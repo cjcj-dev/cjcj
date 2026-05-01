@@ -35,19 +35,19 @@ on:
           - debug
           - relwithdebinfo
       compiler_source:
-        description: "Override compiler source. Format host/owner/repo.git:branch (branch optional, scheme auto-https)."
+        description: "Override compiler source: https://host/owner/repo.git:branch (branch optional)."
         required: false
         default: ""
       runtime_source:
-        description: "Override runtime source. Same format as compiler_source."
+        description: "Override runtime source: https://host/owner/repo.git:branch (branch optional)."
         required: false
         default: ""
       tools_source:
-        description: "Override tools source. Same format as compiler_source."
+        description: "Override tools source: https://host/owner/repo.git:branch (branch optional)."
         required: false
         default: ""
       stdx_source:
-        description: "Override stdx source. Same format as compiler_source."
+        description: "Override stdx source: https://host/owner/repo.git:branch (branch optional)."
         required: false
         default: ""
       vm_size:

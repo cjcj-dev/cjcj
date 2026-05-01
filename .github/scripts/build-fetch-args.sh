@@ -3,10 +3,10 @@
 # argv that `cangjie-build fetch` expects.
 #
 # Each source input is a string of the form:
-#   host/owner/repo.git:branch     (host without scheme, "https://" auto-prefixed)
-#   host/owner/repo.git            (no branch — falls through to the global --tag)
-#   https://host/owner/repo.git:branch (explicit scheme also accepted)
-#   <empty>                        (no override — use the upstream default)
+#   https://host/owner/repo.git:branch (full URL — the expected form)
+#   https://host/owner/repo.git        (no branch — falls through to the global --tag)
+#   host/owner/repo.git[:branch]       (scheme-less — "https://" prepended as fallback)
+#   <empty>                            (no override — use the upstream default)
 #
 # Usage:
 #   COMPILER_SOURCE=... RUNTIME_SOURCE=... TOOLS_SOURCE=... STDX_SOURCE=... \
