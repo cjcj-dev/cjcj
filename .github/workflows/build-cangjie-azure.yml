@@ -54,6 +54,7 @@ on:
 permissions:
   id-token: write
   contents: read
+  actions: write    # required by sccache GHA cache backend on the build job
 
 defaults:
   run:
@@ -130,7 +131,12 @@ jobs:
     env:
       CANGJIE_WORKSPACE: ${{ github.workspace }}/workspace
       CANGJIE_BUILD_ROOT: ${{ github.workspace }}/buildtools
-      # Disk-only sccache: ephemeral runner, no cross-job cache to chase.
+      # Multi-level sccache: disk L0 (within-run reuse on the VM's NVMe) +
+      # GHA cache L1 (cross-run reuse across ephemeral VMs). l0 write
+      # policy: GHA hiccups don't block the build.
+      SCCACHE_GHA_ENABLED: "true"
+      SCCACHE_MULTILEVEL_CHAIN: "disk,gha"
+      SCCACHE_MULTILEVEL_WRITE_ERROR_POLICY: "l0"
       SCCACHE_DIR: ${{ github.workspace }}/.sccache
       SCCACHE_CACHE_SIZE: "10G"
     steps:
@@ -146,9 +152,6 @@ jobs:
       - name: Install Ubuntu system packages
         run: uv run cangjie-build install-system-deps
 
-      # Disk-only sccache (SCCACHE_DIR is set in env above; we deliberately
-      # do NOT set SCCACHE_GHA_ENABLED, so the action's GHA cache backend
-      # stays off — the VM is single-use and disk is local NVMe.)
       - name: Setup sccache
         uses: mozilla-actions/sccache-action@9e7fa8a12102821edf02ca5dbea1acd0f89a2696 # v0.0.10
 
