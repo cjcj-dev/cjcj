@@ -1,0 +1,35 @@
+name: Reap orphan Azure resource groups
+
+# Safety net for build-cangjie-azure.yml: if a run gets cancelled before
+# its cleanup job executes, the VM keeps billing forever. This sweep runs
+# every hour and deletes cangjie-* resource groups older than 6 hours.
+
+on:
+  schedule:
+    - cron: "17 * * * *"      # hourly at :17
+  workflow_dispatch: {}
+
+permissions:
+  id-token: write
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  reap:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - uses: azure/login@a457da9ea143d694b1b9c7c869ebb04ebe844ef5 # v2.4.0
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Reap orphan RGs
+        env:
+          MAX_AGE_HOURS: "6"
+        run: .github/scripts/reap-orphans.sh

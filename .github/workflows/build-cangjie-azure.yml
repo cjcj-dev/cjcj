@@ -1,0 +1,247 @@
+name: Build Cangjie SDK on Azure VM
+
+# Spin up an ephemeral Azure VM, register it as a just-in-time GitHub
+# self-hosted runner, run the Cangjie build there, then delete the entire
+# resource group on the way out.
+#
+# Required repo secrets:
+#   AZURE_CLIENT_ID         - App registration's application (client) ID
+#   AZURE_TENANT_ID         - Microsoft Entra tenant ID
+#   AZURE_SUBSCRIPTION_ID   - Subscription that gets billed for the VM
+#   RUNNER_REGISTRATION_PAT - Fine-grained PAT (or GitHub App token) with
+#                             repo "Administration: Write". Required to call
+#                             POST /repos/.../actions/runners/generate-jitconfig
+#                             — GITHUB_TOKEN cannot hold the administration
+#                             scope, so this can't be replaced by it.
+#
+# Azure auth uses OIDC + federated credentials (no static SP password).
+# Operational helpers live in .github/scripts/ and .github/cloud-init/ and
+# can be exercised locally with the same env vars.
+
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: "Build target."
+        required: true
+        default: "linux-x64"
+        type: choice
+        options:
+          - linux-x64
+          - windows-x64
+      tag:
+        description: "Global Cangjie tag/branch (blank = main)."
+        required: false
+        default: ""
+      build_type:
+        description: "Build type."
+        required: true
+        default: "relwithdebinfo"
+        type: choice
+        options:
+          - release
+          - debug
+          - relwithdebinfo
+      vm_size:
+        description: "Azure VM SKU."
+        required: true
+        default: "Standard_F16als_v6"
+      vm_region:
+        description: "Azure region."
+        required: true
+        default: "westus2"
+      vm_priority:
+        description: "Spot first, fall back to Regular if no capacity."
+        required: true
+        default: "Spot"
+        type: choice
+        options:
+          - Spot
+          - Regular
+
+permissions:
+  id-token: write
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  RG_NAME: cangjie-${{ github.run_id }}-${{ github.run_attempt }}
+  RUNNER_LABEL: cangjie-${{ github.run_id }}-${{ github.run_attempt }}
+  RUNNER_VERSION: "2.334.0"
+
+jobs:
+  provision:
+    name: Provision ephemeral VM
+    runs-on: ubuntu-22.04
+    outputs:
+      runner_label: ${{ env.RUNNER_LABEL }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - uses: azure/login@a457da9ea143d694b1b9c7c869ebb04ebe844ef5 # v2.4.0
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Generate JIT runner config
+        id: jit
+        env:
+          GH_TOKEN: ${{ secrets.RUNNER_REGISTRATION_PAT }}
+        run: |
+          set -euo pipefail
+          jit=$(.github/scripts/generate-jit.sh "${{ github.repository }}" "$RUNNER_LABEL")
+          echo "::add-mask::$jit"
+          {
+            echo 'jit<<__JIT_EOF__'
+            echo "$jit"
+            echo '__JIT_EOF__'
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Render cloud-init
+        env:
+          JIT: ${{ steps.jit.outputs.jit }}
+        run: |
+          .github/scripts/render-cloud-init.sh \
+            .github/cloud-init/runner.template.yml \
+            cloud-init.yml
+
+      - name: Create resource group
+        run: az group create -n "$RG_NAME" -l "${{ inputs.vm_region }}" -o none
+
+      - name: Provision VM
+        env:
+          RG: ${{ env.RG_NAME }}
+          REGION: ${{ inputs.vm_region }}
+          SIZE: ${{ inputs.vm_size }}
+          PRIORITY: ${{ inputs.vm_priority }}
+          CLOUD_INIT: cloud-init.yml
+        run: .github/scripts/provision-vm.sh
+
+      - name: Wait for runner registration
+        env:
+          GH_TOKEN: ${{ secrets.RUNNER_REGISTRATION_PAT }}
+        run: .github/scripts/wait-for-runner.sh "${{ github.repository }}" "$RUNNER_LABEL" 600
+
+  build:
+    name: Build SDK (${{ inputs.target }})
+    needs: provision
+    runs-on:
+      - self-hosted
+      - Linux
+      - X64
+      - ${{ needs.provision.outputs.runner_label }}
+    timeout-minutes: 240
+    env:
+      CANGJIE_WORKSPACE: ${{ github.workspace }}/workspace
+      CANGJIE_BUILD_ROOT: ${{ github.workspace }}/buildtools
+      # Disk-only sccache: ephemeral runner, no cross-job cache to chase.
+      SCCACHE_DIR: ${{ github.workspace }}/.sccache
+      SCCACHE_CACHE_SIZE: "10G"
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        with:
+          enable-cache: false
+
+      - name: Install Python harness dependencies
+        run: uv sync --frozen
+
+      - name: Install Ubuntu system packages
+        run: uv run cangjie-build install-system-deps
+
+      - name: Install sccache
+        run: |
+          set -euo pipefail
+          ver=v0.15.0
+          curl -fsSL "https://github.com/mozilla/sccache/releases/download/${ver}/sccache-${ver}-x86_64-unknown-linux-musl.tar.gz" \
+            | sudo tar xz --strip-components=1 -C /usr/local/bin "sccache-${ver}-x86_64-unknown-linux-musl/sccache"
+          sudo chmod +x /usr/local/bin/sccache
+          sccache --version
+
+      - name: Build static libs (linux-x64)
+        if: inputs.target == 'linux-x64'
+        run: uv run cangjie-build --target linux-x64 install-static-libs
+
+      - name: Build MinGW toolchain (windows-x64)
+        if: inputs.target == 'windows-x64'
+        run: uv run cangjie-build --target windows-x64 install-mingw
+
+      - name: Resolve effective Cangjie version
+        id: cjver
+        run: |
+          if [[ -n "${{ inputs.tag }}" ]]; then
+            echo "value=${{ inputs.tag }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "value=main" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Fetch Cangjie source repositories
+        env:
+          TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          args=()
+          if [[ -n "$TAG" ]]; then args+=(--tag "$TAG"); fi
+          uv run cangjie-build \
+            --target ${{ inputs.target }} \
+            --build-type ${{ inputs.build_type }} \
+            --cangjie-version "${{ steps.cjver.outputs.value }}" \
+            fetch "${args[@]}"
+
+      - name: Build all stages
+        run: |
+          set -euo pipefail
+          for stage in compiler runtime stdlib stdx tools; do
+            uv run cangjie-build \
+              --target ${{ inputs.target }} \
+              --build-type ${{ inputs.build_type }} \
+              --cangjie-version "${{ steps.cjver.outputs.value }}" \
+              build "$stage"
+          done
+
+      - name: Package SDK
+        run: |
+          uv run cangjie-build \
+            --target ${{ inputs.target }} \
+            --build-type ${{ inputs.build_type }} \
+            --cangjie-version "${{ steps.cjver.outputs.value }}" \
+            package
+
+      - name: Verify SDK
+        run: |
+          uv run cangjie-build \
+            --target ${{ inputs.target }} \
+            --build-type ${{ inputs.build_type }} \
+            --cangjie-version "${{ steps.cjver.outputs.value }}" \
+            verify
+
+      - name: Upload SDK + STDX artifacts
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: cangjie-${{ inputs.target }}-${{ steps.cjver.outputs.value }}
+          path: ${{ env.CANGJIE_WORKSPACE }}/software/cangjie-*-${{ inputs.target }}-${{ steps.cjver.outputs.value }}*.*
+          if-no-files-found: error
+
+  cleanup:
+    name: Tear down VM
+    needs: [provision, build]
+    if: always()
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - uses: azure/login@a457da9ea143d694b1b9c7c869ebb04ebe844ef5 # v2.4.0
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Tear down resource group + runner registration
+        env:
+          GH_TOKEN: ${{ secrets.RUNNER_REGISTRATION_PAT }}
+        run: .github/scripts/teardown.sh "${{ github.repository }}" "$RUNNER_LABEL" "$RG_NAME"

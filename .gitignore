@@ -29,3 +29,6 @@ software/
 *.swp
 .DS_Store
 .claude/
+
+# Throwaway dumps from local az cli probing
+skus.json
