@@ -147,12 +147,9 @@ jobs:
     env:
       CANGJIE_WORKSPACE: ${{ github.workspace }}/workspace
       CANGJIE_BUILD_ROOT: ${{ github.workspace }}/buildtools
-      # Single-layer GHA cache only (ephemeral VM means disk L0 doesn't carry
-      # over). Debug log enabled to investigate why ~80% of cache misses
-      # weren't being uploaded to GHA cache; log uploaded as artifact.
+      # Single-layer GHA cache (ephemeral VM means disk L0 doesn't carry
+      # over between runs anyway).
       SCCACHE_GHA_ENABLED: "true"
-      SCCACHE_LOG: "debug"
-      SCCACHE_ERROR_LOG: ${{ github.workspace }}/sccache.log
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
@@ -168,12 +165,6 @@ jobs:
 
       - name: Setup sccache
         uses: mozilla-actions/sccache-action@9e7fa8a12102821edf02ca5dbea1acd0f89a2696 # v0.0.10
-
-      # Start sccache server explicitly so SCCACHE_LOG/SCCACHE_ERROR_LOG
-      # take effect (they're only read at server startup; if the first
-      # compiler invocation auto-spawns the server they'd be ignored).
-      - name: Start sccache server with debug log
-        run: sccache --start-server
 
       - name: Compute toolchain cache key
         id: tc-key
@@ -269,22 +260,6 @@ jobs:
           name: cangjie-windows-x64-${{ steps.cjver.outputs.value }}
           path: ${{ env.CANGJIE_WORKSPACE }}/software/cangjie-*-windows-x64-${{ steps.cjver.outputs.value }}*.*
           if-no-files-found: error
-
-      # Stop sccache server (flushes log buffer) and surface its stats +
-      # debug log as an artifact regardless of build outcome.
-      - name: Dump sccache stats and stop server
-        if: always()
-        run: |
-          sccache --show-stats || true
-          sccache --stop-server || true
-
-      - name: Upload sccache debug log
-        if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: sccache-log-${{ github.run_id }}-${{ github.run_attempt }}
-          path: ${{ github.workspace }}/sccache.log
-          if-no-files-found: warn
 
   cleanup:
     name: Tear down VM
