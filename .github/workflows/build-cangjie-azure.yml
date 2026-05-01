@@ -155,7 +155,23 @@ jobs:
       - name: Setup sccache
         uses: mozilla-actions/sccache-action@9e7fa8a12102821edf02ca5dbea1acd0f89a2696 # v0.0.10
 
+      - name: Compute toolchain cache key
+        id: tc-key
+        run: |
+          # Bump the version suffix when toolchain pinning changes
+          # (LLVM_MINGW_TAG / OPENSSL_VERSION in toolchain/mingw.py).
+          echo "key=mingw-${{ runner.os }}-llvm20220906-openssl3.0.9-v1" >> "$GITHUB_OUTPUT"
+          echo "path=${{ env.CANGJIE_BUILD_ROOT }}/llvm-mingw-w64" >> "$GITHUB_OUTPUT"
+
+      - name: Restore toolchain cache
+        id: tc-cache
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        with:
+          path: ${{ steps.tc-key.outputs.path }}
+          key: ${{ steps.tc-key.outputs.key }}
+
       - name: Build MinGW toolchain
+        if: steps.tc-cache.outputs.cache-hit != 'true'
         run: uv run cangjie-build --target windows-x64 install-mingw
 
       - name: Resolve effective Cangjie version
