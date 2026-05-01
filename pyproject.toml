@@ -3,7 +3,7 @@ name = "cangjie-build"
 version = "0.1.0"
 description = "Engineered build pipeline for the Cangjie SDK (Linux x64 native + Windows x64 cross-compile)."
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.11,<3.13"
 license = { file = "LICENSE" }
 authors = [{ name = "cangjie-build contributors" }]
 dependencies = [
