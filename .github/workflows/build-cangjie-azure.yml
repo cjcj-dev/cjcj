@@ -152,7 +152,7 @@ jobs:
       # policy: GHA hiccups don't block the build.
       SCCACHE_GHA_ENABLED: "true"
       SCCACHE_MULTILEVEL_CHAIN: "disk,gha"
-      SCCACHE_MULTILEVEL_WRITE_ERROR_POLICY: "l0"
+      SCCACHE_MULTILEVEL_WRITE_ERROR_POLICY: "all"   # diagnostic: surface GHA write errors immediately
       SCCACHE_DIR: ${{ github.workspace }}/.sccache
       SCCACHE_CACHE_SIZE: "10G"
       # Capture the GHA backend's actual error rather than guessing.
