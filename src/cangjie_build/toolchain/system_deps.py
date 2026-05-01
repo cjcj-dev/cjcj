@@ -67,6 +67,7 @@ APT_PACKAGES: tuple[str, ...] = (
     "libncurses5-dev",
     "strace",
     "net-tools",
+    "swig",
 )
 
 
