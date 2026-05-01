@@ -70,7 +70,7 @@ on:
 permissions:
   id-token: write
   contents: read
-  actions: write    # actions/cache save uses this on the build job
+  actions: write    # required by sccache GHA cache backend on the build job
 
 defaults:
   run:
@@ -147,12 +147,12 @@ jobs:
     env:
       CANGJIE_WORKSPACE: ${{ github.workspace }}/workspace
       CANGJIE_BUILD_ROOT: ${{ github.workspace }}/buildtools
-      # Disk-only sccache. Adding the GHA layer is tempting for cross-run
-      # caching but sccache 0.15.0 still talks the deprecated Actions Cache
-      # v1 protocol while the runner only exposes v2 (ACTIONS_RESULTS_URL),
-      # so every PUT to GHA fails (~one-error-per-compile in the stats).
-      # The ephemeral VM has no cross-run disk anyway; keep this simple
-      # until sccache ships v2 support.
+      # Multi-level sccache: disk L0 (within-run reuse on the VM's NVMe) +
+      # GHA cache L1 (cross-run reuse across ephemeral VMs). l0 write
+      # policy: GHA hiccups don't block the build.
+      SCCACHE_GHA_ENABLED: "true"
+      SCCACHE_MULTILEVEL_CHAIN: "disk,gha"
+      SCCACHE_MULTILEVEL_WRITE_ERROR_POLICY: "l0"
       SCCACHE_DIR: ${{ github.workspace }}/.sccache
       SCCACHE_CACHE_SIZE: "10G"
     steps:
