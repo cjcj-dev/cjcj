@@ -1,0 +1,30 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+
+# Virtualenv / uv
+.venv/
+.uv-cache/
+
+# Tooling caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Reference repos and build workspace (do not commit)
+ref/
+workspace/
+buildtools/
+artifacts/
+software/
+.sccache-cache/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+.DS_Store

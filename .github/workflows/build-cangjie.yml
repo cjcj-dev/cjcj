@@ -1,0 +1,245 @@
+name: Build Cangjie SDK
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Global tag/branch applied to all four upstream repos (blank = default branch)."
+        required: false
+        default: ""
+      build_type:
+        description: "Build type."
+        required: true
+        default: "relwithdebinfo"
+        type: choice
+        options:
+          - release
+          - debug
+          - relwithdebinfo
+      run_tests:
+        description: "Run the compiler's own test suite (linux-x64 only)."
+        type: boolean
+        required: true
+        default: false
+      repo_urls:
+        description: "Per-repo URL overrides, comma-separated NAME=URL (NAME ∈ compiler|runtime|tools|stdx)."
+        required: false
+        default: ""
+      repo_tags:
+        description: "Per-repo tag overrides, comma-separated NAME=TAG. Wins over the global --tag."
+        required: false
+        default: ""
+  push:
+    branches: [master, main]
+  pull_request:
+    branches: [master, main]
+
+permissions:
+  contents: read
+  actions: write   # required by sccache GHA cache backend
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  lint-and-test:
+    name: Lint & test (Python harness)
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+          cache-dependency-glob: "**/uv.lock"
+
+      - name: Install dev dependencies
+        run: uv sync --frozen
+
+      - name: Ruff lint
+        run: uv run ruff check .
+
+      - name: Ruff format
+        run: uv run ruff format --check .
+
+      - name: ty
+        run: uv run ty check
+
+      - name: Pyright
+        run: uv run pyright
+
+      - name: Pytest
+        run: uv run pytest
+
+  build-sdk:
+    name: Build SDK (${{ matrix.target }})
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-22.04
+    timeout-minutes: 360
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - linux-x64
+          - windows-x64
+
+    env:
+      CANGJIE_WORKSPACE: ${{ github.workspace }}/workspace
+      CANGJIE_BUILD_ROOT: ${{ github.workspace }}/buildtools
+      # Multi-level sccache: disk (L0, intra-job) + GitHub Actions cache (L1, inter-job).
+      # See https://github.com/mozilla/sccache/blob/main/docs/MultiLevel.md
+      SCCACHE_GHA_ENABLED: "true"
+      SCCACHE_MULTILEVEL_CHAIN: "disk,gha"
+      SCCACHE_MULTILEVEL_WRITE_ERROR_POLICY: "l0"
+      SCCACHE_DIR: ${{ github.workspace }}/.sccache
+      SCCACHE_CACHE_SIZE: "5G"
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+          cache-dependency-glob: "**/uv.lock"
+
+      - name: Install Python harness dependencies
+        run: uv sync --frozen
+
+      - name: Install Ubuntu system packages
+        run: uv run cangjie-build install-system-deps
+
+      - name: Setup sccache
+        uses: mozilla-actions/sccache-action@v0.0.6
+
+      - name: Compute toolchain cache key
+        id: tc-key
+        run: |
+          set -euo pipefail
+          if [[ "${{ matrix.target }}" == "windows-x64" ]]; then
+            # Bump the version suffix when toolchain pinning changes.
+            echo "key=mingw-${{ runner.os }}-llvm20220906-openssl3.0.9-v1" >> "$GITHUB_OUTPUT"
+            echo "path=${{ env.CANGJIE_BUILD_ROOT }}/llvm-mingw-w64" >> "$GITHUB_OUTPUT"
+          else
+            echo "key=staticlibs-${{ runner.os }}-ncurses6.5-libedit3.1-v1" >> "$GITHUB_OUTPUT"
+            echo "path=${{ env.CANGJIE_BUILD_ROOT }}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Restore toolchain cache
+        id: tc-cache
+        uses: actions/cache@v5
+        with:
+          path: ${{ steps.tc-key.outputs.path }}
+          key: ${{ steps.tc-key.outputs.key }}
+
+      - name: Build static libs (linux-x64)
+        if: matrix.target == 'linux-x64' && steps.tc-cache.outputs.cache-hit != 'true'
+        run: uv run cangjie-build --target ${{ matrix.target }} install-static-libs
+
+      - name: Build MinGW toolchain (windows-x64)
+        if: matrix.target == 'windows-x64' && steps.tc-cache.outputs.cache-hit != 'true'
+        run: uv run cangjie-build --target ${{ matrix.target }} install-mingw
+
+      - name: Resolve effective Cangjie version
+        id: cjver
+        run: |
+          if [[ -n "${{ inputs.tag }}" ]]; then
+            echo "value=${{ inputs.tag }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "value=main" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Fetch Cangjie source repositories
+        env:
+          TAG: ${{ inputs.tag }}
+          REPO_URLS: ${{ inputs.repo_urls }}
+          REPO_TAGS: ${{ inputs.repo_tags }}
+        run: |
+          set -euo pipefail
+          args=()
+          if [[ -n "$TAG" ]]; then args+=(--tag "$TAG"); fi
+          if [[ -n "$REPO_URLS" ]]; then
+            IFS=',' read -ra items <<< "$REPO_URLS"
+            for item in "${items[@]}"; do args+=(--repo-url "$item"); done
+          fi
+          if [[ -n "$REPO_TAGS" ]]; then
+            IFS=',' read -ra items <<< "$REPO_TAGS"
+            for item in "${items[@]}"; do args+=(--repo-tag "$item"); done
+          fi
+          uv run cangjie-build \
+            --target ${{ matrix.target }} \
+            --build-type ${{ inputs.build_type }} \
+            --cangjie-version "${{ steps.cjver.outputs.value }}" \
+            fetch "${args[@]}"
+
+      - name: Build cangjie_compiler
+        run: |
+          uv run cangjie-build \
+            --target ${{ matrix.target }} \
+            --build-type ${{ inputs.build_type }} \
+            --cangjie-version "${{ steps.cjver.outputs.value }}" \
+            build compiler
+
+      - name: Build runtime
+        run: |
+          uv run cangjie-build \
+            --target ${{ matrix.target }} \
+            --build-type ${{ inputs.build_type }} \
+            --cangjie-version "${{ steps.cjver.outputs.value }}" \
+            build runtime
+
+      - name: Build stdlib
+        run: |
+          uv run cangjie-build \
+            --target ${{ matrix.target }} \
+            --build-type ${{ inputs.build_type }} \
+            --cangjie-version "${{ steps.cjver.outputs.value }}" \
+            build stdlib
+
+      - name: Build STDX
+        run: |
+          uv run cangjie-build \
+            --target ${{ matrix.target }} \
+            --build-type ${{ inputs.build_type }} \
+            --cangjie-version "${{ steps.cjver.outputs.value }}" \
+            build stdx
+
+      - name: Build tools
+        run: |
+          uv run cangjie-build \
+            --target ${{ matrix.target }} \
+            --build-type ${{ inputs.build_type }} \
+            --cangjie-version "${{ steps.cjver.outputs.value }}" \
+            build tools
+
+      - name: Package SDK
+        run: |
+          uv run cangjie-build \
+            --target ${{ matrix.target }} \
+            --build-type ${{ inputs.build_type }} \
+            --cangjie-version "${{ steps.cjver.outputs.value }}" \
+            package
+
+      - name: Verify SDK
+        run: |
+          uv run cangjie-build \
+            --target ${{ matrix.target }} \
+            --build-type ${{ inputs.build_type }} \
+            --cangjie-version "${{ steps.cjver.outputs.value }}" \
+            verify
+
+      - name: Upload SDK artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: cangjie-sdk-${{ matrix.target }}-${{ steps.cjver.outputs.value }}
+          path: |
+            ${{ env.CANGJIE_WORKSPACE }}/software/cangjie-sdk-${{ matrix.target }}-${{ steps.cjver.outputs.value }}.*
+          if-no-files-found: error
+
+      - name: Upload STDX artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: cangjie-stdx-${{ matrix.target }}-${{ steps.cjver.outputs.value }}
+          path: |
+            ${{ env.CANGJIE_WORKSPACE }}/software/cangjie-stdx-${{ matrix.target }}-${{ steps.cjver.outputs.value }}.*
+          if-no-files-found: error
