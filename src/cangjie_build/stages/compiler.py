@@ -47,15 +47,15 @@ def run(cfg: BuildConfig) -> None:
                     "cjc",
                     "--no-tests",
                     *cross_args,
-                    "--build-cjdb",
-                    # cjdb (lldb) is built for the windows target. Without a
-                    # Windows-side Python embeddable distribution at
-                    # $TARGET_PYTHON_PATH, lldb's CMake produces
-                    # Python3_LIBRARIES=/python<ver>.dll which then fails to
-                    # link. We don't ship a Windows Python with the SDK, so
-                    # disable lldb's Python scripting on the windows target.
-                    # The linux host cjdb still has it (built earlier).
-                    "--cjdb-disable-python",
+                    # Skip --build-cjdb on windows cross-compile. The
+                    # nested lldb build raced cangjie-frontend's link on
+                    # fast hosts (cmake's BuildCJDB.cmake doesn't wire
+                    # the dep correctly) and even with --cjdb-disable-python
+                    # patched in there's no clean way to add the dep
+                    # post-hoc — ExternalProject_Add_StepDependencies
+                    # can't APPEND across directory scope. Windows users
+                    # who want cjdb can install lldb separately. Linux
+                    # host cjdb is still built (earlier compiler.build.host).
                 ],
                 stage_name="compiler.build.windows.cjc",
             )
