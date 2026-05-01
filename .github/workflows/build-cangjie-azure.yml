@@ -185,9 +185,16 @@ jobs:
           path: ${{ steps.tc-key.outputs.path }}
           key: ${{ steps.tc-key.outputs.key }}
 
+      - name: Install mold linker
+        if: steps.tc-cache.outputs.cache-hit != 'true'
+        run: .github/scripts/install-mold.sh
+
       - name: Build MinGW toolchain
         if: steps.tc-cache.outputs.cache-hit != 'true'
-        run: uv run cangjie-build --target windows-x64 install-mingw
+        # `mold -run` hooks execve so every child cmake/cc invocation links
+        # via mold instead of the BFD ld that Ubuntu 22.04 ships, cutting
+        # ~10-15 min off the LLVM bootstrap link phase.
+        run: mold -run uv run cangjie-build --target windows-x64 install-mingw
 
       # Save the toolchain cache as soon as it's built — independent of
       # whether subsequent build stages (or this whole job) succeed. Spot
