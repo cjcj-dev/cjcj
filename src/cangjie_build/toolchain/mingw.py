@@ -10,11 +10,25 @@ from cangjie_build.toolchain._archive import download, extract
 
 _log = get_logger("cangjie_build.toolchain.mingw")
 
+# mstorsjo publishes ready-to-use llvm-mingw cross toolchains under
+# https://github.com/mstorsjo/llvm-mingw/releases. Building llvm + clang +
+# lld + libc++ + mingw-w64 from scratch took ~30-60 min and ~40 GB of disk
+# even on a 16-core VM; the prebuilt drops in at ~150 MB / 2 minutes.
+#
+# Cangjie's runtime/stdlib/stdx don't depend on OpenHarmony's LLVM patches
+# when targeting windows-x64 (those patches are for the OHOS triple, not
+# x86_64-w64-mingw32), so vanilla LLVM is sufficient. The only thing the
+# prebuilt doesn't include is OpenSSL — we still build that statically
+# below and drop it next to the cross compiler's sysroot.
 LLVM_MINGW_TAG = "20220906"
-LLVM_MINGW_URL = f"https://github.com/mstorsjo/llvm-mingw/archive/refs/tags/{LLVM_MINGW_TAG}.tar.gz"
-LLVM_PROJECT_REMOTE = "https://gitee.com/openharmony/third_party_llvm-project.git"
-LLVM_PROJECT_COMMIT = "5c68a1cb123161b54b72ce90e7975d95a8eaf2a4"
-MINGW_W64_REMOTE = "https://gitee.com/openharmony/third_party_mingw-w64.git"
+LLVM_MINGW_FLAVOR = "msvcrt"
+LLVM_MINGW_PREBUILT_BASENAME = (
+    f"llvm-mingw-{LLVM_MINGW_TAG}-{LLVM_MINGW_FLAVOR}-ubuntu-18.04-x86_64"
+)
+LLVM_MINGW_PREBUILT_URL = (
+    f"https://github.com/mstorsjo/llvm-mingw/releases/download/{LLVM_MINGW_TAG}/"
+    f"{LLVM_MINGW_PREBUILT_BASENAME}.tar.xz"
+)
 
 OPENSSL_VERSION = "3.0.9"
 OPENSSL_URL = (
@@ -30,7 +44,7 @@ def install_path(build_root: Path) -> Path:
 
 
 def is_installed(build_root: Path) -> bool:
-    """Cheap sentinel check: a complete toolchain has the mingw cross compiler."""
+    """Cheap sentinel: cross compiler binary + bundled OpenSSL static lib."""
     install = install_path(build_root)
     return (install / "bin" / f"{TARGET_TRIPLE}-clang").exists() and (
         install / TARGET_TRIPLE / "lib" / "libssl.a"
@@ -47,69 +61,16 @@ def install(build_root: Path, *, jobs: int | None = None) -> None:
     install = install_path(build_root)
 
     with stage("mingw:llvm-mingw"):
-        llvm_archive = build_root / f"llvm-mingw-{LLVM_MINGW_TAG}.tar.gz"
-        download(LLVM_MINGW_URL, llvm_archive)
-        llvm_src = extract(llvm_archive, build_root)
+        archive = build_root / f"{LLVM_MINGW_PREBUILT_BASENAME}.tar.xz"
+        download(LLVM_MINGW_PREBUILT_URL, archive)
+        extracted = extract(archive, build_root)
+        if install.exists():
+            shutil.rmtree(install)
+        extracted.rename(install)
 
-        # llvm-project is fetched at a specific commit (not a tag/branch); we cannot use shallow_clone.
-        llvm_project = llvm_src / "llvm-project"
-        if not llvm_project.exists():
-            llvm_project.mkdir(parents=True)
-            run(["git", "init"], cwd=llvm_project, stage="mingw.llvm.init")
-            run(
-                ["git", "remote", "add", "origin", LLVM_PROJECT_REMOTE],
-                cwd=llvm_project,
-                stage="mingw.llvm.remote",
-            )
-            run(
-                ["git", "fetch", "--depth", "1", "origin", LLVM_PROJECT_COMMIT],
-                cwd=llvm_project,
-                stage="mingw.llvm.fetch",
-            )
-            run(
-                ["git", "checkout", "FETCH_HEAD"],
-                cwd=llvm_project,
-                stage="mingw.llvm.checkout",
-            )
-
-        mingw_w64 = llvm_src / "mingw-w64"
-        if not mingw_w64.exists():
-            run(
-                ["git", "clone", "--depth", "1", MINGW_W64_REMOTE, str(mingw_w64)],
-                stage="mingw.mingw-w64.clone",
-            )
-
-        toolchain_env = {"TOOLCHAIN_ARCHS": "x86_64"}
-        # lld is a single binary that handles ELF/COFF/Mach-O/WASM targets,
-        # so unlike mold it's safe to use across the whole script chain. We
-        # only inject it into the host LLVM bootstrap though — the cross-
-        # target scripts already wire their own linker via the mingw clang
-        # wrappers and don't read LLVM_CMAKEFLAGS.
-        host_bootstrap_env: dict[str, str] = {}
-        if shutil.which("ld.lld"):
-            host_bootstrap_env["LLVM_CMAKEFLAGS"] = "-DLLVM_USE_LINKER=lld"
-
-        def script(name: str, *extra: str, host: bool = False) -> None:
-            env = {**toolchain_env, "MAKEFLAGS": f"-j{cpus}"}
-            if host:
-                env.update(host_bootstrap_env)
-            run(
-                [str(llvm_src / name), str(install), *extra],
-                cwd=llvm_src,
-                env_overlay=env,
-                stage=f"mingw.{name}",
-            )
-
-        script("build-llvm.sh", "--disable-lldb", host=True)
-        script("strip-llvm.sh")
-        script("install-wrappers.sh")
-        script("build-mingw-w64.sh", "--with-default-msvcrt=msvcrt")
-        script("build-mingw-w64-tools.sh")
-        script("build-compiler-rt.sh")
-        script("build-libcxx.sh")
-        script("build-mingw-w64-libraries.sh")
-
-        # Aliases referenced by the upstream build doc.
+        # Aliases that the upstream Cangjie build doc expects to find next to
+        # the mingw runtime libs. The prebuilt ships libmingwex.a but not
+        # these alternative names.
         target_lib_dir = install / TARGET_TRIPLE / "lib"
         src = target_lib_dir / "libmingwex.a"
         for alias in ("libssp.a", "libssp_nonshared.a"):

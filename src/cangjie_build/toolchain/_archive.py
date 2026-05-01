@@ -27,10 +27,14 @@ def download(url: str, dest: Path) -> None:
 
 
 def extract(tarball: Path, dest_dir: Path) -> Path:
-    """Extract ``tarball`` into ``dest_dir`` and return the resulting top-level path."""
+    """Extract ``tarball`` into ``dest_dir`` and return the resulting top-level path.
+
+    Mode is auto-detected from the file's extensions; .tar.gz, .tar.xz and
+    .tar.bz2 all work.
+    """
     dest_dir.mkdir(parents=True, exist_ok=True)
     _log.info("Extracting %s into %s", tarball.name, dest_dir)
-    with tarfile.open(tarball, "r:gz") as tf:
+    with tarfile.open(tarball, "r:*") as tf:
         first = next(iter(tf), None)
         if first is None:
             raise BuildError("archive", f"empty tarball: {tarball}")

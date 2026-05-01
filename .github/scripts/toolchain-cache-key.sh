@@ -9,6 +9,6 @@ set -euo pipefail
 
 case "${1:?target required (linux-x64|windows-x64)}" in
   linux-x64)   echo "staticlibs-Linux-ncurses6.5-libedit3.1-v1" ;;
-  windows-x64) echo "mingw-Linux-llvm20220906-openssl3.0.9-v1" ;;
+  windows-x64) echo "mingw-Linux-llvm20220906-prebuilt-msvcrt-openssl3.0.9-v2" ;;
   *) echo "unknown target: $1" >&2; exit 1 ;;
 esac
