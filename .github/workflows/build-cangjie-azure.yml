@@ -21,14 +21,6 @@ name: Build Cangjie SDK on Azure VM
 on:
   workflow_dispatch:
     inputs:
-      target:
-        description: "Build target."
-        required: true
-        default: "linux-x64"
-        type: choice
-        options:
-          - linux-x64
-          - windows-x64
       tag:
         description: "Global Cangjie tag/branch (blank = main)."
         required: false
@@ -127,7 +119,7 @@ jobs:
         run: .github/scripts/wait-for-runner.sh "${{ github.repository }}" "$RUNNER_LABEL" 600
 
   build:
-    name: Build SDK (${{ inputs.target }})
+    name: Build SDK (windows-x64)
     needs: provision
     runs-on:
       - self-hosted
@@ -163,12 +155,7 @@ jobs:
           sudo chmod +x /usr/local/bin/sccache
           sccache --version
 
-      - name: Build static libs (linux-x64)
-        if: inputs.target == 'linux-x64'
-        run: uv run cangjie-build --target linux-x64 install-static-libs
-
-      - name: Build MinGW toolchain (windows-x64)
-        if: inputs.target == 'windows-x64'
+      - name: Build MinGW toolchain
         run: uv run cangjie-build --target windows-x64 install-mingw
 
       - name: Resolve effective Cangjie version
@@ -188,7 +175,7 @@ jobs:
           args=()
           if [[ -n "$TAG" ]]; then args+=(--tag "$TAG"); fi
           uv run cangjie-build \
-            --target ${{ inputs.target }} \
+            --target windows-x64 \
             --build-type ${{ inputs.build_type }} \
             --cangjie-version "${{ steps.cjver.outputs.value }}" \
             fetch "${args[@]}"
@@ -198,7 +185,7 @@ jobs:
           set -euo pipefail
           for stage in compiler runtime stdlib stdx tools; do
             uv run cangjie-build \
-              --target ${{ inputs.target }} \
+              --target windows-x64 \
               --build-type ${{ inputs.build_type }} \
               --cangjie-version "${{ steps.cjver.outputs.value }}" \
               build "$stage"
@@ -207,7 +194,7 @@ jobs:
       - name: Package SDK
         run: |
           uv run cangjie-build \
-            --target ${{ inputs.target }} \
+            --target windows-x64 \
             --build-type ${{ inputs.build_type }} \
             --cangjie-version "${{ steps.cjver.outputs.value }}" \
             package
@@ -215,7 +202,7 @@ jobs:
       - name: Verify SDK
         run: |
           uv run cangjie-build \
-            --target ${{ inputs.target }} \
+            --target windows-x64 \
             --build-type ${{ inputs.build_type }} \
             --cangjie-version "${{ steps.cjver.outputs.value }}" \
             verify
@@ -223,8 +210,8 @@ jobs:
       - name: Upload SDK + STDX artifacts
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: cangjie-${{ inputs.target }}-${{ steps.cjver.outputs.value }}
-          path: ${{ env.CANGJIE_WORKSPACE }}/software/cangjie-*-${{ inputs.target }}-${{ steps.cjver.outputs.value }}*.*
+          name: cangjie-windows-x64-${{ steps.cjver.outputs.value }}
+          path: ${{ env.CANGJIE_WORKSPACE }}/software/cangjie-*-windows-x64-${{ steps.cjver.outputs.value }}*.*
           if-no-files-found: error
 
   cleanup:
