@@ -148,9 +148,9 @@ jobs:
 
       - name: Build MinGW toolchain (windows-x64)
         if: matrix.target == 'windows-x64' && steps.tc-cache.outputs.cache-hit != 'true'
-        # `mold -run` hooks execve so child cmake/cc invocations link via
-        # mold instead of the BFD ld that ubuntu-22.04 ships.
-        run: mold -run uv run cangjie-build --target ${{ matrix.target }} install-mingw
+        # mingw.py picks mold off PATH for the host LLVM bootstrap only;
+        # cross-target Windows links keep BFD ld.
+        run: uv run cangjie-build --target ${{ matrix.target }} install-mingw
 
       # Save the toolchain cache as soon as it's built — independent of
       # whether subsequent build stages succeed. Without this, a Cangjie
