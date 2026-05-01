@@ -68,13 +68,17 @@ def install(build_root: Path, *, jobs: int | None = None) -> None:
             shutil.rmtree(install)
         extracted.rename(install)
 
-        # Aliases that the upstream Cangjie build doc expects to find next to
-        # the mingw runtime libs. The prebuilt ships libmingwex.a but not
-        # these alternative names.
+        # The upstream Cangjie build doc fakes libssp.a / libssp_nonshared.a
+        # by symlinking libmingwex.a, because OHOS' mingw-w64 fork merges
+        # __stack_chk_fail/__stack_chk_guard into libmingwex. mstorsjo's
+        # prebuilt ships real, distinct libssp* files — do not overwrite
+        # those, only fill in if the alias is genuinely missing.
         target_lib_dir = install / TARGET_TRIPLE / "lib"
         src = target_lib_dir / "libmingwex.a"
         for alias in ("libssp.a", "libssp_nonshared.a"):
-            shutil.copy2(src, target_lib_dir / alias)
+            target = target_lib_dir / alias
+            if not target.exists():
+                shutil.copy2(src, target)
 
     with stage("mingw:openssl"):
         openssl_archive = build_root / f"openssl-{OPENSSL_VERSION}.tar.gz"
