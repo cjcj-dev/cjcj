@@ -110,7 +110,7 @@ jobs:
         run: uv run cangjie-build install-system-deps
 
       - name: Setup sccache
-        uses: mozilla-actions/sccache-action@v0.0.6
+        uses: mozilla-actions/sccache-action@v0.0.10
 
       - name: Compute toolchain cache key
         id: tc-key
