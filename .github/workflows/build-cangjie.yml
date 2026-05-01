@@ -21,12 +21,20 @@ on:
         type: boolean
         required: true
         default: false
-      repo_urls:
-        description: "Per-repo URL overrides, comma-separated NAME=URL (NAME ∈ compiler|runtime|tools|stdx)."
+      compiler_source:
+        description: "Override compiler source. Format host/owner/repo.git:branch (branch optional, scheme auto-https)."
         required: false
         default: ""
-      repo_tags:
-        description: "Per-repo tag overrides, comma-separated NAME=TAG. Wins over the global --tag."
+      runtime_source:
+        description: "Override runtime source. Same format as compiler_source."
+        required: false
+        default: ""
+      tools_source:
+        description: "Override tools source. Same format as compiler_source."
+        required: false
+        default: ""
+      stdx_source:
+        description: "Override stdx source. Same format as compiler_source."
         required: false
         default: ""
   push:
@@ -152,20 +160,16 @@ jobs:
       - name: Fetch Cangjie source repositories
         env:
           TAG: ${{ inputs.tag }}
-          REPO_URLS: ${{ inputs.repo_urls }}
-          REPO_TAGS: ${{ inputs.repo_tags }}
+          COMPILER_SOURCE: ${{ inputs.compiler_source }}
+          RUNTIME_SOURCE: ${{ inputs.runtime_source }}
+          TOOLS_SOURCE: ${{ inputs.tools_source }}
+          STDX_SOURCE: ${{ inputs.stdx_source }}
         run: |
           set -euo pipefail
           args=()
           if [[ -n "$TAG" ]]; then args+=(--tag "$TAG"); fi
-          if [[ -n "$REPO_URLS" ]]; then
-            IFS=',' read -ra items <<< "$REPO_URLS"
-            for item in "${items[@]}"; do args+=(--repo-url "$item"); done
-          fi
-          if [[ -n "$REPO_TAGS" ]]; then
-            IFS=',' read -ra items <<< "$REPO_TAGS"
-            for item in "${items[@]}"; do args+=(--repo-tag "$item"); done
-          fi
+          mapfile -t override_args < <(.github/scripts/build-fetch-args.sh)
+          args+=("${override_args[@]}")
           uv run cangjie-build \
             --target ${{ matrix.target }} \
             --build-type ${{ inputs.build_type }} \
