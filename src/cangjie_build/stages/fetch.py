@@ -28,7 +28,7 @@ _PATCH_MARKER = "# cangjie-build: lldb -> cangjie-frontend/lsp dep patch"
 
 
 def _patch_buildcjdb_deps(compiler_dir: Path) -> None:
-    """Make the lldb ExternalProject wait for cangjie-frontend/cangjie-lsp.
+    """Make the lldb ExternalProject's build step wait for cangjie-frontend/cangjie-lsp.
 
     BuildCJDB.cmake declares ``ExternalProject_Add(lldb ... DEPENDS cjnative)``,
     but lldb's link step also needs libcangjie-frontend.dll.a and
@@ -43,9 +43,18 @@ def _patch_buildcjdb_deps(compiler_dir: Path) -> None:
     The host (linux) build hides the bug because lldb-with-Python is far
     heavier than cangjie-frontend, so cangjie-frontend always finishes first.
 
-    cangjie-frontend / cangjie-lsp are normal ``add_library`` targets, not
-    ExternalProjects, so we can't extend the ``DEPENDS`` list (CMake errors
-    with 'no stamp_dir'). Append an ``add_dependencies`` call instead.
+    Two non-options:
+      * Adding to ``DEPENDS cjnative cangjie-frontend ...`` — CMake errors
+        with 'External project cangjie-frontend has no stamp_dir' because
+        DEPENDS only accepts other ExternalProject targets there.
+      * ``add_dependencies(lldb cangjie-frontend ...)`` — the 'lldb' target
+        is the ExternalProject aggregator (runs after install), so this
+        only sequences cangjie-frontend before the no-op aggregator step,
+        not before the build step that actually links liblldb.dll.
+
+    Use ``ExternalProject_Add_StepDependencies(lldb build ...)``: that's
+    the documented way to make the build sub-step depend on a regular
+    target.
     """
     cmake_file = compiler_dir / "third_party" / "cmake" / "BuildCJDB.cmake"
     if not cmake_file.is_file():
@@ -57,6 +66,11 @@ def _patch_buildcjdb_deps(compiler_dir: Path) -> None:
     if anchor not in text:
         _log.warning("BuildCJDB.cmake: lldb ExternalProject_Add anchor not found; skipping patch")
         return
-    addition = f"\n{_PATCH_MARKER}\nadd_dependencies(lldb cangjie-frontend cangjie-lsp)\n"
+    addition = (
+        f"\n{_PATCH_MARKER}\n"
+        "ExternalProject_Add_StepDependencies(lldb build cangjie-frontend cangjie-lsp)\n"
+    )
     cmake_file.write_text(text.replace(anchor, anchor + addition, 1), encoding="utf-8")
-    _log.info("Patched BuildCJDB.cmake: lldb now waits on cangjie-frontend/cangjie-lsp")
+    _log.info(
+        "Patched BuildCJDB.cmake: lldb-build step now waits on cangjie-frontend/cangjie-lsp"
+    )
