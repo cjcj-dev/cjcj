@@ -180,7 +180,7 @@ jobs:
 
       - name: Restore toolchain cache
         id: tc-cache
-        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        uses: actions/cache/restore@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
         with:
           path: ${{ steps.tc-key.outputs.path }}
           key: ${{ steps.tc-key.outputs.key }}
@@ -188,6 +188,17 @@ jobs:
       - name: Build MinGW toolchain
         if: steps.tc-cache.outputs.cache-hit != 'true'
         run: uv run cangjie-build --target windows-x64 install-mingw
+
+      # Save the toolchain cache as soon as it's built — independent of
+      # whether subsequent build stages (or this whole job) succeed. Spot
+      # eviction during Cangjie compile would otherwise lose the 30-60 min
+      # of toolchain work for the next run too.
+      - name: Save toolchain cache
+        if: always() && steps.tc-cache.outputs.cache-hit != 'true' && hashFiles(format('{0}/llvm-mingw-w64/bin/x86_64-w64-mingw32-clang', env.CANGJIE_BUILD_ROOT)) != ''
+        uses: actions/cache/save@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        with:
+          path: ${{ steps.tc-key.outputs.path }}
+          key: ${{ steps.tc-key.outputs.key }}
 
       - name: Resolve effective Cangjie version
         id: cjver

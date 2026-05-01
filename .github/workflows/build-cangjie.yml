@@ -133,7 +133,7 @@ jobs:
 
       - name: Restore toolchain cache
         id: tc-cache
-        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        uses: actions/cache/restore@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
         with:
           path: ${{ steps.tc-key.outputs.path }}
           key: ${{ steps.tc-key.outputs.key }}
@@ -145,6 +145,16 @@ jobs:
       - name: Build MinGW toolchain (windows-x64)
         if: matrix.target == 'windows-x64' && steps.tc-cache.outputs.cache-hit != 'true'
         run: uv run cangjie-build --target ${{ matrix.target }} install-mingw
+
+      # Save the toolchain cache as soon as it's built — independent of
+      # whether subsequent build stages succeed. Without this, a Cangjie
+      # compile failure later would lose the 30-60 min of toolchain work.
+      - name: Save toolchain cache
+        if: always() && steps.tc-cache.outputs.cache-hit != 'true' && hashFiles(format('{0}/**', steps.tc-key.outputs.path)) != ''
+        uses: actions/cache/save@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        with:
+          path: ${{ steps.tc-key.outputs.path }}
+          key: ${{ steps.tc-key.outputs.key }}
 
       - name: Resolve effective Cangjie version
         id: cjver
