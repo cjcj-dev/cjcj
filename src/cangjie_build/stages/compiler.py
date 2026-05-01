@@ -36,31 +36,6 @@ def run(cfg: BuildConfig) -> None:
                 "--target-toolchain",
                 str(mingw_path / "bin"),
             ]
-            # Two-pass cjc build to dodge a missing dep in cangjie's cmake.
-            # BuildCJDB.cmake declares lldb as an ExternalProject with
-            # `DEPENDS cjnative` only, so on fast hosts ninja schedules
-            # lldb's link in parallel with cangjie-frontend's compile and
-            # the link fails with libcangjie-frontend.dll.a missing. Patch
-            # attempts (BuildCJDB.cmake / top-level CMakeLists.txt) all
-            # failed to wire the dep. Sequencing it from the harness side
-            # is reliable: pass 1 builds cangjie-frontend / cangjie-lsp /
-            # cjc.exe; pass 2 reconfigures the same build dir with
-            # --build-cjdb and ninja only needs to build lldb (the import
-            # libs are already on disk).
-            run_build_py(
-                cfg,
-                repo_dir,
-                [
-                    "build",
-                    "-t",
-                    cfg.build_type,
-                    "--product",
-                    "cjc",
-                    "--no-tests",
-                    *cross_args,
-                ],
-                stage_name="compiler.build.windows.cjc",
-            )
             run_build_py(
                 cfg,
                 repo_dir,
@@ -73,11 +48,11 @@ def run(cfg: BuildConfig) -> None:
                     "--no-tests",
                     *cross_args,
                     "--build-cjdb",
-                    # No Windows Python embeddable shipped → keep cjdb
+                    # No Windows Python embeddable shipped, so keep cjdb
                     # without Python scripting on the windows target.
                     "--cjdb-disable-python",
                 ],
-                stage_name="compiler.build.windows.cjdb",
+                stage_name="compiler.build.windows.cjc",
             )
             run_build_py(
                 cfg,
