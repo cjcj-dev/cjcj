@@ -146,14 +146,11 @@ jobs:
       - name: Install Ubuntu system packages
         run: uv run cangjie-build install-system-deps
 
-      - name: Install sccache
-        run: |
-          set -euo pipefail
-          ver=v0.15.0
-          curl -fsSL "https://github.com/mozilla/sccache/releases/download/${ver}/sccache-${ver}-x86_64-unknown-linux-musl.tar.gz" \
-            | sudo tar xz --strip-components=1 -C /usr/local/bin "sccache-${ver}-x86_64-unknown-linux-musl/sccache"
-          sudo chmod +x /usr/local/bin/sccache
-          sccache --version
+      # Disk-only sccache (SCCACHE_DIR is set in env above; we deliberately
+      # do NOT set SCCACHE_GHA_ENABLED, so the action's GHA cache backend
+      # stays off — the VM is single-use and disk is local NVMe.)
+      - name: Setup sccache
+        uses: mozilla-actions/sccache-action@9e7fa8a12102821edf02ca5dbea1acd0f89a2696 # v0.0.10
 
       - name: Build MinGW toolchain
         run: uv run cangjie-build --target windows-x64 install-mingw
