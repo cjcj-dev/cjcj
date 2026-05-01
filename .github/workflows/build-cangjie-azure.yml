@@ -155,9 +155,6 @@ jobs:
       SCCACHE_MULTILEVEL_WRITE_ERROR_POLICY: "l0"   # GHA layer is best-effort; disk L0 must succeed
       SCCACHE_DIR: ${{ github.workspace }}/.sccache
       SCCACHE_CACHE_SIZE: "10G"
-      # Capture the GHA backend's actual error rather than guessing.
-      SCCACHE_LOG: "sccache=debug,opendal=debug,reqwest=info"
-      SCCACHE_ERROR_LOG: ${{ github.workspace }}/sccache-server.log
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
@@ -245,19 +242,6 @@ jobs:
               --cangjie-version "${{ steps.cjver.outputs.value }}" \
               build "$stage"
           done
-
-      - name: sccache GHA backend error sample
-        if: always()
-        run: |
-          set +e
-          log="$SCCACHE_ERROR_LOG"
-          [ -f "$log" ] || { echo "no sccache log at $log"; exit 0; }
-          echo "::group::lines mentioning ghac/cache write/error (first 80)"
-          grep -E -i "ghac|cache.*write|opendal|ACTIONS_|err(or)?" "$log" | head -80 || true
-          echo "::endgroup::"
-          echo "::group::tail of sccache log"
-          tail -120 "$log"
-          echo "::endgroup::"
 
       - name: Package SDK
         run: |
