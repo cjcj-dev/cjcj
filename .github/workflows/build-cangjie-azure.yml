@@ -57,7 +57,7 @@ on:
       vm_regions:
         description: "Space-separated, ordered region preference list. First with capacity wins."
         required: true
-        default: "eastus2 eastus westus3 centralus westus2"
+        default: "eastus2"
       vm_priority:
         description: "Spot first, fall back to Regular if no capacity."
         required: true
@@ -70,7 +70,7 @@ on:
 permissions:
   id-token: write
   contents: read
-  actions: write    # required by sccache GHA cache backend on the build job
+  actions: write    # required by actions/cache/save for the toolchain cache
 
 defaults:
   run:
@@ -147,9 +147,12 @@ jobs:
     env:
       CANGJIE_WORKSPACE: ${{ github.workspace }}/workspace
       CANGJIE_BUILD_ROOT: ${{ github.workspace }}/buildtools
-      # Single-layer GHA cache (ephemeral VM means disk L0 doesn't carry
-      # over between runs anyway).
-      SCCACHE_GHA_ENABLED: "true"
+      # Azure Blob Storage backend for sccache. GHA Cache API rate-limited
+      # writes (~5k of 10k compiles got 429s in past runs), so we use a
+      # dedicated blob container in eastus2 (same region as the build VM,
+      # so reads/writes are intra-region and free).
+      SCCACHE_AZURE_CONNECTION_STRING: ${{ secrets.SCCACHE_AZURE_CONNECTION_STRING }}
+      SCCACHE_AZURE_BLOB_CONTAINER: sccache
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
