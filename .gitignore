@@ -32,3 +32,4 @@ software/
 
 # Throwaway dumps from local az cli probing
 skus.json
+all-skus.json
