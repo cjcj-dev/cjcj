@@ -53,7 +53,7 @@ on:
       vm_size:
         description: "Azure VM SKU."
         required: true
-        default: "Standard_F16als_v6"
+        default: "Standard_F16als_v7"
       vm_regions:
         description: "Space-separated, ordered region preference list. First with capacity wins."
         required: true

@@ -48,6 +48,14 @@ def run(cfg: BuildConfig) -> None:
                     "--no-tests",
                     *cross_args,
                     "--build-cjdb",
+                    # cjdb (lldb) is built for the windows target. Without a
+                    # Windows-side Python embeddable distribution at
+                    # $TARGET_PYTHON_PATH, lldb's CMake produces
+                    # Python3_LIBRARIES=/python<ver>.dll which then fails to
+                    # link. We don't ship a Windows Python with the SDK, so
+                    # disable lldb's Python scripting on the windows target.
+                    # The linux host cjdb still has it (built earlier).
+                    "--cjdb-disable-python",
                 ],
                 stage_name="compiler.build.windows.cjc",
             )
