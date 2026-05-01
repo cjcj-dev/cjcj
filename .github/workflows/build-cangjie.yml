@@ -124,12 +124,10 @@ jobs:
         id: tc-key
         run: |
           set -euo pipefail
+          echo "key=$(.github/scripts/toolchain-cache-key.sh ${{ matrix.target }})" >> "$GITHUB_OUTPUT"
           if [[ "${{ matrix.target }}" == "windows-x64" ]]; then
-            # Bump the version suffix when toolchain pinning changes.
-            echo "key=mingw-${{ runner.os }}-llvm20220906-openssl3.0.9-v1" >> "$GITHUB_OUTPUT"
             echo "path=${{ env.CANGJIE_BUILD_ROOT }}/llvm-mingw-w64" >> "$GITHUB_OUTPUT"
           else
-            echo "key=staticlibs-${{ runner.os }}-ncurses6.5-libedit3.1-v1" >> "$GITHUB_OUTPUT"
             echo "path=${{ env.CANGJIE_BUILD_ROOT }}" >> "$GITHUB_OUTPUT"
           fi
 

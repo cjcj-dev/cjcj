@@ -3,25 +3,34 @@
 # until one combination accepts the allocation.
 #
 # Usage:
-#   RG_PREFIX=<prefix> REGIONS="westus2 eastus2 …" SIZE=<sku> \
+#   RG=<rg> REGIONS="westus2 eastus2 …" SIZE=<sku> \
 #   PRIORITY=Spot|Regular CLOUD_INIT=<path> \
 #     provision-vm.sh
 #
 # REGIONS is a space-separated ordered list; the first one with capacity wins.
-# The resource group is named "$RG_PREFIX-$region" and created on demand. The
-# script prints the chosen region+zone+RG to stdout in `key=value` form so the
-# caller (a GitHub Actions step) can append it to $GITHUB_OUTPUT and reuse the
-# values for cleanup.
+# A single resource group ($RG) is created in the first region of the list and
+# holds whichever VM eventually lands — Azure resource groups can host
+# resources from any region, so we don't pay for create/delete round-trips on
+# capacity misses. The chosen region/zone/priority are echoed in `key=value`
+# form on stdout for the caller to reuse.
 set -euo pipefail
 
-: "${RG_PREFIX:?RG_PREFIX required}"
+: "${RG:?RG required}"
 : "${REGIONS:?REGIONS required}"
 : "${SIZE:?SIZE required}"
 : "${PRIORITY:?PRIORITY required}"
 : "${CLOUD_INIT:?CLOUD_INIT path required}"
 ZONES=${ZONES:-"2 1 3"}
 
+read -ra region_arr <<< "$REGIONS"
+home_region="${region_arr[0]}"
+
+# Tag the RG so reap-orphans.sh can find stale ones cheaply via az group list.
+created_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+az group create -n "$RG" -l "$home_region" --tags "createdAt=$created_at" -o none
+
 base_args=(
+  --resource-group "$RG"
   --name runner
   --image Ubuntu2204
   --size "$SIZE"
@@ -34,53 +43,32 @@ base_args=(
   -o none
 )
 
-ensure_rg() {
-  local region="$1" rg="$2"
-  if ! az group show -n "$rg" -o none 2>/dev/null; then
-    az group create -n "$rg" -l "$region" -o none
-  fi
-}
-
 try_create() {
   local label="$1"; shift
-  echo "::group::az vm create attempt: $label"
+  echo "::group::az vm create attempt: $label" >&2
   if az vm create "$@"; then
-    echo "::endgroup::"
+    echo "::endgroup::" >&2
     return 0
   fi
-  echo "::endgroup::"
+  echo "::endgroup::" >&2
   return 1
 }
 
-emit_outcome() {
-  local region="$1" zone="$2" priority="$3" rg="$4"
-  echo "region=$region"
-  echo "zone=$zone"
-  echo "priority=$priority"
-  echo "rg=$rg"
-}
-
 attempt_priority() {
-  # $1 = Spot|Regular ; iterates regions × zones, returns 0 on first success.
   local priority="$1"
-  for region in $REGIONS; do
-    local rg="${RG_PREFIX}-${region}"
-    ensure_rg "$region" "$rg"
-    local extra=()
-    if [[ "$priority" == "Spot" ]]; then
-      extra=(--priority Spot --eviction-policy Delete --max-price -1)
-    fi
+  local extra=()
+  if [[ "$priority" == "Spot" ]]; then
+    extra=(--priority Spot --eviction-policy Delete --max-price -1)
+  fi
+  for region in "${region_arr[@]}"; do
     for zone in $ZONES; do
       if try_create "$priority $region zone=$zone" \
-          --resource-group "$rg" --zone "$zone" \
+          --location "$region" --zone "$zone" \
           "${extra[@]}" "${base_args[@]}"; then
-        emit_outcome "$region" "$zone" "$priority" "$rg"
+        printf 'region=%s\nzone=%s\npriority=%s\n' "$region" "$zone" "$priority"
         return 0
       fi
     done
-    # Region didn't yield this priority; tear the empty RG down so we don't
-    # leave a litter of empty RGs behind.
-    az group delete -n "$rg" --yes --no-wait >/dev/null 2>&1 || true
   done
   return 1
 }
@@ -91,5 +79,6 @@ if [[ "$PRIORITY" == "Spot" ]]; then
 fi
 if attempt_priority Regular; then exit 0; fi
 
+az group delete -n "$RG" --yes --no-wait >/dev/null 2>&1 || true
 echo "::error::Could not allocate $SIZE across regions {$REGIONS} × zones {$ZONES} × {Spot,Regular}."
 exit 1

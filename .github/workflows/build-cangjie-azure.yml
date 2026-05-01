@@ -77,7 +77,7 @@ defaults:
     shell: bash
 
 env:
-  RG_PREFIX: cangjie-${{ github.run_id }}-${{ github.run_attempt }}
+  RG_NAME: cangjie-${{ github.run_id }}-${{ github.run_attempt }}
   RUNNER_LABEL: cangjie-${{ github.run_id }}-${{ github.run_attempt }}
   RUNNER_VERSION: "2.334.0"
 
@@ -87,7 +87,7 @@ jobs:
     runs-on: ubuntu-22.04
     outputs:
       runner_label: ${{ env.RUNNER_LABEL }}
-      rg_name: ${{ steps.vm.outputs.rg }}
+      rg_name: ${{ env.RG_NAME }}
       region: ${{ steps.vm.outputs.region }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -123,13 +123,12 @@ jobs:
       - name: Provision VM (try regions × zones × priority)
         id: vm
         env:
-          RG_PREFIX: ${{ env.RG_PREFIX }}
+          RG: ${{ env.RG_NAME }}
           REGIONS: ${{ inputs.vm_regions }}
           SIZE: ${{ inputs.vm_size }}
           PRIORITY: ${{ inputs.vm_priority }}
           CLOUD_INIT: cloud-init.yml
-        run: |
-          .github/scripts/provision-vm.sh | tee -a "$GITHUB_OUTPUT"
+        run: .github/scripts/provision-vm.sh | tee -a "$GITHUB_OUTPUT"
 
       - name: Wait for runner registration
         env:
@@ -175,9 +174,8 @@ jobs:
       - name: Compute toolchain cache key
         id: tc-key
         run: |
-          # Bump the version suffix when toolchain pinning changes
-          # (LLVM_MINGW_TAG / OPENSSL_VERSION in toolchain/mingw.py).
-          echo "key=mingw-${{ runner.os }}-llvm20220906-openssl3.0.9-v1" >> "$GITHUB_OUTPUT"
+          set -euo pipefail
+          echo "key=$(.github/scripts/toolchain-cache-key.sh windows-x64)" >> "$GITHUB_OUTPUT"
           echo "path=${{ env.CANGJIE_BUILD_ROOT }}/llvm-mingw-w64" >> "$GITHUB_OUTPUT"
 
       - name: Restore toolchain cache
@@ -270,23 +268,4 @@ jobs:
       - name: Tear down resource group + runner registration
         env:
           GH_TOKEN: ${{ secrets.RUNNER_REGISTRATION_PAT }}
-          # provision job emits the actual RG it landed in. If provision
-          # failed before that step, fall back to deleting any RG with our
-          # run-id prefix so we don't leak a half-created one.
-          PICKED_RG: ${{ needs.provision.outputs.rg_name }}
-        run: |
-          set -euo pipefail
-          if [[ -n "${PICKED_RG:-}" ]]; then
-            .github/scripts/teardown.sh "${{ github.repository }}" "$RUNNER_LABEL" "$PICKED_RG"
-          else
-            echo "Provision did not record an RG; sweeping any with prefix $RG_PREFIX-"
-            for rg in $(az group list --query "[?starts_with(name,'${RG_PREFIX}-')].name" -o tsv); do
-              echo "delete $rg"
-              az group delete -n "$rg" --yes --no-wait
-            done
-            id=$(gh api "/repos/${{ github.repository }}/actions/runners" \
-              --jq "[.runners[] | select(.name == \"${RUNNER_LABEL}\")][0].id // empty")
-            if [[ -n "$id" ]]; then
-              gh api -X DELETE "/repos/${{ github.repository }}/actions/runners/${id}"
-            fi
-          fi
+        run: .github/scripts/teardown.sh "${{ github.repository }}" "$RUNNER_LABEL" "$RG_NAME"
