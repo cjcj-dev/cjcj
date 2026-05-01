@@ -57,7 +57,12 @@ on:
       vm_regions:
         description: "Space-separated, ordered region preference list. First with capacity wins."
         required: true
-        default: "eastus2"
+        # eastus2 first for cache locality (the sccache blob container is
+        # in eastus2). eastus is a low-latency fallback (same metro area)
+        # — cross-region blob egress is ~$0.02/GB, so a few GB of cache
+        # traffic is negligible vs leaving the build stuck on a capacity
+        # outage.
+        default: "eastus2 eastus"
       vm_priority:
         description: "Spot first, fall back to Regular if no capacity."
         required: true

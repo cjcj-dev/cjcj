@@ -84,5 +84,7 @@ fi
 if attempt_priority Regular; then exit 0; fi
 
 az group delete -n "$RG" --yes --no-wait >/dev/null 2>&1 || true
-echo "::error::Could not allocate $SIZE across regions {$REGIONS} × zones {$ZONES} × {Spot,Regular}."
+# Send GitHub log directives to stderr so they don't end up in
+# GITHUB_OUTPUT when the caller pipes stdout via `tee -a "$GITHUB_OUTPUT"`.
+echo "::error::Could not allocate $SIZE across regions {$REGIONS} × zones {$ZONES} × {Spot,Regular}." >&2
 exit 1
