@@ -28,3 +28,4 @@ software/
 .vscode/
 *.swp
 .DS_Store
+.claude/

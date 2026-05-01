@@ -47,9 +47,9 @@ jobs:
     name: Lint & test (Python harness)
     runs-on: ubuntu-22.04
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
-      - uses: astral-sh/setup-uv@v8
+      - uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
         with:
           enable-cache: true
           cache-dependency-glob: "**/uv.lock"
@@ -96,9 +96,9 @@ jobs:
       SCCACHE_CACHE_SIZE: "5G"
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
-      - uses: astral-sh/setup-uv@v8
+      - uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
         with:
           enable-cache: true
           cache-dependency-glob: "**/uv.lock"
@@ -110,7 +110,7 @@ jobs:
         run: uv run cangjie-build install-system-deps
 
       - name: Setup sccache
-        uses: mozilla-actions/sccache-action@v0.0.10
+        uses: mozilla-actions/sccache-action@9e7fa8a12102821edf02ca5dbea1acd0f89a2696 # v0.0.10
 
       - name: Compute toolchain cache key
         id: tc-key
@@ -127,7 +127,7 @@ jobs:
 
       - name: Restore toolchain cache
         id: tc-cache
-        uses: actions/cache@v5
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
         with:
           path: ${{ steps.tc-key.outputs.path }}
           key: ${{ steps.tc-key.outputs.key }}
@@ -229,7 +229,7 @@ jobs:
             verify
 
       - name: Upload SDK artifact
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: cangjie-sdk-${{ matrix.target }}-${{ steps.cjver.outputs.value }}
           path: |
@@ -237,7 +237,7 @@ jobs:
           if-no-files-found: error
 
       - name: Upload STDX artifact
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: cangjie-stdx-${{ matrix.target }}-${{ steps.cjver.outputs.value }}
           path: |
