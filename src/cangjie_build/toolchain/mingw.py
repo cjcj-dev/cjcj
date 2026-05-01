@@ -80,26 +80,27 @@ def install(build_root: Path, *, jobs: int | None = None) -> None:
             )
 
         toolchain_env = {"TOOLCHAIN_ARCHS": "x86_64"}
-        mold = shutil.which("mold")
-        # mold is a Linux ELF linker; it cannot link the Windows PE/COFF
-        # outputs that the cross-target scripts produce. Apply it only to
-        # the host LLVM bootstrap, which is where >90% of the link time is.
-        host_link_prefix = ["mold", "-run"] if mold else []
+        # lld is a single binary that handles ELF/COFF/Mach-O/WASM targets,
+        # so unlike mold it's safe to use across the whole script chain. We
+        # only inject it into the host LLVM bootstrap though — the cross-
+        # target scripts already wire their own linker via the mingw clang
+        # wrappers and don't read LLVM_CMAKEFLAGS.
+        host_bootstrap_env: dict[str, str] = {}
+        if shutil.which("ld.lld"):
+            host_bootstrap_env["LLVM_CMAKEFLAGS"] = "-DLLVM_USE_LINKER=lld"
 
-        def script(name: str, *extra: str, with_mold: bool = False) -> None:
-            cmd: list[str] = []
-            if with_mold:
-                cmd.extend(host_link_prefix)
-            cmd.append(str(llvm_src / name))
-            cmd.extend([str(install), *extra])
+        def script(name: str, *extra: str, host: bool = False) -> None:
+            env = {**toolchain_env, "MAKEFLAGS": f"-j{cpus}"}
+            if host:
+                env.update(host_bootstrap_env)
             run(
-                cmd,
+                [str(llvm_src / name), str(install), *extra],
                 cwd=llvm_src,
-                env_overlay={**toolchain_env, "MAKEFLAGS": f"-j{cpus}"},
+                env_overlay=env,
                 stage=f"mingw.{name}",
             )
 
-        script("build-llvm.sh", "--disable-lldb", with_mold=True)
+        script("build-llvm.sh", "--disable-lldb", host=True)
         script("strip-llvm.sh")
         script("install-wrappers.sh")
         script("build-mingw-w64.sh", "--with-default-msvcrt=msvcrt")

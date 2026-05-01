@@ -185,15 +185,12 @@ jobs:
           path: ${{ steps.tc-key.outputs.path }}
           key: ${{ steps.tc-key.outputs.key }}
 
-      - name: Install mold linker
-        if: steps.tc-cache.outputs.cache-hit != 'true'
-        run: .github/scripts/install-mold.sh
-
       - name: Build MinGW toolchain
         if: steps.tc-cache.outputs.cache-hit != 'true'
-        # mingw.py picks mold up off PATH and applies it only to build-llvm.sh
-        # (host ELF link); cross-target scripts that produce Windows PE/COFF
-        # output must keep using BFD ld.
+        # mingw.py passes -DLLVM_USE_LINKER=lld to build-llvm.sh when ld.lld
+        # is on PATH (the apt 'lld' package, installed via install-system-deps).
+        # Host LLVM bootstrap links 5-10x faster; cross-target scripts keep
+        # the mingw clang wrappers' default linker.
         run: uv run cangjie-build --target windows-x64 install-mingw
 
       # Save the toolchain cache as soon as it's built — independent of

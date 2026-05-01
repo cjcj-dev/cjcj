@@ -48,6 +48,7 @@ APT_PACKAGES: tuple[str, ...] = (
     "libcups2-dev",
     "clang",
     "clang-15",
+    "lld",
     "libxrender-dev",
     "zip",
     "bzip2",

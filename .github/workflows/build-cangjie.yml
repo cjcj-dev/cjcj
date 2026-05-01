@@ -142,14 +142,10 @@ jobs:
         if: matrix.target == 'linux-x64' && steps.tc-cache.outputs.cache-hit != 'true'
         run: uv run cangjie-build --target ${{ matrix.target }} install-static-libs
 
-      - name: Install mold linker
-        if: matrix.target == 'windows-x64' && steps.tc-cache.outputs.cache-hit != 'true'
-        run: .github/scripts/install-mold.sh
-
       - name: Build MinGW toolchain (windows-x64)
         if: matrix.target == 'windows-x64' && steps.tc-cache.outputs.cache-hit != 'true'
-        # mingw.py picks mold off PATH for the host LLVM bootstrap only;
-        # cross-target Windows links keep BFD ld.
+        # mingw.py passes -DLLVM_USE_LINKER=lld for the host LLVM bootstrap
+        # when apt's 'lld' package is installed (it is — see system_deps.py).
         run: uv run cangjie-build --target ${{ matrix.target }} install-mingw
 
       # Save the toolchain cache as soon as it's built — independent of
