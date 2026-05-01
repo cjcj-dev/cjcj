@@ -40,6 +40,10 @@ base_args=(
   --nsg ""
   --custom-data "$CLOUD_INIT"
   --os-disk-caching ReadOnly
+  # Default Ubuntu image is ~30 GB; LLVM build needs >40 GB of intermediates,
+  # plus sccache + toolchain cache + workspace. F16als_v6 has no temp volume
+  # (MaxResourceVolumeMB=0), so everything lives on the OS disk.
+  --os-disk-size-gb 256
   -o none
 )
 
