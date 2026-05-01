@@ -44,7 +44,7 @@ on:
 
 permissions:
   contents: read
-  actions: write   # required by sccache GHA cache backend
+  actions: write   # actions/cache save
 
 defaults:
   run:
@@ -95,11 +95,11 @@ jobs:
     env:
       CANGJIE_WORKSPACE: ${{ github.workspace }}/workspace
       CANGJIE_BUILD_ROOT: ${{ github.workspace }}/buildtools
-      # Multi-level sccache: disk (L0, intra-job) + GitHub Actions cache (L1, inter-job).
-      # See https://github.com/mozilla/sccache/blob/main/docs/MultiLevel.md
-      SCCACHE_GHA_ENABLED: "true"
-      SCCACHE_MULTILEVEL_CHAIN: "disk,gha"
-      SCCACHE_MULTILEVEL_WRITE_ERROR_POLICY: "l0"
+      # Disk-only sccache. The GHA cache backend in sccache 0.15.0 still
+      # speaks the deprecated Actions Cache v1 protocol, but the runner now
+      # only exposes v2 (ACTIONS_RESULTS_URL). Every PUT against GHA fails;
+      # the multi-level chain hides this with l0 write policy but the stats
+      # log thousands of "Cache write errors". Drop until sccache catches up.
       SCCACHE_DIR: ${{ github.workspace }}/.sccache
       SCCACHE_CACHE_SIZE: "5G"
 
