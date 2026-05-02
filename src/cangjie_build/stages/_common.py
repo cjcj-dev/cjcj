@@ -65,8 +65,8 @@ def base_env(cfg: BuildConfig) -> dict[str, str]:
         env["CANGJIE_HOME"] = str(cangjie_home)
         extra_path_dirs.insert(0, str(cangjie_home / "tools" / "bin"))
         extra_path_dirs.insert(0, str(cangjie_home / "bin"))
-        runtime_lib = cangjie_home / "runtime" / "lib" / cfg.target.runtime_lib_subdir(
-            cfg.build_type
+        runtime_lib = (
+            cangjie_home / "runtime" / "lib" / cfg.target.runtime_lib_subdir(cfg.build_type)
         )
         if runtime_lib.is_dir():
             ld_paths.insert(0, str(runtime_lib))
@@ -94,9 +94,7 @@ def base_env(cfg: BuildConfig) -> dict[str, str]:
     return env
 
 
-def windows_cross_args(
-    cfg: BuildConfig, *, sysroot: bool = True
-) -> list[CommandPart]:
+def windows_cross_args(cfg: BuildConfig, *, sysroot: bool = True) -> list[CommandPart]:
     """Common ``--target ... --target-sysroot ... --target-toolchain ...`` args.
 
     Pass ``sysroot=False`` for stages that don't accept ``--target-sysroot``

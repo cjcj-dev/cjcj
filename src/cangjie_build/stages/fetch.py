@@ -23,25 +23,21 @@ _log = get_logger("cangjie_build.stages.fetch")
 _BUILDCJDB_EDITS: tuple[tuple[str, str], ...] = (
     (
         "externalproject_get_property(cjnative BINARY_DIR)\n"
-        "set(LLVM_GC_BINARY_DIR \"${BINARY_DIR}\")\n",
+        'set(LLVM_GC_BINARY_DIR "${BINARY_DIR}")\n',
         "cmake_policy(SET CMP0114 NEW)\n"
         "externalproject_get_property(cjnative BINARY_DIR)\n"
-        "set(LLVM_GC_BINARY_DIR \"${BINARY_DIR}\")\n",
+        'set(LLVM_GC_BINARY_DIR "${BINARY_DIR}")\n',
     ),
     (
         "    USES_TERMINAL_BUILD ON\n    DEPENDS cjnative)\n",
-        "    USES_TERMINAL_BUILD ON\n"
-        "    DEPENDS cjnative\n"
-        "    STEP_TARGETS build configure)\n",
+        "    USES_TERMINAL_BUILD ON\n    DEPENDS cjnative\n    STEP_TARGETS build configure)\n",
     ),
 )
 _BUILDCJDB_MARKER = "STEP_TARGETS build configure"
 
 _SRC_CMAKE_EDITS: tuple[tuple[str, str], ...] = (
     (
-        "if(CANGJIE_BUILD_CJDB)\n"
-        "    add_dependencies(lldb cangjie-frontend)\n"
-        "endif()\n",
+        "if(CANGJIE_BUILD_CJDB)\n    add_dependencies(lldb cangjie-frontend)\nendif()\n",
         "if(CANGJIE_BUILD_CJDB)\n"
         "    add_dependencies(lldb cangjie-frontend)\n"
         "    if(TARGET lldb-build)\n"

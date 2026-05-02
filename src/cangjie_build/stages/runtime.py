@@ -29,8 +29,8 @@ def run(cfg: BuildConfig) -> None:
         run_build_py(cfg, runtime_root, ["install"], stage_name="runtime.install.linux")
         copy_contents(runtime_root / "output", target_dir, stage="runtime.snapshot.linux")
 
-        linux_subdir = runtime_root / "output" / "common" / cfg.target.runtime_output_subdir(
-            cfg.build_type
+        linux_subdir = (
+            runtime_root / "output" / "common" / cfg.target.runtime_output_subdir(cfg.build_type)
         )
         for sub in ("lib", "runtime"):
             copy_contents(linux_subdir / sub, compiler_output / sub, stage="runtime.copy.linux")
@@ -55,8 +55,11 @@ def run(cfg: BuildConfig) -> None:
         run_build_py(cfg, runtime_root, ["install"], stage_name="runtime.install.windows")
         copy_contents(runtime_root / "output", target_dir, stage="runtime.snapshot.windows")
 
-        windows_subdir = runtime_root / "output" / "common" / cfg.target.runtime_output_subdir(
-            cfg.cross_build_type
+        windows_subdir = (
+            runtime_root
+            / "output"
+            / "common"
+            / cfg.target.runtime_output_subdir(cfg.cross_build_type)
         )
         compiler_mingw_output = cfg.repo_path(RepoName.COMPILER) / "output-x86_64-w64-mingw32"
         for sub in ("lib", "runtime"):
