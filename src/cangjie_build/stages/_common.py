@@ -37,15 +37,38 @@ def base_env(cfg: BuildConfig) -> dict[str, str]:
         env["MINGW_PATH"] = str(mingw.install_path(cfg.build_root))
         extra_path_dirs.insert(0, str(mingw.install_path(cfg.build_root) / "bin"))
 
+    ld_paths: list[str] = []
+
     if not cfg.target.spec.cross_compile and sys.platform == "linux":
         # OPENSSL_PATH is required by stdlib and STDX builds on Linux.
         candidate = Path("/usr/lib/x86_64-linux-gnu")
         if candidate.exists():
             env["OPENSSL_PATH"] = str(candidate)
-            ld_existing = os.environ.get("LD_LIBRARY_PATH", "")
-            env["LD_LIBRARY_PATH"] = (
-                f"{candidate}{os.pathsep}{ld_existing}" if ld_existing else str(candidate)
-            )
+            ld_paths.append(str(candidate))
+
+    # Mirror what `source output/envsetup.sh` sets (utils/envsetup/llvm_linux.sh
+    # in cangjie_compiler), so stdlib / stdx / tools cmake configures find cjc
+    # and its runtime libs after the compiler stage's install step has written
+    # them into cangjie_compiler/output. Only effective once compiler/output
+    # exists; harmless before that.
+    cangjie_home = cfg.workspace / "cangjie_compiler" / "output"
+    if cangjie_home.is_dir():
+        env["CANGJIE_HOME"] = str(cangjie_home)
+        extra_path_dirs.insert(0, str(cangjie_home / "tools" / "bin"))
+        extra_path_dirs.insert(0, str(cangjie_home / "bin"))
+        # Linux native build_type is lowercase in the runtime lib subdir.
+        runtime_lib = (
+            cangjie_home / "runtime" / "lib" / f"linux_{cfg.build_type.lower()}_x86_64_cjnative"
+        )
+        if runtime_lib.is_dir():
+            ld_paths.insert(0, str(runtime_lib))
+        tools_lib = cangjie_home / "tools" / "lib"
+        if tools_lib.is_dir():
+            ld_paths.insert(0, str(tools_lib))
+
+    if ld_paths:
+        ld_existing = os.environ.get("LD_LIBRARY_PATH", "")
+        env["LD_LIBRARY_PATH"] = os.pathsep.join([*ld_paths, ld_existing] if ld_existing else ld_paths)
 
     current_path = os.environ.get("PATH", "")
     env["PATH"] = os.pathsep.join(p for p in [*extra_path_dirs, current_path] if p)
