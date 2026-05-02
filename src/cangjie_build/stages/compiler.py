@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from cangjie_build.config import BuildConfig, RepoName
-from cangjie_build.errors import BuildError
 from cangjie_build.logging_setup import get_logger, stage
 from cangjie_build.runner import CommandPart
 from cangjie_build.runner import run as run_cmd
@@ -39,7 +38,7 @@ def run(cfg: BuildConfig) -> None:
                 "--target-toolchain",
                 str(mingw_path / "bin"),
             ]
-            cjc_args: list[CommandPart] = [
+            cjc_base_args: list[CommandPart] = [
                 "build",
                 "-t",
                 cfg.build_type,
@@ -47,37 +46,47 @@ def run(cfg: BuildConfig) -> None:
                 "cjc",
                 "--no-tests",
                 *cross_args,
-                "--build-cjdb",
-                # No Windows Python embeddable shipped, so keep cjdb
-                # without Python scripting on the windows target.
-                "--cjdb-disable-python",
             ]
             # Cangjie's BuildCJDB.cmake declares lldb's ExternalProject with
             # `DEPENDS cjnative` only — no dep on cangjie-frontend / cangjie-lsp,
             # whose import libs lldb's link consumes. Slow hosts mask the race
             # because lldb-with-Python is heavier than cangjie-frontend; with
-            # --cjdb-disable-python on F16als_v7 lldb hits its link step almost
-            # immediately and loses. Patching cmake didn't work (CMP0114 OLD
-            # default makes target-level deps soft, NEW didn't fix it; APPEND
-            # cross-directory restriction blocks ExternalProject_Add_StepDependencies).
+            # --cjdb-disable-python on a fast host (F16als_v7) lldb hits its
+            # link step almost immediately and loses. None of our cmake patch
+            # attempts wired the dep correctly (CMP0114 OLD makes target-level
+            # deps soft, NEW didn't fix it; ExternalProject_Add_StepDependencies
+            # uses add_custom_command APPEND with a hard cross-directory limit).
             #
-            # Pragmatic workaround: retry on failure. Pass 1 leaves
-            # libcangjie-frontend.dll.a / libcangjie-lsp.dll.a on disk
-            # (cangjie-frontend's link runs in parallel with lldb's failed
-            # link, and finishes successfully). Pass 2's ninja resumes,
-            # finds the import libs, lldb's nested build succeeds.
-            try:
-                run_build_py(cfg, repo_dir, cjc_args, stage_name="compiler.build.windows.cjc")
-            except BuildError as exc:
-                _log.warning(
-                    "compiler.build.windows.cjc failed (%s); retrying once — "
-                    "expected if lldb's ExternalProject lost the race against "
-                    "cangjie-frontend's link, retry will pick up the imports lib from disk",
-                    exc,
-                )
-                run_build_py(
-                    cfg, repo_dir, cjc_args, stage_name="compiler.build.windows.cjc.retry"
-                )
+            # Sequence the build into two passes from the harness:
+            #   Pass 1: --product cjc (no --build-cjdb)
+            #     → cmake configures with -DCANGJIE_BUILD_CJDB=OFF, lldb is
+            #       not in the build graph at all. ninja builds cjc.exe,
+            #       cangjie-frontend (.dll + .dll.a), cangjie-lsp-share
+            #       (libcangjie-lsp.dll). No race possible.
+            #   rm build.ninja
+            #     → cangjie's build.py only re-runs cmake when build.ninja
+            #       is absent. Removing it forces pass 2 to reconfigure
+            #       with the new flag.
+            #   Pass 2: --product cjc --build-cjdb --cjdb-disable-python
+            #     → cmake re-runs with -DCANGJIE_BUILD_CJDB=ON, adds the
+            #       lldb ExternalProject. ninja sees cangjie-frontend's
+            #       outputs already on disk (timestamps unchanged), only
+            #       schedules the new lldb-build step. lldb's nested
+            #       link finds the import libs and succeeds.
+            run_build_py(cfg, repo_dir, cjc_base_args, stage_name="compiler.build.windows.cjc")
+            # cangjie's build.py passes args.target through TARGET_DICTIONARY:
+            # "windows-x86_64" → "x86_64-w64-mingw32", and the cmake build dir
+            # is build/build-cjc-<mapped-triple>.
+            ninja_file = repo_dir / "build" / "build-cjc-x86_64-w64-mingw32" / "build.ninja"
+            if ninja_file.is_file():
+                _log.info("Removing %s to force cmake re-run in pass 2", ninja_file)
+                ninja_file.unlink()
+            run_build_py(
+                cfg,
+                repo_dir,
+                [*cjc_base_args, "--build-cjdb", "--cjdb-disable-python"],
+                stage_name="compiler.build.windows.cjdb",
+            )
             run_build_py(
                 cfg,
                 repo_dir,
