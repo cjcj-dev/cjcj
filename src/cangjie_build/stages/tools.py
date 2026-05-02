@@ -18,13 +18,21 @@ _TOOL_PATHS: tuple[tuple[str, str], ...] = (
 # is per-runner, so we rewrite the literal to interpolate $MINGW_PATH at
 # runtime. The surrounding string in cjpm/build.py is an f-string, so the
 # braces are evaluated by cjpm itself when it builds the cjc command.
+#
+# The native-windows branch (`is_windows`) in upstream already uses the same
+# {os.path.join(os.environ['MINGW_PATH']...)} expression, so a positive
+# marker on that substring would falsely report "already patched" and let
+# the cross-windows /opt/buildtools/... literal slip through. Instead use
+# the *absence* of /opt/buildtools/llvm-mingw-w64 as the "patched" signal —
+# that string only appears in the cross-windows branch and is gone after
+# we substitute.
+_CJPM_NEEDLE = "/opt/buildtools/llvm-mingw-w64"
 _CJPM_EDITS: tuple[tuple[str, str], ...] = (
     (
         "-L /opt/buildtools/llvm-mingw-w64/x86_64-w64-mingw32/lib",
         "-L {os.path.join(os.environ['MINGW_PATH'], 'x86_64-w64-mingw32', 'lib')}",
     ),
 )
-_CJPM_MARKER = "{os.path.join(os.environ['MINGW_PATH']"
 
 
 def _build_args_for(name: str, cfg: BuildConfig) -> list[CommandPart]:
@@ -41,12 +49,13 @@ def run(cfg: BuildConfig) -> None:
     tools_root = cfg.repo_path(RepoName.TOOLS)
     suffix = cfg.target.spec.exe_suffix
     with stage("tools"):
-        apply_text_patch(
-            tools_root / "cjpm" / "build" / "build.py",
-            _CJPM_EDITS,
-            stage="tools.cjpm.patch",
-            marker=_CJPM_MARKER,
-        )
+        cjpm_build_py = tools_root / "cjpm" / "build" / "build.py"
+        if _CJPM_NEEDLE in cjpm_build_py.read_text():
+            apply_text_patch(
+                cjpm_build_py,
+                _CJPM_EDITS,
+                stage="tools.cjpm.patch",
+            )
         for name, subpath in _TOOL_PATHS:
             cwd = tools_root / subpath
             run_build_py(cfg, cwd, ["clean"], stage_name=f"tools.{name}.clean")
