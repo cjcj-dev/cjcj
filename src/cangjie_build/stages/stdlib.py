@@ -34,7 +34,7 @@ def run(cfg: BuildConfig) -> None:
             [
                 "build",
                 "-t",
-                cfg.build_type,
+                cfg.cross_build_type,
                 "--target",
                 "windows-x86_64",
                 f"--target-lib={runtime_target}",

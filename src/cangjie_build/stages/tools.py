@@ -15,10 +15,10 @@ _TOOL_PATHS: tuple[tuple[str, str], ...] = (
 
 
 def _build_args_for(name: str, cfg: BuildConfig) -> list[CommandPart]:
-    args: list[CommandPart] = ["build", "-t", cfg.build_type]
     if cfg.target.spec.cross_compile:
-        args += ["--target", "windows-x86_64"]
-    elif name == "cjpm":
+        return ["build", "-t", cfg.cross_build_type, "--target", "windows-x86_64"]
+    args: list[CommandPart] = ["build", "-t", cfg.build_type]
+    if name == "cjpm":
         # Linux native cjpm needs an rpath so it locates the runtime's shared libs at runtime.
         args += ["--set-rpath", "$ORIGIN/../../runtime/lib/linux_x86_64_cjnative"]
     return args

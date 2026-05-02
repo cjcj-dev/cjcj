@@ -58,6 +58,21 @@ class BuildConfig:
     def software_dir(self) -> Path:
         return self.workspace / "software"
 
+    @property
+    def cross_build_type(self) -> str:
+        """Build type to use for cross-compile (windows) sub-builds.
+
+        cangjie's build glue has multiple ``relwithdebinfo``-only bugs on
+        MinGW: ``src/CMakeLists.txt:272`` flips cangjie-frontend to a static
+        ``.a`` (which BuildCJDB.cmake then can't find as ``.dll.a``), and
+        ``-fdebug-types-section`` is added to pcre2's compile flags but
+        clang refuses it on the ``x86_64-w64-windows-gnu`` triple. Upstream's
+        ``linux_cross_windows_zh.md`` always uses ``release`` for the windows
+        cross-compile invocations, so we do the same — independent of what
+        the user picked for the linux-host build_type.
+        """
+        return "release" if self.target.spec.cross_compile else self.build_type
+
     def repo(self, name: RepoName | str) -> RepoSpec:
         try:
             key = RepoName(name)

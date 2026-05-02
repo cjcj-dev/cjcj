@@ -38,20 +38,14 @@ def run(cfg: BuildConfig) -> None:
                 "--target-toolchain",
                 str(mingw_path / "bin"),
             ]
-            # cangjie's src/CMakeLists.txt:272 force-enables
-            # WIN_DEBUG_USE_STATIC_LIB on MinGW for build types matching
-            # ^(Debug|RelWithDebInfo|MinSizeRelWithDebInfo)$, which builds
-            # cangjie-frontend as STATIC (.a) instead of SHARED (.dll +
-            # .dll.a). But BuildCJDB.cmake still tells lldb to link against
-            # libcangjie-frontend.dll.a — file that never gets produced
-            # under that build type. Pass 'release' for the windows cross
-            # build to dodge that branch and get a real shared lib +
-            # import lib. Upstream's linux_cross_windows_zh.md does the same.
-            cross_build_type = "release"
+            # cfg.cross_build_type is hardcoded to 'release' for windows
+            # cross-compile (see config.py); cangjie's relwithdebinfo path
+            # has multiple bugs on MinGW (static-lib switch in
+            # src/CMakeLists.txt:272, -fdebug-types-section in pcre2 flags).
             cjc_base_args: list[CommandPart] = [
                 "build",
                 "-t",
-                cross_build_type,
+                cfg.cross_build_type,
                 "--product",
                 "cjc",
                 "--no-tests",
@@ -103,7 +97,7 @@ def run(cfg: BuildConfig) -> None:
                 [
                     "build",
                     "-t",
-                    cross_build_type,
+                    cfg.cross_build_type,
                     "--product",
                     "libs",
                     *cross_args,

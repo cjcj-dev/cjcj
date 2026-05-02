@@ -18,7 +18,7 @@ def run(cfg: BuildConfig) -> None:
             args: list[CommandPart] = [
                 "build",
                 "-t",
-                cfg.build_type,
+                cfg.cross_build_type,
                 f"--include={compiler_include}",
                 f"--target-lib={mingw_path / mingw.TARGET_TRIPLE / 'lib'}",
                 "--target",

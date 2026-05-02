@@ -44,7 +44,7 @@ def run(cfg: BuildConfig) -> None:
             [
                 "build",
                 "-t",
-                cfg.build_type,
+                cfg.cross_build_type,
                 "--target",
                 "windows-x86_64",
                 "--target-toolchain",
@@ -58,7 +58,7 @@ def run(cfg: BuildConfig) -> None:
         copy_contents(runtime_root / "output", target_dir, stage="runtime.snapshot.windows")
 
         windows_subdir = (
-            runtime_root / "output" / "common" / f"windows_{cfg.build_type.lower()}_x86_64"
+            runtime_root / "output" / "common" / f"windows_{cfg.cross_build_type.lower()}_x86_64"
         )
         compiler_mingw_output = cfg.repo_path(RepoName.COMPILER) / "output-x86_64-w64-mingw32"
         for sub in ("lib", "runtime"):
