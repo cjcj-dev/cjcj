@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 from cangjie_build.config import BuildConfig, RepoName
-from cangjie_build.logging_setup import stage
+from cangjie_build.errors import BuildError
+from cangjie_build.logging_setup import get_logger, stage
 from cangjie_build.runner import CommandPart
 from cangjie_build.runner import run as run_cmd
 from cangjie_build.stages._common import (
@@ -12,6 +13,8 @@ from cangjie_build.stages._common import (
     run_build_py,
 )
 from cangjie_build.toolchain import mingw, static_libs
+
+_log = get_logger("cangjie_build.stages.compiler")
 
 
 def run(cfg: BuildConfig) -> None:
@@ -36,24 +39,45 @@ def run(cfg: BuildConfig) -> None:
                 "--target-toolchain",
                 str(mingw_path / "bin"),
             ]
-            run_build_py(
-                cfg,
-                repo_dir,
-                [
-                    "build",
-                    "-t",
-                    cfg.build_type,
-                    "--product",
-                    "cjc",
-                    "--no-tests",
-                    *cross_args,
-                    "--build-cjdb",
-                    # No Windows Python embeddable shipped, so keep cjdb
-                    # without Python scripting on the windows target.
-                    "--cjdb-disable-python",
-                ],
-                stage_name="compiler.build.windows.cjc",
-            )
+            cjc_args: list[CommandPart] = [
+                "build",
+                "-t",
+                cfg.build_type,
+                "--product",
+                "cjc",
+                "--no-tests",
+                *cross_args,
+                "--build-cjdb",
+                # No Windows Python embeddable shipped, so keep cjdb
+                # without Python scripting on the windows target.
+                "--cjdb-disable-python",
+            ]
+            # Cangjie's BuildCJDB.cmake declares lldb's ExternalProject with
+            # `DEPENDS cjnative` only — no dep on cangjie-frontend / cangjie-lsp,
+            # whose import libs lldb's link consumes. Slow hosts mask the race
+            # because lldb-with-Python is heavier than cangjie-frontend; with
+            # --cjdb-disable-python on F16als_v7 lldb hits its link step almost
+            # immediately and loses. Patching cmake didn't work (CMP0114 OLD
+            # default makes target-level deps soft, NEW didn't fix it; APPEND
+            # cross-directory restriction blocks ExternalProject_Add_StepDependencies).
+            #
+            # Pragmatic workaround: retry on failure. Pass 1 leaves
+            # libcangjie-frontend.dll.a / libcangjie-lsp.dll.a on disk
+            # (cangjie-frontend's link runs in parallel with lldb's failed
+            # link, and finishes successfully). Pass 2's ninja resumes,
+            # finds the import libs, lldb's nested build succeeds.
+            try:
+                run_build_py(cfg, repo_dir, cjc_args, stage_name="compiler.build.windows.cjc")
+            except BuildError as exc:
+                _log.warning(
+                    "compiler.build.windows.cjc failed (%s); retrying once — "
+                    "expected if lldb's ExternalProject lost the race against "
+                    "cangjie-frontend's link, retry will pick up the imports lib from disk",
+                    exc,
+                )
+                run_build_py(
+                    cfg, repo_dir, cjc_args, stage_name="compiler.build.windows.cjc.retry"
+                )
             run_build_py(
                 cfg,
                 repo_dir,
