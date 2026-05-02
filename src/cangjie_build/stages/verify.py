@@ -18,19 +18,15 @@ def run(cfg: BuildConfig) -> None:
     we only validate that the headline artifacts landed.
     """
     cangjie_dir = cfg.software_dir / "cangjie"
-    envsetup = require_file(cangjie_dir / "envsetup.sh", stage="verify")
+    suffix = cfg.target.spec.exe_suffix
 
     if cfg.target.spec.cross_compile:
-        # Windows binaries can't be exec'd on the linux runner — just check
-        # the headline artifacts landed where the SDK tree expects them.
-        suffix = cfg.target.spec.exe_suffix
         require_file(cangjie_dir / "bin" / f"cjc{suffix}", stage="verify.cjc")
-        require_file(
-            cangjie_dir / "tools" / "bin" / f"cjpm{suffix}", stage="verify.cjpm"
-        )
+        require_file(cangjie_dir / "tools" / "bin" / f"cjpm{suffix}", stage="verify.cjpm")
         _log.info("Cross-compile target; SDK artifacts present")
         return
 
+    envsetup = require_file(cangjie_dir / "envsetup.sh", stage="verify")
     work = ensure_dir(cfg.workspace / "verify")
     hello = work / "hello.cj"
     hello.write_text(_HELLO_SOURCE, encoding="utf-8")

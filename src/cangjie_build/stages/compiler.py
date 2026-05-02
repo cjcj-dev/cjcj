@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from cangjie_build.config import BuildConfig, RepoName
-from cangjie_build.logging_setup import get_logger, stage
+from cangjie_build.logging_setup import stage
 from cangjie_build.runner import CommandPart
 from cangjie_build.runner import run as run_cmd
 from cangjie_build.stages._common import (
@@ -10,10 +10,9 @@ from cangjie_build.stages._common import (
     python_exe,
     require_dir,
     run_build_py,
+    windows_cross_args,
 )
-from cangjie_build.toolchain import mingw, static_libs
-
-_log = get_logger("cangjie_build.stages.compiler")
+from cangjie_build.toolchain import static_libs
 
 
 def run(cfg: BuildConfig) -> None:
@@ -29,25 +28,12 @@ def run(cfg: BuildConfig) -> None:
                 ["build", "-t", cfg.build_type, "--no-tests"],
                 stage_name="compiler.build.host",
             )
-            mingw_path = mingw.install_path(cfg.build_root)
-            cross_args: list[CommandPart] = [
-                "--target",
-                "windows-x86_64",
-                "--target-sysroot",
-                f"{mingw_path}/",
-                "--target-toolchain",
-                str(mingw_path / "bin"),
-            ]
-            # cfg.cross_build_type is hardcoded to 'release' for windows
-            # cross-compile (see config.py); cangjie's relwithdebinfo path
-            # has multiple bugs on MinGW (static-lib switch in
+            cross_args = windows_cross_args(cfg)
+            # cross_build_type is forced to 'release' (config.py): cangjie's
+            # relwithdebinfo path has multiple MinGW bugs (static-lib switch in
             # src/CMakeLists.txt:272, -fdebug-types-section in pcre2 flags).
-            #
-            # The lldb-build vs cangjie-frontend race that previously forced
-            # a two-pass build is now resolved at the cmake level: fetch
-            # patches BuildCJDB.cmake to add STEP_TARGETS build + CMP0114
-            # NEW, and src/CMakeLists.txt to add_dependencies(lldb-build
-            # cangjie-frontend cangjie-lsp-share). Single pass is enough.
+            # The lldb-build vs cangjie-frontend race is fixed by fetch.py's
+            # cmake patches, so a single pass with --build-cjdb is enough.
             run_build_py(
                 cfg,
                 repo_dir,

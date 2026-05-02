@@ -18,6 +18,13 @@ from cangjie_build.toolchain import mingw, static_libs
 _log = get_logger("cangjie_build.stages")
 
 
+WINDOWS_TARGET = "windows-x86_64"
+
+
+def _join_pathsep(*parts: str) -> str:
+    return os.pathsep.join(p for p in parts if p)
+
+
 def base_env(cfg: BuildConfig) -> dict[str, str]:
     """Compose the env overlay every ``build.py`` invocation needs.
 
@@ -30,14 +37,12 @@ def base_env(cfg: BuildConfig) -> dict[str, str]:
         "STDX_VERSION": str(cfg.stdx_version),
         "BUILD_ROOT": str(cfg.build_root),
         "WORKSPACE": str(cfg.workspace),
-        # Use lld for everything that respects LDFLAGS (cmake EXE/SHARED
-        # linker flags init from this). MinGW cross is already lld via
-        # llvm-mingw; cangjie's bundled clang uses lld for cjc's emit step.
-        # This covers libuv, libfswatcher, ncurses/libedit, and cangjie's
-        # own C++ subprojects on the linux host build.
+        # Use lld for everything that respects LDFLAGS (cmake bakes this into
+        # CMAKE_*_LINKER_FLAGS_INIT at first configure). MinGW cross + cjc's
+        # emit step already use lld; this covers the linux-host C++ subprojects
+        # (libuv, libfswatcher, ncurses/libedit, cangjie's own).
         "LDFLAGS": "-fuse-ld=lld",
     }
-    # Make clang-15 available without polluting the global PATH.
     extra_path_dirs: list[str] = ["/usr/lib/llvm-15/bin"]
     if cfg.target.spec.needs_mingw:
         env["MINGW_PATH"] = str(mingw.install_path(cfg.build_root))
@@ -52,19 +57,16 @@ def base_env(cfg: BuildConfig) -> dict[str, str]:
             env["OPENSSL_PATH"] = str(candidate)
             ld_paths.append(str(candidate))
 
-    # Mirror what `source output/envsetup.sh` sets (utils/envsetup/llvm_linux.sh
-    # in cangjie_compiler), so stdlib / stdx / tools cmake configures find cjc
-    # and its runtime libs after the compiler stage's install step has written
-    # them into cangjie_compiler/output. Only effective once compiler/output
-    # exists; harmless before that.
+    # Stages after compiler.install need cjc on PATH and its runtime libs
+    # findable, the same way `source compiler/output/envsetup.sh` would set
+    # them. No-op before compiler.install has run.
     cangjie_home = cfg.workspace / "cangjie_compiler" / "output"
     if cangjie_home.is_dir():
         env["CANGJIE_HOME"] = str(cangjie_home)
         extra_path_dirs.insert(0, str(cangjie_home / "tools" / "bin"))
         extra_path_dirs.insert(0, str(cangjie_home / "bin"))
-        # Linux native build_type is lowercase in the runtime lib subdir.
-        runtime_lib = (
-            cangjie_home / "runtime" / "lib" / f"linux_{cfg.build_type.lower()}_x86_64_cjnative"
+        runtime_lib = cangjie_home / "runtime" / "lib" / cfg.target.runtime_lib_subdir(
+            cfg.build_type
         )
         if runtime_lib.is_dir():
             ld_paths.insert(0, str(runtime_lib))
@@ -73,21 +75,65 @@ def base_env(cfg: BuildConfig) -> dict[str, str]:
             ld_paths.insert(0, str(tools_lib))
 
     # tools/hyperlangExtension's build.py refuses to even `clean` without
-    # CANGJIE_STDX_PATH. Upstream linux_cross_windows_zh.md exports it
-    # after the stdx install step. Driven from Python here so tools stage
-    # picks it up automatically.
-    stdx_subdir = cfg.target.stdx_target_subdir()
-    stdx_path = cfg.workspace / "cangjie_stdx" / "target" / stdx_subdir / "static" / "stdx"
+    # CANGJIE_STDX_PATH. Set after stdx.install lands, no-op before.
+    stdx_path = (
+        cfg.workspace
+        / "cangjie_stdx"
+        / "target"
+        / cfg.target.stdx_target_subdir()
+        / "static"
+        / "stdx"
+    )
     if stdx_path.is_dir():
         env["CANGJIE_STDX_PATH"] = str(stdx_path)
 
     if ld_paths:
-        ld_existing = os.environ.get("LD_LIBRARY_PATH", "")
-        env["LD_LIBRARY_PATH"] = os.pathsep.join([*ld_paths, ld_existing] if ld_existing else ld_paths)
+        env["LD_LIBRARY_PATH"] = _join_pathsep(*ld_paths, os.environ.get("LD_LIBRARY_PATH", ""))
 
-    current_path = os.environ.get("PATH", "")
-    env["PATH"] = os.pathsep.join(p for p in [*extra_path_dirs, current_path] if p)
+    env["PATH"] = _join_pathsep(*extra_path_dirs, os.environ.get("PATH", ""))
     return env
+
+
+def windows_cross_args(
+    cfg: BuildConfig, *, sysroot: bool = True
+) -> list[CommandPart]:
+    """Common ``--target ... --target-sysroot ... --target-toolchain ...`` args.
+
+    Pass ``sysroot=False`` for stages that don't accept ``--target-sysroot``
+    (e.g. cangjie_runtime/runtime's build.py).
+    """
+    mingw_path = mingw.install_path(cfg.build_root)
+    args: list[CommandPart] = ["--target", WINDOWS_TARGET]
+    if sysroot:
+        args += ["--target-sysroot", f"{mingw_path}/"]
+    args += ["--target-toolchain", str(mingw_path / "bin")]
+    return args
+
+
+def apply_text_patch(
+    path: Path,
+    edits: Sequence[tuple[str, str]],
+    *,
+    stage: str,
+    marker: str | None = None,
+) -> None:
+    """Idempotent text-substitution patch.
+
+    Each ``edits`` entry is ``(old, new)``; both must be unique within the
+    file. If ``marker`` is given and already present in the file the patch
+    is a no-op. Otherwise every ``old`` must be found, or :class:`BuildError`
+    is raised — silent no-ops would mask upstream renames.
+    """
+    require_file(path, stage=stage)
+    text = path.read_text()
+    if marker is not None and marker in text:
+        return
+    for old, new in edits:
+        if old not in text:
+            raise BuildError(stage, f"patch shape drift: {old!r} not found in {path}")
+        text = text.replace(old, new, 1)
+    path.write_text(text)
+    _log.info("Patched %s", path)
 
 
 def cmake_prefix_path_for(cfg: BuildConfig) -> str | None:

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from cangjie_build.config import BuildConfig, RepoName
 from cangjie_build.logging_setup import stage
-from cangjie_build.stages._common import copy_contents, run_build_py
+from cangjie_build.stages._common import copy_contents, run_build_py, windows_cross_args
 from cangjie_build.toolchain import mingw
 
 
@@ -26,8 +26,8 @@ def run(cfg: BuildConfig) -> None:
         if not cfg.target.spec.cross_compile:
             return
 
-        mingw_path = mingw.install_path(cfg.build_root)
         run_build_py(cfg, stdlib_root, ["clean"], stage_name="stdlib.clean.windows")
+        mingw_lib = mingw.install_path(cfg.build_root) / mingw.TARGET_TRIPLE / "lib"
         run_build_py(
             cfg,
             stdlib_root,
@@ -35,14 +35,9 @@ def run(cfg: BuildConfig) -> None:
                 "build",
                 "-t",
                 cfg.cross_build_type,
-                "--target",
-                "windows-x86_64",
                 f"--target-lib={runtime_target}",
-                f"--target-lib={mingw_path / mingw.TARGET_TRIPLE / 'lib'}",
-                "--target-sysroot",
-                f"{mingw_path}/",
-                "--target-toolchain",
-                str(mingw_path / "bin"),
+                f"--target-lib={mingw_lib}",
+                *windows_cross_args(cfg),
             ],
             stage_name="stdlib.build.windows",
         )

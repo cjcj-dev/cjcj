@@ -36,6 +36,13 @@ class Target(ABC):
         """Subdir under cangjie_runtime/runtime/output/common/ produced by build.py install."""
 
     @abstractmethod
+    def runtime_lib_subdir(self, build_type: str) -> str:
+        """Subdir under compiler/output/runtime/lib/ for this target's runtime libs.
+
+        Same shape as ``runtime_output_subdir`` but suffixed with ``_cjnative``.
+        """
+
+    @abstractmethod
     def stdx_target_subdir(self) -> str:
         """Subdir under cangjie_stdx/target produced by stdx build.py install."""
 
@@ -61,6 +68,9 @@ class _LinuxX64(Target):
     def runtime_output_subdir(self, build_type: str) -> str:
         return f"linux_{build_type.lower()}_x86_64"
 
+    def runtime_lib_subdir(self, build_type: str) -> str:
+        return f"linux_{build_type.lower()}_x86_64_cjnative"
+
     def stdx_target_subdir(self) -> str:
         return "linux_x86_64_cjnative"
 
@@ -84,6 +94,9 @@ class _WindowsX64(Target):
 
     def runtime_output_subdir(self, build_type: str) -> str:
         return f"windows_{build_type.lower()}_x86_64"
+
+    def runtime_lib_subdir(self, build_type: str) -> str:
+        return f"windows_{build_type.lower()}_x86_64_cjnative"
 
     def stdx_target_subdir(self) -> str:
         return "windows_x86_64_cjnative"

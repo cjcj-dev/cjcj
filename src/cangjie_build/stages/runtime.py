@@ -6,8 +6,8 @@ from cangjie_build.stages._common import (
     copy_contents,
     ensure_dir,
     run_build_py,
+    windows_cross_args,
 )
-from cangjie_build.toolchain import mingw
 
 
 def run(cfg: BuildConfig) -> None:
@@ -29,14 +29,15 @@ def run(cfg: BuildConfig) -> None:
         run_build_py(cfg, runtime_root, ["install"], stage_name="runtime.install.linux")
         copy_contents(runtime_root / "output", target_dir, stage="runtime.snapshot.linux")
 
-        linux_subdir = runtime_root / "output" / "common" / f"linux_{cfg.build_type.lower()}_x86_64"
+        linux_subdir = runtime_root / "output" / "common" / cfg.target.runtime_output_subdir(
+            cfg.build_type
+        )
         for sub in ("lib", "runtime"):
             copy_contents(linux_subdir / sub, compiler_output / sub, stage="runtime.copy.linux")
 
         if not cfg.target.spec.cross_compile:
             return
 
-        mingw_path = mingw.install_path(cfg.build_root)
         run_build_py(cfg, runtime_root, ["clean"], stage_name="runtime.clean.windows")
         run_build_py(
             cfg,
@@ -45,10 +46,7 @@ def run(cfg: BuildConfig) -> None:
                 "build",
                 "-t",
                 cfg.cross_build_type,
-                "--target",
-                "windows-x86_64",
-                "--target-toolchain",
-                str(mingw_path / "bin"),
+                *windows_cross_args(cfg, sysroot=False),
                 "-v",
                 cfg.cangjie_version,
             ],
@@ -57,8 +55,8 @@ def run(cfg: BuildConfig) -> None:
         run_build_py(cfg, runtime_root, ["install"], stage_name="runtime.install.windows")
         copy_contents(runtime_root / "output", target_dir, stage="runtime.snapshot.windows")
 
-        windows_subdir = (
-            runtime_root / "output" / "common" / f"windows_{cfg.cross_build_type.lower()}_x86_64"
+        windows_subdir = runtime_root / "output" / "common" / cfg.target.runtime_output_subdir(
+            cfg.cross_build_type
         )
         compiler_mingw_output = cfg.repo_path(RepoName.COMPILER) / "output-x86_64-w64-mingw32"
         for sub in ("lib", "runtime"):
