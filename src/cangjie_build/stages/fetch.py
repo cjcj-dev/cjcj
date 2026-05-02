@@ -24,20 +24,28 @@ def run(cfg: BuildConfig) -> None:
         _patch_lldb_step_deps(compiler_dir)
 
 
-_PATCH_OLD = """if(CANGJIE_BUILD_CJDB)
+_BUILDCJDB_OLD = """    USES_TERMINAL_BUILD ON
+    DEPENDS cjnative)"""
+
+_BUILDCJDB_NEW = """    USES_TERMINAL_BUILD ON
+    # cangjie-build patch: expose 'lldb-build' as a top-level target so
+    # src/CMakeLists.txt can add_dependencies() onto the actual build
+    # sub-step (without STEP_TARGETS, ExternalProject only exposes the
+    # aggregator).
+    STEP_TARGETS build
+    DEPENDS cjnative)"""
+
+_SRC_OLD = """if(CANGJIE_BUILD_CJDB)
     add_dependencies(lldb cangjie-frontend)
 endif()"""
 
-_PATCH_NEW = """if(CANGJIE_BUILD_CJDB)
+_SRC_NEW = """if(CANGJIE_BUILD_CJDB)
     add_dependencies(lldb cangjie-frontend)
-    # cangjie-build patch: add_dependencies(lldb X) only sequences X before
-    # the ExternalProject aggregator (a no-op target that runs after install).
-    # The 'lldb-build' sub-target is the one that actually invokes lldb's
-    # nested ninja, and that's where the link to libcangjie-frontend.dll.a /
-    # libcangjie-lsp.dll.a happens. Without this, fast hosts race lldb's
-    # link against cangjie-frontend's compile and fail with the import lib
-    # missing. Slow hosts hide the bug because lldb-with-Python is heavy
-    # enough that cangjie-frontend always finishes first.
+    # cangjie-build patch: the 'lldb' aggregator target above runs *after*
+    # install — it doesn't sequence libs before the actual lldb build step.
+    # 'lldb-build' is exposed by STEP_TARGETS in third_party/cmake/BuildCJDB.cmake;
+    # hooking it ensures libcangjie-frontend.dll.a / libcangjie-lsp.dll.a
+    # exist before lldb's nested ninja tries to link against them.
     add_dependencies(lldb-build cangjie-frontend)
     if(TARGET cangjie-lsp-share)
         add_dependencies(lldb-build cangjie-lsp-share)
@@ -46,30 +54,48 @@ endif()"""
 
 
 def _patch_lldb_step_deps(compiler_dir: Path) -> None:
-    """Wire cangjie-frontend / cangjie-lsp-share into lldb-build's deps.
+    """Two-file patch to make lldb's build sub-step wait for cangjie-frontend.
 
-    The fix targets ``src/CMakeLists.txt`` which already calls
-    ``add_dependencies(lldb cangjie-frontend)`` — but that uses the
-    ExternalProject aggregator target and doesn't actually sequence the
-    libs before lldb's build sub-step. We append two ``add_dependencies``
-    calls that hit the real ``lldb-build`` step target, which CMake creates
-    automatically for each ExternalProject step.
+    cangjie's ``src/CMakeLists.txt:394`` already does
+    ``add_dependencies(lldb cangjie-frontend)``, but ``lldb`` is the
+    ExternalProject aggregator (post-install no-op) so it doesn't sequence
+    cangjie-frontend before the build sub-step that actually runs lldb's
+    nested ninja and links against ``libcangjie-frontend.dll.a`` /
+    ``libcangjie-lsp.dll.a``. On slow hosts lldb-with-Python is heavy
+    enough that cangjie-frontend always finishes first; on F16als_v7 the
+    race fires.
 
-    Done from src/ rather than third_party/ because by the time src/ is
-    processed both ``lldb-build`` (created by ``add_subdirectory(third_party)``
-    earlier) and ``cangjie-frontend`` / ``cangjie-lsp-share`` (defined in
-    src/CMakeLists.txt) are visible. ``add_dependencies`` works across
-    directory scope, unlike ``add_custom_command(APPEND)`` which we hit
-    when we tried ``ExternalProject_Add_StepDependencies``.
+    Two patches are needed:
+
+      * ``third_party/cmake/BuildCJDB.cmake``: add ``STEP_TARGETS build``
+        to ``ExternalProject_Add(lldb ...)`` so CMake creates the
+        ``lldb-build`` top-level target. Without this, ``add_dependencies``
+        on ``lldb-build`` errors with ``Cannot add target-level dependencies
+        to non-existent target``.
+      * ``src/CMakeLists.txt``: add the two ``add_dependencies(lldb-build
+        ...)`` calls (works cross-directory; ``add_custom_command APPEND``,
+        which is what ``ExternalProject_Add_StepDependencies`` uses, doesn't).
     """
-    cmake_file = compiler_dir / "src" / "CMakeLists.txt"
-    if not cmake_file.is_file():
-        return
-    text = cmake_file.read_text(encoding="utf-8")
-    if _PATCH_NEW in text:
-        return
-    if _PATCH_OLD not in text:
-        _log.warning("src/CMakeLists.txt: lldb dep block not found verbatim; skipping patch")
-        return
-    cmake_file.write_text(text.replace(_PATCH_OLD, _PATCH_NEW, 1), encoding="utf-8")
-    _log.info("Patched src/CMakeLists.txt: lldb-build now waits on cangjie-frontend/cangjie-lsp-share")
+    buildcjdb = compiler_dir / "third_party" / "cmake" / "BuildCJDB.cmake"
+    if buildcjdb.is_file():
+        text = buildcjdb.read_text(encoding="utf-8")
+        if _BUILDCJDB_NEW in text:
+            pass
+        elif _BUILDCJDB_OLD not in text:
+            _log.warning("BuildCJDB.cmake: ExternalProject_Add anchor not found; skipping")
+        else:
+            buildcjdb.write_text(text.replace(_BUILDCJDB_OLD, _BUILDCJDB_NEW, 1), encoding="utf-8")
+            _log.info("Patched BuildCJDB.cmake: STEP_TARGETS build added to lldb ExternalProject")
+
+    src_cmake = compiler_dir / "src" / "CMakeLists.txt"
+    if src_cmake.is_file():
+        text = src_cmake.read_text(encoding="utf-8")
+        if _SRC_NEW in text:
+            return
+        if _SRC_OLD not in text:
+            _log.warning("src/CMakeLists.txt: lldb dep block not found verbatim; skipping")
+            return
+        src_cmake.write_text(text.replace(_SRC_OLD, _SRC_NEW, 1), encoding="utf-8")
+        _log.info(
+            "Patched src/CMakeLists.txt: lldb-build now waits on cangjie-frontend/cangjie-lsp-share"
+        )
