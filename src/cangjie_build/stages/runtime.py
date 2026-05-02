@@ -29,9 +29,11 @@ def run(cfg: BuildConfig) -> None:
         run_build_py(cfg, runtime_root, ["install"], stage_name="runtime.install.linux")
         copy_contents(runtime_root / "output", target_dir, stage="runtime.snapshot.linux")
 
-        linux_subdir = (
-            runtime_root / "output" / "common" / cfg.target.runtime_output_subdir(cfg.build_type)
-        )
+        # Linux native runtime always lands in linux_<bt>_x86_64 — no --target was
+        # passed to build.py above, so the subdir name doesn't follow cfg.target.
+        # cfg.target.runtime_output_subdir gives windows_* for the cross-compile
+        # target and would mis-resolve here.
+        linux_subdir = runtime_root / "output" / "common" / f"linux_{cfg.build_type.lower()}_x86_64"
         for sub in ("lib", "runtime"):
             copy_contents(linux_subdir / sub, compiler_output / sub, stage="runtime.copy.linux")
 
