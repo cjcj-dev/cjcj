@@ -16,11 +16,6 @@ on:
           - release
           - debug
           - relwithdebinfo
-      run_tests:
-        description: "Run the compiler's own test suite (linux-x64 only)."
-        type: boolean
-        required: true
-        default: false
       compiler_source:
         description: "Override compiler source: https://host/owner/repo.git:branch (branch optional)."
         required: false
@@ -186,45 +181,16 @@ jobs:
             --cangjie-version "${{ steps.cjver.outputs.value }}" \
             fetch "${args[@]}"
 
-      - name: Build cangjie_compiler
+      - name: Build all stages
         run: |
-          uv run cangjie-build \
-            --target ${{ matrix.target }} \
-            --build-type ${{ inputs.build_type }} \
-            --cangjie-version "${{ steps.cjver.outputs.value }}" \
-            build compiler
-
-      - name: Build runtime
-        run: |
-          uv run cangjie-build \
-            --target ${{ matrix.target }} \
-            --build-type ${{ inputs.build_type }} \
-            --cangjie-version "${{ steps.cjver.outputs.value }}" \
-            build runtime
-
-      - name: Build stdlib
-        run: |
-          uv run cangjie-build \
-            --target ${{ matrix.target }} \
-            --build-type ${{ inputs.build_type }} \
-            --cangjie-version "${{ steps.cjver.outputs.value }}" \
-            build stdlib
-
-      - name: Build STDX
-        run: |
-          uv run cangjie-build \
-            --target ${{ matrix.target }} \
-            --build-type ${{ inputs.build_type }} \
-            --cangjie-version "${{ steps.cjver.outputs.value }}" \
-            build stdx
-
-      - name: Build tools
-        run: |
-          uv run cangjie-build \
-            --target ${{ matrix.target }} \
-            --build-type ${{ inputs.build_type }} \
-            --cangjie-version "${{ steps.cjver.outputs.value }}" \
-            build tools
+          set -euo pipefail
+          for stage in compiler runtime stdlib stdx tools; do
+            uv run cangjie-build \
+              --target ${{ matrix.target }} \
+              --build-type ${{ inputs.build_type }} \
+              --cangjie-version "${{ steps.cjver.outputs.value }}" \
+              build "$stage"
+          done
 
       - name: Package SDK
         run: |
@@ -242,18 +208,9 @@ jobs:
             --cangjie-version "${{ steps.cjver.outputs.value }}" \
             verify
 
-      - name: Upload SDK artifact
+      - name: Upload SDK + STDX artifacts
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: cangjie-sdk-${{ matrix.target }}-${{ steps.cjver.outputs.value }}
-          path: |
-            ${{ env.CANGJIE_WORKSPACE }}/software/cangjie-sdk-${{ matrix.target }}-${{ steps.cjver.outputs.value }}.*
-          if-no-files-found: error
-
-      - name: Upload STDX artifact
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: cangjie-stdx-${{ matrix.target }}-${{ steps.cjver.outputs.value }}
-          path: |
-            ${{ env.CANGJIE_WORKSPACE }}/software/cangjie-stdx-${{ matrix.target }}-${{ steps.cjver.outputs.value }}.*
+          name: cangjie-${{ matrix.target }}-${{ steps.cjver.outputs.value }}
+          path: ${{ env.CANGJIE_WORKSPACE }}/software/cangjie-*-${{ matrix.target }}-${{ steps.cjver.outputs.value }}*.*
           if-no-files-found: error
