@@ -15,17 +15,20 @@ def run(cfg: BuildConfig) -> None:
     """Smoke-test the freshly-built SDK by compiling and running hello.cj.
 
     Cross-compiled targets (Windows) cannot be executed on the Linux runner;
-    we only validate that ``cjc`` exists and reports a version.
+    we only validate that the headline artifacts landed.
     """
     cangjie_dir = cfg.software_dir / "cangjie"
     envsetup = require_file(cangjie_dir / "envsetup.sh", stage="verify")
 
     if cfg.target.spec.cross_compile:
-        _log.info("Cross-compile target; verifying cjc presence only")
-        run_cmd(
-            ["bash", "-c", f"set -e; source '{envsetup}'; cjc -v"],
-            stage="verify.cjc",
+        # Windows binaries can't be exec'd on the linux runner — just check
+        # the headline artifacts landed where the SDK tree expects them.
+        suffix = cfg.target.spec.exe_suffix
+        require_file(cangjie_dir / "bin" / f"cjc{suffix}", stage="verify.cjc")
+        require_file(
+            cangjie_dir / "tools" / "bin" / f"cjpm{suffix}", stage="verify.cjpm"
         )
+        _log.info("Cross-compile target; SDK artifacts present")
         return
 
     work = ensure_dir(cfg.workspace / "verify")

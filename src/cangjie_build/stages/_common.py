@@ -30,6 +30,12 @@ def base_env(cfg: BuildConfig) -> dict[str, str]:
         "STDX_VERSION": str(cfg.stdx_version),
         "BUILD_ROOT": str(cfg.build_root),
         "WORKSPACE": str(cfg.workspace),
+        # Use lld for everything that respects LDFLAGS (cmake EXE/SHARED
+        # linker flags init from this). MinGW cross is already lld via
+        # llvm-mingw; cangjie's bundled clang uses lld for cjc's emit step.
+        # This covers libuv, libfswatcher, ncurses/libedit, and cangjie's
+        # own C++ subprojects on the linux host build.
+        "LDFLAGS": "-fuse-ld=lld",
     }
     # Make clang-15 available without polluting the global PATH.
     extra_path_dirs: list[str] = ["/usr/lib/llvm-15/bin"]
