@@ -136,9 +136,23 @@ jobs:
         run: .github/scripts/provision-vm.sh | tee -a "$GITHUB_OUTPUT"
 
       - name: Wait for runner registration
+        id: wait-runner
         env:
           GH_TOKEN: ${{ secrets.RUNNER_REGISTRATION_PAT }}
-        run: .github/scripts/wait-for-runner.sh "${{ github.repository }}" "$RUNNER_LABEL" 600
+        run: .github/scripts/wait-for-runner.sh "${{ github.repository }}" "$RUNNER_LABEL" 900
+
+      # If the runner never came online, dump cloud-init's log so we can
+      # see whether apt was slow, the runner tarball download stalled, etc.
+      # Best-effort: VM may have been preempted (Spot) so don't block on
+      # az failures.
+      - name: Dump cloud-init log on runner-registration timeout
+        if: failure() && steps.wait-runner.outcome == 'failure'
+        continue-on-error: true
+        run: |
+          set +e
+          az vm run-command invoke -g "$RG_NAME" -n runner --command-id RunShellScript \
+            --scripts 'echo "===cloud-init status==="; cloud-init status --long; echo "===tail cloud-init.log==="; tail -120 /var/log/cloud-init.log 2>/dev/null; echo "===tail cloud-init-output.log==="; tail -120 /var/log/cloud-init-output.log 2>/dev/null' \
+            --query "value[0].message" -o tsv
 
   build:
     name: Build SDK (windows-x64)
