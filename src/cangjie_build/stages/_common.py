@@ -171,13 +171,15 @@ def run_build_py(
     args: Sequence[CommandPart],
     *,
     stage_name: str,
+    extra_env: Mapping[str, str] | None = None,
 ) -> None:
     """Invoke ``python build.py <args>`` inside ``cwd`` with the standard env overlay."""
     require_dir(cwd, stage=stage_name)
+    env = merged_env(cfg, extra_env) if extra_env else merged_env(cfg)
     _run(
         [python_exe(), "build.py", *args],
         cwd=cwd,
-        env_overlay=merged_env(cfg),
+        env_overlay=env,
         stage=stage_name,
     )
 

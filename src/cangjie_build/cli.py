@@ -165,6 +165,18 @@ def cmd_install_mingw(ctx: typer.Context) -> None:
     mingw.install(cfg.build_root)
 
 
+@app.command("install-target-python")
+def cmd_install_target_python(ctx: typer.Context) -> None:
+    """Stage NuGet's Windows Python under TARGET_PYTHON_PATH for cross-windows cjdb."""
+    from cangjie_build.toolchain import target_python
+
+    cfg = _cfg(ctx)
+    if not cfg.target.spec.cross_compile:
+        _log.warning("Target %s is not cross-compile; skipping", cfg.target.spec.key)
+        return
+    target_python.install(cfg.build_root)
+
+
 def parse_repo_kv(items: list[str], *, opt: str) -> dict[RepoName, str]:
     """Parse ``NAME=VALUE`` items, validating ``NAME`` against :class:`RepoName`."""
     out: dict[RepoName, str] = {}
@@ -310,7 +322,7 @@ def cmd_run_all(
         tools,
         verify,
     )
-    from cangjie_build.toolchain import mingw, static_libs, system_deps
+    from cangjie_build.toolchain import mingw, static_libs, system_deps, target_python
 
     cfg = _cfg(ctx)
     if not skip_system_deps:
@@ -318,6 +330,8 @@ def cmd_run_all(
     if not skip_install_libs:
         if cfg.target.spec.needs_mingw:
             mingw.install(cfg.build_root)
+            if cfg.target.spec.cross_compile:
+                target_python.install(cfg.build_root)
         else:
             static_libs.install(cfg.build_root)
     fetch.run(cfg)

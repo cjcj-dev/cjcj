@@ -12,7 +12,7 @@ from cangjie_build.stages._common import (
     run_build_py,
     windows_cross_args,
 )
-from cangjie_build.toolchain import static_libs
+from cangjie_build.toolchain import static_libs, target_python
 
 
 def run(cfg: BuildConfig) -> None:
@@ -29,6 +29,13 @@ def run(cfg: BuildConfig) -> None:
                 stage_name="compiler.build.host",
             )
             cross_args = windows_cross_args(cfg)
+            # BuildCJDB.cmake's cross-windows path links lldb against
+            # ${TARGET_PYTHON_PATH}/python<M><N>.dll and uses headers from
+            # include/python<M>.<N>/. Stage a NuGet python bundle and point
+            # the build at it. Idempotent — call from here so `build compiler`
+            # works without needing a separate install-target-python step.
+            tpp = target_python.install(cfg.build_root)
+            tpp_env = {"TARGET_PYTHON_PATH": str(tpp)}
             # cross_build_type is forced to 'release' (config.py): cangjie's
             # relwithdebinfo path has multiple MinGW bugs (static-lib switch in
             # src/CMakeLists.txt:272, -fdebug-types-section in pcre2 flags).
@@ -45,10 +52,10 @@ def run(cfg: BuildConfig) -> None:
                     "cjc",
                     "--no-tests",
                     "--build-cjdb",
-                    "--cjdb-disable-python",
                     *cross_args,
                 ],
                 stage_name="compiler.build.windows.cjc",
+                extra_env=tpp_env,
             )
             run_build_py(
                 cfg,
@@ -62,14 +69,23 @@ def run(cfg: BuildConfig) -> None:
                     *cross_args,
                 ],
                 stage_name="compiler.build.windows.libs",
+                extra_env=tpp_env,
             )
             run_build_py(
                 cfg,
                 repo_dir,
                 ["install", "--host", "windows-x86_64"],
                 stage_name="compiler.install.windows",
+                extra_env=tpp_env,
             )
             run_build_py(cfg, repo_dir, ["install"], stage_name="compiler.install.host")
+
+            # cmake doesn't bundle the runtime DLL itself — only its own
+            # site-packages under tools/lib/python<M>.<N>/. Drop python<M><N>.dll
+            # next to lldb/cjdb so the binary loads on the windows target.
+            target_python.install_runtime_dlls(
+                tpp, repo_dir / "output-x86_64-w64-mingw32" / "tools" / "bin"
+            )
 
             copy_contents(
                 repo_dir / "output-x86_64-w64-mingw32",

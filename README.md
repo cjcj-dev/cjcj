@@ -30,7 +30,10 @@ uv run cangjie-build --target linux-x64 verify
 ```
 
 `run-all` 子命令把以上步骤串成一条线（主要用于本地调试）。`windows-x64`
-目标把 `install-static-libs` 换成 `install-mingw`。
+目标把 `install-static-libs` 换成 `install-mingw`，并额外跑
+`install-target-python`（从 NuGet 拉一份 Windows Python 摆好布局供
+`BuildCJDB.cmake` 通过 `TARGET_PYTHON_PATH` 链接 lldb，并把
+`python<M><N>.dll` / `vcruntime140*.dll` 落到 `output/tools/bin/`）。
 
 ## 交叉编译涉及的上游补丁
 
