@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from pathlib import Path
-
 from cangjie_build.config import BuildConfig, RepoName
 from cangjie_build.logging_setup import stage
 from cangjie_build.runner import CommandPart
