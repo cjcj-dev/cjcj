@@ -155,11 +155,15 @@ jobs:
 
       - name: Resolve effective Cangjie version
         id: cjver
+        # cangjie-build normalises the value (strips v-prefix, falls back to
+        # 0.0.0-dev on non-SemVer input) before it reaches the runtime, so a
+        # branch-name input like "main" no longer trips the runtime's
+        # CJ_SDK_VERSION parse on startup.
         run: |
           if [[ -n "${{ inputs.tag }}" ]]; then
             echo "value=${{ inputs.tag }}" >> "$GITHUB_OUTPUT"
           else
-            echo "value=main" >> "$GITHUB_OUTPUT"
+            echo "value=0.0.0-dev" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Fetch Cangjie source repositories

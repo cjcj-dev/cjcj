@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 from collections.abc import Mapping
 from dataclasses import dataclass, field, replace
 from enum import StrEnum
@@ -11,6 +12,24 @@ from cangjie_build.targets import Target, get_target
 
 VALID_BUILD_TYPES = ("release", "debug", "relwithdebinfo")
 DEFAULT_BUILD_TYPE = "relwithdebinfo"
+
+# Runtime parses CJ_SDK_VERSION at startup (CjSemanticVersion.cpp) and fatals
+# on the cangjie-std-core load when the string isn't MAJOR.MINOR.PATCH. Branch
+# names ("main") and v-prefixed tags ("v0.59.6") fail that parse, so we strip
+# a leading v/V and fall back to a synthetic dev SemVer for non-conforming
+# inputs. The dev fallback's prerelease segment forces strict X.Y.Z matching
+# between binary and runtime, which is exactly what we want for a local build.
+_SEMVER_RE = re.compile(r"^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$")
+_FALLBACK_VERSION = "0.0.0-dev"
+
+
+def _normalize_cangjie_version(raw: str) -> str:
+    candidate = raw.strip()
+    if candidate[:1] in ("v", "V"):
+        candidate = candidate[1:]
+    if _SEMVER_RE.match(candidate):
+        return candidate
+    return _FALLBACK_VERSION
 
 
 class RepoName(StrEnum):
@@ -130,7 +149,8 @@ def build_config(
 
     ws = _abs(workspace or os.environ.get("CANGJIE_WORKSPACE") or Path.cwd() / "workspace")
     br = _abs(build_root or os.environ.get("CANGJIE_BUILD_ROOT") or Path.cwd() / "buildtools")
-    version = cangjie_version or os.environ.get("CANGJIE_VERSION") or (global_tag or "main")
+    raw_version = cangjie_version or os.environ.get("CANGJIE_VERSION") or global_tag or ""
+    version = _normalize_cangjie_version(raw_version)
 
     return BuildConfig(
         workspace=ws,

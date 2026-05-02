@@ -53,14 +53,43 @@ def test_build_config_defaults(tmp_path: Path) -> None:
     assert cfg.build_root == (tmp_path / "br").resolve()
     assert cfg.target.spec.key == "linux-x64"
     assert cfg.build_type == "relwithdebinfo"
-    assert cfg.cangjie_version == "main"
+    assert cfg.cangjie_version == "0.0.0-dev"
     assert cfg.stdx_version == 1
     assert cfg.software_dir == cfg.workspace / "software"
 
 
 def test_build_config_global_tag_used_as_version_when_unset(tmp_path: Path) -> None:
     cfg = build_config(workspace=tmp_path, build_root=tmp_path, global_tag="v9.9.9")
-    assert cfg.cangjie_version == "v9.9.9"
+    # v-prefix is stripped so the runtime SemVer parser accepts it.
+    assert cfg.cangjie_version == "9.9.9"
+
+
+@pytest.mark.parametrize(
+    "raw,expected",
+    [
+        ("1.2.3", "1.2.3"),
+        ("v1.2.3", "1.2.3"),
+        ("V1.2.3", "1.2.3"),
+        ("1.2.3-rc.1", "1.2.3-rc.1"),
+        ("1.2.3+build.42", "1.2.3+build.42"),
+        ("1.2.3-rc.1+build.42", "1.2.3-rc.1+build.42"),
+        ("main", "0.0.0-dev"),
+        ("feature/foo", "0.0.0-dev"),
+        ("", "0.0.0-dev"),
+        ("1.2", "0.0.0-dev"),
+        ("1.2.3-", "0.0.0-dev"),
+        ("1.2.3+", "0.0.0-dev"),
+    ],
+)
+def test_build_config_normalises_cangjie_version(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    raw: str,
+    expected: str,
+) -> None:
+    monkeypatch.delenv("CANGJIE_VERSION", raising=False)
+    cfg = build_config(workspace=tmp_path, build_root=tmp_path, cangjie_version=raw)
+    assert cfg.cangjie_version == expected
 
 
 def test_build_config_rejects_invalid_build_type(tmp_path: Path) -> None:
