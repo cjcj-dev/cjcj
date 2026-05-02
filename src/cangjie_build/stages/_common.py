@@ -66,6 +66,15 @@ def base_env(cfg: BuildConfig) -> dict[str, str]:
         if tools_lib.is_dir():
             ld_paths.insert(0, str(tools_lib))
 
+    # tools/hyperlangExtension's build.py refuses to even `clean` without
+    # CANGJIE_STDX_PATH. Upstream linux_cross_windows_zh.md exports it
+    # after the stdx install step. Driven from Python here so tools stage
+    # picks it up automatically.
+    stdx_subdir = cfg.target.stdx_target_subdir()
+    stdx_path = cfg.workspace / "cangjie_stdx" / "target" / stdx_subdir / "static" / "stdx"
+    if stdx_path.is_dir():
+        env["CANGJIE_STDX_PATH"] = str(stdx_path)
+
     if ld_paths:
         ld_existing = os.environ.get("LD_LIBRARY_PATH", "")
         env["LD_LIBRARY_PATH"] = os.pathsep.join([*ld_paths, ld_existing] if ld_existing else ld_paths)
