@@ -24,28 +24,31 @@ def run(cfg: BuildConfig) -> None:
         _patch_lldb_step_deps(compiler_dir)
 
 
-_BUILDCJDB_OLD = """externalproject_get_property(cjnative SOURCE_DIR)
-ExternalProject_Add("""
+_TOPLEVEL_OLD = """cmake_minimum_required(VERSION 3.16.5)
+project(cangjie)"""
 
-_BUILDCJDB_NEW = """# cangjie-build patch: under CMP0114 OLD (cangjie's default — set by
-# cmake_minimum_required(VERSION 3.16.5)), ExternalProject step targets
-# don't adopt their underlying custom_command's deps. So
-# add_dependencies(lldb-build X) is a soft target-level edge that ninja
-# does NOT propagate into the custom_command — cangjie-frontend ends up
-# racing lldb's build step. NEW policy makes step targets fully adopt
-# their custom_commands so the dep actually blocks.
-cmake_policy(SET CMP0114 NEW)
-
-externalproject_get_property(cjnative SOURCE_DIR)
-ExternalProject_Add("""
+_TOPLEVEL_NEW = """cmake_minimum_required(VERSION 3.16.5)
+project(cangjie)
+# cangjie-build patch: under CMP0114 OLD (the default for projects with
+# cmake_minimum_required < 3.19), ExternalProject step targets don't
+# adopt their underlying custom_command's deps. So
+# add_dependencies(lldb-build cangjie-frontend) in src/CMakeLists.txt
+# is just a soft target-level edge and ninja still races lldb's build
+# step against cangjie-frontend's link. NEW policy makes step targets
+# fully adopt their custom_commands so the dep actually blocks. Set
+# here at top-level so all subdirectories (third_party for the
+# ExternalProject_Add, src for the add_dependencies) inherit the NEW
+# behavior.
+cmake_policy(SET CMP0114 NEW)"""
 
 _BUILDCJDB_STEP_OLD = """    USES_TERMINAL_BUILD ON
     DEPENDS cjnative)"""
 
 _BUILDCJDB_STEP_NEW = """    USES_TERMINAL_BUILD ON
-    # Expose 'lldb-build' as a top-level target so src/CMakeLists.txt
-    # can add_dependencies() onto the actual build sub-step (without
-    # STEP_TARGETS, ExternalProject only exposes the aggregator).
+    # cangjie-build patch: expose 'lldb-build' as a top-level target so
+    # src/CMakeLists.txt can add_dependencies() onto the actual build
+    # sub-step (without STEP_TARGETS, ExternalProject only exposes the
+    # aggregator).
     STEP_TARGETS build
     DEPENDS cjnative)"""
 
@@ -90,25 +93,27 @@ def _patch_lldb_step_deps(compiler_dir: Path) -> None:
         ...)`` calls (works cross-directory; ``add_custom_command APPEND``,
         which is what ``ExternalProject_Add_StepDependencies`` uses, doesn't).
     """
+    toplevel = compiler_dir / "CMakeLists.txt"
+    if toplevel.is_file():
+        text = toplevel.read_text(encoding="utf-8")
+        if _TOPLEVEL_NEW not in text:
+            if _TOPLEVEL_OLD in text:
+                toplevel.write_text(text.replace(_TOPLEVEL_OLD, _TOPLEVEL_NEW, 1), encoding="utf-8")
+                _log.info("Patched top-level CMakeLists.txt: CMP0114 NEW set after project()")
+            else:
+                _log.warning("top-level CMakeLists.txt: CMP0114 anchor not found; skipping")
+
     buildcjdb = compiler_dir / "third_party" / "cmake" / "BuildCJDB.cmake"
     if buildcjdb.is_file():
         text = buildcjdb.read_text(encoding="utf-8")
-        changed = False
-        if _BUILDCJDB_NEW not in text:
-            if _BUILDCJDB_OLD in text:
-                text = text.replace(_BUILDCJDB_OLD, _BUILDCJDB_NEW, 1)
-                changed = True
-            else:
-                _log.warning("BuildCJDB.cmake: CMP0114 anchor not found; skipping")
         if _BUILDCJDB_STEP_NEW not in text:
             if _BUILDCJDB_STEP_OLD in text:
-                text = text.replace(_BUILDCJDB_STEP_OLD, _BUILDCJDB_STEP_NEW, 1)
-                changed = True
+                buildcjdb.write_text(
+                    text.replace(_BUILDCJDB_STEP_OLD, _BUILDCJDB_STEP_NEW, 1), encoding="utf-8"
+                )
+                _log.info("Patched BuildCJDB.cmake: STEP_TARGETS build added")
             else:
                 _log.warning("BuildCJDB.cmake: STEP_TARGETS anchor not found; skipping")
-        if changed:
-            buildcjdb.write_text(text, encoding="utf-8")
-            _log.info("Patched BuildCJDB.cmake: CMP0114 NEW + STEP_TARGETS build")
 
     src_cmake = compiler_dir / "src" / "CMakeLists.txt"
     if src_cmake.is_file():
