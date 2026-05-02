@@ -249,16 +249,48 @@ jobs:
             --cangjie-version "${{ steps.cjver.outputs.value }}" \
             fetch "${args[@]}"
 
-      - name: Build all stages
+      # Stages are split into separate steps so each gets its own log group
+      # in the GH Actions UI — a single combined log for all five stages
+      # crosses the size threshold where the live-log viewer fails to load.
+      - name: Build compiler
         run: |
-          set -euo pipefail
-          for stage in compiler runtime stdlib stdx tools; do
-            uv run cangjie-build \
-              --target windows-x64 \
-              --build-type ${{ inputs.build_type }} \
-              --cangjie-version "${{ steps.cjver.outputs.value }}" \
-              build "$stage"
-          done
+          uv run cangjie-build \
+            --target windows-x64 \
+            --build-type ${{ inputs.build_type }} \
+            --cangjie-version "${{ steps.cjver.outputs.value }}" \
+            build compiler
+
+      - name: Build runtime
+        run: |
+          uv run cangjie-build \
+            --target windows-x64 \
+            --build-type ${{ inputs.build_type }} \
+            --cangjie-version "${{ steps.cjver.outputs.value }}" \
+            build runtime
+
+      - name: Build stdlib
+        run: |
+          uv run cangjie-build \
+            --target windows-x64 \
+            --build-type ${{ inputs.build_type }} \
+            --cangjie-version "${{ steps.cjver.outputs.value }}" \
+            build stdlib
+
+      - name: Build stdx
+        run: |
+          uv run cangjie-build \
+            --target windows-x64 \
+            --build-type ${{ inputs.build_type }} \
+            --cangjie-version "${{ steps.cjver.outputs.value }}" \
+            build stdx
+
+      - name: Build tools
+        run: |
+          uv run cangjie-build \
+            --target windows-x64 \
+            --build-type ${{ inputs.build_type }} \
+            --cangjie-version "${{ steps.cjver.outputs.value }}" \
+            build tools
 
       - name: Package SDK
         run: |
