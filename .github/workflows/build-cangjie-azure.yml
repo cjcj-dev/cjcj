@@ -57,12 +57,18 @@ on:
       vm_regions:
         description: "Space-separated, ordered region preference list. First with capacity wins."
         required: true
-        # eastus2 first for cache locality (the sccache blob container is
-        # in eastus2). eastus is a low-latency fallback (same metro area)
-        # — cross-region blob egress is ~$0.02/GB, so a few GB of cache
-        # traffic is negligible vs leaving the build stuck on a capacity
-        # outage.
-        default: "eastus2 eastus"
+        # F16als_v7 spot capacity is what gates this list. Verified via
+        # `az vm list-skus` against the live subscription:
+        #   centralus    1/2/3 zones — broadest spot pool
+        #   westus3      1/2/3 zones — second-broadest, different power region
+        #   eastus2      zone 2 only — cache-local but single zone routinely
+        #                              evicted, kept as last fallback for the
+        #                              cross-region blob egress (~$0.02/GB,
+        #                              negligible at our cache traffic volume)
+        #   eastus / northcentralus  not deployed in this subscription
+        # Spot pricing is identical across these three (89%-off tier or
+        # 81%-off tier with cheaper base — same $/hr in practice).
+        default: "centralus westus3 eastus2"
       vm_priority:
         description: "Spot first, fall back to Regular if no capacity."
         required: true

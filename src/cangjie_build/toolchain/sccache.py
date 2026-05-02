@@ -11,12 +11,31 @@ _LAUNCHER_VARS = ("CMAKE_C_COMPILER_LAUNCHER", "CMAKE_CXX_COMPILER_LAUNCHER")
 
 
 def describe_backends() -> str:
-    """Summarise the configured sccache storage chain for log output."""
+    """Summarise the configured sccache storage chain for log output.
+
+    Order matches sccache's own backend selection precedence — see
+    https://github.com/mozilla/sccache/blob/main/docs/Configuration.md
+    (multilevel chain > GHA > azure > S3 > GCS > redis > memcached >
+    webdav > local disk).
+    """
     chain = os.environ.get("SCCACHE_MULTILEVEL_CHAIN")
     if chain:
         return f"multi-level [{chain}]"
     if os.environ.get("SCCACHE_GHA_ENABLED", "").lower() in {"1", "true", "yes"}:
         return "github-actions"
+    if os.environ.get("SCCACHE_AZURE_CONNECTION_STRING"):
+        container = os.environ.get("SCCACHE_AZURE_BLOB_CONTAINER", "?")
+        return f"azblob[{container}]"
+    if os.environ.get("SCCACHE_BUCKET"):
+        return f"s3[{os.environ['SCCACHE_BUCKET']}]"
+    if os.environ.get("SCCACHE_GCS_BUCKET"):
+        return f"gcs[{os.environ['SCCACHE_GCS_BUCKET']}]"
+    if os.environ.get("SCCACHE_REDIS") or os.environ.get("SCCACHE_REDIS_ENDPOINT"):
+        return "redis"
+    if os.environ.get("SCCACHE_MEMCACHED") or os.environ.get("SCCACHE_MEMCACHED_ENDPOINT"):
+        return "memcached"
+    if os.environ.get("SCCACHE_WEBDAV_ENDPOINT"):
+        return "webdav"
     if os.environ.get("SCCACHE_DIR"):
         return "disk"
     return "default (disk)"
