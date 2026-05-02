@@ -77,6 +77,14 @@ attempt_priority() {
   return 1
 }
 
+# Spot path stays opt-in via PRIORITY=Spot but defaults to Regular: this
+# repo's Azure subscription is MSDN/Visual Studio Enterprise (quotaId
+# MSDN_2014-09-01), and that offer family isn't on Azure's spot-supported
+# list (https://learn.microsoft.com/en-us/azure/virtual-machines/spot-vms —
+# only EA, PAYG 003P, Sponsored, CSP). 45/45 spot-create probes returned
+# SkuNotAvailable across 4 SKUs and many region/zone combos, so the Spot
+# loop was just burning ~50s per build before falling back. EA/PAYG users
+# can flip vm_priority back to Spot and the loop fires.
 if [[ "$PRIORITY" == "Spot" ]]; then
   if attempt_priority Spot; then exit 0; fi
   echo "Spot exhausted across REGIONS={$REGIONS}; falling back to Regular." >&2
