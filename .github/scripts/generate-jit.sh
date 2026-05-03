@@ -15,11 +15,11 @@ name=${2:?runner name required}
 : "${GH_TOKEN:?GH_TOKEN required}"
 
 gh api -X POST "/repos/${repo}/actions/runners/generate-jitconfig" \
-  -f "name=${name}" \
-  -F "runner_group_id=1" \
-  -f "labels[]=self-hosted" \
-  -f "labels[]=Linux" \
-  -f "labels[]=X64" \
-  -f "labels[]=${name}" \
-  -f "work_folder=_work" \
-  --jq .encoded_jit_config
+	-f "name=${name}" \
+	-F "runner_group_id=1" \
+	-f "labels[]=self-hosted" \
+	-f "labels[]=Linux" \
+	-f "labels[]=X64" \
+	-f "labels[]=${name}" \
+	-f "work_folder=_work" \
+	--jq .encoded_jit_config

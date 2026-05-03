@@ -4,9 +4,9 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "Global tag/branch applied to all four upstream repos (blank = default branch)."
+        description: "Global tag/branch applied to all four upstream repos (default = dev)."
         required: false
-        default: ""
+        default: "dev"
       build_type:
         description: "Build type."
         required: true
@@ -60,11 +60,24 @@ jobs:
       - name: Install dev dependencies
         run: uv sync --frozen
 
+      - name: Install shell tooling
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y shellcheck
+          go install mvdan.cc/sh/v3/cmd/shfmt@v3.11.0
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+
       - name: Ruff lint
         run: uv run ruff check .
 
       - name: Ruff format
         run: uv run ruff format --check .
+
+      - name: Shell lint
+        run: shellcheck .github/scripts/*.sh
+
+      - name: Shell format
+        run: shfmt -d .github/scripts
 
       - name: ty
         run: uv run ty check

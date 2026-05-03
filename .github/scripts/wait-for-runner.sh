@@ -12,14 +12,14 @@ timeout=${3:-600}
 : "${GH_TOKEN:?GH_TOKEN required}"
 
 deadline=$((SECONDS + timeout))
-while (( SECONDS < deadline )); do
-  online=$(gh api "/repos/${repo}/actions/runners" \
-    --jq "[.runners[] | select(.name == \"${name}\" and .status == \"online\")] | length")
-  if [[ "$online" -ge 1 ]]; then
-    echo "Runner $name is online."
-    exit 0
-  fi
-  sleep 15
+while ((SECONDS < deadline)); do
+	online=$(gh api "/repos/${repo}/actions/runners" \
+		--jq "[.runners[] | select(.name == \"${name}\" and .status == \"online\")] | length")
+	if [[ "$online" -ge 1 ]]; then
+		echo "Runner $name is online."
+		exit 0
+	fi
+	sleep 15
 done
 
 echo "::error::Runner $name did not come online within ${timeout}s."

@@ -1,23 +1,17 @@
-name: Build Cangjie SDK on Azure VM
+name: Build Cangjie SDK on GCP VM
 
-# Spin up an ephemeral Azure VM, register it as a just-in-time GitHub
-# self-hosted runner, run the Cangjie build there, then delete the entire
-# resource group on the way out.
+# Spin up an ephemeral Google Compute Engine VM, register it as a just-in-time
+# GitHub self-hosted runner, run the Cangjie windows-x64 cross build there, then
+# delete the VM and force-remove the runner registration.
 #
 # Required repo secrets:
-#   AZURE_CLIENT_ID         - App registration's application (client) ID
-#   AZURE_TENANT_ID         - Microsoft Entra tenant ID
-#   AZURE_SUBSCRIPTION_ID   - Subscription that gets billed for the VM
-#   RUNNER_REGISTRATION_PAT - Fine-grained PAT (or GitHub App token) with
-#                             repo "Administration: Write". Required to call
-#                             POST /repos/.../actions/runners/generate-jitconfig
-#                             — GITHUB_TOKEN cannot hold the administration
-#                             scope, so this can't be replaced by it.
+#   GCP_WORKLOAD_IDENTITY_PROVIDER - Workload Identity provider resource name.
+#   GCP_SERVICE_ACCOUNT            - Service account that may create/delete the VM.
+#   RUNNER_REGISTRATION_PAT        - Fine-grained PAT or GitHub App token with
+#                                    repo "Administration: Write".
 #
-# Azure auth uses OIDC + federated credentials (no static SP password).
-# Azure operational helpers live in .github/scripts/azure-*.sh; shared helpers
-# live in .github/scripts/ and .github/cloud-init/ and
-# can be exercised locally with the same env vars.
+# The VM writes sccache objects to the GCS bucket selected by the workflow
+# input. The default bucket is gs://default-490702-cangjie-sccache.
 
 on:
   workflow_dispatch:
@@ -51,26 +45,26 @@ on:
         description: "Override stdx source: https://host/owner/repo.git:branch (branch optional)."
         required: false
         default: ""
-      vm_size:
-        description: "Azure VM SKU."
+      machine_type:
+        description: "GCE machine type."
         required: true
-        default: "Standard_F16als_v7"
-      vm_regions:
-        description: "Space-separated, ordered region preference list. First with capacity wins."
+        default: "t2d-standard-16"
+      vm_region:
+        description: "GCE region."
         required: true
-        # eastus2 is cache-local (sccache blob container lives there). centralus
-        # and westus3 are Regular-capacity fallbacks; F16als_v7 has 1/3/3 zones
-        # there respectively per `az vm list-skus`. eastus and northcentralus
-        # don't carry F16als_v7 in this subscription so they're not listed.
-        default: "eastus2 centralus westus3"
-      vm_priority:
-        description: "Spot first, fall back to Regular if no capacity. Default Regular — see azure-provision-vm.sh."
+        default: "asia-east1"
+      vm_zones:
+        description: "Space-separated zone suffixes or full zone names. First allocation wins."
         required: true
-        default: "Regular"
-        type: choice
-        options:
-          - Spot
-          - Regular
+        default: "a b c"
+      boot_disk_size_gb:
+        description: "Runner boot disk size in GB."
+        required: true
+        default: "256"
+      sccache_gcs_bucket:
+        description: "GCS bucket used by sccache."
+        required: true
+        default: "default-490702-cangjie-sccache"
 
 permissions:
   id-token: write
@@ -82,26 +76,30 @@ defaults:
     shell: bash
 
 env:
-  RG_NAME: cangjie-${{ github.run_id }}-${{ github.run_attempt }}
+  GCP_PROJECT_ID: default-490702
+  INSTANCE_NAME: cangjie-${{ github.run_id }}-${{ github.run_attempt }}
   RUNNER_LABEL: cangjie-${{ github.run_id }}-${{ github.run_attempt }}
   RUNNER_VERSION: "2.334.0"
 
 jobs:
   provision:
-    name: Provision ephemeral VM
+    name: Provision ephemeral GCP VM
     runs-on: ubuntu-22.04
     outputs:
-      runner_label: ${{ env.RUNNER_LABEL }}
-      rg_name: ${{ env.RG_NAME }}
+      runner_label: ${{ steps.vm.outputs.runner_label }}
+      instance_name: ${{ steps.vm.outputs.instance_name }}
       region: ${{ steps.vm.outputs.region }}
+      zone: ${{ steps.vm.outputs.zone }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
-      - uses: azure/login@532459ea530d8321f2fb9bb10d1e0bcf23869a43 # v3.0.0
+      - uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
         with:
-          client-id: ${{ secrets.AZURE_CLIENT_ID }}
-          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
-          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          project_id: ${{ env.GCP_PROJECT_ID }}
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+
+      - uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3
 
       - name: Generate JIT runner config
         id: jit
@@ -125,15 +123,17 @@ jobs:
             .github/cloud-init/runner.template.yml \
             cloud-init.yml
 
-      - name: Provision VM (try regions × zones × priority)
+      - name: Provision VM
         id: vm
         env:
-          RG: ${{ env.RG_NAME }}
-          REGIONS: ${{ inputs.vm_regions }}
-          SIZE: ${{ inputs.vm_size }}
-          PRIORITY: ${{ inputs.vm_priority }}
+          INSTANCE_NAME: ${{ env.INSTANCE_NAME }}
+          RUNNER_LABEL: ${{ env.RUNNER_LABEL }}
+          REGION: ${{ inputs.vm_region }}
+          ZONES: ${{ inputs.vm_zones }}
+          MACHINE_TYPE: ${{ inputs.machine_type }}
+          BOOT_DISK_SIZE_GB: ${{ inputs.boot_disk_size_gb }}
           CLOUD_INIT: cloud-init.yml
-        run: .github/scripts/azure-provision-vm.sh | tee -a "$GITHUB_OUTPUT"
+        run: bash .github/scripts/gcp-provision-vm.sh | tee -a "$GITHUB_OUTPUT"
 
       - name: Wait for runner registration
         id: wait-runner
@@ -141,18 +141,14 @@ jobs:
           GH_TOKEN: ${{ secrets.RUNNER_REGISTRATION_PAT }}
         run: .github/scripts/wait-for-runner.sh "${{ github.repository }}" "$RUNNER_LABEL" 900
 
-      # If the runner never came online, dump cloud-init's log so we can
-      # see whether apt was slow, the runner tarball download stalled, etc.
-      # Best-effort: VM may have been preempted (Spot) so don't block on
-      # az failures.
-      - name: Dump cloud-init log on runner-registration timeout
+      - name: Dump serial console on runner-registration timeout
         if: failure() && steps.wait-runner.outcome == 'failure'
         continue-on-error: true
         run: |
-          set +e
-          az vm run-command invoke -g "$RG_NAME" -n runner --command-id RunShellScript \
-            --scripts 'echo "===cloud-init status==="; cloud-init status --long; echo "===tail cloud-init.log==="; tail -120 /var/log/cloud-init.log 2>/dev/null; echo "===tail cloud-init-output.log==="; tail -120 /var/log/cloud-init-output.log 2>/dev/null' \
-            --query "value[0].message" -o tsv
+          gcloud compute instances get-serial-port-output "${{ steps.vm.outputs.instance_name }}" \
+            --zone "${{ steps.vm.outputs.zone }}" \
+            --port 1 \
+            | tail -240
 
   build:
     name: Build SDK (windows-x64)
@@ -166,12 +162,13 @@ jobs:
     env:
       CANGJIE_WORKSPACE: ${{ github.workspace }}/workspace
       CANGJIE_BUILD_ROOT: ${{ github.workspace }}/buildtools
-      # Azure Blob Storage backend for sccache. GHA Cache API rate-limited
-      # writes (~5k of 10k compiles got 429s in past runs), so we use a
-      # dedicated blob container in eastus2 (same region as the build VM,
-      # so reads/writes are intra-region and free).
-      SCCACHE_AZURE_CONNECTION_STRING: ${{ secrets.SCCACHE_AZURE_CONNECTION_STRING }}
-      SCCACHE_AZURE_BLOB_CONTAINER: sccache
+      SCCACHE_GCS_BUCKET: ${{ inputs.sccache_gcs_bucket }}
+      SCCACHE_GCS_KEY_PREFIX: cangjie-build
+      SCCACHE_GCS_RW_MODE: READ_WRITE
+      SCCACHE_MULTILEVEL_CHAIN: disk,gcs
+      SCCACHE_MULTILEVEL_WRITE_ERROR_POLICY: l0
+      SCCACHE_DIR: ${{ github.workspace }}/.sccache
+      SCCACHE_CACHE_SIZE: "5G"
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
@@ -204,16 +201,8 @@ jobs:
 
       - name: Build MinGW toolchain
         if: steps.tc-cache.outputs.cache-hit != 'true'
-        # mingw.py passes -DLLVM_USE_LINKER=lld to build-llvm.sh when ld.lld
-        # is on PATH (the apt 'lld' package, installed via install-system-deps).
-        # Host LLVM bootstrap links 5-10x faster; cross-target scripts keep
-        # the mingw clang wrappers' default linker.
         run: uv run cangjie-build --target windows-x64 install-mingw
 
-      # Save the toolchain cache as soon as it's built — independent of
-      # whether subsequent build stages (or this whole job) succeed. Spot
-      # eviction during Cangjie compile would otherwise lose the 30-60 min
-      # of toolchain work for the next run too.
       - name: Save toolchain cache
         if: always() && steps.tc-cache.outputs.cache-hit != 'true' && hashFiles(format('{0}/llvm-mingw-w64/bin/x86_64-w64-mingw32-clang', env.CANGJIE_BUILD_ROOT)) != ''
         uses: actions/cache/save@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
@@ -223,10 +212,6 @@ jobs:
 
       - name: Resolve effective Cangjie version
         id: cjver
-        # cangjie-build normalises the value (strips v-prefix, falls back to
-        # 0.0.0-dev on non-SemVer input) before it reaches the runtime, so a
-        # branch-name input like "main" no longer trips the runtime's
-        # CJ_SDK_VERSION parse on startup.
         run: |
           if [[ -n "${{ inputs.tag }}" ]]; then
             echo "value=${{ inputs.tag }}" >> "$GITHUB_OUTPUT"
@@ -253,9 +238,6 @@ jobs:
             --cangjie-version "${{ steps.cjver.outputs.value }}" \
             fetch "${args[@]}"
 
-      # Stages are split into separate steps so each gets its own log group
-      # in the GH Actions UI — a single combined log for all five stages
-      # crosses the size threshold where the live-log viewer fails to load.
       - name: Build compiler
         run: |
           uv run cangjie-build \
@@ -322,18 +304,25 @@ jobs:
   cleanup:
     name: Tear down VM
     needs: [provision, build]
-    if: always()
+    if: always() && needs.provision.outputs.instance_name != ''
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
-      - uses: azure/login@532459ea530d8321f2fb9bb10d1e0bcf23869a43 # v3.0.0
+      - uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
         with:
-          client-id: ${{ secrets.AZURE_CLIENT_ID }}
-          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
-          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          project_id: ${{ env.GCP_PROJECT_ID }}
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
 
-      - name: Tear down resource group + runner registration
+      - uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3
+
+      - name: Tear down GCP VM + runner registration
         env:
           GH_TOKEN: ${{ secrets.RUNNER_REGISTRATION_PAT }}
-        run: .github/scripts/azure-teardown.sh "${{ github.repository }}" "$RUNNER_LABEL" "$RG_NAME"
+        run: |
+          bash .github/scripts/gcp-teardown.sh \
+            "${{ github.repository }}" \
+            "${{ needs.provision.outputs.runner_label }}" \
+            "${{ needs.provision.outputs.instance_name }}" \
+            "${{ needs.provision.outputs.zone }}"

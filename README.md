@@ -94,6 +94,8 @@ uv run ruff format --check .
 uv run ty check
 uv run pyright           # strict 模式
 uv run pytest
+shellcheck .github/scripts/*.sh
+shfmt -d .github/scripts
 ```
 
 `build-cangjie.yml` 的 lint job 跑同样的检查。Python 锁在

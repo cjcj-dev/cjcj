@@ -20,33 +20,33 @@
 set -euo pipefail
 
 emit() {
-  local name="$1" raw="$2"
-  raw="${raw#"${raw%%[![:space:]]*}"}"   # trim leading whitespace
-  raw="${raw%"${raw##*[![:space:]]}"}"   # trim trailing whitespace
-  [[ -z "$raw" ]] && return 0
+	local name="$1" raw="$2"
+	raw="${raw#"${raw%%[![:space:]]*}"}" # trim leading whitespace
+	raw="${raw%"${raw##*[![:space:]]}"}" # trim trailing whitespace
+	[[ -z "$raw" ]] && return 0
 
-  local url_part branch=""
-  # Treat the last `:` as the URL/branch separator only when what follows is
-  # branch-like (no slashes). Otherwise the colon belongs to the scheme.
-  if [[ "$raw" =~ ^(.+):([^/[:space:]]+)$ ]]; then
-    url_part="${BASH_REMATCH[1]}"
-    branch="${BASH_REMATCH[2]}"
-  else
-    url_part="$raw"
-  fi
+	local url_part branch=""
+	# Treat the last `:` as the URL/branch separator only when what follows is
+	# branch-like (no slashes). Otherwise the colon belongs to the scheme.
+	if [[ "$raw" =~ ^(.+):([^/[:space:]]+)$ ]]; then
+		url_part="${BASH_REMATCH[1]}"
+		branch="${BASH_REMATCH[2]}"
+	else
+		url_part="$raw"
+	fi
 
-  case "$url_part" in
-    http://*|https://*|git://*|ssh://*) ;;
-    *)  url_part="https://$url_part" ;;
-  esac
+	case "$url_part" in
+	http://* | https://* | git://* | ssh://*) ;;
+	*) url_part="https://$url_part" ;;
+	esac
 
-  printf -- '--repo-url\n%s=%s\n' "$name" "$url_part"
-  if [[ -n "$branch" ]]; then
-    printf -- '--repo-tag\n%s=%s\n' "$name" "$branch"
-  fi
+	printf -- '--repo-url\n%s=%s\n' "$name" "$url_part"
+	if [[ -n "$branch" ]]; then
+		printf -- '--repo-tag\n%s=%s\n' "$name" "$branch"
+	fi
 }
 
 emit compiler "${COMPILER_SOURCE:-}"
-emit runtime  "${RUNTIME_SOURCE:-}"
-emit tools    "${TOOLS_SOURCE:-}"
-emit stdx     "${STDX_SOURCE:-}"
+emit runtime "${RUNTIME_SOURCE:-}"
+emit tools "${TOOLS_SOURCE:-}"
+emit stdx "${STDX_SOURCE:-}"
