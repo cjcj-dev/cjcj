@@ -11,8 +11,13 @@ instance=${3:?instance name required}
 zone=${4:?zone required}
 : "${GH_TOKEN:?GH_TOKEN required}"
 
-if gcloud compute instances describe "$instance" --zone="$zone" -o none 2>/dev/null; then
-	gcloud compute instances delete "$instance" --zone="$zone" --quiet -o none
+# Note: `-o` is not a gcloud flag (it was previously used here as `-o none`,
+# which made describe exit non-zero with "unrecognized arguments" — the if
+# branch then silently skipped the delete and reported "already gone" while
+# the VM was still up, leaking SSD_TOTAL_GB quota until manual cleanup).
+# Suppress chatter via redirection on describe and `--quiet` on delete.
+if gcloud compute instances describe "$instance" --zone="$zone" >/dev/null 2>&1; then
+	gcloud compute instances delete "$instance" --zone="$zone" --quiet
 	echo "GCP instance $instance in $zone deleted."
 else
 	echo "GCP instance $instance in $zone already gone."
