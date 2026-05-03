@@ -25,7 +25,7 @@ def run(cfg: BuildConfig) -> None:
             run_build_py(
                 cfg,
                 repo_dir,
-                ["build", "-t", cfg.build_type, "--no-tests"],
+                ["build", "-t", cfg.build_type, "--no-tests", "-v", cfg.cangjie_version],
                 stage_name="compiler.build.host",
             )
             cross_args = windows_cross_args(cfg)
@@ -52,6 +52,8 @@ def run(cfg: BuildConfig) -> None:
                     "cjc",
                     "--no-tests",
                     "--build-cjdb",
+                    "-v",
+                    cfg.cangjie_version,
                     *cross_args,
                 ],
                 stage_name="compiler.build.windows.cjc",
@@ -66,6 +68,8 @@ def run(cfg: BuildConfig) -> None:
                     cfg.cross_build_type,
                     "--product",
                     "libs",
+                    "-v",
+                    cfg.cangjie_version,
                     *cross_args,
                 ],
                 stage_name="compiler.build.windows.libs",
@@ -101,6 +105,8 @@ def run(cfg: BuildConfig) -> None:
             cfg.build_type,
             "--no-tests",
             "--build-cjdb",
+            "-v",
+            cfg.cangjie_version,
         ]
         if target_lib.exists():
             build_args.extend(["--target-lib", str(target_lib)])
