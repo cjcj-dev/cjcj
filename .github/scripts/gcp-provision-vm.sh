@@ -47,8 +47,7 @@ try_create() {
 		--metadata="created_at=${created_at},runner_label=${RUNNER_LABEL},github_repository=${github_repository}" \
 		--metadata-from-file=user-data="$CLOUD_INIT" \
 		"${service_account_args[@]}" \
-		--quiet \
-		-o none; then
+		--quiet >/dev/null; then
 		echo "::endgroup::" >&2
 		return 0
 	fi

@@ -36,3 +36,10 @@ def test_platform_specific_scripts_are_prefixed() -> None:
     assert ".github/scripts/provision-vm.sh" not in workflows
     assert ".github/scripts/teardown.sh" not in workflows
     assert ".github/scripts/reap-orphans.sh" not in workflows
+
+
+def test_gcp_provision_does_not_write_gcloud_output_to_github_outputs() -> None:
+    script = _read(".github/scripts/gcp-provision-vm.sh")
+
+    assert "-o none" not in script
+    assert "--quiet >/dev/null" in script
