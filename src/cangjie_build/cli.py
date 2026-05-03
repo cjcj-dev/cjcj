@@ -144,6 +144,17 @@ def cmd_install_system_deps() -> None:
     system_deps.install()
 
 
+@app.command("print-version")
+def cmd_print_version(ctx: typer.Context) -> None:
+    """Print the effective (normalised) cangjie_version on a single line.
+
+    Lets shell callers (e.g. GH Actions cjver steps) reuse the same SemVer
+    string the Python harness will bake into the build, so artifact-name
+    globs match the actual produced filenames.
+    """
+    typer.echo(_cfg(ctx).cangjie_version)
+
+
 @app.command("install-static-libs")
 def cmd_install_static_libs(ctx: typer.Context) -> None:
     """Build static ncurses + libedit (linux-x64 only, used by compiler stage)."""

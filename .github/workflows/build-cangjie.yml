@@ -168,16 +168,14 @@ jobs:
 
       - name: Resolve effective Cangjie version
         id: cjver
-        # cangjie-build normalises the value (strips v-prefix, falls back to
-        # 0.0.0-dev on non-SemVer input) before it reaches the runtime, so a
-        # branch-name input like "main" no longer trips the runtime's
-        # CJ_SDK_VERSION parse on startup.
+        # Defer the normalisation to cangjie-build's print-version subcommand
+        # so the artifact-name glob below uses the exact same SemVer the
+        # Python harness will bake into the produced filenames (no drift
+        # between shell-side and Python-side rules).
         run: |
-          if [[ -n "${{ inputs.tag }}" ]]; then
-            echo "value=${{ inputs.tag }}" >> "$GITHUB_OUTPUT"
-          else
-            echo "value=0.0.0-dev" >> "$GITHUB_OUTPUT"
-          fi
+          set -euo pipefail
+          value=$(uv run cangjie-build --cangjie-version "${{ inputs.tag }}" print-version)
+          echo "value=$value" >> "$GITHUB_OUTPUT"
 
       - name: Fetch Cangjie source repositories
         env:
