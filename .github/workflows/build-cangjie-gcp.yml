@@ -162,13 +162,24 @@ jobs:
     env:
       CANGJIE_WORKSPACE: ${{ github.workspace }}/workspace
       CANGJIE_BUILD_ROOT: ${{ github.workspace }}/buildtools
+      # Single-tier GCS backend. We deliberately do NOT set SCCACHE_DIR /
+      # SCCACHE_MULTILEVEL_CHAIN: with a local disk L0, sccache writes the
+      # GCS layer asynchronously via tokio::spawn, decoupled from any client
+      # connection. When the build process exits, the VM is torn down before
+      # the spawned uploads drain — past runs lost ~50% of writes that way
+      # (12118 misses on cold run produced only 5815 GCS objects). Going
+      # single-tier makes uploads synchronous on the client path, so each
+      # compile blocks until its cache entry is durably in GCS.
+      #
+      # Side effect: this changes use_preprocessor_cache_mode from true
+      # (multilevel auto-enables it) to false (direct mode). Cache keys are
+      # incompatible across modes, so the existing ~9k GCS objects under the
+      # cangjie-build/ prefix are dead weight after this change. Consider
+      # setting a 30-day lifecycle rule on the bucket; sccache itself never
+      # evicts from GCS.
       SCCACHE_GCS_BUCKET: ${{ inputs.sccache_gcs_bucket }}
       SCCACHE_GCS_KEY_PREFIX: cangjie-build
       SCCACHE_GCS_RW_MODE: READ_WRITE
-      SCCACHE_MULTILEVEL_CHAIN: disk,gcs
-      SCCACHE_MULTILEVEL_WRITE_ERROR_POLICY: l0
-      SCCACHE_DIR: ${{ github.workspace }}/.sccache
-      SCCACHE_CACHE_SIZE: "5G"
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
@@ -302,6 +313,19 @@ jobs:
           name: cangjie-windows-x64-${{ steps.cjver.outputs.value }}
           path: ${{ env.CANGJIE_WORKSPACE }}/software/cangjie-*-windows-x64-${{ steps.cjver.outputs.value }}*.*
           if-no-files-found: error
+
+      # Belt-and-suspenders flush: even on single-tier GCS the server may
+      # have a small backlog of in-flight uploads (sccache uses a worker
+      # pool). --stop-server triggers the graceful shutdown path which waits
+      # up to 10s for SccacheService instances to drain before dropping the
+      # tokio runtime. Print stats first because mozilla-actions/sccache-action's
+      # post hook will spawn a fresh empty server after this and report zeros.
+      - name: Flush sccache and stop server
+        if: always()
+        run: |
+          set +e
+          "${SCCACHE_PATH:-sccache}" --show-stats || true
+          "${SCCACHE_PATH:-sccache}" --stop-server || true
 
   cleanup:
     name: Tear down VM

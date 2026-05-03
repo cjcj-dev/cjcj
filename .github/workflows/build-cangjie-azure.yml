@@ -317,6 +317,20 @@ jobs:
           path: ${{ env.CANGJIE_WORKSPACE }}/software/cangjie-*-windows-x64-${{ steps.cjver.outputs.value }}*.*
           if-no-files-found: error
 
+      # Belt-and-suspenders flush: this backend is already single-tier
+      # (azblob, no SCCACHE_DIR) so writes are synchronous on the client
+      # path, but --stop-server still gives the worker pool a clean
+      # 10-second grace window to drain any final in-flight blob uploads
+      # before the VM gets torn down. Print stats first because
+      # mozilla-actions/sccache-action's post hook will spawn a fresh empty
+      # server after this and report zeros.
+      - name: Flush sccache and stop server
+        if: always()
+        run: |
+          set +e
+          "${SCCACHE_PATH:-sccache}" --show-stats || true
+          "${SCCACHE_PATH:-sccache}" --stop-server || true
+
   cleanup:
     name: Tear down VM
     needs: [provision, build]
