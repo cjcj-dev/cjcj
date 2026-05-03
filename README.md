@@ -69,16 +69,24 @@ lld，cangjie 自带的 clang 在 cjc emit 时也用 lld。
 
 ## 持续集成
 
-仓库提供两条工作流：
+仓库提供三条构建工作流：
 
 - `.github/workflows/build-cangjie.yml` — GitHub Actions 托管 runner 上
   的矩阵构建（`linux-x64` + `windows-x64`），多级 sccache（disk L0 +
   GHA L1）。`workflow_dispatch` 触发器参数与上游 `tozi-team/cangjie_build`
   对齐：全局 `tag`、按仓库覆盖的 URL/tag、`build_type`、`run_tests`。
 - `.github/workflows/build-cangjie-azure.yml` — Azure ephemeral VM 跑
-  `windows-x64` cross-compile（默认 `Standard_F16als_v7` spot，区域
-  fallback `eastus2 → eastus`）。GHA cache API 在重活下会 429
+  `windows-x64` cross-compile（默认 `Standard_F16als_v7` regular，区域
+  fallback `eastus2 → centralus → westus3`）。GHA cache API 在重活下会 429
   限流，改成把 sccache 写入 Azure Blob 容器（`SCCACHE_AZURE_BLOB_CONTAINER=sccache`）。
+- `.github/workflows/build-cangjie-gcp.yml` — GCP ephemeral VM 跑
+  `windows-x64` cross-compile（默认 `t2d-standard-16`，`asia-east1` 的
+  `a/b/c` zone fallback）。sccache 写入 GCS 桶
+  `gs://default-490702-cangjie-sccache`，SDK 与 STDX artifact 仍上传回
+  GitHub Actions。
+
+`.github/workflows/reap-orphans.yml` 是 Azure/GCP 的安全网：定时清理被取消
+或异常中断的 `cangjie-*` Azure resource group 和 GCP runner VM。
 
 只要 `which sccache` 成功，CLI 就会通过 cmake 的
 `CMAKE_C_COMPILER_LAUNCHER=sccache` /
