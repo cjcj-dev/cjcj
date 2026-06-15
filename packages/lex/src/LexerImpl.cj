@@ -91,10 +91,6 @@ private func byteString(value: UInt8): String {
     return String.fromUtf8([value])
 }
 
-private func isAscii(value: Int64): Bool {
-    return value >= 0 && value <= 127
-}
-
 private func isDigit(value: Int64): Bool {
     return value >= Int64(b'0') && value <= Int64(b'9')
 }
@@ -125,22 +121,6 @@ private func isAsciiIdentifierStart(value: Int64): Bool {
 
 private func isAsciiIdentifierContinue(value: Int64): Bool {
     return isAsciiIdentifierStart(value) || isDigit(value)
-}
-
-private func isCJXIDStart(value: Int64): Bool {
-    if (isAscii(value)) {
-        return isAsciiIdentifierStart(value)
-    }
-    // TODO(selfhost:Lex): replace permissive non-ASCII identifier handling with Unicode XID_Start/CJXID data.
-    return value > 127
-}
-
-private func isXIDContinue(value: Int64): Bool {
-    if (isAscii(value)) {
-        return isAsciiIdentifierContinue(value)
-    }
-    // TODO(selfhost:Lex): replace permissive non-ASCII identifier handling with Unicode XID_Continue data.
-    return value > 127
 }
 
 private func isLegalEscape(value: Int64): Bool {
@@ -398,10 +378,29 @@ public class LexerImpl {
         if (let Some(parts) <- stringPartsMap.get(t)) {
             return parts
         }
-        // TODO(selfhost:Lex): rebuild string parts from macro-provided tokens exactly like the C++ recursive lexer path.
+        let syntheticInput = if (t.kind == TokenKind.MULTILINE_STRING) {
+            "\"\"\"\n" + ProcessQuotaMarks(t.Value()) + "\"\"\""
+        } else {
+            "\"" + ProcessQuotaMarks(t.Value(), processSingle: true) + "\""
+        }
+        let tempLexer = LexerImpl(syntheticInput, diag, source, LexerConfig(posBase: t.Begin()))
+        tempLexer.Scan()
+        let rebuilt = tempLexer.TakeFirstStringParts()
+        if (rebuilt.isEmpty()) {
+            rebuilt.add(StringPart(StringPartKind.STR, t.Value(), t.Begin(), t.End()))
+        }
+        stringPartsMap.add(t, rebuilt)
+        return rebuilt
+    }
+
+    private func TakeFirstStringParts(): ArrayList<StringPart> {
         let ret = ArrayList<StringPart>()
-        ret.add(StringPart(StringPartKind.STR, t.Value(), t.Begin(), t.End()))
-        stringPartsMap.add(t, ret)
+        for ((_, parts) in stringPartsMap) {
+            for (part in parts) {
+                ret.add(part)
+            }
+            return ret
+        }
         return ret
     }
 
