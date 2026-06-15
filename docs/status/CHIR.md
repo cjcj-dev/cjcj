@@ -82,6 +82,14 @@ Implemented:
 - Replaced the serializer placeholder with a versioned textual package signature format that round-trips
   package names, globals, function kinds, return types, and parameter types for the implemented simple type
   model, while still accepting the older single-line package fallback.
+- Added `UnitUnify`, matching the C++ pass shape for replacing used non-constant `Unit` results with a
+  canonical unit constant in the owning block group while skipping lambdas and RTTI expressions.
+- Added a conservative `RedundantLoadElimination` component that performs exact-location straight-line
+  store/load forwarding over the current generic `STORE` and `LOAD` expression representation, clears
+  knowledge across calls and memory-affecting expressions, and recurses into lambda bodies.
+- Added `UselessAllocateElimination` for allocations whose result is unused except by exact stores and
+  debug expressions, preserving function return-value allocations and deleting the allocation plus its
+  removable users.
 
 Known gaps:
 
@@ -98,6 +106,10 @@ Known gaps:
   C++ BCHIR/flatbuffer serializer and deserializer.
 - Closure conversion currently records captures and marks lambda representation/captured value attributes;
   it does not yet synthesize the full C++ closure environment classes and rewritten call paths.
+- `RedundantLoadElimination` is currently the safe local subset; the C++ reaching-definition dataflow
+  engine, static-member call adjustment, and cross-block fixed-point propagation are not fully ported.
+- `UselessAllocateElimination` cannot yet honor class finalizer exclusions because the current Cangjie
+  `ClassDef` model has not ported the finalizer link.
 - The current implementation establishes a compiling, real IR core that downstream CHIR work can build on,
   but it is far below full C++ CHIR behavioral coverage.
 
