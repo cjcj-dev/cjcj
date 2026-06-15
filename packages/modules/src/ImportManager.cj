@@ -63,6 +63,15 @@ private class StdDepEntry {
     }
 }
 
+private class DependencyInfoItem {
+    public var packageName: String = ""
+    public var orPackage: String = ""
+    public var isStd: Bool = false
+    public let imports: ArrayList<ImportSpec> = ArrayList<ImportSpec>()
+
+    public init() {}
+}
+
 public class ImportManager {
     private let diag: DiagnosticEngine
     private let opts: GlobalOptions
@@ -852,8 +861,7 @@ public class ImportManager {
     }
 
     private func GeneratePkgDepInfo(pkg: Package, exportCJO: Bool): String {
-        let _ = exportCJO
-        let dependencyItems = ArrayList<String>()
+        let dependencies = HashMap<String, DependencyInfoItem>()
         let features = HashSet<String>()
         var isProduct = true
         for (file in pkg.files) {
@@ -867,30 +875,126 @@ public class ImportManager {
                 }
                 let longName = ToPackageName(names[0])
                 let shortName = ToPackageName(names[names.size - 1])
-                let packageName = if (IsStandardLibraryPackage(longName)) {
-                    longName
-                } else {
-                    shortName
+                if (!dependencies.contains(longName)) {
+                    dependencies[longName] = CreateDependencyInfoItem(longName, shortName)
                 }
-                dependencyItems.add("{\"package\":\"" + EscapeJson(packageName) + "\",\"orPackage\":\"" +
-                    EscapeJson(if (longName == shortName) { "" } else { longName }) + "\",\"isStd\":" +
-                    BoolToJson(IsStandardLibraryPackage(packageName)) + "}")
+                if (let Some(item) <- dependencies.get(longName)) {
+                    item.imports.add(importSpec)
+                }
             }
             for (feature in file.features) {
                 features.add(feature)
             }
             isProduct = isProduct && file.isProduct
         }
-        let featureItems = ArrayList<String>()
-        for (feature in features) {
-            featureItems.add("\"" + EscapeJson(feature) + "\"")
-        }
         return "{\"package\":\"" + EscapeJson(pkg.fullPackageName) + "\"," +
             "\"isMacro\":" + BoolToJson(pkg.isMacroPackage) + "," +
             "\"accessLevel\":\"" + GetAccessLevelStr(pkg.accessible) + "\"," +
-            "\"dependencies\":[" + JoinStrings(dependencyItems, ",") + "]," +
-            "\"features\":[" + JoinStrings(featureItems, ",") + "]," +
+            "\"dependencies\":" + DependenciesToJson(dependencies, exportCJO) + "," +
+            "\"std-dependencies\":" + StdDependenciesToJson(dependencies, pkg, exportCJO) + "," +
+            "\"features\":" + FeatureSetToJson(features) + "," +
             "\"product\":" + BoolToJson(isProduct) + "}"
+    }
+
+    private func CreateDependencyInfoItem(longName: String, shortName: String): DependencyInfoItem {
+        let item = DependencyInfoItem()
+        if (IsStandardLibraryPackage(longName)) {
+            item.packageName = longName
+            item.isStd = true
+        } else if (IsStandardLibraryPackage(shortName)) {
+            item.packageName = shortName
+            item.isStd = true
+        } else {
+            item.packageName = shortName
+            if (longName != shortName) {
+                item.orPackage = longName
+            }
+            item.isStd = false
+        }
+        return item
+    }
+
+    private func DependenciesToJson(dependencies: HashMap<String, DependencyInfoItem>, exportCJO: Bool): String {
+        let keys = SortedMapKeys(dependencies)
+        let dependencyItems = ArrayList<String>()
+        for (dependencyName in keys) {
+            if (let Some(item) <- dependencies.get(dependencyName)) {
+                dependencyItems.add(DependencyItemToJson(item, exportCJO))
+            }
+        }
+        return "[" + JoinStrings(dependencyItems, ",") + "]"
+    }
+
+    private func DependencyItemToJson(item: DependencyInfoItem, exportCJO: Bool): String {
+        SortImportSpecsByPosition(item.imports)
+        var value = "{\"package\":\"" + EscapeJson(item.packageName) + "\","
+        if (!item.orPackage.isEmpty()) {
+            value += "\"orPackage\":\"" + EscapeJson(item.orPackage) + "\","
+        }
+        value += "\"isStd\":" + BoolToJson(item.isStd) + ","
+        value += "\"imports\":" + ImportSpecsToJson(item.imports, exportCJO) + "}"
+        return value
+    }
+
+    private func ImportSpecsToJson(imports: ArrayList<ImportSpec>, exportCJO: Bool): String {
+        let importItems = ArrayList<String>()
+        for (importSpec in imports) {
+            importItems.add(ImportSpecToJson(importSpec, exportCJO))
+        }
+        return "[" + JoinStrings(importItems, ",") + "]"
+    }
+
+    private func ImportSpecToJson(importSpec: ImportSpec, exportCJO: Bool): String {
+        var fileName = ""
+        if (let Some(curFileValue) <- importSpec.curFile) {
+            fileName = if (exportCJO) { curFileValue.fileName } else { curFileValue.filePath }
+        }
+        return "{\"file\":\"" + EscapeJson(fileName) + "\"," +
+            "\"begin\":" + PositionToJson(importSpec.begin) + "," +
+            "\"end\":" + PositionToJson(importSpec.end) + "}"
+    }
+
+    private func PositionToJson(pos: Position): String {
+        return "{\"line\":" + pos.line.toString() + ",\"column\":" + pos.column.toString() + "}"
+    }
+
+    private func StdDependenciesToJson(
+        dependencies: HashMap<String, DependencyInfoItem>,
+        pkg: Package,
+        exportCJO: Bool
+    ): String {
+        let stdNames = HashSet<String>()
+        stdNames.add(CORE_PACKAGE_NAME)
+        if (exportCJO) {
+            for (stdName in pkg.GetAllDependentStdPkgs()) {
+                if (IsStandardLibraryPackage(stdName)) {
+                    stdNames.add(stdName)
+                }
+            }
+        } else {
+            for (dependencyName in dependencies.keys()) {
+                if (let Some(item) <- dependencies.get(dependencyName)) {
+                    if (item.isStd) {
+                        stdNames.add(item.packageName)
+                    }
+                }
+            }
+        }
+        let orderedStdNames = SortedStringSet(stdNames)
+        let stdItems = ArrayList<String>()
+        for (stdName in orderedStdNames) {
+            stdItems.add("{\"" + EscapeJson(stdName) + "\":[]}")
+        }
+        return "[" + JoinStrings(stdItems, ",") + "]"
+    }
+
+    private func FeatureSetToJson(features: HashSet<String>): String {
+        let orderedFeatures = SortedStringSet(features)
+        let featureItems = ArrayList<String>()
+        for (feature in orderedFeatures) {
+            featureItems.add("\"" + EscapeJson(feature) + "\"")
+        }
+        return "[" + JoinStrings(featureItems, ",") + "]"
     }
 
     private func AddImplicitImports(pkg: Package, globalOptions: GlobalOptions): Unit {
@@ -1016,6 +1120,62 @@ public class ImportManager {
             idx++
         }
         return true
+    }
+
+    private func SortedMapKeys(input: HashMap<String, DependencyInfoItem>): ArrayList<String> {
+        let values = ArrayList<String>()
+        for (key in input.keys()) {
+            values.add(key)
+        }
+        SortStringsInPlace(values)
+        return values
+    }
+
+    private func SortedStringSet(input: HashSet<String>): ArrayList<String> {
+        let values = ArrayList<String>()
+        for (value in input) {
+            values.add(value)
+        }
+        SortStringsInPlace(values)
+        return values
+    }
+
+    private func SortStringsInPlace(values: ArrayList<String>): Unit {
+        var i: Int64 = 1
+        while (i < values.size) {
+            let key = values[i]
+            var j = i - 1
+            while (j >= 0 && values[j] > key) {
+                values[j + 1] = values[j]
+                j--
+            }
+            values[j + 1] = key
+            i++
+        }
+    }
+
+    private func SortImportSpecsByPosition(values: ArrayList<ImportSpec>): Unit {
+        var i: Int64 = 1
+        while (i < values.size) {
+            let key = values[i]
+            var j = i - 1
+            while (j >= 0 && ImportSpecComesAfter(values[j], key)) {
+                values[j + 1] = values[j]
+                j--
+            }
+            values[j + 1] = key
+            i++
+        }
+    }
+
+    private func ImportSpecComesAfter(left: ImportSpec, right: ImportSpec): Bool {
+        if (right.begin < left.begin) {
+            return true
+        }
+        if (left.begin == right.begin && right.end < left.end) {
+            return true
+        }
+        return false
     }
 
     private func cloneStringMap(input: HashMap<String, String>): HashMap<String, String> {
