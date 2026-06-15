@@ -12,6 +12,7 @@ Current Cangjie port state:
 - Added a functional `TypeManager` over the existing self-hosted AST type hierarchy for primitive, tuple, function, array, pointer, nominal type construction, structural equality, simple substitution, declared-super traversal, and conservative subtype/compatibility checks.
 - Added plugin API-level parsing/version comparison and plugin custom annotation metadata support.
 - Added real leaf expression helpers for parenthesized expressions, optional-chain expressions, tuple literals, loop-control jumps, throws, and returns over the current self-hosted AST/TypeManager surfaces.
+- Added real leaf helpers for perform, resume, synchronized, quote, numeric type conversion, `is`/`as`, increment/decrement expressions, and FFI precheck ABI propagation over currently available AST state.
 - Added compiling public entrypoints for generic instantiation, type checking, desugar, incremental helpers, test helpers, lookup, collection, diagnostics, join/meet, promotion, and scope utilities.
 
 Known gaps:
