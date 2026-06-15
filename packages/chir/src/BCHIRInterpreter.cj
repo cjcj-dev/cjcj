@@ -30,6 +30,12 @@ public class BCHIRInterpreter {
             } else if (opCode == OpCode.UINT64 || opCode == OpCode.UINTNAT) {
                 interpStack.ArgsPush(InterpreterValue.MakeUInt(UIntOpKind(opCode), code.Get8Bytes(pc + 1)))
                 pc += 1 + GetOpCodeArgSize(opCode)
+            } else if (opCode == OpCode.FLOAT16 || opCode == OpCode.FLOAT32) {
+                interpStack.ArgsPush(InterpreterValue.MakeFloat(FloatOpKind(opCode), Float64(code.Get(pc + 1))))
+                pc += 1 + GetOpCodeArgSize(opCode)
+            } else if (opCode == OpCode.FLOAT64) {
+                interpStack.ArgsPush(InterpreterValue.MakeFloat(InterpreterValueKind.IFLOAT64, Float64(code.Get8Bytes(pc + 1))))
+                pc += 1 + GetOpCodeArgSize(opCode)
             } else if (opCode == OpCode.BOOL) {
                 interpStack.ArgsPush(InterpreterValue.MakeBool(code.Get(pc + 1) != 0))
                 pc += 2
@@ -93,6 +99,17 @@ public class BCHIRInterpreter {
             } else if (opCode == OpCode.BRANCH) {
                 let condition = interpStack.ArgsPopIVal()
                 pc = if (IValUtils.IsTruthy(condition)) { code.Get(pc + 1) } else { code.Get(pc + 2) }
+            } else if (opCode == OpCode.APPLY) {
+                let argCount = code.Get(pc + 1)
+                if (argCount <= 0 || interpStack.ArgsSize() < argCount) {
+                    return Finish(BCHIRResult(BCHIRResultKind.TRAP, message: "invalid APPLY argument count"))
+                }
+                let functionValue = interpStack.ArgsGet(argCount, 0)
+                if (functionValue.kind != InterpreterValueKind.IFUNC) {
+                    return Finish(BCHIRResult(BCHIRResultKind.TRAP, message: "APPLY target is not a function"))
+                }
+                interpStack.CtrlPush(ControlState(opCode, interpStack.ArgsSize() - argCount, pc + 2, env.GetBP()))
+                pc = functionValue.GetFunctionIndex()
             } else if (IsUnaryOp(opCode)) {
                 if (!EvaluateUnary(opCode)) {
                     return Finish(BCHIRResult(BCHIRResultKind.UNSUPPORTED, message: "unsupported unary op " +
@@ -105,7 +122,20 @@ public class BCHIRInterpreter {
                         GetOpCodeLabel(opCode)))
                 }
                 pc += 1 + GetOpCodeArgSize(opCode)
-            } else if (opCode == OpCode.RETURN || opCode == OpCode.EXIT) {
+            } else if (opCode == OpCode.RETURN) {
+                let returnValue = if (interpStack.ArgsSize() == 0) { InterpreterValue.MakeUnit() } else { interpStack.ArgsPopIVal() }
+                if (let Some(state) <- interpStack.CtrlPop()) {
+                    env.RestoreStackFrameTo(state.envBP)
+                    interpStack.ArgsRemoveAfter(state.argStackPtr)
+                    interpStack.ArgsPush(returnValue)
+                    pc = state.byteCodePtr
+                } else {
+                    if (!expectsReturn) {
+                        return Finish(BCHIRResult(BCHIRResultKind.OK, value: UnitLiteral()))
+                    }
+                    return Finish(ValueToResult(returnValue))
+                }
+            } else if (opCode == OpCode.EXIT) {
                 if (!expectsReturn || interpStack.ArgsSize() == 0) {
                     return Finish(BCHIRResult(BCHIRResultKind.OK, value: UnitLiteral()))
                 }
@@ -297,6 +327,14 @@ private func UIntOpKind(opCode: OpCode): InterpreterValueKind {
         case OpCode.UINT32 => InterpreterValueKind.IUINT32
         case OpCode.UINTNAT => InterpreterValueKind.IUINTNAT
         case _ => InterpreterValueKind.IUINT64
+    }
+}
+
+private func FloatOpKind(opCode: OpCode): InterpreterValueKind {
+    return match (opCode) {
+        case OpCode.FLOAT16 => InterpreterValueKind.IFLOAT16
+        case OpCode.FLOAT32 => InterpreterValueKind.IFLOAT32
+        case _ => InterpreterValueKind.IFLOAT64
     }
 }
 

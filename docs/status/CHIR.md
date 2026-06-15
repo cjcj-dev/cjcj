@@ -120,6 +120,19 @@ Implemented:
 - Added a working BCHIR interpreter subset for primitive constructors, strings, tuples/arrays/objects,
   allocation, local/global load/store, frames, drop/store, jumps, branches, returns/exits, integer/float/bool
   unary and binary operations, equality, and literal result extraction.
+- Added C++-named CHIR-to-BCHIR component files for `CHIR2BCHIRAtomic`, `CHIR2BCHIR`, `TranslateValue`,
+  and `BCHIRLinker`.
+- Added a real CHIR-to-BCHIR package translator for the currently implemented IR model: package metadata,
+  global initializers, function bodies, parameters, local variable slots, blocks, block jump placeholders,
+  class/struct/enum/extend method tables, primitive constants, local/global/function references, unary/binary
+  expressions, allocation/store, tuple/array/apply expressions, goto/branch/exit terminators, string and type
+  section interning, and compile-time filtering.
+- Added a BCHIR linker that combines package bytecode into a linked top-level definition, resolves function
+  placeholders, assigns global/class/method ids, remaps string references, adjusts local branch/jump offsets,
+  links serialized class method tables, installs default function pointers, emits global initializers, and
+  provides a dummy abort target for unresolved functions.
+- Extended the BCHIR interpreter with function application and return-frame handling so linked bytecode can
+  call translated functions through the argument/control stacks.
 
 Known gaps:
 
@@ -146,9 +159,10 @@ Known gaps:
 - `SIntDomain` and `ValueDomain` are real analysis domains over the current IR, but the C++ template
   abstraction, complete arithmetic transfer functions, and integration with the fixed-point analysis engine
   are still pending.
-- The BCHIR interpreter now has the real runtime storage model and a working primitive/control subset, but
-  the full C++ CHIR2BCHIR translator, linker, intrinsic/syscall handling, exception machinery, object method
-  dispatch, raw-array operations, type casts, and FFI execution paths remain to be ported.
+- The BCHIR translator/linker/interpreter now has the first real end-to-end package/function/global/control
+  path, but exact float/rune byte encoding, the complete expression taxonomy, intrinsics/syscalls, exception
+  machinery, object method dispatch, raw-array operations, type casts, full serialization, and FFI execution
+  paths remain to be ported.
 - The current implementation establishes a compiling, real IR core that downstream CHIR work can build on,
   but it is far below full C++ CHIR behavioral coverage.
 
