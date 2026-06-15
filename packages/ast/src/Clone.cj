@@ -252,6 +252,7 @@ public class ASTCloner {
             case ASTKind.MEMBER_ACCESS => MemberAccess()
             case ASTKind.PAREN_EXPR => ParenExpr()
             case ASTKind.LAMBDA_EXPR => LambdaExpr()
+            case ASTKind.IF_AVAILABLE_EXPR => IfAvailableExpr()
             case ASTKind.TRAIL_CLOSURE_EXPR => TrailingClosureExpr()
             case ASTKind.OPTIONAL_EXPR => OptionalExpr()
             case ASTKind.OPTIONAL_CHAIN_EXPR => OptionalChainExpr()
@@ -1063,6 +1064,25 @@ public class ASTCloner {
         }
         if (let Some(src) <- (source as ParenExpr)) { if (let Some(dst) <- (target as ParenExpr)) { dst.leftParenPos = src.leftParenPos; dst.expr = cloneExpr(src.expr); dst.rightParenPos = src.rightParenPos } }
         if (let Some(src) <- (source as LambdaExpr)) { if (let Some(dst) <- (target as LambdaExpr)) { dst.funcBody = cloneFuncBody(src.funcBody); dst.mangledName = src.mangledName } }
+        if (let Some(src) <- (source as IfAvailableExpr)) {
+            if (let Some(dst) <- (target as IfAvailableExpr)) {
+                if (let Some(arg) <- src.GetArg()) {
+                    if (let Some(cloned) <- (Clone(arg) as FuncArg)) {
+                        dst.SetArg(cloned)
+                    }
+                }
+                if (let Some(lambda) <- src.GetLambda1()) {
+                    if (let Some(cloned) <- (Clone(lambda) as LambdaExpr)) {
+                        dst.SetLambda1(cloned)
+                    }
+                }
+                if (let Some(lambda) <- src.GetLambda2()) {
+                    if (let Some(cloned) <- (Clone(lambda) as LambdaExpr)) {
+                        dst.SetLambda2(cloned)
+                    }
+                }
+            }
+        }
         if (let Some(src) <- (source as TrailingClosureExpr)) { if (let Some(dst) <- (target as TrailingClosureExpr)) { dst.leftLambda = src.leftLambda; dst.expr = cloneExpr(src.expr); dst.lambda = if (let Some(lambda) <- src.lambda) { Clone(lambda) as LambdaExpr } else { None }; dst.rightLambda = src.rightLambda } }
         if (let Some(src) <- (source as OptionalExpr)) { if (let Some(dst) <- (target as OptionalExpr)) { dst.baseExpr = cloneExpr(src.baseExpr); dst.questPos = src.questPos } }
         if (let Some(src) <- (source as OptionalChainExpr)) { if (let Some(dst) <- (target as OptionalChainExpr)) { dst.expr = cloneExpr(src.expr) } }

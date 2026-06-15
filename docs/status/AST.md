@@ -33,6 +33,7 @@ The task explicitly disallows editing `cjpm.toml`, so AST currently carries loca
 - Expanded print-node parity with a walker-backed recursive AST dump that emits node kind and display name, source summaries, positions, file/scope/type/attribute/package metadata, symbol and target links, declaration linkage/const/export details, comments, indentation, and optional root labels.
 - Expanded recover-desugar parity with C++-shaped recovery for unary, binary, subscript, assignment, call, array-constructor, pointer-constructor, and variadic-call desugar forms, plus clear-path recovery hooks for overloaded expression nodes.
 - Expanded `Create` parity with C++ factory helpers for scope/file copying, unit/bool literals, overloadable expressions, calls, function arguments, parameters, bodies, declarations, blocks, if/match expressions, reference expressions/types, member access, tuple access, variable patterns/declarations, import specs, and throw/perform/resume/type-pattern helpers.
+- Added the extra semantic `IfAvailableExpr` node from `NodeX.h` with argument/lambda accessors, walker traversal, and clone support, expanded AST casting/category predicates to mirror the C++ `ASTCasting.h` specializations, and aligned native reference-type classification with `ReferenceType.h`.
 - Preserved build compatibility without touching runtime, stdx, tools, manifests, or the C++ reference repository.
 
 ## Remaining Work

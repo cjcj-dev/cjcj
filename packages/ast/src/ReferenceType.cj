@@ -1,8 +1,16 @@
 package cangjie_compiler::ast
 
 public func IsReferenceType(ty: Ty): Bool {
-    return ty.IsClassLike() || ty.IsArray() || ty.IsPointer() || ty.IsCString() ||
-        ty.IsFunc() || ty.IsTuple() || ty.IsStruct() || ty.IsEnum()
+    var isRefOption = false
+    if (ty.IsCoreOptionType()) {
+        if (let Some(enumTy) <- (ty as EnumTy)) {
+            if (!enumTy.typeArgs.isEmpty()) {
+                let elemTy = enumTy.typeArgs[0]
+                isRefOption = IsReferenceType(elemTy) && !elemTy.IsCoreOptionType()
+            }
+        }
+    }
+    return ty.IsClassLike() || ty.IsArray() || isRefOption
 }
 
 public func IsReferenceNode(node: Node): Bool {

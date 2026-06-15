@@ -528,6 +528,17 @@ public class Walker {
                 if (stopIf(WalkNode(body))) { return VisitAction.STOP_NOW }
             }
         }
+        if (let Some(ifAvailable) <- (curNode as IfAvailableExpr)) {
+            if (let Some(arg) <- ifAvailable.GetArg()) {
+                if (stopIf(WalkNode(arg))) { return VisitAction.STOP_NOW }
+            }
+            if (let Some(lambda) <- ifAvailable.GetLambda1()) {
+                if (stopIf(WalkNode(lambda))) { return VisitAction.STOP_NOW }
+            }
+            if (let Some(lambda) <- ifAvailable.GetLambda2()) {
+                if (stopIf(WalkNode(lambda))) { return VisitAction.STOP_NOW }
+            }
+        }
         if (let Some(trailing) <- (curNode as TrailingClosureExpr)) {
             if (stopIf(walkExprOption(trailing.expr))) { return VisitAction.STOP_NOW }
             if (let Some(lambda) <- trailing.lambda) {
