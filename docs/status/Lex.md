@@ -18,11 +18,11 @@ Implemented:
 - Matched C++ numeric suffix recovery for `.identifier` member access after number literals, including Unicode identifier lookahead and the original adjacency guard for unknown-suffix diagnostics.
 - Expanded number diagnostic parity for expected/unexpected digit and illegal integer/float suffix cases with C++ main-hint substitutions, contextual hints, and notes.
 - Expanded string, rune, byte-rune, unicode-escape, and interpolation diagnostic parity with C++ hints, notes, range choices, unicode scalar validation, escape-note text, rune-overflow help, and byte-literal ASCII checks.
+- Added Lex-local Unicode 15.0 NFC canonical decomposition/recomposition data and logic, and normalized identifier token values at the same point as C++ `LexerImpl::ScanIdentifierContinue`.
 
-Known fidelity caveats:
+Known validation caveats:
 
-- Identifier NFC normalization is not yet byte-for-byte equivalent to the C++ `Unicode::NFC` path because the Utils module is not ported as a dependency of Lex in this worktree.
 - Diagnostics report through the same Basic diagnostic IDs, but rendered diagnostic-output parity still needs validation against the C++ Lex test corpus.
-- The implementation is behavior-bearing and buildable; the C++ Lex gtest corpus has been reviewed for parity cases, but this Cangjie workspace currently has no executable Lex tests (`cjpm test` reports 0 tests).
+- The implementation is behavior-bearing and buildable; focused ad hoc checks exercise identifier NFC normalization, but this Cangjie workspace currently has no executable Lex test corpus (`cjpm test` reports 0 tests).
 
 Remaining Lex selfhost markers: 0.

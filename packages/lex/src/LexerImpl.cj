@@ -1488,7 +1488,11 @@ public class LexerImpl {
                 break
             }
         }
-        res.SetValuePos(input[pStart..pNext], GetPos(pStart), GetPos(pNext))
+        var value = input[pStart..pNext]
+        if (res.kind == TokenKind.IDENTIFIER) {
+            value = NormalizeIdentifierNFC(value)
+        }
+        res.SetValuePos(value, GetPos(pStart), GetPos(pNext))
         return res
     }
 
