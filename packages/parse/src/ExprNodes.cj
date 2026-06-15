@@ -5,6 +5,7 @@ import std.collection.*
 public open class Expr <: Node {
     public var semiPos: Position = INVALID_POSITION
     public var hasSemi: Bool = false
+    public var hasQuestSuffix: Bool = false
     public init() { super(ASTKind.EXPR) }
     public init(kind: ASTKind) { super(kind) }
 }
@@ -190,6 +191,31 @@ public class SubscriptExpr <: Expr {
         let out = ArrayList<Node>()
         if (let Some(base) <- baseExpr) { out.add(base) }
         for (expr in indexExprs) { out.add(expr) }
+        return out
+    }
+}
+
+public class OptionalExpr <: Expr {
+    public var baseExpr: Option<Expr> = None
+    public var questPos: Position = INVALID_POSITION
+
+    public init() { super(ASTKind.OPTIONAL_EXPR) }
+
+    public override func Children(): ArrayList<Node> {
+        let out = ArrayList<Node>()
+        if (let Some(base) <- baseExpr) { out.add(base) }
+        return out
+    }
+}
+
+public class OptionalChainExpr <: Expr {
+    public var expr: Option<Expr> = None
+
+    public init() { super(ASTKind.OPTIONAL_CHAIN_EXPR) }
+
+    public override func Children(): ArrayList<Node> {
+        let out = ArrayList<Node>()
+        if (let Some(child) <- expr) { out.add(child) }
         return out
     }
 }

@@ -34,7 +34,16 @@ extend ParserImpl {
 
     public func ParseBaseExpr(expr: Expr, ek: ExprKind): Expr {
         var base = expr
+        var hasQuestSuffix = false
         while (true) {
+            if (SeeingOptionalSuffix()) {
+                base = ParseQuestSuffixExpr(base)
+                hasQuestSuffix = true
+            } else if (Seeing(TokenKind.QUEST) && !Seeing([TokenKind.QUEST, TokenKind.QUEST])) {
+                diag.DiagnoseRefactor(DiagKindRefactor.EXPECTED_TOKEN, Peek().Begin(), "expected '.', '(', '[', '{', or '?' after '?'")
+                Next()
+                break
+            }
             if (Skip(TokenKind.LPAREN)) {
                 let call = CallExpr()
                 call.baseFunc = base
@@ -89,7 +98,8 @@ extend ParserImpl {
                 base = unary
                 continue
             }
-            if (Seeing(TokenKind.LCURL) && (base.astKind == ASTKind.CALL_EXPR || base.astKind == ASTKind.REF_EXPR || base.astKind == ASTKind.MEMBER_ACCESS)) {
+            if (Seeing(TokenKind.LCURL) && (base.astKind == ASTKind.CALL_EXPR || base.astKind == ASTKind.REF_EXPR ||
+                base.astKind == ASTKind.MEMBER_ACCESS || base.astKind == ASTKind.OPTIONAL_EXPR)) {
                 let trailing = TrailingClosureExpr()
                 trailing.expr = base
                 trailing.lambda = ParseLambdaExprWithTrailingClosure()
@@ -100,7 +110,30 @@ extend ParserImpl {
             }
             break
         }
+        if (hasQuestSuffix) {
+            let chain = OptionalChainExpr()
+            chain.expr = base
+            chain.begin = base.begin
+            chain.end = base.end
+            base = chain
+            base.hasQuestSuffix = true
+        }
         return base
+    }
+
+    public func SeeingOptionalSuffix(): Bool {
+        return Seeing([TokenKind.QUEST, TokenKind.DOT]) || Seeing([TokenKind.QUEST, TokenKind.LPAREN]) ||
+            Seeing([TokenKind.QUEST, TokenKind.LSQUARE]) || Seeing([TokenKind.QUEST, TokenKind.LCURL])
+    }
+
+    public func ParseQuestSuffixExpr(expr: Expr): OptionalExpr {
+        let token = Expect(TokenKind.QUEST, "expected '?'")
+        let ret = OptionalExpr()
+        ret.baseExpr = expr
+        ret.questPos = token.Begin()
+        ret.begin = expr.begin
+        ret.end = expr.end
+        return ret
     }
 
     public func ParseExprRhs(minPrec: UInt8, left: Expr, ek: ExprKind): Expr {

@@ -70,6 +70,10 @@ package public APIs.
   resource comma/paren positions, resource variable declarations, catch paren
   positions, exception type patterns, `handle` clauses, effect type patterns,
   handler blocks, and `finally` positions.
+- Added optional suffix expression nodes and postfix parsing for optional
+  chaining forms such as `expr?.member`, `expr?()`, `expr?[index]`, and
+  optional trailing-closure starts, preserving the C++ `hasQuestSuffix` marker
+  on the resulting chain.
 
 ## Remaining Work
 
