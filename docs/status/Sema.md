@@ -22,6 +22,9 @@ Current Cangjie port state:
 - Added type-check expression diagnostic helpers for invalid multiple assignment, unary/binary/subscript expressions, inference failure, and the C++ numeric int/float comparison helper used by type compatibility.
 - Added real type-check expression helpers for builtin unary expressions, range literals, spawn expressions, and literal constants, including numeric suffix/default typing, range element/step validation, future type instantiation, scheduler-handle checks, constant range validation, and `Option<T>` literal boxing over the current self-hosted type surfaces.
 - Added concrete member-signature storage, type-variable constraint graph topological solving/substitution, block expression synthesis/checking over already-typed children, and unit-test mock context package-name tracking within current package dependencies.
+- Added C++-shaped function linkage analysis over current AST surfaces, including modifier-based internal marking, default-parameter/property linkage propagation, exported type/reference promotion, generic source-export queues, and final internal nominal-member cleanup.
+- Added the plugin custom-annotation JSON scanner (`JsonObject`/`JsonPair`) with the C++ cursor behavior for strings, numbers, arrays, object recursion, and recursive key lookup.
+- Added internal-type accessibility collection for public/non-private declarations plus CJMP function parameter/generic matching and default-argument propagation helpers.
 - Added compiling public entrypoints for generic instantiation, type checking, desugar, incremental helpers, test helpers, lookup, collection, diagnostics, join/meet, promotion, and scope utilities.
 
 Known gaps:

@@ -1,6 +1,14 @@
 package cangjie_compiler::sema.CJMP
 
-public func SelfhostPortStatus_CJMP_MPTypeCheckerImpl(): Bool {
-    // TODO(selfhost:Sema): port src/Sema/CJMP/MPTypeCheckerImpl.h.
-    return false
+import cangjie_compiler::sema.*
+
+public class MPTypeCheckerImpl {
+    public var typeManager: TypeManager
+    public var compileCommon: Bool = false
+    public var compilePlatform: Bool = false
+    public var severalParents: Bool = false
+
+    public init(typeManager: TypeManager) {
+        this.typeManager = typeManager
+    }
 }
