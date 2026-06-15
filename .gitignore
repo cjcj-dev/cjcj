@@ -1,0 +1,18 @@
+# Cangjie / cjpm build artifacts
+target/
+build/
+output/
+dist/
+*.o
+*.a
+*.so
+*.bc
+*.cjo
+*.cjao
+.cjpm-cache/
+cjpm.lock.tmp
+
+# Logs / scratch
+*.log
+/tmp/
+.DS_Store
