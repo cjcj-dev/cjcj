@@ -70,7 +70,10 @@ private func AppendConditionExprCacheKey(condition: Expr): Option<String> {
     if (condition.astKind == ASTKind.PAREN_EXPR) {
         if (let Some(pe) <- (condition as ParenExpr)) {
             if (let Some(expr) <- pe.expr) {
-                return AppendConditionExprCacheKey(expr)
+                if (let Some(exprKey) <- AppendConditionExprCacheKey(expr)) {
+                    key += exprKey
+                    return key
+                }
             }
         }
         return None

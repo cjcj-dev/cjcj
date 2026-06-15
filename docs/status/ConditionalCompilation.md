@@ -13,13 +13,12 @@ declarations, enum members/constructors, property accessors, function
 parameters, and block nodes, and recomputes the file `hasMacro` flag after
 filtering.
 
-## Current Integration Limits
+## Current Integration
 
-- `Frontend.CompilerInstance` is not ported in this worktree. The public class
-  therefore exposes an option/config based constructor that carries the same
-  state the C++ implementation reads from `CompilerInstance`. The implementation
-  has one `TODO(selfhost:ConditionalCompilation)` marker for replacing that
-  bridge once Frontend is real.
+- `Frontend.CompilerInstance` is not ported in this worktree. The module exposes
+  `ConditionalCompilationCompilerInstance`, a small provider interface for the
+  `GlobalOptions` and `DiagnosticEngine` state the C++ implementation reads from
+  `CompilerInstance`, plus option/config constructors used by current packages.
 - AST currently uses compatibility copies of Basic/Lex primitives, so this
   package converts AST positions to Basic positions before reporting diagnostics.
 
@@ -27,4 +26,4 @@ filtering.
 
 `cjpm build` passes for the workspace with this package.
 
-Remaining ConditionalCompilation selfhost markers: 1.
+Remaining ConditionalCompilation selfhost markers: 0.

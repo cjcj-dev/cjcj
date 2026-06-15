@@ -12,6 +12,11 @@ import cangjie_compiler::option.TripleInfo
 import cangjie_compiler::option.Vendor
 import std.collection.*
 
+public interface ConditionalCompilationCompilerInstance {
+    func GetGlobalOptions(): GlobalOptions
+    func GetDiagnosticEngine(): BasicDiagnosticEngine
+}
+
 public class ConditionalCompilationConfig {
     public var backendType: BackendType = BackendType.CJNATIVE
     public var target: TripleInfo = TripleInfo()
@@ -25,6 +30,11 @@ public class ConditionalCompilationConfig {
 
     public init(options: GlobalOptions) {
         LoadFromOptions(options)
+    }
+
+    public init(instance: ConditionalCompilationCompilerInstance) {
+        diag = instance.GetDiagnosticEngine()
+        LoadFromOptions(instance.GetGlobalOptions())
     }
 
     public init(options: GlobalOptions, diag: BasicDiagnosticEngine) {

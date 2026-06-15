@@ -52,7 +52,6 @@ class ConditionalCompilationImpl {
     private let conditionExprCache: HashMap<String, Bool> = HashMap<String, Bool>()
 
     public init(config: ConditionalCompilationConfig) {
-        // TODO(selfhost:ConditionalCompilation): add the C++ CompilerInstance constructor once Frontend.CompilerInstance is ported.
         backendType = config.backendType
         triple = CopyTripleInfo(config.target)
         cjcVersion = GetVersionUInt(config.cjcVersion)

@@ -17,6 +17,10 @@ public class ConditionalCompilation {
         impl = ConditionalCompilationImpl(config)
     }
 
+    public init(instance: ConditionalCompilationCompilerInstance) {
+        impl = ConditionalCompilationImpl(ConditionalCompilationConfig(instance))
+    }
+
     public init(options: GlobalOptions) {
         impl = ConditionalCompilationImpl(ConditionalCompilationConfig(options))
     }
