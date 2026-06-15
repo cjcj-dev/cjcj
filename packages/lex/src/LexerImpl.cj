@@ -21,6 +21,9 @@ public let UTF8_3_MAX: UInt32 = 0xffffu32
 public let UTF8_4_MAX: UInt32 = 0x10ffffu32
 public let UTF8_5_MAX: UInt32 = 0x3ffffffu32
 public let UTF8_6_MAX: UInt32 = 0x7fffffffu32
+private let BYTE_4_BASE: UInt32 = 65536u32
+private let BYTE_3_BASE: UInt32 = 2048u32
+private let BYTE_2_BASE: UInt32 = 128u32
 public let ERROR_UTF8: Int64 = -2
 public let UNICODE_MAX_NUM: Int64 = 8
 public let BIN_BASE: Int64 = 2
@@ -695,16 +698,118 @@ public class LexerImpl {
         return true
     }
 
-    private func readContinuation(index: Int64): UInt32 {
-        let byte = UInt32(getByte(pNext + index))
-        if ((byte & 0xc0u32) != 0x80u32 && success) {
-            lexDiagnose(
-                diag, DiagKindRefactor.lex_illegal_UTF8_encoding_byte, GetPos(pNext + index),
-                ToBinaryString(UInt8(byte))
-            )
+    private func CheckIllegalUTF8InStringLiteral(byte: UInt32): Bool {
+        if (byte >= UInt32(BYTE_2_FLAG) || byte < UInt32(BYTE_X_FLAG)) {
+            if (success) {
+                lexDiagnose(
+                    diag, DiagKindRefactor.lex_illegal_UTF8_encoding_byte, GetPos(pCurrent),
+                    ToBinaryString(UInt8(byte))
+                )
+                success = false
+            }
+            return true
+        }
+        return false
+    }
+
+    private func CheckUnicodeSecurity(ch: Int64): Bool {
+        let isControlPictures = ch >= 0x2400 && ch <= 0x243f
+        let isPrivateUseAreas = (ch >= 0xe000 && ch <= 0xf8ff) || (ch >= 0xf0000 && ch <= 0xffffd) ||
+            (ch >= 0x100000 && ch <= 0x10fffd)
+        let isSpecials = ch >= 0xfff0 && ch <= 0xfffb
+        let isTags = ch >= 0xe0000 && ch <= 0xe007f
+        let isBidirectionalNeutralFormatting = ch == 0x061c || ch == 0x200e || ch == 0x200f
+        let isBidirectionalGeneralFormatting = (ch >= 0x202a && ch <= 0x202e) || (ch >= 0x2066 && ch <= 0x2069)
+        let isInterlinearAnnotationChar = ch == 0xfff9 || ch == 0xfffa || ch == 0xfffb
+        let isPrefixedFormatControl = (ch >= 0x0600 && ch <= 0x0605) || ch == 0x06dd || ch == 0x070f ||
+            ch == 0x0890 || ch == 0x0891 || ch == 0x110bd || ch == 0x110cd
+        let isEgyptianHieroglyphs = ch >= 0x13430 && ch <= 0x13438
+        let isBrahmi = ch == 0x1107f || ch == 0x094d || ch == 0x09cd || ch == 0x0a4d || ch == 0x0acd ||
+            ch == 0x0b4d || ch == 0x0bcd || ch == 0x0c4d || ch == 0x0ccd || ch == 0x0d3b || ch == 0x0d3c ||
+            ch == 0x0d4d || ch == 0x0dca || ch == 0x0e3a || ch == 0x0e4e || ch == 0x0eba || ch == 0x1039 ||
+            ch == 0x1714 || ch == 0x1715 || ch == 0x1734 || ch == 0x17d1 || ch == 0x17d2 || ch == 0x1a60 ||
+            ch == 0x1a7a || ch == 0x1b44 || ch == 0x1baa || ch == 0x1bab || ch == 0x1bf2 || ch == 0x1bf3 ||
+            ch == 0xa806 || ch == 0xa82c || ch == 0xa8c4 || ch == 0xa953 || ch == 0xa9c0 || ch == 0xaaf6 ||
+            ch == 0x10a3f || ch == 0x11046 || ch == 0x11070 || ch == 0x110b9 || ch == 0x11133 || ch == 0x111c0 ||
+            ch == 0x11235 || ch == 0x112ea || ch == 0x1134d || ch == 0x11442 || ch == 0x114c2 || ch == 0x115bf ||
+            ch == 0x1163f || ch == 0x116b6 || ch == 0x1172b || ch == 0x11839 || ch == 0x1193d || ch == 0x1193e ||
+            ch == 0x119e0 || ch == 0x11a34 || ch == 0x11a47 || ch == 0x11a99 || ch == 0x11c3f || ch == 0x11d44 ||
+            ch == 0x11d45 || ch == 0x11d97
+        let isHistoricalViramas = ch == 0x0f84 || ch == 0x103a || ch == 0x193b || ch == 0xabed || ch == 0x11134
+        let isMongolianVariation = ch >= 0x180b && ch <= 0x180e
+        let isGenericVariation = (ch >= 0xfe00 && ch <= 0xfe0f) || (ch >= 0xe0100 && ch <= 0xe01ef)
+        let isTagCharacters = (ch >= 0xe0020 && ch <= 0xe007f) || ch == 0xe0001 || ch == 0x2d7f || ch == 0x1680
+        let isIdeographic = (ch >= 0x2ff0 && ch <= 0x2ffb) || ch == 0x303e
+        let isMusicalFormatControl = ch >= 0x1d173 && ch <= 0x1d17a
+        let isShorthandFormat = ch >= 0x1bca0 && ch <= 0x1bca3
+        let isDeprecatedAlternate = ch >= 0x206a && ch <= 0x206f
+        let isOther = ch == 0xfffc || ch == 0xfffd
+        let isSpecialPurposeCharacters = isBidirectionalNeutralFormatting || isBidirectionalGeneralFormatting ||
+            isInterlinearAnnotationChar || isPrefixedFormatControl || isEgyptianHieroglyphs || isBrahmi ||
+            isHistoricalViramas || isMongolianVariation || isGenericVariation || isTagCharacters || isIdeographic ||
+            isMusicalFormatControl || isShorthandFormat || isDeprecatedAlternate || isOther
+        let isSecurity = isControlPictures || isPrivateUseAreas || isSpecials || isTags || isSpecialPurposeCharacters
+        return !isSecurity
+    }
+
+    private func CheckUnsecureUnicodeValue(ch: Int64): Unit {
+        if (!CheckUnicodeSecurity(ch)) {
+            let args = ConvertUnicode(ch)
+            let builder = diag.DiagnoseRefactor(DiagKindRefactor.lex_unsecure_unicode, GetPos(pCurrent), arguments: [args])
+            builder.AddMainHintArguments([args])
             success = false
         }
-        return byte
+    }
+
+    private func ReadUTF8CharFromMultiBytes(first: UInt8): Int64 {
+        if (!CheckArraySize(2)) {
+            return ERROR_UTF8
+        }
+        let byte1 = UInt32(first)
+        let byte2 = UInt32(getByte(pNext + 1))
+        CheckIllegalUTF8InStringLiteral(byte2)
+        if (byte2 >= UInt32(BYTE_2_FLAG) || byte2 < UInt32(BYTE_X_FLAG)) {
+            pNext += if (byte2 < UInt32(BYTE_X_FLAG)) { 1 } else { 2 }
+            return ERROR_UTF8
+        } else if (first >= BYTE_4_FLAG) {
+            if (!CheckArraySize(4)) {
+                return ERROR_UTF8
+            }
+            let byte3 = UInt32(getByte(pNext + 2))
+            let byte4 = UInt32(getByte(pNext + 3))
+            CheckIllegalUTF8InStringLiteral(byte3)
+            CheckIllegalUTF8InStringLiteral(byte4)
+            let ch = ((byte1 & LOW_3_BIT_MASK) << 18) | ((byte2 & LOW_6_BIT_MASK) << 12) |
+                ((byte3 & LOW_6_BIT_MASK) << 6) | (byte4 & LOW_6_BIT_MASK)
+            CheckUnsecureUnicodeValue(Int64(ch))
+            pNext += 4
+            if (ch < BYTE_4_BASE) {
+                return ERROR_UTF8
+            }
+            return Int64(ch)
+        } else if (first >= BYTE_3_FLAG) {
+            if (!CheckArraySize(3)) {
+                return ERROR_UTF8
+            }
+            let byte3 = UInt32(getByte(pNext + 2))
+            CheckIllegalUTF8InStringLiteral(byte3)
+            let ch = ((byte1 & LOW_4_BIT_MASK) << 12) | ((byte2 & LOW_6_BIT_MASK) << 6) |
+                (byte3 & LOW_6_BIT_MASK)
+            CheckUnsecureUnicodeValue(Int64(ch))
+            pNext += 3
+            if (ch < BYTE_3_BASE) {
+                return ERROR_UTF8
+            }
+            return Int64(ch)
+        } else {
+            let ch = ((byte1 & LOW_5_BIT_MASK) << 6) | (byte2 & LOW_6_BIT_MASK)
+            CheckUnsecureUnicodeValue(Int64(ch))
+            pNext += 2
+            if (ch < BYTE_2_BASE) {
+                return ERROR_UTF8
+            }
+            return Int64(ch)
+        }
     }
 
     private func ReadUTF8Char(): Unit {
@@ -728,39 +833,40 @@ public class LexerImpl {
             }
             return
         }
-        var value: UInt32 = UInt32(first)
-        if (first >= BYTE_4_FLAG) {
-            if (!CheckArraySize(4)) {
+        var decoded = ReadUTF8CharFromMultiBytes(first)
+        while (decoded == ERROR_UTF8 && pNext < bytes.size) {
+            let nextFirst = bytes[pNext]
+            if (nextFirst < BYTE_X_FLAG) {
+                pCurrent = pNext
+                pNext++
+                currentChar = ERROR_UTF8
                 return
             }
-            let b2 = readContinuation(1)
-            let b3 = readContinuation(2)
-            let b4 = readContinuation(3)
-            value = ((UInt32(first) & LOW_3_BIT_MASK) << 18) | ((b2 & LOW_6_BIT_MASK) << 12) |
-                ((b3 & LOW_6_BIT_MASK) << 6) | (b4 & LOW_6_BIT_MASK)
-            pNext += 4
-        } else if (first >= BYTE_3_FLAG) {
-            if (!CheckArraySize(3)) {
-                return
-            }
-            let b2 = readContinuation(1)
-            let b3 = readContinuation(2)
-            value = ((UInt32(first) & LOW_4_BIT_MASK) << 12) | ((b2 & LOW_6_BIT_MASK) << 6) |
-                (b3 & LOW_6_BIT_MASK)
-            pNext += 3
-        } else {
-            if (!CheckArraySize(2)) {
-                return
-            }
-            let b2 = readContinuation(1)
-            value = ((UInt32(first) & LOW_5_BIT_MASK) << 6) | (b2 & LOW_6_BIT_MASK)
-            pNext += 2
+            decoded = ReadUTF8CharFromMultiBytes(nextFirst)
         }
-        currentChar = Int64(value)
+        currentChar = decoded
     }
 
     private func Back(): Unit {
         pNext = pCurrent
+    }
+
+    private func IsAdjacent(first: Int64, second: Int64): Bool {
+        if (getByte(first) == b'\r' && first + 1 < bytes.size && getByte(first + 1) == b'\n') {
+            return second - first == 2
+        }
+        return second - first == 1
+    }
+
+    private func MoveCurrentToNextByte(): Unit {
+        if (pNext < bytes.size) {
+            pCurrent = pNext
+            currentChar = Int64(bytes[pCurrent])
+            pNext++
+            return
+        }
+        pCurrent = pNext
+        currentChar = -1
     }
 
     private func GetPos(current: Int64): Position {
@@ -1243,34 +1349,70 @@ public class LexerImpl {
         return res
     }
 
-    private func ScanBackquotedIdentifier(pStart: Int64): Token {
-        var scan = pStart + 1
-        var isPackageIdent = false
-        while (scan < bytes.size && bytes[scan] != b'`' && !isLineTerminatorAt(scan)) {
-            if (bytes[scan] == b'.' || bytes[scan] == b'-' || bytes[scan] == b' ') {
-                isPackageIdent = true
+    private func ScanBackquotedIdentifierPart(resRef: Token): (Token, Bool) {
+        var res = resRef
+        ReadUTF8Char()
+        if (isCJXIDStart(currentChar)) {
+            res = ScanIdentifierContinue(res, pCurrent)
+            if (res.Value() == "_") {
+                res.kind = TokenKind.WILDCARD
+                lexDiagnose(diag, DiagKindRefactor.lex_expected_letter_after_underscore, MakeRange(GetPos(pCurrent), GetPos(pCurrent + 1)))
             }
-            scan++
+            MoveCurrentToNextByte()
+            return (res, true)
         }
-        var endOffset = scan
-        if (scan < bytes.size && bytes[scan] == b'`') {
-            endOffset = scan + 1
-            pNext = endOffset
-            pCurrent = scan
-        } else {
-            pNext = scan
-            pCurrent = scan
-            if (success) {
-                lexDiagnose(diag, DiagKindRefactor.lex_expected_back_quote, GetPos(pCurrent), ConvertCurrentChar())
-                success = false
-            }
-        }
-        let kind = if (isPackageIdent) { TokenKind.PACKAGE_IDENTIFIER } else { TokenKind.IDENTIFIER }
-        return Token(kind, input[pStart..endOffset], GetPos(pStart), GetPos(endOffset))
+        return (res, false)
     }
 
-    private func isLineTerminatorAt(index: Int64): Bool {
-        return GetLineTerminatorLength(bytes, index) > 0u8
+    private func ScanBackquotedIdentifier(pStart: Int64): Token {
+        var res = Token(TokenKind.ILLEGAL)
+        var isPackageIdent = false
+        var scanned = ScanBackquotedIdentifierPart(res)
+        res = scanned[0]
+        if (scanned[1]) {
+            while (currentChar == Int64(b'.') || currentChar == Int64(b'-') || currentChar == Int64(b' ')) {
+                isPackageIdent = true
+                let pLast = pCurrent
+                scanned = ScanBackquotedIdentifierPart(res)
+                res = scanned[0]
+                if (scanned[1]) {
+                    continue
+                }
+                if (IsAdjacent(pLast, pCurrent) && success) {
+                    lexDiagnose(diag, DiagKindRefactor.lex_expected_identifier, GetPos(pCurrent), ConvertCurrentChar())
+                    success = false
+                }
+                break
+            }
+        }
+
+        if (currentChar == Int64(b'`')) {
+            if (IsAdjacent(pStart, pCurrent) && success) {
+                lexDiagnose(diag, DiagKindRefactor.lex_expected_identifier, GetPos(pCurrent), ConvertCurrentChar())
+                success = false
+            }
+        } else {
+            Back()
+            if (!IsAdjacent(pStart, pCurrent) && success) {
+                let builder = diag.DiagnoseRefactor(
+                    DiagKindRefactor.lex_expected_back_quote, GetPos(pCurrent), arguments: [ConvertCurrentChar()]
+                )
+                builder.AddHint(GetPos(pStart))
+                success = false
+            } else if (success) {
+                lexDiagnose(diag, DiagKindRefactor.lex_expected_identifier, GetPos(pCurrent), ConvertCurrentChar())
+                success = false
+            }
+            while (currentChar != Int64(b'`') && currentChar != Int64(b' ') && !IsCurrentCharLineTerminator() &&
+                currentChar != -1) {
+                ReadUTF8Char()
+            }
+        }
+        let endOffset = if (currentChar == Int64(b'`') && pNext > pCurrent) { pNext } else { pCurrent }
+        let kind = if (isPackageIdent) { TokenKind.PACKAGE_IDENTIFIER } else { TokenKind.IDENTIFIER }
+        res.kind = kind
+        res.SetValuePos(input[pStart..endOffset], GetPos(pStart), GetPos(endOffset))
+        return res
     }
 
     private func ProcessIllegalToken(needStringParts: Bool, multiLine: Bool, pStart: Int64, isJString!: Bool = false): Token {

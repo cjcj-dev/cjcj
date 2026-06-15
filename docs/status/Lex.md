@@ -13,11 +13,13 @@ Implemented:
 - Preserved source position tracking with byte offsets and CRLF handling through Basic `Position` and `MakeRange` diagnostics.
 - Replaced the permissive Unicode identifier handling with local Unicode 15.0 `XID_Start`, Cangjie `_` start, and `XID_Continue` range tables mirrored from the C++ `Utils/Unicode.cpp` implementation.
 - Rebuilt missing string parts for macro-provided string tokens by recursively lexing synthetic quoted source, matching the C++ `LexerImpl::GetStrParts` strategy.
+- Ported C++ multi-byte UTF-8 rejection details for malformed continuation bytes, overlong encodings, malformed-run consumption, and unsafe Unicode security diagnostics.
+- Tightened backquoted identifier lexing to scan real identifier parts, package-identifier separators, wildcard diagnostics, and missing-backquote recovery instead of accepting arbitrary backquoted text.
 
 Known fidelity caveats:
 
 - Identifier NFC normalization is not yet byte-for-byte equivalent to the C++ `Unicode::NFC` path because the Utils module is not ported as a dependency of Lex in this worktree.
-- Diagnostics report through the same Basic diagnostic IDs, but several rich hint/help branches from `LexerDiag.cpp` are simplified pending a full diagnostic-detail pass.
-- The implementation is behavior-bearing and buildable, but it has not yet been validated against the C++ Lex unit test corpus.
+- Diagnostics report through the same Basic diagnostic IDs, but several rich hint/help branches from `LexerDiag.cpp` are still simplified pending a full diagnostic-detail pass.
+- The implementation is behavior-bearing and buildable; the C++ Lex gtest corpus has been reviewed for parity cases, but this Cangjie workspace currently has no executable Lex tests (`cjpm test` reports 0 tests).
 
 Remaining Lex selfhost markers: 0.
