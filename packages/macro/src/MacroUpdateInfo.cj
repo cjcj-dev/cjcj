@@ -119,6 +119,11 @@ public func AssignExprReplacement(target: ReplaceTarget, expr: Expr): Bool {
                 parentBinaryRight.rightExpr = Some(expr)
                 return true
             }
+        } else if (target.exprField == ExprFieldKind.VAR_DECL_INITIALIZER) {
+            if (let Some(parentVarDecl) <- (parentNode as VarDecl)) {
+                parentVarDecl.initializer = Some(expr)
+                return true
+            }
         }
     }
     if (let Some(box) <- target.exprBox) {
@@ -150,6 +155,8 @@ public func UpdateMacroInfo(node: Node, collector: MacroCollector): Unit {
     } else if (let Some(binary) <- (node as BinaryExpr)) {
         updateExprField(binary.leftExpr, binary, ExprFieldKind.BINARY_LEFT_EXPR, collector)
         updateExprField(binary.rightExpr, binary, ExprFieldKind.BINARY_RIGHT_EXPR, collector)
+    } else if (let Some(varDecl) <- (node as VarDecl)) {
+        updateExprField(varDecl.initializer, varDecl, ExprFieldKind.VAR_DECL_INITIALIZER, collector)
     } else if (let Some(classDecl) <- (node as ClassDecl)) {
         updateDeclContainer(classDecl.members, classDecl, collector)
     } else if (let Some(structDecl) <- (node as StructDecl)) {

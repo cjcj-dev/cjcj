@@ -4,6 +4,7 @@ import std.collection.*
 
 public let TEST_REGISTER_ATTR: String = "TEST_REGISTER"
 public let TEST_ENTRY_NAME: String = "test_entry"
+private let TEST_PACKAGE_SUFFIX: String = "$test"
 
 public func MakeOwnedNodeDecl(kind: ASTKind): Decl {
     let decl = Decl(kind)
@@ -51,6 +52,18 @@ public func CreateIfExpr(cond: Expr, thenBlock: Block): IfExpr {
     expr.thenBody = Some(thenBlock)
     expr.EnableAttr(Attribute.COMPILER_ADD)
     return expr
+}
+
+public func CreatePrimitiveType(kind: TypeKind): PrimitiveType {
+    let ty = PrimitiveType(kind)
+    ty.EnableAttr(Attribute.COMPILER_ADD)
+    return ty
+}
+
+public func CreateRefType(name: String): RefType {
+    let ty = RefType(name)
+    ty.EnableAttr(Attribute.COMPILER_ADD)
+    return ty
 }
 
 public class TestPackage {
@@ -115,10 +128,8 @@ private func getTopLevelFuncDecls(pkg: Package, out: ArrayList<FuncDecl>): Unit 
             if (let Some(funcDecl) <- (decl as FuncDecl)) {
                 out.add(funcDecl)
             } else if (let Some(med) <- (decl as MacroExpandDecl)) {
-                if (let Some(innerDecl) <- med.invocation.decl) {
-                    if (let Some(funcDecl) <- (innerDecl as FuncDecl)) {
-                        out.add(funcDecl)
-                    }
+                if (let Some(funcDecl) <- getFuncFromMacro(med)) {
+                    out.add(funcDecl)
                 }
             }
         }
@@ -156,16 +167,78 @@ private func findMacro(med: MacroExpandDecl, target: String): Bool {
     return false
 }
 
-private func getFuncFromMacro(med: MacroExpandDecl): Option<FuncDecl> {
+private func getDeclFromMacro(med: MacroExpandDecl, expectedKind: ASTKind): Option<Decl> {
     if (let Some(innerDecl) <- med.invocation.decl) {
-        if (let Some(funcDecl) <- (innerDecl as FuncDecl)) {
-            return Some(funcDecl)
+        if (innerDecl.astKind == expectedKind) {
+            return Some(innerDecl)
         }
         if (let Some(nextMed) <- (innerDecl as MacroExpandDecl)) {
-            return getFuncFromMacro(nextMed)
+            return getDeclFromMacro(nextMed, expectedKind)
         }
     }
     return None
+}
+
+private func getFuncFromMacro(med: MacroExpandDecl): Option<FuncDecl> {
+    if (let Some(funcDeclNode) <- getDeclFromMacro(med, ASTKind.FUNC_DECL)) {
+        if (let Some(funcDecl) <- (funcDeclNode as FuncDecl)) {
+            return Some(funcDecl)
+        }
+    }
+    return None
+}
+
+private func getClassFromMacro(med: MacroExpandDecl): Option<ClassDecl> {
+    if (let Some(classDeclNode) <- getDeclFromMacro(med, ASTKind.CLASS_DECL)) {
+        if (let Some(classDecl) <- (classDeclNode as ClassDecl)) {
+            return Some(classDecl)
+        }
+    }
+    return None
+}
+
+private func isUnitFunction(fd: FuncDecl): Bool {
+    if (let Some(retType) <- fd.funcBody.retType) {
+        if (let Some(primitiveType) <- (retType as PrimitiveType)) {
+            return primitiveType.kind == TypeKind.TYPE_UNIT
+        }
+        return retType.name == "Unit"
+    }
+    return true
+}
+
+private func hasParameterlessConstructor(classDecl: ClassDecl): Bool {
+    var hasConstructorWithInput = false
+    var hasConstructorWithoutInput = false
+    for (member in classDecl.members) {
+        if (let Some(funcDecl) <- (member as FuncDecl)) {
+            if (funcDecl.TestAttr(Attribute.CONSTRUCTOR)) {
+                if (!funcDecl.funcBody.paramLists.isEmpty() && funcDecl.funcBody.paramLists[0].params.isEmpty()) {
+                    hasConstructorWithoutInput = true
+                } else if (!funcDecl.funcBody.paramLists.isEmpty()) {
+                    hasConstructorWithInput = true
+                }
+            }
+        }
+    }
+    if (hasConstructorWithoutInput) {
+        return true
+    }
+    if (hasConstructorWithInput) {
+        return false
+    }
+    return true
+}
+
+private func isTestPackageName(packageName: String): Bool {
+    return packageName.endsWith(TEST_PACKAGE_SUFFIX)
+}
+
+private func getMainPartPackageName(packageName: String): String {
+    if (isTestPackageName(packageName)) {
+        return packageName[0..(packageName.size - TEST_PACKAGE_SUFFIX.size)]
+    }
+    return packageName
 }
 
 private func createMethodCall(refName: String, decl: FuncDecl, args: ArrayList<FuncArg>): CallExpr {
@@ -174,12 +247,20 @@ private func createMethodCall(refName: String, decl: FuncDecl, args: ArrayList<F
     return CreateCallExpr(method, args, target: Some(decl))
 }
 
-private func createSuiteVarDecl(varName: String, suiteName: String, suiteKind: String): Decl {
-    let vd = Decl(ASTKind.VAR_DECL)
+private func createSuiteVarDecl(varName: String, suiteName: String, suiteKind: String): VarDecl {
+    let vd = VarDecl()
     vd.identifier = varName
     vd.fullPackageName = suiteName
+    vd.declType = Some(CreateRefType(suiteKind))
+    let suiteNameArg = FuncArg()
+    let suiteLiteral = LitConstExpr()
+    suiteLiteral.kind = TokenKind.STRING_LITERAL
+    suiteLiteral.rawString = suiteName
+    suiteNameArg.expr = Some(suiteLiteral)
+    let suiteArgs = ArrayList<FuncArg>()
+    suiteArgs.add(suiteNameArg)
+    vd.initializer = Some(CreateCallExpr(CreateRefExpr(suiteKind), suiteArgs))
     vd.EnableAttr(Attribute.COMPILER_ADD)
-    let _ = suiteKind
     return vd
 }
 
@@ -202,8 +283,6 @@ public class TestEntryConstructor {
 
     public static func ConstructTestSuite(moduleName: String, srcPkgs: ArrayList<Package>,
         importedPkgs: ArrayList<PackageDecl>, compileTestsOnly: Bool, mockEnabled: Bool): Unit {
-        let _ = importedPkgs
-        let _ = compileTestsOnly
         let testMod = TestModule(moduleName)
         for (pkg in srcPkgs) {
             let testPkg = TestPackage(pkg.fullPackageName)
@@ -212,6 +291,16 @@ public class TestEntryConstructor {
                 testPkg.testRegisterFunctions.add(funcDecl)
             }
             testMod.testPackages.add(testPkg)
+        }
+        if (!srcPkgs.isEmpty() && compileTestsOnly && isTestPackageName(srcPkgs[srcPkgs.size - 1].fullPackageName)) {
+            if (let Some(mainPartPkg) <- FindMainPartPkgForTestPkg(srcPkgs[srcPkgs.size - 1], importedPkgs)) {
+                let mainTestPkg = TestPackage(mainPartPkg.fullPackageName)
+                let mainFuncs = getTestSuiteRegisterFunctions(mainPartPkg)
+                for (mainFuncDecl in mainFuncs) {
+                    mainTestPkg.testRegisterFunctions.add(mainFuncDecl)
+                }
+                testMod.testPackages.add(mainTestPkg)
+            }
         }
         if (srcPkgs.isEmpty() || srcPkgs[0].files.isEmpty()) {
             return
@@ -242,6 +331,11 @@ public class TestEntryConstructor {
             CheckFunctionWithAtTest(med, funcs, "Test")
             CheckFunctionWithAtTest(med, funcs, "TestCase")
             CheckClassWithMacro(med)
+            if (let Some(expandedDecl) <- med.invocation.decl) {
+                if (expandedDecl.astKind == ASTKind.CLASS_DECL) {
+                    CheckTestSuiteConstraints(expandedDecl, funcs)
+                }
+            }
         }
         if (let Some(decl) <- (root as Decl)) {
             for (member in decl.GetMemberDecls()) {
@@ -257,11 +351,15 @@ public class TestEntryConstructor {
         if (!findMacro(med, "Test") && !findMacro(med, "TestCase")) {
             return
         }
-        if (let Some(innerDecl) <- med.invocation.decl) {
-            if (let Some(classDecl) <- (innerDecl as ClassDecl)) {
-                if (findModifier(classDecl, "foreign")) {
-                    diag.Diagnose(med.begin, "@Test modified foreign class")
-                }
+        if (let Some(classDecl) <- getClassFromMacro(med)) {
+            if (findMacro(med, "Test") && findModifier(classDecl, "foreign")) {
+                diag.Diagnose(med.begin, "@Test modified foreign class")
+            }
+            if (findMacro(med, "TestCase") && findModifier(classDecl, "foreign")) {
+                diag.Diagnose(med.begin, "@TestCase modified foreign class")
+            }
+            if (findMacro(med, "Test") && !hasParameterlessConstructor(classDecl)) {
+                diag.Diagnose(med.begin, "Class modified by @Test must contain a parameterless construction.")
             }
         }
     }
@@ -276,6 +374,9 @@ public class TestEntryConstructor {
             }
             if (macroName == "TestCase" && containsFunc(funcs, fd)) {
                 diag.Diagnose(med.begin, "@" + macroName + " modified top level function")
+            }
+            if (!isUnitFunction(fd)) {
+                diag.Diagnose(med.begin, "@" + macroName + " modified function type is not ()->Unit")
             }
             if (findModifier(fd, "foreign")) {
                 diag.Diagnose(med.begin, "@" + macroName + " modified foreign function")
@@ -307,12 +408,14 @@ public class TestEntryConstructor {
         }
         let entryFunc = FuncDecl()
         entryFunc.identifier = TEST_ENTRY_NAME
-        entryFunc.fullPackageName = pkg.fullPackageName
+        let packageName = getMainPartPackageName(pkg.fullPackageName)
+        entryFunc.fullPackageName = packageName
         entryFunc.EnableAttr(Attribute.GLOBAL)
         entryFunc.EnableAttr(Attribute.COMPILER_ADD)
         entryFunc.curFile = Some(pkg.files[0])
+        entryFunc.funcBody.retType = Some(CreatePrimitiveType(TypeKind.TYPE_INT64))
         let body = Block()
-        body.body.add(createSuiteVarDecl("testPkg", pkg.fullPackageName, "TestPackage"))
+        body.body.add(createSuiteVarDecl("testPkg", packageName, "TestPackage"))
         if (mockEnabled) {
             body.body.add(CreateCallExpr(CreateMemberAccess(CreateRefExpr("testPkg"), "enableOptimizedMockForBench"),
                 ArrayList<FuncArg>()))
@@ -353,7 +456,7 @@ public class TestEntryConstructor {
     }
 
     public static func FindMainPartPkgForTestPkg(testPackage: Package, importedPkgs: ArrayList<PackageDecl>): Option<Package> {
-        let mainPartPkgName = testPackage.fullPackageName.replace(".test", "")
+        let mainPartPkgName = getMainPartPackageName(testPackage.fullPackageName)
         for (packageDecl in importedPkgs) {
             if (let Some(srcPackage) <- packageDecl.srcPackage) {
                 if (srcPackage.fullPackageName == mainPartPkgName) {

@@ -12,6 +12,7 @@ Current constraints:
 - The in-package macro server path now classifies staged/server exits, deserializes macro-call batches, evaluates calls, serializes results, and resets per-stage state through the local process-message bridge.
 - Macro-call collection now follows represented expression fields (function parameter defaults, function arguments, call bases, member bases, returns, if conditions, and binary operands) and writes expanded expression replacements back to their parent AST fields.
 - The local generated-token scanner now handles comments, escaped string and rune forms, multiline/raw strings, built-in type keywords, and the common multi-character operators used when reparsing macro output.
+- Test-entry construction now participates in the package expansion flow, handles `$test` main-package pairing, models primitive/ref/variable declaration nodes locally, checks `@Test`/`@TestCase` Unit-return and constructor constraints, and collects macro calls in variable initializers.
 - Message and AST serialization use deterministic compiling codecs because generated flatbuffer schema packages are not available to this isolated package.
 - Generated-token parsing uses a local bridge until the real Parse entry point can be imported without changing package manifests.
 

@@ -181,6 +181,7 @@ public enum ExprFieldKind {
     | IF_COND_EXPR
     | BINARY_LEFT_EXPR
     | BINARY_RIGHT_EXPR
+    | VAR_DECL_INITIALIZER
 }
 
 private func ExprFieldKindIndex(kind: ExprFieldKind): Int64 {
@@ -194,6 +195,7 @@ private func ExprFieldKindIndex(kind: ExprFieldKind): Int64 {
         case ExprFieldKind.IF_COND_EXPR => 6
         case ExprFieldKind.BINARY_LEFT_EXPR => 7
         case ExprFieldKind.BINARY_RIGHT_EXPR => 8
+        case ExprFieldKind.VAR_DECL_INITIALIZER => 9
     }
 }
 

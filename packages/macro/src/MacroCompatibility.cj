@@ -962,6 +962,59 @@ public open class Type <: Node {
     }
 }
 
+public enum TypeKind {
+    | TYPE_UNKNOWN
+    | TYPE_UNIT
+    | TYPE_INT64
+}
+
+private func TypeKindIndex(kind: TypeKind): Int64 {
+    return match (kind) {
+        case TypeKind.TYPE_UNKNOWN => 0
+        case TypeKind.TYPE_UNIT => 1
+        case TypeKind.TYPE_INT64 => 2
+    }
+}
+
+extend TypeKind <: Equatable<TypeKind> {
+    public operator func ==(right: TypeKind): Bool {
+        return TypeKindIndex(this) == TypeKindIndex(right)
+    }
+
+    public operator func !=(right: TypeKind): Bool {
+        return !(this == right)
+    }
+}
+
+public class PrimitiveType <: Type {
+    public var kind: TypeKind = TypeKind.TYPE_UNKNOWN
+
+    public init() {
+        super()
+    }
+
+    public init(kind: TypeKind) {
+        super()
+        this.kind = kind
+        name = match (kind) {
+            case TypeKind.TYPE_UNIT => "Unit"
+            case TypeKind.TYPE_INT64 => "Int64"
+            case TypeKind.TYPE_UNKNOWN => ""
+        }
+    }
+}
+
+public class RefType <: Type {
+    public init() {
+        super()
+    }
+
+    public init(name: String) {
+        super()
+        this.name = name
+    }
+}
+
 public open class Pattern <: Node {
     public init() {
         super(ASTKind.UNKNOWN)
@@ -1138,6 +1191,23 @@ public open class FuncParam <: Decl {
         let out = ArrayList<Node>()
         if (let Some(item) <- assignment) {
             out.add(item)
+        }
+        return out
+    }
+}
+
+public class VarDecl <: Decl {
+    public var declType: Option<Type> = None
+    public var initializer: Option<Expr> = None
+
+    public init() {
+        super(ASTKind.VAR_DECL)
+    }
+
+    public override func Children(): ArrayList<Node> {
+        let out = ArrayList<Node>()
+        if (let Some(initExpr) <- initializer) {
+            out.add(initExpr)
         }
         return out
     }
@@ -1443,6 +1513,7 @@ public class CompilerGlobalOptions {
     public var compileTestsOnly: Bool = false
     public var compileCjd: Bool = false
     public var enableAddCommentToAst: Bool = false
+    public var mockEnabled: Bool = false
     public var moduleName: String = ""
     public var executablePath: String = ""
     public let macroLib: ArrayList<String> = ArrayList<String>()
@@ -1464,6 +1535,7 @@ public class CompilerInvocation {
 public class ImportManager {
     public let importedMacroPackages: ArrayList<Package> = ArrayList<Package>()
     public let importedStdMacroPackages: ArrayList<String> = ArrayList<String>()
+    public let importedPackageDecls: ArrayList<PackageDecl> = ArrayList<PackageDecl>()
     public let searchPath: ArrayList<String> = ArrayList<String>()
     public let usedMacroDecls: ArrayList<(File, Decl)> = ArrayList<(File, Decl)>()
 
@@ -1475,6 +1547,10 @@ public class ImportManager {
 
     public func GetImportedStdMacroPackages(): ArrayList<String> {
         return importedStdMacroPackages
+    }
+
+    public func GetAllImportedPackages(): ArrayList<PackageDecl> {
+        return importedPackageDecls
     }
 
     public func GetSearchPath(): ArrayList<String> {

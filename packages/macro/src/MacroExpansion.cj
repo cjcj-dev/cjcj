@@ -102,7 +102,6 @@ private func parseGeneratedNodes(tokens: ArrayList<Token>, macroNode: MacroCall)
         return out
     }
     if (macroNode.RequireNode().astKind == ASTKind.MACRO_EXPAND_DECL) {
-        let decl = Decl(ASTKind.UNKNOWN)
         if (first.kind == TokenKind.FUNC || first.kind == TokenKind.MACRO) {
             let fd = FuncDecl()
             fd.identifier = findFollowingIdentifier(tokens, 1)
@@ -112,6 +111,16 @@ private func parseGeneratedNodes(tokens: ArrayList<Token>, macroNode: MacroCall)
             out.add(fd)
             return out
         }
+        if (first.kind == TokenKind.VAR || first.kind == TokenKind.LET || first.kind == TokenKind.CONST) {
+            let varDecl = VarDecl()
+            varDecl.identifier = findFollowingIdentifier(tokens, 1)
+            varDecl.begin = first.Begin()
+            varDecl.end = tokens[tokens.size - 1].End()
+            varDecl.curFile = macroNode.RequireNode().curFile
+            out.add(varDecl)
+            return out
+        }
+        let decl = Decl(ASTKind.UNKNOWN)
         decl.identifier = findFollowingIdentifier(tokens, 0)
         decl.begin = first.Begin()
         decl.end = tokens[tokens.size - 1].End()
@@ -235,6 +244,11 @@ public class MacroExpansion {
         }
         for (pkg in packages) {
             Execute(pkg)
+        }
+        if (ci.invocation.globalOptions.enableCompileTest && ci.invocation.globalOptions.CompileExecutable()) {
+            TestEntryConstructor.ConstructTestSuite(ci.invocation.globalOptions.moduleName, packages,
+                ci.importManager.GetAllImportedPackages(), ci.invocation.globalOptions.compileTestsOnly,
+                ci.invocation.globalOptions.mockEnabled)
         }
         for (pkg in packages) {
             AddCurFile(pkg)
