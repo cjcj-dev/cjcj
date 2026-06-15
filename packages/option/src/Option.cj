@@ -188,7 +188,7 @@ private func replaceStrings(target: ArrayList<String>, values: Array<String>): U
     for (value in values) { target.add(value) }
 }
 
-public class GlobalOptions <: Option {
+public open class GlobalOptions <: Option {
     public var frontendMode: Bool = false
     public let environment: EnvironmentOptions = EnvironmentOptions()
     public var host: TripleInfo = TripleInfo()
@@ -369,11 +369,17 @@ public class GlobalOptions <: Option {
                 Errorln(opt.str + " is an experimental feature. \"--experimental\" option is required.")
                 return false
             }
-            let parsed = ParseAction(this, opt)
-            if (!parsed.success) { return false }
+            let optionResult = ParseOption(opt)
+            if (!optionResult.hasValue || !optionResult.value) { return false }
             OccurrenceCheck(opt, argList)
         }
         return ProcessInputs(argList.GetInputs()) && PerformPostActions()
+    }
+
+    protected open func ParseOption(arg: OptionArgInstance): MaybeBool {
+        let result = ParseAction(this, arg)
+        if (!result.handled) { return MaybeBool() }
+        return MaybeBool(result.success)
     }
 
     private func CollectOrderedInputFiles(entry: ArgListEntry, index: UInt64): Unit {
@@ -460,6 +466,7 @@ public class GlobalOptions <: Option {
     public func IsFullLTOEnabled(): Bool { return ltoMod == LTOMode.FULL_LTO }
     public func IsCompileAsExeEnabled(): Bool { return enableCompileAsExe }
     public func IsLTOPkgVisibilityEnabled(): Bool { return ltoHideAllPkgs || !ltoVisiblePkgs.isEmpty() }
+    public func GetLtoVisiblePkgs(): Array<String> { return ltoVisiblePkgs.toArray() }
     public func AddLtoVisiblePkg(pkg: String): Unit { ltoVisiblePkgs.add(pkg) }
     public func SelectCHIROpt(flag: OptimizationFlag): Unit { addOptimizationFlag(selectedCHIROpts, flag) }
     public func DeselectCHIROpt(flag: OptimizationFlag): Unit { removeOptimizationFlag(selectedCHIROpts, flag) }
@@ -480,6 +487,8 @@ public class GlobalOptions <: Option {
     }
     public func IsConstEvalEnabled(): Bool { return !interpreter && !interpCHIR }
     public func IsSancovOptionEnabled(): Bool { return sancovOption.IsSancovEnabled() }
+    public open func IsObfuscationEnabled(): Bool { return false }
+    public open func ReprocessObfuseOption(): Bool { return true }
     public func IsEmitCHIREnable(): Bool { return emitCHIRPhase != CandidateEmitCHIRPhase.NA }
     public func IsCompilingCJMPSpecific(): Bool { return !commonPartChirs.isEmpty() }
     public func IsCompilingCJMP(): Bool { return IsCompilingCJMPSpecific() || outputMode == OutputMode.CHIR }
@@ -500,6 +509,9 @@ public class GlobalOptions <: Option {
     public func NeedDumpIR(): Bool { return dumpAll || dumpIR }
     public func NeedDumpIRToFile(): Bool { return (NeedDumpIR() && !dumpToScreen) || codegenDebugMode }
     public func NeedDumpIRToScreen(): Bool { return NeedDumpIR() && dumpToScreen }
+    public func SetFrontendMode(): Unit { frontendMode = true }
+    public func GetStackTraceFormat(): String { return "--" + StackTraceFormatToSerializedString() }
+    public func GetJobs(): UInt64 { return if (jobs.hasValue) { jobs.value } else { 1u64 } }
 
     public func ReadPathsFromEnvironmentVars(environmentVars: HashMap<String, String>): Unit {
         environment.allVariables.clear()
@@ -609,6 +621,11 @@ public class GlobalOptions <: Option {
     }
 
     public func CheckDirectoryPath(path: String): MaybeString {
+        if (FileExist(path) && IsDir(path)) { return GetAbsPath(path) }
+        return MaybeString()
+    }
+
+    public func ValidateDirectoryPath(path: String): MaybeString {
         if (FileExist(path) && IsDir(path)) { return GetAbsPath(path) }
         return MaybeString()
     }
@@ -751,7 +768,7 @@ public class GlobalOptions <: Option {
         return true
     }
 
-    private func PerformPostActions(): Bool {
+    protected open func PerformPostActions(): Bool {
         chirLLVM = backend == BackendType.CJNATIVE
         chirCC = chirCC || chirLLVM
         if (interpreter) { chirCC = true }
@@ -810,6 +827,7 @@ public class GlobalOptions <: Option {
         if (enablePgoInstrUse && (!FileExist(pgoProfileFile) || GetFileExtension(pgoProfileFile) != "profdata")) {
             return false
         }
+        if (!ReprocessObfuseOption()) { return false }
         for (commonCjo in commonPartCjos) {
             if (GetFileExtension(commonCjo) != "cjo") { return false }
         }
@@ -826,7 +844,7 @@ public class GlobalOptions <: Option {
         if (!compilePackage && srcFiles.isEmpty() && !inputObjs.isEmpty() && !experimentalMode) { return false }
         if (!jobs.hasValue) { jobs = MaybeUInt64(1u64) }
         if (target.os == OSType.WINDOWS || target.os == OSType.DARWIN || target.os == OSType.IOS ||
-            IsLTOEnabled() || enableCoverage) {
+            IsObfuscationEnabled() || IsLTOEnabled() || enableCoverage) {
             aggressiveParallelCompile = MaybeUInt64(1u64)
         } else if (!aggressiveParallelCompile.hasValue && (optimizationLevel == OptimizationLevel.O0 ||
             aggressiveParallelCompileWithoutArg)) {

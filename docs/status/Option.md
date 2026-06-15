@@ -38,6 +38,16 @@ to absolute paths, common-part CJMP extensions are validated, and the public
 `TempFileInfo`/frontend-output and builtin-dependency state used across the
 driver/frontend boundary is represented.
 
+This pass restores the C++ subclass extension surface on `GlobalOptions`:
+`ParseOption`, `PerformPostActions`, `IsObfuscationEnabled`, and
+`ReprocessObfuseOption` now exist as overridable hooks, unhandled option IDs no
+longer silently succeed, the obfuscation hook participates in post-processing
+and aggressive-parallel-compile normalization, and small public helpers such as
+`SetFrontendMode`, `GetLtoVisiblePkgs`, `GetStackTraceFormat`,
+`GetJobs`, and `ValidateDirectoryPath` are present. Triple full-string
+serialization now follows the C++ empty-environment separator behavior and
+`GetArchType` is exposed.
+
 Remaining fidelity gaps are not hidden behind self-host markers: this package
 still uses local diagnostics instead of Basic diagnostic IDs, and some file-mode
 permission checks are represented by the currently available Cangjie filesystem

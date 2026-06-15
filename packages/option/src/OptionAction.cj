@@ -58,7 +58,10 @@ public func ParseAction(opts: GlobalOptions, arg: OptionArgInstance): ActionResu
     }
     if (id == ID.OUTPUT_JAVA_GEN_DIR) { opts.outputJavaGenDir = MaybeString(arg.value); return handled() }
     if (id == ID.OUTPUT_OBJC_GEN_DIR) { opts.outputObjCGenDir = arg.value; return handled() }
-    if (id == ID.MODULE_NAME) { opts.moduleName = arg.value; return handled() }
+    if (id == ID.MODULE_NAME) {
+        Warningln("option '" + arg.name + "' is deprecated and will be removed in the future")
+        return handled()
+    }
     if (id == ID.PACKAGE_COMPILE) { opts.compilePackage = true; return handled() }
     if (id == ID.IMPORT_PATH) {
         let path = opts.CheckDirectoryPath(arg.value)
@@ -283,7 +286,7 @@ public func ParseAction(opts: GlobalOptions, arg: OptionArgInstance): ActionResu
     if (id == ID.DISCARD_EH_FRAME) { opts.discardEhFrame = true; return handled() }
     if (id == ID.JOBS) { return parseJobs(opts, arg.value, false) }
     if (id == ID.AGGRESSIVE_PARALLEL_COMPILE) { return parseJobs(opts, arg.value, true) }
-    return handled()
+    return missing()
 }
 
 private func parseOutputType(opts: GlobalOptions, value: String): ActionResult {

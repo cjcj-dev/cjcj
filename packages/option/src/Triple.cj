@@ -65,7 +65,7 @@ public class TripleInfo {
     public func ToFullTripleString(): String {
         var systemStr = OSToString()
         let envStr = EnvironmentToString()
-        if (systemStr != "unknown" && envStr != "unknown" && !envStr.isEmpty()) {
+        if (systemStr != "unknown" && envStr != "unknown") {
             systemStr = systemStr + "-" + envStr
         }
         return ArchToString() + "-" + VendorToString() + "-" + systemStr
@@ -87,6 +87,7 @@ public class TripleInfo {
     public func IsMinGW(): Bool { return os == OSType.WINDOWS && env == EnvironmentType.GNU }
     public func IsMacOS(): Bool { return vendor == Vendor.APPLE && (os == OSType.DARWIN || os == OSType.IOS) }
     public func IsArm32(): Bool { return arch == ArchType.ARM32 }
+    public func GetArchType(): ArchType { return arch }
     public func Equal(other: TripleInfo): Bool {
         return arch == other.arch && vendor == other.vendor && os == other.os && env == other.env
     }
