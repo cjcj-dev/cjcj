@@ -1,5 +1,7 @@
 package cangjie_compiler::basic
 
+import std.collection.*
+
 private func severityName(severity: DiagSeverity): String {
     return match (severity) {
         case DiagSeverity.DS_ERROR => "error"
@@ -170,14 +172,49 @@ public class DiagnosticEmitter {
             }
             return
         }
+        let substitutions = sortedSubstitutions(help)
+        if (substitutions.isEmpty()) {
+            return
+        }
         renderLabeledMessage(builder, "help", help.helpMes + ":", HELP_COLOR)
         let width = lineNumberWidth()
-        renderLocation(builder, help.substitutions[0].range.begin, width)
+        renderLocation(builder, substitutions[0].range.begin, width)
         renderGutterLine(builder, width)
-        for (substitution in help.substitutions) {
-            renderSourceLine(builder, substitution.range, OTHER_HINT_MARKER, substitution.str, HELP_COLOR, width)
+        renderHelpSubstitutionSource(builder, substitutions, width)
+        renderGutterLine(builder, width)
+    }
+
+    private func renderHelpSubstitutionSource(builder: StringBuilder, substitutions: Array<Substitution>, width: Int64): Unit {
+        let firstSubstitution = substitutions[0]
+        let firstPos = firstSubstitution.range.begin
+        var line = sourceLine(firstPos)
+        if (line.isEmpty()) {
+            return
         }
-        renderGutterLine(builder, width)
+        let lastSubstitution = substitutions[substitutions.size - 1]
+        if (line.size < lastSubstitution.range.begin.column) {
+            return
+        }
+        let replacementRanges = ArrayList<Range>()
+        for (substitution in substitutions) {
+            let range = substitution.range
+            if (range.begin.fileID != firstPos.fileID || range.begin.line != firstPos.line ||
+                range.end.line != range.begin.line) {
+                continue
+            }
+            let replaceBegin = range.begin.column - 1
+            let replaceEnd = range.end.column - 1
+            if (replaceBegin < 0 || replaceBegin > line.size || replaceEnd < replaceBegin) {
+                continue
+            }
+            let fixedEnd = if (replaceEnd > line.size) { line.size } else { replaceEnd }
+            line = line[0..replaceBegin] + substitution.str + line[fixedEnd..]
+            replacementRanges.add(MakeRange(range.begin, range.begin + substitution.str.size))
+        }
+        builder.append(sourceLinePrefix(firstPos.line, width) + printableSourceLine(line) + "\n")
+        for (range in replacementRanges) {
+            renderInlineMarker(builder, line, range.begin.column, range.end.column, OTHER_HINT_MARKER, "", HELP_COLOR, width)
+        }
     }
 
     private func renderLabeledMessage(builder: StringBuilder, label: String, message: String, color: DiagColor): Unit {
@@ -270,6 +307,25 @@ public class DiagnosticEmitter {
         builder.append(sourceLinePrefix(lineNumber, width) + printableLine + "\n")
         let before = if (beginColumn > 1) { GetSpaceBeforeTarget(line, beginColumn) } else { "" }
         let markerWidth = displayedRangeWidth(line, range.begin.column, range.end.column)
+        var indicator = repeatString(marker, markerWidth)
+        if (!hintText.isEmpty()) {
+            indicator += " " + hintText
+        }
+        builder.append(emptyLinePrefix(width) + before + colorForEmitter(noColor, color, indicator) + "\n")
+    }
+
+    private func renderInlineMarker(
+        builder: StringBuilder,
+        line: String,
+        beginColumn: Int64,
+        endColumn: Int64,
+        marker: String,
+        hintText: String,
+        color: DiagColor,
+        width: Int64
+    ): Unit {
+        let before = if (beginColumn > 1) { GetSpaceBeforeTarget(line, beginColumn) } else { "" }
+        let markerWidth = displayedRangeWidth(line, beginColumn, endColumn)
         var indicator = repeatString(marker, markerWidth)
         if (!hintText.isEmpty()) {
             indicator += " " + hintText
@@ -449,6 +505,18 @@ public class DiagnosticEmitter {
 
     private func emptyLinePrefix(width: Int64): String {
         return repeatString(" ", width + 1) + colorForEmitter(noColor, OTHER_HINT_COLOR, SOURCE_GUTTER + " ")
+    }
+
+    private func sortedSubstitutions(help: DiagHelp): Array<Substitution> {
+        let sorted = ArrayList<Substitution>()
+        for (substitution in help.substitutions) {
+            var idx: Int64 = 0
+            while (idx < sorted.size && sorted[idx].range.begin <= substitution.range.begin) {
+                idx++
+            }
+            sorted.add(substitution, at: idx)
+        }
+        return sorted.toArray()
     }
 }
 
