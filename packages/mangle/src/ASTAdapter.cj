@@ -670,7 +670,11 @@ public class MangleAstAdapter {
             }
         } else if (let Some(constantType) <- (typeNode as ConstantType)) {
             if (let Some(expr) <- constantType.constantExpr) {
-                target.constantValue = expr.ToString()
+                if (let Some(literal) <- (expr as LitConstExpr)) {
+                    target.constantValue = literal.stringValue
+                } else {
+                    target.constantValue = expr.ToString()
+                }
             }
         } else if (let Some(varrayType) <- (typeNode as VArrayType)) {
             if (let Some(typeArg) <- varrayType.typeArgument) {

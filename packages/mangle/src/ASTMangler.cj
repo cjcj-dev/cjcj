@@ -194,6 +194,33 @@ private func sortedStrings(values: ArrayList<String>): ArrayList<String> {
     return out
 }
 
+private class GenericConstraintMangle {
+    public var key: String
+    public var rendered: String
+
+    public init(key: String, rendered: String) {
+        this.key = key
+        this.rendered = rendered
+    }
+}
+
+private func sortedGenericConstraints(values: ArrayList<GenericConstraintMangle>): ArrayList<GenericConstraintMangle> {
+    let out = ArrayList<GenericConstraintMangle>()
+    for (value in values) {
+        out.add(value)
+    }
+    sort(out, by: { left: GenericConstraintMangle, right: GenericConstraintMangle =>
+        if (left.key < right.key) {
+            Ordering.LT
+        } else if (left.key > right.key) {
+            Ordering.GT
+        } else {
+            Ordering.EQ
+        }
+    }, stable: true)
+    return out
+}
+
 private func flattenVarWithPattern(pattern: ManglePattern, out: ArrayList<ManglePattern>): Unit {
     if (pattern.astKind == MangleAstKind.VAR_PATTERN || pattern.astKind == MangleAstKind.WILDCARD_PATTERN) {
         out.add(pattern)
@@ -443,11 +470,13 @@ public class ASTMangler {
     }
 
     private func MangleGenericConstraints(generic: MangleGeneric): String {
-        let constraints = ArrayList<String>()
+        let constraints = ArrayList<GenericConstraintMangle>()
         for (constraint in generic.genericConstraints) {
+            var constrainedType = ""
             var item = MANGLE_GEXTEND_PREFIX
             if (let Some(typeAnnotation) <- constraint.typeAnnotation) {
-                item += MangleAstType(typeAnnotation)
+                constrainedType = MangleAstType(typeAnnotation)
+                item += constrainedType
             }
             let uppers = ArrayList<String>()
             for (upper in constraint.upperBounds) {
@@ -456,11 +485,11 @@ public class ASTMangler {
             for (upper in sortedStrings(uppers)) {
                 item += ":" + upper
             }
-            constraints.add(item)
+            constraints.add(GenericConstraintMangle(constrainedType, item))
         }
         var out = ""
-        for (item in sortedStrings(constraints)) {
-            out += item
+        for (item in sortedGenericConstraints(constraints)) {
+            out += item.rendered
         }
         return out
     }
