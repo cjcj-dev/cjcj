@@ -16,7 +16,14 @@ tracking, compile-target defaults, sanitizer/LTO/compile-as-exe conflicts,
 coverage interactions, PGO checks, CJMP common-part consistency, OHOS static std
 normalization, and C++-shaped serialization helpers.
 
+The follow-up pass replaced extension-based directory guessing with
+`std.fs.FileInfo` predicates and `canonicalize`, implemented `--cfg` path vs
+key/value mode including `cfg.toml` loading and duplicate/built-in key checks,
+made cfg serialization deterministic, added environment path ingestion,
+Cangjie library path-name helpers, compilation cache path/name helpers, and
+corrected sanitizer coverage and target-triple edge cases.
+
 Remaining fidelity gaps are not hidden behind self-host markers: this package
-still uses a local filesystem shim instead of the full C++ `FileUtil` access
-model and cannot emit Basic diagnostic IDs until package dependency wiring is
-allowed.
+still uses local diagnostics instead of Basic diagnostic IDs, and cache file
+names use a deterministic local hash rather than the C++ SipHash utility until
+cross-package utility wiring is allowed.

@@ -60,6 +60,19 @@ public func SplitString(str: String, delimiter: String): Array<String> {
     return res.toArray()
 }
 
+public func SplitLines(str: String): Array<String> {
+    let ret = ArrayList<String>()
+    let rawLines = SplitString(str, "\n")
+    for (rawLine in rawLines) {
+        if (!rawLine.isEmpty() && rawLine[rawLine.size - 1] == b'\r') {
+            ret.add(rawLine[0..rawLine.size - 1])
+        } else {
+            ret.add(rawLine)
+        }
+    }
+    return ret.toArray()
+}
+
 public func StartsWith(value: String, prefix: String): Bool {
     return value.size >= prefix.size && value[0..prefix.size] == prefix
 }
@@ -102,15 +115,28 @@ public func JoinPath(left: String, right: String): String {
     return l + "/" + r
 }
 
+public func SplitEnvironmentPaths(value: String): Array<String> {
+    let delimiter = if (value.contains(";")) { ";" } else { ":" }
+    let ret = ArrayList<String>()
+    for (rawPath in SplitString(value, delimiter)) {
+        let path = rawPath.trimAscii()
+        if (!path.isEmpty()) { ret.add(path) }
+    }
+    return ret.toArray()
+}
+
 public func FileExist(path: String): Bool {
     return exists(path)
 }
 
 public func IsDir(path: String): Bool {
     if (!exists(path)) { return false }
-    let normalized = NormalizePath(path)
-    return normalized == "." || normalized == "/" || normalized[normalized.size - 1] == b'/' ||
-        GetFileExtension(normalized).isEmpty()
+    return FileInfo(path).isDirectory()
+}
+
+public func IsRegularFile(path: String): Bool {
+    if (!exists(path)) { return false }
+    return FileInfo(path).isRegular()
 }
 
 public func IsAbsolutePath(path: String): Bool {
@@ -119,7 +145,41 @@ public func IsAbsolutePath(path: String): Bool {
 
 public func GetAbsPath(path: String): MaybeString {
     if (path.isEmpty()) { return MaybeString() }
+    if (exists(path)) { return MaybeString(NormalizePath(canonicalize(path).toString())) }
     return MaybeString(NormalizePath(path))
+}
+
+public func ReadTextFile(path: String): MaybeString {
+    if (!IsRegularFile(path)) { return MaybeString() }
+    return MaybeString(String.fromUtf8(File.readFrom(path)))
+}
+
+public func CreateDirectory(path: String): Bool {
+    if (path.isEmpty()) { return false }
+    if (IsDir(path)) { return true }
+    Directory.create(path)
+    return IsDir(path)
+}
+
+public func IsIdentifier(value: String): Bool {
+    if (value.isEmpty()) { return false }
+    if (value.size > 2 && value[0] == b'`' && value[value.size - 1] == b'`') {
+        return IsIdentifier(value[1..value.size - 1])
+    }
+    let first = value[0]
+    if (!((first >= b'a' && first <= b'z') || (first >= b'A' && first <= b'Z') || first == b'_')) {
+        return false
+    }
+    var idx: Int64 = 1
+    while (idx < value.size) {
+        let ch = value[idx]
+        if (!((ch >= b'a' && ch <= b'z') || (ch >= b'A' && ch <= b'Z') ||
+            (ch >= b'0' && ch <= b'9') || ch == b'_')) {
+            return false
+        }
+        idx++
+    }
+    return true
 }
 
 public func BoolToSerializedString(value: Bool): String {
@@ -137,6 +197,47 @@ public func TryParseUInt64(value: String): MaybeUInt64 {
         idx++
     }
     return MaybeUInt64(result)
+}
+
+private func hexDigit(value: UInt64): String {
+    if (value == 0u64) { return "0" }
+    if (value == 1u64) { return "1" }
+    if (value == 2u64) { return "2" }
+    if (value == 3u64) { return "3" }
+    if (value == 4u64) { return "4" }
+    if (value == 5u64) { return "5" }
+    if (value == 6u64) { return "6" }
+    if (value == 7u64) { return "7" }
+    if (value == 8u64) { return "8" }
+    if (value == 9u64) { return "9" }
+    if (value == 10u64) { return "a" }
+    if (value == 11u64) { return "b" }
+    if (value == 12u64) { return "c" }
+    if (value == 13u64) { return "d" }
+    if (value == 14u64) { return "e" }
+    return "f"
+}
+
+public func UInt64ToHex(value: UInt64): String {
+    if (value == 0u64) { return "0" }
+    var current = value
+    var result = ""
+    while (current > 0u64) {
+        result = hexDigit(current % 16u64) + result
+        current = current / 16u64
+    }
+    return result
+}
+
+public func StableHashString(value: String): String {
+    var hash: UInt64 = 14695981039346656037u64
+    var idx: Int64 = 0
+    while (idx < value.size) {
+        hash = hash ^ UInt64(value[idx])
+        hash = hash * 1099511628211u64
+        idx++
+    }
+    return UInt64ToHex(hash)
 }
 
 public func Errorln(value: String): Unit {

@@ -368,20 +368,124 @@ private func parseErrorLimit(opts: GlobalOptions, value: String): ActionResult {
 
 private func parsePassedWhen(opts: GlobalOptions, value: String): ActionResult {
     if (value.isEmpty()) { return handled(success: false) }
+    if (isCfgPathMode(value)) {
+        let path = value.replace("\\=", "=")
+        if (!IsDir(path)) { return handled(success: false) }
+        opts.passedWhenCfgPaths.add(path)
+        return handled()
+    }
     let parts = SplitString(value, ",")
     for (part in parts) {
         let kv = SplitString(part, "=")
-        if (kv.size != 2) {
-            opts.passedWhenCfgPaths.add(part.replace("\\=", "="))
-        } else {
-            let key = kv[0].trimAscii()
-            let val = kv[1].trimAscii()
-            if (key.isEmpty() || val.isEmpty()) { return handled(success: false) }
-            if (opts.passedWhenKeyValue.contains(key)) { opts.passedWhenKeyValue.remove(key) }
-            opts.passedWhenKeyValue.add(key, val)
-        }
+        if (kv.size != 2) { return handled(success: false) }
+        let maybeKey = normalizeCfgKey(kv[0].trimAscii())
+        let val = kv[1].trimAscii()
+        if (!maybeKey.hasValue || val.isEmpty()) { return handled(success: false) }
+        if (!addCfgKeyValue(opts.passedWhenKeyValue, maybeKey.value, val)) { return handled(success: false) }
     }
     return handled()
+}
+
+private func countOccurrences(input: String, needle: String): Int64 {
+    if (needle.isEmpty()) { return 0 }
+    var count: Int64 = 0
+    var offset: Int64 = 0
+    var foundPos = input.indexOf(needle, offset)
+    while (let Some(found) <- foundPos) {
+        count++
+        offset = found + needle.size
+        foundPos = input.indexOf(needle, offset)
+    }
+    return count
+}
+
+private func isCfgPathMode(value: String): Bool {
+    return countOccurrences(value, "=") == countOccurrences(value, "\\=")
+}
+
+private func isBuiltinCondition(key: String): Bool {
+    return key == "os" || key == "backend" || key == "arch" || key == "debug" ||
+        key == "cjc_version" || key == "test"
+}
+
+private func normalizeCfgKey(rawKey: String): MaybeString {
+    if (rawKey.isEmpty() || !IsIdentifier(rawKey)) { return MaybeString() }
+    var key = rawKey
+    if (key.size > 2 && key[0] == b'`' && key[key.size - 1] == b'`') {
+        key = key[1..key.size - 1]
+    }
+    if (isBuiltinCondition(key)) { return MaybeString() }
+    return MaybeString(key)
+}
+
+private func addCfgKeyValue(map: HashMap<String, String>, key: String, value: String): Bool {
+    if (map.contains(key)) { return false }
+    map.add(key, value)
+    return true
+}
+
+private func isEscaped(input: String, index: Int64): Bool {
+    var count: Int64 = 0
+    var idx = index
+    while (idx >= 0 && input[idx] == b'\\') {
+        count++
+        idx--
+    }
+    return count % 2 == 1
+}
+
+private func findTomlComment(line: String): Int64 {
+    var insideString = false
+    var idx: Int64 = 0
+    while (idx < line.size) {
+        if (!insideString && line[idx] == b'#') {
+            return idx
+        }
+        if (line[idx] == b'"' && (idx == 0 || !isEscaped(line, idx - 1))) {
+            insideString = !insideString
+        }
+        idx++
+    }
+    return -1
+}
+
+private func parseConditionKeyValueLine(line: String, map: HashMap<String, String>): Bool {
+    let commentPos = findTomlComment(line)
+    let processedLine = if (commentPos >= 0) { line[0..commentPos] } else { line }
+    let trimmedLine = processedLine.trimAscii()
+    if (trimmedLine.isEmpty()) { return true }
+    let kv = SplitString(trimmedLine, "=")
+    if (kv.size != 2) { return false }
+    let maybeKey = normalizeCfgKey(kv[0].trimAscii())
+    let quotedValue = kv[1].trimAscii()
+    if (!maybeKey.hasValue || quotedValue.size <= 2 || quotedValue[0] != b'"' ||
+        quotedValue[quotedValue.size - 1] != b'"') {
+        return false
+    }
+    let unquotedValue = quotedValue[1..quotedValue.size - 1].replace("\\\"", "\"")
+    return addCfgKeyValue(map, maybeKey.value, unquotedValue)
+}
+
+public func SetupConditionalCompilationCfgFromFile(filePath: String, map: HashMap<String, String>): Bool {
+    let content = ReadTextFile(filePath)
+    if (!content.hasValue) { return false }
+    for (line in SplitLines(content.value)) {
+        if (!parseConditionKeyValueLine(line, map)) { return false }
+    }
+    return true
+}
+
+public func SetupConditionalCompilationCfg(opts: GlobalOptions): Bool {
+    if (!opts.passedWhenKeyValue.isEmpty()) { return true }
+    for (path in opts.passedWhenCfgPaths) {
+        let filePath = JoinPath(path, "cfg.toml")
+        if (FileExist(filePath)) {
+            return SetupConditionalCompilationCfgFromFile(filePath, opts.passedWhenKeyValue)
+        }
+    }
+    let defaultCfgFilePath = if (opts.packagePaths.isEmpty()) { "cfg.toml" } else { JoinPath(opts.packagePaths[0], "cfg.toml") }
+    if (!FileExist(defaultCfgFilePath)) { return true }
+    return SetupConditionalCompilationCfgFromFile(defaultCfgFilePath, opts.passedWhenKeyValue)
 }
 
 private func parseLto(opts: GlobalOptions, value: String): ActionResult {
@@ -415,8 +519,8 @@ private func parseSancovLevel(opts: GlobalOptions, value: String): ActionResult 
     if (!parsed.hasValue) { return handled(success: false) }
     if (parsed.value == 0u64) { opts.sancovOption.SetSancovLevel(SanitizerCoverageType.SCK_NONE); return handled() }
     if (parsed.value == 1u64) { opts.sancovOption.SetSancovLevel(SanitizerCoverageType.SCK_FUNCTION); return handled() }
-    if (parsed.value == 2u64) { opts.sancovOption.SetSancovLevel(SanitizerCoverageType.SCK_BB); return handled() }
-    return handled(success: false)
+    opts.sancovOption.SetSancovLevel(SanitizerCoverageType.SCK_BB)
+    return handled()
 }
 
 private func parsePrintBCHIR(opts: GlobalOptions, value: String): ActionResult {
@@ -471,8 +575,16 @@ public func ParseTargetTriple(opts: GlobalOptions, triple: String): Bool {
         if (StartsWith(parts[2], "ios")) {
             opts.target.os = OSType.IOS
             opts.target.apiLevel = parts[2][3..]
-            opts.target.env = if (parts.size == 4 && parts[3] == "simulator") { EnvironmentType.SIMULATOR } else { EnvironmentType.NOT_AVAILABLE }
-            return true
+            if (opts.target.apiLevel.isEmpty()) { opts.target.apiLevel = "11" }
+            if (parts.size == 4 && parts[3] == "simulator") {
+                opts.target.env = EnvironmentType.SIMULATOR
+                return true
+            }
+            if (parts.size == 3) {
+                opts.target.env = EnvironmentType.NOT_AVAILABLE
+                return true
+            }
+            return false
         }
         if (parts[2] == "darwin") {
             opts.target.os = OSType.DARWIN
@@ -490,7 +602,12 @@ public func ParseTargetTriple(opts: GlobalOptions, triple: String): Bool {
     if (envStr == "gnu" || envStr == "mingw32") { opts.target.env = EnvironmentType.GNU }
     else if (envStr == "ohos") { opts.target.env = EnvironmentType.OHOS }
     else if (envStr == "android") { opts.target.env = EnvironmentType.ANDROID; opts.target.apiLevel = MIN_ANDROID_API }
-    else if (StartsWith(envStr, "android")) { opts.target.env = EnvironmentType.ANDROID; opts.target.apiLevel = envStr[7..] }
+    else if (StartsWith(envStr, "android")) {
+        opts.target.env = EnvironmentType.ANDROID
+        opts.target.apiLevel = envStr[7..]
+        let parsed = TryParseUInt64(opts.target.apiLevel)
+        if (!parsed.hasValue || parsed.value < 23u64 || parsed.value > 10000u64) { return false }
+    }
     else if (envStr == "simulator") { opts.target.env = EnvironmentType.SIMULATOR }
     else { return false }
     return true

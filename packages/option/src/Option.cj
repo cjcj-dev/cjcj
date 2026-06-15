@@ -70,6 +70,24 @@ public class OrderedInput {
     }
 }
 
+public class CachePathName {
+    public let dir: String
+    public let file: String
+    public init(dir: String, file: String) {
+        this.dir = dir
+        this.file = file
+    }
+}
+
+private class CfgPair {
+    let key: String
+    let value: String
+    init(key: String, value: String) {
+        this.key = key
+        this.value = value
+    }
+}
+
 private func initPrintBCHIR(): ArrayList<Bool> {
     let ret = ArrayList<Bool>()
     var idx: Int64 = 0
@@ -111,6 +129,35 @@ private func joinStrings(values: ArrayList<String>, delimiter: String): String {
         idx++
     }
     return result
+}
+
+private func appendSortedString(values: ArrayList<String>, value: String): Unit {
+    values.add(value)
+}
+
+private func joinSortedStrings(values: ArrayList<String>): String {
+    let used = ArrayList<Bool>()
+    for (_ in 0..values.size) { used.add(false) }
+    var result = ""
+    var emitted: Int64 = 0
+    while (emitted < values.size) {
+        var bestIndex: Int64 = -1
+        var idx: Int64 = 0
+        while (idx < values.size) {
+            if (!used[idx] && (bestIndex < 0 || values[idx] < values[bestIndex])) { bestIndex = idx }
+            idx++
+        }
+        if (bestIndex < 0) { break }
+        used[bestIndex] = true
+        result += values[bestIndex]
+        emitted++
+    }
+    return result
+}
+
+private func replaceStrings(target: ArrayList<String>, values: Array<String>): Unit {
+    target.clear()
+    for (value in values) { target.add(value) }
 }
 
 public class GlobalOptions <: Option {
@@ -404,8 +451,115 @@ public class GlobalOptions <: Option {
     public func NeedDumpCHIRToFile(): Bool { return NeedDumpCHIR() && !dumpToScreen }
     public func NeedDumpCHIRToScreen(): Bool { return NeedDumpCHIR() && dumpToScreen }
     public func NeedDumpIR(): Bool { return dumpAll || dumpIR }
-    public func NeedDumpIRToFile(): Bool { return NeedDumpIR() && !dumpToScreen }
+    public func NeedDumpIRToFile(): Bool { return (NeedDumpIR() && !dumpToScreen) || codegenDebugMode }
     public func NeedDumpIRToScreen(): Bool { return NeedDumpIR() && dumpToScreen }
+
+    public func ReadPathsFromEnvironmentVars(environmentVars: HashMap<String, String>): Unit {
+        environment.allVariables.clear()
+        for ((key, value) in environmentVars) {
+            environment.allVariables.add(key, value)
+        }
+        if (let Some(value) <- environmentVars.get("CANGJIE_PATH")) {
+            replaceStrings(environment.cangjiePaths, SplitEnvironmentPaths(value))
+        }
+        if (let Some(value) <- environmentVars.get("CANGJIE_HOME")) {
+            environment.cangjieHome = GetAbsPath(value)
+            if (environment.cangjieHome.hasValue) { cangjieHome = environment.cangjieHome.value }
+        }
+        if (let Some(value) <- environmentVars.get("LIBRARY_PATH")) {
+            replaceStrings(environment.libraryPaths, SplitEnvironmentPaths(value))
+        }
+        if (let Some(value) <- environmentVars.get("PATH")) {
+            replaceStrings(environment.paths, SplitEnvironmentPaths(value))
+        }
+        if (let Some(value) <- environmentVars.get("SDKROOT")) {
+            environment.macOSSDKRoot = GetAbsPath(value)
+        }
+    }
+
+    public func GetCangjieLibHostPathName(): String {
+        var name = host.OSToString()
+        if (host.env == EnvironmentType.OHOS) { name += "_" + host.EnvironmentToString() }
+        return name + "_" + host.ArchToString() + "_" + BackendToString(backend)
+    }
+
+    public func GetCangjieLibTargetPathName(): String {
+        var name = target.OSToString()
+        if (target.env != EnvironmentType.GNU && target.env != EnvironmentType.NOT_AVAILABLE) {
+            var envName = target.EnvironmentToString()
+            if (target.env == EnvironmentType.ANDROID && target.ArchToString() != "arm" &&
+                !target.apiLevel.isEmpty() && envName.size >= target.apiLevel.size) {
+                envName = envName[0..envName.size - target.apiLevel.size]
+            }
+            name += "_" + envName
+        }
+        return name + "_" + target.ArchToString() + "_" + BackendToString(backend)
+    }
+
+    public func SetCompilationCachedPath(): Unit {
+        if (outputDir.hasValue) {
+            compilationCachedPath = outputDir.value
+        } else if (IsDir(output)) {
+            compilationCachedPath = output
+        } else {
+            compilationCachedPath = GetDirPath(output)
+        }
+        if (compilationCachedPath.isEmpty()) { compilationCachedPath = "." }
+    }
+
+    public func GetCacheRelativeFilePath(filePath: String): String {
+        if (compilationCachedPath.isEmpty()) { return GetFileName(filePath) }
+        let absFilePath = GetAbsPath(filePath)
+        if (!absFilePath.hasValue) { return GetFileName(filePath) }
+        var base = NormalizePath(compilationCachedPath)
+        if (!base.isEmpty() && base[base.size - 1] != b'/') { base += "/" }
+        let normalized = NormalizePath(absFilePath.value)
+        if (StartsWith(normalized, base)) { return normalized[base.size..] }
+        return GetFileName(filePath)
+    }
+
+    public func GenerateNamesOfCachedDirAndFile(fullPackageName: String): CachePathName {
+        var fileName = ""
+        if (compilePackage) {
+            fileName = fullPackageName
+        } else {
+            let sortedSrcFiles = ArrayList<String>()
+            for (srcFile in srcFiles) {
+                appendSortedString(sortedSrcFiles, GetCacheRelativeFilePath(srcFile))
+            }
+            fileName = joinSortedStrings(sortedSrcFiles)
+        }
+        let folder = JoinPath(compilationCachedPath, ".cached")
+        return CachePathName(folder, StableHashString(fileName))
+    }
+
+    public func GenerateCachedPathName(fullPackageName: String, extension: String): String {
+        let names = GenerateNamesOfCachedDirAndFile(fullPackageName)
+        if (!FileExist(names.dir)) { let _ = CreateDirectory(names.dir) }
+        return JoinPath(names.dir, names.file + extension)
+    }
+
+    public func GenerateCachedPathNameForCodeGen(subModuleName: String, extension: String): String {
+        let hashedFileName = if (codegenDebugMode) { subModuleName } else { StableHashString(subModuleName) }
+        let folder = JoinPath(compilationCachedPath, ".cached")
+        if (!FileExist(folder)) { let _ = CreateDirectory(folder) }
+        return JoinPath(folder, hashedFileName + extension)
+    }
+
+    public func GetHashedObjFileName(objFileName: String): String {
+        return JoinPath(compilationCachedDir, StableHashString(compilationCachedFileName + objFileName))
+    }
+
+    public func GetHashedObjFileNameForPackage(fullPackageName: String, objFileName: String): String {
+        let names = GenerateNamesOfCachedDirAndFile(fullPackageName)
+        return JoinPath(names.dir, StableHashString(names.file + objFileName))
+    }
+
+    public func UpdateCachedDirName(fullPackageName: String): Unit {
+        let names = GenerateNamesOfCachedDirAndFile(fullPackageName)
+        compilationCachedDir = names.dir
+        compilationCachedFileName = names.file
+    }
 
     public func CheckDirectoryPath(path: String): MaybeString {
         if (FileExist(path) && IsDir(path)) { return GetAbsPath(path) }
@@ -413,12 +567,12 @@ public class GlobalOptions <: Option {
     }
 
     public func CheckInputFilePath(path: String): MaybeString {
-        if (FileExist(path) && !IsDir(path)) { return GetAbsPath(path) }
+        if (IsRegularFile(path)) { return GetAbsPath(path) }
         return MaybeString()
     }
 
     public static func ValidateInputFilePath(path: String): MaybeString {
-        if (FileExist(path) && !IsDir(path)) { return GetAbsPath(path) }
+        if (IsRegularFile(path)) { return GetAbsPath(path) }
         return MaybeString()
     }
 
@@ -427,7 +581,7 @@ public class GlobalOptions <: Option {
             let ext = GetFileExtension(input)
             if (ext == "cj" && !compileCjd) {
                 if (compilePackage) { return false }
-                if (!FileExist(input)) { return false }
+                if (!IsRegularFile(input)) { return false }
                 srcFiles.add(input)
             } else if (ext == "o" || ext == "a" || ext == "obj") {
                 let objPath = ValidateInputFilePath(input)
@@ -447,7 +601,7 @@ public class GlobalOptions <: Option {
                 if (!cjoPath.hasValue) { return false }
                 inputCjoFile = cjoPath.value
             } else if (HasCJDExtension(input) && compileCjd) {
-                if (compilePackage || !FileExist(input)) { return false }
+                if (compilePackage || !IsRegularFile(input)) { return false }
                 srcFiles.add(input)
             } else if (compilePackage) {
                 if (!IsDir(input)) { return false }
@@ -467,6 +621,7 @@ public class GlobalOptions <: Option {
         if (outputMode == OutputMode.OBJ && compileTarget == CompileTarget.DEFAULT) {
             compileTarget = CompileTarget.EXECUTABLE
         }
+        if (!SetupConditionalCompilationCfg(this)) { return false }
         if (target.IsMacOS() || target.IsArm32()) { disableReflection = true }
         if (outputDir.hasValue) {
             if (IsAbsolutePath(output)) { return false }
@@ -543,7 +698,29 @@ public class GlobalOptions <: Option {
     }
 
     public func PassedWhenKeyValueToSerializedString(): String {
-        return ""
+        let pairs = ArrayList<CfgPair>()
+        for ((key, value) in passedWhenKeyValue) {
+            pairs.add(CfgPair(key, value))
+        }
+        let used = ArrayList<Bool>()
+        for (_ in 0..pairs.size) { used.add(false) }
+        var result = ""
+        var emitted: Int64 = 0
+        while (emitted < pairs.size) {
+            var bestIndex: Int64 = -1
+            var idx: Int64 = 0
+            while (idx < pairs.size) {
+                if (!used[idx] && (bestIndex < 0 || pairs[idx].key < pairs[bestIndex].key)) {
+                    bestIndex = idx
+                }
+                idx++
+            }
+            if (bestIndex < 0) { break }
+            used[bestIndex] = true
+            result += pairs[bestIndex].key + pairs[bestIndex].value
+            emitted++
+        }
+        return result
     }
 
     public func BackendTypeToSerializedString(): String {
