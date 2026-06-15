@@ -168,6 +168,26 @@ public enum Linkage {
     | EXTERNAL_WEAK
 }
 
+private func LinkageIndex(linkage: Linkage): Int64 {
+    return match (linkage) {
+        case Linkage.WEAK_ODR => 0
+        case Linkage.EXTERNAL => 1
+        case Linkage.INTERNAL => 2
+        case Linkage.LINKONCE_ODR => 3
+        case Linkage.EXTERNAL_WEAK => 4
+    }
+}
+
+extend Linkage <: Equatable<Linkage> {
+    public operator func ==(right: Linkage): Bool {
+        return LinkageIndex(this) == LinkageIndex(right)
+    }
+
+    public operator func !=(right: Linkage): Bool {
+        return !(this == right)
+    }
+}
+
 public enum OverflowStrategy {
     | NA
     | CHECKED
@@ -222,6 +242,7 @@ public enum TokenKind {
     | INTERNAL
     | PROTECTED
     | PUBLIC
+    | MUT
     | WILDCARD
     | THISTYPE
     | DOUBLE_COLON
@@ -263,10 +284,11 @@ public func TokenKindIndex(kind: TokenKind): Int64 {
         case TokenKind.INTERNAL => 30
         case TokenKind.PROTECTED => 31
         case TokenKind.PUBLIC => 32
-        case TokenKind.WILDCARD => 33
-        case TokenKind.THISTYPE => 34
-        case TokenKind.DOUBLE_COLON => 35
-        case TokenKind.DOT => 36
+        case TokenKind.MUT => 33
+        case TokenKind.WILDCARD => 34
+        case TokenKind.THISTYPE => 35
+        case TokenKind.DOUBLE_COLON => 36
+        case TokenKind.DOT => 37
     }
 }
 
@@ -315,6 +337,7 @@ public func TokenKindText(kind: TokenKind): String {
         case TokenKind.INTERNAL => "internal"
         case TokenKind.PROTECTED => "protected"
         case TokenKind.PUBLIC => "public"
+        case TokenKind.MUT => "mut"
         case TokenKind.WILDCARD => "_"
         case TokenKind.THISTYPE => "This"
         case TokenKind.DOUBLE_COLON => "::"
