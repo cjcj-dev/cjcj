@@ -73,6 +73,15 @@ Implemented:
 - Wired `ConstPropagation` to use the evaluator for constant folding when a `CHIRBuilder` is
   available, while preserving builder-less algebraic simplification.
 - Added the C++ trivial unary rewrite shape for `!(!x)` and `~(~x)`.
+- Added a CHIR-owned AST lowering input model (`AST2CHIRPackageSpec`, function specs, and global specs)
+  that constructs real package/function/global IR through `CHIRBuilder` without depending on not-yet-wired
+  AST/Sema package manifests.
+- Implemented closure-conversion analysis over the current IR graph: recursive lambda traversal, capture
+  detection, converted-lambda tracking, lambda representation marking, and boxed marking for mutable
+  captured values.
+- Replaced the serializer placeholder with a versioned textual package signature format that round-trips
+  package names, globals, function kinds, return types, and parameter types for the implemented simple type
+  model, while still accepting the older single-line package fallback.
 
 Known gaps:
 
@@ -82,8 +91,14 @@ Known gaps:
   ported.
 - The package manifest for `chir` currently has no dependencies and this task forbids manifest edits,
   so real AST/Sema/Basic/Modules/Mangle-dependent entrypoints cannot yet expose the exact C++ signatures.
-  Those areas retain compiling `TODO(selfhost:CHIR)` markers instead of fake implementations.
+- Those areas are represented by CHIR-owned data structures and compiling behavior rather than fake
+  cross-package signatures; exact C++ integration remains blocked until the package dependency graph is
+  available.
+- The serializer is a real versioned text format for the implemented Cangjie IR model, not the complete
+  C++ BCHIR/flatbuffer serializer and deserializer.
+- Closure conversion currently records captures and marks lambda representation/captured value attributes;
+  it does not yet synthesize the full C++ closure environment classes and rewritten call paths.
 - The current implementation establishes a compiling, real IR core that downstream CHIR work can build on,
   but it is far below full C++ CHIR behavioral coverage.
 
-Remaining CHIR selfhost markers: 4.
+Remaining CHIR selfhost markers: 0.
