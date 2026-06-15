@@ -220,6 +220,8 @@ public enum TokenKind {
     | MOD
     | AND
     | OR
+    | PIPELINE
+    | COMPOSITION
     | BITAND
     | BITOR
     | BITXOR
@@ -262,33 +264,35 @@ public func TokenKindIndex(kind: TokenKind): Int64 {
         case TokenKind.MOD => 8
         case TokenKind.AND => 9
         case TokenKind.OR => 10
-        case TokenKind.BITAND => 11
-        case TokenKind.BITOR => 12
-        case TokenKind.BITXOR => 13
-        case TokenKind.LSHIFT => 14
-        case TokenKind.RSHIFT => 15
-        case TokenKind.ADD_ASSIGN => 16
-        case TokenKind.SUB_ASSIGN => 17
-        case TokenKind.MUL_ASSIGN => 18
-        case TokenKind.EXP_ASSIGN => 19
-        case TokenKind.DIV_ASSIGN => 20
-        case TokenKind.MOD_ASSIGN => 21
-        case TokenKind.AND_ASSIGN => 22
-        case TokenKind.OR_ASSIGN => 23
-        case TokenKind.BITAND_ASSIGN => 24
-        case TokenKind.BITOR_ASSIGN => 25
-        case TokenKind.BITXOR_ASSIGN => 26
-        case TokenKind.LSHIFT_ASSIGN => 27
-        case TokenKind.RSHIFT_ASSIGN => 28
-        case TokenKind.PRIVATE => 29
-        case TokenKind.INTERNAL => 30
-        case TokenKind.PROTECTED => 31
-        case TokenKind.PUBLIC => 32
-        case TokenKind.MUT => 33
-        case TokenKind.WILDCARD => 34
-        case TokenKind.THISTYPE => 35
-        case TokenKind.DOUBLE_COLON => 36
-        case TokenKind.DOT => 37
+        case TokenKind.PIPELINE => 11
+        case TokenKind.COMPOSITION => 12
+        case TokenKind.BITAND => 13
+        case TokenKind.BITOR => 14
+        case TokenKind.BITXOR => 15
+        case TokenKind.LSHIFT => 16
+        case TokenKind.RSHIFT => 17
+        case TokenKind.ADD_ASSIGN => 18
+        case TokenKind.SUB_ASSIGN => 19
+        case TokenKind.MUL_ASSIGN => 20
+        case TokenKind.EXP_ASSIGN => 21
+        case TokenKind.DIV_ASSIGN => 22
+        case TokenKind.MOD_ASSIGN => 23
+        case TokenKind.AND_ASSIGN => 24
+        case TokenKind.OR_ASSIGN => 25
+        case TokenKind.BITAND_ASSIGN => 26
+        case TokenKind.BITOR_ASSIGN => 27
+        case TokenKind.BITXOR_ASSIGN => 28
+        case TokenKind.LSHIFT_ASSIGN => 29
+        case TokenKind.RSHIFT_ASSIGN => 30
+        case TokenKind.PRIVATE => 31
+        case TokenKind.INTERNAL => 32
+        case TokenKind.PROTECTED => 33
+        case TokenKind.PUBLIC => 34
+        case TokenKind.MUT => 35
+        case TokenKind.WILDCARD => 36
+        case TokenKind.THISTYPE => 37
+        case TokenKind.DOUBLE_COLON => 38
+        case TokenKind.DOT => 39
     }
 }
 
@@ -315,6 +319,8 @@ public func TokenKindText(kind: TokenKind): String {
         case TokenKind.MOD => "%"
         case TokenKind.AND => "&&"
         case TokenKind.OR => "||"
+        case TokenKind.PIPELINE => "|>"
+        case TokenKind.COMPOSITION => "~>"
         case TokenKind.BITAND => "&"
         case TokenKind.BITOR => "|"
         case TokenKind.BITXOR => "^"

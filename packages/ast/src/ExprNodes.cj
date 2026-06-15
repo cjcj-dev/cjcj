@@ -318,6 +318,11 @@ public class AssignExpr <: OverloadableExpr {
     public var rightExpr: Option<Expr> = None
     public var isCompound: Bool = false
     public init() { super(ASTKind.ASSIGN_EXPR) }
+
+    public override func Clear(): Unit {
+        RecoverToAssignExpr(this)
+        super.Clear()
+    }
 }
 
 public class IncOrDecExpr <: OverloadableExpr {
@@ -330,6 +335,14 @@ public class UnaryExpr <: OverloadableExpr {
     public var expr: Option<Expr> = None
     public var operatorPos: Position = INVALID_POSITION
     public init() { super(ASTKind.UNARY_EXPR) }
+
+    public override func Clear(): Unit {
+        RecoverToUnaryExpr(this)
+        super.Clear()
+        if (let Some(value) <- expr) {
+            value.Clear()
+        }
+    }
 }
 
 public class BinaryExpr <: OverloadableExpr {
@@ -337,6 +350,17 @@ public class BinaryExpr <: OverloadableExpr {
     public var rightExpr: Option<Expr> = None
     public var operatorPos: Position = INVALID_POSITION
     public init() { super(ASTKind.BINARY_EXPR) }
+
+    public override func Clear(): Unit {
+        RecoverToBinaryExpr(this)
+        super.Clear()
+        if (let Some(left) <- leftExpr) {
+            left.Clear()
+        }
+        if (let Some(right) <- rightExpr) {
+            right.Clear()
+        }
+    }
 }
 
 public class IsExpr <: Expr {
@@ -381,6 +405,18 @@ public class SubscriptExpr <: OverloadableExpr {
             return base.TyKind() == TypeKind.TYPE_VARRAY
         }
         return false
+    }
+
+    public override func Clear(): Unit {
+        RecoverToSubscriptExpr(this)
+        if (let Some(base) <- baseExpr) {
+            base.Clear()
+        }
+        for (indexExpr in indexExprs) {
+            indexExpr.Clear()
+        }
+        commaPos.clear()
+        super.Clear()
     }
 }
 
@@ -543,6 +579,31 @@ public enum CallKind {
     | CALL_INTRINSIC_FUNCTION
 }
 
+private func CallKindIndex(kind: CallKind): Int64 {
+    return match (kind) {
+        case CallKind.CALL_INVALID => 0
+        case CallKind.CALL_DECLARED_FUNCTION => 1
+        case CallKind.CALL_OBJECT_CREATION => 2
+        case CallKind.CALL_FUNCTION_PTR => 3
+        case CallKind.CALL_STRUCT_CREATION => 4
+        case CallKind.CALL_SUPER_FUNCTION => 5
+        case CallKind.CALL_VARIADIC_FUNCTION => 6
+        case CallKind.CALL_ANNOTATION => 7
+        case CallKind.CALL_BUILTIN_FUNCTION => 8
+        case CallKind.CALL_INTRINSIC_FUNCTION => 9
+    }
+}
+
+extend CallKind <: Equatable<CallKind> {
+    public operator func ==(right: CallKind): Bool {
+        return CallKindIndex(this) == CallKindIndex(right)
+    }
+
+    public operator func !=(right: CallKind): Bool {
+        return !(this == right)
+    }
+}
+
 public class CallExpr <: Expr {
     public var baseFunc: Option<Expr> = None
     public var leftParenPos: Position = INVALID_POSITION
@@ -559,6 +620,7 @@ public class CallExpr <: Expr {
     }
 
     public override func Clear(): Unit {
+        RecoverToCallExpr(this)
         super.Clear()
         if (let Some(base) <- baseFunc) {
             base.Clear()
