@@ -2,9 +2,11 @@ package cangjie_compiler::sema
 
 import std.collection.*
 import cangjie_compiler::ast.*
+import cangjie_compiler::option.GlobalOptions as OptionGlobalOptions
 
 public class CompilerInstance {
     public var typeManager: TypeManager = TypeManager()
+    public var globalOptions: OptionGlobalOptions = OptionGlobalOptions()
     public init() {}
 }
 

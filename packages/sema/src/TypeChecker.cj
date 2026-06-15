@@ -2,6 +2,17 @@ package cangjie_compiler::sema
 
 import std.collection.*
 import cangjie_compiler::ast.*
+import cangjie_compiler::option.OverflowStrategy as OptionOverflowStrategy
+
+private func ConvertOverflowStrategy(strategy: OptionOverflowStrategy): OverflowStrategy {
+    return match (strategy) {
+        case OptionOverflowStrategy.NA => OverflowStrategy.NA
+        case OptionOverflowStrategy.CHECKED => OverflowStrategy.CHECKED
+        case OptionOverflowStrategy.WRAPPING => OverflowStrategy.WRAPPING
+        case OptionOverflowStrategy.THROWING => OverflowStrategy.THROWING
+        case OptionOverflowStrategy.SATURATING => OverflowStrategy.SATURATING
+    }
+}
 
 public class TypeChecker {
     private var ci: Option<CompilerInstance> = None
@@ -21,8 +32,17 @@ public class TypeChecker {
     }
 
     public func SetOverflowStrategy(pkgs: ArrayList<Package>): Unit {
-        let _ = pkgs
-        // TODO(selfhost:Sema): apply command-line overflow strategy after frontend options are ported.
+        var optionStrategy = OverflowStrategy.THROWING
+        if (let Some(instance) <- ci) {
+            optionStrategy = ConvertOverflowStrategy(instance.globalOptions.overflowStrategy)
+        }
+        SetIntegerOverflowStrategy(pkgs, optionStrategy)
+    }
+
+    public func CheckInlineFunctions(pkgs: ArrayList<Package>): Unit {
+        if (let Some(instance) <- ci) {
+            CheckInlineFunctionsForPackages(pkgs, instance.globalOptions)
+        }
     }
 
     public func PerformDesugarAfterInstantiation(ctx: ASTContext, pkg: Package): Unit {

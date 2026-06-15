@@ -13,6 +13,9 @@ Current Cangjie port state:
 - Added plugin API-level parsing/version comparison and plugin custom annotation metadata support.
 - Added real leaf expression helpers for parenthesized expressions, optional-chain expressions, tuple literals, loop-control jumps, throws, and returns over the current self-hosted AST/TypeManager surfaces.
 - Added real leaf helpers for perform, resume, synchronized, quote, numeric type conversion, `is`/`as`, increment/decrement expressions, and FFI precheck ABI propagation over currently available AST state.
+- Added generic-instantiation utility helpers and runtime-prepared type-pattern creation/runtime-check classification over the current AST/TypeManager surfaces.
+- Added integer overflow strategy propagation and integer arithmetic overflow marking, including option-to-AST strategy mapping through the self-hosted compiler instance.
+- Added inline-function eligibility analysis for source packages, including exportability, frozen/const ownership, internal type rejection, reference-target filtering, default-parameter propagation, imported inline function handling, and the C++ 32-node body limit.
 - Added compiling public entrypoints for generic instantiation, type checking, desugar, incremental helpers, test helpers, lookup, collection, diagnostics, join/meet, promotion, and scope utilities.
 
 Known gaps:
