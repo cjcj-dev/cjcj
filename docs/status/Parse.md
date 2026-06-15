@@ -74,6 +74,9 @@ package public APIs.
   chaining forms such as `expr?.member`, `expr?()`, `expr?[index]`, and
   optional trailing-closure starts, preserving the C++ `hasQuestSuffix` marker
   on the resulting chain.
+- Added selectorless match parsing with `MatchCaseOther` nodes for
+  `match { case expr => ... }`, including wildcard expression cases, expression
+  case bodies, and the `matchMode` split used by the C++ AST.
 
 ## Remaining Work
 

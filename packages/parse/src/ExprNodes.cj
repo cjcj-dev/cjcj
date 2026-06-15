@@ -334,9 +334,26 @@ public class MatchCase <: Node {
     }
 }
 
+public class MatchCaseOther <: Node {
+    public var matchExpr: Option<Expr> = None
+    public var arrowPos: Position = INVALID_POSITION
+    public var exprOrDecls: Option<Block> = None
+
+    public init() { super(ASTKind.MATCH_CASE_OTHER) }
+
+    public override func Children(): ArrayList<Node> {
+        let out = ArrayList<Node>()
+        if (let Some(expr) <- matchExpr) { out.add(expr) }
+        if (let Some(body) <- exprOrDecls) { out.add(body) }
+        return out
+    }
+}
+
 public class MatchExpr <: Expr {
+    public var matchMode: Bool = false
     public var selector: Option<Expr> = None
     public let matchCases: ArrayList<MatchCase> = ArrayList<MatchCase>()
+    public let matchCaseOthers: ArrayList<MatchCaseOther> = ArrayList<MatchCaseOther>()
     public var leftParenPos: Position = INVALID_POSITION
     public var rightParenPos: Position = INVALID_POSITION
     public var leftCurlPos: Position = INVALID_POSITION
@@ -348,6 +365,7 @@ public class MatchExpr <: Expr {
         let out = ArrayList<Node>()
         if (let Some(sel) <- selector) { out.add(sel) }
         for (matchCase in matchCases) { out.add(matchCase) }
+        for (matchCaseOther in matchCaseOthers) { out.add(matchCaseOther) }
         return out
     }
 }

@@ -334,6 +334,11 @@ extend ParserImpl {
         let ret = MatchExpr()
         let token = Expect(TokenKind.MATCH, "expected 'match'")
         ret.begin = token.Begin()
+        if (Seeing([TokenKind.LCURL, TokenKind.CASE])) {
+            ParseMatchNoSelector(ret)
+            return ret
+        }
+        ret.matchMode = true
         if (Skip(TokenKind.LPAREN)) {
             ret.leftParenPos = lastToken.Begin()
             if (!Seeing(TokenKind.RPAREN)) {
@@ -375,6 +380,41 @@ extend ParserImpl {
         ret.rightCurlPos = Expect(TokenKind.RCURL, "expected '}' after match").Begin()
         ret.end = ret.rightCurlPos + 1
         return ret
+    }
+
+    public func ParseMatchNoSelector(ret: MatchExpr): Unit {
+        ret.matchMode = false
+        ret.leftCurlPos = Expect(TokenKind.LCURL, "expected '{' for match body").Begin()
+        SkipNLOrSemi()
+        while (!Seeing(TokenKind.END) && !Seeing(TokenKind.RCURL)) {
+            if (!Skip(TokenKind.CASE)) {
+                diag.DiagnoseRefactor(DiagKindRefactor.EXPECTED_TOKEN, Peek().Begin(), "expected 'case'")
+                Next()
+                SkipNLOrSemi()
+                continue
+            }
+            let matchCase = MatchCaseOther()
+            matchCase.begin = lastToken.Begin()
+            if (Skip(TokenKind.WILDCARD)) {
+                matchCase.matchExpr = WildcardExpr(lastToken.Begin())
+            } else {
+                matchCase.matchExpr = ParseExpr()
+            }
+            matchCase.arrowPos = Expect(TokenKind.DOUBLE_ARROW, "expected '=>' after match case").Begin()
+            let block = Block()
+            block.begin = Peek().Begin()
+            while (!Seeing(TokenKind.END) && !Seeing(TokenKind.CASE) && !Seeing(TokenKind.RCURL)) {
+                block.body.add(ParseExprOrDecl(ScopeKind.FUNC_BODY))
+                SkipNLOrSemi()
+            }
+            block.end = lastToken.End()
+            matchCase.exprOrDecls = block
+            matchCase.end = block.end
+            ret.matchCaseOthers.add(matchCase)
+            SkipNLOrSemi()
+        }
+        ret.rightCurlPos = Expect(TokenKind.RCURL, "expected '}' after match").Begin()
+        ret.end = ret.rightCurlPos + 1
     }
 
     public func ParseTryExpr(): TryExpr {
