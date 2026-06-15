@@ -21,6 +21,7 @@ Current Cangjie port state:
 - Added enum-sugar target discovery/resolution over the self-hosted AST context, including enum-constructor lookup, type-argument arity filtering, contextual target refinement through `Option`, interface-super matching, reference target updates, and generic enum type-argument instantiation.
 - Added type-check expression diagnostic helpers for invalid multiple assignment, unary/binary/subscript expressions, inference failure, and the C++ numeric int/float comparison helper used by type compatibility.
 - Added real type-check expression helpers for builtin unary expressions, range literals, spawn expressions, and literal constants, including numeric suffix/default typing, range element/step validation, future type instantiation, scheduler-handle checks, constant range validation, and `Option<T>` literal boxing over the current self-hosted type surfaces.
+- Added concrete member-signature storage, type-variable constraint graph topological solving/substitution, block expression synthesis/checking over already-typed children, and unit-test mock context package-name tracking within current package dependencies.
 - Added compiling public entrypoints for generic instantiation, type checking, desugar, incremental helpers, test helpers, lookup, collection, diagnostics, join/meet, promotion, and scope utilities.
 
 Known gaps:
