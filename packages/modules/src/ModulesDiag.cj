@@ -90,6 +90,29 @@ public func WarnUselessImport(diag: DiagnosticEngine, range: Range, decl: Decl):
     diag.ReportWarning("package_useless_import", "import is shadowed by declaration '${decl.identifier}'", range: range)
 }
 
+public func WarnRepeatedFeatureName(diag: DiagnosticEngine, featureName: String, current: Range, previous: Range): Unit {
+    let _ = previous
+    diag.ReportWarning("package_feature_repeated", "feature '${featureName}' is repeated", range: current)
+}
+
+public func DiagForNullPackageFeature(diag: DiagnosticEngine, range: Range, referenceFeatures: ArrayList<String>): Unit {
+    diag.ReportError("package_feature_missing", "file is missing package feature specification; expected [" +
+        JoinStrings(referenceFeatures, ", ") + "]", range: range)
+}
+
+public func DiagForDifferentPackageFeatureConsistency(
+    diag: DiagnosticEngine,
+    range: Range,
+    currentFeatures: ArrayList<String>,
+    referenceFeatures: ArrayList<String>,
+    hasNonProductAnnotation: Bool
+): Unit {
+    let annotationText = if (hasNonProductAnnotation) { " and matching non-product annotation state" } else { "" }
+    diag.ReportError("package_feature_inconsistent", "package feature specification [" +
+        JoinStrings(currentFeatures, ", ") + "] does not match reference [" +
+        JoinStrings(referenceFeatures, ", ") + "]" + annotationText, range: range)
+}
+
 public func DiagForDifferentPackageNames(diag: DiagnosticEngine, packageNames: ArrayList<String>): Unit {
     diag.ReportError("package_name_inconsistent", "source files declare different package names: " +
         JoinStrings(packageNames, ", "))

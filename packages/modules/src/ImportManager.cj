@@ -374,6 +374,9 @@ public class ImportManager {
             ClearCachesForRebuild()
         }
         for (pkg in packages) {
+            if (pkg.HasFtrDirective()) {
+                CheckPackageFeatureSpec(pkg)
+            }
             if (globalOptions.compileTestsOnly && !IsTestPackage(pkg.fullPackageName)) {
                 pkg.fullPackageName = pkg.fullPackageName + TEST_PKG_SUFFIX
             }
@@ -845,24 +848,80 @@ public class ImportManager {
                     continue
                 }
                 let rangeValue = MakeRange(importSpec.begin, importSpec.end)
+                var previousRange: Option<Range> = None
                 if (importSpec.IsReExport()) {
                     if (pkgImportNamePos.contains(name)) {
-                        WarnConflictImport(diag, name, rangeValue, pkgImportNamePos.get(name).getOrThrow())
+                        previousRange = pkgImportNamePos.get(name)
                     } else {
                         pkgImportNamePos[name] = rangeValue
-                    }
-                } else {
-                    if (!fileImportNamePos.contains(file.fileHash)) {
-                        fileImportNamePos[file.fileHash] = HashMap<String, Range>()
-                    }
-                    if (let Some(map) <- fileImportNamePos.get(file.fileHash)) {
-                        if (map.contains(name)) {
-                            WarnConflictImport(diag, name, rangeValue, map.get(name).getOrThrow())
+                        let fileMapForReExport = GetFileImportNamePos(fileImportNamePos, file.fileHash)
+                        if (fileMapForReExport.contains(name)) {
+                            previousRange = fileMapForReExport.get(name)
                         } else {
-                            map[name] = rangeValue
+                            fileMapForReExport[name] = rangeValue
                         }
                     }
+                } else {
+                    let fileMapForImport = GetFileImportNamePos(fileImportNamePos, file.fileHash)
+                    if (fileMapForImport.contains(name)) {
+                        previousRange = fileMapForImport.get(name)
+                    } else {
+                        fileMapForImport[name] = rangeValue
+                    }
                 }
+                let sourceDecls = GetSourceDeclsForImportedName(pkg, name)
+                if (!IsAllFuncDecls(sourceDecls)) {
+                    WarnUselessImport(diag, rangeValue, sourceDecls[0])
+                } else if (let Some(conflictRange) <- previousRange) {
+                    WarnConflictImport(diag, name, rangeValue, conflictRange)
+                }
+            }
+        }
+    }
+
+    private func CheckPackageFeatureSpec(pkg: Package): Unit {
+        var referenceFile: Option<File> = None
+        var referenceFeatureCount: Int64 = -1
+        var hasNonProductFile = false
+        for (file in pkg.files) {
+            if (file.features.isEmpty()) {
+                continue
+            }
+            let uniqueFeatures = CollectUniqueFeatures(file)
+            WarnRepeatedFeatures(file)
+            if (uniqueFeatures.size > referenceFeatureCount) {
+                referenceFile = Some(file)
+                referenceFeatureCount = uniqueFeatures.size
+            }
+            if (!file.isProduct) {
+                hasNonProductFile = true
+            }
+        }
+        if (let None <- referenceFile) {
+            return
+        }
+        let refFile = referenceFile.getOrThrow()
+        let referenceFeatures = CollectUniqueFeatures(refFile)
+        var reported: Int64 = 0
+        for (file in pkg.files) {
+            if (reported >= 2) {
+                return
+            }
+            if (file.features.isEmpty()) {
+                DiagForNullPackageFeature(diag, MakeRange(file.begin, file.end), referenceFeatures)
+                reported++
+                continue
+            }
+            let currentFeatures = CollectUniqueFeatures(file)
+            if ((hasNonProductFile && file.isProduct) || !SameFeatureSet(currentFeatures, referenceFeatures)) {
+                DiagForDifferentPackageFeatureConsistency(
+                    diag,
+                    MakeRange(file.begin, file.end),
+                    currentFeatures,
+                    referenceFeatures,
+                    hasNonProductFile
+                )
+                reported++
             }
         }
     }
@@ -1139,6 +1198,81 @@ public class ImportManager {
                 imports.add(importSpec)
             }
         }
+    }
+
+    private func GetFileImportNamePos(
+        fileImportNamePos: HashMap<UInt64, HashMap<String, Range>>,
+        fileHash: UInt64
+    ): HashMap<String, Range> {
+        if (!fileImportNamePos.contains(fileHash)) {
+            fileImportNamePos[fileHash] = HashMap<String, Range>()
+        }
+        return fileImportNamePos.get(fileHash).getOrThrow()
+    }
+
+    private func GetSourceDeclsForImportedName(pkg: Package, name: String): ArrayList<Decl> {
+        let out = ArrayList<Decl>()
+        let members = cjoManager.GetPackageMembersByName(pkg.fullPackageName, name)
+        for (decl in members) {
+            if (decl.fullPackageName == pkg.fullPackageName) {
+                AddDeclUnique(out, decl)
+            }
+        }
+        return out
+    }
+
+    private func IsAllFuncDecls(decls: ArrayList<Decl>): Bool {
+        for (decl in decls) {
+            if (!decl.isFunction) {
+                return false
+            }
+        }
+        return true
+    }
+
+    private func CollectUniqueFeatures(file: File): ArrayList<String> {
+        let out = ArrayList<String>()
+        for (feature in file.features) {
+            if (!ContainsStringValue(out, feature)) {
+                out.add(feature)
+            }
+        }
+        SortStringsInPlace(out)
+        return out
+    }
+
+    private func WarnRepeatedFeatures(file: File): Unit {
+        let seen = ArrayList<String>()
+        for (feature in file.features) {
+            if (ContainsStringValue(seen, feature)) {
+                WarnRepeatedFeatureName(diag, feature, MakeRange(file.begin, file.end), MakeRange(file.begin, file.end))
+            } else {
+                seen.add(feature)
+            }
+        }
+    }
+
+    private func SameFeatureSet(left: ArrayList<String>, right: ArrayList<String>): Bool {
+        if (left.size != right.size) {
+            return false
+        }
+        var idx: Int64 = 0
+        while (idx < left.size) {
+            if (left[idx] != right[idx]) {
+                return false
+            }
+            idx++
+        }
+        return true
+    }
+
+    private func ContainsStringValue(values: ArrayList<String>, target: String): Bool {
+        for (value in values) {
+            if (value == target) {
+                return true
+            }
+        }
+        return false
     }
 
     private func RecordTypeAlias(decl: Decl, alias: String): Unit {
