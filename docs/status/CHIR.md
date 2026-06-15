@@ -97,6 +97,11 @@ Implemented:
 - Added `ConstantRange`, a real half-open fixed-width range domain over `SInt`, including full/empty/singleton
   construction, relational constraints, wrapping membership checks, min/max queries, difference,
   intersection/union with signed/unsigned preference, and conservative arithmetic results.
+- Added `SIntDomain`, combining numeric `ConstantRange` bounds with symbolic value bounds, including
+  top/bottom construction, literal/numeric/symbolic relational constructors, symbolic negation, expression
+  relation mapping, intersection/union, same-domain checks, and basic arithmetic composition.
+- Added `ValueDomain`, including abstract objects, reference roots/caching, reference representation checks,
+  and the C++-shaped bottom/ref/value/top join behavior used by later value-analysis passes.
 
 Known gaps:
 
@@ -120,6 +125,9 @@ Known gaps:
 - `SInt` and `ConstantRange` cover the core value/range domain semantics needed by later passes, but the full
   C++ arbitrary edge cases, saturation operations, and complete multi-interval preference logic remain to be
   ported.
+- `SIntDomain` and `ValueDomain` are real analysis domains over the current IR, but the C++ template
+  abstraction, complete arithmetic transfer functions, and integration with the fixed-point analysis engine
+  are still pending.
 - The current implementation establishes a compiling, real IR core that downstream CHIR work can build on,
   but it is far below full C++ CHIR behavioral coverage.
 
