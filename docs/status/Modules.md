@@ -1,6 +1,6 @@
 # Modules Port Status
 
-Date: 2026-06-15
+Date: 2026-06-16
 
 Build: `cjpm build` passes.
 
@@ -20,12 +20,13 @@ This pass keeps the package self-contained because `packages/modules/cjpm.toml` 
 - Implemented `DependencyGraph` direct/transitive dependency collection with macro re-export handling and cache invalidation.
 - Implemented `PackageManager` Tarjan SCC ordering and source package reordering behavior.
 - Added a compiling local AST writer/loader wire format so exported package/import/member data can round-trip inside this package while the real flatbuffer/AST dependencies are unavailable.
+- Continued the local serialization layer with type interning, cached declaration diffing, import reference loading, expression table serialization/deserialization, reference resolution maps, and incremental removed-mangle parsing.
 
 ## Important Blockers
 
 - Real C++ parity requires dependencies on AST, Basic, Option, Sema/TypeManager, and flatbuffers/native CJO format support. Those cannot be wired without editing manifests or porting additional dependency surfaces.
 - The local serialization format is not the production `.cjo` flatbuffer format. It is a compiling, behavior-bearing bridge for the isolated package, not a faithful replacement for C++ AST serialization.
-- Type/reference/expression/incremental deserialization remains explicitly marked with `TODO(selfhost:Modules)` because the real AST and type graph are not available to this package.
+- Type/reference/expression/incremental deserialization has package-local working logic, but it still cannot consume the production C++ flatbuffer schema until real AST/Sema dependencies are available.
 
 ## Remaining Work
 
@@ -34,4 +35,4 @@ This pass keeps the package self-contained because `packages/modules/cjpm.toml` 
 - Wire diagnostics to the real `DiagnosticEngine` and diagnostic IDs from the Basic module.
 - Audit import/package lookup behavior against the C++ test corpus after downstream Sema/Frontend callers are available.
 
-Remaining Modules selfhost markers: 10.
+Remaining Modules selfhost markers: 0.

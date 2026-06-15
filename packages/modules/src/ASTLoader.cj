@@ -1,4 +1,5 @@
 package cangjie_compiler::modules
 
-// ASTLoader is implemented in ASTSerialization.cj so the public loader/writer API remains co-located.
-// TODO(selfhost:Modules): split loader internals here once real flatbuffer AST loading replaces the local wire parser.
+public func CreateASTLoader(data: Array<UInt8>, fullPackageName: String, cjoManager: CjoManager, opts: GlobalOptions): ASTLoader {
+    return ASTLoader(data, fullPackageName, cjoManager, opts)
+}

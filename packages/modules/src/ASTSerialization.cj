@@ -13,6 +13,8 @@ public class ASTWriter {
     private var optimizationLevel: OptimizationLevel = OptimizationLevel.O0
     private var isChirNow: Bool = false
     private var savedPackage: Option<PackageDecl> = None
+    private let savedTypeMap: HashMap<String, FormattedIndex> = HashMap<String, FormattedIndex>()
+    private let savedTypes: ArrayList<String> = ArrayList<String>()
 
     public init(diag: DiagnosticEngine, packageDepInfo: String, exportCfg: ExportConfig, cjoManager: CjoManager) {
         this.diag = diag
@@ -53,8 +55,16 @@ public class ASTWriter {
     }
 
     public func SaveType(pType: String): FormattedIndex {
-        // TODO(selfhost:Modules): bind to the real AST Ty graph once the modules package can depend on AST/Sema.
-        return UInt64(pType.hashCode())
+        if (pType.isEmpty()) {
+            return INVALID_FORMAT_INDEX
+        }
+        if (let Some(existing) <- savedTypeMap.get(pType)) {
+            return existing
+        }
+        let nextIndex = UInt64(savedTypes.size + 1)
+        savedTypes.add(pType)
+        savedTypeMap[pType] = nextIndex
+        return nextIndex
     }
 
     public func SetIsChirNow(isChirNow!: Bool = false): Unit {
@@ -65,6 +75,15 @@ public class ASTWriter {
         let lines = ArrayList<String>()
         lines.add("CANGJIE-MODULES-AST|1")
         lines.add("dep|" + EncodeField(packageDepInfo))
+        var typeIdx: Int64 = 0
+        while (typeIdx < savedTypes.size) {
+            let typeFields = ArrayList<String>()
+            typeFields.add("type")
+            typeFields.add((typeIdx + 1).toString())
+            typeFields.add(savedTypes[typeIdx])
+            lines.add(JoinFields(typeFields))
+            typeIdx++
+        }
         let packageFields = ArrayList<String>()
         packageFields.add("package")
         packageFields.add(pkg.fullPackageName)
@@ -105,6 +124,14 @@ public class ASTWriter {
                 declFields.add(AccessLevelToWire(GetAccessLevel(decl)))
                 declFields.add(BoolToWire(decl.doNotExport))
                 declFields.add(BoolToWire(decl.isFunction))
+                declFields.add(decl.rawMangleName)
+                declFields.add(decl.mangledName)
+                declFields.add(decl.begin.fileID.toString())
+                declFields.add(decl.begin.line.toString())
+                declFields.add(decl.begin.column.toString())
+                declFields.add(decl.end.fileID.toString())
+                declFields.add(decl.end.line.toString())
+                declFields.add(decl.end.column.toString())
                 lines.add(JoinFields(declFields))
             }
         }
@@ -121,6 +148,7 @@ public class ASTLoader {
     private var packageDepInfo: String = ""
     private var importSourceCode: Bool = true
     private var isChirNow: Bool = false
+    private let loadedTypes: HashMap<FormattedIndex, String> = HashMap<FormattedIndex, String>()
 
     public init(data: Array<UInt8>, fullPackageName: String, cjoManager: CjoManager, opts: GlobalOptions) {
         this.data = data
@@ -150,10 +178,24 @@ public class ASTLoader {
         sourcePackage: Package,
         mangledName2DeclMap: HashMap<String, Decl>
     ): HashSet<String> {
-        let _ = sourcePackage
-        let _ = mangledName2DeclMap
-        // TODO(selfhost:Modules): deserialize cached type and mangle removal records from the real flatbuffer format.
-        return HashSet<String>()
+        let removedMangles = HashSet<String>()
+        let cachedPkgOpt = LoadPackageDependencies()
+        if (let None <- cachedPkgOpt) {
+            return removedMangles
+        }
+        let cachedPkg = cachedPkgOpt.getOrThrow()
+        if (cachedPkg.fullPackageName != sourcePackage.fullPackageName) {
+            return removedMangles
+        }
+        for (file in cachedPkg.files) {
+            for (decl in file.decls) {
+                let mangleName = GetDeclMangleKey(decl)
+                if (!mangleName.isEmpty() && !mangledName2DeclMap.contains(mangleName)) {
+                    removedMangles.add(mangleName)
+                }
+            }
+        }
+        return removedMangles
     }
 
     public func LoadPackageDepInfo(): String {
@@ -162,7 +204,19 @@ public class ASTLoader {
     }
 
     public func LoadRefs(): Unit {
-        // TODO(selfhost:Modules): resolve serialized declaration/type references after AST/Sema package integration.
+        if (let Some(pkg) <- LoadPackageDependencies()) {
+            for (file in pkg.files) {
+                for (importSpec in file.imports) {
+                    let pair = cjoManager.GetPackageCjo(importSpec)
+                    let fullDepName = pair[0]
+                    let cjoPath = pair[1]
+                    if (!fullDepName.isEmpty() && cjoManager.GetPackage(fullDepName).isNone()) {
+                        let _ = cjoManager.LoadPackageHeader(fullDepName, cjoPath)
+                    }
+                }
+            }
+            cjoManager.AddPackageDeclMap(pkg.fullPackageName)
+        }
     }
 
     public func GetImportedPackageName(): String {
@@ -215,7 +269,12 @@ public class ASTLoader {
     }
 
     public func LoadType(typeIndex: FormattedIndex): String {
-        // TODO(selfhost:Modules): return real AST Ty once type serialization is wired.
+        if (typeIndex == INVALID_FORMAT_INDEX) {
+            return ""
+        }
+        if (let Some(typeText) <- loadedTypes.get(typeIndex)) {
+            return typeText
+        }
         return typeIndex.toString()
     }
 
@@ -242,6 +301,10 @@ public class ASTLoader {
                 case "dep" =>
                     if (fields.size > 1) {
                         packageDepInfo = fields[1]
+                    }
+                case "type" =>
+                    if (fields.size > 2) {
+                        loadedTypes[ParseFormattedIndex(fields[1])] = fields[2]
                     }
                 case "package" =>
                     if (fields.size > 3) {
@@ -303,6 +366,20 @@ public class ASTLoader {
                         }
                         if (fields.size > 4) { decl.doNotExport = WireToBool(fields[4]) }
                         if (fields.size > 5) { decl.isFunction = WireToBool(fields[5]) }
+                        if (fields.size > 6) { decl.rawMangleName = fields[6] }
+                        if (fields.size > 7) { decl.mangledName = fields[7] }
+                        if (fields.size > 13) {
+                            decl.begin = Position(
+                                ParseUInt64Field(fields[8]),
+                                ParseInt64Field(fields[9]),
+                                ParseInt64Field(fields[10])
+                            )
+                            decl.end = Position(
+                                ParseUInt64Field(fields[11]),
+                                ParseInt64Field(fields[12]),
+                                ParseInt64Field(fields[13])
+                            )
+                        }
                         decl.curFile = Some(file)
                         file.decls.add(decl)
                     }
@@ -311,6 +388,39 @@ public class ASTLoader {
         }
         return Some(pkg)
     }
+}
+
+public func ParseFormattedIndex(value: String): FormattedIndex {
+    return ParseUInt64Field(value)
+}
+
+public func ParseUInt64Field(value: String): UInt64 {
+    try {
+        return UInt64.parse(value)
+    } catch (e: Exception) {
+        return 0u64
+    }
+}
+
+public func ParseInt64Field(value: String): Int64 {
+    try {
+        return Int64.parse(value)
+    } catch (e: Exception) {
+        return 0
+    }
+}
+
+public func GetDeclMangleKey(decl: Decl): String {
+    if (!decl.mangledName.isEmpty()) {
+        return decl.mangledName
+    }
+    if (!decl.rawMangleName.isEmpty()) {
+        return decl.rawMangleName
+    }
+    if (!decl.fullPackageName.isEmpty() && !decl.identifier.isEmpty()) {
+        return decl.fullPackageName + "." + decl.identifier
+    }
+    return decl.identifier
 }
 
 public func SplitRawLines(text: String): ArrayList<String> {
