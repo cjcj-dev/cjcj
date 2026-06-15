@@ -91,11 +91,13 @@ extend ParserImpl {
             if (Seeing(TokenKind.INCR) || Seeing(TokenKind.DECR)) {
                 let op = Peek()
                 Next()
-                let unary = UnaryExpr(op)
-                unary.expr = base
-                unary.begin = base.begin
-                unary.end = op.End()
-                base = unary
+                let incOrDec = IncOrDecExpr()
+                incOrDec.expr = base
+                incOrDec.op = op.kind
+                incOrDec.operatorPos = op.Begin()
+                incOrDec.begin = base.begin
+                incOrDec.end = op.End()
+                base = incOrDec
                 continue
             }
             if (Seeing(TokenKind.LCURL) && (base.astKind == ASTKind.CALL_EXPR || base.astKind == ASTKind.REF_EXPR ||
@@ -724,19 +726,42 @@ extend ParserImpl {
     public func ParseSpawnExpr(): SpawnExpr {
         let ret = SpawnExpr()
         let token = Expect(TokenKind.SPAWN, "expected 'spawn'")
+        ret.spawnPos = token.Begin()
         ret.begin = token.Begin()
-        ret.task = if (Seeing(TokenKind.LCURL)) { ParseLambdaExprWithTrailingClosure() } else { ParseExpr() }
-        if (let Some(task) <- ret.task) { ret.end = task.end }
+        if (Skip(TokenKind.LPAREN)) {
+            ret.leftParenPos = lastToken.Begin()
+            if (!Seeing(TokenKind.RPAREN)) {
+                ret.arg = ParseExpr()
+            }
+            ret.rightParenPos = Expect(TokenKind.RPAREN, "expected ')' after spawn argument").Begin()
+        }
+        if (SeeingAnnotationLambdaExpr()) {
+            ret.task = ParseAnnotationLambdaExpr(true)
+        } else if (Seeing(TokenKind.LCURL)) {
+            ret.task = ParseLambdaExprWithTrailingClosure()
+        } else {
+            diag.DiagnoseRefactor(DiagKindRefactor.EXPECTED_TOKEN, Peek().Begin(), "expected lambda block after spawn")
+            let invalid = InvalidExpr(Peek().Begin())
+            ret.task = invalid
+            ret.isBroken = true
+        }
+        if (let Some(task) <- ret.task) {
+            if (task.astKind != ASTKind.LAMBDA_EXPR) {
+                ret.isBroken = true
+            }
+            ret.end = task.end
+        }
         return ret
     }
 
     public func ParseSynchronizedExpr(): SynchronizedExpr {
         let ret = SynchronizedExpr()
         let token = Expect(TokenKind.SYNCHRONIZED, "expected 'synchronized'")
+        ret.syncPos = token.Begin()
         ret.begin = token.Begin()
-        Expect(TokenKind.LPAREN, "expected '(' after synchronized")
+        ret.leftParenPos = Expect(TokenKind.LPAREN, "expected '(' after synchronized").Begin()
         ret.mutex = ParseExpr()
-        Expect(TokenKind.RPAREN, "expected ')' after synchronized expression")
+        ret.rightParenPos = Expect(TokenKind.RPAREN, "expected ')' after synchronized expression").Begin()
         ret.body = ParseBlock(ScopeKind.FUNC_BODY)
         if (let Some(body) <- ret.body) { ret.end = body.end }
         return ret

@@ -13,7 +13,7 @@ public enum ASTKind {
     | WILDCARD_PATTERN | INVALID_PATTERN
     | EXPR | WILDCARD_EXPR | REF_EXPR | LIT_CONST_EXPR | PAREN_EXPR | TUPLE_LIT | ARRAY_LIT | CALL_EXPR
     | MEMBER_ACCESS | SUBSCRIPT_EXPR | PRIMITIVE_TYPE_EXPR | TYPE_CONV_EXPR | ARRAY_EXPR
-    | UNARY_EXPR | BINARY_EXPR | ASSIGN_EXPR | RANGE_EXPR | IS_EXPR | AS_EXPR
+    | UNARY_EXPR | BINARY_EXPR | INC_OR_DEC_EXPR | ASSIGN_EXPR | RANGE_EXPR | IS_EXPR | AS_EXPR
     | BLOCK | IF_EXPR | MATCH_EXPR | TRY_EXPR | WHILE_EXPR | DO_WHILE_EXPR | FOR_IN_EXPR | LAMBDA_EXPR
     | RETURN_EXPR | JUMP_EXPR | THROW_EXPR | PERFORM_EXPR | RESUME_EXPR | SPAWN_EXPR | SYNCHRONIZED_EXPR
     | QUOTE_EXPR | MACRO_EXPAND_EXPR | IF_AVAILABLE_EXPR | TRAIL_CLOSURE_EXPR | INVALID_EXPR
@@ -87,46 +87,47 @@ public func ASTKindIndex(kind: ASTKind): Int64 {
         case ASTKind.ARRAY_EXPR => 60
         case ASTKind.UNARY_EXPR => 61
         case ASTKind.BINARY_EXPR => 62
-        case ASTKind.ASSIGN_EXPR => 63
-        case ASTKind.RANGE_EXPR => 64
-        case ASTKind.IS_EXPR => 65
-        case ASTKind.AS_EXPR => 66
-        case ASTKind.BLOCK => 67
-        case ASTKind.IF_EXPR => 68
-        case ASTKind.MATCH_EXPR => 69
-        case ASTKind.TRY_EXPR => 70
-        case ASTKind.WHILE_EXPR => 71
-        case ASTKind.DO_WHILE_EXPR => 72
-        case ASTKind.FOR_IN_EXPR => 73
-        case ASTKind.LAMBDA_EXPR => 74
-        case ASTKind.RETURN_EXPR => 75
-        case ASTKind.JUMP_EXPR => 76
-        case ASTKind.THROW_EXPR => 77
-        case ASTKind.PERFORM_EXPR => 78
-        case ASTKind.RESUME_EXPR => 79
-        case ASTKind.SPAWN_EXPR => 80
-        case ASTKind.SYNCHRONIZED_EXPR => 81
-        case ASTKind.QUOTE_EXPR => 82
-        case ASTKind.MACRO_EXPAND_EXPR => 83
-        case ASTKind.IF_AVAILABLE_EXPR => 84
-        case ASTKind.TRAIL_CLOSURE_EXPR => 85
-        case ASTKind.INVALID_EXPR => 86
-        case ASTKind.GENERIC => 87
-        case ASTKind.GENERIC_CONSTRAINT => 88
-        case ASTKind.FUNC_ARG => 89
-        case ASTKind.FUNC_PARAM => 90
-        case ASTKind.FUNC_PARAM_LIST => 91
-        case ASTKind.FUNC_BODY => 92
-        case ASTKind.CLASS_BODY => 93
-        case ASTKind.INTERFACE_BODY => 94
-        case ASTKind.STRUCT_BODY => 95
-        case ASTKind.MATCH_CASE => 96
-        case ASTKind.LET_PATTERN_DESTRUCTOR => 97
-        case ASTKind.EXCEPT_TYPE_PATTERN => 98
-        case ASTKind.COMMAND_TYPE_PATTERN => 99
-        case ASTKind.OPTIONAL_EXPR => 100
-        case ASTKind.OPTIONAL_CHAIN_EXPR => 101
-        case ASTKind.MATCH_CASE_OTHER => 102
+        case ASTKind.INC_OR_DEC_EXPR => 63
+        case ASTKind.ASSIGN_EXPR => 64
+        case ASTKind.RANGE_EXPR => 65
+        case ASTKind.IS_EXPR => 66
+        case ASTKind.AS_EXPR => 67
+        case ASTKind.BLOCK => 68
+        case ASTKind.IF_EXPR => 69
+        case ASTKind.MATCH_EXPR => 70
+        case ASTKind.TRY_EXPR => 71
+        case ASTKind.WHILE_EXPR => 72
+        case ASTKind.DO_WHILE_EXPR => 73
+        case ASTKind.FOR_IN_EXPR => 74
+        case ASTKind.LAMBDA_EXPR => 75
+        case ASTKind.RETURN_EXPR => 76
+        case ASTKind.JUMP_EXPR => 77
+        case ASTKind.THROW_EXPR => 78
+        case ASTKind.PERFORM_EXPR => 79
+        case ASTKind.RESUME_EXPR => 80
+        case ASTKind.SPAWN_EXPR => 81
+        case ASTKind.SYNCHRONIZED_EXPR => 82
+        case ASTKind.QUOTE_EXPR => 83
+        case ASTKind.MACRO_EXPAND_EXPR => 84
+        case ASTKind.IF_AVAILABLE_EXPR => 85
+        case ASTKind.TRAIL_CLOSURE_EXPR => 86
+        case ASTKind.INVALID_EXPR => 87
+        case ASTKind.GENERIC => 88
+        case ASTKind.GENERIC_CONSTRAINT => 89
+        case ASTKind.FUNC_ARG => 90
+        case ASTKind.FUNC_PARAM => 91
+        case ASTKind.FUNC_PARAM_LIST => 92
+        case ASTKind.FUNC_BODY => 93
+        case ASTKind.CLASS_BODY => 94
+        case ASTKind.INTERFACE_BODY => 95
+        case ASTKind.STRUCT_BODY => 96
+        case ASTKind.MATCH_CASE => 97
+        case ASTKind.LET_PATTERN_DESTRUCTOR => 98
+        case ASTKind.EXCEPT_TYPE_PATTERN => 99
+        case ASTKind.COMMAND_TYPE_PATTERN => 100
+        case ASTKind.OPTIONAL_EXPR => 101
+        case ASTKind.OPTIONAL_CHAIN_EXPR => 102
+        case ASTKind.MATCH_CASE_OTHER => 103
     }
 }
 

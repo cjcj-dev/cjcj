@@ -11,7 +11,31 @@ extend ParserImpl {
         return SeeingMacroCall()
     }
 
+    public func ParseAnnotationLambdaExpr(): LambdaExpr {
+        return ParseAnnotationLambdaExpr(false)
+    }
+
+    public func ParseAnnotationLambdaExpr(isTailClosure: Bool): LambdaExpr {
+        let annos = ArrayList<Annotation>()
+        ParseAnnotations(annos)
+        let expr = if (isTailClosure) { ParseLambdaExprWithTrailingClosure() } else { ParseLambdaExpr() }
+        for (anno in annos) { expr.annotations.add(anno) }
+        if (!annos.isEmpty()) {
+            expr.begin = annos[0].begin
+        }
+        return expr
+    }
+
     public func ParseMacroExprOrLambdaExpr(): Expr {
+        if (SeeingAnnotationLambdaExpr()) {
+            return ParseAnnotationLambdaExpr()
+        }
+        if (SeeingBuiltinAnnotation()) {
+            let token = Peek()
+            diag.DiagnoseRefactor(DiagKindRefactor.EXPECTED_TOKEN, token.Begin(), "expected lambda expression after builtin annotation")
+            Next()
+            return InvalidExpr(token.Begin())
+        }
         let expr = MacroExpandExpr()
         expr.begin = Peek().Begin()
         ParseMacroInvocation(ScopeKind.FUNC_BODY, ArrayList<Modifier>(), expr.invocation)

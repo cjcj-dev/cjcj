@@ -80,6 +80,12 @@ package public APIs.
 - Added atom parsing for primitive type conversion expressions, primitive type
   static member bases such as `Int64.foo`, and `VArray<T, $n>(...)` /
   `VArray<T, $n>{ ... }` value-array expressions with C++-shaped AST nodes.
+- Added a distinct `IncOrDecExpr` node for postfix `++`/`--`, and aligned
+  `spawn` / `synchronized` expression storage with the C++ parser's argument,
+  mutex, keyword, and delimiter positions.
+- Added builtin annotation-lambda recognition so `@Anno { ... }` parses as a
+  lambda expression where the C++ parser accepts annotation lambdas, including
+  the `spawn` task position.
 
 ## Remaining Work
 

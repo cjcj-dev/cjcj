@@ -14,6 +14,11 @@ extend ParserImpl {
         return ahead[0].kind == TokenKind.IDENTIFIER && NameToAnnotationKind(ahead[0].Value()) != AnnotationKind.CUSTOM
     }
 
+    public func SeeingAnnotationLambdaExpr(): Bool {
+        return (Seeing([TokenKind.AT, TokenKind.IDENTIFIER, TokenKind.LCURL]) ||
+            Seeing([TokenKind.AT_EXCL, TokenKind.IDENTIFIER, TokenKind.LCURL])) && SeeingBuiltinAnnotation()
+    }
+
     public func ParseAnnotations(annos: ArrayList<Annotation>): Unit {
         while (Seeing(TokenKind.AT) || Seeing(TokenKind.AT_EXCL)) {
             annos.add(ParseAnnotation())

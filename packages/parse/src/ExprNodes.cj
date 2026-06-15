@@ -286,6 +286,20 @@ public class UnaryExpr <: Expr {
     }
 }
 
+public class IncOrDecExpr <: Expr {
+    public var op: TokenKind = TokenKind.ILLEGAL
+    public var operatorPos: Position = INVALID_POSITION
+    public var expr: Option<Expr> = None
+
+    public init() { super(ASTKind.INC_OR_DEC_EXPR) }
+
+    public override func Children(): ArrayList<Node> {
+        let out = ArrayList<Node>()
+        if (let Some(child) <- expr) { out.add(child) }
+        return out
+    }
+}
+
 public open class BinaryExpr <: Expr {
     public var leftExpr: Option<Expr> = None
     public var rightExpr: Option<Expr> = None
@@ -499,8 +513,16 @@ public class ForInExpr <: Expr {
 }
 
 public class LambdaExpr <: Expr {
+    public let annotations: ArrayList<Annotation> = ArrayList<Annotation>()
     public var funcBody: Option<FuncBody> = None
     public init() { super(ASTKind.LAMBDA_EXPR) }
+
+    public override func Children(): ArrayList<Node> {
+        let out = ArrayList<Node>()
+        for (anno in annotations) { out.add(anno) }
+        if (let Some(body) <- funcBody) { out.add(body) }
+        return out
+    }
 }
 
 public class ReturnExpr <: Expr {
@@ -562,14 +584,35 @@ public class ResumeExpr <: Expr {
 }
 
 public class SpawnExpr <: Expr {
+    public var spawnPos: Position = INVALID_POSITION
+    public var leftParenPos: Position = INVALID_POSITION
+    public var arg: Option<Expr> = None
+    public var rightParenPos: Position = INVALID_POSITION
     public var task: Option<Expr> = None
     public init() { super(ASTKind.SPAWN_EXPR) }
+
+    public override func Children(): ArrayList<Node> {
+        let out = ArrayList<Node>()
+        if (let Some(expr) <- arg) { out.add(expr) }
+        if (let Some(expr) <- task) { out.add(expr) }
+        return out
+    }
 }
 
 public class SynchronizedExpr <: Expr {
+    public var syncPos: Position = INVALID_POSITION
+    public var leftParenPos: Position = INVALID_POSITION
     public var mutex: Option<Expr> = None
+    public var rightParenPos: Position = INVALID_POSITION
     public var body: Option<Block> = None
     public init() { super(ASTKind.SYNCHRONIZED_EXPR) }
+
+    public override func Children(): ArrayList<Node> {
+        let out = ArrayList<Node>()
+        if (let Some(expr) <- mutex) { out.add(expr) }
+        if (let Some(block) <- body) { out.add(block) }
+        return out
+    }
 }
 
 public class QuoteExpr <: Expr {
