@@ -28,6 +28,7 @@ Current Cangjie port state:
 - Added C++-shaped unused-import collection over resolved AST targets, including private-vs-package-wide used maps, cache maps, extend/generic-bound target propagation, import filtering, structured unused findings, and diagnostic reporting through `sema_unused_import`.
 - Added declaration-attribute propagation and validation for nominal declarations, interface/enum/struct/class/extend members, property accessors, CJMP abstract members, generic operator functions, and context parent links.
 - Added access-control and mutation helpers for visibility filtering, inout receiver-use detection, `let` value access to `mut` functions, mutable-function-alone detection, and non-mut struct member mutation checks.
+- Added the shared `TypeCheckUtil` helper surface for ideal-type expansion, target replacement, reference/member target maintenance, `This` return compatibility, main-declaration discovery, default-parameter marking, overloadable/builtin operator classification, function parameter type extraction, type-alias target chasing, property accessor selection, `Option` unboxing/nesting, call argument-to-parameter ordering, enum-constructor generic checks, and placeholder/questable-node classification.
 - Added compiling public entrypoints for generic instantiation, type checking, desugar, incremental helpers, test helpers, lookup, collection, diagnostics, join/meet, promotion, and scope utilities.
 
 Known gaps:

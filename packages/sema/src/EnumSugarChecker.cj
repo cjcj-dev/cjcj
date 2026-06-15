@@ -3,27 +3,6 @@ package cangjie_compiler::sema
 import std.collection.*
 import cangjie_compiler::ast.*
 
-public func UpdateInstTysWithTypeArgs(refExpr: NameReferenceExpr): Bool {
-    refExpr.instTys.clear()
-    for (typeArg in refExpr.typeArguments) {
-        if (let Some(typeArgTy) <- typeArg.GetTy()) {
-            refExpr.instTys.add(typeArgTy)
-        } else {
-            refExpr.instTys.clear()
-            return false
-        }
-    }
-    return true
-}
-
-public func ModifyTargetOfRef(refExpr: RefExpr, target: Decl, targets: ArrayList<Decl>): Unit {
-    refExpr.ref.target = target
-    refExpr.ref.targets.clear()
-    for (candidate in targets) {
-        refExpr.ref.targets.add(candidate)
-    }
-}
-
 private func CollectTypeArgumentTys(refExpr: NameReferenceExpr): Option<ArrayList<Ty>> {
     let typeArgs = ArrayList<Ty>()
     for (typeArg in refExpr.typeArguments) {
