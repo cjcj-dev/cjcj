@@ -309,6 +309,14 @@ public class ASTMangler {
         }
         mangled += MangleGenericArguments(decl)
         mangled += MangleDeclAstKind(decl.astKind)
+        if (decl.astKind == MangleAstKind.FUNC_DECL && decl.TestAttr(MangleAttribute.CONSTRUCTOR) &&
+            decl.TestAttr(MangleAttribute.STATIC)) {
+            let initSuffix = MangleName(MANGLE_LT_PREFIX + decl.identifier + MANGLE_GT_PREFIX) +
+                MangleDeclAstKind(MangleAstKind.FUNC_DECL)
+            if (EndsWith(mangled, initSuffix)) {
+                mangled = mangled[0..mangled.size - initSuffix.size] + MangleName(STATIC_INIT_FUNC)
+            }
+        }
         mangled += MangleOthers(decl)
         return mangled
     }
@@ -325,8 +333,18 @@ public class ASTMangler {
             decl.astKind == MangleAstKind.MACRO_DECL || decl.astKind == MangleAstKind.PRIMARY_CTOR_DECL) {
             if (let Some(body) <- decl.funcBody) {
                 mangled += MangleFuncParameters(body.params)
-                if (decl.astKind == MangleAstKind.FUNC_DECL || decl.astKind == MangleAstKind.MAIN_DECL) {
+                if (decl.astKind == MangleAstKind.FUNC_DECL) {
                     mangled += MANGLE_DIDOLLAR_PREFIX
+                    if (let Some(retType) <- body.retType) {
+                        mangled += MangleAstType(retType)
+                    } else if (let Some(outer) <- decl.outerDecl) {
+                        if (outer.astKind == MangleAstKind.PROP_DECL) {
+                            if (let Some(typeAnnotation) <- outer.typeAnnotation) {
+                                mangled += MangleAstType(typeAnnotation)
+                            }
+                        }
+                    }
+                } else if (decl.astKind == MangleAstKind.MAIN_DECL) {
                     if (let Some(retType) <- body.retType) {
                         mangled += MangleAstType(retType)
                     }

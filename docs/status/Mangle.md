@@ -24,7 +24,7 @@ Implemented:
   pattern declarations from real function bodies and blocks, matching the C++ walker structure.
 - Added public AST-backed overloads for `BaseMangler.Mangle`, `BaseMangler.MangleExportIds`,
   `BaseMangler.MangleExportId`, `BaseMangler.MangleLambda`, `ASTMangler.Mangle`, and top-level
-  `MangleAstType`.
+  `MangleAstType`; AST declaration mangling now accepts C++-shaped `ArrayList<Node>` prefix paths.
 - Added AST-facing `MangleUtils` overloads for primitive type lookup, auto-boxed declaration checks,
   enum-element mangling, file-private suffix mangling, and custom-identifier mangling.
 - Implemented declaration, package, prefix, generic-argument, function-parameter, user-defined type,
@@ -34,6 +34,9 @@ Implemented:
   local functions, lambdas, extends, and global wildcard pattern declarations.
 - Aligned lambda numbering with the C++ context-index lookup and aligned export-id handling with the
   C++ function/property/primary-constructor/interface-generic branches.
+- Aligned global var-with-pattern prefix handling, private/default-init extend prefix handling,
+  common/specific generic-parameter naming, parser-AST `MainDecl` return mangling, parser-AST static
+  constructor spelling, and parser-AST property accessor return-type fallback with the C++ rules.
 - Implemented parser-AST type annotation mangling, including primitive, reference, qualified, option,
   constant, VArray, parenthesized, function, tuple, generic, inherited type, generic constraint,
   and var-with-pattern name handling.
