@@ -812,6 +812,53 @@ public class LexerImpl {
         }
     }
 
+    private func DecodeUTF8At(index: Int64): (Int64, Int64, Bool) {
+        if (index < 0 || index >= bytes.size) {
+            return (-1, index, false)
+        }
+        let first = bytes[index]
+        if (first < BYTE_2_FLAG) {
+            return (Int64(first), index + 1, true)
+        }
+        if (index + 1 >= bytes.size) {
+            return (Int64(first), index, false)
+        }
+        let byte1 = UInt32(first)
+        let byte2 = UInt32(getByte(index + 1))
+        if (byte2 >= UInt32(BYTE_2_FLAG) || byte2 < UInt32(BYTE_X_FLAG)) {
+            return (Int64(byte1), index, false)
+        }
+        if (first >= BYTE_4_FLAG) {
+            if (index + 3 >= bytes.size) {
+                return (Int64(byte1), index, false)
+            }
+            let byte3 = UInt32(getByte(index + 2))
+            let byte4 = UInt32(getByte(index + 3))
+            if (byte3 >= UInt32(BYTE_2_FLAG) || byte3 < UInt32(BYTE_X_FLAG) ||
+                byte4 >= UInt32(BYTE_2_FLAG) || byte4 < UInt32(BYTE_X_FLAG)) {
+                return (Int64(byte1), index, false)
+            }
+            let ch = ((byte1 & LOW_3_BIT_MASK) << 18) | ((byte2 & LOW_6_BIT_MASK) << 12) |
+                ((byte3 & LOW_6_BIT_MASK) << 6) | (byte4 & LOW_6_BIT_MASK)
+            return (Int64(ch), index + 4, ch >= BYTE_4_BASE && ch <= UTF8_4_MAX)
+        }
+        if (first >= BYTE_3_FLAG) {
+            if (index + 2 >= bytes.size) {
+                return (Int64(byte1), index, false)
+            }
+            let byte3 = UInt32(getByte(index + 2))
+            if (byte3 >= UInt32(BYTE_2_FLAG) || byte3 < UInt32(BYTE_X_FLAG)) {
+                return (Int64(byte1), index, false)
+            }
+            let ch = ((byte1 & LOW_4_BIT_MASK) << 12) | ((byte2 & LOW_6_BIT_MASK) << 6) |
+                (byte3 & LOW_6_BIT_MASK)
+            let legalScalar = ch <= 0xd7ffu32 || (ch >= 0xe000u32 && ch <= UTF8_4_MAX)
+            return (Int64(ch), index + 3, ch >= BYTE_3_BASE && legalScalar)
+        }
+        let ch = ((byte1 & LOW_5_BIT_MASK) << 6) | (byte2 & LOW_6_BIT_MASK)
+        return (Int64(ch), index + 2, ch >= BYTE_2_BASE)
+    }
+
     private func ReadUTF8Char(): Unit {
         pCurrent = pNext
         if (pNext >= bytes.size) {
@@ -917,15 +964,44 @@ public class LexerImpl {
         }
     }
 
-    private func DiagExpectedDigit(base: UInt8): Unit {
-        lexDiagnose2(diag, DiagKindRefactor.lex_expected_digit, GetPos(pCurrent), PrefixName(base), ConvertCurrentChar())
+    private func DigitRangeText(prefix: UInt8): String {
+        return match (prefix) {
+            case b'b' => "0~1"
+            case b'o' => "0~7"
+            case b'x' => "0~9 or a~f"
+            case _ => "0~9"
+        }
     }
 
-    private func DiagUnexpectedDigit(reasonPoint: Int64): Unit {
-        lexDiagnose2(
-            diag, DiagKindRefactor.lex_unexpected_digit, GetPos(pCurrent), ConvertCurrentChar(),
-            PrefixName(lowerByte(getByte(reasonPoint)))
+    private func DiagExpectedDigit(base: UInt8): Unit {
+        let name = PrefixName(base)
+        let builder = diag.DiagnoseRefactor(
+            DiagKindRefactor.lex_expected_digit, MakeRange(GetPos(pCurrent), GetPos(pNext)),
+            arguments: [name, ConvertCurrentChar()]
         )
+        builder.AddMainHintArguments([name])
+    }
+
+    private func DiagUnexpectedDigit(base: Int64, reasonPoint: Int64): Unit {
+        let baseChar = lowerByte(getByte(reasonPoint))
+        let name = PrefixName(baseChar)
+        let builder = diag.DiagnoseRefactor(
+            DiagKindRefactor.lex_unexpected_digit, GetPos(pCurrent),
+            arguments: [ConvertCurrentChar(), name]
+        )
+        var rangePrefix = b'd'
+        if (base != DEC_BASE) {
+            builder.AddHint(
+                MakeRange(GetPos(reasonPoint - 1), GetPos(reasonPoint) + 1),
+                arguments: ["of this " + name + " prefix"]
+            )
+            rangePrefix = baseChar
+        } else if (baseChar == b'e' || baseChar == b'p') {
+            builder.AddHint(GetPos(reasonPoint), arguments: ["the exponent part base is decimal"])
+        } else {
+            builder.AddHint(MakeRange(GetPos(reasonPoint), GetPos(pCurrent)), arguments: ["the default base is decimal"])
+        }
+        builder.AddNote(name + " may only contain digit within " + DigitRangeText(rangePrefix))
     }
 
     private func DiagSmallExpectedDigit(hasDigit: Bool, base: UInt8): Unit {
@@ -1011,7 +1087,7 @@ public class LexerImpl {
             if (isDigit(currentChar)) {
                 hasDigit = true
                 if (base <= DEC_BASE && currentChar >= Int64(b'0') + base && success) {
-                    DiagUnexpectedDigit(reasonPoint)
+                    DiagUnexpectedDigit(base, reasonPoint)
                     success = false
                 }
             } else if (isHexDigit(currentChar)) {
@@ -1021,7 +1097,7 @@ public class LexerImpl {
                 }
                 hasDigit = true
                 if (base != HEX_BASE && success) {
-                    DiagUnexpectedDigit(reasonPoint)
+                    DiagUnexpectedDigit(base, reasonPoint)
                     success = false
                 }
             } else if (tokenKind != TokenKind.FLOAT_LITERAL && hasDigit &&
@@ -1053,9 +1129,12 @@ public class LexerImpl {
         let pSuffixStart = pCurrent
         let suffix = GetSuffix(pSuffixStart)
         if (!(suffix == "64" || suffix == "32" || suffix == "8" || suffix == "16")) {
-            lexDiagnose(
-                diag, DiagKindRefactor.lex_illegal_integer_suffix, MakeRange(GetPos(pSuffixStart), GetPos(pCurrent)),
-                suffixType + suffix
+            let builder = diag.DiagnoseRefactor(
+                DiagKindRefactor.lex_illegal_integer_suffix, MakeRange(GetPos(pSuffixStart), GetPos(pCurrent)),
+                arguments: [suffixType + suffix]
+            )
+            builder.AddNote(
+                "integer literal type suffix can only be 'u8', 'u16', 'u32', 'u64', 'i8', 'i16', 'i32', 'i64'"
             )
             success = false
             tokenKind = TokenKind.ILLEGAL
@@ -1073,10 +1152,11 @@ public class LexerImpl {
         }
         let suffix = GetSuffix(pSuffixStart)
         if (!(suffix == "64" || suffix == "32" || suffix == "16")) {
-            lexDiagnose(
-                diag, DiagKindRefactor.lex_illegal_float_suffix, MakeRange(GetPos(pSuffixStart), GetPos(pCurrent)),
-                "f" + suffix
+            let builder = diag.DiagnoseRefactor(
+                DiagKindRefactor.lex_illegal_float_suffix, MakeRange(GetPos(pSuffixStart), GetPos(pCurrent)),
+                arguments: ["f" + suffix]
             )
+            builder.AddNote("float literal type suffix can only be 'f16', 'f32', 'f64'")
             success = false
             tokenKind = TokenKind.ILLEGAL
         }
@@ -1270,15 +1350,33 @@ public class LexerImpl {
             if (pNext >= bytes.size) {
                 break
             }
+            if (currentChar == Int64(b'.')) {
+                let decoded = DecodeUTF8At(pNext)
+                if (decoded[2]) {
+                    if (isCJXIDStart(decoded[0])) {
+                        break
+                    }
+                    currentChar = decoded[0]
+                    pNext = decoded[1]
+                    continue
+                }
+                currentChar = decoded[0]
+                break
+            }
             ReadUTF8Char()
         }
-        if (((!isFloat && hasSuffix) || (suffixBegin != pNext && (isFloat || !hasDot))) && success) {
+        if (((!isFloat && hasSuffix) || (suffixBegin != pNext && !IsAdjacent(suffixBegin, pNext) &&
+            (isFloat || !hasDot))) && success) {
             let errPoint = if (isFloat) { suffixBegin } else { nonDigitStart }
             var args = input[errPoint..pCurrent]
             if (args.isEmpty()) {
                 args = "."
             }
-            lexDiagnose(diag, DiagKindRefactor.lex_unknown_suffix, MakeRange(GetPos(errPoint), GetPos(pCurrent)), args)
+            let builder = diag.DiagnoseRefactor(
+                DiagKindRefactor.lex_unknown_suffix, MakeRange(GetPos(errPoint), GetPos(pCurrent)),
+                arguments: [args]
+            )
+            builder.AddMainHintArguments([args])
             success = false
         }
         Back()
