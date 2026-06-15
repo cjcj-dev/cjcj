@@ -576,6 +576,29 @@ public class GlobalOptions <: Option {
         return MaybeString()
     }
 
+    public static func ParseIntOptionValue(
+        arg: OptionArgInstance,
+        from!: Int64 = -2147483648,
+        to!: Int64 = 2147483647
+    ): MaybeInt64 {
+        let parsed = TryParseInt64(arg.value)
+        if (!parsed.hasValue || parsed.value < from || parsed.value > to) {
+            Errorln("The value of " + arg.name + " is invalid.")
+            return MaybeInt64()
+        }
+        return parsed
+    }
+
+    public static func GetSharedLibraryExtension(osType: OSType): String {
+        return match (osType) {
+            case OSType.WINDOWS => ".dll"
+            case OSType.DARWIN => ".dylib"
+            case OSType.IOS => ".dylib"
+            case OSType.LINUX => ".so"
+            case OSType.UNKNOWN => ".so"
+        }
+    }
+
     private func ProcessInputs(inputs: Array<String>): Bool {
         for (input in inputs) {
             let ext = GetFileExtension(input)

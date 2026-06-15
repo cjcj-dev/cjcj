@@ -287,12 +287,31 @@ public func ParseAction(opts: GlobalOptions, arg: OptionArgInstance): ActionResu
 }
 
 private func parseOutputType(opts: GlobalOptions, value: String): ActionResult {
-    if (value == "exe") { opts.outputMode = OutputMode.EXECUTABLE }
-    else if (value == "staticlib") { opts.outputMode = OutputMode.STATIC_LIB }
-    else if (value == "dylib") { opts.outputMode = OutputMode.SHARED_LIB }
-    else if (value == "chir") { opts.outputMode = OutputMode.CHIR }
-    else if (value == "obj") { opts.outputMode = OutputMode.OBJ }
-    else if (value == "hotreload") { opts.outputMode = OutputMode.SHARED_LIB }
+    if (value == "exe") {
+        opts.outputMode = OutputMode.EXECUTABLE
+        opts.enableHotReload = false
+    }
+    else if (value == "staticlib") {
+        opts.outputMode = OutputMode.STATIC_LIB
+        opts.enableHotReload = false
+    }
+    else if (value == "dylib") {
+        opts.outputMode = OutputMode.SHARED_LIB
+        opts.enableHotReload = false
+    }
+    else if (value == "chir") {
+        opts.outputMode = OutputMode.CHIR
+        opts.enableHotReload = false
+    }
+    else if (value == "obj") {
+        opts.outputMode = OutputMode.OBJ
+        opts.enableHotReload = false
+    }
+    else if (value == "hotreload") {
+        opts.outputMode = OutputMode.SHARED_LIB
+        opts.enableHotReload = true
+        opts.linkStaticStd = MaybeBool(false)
+    }
     else { return handled(success: false) }
     opts.enableOutputType = true
     return handled()

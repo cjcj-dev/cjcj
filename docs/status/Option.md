@@ -23,7 +23,13 @@ made cfg serialization deterministic, added environment path ingestion,
 Cangjie library path-name helpers, compilation cache path/name helpers, and
 corrected sanitizer coverage and target-triple edge cases.
 
+This continuation aligns more C++ public behavior: compilation-cache hashing now
+uses the same SipHash-2-4 constants and byte processing as `Utils::SipHash`,
+`--output-type=hotreload` enables hot reload and disables static std linking,
+the public triple-name matcher is present, and `GlobalOptions.ParseIntOptionValue`
+matches the C++ signed `int` range validation helper.
+
 Remaining fidelity gaps are not hidden behind self-host markers: this package
-still uses local diagnostics instead of Basic diagnostic IDs, and cache file
-names use a deterministic local hash rather than the C++ SipHash utility until
-cross-package utility wiring is allowed.
+still uses local diagnostics instead of Basic diagnostic IDs, and some file-mode
+permission checks are represented by the currently available Cangjie filesystem
+predicates rather than the exact C++ `FileUtil::Access` surface.

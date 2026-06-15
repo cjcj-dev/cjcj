@@ -103,6 +103,15 @@ public func IsUnsafeBackend(backendType: BackendType): Bool {
     return backendType == BackendType.CJNATIVE
 }
 
+public func IsPossibleMatchingTripleName(info: TripleInfo, name: String): Bool {
+    let parts = SplitString(name, "-")
+    if (parts.size != 3 && parts.size != 4) { return false }
+    if (parts[0] != info.ArchToString()) { return false }
+    if (parts[parts.size - 2] != info.OSToString()) { return false }
+    if (parts[parts.size - 1] != info.EnvironmentToString()) { return false }
+    return true
+}
+
 public func GetSharedLibraryExtension(osType: OSType): String {
     return match (osType) {
         case OSType.WINDOWS => ".dll"

@@ -41,6 +41,13 @@ public class MaybeUInt64 {
     public init(value: UInt64) { this.hasValue = true; this.value = value }
 }
 
+public class MaybeInt64 {
+    public var hasValue: Bool = false
+    public var value: Int64 = 0
+    public init() {}
+    public init(value: Int64) { this.hasValue = true; this.value = value }
+}
+
 public func SplitString(str: String, delimiter: String): Array<String> {
     if (str.isEmpty()) { return Array<String>() }
     if (delimiter.isEmpty()) { return [str] }
@@ -199,6 +206,34 @@ public func TryParseUInt64(value: String): MaybeUInt64 {
     return MaybeUInt64(result)
 }
 
+public func TryParseInt64(value: String): MaybeInt64 {
+    if (value.isEmpty()) { return MaybeInt64() }
+    var idx: Int64 = 0
+    var isNegative = false
+    if (value[0] == b'+' || value[0] == b'-') {
+        isNegative = value[0] == b'-'
+        idx = 1
+    }
+    if (idx == value.size) { return MaybeInt64() }
+
+    let limit: UInt64 = if (isNegative) { 2147483648u64 } else { 2147483647u64 }
+    var result: UInt64 = 0u64
+    while (idx < value.size) {
+        let ch = value[idx]
+        if (ch < b'0' || ch > b'9') { return MaybeInt64() }
+        let digit = UInt64(ch - b'0')
+        result = result * 10u64 + digit
+        if (result > limit) { return MaybeInt64() }
+        idx++
+    }
+
+    if (isNegative) {
+        if (result == 2147483648u64) { return MaybeInt64(-2147483648) }
+        return MaybeInt64(-Int64(result))
+    }
+    return MaybeInt64(Int64(result))
+}
+
 private func hexDigit(value: UInt64): String {
     if (value == 0u64) { return "0" }
     if (value == 1u64) { return "1" }
@@ -230,14 +265,85 @@ public func UInt64ToHex(value: UInt64): String {
 }
 
 public func StableHashString(value: String): String {
-    var hash: UInt64 = 14695981039346656037u64
+    var state = SipHashState()
+    let data = value.toArray()
     var idx: Int64 = 0
-    while (idx < value.size) {
-        hash = hash ^ UInt64(value[idx])
-        hash = hash * 1099511628211u64
-        idx++
+    while (idx + 8 <= data.size) {
+        let message = LoadLittleEndian64(data, idx)
+        state.v3 = state.v3 ^ message
+        state.Round()
+        state.Round()
+        state.v0 = state.v0 ^ message
+        idx += 8
     }
-    return UInt64ToHex(hash)
+
+    if (idx < data.size) {
+        let left = LoadRemainingLittleEndian(data, idx)
+        state.v3 = state.v3 ^ left
+        state.Round()
+        state.Round()
+        state.v0 = state.v0 ^ left
+    }
+
+    state.v2 = state.v2 ^ 0xffu64
+    state.Round()
+    state.Round()
+    state.Round()
+    state.Round()
+    return UInt64ToHex(state.v0 ^ state.v1 ^ state.v2 ^ state.v3)
+}
+
+private let SIP_HASH_K0: UInt64 = 0xdeadbeefu64
+private let SIP_HASH_K1: UInt64 = 0x12345678u64
+
+private class SipHashState {
+    public var v0: UInt64 = SIP_HASH_K0 ^ 0x736f6d6570736575u64
+    public var v1: UInt64 = SIP_HASH_K1 ^ 0x646f72616e646f6du64
+    public var v2: UInt64 = SIP_HASH_K0 ^ 0x6c7967656e657261u64
+    public var v3: UInt64 = SIP_HASH_K1 ^ 0x7465646279746573u64
+
+    public init() {}
+
+    public func Round(): Unit {
+        v0 += v1
+        v1 = RotateLeft64(v1, 13)
+        v1 = v1 ^ v0
+        v0 = RotateLeft64(v0, 32)
+        v2 += v3
+        v3 = RotateLeft64(v3, 16)
+        v3 = v3 ^ v2
+        v0 += v3
+        v3 = RotateLeft64(v3, 21)
+        v3 = v3 ^ v0
+        v2 += v1
+        v1 = RotateLeft64(v1, 17)
+        v1 = v1 ^ v2
+        v2 = RotateLeft64(v2, 32)
+    }
+}
+
+private func RotateLeft64(value: UInt64, bits: Int64): UInt64 {
+    return (value << bits) | (value >> (64 - bits))
+}
+
+private func LoadLittleEndian64(data: Array<UInt8>, start: Int64): UInt64 {
+    var result: UInt64 = 0u64
+    var offset: Int64 = 0
+    while (offset < 8) {
+        result = result | (UInt64(data[start + offset]) << (offset * 8))
+        offset++
+    }
+    return result
+}
+
+private func LoadRemainingLittleEndian(data: Array<UInt8>, start: Int64): UInt64 {
+    var result: UInt64 = 0u64
+    var offset: Int64 = 0
+    while (start + offset < data.size) {
+        result = result | (UInt64(data[start + offset]) << (offset * 8))
+        offset++
+    }
+    return result
 }
 
 public func Errorln(value: String): Unit {
