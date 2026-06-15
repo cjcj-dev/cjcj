@@ -29,11 +29,12 @@ The task explicitly disallows editing `cjpm.toml`, so AST currently carries loca
 - Extended the AST-local Basic/Lex compatibility layer with `Linkage` equality and the `mut` token needed by mirror-property conversion.
 - Expanded `Symbol` and `ASTContext` parity with C++ symbol hash IDs, scope level/kind/target data, context reset behavior, desugared type-check cache keys, declaration removal by declaration identity, outer variable-with-pattern ownership, macro-origin filtering for enum constructors, enum constructor lookup by name and arity, and member-signature subtype expansion.
 - Expanded scope/search parity with C++ scope-name tail, parent, child, and gate helpers; C++ top-level scope encoding; trie reset/delete/suffix matching; position string formatting; and position range symbol collection APIs.
+- Expanded type-system parity with C++ `Types.cpp`: generic lower-bound subtype predicates, type-alias extendability through aliased types, core-package nominal checks for `Option`, `Array`, `Object`, `Any`, `CType`, `String`, and `Range`, union/intersection-aware recursive type queries, nominal generic type lookup, inherited interface lookup on nominal types, structural type hashing, and type-cache keys based on structural hashes.
 - Preserved build compatibility without touching runtime, stdx, tools, manifests, or the C++ reference repository.
 
 ## Remaining Work
 
 - Replace AST-local Basic/Lex compatibility types with real dependencies.
 - Wire AST validation to the real `DiagnosticEngine`.
-- Audit the ported context, walker, clone, search/query, literal, utility, and validation behavior against the complete C++ implementation once downstream packages can exercise the same API surface.
+- Audit the ported context, walker, clone, search/query, literal, type, utility, and validation behavior against the complete C++ implementation once downstream packages can exercise the same API surface.
 - Align all helper APIs exactly with downstream Parse/Sema/Modules expectations once those packages are ported and the real Basic/Lex packages are available as dependencies.

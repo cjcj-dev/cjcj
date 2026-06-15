@@ -2,6 +2,10 @@ package cangjie_compiler::ast
 
 import std.collection.*
 
+private let CORE_PACKAGE_NAME: String = "std.core"
+private let STD_LIB_OPTION: String = "Option"
+private let CTYPE_NAME: String = "CType"
+
 private func anyInvalid(values: ArrayList<Ty>): Bool {
     for (value in values) {
         if (value.HasInvalidTy()) {
@@ -28,6 +32,141 @@ private func typeArgsString(values: ArrayList<Ty>, delimiter: String): String {
     return JoinStrings(parts, delimiter)
 }
 
+private func hashCombine(seed: Int64, value: Int64): Int64 {
+    return seed * 1315423911 + value + 0x9e3779b9
+}
+
+private func boolHash(value: Bool): Int64 {
+    return if (value) { 1 } else { 0 }
+}
+
+private func declStableHash(decl: Option<Decl>): Int64 {
+    if (let Some(value) <- decl) {
+        var out = ASTKindIndex(value.astKind)
+        out = hashCombine(out, value.identifier.Val().hashCode())
+        out = hashCombine(out, value.fullPackageName.hashCode())
+        out = hashCombine(out, value.begin.hashCode())
+        out = hashCombine(out, value.end.hashCode())
+        return out
+    }
+    return 0
+}
+
+private func classDeclStableHash(decl: Option<ClassDecl>): Int64 {
+    if (let Some(value) <- decl) {
+        return declStableHash(value)
+    }
+    return 0
+}
+
+private func interfaceDeclStableHash(decl: Option<InterfaceDecl>): Int64 {
+    if (let Some(value) <- decl) {
+        return declStableHash(value)
+    }
+    return 0
+}
+
+private func structDeclStableHash(decl: Option<StructDecl>): Int64 {
+    if (let Some(value) <- decl) {
+        return declStableHash(value)
+    }
+    return 0
+}
+
+private func enumDeclStableHash(decl: Option<EnumDecl>): Int64 {
+    if (let Some(value) <- decl) {
+        return declStableHash(value)
+    }
+    return 0
+}
+
+private func typeAliasDeclStableHash(decl: Option<TypeAliasDecl>): Int64 {
+    if (let Some(value) <- decl) {
+        return declStableHash(value)
+    }
+    return 0
+}
+
+private func genericLowerBound(ty: Ty): Option<Ty> {
+    if (let Some(gen) <- (ty as GenericsTy)) {
+        return gen.lowerBound
+    }
+    return None
+}
+
+private func hasCoreDecl(decl: Decl, name: String): Bool {
+    return decl.fullPackageName == CORE_PACKAGE_NAME && decl.identifier == name
+}
+
+private func hasCoreClassDecl(decl: Option<ClassDecl>, name: String): Bool {
+    if (let Some(value) <- decl) {
+        return hasCoreDecl(value, name)
+    }
+    return false
+}
+
+private func hasCoreInterfaceDecl(decl: Option<InterfaceDecl>, name: String): Bool {
+    if (let Some(value) <- decl) {
+        return hasCoreDecl(value, name)
+    }
+    return false
+}
+
+private func hasCoreStructDecl(decl: Option<StructDecl>, name: String): Bool {
+    if (let Some(value) <- decl) {
+        return hasCoreDecl(value, name)
+    }
+    return false
+}
+
+private func hasCoreEnumDecl(decl: Option<EnumDecl>, name: String): Bool {
+    if (let Some(value) <- decl) {
+        return hasCoreDecl(value, name)
+    }
+    return false
+}
+
+private func anyChildTypeMatches(ty: Ty, pred: (Ty) -> Bool): Bool {
+    if (let Some(intersectionTy) <- (ty as IntersectionTy)) {
+        for (child in intersectionTy.tys) {
+            if (pred(child)) {
+                return true
+            }
+        }
+        return false
+    }
+    if (let Some(unionTy) <- (ty as UnionTy)) {
+        for (child in unionTy.tys) {
+            if (pred(child)) {
+                return true
+            }
+        }
+        return false
+    }
+    for (child in ty.typeArgs) {
+        if (pred(child)) {
+            return true
+        }
+    }
+    return false
+}
+
+private func hashTypeArgs(seed: Int64, values: ArrayList<Ty>): Int64 {
+    var out = seed
+    for (value in values) {
+        out = hashCombine(out, value.Hash())
+    }
+    return out
+}
+
+private func hashNominalTy(kind: TypeKind, name: String, typeArgs: ArrayList<Ty>, declHash: Int64): Int64 {
+    var out = TypeKindIndex(kind)
+    out = hashCombine(out, name.hashCode())
+    out = hashTypeArgs(out, typeArgs)
+    out = hashCombine(out, declHash)
+    return out
+}
+
 public open class Ty {
     public let kind: TypeKind
     public var name: String = ""
@@ -48,7 +187,13 @@ public open class Ty {
     }
 
     public func IsIntegerSubType(): Bool {
-        return IsInteger()
+        if (IsInteger()) {
+            return true
+        }
+        if (let Some(lowerBound) <- genericLowerBound(this)) {
+            return lowerBound.IsInteger()
+        }
+        return false
     }
 
     public func IsSignedInteger(): Bool {
@@ -65,7 +210,13 @@ public open class Ty {
     }
 
     public func IsFloatingSubType(): Bool {
-        return IsFloating()
+        if (IsFloating()) {
+            return true
+        }
+        if (let Some(lowerBound) <- genericLowerBound(this)) {
+            return lowerBound.IsFloating()
+        }
+        return false
     }
 
     public func IsBoolean(): Bool {
@@ -73,7 +224,13 @@ public open class Ty {
     }
 
     public func IsBooleanSubType(): Bool {
-        return IsBoolean()
+        if (IsBoolean()) {
+            return true
+        }
+        if (let Some(lowerBound) <- genericLowerBound(this)) {
+            return lowerBound.IsBoolean()
+        }
+        return false
     }
 
     public func IsRune(): Bool {
@@ -105,10 +262,29 @@ public open class Ty {
     }
 
     public func IsPrimitiveSubType(): Bool {
-        return IsPrimitive()
+        if (IsPrimitive()) {
+            return true
+        }
+        if (let Some(lowerBound) <- genericLowerBound(this)) {
+            return lowerBound.IsPrimitive()
+        }
+        return false
     }
 
     public func IsExtendable(): Bool {
+        if (let Some(aliasTy) <- (this as TypeAliasTy)) {
+            if (let Some(aliasDecl) <- aliasTy.declPtr) {
+                if (aliasDecl.TestAttr(Attribute.IN_REFERENCE_CYCLE)) {
+                    return false
+                }
+                if (let Some(typeNode) <- aliasDecl.typeNode) {
+                    if (let Some(aliasTargetTy) <- typeNode.GetTy()) {
+                        return aliasTargetTy.IsExtendable()
+                    }
+                }
+            }
+            return false
+        }
         return kind == TypeKind.TYPE_CLASS || kind == TypeKind.TYPE_ENUM || kind == TypeKind.TYPE_STRUCT ||
             IsArray() || IsPointer() || IsPrimitive() || IsCString()
     }
@@ -151,7 +327,10 @@ public open class Ty {
 
     public func IsCoreOptionType(): Bool {
         if (let Some(enumTy) <- (this as EnumTy)) {
-            return enumTy.name == "Option" && enumTy.typeArgs.size == 1
+            if (hasCoreEnumDecl(enumTy.declPtr, STD_LIB_OPTION) && enumTy.typeArgs.size == 1) {
+                return true
+            }
+            return enumTy.name == STD_LIB_OPTION && enumTy.typeArgs.size == 1
         }
         return false
     }
@@ -182,6 +361,11 @@ public open class Ty {
     }
 
     public func IsStructArray(): Bool {
+        if (let Some(structTy) <- (this as StructTy)) {
+            if (hasCoreStructDecl(structTy.declPtr, "Array")) {
+                return true
+            }
+        }
         return kind == TypeKind.TYPE_STRUCT && name == "Array"
     }
 
@@ -220,15 +404,30 @@ public open class Ty {
     }
 
     public func IsObject(): Bool {
+        if (let Some(classTy) <- (this as ClassTy)) {
+            if (hasCoreClassDecl(classTy.declPtr, "Object")) {
+                return true
+            }
+        }
         return kind == TypeKind.TYPE_CLASS && name == "Object"
     }
 
     public func IsAny(): Bool {
+        if (let Some(interfaceTy) <- (this as InterfaceTy)) {
+            if (hasCoreInterfaceDecl(interfaceTy.declPtr, "Any")) {
+                return true
+            }
+        }
         return kind == TypeKind.TYPE_ANY || (kind == TypeKind.TYPE_INTERFACE && name == "Any")
     }
 
     public func IsCType(): Bool {
-        return kind == TypeKind.TYPE_INTERFACE && name == "CType"
+        if (let Some(interfaceTy) <- (this as InterfaceTy)) {
+            if (hasCoreInterfaceDecl(interfaceTy.declPtr, CTYPE_NAME)) {
+                return true
+            }
+        }
+        return kind == TypeKind.TYPE_INTERFACE && name == CTYPE_NAME
     }
 
     public func IsNothing(): Bool {
@@ -236,23 +435,28 @@ public open class Ty {
     }
 
     public func IsString(): Bool {
+        if (let Some(structTy) <- (this as StructTy)) {
+            if (hasCoreStructDecl(structTy.declPtr, "String")) {
+                return true
+            }
+        }
         return kind == TypeKind.TYPE_STRUCT && name == "String"
     }
 
     public func IsRange(): Bool {
+        if (let Some(structTy) <- (this as StructTy)) {
+            if (hasCoreStructDecl(structTy.declPtr, "Range") && typeArgs.size == 1) {
+                return true
+            }
+        }
         return kind == TypeKind.TYPE_STRUCT && name == "Range" && typeArgs.size == 1
     }
 
     public func Contains(ty: Ty): Bool {
-        if (this.hashCode() == ty.hashCode()) {
+        if (this.Hash() == ty.Hash() && this.String() == ty.String()) {
             return true
         }
-        for (arg in typeArgs) {
-            if (arg.Contains(ty)) {
-                return true
-            }
-        }
-        return false
+        return anyChildTypeMatches(this, { child: Ty => child.Contains(ty) })
     }
 
     public func HasInvalidTy(): Bool {
@@ -263,24 +467,14 @@ public open class Ty {
         if (IsIdeal()) {
             return true
         }
-        for (arg in typeArgs) {
-            if (arg.HasIdealTy()) {
-                return true
-            }
-        }
-        return false
+        return anyChildTypeMatches(this, { child: Ty => child.HasIdealTy() })
     }
 
     public func HasQuestTy(): Bool {
         if (IsQuest()) {
             return true
         }
-        for (arg in typeArgs) {
-            if (arg.HasQuestTy()) {
-                return true
-            }
-        }
-        return false
+        return anyChildTypeMatches(this, { child: Ty => child.HasQuestTy() })
     }
 
     public func HasGeneric(): Bool {
@@ -291,36 +485,21 @@ public open class Ty {
         if (IsIntersection()) {
             return true
         }
-        for (arg in typeArgs) {
-            if (arg.HasIntersectionTy()) {
-                return true
-            }
-        }
-        return false
+        return anyChildTypeMatches(this, { child: Ty => child.HasIntersectionTy() })
     }
 
     public func HasPlaceholder(): Bool {
         if (IsPlaceholder()) {
             return true
         }
-        for (arg in typeArgs) {
-            if (arg.HasPlaceholder()) {
-                return true
-            }
-        }
-        return false
+        return anyChildTypeMatches(this, { child: Ty => child.HasPlaceholder() })
     }
 
     public func HasAliasTy(): Bool {
         if (kind == TypeKind.TYPE) {
             return true
         }
-        for (arg in typeArgs) {
-            if (arg.HasAliasTy()) {
-                return true
-            }
-        }
-        return false
+        return anyChildTypeMatches(this, { child: Ty => child.HasAliasTy() })
     }
 
     public func IsTyArgsSingleton(): Bool {
@@ -451,6 +630,14 @@ public class ArrayTy <: Ty {
         }
         return out
     }
+
+    public override func Hash(): Int64 {
+        var out = TypeKindIndex(TypeKind.TYPE_ARRAY)
+        if (!typeArgs.isEmpty()) {
+            out = hashCombine(out, typeArgs[0].Hash())
+        }
+        return hashCombine(out, Int64(dims))
+    }
 }
 
 public class VArrayTy <: Ty {
@@ -468,6 +655,14 @@ public class VArrayTy <: Ty {
     public override func String(): String {
         return "VArray<${typeArgs[0].String()}, $${size}>"
     }
+
+    public override func Hash(): Int64 {
+        var out = TypeKindIndex(TypeKind.TYPE_VARRAY)
+        if (!typeArgs.isEmpty()) {
+            out = hashCombine(out, typeArgs[0].Hash())
+        }
+        return hashCombine(out, size)
+    }
 }
 
 public class PointerTy <: Ty {
@@ -481,6 +676,14 @@ public class PointerTy <: Ty {
 
     public override func String(): String {
         return "CPointer<${typeArgs[0].String()}>"
+    }
+
+    public override func Hash(): Int64 {
+        var out = TypeKindIndex(TypeKind.TYPE_POINTER)
+        if (!typeArgs.isEmpty()) {
+            out = hashCombine(out, typeArgs[0].Hash())
+        }
+        return out
     }
 }
 
@@ -512,6 +715,11 @@ public class TupleTy <: Ty {
     public override func String(): String {
         let prefix = if (isClosureTy) { "Closure<" } else { "Tuple<" }
         return prefix + typeArgsString(typeArgs, ", ") + ">"
+    }
+
+    public override func Hash(): Int64 {
+        var out = hashCombine(TypeKindIndex(TypeKind.TYPE_TUPLE), boolHash(isClosureTy))
+        return hashTypeArgs(out, typeArgs)
     }
 }
 
@@ -558,6 +766,17 @@ public class FuncTy <: Ty {
         let out = "(${params}) -> ${retTy.String()}"
         return if (isC) { "CFunc<" + out + ">" } else { out }
     }
+
+    public override func Hash(): Int64 {
+        var out = TypeKindIndex(TypeKind.TYPE_FUNC)
+        out = hashCombine(out, retTy.Hash())
+        out = hashTypeArgs(out, paramTys)
+        out = hashCombine(out, boolHash(isClosureTy))
+        out = hashCombine(out, boolHash(isC))
+        out = hashCombine(out, boolHash(hasVariableLenArg))
+        out = hashCombine(out, boolHash(noCast))
+        return out
+    }
 }
 
 public class UnionTy <: Ty {
@@ -573,6 +792,10 @@ public class UnionTy <: Ty {
     public override func String(): String {
         return typeArgsString(tys, " | ")
     }
+
+    public override func Hash(): Int64 {
+        return hashTypeArgs(TypeKindIndex(TypeKind.TYPE_UNION), tys)
+    }
 }
 
 public class IntersectionTy <: Ty {
@@ -587,6 +810,10 @@ public class IntersectionTy <: Ty {
 
     public override func String(): String {
         return typeArgsString(tys, " & ")
+    }
+
+    public override func Hash(): Int64 {
+        return hashTypeArgs(TypeKindIndex(TypeKind.TYPE_INTERSECTION), tys)
     }
 }
 
@@ -623,6 +850,26 @@ public class InterfaceTy <: ClassLikeTy {
     public override func String(): String {
         return "Interface-" + name + PrintTypeArgs()
     }
+
+    public override func Hash(): Int64 {
+        return hashNominalTy(TypeKind.TYPE_INTERFACE, name, typeArgs, interfaceDeclStableHash(declPtr))
+    }
+
+    public func GetGenericTy(): Option<InterfaceTy> {
+        if (let Some(interfaceDecl) <- declPtr) {
+            if (let Some(_) <- interfaceDecl.generic) {
+                return interfaceDecl.GetTy() as InterfaceTy
+            }
+        }
+        return None
+    }
+
+    public override func GetSuperInterfaceTys(): ArrayList<InterfaceTy> {
+        if (let Some(interfaceDecl) <- decl) {
+            return interfaceDecl.GetSuperInterfaceTys()
+        }
+        return ArrayList<InterfaceTy>()
+    }
 }
 
 public open class ClassTy <: ClassLikeTy {
@@ -654,8 +901,29 @@ public open class ClassTy <: ClassLikeTy {
         return None
     }
 
+    public func GetGenericTy(): Option<ClassTy> {
+        if (let Some(classDecl) <- declPtr) {
+            if (let Some(_) <- classDecl.generic) {
+                return classDecl.GetTy() as ClassTy
+            }
+        }
+        return None
+    }
+
+    public override func GetSuperInterfaceTys(): ArrayList<InterfaceTy> {
+        if (let Some(classDecl) <- decl) {
+            return classDecl.GetSuperInterfaceTys()
+        }
+        return ArrayList<InterfaceTy>()
+    }
+
     public open override func String(): String {
         return "Class-" + name + PrintTypeArgs()
+    }
+
+    public open override func Hash(): Int64 {
+        let base = hashNominalTy(TypeKind.TYPE_CLASS, name, typeArgs, classDeclStableHash(declPtr))
+        return hashCombine(base, 0)
     }
 }
 
@@ -666,6 +934,11 @@ public class ClassThisTy <: ClassTy {
 
     public override func String(): String {
         return "This"
+    }
+
+    public override func Hash(): Int64 {
+        let base = hashNominalTy(TypeKind.TYPE_CLASS, name, typeArgs, classDeclStableHash(declPtr))
+        return hashCombine(base, 1)
     }
 }
 
@@ -685,6 +958,10 @@ public class TypeAliasTy <: Ty {
 
     public override func String(): String {
         return "TypeAlias-" + name + PrintTypeArgs()
+    }
+
+    public override func Hash(): Int64 {
+        return hashNominalTy(TypeKind.TYPE, name, typeArgs, typeAliasDeclStableHash(declPtr))
     }
 }
 
@@ -706,6 +983,16 @@ public class GenericsTy <: Ty {
 
     public override func String(): String {
         return "Generics-" + name
+    }
+
+    public override func Hash(): Int64 {
+        var out = TypeKindIndex(TypeKind.TYPE_GENERICS)
+        if (let Some(genericDecl) <- decl) {
+            out = hashCombine(out, genericDecl.identifier.Val().hashCode())
+            out = hashCombine(out, genericDecl.begin.hashCode())
+            out = hashCombine(out, genericDecl.end.hashCode())
+        }
+        return out
     }
 }
 
@@ -734,8 +1021,29 @@ public open class EnumTy <: Ty {
         return false
     }
 
+    public func GetGenericTy(): Option<EnumTy> {
+        if (let Some(enumDecl) <- declPtr) {
+            if (let Some(_) <- enumDecl.generic) {
+                return enumDecl.GetTy() as EnumTy
+            }
+        }
+        return None
+    }
+
+    public func GetSuperInterfaceTys(): ArrayList<InterfaceTy> {
+        if (let Some(enumDecl) <- decl) {
+            return enumDecl.GetSuperInterfaceTys()
+        }
+        return ArrayList<InterfaceTy>()
+    }
+
     public open override func String(): String {
         return "Enum-" + name + PrintTypeArgs()
+    }
+
+    public open override func Hash(): Int64 {
+        let base = hashNominalTy(TypeKind.TYPE_ENUM, name, typeArgs, enumDeclStableHash(declPtr))
+        return hashCombine(base, 0)
     }
 }
 
@@ -747,6 +1055,11 @@ public class RefEnumTy <: EnumTy {
 
     public override func String(): String {
         return "Enum-" + name + PrintTypeArgs() + "(asRef)"
+    }
+
+    public override func Hash(): Int64 {
+        let base = hashNominalTy(TypeKind.TYPE_ENUM, name, typeArgs, enumDeclStableHash(declPtr))
+        return hashCombine(base, 1)
     }
 }
 
@@ -769,6 +1082,26 @@ public class StructTy <: Ty {
     public override func String(): String {
         return "Struct-" + name + PrintTypeArgs()
     }
+
+    public override func Hash(): Int64 {
+        return hashNominalTy(TypeKind.TYPE_STRUCT, name, typeArgs, structDeclStableHash(declPtr))
+    }
+
+    public func GetGenericTy(): Option<StructTy> {
+        if (let Some(structDecl) <- declPtr) {
+            if (let Some(_) <- structDecl.generic) {
+                return structDecl.GetTy() as StructTy
+            }
+        }
+        return None
+    }
+
+    public func GetSuperInterfaceTys(): ArrayList<InterfaceTy> {
+        if (let Some(structDecl) <- decl) {
+            return structDecl.GetSuperInterfaceTys()
+        }
+        return ArrayList<InterfaceTy>()
+    }
 }
 
 public func CompTyByNames(ty1: Option<Ty>, ty2: Option<Ty>): Bool {
@@ -776,7 +1109,7 @@ public func CompTyByNames(ty1: Option<Ty>, ty2: Option<Ty>): Bool {
         if (let Some(right) <- ty2) {
             let leftStr = left.String()
             let rightStr = right.String()
-            return leftStr < rightStr || (leftStr == rightStr && left.hashCode() < right.hashCode())
+            return leftStr < rightStr || (leftStr == rightStr && left.Hash() < right.Hash())
         }
         return false
     }
