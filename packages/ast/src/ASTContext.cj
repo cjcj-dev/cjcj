@@ -22,28 +22,36 @@ public class InvertedIndex {
     }
 
     public func Index(symbol: Symbol, withTrie!: Bool = true): Unit {
-        if (!withTrie) {
-            symbol.invertedIndexBeenDeleted = false
-        }
+        symbol.invertedIndexBeenDeleted = false
+        let scopeName = GetScopeNameWithoutTail(symbol.scopeName)
         putString(nameIndexes, symbol.name, symbol)
-        putString(scopeNameIndexes, symbol.scopeName, symbol)
-        if (let Some(node) <- symbol.node) {
-            putString(astKindIndexes, ASTKindName(node.astKind), symbol)
-            putLevel(scopeLevelIndexes, node.scopeLevel, symbol)
-        }
-        if (!symbol.scopeName.isEmpty()) {
+        putString(scopeNameIndexes, scopeName, symbol)
+        if (symbol.scopeName.contains(CHILD_SCOPE_SEPARATOR)) {
             scopeGateMap[symbol.scopeName] = symbol
+        }
+        putLevel(scopeLevelIndexes, symbol.scopeLevel, symbol)
+        putString(astKindIndexes, ASTKindName(symbol.astKind), symbol)
+        if (withTrie) {
+            if (let Some(node) <- symbol.node) {
+                updatePositionRange(node.begin)
+                updatePositionRange(node.end)
+            }
         }
     }
 
     public func Delete(symbol: Symbol): Unit {
-        symbol.invertedIndexBeenDeleted = true
-        removeString(nameIndexes, symbol.name, symbol)
-        removeString(scopeNameIndexes, symbol.scopeName, symbol)
-        if (let Some(node) <- symbol.node) {
-            removeString(astKindIndexes, ASTKindName(node.astKind), symbol)
-            removeLevel(scopeLevelIndexes, node.scopeLevel, symbol)
+        if (symbol.invertedIndexBeenDeleted) {
+            return
         }
+        let scopeName = GetScopeNameWithoutTail(symbol.scopeName)
+        removeString(nameIndexes, symbol.name, symbol)
+        removeString(scopeNameIndexes, scopeName, symbol)
+        if (symbol.scopeName.contains(CHILD_SCOPE_SEPARATOR)) {
+            scopeGateMap.remove(symbol.scopeName)
+        }
+        removeLevel(scopeLevelIndexes, symbol.scopeLevel, symbol)
+        removeString(astKindIndexes, ASTKindName(symbol.astKind), symbol)
+        symbol.invertedIndexBeenDeleted = true
     }
 
     private func putString(map: HashMap<String, ArrayList<Symbol>>, key: String, symbol: Symbol): Unit {
@@ -68,7 +76,7 @@ public class InvertedIndex {
         if (let Some(values) <- map.get(key)) {
             var idx: Int64 = 0
             while (idx < values.size) {
-                if (values[idx].name == symbol.name && values[idx].scopeName == symbol.scopeName) {
+                if (SameSymbol(values[idx], symbol)) {
                     values.remove(at: idx)
                 } else {
                     idx++
@@ -81,12 +89,24 @@ public class InvertedIndex {
         if (let Some(values) <- map.get(key)) {
             var idx: Int64 = 0
             while (idx < values.size) {
-                if (values[idx].name == symbol.name && values[idx].scopeName == symbol.scopeName) {
+                if (SameSymbol(values[idx], symbol)) {
                     values.remove(at: idx)
                 } else {
                     idx++
                 }
             }
+        }
+    }
+
+    private func updatePositionRange(pos: Position): Unit {
+        if (pos.IsZero()) {
+            return
+        }
+        if (pos < minPos) {
+            minPos = pos
+        }
+        if (maxPos < pos) {
+            maxPos = pos
         }
     }
 }
@@ -122,6 +142,16 @@ public class Candidate {
     public init() {}
 }
 
+private class OuterVarWithPatternDecl {
+    public var varDecl: VarDecl
+    public var patternDecl: VarWithPatternDecl
+
+    public init(varDecl: VarDecl, patternDecl: VarWithPatternDecl) {
+        this.varDecl = varDecl
+        this.patternDecl = patternDecl
+    }
+}
+
 public class ASTContext {
     public var curPackage: Option<Package> = None
     public var fullPackageName: String = ""
@@ -136,8 +166,11 @@ public class ASTContext {
     public let typeCheckCache: HashMap<Int64, TypeCheckCache> = HashMap<Int64, TypeCheckCache>()
     public var searcher: Searcher = Searcher()
     public let packageDecls: ArrayList<PackageDecl> = ArrayList<PackageDecl>()
+    public let mem2Decls: HashMap<MemSig, ArrayList<Decl>> = HashMap<MemSig, ArrayList<Decl>>()
+    public let subtypeDeclsMap: HashMap<Int64, ArrayList<Decl>> = HashMap<Int64, ArrayList<Decl>>()
     public let declMap: HashMap<Names, ArrayList<Decl>> = HashMap<Names, ArrayList<Decl>>()
     public let enumConstructors: HashMap<String, ArrayList<Decl>> = HashMap<String, ArrayList<Decl>>()
+    private let varDeclToVarWithPatternDeclMap: ArrayList<OuterVarWithPatternDecl> = ArrayList<OuterVarWithPatternDecl>()
 
     public init(pkg: Package) {
         curPackage = pkg
@@ -148,10 +181,13 @@ public class ASTContext {
     public func Reset(): Unit {
         currentScopeLevel = 0u32
         currentScopeName = TOPLEVEL_SCOPE_NAME
+        currentCheckingNodes.clear()
+        SymbolApi.ResetID()
         symbolTable.clear()
         invertedIndex.Reset()
         declMap.clear()
         enumConstructors.clear()
+        varDeclToVarWithPatternDeclMap.clear()
     }
 
     public static func GetPackageName(node: Option<Node>): String {
@@ -221,7 +257,13 @@ public class ASTContext {
 
     public func SkipSynForCorrectTy(node: Node): Unit {
         let cache = TypeCheckCache()
-        cache.lastKey = CacheKey(node.GetTy(), false, 0)
+        var isDesugared = false
+        if (let Some(expr) <- (node as Expr)) {
+            if (let Some(_) <- expr.desugarExpr) {
+                isDesugared = true
+            }
+        }
+        cache.lastKey = CacheKey(node.GetTy(), isDesugared, 0)
         typeCheckCache[nodeHash(node)] = cache
     }
 
@@ -252,7 +294,7 @@ public class ASTContext {
         if (let Some(values) <- declMap.get(names)) {
             var idx: Int64 = 0
             while (idx < values.size) {
-                if (values[idx].identifier == decl.identifier) {
+                if (SameDecl(values[idx], decl)) {
                     values.remove(at: idx)
                 } else {
                     idx++
@@ -268,37 +310,149 @@ public class ASTContext {
         return ArrayList<Decl>()
     }
 
-    public func InsertEnumConstructor(name: String, argSize: UInt64, decl: Decl, enableMacroInLsp!: Bool = false): Unit {
-        if (enableMacroInLsp && decl.TestAttr(Attribute.MACRO_EXPANDED_NODE)) {
-            return
+    public func StoreOuterVarWithPatternDecl(vd: VarDecl, vpd: VarWithPatternDecl): Unit {
+        var idx: Int64 = 0
+        while (idx < varDeclToVarWithPatternDeclMap.size) {
+            let entry = varDeclToVarWithPatternDeclMap[idx]
+            if (SameDecl(entry.varDecl, vd)) {
+                entry.patternDecl = vpd
+                return
+            }
+            idx++
         }
-        let key = name + "#${argSize}"
-        if (!enumConstructors.contains(key)) {
-            enumConstructors[key] = ArrayList<Decl>()
+        varDeclToVarWithPatternDeclMap.add(OuterVarWithPatternDecl(vd, vpd))
+    }
+
+    public func GetOuterVarDeclAbstract(vd: VarDecl): VarDeclAbstract {
+        for (entry in varDeclToVarWithPatternDeclMap) {
+            if (SameDecl(entry.varDecl, vd)) {
+                return entry.patternDecl
+            }
         }
-        if (let Some(values) <- enumConstructors.get(key)) {
-            values.add(decl)
-        }
+        return vd
     }
 
     public func IsEnumConstructor(name: String): Bool {
-        for ((key, _) in enumConstructors) {
-            if (key.startsWith(name + "#")) {
-                return true
-            }
-        }
-        return false
+        return enumConstructors.contains(name)
     }
 
     public func FindEnumConstructor(name: String, argSize: UInt64): ArrayList<Decl> {
-        let key = name + "#${argSize}"
+        let key = enumConstructorKey(name, argSize)
         if (let Some(values) <- enumConstructors.get(key)) {
             return values
         }
         return ArrayList<Decl>()
     }
 
+    public func InsertEnumConstructor(name: String, argSize: UInt64, decl: Decl,
+        enableMacroInLsp!: Bool = false): Unit {
+        if (enableMacroInLsp && IsNodeInOriginalMacroCallNodes(decl)) {
+            return
+        }
+        let nameKey = name
+        if (!enumConstructors.contains(nameKey)) {
+            enumConstructors[nameKey] = ArrayList<Decl>()
+        }
+        let argKey = enumConstructorKey(name, argSize)
+        if (!enumConstructors.contains(argKey)) {
+            enumConstructors[argKey] = ArrayList<Decl>()
+        }
+        if (let Some(values) <- enumConstructors.get(argKey)) {
+            values.add(decl)
+        }
+    }
+
+    public func IsNodeInOriginalMacroCallNodes(decl: Decl): Bool {
+        if (let Some(file) <- decl.curFile) {
+            for (node in file.originalMacroCallNodes) {
+                if (let Some(med) <- (node as MacroExpandDecl)) {
+                    if (let Some(invocationDecl) <- med.invocation.decl) {
+                        if (let Some(enumDecl) <- (invocationDecl as EnumDecl)) {
+                            for (constructor in enumDecl.constructors) {
+                                if (SameDecl(constructor, decl)) {
+                                    return true
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        return false
+    }
+
+    public func AddMemDecl(memSig: MemSig, decl: Decl): Unit {
+        if (!mem2Decls.contains(memSig)) {
+            mem2Decls[memSig] = ArrayList<Decl>()
+        }
+        if (let Some(values) <- mem2Decls.get(memSig)) {
+            addDeclUnique(values, decl)
+        }
+    }
+
+    public func AddSubtypeDecl(baseDecl: Decl, subtypeDecl: Decl): Unit {
+        let key = declKey(baseDecl)
+        if (!subtypeDeclsMap.contains(key)) {
+            subtypeDeclsMap[key] = ArrayList<Decl>()
+        }
+        if (let Some(values) <- subtypeDeclsMap.get(key)) {
+            addDeclUnique(values, subtypeDecl)
+        }
+    }
+
+    public func Mem2Decls(memSig: MemSig): ArrayList<Decl> {
+        let out = ArrayList<Decl>()
+        if (let Some(values) <- mem2Decls.get(memSig)) {
+            for (decl in values) {
+                addDeclUnique(out, decl)
+                if (let Some(subtypes) <- subtypeDeclsMap.get(declKey(decl))) {
+                    for (subtype in subtypes) {
+                        addDeclUnique(out, subtype)
+                    }
+                }
+            }
+        }
+        return out
+    }
+
     private func nodeHash(node: Node): Int64 {
         return node.begin.hashCode() ^ (node.end.hashCode() << 1) ^ ASTKindIndex(node.astKind)
     }
+
+    private func enumConstructorKey(name: String, argSize: UInt64): String {
+        return name + "#${argSize}"
+    }
+
+    private func declKey(decl: Decl): Int64 {
+        return decl.begin.hashCode() ^ (decl.end.hashCode() << 1) ^
+            (decl.identifier.Val().hashCode() << 2) ^ (ASTKindIndex(decl.astKind) << 3)
+    }
+
+    private func addDeclUnique(values: ArrayList<Decl>, decl: Decl): Unit {
+        for (value in values) {
+            if (SameDecl(value, decl)) {
+                return
+            }
+        }
+        values.add(decl)
+    }
+}
+
+public func SameSymbol(left: Symbol, right: Symbol): Bool {
+    if (left.hashID == right.hashID && (left.hashID.hash64 != 0u64 || left.hashID.fieldID != 0u32)) {
+        return true
+    }
+    if (let Some(leftNode) <- left.node) {
+        if (let Some(rightNode) <- right.node) {
+            return left.name == right.name && left.scopeName == right.scopeName &&
+                leftNode.begin == rightNode.begin && leftNode.end == rightNode.end &&
+                leftNode.astKind == rightNode.astKind
+        }
+    }
+    return left.name == right.name && left.scopeName == right.scopeName && left.astKind == right.astKind
+}
+
+public func SameDecl(left: Decl, right: Decl): Bool {
+    return left.astKind == right.astKind && left.begin == right.begin && left.end == right.end &&
+        left.identifier == right.identifier && left.fullPackageName == right.fullPackageName
 }

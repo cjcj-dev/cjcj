@@ -27,11 +27,13 @@ The task explicitly disallows editing `cjpm.toml`, so AST currently carries loca
 - Implemented literal constant initialization for boolean, integer, rune, string, unit, and floating-point literal nodes, plus AST type validation over semantic types, target types, and owner declarations.
 - Expanded AST utility parity with C++ `Utils.cpp`: size-property lookup, Java attribute probing, outer function ownership propagation, declaration-attribute ancestry checks, pattern flattening, top-level/exportable declaration iteration, package member access detection, `this`/`super` detection, access-level mapping and formatting, import item name reconstruction, condition detection, enum-subpattern checks, source-export predicates, virtual-member checks, generic instance-member variable checks, member-variable export checks, variable initialization ordering, and mirror property signature synthesis.
 - Extended the AST-local Basic/Lex compatibility layer with `Linkage` equality and the `mut` token needed by mirror-property conversion.
+- Expanded `Symbol` and `ASTContext` parity with C++ symbol hash IDs, scope level/kind/target data, context reset behavior, desugared type-check cache keys, declaration removal by declaration identity, outer variable-with-pattern ownership, macro-origin filtering for enum constructors, enum constructor lookup by name and arity, and member-signature subtype expansion.
+- Expanded scope/search parity with C++ scope-name tail, parent, child, and gate helpers; C++ top-level scope encoding; trie reset/delete/suffix matching; position string formatting; and position range symbol collection APIs.
 - Preserved build compatibility without touching runtime, stdx, tools, manifests, or the C++ reference repository.
 
 ## Remaining Work
 
 - Replace AST-local Basic/Lex compatibility types with real dependencies.
 - Wire AST validation to the real `DiagnosticEngine`.
-- Audit the ported walker, clone, search/query, literal, utility, and validation behavior against the complete C++ implementation once downstream packages can exercise the same API surface.
+- Audit the ported context, walker, clone, search/query, literal, utility, and validation behavior against the complete C++ implementation once downstream packages can exercise the same API surface.
 - Align all helper APIs exactly with downstream Parse/Sema/Modules expectations once those packages are ported and the real Basic/Lex packages are available as dependencies.
