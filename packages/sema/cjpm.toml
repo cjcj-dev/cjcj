@@ -14,3 +14,7 @@
   package-configuration = {}
 
 [dependencies]
+  "cangjie_compiler::ast" = { path = "../ast" }
+  "cangjie_compiler::basic" = { path = "../basic" }
+  "cangjie_compiler::modules" = { path = "../modules" }
+  "cangjie_compiler::option" = { path = "../option" }
