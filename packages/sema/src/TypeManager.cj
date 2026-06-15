@@ -54,6 +54,15 @@ private class OverrideCacheEntry {
     }
 }
 
+private class TopOverrideEntry {
+    public var src: FuncDecl
+    public let targets: ArrayList<FuncDecl> = ArrayList<FuncDecl>()
+
+    public init(src: FuncDecl) {
+        this.src = src
+    }
+}
+
 public class DeclExtendsEntry {
     public var decl: InheritableDecl
     public let extends: ArrayList<ExtendDecl> = ArrayList<ExtendDecl>()
@@ -80,6 +89,7 @@ public class TypeManager {
     private var anyTy: Ty = AnyTy()
     private var ctypeTy: Option<Ty> = None
     private let overrideCache: ArrayList<OverrideCacheEntry> = ArrayList<OverrideCacheEntry>()
+    private let topOverrideMap: ArrayList<TopOverrideEntry> = ArrayList<TopOverrideEntry>()
     private let boxUsedExtends: ArrayList<ExtendDecl> = ArrayList<ExtendDecl>()
     private let boxedNonGenericDecls: ArrayList<InheritableDecl> = ArrayList<InheritableDecl>()
     private let boxedTys: ArrayList<Ty> = ArrayList<Ty>()
@@ -666,21 +676,65 @@ public class TypeManager {
 
     public func CheckGenericDeclInstantiation(d: Option<Decl>, typeArgs: ArrayList<Ty>): Bool {
         if (let Some(decl) <- d) {
-            if (let Some(generic) <- decl.GetGeneric()) {
-                return generic.typeParameters.size == typeArgs.size
+            if (typeArgs.isEmpty()) {
+                return true
             }
-            return typeArgs.isEmpty()
+            let genericParamTys = GetDeclTypeParams(decl)
+            if (genericParamTys.size != typeArgs.size) {
+                return false
+            }
+            var idx: Int64 = 0
+            while (idx < typeArgs.size) {
+                if (!genericParamTys[idx].HasGeneric() && !SameTy(genericParamTys[idx], typeArgs[idx])) {
+                    return false
+                }
+                idx++
+            }
+            if (let None <- decl.GetGeneric()) {
+                return decl.astKind == ASTKind.EXTEND_DECL
+            }
+            let instantiateMap = GenerateTypeMapping(decl, typeArgs)
+            if (decl.astKind == ASTKind.EXTEND_DECL) {
+                idx = 0
+                while (idx < typeArgs.size) {
+                    let instantiatedParam = GetInstantiatedTy(genericParamTys[idx], instantiateMap)
+                    if (!SameTy(instantiatedParam, typeArgs[idx])) {
+                        return false
+                    }
+                    idx++
+                }
+            }
+            return CheckGenericConstraints(decl, instantiateMap)
         }
-        return typeArgs.isEmpty()
+        return false
     }
 
     public func CheckExtendWithConstraint(ty: Ty, extendDecl: Option<ExtendDecl>): Bool {
-        let _ = ty
-        if (let Some(_) <- extendDecl) {
-            // TODO(selfhost:Sema): evaluate generic where constraints once full generic constraint AST is ported.
-            return true
+        if (let Some(value) <- extendDecl) {
+            let declOpt: Option<Decl> = value as Decl
+            return CheckGenericDeclInstantiation(declOpt, GetTypeArgs(ty))
         }
         return false
+    }
+
+    public func GetDeclTypeParams(decl: Decl): ArrayList<Ty> {
+        let out = ArrayList<Ty>()
+        if (let Some(generic) <- decl.GetGeneric()) {
+            for (param in generic.typeParameters) {
+                if (let Some(paramTy) <- param.GetTy()) {
+                    out.add(paramTy)
+                }
+            }
+        } else if (let Some(extendDecl) <- (decl as ExtendDecl)) {
+            if (let Some(extendedType) <- extendDecl.extendedType) {
+                if (let Some(extendedTy) <- extendedType.GetTy()) {
+                    for (typeArg in extendedTy.typeArgs) {
+                        out.add(typeArg)
+                    }
+                }
+            }
+        }
+        return out
     }
 
     public func GenerateStructDeclGenericMapping(m: MultiTypeSubst, decl: InheritableDecl, targetTy: Ty): Unit {
@@ -923,13 +977,45 @@ public class TypeManager {
     }
 
     public func UpdateTopOverriddenFuncDeclMap(src: Option<Decl>, target: Option<Decl>): Unit {
-        let _ = src
-        let _ = target
-        // TODO(selfhost:Sema): keep full override-chain cache once inherited member merging is ported.
+        if (let Some(srcDecl) <- src) {
+            if (let Some(targetDecl) <- target) {
+                if (SameDecl(srcDecl, targetDecl)) {
+                    return
+                }
+                if (let Some(srcFunc) <- (srcDecl as FuncDecl)) {
+                    if (let Some(targetFunc) <- (targetDecl as FuncDecl)) {
+                        addTopOverride(srcFunc, targetFunc)
+                    }
+                } else if (let Some(srcProp) <- (srcDecl as PropDecl)) {
+                    if (let Some(targetProp) <- (targetDecl as PropDecl)) {
+                        if (!srcProp.getters.isEmpty() && !targetProp.getters.isEmpty()) {
+                            addTopOverride(srcProp.getters[0], targetProp.getters[0])
+                        }
+                        if (!srcProp.setters.isEmpty() && !targetProp.setters.isEmpty()) {
+                            addTopOverride(srcProp.setters[0], targetProp.setters[0])
+                        }
+                    }
+                }
+            }
+        }
     }
 
     public func GetTopOverriddenFuncDecl(funcDecl: Option<FuncDecl>): Option<FuncDecl> {
-        return funcDecl
+        if (let Some(fd) <- funcDecl) {
+            if (let Some(first) <- firstTopOverrideTarget(fd)) {
+                var current = first
+                let traversed = ArrayList<FuncDecl>()
+                while (let Some(next) <- firstTopOverrideTarget(current)) {
+                    if (containsFuncDecl(traversed, current)) {
+                        return None
+                    }
+                    traversed.add(current)
+                    current = next
+                }
+                return current
+            }
+        }
+        return None
     }
 
     public func IsFuncDeclSubType(decl: FuncDecl, funcDecl: FuncDecl): Bool {
@@ -1209,6 +1295,48 @@ public class TypeManager {
         return false
     }
 
+    private func containsFuncDecl(values: ArrayList<FuncDecl>, decl: FuncDecl): Bool {
+        for (value in values) {
+            if (SameDecl(value, decl)) {
+                return true
+            }
+        }
+        return false
+    }
+
+    private func findTopOverrideEntry(src: FuncDecl): Option<TopOverrideEntry> {
+        for (entry in topOverrideMap) {
+            if (SameDecl(entry.src, src)) {
+                return entry
+            }
+        }
+        return None
+    }
+
+    private func addTopOverride(src: FuncDecl, target: FuncDecl): Unit {
+        if (SameDecl(src, target)) {
+            return
+        }
+        if (let Some(entry) <- findTopOverrideEntry(src)) {
+            if (!containsFuncDecl(entry.targets, target)) {
+                entry.targets.add(target)
+            }
+            return
+        }
+        let entry = TopOverrideEntry(src)
+        entry.targets.add(target)
+        topOverrideMap.add(entry)
+    }
+
+    private func firstTopOverrideTarget(src: FuncDecl): Option<FuncDecl> {
+        if (let Some(entry) <- findTopOverrideEntry(src)) {
+            if (!entry.targets.isEmpty()) {
+                return entry.targets[0]
+            }
+        }
+        return None
+    }
+
     private func containsExtend(values: ArrayList<ExtendDecl>, ed: ExtendDecl): Bool {
         for (value in values) {
             if (SameDecl(value, ed)) {
@@ -1251,5 +1379,65 @@ public class TypeManager {
                 idx++
             }
         }
+    }
+
+    private func GenerateTypeMapping(decl: Decl, typeArgs: ArrayList<Ty>): TypeSubst {
+        let out = TypeSubst()
+        if (let Some(generic) <- decl.GetGeneric()) {
+            var idx: Int64 = 0
+            while (idx < generic.typeParameters.size && idx < typeArgs.size) {
+                if (let Some(paramTy) <- generic.typeParameters[idx].GetTy()) {
+                    if (let Some(genericTy) <- (paramTy as GenericsTy)) {
+                        out.Put(genericTy, typeArgs[idx])
+                    }
+                }
+                idx++
+            }
+        }
+        return out
+    }
+
+    private func CheckGenericConstraints(decl: Decl, instantiateMap: TypeSubst): Bool {
+        if (let Some(generic) <- decl.GetGeneric()) {
+            for (constraint in generic.genericConstraints) {
+                if (let None <- constraint.refType) {
+                    return false
+                }
+                let refType = constraint.refType.getOrThrow()
+                if (let None <- refType.GetTy()) {
+                    return false
+                }
+                let typeTy = GetInstantiatedTy(refType.GetTy().getOrThrow(), instantiateMap)
+                let isNotGeneric = typeTy.kind != TypeKind.TYPE_GENERICS
+                for (upperBound in constraint.upperBounds) {
+                    if (let None <- upperBound.GetTy()) {
+                        return false
+                    }
+                    let upperBoundTy = GetInstantiatedTy(upperBound.GetTy().getOrThrow(), instantiateMap)
+                    let typeNotMatch = !IsSubtype(typeTy, upperBoundTy)
+                    if (isNotGeneric && typeNotMatch) {
+                        return false
+                    }
+                    if (isNotGeneric) {
+                        continue
+                    }
+                    if (let Some(genericTy) <- (typeTy as GenericsTy)) {
+                        var satisfyConstraint = false
+                        for (assumptionUpper in genericTy.upperBounds) {
+                            if (IsSubtype(assumptionUpper, upperBoundTy)) {
+                                satisfyConstraint = true
+                                break
+                            }
+                        }
+                        if (!satisfyConstraint && typeNotMatch) {
+                            return false
+                        }
+                    } else if (typeNotMatch) {
+                        return false
+                    }
+                }
+            }
+        }
+        return true
     }
 }
