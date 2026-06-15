@@ -81,6 +81,25 @@ public class TyExtendsEntry {
     }
 }
 
+private class TyUsedExtendsEntry {
+    public var ty: Ty
+    public let extends: ArrayList<ExtendDecl> = ArrayList<ExtendDecl>()
+
+    public init(ty: Ty) {
+        this.ty = ty
+    }
+}
+
+private class CheckedTyExtendRelation {
+    public var child: Ty
+    public var interfaceTy: Ty
+
+    public init(child: Ty, interfaceTy: Ty) {
+        this.child = child
+        this.interfaceTy = interfaceTy
+    }
+}
+
 public class TypeManager {
     public let constraints: Constraint = Constraint()
     public let builtinTyToExtendMap: ArrayList<TyExtendsEntry> = ArrayList<TyExtendsEntry>()
@@ -93,6 +112,8 @@ public class TypeManager {
     private let boxUsedExtends: ArrayList<ExtendDecl> = ArrayList<ExtendDecl>()
     private let boxedNonGenericDecls: ArrayList<InheritableDecl> = ArrayList<InheritableDecl>()
     private let boxedTys: ArrayList<Ty> = ArrayList<Ty>()
+    private let tyUsedExtends: ArrayList<TyUsedExtendsEntry> = ArrayList<TyUsedExtendsEntry>()
+    private let checkedTyExtendRelation: ArrayList<CheckedTyExtendRelation> = ArrayList<CheckedTyExtendRelation>()
     private let unsolvedTyVars: ArrayList<GenericsTy> = ArrayList<GenericsTy>()
     private var nextUniqId: UInt64 = 0u64
 
@@ -897,18 +918,36 @@ public class TypeManager {
     }
 
     public func RecordUsedExtend(child: Ty, interfaceTy: Ty): Unit {
-        let _ = child
-        let _ = interfaceTy
+        if (hasCheckedTyExtendRelation(child, interfaceTy)) {
+            return
+        }
+        checkedTyExtendRelation.add(CheckedTyExtendRelation(child, interfaceTy))
+        let extendedTy = GetRealExtendedTy(child, interfaceTy)
+        addBoxedTy(extendedTy)
+        RecordUsedGenericExtend(extendedTy)
+        if (let Some(decl) <- declOfInheritableTy(extendedTy)) {
+            if (let None <- decl.GetGeneric()) {
+                addBoxedNonGenericDecl(decl)
+            }
+            addBoxUsedExtends(collectAllRelatedExtends(decl))
+        } else {
+            addBoxUsedExtends(GetAllExtendsByTy(extendedTy))
+        }
     }
 
     public func RecordUsedGenericExtend(boxedTy: Ty, extendDecl!: Option<ExtendDecl> = None): Unit {
-        if (!containsTy(boxedTys, boxedTy)) {
-            boxedTys.add(boxedTy)
-        }
+        addBoxedTy(boxedTy)
         if (let Some(ed) <- extendDecl) {
-            if (!containsExtend(boxUsedExtends, ed)) {
-                boxUsedExtends.add(ed)
+            if ((let None <- ed.GetGeneric()) || ed.TestAttr(Attribute.GENERIC_INSTANTIATED)) {
+                return
             }
+            addTyUsedExtend(boxedTy, ed)
+            return
+        }
+        if (let Some(decl) <- declOfInheritableTy(boxedTy)) {
+            addTyUsedExtends(boxedTy, collectAllRelatedExtends(decl))
+        } else {
+            addTyUsedExtends(boxedTy, GetAllExtendsByTy(boxedTy))
         }
     }
 
@@ -947,12 +986,17 @@ public class TypeManager {
     }
 
     public func GetTyUsedExtends(ty: Ty): ArrayList<ExtendDecl> {
-        return GetBuiltinTyExtends(ty)
+        if (let Some(entry) <- findTyUsedExtendsEntry(ty)) {
+            return entry.extends
+        }
+        return ArrayList<ExtendDecl>()
     }
 
     public func ClearRecordUsedExtends(): Unit {
         boxUsedExtends.clear()
         boxedTys.clear()
+        tyUsedExtends.clear()
+        checkedTyExtendRelation.clear()
     }
 
     public func ReleaseSemaQueryCaches(): Unit {
@@ -1335,6 +1379,118 @@ public class TypeManager {
             }
         }
         return None
+    }
+
+    private func addBoxedTy(ty: Ty): Unit {
+        if (!containsTy(boxedTys, ty)) {
+            boxedTys.add(ty)
+        }
+    }
+
+    private func addBoxedNonGenericDecl(decl: InheritableDecl): Unit {
+        for (value in boxedNonGenericDecls) {
+            if (SameDecl(value, decl)) {
+                return
+            }
+        }
+        boxedNonGenericDecls.add(decl)
+    }
+
+    private func addBoxUsedExtend(extendDecl: ExtendDecl): Unit {
+        if (!containsExtend(boxUsedExtends, extendDecl)) {
+            boxUsedExtends.add(extendDecl)
+        }
+    }
+
+    private func addBoxUsedExtends(extends: ArrayList<ExtendDecl>): Unit {
+        for (extendDecl in extends) {
+            addBoxUsedExtend(extendDecl)
+        }
+    }
+
+    private func hasCheckedTyExtendRelation(child: Ty, interfaceTy: Ty): Bool {
+        for (entry in checkedTyExtendRelation) {
+            if (SameTy(entry.child, child) && SameTy(entry.interfaceTy, interfaceTy)) {
+                return true
+            }
+        }
+        return false
+    }
+
+    private func findTyUsedExtendsEntry(ty: Ty): Option<TyUsedExtendsEntry> {
+        for (entry in tyUsedExtends) {
+            if (SameTy(entry.ty, ty)) {
+                return entry
+            }
+        }
+        return None
+    }
+
+    private func getOrCreateTyUsedExtendsEntry(ty: Ty): TyUsedExtendsEntry {
+        if (let Some(entry) <- findTyUsedExtendsEntry(ty)) {
+            return entry
+        }
+        let entry = TyUsedExtendsEntry(ty)
+        tyUsedExtends.add(entry)
+        return entry
+    }
+
+    private func addTyUsedExtend(ty: Ty, extendDecl: ExtendDecl): Unit {
+        let entry = getOrCreateTyUsedExtendsEntry(ty)
+        if (!containsExtend(entry.extends, extendDecl)) {
+            entry.extends.add(extendDecl)
+        }
+    }
+
+    private func addTyUsedExtends(ty: Ty, extends: ArrayList<ExtendDecl>): Unit {
+        for (extendDecl in extends) {
+            addTyUsedExtend(ty, extendDecl)
+        }
+    }
+
+    private func declOfInheritableTy(ty: Ty): Option<InheritableDecl> {
+        if (let Some(classTy) <- (ty as ClassTy)) {
+            if (let Some(decl) <- classTy.declPtr) {
+                return decl
+            }
+        }
+        if (let Some(interfaceTy) <- (ty as InterfaceTy)) {
+            if (let Some(decl) <- interfaceTy.declPtr) {
+                return decl
+            }
+        }
+        if (let Some(structTy) <- (ty as StructTy)) {
+            if (let Some(decl) <- structTy.declPtr) {
+                return decl
+            }
+        }
+        if (let Some(enumTy) <- (ty as EnumTy)) {
+            if (let Some(decl) <- enumTy.declPtr) {
+                return decl
+            }
+        }
+        return None
+    }
+
+    private func collectAllRelatedExtends(decl: InheritableDecl): ArrayList<ExtendDecl> {
+        let out = ArrayList<ExtendDecl>()
+        addUniqueExtends(out, GetDeclExtends(decl))
+        if (let Some(classDecl) <- (decl as ClassDecl)) {
+            var current = classDecl.GetSuperClassDecl()
+            while (let Some(superClass) <- current) {
+                addUniqueExtends(out, GetDeclExtends(superClass))
+                current = superClass.GetSuperClassDecl()
+            }
+        }
+        return out
+    }
+
+    private func addUniqueExtends(target: ArrayList<ExtendDecl>, source: ArrayList<ExtendDecl>): Unit {
+        for (extendDecl in source) {
+            if (!containsExtend(target, extendDecl)) {
+                target.add(extendDecl)
+            }
+        }
     }
 
     private func containsExtend(values: ArrayList<ExtendDecl>, ed: ExtendDecl): Bool {
