@@ -264,6 +264,17 @@ foreign {
     func malloc_trim(pad: UIntNative): Int32
 }
 
+@When[os == "Windows"]
+foreign {
+    func _heapmin(): Int32
+}
+
+@When[os == "macOS"]
+foreign {
+    func malloc_default_zone(): UIntNative
+    func malloc_zone_pressure_relief(zone: UIntNative, goal: UIntNative): UIntNative
+}
+
 @When[os == "Linux"]
 public func FreeIdleMemoryToOS(): Unit {
     unsafe {
@@ -271,7 +282,24 @@ public func FreeIdleMemoryToOS(): Unit {
     }
 }
 
-@When[os != "Linux"]
+@When[os == "Windows"]
+public func FreeIdleMemoryToOS(): Unit {
+    unsafe {
+        let _ = _heapmin()
+    }
+}
+
+@When[os == "macOS"]
+public func FreeIdleMemoryToOS(): Unit {
+    unsafe {
+        let zone = malloc_default_zone()
+        if (zone != 0) {
+            let _ = malloc_zone_pressure_relief(zone, 0)
+        }
+    }
+}
+
+@When[os != "Linux" && os != "Windows" && os != "macOS"]
 public func FreeIdleMemoryToOS(): Unit {
     ()
 }
