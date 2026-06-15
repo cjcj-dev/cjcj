@@ -2,6 +2,102 @@ package cangjie_compiler::chir
 
 import std.collection.*
 
+public let ANY_TYPE: String = "ANY_TYPE"
+public let NOT_CARE: String = "NOT_CARE"
+
+public class FuncInfo {
+    public let funcName: String
+    public let parentTy: String
+    public let params: Array<String>
+    public let returnTy: String
+    public let pkgName: String
+
+    public init(funcName: String, parentTy: String, params: Array<String>, returnTy: String, pkgName: String) {
+        this.funcName = funcName
+        this.parentTy = parentTy
+        this.params = params
+        this.returnTy = returnTy
+        this.pkgName = pkgName
+    }
+}
+
+public func IsExpectedFunction(fn: Function, funcInfo: FuncInfo): Bool {
+    return CheckFuncName(fn, funcInfo) && CheckParentTy(fn, funcInfo) && CheckParametersTy(fn, funcInfo) &&
+        CheckReturnTy(fn, funcInfo) && CheckPkgName(fn, funcInfo)
+}
+
+private func CheckFuncName(fn: Function, funcInfo: FuncInfo): Bool {
+    return fn.GetSrcCodeIdentifier() == funcInfo.funcName
+}
+
+private func CheckParentTy(fn: Function, funcInfo: FuncInfo): Bool {
+    if (funcInfo.parentTy == NOT_CARE) {
+        return true
+    }
+    if (let Some(parentTy) <- fn.GetParentCustomTypeOrExtendedType()) {
+        if (funcInfo.parentTy == ANY_TYPE) {
+            return true
+        }
+        if (let Some(customTy) <- (parentTy as CustomType)) {
+            return customTy.GetCustomTypeDef().GetIdentifier() == funcInfo.parentTy
+        }
+        return parentTy.ToSrcCodeString() == funcInfo.parentTy
+    }
+    return funcInfo.parentTy.isEmpty()
+}
+
+private func CheckParametersTy(fn: Function, funcInfo: FuncInfo): Bool {
+    if (let Some(funcTy) <- fn.GetFuncType()) {
+        let paramTys = funcTy.GetParamTypes()
+        if (fn.IsMemberFunc() && !fn.TestAttr(Attribute.STATIC) && !paramTys.isEmpty()) {
+            paramTys.remove(at: 0)
+        }
+        var needToMatchArgsNum = true
+        let loopCnt = if (funcInfo.params.size < paramTys.size) { funcInfo.params.size } else { paramTys.size }
+        var idx: Int64 = 0
+        while (idx < loopCnt) {
+            let expectedTy = funcInfo.params[idx]
+            if (expectedTy == ANY_TYPE) {
+                idx++
+                continue
+            }
+            if (expectedTy == NOT_CARE) {
+                needToMatchArgsNum = false
+                break
+            }
+            if (expectedTy != paramTys[idx].ToSrcCodeString()) {
+                return false
+            }
+            idx++
+        }
+        if (funcInfo.params.size > loopCnt && funcInfo.params[loopCnt] == NOT_CARE) {
+            needToMatchArgsNum = false
+        }
+        if (needToMatchArgsNum && funcInfo.params.size != paramTys.size) {
+            return false
+        }
+        return true
+    }
+    return funcInfo.params.isEmpty()
+}
+
+private func CheckReturnTy(fn: Function, funcInfo: FuncInfo): Bool {
+    if (funcInfo.returnTy == NOT_CARE || funcInfo.returnTy == ANY_TYPE) {
+        return true
+    }
+    if (let Some(returnTy) <- fn.GetReturnType()) {
+        return returnTy.ToSrcCodeString() == funcInfo.returnTy
+    }
+    return false
+}
+
+private func CheckPkgName(fn: Function, funcInfo: FuncInfo): Bool {
+    if (funcInfo.pkgName == NOT_CARE || funcInfo.pkgName == ANY_TYPE) {
+        return true
+    }
+    return fn.GetPackageName() == funcInfo.pkgName
+}
+
 public func IndentToString(indent: Int64): String {
     var out = ""
     var idx: Int64 = 0

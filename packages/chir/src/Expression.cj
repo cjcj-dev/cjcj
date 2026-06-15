@@ -209,7 +209,7 @@ public open class Expression <: Base {
 
     public func MoveAfter(expr: Expression): Unit {
         if (let Some(targetBlock) <- expr.GetParentBlock()) {
-            RemoveSelfFromBlock()
+            DetachFromBlockOnly()
             let exprList = targetBlock.GetExpressionsRef()
             var idx: Int64 = 0
             while (idx < exprList.size) {
@@ -226,7 +226,7 @@ public open class Expression <: Base {
 
     public func MoveBefore(expr: Expression): Unit {
         if (let Some(targetBlock) <- expr.GetParentBlock()) {
-            RemoveSelfFromBlock()
+            DetachFromBlockOnly()
             let exprList = targetBlock.GetExpressionsRef()
             var idx: Int64 = 0
             while (idx < exprList.size) {
@@ -242,15 +242,19 @@ public open class Expression <: Base {
     }
 
     public func MoveTo(block: Block): Unit {
-        RemoveSelfFromBlock()
+        DetachFromBlockOnly()
         block.AppendExpression(this)
     }
 
-    public open func RemoveSelfFromBlock(): Unit {
+    public open func DetachFromBlockOnly(): Unit {
         if (let Some(parentBlock) <- parent) {
             parentBlock.RemoveExprOnly(this)
         }
         parent = None
+    }
+
+    public open func RemoveSelfFromBlock(): Unit {
+        DetachFromBlockOnly()
         EraseOperands()
     }
 

@@ -1,17 +1,5 @@
 package cangjie_compiler::chir
 
-public class NoSideEffectMarker {
-    public init() {}
-
-    public func MarkFunction(fn: Function): Unit {
-        if (fn.GetBody().isNone()) {
-            fn.EnableAttr(Attribute.NO_SIDE_EFFECT)
-            return
-        }
-        // TODO(selfhost:CHIR): port C++ side-effect analysis over full expression taxonomy.
-    }
-}
-
 public class ClosureConversion {
     public init() {}
 

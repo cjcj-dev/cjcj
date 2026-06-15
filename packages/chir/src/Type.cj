@@ -471,7 +471,14 @@ public open class CustomType <: Type {
     }
 
     public override func ToSrcCodeString(): String {
-        return ToString()
+        let args = ArrayList<String>()
+        for (ty in argTys) {
+            args.add(ty.ToSrcCodeString())
+        }
+        if (args.isEmpty()) {
+            return def.GetIdentifier()
+        }
+        return def.GetIdentifier() + "<" + JoinStrings(args, ",") + ">"
     }
 }
 

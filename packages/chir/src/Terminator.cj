@@ -53,6 +53,15 @@ public open class Terminator <: Expression {
         }
     }
 
+    public override func DetachFromBlockOnly(): Unit {
+        if (let Some(parentBlock) <- GetParentBlock()) {
+            for (successor in successors) {
+                successor.RemovePredecessor(parentBlock)
+            }
+        }
+        super.DetachFromBlockOnly()
+    }
+
     public override func AddExtraComment(): String {
         if (successors.isEmpty()) {
             return ""

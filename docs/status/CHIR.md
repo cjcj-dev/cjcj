@@ -43,6 +43,27 @@ Implemented:
 - Added a conservative dead-code elimination pass for removable side-effect-free expressions with
   unused results.
 - Added textual printer and serializer surfaces over the implemented package/function/block IR model.
+- Split optimization/transformation scaffolding into C++-named component files for
+  `DeadCodeElimination`, `MergeBlocks`, `ConstPropagation`, `NoSideEffectMarker`, and
+  `ClosureConversion`.
+- Fixed expression movement so `MoveTo`/`MoveBefore`/`MoveAfter` preserve operands while deletion
+  still disconnects operands, matching the C++ `Expression::MoveTo` versus `RemoveSelfFromBlock`
+  distinction.
+- Added terminator detach handling so successor predecessor lists are updated when terminators move
+  or are removed.
+- Ported the C++ `FuncInfo`/`IsExpectedFunction` matching helper used by CHIR optimizations.
+- Aligned custom type source rendering with the C++ `CustomType::ToSrcCodeString`, using source
+  identifiers and source-rendered generic arguments rather than fully qualified package names.
+- Ported `NoSideEffectMarker` whitelist behavior for known pure stdlib functions instead of
+  marking all bodyless functions.
+- Implemented the C++ `MergeBlocks` unconditional-goto subset supported by the current IR model:
+  single-predecessor/single-successor merge, goto-only block bypass, and recursive handling of
+  lambda bodies.
+- Extended DCE to remove unused no-side-effect calls when the callee is marked
+  `NO_SIDE_EFFECT`.
+- Added local const-propagation algebraic identities (`x + 0`, `x - 0`, shifts by zero,
+  `x * 1`, `x / 1`, `x ** 1`, and idempotent bit ops) while retaining the marker for the full
+  C++ constant lattice and branch rewriting.
 
 Known gaps:
 
@@ -55,4 +76,4 @@ Known gaps:
 - The current implementation establishes a compiling, real IR core that downstream CHIR work can build on,
   but it is far below full C++ CHIR behavioral coverage.
 
-Remaining CHIR selfhost markers: 8.
+Remaining CHIR selfhost markers: 6.

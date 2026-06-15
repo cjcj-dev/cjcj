@@ -3,6 +3,14 @@ package cangjie_compiler::chir
 public class DeadCodeElimination {
     public init() {}
 
+    public func RunOnPackage(pkg: Package): Int64 {
+        var removed: Int64 = 0
+        for (fn in pkg.GetGlobalFuncsWithBody()) {
+            removed += RunOnFunction(fn)
+        }
+        return removed
+    }
+
     public func RunOnFunction(fn: Function): Int64 {
         var removed: Int64 = 0
         if (let Some(body) <- fn.GetBody()) {
@@ -33,7 +41,10 @@ public class DeadCodeElimination {
         if (expr.IsTerminator() || expr.HasExceptionBranch()) {
             return false
         }
-        if (expr.IsFuncCall() || expr.GetExprKind() == ExprKind.STORE || expr.GetExprKind() == ExprKind.DEBUGEXPR) {
+        if (expr.GetExprKind() == ExprKind.STORE || expr.GetExprKind() == ExprKind.DEBUGEXPR) {
+            return false
+        }
+        if (expr.IsFuncCall() && !IsNoSideEffectCall(expr)) {
             return false
         }
         if (let Some(result) <- expr.GetResult()) {
@@ -41,28 +52,14 @@ public class DeadCodeElimination {
         }
         return false
     }
-}
 
-public class MergeBlocks {
-    public init() {}
-
-    public func RunOnFunction(fn: Function): Int64 {
-        // TODO(selfhost:CHIR): implement C++ MergeBlocks control-flow rewiring after all terminator subclasses are ported.
-        if (fn.GetBody().isNone()) {
-            return 0
+    private func IsNoSideEffectCall(expr: Expression): Bool {
+        if (!expr.IsFuncCall() || expr.GetNumOfOperands() == 0) {
+            return false
         }
-        return 0
-    }
-}
-
-public class ConstPropagation {
-    public init() {}
-
-    public func RunOnFunction(fn: Function): Int64 {
-        // TODO(selfhost:CHIR): port C++ constant lattice/evaluator; current package has no AST/Sema constant model dependency.
-        if (fn.GetBody().isNone()) {
-            return 0
+        if (let Some(callee) <- expr.GetOperand(0).AsFunction()) {
+            return callee.TestAttr(Attribute.NO_SIDE_EFFECT)
         }
-        return 0
+        return false
     }
 }
