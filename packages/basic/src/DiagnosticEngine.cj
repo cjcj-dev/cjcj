@@ -664,7 +664,7 @@ public class CompilerDiagnosticHandler <: DiagnosticHandler {
     }
 }
 
-public class DiagnosticBuilder {
+public class DiagnosticBuilder <: Resource {
     public var diagnostic: Diagnostic
     public let diag: DiagnosticEngine
     private var emitted: Bool = false
