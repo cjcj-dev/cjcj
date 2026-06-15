@@ -5,17 +5,76 @@ import std.collection.*
 public open class Decl <: Node {
     public let modifiers: ArrayList<Modifier> = ArrayList<Modifier>()
     public let annotations: ArrayList<Annotation> = ArrayList<Annotation>()
+    private let attributes: ArrayList<Attribute> = ArrayList<Attribute>()
     public var identifier: SrcIdentifier = SrcIdentifier()
     public var keywordPos: Position = INVALID_POSITION
     public var generic: Option<Generic> = None
     public let genericConstraints: ArrayList<GenericConstraint> = ArrayList<GenericConstraint>()
+    public var outerDecl: Option<Decl> = None
 
     public init() { super(ASTKind.DECL) }
     public init(kind: ASTKind) { super(kind) }
 
     public func AddCommon(mods: ArrayList<Modifier>, annos: ArrayList<Annotation>): Unit {
-        for (modifier in mods) { modifiers.add(modifier) }
+        for (modifier in mods) {
+            modifiers.add(modifier)
+            if (let Some(attr) <- GetAttributeByModifier(modifier.tokenKind)) {
+                EnableAttr(attr)
+            }
+        }
         for (anno in annos) { annotations.add(anno) }
+    }
+
+    public func EnableAttr(attr: Attribute): Unit {
+        if (!TestAttr(attr)) {
+            attributes.add(attr)
+        }
+        if (attr == Attribute.IS_BROKEN || attr == Attribute.BROKEN) {
+            isBroken = true
+        }
+    }
+
+    public func TestAttr(attr: Attribute): Bool {
+        for (item in attributes) {
+            if (item == attr) {
+                return true
+            }
+        }
+        return false
+    }
+
+    public func TestAnyAttr(first: Attribute, second: Attribute): Bool {
+        return TestAttr(first) || TestAttr(second)
+    }
+
+    public func TestAnyAttr(first: Attribute, second: Attribute, third: Attribute): Bool {
+        return TestAttr(first) || TestAttr(second) || TestAttr(third)
+    }
+
+    public func HasAnno(kind: AnnotationKind): Bool {
+        for (anno in annotations) {
+            if (anno.kind == kind) {
+                return true
+            }
+        }
+        return false
+    }
+
+    public func HasModifier(kind: ModifierKind): Bool {
+        for (modifier in modifiers) {
+            if (modifier.kind == kind) {
+                return true
+            }
+        }
+        return false
+    }
+
+    public func IsCommonOrSpecific(): Bool {
+        return TestAttr(Attribute.COMMON) || TestAttr(Attribute.SPECIFIC)
+    }
+
+    public open func GetMemberDecls(): ArrayList<Decl> {
+        return ArrayList<Decl>()
     }
 }
 
@@ -84,6 +143,7 @@ public open class FuncDecl <: Decl {
     public var isOperator: Bool = false
 
     public init() { super(ASTKind.FUNC_DECL) }
+    public init(kind: ASTKind) { super(kind) }
 
     public override func Children(): ArrayList<Node> {
         let out = ArrayList<Node>()
@@ -94,13 +154,13 @@ public open class FuncDecl <: Decl {
 
 public class MainDecl <: FuncDecl {
     public init() {
-        super()
+        super(ASTKind.MAIN_DECL)
     }
 }
 
 public class MacroDecl <: FuncDecl {
     public init() {
-        super()
+        super(ASTKind.MACRO_DECL)
     }
 }
 
@@ -141,6 +201,10 @@ public open class InheritableDecl <: Decl {
         for (decl in bodyDecls) { out.add(decl) }
         return out
     }
+
+    public open override func GetMemberDecls(): ArrayList<Decl> {
+        return bodyDecls
+    }
 }
 
 public class ClassDecl <: InheritableDecl {
@@ -158,6 +222,13 @@ public class StructDecl <: InheritableDecl {
 public class EnumDecl <: InheritableDecl {
     public let constructors: ArrayList<Decl> = ArrayList<Decl>()
     public init() { super(ASTKind.ENUM_DECL) }
+
+    public override func GetMemberDecls(): ArrayList<Decl> {
+        let out = ArrayList<Decl>()
+        for (ctor in constructors) { out.add(ctor) }
+        for (decl in bodyDecls) { out.add(decl) }
+        return out
+    }
 }
 
 public class ExtendDecl <: InheritableDecl {
@@ -181,7 +252,7 @@ public class PropDecl <: Decl {
 
 public class PrimaryCtorDecl <: FuncDecl {
     public init() {
-        super()
+        super(ASTKind.PRIMARY_CTOR_DECL)
     }
 }
 

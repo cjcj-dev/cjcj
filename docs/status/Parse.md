@@ -1,6 +1,6 @@
 # Parse Port Status
 
-Date: 2026-06-15
+Date: 2026-06-16
 
 Build: `cjpm build` passes.
 
@@ -12,7 +12,7 @@ tokens, diagnostics, AST node shapes, a lexer, parser state, top-level parsing,
 declaration parsing, expression parsing, type parsing, pattern parsing, imports,
 annotations, modifiers, features, macro-call capture, quote capture, comment
 collection, modifier-rule queries, AST checking, AST hashing, CJMP entry wiring,
-and Java/ObjC native FFI parser shells.
+and Java/ObjC native FFI parser checks.
 
 ## Important Blocker
 
@@ -47,13 +47,21 @@ package public APIs.
   type patterns.
 - Implemented modifier conflict and attribute mapping rules, AST range checking,
   and deterministic structural hashing helpers.
+- Continued the port by replacing the remaining Parse self-host TODO markers
+  with concrete CJMP common/specific validation and Java/Objective-C/foreign
+  annotation validation based on the C++ `ParseCJMPDecl.cpp` and
+  `NativeFFI/*ParserImpl.cpp` behavior available in the local compatibility
+  model.
+- Added declaration attribute tracking, generic/common/specific/default/interop
+  attributes, member ownership propagation, and top-level declaration
+  finalization so CJMP and FFI checks run after class-like members have their
+  enclosing declaration recorded.
 
 ## Remaining Work
 
 - Replace the local compatibility layer with the real Basic/Lex/AST APIs when
   manifest edits are allowed.
-- Replace the remaining `TODO(selfhost:Parse)` markers for CJMP-specific
-  declaration parsing and native Java/ObjC FFI parser validation.
 - Audit grammar and diagnostic parity against the full C++ Parse test corpus;
   the current parser is substantial and compiling, but not a complete faithful
   replacement for all 17k+ lines of C++ parser behavior.
+- Remaining Parse self-host markers: 0.

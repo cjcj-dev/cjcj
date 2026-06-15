@@ -23,6 +23,7 @@ public class ParserImpl {
     public var enableInteropCJMapping: Bool = false
     public var parseDeclFile: Bool = false
     public var enableAttachComment: Bool = false
+    public var compileOptions: GlobalOptions = GlobalOptions()
     public let commentsMap: TokenVecMap = TokenVecMap()
 
     public init(fileID: UInt64, input: String, diag: DiagnosticEngine, sm: SourceManager, attachComment: Bool, parsingDeclFiles: Bool) {
@@ -100,6 +101,7 @@ public class ParserImpl {
     }
 
     public func SetCompileOptions(opts: GlobalOptions): Unit {
+        compileOptions = opts
         enableEH = opts.enableEH
     }
 

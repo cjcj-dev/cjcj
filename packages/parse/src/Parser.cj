@@ -19,7 +19,11 @@ public class Parser {
 
     public func GetLineNum(): Int64 { return impl.GetLineNum() }
     public func ParseTopLevel(): File { return impl.ParseTopLevel() }
-    public func ParseDecl(scopeKind: ScopeKind): Decl { return impl.ParseDecl(scopeKind) }
+    public func ParseDecl(scopeKind: ScopeKind): Decl {
+        let decl = impl.ParseDecl(scopeKind)
+        impl.FinalizeDeclTree(decl)
+        return decl
+    }
     public func ParseExpr(): Expr { return impl.ParseExpr() }
     public func ParseExprLibast(): Expr { return impl.ParseExpr() }
     public func ParseType(): Type { return impl.ParseType() }

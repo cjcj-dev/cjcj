@@ -1,5 +1,7 @@
 package cangjie_compiler::parse
 
+import std.collection.*
+
 public enum ScopeKind {
     | TOPLEVEL | CLASS_BODY | INTERFACE_BODY | STRUCT_BODY | EXTEND_BODY | FUNC_BODY | MACRO_BODY
     | PRIMARY_CONSTRUCTOR_BODY_FOR_CLASS | PRIMARY_CONSTRUCTOR_BODY_FOR_STRUCT
@@ -99,9 +101,29 @@ public enum InteropLanguage {
     | NA | C | JAVA | OBJC
 }
 
+public enum OutputMode {
+    | UNKNOWN | CHIR | OBJECT | EXECUTABLE
+}
+
+private func OutputModeIndex(kind: OutputMode): Int64 {
+    return match (kind) {
+        case OutputMode.UNKNOWN => 0
+        case OutputMode.CHIR => 1
+        case OutputMode.OBJECT => 2
+        case OutputMode.EXECUTABLE => 3
+    }
+}
+
+extend OutputMode <: Equatable<OutputMode> {
+    public operator func ==(right: OutputMode): Bool { return OutputModeIndex(this) == OutputModeIndex(right) }
+    public operator func !=(right: OutputMode): Bool { return !(this == right) }
+}
+
 public class GlobalOptions {
     public var enableEH: Bool = false
     public var interopLanguage: InteropLanguage = InteropLanguage.NA
+    public var outputMode: OutputMode = OutputMode.UNKNOWN
+    public let commonPartCjos: ArrayList<String> = ArrayList<String>()
     public init() {}
 }
 

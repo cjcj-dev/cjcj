@@ -21,7 +21,9 @@ extend ParserImpl {
             } else if (SeeingImport()) {
                 file.imports.add(ParseImportSpec(pendingAnnos))
             } else if (SeeingDecl() || Seeing(TokenKind.AT) || Seeing(TokenKind.AT_EXCL)) {
-                file.decls.add(ParseDecl(ScopeKind.TOPLEVEL, modifiers, pendingAnnos))
+                let decl = ParseDecl(ScopeKind.TOPLEVEL, modifiers, pendingAnnos)
+                FinalizeDeclTree(decl)
+                file.decls.add(decl)
             } else {
                 diag.DiagnoseRefactor(DiagKindRefactor.UNEXPECTED_TOKEN, Peek().Begin(), "unexpected token at top level")
                 Next()
@@ -106,6 +108,9 @@ extend ParserImpl {
         }
         let body = ParseFuncBody(scopeKind)
         ret.funcBody = body
+        if (let Some(_) <- body.generic) {
+            ret.EnableAttr(Attribute.GENERIC)
+        }
         ret.end = body.end
     }
 
@@ -267,9 +272,13 @@ extend ParserImpl {
                 let localAnnos = ArrayList<Annotation>()
                 ParseAnnotations(localAnnos)
                 if (SeeingIdentifierLike()) {
-                    ret.constructors.add(ParseEnumConstructor(ArrayList<Modifier>(), localAnnos))
+                    let ctor = ParseEnumConstructor(ArrayList<Modifier>(), localAnnos)
+                    ctor.outerDecl = ret
+                    ret.constructors.add(ctor)
                 } else if (SeeingDecl()) {
-                    ret.bodyDecls.add(ParseDecl(ScopeKind.ENUM_BODY))
+                    let member = ParseDecl(ScopeKind.ENUM_BODY)
+                    member.outerDecl = ret
+                    ret.bodyDecls.add(member)
                 } else {
                     Next()
                 }
@@ -283,6 +292,7 @@ extend ParserImpl {
     public func ParseEnumConstructor(modifiers: ArrayList<Modifier>, annos: ArrayList<Annotation>): Decl {
         let decl = VarDecl()
         ApplyModifiersAndAnnotations(decl, modifiers, annos)
+        decl.EnableAttr(Attribute.ENUM_CONSTRUCTOR)
         decl.identifier = ExpectIdentifierWithPos(decl)
         decl.begin = if (decl.begin.IsZero()) { decl.identifier.Begin() } else { decl.begin }
         if (Skip(TokenKind.LPAREN)) {
@@ -305,6 +315,7 @@ extend ParserImpl {
         ret.identifier = ExpectIdentifierWithPos(ret)
         if (let Some(generic) <- ParseOptionalGeneric()) {
             ret.generic = generic
+            ret.EnableAttr(Attribute.GENERIC)
         }
         if (Skip(TokenKind.COLON)) {
             ret.inheritedTypes.add(ParseType())
@@ -324,7 +335,9 @@ extend ParserImpl {
         }
         while (!Seeing(TokenKind.END) && !Seeing(TokenKind.RCURL)) {
             if (SeeingDecl() || Seeing(TokenKind.AT) || Seeing(TokenKind.AT_EXCL)) {
-                ret.bodyDecls.add(ParseDecl(scopeKind))
+                let member = ParseDecl(scopeKind)
+                member.outerDecl = ret
+                ret.bodyDecls.add(member)
             } else {
                 Next()
             }
@@ -404,6 +417,7 @@ extend ParserImpl {
         let key = Expect(TokenKind.INIT, "expected 'init'")
         ret.keywordPos = key.Begin()
         ret.identifier = SrcIdentifier("init", "init", key.Begin(), key.End(), false)
+        ret.EnableAttr(Attribute.CONSTRUCTOR)
         ret.begin = if (ret.begin.IsZero()) { key.Begin() } else { ret.begin }
         ret.funcBody = ParseFuncBody(scopeKind)
         if (let Some(body) <- ret.funcBody) { ret.end = body.end }

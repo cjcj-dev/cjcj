@@ -99,6 +99,11 @@ extend ParserImpl {
             node.end = node.begin
         }
     }
+
+    public func FinalizeDeclTree(decl: Decl): Unit {
+        FFIParserImpl(this).CheckInteropDecl(decl)
+        MPParserImpl(this).CheckCJMPDecl(decl)
+    }
 }
 
 public func LevenshteinDistance(source: String, target: String): UInt64 {

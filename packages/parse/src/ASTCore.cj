@@ -235,10 +235,14 @@ public class Modifier <: Node {
 
 public enum Attribute {
     | PUBLIC | PROTECTED | INTERNAL | PRIVATE | STATIC | ABSTRACT | OPEN | SEALED | OVERRIDE
-    | REDEF | FOREIGN | INOUT | MUT | UNSAFE | OPERATOR | CONST | COMMON | SPECIFIC | BROKEN
+    | REDEF | FOREIGN | INOUT | MUT | UNSAFE | OPERATOR | CONST | COMMON | SPECIFIC | COMMON_WITH_DEFAULT
+    | CONSTRUCTOR | PRIMARY_CONSTRUCTOR | ENUM_CONSTRUCTOR | GENERIC
+    | JAVA_MIRROR | JAVA_MIRROR_SUBTYPE | JAVA_CJ_MAPPING
+    | OBJ_C_MIRROR | OBJ_C_MIRROR_SUBTYPE | OBJ_C_INIT | OBJ_C_OPTIONAL
+    | IS_BROKEN | BROKEN
 }
 
-private func AttributeIndex(kind: Attribute): Int64 {
+public func AttributeIndex(kind: Attribute): Int64 {
     return match (kind) {
         case Attribute.PUBLIC => 0
         case Attribute.PROTECTED => 1
@@ -258,7 +262,20 @@ private func AttributeIndex(kind: Attribute): Int64 {
         case Attribute.CONST => 15
         case Attribute.COMMON => 16
         case Attribute.SPECIFIC => 17
-        case Attribute.BROKEN => 18
+        case Attribute.COMMON_WITH_DEFAULT => 18
+        case Attribute.CONSTRUCTOR => 19
+        case Attribute.PRIMARY_CONSTRUCTOR => 20
+        case Attribute.ENUM_CONSTRUCTOR => 21
+        case Attribute.GENERIC => 22
+        case Attribute.JAVA_MIRROR => 23
+        case Attribute.JAVA_MIRROR_SUBTYPE => 24
+        case Attribute.JAVA_CJ_MAPPING => 25
+        case Attribute.OBJ_C_MIRROR => 26
+        case Attribute.OBJ_C_MIRROR_SUBTYPE => 27
+        case Attribute.OBJ_C_INIT => 28
+        case Attribute.OBJ_C_OPTIONAL => 29
+        case Attribute.IS_BROKEN => 30
+        case Attribute.BROKEN => 31
     }
 }
 
