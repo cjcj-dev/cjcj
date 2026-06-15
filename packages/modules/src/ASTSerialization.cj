@@ -92,6 +92,7 @@ public class ASTWriter {
         packageFields.add(BoolToWire(serializingCommon))
         packageFields.add(BoolToWire(debugOption))
         packageFields.add(OptimizationLevelToString(optimizationLevel))
+        AppendNodeFields(packageFields, pkg)
         lines.add(JoinFields(packageFields))
         for (file in pkg.files) {
             let fileFields = ArrayList<String>()
@@ -101,6 +102,7 @@ public class ASTWriter {
             fileFields.add(file.fileHash.toString())
             fileFields.add(JoinStringList(file.features))
             fileFields.add(BoolToWire(file.isProduct))
+            AppendNodeFields(fileFields, file)
             lines.add(JoinFields(fileFields))
             for (importSpec in file.imports) {
                 let importFields = ArrayList<String>()
@@ -114,6 +116,8 @@ public class ASTWriter {
                 importFields.add(AccessLevelToWire(importSpec.accessLevel))
                 importFields.add(BoolToWire(importSpec.hasAccessModifier))
                 importFields.add(BoolToWire(importSpec.withImplicitExport))
+                AppendNodeFields(importFields, importSpec)
+                AppendNodeFields(importFields, importSpec.content)
                 lines.add(JoinFields(importFields))
             }
             for (decl in file.decls) {
@@ -132,6 +136,7 @@ public class ASTWriter {
                 declFields.add(decl.end.fileID.toString())
                 declFields.add(decl.end.line.toString())
                 declFields.add(decl.end.column.toString())
+                declFields.add(JoinAttributes(decl.GetAttrs()))
                 lines.add(JoinFields(declFields))
             }
         }
@@ -311,6 +316,9 @@ public class ASTLoader {
                         pkg = Package(fields[1])
                         pkg.isMacroPackage = WireToBool(fields[2])
                         pkg.accessible = WireToAccessLevel(fields[3])
+                        if (fields.size > 13) {
+                            LoadNodeFields(fields, 7, pkg)
+                        }
                     }
                 case "file" =>
                     let file = File()
@@ -329,6 +337,9 @@ public class ASTLoader {
                         }
                     }
                     if (fields.size > 5) { file.isProduct = WireToBool(fields[5]) }
+                    if (fields.size > 12) {
+                        LoadNodeFields(fields, 6, file)
+                    }
                     pkg.AddFile(file)
                     currentFile = Some(file)
                 case "import" =>
@@ -347,6 +358,16 @@ public class ASTLoader {
                         if (fields.size > 7) { importSpec.accessLevel = WireToAccessLevel(fields[7]) }
                         if (fields.size > 8) { importSpec.hasAccessModifier = WireToBool(fields[8]) }
                         if (fields.size > 9) { importSpec.withImplicitExport = WireToBool(fields[9]) }
+                        ApplyAccessAttr(importSpec, importSpec.accessLevel)
+                        if (fields.size > 16) {
+                            LoadNodeFields(fields, 10, importSpec)
+                        }
+                        if (fields.size > 23) {
+                            LoadNodeFields(fields, 17, importSpec.content)
+                        }
+                        if (!HasAccessAttr(importSpec)) {
+                            ApplyAccessAttr(importSpec, importSpec.accessLevel)
+                        }
                         importSpec.curFile = Some(file)
                         importSpec.content.curFile = Some(file)
                         file.imports.add(importSpec)
@@ -356,13 +377,10 @@ public class ASTLoader {
                         let decl = Decl()
                         if (fields.size > 1) { decl.identifier = fields[1] }
                         if (fields.size > 2) { decl.fullPackageName = fields[2] }
+                        var declAccessLevel = AccessLevel.INTERNAL
                         if (fields.size > 3) {
-                            match (WireToAccessLevel(fields[3])) {
-                                case AccessLevel.PUBLIC => decl.EnableAttr(Attribute.PUBLIC)
-                                case AccessLevel.PRIVATE => decl.EnableAttr(Attribute.PRIVATE)
-                                case AccessLevel.PROTECTED => decl.EnableAttr(Attribute.PROTECTED)
-                                case AccessLevel.INTERNAL => decl.EnableAttr(Attribute.INTERNAL)
-                            }
+                            declAccessLevel = WireToAccessLevel(fields[3])
+                            ApplyAccessAttr(decl, declAccessLevel)
                         }
                         if (fields.size > 4) { decl.doNotExport = WireToBool(fields[4]) }
                         if (fields.size > 5) { decl.isFunction = WireToBool(fields[5]) }
@@ -379,6 +397,12 @@ public class ASTLoader {
                                 ParseInt64Field(fields[12]),
                                 ParseInt64Field(fields[13])
                             )
+                        }
+                        if (fields.size > 14) {
+                            decl.ReplaceAttrs(SplitAttributes(fields[14]))
+                        }
+                        if (!HasAccessAttr(decl)) {
+                            ApplyAccessAttr(decl, declAccessLevel)
                         }
                         decl.curFile = Some(file)
                         file.decls.add(decl)
@@ -421,6 +445,34 @@ public func GetDeclMangleKey(decl: Decl): String {
         return decl.fullPackageName + "." + decl.identifier
     }
     return decl.identifier
+}
+
+public func AppendNodeFields(fields: ArrayList<String>, node: Node): Unit {
+    fields.add(node.begin.fileID.toString())
+    fields.add(node.begin.line.toString())
+    fields.add(node.begin.column.toString())
+    fields.add(node.end.fileID.toString())
+    fields.add(node.end.line.toString())
+    fields.add(node.end.column.toString())
+    fields.add(JoinAttributes(node.GetAttrs()))
+}
+
+public func LoadNodeFields(fields: ArrayList<String>, start: Int64, node: Node): Unit {
+    if (fields.size > start + 5) {
+        node.begin = Position(
+            ParseUInt64Field(fields[start]),
+            ParseInt64Field(fields[start + 1]),
+            ParseInt64Field(fields[start + 2])
+        )
+        node.end = Position(
+            ParseUInt64Field(fields[start + 3]),
+            ParseInt64Field(fields[start + 4]),
+            ParseInt64Field(fields[start + 5])
+        )
+    }
+    if (fields.size > start + 6) {
+        node.ReplaceAttrs(SplitAttributes(fields[start + 6]))
+    }
 }
 
 public func SplitRawLines(text: String): ArrayList<String> {

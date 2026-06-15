@@ -113,6 +113,41 @@ private func AttributeIndex(attr: Attribute): Int64 {
     }
 }
 
+public func AttributeToWire(attr: Attribute): String {
+    return match (attr) {
+        case Attribute.IMPORTED => "IMPORTED"
+        case Attribute.TOOL_ADD => "TOOL_ADD"
+        case Attribute.IMPLICIT_ADD => "IMPLICIT_ADD"
+        case Attribute.COMPILER_ADD => "COMPILER_ADD"
+        case Attribute.PUBLIC => "PUBLIC"
+        case Attribute.PRIVATE => "PRIVATE"
+        case Attribute.PROTECTED => "PROTECTED"
+        case Attribute.INTERNAL => "INTERNAL"
+        case Attribute.IMPLICIT_USED => "IMPLICIT_USED"
+        case Attribute.FOR_TEST => "FOR_TEST"
+        case Attribute.FROM_COMMON_PART => "FROM_COMMON_PART"
+        case Attribute.MACRO_EXPAND_DECL => "MACRO_EXPAND_DECL"
+    }
+}
+
+public func WireToAttribute(value: String): Option<Attribute> {
+    return match (value) {
+        case "IMPORTED" => Some(Attribute.IMPORTED)
+        case "TOOL_ADD" => Some(Attribute.TOOL_ADD)
+        case "IMPLICIT_ADD" => Some(Attribute.IMPLICIT_ADD)
+        case "COMPILER_ADD" => Some(Attribute.COMPILER_ADD)
+        case "PUBLIC" => Some(Attribute.PUBLIC)
+        case "PRIVATE" => Some(Attribute.PRIVATE)
+        case "PROTECTED" => Some(Attribute.PROTECTED)
+        case "INTERNAL" => Some(Attribute.INTERNAL)
+        case "IMPLICIT_USED" => Some(Attribute.IMPLICIT_USED)
+        case "FOR_TEST" => Some(Attribute.FOR_TEST)
+        case "FROM_COMMON_PART" => Some(Attribute.FROM_COMMON_PART)
+        case "MACRO_EXPAND_DECL" => Some(Attribute.MACRO_EXPAND_DECL)
+        case _ => None
+    }
+}
+
 extend Attribute <: Equatable<Attribute> {
     public operator func ==(right: Attribute): Bool {
         return AttributeIndex(this) == AttributeIndex(right)
@@ -245,10 +280,25 @@ public open class Node {
         return TestAttr(first) || TestAttr(second)
     }
 
+    public func GetAttrs(): ArrayList<Attribute> {
+        let out = ArrayList<Attribute>()
+        for (attr in attrs) {
+            out.add(attr)
+        }
+        return out
+    }
+
     public func CopyAttrsFrom(other: Node): Unit {
         attrs.clear()
         for (attr in other.attrs) {
-            attrs.add(attr)
+            EnableAttr(attr)
+        }
+    }
+
+    public func ReplaceAttrs(values: ArrayList<Attribute>): Unit {
+        attrs.clear()
+        for (attr in values) {
+            EnableAttr(attr)
         }
     }
 }
@@ -697,6 +747,24 @@ public func GetAccessLevelStr(node: Node): String {
 
 public func GetAccessLevelStr(pkg: Package): String {
     return GetAccessLevelStr(pkg.accessible)
+}
+
+public func ApplyAccessAttr(node: Node, level: AccessLevel): Unit {
+    node.DisableAttr(Attribute.PUBLIC)
+    node.DisableAttr(Attribute.PRIVATE)
+    node.DisableAttr(Attribute.PROTECTED)
+    node.DisableAttr(Attribute.INTERNAL)
+    match (level) {
+        case AccessLevel.PUBLIC => node.EnableAttr(Attribute.PUBLIC)
+        case AccessLevel.PRIVATE => node.EnableAttr(Attribute.PRIVATE)
+        case AccessLevel.PROTECTED => node.EnableAttr(Attribute.PROTECTED)
+        case AccessLevel.INTERNAL => node.EnableAttr(Attribute.INTERNAL)
+    }
+}
+
+public func HasAccessAttr(node: Node): Bool {
+    return node.TestAttr(Attribute.PUBLIC) || node.TestAttr(Attribute.PRIVATE) ||
+        node.TestAttr(Attribute.PROTECTED) || node.TestAttr(Attribute.INTERNAL)
 }
 
 public func IsCompatibleAccessLevel(srcLevel: AccessLevel, refLevel: AccessLevel): Bool {

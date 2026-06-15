@@ -19,6 +19,7 @@ public class CjoManager {
     }
 
     public func AddSourcePackage(pkg: Package): Unit {
+        NormalizePackageFiles(pkg)
         let info = CjoPackageInfo(pkg)
         impl.AddPackageInfo(pkg.fullPackageName, info)
     }
@@ -26,6 +27,7 @@ public class CjoManager {
     public func AddImportedPackageFromASTNode(pkg: Package): Unit {
         pkg.EnableAttr(Attribute.TOOL_ADD)
         pkg.EnableAttr(Attribute.IMPORTED)
+        NormalizePackageFiles(pkg)
         let info = CjoPackageInfo(pkg)
         impl.AddPackageInfo(pkg.fullPackageName, info)
     }
@@ -45,6 +47,7 @@ public class CjoManager {
         }
         let pkg = pkgOpt.getOrThrow()
         pkg.EnableAttr(Attribute.IMPORTED)
+        NormalizePackageFiles(pkg)
         let info = CjoPackageInfo(pkg, loader, cjoPath)
         impl.AddPackageInfo(fullPackageName, info)
         return true
@@ -437,6 +440,26 @@ public class CjoManager {
             return
         }
         PutDeclMapValue(declMap, decl.identifier, decl)
+    }
+
+    private func NormalizePackageFiles(pkg: Package): Unit {
+        var idx: Int64 = 0
+        while (idx < pkg.files.size) {
+            let file = pkg.files[idx]
+            file.packageRef = Some(pkg)
+            file.indexOfPackage = UInt64(idx)
+            for (importSpec in file.imports) {
+                importSpec.curFile = Some(file)
+                importSpec.content.curFile = Some(file)
+            }
+            for (decl in file.decls) {
+                decl.curFile = Some(file)
+                if (decl.fullPackageName.isEmpty()) {
+                    decl.fullPackageName = pkg.fullPackageName
+                }
+            }
+            idx++
+        }
     }
 }
 

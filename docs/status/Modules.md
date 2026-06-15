@@ -20,7 +20,7 @@ This pass keeps the package self-contained because `packages/modules/cjpm.toml` 
 - Implemented `DependencyGraph` direct/transitive dependency collection with macro re-export handling and cache invalidation.
 - Implemented `PackageManager` Tarjan SCC ordering and source package reordering behavior.
 - Added a compiling local AST writer/loader wire format so exported package/import/member data can round-trip inside this package while the real flatbuffer/AST dependencies are unavailable.
-- Continued the local serialization layer with type interning, cached declaration diffing, import reference loading, expression table serialization/deserialization, reference resolution maps, and incremental removed-mangle parsing.
+- Continued the local serialization layer with type interning, cached declaration diffing, import reference loading, expression table serialization/deserialization, reference resolution maps, incremental removed-mangle parsing, node source-range/attribute preservation, and package file ownership normalization.
 
 ## Important Blockers
 
