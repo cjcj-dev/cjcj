@@ -1,6 +1,9 @@
 package cangjie_compiler::macro_pkg
 
 import std.collection.*
+import std.fs.File as FSFile
+import std.fs.exists
+import std.fs.remove
 
 private func putPosition64(map: ArrayList<(UInt64, Position)>, key: UInt64, pos: Position): Unit {
     var idx: Int64 = 0
@@ -31,6 +34,51 @@ private func isSpecialToken(prevTokenKind: TokenKind, curTokenKind: TokenKind): 
 
 private func getTokenLengthForMap(token: Token): Int64 {
     return GetTokenLength(token.Value().size, token.kind, token.delimiterNum)
+}
+
+private func reportMappingFailedDiag(
+    oldTokens: ArrayList<Token>, newTokens: ArrayList<Token>, mcPos: Position, ci: CompilerInstance): Unit {
+    let minSize = if (oldTokens.size < newTokens.size) { oldTokens.size } else { newTokens.size }
+    var idx: Int64 = 0
+    while (idx < minSize) {
+        if (oldTokens[idx].kind == TokenKind.NL && newTokens[idx].kind == TokenKind.NL) {
+            idx++
+            continue
+        }
+        if (oldTokens[idx].kind != newTokens[idx].kind || oldTokens[idx].Value() != newTokens[idx].Value()) {
+            if (oldTokens[idx].Value().isEmpty()) {
+                ci.diag.Diagnose(mcPos, "macro call map info failed for empty token kind " +
+                    TokenKindIndex(oldTokens[idx].kind).toString())
+            } else {
+                ci.diag.Diagnose(mcPos, "macro call map info failed: expected '" + oldTokens[idx].Value() +
+                    "', got '" + newTokens[idx].Value() + "'")
+            }
+            return
+        }
+        idx++
+    }
+}
+
+private func syncMacroCallDiagInfo(node: Node, invocation: MacroInvocation): Unit {
+    invocation.macroCallDiagInfo.macroCallBegin = node.begin
+    invocation.macroCallDiagInfo.macroCallEnd = node.end
+}
+
+private func isPureCustomAnnotation(invocation: MacroInvocation, ci: CompilerInstance): Bool {
+    if (!invocation.macroCallDiagInfo.isCustom || invocation.newTokens.isEmpty()) {
+        return false
+    }
+    if (invocation.macroCallDiagInfo.isCurFile) {
+        return true
+    }
+    let sm = ci.GetSourceManager()
+    for (token in invocation.newTokens) {
+        if (!IsCurFile(sm, token)) {
+            return false
+        }
+    }
+    invocation.macroCallDiagInfo.isCurFile = true
+    return true
 }
 
 public func RefreshNewTokensPos(node: Node, sm: SourceManager, ci: CompilerInstance): Unit {
@@ -92,6 +140,10 @@ public func RefreshTokensPosMap(node: Node, sm: SourceManager, ci: CompilerInsta
         if (!tokens.isEmpty()) {
             invocation.macroCallDiagInfo.mcEnd = tokens[tokens.size - 1].End()
         }
+        if (tokens.size != invocation.newTokens.size) {
+            reportMappingFailedDiag(invocation.newTokens, tokens, node.begin, ci)
+            return
+        }
         if (!ci.invocation.globalOptions.enableMacroDebug) {
             RefreshNewTokensPos(node, sm, ci)
         }
@@ -105,30 +157,90 @@ public func RefreshTokensPosMap(node: Node, sm: SourceManager, ci: CompilerInsta
             idx++
         }
         invocation.macroCallDiagInfo.isForLSP = ci.invocation.globalOptions.enableMacroInLSP
-        invocation.macroCallDiagInfo.macroCallBegin = node.begin
-        invocation.macroCallDiagInfo.macroCallEnd = node.end
+        syncMacroCallDiagInfo(node, invocation)
     }
 }
 
-private func macroCallSucceeded(call: MacroCall): Bool {
+private func macroCallHasExpandedTokens(call: MacroCall): Bool {
     let invocation = call.RequireInvocation()
-    return !MacroExpandFailed(invocation.newTokens) && call.status != MacroEvalStatus.FAIL &&
-        !invocation.macroCallDiagInfo.isCustom
+    return !MacroExpandFailed(invocation.newTokens) && call.status != MacroEvalStatus.FAIL
+}
+
+private func macroCallSucceededForPackage(call: MacroCall, ci: CompilerInstance): Bool {
+    if (!macroCallHasExpandedTokens(call)) {
+        return false
+    }
+    return !isPureCustomAnnotation(call.RequireInvocation(), ci)
+}
+
+private func sourceEndPosition(sm: SourceManager, fileID: UInt64): Position {
+    if (let Some(source) <- sm.GetSource(fileID)) {
+        return source.GetEndPos()
+    }
+    return Position(fileID, 1, 1)
+}
+
+private func appendOriginalSource(sm: SourceManager, path: String, begin: Position, end: Position): Unit {
+    let content = sm.GetContentBetween(begin, end)
+    if (!content.isEmpty()) {
+        let _ = sm.AppendSource(path, content)
+    }
+}
+
+private func appendMacroAnnotations(sm: SourceManager, path: String, node: Node): Unit {
+    if (let Some(decl) <- (node as MacroExpandDecl)) {
+        for (anno in decl.annotations) {
+            appendOriginalSource(sm, path, anno.begin, anno.end)
+        }
+    }
+}
+
+private func writeStringToFile(path: String, content: String): Bool {
+    try {
+        FSFile.writeTo(path, content.toArray())
+        return true
+    } catch (e: Exception) {
+        return false
+    }
+}
+
+private func removeMacroCallFile(path: String): Unit {
+    try {
+        if (exists(path)) {
+            remove(path)
+        }
+    } catch (e: Exception) {
+        let _ = e
+    }
 }
 
 private func generateMacroCallFile(file: File, nodes: ArrayList<Node>, ci: CompilerInstance): Unit {
     let sm = ci.GetSourceManager()
     let path = file.macroCallFilePath
-    var content = ""
+    let fileID = sm.AddSource(path, "")
+    var curFilePosBase = file.begin
     for (node in nodes) {
         if (let Some(invocation) <- node.GetInvocation()) {
-            file.macroCallPosBase = Position(0, 1, content.size + 1)
-            content += invocation.newTokensStr
+            appendOriginalSource(sm, path, curFilePosBase, node.begin)
+            curFilePosBase = node.end
+            file.macroCallPosBase = sourceEndPosition(sm, fileID)
+            appendMacroAnnotations(sm, path, node)
+            let _ = sm.AppendSource(path, invocation.newTokensStr)
             RefreshTokensPosMap(node, sm, ci)
+            invocation.macroCallDiagInfo.isForLSP = ci.invocation.globalOptions.enableMacroInLSP
+            syncMacroCallDiagInfo(node, invocation)
         }
     }
-    let fileID = sm.AppendSource(path, content)
-    file.macroCallPosBase = Position(fileID, 1, 1)
+    appendOriginalSource(sm, path, curFilePosBase, file.end)
+    if (ci.invocation.globalOptions.enableMacroInLSP || ci.invocation.globalOptions.enableMacroDebug) {
+        if (let Some(source) <- sm.GetSource(fileID)) {
+            if (!writeStringToFile(path, source.buffer)) {
+                ci.diag.Diagnose(file.begin, "failed to save macro call file '" + path + "'")
+            }
+        }
+    } else {
+        removeMacroCallFile(path)
+    }
 }
 
 extend MacroExpansion {
@@ -142,10 +254,9 @@ extend MacroExpansion {
 }
 
 public func ProcessPackageMacros(expansion: MacroExpansion, pkg: Package): Unit {
-        let files = ArrayList<File>()
         let grouped = ArrayList<(File, ArrayList<Node>)>()
         for (call in expansion.macroCollector.macCalls) {
-            if (!macroCallSucceeded(call)) {
+            if (!macroCallSucceededForPackage(call, expansion.ci)) {
                 continue
             }
             if (let Some(node) <- call.GetNode()) {
@@ -162,13 +273,23 @@ public func ProcessPackageMacros(expansion: MacroExpansion, pkg: Package): Unit 
                         let nodes = ArrayList<Node>()
                         nodes.add(node)
                         grouped.add((file, nodes))
-                        files.add(file)
                     }
                 }
             }
         }
         for (file in pkg.files) {
             file.macroCallFilePath = file.filePath + ".macrocall"
+            var hasMacroCall = false
+            for ((groupFile, _) in grouped) {
+                if (groupFile.filePath == file.filePath) {
+                    hasMacroCall = true
+                    break
+                }
+            }
+            if (!hasMacroCall && (expansion.ci.invocation.globalOptions.enableMacroInLSP ||
+                expansion.ci.invocation.globalOptions.enableMacroDebug)) {
+                removeMacroCallFile(file.macroCallFilePath)
+            }
         }
         for ((file, nodes) in grouped) {
             generateMacroCallFile(file, nodes, expansion.ci)
@@ -177,7 +298,7 @@ public func ProcessPackageMacros(expansion: MacroExpansion, pkg: Package): Unit 
 
 public func ProcessMacroCallList(expansion: MacroExpansion, macCalls: ArrayList<MacroCall>): Unit {
     for (call in macCalls) {
-        if (!macroCallSucceeded(call)) {
+        if (!macroCallHasExpandedTokens(call)) {
             continue
         }
         if (let Some(node) <- call.GetNode()) {

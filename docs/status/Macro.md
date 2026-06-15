@@ -16,6 +16,7 @@ Current constraints:
 - Message and AST serialization use deterministic compiling codecs because generated flatbuffer schema packages are not available to this isolated package.
 - Generated-token parsing uses a local bridge until the real Parse entry point can be imported without changing package manifests.
 - Token/native decoding and the deterministic node codec now preserve quoted/raw token widths, primitive/ref types, variable initializers, function parameters and returns, call arguments, if bodies, and block statement payloads for the local AST surface.
+- Macro processing now preserves original source slices around expanded macro calls in `.macrocall` buffers, reports token mapping mismatches, handles pure custom annotations like the C++ path, persists/removes debug/LSP macrocall files through `std.fs`, and re-tokenizes generated identifier tokens that spell keywords/operators.
 
 Verification:
 

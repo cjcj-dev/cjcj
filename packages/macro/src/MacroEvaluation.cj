@@ -879,6 +879,15 @@ public func ProcessCombinedToken(newTokens: ArrayList<Token>, token: Token, diag
     } else if (token.kind == TokenKind.GE) {
         newTokens.add(Token(TokenKind.GT, ">", token.Begin(), token.Begin() + 1))
         newTokens.add(Token(TokenKind.ASSIGN, "=", token.Begin() + 1, token.Begin() + 2))
+    } else if (token.kind == TokenKind.IDENTIFIER) {
+        let parsed = GetTokensFromString(token.Value(), diag, pos: token.Begin())
+        if (parsed.isEmpty()) {
+            newTokens.add(token)
+        } else {
+            for (parsedToken in parsed) {
+                newTokens.add(parsedToken)
+            }
+        }
     } else {
         newTokens.add(token)
     }
