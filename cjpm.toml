@@ -1,0 +1,67 @@
+[dependencies]
+
+[workspace]
+  members = [
+    "packages/basic",
+    "packages/utils",
+    "packages/option",
+    "packages/lex",
+    "packages/ast",
+    "packages/parse",
+    "packages/conditional_compilation",
+    "packages/modules",
+    "packages/macro",
+    "packages/meta_transformation",
+    "packages/mangle",
+    "packages/sema",
+    "packages/chir",
+    "packages/codegen",
+    "packages/incremental_compilation",
+    "packages/frontend",
+    "packages/frontend_tool",
+    "packages/driver"
+  ]
+  build-members = [
+    "packages/basic",
+    "packages/utils",
+    "packages/option",
+    "packages/lex",
+    "packages/ast",
+    "packages/parse",
+    "packages/conditional_compilation",
+    "packages/modules",
+    "packages/macro",
+    "packages/meta_transformation",
+    "packages/mangle",
+    "packages/sema",
+    "packages/chir",
+    "packages/codegen",
+    "packages/incremental_compilation",
+    "packages/frontend",
+    "packages/frontend_tool",
+    "packages/driver"
+  ]
+  test-members = [
+    "packages/basic",
+    "packages/utils",
+    "packages/option",
+    "packages/lex",
+    "packages/ast",
+    "packages/parse",
+    "packages/conditional_compilation",
+    "packages/modules",
+    "packages/macro",
+    "packages/meta_transformation",
+    "packages/mangle",
+    "packages/sema",
+    "packages/chir",
+    "packages/codegen",
+    "packages/incremental_compilation",
+    "packages/frontend",
+    "packages/frontend_tool",
+    "packages/driver"
+  ]
+  compile-option = ""
+  override-compile-option = ""
+  link-option = ""
+  target-dir = ""
