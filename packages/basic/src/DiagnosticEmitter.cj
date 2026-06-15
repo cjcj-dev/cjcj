@@ -23,6 +23,7 @@ private let SOURCE_GUTTER: String = "|"
 private let WITHOUT_SOURCE_SYMBOL: String = "#"
 private let MAIN_HINT_MARKER: String = "^"
 private let OTHER_HINT_MARKER: String = "~"
+private let COMPRESS_LEN: Int64 = 2
 
 private func colorForEmitter(noColor: Bool, color: DiagColor, text: String): String {
     if (noColor) {
@@ -65,6 +66,7 @@ public class DiagnosticEmitter {
     private let noColor: Bool
     private let checkRange: Bool
     private let sourceManager: SourceManager
+    private var macroNoteSwapped: Bool = false
 
     public init(diagnostic: Diagnostic, noColor: Bool, checkRange: Bool, sourceManager: SourceManager) {
         this.diagnostic = diagnostic
@@ -79,6 +81,7 @@ public class DiagnosticEmitter {
     }
 
     public func Render(showSourceOnly!: Bool = false): String {
+        swapErrorMessageWithNote()
         let builder = StringBuilder()
         if (!showSourceOnly) {
             renderHeader(builder)
@@ -225,6 +228,10 @@ public class DiagnosticEmitter {
     ): Unit {
         var lineNo = range.begin.line
         while (lineNo <= range.end.line) {
+            if (shouldCompressMultiLineRange(range, lineNo)) {
+                renderCompressedLine(builder, width)
+                lineNo = range.end.line
+            }
             let line = sourceLine(Position(range.begin.fileID, lineNo, 1))
             let startColumn = if (lineNo == range.begin.line) { range.begin.column } else { 1 }
             let endColumn = if (lineNo == range.end.line) { range.end.column } else { line.size + 1 }
@@ -233,6 +240,14 @@ public class DiagnosticEmitter {
                 color, width)
             lineNo++
         }
+    }
+
+    private func shouldCompressMultiLineRange(range: Range, lineNo: Int64): Bool {
+        return lineNo == range.begin.line + COMPRESS_LEN && range.end.line - range.begin.line > COMPRESS_LEN
+    }
+
+    private func renderCompressedLine(builder: StringBuilder, width: Int64): Unit {
+        builder.append(emptyLinePrefix(width) + "...\n")
     }
 
     private func renderSingleSourceLine(
@@ -323,6 +338,58 @@ public class DiagnosticEmitter {
             }
         }
         return false
+    }
+
+    private func swapErrorMessageWithNote(): Unit {
+        if (macroNoteSwapped || diagnostic.subDiags.isEmpty()) {
+            return
+        }
+        if (let Some(info) <- diagnostic.macroDiagInfo) {
+            let mainHint = diagnostic.mainHint
+            if (info.isCurFile || mainHint.range.begin.isCurFile ||
+                (diagnostic.start != INVALID_POSITION && diagnostic.start.isCurFile) ||
+                !sourceManager.IsInMacroCallSourceFile(mainHint.range.begin) ||
+                (diagnostic.start != INVALID_POSITION && !sourceManager.IsInMacroCallSourceFile(diagnostic.start))) {
+                return
+            }
+            let subDiag = diagnostic.subDiags[0]
+            if (diagnostic.isRefactor) {
+                swapRefactorMacroNote(subDiag, mainHint)
+            } else {
+                swapLegacyMacroNote(subDiag)
+            }
+            macroNoteSwapped = true
+        }
+    }
+
+    private func swapRefactorMacroNote(subDiag: SubDiagnostic, mainHint: IntegratedString): Unit {
+        let newSubDiag = SubDiagnostic(diagnostic.errorMessage)
+        newSubDiag.AddMainHint(mainHint.range, mainHint.str)
+        for (hint in diagnostic.otherHints) {
+            newSubDiag.otherHints.add(hint)
+        }
+        diagnostic.subDiags[0] = newSubDiag
+        diagnostic.errorMessage = subDiag.subDiagMessage
+        diagnostic.mainHint = IntegratedString(subDiag.mainHint.range, "", mainHint.color)
+        diagnostic.otherHints.clear()
+        for (hint in subDiag.otherHints) {
+            diagnostic.otherHints.add(hint)
+        }
+    }
+
+    private func swapLegacyMacroNote(subDiag: SubDiagnostic): Unit {
+        let newSubDiag = SubDiagnostic(diagnostic.diagMessage)
+        newSubDiag.AddMainHint(MakeRange(diagnostic.start, diagnostic.end), "")
+        diagnostic.subDiags.add(newSubDiag, at: 0)
+        diagnostic.diagMessage = subDiag.subDiagMessage
+        diagnostic.errorMessage = subDiag.subDiagMessage
+        diagnostic.start = subDiag.mainHint.range.begin
+        diagnostic.end = subDiag.mainHint.range.end
+        diagnostic.mainHint = IntegratedString(subDiag.mainHint.range, "", diagnostic.mainHint.color)
+        diagnostic.otherHints.clear()
+        for (hint in subDiag.otherHints) {
+            diagnostic.otherHints.add(hint)
+        }
     }
 
     private func lineNumberWidth(): Int64 {
