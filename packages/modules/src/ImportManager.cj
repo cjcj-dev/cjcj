@@ -84,6 +84,8 @@ public class ImportManager {
     private let directMacroDeps: HashMap<String, Package> = HashMap<String, Package>()
     private let declsImportedByNodeMap: HashMap<String, HashMap<String, ArrayList<ImportSpec>>> =
         HashMap<String, HashMap<String, ArrayList<ImportSpec>>>()
+    private let fileUsedMacroDeclsMap: HashMap<UInt64, HashMap<String, ArrayList<Decl>>> =
+        HashMap<UInt64, HashMap<String, ArrayList<Decl>>>()
     private let declToTypeAlias: HashMap<String, HashSet<String>> = HashMap<String, HashSet<String>>()
     private var importSrcCode: Bool = true
     private var cjoManager: CjoManager
@@ -241,6 +243,67 @@ public class ImportManager {
         return ret
     }
 
+    public func GetImportsOfDecl(fullPackageName: String): HashMap<String, ArrayList<ImportSpec>> {
+        let out = HashMap<String, ArrayList<ImportSpec>>()
+        if (let Some(declImportMap) <- declsImportedByNodeMap.get(fullPackageName)) {
+            for (declKey in declImportMap.keys()) {
+                if (let Some(imports) <- declImportMap.get(declKey)) {
+                    out[declKey] = CloneImportSpecArray(imports)
+                }
+            }
+        }
+        return out
+    }
+
+    public func AddUsedMacroDecls(file: File, decl: Decl): Unit {
+        if (!fileUsedMacroDeclsMap.contains(file.indexOfPackage)) {
+            fileUsedMacroDeclsMap[file.indexOfPackage] = HashMap<String, ArrayList<Decl>>()
+        }
+        if (let Some(usedDeclMap) <- fileUsedMacroDeclsMap.get(file.indexOfPackage)) {
+            PutDeclMapValue(usedDeclMap, decl.fullPackageName, decl)
+        }
+    }
+
+    public func GetUsedMacroDecls(file: File): HashMap<String, ArrayList<Decl>> {
+        let out = HashMap<String, ArrayList<Decl>>()
+        if (let Some(usedDeclMap) <- fileUsedMacroDeclsMap.get(file.indexOfPackage)) {
+            for (pkgName in usedDeclMap.keys()) {
+                if (let Some(decls) <- usedDeclMap.get(pkgName)) {
+                    out[pkgName] = CloneDeclArray(decls)
+                }
+            }
+        }
+        return out
+    }
+
+    public func IsDeclAccessible(file: File, decl: Decl): Bool {
+        var accessible = false
+        var relation = PackageRelation.NONE
+        if (let Some(filePackage) <- file.packageRef) {
+            accessible = decl.fullPackageName == filePackage.fullPackageName
+            relation = GetPackageRelation(filePackage.fullPackageName, decl.fullPackageName)
+        }
+        if (ContainsDecl(GetImportedDeclsByName(file, decl.identifier), decl)) {
+            return true
+        }
+        let packageNames = SplitQualifiedName(decl.fullPackageName)
+        var idx = packageNames.size - 1
+        while (idx >= 0) {
+            if (!GetImportedDeclsByName(file, packageNames[idx]).isEmpty() && IsVisible(decl, relation)) {
+                accessible = true
+            }
+            idx--
+        }
+        if (let Some(aliases) <- declToTypeAlias.get(DeclAliasKey(decl))) {
+            for (aliasName in aliases) {
+                if (!GetImportedDeclsByName(file, aliasName).isEmpty()) {
+                    accessible = true
+                }
+            }
+        }
+        return accessible
+    }
+
     public func GetImportedPackageDecl(node: Node, packageName: String): (Option<PackageDecl>, Bool) {
         if (let Some(file) <- node.curFile) {
             let decls = GetImportedDeclsByName(file, packageName)
@@ -327,6 +390,11 @@ public class ImportManager {
         }
         for (pkg in packages) {
             ResolveImports(pkg)
+        }
+        for (pd in GetAllImportedPackages()) {
+            if (pd.srcPackage.hasSourceImportedDecl && !ContainsPackage(packages, pd.srcPackage)) {
+                packages.add(pd.srcPackage)
+            }
         }
         curPackage = Some(packages[0])
         cjoManager.SetHasBuildIndex(true)
@@ -1074,7 +1142,7 @@ public class ImportManager {
     }
 
     private func RecordTypeAlias(decl: Decl, alias: String): Unit {
-        let key = decl.fullPackageName + "." + decl.identifier
+        let key = DeclAliasKey(decl)
         if (!declToTypeAlias.contains(key)) {
             declToTypeAlias[key] = HashSet<String>()
         }
@@ -1096,6 +1164,7 @@ public class ImportManager {
         importedDeclsMap.clear()
         fileImportedDeclsMap.clear()
         declsImportedByNodeMap.clear()
+        fileUsedMacroDeclsMap.clear()
         declToTypeAlias.clear()
         directMacroDeps.clear()
     }
@@ -1174,6 +1243,36 @@ public class ImportManager {
         }
         if (left.begin == right.begin && right.end < left.end) {
             return true
+        }
+        return false
+    }
+
+    private func CloneImportSpecArray(values: ArrayList<ImportSpec>): ArrayList<ImportSpec> {
+        let out = ArrayList<ImportSpec>()
+        for (value in values) {
+            out.add(value)
+        }
+        return out
+    }
+
+    private func ContainsDecl(values: ArrayList<Decl>, decl: Decl): Bool {
+        for (value in values) {
+            if (SameDecl(value, decl)) {
+                return true
+            }
+        }
+        return false
+    }
+
+    private func DeclAliasKey(decl: Decl): String {
+        return decl.fullPackageName + "." + decl.identifier
+    }
+
+    private func ContainsPackage(values: ArrayList<Package>, pkg: Package): Bool {
+        for (value in values) {
+            if (value.fullPackageName == pkg.fullPackageName) {
+                return true
+            }
         }
         return false
     }
