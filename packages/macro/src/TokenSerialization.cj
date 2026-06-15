@@ -225,13 +225,19 @@ public class TokenSerialization {
             let line = readNativeInt32(ptr, cursor)
             let column = readNativeInt32(ptr, cursor)
             let isSingleQuote = readNativeUInt16(ptr, cursor) == 1u16
-            var delimiterNum: UInt32 = 0u32
+            var delimiterNum: UInt32 = 1u32
             if (kind == TokenKind.MULTILINE_RAW_STRING) {
                 delimiterNum = UInt32(readNativeUInt16(ptr, cursor))
             }
             let begin = Position(fileID, line, column)
-            let token = Token(kind, value, begin, begin + value.size, isSingleQuote)
+            let end = if (begin == INVALID_POSITION) {
+                INVALID_POSITION
+            } else {
+                begin + GetTokenLength(value.size, kind, delimiterNum)
+            }
+            let token = Token(kind, value, begin, end)
             token.delimiterNum = delimiterNum
+            token.isSingleQuote = isSingleQuote
             out.add(token)
             idx++
         }

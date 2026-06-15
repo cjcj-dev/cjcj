@@ -15,6 +15,7 @@ Current constraints:
 - Test-entry construction now participates in the package expansion flow, handles `$test` main-package pairing, models primitive/ref/variable declaration nodes locally, checks `@Test`/`@TestCase` Unit-return and constructor constraints, and collects macro calls in variable initializers.
 - Message and AST serialization use deterministic compiling codecs because generated flatbuffer schema packages are not available to this isolated package.
 - Generated-token parsing uses a local bridge until the real Parse entry point can be imported without changing package manifests.
+- Token/native decoding and the deterministic node codec now preserve quoted/raw token widths, primitive/ref types, variable initializers, function parameters and returns, call arguments, if bodies, and block statement payloads for the local AST surface.
 
 Verification:
 
