@@ -102,3 +102,13 @@ public func BackendToString(backend: BackendType): String {
 public func IsUnsafeBackend(backendType: BackendType): Bool {
     return backendType == BackendType.CJNATIVE
 }
+
+public func GetSharedLibraryExtension(osType: OSType): String {
+    return match (osType) {
+        case OSType.WINDOWS => ".dll"
+        case OSType.DARWIN => ".dylib"
+        case OSType.IOS => ".dylib"
+        case OSType.LINUX => ".so"
+        case OSType.UNKNOWN => ".so"
+    }
+}

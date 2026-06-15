@@ -76,6 +76,10 @@ public func GetFileExtension(path: String): String {
     return normalized[dot + 1..]
 }
 
+public func HasCJDExtension(path: String): Bool {
+    return path.size >= 5 && path[path.size - 5..] == ".cj.d"
+}
+
 public func GetFileName(path: String): String {
     let normalized = NormalizePath(path)
     let slash = normalized.lastIndexOf("/") ?? -1

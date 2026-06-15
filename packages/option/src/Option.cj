@@ -44,6 +44,73 @@ public class SanitizerCoverageOptions {
     public func IsSancovEnabled(): Bool {
         return traceCmp || traceMemCmp || tracePCGuard || inline8bitCounters || inlineBoolFlag || pcTable || stackDepth
     }
+    public func ToSerializedString(): String {
+        var result = "coverageType:"
+        if (coverageType == SanitizerCoverageType.SCK_UNKNOW) { result += "K" }
+        else if (coverageType == SanitizerCoverageType.SCK_NONE) { result += "N" }
+        else if (coverageType == SanitizerCoverageType.SCK_FUNCTION) { result += "F" }
+        else if (coverageType == SanitizerCoverageType.SCK_BB) { result += "BB" }
+        result += ",traceCmp:" + BoolToSerializedString(traceCmp)
+        result += ",traceMemCmp:" + BoolToSerializedString(traceMemCmp)
+        result += ",tracePCGuard:" + BoolToSerializedString(tracePCGuard)
+        result += ",inline8bitCounters:" + BoolToSerializedString(inline8bitCounters)
+        result += ",inlineBoolFlag:" + BoolToSerializedString(inlineBoolFlag)
+        result += ",pcTable:" + BoolToSerializedString(pcTable)
+        result += ",stackDepth:" + BoolToSerializedString(stackDepth)
+        return result
+    }
+}
+
+public class OrderedInput {
+    public let value: String
+    public let index: UInt64
+    public init(value: String, index: UInt64) {
+        this.value = value
+        this.index = index
+    }
+}
+
+private func initPrintBCHIR(): ArrayList<Bool> {
+    let ret = ArrayList<Bool>()
+    var idx: Int64 = 0
+    while (idx < 7) {
+        ret.add(false)
+        idx++
+    }
+    return ret
+}
+
+private func containsOptimizationFlag(values: ArrayList<OptimizationFlag>, flag: OptimizationFlag): Bool {
+    for (value in values) {
+        if (value == flag) { return true }
+    }
+    return false
+}
+
+private func addOptimizationFlag(values: ArrayList<OptimizationFlag>, flag: OptimizationFlag): Unit {
+    if (!containsOptimizationFlag(values, flag)) { values.add(flag) }
+}
+
+private func removeOptimizationFlag(values: ArrayList<OptimizationFlag>, flag: OptimizationFlag): Unit {
+    var idx: Int64 = 0
+    while (idx < values.size) {
+        if (values[idx] == flag) {
+            values.remove(at: idx)
+            return
+        }
+        idx++
+    }
+}
+
+private func joinStrings(values: ArrayList<String>, delimiter: String): String {
+    var result = ""
+    var idx: Int64 = 0
+    while (idx < values.size) {
+        if (idx > 0) { result += delimiter }
+        result += values[idx]
+        idx++
+    }
+    return result
 }
 
 public class GlobalOptions <: Option {
@@ -53,25 +120,66 @@ public class GlobalOptions <: Option {
     public var target: TripleInfo = TripleInfo()
     public let passedWhenKeyValue: HashMap<String, String> = HashMap<String, String>()
     public let passedWhenCfgPaths: ArrayList<String> = ArrayList<String>()
+    public var cangjieHome: String = ""
     public var output: String = "./"
     public var outputDir: MaybeString = MaybeString()
+    public var outputJavaGenDir: MaybeString = MaybeString()
+    public var outputObjCGenDir: String = ""
     public let importPaths: ArrayList<String> = ArrayList<String>()
+    public let pluginPaths: ArrayList<String> = ArrayList<String>()
+    public let commonPartCjos: ArrayList<String> = ArrayList<String>()
+    public let commonPartChirs: ArrayList<String> = ArrayList<String>()
+    public var enIncrementalCompilation: Bool = false
+    public var printIncrementalInfo: Bool = false
+    public var compilationCachedPath: String = ""
+    public var compilationCachedDir: String = ""
+    public var compilationCachedFileName: String = ""
+    public var executablePath: String = ""
+    public var moduleSrcPath: String = ""
     public let packagePaths: ArrayList<String> = ArrayList<String>()
     public let srcFiles: ArrayList<String> = ArrayList<String>()
     public let inputObjs: ArrayList<String> = ArrayList<String>()
     public var inputCjoFile: String = ""
+    public let inputPdbaFiles: ArrayList<String> = ArrayList<String>()
     public let bcInputFiles: ArrayList<String> = ArrayList<String>()
+    public let bcPackageNames: ArrayList<String> = ArrayList<String>()
+    public let inputFileOrder: ArrayList<OrderedInput> = ArrayList<OrderedInput>()
+    public let inputLibraryOrder: ArrayList<OrderedInput> = ArrayList<OrderedInput>()
+    public let inputLinkOptionsOrder: ArrayList<OrderedInput> = ArrayList<OrderedInput>()
+    public let inputLinkOptionOrder: ArrayList<OrderedInput> = ArrayList<OrderedInput>()
+    public let removedPathPrefix: ArrayList<String> = ArrayList<String>()
     public var moduleName: String = ""
     public var compilePackage: Bool = false
     public var compileMacroPackage: Bool = false
     public var enableOutputType: Bool = false
+    public var saveTemps: Bool = false
+    public var tempFolderPath: String = "."
     public var backend: BackendType = BackendType.CJNATIVE
+    public let macroLib: ArrayList<String> = ArrayList<String>()
     public var enableVerbose: Bool = false
     public var showUsage: Bool = false
     public var printVersionOnly: Bool = false
     public var experimentalMode: Bool = false
+    public var scanDepPkg: Bool = false
+    public var noSubPkg: Bool = false
+    public var displayLineInfo: Bool = true
     public var enableCompileDebug: Bool = false
+    public var enableAddCommentToAst: Bool = false
+    public var enableMacroInLSP: Bool = false
+    public var enableMacroDebug: Bool = false
+    public var enableParallelMacro: Bool = false
+    public var enableCompileTest: Bool = false
+    public var compileTestsOnly: Bool = false
+    public var exportForTest: Bool = false
+    public var enableEH: Bool = false
+    public var mock: MockMode = MockMode.DEFAULT
+    public var diagFormat: DiagFormat = DiagFormat.DEFAULT
+    public var parseTest: Bool = false
     public var implicitPrelude: Bool = true
+    public var enableInteropCJMapping: Bool = false
+    public var targetInteropLanguage: InteropLanguage = InteropLanguage.NA
+    public var enableTimer: Bool = false
+    public var enableMemoryCollect: Bool = false
     public var linkStaticStd: MaybeBool = MaybeBool()
     public var ltoMod: LTOMode = LTOMode.NO_LTO
     public var enableCompileAsExe: Bool = false
@@ -80,29 +188,90 @@ public class GlobalOptions <: Option {
     public var outputMode: OutputMode = OutputMode.EXECUTABLE
     public var compileTarget: CompileTarget = CompileTarget.DEFAULT
     public var optimizationLevel: OptimizationLevel = OptimizationLevel.O0
+    public var optPassOptions: String = ""
+    public var enableFuncSections: Bool = false
+    public var enableDataSections: Bool = false
+    public var enableGcSections: Bool = false
+    public var enableHotReload: Bool = false
+    public var disableReflection: Bool = false
+    public var enablePgoInstrGen: Bool = false
+    public var enablePgoInstrUse: Bool = false
+    public var pgoProfileFile: String = ""
+    public var discardEhFrame: Bool = false
     public var disableChirOpt: Bool = false
     public var disableBackendOpt: Bool = false
+    public let selectedCHIROpts: ArrayList<OptimizationFlag> = ArrayList<OptimizationFlag>()
+    public var interpreter: Bool = false
+    public let printBCHIR: ArrayList<Bool> = initPrintBCHIR()
+    public let interpreterSearchPaths: ArrayList<String> = ArrayList<String>()
+    public let interpLoadLib: ArrayList<String> = ArrayList<String>()
+    public let interpreterArgs: ArrayList<String> = ArrayList<String>()
+    public var interpreterPrintResult: Bool = false
+    public var interpFullBchir: Bool = false
+    public var interpMainNoLinkage: Bool = false
+    public var interpCHIR: Bool = false
+    public var constEvalDebug: Bool = false
+    public var computeAnnotationsDebug: Bool = false
+    public var disableCodeGen: Bool = false
+    public var disableDeserializer: Bool = false
+    public var chirDebugOptimizer: Bool = false
     public var chirEA: Bool = false
+    public var chirLICM: Bool = false
     public var chirWFC: Bool = true
     public var chirCC: Bool = false
+    public var codegenDebugMode: Bool = false
     public var chirLLVM: Bool = false
+    public var chirDeserialize: Bool = false
+    public var chirDeserializePath: String = ""
+    public var disableSemaVic: Bool = false
+    public var enableChirRGetOrThrowE: Bool = false
+    public var disableChirUselessImportElimination: Bool = false
+    public var enableOpaque: Bool = false
+    public var chirRenderMode: CHIRMode = CHIRMode.NA
+    public var chirHLIR: Bool = false
+    public var strictNumberMode: Bool = false
+    public var fastMathMode: Bool = false
+    public var enableCoverage: Bool = false
+    public var compileCjd: Bool = false
+    public var cjdbMode: Bool = false
+    public var interopCJPackageConfigPath: String = "./"
     public var dumpAST: Bool = false
     public var dumpCHIR: Bool = false
     public var dumpIR: Bool = false
     public var dumpAll: Bool = false
     public var dumpToScreen: Bool = false
     public var sanitizerType: SanitizerType = SanitizerType.NONE
+    public var sanitizerSetRpath: Bool = false
+    public var stackTraceFmt: StackTraceFormat = StackTraceFormat.DEFAULT
     public var errorCountLimit: MaybeUInt64 = MaybeUInt64(8u64)
     public var jobs: MaybeUInt64 = MaybeUInt64()
     public var aggressiveParallelCompile: MaybeUInt64 = MaybeUInt64()
     public var aggressiveParallelCompileWithoutArg: Bool = false
+    public let bitcodeFilesName: ArrayList<String> = ArrayList<String>()
+    public let symbolsNeedLocalized: ArrayList<String> = ArrayList<String>()
+    public var overflowStrategy: OverflowStrategy = OverflowStrategy.THROWING
+    public var targetCPU: String = ""
+    public var sysroot: String = ""
+    public let libraryPaths: ArrayList<String> = ArrayList<String>()
+    public let libraries: ArrayList<String> = ArrayList<String>()
+    public let linkOptions: ArrayList<String> = ArrayList<String>()
+    public let linkOptionGroups: ArrayList<String> = ArrayList<String>()
+    public let toolchains: ArrayList<String> = ArrayList<String>()
+    public var useRuntimeRpath: Bool = false
+    public var optOptions: String = ""
+    public var llcOptions: String = ""
+    public var stripAll: Bool = false
+    public var emitCHIRPhase: CandidateEmitCHIRPhase = CandidateEmitCHIRPhase.NA
     public let sancovOption: SanitizerCoverageOptions = SanitizerCoverageOptions()
     public init() { super() }
 
     public override func ParseFromArgs(argList: ArgList): Bool {
         this.argList = argList
         let delayed = ArrayList<OptionArgInstance>()
+        var rawArgIndex: UInt64 = 0u64
         for (entry in argList.entries) {
+            CollectOrderedInputFiles(entry, rawArgIndex)
+            rawArgIndex++
             if (entry.argInstanceType == ArgInstanceType.Input) {
                 argList.AddInput(argList.inputArgs[entry.index].value)
             } else {
@@ -127,6 +296,21 @@ public class GlobalOptions <: Option {
             OccurrenceCheck(opt, argList)
         }
         return ProcessInputs(argList.GetInputs()) && PerformPostActions()
+    }
+
+    private func CollectOrderedInputFiles(entry: ArgListEntry, index: UInt64): Unit {
+        if (entry.argInstanceType == ArgInstanceType.Input) {
+            inputFileOrder.add(OrderedInput(argList.inputArgs[entry.index].value, index))
+        } else {
+            let opt = argList.optionArgs[entry.index]
+            if (opt.info.GetID() == ID.LIBRARY) {
+                inputLibraryOrder.add(OrderedInput(opt.value, index))
+            } else if (opt.info.GetID() == ID.LINK_OPTION) {
+                inputLinkOptionOrder.add(OrderedInput(opt.value, index))
+            } else if (opt.info.GetID() == ID.LINK_OPTIONS) {
+                inputLinkOptionsOrder.add(OrderedInput(opt.value, index))
+            }
+        }
     }
 
     private func OccurrenceCheck(arg: OptionArgInstance, argList: ArgList): Unit {
@@ -157,20 +341,62 @@ public class GlobalOptions <: Option {
     public func SetOptimizationLevel(level: OptimizationLevel): Bool {
         optimizationLevel = level
         if (enumIndex(level) >= enumIndex(OptimizationLevel.O2)) {
+            addOptimizationFlag(selectedCHIROpts, OptimizationFlag.CONST_PROPAGATION)
+            addOptimizationFlag(selectedCHIROpts, OptimizationFlag.LETC_FOLDING)
+            addOptimizationFlag(selectedCHIROpts, OptimizationFlag.REF_FOLDING)
+            addOptimizationFlag(selectedCHIROpts, OptimizationFlag.REF_TO_LETC)
+            addOptimizationFlag(selectedCHIROpts, OptimizationFlag.REDUNDANT_RETURNS)
+            addOptimizationFlag(selectedCHIROpts, OptimizationFlag.REDUNDANT_FUTURE)
+            addOptimizationFlag(selectedCHIROpts, OptimizationFlag.FUNC_INLINING)
+            addOptimizationFlag(selectedCHIROpts, OptimizationFlag.DEVIRTUALIZATION)
+            addOptimizationFlag(selectedCHIROpts, OptimizationFlag.ARRAY_LAMBDA_OPT)
+            addOptimizationFlag(selectedCHIROpts, OptimizationFlag.SROA_OPT)
+            addOptimizationFlag(selectedCHIROpts, OptimizationFlag.SWITCH_OPT)
+            addOptimizationFlag(selectedCHIROpts, OptimizationFlag.VALUE_RANGE_ANALYSIS)
+            addOptimizationFlag(selectedCHIROpts, OptimizationFlag.REDUNDANT_LOAD)
             chirEA = true
+            chirLICM = true
+        } else {
+            selectedCHIROpts.clear()
         }
         return true
     }
 
     public func IsLTOEnabled(): Bool { return ltoMod != LTOMode.NO_LTO }
+    public func IsFullLTOEnabled(): Bool { return ltoMod == LTOMode.FULL_LTO }
     public func IsCompileAsExeEnabled(): Bool { return enableCompileAsExe }
     public func IsLTOPkgVisibilityEnabled(): Bool { return ltoHideAllPkgs || !ltoVisiblePkgs.isEmpty() }
     public func AddLtoVisiblePkg(pkg: String): Unit { ltoVisiblePkgs.add(pkg) }
+    public func SelectCHIROpt(flag: OptimizationFlag): Unit { addOptimizationFlag(selectedCHIROpts, flag) }
+    public func DeselectCHIROpt(flag: OptimizationFlag): Unit { removeOptimizationFlag(selectedCHIROpts, flag) }
+    public func SetPrintBCHIR(stage: PrintBCHIROption): Unit {
+        printBCHIR[PrintBCHIROptionIndex(stage)] = true
+    }
     public func GetOptionsBackend(): Backend { return if (backend == BackendType.CJNATIVE) { Backend.CJNATIVE } else { Backend.UNKNOWN } }
     public func EnableSanitizer(): Bool { return sanitizerType != SanitizerType.NONE }
     public func EnableAsan(): Bool { return sanitizerType == SanitizerType.ADDRESS }
     public func EnableTsan(): Bool { return sanitizerType == SanitizerType.THREAD }
     public func EnableHwAsan(): Bool { return sanitizerType == SanitizerType.HWADDRESS }
+    public func IsCrossCompiling(): Bool { return !host.Equal(target) }
+    public func IsCHIROptimizationLevelOverO2(): Bool {
+        return !disableChirOpt && enumIndex(optimizationLevel) >= enumIndex(OptimizationLevel.O2)
+    }
+    public func IsOptimizationExisted(flag: OptimizationFlag): Bool {
+        return !disableChirOpt && containsOptimizationFlag(selectedCHIROpts, flag)
+    }
+    public func IsConstEvalEnabled(): Bool { return !interpreter && !interpCHIR }
+    public func IsSancovOptionEnabled(): Bool { return sancovOption.IsSancovEnabled() }
+    public func IsEmitCHIREnable(): Bool { return emitCHIRPhase != CandidateEmitCHIRPhase.NA }
+    public func IsCompilingCJMPSpecific(): Bool { return !commonPartChirs.isEmpty() }
+    public func IsCompilingCJMP(): Bool { return IsCompilingCJMPSpecific() || outputMode == OutputMode.CHIR }
+    public func CompileExecutable(): Bool {
+        return outputMode == OutputMode.EXECUTABLE ||
+            (outputMode == OutputMode.OBJ && compileTarget == CompileTarget.EXECUTABLE)
+    }
+    public func PrintBchir(stage: PrintBCHIROption): Bool {
+        return printBCHIR[PrintBCHIROptionIndex(PrintBCHIROption.ALL)] ||
+            printBCHIR[PrintBCHIROptionIndex(stage)]
+    }
     public func NeedDumpAST(): Bool { return dumpAll || dumpAST }
     public func NeedDumpASTToFile(): Bool { return NeedDumpAST() && !dumpToScreen }
     public func NeedDumpASTToScreen(): Bool { return NeedDumpAST() && dumpToScreen }
@@ -186,20 +412,48 @@ public class GlobalOptions <: Option {
         return MaybeString()
     }
 
+    public func CheckInputFilePath(path: String): MaybeString {
+        if (FileExist(path) && !IsDir(path)) { return GetAbsPath(path) }
+        return MaybeString()
+    }
+
+    public static func ValidateInputFilePath(path: String): MaybeString {
+        if (FileExist(path) && !IsDir(path)) { return GetAbsPath(path) }
+        return MaybeString()
+    }
+
     private func ProcessInputs(inputs: Array<String>): Bool {
         for (input in inputs) {
             let ext = GetFileExtension(input)
-            if (ext == "cj") {
+            if (ext == "cj" && !compileCjd) {
+                if (compilePackage) { return false }
+                if (!FileExist(input)) { return false }
                 srcFiles.add(input)
             } else if (ext == "o" || ext == "a" || ext == "obj") {
-                inputObjs.add(input)
+                let objPath = ValidateInputFilePath(input)
+                if (!objPath.hasValue) { return false }
+                inputObjs.add(objPath.value)
+            } else if (ext == "cbc") {
+                let pdbaPath = ValidateInputFilePath(input)
+                if (!pdbaPath.hasValue) { return false }
+                inputPdbaFiles.add(pdbaPath.value)
             } else if (ext == "bc") {
-                bcInputFiles.add(input)
+                let bcPath = ValidateInputFilePath(input)
+                if (!bcPath.hasValue) { return false }
+                bcInputFiles.add(bcPath.value)
             } else if (ext == "cjo") {
-                if (!inputCjoFile.isEmpty()) { return false }
-                inputCjoFile = input
+                if (compilePackage || !inputCjoFile.isEmpty()) { return false }
+                let cjoPath = ValidateInputFilePath(input)
+                if (!cjoPath.hasValue) { return false }
+                inputCjoFile = cjoPath.value
+            } else if (HasCJDExtension(input) && compileCjd) {
+                if (compilePackage || !FileExist(input)) { return false }
+                srcFiles.add(input)
             } else if (compilePackage) {
+                if (!IsDir(input)) { return false }
                 packagePaths.add(input)
+            } else if (!input.isEmpty()) {
+                return false
             }
         }
         if (compilePackage && packagePaths.isEmpty()) { return false }
@@ -209,29 +463,235 @@ public class GlobalOptions <: Option {
     private func PerformPostActions(): Bool {
         chirLLVM = backend == BackendType.CJNATIVE
         chirCC = chirCC || chirLLVM
+        if (interpreter) { chirCC = true }
         if (outputMode == OutputMode.OBJ && compileTarget == CompileTarget.DEFAULT) {
             compileTarget = CompileTarget.EXECUTABLE
         }
+        if (target.IsMacOS() || target.IsArm32()) { disableReflection = true }
         if (outputDir.hasValue) {
             if (IsAbsolutePath(output)) { return false }
             output = JoinPath(outputDir.value, output)
         }
         if (compileMacroPackage && enableOutputType) { return false }
-        if (IsLTOEnabled() && outputMode == OutputMode.OBJ) { return false }
-        if (EnableSanitizer() && IsLTOEnabled()) { return false }
+        if (compileMacroPackage && !output.isEmpty() && !IsDir(output)) { return false }
+        if (enableCoverage) {
+            if (optimizationLevel != OptimizationLevel.O0) {
+                let _ = SetOptimizationLevel(OptimizationLevel.O0)
+            }
+            removedPathPrefix.clear()
+        }
+        if (scanDepPkg) {
+            if (compilePackage) {
+                if (!inputCjoFile.isEmpty() || packagePaths.isEmpty()) { return false }
+            } else if (inputCjoFile.isEmpty()) {
+                return false
+            }
+        }
+        if (EnableSanitizer()) {
+            if (IsLTOEnabled() || discardEhFrame || compileMacroPackage) { return false }
+            if ((EnableAsan() || EnableHwAsan()) && target.GetOSFamily() != OSType.LINUX) { return false }
+            if (EnableHwAsan() && target.arch != ArchType.X86_64 && target.arch != ArchType.AARCH64) { return false }
+            if (EnableTsan() && target.GetOSFamily() != OSType.LINUX && target.GetOSFamily() != OSType.WINDOWS) {
+                return false
+            }
+        }
+        if (IsLTOEnabled()) {
+            if (target.GetOSFamily() == OSType.DARWIN || target.GetOSFamily() == OSType.IOS ||
+                target.GetOSFamily() == OSType.WINDOWS) {
+                return false
+            }
+            if (outputMode == OutputMode.OBJ) { return false }
+            if (outputMode == OutputMode.STATIC_LIB && !bcInputFiles.isEmpty()) { return false }
+            if (optimizationLevel == OptimizationLevel.Os || optimizationLevel == OptimizationLevel.Oz) { return false }
+        }
+        if (IsCompileAsExeEnabled()) {
+            if (!IsLTOEnabled()) { return false }
+            if (target.GetOSFamily() == OSType.WINDOWS || target.GetOSFamily() == OSType.DARWIN ||
+                target.GetOSFamily() == OSType.IOS) {
+                return false
+            }
+        }
+        if (IsLTOPkgVisibilityEnabled()) {
+            if (!IsLTOEnabled()) { return false }
+            if (!ltoVisiblePkgs.isEmpty() && IsCompileAsExeEnabled()) { return false }
+        }
+        if (enablePgoInstrGen && enablePgoInstrUse) { return false }
+        if (enablePgoInstrGen && target.env == EnvironmentType.OHOS && pgoProfileFile.isEmpty()) { return false }
+        if (enablePgoInstrUse && (!FileExist(pgoProfileFile) || GetFileExtension(pgoProfileFile) != "profdata")) {
+            return false
+        }
+        if (commonPartCjos.size != commonPartChirs.size) { return false }
+        if (outputMode != OutputMode.OBJ && compileTarget != CompileTarget.DEFAULT) {
+            compileTarget = CompileTarget.DEFAULT
+        }
+        if (srcFiles.isEmpty() && (outputMode == OutputMode.OBJ || outputMode == OutputMode.CHIR) && !compilePackage) {
+            return false
+        }
+        if (!compilePackage && srcFiles.isEmpty() && !inputObjs.isEmpty() && !experimentalMode) { return false }
         if (!jobs.hasValue) { jobs = MaybeUInt64(1u64) }
-        if (!aggressiveParallelCompile.hasValue) { aggressiveParallelCompile = MaybeUInt64(1u64) }
+        if (target.os == OSType.WINDOWS || target.os == OSType.DARWIN || target.os == OSType.IOS ||
+            IsLTOEnabled() || enableCoverage) {
+            aggressiveParallelCompile = MaybeUInt64(1u64)
+        } else if (!aggressiveParallelCompile.hasValue && (optimizationLevel == OptimizationLevel.O0 ||
+            aggressiveParallelCompileWithoutArg)) {
+            aggressiveParallelCompile = jobs
+        } else if (!aggressiveParallelCompile.hasValue) {
+            aggressiveParallelCompile = MaybeUInt64(1u64)
+        }
+        if (target.env == EnvironmentType.OHOS) { linkStaticStd = MaybeBool(false) }
         return true
+    }
+
+    public func PassedWhenKeyValueToSerializedString(): String {
+        return ""
+    }
+
+    public func BackendTypeToSerializedString(): String {
+        return match (backend) {
+            case BackendType.CJNATIVE => "LL"
+            case BackendType.UNKNOWN => "K"
+        }
+    }
+
+    public func OptimizationLevelToSerializedString(): String {
+        return match (optimizationLevel) {
+            case OptimizationLevel.O0 => "O0"
+            case OptimizationLevel.O1 => "O1"
+            case OptimizationLevel.O2 => "O2"
+            case OptimizationLevel.O3 => "O3"
+            case OptimizationLevel.Os => "Os"
+            case OptimizationLevel.Oz => "Oz"
+        }
+    }
+
+    public func OutputModeToSerializedString(): String {
+        return match (outputMode) {
+            case OutputMode.EXECUTABLE => "E"
+            case OutputMode.STATIC_LIB => "C"
+            case OutputMode.SHARED_LIB => "S"
+            case OutputMode.CHIR => "CH"
+            case OutputMode.OBJ => CompileTargetToSerializedString()
+        }
+    }
+
+    public func CompileTargetToSerializedString(): String {
+        return match (compileTarget) {
+            case CompileTarget.EXECUTABLE => "E"
+            case CompileTarget.STATIC_LIB => "C"
+            case CompileTarget.SHARED_LIB => "S"
+            case CompileTarget.DEFAULT => "K"
+        }
+    }
+
+    public func StackTraceFormatToSerializedString(): String {
+        let mode = match (stackTraceFmt) {
+            case StackTraceFormat.ALL => "all"
+            case StackTraceFormat.SIMPLE => "simple"
+            case StackTraceFormat.DEFAULT => "default"
+        }
+        return "stack-trace-format=" + mode
+    }
+
+    public func SelectedCHIROptsToSerializedString(): String {
+        var result = ""
+        var idx: Int64 = 0
+        while (idx <= OptimizationFlagIndex(OptimizationFlag.REDUNDANT_LOAD)) {
+            var selected = false
+            for (flag in selectedCHIROpts) {
+                if (OptimizationFlagIndex(flag) == idx) { selected = true }
+            }
+            result += if (selected) { "1" } else { "0" }
+            idx++
+        }
+        return result
+    }
+
+    public func OverflowStrategyToSerializedString(): String {
+        return match (overflowStrategy) {
+            case OverflowStrategy.NA => "N"
+            case OverflowStrategy.CHECKED => "C"
+            case OverflowStrategy.WRAPPING => "W"
+            case OverflowStrategy.THROWING => "T"
+            case OverflowStrategy.SATURATING => "S"
+        }
+    }
+
+    public func SanitizerTypeToSerializedString(): String {
+        return match (sanitizerType) {
+            case SanitizerType.NONE => "none"
+            case SanitizerType.ADDRESS => "address"
+            case SanitizerType.THREAD => "thread"
+            case SanitizerType.HWADDRESS => "hardware address"
+        }
+    }
+
+    public func SanitizerTypeToShortString(): String {
+        return match (sanitizerType) {
+            case SanitizerType.NONE => ""
+            case SanitizerType.ADDRESS => "asan"
+            case SanitizerType.THREAD => "tsan"
+            case SanitizerType.HWADDRESS => "hwasan"
+        }
+    }
+
+    public func LTOModeToSerializedString(): String {
+        return match (ltoMod) {
+            case LTOMode.FULL_LTO => "0"
+            case LTOMode.THIN_LTO => "1"
+            case LTOMode.NO_LTO => "2"
+        }
     }
 
     public func ToSerialized(): Array<String> {
         return [
             BoolToSerializedString(enableCompileDebug),
             target.ToFullTripleString(),
+            PassedWhenKeyValueToSerializedString(),
+            SelectedCHIROptsToSerializedString(),
             BoolToSerializedString(compilePackage),
+            BoolToSerializedString(noSubPkg),
+            BoolToSerializedString(displayLineInfo),
+            moduleName,
+            LTOModeToSerializedString(),
+            joinStrings(removedPathPrefix, ":"),
+            BackendTypeToSerializedString(),
+            BoolToSerializedString(enableMacroInLSP),
+            BoolToSerializedString(enableCompileTest),
             BoolToSerializedString(implicitPrelude),
+            BoolToSerializedString(enableInteropCJMapping),
             BoolToSerializedString(chirEA),
+            BoolToSerializedString(chirLICM),
             BoolToSerializedString(chirCC),
+            OptimizationLevelToSerializedString(),
+            StackTraceFormatToSerializedString(),
+            OutputModeToSerializedString(),
+            BoolToSerializedString(enableHotReload),
+            BoolToSerializedString(disableChirOpt),
+            sancovOption.ToSerializedString(),
+            BoolToSerializedString(chirLLVM),
+            BoolToSerializedString(strictNumberMode),
+            BoolToSerializedString(fastMathMode),
+            BoolToSerializedString(enableCoverage),
+            SanitizerTypeToSerializedString(),
+            BoolToSerializedString(experimentalMode),
+            OverflowStrategyToSerializedString(),
+            BoolToSerializedString(interpreter),
+            joinStrings(interpreterSearchPaths, ":"),
+            joinStrings(interpLoadLib, ":"),
+            joinStrings(interpreterArgs, "\\"),
+            BoolToSerializedString(interpreterPrintResult),
+            BoolToSerializedString(interpFullBchir),
+            BoolToSerializedString(interpMainNoLinkage),
+            BoolToSerializedString(interpCHIR),
+            BoolToSerializedString(constEvalDebug),
+            BoolToSerializedString(disableCodeGen),
+            BoolToSerializedString(disableReflection),
+            BoolToSerializedString(enableEH),
+            BoolToSerializedString(compileCjd),
+            BoolToSerializedString(enableParallelMacro),
+            BoolToSerializedString(enableCoverage),
+            targetCPU,
+            sysroot,
         ]
     }
 }

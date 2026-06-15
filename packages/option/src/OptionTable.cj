@@ -77,68 +77,6 @@ public class OptionInfo {
     }
 }
 
-private let EMPTY_VALUES: Array<OptionValue> = Array<OptionValue>()
-private let STABLE_GLOBAL: Array<Group> = [Group.GLOBAL, Group.STABLE, Group.VISIBLE]
-private let STABLE_DRIVER: Array<Group> = [Group.DRIVER, Group.STABLE, Group.VISIBLE]
-private let ALL_BACKENDS: Array<Backend> = [Backend.ALL]
-private let CJNATIVE_BACKEND: Array<Backend> = [Backend.CJNATIVE]
-
-private func oneOf(values: Array<String>): Array<OptionValue> {
-    let ret = ArrayList<OptionValue>()
-    for (value in values) {
-        ret.add(OptionValue(value, "", ALL_BACKENDS, [Group.STABLE, Group.VISIBLE]))
-    }
-    return ret.toArray()
-}
-
-public func CreateOptionInfos(): Array<OptionInfo> {
-    return [
-        OptionInfo("--output", ID.OUTPUT_FILE, Kind.SEPARATED, ALL_BACKENDS, STABLE_GLOBAL, "-o", EMPTY_VALUES, Occurrence.SINGLE_OCCURRENCE, "Specify product name or output directory when compiling a package"),
-        OptionInfo("--output-dir", ID.OUTPUT_DIR, Kind.SEPARATED, ALL_BACKENDS, STABLE_GLOBAL, "", EMPTY_VALUES, Occurrence.SINGLE_OCCURRENCE, "Specify output directory"),
-        OptionInfo("--module-name", ID.MODULE_NAME, Kind.SEPARATED, ALL_BACKENDS, STABLE_GLOBAL, "", EMPTY_VALUES, Occurrence.SINGLE_OCCURRENCE, "Tell compiler name of the module"),
-        OptionInfo("--package", ID.PACKAGE_COMPILE, Kind.FLAG, ALL_BACKENDS, STABLE_GLOBAL, "-p", EMPTY_VALUES, Occurrence.MULTIPLE_OCCURRENCE, "Specify package directory to be compiled"),
-        OptionInfo("--import-path", ID.IMPORT_PATH, Kind.SEPARATED, ALL_BACKENDS, STABLE_GLOBAL, "", EMPTY_VALUES, Occurrence.MULTIPLE_OCCURRENCE, "Add .cjo search path"),
-        OptionInfo("--target", ID.TARGET, Kind.SEPARATED, CJNATIVE_BACKEND, STABLE_GLOBAL, "", EMPTY_VALUES, Occurrence.SINGLE_OCCURRENCE, "Generate code for the given target platform"),
-        OptionInfo("--backend", ID.BACKEND_MODE, Kind.SEPARATED, ALL_BACKENDS, [Group.GLOBAL, Group.STABLE], "", oneOf(["llvm"]), Occurrence.SINGLE_OCCURRENCE, "Specify backend toolchain"),
-        OptionInfo("--output-type", ID.OUTPUT_TYPE, Kind.SEPARATED, ALL_BACKENDS, STABLE_GLOBAL, "", oneOf(["exe", "staticlib", "dylib", "chir", "obj", "hotreload"]), Occurrence.SINGLE_OCCURRENCE, "Specify output file type"),
-        OptionInfo("--compile-target", ID.COMPILE_TARGET, Kind.SEPARATED, ALL_BACKENDS, [Group.DRIVER, Group.VISIBLE], "", oneOf(["exe", "staticlib", "dylib"]), Occurrence.SINGLE_OCCURRENCE, "Specify compile target for obj"),
-        OptionInfo("-O0", ID.OPTIMIZATION_0, Kind.FLAG, CJNATIVE_BACKEND, STABLE_GLOBAL, "", EMPTY_VALUES, Occurrence.MULTIPLE_OCCURRENCE, "Optimization level 0"),
-        OptionInfo("-O1", ID.OPTIMIZATION_1, Kind.FLAG, CJNATIVE_BACKEND, STABLE_GLOBAL, "-O", EMPTY_VALUES, Occurrence.MULTIPLE_OCCURRENCE, "Optimization level 1"),
-        OptionInfo("-O2", ID.OPTIMIZATION_2, Kind.FLAG, CJNATIVE_BACKEND, STABLE_GLOBAL, "", EMPTY_VALUES, Occurrence.MULTIPLE_OCCURRENCE, "Optimization level 2"),
-        OptionInfo("-O3", ID.OPTIMIZATION_3, Kind.FLAG, CJNATIVE_BACKEND, [Group.GLOBAL, Group.STABLE], "", EMPTY_VALUES, Occurrence.MULTIPLE_OCCURRENCE, "Optimization level 3"),
-        OptionInfo("-Os", ID.OPTIMIZATION_S, Kind.FLAG, CJNATIVE_BACKEND, STABLE_GLOBAL, "", EMPTY_VALUES, Occurrence.MULTIPLE_OCCURRENCE, "Optimization level s"),
-        OptionInfo("-Oz", ID.OPTIMIZATION_Z, Kind.FLAG, CJNATIVE_BACKEND, STABLE_GLOBAL, "", EMPTY_VALUES, Occurrence.MULTIPLE_OCCURRENCE, "Optimization level z"),
-        OptionInfo("-O", ID.OPTIMIZATION_CUSTOM, Kind.CONTINOUS, CJNATIVE_BACKEND, STABLE_GLOBAL, "", EMPTY_VALUES, Occurrence.MULTIPLE_OCCURRENCE, "Set optimization level"),
-        OptionInfo("--warn-off", ID.WARN_OFF, Kind.SEPARATED, ALL_BACKENDS, STABLE_GLOBAL, "-Woff", oneOf(["all", "unused", "driver-arg", "deprecated", "parser", "semantics"]), Occurrence.MULTIPLE_OCCURRENCE, "Suppress a warning group"),
-        OptionInfo("--warn-on", ID.WARN_ON, Kind.SEPARATED, ALL_BACKENDS, STABLE_GLOBAL, "-Won", oneOf(["all", "unused", "driver-arg", "deprecated", "parser", "semantics"]), Occurrence.MULTIPLE_OCCURRENCE, "Enable a warning group"),
-        OptionInfo("--error-count-limit", ID.ERROR_COUNT_LIMIT, Kind.SEPARATED, ALL_BACKENDS, STABLE_GLOBAL, "", EMPTY_VALUES, Occurrence.SINGLE_OCCURRENCE, "Emit specified number of errors only"),
-        OptionInfo("--verbose", ID.VERBOSE, Kind.FLAG, ALL_BACKENDS, STABLE_GLOBAL, "-V", EMPTY_VALUES, Occurrence.MULTIPLE_OCCURRENCE, "Enable verbose"),
-        OptionInfo("--version", ID.VERSION, Kind.FLAG, ALL_BACKENDS, STABLE_GLOBAL, "-v", EMPTY_VALUES, Occurrence.MULTIPLE_OCCURRENCE, "Print compiler version information"),
-        OptionInfo("--help", ID.HELP, Kind.FLAG, ALL_BACKENDS, STABLE_GLOBAL, "-h", EMPTY_VALUES, Occurrence.MULTIPLE_OCCURRENCE, "Show usage"),
-        OptionInfo("--experimental", ID.EXPERIMENTAL, Kind.FLAG, CJNATIVE_BACKEND, STABLE_GLOBAL, "", EMPTY_VALUES, Occurrence.MULTIPLE_OCCURRENCE, "Enable experimental options"),
-        OptionInfo("--cfg", ID.CONDITIONAL_COMPILATION_CONFIG, Kind.SEPARATED, ALL_BACKENDS, STABLE_GLOBAL, "", EMPTY_VALUES, Occurrence.MULTIPLE_OCCURRENCE, "User defined condition to compile"),
-        OptionInfo("-g", ID.COMPILE_DEBUG, Kind.FLAG, ALL_BACKENDS, STABLE_GLOBAL, "", EMPTY_VALUES, Occurrence.MULTIPLE_OCCURRENCE, "Enable compile debug version target"),
-        OptionInfo("--no-prelude", ID.NO_PRELUDE, Kind.FLAG, ALL_BACKENDS, STABLE_GLOBAL, "", EMPTY_VALUES, Occurrence.MULTIPLE_OCCURRENCE, "Do not import prelude by default"),
-        OptionInfo("--static-std", ID.STATIC_STD, Kind.FLAG, CJNATIVE_BACKEND, STABLE_DRIVER, "", EMPTY_VALUES, Occurrence.MULTIPLE_OCCURRENCE, "Statically link std"),
-        OptionInfo("--dy-std", ID.DY_STD, Kind.FLAG, CJNATIVE_BACKEND, STABLE_DRIVER, "", EMPTY_VALUES, Occurrence.MULTIPLE_OCCURRENCE, "Dynamically link std"),
-        OptionInfo("--lto", ID.LTO, Kind.SEPARATED, CJNATIVE_BACKEND, STABLE_DRIVER, "", oneOf(["full", "thin"]), Occurrence.SINGLE_OCCURRENCE, "Enable LTO"),
-        OptionInfo("--compile-as-exe", ID.COMPILE_AS_EXE, Kind.FLAG, CJNATIVE_BACKEND, STABLE_DRIVER, "", EMPTY_VALUES, Occurrence.MULTIPLE_OCCURRENCE, "Hide symbols from bitcode files in LTO mode"),
-        OptionInfo("--lto-keep-pkg-visibility", ID.LTO_KEEP_PKG_VISIBILITY, Kind.SEPARATED, CJNATIVE_BACKEND, STABLE_DRIVER, "", EMPTY_VALUES, Occurrence.MULTIPLE_OCCURRENCE, "Keep packages visible in LTO mode"),
-        OptionInfo("--dump-ast", ID.DUMP_AST, Kind.FLAG, ALL_BACKENDS, STABLE_GLOBAL, "", EMPTY_VALUES, Occurrence.MULTIPLE_OCCURRENCE, "Dump AST"),
-        OptionInfo("--dump-chir", ID.DUMP_CHIR, Kind.FLAG, ALL_BACKENDS, STABLE_GLOBAL, "", EMPTY_VALUES, Occurrence.MULTIPLE_OCCURRENCE, "Dump CHIR"),
-        OptionInfo("--dump-ir", ID.DUMP_IR, Kind.FLAG, ALL_BACKENDS, STABLE_GLOBAL, "", EMPTY_VALUES, Occurrence.MULTIPLE_OCCURRENCE, "Dump IR"),
-        OptionInfo("--dump-all", ID.DUMP_ALL, Kind.FLAG, ALL_BACKENDS, STABLE_GLOBAL, "", EMPTY_VALUES, Occurrence.MULTIPLE_OCCURRENCE, "Dump AST, CHIR, and IR"),
-        OptionInfo("--dump-to-screen", ID.DUMP_TO_SCREEN, Kind.FLAG, ALL_BACKENDS, STABLE_GLOBAL, "", EMPTY_VALUES, Occurrence.MULTIPLE_OCCURRENCE, "Dump to screen"),
-        OptionInfo("--chir-ea", ID.CHIR_EA, Kind.SEPARATED, ALL_BACKENDS, [Group.GLOBAL, Group.STABLE], "", oneOf(["on", "off"]), Occurrence.SINGLE_OCCURRENCE, "Escape analysis for CHIR"),
-        OptionInfo("--chir-wfc", ID.CHIR_WFC, Kind.SEPARATED, ALL_BACKENDS, [Group.GLOBAL, Group.STABLE], "", oneOf(["on", "off"]), Occurrence.SINGLE_OCCURRENCE, "Well-formedness check for CHIR"),
-        OptionInfo("--disable-chir-opt", ID.DISABLE_CHIR_OPT, Kind.FLAG, ALL_BACKENDS, [Group.GLOBAL, Group.STABLE], "", EMPTY_VALUES, Occurrence.MULTIPLE_OCCURRENCE, "Disable CHIR optimization"),
-        OptionInfo("--disable-backend-opt", ID.DISABLE_BACKEND_OPT, Kind.FLAG, ALL_BACKENDS, [Group.GLOBAL, Group.STABLE], "", EMPTY_VALUES, Occurrence.MULTIPLE_OCCURRENCE, "Disable backend optimization"),
-        OptionInfo("--sanitize", ID.SANITIZE, Kind.SEPARATED, CJNATIVE_BACKEND, [Group.GLOBAL, Group.STABLE], "", oneOf(["address", "thread", "hwaddress"]), Occurrence.SINGLE_OCCURRENCE, "Enable sanitizer"),
-        OptionInfo("--jobs", ID.JOBS, Kind.SEPARATED, CJNATIVE_BACKEND, STABLE_GLOBAL, "-j", EMPTY_VALUES, Occurrence.SINGLE_OCCURRENCE, "Number of tasks to run at once"),
-        OptionInfo("--aggressive-parallel-compile", ID.AGGRESSIVE_PARALLEL_COMPILE, Kind.FLAG_WITH_ARG, CJNATIVE_BACKEND, STABLE_GLOBAL, "--apc", EMPTY_VALUES, Occurrence.SINGLE_OCCURRENCE, "Enable aggressive parallel compile"),
-    ]
-}
-
 public open class ArgInstance {
     public let argInstanceType: ArgInstanceType
     public var str: String = ""
