@@ -355,7 +355,7 @@ public class ImportManager {
                     continue
                 }
                 for (name in cjoManager.GetPossibleCjoNames(importSpec)) {
-                    depPkgs.add(ToPackageName(name))
+                    depPkgs.add(name)
                 }
             }
         }
@@ -765,7 +765,6 @@ public class ImportManager {
         isRecursive: Bool,
         isMainPartPkgForTestPkg: Bool
     ): Bool {
-        let _ = isRecursive
         if (!cjoPath.isEmpty()) {
             return true
         }
@@ -775,8 +774,19 @@ public class ImportManager {
             "package_search_error"
         }
         diag.ReportError(kind, "cannot find package '${fullPackageName}'; " + NO_CJO_HELP_INFO,
-            range: MakeRange(importSpec.begin, importSpec.end))
+            range: GetPackageSearchErrorRange(importSpec, isRecursive))
         return false
+    }
+
+    private func GetPackageSearchErrorRange(importSpec: ImportSpec, isRecursive: Bool): Range {
+        if (isRecursive) {
+            return MakeRange(importSpec.begin, importSpec.begin + 1)
+        }
+        return GetPackageNameRange(importSpec)
+    }
+
+    private func GetPackageNameRange(importSpec: ImportSpec): Range {
+        return MakeRange(importSpec.begin, importSpec.end)
     }
 
     private func UpdateMacroPackageUsage(pkg: Package): Unit {
@@ -799,12 +809,15 @@ public class ImportManager {
                     continue
                 }
                 let packageValue = packageOpt.getOrThrow()
+                let packageRange = GetPackageNameRange(importSpec)
                 if (fullPackageName != packageValue.fullPackageName) {
                     diag.ReportError("package_import_inconsistent",
-                        "import resolved to '${packageValue.fullPackageName}', not '${fullPackageName}'")
+                        "import resolved to '${packageValue.fullPackageName}', not '${fullPackageName}'",
+                        range: packageRange)
                     continue
                 } else if (fullPackageName == pkg.fullPackageName) {
-                    diag.ReportError("package_import_itself_illegal", "package '${fullPackageName}' imports itself")
+                    diag.ReportError("package_import_itself_illegal", "package '${fullPackageName}' imports itself",
+                        range: packageRange)
                     continue
                 }
                 if (importSpec.TestAttr(Attribute.IMPLICIT_ADD)) {
@@ -815,15 +828,18 @@ public class ImportManager {
                     (packageValue.accessible == AccessLevel.INTERNAL && relation != PackageRelation.CHILD &&
                         !IsSuperPackage(pkg.fullPackageName, fullPackageName))) {
                     diag.ReportError("package_accessibility",
-                        "package '${fullPackageName}' is ${GetAccessLevelStr(packageValue)} and is not visible from '${pkg.fullPackageName}'")
+                        "package '${fullPackageName}' is ${GetAccessLevelStr(packageValue)} and is not visible from '${pkg.fullPackageName}'",
+                        range: packageRange)
                 } else if (importSpec.IsReExport() && !pkg.isMacroPackage && packageValue.isMacroPackage) {
-                    diag.ReportError("package_cannot_export_macro_package", "non-macro package cannot re-export a macro package")
+                    diag.ReportError("package_cannot_export_macro_package",
+                        "non-macro package cannot re-export a macro package", range: packageRange)
                 } else if (!importSpec.IsImportAll() && !cjoManager.IsImportPackage(importSpec)) {
                     let decls = cjoManager.GetPackageMembersByName(packageValue.fullPackageName, importSpec.content.identifier)
                     let visibleDecls = GetVisibleDeclToMap(decls, GetAccessLevel(importSpec), relation)
                     if (visibleDecls.isEmpty()) {
                         diag.ReportError("package_decl_not_find_in_package",
-                            "declaration '${importSpec.content.identifier}' was not found in package '${fullPackageName}'")
+                            "declaration '${importSpec.content.identifier}' was not found in package '${fullPackageName}'",
+                            range: packageRange)
                     }
                 }
             }
