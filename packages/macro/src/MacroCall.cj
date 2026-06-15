@@ -171,6 +171,42 @@ extend ReplaceTargetKind <: Equatable<ReplaceTargetKind> {
     }
 }
 
+public enum ExprFieldKind {
+    | NONE
+    | FUNC_PARAM_ASSIGNMENT
+    | FUNC_ARG_EXPR
+    | CALL_BASE_FUNC
+    | MEMBER_BASE_EXPR
+    | RETURN_EXPR_VALUE
+    | IF_COND_EXPR
+    | BINARY_LEFT_EXPR
+    | BINARY_RIGHT_EXPR
+}
+
+private func ExprFieldKindIndex(kind: ExprFieldKind): Int64 {
+    return match (kind) {
+        case ExprFieldKind.NONE => 0
+        case ExprFieldKind.FUNC_PARAM_ASSIGNMENT => 1
+        case ExprFieldKind.FUNC_ARG_EXPR => 2
+        case ExprFieldKind.CALL_BASE_FUNC => 3
+        case ExprFieldKind.MEMBER_BASE_EXPR => 4
+        case ExprFieldKind.RETURN_EXPR_VALUE => 5
+        case ExprFieldKind.IF_COND_EXPR => 6
+        case ExprFieldKind.BINARY_LEFT_EXPR => 7
+        case ExprFieldKind.BINARY_RIGHT_EXPR => 8
+    }
+}
+
+extend ExprFieldKind <: Equatable<ExprFieldKind> {
+    public operator func ==(right: ExprFieldKind): Bool {
+        return ExprFieldKindIndex(this) == ExprFieldKindIndex(right)
+    }
+
+    public operator func !=(right: ExprFieldKind): Bool {
+        return !(this == right)
+    }
+}
+
 public class ExprBox {
     public var value: Option<Expr> = None
     public init() {}
@@ -183,6 +219,8 @@ public class ReplaceTarget {
     public var kind: ReplaceTargetKind = ReplaceTargetKind.NONE
     public var loc: Int64 = 0
     public var exprBox: Option<ExprBox> = None
+    public var exprParent: Option<Node> = None
+    public var exprField: ExprFieldKind = ExprFieldKind.NONE
     public var nodes: Option<ArrayList<Node>> = None
     public var exprs: Option<ArrayList<Expr>> = None
     public var decls: Option<ArrayList<Decl>> = None

@@ -1001,6 +1001,14 @@ public class FuncArg <: Node {
     public init() {
         super(ASTKind.UNKNOWN)
     }
+
+    public override func Children(): ArrayList<Node> {
+        let out = ArrayList<Node>()
+        if (let Some(item) <- expr) {
+            out.add(item)
+        }
+        return out
+    }
 }
 
 public class Block <: Expr {
@@ -1103,6 +1111,14 @@ public class FuncParamList <: Node {
     public init() {
         super(ASTKind.FUNC_PARAM_LIST)
     }
+
+    public override func Children(): ArrayList<Node> {
+        let out = ArrayList<Node>()
+        for (param in params) {
+            out.add(param)
+        }
+        return out
+    }
 }
 
 public open class FuncParam <: Decl {
@@ -1116,6 +1132,14 @@ public open class FuncParam <: Decl {
 
     public init(kind: ASTKind) {
         super(kind)
+    }
+
+    public override func Children(): ArrayList<Node> {
+        let out = ArrayList<Node>()
+        if (let Some(item) <- assignment) {
+            out.add(item)
+        }
+        return out
     }
 }
 
@@ -1196,6 +1220,14 @@ public class MemberAccess <: Expr {
     public init() {
         super(ASTKind.MEMBER_ACCESS)
     }
+
+    public override func Children(): ArrayList<Node> {
+        let out = ArrayList<Node>()
+        if (let Some(item) <- baseExpr) {
+            out.add(item)
+        }
+        return out
+    }
 }
 
 public class CallExpr <: Expr {
@@ -1206,6 +1238,17 @@ public class CallExpr <: Expr {
     public init() {
         super(ASTKind.CALL_EXPR)
     }
+
+    public override func Children(): ArrayList<Node> {
+        let out = ArrayList<Node>()
+        if (let Some(item) <- baseFunc) {
+            out.add(item)
+        }
+        for (arg in args) {
+            out.add(arg)
+        }
+        return out
+    }
 }
 
 public class ReturnExpr <: Expr {
@@ -1213,6 +1256,14 @@ public class ReturnExpr <: Expr {
 
     public init() {
         super(ASTKind.RETURN_EXPR)
+    }
+
+    public override func Children(): ArrayList<Node> {
+        let out = ArrayList<Node>()
+        if (let Some(item) <- expr) {
+            out.add(item)
+        }
+        return out
     }
 }
 
@@ -1224,6 +1275,17 @@ public class IfExpr <: Expr {
     public init() {
         super(ASTKind.IF_EXPR)
     }
+
+    public override func Children(): ArrayList<Node> {
+        let out = ArrayList<Node>()
+        if (let Some(cond) <- condExpr) {
+            out.add(cond)
+        }
+        if (let Some(body) <- thenBody) {
+            out.add(body)
+        }
+        return out
+    }
 }
 
 public class BinaryExpr <: Expr {
@@ -1233,6 +1295,17 @@ public class BinaryExpr <: Expr {
 
     public init() {
         super(ASTKind.BINARY_EXPR)
+    }
+
+    public override func Children(): ArrayList<Node> {
+        let out = ArrayList<Node>()
+        if (let Some(left) <- leftExpr) {
+            out.add(left)
+        }
+        if (let Some(right) <- rightExpr) {
+            out.add(right)
+        }
+        return out
     }
 }
 

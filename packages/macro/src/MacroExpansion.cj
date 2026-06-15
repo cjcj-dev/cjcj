@@ -352,9 +352,11 @@ public class MacroExpansion {
         let target = macroNode.replaceLoc
         if (target.kind == ReplaceTargetKind.EXPR_BOX) {
             if (newNodes.size == 1) {
-                if (let Some(expr) <- (newNodes[0] as Expr)) {
-                    if (let Some(box) <- target.exprBox) {
-                        box.value = Some(expr)
+                if (let Some(replacementExpr) <- (newNodes[0] as Expr)) {
+                    if (AssignExprReplacement(target, replacementExpr)) {
+                        if (let Some(file) <- macroNode.RequireNode().curFile) {
+                            file.originalMacroCallNodes.add(macroNode.RequireNode())
+                        }
                     }
                 } else {
                     ci.diag.Diagnose(newNodes[0].begin, "expect one expression from macro expansion")

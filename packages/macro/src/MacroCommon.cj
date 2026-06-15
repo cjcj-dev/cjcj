@@ -282,6 +282,26 @@ public func IsIdentifierOrContextualKeyword(kind: TokenKind): Bool {
 
 private func keywordKind(value: String): TokenKind {
     return match (value) {
+        case "_" => TokenKind.WILDCARD
+        case "Int8" => TokenKind.INT8
+        case "Int16" => TokenKind.INT16
+        case "Int32" => TokenKind.INT32
+        case "Int64" => TokenKind.INT64
+        case "IntNative" => TokenKind.INTNATIVE
+        case "UInt8" => TokenKind.UINT8
+        case "UInt16" => TokenKind.UINT16
+        case "UInt32" => TokenKind.UINT32
+        case "UInt64" => TokenKind.UINT64
+        case "UIntNative" => TokenKind.UINTNATIVE
+        case "Float16" => TokenKind.FLOAT16
+        case "Float32" => TokenKind.FLOAT32
+        case "Float64" => TokenKind.FLOAT64
+        case "Rune" => TokenKind.RUNE
+        case "Bool" => TokenKind.BOOLEAN
+        case "Nothing" => TokenKind.NOTHING
+        case "Unit" => TokenKind.UNIT
+        case "VArray" => TokenKind.VARRAY
+        case "This" => TokenKind.THISTYPE
         case "package" => TokenKind.PACKAGE
         case "import" => TokenKind.IMPORT
         case "class" => TokenKind.CLASS
@@ -351,6 +371,100 @@ private func makeToken(kind: TokenKind, value: String, fileID: UInt64, line: Int
     return Token(kind, value, begin, begin + value.size)
 }
 
+private func startsWithAt(bytes: Array<UInt8>, idx: Int64, value: String): Bool {
+    let pattern = value.toArray()
+    if (idx + pattern.size > bytes.size) {
+        return false
+    }
+    var patIdx: Int64 = 0
+    while (patIdx < pattern.size) {
+        if (bytes[idx + patIdx] != pattern[patIdx]) {
+            return false
+        }
+        patIdx++
+    }
+    return true
+}
+
+private func tokenKindForThree(value: String): TokenKind {
+    return match (value) {
+        case "..." => TokenKind.ELLIPSIS
+        case "..=" => TokenKind.CLOSEDRANGEOP
+        case "**=" => TokenKind.EXP_ASSIGN
+        case "<<=" => TokenKind.LSHIFT_ASSIGN
+        case ">>=" => TokenKind.RSHIFT_ASSIGN
+        case _ => TokenKind.ILLEGAL
+    }
+}
+
+private func tokenKindForTwo(value: String): TokenKind {
+    return match (value) {
+        case "@!" => TokenKind.AT_EXCL
+        case "=>" => TokenKind.DOUBLE_ARROW
+        case "->" => TokenKind.ARROW
+        case "<-" => TokenKind.BACKARROW
+        case ".." => TokenKind.RANGEOP
+        case "++" => TokenKind.INCR
+        case "--" => TokenKind.DECR
+        case "**" => TokenKind.EXP
+        case "&&" => TokenKind.AND
+        case "||" => TokenKind.OR
+        case "??" => TokenKind.COALESCING
+        case "|>" => TokenKind.PIPELINE
+        case "~>" => TokenKind.COMPOSITION
+        case "<<" => TokenKind.LSHIFT
+        case ">>" => TokenKind.RSHIFT
+        case "<=" => TokenKind.LE
+        case ">=" => TokenKind.GE
+        case "!=" => TokenKind.NOTEQ
+        case "==" => TokenKind.EQUAL
+        case "+=" => TokenKind.ADD_ASSIGN
+        case "-=" => TokenKind.SUB_ASSIGN
+        case "*=" => TokenKind.MUL_ASSIGN
+        case "/=" => TokenKind.DIV_ASSIGN
+        case "%=" => TokenKind.MOD_ASSIGN
+        case "&=" => TokenKind.BITAND_ASSIGN
+        case "|=" => TokenKind.BITOR_ASSIGN
+        case "^=" => TokenKind.BITXOR_ASSIGN
+        case "::" => TokenKind.DOUBLE_COLON
+        case _ => TokenKind.ILLEGAL
+    }
+}
+
+private func tokenKindForOne(value: String): TokenKind {
+    return match (value) {
+        case "." => TokenKind.DOT
+        case "," => TokenKind.COMMA
+        case "(" => TokenKind.LPAREN
+        case ")" => TokenKind.RPAREN
+        case "[" => TokenKind.LSQUARE
+        case "]" => TokenKind.RSQUARE
+        case "{" => TokenKind.LCURL
+        case "}" => TokenKind.RCURL
+        case "+" => TokenKind.ADD
+        case "-" => TokenKind.SUB
+        case "*" => TokenKind.MUL
+        case "/" => TokenKind.DIV
+        case "%" => TokenKind.MOD
+        case "!" => TokenKind.NOT
+        case "~" => TokenKind.BITNOT
+        case "&" => TokenKind.BITAND
+        case "|" => TokenKind.BITOR
+        case "^" => TokenKind.BITXOR
+        case ":" => TokenKind.COLON
+        case ";" => TokenKind.SEMI
+        case "=" => TokenKind.ASSIGN
+        case "#" => TokenKind.HASH
+        case "@" => TokenKind.AT
+        case "?" => TokenKind.QUEST
+        case "<" => TokenKind.LT
+        case ">" => TokenKind.GT
+        case "$" => TokenKind.DOLLAR
+        case "_" => TokenKind.WILDCARD
+        case _ => TokenKind.ILLEGAL
+    }
+}
+
 public func GetTokensFromString(source: String, diag: DiagnosticEngine, pos!: Position = INVALID_POSITION): ArrayList<Token> {
     let out = ArrayList<Token>()
     let fileID = if (pos == INVALID_POSITION) { 0u64 } else { pos.fileID }
@@ -370,6 +484,159 @@ public func GetTokensFromString(source: String, diag: DiagnosticEngine, pos!: Po
             line++
             column = 1
             idx++
+            continue
+        }
+        if (current == b'/' && idx + 1 < bytes.size && bytes[idx + 1] == b'/') {
+            let start = idx
+            let startColumn = column
+            while (idx < bytes.size && bytes[idx] != b'\n') {
+                idx++
+                column++
+            }
+            let value = String.fromUtf8(bytes[start..idx])
+            out.add(Token(TokenKind.COMMENT, value, Position(fileID, line, startColumn), Position(fileID, line, column)))
+            continue
+        }
+        if (current == b'/' && idx + 1 < bytes.size && bytes[idx + 1] == b'*') {
+            let start = idx
+            let startLine = line
+            let startColumn = column
+            idx += 2
+            column += 2
+            while (idx + 1 < bytes.size && !(bytes[idx] == b'*' && bytes[idx + 1] == b'/')) {
+                if (bytes[idx] == b'\n') {
+                    line++
+                    column = 1
+                } else {
+                    column++
+                }
+                idx++
+            }
+            if (idx + 1 < bytes.size) {
+                idx += 2
+                column += 2
+            }
+            let value = String.fromUtf8(bytes[start..idx])
+            out.add(Token(TokenKind.COMMENT, value, Position(fileID, startLine, startColumn), Position(fileID, line, column)))
+            continue
+        }
+        if (current == b'#') {
+            let start = idx
+            let startColumn = column
+            var delimiterCount: UInt32 = 0u32
+            while (idx < bytes.size && bytes[idx] == b'#') {
+                delimiterCount++
+                idx++
+                column++
+            }
+            if (idx < bytes.size && bytes[idx] == b'"') {
+                idx++
+                column++
+                let valueStart = idx
+                while (idx < bytes.size) {
+                    if (bytes[idx] == b'"') {
+                        var hashCount: UInt32 = 0u32
+                        var lookahead = idx + 1
+                        while (lookahead < bytes.size && bytes[lookahead] == b'#' && hashCount < delimiterCount) {
+                            hashCount++
+                            lookahead++
+                        }
+                        if (hashCount == delimiterCount) {
+                            let rawValue = String.fromUtf8(bytes[valueStart..idx])
+                            idx = lookahead
+                            column += Int64(delimiterCount) + 1
+                            let token = Token(TokenKind.MULTILINE_RAW_STRING, rawValue, Position(fileID, line, startColumn),
+                                Position(fileID, line, column))
+                            token.delimiterNum = delimiterCount
+                            out.add(token)
+                            break
+                        }
+                    }
+                    if (bytes[idx] == b'\n') {
+                        line++
+                        column = 1
+                    } else {
+                        column++
+                    }
+                    idx++
+                }
+                continue
+            }
+            idx = start
+            column = startColumn
+        }
+        if (startsWithAt(bytes, idx, "\"\"\"")) {
+            let startLine = line
+            let startColumn = column
+            idx += 3
+            column += 3
+            let valueStart = idx
+            while (idx + 2 < bytes.size && !startsWithAt(bytes, idx, "\"\"\"")) {
+                if (bytes[idx] == b'\n') {
+                    line++
+                    column = 1
+                } else {
+                    column++
+                }
+                idx++
+            }
+            let value = String.fromUtf8(bytes[valueStart..idx])
+            if (idx + 2 < bytes.size) {
+                idx += 3
+                column += 3
+            }
+            out.add(Token(TokenKind.MULTILINE_STRING, value, Position(fileID, startLine, startColumn), Position(fileID, line, column)))
+            continue
+        }
+        if ((current == b'J' || current == b'j') && idx + 1 < bytes.size && (bytes[idx + 1] == b'"' || bytes[idx + 1] == b'\'')) {
+            let quoteByte = bytes[idx + 1]
+            let startColumn = column
+            idx += 2
+            column += 2
+            let start = idx
+            var escaped = false
+            while (idx < bytes.size && (escaped || bytes[idx] != quoteByte)) {
+                escaped = !escaped && bytes[idx] == b'\\'
+                if (bytes[idx] == b'\n') {
+                    break
+                }
+                idx++
+                column++
+                if (escaped && idx < bytes.size && bytes[idx - 1] != b'\\') {
+                    escaped = false
+                }
+            }
+            let value = String.fromUtf8(bytes[start..idx])
+            if (idx < bytes.size && bytes[idx] == quoteByte) {
+                idx++
+                column++
+            }
+            let token = Token(TokenKind.JSTRING_LITERAL, value, Position(fileID, line, startColumn), Position(fileID, line, column))
+            token.isSingleQuote = quoteByte == b'\''
+            out.add(token)
+            continue
+        }
+        if (current == b'r' && idx + 1 < bytes.size && (bytes[idx + 1] == b'"' || bytes[idx + 1] == b'\'')) {
+            let quoteByte = bytes[idx + 1]
+            let startColumn = column
+            idx += 2
+            column += 2
+            let start = idx
+            while (idx < bytes.size && bytes[idx] != quoteByte) {
+                if (bytes[idx] == b'\n') {
+                    break
+                }
+                idx++
+                column++
+            }
+            let value = String.fromUtf8(bytes[start..idx])
+            if (idx < bytes.size && bytes[idx] == quoteByte) {
+                idx++
+                column++
+            }
+            let token = Token(TokenKind.RUNE_LITERAL, value, Position(fileID, line, startColumn), Position(fileID, line, column))
+            token.isSingleQuote = quoteByte == b'\''
+            out.add(token)
             continue
         }
         if (isIdentStart(current)) {
@@ -394,96 +661,54 @@ public func GetTokensFromString(source: String, diag: DiagnosticEngine, pos!: Po
             out.add(Token(TokenKind.INTEGER_LITERAL, value, Position(fileID, line, startColumn), Position(fileID, line, column)))
             continue
         }
-        if (current == b'"') {
+        if (current == b'"' || current == b'\'') {
+            let quoteByte = current
             let startColumn = column
             idx++
             column++
             let start = idx
-            while (idx < bytes.size && bytes[idx] != b'"') {
+            var escaped = false
+            while (idx < bytes.size && (escaped || bytes[idx] != quoteByte)) {
                 if (bytes[idx] == b'\n') {
                     break
                 }
+                escaped = !escaped && bytes[idx] == b'\\'
                 idx++
                 column++
+                if (escaped && idx < bytes.size && bytes[idx - 1] != b'\\') {
+                    escaped = false
+                }
             }
             let value = String.fromUtf8(bytes[start..idx])
-            if (idx < bytes.size && bytes[idx] == b'"') {
+            if (idx < bytes.size && bytes[idx] == quoteByte) {
                 idx++
                 column++
             }
-            out.add(Token(TokenKind.STRING_LITERAL, value, Position(fileID, line, startColumn), Position(fileID, line, column)))
+            let token = Token(TokenKind.STRING_LITERAL, value, Position(fileID, line, startColumn), Position(fileID, line, column))
+            token.isSingleQuote = quoteByte == b'\''
+            out.add(token)
+            continue
+        }
+        let three = if (idx + 2 < bytes.size) { String.fromUtf8(bytes[idx..(idx + 3)]) } else { "" }
+        let threeKind = tokenKindForThree(three)
+        if (threeKind != TokenKind.ILLEGAL) {
+            out.add(makeToken(threeKind, three, fileID, line, column))
+            idx += 3
+            column += 3
             continue
         }
         let two = if (idx + 1 < bytes.size) { String.fromUtf8(bytes[idx..(idx + 2)]) } else { "" }
-        if (two == "@!") {
-            out.add(makeToken(TokenKind.AT_EXCL, two, fileID, line, column))
-            idx += 2
-            column += 2
-            continue
-        }
-        if (two == "=>") {
-            out.add(makeToken(TokenKind.DOUBLE_ARROW, two, fileID, line, column))
-            idx += 2
-            column += 2
-            continue
-        }
-        if (two == "->") {
-            out.add(makeToken(TokenKind.ARROW, two, fileID, line, column))
-            idx += 2
-            column += 2
-            continue
-        }
-        if (two == "<-") {
-            out.add(makeToken(TokenKind.BACKARROW, two, fileID, line, column))
-            idx += 2
-            column += 2
-            continue
-        }
-        if (two == ">>") {
-            out.add(makeToken(TokenKind.RSHIFT, two, fileID, line, column))
-            idx += 2
-            column += 2
-            continue
-        }
-        if (two == ">=") {
-            out.add(makeToken(TokenKind.GE, two, fileID, line, column))
-            idx += 2
-            column += 2
-            continue
-        }
-        if (two == "??") {
-            out.add(makeToken(TokenKind.COALESCING, two, fileID, line, column))
+        let twoKind = tokenKindForTwo(two)
+        if (twoKind != TokenKind.ILLEGAL) {
+            out.add(makeToken(twoKind, two, fileID, line, column))
             idx += 2
             column += 2
             continue
         }
         let one = String.fromUtf8([current])
-        let kind = match (one) {
-            case "." => TokenKind.DOT
-            case "," => TokenKind.COMMA
-            case "(" => TokenKind.LPAREN
-            case ")" => TokenKind.RPAREN
-            case "[" => TokenKind.LSQUARE
-            case "]" => TokenKind.RSQUARE
-            case "{" => TokenKind.LCURL
-            case "}" => TokenKind.RCURL
-            case "+" => TokenKind.ADD
-            case "-" => TokenKind.SUB
-            case "*" => TokenKind.MUL
-            case "/" => TokenKind.DIV
-            case ":" => TokenKind.COLON
-            case ";" => TokenKind.SEMI
-            case "=" => TokenKind.ASSIGN
-            case "@" => TokenKind.AT
-            case "?" => TokenKind.QUEST
-            case "<" => TokenKind.LT
-            case ">" => TokenKind.GT
-            case "$" => TokenKind.DOLLAR
-            case "\\" => TokenKind.ILLEGAL
-            case _ => TokenKind.ILLEGAL
-        }
+        let kind = tokenKindForOne(one)
         out.add(makeToken(kind, one, fileID, line, column))
-        if (kind == TokenKind.ILLEGAL && one != "\\") {
+        if (kind == TokenKind.ILLEGAL) {
             diag.Diagnose(Position(fileID, line, column), "unrecognized token in macro input: " + one)
         }
         idx++
