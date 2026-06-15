@@ -25,6 +25,7 @@ Current Cangjie port state:
 - Added C++-shaped function linkage analysis over current AST surfaces, including modifier-based internal marking, default-parameter/property linkage propagation, exported type/reference promotion, generic source-export queues, and final internal nominal-member cleanup.
 - Added the plugin custom-annotation JSON scanner (`JsonObject`/`JsonPair`) with the C++ cursor behavior for strings, numbers, arrays, object recursion, and recursive key lookup.
 - Added internal-type accessibility collection for public/non-private declarations plus CJMP function parameter/generic matching and default-argument propagation helpers.
+- Added C++-shaped unused-import collection over resolved AST targets, including private-vs-package-wide used maps, cache maps, extend/generic-bound target propagation, import filtering, structured unused findings, and diagnostic reporting through `sema_unused_import`.
 - Added compiling public entrypoints for generic instantiation, type checking, desugar, incremental helpers, test helpers, lookup, collection, diagnostics, join/meet, promotion, and scope utilities.
 
 Known gaps:

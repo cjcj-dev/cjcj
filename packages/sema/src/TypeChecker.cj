@@ -45,6 +45,10 @@ public class TypeChecker {
         }
     }
 
+    public func CheckUnusedImportSpec(pkg: Package): ArrayList<UnusedImportFinding> {
+        return CollectUnusedImports(pkg)
+    }
+
     public func PerformDesugarAfterInstantiation(ctx: ASTContext, pkg: Package): Unit {
         let _ = ctx
         let _ = pkg
