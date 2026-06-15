@@ -19,6 +19,9 @@ Implemented:
   AST packages, declarations, files, semantic `Ty` instances, parser type nodes, generics, function
   bodies, function parameters, patterns, inheritance, properties, and member trees into the Mangle
   descriptor model.
+- Added AST-walker-backed mangler context collection so AST-facing mangling now discovers local
+  variables, wildcard pattern declarations, nested functions, lambdas, extends, and global wildcard
+  pattern declarations from real function bodies and blocks, matching the C++ walker structure.
 - Added public AST-backed overloads for `BaseMangler.Mangle`, `BaseMangler.MangleExportIds`,
   `BaseMangler.MangleExportId`, `BaseMangler.MangleLambda`, `ASTMangler.Mangle`, and top-level
   `MangleAstType`.
@@ -44,8 +47,8 @@ Known fidelity caveats:
   scaffold, so CHIR mangling remains descriptor-backed until a real self-hosted CHIR package exists.
 - The AST adapter maps the currently available self-hosted AST package into the Mangle descriptor model
   and prepares package context from `curFile.curPackage` when available. Byte-for-byte validation against
-  full parser/sema output still depends on downstream packages producing complete AST bodies, annotation
-  arrays, semantic types, parent links, and file/package metadata.
+  full parser/sema output still depends on downstream packages producing complete annotation arrays,
+  semantic types, parent links, and file/package metadata.
 - The descriptor CHIR model preserves the CHIR mangling grammar and indexing algorithms, but it depends
   on callers to populate CHIR-equivalent fields that the C++ implementation obtains from real CHIR IR.
 

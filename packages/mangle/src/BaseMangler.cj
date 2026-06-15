@@ -1126,7 +1126,14 @@ public open class BaseMangler {
     public func MangleExportIds(pkg: Package): Unit {
         let adapter = MangleAstAdapter()
         let convertedPkg = adapter.ConvertPackage(pkg)
-        MangleExportIds(convertedPkg)
+        let ctx = PrepareContextForPackage(convertedPkg)
+        adapter.CollectLocalDecls(ctx, pkg)
+        exportIdMode = true
+        for (decl in convertedPkg.members) {
+            if (decl.TestAttr(MangleAttribute.GLOBAL)) {
+                decl.exportId = MangleExportId(decl)
+            }
+        }
         adapter.CopyExportIdsToAst()
     }
 
@@ -1226,7 +1233,7 @@ public open class BaseMangler {
             if (let Some(pkg) <- file.curPackage) {
                 let convertedPkg = adapter.ConvertPackage(pkg)
                 let ctx = PrepareContextForPackage(convertedPkg)
-                CollectLocalDecls(ctx, convertedPkg)
+                adapter.CollectLocalDecls(ctx, pkg)
             }
         }
     }

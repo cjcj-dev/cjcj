@@ -208,6 +208,15 @@ public class MangleAstAdapter {
         lambdaPairs.add(AstLambdaPair(source, target))
     }
 
+    private func SameNode(left: Node, right: Node): Bool {
+        if (let Some(leftDecl) <- (left as Decl)) {
+            if (let Some(rightDecl) <- (right as Decl)) {
+                return SameDecl(leftDecl, rightDecl)
+            }
+        }
+        return left.astKind == right.astKind && left.begin == right.begin && left.end == right.end
+    }
+
     private func PackageNameOf(node: Node): String {
         if (let Some(decl) <- (node as Decl)) {
             if (!decl.fullPackageName.isEmpty()) {
@@ -315,6 +324,184 @@ public class MangleAstAdapter {
             target.funcBody = ConvertFuncBody(body)
         }
         return target
+    }
+
+    private func AstScopeRoot(node: Node): Option<Node> {
+        if (let Some(lambda) <- (node as LambdaExpr)) {
+            if (let Some(body) <- lambda.funcBody) {
+                return body
+            }
+            return None
+        }
+        if (let Some(function) <- (node as FuncDecl)) {
+            if (let Some(body) <- function.funcBody) {
+                return body
+            }
+            return None
+        }
+        if (let Some(primaryCtor) <- (node as PrimaryCtorDecl)) {
+            if (let Some(body) <- primaryCtor.funcBody) {
+                return body
+            }
+            return None
+        }
+        if (let Some(varDecl) <- (node as VarDeclAbstract)) {
+            if (varDecl.TestAttr(Attribute.GLOBAL)) {
+                return node
+            }
+        }
+        return None
+    }
+
+    private func AstDeclKey(node: Node): Option<MangleDecl> {
+        if (let Some(lambda) <- (node as LambdaExpr)) {
+            return ConvertLambdaExpr(lambda)
+        }
+        if (let Some(function) <- (node as FuncDecl)) {
+            return ConvertDecl(function)
+        }
+        if (let Some(primaryCtor) <- (node as PrimaryCtorDecl)) {
+            return ConvertDecl(primaryCtor)
+        }
+        if (let Some(varDecl) <- (node as VarDeclAbstract)) {
+            return ConvertDecl(varDecl)
+        }
+        return None
+    }
+
+    private func IsCompositeMemberVar(node: Node): Bool {
+        if (let Some(varDecl) <- (node as VarDeclAbstract)) {
+            if (let Some(outer) <- varDecl.outerDecl) {
+                return outer.astKind == ASTKind.CLASS_DECL || outer.astKind == ASTKind.INTERFACE_DECL ||
+                    outer.astKind == ASTKind.STRUCT_DECL || outer.astKind == ASTKind.ENUM_DECL
+            }
+        }
+        return false
+    }
+
+    private func NeedCollectScope(node: Node): Bool {
+        if (node.astKind == ASTKind.FUNC_DECL || node.astKind == ASTKind.LAMBDA_EXPR) {
+            return true
+        }
+        if (let Some(varDecl) <- (node as VarDeclAbstract)) {
+            return varDecl.TestAttr(Attribute.GLOBAL) || IsCompositeMemberVar(node)
+        }
+        return false
+    }
+
+    private func ShouldSkipNestedFuncBody(root: Node, node: Node): Bool {
+        if (SameNode(root, node)) {
+            return false
+        }
+        if (let Some(_) <- (node as FuncBody)) {
+            return true
+        }
+        return false
+    }
+
+    private func RegisterAstVarsInScope(ctx: ManglerContext, key: MangleDecl, root: Node): Unit {
+        let walker = Walker(root, visitPre: { node: Node =>
+            if (ShouldSkipNestedFuncBody(root, node)) {
+                return VisitAction.SKIP_CHILDREN
+            }
+            if (!SameNode(root, node)) {
+                if (let Some(varDecl) <- (node as VarDeclAbstract)) {
+                    ctx.RegisterLocalVar(key, ConvertDecl(varDecl))
+                }
+            }
+            VisitAction.WALK_CHILDREN
+        })
+        walker.Walk()
+    }
+
+    private func RegisterAstWildcardVarsInScope(ctx: ManglerContext, key: MangleDecl, root: Node): Unit {
+        let walker = Walker(root, visitPre: { node: Node =>
+            if (ShouldSkipNestedFuncBody(root, node)) {
+                return VisitAction.SKIP_CHILDREN
+            }
+            if (!SameNode(root, node)) {
+                if (let Some(varWithPattern) <- (node as VarWithPatternDecl)) {
+                    ctx.RegisterLocalWildcardVar(key, ConvertDecl(varWithPattern))
+                }
+            }
+            VisitAction.WALK_CHILDREN
+        })
+        walker.Walk()
+    }
+
+    private func RegisterAstFuncsInScope(ctx: ManglerContext, key: MangleDecl, root: Node): Unit {
+        let walker = Walker(root, visitPre: { node: Node =>
+            if (!SameNode(root, node)) {
+                if (let Some(function) <- (node as FuncDecl)) {
+                    ctx.RegisterLocalFunc(key, ConvertDecl(function))
+                }
+            }
+            VisitAction.WALK_CHILDREN
+        })
+        walker.Walk()
+    }
+
+    private func RegisterAstLambdasInScope(ctx: ManglerContext, key: MangleDecl, root: Node): Unit {
+        let walker = Walker(root, visitPre: { node: Node =>
+            if (ShouldSkipNestedFuncBody(root, node)) {
+                return VisitAction.SKIP_CHILDREN
+            }
+            if (!SameNode(root, node)) {
+                if (let Some(lambda) <- (node as LambdaExpr)) {
+                    ctx.RegisterLambda(key, ConvertLambdaExpr(lambda))
+                }
+            }
+            VisitAction.WALK_CHILDREN
+        })
+        walker.Walk()
+    }
+
+    private func RegisterGenericInstantiatedLocalFunction(ctx: ManglerContext, node: Node): Unit {
+        if (let Some(function) <- (node as FuncDecl)) {
+            if (function.TestAttr(Attribute.GENERIC_INSTANTIATED) && !function.TestAttr(Attribute.GLOBAL)) {
+                if (let Some(outer) <- function.outerDecl) {
+                    if (!outer.IsNominalDecl()) {
+                        if (let Some(key) <- AstDeclKey(outer)) {
+                            ctx.RegisterLocalFunc(key, ConvertDecl(function))
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private func CollectScope(ctx: ManglerContext, node: Node): Unit {
+        if (let Some(key) <- AstDeclKey(node)) {
+            RegisterGenericInstantiatedLocalFunction(ctx, node)
+            if (let Some(root) <- AstScopeRoot(node)) {
+                RegisterAstVarsInScope(ctx, key, root)
+                RegisterAstLambdasInScope(ctx, key, root)
+                RegisterAstWildcardVarsInScope(ctx, key, root)
+                RegisterAstFuncsInScope(ctx, key, root)
+            }
+        }
+    }
+
+    public func CollectLocalDecls(ctx: ManglerContext, pkg: Package): Unit {
+        let walker = Walker(pkg, visitPre: { node: Node =>
+            if (let Some(extendDecl) <- (node as ExtendDecl)) {
+                if (let Some(file) <- extendDecl.curFile) {
+                    ctx.SaveExtend2CurFile(ConvertFile(file), ConvertDecl(extendDecl))
+                }
+            }
+            if (let Some(varWithPattern) <- (node as VarWithPatternDecl)) {
+                if (varWithPattern.TestAttr(Attribute.GLOBAL)) {
+                    if (let Some(file) <- varWithPattern.curFile) {
+                        ctx.SaveGlobalWildcardVar(ConvertFile(file), ConvertDecl(varWithPattern))
+                    }
+                }
+            }
+            if (NeedCollectScope(node)) {
+                CollectScope(ctx, node)
+            }
+            VisitAction.WALK_CHILDREN
+        })
+        walker.Walk()
     }
 
     private func FillDeclSubclassFields(source: Decl, target: MangleDecl): Unit {
