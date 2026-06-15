@@ -41,6 +41,45 @@ private func readUInt32(bytes: ArrayList<UInt8>, cursor: Box<Int64>): UInt32 {
     return b0 | b1 | b2 | b3
 }
 
+private func readNativeByte(ptr: CPointer<UInt8>, cursor: Box<Int64>): UInt8 {
+    let value = unsafe { (ptr + cursor.value).read() }
+    cursor.value++
+    return value
+}
+
+private func readNativeUInt16(ptr: CPointer<UInt8>, cursor: Box<Int64>): UInt16 {
+    let b0 = UInt16(readNativeByte(ptr, cursor))
+    let b1 = UInt16(readNativeByte(ptr, cursor)) << 8
+    return b0 | b1
+}
+
+private func readNativeUInt32(ptr: CPointer<UInt8>, cursor: Box<Int64>): UInt32 {
+    let b0 = UInt32(readNativeByte(ptr, cursor))
+    let b1 = UInt32(readNativeByte(ptr, cursor)) << 8
+    let b2 = UInt32(readNativeByte(ptr, cursor)) << 16
+    let b3 = UInt32(readNativeByte(ptr, cursor)) << 24
+    return b0 | b1 | b2 | b3
+}
+
+private func readNativeInt32(ptr: CPointer<UInt8>, cursor: Box<Int64>): Int64 {
+    return Int64(readNativeUInt32(ptr, cursor))
+}
+
+private func readNativeString(ptr: CPointer<UInt8>, cursor: Box<Int64>, len: Int64): String {
+    let builder = StringBuilder()
+    var idx: Int64 = 0
+    while (idx < len) {
+        let byte = readNativeByte(ptr, cursor)
+        if (byte == 0u8) {
+            builder.append("\\0")
+        } else {
+            builder.append(String.fromUtf8([byte]))
+        }
+        idx++
+    }
+    return builder.toString()
+}
+
 private func readInt32(bytes: ArrayList<UInt8>, cursor: Box<Int64>): Int64 {
     return Int64(readUInt32(bytes, cursor))
 }
@@ -164,6 +203,35 @@ public class TokenSerialization {
             let token = Token(kind, value, begin, end)
             token.delimiterNum = delimiterNum
             token.isSingleQuote = isSingle == 1u16
+            out.add(token)
+            idx++
+        }
+        return out
+    }
+
+    public static func GetTokensFromNativeBuffer(ptr: CPointer<UInt8>): ArrayList<Token> {
+        let out = ArrayList<Token>()
+        if (ptr.isNull()) {
+            return out
+        }
+        let cursor = Box<Int64>(0)
+        let count = readNativeUInt32(ptr, cursor)
+        var idx: UInt32 = 0u32
+        while (idx < count) {
+            let kind = tokenKindFromIndex(readNativeUInt16(ptr, cursor))
+            let strLen = Int64(readNativeUInt32(ptr, cursor))
+            let value = readNativeString(ptr, cursor, strLen)
+            let fileID = UInt64(readNativeUInt32(ptr, cursor))
+            let line = readNativeInt32(ptr, cursor)
+            let column = readNativeInt32(ptr, cursor)
+            let isSingleQuote = readNativeUInt16(ptr, cursor) == 1u16
+            var delimiterNum: UInt32 = 0u32
+            if (kind == TokenKind.MULTILINE_RAW_STRING) {
+                delimiterNum = UInt32(readNativeUInt16(ptr, cursor))
+            }
+            let begin = Position(fileID, line, column)
+            let token = Token(kind, value, begin, begin + value.size, isSingleQuote)
+            token.delimiterNum = delimiterNum
             out.add(token)
             idx++
         }

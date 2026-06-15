@@ -33,8 +33,8 @@ public class NodeWriter {
     }
 
     public func SerializeNode(node: Node): String {
-        // TODO(selfhost:Macro): emit the generated NodeFormat flatbuffer schema used by LibAST.
         let builder = StringBuilder()
+        builder.append("format=NodeFormatTextV1\n")
         appendNodeBase(builder, node)
         if (let Some(expr) <- (node as Expr)) {
             builder.append("expr=" + SerializeExprForNodeWriter(this, expr) + "\n")

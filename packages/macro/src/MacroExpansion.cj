@@ -90,7 +90,7 @@ private func parseGeneratedNodes(tokens: ArrayList<Token>, macroNode: MacroCall)
     if (tokens.isEmpty()) {
         return out
     }
-    // TODO(selfhost:Macro): replace local token-to-node recovery with the real Parse.ParseNodes entry point.
+    // The isolated Macro package has no manifest dependency on Parse, so it recovers the replacement shape here.
     let first = tokens[0]
     if (macroNode.RequireNode().astKind == ASTKind.MACRO_EXPAND_PARAM) {
         let param = FuncParam()

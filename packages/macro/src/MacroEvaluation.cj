@@ -293,6 +293,100 @@ private func isMacroDefUndeclared(macCall: MacroCall): Bool {
     return invocation.hasParenthesis && !invocation.IsIfAvailable()
 }
 
+private type CommonMacroFunc = CFunc<(CPointer<UInt8>, Int64, CPointer<Unit>) -> CPointer<UInt8>>
+private type AttrMacroFunc = CFunc<(CPointer<UInt8>, Int64, CPointer<UInt8>, Int64, CPointer<Unit>) -> CPointer<UInt8>>
+
+private func nativeBufferSize(bytes: ArrayList<UInt8>): Int64 {
+    if (bytes.isEmpty()) {
+        return 1
+    }
+    return bytes.size
+}
+
+private func writeNativeBytes(ptr: CPointer<UInt8>, bytes: ArrayList<UInt8>): Unit {
+    var idx: Int64 = 0
+    unsafe {
+        while (idx < bytes.size) {
+            (ptr + idx).write(bytes[idx])
+            idx++
+        }
+    }
+}
+
+private func installNativeMacroResult(macCall: MacroCall, resultPtr: CPointer<UInt8>): Bool {
+    if (resultPtr.isNull()) {
+        return false
+    }
+    let invocation = macCall.RequireInvocation()
+    let tokens = TokenSerialization.GetTokensFromNativeBuffer(resultPtr)
+    FreeNativeBuffer(resultPtr)
+    invocation.newTokens.clear()
+    for (token in tokens) {
+        invocation.newTokens.add(token)
+    }
+    macCall.isDataReady = true
+    return true
+}
+
+private func invokeCommonNativeMacro(macCall: MacroCall, inputBytes: ArrayList<UInt8>): Bool {
+    var result = false
+    try (inputPtr = LibC.malloc<UInt8>(count: nativeBufferSize(inputBytes)).asResource()) {
+        if (inputPtr.value.isNull()) {
+            result = false
+        } else {
+            writeNativeBytes(inputPtr.value, inputBytes)
+            let invokeFunc = CommonMacroFunc(macCall.invokeFunc)
+            let resultPtr = unsafe { invokeFunc(inputPtr.value, inputBytes.size, CPointer<Unit>()) }
+            result = installNativeMacroResult(macCall, resultPtr)
+        }
+    } catch (e: Exception) {
+        result = false
+    }
+    return result
+}
+
+private func invokeAttrNativeMacro(macCall: MacroCall, attrBytes: ArrayList<UInt8>, inputBytes: ArrayList<UInt8>): Bool {
+    var result = false
+    try (attrPtr = LibC.malloc<UInt8>(count: nativeBufferSize(attrBytes)).asResource()) {
+        if (attrPtr.value.isNull()) {
+            result = false
+        } else {
+            writeNativeBytes(attrPtr.value, attrBytes)
+            try (inputPtr = LibC.malloc<UInt8>(count: nativeBufferSize(inputBytes)).asResource()) {
+                if (inputPtr.value.isNull()) {
+                    result = false
+                } else {
+                    writeNativeBytes(inputPtr.value, inputBytes)
+                    let invokeFunc = AttrMacroFunc(macCall.invokeFunc)
+                    let resultPtr = unsafe {
+                        invokeFunc(attrPtr.value, attrBytes.size, inputPtr.value, inputBytes.size, CPointer<Unit>())
+                    }
+                    result = installNativeMacroResult(macCall, resultPtr)
+                }
+            }
+        }
+    } catch (e: Exception) {
+        result = false
+    }
+    return result
+}
+
+private func evaluateNativeMacro(macCall: MacroCall): Bool {
+    if (macCall.invokeFunc.isNull() && !macCall.FindMacroDefMethod()) {
+        return false
+    }
+    if (macCall.invokeFunc.isNull()) {
+        return false
+    }
+    let invocation = macCall.RequireInvocation()
+    let inputBytes = TokenSerialization.GetTokensBytes(invocation.args)
+    if (invocation.hasAttr) {
+        let attrBytes = TokenSerialization.GetTokensBytes(invocation.attrs)
+        return invokeAttrNativeMacro(macCall, attrBytes, inputBytes)
+    }
+    return invokeCommonNativeMacro(macCall, inputBytes)
+}
+
 public class MacroEvaluation {
     private var ci: CompilerInstance
     private var macroCollector: MacroCollector
@@ -412,10 +506,11 @@ public class MacroEvaluation {
             macCall.isDataReady = true
             return
         }
-        // TODO(selfhost:Macro): call compiled macro functions through the cjnative runtime C ABI.
-        invocation.newTokens.clear()
-        invocation.newTokens.add(Token(TokenKind.ILLEGAL, ""))
-        macCall.isDataReady = true
+        if (!evaluateNativeMacro(macCall)) {
+            invocation.newTokens.clear()
+            invocation.newTokens.add(Token(TokenKind.ILLEGAL, ""))
+            macCall.isDataReady = true
+        }
     }
 
     public func ReleaseThreadHandle(macCall: MacroCall): Unit {

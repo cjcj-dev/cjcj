@@ -10,8 +10,10 @@ extend MacroCall {
         }
         if (libPath.isEmpty()) {
             for (handle in GetOpenedLibHandles()) {
-                if (GetMethod(handle, methodName).isSome()) {
+                let method = GetMethodPointer(handle, methodName)
+                if (!method.isNull()) {
                     invokeFuncName = methodName
+                    invokeFunc = method
                     return true
                 }
             }
@@ -22,9 +24,11 @@ extend MacroCall {
             status = MacroEvalStatus.FAIL
             return false
         }
-        if (GetMethod(handle, methodName).isSome()) {
+        let method = GetMethodPointer(handle, methodName)
+        if (!method.isNull()) {
             SetOpenedLibHandles(handle)
             invokeFuncName = methodName
+            invokeFunc = method
             return true
         }
         return false

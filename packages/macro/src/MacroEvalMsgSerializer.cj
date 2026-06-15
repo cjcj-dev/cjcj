@@ -32,11 +32,11 @@ extend MacroMsgContent <: Equatable<MacroMsgContent> {
 }
 
 private func escapeField(value: String): String {
-    return value.replace("\\", "\\\\").replace("\n", "\\n").replace("|", "\\p")
+    return value.replace("\\", "\\\\").replace("\n", "\\n").replace("|", "\\p").replace(",", "\\c").replace(";", "\\s")
 }
 
 private func unescapeField(value: String): String {
-    return value.replace("\\p", "|").replace("\\n", "\n").replace("\\\\", "\\")
+    return value.replace("\\s", ";").replace("\\c", ",").replace("\\p", "|").replace("\\n", "\n").replace("\\\\", "\\")
 }
 
 private func bytesToString(bytes: ArrayList<UInt8>): String {
@@ -190,6 +190,64 @@ private func decodeItems(value: String, out: ArrayList<ItemInfo>): Unit {
     }
 }
 
+private func diagSeverityIndex(value: DiagSeverity): Int64 {
+    return match (value) {
+        case DiagSeverity.DS_ERROR => 0
+        case DiagSeverity.DS_WARNING => 1
+        case DiagSeverity.DS_NOTE => 2
+    }
+}
+
+private func diagSeverityFromIndex(value: Int64): DiagSeverity {
+    return match (value) {
+        case 0 => DiagSeverity.DS_ERROR
+        case 1 => DiagSeverity.DS_WARNING
+        case _ => DiagSeverity.DS_NOTE
+    }
+}
+
+private func encodeDiagnostics(diags: ArrayList<Diagnostic>): String {
+    let builder = StringBuilder()
+    var idx: Int64 = 0
+    while (idx < diags.size) {
+        if (idx > 0) {
+            builder.append(";")
+        }
+        let diag = diags[idx]
+        builder.append(diagSeverityIndex(diag.severity).toString() + ",")
+        builder.append(encodePosition(diag.range.begin) + ",")
+        builder.append(encodePosition(diag.range.end) + ",")
+        builder.append(escapeField(diag.message) + ",")
+        builder.append(escapeField(diag.hint))
+        idx++
+    }
+    return builder.toString()
+}
+
+private func decodeDiagnostics(value: String, out: ArrayList<Diagnostic>): Unit {
+    out.clear()
+    if (value.isEmpty()) {
+        return
+    }
+    for (segment in value.split(";")) {
+        let fields = segment.split(",")
+        if (fields.size < 9) {
+            continue
+        }
+        let severity = diagSeverityFromIndex(Int64.parse(fields[0]))
+        let begin = Position(UInt64.parse(fields[1]), Int64.parse(fields[2]), Int64.parse(fields[3]))
+        let end = Position(UInt64.parse(fields[4]), Int64.parse(fields[5]), Int64.parse(fields[6]))
+        out.add(Diagnostic(severity, Range(begin, end), unescapeField(fields[7]), hint: unescapeField(fields[8])))
+    }
+}
+
+private func getCallDiagnostics(macCall: MacroCall): ArrayList<Diagnostic> {
+    if (let Some(instance) <- macCall.ci) {
+        return instance.diag.diagnostics
+    }
+    return ArrayList<Diagnostic>()
+}
+
 private func appendLine(builder: StringBuilder, key: String, value: String): Unit {
     builder.append(key + "|" + value + "\n")
 }
@@ -232,6 +290,7 @@ private func resultMessage(macCall: MacroCall): String {
     appendLine(builder, "TOKENS", encodeTokens(invocation.newTokens))
     appendLine(builder, "ITEMS", encodeItems(macCall.items))
     appendLine(builder, "ASSERT_PARENTS", encodeStringList(macCall.assertParents))
+    appendLine(builder, "DIAGS", encodeDiagnostics(getCallDiagnostics(macCall)))
     return builder.toString()
 }
 
@@ -397,8 +456,10 @@ public class MacroEvalMsgSerializer {
     }
 
     public static func DeSerializeDiagsFromResult(diags: ArrayList<Diagnostic>, bufferData: ArrayList<UInt8>): Unit {
-        let _ = bufferData
         diags.clear()
-        // TODO(selfhost:Macro): replace the local line codec with the generated MacroMsgFormat flatbuffer schema.
+        let lines = bytesToString(bufferData).split("\n")
+        if (let Some(value) <- lineValue(lines, "DIAGS")) {
+            decodeDiagnostics(value, diags)
+        }
     }
 }

@@ -201,6 +201,8 @@ public class MacroCall {
     public var strKind: TokenKind = TokenKind.STRING_LITERAL
     public var newStr: String = ""
     public var invokeFuncName: String = ""
+    public var invokeFunc: CPointer<Unit> = CPointer<Unit>()
+    public var coroutineHandle: CPointer<Unit> = CPointer<Unit>()
     public var isDataReady: Bool = false
     public var useParentPos: Bool = false
     public var parentMacroCall: Option<MacroCall> = None
