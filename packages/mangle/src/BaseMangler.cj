@@ -649,8 +649,7 @@ public open class BaseMangler {
                                 var reverseIndex: Int64 = genericsTypeStack.size - 1
                                 while (reverseIndex >= 0) {
                                     if (genericsTypeStack[reverseIndex] == genericsTy.name) {
-                                        let index = genericsTypeStack.size - reverseIndex - 1
-                                        name = MANGLE_GENERIC_TYPE_PREFIX + DecimalToManglingNumber("${index}")
+                                        name = MANGLE_GENERIC_TYPE_PREFIX + DecimalToManglingNumber("${reverseIndex}")
                                         found = true
                                         break
                                     }
@@ -1015,7 +1014,7 @@ public open class BaseMangler {
             var reverseIndex: Int64 = genericsTypeStack.size - 1
             while (reverseIndex >= 0) {
                 if (genericsTypeStack[reverseIndex] == ty.name) {
-                    index = genericsTypeStack.size - reverseIndex - 1
+                    index = reverseIndex
                     found = true
                     break
                 }

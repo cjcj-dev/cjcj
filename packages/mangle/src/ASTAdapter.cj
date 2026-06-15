@@ -162,12 +162,16 @@ private func CopyParamAttributes(source: FuncParam, target: MangleFuncParam): Un
     AddParamAttrIf(target, source.TestAttr(Attribute.PRIVATE), MangleAttribute.PRIVATE)
     AddParamAttrIf(target, source.TestAttr(Attribute.PROTECTED), MangleAttribute.PROTECTED)
     AddParamAttrIf(target, source.TestAttr(Attribute.INTERNAL), MangleAttribute.INTERNAL)
+    target.hasAccessibilityModifiers = true
     for (modifier in source.modifiers) {
         if (modifier.modifier == TokenKind.PUBLIC) {
+            target.accessibilityModifiers += MANGLE_PUBLIC_PREFIX
             AddParamAttrIf(target, true, MangleAttribute.PUBLIC)
         } else if (modifier.modifier == TokenKind.PRIVATE) {
+            target.accessibilityModifiers += MANGLE_PRIVATE_PREFIX
             AddParamAttrIf(target, true, MangleAttribute.PRIVATE)
         } else if (modifier.modifier == TokenKind.PROTECTED) {
+            target.accessibilityModifiers += MANGLE_PROTECTED_PREFIX
             AddParamAttrIf(target, true, MangleAttribute.PROTECTED)
         } else if (modifier.modifier == TokenKind.INTERNAL) {
             AddParamAttrIf(target, true, MangleAttribute.INTERNAL)

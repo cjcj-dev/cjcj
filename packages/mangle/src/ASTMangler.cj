@@ -147,6 +147,9 @@ public func MangleAstType(typeNode: Type): String {
 }
 
 private func MangleAccessibility(param: MangleFuncParam): String {
+    if (param.hasAccessibilityModifiers) {
+        return param.accessibilityModifiers
+    }
     var res = ""
     if (param.TestAttr(MangleAttribute.PUBLIC)) {
         res += MANGLE_PUBLIC_PREFIX

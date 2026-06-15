@@ -376,6 +376,8 @@ public class MangleFuncParam {
     public var isNamedParam: Bool = false
     public var hasLetOrVar: Bool = false
     public var isVar: Bool = false
+    public var hasAccessibilityModifiers: Bool = false
+    public var accessibilityModifiers: String = ""
     public let attrs: ArrayList<MangleAttribute> = ArrayList<MangleAttribute>()
 
     public init() {}

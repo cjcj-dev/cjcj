@@ -41,6 +41,8 @@ Implemented:
   parameter mangling with the C++ `BaseMangler` behavior, including native-backend runtime throw helpers.
 - Aligned parser-AST extend generic-constraint ordering with the C++ stable sort by constrained type.
 - Aligned parser-AST constant type annotation conversion with the C++ use of literal `stringValue`.
+- Aligned descriptor and CHIR generic type references with the C++ declaration-order stack index.
+- Aligned parser-AST member-parameter accessibility mangling with C++ modifier-list based emission.
 - Implemented parser-AST type annotation mangling, including primitive, reference, qualified, option,
   constant, VArray, parenthesized, function, tuple, generic, inherited type, generic constraint,
   and var-with-pattern name handling.

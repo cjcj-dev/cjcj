@@ -267,8 +267,7 @@ public func MangleCHIRType(t: CHIRType, genericsTypeStack: ArrayList<String>, us
         var idx = genericsTypeStack.size - 1
         while (idx >= 0) {
             if (genericsTypeStack[idx] == t.srcCodeIdentifier) {
-                return MANGLE_CHIR_GENERIC_PREFIX +
-                    DecimalToManglingNumber("${genericsTypeStack.size - idx - 1}")
+                return MANGLE_CHIR_GENERIC_PREFIX + DecimalToManglingNumber("${idx}")
             }
             idx--
         }
