@@ -1,6 +1,6 @@
 # Mangle Port Status
 
-Date: 2026-06-15
+Date: 2026-06-16
 
 Build: `cjpm build` passes.
 
@@ -15,11 +15,22 @@ Implemented:
   paths, composite types, function types, tuple types, and recursive entity/type output.
 - Added descriptor-backed equivalents for declarations, files, semantic types, parser type annotations,
   generic constraints, function parameters, patterns, CHIR functions, CHIR custom types, and CHIR types.
+- Added a module-local dependency on `cangjie_compiler::ast` and an AST adapter that converts real
+  AST packages, declarations, files, semantic `Ty` instances, parser type nodes, generics, function
+  bodies, function parameters, patterns, inheritance, properties, and member trees into the Mangle
+  descriptor model.
+- Added public AST-backed overloads for `BaseMangler.Mangle`, `BaseMangler.MangleExportIds`,
+  `BaseMangler.MangleExportId`, `BaseMangler.MangleLambda`, `ASTMangler.Mangle`, and top-level
+  `MangleAstType`.
+- Added AST-facing `MangleUtils` overloads for primitive type lookup, auto-boxed declaration checks,
+  enum-element mangling, file-private suffix mangling, and custom-identifier mangling.
 - Implemented declaration, package, prefix, generic-argument, function-parameter, user-defined type,
   tuple, function, array, VArray, pointer, CString, local-variable, local-function, lambda, extend,
   export-id, and entry-function mangling logic over the descriptor model.
 - Implemented recursive mangler context collection for local variables, wildcard pattern variables,
   local functions, lambdas, extends, and global wildcard pattern declarations.
+- Aligned lambda numbering with the C++ context-index lookup and aligned export-id handling with the
+  C++ function/property/primary-constructor/interface-generic branches.
 - Implemented parser-AST type annotation mangling, including primitive, reference, qualified, option,
   constant, VArray, parenthesized, function, tuple, generic, inherited type, generic constraint,
   and var-with-pattern name handling.
@@ -29,18 +40,13 @@ Implemented:
 
 Known fidelity caveats:
 
-- The C++ public API takes real `AST`, `Basic`, and CHIR objects. This package cannot currently import
-  `cangjie_compiler::ast` or `cangjie_compiler::basic` without editing package metadata, and this task
-  explicitly disallows `cjpm.toml` edits. The port therefore exposes a faithful local descriptor model
-  rather than direct AST/CHIR bindings.
-- The descriptor model preserves the mangling grammar and indexing algorithms, but it depends on callers
-  to populate AST/CHIR-equivalent fields that the C++ implementation obtains from real compiler nodes,
-  semantic types, files, function bodies, annotations, and parent links.
-- The C++ walker visits the full compiler AST, including statement bodies and annotations. The Cangjie
-  context collector recurses through descriptor `members`, so downstream integration must map real
-  function bodies, local declarations, lambdas, annotations, and pattern declarations into that tree.
-- Export-id handling covers the recursive member path and property accessor mangling shape, but exact
-  generic-parameter export-id side effects need real AST generic declarations before they can be matched
-  byte-for-byte with the C++ implementation.
+- The C++ public API also takes real CHIR objects. The CHIR package in this worktree is still only a
+  scaffold, so CHIR mangling remains descriptor-backed until a real self-hosted CHIR package exists.
+- The AST adapter maps the currently available self-hosted AST package into the Mangle descriptor model
+  and prepares package context from `curFile.curPackage` when available. Byte-for-byte validation against
+  full parser/sema output still depends on downstream packages producing complete AST bodies, annotation
+  arrays, semantic types, parent links, and file/package metadata.
+- The descriptor CHIR model preserves the CHIR mangling grammar and indexing algorithms, but it depends
+  on callers to populate CHIR-equivalent fields that the C++ implementation obtains from real CHIR IR.
 
 Remaining Mangle selfhost markers: 0.

@@ -855,7 +855,6 @@ public func TryParsePath(mangled: String, restRef!: StringRef, state!: ParseStat
         let ch = mangled[idx]
         var nextIdx = idx
         var entityTy = EntityType.ERROR_ENTITY_TYPE
-        var entityName = ""
         if (ch == b'0') {
             nextIdx = ForwardNumber(mangled, idx: nextIdx + MANGLE_CHAR_LEN)
             entityTy = if (nextIdx == idx + MANGLE_CHAR_LEN) { EntityType.ERROR_ENTITY_TYPE } else { EntityType.ANONYMOUS }
@@ -864,7 +863,6 @@ public func TryParsePath(mangled: String, restRef!: StringRef, state!: ParseStat
             let parsed = tryNamePrefixPath(mangled, state, entities, idx)
             nextIdx = parsed[0]
             entityTy = parsed[1]
-            entityName = parsed[2]
             if (parsed[3]) {
                 return entities
             }
@@ -872,7 +870,6 @@ public func TryParsePath(mangled: String, restRef!: StringRef, state!: ParseStat
             let parsed = tryExtendPath(mangled, state, entities, idx)
             nextIdx = parsed[0]
             entityTy = parsed[1]
-            entityName = parsed[2]
             if (parsed[3]) {
                 return entities
             }
@@ -883,7 +880,6 @@ public func TryParsePath(mangled: String, restRef!: StringRef, state!: ParseStat
         } else if (isSpecialName(mangled, idx, stdPkg: true)) {
             nextIdx = forwardPackageName(mangled, idx, state)
             entityTy = EntityType.PACKAGE
-            entityName = mangled[idx..idx + MANGLE_PREFIX_LEN]
         }
         if (idx != nextIdx && entityTy != EntityType.ERROR_ENTITY_TYPE) {
             if (isGeneralEntity(entityTy)) {

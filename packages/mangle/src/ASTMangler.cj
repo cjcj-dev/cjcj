@@ -2,6 +2,7 @@ package cangjie_compiler::mangle
 
 import std.collection.*
 import std.sort.*
+import cangjie_compiler::ast.*
 
 public let MANGLE_PAREN_PREFIX: String = "P"
 public let MANGLE_OPTION_PREFIX: String = "O"
@@ -140,18 +141,9 @@ public func MangleAstType(typeAnnotation: MangleTypeAnnotation): String {
     }
 }
 
-private func MangleAccessibility(decl: MangleDecl): String {
-    var res = ""
-    if (decl.TestAttr(MangleAttribute.PUBLIC)) {
-        res += MANGLE_PUBLIC_PREFIX
-    }
-    if (decl.TestAttr(MangleAttribute.PROTECTED)) {
-        res += MANGLE_PROTECTED_PREFIX
-    }
-    if (decl.TestAttr(MangleAttribute.PRIVATE)) {
-        res += MANGLE_PRIVATE_PREFIX
-    }
-    return res
+public func MangleAstType(typeNode: Type): String {
+    let adapter = MangleAstAdapter()
+    return MangleAstType(adapter.ConvertTypeAnnotation(typeNode))
 }
 
 private func MangleAccessibility(param: MangleFuncParam): String {
@@ -234,6 +226,11 @@ public class ASTMangler {
         return MangleDeclCommon(decl)
     }
 
+    public func Mangle(decl: Decl): String {
+        let adapter = MangleAstAdapter()
+        return Mangle(adapter.ConvertDecl(decl))
+    }
+
     public static func ManglePrimitiveType(typeAnnotation: MangleTypeAnnotation): String {
         if (let Some(value) <- MangleBuiltinTypeImpl(typeAnnotation.name)) {
             return value
@@ -244,6 +241,11 @@ public class ASTMangler {
             }
         }
         return MANGLE_INITIAL_PREFIX
+    }
+
+    public static func ManglePrimitiveType(typeNode: Type): String {
+        let adapter = MangleAstAdapter()
+        return ASTMangler.ManglePrimitiveType(adapter.ConvertTypeAnnotation(typeNode))
     }
 
     public static func MangleBuiltinType(typeName: String): String {

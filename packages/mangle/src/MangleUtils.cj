@@ -2,6 +2,7 @@ package cangjie_compiler::mangle
 
 import std.collection.*
 import std.convert.*
+import cangjie_compiler::ast.*
 
 public let MANGLE_CANGJIE_PREFIX: String = "_C"
 public let MANGLE_NESTED_PREFIX: String = "N"
@@ -104,6 +105,10 @@ public func PrimitiveTypeMangle(kind: MangleTypeKind): Option<String> {
     }
 }
 
+public func PrimitiveTypeMangle(kind: TypeKind): Option<String> {
+    return PrimitiveTypeMangle(ConvertAstTypeToMangle(PrimitiveTy(kind)).kind)
+}
+
 public func OperatorTypeMangle(name: String): Option<String> {
     return match (name) {
         case "[]" => "ix"
@@ -141,6 +146,10 @@ public func IsAutoBoxedBaseDecl(decl: MangleDecl): Bool {
     return decl.TestAttr(MangleAttribute.NO_MANGLE) && decl.astKind == MangleAstKind.CLASS_DECL
 }
 
+public func IsAutoBoxedBaseDecl(decl: Decl): Bool {
+    return IsAutoBoxedBaseDecl(ConvertAstDeclToMangle(decl))
+}
+
 public func MangleEnumElement(enumDeclMangledName: String, decl: MangleDecl): String {
     var elementClassName = enumDeclMangledName + MANGLE_DOLLAR_PREFIX + decl.identifier
     if (let Some(ty) <- decl.semaTy) {
@@ -151,8 +160,34 @@ public func MangleEnumElement(enumDeclMangledName: String, decl: MangleDecl): St
     return elementClassName
 }
 
+public func MangleEnumElement(enumDeclMangledName: String, decl: Decl): String {
+    return MangleEnumElement(enumDeclMangledName, ConvertAstDeclToMangle(decl))
+}
+
 public func GetMangledNameOfCompilerAddedClass(className: String): String {
     return MANGLE_NESTED_PREFIX + MangleName(className) + MANGLE_SUFFIX
+}
+
+public func ComputeMangledNameWithCustomIdentifier(decl: Decl, customIdentifier: String): String {
+    let originalIdentifier = decl.identifier
+    let originalMangledName = decl.mangledName
+    decl.identifier = SrcIdentifier(customIdentifier)
+    decl.mangledName = ""
+    let mangledName = BaseMangler().Mangle(decl)
+    decl.identifier = originalIdentifier
+    decl.mangledName = originalMangledName
+    return mangledName
+}
+
+public func ComputeMangledNameWithCustomIdentifier(decl: MangleDecl, customIdentifier: String): String {
+    let originalIdentifier = decl.identifier
+    let originalMangledName = decl.mangledName
+    decl.identifier = customIdentifier
+    decl.mangledName = ""
+    let mangledName = BaseMangler().Mangle(decl)
+    decl.identifier = originalIdentifier
+    decl.mangledName = originalMangledName
+    return mangledName
 }
 
 public func GetOptPkgName(pkgName: String): String {
@@ -225,6 +260,10 @@ public func MangleFilePrivate(decl: MangleDecl): String {
         return MangleName(ToHex(file.fileHash))
     }
     return MangleName(MANGLE_DOLLAR_PREFIX)
+}
+
+public func MangleFilePrivate(decl: Decl): String {
+    return MangleFilePrivate(ConvertAstDeclToMangle(decl))
 }
 
 public func ToHex(value: UInt64): String {
