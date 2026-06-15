@@ -26,6 +26,8 @@ Current Cangjie port state:
 - Added the plugin custom-annotation JSON scanner (`JsonObject`/`JsonPair`) with the C++ cursor behavior for strings, numbers, arrays, object recursion, and recursive key lookup.
 - Added internal-type accessibility collection for public/non-private declarations plus CJMP function parameter/generic matching and default-argument propagation helpers.
 - Added C++-shaped unused-import collection over resolved AST targets, including private-vs-package-wide used maps, cache maps, extend/generic-bound target propagation, import filtering, structured unused findings, and diagnostic reporting through `sema_unused_import`.
+- Added declaration-attribute propagation and validation for nominal declarations, interface/enum/struct/class/extend members, property accessors, CJMP abstract members, generic operator functions, and context parent links.
+- Added access-control and mutation helpers for visibility filtering, inout receiver-use detection, `let` value access to `mut` functions, mutable-function-alone detection, and non-mut struct member mutation checks.
 - Added compiling public entrypoints for generic instantiation, type checking, desugar, incremental helpers, test helpers, lookup, collection, diagnostics, join/meet, promotion, and scope utilities.
 
 Known gaps:

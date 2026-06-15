@@ -2,6 +2,7 @@ package cangjie_compiler::sema
 
 import std.collection.*
 import cangjie_compiler::ast.*
+import cangjie_compiler::option.GlobalOptions as OptionGlobalOptions
 import cangjie_compiler::option.OverflowStrategy as OptionOverflowStrategy
 
 private func ConvertOverflowStrategy(strategy: OptionOverflowStrategy): OverflowStrategy {
@@ -47,6 +48,14 @@ public class TypeChecker {
 
     public func CheckUnusedImportSpec(pkg: Package): ArrayList<UnusedImportFinding> {
         return CollectUnusedImports(pkg)
+    }
+
+    public func CheckAllDeclAttributes(pkg: Package): ArrayList<DeclAttributeIssue> {
+        var options = OptionGlobalOptions()
+        if (let Some(instance) <- ci) {
+            options = instance.globalOptions
+        }
+        return CheckDeclAttributesForPackage(pkg, opts: options)
     }
 
     public func PerformDesugarAfterInstantiation(ctx: ASTContext, pkg: Package): Unit {
