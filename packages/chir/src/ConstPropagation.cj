@@ -1,7 +1,12 @@
 package cangjie_compiler::chir
 
 public class ConstPropagation {
-    public init() {}
+    private let builder: Option<CHIRBuilder>
+    private let constEval: ConstEval = ConstEval()
+
+    public init(builder!: Option<CHIRBuilder> = None) {
+        this.builder = builder
+    }
 
     public func RunOnPackage(pkg: Package): Int64 {
         var changed: Int64 = 0
@@ -12,7 +17,6 @@ public class ConstPropagation {
     }
 
     public func RunOnFunction(fn: Function): Int64 {
-        // TODO(selfhost:CHIR): port C++ constant lattice/evaluator and branch rewriting.
         var changed: Int64 = 0
         if (let Some(body) <- fn.GetBody()) {
             for (block in body.GetBlocksRef()) {
@@ -28,13 +32,60 @@ public class ConstPropagation {
         var idx: Int64 = 0
         while (idx < exprs.size) {
             let expr = exprs[idx]
-            if (TrySimplifyBinary(expr)) {
+            if (TryFoldToConstant(expr)) {
+                changed++
+            } else if (TrySimplifyUnary(expr)) {
+                changed++
+            } else if (TrySimplifyBinary(expr)) {
                 changed++
             } else {
                 idx++
             }
         }
         return changed
+    }
+
+    private func TryFoldToConstant(expr: Expression): Bool {
+        if (expr.IsConstant() || expr.IsTerminator() || expr.HasExceptionBranch()) {
+            return false
+        }
+        if (builder.isNone()) {
+            return false
+        }
+        if (let Some(foldedLiteral) <- constEval.EvaluateToLiteral(expr)) {
+            if (let Some(result) <- expr.GetResult()) {
+                if (let Some(resultTy) <- result.GetType()) {
+                    if (let Some(parentBlock) <- expr.GetParentBlock()) {
+                        if (let Some(chirBuilder) <- builder) {
+                            let newExpr = chirBuilder.CreateConstant(resultTy, foldedLiteral, parentBlock)
+                            newExpr.SetDebugLocation(expr.GetDebugLocation())
+                            expr.ReplaceWith(newExpr)
+                            return true
+                        }
+                    }
+                }
+            }
+        }
+        return false
+    }
+
+    private func TrySimplifyUnary(expr: Expression): Bool {
+        if (!expr.IsUnaryExpr() || expr.GetNumOfOperands() != 1) {
+            return false
+        }
+        let kind = expr.GetExprKind()
+        if (kind != ExprKind.NOT && kind != ExprKind.BITNOT) {
+            return false
+        }
+        let operand = expr.GetOperand(0)
+        if (let Some(local) <- operand.AsLocalVar()) {
+            if (let Some(operandExpr) <- local.GetExpr()) {
+                if (operandExpr.GetExprKind() == kind && operandExpr.GetNumOfOperands() == 1) {
+                    return ReplaceResultWithOperand(expr, operandExpr.GetOperand(0))
+                }
+            }
+        }
+        return false
     }
 
     private func TrySimplifyBinary(expr: Expression): Bool {

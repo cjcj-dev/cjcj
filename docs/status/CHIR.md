@@ -64,16 +64,26 @@ Implemented:
 - Added local const-propagation algebraic identities (`x + 0`, `x - 0`, shifts by zero,
   `x * 1`, `x / 1`, `x ** 1`, and idempotent bit ops) while retaining the marker for the full
   C++ constant lattice and branch rewriting.
+- Fixed `Expression.ReplaceWith` so it detaches the replacement expression before insertion and
+  disconnects the old expression without removing the new expression from the parent block.
+- Added a real constant-evaluation subset for the currently implemented IR: literal constants,
+  recursive local/global initializer lookup, integer/float/bool/string equality and comparison,
+  integer arithmetic/bitwise/shift/power operations, float arithmetic, boolean `&&`/`||`, unary
+  negation, logical not, and integer bit-not.
+- Wired `ConstPropagation` to use the evaluator for constant folding when a `CHIRBuilder` is
+  available, while preserving builder-less algebraic simplification.
+- Added the C++ trivial unary rewrite shape for `!(!x)` and `~(~x)`.
 
 Known gaps:
 
 - This is not a complete faithful port of C++ CHIR. The full C++ AST-to-IR lowering, complete
-  expression taxonomy, checker suite, BCHIR interpreter, binary serializer/deserializer, analyses,
-  transformations, and optimization passes still need to be ported.
+  expression taxonomy, checker suite, BCHIR instruction interpreter/linker, binary
+  serializer/deserializer, analyses, transformations, and optimization passes still need to be
+  ported.
 - The package manifest for `chir` currently has no dependencies and this task forbids manifest edits,
   so real AST/Sema/Basic/Modules/Mangle-dependent entrypoints cannot yet expose the exact C++ signatures.
   Those areas retain compiling `TODO(selfhost:CHIR)` markers instead of fake implementations.
 - The current implementation establishes a compiling, real IR core that downstream CHIR work can build on,
   but it is far below full C++ CHIR behavioral coverage.
 
-Remaining CHIR selfhost markers: 6.
+Remaining CHIR selfhost markers: 4.

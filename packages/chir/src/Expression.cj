@@ -259,7 +259,12 @@ public open class Expression <: Base {
     }
 
     public open func ReplaceWith(newExpr: Expression): Unit {
-        if (let Some(parentBlock) <- parent) {
+        if (let Some(newParent) <- newExpr.GetParentBlock()) {
+            newParent.RemoveExprOnly(newExpr)
+            newExpr.ClearParent()
+        }
+        let oldParent = parent
+        if (let Some(parentBlock) <- oldParent) {
             let exprList = parentBlock.GetExpressionsRef()
             var idx: Int64 = 0
             while (idx < exprList.size) {
@@ -276,7 +281,8 @@ public open class Expression <: Base {
                 oldResult.ReplaceWith(newResult)
             }
         }
-        RemoveSelfFromBlock()
+        parent = None
+        EraseOperands()
     }
 
     public open func OperandsToString(): String {
