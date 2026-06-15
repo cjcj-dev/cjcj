@@ -1,0 +1,954 @@
+package cangjie_compiler::ast
+
+import std.collection.*
+
+public func AddMacroAttr(node: Node): Unit {
+    if (let Some(macroCall) <- node.curMacroCall) {
+        let curFile = node.curFile
+        let walker = Walker(node, visitPre: { curNode: Node =>
+            curNode.curMacroCall = macroCall
+            curNode.curFile = curFile
+            curNode.EnableAttr(Attribute.MACRO_EXPANDED_NODE)
+            VisitAction.WALK_CHILDREN
+        })
+        walker.Walk()
+    }
+}
+
+public func AddCurFile(root: Node, file!: Option<File> = None): Unit {
+    if (let Some(pkg) <- (root as Package)) {
+        for (pkgFile in pkg.files) {
+            pkgFile.curPackage = pkg
+            assignCurFile(pkgFile, pkgFile)
+        }
+        return
+    }
+    if (let Some(fileNode) <- (root as File)) {
+        assignCurFile(fileNode, fileNode)
+        return
+    }
+    if (let Some(value) <- file) {
+        assignCurFile(root, value)
+    }
+}
+
+private func assignCurFile(root: Node, file: File): Unit {
+    let walker = Walker(root, visitPre: { curNode: Node =>
+        curNode.curFile = file
+        if (let Some(_) <- curNode.curMacroCall) {
+            AddMacroAttr(curNode)
+            return VisitAction.SKIP_CHILDREN
+        }
+        VisitAction.WALK_CHILDREN
+    })
+    walker.Walk()
+}
+
+public func SortModifierByPos(modifiers: ArrayList<Modifier>): ArrayList<Modifier> {
+    let out = ArrayList<Modifier>()
+    for (modifier in modifiers) {
+        var inserted = false
+        var idx: Int64 = 0
+        while (idx < out.size) {
+            if (modifier.begin < out[idx].begin) {
+                out.add(modifier, at: idx)
+                inserted = true
+                break
+            }
+            idx++
+        }
+        if (!inserted) {
+            out.add(modifier)
+        }
+    }
+    return out
+}
+
+public func IsInstanceConstructor(node: Node): Bool {
+    return node.TestAttr(Attribute.CONSTRUCTOR) && !node.TestAttr(Attribute.STATIC)
+}
+
+public func IsStaticInitializer(decl: Decl): Bool {
+    return decl.TestAttr(Attribute.STATIC) && decl.TestAttr(Attribute.CONSTRUCTOR)
+}
+
+public func IsClassOrEnumConstructor(decl: Decl): Bool {
+    return IsInstanceConstructor(decl) || decl.TestAttr(Attribute.ENUM_CONSTRUCTOR)
+}
+
+public func IsGlobalOrMember(node: Node): Bool {
+    return node.TestAnyAttr(Attribute.GLOBAL, Attribute.IN_CLASSLIKE, Attribute.IN_ENUM) ||
+        node.TestAnyAttr(Attribute.IN_STRUCT, Attribute.IN_EXTEND)
+}
+
+public func IsInstanceMember(decl: Decl): Bool {
+    if (let Some(outer) <- decl.outerDecl) {
+        return outer.IsNominalDecl() && !decl.TestAttr(Attribute.STATIC)
+    }
+    return false
+}
+
+public func IsGlobalOrStaticVar(decl: Decl): Bool {
+    return decl.astKind == ASTKind.VAR_DECL && decl.TestAnyAttr(Attribute.STATIC, Attribute.GLOBAL)
+}
+
+public func IsInheritableClass(decl: Decl): Bool {
+    return decl.astKind == ASTKind.CLASS_DECL && decl.TestAnyAttr(Attribute.OPEN, Attribute.ABSTRACT)
+}
+
+public func IsMemberParam(decl: Decl): Bool {
+    if (let Some(param) <- (decl as FuncParam)) {
+        return param.isMemberParam
+    }
+    return false
+}
+
+public func IsSingleRuneStringLiteral(expr: Expr): Bool {
+    if (let Some(lit) <- (expr as LitConstExpr)) {
+        return lit.kind == LitConstKind.STRING && lit.codepoint.size == 1
+    }
+    return false
+}
+
+public func IsSingleByteStringLiteral(expr: Expr): Bool {
+    if (let Some(lit) <- (expr as LitConstExpr)) {
+        return IsSingleRuneStringLiteral(expr) && lit.codepoint[0] <= 255u32
+    }
+    return false
+}
+
+public func GetSizeDecl(ty: Ty): Option<FuncDecl> {
+    if (!ty.IsClassLike()) {
+        return None
+    }
+    if (let Some(classTy) <- (ty as ClassTy)) {
+        if (let Some(decl) <- classTy.decl) {
+            return getSizeDeclFromMembers(decl.GetMemberDecls())
+        }
+    }
+    if (let Some(interfaceTy) <- (ty as InterfaceTy)) {
+        if (let Some(decl) <- interfaceTy.decl) {
+            return getSizeDeclFromMembers(decl.GetMemberDecls())
+        }
+    }
+    if (let Some(classLikeTy) <- (ty as ClassLikeTy)) {
+        if (let Some(decl) <- classLikeTy.commonDecl) {
+            return getSizeDeclFromMembers(decl.GetMemberDecls())
+        }
+    }
+    return None
+}
+
+private func getSizeDeclFromMembers(members: ArrayList<Decl>): Option<FuncDecl> {
+    for (member in members) {
+        if (let Some(propDecl) <- (member as PropDecl)) {
+            if (propDecl.identifier == "size" && !propDecl.getters.isEmpty()) {
+                return propDecl.getters[0]
+            }
+        }
+    }
+    return None
+}
+
+public func HasJavaAttr(node: Node): Option<Attribute> {
+    if (node.TestAttr(Attribute.JAVA_APP)) {
+        return Attribute.JAVA_APP
+    }
+    if (node.TestAttr(Attribute.JAVA_EXT)) {
+        return Attribute.JAVA_EXT
+    }
+    return None
+}
+
+public class FloatTypeInfo {
+    public var inf: UInt64 = 0
+    public var min: String = ""
+    public var max: String = ""
+
+    public init() {}
+
+    public init(inf: UInt64, min: String, max: String) {
+        this.inf = inf
+        this.min = min
+        this.max = max
+    }
+}
+
+public func GetFloatTypeInfoByKind(kind: TypeKind): FloatTypeInfo {
+    if (kind == TypeKind.TYPE_FLOAT16) {
+        return FloatTypeInfo(0xF800, "5.960464477539063E-8", "6.5504E4")
+    }
+    if (kind == TypeKind.TYPE_FLOAT32) {
+        return FloatTypeInfo(0xFF000000, "1.40129846E-45", "3.40282347E38")
+    }
+    return FloatTypeInfo(0xFFE0000000000000, "4.9406564584124654E-324", "1.7976931348623157E308")
+}
+
+public func SetOuterFunctionDecl(decl: Decl): Unit {
+    var root: Option<Node> = None
+    if (let Some(funcDecl) <- (decl as FuncDecl)) {
+        if (let Some(body) <- funcDecl.funcBody) {
+            root = body
+        }
+    } else if (let Some(varDecl) <- (decl as VarDecl)) {
+        let isGlobalOrMember = varDecl.TestAttr(Attribute.GLOBAL) ||
+            (if (let Some(outer) <- varDecl.outerDecl) { outer.IsNominalDecl() } else { false })
+        if (isGlobalOrMember) {
+            if (let Some(initializer) <- varDecl.initializer) {
+                root = initializer
+            }
+        }
+    }
+    if (let Some(value) <- root) {
+        let walker = Walker(value, visitPre: { node: Node =>
+            if (let Some(param) <- (node as FuncParam)) {
+                param.outerDecl = decl
+                return VisitAction.SKIP_CHILDREN
+            }
+            if (let Some(funcDecl) <- (node as FuncDecl)) {
+                funcDecl.outerDecl = decl
+                return VisitAction.SKIP_CHILDREN
+            }
+            VisitAction.WALK_CHILDREN
+        })
+        walker.Walk()
+    }
+}
+
+public func IsInDeclWithAttribute(decl: Decl, attr: Attribute): Bool {
+    var current: Option<Decl> = decl
+    while (let Some(value) <- current) {
+        if (value.TestAttr(attr)) {
+            return true
+        }
+        if (let Some(funcDecl) <- (value as FuncDecl)) {
+            if (let Some(ownerFunc) <- funcDecl.ownerFunc) {
+                if (ownerFunc.TestAttr(attr)) {
+                    return true
+                }
+            }
+        }
+        current = value.outerDecl
+    }
+    return false
+}
+
+public func InitializeLitConstValue(lce: LitConstExpr): Unit {
+    lce.isConst = true
+    let primitiveKind = getPrimitiveLiteralKind(lce)
+    if (lce.kind == LitConstKind.BOOL) {
+        lce.constNumValue.asBoolean = lce.stringValue == "true"
+        return
+    }
+    if (lce.kind == LitConstKind.UNIT || lce.kind == LitConstKind.NONE) {
+        return
+    }
+    if (TypeKindInRange(primitiveKind, TypeKind.TYPE_INT8, TypeKind.TYPE_UINT_NATIVE) ||
+        primitiveKind == TypeKind.TYPE_IDEAL_INT || lce.kind == LitConstKind.RUNE_BYTE ||
+        lce.kind == LitConstKind.RUNE) {
+        let value = if ((lce.kind == LitConstKind.STRING || lce.kind == LitConstKind.RUNE_BYTE ||
+            lce.kind == LitConstKind.RUNE) && lce.codepoint.size == 1) {
+            "${lce.codepoint[0]}"
+        } else {
+            lce.stringValue
+        }
+        lce.constNumValue.asInt.InitIntLiteral(value, primitiveKind)
+        return
+    }
+    if (TypeKindInRange(primitiveKind, TypeKind.TYPE_FLOAT16, TypeKind.TYPE_IDEAL_FLOAT)) {
+        lce.constNumValue.asFloat.value = parseFloatLiteral(lce.stringValue)
+        lce.constNumValue.asFloat.flowStatus = FlowStatus.NORMAL
+    }
+}
+
+private func getPrimitiveLiteralKind(lce: LitConstExpr): TypeKind {
+    if (let Some(ty) <- lce.GetTy()) {
+        if (let Some(primitive) <- (ty as PrimitiveTy)) {
+            if (primitive.kind == TypeKind.TYPE_INT_NATIVE) {
+                return if (primitive.bitness == 32) { TypeKind.TYPE_INT32 } else { TypeKind.TYPE_INT64 }
+            }
+            if (primitive.kind == TypeKind.TYPE_UINT_NATIVE) {
+                return if (primitive.bitness == 32) { TypeKind.TYPE_UINT32 } else { TypeKind.TYPE_UINT64 }
+            }
+            return primitive.kind
+        }
+        if (let Some(genericTy) <- (ty as GenericsTy)) {
+            if (let Some(lower) <- genericTy.lowerBound) {
+                if (let Some(primitive) <- (lower as PrimitiveTy)) {
+                    return primitive.kind
+                }
+            }
+        }
+    }
+    if (lce.kind == LitConstKind.BOOL) {
+        return TypeKind.TYPE_BOOLEAN
+    }
+    if (lce.kind == LitConstKind.RUNE) {
+        return TypeKind.TYPE_RUNE
+    }
+    return lce.GetNumLitTypeKind()
+}
+
+private func parseFloatLiteral(value: String): Float64 {
+    let text = removeNumericSeparators(value)
+    var idx: Int64 = 0
+    var sign = 1.0
+    if (idx < text.size && text[idx] == b'-') {
+        sign = -1.0
+        idx++
+    } else if (idx < text.size && text[idx] == b'+') {
+        idx++
+    }
+    var result = 0.0
+    while (idx < text.size && text[idx] >= b'0' && text[idx] <= b'9') {
+        result = result * 10.0 + Float64(text[idx] - b'0')
+        idx++
+    }
+    if (idx < text.size && text[idx] == b'.') {
+        idx++
+        var scale = 0.1
+        while (idx < text.size && text[idx] >= b'0' && text[idx] <= b'9') {
+            result += Float64(text[idx] - b'0') * scale
+            scale /= 10.0
+            idx++
+        }
+    }
+    if (idx < text.size && (text[idx] == b'e' || text[idx] == b'E')) {
+        idx++
+        var expSign: Int64 = 1
+        if (idx < text.size && text[idx] == b'-') {
+            expSign = -1
+            idx++
+        } else if (idx < text.size && text[idx] == b'+') {
+            idx++
+        }
+        var exp: Int64 = 0
+        while (idx < text.size && text[idx] >= b'0' && text[idx] <= b'9') {
+            exp = exp * 10 + Int64(text[idx] - b'0')
+            idx++
+        }
+        result *= pow10(exp * expSign)
+    }
+    return sign * result
+}
+
+private func removeNumericSeparators(value: String): String {
+    let out = StringBuilder()
+    for (byte in value.toArray()) {
+        if (byte == b'f' || byte == b'F' || byte == b'i' || byte == b'u' || byte == b'U') {
+            break
+        }
+        if (byte != b'_') {
+            out.append(String.fromUtf8([byte]))
+        }
+    }
+    return out.toString()
+}
+
+private func pow10(exp: Int64): Float64 {
+    var result = 1.0
+    if (exp >= 0) {
+        for (_ in 0..exp) {
+            result *= 10.0
+        }
+    } else {
+        var idx: Int64 = 0
+        while (idx < -exp) {
+            result /= 10.0
+            idx++
+        }
+    }
+    return result
+}
+
+public func FlattenVarWithPatternDecl(vwpDecl: VarWithPatternDecl): ArrayList<Pattern> {
+    let out = ArrayList<Pattern>()
+    if (let Some(pattern) <- vwpDecl.irrefutablePattern) {
+        let queue = ArrayList<Pattern>()
+        queue.add(pattern)
+        var idx: Int64 = 0
+        while (idx < queue.size) {
+            let current = queue[idx]
+            if (let Some(_) <- (current as WildcardPattern)) {
+                out.add(current)
+            } else if (let Some(_) <- (current as VarPattern)) {
+                out.add(current)
+            } else if (let Some(tuplePattern) <- (current as TuplePattern)) {
+                for (child in tuplePattern.patterns) {
+                    queue.add(child)
+                }
+            } else if (let Some(enumPattern) <- (current as EnumPattern)) {
+                for (child in enumPattern.patterns) {
+                    queue.add(child)
+                }
+            }
+            idx++
+        }
+    }
+    return out
+}
+
+public func GetAnnotatedDeclKindString(decl: Decl): String {
+    if (decl.astKind == ASTKind.CLASS_DECL || decl.astKind == ASTKind.INTERFACE_DECL ||
+        decl.astKind == ASTKind.STRUCT_DECL || decl.astKind == ASTKind.ENUM_DECL) {
+        return "type"
+    }
+    if (decl.astKind == ASTKind.FUNC_DECL) {
+        if (decl.TestAttr(Attribute.CONSTRUCTOR)) {
+            return "init"
+        }
+        return "member function"
+    }
+    if (decl.astKind == ASTKind.PROP_DECL) {
+        return "member property"
+    }
+    if (decl.astKind == ASTKind.VAR_DECL) {
+        return "member variable"
+    }
+    if (decl.astKind == ASTKind.FUNC_PARAM) {
+        return "parameter"
+    }
+    return ASTKindName(decl.astKind)
+}
+
+public func IterateToplevelDecls(pkg: Package, process: (Decl) -> Unit): Unit {
+    for (file in pkg.files) {
+        for (decl in file.decls) {
+            process(decl)
+        }
+        for (decl in file.exportedInternalDecls) {
+            process(decl)
+        }
+    }
+}
+
+private func IterateAllMembersInTypeDecl(decl: InheritableDecl, action: (Decl) -> Unit): Unit {
+    for (member in decl.GetMemberDeclPtrs()) {
+        if (member.astKind == ASTKind.FUNC_DECL && !member.TestAttr(Attribute.ENUM_CONSTRUCTOR)) {
+            action(member)
+        } else if (let Some(propDecl) <- (member as PropDecl)) {
+            for (getter in propDecl.getters) {
+                action(getter)
+            }
+            for (setter in propDecl.setters) {
+                action(setter)
+            }
+        } else if (member.astKind == ASTKind.VAR_DECL) {
+            action(member)
+        }
+    }
+}
+
+public func IterateAllExportableDecls(pkg: Package, action: (Decl) -> Unit): Unit {
+    for (file in pkg.files) {
+        for (decl in file.decls) {
+            action(decl)
+            if (let Some(inheritable) <- (decl as InheritableDecl)) {
+                IterateAllMembersInTypeDecl(inheritable, action)
+            }
+        }
+    }
+}
+
+public func IsPackageMemberAccess(ma: MemberAccess): Bool {
+    if (let Some(base) <- ma.baseExpr) {
+        if (let Some(target) <- getExprTarget(base)) {
+            return target.astKind == ASTKind.PACKAGE_DECL
+        }
+    }
+    return false
+}
+
+private func getExprTarget(expr: Expr): Option<Decl> {
+    if (let Some(refExpr) <- (expr as RefExpr)) {
+        return refExpr.ref.target
+    }
+    if (let Some(member) <- (expr as MemberAccess)) {
+        return member.target
+    }
+    return None
+}
+
+public func IsThisOrSuper(expr: Expr): Bool {
+    if (let Some(refExpr) <- (expr as RefExpr)) {
+        return refExpr.isThis || refExpr.isSuper
+    }
+    return false
+}
+
+public func GetAccessLevel(node: Node): AccessLevel {
+    var level = if (node.astKind == ASTKind.IMPORT_SPEC) { AccessLevel.PRIVATE } else { AccessLevel.INTERNAL }
+    if (node.TestAttr(Attribute.PRIVATE)) {
+        level = AccessLevel.PRIVATE
+    } else if (node.TestAttr(Attribute.INTERNAL)) {
+        level = AccessLevel.INTERNAL
+    } else if (node.TestAttr(Attribute.PROTECTED)) {
+        level = AccessLevel.PROTECTED
+    } else if (node.TestAttr(Attribute.PUBLIC)) {
+        level = AccessLevel.PUBLIC
+    }
+    if (let Some(decl) <- (node as Decl)) {
+        if (let Some(outer) <- decl.outerDecl) {
+            if (outer.IsNominalDecl()) {
+                let parentLevel = getDirectAccessLevel(outer)
+                if (AccessLevelRank(parentLevel) < AccessLevelRank(level)) {
+                    return parentLevel
+                }
+            }
+        }
+    }
+    return level
+}
+
+private func getDirectAccessLevel(node: Node): AccessLevel {
+    if (node.TestAttr(Attribute.PRIVATE)) { return AccessLevel.PRIVATE }
+    if (node.TestAttr(Attribute.INTERNAL)) { return AccessLevel.INTERNAL }
+    if (node.TestAttr(Attribute.PROTECTED)) { return AccessLevel.PROTECTED }
+    if (node.TestAttr(Attribute.PUBLIC)) { return AccessLevel.PUBLIC }
+    return AccessLevel.INTERNAL
+}
+
+private func AccessLevelRank(level: AccessLevel): Int64 {
+    return match (level) {
+        case AccessLevel.PRIVATE => 0
+        case AccessLevel.INTERNAL => 1
+        case AccessLevel.PROTECTED => 2
+        case AccessLevel.PUBLIC => 3
+    }
+}
+
+public func GetAttrByAccessLevel(level: AccessLevel): Attribute {
+    return match (level) {
+        case AccessLevel.PRIVATE => Attribute.PRIVATE
+        case AccessLevel.INTERNAL => Attribute.INTERNAL
+        case AccessLevel.PROTECTED => Attribute.PROTECTED
+        case AccessLevel.PUBLIC => Attribute.PUBLIC
+    }
+}
+
+public func GetAccessLevelStr(node: Node): String {
+    return match (GetAccessLevel(node)) {
+        case AccessLevel.PRIVATE => "private"
+        case AccessLevel.INTERNAL => "internal"
+        case AccessLevel.PROTECTED => "protected"
+        case AccessLevel.PUBLIC => "public"
+    }
+}
+
+public func GetAccessLevelStr(node: Node, surround: String): String {
+    let value = GetAccessLevelStr(node)
+    if (surround.isEmpty()) {
+        return value
+    }
+    return surround + value + surround
+}
+
+public func GetAccessLevelStr(pkg: Package): String {
+    return match (pkg.accessible) {
+        case AccessLevel.INTERNAL => "internal"
+        case AccessLevel.PROTECTED => "protected"
+        case AccessLevel.PRIVATE => "private"
+        case AccessLevel.PUBLIC => "public"
+    }
+}
+
+public func GetImportedItemFullName(content: ImportContent, commonPrefix!: String = ""): String {
+    let builder = StringBuilder()
+    if (!commonPrefix.isEmpty()) {
+        builder.append(commonPrefix)
+        builder.append(".")
+    }
+    builder.append(content.GetPrefixPath())
+    if (content.kind == ImportKind.IMPORT_ALIAS || content.kind == ImportKind.IMPORT_SINGLE) {
+        if (!content.GetPrefixPath().isEmpty()) {
+            builder.append(".")
+        }
+        builder.append(content.identifier.Val())
+    }
+    return builder.toString()
+}
+
+public func IsCondition(expr: Expr): Bool {
+    if (let Some(_) <- (expr as LetPatternDestructor)) {
+        return true
+    }
+    if (let Some(parenExpr) <- (expr as ParenExpr)) {
+        if (let Some(child) <- parenExpr.expr) {
+            return IsCondition(child)
+        }
+        return false
+    }
+    if (let Some(binaryExpr) <- (expr as BinaryExpr)) {
+        if (binaryExpr.op == TokenKind.AND || binaryExpr.op == TokenKind.OR) {
+            if (let Some(left) <- binaryExpr.leftExpr) {
+                if (IsCondition(left)) {
+                    return true
+                }
+            }
+            if (let Some(right) <- binaryExpr.rightExpr) {
+                return IsCondition(right)
+            }
+        }
+    }
+    return false
+}
+
+public func DoesNotHaveEnumSubpattern(letExpr: LetPatternDestructor): Bool {
+    for (pattern in letExpr.patterns) {
+        if (let Some(enumPattern) <- (pattern as EnumPattern)) {
+            if (!enumPattern.patterns.isEmpty()) {
+                return false
+            }
+        }
+    }
+    return true
+}
+
+public func IsNestedFunc(fd: FuncDecl): Bool {
+    if (fd.TestAttr(Attribute.GLOBAL)) {
+        return false
+    }
+    if (let Some(outer) <- fd.outerDecl) {
+        return outer.IsFunc()
+    }
+    return true
+}
+
+public func IsDefaultImplementation(decl: Decl): Bool {
+    if (!decl.TestAttr(Attribute.DEFAULT)) {
+        return false
+    }
+    if (let Some(outer) <- decl.outerDecl) {
+        return outer.astKind == ASTKind.INTERFACE_DECL
+    }
+    return false
+}
+
+public func InsideAtJavaDecl(decl: Decl): Bool {
+    if ((decl.astKind == ASTKind.FUNC_DECL || decl.astKind == ASTKind.VAR_DECL) &&
+        decl.TestAttr(Attribute.IN_CLASSLIKE)) {
+        if (let Some(_) <- HasJavaAttr(decl)) {
+            return true
+        }
+        return false
+    }
+    if (decl.astKind == ASTKind.FUNC_PARAM) {
+        if (let Some(outer) <- decl.outerDecl) {
+            return InsideAtJavaDecl(outer)
+        }
+    }
+    return false
+}
+
+public func CanBeSrcExported(fd: FuncDecl): Bool {
+    if (fd.isInline) {
+        return true
+    }
+    let hasGenericBody = if (let Some(body) <- fd.funcBody) {
+        if (let Some(_) <- body.generic) { true } else { false }
+    } else {
+        false
+    }
+    let isGenericFunction = hasGenericBody || fd.TestAttr(Attribute.GENERIC)
+    if ((isGenericFunction || fd.IsExportedDecl() || fd.linkage != Linkage.INTERNAL) &&
+        (fd.isConst || fd.isFrozen)) {
+        return true
+    }
+    let ownerDecl = if (let Some(ownerFunc) <- fd.ownerFunc) { ownerFunc } else { fd }
+    return !IsInDeclWithAttribute(ownerDecl, Attribute.GENERIC_INSTANTIATED) &&
+        IsDefaultImplementation(ownerDecl)
+}
+
+public func IsInstMemberVarInGenericDecl(vd: VarDecl): Bool {
+    return vd.astKind == ASTKind.VAR_DECL && !vd.TestAttr(Attribute.STATIC) &&
+        IsInDeclWithAttribute(vd, Attribute.GENERIC)
+}
+
+public func IsCommonWithoutDefault(decl: Decl): Bool {
+    return decl.TestAttr(Attribute.COMMON) && !decl.TestAttr(Attribute.COMMON_WITH_DEFAULT)
+}
+
+public func IsVirtualMember(decl: Decl): Bool {
+    if (let Some(outer) <- decl.outerDecl) {
+        if (outer.astKind == ASTKind.INTERFACE_DECL) {
+            return true
+        }
+        if (outer.astKind == ASTKind.EXTEND_DECL) {
+            return false
+        }
+        if (outer.astKind != ASTKind.CLASS_DECL) {
+            return false
+        }
+        if (!outer.TestAnyAttr(Attribute.ABSTRACT, Attribute.OPEN)) {
+            return false
+        }
+    } else {
+        return false
+    }
+    if (!decl.IsFuncOrProp()) {
+        return false
+    }
+    if (let Some(funcDecl) <- (decl as FuncDecl)) {
+        let isGenericInstantiatedNonJava = decl.TestAttr(Attribute.GENERIC_INSTANTIATED) &&
+            !decl.TestAnyAttr(Attribute.JAVA_APP, Attribute.JAVA_EXT)
+        if (decl.TestAttr(Attribute.CONSTRUCTOR) || funcDecl.IsFinalizer() || isGenericInstantiatedNonJava) {
+            return false
+        }
+    }
+    if (!decl.TestAttr(Attribute.STATIC)) {
+        if (decl.TestAnyAttr(Attribute.PRIVATE, Attribute.INTERNAL)) {
+            return false
+        }
+        if (!decl.TestAnyAttr(Attribute.ABSTRACT, Attribute.OPEN)) {
+            return false
+        }
+    } else if (decl.TestAttr(Attribute.PRIVATE)) {
+        return false
+    }
+    return true
+}
+
+public func IsStaticVar(decl: Decl): Bool {
+    return decl.astKind == ASTKind.VAR_DECL && decl.TestAttr(Attribute.STATIC)
+}
+
+public func IsMemberVarShouldBeSrcExported(vd: VarDecl): Bool {
+    if (let Some(_) <- vd.outerDecl) {
+        if (let Some(_) <- vd.initializer) {
+            if (vd.TestAttr(Attribute.STATIC)) {
+                return false
+            }
+        } else {
+            return false
+        }
+    } else {
+        return false
+    }
+    if (let Some(outer) <- vd.outerDecl) {
+        if (let Some(structDecl) <- (outer as StructDecl)) {
+            return structDecl.HasConstOrFrozenInit()
+        }
+        if (let Some(classDecl) <- (outer as ClassDecl)) {
+            return classDecl.HasConstOrFrozenInit()
+        }
+    }
+    return false
+}
+
+public class VarDeclWithPosition {
+    public var decl: Option<VarDecl> = None
+    public var fieldPosition: UInt64 = 0
+
+    public init() {}
+
+    public init(decl: VarDecl, fieldPosition: UInt64) {
+        this.decl = decl
+        this.fieldPosition = fieldPosition
+    }
+}
+
+public func GetVarsInitializationOrderWithPositions(parentDecl: Decl): ArrayList<VarDeclWithPosition> {
+    let commonDecls = ArrayList<VarDeclWithPosition>()
+    let specificDecls = ArrayList<VarDeclWithPosition>()
+    var fieldIdx: UInt64 = 0
+    for (member in parentDecl.GetMemberDecls()) {
+        if (member.astKind != ASTKind.VAR_DECL || member.IsStaticOrGlobal()) {
+            continue
+        }
+        if (let Some(varDecl) <- (member as VarDecl)) {
+            if (varDecl.TestAttr(Attribute.FROM_COMMON_PART)) {
+                commonDecls.add(VarDeclWithPosition(varDecl, fieldIdx))
+            } else {
+                insertVarDeclByPosition(specificDecls, VarDeclWithPosition(varDecl, fieldIdx))
+            }
+            fieldIdx++
+        }
+    }
+
+    let resultDecls = ArrayList<VarDeclWithPosition>()
+    var specificIdx: Int64 = 0
+    let emittedSpecificDeps = ArrayList<Decl>()
+    for (common in commonDecls) {
+        let specificDeps = ArrayList<Decl>()
+        if (let Some(commonDecl) <- common.decl) {
+            for (dep in commonDecl.dependencies) {
+                if (!dep.TestAttr(Attribute.SPECIFIC)) {
+                    continue
+                }
+                if (!containsDecl(emittedSpecificDeps, dep)) {
+                    emittedSpecificDeps.add(dep)
+                    specificDeps.add(dep)
+                }
+            }
+        }
+        while (!specificDeps.isEmpty() && specificIdx < specificDecls.size) {
+            let candidate = specificDecls[specificIdx]
+            if (let Some(candidateDecl) <- candidate.decl) {
+                removeDeclIfPresent(specificDeps, candidateDecl)
+            }
+            resultDecls.add(candidate)
+            specificIdx++
+        }
+        resultDecls.add(common)
+    }
+    while (specificIdx < specificDecls.size) {
+        resultDecls.add(specificDecls[specificIdx])
+        specificIdx++
+    }
+    return resultDecls
+}
+
+private func insertVarDeclByPosition(values: ArrayList<VarDeclWithPosition>, item: VarDeclWithPosition): Unit {
+    if (let Some(itemDecl) <- item.decl) {
+        var idx: Int64 = 0
+        while (idx < values.size) {
+            if (let Some(existingDecl) <- values[idx].decl) {
+                if (itemDecl.begin < existingDecl.begin) {
+                    values.add(item, at: idx)
+                    return
+                }
+            }
+            idx++
+        }
+    }
+    values.add(item)
+}
+
+private func containsDecl(values: ArrayList<Decl>, decl: Decl): Bool {
+    for (value in values) {
+        if (sameDecl(value, decl)) {
+            return true
+        }
+    }
+    return false
+}
+
+private func removeDeclIfPresent(values: ArrayList<Decl>, decl: Decl): Unit {
+    var idx: Int64 = 0
+    while (idx < values.size) {
+        if (sameDecl(values[idx], decl)) {
+            values.remove(at: idx)
+            return
+        }
+        idx++
+    }
+}
+
+private func sameDecl(left: Decl, right: Decl): Bool {
+    return left.astKind == right.astKind && left.begin == right.begin && left.end == right.end &&
+        left.identifier == right.identifier && left.fullPackageName == right.fullPackageName
+}
+
+public func InsertPropGetterSignature(propDecl: PropDecl, attrToBeSet: Attribute): Unit {
+    let getter = FuncDecl()
+    getter.identifier = SrcIdentifier("get", INVALID_POSITION, INVALID_POSITION, false)
+    getter.outerDecl = propDecl.outerDecl
+    getter.propDecl = propDecl
+    getter.isGetter = true
+    getter.CloneAttrs(propDecl)
+    getter.DisableAttr(Attribute.MUT)
+    getter.EnableAttr(Attribute.COMPILER_ADD)
+    getter.EnableAttr(attrToBeSet)
+    if (let Some(outer) <- propDecl.outerDecl) {
+        if (outer.astKind == ASTKind.INTERFACE_DECL) {
+            getter.EnableAttr(Attribute.PUBLIC)
+        }
+    }
+    let getterBody = FuncBody()
+    getterBody.EnableAttr(Attribute.COMPILER_ADD)
+    let params = FuncParamList()
+    params.EnableAttr(Attribute.COMPILER_ADD)
+    getterBody.paramLists.add(params)
+    getterBody.funcDecl = getter
+    getter.funcBody = getterBody
+    propDecl.getters.add(getter)
+}
+
+public func InsertPropSetterSignature(propDecl: PropDecl, attrToBeSet: Attribute): Unit {
+    let setter = FuncDecl()
+    setter.identifier = SrcIdentifier("set", INVALID_POSITION, INVALID_POSITION, false)
+    setter.outerDecl = propDecl.outerDecl
+    setter.propDecl = propDecl
+    setter.isSetter = true
+    setter.CloneAttrs(propDecl)
+    setter.DisableAttr(Attribute.MUT)
+    setter.EnableAttr(Attribute.COMPILER_ADD)
+    setter.EnableAttr(attrToBeSet)
+    if (let Some(outer) <- propDecl.outerDecl) {
+        if (outer.astKind == ASTKind.INTERFACE_DECL) {
+            setter.EnableAttr(Attribute.PUBLIC)
+        }
+    }
+    let setterBody = FuncBody()
+    setterBody.EnableAttr(Attribute.COMPILER_ADD)
+    let params = FuncParamList()
+    params.EnableAttr(Attribute.COMPILER_ADD)
+    let setterParam = FuncParam()
+    setterParam.EnableAttr(Attribute.COMPILER_ADD)
+    setterParam.identifier = SrcIdentifier("set", INVALID_POSITION, INVALID_POSITION, false)
+    params.params.add(setterParam)
+    setterBody.paramLists.add(params)
+    setterBody.funcDecl = setter
+    setter.funcBody = setterBody
+    propDecl.setters.add(setter)
+}
+
+public func InsertMirrorVarProp(decl: ClassDecl, attrToBeSet: Attribute): Unit {
+    if (let Some(body) <- decl.body) {
+        let oldVars = ArrayList<VarDecl>()
+        for (member in body.decls) {
+            if (member.astKind == ASTKind.VAR_DECL) {
+                if (let Some(varDecl) <- (member as VarDecl)) {
+                    if (let Some(_) <- varDecl.typeNode) {
+                        oldVars.add(varDecl)
+                    }
+                }
+            }
+        }
+        for (varDecl in oldVars) {
+            body.decls.add(makeMirrorPropFromVar(varDecl, attrToBeSet))
+        }
+        var idx: Int64 = 0
+        while (idx < body.decls.size) {
+            if (body.decls[idx].astKind == ASTKind.VAR_DECL) {
+                body.decls.remove(at: idx)
+            } else {
+                idx++
+            }
+        }
+    }
+}
+
+private func makeMirrorPropFromVar(varDecl: VarDecl, attrToBeSet: Attribute): PropDecl {
+    let propNode = PropDecl()
+    propNode.begin = varDecl.begin
+    propNode.end = varDecl.end
+    propNode.keywordPos = varDecl.keywordPos
+    propNode.identifier = varDecl.identifier
+    propNode.colonPos = varDecl.colonPos
+    propNode.typeNode = varDecl.typeNode
+    if (let Some(ty) <- varDecl.GetTy()) {
+        propNode.SetTy(ty)
+    }
+    propNode.CloneAttrs(varDecl)
+    propNode.EnableAttr(Attribute.DESUGARED_MIRROR_FIELD)
+    for (modifier in varDecl.modifiers) {
+        propNode.modifiers.add(modifier)
+    }
+    propNode.isVar = varDecl.isVar
+    for (annotation in varDecl.annotations) {
+        if (let Some(cloned) <- (ASTCloner.Clone(annotation) as Annotation)) {
+            propNode.annotations.add(cloned)
+        }
+    }
+    if (varDecl.isVar) {
+        propNode.EnableAttr(Attribute.MUT)
+        propNode.modifiers.add(Modifier(TokenKind.MUT, varDecl.begin))
+    }
+    propNode.outerDecl = varDecl.outerDecl
+    InsertPropGetterSignature(propNode, attrToBeSet)
+    if (varDecl.isVar) {
+        InsertPropSetterSignature(propNode, attrToBeSet)
+    }
+    return propNode
+}
