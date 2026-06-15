@@ -182,6 +182,42 @@ extend ParserImpl {
             kind == TokenKind.LSHIFT_ASSIGN || kind == TokenKind.RSHIFT_ASSIGN
     }
 
+    public func ParseLetPattern(ek: ExprKind): LetPatternDestructor {
+        let ret = LetPatternDestructor()
+        let letToken = Expect(TokenKind.LET, "expected 'let'")
+        let conditionName = if (ek == ExprKind.WHILE_COND_EXPR) { "while-let" } else { "if-let" }
+        ret.begin = letToken.Begin()
+        ret.patterns.add(ParsePattern())
+        while (Skip(TokenKind.BITOR)) {
+            ret.orPos.add(lastToken.Begin())
+            ret.patterns.add(ParsePattern())
+        }
+        if (!Skip(TokenKind.BACKARROW)) {
+            diag.DiagnoseRefactor(DiagKindRefactor.EXPECTED_TOKEN, Peek().Begin(), "expected '<-' in ${conditionName} condition")
+            ConsumeUntilAny([TokenKind.AND, TokenKind.OR, TokenKind.RPAREN, TokenKind.LET, TokenKind.BACKARROW], targetTokenConsumed: false)
+            let invalid = InvalidExpr(Peek().Begin())
+            ret.backarrowPos = Peek().Begin()
+            ret.initializer = invalid
+            ret.end = invalid.end
+            ret.isBroken = true
+            return ret
+        }
+        ret.backarrowPos = lastToken.Begin()
+        if (AtTerminator()) {
+            diag.DiagnoseRefactor(DiagKindRefactor.EXPECTED_TOKEN, Peek().Begin(), "expected expression after '<-'")
+            let invalid = InvalidExpr(Peek().Begin())
+            ret.initializer = invalid
+            ret.end = invalid.end
+            ret.isBroken = true
+            return ret
+        }
+        ret.initializer = ParseExpr(ExprKind.LET_PATTERN)
+        if (let Some(expr) <- ret.initializer) {
+            ret.end = expr.end
+        }
+        return ret
+    }
+
     public func ParseFuncArg(): FuncArg {
         let arg = FuncArg()
         let first = Peek()
@@ -194,6 +230,18 @@ extend ParserImpl {
         arg.begin = first.Begin()
         MarkEndFromLast(arg)
         return arg
+    }
+
+    public func ParseUnsafeBlock(): Expr {
+        let unsafeToken = Expect(TokenKind.UNSAFE, "expected 'unsafe'")
+        if (!Seeing(TokenKind.LCURL)) {
+            diag.DiagnoseRefactor(DiagKindRefactor.EXPECTED_TOKEN, Peek().Begin(), "expected block after unsafe")
+            return InvalidExpr(unsafeToken.Begin())
+        }
+        let block = ParseBlock(ScopeKind.FUNC_BODY)
+        block.unsafePos = unsafeToken.Begin()
+        block.begin = unsafeToken.Begin()
+        return block
     }
 
     public func ParseBlock(): Block {

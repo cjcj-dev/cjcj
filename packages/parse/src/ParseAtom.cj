@@ -15,6 +15,8 @@ extend ParserImpl {
 
     public func ParseAtom(ek: ExprKind): Expr {
         if (SeeingLiteral()) { return ParseLitConst() }
+        if (Seeing(TokenKind.LET)) { return ParseLetPattern(ek) }
+        if (Seeing([TokenKind.UNSAFE, TokenKind.LCURL])) { return ParseUnsafeBlock() }
         if (Seeing(TokenKind.IDENTIFIER) || Seeing(TokenKind.PACKAGE_IDENTIFIER) || Seeing(TokenKind.THIS) || Seeing(TokenKind.SUPER)) {
             return ParseRefExpr(ek)
         }

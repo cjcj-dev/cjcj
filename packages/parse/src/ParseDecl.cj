@@ -39,7 +39,8 @@ extend ParserImpl {
     }
 
     public func SeeingDecl(): Bool {
-        return SeeingModifier() || SeeingAny([TokenKind.FUNC, TokenKind.MACRO, TokenKind.LET, TokenKind.VAR,
+        return (SeeingModifier() && !Seeing([TokenKind.UNSAFE, TokenKind.LCURL])) ||
+            SeeingAny([TokenKind.FUNC, TokenKind.MACRO, TokenKind.LET, TokenKind.VAR,
             TokenKind.CONST, TokenKind.ENUM, TokenKind.TYPE, TokenKind.STRUCT, TokenKind.CLASS,
             TokenKind.INTERFACE, TokenKind.MAIN, TokenKind.EXTEND, TokenKind.PROP, TokenKind.INIT])
     }
@@ -99,9 +100,13 @@ extend ParserImpl {
         ret.keywordPos = keywordToken.Begin()
         if (ret.begin.IsZero()) { ret.begin = keywordToken.Begin() }
         if (keyword != TokenKind.MAIN) {
-            if (Skip(TokenKind.OPERATOR)) {
+            if (ret.TestAttr(Attribute.OPERATOR)) {
                 ret.isOperator = true
-                ret.identifier = SrcIdentifier(lastToken.Value(), lastToken.Value(), lastToken.Begin(), lastToken.End(), false)
+                ret.identifier = ExpectOperatorIdentifier(ret)
+            } else if (Skip(TokenKind.OPERATOR)) {
+                ret.EnableAttr(Attribute.OPERATOR)
+                ret.isOperator = true
+                ret.identifier = ExpectOperatorIdentifier(ret)
             } else {
                 ret.identifier = ExpectIdentifierWithPos(ret)
             }
@@ -112,6 +117,65 @@ extend ParserImpl {
             ret.EnableAttr(Attribute.GENERIC)
         }
         ret.end = body.end
+    }
+
+    public func ExpectOperatorIdentifier(ret: FuncDecl): SrcIdentifier {
+        let operatorToken = SkipAndReturnOverloadingOperator()
+        if (operatorToken.kind == TokenKind.ILLEGAL) {
+            diag.DiagnoseRefactor(DiagKindRefactor.EXPECTED_IDENTIFIER, Peek().Begin(), "expected overloadable operator")
+            Next()
+            return SrcIdentifier("", "", Peek().Begin(), Peek().Begin(), false)
+        }
+        if (!Seeing(TokenKind.LPAREN) && !Seeing(TokenKind.LT)) {
+            diag.DiagnoseRefactor(DiagKindRefactor.EXPECTED_TOKEN, Peek().Begin(), "expected '(' after operator name")
+            Next()
+        }
+        ret.op = operatorToken.kind
+        return SrcIdentifier(operatorToken.Value(), operatorToken.Value(), operatorToken.Begin(), operatorToken.End(), false)
+    }
+
+    public func SkipAndReturnOverloadingOperator(): Token {
+        if (Skip(TokenKind.RSHIFT)) {
+            return lastToken
+        }
+        if (Skip(TokenKind.GE)) {
+            return lastToken
+        }
+        if (Seeing([TokenKind.GT, TokenKind.GT])) {
+            let start = Peek().Begin()
+            Skip(TokenKind.GT)
+            Skip(TokenKind.GT)
+            return Token(TokenKind.RSHIFT, ">>", start, lastToken.End())
+        }
+        if (Seeing([TokenKind.GT, TokenKind.ASSIGN])) {
+            let start = Peek().Begin()
+            Skip(TokenKind.GT)
+            Skip(TokenKind.ASSIGN)
+            return Token(TokenKind.GE, ">=", start, lastToken.End())
+        }
+        if (Seeing([TokenKind.LSQUARE, TokenKind.RSQUARE])) {
+            let start = Peek().Begin()
+            Skip(TokenKind.LSQUARE)
+            Skip(TokenKind.RSQUARE)
+            return Token(TokenKind.LSQUARE, "[]", start, lastToken.End())
+        }
+        if (Seeing([TokenKind.LPAREN, TokenKind.RPAREN])) {
+            let start = Peek().Begin()
+            Skip(TokenKind.LPAREN)
+            Skip(TokenKind.RPAREN)
+            return Token(TokenKind.LPAREN, "()", start, lastToken.End())
+        }
+        if (SkipOperator()) {
+            return lastToken
+        }
+        return Token(TokenKind.ILLEGAL)
+    }
+
+    public func SkipOperator(): Bool {
+        return Skip(TokenKind.NOT) || Skip(TokenKind.ADD) || Skip(TokenKind.SUB) || Skip(TokenKind.EXP) ||
+            Skip(TokenKind.MUL) || Skip(TokenKind.DIV) || Skip(TokenKind.MOD) || Skip(TokenKind.LSHIFT) ||
+            Skip(TokenKind.LT) || Skip(TokenKind.LE) || Skip(TokenKind.GT) || Skip(TokenKind.EQUAL) ||
+            Skip(TokenKind.NOTEQ) || Skip(TokenKind.BITAND) || Skip(TokenKind.BITXOR) || Skip(TokenKind.BITOR)
     }
 
     public func ParseFuncBody(scopeKind: ScopeKind): FuncBody {

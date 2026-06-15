@@ -141,6 +141,7 @@ public open class FuncDecl <: Decl {
     public var funcBody: Option<FuncBody> = None
     public var isConst: Bool = false
     public var isOperator: Bool = false
+    public var op: TokenKind = TokenKind.ILLEGAL
 
     public init() { super(ASTKind.FUNC_DECL) }
     public init(kind: ASTKind) { super(kind) }

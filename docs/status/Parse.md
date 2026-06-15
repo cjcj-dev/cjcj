@@ -56,6 +56,12 @@ package public APIs.
   attributes, member ownership propagation, and top-level declaration
   finalization so CJMP and FFI checks run after class-like members have their
   enclosing declaration recorded.
+- Continued grammar parity by adding the `LetPatternDestructor` expression node
+  and parser path for `let pattern <- expr` conditions, parsing `unsafe { ... }`
+  as a block expression instead of a declaration modifier sequence, and matching
+  the C++ operator-function flow where `operator` is a function modifier and the
+  overloadable token (`+`, `[]`, `()`, `>>`, `>=`, and the supported operator
+  set) becomes the function identifier and recorded operator kind.
 
 ## Remaining Work
 

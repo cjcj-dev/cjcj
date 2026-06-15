@@ -247,6 +247,22 @@ public class AsExpr <: BinaryExpr {
     public init(op: Token) { super(ASTKind.AS_EXPR, op) }
 }
 
+public class LetPatternDestructor <: Expr {
+    public let patterns: ArrayList<Pattern> = ArrayList<Pattern>()
+    public let orPos: ArrayList<Position> = ArrayList<Position>()
+    public var backarrowPos: Position = INVALID_POSITION
+    public var initializer: Option<Expr> = None
+
+    public init() { super(ASTKind.LET_PATTERN_DESTRUCTOR) }
+
+    public override func Children(): ArrayList<Node> {
+        let out = ArrayList<Node>()
+        for (pattern in patterns) { out.add(pattern) }
+        if (let Some(expr) <- initializer) { out.add(expr) }
+        return out
+    }
+}
+
 public class Block <: Expr {
     public let body: ArrayList<Node> = ArrayList<Node>()
     public var leftCurlPos: Position = INVALID_POSITION
