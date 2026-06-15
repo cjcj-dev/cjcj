@@ -29,6 +29,15 @@ uses the same SipHash-2-4 constants and byte processing as `Utils::SipHash`,
 the public triple-name matcher is present, and `GlobalOptions.ParseIntOptionValue`
 matches the C++ signed `int` range validation helper.
 
+The latest pass adds C++-shaped output and input reprocessing: `--output-dir`
+now normalizes output paths, output path length and `lib-macro_` prefix checks
+are enforced, input files that would be overwritten by output are rejected,
+package directories are de-duplicated by canonical path, package `.cj` members
+are considered for overwrite checks, `.bc`/object ordered inputs are rewritten
+to absolute paths, common-part CJMP extensions are validated, and the public
+`TempFileInfo`/frontend-output and builtin-dependency state used across the
+driver/frontend boundary is represented.
+
 Remaining fidelity gaps are not hidden behind self-host markers: this package
 still uses local diagnostics instead of Basic diagnostic IDs, and some file-mode
 permission checks are represented by the currently available Cangjie filesystem

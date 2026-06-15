@@ -70,6 +70,27 @@ public class OrderedInput {
     }
 }
 
+public class TempFileInfo {
+    public var fileName: String
+    public var filePath: String
+    public var rawPath: String
+    public var isFrontendOutput: Bool
+    public var isForeignInput: Bool
+    public init(
+        fileName!: String = "",
+        filePath!: String = "",
+        rawPath!: String = "",
+        isFrontendOutput!: Bool = false,
+        isForeignInput!: Bool = false
+    ) {
+        this.fileName = fileName
+        this.filePath = filePath
+        this.rawPath = rawPath
+        this.isFrontendOutput = isFrontendOutput
+        this.isForeignInput = isForeignInput
+    }
+}
+
 public class CachePathName {
     public let dir: String
     public let file: String
@@ -155,6 +176,13 @@ private func joinSortedStrings(values: ArrayList<String>): String {
     return result
 }
 
+private func containsString(values: ArrayList<String>, target: String): Bool {
+    for (value in values) {
+        if (value == target) { return true }
+    }
+    return false
+}
+
 private func replaceStrings(target: ArrayList<String>, values: Array<String>): Unit {
     target.clear()
     for (value in values) { target.add(value) }
@@ -188,6 +216,9 @@ public class GlobalOptions <: Option {
     public let inputObjs: ArrayList<String> = ArrayList<String>()
     public var inputCjoFile: String = ""
     public let inputPdbaFiles: ArrayList<String> = ArrayList<String>()
+    public let directBuiltinDependencies: HashSet<String> = HashSet<String>()
+    public let indirectBuiltinDependencies: HashSet<String> = HashSet<String>()
+    public let frontendOutputFiles: ArrayList<TempFileInfo> = ArrayList<TempFileInfo>()
     public let bcInputFiles: ArrayList<String> = ArrayList<String>()
     public let bcPackageNames: ArrayList<String> = ArrayList<String>()
     public let inputFileOrder: ArrayList<OrderedInput> = ArrayList<OrderedInput>()
@@ -360,6 +391,17 @@ public class GlobalOptions <: Option {
         }
     }
 
+    private func ReplaceInputFileName(oldName: String, newName: String): Unit {
+        var idx: Int64 = 0
+        while (idx < inputFileOrder.size) {
+            let oldInput = inputFileOrder[idx]
+            if (oldInput.value == oldName) {
+                inputFileOrder[idx] = OrderedInput(newName, oldInput.index)
+            }
+            idx++
+        }
+    }
+
     private func OccurrenceCheck(arg: OptionArgInstance, argList: ArgList): Unit {
         if (argList.IsSpecified(arg.info.GetID()) &&
             arg.info.GetOccurrenceType() == Occurrence.SINGLE_OCCURRENCE && !argList.IsWarned(arg.info.GetID())) {
@@ -381,6 +423,11 @@ public class GlobalOptions <: Option {
                     if (opt.info.GetKind() == Kind.SEPARATED) { out.add(opt.value) }
                 }
             }
+        }
+        let multiBC = aggressiveParallelCompile.hasValue && aggressiveParallelCompile.value > 1u64
+        if (!frontendOutputFiles.isEmpty() && !multiBC) {
+            out.add("-o")
+            out.add(frontendOutputFiles[0].filePath)
         }
         return out.toArray()
     }
@@ -567,12 +614,12 @@ public class GlobalOptions <: Option {
     }
 
     public func CheckInputFilePath(path: String): MaybeString {
-        if (IsRegularFile(path)) { return GetAbsPath(path) }
+        if (FileExist(path) && !IsDir(path)) { return GetAbsPath(path) }
         return MaybeString()
     }
 
     public static func ValidateInputFilePath(path: String): MaybeString {
-        if (IsRegularFile(path)) { return GetAbsPath(path) }
+        if (!IsPathAboveLengthLimit(path) && FileExist(path) && !IsDir(path)) { return GetAbsPath(path) }
         return MaybeString()
     }
 
@@ -604,36 +651,103 @@ public class GlobalOptions <: Option {
             let ext = GetFileExtension(input)
             if (ext == "cj" && !compileCjd) {
                 if (compilePackage) { return false }
-                if (!IsRegularFile(input)) { return false }
+                if (!ValidateInputFilePath(input).hasValue) { return false }
                 srcFiles.add(input)
             } else if (ext == "o" || ext == "a" || ext == "obj") {
                 let objPath = ValidateInputFilePath(input)
                 if (!objPath.hasValue) { return false }
                 inputObjs.add(objPath.value)
-            } else if (ext == "cbc") {
-                let pdbaPath = ValidateInputFilePath(input)
-                if (!pdbaPath.hasValue) { return false }
-                inputPdbaFiles.add(pdbaPath.value)
+                ReplaceInputFileName(input, objPath.value)
             } else if (ext == "bc") {
                 let bcPath = ValidateInputFilePath(input)
                 if (!bcPath.hasValue) { return false }
                 bcInputFiles.add(bcPath.value)
+                ReplaceInputFileName(input, bcPath.value)
             } else if (ext == "cjo") {
                 if (compilePackage || !inputCjoFile.isEmpty()) { return false }
                 let cjoPath = ValidateInputFilePath(input)
                 if (!cjoPath.hasValue) { return false }
-                inputCjoFile = cjoPath.value
+                inputCjoFile = input
             } else if (HasCJDExtension(input) && compileCjd) {
-                if (compilePackage || !IsRegularFile(input)) { return false }
+                if (compilePackage || !ValidateInputFilePath(input).hasValue) { return false }
                 srcFiles.add(input)
-            } else if (compilePackage) {
-                if (!IsDir(input)) { return false }
-                packagePaths.add(input)
-            } else if (!input.isEmpty()) {
-                return false
+            } else {
+                if (IsPathAboveLengthLimit(input)) { return false }
+                if (!FileExist(input)) { return false }
+                if (IsDir(input)) {
+                    let packagePath = CheckDirectoryPath(input)
+                    if (!packagePath.hasValue) { return false }
+                    packagePaths.add(input)
+                } else {
+                    Warningln("argument unused: " + input)
+                }
             }
         }
         if (compilePackage && packagePaths.isEmpty()) { return false }
+        if (compilePackage && packagePaths.size > 1 && !ValidateUniquePackagePaths()) { return false }
+        return true
+    }
+
+    private func ValidateUniquePackagePaths(): Bool {
+        let seen = ArrayList<String>()
+        for (packagePath in packagePaths) {
+            let absPath = GetAbsPath(packagePath)
+            let canonical = if (absPath.hasValue) { absPath.value } else { NormalizePath(packagePath) }
+            if (containsString(seen, canonical)) {
+                Errorln("duplicate package path '" + packagePath + "' specified with '-p'")
+                return false
+            }
+            seen.add(canonical)
+        }
+        return true
+    }
+
+    private func CheckOutputPathLength(): Bool {
+        let defaultOutputNameLen: Int64 = 4
+        let fullLength = if (IsDir(output)) { output.size + defaultOutputNameLen } else { output.size }
+        if (fullLength > FILE_PATH_MAX_LENGTH) { return false }
+        if (fullLength > FILE_PATH_MAX_LENGTH - 15) {
+            Warningln("the output file path is close to the length limit " + FILE_PATH_MAX_LENGTH.toString())
+        }
+        return true
+    }
+
+    private func ReprocessOutputs(): Bool {
+        if (outputDir.hasValue) {
+            if (IsAbsolutePath(output)) { return false }
+            output = JoinPath(outputDir.value, output)
+            let outputDirAbs = CheckDirectoryPath(outputDir.value)
+            if (!outputDirAbs.hasValue) { return false }
+            outputDir = MaybeString(outputDirAbs.value)
+        }
+
+        let outputIsDir = IsDir(output)
+        let dirPath = GetDirPath(output)
+        let saveDir = if (outputIsDir) { output } else if (dirPath.isEmpty()) { "/" } else { dirPath }
+        let saveDirAbs = CheckDirectoryPath(saveDir)
+        if (!saveDirAbs.hasValue) { return false }
+        output = if (outputIsDir) { saveDirAbs.value } else { JoinPath(saveDirAbs.value, GetFileName(output)) }
+        if (!CheckOutputPathLength()) { return false }
+        if (!compileMacroPackage && StartsWith(GetFileName(output), "lib-macro_")) { return false }
+        return true
+    }
+
+    private func ReprocessInputs(): Bool {
+        if (IsDir(output)) { return true }
+        let inputsToCheck = ArrayList<String>()
+        for (input in argList.GetInputs()) { inputsToCheck.add(input) }
+        if (compilePackage) {
+            for (packagePath in packagePaths) {
+                for (fileName in GetAllFilesUnderCurrentPath(packagePath, "cj")) {
+                    inputsToCheck.add(JoinPath(packagePath, fileName))
+                }
+            }
+        }
+        for (inputFile in inputsToCheck) {
+            let absInputFile = GetAbsPath(inputFile)
+            if (!absInputFile.hasValue) { return false }
+            if (absInputFile.value == output) { return false }
+        }
         return true
     }
 
@@ -646,10 +760,8 @@ public class GlobalOptions <: Option {
         }
         if (!SetupConditionalCompilationCfg(this)) { return false }
         if (target.IsMacOS() || target.IsArm32()) { disableReflection = true }
-        if (outputDir.hasValue) {
-            if (IsAbsolutePath(output)) { return false }
-            output = JoinPath(outputDir.value, output)
-        }
+        if (!ReprocessOutputs()) { return false }
+        if (!ReprocessInputs()) { return false }
         if (compileMacroPackage && enableOutputType) { return false }
         if (compileMacroPackage && !output.isEmpty() && !IsDir(output)) { return false }
         if (enableCoverage) {
@@ -697,6 +809,12 @@ public class GlobalOptions <: Option {
         if (enablePgoInstrGen && target.env == EnvironmentType.OHOS && pgoProfileFile.isEmpty()) { return false }
         if (enablePgoInstrUse && (!FileExist(pgoProfileFile) || GetFileExtension(pgoProfileFile) != "profdata")) {
             return false
+        }
+        for (commonCjo in commonPartCjos) {
+            if (GetFileExtension(commonCjo) != "cjo") { return false }
+        }
+        for (commonChir in commonPartChirs) {
+            if (GetFileExtension(commonChir) != "chir") { return false }
         }
         if (commonPartCjos.size != commonPartChirs.size) { return false }
         if (outputMode != OutputMode.OBJ && compileTarget != CompileTarget.DEFAULT) {

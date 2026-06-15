@@ -5,6 +5,7 @@ import std.fs.*
 
 public let DEFAULT_ANDROID_API: String = "31"
 public let MIN_ANDROID_API: String = "26"
+public let FILE_PATH_MAX_LENGTH: Int64 = 4096
 
 public struct Position {
     public var fileID: UInt64 = 0u64
@@ -154,6 +155,34 @@ public func GetAbsPath(path: String): MaybeString {
     if (path.isEmpty()) { return MaybeString() }
     if (exists(path)) { return MaybeString(NormalizePath(canonicalize(path).toString())) }
     return MaybeString(NormalizePath(path))
+}
+
+public func IsPathAboveLengthLimit(path: String): Bool {
+    return path.size > FILE_PATH_MAX_LENGTH
+}
+
+public func GetAllFilesUnderCurrentPath(
+    path: String,
+    extension: String,
+    shouldSkipTestFiles!: Bool = true,
+    shouldSkipRegularFiles!: Bool = false
+): Array<String> {
+    let files = ArrayList<String>()
+    try {
+        for (info in Directory.readFrom(path)) {
+            if (!info.isRegular()) { continue }
+            let fileName = info.name
+            if (fileName.isEmpty() || fileName[0] == b'.') { continue }
+            if (GetFileExtension(fileName) != extension) { continue }
+            let isTestFile = fileName.endsWith("_test.cj")
+            if (shouldSkipTestFiles && isTestFile) { continue }
+            if (shouldSkipRegularFiles && !isTestFile) { continue }
+            files.add(fileName)
+        }
+    } catch (_: Exception) {
+        return files.toArray()
+    }
+    return files.toArray()
 }
 
 public func ReadTextFile(path: String): MaybeString {
