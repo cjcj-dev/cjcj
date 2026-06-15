@@ -31,27 +31,55 @@ private func NextCharInfoIndex(value: NextCharInfo): Int64 {
 }
 
 public func LookupWidth(cp: UTF32, isCJK: Bool): Int64 {
-    // TODO(selfhost:Utils): generate and use WidthData.generated.inc packed Unicode tr11 width tables.
-    let _ = isCJK
-    if (cp == 0u32) {
-        return 0
+    let t1Offset = WIDTH_TABLES_0[Int64((cp >> 13u32) & 0xffu32)]
+    let t2Index = 128 * Int64(t1Offset) + Int64((cp >> 6u32) & 0x7fu32)
+    let t2Offset = WIDTH_TABLES_1[t2Index]
+    let packedIndex = 16 * Int64(t2Offset) + Int64((cp >> 2u32) & 0x0fu32)
+    let packedWidths = WIDTH_TABLES_2[packedIndex]
+    let width = (packedWidths >> UInt8(2 * Int64(cp & 0x03u32))) & 0x03u8
+    if (width == 3u8) {
+        return if (isCJK) { 2 } else { 1 }
     }
-    if (cp < 0x20u32 || (cp >= 0x7fu32 && cp < 0xa0u32)) {
-        return 0
+    return Int64(width)
+}
+
+private func startsEmojiPresentationSeq(cp: UTF32): Bool {
+    let topBits = cp >> 10u32
+    let idxOfLeaf = match (topBits) {
+        case 0u32 => 0
+        case 8u32 => 1
+        case 9u32 => 2
+        case 10u32 => 3
+        case 124u32 => 4
+        case 125u32 => 5
+        case _ => return false
     }
-    if ((cp >= 0x1100u32 && cp <= 0x115fu32) || (cp >= 0x2329u32 && cp <= 0x232au32) ||
-        (cp >= 0x2e80u32 && cp <= 0xa4cfu32) || (cp >= 0xac00u32 && cp <= 0xd7a3u32) ||
-        (cp >= 0xf900u32 && cp <= 0xfaffu32) || (cp >= 0xfe10u32 && cp <= 0xfe19u32) ||
-        (cp >= 0xfe30u32 && cp <= 0xfe6fu32) || (cp >= 0xff00u32 && cp <= 0xff60u32) ||
-        (cp >= 0xffe0u32 && cp <= 0xffe6u32)) {
-        return 2
+    let indexWithinLeaf = Int64((cp >> 3u32) & 0x7fu32)
+    let leafByte = EMOJI_PRESENTATION_LEAVES[idxOfLeaf][indexWithinLeaf]
+    return ((leafByte >> UInt8(cp & 0x07u32)) & 1u8) == 1u8
+}
+
+private func startsNonIdeographicTextPresentationSeq(cp: UTF32): Bool {
+    let topBits = cp >> 10u32
+    let idxOfLeaf = match (topBits) {
+        case 8u32 => 0
+        case 9u32 => 1
+        case 10u32 => 2
+        case 124u32 => 3
+        case 125u32 => 4
+        case _ => return false
     }
-    return 1
+    let indexWithinLeaf = Int64((cp >> 3u32) & 0x7fu32)
+    let leafByte = TEXT_PRESENTATION_LEAVES[idxOfLeaf][indexWithinLeaf]
+    return ((leafByte >> UInt8(cp & 0x07u32)) & 1u8) == 1u8
 }
 
 private func widthInStr(c: UTF32, isCJK: Bool, nextInfo: NextCharInfo): (Int64, NextCharInfo) {
     if (isCJK && nextInfo == NextCharInfo.COMBINING_LONG_SOLIDUS_OVERLAY &&
         (c == UInt32(b'<') || c == UInt32(b'=') || c == UInt32(b'>'))) {
+        return (2, NextCharInfo.DEFAULT)
+    }
+    if (nextInfo == NextCharInfo.VS16 && startsEmojiPresentationSeq(c)) {
         return (2, NextCharInfo.DEFAULT)
     }
     if (c <= 0xa0u32) {
@@ -77,6 +105,9 @@ private func widthInStr(c: UTF32, isCJK: Bool, nextInfo: NextCharInfo): (Int64, 
     }
     if (c == 0xfe0fu32) {
         return (0, NextCharInfo.VS16)
+    }
+    if (nextInfo == NextCharInfo.VS15 && !isCJK && startsNonIdeographicTextPresentationSeq(c)) {
+        return (1, NextCharInfo.DEFAULT)
     }
     return (LookupWidth(c, isCJK), NextCharInfo.DEFAULT)
 }

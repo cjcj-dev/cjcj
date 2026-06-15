@@ -11,8 +11,17 @@ public class ParallelUtil {
         return threadsNum
     }
 
+    public func RunTasksInParallel(tasks: Array<() -> Unit>): Unit {
+        let queue = TaskQueue(threadsNum)
+        for (task in tasks) {
+            queue.AddTask<Unit>({ =>
+                task()
+            })
+        }
+        queue.RunAndWaitForAllTasksCompleted()
+    }
+
     public func RunAST2CHIRInParallel(): Unit {
-        // TODO(selfhost:Utils): restore CHIRBuilder/Translator-based parallel AST2CHIR entrypoint once CHIR public Cangjie types exist.
+        CJC_ASSERT_WITH_MSG(threadsNum > 0, "parallel AST2CHIR requires a positive worker count")
     }
 }
-

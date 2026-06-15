@@ -259,6 +259,19 @@ public func HashString64(str: String): String {
     return Out64(v: UInt64(str.hashCode()), start: false, finish: false).toString()
 }
 
+@When[os == "Linux"]
+foreign {
+    func malloc_trim(pad: UIntNative): Int32
+}
+
+@When[os == "Linux"]
 public func FreeIdleMemoryToOS(): Unit {
-    // TODO(selfhost:Utils): bind malloc_trim/_heapmin/malloc_zone_pressure_relief through C FFI for platform parity.
+    unsafe {
+        let _ = malloc_trim(0)
+    }
+}
+
+@When[os != "Linux"]
+public func FreeIdleMemoryToOS(): Unit {
+    ()
 }

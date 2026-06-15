@@ -2,6 +2,7 @@ package cangjie_compiler::utils
 
 import std.collection.*
 import std.sort.*
+import std.sync.*
 
 private class QueuedTask {
     let fn: () -> Unit
@@ -18,17 +19,27 @@ private class QueuedTask {
 public class TaskResult<T> {
     private var completed = false
     private var value: Option<T> = None
+    private var failure: Option<Exception> = None
+    private let counter = SyncCounter(1)
 
     public init() {}
 
     public func complete(v: T): Unit {
         value = v
         completed = true
+        counter.dec()
+    }
+
+    public func fail(e: Exception): Unit {
+        failure = e
+        completed = true
+        counter.dec()
     }
 
     public func get(): T {
-        if (!completed) {
-            throw IllegalStateException("task result requested before task completion")
+        counter.waitUntilZero()
+        if (let Some(e) <- failure) {
+            throw e
         }
         return value.getOrThrow()
     }
@@ -40,6 +51,8 @@ public class TaskResult<T> {
 
 public class TaskQueue {
     private let tasks = ArrayList<QueuedTask>()
+    private let threads = ArrayList<Future<Unit>>()
+    private let mutex = Mutex()
     private var isStarted = false
     private let threadsNum: Int64
 
@@ -52,20 +65,40 @@ public class TaskQueue {
         let result = TaskResult<T>()
         let order = tasks.size
         tasks.add(QueuedTask({ =>
-            result.complete(fn())
+            try {
+                result.complete(fn())
+            } catch (e: Exception) {
+                result.fail(e)
+                throw e
+            }
         }, priority, order))
         return result
     }
 
     public func RunInBackground(): Unit {
-        RunAndWaitForAllTasksCompleted()
+        if (tasks.isEmpty()) {
+            return
+        }
+        createThreads()
     }
 
     public func WaitForAllTasksCompleted(): Unit {
+        for (thread in threads) {
+            thread.get()
+        }
+        threads.clear()
     }
 
     public func RunAndWaitForAllTasksCompleted(): Unit {
         if (tasks.isEmpty()) {
+            return
+        }
+        createThreads()
+        WaitForAllTasksCompleted()
+    }
+
+    private func createThreads(): Unit {
+        if (isStarted) {
             return
         }
         isStarted = true
@@ -78,10 +111,32 @@ public class TaskQueue {
                 left.order.compare(right.order)
             }
         }, stable: true)
-        while (!tasks.isEmpty()) {
+        let fixedThreadsNum = if (tasks.size < threadsNum) { tasks.size } else { threadsNum }
+        for (_ in 0..fixedThreadsNum) {
+            threads.add(spawn {
+                doTask()
+            })
+        }
+    }
+
+    private func popTask(): Option<QueuedTask> {
+        synchronized(mutex) {
+            if (tasks.isEmpty()) {
+                return None
+            }
             let task = tasks[0]
             tasks.remove(at: 0)
-            task.fn()
+            return task
+        }
+    }
+
+    private func doTask(): Unit {
+        while (true) {
+            let task = popTask()
+            if (let None <- task) {
+                return
+            }
+            task.getOrThrow().fn()
         }
     }
 }

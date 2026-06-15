@@ -58,6 +58,115 @@ public func GetCanonicalCombiningClass(c: UTF32): UInt8 {
     return current
 }
 
+private func compositionTable(c1: UTF32, c2: UTF32): Option<UTF32> {
+    if (c1 < 0x10000u32 && c2 < 0x10000u32) {
+        let key = (c1 << 16u32) | c2
+        for ((candidate, composed) in COMPOSITION_TABLE_KV) {
+            if (candidate == key) {
+                return composed
+            }
+        }
+        return None
+    }
+    for ((first, second, composed) in COMPOSITION_TABLE_ASTRAL_VALUES) {
+        if (first == c1 && second == c2) {
+            return composed
+        }
+    }
+    return None
+}
+
+private func composeCanonical(a: UTF32, b: UTF32): Option<UTF32> {
+    if (let Some(hangul) <- ComposeHangul(a, b)) {
+        return hangul
+    }
+    return compositionTable(a, b)
+}
+
+private func canonicalFullyDecomposed(c: UTF32): Option<Array<UTF32>> {
+    for ((candidate, start, length) in CANONICAL_DECOMPOSED_KV) {
+        if (candidate == c) {
+            let chars = ArrayList<UTF32>()
+            var idx: Int64 = 0
+            while (idx < length) {
+                chars.add(CANONICAL_DECOMPOSED_CHARS[start + idx])
+                idx++
+            }
+            return chars.toArray()
+        }
+    }
+    return None
+}
+
+private func appendCanonicalDecomposition(c: UTF32, result: ArrayList<UTF32>): Unit {
+    if (c <= 0x7fu32) {
+        result.add(c)
+        return
+    }
+    if (isHangulSyllable(c)) {
+        for (item in DecomposeHangul(c)) {
+            result.add(item)
+        }
+        return
+    }
+    if (let Some(decomposed) <- canonicalFullyDecomposed(c)) {
+        for (item in decomposed) {
+            result.add(item)
+        }
+        return
+    }
+    result.add(c)
+}
+
+private func flushPending(pending: ArrayList<(UInt8, UTF32)>, result: ArrayList<UTF32>): Unit {
+    let emitted = Array<Bool>(pending.size, repeat: false)
+    var emittedCount: Int64 = 0
+    while (emittedCount < pending.size) {
+        var bestIdx: Int64 = -1
+        var bestClass: UInt8 = UInt8.Max
+        var idx: Int64 = 0
+        while (idx < pending.size) {
+            if (!emitted[idx]) {
+                let cc = pending[idx][0]
+                if (bestIdx < 0 || cc < bestClass) {
+                    bestIdx = idx
+                    bestClass = cc
+                }
+            }
+            idx++
+        }
+        CJC_ASSERT(bestIdx >= 0)
+        result.add(pending[bestIdx][1])
+        emitted[bestIdx] = true
+        emittedCount++
+    }
+    pending.clear()
+}
+
+private func canonicalDecomposeToUTF32(s: String): Option<Array<UTF32>> {
+    let (status, codepoints) = ConvertUTF8ToUTF32(s.toArray())
+    if (status != ConversionResult.OK) {
+        return None
+    }
+    let raw = ArrayList<UTF32>()
+    for (ch in codepoints) {
+        appendCanonicalDecomposition(ch, raw)
+    }
+    let ordered = ArrayList<UTF32>()
+    let pending = ArrayList<(UInt8, UTF32)>()
+    for (ch in raw) {
+        let cc = GetCanonicalCombiningClass(ch)
+        if (cc == 0u8) {
+            flushPending(pending, ordered)
+            ordered.add(ch)
+        } else {
+            pending.add((cc, ch))
+        }
+    }
+    flushPending(pending, ordered)
+    return ordered.toArray()
+}
+
 public func NfcQuickCheck(s: String): NfcQcResult {
     var lastcc = 0u8
     var result = NfcQcResult.YES
@@ -86,51 +195,56 @@ public func NfcQuickCheck(s: String): NfcQcResult {
 }
 
 public func CanonicalDecompose(s: String): String {
-    let (status, codepoints) = ConvertUTF8ToUTF32(s.toArray())
-    if (status != ConversionResult.OK) {
+    let decomposed = canonicalDecomposeToUTF32(s)
+    if (let None <- decomposed) {
+        return s
+    }
+    return ConvertUTF32ToUTF8String(decomposed.getOrThrow()) ?? s
+}
+
+public func CanonicalRecompose(s: String): String {
+    let maybeCodepoints = canonicalDecomposeToUTF32(s)
+    if (let None <- maybeCodepoints) {
+        return s
+    }
+    let codepoints = maybeCodepoints.getOrThrow()
+    if (codepoints.isEmpty()) {
         return s
     }
     let result = ArrayList<UTF32>()
+    var starterIdx: Int64 = -1
+    var lastClass = 0u8
     for (ch in codepoints) {
-        if (isHangulSyllable(ch)) {
-            for (item in DecomposeHangul(ch)) {
-                result.add(item)
+        let cc = GetCanonicalCombiningClass(ch)
+        if (starterIdx >= 0) {
+            let starter = result[starterIdx]
+            if (lastClass == 0u8 || lastClass < cc) {
+                if (let Some(composed) <- composeCanonical(starter, ch)) {
+                    result[starterIdx] = composed
+                    if (cc == 0u8) {
+                        lastClass = 0u8
+                    }
+                    continue
+                }
             }
-        } else {
-            result.add(ch)
         }
+        if (cc == 0u8) {
+            starterIdx = result.size
+            lastClass = 0u8
+        } else {
+            lastClass = cc
+        }
+        result.add(ch)
     }
     return ConvertUTF32ToUTF8String(result.toArray()) ?? s
 }
 
-public func CanonicalRecompose(s: String): String {
-    // TODO(selfhost:Utils): port NormalisationData.generated.inc composition/decomposition tables for full Unicode NFC.
-    let decomposed = CanonicalDecompose(s)
-    let (status, codepoints) = ConvertUTF8ToUTF32(decomposed.toArray())
-    if (status != ConversionResult.OK || codepoints.isEmpty()) {
-        return s
+public func CanonicalRecompose(bytes: Array<UTF8>, begin: Int64, end: Int64): String {
+    if (begin < 0 || end < begin || end > bytes.size) {
+        return ""
     }
-    let result = ArrayList<UTF32>()
-    var idx: Int64 = 0
-    while (idx < codepoints.size) {
-        if (idx + 1 < codepoints.size) {
-            if (let Some(composed) <- ComposeHangul(codepoints[idx], codepoints[idx + 1])) {
-                if (idx + 2 < codepoints.size) {
-                    if (let Some(composedWithTail) <- ComposeHangul(composed, codepoints[idx + 2])) {
-                        result.add(composedWithTail)
-                        idx += 3
-                        continue
-                    }
-                }
-                result.add(composed)
-                idx += 2
-                continue
-            }
-        }
-        result.add(codepoints[idx])
-        idx++
-    }
-    return ConvertUTF32ToUTF8String(result.toArray()) ?? s
+    let sliced = String.fromUtf8(bytes[begin..end])
+    return CanonicalRecompose(sliced)
 }
 
 public func IsNFC(s: String): Bool {
