@@ -1011,6 +1011,36 @@ public class LexerImpl {
         }
     }
 
+    private func TrimmedHex(value: UInt32): String {
+        let raw = ToHexString(value, len: 8)
+        var idx: Int64 = 0
+        while (idx + 1 < raw.size && raw[idx] == b'0') {
+            idx++
+        }
+        return raw[idx..]
+    }
+
+    private func IsLegalUnicodeScalar(value: UInt32): Bool {
+        return value <= 0xd7ffu32 || (value >= 0xe000u32 && value <= UTF8_4_MAX)
+    }
+
+    private func DiagExpectedRightBracket(pStart: Int64): Unit {
+        let builder = diag.DiagnoseRefactor(
+            DiagKindRefactor.lex_expected_right_bracket, GetPos(pCurrent), arguments: [ConvertCurrentChar()]
+        )
+        builder.AddHint(GetPos(pStart + 2))
+        builder.AddNote("unicode escape may contain 8 hexadecimal digits at most")
+    }
+
+    private func DiagExpectedRightBracketOrHexadecimal(pStart: Int64): Unit {
+        let builder = diag.DiagnoseRefactor(
+            DiagKindRefactor.lex_expected_right_bracket_or_hexadecimal, GetPos(pCurrent),
+            arguments: [ConvertCurrentChar()]
+        )
+        builder.AddHint(MakeRange(GetPos(pStart), GetPos(pStart + 2)))
+        builder.AddNote("unicode escape may only contain hexadecimal digits")
+    }
+
     private func ProcessUnicodeEscape(): Unit {
         var hexNum: Int64 = 0
         var hexVal: UInt32 = 0u32
@@ -1042,24 +1072,63 @@ public class LexerImpl {
             DiagExpectedDigit(b'x')
             success = false
         }
-        ReadUTF8Char()
-        if (currentChar != Int64(b'}') && success) {
-            let diagKind = if (hexNum == UNICODE_MAX_NUM) {
-                DiagKindRefactor.lex_expected_right_bracket
-            } else {
-                DiagKindRefactor.lex_expected_right_bracket_or_hexadecimal
-            }
-            lexDiagnose(diag, diagKind, GetPos(pCurrent), ConvertCurrentChar())
+        if (hexNum == UNICODE_MAX_NUM && isHexDigit(currentChar) && success) {
+            DiagExpectedRightBracket(escapeStart)
             Back()
             success = false
         }
-        if (hexVal > UTF8_4_MAX && success) {
-            lexDiagnose(diag, DiagKindRefactor.lex_illegal_uni_character_literal, MakeRange(GetPos(escapeStart), GetPos(pNext)))
+        ReadUTF8Char()
+        if (currentChar != Int64(b'}') && success) {
+            if (hexNum == UNICODE_MAX_NUM) {
+                DiagExpectedRightBracket(escapeStart)
+            } else {
+                DiagExpectedRightBracketOrHexadecimal(escapeStart)
+            }
+            Back()
+            success = false
+        }
+        if (!IsLegalUnicodeScalar(hexVal) && success) {
+            lexDiagnose(
+                diag, DiagKindRefactor.lex_illegal_uni_character_literal,
+                MakeRange(GetPos(escapeStart), GetPos(pNext)), TrimmedHex(hexVal)
+            )
             success = false
         }
     }
 
-    private func ProcessEscape(isInString: Bool, isByteLiteral: Bool): Unit {
+    private func EscapeNote(target: String, isByteLiteral: Bool): String {
+        var note = "found " + if (isByteLiteral) { "11" } else { "12" } + " possible escapes: "
+        note += "'\\b', '\\t', '\\n', '\\v', '\\f', '\\r', "
+        note += "'\\0', '\\\\', '\\'', '\\\"', '\\u{__}'"
+        if (!isByteLiteral) {
+            note += ", '\\$'"
+        }
+        return note + " in " + target + " literal"
+    }
+
+    private func DiagUnrecognizedEscape(pStart: Int64, isInString: Bool, isByteLiteral: Bool): Unit {
+        var target = if (isInString) { "string" } else { "rune" }
+        if (isByteLiteral) {
+            target += " byte"
+        }
+        if (isInString && isByteLiteral) {
+            target = "byte array"
+        }
+        let escaped = "\\" + ConvertCurrentChar()
+        let builder = diag.DiagnoseRefactor(
+            DiagKindRefactor.lex_unrecognized_escape,
+            MakeRange(GetPos(pCurrent - 1), GetPos(pCurrent) + ConvertCurrentChar().size),
+            arguments: [escaped, target]
+        )
+        if (getByte(pStart) == b'"' && getByte(pStart + 1) == b'"') {
+            builder.AddHint(MakeRange(GetPos(pStart), GetPos(pStart + 3)), arguments: [target])
+        } else {
+            builder.AddHint(GetPos(pStart), arguments: [target])
+        }
+        builder.AddNote(EscapeNote(target, isByteLiteral))
+    }
+
+    private func ProcessEscape(pStart: Int64, isInString: Bool, isByteLiteral: Bool): Unit {
         ReadUTF8Char()
         if (isLegalEscape(currentChar) || (!isByteLiteral && currentChar == Int64(b'$'))) {
             return
@@ -1069,11 +1138,7 @@ public class LexerImpl {
             return
         }
         if (success) {
-            let target = if (isInString) { "string" } else { "rune" }
-            lexDiagnose2(
-                diag, DiagKindRefactor.lex_unrecognized_escape,
-                MakeRange(GetPos(pCurrent - 1), GetPos(pNext)), "\\" + ConvertCurrentChar(), target
-            )
+            DiagUnrecognizedEscape(pStart, isInString, isByteLiteral)
             success = false
         }
         Back()
@@ -1513,14 +1578,74 @@ public class LexerImpl {
         return res
     }
 
-    private func ProcessIllegalToken(needStringParts: Bool, multiLine: Bool, pStart: Int64, isJString!: Bool = false): Token {
-        if (success) {
-            let kind = if (multiLine) {
-                DiagKindRefactor.lex_unterminated_multi_line_string
-            } else {
-                DiagKindRefactor.lex_unterminated_single_line_string
+    private func DiagUnterminatedSingleLineString(pStart: Int64, isMatchEnd: Bool, isJString: Bool): Unit {
+        let builder = diag.DiagnoseRefactor(
+            DiagKindRefactor.lex_unterminated_single_line_string,
+            MakeRange(GetPos(pStart), GetPos(pCurrent) + 1)
+        )
+        if (!interpolations.isEmpty() && !stringStarts.isEmpty()) {
+            let interpolation = interpolations[interpolations.size - 1]
+            let stringStart = stringStarts[stringStarts.size - 1]
+            if (interpolation < pStart && !stringStart[1]) {
+                builder.AddHint(MakeRange(GetPos(interpolation), GetPos(interpolation + 2)))
             }
-            lexDiagnose(diag, kind, MakeRange(GetPos(pStart), GetPos(pCurrent)))
+        }
+        if (!isMatchEnd && !isJString) {
+            builder.AddNote("consider using multi-line string if you intended to include '\\n' in string")
+        }
+    }
+
+    private func DiagUnterminatedMultiLineString(pStart: Int64): Unit {
+        let builder = diag.DiagnoseRefactor(
+            DiagKindRefactor.lex_unterminated_multi_line_string,
+            MakeRange(GetPos(pStart), GetPos(pCurrent))
+        )
+        if (!interpolations.isEmpty() && !stringStarts.isEmpty()) {
+            let interpolation = interpolations[interpolations.size - 1]
+            let stringStart = stringStarts[stringStarts.size - 1]
+            if (interpolation < pStart && stringStart[1]) {
+                builder.AddHint(MakeRange(GetPos(interpolation), GetPos(interpolation + 2)))
+            }
+        }
+    }
+
+    private func DiagUnterminatedRawString(pStart: Int64): Unit {
+        let builder = diag.DiagnoseRefactor(
+            DiagKindRefactor.lex_unterminated_raw_string,
+            MakeRange(GetPos(pStart), GetPos(pCurrent))
+        )
+        if (!interpolations.isEmpty() && !stringStarts.isEmpty()) {
+            let interpolation = interpolations[interpolations.size - 1]
+            let stringStart = stringStarts[stringStarts.size - 1]
+            if (interpolation < pStart && !stringStart[1]) {
+                builder.AddHint(MakeRange(GetPos(interpolation), GetPos(interpolation + 2)))
+            }
+        }
+    }
+
+    private func DiagUnterminatedInterpolation(): Unit {
+        if (interpolations.isEmpty()) {
+            lexDiagnose(diag, DiagKindRefactor.lex_unterminated_interpolation, GetPos(pCurrent))
+            return
+        }
+        let interpolation = interpolations[interpolations.size - 1]
+        let builder = diag.DiagnoseRefactor(
+            DiagKindRefactor.lex_unterminated_interpolation,
+            MakeRange(GetPos(interpolation), GetPos(pCurrent) + 1)
+        )
+        if (!stringStarts.isEmpty()) {
+            builder.AddHint(GetPos(stringStarts[stringStarts.size - 1][0]))
+        }
+    }
+
+    private func ProcessIllegalToken(needStringParts: Bool, multiLine: Bool, pStart: Int64, isJString!: Bool = false): Token {
+        let isMatchEnd = currentChar == -1
+        if (success) {
+            if (multiLine) {
+                DiagUnterminatedMultiLineString(pStart)
+            } else {
+                DiagUnterminatedSingleLineString(pStart, isMatchEnd, isJString)
+            }
             success = false
         }
         let tokKind = if (multiLine) {
@@ -1563,7 +1688,7 @@ public class LexerImpl {
                 stringStarts.remove(at: stringStarts.size - 1)
                 return (ProcessIllegalToken(needStringParts, false, if (isJString) { pStart + 1 } else { pStart }, isJString: isJString), false)
             } else if (currentChar == Int64(b'\\')) {
-                ProcessEscape(true, false)
+                ProcessEscape(pStart, true, false)
             } else if (currentChar == Int64(b'$') && getNextChar(0) == b'{' && !isJString) {
                 let processed = ProcessStringInterpolation(begin, beginPos, stringParts, false)
                 begin = processed[0]
@@ -1597,7 +1722,7 @@ public class LexerImpl {
             ReadUTF8Char()
             if (currentChar == -1 || (IsCurrentCharLineTerminator() && !allowNewline)) {
                 if (success) {
-                    lexDiagnose(diag, DiagKindRefactor.lex_unterminated_interpolation, GetPos(pCurrent))
+                    DiagUnterminatedInterpolation()
                     success = false
                 }
                 return false
@@ -1623,6 +1748,20 @@ public class LexerImpl {
                 level--
             } else if (currentChar == Int64(b'/')) {
                 if (getNextChar(0) == b'*' || getNextChar(0) == b'/') {
+                    if (getNextChar(0) == b'/' && !allowNewline) {
+                        while (true) {
+                            ReadUTF8Char()
+                            if (IsCurrentCharLineTerminator() || currentChar == -1) {
+                                break
+                            }
+                        }
+                        if (success) {
+                            DiagUnterminatedInterpolation()
+                            success = false
+                        }
+                        Back()
+                        return false
+                    }
                     if (!ScanComment(pCurrent, allowNewLine: allowNewline)[1]) {
                         return false
                     }
@@ -1674,7 +1813,7 @@ public class LexerImpl {
         while (true) {
             ReadUTF8Char()
             if (currentChar == Int64(b'\\')) {
-                ProcessEscape(true, false)
+                ProcessEscape(pStart, true, false)
             } else if (currentChar == quoteChar && getNextChar(0) == UInt8(quoteChar) && getNextChar(1) == UInt8(quoteChar)) {
                 stringParts.add(StringPart(StringPartKind.STR, input[begin..pCurrent], beginPos, GetPos(pCurrent)))
                 ReadUTF8Char()
@@ -1746,7 +1885,7 @@ public class LexerImpl {
                         pNext = pStart + 1
                         return (Token(TokenKind.HASH, "#", GetPos(pStart), GetPos(pNext)), false)
                     }
-                    lexDiagnose(diag, DiagKindRefactor.lex_unterminated_raw_string, MakeRange(GetPos(pStart), GetPos(pCurrent)))
+                    DiagUnterminatedRawString(pStart)
                     success = false
                 }
                 return (Token(TokenKind.MULTILINE_RAW_STRING, "", pos, GetPos(pNext)), false)
@@ -1768,7 +1907,7 @@ public class LexerImpl {
         while (currentChar != -1 && level > 0) {
             ReadUTF8Char()
             if (IsCurrentCharLineTerminator() && success && !allowNewLine) {
-                lexDiagnose(diag, DiagKindRefactor.lex_unterminated_interpolation, GetPos(pCurrent))
+                DiagUnterminatedInterpolation()
                 success = false
                 break
             }
@@ -1809,6 +1948,16 @@ public class LexerImpl {
         }
     }
 
+    private func DiagCharactersOverflow(pStart: Int64): Unit {
+        let range = MakeRange(GetPos(pStart), GetPos(pCurrent + 1))
+        let builder = diag.DiagnoseRefactor(DiagKindRefactor.lex_characters_overflow, range)
+        let innerBegin = pStart + 2
+        let inner = if (innerBegin <= pCurrent) { input[innerBegin..pCurrent] } else { "" }
+        let help = DiagHelp("if you intended to write a string literal, use '\"'")
+        help.AddSubstitution(range, "\"" + inner + "\"")
+        builder.AddHelp(help)
+    }
+
     private func ProcessIllegalCharValue(pStart: Int64, beginOffset: Int64): (Token, Bool) {
         if (currentChar == Int64(b'\'')) {
             if (success) {
@@ -1830,7 +1979,7 @@ public class LexerImpl {
             return false
         }
         if (success) {
-            lexDiagnose(diag, DiagKindRefactor.lex_characters_overflow, MakeRange(GetPos(pStart), GetPos(pCurrent + 1)))
+            DiagCharactersOverflow(pStart)
             success = false
         }
         return true
@@ -1845,7 +1994,7 @@ public class LexerImpl {
             return ProcessIllegalCharValue(pStart, beginOffset)
         }
         if (currentChar == Int64(b'\\')) {
-            ProcessEscape(false, isByteLiteral)
+            ProcessEscape(pStart, false, isByteLiteral)
         }
         ReadUTF8Char()
         var ok = true
@@ -1857,13 +2006,37 @@ public class LexerImpl {
         return (tok, ok)
     }
 
+    private func DiagUnrecognizedCharInByte(c: Int64, str: String, pStart: Int64, range: (Position, Position)): Unit {
+        let builder = diag.DiagnoseRefactor(
+            DiagKindRefactor.lex_unrecognized_char_in_binary_string,
+            MakeRange(range[0], range[1]), arguments: [ConvertChar(c), str]
+        )
+        let hintPos = GetPos(pStart)
+        builder.AddHint(MakeRange(hintPos, hintPos + 2), arguments: [str])
+        builder.AddNote("character in " + str + " must be ASCII")
+    }
+
     private func ScanByteUInt8(pStart: Int64): Token {
+        let intByteGapLen: Int64 = 3
         var token = ScanChar(pStart, isByteLiteral: true)[0]
+        if (let Some(position) <- token.Value().indexOf("\\u")) {
+            let leftCurl = token.Value().indexOf("{", position)
+            let rightCurl = token.Value().indexOf("}", position)
+            if (let Some(lCurl) <- leftCurl) {
+                if (let Some(rCurl) <- rightCurl) {
+                    if (rCurl - lCurl > intByteGapLen && success) {
+                        lexDiagnose(
+                            diag, DiagKindRefactor.lex_too_many_digits, GetPos(pStart + intByteGapLen), token.Value()
+                        )
+                        success = false
+                    }
+                }
+            }
+        }
         let codepoints = UTF8ToChar32(token.Value())
         if (!codepoints.isEmpty() && codepoints[0] > UInt32(ASCII_BASE) && success) {
-            lexDiagnose2(
-                diag, DiagKindRefactor.lex_unrecognized_char_in_binary_string,
-                MakeRange(GetPos(pStart + 2), GetPos(pCurrent)), Char32ToUTF8(codepoints[0]), "character byte literal"
+            DiagUnrecognizedCharInByte(
+                Int64(codepoints[0]), "character byte literal", pStart, (GetPos(pStart + 2), GetPos(pCurrent))
             )
             success = false
         }

@@ -30,7 +30,3 @@ func lexDiagnose(diag: DiagnosticEngine, kind: DiagKindRefactor, range: BasicRan
 func lexDiagnose2(diag: DiagnosticEngine, kind: DiagKindRefactor, pos: Position, left: String, right: String): Unit {
     diag.DiagnoseRefactor(kind, pos, arguments: twoArgs(left, right))
 }
-
-func lexDiagnose2(diag: DiagnosticEngine, kind: DiagKindRefactor, range: BasicRange, left: String, right: String): Unit {
-    diag.DiagnoseRefactor(kind, range, arguments: twoArgs(left, right))
-}

@@ -17,11 +17,12 @@ Implemented:
 - Tightened backquoted identifier lexing to scan real identifier parts, package-identifier separators, wildcard diagnostics, and missing-backquote recovery instead of accepting arbitrary backquoted text.
 - Matched C++ numeric suffix recovery for `.identifier` member access after number literals, including Unicode identifier lookahead and the original adjacency guard for unknown-suffix diagnostics.
 - Expanded number diagnostic parity for expected/unexpected digit and illegal integer/float suffix cases with C++ main-hint substitutions, contextual hints, and notes.
+- Expanded string, rune, byte-rune, unicode-escape, and interpolation diagnostic parity with C++ hints, notes, range choices, unicode scalar validation, escape-note text, rune-overflow help, and byte-literal ASCII checks.
 
 Known fidelity caveats:
 
 - Identifier NFC normalization is not yet byte-for-byte equivalent to the C++ `Unicode::NFC` path because the Utils module is not ported as a dependency of Lex in this worktree.
-- Diagnostics report through the same Basic diagnostic IDs, but several rich hint/help branches from string, rune, and interpolation diagnostics are still simplified pending a full diagnostic-detail pass.
+- Diagnostics report through the same Basic diagnostic IDs, but rendered diagnostic-output parity still needs validation against the C++ Lex test corpus.
 - The implementation is behavior-bearing and buildable; the C++ Lex gtest corpus has been reviewed for parity cases, but this Cangjie workspace currently has no executable Lex tests (`cjpm test` reports 0 tests).
 
 Remaining Lex selfhost markers: 0.
