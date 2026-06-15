@@ -240,9 +240,13 @@ public class ASTLoader {
         if (let Some(pkg) <- LoadPackageDependencies()) {
             for (file in pkg.files) {
                 for (importSpec in file.imports) {
-                    let name = importSpec.content.GetImportedPackageName()
-                    if (!name.isEmpty() && !out.contains(name)) {
-                        out.add(name)
+                    var depName = cjoManager.GetPackageNameByImport(importSpec)
+                    if (depName.isEmpty()) {
+                        let pair = cjoManager.GetPackageCjo(importSpec)
+                        depName = pair[0]
+                    }
+                    if (!depName.isEmpty() && !out.contains(depName)) {
+                        out.add(depName)
                     }
                 }
             }

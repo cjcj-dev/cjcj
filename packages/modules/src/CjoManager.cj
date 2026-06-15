@@ -76,7 +76,7 @@ public class CjoManager {
         }
         if (let Some(depPd) <- GetPackageDecl(depName)) {
             let isDepMacro = depPd.srcPackage.isMacroPackage
-            if (!isCurMacro || isDepMacro || depName == AST_PACKAGE_NAME || impl.IsReExportBy(curName, depName)) {
+            if (!isCurMacro || isDepMacro || depName == AST_PACKAGE_NAME || IsReExportByResolved(curName, depName)) {
                 return true
             }
         }
@@ -85,6 +85,7 @@ public class CjoManager {
 
     public func LoadPackageDeclsOnDemand(packages: ArrayList<Package>, fromLsp!: Bool = false): Unit {
         let queue = ArrayList<CjoPackageInfo>()
+        let loaders = ArrayList<ASTLoader>()
         for (pkg in packages) {
             if (fromLsp) {
                 if (let Some(info) <- impl.GetPackageInfo(pkg.fullPackageName)) {
@@ -102,6 +103,14 @@ public class CjoManager {
                 }
             }
         }
+        for (pkg in packages) {
+            if (impl.GetGlobalOptions().IsCompilingCJMPSpecific() || !impl.GetGlobalOptions().commonPartCjos.isEmpty()) {
+                for (commonLoader in GetCommonPartCjos(pkg.fullPackageName)) {
+                    commonLoader.LoadPackageDecls()
+                    loaders.add(commonLoader)
+                }
+            }
+        }
         var head: Int64 = 0
         while (head < queue.size) {
             let cur = queue[head]
@@ -114,6 +123,7 @@ public class CjoManager {
             if (!impl.AddLoadedPackages(pkgName)) {
                 continue
             }
+            loaders.add(loader)
             loader.LoadPackageDecls()
             let isCurMacro = cur.pkg.isMacroPackage
             for (depPkg in loader.GetDependentPackageNames()) {
@@ -124,12 +134,8 @@ public class CjoManager {
                 }
             }
         }
-        for (name in impl.GetPackageNameMap().keys()) {
-            if (let Some(info) <- impl.GetPackageInfo(name)) {
-                if (let Some(loader) <- info.loader) {
-                    loader.LoadRefs()
-                }
-            }
+        for (loader in loaders) {
+            loader.LoadRefs()
         }
     }
 
@@ -433,6 +439,27 @@ public class CjoManager {
         }
         impl.CacheCjoPathForFind(fullPackageName, "")
         return ""
+    }
+
+    private func IsReExportByResolved(srcPackage: String, reExportPackage: String): Bool {
+        if (let Some(info) <- impl.GetPackageInfo(srcPackage)) {
+            for (file in info.pkg.files) {
+                for (importSpec in file.imports) {
+                    if (!importSpec.IsReExport()) {
+                        continue
+                    }
+                    var mapped = GetPackageNameByImport(importSpec)
+                    if (mapped.isEmpty()) {
+                        let pair = GetPackageCjo(importSpec)
+                        mapped = pair[0]
+                    }
+                    if (mapped == reExportPackage) {
+                        return true
+                    }
+                }
+            }
+        }
+        return false
     }
 
     private func AddDeclToMap(decl: Decl, declMap: HashMap<String, ArrayList<Decl>>): Unit {
