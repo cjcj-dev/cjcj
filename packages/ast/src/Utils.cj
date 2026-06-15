@@ -142,11 +142,131 @@ public func GetFloatTypeInfoByKind(kind: TypeKind): FloatTypeInfo {
 }
 
 public func InitializeLitConstValue(lce: LitConstExpr): Unit {
-    // TODO(selfhost:AST): finish exact C++ literal constant initialization after Sema type manager is available.
     lce.isConst = true
-    if (lce.kind == LitConstKind.INTEGER || lce.kind == LitConstKind.RUNE_BYTE) {
-        lce.constNumValue.asInt.InitIntLiteral(lce.stringValue, lce.GetNumLitTypeKind())
+    let primitiveKind = getPrimitiveLiteralKind(lce)
+    if (lce.kind == LitConstKind.BOOL) {
+        lce.constNumValue.asBoolean = lce.stringValue == "true"
+        return
     }
+    if (lce.kind == LitConstKind.UNIT || lce.kind == LitConstKind.NONE) {
+        return
+    }
+    if (TypeKindInRange(primitiveKind, TypeKind.TYPE_INT8, TypeKind.TYPE_UINT_NATIVE) ||
+        primitiveKind == TypeKind.TYPE_IDEAL_INT || lce.kind == LitConstKind.RUNE_BYTE ||
+        lce.kind == LitConstKind.RUNE) {
+        let value = if ((lce.kind == LitConstKind.STRING || lce.kind == LitConstKind.RUNE_BYTE ||
+            lce.kind == LitConstKind.RUNE) && lce.codepoint.size == 1) {
+            "${lce.codepoint[0]}"
+        } else {
+            lce.stringValue
+        }
+        lce.constNumValue.asInt.InitIntLiteral(value, primitiveKind)
+        return
+    }
+    if (TypeKindInRange(primitiveKind, TypeKind.TYPE_FLOAT16, TypeKind.TYPE_IDEAL_FLOAT)) {
+        lce.constNumValue.asFloat.value = parseFloatLiteral(lce.stringValue)
+        lce.constNumValue.asFloat.flowStatus = FlowStatus.NORMAL
+    }
+}
+
+private func getPrimitiveLiteralKind(lce: LitConstExpr): TypeKind {
+    if (let Some(ty) <- lce.GetTy()) {
+        if (let Some(primitive) <- (ty as PrimitiveTy)) {
+            if (primitive.kind == TypeKind.TYPE_INT_NATIVE) {
+                return if (primitive.bitness == 32) { TypeKind.TYPE_INT32 } else { TypeKind.TYPE_INT64 }
+            }
+            if (primitive.kind == TypeKind.TYPE_UINT_NATIVE) {
+                return if (primitive.bitness == 32) { TypeKind.TYPE_UINT32 } else { TypeKind.TYPE_UINT64 }
+            }
+            return primitive.kind
+        }
+        if (let Some(genericTy) <- (ty as GenericsTy)) {
+            if (let Some(lower) <- genericTy.lowerBound) {
+                if (let Some(primitive) <- (lower as PrimitiveTy)) {
+                    return primitive.kind
+                }
+            }
+        }
+    }
+    if (lce.kind == LitConstKind.BOOL) {
+        return TypeKind.TYPE_BOOLEAN
+    }
+    if (lce.kind == LitConstKind.RUNE) {
+        return TypeKind.TYPE_RUNE
+    }
+    return lce.GetNumLitTypeKind()
+}
+
+private func parseFloatLiteral(value: String): Float64 {
+    let text = removeNumericSeparators(value)
+    var idx: Int64 = 0
+    var sign = 1.0
+    if (idx < text.size && text[idx] == b'-') {
+        sign = -1.0
+        idx++
+    } else if (idx < text.size && text[idx] == b'+') {
+        idx++
+    }
+    var result = 0.0
+    while (idx < text.size && text[idx] >= b'0' && text[idx] <= b'9') {
+        result = result * 10.0 + Float64(text[idx] - b'0')
+        idx++
+    }
+    if (idx < text.size && text[idx] == b'.') {
+        idx++
+        var scale = 0.1
+        while (idx < text.size && text[idx] >= b'0' && text[idx] <= b'9') {
+            result += Float64(text[idx] - b'0') * scale
+            scale /= 10.0
+            idx++
+        }
+    }
+    if (idx < text.size && (text[idx] == b'e' || text[idx] == b'E')) {
+        idx++
+        var expSign: Int64 = 1
+        if (idx < text.size && text[idx] == b'-') {
+            expSign = -1
+            idx++
+        } else if (idx < text.size && text[idx] == b'+') {
+            idx++
+        }
+        var exp: Int64 = 0
+        while (idx < text.size && text[idx] >= b'0' && text[idx] <= b'9') {
+            exp = exp * 10 + Int64(text[idx] - b'0')
+            idx++
+        }
+        result *= pow10(exp * expSign)
+    }
+    return sign * result
+}
+
+private func removeNumericSeparators(value: String): String {
+    let out = StringBuilder()
+    for (byte in value.toArray()) {
+        if (byte == b'f' || byte == b'F' || byte == b'i' || byte == b'u' || byte == b'U') {
+            break
+        }
+        if (byte != b'_') {
+            out.append(String.fromUtf8([byte]))
+        }
+    }
+    return out.toString()
+}
+
+private func pow10(exp: Int64): Float64 {
+    var result = 1.0
+    if (exp >= 0) {
+        for (_ in 0..exp) {
+            result *= 10.0
+        }
+    } else {
+        var idx: Int64 = 0
+        while (idx < -exp) {
+            result /= 10.0
+            idx++
+        }
+    }
+    return result
 }
 
 public func FlattenVarWithPatternDecl(vwpDecl: VarWithPatternDecl): ArrayList<Pattern> {

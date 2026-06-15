@@ -8,6 +8,7 @@ public class TrieNode {
     public var depth: UInt32 = 0u32
     public let next: HashMap<String, TrieNode> = HashMap<String, TrieNode>()
     public let suffixes: HashSet<String> = HashSet<String>()
+    public let ids: ArrayList<Symbol> = ArrayList<Symbol>()
     public init() {}
 }
 
@@ -17,6 +18,10 @@ public class Trie {
     public init() {}
 
     public func Insert(value: String): Unit {
+        Insert(value, Symbol(value))
+    }
+
+    public func Insert(value: String, symbol: Symbol): Unit {
         var node = root
         var prefix = ""
         for (byte in value.toArray()) {
@@ -30,6 +35,7 @@ public class Trie {
             }
             if (let Some(child) <- node.next.get(key)) {
                 node = child
+                node.ids.add(symbol)
             }
         }
         node.value = value
@@ -92,17 +98,13 @@ public class Searcher {
     public init() {}
 
     public func Search(ctx: ASTContext, query: String): ArrayList<Symbol> {
-        // TODO(selfhost:AST): port the full QueryParser grammar and boolean query evaluation from C++ Query.cpp.
-        if (let Some(values) <- cache.get(query)) {
+        let parsed = ParseQuery(query)
+        let key = parsed.PrettyPrint()
+        if (let Some(values) <- cache.get(key)) {
             return values
         }
-        let out = ArrayList<Symbol>()
-        for (symbol in ctx.symbolTable) {
-            if (query.isEmpty() || symbol.name.contains(query) || symbol.scopeName.contains(query)) {
-                out.add(symbol)
-            }
-        }
-        cache[query] = out
+        let out = Search(ctx, parsed)
+        cache[key] = out
         return out
     }
 
@@ -110,7 +112,7 @@ public class Searcher {
         let out = ArrayList<Symbol>()
         for (symbol in ctx.symbolTable) {
             if (query.Match(symbol)) {
-                out.add(symbol)
+                insertByPosition(out, symbol)
             }
         }
         return out
@@ -132,9 +134,30 @@ public class Searcher {
         let out = ArrayList<String>()
         for (symbol in ctx.symbolTable) {
             if (symbol.scopeName.startsWith(prefix)) {
-                out.add(symbol.scopeName)
+                addUniqueString(out, symbol.scopeName)
             }
         }
         return out
+    }
+
+    private func insertByPosition(out: ArrayList<Symbol>, symbol: Symbol): Unit {
+        var idx: Int64 = 0
+        while (idx < out.size) {
+            if (Sort.PosDesc(symbol, out[idx])) {
+                out.add(symbol, at: idx)
+                return
+            }
+            idx++
+        }
+        out.add(symbol)
+    }
+
+    private func addUniqueString(out: ArrayList<String>, value: String): Unit {
+        for (item in out) {
+            if (item == value) {
+                return
+            }
+        }
+        out.add(value)
     }
 }

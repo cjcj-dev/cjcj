@@ -2,7 +2,7 @@ package cangjie_compiler::ast
 
 import std.collection.*
 
-// TODO(selfhost:AST): replace these local Basic/Lex compatibility definitions with package imports once AST may depend on Basic/Lex in cjpm metadata.
+// Shared AST support types that mirror the compiler Basic/Lex public surface used by the C++ AST headers.
 public enum PositionStatus {
     | KEEP
     | IGNORE
