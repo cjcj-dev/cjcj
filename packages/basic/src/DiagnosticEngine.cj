@@ -755,13 +755,20 @@ public class DiagnosticBuilder {
         diagnostic.helps.add(help)
     }
 
-    // TODO(selfhost:Basic): C++ emits in DiagnosticBuilder::~DiagnosticBuilder; Cangjie has no equivalent RAII hook here, so callers must use Emit().
     public func Emit(): Unit {
         if (emitted) {
             return
         }
         emitted = true
         diag.FinishDiagnostic(diagnostic)
+    }
+
+    public func close(): Unit {
+        Emit()
+    }
+
+    public func isClosed(): Bool {
+        return emitted
     }
 }
 

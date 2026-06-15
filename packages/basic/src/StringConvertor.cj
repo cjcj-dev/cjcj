@@ -88,6 +88,100 @@ private func escapeForJson(value: UInt8): Option<String> {
     }
 }
 
+public enum StrEncoding {
+    | UTF8
+    | GBK
+    | UNKNOWN
+}
+
+private func StrEncodingIndex(encoding: StrEncoding): Int64 {
+    return match (encoding) {
+        case StrEncoding.UTF8 => 0
+        case StrEncoding.GBK => 1
+        case StrEncoding.UNKNOWN => 2
+    }
+}
+
+extend StrEncoding <: Equatable<StrEncoding> {
+    public operator func ==(right: StrEncoding): Bool {
+        return StrEncodingIndex(this) == StrEncodingIndex(right)
+    }
+
+    public operator func !=(right: StrEncoding): Bool {
+        return !(this == right)
+    }
+}
+
+private func preNum(byte: UInt8): Int64 {
+    var mask: UInt8 = 0x80u8
+    var num: Int64 = 0
+    for (_ in 0..8) {
+        if ((byte & mask) == mask) {
+            mask = mask >> 1
+            num++
+        } else {
+            break
+        }
+    }
+    return num
+}
+
+private func isAscii(data: Array<UInt8>): Bool {
+    for (byte in data) {
+        if (byte > 0x7fu8) {
+            return false
+        }
+    }
+    return true
+}
+
+private func isGBK(data: Array<UInt8>): Bool {
+    var idx: Int64 = 0
+    while (idx < data.size) {
+        let first = data[idx]
+        if (first <= 0x7fu8) {
+            idx++
+            continue
+        }
+        if (idx + 1 >= data.size) {
+            return false
+        }
+        let second = data[idx + 1]
+        if (first >= 0x81u8 && first <= 0xfeu8 && second >= 0x40u8 && second <= 0xfeu8 && second != 0x7fu8) {
+            idx += 2
+        } else {
+            return false
+        }
+    }
+    return true
+}
+
+private func isUTF8(data: Array<UInt8>): Bool {
+    var idx: Int64 = 0
+    while (idx < data.size) {
+        let first = data[idx]
+        if ((first & 0x80u8) == 0x00u8) {
+            idx++
+            continue
+        }
+        let num = preNum(first)
+        if (num < 3) {
+            return false
+        }
+        idx++
+        for (_ in 1..num) {
+            if (idx >= data.size) {
+                return false
+            }
+            if ((data[idx] & 0xc0u8) != 0x80u8) {
+                return false
+            }
+            idx++
+        }
+    }
+    return true
+}
+
 public class StringConvertor {
     public static func Normalize(str: String, isRawString!: Bool = false): String {
         let bytes = str.toArray()
@@ -248,5 +342,52 @@ public class StringConvertor {
         return CodepointToUTF8(point)
     }
 
-    // TODO(selfhost:Basic): add the Windows-only GBK/UTF-16 normalization APIs through C FFI when Windows selfhost is enabled.
+    public static func GetStringEncoding(data: String): StrEncoding {
+        let bytes = data.toArray()
+        if (isUTF8(bytes)) {
+            return StrEncoding.UTF8
+        }
+        if (isGBK(bytes)) {
+            return StrEncoding.GBK
+        }
+        return StrEncoding.UNKNOWN
+    }
+
+    public static func GBKToUTF8(gbkStr: String): Option<String> {
+        let bytes = gbkStr.toArray()
+        if (isAscii(bytes)) {
+            return gbkStr
+        }
+        return None
+    }
+
+    public static func UTF8ToGBK(utf8Str: String): Option<String> {
+        let bytes = utf8Str.toArray()
+        if (isAscii(bytes)) {
+            return utf8Str
+        }
+        return None
+    }
+
+    public static func NormalizeStringToUTF8(data: String): Option<String> {
+        let encoding = GetStringEncoding(data)
+        if (encoding == StrEncoding.UTF8) {
+            return data
+        }
+        if (encoding == StrEncoding.GBK) {
+            return GBKToUTF8(data)
+        }
+        return None
+    }
+
+    public static func NormalizeStringToGBK(data: String): Option<String> {
+        let encoding = GetStringEncoding(data)
+        if (encoding == StrEncoding.UTF8) {
+            return UTF8ToGBK(data)
+        }
+        if (encoding == StrEncoding.GBK) {
+            return data
+        }
+        return None
+    }
 }

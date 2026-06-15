@@ -45,6 +45,7 @@ public class DiagnosticEmitter {
         for (hint in diagnostic.otherHints) {
             renderHint(builder, hint, "~")
         }
+        renderMacroExpansion(builder)
         for (subDiag in diagnostic.subDiags) {
             renderSubDiagnostic(builder, subDiag)
         }
@@ -110,13 +111,43 @@ public class DiagnosticEmitter {
     }
 
     private func renderSourceLine(builder: StringBuilder, range: Range, marker: String, hintText: String): Unit {
+        if (range.begin.line != range.end.line) {
+            renderMultiLineSourceRange(builder, range, marker, hintText)
+            return
+        }
+        renderSingleSourceLine(builder, range.begin.fileID, range.begin.line, range.begin.column, range.end.column, marker, hintText)
+    }
+
+    private func renderMultiLineSourceRange(builder: StringBuilder, range: Range, marker: String, hintText: String): Unit {
+        var lineNo = range.begin.line
+        while (lineNo <= range.end.line) {
+            let line = sourceLine(Position(range.begin.fileID, lineNo, 1))
+            let startColumn = if (lineNo == range.begin.line) { range.begin.column } else { 1 }
+            let endColumn = if (lineNo == range.end.line) { range.end.column } else { line.size + 1 }
+            let text = if (lineNo == range.end.line) { hintText } else { "" }
+            renderSingleSourceLine(builder, range.begin.fileID, lineNo, startColumn, endColumn, marker, text)
+            lineNo++
+        }
+    }
+
+    private func renderSingleSourceLine(
+        builder: StringBuilder,
+        fileID: UInt64,
+        lineNumber: Int64,
+        beginColumn: Int64,
+        endColumn: Int64,
+        marker: String,
+        hintText: String
+    ): Unit {
+        let range = MakeRange(Position(fileID, lineNumber, beginColumn), Position(fileID, lineNumber, endColumn))
         let line = sourceLine(range.begin)
         if (line.isEmpty()) {
             return
         }
-        builder.append("${range.begin.line} | " + line + "\n")
-        let prefix = repeatString(" ", "${range.begin.line}".size) + " | "
-        let before = if (range.begin.column > 1) { GetSpaceBeforeTarget(line, range.begin.column) } else { "" }
+        let printableLine = printableSourceLine(line)
+        builder.append("${lineNumber} | " + printableLine + "\n")
+        let prefix = repeatString(" ", "${lineNumber}".size) + " | "
+        let before = if (beginColumn > 1) { GetSpaceBeforeTarget(line, beginColumn) } else { "" }
         let widthValue = range.end.column - range.begin.column
         let width = if (widthValue > 0) { widthValue } else { 1 }
         builder.append(prefix + before + repeatString(marker, width))
@@ -124,6 +155,25 @@ public class DiagnosticEmitter {
             builder.append(" " + hintText)
         }
         builder.append("\n")
+    }
+
+    private func renderMacroExpansion(builder: StringBuilder): Unit {
+        if (let Some(info) <- diagnostic.macroDiagInfo) {
+            if (info.hasShownCode || info.mcBegin == DEFAULT_POSITION || info.mcEnd == DEFAULT_POSITION) {
+                return
+            }
+            let content = sourceManager.GetContentBetween(info.mcBegin, info.mcEnd)
+            if (content.isEmpty()) {
+                return
+            }
+            info.hasShownCode = true
+            builder.append("note: " + MACROCALL_CODE + "\n")
+            var lineNo = info.mcBegin.line
+            for (line in SplitLines(content)) {
+                builder.append("${lineNo} | " + printableSourceLine(line) + "\n")
+                lineNo++
+            }
+        }
     }
 
     private func sourceLine(pos: Position): String {
@@ -139,8 +189,45 @@ public class DiagnosticEmitter {
         if (!checkRange) {
             return false
         }
-        return diagnostic.mainHint.range.HasZero()
+        if (diagnostic.mainHint.range.HasZero()) {
+            return true
+        }
+        for (hint in diagnostic.otherHints) {
+            if (hint.range.HasZero()) {
+                return true
+            }
+        }
+        for (subDiag in diagnostic.subDiags) {
+            if (!subDiag.mainHint.IsDefault() && subDiag.mainHint.range.HasZero()) {
+                return true
+            }
+            for (hint in subDiag.otherHints) {
+                if (hint.range.HasZero()) {
+                    return true
+                }
+            }
+        }
+        for (help in diagnostic.helps) {
+            for (substitution in help.substitutions) {
+                if (substitution.range.HasZero()) {
+                    return true
+                }
+            }
+        }
+        return false
     }
+}
 
-    // TODO(selfhost:Basic): match the full C++ DiagnosticEmitter layout, macro expansion blocks, color policy, and comment rendering exactly.
+private func printableSourceLine(line: String): String {
+    let builder = StringBuilder()
+    for (byte in line.toArray()) {
+        if (byte == b'\t') {
+            builder.append(repeatString(" ", HORIZONTAL_TAB_LEN))
+        } else if (byte < 0x20u8 || byte == 0x7fu8) {
+            builder.append(ConvertUnicode(Int64(byte)))
+        } else {
+            builder.append(String.fromUtf8([byte]))
+        }
+    }
+    return builder.toString()
 }

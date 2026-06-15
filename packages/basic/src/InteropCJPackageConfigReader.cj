@@ -85,8 +85,8 @@ public class LambdaPattern {
 
 public class PackageConfig {
     public var name: String = ""
-    public var apiStrategy: InteropCJStrategy = InteropCJStrategy.UNKNOWN
-    public var genericTypeStrategy: InteropCJGenericStrategyType = InteropCJGenericStrategyType.UNKNOWN
+    public var apiStrategy: InteropCJStrategy = InteropCJStrategy.NONE
+    public var genericTypeStrategy: InteropCJGenericStrategyType = InteropCJGenericStrategyType.NONE
     public let interopCJIncludedApis: ArrayList<String> = ArrayList<String>()
     public let interopCJExcludedApis: ArrayList<String> = ArrayList<String>()
     public let allowedInteropCJGenericInstantiations: HashMap<String, HashMap<String, GenericTypeArguments>> =
@@ -106,10 +106,14 @@ public class InteropCJPackageConfigReader {
 
     public func Parse(filePath: String): Bool {
         let content = String.fromUtf8(File.readFrom(filePath))
+        if (content.contains("/*")) {
+            WriteError("Failed to open configuration file. Error: Unsupported block comment '/*' detected. Please use line comment '#' instead.\n")
+            return false
+        }
         var currentSection = ""
         var currentPackage: Option<PackageConfig> = None
-        for (rawLine in SplitLines(content)) {
-            let line = stripComment(rawLine).trimAscii()
+        for (rawLine in collectTomlStatements(content)) {
+            let line = rawLine.trimAscii()
             if (line.isEmpty()) {
                 continue
             }
@@ -208,11 +212,14 @@ public class InteropCJPackageConfigReader {
             appendStrings(pkg.interopTuples, parseStringArray(value))
         } else if (key == "signature") {
             let signature = parseString(value)
-            let params = parseParameterList(signature)
+            let params = parseSignatureParameterList(signature)
             let retType = parseReturnType(signature)
             pkg.lambdaPatterns.add(LambdaPattern(signature, params, retType))
+        } else if (key == "generic_object_configuration") {
+            parseGenericObjectConfiguration(pkg, value)
+        } else if (key == "lambda_patterns") {
+            parseLambdaPatternsConfiguration(pkg, value)
         }
-        // TODO(selfhost:Basic): complete tinytoml-compatible parsing for generic_object_configuration and class_mappings tables.
     }
 
     private func storePackage(pkgOpt: Option<PackageConfig>): Unit {
@@ -225,6 +232,58 @@ public class InteropCJPackageConfigReader {
             }
         }
     }
+}
+
+private func collectTomlStatements(content: String): Array<String> {
+    let result = ArrayList<String>()
+    var builder = StringBuilder()
+    var squareDepth: Int64 = 0
+    var braceDepth: Int64 = 0
+    var inString = false
+    var escaped = false
+    for (rawLine in SplitLines(content)) {
+        let line = stripComment(rawLine).trimAscii()
+        if (line.isEmpty()) {
+            continue
+        }
+        if (builder.toString().isEmpty()) {
+            builder.append(line)
+        } else {
+            builder.append(" " + line)
+        }
+        for (byte in line.toArray()) {
+            if (inString) {
+                if (escaped) {
+                    escaped = false
+                } else if (byte == b'\\') {
+                    escaped = true
+                } else if (byte == b'"') {
+                    inString = false
+                }
+            } else if (byte == b'"') {
+                inString = true
+            } else if (byte == b'[') {
+                squareDepth++
+            } else if (byte == b']') {
+                squareDepth--
+            } else if (byte == b'{') {
+                braceDepth++
+            } else if (byte == b'}') {
+                braceDepth--
+            }
+        }
+        if (squareDepth <= 0 && braceDepth <= 0 && !inString) {
+            result.add(builder.toString())
+            builder = StringBuilder()
+            squareDepth = 0
+            braceDepth = 0
+        }
+    }
+    let rest = builder.toString().trimAscii()
+    if (!rest.isEmpty()) {
+        result.add(rest)
+    }
+    return result.toArray()
 }
 
 private func stringToStrategy(value: String): InteropCJStrategy {
@@ -297,13 +356,339 @@ private func parseStringArray(value: String): Array<String> {
     return result.toArray()
 }
 
+private func splitTopLevel(value: String, delimiter: UInt8): Array<String> {
+    let result = ArrayList<String>()
+    var builder = StringBuilder()
+    var squareDepth: Int64 = 0
+    var braceDepth: Int64 = 0
+    var angleDepth: Int64 = 0
+    var inString = false
+    var escaped = false
+    for (byte in value.toArray()) {
+        if (inString) {
+            builder.append(String.fromUtf8([byte]))
+            if (escaped) {
+                escaped = false
+            } else if (byte == b'\\') {
+                escaped = true
+            } else if (byte == b'"') {
+                inString = false
+            }
+            continue
+        }
+        if (byte == b'"') {
+            inString = true
+            builder.append("\"")
+        } else if (byte == b'[') {
+            squareDepth++
+            builder.append("[")
+        } else if (byte == b']') {
+            squareDepth--
+            builder.append("]")
+        } else if (byte == b'{') {
+            braceDepth++
+            builder.append("{")
+        } else if (byte == b'}') {
+            braceDepth--
+            builder.append("}")
+        } else if (byte == b'<') {
+            angleDepth++
+            builder.append("<")
+        } else if (byte == b'>') {
+            angleDepth--
+            builder.append(">")
+        } else if (byte == delimiter && squareDepth == 0 && braceDepth == 0 && angleDepth == 0) {
+            result.add(builder.toString().trimAscii())
+            builder = StringBuilder()
+        } else {
+            builder.append(String.fromUtf8([byte]))
+        }
+    }
+    let finalPart = builder.toString().trimAscii()
+    if (!finalPart.isEmpty()) {
+        result.add(finalPart)
+    }
+    return result.toArray()
+}
+
+private func topLevelEquals(value: String): Int64 {
+    var squareDepth: Int64 = 0
+    var braceDepth: Int64 = 0
+    var inString = false
+    var escaped = false
+    var idx: Int64 = 0
+    while (idx < value.size) {
+        let byte = value[idx]
+        if (inString) {
+            if (escaped) {
+                escaped = false
+            } else if (byte == b'\\') {
+                escaped = true
+            } else if (byte == b'"') {
+                inString = false
+            }
+        } else if (byte == b'"') {
+            inString = true
+        } else if (byte == b'[') {
+            squareDepth++
+        } else if (byte == b']') {
+            squareDepth--
+        } else if (byte == b'{') {
+            braceDepth++
+        } else if (byte == b'}') {
+            braceDepth--
+        } else if (byte == b'=' && squareDepth == 0 && braceDepth == 0) {
+            return idx
+        }
+        idx++
+    }
+    return -1
+}
+
+private func putRawValue(map: HashMap<String, String>, key: String, value: String): Unit {
+    if (map.contains(key)) {
+        map.remove(key)
+    }
+    map.add(key, value)
+}
+
+private func parseInlineTable(table: String): HashMap<String, String> {
+    let result = HashMap<String, String>()
+    let trimmed = table.trimAscii()
+    if (trimmed.size < 2 || trimmed[0] != b'{' || trimmed[trimmed.size - 1] != b'}') {
+        return result
+    }
+    let body = trimmed[1..trimmed.size - 1]
+    for (entry in splitTopLevel(body, b',')) {
+        let eqPos = topLevelEquals(entry)
+        if (eqPos < 0) {
+            continue
+        }
+        let key = entry[0..eqPos].trimAscii()
+        let value = entry[eqPos + 1..].trimAscii()
+        if (!key.isEmpty()) {
+            putRawValue(result, key, value)
+        }
+    }
+    return result
+}
+
+private func parseArrayOfTables(value: String): Array<HashMap<String, String>> {
+    let result = ArrayList<HashMap<String, String>>()
+    let trimmed = value.trimAscii()
+    if (trimmed.size < 2 || trimmed[0] != b'[' || trimmed[trimmed.size - 1] != b']') {
+        return result.toArray()
+    }
+    let body = trimmed[1..trimmed.size - 1]
+    var builder = StringBuilder()
+    var braceDepth: Int64 = 0
+    var inString = false
+    var escaped = false
+    for (byte in body.toArray()) {
+        if (inString) {
+            if (braceDepth > 0) {
+                builder.append(String.fromUtf8([byte]))
+            }
+            if (escaped) {
+                escaped = false
+            } else if (byte == b'\\') {
+                escaped = true
+            } else if (byte == b'"') {
+                inString = false
+            }
+            continue
+        }
+        if (byte == b'"') {
+            inString = true
+            if (braceDepth > 0) {
+                builder.append("\"")
+            }
+        } else if (byte == b'{') {
+            braceDepth++
+            builder.append("{")
+        } else if (byte == b'}') {
+            if (braceDepth > 0) {
+                builder.append("}")
+                braceDepth--
+                if (braceDepth == 0) {
+                    result.add(parseInlineTable(builder.toString()))
+                    builder = StringBuilder()
+                }
+            }
+        } else if (braceDepth > 0) {
+            builder.append(String.fromUtf8([byte]))
+        }
+    }
+    return result.toArray()
+}
+
 private func appendStrings(target: ArrayList<String>, values: Array<String>): Unit {
     for (value in values) {
         target.add(value)
     }
 }
 
-private func parseParameterList(signature: String): Array<String> {
+private func isValidInteropType(value: String): Bool {
+    let validTypes = [
+        "Int", "Int8", "Int16", "Int32", "Int64", "IntNative",
+        "UInt8", "UInt16", "UInt32", "UInt64", "UIntNative",
+        "Float16", "Float32", "Float64", "Bool", "Boolean", "Unit"
+    ]
+    for (validType in validTypes) {
+        if (value == validType) {
+            return true
+        }
+    }
+    return false
+}
+
+private func parseTypeString(typeString: String): Array<String> {
+    let result = ArrayList<String>()
+    for (segment in splitTopLevel(typeString, b',')) {
+        let trimmed = segment.trimAscii()
+        if (!trimmed.isEmpty() && isValidInteropType(trimmed)) {
+            result.add(trimmed)
+        }
+    }
+    return result.toArray()
+}
+
+private func combineTypes(types: Array<String>): String {
+    return String.join(types, delimiter: ", ")
+}
+
+private func putGenericArgs(pkg: PackageConfig, outerType: String, innerType: String, args: GenericTypeArguments): Unit {
+    if (let Some(innerMap) <- pkg.allowedInteropCJGenericInstantiations.get(outerType)) {
+        if (innerMap.contains(innerType)) {
+            innerMap.remove(innerType)
+        }
+        innerMap.add(innerType, args)
+        return
+    }
+    let created = HashMap<String, GenericTypeArguments>()
+    created.add(innerType, args)
+    pkg.allowedInteropCJGenericInstantiations.add(outerType, created)
+}
+
+private func appendTypeArgument(
+    typeArgumentsMap: HashMap<String, ArrayList<String>>,
+    packageName: String,
+    typeValue: String
+): Unit {
+    if (let Some(values) <- typeArgumentsMap.get(packageName)) {
+        values.add(typeValue)
+        return
+    }
+    let values = ArrayList<String>()
+    values.add(typeValue)
+    typeArgumentsMap.add(packageName, values)
+}
+
+private func containsString(values: ArrayList<String>, value: String): Bool {
+    for (candidate in values) {
+        if (candidate == value) {
+            return true
+        }
+    }
+    return false
+}
+
+private func makeSymbols(rawSymbols: String): GenericTypeArguments {
+    let args = GenericTypeArguments()
+    for (symbol in parseStringArray(rawSymbols)) {
+        args.symbols.add(symbol)
+    }
+    return args
+}
+
+private func collectTypeArguments(
+    tables: Array<HashMap<String, String>>,
+    typeArgumentsMap: HashMap<String, ArrayList<String>>,
+    pkg: PackageConfig
+): Bool {
+    for (table in tables) {
+        let packageName = if (let Some(rawName) <- table.get("name")) { parseString(rawName) } else { "" }
+        if (packageName.isEmpty()) {
+            continue
+        }
+        if (let Some(rawTypeArguments) <- table.get("type_arguments")) {
+            for (typeString in parseStringArray(rawTypeArguments)) {
+                let validatedTypes = parseTypeString(typeString)
+                if (validatedTypes.isEmpty()) {
+                    WriteError("Error: Empty or invalid type definition in package '${pkg.name}'\n")
+                    return false
+                }
+                let combined = combineTypes(validatedTypes)
+                putGenericArgs(pkg, packageName, combined, GenericTypeArguments())
+                appendTypeArgument(typeArgumentsMap, packageName, combined)
+            }
+        }
+    }
+    return true
+}
+
+private func processSymbolConfigurations(
+    tables: Array<HashMap<String, String>>,
+    typeArgumentsMap: HashMap<String, ArrayList<String>>,
+    pkg: PackageConfig
+): Unit {
+    for (table in tables) {
+        let name = if (let Some(rawName) <- table.get("name")) { parseString(rawName) } else { "" }
+        if (name.isEmpty()) {
+            continue
+        }
+        if (let Some(rawSymbols) <- table.get("symbols")) {
+            let anglePos = name.indexOf("<") ?? -1
+            if (anglePos >= 0 && name.endsWith(">")) {
+                let outerType = name[0..anglePos]
+                let innerType = name[anglePos + 1..name.size - 1]
+                if (let Some(allowedTypes) <- typeArgumentsMap.get(outerType)) {
+                    if (containsString(allowedTypes, innerType)) {
+                        putGenericArgs(pkg, outerType, innerType, makeSymbols(rawSymbols))
+                    }
+                }
+            } else {
+                putGenericArgs(pkg, name, "", makeSymbols(rawSymbols))
+            }
+        }
+    }
+}
+
+private func parseGenericObjectConfiguration(pkg: PackageConfig, value: String): Bool {
+    let tables = parseArrayOfTables(value)
+    let typeArgumentsMap = HashMap<String, ArrayList<String>>()
+    if (!collectTypeArguments(tables, typeArgumentsMap, pkg)) {
+        return false
+    }
+    processSymbolConfigurations(tables, typeArgumentsMap, pkg)
+    return true
+}
+
+private func parseClassMappings(value: String): Array<ClassMapping> {
+    let result = ArrayList<ClassMapping>()
+    let table = parseInlineTable(value)
+    for ((name, pkgPath) in table) {
+        result.add(ClassMapping(name, parseString(pkgPath)))
+    }
+    return result.toArray()
+}
+
+private func parseLambdaPatternsConfiguration(pkg: PackageConfig, value: String): Unit {
+    for (table in parseArrayOfTables(value)) {
+        if (let Some(rawSignature) <- table.get("signature")) {
+            let signature = parseString(rawSignature)
+            let lambdaPattern = LambdaPattern(signature, parseSignatureParameterList(signature), parseReturnType(signature))
+            if (let Some(rawClassMappings) <- table.get("class_mappings")) {
+                for (classMapping in parseClassMappings(rawClassMappings)) {
+                    lambdaPattern.classMappings.add(classMapping)
+                }
+            }
+            pkg.lambdaPatterns.add(lambdaPattern)
+        }
+    }
+}
+
+private func parseSignatureParameterList(signature: String): Array<String> {
     if (!signature.startsWith("(")) {
         return Array<String>()
     }
