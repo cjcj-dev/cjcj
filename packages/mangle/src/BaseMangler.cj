@@ -574,8 +574,10 @@ public open class BaseMangler {
             mangled += MangleFuncParams(funcDecl, genericsTypeStack, false)
             return mangled
         }
-        if (let Some(special) <- GetSpecialFuncName(funcDecl)) {
-            return special
+        if (let None <- funcDecl.outerDecl) {
+            if (let Some(special) <- GetSpecialFuncName(funcDecl)) {
+                return special
+            }
         }
         if (let Some(entryName) <- MangleEntryFunction(funcDecl)) {
             return entryName
@@ -985,7 +987,7 @@ public open class BaseMangler {
                     }
                 }
             }
-            return if (mangled.isEmpty()) { MANGLE_VOID_TY_SUFFIX } else { mangled }
+            return mangled
         }
         return MANGLE_VOID_TY_SUFFIX
     }
@@ -1363,6 +1365,8 @@ public open class BaseMangler {
             return None
         }
         return match (fd.identifier) {
+            case "throwGlobalOutOfMemoryError" => "rt$ThrowGlobalOutOfMemoryError"
+            case "throwStackOverflowError" => "rt$ThrowStackOverflowError"
             case "throwOutOfMemoryError" => "rt$ThrowOutOfMemoryError"
             case "throwImplicitException" => "rt$ThrowImplicitException"
             case "throwArithmeticException" => "rt$ThrowArithmeticException"

@@ -37,6 +37,8 @@ Implemented:
 - Aligned global var-with-pattern prefix handling, private/default-init extend prefix handling,
   common/specific generic-parameter naming, parser-AST `MainDecl` return mangling, parser-AST static
   constructor spelling, and parser-AST property accessor return-type fallback with the C++ rules.
+- Aligned top-level-only core runtime special-function mangling and all-initial-parameter function
+  parameter mangling with the C++ `BaseMangler` behavior, including native-backend runtime throw helpers.
 - Implemented parser-AST type annotation mangling, including primitive, reference, qualified, option,
   constant, VArray, parenthesized, function, tuple, generic, inherited type, generic constraint,
   and var-with-pattern name handling.
