@@ -104,3 +104,28 @@ public class TypePattern <: Pattern {
         return out
     }
 }
+
+public open class TypeListPattern <: Pattern {
+    public var pattern: Option<Pattern> = None
+    public var patternPos: Position = INVALID_POSITION
+    public var colonPos: Position = INVALID_POSITION
+    public let types: ArrayList<Type> = ArrayList<Type>()
+    public let bitOrPosVector: ArrayList<Position> = ArrayList<Position>()
+
+    public init(kind: ASTKind) { super(kind) }
+
+    public override func Children(): ArrayList<Node> {
+        let out = ArrayList<Node>()
+        if (let Some(pat) <- pattern) { out.add(pat) }
+        for (ty in types) { out.add(ty) }
+        return out
+    }
+}
+
+public class ExceptTypePattern <: TypeListPattern {
+    public init() { super(ASTKind.EXCEPT_TYPE_PATTERN) }
+}
+
+public class CommandTypePattern <: TypeListPattern {
+    public init() { super(ASTKind.COMMAND_TYPE_PATTERN) }
+}

@@ -172,8 +172,16 @@ public open class VarDeclAbstract <: Decl {
     public var assignPos: Position = INVALID_POSITION
     public var isVar: Bool = false
     public var isConst: Bool = false
+    public var isResourceVar: Bool = false
 
     public init(kind: ASTKind) { super(kind) }
+
+    public override func Children(): ArrayList<Node> {
+        let out = ArrayList<Node>()
+        if (let Some(ty) <- typeNode) { out.add(ty) }
+        if (let Some(expr) <- initializer) { out.add(expr) }
+        return out
+    }
 }
 
 public class VarDecl <: VarDeclAbstract {

@@ -349,25 +349,205 @@ extend ParserImpl {
         let token = Expect(TokenKind.TRY, "expected 'try'")
         ret.tryPos = token.Begin()
         ret.begin = token.Begin()
-        ret.tryBlock = ParseBlock(ScopeKind.FUNC_BODY)
-        while (Skip(TokenKind.CATCH)) {
-            if (Skip(TokenKind.LPAREN)) {
-                ret.catchPatterns.add(ParsePattern())
-                Expect(TokenKind.RPAREN, "expected ')' after catch pattern")
+        if (Seeing(TokenKind.LCURL)) {
+            ret.tryBlock = ParseBlock(ScopeKind.FUNC_BODY)
+        } else if (Seeing(TokenKind.LPAREN)) {
+            ParseTryWithResource(ret, ScopeKind.FUNC_BODY)
+        } else {
+            diag.DiagnoseRefactor(DiagKindRefactor.EXPECTED_TOKEN, Peek().Begin(), "expected try block or resource specification")
+            ret.isBroken = true
+        }
+        while (Seeing(TokenKind.HANDLE) || Seeing(TokenKind.CATCH)) {
+            if (Skip(TokenKind.HANDLE)) {
+                ParseHandleBlock(ret)
+            } else if (Skip(TokenKind.CATCH)) {
+                ParseCatchBlock(ret)
             }
-            ret.catchBlocks.add(ParseBlock(ScopeKind.FUNC_BODY))
         }
         if (Skip(TokenKind.FINALLY)) {
+            ret.finallyPos = lastToken.Begin()
             ret.finallyBlock = ParseBlock(ScopeKind.FUNC_BODY)
         }
         if (let Some(finallyBlock) <- ret.finallyBlock) {
             ret.end = finallyBlock.end
+        } else if (!ret.handlers.isEmpty()) {
+            if (let Some(block) <- ret.handlers[ret.handlers.size - 1].block) {
+                ret.end = block.end
+            }
         } else if (!ret.catchBlocks.isEmpty()) {
             ret.end = ret.catchBlocks[ret.catchBlocks.size - 1].end
         } else if (let Some(tryBlock) <- ret.tryBlock) {
             ret.end = tryBlock.end
+        } else {
+            ret.end = token.End()
         }
         return ret
+    }
+
+    public func ParseTryWithResource(ret: TryExpr, scopeKind: ScopeKind): Unit {
+        ret.lParen = Expect(TokenKind.LPAREN, "expected '(' after try").Begin()
+        let resourceNames = ArrayList<String>()
+        while (!Seeing(TokenKind.END) && !Seeing(TokenKind.RPAREN)) {
+            let decl = VarDecl()
+            decl.isVar = false
+            decl.isResourceVar = true
+            decl.identifier = ExpectIdentifierWithPos(decl)
+            decl.begin = decl.identifier.Begin()
+            for (name in resourceNames) {
+                if (name == decl.identifier.Val()) {
+                    diag.DiagnoseRefactor(DiagKindRefactor.PARSE_ERROR, decl.identifier.Begin(), "redefined resource name '${decl.identifier.Val()}'")
+                }
+            }
+            resourceNames.add(decl.identifier.Val())
+            if (Skip(TokenKind.COLON)) {
+                decl.colonPos = lastToken.Begin()
+                decl.typeNode = ParseType()
+            }
+            if (Skip(TokenKind.ASSIGN)) {
+                decl.assignPos = lastToken.Begin()
+                decl.initializer = ParseExpr(ExprKind.VAR_INIT)
+            } else {
+                diag.DiagnoseRefactor(DiagKindRefactor.EXPECTED_TOKEN, Peek().Begin(), "expected assignment in try resource")
+            }
+            decl.end = if (let Some(expr) <- decl.initializer) {
+                expr.end
+            } else if (let Some(ty) <- decl.typeNode) {
+                ty.end
+            } else {
+                decl.identifier.End()
+            }
+            ret.resourceSpec.add(decl)
+            if (Skip(TokenKind.COMMA)) {
+                ret.resourceSpecCommaPos.add(lastToken.Begin())
+            } else {
+                break
+            }
+        }
+        ret.rParen = Expect(TokenKind.RPAREN, "expected ')' after try resources").Begin()
+        ret.isDesugaredFromTryWithResources = true
+        ret.tryBlock = ParseBlock(scopeKind)
+    }
+
+    public func ParseCatchBlock(ret: TryExpr): Unit {
+        ret.catchPosVector.add(lastToken.Begin())
+        if (Skip(TokenKind.LPAREN)) {
+            ret.catchLParenPosVector.add(lastToken.Begin())
+        } else {
+            diag.DiagnoseRefactor(DiagKindRefactor.EXPECTED_TOKEN, Peek().Begin(), "expected '(' after catch")
+            ret.isBroken = true
+        }
+        ret.catchPatterns.add(ParseExceptTypePattern())
+        if (Skip(TokenKind.RPAREN)) {
+            ret.catchRParenPosVector.add(lastToken.Begin())
+        } else {
+            diag.DiagnoseRefactor(DiagKindRefactor.EXPECTED_TOKEN, Peek().Begin(), "expected ')' after catch pattern")
+            ret.isBroken = true
+        }
+        ret.catchBlocks.add(ParseBlock(ScopeKind.FUNC_BODY))
+    }
+
+    public func ParseHandleBlock(ret: TryExpr): Unit {
+        let handler = Handler()
+        handler.pos = lastToken.Begin()
+        if (!Skip(TokenKind.LPAREN)) {
+            diag.DiagnoseRefactor(DiagKindRefactor.EXPECTED_TOKEN, Peek().Begin(), "expected '(' after handle")
+            ret.isBroken = true
+        }
+        handler.commandPattern = ParseCommandTypePattern()
+        if (!Skip(TokenKind.RPAREN)) {
+            diag.DiagnoseRefactor(DiagKindRefactor.EXPECTED_TOKEN, Peek().Begin(), "expected ')' after handle pattern")
+            ret.isBroken = true
+        }
+        handler.block = ParseBlock(ScopeKind.FUNC_BODY)
+        ret.handlers.add(handler)
+    }
+
+    public func ParseTypeAlternatives(pattern: TypeListPattern): Unit {
+        pattern.types.add(ParseType())
+        while (Skip(TokenKind.BITOR)) {
+            pattern.bitOrPosVector.add(lastToken.Begin())
+            pattern.types.add(ParseType())
+        }
+        if (!pattern.types.isEmpty()) {
+            pattern.end = pattern.types[pattern.types.size - 1].end
+        }
+    }
+
+    public func ParseExceptTypePattern(): Pattern {
+        if (Skip(TokenKind.WILDCARD)) {
+            let wildcard = WildcardPattern(lastToken.Begin())
+            if (!Skip(TokenKind.COLON)) {
+                return wildcard
+            }
+            let pattern = ExceptTypePattern()
+            pattern.pattern = wildcard
+            pattern.patternPos = wildcard.begin
+            pattern.colonPos = lastToken.Begin()
+            pattern.begin = wildcard.begin
+            ParseTypeAlternatives(pattern)
+            return pattern
+        }
+        if (SeeingIdentifierLike()) {
+            let token = Peek()
+            let identifier = ParseIdentifierFromToken(token)
+            Next()
+            let varPattern = VarPattern(identifier, false)
+            let pattern = ExceptTypePattern()
+            pattern.pattern = varPattern
+            pattern.patternPos = token.Begin()
+            pattern.begin = token.Begin()
+            if (Skip(TokenKind.COLON)) {
+                pattern.colonPos = lastToken.Begin()
+            } else {
+                diag.DiagnoseRefactor(DiagKindRefactor.EXPECTED_TOKEN, Peek().Begin(), "expected ':' in catch pattern")
+                pattern.isBroken = true
+            }
+            ParseTypeAlternatives(pattern)
+            return pattern
+        }
+        let token = Peek()
+        diag.DiagnoseRefactor(DiagKindRefactor.EXPECTED_TOKEN, token.Begin(), "expected wildcard or exception pattern")
+        Next()
+        return InvalidPattern(token.Begin())
+    }
+
+    public func ParseCommandTypePattern(): Pattern {
+        if (Skip(TokenKind.WILDCARD)) {
+            let wildcard = WildcardPattern(lastToken.Begin())
+            if (!Skip(TokenKind.COLON)) {
+                diag.DiagnoseRefactor(DiagKindRefactor.EXPECTED_TOKEN, Peek().Begin(), "expected ':' in handle pattern")
+                return InvalidPattern(wildcard.begin)
+            }
+            let pattern = CommandTypePattern()
+            pattern.pattern = wildcard
+            pattern.patternPos = wildcard.begin
+            pattern.colonPos = lastToken.Begin()
+            pattern.begin = wildcard.begin
+            ParseTypeAlternatives(pattern)
+            return pattern
+        }
+        if (SeeingIdentifierLike()) {
+            let token = Peek()
+            let identifier = ParseIdentifierFromToken(token)
+            Next()
+            let varPattern = VarPattern(identifier, false)
+            let pattern = CommandTypePattern()
+            pattern.pattern = varPattern
+            pattern.patternPos = token.Begin()
+            pattern.begin = token.Begin()
+            if (Skip(TokenKind.COLON)) {
+                pattern.colonPos = lastToken.Begin()
+            } else {
+                diag.DiagnoseRefactor(DiagKindRefactor.EXPECTED_TOKEN, Peek().Begin(), "expected ':' in handle pattern")
+                pattern.isBroken = true
+            }
+            ParseTypeAlternatives(pattern)
+            return pattern
+        }
+        let token = Peek()
+        diag.DiagnoseRefactor(DiagKindRefactor.EXPECTED_TOKEN, token.Begin(), "expected wildcard or handle pattern")
+        Next()
+        return InvalidPattern(token.Begin())
     }
 
     public func ParseWhileExpr(): WhileExpr {

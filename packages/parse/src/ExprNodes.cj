@@ -326,13 +326,46 @@ public class MatchExpr <: Expr {
     }
 }
 
+public class Handler {
+    public var pos: Position = INVALID_POSITION
+    public var commandPattern: Option<Pattern> = None
+    public var block: Option<Block> = None
+
+    public init() {}
+}
+
 public class TryExpr <: Expr {
     public var tryPos: Position = INVALID_POSITION
+    public var lParen: Position = INVALID_POSITION
+    public let resourceSpec: ArrayList<VarDecl> = ArrayList<VarDecl>()
+    public let resourceSpecCommaPos: ArrayList<Position> = ArrayList<Position>()
+    public var rParen: Position = INVALID_POSITION
     public var tryBlock: Option<Block> = None
+    public let catchPosVector: ArrayList<Position> = ArrayList<Position>()
+    public let catchLParenPosVector: ArrayList<Position> = ArrayList<Position>()
+    public let catchRParenPosVector: ArrayList<Position> = ArrayList<Position>()
     public let catchPatterns: ArrayList<Pattern> = ArrayList<Pattern>()
     public let catchBlocks: ArrayList<Block> = ArrayList<Block>()
+    public var finallyPos: Position = INVALID_POSITION
     public var finallyBlock: Option<Block> = None
+    public let handlers: ArrayList<Handler> = ArrayList<Handler>()
+    public var isIllegalResourceSpec: Bool = false
+    public var isDesugaredFromTryWithResources: Bool = false
     public init() { super(ASTKind.TRY_EXPR) }
+
+    public override func Children(): ArrayList<Node> {
+        let out = ArrayList<Node>()
+        for (decl in resourceSpec) { out.add(decl) }
+        if (let Some(block) <- tryBlock) { out.add(block) }
+        for (pattern in catchPatterns) { out.add(pattern) }
+        for (block in catchBlocks) { out.add(block) }
+        if (let Some(block) <- finallyBlock) { out.add(block) }
+        for (handler in handlers) {
+            if (let Some(pattern) <- handler.commandPattern) { out.add(pattern) }
+            if (let Some(block) <- handler.block) { out.add(block) }
+        }
+        return out
+    }
 }
 
 public class WhileExpr <: Expr {

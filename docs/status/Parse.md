@@ -66,6 +66,10 @@ package public APIs.
   case `|` positions, added for-in `where` guard fields and parsing, fixed
   `perform` to build a real `PERFORM_EXPR`, and matched the C++ `resume with`
   / `resume throwing` operand parsing shape.
+- Added C++-shaped try expression storage and parsing for try-with-resources,
+  resource comma/paren positions, resource variable declarations, catch paren
+  positions, exception type patterns, `handle` clauses, effect type patterns,
+  handler blocks, and `finally` positions.
 
 ## Remaining Work
 
