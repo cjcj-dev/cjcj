@@ -16,6 +16,18 @@ private let LLAST: UTF32 = LBASE + LCOUNT - 1u32
 private let VLAST: UTF32 = VBASE + VCOUNT - 1u32
 private let TLAST: UTF32 = TBASE + TCOUNT - 1u32
 private let TFIRST: UTF32 = TBASE + 1u32
+private let HASH_MASK: UInt64 = 0xFFFF_FFFFu64
+private let HASH_KNUTH: UInt64 = 2654435769u64
+private let HASH_PI: UInt64 = 0x31415926u64
+
+private func nfcHash(key: UTF32, salt: UTF32, n: Int64): Int64 {
+    let key64 = UInt64(key)
+    let t1 = (key64 + UInt64(salt)) & HASH_MASK
+    let y1 = (t1 * HASH_KNUTH) & HASH_MASK
+    let t2 = (key64 * HASH_PI) & HASH_MASK
+    let mixed = (y1 ^ t2) & HASH_MASK
+    return Int64((mixed * UInt64(n)) >> 32u64)
+}
 
 private func isHangulSyllable(c: UTF32): Bool {
     return c >= SBASE && c < SBASE + SCOUNT
@@ -61,10 +73,12 @@ public func GetCanonicalCombiningClass(c: UTF32): UInt8 {
 private func compositionTable(c1: UTF32, c2: UTF32): Option<UTF32> {
     if (c1 < 0x10000u32 && c2 < 0x10000u32) {
         let key = (c1 << 16u32) | c2
-        for ((candidate, composed) in COMPOSITION_TABLE_KV) {
-            if (candidate == key) {
-                return composed
-            }
+        let saltIndex = nfcHash(key, 0u32, COMPOSITION_TABLE_SALT.size)
+        let salt = COMPOSITION_TABLE_SALT[saltIndex]
+        let keyValueIndex = nfcHash(key, salt, COMPOSITION_TABLE_SALT.size)
+        let (candidate, composed) = COMPOSITION_TABLE_KV[keyValueIndex]
+        if (candidate == key) {
+            return composed
         }
         return None
     }
@@ -84,16 +98,18 @@ private func composeCanonical(a: UTF32, b: UTF32): Option<UTF32> {
 }
 
 private func canonicalFullyDecomposed(c: UTF32): Option<Array<UTF32>> {
-    for ((candidate, start, length) in CANONICAL_DECOMPOSED_KV) {
-        if (candidate == c) {
-            let chars = ArrayList<UTF32>()
-            var idx: Int64 = 0
-            while (idx < length) {
-                chars.add(CANONICAL_DECOMPOSED_CHARS[start + idx])
-                idx++
-            }
-            return chars.toArray()
+    let saltIndex = nfcHash(c, 0u32, CANONICAL_DECOMPOSED_SALT.size)
+    let salt = CANONICAL_DECOMPOSED_SALT[saltIndex]
+    let keyValueIndex = nfcHash(c, salt, CANONICAL_DECOMPOSED_SALT.size)
+    let (candidate, start, length) = CANONICAL_DECOMPOSED_KV[keyValueIndex]
+    if (candidate == c) {
+        let chars = ArrayList<UTF32>()
+        var idx: Int64 = 0
+        while (idx < length) {
+            chars.add(CANONICAL_DECOMPOSED_CHARS[start + idx])
+            idx++
         }
+        return chars.toArray()
     }
     return None
 }

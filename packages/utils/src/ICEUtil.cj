@@ -84,9 +84,12 @@ public func InternalError(message: String): Unit {
     if (ICE.CanWriteOnceICEMessage()) {
         ICE.PrintVersionFromError()
         eprintln(ICE.MSG_PART_ONE + message + ICE.MSG_PART_TWO + ICE.GetTriggerPoint().toString())
-        if (ICE.GetTriggerPoint() != ICE.LSP_TP && ICE.GetTriggerPoint() != ICE.UNITTEST_TP) {
-            throw IllegalStateException(message)
+        let triggerPoint = ICE.GetTriggerPoint()
+        if (triggerPoint == ICE.LSP_TP || triggerPoint == ICE.UNITTEST_TP) {
+            return
         }
+        ICE.RemoveTempFile()
+        throw IllegalStateException(message)
     }
 }
 

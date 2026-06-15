@@ -21,7 +21,23 @@ public class ParallelUtil {
         queue.RunAndWaitForAllTasksCompleted()
     }
 
-    public func RunAST2CHIRInParallel(): Unit {
-        CJC_ASSERT_WITH_MSG(threadsNum > 0, "parallel AST2CHIR requires a positive worker count")
+    public func RunIndexedInParallel<T>(items: Array<T>, worker: (Int64, T) -> Unit): Unit {
+        let queue = TaskQueue(threadsNum)
+        var idx: Int64 = 0
+        while (idx < items.size) {
+            let taskIndex = idx
+            let item = items[taskIndex]
+            queue.AddTask<Unit>({ =>
+                worker(taskIndex, item)
+            })
+            idx++
+        }
+        queue.RunAndWaitForAllTasksCompleted()
+    }
+
+    public func RunAST2CHIRInParallel<T>(decls: Array<T>, translateASTNode: (T) -> Unit): Unit {
+        RunIndexedInParallel<T>(decls, { _: Int64, decl: T =>
+            translateASTNode(decl)
+        })
     }
 }
