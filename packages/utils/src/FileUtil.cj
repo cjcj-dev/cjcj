@@ -1,0 +1,763 @@
+package cangjie_compiler::utils
+
+import std.collection.*
+import std.fs.Directory as FSDirectory
+import std.fs.File
+import std.fs.FileInfo
+import std.fs.Path
+import std.fs.canonicalize
+import std.fs.exists
+import std.fs.remove
+
+public let FILE_NAME_MAX_LENGTH: Int64 = 255
+public let INJECTION_STRING: String = "|;&$><\\!\n"
+public let DIR_SEPARATOR: String = "/"
+public let CURRENT_PATH: String = "./"
+public let UPPERLEVEL_PATH: String = "../"
+public let FILE_PATH_MAX_LENGTH: Int64 = 4096
+public let DIR_PATH_MAX_LENGTH: Int64 = 4096
+
+private let SHORT_HASH_NUM: Int64 = 8
+private let BOM_ENCODING_LEN: Int64 = 3
+private let TEST_FILE_NAME: String = "_test.cj"
+private let FILE_LEN_LIMIT: Int64 = 4 * 1024 * 1024 * 1024
+private let FILE_LEN_LIMIT_STR: String = "4 GB"
+
+public enum FileMode {
+    | FM_EXIST
+    | FM_EXE
+    | FM_WRITE
+    | FM_READ
+}
+
+extend FileMode <: Equatable<FileMode> {
+    public operator func ==(right: FileMode): Bool {
+        return FileModeIndex(this) == FileModeIndex(right)
+    }
+
+    public operator func !=(right: FileMode): Bool {
+        return !(this == right)
+    }
+}
+
+private func FileModeIndex(mode: FileMode): Int64 {
+    return match (mode) {
+        case FileMode.FM_EXIST => 0
+        case FileMode.FM_EXE => 1
+        case FileMode.FM_WRITE => 2
+        case FileMode.FM_READ => 3
+    }
+}
+
+public enum AccessResultType {
+    | OK
+    | NOT_EXIST
+    | NO_PERMISSION
+    | FAILED_WITH_UNKNOWN_REASON
+}
+
+public struct Directory {
+    public var path: String = ""
+    public var name: String = ""
+
+    public init() {}
+
+    public init(path: String, name: String) {
+        this.path = path
+        this.name = name
+    }
+}
+
+public class FailureReason {
+    public var value: String = ""
+    public init() {}
+}
+
+private func lastDirSplit(str: String): Option<Int64> {
+    return str.lastIndexOf("/")
+}
+
+private func isLastCharDirSplit(str: String): Bool {
+    return !str.isEmpty() && str[str.size - 1] == b'/'
+}
+
+private func hasDirSplit(str: String): Bool {
+    return str.contains("/")
+}
+
+private func appendPath(p1: String, p2: String): String {
+    if (isLastCharDirSplit(p1)) {
+        return p1 + p2
+    }
+    return p1 + "/" + p2
+}
+
+private func addFileIfNeeded(
+    fileName: String,
+    allFiles: ArrayList<String>,
+    shouldSkipTestFiles: Bool,
+    shouldSkipRegularFiles: Bool
+): Bool {
+    let hasTestSuffix = fileName.endsWith(TEST_FILE_NAME)
+    if (shouldSkipTestFiles && hasTestSuffix) {
+        return false
+    }
+    if (shouldSkipRegularFiles && !hasTestSuffix) {
+        return false
+    }
+    allFiles.add(fileName)
+    return true
+}
+
+public class FileUtil {
+    public static func CheckCommandLineInjection(cmd: String): Bool {
+        for (byte in cmd.toArray()) {
+            if (INJECTION_STRING.toArray().contains(byte)) {
+                return true
+            }
+        }
+        var isEven = true
+        for (byte in cmd.toArray()) {
+            if (byte == b'`') {
+                isEven = !isEven
+            }
+        }
+        return !isEven
+    }
+
+    public static func TransferEscapeBacktick(s: String): String {
+        let builder = StringBuilder()
+        for (byte in s.toArray()) {
+            if (byte == b'`') {
+                builder.append("\\`")
+            } else {
+                builder.append(String.fromUtf8([byte]))
+            }
+        }
+        return builder.toString()
+    }
+
+    public static func RemoveDirectoryRecursively(dirPath: String): Bool {
+        if (dirPath.isEmpty()) {
+            return false
+        }
+        try {
+            remove(dirPath, recursive: true)
+            return true
+        } catch (e: Exception) {
+            return false
+        }
+    }
+
+    public static func GetFileName(filePath: String): String {
+        let path = Normalize(filePath)
+        if (let Some(pos) <- lastDirSplit(path)) {
+            return path[pos + 1..]
+        }
+        return path
+    }
+
+    public static func GetQuoted(str: String): String {
+        return "\"" + str.replace("\\", "\\\\").replace("\"", "\\\"") + "\""
+    }
+
+    public static func GetDirName(filePath: String): String {
+        var path = filePath
+        if (isLastCharDirSplit(path)) {
+            path = path[0..path.size - 1]
+        }
+        if (path == "." || path == "..") {
+            path = GetAbsPath(path) ?? path
+        }
+        return GetFileName(path)
+    }
+
+    public static func GetDirPath(filePath: String): String {
+        if (let Some(pos) <- lastDirSplit(filePath)) {
+            return Normalize(filePath[0..pos])
+        }
+        return "."
+    }
+
+    public static func GetFileExtension(filePath: String): String {
+        let dotPos = GetFileExtensionSeparatorPos(filePath) ?? filePath.size
+        if (dotPos < filePath.size) {
+            return filePath[dotPos + 1..]
+        }
+        return ""
+    }
+
+    public static func GetFileExtensionSeparatorPos(filePath: String): Option<Int64> {
+        let dotOpt = filePath.lastIndexOf(".")
+        if (let None <- dotOpt) {
+            return None
+        }
+        let dotPos = dotOpt.getOrThrow()
+        if (dotPos == 0) {
+            return None
+        }
+        if (let Some(dirPos) <- lastDirSplit(filePath)) {
+            if (dotPos == dirPos + 1 || dirPos > dotPos) {
+                return None
+            }
+        }
+        return dotPos
+    }
+
+    public static func GetFileNameWithoutExtension(filePath: String): String {
+        var dotPos = filePath.lastIndexOf(".") ?? filePath.size
+        let dirSplitPos = (lastDirSplit(filePath) ?? -1) + 1
+        if (dotPos == dirSplitPos) {
+            dotPos = filePath.size
+        }
+        return filePath[dirSplitPos..dotPos]
+    }
+
+    public static func HasExtension(filePath: String, extension: String): Bool {
+        return GetFileExtension(filePath) == extension
+    }
+
+    public static func HasCJDExtension(path: String): Bool {
+        return path.size > CJ_D_FILE_EXTENSION.size && path.endsWith(CJ_D_FILE_EXTENSION)
+    }
+
+    public static func GetFileBase(filePath: String): String {
+        let dotPos = GetFileExtensionSeparatorPos(filePath) ?? filePath.size
+        return filePath[0..dotPos]
+    }
+
+    public static func Normalize(input: String, toUnix!: Bool = false): String {
+        let _ = toUnix
+        let builder = StringBuilder()
+        var previousIsSlash = false
+        for (byte in input.toArray()) {
+            if (byte == 0u8) {
+                break
+            }
+            let isSlashByte = byte == b'/' || byte == b'\\'
+            if (previousIsSlash && isSlashByte) {
+                continue
+            }
+            if (isSlashByte) {
+                builder.append("/")
+                previousIsSlash = true
+            } else {
+                builder.append(String.fromUtf8([byte]))
+                previousIsSlash = false
+            }
+        }
+        return builder.toString()
+    }
+
+    public static func IsDir(filePath: String): Bool {
+        try {
+            return FileInfo(filePath).isDirectory()
+        } catch (e: Exception) {
+            return false
+        }
+    }
+
+    public static func IsAbsolutePath(filePath: String): Bool {
+        return !filePath.isEmpty() && filePath[0] == b'/'
+    }
+
+    public static func Remove(itemPath: String): Bool {
+        try {
+            remove(itemPath)
+            return true
+        } catch (e: Exception) {
+            return false
+        }
+    }
+
+    public static func GetFileSize(filePath: String): Int64 {
+        try {
+            return FileInfo(filePath).size
+        } catch (e: Exception) {
+            return 0
+        }
+    }
+
+    public static func ReadBinaryFileToBuffer(filePath: String): (Bool, Array<UInt8>, String) {
+        let realFilePath = GetAbsPath(filePath)
+        if (let None <- realFilePath) {
+            return (false, Array<UInt8>(), "open file failed")
+        }
+        let actualPath = realFilePath.getOrThrow()
+        try {
+            let fileLength = FileInfo(actualPath).size
+            if (fileLength == 0) {
+                return (false, Array<UInt8>(), "empty binary file")
+            }
+            if (fileLength >= FILE_LEN_LIMIT) {
+                return (false, Array<UInt8>(), "exceed the max file length: " + FILE_LEN_LIMIT_STR)
+            }
+            let content = File.readFrom(actualPath)
+            return (true, content, "")
+        } catch (e: Exception) {
+            return (false, Array<UInt8>(), "open file failed")
+        }
+    }
+
+    public static func ReadBinaryFileToBuffer(filePath: String, buffer: ArrayList<UInt8>, failedReason: FailureReason): Bool {
+        let (ok, data, reason) = ReadBinaryFileToBuffer(filePath)
+        buffer.clear()
+        for (byte in data) {
+            buffer.add(byte)
+        }
+        failedReason.value = reason
+        return ok
+    }
+
+    public static func WriteToFile(filePath: String, data: String): Bool {
+        if (!FileExist(filePath)) {
+            if (CreateDirs(filePath) != 0) {
+                return false
+            }
+        }
+        let normalizedDir = GetAbsPath(GetDirPath(filePath))
+        if (let None <- normalizedDir) {
+            return false
+        }
+        let normalizedFilePath = JoinPath(normalizedDir.getOrThrow(), GetFileName(filePath))
+        try {
+            File.writeTo(normalizedFilePath, data.toArray())
+            return true
+        } catch (e: Exception) {
+            return false
+        }
+    }
+
+    public static func WriteBufferToASTFile(filePath: String, buffer: Array<UInt8>): Bool {
+        let baseDir = GetDirPath(filePath)
+        if (!FileExist(baseDir)) {
+            if (CreateDirs(baseDir + "/") != 0) {
+                return false
+            }
+        }
+        let realFilePath = GetAbsPath(baseDir)
+        if (let None <- realFilePath) {
+            return false
+        }
+        let fileName = GetFileName(filePath)
+        try {
+            File.writeTo(JoinPath(realFilePath.getOrThrow(), fileName), buffer)
+            return true
+        } catch (e: Exception) {
+            return false
+        }
+    }
+
+    public static func ReadFileContent(filePath: String, failedReason: FailureReason): Option<String> {
+        if (!FileExist(filePath)) {
+            failedReason.value = "file not exist"
+            return None
+        }
+        let realFilePath = GetAbsPath(filePath)
+        if (let None <- realFilePath) {
+            failedReason.value = "file path illegal"
+            return None
+        }
+        try {
+            let actualPath = realFilePath.getOrThrow()
+            let fileLength = FileInfo(actualPath).size
+            if (fileLength >= FILE_LEN_LIMIT) {
+                failedReason.value = "exceed the max file length: " + FILE_LEN_LIMIT_STR
+                return None
+            }
+            var content = File.readFrom(actualPath)
+            if (content.size >= BOM_ENCODING_LEN && content[0] == 0xefu8 && content[1] == 0xbbu8 && content[2] == 0xbfu8) {
+                content = content[BOM_ENCODING_LEN..]
+            }
+            failedReason.value = ""
+            return String.fromUtf8(content)
+        } catch (e: Exception) {
+            failedReason.value = "open file failed"
+            return None
+        }
+    }
+
+    public static func AppendExtension(file: String, backup: String, extension: String): String {
+        let result = GetFileBase(file)
+        return if (result.isEmpty()) { backup + extension } else { result + extension }
+    }
+
+    public static func IsAbsolutePathAboveLengthLimit(path: String): Bool {
+        return path.size > FILE_PATH_MAX_LENGTH
+    }
+
+    public static func GetAbsPath(path: String): Option<String> {
+        if (path.size > FILE_PATH_MAX_LENGTH) {
+            return None
+        }
+        try {
+            return Normalize(canonicalize(path).toString())
+        } catch (e: Exception) {
+            return None
+        }
+    }
+
+    public static func GetRelativePath(basePath: String, path: String): Option<String> {
+        if (basePath.isEmpty() || path.isEmpty()) {
+            return None
+        }
+        var lastDelimPos: Int64 = 0
+        var pos: Int64 = 0
+        while (pos != basePath.size && pos != path.size && basePath[pos] == path[pos]) {
+            if (IsSlash(basePath[pos])) {
+                lastDelimPos = pos
+            }
+            pos++
+        }
+        var parentCount: Int64 = 0
+        var idx = lastDelimPos + 1
+        while (idx < basePath.size) {
+            if (IsSlash(basePath[idx])) {
+                parentCount++
+            }
+            idx++
+        }
+        var suffixLength = (path.size - lastDelimPos) - 1
+        if (pos == path.size && !IsSlash(path[path.size - 1])) {
+            parentCount = if (parentCount == 0) { 0 } else { parentCount - 1 }
+            suffixLength = 0
+        }
+        let builder = StringBuilder()
+        if (parentCount == 0) {
+            builder.append("./")
+        } else {
+            for (_ in 0..parentCount) {
+                builder.append("../")
+            }
+        }
+        if (suffixLength > 0) {
+            builder.append(path[lastDelimPos + 1..lastDelimPos + 1 + suffixLength])
+        }
+        return Normalize(builder.toString())
+    }
+
+    public static func GetAllDirsUnderCurrentPath(path: String): Array<String> {
+        let allDirs = ArrayList<String>()
+        let queue = ArrayList<String>()
+        queue.add(Normalize(path))
+        var head: Int64 = 0
+        while (head < queue.size) {
+            let tmpPath = queue[head]
+            head++
+            let dirs = GetDirectories(tmpPath)
+            for (dir in dirs) {
+                allDirs.add(dir.path)
+                queue.add(dir.path)
+            }
+        }
+        return allDirs.toArray()
+    }
+
+    public static func GetAllFilesUnderCurrentPath(
+        path: String,
+        extension: String,
+        shouldSkipTestFiles!: Bool = true,
+        shouldSkipRegularFiles!: Bool = false
+    ): Array<String> {
+        let allFiles = ArrayList<String>()
+        try {
+            for (info in FSDirectory.readFrom(path)) {
+                let fileName = info.name
+                if (!info.isRegular() || fileName.isEmpty() || fileName[0] == b'.' || !HasExtension(fileName, extension)) {
+                    continue
+                }
+                addFileIfNeeded(fileName, allFiles, shouldSkipTestFiles, shouldSkipRegularFiles)
+            }
+        } catch (e: Exception) {
+            ()
+        }
+        return allFiles.toArray()
+    }
+
+    public static func GetDirectories(path: String): Array<Directory> {
+        let directories = ArrayList<Directory>()
+        try {
+            for (info in FSDirectory.readFrom(path)) {
+                if (info.isDirectory() || info.isSymbolicLink()) {
+                    directories.add(Directory(info.path.toString(), info.name))
+                }
+            }
+        } catch (e: Exception) {
+            ()
+        }
+        return directories.toArray()
+    }
+
+    public static func JoinPath(base: String, append: String): String {
+        var joinedPath = base
+        if (base.isEmpty() || base[base.size - 1] != b'/') {
+            joinedPath += "/"
+        }
+        joinedPath += append
+        return Normalize(joinedPath)
+    }
+
+    public static func GetShortHash(fullHash: UInt64): String {
+        let hash = fullHash.toString()
+        return if (hash.size <= SHORT_HASH_NUM) { hash } else { hash[0..SHORT_HASH_NUM] }
+    }
+
+    public static func SplitStr(str: String, del: UInt8): Array<String> {
+        let res = ArrayList<String>()
+        var slow: Int64 = 0
+        var fast: Int64 = 0
+        let len = str.size
+        while (slow < len && fast < len) {
+            if (str[fast] == del && str[slow] == del) {
+                fast++
+                slow = fast
+            } else if (str[fast] != del && str[slow] != del) {
+                fast++
+            } else if (str[fast] == del && str[slow] != del) {
+                res.add(str[slow..fast])
+                slow = fast
+            }
+        }
+        if (slow != fast) {
+            res.add(str[slow..fast])
+        }
+        return res.toArray()
+    }
+
+    public static func IdenticalFunc(str: String): String {
+        return str
+    }
+
+    public static func GetPkgNameFromRelativePath(path: String): String {
+        var packageName = Normalize(path)
+        if (packageName.contains(UPPERLEVEL_PATH)) {
+            return DEFAULT_PACKAGE_NAME
+        }
+        while (let Some(pos) <- packageName.indexOf(CURRENT_PATH)) {
+            packageName = packageName[0..pos] + packageName[pos + CURRENT_PATH.size..]
+        }
+        packageName = packageName.replace("/", ".")
+        while (!packageName.isEmpty() && packageName[packageName.size - 1] == b'.') {
+            packageName = packageName[0..packageName.size - 1]
+        }
+        return if (packageName.isEmpty()) { DEFAULT_PACKAGE_NAME } else { packageName }
+    }
+
+    public static func IsIdentifier(str: String, useContextualKeyWords!: Bool = true): Bool {
+        return IsCangjieIdentifier(str, useContextualKeyWords)
+    }
+
+    public static func NormalizePath(path: String): String {
+        if (path.isEmpty()) {
+            return path
+        }
+        if (GetDirPath(path) == ".") {
+            return JoinPath(".", GetFileName(path))
+        }
+        return Normalize(path)
+    }
+
+    public static func ConvertPackageNameToLibCangjieBaseFormat(fullPackageName: String): String {
+        if (let Some(mapped) <- StandardLibName(fullPackageName)) {
+            let names = SplitQualifiedName(fullPackageName)
+            if (names.size == 1) {
+                return "cangjie-" + mapped
+            }
+            return "cangjie-" + names[0] + "-" + mapped
+        }
+        return ""
+    }
+
+    public static func ConvertFilenameToLibCangjieBaseFormat(objectFile: String, sanitizerSuffix!: String = ""): String {
+        let fullPackageName = GetFileNameWithoutExtension(objectFile)
+        let base = ConvertPackageNameToLibCangjieBaseFormat(fullPackageName)
+        return if (base.isEmpty()) { "" } else { base + sanitizerSuffix }
+    }
+
+    public static func ConvertFilenameToLibCangjieFormat(
+        objectFile: String,
+        extension: String,
+        sanitizerSuffix!: String = ""
+    ): String {
+        let base = ConvertFilenameToLibCangjieBaseFormat(objectFile, sanitizerSuffix: sanitizerSuffix)
+        return if (base.isEmpty()) { "" } else { "lib" + base + extension }
+    }
+
+    public static func ConvertFilenameToLtoLibCangjieFormat(objectFile: String): String {
+        let dotPos = objectFile.lastIndexOf(".") ?? objectFile.size
+        let dirSplitPos = objectFile.lastIndexOf("/") ?? 0
+        let path = objectFile[0..dirSplitPos]
+        let libName = objectFile[dirSplitPos + 1..dotPos]
+        return path + "/" + "lib" + libName + ".bc"
+    }
+
+    public static func AccessWithResult(path: String, mode: FileMode): AccessResultType {
+        if (!FileExist(path)) {
+            return AccessResultType.NOT_EXIST
+        }
+        if (Access(path, mode)) {
+            return AccessResultType.OK
+        }
+        return AccessResultType.NO_PERMISSION
+    }
+
+    public static func Access(path: String, mode: FileMode): Bool {
+        try {
+            if (mode == FileMode.FM_EXIST) {
+                return exists(path)
+            }
+            let info = FileInfo(path)
+            return match (mode) {
+                case FileMode.FM_EXE => info.canExecute()
+                case FileMode.FM_WRITE => info.canWrite()
+                case FileMode.FM_READ => info.canRead()
+                case FileMode.FM_EXIST => true
+            }
+        } catch (e: Exception) {
+            return false
+        }
+    }
+
+    public static func FileExist(path: String, caseSensitive!: Bool = false): Bool {
+        let _ = caseSensitive
+        try {
+            return exists(path)
+        } catch (e: Exception) {
+            return false
+        }
+    }
+
+    public static func FindFileByName(fileName: String, searchPaths: Array<String>, caseSensitive!: Bool = false): Option<String> {
+        if (fileName.isEmpty()) {
+            return None
+        }
+        for (path in searchPaths) {
+            if (path.isEmpty()) {
+                continue
+            }
+            let filePath = JoinPath(path, fileName)
+            if (FileExist(filePath, caseSensitive: caseSensitive)) {
+                return filePath
+            }
+        }
+        return None
+    }
+
+    public static func FindProgramByName(name: String, paths: Array<String>): String {
+        if (name.isEmpty()) {
+            return ""
+        }
+        if (hasDirSplit(name)) {
+            return name
+        }
+        for (path in paths) {
+            if (path.isEmpty()) {
+                continue
+            }
+            let exePath = appendPath(path, name)
+            if (FileExist(exePath) && Access(exePath, FileMode.FM_EXE)) {
+                return exePath
+            }
+        }
+        return ""
+    }
+
+    public static func FindSerializationFile(fullPackageName: String, suffix: String, searchPaths: Array<String>): String {
+        let names = SplitQualifiedName(fullPackageName)
+        let packageName = ToCjoFileName(fullPackageName)
+        let fileName = ToCjoFileName(names[0]) + "/" + packageName
+        let filePath = FindFileByName(fileName + suffix, searchPaths, caseSensitive: true) ?? ""
+        if (filePath.isEmpty()) {
+            return FindFileByName(packageName + suffix, searchPaths, caseSensitive: true) ?? ""
+        }
+        return filePath
+    }
+
+    public static func CreateDirs(directoryPath: String): Int64 {
+        if (directoryPath.size > DIR_PATH_MAX_LENGTH) {
+            return -1
+        }
+        var current = ""
+        var fileNameStartIdx: Int64 = 0
+        var idx: Int64 = 0
+        while (idx < directoryPath.size) {
+            current += String.fromUtf8([directoryPath[idx]])
+            if (directoryPath[idx] != b'/') {
+                idx++
+                continue
+            }
+            if (idx - fileNameStartIdx > FILE_NAME_MAX_LENGTH) {
+                return -1
+            }
+            fileNameStartIdx = idx + 1
+            if (!FileExist(current)) {
+                try {
+                    FSDirectory.create(current, recursive: true)
+                } catch (e: Exception) {
+                    if (!FileExist(current)) {
+                        return -1
+                    }
+                }
+            }
+            idx++
+        }
+        return 0
+    }
+
+    public static func SplitEnvironmentPaths(pathsString: String): Array<String> {
+        let strings = SplitString(pathsString, ":")
+        let paths = ArrayList<String>()
+        for (entry in strings) {
+            if (entry.isEmpty()) {
+                continue
+            }
+            if (let Some(path) <- GetAbsPath(entry)) {
+                paths.add(path)
+            }
+        }
+        return paths.toArray()
+    }
+
+    public static func CanWrite(path: String): Bool {
+        return Access(path, FileMode.FM_WRITE)
+    }
+
+    public static func RemovePathPrefix(absolutePath: String, removedPathPrefix: Array<String>): String {
+        var res = absolutePath + "/"
+        for (prefix in removedPathPrefix) {
+            if (res.startsWith(prefix)) {
+                res = res[prefix.size..]
+                if (res.isEmpty()) {
+                    return res
+                }
+                if (res[0] == b'/') {
+                    res = res[1..]
+                }
+                break
+            }
+        }
+        return if (res.isEmpty()) { res } else { res[0..res.size - 1] }
+    }
+
+    public static func IsSlash(c: UInt8): Bool {
+        return c == b'/'
+    }
+
+    public static func ToCjoFileName(fullPackageName: String): String {
+        if (let Some(pos) <- fullPackageName.indexOf("::")) {
+            return fullPackageName[pos + 2..] + ORG_NAME_SEPARATOR + fullPackageName[0..pos]
+        }
+        return fullPackageName
+    }
+
+    public static func ToPackageName(cjoName: String): String {
+        if (let Some(pos) <- cjoName.indexOf(ORG_NAME_SEPARATOR)) {
+            return cjoName[pos + 1..] + "::" + cjoName[0..pos]
+        }
+        return cjoName
+    }
+}
+
+public func IsSlash(c: UInt8): Bool {
+    return FileUtil.IsSlash(c)
+}
