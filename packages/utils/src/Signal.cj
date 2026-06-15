@@ -119,7 +119,7 @@ private func threadDelaySynchronizer(): Unit {
 private func windowsSignalHandler(signum: Int32): Unit {
     threadDelaySynchronizer()
     writeICEMessage(Int64(signum))
-    ICE.RemoveTempFile()
+    ICE.RemoveTempFileSignalSafe()
     unsafe {
         _exit(signum + 128)
     }
@@ -168,7 +168,7 @@ private let windowsUnhandledExceptionHandlerC: WindowsExceptionHandler = {
 private func crashSignalHandler(signum: Int32): Bool {
     threadDelaySynchronizer()
     writeICEMessage(Int64(signum))
-    ICE.RemoveTempFile()
+    ICE.RemoveTempFileSignalSafe()
     unsafe {
         _exit(signum + 128)
     }

@@ -2,7 +2,6 @@ package cangjie_compiler::utils
 
 import std.collection.*
 import std.convert.*
-import std.fs.File
 import std.time.DateTime
 
 private let OVERFLOW_NAMES: Array<(String, OverflowStrategy)> = [
@@ -12,6 +11,21 @@ private let OVERFLOW_NAMES: Array<(String, OverflowStrategy)> = [
     ("throwing", OverflowStrategy.THROWING),
     ("saturating", OverflowStrategy.SATURATING)
 ]
+
+@When[os != "Windows"]
+private let O_RDONLY: Int32 = 0
+
+@When[os != "Windows"]
+foreign {
+    func open(pathname: CString, flags: Int32, ...): Int32
+    func read(fd: Int32, buf: CPointer<UInt8>, count: UIntNative): IntNative
+    func close(fd: Int32): Int32
+}
+
+@When[os == "Windows"]
+foreign {
+    func rand_s(randomValue: CPointer<UInt32>): Int32
+}
 
 public func FillZero(num: Int64, len: Int64): String {
     let raw = num.toString()
@@ -41,6 +55,238 @@ public func TrimStringVector(container: ArrayList<String>): Unit {
         container[idx] = TrimString(container[idx])
         idx++
     }
+}
+
+public func HashPair<T1, T2>(pair: (T1, T2)): Int64 where T1 <: Hashable, T2 <: Hashable {
+    return pair[0].hashCode() ^ pair[1].hashCode()
+}
+
+@OverflowWrapping
+public func HashCombine<T>(seed: Int64, value: T): Int64 where T <: Hashable {
+    return seed ^ (value.hashCode() + 0x9e3779b9 + (seed << 6) + (seed >> 2))
+}
+
+public func HashCombine<T>(seed: Box<Int64>, value: T): Int64 where T <: Hashable {
+    let combined = HashCombine<T>(seed.value, value)
+    seed.value = combined
+    return combined
+}
+
+public func SetToVec<T>(values: HashSet<T>): Array<T> where T <: Hashable & Equatable<T> {
+    let result = ArrayList<T>()
+    for (item in values) {
+        result.add(item)
+    }
+    return result.toArray()
+}
+
+public func SetToVec<T>(values: TreeSet<T>): Array<T> where T <: Comparable<T> {
+    let result = ArrayList<T>()
+    for (item in values) {
+        result.add(item)
+    }
+    return result.toArray()
+}
+
+public func VecToSet<T>(values: Array<T>): HashSet<T> where T <: Hashable & Equatable<T> {
+    let result = HashSet<T>()
+    for (item in values) {
+        result.add(item)
+    }
+    return result
+}
+
+public func VecToSet<T>(values: ArrayList<T>): HashSet<T> where T <: Hashable & Equatable<T> {
+    return VecToSet<T>(values.toArray())
+}
+
+public func VecToSortedSet<T>(values: Array<T>): TreeSet<T> where T <: Comparable<T> {
+    let result = TreeSet<T>()
+    for (item in values) {
+        result.add(item)
+    }
+    return result
+}
+
+public func VecToSortedSet<T>(values: ArrayList<T>): TreeSet<T> where T <: Comparable<T> {
+    return VecToSortedSet<T>(values.toArray())
+}
+
+public func EraseIf<T>(container: ArrayList<T>, pred: (T) -> Bool): Unit {
+    var idx: Int64 = 0
+    while (idx < container.size) {
+        if (pred(container[idx])) {
+            container.remove(at: idx)
+        } else {
+            idx++
+        }
+    }
+}
+
+public func GetKeys<K, V>(container: HashMap<K, V>): HashSet<K> where K <: Hashable & Equatable<K> {
+    let result = HashSet<K>()
+    for (key in container.keys()) {
+        result.add(key)
+    }
+    return result
+}
+
+public func GetKeys<K, V>(container: TreeMap<K, V>): TreeSet<K> where K <: Comparable<K> {
+    let result = TreeSet<K>()
+    for (key in container.keys()) {
+        result.add(key)
+    }
+    return result
+}
+
+public func InKeys<K, V>(key: K, container: HashMap<K, V>): Bool where K <: Hashable & Equatable<K> {
+    return container.contains(key)
+}
+
+public func InKeys<K, V>(key: K, container: TreeMap<K, V>): Bool where K <: Comparable<K> {
+    return container.contains(key)
+}
+
+public func In<T>(element: T, values: Array<T>): Bool where T <: Equatable<T> {
+    return values.contains(element)
+}
+
+public func In<T>(element: T, values: ArrayList<T>): Bool where T <: Equatable<T> {
+    return values.contains(element)
+}
+
+public func In<T>(element: T, values: HashSet<T>): Bool where T <: Hashable & Equatable<T> {
+    return values.contains(element)
+}
+
+public func In<T>(element: T, values: TreeSet<T>): Bool where T <: Comparable<T> {
+    return values.contains(element)
+}
+
+public func In<T>(values: Array<T>, pred: (T) -> Bool): Bool {
+    for (item in values) {
+        if (pred(item)) {
+            return true
+        }
+    }
+    return false
+}
+
+public func In<T>(values: ArrayList<T>, pred: (T) -> Bool): Bool {
+    for (item in values) {
+        if (pred(item)) {
+            return true
+        }
+    }
+    return false
+}
+
+public func In<T>(values: HashSet<T>, pred: (T) -> Bool): Bool where T <: Hashable & Equatable<T> {
+    for (item in values) {
+        if (pred(item)) {
+            return true
+        }
+    }
+    return false
+}
+
+public func In<T>(values: TreeSet<T>, pred: (T) -> Bool): Bool where T <: Comparable<T> {
+    for (item in values) {
+        if (pred(item)) {
+            return true
+        }
+    }
+    return false
+}
+
+public func NotIn<T>(element: T, values: Array<T>): Bool where T <: Equatable<T> {
+    return !In<T>(element, values)
+}
+
+public func NotIn<T>(element: T, values: ArrayList<T>): Bool where T <: Equatable<T> {
+    return !In<T>(element, values)
+}
+
+public func NotIn<T>(element: T, values: HashSet<T>): Bool where T <: Hashable & Equatable<T> {
+    return !In<T>(element, values)
+}
+
+public func NotIn<T>(element: T, values: TreeSet<T>): Bool where T <: Comparable<T> {
+    return !In<T>(element, values)
+}
+
+public func NotIn<T>(values: Array<T>, pred: (T) -> Bool): Bool {
+    return !In<T>(values, pred)
+}
+
+public func NotIn<T>(values: ArrayList<T>, pred: (T) -> Bool): Bool {
+    return !In<T>(values, pred)
+}
+
+public func NotIn<T>(values: HashSet<T>, pred: (T) -> Bool): Bool where T <: Hashable & Equatable<T> {
+    return !In<T>(values, pred)
+}
+
+public func NotIn<T>(values: TreeSet<T>, pred: (T) -> Bool): Bool where T <: Comparable<T> {
+    return !In<T>(values, pred)
+}
+
+public func All<T>(values: Array<T>, pred: (T) -> Bool): Bool {
+    for (item in values) {
+        if (!pred(item)) {
+            return false
+        }
+    }
+    return true
+}
+
+public func All<T>(values: ArrayList<T>, pred: (T) -> Bool): Bool {
+    for (item in values) {
+        if (!pred(item)) {
+            return false
+        }
+    }
+    return true
+}
+
+public func All<T>(values: HashSet<T>, pred: (T) -> Bool): Bool where T <: Hashable & Equatable<T> {
+    for (item in values) {
+        if (!pred(item)) {
+            return false
+        }
+    }
+    return true
+}
+
+public func All<T>(values: TreeSet<T>, pred: (T) -> Bool): Bool where T <: Comparable<T> {
+    for (item in values) {
+        if (!pred(item)) {
+            return false
+        }
+    }
+    return true
+}
+
+public func AnyOf(values: Array<Bool>): Bool {
+    for (value in values) {
+        if (value) {
+            return true
+        }
+    }
+    return false
+}
+
+public func AllOf(values: Array<Bool>): Bool {
+    for (value in values) {
+        if (!value) {
+            return false
+        }
+    }
+    return true
+}
+
+public func RemoveFromVec<T>(values: ArrayList<T>, item: T): Unit where T <: Equatable<T> {
+    EraseIf<T>(values, { candidate: T => candidate == item })
 }
 
 public func SplitString(str: String, delimiter: String): Array<String> {
@@ -139,18 +385,54 @@ public func TryParseInt(str: String): Option<Int64> {
     return Stoi(str)
 }
 
-public func GenerateRandomHexString(): String {
-    try {
-        let bytes = File.readFrom("/dev/urandom")
-        if (bytes.size >= 4) {
-            var value = 0u64
-            for (idx in 0..4) {
-                value |= UInt64(bytes[idx]) << UInt64(idx * 8)
+@When[os == "Windows"]
+private func ReadRandomUInt32(): Option<UInt32> {
+    try (randomPtr = LibC.malloc<UInt32>().asResource()) {
+        if (randomPtr.value.isNull()) {
+            return None
+        }
+        unsafe {
+            if (rand_s(randomPtr.value) == 0) {
+                return randomPtr.value.read()
             }
-            return value.toString(radix: 16)
+        }
+    }
+    return None
+}
+
+@When[os != "Windows"]
+private func ReadRandomUInt32(): Option<UInt32> {
+    try (path = unsafe { LibC.mallocCString("/dev/urandom") }.asResource()) {
+        let fd = unsafe { open(path.value, O_RDONLY) }
+        if (fd < 0) {
+            return None
+        }
+        try (randomPtr = LibC.malloc<UInt32>().asResource()) {
+            if (randomPtr.value.isNull()) {
+                unsafe {
+                    let _ = close(fd)
+                }
+                return None
+            }
+            let bytesRead = unsafe { read(fd, CPointer<UInt8>(randomPtr.value), UIntNative(4)) }
+            unsafe {
+                let _ = close(fd)
+            }
+            if (bytesRead == 4) {
+                unsafe {
+                    return randomPtr.value.read()
+                }
+            }
         }
     } catch (e: Exception) {
         ()
+    }
+    return None
+}
+
+public func GenerateRandomHexString(): String {
+    if (let Some(value) <- ReadRandomUInt32()) {
+        return UInt64(value).toString(radix: 16)
     }
     return UInt64(DateTime.nowUTC().hashCode()).toString(radix: 16)
 }

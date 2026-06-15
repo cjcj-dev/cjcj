@@ -15,13 +15,38 @@ public class ICE {
     public static let UNITTEST_TP: Int64 = -2
     public static let LSP_TP: Int64 = -3
     private static let writeOnceICEMessage = AtomicBool(false)
+    private static var removeTempFileHook: Option<() -> Unit> = None
+    private static var removeTempFileSignalSafeHook: Option<() -> Unit> = None
 
     public static func PrintVersionFromError(): Unit {
         eprintln("cangjie selfhost")
     }
 
+    public static func RegisterRemoveTempFileHook(hook: () -> Unit): Unit {
+        removeTempFileHook = hook
+    }
+
+    public static func RegisterRemoveTempFileSignalSafeHook(hook: () -> Unit): Unit {
+        removeTempFileSignalSafeHook = hook
+    }
+
+    public static func ClearRemoveTempFileHooks(): Unit {
+        removeTempFileHook = None
+        removeTempFileSignalSafeHook = None
+    }
+
     public static func RemoveTempFile(): Unit {
-        // TempFileManager belongs to Driver and is outside this package's current dependency boundary.
+        if (let Some(hook) <- removeTempFileHook) {
+            hook()
+        }
+    }
+
+    public static func RemoveTempFileSignalSafe(): Unit {
+        if (let Some(hook) <- removeTempFileSignalSafeHook) {
+            hook()
+        } else {
+            RemoveTempFile()
+        }
     }
 
     public static func GetTriggerPoint(): Int64 {
