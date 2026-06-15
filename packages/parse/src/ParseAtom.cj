@@ -17,6 +17,13 @@ extend ParserImpl {
         if (SeeingLiteral()) { return ParseLitConst() }
         if (Seeing(TokenKind.LET)) { return ParseLetPattern(ek) }
         if (Seeing([TokenKind.UNSAFE, TokenKind.LCURL])) { return ParseUnsafeBlock() }
+        if (Seeing(TokenKind.VARRAY)) { return ParseVArrayExpr() }
+        if (SeeingPrimitiveTypeAndLParen()) { return ParseTypeConvExpr() }
+        if (SeeingPrimitiveTypeAndDot()) {
+            let token = Peek()
+            Next()
+            return PrimitiveTypeExpr(token)
+        }
         if (Seeing(TokenKind.IDENTIFIER) || Seeing(TokenKind.PACKAGE_IDENTIFIER) || Seeing(TokenKind.THIS) || Seeing(TokenKind.SUPER)) {
             return ParseRefExpr(ek)
         }
@@ -78,6 +85,47 @@ extend ParserImpl {
         }
         Next()
         return LitConstExpr(kind, token)
+    }
+
+    public func ParseTypeConvExpr(): Expr {
+        let token = Peek()
+        let ret = TypeConvExpr()
+        let primitive = PrimitiveType(token.Value(), token.kind, token.Begin(), token.End())
+        ret.typeNode = primitive
+        ret.begin = token.Begin()
+        Next()
+        ret.leftParenPos = Expect(TokenKind.LPAREN, "expected '(' after primitive type").Begin()
+        ret.expr = ParseExpr()
+        ret.rightParenPos = Expect(TokenKind.RPAREN, "expected ')' after type conversion expression").Begin()
+        ret.end = ret.rightParenPos + 1
+        return ret
+    }
+
+    public func ParseVArrayExpr(): Expr {
+        let ret = ArrayExpr()
+        ret.begin = Peek().Begin()
+        ret.typeNode = ParseVarrayType()
+        ret.isValueArray = true
+        if (!Skip(TokenKind.LPAREN)) {
+            if (!Seeing(TokenKind.LCURL)) {
+                diag.DiagnoseRefactor(DiagKindRefactor.EXPECTED_TOKEN, Peek().Begin(), "expected '(' or trailing lambda after VArray type")
+                ret.isBroken = true
+            }
+            if (let Some(ty) <- ret.typeNode) { ret.end = ty.end }
+            return ret
+        }
+        ret.leftParenPos = lastToken.Begin()
+        while (!Seeing(TokenKind.END) && !Seeing(TokenKind.RPAREN)) {
+            ret.args.add(ParseFuncArg())
+            if (Skip(TokenKind.COMMA)) {
+                ret.commaPosVector.add(lastToken.Begin())
+            } else {
+                break
+            }
+        }
+        ret.rightParenPos = Expect(TokenKind.RPAREN, "expected ')' after VArray arguments").Begin()
+        ret.end = ret.rightParenPos + 1
+        return ret
     }
 
     public func ParseRefExpr(): RefExpr {

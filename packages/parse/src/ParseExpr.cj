@@ -99,7 +99,8 @@ extend ParserImpl {
                 continue
             }
             if (Seeing(TokenKind.LCURL) && (base.astKind == ASTKind.CALL_EXPR || base.astKind == ASTKind.REF_EXPR ||
-                base.astKind == ASTKind.MEMBER_ACCESS || base.astKind == ASTKind.OPTIONAL_EXPR)) {
+                base.astKind == ASTKind.MEMBER_ACCESS || base.astKind == ASTKind.OPTIONAL_EXPR ||
+                base.astKind == ASTKind.ARRAY_EXPR || base.astKind == ASTKind.MACRO_EXPAND_EXPR)) {
                 let trailing = TrailingClosureExpr()
                 trailing.expr = base
                 trailing.lambda = ParseLambdaExprWithTrailingClosure()

@@ -12,6 +12,26 @@ extend ParserImpl {
             Seeing(TokenKind.INIT) || Seeing(TokenKind.THIS) || Seeing(TokenKind.SUPER)
     }
 
+    public func SeeingPrimitiveTypeToken(kind: TokenKind): Bool {
+        let idx = TokenKindIndex(kind)
+        return idx >= TokenKindIndex(TokenKind.INT8) && idx <= TokenKindIndex(TokenKind.UNIT)
+    }
+
+    public func SeeingTypeConvertiblePrimitiveToken(kind: TokenKind): Bool {
+        let idx = TokenKindIndex(kind)
+        return idx >= TokenKindIndex(TokenKind.INT8) && idx <= TokenKindIndex(TokenKind.RUNE)
+    }
+
+    public func SeeingPrimitiveTypeAndLParen(): Bool {
+        return SeeingTypeConvertiblePrimitiveToken(Peek().kind) &&
+            lexer.LookAhead(1).size > 0 && lexer.LookAhead(1)[0].kind == TokenKind.LPAREN
+    }
+
+    public func SeeingPrimitiveTypeAndDot(): Bool {
+        return SeeingPrimitiveTypeToken(Peek().kind) &&
+            lexer.LookAhead(1).size > 0 && lexer.LookAhead(1)[0].kind == TokenKind.DOT
+    }
+
     public func ParseIdentifierFromToken(token: Token): SrcIdentifier {
         let raw = token.Value()
         var value = raw

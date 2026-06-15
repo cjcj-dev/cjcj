@@ -195,6 +195,55 @@ public class SubscriptExpr <: Expr {
     }
 }
 
+public class PrimitiveTypeExpr <: Expr {
+    public var name: String = ""
+    public var tokenKind: TokenKind = TokenKind.ILLEGAL
+
+    public init(token: Token) {
+        super(ASTKind.PRIMITIVE_TYPE_EXPR)
+        name = token.Value()
+        tokenKind = token.kind
+        begin = token.Begin()
+        end = token.End()
+    }
+
+    public override func ToString(): String { return name }
+}
+
+public class TypeConvExpr <: Expr {
+    public var typeNode: Option<Type> = None
+    public var leftParenPos: Position = INVALID_POSITION
+    public var expr: Option<Expr> = None
+    public var rightParenPos: Position = INVALID_POSITION
+
+    public init() { super(ASTKind.TYPE_CONV_EXPR) }
+
+    public override func Children(): ArrayList<Node> {
+        let out = ArrayList<Node>()
+        if (let Some(ty) <- typeNode) { out.add(ty) }
+        if (let Some(child) <- expr) { out.add(child) }
+        return out
+    }
+}
+
+public class ArrayExpr <: Expr {
+    public var typeNode: Option<Type> = None
+    public var leftParenPos: Position = INVALID_POSITION
+    public let args: ArrayList<FuncArg> = ArrayList<FuncArg>()
+    public let commaPosVector: ArrayList<Position> = ArrayList<Position>()
+    public var rightParenPos: Position = INVALID_POSITION
+    public var isValueArray: Bool = false
+
+    public init() { super(ASTKind.ARRAY_EXPR) }
+
+    public override func Children(): ArrayList<Node> {
+        let out = ArrayList<Node>()
+        if (let Some(ty) <- typeNode) { out.add(ty) }
+        for (arg in args) { out.add(arg) }
+        return out
+    }
+}
+
 public class OptionalExpr <: Expr {
     public var baseExpr: Option<Expr> = None
     public var questPos: Position = INVALID_POSITION

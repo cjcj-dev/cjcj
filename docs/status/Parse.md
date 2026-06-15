@@ -77,6 +77,9 @@ package public APIs.
 - Added selectorless match parsing with `MatchCaseOther` nodes for
   `match { case expr => ... }`, including wildcard expression cases, expression
   case bodies, and the `matchMode` split used by the C++ AST.
+- Added atom parsing for primitive type conversion expressions, primitive type
+  static member bases such as `Int64.foo`, and `VArray<T, $n>(...)` /
+  `VArray<T, $n>{ ... }` value-array expressions with C++-shaped AST nodes.
 
 ## Remaining Work
 
