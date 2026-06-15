@@ -90,6 +90,13 @@ Implemented:
 - Added `UselessAllocateElimination` for allocations whose result is unused except by exact stores and
   debug expressions, preserving function return-value allocations and deleting the allocation plus its
   removable users.
+- Added `BoolDomain`, a direct four-state boolean lattice (`bottom`, `false`, `true`, `top`) with C++-shaped
+  logical/bitwise operations, union, single-value queries, and string rendering.
+- Added `SInt`, the fixed-width integer value primitive used by CHIR range analysis, with width conversion
+  from CHIR types, normalization, signed/unsigned predicates, bit masks, arithmetic, shifts, and formatting.
+- Added `ConstantRange`, a real half-open fixed-width range domain over `SInt`, including full/empty/singleton
+  construction, relational constraints, wrapping membership checks, min/max queries, difference,
+  intersection/union with signed/unsigned preference, and conservative arithmetic results.
 
 Known gaps:
 
@@ -110,6 +117,9 @@ Known gaps:
   engine, static-member call adjustment, and cross-block fixed-point propagation are not fully ported.
 - `UselessAllocateElimination` cannot yet honor class finalizer exclusions because the current Cangjie
   `ClassDef` model has not ported the finalizer link.
+- `SInt` and `ConstantRange` cover the core value/range domain semantics needed by later passes, but the full
+  C++ arbitrary edge cases, saturation operations, and complete multi-interval preference logic remain to be
+  ported.
 - The current implementation establishes a compiling, real IR core that downstream CHIR work can build on,
   but it is far below full C++ CHIR behavioral coverage.
 
