@@ -62,6 +62,10 @@ package public APIs.
   the C++ operator-function flow where `operator` is a function modifier and the
   overloadable token (`+`, `[]`, `()`, `>>`, `>=`, and the supported operator
   set) becomes the function identifier and recorded operator kind.
+- Added match-case pattern guard parsing (`case ... where expr =>`), recorded
+  case `|` positions, added for-in `where` guard fields and parsing, fixed
+  `perform` to build a real `PERFORM_EXPR`, and matched the C++ `resume with`
+  / `resume throwing` operand parsing shape.
 
 ## Remaining Work
 

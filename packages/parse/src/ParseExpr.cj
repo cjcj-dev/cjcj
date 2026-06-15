@@ -314,9 +314,17 @@ extend ParserImpl {
             let matchCase = MatchCase()
             Expect(TokenKind.CASE, "expected 'case'")
             matchCase.begin = lastToken.Begin()
-            while (!Seeing(TokenKind.END) && !Seeing(TokenKind.DOUBLE_ARROW)) {
+            while (!Seeing(TokenKind.END) && !Seeing(TokenKind.DOUBLE_ARROW) && !Seeing(TokenKind.WHERE)) {
                 matchCase.patterns.add(ParsePattern())
-                if (!Skip(TokenKind.BITOR)) { break }
+                if (Skip(TokenKind.BITOR)) {
+                    matchCase.bitOrPosVector.add(lastToken.Begin())
+                } else {
+                    break
+                }
+            }
+            if (Skip(TokenKind.WHERE)) {
+                matchCase.wherePos = lastToken.Begin()
+                matchCase.patternGuard = ParseExpr()
             }
             matchCase.arrowPos = Expect(TokenKind.DOUBLE_ARROW, "expected '=>' after match case").Begin()
             let block = Block()
@@ -395,11 +403,15 @@ extend ParserImpl {
         let token = Expect(TokenKind.FOR, "expected 'for'")
         ret.forPos = token.Begin()
         ret.begin = token.Begin()
-        Expect(TokenKind.LPAREN, "expected '(' after for")
+        ret.leftParenPos = Expect(TokenKind.LPAREN, "expected '(' after for").Begin()
         ret.pattern = ParsePattern()
         ret.inPos = Expect(TokenKind.IN, "expected 'in' in for expression").Begin()
         ret.inExpr = ParseExpr()
-        Expect(TokenKind.RPAREN, "expected ')' after for-in")
+        if (Skip(TokenKind.WHERE)) {
+            ret.wherePos = lastToken.Begin()
+            ret.patternGuard = ParseExpr()
+        }
+        ret.rightParenPos = Expect(TokenKind.RPAREN, "expected ')' after for-in").Begin()
         ret.body = ParseBlock(ScopeKind.FUNC_BODY)
         if (let Some(body) <- ret.body) { ret.end = body.end }
         return ret
@@ -427,10 +439,10 @@ extend ParserImpl {
         return ret
     }
 
-    public func ParsePerformExpr(): Expr {
-        let ret = ThrowExpr()
+    public func ParsePerformExpr(): PerformExpr {
+        let ret = PerformExpr()
         let token = Expect(TokenKind.PERFORM, "expected 'perform'")
-        ret.throwPos = token.Begin()
+        ret.performPos = token.Begin()
         ret.begin = token.Begin()
         ret.expr = ParseExpr()
         ret.end = if (let Some(expr) <- ret.expr) { expr.end } else { token.End() }
@@ -442,8 +454,16 @@ extend ParserImpl {
         let token = Expect(TokenKind.RESUME, "expected 'resume'")
         ret.resumePos = token.Begin()
         ret.begin = token.Begin()
-        if (!AtTerminator()) { ret.withExpr = ParseExpr() }
-        ret.end = if (let Some(expr) <- ret.withExpr) { expr.end } else { token.End() }
+        ret.end = token.End()
+        if (Skip(TokenKind.WITH)) {
+            ret.withPos = lastToken.Begin()
+            ret.withExpr = ParseExpr()
+            if (let Some(expr) <- ret.withExpr) { ret.end = expr.end }
+        } else if (Skip(TokenKind.THROWING)) {
+            ret.throwingPos = lastToken.Begin()
+            ret.throwingExpr = ParseExpr()
+            if (let Some(expr) <- ret.throwingExpr) { ret.end = expr.end }
+        }
         return ret
     }
 

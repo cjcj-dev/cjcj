@@ -291,12 +291,21 @@ public class IfExpr <: Expr {
 
 public class MatchCase <: Node {
     public let patterns: ArrayList<Pattern> = ArrayList<Pattern>()
+    public let bitOrPosVector: ArrayList<Position> = ArrayList<Position>()
     public var wherePos: Position = INVALID_POSITION
     public var patternGuard: Option<Expr> = None
     public var arrowPos: Position = INVALID_POSITION
     public var exprOrDecls: Option<Block> = None
 
     public init() { super(ASTKind.MATCH_CASE) }
+
+    public override func Children(): ArrayList<Node> {
+        let out = ArrayList<Node>()
+        for (pattern in patterns) { out.add(pattern) }
+        if (let Some(guard) <- patternGuard) { out.add(guard) }
+        if (let Some(body) <- exprOrDecls) { out.add(body) }
+        return out
+    }
 }
 
 public class MatchExpr <: Expr {
@@ -308,6 +317,13 @@ public class MatchExpr <: Expr {
     public var rightCurlPos: Position = INVALID_POSITION
 
     public init() { super(ASTKind.MATCH_EXPR) }
+
+    public override func Children(): ArrayList<Node> {
+        let out = ArrayList<Node>()
+        if (let Some(sel) <- selector) { out.add(sel) }
+        for (matchCase in matchCases) { out.add(matchCase) }
+        return out
+    }
 }
 
 public class TryExpr <: Expr {
@@ -336,11 +352,24 @@ public class DoWhileExpr <: Expr {
 
 public class ForInExpr <: Expr {
     public var forPos: Position = INVALID_POSITION
+    public var leftParenPos: Position = INVALID_POSITION
     public var pattern: Option<Pattern> = None
     public var inPos: Position = INVALID_POSITION
     public var inExpr: Option<Expr> = None
+    public var rightParenPos: Position = INVALID_POSITION
+    public var wherePos: Position = INVALID_POSITION
+    public var patternGuard: Option<Expr> = None
     public var body: Option<Block> = None
     public init() { super(ASTKind.FOR_IN_EXPR) }
+
+    public override func Children(): ArrayList<Node> {
+        let out = ArrayList<Node>()
+        if (let Some(pat) <- pattern) { out.add(pat) }
+        if (let Some(expr) <- inExpr) { out.add(expr) }
+        if (let Some(guard) <- patternGuard) { out.add(guard) }
+        if (let Some(block) <- body) { out.add(block) }
+        return out
+    }
 }
 
 public class LambdaExpr <: Expr {
@@ -368,19 +397,42 @@ public open class ThrowExpr <: Expr {
     public var throwPos: Position = INVALID_POSITION
     public var expr: Option<Expr> = None
     public init() { super(ASTKind.THROW_EXPR) }
+    public init(kind: ASTKind) { super(kind) }
+
+    public override func Children(): ArrayList<Node> {
+        let out = ArrayList<Node>()
+        if (let Some(child) <- expr) { out.add(child) }
+        return out
+    }
 }
 
-public class PerformExpr <: ThrowExpr {
-    public init() {
-        super()
+public class PerformExpr <: Expr {
+    public var performPos: Position = INVALID_POSITION
+    public var expr: Option<Expr> = None
+
+    public init() { super(ASTKind.PERFORM_EXPR) }
+
+    public override func Children(): ArrayList<Node> {
+        let out = ArrayList<Node>()
+        if (let Some(child) <- expr) { out.add(child) }
+        return out
     }
 }
 
 public class ResumeExpr <: Expr {
     public var resumePos: Position = INVALID_POSITION
+    public var withPos: Position = INVALID_POSITION
     public var withExpr: Option<Expr> = None
+    public var throwingPos: Position = INVALID_POSITION
     public var throwingExpr: Option<Expr> = None
     public init() { super(ASTKind.RESUME_EXPR) }
+
+    public override func Children(): ArrayList<Node> {
+        let out = ArrayList<Node>()
+        if (let Some(expr) <- withExpr) { out.add(expr) }
+        if (let Some(expr) <- throwingExpr) { out.add(expr) }
+        return out
+    }
 }
 
 public class SpawnExpr <: Expr {
