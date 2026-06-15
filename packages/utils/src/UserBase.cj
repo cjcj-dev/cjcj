@@ -18,7 +18,11 @@ public open class UserBase {
         if (!enable) {
             return
         }
-        WriteJson(GetResult(), GetSuffix())
+        try {
+            WriteJson(GetResult(), GetSuffix())
+        } catch (e: Exception) {
+            ()
+        }
     }
 
     public func WriteJson(context: String, suffix: String): Unit {
@@ -58,4 +62,3 @@ public open class UserBase {
         return ""
     }
 }
-

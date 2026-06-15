@@ -69,7 +69,6 @@ public class TaskQueue {
                 result.complete(fn())
             } catch (e: Exception) {
                 result.fail(e)
-                throw e
             }
         }, priority, order))
         return result

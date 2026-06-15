@@ -86,8 +86,23 @@ public class StringRef <: ArrayRef<UTF8> {
     }
 
     public func ToUTF32(): Array<UTF32> {
-        let (_, converted) = ConvertUTF8ToUTF32(ToArray())
-        return converted
+        let source = ToArray()
+        let result = ArrayList<UTF32>()
+        var index: Int64 = 0
+        while (index < source.size) {
+            let (status, code, nextIndex) = decodeOne(source, index)
+            if (status != ConversionResult.OK) {
+                var sourceLeft = index
+                while (sourceLeft < source.size) {
+                    result.add(UInt32(source[sourceLeft]))
+                    sourceLeft++
+                }
+                return result.toArray()
+            }
+            result.add(code)
+            index = nextIndex
+        }
+        return result.toArray()
     }
 }
 

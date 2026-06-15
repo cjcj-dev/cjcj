@@ -39,8 +39,15 @@ public class PSet<T> where T <: Comparable<T> {
         commit()
     }
 
+    public init(values: TreeSet<T>) {
+        for (value in values) {
+            data.add(value)
+        }
+        commit()
+    }
+
     public func raw(): TreeSet<T> {
-        return data
+        return data.clone()
     }
 
     public func clear(): Unit {
@@ -87,6 +94,19 @@ public class PSet<T> where T <: Comparable<T> {
             insert(value)
         }
         src.clear()
+    }
+
+    public func merge(src: TreeSet<T>): Unit {
+        let valuesToMove = ArrayList<T>()
+        for (value in src) {
+            if (!contains(value)) {
+                valuesToMove.add(value)
+            }
+        }
+        for (value in valuesToMove) {
+            insert(value)
+            src.remove(value)
+        }
     }
 
     public func empty(): Bool {
@@ -213,4 +233,3 @@ public class PData {
         data.resetSoft()
     }
 }
-

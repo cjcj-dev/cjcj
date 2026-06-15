@@ -20,6 +20,8 @@ public let DIR_PATH_MAX_LENGTH: Int64 = 4096
 private let SHORT_HASH_NUM: Int64 = 8
 private let BOM_ENCODING_LEN: Int64 = 3
 private let TEST_FILE_NAME: String = "_test.cj"
+private let FILE_LEN_LIMIT: Int64 = 4 * 1024 * 1024 * 1024
+private let FILE_LEN_LIMIT_STR: String = "4 GB"
 
 public enum FileMode {
     | FM_EXIST
@@ -281,11 +283,16 @@ public class FileUtil {
         if (let None <- realFilePath) {
             return (false, Array<UInt8>(), "open file failed")
         }
+        let actualPath = realFilePath.getOrThrow()
         try {
-            let content = File.readFrom(realFilePath.getOrThrow())
-            if (content.isEmpty()) {
-                return (false, content, "empty binary file")
+            let fileLength = FileInfo(actualPath).size
+            if (fileLength == 0) {
+                return (false, Array<UInt8>(), "empty binary file")
             }
+            if (fileLength >= FILE_LEN_LIMIT) {
+                return (false, Array<UInt8>(), "exceed the max file length: " + FILE_LEN_LIMIT_STR)
+            }
+            let content = File.readFrom(actualPath)
             return (true, content, "")
         } catch (e: Exception) {
             return (false, Array<UInt8>(), "open file failed")
@@ -308,8 +315,13 @@ public class FileUtil {
                 return false
             }
         }
+        let normalizedDir = GetAbsPath(GetDirPath(filePath))
+        if (let None <- normalizedDir) {
+            return false
+        }
+        let normalizedFilePath = JoinPath(normalizedDir.getOrThrow(), GetFileName(filePath))
         try {
-            File.writeTo(filePath, data.toArray())
+            File.writeTo(normalizedFilePath, data.toArray())
             return true
         } catch (e: Exception) {
             return false
@@ -323,8 +335,13 @@ public class FileUtil {
                 return false
             }
         }
+        let realFilePath = GetAbsPath(baseDir)
+        if (let None <- realFilePath) {
+            return false
+        }
+        let fileName = GetFileName(filePath)
         try {
-            File.writeTo(filePath, buffer)
+            File.writeTo(JoinPath(realFilePath.getOrThrow(), fileName), buffer)
             return true
         } catch (e: Exception) {
             return false
@@ -336,8 +353,19 @@ public class FileUtil {
             failedReason.value = "file not exist"
             return None
         }
+        let realFilePath = GetAbsPath(filePath)
+        if (let None <- realFilePath) {
+            failedReason.value = "file path illegal"
+            return None
+        }
         try {
-            var content = File.readFrom(filePath)
+            let actualPath = realFilePath.getOrThrow()
+            let fileLength = FileInfo(actualPath).size
+            if (fileLength >= FILE_LEN_LIMIT) {
+                failedReason.value = "exceed the max file length: " + FILE_LEN_LIMIT_STR
+                return None
+            }
+            var content = File.readFrom(actualPath)
             if (content.size >= BOM_ENCODING_LEN && content[0] == 0xefu8 && content[1] == 0xbbu8 && content[2] == 0xbfu8) {
                 content = content[BOM_ENCODING_LEN..]
             }

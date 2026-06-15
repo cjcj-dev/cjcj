@@ -6,6 +6,9 @@ public class Caster {
     }
 
     public static func As<T>(value: Any): Option<T> {
-        return As<T>(value)
+        if (value is T) {
+            return value as T
+        }
+        return None
     }
 }

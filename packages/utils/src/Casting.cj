@@ -11,3 +11,14 @@ public func As<T>(value: Any): Option<T> {
     return None
 }
 
+public func DynamicCast<T>(value: Any): Option<T> {
+    return As<T>(value)
+}
+
+public func StaticCast<T>(value: Any): T {
+    return (value as T).getOrThrow()
+}
+
+public func RawStaticCast<T>(value: Any): T {
+    return (value as T).getOrThrow()
+}
