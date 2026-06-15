@@ -120,10 +120,14 @@ public class DiagnosticEmitter {
         let width = lineNumberWidth()
         renderLocation(builder, diagnostic.mainHint.range.begin, width)
         renderGutterLine(builder, width)
-        renderSourceLine(builder, diagnostic.mainHint.range, MAIN_HINT_MARKER, diagnostic.mainHint.str,
-            diagnostic.mainHint.color, width)
-        for (hint in diagnostic.otherHints) {
-            renderHint(builder, hint, OTHER_HINT_MARKER, width)
+        if (canRenderSameLineHintGroup(diagnostic.mainHint, diagnostic.otherHints)) {
+            renderSameLineHintGroup(builder, diagnostic.mainHint, diagnostic.otherHints, width)
+        } else {
+            renderSourceLine(builder, diagnostic.mainHint.range, MAIN_HINT_MARKER, diagnostic.mainHint.str,
+                diagnostic.mainHint.color, width)
+            for (hint in diagnostic.otherHints) {
+                renderHint(builder, hint, OTHER_HINT_MARKER, width)
+            }
         }
         renderGutterLine(builder, width)
     }
@@ -144,12 +148,18 @@ public class DiagnosticEmitter {
             renderLocation(builder, subDiag.otherHints[0].range.begin, width)
         }
         renderGutterLine(builder, width)
-        if (!subDiag.mainHint.IsDefault()) {
+        if (!subDiag.mainHint.IsDefault() && canRenderSameLineHintGroup(subDiag.mainHint, subDiag.otherHints)) {
+            renderSameLineHintGroup(builder, subDiag.mainHint, subDiag.otherHints, width)
+        } else if (!subDiag.mainHint.IsDefault()) {
             renderSourceLine(builder, subDiag.mainHint.range, MAIN_HINT_MARKER, subDiag.mainHint.str,
                 subDiag.mainHint.color, width)
-        }
-        for (hint in subDiag.otherHints) {
-            renderHint(builder, hint, OTHER_HINT_MARKER, width)
+            for (hint in subDiag.otherHints) {
+                renderHint(builder, hint, OTHER_HINT_MARKER, width)
+            }
+        } else {
+            for (hint in subDiag.otherHints) {
+                renderHint(builder, hint, OTHER_HINT_MARKER, width)
+            }
         }
         renderGutterLine(builder, width)
         renderHelp(builder, subDiag.help)
@@ -160,6 +170,44 @@ public class DiagnosticEmitter {
             return
         }
         renderSourceLine(builder, hint.range, marker, hint.str, hint.color, width)
+    }
+
+    private func canRenderSameLineHintGroup(mainHint: IntegratedString, otherHints: ArrayList<IntegratedString>): Bool {
+        if (mainHint.IsDefault() || mainHint.range.begin.line != mainHint.range.end.line) {
+            return false
+        }
+        for (hint in otherHints) {
+            if (hint.IsDefault()) {
+                continue
+            }
+            if (hint.range.begin.fileID != mainHint.range.begin.fileID ||
+                hint.range.begin.line != mainHint.range.begin.line ||
+                hint.range.end.line != hint.range.begin.line) {
+                return false
+            }
+        }
+        return true
+    }
+
+    private func renderSameLineHintGroup(
+        builder: StringBuilder,
+        mainHint: IntegratedString,
+        otherHints: ArrayList<IntegratedString>,
+        width: Int64
+    ): Unit {
+        let line = sourceLine(mainHint.range.begin)
+        if (line.isEmpty()) {
+            return
+        }
+        builder.append(sourceLinePrefix(mainHint.range.begin.line, width) + printableSourceLine(line) + "\n")
+        renderInlineMarker(builder, line, mainHint.range.begin.column, mainHint.range.end.column, MAIN_HINT_MARKER,
+            mainHint.str, mainHint.color, width)
+        for (hint in otherHints) {
+            if (!hint.IsDefault()) {
+                renderInlineMarker(builder, line, hint.range.begin.column, hint.range.end.column, OTHER_HINT_MARKER,
+                    hint.str, hint.color, width)
+            }
+        }
     }
 
     private func renderHelp(builder: StringBuilder, help: DiagHelp): Unit {
