@@ -32,11 +32,13 @@ extend MacroMsgContent <: Equatable<MacroMsgContent> {
 }
 
 private func escapeField(value: String): String {
-    return value.replace("\\", "\\\\").replace("\n", "\\n").replace("|", "\\p").replace(",", "\\c").replace(";", "\\s")
+    return value.replace("\\", "\\\\").replace("\n", "\\n").replace("|", "\\p").replace(",", "\\c").replace(";", "\\s").
+        replace("#", "\\h")
 }
 
 private func unescapeField(value: String): String {
-    return value.replace("\\s", ";").replace("\\c", ",").replace("\\p", "|").replace("\\n", "\n").replace("\\\\", "\\")
+    return value.replace("\\h", "#").replace("\\s", ";").replace("\\c", ",").replace("\\p", "|").replace("\\n", "\n").
+        replace("\\\\", "\\")
 }
 
 private func bytesToString(bytes: ArrayList<UInt8>): String {
@@ -264,6 +266,8 @@ private func lineValue(lines: Array<String>, key: String): Option<String> {
 private func createMacroCallMessage(macCall: MacroCall): String {
     let builder = StringBuilder()
     let invocation = macCall.RequireInvocation()
+    let childMessages = ArrayList<ChildMessage>()
+    CollectChildMessages(macCall, childMessages)
     appendLine(builder, "CALL_BEGIN", encodePosition(macCall.GetBeginPos()))
     appendLine(builder, "CALL_END", encodePosition(macCall.GetEndPos()))
     appendLine(builder, "ID", escapeField(invocation.macroCallDiagInfo.identifier))
@@ -273,11 +277,51 @@ private func createMacroCallMessage(macCall: MacroCall): String {
     appendLine(builder, "ARGS", encodeTokens(invocation.args))
     appendLine(builder, "ATTRS", encodeTokens(invocation.attrs))
     appendLine(builder, "PARENTS", encodeStringList(macCall.parentNames))
+    appendLine(builder, "CHILDREN", encodeChildMessages(childMessages))
     appendLine(builder, "METHOD", escapeField(macCall.methodName))
     appendLine(builder, "PACKAGE", escapeField(macCall.packageName))
     appendLine(builder, "LIB", escapeField(macCall.libPath))
     appendLine(builder, "CALL_DONE", "")
     return builder.toString()
+}
+
+public func CollectChildMessages(macCall: MacroCall, out: ArrayList<ChildMessage>): Unit {
+    for (child in macCall.children) {
+        if (!child.items.isEmpty()) {
+            out.add(ChildMessage(child.GetFullName(), child.items))
+        }
+        CollectChildMessages(child, out)
+    }
+}
+
+private func encodeChildMessages(messages: ArrayList<ChildMessage>): String {
+    let builder = StringBuilder()
+    var idx: Int64 = 0
+    while (idx < messages.size) {
+        if (idx > 0) {
+            builder.append("#")
+        }
+        let message = messages[idx]
+        builder.append(escapeField(message.childName) + "|" + encodeItems(message.items))
+        idx++
+    }
+    return builder.toString()
+}
+
+private func decodeChildMessages(value: String, out: ArrayList<ChildMessage>): Unit {
+    out.clear()
+    if (value.isEmpty()) {
+        return
+    }
+    for (segment in value.split("#")) {
+        let fields = segment.split("|")
+        if (fields.size < 2) {
+            continue
+        }
+        let items = ArrayList<ItemInfo>()
+        decodeItems(fields[1], items)
+        out.add(ChildMessage(unescapeField(fields[0]), items))
+    }
 }
 
 private func resultMessage(macCall: MacroCall): String {
@@ -348,6 +392,14 @@ public class MacroEvalMsgSerializer {
         stringToBytes(builder.toString(), bufferData)
     }
 
+    public static func GetExitFlag(bufferData: ArrayList<UInt8>): Bool {
+        let lines = bytesToString(bufferData).split("\n")
+        if (let Some(value) <- lineValue(lines, "FLAG")) {
+            return value == "1"
+        }
+        return true
+    }
+
     public static func GetMacroMsgContenType(bufferData: ArrayList<UInt8>): MacroMsgContent {
         let text = bytesToString(bufferData)
         let lines = text.split("\n")
@@ -372,6 +424,25 @@ public class MacroEvalMsgSerializer {
         let lines = bytesToString(bufferData).split("\n")
         if (let Some(value) <- lineValue(lines, "PATHS")) {
             decodeStringList(value, macroLibs)
+        }
+    }
+
+    public static func DeSerializeMacroCallMessages(bufferData: ArrayList<UInt8>, calls: ArrayList<String>): Unit {
+        calls.clear()
+        var currentBlock = ""
+        var inCall = false
+        for (line in bytesToString(bufferData).split("\n")) {
+            if (line.startsWith("CALL_BEGIN|")) {
+                currentBlock = ""
+                inCall = true
+            }
+            if (inCall) {
+                currentBlock += line + "\n"
+            }
+            if (line.startsWith("CALL_DONE|") && inCall) {
+                calls.add(currentBlock)
+                inCall = false
+            }
         }
     }
 
@@ -413,6 +484,42 @@ public class MacroEvalMsgSerializer {
         let lines = text.split("\n")
         if (let Some(value) <- lineValue(lines, "PARENTS")) {
             decodeStringList(value, parentNames)
+        }
+    }
+
+    public static func DeSerializeFullNameFromCall(fullName: Box<String>, text: String): Unit {
+        let lines = text.split("\n")
+        if (let Some(value) <- lineValue(lines, "FULL")) {
+            fullName.value = unescapeField(value)
+        }
+    }
+
+    public static func DeSerializeHasAttrFromCall(text: String): Bool {
+        let lines = text.split("\n")
+        if (let Some(value) <- lineValue(lines, "HAS_ATTR")) {
+            return value == "1"
+        }
+        return false
+    }
+
+    public static func DeSerializeMethodInfoFromCall(methodName: Box<String>, packageName: Box<String>,
+        libPath: Box<String>, text: String): Unit {
+        let lines = text.split("\n")
+        if (let Some(value) <- lineValue(lines, "METHOD")) {
+            methodName.value = unescapeField(value)
+        }
+        if (let Some(value) <- lineValue(lines, "PACKAGE")) {
+            packageName.value = unescapeField(value)
+        }
+        if (let Some(value) <- lineValue(lines, "LIB")) {
+            libPath.value = unescapeField(value)
+        }
+    }
+
+    public static func DeSerializeChildMsgesFromCall(childMsges: ArrayList<ChildMessage>, text: String): Unit {
+        let lines = text.split("\n")
+        if (let Some(value) <- lineValue(lines, "CHILDREN")) {
+            decodeChildMessages(value, childMsges)
         }
     }
 

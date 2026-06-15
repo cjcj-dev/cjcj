@@ -9,6 +9,7 @@ Current constraints:
 
 - `packages/macro/cjpm.toml` has no package dependencies, so this port includes a local compatibility model for the Basic, AST, and Parse surfaces that Macro needs.
 - Native dynamic loading now uses C FFI (`dlopen`/`dlsym`/`dlclose` or Windows equivalents), runtime init/fini symbols are resolved through the native library, and macro function pointers can be invoked with serialized token buffers.
+- The in-package macro server path now classifies staged/server exits, deserializes macro-call batches, evaluates calls, serializes results, and resets per-stage state through the local process-message bridge.
 - Message and AST serialization use deterministic compiling codecs because generated flatbuffer schema packages are not available to this isolated package.
 - Generated-token parsing uses a local bridge until the real Parse entry point can be imported without changing package manifests.
 

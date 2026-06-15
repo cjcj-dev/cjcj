@@ -388,14 +388,14 @@ private func evaluateNativeMacro(macCall: MacroCall): Bool {
 }
 
 public class MacroEvaluation {
-    private var ci: CompilerInstance
-    private var macroCollector: MacroCollector
-    private var useChildProcess: Bool
-    private let vecOfGeneratedCodes: ArrayList<String> = ArrayList<String>()
-    private let escapePosVec: ArrayList<Position> = ArrayList<Position>()
-    private let pMacroCalls: ArrayList<MacroCall> = ArrayList<MacroCall>()
-    private var enableParallelMacro: Bool = false
-    private let usedMacroPkgs: ArrayList<(String, Bool)> = ArrayList<(String, Bool)>()
+    var ci: CompilerInstance
+    var macroCollector: MacroCollector
+    var useChildProcess: Bool
+    let vecOfGeneratedCodes: ArrayList<String> = ArrayList<String>()
+    let escapePosVec: ArrayList<Position> = ArrayList<Position>()
+    let pMacroCalls: ArrayList<MacroCall> = ArrayList<MacroCall>()
+    var enableParallelMacro: Bool = false
+    let usedMacroPkgs: ArrayList<(String, Bool)> = ArrayList<(String, Bool)>()
 
     public init(cIns: CompilerInstance, mc: MacroCollector, useChildProcess: Bool) {
         ci = cIns
@@ -440,12 +440,7 @@ public class MacroEvaluation {
     }
 
     public func ExecuteEvalSrvTask(): Unit {
-        let msg = ArrayList<UInt8>()
-        while (MacroProcMsger.GetInstance().ReadMsgFromClient(msg)) {
-            if (MacroEvalMsgSerializer.GetMacroMsgContenType(msg) == MacroMsgContent.EXIT_TASK) {
-                break
-            }
-        }
+        ExecuteMacroServerTaskLoop(this)
     }
 
     private func InitThreadNum(): Unit {
@@ -497,6 +492,9 @@ public class MacroEvaluation {
     public func EvaluateWithRuntime(macCall: MacroCall): Unit {
         if (useChildProcess) {
             if (SendMacroCallTaskToServer(macCall) && !enableParallelMacro) {
+                if (MacroProcMsger.GetInstance().macroSrvRun) {
+                    let _ = ExecuteOneMacroServerTask(this)
+                }
                 WaitMacroCallEvalResultFromServer(macCall)
             }
             return
