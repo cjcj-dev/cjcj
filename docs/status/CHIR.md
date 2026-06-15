@@ -102,11 +102,29 @@ Implemented:
   relation mapping, intersection/union, same-domain checks, and basic arithmetic composition.
 - Added `ValueDomain`, including abstract objects, reference roots/caching, reference representation checks,
   and the C++-shaped bottom/ref/value/top join behavior used by later value-analysis passes.
+- Added C++-named BCHIR interpreter component files for `OpCodes`, `BCHIR`, `BCHIRPrinter`,
+  `BCHIRInterpreter`, `InterpreterValue`, `InterpreterValueUtils`, `InterpreterArena`,
+  `InterpreterEnv`, and `InterpreterStack`.
+- Ported the BCHIR opcode inventory and metadata from `OpCodes.inc`, including stable opcode numbering,
+  human labels, fixed operand counts, and exception-handler flags.
+- Added an interpreter value model covering the C++ `IVal` families: signed/unsigned integer widths,
+  floats, rune/bool/unit/null/string primitives, pointers, tuples, arrays, objects, and function
+  references, with literal conversion, equality, truthiness, and debug rendering helpers.
+- Added explicit BCHIR argument/control stacks, local/global environment storage with frame base pointers,
+  and an interpreter arena for pointer-like allocated values.
+- Added BCHIR definitions and package sections for bytecode cells, annotations, functions, globals,
+  string/type/file sections, serialized class info, linked class tables, default-function pointers,
+  main/global-init metadata, cloning, removal, and deterministic insertion-order definition storage.
+- Added a BCHIR printer that emits linked bytecode, function/global definitions, annotations, string/type/file
+  sections, and serialized class entries in a readable form.
+- Added a working BCHIR interpreter subset for primitive constructors, strings, tuples/arrays/objects,
+  allocation, local/global load/store, frames, drop/store, jumps, branches, returns/exits, integer/float/bool
+  unary and binary operations, equality, and literal result extraction.
 
 Known gaps:
 
 - This is not a complete faithful port of C++ CHIR. The full C++ AST-to-IR lowering, complete
-  expression taxonomy, checker suite, BCHIR instruction interpreter/linker, binary
+  expression taxonomy, checker suite, complete BCHIR translator/interpreter/linker, binary
   serializer/deserializer, analyses, transformations, and optimization passes still need to be
   ported.
 - The package manifest for `chir` currently has no dependencies and this task forbids manifest edits,
@@ -128,6 +146,9 @@ Known gaps:
 - `SIntDomain` and `ValueDomain` are real analysis domains over the current IR, but the C++ template
   abstraction, complete arithmetic transfer functions, and integration with the fixed-point analysis engine
   are still pending.
+- The BCHIR interpreter now has the real runtime storage model and a working primitive/control subset, but
+  the full C++ CHIR2BCHIR translator, linker, intrinsic/syscall handling, exception machinery, object method
+  dispatch, raw-array operations, type casts, and FFI execution paths remain to be ported.
 - The current implementation establishes a compiling, real IR core that downstream CHIR work can build on,
   but it is far below full C++ CHIR behavioral coverage.
 

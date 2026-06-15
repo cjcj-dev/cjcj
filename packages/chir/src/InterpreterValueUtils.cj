@@ -1,0 +1,182 @@
+package cangjie_compiler::chir
+
+import std.collection.*
+
+public class IValUtils {
+    public static func FromLiteral(literal: LiteralValue): InterpreterValue {
+        if (let Some(value) <- (literal as IntLiteral)) {
+            return InterpreterValue.MakeInt(InterpreterValueKind.IINT64, value.value)
+        }
+        if (let Some(value) <- (literal as FloatLiteral)) {
+            return InterpreterValue.MakeFloat(InterpreterValueKind.IFLOAT64, value.value)
+        }
+        if (let Some(value) <- (literal as BoolLiteral)) {
+            return InterpreterValue.MakeBool(value.value)
+        }
+        if (let Some(value) <- (literal as RuneLiteral)) {
+            return InterpreterValue.MakeRune(value.value)
+        }
+        if (let Some(value) <- (literal as StringLiteral)) {
+            return InterpreterValue.MakeString(value.value)
+        }
+        if (literal.IsNullLit()) {
+            return InterpreterValue.MakeNull()
+        }
+        if (literal.IsUnitLit()) {
+            return InterpreterValue.MakeUnit()
+        }
+        return InterpreterValue.MakeInvalid()
+    }
+
+    public static func ToLiteral(value: InterpreterValue): Option<LiteralValue> {
+        if (let Some(literal) <- value.GetLiteral()) {
+            return literal
+        }
+        if (value.IsIntLike()) {
+            return IntLiteral(value.GetInt())
+        }
+        if (value.IsFloatLike()) {
+            return FloatLiteral(value.GetFloat())
+        }
+        if (value.kind == InterpreterValueKind.IBOOL) {
+            return BoolLiteral(value.GetBool())
+        }
+        if (value.kind == InterpreterValueKind.ISTRING) {
+            return StringLiteral(value.GetText())
+        }
+        if (value.kind == InterpreterValueKind.IUNIT) {
+            return UnitLiteral()
+        }
+        if (value.kind == InterpreterValueKind.INULLPTR) {
+            return NullLiteral()
+        }
+        return None
+    }
+
+    public static func PrimitiveOfType(ty: Type, raw: Int64): InterpreterValue {
+        return match (ty.GetTypeKind()) {
+            case TypeKind.TYPE_UINT8 => InterpreterValue.MakeUInt(InterpreterValueKind.IUINT8, raw)
+            case TypeKind.TYPE_UINT16 => InterpreterValue.MakeUInt(InterpreterValueKind.IUINT16, raw)
+            case TypeKind.TYPE_UINT32 => InterpreterValue.MakeUInt(InterpreterValueKind.IUINT32, raw)
+            case TypeKind.TYPE_UINT64 => InterpreterValue.MakeUInt(InterpreterValueKind.IUINT64, raw)
+            case TypeKind.TYPE_UINT_NATIVE => InterpreterValue.MakeUInt(InterpreterValueKind.IUINTNAT, raw)
+            case TypeKind.TYPE_INT8 => InterpreterValue.MakeInt(InterpreterValueKind.IINT8, raw)
+            case TypeKind.TYPE_INT16 => InterpreterValue.MakeInt(InterpreterValueKind.IINT16, raw)
+            case TypeKind.TYPE_INT32 => InterpreterValue.MakeInt(InterpreterValueKind.IINT32, raw)
+            case TypeKind.TYPE_INT64 => InterpreterValue.MakeInt(InterpreterValueKind.IINT64, raw)
+            case TypeKind.TYPE_INT_NATIVE => InterpreterValue.MakeInt(InterpreterValueKind.IINTNAT, raw)
+            case TypeKind.TYPE_FLOAT16 => InterpreterValue.MakeFloat(InterpreterValueKind.IFLOAT16, Float64(raw))
+            case TypeKind.TYPE_FLOAT32 => InterpreterValue.MakeFloat(InterpreterValueKind.IFLOAT32, Float64(raw))
+            case TypeKind.TYPE_FLOAT64 => InterpreterValue.MakeFloat(InterpreterValueKind.IFLOAT64, Float64(raw))
+            case TypeKind.TYPE_BOOLEAN => InterpreterValue.MakeBool(raw != 0)
+            case TypeKind.TYPE_UNIT => InterpreterValue.MakeUnit()
+            case _ => InterpreterValue.MakeInvalid()
+        }
+    }
+
+    public static func ToString(value: InterpreterValue): String {
+        if (let Some(literal) <- ToLiteral(value)) {
+            return literal.ToString()
+        }
+        return match (value.kind) {
+            case InterpreterValueKind.IINVALID => "<invalid>"
+            case InterpreterValueKind.IPOINTER => "&${value.GetPointerIndex()}"
+            case InterpreterValueKind.IFUNC => "func@${value.GetFunctionIndex()}"
+            case InterpreterValueKind.ITUPLE => "(" + JoinValueStrings(value.GetElementsRef(), ", ") + ")"
+            case InterpreterValueKind.IARRAY => "[" + JoinValueStrings(value.GetElementsRef(), ", ") + "]"
+            case InterpreterValueKind.IOBJECT => "object#${value.GetClassId()}{" +
+                JoinValueStrings(value.GetElementsRef(), ", ") + "}"
+            case _ => "${value.GetInt()}"
+        }
+    }
+
+    public static func Equals(left: InterpreterValue, right: InterpreterValue): Bool {
+        if (left.kind != right.kind) {
+            if (left.IsIntLike() && right.IsIntLike()) {
+                return left.GetInt() == right.GetInt()
+            }
+            return false
+        }
+        if (left.IsIntLike()) {
+            return left.GetInt() == right.GetInt()
+        }
+        if (left.IsFloatLike()) {
+            return left.GetFloat() == right.GetFloat()
+        }
+        if (left.kind == InterpreterValueKind.IBOOL) {
+            return left.GetBool() == right.GetBool()
+        }
+        if (left.kind == InterpreterValueKind.ISTRING) {
+            return left.GetText() == right.GetText()
+        }
+        if (left.kind == InterpreterValueKind.IUNIT || left.kind == InterpreterValueKind.INULLPTR) {
+            return true
+        }
+        if (left.kind == InterpreterValueKind.IPOINTER) {
+            return left.GetPointerIndex() == right.GetPointerIndex()
+        }
+        if (left.kind == InterpreterValueKind.IFUNC) {
+            return left.GetFunctionIndex() == right.GetFunctionIndex()
+        }
+        if (left.kind == InterpreterValueKind.ITUPLE || left.kind == InterpreterValueKind.IARRAY ||
+            left.kind == InterpreterValueKind.IOBJECT) {
+            let leftItems = left.GetElementsRef()
+            let rightItems = right.GetElementsRef()
+            if (leftItems.size != rightItems.size) {
+                return false
+            }
+            var idx: Int64 = 0
+            while (idx < leftItems.size) {
+                if (!Equals(leftItems[idx], rightItems[idx])) {
+                    return false
+                }
+                idx++
+            }
+            return left.GetClassId() == right.GetClassId()
+        }
+        return false
+    }
+
+    public static func IsTruthy(value: InterpreterValue): Bool {
+        if (value.kind == InterpreterValueKind.IBOOL) {
+            return value.GetBool()
+        }
+        if (value.IsIntLike()) {
+            return value.GetInt() != 0
+        }
+        if (value.kind == InterpreterValueKind.INULLPTR || value.kind == InterpreterValueKind.IINVALID) {
+            return false
+        }
+        return true
+    }
+
+    public static func StringToArray(text: String): InterpreterValue {
+        let items = ArrayList<InterpreterValue>()
+        items.add(InterpreterValue.MakeInt(InterpreterValueKind.IINT64, text.size))
+        var idx: Int64 = 0
+        while (idx < text.size) {
+            items.add(InterpreterValue.MakeUInt(InterpreterValueKind.IUINT8, Int64(text[idx])))
+            idx++
+        }
+        return InterpreterValue.MakeArray(items)
+    }
+
+    public static func CreateCPointer(address: Int64): InterpreterValue {
+        let items = ArrayList<InterpreterValue>()
+        items.add(InterpreterValue.MakeUInt(InterpreterValueKind.IUINTNAT, address))
+        return InterpreterValue.MakeTuple(items)
+    }
+}
+
+private func JoinValueStrings(values: ArrayList<InterpreterValue>, sep: String): String {
+    var out = ""
+    var idx: Int64 = 0
+    while (idx < values.size) {
+        if (idx > 0) {
+            out += sep
+        }
+        out += IValUtils.ToString(values[idx])
+        idx++
+    }
+    return out
+}
