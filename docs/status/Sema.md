@@ -17,9 +17,10 @@ Current Cangjie port state:
 - Added integer overflow strategy propagation and integer arithmetic overflow marking, including option-to-AST strategy mapping through the self-hosted compiler instance.
 - Added inline-function eligibility analysis for source packages, including exportability, frozen/const ownership, internal type rejection, reference-target filtering, default-parameter propagation, imported inline function handling, and the C++ 32-node body limit.
 - Added real after-typecheck desugar helpers for `is`, `as`, pipeline binary expressions, range construction, unit insertion for `if`, default-parameter debug line-info cleanup, and shared enum/ref-loop utilities. Coalescing now has the real Option-match construction helper, with traversal still blocked by missing `COALESCING` in the self-host AST token surface.
+- Added literal constant range validation/ideal-type replacement plus after-typecheck helpers for spawn future construction, spawn scheduler-handle extraction, and std.core comparable intrinsic call rewriting.
 - Added compiling public entrypoints for generic instantiation, type checking, desugar, incremental helpers, test helpers, lookup, collection, diagnostics, join/meet, promotion, and scope utilities.
 
 Known gaps:
 
 - This is not a complete faithful port of C++ Sema. The full C++ algorithms for type inference, overload resolution, generic constraint solving, inheritance merging, desugaring, FFI/CJMP/plugin checks, initialization legality, and expression-specific type checking still need to be ported.
-- Several required upstream/downstream C++ surfaces (`Frontend`, full `Macro`, full `IncrementalCompilation`, and complete `Modules` integration) are not yet available as faithful Cangjie packages, so affected Sema entrypoints still contain self-host Sema TODO markers with compiling conservative bodies.
+- Several required upstream/downstream C++ surfaces (`Frontend`, full `Macro`, full `IncrementalCompilation`, complete `Modules` integration, and the type-checker synthesis entrypoints needed by token desugaring) are not yet available as faithful Cangjie packages, so affected Sema entrypoints still contain self-host Sema TODO markers with compiling conservative bodies.
