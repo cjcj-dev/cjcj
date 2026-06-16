@@ -4,6 +4,12 @@ Last updated: 2026-06-17
 
 ## Current pass
 
+- Deepened `packages/sema/src/Desugar/DesugarBeforeTypeCheck.cj` against the C++ `DesugarBeforeTypeCheck.cpp` reference:
+  - added real `@IfAvailable` desugaring for `level` and `syscap` arguments, including the SDK-26 `apiAvailable(...)` split, legacy `DeviceInfo.sdkApiVersion >= N` checks, string triple parsing via the real `sema.Plugin.APILevelVersion`, invalid-literal fallback cloning, and source/cur-file propagation;
+  - replaced unconditional branch unitification with a discarded-value context stack modeled after the C++ `DiscardedHelper`, including block-child, loop, finally, constructor, explicit `Unit` return, parenthesized, `if`/`try`/`match`, synchronized-body, and function-body propagation rules;
+  - fixed unitification to recognize only literal `()` as unit, rather than treating every literal as already unit-like;
+  - handled `tryLambda` branch bodies during try-expression unitification;
+  - added tuple-assignment handling for optional-chain lvalues, producing compiler-added `OptionalChainExpr` assignment nodes rather than plain cloned lvalue assignments.
 - Continued the in-type-check desugar port in `packages/sema/src/Desugar/DesugarInTypeCheck.cj` with real lowering for pipeline expressions (`a |> f` to `f(a)`) and composition expressions (`f ~> g` to `composition(f, g)`), including `operator()` wrapping for non-function callees, flow-expression marking, `sourceExpr`, unsafe propagation, and cur-file propagation.
 - Continued the after-instantiation desugar port in `packages/sema/src/Desugar/DesugarAfterInstantiation.cj` with the C++ pass's declaration attribute update behavior: default marking for initialized variables, `--export-for-test` linkage/`FOR_TEST` handling for extend and foreign functions, property linkage propagation, and coverage line-info clearing for generic-instantiated declarations.
 - Added a package-local before-type-check desugar traversal in `packages/sema/src/Desugar/DesugarBeforeTypeCheck.cj` with concrete lowering for synchronized expressions, optional chains, increment/decrement, tuple assignment, option types, main declarations, trailing closures, and branch unitification.
@@ -19,6 +25,7 @@ Last updated: 2026-06-17
 ## Remaining gaps
 
 - The public root `sema.PerformDesugarBeforeTypeCheck` facade is still a no-op. The real helper currently lives in package `cangjie_compiler::sema.Desugar`; importing it into root `sema` creates a cycle through `sema.Desugar.AfterTypeCheck -> sema`. Fixing this needs a package ownership split outside this pass's allowed edit surface.
+- The `desugarMacrocall` switch is not faithfully represented: the generic self-hosted walker already visits `File.originalMacroCallNodes`, so the C++ file-dispatch loop cannot be copied directly without double-walking macro-call nodes. Macro declaration and quote desugar remain substantially incomplete.
 - The new after-type-check traversal is implemented in `sema.Desugar`, but the root type-checker facade is outside this pass's edit surface, so full pipeline wiring remains pending.
 - `ForInExpr` currently has real range lowering only. String and iterator lowering still need faithful lookup/import-manager behavior from the C++ implementation.
 - In-type-check desugar is still limited to pipeline/composition. Primary constructor lowering, compound assignment overload lowering, and other C++ in-typecheck transformations remain pending.
@@ -27,4 +34,4 @@ Last updated: 2026-06-17
 
 ## Coverage estimate
 
-Real behavior coverage for this scoped desugar area is about 27% versus the C++ reference. The implemented pieces now perform meaningful AST transformations, but substantial C++ behavior remains either not wired into the root pipeline or represented by compiling compatibility bodies.
+Real behavior coverage for this scoped desugar area is about 31% versus the C++ reference. The implemented pieces now perform meaningful AST transformations, including the API-level `@IfAvailable` path and more faithful discarded-context branch handling, but substantial C++ behavior remains either not wired into the root pipeline or represented by compiling compatibility bodies.
