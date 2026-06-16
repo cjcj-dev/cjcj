@@ -57,6 +57,30 @@ Verification:
 - `cjpm build` passes after this pass.
 - Remaining `TODO(selfhost:Sema)` markers in the tc-core-owned files listed by the task: 0.
 
+## 2026-06-17 Continue Pass 3
+
+Files deepened:
+
+- `packages/sema/src/TypeManager.cj`
+
+Implemented behavior:
+
+- Ported the C++ `TypeManager::GetTyForExtendMap` normalization branches for extend lookup. Array types now map to the raw array key, pointer types map to `CPointer<Invalid>`, and instantiated nominal generics map to their generic declaration type before builtin extend lookup.
+- Replaced the self-mapping placeholder in `GenerateGenericMappingFromGeneric` with the C++ behavior that maps parent generic parameters to the corresponding child generic parameter types when both generic parameter lists line up.
+- Replaced the empty `GenerateStructDeclTypeMapping` stub with the C++ control flow for nominal and extend declarations, using the declaration type or extend target type as the mapping root.
+- Lifted the `MultiTypeSubst` generic mapping traversal toward the C++ DFS: it now walks applicable extend declarations and classlike inherited types with a visited set and skips inheritance nodes marked `IN_REFERENCE_CYCLE`.
+
+Remaining gaps:
+
+- The `SubstPack` generic mapping overload still goes through the `MultiTypeSubst` bridge instead of the C++ placeholder-aware contextual traversal.
+- Imported-declaration lookup and exact diagnostic paths remain blocked by dependencies outside this tc-core pass.
+
+Verification:
+
+- `cjpm build` passes after this pass.
+- `grep -rn "TODO(selfhost:Sema)" packages/sema/src` reports 4 remaining package-level markers, all outside the tc-core-owned files.
+- Remaining `TODO(selfhost:Sema)` markers in the tc-core-owned files listed by the task: 0.
+
 ## 2026-06-17 Continue Pass
 
 Files deepened:

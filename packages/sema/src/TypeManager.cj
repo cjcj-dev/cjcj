@@ -846,28 +846,68 @@ public class TypeManager {
         return out
     }
 
-    public func GenerateStructDeclGenericMapping(m: MultiTypeSubst, decl: InheritableDecl, targetTy: Ty): Unit {
+    private func hasVisitedGenericMappingTy(visited: ArrayList<Ty>, ty: Ty): Bool {
+        for (value in visited) {
+            if (SameTy(value, ty)) {
+                return true
+            }
+        }
+        return false
+    }
+
+    private func isInheritableTypeForGenericMapping(ty: Ty): Bool {
+        if (!Ty.IsTyCorrect(ty) || !ty.IsClassLike()) {
+            return false
+        }
+        if (let Some(decl) <- Ty.GetInheritableDeclPtrOfTy(Some(ty))) {
+            return !decl.TestAttr(Attribute.IN_REFERENCE_CYCLE)
+        }
+        return false
+    }
+
+    private func generateGenericMappingVisit(m: MultiTypeSubst, baseType: Ty, visited: ArrayList<Ty>): Unit {
+        if (!Ty.IsTyCorrect(baseType) || hasVisitedGenericMappingTy(visited, baseType)) {
+            return
+        }
+        visited.add(baseType)
+        generateExtendGenericMappingVisit(m, baseType, visited)
+        if (let Some(decl) <- Ty.GetInheritableDeclPtrOfTy(Some(baseType))) {
+            generateStructDeclGenericMappingVisit(m, decl, baseType, visited)
+        }
+    }
+
+    private func generateExtendGenericMappingVisit(m: MultiTypeSubst, baseType: Ty, visited: ArrayList<Ty>): Unit {
+        if (!Ty.IsTyCorrect(baseType)) {
+            return
+        }
+        for (extendDecl in GetAllExtendsByTy(baseType)) {
+            generateStructDeclGenericMappingVisit(m, extendDecl, baseType, visited)
+        }
+    }
+
+    private func generateStructDeclGenericMappingVisit(m: MultiTypeSubst, decl: InheritableDecl, targetTy: Ty,
+        visited: ArrayList<Ty>): Unit {
+        if (!Ty.IsTyCorrect(targetTy)) {
+            return
+        }
         generateDeclGenericMapping(m, decl, targetTy)
+        for (inheritedType in decl.inheritedTypes) {
+            if (let Some(inheritedTy) <- inheritedType.GetTy()) {
+                if (isInheritableTypeForGenericMapping(inheritedTy)) {
+                    generateGenericMappingVisit(m, inheritedTy, visited)
+                }
+            }
+        }
+    }
+
+    public func GenerateStructDeclGenericMapping(m: MultiTypeSubst, decl: InheritableDecl, targetTy: Ty): Unit {
+        let visited = ArrayList<Ty>()
+        generateStructDeclGenericMappingVisit(m, decl, targetTy, visited)
     }
 
     public func GenerateGenericMapping(m: MultiTypeSubst, baseType: Ty): Unit {
-        if (let Some(classTy) <- (baseType as ClassTy)) {
-            if (let Some(decl) <- classTy.declPtr) {
-                generateDeclGenericMapping(m, decl, baseType)
-            }
-        } else if (let Some(interfaceTy) <- (baseType as InterfaceTy)) {
-            if (let Some(decl) <- interfaceTy.declPtr) {
-                generateDeclGenericMapping(m, decl, baseType)
-            }
-        } else if (let Some(structTy) <- (baseType as StructTy)) {
-            if (let Some(decl) <- structTy.declPtr) {
-                generateDeclGenericMapping(m, decl, baseType)
-            }
-        } else if (let Some(enumTy) <- (baseType as EnumTy)) {
-            if (let Some(decl) <- enumTy.declPtr) {
-                generateDeclGenericMapping(m, decl, baseType)
-            }
-        }
+        let visited = ArrayList<Ty>()
+        generateGenericMappingVisit(m, baseType, visited)
     }
 
     public func GenerateGenericMapping(m: SubstPack, baseType: Ty): Unit {
@@ -877,13 +917,20 @@ public class TypeManager {
     }
 
     public func GenerateGenericMappingFromGeneric(parentDecl: Decl, childDecl: Decl): TypeSubst {
-        let _ = childDecl
         let out = TypeSubst()
-        if (let Some(generic) <- parentDecl.GetGeneric()) {
-            for (param in generic.typeParameters) {
-                if (let Some(paramTy) <- param.GetTy()) {
-                    if (let Some(genTy) <- (paramTy as GenericsTy)) {
-                        out.Put(genTy, genTy)
+        if (let Some(parentGeneric) <- parentDecl.GetGeneric()) {
+            if (let Some(childGeneric) <- childDecl.GetGeneric()) {
+                if (parentGeneric.typeParameters.size == childGeneric.typeParameters.size) {
+                    var idx: Int64 = 0
+                    while (idx < parentGeneric.typeParameters.size) {
+                        if (let Some(parentParamTy) <- parentGeneric.typeParameters[idx].GetTy()) {
+                            if (let Some(parentGenTy) <- (parentParamTy as GenericsTy)) {
+                                if (let Some(childParamTy) <- childGeneric.typeParameters[idx].GetTy()) {
+                                    out.Put(parentGenTy, childParamTy)
+                                }
+                            }
+                        }
+                        idx++
                     }
                 }
             }
@@ -892,8 +939,22 @@ public class TypeManager {
     }
 
     public func GenerateStructDeclTypeMapping(decl: Decl): MultiTypeSubst {
-        let _ = decl
-        return MultiTypeSubst()
+        let out = MultiTypeSubst()
+        if (!decl.IsNominalDecl()) {
+            return out
+        }
+        var parentTy = decl.GetTy()
+        if (let Some(extendDecl) <- (decl as ExtendDecl)) {
+            if (let Some(extendedType) <- extendDecl.extendedType) {
+                parentTy = extendedType.GetTy()
+            } else {
+                return out
+            }
+        }
+        if (let Some(value) <- parentTy) {
+            GenerateGenericMapping(out, value)
+        }
+        return out
     }
 
     public func ReplaceIdealTy(ty: Ty): Ty {
@@ -932,6 +993,15 @@ public class TypeManager {
     }
 
     public func GetTyForExtendMap(ty: Ty): Ty {
+        if (ty.IsArray()) {
+            return GetArrayTy()
+        }
+        if (ty.IsPointer()) {
+            return GetPointerTy(TypeManager.GetInvalidTy())
+        }
+        if (let Some(genericTy) <- Ty.GetGenericTyOfInsTy(ty)) {
+            return genericTy
+        }
         return ty
     }
 
