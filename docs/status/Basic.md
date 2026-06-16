@@ -6,6 +6,9 @@ Build: `cjpm build` passes.
 
 Deepening pass updates:
 
+- Aligned diagnostic text rendering for missing backing source files with the C++ emitter: location lines are skipped
+  when `SourceManager::IsSourceFileExist` is false, and source excerpts omit numbered prefixes in that case while
+  keeping the gutter/source body.
 - Matched two C++ edge cases in core Basic value handling: `Position - Position` now returns a default
   non-current-file result like the C++ constructor path, and Unicode escape normalization consumes the first
   non-hex delimiter after `\u{...` exactly as the C++ iterator loop does.
