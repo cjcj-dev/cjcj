@@ -15,6 +15,7 @@ Continuation updates:
 - `TypeCheckPattern.cj`: tightened constant-pattern literal checking with the C++ rune and `UInt8` single-character string literal special cases, ideal numeric literal retargeting to the selector type, range validation, delayed string-interpolation rejection, and the final exact type-equality rule.
 - `TypeCheckPattern.cj`: aligned type-pattern runtime-check decisions with the C++ `IsNeedRuntimeCheck` logic for final runtime types, class-like/generic relationships, and bidirectional boxed subtype checks.
 - `TypeCheckPattern.cj`: aligned var-pattern duplicate binding behavior with C++ by exempting compiler-generated `v-compiler` bindings and specific-vs-common pattern bindings, while preserving full package metadata on generated var declarations.
+- `TypeCheckPattern.cj`: added C++-shaped constant-pattern equality resolution: built-in equality types return directly, while non-built-in exact-typed constants synthesize and check an overloaded `==` call stored in `operatorCallExpr`.
 
 Build status:
 
@@ -26,7 +27,7 @@ Build status:
 Known fidelity gaps:
 
 - The C++ `TypeCheckCall.cpp` still has deeper behavior not fully available in this self-host surface: local type argument synthesis, constraint-version rollback, full import/access filtering, re-export ordering, complete generic call mapping, variadic desugaring/recovery, operator-call desugaring, ToTokens checks, static/non-static member call validation, and rich candidate diagnostics.
-- Pattern usefulness/checking is functional but still conservative around complete sealed hierarchy discovery, full intersection/union/Option refinements, operator-overloaded constant-pattern equality synthesis, and diagnostics that depend on richer C++ Sema context.
+- Pattern usefulness/checking is functional but still conservative around complete sealed hierarchy discovery, full intersection/union/Option refinements, and diagnostics that depend on richer C++ Sema context.
 - Builtin and match checking use real AST and type data but still lack the full TypeCheckerImpl cache/synthesis integration present in C++.
 
-Honest coverage estimate for this scoped pass: about 60% of C++ behavior, materially higher than the prior compiling stubs but not module-complete.
+Honest coverage estimate for this scoped pass: about 62% of C++ behavior, materially higher than the prior compiling stubs but not module-complete.

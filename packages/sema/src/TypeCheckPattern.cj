@@ -106,6 +106,45 @@ private func CheckConstPatternLiteral(target: Ty, lit: LitConstExpr): Bool {
     }
 }
 
+private func IsBuiltinConstPatternEqualityTy(ty: Ty): Bool {
+    return ty.IsInteger() || ty.IsFloating() || ty.IsRune() || ty.IsBoolean() || ty.IsUnit()
+}
+
+private func ChkOpOverloadForConstPattern(typeManager: TypeManager, ctx: ASTContext, target: Ty,
+    pattern: ConstPattern): Bool {
+    let _ = ctx
+    if (let None <- pattern.literal) {
+        return InvalidPatternTy(pattern)
+    }
+    let literal = pattern.literal.getOrThrow()
+    let clonedLiteral = ASTCloner.Clone(literal) as Expr
+    if (let None <- clonedLiteral) {
+        return InvalidPatternTy(pattern)
+    }
+
+    let baseExpr = RefExpr()
+    CopyNodeWithFileID(baseExpr, pattern)
+    baseExpr.begin = pattern.begin
+    baseExpr.end = pattern.end
+    baseExpr.SetTy(target)
+    let callBase = CreateMemberAccess(baseExpr, "==")
+    callBase.scopeName = pattern.scopeName
+    let arg = CreateFuncArg(clonedLiteral.getOrThrow())
+    arg.scopeName = pattern.scopeName
+    let args = ArrayList<FuncArg>()
+    args.add(arg)
+    let callExpr = CreateCallExpr(callBase, args)
+    callExpr.scopeName = pattern.scopeName
+    callExpr.scopeLevel = pattern.scopeLevel
+    callExpr.curFile = pattern.curFile
+    if (ChkCallExpr(typeManager, None, Some(TypeManager.GetBoolTy()), callExpr)) {
+        pattern.operatorCallExpr = callExpr
+        return true
+    }
+    pattern.SetTy(TypeManager.GetNonNullTy(pattern.GetTy() ?? TypeManager.GetInvalidTy()))
+    return false
+}
+
 private func IsSubtypeBoxed(typeManager: TypeManager, leaf: Ty, root: Ty): Bool {
     if (let Some(leafTuple) <- (leaf as TupleTy)) {
         if (let Some(rootTuple) <- (root as TupleTy)) {
@@ -386,7 +425,7 @@ public func ChkWildcardPattern(target: Ty, pattern: WildcardPattern): Bool {
     return true
 }
 
-public func ChkConstPattern(typeManager: TypeManager, target: Ty, pattern: ConstPattern): Bool {
+public func ChkConstPattern(typeManager: TypeManager, ctx: ASTContext, target: Ty, pattern: ConstPattern): Bool {
     if (let None <- pattern.literal) {
         return InvalidPatternTy(pattern)
     }
@@ -418,7 +457,10 @@ public func ChkConstPattern(typeManager: TypeManager, target: Ty, pattern: Const
         }
     }
     pattern.SetTy(typeManager.TryGreedySubst(target))
-    return true
+    if (IsBuiltinConstPatternEqualityTy(pattern.GetTy() ?? TypeManager.GetInvalidTy())) {
+        return true
+    }
+    return ChkOpOverloadForConstPattern(typeManager, ctx, target, pattern)
 }
 
 public func ChkTypePattern(typeManager: TypeManager, ctx: ASTContext, target: Ty, pattern: TypePattern): Bool {
@@ -628,7 +670,7 @@ public func ChkPattern(typeManager: TypeManager, ctx: ASTContext, target: Ty,
         return ChkWildcardPattern(target, wildcard)
     }
     if (let Some(constPattern) <- (pattern as ConstPattern)) {
-        return ChkConstPattern(typeManager, target, constPattern)
+        return ChkConstPattern(typeManager, ctx, target, constPattern)
     }
     if (let Some(typePattern) <- (pattern as TypePattern)) {
         return ChkTypePattern(typeManager, ctx, target, typePattern)
