@@ -50,9 +50,12 @@ public class AST2CHIRFunctionSpec {
     public let paramNames: ArrayList<String> = ArrayList<String>()
     public let attributes: ArrayList<Attribute> = ArrayList<Attribute>()
     public let genericTypeParams: ArrayList<GenericType> = ArrayList<GenericType>()
+    public let defaultParamFunctions: ArrayList<AST2CHIRFunctionSpec> = ArrayList<AST2CHIRFunctionSpec>()
     public var ownerTypeName: Option<String> = None
     public var isInstanceMember: Bool = false
     public var genericDeclName: Option<String> = None
+    public var sourceFileKey: String = ""
+    public var isCommonMatchedWithSpecific: Bool = false
 
     public init(name: String, paramTypes: ArrayList<Type>, returnType: Type, srcCodeIdentifier!: String = "",
         rawMangledName!: String = "", funcKind!: FuncKind = FuncKind.DEFAULT, emitBody!: Bool = true) {
@@ -92,6 +95,21 @@ public class AST2CHIRFunctionSpec {
         genericDeclName = Some(name)
         return this
     }
+
+    public func AddDefaultParamFunction(spec: AST2CHIRFunctionSpec): AST2CHIRFunctionSpec {
+        defaultParamFunctions.add(spec)
+        return this
+    }
+
+    public func SetSourceFileKey(key: String): AST2CHIRFunctionSpec {
+        sourceFileKey = key
+        return this
+    }
+
+    public func SetCommonMatchedWithSpecific(value: Bool): AST2CHIRFunctionSpec {
+        isCommonMatchedWithSpecific = value
+        return this
+    }
 }
 
 public class AST2CHIRPackageSpec {
@@ -99,9 +117,15 @@ public class AST2CHIRPackageSpec {
     public let types: ArrayList<AST2CHIRNominalSpec> = ArrayList<AST2CHIRNominalSpec>()
     public let globals: ArrayList<AST2CHIRGlobalSpec> = ArrayList<AST2CHIRGlobalSpec>()
     public let functions: ArrayList<AST2CHIRFunctionSpec> = ArrayList<AST2CHIRFunctionSpec>()
+    public var mergingSpecific: Bool = false
 
     public init(name: String) {
         this.name = name
+    }
+
+    public func SetMergingSpecific(value: Bool): AST2CHIRPackageSpec {
+        mergingSpecific = value
+        return this
     }
 
     public func AddType(spec: AST2CHIRNominalSpec): AST2CHIRPackageSpec {

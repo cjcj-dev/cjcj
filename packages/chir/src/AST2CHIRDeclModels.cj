@@ -36,6 +36,9 @@ public class AST2CHIRMemberVarSpec {
     public var rawMangledName: String
     public var isStatic: Bool
     public var isReadOnly: Bool
+    public var sourceFileKey: String = ""
+    public var initializerFunc: Option<AST2CHIRFunctionSpec> = None
+    public var isSpecificDecl: Bool = false
     public let attributes: ArrayList<Attribute> = ArrayList<Attribute>()
 
     public init(name: String, ty: Type, rawMangledName!: String = "", isStatic!: Bool = false,
@@ -51,18 +54,39 @@ public class AST2CHIRMemberVarSpec {
         AddAttributeUnique(attributes, attr)
         return this
     }
+
+    public func SetSourceFileKey(key: String): AST2CHIRMemberVarSpec {
+        sourceFileKey = key
+        return this
+    }
+
+    public func SetInitializerFunc(spec: AST2CHIRFunctionSpec): AST2CHIRMemberVarSpec {
+        initializerFunc = Some(spec)
+        return this
+    }
+
+    public func SetSpecificDecl(value: Bool): AST2CHIRMemberVarSpec {
+        isSpecificDecl = value
+        return this
+    }
 }
 
 public class AST2CHIREnumCtorSpec {
     public let name: String
+    public let mangledName: String
     public let payloadTypes: ArrayList<Type> = ArrayList<Type>()
 
     public init(name: String) {
-        this.name = name
+        this(name, mangledName: "", payloadTypes: ArrayList<Type>())
     }
 
     public init(name: String, payloadTypes: ArrayList<Type>) {
+        this(name, mangledName: "", payloadTypes: payloadTypes)
+    }
+
+    public init(name: String, mangledName!: String = "", payloadTypes!: ArrayList<Type> = ArrayList<Type>()) {
         this.name = name
+        this.mangledName = mangledName
         for (payloadType in payloadTypes) {
             this.payloadTypes.add(payloadType)
         }
@@ -88,6 +112,8 @@ public class AST2CHIRNominalSpec {
     public let implementedInterfaces: ArrayList<String> = ArrayList<String>()
     public var superClassName: Option<String> = None
     public var extendedType: Option<Type> = None
+    public var sourceFileKey: String = ""
+    public var isSpecificDecl: Bool = false
 
     public init(kind: AST2CHIRNominalKind, name: String, packageName!: String = "", srcCodeIdentifier!: String = "",
         rawMangledName!: String = "") {
@@ -105,6 +131,16 @@ public class AST2CHIRNominalSpec {
 
     public func AddGenericTypeParam(param: GenericType): AST2CHIRNominalSpec {
         genericTypeParams.add(param)
+        return this
+    }
+
+    public func SetSourceFileKey(key: String): AST2CHIRNominalSpec {
+        sourceFileKey = key
+        return this
+    }
+
+    public func SetSpecificDecl(value: Bool): AST2CHIRNominalSpec {
+        isSpecificDecl = value
         return this
     }
 

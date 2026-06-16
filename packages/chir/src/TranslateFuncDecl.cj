@@ -24,6 +24,7 @@ extend AST2CHIRDeclTranslator {
             AddFunctionToPackage(pkg, fn)
         }
         AttachFunctionToOwner(fn, spec)
+        LowerDefaultParamFunctions(defaultPackage, fn, spec)
         return fn
     }
 
@@ -79,10 +80,25 @@ extend AST2CHIRDeclTranslator {
     }
 
     private func AttachFunctionToOwner(fn: Function, spec: AST2CHIRFunctionSpec): Unit {
+        if (fn.GetFuncKind() == FuncKind.GLOBALVAR_INIT) {
+            return
+        }
         if (let Some(ownerName) <- spec.ownerTypeName) {
             if (let Some(ownerDef) <- TryGetTypeDef(ownerName)) {
                 ownerDef.AddMethod(fn)
             }
+        }
+    }
+
+    private func LowerDefaultParamFunctions(defaultPackage: String, host: Function, spec: AST2CHIRFunctionSpec): Unit {
+        for (defaultSpec in spec.defaultParamFunctions) {
+            if (let Some(ownerName) <- spec.ownerTypeName) {
+                if (defaultSpec.ownerTypeName.isNone()) {
+                    defaultSpec.SetOwnerType(ownerName, isInstanceMember: spec.isInstanceMember)
+                }
+            }
+            let defaultFn = LowerFunction(defaultPackage, defaultSpec)
+            defaultFn.SetParamDftValHostFunc(host)
         }
     }
 

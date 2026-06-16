@@ -66,17 +66,48 @@ extend AST2CHIRDeclTranslator {
 
     public func LowerMemberVarsAndMethods(spec: AST2CHIRNominalSpec, def: CustomTypeDef): Unit {
         for (varSpec in spec.instanceVars) {
-            AddMemberVarDecl(def, varSpec)
+            if (ShouldTranslateMember(spec, varSpec.sourceFileKey)) {
+                if (ShouldAddMemberVar(def, varSpec)) {
+                    AddMemberVarDecl(def, varSpec)
+                    LowerMemberVarInitializer(spec, varSpec)
+                }
+            }
         }
         for (methodSpec in spec.methods) {
-            methodSpec.SetOwnerType(spec.name, isInstanceMember: !methodSpec.attributes.contains(Attribute.STATIC))
-            LowerFunction(ActivePackageName(spec.packageName), methodSpec)
+            if (ShouldTranslateFunctionMember(spec, methodSpec)) {
+                methodSpec.SetOwnerType(spec.name, isInstanceMember: !methodSpec.attributes.contains(Attribute.STATIC))
+                LowerFunction(ActivePackageName(spec.packageName), methodSpec)
+            }
         }
     }
 
     public func AddMemberVarDecl(def: CustomTypeDef, spec: AST2CHIRMemberVarSpec): Unit {
-        let info = MemberVarInfo(spec.name, spec.ty, isStatic: spec.isStatic, isReadOnly: spec.isReadOnly)
+        let readOnly = spec.isReadOnly || spec.attributes.contains(Attribute.READONLY) ||
+            spec.attributes.contains(Attribute.CONST)
+        let info = MemberVarInfo(spec.name, spec.ty, isStatic: spec.isStatic, isReadOnly: readOnly)
         def.AddInstanceVar(info)
+    }
+
+    private func ShouldAddMemberVar(def: CustomTypeDef, spec: AST2CHIRMemberVarSpec): Bool {
+        return !spec.isSpecificDecl || def.TestAttr(Attribute.GENERIC_INSTANTIATED)
+    }
+
+    private func LowerMemberVarInitializer(owner: AST2CHIRNominalSpec, varSpec: AST2CHIRMemberVarSpec): Unit {
+        if (varSpec.isStatic) {
+            return
+        }
+        if (let Some(initSpec) <- varSpec.initializerFunc) {
+            initSpec.SetOwnerType(owner.name, isInstanceMember: true)
+            initSpec.AddAttribute(Attribute.MUT)
+            LowerFunction(ActivePackageName(owner.packageName), initSpec)
+        }
+    }
+
+    private func ShouldTranslateFunctionMember(owner: AST2CHIRNominalSpec, methodSpec: AST2CHIRFunctionSpec): Bool {
+        if (methodSpec.isCommonMatchedWithSpecific) {
+            return false
+        }
+        return ShouldTranslateMember(owner, methodSpec.sourceFileKey)
     }
 
     private func AddTypeDefToPackage(pkg: Package, kind: AST2CHIRNominalKind, def: CustomTypeDef): Unit {

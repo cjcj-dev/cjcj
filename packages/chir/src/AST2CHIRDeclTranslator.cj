@@ -8,6 +8,7 @@ public class AST2CHIRDeclTranslator {
     public let typeDefs: HashMap<String, CustomTypeDef> = HashMap<String, CustomTypeDef>()
     public let functions: HashMap<String, Function> = HashMap<String, Function>()
     public let globals: HashMap<String, GlobalVar> = HashMap<String, GlobalVar>()
+    public var mergingSpecific: Bool = false
 
     public init(builder: CHIRBuilder) {
         this.builder = builder
@@ -68,6 +69,25 @@ public class AST2CHIRDeclTranslator {
         return true
     }
 
+    public func ShouldTranslateMember(owner: AST2CHIRNominalSpec, memberFileKey: String): Bool {
+        if (!mergingSpecific) {
+            return true
+        }
+        if (owner.attributes.contains(Attribute.IMPORTED)) {
+            return true
+        }
+        if (!owner.isSpecificDecl) {
+            return true
+        }
+        if (owner.attributes.contains(Attribute.GENERIC_INSTANTIATED)) {
+            return true
+        }
+        if (owner.sourceFileKey.isEmpty() || memberFileKey.isEmpty()) {
+            return true
+        }
+        return owner.sourceFileKey == memberFileKey
+    }
+
     public func GetNominalType(def: CustomTypeDef): Type {
         let typeArgs = ArrayList<Type>()
         for (param in def.genericTypeParams) {
@@ -113,6 +133,7 @@ extend AST2CHIRDeclTranslator {
     public func LowerPackage(spec: AST2CHIRPackageSpec): AST2CHIRResult {
         let pkg = builder.CreatePackage(spec.name)
         currentPackage = Some(pkg)
+        mergingSpecific = spec.mergingSpecific
         for (typeSpec in spec.types) {
             CreateNominalDef(spec.name, typeSpec)
         }
