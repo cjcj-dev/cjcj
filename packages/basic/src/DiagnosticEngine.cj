@@ -534,7 +534,19 @@ public class CompilerDiagnosticHandler <: DiagnosticHandler {
         return true
     }
 
+    private func ShouldSaveDiagnosticCategory(category: DiagCategory): Bool {
+        return match (category) {
+            case DiagCategory.LEX | DiagCategory.PARSE | DiagCategory.CONDITIONAL_COMPILATION |
+                DiagCategory.IMPORT_PACKAGE | DiagCategory.MODULE | DiagCategory.MACRO_EXPAND |
+                DiagCategory.SEMA | DiagCategory.CHIR | DiagCategory.OTHER => true
+            case _ => false
+        }
+    }
+
     public func SaveDiagnostics(diagnostic: Diagnostic): Bool {
+        if (!ShouldSaveDiagnosticCategory(diagnostic.diagCategory)) {
+            return true
+        }
         return SaveCategoryDiagnostic(diagnostic)
     }
 
@@ -607,10 +619,17 @@ public class CompilerDiagnosticHandler <: DiagnosticHandler {
     }
 
     public func GetDiagnosticInfo(diagnostic: Diagnostic): DiagnosticInfo {
-        let sm = if (diag.HasSourceManager()) { diag.GetSourceManager() } else { SourceManager() }
-        let emitter = DiagnosticEmitter(diagnostic, true, !diag.IsCheckRangeErrorCodeRatherICE(), sm)
+        let hint = if (diag.HasSourceManager()) {
+            let sm = diag.GetSourceManager()
+            let emitter = DiagnosticEmitter(diagnostic, true, !diag.IsCheckRangeErrorCodeRatherICE(), sm)
+            emitter.Render(showSourceOnly: true)
+        } else {
+            let sm = SourceManager()
+            let emitter = DiagnosticEmitter(diagnostic, true, !diag.IsCheckRangeErrorCodeRatherICE(), sm)
+            emitter.Render()
+        }
         return DiagnosticInfo(diagnostic.diagSeverity, range: diagnostic.mainHint.range,
-            msg: diagnostic.errorMessage, hint: emitter.Render())
+            msg: diagnostic.errorMessage, hint: hint)
     }
 
     private func sortedDiagnostics(category: DiagCategory): Array<Diagnostic> {

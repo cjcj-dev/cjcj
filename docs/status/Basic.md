@@ -17,6 +17,11 @@ Deepening pass updates:
 - Matched two byte-level utility behaviors from C++ Basic: `SplitString` advances one byte past a found delimiter, and
   `StringConvertor.Normalize` drops an unrecognized escape backslash while preserving the escaped byte for later
   processing.
+- Matched the C++ compiler diagnostic handler's saved-category filter: `PARSE_QUERY` diagnostics are still handled and
+  counted, but are not cached into the category buffers used for deferred emission.
+- Aligned `GetDiagnosticInfo` with the C++ `Emit(true)` path when a `SourceManager` is present, returning only the
+  rendered source/hint body in the `hint` field while keeping the diagnostic message in `msg`; the no-source-manager
+  fallback keeps the full render path like the C++ implementation.
 
 Implemented:
 
