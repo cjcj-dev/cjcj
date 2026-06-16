@@ -205,6 +205,7 @@ public class GenericInstantiationManagerImpl {
     private var ci: CompilerInstance
     private var context: GenericInstantiationContext
     private let instantiations: ArrayList<GenericInstantiationRecord> = ArrayList<GenericInstantiationRecord>()
+    private let structContext: ArrayList<Decl> = ArrayList<Decl>()
 
     public init(ci: CompilerInstance) {
         this.ci = ci
@@ -267,6 +268,7 @@ public class GenericInstantiationManagerImpl {
 
     public func ResetGenericInstantiationStage(): Unit {
         instantiations.clear()
+        structContext.clear()
         context.Clear()
         PartialInstantiation.ResetGlobalMap()
     }
@@ -384,6 +386,8 @@ public class GenericInstantiationManagerImpl {
     private func InstantiateReferencedGenericsInNode(root: Node, pkg: Package): Unit {
         let walker = Walker(root, visitPre: { node: Node =>
             CheckNodeInstantiation(node, pkg)
+        }, visitPost: { node: Node =>
+            PopStructContext(node)
         })
         let _ = walker.Walk()
     }
@@ -392,6 +396,7 @@ public class GenericInstantiationManagerImpl {
         if (ShouldSkipInstantiationNode(node)) {
             return VisitAction.SKIP_CHILDREN
         }
+        PushStructContext(node)
         if (let Some(expr) <- (node as Expr)) {
             if (let Some(desugar) <- expr.desugarExpr) {
                 InstantiateReferencedGenericsInNode(desugar, pkg)
@@ -401,16 +406,60 @@ public class GenericInstantiationManagerImpl {
         InstantiateGenericTysForNode(node, pkg)
         if (let Some(refExpr) <- (node as RefExpr)) {
             GenericRefExprInstantiate(refExpr, pkg)
+            return VisitAction.SKIP_CHILDREN
         } else if (let Some(memberAccess) <- (node as MemberAccess)) {
             GenericMemberAccessInstantiate(memberAccess, pkg)
+            return VisitAction.SKIP_CHILDREN
         } else if (let Some(typeNode) <- (node as Type)) {
             GenericTypeInstantiate(typeNode, pkg)
+            if (typeNode.astKind == ASTKind.REF_TYPE || typeNode.astKind == ASTKind.QUALIFIED_TYPE) {
+                return VisitAction.SKIP_CHILDREN
+            }
         } else if (let Some(arrayExpr) <- (node as ArrayExpr)) {
             GenericArrayExprInstantiate(arrayExpr, pkg)
         } else if (let Some(arrayLit) <- (node as ArrayLit)) {
             GenericArrayLitInstantiate(arrayLit, pkg)
+            return VisitAction.SKIP_CHILDREN
         }
         return VisitAction.WALK_CHILDREN
+    }
+
+    private func PushStructContext(node: Node): Unit {
+        if (let Some(decl) <- (node as Decl)) {
+            if (NeedSwitchContext(decl)) {
+                structContext.add(decl)
+            }
+        }
+    }
+
+    private func PopStructContext(node: Node): VisitAction {
+        if (let Some(decl) <- (node as Decl)) {
+            if (!structContext.isEmpty() && NeedSwitchContext(decl) &&
+                SameDecl(structContext[structContext.size - 1], decl)) {
+                structContext.remove(at: structContext.size - 1)
+            }
+        }
+        return VisitAction.KEEP_DECISION
+    }
+
+    private func GetStructDeclByContext(): Option<Decl> {
+        if (structContext.isEmpty()) {
+            return None
+        }
+        var decl: Option<Decl> = Some(structContext[structContext.size - 1])
+        while (let Some(value) <- decl) {
+            if (value.IsNominalDecl()) {
+                return value
+            }
+            decl = value.outerDecl
+        }
+        return None
+    }
+
+    private func WalkNameReferenceTypeArguments(expr: NameReferenceExpr, pkg: Package): Unit {
+        for (typeArg in expr.typeArguments) {
+            InstantiateReferencedGenericsInNode(typeArg, pkg)
+        }
     }
 
     private func ShouldSkipInstantiationNode(node: Node): Bool {
@@ -455,11 +504,12 @@ public class GenericInstantiationManagerImpl {
     }
 
     private func GenericRefExprInstantiate(refExpr: RefExpr, pkg: Package): Unit {
+        WalkNameReferenceTypeArguments(refExpr, pkg)
         if (let Some(target) <- refExpr.GetTarget()) {
             if (target.astKind == ASTKind.GENERIC_PARAM_DECL || target.astKind == ASTKind.PACKAGE_DECL) {
                 return
             }
-            var targetDecl = target
+            var targetDecl = GetRealTarget(target)
             let instTys = ArrayList<Ty>()
             for (ty in refExpr.instTys) {
                 instTys.add(ty)
@@ -484,16 +534,31 @@ public class GenericInstantiationManagerImpl {
                     }
                 }
             }
+            let contextBaseTy = GetContextBaseTy(targetDecl)
+            if (let Some(baseTy) <- contextBaseTy) {
+                InstantiateParentDeclForMemberTarget(targetDecl, baseTy, pkg)
+            }
             InstantiateGenericDeclWithInstTys(targetDecl, instTys, pkg)
+            if (let Some(baseTy) <- contextBaseTy) {
+                if (targetDecl.IsFunc() && targetDecl.TestAttr(Attribute.GENERIC)) {
+                    let contextTarget = FindInstantiatedTarget(targetDecl, Some(baseTy), instTys,
+                        refExpr.matchedParentTy, pkg)
+                    InstantiateGenericDeclWithInstTys(contextTarget, instTys, pkg)
+                }
+            }
         }
     }
 
     private func GenericMemberAccessInstantiate(memberAccess: MemberAccess, pkg: Package): Unit {
+        WalkNameReferenceTypeArguments(memberAccess, pkg)
+        if (let Some(baseExpr) <- memberAccess.baseExpr) {
+            InstantiateReferencedGenericsInNode(baseExpr, pkg)
+        }
         if (let Some(target) <- memberAccess.GetTarget()) {
             if (target.astKind == ASTKind.PACKAGE_DECL) {
                 return
             }
-            var targetDecl = target
+            var targetDecl = GetRealTarget(target)
             let instTys = ArrayList<Ty>()
             for (ty in memberAccess.instTys) {
                 instTys.add(ty)
@@ -521,7 +586,33 @@ public class GenericInstantiationManagerImpl {
                     }
                 }
             }
+            if (let Some(baseTy) <- GetMemberBaseTy(memberAccess)) {
+                InstantiateParentDeclForMemberTarget(targetDecl, baseTy, pkg)
+            }
             InstantiateGenericDeclWithInstTys(targetDecl, instTys, pkg)
+        }
+    }
+
+    private func GetContextBaseTy(target: Decl): Option<Ty> {
+        if (let Some(contextDecl) <- GetStructDeclByContext()) {
+            if (let Some(targetOuter) <- target.outerDecl) {
+                if (!SameDecl(contextDecl, targetOuter)) {
+                    return GetDeclTy(contextDecl)
+                }
+            }
+        }
+        return None
+    }
+
+    private func InstantiateParentDeclForMemberTarget(target: Decl, baseTy: Ty, pkg: Package): Unit {
+        if (let Some(outer) <- target.outerDecl) {
+            if (outer.IsNominalDecl() && (IsGenericInGenericStruct(target) || outer.TestAttr(Attribute.GENERIC))) {
+                let outerTy = GetDeclTy(outer) ?? baseTy
+                let promotedTys = Promotion(ci.typeManager).Promote(baseTy, outerTy)
+                if (!promotedTys.IsEmpty()) {
+                    InstantiateGenericDeclWithInstTys(outer, copyTypeArgs(Some(promotedTys.values[0])), pkg)
+                }
+            }
         }
     }
 
@@ -548,6 +639,9 @@ public class GenericInstantiationManagerImpl {
     }
 
     private func GenericArrayLitInstantiate(arrayLit: ArrayLit, pkg: Package): Unit {
+        for (child in arrayLit.children) {
+            InstantiateReferencedGenericsInNode(child, pkg)
+        }
         if (let Some(initFunc) <- arrayLit.initFunc) {
             if (let Some(arrayTy) <- arrayLit.GetTy()) {
                 InstantiateGenericDeclWithInstTys(initFunc, copyTypeArgs(Some(arrayTy)), pkg)
@@ -588,6 +682,8 @@ public class GenericInstantiationManagerImpl {
     private func RearrangeReferencesInNode(root: Node, pkg: Package): Unit {
         let walker = Walker(root, visitPre: { node: Node =>
             CheckNodeRearrangement(node, pkg)
+        }, visitPost: { node: Node =>
+            PopStructContext(node)
         })
         let _ = walker.Walk()
     }
@@ -597,6 +693,7 @@ public class GenericInstantiationManagerImpl {
             node.astKind == ASTKind.MODIFIER) {
             return VisitAction.SKIP_CHILDREN
         }
+        PushStructContext(node)
         if (let Some(expr) <- (node as Expr)) {
             if (let Some(desugar) <- expr.desugarExpr) {
                 RearrangeReferencesInNode(desugar, pkg)
@@ -758,9 +855,20 @@ public class GenericInstantiationManagerImpl {
         }
     }
 
+    private func SelectContextOrDeclTy(contextTy: Option<Ty>, decl: Decl): Option<Ty> {
+        if (let Some(value) <- contextTy) {
+            return value
+        }
+        return decl.GetTy()
+    }
+
     private func RearrangeFuncBodyReference(funcBody: FuncBody, pkg: Package): Unit {
+        var contextTy: Option<Ty> = None
+        if (let Some(contextDecl) <- GetStructDeclByContext()) {
+            contextTy = GetDeclTy(contextDecl)
+        }
         if (let Some(parentClassLike) <- funcBody.parentClassLike) {
-            if (let Some(parentTy) <- parentClassLike.GetTy()) {
+            if (let Some(parentTy) <- SelectContextOrDeclTy(contextTy, parentClassLike)) {
                 let target = FindInstantiatedTarget(parentClassLike, Some(parentTy), copyTypeArgs(Some(parentTy)),
                     None, pkg)
                 if (let Some(classLike) <- (target as ClassLikeDecl)) {
@@ -768,7 +876,7 @@ public class GenericInstantiationManagerImpl {
                 }
             }
         } else if (let Some(parentStruct) <- funcBody.parentStruct) {
-            if (let Some(parentTy) <- parentStruct.GetTy()) {
+            if (let Some(parentTy) <- SelectContextOrDeclTy(contextTy, parentStruct)) {
                 let target = FindInstantiatedTarget(parentStruct, Some(parentTy), copyTypeArgs(Some(parentTy)),
                     None, pkg)
                 if (let Some(structDecl) <- (target as StructDecl)) {
@@ -776,7 +884,7 @@ public class GenericInstantiationManagerImpl {
                 }
             }
         } else if (let Some(parentEnum) <- funcBody.parentEnum) {
-            if (let Some(parentTy) <- parentEnum.GetTy()) {
+            if (let Some(parentTy) <- SelectContextOrDeclTy(contextTy, parentEnum)) {
                 let target = FindInstantiatedTarget(parentEnum, Some(parentTy), copyTypeArgs(Some(parentTy)),
                     None, pkg)
                 if (let Some(enumDecl) <- (target as EnumDecl)) {
