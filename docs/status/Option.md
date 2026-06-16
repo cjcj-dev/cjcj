@@ -48,7 +48,66 @@ and aggressive-parallel-compile normalization, and small public helpers such as
 serialization now follows the C++ empty-environment separator behavior and
 `GetArchType` is exposed.
 
+This deepening pass de-isolates Option's path and filesystem layer to the real
+`cangjie_compiler::utils.FileUtil` package, matching the C++ ownership model in
+`Option.cpp`/`OptionAction.cpp`. Option now delegates normalization, extension
+parsing, directory/file existence checks, absolute-path resolution, environment
+path splitting, recursive directory creation, directory scans, file reads,
+relative cache path computation, and `FileMode` read/write/execute permission
+checks through `FileUtil`. The unused local `Position`/`DEFAULT_POSITION` copy
+was removed from Option rather than retained as a compatibility type; `basic`
+already owns the real position model. `--trimpath` intentionally uses
+`FileUtil.Normalize` while other C++ call sites use `NormalizePath`, preserving
+the distinction in the reference implementation.
+
+This pass removes the remaining local ASCII-only conditional-compilation
+identifier checker and uses `utils.FileUtil.IsIdentifier`, so raw identifiers,
+keywords, and Unicode identifier rules come from the same shared implementation
+as the C++ `Utils::IsIdentifier` path. `cfg.toml` loading now mirrors the C++
+line discipline: empty lines and full-line comments are skipped by the file
+reader, while malformed/blank content passed to the key-value parser is rejected.
+Target-triple parsing now accepts the reference `unknown` arch/OS spellings,
+empty environment fields, `arm64` as `aarch64`, `mingw32` as GNU, and Android
+API suffixes with the same non-fatal diagnostic behavior as the C++ parser.
+
+This continuation tightens cache-affecting serialization to the C++ contract.
+`SelectedCHIROptsToSerializedString` now uses the shared `utils.Out64`
+formatter instead of a local bit-string encoding, sanitizer coverage
+serialization preserves the reference `traceMemCmp` spelling, and
+`GlobalOptions.ToSerialized` now emits the same 39 fields as `Option.cpp`
+rather than appending extra self-host-only state. Pre-action parsing also now
+matches the C++ two-phase flow more closely: `--help`/`--version` mark normal
+parsing to be skipped after all first-pass arguments have been scanned, instead
+of returning immediately and ignoring later pre-actions.
+
+This pass restores more of the C++ `OptionTable`/`Options.inc` behavior. Help
+formatting now follows the reference `Usage`/`PrintInfo` layout, including the
+28-column command width, continuous-option value spelling, per-value help rows,
+experimental labels, backend filtering, and the C++ rule that experimental
+options themselves are still listed in normal help. Joined and continuous
+options now warn on empty values except for `--lto-keep-pkg-visibility=""`.
+The predefined option values in `Options.cj` now carry the C++ help text,
+backend tags, and stability tags instead of a flat local stable list, and
+`GlobalOptions` rejects experimental option values without `--experimental`.
+Input and post-action behavior also moved closer to the reference: `.cjo`
+inputs are no longer rejected solely because package mode is enabled, sanitizer
+post-checks validate the target sanitizer runtime library under
+`cangjieHome/runtime/lib/<target>/<sanitizer>`, and `--jobs`/`--apc` parsing now
+matches the C++ digit, maximum-length, empty-value, and zero-normalization
+rules.
+
+This continuation closes that jobs gap for Linux hosts: Option now obtains
+hardware concurrency through a small C FFI binding to `get_nprocs`, uses it for
+the default `jobs` value, and clamps explicit `--jobs`/`--apc` values to the
+host thread count like the C++ `std::thread::hardware_concurrency` flow. Normal
+and pre-action option processing now both run deprecated-option checks and
+duplicate occurrence tracking, and duplicate warnings include aliases in the
+C++ spelling. Conditional-compilation setup also reports ignored cfg paths when
+key/value cfgs are already present and warns for missing explicit `cfg.toml`
+files before continuing to later paths.
+
 Remaining fidelity gaps are not hidden behind self-host markers: this package
-still uses local diagnostics instead of Basic diagnostic IDs, and some file-mode
-permission checks are represented by the currently available Cangjie filesystem
-predicates rather than the exact C++ `FileUtil::Access` surface.
+still uses local diagnostics instead of Basic diagnostic IDs. Importing Basic
+directly is currently blocked by the existing `basic -> option` dependency for
+`WarningOptionMgr`, so diagnostic de-isolation needs a dependency-shape change
+outside this package before it can faithfully use `DiagnosticEngine`.

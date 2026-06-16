@@ -1,32 +1,130 @@
 package cangjie_compiler::option
 
-import std.collection.*
-
 private let EMPTY_VALUES: Array<OptionValue> = Array<OptionValue>()
 
-private func oneOf(values: Array<String>): Array<OptionValue> {
-    let ret = ArrayList<OptionValue>()
-    for (value in values) {
-        ret.add(OptionValue(value, "", [Backend.ALL], [Group.GLOBAL, Group.STABLE, Group.VISIBLE]))
-    }
-    return ret.toArray()
+private func value(
+    name: String,
+    help: String,
+    backends: Array<Backend>,
+    groups: Array<Group>
+): OptionValue {
+    return OptionValue(name, help, backends, groups)
 }
 
 private func optionValues(name: String): Array<OptionValue> {
-    if (name == "backend_value") { return oneOf(["llvm"]) }
-    if (name == "warn_group") { return oneOf(["all", "unused", "unused-main", "driver-arg", "deprecated", "unsupport-compile-source", "package-import", "parser", "semantics", "interpreter", "apilevel-check"]) }
-    if (name == "diagnostic_value") { return oneOf(["json", "noColor", "default"]) }
-    if (name == "emit_chir_phase") { return oneOf(["raw", "opt"]) }
-    if (name == "chir_mode") { return oneOf(["standard", "withID", "all"]) }
-    if (name == "simple_on_off_mode") { return oneOf(["on", "off"]) }
-    if (name == "integer_overflow_mode") { return oneOf(["throwing", "wrapping", "saturating"]) }
-    if (name == "sanitizer_type") { return oneOf(["address", "thread", "hwaddress"]) }
-    if (name == "stack_trace_format") { return oneOf(["default", "simple", "all"]) }
-    if (name == "output_type_list") { return oneOf(["exe", "staticlib", "dylib", "chir", "obj", "hotreload"]) }
-    if (name == "compile_target_list") { return oneOf(["exe", "staticlib", "dylib"]) }
-    if (name == "lto_mode") { return oneOf(["full", "thin"]) }
-    if (name == "bchir_print_mode") { return oneOf(["deserialized", "linked", "chir2bchir", "interpreter", "ce-linked", "ce-chir2bchir", "all"]) }
-    if (name == "mock_mode") { return oneOf(["on", "off", "runtime-error"]) }
+    if (name == "backend_value") {
+        return [
+            value("llvm", "compile with cjnative backend (default)", [Backend.ALL], [Group.STABLE])
+        ]
+    }
+    if (name == "warn_group") {
+        return [
+            value("all", "", [Backend.ALL], [Group.GLOBAL, Group.STABLE, Group.VISIBLE]),
+            value("unused", "", [Backend.ALL], [Group.GLOBAL, Group.STABLE, Group.VISIBLE]),
+            value("unused-main", "", [Backend.ALL], [Group.GLOBAL, Group.STABLE, Group.VISIBLE]),
+            value("driver-arg", "", [Backend.ALL], [Group.GLOBAL, Group.STABLE, Group.VISIBLE]),
+            value("deprecated", "", [Backend.ALL], [Group.GLOBAL, Group.STABLE, Group.VISIBLE]),
+            value("unsupport-compile-source", "", [Backend.ALL], [Group.GLOBAL, Group.STABLE, Group.VISIBLE]),
+            value("package-import", "", [Backend.ALL], [Group.GLOBAL, Group.STABLE, Group.VISIBLE]),
+            value("parser", "", [Backend.ALL], [Group.GLOBAL, Group.STABLE, Group.VISIBLE]),
+            value("semantics", "", [Backend.ALL], [Group.GLOBAL, Group.STABLE, Group.VISIBLE]),
+            value("interpreter", "", [Backend.ALL], [Group.GLOBAL, Group.STABLE, Group.VISIBLE]),
+            value("apilevel-check", "", [Backend.ALL], [Group.GLOBAL, Group.STABLE, Group.VISIBLE])
+        ]
+    }
+    if (name == "diagnostic_value") {
+        return [
+            value("json", "", [Backend.ALL], [Group.STABLE, Group.VISIBLE]),
+            value("noColor", "", [Backend.ALL], [Group.STABLE, Group.VISIBLE]),
+            value("default", "", [Backend.ALL], [Group.STABLE, Group.VISIBLE])
+        ]
+    }
+    if (name == "emit_chir_phase") {
+        return [
+            value("raw", "emit CHIR before compiler optimization", [Backend.ALL], [Group.STABLE, Group.VISIBLE]),
+            value("opt", "emit CHIR after compiler optimization (default)", [Backend.ALL], [Group.STABLE, Group.VISIBLE])
+        ]
+    }
+    if (name == "chir_mode") {
+        return [
+            value("standard", "", [Backend.ALL], [Group.STABLE, Group.VISIBLE]),
+            value("withID", "", [Backend.ALL], [Group.STABLE, Group.VISIBLE]),
+            value("all", "", [Backend.ALL], [Group.STABLE, Group.VISIBLE])
+        ]
+    }
+    if (name == "simple_on_off_mode") {
+        return [
+            value("on", "", [Backend.ALL], [Group.STABLE, Group.VISIBLE]),
+            value("off", "", [Backend.ALL], [Group.STABLE, Group.VISIBLE])
+        ]
+    }
+    if (name == "integer_overflow_mode") {
+        return [
+            value("throwing", "", [Backend.ALL], [Group.STABLE, Group.VISIBLE]),
+            value("wrapping", "", [Backend.ALL], [Group.STABLE, Group.VISIBLE]),
+            value("saturating", "", [Backend.ALL], [Group.STABLE, Group.VISIBLE])
+        ]
+    }
+    if (name == "sanitizer_type") {
+        return [
+            value("address", "enable address sanitizer", [Backend.CJNATIVE], [Group.STABLE, Group.VISIBLE]),
+            value("thread", "enable thread sanitizer", [Backend.CJNATIVE], [Group.STABLE, Group.VISIBLE]),
+            value(
+                "hwaddress",
+                "enable hardware-assisted address sanitizer",
+                [Backend.CJNATIVE],
+                [Group.STABLE, Group.VISIBLE]
+            )
+        ]
+    }
+    if (name == "stack_trace_format") {
+        return [
+            value("default", "", [Backend.CJNATIVE], [Group.STABLE, Group.VISIBLE]),
+            value("simple", "", [Backend.CJNATIVE], [Group.STABLE, Group.VISIBLE]),
+            value("all", "", [Backend.CJNATIVE], [Group.STABLE, Group.VISIBLE])
+        ]
+    }
+    if (name == "output_type_list") {
+        return [
+            value("exe", "emit executable (default)", [Backend.CJNATIVE], [Group.STABLE, Group.VISIBLE]),
+            value("staticlib", "emit static library", [Backend.CJNATIVE], [Group.STABLE, Group.VISIBLE]),
+            value("dylib", "emit dynamic library", [Backend.CJNATIVE], [Group.STABLE, Group.VISIBLE]),
+            value("chir", "emit partially compiled package", [Backend.CJNATIVE], [Group.VISIBLE]),
+            value("obj", "emit obj", [Backend.CJNATIVE], [Group.VISIBLE]),
+            value("hotreload", "emit dynamic library with hot reload supports", [Backend.CJNATIVE], [Group.VISIBLE])
+        ]
+    }
+    if (name == "compile_target_list") {
+        return [
+            value("exe", "compile executable (default)", [Backend.CJNATIVE], [Group.VISIBLE]),
+            value("staticlib", "compile static library", [Backend.CJNATIVE], [Group.VISIBLE]),
+            value("dylib", "compile dynamic library", [Backend.CJNATIVE], [Group.VISIBLE])
+        ]
+    }
+    if (name == "lto_mode") {
+        return [
+            value("full", "", [Backend.CJNATIVE], [Group.STABLE, Group.VISIBLE]),
+            value("thin", "", [Backend.CJNATIVE], [Group.STABLE, Group.VISIBLE])
+        ]
+    }
+    if (name == "bchir_print_mode") {
+        return [
+            value("deserialized", "after deserialisation", [Backend.CJNATIVE], [Group.STABLE]),
+            value("linked", "after linkage", [Backend.CJNATIVE], [Group.STABLE]),
+            value("chir2bchir", "after chir2bchir", [Backend.CJNATIVE], [Group.STABLE]),
+            value("interpreter", "interpretation trace", [Backend.CJNATIVE], [Group.STABLE]),
+            value("ce-linked", "const eval after linkage", [Backend.CJNATIVE], [Group.STABLE]),
+            value("ce-chir2bchir", "const eval after chir2bchir", [Backend.CJNATIVE], [Group.STABLE]),
+            value("all", "all of the above", [Backend.CJNATIVE], [Group.STABLE])
+        ]
+    }
+    if (name == "mock_mode") {
+        return [
+            value("on", "", [Backend.ALL], [Group.STABLE, Group.VISIBLE]),
+            value("off", "", [Backend.ALL], [Group.STABLE, Group.VISIBLE]),
+            value("runtime-error", "", [Backend.ALL], [Group.STABLE, Group.VISIBLE])
+        ]
+    }
     return EMPTY_VALUES
 }
 

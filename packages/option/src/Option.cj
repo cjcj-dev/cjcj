@@ -1,5 +1,7 @@
 package cangjie_compiler::option
 
+import cangjie_compiler::utils.FileMode as UtilsFileMode
+import cangjie_compiler::utils.Out64
 import std.collection.*
 
 public class Path {
@@ -51,7 +53,7 @@ public class SanitizerCoverageOptions {
         else if (coverageType == SanitizerCoverageType.SCK_FUNCTION) { result += "F" }
         else if (coverageType == SanitizerCoverageType.SCK_BB) { result += "BB" }
         result += ",traceCmp:" + BoolToSerializedString(traceCmp)
-        result += ",traceMemCmp:" + BoolToSerializedString(traceMemCmp)
+        result += ",traceMemCmp" + BoolToSerializedString(traceMemCmp)
         result += ",tracePCGuard:" + BoolToSerializedString(tracePCGuard)
         result += ",inline8bitCounters:" + BoolToSerializedString(inline8bitCounters)
         result += ",inlineBoolFlag:" + BoolToSerializedString(inlineBoolFlag)
@@ -177,6 +179,20 @@ private func joinSortedStrings(values: ArrayList<String>): String {
 }
 
 private func containsString(values: ArrayList<String>, target: String): Bool {
+    for (value in values) {
+        if (value == target) { return true }
+    }
+    return false
+}
+
+private func optionValueBelongsBackend(values: Array<Backend>, target: Backend): Bool {
+    for (value in values) {
+        if (value == Backend.ALL || value == target) { return true }
+    }
+    return false
+}
+
+private func optionValueBelongsGroup(values: Array<Group>, target: Group): Bool {
     for (value in values) {
         if (value == target) { return true }
     }
@@ -347,6 +363,7 @@ public open class GlobalOptions <: Option {
         this.argList = argList
         let delayed = ArrayList<OptionArgInstance>()
         var rawArgIndex: UInt64 = 0u64
+        var skipParsing = false
         for (entry in argList.entries) {
             CollectOrderedInputFiles(entry, rawArgIndex)
             rawArgIndex++
@@ -357,18 +374,25 @@ public open class GlobalOptions <: Option {
                 let pre = ParsePreAction(this, opt)
                 if (pre.handled) {
                     OccurrenceCheck(opt, argList)
-                    if (pre.skipParsing) { return pre.success }
+                    DeprecatedOptionCheck(opt)
                     if (!pre.success) { return false }
+                    skipParsing = skipParsing || pre.skipParsing
                 } else {
                     delayed.add(opt)
                 }
             }
         }
+        if (skipParsing) { return true }
         for (opt in delayed) {
             if (!experimentalMode && !opt.info.BelongsGroup(Group.STABLE)) {
                 Errorln(opt.str + " is an experimental feature. \"--experimental\" option is required.")
                 return false
             }
+            if (!experimentalMode && OptionValueRequiresExperimental(opt)) {
+                Errorln(opt.str + " is an experimental feature. \"--experimental\" option is required.")
+                return false
+            }
+            DeprecatedOptionCheck(opt)
             let optionResult = ParseOption(opt)
             if (!optionResult.hasValue || !optionResult.value) { return false }
             OccurrenceCheck(opt, argList)
@@ -380,6 +404,23 @@ public open class GlobalOptions <: Option {
         let result = ParseAction(this, arg)
         if (!result.handled) { return MaybeBool() }
         return MaybeBool(result.success)
+    }
+
+    private func OptionValueRequiresExperimental(arg: OptionArgInstance): Bool {
+        for (optionValue in arg.info.values) {
+            if (optionValue.value == arg.value &&
+                optionValueBelongsBackend(optionValue.backends, GetOptionsBackend())) {
+                return !optionValueBelongsGroup(optionValue.groups, Group.STABLE)
+            }
+        }
+        return false
+    }
+
+    private func DeprecatedOptionCheck(arg: OptionArgInstance): Unit {
+        let id = arg.info.GetID()
+        if (id == ID.STATIC_LIBS || id == ID.DY_LIBS || id == ID.COMPILE_AS_EXE) {
+            Warningln("option '" + arg.str + "' is deprecated and will be removed in the future")
+        }
     }
 
     private func CollectOrderedInputFiles(entry: ArgListEntry, index: UInt64): Unit {
@@ -411,7 +452,9 @@ public open class GlobalOptions <: Option {
     private func OccurrenceCheck(arg: OptionArgInstance, argList: ArgList): Unit {
         if (argList.IsSpecified(arg.info.GetID()) &&
             arg.info.GetOccurrenceType() == Occurrence.SINGLE_OCCURRENCE && !argList.IsWarned(arg.info.GetID())) {
-            Warningln("'" + arg.info.GetName() + "' is specified multiple times. The last one is chosen.")
+            var name = arg.info.GetName()
+            if (!arg.info.GetAlias().isEmpty()) { name += "' or '" + arg.info.GetAlias() }
+            Warningln("'" + name + "' is specified multiple times. The last one is chosen.")
             argList.MarkWarned(arg.info.GetID())
         }
         argList.MarkSpecified(arg)
@@ -570,10 +613,8 @@ public open class GlobalOptions <: Option {
         if (compilationCachedPath.isEmpty()) { return GetFileName(filePath) }
         let absFilePath = GetAbsPath(filePath)
         if (!absFilePath.hasValue) { return GetFileName(filePath) }
-        var base = NormalizePath(compilationCachedPath)
-        if (!base.isEmpty() && base[base.size - 1] != b'/') { base += "/" }
-        let normalized = NormalizePath(absFilePath.value)
-        if (StartsWith(normalized, base)) { return normalized[base.size..] }
+        let relativePath = GetRelativePath(JoinPath(compilationCachedPath, ""), absFilePath.value)
+        if (relativePath.hasValue) { return relativePath.value }
         return GetFileName(filePath)
     }
 
@@ -621,22 +662,31 @@ public open class GlobalOptions <: Option {
     }
 
     public func CheckDirectoryPath(path: String): MaybeString {
-        if (FileExist(path) && IsDir(path)) { return GetAbsPath(path) }
-        return MaybeString()
+        if (!FileExist(path) || !IsDir(path)) { return MaybeString() }
+        return GetAbsPath(path)
     }
 
-    public func ValidateDirectoryPath(path: String): MaybeString {
-        if (FileExist(path) && IsDir(path)) { return GetAbsPath(path) }
-        return MaybeString()
+    public func ValidateDirectoryPath(path: String, mode!: UtilsFileMode = UtilsFileMode.FM_EXIST): MaybeString {
+        let accessResult = AccessFileWithResult(path, mode)
+        if (!IsAccessOK(accessResult)) { return MaybeString() }
+        if (!IsDir(path)) { return MaybeString() }
+        if (mode == UtilsFileMode.FM_WRITE) {
+            let execResult = AccessFileWithResult(path, UtilsFileMode.FM_EXE)
+            if (!IsAccessOK(execResult)) { return MaybeString() }
+        }
+        return GetAbsPath(path)
     }
 
     public func CheckInputFilePath(path: String): MaybeString {
-        if (FileExist(path) && !IsDir(path)) { return GetAbsPath(path) }
+        if (FileExist(path) && CanAccessFile(path, UtilsFileMode.FM_READ) && !IsDir(path)) { return GetAbsPath(path) }
         return MaybeString()
     }
 
     public static func ValidateInputFilePath(path: String): MaybeString {
-        if (!IsPathAboveLengthLimit(path) && FileExist(path) && !IsDir(path)) { return GetAbsPath(path) }
+        if (!IsPathAboveLengthLimit(path) && FileExist(path) && CanAccessFile(path, UtilsFileMode.FM_READ) &&
+            !IsDir(path)) {
+            return GetAbsPath(path)
+        }
         return MaybeString()
     }
 
@@ -681,7 +731,7 @@ public open class GlobalOptions <: Option {
                 bcInputFiles.add(bcPath.value)
                 ReplaceInputFileName(input, bcPath.value)
             } else if (ext == "cjo") {
-                if (compilePackage || !inputCjoFile.isEmpty()) { return false }
+                if (!inputCjoFile.isEmpty()) { return false }
                 let cjoPath = ValidateInputFilePath(input)
                 if (!cjoPath.hasValue) { return false }
                 inputCjoFile = input
@@ -733,7 +783,7 @@ public open class GlobalOptions <: Option {
         if (outputDir.hasValue) {
             if (IsAbsolutePath(output)) { return false }
             output = JoinPath(outputDir.value, output)
-            let outputDirAbs = CheckDirectoryPath(outputDir.value)
+            let outputDirAbs = ValidateDirectoryPath(outputDir.value, mode: UtilsFileMode.FM_WRITE)
             if (!outputDirAbs.hasValue) { return false }
             outputDir = MaybeString(outputDirAbs.value)
         }
@@ -741,7 +791,7 @@ public open class GlobalOptions <: Option {
         let outputIsDir = IsDir(output)
         let dirPath = GetDirPath(output)
         let saveDir = if (outputIsDir) { output } else if (dirPath.isEmpty()) { "/" } else { dirPath }
-        let saveDirAbs = CheckDirectoryPath(saveDir)
+        let saveDirAbs = ValidateDirectoryPath(saveDir, mode: UtilsFileMode.FM_WRITE)
         if (!saveDirAbs.hasValue) { return false }
         output = if (outputIsDir) { saveDirAbs.value } else { JoinPath(saveDirAbs.value, GetFileName(output)) }
         if (!CheckOutputPathLength()) { return false }
@@ -795,6 +845,11 @@ public open class GlobalOptions <: Option {
             }
         }
         if (EnableSanitizer()) {
+            let runtimeDirPath = JoinPath(cangjieHome, "runtime")
+            let libraryDirPath = JoinPath(JoinPath(runtimeDirPath, "lib"), GetCangjieLibTargetPathName())
+            let sanitizerPath = JoinPath(libraryDirPath, SanitizerTypeToShortString())
+            let runtimePath = JoinPath(sanitizerPath, "libcangjie-runtime" + GetSharedLibraryExtension(target.os))
+            if (!FileExist(runtimePath)) { return false }
             if (IsLTOEnabled() || discardEhFrame || compileMacroPackage) { return false }
             if ((EnableAsan() || EnableHwAsan()) && target.GetOSFamily() != OSType.LINUX) { return false }
             if (EnableHwAsan() && target.arch != ArchType.X86_64 && target.arch != ArchType.AARCH64) { return false }
@@ -842,7 +897,7 @@ public open class GlobalOptions <: Option {
             return false
         }
         if (!compilePackage && srcFiles.isEmpty() && !inputObjs.isEmpty() && !experimentalMode) { return false }
-        if (!jobs.hasValue) { jobs = MaybeUInt64(1u64) }
+        if (!jobs.hasValue) { jobs = MaybeUInt64(GetHardwareConcurrency()) }
         if (target.os == OSType.WINDOWS || target.os == OSType.DARWIN || target.os == OSType.IOS ||
             IsObfuscationEnabled() || IsLTOEnabled() || enableCoverage) {
             aggressiveParallelCompile = MaybeUInt64(1u64)
@@ -929,17 +984,12 @@ public open class GlobalOptions <: Option {
     }
 
     public func SelectedCHIROptsToSerializedString(): String {
-        var result = ""
-        var idx: Int64 = 0
-        while (idx <= OptimizationFlagIndex(OptimizationFlag.REDUNDANT_LOAD)) {
-            var selected = false
-            for (flag in selectedCHIROpts) {
-                if (OptimizationFlagIndex(flag) == idx) { selected = true }
-            }
-            result += if (selected) { "1" } else { "0" }
-            idx++
+        let printer = Out64(v: 0u64, start: false, finish: false)
+        for (flag in selectedCHIROpts) {
+            let bit = 1u64 << OptimizationFlagIndex(flag)
+            let _ = printer.append(bit)
         }
-        return result
+        return printer.toString()
     }
 
     public func OverflowStrategyToSerializedString(): String {
@@ -1016,18 +1066,9 @@ public open class GlobalOptions <: Option {
             joinStrings(interpLoadLib, ":"),
             joinStrings(interpreterArgs, "\\"),
             BoolToSerializedString(interpreterPrintResult),
-            BoolToSerializedString(interpFullBchir),
             BoolToSerializedString(interpMainNoLinkage),
-            BoolToSerializedString(interpCHIR),
-            BoolToSerializedString(constEvalDebug),
             BoolToSerializedString(disableCodeGen),
-            BoolToSerializedString(disableReflection),
-            BoolToSerializedString(enableEH),
-            BoolToSerializedString(compileCjd),
-            BoolToSerializedString(enableParallelMacro),
-            BoolToSerializedString(enableCoverage),
-            targetCPU,
-            sysroot,
+            BoolToSerializedString(disableDeserializer),
         ]
     }
 }
