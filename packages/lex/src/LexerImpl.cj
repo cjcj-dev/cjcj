@@ -1,6 +1,15 @@
 package cangjie_compiler::lex
 
 import cangjie_compiler::basic.*
+import cangjie_compiler::utils.IsAlnum as UtilsIsAlnum
+import cangjie_compiler::utils.IsASCIIIdContinue as UtilsIsASCIIIdContinue
+import cangjie_compiler::utils.IsASCIIIdStart as UtilsIsASCIIIdStart
+import cangjie_compiler::utils.IsCJXIDStart as UtilsIsCJXIDStart
+import cangjie_compiler::utils.IsDigit as UtilsIsDigit
+import cangjie_compiler::utils.IsXDigit as UtilsIsXDigit
+import cangjie_compiler::utils.IsXIDContinue as UtilsIsXIDContinue
+import cangjie_compiler::utils.NFC as UtilsNFC
+import cangjie_compiler::utils.CJC_ASSERT
 import std.collection.*
 
 public let BYTE_X_FLAG: UInt8 = 0x80u8
@@ -110,20 +119,15 @@ private func byteString(value: UInt8): String {
 }
 
 private func isDigit(value: Int64): Bool {
-    return value >= Int64(b'0') && value <= Int64(b'9')
+    return UtilsIsDigit(value)
 }
 
 private func isHexDigit(value: Int64): Bool {
-    return isDigit(value) || (value >= Int64(b'a') && value <= Int64(b'f')) ||
-        (value >= Int64(b'A') && value <= Int64(b'F'))
-}
-
-private func isAlpha(value: Int64): Bool {
-    return (value >= Int64(b'a') && value <= Int64(b'z')) || (value >= Int64(b'A') && value <= Int64(b'Z'))
+    return UtilsIsXDigit(value)
 }
 
 private func isAlnum(value: Int64): Bool {
-    return isAlpha(value) || isDigit(value)
+    return UtilsIsAlnum(value)
 }
 
 private func lowerByte(value: UInt8): UInt8 {
@@ -134,11 +138,35 @@ private func lowerByte(value: UInt8): UInt8 {
 }
 
 private func isAsciiIdentifierStart(value: Int64): Bool {
-    return isAlpha(value) || value == Int64(b'_')
+    if (value < 0 || value > 127) {
+        return false
+    }
+    return UtilsIsASCIIIdStart(UInt32(value))
 }
 
 private func isAsciiIdentifierContinue(value: Int64): Bool {
-    return isAsciiIdentifierStart(value) || isDigit(value)
+    if (value < 0 || value > 127) {
+        return false
+    }
+    return UtilsIsASCIIIdContinue(UInt32(value))
+}
+
+private func isCJXIDStart(value: Int64): Bool {
+    if (value < 0 || value > 0x10ffff) {
+        return false
+    }
+    return UtilsIsCJXIDStart(UInt32(value))
+}
+
+private func isXIDContinue(value: Int64): Bool {
+    if (value < 0 || value > 0x10ffff) {
+        return false
+    }
+    return UtilsIsXIDContinue(UInt32(value))
+}
+
+private func NormalizeIdentifierNFC(value: String): String {
+    return UtilsNFC(value)
 }
 
 private func isLegalEscape(value: Int64): Bool {
@@ -184,7 +212,7 @@ public class LexerImpl {
     private var enableCollectTokenStream: Bool = false
     private let collectTokensFindCache: HashSet<Position> = HashSet<Position>()
     private let collectTokens: ArrayList<Token> = ArrayList<Token>()
-    private let tokenStream: HashSet<Token> = HashSet<Token>()
+    private let tokenStream: TreeSet<Token> = TreeSet<Token>()
     private let stringPartsMap: HashMap<Token, ArrayList<StringPart>> = HashMap<Token, ArrayList<StringPart>>()
     private let comments: ArrayList<Token> = ArrayList<Token>()
     private var success: Bool = true
@@ -327,7 +355,7 @@ public class LexerImpl {
         return ret
     }
 
-    public func GetTokenStream(): HashSet<Token> {
+    public func GetTokenStream(): TreeSet<Token> {
         return tokenStream
     }
 
@@ -336,9 +364,8 @@ public class LexerImpl {
     }
 
     public func ExitQuoteMod(): Unit {
-        if (!ctx.isEmpty() && ctx[ctx.size - 1] == LexerContext.QUOTE) {
-            ctx.remove(at: ctx.size - 1)
-        }
+        CJC_ASSERT(!ctx.isEmpty() && ctx[ctx.size - 1] == LexerContext.QUOTE)
+        ctx.remove(at: ctx.size - 1)
     }
 
     public func EnterNormalMod(): Unit {
@@ -346,9 +373,8 @@ public class LexerImpl {
     }
 
     public func ExitNormalMod(): Unit {
-        if (!ctx.isEmpty() && ctx[ctx.size - 1] == LexerContext.NORMAL) {
-            ctx.remove(at: ctx.size - 1)
-        }
+        CJC_ASSERT(!ctx.isEmpty() && ctx[ctx.size - 1] == LexerContext.NORMAL)
+        ctx.remove(at: ctx.size - 1)
     }
 
     public func SetResetPoint(): Unit {
@@ -393,22 +419,25 @@ public class LexerImpl {
     }
 
     public func GetStrParts(t: Token): ArrayList<StringPart> {
+        CJC_ASSERT(t.kind == TokenKind.STRING_LITERAL || t.kind == TokenKind.MULTILINE_STRING)
         if (let Some(parts) <- stringPartsMap.get(t)) {
             return parts
         }
-        let syntheticInput = if (t.kind == TokenKind.MULTILINE_STRING) {
-            "\"\"\"\n" + ProcessQuotaMarks(t.Value()) + "\"\"\""
-        } else {
-            "\"" + ProcessQuotaMarks(t.Value(), processSingle: true) + "\""
+        if (!enableScan) {
+            let syntheticInput = if (t.kind == TokenKind.MULTILINE_STRING) {
+                "\"\"\"\n" + ProcessQuotaMarks(t.Value()) + "\"\"\""
+            } else {
+                "\"" + ProcessQuotaMarks(t.Value(), processSingle: true) + "\""
+            }
+            let tempLexer = LexerImpl(syntheticInput, diag, source, LexerConfig(posBase: t.Begin()))
+            tempLexer.Scan()
+            stringPartsMap.add(t, tempLexer.TakeFirstStringParts())
         }
-        let tempLexer = LexerImpl(syntheticInput, diag, source, LexerConfig(posBase: t.Begin()))
-        tempLexer.Scan()
-        let rebuilt = tempLexer.TakeFirstStringParts()
-        if (rebuilt.isEmpty()) {
-            rebuilt.add(StringPart(StringPartKind.STR, t.Value(), t.Begin(), t.End()))
+        if (let Some(parts) <- stringPartsMap.get(t)) {
+            return parts
         }
-        stringPartsMap.add(t, rebuilt)
-        return rebuilt
+        CJC_ASSERT(false)
+        return ArrayList<StringPart>()
     }
 
     private func TakeFirstStringParts(): ArrayList<StringPart> {
@@ -463,7 +492,8 @@ public class LexerImpl {
     }
 
     private func IsQuoteContext(): Bool {
-        return !ctx.isEmpty() && ctx[ctx.size - 1] == LexerContext.QUOTE
+        CJC_ASSERT(!ctx.isEmpty())
+        return ctx[ctx.size - 1] == LexerContext.QUOTE
     }
 
     private func ReserveToken(num: Int64, skipNewline: Bool, skipComments: Bool): Unit {
@@ -958,13 +988,7 @@ public class LexerImpl {
         if (IsCurrentCharLineTerminator()) {
             return "new line character"
         }
-        if (currentChar < 0) {
-            return "end of file"
-        }
-        if (currentChar <= 127) {
-            return byteString(UInt8(currentChar))
-        }
-        return Char32ToUTF8(UInt32(currentChar))
+        return ConvertChar(currentChar)
     }
 
     private func PrefixName(prefix: UInt8): String {
@@ -1176,7 +1200,6 @@ public class LexerImpl {
                 diag, DiagKindRefactor.lex_illegal_uni_character_literal,
                 MakeRange(GetPos(escapeStart), GetPos(pNext)), TrimmedHex(hexVal)
             )
-            success = false
         }
     }
 
@@ -1850,6 +1873,7 @@ public class LexerImpl {
     }
 
     private func ScanInterpolationStringLiteralHoleBalancedTextString(): Bool {
+        CJC_ASSERT(currentChar == Int64(b'\'') || currentChar == Int64(b'"'))
         if (getNextChar(0) == UInt8(currentChar) && getNextChar(1) == UInt8(currentChar)) {
             return ScanMultiLineString(pCurrent, needStringParts: false)[1]
         }
@@ -2167,6 +2191,7 @@ public class LexerImpl {
 
     private func ScanSingleOrMultiLineString(pStart: Int64): Token {
         success = true
+        CJC_ASSERT(currentChar == Int64(b'\'') || currentChar == Int64(b'"'))
         if (getNextChar(0) == UInt8(currentChar) && getNextChar(1) == UInt8(currentChar)) {
             return ScanMultiLineString(pStart)[0]
         }
@@ -2345,7 +2370,6 @@ public class LexerImpl {
                 let tok = ScanIdentifierOrKeyword(Token(TokenKind.IDENTIFIER), pStart + 1)
                 if (tok.kind != TokenKind.IDENTIFIER) {
                     DiagUnexpectedDollarIdentifier(tok)
-                    success = false
                 }
                 return Token(TokenKind.DOLLAR_IDENTIFIER, "$" + tok.Value(), pos, GetPos(pNext))
             }

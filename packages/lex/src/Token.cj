@@ -1,9 +1,10 @@
 package cangjie_compiler::lex
 
 import cangjie_compiler::basic.*
+import cangjie_compiler::utils.CJC_ASSERT
 import std.collection.*
 
-public struct Token <: Hashable & Equatable<Token> {
+public struct Token <: Comparable<Token> & Hashable & Equatable<Token> {
     public var kind: TokenKind = TokenKind.ILLEGAL
     public var delimiterNum: UInt32 = 1u32
     public var isSingleQuote: Bool = false
@@ -52,6 +53,8 @@ public struct Token <: Hashable & Equatable<Token> {
     }
 
     public func Length(): Int64 {
+        CJC_ASSERT(begin.fileID == end.fileID)
+        CJC_ASSERT(begin.line == end.line)
         return end.column - begin.column
     }
 
@@ -66,6 +69,16 @@ public struct Token <: Hashable & Equatable<Token> {
 
     public operator func <(right: Token): Bool {
         return Begin() < right.Begin()
+    }
+
+    public func compare(right: Token): Ordering {
+        if (Begin() < right.Begin()) {
+            return Ordering.LT
+        }
+        if (right.Begin() < Begin()) {
+            return Ordering.GT
+        }
+        return Ordering.EQ
     }
 
     public operator func ==(right: Token): Bool {

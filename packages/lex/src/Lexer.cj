@@ -50,7 +50,7 @@ public class Lexer {
         return impl.GetComments().toArray()
     }
 
-    public func GetTokenStream(): HashSet<Token> {
+    public func GetTokenStream(): TreeSet<Token> {
         return impl.GetTokenStream()
     }
 
@@ -123,13 +123,12 @@ public func ProcessQuotaMarks(value: String, processSingle!: Bool = false): Stri
     var inDollar = false
     var leftCurl: Int64 = 0
     var quoteNum: Int64 = 0
-    let builder = StringBuilder()
+    let out = ArrayList<Byte>()
     let bytes = value.toArray()
     var index: Int64 = 0
     while (index < bytes.size) {
         let ch = bytes[index]
-        let existing = builder.toString()
-        if (!existing.isEmpty() && existing[existing.size - 1] == b'$' && ch == b'{') {
+        if (!out.isEmpty() && out[out.size - 1] == b'$' && ch == b'{') {
             inDollar = true
         }
         if (inDollar && ch == b'{') {
@@ -144,29 +143,35 @@ public func ProcessQuotaMarks(value: String, processSingle!: Bool = false): Stri
             }
         }
         if (inDollar) {
-            builder.append(String.fromUtf8([ch]))
+            out.add(ch)
             index++
             continue
         }
-        if (ch == b'"' && (existing.isEmpty() || existing[existing.size - 1] != b'\\')) {
+        if (ch == b'"' && (out.isEmpty() || out[out.size - 1] != b'\\')) {
             quoteNum++
             if (quoteNum == 3) {
                 quoteNum = 0
-                builder.append("\\\"\\\"\\\"")
+                appendBytes(out, "\\\"\\\"\\\"")
             }
             index++
             continue
         }
         while (quoteNum > 0) {
-            builder.append(if (processSingle) { "\\\"" } else { "\"" })
+            appendBytes(out, if (processSingle) { "\\\"" } else { "\"" })
             quoteNum--
         }
-        builder.append(String.fromUtf8([ch]))
+        out.add(ch)
         index++
     }
     while (quoteNum > 0) {
-        builder.append(if (processSingle) { "\\\"" } else { "\"" })
+        appendBytes(out, if (processSingle) { "\\\"" } else { "\"" })
         quoteNum--
     }
-    return builder.toString()
+    return String.fromUtf8(out.toArray())
+}
+
+private func appendBytes(out: ArrayList<Byte>, value: String): Unit {
+    for (byte in value.toArray()) {
+        out.add(byte)
+    }
 }
