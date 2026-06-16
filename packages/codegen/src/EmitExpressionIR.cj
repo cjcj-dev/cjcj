@@ -5,21 +5,35 @@ import cangjie_compiler::chir.Expression
 import cangjie_compiler::chir.Type
 import cangjie_compiler::chir.TypeKind
 
-public func EmitExpressionIR(cgMod: CGModule, chirExprs: ArrayList<Expression>): Unit {
-    if (chirExprs.isEmpty()) {
-        return
+private class ExpressionGeneratorImpl <: IRGeneratorImpl {
+    private let cgMod: CGModule
+    private let chirExprs: ArrayList<Expression>
+
+    public init(cgMod: CGModule, chirExprs: ArrayList<Expression>) {
+        this.cgMod = cgMod
+        this.chirExprs = chirExprs
     }
 
-    let irBuilder = IRBuilder2(cgMod)
-    if (let Some(parentBlock) <- chirExprs[0].GetParentBlock()) {
-        if (let Some(mappedBlock) <- cgMod.GetMappedBB(parentBlock)) {
-            irBuilder.SetInsertPoint(mappedBlock)
+    public func EmitIR(): Unit {
+        if (chirExprs.isEmpty()) {
+            return
         }
+
+        let irBuilder = IRBuilder2(cgMod)
+        if (let Some(parentBlock) <- chirExprs[0].GetParentBlock()) {
+            if (let Some(mappedBlock) <- cgMod.GetMappedBB(parentBlock)) {
+                irBuilder.SetInsertPoint(mappedBlock)
+            }
+        }
+        if (let Some(topLevelFunc) <- chirExprs[0].GetTopLevelFunc()) {
+            irBuilder.SetInsertCGFunction(cgMod.GetOrInsertCGFunction(topLevelFunc))
+        }
+        EmitExpressionIR(cgMod, irBuilder, chirExprs)
     }
-    if (let Some(topLevelFunc) <- chirExprs[0].GetTopLevelFunc()) {
-        irBuilder.SetInsertCGFunction(cgMod.GetOrInsertCGFunction(topLevelFunc))
-    }
-    EmitExpressionIR(cgMod, irBuilder, chirExprs)
+}
+
+public func EmitExpressionIR(cgMod: CGModule, chirExprs: ArrayList<Expression>): Unit {
+    IRGenerator(ExpressionGeneratorImpl(cgMod, chirExprs)).EmitIR()
 }
 
 public func EmitExpressionIR(cgMod: CGModule, irBuilder: IRBuilder2, chirExprs: ArrayList<Expression>): Unit {

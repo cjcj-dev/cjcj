@@ -27,6 +27,9 @@ Implemented:
 - Added a package-level lowering entry point shaped like the C++ `EmitPackageIR`, including CHIR package splitting,
   per-submodule context/module construction, global and function declaration materialization, function emission
   traversal, verification, and optional bitcode emission.
+- Added a C++-shaped `IRGenerator` abstraction with an `IRGeneratorImpl` interface and forwarding wrapper.
+  Basic-block, expression, function, and global-variable emission now use concrete generator implementation classes
+  matching the reference dispatch structure while preserving their existing public entry points.
 - Added a C++-shaped `CGModule` with function/global/local value caches, basic-block mapping, target
   triple/data-layout storage, LLVM module accessors, intrinsic declaration helpers, function-parameter mapping,
   CHIR value materialization, and pass orchestration hooks.
@@ -79,8 +82,8 @@ Known gaps:
   intrinsics, complete
   array/tuple/object construction, precise casts, C/FFI lowering, incremental generation, native backend-specific
   metadata, and post-generation optimization/cleanup passes.
-- Only 44 `.cj` files are present in this pass, compared with 118 reference CodeGen source/header files. Additional
-  C++-named component files still need to be split out for `LICMOptimizer`, `IRGenerator`, LLVM-specific `CGUtils`,
+- Only 45 `.cj` files are present in this pass, compared with 118 reference CodeGen source/header files. Additional
+  C++-named component files still need to be split out for `LICMOptimizer`, LLVM-specific `CGUtils`,
   incremental generation, Cangjie-native metadata, type info, CFFI, and the detailed base
   expression implementation files.
 - The package manifest now depends on the existing self-hosted `basic`, `chir`, `mangle`, `option`, and `utils`
@@ -88,4 +91,4 @@ Known gaps:
 
 Remaining CodeGen selfhost markers: 0.
 
-Current CodeGen package size: 44 `.cj` files, approximately 4093 total lines.
+Current CodeGen package size: 45 `.cj` files, approximately 4181 total lines.
