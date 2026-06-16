@@ -374,23 +374,31 @@ public class Searcher {
 
     public func Search(ctx: ASTContext, query: String): ArrayList<Symbol> {
         let parsed = ParseQuery(query)
-        let key = parsed.PrettyPrint()
-        if (let Some(values) <- cache.get(key)) {
-            return values
+        return Search(ctx, parsed)
+    }
+
+    public func Search(ctx: ASTContext, query: String, fileHashes: HashSet<UInt64>): ArrayList<Symbol> {
+        let parsed = ParseQuery(query)
+        parsed.AddFileHashes(fileHashes)
+        return Search(ctx, parsed)
+    }
+
+    public func Search(ctx: ASTContext, query: String, fileHashes: ArrayList<UInt64>): ArrayList<Symbol> {
+        let parsed = ParseQuery(query)
+        for (fileHash in fileHashes) {
+            parsed.AddFileHash(fileHash)
         }
-        let out = Search(ctx, parsed)
-        cache[key] = out
-        return out
+        return Search(ctx, parsed)
     }
 
     public func Search(ctx: ASTContext, query: Query): ArrayList<Symbol> {
-        let ids = PerformSearch(ctx, query)
-        let out = ArrayList<Symbol>()
-        for (symbol in ids) {
-            if (!symbol.invertedIndexBeenDeleted) {
-                insertByPosition(out, symbol)
-            }
+        let key = NormalizeQuery(query)
+        if (let Some(values) <- cache.get(key)) {
+            return FilterCachedSearchResult(values, query)
         }
+        let ids = PerformSearch(ctx, query)
+        let out = FilterAndSortSearchResult(ids, query)
+        cache[key] = out
         return out
     }
 
@@ -410,6 +418,21 @@ public class Searcher {
         }
     }
 
+    public func SetCache(newCache: HashMap<String, ArrayList<Symbol>>): Unit {
+        cache.clear()
+        for ((key, values) in newCache) {
+            cache[key] = values
+        }
+    }
+
+    public func GetCache(): HashMap<String, ArrayList<Symbol>> {
+        let out = HashMap<String, ArrayList<Symbol>>()
+        for ((key, values) in cache) {
+            out[key] = values
+        }
+        return out
+    }
+
     public func GetScopeNamesByPrefix(ctx: ASTContext, prefix: String): ArrayList<String> {
         if (!ctx.invertedIndex.scopeNameIndexes.isEmpty()) {
             return ctx.invertedIndex.scopeNameTrie.PrefixMatch(prefix)
@@ -421,6 +444,42 @@ public class Searcher {
             }
         }
         return out
+    }
+
+    private func NormalizeQuery(query: Query): String {
+        var normalized = query.PrettyPrint()
+        for (fileHash in query.fileHashes) {
+            normalized += "|fileHash:${fileHash}"
+        }
+        normalized += "|sort:desc"
+        return normalized
+    }
+
+    private func FilterCachedSearchResult(values: ArrayList<Symbol>, query: Query): ArrayList<Symbol> {
+        if (!query.HasFileHashFilter()) {
+            return values
+        }
+        let out = ArrayList<Symbol>()
+        for (symbol in values) {
+            if (!symbol.invertedIndexBeenDeleted && InFiles(query, symbol)) {
+                out.add(symbol)
+            }
+        }
+        return out
+    }
+
+    private func FilterAndSortSearchResult(ids: ArrayList<Symbol>, query: Query): ArrayList<Symbol> {
+        let out = ArrayList<Symbol>()
+        for (symbol in ids) {
+            if (!symbol.invertedIndexBeenDeleted && InFiles(query, symbol)) {
+                insertByPosition(out, symbol)
+            }
+        }
+        return out
+    }
+
+    private func InFiles(query: Query, symbol: Symbol): Bool {
+        return !query.HasFileHashFilter() || query.fileHashes.contains(symbol.hashID.hash64)
     }
 
     private func PerformSearch(ctx: ASTContext, query: Query): ArrayList<Symbol> {

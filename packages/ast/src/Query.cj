@@ -94,8 +94,24 @@ extend PositionCompare <: Equatable<PositionCompare> {
 
 public open class Query {
     public let kind: QueryKind
+    public let fileHashes: HashSet<UInt64> = HashSet<UInt64>()
+
     public init(kind: QueryKind) {
         this.kind = kind
+    }
+
+    public func AddFileHash(fileHash: UInt64): Unit {
+        fileHashes.add(fileHash)
+    }
+
+    public func AddFileHashes(filters: HashSet<UInt64>): Unit {
+        for (fileHash in filters) {
+            fileHashes.add(fileHash)
+        }
+    }
+
+    public func HasFileHashFilter(): Bool {
+        return !fileHashes.isEmpty()
     }
 
     public open func Match(symbol: Symbol): Bool {
@@ -236,16 +252,11 @@ public class FileHashQuery <: Query {
     }
 
     public override func Match(symbol: Symbol): Bool {
-        if (let Some(node) <- symbol.node) {
-            if (let Some(file) <- node.curFile) {
-                return file.fileHash == fileHash
-            }
-        }
-        return false
+        return symbol.hashID.hash64 == fileHash
     }
 
     public override func PrettyPrint(): String {
-        return "fileHash:${fileHash}"
+        return "fileHash=${fileHash}"
     }
 }
 

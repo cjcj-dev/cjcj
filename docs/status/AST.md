@@ -10,6 +10,8 @@ The AST package is a multi-file Cangjie package mirroring the C++ AST component 
 
 ## Implemented In This Pass
 
+- Added C++ `Searcher` file-hash filtering parity: `Query` now carries file-hash filters, string searches can receive hash filters, normalized cache keys include file hashes and sort direction, cached/fresh results are filtered through `Symbol.hashID.hash64`, and `SetCache`/`GetCache` are exposed for warmup-cache parity.
+- Aligned the AST-local `FileHashQuery` leaf to use the symbol file hash instead of mutable node file state, and normalized its pretty-printed key spelling.
 - Deepened `Clone` visitor parity with C++: `SetIsClonedSourceCode` now unconditionally marks cloned targets, `CloneGeneric` accepts a visitor callback, and `ASTCloner.Clone` has a visitor overload that applies callbacks across the cloned tree for source-to-target clone hooks.
 - Added C++ `Searcher` scope-level comparison parity for programmatic `scope_level < N` and `scope_level <= N` queries, with indexed lookup and linear fallback sharing the same `ScopeLevelQuery` semantics.
 - Added later `Utils.cpp` interop-helper parity: Java mirror/impl/CJ-mapping/JObject/Object/forward-class predicates, CFunc constructor-call validation, Java ref-getter stub generation, Java synthetic wrapper class generation, and ObjC synthetic wrapper class generation using existing AST creation helpers.
@@ -64,7 +66,7 @@ The AST package is a multi-file Cangjie package mirroring the C++ AST component 
 
 - Wire AST validation and diagnostics through the real `DiagnosticEngine` instead of the current local validation result surface.
 - Resolve `ScopeKind` and `ExprKind` layering with Parse once the self-hosted packages can share those APIs without introducing a package cycle. The C++ AST only forward-declares the related parse concepts, so the current AST-local minimal enums are kept until that dependency direction is settled.
-- Finish exact C++ `Searcher` parity for diagnostic-producing query parse failures, file-hash query normalization/filtering, and broader downstream validation of indexed position searches once the collector/scope-manager pipeline fully populates indexes in the Cangjie port.
+- Finish exact C++ `Searcher` parity for diagnostic-producing query parse failures and broader downstream validation of indexed position searches once the collector/scope-manager pipeline fully populates indexes in the Cangjie port.
 - Continue auditing macro diagnostic map lifetimes through Parse/Macro/Sema; AST now avoids clone-time `MacroCallDiagInfo` aliasing, but full private Basic map reconstruction is still owned by the macro pipeline.
 - Continue auditing context, walker, clone, printer, recover-desugar, search/query, type, utility, and validation behavior against the complete C++ implementation under downstream Parse/Sema workloads.
 - Replace any remaining compatibility API spellings only after downstream packages no longer depend on them.
