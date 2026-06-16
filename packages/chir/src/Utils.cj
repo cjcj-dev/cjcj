@@ -98,6 +98,17 @@ private func CheckPkgName(fn: Function, funcInfo: FuncInfo): Bool {
     return fn.GetPackageName() == funcInfo.pkgName
 }
 
+public func IsGetOrThrowFunction(expr: Expression): Bool {
+    if (expr.GetExprKind() != ExprKind.APPLY || expr.GetNumOfOperands() == 0) {
+        return false
+    }
+    if (let Some(callee) <- expr.GetOperand(0).AsFunction()) {
+        let getOrThrowInfo = FuncInfo("getOrThrow", NOT_CARE, [NOT_CARE], NOT_CARE, "std.core")
+        return IsExpectedFunction(callee, getOrThrowInfo)
+    }
+    return false
+}
+
 public func IndentToString(indent: Int64): String {
     var out = ""
     var idx: Int64 = 0

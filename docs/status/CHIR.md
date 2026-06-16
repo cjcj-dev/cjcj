@@ -118,6 +118,10 @@ Implemented:
   class-like values, scanning constructors for member stores, tracing forwarding local values through casts/boxing
   conversions, invalidating ambiguous or open-class assignments, and recording unique concrete derived member types
   by custom-definition id and member index.
+- Added `GetOrThrowResultAnalysis` and `RedundantGetOrThrowElimination`, including the C++ `std.core.getOrThrow`
+  matcher, a bottom/element/top per-argument result domain, block fixed-point propagation, recursive lambda-body
+  traversal, and replacement of later redundant `getOrThrow` result uses with the first dominating result in the
+  function body.
 - Added C++-named BCHIR interpreter component files for `OpCodes`, `BCHIR`, `BCHIRPrinter`,
   `BCHIRInterpreter`, `InterpreterValue`, `InterpreterValueUtils`, `InterpreterArena`,
   `InterpreterEnv`, and `InterpreterStack`.
@@ -182,6 +186,9 @@ Known gaps:
 - `ConstMemberVarCollector` mirrors the C++ constructor-scan and unique-derived-type logic over the current generic
   expression model, but exact direct/all inherited instance-var splitting, specialized `StoreElementRef` path
   metadata, final/inheritance flags, and full `CanBeInherited` semantics remain limited by the current IR model.
+- `RedundantGetOrThrowElimination` follows the C++ state-before-expression replacement behavior over generic
+  `APPLY` operands, but it does not yet include the complete C++ engine visitor/debug-location reporting surface or
+  specialized `Apply` accessors.
 - The BCHIR translator/linker/interpreter now has the first real end-to-end package/function/global/control
   path, but exact float/rune byte encoding, the complete expression taxonomy, intrinsics/syscalls, exception
   machinery, object method dispatch, raw-array operations, type casts, full serialization, and FFI execution
