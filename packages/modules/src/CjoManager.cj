@@ -302,13 +302,21 @@ public class CjoManager {
         var cjoPath = ""
         var cjoName = ""
         var cjoPackageName = ""
+        var inGroupPackageName = ""
         for (candidate in GetPossibleCjoNames(importSpec)) {
             cjoName = candidate
             cjoPackageName = ToPackageName(candidate)
+            if (inGroupPackageName.isEmpty() && impl.GetPackageInfo(cjoPackageName).isSome()) {
+                inGroupPackageName = cjoPackageName
+            }
             cjoPath = FindCjoPath(cjoPackageName, candidate, GetSearchPath())
             if (!cjoPath.isEmpty()) {
                 break
             }
+        }
+        if (!inGroupPackageName.isEmpty() && inGroupPackageName != cjoPackageName) {
+            cjoPackageName = inGroupPackageName
+            cjoPath = ""
         }
         if (cjoName.isEmpty()) {
             cjoPackageName = importSpec.content.GetImportedPackageName()
@@ -422,6 +430,9 @@ public class CjoManager {
     }
 
     private func FindCjoPath(fullPackageName: String, cjoName: String, paths: ArrayList<String>): String {
+        if (impl.GetCjoFileCacheMap().contains(fullPackageName)) {
+            return cjoName
+        }
         if (let Some(cached) <- impl.GetCjoPathFromFindCache(fullPackageName)) {
             return cached
         }

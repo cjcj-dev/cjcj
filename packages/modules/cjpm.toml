@@ -14,3 +14,4 @@
   package-configuration = {}
 
 [dependencies]
+  "cangjie_compiler::option" = { path = "../option" }

@@ -2,6 +2,8 @@ package cangjie_compiler::modules
 
 import std.collection.*
 import std.convert.*
+import cangjie_compiler::option.GlobalOptions
+import cangjie_compiler::option.OptimizationLevel
 
 public class ASTWriter {
     private let diag: DiagnosticEngine
