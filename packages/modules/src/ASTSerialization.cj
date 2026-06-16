@@ -123,26 +123,36 @@ public class ASTWriter {
                 lines.add(JoinFields(importFields))
             }
             for (decl in file.decls) {
-                let declFields = ArrayList<String>()
-                declFields.add("decl")
-                declFields.add(decl.identifier)
-                declFields.add(decl.fullPackageName)
-                declFields.add(AccessLevelToWire(GetAccessLevel(decl)))
-                declFields.add(BoolToWire(decl.doNotExport))
-                declFields.add(BoolToWire(decl.isFunction))
-                declFields.add(decl.rawMangleName)
-                declFields.add(decl.mangledName)
-                declFields.add(decl.begin.fileID.toString())
-                declFields.add(decl.begin.line.toString())
-                declFields.add(decl.begin.column.toString())
-                declFields.add(decl.end.fileID.toString())
-                declFields.add(decl.end.line.toString())
-                declFields.add(decl.end.column.toString())
-                declFields.add(JoinAttributes(decl.GetAttrs()))
-                lines.add(JoinFields(declFields))
+                AppendSerializedDecl(lines, "decl", decl)
+            }
+            for (decl in file.exportedInternalDecls) {
+                AppendSerializedDecl(lines, "internal-decl", decl)
             }
         }
         return JoinStrings(lines, "\n") + "\n"
+    }
+
+    private func AppendSerializedDecl(lines: ArrayList<String>, recordKind: String, decl: Decl): Unit {
+        if (decl.doNotExport) {
+            return
+        }
+        let declFields = ArrayList<String>()
+        declFields.add(recordKind)
+        declFields.add(decl.identifier)
+        declFields.add(decl.fullPackageName)
+        declFields.add(AccessLevelToWire(GetAccessLevel(decl)))
+        declFields.add(BoolToWire(decl.doNotExport))
+        declFields.add(BoolToWire(decl.isFunction))
+        declFields.add(decl.rawMangleName)
+        declFields.add(decl.mangledName)
+        declFields.add(decl.begin.fileID.toString())
+        declFields.add(decl.begin.line.toString())
+        declFields.add(decl.begin.column.toString())
+        declFields.add(decl.end.fileID.toString())
+        declFields.add(decl.end.line.toString())
+        declFields.add(decl.end.column.toString())
+        declFields.add(JoinAttributes(decl.GetAttrs()))
+        lines.add(JoinFields(declFields))
     }
 }
 
@@ -398,43 +408,55 @@ public class ASTLoader {
                     }
                 case "decl" =>
                     if (let Some(file) <- currentFile) {
-                        let decl = Decl()
-                        if (fields.size > 1) { decl.identifier = fields[1] }
-                        if (fields.size > 2) { decl.fullPackageName = fields[2] }
-                        var declAccessLevel = AccessLevel.INTERNAL
-                        if (fields.size > 3) {
-                            declAccessLevel = WireToAccessLevel(fields[3])
-                            ApplyAccessAttr(decl, declAccessLevel)
-                        }
-                        if (fields.size > 4) { decl.doNotExport = WireToBool(fields[4]) }
-                        if (fields.size > 5) { decl.isFunction = WireToBool(fields[5]) }
-                        if (fields.size > 6) { decl.rawMangleName = fields[6] }
-                        if (fields.size > 7) { decl.mangledName = fields[7] }
-                        if (fields.size > 13) {
-                            decl.begin = Position(
-                                ParseUInt64Field(fields[8]),
-                                ParseInt64Field(fields[9]),
-                                ParseInt64Field(fields[10])
-                            )
-                            decl.end = Position(
-                                ParseUInt64Field(fields[11]),
-                                ParseInt64Field(fields[12]),
-                                ParseInt64Field(fields[13])
-                            )
-                        }
-                        if (fields.size > 14) {
-                            decl.ReplaceAttrs(SplitAttributes(fields[14]))
-                        }
-                        if (!HasAccessAttr(decl)) {
-                            ApplyAccessAttr(decl, declAccessLevel)
-                        }
-                        decl.curFile = Some(file)
-                        file.decls.add(decl)
+                        LoadDeclRecord(fields, file, false)
+                    }
+                case "internal-decl" =>
+                    if (let Some(file) <- currentFile) {
+                        LoadDeclRecord(fields, file, true)
                     }
                 case _ => ()
             }
         }
         return Some(pkg)
+    }
+
+    private func LoadDeclRecord(fields: ArrayList<String>, file: File, intoExportedInternal: Bool): Unit {
+        let decl = Decl()
+        if (fields.size > 1) { decl.identifier = fields[1] }
+        if (fields.size > 2) { decl.fullPackageName = fields[2] }
+        var declAccessLevel = AccessLevel.INTERNAL
+        if (fields.size > 3) {
+            declAccessLevel = WireToAccessLevel(fields[3])
+            ApplyAccessAttr(decl, declAccessLevel)
+        }
+        if (fields.size > 4) { decl.doNotExport = WireToBool(fields[4]) }
+        if (fields.size > 5) { decl.isFunction = WireToBool(fields[5]) }
+        if (fields.size > 6) { decl.rawMangleName = fields[6] }
+        if (fields.size > 7) { decl.mangledName = fields[7] }
+        if (fields.size > 13) {
+            decl.begin = Position(
+                ParseUInt64Field(fields[8]),
+                ParseInt64Field(fields[9]),
+                ParseInt64Field(fields[10])
+            )
+            decl.end = Position(
+                ParseUInt64Field(fields[11]),
+                ParseInt64Field(fields[12]),
+                ParseInt64Field(fields[13])
+            )
+        }
+        if (fields.size > 14) {
+            decl.ReplaceAttrs(SplitAttributes(fields[14]))
+        }
+        if (!HasAccessAttr(decl)) {
+            ApplyAccessAttr(decl, declAccessLevel)
+        }
+        decl.curFile = Some(file)
+        if (intoExportedInternal) {
+            file.exportedInternalDecls.add(decl)
+        } else {
+            file.decls.add(decl)
+        }
     }
 
     private func ValidateCommonSpecificFeatureSetsRelations(commonPkg: Package, specificPkg: Package): Unit {
