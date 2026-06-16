@@ -2,6 +2,7 @@ package cangjie_compiler::codegen
 
 import std.collection.*
 import cangjie_compiler::chir.Expression
+import cangjie_compiler::chir.ExprKind
 import cangjie_compiler::chir.RawArrayType
 import cangjie_compiler::chir.Type
 
@@ -31,6 +32,38 @@ public func GenerateRawArrayAllocate(irBuilder: IRBuilder2, chirExpr: Expression
             let lengthValue = irBuilder.GetCGModule().MaterializeValue(irBuilder, chirExpr.GetOperand(0)).GetRawValue()
             return GenerateCheckedRawArrayAllocate(irBuilder, rawArrayTy, lengthValue)
         }
+    }
+    return LLVMNullValue()
+}
+
+public func GenerateRawArrayLiteralInit(irBuilder: IRBuilder2, chirExpr: Expression): LLVMValueRef {
+    if (chirExpr.GetNumOfOperands() == 0) {
+        return LLVMNullValue()
+    }
+    let rawArrayValue = irBuilder.GetCGModule().MaterializeValue(irBuilder, chirExpr.GetOperand(0))
+    if (let Some(elementCGType) <- GetRawArrayElementCGType(rawArrayValue)) {
+        var elementIdx: Int64 = 1
+        while (elementIdx < chirExpr.GetNumOfOperands()) {
+            let elementValue = irBuilder.GetCGModule().MaterializeValue(irBuilder, chirExpr.GetOperand(elementIdx))
+            let elementPtr = CreateRawArrayElementPointer(irBuilder, rawArrayValue, elementCGType, elementIdx - 1)
+            irBuilder.CreateStore(elementValue.GetRawValue(), elementPtr)
+            elementIdx++
+        }
+        return rawArrayValue.GetRawValue()
+    }
+    return LLVMNullValue()
+}
+
+public func GenerateRawArrayInitByValue(irBuilder: IRBuilder2, chirExpr: Expression): LLVMValueRef {
+    if (chirExpr.GetNumOfOperands() < 3) {
+        return LLVMNullValue()
+    }
+    let rawArrayValue = irBuilder.GetCGModule().MaterializeValue(irBuilder, chirExpr.GetOperand(0))
+    if (let Some(elementCGType) <- GetRawArrayElementCGType(rawArrayValue)) {
+        let sizeValue = irBuilder.GetCGModule().MaterializeValue(irBuilder, chirExpr.GetOperand(1)).GetRawValue()
+        let initValue = irBuilder.GetCGModule().MaterializeValue(irBuilder, chirExpr.GetOperand(2)).GetRawValue()
+        GenerateRawArrayFillLoop(irBuilder, rawArrayValue, elementCGType, sizeValue, initValue)
+        return rawArrayValue.GetRawValue()
     }
     return LLVMNullValue()
 }
@@ -70,6 +103,61 @@ private func FindRawArrayType(ty: Type): Option<RawArrayType> {
         return rawArrayTy
     }
     return None
+}
+
+private func GetRawArrayElementCGType(rawArrayValue: CGValue): Option<CGType> {
+    if (let Some(rawArrayCGType) <- rawArrayValue.GetCGType()) {
+        return rawArrayCGType.GetPointerElementType()
+    }
+    return None
+}
+
+private func CreateRawArrayElementPointer(irBuilder: IRBuilder2, rawArrayValue: CGValue,
+    elementCGType: CGType, elementIdx: Int64): LLVMValueRef {
+    let indices = ArrayList<LLVMValueRef>()
+    indices.add(unsafe { LLVMConstInt(LLVMInt64TypeInContext(irBuilder.GetLLVMContext().raw), UInt64(elementIdx), 0) })
+    return irBuilder.CreateGEP(elementCGType.GetLLVMType(), rawArrayValue.GetRawValue(), indices, name: "rawarray.elem")
+}
+
+private func GenerateRawArrayFillLoop(irBuilder: IRBuilder2, rawArrayValue: CGValue, elementCGType: CGType,
+    sizeValue: LLVMValueRef, initValue: LLVMValueRef): Unit {
+    let currentBlock = irBuilder.GetInsertBlock()
+    if (currentBlock.isNull()) {
+        return
+    }
+    let parentFunction = unsafe { LLVMGetBasicBlockParent(currentBlock) }
+    if (parentFunction.isNull()) {
+        return
+    }
+    let loopCondBlock = irBuilder.CreateEntryBasicBlock(parentFunction, "arr.init.start")
+    unsafe { LLVMMoveBasicBlockAfter(loopCondBlock, currentBlock) }
+    let loopBodyBlock = irBuilder.CreateEntryBasicBlock(parentFunction, "arr.init.body")
+    unsafe { LLVMMoveBasicBlockAfter(loopBodyBlock, loopCondBlock) }
+    let loopEndBlock = irBuilder.CreateEntryBasicBlock(parentFunction, "arr.init.end")
+    unsafe { LLVMMoveBasicBlockAfter(loopEndBlock, loopBodyBlock) }
+
+    let indexSlot = irBuilder.CreateEntryAlloca(unsafe { LLVMTypeOf(sizeValue) }, name: "iterator")
+    let zeroValue = unsafe { LLVMConstInt(LLVMTypeOf(sizeValue), 0u64, 0) }
+    let oneValue = unsafe { LLVMConstInt(LLVMTypeOf(sizeValue), 1u64, 0) }
+    irBuilder.CreateStore(zeroValue, indexSlot)
+    irBuilder.CreateBr(loopCondBlock)
+
+    irBuilder.SetInsertPoint(loopCondBlock)
+    let currentIndex = irBuilder.CreateLoad(unsafe { LLVMTypeOf(sizeValue) }, indexSlot, name: "iterator")
+    let hasElement = irBuilder.CreateICmp(LLVMIntPredicate.SLT, currentIndex, sizeValue, name: "iterator.size.cmp")
+    irBuilder.CreateCondBr(hasElement, loopBodyBlock, loopEndBlock)
+
+    irBuilder.SetInsertPoint(loopBodyBlock)
+    let elementIndices = ArrayList<LLVMValueRef>()
+    elementIndices.add(currentIndex)
+    let elementPtr = irBuilder.CreateGEP(elementCGType.GetLLVMType(), rawArrayValue.GetRawValue(), elementIndices,
+        name: "rawarray.elem")
+    irBuilder.CreateStore(initValue, elementPtr)
+    let nextIndex = irBuilder.CreateBinary(ExprKind.ADD, currentIndex, oneValue, name: "iterator.next")
+    irBuilder.CreateStore(nextIndex, indexSlot)
+    irBuilder.CreateBr(loopCondBlock)
+
+    irBuilder.SetInsertPoint(loopEndBlock)
 }
 
 public func GenerateStore(irBuilder: IRBuilder2, chirExpr: Expression): LLVMValueRef {

@@ -79,9 +79,10 @@ Implemented:
   call-or-invoke emission,
   `GET_EXCEPTION` through the patched LLVM exception-wrapper intrinsic, raw-array allocation through
   `llvm.cj.malloc.array`/`llvm.cj.malloc.array.generic` with signed negative-size branching to the runtime
-  negative-array-size helper, tuple/aggregate and varray construction through C++-named component files, and
-  scalar/pointer typecast lowering through a C++-shaped `TypeCastImpl` component with real LLVM numeric conversion
-  op selection.
+  negative-array-size helper, raw-array literal initialization through direct flattened-operand element stores,
+  raw-array init-by-value through an explicit LLVM loop over the requested size, tuple/aggregate and varray
+  construction through C++-named component files, and scalar/pointer typecast lowering through a C++-shaped
+  `TypeCastImpl` component with real LLVM numeric conversion op selection.
 - Added a C++-shaped `EmitExpressionIR` component that emits expression sequences through a local `IRBuilder2`,
   sets the insertion function from the top-level CHIR function, dispatches each expression by major kind, and maps
   non-null results back into `CGModule` with sret result tagging.
@@ -103,8 +104,8 @@ Known gaps:
 - This is not a complete faithful port of C++ CodeGen. The remaining full CHIR-to-LLVM surface still includes
   object/class allocation, precise field and enum layout access, closures, generics, RTTI/type info, package and
   native metadata, full debug metadata attachment, broad exception handling, most checked overflow arithmetic,
-  intrinsics, complete
-  array literal/init-by-value content initialization, object construction, full checked casts, C/FFI lowering,
+  intrinsics, array constant-content initialization optimizations, GC-barrier/memcpy-rich array initialization
+  paths, object construction, full checked casts, C/FFI lowering,
   incremental generation, native backend-specific
   metadata, and post-generation optimization/cleanup passes.
 - Only 54 `.cj` files are present in this pass, compared with 118 reference CodeGen source/header files. Additional
@@ -116,4 +117,4 @@ Known gaps:
 
 Remaining CodeGen selfhost markers: 0.
 
-Current CodeGen package size: 54 `.cj` files, approximately 5109 total lines.
+Current CodeGen package size: 54 `.cj` files, approximately 5202 total lines.

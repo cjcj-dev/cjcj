@@ -20,8 +20,13 @@ public func HandleOthersExpression(irBuilder: IRBuilder2, chirExpr: Expression):
     if (kind == ExprKind.RAW_ARRAY_ALLOCATE) {
         return GenerateRawArrayAllocate(irBuilder, chirExpr)
     }
-    if (kind == ExprKind.TUPLE || kind == ExprKind.RAW_ARRAY_LITERAL_INIT ||
-        kind == ExprKind.RAW_ARRAY_INIT_BY_VALUE) {
+    if (kind == ExprKind.RAW_ARRAY_LITERAL_INIT) {
+        return GenerateRawArrayLiteralInit(irBuilder, chirExpr)
+    }
+    if (kind == ExprKind.RAW_ARRAY_INIT_BY_VALUE) {
+        return GenerateRawArrayInitByValue(irBuilder, chirExpr)
+    }
+    if (kind == ExprKind.TUPLE) {
         return GenerateTupleOrAggregateExpression(irBuilder, chirExpr)
     }
     if (kind == ExprKind.VARRAY) {
