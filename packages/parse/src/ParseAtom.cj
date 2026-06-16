@@ -53,7 +53,7 @@ extend ParserImpl {
         if (Seeing(TokenKind.SPAWN)) { return ParseSpawnExpr() }
         if (Seeing(TokenKind.SYNCHRONIZED)) { return ParseSynchronizedExpr() }
         if (Seeing(TokenKind.QUOTE)) { return ParseQuoteExpr() }
-        if (Seeing(TokenKind.AT) || Seeing(TokenKind.AT_EXCL)) { return ParseMacroExprOrLambdaExpr() }
+        if (SeeingMacroCall() || SeeingBuiltinAnnotation()) { return ParseMacroExprOrLambdaExpr() }
         let token = Peek()
         diag.DiagnoseRefactor(DiagKindRefactor.EXPECTED_TOKEN, token.Begin(), "expected expression")
         Next()

@@ -3,6 +3,7 @@ package cangjie_compiler::parse
 import std.collection.*
 import cangjie_compiler::ast.AnnotationKind as AstAnnotationKind
 public import cangjie_compiler::ast.{ASTKind, ASTKindIndex, Attribute, AttributeIndex}
+public import cangjie_compiler::utils.OverflowStrategy
 
 public type AnnotationKind = AstAnnotationKind
 
@@ -116,12 +117,21 @@ public class Modifier <: Node {
 }
 
 public class Annotation <: Node {
+    public var isCompileTimeVisible: Bool = false
     public var kind: AnnotationKind = AnnotationKind.CUSTOM
     public var identifier: SrcIdentifier = SrcIdentifier()
+    public var lsquarePos: Position = INVALID_POSITION
     public let args: ArrayList<FuncArg> = ArrayList<FuncArg>()
+    public var rsquarePos: Position = INVALID_POSITION
+    public var overflowStrategy: OverflowStrategy = OverflowStrategy.NA
+    public let attrs: ArrayList<Token> = ArrayList<Token>()
+    public let attrCommas: ArrayList<Position> = ArrayList<Position>()
+    public var definedPackage: String = ""
+    public var condExpr: Option<Expr> = None
+    public var target: UInt16 = 0u16
+    public var runtimeVisible: Bool = false
+    public var baseExpr: Option<Expr> = None
     public var atPos: Position = INVALID_POSITION
-    public var leftParenPos: Position = INVALID_POSITION
-    public var rightParenPos: Position = INVALID_POSITION
 
     public init() {
         super(ASTKind.ANNOTATION)
@@ -130,6 +140,8 @@ public class Annotation <: Node {
     public override func Children(): ArrayList<Node> {
         let out = ArrayList<Node>()
         for (arg in args) { out.add(arg) }
+        if (let Some(cond) <- condExpr) { out.add(cond) }
+        if (let Some(base) <- baseExpr) { out.add(base) }
         return out
     }
 }

@@ -1,6 +1,6 @@
 # Parse Port Status
 
-Date: 2026-06-16
+Date: 2026-06-17
 
 Build: `cjpm build` passes.
 
@@ -9,7 +9,8 @@ Build: `cjpm build` passes.
 Replaced the Parse scaffold with a multi-file Cangjie package that mirrors the C++
 Parse component split. The package now imports real Basic positions/source
 manager, real Lex tokens/token tables, real AST kind/attribute/annotation
-enums, and real Option compiler configuration types. It still has local
+enums, real Utils overflow strategy helpers, and real Option compiler
+configuration types. It still has local
 parser-facing diagnostics, AST node shapes, a lexer, parser state, top-level parsing,
 declaration parsing, expression parsing, type parsing, pattern parsing, imports,
 annotations, modifiers, features, macro-call capture, quote capture, comment
@@ -18,14 +19,17 @@ and Java/ObjC native FFI parser checks.
 
 ## Current De-Isolation
 
-`packages/parse/cjpm.toml` now depends on `basic`, `lex`, `ast`, and `option`.
+`packages/parse/cjpm.toml` now depends on `basic`, `lex`, `ast`, `option`, and
+`utils`.
 `Position.cj` and `Token.cj` no longer own compatibility copies of the Basic
 position/source types or Lex token types. `ASTCore.cj` no longer owns local
 copies of `ASTKind`, `Attribute`, or `AnnotationKind`; it imports the real AST
 definitions and keeps only Parse-local lightweight node classes that still
-diverge from the real AST class layout. `ParserTypes.cj` no longer owns local
-copies of `GlobalOptions`, `OutputMode`, `InteropLanguage`, `BackendType`, or
-`Triple`; those names are public aliases of the real Option package types.
+diverge from the real AST class layout. The local `Annotation` scaffold now uses
+the real Utils `OverflowStrategy` type rather than a Parse-local copy.
+`ParserTypes.cj` no longer owns local copies of `GlobalOptions`, `OutputMode`,
+`InteropLanguage`, `BackendType`, or `Triple`; those names are public aliases of
+the real Option package types.
 
 ## Implemented In This Pass
 
@@ -109,6 +113,15 @@ copies of `GlobalOptions`, `OutputMode`, `InteropLanguage`, `BackendType`, or
   identifiers, feature annotations, and broken-node state for malformed sets.
   The local `FeatureId`, `FeaturesSet`, and `FeaturesDirective` scaffolding now
   mirrors the real AST/C++ field layout for feature directives.
+- Reworked builtin annotation parsing toward `ParseAnnotations.cpp`: builtin
+  annotations now use square-bracket argument lists, `@When[...]` stores a
+  condition expression, `@Attribute[...]` stores attribute tokens and comma
+  positions, overflow annotations store a real Utils `OverflowStrategy`, and
+  `@Deprecated[...]` validates literal argument names/types. Custom annotations
+  parse `@`/`@!`, preserve compile-time visibility, accept qualified names via
+  `baseExpr`, and use square-bracket arguments. Macro-call classification now
+  excludes builtin annotations and expression macro calls no longer accept
+  `@!`, matching the C++ split more closely.
 
 ## Remaining Work
 
@@ -118,6 +131,9 @@ copies of `GlobalOptions`, `OutputMode`, `InteropLanguage`, `BackendType`, or
 - Feature raw-identifier diagnostics still depend on finishing lexer
   de-isolation: the local Parse lexer strips backticks before parser recovery,
   while the real Lex lexer preserves raw identifier spelling in `Token.Value()`.
+- Annotation diagnostics are still message-based through the local Parse
+  diagnostic shim; converting them to real Basic diagnostic IDs remains part of
+  the broader diagnostics de-isolation.
 - Audit grammar and diagnostic parity against the full C++ Parse test corpus;
   the current parser is substantial and compiling, but not a complete faithful
   replacement for all 17k+ lines of C++ parser behavior.

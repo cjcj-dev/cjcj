@@ -249,6 +249,9 @@ public class ParserImpl {
 }
 
 public func IsBuiltinAnnotation(moduleName: String, identifier: String): Bool {
+    if (identifier == "ConstSafe") {
+        return moduleName == "std"
+    }
     return NameToAnnotationKind(identifier) != AnnotationKind.CUSTOM
 }
 
