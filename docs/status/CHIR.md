@@ -122,6 +122,9 @@ Implemented:
   matcher, a bottom/element/top per-argument result domain, block fixed-point propagation, recursive lambda-body
   traversal, and replacement of later redundant `getOrThrow` result uses with the first dominating result in the
   function body.
+- Added `DevirtualizationInfo`, collecting concrete runtime return-type summaries, class/interface subtype
+  inheritance summaries, type-to-definition mappings, and const-member-derived-type data through
+  `ConstMemberVarCollector` for the current CHIR package model.
 - Added C++-named BCHIR interpreter component files for `OpCodes`, `BCHIR`, `BCHIRPrinter`,
   `BCHIRInterpreter`, `InterpreterValue`, `InterpreterValueUtils`, `InterpreterArena`,
   `InterpreterEnv`, and `InterpreterStack`.
@@ -189,6 +192,10 @@ Known gaps:
 - `RedundantGetOrThrowElimination` follows the C++ state-before-expression replacement behavior over generic
   `APPLY` operands, but it does not yet include the complete C++ engine visitor/debug-location reporting surface or
   specialized `Apply` accessors.
+- `DevirtualizationInfo` has real return/subtype/const-member collection over the implemented Cangjie IR, but
+  exact `GlobalOptions`, `Modules::GetPackageRelation`, `Attribute::SKIP_ANALYSIS`/`INTERNAL`, closure-conversion
+  auto-env metadata, and specialized `Apply`/`TypeCast` source-type accessors are approximated by current package
+  names, annotations, and generic expression operands.
 - The BCHIR translator/linker/interpreter now has the first real end-to-end package/function/global/control
   path, but exact float/rune byte encoding, the complete expression taxonomy, intrinsics/syscalls, exception
   machinery, object method dispatch, raw-array operations, type casts, full serialization, and FFI execution
