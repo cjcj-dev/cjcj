@@ -69,10 +69,6 @@ public open class MetaTransformConcept {
 
     public init() {}
 
-    public func GetKind(): MetaTransformKind {
-        return kind
-    }
-
     public func IsForCHIR(): Bool {
         return kind > MetaTransformKind.UNKNOWN && kind < MetaTransformKind.FOR_CHIR
     }

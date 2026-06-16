@@ -20,6 +20,9 @@ Implemented:
 - Matched the C++ enum-ordering surface more closely: `MetaTransformKind` has relational operators,
   formally implements `Comparable`, and `IsForCHIR` uses the same range comparison as the C++
   implementation. The ordinal helper is private implementation detail rather than public API.
+- Narrowed the public `MetaTransformConcept` surface back toward the C++ declaration: transform kind
+  remains protected state, and callers use the CHIR/function/package predicates rather than a non-C++
+  public getter.
 - Tightened construction to match the C++ ownership model: kind-setting constructors are protected, and
   the CHIR meta-kind marker is a value marker rather than a heap class.
 - Matched the C++ constructor sequence more closely: `MetaTransformConcept` now only default-constructs
