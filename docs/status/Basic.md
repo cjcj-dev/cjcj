@@ -30,6 +30,11 @@ Deepening pass updates:
   Explicit invalid strategy strings remain `UNKNOWN` and fail validation.
 - Made `InteropCJPackageConfigReader.Parse` return `false` on file read failures instead of allowing the filesystem
   exception to escape, matching the C++ reader's caught parse/open failure path.
+- Extended `InteropCJPackageConfigReader` beyond inline-array TOML to cover the C++ parser's nested package
+  array-of-table forms for `generic_object_configuration` and `lambda_patterns`, including nested
+  `class_mappings` tables. Inline and nested generic configuration entries are now accumulated and validated through
+  the same two-pass type-argument/symbol processing as the C++ implementation, and package entries without a required
+  `name` now fail parsing instead of being silently ignored.
 - Matched two byte-level utility behaviors from C++ Basic: `SplitString` advances one byte past a found delimiter, and
   `StringConvertor.Normalize` drops an unrecognized escape backslash while preserving the escaped byte for later
   processing.
@@ -75,9 +80,14 @@ Known fidelity caveats:
   `cangjie_compiler::utils.FileUtil` package even though the C++ Basic source calls `FileUtil`.
 - The same package-cycle issue currently blocks replacing Basic-local warning suppression state with the real
   selfhost `option.WarningOptionMgr`, even though the C++ Basic implementation owns a pointer to Option's manager.
-- Basic still publishes its generated `WarnGroup` and `DiagFormat` enums for downstream Basic APIs. Warning suppression itself now uses the real Option manager by index, but fully replacing those public enum types with Option-owned types requires a coordinated API migration across users of `basic.*`.
+- Basic still publishes its generated `WarnGroup` and `DiagFormat` enums for downstream Basic APIs. Warning
+  suppression is still stored in the Basic-local compatibility manager, with `option.WarningOptionMgr` forwarding
+  updates by generated warning-group index; fully replacing those public enum/storage types with Option-owned types
+  requires a coordinated package-graph and API migration across users of `basic.*`.
 - Diagnostic text output now covers C++-style source gutters, padded line numbers, source/no-source notes and helps, substitution previews, same-line grouped hints, multi-line ranges, long-range compression, macro-call headline/note swapping, control characters, and macro expansion excerpts, but it is not byte-for-byte identical to every overlapping-hint hanging/color branch in the C++ `DiagnosticEmitterImpl`.
-- Interop package config parsing covers the table shapes consumed by the C++ reader (`default`, `package`, `generic_object_configuration`, `lambda_patterns`, `class_mappings`) without depending on an external TOML library.
+- Interop package config parsing covers the table shapes consumed by the C++ reader (`default`, `package`,
+  inline and nested `generic_object_configuration`, inline and nested `lambda_patterns`, and nested/inline
+  `class_mappings`) without depending on an external TOML library.
 - Windows-only GBK conversion is represented as optional ASCII-safe conversion plus encoding detection on this non-Windows selfhost target; non-ASCII GBK transcoding still needs a platform bridge if Windows self-hosting is enabled.
 
 Remaining Basic selfhost markers: 0.
