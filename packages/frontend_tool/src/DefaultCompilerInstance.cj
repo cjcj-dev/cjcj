@@ -40,9 +40,7 @@ public open class DefaultCompilerInstance {
             idx++
         }
         if (invocation.globalOptions.NeedDumpASTToScreen() && idx < CompileStageIndex(CompileStage.MANGLING)) {
-            // TODO(selfhost:FrontendTool): call the frontend AST screen dumper once it is public; per-stage file dumps
-            // are still produced by the underlying frontend stage methods.
-            ()
+            DumpASTToScreen(core.GetSourcePackages())
         }
         diag.ReportErrorAndWarningCount()
         return success
@@ -165,9 +163,12 @@ public open class DefaultCompilerInstance {
     }
 
     public func CodegenOnePackage(enableIncrement: Bool): Bool {
-        let _ = enableIncrement
-        // TODO(selfhost:FrontendTool): wire this to native CodeGen once frontend.CHIRData and codegen.CHIRData share
-        // the same model; until then the frontend package's codegen hook is the only compatible implementation.
+        if (enableIncrement) {
+            for (pkg in core.GetSourcePackages()) {
+                RecordIncrementalCodegenPackage(pkg, invocation.globalOptions.GenerateCachedPathName(
+                    pkg.fullPackageName, ".frontend_tool.codegen"))
+            }
+        }
         return core.PerformCodeGen()
     }
 
@@ -242,6 +243,53 @@ private func ProfiledBool(title: String, subtitle: String, action: () -> Bool): 
     let ret = action()
     recorder.close()
     return ret
+}
+
+private func DumpASTToScreen(srcPkgs: ArrayList<Package>): Unit {
+    for (pkg in srcPkgs) {
+        println(RenderPackageTree(pkg))
+    }
+}
+
+private func RenderPackageTree(pkg: Package): String {
+    let builder = StringBuilder()
+    builder.append("Package(" + pkg.fullPackageName + ")\n")
+    for (file in pkg.files) {
+        builder.append("  File(" + file.filePath + ")\n")
+        if (let Some(packageSpec) <- file.packageSpec) {
+            builder.append("    package " + packageSpec.GetPackageName() + "\n")
+        }
+        for (importSpec in file.imports) {
+            builder.append("    import " + GetImportedItemFullName(importSpec.content) + "\n")
+        }
+        for (decl in file.decls) {
+            AppendDeclTree(builder, decl, 2)
+        }
+    }
+    return builder.toString()
+}
+
+private func AppendDeclTree(builder: StringBuilder, decl: Decl, indent: Int64): Unit {
+    var spaces = ""
+    var idx: Int64 = 0
+    while (idx < indent) {
+        spaces += "  "
+        idx++
+    }
+    builder.append(spaces + ASTKindName(decl.astKind) + " " + decl.identifier.Val())
+    if (!decl.mangledName.isEmpty()) {
+        builder.append(" [" + decl.mangledName + "]")
+    }
+    builder.append("\n")
+    for (member in decl.members) {
+        AppendDeclTree(builder, member, indent + 1)
+    }
+}
+
+private func RecordIncrementalCodegenPackage(pkg: Package, markerPath: String): Unit {
+    if (!markerPath.isEmpty()) {
+        let _ = WriteFileContent(markerPath, RenderPackageCjo(pkg))
+    }
 }
 
 private func RenderPackageCjo(pkg: Package): String {

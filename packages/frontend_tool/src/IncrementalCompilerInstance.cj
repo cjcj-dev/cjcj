@@ -44,6 +44,7 @@ public class IncrementalCompilerInstance <: DefaultCompilerInstance {
     public var kind: IncreKind = IncreKind.INVALID
     private let declsToBeReCompiled: HashSet<String> = HashSet<String>()
     private let rawIncrRemovedDecls: ArrayList<String> = ArrayList<String>()
+    private var currentCacheText: String = ""
 
     public init(invocation: CompilerInvocation, diag: DiagnosticEngine) {
         super(invocation, diag)
@@ -55,13 +56,14 @@ public class IncrementalCompilerInstance <: DefaultCompilerInstance {
 
     public override func PerformIncrementalScopeAnalysis(): Bool {
         let recorder = ProfileRecorder("Main Stage", "AST Diff")
+        declsToBeReCompiled.clear()
+        rawIncrRemovedDecls.clear()
+        currentCacheText = ""
         let calculated = core.CalculateASTCache()
         if (!calculated || core.GetSourcePackages().isEmpty()) {
             kind = IncreKind.EMPTY_PKG
         } else {
-            // TODO(selfhost:FrontendTool): replace conservative rollback with the C++ ASTDiff/PollutionAnalyzer flow
-            // once those incremental data structures are exposed through Cangjie packages.
-            kind = IncreKind.ROLLBACK
+            kind = AnalyseCurrentFrontendCache()
         }
         recorder.close()
         return true
@@ -162,15 +164,102 @@ public class IncrementalCompilerInstance <: DefaultCompilerInstance {
     }
 
     private func SaveIncrementalSignatures(): Unit {
-        let _ = declsToBeReCompiled
-        let _ = rawIncrRemovedDecls
+        if (currentCacheText.isEmpty()) {
+            currentCacheText = RenderFrontendToolIncrementalCache()
+        }
+        let cachePath = GetFrontendToolIncrementalCachePath()
+        if (!cachePath.isEmpty()) {
+            let _ = WriteFileContent(cachePath, currentCacheText)
+        }
         for (pkg in core.GetSourcePackages()) {
             if (pkg.IsEmpty()) {
                 continue
             }
-            let cachedCjo = invocation.globalOptions.GenerateCachedPathName(pkg.fullPackageName, SERIALIZED_FILE_EXTENSION)
             let _ = SaveCjo(pkg)
-            let _ = cachedCjo
         }
     }
+
+    private func AnalyseCurrentFrontendCache(): IncreKind {
+        currentCacheText = RenderFrontendToolIncrementalCache()
+        let cachePath = GetFrontendToolIncrementalCachePath()
+        if (cachePath.isEmpty() || !FileExist(cachePath)) {
+            return IncreKind.ROLLBACK
+        }
+        let readResult = ReadFileContent(cachePath)
+        if (!readResult[0]) {
+            return IncreKind.ROLLBACK
+        }
+        let previousCache = readResult[1]
+        if (previousCache == currentCacheText) {
+            return IncreKind.NO_CHANGE
+        }
+        if (GetCacheLineValue(previousCache, "args:") != EscapeCacheLine(core.cachedInfo.compileArgs)) {
+            return IncreKind.ROLLBACK
+        }
+        CollectCacheDelta(previousCache, currentCacheText)
+        return if (declsToBeReCompiled.isEmpty() && rawIncrRemovedDecls.isEmpty()) {
+            IncreKind.NO_CHANGE
+        } else {
+            IncreKind.INCR
+        }
+    }
+
+    private func GetFrontendToolIncrementalCachePath(): String {
+        let pkgs = core.GetSourcePackages()
+        if (pkgs.isEmpty()) {
+            return ""
+        }
+        return invocation.globalOptions.GenerateCachedPathName(pkgs[0].fullPackageName, ".frontend_tool.incr")
+    }
+
+    private func RenderFrontendToolIncrementalCache(): String {
+        let builder = StringBuilder()
+        builder.append("version:1\n")
+        builder.append("args:" + EscapeCacheLine(core.cachedInfo.compileArgs) + "\n")
+        for (summary in core.cachedInfo.fileSummaries) {
+            builder.append("file:" + EscapeCacheLine(summary) + "\n")
+        }
+        for (summary in core.cachedInfo.declSummaries) {
+            builder.append("decl:" + EscapeCacheLine(summary) + "\n")
+        }
+        return builder.toString()
+    }
+
+    private func CollectCacheDelta(previousCache: String, newCache: String): Unit {
+        let previousDecls = CollectCacheLines(previousCache, "decl:")
+        let newDecls = CollectCacheLines(newCache, "decl:")
+        for (oldDecl in previousDecls) {
+            if (!newDecls.contains(oldDecl)) {
+                rawIncrRemovedDecls.add(oldDecl)
+            }
+        }
+        for (newDecl in newDecls) {
+            if (!previousDecls.contains(newDecl)) {
+                declsToBeReCompiled.add(newDecl)
+            }
+        }
+    }
+}
+
+private func CollectCacheLines(cacheText: String, prefix: String): HashSet<String> {
+    let out = HashSet<String>()
+    for (line in SplitLines(cacheText)) {
+        if (line.startsWith(prefix)) {
+            out.add(line[prefix.size..])
+        }
+    }
+    return out
+}
+
+private func GetCacheLineValue(cacheText: String, prefix: String): String {
+    for (line in SplitLines(cacheText)) {
+        if (line.startsWith(prefix)) {
+            return line[prefix.size..]
+        }
+    }
+    return ""
+}
+
+private func EscapeCacheLine(text: String): String {
+    return text.replace("\\", "\\\\").replace("\n", "\\n").replace("\r", "\\r")
 }

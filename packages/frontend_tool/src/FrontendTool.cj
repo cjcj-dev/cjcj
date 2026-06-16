@@ -4,6 +4,7 @@ import std.collection.*
 import cangjie_compiler::basic.PrintVersion
 import cangjie_compiler::basic.WriteError
 import cangjie_compiler::frontend.*
+import cangjie_compiler::utils.FileUtil
 
 public class DriverOptions {
     public let sourceFiles: ArrayList<String> = ArrayList<String>()
@@ -132,9 +133,7 @@ private func ExecuteCompile(instance: DefaultCompilerInstance): Bool {
     }
 
     if (!globalOptions.compilePackage && globalOptions.srcFiles.isEmpty() && !globalOptions.inputObjs.isEmpty()) {
-        // TODO(selfhost:FrontendTool): mirror the C++ inputLibraryOrder rewrite after frontend.GlobalOptions exposes
-        // ordered library inputs; object-only frontend invocations currently have no frontend work to perform.
-        return true
+        return ProcessObjectOnlyFrontendInputs(globalOptions)
     }
 
     if (opts.dumpAction != DumpAction.NO_ACTION) {
@@ -223,6 +222,40 @@ private func ReadPathsFromEnvironmentVars(opts: FrontendOptions, environmentVars
             opts.cangjieHome = absHome
         }
     }
+}
+
+private func ProcessObjectOnlyFrontendInputs(opts: GlobalOptions): Bool {
+    for (inputObj in opts.inputObjs) {
+        let rawName = LibraryBaseName(inputObj)
+        if (rawName.isEmpty()) {
+            continue
+        }
+        let normalizedName = if (rawName.startsWith("libcangjie-")) {
+            rawName[3..]
+        } else {
+            rawName
+        }
+        if (!normalizedName.startsWith("cangjie-")) {
+            continue
+        }
+        let potentialPkgName = normalizedName["cangjie-".size..].replace("-", ".")
+        if (potentialPkgName.isEmpty()) {
+            continue
+        }
+        let converted = FileUtil.ConvertPackageNameToLibCangjieBaseFormat(potentialPkgName)
+        if (!converted.isEmpty() && converted == normalizedName) {
+            opts.indirectBuiltinDependencies.add(potentialPkgName + ".cjo")
+        }
+    }
+    return true
+}
+
+private func LibraryBaseName(path: String): String {
+    var name = GetFileName(path)
+    if (let Some(dotPos) <- name.lastIndexOf(".")) {
+        name = name[0..dotPos]
+    }
+    return name
 }
 
 private func PrintFrontendUsage(): Unit {
