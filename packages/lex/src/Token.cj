@@ -1,6 +1,7 @@
 package cangjie_compiler::lex
 
 import cangjie_compiler::basic.*
+import cangjie_compiler::utils.CJC_ASSERT
 import std.collection.*
 
 public struct Token <: Comparable<Token> & Hashable & Equatable<Token> {
@@ -52,6 +53,8 @@ public struct Token <: Comparable<Token> & Hashable & Equatable<Token> {
     }
 
     public func Length(): Int64 {
+        CJC_ASSERT(begin.fileID == end.fileID)
+        CJC_ASSERT(begin.line == end.line)
         return end.column - begin.column
     }
 

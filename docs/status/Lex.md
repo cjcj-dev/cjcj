@@ -22,8 +22,9 @@ Implemented:
 - Expanded string, rune, byte-rune, unicode-escape, and interpolation diagnostic parity with C++ hints, notes, range choices, unicode scalar validation, escape-note text, rune-overflow help, and byte-literal ASCII checks.
 - Normalized identifier token values at the same point as C++ `LexerImpl::ScanIdentifierContinue`, now through `utils.NFC`.
 - Aligned `Token` identity with the C++ `Token::operator==`/ordering contract by keying equality and hashing on begin position only, which makes token-stream and string-part maps match the reference's position-based token identity.
+- Matched the C++ `Token::Length` precondition checks by asserting same-file and same-line token ranges before computing column length.
 - Restored `GetTokenStream` to ordered `TreeSet<Token>` semantics, matching the C++ `std::set<Token>` behavior instead of exposing an unordered hash set.
-- Restored C++ public lexer/token constants that the earlier port omitted (`NUM_TOKENS == 200`, UTF-8 byte step/index constants, and shift constants) and padded the precedence table to the reference capacity.
+- Restored C++ public lexer/token constants that the earlier port omitted (`NUM_TOKENS == 200`, UTF-8 byte step/index constants, and shift constants) and padded the precedence table to the exact reference capacity.
 - Matched the C++ `ReserveToken` EOF-padding behavior used by `Seeing` instead of stopping after the first `END` token.
 - Fixed macro-provided ambiguous-token splitting to preserve the C++ left-token source range while mutating the cached right token for `??`, `>>=`, `>>`, and `>=`.
 - Matched C++ invalid composite symbol consumption for `+&=`, `-&=`, `*&=`, and `**&=` so those forms are diagnosed as one illegal token.
