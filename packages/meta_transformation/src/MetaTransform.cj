@@ -12,7 +12,7 @@ public enum MetaTransformKind {
     | FOR_CHIR
 }
 
-private func MetaTransformKindIndex(kind: MetaTransformKind): Int64 {
+public func MetaTransformKindIndex(kind: MetaTransformKind): Int64 {
     return match (kind) {
         case MetaTransformKind.UNKNOWN => 0
         case MetaTransformKind.FOR_CHIR_FUNC => 1
@@ -29,6 +29,22 @@ extend MetaTransformKind <: Equatable<MetaTransformKind> {
     public operator func !=(right: MetaTransformKind): Bool {
         return !(this == right)
     }
+
+    public operator func <(right: MetaTransformKind): Bool {
+        return MetaTransformKindIndex(this) < MetaTransformKindIndex(right)
+    }
+
+    public operator func <=(right: MetaTransformKind): Bool {
+        return MetaTransformKindIndex(this) <= MetaTransformKindIndex(right)
+    }
+
+    public operator func >(right: MetaTransformKind): Bool {
+        return MetaTransformKindIndex(this) > MetaTransformKindIndex(right)
+    }
+
+    public operator func >=(right: MetaTransformKind): Bool {
+        return MetaTransformKindIndex(this) >= MetaTransformKindIndex(right)
+    }
 }
 
 public open class MetaTransformConcept {
@@ -36,7 +52,7 @@ public open class MetaTransformConcept {
 
     public init() {}
 
-    public init(kind: MetaTransformKind) {
+    protected init(kind: MetaTransformKind) {
         this.kind = kind
     }
 
@@ -45,8 +61,7 @@ public open class MetaTransformConcept {
     }
 
     public func IsForCHIR(): Bool {
-        return MetaTransformKindIndex(kind) > MetaTransformKindIndex(MetaTransformKind.UNKNOWN) &&
-            MetaTransformKindIndex(kind) < MetaTransformKindIndex(MetaTransformKind.FOR_CHIR)
+        return kind > MetaTransformKind.UNKNOWN && kind < MetaTransformKind.FOR_CHIR
     }
 
     public func IsForFunc(): Bool {
@@ -67,7 +82,7 @@ public abstract class MetaTransform<DeclT> <: MetaTransformConcept & MetaTransfo
         super(MetaTransformKind.UNKNOWN)
     }
 
-    public init(kind: MetaTransformKind) {
+    protected init(kind: MetaTransformKind) {
         super(kind)
     }
 }

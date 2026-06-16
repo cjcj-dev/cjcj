@@ -2,7 +2,7 @@ package cangjie_compiler::meta_transformation
 
 import std.collection.*
 
-public class MetaKindCHIR {
+public struct MetaKindCHIR {
     public init() {}
 }
 
@@ -23,4 +23,3 @@ public class MetaTransformPluginManager<MetaKindT> {
 }
 
 public type CHIRPluginManager = MetaTransformPluginManager<MetaKindCHIR>
-
