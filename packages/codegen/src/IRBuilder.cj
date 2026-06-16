@@ -335,6 +335,78 @@ public class IRBuilder2 {
         return CreateCall(callee, calleeType, args, name: name)
     }
 
+    public func GetOrInsertIntrinsicDeclaration(intrinsicName: String): LLVMValueRef {
+        return GetOrInsertIntrinsicDeclaration(intrinsicName, ArrayList<LLVMTypeRef>())
+    }
+
+    public func GetOrInsertIntrinsicDeclaration(intrinsicName: String,
+        overloadedTypes: ArrayList<LLVMTypeRef>): LLVMValueRef {
+        let intrinsicID = LookupIntrinsicID(intrinsicName)
+        if (intrinsicID == 0u32) {
+            return LLVMNullValue()
+        }
+        if (let Some(moduleHandle) <- cgMod.GetLLVMModule()) {
+            if (overloadedTypes.isEmpty()) {
+                return unsafe {
+                    LLVMGetIntrinsicDeclaration(moduleHandle.raw, intrinsicID, CPointer<LLVMTypeRef>(), 0)
+                }
+            }
+            var result = LLVMNullValue()
+            try (typePtr = LibC.malloc<LLVMTypeRef>(count: overloadedTypes.size).asResource()) {
+                var typeIdx: Int64 = 0
+                while (typeIdx < overloadedTypes.size) {
+                    unsafe { (typePtr.value + typeIdx).write(overloadedTypes[typeIdx]) }
+                    typeIdx++
+                }
+                result = unsafe {
+                    LLVMGetIntrinsicDeclaration(moduleHandle.raw, intrinsicID, typePtr.value,
+                        UIntNative(overloadedTypes.size))
+                }
+            }
+            return result
+        }
+        return LLVMNullValue()
+    }
+
+    public func GetIntrinsicFunctionType(intrinsicName: String): LLVMTypeRef {
+        return GetIntrinsicFunctionType(intrinsicName, ArrayList<LLVMTypeRef>())
+    }
+
+    public func GetIntrinsicFunctionType(intrinsicName: String, overloadedTypes: ArrayList<LLVMTypeRef>): LLVMTypeRef {
+        let intrinsicID = LookupIntrinsicID(intrinsicName)
+        if (intrinsicID == 0u32) {
+            return LLVMNullType()
+        }
+        if (overloadedTypes.isEmpty()) {
+            return unsafe { LLVMIntrinsicGetType(GetLLVMContext().raw, intrinsicID, CPointer<LLVMTypeRef>(), 0) }
+        }
+        var result = LLVMNullType()
+        try (typePtr = LibC.malloc<LLVMTypeRef>(count: overloadedTypes.size).asResource()) {
+            var typeIdx: Int64 = 0
+            while (typeIdx < overloadedTypes.size) {
+                unsafe { (typePtr.value + typeIdx).write(overloadedTypes[typeIdx]) }
+                typeIdx++
+            }
+            result = unsafe {
+                LLVMIntrinsicGetType(GetLLVMContext().raw, intrinsicID, typePtr.value, UIntNative(overloadedTypes.size))
+            }
+        }
+        return result
+    }
+
+    public func CreateIntrinsicCall(intrinsicName: String, overloadedTypes: ArrayList<LLVMTypeRef>,
+        args: ArrayList<LLVMValueRef>, name!: String = ""): LLVMValueRef {
+        let callee = GetOrInsertIntrinsicDeclaration(intrinsicName, overloadedTypes)
+        if (callee.isNull()) {
+            return LLVMNullValue()
+        }
+        let calleeType = GetIntrinsicFunctionType(intrinsicName, overloadedTypes)
+        if (calleeType.isNull()) {
+            return LLVMNullValue()
+        }
+        return CreateCallOrInvoke(callee, calleeType, args, name: name)
+    }
+
     public func CreateGEP(elementType: LLVMTypeRef, pointer: LLVMValueRef, indices: ArrayList<LLVMValueRef>,
         name!: String = ""): LLVMValueRef {
         var result = LLVMNullValue()
@@ -580,6 +652,14 @@ public class IRBuilder2 {
             result = unsafe { LLVMFunctionType(returnType, paramPtr.value, UInt32(paramTypes.size), 0) }
         }
         return result
+    }
+
+    private func LookupIntrinsicID(intrinsicName: String): UInt32 {
+        var intrinsicID = 0u32
+        try (nameCString = unsafe { LibC.mallocCString(intrinsicName) }.asResource()) {
+            intrinsicID = unsafe { LLVMLookupIntrinsicID(nameCString.value, UIntNative(intrinsicName.size)) }
+        }
+        return intrinsicID
     }
 
     private func IsFloatOperand(ty: Option<Type>): Bool {

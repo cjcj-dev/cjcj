@@ -30,11 +30,65 @@ public func HandleTerminatorExpression(irBuilder: IRBuilder2, chirExpr: Expressi
         let retValue = irBuilder.GetCGModule().MaterializeValue(irBuilder, chirExpr.GetOperand(0))
         return irBuilder.CreateRet(retValue.GetRawValue())
     }
-    let exceptionalSuccessors = GetTerminatorSuccessors(chirExpr)
-    if (!exceptionalSuccessors.isEmpty()) {
-        return irBuilder.CreateBr(GetOrCreateTerminatorDest(irBuilder, exceptionalSuccessors[0]))
+    if (kind == ExprKind.RAISE_EXCEPTION) {
+        return HandleRaiseException(irBuilder, chirExpr)
+    }
+    if (IsCallLikeWithExceptionKind(kind)) {
+        return HandleWithExceptionTerminator(irBuilder, chirExpr, { builder: IRBuilder2, expr: Expression =>
+            EmitCallLikeExpression(builder, expr)
+        })
+    }
+    if (kind == ExprKind.TYPECAST_WITH_EXCEPTION) {
+        return HandleWithExceptionTerminator(irBuilder, chirExpr, { builder: IRBuilder2, expr: Expression =>
+            EmitTypeCastExpression(builder, expr)
+        })
+    }
+    if (kind == ExprKind.ALLOCATE_WITH_EXCEPTION) {
+        return HandleWithExceptionTerminator(irBuilder, chirExpr, { builder: IRBuilder2, expr: Expression =>
+            GenerateAllocate(builder, expr)
+        })
     }
     return LLVMNullValue()
+}
+
+private func HandleRaiseException(irBuilder: IRBuilder2, chirExpr: Expression): LLVMValueRef {
+    if (chirExpr.GetNumOfOperands() == 0) {
+        return irBuilder.CreateUnreachable()
+    }
+    let successors = GetTerminatorSuccessors(chirExpr)
+    let exceptionValue = irBuilder.GetCGModule().MaterializeValue(irBuilder, chirExpr.GetOperand(0))
+    if (!successors.isEmpty()) {
+        let unwindDest = GetOrCreateTerminatorDest(irBuilder, successors[0])
+        try (scope = CodeGenUnwindBlockScope(irBuilder.GetCGModule(), unwindDest)) {
+            irBuilder.CallExceptionIntrinsicThrow(exceptionValue.GetRawValue())
+        }
+    } else {
+        irBuilder.CallExceptionIntrinsicThrow(exceptionValue.GetRawValue())
+    }
+    return LLVMNullValue()
+}
+
+private func IsCallLikeWithExceptionKind(kind: ExprKind): Bool {
+    return kind == ExprKind.APPLY_WITH_EXCEPTION || kind == ExprKind.INVOKE_WITH_EXCEPTION ||
+        kind == ExprKind.INVOKESTATIC_WITH_EXCEPTION
+}
+
+private func HandleWithExceptionTerminator(irBuilder: IRBuilder2, chirExpr: Expression,
+    emit: (IRBuilder2, Expression) -> LLVMValueRef): LLVMValueRef {
+    let successors = GetTerminatorSuccessors(chirExpr)
+    if (successors.size < 2) {
+        return emit(irBuilder, chirExpr)
+    }
+    let normalDest = GetOrCreateTerminatorDest(irBuilder, successors[0])
+    let unwindDest = GetOrCreateTerminatorDest(irBuilder, successors[1])
+    var result = LLVMNullValue()
+    try (scope = CodeGenUnwindBlockScope(irBuilder.GetCGModule(), unwindDest)) {
+        result = emit(irBuilder, chirExpr)
+    }
+    if (!normalDest.isNull()) {
+        irBuilder.CreateBr(normalDest)
+    }
+    return result
 }
 
 private func GetTerminatorSuccessors(chirExpr: Expression): ArrayList<Block> {

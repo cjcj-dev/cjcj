@@ -22,7 +22,9 @@ Implemented:
   modules, builders, primitive/composite/function types, constants, integer and floating arithmetic instructions,
   comparisons, casts, GEPs, calls, branches, returns, attributes, debug locations, global initializers,
   verification, bitcode writing, basic-block/instruction iteration, use-list checks, declaration/global/function
-  iteration, deletion APIs, and insertion-point clearing. LLVM itself is not reimplemented.
+  iteration, deletion APIs, insertion-point clearing, and intrinsic lookup/declaration/type queries through
+  `LLVMLookupIntrinsicID`, `LLVMGetIntrinsicDeclaration`, and `LLVMIntrinsicGetType`. LLVM itself is not
+  reimplemented.
 - Added CodeGen-owned LLVM handle wrappers and module/context ownership helpers.
 - Added a package-level lowering entry point shaped like the C++ `EmitPackageIR`, including CHIR package splitting,
   per-submodule context/module construction, global and function declaration materialization, function emission
@@ -46,7 +48,8 @@ Implemented:
 - Added `IRBuilder2` wrappers for selected LLVM builder operations, primitive constants, default literal constants,
   call and invoke construction, bitcasts, pointer casts, integer/float extension and truncation, int/float and
   pointer/int conversions, address-space casts, aggregate insertion, GEP construction, unreachable terminators,
-  insertion-point inspection/clearing, and scoped debug-location restoration.
+  insertion-point inspection/clearing, scoped debug-location restoration, and named LLVM intrinsic declaration/call
+  helpers for overloaded and non-overloaded intrinsics.
 - Added a C++-shaped `CGUtils` component for pure CodeGen helpers: basic-block naming, class object layout naming,
   compiler-added class mangling, SipHash/`Out64`-style Cangjie string and constant global names through
   `Utils.HashString64`, reference stripping, and generic/class/struct/varray reference predicates. `IRBuilder2`
@@ -67,9 +70,11 @@ Implemented:
   and floating binary operations through C++-shaped `ArithmeticOpImpl` and `LogicalOpImpl` components, including
   right-hand shift operand normalization and constant `Unit`/`Nothing` equality, allocation/load/store/GEP memory
   expressions through C++-named `AllocateImpl` and `ArrayImpl` components, `GOTO`/`BRANCH`/`EXIT`
-  terminators, call-like expressions through a C++-shaped `ApplyImpl` component using call-or-invoke emission,
-  tuple/aggregate and varray construction through C++-named component files, and scalar/pointer typecast lowering
-  through a C++-shaped `TypeCastImpl` component with real LLVM numeric conversion op selection.
+  terminators, `RAISE_EXCEPTION` through the runtime throw path, with-exception call-like/typecast/allocation
+  terminators through unwind-block scoped invoke emission and normal-successor branching, call-like expressions
+  through a C++-shaped `ApplyImpl` component using call-or-invoke emission, tuple/aggregate and varray construction
+  through C++-named component files, and scalar/pointer typecast lowering through a C++-shaped `TypeCastImpl`
+  component with real LLVM numeric conversion op selection.
 - Added a C++-shaped `EmitExpressionIR` component that emits expression sequences through a local `IRBuilder2`,
   sets the insertion function from the top-level CHIR function, dispatches each expression by major kind, and maps
   non-null results back into `CGModule` with sret result tagging.
@@ -103,4 +108,4 @@ Known gaps:
 
 Remaining CodeGen selfhost markers: 0.
 
-Current CodeGen package size: 54 `.cj` files, approximately 4768 total lines.
+Current CodeGen package size: 54 `.cj` files, approximately 4907 total lines.

@@ -131,6 +131,11 @@ foreign {
 
     func LLVMAddFunction(module: LLVMModuleRef, name: CString, functionType: LLVMTypeRef): LLVMValueRef
     func LLVMGetNamedFunction(module: LLVMModuleRef, name: CString): LLVMValueRef
+    func LLVMLookupIntrinsicID(name: CString, nameLen: UIntNative): UInt32
+    func LLVMGetIntrinsicDeclaration(module: LLVMModuleRef, id: UInt32, paramTypes: CPointer<LLVMTypeRef>,
+        paramCount: UIntNative): LLVMValueRef
+    func LLVMIntrinsicGetType(context: LLVMContextRef, id: UInt32, paramTypes: CPointer<LLVMTypeRef>,
+        paramCount: UIntNative): LLVMTypeRef
     func LLVMGetFirstFunction(module: LLVMModuleRef): LLVMValueRef
     func LLVMGetNextFunction(fn: LLVMValueRef): LLVMValueRef
     func LLVMDeleteFunction(fn: LLVMValueRef): Unit
