@@ -55,6 +55,14 @@ private class CollectDeclsInfo {
     public init() {}
 }
 
+private class InitBoolBox {
+    public var value: Bool
+
+    public init(value: Bool) {
+        this.value = value
+    }
+}
+
 private func ContainsInitDecl(values: ArrayList<Decl>, decl: Decl): Bool {
     for (value in values) {
         if (SameDecl(value, decl)) {
@@ -68,6 +76,44 @@ private func AddUniqueDecl(values: ArrayList<Decl>, decl: Decl): Unit {
     if (!ContainsInitDecl(values, decl)) {
         values.add(decl)
     }
+}
+
+private func CopyDeclList(dst: ArrayList<Decl>, src: ArrayList<Decl>): Unit {
+    dst.clear()
+    for (decl in src) {
+        AddUniqueDecl(dst, decl)
+    }
+}
+
+private func RemoveDecls(values: ArrayList<Decl>, toRemove: ArrayList<Decl>): Unit {
+    var idx: Int64 = 0
+    while (idx < values.size) {
+        if (ContainsInitDecl(toRemove, values[idx])) {
+            values.remove(at: idx)
+        } else {
+            idx++
+        }
+    }
+}
+
+private func RetainDeclIntersection(values: ArrayList<Decl>, other: ArrayList<Decl>): Unit {
+    var idx: Int64 = 0
+    while (idx < values.size) {
+        if (ContainsInitDecl(other, values[idx])) {
+            idx++
+        } else {
+            values.remove(at: idx)
+        }
+    }
+}
+
+private func ContainsPatternVar(values: ArrayList<VarDecl>, decl: Decl): Bool {
+    for (value in values) {
+        if (SameDecl(value, decl)) {
+            return true
+        }
+    }
+    return false
 }
 
 private func IsInitializedButUnreachable(vd: VarDecl): Bool {
@@ -127,16 +173,11 @@ private func MayBeStructTy(target: VarDecl): Bool {
             return true
         }
         if (let Some(genericTy) <- (ty as GenericsTy)) {
-            var hasNonInterfaceBound = false
             for (upperBound in genericTy.upperBounds) {
-                if (upperBound.IsStruct()) {
+                if (upperBound.IsInterface()) {
                     return true
                 }
-                if (!upperBound.IsInterface()) {
-                    hasNonInterfaceBound = true
-                }
             }
-            return !hasNonInterfaceBound
         }
     }
     return false
@@ -214,6 +255,31 @@ private func CollectReferencedDeclsBeforeJumpExpr(block: Block): ArrayList<Decl>
     return result
 }
 
+private func CollectPatternVarsInCondition(expr: Expr, out: ArrayList<VarDecl>): Unit {
+    if (let Some(letPattern) <- (expr as LetPatternDestructor)) {
+        for (pattern in letPattern.patterns) {
+            CollectPatternVars(pattern, out)
+        }
+        return
+    }
+    if (let Some(binary) <- (expr as BinaryExpr)) {
+        if (IsCondition(expr) && binary.op == TokenKind.AND) {
+            if (let Some(left) <- binary.leftExpr) {
+                CollectPatternVarsInCondition(left, out)
+            }
+            if (let Some(right) <- binary.rightExpr) {
+                CollectPatternVarsInCondition(right, out)
+            }
+        }
+        return
+    }
+    if (let Some(paren) <- (expr as ParenExpr)) {
+        if (let Some(child) <- paren.expr) {
+            CollectPatternVarsInCondition(child, out)
+        }
+    }
+}
+
 private func CollectPatternVars(pattern: Pattern, out: ArrayList<VarDecl>): Unit {
     if (let Some(varPattern) <- (pattern as VarPattern)) {
         if (let Some(varDecl) <- varPattern.varDecl) {
@@ -249,6 +315,58 @@ private func CollectPatternVars(pattern: Pattern, out: ArrayList<VarDecl>): Unit
             CollectPatternVars(child, out)
         }
     }
+}
+
+private func CollectConditionalInitializedDecls(node: Node, uninitsDecls: ArrayList<Decl>,
+    patternVars: ArrayList<VarDecl>): ArrayList<Decl> {
+    let conditionalInitialized = ArrayList<Decl>()
+    if (uninitsDecls.isEmpty()) {
+        return conditionalInitialized
+    }
+    let walker = Walker(node, visitPre: { current: Node =>
+        if (let Some(expr) <- (current as Expr)) {
+            if (expr.IsReferenceExpr()) {
+                if (let Some(target) <- expr.GetTarget()) {
+                    if (target.TestAttr(Attribute.INITIALIZED) && ContainsInitDecl(uninitsDecls, target)) {
+                        AddUniqueDecl(conditionalInitialized, target)
+                        if (!ContainsPatternVar(patternVars, target)) {
+                            target.DisableAttr(Attribute.INITIALIZED)
+                        }
+                    }
+                }
+            }
+        }
+        VisitAction.WALK_CHILDREN
+    })
+    walker.Walk()
+    return conditionalInitialized
+}
+
+private func MetControlTransferExpr(node: Node): Bool {
+    if (node.astKind == ASTKind.RETURN_EXPR || node.astKind == ASTKind.JUMP_EXPR ||
+        node.astKind == ASTKind.THROW_EXPR) {
+        return true
+    }
+    if (let Some(block) <- (node as Block)) {
+        for (child in block.body) {
+            if (MetControlTransferExpr(child)) {
+                return true
+            }
+        }
+        return false
+    }
+    if (let Some(assign) <- (node as AssignExpr)) {
+        if (let Some(right) <- assign.rightExpr) {
+            return MetControlTransferExpr(right)
+        }
+        return false
+    }
+    if (let Some(doWhile) <- (node as DoWhileExpr)) {
+        if (let Some(body) <- doWhile.body) {
+            return MetControlTransferExpr(body)
+        }
+    }
+    return false
 }
 
 public class InitializationChecker {
@@ -926,7 +1044,7 @@ public class InitializationChecker {
     }
 
     private func CheckInitInWhileExpr(whileExpr: WhileExpr): Bool {
-        let result = CheckExprOption(whileExpr.condExpr)
+        let result = CheckInitInConditionOption(whileExpr.condExpr)
         CheckInitInLoop(whileExpr.body)
         return result
     }
@@ -967,6 +1085,76 @@ public class InitializationChecker {
         return result
     }
 
+    private func CheckInitInConditionOption(expr: Option<Expr>): Bool {
+        if (let Some(value) <- expr) {
+            return CheckInitInCondition(value)
+        }
+        return true
+    }
+
+    private func CheckInitInCondition(expr: Expr): Bool {
+        if (!IsCondition(expr)) {
+            return CheckInitInExpr(expr)
+        }
+        if (let Some(letPattern) <- (expr as LetPatternDestructor)) {
+            let result = CheckExprOption(letPattern.initializer)
+            let vars = ArrayList<VarDecl>()
+            for (pattern in letPattern.patterns) {
+                CollectPatternVars(pattern, vars)
+            }
+            for (varDecl in vars) {
+                varDecl.EnableAttr(Attribute.INITIALIZED)
+            }
+            return result
+        }
+        if (let Some(binary) <- (expr as BinaryExpr)) {
+            if (binary.op == TokenKind.AND) {
+                var binaryResult = CheckInitInConditionOption(binary.leftExpr)
+                binaryResult = CheckInitInConditionOption(binary.rightExpr) && binaryResult
+                return binaryResult
+            }
+        }
+        if (let Some(paren) <- (expr as ParenExpr)) {
+            if (let Some(child) <- paren.expr) {
+                return CheckInitInCondition(child)
+            }
+            return true
+        }
+        return CheckInitInExpr(expr)
+    }
+
+    private func CheckAndGetConditionalInitDecls(expr: Expr, uninitsDecls: ArrayList<Decl>): ArrayList<Decl> {
+        CheckInitInCondition(expr)
+        if (uninitsDecls.isEmpty()) {
+            return ArrayList<Decl>()
+        }
+        let patternVars = ArrayList<VarDecl>()
+        CollectPatternVarsInCondition(expr, patternVars)
+        return CollectConditionalInitializedDecls(expr, uninitsDecls, patternVars)
+    }
+
+    private func CheckInitInCondBlock(block: Block, uninitsDecls: ArrayList<Decl>,
+        commonInitedDeclsOfBranches: ArrayList<Decl>, firstInitBranchInited: InitBoolBox): Unit {
+        let initedInBlock = CheckAndGetConditionalInitDecls(block, uninitsDecls)
+        if (MetControlTransferExpr(block)) {
+            return
+        }
+        if (!firstInitBranchInited.value) {
+            CopyDeclList(commonInitedDeclsOfBranches, initedInBlock)
+            firstInitBranchInited.value = true
+        } else {
+            RetainDeclIntersection(commonInitedDeclsOfBranches, initedInBlock)
+        }
+    }
+
+    private func UpdateInitCondition(commonInitedDecls: ArrayList<Decl>, uninitsDecls: ArrayList<Decl>): Unit {
+        for (decl in commonInitedDecls) {
+            if (ContainsInitDecl(uninitsDecls, decl)) {
+                decl.EnableAttr(Attribute.INITIALIZED)
+            }
+        }
+    }
+
     private func CheckInitInBinaryExpr(binary: BinaryExpr): Bool {
         if (let Some(desugar) <- binary.desugarExpr) {
             return CheckInitInExpr(desugar)
@@ -994,6 +1182,9 @@ public class InitializationChecker {
 
     private func CheckInitInMatchExpr(matchExpr: MatchExpr): Bool {
         var result = CheckExprOption(matchExpr.selector)
+        let uninitsDecls = CollectUninitializedReferences(matchExpr)
+        let commonInitedDeclsOfBranches = ArrayList<Decl>()
+        let firstInitBranchInited = InitBoolBox(false)
         for (matchCase in matchExpr.matchCases) {
             if (matchCase.TestAttr(Attribute.UNREACHABLE)) {
                 continue
@@ -1002,22 +1193,71 @@ public class InitializationChecker {
                 result = CheckInitInPattern(pattern) && result
             }
             result = CheckExprOption(matchCase.patternGuard) && result
-            CheckBlockOption(matchCase.exprOrDecls)
+            if (result) {
+                if (let Some(block) <- matchCase.exprOrDecls) {
+                    CheckInitInCondBlock(block, uninitsDecls, commonInitedDeclsOfBranches, firstInitBranchInited)
+                }
+            }
         }
         for (other in matchExpr.matchCaseOthers) {
             if (other.TestAttr(Attribute.UNREACHABLE)) {
                 continue
             }
             result = CheckExprOption(other.matchExpr) && result
-            CheckBlockOption(other.exprOrDecls)
+            if (result) {
+                if (let Some(block) <- other.exprOrDecls) {
+                    CheckInitInCondBlock(block, uninitsDecls, commonInitedDeclsOfBranches, firstInitBranchInited)
+                }
+            }
         }
+        UpdateInitCondition(commonInitedDeclsOfBranches, uninitsDecls)
         return result
     }
 
     private func CheckInitInIfExpr(ifExpr: IfExpr): Bool {
-        var result = CheckExprOption(ifExpr.condExpr)
-        CheckBlockOption(ifExpr.thenBody)
-        result = CheckExprOption(ifExpr.elseBody) && result
+        let result = CheckInitInConditionOption(ifExpr.condExpr)
+        let uninitsDecls = CollectUninitializedReferences(ifExpr)
+        let commonInitedDeclsOfBranches = ArrayList<Decl>()
+        let firstInitBranchInited = InitBoolBox(false)
+        let curUninits = ArrayList<Decl>()
+        CopyDeclList(curUninits, uninitsDecls)
+        var visitingIf = ifExpr
+        var isFirstIf = true
+        while (true) {
+            if (let None <- visitingIf.thenBody) {
+                break
+            }
+            if (!isFirstIf) {
+                if (let Some(cond) <- visitingIf.condExpr) {
+                    let initedInCondition = CheckAndGetConditionalInitDecls(cond, curUninits)
+                    RemoveDecls(curUninits, initedInCondition)
+                }
+            }
+            if (let Some(thenBlock) <- visitingIf.thenBody) {
+                CheckInitInCondBlock(thenBlock, curUninits, commonInitedDeclsOfBranches, firstInitBranchInited)
+            }
+            if (!visitingIf.hasElse) {
+                commonInitedDeclsOfBranches.clear()
+                break
+            }
+            if (let Some(elseExpr) <- visitingIf.elseBody) {
+                if (let Some(elseIf) <- (elseExpr as IfExpr)) {
+                    visitingIf = elseIf
+                    isFirstIf = false
+                } else {
+                    if (let Some(elseBlock) <- (elseExpr as Block)) {
+                        CheckInitInCondBlock(elseBlock, curUninits, commonInitedDeclsOfBranches,
+                            firstInitBranchInited)
+                    } else {
+                        CheckInitInExpr(elseExpr)
+                    }
+                    break
+                }
+            } else {
+                break
+            }
+        }
+        UpdateInitCondition(commonInitedDeclsOfBranches, uninitsDecls)
         return result
     }
 
