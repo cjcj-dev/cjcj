@@ -1,7 +1,6 @@
 package cangjie_compiler::utils
 
 import std.runtime.*
-import std.sync.AtomicBool
 
 @When[os != "Windows"]
 public let SIGNAL_MSG_PART_ONE: String = "Interrupt signal ("
@@ -12,7 +11,9 @@ public let SIGNAL_MSG_PART_ONE: String = "Windows unexpected exception code ("
 public let SIGNAL_MSG_PART_TWO: String = ") received."
 
 private let SIGNAL_STACK_SIZE: Int64 = 8192
-private let processingSignalOrException = AtomicBool(false)
+
+@When[os != "Windows"]
+private let SS_ONSTACK: Int32 = 1
 
 @When[os == "Windows"]
 private let EXCEPTION_EXECUTE_HANDLER: Int32 = 1
@@ -98,22 +99,10 @@ private let altStackMemory = LibC.malloc<UInt8>(count: SIGNAL_STACK_SIZE)
 private let altStackRecord = LibC.malloc<SignalStack>(count: 1)
 
 @When[os != "Windows"]
+private let oldAltStackRecord = LibC.malloc<SignalStack>(count: 1)
+
+@When[os != "Windows"]
 private var altStackInstalled = false
-
-private func writeICEMessage(errorCode: Int64): Unit {
-    ICE.PrintVersionFromError()
-    eprintln(ICE.MSG_PART_ONE + SIGNAL_MSG_PART_ONE + errorCode.toString() + SIGNAL_MSG_PART_TWO +
-        ICE.MSG_PART_TWO + ICE.GetTriggerPoint().toString())
-}
-
-private func threadDelaySynchronizer(): Unit {
-    if (processingSignalOrException.swap(true)) {
-        var count: Int64 = 100000
-        while (count > 0) {
-            count--
-        }
-    }
-}
 
 @When[os == "Windows"]
 private func windowsSignalHandler(signum: Int32): Unit {
@@ -235,13 +224,22 @@ public func CreateAltSignalStack(): Unit {
     if (altStackInstalled) {
         return
     }
-    if (altStackMemory.isNull() || altStackRecord.isNull()) {
+    if (altStackMemory.isNull() || altStackRecord.isNull() || oldAltStackRecord.isNull()) {
         InternalError("Failed to create a backup stack for the thread.")
         return
     }
     unsafe {
+        if (sigaltstack(CPointer<SignalStack>(), oldAltStackRecord) != 0) {
+            return
+        }
+        let oldStack = oldAltStackRecord.read()
+        if ((oldStack.ss_flags & SS_ONSTACK) != 0 ||
+            (!oldStack.ss_sp.isNull() && oldStack.ss_size >= UIntNative(SIGNAL_STACK_SIZE))) {
+            altStackInstalled = true
+            return
+        }
         altStackRecord.write(SignalStack(CPointer<Unit>(altStackMemory), 0, UIntNative(SIGNAL_STACK_SIZE)))
-        if (sigaltstack(altStackRecord, CPointer<SignalStack>()) != 0) {
+        if (sigaltstack(altStackRecord, oldAltStackRecord) != 0) {
             InternalError("Failed to create a backup stack for the thread.")
             return
         }
