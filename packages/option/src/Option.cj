@@ -1,7 +1,9 @@
 package cangjie_compiler::option
 
+import cangjie_compiler::utils.CJC_ABORT
 import cangjie_compiler::utils.FileMode as UtilsFileMode
 import cangjie_compiler::utils.Out64
+import cangjie_compiler::utils.OverflowStrategy
 import std.collection.*
 
 public class Path {
@@ -1100,13 +1102,13 @@ public open class GlobalOptions <: Option {
     }
 
     public func OverflowStrategyToSerializedString(): String {
-        return match (overflowStrategy) {
-            case OverflowStrategy.NA => "N"
-            case OverflowStrategy.CHECKED => "C"
-            case OverflowStrategy.WRAPPING => "W"
-            case OverflowStrategy.THROWING => "T"
-            case OverflowStrategy.SATURATING => "S"
-        }
+        if (overflowStrategy == OverflowStrategy.NA) { return "N" }
+        if (overflowStrategy == OverflowStrategy.CHECKED) { return "C" }
+        if (overflowStrategy == OverflowStrategy.WRAPPING) { return "W" }
+        if (overflowStrategy == OverflowStrategy.THROWING) { return "T" }
+        if (overflowStrategy == OverflowStrategy.SATURATING) { return "S" }
+        CJC_ABORT()
+        return ""
     }
 
     public func SanitizerTypeToSerializedString(): String {

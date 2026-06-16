@@ -139,3 +139,12 @@ warning-group enum and index table. `-Woff`/`-Won` now use the real
 shared `WarningOptionMgr`, and unknown warning-group values now fail option
 processing like the C++ `WARN_GROUP_MAP` path instead of being accepted
 silently.
+
+This pass removes another compatibility enum: Option's local
+`OverflowStrategy` copy is replaced by the real `cangjie_compiler::utils`
+definition, re-exported through Option to preserve the public include-like
+surface. `GlobalOptions.overflowStrategy` now has the same type consumed by sema,
+so the old sema-side conversion bridge is gone. `--int-overflow-mode` also uses
+the shared Utils parser/validator, accepting the full C++ set (`no`, `checked`,
+`wrapping`, `throwing`, `saturating`) and preserving the C++ abort-on-invalid
+serialization path.

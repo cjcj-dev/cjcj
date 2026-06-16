@@ -3,6 +3,8 @@ package cangjie_compiler::option
 import cangjie_compiler::basic.WarnGroup as BasicWarnGroup
 import cangjie_compiler::basic.WarnGroupIndex as BasicWarnGroupIndex
 import cangjie_compiler::utils.FileUtil
+import cangjie_compiler::utils.StringToOverflowStrategy
+import cangjie_compiler::utils.ValidOverflowStrategy
 import std.collection.*
 
 public class ActionResult {
@@ -560,10 +562,9 @@ private func parseChirMode(opts: GlobalOptions, value: String): ActionResult {
 }
 
 private func parseOverflowStrategy(opts: GlobalOptions, value: String): ActionResult {
-    if (value == "throwing") { opts.overflowStrategy = OverflowStrategy.THROWING; return handled() }
-    if (value == "wrapping") { opts.overflowStrategy = OverflowStrategy.WRAPPING; return handled() }
-    if (value == "saturating") { opts.overflowStrategy = OverflowStrategy.SATURATING; return handled() }
-    return handled(success: false)
+    if (!ValidOverflowStrategy(value)) { return handled(success: false) }
+    opts.overflowStrategy = StringToOverflowStrategy(value)
+    return handled()
 }
 
 private func parseSancovLevel(opts: GlobalOptions, value: String): ActionResult {

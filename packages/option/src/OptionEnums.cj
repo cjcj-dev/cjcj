@@ -1,5 +1,7 @@
 package cangjie_compiler::option
 
+public import cangjie_compiler::utils.{OverflowStrategy, OverflowStrategyIndex}
+
 public enum Kind {
     | UNKNOWN | FLAG | FLAG_WITH_ARG | SEPARATED | CONTINOUS
 }
@@ -89,7 +91,6 @@ public enum PrintBCHIROption { | DESERIALIED | LINKED | CHIR2BCHIR | CE_CHIR2BCH
 public enum CHIRMode { | NA | STANDARD | WITH_ID | ALL }
 public enum SanitizerType { | NONE | ADDRESS | THREAD | HWADDRESS }
 public enum CandidateEmitCHIRPhase { | NA | RAW | OPT }
-public enum OverflowStrategy { | NA | CHECKED | WRAPPING | THROWING | SATURATING }
 
 public func KindIndex(value: Kind): Int64 {
     return match (value) {
@@ -601,20 +602,4 @@ extend CandidateEmitCHIRPhase <: Equatable<CandidateEmitCHIRPhase> {
         return CandidateEmitCHIRPhaseIndex(this) == CandidateEmitCHIRPhaseIndex(right)
     }
     public operator func !=(right: CandidateEmitCHIRPhase): Bool { return !(this == right) }
-}
-
-public func OverflowStrategyIndex(value: OverflowStrategy): Int64 {
-    return match (value) {
-        case OverflowStrategy.NA => 0
-        case OverflowStrategy.CHECKED => 1
-        case OverflowStrategy.WRAPPING => 2
-        case OverflowStrategy.THROWING => 3
-        case OverflowStrategy.SATURATING => 4
-    }
-}
-extend OverflowStrategy <: Equatable<OverflowStrategy> {
-    public operator func ==(right: OverflowStrategy): Bool {
-        return OverflowStrategyIndex(this) == OverflowStrategyIndex(right)
-    }
-    public operator func !=(right: OverflowStrategy): Bool { return !(this == right) }
 }
