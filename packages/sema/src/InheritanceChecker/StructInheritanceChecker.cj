@@ -61,6 +61,21 @@ private func AddTyUniqueByName(values: ArrayList<Ty>, ty: Ty): Unit {
     values.add(ty)
 }
 
+private func AddTyUniqueByNameSkipping(values: ArrayList<Ty>, ty: Ty, skipTy: Option<Ty>): Unit {
+    if (SameTy(Some(ty), skipTy)) {
+        return
+    }
+    AddTyUniqueByName(values, ty)
+}
+
+private func StringifyInconsistentTypes(inconsistentTypes: TySet, childTy!: Option<Ty> = None): String {
+    let sortedTys = ArrayList<Ty>()
+    for (ty in inconsistentTypes.values) {
+        AddTyUniqueByNameSkipping(sortedTys, ty, childTy)
+    }
+    return "'" + Ty.GetTypesToStableStr(sortedTys, "', '") + "'"
+}
+
 private func IsExtendVisibleForPackage(currentPkg: String, extendDecl: ExtendDecl): Bool {
     let relation = GetPackageRelation(currentPkg, extendDecl.fullPackageName)
     return IsAstVisibleInRelation(extendDecl, relation)
@@ -230,6 +245,7 @@ public class StructInheritanceChecker {
     private let checkingDecls: ArrayList<InheritableDecl> = ArrayList<InheritableDecl>()
     private let instantiatedKeys: HashSet<String> = HashSet<String>()
     private let instantiationTriggers: ArrayList<InstantiationTriggerInfo> = ArrayList<InstantiationTriggerInfo>()
+    private let instantiationTypeMaps: ArrayList<TypeSubst> = ArrayList<TypeSubst>()
     private var infiniteInstantiationOccurred: Bool = false
 
     public init(diag: DiagnosticEngine, typeManager: TypeManager, pkg: Package) {
@@ -307,6 +323,27 @@ public class StructInheritanceChecker {
             return None
         }
         return instantiationTriggers[instantiationTriggers.size - 1]
+    }
+
+    public func HasInstantiationTypeMap(): Bool {
+        return !instantiationTypeMaps.isEmpty()
+    }
+
+    public func PushInstantiationTypeMap(typeMapping: TypeSubst): Unit {
+        instantiationTypeMaps.add(typeMapping.Clone())
+    }
+
+    public func PopInstantiationTypeMap(): Unit {
+        if (!instantiationTypeMaps.isEmpty()) {
+            instantiationTypeMaps.remove(at: instantiationTypeMaps.size - 1)
+        }
+    }
+
+    public func CurrentInstantiationTypeMap(): Option<TypeSubst> {
+        if (instantiationTypeMaps.isEmpty()) {
+            return None
+        }
+        return instantiationTypeMaps[instantiationTypeMaps.size - 1]
     }
 
     public func HasInfiniteInstantiationOccurred(): Bool {
@@ -1167,7 +1204,7 @@ public class StructInheritanceChecker {
                 NodeRange(node),
                 arguments: [typeName, DeclKindText(memberDecl), memberDecl.identifier.Val()]
             )
-            builder.AddNote("conflict types are " + member.inconsistentTypes.ToString())
+            builder.AddNote("conflict types are " + StringifyInconsistentTypes(member.inconsistentTypes))
         }
     }
 
@@ -1354,6 +1391,7 @@ public class StructInheritanceChecker {
                     if (let Some(childFuncTy) <- FuncTyFromOption(child.ty)) {
                         let sameSignature = typeManager.IsFuncParameterTypesIdentical(parentFuncTy, childFuncTy)
                         if (sameSignature) {
+                            let inheritedByExtension = typeManager.HasExtensionRelation(childFuncTy.retTy, parentFuncTy.retTy)
                             if (!AreFuncParameterNameIdentical(parentFunc, childFunc)) {
                                 DiagnoseParameterName(diag, parentFunc, childFunc)
                             } else if (!CheckThisTypeCompatibility(parentFunc, childFunc)) {
@@ -1373,7 +1411,7 @@ public class StructInheritanceChecker {
                                 }
                                 CheckAccessVisibility(parentFunc, childFunc, diagNode)
                                 CheckGenericTypeArgInfo(parent, child)
-                            } else if (!CheckReturnOverrideByGeneric(parentFuncTy, childFuncTy)) {
+                            } else if (inheritedByExtension || !CheckReturnOverrideByGeneric(parentFuncTy, childFuncTy)) {
                                 let builder = diag.Diagnose(
                                     childFunc.begin,
                                     childFunc.end,
@@ -1382,14 +1420,23 @@ public class StructInheritanceChecker {
                                 )
                                 builder.AddNote(DeclRange(parentFunc), "cannot override/implement the following function")
                             } else {
+                                var targetFunc: FuncDecl = parentFunc
+                                var inconsistentTypesText = "'" + parentFuncTy.retTy.String() + "'"
+                                if (!parent.inconsistentTypes.IsEmpty()) {
+                                    targetFunc = childFunc
+                                    inconsistentTypesText = StringifyInconsistentTypes(
+                                        parent.inconsistentTypes,
+                                        childTy: Some(childFuncTy.retTy)
+                                    )
+                                }
                                 let builder = diag.DiagnoseRefactor(
                                     DiagKindRefactor.sema_return_type_incompatible,
                                     DeclRange(childFunc),
                                     arguments: [childFunc.identifier.Val()]
                                 )
                                 builder.AddNote(
-                                    DeclRange(parentFunc),
-                                    "'" + childFuncTy.retTy.String() + "' is not a subtype of '" + parentFuncTy.retTy.String() + "'"
+                                    DeclRange(targetFunc),
+                                    "'" + childFuncTy.retTy.String() + "' is not a subtype of " + inconsistentTypesText
                                 )
                             }
                             if (!childFunc.IsConst() && parentDecl.IsConst()) {

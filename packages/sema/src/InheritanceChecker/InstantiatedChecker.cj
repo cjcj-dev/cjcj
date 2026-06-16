@@ -193,6 +193,13 @@ private func WillCauseInfiniteInstantiation(
         checker.MarkInfiniteInstantiationOccurred()
         return true
     }
+    if (let Some(currentMapping) <- checker.CurrentInstantiationTypeMap()) {
+        if (HaveCyclicSubstitution(checker.typeManager, currentMapping)) {
+            checker.diag.Diagnose(triggerNode.begin, DiagKind.sema_generic_infinite_instantiation)
+            checker.MarkInfiniteInstantiationOccurred()
+            return true
+        }
+    }
     if (let None <- decl.GetGeneric()) {
         return false
     }
@@ -210,6 +217,37 @@ private func WillCauseInfiniteInstantiation(
         }
     }
     return false
+}
+
+private func ApplyCurrentInstantiationMap(checker: StructInheritanceChecker, instTys: ArrayList<Ty>): Unit {
+    if (let Some(currentMapping) <- checker.CurrentInstantiationTypeMap()) {
+        var idx: Int64 = 0
+        while (idx < instTys.size) {
+            instTys[idx] = checker.typeManager.GetInstantiatedTy(instTys[idx], currentMapping)
+            idx++
+        }
+    }
+}
+
+private func MergeTypeSubstForInstantiation(target: TypeSubst, source: TypeSubst): Unit {
+    for (entry in source.entries) {
+        target.Put(entry.tyVar, entry.ty)
+    }
+}
+
+private func BuildInstantiationTypeMap(decl: Decl, instTys: ArrayList<Ty>): TypeSubst {
+    if (let Some(extendDecl) <- (decl as ExtendDecl)) {
+        if (let Some(extendTy) <- extendDecl.GetTy()) {
+            if (extendTy.IsNominal()) {
+                if (let Some(targetDecl) <- Ty.GetDeclPtrOfTy(extendTy)) {
+                    let typeMapping = GenerateTypeMapping(targetDecl, instTys)
+                    MergeTypeSubstForInstantiation(typeMapping, GenerateTypeMapping(decl, extendTy.typeArgs))
+                    return typeMapping
+                }
+            }
+        }
+    }
+    return GenerateTypeMapping(decl, instTys)
 }
 
 func CheckInstDupFuncsRecursively(checker: StructInheritanceChecker, node: Node): VisitAction {
@@ -247,14 +285,20 @@ func CheckInstDupFuncsRecursively(checker: StructInheritanceChecker, node: Node)
             if (WillCauseInfiniteInstantiation(checker, node, target, instTys, typeMapping)) {
                 return VisitAction.STOP_NOW
             }
-            checker.PushInstantiationTrigger(node, target, instTys)
+            ApplyCurrentInstantiationMap(checker, instTys)
+            let shouldUpdateTrigger = !baseTy.HasGeneric() || !checker.HasInstantiationTypeMap()
+            if (shouldUpdateTrigger) {
+                checker.PushInstantiationTrigger(node, target, instTys)
+            }
             if (let Some(inheritable) <- (target as InheritableDecl)) {
                 CheckInstMemberSignatures(checker, inheritable, instTys)
             }
             for (extendDecl in GetVisibleExtendsForInstantiation(checker, target, instTys)) {
                 CheckInstMemberSignatures(checker, extendDecl, instTys)
             }
-            checker.PopInstantiationTrigger()
+            if (shouldUpdateTrigger) {
+                checker.PopInstantiationTrigger()
+            }
         }
     }
     return VisitAction.WALK_CHILDREN
@@ -264,11 +308,13 @@ func CheckInstantiatedDecl(checker: StructInheritanceChecker, decl: Decl, instTy
     if (decl.IsBuiltIn()) {
         return
     }
-    let _ = instTys
+    let typeMapping = BuildInstantiationTypeMap(decl, instTys)
+    checker.PushInstantiationTypeMap(typeMapping)
     let walker = Walker(decl, visitPre: { node: Node =>
         CheckInstDupFuncsRecursively(checker, node)
     })
     walker.Walk()
+    checker.PopInstantiationTypeMap()
 }
 
 func CheckInstDupFuncsInNominalDecls(checker: StructInheritanceChecker): Unit {

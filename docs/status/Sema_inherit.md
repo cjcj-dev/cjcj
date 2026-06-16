@@ -44,6 +44,19 @@ Deepening update:
   the instantiation use site with the instantiated declaration text, pre-walks referenced generic nominal declarations,
   and diagnoses direct/cyclic generic infinite instantiation with the real substitution cycle helper.
 
+Continuation deepening update:
+
+- Generic override constraint diagnostics now mirror the C++ mapped-bound check more closely: parent constraints are
+  instantiated before formatting, rendered in stable type order, and reported on the exact child generic constraint node
+  when available instead of on the whole child declaration.
+- Return-type inconsistency diagnostics now use stable quoted conflict-type text and exclude the child return type from
+  the inherited conflict list when matching the C++ override failure note.
+- Function override return checking now includes the C++ extension-relation invariance branch before falling back to
+  subtype-incompatible diagnostics.
+- Instantiated declaration walking now keeps a substitution stack like the C++ `institutionMaps`: nested instantiated
+  type arguments are substituted through the active map, active maps participate in cyclic-substitution detection, and
+  extend declarations build a combined map from the extended nominal type and the extension's own type arguments.
+
 De-isolation status: the implementation imports `cangjie_compiler::ast`, `cangjie_compiler::basic`, and
 `cangjie_compiler::sema` directly. This pass also imports the real `cangjie_compiler::modules` package-relation helper.
 It does not define local compatibility copies of AST, Basic, Lex, diagnostics, TypeManager, or generic substitution
@@ -51,8 +64,9 @@ types.
 
 Known remaining fidelity gaps are caused by sibling systems that are not yet represented in this self-hosting package:
 full import-manager extend accessibility, native backend Java/ObjC inheritance annotation checks, C++ extension ordering
-generic substitution through extended generic type arguments, full C++ diagnostic note/hint parity, and replay caching for
-duplicate instantiated-member diagnostics. The implemented behavior is executable and participates in the package build,
-but it is not yet wired into `TypeChecker::CheckInheritance` because that owner is outside this pass's edit scope.
+generic substitution through extended generic type arguments for cross-extension ordering, full C++ diagnostic note/hint
+parity, and replay caching for duplicate instantiated-member diagnostics. The implemented behavior is executable and
+participates in the package build, but it is not yet wired into `TypeChecker::CheckInheritance` because that owner is
+outside this pass's edit scope.
 
-Verification: `cjpm build` passes for the whole workspace after this deepening pass.
+Verification: `cjpm build` passes for the whole workspace after this continuation deepening pass.
