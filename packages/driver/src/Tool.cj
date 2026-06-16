@@ -11,6 +11,10 @@ public func MakeSingleToolBatch(tool: Tool): ToolBatch {
     return result
 }
 
+private func EnvironmentLauncherPath(): String {
+    return if (FileUtil.FileExist("/usr/bin/env")) { "/usr/bin/env" } else { "env" }
+}
+
 public class Tool {
     public let toolType: ToolType
     public let name: String
@@ -85,7 +89,11 @@ public class Tool {
             return ThreadFuture(InternalImplementedCommandExec())
         }
         try {
-            let code = execute(name, args.toArray())
+            let code = if (HostOS() == OSType.WINDOWS) {
+                execute(name, args.toArray())
+            } else {
+                execute(EnvironmentLauncherPath(), BuildEnvironmentLauncherArgs())
+            }
             return ProcessFuture(code)
         } catch (e: Exception) {
             return ErrorFuture(e.message)
@@ -134,6 +142,19 @@ public class Tool {
             return FileUtil.CopyFile(full[1], full[2])
         }
         return false
+    }
+
+    private func BuildEnvironmentLauncherArgs(): Array<String> {
+        let launcherArgs = ArrayList<String>()
+        launcherArgs.add("-i")
+        for (entry in BuildEnvironmentVector()) {
+            launcherArgs.add(entry)
+        }
+        launcherArgs.add(name)
+        for (arg in args) {
+            launcherArgs.add(arg)
+        }
+        return launcherArgs.toArray()
     }
 
     public func BuildEnvironmentVector(): Array<String> {

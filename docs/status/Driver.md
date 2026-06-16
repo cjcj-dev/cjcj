@@ -49,6 +49,13 @@ Current status:
   package-specific symbol-localization lists when available, schedules the
   `objcopy --localize-symbols` visibility pass, and copies combined package
   objects into the aggressive-parallel cache slot.
+- Job execution now preserves C++ batch semantics more closely by running tools
+  within a `ToolBatch` through a bounded worker set derived from `--jobs`, while
+  keeping dependency-ordered batches sequential.
+- External tool execution now uses the Driver's sanitized environment vector on
+  POSIX hosts through an `env -i` launcher, so `LD_LIBRARY_PATH` and blocked
+  loader/compiler-wrapper variables are applied to the actual process rather
+  than only to verbose command text.
 
 Residual fidelity risks:
 
@@ -63,6 +70,9 @@ Residual fidelity risks:
 - The Windows-specific `main-frontend.cpp` process wrapper is represented by a
   direct Cangjie frontend shim rather than a separate `CreateProcess`-style
   executable launcher.
+- POSIX external-process execution now has sanitized environment parity through
+  the standard process API, but it still goes through an `env` launcher rather
+  than a direct `posix_spawn`/`CreateProcess` FFI implementation.
 
 Module completion:
 
