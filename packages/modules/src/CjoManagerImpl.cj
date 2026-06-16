@@ -277,8 +277,11 @@ public class CjoManagerImpl {
         if (!commonPartLoaders.isEmpty()) {
             return commonPartLoaders
         }
+        if (globalOptions.commonPartCjos.isEmpty()) {
+            diag.ReportError("module_common_part_path_is_required", "common part cjo path is required")
+        }
         for (path in globalOptions.commonPartCjos) {
-            let loaderOpt = ReadCjo(expectedName, path, cjoManager, printErr: false)
+            let loaderOpt = ReadCjo(expectedName, path, cjoManager)
             if (let Some(loader) <- loaderOpt) {
                 commonPartLoaders.add(loader)
             }
@@ -293,25 +296,31 @@ public class CjoManagerImpl {
         printErr!: Bool = true
     ): Option<ASTLoader> {
         if (let Some(cache) <- cjoFileCacheMap.get(fullPackageName)) {
-            return Some(ASTLoader(cache.data.toArray(), fullPackageName, cjoManager, globalOptions))
+            return Some(CreateASTLoader(cache.data.toArray(), fullPackageName, cjoManager))
         }
         if (cjoPath.isEmpty() || !exists(cjoPath)) {
             if (printErr) {
                 diag.ReportError("package_search_error", "cannot find serialized package '${fullPackageName}'")
                 return None
             }
-            return Some(ASTLoader("".toArray(), fullPackageName, cjoManager, globalOptions))
+            return Some(CreateASTLoader("".toArray(), fullPackageName, cjoManager))
         }
         try {
             let bytes = FSFile.readFrom(cjoPath)
-            return Some(ASTLoader(bytes, fullPackageName, cjoManager, globalOptions))
+            return Some(CreateASTLoader(bytes, fullPackageName, cjoManager))
         } catch (e: Exception) {
             if (printErr) {
                 diag.ReportError("cjo_read_error", "cannot read serialized package '${fullPackageName}'")
                 return None
             }
-            return Some(ASTLoader("".toArray(), fullPackageName, cjoManager, globalOptions))
+            return Some(CreateASTLoader("".toArray(), fullPackageName, cjoManager))
         }
+    }
+
+    private func CreateASTLoader(data: Array<UInt8>, fullPackageName: String, cjoManager: CjoManager): ASTLoader {
+        let loader = ASTLoader(data, fullPackageName, cjoManager, globalOptions)
+        loader.SetImportSourceCode(importSrcCode)
+        return loader
     }
 
     public func IsReExportBy(srcPackage: String, reExportPackage: String): Bool {
