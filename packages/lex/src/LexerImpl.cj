@@ -1467,6 +1467,7 @@ public class LexerImpl {
     }
 
     private func ScanNumberExponentPart(reasonPoint: Int64): Unit {
+        let expReasonPoint = if (reasonPoint == pCurrent) { reasonPoint } else { pCurrent }
         ReadUTF8Char()
         tokenKind = TokenKind.FLOAT_LITERAL
         if (currentChar == Int64(b'-')) {
@@ -1477,7 +1478,7 @@ public class LexerImpl {
             success = false
         }
         var expHasDigit = false
-        let digits = ProcessDigits(DEC_BASE, expHasDigit, reasonPoint, false)
+        let digits = ProcessDigits(DEC_BASE, expHasDigit, expReasonPoint, false)
         expHasDigit = digits[0]
         if (!expHasDigit && success) {
             DiagExpectedDigit(b'd')
@@ -1528,7 +1529,6 @@ public class LexerImpl {
                 arguments: [args]
             )
             builder.AddMainHintArguments([args])
-            success = false
         }
         Back()
     }

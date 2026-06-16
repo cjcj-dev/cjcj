@@ -30,6 +30,7 @@ Implemented:
 - Added C++-style diagnostics for non-ASCII numeric junk, illegal Unicode identifier continuations, and missing multiline/raw-string delimiter hints.
 - Reworked string-interpolation hole scanning to mirror the C++ helper split for nested braces, strings, comments, linebreak diagnostics, and raw-string failure propagation.
 - Routed non-identifier Unicode token starts through the C++ symbol fallback path so they produce `lex_unknown_start_of_token` behavior instead of Lex-local unrecognized-symbol handling.
+- Aligned numeric exponent/suffix diagnostics with C++ by anchoring exponent digit scanning at the exponent marker and preserving the reference `success` state after unknown-suffix reporting.
 
 Known validation caveats:
 
