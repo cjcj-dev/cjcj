@@ -40,6 +40,7 @@ public class GenericInstantiationManagerImpl {
     public init(ci: CompilerInstance) {
         this.ci = ci
         context = GenericInstantiationContext(ci.typeManager)
+        SetOptLevel(ci.globalOptions)
     }
 
     public func GenericInstantiatePackage(pkg: Package, resetGlobalState!: Bool = true): Unit {
