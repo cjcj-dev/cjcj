@@ -242,6 +242,89 @@ private func WideCharWidth(ucs: UInt32): Int64 {
     return if (isWide) { 2 } else { 1 }
 }
 
+private func isUtf8Continuation(byte: UInt8): Bool {
+    return (byte & 0xc0u8) == 0x80u8
+}
+
+private func hasUtf8Continuation(bytes: Array<UInt8>, index: Int64): Bool {
+    return index < bytes.size && isUtf8Continuation(bytes[index])
+}
+
+private func isValidDisplayUtf8(str: String): Bool {
+    let bytes = str.toArray()
+    var idx: Int64 = 0
+    while (idx < bytes.size) {
+        let first = bytes[idx]
+        if (first <= 0x7fu8) {
+            idx++
+            continue
+        }
+        if (first >= 0xc2u8 && first <= 0xdfu8) {
+            if (!hasUtf8Continuation(bytes, idx + 1)) {
+                return false
+            }
+            idx += 2
+            continue
+        }
+        if (first == 0xe0u8) {
+            if (idx + 2 >= bytes.size || bytes[idx + 1] < 0xa0u8 || bytes[idx + 1] > 0xbfu8 ||
+                !hasUtf8Continuation(bytes, idx + 2)) {
+                return false
+            }
+            idx += 3
+            continue
+        }
+        if (first >= 0xe1u8 && first <= 0xecu8) {
+            if (!hasUtf8Continuation(bytes, idx + 1) || !hasUtf8Continuation(bytes, idx + 2)) {
+                return false
+            }
+            idx += 3
+            continue
+        }
+        if (first == 0xedu8) {
+            if (idx + 2 >= bytes.size || bytes[idx + 1] < 0x80u8 || bytes[idx + 1] > 0x9fu8 ||
+                !hasUtf8Continuation(bytes, idx + 2)) {
+                return false
+            }
+            idx += 3
+            continue
+        }
+        if (first >= 0xeeu8 && first <= 0xefu8) {
+            if (!hasUtf8Continuation(bytes, idx + 1) || !hasUtf8Continuation(bytes, idx + 2)) {
+                return false
+            }
+            idx += 3
+            continue
+        }
+        if (first == 0xf0u8) {
+            if (idx + 3 >= bytes.size || bytes[idx + 1] < 0x90u8 || bytes[idx + 1] > 0xbfu8 ||
+                !hasUtf8Continuation(bytes, idx + 2) || !hasUtf8Continuation(bytes, idx + 3)) {
+                return false
+            }
+            idx += 4
+            continue
+        }
+        if (first >= 0xf1u8 && first <= 0xf3u8) {
+            if (!hasUtf8Continuation(bytes, idx + 1) || !hasUtf8Continuation(bytes, idx + 2) ||
+                !hasUtf8Continuation(bytes, idx + 3)) {
+                return false
+            }
+            idx += 4
+            continue
+        }
+        if (first == 0xf4u8) {
+            if (idx + 3 >= bytes.size || bytes[idx + 1] < 0x80u8 || bytes[idx + 1] > 0x8fu8 ||
+                !hasUtf8Continuation(bytes, idx + 2) || !hasUtf8Continuation(bytes, idx + 3)) {
+                return false
+            }
+            idx += 4
+            continue
+        }
+        return false
+    }
+    return true
+}
+
 public func ConvertUnicode(ch: Int64): String {
     return #"\u{"# + ToHexString(ch, len: NORMAL_CODEPOINT_LEN) + "}"
 }
@@ -276,6 +359,9 @@ public func DisplayWidth(pwcs: Array<UInt32>): Int64 {
 }
 
 public func DisplayWidth(str: String): Int64 {
+    if (!isValidDisplayUtf8(str)) {
+        return str.size
+    }
     return DisplayWidth(UTF8ToChar32(str))
 }
 

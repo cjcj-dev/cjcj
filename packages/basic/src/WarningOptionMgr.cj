@@ -21,18 +21,26 @@ public class WarningOptionMgr {
         }
     }
 
-    public static func UpdateFlag(index: UInt64, newVal: Bool): Unit {
-        let idx = Int64(index)
-        if (idx >= 0 && idx < suppressedFlags.size) {
-            suppressedFlags[idx] = newVal
+    public static func UpdateFlags(newFlags: Array<Bool>): Unit {
+        suppressedFlags.clear()
+        for (flag in newFlags) {
+            suppressedFlags.add(flag)
         }
     }
 
-    public static func IsSuppressed(index: UInt64): Bool {
+    private static func RequireValidIndex(index: UInt64): Int64 {
         let idx = Int64(index)
         if (idx < 0 || idx >= suppressedFlags.size) {
-            return false
+            throw IllegalStateException("warning option index out of range")
         }
-        return suppressedFlags[idx]
+        return idx
+    }
+
+    public static func UpdateFlag(index: UInt64, newVal: Bool): Unit {
+        suppressedFlags[RequireValidIndex(index)] = newVal
+    }
+
+    public static func IsSuppressed(index: UInt64): Bool {
+        return suppressedFlags[RequireValidIndex(index)]
     }
 }

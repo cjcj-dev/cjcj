@@ -119,20 +119,58 @@ public class InteropCJPackageConfigReader {
         }
         var currentSection = ""
         var currentPackage: Option<PackageConfig> = None
+        var currentNestedSection = ""
+        var currentNestedTable: Option<HashMap<String, String>> = None
+        let pendingGenericTables = ArrayList<HashMap<String, String>>()
         for (rawLine in collectTomlStatements(content)) {
             let line = rawLine.trimAscii()
             if (line.isEmpty()) {
                 continue
             }
+            if (isSectionHeader(line)) {
+                if (isPackageLambdaClassMappingsSection(line)) {
+                    if (currentNestedSection != "lambda_patterns" || (let None <- currentNestedTable)) {
+                        return false
+                    }
+                    currentNestedSection = "lambda_patterns.class_mappings"
+                    continue
+                }
+                if (currentNestedSection == "lambda_patterns.class_mappings") {
+                    currentNestedSection = "lambda_patterns"
+                }
+                if (!flushNestedPackageTable(currentPackage, currentNestedSection, currentNestedTable, pendingGenericTables)) {
+                    return false
+                }
+                currentNestedSection = ""
+                currentNestedTable = None
+            }
             if (line == "[default]") {
-                storePackage(currentPackage)
+                if (!storePackage(currentPackage, pendingGenericTables)) {
+                    return false
+                }
+                pendingGenericTables.clear()
                 currentPackage = None
                 currentSection = "default"
                 continue
             }
             if (line == "[[package]]" || line == "[package]") {
-                storePackage(currentPackage)
+                if (!storePackage(currentPackage, pendingGenericTables)) {
+                    return false
+                }
+                pendingGenericTables.clear()
                 currentPackage = PackageConfig()
+                currentSection = "package"
+                continue
+            }
+            if (isPackageGenericObjectSection(line)) {
+                currentNestedSection = "generic_object_configuration"
+                currentNestedTable = HashMap<String, String>()
+                currentSection = "package"
+                continue
+            }
+            if (isPackageLambdaPatternSection(line)) {
+                currentNestedSection = "lambda_patterns"
+                currentNestedTable = HashMap<String, String>()
                 currentSection = "package"
                 continue
             }
@@ -149,17 +187,31 @@ public class InteropCJPackageConfigReader {
             }
             let key = parts[0].trimAscii()
             let value = line[eqPos + 1..].trimAscii()
-            if (currentSection == "default") {
+            if (currentNestedSection == "lambda_patterns.class_mappings") {
+                appendNestedClassMapping(currentNestedTable, key, value)
+            } else if (!currentNestedSection.isEmpty()) {
+                if (let Some(activeNestedTable) <- currentNestedTable) {
+                    putRawValue(activeNestedTable, key, value)
+                }
+            } else if (currentSection == "default") {
                 parseDefaultEntry(key, value)
             } else if (currentSection == "package") {
                 if (let Some(pkg) <- currentPackage) {
-                    if (!parsePackageEntry(pkg, key, value)) {
+                    if (!parsePackageEntry(pkg, key, value, pendingGenericTables)) {
                         return false
                     }
                 }
             }
         }
-        storePackage(currentPackage)
+        if (currentNestedSection == "lambda_patterns.class_mappings") {
+            currentNestedSection = "lambda_patterns"
+        }
+        if (!flushNestedPackageTable(currentPackage, currentNestedSection, currentNestedTable, pendingGenericTables)) {
+            return false
+        }
+        if (!storePackage(currentPackage, pendingGenericTables)) {
+            return false
+        }
         return true
     }
 
@@ -234,7 +286,12 @@ public class InteropCJPackageConfigReader {
         }
     }
 
-    private func parsePackageEntry(pkg: PackageConfig, key: String, value: String): Bool {
+    private func parsePackageEntry(
+        pkg: PackageConfig,
+        key: String,
+        value: String,
+        pendingGenericTables: ArrayList<HashMap<String, String>>
+    ): Bool {
         if (key == "name") {
             pkg.name = parseString(value)
         } else if (key == "APIStrategy") {
@@ -255,15 +312,24 @@ public class InteropCJPackageConfigReader {
             let retType = parseReturnType(signature)
             pkg.lambdaPatterns.add(LambdaPattern(signature, params, retType))
         } else if (key == "generic_object_configuration") {
-            return parseGenericObjectConfiguration(pkg, value)
+            appendGenericTables(pendingGenericTables, parseArrayOfTables(value))
         } else if (key == "lambda_patterns") {
             parseLambdaPatternsConfiguration(pkg, value)
         }
         return true
     }
 
-    private func storePackage(pkgOpt: Option<PackageConfig>): Unit {
+    private func storePackage(
+        pkgOpt: Option<PackageConfig>,
+        pendingGenericTables: ArrayList<HashMap<String, String>>
+    ): Bool {
         if (let Some(pkg) <- pkgOpt) {
+            if (pkg.name.isEmpty()) {
+                return false
+            }
+            if (!pendingGenericTables.isEmpty() && !processGenericObjectTables(pkg, pendingGenericTables.toArray())) {
+                return false
+            }
             if (!pkg.name.isEmpty()) {
                 if (!pkg.hasApiStrategy) {
                     pkg.apiStrategy = InteropCJStrategy.NONE
@@ -277,7 +343,66 @@ public class InteropCJPackageConfigReader {
                 packages.add(pkg.name, pkg)
             }
         }
+        return true
     }
+}
+
+private func isSectionHeader(line: String): Bool {
+    return line.startsWith("[") && line.endsWith("]")
+}
+
+private func isPackageGenericObjectSection(line: String): Bool {
+    return line == "[[package.generic_object_configuration]]" || line == "[package.generic_object_configuration]"
+}
+
+private func isPackageLambdaPatternSection(line: String): Bool {
+    return line == "[[package.lambda_patterns]]" || line == "[package.lambda_patterns]"
+}
+
+private func isPackageLambdaClassMappingsSection(line: String): Bool {
+    return line == "[package.lambda_patterns.class_mappings]"
+}
+
+private func appendNestedClassMapping(tableOpt: Option<HashMap<String, String>>, key: String, value: String): Unit {
+    if (let Some(activeTable) <- tableOpt) {
+        let currentRaw = activeTable.get("class_mappings") ?? "{}"
+        let trimmedRaw = currentRaw.trimAscii()
+        var body = ""
+        if (trimmedRaw.size >= 2 && trimmedRaw[0] == b'{' && trimmedRaw[trimmedRaw.size - 1] == b'}') {
+            body = trimmedRaw[1..trimmedRaw.size - 1].trimAscii()
+        }
+        let entry = key + " = " + value
+        let nextRaw = if (body.isEmpty()) { "{" + entry + "}" } else { "{" + body + ", " + entry + "}" }
+        putRawValue(activeTable, "class_mappings", nextRaw)
+    }
+}
+
+private func flushNestedPackageTable(
+    pkgOpt: Option<PackageConfig>,
+    nestedKind: String,
+    tableOpt: Option<HashMap<String, String>>,
+    pendingGenericTables: ArrayList<HashMap<String, String>>
+): Bool {
+    if (nestedKind.isEmpty()) {
+        return true
+    }
+    if (let None <- tableOpt) {
+        return true
+    }
+    if (let None <- pkgOpt) {
+        return false
+    }
+    let activePkg = pkgOpt.getOrThrow()
+    let activeTable = tableOpt.getOrThrow()
+    if (nestedKind == "generic_object_configuration") {
+        pendingGenericTables.add(activeTable)
+        return true
+    }
+    if (nestedKind == "lambda_patterns") {
+        parseLambdaPatternTable(activePkg, activeTable)
+        return true
+    }
+    return true
 }
 
 private func collectTomlStatements(content: String): Array<String> {
@@ -717,8 +842,16 @@ private func processSymbolConfigurations(
     }
 }
 
-private func parseGenericObjectConfiguration(pkg: PackageConfig, value: String): Bool {
-    let tables = parseArrayOfTables(value)
+private func appendGenericTables(
+    target: ArrayList<HashMap<String, String>>,
+    tables: Array<HashMap<String, String>>
+): Unit {
+    for (table in tables) {
+        target.add(table)
+    }
+}
+
+private func processGenericObjectTables(pkg: PackageConfig, tables: Array<HashMap<String, String>>): Bool {
     let typeArgumentsMap = HashMap<String, ArrayList<String>>()
     if (!collectTypeArguments(tables, typeArgumentsMap, pkg)) {
         return false
@@ -736,23 +869,27 @@ private func parseClassMappings(value: String): Array<ClassMapping> {
     return result.toArray()
 }
 
+private func parseLambdaPatternTable(pkg: PackageConfig, table: HashMap<String, String>): Unit {
+    if (let Some(rawSignature) <- table.get("signature")) {
+        let signature = parseString(rawSignature)
+        let trimmedSignature = signature.trimAscii()
+        let lambdaPattern = LambdaPattern(
+            trimmedSignature,
+            parseSignatureParameterList(trimmedSignature),
+            parseReturnType(trimmedSignature)
+        )
+        if (let Some(rawClassMappings) <- table.get("class_mappings")) {
+            for (classMapping in parseClassMappings(rawClassMappings)) {
+                lambdaPattern.classMappings.add(classMapping)
+            }
+        }
+        pkg.lambdaPatterns.add(lambdaPattern)
+    }
+}
+
 private func parseLambdaPatternsConfiguration(pkg: PackageConfig, value: String): Unit {
     for (table in parseArrayOfTables(value)) {
-        if (let Some(rawSignature) <- table.get("signature")) {
-            let signature = parseString(rawSignature)
-            let trimmedSignature = signature.trimAscii()
-            let lambdaPattern = LambdaPattern(
-                trimmedSignature,
-                parseSignatureParameterList(trimmedSignature),
-                parseReturnType(trimmedSignature)
-            )
-            if (let Some(rawClassMappings) <- table.get("class_mappings")) {
-                for (classMapping in parseClassMappings(rawClassMappings)) {
-                    lambdaPattern.classMappings.add(classMapping)
-                }
-            }
-            pkg.lambdaPatterns.add(lambdaPattern)
-        }
+        parseLambdaPatternTable(pkg, table)
     }
 }
 

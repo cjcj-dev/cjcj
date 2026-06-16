@@ -30,6 +30,11 @@ Deepening pass updates:
   Explicit invalid strategy strings remain `UNKNOWN` and fail validation.
 - Made `InteropCJPackageConfigReader.Parse` return `false` on file read failures instead of allowing the filesystem
   exception to escape, matching the C++ reader's caught parse/open failure path.
+- Extended `InteropCJPackageConfigReader` beyond inline-array TOML to cover the C++ parser's nested package
+  array-of-table forms for `generic_object_configuration` and `lambda_patterns`, including nested
+  `class_mappings` tables. Inline and nested generic configuration entries are now accumulated and validated through
+  the same two-pass type-argument/symbol processing as the C++ implementation, and package entries without a required
+  `name` now fail parsing instead of being silently ignored.
 - Matched two byte-level utility behaviors from C++ Basic: `SplitString` advances one byte past a found delimiter, and
   `StringConvertor.Normalize` drops an unrecognized escape backslash while preserving the escaped byte for later
   processing.
@@ -48,6 +53,15 @@ Deepening pass updates:
   behavior implemented by Basic-local helpers because importing `utils.FileUtil` from Basic would create a cycle.
   `IsInMacroCallSourceFile` follows the C++ size/source-id guard shape, but full path-helper de-isolation remains
   blocked on package graph work.
+- Matched the C++ `DisplayWidth(std::string)` malformed UTF-8 behavior by validating the input byte sequence before
+  display-width decoding and returning the raw byte length for invalid, overlong, surrogate, truncated, or out-of-range
+  UTF-8 sequences.
+- Tightened refactor diagnostic `%s` substitution to match the C++ `Diagnostic::InsertArguments` invariant: missing
+  replacement arguments and unused extra arguments now fail instead of silently leaving placeholders or dropping inputs.
+- Matched `DiagnosticEngineImpl::CheckRange`'s C++ fatal/internal-error split: zero ranges now raise in normal mode,
+  and only degrade to `DIAG_RANGE_ERROR` when `EnableCheckRangeErrorCodeRatherICE()` is active.
+- Tightened the Basic-local `WarningOptionMgr` compatibility shim to match the C++ warning manager's vector
+  replacement API and invalid-index assertions while retaining the selfhost bulk boolean helper used by `option`.
 
 Implemented:
 
@@ -65,6 +79,13 @@ Implemented:
   deterministic `DiagnosticBuilder.close()/Emit()` cleanup with `Resource` support for try-with-resource use, C++-schema diagnostic JSON formatting, multi-line/control-character-aware diagnostic text rendering, same-line hint composition, macro-call message/note swapping, compressed long source excerpts, C++-style help substitution source rendering, macro expansion excerpts, generic object and lambda pattern parsing for interop package configs, and UTF-8/GBK encoding detection with optional normalization.
 - Corrected `MacroCallDiagInfo` and `DiagnosticEngineImpl` macro-position lookups to match the C++ `std::map::lower_bound` behavior, including the LSP exact-key successor case used when mapping macro-generated positions back to source positions.
 - Tightened interop package config validation to mirror the C++ reader: per-package unknown strategies now fail validation, invalid include/exclude combinations are rejected, `GenericTypeStrategy = "None"` rejects generic instantiations, and invalid `generic_object_configuration` entries now fail parsing instead of being ignored.
+- Aligned `DisplayWidth(String)` with the C++ `std::range_error` fallback path for malformed UTF-8 so diagnostics keep
+  byte-count spacing instead of decoding permissive replacement code points.
+- Matched the C++ refactor diagnostic formatter's placeholder-count checks for `Diagnostic.InsertArguments`.
+- Matched C++ range-check handling for zero-position diagnostics, preserving the special error-code mode used by
+  libast callers while restoring fatal behavior in the normal diagnostic path.
+- Extended the Basic-local warning suppression manager with the C++ whole-vector `UpdateFlags` shape and C++-style
+  range checks for single-flag updates/lookups.
 - Kept LLVM/native backend out of scope as required; Basic does not bind LLVM directly.
 
 Known fidelity caveats:
@@ -75,9 +96,14 @@ Known fidelity caveats:
   `cangjie_compiler::utils.FileUtil` package even though the C++ Basic source calls `FileUtil`.
 - The same package-cycle issue currently blocks replacing Basic-local warning suppression state with the real
   selfhost `option.WarningOptionMgr`, even though the C++ Basic implementation owns a pointer to Option's manager.
-- Basic still publishes its generated `WarnGroup` and `DiagFormat` enums for downstream Basic APIs. Warning suppression itself now uses the real Option manager by index, but fully replacing those public enum types with Option-owned types requires a coordinated API migration across users of `basic.*`.
+- Basic still publishes its generated `WarnGroup` and `DiagFormat` enums for downstream Basic APIs. Warning
+  suppression is still stored in the Basic-local compatibility manager, with `option.WarningOptionMgr` forwarding
+  updates by generated warning-group index; fully replacing those public enum/storage types with Option-owned types
+  requires a coordinated package-graph and API migration across users of `basic.*`.
 - Diagnostic text output now covers C++-style source gutters, padded line numbers, source/no-source notes and helps, substitution previews, same-line grouped hints, multi-line ranges, long-range compression, macro-call headline/note swapping, control characters, and macro expansion excerpts, but it is not byte-for-byte identical to every overlapping-hint hanging/color branch in the C++ `DiagnosticEmitterImpl`.
-- Interop package config parsing covers the table shapes consumed by the C++ reader (`default`, `package`, `generic_object_configuration`, `lambda_patterns`, `class_mappings`) without depending on an external TOML library.
+- Interop package config parsing covers the table shapes consumed by the C++ reader (`default`, `package`,
+  inline and nested `generic_object_configuration`, inline and nested `lambda_patterns`, and nested/inline
+  `class_mappings`) without depending on an external TOML library.
 - Windows-only GBK conversion is represented as optional ASCII-safe conversion plus encoding detection on this non-Windows selfhost target; non-ASCII GBK transcoding still needs a platform bridge if Windows self-hosting is enabled.
 
 Remaining Basic selfhost markers: 0.
