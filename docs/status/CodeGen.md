@@ -22,9 +22,9 @@ Implemented:
   modules, builders, primitive/composite/function types, constants, integer and floating arithmetic instructions,
   comparisons, casts, GEPs, calls, branches, returns, attributes, debug locations, global initializers,
   verification, bitcode writing, basic-block/instruction iteration, use-list checks, declaration/global/function
-  iteration, deletion APIs, insertion-point clearing, and intrinsic lookup/declaration/type queries through
-  `LLVMLookupIntrinsicID`, `LLVMGetIntrinsicDeclaration`, and `LLVMIntrinsicGetType`. LLVM itself is not
-  reimplemented.
+  iteration, deletion APIs, insertion-point clearing, value type/int-width queries through `LLVMTypeOf` and
+  `LLVMGetIntTypeWidth`, and intrinsic lookup/declaration/type queries through `LLVMLookupIntrinsicID`,
+  `LLVMGetIntrinsicDeclaration`, and `LLVMIntrinsicGetType`. LLVM itself is not reimplemented.
 - Added CodeGen-owned LLVM handle wrappers and module/context ownership helpers.
 - Added a package-level lowering entry point shaped like the C++ `EmitPackageIR`, including CHIR package splitting,
   per-submodule context/module construction, global and function declaration materialization, function emission
@@ -63,18 +63,22 @@ Implemented:
 - Added Cangjie string-literal global creation and checked arithmetic exception lowering: overflow/arithmetic helper
   functions are resolved from implicit CHIR declarations when available, otherwise inserted as external LLVM runtime
   declarations; the generated literal is passed as a Cangjie string reference, the returned exception object is sent
-  to `CJ_MCC_ThrowException`, and the block is terminated with `unreachable`, using `invoke` when an unwind block is
-  active.
+  through the patched LLVM `llvm.cj.throw.exception` intrinsic when available with a `CJ_MCC_ThrowException`
+  fallback, and the block is terminated with `unreachable`, using `invoke` when an unwind block is active. Added
+  `llvm.cj.get.exception.wrapper`/`llvm.cj.post.throw.exception` helpers for catch and rethrow-related lowering.
 - Added expression dispatch structure for constants, unary, binary, memory, terminator, and other expression
   families. The current implementation lowers typed constants, unary integer/float operations, signed/unsigned
   and floating binary operations through C++-shaped `ArithmeticOpImpl` and `LogicalOpImpl` components, including
   right-hand shift operand normalization and constant `Unit`/`Nothing` equality, allocation/load/store/GEP memory
   expressions through C++-named `AllocateImpl` and `ArrayImpl` components, `GOTO`/`BRANCH`/`EXIT`
-  terminators, `RAISE_EXCEPTION` through the runtime throw path, with-exception call-like/typecast/allocation
-  terminators through unwind-block scoped invoke emission and normal-successor branching, call-like expressions
-  through a C++-shaped `ApplyImpl` component using call-or-invoke emission, tuple/aggregate and varray construction
-  through C++-named component files, and scalar/pointer typecast lowering through a C++-shaped `TypeCastImpl`
-  component with real LLVM numeric conversion op selection.
+  terminators, `RAISE_EXCEPTION` through the LLVM exception intrinsic path, with-exception call-like/typecast/
+  allocation/raw-array-allocation terminators through unwind-block scoped invoke emission and normal-successor
+  branching, call-like expressions through a C++-shaped `ApplyImpl` component using call-or-invoke emission,
+  `GET_EXCEPTION` through the patched LLVM exception-wrapper intrinsic, raw-array allocation through
+  `llvm.cj.malloc.array`/`llvm.cj.malloc.array.generic` with signed negative-size branching to the runtime
+  negative-array-size helper, tuple/aggregate and varray construction through C++-named component files, and
+  scalar/pointer typecast lowering through a C++-shaped `TypeCastImpl` component with real LLVM numeric conversion
+  op selection.
 - Added a C++-shaped `EmitExpressionIR` component that emits expression sequences through a local `IRBuilder2`,
   sets the insertion function from the top-level CHIR function, dispatches each expression by major kind, and maps
   non-null results back into `CGModule` with sret result tagging.
@@ -97,7 +101,8 @@ Known gaps:
   object/class allocation, precise field and enum layout access, closures, generics, RTTI/type info, package and
   native metadata, full debug metadata attachment, broad exception handling, most checked overflow arithmetic,
   intrinsics, complete
-  array/object construction, full checked casts, C/FFI lowering, incremental generation, native backend-specific
+  array literal/init-by-value content initialization, object construction, full checked casts, C/FFI lowering,
+  incremental generation, native backend-specific
   metadata, and post-generation optimization/cleanup passes.
 - Only 54 `.cj` files are present in this pass, compared with 118 reference CodeGen source/header files. Additional
   C++-named component files still need to be split out for `LICMOptimizer`, LLVM-specific `CGUtils`,
@@ -108,4 +113,4 @@ Known gaps:
 
 Remaining CodeGen selfhost markers: 0.
 
-Current CodeGen package size: 54 `.cj` files, approximately 4907 total lines.
+Current CodeGen package size: 54 `.cj` files, approximately 5077 total lines.

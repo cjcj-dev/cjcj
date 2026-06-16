@@ -17,6 +17,9 @@ public func HandleOthersExpression(irBuilder: IRBuilder2, chirExpr: Expression):
     if (kind == ExprKind.APPLY || kind == ExprKind.INVOKE || kind == ExprKind.INVOKESTATIC) {
         return EmitCallLikeExpression(irBuilder, chirExpr)
     }
+    if (kind == ExprKind.RAW_ARRAY_ALLOCATE) {
+        return GenerateRawArrayAllocate(irBuilder, chirExpr)
+    }
     if (kind == ExprKind.TUPLE || kind == ExprKind.RAW_ARRAY_LITERAL_INIT ||
         kind == ExprKind.RAW_ARRAY_INIT_BY_VALUE) {
         return GenerateTupleOrAggregateExpression(irBuilder, chirExpr)
@@ -32,9 +35,11 @@ public func HandleOthersExpression(irBuilder: IRBuilder2, chirExpr: Expression):
     if (kind == ExprKind.DEBUGEXPR) {
         return LLVMNullValue()
     }
-    if (kind == ExprKind.GET_EXCEPTION || kind == ExprKind.GET_RTTI || kind == ExprKind.GET_RTTI_STATIC ||
-        kind == ExprKind.INSTANCEOF || kind == ExprKind.INTRINSIC || kind == ExprKind.SPAWN ||
-        kind == ExprKind.GET_INSTANTIATE_VALUE) {
+    if (kind == ExprKind.GET_EXCEPTION) {
+        return irBuilder.CallExceptionIntrinsicGetExceptionValue()
+    }
+    if (kind == ExprKind.GET_RTTI || kind == ExprKind.GET_RTTI_STATIC || kind == ExprKind.INSTANCEOF ||
+        kind == ExprKind.INTRINSIC || kind == ExprKind.SPAWN || kind == ExprKind.GET_INSTANTIATE_VALUE) {
         if (let Some(resultTy) <- chirExpr.GetResultType()) {
             return unsafe { LLVMConstNull(CGType.GetOrCreate(irBuilder.GetCGModule(), resultTy).GetLLVMType()) }
         }

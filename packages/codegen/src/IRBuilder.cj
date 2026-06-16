@@ -6,6 +6,7 @@ import cangjie_compiler::chir.ExprKind
 import cangjie_compiler::chir.FloatLiteral
 import cangjie_compiler::chir.IntLiteral
 import cangjie_compiler::chir.LiteralValue
+import cangjie_compiler::chir.RawArrayType
 import cangjie_compiler::chir.RuneLiteral
 import cangjie_compiler::chir.StringLiteral
 import cangjie_compiler::chir.Type
@@ -13,6 +14,12 @@ import cangjie_compiler::chir.Type
 private let CREATE_OVERFLOW_EXCEPTION_FUNC_NAME: String = "rt$CreateOverflowException_msg"
 private let CREATE_ARITHMETIC_EXCEPTION_FUNC_NAME: String = "rt$CreateArithmeticException_msg"
 private let THROW_EXCEPTION_FUNC_NAME: String = PREFIX_OF_BACKEND_SYMS + "ThrowException"
+private let THROW_NEGATIVE_ARRAY_SIZE_EXCEPTION_FUNC_NAME: String = "rt$ThrowNegativeArraySizeException"
+private let THROW_EXCEPTION_INTRINSIC_NAME: String = "llvm.cj.throw.exception"
+private let GET_EXCEPTION_WRAPPER_INTRINSIC_NAME: String = "llvm.cj.get.exception.wrapper"
+private let POST_THROW_EXCEPTION_INTRINSIC_NAME: String = "llvm.cj.post.throw.exception"
+private let MALLOC_ARRAY_INTRINSIC_NAME: String = "llvm.cj.malloc.array"
+private let MALLOC_ARRAY_GENERIC_INTRINSIC_NAME: String = "llvm.cj.malloc.array.generic"
 
 public class IRBuilder2 {
     private let cgMod: CGModule
@@ -56,6 +63,10 @@ public class IRBuilder2 {
         return unsafe { LLVMConstInt(LLVMInt1TypeInContext(GetLLVMContext().raw), 0u64, 0) }
     }
 
+    public func GetInt64(value: Int64): LLVMValueRef {
+        return unsafe { LLVMConstInt(LLVMInt64TypeInContext(GetLLVMContext().raw), UInt64(value), 1) }
+    }
+
     public func CreateEntryAlloca(valueType: LLVMTypeRef, name!: String = ""): LLVMValueRef {
         var result = LLVMNullValue()
         try (nameCString = unsafe { LibC.mallocCString(name) }.asResource()) {
@@ -94,6 +105,15 @@ public class IRBuilder2 {
 
     public func CreateCondBr(cond: LLVMValueRef, trueBranch: LLVMBasicBlockRef, falseBranch: LLVMBasicBlockRef): LLVMValueRef {
         return unsafe { LLVMBuildCondBr(builder.raw, cond, trueBranch, falseBranch) }
+    }
+
+    public func CreateICmp(predicate: LLVMIntPredicate, left: LLVMValueRef, right: LLVMValueRef,
+        name!: String = ""): LLVMValueRef {
+        var result = LLVMNullValue()
+        try (nameCString = unsafe { LibC.mallocCString(name) }.asResource()) {
+            result = unsafe { LLVMBuildICmp(builder.raw, LLVMIntPredicateValue(predicate), left, right, nameCString.value) }
+        }
+        return result
     }
 
     public func CreateRetVoid(): LLVMValueRef {
@@ -589,12 +609,77 @@ public class IRBuilder2 {
     }
 
     public func CallExceptionIntrinsicThrow(exceptionValue: LLVMValueRef): Unit {
-        let throwType = GetThrowExceptionFunctionType()
-        let throwFunction = GetOrInsertRuntimeFunction(THROW_EXCEPTION_FUNC_NAME, throwType)
         let throwArgs = ArrayList<LLVMValueRef>()
         throwArgs.add(exceptionValue)
-        let _ = CreateCallOrInvoke(throwFunction, throwType, throwArgs)
+        let intrinsicCall = CreateIntrinsicCall(THROW_EXCEPTION_INTRINSIC_NAME, ArrayList<LLVMTypeRef>(), throwArgs)
+        if (intrinsicCall.isNull()) {
+            let throwType = GetThrowExceptionFunctionType()
+            let throwFunction = GetOrInsertRuntimeFunction(THROW_EXCEPTION_FUNC_NAME, throwType)
+            let _ = CreateCallOrInvoke(throwFunction, throwType, throwArgs)
+        }
         let _ = CreateUnreachable()
+    }
+
+    public func CallExceptionIntrinsicGetExceptionValue(): LLVMValueRef {
+        let args = ArrayList<LLVMValueRef>()
+        let exceptionValue = CreateIntrinsicCall(GET_EXCEPTION_WRAPPER_INTRINSIC_NAME, ArrayList<LLVMTypeRef>(), args,
+            name: "exception.wrapper")
+        if (!exceptionValue.isNull()) {
+            return exceptionValue
+        }
+        let fallbackType = MakeFunctionType(unsafe { LLVMPointerType(LLVMInt8TypeInContext(GetLLVMContext().raw), 0u32) },
+            ArrayList<LLVMTypeRef>())
+        return CreateCallOrInvoke(GetOrInsertRuntimeFunction("CJ_MCC_GetExceptionWrapper", fallbackType), fallbackType,
+            args, name: "exception.wrapper")
+    }
+
+    public func CallPostThrowExceptionIntrinsic(exceptionValue: LLVMValueRef): LLVMValueRef {
+        let args = ArrayList<LLVMValueRef>()
+        args.add(exceptionValue)
+        let postThrowValue = CreateIntrinsicCall(POST_THROW_EXCEPTION_INTRINSIC_NAME, ArrayList<LLVMTypeRef>(), args,
+            name: "post.throw")
+        if (!postThrowValue.isNull()) {
+            return postThrowValue
+        }
+        let paramTypes = ArrayList<LLVMTypeRef>()
+        paramTypes.add(unsafe { LLVMPointerType(LLVMInt8TypeInContext(GetLLVMContext().raw), 0u32) })
+        let fallbackType = MakeFunctionType(CGType.GetRefType(GetLLVMContext()), paramTypes)
+        return CreateCallOrInvoke(GetOrInsertRuntimeFunction("CJ_MCC_PostThrowException", fallbackType), fallbackType,
+            args, name: "post.throw")
+    }
+
+    public func CreateNegativeArraySizeException(): Unit {
+        let helperType = MakeFunctionType(unsafe { LLVMVoidTypeInContext(GetLLVMContext().raw) }, ArrayList<LLVMTypeRef>())
+        let helper = if (let Some(helperNode) <- GetCGContext().GetImplicitUsedFunc(THROW_NEGATIVE_ARRAY_SIZE_EXCEPTION_FUNC_NAME)) {
+            cgMod.GetOrInsertCGFunction(helperNode).GetRawFunction()
+        } else {
+            GetOrInsertRuntimeFunction(THROW_NEGATIVE_ARRAY_SIZE_EXCEPTION_FUNC_NAME, helperType)
+        }
+        let _ = CreateCallOrInvoke(helper, helperType, ArrayList<LLVMValueRef>())
+        let _ = CreateUnreachable()
+    }
+
+    public func AllocateArray(rawArrayTy: RawArrayType, length: LLVMValueRef): LLVMValueRef {
+        let rawArrayCGType = CGType.GetOrCreate(cgMod, rawArrayTy)
+        let rawTypeInfo = rawArrayCGType.GetOrCreateTypeInfo()
+        let rawTypeInfoArg = CreateBitCast(rawTypeInfo,
+            unsafe { LLVMPointerType(LLVMInt8TypeInContext(GetLLVMContext().raw), 0u32) }, name: "rawarray.ti")
+        let lengthArg = CastIntegerToInt64(length)
+        let args = ArrayList<LLVMValueRef>()
+        args.add(rawTypeInfoArg)
+        args.add(lengthArg)
+        let intrinsicName = if (rawArrayCGType.IsDynamicGI()) {
+            MALLOC_ARRAY_GENERIC_INTRINSIC_NAME
+        } else {
+            let elementSize = GetRawArrayElementSize(rawArrayTy)
+            args.add(unsafe { LLVMConstInt(LLVMInt64TypeInContext(GetLLVMContext().raw), UInt64(elementSize), 0) })
+            MALLOC_ARRAY_INTRINSIC_NAME
+        }
+        let arrayValue = CreateIntrinsicCall(intrinsicName, ArrayList<LLVMTypeRef>(), args, name: "rawarray")
+        if (arrayValue.isNull()) {
+            return LLVMNullValue()
+        }
+        return CreatePointerCast(arrayValue, rawArrayCGType.GetLLVMType(), name: "rawarray.cast")
     }
 
     private func GetOrInsertRuntimeExceptionHelper(funcName: String): (LLVMValueRef, LLVMTypeRef) {
@@ -652,6 +737,27 @@ public class IRBuilder2 {
             result = unsafe { LLVMFunctionType(returnType, paramPtr.value, UInt32(paramTypes.size), 0) }
         }
         return result
+    }
+
+    private func CastIntegerToInt64(value: LLVMValueRef): LLVMValueRef {
+        let valueType = unsafe { LLVMTypeOf(value) }
+        let bitWidth = unsafe { LLVMGetIntTypeWidth(valueType) }
+        if (bitWidth == 64u32) {
+            return value
+        }
+        let int64Type = unsafe { LLVMInt64TypeInContext(GetLLVMContext().raw) }
+        if (bitWidth < 64u32) {
+            return CreateSExt(value, int64Type, name: "array.length.i64")
+        }
+        return CreateTrunc(value, int64Type, name: "array.length.i64")
+    }
+
+    private func GetRawArrayElementSize(rawArrayTy: RawArrayType): Int64 {
+        let elementCGType = CGType.GetOrCreate(cgMod, rawArrayTy.GetElementType())
+        if (let Some(elementSize) <- elementCGType.GetSize()) {
+            return elementSize
+        }
+        return 0
     }
 
     private func LookupIntrinsicID(intrinsicName: String): UInt32 {

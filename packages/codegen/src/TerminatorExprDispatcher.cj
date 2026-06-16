@@ -48,6 +48,11 @@ public func HandleTerminatorExpression(irBuilder: IRBuilder2, chirExpr: Expressi
             GenerateAllocate(builder, expr)
         })
     }
+    if (kind == ExprKind.RAW_ARRAY_ALLOCATE_WITH_EXCEPTION) {
+        return HandleWithExceptionTerminator(irBuilder, chirExpr, { builder: IRBuilder2, expr: Expression =>
+            GenerateRawArrayAllocate(builder, expr)
+        })
+    }
     return LLVMNullValue()
 }
 

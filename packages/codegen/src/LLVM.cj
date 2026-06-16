@@ -173,6 +173,8 @@ foreign {
     func LLVMConstReal(realType: LLVMTypeRef, value: Float64): LLVMValueRef
     func LLVMConstStringInContext(context: LLVMContextRef, str: CString, length: UInt32, dontNullTerminate: Int32): LLVMValueRef
     func LLVMValueAsMetadata(value: LLVMValueRef): LLVMMetadataRef
+    func LLVMTypeOf(value: LLVMValueRef): LLVMTypeRef
+    func LLVMGetIntTypeWidth(integerTy: LLVMTypeRef): UInt32
 
     func LLVMCreateBuilderInContext(context: LLVMContextRef): LLVMBuilderRef
     func LLVMDisposeBuilder(builder: LLVMBuilderRef): Unit
