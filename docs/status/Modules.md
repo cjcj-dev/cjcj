@@ -1,6 +1,6 @@
 # Modules Port Status
 
-Date: 2026-06-16
+Date: 2026-06-17
 
 Build: `cjpm build` passes.
 
@@ -8,7 +8,7 @@ Build: `cjpm build` passes.
 
 The Modules package has been expanded from a single scaffold into a multi-file Cangjie package mirroring the C++ Modules layout. It now contains public module-local models for packages, files, imports, declarations, package declarations, access levels, diagnostics, CJO manager state, AST serialization wrappers, dependency graphs, and package dependency ordering.
 
-This pass de-isolated compiler options and Basic source locations: `packages/modules` now depends on the real `cangjie_compiler::option` and `cangjie_compiler::basic` packages, uses real `GlobalOptions`, `OutputMode`, `OptimizationLevel`, `Position`, `Range`, and delegates `MakeRange` to Basic rather than keeping local compatibility copies. The package still carries local AST and diagnostic models because the real AST import representation (`Identifier`, `Modifier`, `AttributePack`, typed decl subclasses) and Basic diagnostic builder flow do not yet match the simplified Modules call sites without a broader conversion pass.
+This pass de-isolated compiler options, Basic source locations, and the first layer of Modules diagnostics: `packages/modules` now depends on the real `cangjie_compiler::option` and `cangjie_compiler::basic` packages, uses real `GlobalOptions`, `OutputMode`, `OptimizationLevel`, `Position`, `Range`, delegates `MakeRange` to Basic, and forwards recognized module/import diagnostic IDs into a real Basic `DiagnosticEngine` while preserving the current module-local diagnostic record for compatibility. The package still carries local AST models because the real AST import representation (`Identifier`, `Modifier`, `AttributePack`, typed decl subclasses) does not yet match the simplified Modules call sites without a broader conversion pass.
 
 ## Implemented
 
@@ -17,6 +17,7 @@ This pass de-isolated compiler options and Basic source locations: `packages/mod
 - Added module-local equivalents for `Package`, `File`, `Decl`, `PackageDecl`, `ImportSpec`, `ImportContent`, `ExternalLibCfg`, `DepType`, `ExportConfig`, and diagnostics needed by the ported logic.
 - Replaced the module-local `GlobalOptions`, `OutputMode`, `OptimizationLevel`, and option environment copies with imports from `cangjie_compiler::option`; option serialization now preserves `Os` and `Oz`.
 - Replaced module-local `Position`/`Range` compatibility structs with public aliases to `cangjie_compiler::basic` and delegated range construction to Basic `MakeRange`.
+- Added a Basic diagnostic bridge for Modules diagnostics: the compatibility `DiagnosticEngine` now wraps a real `cangjie_compiler::basic.DiagnosticEngine`, exposes it for downstream integration, resets it with local diagnostics, and forwards recognized module/import diagnostic kind strings to real `DiagKindRefactor` IDs.
 - Implemented `CjoManager` state for source/imported package registration, package/member maps, implicit members, CJO path cache, CJO data cache, macro-only package marking, search path updates, package declaration lookup, re-export member map construction, on-demand loader traversal with common-part loader participation, and resolved re-export dependency checks.
 - Matched the C++ `GetPackageCjo` in-group source package rule: a registered source package candidate now outranks a less-specific on-disk ancestor CJO, and in-memory cached CJO data now returns the cached CJO name path just like the C++ helper.
 - Matched additional CJO manager lifecycle behavior: common-part reloads now remove previously loaded `FROM_COMMON_PART` files before appending fresh common files, `DeleteASTLoaders` clears loader handles, rebuild-index clearing clears package loaders while preserving common-part loader/cache state, and silent CJO read failures return an empty loader like the C++ helper.
@@ -30,7 +31,7 @@ This pass de-isolated compiler options and Basic source locations: `packages/mod
 
 ## Important Blockers
 
-- Real C++ parity still requires dependencies on AST, Basic diagnostics/source manager, Sema/TypeManager, and flatbuffers/native CJO format support. Option and Basic source location types are now wired to the real packages.
+- Real C++ parity still requires dependencies on AST, full Basic diagnostic builder/source-manager call-site conversion, Sema/TypeManager, and flatbuffers/native CJO format support. Option, Basic source location types, and a first diagnostic forwarding bridge are now wired to the real packages.
 - The local serialization format is not the production `.cjo` flatbuffer format. It is a compiling, behavior-bearing bridge for the isolated package, not a faithful replacement for C++ AST serialization.
 - Type/reference/expression/incremental deserialization has package-local working logic, but it still cannot consume the production C++ flatbuffer schema until real AST/Sema dependencies are available.
 
@@ -38,7 +39,7 @@ This pass de-isolated compiler options and Basic source locations: `packages/mod
 
 - Replace module-local AST/Basic compatibility models with the real packages and adapt Modules call sites to AST `Identifier`, `Modifier`, `AttributePack`, and typed declaration subclasses.
 - Bind the real flatbuffer module format and implement full `ASTWriter`, `ASTLoader`, expression writer/loader, reference loader, production CJMP common-part loading, and incremental cache loading.
-- Wire diagnostics to the real `DiagnosticEngine` and diagnostic IDs from the Basic module.
+- Replace remaining free-form compatibility diagnostics with exact Basic diagnostic builder calls and C++ note/hint structure.
 - Audit import/package lookup behavior against the C++ test corpus after downstream Sema/Frontend callers are available.
 
 Remaining Modules selfhost markers: 0.
