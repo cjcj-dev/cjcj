@@ -80,7 +80,8 @@ public open class ToolChain {
     }
 
     protected func GenerateLinkOptionsOfBuiltinLibs(tool: Tool): Unit {
-        if (driverOptions.linkStaticStd ?? false) {
+        let notOutputDylib = driverOptions.outputMode != OutputMode.SHARED_LIB
+        if (driverOptions.linkStaticStd ?? notOutputDylib) {
             GenerateLinkOptionsOfBuiltinLibsForStaticLink(tool)
         } else {
             GenerateLinkOptionsOfBuiltinLibsForDyLink(tool)
@@ -88,28 +89,201 @@ public open class ToolChain {
     }
 
     protected open func GenerateLinkOptionsOfBuiltinLibsForStaticLink(tool: Tool): Unit {
+        let dynamicLibraries = HashSet<String>()
+        let staticLibraries = HashSet<String>()
+        let ltoBuiltInDependencies = HashSet<String>()
+        let dyDependencies = HashSet<String>()
+        GatherAlwaysDynamicStdDependencies(driverOptions.directBuiltinDependencies, dyDependencies)
+        GatherAlwaysDynamicStdDependencies(driverOptions.indirectBuiltinDependencies, dyDependencies)
         for (pkg in driverOptions.directBuiltinDependencies) {
-            if (let Some(name) <- StandardLibName(pkg)) {
-                tool.AppendArg("-l:libcangjie-std-" + name + ".a")
-            }
+            AppendStaticBuiltinLibrary(pkg, dynamicLibraries, staticLibraries, ltoBuiltInDependencies, dyDependencies)
         }
         for (pkg in driverOptions.indirectBuiltinDependencies) {
-            if (let Some(name) <- StandardLibName(pkg)) {
-                tool.AppendArg("-l:libcangjie-std-" + name + ".a")
+            AppendStaticBuiltinLibrary(pkg, dynamicLibraries, staticLibraries, ltoBuiltInDependencies, dyDependencies)
+        }
+        if (driverOptions.IsLTOEnabled()) {
+            for (bcFile in ltoBuiltInDependencies) {
+                tool.AppendArg(bcFile)
             }
+        }
+        let needsElfGroup = driverOptions.target.os == OSType.LINUX || driverOptions.target.os == OSType.WINDOWS
+        if (needsElfGroup) {
+            tool.AppendArg("--start-group")
+        }
+        for (lib in staticLibraries) {
+            tool.AppendArg(lib)
+        }
+        if (needsElfGroup) {
+            tool.AppendArg("--end-group")
+        }
+        for (lib in dynamicLibraries) {
+            tool.AppendArg(lib)
         }
     }
 
     protected open func GenerateLinkOptionsOfBuiltinLibsForDyLink(tool: Tool): Unit {
         for (pkg in driverOptions.directBuiltinDependencies) {
-            if (let Some(name) <- StandardLibName(pkg)) {
-                tool.AppendArg("-lcangjie-std-" + name)
+            if (let Some(dynamicArg) <- BuiltinDynamicLinkArg(pkg)) {
+                tool.AppendArg(dynamicArg)
             }
         }
+        if (driverOptions.target.os == OSType.LINUX && !driverOptions.target.IsMinGW()) {
+            tool.AppendArg("--as-needed")
+        }
         for (pkg in driverOptions.indirectBuiltinDependencies) {
-            if (let Some(name) <- StandardLibName(pkg)) {
-                tool.AppendArg("-lcangjie-std-" + name)
+            if (let Some(dynamicArg) <- BuiltinDynamicLinkArg(pkg)) {
+                tool.AppendArg(dynamicArg)
             }
+        }
+        if (driverOptions.target.os == OSType.LINUX && !driverOptions.target.IsMinGW()) {
+            tool.AppendArg("--no-as-needed")
+        }
+    }
+
+    private func GatherAlwaysDynamicStdDependencies(pkgs: HashSet<String>, dyDependencies: HashSet<String>): Unit {
+        for (pkg in pkgs) {
+            if (let Some(staticLib) <- LibCangjieFormat(pkg, ".a")) {
+                if (staticLib == "libcangjie-std-ast.a") {
+                    dyDependencies.add(staticLib)
+                    if (driverOptions.target.os != OSType.WINDOWS) {
+                        dyDependencies.add("libcangjie-std-core.a")
+                        dyDependencies.add("libcangjie-std-collection.a")
+                        dyDependencies.add("libcangjie-std-sort.a")
+                        dyDependencies.add("libcangjie-std-math.a")
+                    }
+                }
+            }
+        }
+    }
+
+    private func AppendStaticBuiltinLibrary(
+        pkg: String,
+        dynamicLibraries: HashSet<String>,
+        staticLibraries: HashSet<String>,
+        ltoBuiltInDependencies: HashSet<String>,
+        dyDependencies: HashSet<String>
+    ): Unit {
+        if (let Some(staticLib) <- LibCangjieFormat(pkg, ".a")) {
+            if (dyDependencies.contains(staticLib) && !driverOptions.linkStatic) {
+                if (let Some(dynamicArg) <- BuiltinDynamicLinkArg(pkg)) {
+                    dynamicLibraries.add(dynamicArg)
+                }
+                return
+            }
+            if (driverOptions.IsLTOEnabled()) {
+                if (let Some(ffiLib) <- LTOCStdFFILib(staticLib)) {
+                    staticLibraries.add("-l:" + ffiLib)
+                }
+                if (let Some(ltoLib) <- LtoLibCangjieFormat(pkg)) {
+                    ltoBuiltInDependencies.add(ltoLib)
+                }
+            } else if (driverOptions.EnableSanitizer()) {
+                let cangjieLibPath = FileUtil.JoinPath(FileUtil.JoinPath(FileUtil.JoinPath(driver.cangjieHome, "lib"),
+                    driverOptions.GetCangjieLibTargetPathName()), driverOptions.SanitizerTypeToShortString())
+                staticLibraries.add(FileUtil.JoinPath(cangjieLibPath, staticLib))
+            } else {
+                staticLibraries.add("-l:" + staticLib)
+            }
+            CheckOtherDependenciesOfStaticLib(staticLib, dynamicLibraries, staticLibraries)
+        }
+    }
+
+    private func CheckOtherDependenciesOfStaticLib(
+        libName: String,
+        dynamicLibraries: HashSet<String>,
+        staticLibraries: HashSet<String>
+    ): Unit {
+        if (libName == "libcangjie-std-net.a") {
+            if (driverOptions.target.IsMinGW()) {
+                staticLibraries.add("-l:libws2_32.a")
+            }
+        } else if (libName == "libcangjie-dynamicLoader-openssl.a") {
+            if (!driverOptions.target.IsMinGW()) {
+                dynamicLibraries.add("-ldl")
+            } else {
+                dynamicLibraries.add("-lcrypt32")
+            }
+        } else if (libName == "libcangjie-std-ffi.python.a") {
+            dynamicLibraries.add("-ldl")
+        } else if (libName == "libcangjie-std-ast.a") {
+            if (driverOptions.target.os == OSType.DARWIN) {
+                staticLibraries.add("-lcangjie-std-astFFI")
+            } else {
+                staticLibraries.add("-l:libcangjie-std-astFFI.a")
+            }
+            if (driverOptions.target.arch != ArchType.AARCH64 && driverOptions.target.os == OSType.LINUX &&
+                driverOptions.target.env != EnvironmentType.OHOS &&
+                driverOptions.target.env != EnvironmentType.ANDROID) {
+                staticLibraries.add("-lclang_rt-builtins")
+            }
+            if (driverOptions.target.os == OSType.LINUX &&
+                driverOptions.target.env == EnvironmentType.ANDROID) {
+                staticLibraries.add("-lc++")
+                staticLibraries.add("-lunwind")
+            } else if (!driverOptions.target.IsMacOS() && !driverOptions.target.IsMinGW()) {
+                dynamicLibraries.add("-lgcc_s")
+            }
+        }
+    }
+
+    private func LibCangjieBaseFormat(pkg: String): Option<String> {
+        if (let Some(name) <- StandardLibName(pkg)) {
+            if (let Some(pos) <- pkg.indexOf(".")) {
+                return "cangjie-" + pkg[0..pos] + "-" + name
+            }
+            return "cangjie-" + name
+        }
+        return None
+    }
+
+    private func LibCangjieFormat(pkg: String, extension: String): Option<String> {
+        if (let Some(base) <- LibCangjieBaseFormat(pkg)) {
+            return "lib" + base + extension
+        }
+        return None
+    }
+
+    private func BuiltinDynamicLinkArg(pkg: String): Option<String> {
+        if (driverOptions.target.os == OSType.DARWIN || driverOptions.target.os == OSType.IOS) {
+            if (let Some(base) <- LibCangjieBaseFormat(pkg)) {
+                return "-l:" + base
+            }
+            return None
+        }
+        if (let Some(libName) <- LibCangjieFormat(pkg, GetSharedLibraryExtension())) {
+            return "-l:" + libName
+        }
+        return None
+    }
+
+    private func LtoLibCangjieFormat(pkg: String): Option<String> {
+        if (let Some(base) <- LibCangjieBaseFormat(pkg)) {
+            return "lib" + base + ".bc"
+        }
+        return None
+    }
+
+    private func LTOCStdFFILib(staticLib: String): Option<String> {
+        return match (staticLib) {
+            case "libcangjie-std-core.a" => "libcangjie-std-coreFFI.a"
+            case "libcangjie-std-ast.a" => "libcangjie-std-astFFI.a"
+            case "libcangjie-std-convert.a" => "libcangjie-std-convertFFI.a"
+            case "libcangjie-std-fs.a" => "libcangjie-std-fsFFI.a"
+            case "libcangjie-std-console.a" => "libcangjie-std-envFFI.a"
+            case "libcangjie-std-math.a" => "libcangjie-std-mathFFI.a"
+            case "libcangjie-std-time.a" => "libcangjie-std-timeFFI.a"
+            case "libcangjie-std-posix.a" => "libcangjie-std-posixFFI.a"
+            case "libcangjie-std-process.a" => "libcangjie-std-processFFI.a"
+            case "libcangjie-std-env.a" => "libcangjie-std-envFFI.a"
+            case "libcangjie-std-random.a" => "libcangjie-std-randomFFI.a"
+            case "libcangjie-std-net.a" => "libcangjie-std-netFFI.a"
+            case "libcangjie-std-objectpool.a" => "libcangjie-std-objectpoolFFI.a"
+            case "libcangjie-std-unittest.a" => "libcangjie-std-unittestFFI.a"
+            case "libcangjie-std-regex.a" => "libcangjie-std-regexFFI.a"
+            case "libcangjie-std-collection.concurrent.a" => "libcangjie-std-collection.concurrentFFI.a"
+            case "libcangjie-dynamicLoader-openssl.a" => "libcangjie-dynamicLoader-opensslFFI.a"
+            case "libcangjie-std-runtime.a" => "libcangjie-std-runtimeFFI.a"
+            case _ => None
         }
     }
 
@@ -218,10 +392,10 @@ public open class ToolChain {
 
     protected func GetArchFolderName(arch: ArchType): String {
         return match (arch) {
-            case ArchType.X86_64 => "x86_64"
-            case ArchType.AARCH64 => "aarch64"
-            case ArchType.ARM32 => "arm"
-            case ArchType.UNKNOWN => "unknown"
+            case ArchType.X86_64 => "lib64"
+            case ArchType.AARCH64 => "lib64"
+            case ArchType.ARM32 => "lib"
+            case ArchType.UNKNOWN => ""
         }
     }
 
@@ -259,10 +433,19 @@ public open class ToolChain {
         if (!driverOptions.useRuntimeRpath && !driverOptions.sanitizerEnableRpath) {
             return
         }
-        let runtimePath = FileUtil.JoinPath(driver.cangjieHome, "runtime/lib")
-        if (!runtimePath.isEmpty()) {
+        if (driverOptions.IsCrossCompiling()) {
+            return
+        }
+        let runtimePath = FileUtil.JoinPath(FileUtil.JoinPath(driver.cangjieHome, "runtime/lib"),
+            driverOptions.GetCangjieLibTargetPathName())
+        if (driverOptions.useRuntimeRpath) {
             tool.AppendArg("-rpath")
             tool.AppendArg(runtimePath)
+        } else if (driverOptions.sanitizerEnableRpath) {
+            let sanitizerRuntimePath = FileUtil.JoinPath(runtimePath, driverOptions.SanitizerTypeToShortString())
+            tool.AppendArg("--disable-new-dtags")
+            tool.AppendArg("-rpath")
+            tool.AppendArg(sanitizerRuntimePath)
         }
     }
 

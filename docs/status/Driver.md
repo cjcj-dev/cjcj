@@ -25,16 +25,22 @@ Current status:
   `chir`/`obj`/`hotreload` output-type parsing, PGO flags, section flags, jobs,
   warning forwarding, and target-triple validation are represented in Driver
   options.
+- GNU/Linux native linking now mirrors the C++ driver more closely: target-
+  specific Cangjie library directories, GCC CRT scanning, Linux CRT/linker
+  script placement, sanitizer runtime lookup/fallbacks, PGO runtime placement,
+  LTO linker options, target runtime rpath, standard-library static/dynamic
+  grouping, and multi-module package partial linking are implemented.
 
 Residual fidelity risks:
 
 - Driver self-host markers have been removed. Bitcode package names are read
   through LLVM C API bindings, and source compilation now invokes the
   self-hosted FrontendTool package.
-- GNU/Mach-O/platform toolchains are functional command builders but still omit
-  many C++ driver details around SDK/sysroot discovery, exact sanitizer/runtime
-  library selection, GCC runtime discovery, LTO linker parity, and platform
-  linker script handling.
+- GNU/Mach-O/platform toolchains are functional command builders. Linux/GNU
+  linkage has substantially more C++ parity, but exact symbol-localization data
+  from codegen partial-linking, some Android/OHOS/MinGW specialized linker
+  arguments, Darwin SDK/codesign behavior, and full platform-specific runtime
+  library edge cases remain below the C++ driver.
 - Main frontend support is a compiling shim rather than the full C++
   `main-frontend.cpp` standalone flow.
 

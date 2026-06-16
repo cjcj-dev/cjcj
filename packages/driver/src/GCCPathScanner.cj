@@ -125,3 +125,19 @@ private func IsCompatibleTripleName(info: TripleInfo, name: String): Bool {
     }
     return false
 }
+
+public func IsPossibleMatchingTripleName(info: TripleInfo, name: String): Bool {
+    if (IsCompatibleTripleName(info, name)) {
+        return true
+    }
+    if (!name.contains(info.ArchToString())) {
+        return false
+    }
+    if (info.os == OSType.LINUX && !name.contains("linux")) {
+        return false
+    }
+    if (info.os == OSType.WINDOWS && !name.contains("mingw") && !name.contains("windows")) {
+        return false
+    }
+    return true
+}

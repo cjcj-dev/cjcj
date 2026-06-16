@@ -13,6 +13,13 @@ private func HasBoolValue(value: Option<Bool>): Bool {
     return if (let Some(_) <- value) { true } else { false }
 }
 
+private func BackendToString(backend: BackendType): String {
+    return match (backend) {
+        case BackendType.CJNATIVE => "cjnative"
+        case BackendType.UNKNOWN => "unknown"
+    }
+}
+
 public class DriverOptions {
     public var argList: Array<String> = []
     public var executablePath: String = ""
@@ -203,6 +210,23 @@ public class DriverOptions {
 
     public func GetStackTraceFormat(): String {
         return stackTraceFormat
+    }
+
+    public func GetCangjieLibTargetPathName(): String {
+        var name = target.OSTypeToString()
+        if (target.env != EnvironmentType.GNU && target.env != EnvironmentType.NOT_AVAILABLE) {
+            name += "_" + target.EnvironmentToString()
+        }
+        return name + "_" + target.ArchToString() + "_" + BackendToString(backend)
+    }
+
+    public func SanitizerTypeToShortString(): String {
+        return match (sanitizerType) {
+            case SanitizerType.ADDRESS => "asan"
+            case SanitizerType.THREAD => "tsan"
+            case SanitizerType.HWADDRESS => "hwasan"
+            case SanitizerType.NONE => ""
+        }
     }
 
     public func SetOptimizationLevel(level: OptimizationLevel): Bool {

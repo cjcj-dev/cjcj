@@ -309,6 +309,29 @@ public class FileUtil {
         return ""
     }
 
+    public static func FindFileByName(name: String, paths: Array<String>): Option<String> {
+        if (name.isEmpty()) {
+            return None
+        }
+        if (name.contains("/")) {
+            return if (FileExist(name)) { name } else { None }
+        }
+        for (dir in paths) {
+            if (dir.isEmpty()) {
+                continue
+            }
+            let candidate = JoinPath(dir, name)
+            if (FileExist(candidate)) {
+                return candidate
+            }
+        }
+        return None
+    }
+
+    public static func FindFileByName(name: String, paths: ArrayList<String>): Option<String> {
+        return FindFileByName(name, paths.toArray())
+    }
+
     public static func SplitEnvironmentPaths(pathsString: String): Array<String> {
         let result = ArrayList<String>()
         for (entry in SplitString(pathsString, ":")) {
