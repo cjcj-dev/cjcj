@@ -109,6 +109,11 @@ Implemented:
   tracked allocation results: bottom/single/top facts, reaching store/load queries, fixed-point propagation over
   block successors, conservative invalidation for mutable calls/intrinsics/lambda captures, recursive lambda block
   discovery, and block entry/exit result storage.
+- Added `GenKillAnalysis`, `MaybeUninitAnalysis`, and `MaybeInitAnalysis` components. The Cangjie versions provide
+  the shared reachable gen/kill domain, constructor initialization metadata, allocation tracking, maybe-uninit and
+  maybe-init domains, line tracking for stores that initialize allocations/members, block fixed-point propagation,
+  recursive lambda-body traversal, constructor super/delegating-call handling, and member initialization queries
+  over the current `CustomTypeDef`/generic memory-expression model.
 - Added C++-named BCHIR interpreter component files for `OpCodes`, `BCHIR`, `BCHIRPrinter`,
   `BCHIRInterpreter`, `InterpreterValue`, `InterpreterValueUtils`, `InterpreterArena`,
   `InterpreterEnv`, and `InterpreterStack`.
@@ -167,6 +172,9 @@ Known gaps:
 - `SIntDomain` and `ValueDomain` are real analysis domains over the current IR, but the C++ template
   abstraction, complete arithmetic transfer functions, and integration with the fixed-point analysis engine
   are still pending.
+- `MaybeInitAnalysis` and `MaybeUninitAnalysis` now model the C++ gen/kill behavior for the current IR, but
+  precise `Debug` expression filtering, specialized `StoreElementRef` metadata, exact `IsInitialisingMemberVar`
+  semantics, and full constructor-call annotations are still limited by the not-yet-complete expression classes.
 - The BCHIR translator/linker/interpreter now has the first real end-to-end package/function/global/control
   path, but exact float/rune byte encoding, the complete expression taxonomy, intrinsics/syscalls, exception
   machinery, object method dispatch, raw-array operations, type casts, full serialization, and FFI execution
