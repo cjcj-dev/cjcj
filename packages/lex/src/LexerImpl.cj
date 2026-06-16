@@ -1810,23 +1810,57 @@ public class LexerImpl {
         return balanced && currentChar == Int64(b'}')
     }
 
+    private func ScanInterpolationStringLiteralHoleComment(allowNewline: Bool): Bool {
+        if (getNextChar(0) == b'/' && !allowNewline) {
+            while (true) {
+                ReadUTF8Char()
+                if (IsCurrentCharLineTerminator() || currentChar == -1) {
+                    break
+                }
+            }
+            if (success) {
+                DiagUnterminatedInterpolation()
+                success = false
+            }
+            Back()
+            return false
+        }
+        if (getNextChar(0) == b'*' || getNextChar(0) == b'/') {
+            return ScanComment(pCurrent, allowNewLine: allowNewline)[1]
+        }
+        return true
+    }
+
+    private func ProcessInterpolationStringLiteralLineBreak(allowNewline: Bool): Bool {
+        if (IsCurrentCharLineTerminator() && allowNewline) {
+            return true
+        }
+        if (success) {
+            let interpolation = if (interpolations.isEmpty()) { pCurrent } else { interpolations[interpolations.size - 1] }
+            let builder = diag.DiagnoseRefactor(
+                DiagKindRefactor.lex_unterminated_interpolation,
+                MakeRange(GetPos(interpolation), GetPos(pCurrent) + 1)
+            )
+            if (!allowNewline && currentChar != -1 && !stringStarts.isEmpty()) {
+                builder.AddHint(GetPos(stringStarts[stringStarts.size - 1][0]))
+            }
+            success = false
+        }
+        return false
+    }
+
+    private func ScanInterpolationStringLiteralHoleBalancedTextString(): Bool {
+        if (getNextChar(0) == UInt8(currentChar) && getNextChar(1) == UInt8(currentChar)) {
+            return ScanMultiLineString(pCurrent, needStringParts: false)[1]
+        }
+        return ScanStringOrJString(pCurrent, needStringParts: false)[1]
+    }
+
     private func ScanInterpolationStringLiteralHoleBalancedText(endingChar: UInt8, allowNewline: Bool): Bool {
-        var level: Int64 = 0
         while (true) {
             ReadUTF8Char()
-            if (currentChar == -1 || (IsCurrentCharLineTerminator() && !allowNewline)) {
-                if (success) {
-                    DiagUnterminatedInterpolation()
-                    success = false
-                }
-                return false
-            }
             if (isQuote(currentChar)) {
-                if (getNextChar(0) == UInt8(currentChar) && getNextChar(1) == UInt8(currentChar)) {
-                    if (!ScanMultiLineString(pCurrent, needStringParts: false)[1]) {
-                        return false
-                    }
-                } else if (!ScanStringOrJString(pCurrent, needStringParts: false)[1]) {
+                if (!ScanInterpolationStringLiteralHoleBalancedTextString()) {
                     return false
                 }
             } else if (currentChar == Int64(b'#') && getNextChar(0) == b'#') {
@@ -1834,31 +1868,18 @@ public class LexerImpl {
                     return false
                 }
             } else if (currentChar == Int64(b'{')) {
-                level++
-            } else if (currentChar == Int64(endingChar)) {
-                if (level == 0) {
-                    return true
+                if (!ScanInterpolationStringLiteralHoleBalancedText(b'}', allowNewline)) {
+                    return false
                 }
-                level--
+            } else if (currentChar == Int64(endingChar)) {
+                return true
+            } else if (currentChar == -1 || IsCurrentCharLineTerminator()) {
+                if (!ProcessInterpolationStringLiteralLineBreak(allowNewline)) {
+                    return false
+                }
             } else if (currentChar == Int64(b'/')) {
-                if (getNextChar(0) == b'*' || getNextChar(0) == b'/') {
-                    if (getNextChar(0) == b'/' && !allowNewline) {
-                        while (true) {
-                            ReadUTF8Char()
-                            if (IsCurrentCharLineTerminator() || currentChar == -1) {
-                                break
-                            }
-                        }
-                        if (success) {
-                            DiagUnterminatedInterpolation()
-                            success = false
-                        }
-                        Back()
-                        return false
-                    }
-                    if (!ScanComment(pCurrent, allowNewLine: allowNewline)[1]) {
-                        return false
-                    }
+                if (!ScanInterpolationStringLiteralHoleComment(allowNewline)) {
+                    return false
                 }
             }
         }
@@ -1998,7 +2019,7 @@ public class LexerImpl {
         )
         tok.delimiterNum = delimiterNum
         tok.isSingleQuote = quoteChar == Int64(b'\'')
-        return (tok, true)
+        return (tok, false)
     }
 
     private func ScanMultiLineComment(pStart: Int64, allowNewLine: Bool): (Token, Bool) {
@@ -2441,9 +2462,6 @@ public class LexerImpl {
         }
         if (currentChar == Int64(b'\\') && isMacroEscape(getNextChar(0))) {
             return Token(TokenKind.ILLEGAL, "\\", pos, pos + 1)
-        }
-        if (currentChar > Int64(ASCII_BASE)) {
-            return ScanIllegalSymbol(pStart)
         }
         return ScanSymbol(pStart)
     }

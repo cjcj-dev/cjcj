@@ -28,6 +28,8 @@ Implemented:
 - Matched C++ invalid composite symbol consumption for `+&=`, `-&=`, `*&=`, and `**&=` so those forms are diagnosed as one illegal token.
 - Expanded numeric, unicode-escape, unknown-token, and dollar-identifier diagnostics with the C++ helper behavior: secondary hints, notes, and fix-it substitutions.
 - Added C++-style diagnostics for non-ASCII numeric junk, illegal Unicode identifier continuations, and missing multiline/raw-string delimiter hints.
+- Reworked string-interpolation hole scanning to mirror the C++ helper split for nested braces, strings, comments, linebreak diagnostics, and raw-string failure propagation.
+- Routed non-identifier Unicode token starts through the C++ symbol fallback path so they produce `lex_unknown_start_of_token` behavior instead of Lex-local unrecognized-symbol handling.
 
 Known validation caveats:
 
