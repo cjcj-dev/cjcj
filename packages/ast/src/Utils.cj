@@ -1,5 +1,9 @@
 package cangjie_compiler::ast
 
+import cangjie_compiler::utils.{
+    GetRootPackageName, INTEROP_JAVA_LANG_PACKAGE, INTEROP_JOBJECT_NAME, INTEROPLIB_CFFI_JAVA_ENTITY,
+    JAVA_REF_GETTER_FUNC_NAME, SYNTHETIC_CLASS_SUFFIX
+}
 import std.collection.*
 
 public func AddMacroAttr(node: Node): Unit {
@@ -672,6 +676,22 @@ public func IsCommonWithoutDefault(decl: Decl): Bool {
     return decl.TestAttr(Attribute.COMMON) && !decl.TestAttr(Attribute.COMMON_WITH_DEFAULT)
 }
 
+public func IsValidCFuncConstructorCall(ce: CallExpr): Bool {
+    if (!Ty.IsTyCorrect(ce.GetTy())) {
+        return false
+    }
+    if (let Some(baseFunc) <- ce.baseFunc) {
+        if (let Some(refExpr) <- (baseFunc as RefExpr)) {
+            if (let Some(target) <- refExpr.ref.target) {
+                if (let Some(builtinDecl) <- (target as BuiltInDecl)) {
+                    return builtinDecl.IsType(BuiltInType.CFUNC)
+                }
+            }
+        }
+    }
+    return false
+}
+
 public func IsVirtualMember(decl: Decl): Bool {
     if (let Some(outer) <- decl.outerDecl) {
         if (outer.astKind == ASTKind.INTERFACE_DECL) {
@@ -955,4 +975,153 @@ private func makeMirrorPropFromVar(varDecl: VarDecl, attrToBeSet: Attribute): Pr
         InsertPropSetterSignature(propNode, attrToBeSet)
     }
     return propNode
+}
+
+private func setPositionAndCurFileByProvidedNode(consumer: Node, provider: Node): Unit {
+    consumer.curFile = provider.curFile
+    consumer.begin = provider.begin
+    consumer.end = provider.end
+}
+
+public func IsImpl(node: Node): Bool {
+    return !node.TestAttr(Attribute.JAVA_MIRROR) && node.TestAttr(Attribute.JAVA_MIRROR_SUBTYPE)
+}
+
+public func IsJObject(decl: Decl): Bool {
+    return IsJObject(decl, decl.fullPackageName)
+}
+
+public func IsJObject(decl: Decl, packageName: String): Bool {
+    return IsMirror(decl) && decl.identifier.Val() == INTEROP_JOBJECT_NAME &&
+        packageName == INTEROP_JAVA_LANG_PACKAGE
+}
+
+public func IsMirror(node: Node): Bool {
+    return node.TestAttr(Attribute.JAVA_MIRROR)
+}
+
+public func IsCJMapping(node: Node): Bool {
+    return node.TestAttr(Attribute.JAVA_CJ_MAPPING)
+}
+
+public func IsObject(node: Node): Bool {
+    if (let Some(ty) <- node.GetTy()) {
+        return ty.IsObject()
+    }
+    return false
+}
+
+public func IsFwdClass(node: Node): Bool {
+    return node.TestAttr(Attribute.CJ_MIRROR_JAVA_INTERFACE_FWD)
+}
+
+public func InsertJavaRefGetterStubWithBody(decl: ClassDecl): Unit {
+    let callParams = ArrayList<FuncParam>()
+    let paramLists = ArrayList<FuncParamList>()
+    let paramList = CreateFuncParamList(callParams)
+    paramList.begin = decl.begin
+    paramList.end = decl.end
+    paramLists.add(paramList)
+
+    let constructor = CreateCallExpr(CreateRefExpr(INTEROPLIB_CFFI_JAVA_ENTITY), ArrayList<FuncArg>())
+    let retExpr = CreateReturnExpr(constructor)
+    let nodes = ArrayList<Node>()
+    nodes.add(retExpr)
+
+    let funcBody = CreateFuncBody(paramLists, Some(CreateRefType(INTEROPLIB_CFFI_JAVA_ENTITY)),
+        Some(CreateBlock(nodes)), None)
+    let funcDecl = CreateFuncDecl(JAVA_REF_GETTER_FUNC_NAME, Some(funcBody), None)
+    funcDecl.EnableAttr(Attribute.PUBLIC)
+    funcDecl.EnableAttr(Attribute.IN_CLASSLIKE)
+    funcDecl.fullPackageName = decl.fullPackageName
+    if (let Some(body) <- funcDecl.funcBody) {
+        body.funcDecl = funcDecl
+        body.parentClassLike = decl
+    }
+    funcDecl.outerDecl = decl
+
+    if (let Some(body) <- decl.body) {
+        body.decls.add(funcDecl)
+    }
+}
+
+public func IsJavaDeclAppropriateForSyntheticClassGeneration(node: Node): Bool {
+    return IsMirror(node) && (node.astKind == ASTKind.INTERFACE_DECL ||
+        (node.astKind == ASTKind.CLASS_DECL && node.TestAttr(Attribute.ABSTRACT)))
+}
+
+public func GetJavaSyntheticNameFromClassLike(decl: ClassLikeDecl): String {
+    return decl.identifier.Val() + "$impl"
+}
+
+public func InsertJavaSyntheticClassDecl(decl: ClassLikeDecl, file: File): ClassDecl {
+    let synthetic = ClassDecl()
+    copyAccessAttr(decl, synthetic)
+    synthetic.EnableAttr(Attribute.JAVA_MIRROR)
+    synthetic.EnableAttr(Attribute.JAVA_MIRROR_SUBTYPE)
+    synthetic.EnableAttr(Attribute.JAVA_MIRROR_SYNTHETIC_WRAPPER)
+    synthetic.EnableAttr(Attribute.COMPILER_ADD)
+    synthetic.EnableAttr(Attribute.ABSTRACT)
+    synthetic.identifier = SrcIdentifier(GetJavaSyntheticNameFromClassLike(decl), decl.identifier.Begin(),
+        decl.identifier.End(), decl.identifier.IsRaw())
+
+    if (decl.astKind == ASTKind.INTERFACE_DECL) {
+        let jobject = CreateRefType(INTEROP_JOBJECT_NAME)
+        setPositionAndCurFileByProvidedNode(jobject, decl)
+        synthetic.inheritedTypes.add(jobject)
+    }
+    synthetic.inheritedTypes.add(CreateRefType(decl))
+
+    synthetic.fullPackageName = decl.fullPackageName
+    setPositionAndCurFileByProvidedNode(synthetic, decl)
+
+    let body = ClassBody()
+    setPositionAndCurFileByProvidedNode(body, synthetic)
+    synthetic.body = body
+
+    synthetic.moduleName = GetRootPackageName(decl.fullPackageName)
+    file.decls.add(synthetic)
+    return synthetic
+}
+
+public func IsObjCDeclAppropriateForSyntheticClassGeneration(decl: Decl): Bool {
+    return decl.TestAttr(Attribute.OBJ_C_MIRROR) && decl.astKind == ASTKind.INTERFACE_DECL
+}
+
+public func GetObjCSyntheticNameFromClassLike(decl: ClassLikeDecl): String {
+    return decl.identifier.Val() + SYNTHETIC_CLASS_SUFFIX
+}
+
+public func InsertObjCSyntheticClassDecl(decl: ClassLikeDecl, file: File): ClassDecl {
+    let synthetic = ClassDecl()
+    synthetic.CloneAttrs(decl)
+    synthetic.EnableAttr(Attribute.OBJ_C_MIRROR_SYNTHETIC_WRAPPER)
+    synthetic.EnableAttr(Attribute.COMPILER_ADD)
+    synthetic.EnableAttr(Attribute.ABSTRACT)
+    synthetic.DisableAttr(Attribute.OBJ_C_MIRROR)
+    synthetic.identifier = SrcIdentifier(GetObjCSyntheticNameFromClassLike(decl), decl.identifier.Begin(),
+        decl.identifier.End(), decl.identifier.IsRaw())
+    synthetic.inheritedTypes.add(CreateRefType(decl))
+    synthetic.fullPackageName = decl.fullPackageName
+    setPositionAndCurFileByProvidedNode(synthetic, decl)
+
+    let body = ClassBody()
+    setPositionAndCurFileByProvidedNode(body, synthetic)
+    synthetic.body = body
+
+    synthetic.moduleName = GetRootPackageName(decl.fullPackageName)
+    file.decls.add(synthetic)
+    return synthetic
+}
+
+private func copyAccessAttr(source: Node, target: Node): Unit {
+    if (source.TestAttr(Attribute.PUBLIC)) {
+        target.EnableAttr(Attribute.PUBLIC)
+    } else if (source.TestAttr(Attribute.INTERNAL)) {
+        target.EnableAttr(Attribute.INTERNAL)
+    } else if (source.TestAttr(Attribute.PROTECTED)) {
+        target.EnableAttr(Attribute.PROTECTED)
+    } else if (source.TestAttr(Attribute.PRIVATE)) {
+        target.EnableAttr(Attribute.PRIVATE)
+    }
 }

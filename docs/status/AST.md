@@ -10,6 +10,8 @@ The AST package is a multi-file Cangjie package mirroring the C++ AST component 
 
 ## Implemented In This Pass
 
+- Added later `Utils.cpp` interop-helper parity: Java mirror/impl/CJ-mapping/JObject/Object/forward-class predicates, CFunc constructor-call validation, Java ref-getter stub generation, Java synthetic wrapper class generation, and ObjC synthetic wrapper class generation using existing AST creation helpers.
+- Reused real `cangjie_compiler::utils` constants and `GetRootPackageName` for Java/ObjC generated declarations instead of local string copies.
 - Aligned `Walker` post-visit action handling with C++: `VisitPost` now overrides the current decision unless it returns `KEEP_DECISION`, preserves immediate `STOP_NOW`, and asserts that the final decision is not `KEEP_DECISION`.
 - Deepened `Walker` traversal parity for desugared AST nodes: macro and main declarations now walk either `desugarDecl` or the original body, return/literal/optional-chain/synchronized nodes skip stale original children after desugaring, and try-handler blocks are skipped once the try expression has a desugared replacement.
 - Aligned package traversal order with the C++ walker by visiting generic instantiated declarations before package files.
