@@ -6,6 +6,8 @@ Build: `cjpm build` passes.
 
 Deepening pass updates:
 
+- Separated `InteropCJPackageConfigReader.Parse` from semantic validation to match the C++ reader flow: parse now
+  reports file/read/TOML-shape failures, while strategy consistency checks remain in the explicit `Validate()` step.
 - Added the C++ `DiagnosticEngine::StashDisableDiagnoseStatus` behavior as a Cangjie `Resource`, including
   temporary re-enable/restore of disabled diagnostic state and replay of non-error stored diagnostics for the
   `hasTargetType` path. Exposed the missing `DisableDiagnose()`, no-argument `EnableDiagnose()`, and

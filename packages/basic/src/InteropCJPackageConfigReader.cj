@@ -160,7 +160,7 @@ public class InteropCJPackageConfigReader {
             }
         }
         storePackage(currentPackage)
-        return Validate()
+        return true
     }
 
     public func GetPackage(name: String): Option<PackageConfig> {
