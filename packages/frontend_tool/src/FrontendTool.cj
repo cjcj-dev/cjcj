@@ -11,8 +11,20 @@ import cangjie_compiler::utils.FileUtil
 
 public class DriverOptions {
     public let sourceFiles: ArrayList<String> = ArrayList<String>()
+    public let inputObjs: ArrayList<String> = ArrayList<String>()
+    public let packagePaths: ArrayList<String> = ArrayList<String>()
+    public let importPaths: ArrayList<String> = ArrayList<String>()
+    public let pluginPaths: ArrayList<String> = ArrayList<String>()
+    public let commonPartCjos: ArrayList<String> = ArrayList<String>()
+    public let commonPartChirs: ArrayList<String> = ArrayList<String>()
+    public let bcPackageNames: ArrayList<String> = ArrayList<String>()
     public let directBuiltinDependencies: HashSet<String> = HashSet<String>()
     public let indirectBuiltinDependencies: HashSet<String> = HashSet<String>()
+    public var output: String = ""
+    public var executablePath: String = ""
+    public var cangjieHome: String = ""
+    public var moduleSrcPath: String = ""
+    public var inputCjoFile: String = ""
     public var compilationCachedPath: String = ""
     public var compilationCachedDir: String = ""
     public var compilationCachedFileName: String = ""
@@ -21,12 +33,21 @@ public class DriverOptions {
     public init() {}
 
     public func CopyFromOptions(opts: GlobalOptions, incrementalNoChange: Bool): Unit {
-        sourceFiles.clear()
-        for (srcFile in opts.srcFiles) {
-            sourceFiles.add(srcFile)
-        }
+        CopyStringList(sourceFiles, opts.srcFiles)
+        CopyStringList(inputObjs, opts.inputObjs)
+        CopyStringList(packagePaths, opts.packagePaths)
+        CopyStringList(importPaths, opts.importPaths)
+        CopyStringList(pluginPaths, opts.pluginPaths)
+        CopyStringList(commonPartCjos, opts.commonPartCjos)
+        CopyStringList(commonPartChirs, opts.commonPartChirs)
+        CopyStringList(bcPackageNames, opts.bcPackageNames)
         CopyStringSet(directBuiltinDependencies, opts.directBuiltinDependencies)
         CopyStringSet(indirectBuiltinDependencies, opts.indirectBuiltinDependencies)
+        output = opts.output
+        executablePath = opts.executablePath
+        cangjieHome = opts.cangjieHome
+        moduleSrcPath = opts.moduleSrcPath
+        inputCjoFile = opts.inputCjoFile
         compilationCachedPath = opts.compilationCachedPath
         compilationCachedDir = opts.compilationCachedDir
         compilationCachedFileName = opts.compilationCachedFileName
@@ -100,10 +121,7 @@ public func NeedCreateIncrementalCompilerInstance(opts: GlobalOptions): Bool {
     if (!opts.enIncrementalCompilation) {
         return false
     }
-    if (opts.compileCjd) {
-        return false
-    }
-    if (!opts.commonPartCjos.isEmpty() || !opts.commonPartChirs.isEmpty()) {
+    if (!opts.commonPartCjos.isEmpty()) {
         return false
     }
     return true
@@ -278,6 +296,13 @@ private func PrintFrontendUsage(): Unit {
     println("  -d")
     println("  -p, --package")
     println("  -o, --output <file>")
+}
+
+private func CopyStringList(target: ArrayList<String>, source: ArrayList<String>): Unit {
+    target.clear()
+    for (value in source) {
+        target.add(value)
+    }
 }
 
 private func CopyStringSet(target: HashSet<String>, source: HashSet<String>): Unit {
