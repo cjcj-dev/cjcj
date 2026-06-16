@@ -219,6 +219,11 @@ class CHIRSerializerImpl {
         fields.add(CHIRSerializeAttributes(expr))
         fields.add(serializeBlockGroupRefs(expr.GetBlockGroups()))
         fields.add(CHIRSerializeBaseAnnotations(expr))
+        fields.add(serializeResultSrcCodeIdentifier(expr))
+        fields.add(serializeResultIsRetValue(expr))
+        fields.add(serializeResultDebugLocation(expr))
+        fields.add(serializeResultAttributes(expr))
+        fields.add(serializeResultBaseAnnotations(expr))
         lines.add(CHIRWireJoinFields(fields))
         for (group in expr.GetBlockGroups()) {
             appendBlockGroup(lines, group)
@@ -268,6 +273,41 @@ class CHIRSerializerImpl {
             out.add(CHIRValueId(value))
         }
         return CHIRWireJoinList(out)
+    }
+
+    private func serializeResultSrcCodeIdentifier(expr: Expression): String {
+        if (let Some(result) <- expr.GetResult()) {
+            return result.GetSrcCodeIdentifier()
+        }
+        return ""
+    }
+
+    private func serializeResultIsRetValue(expr: Expression): String {
+        if (let Some(result) <- expr.GetResult()) {
+            return CHIRBoolToWire(result.IsRetValue())
+        }
+        return ""
+    }
+
+    private func serializeResultDebugLocation(expr: Expression): String {
+        if (let Some(result) <- expr.GetResult()) {
+            return CHIRSerializeDebugLocation(result.GetDebugLocation())
+        }
+        return ""
+    }
+
+    private func serializeResultAttributes(expr: Expression): String {
+        if (let Some(result) <- expr.GetResult()) {
+            return CHIRSerializeAttributes(result)
+        }
+        return ""
+    }
+
+    private func serializeResultBaseAnnotations(expr: Expression): String {
+        if (let Some(result) <- expr.GetResult()) {
+            return CHIRSerializeBaseAnnotations(result)
+        }
+        return ""
     }
 
     private func serializeValueRefs(values: ArrayList<Value>): String {

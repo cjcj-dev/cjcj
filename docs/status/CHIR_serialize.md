@@ -39,6 +39,9 @@ Implemented in this pass:
   landing-pad exception class types, explicit predecessor lists, expression order, result locals, operands,
   expression-owned block groups, terminator successors, constant literal payloads, debug locations, attributes,
   and public base annotation-map entries.
+- Extended expression result-local records toward the C++ `LocalVar` serializer shape: result source-code
+  identifiers, return-value flags, debug locations, attributes, and public base annotation-map entries now
+  round-trip with the expression result.
 - Deserialization is now multi-pass: package/custom defs, globals/functions/parameters, block groups/blocks,
   relationship configuration, expression creation, explicit predecessor repair, block-group entry/owner repair,
   and package function repair.
@@ -63,4 +66,4 @@ Known gaps:
 - `TYPE_CPOINTER` exists in the enum but has no concrete Cangjie type/context constructor in this package, so
   deserialization falls back to `Invalid` for that kind.
 
-Honest coverage estimate for CHIR serializer/deserializer scope: 40%.
+Honest coverage estimate for CHIR serializer/deserializer scope: 42%.

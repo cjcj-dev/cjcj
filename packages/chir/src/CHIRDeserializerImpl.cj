@@ -341,7 +341,7 @@ class CHIRDeserializerImpl {
                     expressionsById[CHIRFieldAt(fields, 1)] = expr
                     CHIRApplyBaseInfo(expr, CHIRFieldAt(fields, 11), CHIRFieldAt(fields, 12), annotationText: CHIRFieldAt(fields, 14))
                     if (let Some(result) <- expr.GetResult()) {
-                        result.SetIdentifier(CHIRFieldAt(fields, 6))
+                        configureExpressionResult(result, fields)
                         valuesById[CHIRFieldAt(fields, 5)] = result
                     }
                 }
@@ -358,6 +358,16 @@ class CHIRDeserializerImpl {
                 }
             }
         }
+    }
+
+    private func configureExpressionResult(result: LocalVar, fields: ArrayList<String>): Unit {
+        result.SetIdentifier(CHIRFieldAt(fields, 6))
+        result.SetSrcCodeIdentifier(CHIRFieldAt(fields, 15))
+        if (!CHIRFieldAt(fields, 16).isEmpty()) {
+            result.SetRetValue(CHIRWireToBool(CHIRFieldAt(fields, 16)))
+        }
+        CHIRApplyBaseInfo(result, CHIRFieldAt(fields, 17), CHIRFieldAt(fields, 18),
+            annotationText: CHIRFieldAt(fields, 19))
     }
 
     private func createExpression(fields: ArrayList<String>, block: Block): Expression {
