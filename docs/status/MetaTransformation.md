@@ -34,7 +34,9 @@ Implemented:
 - Added `MakeCHIRPluginInfo`, the Cangjie equivalent of the C++ `CHIR_PLUGIN` macro expansion: it wraps
   a transform factory in a plugin-info registration callback that appends the produced transform to the
   CHIR plugin manager. The default overload reports the real `basic.CANGJIE_VERSION`, matching the C++
-  macro's version source, while the explicit-version overload remains useful for tests.
+  macro's version source, while the explicit-version overload remains useful for tests. The helper is
+  generic over the concrete transform subclass, so callers do not need to pre-widen plugin factories to
+  `MetaTransformConcept` before registration.
 - Added typed CHIR transform factory aliases and function/package-specific plugin-info helpers. These
   preserve the C++ macro's type-specific construction path more closely for Cangjie plugins that derive
   from `CHIRFunctionMetaTransform` or `CHIRPackageMetaTransform`; the helpers are generic over the

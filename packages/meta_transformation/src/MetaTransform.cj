@@ -119,10 +119,10 @@ public struct MetaTransformPluginInfo {
     }
 }
 
-public func MakeCHIRPluginInfo(
+public func MakeCHIRPluginInfo<MT>(
     cjcVersion: String,
-    factory: CHIRMetaTransformFactory
-): MetaTransformPluginInfo {
+    factory: (CHIRBuilder) -> MT
+): MetaTransformPluginInfo where MT <: MetaTransformConcept {
     return MetaTransformPluginInfo(cjcVersion, { builder: MetaTransformPluginBuilder =>
         builder.RegisterCHIRPluginCallback({ manager: CHIRPluginManager, chirBuilder: CHIRBuilder =>
             manager.AddMetaTransform(factory(chirBuilder))
@@ -130,7 +130,8 @@ public func MakeCHIRPluginInfo(
     })
 }
 
-public func MakeCHIRPluginInfo(factory: CHIRMetaTransformFactory): MetaTransformPluginInfo {
+public func MakeCHIRPluginInfo<MT>(factory: (CHIRBuilder) -> MT): MetaTransformPluginInfo
+    where MT <: MetaTransformConcept {
     return MakeCHIRPluginInfo(CANGJIE_VERSION, factory)
 }
 
