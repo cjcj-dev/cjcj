@@ -82,31 +82,27 @@ public func ReplaceSubstring(str: String, from: String, to: String): String {
     return out
 }
 
-public func PrimitiveTypeMangle(kind: MangleTypeKind): Option<String> {
+public func PrimitiveTypeMangle(kind: TypeKind): Option<String> {
     return match (kind) {
-        case MangleTypeKind.TYPE_NOTHING => "n"
-        case MangleTypeKind.TYPE_UNIT => "u"
-        case MangleTypeKind.TYPE_RUNE => "c"
-        case MangleTypeKind.TYPE_BOOLEAN => "b"
-        case MangleTypeKind.TYPE_FLOAT16 => "Dh"
-        case MangleTypeKind.TYPE_FLOAT32 => "f"
-        case MangleTypeKind.TYPE_FLOAT64 => "d"
-        case MangleTypeKind.TYPE_INT8 => "a"
-        case MangleTypeKind.TYPE_INT16 => "s"
-        case MangleTypeKind.TYPE_INT32 => "i"
-        case MangleTypeKind.TYPE_INT64 => "l"
-        case MangleTypeKind.TYPE_INT_NATIVE => "q"
-        case MangleTypeKind.TYPE_UINT8 => "h"
-        case MangleTypeKind.TYPE_UINT16 => "t"
-        case MangleTypeKind.TYPE_UINT32 => "j"
-        case MangleTypeKind.TYPE_UINT64 => "m"
-        case MangleTypeKind.TYPE_UINT_NATIVE => "r"
+        case TypeKind.TYPE_NOTHING => "n"
+        case TypeKind.TYPE_UNIT => "u"
+        case TypeKind.TYPE_RUNE => "c"
+        case TypeKind.TYPE_BOOLEAN => "b"
+        case TypeKind.TYPE_FLOAT16 => "Dh"
+        case TypeKind.TYPE_FLOAT32 => "f"
+        case TypeKind.TYPE_FLOAT64 => "d"
+        case TypeKind.TYPE_INT8 => "a"
+        case TypeKind.TYPE_INT16 => "s"
+        case TypeKind.TYPE_INT32 => "i"
+        case TypeKind.TYPE_INT64 => "l"
+        case TypeKind.TYPE_INT_NATIVE => "q"
+        case TypeKind.TYPE_UINT8 => "h"
+        case TypeKind.TYPE_UINT16 => "t"
+        case TypeKind.TYPE_UINT32 => "j"
+        case TypeKind.TYPE_UINT64 => "m"
+        case TypeKind.TYPE_UINT_NATIVE => "r"
         case _ => None
     }
-}
-
-public func PrimitiveTypeMangle(kind: TypeKind): Option<String> {
-    return PrimitiveTypeMangle(ConvertAstTypeToMangle(PrimitiveTy(kind)).kind)
 }
 
 public func OperatorTypeMangle(name: String): Option<String> {
@@ -143,7 +139,7 @@ public func IsOperatorMangleCode(code: String): Bool {
 }
 
 public func IsAutoBoxedBaseDecl(decl: MangleDecl): Bool {
-    return decl.TestAttr(MangleAttribute.NO_MANGLE) && decl.astKind == MangleAstKind.CLASS_DECL
+    return decl.TestAttr(Attribute.NO_MANGLE) && decl.astKind == ASTKind.CLASS_DECL
 }
 
 public func IsAutoBoxedBaseDecl(decl: Decl): Bool {
@@ -153,7 +149,7 @@ public func IsAutoBoxedBaseDecl(decl: Decl): Bool {
 public func MangleEnumElement(enumDeclMangledName: String, decl: MangleDecl): String {
     var elementClassName = enumDeclMangledName + MANGLE_DOLLAR_PREFIX + decl.identifier
     if (let Some(ty) <- decl.semaTy) {
-        if (ty.kind == MangleTypeKind.TYPE_FUNC) {
+        if (ty.kind == TypeKind.TYPE_FUNC) {
             elementClassName += MANGLE_DOLLAR_PREFIX + "${ty.paramTys.size}"
         }
     }
