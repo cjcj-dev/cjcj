@@ -113,6 +113,9 @@ public func CollectTargets(node: Node): TargetCache {
         }
     }
     let first = node.GetTarget()
+    if (let None <- first) {
+        return TargetCache(None, None)
+    }
     var second: Option<Decl> = None
     if (let Some(member) <- (node as MemberAccess)) {
         if (let Some(base) <- member.baseExpr) {

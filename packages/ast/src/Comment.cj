@@ -17,7 +17,7 @@ public enum CommentKind {
 public class Comment {
     public var style: CommentStyle = CommentStyle.OTHER
     public var kind: CommentKind = CommentKind.LINE
-    public var info: Token = Token()
+    public var info: Token = Token(TokenKind.ILLEGAL)
 
     public init() {}
 
