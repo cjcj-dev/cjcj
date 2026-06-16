@@ -12,6 +12,16 @@ public func SetIsClonedSourceCode(source: Node, target: Node): Unit {
     target.EnableAttr(Attribute.IS_CLONED_SOURCE_CODE)
 }
 
+private class ClonePair {
+    public let sourceNode: Node
+    public let targetNode: Node
+
+    public init(sourceNode: Node, targetNode: Node) {
+        this.sourceNode = sourceNode
+        this.targetNode = targetNode
+    }
+}
+
 private func cloneIdentifier(source: Identifier): Identifier {
     return Identifier(source.Val(), source.Begin(), source.End())
 }
@@ -121,13 +131,21 @@ public func CloneGeneric(source: Generic, visitFunc: (Node, Node) -> Unit): Gene
 }
 
 public class ASTCloner {
+    private static var cloneDepth: Int64 = 0
+
     public init() {}
 
     public static func Clone(node: Node): Node {
+        let shouldRepairPointers = cloneDepth == 0
+        cloneDepth++
         let target = makeNode(node)
         CopyBasicInfo(node, target)
         copyCommon(node, target)
         copySpecific(node, target)
+        cloneDepth--
+        if (shouldRepairPointers) {
+            repairClonedPointers(node, target)
+        }
         return target
     }
 
@@ -157,6 +175,362 @@ public class ASTCloner {
         })
         walker.Walk()
         return nodes
+    }
+
+    private static func collectClonePairs(sourceRoot: Node, targetRoot: Node): ArrayList<ClonePair> {
+        let pairs = ArrayList<ClonePair>()
+        let sourceNodes = collectPreorder(sourceRoot)
+        let targetNodes = collectPreorder(targetRoot)
+        let count = if (sourceNodes.size < targetNodes.size) { sourceNodes.size } else { targetNodes.size }
+        var idx: Int64 = 0
+        while (idx < count) {
+            pairs.add(ClonePair(sourceNodes[idx], targetNodes[idx]))
+            idx++
+        }
+        return pairs
+    }
+
+    private static func sameCloneSourceNode(sourceValue: Node, candidateValue: Node): Bool {
+        if (sourceValue.astKind != candidateValue.astKind) {
+            return false
+        }
+        if (sourceValue.begin != candidateValue.begin || sourceValue.end != candidateValue.end) {
+            return false
+        }
+        if (let Some(sourceDecl) <- (sourceValue as Decl)) {
+            if (let Some(candidateDecl) <- (candidateValue as Decl)) {
+                return SameDecl(sourceDecl, candidateDecl)
+            }
+            return false
+        }
+        if (let Some(sourceRefExpr) <- (sourceValue as RefExpr)) {
+            if (let Some(candidateRefExpr) <- (candidateValue as RefExpr)) {
+                return sourceRefExpr.ref.identifier == candidateRefExpr.ref.identifier &&
+                    sourceRefExpr.isThis == candidateRefExpr.isThis && sourceRefExpr.isSuper == candidateRefExpr.isSuper
+            }
+            return false
+        }
+        if (let Some(sourceMember) <- (sourceValue as MemberAccess)) {
+            if (let Some(candidateMember) <- (candidateValue as MemberAccess)) {
+                return sourceMember.field == candidateMember.field
+            }
+            return false
+        }
+        if (let Some(sourceRefType) <- (sourceValue as RefType)) {
+            if (let Some(candidateRefType) <- (candidateValue as RefType)) {
+                return sourceRefType.ref.identifier == candidateRefType.ref.identifier
+            }
+            return false
+        }
+        if (let Some(sourceQualified) <- (sourceValue as QualifiedType)) {
+            if (let Some(candidateQualified) <- (candidateValue as QualifiedType)) {
+                return sourceQualified.field == candidateQualified.field
+            }
+            return false
+        }
+        return sourceValue.ToString() == candidateValue.ToString()
+    }
+
+    private static func findNodeClone(pairs: ArrayList<ClonePair>, node: Node): Option<Node> {
+        var found: Option<Node> = None
+        var foundCount: Int64 = 0
+        for (pair in pairs) {
+            if (sameCloneSourceNode(pair.sourceNode, node)) {
+                found = pair.targetNode
+                foundCount++
+            }
+        }
+        if (foundCount == 1) {
+            return found
+        }
+        return None
+    }
+
+    private static func findDeclClone(pairs: ArrayList<ClonePair>, decl: Decl): Option<Decl> {
+        if (let Some(node) <- findNodeClone(pairs, decl)) {
+            return node as Decl
+        }
+        return None
+    }
+
+    private static func findFuncDeclClone(pairs: ArrayList<ClonePair>, decl: FuncDecl): Option<FuncDecl> {
+        if (let Some(node) <- findNodeClone(pairs, decl)) {
+            return node as FuncDecl
+        }
+        return None
+    }
+
+    private static func findPropDeclClone(pairs: ArrayList<ClonePair>, decl: PropDecl): Option<PropDecl> {
+        if (let Some(node) <- findNodeClone(pairs, decl)) {
+            return node as PropDecl
+        }
+        return None
+    }
+
+    private static func findExprClone(pairs: ArrayList<ClonePair>, expr: Expr): Option<Expr> {
+        if (let Some(node) <- findNodeClone(pairs, expr)) {
+            return node as Expr
+        }
+        return None
+    }
+
+    private static func findPatternClone(pairs: ArrayList<ClonePair>, pattern: Pattern): Option<Pattern> {
+        if (let Some(node) <- findNodeClone(pairs, pattern)) {
+            return node as Pattern
+        }
+        return None
+    }
+
+    private static func findFuncBodyClone(pairs: ArrayList<ClonePair>, body: FuncBody): Option<FuncBody> {
+        if (let Some(node) <- findNodeClone(pairs, body)) {
+            return node as FuncBody
+        }
+        return None
+    }
+
+    private static func findClassLikeDeclClone(pairs: ArrayList<ClonePair>,
+        decl: ClassLikeDecl): Option<ClassLikeDecl> {
+        if (let Some(node) <- findNodeClone(pairs, decl)) {
+            return node as ClassLikeDecl
+        }
+        return None
+    }
+
+    private static func findStructDeclClone(pairs: ArrayList<ClonePair>, decl: StructDecl): Option<StructDecl> {
+        if (let Some(node) <- findNodeClone(pairs, decl)) {
+            return node as StructDecl
+        }
+        return None
+    }
+
+    private static func findEnumDeclClone(pairs: ArrayList<ClonePair>, decl: EnumDecl): Option<EnumDecl> {
+        if (let Some(node) <- findNodeClone(pairs, decl)) {
+            return node as EnumDecl
+        }
+        return None
+    }
+
+    private static func remapDecl(pairs: ArrayList<ClonePair>, value: Option<Decl>): Option<Decl> {
+        if (let Some(decl) <- value) {
+            if (let Some(cloned) <- findDeclClone(pairs, decl)) {
+                return cloned
+            }
+        }
+        return value
+    }
+
+    private static func remapFuncDecl(pairs: ArrayList<ClonePair>, value: Option<FuncDecl>): Option<FuncDecl> {
+        if (let Some(decl) <- value) {
+            if (let Some(cloned) <- findFuncDeclClone(pairs, decl)) {
+                return cloned
+            }
+        }
+        return value
+    }
+
+    private static func remapPropDecl(pairs: ArrayList<ClonePair>, value: Option<PropDecl>): Option<PropDecl> {
+        if (let Some(decl) <- value) {
+            if (let Some(cloned) <- findPropDeclClone(pairs, decl)) {
+                return cloned
+            }
+        }
+        return value
+    }
+
+    private static func remapExpr(pairs: ArrayList<ClonePair>, value: Option<Expr>): Option<Expr> {
+        if (let Some(expr) <- value) {
+            if (let Some(cloned) <- findExprClone(pairs, expr)) {
+                return cloned
+            }
+        }
+        return value
+    }
+
+    private static func remapPattern(pairs: ArrayList<ClonePair>, value: Option<Pattern>): Option<Pattern> {
+        if (let Some(pattern) <- value) {
+            if (let Some(cloned) <- findPatternClone(pairs, pattern)) {
+                return cloned
+            }
+        }
+        return value
+    }
+
+    private static func remapFuncBody(pairs: ArrayList<ClonePair>, value: Option<FuncBody>): Option<FuncBody> {
+        if (let Some(body) <- value) {
+            if (let Some(cloned) <- findFuncBodyClone(pairs, body)) {
+                return cloned
+            }
+        }
+        return value
+    }
+
+    private static func remapClassLikeDecl(pairs: ArrayList<ClonePair>,
+        value: Option<ClassLikeDecl>): Option<ClassLikeDecl> {
+        if (let Some(decl) <- value) {
+            if (let Some(cloned) <- findClassLikeDeclClone(pairs, decl)) {
+                return cloned
+            }
+        }
+        return value
+    }
+
+    private static func remapStructDecl(pairs: ArrayList<ClonePair>, value: Option<StructDecl>): Option<StructDecl> {
+        if (let Some(decl) <- value) {
+            if (let Some(cloned) <- findStructDeclClone(pairs, decl)) {
+                return cloned
+            }
+        }
+        return value
+    }
+
+    private static func remapEnumDecl(pairs: ArrayList<ClonePair>, value: Option<EnumDecl>): Option<EnumDecl> {
+        if (let Some(decl) <- value) {
+            if (let Some(cloned) <- findEnumDeclClone(pairs, decl)) {
+                return cloned
+            }
+        }
+        return value
+    }
+
+    private static func remapNode(pairs: ArrayList<ClonePair>, value: Option<Node>): Option<Node> {
+        if (let Some(node) <- value) {
+            if (let Some(cloned) <- findNodeClone(pairs, node)) {
+                return cloned
+            }
+        }
+        return value
+    }
+
+    private static func remapDeclTargets(pairs: ArrayList<ClonePair>, values: ArrayList<Decl>): Unit {
+        var idx: Int64 = 0
+        while (idx < values.size) {
+            if (let Some(cloned) <- findDeclClone(pairs, values[idx])) {
+                values[idx] = cloned
+            }
+            idx++
+        }
+    }
+
+    private static func memberAccessBaseIsThis(member: MemberAccess): Bool {
+        if (let Some(baseExpr) <- member.baseExpr) {
+            if (let Some(refExpr) <- (baseExpr as RefExpr)) {
+                return refExpr.isThis
+            }
+        }
+        return false
+    }
+
+    private static func shouldRemapCallTarget(call: CallExpr): Bool {
+        if (let Some(baseFunc) <- call.baseFunc) {
+            if (let Some(member) <- (baseFunc as MemberAccess)) {
+                return memberAccessBaseIsThis(member)
+            }
+        }
+        return true
+    }
+
+    private static func repairClonedPointers(sourceRoot: Node, targetRoot: Node): Unit {
+        let pairs = collectClonePairs(sourceRoot, targetRoot)
+        for (pair in pairs) {
+            repairClonedPointerFields(pairs, pair.sourceNode, pair.targetNode)
+        }
+    }
+
+    private static func repairClonedPointerFields(pairs: ArrayList<ClonePair>, sourceNode: Node, targetNode: Node): Unit {
+        if (let Some(sourceDecl) <- (sourceNode as Decl)) {
+            if (let Some(targetDecl) <- (targetNode as Decl)) {
+                targetDecl.outerDecl = remapDecl(pairs, sourceDecl.outerDecl)
+                targetDecl.genericDecl = remapDecl(pairs, sourceDecl.genericDecl)
+            }
+        }
+        if (let Some(sourceExpr) <- (sourceNode as Expr)) {
+            if (let Some(targetExpr) <- (targetNode as Expr)) {
+                targetExpr.sourceExpr = remapExpr(pairs, sourceExpr.sourceExpr)
+                targetExpr.mapExpr = remapExpr(pairs, sourceExpr.mapExpr)
+            }
+        }
+        if (let Some(sourceBody) <- (sourceNode as FuncBody)) {
+            if (let Some(targetBody) <- (targetNode as FuncBody)) {
+                targetBody.funcDecl = remapFuncDecl(pairs, sourceBody.funcDecl)
+                targetBody.outerFunc = remapFuncBody(pairs, sourceBody.outerFunc)
+                targetBody.parentClassLike = remapClassLikeDecl(pairs, sourceBody.parentClassLike)
+                targetBody.parentStruct = remapStructDecl(pairs, sourceBody.parentStruct)
+                targetBody.parentEnum = remapEnumDecl(pairs, sourceBody.parentEnum)
+            }
+        }
+        if (let Some(sourcePattern) <- (sourceNode as Pattern)) {
+            if (let Some(targetPattern) <- (targetNode as Pattern)) {
+                targetPattern.ctxExpr = remapExpr(pairs, sourcePattern.ctxExpr)
+            }
+        }
+        if (let Some(sourceRefExpr) <- (sourceNode as RefExpr)) {
+            if (let Some(targetRefExpr) <- (targetNode as RefExpr)) {
+                targetRefExpr.ref.target = remapDecl(pairs, sourceRefExpr.ref.target)
+                targetRefExpr.callOrPattern = remapNode(pairs, sourceRefExpr.callOrPattern)
+            }
+        }
+        if (let Some(sourceArrayExpr) <- (sourceNode as ArrayExpr)) {
+            if (let Some(targetArrayExpr) <- (targetNode as ArrayExpr)) {
+                targetArrayExpr.initFunc = remapFuncDecl(pairs, sourceArrayExpr.initFunc)
+            }
+        }
+        if (let Some(sourceArrayLit) <- (sourceNode as ArrayLit)) {
+            if (let Some(targetArrayLit) <- (targetNode as ArrayLit)) {
+                targetArrayLit.initFunc = remapFuncDecl(pairs, sourceArrayLit.initFunc)
+            }
+        }
+        if (let Some(sourceMember) <- (sourceNode as MemberAccess)) {
+            if (let Some(targetMember) <- (targetNode as MemberAccess)) {
+                if (memberAccessBaseIsThis(sourceMember)) {
+                    targetMember.target = remapDecl(pairs, sourceMember.target)
+                    targetMember.callOrPattern = remapNode(pairs, sourceMember.callOrPattern)
+                    remapDeclTargets(pairs, targetMember.targets)
+                }
+            }
+        }
+        if (let Some(sourceForIn) <- (sourceNode as ForInExpr)) {
+            if (let Some(targetForIn) <- (targetNode as ForInExpr)) {
+                targetForIn.patternInDesugarExpr = remapPattern(pairs, sourceForIn.patternInDesugarExpr)
+            }
+        }
+        if (let Some(sourceCall) <- (sourceNode as CallExpr)) {
+            if (let Some(targetCall) <- (targetNode as CallExpr)) {
+                if (shouldRemapCallTarget(sourceCall)) {
+                    targetCall.resolvedFunction = remapFuncDecl(pairs, sourceCall.resolvedFunction)
+                }
+            }
+        }
+        if (let Some(sourceReturn) <- (sourceNode as ReturnExpr)) {
+            if (let Some(targetReturn) <- (targetNode as ReturnExpr)) {
+                targetReturn.refFuncBody = remapFuncBody(pairs, sourceReturn.refFuncBody)
+            }
+        }
+        if (let Some(sourceJump) <- (sourceNode as JumpExpr)) {
+            if (let Some(targetJump) <- (targetNode as JumpExpr)) {
+                targetJump.refLoop = remapExpr(pairs, sourceJump.refLoop)
+            }
+        }
+        if (let Some(sourceRefType) <- (sourceNode as RefType)) {
+            if (let Some(targetRefType) <- (targetNode as RefType)) {
+                targetRefType.ref.target = remapDecl(pairs, sourceRefType.ref.target)
+            }
+        }
+        if (let Some(sourceQualified) <- (sourceNode as QualifiedType)) {
+            if (let Some(targetQualified) <- (targetNode as QualifiedType)) {
+                targetQualified.target = remapDecl(pairs, sourceQualified.target)
+            }
+        }
+        if (let Some(sourceFuncDecl) <- (sourceNode as FuncDecl)) {
+            if (let Some(targetFuncDecl) <- (targetNode as FuncDecl)) {
+                targetFuncDecl.ownerFunc = remapFuncDecl(pairs, sourceFuncDecl.ownerFunc)
+                targetFuncDecl.propDecl = remapPropDecl(pairs, sourceFuncDecl.propDecl)
+            }
+        }
+        if (let Some(sourceVarDecl) <- (sourceNode as VarDecl)) {
+            if (let Some(targetVarDecl) <- (targetNode as VarDecl)) {
+                targetVarDecl.parentPattern = remapPattern(pairs, sourceVarDecl.parentPattern)
+            }
+        }
     }
 
     private static func cloneExpr(node: Option<Expr>): Option<Expr> {
@@ -326,8 +700,8 @@ public class ASTCloner {
         if (let Some(sourceExpr) <- (source as Expr)) {
             if (let Some(targetExpr) <- (target as Expr)) {
                 targetExpr.desugarExpr = cloneExpr(sourceExpr.desugarExpr)
-                targetExpr.sourceExpr = cloneExpr(sourceExpr.sourceExpr)
-                targetExpr.mapExpr = cloneExpr(sourceExpr.mapExpr)
+                targetExpr.sourceExpr = sourceExpr.sourceExpr
+                targetExpr.mapExpr = sourceExpr.mapExpr
                 targetExpr.semiPos = sourceExpr.semiPos
                 targetExpr.overflowStrategy = sourceExpr.overflowStrategy
                 targetExpr.isConst = sourceExpr.isConst
@@ -377,7 +751,7 @@ public class ASTCloner {
 
         if (let Some(sourcePattern) <- (source as Pattern)) {
             if (let Some(targetPattern) <- (target as Pattern)) {
-                targetPattern.ctxExpr = cloneExpr(sourcePattern.ctxExpr)
+                targetPattern.ctxExpr = sourcePattern.ctxExpr
             }
         }
 
@@ -541,6 +915,7 @@ public class ASTCloner {
         }
         if (let Some(src) <- (source as VarDecl)) {
             if (let Some(dst) <- (target as VarDecl)) {
+                dst.parentPattern = src.parentPattern
                 dst.isIdentifierCompilerAdd = src.isIdentifierCompilerAdd
                 dst.isResourceVar = src.isResourceVar
                 dst.isMemberParam = src.isMemberParam
@@ -596,7 +971,7 @@ public class ASTCloner {
                 dst.body = cloneBlock(src.body)
                 dst.generic = if (let Some(generic) <- src.generic) { Clone(generic) as Generic } else { None }
                 dst.funcDecl = src.funcDecl
-                for (captured in src.capturedVars) { if (let Some(cloned) <- (Clone(captured) as NameReferenceExpr)) { dst.capturedVars.add(cloned) } }
+                for (captured in src.capturedVars) { dst.capturedVars.add(captured) }
                 dst.outerFunc = src.outerFunc
                 dst.parentClassLike = src.parentClassLike
                 dst.parentStruct = src.parentStruct
@@ -609,6 +984,7 @@ public class ASTCloner {
                 dst.leftParenPos = src.leftParenPos
                 dst.rightParenPos = src.rightParenPos
                 dst.funcBody = cloneFuncBody(src.funcBody)
+                if (let Some(body) <- dst.funcBody) { body.funcDecl = dst }
                 dst.ownerFunc = src.ownerFunc
                 dst.propDecl = src.propDecl
                 dst.overflowStrategy = src.overflowStrategy
@@ -988,12 +1364,12 @@ public class ASTCloner {
             }
         }
         if (let Some(src) <- (source as ReturnExpr)) { if (let Some(dst) <- (target as ReturnExpr)) { dst.returnPos = src.returnPos; dst.expr = cloneExpr(src.expr); dst.refFuncBody = src.refFuncBody } }
-        if (let Some(src) <- (source as JumpExpr)) { if (let Some(dst) <- (target as JumpExpr)) { dst.refLoop = cloneExpr(src.refLoop); dst.isBreak = src.isBreak } }
+        if (let Some(src) <- (source as JumpExpr)) { if (let Some(dst) <- (target as JumpExpr)) { dst.refLoop = src.refLoop; dst.isBreak = src.isBreak } }
         if (let Some(src) <- (source as ForInExpr)) {
             if (let Some(dst) <- (target as ForInExpr)) {
                 dst.leftParenPos = src.leftParenPos
                 dst.pattern = clonePattern(src.pattern)
-                dst.patternInDesugarExpr = clonePattern(src.patternInDesugarExpr)
+                dst.patternInDesugarExpr = src.patternInDesugarExpr
                 dst.inPos = src.inPos
                 dst.inExpression = cloneExpr(src.inExpression)
                 dst.rightParenPos = src.rightParenPos
@@ -1073,6 +1449,11 @@ public class ASTCloner {
         if (let Some(src) <- (source as CallExpr)) {
             if (let Some(dst) <- (target as CallExpr)) {
                 dst.baseFunc = cloneExpr(src.baseFunc)
+                if (let Some(baseFunc) <- dst.baseFunc) {
+                    if (let Some(member) <- (baseFunc as MemberAccess)) {
+                        member.callOrPattern = dst
+                    }
+                }
                 dst.leftParenPos = src.leftParenPos
                 for (arg in src.args) { if (let Some(cloned) <- (Clone(arg) as FuncArg)) { dst.args.add(cloned) } }
                 dst.rightParenPos = src.rightParenPos

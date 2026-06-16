@@ -39,6 +39,8 @@ The AST package is a multi-file Cangjie package mirroring the C++ AST component 
 - Ported `GetDebugPos` macro debug-map lookup so desugar/debug position recovery can map generated macro columns back to original positions.
 - Added AST `IsPureAnnotation(MacroInvocation)` utility parity with the C++ inline helper.
 - Fixed `CloneMacroInvocation` to allocate a fresh `MacroCallDiagInfo` rather than aliasing the source object's class reference, preserving scalar diagnostic fields without Cangjie reference sharing.
+- Deepened `ASTCloner` toward C++ `CloneWithRearrange`: top-level clones now collect source/target preorder pairs and remap cloned-subtree semantic pointers for declaration outers/generics, expression source/map links, function-body ownership, pattern context expressions, reference targets/call owners, member accesses through `this`, array initializers, for-in desugar patterns, call resolutions, return/jump links, qualified/ref type targets, function owner/property links, and variable parent patterns.
+- Aligned clone-time semantic-pointer copy behavior with the C++ reference for `sourceExpr`, `mapExpr`, pattern `ctxExpr`, jump loops, for-in desugar patterns, captured variables, function-body back references, and cloned member-call ownership instead of deep-cloning those backpointers eagerly.
 - De-isolated AST support types from local compatibility copies to the real sibling packages.
 - Added AST package dependencies on `cangjie_compiler::basic`, `cangjie_compiler::lex`, and `cangjie_compiler::utils`.
 - Re-exported real Basic/Lex/Utils APIs through `Common.cj`: `Position`, `Range`, `MakeRange`, `Linkage`, `MacroCallDiagInfo`, `TokenKind`, `Token`, `StringPart`, token helpers, `TokenVecMap`, and `OverflowStrategy`.
@@ -68,5 +70,6 @@ The AST package is a multi-file Cangjie package mirroring the C++ AST component 
 - Resolve `ScopeKind` and `ExprKind` layering with Parse once the self-hosted packages can share those APIs without introducing a package cycle. The C++ AST only forward-declares the related parse concepts, so the current AST-local minimal enums are kept until that dependency direction is settled.
 - Finish exact C++ `Searcher` parity for diagnostic-producing query parse failures and broader downstream validation of indexed position searches once the collector/scope-manager pipeline fully populates indexes in the Cangjie port.
 - Continue auditing macro diagnostic map lifetimes through Parse/Macro/Sema; AST now avoids clone-time `MacroCallDiagInfo` aliasing, but full private Basic map reconstruction is still owned by the macro pipeline.
+- Continue auditing clone pointer rearrangement under ambiguous generated-node cases. The current Cangjie pass remaps unique structural source/target pairs and preserves external pointers; C++ still has stricter pointer-identity fidelity through `source2cloned`.
 - Continue auditing context, walker, clone, printer, recover-desugar, search/query, type, utility, and validation behavior against the complete C++ implementation under downstream Parse/Sema workloads.
 - Replace any remaining compatibility API spellings only after downstream packages no longer depend on them.
