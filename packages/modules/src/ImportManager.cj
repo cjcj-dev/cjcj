@@ -620,6 +620,12 @@ public class ImportManager {
         return cjoManager.GetPackage(fullPackageName)
     }
 
+    public func SetImportedPackageFromASTNode(pkgs: ArrayList<Package>): Unit {
+        for (pkg in pkgs) {
+            cjoManager.AddImportedPackageFromASTNode(pkg)
+        }
+    }
+
     public func GetSearchPath(): ArrayList<String> {
         return cjoManager.GetSearchPath()
     }
@@ -699,7 +705,18 @@ public class ImportManager {
             let cjoPath = pair[1]
             SaveDepPkgCjoPath(fullPackageName, cjoPath)
             if (let Some(importPkg) <- cjoManager.GetPackage(fullPackageName)) {
-                success = HandleParsedPackage(importPkg, cjoPath, !isMacroRelated || isVisibleImport, isRecursive) && success
+                if (!importPkg.TestAttr(Attribute.IMPORTED) && curPkg.TestAttr(Attribute.IMPORTED)) {
+                    success = false
+                    diag.ReportError(
+                        "module_same_name_with_indirect_dependent_pkg",
+                        "failed to load dependent package '${fullPackageName}' for package '${curPkg.fullPackageName}', " +
+                            "which have same package name with source package"
+                    )
+                } else {
+                    success =
+                        HandleParsedPackage(importPkg, cjoPath, !isMacroRelated || isVisibleImport, isRecursive) &&
+                        success
+                }
                 continue
             }
             let isMainPartPkgForTestPkg = opts.compileTestsOnly && IsTestPackage(curPkg.fullPackageName) &&

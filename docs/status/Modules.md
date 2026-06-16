@@ -14,6 +14,8 @@ This deepening pass moved qualified-name splitting onto the real Basic helper wh
 
 This continuation aligned more `ImportManager`/`CjoManager` behavior with C++: `ExportDeclsWithContent` now caches a pre-saved writer for later `ExportAST` reuse, `DeleteASTWriters` clears that cache, standard-library dependency JSON now recursively records each std package's imported packages instead of emitting empty arrays, and `CjoManagerImpl.UpdateSearchPath` always appends the `cangjieModules` path entry like the reference implementation.
 
+This pass filled another import-resolution edge case from the C++ `HandleAlreadyParsedPackage` path: when an imported package resolves to an already-loaded source package while the current package was imported, Modules now reports `module_same_name_with_indirect_dependent_pkg` and fails that import resolution instead of silently accepting the collision. The diagnostic bridge now forwards that module diagnostic to Basic. The public `SetImportedPackageFromASTNode` API was also added and delegates to `CjoManager.AddImportedPackageFromASTNode`, matching the C++ ImportManager surface within the local ownership model.
+
 ## Implemented
 
 - Replaced `ModulesScaffold.cj` with per-component source files under `packages/modules/src`.
@@ -30,6 +32,8 @@ This continuation aligned more `ImportManager`/`CjoManager` behavior with C++: `
 - Implemented `ImportManager` behavior for implicit imports, import header resolution, CJO path recording, standard-library dependency classification, source package import indexing, imported declaration lookup, imported-declaration provenance queries, source-imported package retention after indexing, macro-used declaration tracking, direct dependency collection using the same CJO lookup-name form as the C++ reference, macro package collection, reindexing after macro expansion, package accessibility checks with source ranges, local declaration shadowing checks for useless imports, package feature consistency validation, duplicate import warnings, dependency JSON generation with per-import source ranges and standard-library dependency entries, BCHIR/CJO cache plumbing, and package loading from CJO.
 - Matched the C++ AST writer lifecycle more closely: content export pre-save now stores a writer per package, later AST export reuses that writer, and writer deletion clears the cache.
 - Matched the C++ standard-library dependency JSON shape more closely by recursively loading std package headers and recording each std package's import set.
+- Added the C++ already-parsed package collision behavior for source packages that shadow indirect dependencies, plus the corresponding Basic diagnostic forwarding.
+- Added `ImportManager.SetImportedPackageFromASTNode` to register tool-provided package AST nodes through the CJO manager.
 - Implemented `DependencyGraph` direct/transitive dependency collection with macro re-export handling and cache invalidation.
 - Implemented `PackageManager` Tarjan SCC ordering and source package reordering behavior.
 - Added a compiling local AST writer/loader wire format so exported package/import/member data can round-trip inside this package while the real flatbuffer/AST dependencies are unavailable.
