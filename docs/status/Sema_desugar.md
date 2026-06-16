@@ -4,6 +4,10 @@ Last updated: 2026-06-17
 
 ## Current pass
 
+- Deepened `packages/sema/src/Desugar/AfterTypeCheck/CallExpr.cj` against the C++ `AfterTypeCheck/CallExpr.cpp` reference:
+  - replaced the empty token-call body with real `std.ast.Token(...)` desugaring to `std.ast.refreshPos(Token(...), fileID, line, column)`;
+  - preserved the C++ guards for invalid types, already-desugared calls, `TOKEN_CALL` recursion avoidance, non-ref callees, wrong package targets, empty argument lists, and calls that already carry position arguments;
+  - marks the inner `Token(...)` call with `SugarKind.TOKEN_CALL`, propagates source/cur-file information, and carries the original token type onto the generated `refreshPos` call.
 - Deepened `packages/sema/src/Desugar/DesugarBeforeTypeCheck.cj` against the C++ `DesugarBeforeTypeCheck.cpp` reference:
   - added real `@IfAvailable` desugaring for `level` and `syscap` arguments, including the SDK-26 `apiAvailable(...)` split, legacy `DeviceInfo.sdkApiVersion >= N` checks, string triple parsing via the real `sema.Plugin.APILevelVersion`, invalid-literal fallback cloning, and source/cur-file propagation;
   - replaced unconditional branch unitification with a discarded-value context stack modeled after the C++ `DiscardedHelper`, including block-child, loop, finally, constructor, explicit `Unit` return, parenthesized, `if`/`try`/`match`, synchronized-body, and function-body propagation rules;
@@ -30,8 +34,8 @@ Last updated: 2026-06-17
 - `ForInExpr` currently has real range lowering only. String and iterator lowering still need faithful lookup/import-manager behavior from the C++ implementation.
 - In-type-check desugar is still limited to pipeline/composition. Primary constructor lowering, compound assignment overload lowering, and other C++ in-typecheck transformations remain pending.
 - After-instantiation desugar now covers declaration attributes and generic-instantiation coverage positions, but recursive type elimination, used-import marking, option/extend boxing, and dependency pruning remain pending.
-- String interpolation, try-with-resources/finally details, effect handlers, semantic usage collection, macro desugar, property desugar, Java/ObjC interop branches, main invocation synthesis, and linkage refresh behavior remain below C++ fidelity.
+- String interpolation and try-with-resources/finally details still need faithful import-manager lookup and synthesis context that are not currently threaded through the self-hosted desugar facade. Effect handlers, semantic usage collection, macro desugar, property desugar, Java/ObjC interop branches, main invocation synthesis, and linkage refresh behavior remain below C++ fidelity.
 
 ## Coverage estimate
 
-Real behavior coverage for this scoped desugar area is about 31% versus the C++ reference. The implemented pieces now perform meaningful AST transformations, including the API-level `@IfAvailable` path and more faithful discarded-context branch handling, but substantial C++ behavior remains either not wired into the root pipeline or represented by compiling compatibility bodies.
+Real behavior coverage for this scoped desugar area is about 32% versus the C++ reference. The implemented pieces now perform meaningful AST transformations, including token-call position refresh, the API-level `@IfAvailable` path, and more faithful discarded-context branch handling, but substantial C++ behavior remains either not wired into the root pipeline or represented by compiling compatibility bodies.

@@ -1,9 +1,21 @@
 package cangjie_compiler::sema.Desugar.AfterTypeCheck
 
+import std.collection.*
 import cangjie_compiler::ast.*
 import cangjie_compiler::sema.*
 
 private let CORE_PACKAGE_NAME: String = "std.core"
+private let AST_PACKAGE_NAME: String = "std.ast"
+private let TOKEN_CTOR_NAME: String = "Token"
+private let REFRESH_POS_NAME: String = "refreshPos"
+private let TOKEN_ARG_NUM: Int64 = 2
+
+private func IsTokenCallSugar(kind: SugarKind): Bool {
+    return match (kind) {
+        case SugarKind.TOKEN_CALL => true
+        case _ => false
+    }
+}
 
 private func GetIntrinsicOp(identifier: String): TokenKind {
     if (identifier == "Int64Less" || identifier == "Int32Less" || identifier == "Int16Less" ||
@@ -95,6 +107,76 @@ public func DesugarIntrinsicCallExpr(expr: CallExpr): Unit {
     }
 }
 
+private func GetTokenTarget(expr: RefExpr): Option<Decl> {
+    if (!expr.ref.targets.isEmpty()) {
+        return expr.ref.targets[0]
+    }
+    return expr.ref.target
+}
+
+private func IsStdAstTokenCall(expr: CallExpr): Bool {
+    if (!Ty.IsTyCorrect(expr.GetTy())) {
+        return false
+    }
+    if (let Some(_) <- expr.desugarExpr) {
+        return false
+    }
+    if (IsTokenCallSugar(expr.sugarKind)) {
+        return false
+    }
+    if (expr.args.isEmpty() || expr.args.size > TOKEN_ARG_NUM) {
+        return false
+    }
+    if (let Some(base) <- expr.baseFunc) {
+        if (let Some(refExpr) <- (base as RefExpr)) {
+            if (refExpr.ref.identifier.Val() != TOKEN_CTOR_NAME) {
+                return false
+            }
+            if (let Some(target) <- GetTokenTarget(refExpr)) {
+                return target.fullPackageName == AST_PACKAGE_NAME
+            }
+        }
+    }
+    return false
+}
+
+private func CreatePosArg(kind: TypeKind, value: UInt64): FuncArg {
+    let ty = TypeManager.GetPrimitiveTy(kind)
+    return CreateFuncArg(CreateLitConstExpr(LitConstKind.INTEGER, "${value}", ty))
+}
+
+private func CreatePosArg(kind: TypeKind, value: Int64): FuncArg {
+    let ty = TypeManager.GetPrimitiveTy(kind)
+    return CreateFuncArg(CreateLitConstExpr(LitConstKind.INTEGER, "${value}", ty))
+}
+
 public func DesugarTokenCallExpr(expr: CallExpr): Unit {
-    let _ = expr
+    if (!IsStdAstTokenCall(expr)) {
+        return
+    }
+    if (let Some(baseFunc) <- expr.baseFunc) {
+        let innerArgs = ArrayList<FuncArg>()
+        for (arg in expr.args) {
+            innerArgs.add(arg)
+        }
+        let innerCall = CreateCallExpr(baseFunc, innerArgs, expr.resolvedFunction, expr.GetTy(), expr.callKind)
+        innerCall.sugarKind = SugarKind.TOKEN_CALL
+
+        let args = ArrayList<FuncArg>()
+        args.add(CreateFuncArg(innerCall))
+        args.add(CreatePosArg(TypeKind.TYPE_UINT32, expr.begin.fileID))
+        args.add(CreatePosArg(TypeKind.TYPE_INT32, expr.begin.line))
+        args.add(CreatePosArg(TypeKind.TYPE_INT32, expr.begin.column))
+
+        let refreshExpr = CreateRefExprInAST(REFRESH_POS_NAME)
+        refreshExpr.begin = expr.begin
+        refreshExpr.end = expr.end
+        let refreshCall = CreateCallExpr(refreshExpr, args)
+        if (let Some(ty) <- expr.GetTy()) {
+            refreshCall.SetTy(ty)
+        }
+        CopyBasicInfo(expr, refreshCall)
+        AddCurFile(refreshCall, file: expr.curFile)
+        expr.desugarExpr = refreshCall
+    }
 }
