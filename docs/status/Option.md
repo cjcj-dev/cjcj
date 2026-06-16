@@ -148,3 +148,10 @@ so the old sema-side conversion bridge is gone. `--int-overflow-mode` also uses
 the shared Utils parser/validator, accepting the full C++ set (`no`, `checked`,
 `wrapping`, `throwing`, `saturating`) and preserving the C++ abort-on-invalid
 serialization path.
+
+This continuation tightens action-level parity with `OptionAction.cpp`.
+`--common-part-cjo` and `--common-part-chir` now match the C++ action contract:
+invalid paths are not added, but the option action itself still succeeds so
+diagnostics/post-action processing can proceed. `--render-chir=na` is also
+accepted by the action path, matching the C++ `DUMP_CHIR_MODE_MAP` entry even
+though the visible predefined value list remains unchanged.

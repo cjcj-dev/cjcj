@@ -84,12 +84,12 @@ public func ParseAction(opts: GlobalOptions, arg: OptionArgInstance): ActionResu
     if (id == ID.COMMON_PART_CJO) {
         let commonCjo = opts.CheckInputFilePath(arg.value)
         if (commonCjo.hasValue) { opts.commonPartCjos.add(commonCjo.value) }
-        return handled(success: commonCjo.hasValue)
+        return handled()
     }
     if (id == ID.COMMON_PART_CHIR) {
         let commonChir = opts.CheckInputFilePath(arg.value)
         if (commonChir.hasValue) { opts.commonPartChirs.add(commonChir.value) }
-        return handled(success: commonChir.hasValue)
+        return handled()
     }
     if (id == ID.INCRE_COMPILE) { opts.enIncrementalCompilation = true; return handled() }
     if (id == ID.INCRE_DEBUG) { opts.printIncrementalInfo = true; return handled() }
@@ -555,6 +555,7 @@ private func parseEmitCHIR(opts: GlobalOptions, value: String): ActionResult {
 }
 
 private func parseChirMode(opts: GlobalOptions, value: String): ActionResult {
+    if (value == "na") { opts.chirRenderMode = CHIRMode.NA; return handled() }
     if (value == "standard") { opts.chirRenderMode = CHIRMode.STANDARD; return handled() }
     if (value == "withID") { opts.chirRenderMode = CHIRMode.WITH_ID; return handled() }
     if (value == "all") { opts.chirRenderMode = CHIRMode.ALL; return handled() }
