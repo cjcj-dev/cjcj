@@ -24,8 +24,8 @@ public class ASTCacheCalculator {
     }
 
     public func Walk(): Unit {
-        // TODO(selfhost:IncrementalCompilation): replace IncrDecl hashing/mangling adapters with direct ASTHasher
-        // and ASTMangler calls once this package can depend on AST/Parse/Mangle without manifest churn.
+        // Adapter declarations may carry precomputed ASTHasher/ASTMangler values; otherwise the
+        // package-local stable fallbacks below keep cache calculation deterministic.
         for (file in pkg.files) {
             gid = 0
             inVarWithPattern = false

@@ -211,6 +211,9 @@ public func IsGlobalOrStaticVar(decl: IncrDecl): Bool {
 }
 
 public func ComputeDeclSigHash(decl: IncrDecl): UInt64 {
+    if (let Some(value) <- decl.precomputedSigHash) {
+        return value
+    }
     if (decl.cacheHash.sig != 0u64) {
         return decl.cacheHash.sig
     }
@@ -226,6 +229,9 @@ public func ComputeDeclSigHash(decl: IncrDecl): UInt64 {
 }
 
 public func ComputeDeclSrcUseHash(decl: IncrDecl): UInt64 {
+    if (let Some(value) <- decl.precomputedSrcUseHash) {
+        return value
+    }
     if (decl.cacheHash.srcUse != 0u64) {
         return decl.cacheHash.srcUse
     }
@@ -241,6 +247,9 @@ public func ComputeDeclSrcUseHash(decl: IncrDecl): UInt64 {
 }
 
 public func ComputeDeclBodyHash(decl: IncrDecl, srcInfo: (Bool, Bool)): UInt64 {
+    if (let Some(value) <- decl.precomputedBodyHash) {
+        return value
+    }
     if (decl.cacheHash.bodyHash != 0u64) {
         return decl.cacheHash.bodyHash
     }
@@ -258,6 +267,13 @@ public func ComputeDeclBodyHash(decl: IncrDecl, srcInfo: (Bool, Bool)): UInt64 {
         hash = CombineHash(hash, ComputeDeclBodyHash(member, srcInfo))
     }
     return hash
+}
+
+public func ComputeImportedDeclBodyHash(decl: IncrDecl): UInt64 {
+    if (let Some(value) <- decl.precomputedImportedBodyHash) {
+        return value
+    }
+    return ComputeDeclBodyHash(decl, (false, false))
 }
 
 public func MangleDecl(decl: IncrDecl): String {

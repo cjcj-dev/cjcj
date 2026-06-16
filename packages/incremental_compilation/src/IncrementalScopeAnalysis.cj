@@ -235,14 +235,18 @@ private class ImportPackageWalker {
                 continue
             }
             let walker = ImportPackageWalker()
-            for (decl in pkg.AllTopLevelDecls()) {
+            let decls = pkg.AllTopLevelDecls()
+            for (decl in decls) {
                 if (decl.rawMangleName.isEmpty()) {
                     decl.rawMangleName = MangleDecl(decl)
                 }
-                walker.UpdateMangleNameAndCollectDep(decl, result)
-                result.importedMangled2Decl[decl.rawMangleName] = decl
+                walker.UpdateMangleName(decl)
+                walker.RegisterDeclAndMembers(decl, result.importedMangled2Decl)
             }
-            for (decl in pkg.AllTopLevelDecls()) {
+            for (decl in decls) {
+                walker.CollectSourceImportedDependencies(decl, result)
+            }
+            for (decl in decls) {
                 result.importedASTCache[decl.rawMangleName] = walker.VisitTopLevel(decl, result.importedMangled2Decl)
                 result.importRelations.CollectImportedDeclExtraRelation(decl)
             }
@@ -264,7 +268,7 @@ private class ImportPackageWalker {
         cache.virtHash = decl.cacheHash.virt
         cache.sigHash = ComputeDeclSigHash(decl)
         cache.srcUse = ComputeDeclSrcUseHash(decl)
-        cache.bodyHash = if (SkipImportedBodyHash(decl)) { 0u64 } else { ComputeDeclBodyHash(decl, (false, false)) }
+        cache.bodyHash = if (SkipImportedBodyHash(decl)) { 0u64 } else { ComputeImportedDeclBodyHash(decl) }
         cache.astKind = UInt8(IncrDeclKindIndex(decl.astKind))
         cache.cgMangle = if (decl.cgMangle.isEmpty()) { decl.mangledName } else { decl.cgMangle }
         return cache
@@ -280,22 +284,63 @@ private class ImportPackageWalker {
         }
         cache.sigHash = ComputeDeclSigHash(decl)
         cache.srcUse = ComputeDeclSrcUseHash(decl)
-        cache.bodyHash = if (SkipImportedBodyHash(decl)) { 0u64 } else { ComputeDeclBodyHash(decl, (false, false)) }
+        cache.bodyHash = if (SkipImportedBodyHash(decl)) { 0u64 } else { ComputeImportedDeclBodyHash(decl) }
         cache.astKind = UInt8(IncrDeclKindIndex(decl.astKind))
         cache.cgMangle = if (decl.cgMangle.isEmpty()) { decl.mangledName } else { decl.cgMangle }
         return cache
     }
 
-    private func UpdateMangleNameAndCollectDep(decl: IncrDecl, result: ImportPackageWalkerResult): Unit {
-        // TODO(selfhost:IncrementalCompilation): collect source-imported expression target dependencies with the
-        // real AST Walker once this package can import the AST node hierarchy.
+    private func UpdateMangleName(decl: IncrDecl): Unit {
         ReplaceTypeWithTyInMangleName(decl)
         for (member in GetMembers(decl)) {
             if (member.rawMangleName.isEmpty()) {
                 member.rawMangleName = MangleDecl(member)
             }
-            UpdateMangleNameAndCollectDep(member, result)
+            UpdateMangleName(member)
         }
+    }
+
+    private func RegisterDeclAndMembers(decl: IncrDecl, map: RawMangled2DeclMap): Unit {
+        if (!decl.rawMangleName.isEmpty()) {
+            map[decl.rawMangleName] = decl
+        }
+        for (member in GetMembers(decl)) {
+            RegisterDeclAndMembers(member, map)
+        }
+    }
+
+    private func CollectSourceImportedDependencies(decl: IncrDecl, result: ImportPackageWalkerResult): Unit {
+        if (HasImportedBodyDependencySource(decl)) {
+            for (target in decl.sourceImportedTargets) {
+                AddSourceImportedDependency(target, decl, result.sourcePopulations)
+            }
+            for (rawMangle in decl.sourceImportedTargetMangles) {
+                if (let Some(target) <- result.importedMangled2Decl.get(rawMangle)) {
+                    AddSourceImportedDependency(target, decl, result.sourcePopulations)
+                }
+            }
+        }
+        for (member in GetMembers(decl)) {
+            CollectSourceImportedDependencies(member, result)
+        }
+    }
+
+    private func AddSourceImportedDependency(usedDecl: IncrDecl, importingDecl: IncrDecl,
+        deps: SrcImportedDepMap): Unit {
+        if (!deps.contains(usedDecl)) {
+            deps[usedDecl] = HashSet<IncrDecl>()
+        }
+        deps[usedDecl].add(importingDecl)
+    }
+
+    private func HasImportedBodyDependencySource(decl: IncrDecl): Bool {
+        if (decl.astKind == IncrDeclKind.FUNC_DECL) {
+            return decl.hasBody
+        }
+        if (decl.astKind == IncrDeclKind.VAR_DECL) {
+            return decl.hasInitializer
+        }
+        return false
     }
 
     private func ReplaceTypeWithTyInMangleName(decl: IncrDecl): Unit {
@@ -305,8 +350,17 @@ private class ImportPackageWalker {
             return
         }
         if (let Some(pos) <- decl.rawMangleName.lastIndexOf("$$")) {
-            if (decl.hasExplicitType) {
-                decl.rawMangleName = decl.rawMangleName[0..pos + 2] + "typed"
+            let suffix = if (decl.astKind == IncrDeclKind.FUNC_DECL && !decl.returnTypeName.isEmpty()) {
+                decl.returnTypeName
+            } else if (!decl.resolvedTypeName.isEmpty()) {
+                decl.resolvedTypeName
+            } else if (decl.hasExplicitType) {
+                "typed"
+            } else {
+                ""
+            }
+            if (!suffix.isEmpty()) {
+                decl.rawMangleName = decl.rawMangleName[0..pos + 2] + suffix
             }
         }
     }

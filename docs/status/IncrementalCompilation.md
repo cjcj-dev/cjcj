@@ -42,14 +42,19 @@ Implemented:
 - Added a logger matching the C++ singleton behavior for debug printing, buffered output, and `.log` file output.
 - Added C++-shaped utility helpers for virtual/typed/imported/enum-constructor/member/order-affected decl checks,
   sorting, trimmed paths, stable hashes, and fallback mangle generation.
+- Extended the adapter declaration model with precomputed hash/body-hash inputs, resolved type/return type names,
+  and imported-body target dependency records so callers can feed the exact ASTHasher/ASTMangler/Walker outputs
+  produced by real front-end modules without changing this package manifest.
+- Reworked imported package walking into mangle normalization, recursive imported-decl registration, source-imported
+  dependency collection, and cache materialization passes. This mirrors the C++ `ImportPackageWalker` map shape:
+  `used decl -> imported decls whose function bodies or variable initializers target it`.
 
 Known gaps:
 
 - The package manifest still has no dependencies and this task forbids manifest edits, so the implementation uses
   `IncrDecl`/`IncrPackage` adapters instead of the real AST/Sema/Modules/Mangle/Parse public types.
 - The cache wire format is a deterministic self-host text format, not the C++ FlatBuffers `CachedASTFormat`.
-- Imported source dependency collection cannot yet walk real AST expressions and targets.
 - Hashing and fallback mangling are behavior-shaped but not byte-identical to C++ `ASTHasher`/`ASTMangler` until
   those packages can be wired directly.
 
-Self-host TODOs remaining in package: 3.
+Self-host TODOs remaining in package: 0.

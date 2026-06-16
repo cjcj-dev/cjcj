@@ -249,9 +249,13 @@ public class IncrDecl <: Hashable & Equatable<IncrDecl> {
     public let setters: ArrayList<IncrDecl> = ArrayList<IncrDecl>()
     public let constructorMangles: ArrayList<String> = ArrayList<String>()
     public let enumConstructorMangles: ArrayList<String> = ArrayList<String>()
+    public let sourceImportedTargets: HashSet<IncrDecl> = HashSet<IncrDecl>()
+    public let sourceImportedTargetMangles: HashSet<String> = HashSet<String>()
     public var outerDecl: Option<IncrDecl> = None
     public var extendedTypeMangle: Option<String> = None
     public var extendedTypeIdentifier: String = ""
+    public var resolvedTypeName: String = ""
+    public var returnTypeName: String = ""
     public var hasExplicitType: Bool = true
     public var hasBody: Bool = false
     public var hasInitializer: Bool = false
@@ -262,6 +266,10 @@ public class IncrDecl <: Hashable & Equatable<IncrDecl> {
     public var toBeCompiled: Bool = false
     public var cgMangle: String = ""
     public var cacheHash: DeclHashInfo = DeclHashInfo()
+    public var precomputedSigHash: Option<UInt64> = None
+    public var precomputedSrcUseHash: Option<UInt64> = None
+    public var precomputedBodyHash: Option<UInt64> = None
+    public var precomputedImportedBodyHash: Option<UInt64> = None
 
     public init() {}
 
@@ -310,6 +318,37 @@ public class IncrDecl <: Hashable & Equatable<IncrDecl> {
             member.filePath = filePath
         }
         members.add(member)
+    }
+
+    public func AddSourceImportedTarget(target: IncrDecl): Unit {
+        sourceImportedTargets.add(target)
+    }
+
+    public func AddSourceImportedTargetMangle(rawMangle: String): Unit {
+        if (!rawMangle.isEmpty()) {
+            sourceImportedTargetMangles.add(rawMangle)
+        }
+    }
+
+    public func SetResolvedTypeName(typeName: String): Unit {
+        resolvedTypeName = typeName
+    }
+
+    public func SetReturnTypeName(typeName: String): Unit {
+        returnTypeName = typeName
+    }
+
+    public func SetPrecomputedHashes(sig: UInt64, srcUse: UInt64, body: UInt64): Unit {
+        precomputedSigHash = Some(sig)
+        precomputedSrcUseHash = Some(srcUse)
+        precomputedBodyHash = Some(body)
+        cacheHash.sig = sig
+        cacheHash.srcUse = srcUse
+        cacheHash.bodyHash = body
+    }
+
+    public func SetPrecomputedImportedBodyHash(body: UInt64): Unit {
+        precomputedImportedBodyHash = Some(body)
     }
 
     public func AddGetter(getter: IncrDecl): Unit {

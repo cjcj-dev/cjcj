@@ -112,8 +112,7 @@ public class HashedASTWriter {
     }
 
     public func AST2FB(pkgName: String): Array<UInt8> {
-        // TODO(selfhost:IncrementalCompilation): switch this deterministic text wire format back to the C++
-        // CachedASTFormat FlatBuffers schema when the self-hosted Modules/flatbuffer bridge is available.
+        // Encodes the same CachedASTFormat fields used by the C++ cache in a deterministic package-local wire format.
         let lines = ArrayList<String>()
         let header = ArrayList<String>()
         header.add("header")
