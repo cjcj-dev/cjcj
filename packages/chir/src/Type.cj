@@ -1,6 +1,7 @@
 package cangjie_compiler::chir
 
 import std.collection.*
+import std.sort.*
 
 public open class Type {
     public let kind: TypeKind
@@ -419,14 +420,71 @@ public class BoxType <: Type {
 
 public class GenericType <: Type {
     public let name: String
+    private var srcCodeIdentifier: String
+    private let upperBounds: ArrayList<Type> = ArrayList<Type>()
 
     public init(name: String) {
+        this(name, name)
+    }
+
+    public init(name: String, srcCodeIdentifier: String) {
         super(TypeKind.TYPE_GENERIC)
         this.name = name
+        this.srcCodeIdentifier = srcCodeIdentifier
+    }
+
+    public func GetIdentifier(): String {
+        return name
+    }
+
+    public func GetSrcCodeIdentifier(): String {
+        return srcCodeIdentifier
+    }
+
+    public func SetSrcCodeIdentifier(srcName: String): Unit {
+        srcCodeIdentifier = srcName
+    }
+
+    public func GetUpperBounds(): ArrayList<Type> {
+        return CopyTypeList(upperBounds)
+    }
+
+    public func SetUpperBounds(bounds: ArrayList<Type>): Unit {
+        upperBounds.clear()
+        for (bound in bounds) {
+            if (bound.StripAllRefs().IsValueType()) {
+                throw IllegalArgumentException("Generic type upper bound should not be a value type")
+            }
+            upperBounds.add(bound)
+        }
+        sort(upperBounds, by: { left: Type, right: Type =>
+            if (left.ToString() < right.ToString()) {
+                Ordering.LT
+            } else if (left.ToString() > right.ToString()) {
+                Ordering.GT
+            } else {
+                Ordering.EQ
+            }
+        }, stable: true)
     }
 
     public override func ToString(): String {
-        return name
+        return "Generic-" + name
+    }
+
+    public override func ToSrcCodeString(): String {
+        return srcCodeIdentifier
+    }
+
+    public override func Hash(): Int64 {
+        return name.hashCode()
+    }
+
+    public override func IsEqual(other: Type): Bool {
+        if (let Some(genericTy) <- (other as GenericType)) {
+            return name == genericTy.name
+        }
+        return false
     }
 }
 

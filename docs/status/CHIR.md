@@ -131,6 +131,13 @@ Implemented:
 - Added `UnreachableBranchCheck`, detecting constant-boolean `BRANCH` terminators, collecting structured
   unreachable-block warnings, recursively walking unreachable branch subgraphs, preserving processed-block guards,
   and evaluating local/global constant conditions through the CHIR constant evaluator.
+- Added `Arithmetic`, porting the C++ fixed-width bit utility surface for sign extension, power-of-two checks,
+  leading/trailing zero/one counts, and population counts over unsigned CHIR integer bit patterns.
+- Added `ConstantUtils`, mirroring CHIR utility constants for C string helper mangled names, global-value prefix,
+  and class reference dimension.
+- Added `ToStringUtils` string-rendering helpers for generic constraints, package access levels, empty-skipping
+  string joins, value/type vector rendering, comments, and conditional newlines, and extended `GenericType` with
+  C++-style source identifiers plus sorted upper-bound storage.
 - Added C++-named BCHIR interpreter component files for `OpCodes`, `BCHIR`, `BCHIRPrinter`,
   `BCHIRInterpreter`, `InterpreterValue`, `InterpreterValueUtils`, `InterpreterArena`,
   `InterpreterEnv`, and `InterpreterStack`.
@@ -208,6 +215,8 @@ Known gaps:
 - `UnreachableBranchCheck` implements the C++ constant-branch warning core over current CHIR terminators, but exact
   `DiagnosticEngine`, `ConstAnalysisWrapper` result visitation, source-expression-specific messages, cross-package
   suppression, `SkipCheck`, and full `MULTIBRANCH` semantics remain blocked by missing dependencies/metadata.
+- `ToStringUtils` ports the dependency-local rendering helpers, but exact `OverflowToString` and
+  `IntrinsicKindToString` remain blocked while `chir` cannot depend on the packages that own those enum definitions.
 - The BCHIR translator/linker/interpreter now has the first real end-to-end package/function/global/control
   path, but exact float/rune byte encoding, the complete expression taxonomy, intrinsics/syscalls, exception
   machinery, object method dispatch, raw-array operations, type casts, full serialization, and FFI execution
