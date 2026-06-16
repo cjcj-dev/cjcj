@@ -5,6 +5,8 @@ import cangjie_compiler::ast.*
 import cangjie_compiler::basic.DiagnosticEngine as BasicDiagnosticEngine
 import cangjie_compiler::basic.DiagKindRefactor as BasicDiagKindRefactor
 
+private let V_COMPILER: String = "v-compiler"
+
 private func InvalidPatternTy(pattern: Pattern): Bool {
     pattern.SetTy(TypeManager.GetInvalidTy())
     return false
@@ -138,6 +140,66 @@ private func IsSubtypeBoxed(typeManager: TypeManager, leaf: Ty, root: Ty): Bool 
         }
     }
     return typeManager.IsSubtype(leaf, root, allowOptionBox: false)
+}
+
+private func RuntimeDeclOfTy(ty: Ty): Option<Decl> {
+    if (let Some(classTy) <- (ty as ClassTy)) {
+        if (let Some(decl) <- classTy.declPtr) {
+            return decl
+        }
+    }
+    if (let Some(interfaceTy) <- (ty as InterfaceTy)) {
+        if (let Some(decl) <- interfaceTy.declPtr) {
+            return decl
+        }
+    }
+    if (let Some(structTy) <- (ty as StructTy)) {
+        if (let Some(decl) <- structTy.declPtr) {
+            return decl
+        }
+    }
+    if (let Some(enumTy) <- (ty as EnumTy)) {
+        if (let Some(decl) <- enumTy.declPtr) {
+            return decl
+        }
+    }
+    if (let Some(aliasTy) <- (ty as TypeAliasTy)) {
+        if (let Some(decl) <- aliasTy.declPtr) {
+            return decl
+        }
+    }
+    return None
+}
+
+private func IsFinalRuntimeTy(ty: Ty): Bool {
+    if (ty.IsStruct() || ty.IsEnum() || ty.IsPointer() || ty.IsCString() || ty.IsPrimitive() ||
+        ty.IsArray() || ty.kind == TypeKind.TYPE_VARRAY) {
+        return true
+    }
+    if (let Some(classTy) <- (ty as ClassTy)) {
+        if (let Some(classDecl) <- classTy.declPtr) {
+            return !classDecl.TestAnyAttr(Attribute.ABSTRACT, Attribute.OPEN)
+        }
+    }
+    return false
+}
+
+private func IsNeedRuntimeCheckForPattern(typeManager: TypeManager, srcTy: Ty, targetTy: Ty): Bool {
+    if (IsFinalRuntimeTy(srcTy) && IsFinalRuntimeTy(targetTy)) {
+        if (let Some(srcDecl) <- RuntimeDeclOfTy(srcTy)) {
+            if (let Some(targetDecl) <- RuntimeDeclOfTy(targetTy)) {
+                return DeclIdentity(srcDecl) == DeclIdentity(targetDecl)
+            }
+            return false
+        }
+        if (let Some(_) <- RuntimeDeclOfTy(targetTy)) {
+            return false
+        }
+    }
+    return (srcTy.IsClassLike() && targetTy.IsClassLike()) || srcTy.IsGeneric() || targetTy.IsGeneric() ||
+        srcTy.HasGeneric() || targetTy.HasGeneric() ||
+        typeManager.IsSubtype(srcTy, targetTy, implicitBoxed: true, allowOptionBox: false) ||
+        typeManager.IsSubtype(targetTy, srcTy, implicitBoxed: true, allowOptionBox: false)
 }
 
 private func FindMemberInEnum(enumDecl: EnumDecl, name: String): ArrayList<Decl> {
@@ -375,7 +437,7 @@ public func ChkTypePattern(typeManager: TypeManager, ctx: ASTContext, target: Ty
         pattern.needRuntimeTypeCheck = false
         pattern.matchBeforeRuntime = true
     } else {
-        pattern.needRuntimeTypeCheck = true
+        pattern.needRuntimeTypeCheck = IsNeedRuntimeCheckForPattern(typeManager, target, patternTy)
         pattern.matchBeforeRuntime = false
         if (IsSubtypeBoxed(typeManager, target, patternTy)) {
             pattern.EnableAttr(Attribute.UNREACHABLE)
@@ -391,15 +453,20 @@ public func ChkTypePattern(typeManager: TypeManager, ctx: ASTContext, target: Ty
 public func ChkVarPattern(ctx: ASTContext, target: Ty, pattern: VarPattern): Bool {
     if (let Some(varDecl) <- pattern.varDecl) {
         let name = varDecl.identifier.Val()
-        if (name != "_") {
+        if (name != V_COMPILER) {
             let decls = ctx.GetDeclsByName(Names(name, varDecl.scopeName))
             for (decl in decls) {
-                if (!SameDecl(decl, varDecl)) {
-                    pattern.SetTy(TypeManager.GetInvalidTy())
-                    varDecl.SetTy(TypeManager.GetInvalidTy())
-                    varDecl.EnableAttr(Attribute.IS_CHECK_VISITED)
-                    return false
+                if (SameDecl(decl, varDecl)) {
+                    continue
                 }
+                if (varDecl.TestAttr(Attribute.SPECIFIC) && decl.TestAttr(Attribute.COMMON)) {
+                    continue
+                }
+                pattern.SetTy(TypeManager.GetInvalidTy())
+                varDecl.SetTy(TypeManager.GetInvalidTy())
+                varDecl.fullPackageName = pattern.GetFullPackageName()
+                varDecl.EnableAttr(Attribute.IS_CHECK_VISITED)
+                return false
             }
         }
         pattern.SetTy(target)
@@ -495,6 +562,7 @@ private func VarOrEnumPatternToVarPattern(pattern: VarOrEnumPattern): VarPattern
         CopyNodeWithFileID(varDecl, pattern)
         varDecl.scopeName = pattern.scopeName
         varDecl.scopeLevel = pattern.scopeLevel
+        varDecl.fullPackageName = pattern.GetFullPackageName()
     }
     return varPattern
 }
