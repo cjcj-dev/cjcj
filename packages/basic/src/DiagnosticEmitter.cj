@@ -1,6 +1,7 @@
 package cangjie_compiler::basic
 
 import std.collection.*
+import cangjie_compiler::utils.FileUtil
 
 private func severityName(severity: DiagSeverity): String {
     return match (severity) {
@@ -36,7 +37,7 @@ private func colorForEmitter(noColor: Bool, color: DiagColor, text: String): Str
 
 private func sourceDisplayName(source: Source): String {
     if (let Some(name) <- source.packageName) {
-        return "(package " + name + ")" + FileName(source.path)
+        return "(package " + name + ")" + FileUtil.GetFileName(source.path)
     }
     return if (source.path.isEmpty()) { "<unknown>" } else { source.path }
 }
@@ -80,6 +81,10 @@ public class DiagnosticEmitter {
     public func Emit(): Bool {
         WriteError(Render())
         return !hasRangeError()
+    }
+
+    public func HasRangeError(): Bool {
+        return hasRangeError()
     }
 
     public func Render(showSourceOnly!: Bool = false): String {

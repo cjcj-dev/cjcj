@@ -1,6 +1,7 @@
 package cangjie_compiler::basic
 
 import std.collection.*
+import cangjie_compiler::utils.FileUtil
 
 private let DIAG_JSON_DEEP: Int64 = 3
 private let INDENT_WIDTH: Int64 = 4
@@ -10,12 +11,10 @@ private func jsonEscape(value: String): String {
 }
 
 private func jsonSeverity(severity: DiagSeverity): String {
-    return match (severity) {
-        case DiagSeverity.DS_ERROR => "error"
-        case DiagSeverity.DS_WARNING => "warning"
-        case DiagSeverity.DS_NOTE => "note"
-        case DiagSeverity.DS_HINT => "hint"
+    if (severity == DiagSeverity.DS_ERROR) {
+        return "error"
     }
+    return "warning"
 }
 
 private func jsonCategory(category: DiagCategory): String {
@@ -148,8 +147,8 @@ public class DiagnosticJsonFormatter {
         if (diag.HasSourceManager() && diag.GetSourceManager().IsSourceFileExist(pos.fileID)) {
             let source = diag.GetSourceManager().GetSource(pos.fileID)
             if (let Some(pkgName) <- source.packageName) {
-                fileStr = "(package " + pkgName + ")" + FileName(source.path)
-            } else if (!source.path.isEmpty()) {
+                fileStr = "(package " + pkgName + ")" + FileUtil.GetFileName(source.path)
+            } else {
                 fileStr = source.path
             }
         }

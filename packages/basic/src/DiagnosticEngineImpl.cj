@@ -437,19 +437,19 @@ public class DiagnosticEngineImpl {
 
     public func FindMacroCallInfo(pos: Position): Option<MacroCallDiagInfo> {
         let key = pos.Hash64()
-        var best: Option<(UInt64, Option<MacroCallDiagInfo>)> = None
+        var lower: Option<(UInt64, Option<MacroCallDiagInfo>)> = None
         for ((entryKey, entryValue) in pos2MacroCallDiagInfoMap) {
-            if (entryKey <= key) {
-                if (let Some(current) <- best) {
-                    if (entryKey > current[0]) {
-                        best = (entryKey, entryValue)
+            if (entryKey >= key) {
+                if (let Some(current) <- lower) {
+                    if (entryKey < current[0]) {
+                        lower = (entryKey, entryValue)
                     }
                 } else {
-                    best = (entryKey, entryValue)
+                    lower = (entryKey, entryValue)
                 }
             }
         }
-        if (let Some(entry) <- best) {
+        if (let Some(entry) <- lower) {
             return entry[1]
         }
         return None

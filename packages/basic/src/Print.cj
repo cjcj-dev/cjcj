@@ -90,6 +90,11 @@ public func PrintIndent(indent: UInt64, value: String): Unit {
     println(value)
 }
 
+public func PrintCommandDesc(option: String, desc: String, optionWidth: Int64): Unit {
+    let padding = if (optionWidth > option.size) { repeatString(" ", optionWidth - option.size) } else { "" }
+    println("  " + option + padding + desc)
+}
+
 public func WriteError(value: String): Unit {
     eprint(value)
 }
@@ -127,5 +132,7 @@ public func Debugln(value: String): Unit {
 }
 
 public func ErrorWithColor(color: DiagColor, content: String, isBright!: Bool = false): Unit {
-    eprint(coloredString(color, content, isBright: isBright))
+    let bright = if (isBright) { ANSI_COLOR_BRIGHT } else { "" }
+    let reset = if (color == DiagColor.NO_COLOR) { "" } else { ANSI_COLOR_RESET }
+    eprint(bright + colorToAnsi(color) + content + reset)
 }

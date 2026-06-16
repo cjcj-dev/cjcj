@@ -208,6 +208,8 @@ public class StringConvertor {
                     idx += 2
                     continue
                 }
+                idx++
+                continue
             }
             if (current == b'\r') {
                 if (idx + 1 < bytes.size && bytes[idx + 1] == b'\n') {
