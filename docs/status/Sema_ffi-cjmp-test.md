@@ -2,24 +2,22 @@
 
 Date: 2026-06-17
 Build: `cjpm build` passes.
-Scoped TODO markers: 0 remaining `TODO(selfhost:Sema)` markers in the requested files.
+Scoped selfhost TODO comments: 0 remaining in the requested files.
 
 ## Implemented in this pass
 
-- Replaced scoped stubs in C FFI, NativeFFI utilities, CJMP declaration matching, CJMP annotation matching, plugin custom annotation checking, mock/test semantic helpers, and LSP type-check helpers with real code wired to the shared AST, sema type manager, option, and basic diagnostic packages.
-- Added CJMP diagnostics for mismatched parameters, generic arity, missing common/specific implementations, annotation mismatches, return type mismatches, variable type mismatches, and default-argument conflicts.
-- Added focused C FFI prechecks for `@C`, `@CallingConv`, `@FastNative`, `@Frozen`, foreign linkage setup, C function signature validation, and invalid C parameter/reference cases.
-- Added NativeFFI helpers for foreign-name annotations, Objective-C mirror names, constructor-call classification, generic instantiation config, primitive type lookup, and Cangjie library-name derivation through the real option package wrappers.
-- Added plugin custom annotation parsing/checking for API level, `since`, `syscap`, `ifAvailable`, and `@Hide` arguments using real plugin data structures.
-- Added mock/test helpers for mock call recognition, mock class naming, mockability checks, generated accessor naming, accessor-kind classification, mock preparation collection, and package-name normalization through the real source manager suffix.
-- Added LSP scope-name and base-name helpers for declarations, references, member access, calls, type references, and selected pattern/selector forms.
+- Deepened C FFI checks with real foreign-without-`@C` diagnostics, recursive zero-sized C type detection, unsafe/inout legality helpers, invalid reference checks for C functions, C struct member validation, and unsafe-call diagnostics wired to the shared AST and diagnostic packages.
+- Added CJMP collection and matching logic for common/specific declarations, nominal declaration attribute and supertype matching, enum constructor matching, variable pattern matching, direct-extension private member conflicts, specific abstract-class member checks, and common open-class prechecks.
+- Expanded plugin custom annotation checking with semantic target recognition for `@APILevel` and `@Hide`, duplicate `@Hide` diagnostics, function-parameter and compile-time visibility checks, per-declaration annotation caching, and extension/member hide consistency checks.
+- Improved mock/test semantic preparation by collecting global/static/extension functions, classes with defaulted interfaces, interfaces with default implementations, and extension-default interface pairs; mock accessor argument rendering now erases generic declaration arguments like the C++ helper.
+- Kept all new logic on real sibling package types rather than adding local compatibility copies.
 
 ## Remaining fidelity gaps
 
-- NativeFFI still lacks the full C++ AST synthesis/desugaring helper surface for generated `this`/`super` calls, synthesized lambda wrappers, mangling integration, Objective-C bridging, and import-manager driven core declarations.
-- Mock/test support is semantic classification and preparation plumbing only; full C++ desugar/injection behavior, generic instantiation handling, and accessor body synthesis remain incomplete.
-- C FFI covers core annotation/signature checks but not the entire reference matrix of platform ABI handling, every diagnostic edge case, and full downstream integration.
-- Plugin custom annotation checking parses the main argument shapes but does not yet load or merge the complete external plugin JSON configuration path from the C++ implementation.
-- LSP support covers common scope/base-name propagation, but not all C++ visitor edge cases.
+- C FFI still lacks backend-option-sensitive unsafe-call gating and the full platform ABI diagnostic matrix from the C++ checker.
+- CJMP generic constraint diagnostics, common member symbol-table rewriting, some extension declaration-map updates, and several merged-member ownership details remain partial.
+- Plugin checking still lacks the complete external plugin configuration and API-level/global-option integration path from the C++ implementation.
+- Mock/test support now has stronger semantic classification and preparation plumbing, but generated wrapper/body synthesis and full injection behavior are still incomplete.
+- NativeFFI and LSP files were reviewed for this scope but not changed in this pass; their broader C++ helper surface remains incomplete.
 
-Honest real-behavior coverage for this scoped pass is estimated at 24% versus the corresponding C++ reference surface.
+Honest real-behavior coverage for this scoped pass is estimated at 36% versus the corresponding C++ reference surface.

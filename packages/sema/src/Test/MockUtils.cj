@@ -130,7 +130,15 @@ public class MockUtils {
                     let parts = ArrayList<String>()
                     for (param in body.paramLists[0].params) {
                         if (let Some(paramTy) <- param.GetTy()) {
-                            parts.add(paramTy.String())
+                            var argumentTy = paramTy
+                            if (let Some(paramTyDecl) <- Ty.GetDeclOfTy(Some(paramTy))) {
+                                if (let Some(genericDecl) <- paramTyDecl.genericDecl) {
+                                    if (let Some(genericTy) <- genericDecl.GetTy()) {
+                                        argumentTy = genericTy
+                                    }
+                                }
+                            }
+                            parts.add(argumentTy.String())
                         } else {
                             parts.add(TypeManager.GetInvalidTy().String())
                         }
