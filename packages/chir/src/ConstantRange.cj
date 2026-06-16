@@ -285,6 +285,42 @@ public struct ConstantRange {
         }
     }
 
+    public func ZeroExtend(newWidth: IntWidth): ConstantRange {
+        if (IsEmptySet()) {
+            return ConstantRange.Empty(newWidth)
+        }
+        if (IntWidthBits(Width()) >= IntWidthBits(newWidth)) {
+            throw IllegalArgumentException("zero extension requires a larger width")
+        }
+        if (IsFullSet() || IsWrappedSet()) {
+            return ConstantRange(SInt(newWidth, 0), SInt.GetOneBitSet(newWidth, IntWidthBits(Width())))
+        }
+        if (upper.IsUMinValue()) {
+            return ConstantRange(lower.ZExt(newWidth), SInt.GetOneBitSet(newWidth, IntWidthBits(Width())))
+        }
+        return ConstantRange(lower.ZExt(newWidth), upper.ZExt(newWidth))
+    }
+
+    public func SignExtend(newWidth: IntWidth): ConstantRange {
+        if (IsEmptySet()) {
+            return ConstantRange.Empty(newWidth)
+        }
+        if (IntWidthBits(Width()) >= IntWidthBits(newWidth)) {
+            throw IllegalArgumentException("sign extension requires a larger width")
+        }
+        if (IsFullSet() || IsSignWrappedSet()) {
+            let oldBits = IntWidthBits(Width())
+            let newBits = IntWidthBits(newWidth)
+            let lowerValue = SInt.GetHighBitsSet(newWidth, (newBits - oldBits) + 1)
+            let upperValue = SInt.GetLowBitsSet(newWidth, oldBits - 1).Add(SInt(newWidth, 1))
+            return ConstantRange(lowerValue, upperValue)
+        }
+        if (upper.IsSMinValue()) {
+            return ConstantRange(lower.SExt(newWidth), upper.ZExt(newWidth))
+        }
+        return ConstantRange(lower.SExt(newWidth), upper.SExt(newWidth))
+    }
+
     public func Add(rhs: ConstantRange): ConstantRange {
         if (IsEmptySet() || rhs.IsEmptySet()) {
             return ConstantRange.Empty(Width())
@@ -319,6 +355,306 @@ public struct ConstantRange {
         let result = ConstantRange(newLower, newUpper)
         if (result.IsSizeStrictlySmallerThan(this) || result.IsSizeStrictlySmallerThan(rhs)) {
             return ConstantRange.Full(Width())
+        }
+        return result
+    }
+
+    public func UMul(rhs: ConstantRange): ConstantRange {
+        if (IsEmptySet() || rhs.IsEmptySet()) {
+            return ConstantRange.Empty(Width())
+        }
+        let lhsMin = UMinValue()
+        let lhsMax = UMaxValue()
+        let rhsMin = rhs.UMinValue()
+        let rhsMax = rhs.UMaxValue()
+        let lowerResult = lhsMin.UMulOvf(rhsMin)
+        let upperResult = lhsMax.UMulOvf(rhsMax)
+        if (lowerResult[1] || upperResult[1]) {
+            return ConstantRange.Full(Width())
+        }
+        return ConstantRange.NonEmpty(lowerResult[0], upperResult[0].Add(SInt(Width(), 1)))
+    }
+
+    public func SMul(rhs: ConstantRange): ConstantRange {
+        if (IsEmptySet() || rhs.IsEmptySet()) {
+            return ConstantRange.Empty(Width())
+        }
+        let lhsMin = SMinValue()
+        let lhsMax = SMaxValue()
+        let rhsMin = rhs.SMinValue()
+        let rhsMax = rhs.SMaxValue()
+        let product1 = lhsMin.SMulOvf(rhsMin)
+        let product2 = lhsMin.SMulOvf(rhsMax)
+        let product3 = lhsMax.SMulOvf(rhsMin)
+        let product4 = lhsMax.SMulOvf(rhsMax)
+        if (product1[1] || product2[1] || product3[1] || product4[1]) {
+            return ConstantRange.Full(Width())
+        }
+        var minProduct = product1[0]
+        var maxProduct = product1[0]
+        if (product2[0].Slt(minProduct)) { minProduct = product2[0] }
+        if (product3[0].Slt(minProduct)) { minProduct = product3[0] }
+        if (product4[0].Slt(minProduct)) { minProduct = product4[0] }
+        if (product2[0].Sgt(maxProduct)) { maxProduct = product2[0] }
+        if (product3[0].Sgt(maxProduct)) { maxProduct = product3[0] }
+        if (product4[0].Sgt(maxProduct)) { maxProduct = product4[0] }
+        return ConstantRange.NonEmpty(minProduct, maxProduct.Add(SInt(Width(), 1)))
+    }
+
+    public func UDiv(rhs: ConstantRange): ConstantRange {
+        if (IsEmptySet() || rhs.IsEmptySet() || rhs.UMaxValue().IsZero()) {
+            return ConstantRange.Empty(Width())
+        }
+        let newLower = UMinValue().UDiv(rhs.UMaxValue())
+        var rhsMin = rhs.UMinValue()
+        if (rhsMin.IsZero()) {
+            rhsMin = if (rhs.upper.IsOne()) { rhs.lower } else { SInt(Width(), 1) }
+        }
+        let newUpper = UMaxValue().UDiv(rhsMin).Add(SInt(Width(), 1))
+        return ConstantRange.NonEmpty(newLower, newUpper)
+    }
+
+    public func SDiv(rhs: ConstantRange): ConstantRange {
+        return SDivImpl(rhs, false)
+    }
+
+    public func SDivSat(rhs: ConstantRange): ConstantRange {
+        return SDivImpl(rhs, true)
+    }
+
+    public func URem(rhs: ConstantRange): ConstantRange {
+        if (IsEmptySet() || rhs.IsEmptySet() || rhs.UMaxValue().IsZero()) {
+            return ConstantRange.Empty(Width())
+        }
+        if (rhs.IsSingleElement()) {
+            let rhsValue = rhs.GetSingleElement()
+            if (rhsValue.IsZero()) {
+                return ConstantRange.Empty(Width())
+            }
+            if (IsSingleElement()) {
+                return ConstantRange(GetSingleElement().URem(rhsValue))
+            }
+        }
+        if (UMaxValue().Ult(rhs.UMinValue())) {
+            return this
+        }
+        let zero = SInt.Zero(Width())
+        let upperValue = SInt.UMin(UMaxValue(), rhs.UMaxValue().Sub(SInt(Width(), 1))).Add(SInt(Width(), 1))
+        return ConstantRange.NonEmpty(zero, upperValue)
+    }
+
+    public func SRem(rhs: ConstantRange): ConstantRange {
+        if (IsEmptySet() || rhs.IsEmptySet()) {
+            return ConstantRange.Empty(Width())
+        }
+        if (rhs.IsSingleElement()) {
+            let rhsValue = rhs.GetSingleElement()
+            if (rhsValue.IsZero()) {
+                return ConstantRange.Empty(Width())
+            }
+            if (IsSingleElement()) {
+                return ConstantRange(GetSingleElement().SRem(rhsValue))
+            }
+        }
+        let absRhs = rhs.Abs()
+        var minAbsRhs = absRhs.UMinValue()
+        let maxAbsRhs = absRhs.UMaxValue()
+        if (maxAbsRhs.IsZero()) {
+            return ConstantRange.Empty(Width())
+        }
+        if (minAbsRhs.IsZero()) {
+            minAbsRhs = minAbsRhs.Add(SInt(Width(), 1))
+        }
+        let minLhs = SMinValue()
+        let maxLhs = SMaxValue()
+        if (minLhs.IsNonNeg()) {
+            if (maxLhs.Ult(minAbsRhs)) {
+                return this
+            }
+            let upperValue = SInt.UMin(maxLhs, maxAbsRhs.Sub(SInt(Width(), 1))).Add(SInt(Width(), 1))
+            return ConstantRange(SInt.Zero(Width()), upperValue)
+        }
+        if (maxLhs.IsNeg()) {
+            if (minLhs.Ugt(minAbsRhs.Neg())) {
+                return this
+            }
+            let lowerValue = SInt.UMax(minLhs, maxAbsRhs.Neg().Add(SInt(Width(), 1)))
+            return ConstantRange(lowerValue, SInt(Width(), 1))
+        }
+        let lowerValue = SInt.UMax(minLhs, maxAbsRhs.Neg().Add(SInt(Width(), 1)))
+        let upperValue = SInt.UMin(maxLhs, maxAbsRhs.Sub(SInt(Width(), 1))).Add(SInt(Width(), 1))
+        return ConstantRange(lowerValue, upperValue)
+    }
+
+    public func UAddSat(rhs: ConstantRange): ConstantRange {
+        if (IsEmptySet() || rhs.IsEmptySet()) {
+            return ConstantRange.Empty(Width())
+        }
+        let lowerValue = UMinValue().UAddSat(rhs.UMinValue())
+        let upperValue = UMaxValue().UAddSat(rhs.UMaxValue()).Add(SInt(Width(), 1))
+        return ConstantRange.NonEmpty(lowerValue, upperValue)
+    }
+
+    public func SAddSat(rhs: ConstantRange): ConstantRange {
+        if (IsEmptySet() || rhs.IsEmptySet()) {
+            return ConstantRange.Empty(Width())
+        }
+        let lowerValue = SMinValue().SAddSat(rhs.SMinValue())
+        let upperValue = SMaxValue().SAddSat(rhs.SMaxValue()).Add(SInt(Width(), 1))
+        return ConstantRange.NonEmpty(lowerValue, upperValue)
+    }
+
+    public func USubSat(rhs: ConstantRange): ConstantRange {
+        if (IsEmptySet() || rhs.IsEmptySet()) {
+            return ConstantRange.Empty(Width())
+        }
+        let lowerValue = UMinValue().USubSat(rhs.UMaxValue())
+        let upperValue = UMaxValue().USubSat(rhs.UMinValue()).Add(SInt(Width(), 1))
+        return ConstantRange.NonEmpty(lowerValue, upperValue)
+    }
+
+    public func SSubSat(rhs: ConstantRange): ConstantRange {
+        if (IsEmptySet() || rhs.IsEmptySet()) {
+            return ConstantRange.Empty(Width())
+        }
+        let lowerValue = SMinValue().SSubSat(rhs.SMaxValue())
+        let upperValue = SMaxValue().SSubSat(rhs.SMinValue()).Add(SInt(Width(), 1))
+        return ConstantRange.NonEmpty(lowerValue, upperValue)
+    }
+
+    public func UMulSat(rhs: ConstantRange): ConstantRange {
+        if (IsEmptySet() || rhs.IsEmptySet()) {
+            return ConstantRange.Empty(Width())
+        }
+        let lowerValue = UMinValue().UMulSat(rhs.UMinValue())
+        let upperValue = UMaxValue().UMulSat(rhs.UMaxValue()).Add(SInt(Width(), 1))
+        return ConstantRange.NonEmpty(lowerValue, upperValue)
+    }
+
+    public func SMulSat(rhs: ConstantRange): ConstantRange {
+        if (IsEmptySet() || rhs.IsEmptySet()) {
+            return ConstantRange.Empty(Width())
+        }
+        let lhsMin = SMinValue()
+        let lhsMax = SMaxValue()
+        let rhsMin = rhs.SMinValue()
+        let rhsMax = rhs.SMaxValue()
+        let product1 = lhsMin.SMulSat(rhsMin)
+        let product2 = lhsMin.SMulSat(rhsMax)
+        let product3 = lhsMax.SMulSat(rhsMin)
+        let product4 = lhsMax.SMulSat(rhsMax)
+        var minProduct = product1
+        var maxProduct = product1
+        if (product2.Slt(minProduct)) { minProduct = product2 }
+        if (product3.Slt(minProduct)) { minProduct = product3 }
+        if (product4.Slt(minProduct)) { minProduct = product4 }
+        if (product2.Sgt(maxProduct)) { maxProduct = product2 }
+        if (product3.Sgt(maxProduct)) { maxProduct = product3 }
+        if (product4.Sgt(maxProduct)) { maxProduct = product4 }
+        return ConstantRange.NonEmpty(minProduct, maxProduct.Add(SInt(Width(), 1)))
+    }
+
+    public func Abs(intMinIsPoison!: Bool = false): ConstantRange {
+        if (IsEmptySet()) {
+            return ConstantRange.Empty(Width())
+        }
+        if (IsSignWrappedSet()) {
+            var lowerValue = SInt.UMin(lower, upper.Neg().Add(SInt(Width(), 1)))
+            if (upper.IsPositive() || !lower.IsPositive()) {
+                lowerValue = SInt.Zero(Width())
+            }
+            let signedMin = SInt.SMinValue(Width())
+            return if (intMinIsPoison) {
+                ConstantRange(lowerValue, signedMin)
+            } else {
+                ConstantRange(lowerValue, signedMin.Add(SInt(Width(), 1)))
+            }
+        }
+        var signedMinValue = SMinValue()
+        let signedMaxValue = SMaxValue()
+        if (intMinIsPoison && signedMinValue.IsSMinValue()) {
+            if (signedMaxValue.IsSMinValue()) {
+                return ConstantRange.Empty(Width())
+            }
+            signedMinValue = signedMinValue.Add(SInt(Width(), 1))
+        }
+        if (signedMinValue.IsNonNeg()) {
+            return this
+        }
+        if (signedMaxValue.IsNeg()) {
+            return ConstantRange(signedMaxValue.Neg(), signedMinValue.Neg().Add(SInt(Width(), 1)))
+        }
+        return ConstantRange(SInt.Zero(Width()), SInt.UMax(signedMinValue.Neg(), signedMaxValue).Add(SInt(Width(), 1)))
+    }
+
+    public func Negate(): ConstantRange {
+        if (IsEmptySet() || IsFullSet()) {
+            return this
+        }
+        let lowerValue = upper.Sub(SInt(Width(), 1)).Neg()
+        let upperValue = if (lower.IsSMinValue()) { lower } else { lower.Neg().Add(SInt(Width(), 1)) }
+        return ConstantRange(lowerValue, upperValue)
+    }
+
+    private func SDivImpl(rhs: ConstantRange, saturating: Bool): ConstantRange {
+        let zero = SInt.Zero(Width())
+        let one = SInt(Width(), 1)
+        let signedMin = SInt.SMinValue(Width())
+        let posFilter = ConstantRange(one, signedMin)
+        let negFilter = ConstantRange(signedMin, zero)
+        let posL = IntersectWith(posFilter)
+        let negL = IntersectWith(negFilter)
+        let posR = rhs.IntersectWith(posFilter)
+        let negR = rhs.IntersectWith(negFilter)
+
+        var posDivPosRes = ConstantRange.Empty(Width())
+        if (!posL.IsEmptySet() && !posR.IsEmptySet()) {
+            let lowerValue = SignedDiv(posL.lower, posR.upper.Sub(one), saturating)
+            let upperValue = SignedDiv(posL.upper.Sub(one), posR.lower, saturating).Add(one)
+            posDivPosRes = ConstantRange(lowerValue, upperValue)
+        }
+
+        var negDivNegRes = ConstantRange.Empty(Width())
+        if (!negL.IsEmptySet() && !negR.IsEmptySet()) {
+            let lowerValue = SignedDiv(negL.upper.Sub(one), negR.lower, saturating)
+            var upperValue = SignedDiv(negL.lower, negR.upper.Sub(one), saturating).Add(one)
+            if (negL.lower.IsSMinValue() && negR.upper.IsZero()) {
+                if (!negR.lower.IsAllOnes()) {
+                    var adjustedNegRUpper = negR.upper.Sub(one)
+                    if (rhs.lower.IsAllOnes()) {
+                        adjustedNegRUpper = rhs.upper
+                    }
+                    upperValue = SignedDiv(negL.lower, adjustedNegRUpper.Sub(one), saturating).Add(one)
+                }
+                if (!negL.upper.IsSame(signedMin.Add(one))) {
+                    var adjustedNegLLower = negL.lower.Add(one)
+                    if (upper.IsSame(signedMin.Add(one))) {
+                        adjustedNegLLower = lower
+                    }
+                    upperValue = SignedDiv(adjustedNegLLower, negR.upper.Sub(one), saturating).Add(one)
+                }
+            }
+            negDivNegRes = ConstantRange(lowerValue, upperValue)
+        }
+        let posRes = posDivPosRes.UnionWith(negDivNegRes)
+
+        var posDivNegRes = ConstantRange.Empty(Width())
+        if (!posL.IsEmptySet() && !negR.IsEmptySet()) {
+            let lowerValue = SignedDiv(posL.upper.Sub(one), negR.upper.Sub(one), saturating)
+            let upperValue = SignedDiv(posL.lower, negR.lower, saturating).Add(one)
+            posDivNegRes = ConstantRange(lowerValue, upperValue)
+        }
+
+        var negDivPosRes = ConstantRange.Empty(Width())
+        if (!negL.IsEmptySet() && !posR.IsEmptySet()) {
+            let lowerValue = SignedDiv(negL.lower, posR.lower, saturating)
+            let upperValue = SignedDiv(negL.upper.Sub(one), posR.upper.Sub(one), saturating).Add(one)
+            negDivPosRes = ConstantRange(lowerValue, upperValue)
+        }
+        let negRes = posDivNegRes.UnionWith(negDivPosRes)
+        var result = negRes.UnionWith(posRes, preferredType: PreferredRangeType.SIGNED)
+        if (Contains(zero) && (!posR.IsEmptySet() || !negR.IsEmptySet())) {
+            result = result.UnionWith(ConstantRange(zero))
         }
         return result
     }
@@ -454,4 +790,8 @@ private func GetPreferredRange(left: ConstantRange, right: ConstantRange,
         }
     }
     return if (left.IsSizeStrictlySmallerThan(right)) { left } else { right }
+}
+
+private func SignedDiv(left: SInt, right: SInt, saturating: Bool): SInt {
+    return if (saturating) { left.SDivSat(right) } else { left.SDiv(right) }
 }

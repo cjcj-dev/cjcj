@@ -157,6 +157,13 @@ public struct SInt {
         return bit >= 0 && bit < WidthBits() && value == Pow2(bit)
     }
 
+    public func At(bit: Int64): Bool {
+        if (bit < 0 || bit >= WidthBits()) {
+            return false
+        }
+        return (value & Pow2(bit)) != 0
+    }
+
     public func IsUIntN(bits: Int64): Bool {
         if (bits >= WidthBits()) {
             return true
@@ -210,6 +217,46 @@ public struct SInt {
             return SInt.Zero(width)
         }
         return SInt(width, value * Pow2(count))
+    }
+
+    public func UDiv(rhs: SInt): SInt {
+        return UDivRem(rhs)[0]
+    }
+
+    public func SDiv(rhs: SInt): SInt {
+        if (rhs.IsZero()) {
+            throw IllegalArgumentException("division by zero")
+        }
+        if (IsNeg()) {
+            if (rhs.IsNeg()) {
+                return Neg().UDiv(rhs.Neg())
+            }
+            return Neg().UDiv(rhs).Neg()
+        }
+        if (rhs.IsNeg()) {
+            return UDiv(rhs.Neg()).Neg()
+        }
+        return UDiv(rhs)
+    }
+
+    public func URem(rhs: SInt): SInt {
+        return UDivRem(rhs)[1]
+    }
+
+    public func SRem(rhs: SInt): SInt {
+        if (rhs.IsZero()) {
+            throw IllegalArgumentException("remainder by zero")
+        }
+        if (IsNeg()) {
+            if (rhs.IsNeg()) {
+                return Neg().URem(rhs.Neg()).Neg()
+            }
+            return Neg().URem(rhs).Neg()
+        }
+        if (rhs.IsNeg()) {
+            return URem(rhs.Neg())
+        }
+        return URem(rhs)
     }
 
     public func LShr(count: Int64): SInt {
@@ -297,6 +344,152 @@ public struct SInt {
 
     public static func SMax(left: SInt, right: SInt): SInt {
         return if (left.Sle(right)) { right } else { left }
+    }
+
+    public func Trunc(newWidth: IntWidth): SInt {
+        return SInt(newWidth, value)
+    }
+
+    public func ZExt(newWidth: IntWidth): SInt {
+        return SInt(newWidth, value)
+    }
+
+    public func SExt(newWidth: IntWidth): SInt {
+        return SInt(newWidth, SVal())
+    }
+
+    public func ActiveBits(): Int64 {
+        var bit = WidthBits() - 1
+        while (bit >= 0) {
+            if (At(bit)) {
+                return bit + 1
+            }
+            bit--
+        }
+        return 0
+    }
+
+    public static func GetBitsSetFrom(width: IntWidth, lowBit: Int64): SInt {
+        if (lowBit <= 0) {
+            return SInt.AllOnes(width)
+        }
+        if (lowBit >= IntWidthBits(width)) {
+            return SInt.Zero(width)
+        }
+        return SInt.BitMask(width, lowBit, IntWidthBits(width) - 1)
+    }
+
+    public func UAddOvf(rhs: SInt): (SInt, Bool) {
+        let result = Add(rhs)
+        return (result, result.Ult(rhs))
+    }
+
+    public func SAddOvf(rhs: SInt): (SInt, Bool) {
+        let result = Add(rhs)
+        let overflow = IsNonNeg() == rhs.IsNonNeg() && result.IsNonNeg() != IsNonNeg()
+        return (result, overflow)
+    }
+
+    public func USubOvf(rhs: SInt): (SInt, Bool) {
+        let result = Sub(rhs)
+        return (result, result.Ugt(this))
+    }
+
+    public func SSubOvf(rhs: SInt): (SInt, Bool) {
+        let result = Sub(rhs)
+        let overflow = IsNonNeg() != rhs.IsNonNeg() && result.IsNonNeg() != IsNonNeg()
+        return (result, overflow)
+    }
+
+    public func UMulOvf(rhs: SInt): (SInt, Bool) {
+        var result = SInt.Zero(width)
+        var overflow = false
+        let active = ActiveBits()
+        var bit: Int64 = 0
+        while (bit < WidthBits()) {
+            if (rhs.At(bit)) {
+                if (active + bit > WidthBits()) {
+                    overflow = true
+                }
+                let addResult = result.UAddOvf(Shl(bit))
+                result = addResult[0]
+                overflow = overflow || addResult[1]
+            }
+            bit++
+        }
+        return (result, overflow)
+    }
+
+    public func SMulOvf(rhs: SInt): (SInt, Bool) {
+        let result = Mul(rhs)
+        var overflow = false
+        if (!rhs.IsZero()) {
+            overflow = !result.SDiv(rhs).IsSame(this) || (IsSMinValue() && rhs.IsAllOnes())
+        }
+        return (result, overflow)
+    }
+
+    public func UAddSat(rhs: SInt): SInt {
+        let result = UAddOvf(rhs)
+        return if (result[1]) { SInt.UMaxValue(width) } else { result[0] }
+    }
+
+    public func SAddSat(rhs: SInt): SInt {
+        let result = SAddOvf(rhs)
+        return if (!result[1]) { result[0] } else if (IsNeg()) { SInt.SMinValue(width) } else { SInt.SMaxValue(width) }
+    }
+
+    public func USubSat(rhs: SInt): SInt {
+        let result = USubOvf(rhs)
+        return if (result[1]) { SInt.UMinValue(width) } else { result[0] }
+    }
+
+    public func SSubSat(rhs: SInt): SInt {
+        let result = SSubOvf(rhs)
+        return if (!result[1]) { result[0] } else if (IsNeg()) { SInt.SMinValue(width) } else { SInt.SMaxValue(width) }
+    }
+
+    public func UMulSat(rhs: SInt): SInt {
+        let result = UMulOvf(rhs)
+        return if (result[1]) { SInt.UMaxValue(width) } else { result[0] }
+    }
+
+    public func SMulSat(rhs: SInt): SInt {
+        let result = SMulOvf(rhs)
+        return if (!result[1]) { result[0] } else if (IsNeg() != rhs.IsNeg()) {
+            SInt.SMinValue(width)
+        } else {
+            SInt.SMaxValue(width)
+        }
+    }
+
+    public func SDivSat(rhs: SInt): SInt {
+        if (rhs.IsAllOnes() && IsSMinValue()) {
+            return SInt.SMaxValue(width)
+        }
+        return SDiv(rhs)
+    }
+
+    private func UDivRem(rhs: SInt): (SInt, SInt) {
+        if (rhs.IsZero()) {
+            throw IllegalArgumentException("division by zero")
+        }
+        var quotient = SInt.Zero(width)
+        var remainder = SInt.Zero(width)
+        let one = SInt(width, 1)
+        var bit = WidthBits() - 1
+        while (bit >= 0) {
+            remainder = remainder.Shl(1)
+            if (At(bit)) {
+                remainder = remainder.BitOr(one)
+            }
+            if (remainder.Uge(rhs)) {
+                remainder = remainder.Sub(rhs)
+                quotient = quotient.BitOr(SInt.BitMask(width, bit))
+            }
+            bit--
+        }
+        return (quotient, remainder)
     }
 
     public func ToString(asUnsigned!: Bool = true, radix!: Radix = Radix.R10): String {

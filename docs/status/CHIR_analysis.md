@@ -24,3 +24,22 @@
 
 - `cjpm build` passed after implementation.
 - `TODO(selfhost:CHIR)` count in `packages/chir/src`: 0.
+
+## 2026-06-17 Continuation
+
+- Reference read: `src/CHIR/Analysis/{SInt,ConstantRange,SIntDomain}.cpp` and matching headers.
+- Added fixed-width `SInt` division/remainder, extension/truncation primitives, active-bit inspection, overflow-detecting arithmetic, and saturating arithmetic.
+- Added `ConstantRange` zero/sign extension, unsigned/signed multiply, unsigned/signed divide, unsigned/signed remainder, saturating arithmetic, absolute value, and negation following the C++ transfer functions.
+- Added signed-division range splitting by positive/negative operands, including the C++ special handling around signed-min divided by `-1`.
+- Added `SIntDomain` arithmetic wrappers for multiply, divide, modulo, and saturating add/sub/mul/div so analyses can consume the new range behavior through the domain layer.
+
+## Remaining After Continuation
+
+- `ConstantRange.Truncate` is still missing, along with the numeric conversion and type-cast range routines in C++ `SIntDomain.cpp`.
+- `SInt` still lacks string construction/format parity, full bit-manipulation helpers, shift overflow/saturation helpers, and some bit-counting APIs.
+- Higher-level CHIR analysis orchestration remains partial compared with C++ `AnalysisWrapper`, `Engine`, `Results`, `ConstAnalysis`, `TypeAnalysis`, `ValueAnalysis`, and `ValueRangeAnalysis`.
+
+## Verification After Continuation
+
+- `cjpm build` passed after implementation.
+- `TODO(selfhost:CHIR)` count in `packages/chir/src`: 0.

@@ -192,6 +192,47 @@ public class SIntDomain {
         return SIntDomain(numeric.Sub(rhs.numeric), unsignedFlag)
     }
 
+    public func Mul(rhs: SIntDomain): SIntDomain {
+        let result = if (unsignedFlag) { numeric.UMul(rhs.numeric) } else { numeric.SMul(rhs.numeric) }
+        return SIntDomain(result, unsignedFlag)
+    }
+
+    public func Div(rhs: SIntDomain): SIntDomain {
+        if (rhs.numeric.Contains(SInt.Zero(rhs.Width()))) {
+            return SIntDomain.Top(Width(), unsignedFlag)
+        }
+        let result = if (unsignedFlag) { numeric.UDiv(rhs.numeric) } else { numeric.SDiv(rhs.numeric) }
+        return SIntDomain(result, unsignedFlag)
+    }
+
+    public func Mod(rhs: SIntDomain): SIntDomain {
+        let result = if (unsignedFlag) { numeric.URem(rhs.numeric) } else { numeric.SRem(rhs.numeric) }
+        return SIntDomain(result, unsignedFlag)
+    }
+
+    public func AddSat(rhs: SIntDomain): SIntDomain {
+        let result = if (unsignedFlag) { numeric.UAddSat(rhs.numeric) } else { numeric.SAddSat(rhs.numeric) }
+        return SIntDomain(result, unsignedFlag)
+    }
+
+    public func SubSat(rhs: SIntDomain): SIntDomain {
+        let result = if (unsignedFlag) { numeric.USubSat(rhs.numeric) } else { numeric.SSubSat(rhs.numeric) }
+        return SIntDomain(result, unsignedFlag)
+    }
+
+    public func MulSat(rhs: SIntDomain): SIntDomain {
+        let result = if (unsignedFlag) { numeric.UMulSat(rhs.numeric) } else { numeric.SMulSat(rhs.numeric) }
+        return SIntDomain(result, unsignedFlag)
+    }
+
+    public func DivSat(rhs: SIntDomain): SIntDomain {
+        if (rhs.numeric.Contains(SInt.Zero(rhs.Width()))) {
+            return SIntDomain.Top(Width(), unsignedFlag)
+        }
+        let result = if (unsignedFlag) { numeric.UDiv(rhs.numeric) } else { numeric.SDivSat(rhs.numeric) }
+        return SIntDomain(result, unsignedFlag)
+    }
+
     public func ToString(asUnsigned!: Bool = unsignedFlag, radix!: Radix = Radix.R10): String {
         if (symbolics.isEmpty()) {
             return numeric.ToString(asUnsigned: asUnsigned, radix: radix)
