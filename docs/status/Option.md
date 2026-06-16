@@ -155,3 +155,14 @@ invalid paths are not added, but the option action itself still succeeds so
 diagnostics/post-action processing can proceed. `--render-chir=na` is also
 accepted by the action path, matching the C++ `DUMP_CHIR_MODE_MAP` entry even
 though the visible predefined value list remains unchanged.
+
+This pass de-isolates conditional-compilation cfg diagnostics onto the real
+`cangjie_compiler::basic.DiagnosticEngine` surface for the paths owned by
+`OptionAction.cpp`. `--cfg` now reports the C++ diagnostic IDs for malformed
+key/value input, invalid identifiers, builtin-key reuse, duplicate keys,
+non-directory cfg paths, ignored cfg paths, missing explicit `cfg.toml` files,
+and malformed cfg file lines. `SetupConditionalCompilationCfgFromFile` also
+reports `driver_cfg_file_read_failed`; the only remaining approximation in
+this path is the empty failure-reason string because the current Cangjie
+`ReadTextFile` wrapper exposes success/content but not the underlying IO error
+message that C++ passes through.

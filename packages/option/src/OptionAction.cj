@@ -1,5 +1,8 @@
 package cangjie_compiler::option
 
+import cangjie_compiler::basic.DEFAULT_POSITION as BasicDefaultPosition
+import cangjie_compiler::basic.DiagnosticEngine as BasicDiagnosticEngine
+import cangjie_compiler::basic.DiagKindRefactor as BasicDiagKindRefactor
 import cangjie_compiler::basic.WarnGroup as BasicWarnGroup
 import cangjie_compiler::basic.WarnGroupIndex as BasicWarnGroupIndex
 import cangjie_compiler::utils.FileUtil
@@ -20,6 +23,21 @@ public class ActionResult {
 
 private func handled(success!: Bool = true): ActionResult { return ActionResult(true, success) }
 private func missing(): ActionResult { return ActionResult(false, true) }
+
+private func emitDiag(kind: BasicDiagKindRefactor): Unit {
+    let diag = BasicDiagnosticEngine()
+    diag.DiagnoseRefactor(kind, BasicDefaultPosition).Emit()
+}
+
+private func emitDiag(kind: BasicDiagKindRefactor, arg: String): Unit {
+    let diag = BasicDiagnosticEngine()
+    diag.DiagnoseRefactor(kind, BasicDefaultPosition, arguments: [arg]).Emit()
+}
+
+private func emitDiag(kind: BasicDiagKindRefactor, first: String, second: String): Unit {
+    let diag = BasicDiagnosticEngine()
+    diag.DiagnoseRefactor(kind, BasicDefaultPosition, arguments: [first, second]).Emit()
+}
 
 public func ParsePreAction(opts: GlobalOptions, arg: OptionArgInstance): ActionResult {
     let id = arg.info.GetID()
@@ -403,21 +421,35 @@ private func parseErrorLimit(opts: GlobalOptions, value: String): ActionResult {
 }
 
 private func parsePassedWhen(opts: GlobalOptions, value: String): ActionResult {
-    if (value.isEmpty()) { return handled(success: false) }
+    if (value.isEmpty()) {
+        emitDiag(BasicDiagKindRefactor.driver_cfg_value_err)
+        return handled(success: false)
+    }
     if (isCfgPathMode(value)) {
         let path = value.replace("\\=", "=")
-        if (!IsDir(path)) { return handled(success: false) }
+        if (!IsDir(path)) {
+            emitDiag(BasicDiagKindRefactor.dirver_cfg_not_a_dir, path)
+            return handled(success: false)
+        }
         opts.passedWhenCfgPaths.add(path)
         return handled()
     }
     let parts = SplitString(value, ",")
     for (part in parts) {
         let kv = SplitString(part, "=")
-        if (kv.size != 2) { return handled(success: false) }
-        let maybeKey = normalizeCfgKey(kv[0].trimAscii())
+        if (kv.size != 2) {
+            emitDiag(BasicDiagKindRefactor.driver_cfg_value_err)
+            return handled(success: false)
+        }
+        let rawKey = kv[0].trimAscii()
         let val = kv[1].trimAscii()
-        if (!maybeKey.hasValue || val.isEmpty()) { return handled(success: false) }
-        if (!addCfgKeyValue(opts.passedWhenKeyValue, maybeKey.value, val)) { return handled(success: false) }
+        if (rawKey.isEmpty() || val.isEmpty()) {
+            emitDiag(BasicDiagKindRefactor.driver_cfg_value_err)
+            return handled(success: false)
+        }
+        let maybeKey = parseCfgKey(rawKey, opts.passedWhenKeyValue)
+        if (!maybeKey.hasValue) { return handled(success: false) }
+        opts.passedWhenKeyValue.add(maybeKey.value, val)
     }
     return handled()
 }
@@ -444,20 +476,29 @@ private func isBuiltinCondition(key: String): Bool {
         key == "cjc_version" || key == "test"
 }
 
-private func normalizeCfgKey(rawKey: String): MaybeString {
-    if (rawKey.isEmpty() || !FileUtil.IsIdentifier(rawKey)) { return MaybeString() }
-    var key = rawKey
-    if (key.size > 2 && key[0] == b'`' && key[key.size - 1] == b'`') {
-        key = key[1..key.size - 1]
+private func checkCfgIdentifier(rawKey: String): Bool {
+    if (!FileUtil.IsIdentifier(rawKey)) {
+        emitDiag(BasicDiagKindRefactor.dirver_cfg_invaild_identifier)
+        return false
     }
-    if (isBuiltinCondition(key)) { return MaybeString() }
-    return MaybeString(key)
+    return true
 }
 
-private func addCfgKeyValue(map: HashMap<String, String>, key: String, value: String): Bool {
-    if (map.contains(key)) { return false }
-    map.add(key, value)
-    return true
+private func parseCfgKey(rawKey: String, map: HashMap<String, String>): MaybeString {
+    if (!checkCfgIdentifier(rawKey)) { return MaybeString() }
+    var key = rawKey
+    if (key.size > 2 && key[0] == b'`') {
+        key = key[1..key.size - 1]
+    }
+    if (isBuiltinCondition(key)) {
+        emitDiag(BasicDiagKindRefactor.dirver_cfg_same_with_builtin)
+        return MaybeString()
+    }
+    if (map.contains(key)) {
+        emitDiag(BasicDiagKindRefactor.dirver_cfg_key_repeat)
+        return MaybeString()
+    }
+    return MaybeString(key)
 }
 
 private func isEscaped(input: String, index: Int64): Bool {
@@ -502,20 +543,30 @@ private func parseConditionKeyValueLine(line: String, map: HashMap<String, Strin
     let commentPos = findTomlComment(line)
     let processedLine = if (commentPos >= 0) { line[0..commentPos] } else { line }
     let kv = SplitString(processedLine, "=")
-    if (kv.size != 2) { return false }
-    let maybeKey = normalizeCfgKey(kv[0].trimAscii())
-    let quotedValue = kv[1].trimAscii()
-    if (!maybeKey.hasValue || quotedValue.size <= 2 || quotedValue[0] != b'"' ||
-        quotedValue[quotedValue.size - 1] != b'"') {
+    if (kv.size != 2) {
+        emitDiag(BasicDiagKindRefactor.driver_cfg_toml_content_err)
         return false
     }
+    let rawKey = kv[0].trimAscii()
+    let quotedValue = kv[1].trimAscii()
+    if (rawKey.isEmpty() || quotedValue.size <= 2 || quotedValue[0] != b'"' ||
+        quotedValue[quotedValue.size - 1] != b'"') {
+        emitDiag(BasicDiagKindRefactor.driver_cfg_toml_content_err)
+        return false
+    }
+    let maybeKey = parseCfgKey(rawKey, map)
+    if (!maybeKey.hasValue) { return false }
     let unquotedValue = quotedValue[1..quotedValue.size - 1].replace("\\\"", "\"")
-    return addCfgKeyValue(map, maybeKey.value, unquotedValue)
+    map.add(maybeKey.value, unquotedValue)
+    return true
 }
 
 public func SetupConditionalCompilationCfgFromFile(filePath: String, map: HashMap<String, String>): Bool {
     let content = ReadTextFile(filePath)
-    if (!content.hasValue) { return false }
+    if (!content.hasValue) {
+        emitDiag(BasicDiagKindRefactor.driver_cfg_file_read_failed, filePath, "")
+        return false
+    }
     for (line in SplitLines(content.value)) {
         if (line.isEmpty() || seeingTomlComment(line)) { continue }
         if (!parseConditionKeyValueLine(line, map)) { return false }
@@ -526,7 +577,7 @@ public func SetupConditionalCompilationCfgFromFile(filePath: String, map: HashMa
 public func SetupConditionalCompilationCfg(opts: GlobalOptions): Bool {
     if (!opts.passedWhenKeyValue.isEmpty()) {
         if (!opts.passedWhenCfgPaths.isEmpty()) {
-            Warningln("cfg paths are ignored because key-value cfg options are already specified")
+            emitDiag(BasicDiagKindRefactor.driver_cfg_path_ignored)
         }
         return true
     }
@@ -535,7 +586,7 @@ public func SetupConditionalCompilationCfg(opts: GlobalOptions): Bool {
         if (FileExist(filePath)) {
             return SetupConditionalCompilationCfgFromFile(filePath, opts.passedWhenKeyValue)
         }
-        Warningln("no such file: " + filePath)
+        emitDiag(BasicDiagKindRefactor.driver_warning_no_such_file, filePath)
     }
     let defaultCfgFilePath = if (opts.packagePaths.isEmpty()) { "cfg.toml" } else { JoinPath(opts.packagePaths[0], "cfg.toml") }
     if (!FileExist(defaultCfgFilePath)) { return true }
