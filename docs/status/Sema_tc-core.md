@@ -149,3 +149,28 @@ Verification:
 
 - `cjpm build` passes after this pass.
 - Remaining `TODO(selfhost:Sema)` markers in the tc-core-owned files listed by the task: 0.
+
+## 2026-06-17 Continue Pass 4
+
+Files deepened:
+
+- `packages/sema/src/TypeManager.cj`
+
+Implemented behavior:
+
+- Ported the C++ `SubstPack` packing shape for `TypeSubst`, `MultiTypeSubst`, and single-type mappings. Universal generic variables now allocate an instantiation placeholder through `AllocTyVar`, and solutions are recorded under that placeholder; placeholder sources write directly to `inst` and drop self-solutions.
+- Matched `ApplySubstPack` and `ApplySubstPackNonUniq` handling of `ignoreUnsolved` by filtering `u2i` to placeholders that already have solved `inst` entries before applying the two-stage substitution.
+- Replaced the no-op `InstOf`, `RecoverUnivTyVar`, and `GetInstMapping` helpers with current `InstCtxScope` stack behavior. `RecoverUnivTyVar` now builds the inverse inst-to-universal substitution from the active mapping.
+- Replaced the `SubstPack` generic-mapping bridge through `MultiTypeSubst` with the C++ contextual traversal over applicable extends and inherited classlike declarations. Non-contextual inherited visits now instantiate intermediate target type arguments through the current `u2i` mapping before generating direct substitutions.
+
+Remaining gaps:
+
+- The self-hosted instantiation-context helpers keep an empty-mapping fallback when no `InstCtxScope` is active instead of the C++ assertion-style precondition.
+- Type-variable resource pooling from C++ is still not modeled; allocated placeholders are tracked and released but not reused.
+- Exact diagnostic emission and import-manager dependent lookup remain blocked by surrounding partial ports outside this tc-core pass.
+
+Verification:
+
+- `cjpm build` passes after the code changes in this pass.
+- `grep -rn "TODO(selfhost:Sema)" packages/sema/src` reports 4 remaining package-level markers, all outside the tc-core-owned files.
+- Remaining `TODO(selfhost:Sema)` markers in the tc-core-owned files listed by the task: 0.

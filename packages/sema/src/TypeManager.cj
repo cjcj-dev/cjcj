@@ -493,43 +493,111 @@ public class TypeManager {
         return out
     }
 
+    private func getSolvedU2I(maps: SubstPack): TypeSubst {
+        let out = TypeSubst()
+        for (entry in maps.u2i.entries) {
+            if (let Some(instTv) <- (entry.ty as GenericsTy)) {
+                if (let Some(_) <- maps.inst.Get(instTv)) {
+                    out.Put(entry.tyVar, entry.ty)
+                }
+            }
+        }
+        return out
+    }
+
     public func ApplySubstPack(declaredTy: Ty, maps: SubstPack, ignoreUnsolved!: Bool = false): Ty {
-        let _ = ignoreUnsolved
-        let afterU2I = GetInstantiatedTy(declaredTy, maps.u2i)
+        let u2i = if (ignoreUnsolved) { getSolvedU2I(maps) } else { maps.u2i }
+        let afterU2I = GetInstantiatedTy(declaredTy, u2i)
         return GetBestInstantiatedTy(afterU2I, maps.inst)
     }
 
     public func ApplySubstPackNonUniq(declaredTy: Ty, maps: SubstPack, ignoreUnsolved!: Bool = false): TySet {
-        let _ = ignoreUnsolved
-        return GetInstantiatedTys(GetInstantiatedTy(declaredTy, maps.u2i), maps.inst)
+        let u2i = if (ignoreUnsolved) { getSolvedU2I(maps) } else { maps.u2i }
+        return GetInstantiatedTys(GetInstantiatedTy(declaredTy, u2i), maps.inst)
     }
 
     public func InstOf(ty: Ty): Ty {
-        return ty
+        if (instCtxScopes.isEmpty()) {
+            return ty
+        }
+        let topIndex = instCtxScopes.size - 1
+        return ApplySubstPack(ty, instCtxScopes[topIndex].maps)
     }
 
     public func RecoverUnivTyVar(ty: Ty): Ty {
-        return ty
+        if (instCtxScopes.isEmpty()) {
+            return ty
+        }
+        let mapping = GetInstMapping()
+        let i2uMap = TypeSubst()
+        for (entry in mapping.u2i.entries) {
+            if (let Some(instTv) <- (entry.ty as GenericsTy)) {
+                i2uMap.Put(instTv, entry.tyVar)
+            }
+        }
+        return GetInstantiatedTy(ty, i2uMap)
     }
 
     public func GetInstMapping(): SubstPack {
-        return SubstPack()
+        if (instCtxScopes.isEmpty()) {
+            return SubstPack()
+        }
+        let topIndex = instCtxScopes.size - 1
+        return instCtxScopes[topIndex].maps.Clone()
+    }
+
+    private func ensureInstTyVar(maps: SubstPack, tv: GenericsTy): Option<GenericsTy> {
+        if (let Some(existing) <- maps.u2i.Get(tv)) {
+            if (let Some(existingGen) <- (existing as GenericsTy)) {
+                return existingGen
+            }
+        }
+        if (tv.isPlaceholder) {
+            return None
+        }
+        let instTv = AllocTyVar(srcId: tv.name)
+        maps.u2i.Put(tv, instTv)
+        return instTv
     }
 
     public func PackMapping(maps: SubstPack, m: MultiTypeSubst): Unit {
         for (entry in m.entries) {
-            maps.inst.PutAll(entry.tyVar, entry.tys)
+            if (entry.tyVar.isPlaceholder) {
+                let instTys = entry.tys.Clone()
+                let _ = instTys.Remove(entry.tyVar)
+                maps.inst.PutAll(entry.tyVar, instTys)
+            } else if (!entry.tys.IsEmpty()) {
+                if (let Some(instTv) <- ensureInstTyVar(maps, entry.tyVar)) {
+                    maps.inst.PutAll(instTv, entry.tys)
+                }
+            }
         }
     }
 
     public func PackMapping(maps: SubstPack, m: TypeSubst): Unit {
         for (entry in m.entries) {
-            maps.u2i.Put(entry.tyVar, entry.ty)
+            if (entry.tyVar.isPlaceholder) {
+                if (!SameTy(entry.tyVar, entry.ty)) {
+                    maps.inst.Put(entry.tyVar, entry.ty)
+                }
+            } else {
+                if (let Some(instTv) <- ensureInstTyVar(maps, entry.tyVar)) {
+                    maps.inst.Put(instTv, entry.ty)
+                }
+            }
         }
     }
 
     public func PackMapping(maps: SubstPack, tv: GenericsTy, instTy: Ty): Unit {
-        maps.inst.Put(tv, instTy)
+        if (tv.isPlaceholder) {
+            if (!SameTy(tv, instTy)) {
+                maps.inst.Put(tv, instTy)
+            }
+        } else {
+            if (let Some(instTv) <- ensureInstTyVar(maps, tv)) {
+                maps.inst.Put(instTv, instTy)
+            }
+        }
     }
 
     public func ZipSubstPack(mapping: SubstPack): MultiTypeSubst {
@@ -549,12 +617,7 @@ public class TypeManager {
     }
 
     public func MakeInstTyVar(maps: SubstPack, uTv: GenericsTy): Unit {
-        let decl = GenericParamDecl()
-        decl.identifier = SrcIdentifier("Ti${nextUniqId}")
-        nextUniqId++
-        let inst = GenericsTy(decl.identifier.Val(), decl)
-        inst.isPlaceholder = true
-        maps.u2i.Put(uTv, inst)
+        let _ = ensureInstTyVar(maps, uTv)
     }
 
     public func MakeInstTyVar(maps: SubstPack, d: Decl): Unit {
@@ -933,6 +996,50 @@ public class TypeManager {
         }
     }
 
+    private func generateGenericMappingVisit(m: SubstPack, baseType: Ty, visited: ArrayList<Ty>, contextual: Bool): Unit {
+        if (!Ty.IsTyCorrect(baseType) || hasVisitedGenericMappingTy(visited, baseType)) {
+            return
+        }
+        visited.add(baseType)
+        generateExtendGenericMappingVisit(m, baseType, visited, contextual)
+        if (let Some(decl) <- Ty.GetInheritableDeclPtrOfTy(Some(baseType))) {
+            generateStructDeclGenericMappingVisit(m, decl, baseType, visited, contextual)
+        }
+    }
+
+    private func generateExtendGenericMappingVisit(m: SubstPack, baseType: Ty, visited: ArrayList<Ty>,
+        contextual: Bool): Unit {
+        if (!Ty.IsTyCorrect(baseType)) {
+            return
+        }
+        for (extendDecl in GetAllExtendsByTy(baseType)) {
+            generateStructDeclGenericMappingVisit(m, extendDecl, baseType, visited, contextual)
+        }
+    }
+
+    private func generateStructDeclGenericMappingVisit(m: SubstPack, decl: InheritableDecl, targetTy: Ty,
+        visited: ArrayList<Ty>, contextual: Bool): Unit {
+        if (!Ty.IsTyCorrect(targetTy)) {
+            return
+        }
+        if (contextual) {
+            GenerateTypeMapping(this, m, decl, targetTy.typeArgs)
+        } else {
+            let typeArgs = ArrayList<Ty>()
+            for (argTy in targetTy.typeArgs) {
+                typeArgs.add(GetInstantiatedTy(argTy, m.u2i))
+            }
+            GenerateTypeMapping(this, m, decl, typeArgs)
+        }
+        for (inheritedType in decl.inheritedTypes) {
+            if (let Some(inheritedTy) <- inheritedType.GetTy()) {
+                if (isInheritableTypeForGenericMapping(inheritedTy)) {
+                    generateGenericMappingVisit(m, inheritedTy, visited, false)
+                }
+            }
+        }
+    }
+
     public func GenerateStructDeclGenericMapping(m: MultiTypeSubst, decl: InheritableDecl, targetTy: Ty): Unit {
         let visited = ArrayList<Ty>()
         generateStructDeclGenericMappingVisit(m, decl, targetTy, visited)
@@ -944,9 +1051,8 @@ public class TypeManager {
     }
 
     public func GenerateGenericMapping(m: SubstPack, baseType: Ty): Unit {
-        let multi = MultiTypeSubst()
-        GenerateGenericMapping(multi, baseType)
-        PackMapping(m, multi)
+        let visited = ArrayList<Ty>()
+        generateGenericMappingVisit(m, baseType, visited, true)
     }
 
     public func GenerateGenericMappingFromGeneric(parentDecl: Decl, childDecl: Decl): TypeSubst {
