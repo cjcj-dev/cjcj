@@ -1,11 +1,13 @@
 package cangjie_compiler::utils
 
-import std.convert.*
-
 public let STOINT_BASE: Int64 = 10
 
 private let INT64_POSITIVE_LIMIT: UInt64 = 9223372036854775807u64
 private let INT64_NEGATIVE_LIMIT: UInt64 = 9223372036854775808u64
+
+foreign {
+    func strtod(nptr: CString, endptr: CPointer<CString>): Float64
+}
 
 private func isAsciiSpace(byte: UInt8): Bool {
     return byte == b' ' || byte == b'\t' || byte == b'\n' || byte == b'\r' || byte == b'\v' || byte == b'\f'
@@ -22,6 +24,13 @@ private func digitValue(byte: UInt8): Int64 {
         return Int64(byte - b'A') + 10
     }
     return -1
+}
+
+private func asciiLower(byte: UInt8): UInt8 {
+    if (byte >= b'A' && byte <= b'Z') {
+        return byte + (b'a' - b'A')
+    }
+    return byte
 }
 
 private func isValidBase(base: Int64): Bool {
@@ -121,6 +130,64 @@ private func parseUInt64Value(s: String, base: Int64): Option<UInt64> {
     return UInt64.Max - value + 1u64
 }
 
+private func hasPrefixIgnoreAsciiCase(s: String, start: Int64, prefix: String): Bool {
+    if (start + prefix.size > s.size) {
+        return false
+    }
+    var idx: Int64 = 0
+    while (idx < prefix.size) {
+        if (asciiLower(s[start + idx]) != asciiLower(prefix[idx])) {
+            return false
+        }
+        idx++
+    }
+    return true
+}
+
+private func hasStrtodSubject(s: String): Bool {
+    var idx = skipLeadingSpace(s)
+    if (idx >= s.size) {
+        return false
+    }
+    if (s[idx] == b'+' || s[idx] == b'-') {
+        idx++
+    }
+    if (idx >= s.size) {
+        return false
+    }
+    if (hasPrefixIgnoreAsciiCase(s, idx, "inf") || hasPrefixIgnoreAsciiCase(s, idx, "nan")) {
+        return true
+    }
+    var consumedDigit = false
+    while (idx < s.size && digitValue(s[idx]) >= 0 && digitValue(s[idx]) < 10) {
+        consumedDigit = true
+        idx++
+    }
+    if (idx < s.size && s[idx] == b'.') {
+        idx++
+        while (idx < s.size && digitValue(s[idx]) >= 0 && digitValue(s[idx]) < 10) {
+            consumedDigit = true
+            idx++
+        }
+    }
+    return consumedDigit
+}
+
+private func parseFloat64Value(s: String): Option<Float64> {
+    if (!hasStrtodSubject(s)) {
+        return None
+    }
+    var result: Option<Float64> = None
+    try (cInput = unsafe { LibC.mallocCString(s) }.asResource()) {
+        if (!cInput.value.isNull()) {
+            result = unsafe { strtod(cInput.value, CPointer<CString>()) }
+        }
+    } catch (e: Exception) {
+        result = None
+    }
+    return result
+}
+
 public func Stoi(s: String, base!: Int64 = STOINT_BASE): Option<Int64> {
     let parsed = parseInt64Value(s, base)
     if (let Some(v) <- parsed) {
@@ -158,13 +225,9 @@ public func Stoull(s: String, base!: Int64 = STOINT_BASE): Option<UInt64> {
 }
 
 public func Stod(s: String): Option<Float64> {
-    try {
-        return Float64.parse(s)
-    } catch (e: Exception) {
-        return None
-    }
+    return parseFloat64Value(s)
 }
 
 public func Stold(s: String): Option<Float64> {
-    return Stod(s)
+    return parseFloat64Value(s)
 }

@@ -1,5 +1,7 @@
 package cangjie_compiler::utils
 
+import std.fs.File
+
 public open class UserBase {
     protected var enable: Bool = false
     protected var packageName: String = ""
@@ -21,7 +23,7 @@ public open class UserBase {
         try {
             WriteJson(GetResult(), GetSuffix())
         } catch (e: Exception) {
-            ()
+            eprintln("Get an exception while running function 'OutputResult' !!!\n")
         }
     }
 
@@ -31,7 +33,11 @@ public open class UserBase {
             name = name[0..pos] + "-" + name[pos + 1..]
         }
         let filename = name + suffix
-        FileUtil.WriteToFile(FileUtil.JoinPath(outputDir, filename), context)
+        try {
+            File.writeTo(FileUtil.JoinPath(outputDir, filename), context.toArray())
+        } catch (e: Exception) {
+            ()
+        }
     }
 
     public func Enable(en: Bool): Unit {

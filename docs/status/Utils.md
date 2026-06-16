@@ -23,6 +23,8 @@ Implemented:
 - Restored the C++ `UserTimer` unfinished-scope diagnostic when profile output is collected while a timer has a beginning time but no ending time, including the Windows/plain and non-Windows/red message split.
 - Aligned `ProfileRecorder` resource cleanup with the C++ destructor by swallowing `Stop` exceptions during close so profiling cleanup cannot leak exceptions.
 - Deepened `StdUtils` integer conversion fidelity: `Sto*` helpers now follow the C++ `std::sto*` family more closely for leading ASCII whitespace, optional signs, base-0 autodetection, hexadecimal prefixes, partial numeric consumption, and range failures.
+- Switched `StdUtils.Stod`/`Stold` to libc `strtod` behind C FFI with C++-style subject detection, preserving leading whitespace, `inf`/`nan`, and partial numeric consumption behavior that `std::stod` accepts.
+- Brought `UserBase` profiling output closer to the C++ implementation: result-generation exceptions now print the same `OutputResult` diagnostic, and JSON profile writes no longer auto-create missing parent directories.
 - Restored the C++ signal utility split with `SignalUtil.cj`, and brought Unix alternate signal stack setup closer to `SignalUnix.cpp` by querying/preserving the old stack and reusing an existing active or sufficiently large alternate stack.
 
 Known fidelity caveats:
