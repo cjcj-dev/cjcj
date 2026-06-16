@@ -1,5 +1,9 @@
 package cangjie_compiler::utils
 
+import cangjie_compiler::lex.IsContextualKeyword as LexIsContextualKeyword
+import cangjie_compiler::lex.TOKENS as LEX_TOKENS
+import cangjie_compiler::lex.TokenKind as LexTokenKind
+import cangjie_compiler::lex.TokenKindIndex as LexTokenKindIndex
 import std.collection.*
 
 public type UTF8 = UInt8
@@ -345,27 +349,18 @@ public func IsCangjieIdentifier(str: String, useContextualKeyWords: Bool): Bool 
     return true
 }
 
-private let KEYWORDS: Array<String> = [
-    "is", "as", "_",
-    "Int8", "Int16", "Int32", "Int64", "IntNative", "UInt8", "UInt16", "UInt32", "UInt64", "UIntNative",
-    "Float16", "Float32", "Float64", "Rune", "Bool", "Nothing", "Unit", "VArray", "This",
-    "struct", "enum", "package", "import", "class", "interface", "func", "macro", "quote", "let", "var",
-    "const", "type", "init", "this", "super", "if", "else", "case", "try", "catch", "finally", "for",
-    "do", "while", "throw", "return", "continue", "break", "in", "match", "where", "extend", "with",
-    "prop", "static", "public", "private", "internal", "protected", "override", "redef", "abstract",
-    "sealed", "open", "foreign", "inout", "mut", "unsafe", "operator", "spawn", "synchronized", "main",
-    "true", "false"
-]
-
-private let CONTEXTUAL_KEYWORDS: Array<String> = [
-    "public", "private", "internal", "protected", "override", "redef", "abstract", "sealed", "open",
-    "common", "specific", "features"
-]
-
 private func IsKeyword(str: String): Bool {
-    return KEYWORDS.contains(str)
+    let identifierIndex = LexTokenKindIndex(LexTokenKind.IDENTIFIER)
+    var idx: Int64 = 0
+    while (idx < identifierIndex) {
+        if (LEX_TOKENS[idx] == str) {
+            return true
+        }
+        idx++
+    }
+    return str == "true" || str == "false"
 }
 
 private func IsContextualKeyword(str: String): Bool {
-    return CONTEXTUAL_KEYWORDS.contains(str)
+    return LexIsContextualKeyword(str)
 }

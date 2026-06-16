@@ -16,12 +16,12 @@ Implemented:
 - Deepened Semaphore startup behavior by deriving the singleton count from processor count on Linux/macOS via `sysconf`, preserving the C++ "leave two cores free, minimum one" policy.
 - Aligned `Semaphore.SetCount` with the C++ implementation by updating the count under lock without broadcasting to waiters.
 - Corrected Unicode identifier classification to match the lexer token tables: raw identifiers can wrap keywords, `_` and built-in type token names are rejected as identifiers, and contextual modifier keywords are allowed only when requested.
+- De-isolated Unicode keyword and ICE version/color handling to real sibling packages: Utils now depends on `basic` for compiler version and ANSI ICE prefix constants, and on `lex` for `TOKENS`, `TokenKind.IDENTIFIER`, and contextual keyword classification instead of local compatibility copies.
 
 Known fidelity caveats:
 
 - Utils exposes normal and signal-safe ICE temp-file cleanup hooks for the Driver port to register; the actual C++ `TempFileManager` deletion policy still belongs to Driver and is outside Utils' dependency boundary here.
 - `ParallelUtil` provides real generic indexed parallel dispatch, but the exact C++ CHIRBuilder/Translator entrypoint still requires CHIR-facing Cangjie types.
-- The package remains intentionally dependency-light; duplicated Basic namespace string helpers are retained here because adding a `utils -> basic` package edge would be a manifest-level graph change outside this pass.
 - Non-Linux memory profiling still uses the conservative Cangjie fallback rather than the C++ Windows/macOS process-memory APIs.
 
 Remaining Utils selfhost markers: 0.
