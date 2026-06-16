@@ -130,7 +130,15 @@ public class MockUtils {
                     let parts = ArrayList<String>()
                     for (param in body.paramLists[0].params) {
                         if (let Some(paramTy) <- param.GetTy()) {
-                            parts.add(paramTy.String())
+                            var argumentTy = paramTy
+                            if (let Some(paramTyDecl) <- Ty.GetDeclOfTy(Some(paramTy))) {
+                                if (let Some(genericDecl) <- paramTyDecl.genericDecl) {
+                                    if (let Some(genericTy) <- genericDecl.GetTy()) {
+                                        argumentTy = genericTy
+                                    }
+                                }
+                            }
+                            parts.add(argumentTy.String())
                         } else {
                             parts.add(TypeManager.GetInvalidTy().String())
                         }
@@ -173,6 +181,17 @@ public class MockUtils {
             return decl.identifier.Val()
         }
         return decl.identifier.Val()[0..decl.identifier.Val().size - suffixSize]
+    }
+
+    public static func GetOriginalIdentifierOfAccessor(decl: FuncDecl): String {
+        let accessorOwner = if (let Some(propDecl) <- decl.propDecl) { propDecl } else { decl }
+        var originalId = GetOriginalIdentifierOfMockAccessor(accessorOwner)
+        if (originalId.endsWith(GETTER_SUFFIX)) {
+            originalId = originalId[0..originalId.size - GETTER_SUFFIX.size]
+        } else if (originalId.endsWith(SETTER_SUFFIX)) {
+            originalId = originalId[0..originalId.size - SETTER_SUFFIX.size]
+        }
+        return originalId
     }
 
     public static func ComputeAccessorKind(accessorDecl: FuncDecl): AccessorKind {
@@ -224,6 +243,66 @@ public class MockUtils {
     public static func IsGeneratedGetter(kind: AccessorKind): Bool {
         return kind == AccessorKind.FIELD_GETTER || kind == AccessorKind.STATIC_FIELD_GETTER ||
             kind == AccessorKind.TOP_LEVEL_VARIABLE_GETTER
+    }
+
+    private static func FindMemberDeclByIdentifier(outerDecl: Decl, identifier: String): Option<Decl> {
+        for (member in outerDecl.GetMemberDecls()) {
+            if (member.identifier.Val() == identifier) {
+                return Some(member)
+            }
+        }
+        return None
+    }
+
+    private static func FindGlobalDeclByIdentifier(file: File, identifier: String): Option<Decl> {
+        for (decl in file.decls) {
+            if (decl.identifier.Val() == identifier) {
+                return Some(decl)
+            }
+        }
+        if (let Some(pkg) <- file.curPackage) {
+            for (pkgFile in pkg.files) {
+                for (decl in pkgFile.decls) {
+                    if (decl.identifier.Val() == identifier) {
+                        return Some(decl)
+                    }
+                }
+            }
+        }
+        return None
+    }
+
+    public static func IsGetterForMutField(accessorDecl: FuncDecl): Bool {
+        let accessorKind = ComputeAccessorKind(accessorDecl)
+        if (accessorKind != AccessorKind.FIELD_GETTER &&
+            accessorKind != AccessorKind.STATIC_FIELD_GETTER &&
+            accessorKind != AccessorKind.TOP_LEVEL_VARIABLE_GETTER) {
+            return false
+        }
+        let getterDeclId = accessorDecl.identifier.Val()
+        let setterDeclId = getterDeclId.replace(GETTER_SUFFIX + MOCKED_ACCESSOR_SUFFIX,
+            SETTER_SUFFIX + MOCKED_ACCESSOR_SUFFIX)
+        if (getterDeclId == setterDeclId) {
+            return false
+        }
+        if (let Some(outer) <- accessorDecl.outerDecl) {
+            return FindMemberDeclByIdentifier(outer, setterDeclId).isSome()
+        }
+        if (let Some(file) <- accessorDecl.curFile) {
+            return FindGlobalDeclByIdentifier(file, setterDeclId).isSome()
+        }
+        return false
+    }
+
+    public static func FindMockGlobalDecl(decl: Decl, name: String): Option<Decl> {
+        if (let Some(file) <- decl.curFile) {
+            return FindGlobalDeclByIdentifier(file, name + MOCKED_ACCESSOR_SUFFIX)
+        }
+        return None
+    }
+
+    public static func GetForeignAccessorName(decl: FuncDecl): String {
+        return decl.fullPackageName + "$" + decl.identifier.Val()
     }
 }
 

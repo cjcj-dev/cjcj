@@ -3,6 +3,7 @@ package cangjie_compiler::sema.NativeFFI
 import std.collection.*
 import cangjie_compiler::ast.*
 import cangjie_compiler::ast.AnnotationKind as AstAnnotationKind
+import cangjie_compiler::basic.LambdaPattern as BasicLambdaPattern
 import cangjie_compiler::option.GetFileName as OptionGetFileName
 import cangjie_compiler::option.IsDir as OptionIsDir
 import cangjie_compiler::sema.TypeManager
@@ -11,6 +12,13 @@ public let NSSTRING_CLASS_IDENT: String = "NSString"
 public let NSOBJECT_CLASS_IDENT: String = "NSObject"
 public let TOSTRING_METHOD_IDENT: String = "toString"
 public let INIT_IDENT: String = "init"
+private let STD_LIB_STRING_IDENT: String = "String"
+private let INTEROP_JARRAY_NAME: String = "JArray"
+private let INTEROP_JAVA_LANG_PACKAGE: String = "java.lang"
+private let JAVA_ARRAY_GET_FOR_REF_TYPES: String = "$javaarrayget"
+private let JAVA_ARRAY_SET_FOR_REF_TYPES: String = "$javaarrayset"
+private let ARRAY_SUBSCRIPT_IDENT: String = "[]"
+private let ARRAY_LENGTH_IDENT: String = "length"
 
 public enum ArrayOperationKind {
     | CREATE
@@ -64,6 +72,154 @@ public func GetParamTys(params: FuncParamList): ArrayList<Ty> {
         }
     }
     return paramTys
+}
+
+public func CreateThisRef(target: Option<Decl>, ty: Option<Ty>, curFile: Option<File>): RefExpr {
+    let thisRef = RefExpr()
+    thisRef.isThis = true
+    thisRef.ref.identifier = SrcIdentifier("this")
+    thisRef.ref.target = target
+    thisRef.curFile = curFile
+    if (let Some(value) <- ty) {
+        thisRef.SetTy(value)
+    }
+    return thisRef
+}
+
+public func CreateThisRef(target: Decl, ty: Ty, curFile: File): RefExpr {
+    return CreateThisRef(Some(target), Some(ty), Some(curFile))
+}
+
+public func CreateSuperRef(target: Option<Decl>, ty: Option<Ty>): RefExpr {
+    let superRef = RefExpr()
+    superRef.isSuper = true
+    superRef.ref.identifier = SrcIdentifier("super")
+    superRef.ref.target = target
+    if (let Some(value) <- ty) {
+        superRef.SetTy(value)
+    }
+    return superRef
+}
+
+public func CreateSuperRef(target: Decl, ty: Ty): RefExpr {
+    return CreateSuperRef(Some(target), Some(ty))
+}
+
+public func CreateThisCall(target: Decl, baseTarget: FuncDecl, funcTy: Ty, curFile: File): CallExpr {
+    return CreateThisCall(target, baseTarget, funcTy, curFile, ArrayList<FuncArg>())
+}
+
+public func CreateThisCall(target: Decl, baseTarget: FuncDecl, funcTy: Ty, curFile: File,
+    args: ArrayList<FuncArg>): CallExpr {
+    let callExpr = CreateCallExpr(CreateThisRef(baseTarget, funcTy, curFile), args)
+    callExpr.callKind = CallKind.CALL_OBJECT_CREATION
+    if (let Some(targetTy) <- target.GetTy()) {
+        callExpr.SetTy(targetTy)
+    }
+    callExpr.resolvedFunction = baseTarget
+    return callExpr
+}
+
+public func CreateSuperCall(target: Decl, baseTarget: FuncDecl, funcTy: Ty): CallExpr {
+    let callExpr = CreateCallExpr(CreateSuperRef(baseTarget, funcTy), ArrayList<FuncArg>())
+    callExpr.callKind = CallKind.CALL_SUPER_FUNCTION
+    if (let Some(targetTy) <- target.GetTy()) {
+        callExpr.SetTy(targetTy)
+    }
+    callExpr.resolvedFunction = baseTarget
+    return callExpr
+}
+
+public func CreateUnitType(curFile: Option<File>): PrimitiveType {
+    let unitType = PrimitiveType()
+    unitType.str = "Unit"
+    unitType.kind = TypeKind.TYPE_UNIT
+    unitType.SetTy(TypeManager.GetPrimitiveTy(TypeKind.TYPE_UNIT))
+    unitType.curFile = curFile
+    return unitType
+}
+
+public func CreateUnitType(curFile: File): PrimitiveType {
+    return CreateUnitType(Some(curFile))
+}
+
+public func CreateType(ty: Ty): Type {
+    let typeNode = Type()
+    typeNode.SetTy(ty)
+    return typeNode
+}
+
+public func CreateFuncType(ty: FuncTy): FuncType {
+    let typeNode = FuncType()
+    typeNode.SetTy(ty)
+    for (paramTy in ty.paramTys) {
+        typeNode.paramTypes.add(CreateType(paramTy))
+    }
+    typeNode.retType = CreateType(ty.retTy)
+    return typeNode
+}
+
+public func IsJArray(decl: Decl): Bool {
+    if ((decl as ClassLikeDecl).isNone()) {
+        return false
+    }
+    if (!decl.TestAttr(Attribute.JAVA_MIRROR)) {
+        return false
+    }
+    if (decl.identifier.Val() != INTEROP_JARRAY_NAME || decl.fullPackageName != INTEROP_JAVA_LANG_PACKAGE) {
+        return false
+    }
+    if (let Some(attr) <- GetSingleArgumentAnnotationValue(decl, AstAnnotationKind.JAVA_MIRROR)) {
+        return attr == ARRAY_SUBSCRIPT_IDENT
+    }
+    return false
+}
+
+public func IsJArray(ty: Ty): Bool {
+    if (let Some(classLikeTy) <- (ty as ClassLikeTy)) {
+        if (let Some(decl) <- classLikeTy.commonDecl) {
+            return IsJArray(decl)
+        }
+    }
+    return false
+}
+
+public func TryGetArrayOperationKind(decl: Decl): Option<ArrayOperationKind> {
+    if (let Some(propDecl) <- (decl as PropDecl)) {
+        if (propDecl.identifier.Val() == ARRAY_LENGTH_IDENT) {
+            return Some(ArrayOperationKind.GET_LENGTH)
+        }
+    }
+    if (let Some(funcDecl) <- (decl as FuncDecl)) {
+        let funcName = funcDecl.identifier.Val()
+        if (funcName == ARRAY_SUBSCRIPT_IDENT) {
+            if (let Some(body) <- funcDecl.funcBody) {
+                if (!body.paramLists.isEmpty()) {
+                    let paramsNumber = body.paramLists[0].params.size
+                    if (paramsNumber == 1) {
+                        return Some(ArrayOperationKind.GET)
+                    }
+                    if (paramsNumber == 2) {
+                        return Some(ArrayOperationKind.SET)
+                    }
+                }
+            }
+        }
+        if (funcName == JAVA_ARRAY_GET_FOR_REF_TYPES) {
+            return Some(ArrayOperationKind.GET)
+        }
+        if (funcName == JAVA_ARRAY_SET_FOR_REF_TYPES) {
+            return Some(ArrayOperationKind.SET)
+        }
+    }
+    return None
+}
+
+public func GetArrayOperationKind(decl: Decl): ArrayOperationKind {
+    if (let Some(kind) <- TryGetArrayOperationKind(decl)) {
+        return kind
+    }
+    return ArrayOperationKind.CREATE
 }
 
 public func GetCangjieLibName(outputLibPath: String, fullPackageName: String, trimmed!: Bool = true): String {
@@ -134,7 +290,76 @@ public func IsSuperConstructorCall(call: CallExpr): Bool {
 public func IsThisConstructorCall(call: CallExpr): Bool {
     if (let Some(base) <- call.baseFunc) {
         if (let Some(refExpr) <- (base as RefExpr)) {
-            return refExpr.isThis && call.callKind == CallKind.CALL_OBJECT_CREATION
+            return refExpr.isThis && call.callKind == CallKind.CALL_DECLARED_FUNCTION
+        }
+    }
+    return false
+}
+
+public func IsObjCGeneratedNSStringCtor(target: Decl): Bool {
+    if (let Some(funcDecl) <- (target as FuncDecl)) {
+        if (funcDecl.identifier.Val() != INIT_IDENT ||
+            !funcDecl.TestAttr(Attribute.CONSTRUCTOR) || !funcDecl.TestAttr(Attribute.COMPILER_ADD)) {
+            return false
+        }
+        if (let Some(body) <- funcDecl.funcBody) {
+            if (body.paramLists.isEmpty()) {
+                return false
+            }
+            let params = body.paramLists[0].params
+            if (params.size != 1) {
+                return false
+            }
+            if (let Some(typeNode) <- params[0].typeNode) {
+                if (let Some(refType) <- (typeNode as RefType)) {
+                    return refType.ref.identifier.Val() == STD_LIB_STRING_IDENT
+                }
+                return typeNode.ToString() == STD_LIB_STRING_IDENT
+            }
+        }
+    }
+    return false
+}
+
+public func IsObjCGeneratedNSObjectToString(target: Decl): Bool {
+    if (let Some(funcDecl) <- (target as FuncDecl)) {
+        if (funcDecl.identifier.Val() != TOSTRING_METHOD_IDENT ||
+            !funcDecl.TestAttr(Attribute.COMPILER_ADD)) {
+            return false
+        }
+        if (let Some(body) <- funcDecl.funcBody) {
+            if (body.paramLists.isEmpty()) {
+                return false
+            }
+            return body.paramLists[0].params.isEmpty()
+        }
+    }
+    return false
+}
+
+public func IsObjCGeneratedMember(target: Decl): Bool {
+    if (let Some(outer) <- target.outerDecl) {
+        if (let Some(classLikeDecl) <- (outer as ClassLikeDecl)) {
+            let foreignName = GetObjCMirrorForeignName(classLikeDecl)
+            return (foreignName == NSSTRING_CLASS_IDENT && IsObjCGeneratedNSStringCtor(target)) ||
+                (foreignName == NSOBJECT_CLASS_IDENT && IsObjCGeneratedNSObjectToString(target))
+        }
+    }
+    return false
+}
+
+public func IsCJMappingGeneric(decl: Decl): Bool {
+    if (let Some(classDecl) <- (decl as ClassDecl)) {
+        if (!classDecl.TestAnyAttr(Attribute.ABSTRACT, Attribute.OPEN)) {
+            if (let Some(ty) <- classDecl.GetTy()) {
+                return ty.HasGeneric()
+            }
+        }
+        return false
+    }
+    if ((decl as StructDecl).isSome() || (decl as EnumDecl).isSome() || (decl as InterfaceDecl).isSome()) {
+        if (let Some(ty) <- decl.GetTy()) {
+            return ty.HasGeneric()
         }
     }
     return false
@@ -190,6 +415,22 @@ public func GetTyByName(typeName: String): Ty {
     return TypeManager.GetPrimitiveTy(typeKind)
 }
 
+public func GetPrimitiveType(typeName: String, typeKind: TypeKind): PrimitiveType {
+    let typeNode = PrimitiveType()
+    typeNode.str = typeName
+    typeNode.kind = typeKind
+    typeNode.SetTy(TypeManager.GetPrimitiveTy(typeKind))
+    return typeNode
+}
+
+public func GetTypeByName(typeName: String): Type {
+    let typeKind = GetActualTypeKind(typeName)
+    if (typeKind == TypeKind.TYPE_INVALID) {
+        return InvalidType(INVALID_POSITION)
+    }
+    return GetPrimitiveType(typeName, typeKind)
+}
+
 public func GetGenericActualType(config: GenericConfigInfo, genericName: String): String {
     for (inst in config.instTypes) {
         if (inst[0] == genericName) {
@@ -205,6 +446,11 @@ public func GetGenericInstTy(config: GenericConfigInfo, genericName: String): Ty
         return Ty.GetInitialTy()
     }
     return GetTyByName(actualTypeName)
+}
+
+public func GetGenericInstType(config: GenericConfigInfo, genericName: String): Type {
+    let actualTypeName = GetGenericActualType(config, genericName)
+    return GetTypeByName(actualTypeName)
 }
 
 public func GetGenericInstTy(config: GenericConfigInfo, genericTy: Ty, typeManager: TypeManager): Ty {
@@ -239,6 +485,260 @@ public func GetGenericInstTy(config: GenericConfigInfo, genericTy: Ty, typeManag
         return typeManager.GetTupleTy(elements.toArray())
     }
     return genericTy
+}
+
+public func GetGenericInstType(config: GenericConfigInfo, genericTy: Ty, typeManager: TypeManager): Type {
+    let instantiatedTy = GetGenericInstTy(config, genericTy, typeManager)
+    if (instantiatedTy.IsPrimitive()) {
+        return GetPrimitiveType(instantiatedTy.String(), instantiatedTy.kind)
+    }
+    if (let Some(funcTy) <- (instantiatedTy as FuncTy)) {
+        let funcType = FuncType()
+        funcType.SetTy(instantiatedTy)
+        for (paramTy in funcTy.paramTys) {
+            funcType.paramTypes.add(GetGenericInstType(config, paramTy, typeManager))
+        }
+        funcType.retType = GetGenericInstType(config, funcTy.retTy, typeManager)
+        return funcType
+    }
+    if (instantiatedTy.IsTuple()) {
+        let tupleType = TupleType()
+        tupleType.SetTy(instantiatedTy)
+        return tupleType
+    }
+    return InvalidType(INVALID_POSITION)
+}
+
+public func ReplaceGenericTyForFuncTy(ty: Ty, config: GenericConfigInfo, typeManager: TypeManager): Ty {
+    if (!ty.HasGeneric()) {
+        return ty
+    }
+    return GetGenericInstTy(config, ty, typeManager)
+}
+
+public func ReplaceGenericTyForFunc(funcDecl: FuncDecl, config: GenericConfigInfo, typeManager: TypeManager): Unit {
+    if (let None <- funcDecl.funcBody) {
+        return
+    }
+    let body = funcDecl.funcBody.getOrThrow()
+    if (let Some(retTypeNode) <- body.retType) {
+        if (let Some(retTy) <- retTypeNode.GetTy()) {
+            if (retTy.HasGeneric()) {
+                body.retType = GetGenericInstType(config, retTy, typeManager)
+            }
+        }
+    }
+
+    let paramTys = ArrayList<Ty>()
+    if (!body.paramLists.isEmpty()) {
+        for (param in body.paramLists[0].params) {
+            if (let Some(paramTy) <- param.GetTy()) {
+                if (paramTy.HasGeneric()) {
+                    let actualTypeNode = GetGenericInstType(config, paramTy, typeManager)
+                    let actualTy = GetGenericInstTy(config, paramTy, typeManager)
+                    param.typeNode = actualTypeNode
+                    param.SetTy(actualTy)
+                    paramTys.add(actualTy)
+                } else {
+                    paramTys.add(paramTy)
+                }
+            }
+        }
+    }
+
+    let tmpTypeArgs = ArrayList<Ty>()
+    if (let Some(funcTy) <- funcDecl.GetTy()) {
+        for (typeArg in funcTy.typeArgs) {
+            if (typeArg.HasGeneric()) {
+                tmpTypeArgs.add(GetGenericInstTy(config, typeArg, typeManager))
+            } else {
+                tmpTypeArgs.add(typeArg)
+            }
+        }
+    }
+    let retTyForFunc = if (let Some(retTypeNode) <- body.retType) {
+        retTypeNode.GetTy() ?? TypeManager.GetInvalidTy()
+    } else {
+        TypeManager.GetInvalidTy()
+    }
+    let newFuncTy = typeManager.GetFunctionTy(paramTys.toArray(), retTyForFunc)
+    for (typeArg in tmpTypeArgs) {
+        newFuncTy.typeArgs.add(typeArg)
+    }
+    funcDecl.SetTy(newFuncTy)
+}
+
+public func GetArgsAndRetGenericActualTyVector(config: GenericConfigInfo, ctor: FuncDecl,
+    actualTyArgMap: HashMap<String, Ty>, funcTyParams: ArrayList<Ty>, actualPrimitiveType: ArrayList<Type>,
+    typeManager: TypeManager): Unit {
+    if (let Some(outerDecl) <- ctor.outerDecl) {
+        if (let Some(outerTy) <- outerDecl.GetTy()) {
+            for (argTy in outerTy.typeArgs) {
+                if (argTy.IsGeneric()) {
+                    let actualRetTy = GetGenericInstTy(config, argTy, typeManager)
+                    actualTyArgMap.add(argTy.name, actualRetTy)
+                    actualPrimitiveType.add(GetTypeByName(actualRetTy.String()))
+                }
+            }
+        }
+    }
+    if (let Some(body) <- ctor.funcBody) {
+        if (!body.paramLists.isEmpty()) {
+            for (param in body.paramLists[0].params) {
+                if (let Some(paramTy) <- param.GetTy()) {
+                    if (paramTy.HasGeneric()) {
+                        let actualTy = GetGenericInstTy(config, paramTy, typeManager)
+                        if (actualTy.kind != TypeKind.TYPE_INITIAL) {
+                            funcTyParams.add(actualTy)
+                        } else {
+                            funcTyParams.add(paramTy)
+                        }
+                    } else {
+                        funcTyParams.add(paramTy)
+                    }
+                }
+            }
+        }
+    }
+}
+
+public func GetInstantyForGenericTy(decl: Decl, actualTyArgMap: HashMap<String, Ty>,
+    typeManager: TypeManager): Ty {
+    let actualTypeArgs = ArrayList<Ty>()
+    if (let Some(declTy) <- decl.GetTy()) {
+        for (typeArg in declTy.typeArgs) {
+            if (let Some(actualTy) <- actualTyArgMap.get(typeArg.name)) {
+                actualTypeArgs.add(actualTy)
+            }
+        }
+    }
+    if (let Some(classDecl) <- (decl as ClassDecl)) {
+        return typeManager.GetClassTy(classDecl, actualTypeArgs.toArray())
+    }
+    if (let Some(structDecl) <- (decl as StructDecl)) {
+        return typeManager.GetStructTy(structDecl, actualTypeArgs.toArray())
+    }
+    if (let Some(enumDecl) <- (decl as EnumDecl)) {
+        return typeManager.GetEnumTy(enumDecl, typeArgs: actualTypeArgs.toArray())
+    }
+    if (let Some(interfaceDecl) <- (decl as InterfaceDecl)) {
+        return typeManager.GetInterfaceTy(interfaceDecl, actualTypeArgs.toArray())
+    }
+    return decl.GetTy() ?? TypeManager.GetInvalidTy()
+}
+
+public func IsGenericParam(ty: Ty, decl: Decl, config: GenericConfigInfo): Bool {
+    if (!IsCJMappingGeneric(decl) || !ty.HasGeneric()) {
+        return false
+    }
+    if (ty.IsGeneric()) {
+        return !GetGenericActualType(config, ty.name).isEmpty()
+    }
+    if (ty.IsTuple()) {
+        for (typeArg in ty.typeArgs) {
+            if (typeArg.HasGeneric() && !IsGenericParam(typeArg, decl, config)) {
+                return false
+            }
+        }
+        return true
+    }
+    if (let Some(funcTy) <- (ty as FuncTy)) {
+        for (paramTy in funcTy.paramTys) {
+            if (paramTy.HasGeneric() && !IsGenericParam(paramTy, decl, config)) {
+                return false
+            }
+        }
+        if (funcTy.retTy.HasGeneric()) {
+            return IsGenericParam(funcTy.retTy, decl, config)
+        }
+        return true
+    }
+    return false
+}
+
+public func IsVisibalFunc(funcDecl: FuncDecl, decl: Decl, config: GenericConfigInfo): Bool {
+    var hasGenericParam = false
+    if (let Some(body) <- funcDecl.funcBody) {
+        if (!body.paramLists.isEmpty()) {
+            for (param in body.paramLists[0].params) {
+                if (let Some(paramTy) <- param.GetTy()) {
+                    if (IsGenericParam(paramTy, decl, config)) {
+                        hasGenericParam = true
+                        break
+                    }
+                }
+            }
+        }
+        if (!hasGenericParam) {
+            if (let Some(retType) <- body.retType) {
+                if (let Some(retTy) <- retType.GetTy()) {
+                    hasGenericParam = IsGenericParam(retTy, decl, config)
+                }
+            }
+        }
+    }
+    if (!hasGenericParam) {
+        return true
+    }
+    return config.funcNames.contains(funcDecl.identifier.Val())
+}
+
+public func GetCjMappingTupleName(tupleTy: Ty): String {
+    if (!tupleTy.IsTuple()) {
+        return ""
+    }
+    let builder = StringBuilder()
+    builder.append("TupleOf")
+    for (typeArg in tupleTy.typeArgs) {
+        builder.append(typeArg.String())
+    }
+    return builder.toString()
+}
+
+public func GetLambdaJavaClassName(ty: Ty): String {
+    if (let Some(funcTy) <- (ty as FuncTy)) {
+        let builder = StringBuilder()
+        for (paramTy in funcTy.paramTys) {
+            builder.append(paramTy.String())
+        }
+        builder.append("To")
+        builder.append(funcTy.retTy.String())
+        return builder.toString()
+    }
+    return ""
+}
+
+public func GetLambdaJavaClassName(pattern: BasicLambdaPattern): String {
+    let builder = StringBuilder()
+    for (paramType in pattern.parameterTypes) {
+        builder.append(paramType)
+    }
+    builder.append("To")
+    builder.append(pattern.returnType)
+    return builder.toString()
+}
+
+public func AreParamTypeKindsValid(fd: FuncDecl, typeKinds: ArrayList<TypeKind>): Bool {
+    if (let Some(body) <- fd.funcBody) {
+        if (body.paramLists.isEmpty()) {
+            return typeKinds.isEmpty()
+        }
+        let params = body.paramLists[0].params
+        if (params.size != typeKinds.size) {
+            return false
+        }
+        for (idx in 0..typeKinds.size) {
+            if (let Some(paramTy) <- params[idx].GetTy()) {
+                if (paramTy.kind != typeKinds[idx]) {
+                    return false
+                }
+            } else {
+                return false
+            }
+        }
+        return true
+    }
+    return false
 }
 
 public func SelfhostPortStatus_NativeFFI_Utils(): Bool {

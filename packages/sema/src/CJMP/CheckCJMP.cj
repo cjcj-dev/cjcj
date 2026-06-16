@@ -75,6 +75,11 @@ private func DeclInfo(decl: Decl): String {
     if (decl.astKind == ASTKind.VAR_WITH_PATTERN_DECL) {
         return "variable with pattern"
     }
+    if (let Some(extendDecl) <- (decl as ExtendDecl)) {
+        if (let Some(extendedType) <- extendDecl.extendedType) {
+            return DeclKindToString(decl) + " '" + extendedType.ToString() + "'"
+        }
+    }
     return DeclKindToString(decl) + " '" + decl.identifier.GetRawText() + "'"
 }
 
@@ -90,7 +95,215 @@ private func DiagNotMatchedSpecificDecl(checker: MPTypeCheckerImpl, decl: Decl):
     DiagNotMatchedDecl(checker, decl, "common", "specific")
 }
 
+private func DiagNotMatchedCommonDecl(checker: MPTypeCheckerImpl, decl: Decl): Unit {
+    DiagNotMatchedDecl(checker, decl, "specific", "common")
+}
+
+private func DiagNotMatchedSuperType(checker: MPTypeCheckerImpl, decl: Decl): Unit {
+    let builder = checker.diag.DiagnoseRefactor(
+        BasicDiagKindRefactor.sema_specific_has_different_super_type,
+        NodeRange(decl),
+        arguments: [DeclKindToString(decl)])
+    builder.Emit()
+}
+
+private func HasGeneralSubClass(cls: ClassDecl): Bool {
+    var current = cls
+    while (!current.subDecls.isEmpty()) {
+        if (let Some(child) <- (current.subDecls[0] as ClassDecl)) {
+            if (!child.TestAttr(Attribute.COMMON)) {
+                return true
+            }
+            current = child
+        } else {
+            return true
+        }
+    }
+    return false
+}
+
+private func MatchNominativeDecl(checker: MPTypeCheckerImpl, commonDecl: Decl, specificDecl: Decl): Bool {
+    if (commonDecl.astKind != specificDecl.astKind) {
+        let builder = checker.diag.DiagnoseRefactor(
+            BasicDiagKindRefactor.specific_has_different_kind,
+            NodeRange(specificDecl),
+            arguments: [DeclKindToString(specificDecl), DeclKindToString(commonDecl)])
+        builder.Emit()
+        return false
+    }
+    if (let Some(commonEnum) <- (commonDecl as EnumDecl)) {
+        if (let Some(specificEnum) <- (specificDecl as EnumDecl)) {
+            if (commonEnum.hasEllipsis) {
+                specificDecl.EnableAttr(Attribute.COMMON_NON_EXHAUSTIVE)
+            } else if (specificEnum.hasEllipsis) {
+                let builder = checker.diag.DiagnoseRefactor(
+                    BasicDiagKindRefactor.common_non_exaustive_platfrom_exaustive_mismatch,
+                    NodeRange(specificDecl),
+                    arguments: [DeclKindToString(commonDecl), DeclKindToString(specificDecl)])
+                builder.Emit()
+                return false
+            }
+        }
+    }
+    return true
+}
+
+private func CollectDecl(decl: Decl, commonDecls: ArrayList<Decl>, specificDecls: ArrayList<Decl>): Unit {
+    if (decl.TestAttr(Attribute.COMMON)) {
+        commonDecls.add(decl)
+    } else if (decl.TestAttr(Attribute.SPECIFIC)) {
+        specificDecls.add(decl)
+    }
+}
+
+private func CollectCJMPDecls(pkg: Package, commonDecls: ArrayList<Decl>, specificDecls: ArrayList<Decl>): Unit {
+    let walker = Walker(pkg, visitPre: { node: Node =>
+        if (node.IsDecl() && node.astKind != ASTKind.PRIMARY_CTOR_DECL) {
+            if (let Some(decl) <- (node as Decl)) {
+                CollectDecl(decl, commonDecls, specificDecls)
+            }
+        }
+        if (node.astKind == ASTKind.PACKAGE || node.astKind == ASTKind.FILE ||
+            node.IsNominalDecl() || node.IsNominalDeclBody()) {
+            return VisitAction.WALK_CHILDREN
+        }
+        return VisitAction.SKIP_CHILDREN
+    })
+    let _ = walker.Walk()
+}
+
+private func MustMatchWithPlatform(decl: Decl, compilingCommon: Bool): Bool {
+    if (compilingCommon) {
+        return false
+    }
+    if (let Some(_) <- decl.specificImplementation) {
+        return false
+    }
+    if (decl.TestAttr(Attribute.COMMON_WITH_DEFAULT)) {
+        return false
+    }
+    if (decl.TestAttr(Attribute.ENUM_CONSTRUCTOR)) {
+        if (let Some(outer) <- decl.outerDecl) {
+            if (outer.TestAttr(Attribute.COMMON_WITH_DEFAULT) && (let None <- outer.specificImplementation)) {
+                return false
+            }
+        }
+    }
+    if (let Some(outer) <- decl.outerDecl) {
+        if (outer.astKind == ASTKind.INTERFACE_DECL) {
+            return false
+        }
+    }
+    if (decl.astKind == ASTKind.VAR_DECL && decl.TestAttr(Attribute.INITIALIZED)) {
+        return false
+    }
+    if (let Some(varDecl) <- (decl as VarDecl)) {
+        if (!varDecl.IsStaticOrGlobal()) {
+            if (let Some(outer) <- varDecl.outerDecl) {
+                return outer.astKind == ASTKind.ENUM_DECL
+            }
+            return false
+        }
+    }
+    return true
+}
+
+private func ContainsDecl(decls: ArrayList<Decl>, target: Decl): Bool {
+    for (decl in decls) {
+        if (SameDecl(decl, target)) {
+            return true
+        }
+    }
+    return false
+}
+
+private func SameTyList(left: ArrayList<InterfaceTy>, right: ArrayList<InterfaceTy>, checker: MPTypeCheckerImpl): Bool {
+    if (left.size != right.size) {
+        return false
+    }
+    for (leftTy in left) {
+        var found = false
+        for (rightTy in right) {
+            if (checker.typeManager.IsTyEqual(leftTy, rightTy)) {
+                found = true
+                break
+            }
+        }
+        if (!found) {
+            return false
+        }
+    }
+    return true
+}
+
+private class DirectExtensionPrivateFunctions {
+    public var extendedTypeName: String
+    public let rawNames: ArrayList<String> = ArrayList<String>()
+
+    public init(extendedTypeName: String) {
+        this.extendedTypeName = extendedTypeName
+    }
+}
+
+private func FindPrivateFunctionBucket(
+    buckets: ArrayList<DirectExtensionPrivateFunctions>, extendedTypeName: String): DirectExtensionPrivateFunctions {
+    for (bucket in buckets) {
+        if (bucket.extendedTypeName == extendedTypeName) {
+            return bucket
+        }
+    }
+    let created = DirectExtensionPrivateFunctions(extendedTypeName)
+    buckets.add(created)
+    return created
+}
+
+private func HasRawName(names: ArrayList<String>, name: String): Bool {
+    for (value in names) {
+        if (value == name) {
+            return true
+        }
+    }
+    return false
+}
+
 extend MPTypeCheckerImpl {
+    public func PreCheck4CJMP(pkg: Package): Unit {
+        if (!compileCommon) {
+            return
+        }
+        let walker = Walker(pkg, visitPre: { node: Node =>
+            if (let Some(classDecl) <- (node as ClassDecl)) {
+                PreCheckCJMPClass(classDecl)
+                return VisitAction.SKIP_CHILDREN
+            }
+            if (node.IsDecl()) {
+                return VisitAction.SKIP_CHILDREN
+            }
+            return VisitAction.WALK_CHILDREN
+        })
+        let _ = walker.Walk()
+    }
+
+    public func PreCheckCJMPClass(cls: ClassDecl): Unit {
+        if (!(cls.TestAttr(Attribute.COMMON) && cls.TestAnyAttr(Attribute.OPEN, Attribute.ABSTRACT))) {
+            return
+        }
+        var hasInit = false
+        for (member in cls.GetMemberDeclPtrs()) {
+            if (member.TestAttr(Attribute.CONSTRUCTOR)) {
+                hasInit = true
+                break
+            }
+        }
+        if (!hasInit && HasGeneralSubClass(cls)) {
+            let builder = diag.DiagnoseRefactor(
+                BasicDiagKindRefactor.sema_common_open_class_no_init,
+                NodeRange(cls),
+                arguments: [cls.identifier.Val()])
+            builder.Emit()
+        }
+    }
+
     public func RemoveCommonCandidatesIfHasSpecific(candidates: ArrayList<FuncDecl>): Unit {
         var idx: Int64 = 0
         while (idx < candidates.size) {
@@ -165,6 +378,130 @@ extend MPTypeCheckerImpl {
         return true
     }
 
+    public func MatchCJMPDeclAttrs(attrs: ArrayList<Attribute>, common: Decl, specific: Decl): Bool {
+        for (attr in attrs) {
+            if (common.TestAttr(attr) == specific.TestAttr(attr)) {
+                continue
+            }
+            if (attr == Attribute.ABSTRACT || attr == Attribute.OPEN) {
+                if (NeedToReportMissingBody(common, specific)) {
+                    continue
+                }
+                if (specific.TestAttr(Attribute.ABSTRACT) && common.TestAttr(Attribute.OPEN) &&
+                    common.IsFuncOrProp()) {
+                    let kindStr = if (common.astKind == ASTKind.FUNC_DECL) { "function" } else { "property" }
+                    let builder = diag.DiagnoseRefactor(
+                        BasicDiagKindRefactor.sema_open_abstract_specific_can_not_replace_open_common,
+                        NodeRange(specific),
+                        arguments: [kindStr, kindStr])
+                    builder.Emit()
+                }
+                let funcOrProp = common.astKind == ASTKind.FUNC_DECL || common.astKind == ASTKind.PROP_DECL
+                if (funcOrProp && common.TestAttr(Attribute.ABSTRACT) && specific.TestAttr(Attribute.OPEN)) {
+                    continue
+                }
+                if (common.TestAttr(Attribute.ABSTRACT) &&
+                    common.TestAttr(Attribute.STATIC) && specific.TestAttr(Attribute.STATIC)) {
+                    continue
+                }
+            }
+            if (common.astKind == ASTKind.PROP_DECL && attr == Attribute.MUT) {
+                let kind = if (common.TestAttr(attr)) {
+                    BasicDiagKindRefactor.sema_property_have_same_declaration_in_inherit_mut
+                } else {
+                    BasicDiagKindRefactor.sema_property_have_same_declaration_in_inherit_immut
+                }
+                let target = if (common.TestAttr(attr)) { specific } else { common }
+                let builder = diag.DiagnoseRefactor(kind, NodeRange(target), arguments: [target.identifier.Val()])
+                builder.Emit()
+            } else if (common.astKind == ASTKind.CLASS_DECL &&
+                (attr == Attribute.SEALED || attr == Attribute.OPEN) &&
+                specific.TestAttr(Attribute.SEALED) && common.TestAttr(Attribute.ABSTRACT)) {
+                continue
+            } else {
+                let builder = diag.DiagnoseRefactor(
+                    BasicDiagKindRefactor.sema_specific_has_different_modifier,
+                    NodeRange(specific),
+                    arguments: [DeclKindToString(specific)])
+                builder.Emit()
+            }
+            return false
+        }
+        return true
+    }
+
+    public func CheckCommonSpecificGenericMatch(specificDecl: Decl, commonDecl: Decl): Unit {
+        let _ = typeManager.GenerateGenericMappingFromGeneric(commonDecl, specificDecl)
+    }
+
+    public func MatchCommonNominalDeclWithSpecific(commonDecl: InheritableDecl): Bool {
+        if (let None <- commonDecl.specificImplementation) {
+            return true
+        }
+        let specificDecl = commonDecl.specificImplementation.getOrThrow()
+        if (!MatchNominativeDecl(this, commonDecl, specificDecl)) {
+            return false
+        }
+        let matchedAttr = ArrayList<Attribute>()
+        matchedAttr.add(Attribute.ABSTRACT)
+        matchedAttr.add(Attribute.PUBLIC)
+        matchedAttr.add(Attribute.OPEN)
+        matchedAttr.add(Attribute.PROTECTED)
+        matchedAttr.add(Attribute.C)
+        matchedAttr.add(Attribute.SEALED)
+        if (!MatchCJMPDeclAttrs(matchedAttr, commonDecl, specificDecl)) {
+            return false
+        }
+        let specificInheritable = specificDecl as InheritableDecl
+        if (let Some(platformDecl) <- specificInheritable) {
+            let commonSupInterfaces = ArrayList<InterfaceTy>()
+            let genericTyMap = TypeSubst()
+            MapCJMPGenericTypeArgs(genericTyMap, commonDecl, specificDecl)
+            for (superInterface in commonDecl.GetSuperInterfaceTys()) {
+                if (genericTyMap.IsEmpty()) {
+                    commonSupInterfaces.add(superInterface)
+                } else if (let Some(updated) <- (typeManager.GetInstantiatedTy(superInterface, genericTyMap) as InterfaceTy)) {
+                    commonSupInterfaces.add(updated)
+                }
+            }
+            if (!SameTyList(commonSupInterfaces, platformDecl.GetSuperInterfaceTys(), this)) {
+                DiagNotMatchedSuperType(this, specificDecl)
+                return false
+            }
+            if (let Some(commonClass) <- (commonDecl as ClassDecl)) {
+                if (let Some(specificClass) <- (specificDecl as ClassDecl)) {
+                    let commonSuper = commonClass.GetSuperClassDecl()
+                    let specificSuper = specificClass.GetSuperClassDecl()
+                    var bothHaveSuper = false
+                    var neitherHasSuper = false
+                    if ((let Some(_) <- commonSuper) && (let Some(_) <- specificSuper)) {
+                        bothHaveSuper = true
+                    }
+                    if ((let None <- commonSuper) && (let None <- specificSuper)) {
+                        neitherHasSuper = true
+                    }
+                    if (bothHaveSuper) {
+                        let commonSuperDecl = commonSuper.getOrThrow()
+                        let specificSuperDecl = specificSuper.getOrThrow()
+                        if (let Some(commonSuperTy) <- commonSuperDecl.GetTy()) {
+                            if (let Some(specificSuperTy) <- specificSuperDecl.GetTy()) {
+                                if (!typeManager.IsTyEqual(commonSuperTy, specificSuperTy)) {
+                                    DiagNotMatchedSuperType(this, specificDecl)
+                                    return false
+                                }
+                            }
+                        }
+                    } else if (!neitherHasSuper) {
+                        DiagNotMatchedSuperType(this, specificDecl)
+                        return false
+                    }
+                }
+            }
+        }
+        CheckCommonSpecificGenericMatch(specificDecl, commonDecl)
+        return true
+    }
+
     public func MatchCJMPFunction(specificFunc: FuncDecl, commonFunc: FuncDecl): Bool {
         if (!IsCJMPDeclMatchable(specificFunc, commonFunc)) {
             return false
@@ -181,6 +518,44 @@ extend MPTypeCheckerImpl {
             return false
         }
         return TrySetSpecificImpl(specificFunc, commonFunc, "function")
+    }
+
+    public func MatchEnumFuncTypes(specific: FuncDecl, common: FuncDecl): Bool {
+        if (typeManager.IsFuncDeclEqualType(specific, common)) {
+            return true
+        }
+        if (let Some(commonOuter) <- common.outerDecl) {
+            if (let Some(specificOuter) <- specific.outerDecl) {
+                let genericTyMap = TypeSubst()
+                MapCJMPGenericTypeArgs(genericTyMap, commonOuter, specificOuter)
+                if (genericTyMap.IsEmpty()) {
+                    return false
+                }
+                if (let Some(commonTy) <- common.GetTy()) {
+                    if (let Some(specificTy) <- specific.GetTy()) {
+                        return typeManager.IsTyEqual(typeManager.GetInstantiatedTy(commonTy, genericTyMap), specificTy)
+                    }
+                }
+            }
+        }
+        return false
+    }
+
+    public func MatchCJMPEnumConstructor(specificDecl: Decl, commonDecl: Decl): Bool {
+        if (!IsCJMPDeclMatchable(specificDecl, commonDecl)) {
+            return false
+        }
+        if (specificDecl.astKind == ASTKind.FUNC_DECL) {
+            if (let Some(specificFunc) <- (specificDecl as FuncDecl)) {
+                if (let Some(commonFunc) <- (commonDecl as FuncDecl)) {
+                    if (!MatchEnumFuncTypes(specificFunc, commonFunc)) {
+                        return false
+                    }
+                }
+            }
+        }
+        let enumName = if (let Some(outer) <- specificDecl.outerDecl) { outer.identifier.GetRawText() } else { "" }
+        return TrySetSpecificImpl(specificDecl, commonDecl, "enum '" + enumName + "' constructor")
     }
 
     public func MatchCJMPProp(specificProp: PropDecl, commonProp: PropDecl): Bool {
@@ -258,6 +633,211 @@ extend MPTypeCheckerImpl {
             commonVar.doNotExport = true
         }
         return true
+    }
+
+    public func TryMatchVarWithPatternWithVarDecls(specificDecl: VarWithPatternDecl,
+        commonDecls: ArrayList<Decl>): Bool {
+        if (let Some(pattern) <- specificDecl.irrefutablePattern) {
+            if (let Some(tuplePattern) <- (pattern as TuplePattern)) {
+                var matchedAll = true
+                for (child in tuplePattern.patterns) {
+                    if (let Some(varPattern) <- (child as VarPattern)) {
+                        if (let Some(varDecl) <- varPattern.varDecl) {
+                            if (!MatchSpecificDeclWithCommonDecls(varDecl, commonDecls)) {
+                                matchedAll = false
+                            }
+                        } else {
+                            matchedAll = false
+                        }
+                    } else {
+                        matchedAll = false
+                    }
+                }
+                return matchedAll
+            }
+        }
+        return false
+    }
+
+    public func MatchSpecificDeclWithCommonDecls(specificDecl: Decl, commonDecls: ArrayList<Decl>): Bool {
+        var matched = false
+        let isEnumCtor = specificDecl.TestAttr(Attribute.ENUM_CONSTRUCTOR)
+        let kind = specificDecl.astKind
+        for (commonDecl in commonDecls) {
+            if (matched && !severalParents) {
+                break
+            }
+            if (commonDecl.astKind != kind) {
+                continue
+            }
+            if (isEnumCtor && commonDecl.TestAttr(Attribute.ENUM_CONSTRUCTOR)) {
+                matched = MatchCJMPEnumConstructor(specificDecl, commonDecl) || matched
+            } else if (kind == ASTKind.FUNC_DECL) {
+                if (let Some(specificFunc) <- (specificDecl as FuncDecl)) {
+                    if (let Some(commonFunc) <- (commonDecl as FuncDecl)) {
+                        matched = MatchCJMPFunction(specificFunc, commonFunc) || matched
+                    }
+                }
+            } else if (kind == ASTKind.PROP_DECL) {
+                if (let Some(specificProp) <- (specificDecl as PropDecl)) {
+                    if (let Some(commonProp) <- (commonDecl as PropDecl)) {
+                        matched = MatchCJMPProp(specificProp, commonProp) || matched
+                    }
+                }
+            } else if (kind == ASTKind.VAR_DECL) {
+                if (let Some(specificVar) <- (specificDecl as VarDecl)) {
+                    if (let Some(commonVar) <- (commonDecl as VarDecl)) {
+                        matched = MatchCJMPVar(specificVar, commonVar) || matched
+                    }
+                }
+            }
+        }
+        if (kind == ASTKind.VAR_WITH_PATTERN_DECL) {
+            if (let Some(varWithPattern) <- (specificDecl as VarWithPatternDecl)) {
+                matched = TryMatchVarWithPatternWithVarDecls(varWithPattern, commonDecls)
+            }
+        }
+        if (!matched) {
+            if (let Some(outer) <- specificDecl.outerDecl) {
+                if (outer.TestAttr(Attribute.COMMON_NON_EXHAUSTIVE)) {
+                    return false
+                }
+            }
+            DiagNotMatchedCommonDecl(this, specificDecl)
+        }
+        return matched
+    }
+
+    public func CheckCommonExtensions(commonDecls: ArrayList<Decl>): Unit {
+        let buckets = ArrayList<DirectExtensionPrivateFunctions>()
+        for (decl in commonDecls) {
+            if (let Some(extendDecl) <- (decl as ExtendDecl)) {
+                if (!extendDecl.GetSuperInterfaceTys().isEmpty()) {
+                    continue
+                }
+                if (let Some(extendedType) <- extendDecl.extendedType) {
+                    let bucket = FindPrivateFunctionBucket(buckets, extendedType.ToString())
+                    for (memberDecl in extendDecl.GetMemberDecls()) {
+                        if (!memberDecl.IsFuncOrProp() || !memberDecl.TestAttr(Attribute.PRIVATE)) {
+                            continue
+                        }
+                        let rawName = memberDecl.rawMangleName
+                        if (HasRawName(bucket.rawNames, rawName)) {
+                            let kind = if (memberDecl.IsFunc()) { "function" } else { "property" }
+                            let builder = diag.DiagnoseRefactor(
+                                BasicDiagKindRefactor.sema_common_direct_extension_has_duplicate_private_members,
+                                NodeRange(memberDecl),
+                                arguments: [extendedType.ToString(), kind, memberDecl.identifier.GetRawText()])
+                            builder.Emit()
+                        } else if (memberDecl.TestAttr(Attribute.COMMON)) {
+                            let kind = if (memberDecl.IsFunc()) { "function" } else { "property" }
+                            let builder = diag.DiagnoseRefactor(
+                                BasicDiagKindRefactor.sema_common_direct_extension_has_common_private_members,
+                                NodeRange(memberDecl),
+                                arguments: [kind, memberDecl.identifier.GetRawText()])
+                            builder.Emit()
+                        } else {
+                            bucket.rawNames.add(rawName)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    public func CheckAbstractClassMembers(specificDecl: InheritableDecl): Unit {
+        if (!specificDecl.TestAttr(Attribute.SPECIFIC) || !specificDecl.TestAttr(Attribute.ABSTRACT) ||
+            specificDecl.astKind != ASTKind.CLASS_DECL) {
+            return
+        }
+        if (let Some(classDecl) <- (specificDecl as ClassDecl)) {
+            for (memberDecl in classDecl.GetMemberDeclPtrs()) {
+                if (memberDecl.TestAttr(Attribute.ABSTRACT) && !memberDecl.TestAttr(Attribute.SPECIFIC) &&
+                    !memberDecl.TestAttr(Attribute.FROM_COMMON_PART) &&
+                    (memberDecl.astKind == ASTKind.FUNC_DECL || memberDecl.astKind == ASTKind.PROP_DECL)) {
+                    let memberKind = if (memberDecl.astKind == ASTKind.FUNC_DECL) { "function" } else { "property" }
+                    let builder = diag.DiagnoseRefactor(
+                        BasicDiagKindRefactor.sema_cjmp_non_specific_abstract_member_in_specific_class,
+                        NodeRange(memberDecl),
+                        arguments: [specificDecl.identifier.Val(), memberKind])
+                    builder.Emit()
+                }
+            }
+        }
+    }
+
+    public func MatchCJMPDecls(commonDecls: ArrayList<Decl>, specificDecls: ArrayList<Decl>): Unit {
+        for (specificDecl in specificDecls) {
+            if (specificDecl.TestAttr(Attribute.IS_BROKEN) || specificDecl.IsNominalDecl()) {
+                continue
+            }
+            MatchSpecificDeclWithCommonDecls(specificDecl, commonDecls)
+        }
+        let matchedIds = ArrayList<Decl>()
+        for (commonDecl in commonDecls) {
+            if (let Some(commonInheritable) <- (commonDecl as InheritableDecl)) {
+                if (commonDecl.IsNominalDecl() && MatchCommonNominalDeclWithSpecific(commonInheritable)) {
+                    if (let Some(specific) <- commonDecl.specificImplementation) {
+                        matchedIds.add(specific)
+                    }
+                }
+            }
+            if (!MustMatchWithPlatform(commonDecl, compileCommon)) {
+                continue
+            }
+            if (commonDecl.astKind == ASTKind.VAR_DECL && !commonDecl.TestAttr(Attribute.ENUM_CONSTRUCTOR)) {
+                continue
+            }
+            DiagNotMatchedSpecificDecl(this, commonDecl)
+        }
+        for (specificDecl in specificDecls) {
+            if (specificDecl.IsNominalDecl() && !ContainsDecl(matchedIds, specificDecl)) {
+                DiagNotMatchedCommonDecl(this, specificDecl)
+            }
+            if (let Some(inheritable) <- (specificDecl as InheritableDecl)) {
+                CheckAbstractClassMembers(inheritable)
+            }
+        }
+        for (commonDecl in commonDecls) {
+            if (commonDecl.IsNominalDecl()) {
+                continue
+            }
+            if (let Some(specificDecl) <- commonDecl.specificImplementation) {
+                let matchedAttrs = ArrayList<Attribute>()
+                matchedAttrs.add(Attribute.STATIC)
+                matchedAttrs.add(Attribute.MUT)
+                matchedAttrs.add(Attribute.PRIVATE)
+                matchedAttrs.add(Attribute.PUBLIC)
+                matchedAttrs.add(Attribute.PROTECTED)
+                matchedAttrs.add(Attribute.FOREIGN)
+                matchedAttrs.add(Attribute.UNSAFE)
+                matchedAttrs.add(Attribute.OPEN)
+                matchedAttrs.add(Attribute.ABSTRACT)
+                let _ = MatchCJMPDeclAttrs(matchedAttrs, commonDecl, specificDecl)
+            }
+        }
+    }
+
+    public func MatchSpecificWithCommon(pkg: Package): Unit {
+        let commonDecls = ArrayList<Decl>()
+        let specificDecls = ArrayList<Decl>()
+        CollectCJMPDecls(pkg, commonDecls, specificDecls)
+        if (compileCommon) {
+            CheckCommonExtensions(commonDecls)
+        }
+        if (compilePlatform) {
+            MatchCJMPDecls(commonDecls, specificDecls)
+        }
+        for (commonDecl in commonDecls) {
+            if (let Some(specificDecl) <- commonDecl.specificImplementation) {
+                PropagateCJMPDeclAnnotations(commonDecl, specificDecl)
+                if (let Some(commonFunc) <- (commonDecl as FuncDecl)) {
+                    if (let Some(specificFunc) <- (specificDecl as FuncDecl)) {
+                        PropagateDefaultArguments(commonFunc, specificFunc)
+                    }
+                }
+            }
+        }
     }
 
     public func CheckMatchedFunctionReturnTypes(specificFunc: FuncDecl, commonFunc: FuncDecl): Unit {

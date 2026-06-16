@@ -45,6 +45,88 @@ public func ShouldHandleMockAnnotatedLambdaValue(target: Decl): Bool {
     return isInExtend || isInInterfaceWithDefault || target.IsStaticOrGlobal()
 }
 
+public func ArePackagesMockSupportConsistent(currentPackage: Package, importedPackage: Package): Bool {
+    let isImportedSupportMock = importedPackage.TestAttr(Attribute.MOCK_SUPPORTED)
+    if (!isImportedSupportMock) {
+        return true
+    }
+    return currentPackage.TestAttr(Attribute.MOCK_SUPPORTED) && isImportedSupportMock
+}
+
+public func ShouldBeMarkedAsContainingMockCreationCall(callExpr: CallExpr, enclosingFunc: FuncDecl): Bool {
+    if (let None <- callExpr.resolvedFunction) {
+        return false
+    }
+    let resolvedFunc = callExpr.resolvedFunction.getOrThrow()
+    if (let None <- resolvedFunc.funcBody) {
+        return false
+    }
+    let resolvedBody = resolvedFunc.funcBody.getOrThrow()
+    if (let None <- resolvedBody.generic) {
+        return false
+    }
+    if (let None <- enclosingFunc.funcBody) {
+        return false
+    }
+    let enclosingBody = enclosingFunc.funcBody.getOrThrow()
+    if (let None <- enclosingBody.generic) {
+        return false
+    }
+    if (!MockManager.IsMockCall(callExpr) && !resolvedFunc.TestAttr(Attribute.CONTAINS_MOCK_CREATION_CALL)) {
+        return false
+    }
+    if (let Some(baseExpr) <- callExpr.baseFunc) {
+        if (let Some(nameRefExpr) <- (baseExpr as NameReferenceExpr)) {
+            let enclosingGeneric = enclosingBody.generic.getOrThrow()
+            return IsAnyTypeParamUsedInTypeArgs(enclosingGeneric.typeParameters, nameRefExpr.typeArguments)
+        }
+    }
+    return false
+}
+
+private func NodeBelongsToPackage(node: Node, pkg: Package): Bool {
+    if (let Some(fileNode) <- node.curFile) {
+        if (let Some(curPkg) <- fileNode.curPackage) {
+            return curPkg.fullPackageName == pkg.fullPackageName
+        }
+        return false
+    }
+    return true
+}
+
+private class MockUsageFoundBox {
+    public var value: Bool = false
+    public init() {}
+}
+
+public func IsThereMockUsageInPackage(pkg: Package): Bool {
+    let mockUsageFound = MockUsageFoundBox()
+    let walker = Walker(pkg, visitPre: { node: Node =>
+        if (let Some(callExpr) <- (node as CallExpr)) {
+            if (NodeBelongsToPackage(callExpr, pkg)) {
+                let markedResolved = if (let Some(resolvedFunc) <- callExpr.resolvedFunction) {
+                    resolvedFunc.TestAttr(Attribute.CONTAINS_MOCK_CREATION_CALL)
+                } else {
+                    false
+                }
+                if (MockManager.IsMockCall(callExpr) || markedResolved) {
+                    mockUsageFound.value = true
+                    return VisitAction.STOP_NOW
+                }
+            }
+        }
+        if (let Some(lambdaExpr) <- (node as LambdaExpr)) {
+            if (NodeBelongsToPackage(lambdaExpr, pkg) && lambdaExpr.TestAttr(Attribute.MOCK_SUPPORTED)) {
+                mockUsageFound.value = true
+                return VisitAction.STOP_NOW
+            }
+        }
+        return VisitAction.WALK_CHILDREN
+    })
+    let _ = walker.Walk()
+    return mockUsageFound.value
+}
+
 public class TestManager {
     public init() {}
 

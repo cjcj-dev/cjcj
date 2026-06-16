@@ -58,6 +58,29 @@ private func HasDefaults(interfaceDecl: InterfaceDecl): Bool {
     return false
 }
 
+private func FindInterfacesWithDefaults(decl: InheritableDecl): ArrayList<InterfaceDecl> {
+    let result = ArrayList<InterfaceDecl>()
+    for (inherited in decl.inheritedTypes) {
+        if (let Some(typeDecl) <- Ty.GetDeclPtrOfTy(inherited.GetTy())) {
+            if (let Some(interfaceDecl) <- (typeDecl as InterfaceDecl)) {
+                if (HasDefaults(interfaceDecl)) {
+                    result.add(interfaceDecl)
+                }
+            }
+        }
+    }
+    return result
+}
+
+private func GetExtendedClassDecl(extendDecl: ExtendDecl): Option<ClassLikeDecl> {
+    if (let Some(extendedType) <- extendDecl.extendedType) {
+        if (let Some(typeDecl) <- Ty.GetDeclPtrOfTy(extendedType.GetTy())) {
+            return typeDecl as ClassLikeDecl
+        }
+    }
+    return None
+}
+
 public class MockSupportManager {
     public init() {}
 
@@ -145,6 +168,33 @@ public class MockSupportManager {
                 decls.interfacesWithDefaults.add(interfaceDecl)
                 decls.classWithInterfaceDefaults.add((interfaceDecl, interfaceDecl, None))
             }
+            return
+        }
+        if (let Some(classDecl) <- (decl as ClassDecl)) {
+            for (interfaceDecl in FindInterfacesWithDefaults(classDecl)) {
+                decls.classWithInterfaceDefaults.add((classDecl, interfaceDecl, None))
+            }
+            return
+        }
+        if (let Some(extendDecl) <- (decl as ExtendDecl)) {
+            if (let Some(classDecl) <- GetExtendedClassDecl(extendDecl)) {
+                for (interfaceDecl in FindInterfacesWithDefaults(extendDecl)) {
+                    decls.classWithInterfaceDefaults.add((classDecl, interfaceDecl, Some(extendDecl)))
+                }
+            }
+            return
+        }
+        if (let Some(funcDecl) <- (decl as FuncDecl)) {
+            if (!decl.IsStaticOrGlobal() && !funcDecl.TestAttr(Attribute.IN_EXTEND)) {
+                return
+            }
+            if (decl.IsConst()) {
+                return
+            }
+            if (decl.TestAnyAttr(Attribute.PRIVATE, Attribute.MAIN_ENTRY)) {
+                return
+            }
+            decls.functions.add(funcDecl)
         }
     }
 }

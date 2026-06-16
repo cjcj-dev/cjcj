@@ -1,5 +1,6 @@
 package cangjie_compiler::sema.FFI
 
+import std.collection.*
 import cangjie_compiler::ast.*
 import cangjie_compiler::ast.AnnotationKind as AstAnnotationKind
 import cangjie_compiler::sema.*
@@ -45,6 +46,86 @@ private func IsTopLevelDecl(decl: Decl): Bool {
         return false
     }
     return decl.scopeLevel == 0u32
+}
+
+private func HasModifier(decl: Decl, kind: TokenKind): Bool {
+    for (modifier in decl.modifiers) {
+        if (modifier.modifier == kind) {
+            return true
+        }
+    }
+    return false
+}
+
+private func HasCAnnotation(decl: Decl): Bool {
+    for (annotation in decl.annotations) {
+        if (annotation.kind == AstAnnotationKind.C) {
+            return true
+        }
+    }
+    return false
+}
+
+private func IsNonStaticMember(target: Decl): Bool {
+    return !target.TestAttr(Attribute.STATIC) &&
+        (target.TestAnyAttr(Attribute.IN_CLASSLIKE, Attribute.IN_STRUCT, Attribute.IN_ENUM) ||
+        target.TestAttr(Attribute.IN_EXTEND))
+}
+
+private func IsInoutZeroSizedArg(arg: FuncArg): Bool {
+    if (!arg.withInout) {
+        return false
+    }
+    if (let Some(expr) <- arg.expr) {
+        if (expr.astKind != ASTKind.REF_EXPR && expr.astKind != ASTKind.MEMBER_ACCESS) {
+            return false
+        }
+        if (let Some(ty) <- expr.GetTy()) {
+            return Ty.IsMetCType(ty) && IsZeroSizedTy(ty)
+        }
+    }
+    return false
+}
+
+private func IsStructZeroSized(structTy: Ty, visited: ArrayList<Ty>): Bool {
+    for (ty in visited) {
+        if (SameTy(ty, structTy)) {
+            return false
+        }
+    }
+    if (let Some(decl) <- Ty.GetDeclPtrOfTy(Some(structTy))) {
+        if (let Some(structDecl) <- (decl as StructDecl)) {
+            visited.add(structTy)
+            for (member in structDecl.GetMemberDecls()) {
+                if (member.astKind != ASTKind.VAR_DECL || member.TestAttr(Attribute.STATIC)) {
+                    continue
+                }
+                if (let Some(memberTy) <- member.GetTy()) {
+                    if (!IsZeroSizedTyImpl(memberTy, visited)) {
+                        return false
+                    }
+                } else {
+                    return false
+                }
+            }
+            return true
+        }
+    }
+    return false
+}
+
+private func IsZeroSizedTyImpl(ty: Ty, visited: ArrayList<Ty>): Bool {
+    if (ty.IsUnit() || ty.IsNothing()) {
+        return true
+    }
+    if (let Some(_) <- (ty as StructTy)) {
+        return IsStructZeroSized(ty, visited)
+    }
+    return false
+}
+
+public func IsZeroSizedTy(ty: Ty): Bool {
+    return IsZeroSizedTyImpl(ty, ArrayList<Ty>())
 }
 
 public func CheckAnnoC(decl: Decl, annotation: Annotation, diag: BasicDiagnosticEngine): Unit {
@@ -143,6 +224,23 @@ public func CheckAnnoFrozen(decl: Decl, annotation: Annotation, diag: BasicDiagn
 }
 
 public func PreCheckAnnoForCFFI(decl: Decl, diag: BasicDiagnosticEngine): Unit {
+    if (HasModifier(decl, TokenKind.FOREIGN) && !HasCAnnotation(decl)) {
+        if (decl.astKind == ASTKind.CLASS_DECL) {
+            EmitLegacy(
+                diag,
+                BasicDiagKind.sema_unexpected_wrapper,
+                decl,
+                args: [BasicDiagArgument("class declaration")])
+        } else if (decl.astKind == ASTKind.INTERFACE_DECL) {
+            EmitLegacy(
+                diag,
+                BasicDiagKind.sema_unexpected_wrapper,
+                decl,
+                args: [BasicDiagArgument("interface declaration")])
+        } else if (decl.astKind == ASTKind.VAR_DECL) {
+            EmitLegacy(diag, BasicDiagKind.sema_native_var_error, decl)
+        }
+    }
     for (annotation in decl.annotations) {
         if (annotation.kind == AstAnnotationKind.C) {
             decl.EnableAttr(Attribute.C)
@@ -221,6 +319,107 @@ public func CheckCFuncSignature(body: FuncBody, diag: BasicDiagnosticEngine): Un
             }
         }
     }
+}
+
+public func CheckInvalidRefInCFunc(refExpr: RefExpr, target: Decl, diag: BasicDiagnosticEngine): Unit {
+    if (target.TestAnyAttr(Attribute.CONSTRUCTOR, Attribute.ENUM_CONSTRUCTOR)) {
+        return
+    }
+    if (IsNonStaticMember(target)) {
+        EmitLegacy(
+            diag,
+            BasicDiagKind.sema_cfunc_cannot_capture_this,
+            refExpr,
+            args: [BasicDiagArgument("this")])
+    }
+}
+
+public func CheckInvalidThisOrSuperInCFunc(refExpr: RefExpr, diag: BasicDiagnosticEngine): Unit {
+    if (refExpr.isThis) {
+        EmitLegacy(
+            diag,
+            BasicDiagKind.sema_cfunc_cannot_capture_this,
+            refExpr,
+            args: [BasicDiagArgument("this")])
+    } else if (refExpr.isSuper) {
+        EmitLegacy(
+            diag,
+            BasicDiagKind.sema_cfunc_cannot_capture_this,
+            refExpr,
+            args: [BasicDiagArgument("super")])
+    }
+}
+
+public func CheckCTypeMember(decl: Decl, diag: BasicDiagnosticEngine): Unit {
+    if (decl.astKind != ASTKind.VAR_DECL) {
+        return
+    }
+    if (let None <- decl.outerDecl) {
+        return
+    }
+    if (let Some(varDecl) <- (decl as VarDecl)) {
+        if (let Some(outer) <- decl.outerDecl) {
+            if (!Ty.IsTyCorrect(outer.GetTy())) {
+                return
+            }
+            if (let Some(outerTy) <- outer.GetTy()) {
+                if (!Ty.IsCStructType(outerTy)) {
+                    return
+                }
+            }
+            if (let Some(varTy) <- varDecl.GetTy()) {
+                if (varTy.IsUnit()) {
+                    EmitLegacy(
+                        diag,
+                        BasicDiagKind.sema_cstruct_cannot_have_unit_fields,
+                        varDecl,
+                        args: [BasicDiagArgument(varDecl.identifier.Val())])
+                    return
+                }
+                if (Ty.IsMetCType(varTy)) {
+                    return
+                }
+            }
+            EmitLegacy(
+                diag,
+                BasicDiagKind.sema_illegal_member_of_cstruct,
+                varDecl,
+                args: [BasicDiagArgument(varDecl.identifier.Val()), BasicDiagArgument(outer.identifier.Val())])
+        }
+    }
+}
+
+public func CheckUnsafeInvoke(call: CallExpr, diag: BasicDiagnosticEngine): Unit {
+    if (let Some(resolved) <- call.resolvedFunction) {
+        if (!Ty.IsTyCorrect(resolved.GetTy())) {
+            return
+        }
+        var isUnsafe = resolved.TestAnyAttr(Attribute.UNSAFE, Attribute.FOREIGN)
+        if (let Some(funcTy) <- (resolved.GetTy().getOrThrow() as FuncTy)) {
+            isUnsafe = isUnsafe || funcTy.isC
+        }
+        if (isUnsafe && !call.TestAttr(Attribute.UNSAFE)) {
+            EmitLegacy(diag, BasicDiagKind.sema_unsafe_function_invoke_failed, call)
+        }
+    }
+}
+
+public func CheckLegalityOfUnsafeAndInout(root: Node, diag: BasicDiagnosticEngine): Unit {
+    let walker = Walker(root, visitPre: { node: Node =>
+        if (let Some(call) <- (node as CallExpr)) {
+            CheckUnsafeInvoke(call, diag)
+        } else if (let Some(arg) <- (node as FuncArg)) {
+            if (IsInoutZeroSizedArg(arg)) {
+                EmitRefactor(
+                    diag,
+                    BasicDiagKindRefactor.sema_inout_modify_cstring_or_zerosized,
+                    arg,
+                    args: ["zero-sized type"])
+            }
+        }
+        return VisitAction.WALK_CHILDREN
+    })
+    let _ = walker.Walk()
 }
 
 public func SelfhostPortStatus_FFI_CFFICheck(): Bool {
