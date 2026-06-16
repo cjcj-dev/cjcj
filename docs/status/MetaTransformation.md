@@ -17,9 +17,9 @@ Implemented:
   C++ builder behavior.
 - De-isolated the CHIR boundary: `MetaTransformation` now imports the real sibling `chir` package and
   uses `CHIRBuilder`, `Function`, and `Package` directly instead of local compatibility interfaces.
-- Matched the C++ enum-ordering surface more closely: `MetaTransformKind` now exposes its ordinal helper
-  and relational operators, formally implements `Comparable`, and `IsForCHIR` uses the same range
-  comparison as the C++ implementation.
+- Matched the C++ enum-ordering surface more closely: `MetaTransformKind` has relational operators,
+  formally implements `Comparable`, and `IsForCHIR` uses the same range comparison as the C++
+  implementation. The ordinal helper is private implementation detail rather than public API.
 - Tightened construction to match the C++ ownership model: kind-setting constructors are protected, and
   the CHIR meta-kind marker is a value marker rather than a heap class.
 - Matched the C++ constructor sequence more closely: `MetaTransformConcept` now only default-constructs
@@ -30,13 +30,17 @@ Implemented:
   a transform factory in a plugin-info registration callback that appends the produced transform to the
   CHIR plugin manager. The default overload reports the real `basic.CANGJIE_VERSION`, matching the C++
   macro's version source, while the explicit-version overload remains useful for tests.
+- Added typed CHIR transform factory aliases and function/package-specific plugin-info helpers. These
+  preserve the C++ macro's type-specific construction path more closely for Cangjie plugins that derive
+  from `CHIRFunctionMetaTransform` or `CHIRPackageMetaTransform`.
 
 Known fidelity caveats:
 
 - The C++ `MetaTransform<DeclT>` default constructor uses `if constexpr` to infer function/package
   transform kind from the template argument. Cangjie does not currently have an equivalent specialization
-  mechanism in this port, so direct subclasses of `MetaTransform<DeclT>` must pass a kind explicitly or
-  use the provided `CHIRFunctionMetaTransform`/`CHIRPackageMetaTransform` bases.
+  mechanism in this port, so direct subclasses of `MetaTransform<DeclT>` must pass a kind explicitly.
+  Plugins should use `CHIRFunctionMetaTransform`/`CHIRPackageMetaTransform` and the typed plugin-info
+  helpers when they need the C++ macro's CHIR function/package behavior.
 - Cangjie has no direct preprocessor macro equivalent for `CHIR_PLUGIN`; `MakeCHIRPluginInfo` preserves
   the registration behavior but not the C++ macro spelling.
 

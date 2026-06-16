@@ -6,6 +6,9 @@ import cangjie_compiler::chir.Function as CHIRFunction
 import cangjie_compiler::chir.Package as CHIRPackage
 
 public type MetaTransformRegisterCallback = (MetaTransformPluginBuilder) -> Unit
+public type CHIRMetaTransformFactory = (CHIRBuilder) -> MetaTransformConcept
+public type CHIRFunctionMetaTransformFactory = (CHIRBuilder) -> CHIRFunctionMetaTransform
+public type CHIRPackageMetaTransformFactory = (CHIRBuilder) -> CHIRPackageMetaTransform
 
 public enum MetaTransformKind {
     | UNKNOWN
@@ -14,7 +17,7 @@ public enum MetaTransformKind {
     | FOR_CHIR
 }
 
-public func MetaTransformKindIndex(kind: MetaTransformKind): Int64 {
+private func MetaTransformKindIndex(kind: MetaTransformKind): Int64 {
     return match (kind) {
         case MetaTransformKind.UNKNOWN => 0
         case MetaTransformKind.FOR_CHIR_FUNC => 1
@@ -122,7 +125,7 @@ public struct MetaTransformPluginInfo {
 
 public func MakeCHIRPluginInfo(
     cjcVersion: String,
-    factory: (CHIRBuilder) -> MetaTransformConcept
+    factory: CHIRMetaTransformFactory
 ): MetaTransformPluginInfo {
     return MetaTransformPluginInfo(cjcVersion, { builder: MetaTransformPluginBuilder =>
         builder.RegisterCHIRPluginCallback({ manager: CHIRPluginManager, chirBuilder: CHIRBuilder =>
@@ -131,6 +134,28 @@ public func MakeCHIRPluginInfo(
     })
 }
 
-public func MakeCHIRPluginInfo(factory: (CHIRBuilder) -> MetaTransformConcept): MetaTransformPluginInfo {
+public func MakeCHIRPluginInfo(factory: CHIRMetaTransformFactory): MetaTransformPluginInfo {
     return MakeCHIRPluginInfo(CANGJIE_VERSION, factory)
+}
+
+public func MakeCHIRFunctionPluginInfo(
+    cjcVersion: String,
+    factory: CHIRFunctionMetaTransformFactory
+): MetaTransformPluginInfo {
+    return MakeCHIRPluginInfo(cjcVersion, { builder: CHIRBuilder => factory(builder) })
+}
+
+public func MakeCHIRFunctionPluginInfo(factory: CHIRFunctionMetaTransformFactory): MetaTransformPluginInfo {
+    return MakeCHIRFunctionPluginInfo(CANGJIE_VERSION, factory)
+}
+
+public func MakeCHIRPackagePluginInfo(
+    cjcVersion: String,
+    factory: CHIRPackageMetaTransformFactory
+): MetaTransformPluginInfo {
+    return MakeCHIRPluginInfo(cjcVersion, { builder: CHIRBuilder => factory(builder) })
+}
+
+public func MakeCHIRPackagePluginInfo(factory: CHIRPackageMetaTransformFactory): MetaTransformPluginInfo {
+    return MakeCHIRPackagePluginInfo(CANGJIE_VERSION, factory)
 }
