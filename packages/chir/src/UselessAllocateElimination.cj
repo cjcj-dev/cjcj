@@ -107,8 +107,8 @@ public class UselessAllocateElimination {
         if (kind == ExprKind.STORE && user.GetNumOfOperands() >= 2) {
             return user.GetOperand(1).nodeId == allocated.nodeId
         }
-        if (kind == ExprKind.STORE_ELEMENT_REF && user.GetNumOfOperands() >= 1) {
-            return user.GetOperand(0).nodeId == allocated.nodeId
+        if (kind == ExprKind.STORE_ELEMENT_REF && user.GetNumOfOperands() >= 2) {
+            return user.GetOperand(1).nodeId == allocated.nodeId
         }
         return false
     }

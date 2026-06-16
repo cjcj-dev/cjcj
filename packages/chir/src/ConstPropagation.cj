@@ -17,10 +17,22 @@ public class ConstPropagation {
     }
 
     public func RunOnFunction(fn: Function): Int64 {
-        var changed: Int64 = 0
         if (let Some(body) <- fn.GetBody()) {
-            for (block in body.GetBlocksRef()) {
-                changed += SimplifyBlock(block)
+            return SimplifyBody(body)
+        }
+        return 0
+    }
+
+    private func SimplifyBody(body: BlockGroup): Int64 {
+        var changed: Int64 = 0
+        for (block in body.GetBlocksRef()) {
+            changed += SimplifyBlock(block)
+            for (expr in block.GetExpressions()) {
+                if (let Some(lambdaExpr) <- (expr as Lambda)) {
+                    if (let Some(lambdaBody) <- lambdaExpr.GetBody()) {
+                        changed += SimplifyBody(lambdaBody)
+                    }
+                }
             }
         }
         return changed
@@ -116,7 +128,7 @@ public class ConstPropagation {
 
     private func ReplaceResultWithOperand(expr: Expression, operand: Value): Bool {
         if (let Some(result) <- expr.GetResult()) {
-            result.ReplaceWith(operand)
+            result.ReplaceWith(operand, expr.GetParentBlockGroup())
             expr.RemoveSelfFromBlock()
             return true
         }

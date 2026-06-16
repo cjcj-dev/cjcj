@@ -33,7 +33,21 @@ Remaining fidelity gaps in this transform/optimization scope:
   optimizations are still absent or represented only by smaller compatibility
   surfaces in this package.
 
+Continuation pass:
+
+- `UselessAllocateElimination.cj`: fixed `StoreElementRef` operand handling to
+  use operand 1 as the stored-to location, matching the C++ constructor and
+  serializer/deserializer contract `{value, location}`. This prevents the pass
+  from mistaking the stored value for the allocation location.
+- `ReachingDefinitionAnalysis.cj`: fixed the same `StoreElementRef` location
+  operand in the data-flow invalidation used by redundant-load elimination, and
+  conservatively handles `StoreElementByName` the same way while the
+  self-hosted `UpdateMemberVarPath` pass is not yet real.
+- `ConstPropagation.cj`: now recursively simplifies nested lambda block groups
+  and scopes algebraic result replacement to the expression's parent block
+  group, matching the C++ helper's scoped `ReplaceWith` usage more closely.
+
 Estimated behavior coverage for the touched transform/optimization surface is
-about 24% versus the C++ reference. The changes above remove several unsafe
+about 26% versus the C++ reference. The changes above remove several unsafe
 behavior differences but the overall CHIR transform/optimization module remains
 far from complete.

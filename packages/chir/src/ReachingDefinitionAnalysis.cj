@@ -243,7 +243,7 @@ public class ReachingDefinitionAnalysis {
             HandleLoadExpr(state, expression)
         } else if (kind == ExprKind.GET_ELEMENT_REF) {
             HandleGetElemRefExpr(state, expression)
-        } else if (kind == ExprKind.STORE_ELEMENT_REF) {
+        } else if (kind == ExprKind.STORE_ELEMENT_REF || kind == ExprKind.STORE_ELEMENT_BY_NAME) {
             HandleStoreElemRefExpr(state, expression)
         } else if (kind == ExprKind.APPLY || kind == ExprKind.APPLY_WITH_EXCEPTION ||
             kind == ExprKind.INVOKE || kind == ExprKind.INVOKE_WITH_EXCEPTION ||
@@ -357,8 +357,8 @@ public class ReachingDefinitionAnalysis {
     }
 
     private func HandleStoreElemRefExpr(state: ReachingDefinitionDomain, storeElemRef: Expression): Unit {
-        if (storeElemRef.GetNumOfOperands() >= 1) {
-            let location = storeElemRef.GetOperand(0)
+        if (storeElemRef.GetNumOfOperands() >= 2) {
+            let location = storeElemRef.GetOperand(1)
             if (IsTrackedStructRef(location)) {
                 state.Invalidate(location)
             }
