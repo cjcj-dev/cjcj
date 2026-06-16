@@ -82,6 +82,10 @@ public class DiagnosticEmitter {
         return !hasRangeError()
     }
 
+    public func HasRangeError(): Bool {
+        return hasRangeError()
+    }
+
     public func Render(showSourceOnly!: Bool = false): String {
         swapErrorMessageWithNote()
         let builder = StringBuilder()

@@ -22,6 +22,10 @@ Deepening pass updates:
 - Aligned `GetDiagnosticInfo` with the C++ `Emit(true)` path when a `SourceManager` is present, returning only the
   rendered source/hint body in the `hint` field while keeping the diagnostic message in `msg`; the no-source-manager
   fallback keeps the full render path like the C++ implementation.
+- Tightened diagnostic JSON formatting to match the C++ formatter's top-level severity schema (`error` vs `warning`)
+  and source-backed empty-path position formatting.
+- Propagated diagnostic emitter range-check failures back into `DiagEngineErrorCode.DIAG_RANGE_ERROR` from normal
+  emission and `GetDiagnosticInfo`, matching the C++ `DiagnosticEmitter::Emit()` result handling.
 
 Implemented:
 

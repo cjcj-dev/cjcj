@@ -605,6 +605,9 @@ public class CompilerDiagnosticHandler <: DiagnosticHandler {
             let sm = if (diag.HasSourceManager()) { diag.GetSourceManager() } else { SourceManager() }
             let emitter = DiagnosticEmitter(diagnostic, noColor, !diag.IsCheckRangeErrorCodeRatherICE(), sm)
             let rendered = emitter.Render()
+            if (emitter.HasRangeError()) {
+                diag.SetDiagEngineErrorCode(DiagEngineErrorCode.DIAG_RANGE_ERROR)
+            }
             if (outToStringStream) {
                 strStream.append(rendered)
             } else {
@@ -622,11 +625,19 @@ public class CompilerDiagnosticHandler <: DiagnosticHandler {
         let hint = if (diag.HasSourceManager()) {
             let sm = diag.GetSourceManager()
             let emitter = DiagnosticEmitter(diagnostic, true, !diag.IsCheckRangeErrorCodeRatherICE(), sm)
-            emitter.Render(showSourceOnly: true)
+            let rendered = emitter.Render(showSourceOnly: true)
+            if (emitter.HasRangeError()) {
+                diag.SetDiagEngineErrorCode(DiagEngineErrorCode.DIAG_RANGE_ERROR)
+            }
+            rendered
         } else {
             let sm = SourceManager()
             let emitter = DiagnosticEmitter(diagnostic, true, !diag.IsCheckRangeErrorCodeRatherICE(), sm)
-            emitter.Render()
+            let rendered = emitter.Render()
+            if (emitter.HasRangeError()) {
+                diag.SetDiagEngineErrorCode(DiagEngineErrorCode.DIAG_RANGE_ERROR)
+            }
+            rendered
         }
         return DiagnosticInfo(diagnostic.diagSeverity, range: diagnostic.mainHint.range,
             msg: diagnostic.errorMessage, hint: hint)
