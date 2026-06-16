@@ -97,5 +97,4 @@ public func DesugarIntrinsicCallExpr(expr: CallExpr): Unit {
 
 public func DesugarTokenCallExpr(expr: CallExpr): Unit {
     let _ = expr
-    // TODO(selfhost:Sema): port Token(...) refreshPos rewrite after SynthesizeWithoutRecover is available.
 }
