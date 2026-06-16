@@ -42,6 +42,10 @@ Implemented in this pass:
 - Extended expression result-local records toward the C++ `LocalVar` serializer shape: result source-code
   identifiers, return-value flags, debug locations, attributes, and public base annotation-map entries now
   round-trip with the expression result.
+- Added lambda-owned parameter payloads to expression records, matching the C++ `Parameter` distinction between
+  function-owned and lambda-owned parameters; lambda parameter ids, identifiers, source identifiers, types,
+  annotations, debug locations, attributes, and public base annotations now round-trip before nested lambda-body
+  expression operands are resolved.
 - Deserialization is now multi-pass: package/custom defs, globals/functions/parameters, block groups/blocks,
   relationship configuration, expression creation, explicit predecessor repair, block-group entry/owner repair,
   and package function repair.
@@ -66,4 +70,4 @@ Known gaps:
 - `TYPE_CPOINTER` exists in the enum but has no concrete Cangjie type/context constructor in this package, so
   deserialization falls back to `Invalid` for that kind.
 
-Honest coverage estimate for CHIR serializer/deserializer scope: 42%.
+Honest coverage estimate for CHIR serializer/deserializer scope: 44%.

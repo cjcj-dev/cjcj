@@ -224,6 +224,7 @@ class CHIRSerializerImpl {
         fields.add(serializeResultDebugLocation(expr))
         fields.add(serializeResultAttributes(expr))
         fields.add(serializeResultBaseAnnotations(expr))
+        fields.add(serializeLambdaParams(expr))
         lines.add(CHIRWireJoinFields(fields))
         for (group in expr.GetBlockGroups()) {
             appendBlockGroup(lines, group)
@@ -310,6 +311,13 @@ class CHIRSerializerImpl {
         return ""
     }
 
+    private func serializeLambdaParams(expr: Expression): String {
+        if (let Some(lambdaExpr) <- (expr as Lambda)) {
+            return serializeParameterRecords(lambdaExpr.GetParams())
+        }
+        return ""
+    }
+
     private func serializeValueRefs(values: ArrayList<Value>): String {
         let out = ArrayList<String>()
         for (value in values) {
@@ -380,20 +388,28 @@ class CHIRSerializerImpl {
     }
 
     private func serializeParameters(params: ArrayList<Parameter>): String {
+        return serializeParameterRecords(params)
+    }
+
+    private func serializeParameterRecords(params: ArrayList<Parameter>): String {
         let out = ArrayList<String>()
         for (param in params) {
-            let fields = ArrayList<String>()
-            fields.add(CHIRValueId(param))
-            fields.add(param.GetIdentifier())
-            fields.add(param.GetSrcCodeIdentifier())
-            fields.add(if (let Some(ty) <- param.GetType()) { CHIRSerializeType(ty) } else { "" })
-            fields.add(CHIRSerializeAnnoInfo(param.GetAnnoInfo()))
-            fields.add(CHIRSerializeDebugLocation(param.GetDebugLocation()))
-            fields.add(CHIRSerializeAttributes(param))
-            fields.add(CHIRSerializeBaseAnnotations(param))
-            out.add(CHIRWireJoinFields(fields))
+            out.add(serializeParameterRecord(param))
         }
         return CHIRWireJoinList(out)
+    }
+
+    private func serializeParameterRecord(param: Parameter): String {
+        let fields = ArrayList<String>()
+        fields.add(CHIRValueId(param))
+        fields.add(param.GetIdentifier())
+        fields.add(param.GetSrcCodeIdentifier())
+        fields.add(if (let Some(ty) <- param.GetType()) { CHIRSerializeType(ty) } else { "" })
+        fields.add(CHIRSerializeAnnoInfo(param.GetAnnoInfo()))
+        fields.add(CHIRSerializeDebugLocation(param.GetDebugLocation()))
+        fields.add(CHIRSerializeAttributes(param))
+        fields.add(CHIRSerializeBaseAnnotations(param))
+        return CHIRWireJoinFields(fields)
     }
 
     private func serializeLiteral(expr: Expression): String {

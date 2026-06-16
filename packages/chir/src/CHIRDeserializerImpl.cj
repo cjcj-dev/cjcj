@@ -344,6 +344,7 @@ class CHIRDeserializerImpl {
                         configureExpressionResult(result, fields)
                         valuesById[CHIRFieldAt(fields, 5)] = result
                     }
+                    configureLambdaParameters(expr, CHIRFieldAt(fields, 20))
                 }
             }
         }
@@ -368,6 +369,28 @@ class CHIRDeserializerImpl {
         }
         CHIRApplyBaseInfo(result, CHIRFieldAt(fields, 17), CHIRFieldAt(fields, 18),
             annotationText: CHIRFieldAt(fields, 19))
+    }
+
+    private func configureLambdaParameters(expr: Expression, value: String): Unit {
+        if (value.isEmpty()) {
+            return
+        }
+        if (let Some(lambdaExpr) <- (expr as Lambda)) {
+            for (item in CHIRWireSplitList(value)) {
+                if (item.isEmpty()) {
+                    continue
+                }
+                let paramFields = CHIRWireSplitFields(item)
+                let paramTy = CHIRParseType(CHIRFieldAt(paramFields, 3), builder, customDefs)
+                let param = Parameter(paramTy, CHIRFieldAt(paramFields, 1), lambdaExpr)
+                builder.context.RegisterValue(param)
+                param.SetSrcCodeIdentifier(CHIRFieldAt(paramFields, 2))
+                CHIRApplyAnnoInfo(param.GetAnnoInfo(), CHIRFieldAt(paramFields, 4))
+                CHIRApplyBaseInfo(param, CHIRFieldAt(paramFields, 5), CHIRFieldAt(paramFields, 6),
+                    annotationText: CHIRFieldAt(paramFields, 7))
+                valuesById[CHIRFieldAt(paramFields, 0)] = param
+            }
+        }
     }
 
     private func createExpression(fields: ArrayList<String>, block: Block): Expression {
