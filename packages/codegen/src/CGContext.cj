@@ -74,6 +74,7 @@ public class CGContext {
     private let llvmUsedGVs: HashSet<String> = HashSet<String>()
     private let callBasesToReplace: ArrayList<CallBaseToReplaceInfo> = ArrayList<CallBaseToReplaceInfo>()
     private let dependentPartialOrderOfTypes: ArrayList<PartialOrderPair> = ArrayList<PartialOrderPair>()
+    private var cjStringType: LLVMTypeRef = LLVMNullType()
 
     public var debugValue: LLVMValueRef = LLVMNullValue()
 
@@ -114,11 +115,15 @@ public class CGContext {
     }
 
     public func GetCjStringType(): LLVMTypeRef {
+        if (!cjStringType.isNull()) {
+            return cjStringType
+        }
         var result = LLVMNullType()
         try (nameCString = unsafe { LibC.mallocCString("record.std.core:String") }.asResource()) {
             result = unsafe { LLVMStructCreateNamed(llvmContext.raw, nameCString.value) }
         }
-        return result
+        cjStringType = result
+        return cjStringType
     }
 
     public func AddCJString(cjStringName: String, cjStringContent: String): Unit {

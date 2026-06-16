@@ -10,6 +10,10 @@ import cangjie_compiler::chir.RuneLiteral
 import cangjie_compiler::chir.StringLiteral
 import cangjie_compiler::chir.Type
 
+private let CREATE_OVERFLOW_EXCEPTION_FUNC_NAME: String = "rt$CreateOverflowException_msg"
+private let CREATE_ARITHMETIC_EXCEPTION_FUNC_NAME: String = "rt$CreateArithmeticException_msg"
+private let THROW_EXCEPTION_FUNC_NAME: String = PREFIX_OF_BACKEND_SYMS + "ThrowException"
+
 public class IRBuilder2 {
     private let cgMod: CGModule
     private let builder: LLVMBuilderHandle
@@ -279,6 +283,50 @@ public class IRBuilder2 {
         return result
     }
 
+    public func CreateInvoke(callee: LLVMValueRef, calleeType: LLVMTypeRef, normalDest: LLVMBasicBlockRef,
+        unwindDest: LLVMBasicBlockRef, args: ArrayList<LLVMValueRef>, name!: String = ""): LLVMValueRef {
+        var result = LLVMNullValue()
+        try (nameCString = unsafe { LibC.mallocCString(name) }.asResource()) {
+            if (args.isEmpty()) {
+                result = unsafe {
+                    LLVMBuildInvoke2(builder.raw, calleeType, callee, CPointer<LLVMValueRef>(), 0u32,
+                        normalDest, unwindDest, nameCString.value)
+                }
+            } else {
+                try (argPtr = LibC.malloc<LLVMValueRef>(count: args.size).asResource()) {
+                    var idx: Int64 = 0
+                    while (idx < args.size) {
+                        unsafe { (argPtr.value + idx).write(args[idx]) }
+                        idx++
+                    }
+                    result = unsafe {
+                        LLVMBuildInvoke2(builder.raw, calleeType, callee, argPtr.value, UInt32(args.size),
+                            normalDest, unwindDest, nameCString.value)
+                    }
+                }
+            }
+        }
+        return result
+    }
+
+    public func CreateCallOrInvoke(callee: LLVMValueRef, calleeType: LLVMTypeRef, args: ArrayList<LLVMValueRef>,
+        name!: String = ""): LLVMValueRef {
+        if (let Some(unwindBlock) <- GetCGContext().TopUnwindBlockStack()) {
+            let currentBlock = unsafe { LLVMGetInsertBlock(builder.raw) }
+            if (!currentBlock.isNull()) {
+                let parentFunction = unsafe { LLVMGetBasicBlockParent(currentBlock) }
+                if (!parentFunction.isNull()) {
+                    let normalDest = CreateEntryBasicBlock(parentFunction, "normalDest")
+                    unsafe { LLVMMoveBasicBlockAfter(normalDest, currentBlock) }
+                    let invokeValue = CreateInvoke(callee, calleeType, normalDest, unwindBlock, args, name: name)
+                    SetInsertPoint(normalDest)
+                    return invokeValue
+                }
+            }
+        }
+        return CreateCall(callee, calleeType, args, name: name)
+    }
+
     public func CreateGEP(elementType: LLVMTypeRef, pointer: LLVMValueRef, indices: ArrayList<LLVMValueRef>,
         name!: String = ""): LLVMValueRef {
         var result = LLVMNullValue()
@@ -306,6 +354,18 @@ public class IRBuilder2 {
         return result
     }
 
+    public func CreateAddrSpaceCast(value: LLVMValueRef, destType: LLVMTypeRef, name!: String = "addrspacecast"): LLVMValueRef {
+        var result = LLVMNullValue()
+        try (nameCString = unsafe { LibC.mallocCString(name) }.asResource()) {
+            result = unsafe { LLVMBuildAddrSpaceCast(builder.raw, value, destType, nameCString.value) }
+        }
+        return result
+    }
+
+    public func CreateUnreachable(): LLVMValueRef {
+        return unsafe { LLVMBuildUnreachable(builder.raw) }
+    }
+
     public func CreateAggregateValue(aggregateType: LLVMTypeRef, elements: ArrayList<LLVMValueRef>,
         name!: String = "agg"): LLVMValueRef {
         var aggregate = unsafe { LLVMGetUndef(aggregateType) }
@@ -320,7 +380,106 @@ public class IRBuilder2 {
     }
 
     public func CreateOverflowOrArithmeticException(ident: String, isOverflow!: Bool = true): Unit {
-        // TODO(selfhost:CodeGen): lower runtime exception helper calls for checked arithmetic.
+        let helperName = if (isOverflow) { CREATE_OVERFLOW_EXCEPTION_FUNC_NAME } else {
+            CREATE_ARITHMETIC_EXCEPTION_FUNC_NAME
+        }
+        let literal = CreateStringLiteral(ident)
+        let stringArg = CreateAddrSpaceCast(literal, GetCjStringRefType(), name: "cjstr")
+        let (helperFunction, helperType) = GetOrInsertRuntimeExceptionHelper(helperName)
+        let helperArgs = ArrayList<LLVMValueRef>()
+        helperArgs.add(stringArg)
+        let exceptionValue = CreateCallOrInvoke(helperFunction, helperType, helperArgs, name: "exception")
+        CallExceptionIntrinsicThrow(exceptionValue)
+    }
+
+    public func CreateStringLiteral(value: String): LLVMValueRef {
+        let cjStringName = GetCjStringLiteralName(value)
+        if (let Some(moduleHandle) <- cgMod.GetLLVMModule()) {
+            var result = LLVMNullValue()
+            try (nameCString = unsafe { LibC.mallocCString(cjStringName) }.asResource()) {
+                result = unsafe { LLVMGetNamedGlobal(moduleHandle.raw, nameCString.value) }
+                if (result.isNull()) {
+                    result = unsafe { LLVMAddGlobal(moduleHandle.raw, GetCGContext().GetCjStringType(), nameCString.value) }
+                    unsafe {
+                        LLVMSetGlobalConstant(result, 1)
+                        LLVMSetLinkage(result, LLVMLinkageValue(LLVMLinkage.Private))
+                    }
+                    GetCGContext().AddCJString(cjStringName, value)
+                }
+            }
+            return result
+        }
+        throw IllegalStateException("cannot create string literal without an LLVM module")
+    }
+
+    public func CallExceptionIntrinsicThrow(exceptionValue: LLVMValueRef): Unit {
+        let throwType = GetThrowExceptionFunctionType()
+        let throwFunction = GetOrInsertRuntimeFunction(THROW_EXCEPTION_FUNC_NAME, throwType)
+        let throwArgs = ArrayList<LLVMValueRef>()
+        throwArgs.add(exceptionValue)
+        let _ = CreateCallOrInvoke(throwFunction, throwType, throwArgs)
+        let _ = CreateUnreachable()
+    }
+
+    private func GetOrInsertRuntimeExceptionHelper(funcName: String): (LLVMValueRef, LLVMTypeRef) {
+        if (let Some(helperNode) <- GetCGContext().GetImplicitUsedFunc(funcName)) {
+            let cgFunctionValue = cgMod.GetOrInsertCGFunction(helperNode)
+            if (let Some(functionType) <- cgFunctionValue.GetCGFunctionType()) {
+                return (cgFunctionValue.GetRawFunction(), functionType.GetLLVMFunctionType())
+            }
+        }
+        let fallbackType = GetRuntimeExceptionHelperType()
+        return (GetOrInsertRuntimeFunction(funcName, fallbackType), fallbackType)
+    }
+
+    private func GetRuntimeExceptionHelperType(): LLVMTypeRef {
+        let paramTypes = ArrayList<LLVMTypeRef>()
+        paramTypes.add(GetCjStringRefType())
+        return MakeFunctionType(CGType.GetRefType(GetLLVMContext()), paramTypes)
+    }
+
+    private func GetThrowExceptionFunctionType(): LLVMTypeRef {
+        let paramTypes = ArrayList<LLVMTypeRef>()
+        paramTypes.add(CGType.GetRefType(GetLLVMContext()))
+        return MakeFunctionType(unsafe { LLVMVoidTypeInContext(GetLLVMContext().raw) }, paramTypes)
+    }
+
+    private func GetCjStringRefType(): LLVMTypeRef {
+        return unsafe { LLVMPointerType(GetCGContext().GetCjStringType(), 1u32) }
+    }
+
+    private func GetOrInsertRuntimeFunction(name: String, functionType: LLVMTypeRef): LLVMValueRef {
+        if (let Some(moduleHandle) <- cgMod.GetLLVMModule()) {
+            var result = LLVMNullValue()
+            try (nameCString = unsafe { LibC.mallocCString(name) }.asResource()) {
+                result = unsafe { LLVMGetNamedFunction(moduleHandle.raw, nameCString.value) }
+                if (result.isNull()) {
+                    result = unsafe { LLVMAddFunction(moduleHandle.raw, nameCString.value, functionType) }
+                }
+            }
+            return result
+        }
+        throw IllegalStateException("cannot create runtime function without an LLVM module")
+    }
+
+    private func MakeFunctionType(returnType: LLVMTypeRef, paramTypes: ArrayList<LLVMTypeRef>): LLVMTypeRef {
+        if (paramTypes.isEmpty()) {
+            return unsafe { LLVMFunctionType(returnType, CPointer<LLVMTypeRef>(), 0u32, 0) }
+        }
+        var result = LLVMNullType()
+        try (paramPtr = LibC.malloc<LLVMTypeRef>(count: paramTypes.size).asResource()) {
+            var idx: Int64 = 0
+            while (idx < paramTypes.size) {
+                unsafe { (paramPtr.value + idx).write(paramTypes[idx]) }
+                idx++
+            }
+            result = unsafe { LLVMFunctionType(returnType, paramPtr.value, UInt32(paramTypes.size), 0) }
+        }
+        return result
+    }
+
+    private func GetCjStringLiteralName(value: String): String {
+        return CJSTRING_LITERAL_PREFIX + UInt64(value.hashCode()).toString()
     }
 
     private func IsFloatOperand(ty: Option<Type>): Bool {

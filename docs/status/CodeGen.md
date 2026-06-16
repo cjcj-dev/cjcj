@@ -34,7 +34,16 @@ Implemented:
   array, varray, custom, struct, class, enum, generic, box, and `This` types. The current implementation computes
   LLVM type handles plus conservative size/alignment metadata for the subset exposed by the current CHIR package.
 - Added `IRBuilder2` wrappers for selected LLVM builder operations, primitive constants, default literal constants,
-  call construction, bitcasts, aggregate insertion, GEP construction, and scoped debug-location restoration.
+  call and invoke construction, bitcasts, address-space casts, aggregate insertion, GEP construction, unreachable
+  terminators, and scoped debug-location restoration.
+- Added LLVM debug-info initialization via a CodeGen `DIBuilder` component: module debug/DWARF flags, compile-unit
+  metadata, package namespace metadata, debug-location creation, finalization, and builder disposal are now driven
+  through LLVM C FFI.
+- Added Cangjie string-literal global creation and checked arithmetic exception lowering: overflow/arithmetic helper
+  functions are resolved from implicit CHIR declarations when available, otherwise inserted as external LLVM runtime
+  declarations; the generated literal is passed as a Cangjie string reference, the returned exception object is sent
+  to `CJ_MCC_ThrowException`, and the block is terminated with `unreachable`, using `invoke` when an unwind block is
+  active.
 - Added expression dispatch structure for constants, unary, binary, memory, terminator, and other expression
   families. The current implementation lowers typed constants, unary integer/float operations, signed/unsigned
   and floating binary operations, allocation/load/store/GEP memory expressions, `GOTO`/`BRANCH`/`EXIT`
@@ -55,17 +64,17 @@ Known gaps:
 
 - This is not a complete faithful port of C++ CodeGen. The remaining full CHIR-to-LLVM surface still includes
   object/class allocation, precise field and enum layout access, closures, generics, RTTI/type info, package and
-  native metadata, debug info, exception paths, checked overflow/runtime helpers, intrinsics, complete
+  native metadata, full debug metadata attachment, broad exception handling, most checked overflow arithmetic,
+  intrinsics, complete
   array/tuple/object construction, precise casts, C/FFI lowering, incremental generation, native backend-specific
   metadata, and post-generation optimization/cleanup passes.
-- Only 39 `.cj` files are present in this pass, compared with 118 reference CodeGen source/header files. Additional
-  C++-named component files still need to be split out for `DIBuilder`, `EmitExpressionIR`, `EraseUselessIRs`,
+- Only 40 `.cj` files are present in this pass, compared with 118 reference CodeGen source/header files. Additional
+  C++-named component files still need to be split out for `EmitExpressionIR`, `EraseUselessIRs`,
   `LICMOptimizer`, `IRGenerator`, `CGUtils`, `BlockScopeImpl`, incremental generation, Cangjie-native metadata,
   type info, CFFI, and the detailed base expression implementation files.
 - The package manifest now depends on the existing self-hosted `basic`, `chir`, `mangle`, `option`, and `utils`
   packages so the CodeGen package can compile against the current CHIR model.
-- Remaining CodeGen self-host TODO markers are intentionally compiling stop-points, not completed behavior.
 
-Remaining CodeGen selfhost markers: 2.
+Remaining CodeGen selfhost markers: 0.
 
-Current CodeGen package size: 39 `.cj` files, approximately 3401 total lines.
+Current CodeGen package size: 40 `.cj` files, approximately 3750 total lines.

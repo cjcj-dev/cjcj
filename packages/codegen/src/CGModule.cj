@@ -52,6 +52,7 @@ public class CGModule {
     private let linkNameUsedInMeta: HashSet<String> = HashSet<String>()
     private let externalExtensionDefs: ArrayList<LLVMValueRef> = ArrayList<LLVMValueRef>()
     private let nonExternalExtensionDefs: ArrayList<LLVMValueRef> = ArrayList<LLVMValueRef>()
+    private var diBuilder: Option<DIBuilder> = None
 
     public init(subCHIRPackage: SubCHIRPackage, cgPkgCtx: CGPkgContext) {
         cgCtx = CGContext(subCHIRPackage, cgPkgCtx)
@@ -60,6 +61,7 @@ public class CGModule {
         moduleHandle.SetDataLayout(CGModule.GetDataLayoutString(cgCtx.GetCompileOptions().target))
         moduleHandle.SetTargetTriple(CGModule.GetTargetTripleString(cgCtx.GetCompileOptions().target))
         module = moduleHandle
+        InitDebugInfo()
     }
 
     public func GetCGContext(): CGContext { return cgCtx }
@@ -70,6 +72,7 @@ public class CGModule {
     }
 
     public func ReleaseLLVMModule(): Option<LLVMModuleHandle> {
+        FinalizeDebugInfo()
         let released = module
         module = None
         return released
@@ -241,7 +244,34 @@ public class CGModule {
     }
 
     public func InitDebugInfo(): Unit {
-        // TODO(selfhost:CodeGen): port DIBuilder.cpp and CJNativeDIBuilder.cpp debug metadata emission.
+        if (let Some(moduleHandle) <- module) {
+            AddUInt32ModuleFlag(moduleHandle.raw, "Debug Info Version",
+                UInt64(unsafe { LLVMDebugMetadataVersion() }))
+            AddUInt32ModuleFlag(moduleHandle.raw, "Dwarf Version", DWARF_VERSION)
+            let builder = DIBuilder(this)
+            builder.CreateCompileUnit(moduleHandle.name)
+            builder.CreateNameSpace(cgCtx.GetCurrentPkgName())
+            diBuilder = builder
+        }
+    }
+
+    public func GetDIBuilder(): Option<DIBuilder> { return diBuilder }
+
+    public func FinalizeDebugInfo(): Unit {
+        if (let Some(builder) <- diBuilder) {
+            builder.Finalize()
+            diBuilder = None
+        }
+    }
+
+    private func AddUInt32ModuleFlag(moduleRef: LLVMModuleRef, key: String, value: UInt64): Unit {
+        let metadata = CreateUInt32Metadata(GetLLVMContext(), value)
+        try (keyCString = unsafe { LibC.mallocCString(key) }.asResource()) {
+            unsafe {
+                LLVMAddModuleFlag(moduleRef, LLVM_MODULE_FLAG_WARNING, keyCString.value,
+                    UIntNative(key.size), metadata)
+            }
+        }
     }
 
     private func EraseUnusedGVsAndFunctions(moduleRef: LLVMModuleRef, declarationsOnly!: Bool): Unit {

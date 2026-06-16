@@ -10,6 +10,7 @@ public type LLVMMemoryBufferRef = CPointer<Unit>
 public type LLVMMetadataRef = CPointer<Unit>
 public type LLVMAttributeRef = CPointer<Unit>
 public type LLVMUseRef = CPointer<Unit>
+public type LLVMDIBuilderRef = CPointer<Unit>
 
 public enum LLVMLinkage {
     | External
@@ -105,6 +106,8 @@ foreign {
     func LLVMSetDataLayout(module: LLVMModuleRef, dataLayout: CString): Unit
     func LLVMSetTarget(module: LLVMModuleRef, triple: CString): Unit
     func LLVMGetModuleContext(module: LLVMModuleRef): LLVMContextRef
+    func LLVMAddModuleFlag(module: LLVMModuleRef, behavior: Int32, key: CString, keyLen: UIntNative,
+        value: LLVMMetadataRef): Unit
     func LLVMVerifyModule(module: LLVMModuleRef, action: Int32, outMessage: CPointer<CString>): Int32
     func LLVMWriteBitcodeToFile(module: LLVMModuleRef, path: CString): Int32
     func LLVMDisposeMessage(message: CString): Unit
@@ -124,10 +127,12 @@ foreign {
     func LLVMFunctionType(returnType: LLVMTypeRef, paramTypes: CPointer<LLVMTypeRef>, paramCount: UInt32, isVarArg: Int32): LLVMTypeRef
 
     func LLVMAddFunction(module: LLVMModuleRef, name: CString, functionType: LLVMTypeRef): LLVMValueRef
+    func LLVMGetNamedFunction(module: LLVMModuleRef, name: CString): LLVMValueRef
     func LLVMGetFirstFunction(module: LLVMModuleRef): LLVMValueRef
     func LLVMGetNextFunction(fn: LLVMValueRef): LLVMValueRef
     func LLVMDeleteFunction(fn: LLVMValueRef): Unit
     func LLVMAddGlobal(module: LLVMModuleRef, globalType: LLVMTypeRef, name: CString): LLVMValueRef
+    func LLVMGetNamedGlobal(module: LLVMModuleRef, name: CString): LLVMValueRef
     func LLVMGetFirstGlobal(module: LLVMModuleRef): LLVMValueRef
     func LLVMGetNextGlobal(global: LLVMValueRef): LLVMValueRef
     func LLVMDeleteGlobal(global: LLVMValueRef): Unit
@@ -136,11 +141,13 @@ foreign {
     func LLVMGetLinkage(global: LLVMValueRef): Int32
     func LLVMSetLinkage(global: LLVMValueRef, linkage: Int32): Unit
     func LLVMIsDeclaration(global: LLVMValueRef): Int32
+    func LLVMSetGlobalConstant(global: LLVMValueRef, isConstant: Int32): Unit
     func LLVMSetInitializer(global: LLVMValueRef, constantVal: LLVMValueRef): Unit
     func LLVMGetParam(fn: LLVMValueRef, index: UInt32): LLVMValueRef
     func LLVMGetFirstBasicBlock(fn: LLVMValueRef): LLVMBasicBlockRef
     func LLVMGetNextBasicBlock(block: LLVMBasicBlockRef): LLVMBasicBlockRef
     func LLVMGetEntryBasicBlock(fn: LLVMValueRef): LLVMBasicBlockRef
+    func LLVMGetBasicBlockParent(block: LLVMBasicBlockRef): LLVMValueRef
     func LLVMGetBasicBlockName(block: LLVMBasicBlockRef): CString
     func LLVMGetBasicBlockTerminator(block: LLVMBasicBlockRef): LLVMValueRef
     func LLVMGetNumSuccessors(term: LLVMValueRef): UInt32
@@ -151,16 +158,19 @@ foreign {
     func LLVMGetInstructionOpcode(inst: LLVMValueRef): Int32
     func LLVMGetFirstUse(value: LLVMValueRef): LLVMUseRef
     func LLVMInstructionEraseFromParent(inst: LLVMValueRef): Unit
+    func LLVMMoveBasicBlockAfter(block: LLVMBasicBlockRef, movePos: LLVMBasicBlockRef): Unit
     func LLVMConstNull(valueType: LLVMTypeRef): LLVMValueRef
     func LLVMGetUndef(valueType: LLVMTypeRef): LLVMValueRef
     func LLVMConstInt(intType: LLVMTypeRef, value: UInt64, signExtend: Int32): LLVMValueRef
     func LLVMConstReal(realType: LLVMTypeRef, value: Float64): LLVMValueRef
     func LLVMConstStringInContext(context: LLVMContextRef, str: CString, length: UInt32, dontNullTerminate: Int32): LLVMValueRef
+    func LLVMValueAsMetadata(value: LLVMValueRef): LLVMMetadataRef
 
     func LLVMCreateBuilderInContext(context: LLVMContextRef): LLVMBuilderRef
     func LLVMDisposeBuilder(builder: LLVMBuilderRef): Unit
     func LLVMGetCurrentDebugLocation2(builder: LLVMBuilderRef): LLVMMetadataRef
     func LLVMSetCurrentDebugLocation2(builder: LLVMBuilderRef, location: LLVMMetadataRef): Unit
+    func LLVMGetInsertBlock(builder: LLVMBuilderRef): LLVMBasicBlockRef
     func LLVMClearInsertionPosition(builder: LLVMBuilderRef): Unit
     func LLVMAppendBasicBlockInContext(context: LLVMContextRef, fn: LLVMValueRef, name: CString): LLVMBasicBlockRef
     func LLVMPositionBuilderAtEnd(builder: LLVMBuilderRef, block: LLVMBasicBlockRef): Unit
@@ -195,13 +205,34 @@ foreign {
     func LLVMBuildICmp(builder: LLVMBuilderRef, op: Int32, left: LLVMValueRef, right: LLVMValueRef, name: CString): LLVMValueRef
     func LLVMBuildFCmp(builder: LLVMBuilderRef, op: Int32, left: LLVMValueRef, right: LLVMValueRef, name: CString): LLVMValueRef
     func LLVMBuildBitCast(builder: LLVMBuilderRef, value: LLVMValueRef, destType: LLVMTypeRef, name: CString): LLVMValueRef
+    func LLVMBuildAddrSpaceCast(builder: LLVMBuilderRef, value: LLVMValueRef, destType: LLVMTypeRef, name: CString): LLVMValueRef
     func LLVMBuildInsertValue(builder: LLVMBuilderRef, aggregate: LLVMValueRef, element: LLVMValueRef, index: UInt32, name: CString): LLVMValueRef
     func LLVMBuildCall2(builder: LLVMBuilderRef, functionType: LLVMTypeRef, fn: LLVMValueRef, args: CPointer<LLVMValueRef>, numArgs: UInt32, name: CString): LLVMValueRef
+    func LLVMBuildInvoke2(builder: LLVMBuilderRef, functionType: LLVMTypeRef, fn: LLVMValueRef,
+        args: CPointer<LLVMValueRef>, numArgs: UInt32, thenBlock: LLVMBasicBlockRef, catchBlock: LLVMBasicBlockRef,
+        name: CString): LLVMValueRef
     func LLVMBuildGEP2(builder: LLVMBuilderRef, elementType: LLVMTypeRef, pointer: LLVMValueRef, indices: CPointer<LLVMValueRef>, numIndices: UInt32, name: CString): LLVMValueRef
+    func LLVMBuildUnreachable(builder: LLVMBuilderRef): LLVMValueRef
     func LLVMGetEnumAttributeKindForName(name: CString, len: UIntNative): UInt32
     func LLVMCreateEnumAttribute(context: LLVMContextRef, kindID: UInt32, value: UInt64): LLVMAttributeRef
     func LLVMAddAttributeAtIndex(fn: LLVMValueRef, index: UInt32, attr: LLVMAttributeRef): Unit
     func strcmp(lhs: CString, rhs: CString): Int32
+
+    func LLVMDebugMetadataVersion(): UInt32
+    func LLVMCreateDIBuilder(module: LLVMModuleRef): LLVMDIBuilderRef
+    func LLVMDisposeDIBuilder(builder: LLVMDIBuilderRef): Unit
+    func LLVMDIBuilderFinalize(builder: LLVMDIBuilderRef): Unit
+    func LLVMDIBuilderCreateFile(builder: LLVMDIBuilderRef, filename: CString, filenameLen: UIntNative,
+        directory: CString, directoryLen: UIntNative): LLVMMetadataRef
+    func LLVMDIBuilderCreateCompileUnit(builder: LLVMDIBuilderRef, language: Int32, fileRef: LLVMMetadataRef,
+        producer: CString, producerLen: UIntNative, isOptimized: Int32, flags: CString, flagsLen: UIntNative,
+        runtimeVersion: UInt32, splitName: CString, splitNameLen: UIntNative, emissionKind: Int32, dwoId: UInt32,
+        splitDebugInlining: Int32, debugInfoForProfiling: Int32, sysRoot: CString, sysRootLen: UIntNative,
+        sdk: CString, sdkLen: UIntNative): LLVMMetadataRef
+    func LLVMDIBuilderCreateNameSpace(builder: LLVMDIBuilderRef, parentScope: LLVMMetadataRef, name: CString,
+        nameLen: UIntNative, exportSymbols: Int32): LLVMMetadataRef
+    func LLVMDIBuilderCreateDebugLocation(context: LLVMContextRef, line: UInt32, column: UInt32,
+        scope: LLVMMetadataRef, inlinedAt: LLVMMetadataRef): LLVMMetadataRef
 }
 
 public func LLVMNullContext(): LLVMContextRef { return CPointer<Unit>() }
@@ -212,6 +243,7 @@ public func LLVMNullBasicBlock(): LLVMBasicBlockRef { return CPointer<Unit>() }
 public func LLVMNullBuilder(): LLVMBuilderRef { return CPointer<Unit>() }
 public func LLVMNullMetadata(): LLVMMetadataRef { return CPointer<Unit>() }
 public func LLVMNullAttribute(): LLVMAttributeRef { return CPointer<Unit>() }
+public func LLVMNullDIBuilder(): LLVMDIBuilderRef { return CPointer<Unit>() }
 
 public class LLVMContextHandle {
     public let raw: LLVMContextRef
