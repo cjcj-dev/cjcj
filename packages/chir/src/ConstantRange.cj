@@ -285,6 +285,11 @@ public struct ConstantRange {
         }
     }
 
+    public func SplitWrapping(asUnsigned: Bool): (ConstantRange, ConstantRange) {
+        return (ConstantRange.From(RelationalOperation.LT, upper, !asUnsigned),
+            ConstantRange.From(RelationalOperation.GE, lower, !asUnsigned))
+    }
+
     public func ZeroExtend(newWidth: IntWidth): ConstantRange {
         if (IsEmptySet()) {
             return ConstantRange.Empty(newWidth)
@@ -319,6 +324,53 @@ public struct ConstantRange {
             return ConstantRange(lower.SExt(newWidth), upper.ZExt(newWidth))
         }
         return ConstantRange(lower.SExt(newWidth), upper.SExt(newWidth))
+    }
+
+    public func Truncate(dstWidth: IntWidth): ConstantRange {
+        if (IntWidthBits(Width()) <= IntWidthBits(dstWidth)) {
+            throw IllegalArgumentException("truncation requires a smaller width")
+        }
+        if (IsEmptySet()) {
+            return ConstantRange.Empty(dstWidth)
+        }
+        if (IsFullSet()) {
+            return ConstantRange.Full(dstWidth)
+        }
+
+        var lowerDiv = lower
+        var upperDiv = upper
+        var wrappedPart = ConstantRange.Empty(dstWidth)
+        if (IsUpperWrapped()) {
+            let dstMaxValue = SInt.UMaxValue(dstWidth)
+            if (upper.Uge(dstMaxValue.ZExt(Width()))) {
+                return ConstantRange.Full(dstWidth)
+            }
+            wrappedPart = ConstantRange(dstMaxValue, upper.Trunc(dstWidth))
+            if (lowerDiv.IsUMaxValue()) {
+                return wrappedPart
+            }
+            upperDiv = SInt.AllOnes(Width())
+        }
+
+        let dstBits = IntWidthBits(dstWidth)
+        if (lowerDiv.ActiveBits() > dstBits) {
+            let adjust = lowerDiv.BitAnd(SInt.GetBitsSetFrom(Width(), dstBits))
+            lowerDiv = lowerDiv.Sub(adjust)
+            upperDiv = upperDiv.Sub(adjust)
+        }
+
+        let upperDivWidth = upperDiv.ActiveBits()
+        if (upperDivWidth <= dstBits) {
+            return ConstantRange(lowerDiv.Trunc(dstWidth), upperDiv.Trunc(dstWidth)).UnionWith(wrappedPart)
+        }
+        if (upperDivWidth == dstBits + 1) {
+            let clearedUpper = upperDiv.ClearBit(dstBits)
+            if (clearedUpper.Ult(lowerDiv)) {
+                return ConstantRange(lowerDiv.Trunc(dstWidth), clearedUpper.Trunc(dstWidth)).UnionWith(wrappedPart)
+            }
+            return ConstantRange.Full(dstWidth)
+        }
+        return ConstantRange.Full(dstWidth)
     }
 
     public func Add(rhs: ConstantRange): ConstantRange {

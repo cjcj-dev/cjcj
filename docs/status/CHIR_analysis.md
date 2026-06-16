@@ -43,3 +43,21 @@
 
 - `cjpm build` passed after implementation.
 - `TODO(selfhost:CHIR)` count in `packages/chir/src`: 0.
+
+## 2026-06-17 Truncation Pass
+
+- Reference read: C++ `ConstantRange::SplitWrapping` and `ConstantRange::Truncate` in `src/CHIR/Analysis/ConstantRange.cpp`.
+- Added immutable `SInt.ClearBit` support needed by the truncation transfer function.
+- Added `ConstantRange.SplitWrapping`.
+- Added `ConstantRange.Truncate`, including C++ behavior for upper-wrapped ranges, high-bit adjustment before truncation, destination-width full coverage detection, and union with the wrapped part.
+
+## Remaining After Truncation Pass
+
+- Numeric conversion and type-cast range routines from C++ `SIntDomain.cpp` still need a real Cangjie port.
+- `SInt` still lacks full C++ parity for string construction/formatting and several bit-counting/shift overflow helpers.
+- Higher-level CHIR analysis orchestration remains partial compared with C++ `AnalysisWrapper`, `Engine`, `Results`, `ConstAnalysis`, `TypeAnalysis`, `ValueAnalysis`, and `ValueRangeAnalysis`.
+
+## Verification After Truncation Pass
+
+- `cjpm build` passed after implementation.
+- `TODO(selfhost:CHIR)` count in `packages/chir/src`: 0.

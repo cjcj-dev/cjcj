@@ -207,6 +207,12 @@ public struct SInt {
     @OverflowWrapping
     public func Neg(): SInt { return SInt(width, -SVal()) }
     public func BitNot(): SInt { return SInt(width, value ^ MaskForWidth(width)) }
+    public func ClearBit(bit: Int64): SInt {
+        if (bit < 0 || bit >= WidthBits()) {
+            return this
+        }
+        return BitAnd(SInt.BitMask(width, bit).BitNot())
+    }
 
     @OverflowWrapping
     public func Shl(count: Int64): SInt {
