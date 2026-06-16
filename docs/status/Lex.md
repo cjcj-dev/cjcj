@@ -17,7 +17,9 @@ Implemented:
 - Rebuilt missing string parts for macro-provided string tokens by recursively lexing synthetic quoted source, matching the C++ `LexerImpl::GetStrParts` strategy.
 - Ported C++ multi-byte UTF-8 rejection details for malformed continuation bytes, overlong encodings, malformed-run consumption, and unsafe Unicode security diagnostics.
 - Tightened backquoted identifier lexing to scan real identifier parts, package-identifier separators, wildcard diagnostics, and missing-backquote recovery instead of accepting arbitrary backquoted text.
+- Aligned backquoted identifier token value/range finalization with C++ by fixing the returned token before recovery scanning consumes trailing malformed text.
 - Matched C++ numeric suffix recovery for `.identifier` member access after number literals, including Unicode identifier lookahead and the original adjacency guard for unknown-suffix diagnostics.
+- Matched C++ fractional-number classification by only promoting a dotted numeric literal during decimal-part scanning when the first fractional character is an ASCII digit, preserving hex-letter member-access fallback unless an exponent follows.
 - Expanded number diagnostic parity for expected/unexpected digit and illegal integer/float suffix cases with C++ main-hint substitutions, contextual hints, and notes.
 - Expanded string, rune, byte-rune, unicode-escape, and interpolation diagnostic parity with C++ hints, notes, range choices, unicode scalar validation, escape-note text, rune-overflow help, and byte-literal ASCII checks.
 - Normalized identifier token values at the same point as C++ `LexerImpl::ScanIdentifierContinue`, now through `utils.NFC`.
