@@ -95,5 +95,6 @@ public func PreCheckPackage(ctx: ASTContext, pkg: Package): Bool {
             valid = collectDecl(ctx, decl) && valid
         }
     }
+    PreSetDeclType(TypeManager(), ctx)
     return valid
 }

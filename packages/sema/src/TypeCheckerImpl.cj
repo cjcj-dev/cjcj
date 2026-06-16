@@ -171,6 +171,54 @@ public class TypeCheckerImpl {
             idx++
         }
     }
+
+    public func GetTyFromASTType(ctx: ASTContext, node: Option<Node>): Ty {
+        return GetTyFromASTNode(typeManager, ctx, node)
+    }
+
+    public func GetTyFromASTType(ctx: ASTContext, node: Node): Ty {
+        return GetTyFromASTNode(typeManager, ctx, node)
+    }
+
+    public func GetTyFromASTDecl(decl: Decl, typeArgs: ArrayList<Ty>): Ty {
+        return GetTyFromASTDecl(typeManager, decl, typeArgs)
+    }
+
+    public func SetDeclTy(decl: Decl): Unit {
+        SetDeclTy(typeManager, decl)
+    }
+
+    public func SetTypeAliasDeclTy(ctx: ASTContext, tad: TypeAliasDecl): Unit {
+        SetTypeAliasDeclTy(typeManager, ctx, tad)
+    }
+
+    public func ResolveOneDecl(ctx: ASTContext, decl: Decl): Unit {
+        ResolveOneDecl(typeManager, ctx, decl)
+    }
+
+    public func ResolveDecls(ctx: ASTContext): Unit {
+        ResolveDecls(typeManager, ctx)
+    }
+
+    public func ResolveTypeAlias(ctx: ASTContext): Unit {
+        ResolveTypeAlias(typeManager, ctx)
+    }
+
+    public func SetTypeTy(ctx: ASTContext, typeNode: Type): Unit {
+        SetTypeTy(typeManager, ctx, typeNode)
+    }
+
+    public func SubstituteTypeAliasForAlias(tad: TypeAliasDecl): Unit {
+        SubstituteTypeAliasForAlias(typeManager, tad)
+    }
+
+    public func ResolveNames(ctx: ASTContext): Unit {
+        ResolveNames(typeManager, ctx)
+    }
+
+    public func PreSetDeclType(ctx: ASTContext): Unit {
+        PreSetDeclType(typeManager, ctx)
+    }
 }
 
 public func SelfhostPortStatus_TypeCheckerImpl(): Bool {
