@@ -1,5 +1,8 @@
 package cangjie_compiler::utils
 
+import cangjie_compiler::basic.JoinStrings as BasicJoinStrings
+import cangjie_compiler::basic.SplitQualifiedName as BasicSplitQualifiedName
+import cangjie_compiler::basic.SplitString as BasicSplitString
 import std.collection.*
 import std.convert.*
 
@@ -303,55 +306,15 @@ public func RemoveFromVec<T>(values: ArrayList<T>, item: T): Unit where T <: Equ
 }
 
 public func SplitString(str: String, delimiter: String): Array<String> {
-    if (str.isEmpty()) {
-        return Array<String>()
-    }
-    if (delimiter.isEmpty()) {
-        return [str]
-    }
-    let res = ArrayList<String>()
-    var pos: Int64 = 0
-    var foundPos = str.indexOf(delimiter)
-    while (let Some(found) <- foundPos) {
-        res.add(str[pos..found])
-        pos = found + delimiter.size
-        foundPos = str.indexOf(delimiter, pos)
-    }
-    if (pos < str.size) {
-        res.add(str[pos..])
-    } else if (pos == str.size) {
-        res.add("")
-    }
-    return res.toArray()
+    return BasicSplitString(str, delimiter)
 }
 
 public func SplitQualifiedName(qualifiedName: String, splitDc!: Bool = false): Array<String> {
-    let names = ArrayList<String>()
-    var idx: Int64 = 0
-    if (splitDc) {
-        if (let Some(next) <- qualifiedName.indexOf("::")) {
-            names.add(qualifiedName[0..next])
-            idx = next + 2
-        }
-    }
-    while (idx < qualifiedName.size) {
-        if (qualifiedName[idx] == b'.') {
-            idx++
-        } else if (qualifiedName[idx] == b'`') {
-            let next = qualifiedName.indexOf("`", idx + 1) ?? qualifiedName.size
-            names.add(qualifiedName[idx + 1..next])
-            idx = if (next == qualifiedName.size) { next } else { next + 1 }
-        } else {
-            let next = qualifiedName.indexOf(".", idx + 1) ?? qualifiedName.size
-            names.add(qualifiedName[idx..next])
-            idx = next
-        }
-    }
-    return names.toArray()
+    return BasicSplitQualifiedName(qualifiedName, splitDc: splitDc)
 }
 
 public func JoinStrings(strs: Array<String>, delimiter: String): String {
-    return String.join(strs, delimiter: delimiter)
+    return BasicJoinStrings(strs, delimiter)
 }
 
 public func StrToLower(str: String): String {
@@ -386,7 +349,7 @@ public func OverflowStrategyName(strategy: OverflowStrategy): String {
     return "no"
 }
 
-public func TryParseInt(str: String): Option<Int64> {
+public func TryParseInt(str: String): Option<Int32> {
     if (str.isEmpty()) {
         return None
     }
@@ -395,7 +358,10 @@ public func TryParseInt(str: String): Option<Int64> {
             return None
         }
     }
-    return Stoi(str)
+    if (let Some(value) <- Stoi(str)) {
+        return Int32(value)
+    }
+    return None
 }
 
 @When[os == "Windows"]

@@ -76,6 +76,14 @@ private func isValidBase(base: Int64): Bool {
     return base == 0 || (base >= 2 && base <= 36)
 }
 
+private func hasHexPrefixWithDigit(s: String, idx: Int64): Bool {
+    if (idx + 2 >= s.size || s[idx] != b'0' || (s[idx + 1] != b'x' && s[idx + 1] != b'X')) {
+        return false
+    }
+    let digit = digitValue(s[idx + 2])
+    return digit >= 0 && digit < 16
+}
+
 private func skipLeadingSpace(s: String): Int64 {
     var idx: Int64 = 0
     while (idx < s.size && isAsciiSpace(s[idx])) {
@@ -99,7 +107,7 @@ private func parseMagnitude(s: String, base: Int64): Option<(Bool, UInt64)> {
     }
     var actualBase = base
     if (actualBase == 0) {
-        if (idx + 1 < s.size && s[idx] == b'0' && (s[idx + 1] == b'x' || s[idx + 1] == b'X')) {
+        if (hasHexPrefixWithDigit(s, idx)) {
             actualBase = 16
             idx += 2
         } else if (idx < s.size && s[idx] == b'0') {
@@ -107,8 +115,7 @@ private func parseMagnitude(s: String, base: Int64): Option<(Bool, UInt64)> {
         } else {
             actualBase = 10
         }
-    } else if (actualBase == 16 && idx + 1 < s.size && s[idx] == b'0' &&
-        (s[idx + 1] == b'x' || s[idx + 1] == b'X')) {
+    } else if (actualBase == 16 && hasHexPrefixWithDigit(s, idx)) {
         idx += 2
     }
     var consumed = false
