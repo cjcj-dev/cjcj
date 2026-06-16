@@ -51,6 +51,12 @@ public open class Decl <: Node {
         return TestAttr(first) || TestAttr(second) || TestAttr(third)
     }
 
+    public func GetAttrs(): ArrayList<Attribute> {
+        let out = ArrayList<Attribute>()
+        for (attr in attributes) { out.add(attr) }
+        return out
+    }
+
     public func HasAnno(kind: AnnotationKind): Bool {
         for (anno in annotations) {
             if (anno.kind == kind) {

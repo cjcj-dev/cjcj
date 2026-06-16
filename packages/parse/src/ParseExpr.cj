@@ -261,6 +261,9 @@ extend ParserImpl {
             arg.name = ParseIdentifierFromToken(first)
             Next()
             arg.colonPos = Expect(TokenKind.COLON, "expected ':' after argument name").Begin()
+        } else if (Skip(TokenKind.INOUT)) {
+            arg.withInout = true
+            arg.inoutPos = lastToken.Begin()
         }
         arg.expr = ParseExpr(ExprKind.EXPR_IN_CALLSUFFIX)
         arg.begin = first.Begin()
@@ -308,7 +311,7 @@ extend ParserImpl {
     }
 
     public func CheckIfSeeingDecl(scopeKind: ScopeKind): Bool {
-        return SeeingDecl() || SeeingImport()
+        return SeeingDeclInScope(scopeKind) || SeeingImport()
     }
 
     public func ParseIfExpr(): IfExpr {
@@ -318,6 +321,9 @@ extend ParserImpl {
         ret.begin = token.Begin()
         ret.leftParenPos = Expect(TokenKind.LPAREN, "expected '(' after if").Begin()
         ret.condExpr = ParseExpr(ExprKind.IF_COND_EXPR)
+        if (let Some(cond) <- ret.condExpr) {
+            CheckCondition(cond)
+        }
         ret.rightParenPos = Expect(TokenKind.RPAREN, "expected ')' after if condition").Begin()
         ret.thenBody = ParseBlock(ScopeKind.FUNC_BODY)
         if (Skip(TokenKind.ELSE)) {
@@ -633,6 +639,9 @@ extend ParserImpl {
         ret.begin = token.Begin()
         Expect(TokenKind.LPAREN, "expected '(' after while")
         ret.condExpr = ParseExpr(ExprKind.WHILE_COND_EXPR)
+        if (let Some(cond) <- ret.condExpr) {
+            CheckCondition(cond)
+        }
         Expect(TokenKind.RPAREN, "expected ')' after while condition")
         ret.body = ParseBlock(ScopeKind.FUNC_BODY)
         if (let Some(body) <- ret.body) { ret.end = body.end }
@@ -768,16 +777,20 @@ extend ParserImpl {
     }
 
     public func ParseLambdaExprWithTrailingClosure(): LambdaExpr {
-        return ParseLambdaExpr()
+        return ParseLambdaExpr(true)
     }
 
     public func ParseLambdaExpr(): LambdaExpr {
+        return ParseLambdaExpr(false)
+    }
+
+    public func ParseLambdaExpr(isTailClosure: Bool): LambdaExpr {
         let lambda = LambdaExpr()
         lambda.begin = Peek().Begin()
         let body = FuncBody()
         if (Skip(TokenKind.LCURL)) {
             let paramList = FuncParamList()
-            if (!Seeing(TokenKind.DOUBLE_ARROW)) {
+            if (!Seeing(TokenKind.DOUBLE_ARROW) && !SeeingInvalidParamListInLambdaExpr()) {
                 while (!Seeing(TokenKind.END) && !Seeing(TokenKind.DOUBLE_ARROW) && !Seeing(TokenKind.RCURL)) {
                     paramList.params.add(ParseFuncParam())
                     if (!Skip(TokenKind.COMMA)) { break }
@@ -785,6 +798,9 @@ extend ParserImpl {
             }
             if (Skip(TokenKind.DOUBLE_ARROW)) {
                 body.paramLists.add(paramList)
+            } else if (!paramList.params.isEmpty() && !isTailClosure) {
+                diag.DiagnoseRefactor(DiagKindRefactor.EXPECTED_TOKEN, Peek().Begin(), "expected '=>' in lambda expression")
+                lambda.isBroken = true
             }
             let block = Block()
             block.leftCurlPos = lambda.begin
@@ -801,5 +817,35 @@ extend ParserImpl {
             lambda.end = block.end
         }
         return lambda
+    }
+
+    public func CheckCondition(expr: Expr): Bool {
+        if (let Some(paren) <- (expr as ParenExpr)) {
+            if (let Some(child) <- paren.expr) {
+                return CheckCondition(child)
+            }
+            return false
+        }
+        if (expr.astKind == ASTKind.LET_PATTERN_DESTRUCTOR) {
+            return true
+        }
+        if (let Some(binary) <- (expr as BinaryExpr)) {
+            var hasSubCondition = false
+            if (let Some(left) <- binary.leftExpr) {
+                hasSubCondition = CheckCondition(left)
+            }
+            if (let Some(right) <- binary.rightExpr) {
+                hasSubCondition = CheckCondition(right) || hasSubCondition
+            }
+            if (hasSubCondition && binary.op.kind != TokenKind.AND && binary.op.kind != TokenKind.OR) {
+                diag.DiagnoseRefactor(
+                    DiagKindRefactor.PARSE_ERROR,
+                    binary.op.Begin(),
+                    "let-pattern conditions can only be combined with '&&' or '||'")
+                binary.isBroken = true
+            }
+            return hasSubCondition
+        }
+        return false
     }
 }

@@ -186,7 +186,13 @@ extend ParserImpl {
     }
 
     public func SeeingDecl(): Bool {
-        return (SeeingModifier() && !Seeing([TokenKind.UNSAFE, TokenKind.LCURL])) ||
+        return SeeingDeclInScope(ScopeKind.UNKNOWN_SCOPE)
+    }
+
+    public func SeeingDeclInScope(scopeKind: ScopeKind): Bool {
+        let seeingScopedSpecial = ((scopeKind == ScopeKind.CLASS_BODY) && SeeingFinalizer()) ||
+            SeeingPrimaryConstructor(scopeKind)
+        return seeingScopedSpecial || (SeeingModifier() && !Seeing([TokenKind.UNSAFE, TokenKind.LCURL])) ||
             SeeingAny([TokenKind.FUNC, TokenKind.MACRO, TokenKind.LET, TokenKind.VAR,
             TokenKind.CONST, TokenKind.ENUM, TokenKind.TYPE, TokenKind.STRUCT, TokenKind.CLASS,
             TokenKind.INTERFACE, TokenKind.MAIN, TokenKind.EXTEND, TokenKind.PROP, TokenKind.INIT])
@@ -204,6 +210,8 @@ extend ParserImpl {
         if (Seeing(TokenKind.AT) || Seeing(TokenKind.AT_EXCL)) {
             return ParseMacroCallDeclInput(scopeKind, modifiers, annos)
         }
+        if (SeeingFinalizer()) { return ParseFinalizer(scopeKind, modifiers, annos) }
+        if (SeeingPrimaryConstructor(scopeKind)) { return ParsePrimaryConstructor(scopeKind, modifiers, annos) }
         if (Seeing(TokenKind.FUNC)) { return ParseFuncDecl(scopeKind, modifiers, annos) }
         if (Seeing(TokenKind.MACRO)) { return ParseMacroDecl(scopeKind, modifiers, annos) }
         if (Seeing(TokenKind.MAIN)) { return ParseMainDecl(scopeKind, modifiers, annos) }
@@ -457,7 +465,9 @@ extend ParserImpl {
     public func ParseClassDecl(scopeKind: ScopeKind, modifiers: ArrayList<Modifier>, annos: ArrayList<Annotation>): ClassDecl {
         let ret = ClassDecl()
         ParseInheritableHeader(ret, TokenKind.CLASS, modifiers, annos)
+        SetPrimaryDecl(ret.identifier.Val())
         ParseClassLikeBody(ret, ScopeKind.CLASS_BODY)
+        RevertPrimaryDecl()
         return ret
     }
 
@@ -471,7 +481,9 @@ extend ParserImpl {
     public func ParseStructDecl(scopeKind: ScopeKind, modifiers: ArrayList<Modifier>, annos: ArrayList<Annotation>): StructDecl {
         let ret = StructDecl()
         ParseInheritableHeader(ret, TokenKind.STRUCT, modifiers, annos)
+        SetPrimaryDecl(ret.identifier.Val())
         ParseClassLikeBody(ret, ScopeKind.STRUCT_BODY)
+        RevertPrimaryDecl()
         return ret
     }
 
@@ -486,7 +498,7 @@ extend ParserImpl {
                     let ctor = ParseEnumConstructor(ArrayList<Modifier>(), localAnnos)
                     ctor.outerDecl = ret
                     ret.constructors.add(ctor)
-                } else if (SeeingDecl()) {
+                } else if (SeeingDeclInScope(ScopeKind.ENUM_BODY)) {
                     let member = ParseDecl(ScopeKind.ENUM_BODY)
                     member.outerDecl = ret
                     ret.bodyDecls.add(member)
@@ -545,7 +557,7 @@ extend ParserImpl {
             return
         }
         while (!Seeing(TokenKind.END) && !Seeing(TokenKind.RCURL)) {
-            if (SeeingDecl() || Seeing(TokenKind.AT) || Seeing(TokenKind.AT_EXCL)) {
+            if (SeeingDeclInScope(scopeKind) || Seeing(TokenKind.AT) || Seeing(TokenKind.AT_EXCL)) {
                 let member = ParseDecl(scopeKind)
                 member.outerDecl = ret
                 ret.bodyDecls.add(member)
@@ -632,6 +644,79 @@ extend ParserImpl {
         ret.begin = if (ret.begin.IsZero()) { key.Begin() } else { ret.begin }
         ret.funcBody = ParseFuncBody(scopeKind)
         if (let Some(body) <- ret.funcBody) { ret.end = body.end }
+        return ret
+    }
+
+    public func ParseFinalizer(scopeKind: ScopeKind, modifiers: ArrayList<Modifier>, annos: ArrayList<Annotation>): FuncDecl {
+        let ret = FuncDecl()
+        ApplyModifiersAndAnnotations(ret, modifiers, annos)
+        let tilde = Expect(TokenKind.BITNOT, "expected '~' before finalizer")
+        let initTok = Expect(TokenKind.INIT, "expected 'init' after '~'")
+        ret.keywordPos = initTok.Begin()
+        ret.identifier = SrcIdentifier("~init", "~init", tilde.Begin(), initTok.End(), false)
+        ret.EnableAttr(Attribute.FINALIZER)
+        ret.begin = if (ret.begin.IsZero()) { tilde.Begin() } else { ret.begin }
+        ret.funcBody = ParseFuncBody(scopeKind)
+        if (let Some(body) <- ret.funcBody) {
+            if (!body.paramLists.isEmpty() && !body.paramLists[0].params.isEmpty()) {
+                diag.DiagnoseRefactor(
+                    DiagKindRefactor.PARSE_ERROR,
+                    body.paramLists[0].begin,
+                    "finalizer cannot accept parameters")
+                ret.EnableAttr(Attribute.IS_BROKEN)
+            }
+            if (let Some(retType) <- body.retType) {
+                diag.DiagnoseRefactor(
+                    DiagKindRefactor.PARSE_ERROR,
+                    retType.begin,
+                    "finalizer cannot declare a return type")
+                ret.EnableAttr(Attribute.IS_BROKEN)
+            }
+            ret.end = body.end
+        }
+        return ret
+    }
+
+    public func ParsePrimaryConstructor(scopeKind: ScopeKind, modifiers: ArrayList<Modifier>, annos: ArrayList<Annotation>): PrimaryCtorDecl {
+        let ret = PrimaryCtorDecl()
+        ApplyModifiersAndAnnotations(ret, modifiers, annos)
+        let id = ExpectIdentifierWithPos(ret)
+        ret.identifier = id
+        ret.keywordPos = id.Begin()
+        ret.begin = if (ret.begin.IsZero()) { id.Begin() } else { ret.begin }
+        if (!curPrimaryDeclIdent.isEmpty() && id.Val() != curPrimaryDeclIdent) {
+            diag.DiagnoseRefactor(
+                DiagKindRefactor.EXPECTED_IDENTIFIER,
+                id.Begin(),
+                "expected primary constructor name '${curPrimaryDeclIdent}'")
+            ret.EnableAttr(Attribute.IS_BROKEN)
+        }
+        let bodyScope = if (scopeKind == ScopeKind.STRUCT_BODY) {
+            ScopeKind.PRIMARY_CONSTRUCTOR_BODY_FOR_STRUCT
+        } else {
+            ScopeKind.PRIMARY_CONSTRUCTOR_BODY_FOR_CLASS
+        }
+        ret.funcBody = ParseFuncBody(bodyScope)
+        ret.EnableAttr(Attribute.CONSTRUCTOR)
+        ret.EnableAttr(Attribute.PRIMARY_CONSTRUCTOR)
+        if (scopeKind == ScopeKind.STRUCT_BODY) {
+            ret.EnableAttr(Attribute.IN_STRUCT)
+        } else {
+            ret.EnableAttr(Attribute.IN_CLASSLIKE)
+        }
+        if (ret.HasModifier(ModifierKind.CONST)) {
+            ret.isConst = true
+        }
+        if (let Some(body) <- ret.funcBody) {
+            if (let Some(retType) <- body.retType) {
+                diag.DiagnoseRefactor(
+                    DiagKindRefactor.PARSE_ERROR,
+                    retType.begin,
+                    "primary constructor cannot declare a return type")
+                ret.EnableAttr(Attribute.IS_BROKEN)
+            }
+            ret.end = body.end
+        }
         return ret
     }
 }

@@ -55,15 +55,24 @@ extend LitConstKind <: Equatable<LitConstKind> {
 public class LitConstExpr <: Expr {
     public var kind: LitConstKind = LitConstKind.INTEGER
     public var stringValue: String = ""
+    public var rawString: String = ""
     public var tokenKind: TokenKind = TokenKind.ILLEGAL
+    public var siExpr: Option<StrInterpolationExpr> = None
 
     public init(kind: LitConstKind, token: Token) {
         super(ASTKind.LIT_CONST_EXPR)
         this.kind = kind
         stringValue = token.Value()
+        rawString = token.Value()
         tokenKind = token.kind
         begin = token.Begin()
         end = token.End()
+    }
+
+    public override func Children(): ArrayList<Node> {
+        let out = ArrayList<Node>()
+        if (let Some(expr) <- siExpr) { out.add(expr) }
+        return out
     }
 
     public override func ToString(): String { return stringValue }
@@ -138,6 +147,8 @@ public class FuncArg <: Node {
     public var colonPos: Position = INVALID_POSITION
     public var expr: Option<Expr> = None
     public var commaPos: Position = INVALID_POSITION
+    public var withInout: Bool = false
+    public var inoutPos: Position = INVALID_POSITION
 
     public init() { super(ASTKind.FUNC_ARG) }
 
@@ -437,6 +448,38 @@ public class MatchExpr <: Expr {
         for (matchCaseOther in matchCaseOthers) { out.add(matchCaseOther) }
         return out
     }
+}
+
+public class InterpolationExpr <: Expr {
+    public var rawString: String = ""
+    public var dollarPos: Position = INVALID_POSITION
+    public var block: Option<Block> = None
+
+    public init() { super(ASTKind.INTERPOLATION_EXPR) }
+
+    public override func Children(): ArrayList<Node> {
+        let out = ArrayList<Node>()
+        if (let Some(value) <- block) { out.add(value) }
+        return out
+    }
+
+    public override func ToString(): String { return rawString }
+}
+
+public class StrInterpolationExpr <: Expr {
+    public var rawString: String = ""
+    public let strParts: ArrayList<StringPart> = ArrayList<StringPart>()
+    public let strPartExprs: ArrayList<Expr> = ArrayList<Expr>()
+
+    public init() { super(ASTKind.STR_INTERPOLATION_EXPR) }
+
+    public override func Children(): ArrayList<Node> {
+        let out = ArrayList<Node>()
+        for (expr in strPartExprs) { out.add(expr) }
+        return out
+    }
+
+    public override func ToString(): String { return rawString }
 }
 
 public class Handler {

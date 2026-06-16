@@ -14,9 +14,9 @@ extend ParserImpl {
         if (Seeing(TokenKind.LPAREN)) {
             return ParseTuplePattern(false, attributes, isVar, inDecl)
         }
-        if (SeeingLiteral()) {
+        if (SeeingLiteral() || Seeing(TokenKind.SUB)) {
             let constPat = ConstPattern()
-            constPat.literal = ParseLitConst()
+            constPat.literal = if (Seeing(TokenKind.SUB)) { ParseNegativeLiteral() } else { ParseLitConst() }
             if (let Some(expr) <- constPat.literal) {
                 constPat.begin = expr.begin
                 constPat.end = expr.end

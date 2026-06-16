@@ -90,6 +90,11 @@ public class ParserImpl {
         curPrimaryDeclIdent = decl
     }
 
+    public func RevertPrimaryDecl(): Unit {
+        curPrimaryDeclIdent = lastPrimaryDeclIdent
+        lastPrimaryDeclIdent = ""
+    }
+
     public func SetForImport(isForImport: Bool): ParserImpl {
         forImport = isForImport
         return this
