@@ -56,8 +56,7 @@ public class ASTCacheCalculator {
     }
 
     private func WalkDecl(decl: IncrDecl): Unit {
-        if (decl.astKind == IncrDeclKind.EXTEND_DECL && decl.constructorMangles.isEmpty() &&
-            decl.HasExtendedTypeMangle()) {
+        if (decl.IsDirectExtend()) {
             decl.rawMangleName = MangleDecl(decl)
             if (!directExtends.contains(decl.rawMangleName)) {
                 directExtends[decl.rawMangleName] = ArrayList<DirectExtendEntry>()

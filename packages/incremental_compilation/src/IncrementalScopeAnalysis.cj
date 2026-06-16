@@ -248,6 +248,7 @@ private class ImportPackageWalker {
             }
             for (decl in decls) {
                 result.importedASTCache[decl.rawMangleName] = walker.VisitTopLevel(decl, result.importedMangled2Decl)
+                walker.ResolveInheritedTypeDecls(decl, result.importedMangled2Decl)
                 result.importRelations.CollectImportedDeclExtraRelation(decl)
             }
         }
@@ -306,6 +307,19 @@ private class ImportPackageWalker {
         }
         for (member in GetMembers(decl)) {
             RegisterDeclAndMembers(member, map)
+        }
+    }
+
+    private func ResolveInheritedTypeDecls(decl: IncrDecl, map: RawMangled2DeclMap): Unit {
+        for (rawMangle in decl.inheritedTypeMangles) {
+            if (let Some(parent) <- map.get(rawMangle)) {
+                if (!decl.inheritedTypes.contains(parent)) {
+                    decl.inheritedTypes.add(parent)
+                }
+            }
+        }
+        for (member in GetMembers(decl)) {
+            ResolveInheritedTypeDecls(member, map)
         }
     }
 
@@ -373,7 +387,15 @@ private class ImportPackageWalker {
             return !decl.hasInitializer
         }
         if (decl.astKind == IncrDeclKind.FUNC_DECL) {
-            return !decl.hasBody
+            if (decl.hasBody) {
+                return false
+            }
+            for (desugarDecl in decl.defaultParamDesugarDecls) {
+                if (desugarDecl.hasBody) {
+                    return false
+                }
+            }
+            return true
         }
         return false
     }

@@ -69,8 +69,13 @@ public class TypeMap {
         if (!decl.IsNominalDecl()) {
             return
         }
-        if (let Some(extendedType) <- decl.extendedTypeMangle) {
-            AddExtend(extendedType, decl.rawMangleName)
+        for (parent in decl.inheritedTypes) {
+            AddParent(parent, decl)
+        }
+        if (decl.astKind == IncrDeclKind.EXTEND_DECL) {
+            if (let Some(extendedType) <- decl.extendedTypeMangle) {
+                AddExtend(extendedType, decl.rawMangleName)
+            }
         }
     }
 
@@ -305,6 +310,68 @@ private class PollutedOtherUseRecord {
     public var box: Bool = false
 }
 
+private func TruncateDeletedExtendMangledName(name: String): Option<String> {
+    if (name.contains("7Extend!")) {
+        return None
+    }
+    if (let Some(pos) <- name.indexOf("<:")) {
+        return Some(name[0..pos])
+    }
+    return None
+}
+
+private func IsDigitByte(byte: UInt8): Bool {
+    return byte >= b'0' && byte <= b'9'
+}
+
+private func LastPackageSeparatorBefore(bytes: Array<UInt8>, end: Int64): Int64 {
+    if (end <= 0) {
+        return 0
+    }
+    var idx = end - 1
+    while (idx >= 0) {
+        if (bytes[idx] == b'.') {
+            return idx + 1
+        }
+        if (idx == 0) {
+            break
+        }
+        idx--
+    }
+    return 0
+}
+
+private func GenericBoundary(bytes: Array<UInt8>): Int64 {
+    var idx: Int64 = 0
+    while (idx < bytes.size) {
+        if (bytes[idx] == b'<') {
+            return idx
+        }
+        idx++
+    }
+    return bytes.size
+}
+
+private func BytesToString(bytes: Array<UInt8>, begin: Int64, end: Int64): String {
+    let builder = StringBuilder()
+    var idx = begin
+    while (idx < end) {
+        builder.append(String.fromUtf8([bytes[idx]]))
+        idx++
+    }
+    return builder.toString()
+}
+
+private func GetIdentifierFromTruncatedName(mangle: String): String {
+    let bytes = mangle.toArray()
+    let end = GenericBoundary(bytes)
+    var begin = LastPackageSeparatorBefore(bytes, end)
+    while (begin < end && IsDigitByte(bytes[begin])) {
+        begin++
+    }
+    return BytesToString(bytes, begin, end)
+}
+
 public class PollutionAnalyzer {
     private var p: ChangePollutedMap
     private var t: TypeMap
@@ -429,8 +496,15 @@ public class PollutionAnalyzer {
 
     public func AddToPollutedDecls(decl: IncrDecl): Unit {
         pollutedDecls.add(decl)
-        if (decl.astKind == IncrDeclKind.VAR_WITH_PATTERN_DECL) {
-            for (member in decl.members) {
+        if (decl.astKind == IncrDeclKind.FUNC_DECL && decl.IsImported()) {
+            for (desugarDecl in decl.defaultParamDesugarDecls) {
+                if (desugarDecl.rawMangleName.isEmpty() && !desugarDecl.mangledName.isEmpty()) {
+                    desugarDecl.rawMangleName = desugarDecl.mangledName
+                }
+                AddToPollutedDecls(desugarDecl)
+            }
+        } else if (decl.astKind == IncrDeclKind.VAR_WITH_PATTERN_DECL) {
+            for (member in GetMembers(decl)) {
                 if (member.astKind == IncrDeclKind.VAR_DECL) {
                     pollutedDecls.add(member)
                 }
@@ -515,7 +589,7 @@ public class PollutionAnalyzer {
     }
 
     public func AdditionPollutionForAddedExtendDecl(decl: IncrDecl): Unit {
-        if (GetMembers(decl).isEmpty()) {
+        if (decl.IsDirectExtend() && GetMembers(decl).isEmpty()) {
             return
         }
         AdditionPollutionAPIOfExtendedDecl(decl)
@@ -535,6 +609,21 @@ public class PollutionAnalyzer {
                         PollutedInstantiationChangeFromDecl(extendDecl)
                     }
                 }
+            }
+        } else if (let Some(truncatedExtendName) <- TruncateDeletedExtendMangledName(mangle)) {
+            let identifier = GetIdentifierFromTruncatedName(truncatedExtendName)
+            var foundCandidate = false
+            for ((_, decl) in mangled2Decl) {
+                if (decl.identifier == identifier && decl.IsNominalDecl() &&
+                    decl.astKind != IncrDeclKind.EXTEND_DECL) {
+                    foundCandidate = true
+                    AddToPollutedDecls(decl)
+                    PolluteBoxUsesFromDecl(decl)
+                    PollutedInstantiationChangeFromDecl(decl)
+                }
+            }
+            if (!foundCandidate) {
+                PollutedToBoxUses(identifier)
             }
         }
         for (extendDecl in FindAllExtendDeclsOfType(mangle)) {
@@ -578,7 +667,19 @@ public class PollutionAnalyzer {
             }
             record.body = true
             if (decl.astKind == IncrDeclKind.EXTEND_DECL) {
-                AdditionPollutionAPIOfExtendedDecl(decl)
+                if (let Some(extendedTypeRawMangleName) <- GetExtendedTypeRawMangleName(decl)) {
+                    if (let Some(extendedTypeDecl) <- mangled2Decl.get(extendedTypeRawMangleName)) {
+                        if (extendedTypeDecl.IsNominalDecl() && extendedTypeDecl.astKind != IncrDeclKind.EXTEND_DECL) {
+                            PollutionForBodyChangedDecl(extendedTypeDecl)
+                        }
+                    } else {
+                        for (extendName in t.GetAllExtendsOfType(extendedTypeRawMangleName)) {
+                            if (let Some(extendOfBuiltinDecl) <- mangled2Decl.get(extendName)) {
+                                AddToPollutedDecls(extendOfBuiltinDecl)
+                            }
+                        }
+                    }
+                }
                 AdditionPollutionForBodyChangedExtendDecl(decl)
             }
             if (decl.astKind == IncrDeclKind.CLASS_DECL) {
@@ -1019,8 +1120,10 @@ public class PollutionAnalyzer {
             }
         }
         for (extendDecl in FindAllExtendDeclsOfType(mangle)) {
-            AddToPollutedDecls(extendDecl)
-            PolluteCHIROptAffectDecl(extendDecl)
+            if (!extendDecl.IsDirectExtend()) {
+                AddToPollutedDecls(extendDecl)
+                PolluteCHIROptAffectDecl(extendDecl)
+            }
         }
     }
 

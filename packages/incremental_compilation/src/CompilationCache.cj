@@ -251,6 +251,9 @@ public class IncrDecl <: Hashable & Equatable<IncrDecl> {
     public let enumConstructorMangles: ArrayList<String> = ArrayList<String>()
     public let sourceImportedTargets: HashSet<IncrDecl> = HashSet<IncrDecl>()
     public let sourceImportedTargetMangles: HashSet<String> = HashSet<String>()
+    public let defaultParamDesugarDecls: ArrayList<IncrDecl> = ArrayList<IncrDecl>()
+    public let inheritedTypes: ArrayList<IncrDecl> = ArrayList<IncrDecl>()
+    public let inheritedTypeMangles: ArrayList<String> = ArrayList<String>()
     public var outerDecl: Option<IncrDecl> = None
     public var extendedTypeMangle: Option<String> = None
     public var extendedTypeIdentifier: String = ""
@@ -263,6 +266,8 @@ public class IncrDecl <: Hashable & Equatable<IncrDecl> {
     public var isFinalizer: Bool = false
     public var isConstValue: Bool = false
     public var hasEllipsis: Bool = false
+    public var isGetter: Bool = false
+    public var isSetter: Bool = false
     public var toBeCompiled: Bool = false
     public var cgMangle: String = ""
     public var cacheHash: DeclHashInfo = DeclHashInfo()
@@ -327,6 +332,23 @@ public class IncrDecl <: Hashable & Equatable<IncrDecl> {
     public func AddSourceImportedTargetMangle(rawMangle: String): Unit {
         if (!rawMangle.isEmpty()) {
             sourceImportedTargetMangles.add(rawMangle)
+        }
+    }
+
+    public func AddDefaultParamDesugarDecl(decl: IncrDecl): Unit {
+        defaultParamDesugarDecls.add(decl)
+    }
+
+    public func AddInheritedType(parent: IncrDecl): Unit {
+        inheritedTypes.add(parent)
+        if (!parent.rawMangleName.isEmpty()) {
+            inheritedTypeMangles.add(parent.rawMangleName)
+        }
+    }
+
+    public func AddInheritedTypeMangle(rawMangle: String): Unit {
+        if (!rawMangle.isEmpty()) {
+            inheritedTypeMangles.add(rawMangle)
         }
     }
 
@@ -404,7 +426,8 @@ public class IncrDecl <: Hashable & Equatable<IncrDecl> {
     }
 
     public func IsDirectExtend(): Bool {
-        return astKind == IncrDeclKind.EXTEND_DECL && HasExtendedTypeMangle() && constructorMangles.isEmpty()
+        return astKind == IncrDeclKind.EXTEND_DECL && HasExtendedTypeMangle() &&
+            inheritedTypes.isEmpty() && inheritedTypeMangles.isEmpty()
     }
 
     public func DisplayName(): String {

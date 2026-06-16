@@ -34,11 +34,23 @@ public func IsTyped(decl: IncrDecl): Bool {
     if (decl.TestAttr(IncrAttribute.ENUM_CONSTRUCTOR)) {
         return true
     }
-    if (decl.astKind == IncrDeclKind.VAR_WITH_PATTERN_DECL || decl.astKind == IncrDeclKind.VAR_DECL ||
-        decl.astKind == IncrDeclKind.FUNC_DECL || decl.astKind == IncrDeclKind.FUNC_PARAM ||
-        decl.astKind == IncrDeclKind.PRIMARY_CTOR_DECL) {
-        return decl.hasExplicitType || decl.IsImported() || decl.TestAttr(IncrAttribute.CONSTRUCTOR) ||
-            decl.isFinalizer
+    if (decl.astKind == IncrDeclKind.VAR_WITH_PATTERN_DECL) {
+        return decl.hasExplicitType || decl.IsImported()
+    }
+    if (decl.astKind == IncrDeclKind.VAR_DECL || decl.astKind == IncrDeclKind.FUNC_PARAM) {
+        if (let Some(parent) <- decl.outerDecl) {
+            if (parent.astKind == IncrDeclKind.VAR_WITH_PATTERN_DECL) {
+                return IsTyped(parent)
+            }
+        }
+        return decl.hasExplicitType || decl.IsImported()
+    }
+    if (decl.astKind == IncrDeclKind.FUNC_DECL) {
+        return decl.hasExplicitType || decl.isGetter || decl.isSetter ||
+            decl.TestAttr(IncrAttribute.CONSTRUCTOR) || decl.isFinalizer
+    }
+    if (decl.astKind == IncrDeclKind.PRIMARY_CTOR_DECL) {
+        return decl.hasExplicitType || decl.TestAttr(IncrAttribute.CONSTRUCTOR)
     }
     return true
 }
@@ -104,11 +116,14 @@ public func GetAllMembers(decl: IncrDecl): ArrayList<IncrDecl> {
 
 public func IsOOEAffectedDecl(decl: IncrDecl): Bool {
     if (decl.astKind == IncrDeclKind.VAR_DECL || decl.astKind == IncrDeclKind.VAR_WITH_PATTERN_DECL) {
-        return decl.hasInitializer || decl.hasBody || decl.IsConst()
+        return decl.hasInitializer
     }
-    if (decl.astKind == IncrDeclKind.FUNC_DECL || decl.astKind == IncrDeclKind.PRIMARY_CTOR_DECL ||
-        decl.astKind == IncrDeclKind.MACRO_DECL || decl.astKind == IncrDeclKind.MAIN_DECL) {
+    if (decl.astKind == IncrDeclKind.FUNC_DECL) {
         return decl.hasBody
+    }
+    if (decl.astKind == IncrDeclKind.MACRO_DECL || decl.astKind == IncrDeclKind.MAIN_DECL ||
+        decl.astKind == IncrDeclKind.PRIMARY_CTOR_DECL) {
+        return true
     }
     return false
 }

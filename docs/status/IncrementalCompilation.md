@@ -48,6 +48,13 @@ Implemented:
 - Reworked imported package walking into mangle normalization, recursive imported-decl registration, source-imported
   dependency collection, and cache materialization passes. This mirrors the C++ `ImportPackageWalker` map shape:
   `used decl -> imported decls whose function bodies or variable initializers target it`.
+- Added adapter fields and logic for getter/setter typedness, default-argument desugar functions, inherited type
+  relations, and direct-vs-interface extend classification. These close C++ parity gaps in `IsTyped`,
+  `IsOOEAffectedDecl`, imported body-hash skipping, imported inheritance relation collection, direct-extend cache
+  coalescing, and box/extend pollution.
+- Ported the C++ fallback for deleted imported extend decls: when the cached extend-to-type relation is missing,
+  the analyzer truncates the extend mangle, recovers the candidate type identifier, pollutes matching nominal decls,
+  and falls back to builtin box pollution when no decl exists.
 
 Known gaps:
 
