@@ -41,8 +41,9 @@ Implemented:
   `ArrayBase`, `BitMap`, `TypeInfo`, `TypeTemplate`, `ExtensionDef`, tuples, raw arrays, varrays, and CHIR
   struct/class instance-variable layouts.
 - Added `IRBuilder2` wrappers for selected LLVM builder operations, primitive constants, default literal constants,
-  call and invoke construction, bitcasts, address-space casts, aggregate insertion, GEP construction, unreachable
-  terminators, insertion-point inspection/clearing, and scoped debug-location restoration.
+  call and invoke construction, bitcasts, pointer casts, integer/float extension and truncation, int/float and
+  pointer/int conversions, address-space casts, aggregate insertion, GEP construction, unreachable terminators,
+  insertion-point inspection/clearing, and scoped debug-location restoration.
 - Added a C++-shaped `CGUtils` component for pure CodeGen helpers: basic-block naming, class object layout naming,
   compiler-added class mangling, SipHash/`Out64`-style Cangjie string and constant global names through
   `Utils.HashString64`, reference stripping, and generic/class/struct/varray reference predicates. `IRBuilder2`
@@ -61,7 +62,9 @@ Implemented:
 - Added expression dispatch structure for constants, unary, binary, memory, terminator, and other expression
   families. The current implementation lowers typed constants, unary integer/float operations, signed/unsigned
   and floating binary operations, allocation/load/store/GEP memory expressions, `GOTO`/`BRANCH`/`EXIT`
-  terminators, simple call-like expressions, simple aggregate construction, and basic cast/box/unbox forwarding.
+  terminators, call-like expressions through a C++-shaped `ApplyImpl` component using call-or-invoke emission,
+  tuple/aggregate and varray construction through C++-named component files, and scalar/pointer typecast lowering
+  through a C++-shaped `TypeCastImpl` component with real LLVM numeric conversion op selection.
 - Added a C++-shaped `EmitExpressionIR` component that emits expression sequences through a local `IRBuilder2`,
   sets the insertion function from the top-level CHIR function, dispatches each expression by major kind, and maps
   non-null results back into `CGModule` with sret result tagging.
@@ -84,9 +87,9 @@ Known gaps:
   object/class allocation, precise field and enum layout access, closures, generics, RTTI/type info, package and
   native metadata, full debug metadata attachment, broad exception handling, most checked overflow arithmetic,
   intrinsics, complete
-  array/tuple/object construction, precise casts, C/FFI lowering, incremental generation, native backend-specific
+  array/object construction, full checked casts, C/FFI lowering, incremental generation, native backend-specific
   metadata, and post-generation optimization/cleanup passes.
-- Only 45 `.cj` files are present in this pass, compared with 118 reference CodeGen source/header files. Additional
+- Only 49 `.cj` files are present in this pass, compared with 118 reference CodeGen source/header files. Additional
   C++-named component files still need to be split out for `LICMOptimizer`, LLVM-specific `CGUtils`,
   incremental generation, Cangjie-native metadata, type info, CFFI, and the detailed base
   expression implementation files.
@@ -95,4 +98,4 @@ Known gaps:
 
 Remaining CodeGen selfhost markers: 0.
 
-Current CodeGen package size: 45 `.cj` files, approximately 4387 total lines.
+Current CodeGen package size: 49 `.cj` files, approximately 4629 total lines.
