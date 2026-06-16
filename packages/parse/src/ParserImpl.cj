@@ -249,6 +249,9 @@ public class ParserImpl {
 }
 
 public func IsBuiltinAnnotation(moduleName: String, identifier: String): Bool {
+    if (identifier == "ConstSafe") {
+        return moduleName == "std"
+    }
     return NameToAnnotationKind(identifier) != AnnotationKind.CUSTOM
 }
 
@@ -278,6 +281,8 @@ public func AnnotationKindToString(kind: AnnotationKind): String {
         case AnnotationKind.ENSURE_PREPARED_TO_MOCK => "EnsurePreparedToMock"
         case AnnotationKind.NON_PRODUCT => "NonProduct"
         case AnnotationKind.CUSTOM => "Custom"
+        case AnnotationKind.JAVA => "Java"
+        case AnnotationKind.UNKNOWN => "Unknown"
     }
 }
 

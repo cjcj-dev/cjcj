@@ -137,6 +137,7 @@ public class FuncArg <: Node {
     public var name: SrcIdentifier = SrcIdentifier()
     public var colonPos: Position = INVALID_POSITION
     public var expr: Option<Expr> = None
+    public var commaPos: Position = INVALID_POSITION
 
     public init() { super(ASTKind.FUNC_ARG) }
 
@@ -176,6 +177,11 @@ public class MemberAccess <: Expr {
         if (let Some(base) <- baseExpr) { out.add(base) }
         for (ty in typeArguments) { out.add(ty) }
         return out
+    }
+
+    public override func ToString(): String {
+        let base = if (let Some(value) <- baseExpr) { value.ToString() + "." } else { "" }
+        return base + field.GetRawText()
     }
 }
 

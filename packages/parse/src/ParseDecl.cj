@@ -10,32 +10,179 @@ extend ParserImpl {
         file.begin = Peek().Begin()
         SkipNLOrSemi()
         var pendingAnnos = ArrayList<Annotation>()
-        while (!Seeing(TokenKind.END)) {
-            ParseAnnotations(pendingAnnos)
-            let modifiers = ArrayList<Modifier>()
-            ParseModifiers(modifiers)
-            if (Seeing(TokenKind.PACKAGE)) {
-                file.packageSpec = ParsePackageHeader(modifiers)
-            } else if (Seeing(TokenKind.FEATURES)) {
-                file.features.add(ParseTopLvlFeatures(pendingAnnos))
-            } else if (SeeingImport()) {
-                file.imports.add(ParseImportSpec(pendingAnnos))
-            } else if (SeeingDecl() || Seeing(TokenKind.AT) || Seeing(TokenKind.AT_EXCL)) {
-                let decl = ParseDecl(ScopeKind.TOPLEVEL, modifiers, pendingAnnos)
-                FinalizeDeclTree(decl)
-                file.decls.add(decl)
-            } else {
-                diag.DiagnoseRefactor(DiagKindRefactor.UNEXPECTED_TOKEN, Peek().Begin(), "unexpected token at top level")
-                Next()
-            }
-            pendingAnnos = ArrayList<Annotation>()
-            SkipNLOrSemi()
-        }
+        ParseTopLevelPreamble(file, pendingAnnos)
+        ParseTopLevelDecls(file, pendingAnnos)
         file.end = Peek().End()
         if (enableAttachComment) {
             AttachCommentToFile(file)
         }
         return file
+    }
+
+    private func ParseTopLevelPreamble(file: File, annos: ArrayList<Annotation>): Unit {
+        if (SeeingBuiltinAnnotation()) {
+            ParseAnnotations(annos)
+        }
+        if (Seeing(TokenKind.FEATURES)) {
+            file.features.add(ParseTopLvlFeatures(annos))
+            annos.clear()
+        } else {
+            CheckAndHandleUnexpectedTopLevelDeclAfterFeatures()
+        }
+        if (SeeingBuiltinAnnotation()) {
+            ParseAnnotations(annos)
+        }
+        if (SeeingPackageHeaderAfterModifiers()) {
+            let modifiers = ArrayList<Modifier>()
+            ParseModifiers(modifiers)
+            file.packageSpec = ParsePackageHeader(modifiers)
+            if (!annos.isEmpty()) {
+                diag.DiagnoseRefactor(
+                    DiagKindRefactor.INVALID_ANNOTATION,
+                    annos[0].begin,
+                    "unexpected annotation '${annos[0].identifier.GetRawText()}' on package")
+                annos.clear()
+            }
+            SkipBlank(TokenKind.SEMI)
+        } else {
+            CheckExpectedTopLevelDeclWhenNoPackage(annos)
+        }
+        ParseImportSpecInTop(file.imports, annos)
+    }
+
+    private func ParseTopLevelDecls(file: File, annos: ArrayList<Annotation>): Unit {
+        var topLevelCount: Int64 = 0
+        while (!Seeing(TokenKind.END)) {
+            if (topLevelCount > 0 && !newlineSkipped && !Skip(TokenKind.SEMI)) {
+                diag.DiagnoseRefactor(
+                    DiagKindRefactor.EXPECTED_TOKEN,
+                    Peek().Begin(),
+                    "expected ';' or newline between top-level declarations")
+                ConsumeUntilAny([TokenKind.NL, TokenKind.SEMI], targetTokenConsumed: false)
+            }
+            SkipBlank(TokenKind.SEMI)
+            if (Seeing(TokenKind.END)) {
+                break
+            }
+            ParseAnnotations(annos)
+            ParseTopLevelDecl(file, annos)
+            annos.clear()
+            topLevelCount++
+        }
+    }
+
+    private func ParseTopLevelDecl(file: File, annos: ArrayList<Annotation>): Unit {
+        let modifiers = ArrayList<Modifier>()
+        ParseModifiers(modifiers)
+        if (SeeingPackageHeader()) {
+            diag.DiagnoseRefactor(
+                DiagKindRefactor.UNEXPECTED_TOKEN,
+                Peek().Begin(),
+                "package declaration is only allowed in the preamble")
+            ConsumeUntilAny([TokenKind.NL, TokenKind.SEMI], targetTokenConsumed: false)
+            return
+        }
+        if (SeeingImport()) {
+            diag.DiagnoseRefactor(
+                DiagKindRefactor.UNEXPECTED_TOKEN,
+                Peek().Begin(),
+                "import declaration is only allowed before top-level declarations")
+            ParseImportSpec(file.imports, annos)
+            return
+        }
+        if (Seeing(TokenKind.FEATURES)) {
+            diag.DiagnoseRefactor(
+                DiagKindRefactor.UNEXPECTED_TOKEN,
+                Peek().Begin(),
+                "features directive is only allowed before the package header")
+            file.features.add(ParseTopLvlFeatures(annos))
+            return
+        }
+        if (SeeingDecl() || Seeing(TokenKind.AT) || Seeing(TokenKind.AT_EXCL)) {
+            let decl = ParseDecl(ScopeKind.TOPLEVEL, modifiers, annos)
+            decl.EnableAttr(Attribute.GLOBAL)
+            FinalizeDeclTree(decl)
+            CheckMacroPackageTopLevelDecl(file, decl)
+            file.decls.add(decl)
+            return
+        }
+        diag.DiagnoseRefactor(DiagKindRefactor.UNEXPECTED_TOKEN, Peek().Begin(), "unexpected token at top level")
+        Next()
+    }
+
+    private func SeeingPackageHeader(): Bool {
+        return Seeing(TokenKind.PACKAGE) || Seeing([TokenKind.MACRO, TokenKind.PACKAGE])
+    }
+
+    private func SeeingPackageHeaderAfterModifiers(): Bool {
+        if (SeeingPackageHeader()) {
+            return true
+        }
+        if (!SeeingModifier()) {
+            return false
+        }
+        let ahead = lexer.LookAheadSkipNL(32)
+        var kind = Peek().kind
+        var index: Int64 = 0
+        while (ModifierKindFromToken(kind).isSome()) {
+            if (index >= ahead.size) {
+                return false
+            }
+            kind = ahead[index].kind
+            index++
+        }
+        if (kind == TokenKind.PACKAGE) {
+            return true
+        }
+        if (kind == TokenKind.MACRO && index < ahead.size && ahead[index].kind == TokenKind.PACKAGE) {
+            return true
+        }
+        return false
+    }
+
+    private func CheckMacroPackageTopLevelDecl(file: File, decl: Decl): Unit {
+        if (let Some(pkg) <- file.packageSpec) {
+            if (pkg.hasMacro && decl.HasModifier(ModifierKind.PUBLIC) && decl.astKind != ASTKind.MACRO_DECL) {
+                diag.DiagnoseRefactor(
+                    DiagKindRefactor.INVALID_MODIFIER,
+                    decl.begin,
+                    "public declaration in a macro package must be a macro declaration")
+                decl.EnableAttr(Attribute.IS_BROKEN)
+            }
+        }
+    }
+
+    private func CheckAndHandleUnexpectedTopLevelDeclAfterFeatures(): Unit {
+        if (SeeingExpectedAfterFeatures(true)) {
+            return
+        }
+        diag.DiagnoseRefactor(
+            DiagKindRefactor.UNEXPECTED_TOKEN,
+            Peek().Begin(),
+            "expected features, package, import, or top-level declaration")
+        while (!Seeing(TokenKind.END) && !SeeingExpectedAfterFeatures(true)) {
+            Next()
+        }
+    }
+
+    private func CheckExpectedTopLevelDeclWhenNoPackage(annos: ArrayList<Annotation>): Unit {
+        if (!annos.isEmpty()) {
+            return
+        }
+        if (!SeeingExpectedAfterFeatures(false)) {
+            diag.DiagnoseRefactor(
+                DiagKindRefactor.UNEXPECTED_TOKEN,
+                Peek().Begin(),
+                "expected package, import, or top-level declaration")
+        }
+    }
+
+    private func SeeingExpectedAfterFeatures(allowPackageKeyword: Bool): Bool {
+        if (Seeing(TokenKind.SEMI) || SeeingImport() || SeeingDecl() || SeeingMacroCallDecl() ||
+            SeeingBuiltinAnnotation() || Seeing(TokenKind.END)) {
+            return true
+        }
+        return allowPackageKeyword && SeeingPackageHeader()
     }
 
     public func SeeingDecl(): Bool {

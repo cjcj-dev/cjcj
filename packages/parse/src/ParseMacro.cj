@@ -4,11 +4,35 @@ import std.collection.*
 
 extend ParserImpl {
     public func SeeingMacroCall(): Bool {
-        return Seeing(TokenKind.AT) || Seeing(TokenKind.AT_EXCL)
+        if (!Seeing(TokenKind.AT)) {
+            return false
+        }
+        return SeeingMacroCallIdentifier()
     }
 
     public func SeeingMacroCallDecl(): Bool {
-        return SeeingMacroCall()
+        if (!Seeing(TokenKind.AT) && !Seeing(TokenKind.AT_EXCL)) {
+            return false
+        }
+        return SeeingMacroCallIdentifier()
+    }
+
+    private func SeeingMacroCallIdentifier(): Bool {
+        let ahead = lexer.LookAheadSkipNL(1)
+        if (ahead.isEmpty()) {
+            return false
+        }
+        let kind = ahead[0].kind
+        let canStart = kind == TokenKind.IDENTIFIER || kind == TokenKind.PUBLIC || kind == TokenKind.PROTECTED ||
+            kind == TokenKind.INTERNAL || kind == TokenKind.PRIVATE || kind == TokenKind.STATIC ||
+            kind == TokenKind.ABSTRACT || kind == TokenKind.OPEN
+        if (!canStart) {
+            return false
+        }
+        if (Seeing(TokenKind.AT) && kind == TokenKind.IDENTIFIER && IsBuiltinAnnotation(moduleName, ahead[0].Value())) {
+            return false
+        }
+        return true
     }
 
     public func ParseAnnotationLambdaExpr(): LambdaExpr {
@@ -33,6 +57,12 @@ extend ParserImpl {
         if (SeeingBuiltinAnnotation()) {
             let token = Peek()
             diag.DiagnoseRefactor(DiagKindRefactor.EXPECTED_TOKEN, token.Begin(), "expected lambda expression after builtin annotation")
+            Next()
+            return InvalidExpr(token.Begin())
+        }
+        if (!SeeingMacroCall()) {
+            let token = Peek()
+            diag.DiagnoseRefactor(DiagKindRefactor.EXPECTED_TOKEN, token.Begin(), "expected macro call")
             Next()
             return InvalidExpr(token.Begin())
         }

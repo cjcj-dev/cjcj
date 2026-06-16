@@ -1,5 +1,6 @@
 package cangjie_compiler::parse
 
+import cangjie_compiler::option.OutputModeIndex as OptionOutputModeIndex
 import std.collection.*
 
 public class MPParserImpl {
@@ -158,7 +159,7 @@ public class MPParserImpl {
 
     private func CompileCommon(): Bool {
         if (let Some(options) <- opts) {
-            return options.outputMode == OutputMode.CHIR
+            return OptionOutputModeIndex(options.outputMode) == OptionOutputModeIndex(OutputMode.CHIR)
         }
         return false
     }

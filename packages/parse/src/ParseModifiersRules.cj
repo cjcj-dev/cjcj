@@ -11,52 +11,504 @@ public class ConflictArray {
     public func size(): Int64 { return data.size }
 }
 
-public func HasScopeRules(defKind: DefKind, scopeKind: ScopeKind): Bool {
-    return true
+private func NoConflicts(): Array<TokenKind> { return Array<TokenKind>() }
+private func AccessPublic(): Array<TokenKind> { return [TokenKind.PRIVATE, TokenKind.INTERNAL, TokenKind.PROTECTED] }
+private func AccessPrivate(): Array<TokenKind> { return [TokenKind.PUBLIC, TokenKind.INTERNAL, TokenKind.PROTECTED] }
+private func AccessInternal(): Array<TokenKind> { return [TokenKind.PUBLIC, TokenKind.PRIVATE, TokenKind.PROTECTED] }
+private func AccessProtected(): Array<TokenKind> { return [TokenKind.PUBLIC, TokenKind.PRIVATE, TokenKind.INTERNAL] }
+private func CommonSpecific(): Array<TokenKind> { return [TokenKind.SPECIFIC] }
+private func SpecificCommon(): Array<TokenKind> { return [TokenKind.COMMON] }
+private func ConstCommonSpecific(): Array<TokenKind> { return [TokenKind.COMMON, TokenKind.SPECIFIC] }
+private func CommonConstSpecific(): Array<TokenKind> { return [TokenKind.CONST, TokenKind.SPECIFIC] }
+private func SpecificConstCommon(): Array<TokenKind> { return [TokenKind.CONST, TokenKind.COMMON] }
+private func OverrideStaticRedef(): Array<TokenKind> { return [TokenKind.STATIC, TokenKind.REDEF] }
+private func RedefOverrideOpenOperator(): Array<TokenKind> {
+    return [TokenKind.OVERRIDE, TokenKind.OPEN, TokenKind.OPERATOR]
+}
+private func OpenStaticRedef(): Array<TokenKind> { return [TokenKind.STATIC, TokenKind.REDEF] }
+private func OperatorStatic(): Array<TokenKind> { return [TokenKind.STATIC] }
+private func MutStatic(): Array<TokenKind> { return [TokenKind.STATIC] }
+private func StaticOverride(): Array<TokenKind> { return [TokenKind.OVERRIDE] }
+private func StaticOverrideOpen(): Array<TokenKind> { return [TokenKind.OVERRIDE, TokenKind.OPEN] }
+private func RedefOverride(): Array<TokenKind> { return [TokenKind.OVERRIDE] }
+private func RedefOverrideOpen(): Array<TokenKind> { return [TokenKind.OVERRIDE, TokenKind.OPEN] }
+private func PublicSealed(): Array<TokenKind> { return [TokenKind.SEALED] }
+private func IllegalOnly(): Array<TokenKind> { return [TokenKind.ILLEGAL] }
+private func AggPublic(): Array<TokenKind> {
+    return [TokenKind.STATIC, TokenKind.PRIVATE, TokenKind.INTERNAL, TokenKind.PROTECTED]
+}
+private func AggPrivate(): Array<TokenKind> {
+    return [TokenKind.STATIC, TokenKind.PUBLIC, TokenKind.INTERNAL, TokenKind.PROTECTED]
+}
+private func AggInternal(): Array<TokenKind> {
+    return [TokenKind.STATIC, TokenKind.PUBLIC, TokenKind.PRIVATE, TokenKind.PROTECTED]
+}
+private func AggProtected(): Array<TokenKind> {
+    return [TokenKind.STATIC, TokenKind.PUBLIC, TokenKind.PRIVATE, TokenKind.INTERNAL]
 }
 
-public func IsScopeRulesEmpty(defKind: DefKind, scopeKind: ScopeKind): Bool {
+private func PackageRule(modifier: TokenKind): Option<Array<TokenKind>> {
+    if (modifier == TokenKind.PUBLIC) { return [TokenKind.INTERNAL, TokenKind.PROTECTED] }
+    if (modifier == TokenKind.INTERNAL) { return [TokenKind.PUBLIC, TokenKind.PROTECTED] }
+    if (modifier == TokenKind.PROTECTED) { return [TokenKind.PUBLIC, TokenKind.INTERNAL] }
+    return None
+}
+
+private func TopLevelCommonRule(modifier: TokenKind): Option<Array<TokenKind>> {
+    if (modifier == TokenKind.PUBLIC) { return AccessPublic() }
+    if (modifier == TokenKind.PRIVATE) { return AccessPrivate() }
+    if (modifier == TokenKind.INTERNAL) { return AccessInternal() }
+    if (modifier == TokenKind.PROTECTED) { return AccessProtected() }
+    return None
+}
+
+private func TopLevelEnumStructRule(modifier: TokenKind): Option<Array<TokenKind>> {
+    if (modifier == TokenKind.PUBLIC) { return AccessPublic() }
+    if (modifier == TokenKind.PRIVATE) {
+        return [TokenKind.PUBLIC, TokenKind.INTERNAL, TokenKind.PROTECTED, TokenKind.COMMON, TokenKind.SPECIFIC]
+    }
+    if (modifier == TokenKind.INTERNAL) { return AccessInternal() }
+    if (modifier == TokenKind.PROTECTED) { return AccessProtected() }
+    if (modifier == TokenKind.COMMON) { return [TokenKind.PRIVATE, TokenKind.SPECIFIC] }
+    if (modifier == TokenKind.SPECIFIC) { return [TokenKind.PRIVATE, TokenKind.COMMON] }
+    return None
+}
+
+private func TopLevelClassRule(modifier: TokenKind): Option<Array<TokenKind>> {
+    if (modifier == TokenKind.PUBLIC) {
+        return [TokenKind.PRIVATE, TokenKind.INTERNAL, TokenKind.PROTECTED, TokenKind.FOREIGN]
+    }
+    if (modifier == TokenKind.PRIVATE) {
+        return [
+            TokenKind.PUBLIC, TokenKind.INTERNAL, TokenKind.PROTECTED, TokenKind.SEALED, TokenKind.COMMON,
+            TokenKind.SPECIFIC
+        ]
+    }
+    if (modifier == TokenKind.INTERNAL) {
+        return [TokenKind.PUBLIC, TokenKind.PRIVATE, TokenKind.PROTECTED, TokenKind.SEALED]
+    }
+    if (modifier == TokenKind.PROTECTED) {
+        return [TokenKind.PUBLIC, TokenKind.PRIVATE, TokenKind.INTERNAL, TokenKind.SEALED]
+    }
+    if (modifier == TokenKind.ABSTRACT) { return NoConflicts() }
+    if (modifier == TokenKind.SEALED) { return [TokenKind.PRIVATE, TokenKind.INTERNAL, TokenKind.PROTECTED] }
+    if (modifier == TokenKind.OPEN) { return NoConflicts() }
+    if (modifier == TokenKind.FOREIGN) { return [TokenKind.PUBLIC] }
+    if (modifier == TokenKind.COMMON) { return [TokenKind.PRIVATE, TokenKind.SPECIFIC] }
+    if (modifier == TokenKind.SPECIFIC) { return [TokenKind.PRIVATE, TokenKind.COMMON] }
+    return None
+}
+
+private func TopLevelInterfaceRule(modifier: TokenKind): Option<Array<TokenKind>> {
+    if (modifier == TokenKind.PUBLIC) {
+        return [TokenKind.PRIVATE, TokenKind.INTERNAL, TokenKind.PROTECTED, TokenKind.FOREIGN]
+    }
+    if (modifier == TokenKind.PRIVATE) {
+        return [
+            TokenKind.PUBLIC, TokenKind.INTERNAL, TokenKind.PROTECTED, TokenKind.SEALED, TokenKind.COMMON,
+            TokenKind.SPECIFIC
+        ]
+    }
+    if (modifier == TokenKind.INTERNAL) {
+        return [TokenKind.PUBLIC, TokenKind.PRIVATE, TokenKind.PROTECTED, TokenKind.SEALED]
+    }
+    if (modifier == TokenKind.PROTECTED) {
+        return [TokenKind.PUBLIC, TokenKind.PRIVATE, TokenKind.INTERNAL, TokenKind.SEALED]
+    }
+    if (modifier == TokenKind.SEALED) { return [TokenKind.PRIVATE, TokenKind.INTERNAL, TokenKind.PROTECTED] }
+    if (modifier == TokenKind.OPEN) { return NoConflicts() }
+    if (modifier == TokenKind.FOREIGN) { return [TokenKind.PUBLIC] }
+    if (modifier == TokenKind.COMMON) { return [TokenKind.PRIVATE, TokenKind.SPECIFIC] }
+    if (modifier == TokenKind.SPECIFIC) { return [TokenKind.PRIVATE, TokenKind.COMMON] }
+    return None
+}
+
+private func TopLevelVariableRule(modifier: TokenKind): Option<Array<TokenKind>> {
+    if (modifier == TokenKind.CONST) { return [TokenKind.FOREIGN, TokenKind.COMMON, TokenKind.SPECIFIC] }
+    if (modifier == TokenKind.PUBLIC) {
+        return [TokenKind.PRIVATE, TokenKind.INTERNAL, TokenKind.PROTECTED, TokenKind.FOREIGN]
+    }
+    if (modifier == TokenKind.PRIVATE) {
+        return [TokenKind.PUBLIC, TokenKind.INTERNAL, TokenKind.PROTECTED, TokenKind.COMMON, TokenKind.SPECIFIC]
+    }
+    if (modifier == TokenKind.INTERNAL) { return AccessInternal() }
+    if (modifier == TokenKind.PROTECTED) { return AccessProtected() }
+    if (modifier == TokenKind.FOREIGN) {
+        return [TokenKind.CONST, TokenKind.PUBLIC, TokenKind.UNSAFE, TokenKind.COMMON, TokenKind.SPECIFIC]
+    }
+    if (modifier == TokenKind.COMMON) {
+        return [TokenKind.CONST, TokenKind.PRIVATE, TokenKind.FOREIGN, TokenKind.SPECIFIC]
+    }
+    if (modifier == TokenKind.SPECIFIC) {
+        return [TokenKind.CONST, TokenKind.PRIVATE, TokenKind.FOREIGN, TokenKind.COMMON]
+    }
+    return None
+}
+
+private func TopLevelFuncRule(modifier: TokenKind): Option<Array<TokenKind>> {
+    if (modifier == TokenKind.CONST) { return [TokenKind.FOREIGN, TokenKind.COMMON, TokenKind.SPECIFIC] }
+    if (modifier == TokenKind.PUBLIC) {
+        return [TokenKind.PRIVATE, TokenKind.INTERNAL, TokenKind.PROTECTED, TokenKind.FOREIGN]
+    }
+    if (modifier == TokenKind.PRIVATE) {
+        return [TokenKind.PUBLIC, TokenKind.INTERNAL, TokenKind.PROTECTED, TokenKind.FOREIGN, TokenKind.COMMON]
+    }
+    if (modifier == TokenKind.INTERNAL) {
+        return [TokenKind.PUBLIC, TokenKind.PRIVATE, TokenKind.PROTECTED, TokenKind.FOREIGN]
+    }
+    if (modifier == TokenKind.PROTECTED) {
+        return [TokenKind.PUBLIC, TokenKind.PRIVATE, TokenKind.INTERNAL, TokenKind.FOREIGN]
+    }
+    if (modifier == TokenKind.FOREIGN) {
+        return [
+            TokenKind.CONST, TokenKind.PUBLIC, TokenKind.PRIVATE, TokenKind.INTERNAL, TokenKind.PROTECTED,
+            TokenKind.UNSAFE, TokenKind.COMMON
+        ]
+    }
+    if (modifier == TokenKind.UNSAFE) { return [TokenKind.FOREIGN] }
+    if (modifier == TokenKind.COMMON) {
+        return [TokenKind.CONST, TokenKind.PRIVATE, TokenKind.FOREIGN, TokenKind.SPECIFIC]
+    }
+    if (modifier == TokenKind.SPECIFIC) { return [TokenKind.CONST, TokenKind.PRIVATE, TokenKind.COMMON] }
+    return None
+}
+
+private func TopLevelMacroRule(modifier: TokenKind): Option<Array<TokenKind>> {
+    return TopLevelCommonRule(modifier)
+}
+
+private func TopLevelMainRule(modifier: TokenKind): Option<Array<TokenKind>> {
+    if (modifier == TokenKind.UNSAFE) { return NoConflicts() }
+    return None
+}
+
+private func ClassBodyFuncRule(modifier: TokenKind): Option<Array<TokenKind>> {
+    if (modifier == TokenKind.CONST) { return [TokenKind.OPEN, TokenKind.COMMON, TokenKind.SPECIFIC] }
+    if (modifier == TokenKind.STATIC) { return [TokenKind.OVERRIDE, TokenKind.OPEN, TokenKind.OPERATOR] }
+    if (modifier == TokenKind.PUBLIC) { return AccessPublic() }
+    if (modifier == TokenKind.PRIVATE) { return [TokenKind.PUBLIC, TokenKind.INTERNAL, TokenKind.PROTECTED, TokenKind.OPEN] }
+    if (modifier == TokenKind.INTERNAL) { return [TokenKind.PUBLIC, TokenKind.PRIVATE, TokenKind.PROTECTED, TokenKind.OPEN] }
+    if (modifier == TokenKind.PROTECTED) { return AccessProtected() }
+    if (modifier == TokenKind.OVERRIDE) { return OverrideStaticRedef() }
+    if (modifier == TokenKind.REDEF) { return RedefOverrideOpenOperator() }
+    if (modifier == TokenKind.ABSTRACT) { return NoConflicts() }
+    if (modifier == TokenKind.OPEN) {
+        return [TokenKind.CONST, TokenKind.STATIC, TokenKind.PRIVATE, TokenKind.INTERNAL, TokenKind.REDEF]
+    }
+    if (modifier == TokenKind.UNSAFE) { return NoConflicts() }
+    if (modifier == TokenKind.OPERATOR) { return OverrideStaticRedef() }
+    if (modifier == TokenKind.COMMON) { return CommonConstSpecific() }
+    if (modifier == TokenKind.SPECIFIC) { return SpecificConstCommon() }
+    return None
+}
+
+private func InterfaceBodyFuncRule(modifier: TokenKind): Option<Array<TokenKind>> {
+    if (modifier == TokenKind.CONST) { return ConstCommonSpecific() }
+    if (modifier == TokenKind.STATIC) { return [TokenKind.OVERRIDE, TokenKind.OPEN, TokenKind.MUT, TokenKind.OPERATOR] }
+    if (modifier == TokenKind.PUBLIC) { return NoConflicts() }
+    if (modifier == TokenKind.OVERRIDE) { return OverrideStaticRedef() }
+    if (modifier == TokenKind.REDEF) { return RedefOverrideOpenOperator() }
+    if (modifier == TokenKind.OPEN) { return OpenStaticRedef() }
+    if (modifier == TokenKind.MUT) { return MutStatic() }
+    if (modifier == TokenKind.UNSAFE) { return NoConflicts() }
+    if (modifier == TokenKind.OPERATOR) { return OperatorStatic() }
+    if (modifier == TokenKind.COMMON) { return CommonConstSpecific() }
+    if (modifier == TokenKind.SPECIFIC) { return SpecificConstCommon() }
+    return None
+}
+
+private func StructBodyFuncRule(modifier: TokenKind): Option<Array<TokenKind>> {
+    if (modifier == TokenKind.CONST) { return [TokenKind.MUT, TokenKind.COMMON, TokenKind.SPECIFIC] }
+    if (modifier == TokenKind.STATIC) { return [TokenKind.MUT, TokenKind.OPERATOR] }
+    if (modifier == TokenKind.PUBLIC) { return AccessPublic() }
+    if (modifier == TokenKind.PRIVATE) { return AccessPrivate() }
+    if (modifier == TokenKind.INTERNAL) { return AccessInternal() }
+    if (modifier == TokenKind.PROTECTED) { return AccessProtected() }
+    if (modifier == TokenKind.OVERRIDE) { return OverrideStaticRedef() }
+    if (modifier == TokenKind.REDEF) { return RedefOverrideOpenOperator() }
+    if (modifier == TokenKind.MUT) { return [TokenKind.CONST, TokenKind.STATIC] }
+    if (modifier == TokenKind.UNSAFE) { return NoConflicts() }
+    if (modifier == TokenKind.OPERATOR) { return OperatorStatic() }
+    if (modifier == TokenKind.COMMON) { return CommonConstSpecific() }
+    if (modifier == TokenKind.SPECIFIC) { return SpecificConstCommon() }
+    return None
+}
+
+private func EnumBodyFuncRule(modifier: TokenKind): Option<Array<TokenKind>> {
+    if (modifier == TokenKind.CONST) { return ConstCommonSpecific() }
+    if (modifier == TokenKind.STATIC) { return [TokenKind.OPERATOR] }
+    if (modifier == TokenKind.PUBLIC) { return AccessPublic() }
+    if (modifier == TokenKind.PRIVATE) { return AccessPrivate() }
+    if (modifier == TokenKind.INTERNAL) { return AccessInternal() }
+    if (modifier == TokenKind.PROTECTED) { return AccessProtected() }
+    if (modifier == TokenKind.OVERRIDE) { return OverrideStaticRedef() }
+    if (modifier == TokenKind.REDEF) { return [TokenKind.OVERRIDE, TokenKind.OPERATOR] }
+    if (modifier == TokenKind.UNSAFE) { return NoConflicts() }
+    if (modifier == TokenKind.OPERATOR) { return [TokenKind.STATIC] }
+    if (modifier == TokenKind.COMMON) { return CommonConstSpecific() }
+    if (modifier == TokenKind.SPECIFIC) { return SpecificConstCommon() }
+    return None
+}
+
+private func FuncBodyFuncRule(modifier: TokenKind): Option<Array<TokenKind>> {
+    if (modifier == TokenKind.CONST) { return NoConflicts() }
+    if (modifier == TokenKind.UNSAFE) { return NoConflicts() }
+    return None
+}
+
+private func ExtendBodyFuncRule(modifier: TokenKind): Option<Array<TokenKind>> {
+    if (modifier == TokenKind.CONST) { return NoConflicts() }
+    if (modifier == TokenKind.STATIC) { return [TokenKind.MUT, TokenKind.OPERATOR] }
+    if (modifier == TokenKind.PUBLIC) { return AccessPublic() }
+    if (modifier == TokenKind.PRIVATE) { return AccessPrivate() }
+    if (modifier == TokenKind.INTERNAL) { return AccessInternal() }
+    if (modifier == TokenKind.PROTECTED) { return AccessProtected() }
+    if (modifier == TokenKind.MUT) { return MutStatic() }
+    if (modifier == TokenKind.UNSAFE) { return NoConflicts() }
+    if (modifier == TokenKind.OPERATOR) { return OperatorStatic() }
+    if (modifier == TokenKind.COMMON) { return CommonSpecific() }
+    if (modifier == TokenKind.SPECIFIC) { return SpecificCommon() }
+    return None
+}
+
+private func ClassStructBodyVarRule(modifier: TokenKind): Option<Array<TokenKind>> {
+    if (modifier == TokenKind.CONST) { return ConstCommonSpecific() }
+    if (modifier == TokenKind.STATIC) { return NoConflicts() }
+    if (modifier == TokenKind.PUBLIC) { return AccessPublic() }
+    if (modifier == TokenKind.PRIVATE) { return AccessPrivate() }
+    if (modifier == TokenKind.INTERNAL) { return AccessInternal() }
+    if (modifier == TokenKind.PROTECTED) { return AccessProtected() }
+    if (modifier == TokenKind.COMMON) { return CommonConstSpecific() }
+    if (modifier == TokenKind.SPECIFIC) { return SpecificConstCommon() }
+    return None
+}
+
+private func FuncBodyVarRule(modifier: TokenKind): Option<Array<TokenKind>> {
+    if (modifier == TokenKind.CONST) { return NoConflicts() }
+    return None
+}
+
+private func ClassBodyPropRule(modifier: TokenKind): Option<Array<TokenKind>> {
+    if (modifier == TokenKind.STATIC) { return StaticOverrideOpen() }
+    if (modifier == TokenKind.PUBLIC) { return AccessPublic() }
+    if (modifier == TokenKind.PRIVATE) { return [TokenKind.PUBLIC, TokenKind.INTERNAL, TokenKind.PROTECTED, TokenKind.OPEN] }
+    if (modifier == TokenKind.INTERNAL) { return [TokenKind.PUBLIC, TokenKind.PRIVATE, TokenKind.PROTECTED, TokenKind.OPEN] }
+    if (modifier == TokenKind.PROTECTED) { return AccessProtected() }
+    if (modifier == TokenKind.OVERRIDE) { return OverrideStaticRedef() }
+    if (modifier == TokenKind.REDEF) { return RedefOverrideOpen() }
+    if (modifier == TokenKind.ABSTRACT) { return NoConflicts() }
+    if (modifier == TokenKind.OPEN) { return [TokenKind.STATIC, TokenKind.PRIVATE, TokenKind.INTERNAL, TokenKind.REDEF] }
+    if (modifier == TokenKind.MUT) { return NoConflicts() }
+    if (modifier == TokenKind.COMMON) { return CommonSpecific() }
+    if (modifier == TokenKind.SPECIFIC) { return SpecificCommon() }
+    return None
+}
+
+private func InterfaceBodyPropRule(modifier: TokenKind): Option<Array<TokenKind>> {
+    if (modifier == TokenKind.STATIC) { return StaticOverrideOpen() }
+    if (modifier == TokenKind.PUBLIC) { return NoConflicts() }
+    if (modifier == TokenKind.OVERRIDE) { return OverrideStaticRedef() }
+    if (modifier == TokenKind.REDEF) { return RedefOverrideOpen() }
+    if (modifier == TokenKind.OPEN) { return OpenStaticRedef() }
+    if (modifier == TokenKind.MUT) { return NoConflicts() }
+    if (modifier == TokenKind.COMMON) { return CommonSpecific() }
+    if (modifier == TokenKind.SPECIFIC) { return SpecificCommon() }
+    return None
+}
+
+private func StructBodyPropRule(modifier: TokenKind): Option<Array<TokenKind>> {
+    if (modifier == TokenKind.STATIC) { return StaticOverride() }
+    if (modifier == TokenKind.PUBLIC) { return AccessPublic() }
+    if (modifier == TokenKind.PRIVATE) { return AccessPrivate() }
+    if (modifier == TokenKind.INTERNAL) { return AccessInternal() }
+    if (modifier == TokenKind.PROTECTED) { return AccessProtected() }
+    if (modifier == TokenKind.OVERRIDE) { return OverrideStaticRedef() }
+    if (modifier == TokenKind.REDEF) { return RedefOverride() }
+    if (modifier == TokenKind.MUT) { return NoConflicts() }
+    if (modifier == TokenKind.COMMON) { return CommonSpecific() }
+    if (modifier == TokenKind.SPECIFIC) { return SpecificCommon() }
+    return None
+}
+
+private func EnumBodyPropRule(modifier: TokenKind): Option<Array<TokenKind>> {
+    if (modifier == TokenKind.STATIC) { return StaticOverride() }
+    if (modifier == TokenKind.PUBLIC) { return AccessPublic() }
+    if (modifier == TokenKind.PRIVATE) { return AccessPrivate() }
+    if (modifier == TokenKind.INTERNAL) { return AccessInternal() }
+    if (modifier == TokenKind.PROTECTED) { return AccessProtected() }
+    if (modifier == TokenKind.OVERRIDE) { return OverrideStaticRedef() }
+    if (modifier == TokenKind.REDEF) { return RedefOverride() }
+    if (modifier == TokenKind.COMMON) { return CommonSpecific() }
+    if (modifier == TokenKind.SPECIFIC) { return SpecificCommon() }
+    return None
+}
+
+private func ExtendBodyPropRule(modifier: TokenKind): Option<Array<TokenKind>> {
+    if (modifier == TokenKind.STATIC) { return NoConflicts() }
+    if (modifier == TokenKind.PUBLIC) { return AccessPublic() }
+    if (modifier == TokenKind.PRIVATE) { return AccessPrivate() }
+    if (modifier == TokenKind.INTERNAL) { return AccessInternal() }
+    if (modifier == TokenKind.PROTECTED) { return AccessProtected() }
+    if (modifier == TokenKind.MUT) { return NoConflicts() }
+    if (modifier == TokenKind.COMMON) { return CommonSpecific() }
+    if (modifier == TokenKind.SPECIFIC) { return SpecificCommon() }
+    return None
+}
+
+private func AggregateBodyInstanceInitRule(modifier: TokenKind): Option<Array<TokenKind>> {
+    if (modifier == TokenKind.CONST) { return NoConflicts() }
+    if (modifier == TokenKind.PUBLIC) { return AggPublic() }
+    if (modifier == TokenKind.PRIVATE) { return AggPrivate() }
+    if (modifier == TokenKind.INTERNAL) { return AggInternal() }
+    if (modifier == TokenKind.PROTECTED) { return AggProtected() }
+    return None
+}
+
+private func AggregateBodyInitRule(modifier: TokenKind): Option<Array<TokenKind>> {
+    if (modifier == TokenKind.CONST) { return NoConflicts() }
+    if (modifier == TokenKind.STATIC) {
+        return [TokenKind.PUBLIC, TokenKind.PRIVATE, TokenKind.INTERNAL, TokenKind.PROTECTED]
+    }
+    if (modifier == TokenKind.PUBLIC) { return AggPublic() }
+    if (modifier == TokenKind.PRIVATE) { return AggPrivate() }
+    if (modifier == TokenKind.INTERNAL) { return AggInternal() }
+    if (modifier == TokenKind.PROTECTED) { return AggProtected() }
+    if (modifier == TokenKind.COMMON) { return CommonSpecific() }
+    if (modifier == TokenKind.SPECIFIC) { return SpecificCommon() }
+    return None
+}
+
+private func EmptyScopeRule(defKind: DefKind, scopeKind: ScopeKind): Bool {
+    return (defKind == DefKind.EXTEND && scopeKind == ScopeKind.TOPLEVEL) ||
+        (defKind == DefKind.FINALIZER && scopeKind == ScopeKind.CLASS_BODY)
+}
+
+private func FindRule(defKind: DefKind, scopeKind: ScopeKind, modifier: TokenKind): Option<Array<TokenKind>> {
+    if (defKind == DefKind.FUNC) {
+        if (scopeKind == ScopeKind.TOPLEVEL) { return TopLevelFuncRule(modifier) }
+        if (scopeKind == ScopeKind.CLASS_BODY) { return ClassBodyFuncRule(modifier) }
+        if (scopeKind == ScopeKind.INTERFACE_BODY) { return InterfaceBodyFuncRule(modifier) }
+        if (scopeKind == ScopeKind.STRUCT_BODY) { return StructBodyFuncRule(modifier) }
+        if (scopeKind == ScopeKind.EXTEND_BODY) { return ExtendBodyFuncRule(modifier) }
+        if (scopeKind == ScopeKind.FUNC_BODY) { return FuncBodyFuncRule(modifier) }
+        if (scopeKind == ScopeKind.ENUM_BODY) { return EnumBodyFuncRule(modifier) }
+        return None
+    }
+    if (defKind == DefKind.MAIN) {
+        if (scopeKind == ScopeKind.TOPLEVEL) { return TopLevelMainRule(modifier) }
+        return None
+    }
+    if (defKind == DefKind.MACRO) {
+        if (scopeKind == ScopeKind.TOPLEVEL) { return TopLevelMacroRule(modifier) }
+        return None
+    }
+    if (defKind == DefKind.CLASS) {
+        if (scopeKind == ScopeKind.TOPLEVEL) { return TopLevelClassRule(modifier) }
+        return None
+    }
+    if (defKind == DefKind.INTERFACE) {
+        if (scopeKind == ScopeKind.TOPLEVEL) { return TopLevelInterfaceRule(modifier) }
+        return None
+    }
+    if (defKind == DefKind.VARIABLE) {
+        if (scopeKind == ScopeKind.TOPLEVEL) { return TopLevelVariableRule(modifier) }
+        if (scopeKind == ScopeKind.CLASS_BODY || scopeKind == ScopeKind.STRUCT_BODY) {
+            return ClassStructBodyVarRule(modifier)
+        }
+        if (scopeKind == ScopeKind.FUNC_BODY || scopeKind == ScopeKind.MACRO_BODY) { return FuncBodyVarRule(modifier) }
+        if (scopeKind == ScopeKind.PRIMARY_CONSTRUCTOR_BODY_FOR_CLASS ||
+            scopeKind == ScopeKind.PRIMARY_CONSTRUCTOR_BODY_FOR_STRUCT) {
+            return AggregateBodyInstanceInitRule(modifier)
+        }
+        return None
+    }
+    if (defKind == DefKind.ENUM) {
+        if (scopeKind == ScopeKind.TOPLEVEL) { return TopLevelEnumStructRule(modifier) }
+        return None
+    }
+    if (defKind == DefKind.STRUCT) {
+        if (scopeKind == ScopeKind.TOPLEVEL) { return TopLevelEnumStructRule(modifier) }
+        return None
+    }
+    if (defKind == DefKind.TYPE) {
+        if (scopeKind == ScopeKind.TOPLEVEL) { return TopLevelCommonRule(modifier) }
+        return None
+    }
+    if (defKind == DefKind.CONSTRUCTOR) {
+        if (scopeKind == ScopeKind.CLASS_BODY || scopeKind == ScopeKind.STRUCT_BODY) {
+            return AggregateBodyInitRule(modifier)
+        }
+        return None
+    }
+    if (defKind == DefKind.PRIMARY_CONSTRUCTOR) {
+        if (scopeKind == ScopeKind.CLASS_BODY || scopeKind == ScopeKind.STRUCT_BODY) {
+            return AggregateBodyInstanceInitRule(modifier)
+        }
+        return None
+    }
+    if (defKind == DefKind.PROPERTY) {
+        if (scopeKind == ScopeKind.CLASS_BODY) { return ClassBodyPropRule(modifier) }
+        if (scopeKind == ScopeKind.INTERFACE_BODY) { return InterfaceBodyPropRule(modifier) }
+        if (scopeKind == ScopeKind.STRUCT_BODY) { return StructBodyPropRule(modifier) }
+        if (scopeKind == ScopeKind.EXTEND_BODY) { return ExtendBodyPropRule(modifier) }
+        if (scopeKind == ScopeKind.ENUM_BODY) { return EnumBodyPropRule(modifier) }
+        return None
+    }
+    if (defKind == DefKind.PACKAGE) {
+        if (scopeKind == ScopeKind.TOPLEVEL) { return PackageRule(modifier) }
+        return None
+    }
+    return None
+}
+
+public func HasScopeRules(defKind: DefKind, scopeKind: ScopeKind): Bool {
+    if (EmptyScopeRule(defKind, scopeKind)) { return true }
+    for (modifier in [
+        TokenKind.CONST, TokenKind.STATIC, TokenKind.PUBLIC, TokenKind.PRIVATE, TokenKind.INTERNAL,
+        TokenKind.PROTECTED, TokenKind.OVERRIDE, TokenKind.REDEF, TokenKind.ABSTRACT, TokenKind.SEALED,
+        TokenKind.OPEN, TokenKind.FOREIGN, TokenKind.INOUT, TokenKind.MUT, TokenKind.UNSAFE, TokenKind.OPERATOR,
+        TokenKind.COMMON, TokenKind.SPECIFIC
+    ]) {
+        if (FindRule(defKind, scopeKind, modifier).isSome()) { return true }
+    }
     return false
 }
 
+public func IsScopeRulesEmpty(defKind: DefKind, scopeKind: ScopeKind): Bool {
+    if (EmptyScopeRule(defKind, scopeKind)) { return true }
+    return !HasScopeRules(defKind, scopeKind)
+}
+
 public func IsModifierAllowed(defKind: DefKind, scopeKind: ScopeKind, modifier: TokenKind): Bool {
-    if (defKind == DefKind.PACKAGE) {
-        return modifier == TokenKind.MACRO
-    }
-    if (modifier == TokenKind.PUBLIC || modifier == TokenKind.PRIVATE || modifier == TokenKind.INTERNAL || modifier == TokenKind.PROTECTED) {
-        return true
-    }
-    if (scopeKind == ScopeKind.FUNC_BODY || scopeKind == ScopeKind.MAIN_BODY) {
-        return modifier == TokenKind.CONST || modifier == TokenKind.MUT || modifier == TokenKind.UNSAFE
-    }
-    if (defKind == DefKind.VARIABLE) {
-        return modifier == TokenKind.STATIC || modifier == TokenKind.CONST || modifier == TokenKind.UNSAFE ||
-            modifier == TokenKind.PUBLIC || modifier == TokenKind.PRIVATE || modifier == TokenKind.INTERNAL ||
-            modifier == TokenKind.PROTECTED
-    }
-    return true
+    return FindRule(defKind, scopeKind, modifier).isSome()
 }
 
 public func GetConflictingModifiers(defKind: DefKind, scopeKind: ScopeKind, modifier: TokenKind): ConflictArray {
-    if (modifier == TokenKind.PUBLIC || modifier == TokenKind.PRIVATE || modifier == TokenKind.INTERNAL || modifier == TokenKind.PROTECTED) {
-        return ConflictArray([TokenKind.PUBLIC, TokenKind.PRIVATE, TokenKind.INTERNAL, TokenKind.PROTECTED])
-    }
-    if (modifier == TokenKind.OPEN || modifier == TokenKind.SEALED || modifier == TokenKind.ABSTRACT) {
-        return ConflictArray([TokenKind.OPEN, TokenKind.SEALED, TokenKind.ABSTRACT])
-    }
-    if (modifier == TokenKind.COMMON || modifier == TokenKind.SPECIFIC) {
-        return ConflictArray([TokenKind.COMMON, TokenKind.SPECIFIC])
+    if (let Some(conflicts) <- FindRule(defKind, scopeKind, modifier)) {
+        return ConflictArray(conflicts)
     }
     return ConflictArray()
 }
 
 public func HasWarningRules(defKind: DefKind, scopeKind: ScopeKind): Bool {
-    return true
+    return (defKind == DefKind.FUNC && scopeKind == ScopeKind.INTERFACE_BODY) ||
+        (defKind == DefKind.CLASS && scopeKind == ScopeKind.TOPLEVEL) ||
+        (defKind == DefKind.INTERFACE && scopeKind == ScopeKind.TOPLEVEL) ||
+        (defKind == DefKind.PROPERTY && scopeKind == ScopeKind.INTERFACE_BODY)
 }
 
 public func GetWarningConflicts(defKind: DefKind, scopeKind: ScopeKind, modifier: TokenKind): ConflictArray {
-    if (modifier == TokenKind.UNSAFE && (defKind == DefKind.CLASS || defKind == DefKind.STRUCT || defKind == DefKind.INTERFACE)) {
-        return ConflictArray([TokenKind.UNSAFE])
+    if (defKind == DefKind.CLASS && scopeKind == ScopeKind.TOPLEVEL) {
+        if (modifier == TokenKind.PUBLIC) { return ConflictArray(PublicSealed()) }
+        if (modifier == TokenKind.OPEN) { return ConflictArray([TokenKind.SEALED, TokenKind.ABSTRACT]) }
+    }
+    if (defKind == DefKind.INTERFACE && scopeKind == ScopeKind.TOPLEVEL) {
+        if (modifier == TokenKind.PUBLIC) { return ConflictArray(PublicSealed()) }
+        if (modifier == TokenKind.OPEN) { return ConflictArray([TokenKind.SEALED, TokenKind.ILLEGAL]) }
+    }
+    if ((defKind == DefKind.FUNC || defKind == DefKind.PROPERTY) && scopeKind == ScopeKind.INTERFACE_BODY) {
+        if (modifier == TokenKind.PUBLIC) { return ConflictArray(IllegalOnly()) }
+        if (modifier == TokenKind.OPEN) { return ConflictArray(IllegalOnly()) }
     }
     return ConflictArray()
 }
@@ -73,11 +525,11 @@ public func GetAttributeByModifier(tokenKind: TokenKind): Option<Attribute> {
     if (tokenKind == TokenKind.OVERRIDE) { return Attribute.OVERRIDE }
     if (tokenKind == TokenKind.REDEF) { return Attribute.REDEF }
     if (tokenKind == TokenKind.FOREIGN) { return Attribute.FOREIGN }
-    if (tokenKind == TokenKind.INOUT) { return Attribute.INOUT }
+    if (tokenKind == TokenKind.INOUT) { return None }
     if (tokenKind == TokenKind.MUT) { return Attribute.MUT }
     if (tokenKind == TokenKind.UNSAFE) { return Attribute.UNSAFE }
     if (tokenKind == TokenKind.OPERATOR) { return Attribute.OPERATOR }
-    if (tokenKind == TokenKind.CONST) { return Attribute.CONST }
+    if (tokenKind == TokenKind.CONST) { return None }
     if (tokenKind == TokenKind.COMMON) { return Attribute.COMMON }
     if (tokenKind == TokenKind.SPECIFIC) { return Attribute.SPECIFIC }
     return None

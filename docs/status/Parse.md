@@ -1,28 +1,35 @@
 # Parse Port Status
 
-Date: 2026-06-16
+Date: 2026-06-17
 
 Build: `cjpm build` passes.
 
 ## Summary
 
 Replaced the Parse scaffold with a multi-file Cangjie package that mirrors the C++
-Parse component split. The package now has local parser-facing source positions,
-tokens, diagnostics, AST node shapes, a lexer, parser state, top-level parsing,
+Parse component split. The package now imports real Basic positions/source
+manager, real Lex tokens/token tables, real AST kind/attribute/annotation
+enums, real Utils overflow strategy helpers, and real Option compiler
+configuration types. It still has local
+parser-facing diagnostics, AST node shapes, a lexer, parser state, top-level parsing,
 declaration parsing, expression parsing, type parsing, pattern parsing, imports,
 annotations, modifiers, features, macro-call capture, quote capture, comment
 collection, modifier-rule queries, AST checking, AST hashing, CJMP entry wiring,
 and Java/ObjC native FFI parser checks.
 
-## Important Blocker
+## Current De-Isolation
 
-`packages/parse/cjpm.toml` currently has no dependencies, and this task forbids
-editing manifests. A faithful production Parse port must import the real
-`cangjie_compiler::lex`, `cangjie_compiler::ast`, and
-`cangjie_compiler::basic` packages. Without those manifest dependencies, this
-pass keeps a local compatibility layer so the workspace still compiles. That
-means the parser is behavior-bearing but not yet wired to the real sibling
-package public APIs.
+`packages/parse/cjpm.toml` now depends on `basic`, `lex`, `ast`, `option`, and
+`utils`.
+`Position.cj` and `Token.cj` no longer own compatibility copies of the Basic
+position/source types or Lex token types. `ASTCore.cj` no longer owns local
+copies of `ASTKind`, `Attribute`, or `AnnotationKind`; it imports the real AST
+definitions and keeps only Parse-local lightweight node classes that still
+diverge from the real AST class layout. The local `Annotation` scaffold now uses
+the real Utils `OverflowStrategy` type rather than a Parse-local copy.
+`ParserTypes.cj` no longer owns local copies of `GlobalOptions`, `OutputMode`,
+`InteropLanguage`, `BackendType`, or `Triple`; those names are public aliases of
+the real Option package types.
 
 ## Implemented In This Pass
 
@@ -86,11 +93,66 @@ package public APIs.
 - Added builtin annotation-lambda recognition so `@Anno { ... }` parses as a
   lambda expression where the C++ parser accepts annotation lambdas, including
   the `spawn` task position.
+- Continued the de-isolation pass by importing real Basic `Position`, `Range`,
+  `Source`, and `SourceManager`; real Lex `Token`, `TokenKind`, `StringPart`,
+  `TokenVecMap`, and token helper tables; and real AST `ASTKind`, `Attribute`,
+  and `AnnotationKind`.
+- Replaced the simplified modifier allowance/conflict/warning placeholders with
+  C++-shaped rule mappings from `ParserModifierRules.cpp`, including top-level,
+  class/interface/struct/enum/extend body, constructor, property, package, and
+  interface warning rules. `INOUT` and `const` now follow the C++ mapping:
+  `INOUT` has no AST attribute, and `const` is carried by declaration fields.
+- Continued de-isolating compiler-wide option state by replacing Parse-local
+  compatibility copies of `GlobalOptions`, `OutputMode`, `InteropLanguage`,
+  `BackendType`, and `Triple` with real imports from `cangjie_compiler::option`.
+  CJMP common-mode checks now use the real Option `OutputModeIndex` helper when
+  comparing against `OutputMode.CHIR`.
+- Reworked feature directive parsing to match `ParseFeatures.cpp` more closely:
+  `features` now expects a `{ ... }` set instead of the previous parenthesized
+  shape, records left/right brace positions, comma positions, dotted feature
+  identifiers, feature annotations, and broken-node state for malformed sets.
+  The local `FeatureId`, `FeaturesSet`, and `FeaturesDirective` scaffolding now
+  mirrors the real AST/C++ field layout for feature directives.
+- Reworked builtin annotation parsing toward `ParseAnnotations.cpp`: builtin
+  annotations now use square-bracket argument lists, `@When[...]` stores a
+  condition expression, `@Attribute[...]` stores attribute tokens and comma
+  positions, overflow annotations store a real Utils `OverflowStrategy`, and
+  `@Deprecated[...]` validates literal argument names/types. Custom annotations
+  parse `@`/`@!`, preserve compile-time visibility, accept qualified names via
+  `baseExpr`, and use square-bracket arguments. Macro-call classification now
+  excludes builtin annotations and expression macro calls no longer accept
+  `@!`, matching the C++ split more closely.
+- Reworked package/import parsing toward `Parser.cpp` and `ParseImports.cpp`:
+  package headers now record macro-package state, `::` organization separators,
+  separator positions, package-name fields, raw-identifier errors, module-name
+  derivation, and package-name length checks. Import specs now model C++ import
+  kinds (`single`, `alias`, `all`, `multi`), `::`, prefix separator positions,
+  `as` positions, brace/comma positions, `import a.{b, c as d}` parsing,
+  import-all parsing, import annotation validation, multi-import desugaring, and
+  import package-name length checks.
+- Reworked top-level parsing toward the C++ `Parser.cpp` preamble shape:
+  `features? package? import* decl*` is now parsed in distinct phases instead
+  of allowing package/import/features repeatedly anywhere, import annotations
+  are preserved for the first declaration when they are not followed by an
+  import, modifiers before non-package declarations are no longer consumed by
+  the package probe, late package/import/features forms are diagnosed, top-level
+  declarations get `Attribute.GLOBAL`, and `macro package` now diagnoses public
+  non-macro declarations.
 
 ## Remaining Work
 
-- Replace the local compatibility layer with the real Basic/Lex/AST APIs when
-  manifest edits are allowed.
+- Replace the remaining Parse-local AST node classes, parser diagnostics, and
+  parser lexer implementation with real sibling package APIs where their public
+  surfaces are sufficiently complete.
+- Top-level recovery still uses local message diagnostics rather than the exact
+  C++ diagnostic IDs, suggestions, parser-scope reset objects, and bracket-stack
+  cleanup.
+- Feature raw-identifier diagnostics still depend on finishing lexer
+  de-isolation: the local Parse lexer strips backticks before parser recovery,
+  while the real Lex lexer preserves raw identifier spelling in `Token.Value()`.
+- Annotation diagnostics are still message-based through the local Parse
+  diagnostic shim; converting them to real Basic diagnostic IDs remains part of
+  the broader diagnostics de-isolation.
 - Audit grammar and diagnostic parity against the full C++ Parse test corpus;
   the current parser is substantial and compiling, but not a complete faithful
   replacement for all 17k+ lines of C++ parser behavior.
