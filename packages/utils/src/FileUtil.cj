@@ -350,6 +350,14 @@ public class FileUtil {
             return false
         }
         try {
+            let info = FileInfo(dirPath)
+            if (info.isSymbolicLink()) {
+                remove(dirPath)
+                return true
+            }
+            if (!info.isDirectory()) {
+                return false
+            }
             remove(dirPath, recursive: true)
             return true
         } catch (e: Exception) {
