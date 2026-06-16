@@ -1873,6 +1873,7 @@ public class LexerImpl {
     }
 
     private func ScanInterpolationStringLiteralHoleBalancedTextString(): Bool {
+        CJC_ASSERT(currentChar == Int64(b'\'') || currentChar == Int64(b'"'))
         if (getNextChar(0) == UInt8(currentChar) && getNextChar(1) == UInt8(currentChar)) {
             return ScanMultiLineString(pCurrent, needStringParts: false)[1]
         }
