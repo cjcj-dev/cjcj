@@ -105,6 +105,8 @@ public open class CGType {
     protected var addrspace: UInt32 = 0u32
     protected var size: Option<Int64> = None
     protected var align: Option<Int64> = None
+    private var typeInfo: Option<LLVMValueRef> = None
+    private var typeTemplate: Option<LLVMValueRef> = None
     private var containedGenerated: Bool = false
     private var cgGenericKind: CGGenericKind
 
@@ -188,31 +190,24 @@ public open class CGType {
     }
 
     public func GetOrCreateTypeInfo(): LLVMValueRef {
-        let typeInfoTy = CGType.GetOrCreateTypeInfoType(cgMod.GetLLVMContext())
-        let typeInfoName = CGType.GetNameOfTypeInfoGV(chirType)
-        cgCtx.AddCodeGenAddedFuncsOrVars(chirType, typeInfoName)
-        if (let Some(moduleHandle) <- cgMod.GetLLVMModule()) {
-            var createdGlobal = LLVMNullValue()
-            try (nameCString = unsafe { LibC.mallocCString(typeInfoName) }.asResource()) {
-                createdGlobal = unsafe { LLVMAddGlobal(moduleHandle.raw, typeInfoTy, nameCString.value) }
-            }
-            return createdGlobal
+        if (chirType.IsThis() || chirType.IsRef()) {
+            throw IllegalArgumentException("typeinfo is not valid for " + chirType.ToString())
         }
-        return LLVMNullValue()
+        if (let Some(existingInfo) <- typeInfo) {
+            return existingInfo
+        }
+        let createdInfo = GetOrCreateTypeInfoGlobal(cgMod, chirType, cgGenericKind)
+        typeInfo = createdInfo
+        return createdInfo
     }
 
     public func GetOrCreateTypeTemplate(): LLVMValueRef {
-        let templateTy = CGType.GetOrCreateTypeTemplateType(cgMod.GetLLVMContext())
-        let templateName = CGType.GetNameOfTypeTemplateGV(chirType)
-        cgCtx.AddCodeGenAddedFuncsOrVars(chirType, templateName)
-        if (let Some(moduleHandle) <- cgMod.GetLLVMModule()) {
-            var createdGlobal = LLVMNullValue()
-            try (nameCString = unsafe { LibC.mallocCString(templateName) }.asResource()) {
-                createdGlobal = unsafe { LLVMAddGlobal(moduleHandle.raw, templateTy, nameCString.value) }
-            }
-            return createdGlobal
+        if (let Some(existingTemplate) <- typeTemplate) {
+            return existingTemplate
         }
-        return LLVMNullValue()
+        let createdTemplate = GetOrCreateTypeTemplateGlobal(cgMod, chirType)
+        typeTemplate = createdTemplate
+        return createdTemplate
     }
 
     protected open func GenLLVMType(): LLVMTypeRef { return LLVMNullType() }
