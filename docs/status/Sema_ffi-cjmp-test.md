@@ -15,15 +15,16 @@ Whole-package selfhost TODO grep: 4 existing markers remain outside the allowed 
 - Added NativeFFI generic replacement and interop naming helpers: function generic type substitution, constructor argument generic actual-type collection, instantiated nominal type construction, CJMapping tuple names, function-type Java lambda names, and parameter TypeKind validation.
 - Added mock helper parity for mutable-field getter detection, original accessor identifier recovery, generated global accessor lookup, and foreign accessor naming.
 - Added TestManager semantic helpers for package mock-support consistency, generic mock-creation call propagation, and in-package mock usage scanning with the real AST walker.
+- Ported additional plugin custom-annotation helper behavior: module-name extraction, syscap diagnostic formatting, API/syscap/hide reference checks, C++-style target selection for `CheckNode`, imported class-like external-weak marking, and linkage propagation to desugared parameters/macros/property accessors.
 - Kept all new logic on real sibling package types rather than adding local compatibility copies.
 
 ## Remaining fidelity gaps
 
 - C FFI still lacks backend-option-sensitive unsafe-call gating and the full platform ABI diagnostic matrix from the C++ checker.
 - CJMP generic constraint diagnostics, common member symbol-table rewriting, some extension declaration-map updates, and several merged-member ownership details remain partial.
-- Plugin checking still lacks the complete external plugin configuration and API-level/global-option integration path from the C++ implementation.
+- Plugin checking now has the core reference-check helpers and external-weak marking hooks, but still lacks full option/import-manager parsing, dependency annotation clearing, override-hide comparison, macro ordering diagnostics, and full IfAvailable branch walking from the C++ implementation.
 - Mock/test support now has stronger semantic classification, naming, lookup, package usage detection, and preparation plumbing, but generated wrapper/body synthesis and full injection behavior are still incomplete.
 - NativeFFI utilities now cover more reference, generic, and naming helpers, but AST synthesis/desugaring helpers, mangler-driven method naming, import-manager core declaration helpers, and full Java/ObjC interop manager behavior remain incomplete.
 - LSP base-name and scope-name helpers are present, but the C++ type synthesizer half remains outside the current self-host surface.
 
-Honest real-behavior coverage for this scoped pass is estimated at 40% versus the corresponding C++ reference surface.
+Honest real-behavior coverage for this scoped pass is estimated at 42% versus the corresponding C++ reference surface.
