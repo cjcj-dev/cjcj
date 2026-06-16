@@ -50,6 +50,13 @@ Reference sources inspected from `/root/cj_build/cangjie_compiler/src/Sema`:
   report ambiguous imported non-function sets, detect generic base type
   references without type arguments during member inference, and report
   recursive quest-return function references when no target type is available.
+- Continued reference legality parity in `TypeCheckReference.cj`: reference and
+  member-access helpers now emit access-control failures through the real
+  `TypeCheckAccess` issue model, reject unsafe function references used as
+  values, diagnose type declarations used as rvalues, check package-member
+  visibility with the real module package-relation utility, reject abstract
+  interface calls through type access, reject enum constructor type arguments on
+  member access, and reject direct `super` access to abstract members.
 - Deepened extend checking toward `TypeCheckExtend.cpp`: extend-map construction
   now checks duplicate direct interface implementations, duplicate inherited
   interface implementations, and non-extendable `std.core.Any`/`std.core.CType`
@@ -78,8 +85,9 @@ are from pre-existing files outside this pass scope.
   recommendation, access-control context, alias substitution, promotion-based
   extend constraint filtering, exact generic specialization duplicate checks,
   orphan-rule diagnostics, pipeline wiring for type-alias and class-like
-  declaration checks, and all TypeChecker-owned state once those sibling
-  surfaces are available in the allowed owner files.
+  declaration checks, reference-legality walker wiring, and all
+  TypeChecker-owned state once those sibling surfaces are available in the
+  allowed owner files.
 - Diagnostics are mapped to the available self-hosted diagnostic tables; a few
   C++ diagnostic helpers are represented by the closest currently available
   refactored/legacy diagnostic kind.
