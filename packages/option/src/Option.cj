@@ -1,6 +1,7 @@
 package cangjie_compiler::option
 
 import cangjie_compiler::utils.FileMode as UtilsFileMode
+import cangjie_compiler::utils.Out64
 import std.collection.*
 
 public class Path {
@@ -52,7 +53,7 @@ public class SanitizerCoverageOptions {
         else if (coverageType == SanitizerCoverageType.SCK_FUNCTION) { result += "F" }
         else if (coverageType == SanitizerCoverageType.SCK_BB) { result += "BB" }
         result += ",traceCmp:" + BoolToSerializedString(traceCmp)
-        result += ",traceMemCmp:" + BoolToSerializedString(traceMemCmp)
+        result += ",traceMemCmp" + BoolToSerializedString(traceMemCmp)
         result += ",tracePCGuard:" + BoolToSerializedString(tracePCGuard)
         result += ",inline8bitCounters:" + BoolToSerializedString(inline8bitCounters)
         result += ",inlineBoolFlag:" + BoolToSerializedString(inlineBoolFlag)
@@ -348,6 +349,7 @@ public open class GlobalOptions <: Option {
         this.argList = argList
         let delayed = ArrayList<OptionArgInstance>()
         var rawArgIndex: UInt64 = 0u64
+        var skipParsing = false
         for (entry in argList.entries) {
             CollectOrderedInputFiles(entry, rawArgIndex)
             rawArgIndex++
@@ -358,13 +360,14 @@ public open class GlobalOptions <: Option {
                 let pre = ParsePreAction(this, opt)
                 if (pre.handled) {
                     OccurrenceCheck(opt, argList)
-                    if (pre.skipParsing) { return pre.success }
                     if (!pre.success) { return false }
+                    skipParsing = skipParsing || pre.skipParsing
                 } else {
                     delayed.add(opt)
                 }
             }
         }
+        if (skipParsing) { return true }
         for (opt in delayed) {
             if (!experimentalMode && !opt.info.BelongsGroup(Group.STABLE)) {
                 Errorln(opt.str + " is an experimental feature. \"--experimental\" option is required.")
@@ -937,17 +940,12 @@ public open class GlobalOptions <: Option {
     }
 
     public func SelectedCHIROptsToSerializedString(): String {
-        var result = ""
-        var idx: Int64 = 0
-        while (idx <= OptimizationFlagIndex(OptimizationFlag.REDUNDANT_LOAD)) {
-            var selected = false
-            for (flag in selectedCHIROpts) {
-                if (OptimizationFlagIndex(flag) == idx) { selected = true }
-            }
-            result += if (selected) { "1" } else { "0" }
-            idx++
+        let printer = Out64(v: 0u64, start: false, finish: false)
+        for (flag in selectedCHIROpts) {
+            let bit = 1u64 << OptimizationFlagIndex(flag)
+            let _ = printer.append(bit)
         }
-        return result
+        return printer.toString()
     }
 
     public func OverflowStrategyToSerializedString(): String {
@@ -1024,18 +1022,9 @@ public open class GlobalOptions <: Option {
             joinStrings(interpLoadLib, ":"),
             joinStrings(interpreterArgs, "\\"),
             BoolToSerializedString(interpreterPrintResult),
-            BoolToSerializedString(interpFullBchir),
             BoolToSerializedString(interpMainNoLinkage),
-            BoolToSerializedString(interpCHIR),
-            BoolToSerializedString(constEvalDebug),
             BoolToSerializedString(disableCodeGen),
-            BoolToSerializedString(disableReflection),
-            BoolToSerializedString(enableEH),
-            BoolToSerializedString(compileCjd),
-            BoolToSerializedString(enableParallelMacro),
-            BoolToSerializedString(enableCoverage),
-            targetCPU,
-            sysroot,
+            BoolToSerializedString(disableDeserializer),
         ]
     }
 }

@@ -70,6 +70,16 @@ Target-triple parsing now accepts the reference `unknown` arch/OS spellings,
 empty environment fields, `arm64` as `aarch64`, `mingw32` as GNU, and Android
 API suffixes with the same non-fatal diagnostic behavior as the C++ parser.
 
+This continuation tightens cache-affecting serialization to the C++ contract.
+`SelectedCHIROptsToSerializedString` now uses the shared `utils.Out64`
+formatter instead of a local bit-string encoding, sanitizer coverage
+serialization preserves the reference `traceMemCmp` spelling, and
+`GlobalOptions.ToSerialized` now emits the same 39 fields as `Option.cpp`
+rather than appending extra self-host-only state. Pre-action parsing also now
+matches the C++ two-phase flow more closely: `--help`/`--version` mark normal
+parsing to be skipped after all first-pass arguments have been scanned, instead
+of returning immediately and ignoring later pre-actions.
+
 Remaining fidelity gaps are not hidden behind self-host markers: this package
 still uses local diagnostics instead of Basic diagnostic IDs. Importing Basic
 directly is currently blocked by the existing `basic -> option` dependency for
