@@ -4,9 +4,48 @@ public let STOINT_BASE: Int64 = 10
 
 private let INT64_POSITIVE_LIMIT: UInt64 = 9223372036854775807u64
 private let INT64_NEGATIVE_LIMIT: UInt64 = 9223372036854775808u64
+private let ERANGE_ERRNO: Int32 = 34
 
 foreign {
     func strtod(nptr: CString, endptr: CPointer<CString>): Float64
+}
+
+@When[os == "Linux"]
+private func errnoLocationForStdUtils(): CPointer<Int32> {
+    unsafe {
+        return __errno_location()
+    }
+}
+
+@When[os == "macOS"]
+private func errnoLocationForStdUtils(): CPointer<Int32> {
+    unsafe {
+        return __error()
+    }
+}
+
+@When[os != "Linux" && os != "macOS"]
+private func errnoLocationForStdUtils(): CPointer<Int32> {
+    return CPointer<Int32>()
+}
+
+private func resetStdUtilsErrno(): Unit {
+    unsafe {
+        let errnoPtr = errnoLocationForStdUtils()
+        if (!errnoPtr.isNull()) {
+            errnoPtr.write(0)
+        }
+    }
+}
+
+private func stdUtilsErrno(): Int32 {
+    unsafe {
+        let errnoPtr = errnoLocationForStdUtils()
+        if (errnoPtr.isNull()) {
+            return 0
+        }
+        return errnoPtr.read()
+    }
 }
 
 private func isAsciiSpace(byte: UInt8): Bool {
@@ -180,7 +219,13 @@ private func parseFloat64Value(s: String): Option<Float64> {
     var result: Option<Float64> = None
     try (cInput = unsafe { LibC.mallocCString(s) }.asResource()) {
         if (!cInput.value.isNull()) {
-            result = unsafe { strtod(cInput.value, CPointer<CString>()) }
+            resetStdUtilsErrno()
+            let parsed = unsafe { strtod(cInput.value, CPointer<CString>()) }
+            result = if (stdUtilsErrno() == ERANGE_ERRNO) {
+                None
+            } else {
+                parsed
+            }
         }
     } catch (e: Exception) {
         result = None

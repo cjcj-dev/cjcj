@@ -1,6 +1,6 @@
 # Utils Port Status
 
-Date: 2026-06-16
+Date: 2026-06-17
 
 Build: `cjpm build` passes.
 
@@ -24,6 +24,7 @@ Implemented:
 - Aligned `ProfileRecorder` resource cleanup with the C++ destructor by swallowing `Stop` exceptions during close so profiling cleanup cannot leak exceptions.
 - Deepened `StdUtils` integer conversion fidelity: `Sto*` helpers now follow the C++ `std::sto*` family more closely for leading ASCII whitespace, optional signs, base-0 autodetection, hexadecimal prefixes, partial numeric consumption, and range failures.
 - Switched `StdUtils.Stod`/`Stold` to libc `strtod` behind C FFI with C++-style subject detection, preserving leading whitespace, `inf`/`nan`, and partial numeric consumption behavior that `std::stod` accepts.
+- Added libc `errno`/`ERANGE` handling around `StdUtils.Stod`/`Stold`, so floating overflow and underflow now map to `None` like the C++ wrappers catching `std::out_of_range`.
 - Brought `UserBase` profiling output closer to the C++ implementation: result-generation exceptions now print the same `OutputResult` diagnostic, and JSON profile writes no longer auto-create missing parent directories.
 - Restored the C++ signal utility split with `SignalUtil.cj`, and brought Unix alternate signal stack setup closer to `SignalUnix.cpp` by querying/preserving the old stack and reusing an existing active or sufficiently large alternate stack.
 
