@@ -22,6 +22,8 @@ Implemented:
   comparison as the C++ implementation.
 - Tightened construction to match the C++ ownership model: kind-setting constructors are protected, and
   the CHIR meta-kind marker is a value marker rather than a heap class.
+- Matched the C++ constructor sequence more closely: `MetaTransformConcept` now only default-constructs
+  with `UNKNOWN`, and `MetaTransform` assigns the protected kind during its own construction.
 - Exposed the public callback type aliases used by plugin registration and plugin-info registration, so
   the Cangjie API surface no longer hides public C++ callback signatures behind private aliases.
 - Added `MakeCHIRPluginInfo`, the Cangjie equivalent of the C++ `CHIR_PLUGIN` macro expansion: it wraps

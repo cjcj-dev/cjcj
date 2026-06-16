@@ -66,10 +66,6 @@ public open class MetaTransformConcept {
 
     public init() {}
 
-    protected init(kind: MetaTransformKind) {
-        this.kind = kind
-    }
-
     public func GetKind(): MetaTransformKind {
         return kind
     }
@@ -93,11 +89,12 @@ public interface MetaTransformRunner<DeclT> {
 
 public abstract class MetaTransform<DeclT> <: MetaTransformConcept & MetaTransformRunner<DeclT> {
     public init() {
-        super(MetaTransformKind.UNKNOWN)
+        super()
     }
 
     protected init(kind: MetaTransformKind) {
-        super(kind)
+        super()
+        this.kind = kind
     }
 }
 
