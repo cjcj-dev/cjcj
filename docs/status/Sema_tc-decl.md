@@ -70,6 +70,12 @@ Reference sources inspected from `/root/cj_build/cangjie_compiler/src/Sema`:
 - Deepened annotation checking toward `TypeCheckAnnotation.cpp` by preserving
   the C++ `NO_REFLECT_INFO` marker on custom annotation call expressions that
   are not compile-time visible.
+- Continued annotation parity in `TypeCheckAnnotation.cj`: custom annotation
+  recovery now runs the shared `RecoverToCallExpr` desugar rollback before
+  moving the call payload back, and successful custom annotation checks clone
+  the resolved base expression and function arguments back into the original
+  annotation so cjo serialization retains the C++ payload shape while
+  `annotationsArray` keeps the checked call expression.
 - The scoped files continue to use the real sibling `ast`, `basic`, and root
   `sema` types. An attempted direct import of `sema.FFI.CheckCFuncParamType`
   exposed a package cycle (`sema.FFI -> sema -> sema.FFI`), so the root type
@@ -89,8 +95,9 @@ are from pre-existing files outside this pass scope.
 - Full C++ parity still requires complete overload resolution, lookup/import
   recommendation, exact access-control context, alias substitution, promotion-based
   extend constraint filtering, exact generic specialization duplicate checks,
-  orphan-rule diagnostics, pipeline wiring for type-alias and class-like
-  declaration checks, reference-legality walker wiring, and all
+  orphan-rule diagnostics, custom annotation expression synthesis/type checking,
+  annotation target-array type checking, pipeline wiring for type-alias and
+  class-like declaration checks, reference-legality walker wiring, and all
   TypeChecker-owned state once those sibling surfaces are available in the
   allowed owner files.
 - Diagnostics are mapped to the available self-hosted diagnostic tables; a few
