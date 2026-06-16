@@ -14,6 +14,7 @@ Implemented:
 - Deepened FileUtil platform fidelity: public path/injection constants now match the C++ Windows/POSIX split, normalization uses platform slash rules, empty-base `JoinPath` matches C++, environment path splitting is platform-specific, case-sensitive `FileExist` verifies the directory entry name, and package/serialization/LTO path helpers share the same separator handling.
 - Matched `FileUtil::Access` and `AccessWithResult` to the C++ `access(2)`/`_access` model: file mode flags now use native `F_OK`/`X_OK`/`W_OK`/`R_OK` values, Unix failures distinguish `ENOENT`, `EACCES`, and unknown errors, and the file-scan `_test.cj` filter now follows the C++ suffix/substring rules.
 - Tightened `FileUtil.RemoveDirectoryRecursively` to match the C++ entrypoint: regular files are rejected, symbolic links are removed without descending, and recursive deletion is reserved for real directories.
+- Matched the POSIX `FileUtil.GetAllDirsUnderCurrentPath` traversal more closely by enumerating only real directories and returning the directories collected so far when an intermediate directory cannot be opened, instead of reusing `GetDirectories` and following symbolic links.
 - Deepened Semaphore startup behavior by deriving the singleton count from processor count on Linux/macOS via `sysconf`, preserving the C++ "leave two cores free, minimum one" policy.
 - Aligned `Semaphore.SetCount` with the C++ implementation by updating the count under lock without broadcasting to waiters.
 - Corrected Unicode identifier classification to match the lexer token tables: raw identifiers can wrap keywords, `_` and built-in type token names are rejected as identifiers, and contextual modifier keywords are allowed only when requested.
@@ -25,12 +26,15 @@ Implemented:
 - Deepened `StdUtils` integer conversion fidelity: `Sto*` helpers now follow the C++ `std::sto*` family more closely for leading ASCII whitespace, optional signs, base-0 autodetection, hexadecimal prefixes, partial numeric consumption, and range failures.
 - Switched `StdUtils.Stod`/`Stold` to libc `strtod` behind C FFI with C++-style subject detection, preserving leading whitespace, `inf`/`nan`, and partial numeric consumption behavior that `std::stod` accepts.
 - Added libc `errno`/`ERANGE` handling around `StdUtils.Stod`/`Stold`, so floating overflow and underflow now map to `None` like the C++ wrappers catching `std::out_of_range`.
+- Added the unsigned `FillZero` overload from the C++ header facade and matched Windows environment-variable key normalization in `StringifyEnvironmentPointer`.
 - Brought `UserBase` profiling output closer to the C++ implementation: result-generation exceptions now print the same `OutputResult` diagnostic, and JSON profile writes no longer auto-create missing parent directories.
 - Restored the C++ signal utility split with `SignalUtil.cj`, and brought Unix alternate signal stack setup closer to `SignalUnix.cpp` by querying/preserving the old stack and reusing an existing active or sufficiently large alternate stack.
+- Updated the Utils-local standard library map used by `ConvertPackageNameToLibCangjieBaseFormat` to include the same standard, deriving, and macro package entries as the real Driver table that C++ Utils consults.
 
 Known fidelity caveats:
 
 - Utils exposes normal and signal-safe ICE temp-file cleanup hooks for the Driver port to register; the actual C++ `TempFileManager` deletion policy still belongs to Driver and is outside Utils' dependency boundary here.
+- `StdlibMap.cj` still mirrors Driver standard-library metadata locally because importing Driver from Utils would create a package cycle; table contents are synced with the Driver port in this pass.
 - `ParallelUtil` provides real generic indexed parallel dispatch, but the exact C++ CHIRBuilder/Translator entrypoint still requires CHIR-facing Cangjie types.
 - Non-Linux memory profiling still uses the conservative Cangjie fallback rather than the C++ Windows/macOS process-memory APIs.
 

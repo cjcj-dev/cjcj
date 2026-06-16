@@ -40,6 +40,19 @@ public func FillZero(num: Int64, len: Int64): String {
     return builder.toString()
 }
 
+public func FillZero(num: UInt64, len: Int64): String {
+    let raw = num.toString()
+    if (raw.size >= len) {
+        return raw
+    }
+    let builder = StringBuilder()
+    for (_ in 0..(len - raw.size)) {
+        builder.append("0")
+    }
+    builder.append(raw)
+    return builder.toString()
+}
+
 public func GetMacroFuncName(fullPackageName: String, isAttr: Bool, ident: String): String {
     let prefix = if (isAttr) { "macroCall_a_" } else { "macroCall_c_" }
     return (prefix + ident + "_" + fullPackageName).replace(".", "_").replace(":", "_")
@@ -441,11 +454,21 @@ public func StringifyArgumentVector(args: Array<String>): Array<String> {
     return args
 }
 
+@When[os == "Windows"]
+private func normalizeEnvironmentKey(key: String): String {
+    return key.toAsciiUpper()
+}
+
+@When[os != "Windows"]
+private func normalizeEnvironmentKey(key: String): String {
+    return key
+}
+
 public func StringifyEnvironmentPointer(entries: Array<String>): HashMap<String, String> {
     let environmentVars = HashMap<String, String>()
     for (item in entries) {
         if (let Some(pos) <- item.indexOf("=")) {
-            environmentVars.add(item[0..pos], item[pos + 1..])
+            environmentVars.add(normalizeEnvironmentKey(item[0..pos]), item[pos + 1..])
         }
     }
     return environmentVars

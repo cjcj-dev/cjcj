@@ -325,6 +325,16 @@ private func addFileIfNeeded(
     return true
 }
 
+@When[os == "Windows"]
+private func skipSymlinkInRecursiveDirectorySearch(): Bool {
+    return false
+}
+
+@When[os != "Windows"]
+private func skipSymlinkInRecursiveDirectorySearch(): Bool {
+    return true
+}
+
 public class FileUtil {
     public static func CheckCommandLineInjection(cmd: String): Bool {
         for (byte in cmd.toArray()) {
@@ -660,10 +670,17 @@ public class FileUtil {
         while (head < queue.size) {
             let tmpPath = queue[head]
             head++
-            let dirs = GetDirectories(tmpPath)
-            for (dir in dirs) {
-                allDirs.add(dir.path)
-                queue.add(dir.path)
+            try {
+                for (info in FSDirectory.readFrom(tmpPath)) {
+                    if (!info.isDirectory() || (skipSymlinkInRecursiveDirectorySearch() && info.isSymbolicLink())) {
+                        continue
+                    }
+                    let dirPath = JoinPath(tmpPath, info.name)
+                    allDirs.add(dirPath)
+                    queue.add(dirPath)
+                }
+            } catch (e: Exception) {
+                return allDirs.toArray()
             }
         }
         return allDirs.toArray()
