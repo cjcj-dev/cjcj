@@ -1,5 +1,7 @@
 package cangjie_compiler::macro_pkg
 
+import cangjie_compiler::basic.SplitQualifiedName as BasicSplitQualifiedName
+import cangjie_compiler::parse.IsBuiltinAnnotation as ParseIsBuiltinAnnotation
 import std.collection.*
 
 private func appendTokens(target: ArrayList<Token>, source: ArrayList<Token>): Unit {
@@ -16,6 +18,22 @@ private func tokenListFromRange(input: ArrayList<Token>, start: Int64, finish: I
         idx++
     }
     return out
+}
+
+private func replaceTokenSpan(tokens: ArrayList<Token>, start: Int64, count: Int64, replacement: Token): Unit {
+    let rebuilt = ArrayList<Token>()
+    var idx: Int64 = 0
+    while (idx < tokens.size) {
+        if (idx == start) {
+            rebuilt.add(replacement)
+            idx += count
+        } else {
+            rebuilt.add(tokens[idx])
+            idx++
+        }
+    }
+    tokens.clear()
+    appendTokens(tokens, rebuilt)
 }
 
 private func preprocessTokens(inputTokens: ArrayList<Token>, escapePosVec: ArrayList<Position>): Bool {
@@ -47,11 +65,13 @@ private func isEscapedAt(pos: Position, escapePosVec: ArrayList<Position>): Bool
 
 private func hasMacroCallToEval(moduleName: String, inputTokens: ArrayList<Token>, curIndex: Int64,
     escapePosVec: ArrayList<Position>): Bool {
-    let _ = moduleName
     if (curIndex >= inputTokens.size - 1 || inputTokens[curIndex].Value() != "@") {
         return false
     }
     if (isEscapedAt(inputTokens[curIndex].Begin(), escapePosVec)) {
+        return false
+    }
+    if (ParseIsBuiltinAnnotation(moduleName, inputTokens[curIndex + 1].Value())) {
         return false
     }
     return IsIdentifierOrContextualKeyword(inputTokens[curIndex + 1].kind)
@@ -69,6 +89,67 @@ private func hasChildMacroCall(macCall: MacroCall): Bool {
         }
     }
     return false
+}
+
+private func hasMacroCallInTokens(tokens: ArrayList<Token>, moduleName: String, currentIdentifier: String): Bool {
+    var idx: Int64 = 0
+    while (idx + 1 < tokens.size) {
+        if (tokens[idx].Value() == "@" && IsIdentifierOrContextualKeyword(tokens[idx + 1].kind) &&
+            !ParseIsBuiltinAnnotation(moduleName, tokens[idx + 1].Value()) &&
+            tokens[idx + 1].Value() != currentIdentifier) {
+            return true
+        }
+        idx++
+    }
+    return false
+}
+
+private func skipBracketedTokens(tokens: ArrayList<Token>, startIndex: Int64, openKind: TokenKind,
+    closeKind: TokenKind): Int64 {
+    var idx = startIndex
+    if (idx >= tokens.size || tokens[idx].kind != openKind) {
+        return idx
+    }
+    var depth: Int64 = 1
+    idx++
+    while (idx < tokens.size && depth > 0) {
+        if (tokens[idx].kind == openKind) {
+            depth++
+        } else if (tokens[idx].kind == closeKind) {
+            depth--
+        }
+        idx++
+    }
+    return idx
+}
+
+private func skipAnnotationTokens(tokens: ArrayList<Token>): Int64 {
+    var idx: Int64 = 0
+    if (idx < tokens.size && tokens[idx].Value() == "@") {
+        idx++
+    }
+    if (idx < tokens.size && IsIdentifierOrContextualKeyword(tokens[idx].kind)) {
+        idx++
+    }
+    idx = skipBracketedTokens(tokens, idx, TokenKind.LSQUARE, TokenKind.RSQUARE)
+    while (idx < tokens.size && tokens[idx].kind == TokenKind.NL) {
+        idx++
+    }
+    return idx
+}
+
+private func moduleNameForMacroCall(macCall: MacroCall): String {
+    if (let Some(node) <- macCall.GetNode()) {
+        if (let Some(file) <- node.curFile) {
+            if (let Some(pkg) <- file.curPackage) {
+                let names = BasicSplitQualifiedName(pkg.fullPackageName)
+                if (names.size > 1) {
+                    return names[0]
+                }
+            }
+        }
+    }
+    return ""
 }
 
 private func calculateCallEnd(inputTokens: ArrayList<Token>, atIndex: Int64): Int64 {
@@ -179,6 +260,20 @@ private func refreshMacroCallArgs(macCall: MacroCall, diag: DiagnosticEngine): U
             appendTokens(tokensAfterEval, invocation.attrs)
             tokensAfterEval.add(Token(TokenKind.RSQUARE, "]", invocation.rightSquarePos, invocation.rightSquarePos + 1))
         }
+        if (invocation.hasParenthesis && invocation.nodes.isEmpty()) {
+            tokensAfterEval.add(Token(TokenKind.LPAREN, "(", invocation.leftParenPos, invocation.leftParenPos + 1))
+            appendTokens(tokensAfterEval, invocation.args)
+            tokensAfterEval.add(Token(TokenKind.RPAREN, ")", invocation.rightParenPos, invocation.rightParenPos + 1))
+        } else {
+            let newLinePos = tokensAfterEval[tokensAfterEval.size - 1].Begin() + 1
+            tokensAfterEval.add(Token(TokenKind.NL, "\n", newLinePos, newLinePos + 1))
+            if (invocation.nodes.isEmpty()) {
+                appendTokens(tokensAfterEval, invocation.args)
+            }
+        }
+    }
+    if (macCall.status == MacroEvalStatus.ANNOTATION && invocation.hasParenthesis && !invocation.nodes.isEmpty()) {
+        tokensAfterEval.add(Token(TokenKind.LPAREN, "(", invocation.leftParenPos, invocation.leftParenPos + 1))
     }
     for (node in invocation.nodes) {
         if (let Some(tokenPart) <- (node as TokenPart)) {
@@ -186,6 +281,9 @@ private func refreshMacroCallArgs(macCall: MacroCall, diag: DiagnosticEngine): U
         } else if (let Some(childInv) <- node.GetInvocation()) {
             appendTokens(tokensAfterEval, childInv.newTokens)
         }
+    }
+    if (macCall.status == MacroEvalStatus.ANNOTATION && invocation.hasParenthesis && !invocation.nodes.isEmpty()) {
+        tokensAfterEval.add(Token(TokenKind.RPAREN, ")", invocation.rightParenPos, invocation.rightParenPos + 1))
     }
     if (macCall.isForInterpolation) {
         invocation.newTokens.clear()
@@ -517,6 +615,19 @@ public class MacroEvaluation {
 
     public func CheckAttrTokens(attrTokens: ArrayList<Token>, macCall: MacroCall): Bool {
         ExpandBuildInMacro(attrTokens, macCall)
+        if (attrTokens.isEmpty()) {
+            return true
+        }
+        if (!preprocessTokens(attrTokens, escapePosVec)) {
+            ci.diag.Diagnose(attrTokens[0].Begin(), " illegal escape in macro call")
+            return false
+        }
+        for (token in attrTokens) {
+            if (token.kind == TokenKind.AT && !isEscapedAt(token.Begin(), escapePosVec)) {
+                ci.diag.Diagnose(token.Begin(), " illegal input tokens in macro attribute")
+                return false
+            }
+        }
         return true
     }
 
@@ -550,12 +661,9 @@ public class MacroEvaluation {
                     let lineStr = pos.line.toString()
                     replacement = Token(TokenKind.INTEGER_LITERAL, lineStr, pos, pos + lineStr.size)
                 }
-                attrTokens.remove(at: idx)
-                attrTokens.remove(at: idx)
-                attrTokens.remove(at: idx)
-                attrTokens.remove(at: idx)
-                attrTokens.add(replacement)
-                return
+                replaceTokenSpan(attrTokens, idx, 4, replacement)
+                idx++
+                continue
             }
             idx++
         }
@@ -645,6 +753,10 @@ public class MacroEvaluation {
     public func NeedCreateMacroCallTreeForReEval(macCall: MacroCall): Bool {
         let invocation = macCall.RequireInvocation()
         if (invocation.macroCallDiagInfo.isCustom) {
+            let moduleName = moduleNameForMacroCall(macCall)
+            if (hasMacroCallInTokens(invocation.newTokens, moduleName, invocation.macroCallDiagInfo.identifier)) {
+                return true
+            }
             macCall.status = MacroEvalStatus.FINISH
             return false
         }
@@ -686,14 +798,20 @@ public class MacroEvaluation {
         let invocation = macCall.RequireInvocation()
         invocation.nodes.clear()
         let inputTokens = if (reEval) { invocation.newTokens } else { invocation.args }
+        let tokenStartOffset = if (reEval && invocation.macroCallDiagInfo.isCustom) {
+            skipAnnotationTokens(inputTokens)
+        } else {
+            0
+        }
         if (!preprocessTokens(inputTokens, escapePosVec)) {
             if (!inputTokens.isEmpty()) {
                 ci.diag.Diagnose(inputTokens[0].Begin(), " illegal escape in macro call")
             }
             return
         }
-        var startIndex = Box<Int64>(0)
-        var curIndex = Box<Int64>(0)
+        var startIndex = Box<Int64>(tokenStartOffset)
+        var curIndex = Box<Int64>(tokenStartOffset)
+        let moduleName = moduleNameForMacroCall(macCall)
         while (curIndex.value < inputTokens.size) {
             let currentToken = inputTokens[curIndex.value]
             if (currentToken.kind == TokenKind.AT && !isEscapedAt(currentToken.Begin(), escapePosVec) &&
@@ -711,7 +829,7 @@ public class MacroEvaluation {
                 startIndex.value = curIndex.value
                 continue
             }
-            if (!hasMacroCallToEval("", inputTokens, curIndex.value, escapePosVec)) {
+            if (!hasMacroCallToEval(moduleName, inputTokens, curIndex.value, escapePosVec)) {
                 curIndex.value++
                 continue
             }
