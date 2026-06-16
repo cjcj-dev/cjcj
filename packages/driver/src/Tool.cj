@@ -11,8 +11,67 @@ public func MakeSingleToolBatch(tool: Tool): ToolBatch {
     return result
 }
 
-private func EnvironmentLauncherPath(): String {
-    return if (FileUtil.FileExist("/usr/bin/env")) { "/usr/bin/env" } else { "env" }
+@When[os != "Windows"]
+foreign {
+    func posix_spawn(
+        pid: CPointer<Int32>,
+        path: CString,
+        fileActions: CPointer<Unit>,
+        attrp: CPointer<Unit>,
+        argv: CPointer<CString>,
+        envp: CPointer<CString>
+    ): Int32
+    func posix_spawnp(
+        pid: CPointer<Int32>,
+        file: CString,
+        fileActions: CPointer<Unit>,
+        attrp: CPointer<Unit>,
+        argv: CPointer<CString>,
+        envp: CPointer<CString>
+    ): Int32
+    func waitpid(pid: Int32, status: CPointer<Int32>, options: Int32): Int32
+    func free(ptr: CString): Unit
+}
+
+@When[os != "Windows"]
+private func FreeCStringList(values: ArrayList<CString>): Unit {
+    for (value in values) {
+        if (!value.isNull()) {
+            unsafe { free(value) }
+        }
+    }
+}
+
+@When[os != "Windows"]
+private func WriteNativeStringArray(
+    values: Array<String>,
+    target: CPointer<CString>,
+    allocatedStrings: ArrayList<CString>
+): Bool {
+    var idx: Int64 = 0
+    while (idx < values.size) {
+        let nativeString = unsafe { LibC.mallocCString(values[idx]) }
+        if (nativeString.isNull()) {
+            return false
+        }
+        allocatedStrings.add(nativeString)
+        unsafe { (target + idx).write(nativeString) }
+        idx++
+    }
+    unsafe { (target + values.size).write(CString(CPointer<UInt8>())) }
+    return true
+}
+
+@When[os != "Windows"]
+private func DecodeWaitStatus(status: Int32): Int64 {
+    let signalBits = status & 0x7f
+    if (signalBits == 0) {
+        return Int64((status >> 8) & 0xff)
+    }
+    if (signalBits == 0x7f) {
+        return 1
+    }
+    return Int64(128 + signalBits)
 }
 
 public class Tool {
@@ -92,7 +151,7 @@ public class Tool {
             let code = if (HostOS() == OSType.WINDOWS) {
                 execute(name, args.toArray())
             } else {
-                execute(EnvironmentLauncherPath(), BuildEnvironmentLauncherArgs())
+                RunPOSIX()
             }
             return ProcessFuture(code)
         } catch (e: Exception) {
@@ -144,19 +203,6 @@ public class Tool {
         return false
     }
 
-    private func BuildEnvironmentLauncherArgs(): Array<String> {
-        let launcherArgs = ArrayList<String>()
-        launcherArgs.add("-i")
-        for (entry in BuildEnvironmentVector()) {
-            launcherArgs.add(entry)
-        }
-        launcherArgs.add(name)
-        for (arg in args) {
-            launcherArgs.add(arg)
-        }
-        return launcherArgs.toArray()
-    }
-
     public func BuildEnvironmentVector(): Array<String> {
         let environment = ArrayList<String>()
         if (!ldLibraryPath.isEmpty()) {
@@ -176,6 +222,53 @@ public class Tool {
             environment.add(key + "=" + value)
         }
         return environment.toArray()
+    }
+
+    @When[os != "Windows"]
+    private func RunPOSIX(): Int64 {
+        let argvValues = GetFullArgs()
+        let environmentValues = BuildEnvironmentVector()
+        let allocatedStrings = ArrayList<CString>()
+        var exitCode: Int64 = 1
+        try (pidPtr = LibC.malloc<Int32>().asResource(),
+            statusPtr = LibC.malloc<Int32>().asResource(),
+            argvPtr = LibC.malloc<CString>(count: argvValues.size + 1).asResource(),
+            envpPtr = LibC.malloc<CString>(count: environmentValues.size + 1).asResource(),
+            nameCString = unsafe { LibC.mallocCString(name) }.asResource()) {
+            if (pidPtr.value.isNull() || statusPtr.value.isNull() || argvPtr.value.isNull() ||
+                envpPtr.value.isNull() || nameCString.value.isNull()) {
+                FreeCStringList(allocatedStrings)
+                throw Exception("failed to allocate process launch buffers")
+            }
+            if (!WriteNativeStringArray(argvValues, argvPtr.value, allocatedStrings)) {
+                FreeCStringList(allocatedStrings)
+                throw Exception("failed to allocate process arguments")
+            }
+            if (!WriteNativeStringArray(environmentValues, envpPtr.value, allocatedStrings)) {
+                FreeCStringList(allocatedStrings)
+                throw Exception("failed to allocate process environment")
+            }
+            let spawnStatus = unsafe {
+                if (name.contains("/")) {
+                    posix_spawn(pidPtr.value, nameCString.value, CPointer<Unit>(), CPointer<Unit>(),
+                        argvPtr.value, envpPtr.value)
+                } else {
+                    posix_spawnp(pidPtr.value, nameCString.value, CPointer<Unit>(), CPointer<Unit>(),
+                        argvPtr.value, envpPtr.value)
+                }
+            }
+            FreeCStringList(allocatedStrings)
+            if (spawnStatus != 0) {
+                throw Exception("posix_spawn failed with error ${spawnStatus}")
+            }
+            let pid = unsafe { pidPtr.value.read() }
+            let waited = unsafe { waitpid(pid, statusPtr.value, 0) }
+            if (waited < 0) {
+                throw Exception("waitpid failed")
+            }
+            exitCode = DecodeWaitStatus(unsafe { statusPtr.value.read() })
+        }
+        return exitCode
     }
 }
 

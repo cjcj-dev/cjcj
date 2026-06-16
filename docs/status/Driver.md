@@ -52,10 +52,10 @@ Current status:
 - Job execution now preserves C++ batch semantics more closely by running tools
   within a `ToolBatch` through a bounded worker set derived from `--jobs`, while
   keeping dependency-ordered batches sequential.
-- External tool execution now uses the Driver's sanitized environment vector on
-  POSIX hosts through an `env -i` launcher, so `LD_LIBRARY_PATH` and blocked
-  loader/compiler-wrapper variables are applied to the actual process rather
-  than only to verbose command text.
+- External tool execution now uses direct POSIX `posix_spawn`/`posix_spawnp`
+  and `waitpid` FFI with the Driver's sanitized environment vector, so
+  `LD_LIBRARY_PATH` and blocked loader/compiler-wrapper variables are applied to
+  the actual process rather than only to verbose command text.
 
 Residual fidelity risks:
 
@@ -71,8 +71,8 @@ Residual fidelity risks:
   direct Cangjie frontend shim rather than a separate `CreateProcess`-style
   executable launcher.
 - POSIX external-process execution now has sanitized environment parity through
-  the standard process API, but it still goes through an `env` launcher rather
-  than a direct `posix_spawn`/`CreateProcess` FFI implementation.
+  direct `posix_spawn`/`waitpid` FFI. Windows process-launch parity still needs
+  a native `CreateProcess`-style path when that backend is made host-active.
 
 Module completion:
 
