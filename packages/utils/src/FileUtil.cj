@@ -41,6 +41,10 @@ public let DIR_PATH_MAX_LENGTH: Int64 = 248
 @When[os != "Windows"]
 public let DIR_PATH_MAX_LENGTH: Int64 = 4096
 
+private let ENOENT_ERRNO: Int32 = 2
+
+private let EACCES_ERRNO: Int32 = 13
+
 private let SHORT_HASH_NUM: Int64 = 8
 private let BOM_ENCODING_LEN: Int64 = 3
 private let TEST_FILE_NAME: String = "_test.cj"
@@ -98,6 +102,26 @@ public class FailureReason {
 }
 
 @When[os == "Windows"]
+foreign {
+    func _access(pathname: CString, mode: Int32): Int32
+}
+
+@When[os != "Windows"]
+foreign {
+    func access(pathname: CString, mode: Int32): Int32
+}
+
+@When[os == "Linux"]
+foreign {
+    func __errno_location(): CPointer<Int32>
+}
+
+@When[os == "macOS"]
+foreign {
+    func __error(): CPointer<Int32>
+}
+
+@When[os == "Windows"]
 private func isPathSlashByte(byte: UInt8): Bool {
     return byte == b'/' || byte == b'\\'
 }
@@ -136,6 +160,83 @@ private func normalizeCaseForPrefixMatch(path: String): String {
 @When[os != "Windows"]
 private func normalizeCaseForPrefixMatch(path: String): String {
     return path
+}
+
+@When[os == "Windows"]
+private func fileModeAccessFlag(mode: FileMode): Int32 {
+    return match (mode) {
+        case FileMode.FM_EXIST => 0
+        case FileMode.FM_EXE => 0
+        case FileMode.FM_WRITE => 2
+        case FileMode.FM_READ => 4
+    }
+}
+
+@When[os != "Windows"]
+private func fileModeAccessFlag(mode: FileMode): Int32 {
+    return match (mode) {
+        case FileMode.FM_EXIST => 0
+        case FileMode.FM_EXE => 1
+        case FileMode.FM_WRITE => 2
+        case FileMode.FM_READ => 4
+    }
+}
+
+@When[os == "Linux"]
+private func currentErrno(): Int32 {
+    unsafe {
+        let errnoPtr = __errno_location()
+        if (errnoPtr.isNull()) {
+            return 0
+        }
+        return errnoPtr.read()
+    }
+}
+
+@When[os == "macOS"]
+private func currentErrno(): Int32 {
+    unsafe {
+        let errnoPtr = __error()
+        if (errnoPtr.isNull()) {
+            return 0
+        }
+        return errnoPtr.read()
+    }
+}
+
+@When[os != "Linux" && os != "macOS"]
+private func currentErrno(): Int32 {
+    return 0
+}
+
+@When[os == "Windows"]
+private func accessPath(path: String, mode: FileMode): Int32 {
+    var result: Int32 = -1
+    try (cPath = unsafe { LibC.mallocCString(path) }.asResource()) {
+        if (!cPath.value.isNull()) {
+            unsafe {
+                result = _access(cPath.value, fileModeAccessFlag(mode))
+            }
+        }
+    } catch (e: Exception) {
+        result = -1
+    }
+    return result
+}
+
+@When[os != "Windows"]
+private func accessPath(path: String, mode: FileMode): Int32 {
+    var result: Int32 = -1
+    try (cPath = unsafe { LibC.mallocCString(path) }.asResource()) {
+        if (!cPath.value.isNull()) {
+            unsafe {
+                result = access(cPath.value, fileModeAccessFlag(mode))
+            }
+        }
+    } catch (e: Exception) {
+        result = -1
+    }
+    return result
 }
 
 private func lastDirSplit(str: String): Option<Int64> {
@@ -208,11 +309,16 @@ private func addFileIfNeeded(
     shouldSkipTestFiles: Bool,
     shouldSkipRegularFiles: Bool
 ): Bool {
-    let hasTestSuffix = fileName.endsWith(TEST_FILE_NAME)
+    let testSuffixPos = fileName.indexOf(TEST_FILE_NAME)
+    let hasTestSuffix = if (let Some(pos) <- testSuffixPos) {
+        fileName.size - pos == TEST_FILE_NAME.size
+    } else {
+        false
+    }
     if (shouldSkipTestFiles && hasTestSuffix) {
         return false
     }
-    if (shouldSkipRegularFiles && !hasTestSuffix) {
+    if (shouldSkipRegularFiles && (let None <- testSuffixPos)) {
         return false
     }
     allFiles.add(fileName)
@@ -702,30 +808,21 @@ public class FileUtil {
     }
 
     public static func AccessWithResult(path: String, mode: FileMode): AccessResultType {
-        if (!FileExist(path)) {
-            return AccessResultType.NOT_EXIST
-        }
-        if (Access(path, mode)) {
+        if (accessPath(path, mode) == 0) {
             return AccessResultType.OK
         }
-        return AccessResultType.NO_PERMISSION
+        let lastErrno = currentErrno()
+        if (lastErrno == ENOENT_ERRNO) {
+            return AccessResultType.NOT_EXIST
+        }
+        if (lastErrno == EACCES_ERRNO) {
+            return AccessResultType.NO_PERMISSION
+        }
+        return AccessResultType.FAILED_WITH_UNKNOWN_REASON
     }
 
     public static func Access(path: String, mode: FileMode): Bool {
-        try {
-            if (mode == FileMode.FM_EXIST) {
-                return exists(path)
-            }
-            let info = FileInfo(path)
-            return match (mode) {
-                case FileMode.FM_EXE => info.canExecute()
-                case FileMode.FM_WRITE => info.canWrite()
-                case FileMode.FM_READ => info.canRead()
-                case FileMode.FM_EXIST => true
-            }
-        } catch (e: Exception) {
-            return false
-        }
+        return accessPath(path, mode) == 0
     }
 
     public static func FileExist(path: String, caseSensitive!: Bool = false): Bool {

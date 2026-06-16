@@ -12,7 +12,9 @@ Implemented:
 - Preserved native/back-end boundaries by keeping LLVM and external native behavior behind Cangjie FFI or standard runtime APIs.
 - Kept the package self-contained within `packages/utils` and avoided manifest or cross-module package edits.
 - Deepened FileUtil platform fidelity: public path/injection constants now match the C++ Windows/POSIX split, normalization uses platform slash rules, empty-base `JoinPath` matches C++, environment path splitting is platform-specific, case-sensitive `FileExist` verifies the directory entry name, and package/serialization/LTO path helpers share the same separator handling.
+- Matched `FileUtil::Access` and `AccessWithResult` to the C++ `access(2)`/`_access` model: file mode flags now use native `F_OK`/`X_OK`/`W_OK`/`R_OK` values, Unix failures distinguish `ENOENT`, `EACCES`, and unknown errors, and the file-scan `_test.cj` filter now follows the C++ suffix/substring rules.
 - Deepened Semaphore startup behavior by deriving the singleton count from processor count on Linux/macOS via `sysconf`, preserving the C++ "leave two cores free, minimum one" policy.
+- Aligned `Semaphore.SetCount` with the C++ implementation by updating the count under lock without broadcasting to waiters.
 - Corrected Unicode identifier classification to match the lexer token tables: raw identifiers can wrap keywords, `_` and built-in type token names are rejected as identifiers, and contextual modifier keywords are allowed only when requested.
 
 Known fidelity caveats:

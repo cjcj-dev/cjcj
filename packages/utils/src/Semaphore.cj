@@ -65,7 +65,6 @@ public class Semaphore {
     public func SetCount(newCount: Int64): Unit {
         synchronized(mutex) {
             count = newCount
-            condition.notifyAll()
         }
     }
 
