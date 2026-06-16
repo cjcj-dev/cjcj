@@ -10,6 +10,10 @@ The AST package is a multi-file Cangjie package mirroring the C++ AST component 
 
 ## Implemented In This Pass
 
+- Aligned `Walker` post-visit action handling with C++: `VisitPost` now overrides the current decision unless it returns `KEEP_DECISION`, preserves immediate `STOP_NOW`, and asserts that the final decision is not `KEEP_DECISION`.
+- Deepened `Walker` traversal parity for desugared AST nodes: macro and main declarations now walk either `desugarDecl` or the original body, return/literal/optional-chain/synchronized nodes skip stale original children after desugaring, and try-handler blocks are skipped once the try expression has a desugared replacement.
+- Aligned package traversal order with the C++ walker by visiting generic instantiated declarations before package files.
+- Added C++ walker parity for macro expansion invocations by walking `MacroInvocation.decl` for macro expand expressions, declarations, and parameters while preserving the self-hosted macro pipeline's existing expansion-node traversal.
 - Added C++ `Ty` helper parity for primitive upper-bound extraction, C ABI type classification (`IsPrimitiveCType`, `IsCStructType`, `IsMetCType`, `IsCTypeConstraint`), type-argument size checks, initial-type checks, and instantiated nominal type to generic type lookup.
 - Added recursive generic type-argument collection APIs, including candidate-filtered generic collection with duplicate suppression.
 - Added C++ `GetTypesToStr` / `GetTypesToStableStr` parity and routed union/intersection type stringification through stable name/hash ordering for deterministic output.

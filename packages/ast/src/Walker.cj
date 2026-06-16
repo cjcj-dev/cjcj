@@ -1,5 +1,7 @@
 package cangjie_compiler::ast
 
+import cangjie_compiler::utils.CJC_ASSERT
+
 public enum VisitAction {
     | WALK_CHILDREN
     | SKIP_CHILDREN
@@ -90,7 +92,11 @@ public class Walker {
             if (postAction == VisitAction.STOP_NOW) {
                 return postAction
             }
+            if (postAction != VisitAction.KEEP_DECISION) {
+                action = postAction
+            }
         }
+        CJC_ASSERT(action != VisitAction.KEEP_DECISION)
         return action
     }
 
@@ -115,6 +121,13 @@ public class Walker {
     private func walkPatternOption(node: Option<Pattern>): VisitAction {
         if (let Some(value) <- node) {
             return WalkNode(value)
+        }
+        return VisitAction.WALK_CHILDREN
+    }
+
+    private func walkMacroInvocation(invocation: MacroInvocation): VisitAction {
+        if (let Some(decl) <- invocation.decl) {
+            return WalkNode(decl)
         }
         return VisitAction.WALK_CHILDREN
     }
@@ -193,11 +206,11 @@ public class Walker {
             }
         }
         if (let Some(pkg) <- (curNode as Package)) {
-            for (file in pkg.files) {
-                if (stopIf(WalkNode(file))) { return VisitAction.STOP_NOW }
-            }
             for (decl in pkg.genericInstantiatedDecls) {
                 if (stopIf(WalkNode(decl))) { return VisitAction.STOP_NOW }
+            }
+            for (file in pkg.files) {
+                if (stopIf(WalkNode(file))) { return VisitAction.STOP_NOW }
             }
             for (decl in pkg.srcImportedNonGenericDecls) {
                 if (stopIf(WalkNode(decl))) { return VisitAction.STOP_NOW }
@@ -273,19 +286,17 @@ public class Walker {
             }
         }
         if (let Some(macroDecl) <- (curNode as MacroDecl)) {
-            if (let Some(body) <- macroDecl.funcBody) {
-                if (stopIf(WalkNode(body))) { return VisitAction.STOP_NOW }
-            }
             if (let Some(desugarDecl) <- macroDecl.desugarDecl) {
                 if (stopIf(WalkNode(desugarDecl))) { return VisitAction.STOP_NOW }
+            } else if (let Some(body) <- macroDecl.funcBody) {
+                if (stopIf(WalkNode(body))) { return VisitAction.STOP_NOW }
             }
         }
         if (let Some(mainDecl) <- (curNode as MainDecl)) {
-            if (let Some(body) <- mainDecl.funcBody) {
-                if (stopIf(WalkNode(body))) { return VisitAction.STOP_NOW }
-            }
             if (let Some(desugarDecl) <- mainDecl.desugarDecl) {
                 if (stopIf(WalkNode(desugarDecl))) { return VisitAction.STOP_NOW }
+            } else if (let Some(body) <- mainDecl.funcBody) {
+                if (stopIf(WalkNode(body))) { return VisitAction.STOP_NOW }
             }
         }
         if (let Some(primaryCtor) <- (curNode as PrimaryCtorDecl)) {
@@ -401,13 +412,15 @@ public class Walker {
             if (let Some(blockValue) <- tryExpr.finallyBlock) {
                 if (stopIf(WalkNode(blockValue))) { return VisitAction.STOP_NOW }
             }
-            for (handler in tryExpr.handlers) {
-                if (stopIf(walkPatternOption(handler.commandPattern))) { return VisitAction.STOP_NOW }
-                if (let Some(blockValue) <- handler.block) {
-                    if (stopIf(WalkNode(blockValue))) { return VisitAction.STOP_NOW }
-                }
-                if (let Some(lambda) <- handler.desugaredLambda) {
-                    if (stopIf(WalkNode(lambda))) { return VisitAction.STOP_NOW }
+            if (let None <- tryExpr.desugarExpr) {
+                for (handler in tryExpr.handlers) {
+                    if (stopIf(walkPatternOption(handler.commandPattern))) { return VisitAction.STOP_NOW }
+                    if (let Some(blockValue) <- handler.block) {
+                        if (stopIf(WalkNode(blockValue))) { return VisitAction.STOP_NOW }
+                    }
+                    if (let Some(lambda) <- handler.desugaredLambda) {
+                        if (stopIf(WalkNode(lambda))) { return VisitAction.STOP_NOW }
+                    }
                 }
             }
             if (let Some(lambda) <- tryExpr.tryLambda) {
@@ -428,7 +441,9 @@ public class Walker {
             if (stopIf(walkExprOption(resumeExpr.throwingExpr))) { return VisitAction.STOP_NOW }
         }
         if (let Some(returnExpr) <- (curNode as ReturnExpr)) {
-            if (stopIf(walkExprOption(returnExpr.expr))) { return VisitAction.STOP_NOW }
+            if (let None <- returnExpr.desugarExpr) {
+                if (stopIf(walkExprOption(returnExpr.expr))) { return VisitAction.STOP_NOW }
+            }
         }
         if (let Some(jumpExpr) <- (curNode as JumpExpr)) {
             if (stopIf(walkExprOption(jumpExpr.refLoop))) { return VisitAction.STOP_NOW }
@@ -501,8 +516,10 @@ public class Walker {
             if (let Some(refType) <- lit.ref) {
                 if (stopIf(WalkNode(refType))) { return VisitAction.STOP_NOW }
             }
-            if (let Some(siExpr) <- lit.siExpr) {
-                if (stopIf(WalkNode(siExpr))) { return VisitAction.STOP_NOW }
+            if (let None <- lit.desugarExpr) {
+                if (let Some(siExpr) <- lit.siExpr) {
+                    if (stopIf(WalkNode(siExpr))) { return VisitAction.STOP_NOW }
+                }
             }
         }
         if (let Some(arg) <- (curNode as FuncArg)) {
@@ -549,7 +566,9 @@ public class Walker {
             if (stopIf(walkExprOption(optional.baseExpr))) { return VisitAction.STOP_NOW }
         }
         if (let Some(chain) <- (curNode as OptionalChainExpr)) {
-            if (stopIf(walkExprOption(chain.expr))) { return VisitAction.STOP_NOW }
+            if (let None <- chain.desugarExpr) {
+                if (stopIf(walkExprOption(chain.expr))) { return VisitAction.STOP_NOW }
+            }
         }
         if (let Some(arrayLit) <- (curNode as ArrayLit)) {
             for (exprValue in arrayLit.children) {
@@ -586,8 +605,10 @@ public class Walker {
         }
         if (let Some(sync) <- (curNode as SynchronizedExpr)) {
             if (stopIf(walkExprOption(sync.mutex))) { return VisitAction.STOP_NOW }
-            if (let Some(body) <- sync.body) {
-                if (stopIf(WalkNode(body))) { return VisitAction.STOP_NOW }
+            if (let None <- sync.desugarExpr) {
+                if (let Some(body) <- sync.body) {
+                    if (stopIf(WalkNode(body))) { return VisitAction.STOP_NOW }
+                }
             }
         }
 
@@ -694,6 +715,7 @@ public class Walker {
         }
 
         if (let Some(macroExpr) <- (curNode as MacroExpandExpr)) {
+            if (stopIf(walkMacroInvocation(macroExpr.invocation))) { return VisitAction.STOP_NOW }
             for (annotation in macroExpr.annotations) {
                 if (stopIf(WalkNode(annotation))) { return VisitAction.STOP_NOW }
             }
@@ -705,11 +727,13 @@ public class Walker {
             }
         }
         if (let Some(macroDecl) <- (curNode as MacroExpandDecl)) {
+            if (stopIf(walkMacroInvocation(macroDecl.invocation))) { return VisitAction.STOP_NOW }
             for (node in macroDecl.invocation.nodes) {
                 if (stopIf(WalkNode(node))) { return VisitAction.STOP_NOW }
             }
         }
         if (let Some(macroParam) <- (curNode as MacroExpandParam)) {
+            if (stopIf(walkMacroInvocation(macroParam.invocation))) { return VisitAction.STOP_NOW }
             for (node in macroParam.invocation.nodes) {
                 if (stopIf(WalkNode(node))) { return VisitAction.STOP_NOW }
             }
