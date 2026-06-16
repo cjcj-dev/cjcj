@@ -437,7 +437,7 @@ public class Searcher {
             return GetIDsByASTKind(ctx, kindQuery)
         }
         if (let Some(levelQuery) <- (query as ScopeLevelQuery)) {
-            return GetIDsByScopeLevel(ctx, levelQuery.level)
+            return GetIDsByScopeLevel(ctx, levelQuery)
         }
         if (let Some(positionQuery) <- (query as PositionQuery)) {
             return GetIDsByPos(ctx, positionQuery)
@@ -512,13 +512,28 @@ public class Searcher {
         return out
     }
 
-    private func GetIDsByScopeLevel(ctx: ASTContext, level: UInt32): ArrayList<Symbol> {
+    private func GetIDsByScopeLevel(ctx: ASTContext, query: ScopeLevelQuery): ArrayList<Symbol> {
         if (ctx.invertedIndex.scopeLevelIndexes.isEmpty()) {
-            return FilterByMatcher(ctx, ScopeLevelQuery(level))
+            return FilterByMatcher(ctx, query)
         }
         let out = ArrayList<Symbol>()
-        if (let Some(values) <- ctx.invertedIndex.scopeLevelIndexes.get(level)) {
-            AddAllUnique(out, values)
+        if (query.comparator == PositionCompare.EQ) {
+            if (let Some(values) <- ctx.invertedIndex.scopeLevelIndexes.get(query.level)) {
+                AddAllUnique(out, values)
+            }
+            return out
+        }
+        if (query.comparator == PositionCompare.LT || query.comparator == PositionCompare.LE) {
+            var currentLevel: UInt32 = 0u32
+            while (currentLevel < query.level || (query.comparator == PositionCompare.LE && currentLevel == query.level)) {
+                if (let Some(values) <- ctx.invertedIndex.scopeLevelIndexes.get(currentLevel)) {
+                    AddAllUnique(out, values)
+                }
+                if (currentLevel == UInt32.Max) {
+                    break
+                }
+                currentLevel++
+            }
         }
         return out
     }

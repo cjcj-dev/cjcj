@@ -10,6 +10,8 @@ The AST package is a multi-file Cangjie package mirroring the C++ AST component 
 
 ## Implemented In This Pass
 
+- Deepened `Clone` visitor parity with C++: `SetIsClonedSourceCode` now unconditionally marks cloned targets, `CloneGeneric` accepts a visitor callback, and `ASTCloner.Clone` has a visitor overload that applies callbacks across the cloned tree for source-to-target clone hooks.
+- Added C++ `Searcher` scope-level comparison parity for programmatic `scope_level < N` and `scope_level <= N` queries, with indexed lookup and linear fallback sharing the same `ScopeLevelQuery` semantics.
 - Added later `Utils.cpp` interop-helper parity: Java mirror/impl/CJ-mapping/JObject/Object/forward-class predicates, CFunc constructor-call validation, Java ref-getter stub generation, Java synthetic wrapper class generation, and ObjC synthetic wrapper class generation using existing AST creation helpers.
 - Reused real `cangjie_compiler::utils` constants and `GetRootPackageName` for Java/ObjC generated declarations instead of local string copies.
 - Aligned `Walker` post-visit action handling with C++: `VisitPost` now overrides the current decision unless it returns `KEEP_DECISION`, preserves immediate `STOP_NOW`, and asserts that the final decision is not `KEEP_DECISION`.

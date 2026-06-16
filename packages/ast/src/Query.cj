@@ -192,21 +192,38 @@ public class ASTKindQuery <: Query {
 
 public class ScopeLevelQuery <: Query {
     public var level: UInt32 = 0u32
+    public var comparator: PositionCompare = PositionCompare.EQ
 
-    public init(level: UInt32) {
+    public init(level: UInt32, comparator!: PositionCompare = PositionCompare.EQ) {
         super(QueryKind.SCOPE_LEVEL)
         this.level = level
+        this.comparator = comparator
     }
 
     public override func Match(symbol: Symbol): Bool {
         if (let Some(node) <- symbol.node) {
-            return node.scopeLevel == level
+            if (comparator == PositionCompare.EQ) {
+                return node.scopeLevel == level
+            }
+            if (comparator == PositionCompare.LT) {
+                return node.scopeLevel < level
+            }
+            if (comparator == PositionCompare.LE) {
+                return node.scopeLevel <= level
+            }
         }
         return false
     }
 
     public override func PrettyPrint(): String {
-        return "scope_level=${level}"
+        let op = match (comparator) {
+            case PositionCompare.EQ => "="
+            case PositionCompare.LT => "<"
+            case PositionCompare.LE => "<="
+            case PositionCompare.GT => ">"
+            case PositionCompare.GE => ">="
+        }
+        return "scope_level${op}${level}"
     }
 }
 

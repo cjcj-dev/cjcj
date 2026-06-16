@@ -3,15 +3,13 @@ package cangjie_compiler::ast
 import std.collection.*
 
 public func DefaultVisitFunc(source: Node, target: Node): Unit {
-    if (source.astKind == target.astKind) {
-        return
-    }
+    let _ = source
+    let _ = target
 }
 
 public func SetIsClonedSourceCode(source: Node, target: Node): Unit {
-    if (source.astKind == target.astKind) {
-        target.EnableAttr(Attribute.IS_CLONED_SOURCE_CODE)
-    }
+    let _ = source
+    target.EnableAttr(Attribute.IS_CLONED_SOURCE_CODE)
 }
 
 private func cloneIdentifier(source: Identifier): Identifier {
@@ -115,6 +113,13 @@ public func CloneGeneric(source: Generic): Generic {
     return Generic()
 }
 
+public func CloneGeneric(source: Generic, visitFunc: (Node, Node) -> Unit): Generic {
+    if (let Some(cloned) <- (ASTCloner.Clone(source, visitFunc) as Generic)) {
+        return cloned
+    }
+    return Generic()
+}
+
 public class ASTCloner {
     public init() {}
 
@@ -124,6 +129,34 @@ public class ASTCloner {
         copyCommon(node, target)
         copySpecific(node, target)
         return target
+    }
+
+    public static func Clone(node: Node, visitFunc: (Node, Node) -> Unit): Node {
+        let target = Clone(node)
+        applyVisitFuncToClonedTree(node, target, visitFunc)
+        return target
+    }
+
+    private static func applyVisitFuncToClonedTree(source: Node, target: Node,
+        visitFunc: (Node, Node) -> Unit): Unit {
+        let sourceNodes = collectPreorder(source)
+        let targetNodes = collectPreorder(target)
+        let count = if (sourceNodes.size < targetNodes.size) { sourceNodes.size } else { targetNodes.size }
+        var idx: Int64 = 0
+        while (idx < count) {
+            visitFunc(sourceNodes[idx], targetNodes[idx])
+            idx++
+        }
+    }
+
+    private static func collectPreorder(root: Node): ArrayList<Node> {
+        let nodes = ArrayList<Node>()
+        let walker = Walker(root, visitPre: { node: Node =>
+            nodes.add(node)
+            VisitAction.WALK_CHILDREN
+        })
+        walker.Walk()
+        return nodes
     }
 
     private static func cloneExpr(node: Option<Expr>): Option<Expr> {
