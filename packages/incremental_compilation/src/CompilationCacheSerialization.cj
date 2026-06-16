@@ -190,22 +190,46 @@ public class HashedASTWriter {
     }
 
     private func appendDependencies(lines: ArrayList<String>): Unit {
+        let depsByMangle = HashMap<String, DeclDependency>()
+        let depMangles = ArrayList<String>()
         for (dep in varAndFunc) {
+            let depMangle = GetDependencyDeclRawMangleName(dep.decl)
+            if (depMangle.isEmpty() || depsByMangle.contains(depMangle)) {
+                continue
+            }
+            depsByMangle[depMangle] = dep
+            depMangles.add(depMangle)
+        }
+        for (depMangle in SortedStringList(depMangles)) {
+            let dep = depsByMangle[depMangle]
             let names = ArrayList<String>()
             for (value in dep.dependencies) {
-                names.add(value.rawMangleName)
+                let valueMangle = GetDependencyDeclRawMangleName(value)
+                if (!valueMangle.isEmpty()) {
+                    names.add(valueMangle)
+                }
             }
             let fields = ArrayList<String>()
             fields.add("dep")
-            fields.add(dep.decl.rawMangleName)
+            fields.add(depMangle)
             fields.add(JoinCacheStringList(SortedStringList(names)))
             lines.add(JoinCacheFields(fields))
         }
     }
 
     private func appendSemanticInfo(lines: ArrayList<String>): Unit {
+        let usagesByMangle = HashMap<String, SemaUsage>()
+        let usageMangles = ArrayList<String>()
         for ((decl, usage) in semaUsages.usages) {
             let usageMangle = GetSemanticUsageRawMangleName(decl)
+            if (usageMangle.isEmpty() || usagesByMangle.contains(usageMangle)) {
+                continue
+            }
+            usagesByMangle[usageMangle] = usage
+            usageMangles.add(usageMangle)
+        }
+        for (usageMangle in SortedStringList(usageMangles)) {
+            let usage = usagesByMangle[usageMangle]
             let fields = ArrayList<String>()
             fields.add("usage")
             fields.add(usageMangle)
@@ -218,18 +242,27 @@ public class HashedASTWriter {
         }
         appendRelations(lines, "relation", semaUsages.relations)
         appendRelations(lines, "builtin-relation", semaUsages.builtInTypeRelations)
-        for ((decl, related) in semaUsages.compilerAddedUsages) {
+        let compilerAdded = ArrayList<String>()
+        for ((decl, _) in semaUsages.compilerAddedUsages) {
+            compilerAdded.add(decl)
+        }
+        for (decl in SortedStringList(compilerAdded)) {
             let fields = ArrayList<String>()
             fields.add("compiler-added")
             fields.add(decl)
-            fields.add(StringSetToWire(related))
+            fields.add(StringSetToWire(semaUsages.compilerAddedUsages[decl]))
             lines.add(JoinCacheFields(fields))
         }
     }
 
     private func appendNameUsages(lines: ArrayList<String>, decl: String, phase: String,
         names: HashMap<String, NameUsage>): Unit {
-        for ((name, usage) in names) {
+        let usageNames = ArrayList<String>()
+        for ((name, _) in names) {
+            usageNames.add(name)
+        }
+        for (name in SortedStringList(usageNames)) {
+            let usage = names[name]
             let fields = ArrayList<String>()
             fields.add("nameusage")
             fields.add(decl)
@@ -245,7 +278,12 @@ public class HashedASTWriter {
 
     private func appendRelations(lines: ArrayList<String>, tag: String,
         relations: HashMap<String, SemaRelation>): Unit {
-        for ((decl, relation) in relations) {
+        let decls = ArrayList<String>()
+        for ((decl, _) in relations) {
+            decls.add(decl)
+        }
+        for (decl in SortedStringList(decls)) {
+            let relation = relations[decl]
             let fields = ArrayList<String>()
             fields.add(tag)
             fields.add(decl)
@@ -254,6 +292,13 @@ public class HashedASTWriter {
             fields.add(StringSetToWire(relation.extendedInterfaces))
             lines.add(JoinCacheFields(fields))
         }
+    }
+
+    private func GetDependencyDeclRawMangleName(decl: IncrDecl): String {
+        if (!decl.rawMangleName.isEmpty()) {
+            return decl.rawMangleName
+        }
+        return GetSemanticUsageRawMangleName(decl)
     }
 
     private func appendAST(lines: ArrayList<String>, tag: String, ast: ASTCache, writeOrder: ArrayList<String>): Unit {
@@ -510,22 +555,26 @@ public class HashedASTLoader {
 
     private func collectFileMapForTop(mangle: String, cache: TopLevelDeclCache): Unit {
         let kind = IncrDeclKindFromIndex(Int64(cache.astKind))
-        if (isOOEAffectedKind(kind) && !(kind == IncrDeclKind.VAR_DECL && !cache.isGV)) {
+        if (isOOEAffectedTopKind(kind) && !(kind == IncrDeclKind.VAR_DECL && !cache.isGV)) {
             addFileMapEntry(cache.gvid.file, mangle, cache.gvid.id)
         }
     }
 
     private func collectFileMapForMember(member: MemberDeclCache): Unit {
         let kind = IncrDeclKindFromIndex(Int64(member.astKind))
-        if (member.isGV || isOOEAffectedKind(kind)) {
+        if (member.isGV || isOOEAffectedMemberKind(kind)) {
             addFileMapEntry(member.gvid.file, member.rawMangle, member.gvid.id)
         }
     }
 
-    private func isOOEAffectedKind(kind: IncrDeclKind): Bool {
+    private func isOOEAffectedTopKind(kind: IncrDeclKind): Bool {
         return kind == IncrDeclKind.VAR_DECL || kind == IncrDeclKind.VAR_WITH_PATTERN_DECL ||
-            kind == IncrDeclKind.FUNC_DECL || kind == IncrDeclKind.MAIN_DECL ||
-            kind == IncrDeclKind.MACRO_DECL || kind == IncrDeclKind.PRIMARY_CTOR_DECL
+            kind == IncrDeclKind.FUNC_DECL || kind == IncrDeclKind.MAIN_DECL || kind == IncrDeclKind.MACRO_DECL
+    }
+
+    private func isOOEAffectedMemberKind(kind: IncrDeclKind): Bool {
+        return kind == IncrDeclKind.VAR_DECL || kind == IncrDeclKind.PRIMARY_CTOR_DECL ||
+            kind == IncrDeclKind.FUNC_DECL
     }
 
     private func addFileMapEntry(file: String, mangle: String, id: Int64): Unit {

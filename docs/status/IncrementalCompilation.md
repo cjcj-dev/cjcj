@@ -66,6 +66,9 @@ Implemented:
 - Added adapter-backed source import records and wired `PollutionMapGen::CollectAlias` parity: package aliases and
   single/aliased declaration imports now populate the same alias maps used by unqualified and package-qualified
   pollution propagation.
+- Matched more of the C++ cache writer/loader ordering behavior: CHIR var/function dependencies, semantic usages,
+  name usages, relations, and compiler-added usages are serialized by raw mangle/name order, and cached file-map
+  reconstruction now applies the C++ top-level/member affected-declaration filters separately.
 
 Known gaps:
 
