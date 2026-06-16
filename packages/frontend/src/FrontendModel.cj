@@ -1003,11 +1003,19 @@ public class Candidate {
 public class CompilationCache {
     public var compileArgs: String = ""
     public var lambdaCounter: Int64 = 0
+    public let fileSummaries: ArrayList<String> = ArrayList<String>()
+    public let declSummaries: ArrayList<String> = ArrayList<String>()
     public init() {}
 }
 
 public class CHIRPackage {
     public var name: String
+    public var fileCount: Int64 = 0
+    public var declCount: Int64 = 0
+    public let mangleNames: ArrayList<String> = ArrayList<String>()
+    public let implicitFuncs: HashMap<String, String> = HashMap<String, String>()
+    public let constVarInitFuncs: ArrayList<String> = ArrayList<String>()
+
     public init(name: String) {
         this.name = name
     }

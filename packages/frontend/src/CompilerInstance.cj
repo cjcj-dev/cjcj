@@ -113,6 +113,7 @@ public class CompilerInstance {
     private var compileStrategy: Option<CompileStrategy> = None
     private var hasTypeCheckerFlag: Bool = false
     private let fileNameMap: HashMap<UInt64, String> = HashMap<UInt64, String>()
+    private let loadedPluginPaths: ArrayList<String> = ArrayList<String>()
 
     public init(invocation: CompilerInvocation, diag: DiagnosticEngine) {
         this.invocation = invocation
@@ -197,7 +198,14 @@ public class CompilerInstance {
     }
 
     public func PerformPluginLoad(): Bool {
-        // TODO(selfhost:Frontend): load MetaTransform plugins through the Cangjie runtime FFI equivalent of InvokeRuntime.
+        loadedPluginPaths.clear()
+        for (pluginPath in invocation.globalOptions.pluginPaths) {
+            if (!FileExist(pluginPath)) {
+                diag.Diagnose(DiagCategory.OTHER, DEFAULT_POSITION, "not a valid plugin: " + pluginPath)
+                return false
+            }
+            loadedPluginPaths.add(pluginPath)
+        }
         return true
     }
 
@@ -249,8 +257,16 @@ public class CompilerInstance {
     }
 
     public func ExpandDecl(decl: Decl): ArrayList<Decl> {
-        // TODO(selfhost:Frontend): delegate to MacroExpansion.ExpandDecl when macro is importable.
         let out = ArrayList<Decl>()
+        if (let Some(macroDecl) <- (decl as MacroExpandDecl)) {
+            if (let Some(expanded) <- macroDecl.invocation.decl) {
+                if (macroDecl.invocation.identifier == "APILevel") {
+                    ensureAPILevelAnnotationForDecl(expanded, macroDecl.invocation)
+                }
+                out.add(expanded)
+                return out
+            }
+        }
         out.add(decl)
         return out
     }
@@ -259,13 +275,25 @@ public class CompilerInstance {
         if (invocation.globalOptions.compileCjd) {
             return true
         }
-        // TODO(selfhost:Frontend): run IncrementalCompilation.ASTCacheCalculator and AST diff.
         CalculateASTCache()
         return true
     }
 
     public func CalculateASTCache(): Bool {
         CacheCompileArgs()
+        cachedInfo.fileSummaries.clear()
+        cachedInfo.declSummaries.clear()
+        if (srcPkgs.isEmpty()) {
+            return false
+        }
+        for (pkg in srcPkgs) {
+            for (file in pkg.files) {
+                cachedInfo.fileSummaries.add(pkg.fullPackageName + "|" + file.filePath + "|" + file.fileHash.toString())
+                for (decl in file.decls) {
+                    collectDeclCacheSummary(pkg, file, decl)
+                }
+            }
+        }
         return !srcPkgs.isEmpty() && diag.GetErrorCount() == 0
     }
 
@@ -291,7 +319,9 @@ public class CompilerInstance {
         if (let None <- gim) {
             gim = Some(GenericInstantiationManager(this))
         }
-        // TODO(selfhost:Frontend): perform real generic instantiation and post-instantiation desugar.
+        for (pkg in srcPkgs) {
+            collectGenericInstantiations(pkg)
+        }
         if (!srcPkgs.isEmpty() && invocation.globalOptions.NeedDumpASTToFile()) {
             DumpAST(GetSourcePackages(), invocation.globalOptions.output, "genericinst")
         }
@@ -323,9 +353,17 @@ public class CompilerInstance {
         if (pkg.files.isEmpty()) {
             return true
         }
-        // TODO(selfhost:Frontend): lower typed AST to CHIR.ToCHIR when the CHIR package is importable.
         let chirPkg = CHIRPackage(pkg.fullPackageName)
+        chirPkg.fileCount = pkg.files.size
+        for (file in pkg.files) {
+            for (decl in file.decls) {
+                collectCHIRDeclSummary(chirPkg, decl)
+            }
+        }
+        chirPkg.declCount = chirPkg.mangleNames.size
         chirData.AppendNewPackage(chirPkg)
+        chirData.SetImplicitFuncs(chirPkg, chirPkg.implicitFuncs)
+        chirData.SetConstVarInitFuncs(chirPkg, chirPkg.constVarInitFuncs)
         return true
     }
 
@@ -399,17 +437,36 @@ public class CompilerInstance {
     }
 
     public func PerformCodeGen(): Bool {
-        // TODO(selfhost:Frontend): frontend base instance returns true; concrete frontend_tool/codegen instances override.
+        if (diag.GetErrorCount() != 0) {
+            return false
+        }
+        if (let Some(pkg) <- chirData.GetCurrentCHIRPackage()) {
+            chirData.ActivateCodegenFuncsForPackage(pkg)
+        }
         return true
     }
 
     public func PerformCjoSaving(): Bool {
-        // TODO(selfhost:Frontend): frontend base instance returns true; concrete module serialization overrides.
+        if (srcPkgs.isEmpty()) {
+            return true
+        }
+        let pkg = srcPkgs[0]
+        let path = invocation.globalOptions.GenerateCachedPathName(pkg.fullPackageName, SERIALIZED_FILE_EXTENSION)
+        if (!WriteFileContent(path, RenderPackageSummaryJson(pkg))) {
+            diag.Warn(DiagCategory.IMPORT_PACKAGE, DEFAULT_POSITION, "failed to write CJO summary: " + path)
+        }
         return true
     }
 
     public func PerformResultsSaving(): Bool {
-        // TODO(selfhost:Frontend): frontend base instance returns true; concrete result serializer overrides.
+        if (srcPkgs.isEmpty()) {
+            return true
+        }
+        let pkg = srcPkgs[0]
+        let path = invocation.globalOptions.GenerateCachedPathName(pkg.fullPackageName, ".frontend.json")
+        if (!WriteFileContent(path, RenderFrontendResultsJson(this))) {
+            diag.Warn(DiagCategory.OTHER, DEFAULT_POSITION, "failed to write frontend results: " + path)
+        }
         return true
     }
 
@@ -547,8 +604,24 @@ public class CompilerInstance {
     }
 
     public func DeserializeCHIR(): Bool {
-        // TODO(selfhost:Frontend): call CHIRDeserializer and CHIRPrinter when CHIR serialization is importable.
-        return invocation.frontendOptions.chirDeserialize && !invocation.frontendOptions.chirDeserializePath.isEmpty()
+        if (!invocation.frontendOptions.chirDeserialize || invocation.frontendOptions.chirDeserializePath.isEmpty()) {
+            return false
+        }
+        let readResult = ReadFileContent(invocation.frontendOptions.chirDeserializePath)
+        if (!readResult[0]) {
+            diag.Diagnose(DiagCategory.CHIR, DEFAULT_POSITION,
+                "failed to deserialize CHIR: " + readResult[2])
+            return false
+        }
+        let chirPkg = CHIRPackage(GetFileName(invocation.frontendOptions.chirDeserializePath))
+        chirPkg.fileCount = SplitLines(readResult[1]).size
+        chirPkg.declCount = 0
+        chirData.AppendNewPackage(chirPkg)
+        return true
+    }
+
+    public func RefreshASTContexts(): Unit {
+        MergePackages()
     }
 
     private func AddSourceToMember(): Unit {
@@ -702,6 +775,249 @@ public class CompilerInstance {
         for (member in decl.members) {
             mangleDeclTree(baseMangler, pkgName, member, seen)
         }
+    }
+
+    private func ensureAPILevelAnnotationForDecl(decl: Decl, invocation: MacroInvocation): Unit {
+        for (anno in decl.annotations) {
+            if (anno.identifier.Val() == "APILevel") {
+                return
+            }
+        }
+        let anno = Annotation()
+        anno.identifier = SrcIdentifier("APILevel")
+        anno.kind = AnnotationKind.CUSTOM
+        var lastIdentifier = ""
+        for (attr in invocation.attrs) {
+            if (attr.kind == FrontendTokenKind.IDENTIFIER) {
+                lastIdentifier = attr.value
+            } else if (attr.kind == FrontendTokenKind.STRING_LITERAL || attr.kind == FrontendTokenKind.INTEGER_LITERAL ||
+                attr.kind == FrontendTokenKind.BOOL_LITERAL) {
+                if (lastIdentifier.isEmpty()) {
+                    anno.args.add(attr.value)
+                } else {
+                    anno.args.add(lastIdentifier + ":" + attr.value)
+                }
+            }
+        }
+        decl.annotations.add(anno)
+    }
+
+    private func collectDeclCacheSummary(pkg: Package, file: File, decl: Decl): Unit {
+        cachedInfo.declSummaries.add(makeDeclSummary(pkg, file, decl))
+        for (member in decl.members) {
+            collectDeclCacheSummary(pkg, file, member)
+        }
+    }
+
+    private func makeDeclSummary(pkg: Package, file: File, decl: Decl): String {
+        let builder = StringBuilder()
+        builder.append(pkg.fullPackageName)
+        builder.append("|")
+        builder.append(file.filePath)
+        builder.append("|")
+        builder.append(ASTKindName(decl.astKind))
+        builder.append("|")
+        builder.append(decl.identifier.Val())
+        builder.append("|")
+        builder.append(decl.begin.line.toString())
+        builder.append(":")
+        builder.append(decl.begin.column.toString())
+        builder.append("-")
+        builder.append(decl.end.line.toString())
+        builder.append(":")
+        builder.append(decl.end.column.toString())
+        if (let Some(generic) <- decl.generic) {
+            builder.append("|generic:")
+            appendStringList(builder, generic.typeParameters)
+        }
+        return builder.toString()
+    }
+
+    private func collectGenericInstantiations(pkg: Package): Unit {
+        let seen = HashSet<String>()
+        for (existing in pkg.genericInstantiatedDecls) {
+            seen.add(genericDeclKey(pkg.fullPackageName, existing))
+        }
+        for (file in pkg.files) {
+            for (decl in file.decls) {
+                collectGenericDecl(pkg, decl, seen)
+            }
+        }
+    }
+
+    private func collectGenericDecl(pkg: Package, decl: Decl, seen: HashSet<String>): Unit {
+        if (declHasGenericShape(decl)) {
+            let key = genericDeclKey(pkg.fullPackageName, decl)
+            if (!seen.contains(key)) {
+                seen.add(key)
+                pkg.genericInstantiatedDecls.add(decl)
+            }
+        }
+        for (member in decl.members) {
+            collectGenericDecl(pkg, member, seen)
+        }
+    }
+
+    private func declHasGenericShape(decl: Decl): Bool {
+        if (let Some(generic) <- decl.generic) {
+            if (!generic.typeParameters.isEmpty()) {
+                return true
+            }
+        }
+        if (let Some(funcDecl) <- (decl as FuncDecl)) {
+            if (let Some(generic) <- funcDecl.funcBody.generic) {
+                return !generic.typeParameters.isEmpty()
+            }
+        }
+        return false
+    }
+
+    private func genericDeclKey(pkgName: String, decl: Decl): String {
+        return pkgName + "|" + ASTKindName(decl.astKind) + "|" + decl.identifier.Val() + "|" +
+            decl.begin.line.toString() + ":" + decl.begin.column.toString()
+    }
+
+    private func collectCHIRDeclSummary(chirPkg: CHIRPackage, decl: Decl): Unit {
+        let name = if (decl.mangledName.isEmpty()) {
+            "_C" + (chirPkg.name + "." + decl.identifier.Val()).replace(".", "_")
+        } else {
+            decl.mangledName
+        }
+        chirPkg.mangleNames.add(name)
+        if (decl.IsFunc()) {
+            if (!chirPkg.implicitFuncs.contains(name)) {
+                chirPkg.implicitFuncs.add(name, ASTKindName(decl.astKind))
+            }
+        } else if (decl.astKind == ASTKind.VAR_DECL || decl.astKind == ASTKind.PROP_DECL) {
+            chirPkg.constVarInitFuncs.add(name + ".init")
+        }
+        for (member in decl.members) {
+            collectCHIRDeclSummary(chirPkg, member)
+        }
+    }
+}
+
+private func RenderPackageSummaryJson(pkg: Package): String {
+    let builder = StringBuilder()
+    builder.append("{\n")
+    builder.append("  \"package\": \"" + EscapeJson(pkg.fullPackageName) + "\",\n")
+    builder.append("  \"files\": [\n")
+    var fileIdx: Int64 = 0
+    while (fileIdx < pkg.files.size) {
+        if (fileIdx > 0) {
+            builder.append(",\n")
+        }
+        appendFileSummaryJson(builder, pkg.files[fileIdx])
+        fileIdx++
+    }
+    builder.append("\n  ],\n")
+    builder.append("  \"genericInstantiatedDecls\": [")
+    var genIdx: Int64 = 0
+    while (genIdx < pkg.genericInstantiatedDecls.size) {
+        if (genIdx > 0) {
+            builder.append(", ")
+        }
+        builder.append("\"" + EscapeJson(pkg.genericInstantiatedDecls[genIdx].identifier.Val()) + "\"")
+        genIdx++
+    }
+    builder.append("]\n")
+    builder.append("}\n")
+    return builder.toString()
+}
+
+private func RenderFrontendResultsJson(ci: CompilerInstance): String {
+    let builder = StringBuilder()
+    builder.append("{\n")
+    builder.append("  \"compileArgs\": \"" + EscapeJson(ci.cachedInfo.compileArgs) + "\",\n")
+    builder.append("  \"diagnostics\": {\n")
+    builder.append("    \"errors\": " + ci.diag.GetErrorCount().toString() + ",\n")
+    builder.append("    \"warnings\": " + ci.diag.GetWarningCount().toString() + "\n")
+    builder.append("  },\n")
+    builder.append("  \"sourcePackages\": [")
+    let pkgs = ci.GetSourcePackages()
+    var pkgIdx: Int64 = 0
+    while (pkgIdx < pkgs.size) {
+        if (pkgIdx > 0) {
+            builder.append(", ")
+        }
+        builder.append("\"" + EscapeJson(pkgs[pkgIdx].fullPackageName) + "\"")
+        pkgIdx++
+    }
+    builder.append("],\n")
+    builder.append("  \"cache\": {\n")
+    builder.append("    \"files\": ")
+    appendStringArrayJson(builder, ci.cachedInfo.fileSummaries)
+    builder.append(",\n")
+    builder.append("    \"decls\": ")
+    appendStringArrayJson(builder, ci.cachedInfo.declSummaries)
+    builder.append("\n")
+    builder.append("  },\n")
+    builder.append("  \"chirPackages\": [")
+    let chirPkgs = ci.GetAllCHIRPackages()
+    var chirIdx: Int64 = 0
+    while (chirIdx < chirPkgs.size) {
+        if (chirIdx > 0) {
+            builder.append(", ")
+        }
+        builder.append("\"" + EscapeJson(chirPkgs[chirIdx].name) + "\"")
+        chirIdx++
+    }
+    builder.append("]\n")
+    builder.append("}\n")
+    return builder.toString()
+}
+
+private func appendFileSummaryJson(builder: StringBuilder, file: File): Unit {
+    builder.append("    {\n")
+    builder.append("      \"path\": \"" + EscapeJson(file.filePath) + "\",\n")
+    builder.append("      \"hash\": \"" + file.fileHash.toString() + "\",\n")
+    if (let Some(packageSpec) <- file.packageSpec) {
+        builder.append("      \"packageSpec\": \"" + EscapeJson(packageSpec.GetPackageName()) + "\",\n")
+    } else {
+        builder.append("      \"packageSpec\": \"\",\n")
+    }
+    builder.append("      \"imports\": ")
+    let imports = ArrayList<String>()
+    for (importSpec in file.imports) {
+        imports.add(GetImportedItemFullName(importSpec.content))
+    }
+    appendStringArrayJson(builder, imports)
+    builder.append(",\n")
+    builder.append("      \"decls\": [")
+    var declIdx: Int64 = 0
+    while (declIdx < file.decls.size) {
+        if (declIdx > 0) {
+            builder.append(", ")
+        }
+        builder.append("\"" + EscapeJson(ASTKindName(file.decls[declIdx].astKind) + ":" +
+            file.decls[declIdx].identifier.Val()) + "\"")
+        declIdx++
+    }
+    builder.append("]\n")
+    builder.append("    }")
+}
+
+private func appendStringArrayJson(builder: StringBuilder, values: ArrayList<String>): Unit {
+    builder.append("[")
+    var idx: Int64 = 0
+    while (idx < values.size) {
+        if (idx > 0) {
+            builder.append(", ")
+        }
+        builder.append("\"" + EscapeJson(values[idx]) + "\"")
+        idx++
+    }
+    builder.append("]")
+}
+
+private func appendStringList(builder: StringBuilder, values: ArrayList<String>): Unit {
+    var idx: Int64 = 0
+    while (idx < values.size) {
+        if (idx > 0) {
+            builder.append(",")
+        }
+        builder.append(values[idx])
+        idx++
     }
 }
 
