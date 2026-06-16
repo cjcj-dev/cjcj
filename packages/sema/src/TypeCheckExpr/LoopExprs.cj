@@ -147,6 +147,9 @@ public func SynForInExpr(typeManager: TypeManager, fie: ForInExpr): Ty {
     } else {
         ok = false
     }
+    if (let Some(pattern) <- fie.pattern) {
+        ok = IsIrrefutablePattern(pattern) && ok
+    }
     if (ok) {
         let unitTy = TcUnitTy()
         fie.SetTy(unitTy)

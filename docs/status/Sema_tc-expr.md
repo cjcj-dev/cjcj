@@ -35,7 +35,9 @@ What changed:
   - Try handler command-pattern checking now carries a separate included-command set and rejects non-`Command<T>`-shaped patterns or already-covered command types before checking the nested pattern.
 - Resume pass:
   - `@IfAvailable(level:)` string literal validation now uses the real `sema.Plugin.APILevelVersion` parser with the C++ `TRIPLE_ONLY` rule, while preserving the C++ expression checker behavior that accepts integer literals as literals in this path.
-- Verification: `cjpm build` passes after the resume pass. `grep -rn "TODO(selfhost:Sema)" packages/sema/src` reports only out-of-scope Sema placeholders; the scoped `TypeCheckExpr.cj` and `TypeCheckExpr/*` files have zero matching markers.
+- Current continuation:
+  - `for-in` expression checking now reuses the real sibling `IsIrrefutablePattern` helper and rejects refutable iteration patterns after type-checking the iterable, guard, and body, matching the C++ `SynForInExpr` control flow.
+- Verification: `cjpm build` passes after the current continuation. `grep -rn "TODO(selfhost:Sema)" packages/sema/src` reports only out-of-scope Sema placeholders; the scoped `TypeCheckExpr.cj` and `TypeCheckExpr/*` files have zero matching markers.
 
 Remaining fidelity gaps:
 - Full overload resolution/desugar paths for operator, subscript, and compound assignment still depend on broader call/lookup/desugar infrastructure.
@@ -47,5 +49,6 @@ Remaining fidelity gaps:
 - Try-handle command pattern promotion is still approximated from the available self-hosted type arguments; full parity needs the broader promotion/import-manager path used by C++ `ChkCommandTypePattern`.
 - Catch pattern validation cannot yet prove subtype-of-core-`Exception`/`Error` without an import-manager/core-decl path in this helper; it conservatively validates catchable classlike/generic shapes.
 - `@IfAvailable` still lacks the C++ import-manager checks for `ohos.device_info` and `ohos.base` package availability.
+- `for-in` refutable-pattern rejection now has the C++ behavior but not the exact `sema_forin_pattern_must_be_irrefutable` diagnostic emission in this shallow helper.
 
-Completeness estimate: 55% of C++ behavior for this scoped expression type-checking area, weighted by behavior rather than line count.
+Completeness estimate: 56% of C++ behavior for this scoped expression type-checking area, weighted by behavior rather than line count.
