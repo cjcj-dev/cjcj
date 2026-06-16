@@ -1382,6 +1382,9 @@ public class TypeManager {
         let _ = needSubstituteGeneric
         if (let Some(aliasTy) <- (ty as TypeAliasTy)) {
             if (let Some(decl) <- aliasTy.declPtr) {
+                if (decl.TestAttr(Attribute.IN_REFERENCE_CYCLE)) {
+                    return GetInstantiatedTy(ty, typeMapping)
+                }
                 if (let Some(typeNode) <- decl.typeNode) {
                     if (let Some(targetTy) <- typeNode.GetTy()) {
                         return GetInstantiatedTy(targetTy, typeMapping)

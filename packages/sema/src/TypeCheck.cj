@@ -132,8 +132,10 @@ private func getTyFromBuiltinDecl(typeManager: TypeManager, bid: BuiltInDecl, ty
         return TypeManager.GetCStringTy()
     }
     if (bid.IsType(BuiltInType.VARRAY)) {
-        let elemTy = if (typeArgs.isEmpty()) { TypeManager.GetInvalidTy() } else { typeArgs[0] }
-        return typeManager.GetVArrayTy(elemTy, 0)
+        if (typeArgs.size != 1) {
+            return TypeManager.GetInvalidTy()
+        }
+        return typeManager.GetVArrayTy(typeArgs[0], 0)
     }
     if (bid.IsType(BuiltInType.CFUNC)) {
         if (typeArgs.size != 1) {
@@ -252,6 +254,90 @@ private func collectDeclsFromDecl(decl: Decl, out: ArrayList<Decl>): Unit {
     } else if (let Some(interfaceDecl) <- (decl as InterfaceDecl)) {
         for (subDecl in interfaceDecl.subDecls) {
             collectDeclsFromDecl(subDecl, out)
+        }
+    }
+}
+
+private func markTypeAliasCycle(root: TypeAliasDecl, path: ArrayList<Decl>): String {
+    var inCycle = false
+    var diagInfo = ""
+    for (decl in path) {
+        if (SameDecl(decl, root)) {
+            inCycle = true
+        }
+        if (inCycle) {
+            decl.EnableAttr(Attribute.IN_REFERENCE_CYCLE)
+            diagInfo += decl.identifier.Val() + "->"
+        }
+    }
+    root.EnableAttr(Attribute.IN_REFERENCE_CYCLE)
+    return diagInfo + root.identifier.Val()
+}
+
+private func isVisitStatus(value: InheritanceVisitStatus, expected: InheritanceVisitStatus): Bool {
+    return match (value) {
+        case InheritanceVisitStatus.UNVISITED => match (expected) {
+            case InheritanceVisitStatus.UNVISITED => true
+            case _ => false
+        }
+        case InheritanceVisitStatus.VISITING => match (expected) {
+            case InheritanceVisitStatus.VISITING => true
+            case _ => false
+        }
+        case InheritanceVisitStatus.VISITED => match (expected) {
+            case InheritanceVisitStatus.VISITED => true
+            case _ => false
+        }
+    }
+}
+
+private func checkTypeAliasCycleForOneDecl(tad: TypeAliasDecl, path: ArrayList<Decl>): Unit {
+    if (isVisitStatus(tad.checkFlag, InheritanceVisitStatus.VISITING)) {
+        let _ = markTypeAliasCycle(tad, path)
+        return
+    }
+    if (isVisitStatus(tad.checkFlag, InheritanceVisitStatus.VISITED)) {
+        return
+    }
+    tad.checkFlag = InheritanceVisitStatus.VISITING
+    path.add(tad)
+    if (let Some(typeNode) <- tad.typeNode) {
+        checkTypeAliasCycleForOneType(typeNode, path)
+    }
+    path.remove(at: path.size - 1)
+    tad.checkFlag = InheritanceVisitStatus.VISITED
+}
+
+private func checkTypeAliasCycleForOneType(typeNode: Type, path: ArrayList<Decl>): Unit {
+    let walker = Walker(typeNode, visitPre: { node: Node =>
+        if (let Some(currentType) <- (node as Type)) {
+            if (let Some(target) <- currentType.GetTarget()) {
+                if (let Some(aliasDecl) <- (target as TypeAliasDecl)) {
+                    checkTypeAliasCycleForOneDecl(aliasDecl, path)
+                }
+            }
+        }
+        VisitAction.WALK_CHILDREN
+    })
+    let _ = walker.Walk()
+}
+
+public func TypeAliasCircleCheck(ctx: ASTContext): Unit {
+    if (let Some(pkg) <- ctx.curPackage) {
+        if (pkg.TestAttr(Attribute.IMPORTED)) {
+            return
+        }
+    }
+    let decls = if (let Some(pkg) <- ctx.curPackage) { collectDeclsFromPackage(pkg) } else { GetAllDecls(ctx) }
+    for (decl in decls) {
+        if (let Some(tad) <- (decl as TypeAliasDecl)) {
+            tad.checkFlag = InheritanceVisitStatus.UNVISITED
+        }
+    }
+    for (decl in decls) {
+        if (let Some(tad) <- (decl as TypeAliasDecl)) {
+            let path = ArrayList<Decl>()
+            checkTypeAliasCycleForOneDecl(tad, path)
         }
     }
 }
@@ -598,6 +684,7 @@ public func ResolveTypeAlias(typeManager: TypeManager, ctx: ASTContext): Unit {
             SetTypeAliasDeclTy(typeManager, ctx, tad)
         }
     }
+    TypeAliasCircleCheck(ctx)
     for (decl in decls) {
         if (let Some(tad) <- (decl as TypeAliasDecl)) {
             SubstituteTypeAliasForAlias(typeManager, tad)

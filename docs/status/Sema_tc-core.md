@@ -56,3 +56,26 @@ Verification:
 
 - `cjpm build` passes after this pass.
 - Remaining `TODO(selfhost:Sema)` markers in the tc-core-owned files listed by the task: 0.
+
+## 2026-06-17 Continue Pass
+
+Files deepened:
+
+- `packages/sema/src/TypeCheck.cj`
+- `packages/sema/src/TypeManager.cj`
+
+Implemented behavior:
+
+- Added a C++-shaped type-alias cycle check in the precheck type-alias phase. The pass walks resolved alias type syntax, tracks `InheritanceVisitStatus`, detects direct and indirect alias cycles, and marks participating aliases with `IN_REFERENCE_CYCLE` before alias substitution.
+- Updated alias substitution in the shared `TypeManager` helper to preserve cyclic `TypeAliasTy` nodes instead of substituting through aliases marked `IN_REFERENCE_CYCLE`.
+- Tightened builtin `VArray` type construction to require exactly one type argument, matching the C++ `GetBuiltInVArrayType` contract.
+
+Remaining gaps:
+
+- Alias-cycle diagnostics still only mark the AST; exact C++ diagnostic emission is not yet wired through the partial self-hosted diagnostic path.
+- Import-manager dependent lookup remains blocked by modules-local compatibility AST types.
+
+Verification:
+
+- `cjpm build` passes after this pass.
+- Remaining `TODO(selfhost:Sema)` markers in the tc-core-owned files listed by the task: 0.
