@@ -204,9 +204,7 @@ public class CjoManagerImpl {
         for (path in globalOptions.environment.cangjiePaths) {
             searchPath.add(path)
         }
-        if (!cangjieModules.isEmpty()) {
-            searchPath.add(cangjieModules)
-        }
+        searchPath.add(cangjieModules)
     }
 
     public func GetSearchPath(): ArrayList<String> {

@@ -89,6 +89,7 @@ public class ImportManager {
     private let fileUsedMacroDeclsMap: HashMap<UInt64, HashMap<String, ArrayList<Decl>>> =
         HashMap<UInt64, HashMap<String, ArrayList<Decl>>>()
     private let declToTypeAlias: HashMap<String, HashSet<String>> = HashMap<String, HashSet<String>>()
+    private let astWriters: HashMap<String, ASTWriter> = HashMap<String, ASTWriter>()
     private var importSrcCode: Bool = true
     private var cjoManager: CjoManager
     private var dependencyGraph: DependencyGraph
@@ -133,11 +134,16 @@ public class ImportManager {
         if (opts.outputMode == OutputMode.CHIR) {
             writer.SetSerializingCommon()
         }
-        writer.PreSaveFullExportDecls(pkg)
-        writer.ExportAST(PackageDecl(pkg))
-        writer.SaveOptions(opts.enableCompileDebug, opts.optimizationLevel)
-        additionalSerializations(writer)
-        writer.AST2FB(astData, PackageDecl(pkg))
+        let writerToUse = if (let Some(cachedWriter) <- astWriters.get(pkg.fullPackageName)) {
+            cachedWriter
+        } else {
+            writer.PreSaveFullExportDecls(pkg)
+            writer
+        }
+        writerToUse.ExportAST(PackageDecl(pkg))
+        writerToUse.SaveOptions(opts.enableCompileDebug, opts.optimizationLevel)
+        additionalSerializations(writerToUse)
+        writerToUse.AST2FB(astData, PackageDecl(pkg))
     }
 
     public func ExportASTSignature(pkg: Package): ArrayList<UInt8> {
@@ -164,6 +170,7 @@ public class ImportManager {
         )
         writer.PreSaveFullExportDecls(pkg)
         writer.SaveOptions(opts.enableCompileDebug, opts.optimizationLevel)
+        astWriters[pkg.fullPackageName] = writer
     }
 
     public func GetAllImportedPackages(includeMacroPkg!: Bool = false): ArrayList<PackageDecl> {
@@ -621,7 +628,9 @@ public class ImportManager {
         cjoManager.UpdateSearchPath(cangjieModules)
     }
 
-    public func DeleteASTWriters(): Unit {}
+    public func DeleteASTWriters(): Unit {
+        astWriters.clear()
+    }
 
     public func DeleteASTLoaders(): Unit {
         cjoManager.DeleteASTLoaders()
@@ -1108,29 +1117,66 @@ public class ImportManager {
         pkg: Package,
         exportCJO: Bool
     ): String {
-        let stdNames = HashSet<String>()
-        stdNames.add(CORE_PACKAGE_NAME)
+        let stdDependencies = HashMap<String, HashSet<String>>()
+        stdDependencies[CORE_PACKAGE_NAME] = HashSet<String>()
         if (exportCJO) {
             for (stdName in pkg.GetAllDependentStdPkgs()) {
                 if (IsStandardLibraryPackage(stdName)) {
-                    stdNames.add(stdName)
+                    CollectStdDependency(stdDependencies, stdName)
                 }
             }
         } else {
             for (dependencyName in dependencies.keys()) {
                 if (let Some(item) <- dependencies.get(dependencyName)) {
                     if (item.isStd) {
-                        stdNames.add(item.packageName)
+                        CollectStdDependency(stdDependencies, item.packageName)
                     }
                 }
             }
         }
-        let orderedStdNames = SortedStringSet(stdNames)
+        let orderedStdNames = SortedStdDependencyKeys(stdDependencies)
         let stdItems = ArrayList<String>()
         for (stdName in orderedStdNames) {
-            stdItems.add("{\"" + EscapeJson(stdName) + "\":[]}")
+            let imports = if (let Some(importSet) <- stdDependencies.get(stdName)) {
+                FeatureSetToJson(importSet)
+            } else {
+                "[]"
+            }
+            stdItems.add("{\"" + EscapeJson(stdName) + "\":" + imports + "}")
         }
         return "[" + JoinStrings(stdItems, ",") + "]"
+    }
+
+    private func CollectStdDependency(stdDependencies: HashMap<String, HashSet<String>>, stdPkg: String): Unit {
+        if (stdDependencies.contains(stdPkg)) {
+            return
+        }
+        let importInfo = HashSet<String>()
+        stdDependencies[stdPkg] = importInfo
+        if (let None <- cjoManager.GetPackage(stdPkg)) {
+            let cjoPath = cjoManager.GetPackageCjoPath(stdPkg)
+            if (cjoPath.isEmpty()) {
+                diag.ReportError("package_search_error", "cannot find package '${stdPkg}'")
+                return
+            }
+            if (!cjoManager.LoadPackageHeader(stdPkg, cjoPath)) {
+                return
+            }
+        }
+        if (let Some(stdPkgInfo) <- cjoManager.GetPackage(stdPkg)) {
+            for (file in stdPkgInfo.files) {
+                for (importSpec in file.imports) {
+                    importInfo.add(importSpec.content.GetImportedPackageNameWithIsDecl())
+                }
+            }
+        }
+        let importNames = ArrayList<String>()
+        for (importName in importInfo) {
+            importNames.add(importName)
+        }
+        for (importName in importNames) {
+            CollectStdDependency(stdDependencies, importName)
+        }
     }
 
     private func FeatureSetToJson(features: HashSet<String>): String {
@@ -1356,6 +1402,15 @@ public class ImportManager {
         let values = ArrayList<String>()
         for (value in input) {
             values.add(value)
+        }
+        SortStringsInPlace(values)
+        return values
+    }
+
+    private func SortedStdDependencyKeys(input: HashMap<String, HashSet<String>>): ArrayList<String> {
+        let values = ArrayList<String>()
+        for (key in input.keys()) {
+            values.add(key)
         }
         SortStringsInPlace(values)
         return values
