@@ -356,11 +356,15 @@ public class Diagnostic {
         var formatPos = result.indexOf("%s")
         while (let Some(pos) <- formatPos) {
             if (index >= arguments.size) {
-                break
+                throw IllegalStateException("diagnostic argument count does not match format placeholders")
             }
-            result = result[0..pos] + arguments[index] + result[pos + 2..]
+            let argument = arguments[index]
+            result = result[0..pos] + argument + result[pos + 2..]
             index++
-            formatPos = result.indexOf("%s", pos + arguments[index - 1].size)
+            formatPos = result.indexOf("%s", pos + argument.size)
+        }
+        if (index != arguments.size) {
+            throw IllegalStateException("diagnostic argument count does not match format placeholders")
         }
         return result
     }

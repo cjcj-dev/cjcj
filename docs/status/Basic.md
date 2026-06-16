@@ -56,6 +56,8 @@ Deepening pass updates:
 - Matched the C++ `DisplayWidth(std::string)` malformed UTF-8 behavior by validating the input byte sequence before
   display-width decoding and returning the raw byte length for invalid, overlong, surrogate, truncated, or out-of-range
   UTF-8 sequences.
+- Tightened refactor diagnostic `%s` substitution to match the C++ `Diagnostic::InsertArguments` invariant: missing
+  replacement arguments and unused extra arguments now fail instead of silently leaving placeholders or dropping inputs.
 
 Implemented:
 
@@ -75,6 +77,7 @@ Implemented:
 - Tightened interop package config validation to mirror the C++ reader: per-package unknown strategies now fail validation, invalid include/exclude combinations are rejected, `GenericTypeStrategy = "None"` rejects generic instantiations, and invalid `generic_object_configuration` entries now fail parsing instead of being ignored.
 - Aligned `DisplayWidth(String)` with the C++ `std::range_error` fallback path for malformed UTF-8 so diagnostics keep
   byte-count spacing instead of decoding permissive replacement code points.
+- Matched the C++ refactor diagnostic formatter's placeholder-count checks for `Diagnostic.InsertArguments`.
 - Kept LLVM/native backend out of scope as required; Basic does not bind LLVM directly.
 
 Known fidelity caveats:
