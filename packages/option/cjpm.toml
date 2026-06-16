@@ -14,4 +14,5 @@
   package-configuration = {}
 
 [dependencies]
+  "cangjie_compiler::basic" = { path = "../basic" }
   "cangjie_compiler::utils" = { path = "../utils" }

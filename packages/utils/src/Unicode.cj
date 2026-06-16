@@ -1,14 +1,25 @@
 package cangjie_compiler::utils
 
-import cangjie_compiler::lex.IsContextualKeyword as LexIsContextualKeyword
-import cangjie_compiler::lex.TOKENS as LEX_TOKENS
-import cangjie_compiler::lex.TokenKind as LexTokenKind
-import cangjie_compiler::lex.TokenKindIndex as LexTokenKindIndex
 import std.collection.*
 
 public type UTF8 = UInt8
 public type UTF16 = UInt16
 public type UTF32 = UInt32
+
+private let CANGJIE_RESERVED_KEYWORDS: Array<String> = [
+    "is", "as", "Int8", "Int16", "Int32", "Int64", "IntNative", "UInt8", "UInt16", "UInt32", "UInt64",
+    "UIntNative", "Float16", "Float32", "Float64", "Rune", "Bool", "Nothing", "Unit", "struct", "enum",
+    "VArray", "This", "package", "import", "class", "interface", "func", "macro", "quote", "let", "var",
+    "const", "type", "init", "this", "super", "if", "else", "case", "try", "catch", "finally", "for", "do",
+    "while", "throw", "return", "continue", "break", "in", "_", "match", "where", "extend", "with", "prop",
+    "static", "public", "private", "internal", "protected", "override", "redef", "abstract", "sealed", "open",
+    "foreign", "inout", "mut", "unsafe", "operator", "spawn", "synchronized", "main", "true", "false"
+]
+
+private let CANGJIE_CONTEXTUAL_KEYWORDS: Array<String> = [
+    "public", "private", "internal", "protected", "override", "redef", "abstract", "sealed", "open",
+    "common", "specific", "features"
+]
 
 public enum ConversionResult {
     | OK
@@ -350,17 +361,19 @@ public func IsCangjieIdentifier(str: String, useContextualKeyWords: Bool): Bool 
 }
 
 private func IsKeyword(str: String): Bool {
-    let identifierIndex = LexTokenKindIndex(LexTokenKind.IDENTIFIER)
-    var idx: Int64 = 0
-    while (idx < identifierIndex) {
-        if (LEX_TOKENS[idx] == str) {
+    for (keyword in CANGJIE_RESERVED_KEYWORDS) {
+        if (keyword == str) {
             return true
         }
-        idx++
     }
-    return str == "true" || str == "false"
+    return false
 }
 
 private func IsContextualKeyword(str: String): Bool {
-    return LexIsContextualKeyword(str)
+    for (keyword in CANGJIE_CONTEXTUAL_KEYWORDS) {
+        if (keyword == str) {
+            return true
+        }
+    }
+    return false
 }

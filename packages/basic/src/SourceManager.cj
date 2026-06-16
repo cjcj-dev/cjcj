@@ -1,7 +1,95 @@
 package cangjie_compiler::basic
 
 import std.collection.*
-import cangjie_compiler::utils.FileUtil
+import std.fs.exists
+
+@When[os == "Windows"]
+func basicIsPathSlashByte(byte: UInt8): Bool {
+    return byte == b'/' || byte == b'\\'
+}
+
+@When[os != "Windows"]
+func basicIsPathSlashByte(byte: UInt8): Bool {
+    return byte == b'/'
+}
+
+@When[os == "Windows"]
+func basicPreferredDirSeparator(toUnix: Bool): String {
+    return if (toUnix) { "/" } else { "\\" }
+}
+
+@When[os != "Windows"]
+func basicPreferredDirSeparator(toUnix: Bool): String {
+    let _ = toUnix
+    return "/"
+}
+
+func basicLastDirSplit(str: String): Option<Int64> {
+    var idx = str.size - 1
+    while (idx >= 0) {
+        if (basicIsPathSlashByte(str[idx])) {
+            return idx
+        }
+        idx--
+    }
+    return None
+}
+
+func BasicNormalizePath(input: String, toUnix!: Bool = false): String {
+    let builder = StringBuilder()
+    var previousIsSlash = false
+    let slash = basicPreferredDirSeparator(toUnix)
+    for (byte in input.toArray()) {
+        if (byte == 0u8) {
+            break
+        }
+        let isSlashByte = basicIsPathSlashByte(byte)
+        if (previousIsSlash && isSlashByte) {
+            continue
+        }
+        if (isSlashByte) {
+            builder.append(slash)
+            previousIsSlash = true
+        } else {
+            builder.append(String.fromUtf8([byte]))
+            previousIsSlash = false
+        }
+    }
+    return builder.toString()
+}
+
+func BasicGetFileName(filePath: String): String {
+    let path = BasicNormalizePath(filePath)
+    if (let Some(pos) <- basicLastDirSplit(path)) {
+        return path[pos + 1..]
+    }
+    return path
+}
+
+func BasicGetFileExtension(filePath: String): String {
+    let dotOpt = filePath.lastIndexOf(".")
+    if (let None <- dotOpt) {
+        return ""
+    }
+    let dotPos = dotOpt.getOrThrow()
+    if (dotPos == 0) {
+        return ""
+    }
+    if (let Some(dirPos) <- basicLastDirSplit(filePath)) {
+        if (dotPos == dirPos + 1 || dirPos > dotPos) {
+            return ""
+        }
+    }
+    return filePath[dotPos + 1..]
+}
+
+func BasicFileExist(path: String): Bool {
+    try {
+        return exists(path)
+    } catch (e: Exception) {
+        return false
+    }
+}
 
 public class Token {
     private var beginPos: Position
@@ -188,13 +276,13 @@ public class SourceManager {
         packageName!: Option<String> = None,
         isCjmpFile!: Bool = false
     ): UInt64 {
-        let normalizedPath = FileUtil.Normalize(path)
+        let normalizedPath = BasicNormalizePath(path)
         let fileHash = GetHash(normalizedPath)
         return GetFileId(normalizedPath, buffer, fileHash, packageName, isCjmpFile, false)
     }
 
     public func AppendSource(path: String, buffer: String, isCjmpFile!: Bool = false): UInt64 {
-        let normalizedPath = FileUtil.Normalize(path)
+        let normalizedPath = BasicNormalizePath(path)
         let fileHash = GetHash(normalizedPath)
         return GetFileId(normalizedPath, buffer, fileHash, None, isCjmpFile, true)
     }
@@ -203,14 +291,14 @@ public class SourceManager {
         if (pos.fileID == 0 || pos.fileID >= UInt64(sources.size) || !sources.contains(pos.fileID)) {
             return false
         }
-        return FileUtil.GetFileExtension(GetSource(pos.fileID).path) == "macrocall"
+        return BasicGetFileExtension(GetSource(pos.fileID).path) == "macrocall"
     }
 
     public func IsSourceFileExist(id: UInt64): Bool {
         if (sources.contains(id)) {
             let path = GetSource(id).path
-            if (!path.isEmpty() && FileUtil.GetFileExtension(path) != "cj") {
-                return FileUtil.FileExist(path)
+            if (!path.isEmpty() && BasicGetFileExtension(path) != "cj") {
+                return BasicFileExist(path)
             }
         }
         return true

@@ -1,6 +1,5 @@
 package cangjie_compiler::basic
 
-import cangjie_compiler::option.WarningOptionMgr as OptionWarningOptionMgr
 import std.collection.*
 
 public class DiagnosticEngineImpl {
@@ -235,7 +234,7 @@ public class DiagnosticEngineImpl {
         if (index < 0) {
             return false
         }
-        return OptionWarningOptionMgr.IsSuppressed(UInt64(index))
+        return WarningOptionMgr.IsSuppressed(UInt64(index))
     }
 
     public func Prepare(): Unit {
