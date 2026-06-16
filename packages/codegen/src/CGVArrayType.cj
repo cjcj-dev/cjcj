@@ -1,5 +1,6 @@
 package cangjie_compiler::codegen
 
+import std.collection.*
 import cangjie_compiler::chir.Type
 import cangjie_compiler::chir.VArrayType
 
@@ -19,7 +20,21 @@ public class CGVArrayType <: CGType {
         } else {
             0u32
         }
-        return unsafe { LLVMArrayType(elementTy, elementCount) }
+        let arrayType = unsafe { LLVMArrayType(elementTy, elementCount) }
+        let layoutName = if (let Some(vArrayTy) <- (chirType as VArrayType)) {
+            "VArray.${vArrayTy.size}" + vArrayTy.GetElementType().ToString()
+        } else {
+            "VArray.0Invalid"
+        }
+        let varrayLayout = GetOrCreateNamedStructType(cgCtx.GetLLVMContext(), layoutName)
+        layoutType = varrayLayout
+        if (!cgCtx.IsGeneratedStructType(layoutName)) {
+            let body = ArrayList<LLVMTypeRef>()
+            body.add(arrayType)
+            SetStructTypeBody(varrayLayout, body)
+            cgCtx.AddGeneratedStructType(layoutName)
+        }
+        return arrayType
     }
 
     protected override func GenContainedCGTypes(): Unit {

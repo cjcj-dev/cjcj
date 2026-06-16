@@ -250,10 +250,9 @@ public open class CGType {
     }
 
     public static func GetUnitType(context: LLVMContextHandle): LLVMTypeRef {
-        var result = LLVMNullType()
-        try (nameCString = unsafe { LibC.mallocCString(UNIT_TYPE_STR) }.asResource()) {
-            result = unsafe { LLVMStructCreateNamed(context.raw, nameCString.value) }
-        }
+        let result = GetOrCreateNamedStructType(context, UNIT_TYPE_STR)
+        let fields = ArrayList<LLVMTypeRef>()
+        SetStructTypeBody(result, fields)
         return result
     }
 
@@ -261,11 +260,24 @@ public open class CGType {
         return unsafe { LLVMPointerType(LLVMInt8TypeInContext(context.raw), 1u32) }
     }
 
-    public static func GetBitMapType(context: LLVMContextHandle): LLVMTypeRef {
-        var result = LLVMNullType()
-        try (nameCString = unsafe { LibC.mallocCString("BitMap") }.asResource()) {
-            result = unsafe { LLVMStructCreateNamed(context.raw, nameCString.value) }
+    public static func GetArrayBaseType(cgCtx: CGContext): LLVMTypeRef {
+        let context = cgCtx.GetLLVMContext()
+        let result = GetOrCreateNamedStructType(context, "ArrayBase")
+        if (!cgCtx.IsGeneratedStructType("ArrayBase")) {
+            let body = ArrayList<LLVMTypeRef>()
+            body.add(unsafe { LLVMInt64TypeInContext(context.raw) })
+            SetStructTypeBody(result, body)
+            cgCtx.AddGeneratedStructType("ArrayBase")
         }
+        return result
+    }
+
+    public static func GetBitMapType(context: LLVMContextHandle): LLVMTypeRef {
+        let result = GetOrCreateNamedStructType(context, "BitMap")
+        let body = ArrayList<LLVMTypeRef>()
+        body.add(unsafe { LLVMInt32TypeInContext(context.raw) })
+        body.add(unsafe { LLVMArrayType(LLVMInt8TypeInContext(context.raw), 0u32) })
+        SetStructTypeBody(result, body)
         return result
     }
 
@@ -274,10 +286,35 @@ public open class CGType {
     }
 
     public static func GetOrCreateTypeInfoType(context: LLVMContextHandle): LLVMTypeRef {
-        var result = LLVMNullType()
-        try (nameCString = unsafe { LibC.mallocCString("TypeInfo") }.asResource()) {
-            result = unsafe { LLVMStructCreateNamed(context.raw, nameCString.value) }
-        }
+        let result = GetOrCreateNamedStructType(context, "TypeInfo")
+        let i8Ty = unsafe { LLVMInt8TypeInContext(context.raw) }
+        let i16Ty = unsafe { LLVMInt16TypeInContext(context.raw) }
+        let i32Ty = unsafe { LLVMInt32TypeInContext(context.raw) }
+        let i8PtrTy = unsafe { LLVMPointerType(i8Ty, 0u32) }
+        let i32PtrTy = unsafe { LLVMPointerType(i32Ty, 0u32) }
+        let typeInfoPtrTy = unsafe { LLVMPointerType(result, 0u32) }
+        let extensionDefPtrPtrTy = unsafe { LLVMPointerType(CGType.GetOrCreateExtensionDefPtrType(context), 0u32) }
+        let bitMapPtrTy = unsafe { LLVMPointerType(CGType.GetBitMapType(context), 0u32) }
+        let body = ArrayList<LLVMTypeRef>()
+        body.add(i8PtrTy)
+        body.add(i8Ty)
+        body.add(i8Ty)
+        body.add(i16Ty)
+        body.add(i32Ty)
+        body.add(bitMapPtrTy)
+        body.add(i32Ty)
+        body.add(i8Ty)
+        body.add(i8Ty)
+        body.add(i16Ty)
+        body.add(i32PtrTy)
+        body.add(i8PtrTy)
+        body.add(i8PtrTy)
+        body.add(i8PtrTy)
+        body.add(typeInfoPtrTy)
+        body.add(extensionDefPtrPtrTy)
+        body.add(i8PtrTy)
+        body.add(i8PtrTy)
+        SetStructTypeBody(result, body)
         return result
     }
 
@@ -286,18 +323,43 @@ public open class CGType {
     }
 
     public static func GetOrCreateTypeTemplateType(context: LLVMContextHandle): LLVMTypeRef {
-        var result = LLVMNullType()
-        try (nameCString = unsafe { LibC.mallocCString("TypeTemplate") }.asResource()) {
-            result = unsafe { LLVMStructCreateNamed(context.raw, nameCString.value) }
-        }
+        let result = GetOrCreateNamedStructType(context, "TypeTemplate")
+        let i8Ty = unsafe { LLVMInt8TypeInContext(context.raw) }
+        let i16Ty = unsafe { LLVMInt16TypeInContext(context.raw) }
+        let i8PtrTy = unsafe { LLVMPointerType(i8Ty, 0u32) }
+        let extensionDefPtrPtrTy = unsafe { LLVMPointerType(CGType.GetOrCreateExtensionDefPtrType(context), 0u32) }
+        let body = ArrayList<LLVMTypeRef>()
+        body.add(i8PtrTy)
+        body.add(i8Ty)
+        body.add(i8Ty)
+        body.add(i16Ty)
+        body.add(i8Ty)
+        body.add(i8PtrTy)
+        body.add(i8PtrTy)
+        body.add(i8PtrTy)
+        body.add(i8PtrTy)
+        body.add(extensionDefPtrPtrTy)
+        body.add(i16Ty)
+        SetStructTypeBody(result, body)
         return result
     }
 
     public static func GetOrCreateExtensionDefType(context: LLVMContextHandle): LLVMTypeRef {
-        var result = LLVMNullType()
-        try (nameCString = unsafe { LibC.mallocCString("ExtensionDef") }.asResource()) {
-            result = unsafe { LLVMStructCreateNamed(context.raw, nameCString.value) }
-        }
+        let result = GetOrCreateNamedStructType(context, "ExtensionDef")
+        let i8Ty = unsafe { LLVMInt8TypeInContext(context.raw) }
+        let i16Ty = unsafe { LLVMInt16TypeInContext(context.raw) }
+        let i32Ty = unsafe { LLVMInt32TypeInContext(context.raw) }
+        let i8PtrTy = unsafe { LLVMPointerType(i8Ty, 0u32) }
+        let body = ArrayList<LLVMTypeRef>()
+        body.add(i32Ty)
+        body.add(i8Ty)
+        body.add(i8Ty)
+        body.add(i16Ty)
+        body.add(i8PtrTy)
+        body.add(i8PtrTy)
+        body.add(i8PtrTy)
+        body.add(i8PtrTy)
+        SetStructTypeBody(result, body)
         return result
     }
 

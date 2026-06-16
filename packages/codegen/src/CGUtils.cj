@@ -1,5 +1,6 @@
 package cangjie_compiler::codegen
 
+import std.collection.*
 import cangjie_compiler::chir.Type
 import cangjie_compiler::mangle.MANGLE_NESTED_PREFIX
 import cangjie_compiler::mangle.MANGLE_SUFFIX
@@ -14,6 +15,35 @@ public func GenNameForBB(name: String, extraInfo!: UInt64 = 0u64): String {
 
 public func GetClassObjLayoutName(className: String): String {
     return "ObjLayout." + className
+}
+
+public func GetOrCreateNamedStructType(context: LLVMContextHandle, name: String): LLVMTypeRef {
+    var result = LLVMNullType()
+    try (nameCString = unsafe { LibC.mallocCString(name) }.asResource()) {
+        result = unsafe { LLVMGetTypeByName2(context.raw, nameCString.value) }
+        if (result.isNull()) {
+            result = unsafe { LLVMStructCreateNamed(context.raw, nameCString.value) }
+        }
+    }
+    return result
+}
+
+public func SetStructTypeBody(structType: LLVMTypeRef, body: ArrayList<LLVMTypeRef>): Unit {
+    if (structType.isNull()) {
+        return
+    }
+    if (body.isEmpty()) {
+        unsafe { LLVMStructSetBody(structType, CPointer<LLVMTypeRef>(), 0u32, 0) }
+        return
+    }
+    try (bodyPtr = LibC.malloc<LLVMTypeRef>(count: body.size).asResource()) {
+        var idx: Int64 = 0
+        while (idx < body.size) {
+            unsafe { (bodyPtr.value + idx).write(body[idx]) }
+            idx++
+        }
+        unsafe { LLVMStructSetBody(structType, bodyPtr.value, UInt32(body.size), 0) }
+    }
 }
 
 public func MangleName(value: String): String {

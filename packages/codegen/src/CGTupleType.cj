@@ -1,5 +1,6 @@
 package cangjie_compiler::codegen
 
+import std.collection.*
 import cangjie_compiler::chir.Type
 
 public class CGTupleType <: CGType {
@@ -11,10 +12,18 @@ public class CGTupleType <: CGType {
     }
 
     protected override func GenLLVMType(): LLVMTypeRef {
-        try (nameCString = unsafe { LibC.mallocCString(chirType.ToString() + ".Type") }.asResource()) {
-            layoutType = unsafe { LLVMStructCreateNamed(cgCtx.GetLLVMContext().raw, nameCString.value) }
+        let typeName = chirType.ToString() + ".Type"
+        let tupleLayout = GetOrCreateNamedStructType(cgCtx.GetLLVMContext(), typeName)
+        layoutType = tupleLayout
+        if (!cgCtx.IsGeneratedStructType(typeName)) {
+            let fieldTypes = ArrayList<LLVMTypeRef>()
+            for (fieldTy in chirType.GetTypeArgs()) {
+                fieldTypes.add(CGType.GetOrCreate(cgMod, fieldTy, extraInfo: extraInfo).GetLLVMType())
+            }
+            SetStructTypeBody(tupleLayout, fieldTypes)
+            cgCtx.AddGeneratedStructType(typeName)
         }
-        return GetLayoutType()
+        return tupleLayout
     }
 
     protected override func GenContainedCGTypes(): Unit {

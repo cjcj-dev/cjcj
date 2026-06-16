@@ -1,5 +1,6 @@
 package cangjie_compiler::codegen
 
+import std.collection.*
 import cangjie_compiler::chir.RawArrayType
 import cangjie_compiler::chir.Type
 
@@ -12,6 +13,19 @@ public class CGArrayType <: CGType {
         return GetPointerElementType()
     }
 
+    public static func GenerateArrayLayoutTypeInfo(cgCtx: CGContext, layoutName: String,
+        elementType: LLVMTypeRef): LLVMTypeRef {
+        let result = GetOrCreateNamedStructType(cgCtx.GetLLVMContext(), layoutName)
+        if (!cgCtx.IsGeneratedStructType(layoutName)) {
+            let body = ArrayList<LLVMTypeRef>()
+            body.add(CGType.GetArrayBaseType(cgCtx))
+            body.add(unsafe { LLVMArrayType(elementType, 0u32) })
+            SetStructTypeBody(result, body)
+            cgCtx.AddGeneratedStructType(layoutName)
+        }
+        return result
+    }
+
     protected override func GenLLVMType(): LLVMTypeRef {
         let elementTy = if (let Some(rawArrayTy) <- (chirType as RawArrayType)) {
             CGType.GetOrCreate(cgMod, rawArrayTy.GetElementType()).GetLLVMType()
@@ -19,9 +33,7 @@ public class CGArrayType <: CGType {
             unsafe { LLVMInt8TypeInContext(cgCtx.GetLLVMContext().raw) }
         }
         let layoutName = ARRAY_LAYOUT_PREFIX + chirType.ToString()
-        try (nameCString = unsafe { LibC.mallocCString(layoutName) }.asResource()) {
-            layoutType = unsafe { LLVMStructCreateNamed(cgCtx.GetLLVMContext().raw, nameCString.value) }
-        }
+        layoutType = CGArrayType.GenerateArrayLayoutTypeInfo(cgCtx, layoutName, elementTy)
         return unsafe { LLVMPointerType(elementTy, 1u32) }
     }
 

@@ -123,7 +123,10 @@ foreign {
     func LLVMDoubleTypeInContext(context: LLVMContextRef): LLVMTypeRef
     func LLVMPointerType(elementType: LLVMTypeRef, addressSpace: UInt32): LLVMTypeRef
     func LLVMArrayType(elementType: LLVMTypeRef, elementCount: UInt32): LLVMTypeRef
+    func LLVMGetTypeByName2(context: LLVMContextRef, name: CString): LLVMTypeRef
     func LLVMStructCreateNamed(context: LLVMContextRef, name: CString): LLVMTypeRef
+    func LLVMStructSetBody(structTy: LLVMTypeRef, elementTypes: CPointer<LLVMTypeRef>, elementCount: UInt32,
+        packed: Int32): Unit
     func LLVMFunctionType(returnType: LLVMTypeRef, paramTypes: CPointer<LLVMTypeRef>, paramCount: UInt32, isVarArg: Int32): LLVMTypeRef
 
     func LLVMAddFunction(module: LLVMModuleRef, name: CString, functionType: LLVMTypeRef): LLVMValueRef

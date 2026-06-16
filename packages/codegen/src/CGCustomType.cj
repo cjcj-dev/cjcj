@@ -9,10 +9,9 @@ public open class CGCustomType <: CGType {
 
     protected open override func GenLLVMType(): LLVMTypeRef {
         let layoutName = STRUCT_TYPE_PREFIX + chirType.ToString()
-        try (nameCString = unsafe { LibC.mallocCString(layoutName) }.asResource()) {
-            layoutType = unsafe { LLVMStructCreateNamed(cgCtx.GetLLVMContext().raw, nameCString.value) }
-        }
-        return GetLayoutType()
+        let customLayout = GetOrCreateNamedStructType(cgCtx.GetLLVMContext(), layoutName)
+        layoutType = customLayout
+        return customLayout
     }
 
     protected open override func GenContainedCGTypes(): Unit {

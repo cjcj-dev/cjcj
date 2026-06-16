@@ -36,6 +36,10 @@ Implemented:
 - Added `CGType` interning and concrete type classes for primitive, tuple, function, C string, C pointer, reference,
   array, varray, custom, struct, class, enum, generic, box, and `This` types. The current implementation computes
   LLVM type handles plus conservative size/alignment metadata for the subset exposed by the current CHIR package.
+- Added native LLVM named-struct lookup and body emission through C FFI (`LLVMGetTypeByName2` and
+  `LLVMStructSetBody`). Fixed runtime metadata and aggregate layouts now receive concrete LLVM struct bodies for
+  `ArrayBase`, `BitMap`, `TypeInfo`, `TypeTemplate`, `ExtensionDef`, tuples, raw arrays, varrays, and CHIR
+  struct/class instance-variable layouts.
 - Added `IRBuilder2` wrappers for selected LLVM builder operations, primitive constants, default literal constants,
   call and invoke construction, bitcasts, address-space casts, aggregate insertion, GEP construction, unreachable
   terminators, insertion-point inspection/clearing, and scoped debug-location restoration.
@@ -91,4 +95,4 @@ Known gaps:
 
 Remaining CodeGen selfhost markers: 0.
 
-Current CodeGen package size: 45 `.cj` files, approximately 4181 total lines.
+Current CodeGen package size: 45 `.cj` files, approximately 4387 total lines.
