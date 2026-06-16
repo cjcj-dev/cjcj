@@ -6,6 +6,7 @@ import cangjie_compiler::basic.DiagArgument as BasicDiagArgument
 import cangjie_compiler::basic.DiagKind as BasicDiagKind
 import cangjie_compiler::basic.DiagKindRefactor as BasicDiagKindRefactor
 import cangjie_compiler::basic.DiagnosticEngine as BasicDiagnosticEngine
+import cangjie_compiler::basic.Range as BasicRange
 
 private func TypeCheckDeclEmitDiag(
     diag: BasicDiagnosticEngine,
@@ -26,12 +27,60 @@ private func TypeCheckDeclAddUniqueDecl(values: ArrayList<Decl>, decl: Decl): Un
     values.add(decl)
 }
 
+private func TypeCheckDeclIdentifierRange(decl: Decl): BasicRange {
+    let beginPos = decl.identifier.Begin()
+    if (!beginPos.IsZero()) {
+        let endPos = decl.identifier.End()
+        if (!endPos.IsZero()) {
+            return MakeRange(beginPos, endPos)
+        }
+    }
+    return MakeRange(decl.begin, decl.end)
+}
+
 private func TypeCheckDeclCopyTypeArgs(args: ArrayList<Ty>): Array<Ty> {
     let out = ArrayList<Ty>()
     for (arg in args) {
         out.add(arg)
     }
     return out.toArray()
+}
+
+private func TypeCheckDeclIsBuiltinUnaryOperand(op: TokenKind, ty: Ty): Bool {
+    if (op == TokenKind.SUB) {
+        return ty.IsNumeric()
+    }
+    if (op == TokenKind.NOT) {
+        return ty.IsIntegerSubType() || ty.IsBoolean() || ty.kind == TypeKind.TYPE_IDEAL_INT
+    }
+    return false
+}
+
+private func TypeCheckDeclIsBuiltinBinaryOperandPair(op: TokenKind, leftTy: Ty, rightTy: Ty): Bool {
+    if (op == TokenKind.EXP) {
+        return (leftTy.kind == TypeKind.TYPE_INT64 && rightTy.kind == TypeKind.TYPE_UINT64) ||
+            (leftTy.kind == TypeKind.TYPE_FLOAT64 &&
+                (rightTy.kind == TypeKind.TYPE_FLOAT64 || rightTy.kind == TypeKind.TYPE_INT64)) ||
+            (leftTy.kind == TypeKind.TYPE_IDEAL_INT && rightTy.kind == TypeKind.TYPE_IDEAL_INT) ||
+            (leftTy.kind == TypeKind.TYPE_IDEAL_FLOAT && rightTy.kind == TypeKind.TYPE_IDEAL_FLOAT)
+    }
+    if (op == TokenKind.LSHIFT || op == TokenKind.RSHIFT) {
+        return leftTy.IsIntegerSubType() && rightTy.IsIntegerSubType()
+    }
+    if (op == TokenKind.MOD || op == TokenKind.BITAND || op == TokenKind.BITOR || op == TokenKind.BITXOR) {
+        return SameTy(leftTy, rightTy) && (leftTy.IsIntegerSubType() || leftTy.kind == TypeKind.TYPE_IDEAL_INT)
+    }
+    if (op == TokenKind.ADD || op == TokenKind.SUB || op == TokenKind.MUL || op == TokenKind.DIV) {
+        return SameTy(leftTy, rightTy) && leftTy.IsNumeric()
+    }
+    if (op == TokenKind.EQUAL || op == TokenKind.NOTEQ) {
+        return SameTy(leftTy, rightTy) && (leftTy.IsNumeric() || leftTy.IsBoolean() || leftTy.IsUnit() ||
+            leftTy.IsRune())
+    }
+    if (op == TokenKind.LT || op == TokenKind.LE || op == TokenKind.GT || op == TokenKind.GE) {
+        return SameTy(leftTy, rightTy) && (leftTy.IsNumeric() || leftTy.IsRune())
+    }
+    return false
 }
 
 public func TypeCheckDeclInsertEnumConstructors(
@@ -151,6 +200,16 @@ public func TypeCheckDeclCheckOperatorOverloadFunc(diag: BasicDiagnosticEngine, 
                         args: [BasicDiagArgument(fd.identifier.Val())])
                     return false
                 }
+                if (let Some(outer) <- fd.outerDecl) {
+                    if (let Some(baseTy) <- outer.GetTy()) {
+                        if (TypeCheckDeclIsBuiltinUnaryOperand(fd.op, baseTy)) {
+                            TypeCheckDeclEmitDiag(diag, fd,
+                                BasicDiagKind.sema_operator_overload_built_in_unary_operator,
+                                args: [BasicDiagArgument(fd.identifier.Val()), BasicDiagArgument(baseTy.String())])
+                            return false
+                        }
+                    }
+                }
                 return true
             }
             if (funcTy.paramTys.size == 1) {
@@ -158,6 +217,22 @@ public func TypeCheckDeclCheckOperatorOverloadFunc(diag: BasicDiagnosticEngine, 
                     TypeCheckDeclEmitDiag(diag, fd, BasicDiagKind.sema_operator_overload_invalid_num_parameter,
                         args: [BasicDiagArgument(fd.identifier.Val())])
                     return false
+                }
+                if (fd.fullPackageName != "std.core") {
+                    if (let Some(outer) <- fd.outerDecl) {
+                        if (let Some(baseTy) <- outer.GetTy()) {
+                            if (TypeCheckDeclIsBuiltinBinaryOperandPair(fd.op, baseTy, funcTy.paramTys[0])) {
+                                TypeCheckDeclEmitDiag(diag, fd,
+                                    BasicDiagKind.sema_operator_overload_built_in_binary_operator,
+                                    args: [
+                                        BasicDiagArgument(fd.identifier.Val()),
+                                        BasicDiagArgument(baseTy.String()),
+                                        BasicDiagArgument(funcTy.paramTys[0].String())
+                                    ])
+                                return false
+                            }
+                        }
+                    }
                 }
                 return true
             }
@@ -197,29 +272,56 @@ public func TypeCheckDeclCheckIndexOperatorOverload(
         return true
     }
     var valid = true
+    let invalidNamedParams = ArrayList<FuncParam>()
     for (param in params) {
         if (param.isNamedParam && param.identifier.Val() != "value") {
             valid = false
+            invalidNamedParams.add(param)
         }
     }
+    if (!invalidNamedParams.isEmpty()) {
+        let first = invalidNamedParams[0]
+        let builder = diag.DiagnoseRefactor(BasicDiagKindRefactor.sema_invalid_subscript_assign_parameter,
+            TypeCheckDeclIdentifierRange(first))
+        var idx: Int64 = 1
+        while (idx < invalidNamedParams.size) {
+            builder.AddHint(TypeCheckDeclIdentifierRange(invalidNamedParams[idx]))
+            idx++
+        }
+        builder.Emit()
+    }
     if (params.size <= 1) {
+        let builder = diag.DiagnoseRefactor(BasicDiagKindRefactor.sema_invalid_subscript_assign_parameter_num,
+            TypeCheckDeclIdentifierRange(fd))
+        builder.Emit()
         valid = false
     }
     if (valid && Ty.IsTyCorrect(fd.GetTy())) {
         if (let Some(realFuncTy) <- (fd.GetTy().getOrThrow() as FuncTy)) {
             if (!realFuncTy.retTy.IsUnit()) {
+                let range = if (let Some(retType) <- body.retType) {
+                    MakeRange(retType.begin, retType.end)
+                } else {
+                    TypeCheckDeclIdentifierRange(fd)
+                }
+                let builder = diag.DiagnoseRefactor(BasicDiagKindRefactor.sema_invalid_subscript_assign_return, range)
+                builder.Emit()
                 valid = false
             }
         }
     }
-    if (!valid) {
+    if (!valid && invalidNamedParams.isEmpty() && params.size > 1) {
         TypeCheckDeclEmitDiag(diag, fd, BasicDiagKind.sema_operator_overload_invalid_num_parameter,
             args: [BasicDiagArgument(fd.identifier.Val())])
     }
     return valid
 }
 
-public func TypeCheckDeclSynchronizeTypeAndInitializer(tm: TypeManager, vd: VarDeclAbstract): Ty {
+public func TypeCheckDeclSynchronizeTypeAndInitializer(
+    tm: TypeManager,
+    vd: VarDeclAbstract,
+    diag!: Option<BasicDiagnosticEngine> = None
+): Ty {
     if (let Some(typeNode) <- vd.typeNode) {
         if (let Some(typeTy) <- typeNode.GetTy()) {
             vd.SetTy(typeTy)
@@ -247,6 +349,12 @@ public func TypeCheckDeclSynchronizeTypeAndInitializer(tm: TypeManager, vd: VarD
             if (let Some(funcTy) <- (initTy as FuncTy)) {
                 if (funcTy.isC && funcTy.hasVariableLenArg) {
                     vd.SetTy(TypeManager.GetInvalidTy())
+                    if (let Some(diagValue) <- diag) {
+                        if (vd.ShouldDiagnose() && !CanSkipDiag(initializer)) {
+                            TypeCheckDeclEmitDiag(diagValue, initializer,
+                                BasicDiagKind.sema_cfunc_var_cannot_have_var_param)
+                        }
+                    }
                     return TypeManager.GetInvalidTy()
                 }
             }
@@ -257,7 +365,11 @@ public func TypeCheckDeclSynchronizeTypeAndInitializer(tm: TypeManager, vd: VarD
     return TypeManager.GetInvalidTy()
 }
 
-public func TypeCheckDeclSetEnumElementTy(tm: TypeManager, constructor: Decl): Ty {
+public func TypeCheckDeclSetEnumElementTy(
+    tm: TypeManager,
+    constructor: Decl,
+    diag!: Option<BasicDiagnosticEngine> = None
+): Ty {
     if (!constructor.TestAttr(Attribute.ENUM_CONSTRUCTOR)) {
         return constructor.GetTy() ?? TypeManager.GetInvalidTy()
     }
@@ -275,13 +387,50 @@ public func TypeCheckDeclSetEnumElementTy(tm: TypeManager, constructor: Decl): T
         return TypeManager.GetInvalidTy()
     }
     if (let Some(funcDecl) <- (constructor as FuncDecl)) {
-        return TypeCheckDeclSetEnumElementTyForFunc(tm, funcDecl)
+        return TypeCheckDeclSetEnumElementTyForFunc(tm, funcDecl, diag: diag)
+    }
+    if (let Some(diagValue) <- diag) {
+        TypeCheckDeclEmitDiag(diagValue, constructor, BasicDiagKind.sema_invalid_constructor_in_enum)
     }
     constructor.SetTy(TypeManager.GetInvalidTy())
     return TypeManager.GetInvalidTy()
 }
 
-public func TypeCheckDeclSetEnumElementTyForFunc(tm: TypeManager, funcDecl: FuncDecl): Ty {
+private func TypeCheckDeclCheckEnumFuncDeclIsCStructParam(diag: BasicDiagnosticEngine, funcDecl: FuncDecl): Unit {
+    if (let None <- funcDecl.funcBody) {
+        return
+    }
+    let body = funcDecl.funcBody.getOrThrow()
+    if (body.paramLists.isEmpty()) {
+        return
+    }
+    for (param in body.paramLists[0].params) {
+        if (let Some(paramTy) <- param.GetTy()) {
+            if (Ty.IsCStructType(paramTy)) {
+                if (let Some(structTy) <- (paramTy as StructTy)) {
+                    if (let Some(decl) <- structTy.declPtr) {
+                        if (decl.identifier.Val() != "String") {
+                            if (let Some(outer) <- funcDecl.outerDecl) {
+                                TypeCheckDeclEmitDiag(diag, funcDecl,
+                                    BasicDiagKind.sema_enum_pattern_func_param_cty_error,
+                                    args: [
+                                        BasicDiagArgument(funcDecl.identifier.Val()),
+                                        BasicDiagArgument(outer.identifier.Val())
+                                    ])
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+public func TypeCheckDeclSetEnumElementTyForFunc(
+    tm: TypeManager,
+    funcDecl: FuncDecl,
+    diag!: Option<BasicDiagnosticEngine> = None
+): Ty {
     if (let None <- funcDecl.outerDecl) {
         funcDecl.SetTy(TypeManager.GetInvalidTy())
         return TypeManager.GetInvalidTy()
@@ -314,6 +463,21 @@ public func TypeCheckDeclSetEnumElementTyForFunc(tm: TypeManager, funcDecl: Func
     let ctorTy = tm.GetFunctionTy(paramTys.toArray(), retTy)
     body.SetTy(ctorTy)
     funcDecl.SetTy(ctorTy)
+    let retType = RefType()
+    retType.SetTy(retTy)
+    retType.begin = funcDecl.begin
+    retType.end = funcDecl.end
+    retType.EnableAttr(Attribute.COMPILER_ADD)
+    body.retType = Some(retType)
+    if (let Some(diagValue) <- diag) {
+        let outer = funcDecl.outerDecl.getOrThrow()
+        if (outer.TestAttr(Attribute.C)) {
+            TypeCheckDeclEmitDiag(diagValue, funcDecl, BasicDiagKind.sema_enum_pattern_func_cty_error,
+                args: [BasicDiagArgument(funcDecl.identifier.Val()), BasicDiagArgument(outer.identifier.Val())])
+        } else {
+            TypeCheckDeclCheckEnumFuncDeclIsCStructParam(diagValue, funcDecl)
+        }
+    }
     return ctorTy
 }
 

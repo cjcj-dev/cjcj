@@ -84,6 +84,83 @@ private func TypeCheckExtendIsExtendedASTKind(typeNode: Type): Bool {
         typeNode.astKind == ASTKind.PRIMITIVE_TYPE || typeNode.astKind == ASTKind.OPTION_TYPE
 }
 
+private func TypeCheckExtendDeclKey(decl: Decl): String {
+    return "${decl.fullPackageName}:${decl.identifier.Val()}:${decl.begin.line}:${decl.begin.column}"
+}
+
+private func TypeCheckExtendTyKey(ty: Ty): String {
+    if (let Some(decl) <- Ty.GetDeclPtrOfTy(Some(ty))) {
+        return TypeCheckExtendDeclKey(decl) + ty.PrintTypeArgs()
+    }
+    return ty.String()
+}
+
+private func TypeCheckExtendContainsKey(keys: ArrayList<String>, key: String): Bool {
+    for (value in keys) {
+        if (value == key) {
+            return true
+        }
+    }
+    return false
+}
+
+private func TypeCheckExtendRecordKey(keys: ArrayList<String>, key: String): Bool {
+    if (TypeCheckExtendContainsKey(keys, key)) {
+        return false
+    }
+    keys.add(key)
+    return true
+}
+
+private func TypeCheckExtendHasInheritedInterface(tm: TypeManager, extendedTy: Ty, interfaceTy: Ty): Bool {
+    if (let Some(extendedDecl) <- Ty.GetDeclPtrOfTy(Some(extendedTy))) {
+        if (let Some(inheritableDecl) <- (extendedDecl as InheritableDecl)) {
+            if (let Some(declTy) <- inheritableDecl.GetTy()) {
+                let superTys = tm.GetAllSuperTys(declTy, withExtended: false)
+                for (superTy in superTys.values) {
+                    if (superTy.IsInterface() && SameTy(superTy, interfaceTy)) {
+                        return true
+                    }
+                }
+            }
+        }
+    }
+    return false
+}
+
+private func TypeCheckExtendDiagDuplicateInterface(
+    diag: BasicDiagnosticEngine,
+    interfaceType: Type,
+    interfaceTy: Ty,
+    extendedTy: Ty
+): Unit {
+    if (interfaceType.TestAttr(Attribute.IMPORTED)) {
+        return
+    }
+    let builder = diag.DiagnoseRefactor(
+        BasicDiagKindRefactor.sema_extend_duplicate_interface,
+        TypeCheckExtendRange(interfaceType),
+        arguments: [interfaceTy.String(), extendedTy.String()])
+    builder.Emit()
+}
+
+private func TypeCheckExtendDiagNonExtendableCoreInterface(
+    diag: BasicDiagnosticEngine,
+    interfaceType: Type,
+    interfaceTy: Ty
+): Unit {
+    if (let Some(interfaceDecl) <- Ty.GetDeclPtrOfTy(Some(interfaceTy))) {
+        let name = interfaceDecl.identifier.Val()
+        if (interfaceDecl.fullPackageName == "std.core" && (name == "Any" || name == "CType")) {
+            let builder = diag.DiagnoseRefactor(
+                BasicDiagKindRefactor.sema_interface_is_not_extendable,
+                TypeCheckExtendRange(interfaceType),
+                arguments: [name])
+            builder.Emit()
+        }
+    }
+}
+
 public func TypeCheckExtendCheckExtendGenerics(
     diag: BasicDiagnosticEngine,
     extendDecl: ExtendDecl
@@ -284,6 +361,61 @@ public func TypeCheckExtendBuildMap(
         TypeCheckExtendPreCheckExtend(diag, tm, ctx, extendDecl)
     }
     TypeCheckExtendUpdateExtendMap(tm, extends)
+    TypeCheckExtendCheckDuplicateInterfaces(diag, tm, extends)
+}
+
+public func TypeCheckExtendCheckDuplicateInterfaces(
+    diag: BasicDiagnosticEngine,
+    tm: TypeManager,
+    extends: ArrayList<ExtendDecl>
+): Bool {
+    var valid = true
+    let seenExtendTyKeys = ArrayList<String>()
+    let seenInterfaceKeys = ArrayList<String>()
+    for (extendDecl in extends) {
+        if (let None <- extendDecl.extendedType) {
+            continue
+        }
+        let extendedType = extendDecl.extendedType.getOrThrow()
+        if (!Ty.IsTyCorrect(extendedType.GetTy())) {
+            continue
+        }
+        let extendedTy = extendedType.GetTy().getOrThrow()
+        let extendedKey = TypeCheckExtendTyKey(extendedTy)
+        var localSeen = ArrayList<String>()
+        for (interfaceType in extendDecl.inheritedTypes) {
+            if (!Ty.IsTyCorrect(interfaceType.GetTy())) {
+                continue
+            }
+            let interfaceTy = interfaceType.GetTy().getOrThrow()
+            if (!interfaceTy.IsInterface()) {
+                continue
+            }
+            TypeCheckExtendDiagNonExtendableCoreInterface(diag, interfaceType, interfaceTy)
+            let interfaceKey = TypeCheckExtendTyKey(interfaceTy)
+            let pairKey = extendedKey + "<:" + interfaceKey
+            var duplicate = TypeCheckExtendContainsKey(localSeen, interfaceKey)
+            if (!duplicate) {
+                duplicate = TypeCheckExtendHasInheritedInterface(tm, extendedTy, interfaceTy)
+            }
+            if (!duplicate && TypeCheckExtendContainsKey(seenInterfaceKeys, pairKey)) {
+                duplicate = true
+            }
+            if (duplicate) {
+                TypeCheckExtendDiagDuplicateInterface(diag, interfaceType, interfaceTy, extendedTy)
+                valid = false
+            }
+            let _ = TypeCheckExtendRecordKey(localSeen, interfaceKey)
+            if (TypeCheckExtendContainsKey(seenExtendTyKeys, extendedKey)) {
+                let _ = TypeCheckExtendRecordKey(seenInterfaceKeys, pairKey)
+            }
+        }
+        let _ = TypeCheckExtendRecordKey(seenExtendTyKeys, extendedKey)
+        for (interfaceKey in localSeen) {
+            let _ = TypeCheckExtendRecordKey(seenInterfaceKeys, extendedKey + "<:" + interfaceKey)
+        }
+    }
+    return valid
 }
 
 public func TypeCheckExtendSetExternalAttr(ctx: ASTContext, extendDecl: ExtendDecl): Unit {
@@ -404,6 +536,15 @@ public func TypeCheckExtendCheckDecl(
     }
     for (member in extendDecl.members) {
         if (Ty.IsTyCorrect(extendDecl.GetTy()) && extendDecl.GetTy().getOrThrow().IsImmutableType()) {
+            if (let Some(funcDecl) <- (member as FuncDecl)) {
+                if (!extendDecl.GetTy().getOrThrow().IsEnum() && TypeCheckExtendIsIndexAssignmentOperator(funcDecl)) {
+                    let builder = diag.DiagnoseRefactor(
+                        BasicDiagKindRefactor.sema_immutable_type_extend_assignment_index_operator,
+                        TypeCheckExtendRange(funcDecl))
+                    builder.Emit()
+                    valid = false
+                }
+            }
             if (let Some(propDecl) <- (member as PropDecl)) {
                 if (propDecl.isVar) {
                     let builder = diag.DiagnoseRefactor(
@@ -416,6 +557,24 @@ public func TypeCheckExtendCheckDecl(
         }
     }
     return valid
+}
+
+private func TypeCheckExtendIsIndexAssignmentOperator(funcDecl: FuncDecl): Bool {
+    if (funcDecl.op != TokenKind.LSQUARE) {
+        return false
+    }
+    if (let Some(body) <- funcDecl.funcBody) {
+        if (!body.paramLists.isEmpty()) {
+            let params = body.paramLists[0].params
+            return params.size > 1 && params[params.size - 1].isNamedParam
+        }
+    }
+    if (let Some(rawTy) <- funcDecl.GetTy()) {
+        if (let Some(funcTy) <- (rawTy as FuncTy)) {
+            return funcTy.paramTys.size > 1 && funcTy.retTy.IsUnit()
+        }
+    }
+    return false
 }
 
 public func SelfhostPortStatus_TypeCheckExtend(): Bool {

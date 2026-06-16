@@ -20,6 +20,22 @@ private func TypeCheckTypeEmitOld(diag: BasicDiagnosticEngine, node: Node, kind:
     builder.Emit()
 }
 
+private func TypeCheckTypeCheckCFuncParamType(diag: BasicDiagnosticEngine, typeNode: Type): Bool {
+    if (let None <- typeNode.GetTy()) {
+        return false
+    }
+    let ty = typeNode.GetTy().getOrThrow()
+    if (ty.IsUnit()) {
+        TypeCheckTypeEmitOld(diag, typeNode, BasicDiagKind.sema_cfunc_cannot_have_unit_args)
+        return false
+    }
+    if (!Ty.IsMetCType(ty)) {
+        TypeCheckTypeEmitOld(diag, typeNode, BasicDiagKind.sema_invalid_cfunc_arg_type)
+        return false
+    }
+    return true
+}
+
 private func TypeCheckTypeHasSameTy(values: ArrayList<Ty>, candidate: Ty): Bool {
     for (value in values) {
         if (SameTy(value, candidate)) {
@@ -248,9 +264,46 @@ public func TypeCheckTypeCheckRefType(
         return false
     }
     if (let Some(aliasDecl) <- (target as TypeAliasDecl)) {
-        return TypeCheckTypeCheckTypeParametersForAliasRef(diag, refType, aliasDecl)
+        if (!TypeCheckTypeCheckTypeParametersForAliasRef(diag, refType, aliasDecl)) {
+            return false
+        }
+    }
+    if (let Some(builtinDecl) <- (target as BuiltInDecl)) {
+        if (builtinDecl.IsType(BuiltInType.CFUNC)) {
+            TypeCheckTypeCheckCFuncRefType(diag, tm, refType)
+            return true
+        }
+    }
+    let typeArgs = refType.GetTypeArgs()
+    if (!typeArgs.isEmpty()) {
+        if (!CheckGenericDeclInstantiation(tm, target, typeArgs)) {
+            refType.SetTy(TypeManager.GetInvalidTy())
+            return false
+        }
     }
     return true
+}
+
+private func TypeCheckTypeCheckCFuncRefType(
+    diag: BasicDiagnosticEngine,
+    tm: TypeManager,
+    refType: RefType
+): Unit {
+    let _ = tm
+    let args = refType.GetTypeArgs()
+    if (args.size != 1) {
+        return
+    }
+    if (let Some(funcType) <- (args[0] as FuncType)) {
+        for (paramType in funcType.paramTypes) {
+            let _ = TypeCheckTypeCheckCFuncParamType(diag, paramType)
+        }
+        if (let Some(retType) <- funcType.retType) {
+            if (Ty.IsTyCorrect(retType.GetTy())) {
+                let _ = TypeCheckTypeCheckCFuncReturnType(diag, retType)
+            }
+        }
+    }
 }
 
 public func TypeCheckTypeCheckQualifiedType(
@@ -267,6 +320,12 @@ public func TypeCheckTypeCheckQualifiedType(
         qualifiedType.SetTarget(None)
         qualifiedType.SetTy(TypeManager.GetInvalidTy())
         return false
+    }
+    if (Ty.IsTyCorrect(qualifiedType.GetTy()) && !qualifiedType.GetTypeArgs().isEmpty()) {
+        if (!CheckGenericDeclInstantiation(tm, qualifiedType.target.getOrThrow(), qualifiedType.GetTypeArgs())) {
+            qualifiedType.SetTy(TypeManager.GetInvalidTy())
+            return false
+        }
     }
     return true
 }
@@ -309,14 +368,8 @@ public func TypeCheckTypeCheckFuncType(
     if (funcType.isC) {
         for (paramType in funcType.paramTypes) {
             if (let Some(paramTy) <- paramType.GetTy()) {
-                var isVArray = false
-                if (let Some(_) <- (paramTy as VArrayTy)) {
-                    isVArray = true
-                }
-                if (!Ty.IsMetCType(paramTy) || isVArray) {
-                    let builder = diag.DiagnoseRefactor(BasicDiagKindRefactor.sema_varray_in_cfunc,
-                        TypeCheckTypeRange(paramType))
-                    builder.Emit()
+                let _ = TypeCheckTypeCheckCFuncParamType(diag, paramType)
+                if (paramTy.IsUnit() || !Ty.IsMetCType(paramTy)) {
                     valid = false
                 }
             }

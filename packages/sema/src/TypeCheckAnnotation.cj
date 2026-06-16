@@ -219,6 +219,9 @@ public func TypeCheckAnnotationCheckAnnotations(
             }
         } else if (annotation.kind == AstAnnotationKind.CUSTOM) {
             if (let Some(callExpr) <- TypeCheckAnnotationCheckCustomAnnotation(diag, decl, annotation)) {
+                if (!annotation.isCompileTimeVisible) {
+                    callExpr.EnableAttr(Attribute.NO_REFLECT_INFO)
+                }
                 annotationExprs.add(callExpr)
                 checkedAnnotations.add(annotation)
             } else {

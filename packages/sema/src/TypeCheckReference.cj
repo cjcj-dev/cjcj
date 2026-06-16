@@ -49,8 +49,148 @@ private func TypeCheckReferenceAllFuncDecl(values: ArrayList<Decl>): Bool {
     return true
 }
 
+private func TypeCheckReferenceAllMemberDecl(values: ArrayList<Decl>): Bool {
+    if (values.isEmpty()) {
+        return false
+    }
+    for (value in values) {
+        if (!value.IsMemberDecl()) {
+            return false
+        }
+    }
+    return true
+}
+
 private func TypeCheckReferenceRemoveAt(values: ArrayList<Decl>, idx: Int64): Unit {
     values.remove(at: idx)
+}
+
+private func TypeCheckReferenceSameParamTypes(leftDecl: FuncDecl, rightDecl: FuncDecl): Bool {
+    let left = GetParamTys(leftDecl)
+    let right = GetParamTys(rightDecl)
+    return left.size == right.size && SameTypeArgs(left, right)
+}
+
+private func TypeCheckReferenceAddUniqueFunc(values: ArrayList<FuncDecl>, decl: FuncDecl): Unit {
+    for (value in values) {
+        if (SameDecl(value, decl)) {
+            return
+        }
+    }
+    values.add(decl)
+}
+
+private func TypeCheckReferenceFilterShadowedFuncs(targets: ArrayList<Decl>): Unit {
+    if (!TypeCheckReferenceAllFuncDecl(targets)) {
+        return
+    }
+    let out = ArrayList<FuncDecl>()
+    for (target in targets) {
+        if (let Some(funcDecl) <- (target as FuncDecl)) {
+            var shadowed = false
+            for (existing in out) {
+                if (funcDecl.identifier.Val() == existing.identifier.Val() &&
+                    funcDecl.TestAttr(Attribute.GENERIC) == existing.TestAttr(Attribute.GENERIC) &&
+                    TypeCheckReferenceSameParamTypes(funcDecl, existing) &&
+                    funcDecl.scopeLevel <= existing.scopeLevel) {
+                    shadowed = true
+                    break
+                }
+            }
+            if (!shadowed) {
+                TypeCheckReferenceAddUniqueFunc(out, funcDecl)
+            }
+        }
+    }
+    targets.clear()
+    for (funcDecl in out) {
+        targets.add(funcDecl)
+    }
+}
+
+private func TypeCheckReferenceFilterMacroFuncTargets(expr: Expr, targets: ArrayList<Decl>): Unit {
+    if (expr.TestAttr(Attribute.MACRO_INVOKE_BODY)) {
+        return
+    }
+    var idx: Int64 = 0
+    while (idx < targets.size) {
+        if (targets[idx].TestAttr(Attribute.MACRO_FUNC)) {
+            targets.remove(at: idx)
+        } else {
+            idx++
+        }
+    }
+}
+
+private func TypeCheckReferenceFilterCandidatesForRef(expr: Expr, targets: ArrayList<Decl>): Unit {
+    TypeCheckReferenceFilterMacroFuncTargets(expr, targets)
+    TypeCheckReferenceFilterShadowedFuncs(targets)
+}
+
+private func TypeCheckReferenceCheckForQuestFuncRetType(
+    diag: BasicDiagnosticEngine,
+    target: Decl,
+    expr: Expr,
+    hasTargetTy: Bool
+): Bool {
+    if (hasTargetTy) {
+        return true
+    }
+    if (target.astKind != ASTKind.FUNC_DECL) {
+        return true
+    }
+    if (let Some(targetTy) <- target.GetTy()) {
+        if (Ty.IsTyCorrect(targetTy) && targetTy.HasQuestTy()) {
+            let builder = diag.DiagnoseRefactor(
+                BasicDiagKindRefactor.sema_unable_to_infer_return_type,
+                TypeCheckReferenceRange(target))
+            builder.AddNote(TypeCheckReferenceRange(expr), "with recursive usage from")
+            builder.Emit()
+            return false
+        }
+    }
+    return true
+}
+
+private func TypeCheckReferenceCheckAmbiguousImportedNonFuncs(
+    diag: BasicDiagnosticEngine,
+    expr: Expr,
+    targets: ArrayList<Decl>,
+    name: String
+): Bool {
+    let source = ArrayList<Decl>()
+    let imported = ArrayList<Decl>()
+    for (target in targets) {
+        if (target.TestAttr(Attribute.IMPORTED)) {
+            imported.add(target)
+        } else {
+            source.add(target)
+        }
+    }
+    if (!source.isEmpty() && !TypeCheckReferenceAllFuncDecl(source)) {
+        return true
+    }
+    if (imported.size <= 1) {
+        return true
+    }
+    var hasImportedNonFunc = false
+    for (target in imported) {
+        if (target.astKind != ASTKind.FUNC_DECL) {
+            hasImportedNonFunc = true
+            break
+        }
+    }
+    if (!hasImportedNonFunc || TypeCheckReferenceAllMemberDecl(imported)) {
+        return true
+    }
+    let builder = diag.DiagnoseRefactor(BasicDiagKindRefactor.sema_ambiguous_use,
+        TypeCheckReferenceRange(expr),
+        arguments: [name])
+    for (target in imported) {
+        builder.AddNote(TypeCheckReferenceRange(target), "found candidate")
+    }
+    builder.Emit()
+    return false
 }
 
 private func TypeCheckReferenceNominalKindName(ty: Ty): String {
@@ -314,6 +454,7 @@ public func TypeCheckReferenceFilterAndCheckTargetsOfRef(
     targets: ArrayList<Decl>
 ): Bool {
     TypeCheckReferenceRemoveDuplicateTargets(targets)
+    TypeCheckReferenceFilterCandidatesForRef(re, targets)
     if (targets.isEmpty()) {
         let builder = diag.DiagnoseRefactor(BasicDiagKindRefactor.sema_undeclared_identifier,
             TypeCheckReferenceRange(re),
@@ -331,6 +472,9 @@ public func TypeCheckReferenceFilterAndCheckTargetsOfRef(
     if (!TypeCheckReferenceFilterTargetsInExtend(tm, re, re.GetTy(), targets)) {
         return false
     }
+    if (!TypeCheckReferenceCheckAmbiguousImportedNonFuncs(diag, re, targets, re.ref.identifier.Val())) {
+        return false
+    }
     if (!TypeCheckReferenceIsRefTypeArgSizeValid(diag, re, targets) ||
         !TypeCheckReferenceFilterInvalidEnumTargets(diag, re, targets)) {
         return false
@@ -343,7 +487,10 @@ public func TypeCheckReferenceFilterAndCheckTargetsOfRef(
     if (!hasTarget && re.isAlone) {
         return TypeCheckReferenceFilterTargetsForFuncReference(diag, re, targets)
     }
-    return true
+    if (targets.isEmpty()) {
+        return false
+    }
+    return TypeCheckReferenceCheckForQuestFuncRetType(diag, targets[0], re, hasTarget)
 }
 
 public func TypeCheckReferenceFilterAndCheckTargetsOfNameAccess(
@@ -376,11 +523,13 @@ public func TypeCheckReferenceFilterAndCheckTargetsOfNameAccess(
         return false
     }
     TypeCheckReferenceRemoveDuplicateTargets(targets)
+    TypeCheckReferenceFilterCandidatesForRef(ma, targets)
     var baseTy: Option<Ty> = None
     if (let Some(baseExpr) <- ma.baseExpr) {
         baseTy = baseExpr.GetTy()
     }
     if (!TypeCheckReferenceFilterTargetsInExtend(tm, ma, baseTy, targets)) {
+        TypeCheckReferenceDiagMemberAccessNotFound(diag, ma)
         return false
     }
     if (!TypeCheckReferenceIsRefTypeArgSizeValid(diag, ma, targets) ||
@@ -392,10 +541,30 @@ public func TypeCheckReferenceFilterAndCheckTargetsOfNameAccess(
         hasCallOrPattern = true
     }
     let hasTarget = ctx.HasTargetTy(ma) || ma.isInFlowExpr || hasCallOrPattern
-    if (!hasTarget && (ma.isAlone || !hasCallOrPattern) && !ma.isPattern) {
+    let referenceNeedTypeInfer = ((!hasTarget && (ma.isAlone || !hasCallOrPattern)) ||
+        (!targets.isEmpty() && targets[0].astKind != ASTKind.FUNC_DECL &&
+            !targets[0].TestAttr(Attribute.ENUM_CONSTRUCTOR))) && !ma.isPattern
+    if (referenceNeedTypeInfer) {
+        if (let Some(baseExpr) <- ma.baseExpr) {
+            if (let Some(targetOfBase) <- baseExpr.GetTarget()) {
+                if (targetOfBase.IsTypeDecl() && (let Some(_) <- targetOfBase.GetGeneric()) &&
+                    NeedFurtherInstantiation(baseExpr.GetTypeArgs())) {
+                    TypeCheckReferenceEmitGenericTypeWithoutTypeArg(diag, baseExpr)
+                    return false
+                }
+            }
+        }
         return TypeCheckReferenceFilterTargetsForFuncReference(diag, ma, targets)
     }
-    return true
+    if (targets.isEmpty()) {
+        return false
+    }
+    return TypeCheckReferenceCheckForQuestFuncRetType(diag, targets[0], ma, hasTarget)
+}
+
+private func TypeCheckReferenceEmitGenericTypeWithoutTypeArg(diag: BasicDiagnosticEngine, expr: Expr): Unit {
+    let builder = diag.Diagnose(expr.begin, expr.end, BasicDiagKind.sema_generic_type_without_type_argument)
+    builder.Emit()
 }
 
 public func TypeCheckReferenceAddFuncTargetsForMemberAccess(memberAccess: MemberAccess, targets: ArrayList<Decl>): Unit {
