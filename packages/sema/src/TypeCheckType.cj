@@ -2,6 +2,7 @@ package cangjie_compiler::sema
 
 import std.collection.*
 import cangjie_compiler::ast.*
+import cangjie_compiler::basic.DiagArgument as BasicDiagArgument
 import cangjie_compiler::basic.DiagKind as BasicDiagKind
 import cangjie_compiler::basic.DiagKindRefactor as BasicDiagKindRefactor
 import cangjie_compiler::basic.DiagnosticEngine as BasicDiagnosticEngine
@@ -34,6 +35,26 @@ private func TypeCheckTypeCheckCFuncParamType(diag: BasicDiagnosticEngine, typeN
         return false
     }
     return true
+}
+
+private func TypeCheckTypeCheckAccessLegality(
+    diag: BasicDiagnosticEngine,
+    typeNode: Type,
+    target: Decl,
+    clearTargetOnFail!: Bool = false
+): Bool {
+    if (IsLegalAccess(typeNode, target)) {
+        return true
+    }
+    let builder = diag.Diagnose(typeNode.begin, typeNode.end,
+        BasicDiagKind.sema_invalid_access_control,
+        args: [BasicDiagArgument(target.identifier.Val())])
+    builder.Emit()
+    if (clearTargetOnFail) {
+        typeNode.SetTarget(None)
+    }
+    typeNode.SetTy(TypeManager.GetInvalidTy())
+    return false
 }
 
 private func TypeCheckTypeHasSameTy(values: ArrayList<Ty>, candidate: Ty): Bool {
@@ -248,6 +269,41 @@ public func TypeCheckTypeCheckTypeParametersForAliasRef(
     return true
 }
 
+private func TypeCheckTypeHasJavaAttr(target: Decl): Bool {
+    return if (let Some(_) <- HasJavaAttr(target)) { true } else { false }
+}
+
+private func TypeCheckTypeIsLegalJavaTypeArgument(typeNode: Type): Bool {
+    if (let Some(refType) <- (typeNode as RefType)) {
+        if (let Some(target) <- refType.ref.target) {
+            let realTarget = GetRealTarget(target)
+            return TypeCheckTypeHasJavaAttr(realTarget) || realTarget.astKind == ASTKind.GENERIC_PARAM_DECL
+        }
+        return false
+    }
+    if (let Some(qualifiedType) <- (typeNode as QualifiedType)) {
+        if (let Some(target) <- qualifiedType.target) {
+            return TypeCheckTypeHasJavaAttr(GetRealTarget(target))
+        }
+    }
+    return false
+}
+
+private func TypeCheckTypeCheckRefExprCheckTyArgs(refType: RefType, target: Decl): Bool {
+    if (refType.typeArguments.isEmpty()) {
+        return true
+    }
+    if (!TypeCheckTypeHasJavaAttr(target)) {
+        return false
+    }
+    for (typeArg in refType.typeArguments) {
+        if (!TypeCheckTypeIsLegalJavaTypeArgument(typeArg)) {
+            return true
+        }
+    }
+    return false
+}
+
 public func TypeCheckTypeCheckRefType(
     diag: BasicDiagnosticEngine,
     tm: TypeManager,
@@ -258,6 +314,9 @@ public func TypeCheckTypeCheckRefType(
         return true
     }
     let target = refType.ref.target.getOrThrow()
+    if (!TypeCheckTypeCheckAccessLegality(diag, refType, target, clearTargetOnFail: true)) {
+        return false
+    }
     if (!TypeCheckTypeIsGenericTypeWithTypeArgs(refType)) {
         TypeCheckTypeEmitOld(diag, refType, BasicDiagKind.sema_generic_type_without_type_argument)
         refType.SetTy(TypeManager.GetInvalidTy())
@@ -273,6 +332,9 @@ public func TypeCheckTypeCheckRefType(
             TypeCheckTypeCheckCFuncRefType(diag, tm, refType)
             return true
         }
+    }
+    if (TypeCheckTypeCheckRefExprCheckTyArgs(refType, target)) {
+        return true
     }
     let typeArgs = refType.GetTypeArgs()
     if (!typeArgs.isEmpty()) {
@@ -315,6 +377,10 @@ public func TypeCheckTypeCheckQualifiedType(
     if (let None <- qualifiedType.target) {
         return true
     }
+    var valid = true
+    if (!TypeCheckTypeCheckAccessLegality(diag, qualifiedType, qualifiedType.target.getOrThrow())) {
+        valid = false
+    }
     if (!TypeCheckTypeIsGenericTypeWithTypeArgs(qualifiedType)) {
         TypeCheckTypeEmitOld(diag, qualifiedType, BasicDiagKind.sema_generic_type_without_type_argument)
         qualifiedType.SetTarget(None)
@@ -327,7 +393,7 @@ public func TypeCheckTypeCheckQualifiedType(
             return false
         }
     }
-    return true
+    return valid
 }
 
 public func TypeCheckTypeCheckTupleType(diag: BasicDiagnosticEngine, tupleType: TupleType): Bool {

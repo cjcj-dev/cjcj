@@ -45,6 +45,11 @@ Reference sources inspected from `/root/cj_build/cangjie_compiler/src/Sema`:
   `CFunc<...>` reference types validate their function parameter and return
   types, and C function type parameters now use the C++ legacy CFunc parameter
   diagnostics instead of the previous generic VArray diagnostic.
+- Continued type-checking parity in `TypeCheckType.cj`: `RefType` and
+  `QualifiedType` legality now runs the real sema access-control predicate and
+  emits `sema_invalid_access_control` like the C++ path, invalidating illegal
+  `RefType` targets; `RefType` also mirrors the C++ Java generic type-argument
+  short-circuit before normal generic-instantiation checks.
 - Deepened reference filtering toward `TypeCheckReference.cpp`: name references
   now filter macro-function targets, collapse shadowed all-function candidates,
   report ambiguous imported non-function sets, detect generic base type
@@ -82,7 +87,7 @@ are from pre-existing files outside this pass scope.
   pass, so these helpers are not yet wired into a full C++-faithful
   declaration/type/reference traversal pipeline.
 - Full C++ parity still requires complete overload resolution, lookup/import
-  recommendation, access-control context, alias substitution, promotion-based
+  recommendation, exact access-control context, alias substitution, promotion-based
   extend constraint filtering, exact generic specialization duplicate checks,
   orphan-rule diagnostics, pipeline wiring for type-alias and class-like
   declaration checks, reference-legality walker wiring, and all
