@@ -8,16 +8,21 @@ Scope updated in this pass:
 - `TypeCheckBuiltinExpr.cj`: replaced the stub with builtin call checking for array, value-array, pointer, C string, CFunc, and builtin type constructor calls over real AST builtin declarations and type aliases.
 - `TypeCheckCall.cj`: replaced the stub with call candidate collection, named/positional argument validation, lambda syntax filtering, variadic eligibility checks, argument-to-parameter compatibility, overload comparison, function pointer calls, call kind classification, selected target binding, and call type synthesis over the current self-hosted AST/TypeManager surfaces.
 
+Continuation updates:
+
+- `TypeCheckCall.cj`: added C++-shaped post-selection checks for abstract class and interface construction, `This` return binding for member calls, inout legality, VArray inout requirements for C/foreign calls, unsafe C function invocation checks, C unit-argument rejection, C-struct autobox prevention, and string-argument diagnostic forwarding for the relevant old diagnostic kinds.
+
 Build status:
 
 - `cjpm build` passes for the whole workspace after this pass.
 - Remaining warnings are pre-existing warnings outside this scope.
 - Remaining `TODO(selfhost:Sema)` markers in the five scoped files: 0.
+- Package-wide `grep -rn "TODO(selfhost:Sema)" packages/sema/src` still reports 4 markers, all outside this scoped call/match/pattern/builtin/usefulness area.
 
 Known fidelity gaps:
 
-- The C++ `TypeCheckCall.cpp` still has deeper behavior not fully available in this self-host surface: local type argument synthesis, constraint-version rollback, full import/access filtering, re-export ordering, complete generic call mapping, variadic desugaring/recovery, operator-call desugaring, ToTokens checks, inout legality, unsafe CFunc checks, and rich candidate diagnostics.
+- The C++ `TypeCheckCall.cpp` still has deeper behavior not fully available in this self-host surface: local type argument synthesis, constraint-version rollback, full import/access filtering, re-export ordering, complete generic call mapping, variadic desugaring/recovery, operator-call desugaring, ToTokens checks, static/non-static member call validation, and rich candidate diagnostics.
 - Pattern usefulness/checking is functional but still conservative around complete sealed hierarchy discovery, full intersection/union/Option refinements, and diagnostics that depend on richer C++ Sema context.
 - Builtin and match checking use real AST and type data but still lack the full TypeCheckerImpl cache/synthesis integration present in C++.
 
-Honest coverage estimate for this scoped pass: about 52% of C++ behavior, materially higher than the prior compiling stubs but not module-complete.
+Honest coverage estimate for this scoped pass: about 55% of C++ behavior, materially higher than the prior compiling stubs but not module-complete.
