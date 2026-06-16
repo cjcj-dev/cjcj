@@ -246,7 +246,7 @@ public class PositionQuery <: Query {
         if (let Some(node) <- symbol.node) {
             let begin = node.GetBegin()
             let end = node.GetEnd()
-            let contains = ComparePosition(begin, pos) <= 0 && ComparePosition(pos, end) < 0
+            let contains = ComparePosition(begin, pos) <= 0 && ComparePosition(pos, end) <= 0
             if (comparator == PositionCompare.EQ) {
                 return contains
             }

@@ -20,8 +20,9 @@ The AST package is a multi-file Cangjie package mirroring the C++ AST component 
 - Aligned `Cache.CollectTargets` with the C++ target-cache rule so member-base targets are preserved only when the node itself has a target.
 - Aligned `ScopeManagerApi.GetChildScopeName` with the C++ first-child-split replacement behavior.
 - Aligned `AttributePack.ToString` and `GetAllIdxOfAttr` with the C++ `ATTR2STR` names and bit-index traversal order, including the deprecated macro-expanded-node spelling and invalid mapping guard.
-- Deepened query/search behavior toward C++: canonical `scope_name`, `scope_level`, and `ast_kind` spellings now parse, pretty-print cache keys use `key=value`, unsupported scope-name suffix and AST-kind prefix matches return empty, and position equality/closed comparisons use the C++ half-open containment rule.
+- Deepened query/search behavior toward C++: canonical `scope_name`, `scope_level`, and `ast_kind` spellings now parse, pretty-print cache keys use `key=value`, unsupported scope-name suffix and AST-kind prefix matches return empty, and position equality/closed comparisons follow the C++ search implementation.
 - Added C++-style inverted-index trie members for names, scopes, AST kinds, and begin/end positions; `Searcher` now evaluates name/scope/kind/level leaves through indexes when available, preserves linear fallback for unindexed partial-port callers, removes deleted symbols from query results, uses C++ position sort tie-breaks, and aligns `InvalidateCacheBut` with substring retention.
+- Ported the C++ `PosSearchApi` common-root trie walk for encoded positions and routed `PositionQuery` through begin/end position tries when the AST context has populated them.
 
 ## Existing Ported Coverage
 
@@ -35,6 +36,6 @@ The AST package is a multi-file Cangjie package mirroring the C++ AST component 
 
 - Wire AST validation and diagnostics through the real `DiagnosticEngine` instead of the current local validation result surface.
 - Resolve `ScopeKind` and `ExprKind` layering with Parse once the self-hosted packages can share those APIs without introducing a package cycle. The C++ AST only forward-declares the related parse concepts, so the current AST-local minimal enums are kept until that dependency direction is settled.
-- Finish exact C++ `Searcher` parity for diagnostic-producing query parse failures, file-hash query normalization/filtering, and trie-only position range search once the collector/scope-manager pipeline fully populates indexes in the Cangjie port.
+- Finish exact C++ `Searcher` parity for diagnostic-producing query parse failures, file-hash query normalization/filtering, and broader downstream validation of indexed position searches once the collector/scope-manager pipeline fully populates indexes in the Cangjie port.
 - Continue auditing context, walker, clone, printer, recover-desugar, search/query, literal, type, utility, and validation behavior against the complete C++ implementation under downstream Parse/Sema workloads.
 - Replace any remaining compatibility API spellings only after downstream packages no longer depend on them.

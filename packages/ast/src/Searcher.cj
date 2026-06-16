@@ -173,70 +173,95 @@ public class PosSearchApi {
             fillZeroInt(pos.column, MAX_DIGITS_COLUMN)
     }
 
+    public static func FindCommonRootInPosTrie(posTrie: Trie, pos: Position): TrieNode {
+        return FindCommonRootInPosTrie(posTrie, PosToStr(pos))
+    }
+
+    public static func FindCommonRootInPosTrie(posTrie: Trie, pos: String): TrieNode {
+        var node = posTrie.root
+        for (byte in pos.toArray()) {
+            let key = String.fromUtf8([byte])
+            if (let Some(child) <- node.next.get(key)) {
+                node = child
+            } else {
+                return node
+            }
+        }
+        return node
+    }
+
     public static func GetIDsWithinPosXByRange(posTrie: Trie, startPos: Position, endPos: Position,
         isLeftClose!: Bool = true, isRightClose!: Bool = false): ArrayList<Symbol> {
-        let out = ArrayList<Symbol>()
-        collectPositionSymbols(posTrie.root, out, startPos, endPos, isLeftClose, isRightClose)
-        return out
+        if (endPos <= startPos) {
+            return ArrayList<Symbol>()
+        }
+        return intersection(GetIDsGreaterThanPos(posTrie, startPos, isClose: isLeftClose),
+            GetIDsLessThanPos(posTrie, endPos, isClose: isRightClose))
     }
 
     public static func GetIDsGreaterThanPos(posTrie: Trie, pos: Position, isClose!: Bool = true): ArrayList<Symbol> {
+        let posStr = PosToStr(pos)
+        var node = FindCommonRootInPosTrie(posTrie, posStr)
         let out = ArrayList<Symbol>()
-        collectGreaterSymbols(posTrie.root, out, pos, isClose)
+        var close = isClose
+        while (Int64(node.depth) > MAX_DIGITS_FILE) {
+            if (Int64(node.depth) == GetMaxDigitsPostion()) {
+                if (let Some(parent) <- node.parent) {
+                    node = parent
+                    continue
+                }
+                break
+            }
+            let target = digitAt(posStr, node.depth)
+            for ((key, child) in node.next) {
+                let selected = if (close) { !(key < target) } else { target < key }
+                if (selected) {
+                    addAllUnique(out, child.ids)
+                }
+            }
+            close = false
+            if (let Some(parent) <- node.parent) {
+                node = parent
+            } else {
+                break
+            }
+        }
         return out
     }
 
     public static func GetIDsLessThanPos(posTrie: Trie, pos: Position, isClose!: Bool = true): ArrayList<Symbol> {
+        let posStr = PosToStr(pos)
+        var node = FindCommonRootInPosTrie(posTrie, posStr)
         let out = ArrayList<Symbol>()
-        collectLessSymbols(posTrie.root, out, pos, isClose)
+        var close = isClose
+        while (Int64(node.depth) > MAX_DIGITS_FILE) {
+            if (Int64(node.depth) == GetMaxDigitsPostion()) {
+                if (let Some(parent) <- node.parent) {
+                    node = parent
+                    continue
+                }
+                break
+            }
+            let target = digitAt(posStr, node.depth)
+            var sawLowerBound = false
+            for ((key, child) in node.next) {
+                if (!(key < target)) {
+                    sawLowerBound = true
+                }
+                if (key < target || (close && key == target)) {
+                    addAllUnique(out, child.ids)
+                }
+            }
+            if (sawLowerBound) {
+                close = false
+            }
+            if (let Some(parent) <- node.parent) {
+                node = parent
+            } else {
+                break
+            }
+        }
         return out
-    }
-
-    private static func collectPositionSymbols(node: TrieNode, out: ArrayList<Symbol>, startPos: Position,
-        endPos: Position, isLeftClose: Bool, isRightClose: Bool): Unit {
-        for (symbol in node.ids) {
-            if (let Some(symbolNode) <- symbol.node) {
-                let begin = symbolNode.begin
-                let leftOk = if (isLeftClose) { startPos <= begin } else { startPos < begin }
-                let rightOk = if (isRightClose) { begin <= endPos } else { begin < endPos }
-                if (leftOk && rightOk) {
-                    addUniqueSymbol(out, symbol)
-                }
-            }
-        }
-        for ((_, child) in node.next) {
-            collectPositionSymbols(child, out, startPos, endPos, isLeftClose, isRightClose)
-        }
-    }
-
-    private static func collectGreaterSymbols(node: TrieNode, out: ArrayList<Symbol>, pos: Position,
-        isClose: Bool): Unit {
-        for (symbol in node.ids) {
-            if (let Some(symbolNode) <- symbol.node) {
-                let begin = symbolNode.begin
-                if ((isClose && pos <= begin) || (!isClose && pos < begin)) {
-                    addUniqueSymbol(out, symbol)
-                }
-            }
-        }
-        for ((_, child) in node.next) {
-            collectGreaterSymbols(child, out, pos, isClose)
-        }
-    }
-
-    private static func collectLessSymbols(node: TrieNode, out: ArrayList<Symbol>, pos: Position,
-        isClose: Bool): Unit {
-        for (symbol in node.ids) {
-            if (let Some(symbolNode) <- symbol.node) {
-                let begin = symbolNode.begin
-                if ((isClose && begin <= pos) || (!isClose && begin < pos)) {
-                    addUniqueSymbol(out, symbol)
-                }
-            }
-        }
-        for ((_, child) in node.next) {
-            collectLessSymbols(child, out, pos, isClose)
-        }
     }
 
     private static func addUniqueSymbol(values: ArrayList<Symbol>, symbol: Symbol): Unit {
@@ -246,6 +271,33 @@ public class PosSearchApi {
             }
         }
         values.add(symbol)
+    }
+
+    private static func addAllUnique(values: ArrayList<Symbol>, symbols: ArrayList<Symbol>): Unit {
+        for (symbol in symbols) {
+            addUniqueSymbol(values, symbol)
+        }
+    }
+
+    private static func intersection(left: ArrayList<Symbol>, right: ArrayList<Symbol>): ArrayList<Symbol> {
+        let out = ArrayList<Symbol>()
+        for (symbol in left) {
+            for (candidate in right) {
+                if (SameSymbol(symbol, candidate)) {
+                    addUniqueSymbol(out, symbol)
+                    break
+                }
+            }
+        }
+        return out
+    }
+
+    private static func digitAt(value: String, depth: UInt32): String {
+        let idx = Int64(depth)
+        if (idx < 0 || idx >= value.size) {
+            return ""
+        }
+        return value[idx..(idx + 1)]
     }
 
     private static func fillZeroUInt(value: UInt64, width: Int64): String {
@@ -387,6 +439,9 @@ public class Searcher {
         if (let Some(levelQuery) <- (query as ScopeLevelQuery)) {
             return GetIDsByScopeLevel(ctx, levelQuery.level)
         }
+        if (let Some(positionQuery) <- (query as PositionQuery)) {
+            return GetIDsByPos(ctx, positionQuery)
+        }
         return FilterByMatcher(ctx, query)
     }
 
@@ -482,6 +537,64 @@ public class Searcher {
             return SymbolsForKey(ctx.invertedIndex.astKindIndexes, query.valueText)
         }
         return SymbolsForKeys(ctx.invertedIndex.astKindIndexes, ctx.invertedIndex.astKindTrie.SuffixMatch(query.valueText))
+    }
+
+    private func GetIDsByPos(ctx: ASTContext, query: PositionQuery): ArrayList<Symbol> {
+        if (ctx.invertedIndex.posBeginTrie.root.next.isEmpty() || ctx.invertedIndex.posEndTrie.root.next.isEmpty()) {
+            return FilterByMatcher(ctx, query)
+        }
+        if (query.comparator == PositionCompare.EQ) {
+            return GetIDsByPosEQ(ctx, query.pos)
+        }
+        if (query.comparator == PositionCompare.LT) {
+            return GetIDsByPosLT(ctx, query.pos)
+        }
+        if (query.comparator == PositionCompare.LE) {
+            return GetIDsByPosLT(ctx, query.pos, contain: true)
+        }
+        if (query.comparator == PositionCompare.GT) {
+            return GetIDsByPosGT(ctx, query.pos)
+        }
+        return GetIDsByPosGT(ctx, query.pos, contain: true)
+    }
+
+    private func GetIDsByPosEQ(ctx: ASTContext, pos: Position, isLeftClose!: Bool = true,
+        isRightClose!: Bool = true): ArrayList<Symbol> {
+        let beginIDs = PosSearchApi.GetIDsLessThanPos(ctx.invertedIndex.posBeginTrie, pos, isClose: isLeftClose)
+        let endIDs = PosSearchApi.GetIDsGreaterThanPos(ctx.invertedIndex.posEndTrie, pos, isClose: isRightClose)
+        if (!endIDs.isEmpty()) {
+            return Intersection(beginIDs, endIDs)
+        }
+        if (beginIDs.isEmpty()) {
+            return ArrayList<Symbol>()
+        }
+        let out = ArrayList<Symbol>()
+        var remaining = Int64(beginIDs[0].scopeLevel)
+        for (symbol in beginIDs) {
+            if (remaining >= 0) {
+                AddUnique(out, symbol)
+                remaining--
+            } else {
+                break
+            }
+        }
+        return out
+    }
+
+    private func GetIDsByPosLT(ctx: ASTContext, pos: Position, contain!: Bool = false): ArrayList<Symbol> {
+        let out = PosSearchApi.GetIDsLessThanPos(ctx.invertedIndex.posEndTrie, pos, isClose: false)
+        if (contain) {
+            AddAllUnique(out, GetIDsByPosEQ(ctx, pos))
+        }
+        return out
+    }
+
+    private func GetIDsByPosGT(ctx: ASTContext, pos: Position, contain!: Bool = false): ArrayList<Symbol> {
+        let out = PosSearchApi.GetIDsGreaterThanPos(ctx.invertedIndex.posBeginTrie, pos, isClose: false)
+        if (contain) {
+            AddAllUnique(out, GetIDsByPosEQ(ctx, pos))
+        }
+        return out
     }
 
     private func SymbolsForKeys(map: HashMap<String, ArrayList<Symbol>>, keys: ArrayList<String>): ArrayList<Symbol> {
