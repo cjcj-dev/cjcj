@@ -3,6 +3,7 @@ package cangjie_compiler::sema.GenericInstantiation
 import std.collection.*
 import cangjie_compiler::ast.*
 import cangjie_compiler::sema.*
+import cangjie_compiler::sema.Desugar.AfterTypeCheck.IsNeedRuntimeCheck
 
 private class GenericInstantiationRecord {
     public var genericDecl: Decl
@@ -718,6 +719,8 @@ public class GenericInstantiationManagerImpl {
             RearrangeArrayLitReference(arrayLit, pkg)
         } else if (let Some(funcBody) <- (node as FuncBody)) {
             RearrangeFuncBodyReference(funcBody, pkg)
+        } else if (let Some(pattern) <- (node as Pattern)) {
+            UpdateTypePatternMatchResult(pattern)
         }
         return VisitAction.WALK_CHILDREN
     }
@@ -889,6 +892,54 @@ public class GenericInstantiationManagerImpl {
                     None, pkg)
                 if (let Some(enumDecl) <- (target as EnumDecl)) {
                     funcBody.parentEnum = enumDecl
+                }
+            }
+        }
+    }
+
+    private func UpdateTypePatternMatchResult(pattern: Pattern): Unit {
+        if (!Ty.IsTyCorrect(pattern.GetTy())) {
+            return
+        }
+        if (let Some(tuplePattern) <- (pattern as TuplePattern)) {
+            if (let Some(patternTy) <- tuplePattern.GetTy()) {
+                if (let Some(tupleTy) <- (patternTy as TupleTy)) {
+                    UpdateChildTypePatterns(tupleTy.typeArgs, tuplePattern.patterns)
+                }
+            }
+        } else if (let Some(enumPattern) <- (pattern as EnumPattern)) {
+            if (let Some(constructor) <- enumPattern.constructor) {
+                if (let Some(constructorTy) <- constructor.GetTy()) {
+                    if (let Some(funcTy) <- (constructorTy as FuncTy)) {
+                        UpdateChildTypePatterns(funcTy.paramTys, enumPattern.patterns)
+                    }
+                }
+            }
+        } else if (let Some(ctxExpr) <- pattern.ctxExpr) {
+            if (let Some(ctxTy) <- ctxExpr.GetTy()) {
+                UpdateTypePattern(ctxTy, pattern)
+            }
+        }
+    }
+
+    private func UpdateChildTypePatterns(targetTys: ArrayList<Ty>, patterns: ArrayList<Pattern>): Unit {
+        let limit = if (targetTys.size < patterns.size) { targetTys.size } else { patterns.size }
+        for (idx in 0..limit) {
+            UpdateTypePattern(targetTys[idx], patterns[idx])
+        }
+    }
+
+    private func UpdateTypePattern(targetTy: Ty, pattern: Pattern): Unit {
+        if (let Some(typePattern) <- (pattern as TypePattern)) {
+            if (typePattern.matchBeforeRuntime) {
+                return
+            }
+            if (let Some(typeNode) <- typePattern.typeNode) {
+                if (let Some(patternTy) <- typeNode.GetTy()) {
+                    typePattern.matchBeforeRuntime =
+                        ci.typeManager.IsSubtype(targetTy, patternTy, implicitBoxed: true, allowOptionBox: false)
+                    typePattern.needRuntimeTypeCheck =
+                        !typePattern.matchBeforeRuntime && IsNeedRuntimeCheck(ci.typeManager, targetTy, patternTy)
                 }
             }
         }
