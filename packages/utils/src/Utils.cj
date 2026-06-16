@@ -2,7 +2,6 @@ package cangjie_compiler::utils
 
 import std.collection.*
 import std.convert.*
-import std.time.DateTime
 
 private let OVERFLOW_NAMES: Array<(String, OverflowStrategy)> = [
     ("no", OverflowStrategy.NA),
@@ -25,6 +24,7 @@ foreign {
 @When[os == "Windows"]
 foreign {
     func rand_s(randomValue: CPointer<UInt32>): Int32
+    func GetModuleFileNameA(module: CPointer<Unit>, filename: CPointer<UInt8>, size: UInt32): UInt32
 }
 
 public func FillZero(num: Int64, len: Int64): String {
@@ -399,55 +399,52 @@ public func TryParseInt(str: String): Option<Int64> {
 }
 
 @When[os == "Windows"]
-private func ReadRandomUInt32(): Option<UInt32> {
+private func ReadRandomUInt32(): UInt32 {
+    var randomValue: UInt32 = 0u32
     try (randomPtr = LibC.malloc<UInt32>().asResource()) {
         if (randomPtr.value.isNull()) {
-            return None
+            return randomValue
         }
         unsafe {
-            if (rand_s(randomPtr.value) == 0) {
-                return randomPtr.value.read()
-            }
+            randomPtr.value.write(0u32)
+            let _ = rand_s(randomPtr.value)
+            randomValue = randomPtr.value.read()
         }
+    } catch (e: Exception) {
+        ()
     }
-    return None
+    return randomValue
 }
 
 @When[os != "Windows"]
-private func ReadRandomUInt32(): Option<UInt32> {
+private func ReadRandomUInt32(): UInt32 {
+    var randomValue: UInt32 = 0u32
     try (path = unsafe { LibC.mallocCString("/dev/urandom") }.asResource()) {
         let fd = unsafe { open(path.value, O_RDONLY) }
-        if (fd < 0) {
-            return None
-        }
-        try (randomPtr = LibC.malloc<UInt32>().asResource()) {
-            if (randomPtr.value.isNull()) {
-                unsafe {
-                    let _ = close(fd)
+        if (fd > 0) {
+            try (randomPtr = LibC.malloc<UInt32>().asResource()) {
+                if (!randomPtr.value.isNull()) {
+                    unsafe {
+                        randomPtr.value.write(0u32)
+                        let _ = read(fd, CPointer<UInt8>(randomPtr.value), UIntNative(4))
+                        randomValue = randomPtr.value.read()
+                    }
                 }
-                return None
             }
-            let bytesRead = unsafe { read(fd, CPointer<UInt8>(randomPtr.value), UIntNative(4)) }
+        }
+        if (fd >= 0) {
             unsafe {
                 let _ = close(fd)
-            }
-            if (bytesRead == 4) {
-                unsafe {
-                    return randomPtr.value.read()
-                }
             }
         }
     } catch (e: Exception) {
         ()
     }
-    return None
+    return randomValue
 }
 
 public func GenerateRandomHexString(): String {
-    if (let Some(value) <- ReadRandomUInt32()) {
-        return UInt64(value).toString(radix: 16)
-    }
-    return UInt64(DateTime.nowUTC().hashCode()).toString(radix: 16)
+    return UInt64(ReadRandomUInt32()).toString(radix: 16)
 }
 
 public func StringifyArgumentVector(args: Array<String>): Array<String> {
@@ -495,6 +492,32 @@ public func GetRootPackageName(fullPackageName: String): String {
         return fullPackageName[0..dotPos + 1]
     }
     return fullPackageName
+}
+
+@When[os == "Windows"]
+public func GetApplicationPath(): Option<String> {
+    try (buffer = LibC.malloc<UInt8>(count: FILE_PATH_MAX_LENGTH).asResource()) {
+        if (buffer.value.isNull()) {
+            return None
+        }
+        let length = unsafe { GetModuleFileNameA(CPointer<Unit>(), buffer.value, UInt32(FILE_PATH_MAX_LENGTH)) }
+        if (length == 0u32) {
+            return None
+        }
+        let bytes = ArrayList<UInt8>()
+        var idx: Int64 = 0
+        while (idx < Int64(length)) {
+            let byte = unsafe { (buffer.value + idx).read() }
+            if (byte == 0u8) {
+                break
+            }
+            bytes.add(byte)
+            idx++
+        }
+        return String.fromUtf8(bytes.toArray())
+    } catch (e: Exception) {
+        return None
+    }
 }
 
 public func GetApplicationPath(argv0: String, environmentVars: HashMap<String, String>): Option<String> {
