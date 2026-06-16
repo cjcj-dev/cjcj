@@ -18,6 +18,7 @@ private let HIDE_ARG_NAME: String = "isChecked"
 private let APILEVEL_MAJOR_MIN: UInt64 = 1u64
 private let APILEVEL_MAJOR_MAX: UInt64 = 99u64
 private let SYSCAP_DIAG_DISPLAY_LIMIT: Int64 = 3
+private let IFAVAILABLE_LOWER_LIMITLEVEL: UInt32 = 19u32
 
 private func ToBasicPosition(pos: Position): BasicPosition {
     return BasicPosition(pos.fileID, pos.line, pos.column)
@@ -404,6 +405,15 @@ public class PluginCustomAnnoChecker {
         return None
     }
 
+    private func IsKnownIfAvailableArg(argName: String): Bool {
+        return argName == SINCE_IDENTIFIER || argName == LEVEL_IDENTIFIER ||
+            argName == SYSCAP_IDENTIFIER || argName == HIDE_ARG_NAME
+    }
+
+    private func IsPluginCustomAnnoMacroName(macroName: String): Bool {
+        return macroName == APILEVEL_ANNO_NAME || macroName == HIDE_ANNO_NAME
+    }
+
     public func SetAvailabilityOptions(level: APILevelVersion, unionSyscaps: HashSet<String>,
         intersectionSyscaps: HashSet<String>): Unit {
         globalLevel = level
@@ -560,6 +570,221 @@ public class PluginCustomAnnoChecker {
         return checkResult
     }
 
+    public func TryBuildIfAvailableScopeFromIfExpr(ifExpr: IfExpr,
+        ifscopeAnnoInfo: PluginCustomAnnoInfo): Bool {
+        if (let None <- ifExpr.condExpr) {
+            return false
+        }
+        let condExpr = ifExpr.condExpr.getOrThrow()
+        if (let Some(callExpr) <- (condExpr as CallExpr)) {
+            if (let Some(resolvedFunction) <- callExpr.resolvedFunction) {
+                if (resolvedFunction.identifier.Val() == "canIUse") {
+                    ParseSysCap(callExpr, ifscopeAnnoInfo, diag)
+                    return !ifscopeAnnoInfo.syscap.isEmpty()
+                }
+            }
+        }
+        if (let Some(binaryExpr) <- (condExpr as BinaryExpr)) {
+            if (let Some(leftExpr) <- binaryExpr.leftExpr) {
+                if (let Some(callExpr) <- (leftExpr as CallExpr)) {
+                    if (let Some(resolvedFunction) <- callExpr.resolvedFunction) {
+                        if (resolvedFunction.identifier.Val() == "sdkApiVersion") {
+                            ParseSince(binaryExpr, ifscopeAnnoInfo, diag)
+                            return !ifscopeAnnoInfo.since.IsZero()
+                        }
+                    }
+                }
+            }
+        }
+        return false
+    }
+
+    public func ParseIfAvailableLevelArg(arg: FuncArg, ifscopeAnnoInfo: PluginCustomAnnoInfo): Bool {
+        if (let None <- arg.expr) {
+            return false
+        }
+        let argExpr = arg.expr.getOrThrow()
+        if (let None <- (argExpr as LitConstExpr)) {
+            return false
+        }
+        if (let Some(parsedLevel) <- ParseIfAvailableArgVersion(argExpr)) {
+            ifscopeAnnoInfo.since = parsedLevel
+            return true
+        }
+        let literal = (argExpr as LitConstExpr).getOrThrow()
+        Emit(diag, BasicDiagKindRefactor.sema_apilevel_invalid_version_format, arg, args: [literal.stringValue])
+        return false
+    }
+
+    public func ValidateIfAvailableArgs(arg: FuncArg, lambda1: LambdaExpr, lambda2: LambdaExpr): Bool {
+        if (let None <- lambda1.funcBody) {
+            return false
+        }
+        if (let None <- lambda2.funcBody) {
+            return false
+        }
+        let lambda1Body = lambda1.funcBody.getOrThrow()
+        let lambda2Body = lambda2.funcBody.getOrThrow()
+        if (let None <- lambda1Body.body) {
+            return false
+        }
+        if (let None <- lambda2Body.body) {
+            return false
+        }
+        let argName = arg.name.Val()
+        if (let None <- arg.expr) {
+            if (argName != SYSCAP_IDENTIFIER) {
+                return false
+            }
+        }
+        return IsKnownIfAvailableArg(argName)
+    }
+
+    public func BuildIfAvailableScope(arg: FuncArg, ifExprOpt: Option<IfExpr>,
+        ifscopeAnnoInfo: PluginCustomAnnoInfo): Bool {
+        let argName = arg.name.Val()
+        if (argName == LEVEL_IDENTIFIER) {
+            return ParseIfAvailableLevelArg(arg, ifscopeAnnoInfo)
+        }
+        if (argName == SYSCAP_IDENTIFIER) {
+            if (let Some(ifExpr) <- ifExprOpt) {
+                return TryBuildIfAvailableScopeFromIfExpr(ifExpr, ifscopeAnnoInfo)
+            }
+            return false
+        }
+        if (let None <- arg.expr) {
+            return false
+        }
+        let argExpr = arg.expr.getOrThrow()
+        if (argName == SINCE_IDENTIFIER) {
+            ParseSince(argExpr, ifscopeAnnoInfo, diag)
+            return true
+        }
+        if (argName == HIDE_ARG_NAME) {
+            ParseCheckingHide(argExpr, ifscopeAnnoInfo, diag)
+            return true
+        }
+        return false
+    }
+
+    private func WalkBranchBody(body: Block, checker: (Node) -> VisitAction): Unit {
+        for (bodyNode in body.body) {
+            let branchWalker = Walker(bodyNode, visitPre: checker)
+            let _ = branchWalker.Walk()
+        }
+    }
+
+    public func WalkIfAvailableBranches(ifExprOpt: Option<IfExpr>, lambda1: LambdaExpr, lambda2: LambdaExpr,
+        ifscopeAnnoInfo: PluginCustomAnnoInfo, scopeAnnoInfo: PluginCustomAnnoInfo): Unit {
+        let checkerIf = { branchNode: Node =>
+            if (let Some(nestedIfAvailable) <- (branchNode as IfAvailableExpr)) {
+                CheckIfAvailableExpr(nestedIfAvailable, ifscopeAnnoInfo)
+                return VisitAction.SKIP_CHILDREN
+            }
+            let branchOk = CheckNode(branchNode, ifscopeAnnoInfo)
+            if (branchOk && !CheckNode(branchNode, scopeAnnoInfo, reportDiag: false)) {
+                MarkTargetAsExternalWeak(branchNode)
+            }
+            if (!branchOk) {
+                return VisitAction.SKIP_CHILDREN
+            }
+            return VisitAction.WALK_CHILDREN
+        }
+        let checkerElse = { branchNode: Node =>
+            if (let Some(nestedIfAvailable) <- (branchNode as IfAvailableExpr)) {
+                CheckIfAvailableExpr(nestedIfAvailable, scopeAnnoInfo)
+                return VisitAction.SKIP_CHILDREN
+            }
+            if (!CheckNode(branchNode, scopeAnnoInfo)) {
+                return VisitAction.SKIP_CHILDREN
+            }
+            return VisitAction.WALK_CHILDREN
+        }
+        var thenBodyOpt: Option<Block> = None
+        var elseBodyOpt: Option<Block> = None
+        if (let Some(ifExpr) <- ifExprOpt) {
+            thenBodyOpt = ifExpr.thenBody
+            if (let Some(elseExpr) <- ifExpr.elseBody) {
+                elseBodyOpt = elseExpr as Block
+            }
+        }
+        if (let None <- thenBodyOpt) {
+            if (let Some(lambdaBody1) <- lambda1.funcBody) {
+                thenBodyOpt = lambdaBody1.body
+            }
+        }
+        if (let None <- elseBodyOpt) {
+            if (let Some(lambdaBody2) <- lambda2.funcBody) {
+                elseBodyOpt = lambdaBody2.body
+            }
+        }
+        if (let Some(thenBody) <- thenBodyOpt) {
+            WalkBranchBody(thenBody, checkerIf)
+        }
+        if (let Some(elseBody) <- elseBodyOpt) {
+            WalkBranchBody(elseBody, checkerElse)
+        }
+    }
+
+    public func CheckIfAvailableExpr(ifAvailable: IfAvailableExpr, scopeAnnoInfo: PluginCustomAnnoInfo): Unit {
+        if (let None <- ifAvailable.GetArg()) {
+            return
+        }
+        if (let None <- ifAvailable.GetLambda1()) {
+            return
+        }
+        if (let None <- ifAvailable.GetLambda2()) {
+            return
+        }
+        let arg = ifAvailable.GetArg().getOrThrow()
+        let lambda1 = ifAvailable.GetLambda1().getOrThrow()
+        let lambda2 = ifAvailable.GetLambda2().getOrThrow()
+        if (!ValidateIfAvailableArgs(arg, lambda1, lambda2)) {
+            return
+        }
+        let ifExprOpt = ifAvailable.desugarExpr as IfExpr
+        let ifscopeAnnoInfo = PluginCustomAnnoInfo(since: APILevelVersion(), syscap: "", hasHideAnno: None)
+        if (!BuildIfAvailableScope(arg, ifExprOpt, ifscopeAnnoInfo)) {
+            return
+        }
+        if (!ifscopeAnnoInfo.since.IsZero() &&
+            ifscopeAnnoInfo.since < APILevelVersion(IFAVAILABLE_LOWER_LIMITLEVEL)) {
+            Emit(diag, BasicDiagKindRefactor.sema_ifavailable_level_limit, arg)
+            return
+        }
+        WalkIfAvailableBranches(ifExprOpt, lambda1, lambda2, ifscopeAnnoInfo, scopeAnnoInfo)
+    }
+
+    public func CheckAnnoBeforeMacro(pkg: Package): Unit {
+        for (file in pkg.files) {
+            for (macroNode in file.originalMacroCallNodes) {
+                let macroWalker = Walker(macroNode, visitPre: { node: Node =>
+                    if (node.astKind != ASTKind.MACRO_EXPAND_DECL) {
+                        return VisitAction.WALK_CHILDREN
+                    }
+                    let macroExpand = (node as MacroExpandDecl).getOrThrow()
+                    if (!IsPluginCustomAnnoMacroName(macroExpand.identifier.Val())) {
+                        return VisitAction.WALK_CHILDREN
+                    }
+                    if (let Some(subDecl) <- macroExpand.invocation.decl) {
+                        if (let Some(subMacroExpand) <- (subDecl as MacroExpandDecl)) {
+                            if (!IsPluginCustomAnnoMacroName(subMacroExpand.identifier.Val())) {
+                                let builder = diag.DiagnoseRefactor(
+                                    BasicDiagKindRefactor.sema_hide_must_at_end,
+                                    macroExpand.begin,
+                                    arguments: [macroExpand.identifier.Val()])
+                                builder.Emit()
+                                return VisitAction.SKIP_CHILDREN
+                            }
+                        }
+                    }
+                    return VisitAction.WALK_CHILDREN
+                })
+                let _ = macroWalker.Walk()
+            }
+        }
+    }
+
     public func CheckHideOfExtendDecl(decl: Decl, annoInfo: PluginCustomAnnoInfo): Unit {
         if (decl.astKind != ASTKind.EXTEND_DECL) {
             return
@@ -651,6 +876,8 @@ public class PluginCustomAnnoChecker {
 
     public func Check(pkg: Package): Unit {
         curModuleName = GetModuleName(pkg.fullPackageName)
+        CheckAnnoBeforeMacro(pkg)
+        let scopeDecl = ArrayList<Decl>()
         let walker = Walker(pkg, visitPre: { node: Node =>
             if (let Some(decl) <- (node as Decl)) {
                 if (decl.astKind == ASTKind.PRIMARY_CTOR_DECL) {
@@ -658,8 +885,32 @@ public class PluginCustomAnnoChecker {
                 }
                 let info = PluginCustomAnnoInfo(since: APILevelVersion(), syscap: "", hasHideAnno: None)
                 Parse(decl, info)
+                scopeDecl.add(decl)
+                return VisitAction.WALK_CHILDREN
+            }
+            let scopeAnnoInfo = PluginCustomAnnoInfo(since: APILevelVersion(), syscap: "", hasHideAnno: None)
+            for (offset in 0..scopeDecl.size) {
+                let scopeIdx = scopeDecl.size - 1 - offset
+                Parse(scopeDecl[scopeIdx], scopeAnnoInfo)
+            }
+            if (let Some(ifAvailable) <- (node as IfAvailableExpr)) {
+                if (scopeAnnoInfo.since.IsZero()) {
+                    scopeAnnoInfo.since = globalLevel
+                }
+                CheckIfAvailableExpr(ifAvailable, scopeAnnoInfo)
+                return VisitAction.SKIP_CHILDREN
+            }
+            if (!CheckNode(node, scopeAnnoInfo)) {
+                return VisitAction.SKIP_CHILDREN
             }
             return VisitAction.WALK_CHILDREN
+        }, visitPost: { node: Node =>
+            if (let Some(decl) <- (node as Decl)) {
+                if (!scopeDecl.isEmpty() && SameDecl(scopeDecl[scopeDecl.size - 1], decl)) {
+                    scopeDecl.remove(at: scopeDecl.size - 1)
+                }
+            }
+            return VisitAction.KEEP_DECISION
         })
         let _ = walker.Walk()
     }
