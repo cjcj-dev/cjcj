@@ -37,7 +37,8 @@ Implemented:
   macro's version source, while the explicit-version overload remains useful for tests.
 - Added typed CHIR transform factory aliases and function/package-specific plugin-info helpers. These
   preserve the C++ macro's type-specific construction path more closely for Cangjie plugins that derive
-  from `CHIRFunctionMetaTransform` or `CHIRPackageMetaTransform`.
+  from `CHIRFunctionMetaTransform` or `CHIRPackageMetaTransform`; the helpers are generic over the
+  concrete transform subclass so plugin factories can return the actual plugin type like the C++ macro.
 
 Known fidelity caveats:
 
