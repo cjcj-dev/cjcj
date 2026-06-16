@@ -215,9 +215,13 @@ public func ManglePrimitive(kind: TypeKind): String {
 }
 
 private func IdentifierForMangledCHIRType(def: CustomTypeDef): String {
+    return StripCangjiePrefix(CustomTypeDefIdentifierForTypeMangle(def))
+}
+
+private func CustomTypeDefIdentifierForTypeMangle(def: CustomTypeDef): String {
     let identifier = def.GetIdentifier()
-    if (StartsWith(identifier, MANGLE_CANGJIE_PREFIX)) {
-        return StripCangjiePrefix(identifier)
+    if (StartsWith(identifier, MANGLE_AT_PREFIX)) {
+        return identifier[MANGLE_CHAR_LEN..]
     }
     return identifier
 }
@@ -590,5 +594,5 @@ public func GetCustomTypeDefIdentifier(def: CHIRType): String {
 }
 
 public func GetCustomTypeDefIdentifier(def: CustomTypeDef): String {
-    return def.GetIdentifier()
+    return CustomTypeDefIdentifierForTypeMangle(def)
 }

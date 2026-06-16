@@ -63,6 +63,8 @@ Implemented:
   undeclared generic type references instead of silently mapping them to `G0`.
 - Aligned real-CHIR virtual/wrapper helper names with the C++ `CustomTypeDef::GetIdentifierWithoutPrefix`
   behavior and made CHIR prefix replacement reject non-`_C` inputs instead of silently preserving them.
+- Aligned real-CHIR custom type identifier fallback in type mangling and type qualified-name rendering so
+  C++-shaped `@`-prefixed `CustomTypeDef` identifiers are normalized before use.
 
 Known fidelity caveats:
 
