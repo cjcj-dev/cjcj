@@ -132,7 +132,7 @@ public class NameQuery <: Query {
     }
 
     public override func PrettyPrint(): String {
-        return "name:${printPattern(value, matchKind)}"
+        return "name=${printPattern(value, matchKind)}"
     }
 }
 
@@ -147,11 +147,14 @@ public class ScopeQuery <: Query {
     }
 
     public override func Match(symbol: Symbol): Bool {
+        if (matchKind == MatchKind.SUFFIX) {
+            return false
+        }
         return stringMatches(symbol.scopeName, value, matchKind)
     }
 
     public override func PrettyPrint(): String {
-        return "scopeName:${printPattern(value, matchKind)}"
+        return "scope_name=${printPattern(value, matchKind)}"
     }
 }
 
@@ -173,6 +176,9 @@ public class ASTKindQuery <: Query {
     }
 
     public override func Match(symbol: Symbol): Bool {
+        if (matchKind == MatchKind.PREFIX) {
+            return false
+        }
         if (let Some(node) <- symbol.node) {
             return stringMatches(ASTKindName(node.astKind), valueText, matchKind)
         }
@@ -180,7 +186,7 @@ public class ASTKindQuery <: Query {
     }
 
     public override func PrettyPrint(): String {
-        return "astKind:${printPattern(valueText, matchKind)}"
+        return "ast_kind=${printPattern(valueText, matchKind)}"
     }
 }
 
@@ -200,7 +206,7 @@ public class ScopeLevelQuery <: Query {
     }
 
     public override func PrettyPrint(): String {
-        return "scopeLevel:${level}"
+        return "scope_level=${level}"
     }
 }
 
@@ -240,19 +246,20 @@ public class PositionQuery <: Query {
         if (let Some(node) <- symbol.node) {
             let begin = node.GetBegin()
             let end = node.GetEnd()
+            let contains = begin <= pos && pos < end
             if (comparator == PositionCompare.EQ) {
-                return begin <= pos && pos <= end
+                return contains
             }
             if (comparator == PositionCompare.LT) {
                 return end < pos
             }
             if (comparator == PositionCompare.LE) {
-                return end <= pos
+                return end < pos || contains
             }
             if (comparator == PositionCompare.GT) {
                 return begin > pos
             }
-            return begin >= pos
+            return begin > pos || contains
         }
         return false
     }
@@ -489,13 +496,13 @@ private class QueryParser {
         if (keyToken.text == "name") {
             return NameQuery(value, matchKind: matchKind)
         }
-        if (keyToken.text == "scopeName" || keyToken.text == "scope") {
+        if (keyToken.text == "scope_name" || keyToken.text == "scopeName" || keyToken.text == "scope") {
             return ScopeQuery(value, matchKind: matchKind)
         }
-        if (keyToken.text == "astKind" || keyToken.text == "kind") {
+        if (keyToken.text == "ast_kind" || keyToken.text == "astKind" || keyToken.text == "kind") {
             return ASTKindQuery(value, matchKind: matchKind)
         }
-        if (keyToken.text == "scopeLevel" || keyToken.text == "level") {
+        if (keyToken.text == "scope_level" || keyToken.text == "scopeLevel" || keyToken.text == "level") {
             return ScopeLevelQuery(UInt32(parseUInt(value)))
         }
         if (keyToken.text == "fileHash") {

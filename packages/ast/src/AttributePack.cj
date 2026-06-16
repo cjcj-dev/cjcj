@@ -208,8 +208,109 @@ extend Attribute <: Equatable<Attribute> {
     }
 }
 
+private let ATTRIBUTE_NAMES: Array<String> = [
+    "IN_REFERENCE_CYCLE",
+    "UNREACHABLE",
+    "IMPLICIT_USED",
+    "IMPORTED",
+    "GLOBAL",
+    "INITIALIZED",
+    "COMPILER_ADD",
+    "GENERIC",
+    "DEFAULT",
+    "STATIC",
+    "PUBLIC",
+    "PRIVATE",
+    "PROTECTED",
+    "EXTERNAL",
+    "INTERNAL",
+    "OVERRIDE",
+    "REDEF",
+    "ABSTRACT",
+    "SEALED",
+    "OPEN",
+    "OPERATOR",
+    "FOREIGN",
+    "UNSAFE",
+    "MUT",
+    "HAS_BROKEN",
+    "IN_STRUCT",
+    "IN_EXTEND",
+    "IN_ENUM",
+    "IN_CLASSLIKE",
+    "IN_MACRO",
+    "PRIMARY_CONSTRUCTOR",
+    "CONSTRUCTOR",
+    "ENUM_CONSTRUCTOR",
+    "FINALIZER",
+    "IS_CLONED_SOURCE_CODE",
+    "IS_CAPTURE",
+    "IN_CORE",
+    "NEED_AUTO_BOX",
+    "MACRO_EXPANDED_NODE(deprecated)",
+    "MACRO_FUNC",
+    "MACRO_INVOKE_FUNC",
+    "MACRO_INVOKE_BODY",
+    "LEFT_VALUE",
+    "C",
+    "SRC_IMPORTED",
+    "JAVA_APP",
+    "JAVA_EXT",
+    "STD_CALL",
+    "NO_MANGLE",
+    "INITIALIZATION_CHECKED",
+    "IS_BROKEN",
+    "GENERIC_INSTANTIATED",
+    "HAS_INITIAL",
+    "IS_VOLATILE",
+    "NUMERIC_OVERFLOW",
+    "INTRINSIC",
+    "TOOL_ADD",
+    "IS_CHECK_VISITED",
+    "INCRE_COMPILE",
+    "SIDE_EFFECT",
+    "IMPLICIT_ADD",
+    "MAIN_ENTRY",
+    "GENERATED_TO_MOCK",
+    "IS_OUTERMOST",
+    "IS_ANNOTATION",
+    "NO_REFLECT_INFO",
+    "MOCK_SUPPORTED",
+    "OPEN_TO_MOCK",
+    "INTERFACE_IMPL",
+    "FOR_TEST",
+    "CONTAINS_MOCK_CREATION_CALL",
+    "COMMON",
+    "FROM_COMMON_PART",
+    "COMMON_NON_EXHAUSTIVE",
+    "SPECIFIC",
+    "COMMON_WITH_DEFAULT",
+    "JAVA_MIRROR",
+    "JAVA_MIRROR_SUBTYPE",
+    "JAVA_HAS_DEFAULT",
+    "JAVA_MIRROR_SYNTHETIC_WRAPPER",
+    "OBJ_C_MIRROR",
+    "OBJ_C_MIRROR_SUBTYPE",
+    "OBJ_C_INIT",
+    "OBJ_C_OPTIONAL",
+    "JAVA_CJ_MAPPING",
+    "OBJ_C_CJ_MAPPING",
+    "CJ_MIRROR_JAVA_INTERFACE_FWD",
+    "DESUGARED_MIRROR_FIELD",
+    "HAS_INITED_FIELD",
+    "OBJ_C_MIRROR_SYNTHETIC_WRAPPER",
+    "CJ_MIRROR_JAVA_INTERFACE_DEFAULT",
+    "CJ_MIRROR_OBJC_INTERFACE_FWD",
+    "ALREADY_LOADED",
+    "AST_ATTR_END"
+]
+
 public func AttributeName(attr: Attribute): String {
-    return "Attribute#${AttributeIndex(attr)}"
+    let idx = AttributeIndex(attr)
+    if (idx >= ATTRIBUTE_NAMES.size) {
+        return "UnknownAttr(${idx})"
+    }
+    return ATTRIBUTE_NAMES[idx]
 }
 
 public class AttributePack {
@@ -251,8 +352,13 @@ public class AttributePack {
 
     public func GetAllIdxOfAttr(): ArrayList<UInt64> {
         let out = ArrayList<UInt64>()
-        for (attr in enabled) {
-            out.add(UInt64(AttributeIndex(attr)))
+        for (idx in 0..(AttributeIndex(Attribute.AST_ATTR_END) + 1)) {
+            for (attr in enabled) {
+                if (AttributeIndex(attr) == idx) {
+                    out.add(UInt64(idx))
+                    break
+                }
+            }
         }
         return out
     }
@@ -262,12 +368,20 @@ public class AttributePack {
     }
 
     public func ToString(): String {
+        let expected = AttributeIndex(Attribute.AST_ATTR_END) + 1
+        if (ATTRIBUTE_NAMES.size != expected) {
+            return "ATTR2STR has invalid mapping(${ATTRIBUTE_NAMES.size}!=${expected})"
+        }
         if (enabled.isEmpty()) {
             return "[]"
         }
         let names = ArrayList<String>()
-        for (attr in enabled) {
-            names.add(AttributeName(attr))
+        for (idx in GetAllIdxOfAttr()) {
+            if (idx >= UInt64(ATTRIBUTE_NAMES.size)) {
+                names.add("UnknownAttr(${idx})")
+            } else {
+                names.add(ATTRIBUTE_NAMES[Int64(idx)])
+            }
         }
         return "[" + JoinStrings(names, ", ") + "]"
     }

@@ -19,6 +19,8 @@ The AST package is a multi-file Cangjie package mirroring the C++ AST component 
 - Deepened `ASTTypeValidator` toward the C++ pre/post strategy: shared walker IDs for desugared expressions, skip-child handling for ignored kinds, no-ty-kind separation, generic type-node skipping, package-decl target skipping, and rejection of unresolved invalid/ideal/quest semantic types.
 - Aligned `Cache.CollectTargets` with the C++ target-cache rule so member-base targets are preserved only when the node itself has a target.
 - Aligned `ScopeManagerApi.GetChildScopeName` with the C++ first-child-split replacement behavior.
+- Aligned `AttributePack.ToString` and `GetAllIdxOfAttr` with the C++ `ATTR2STR` names and bit-index traversal order, including the deprecated macro-expanded-node spelling and invalid mapping guard.
+- Deepened query/search behavior toward C++: canonical `scope_name`, `scope_level`, and `ast_kind` spellings now parse, pretty-print cache keys use `key=value`, unsupported scope-name suffix and AST-kind prefix matches return empty, and position equality/closed comparisons use the C++ half-open containment rule.
 
 ## Existing Ported Coverage
 
