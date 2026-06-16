@@ -2,6 +2,7 @@ package cangjie_compiler::mangle
 
 import std.collection.*
 import std.sort.*
+import cangjie_compiler::chir.*
 
 public let MANGLE_VIRTUAL_PREFIX: String = "_CV"
 public let MANGLE_MUTABLE_PREFIX: String = "_CM"
@@ -57,7 +58,27 @@ private func ReplaceManglePrefixWith(mangledName: String, newPrefix: String): St
     if (StartsWith(mangledName, MANGLE_CANGJIE_PREFIX)) {
         return newPrefix + mangledName[MANGLE_PREFIX_LEN..]
     }
-    return mangledName
+    throw IllegalArgumentException("Mangle name has no _C prefix to be replaced: " + mangledName)
+}
+
+private func FunctionIdentifierForPrefix(function: Function): String {
+    let identifier = function.GetIdentifier()
+    if (StartsWith(identifier, MANGLE_CANGJIE_PREFIX)) {
+        return identifier
+    }
+    let withoutPrefix = function.GetIdentifierWithoutPrefix()
+    if (StartsWith(withoutPrefix, MANGLE_CANGJIE_PREFIX)) {
+        return withoutPrefix
+    }
+    return identifier
+}
+
+private func CustomTypeDefIdentifierWithoutPrefix(def: CustomTypeDef): String {
+    let identifier = def.GetIdentifier()
+    if (identifier.isEmpty()) {
+        throw IllegalArgumentException("Custom type identifier has no prefix to strip.")
+    }
+    return identifier[1..]
 }
 
 private func sortedMangledTypes(types: ArrayList<CHIRType>, genericsTypeStack: ArrayList<String>): ArrayList<String> {
@@ -100,7 +121,39 @@ public func GenerateVirtualFuncMangleName(rawFunc: CHIRFunction, customTypeDef: 
     return out
 }
 
+public func GenerateVirtualFuncMangleName(rawFunc: Function, customTypeDef: CustomTypeDef,
+    parentTy: ClassType, isVirtual: Bool): String {
+    let prefix = if (isVirtual) { MANGLE_VIRTUAL_PREFIX } else { MANGLE_MUTABLE_PREFIX }
+    var out = ReplaceManglePrefixWith(FunctionIdentifierForPrefix(rawFunc), prefix)
+    let customTyGenericTypeStack = ArrayList<String>()
+    for (genericType in customTypeDef.genericTypeParams) {
+        customTyGenericTypeStack.add(genericType.GetSrcCodeIdentifier())
+    }
+    if (let Some(extendDef) <- (customTypeDef as ExtendDef)) {
+        if (let Some(extendedType) <- extendDef.extendedType) {
+            out += MANGLE_CHIR_EXTEND_PREFIX + MangleCHIRType(extendedType, customTyGenericTypeStack)
+        }
+        out += "${customTypeDef.GetPackageName().size}" + customTypeDef.GetPackageName()
+    } else {
+        out += MANGLE_DOLLAR_PREFIX + ReplaceManglePrefixWith(CustomTypeDefIdentifierWithoutPrefix(customTypeDef), "")
+    }
+    out += MANGLE_DOLLAR_PREFIX + MangleCHIRType(parentTy, customTyGenericTypeStack)
+    return out
+}
+
 public func GenerateInstantiateFuncMangleName(baseName: String, instTysInFunc: ArrayList<CHIRType>): String {
+    var out = ReplaceManglePrefixWith(baseName, MANGLE_INSTANTIATE_PREFIX) + MANGLE_DOLLAR_PREFIX
+    if (instTysInFunc.isEmpty()) {
+        out += MANGLE_VOID_TY_SUFFIX
+    } else {
+        for (paramTy in instTysInFunc) {
+            out += MangleCHIRType(paramTy)
+        }
+    }
+    return out
+}
+
+public func GenerateInstantiateFuncMangleName(baseName: String, instTysInFunc: ArrayList<Type>): String {
     var out = ReplaceManglePrefixWith(baseName, MANGLE_INSTANTIATE_PREFIX) + MANGLE_DOLLAR_PREFIX
     if (instTysInFunc.isEmpty()) {
         out += MANGLE_VOID_TY_SUFFIX
@@ -117,6 +170,11 @@ public func GenerateLambdaFuncMangleName(baseFunc: CHIRFunction, counter: Int64)
         MANGLE_DOLLAR_PREFIX + "${counter}" + MANGLE_WILDCARD_PREFIX
 }
 
+public func GenerateLambdaFuncMangleName(baseFunc: Function, counter: Int64): String {
+    return ReplaceManglePrefixWith(FunctionIdentifierForPrefix(baseFunc), MANGLE_CHIR_LAMBDA_PREFIX) +
+        MANGLE_DOLLAR_PREFIX + "${counter}" + MANGLE_WILDCARD_PREFIX
+}
+
 public func OverflowStrategyToString(ovf: MangleOverflowStrategy): String {
     return match (ovf) {
         case MangleOverflowStrategy.WRAPPING => "&"
@@ -125,12 +183,26 @@ public func OverflowStrategyToString(ovf: MangleOverflowStrategy): String {
     }
 }
 
+private func OverflowOperatorMangleCode(name: String): String {
+    if (let Some(op) <- OperatorTypeMangle(name)) {
+        return op
+    }
+    throw IllegalArgumentException("Unsupported name for overflow operator mangling: " + name)
+}
+
 public func GenerateOverflowOperatorFuncMangleName(name: String, ovf: MangleOverflowStrategy, isBinary: Bool,
     typeInfo: CHIRType): String {
-    var out = MANGLE_OPERATOR_PREFIX + OverflowStrategyToString(ovf)
-    if (let Some(op) <- OperatorTypeMangle(name)) {
-        out += op
+    var out = MANGLE_OPERATOR_PREFIX + OverflowStrategyToString(ovf) + OverflowOperatorMangleCode(name)
+    out += MANGLE_FUNC_PARAM_TYPE_PREFIX + MangleCHIRType(typeInfo)
+    if (isBinary) {
+        out += MangleCHIRType(typeInfo)
     }
+    return out
+}
+
+public func GenerateOverflowOperatorFuncMangleName(name: String, ovf: MangleOverflowStrategy, isBinary: Bool,
+    typeInfo: BuiltinType): String {
+    var out = MANGLE_OPERATOR_PREFIX + OverflowStrategyToString(ovf) + OverflowOperatorMangleCode(name)
     out += MANGLE_FUNC_PARAM_TYPE_PREFIX + MangleCHIRType(typeInfo)
     if (isBinary) {
         out += MangleCHIRType(typeInfo)
@@ -150,8 +222,16 @@ public func GenerateInstantiatedBaseClassMangleName(funcType: CHIRType): String 
     return MANGLE_CLOSURE_INSTANTIATE_PREFIX + MangleCHIRType(funcType)
 }
 
+public func GenerateInstantiatedBaseClassMangleName(funcType: FuncType): String {
+    return MANGLE_CLOSURE_INSTANTIATE_PREFIX + MangleCHIRType(funcType)
+}
+
 public func GenerateGlobalImplClassMangleName(function: CHIRFunction): String {
     return ReplaceManglePrefixWith(function.identifierWithoutPrefix, MANGLE_CLOSURE_FUNC_PREFIX)
+}
+
+public func GenerateGlobalImplClassMangleName(function: Function): String {
+    return ReplaceManglePrefixWith(FunctionIdentifierForPrefix(function), MANGLE_CLOSURE_FUNC_PREFIX)
 }
 
 public func GenerateLambdaImplClassMangleName(function: CHIRFunction, count: Int64): String {
@@ -162,26 +242,56 @@ public func GenerateWrapperClassMangleName(def: CHIRCustomTypeDef): String {
     return MANGLE_CLOSURE_WRAPPER_PREFIX + def.identifierWithoutPrefix
 }
 
+public func GenerateWrapperClassMangleName(def: ClassDef): String {
+    return MANGLE_CLOSURE_WRAPPER_PREFIX + CustomTypeDefIdentifierWithoutPrefix(def)
+}
+
 public func GenerateGenericAbstractFuncMangleName(def: CHIRCustomTypeDef): String {
     return MANGLE_CHIR_FUNC_PREFIX + def.identifier + MANGLE_ABSTRACT_GENERIC_PREFIX
+}
+
+public func GenerateGenericAbstractFuncMangleName(def: ClassDef): String {
+    return MANGLE_CHIR_FUNC_PREFIX + def.GetIdentifier() + MANGLE_ABSTRACT_GENERIC_PREFIX
 }
 
 public func GenerateInstantiatedAbstractFuncMangleName(def: CHIRCustomTypeDef): String {
     return MANGLE_CHIR_FUNC_PREFIX + def.identifier + MANGLE_ABSTRACT_INSTANTIATED_PREFIX
 }
 
+public func GenerateInstantiatedAbstractFuncMangleName(def: ClassDef): String {
+    return MANGLE_CHIR_FUNC_PREFIX + def.GetIdentifier() + MANGLE_ABSTRACT_INSTANTIATED_PREFIX
+}
+
 public func GenerateGenericOverrideFuncMangleName(function: CHIRFunction): String {
     return ReplaceManglePrefixWith(function.identifierWithoutPrefix, MANGLE_CHIR_FUNC_PREFIX) + MANGLE_CHIR_GENERIC_SUFFIX
+}
+
+public func GenerateGenericOverrideFuncMangleName(function: Function): String {
+    return ReplaceManglePrefixWith(FunctionIdentifierForPrefix(function), MANGLE_CHIR_FUNC_PREFIX) +
+        MANGLE_CHIR_GENERIC_SUFFIX
 }
 
 public func GenerateInstOverrideFuncMangleName(function: CHIRFunction): String {
     return ReplaceManglePrefixWith(function.identifierWithoutPrefix, MANGLE_CHIR_FUNC_PREFIX) + MANGLE_ABSTRACT_INST_PREFIX
 }
 
+public func GenerateInstOverrideFuncMangleName(function: Function): String {
+    return ReplaceManglePrefixWith(FunctionIdentifierForPrefix(function), MANGLE_CHIR_FUNC_PREFIX) +
+        MANGLE_ABSTRACT_INST_PREFIX
+}
+
 public func GenerateWrapperClassGenericOverrideFuncMangleName(def: CHIRCustomTypeDef): String {
     return MANGLE_CHIR_FUNC_PREFIX + def.identifierWithoutPrefix + MANGLE_CHIR_GENERIC_SUFFIX
 }
 
+public func GenerateWrapperClassGenericOverrideFuncMangleName(def: ClassDef): String {
+    return MANGLE_CHIR_FUNC_PREFIX + CustomTypeDefIdentifierWithoutPrefix(def) + MANGLE_CHIR_GENERIC_SUFFIX
+}
+
 public func GenerateWrapperClassInstOverrideFuncMangleName(def: CHIRCustomTypeDef): String {
     return MANGLE_CHIR_FUNC_PREFIX + def.identifierWithoutPrefix + MANGLE_ABSTRACT_INST_PREFIX
+}
+
+public func GenerateWrapperClassInstOverrideFuncMangleName(def: ClassDef): String {
+    return MANGLE_CHIR_FUNC_PREFIX + CustomTypeDefIdentifierWithoutPrefix(def) + MANGLE_ABSTRACT_INST_PREFIX
 }
