@@ -1,6 +1,6 @@
 # AST Port Status
 
-Date: 2026-06-16
+Date: 2026-06-17
 
 ## Summary
 
@@ -10,6 +10,25 @@ The AST package is a multi-file Cangjie package mirroring the C++ AST component 
 
 ## Implemented In This Pass
 
+- Added C++ `Ty` helper parity for primitive upper-bound extraction, C ABI type classification (`IsPrimitiveCType`, `IsCStructType`, `IsMetCType`, `IsCTypeConstraint`), type-argument size checks, initial-type checks, and instantiated nominal type to generic type lookup.
+- Added recursive generic type-argument collection APIs, including candidate-filtered generic collection with duplicate suppression.
+- Added C++ `GetTypesToStr` / `GetTypesToStableStr` parity and routed union/intersection type stringification through stable name/hash ordering for deterministic output.
+- Ported C++ `Decl.GetGeneric` enum-member behavior so enum-contained `VarDecl` nodes inherit the enum generic when they have no function-body generic source.
+- Deepened `Node.cpp` `ToString` parity across type nodes: invalid type spelling, qualified-type arguments, multi-question option types, varray size omission when absent, optional function-type returns, and empty generic/generic-constraint formatting.
+- Added C++ pattern stringification for invalid, const, wildcard, tuple, type, enum, var-or-enum, except-type, and command-type patterns.
+- Added C++ declaration stringification for function parameters, function bodies, functions, type aliases, class/struct/interface bodies, and invalid declarations, including explicit modifier prefixes and generic constraints.
+- Added C++ expression stringification for blocks, if/for/while/do-while/match/try forms, let-pattern destructors, token/quote/interpolation expressions, throw/perform/resume/return/jump, casts, parens, lambdas/trailing closures, optional chains, arrays, pointers, type conversions, invalid expressions, spawn, and synchronized expressions.
+- Added C++ `Ty::GetDeclOfTy` / `Ty::GetDeclPtrOfTy` parity helpers in `Types.cj`, including nominal class/interface/struct/enum/type-alias declaration lookup and `specificImplementation` remapping for generic-declaration lookups.
+- Ported `ExtendDecl.IsExportedDecl` from `Node.cpp`: extended type-argument export checks, same-package direct-extension rules, `std.core` direct-extension export behavior, interface-extension inherited-interface export checks, and generic upper-bound export constraints.
+- Ported extend-member export behavior for `FuncDecl` and `PropDecl`, so direct extensions of foreign-package types hide members while interface implementations export only interface-implementation members.
+- Aligned `FuncDecl.IsOpen` and `PropDecl.IsOpen` with the C++ outer-declaration rules, static/imported checks, and body/accessor absence handling instead of treating local `open`/`abstract` attributes alone as sufficient.
+- Deepened `InheritableDecl` inheritance helpers: direct interface types are de-duplicated, stable interface lists now use the existing `CompTyByNames` ordering, and `GetAllSuperDecls` now performs the C++ breadth-first traversal through class/interface inherited types with cycle/duplicate guards.
+- Aligned `Decl.GetMemberDeclPtrs` with the C++ helper by returning a fresh member list per nominal/extend declaration and including enum constructors before enum members without changing mutable `GetMemberDecls` behavior.
+- Deepened macro-call source-position recovery in `Node`: `GetMacroCallPos` now follows the C++ same-line guard for expanded nodes, skips pure custom annotations, and refuses cross-file direct macro mappings.
+- Ported C++-style `GetMacroCallNewPos` behavior for LSP macro positions: it selects the outermost macro invocation, consults `originPosMap` and `origin2newPosMap`, and returns `INVALID_POSITION` when no faithful mapping exists.
+- Ported `GetDebugPos` macro debug-map lookup so desugar/debug position recovery can map generated macro columns back to original positions.
+- Added AST `IsPureAnnotation(MacroInvocation)` utility parity with the C++ inline helper.
+- Fixed `CloneMacroInvocation` to allocate a fresh `MacroCallDiagInfo` rather than aliasing the source object's class reference, preserving scalar diagnostic fields without Cangjie reference sharing.
 - De-isolated AST support types from local compatibility copies to the real sibling packages.
 - Added AST package dependencies on `cangjie_compiler::basic`, `cangjie_compiler::lex`, and `cangjie_compiler::utils`.
 - Re-exported real Basic/Lex/Utils APIs through `Common.cj`: `Position`, `Range`, `MakeRange`, `Linkage`, `MacroCallDiagInfo`, `TokenKind`, `Token`, `StringPart`, token helpers, `TokenVecMap`, and `OverflowStrategy`.
@@ -38,5 +57,6 @@ The AST package is a multi-file Cangjie package mirroring the C++ AST component 
 - Wire AST validation and diagnostics through the real `DiagnosticEngine` instead of the current local validation result surface.
 - Resolve `ScopeKind` and `ExprKind` layering with Parse once the self-hosted packages can share those APIs without introducing a package cycle. The C++ AST only forward-declares the related parse concepts, so the current AST-local minimal enums are kept until that dependency direction is settled.
 - Finish exact C++ `Searcher` parity for diagnostic-producing query parse failures, file-hash query normalization/filtering, and broader downstream validation of indexed position searches once the collector/scope-manager pipeline fully populates indexes in the Cangjie port.
+- Continue auditing macro diagnostic map lifetimes through Parse/Macro/Sema; AST now avoids clone-time `MacroCallDiagInfo` aliasing, but full private Basic map reconstruction is still owned by the macro pipeline.
 - Continue auditing context, walker, clone, printer, recover-desugar, search/query, type, utility, and validation behavior against the complete C++ implementation under downstream Parse/Sema workloads.
 - Replace any remaining compatibility API spellings only after downstream packages no longer depend on them.

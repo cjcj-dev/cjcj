@@ -44,6 +44,10 @@ private func assignCurFile(root: Node, file: File): Unit {
     walker.Walk()
 }
 
+public func IsPureAnnotation(invocation: MacroInvocation): Bool {
+    return invocation.macroCallDiagInfo.isCustom && invocation.macroCallDiagInfo.isCurFile
+}
+
 public func SortModifierByPos(modifiers: ArrayList<Modifier>): ArrayList<Modifier> {
     let out = ArrayList<Modifier>()
     for (modifier in modifiers) {

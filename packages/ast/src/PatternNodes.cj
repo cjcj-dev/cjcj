@@ -2,6 +2,22 @@ package cangjie_compiler::ast
 
 import std.collection.*
 
+private func joinPatternStrings(values: ArrayList<Pattern>, delimiter: String): String {
+    let parts = ArrayList<String>()
+    for (value in values) {
+        parts.add(value.ToString())
+    }
+    return JoinStrings(parts, delimiter)
+}
+
+private func joinPatternTypeStrings(values: ArrayList<Type>, delimiter: String): String {
+    let parts = ArrayList<String>()
+    for (value in values) {
+        parts.add(value.ToString())
+    }
+    return JoinStrings(parts, delimiter)
+}
+
 public open class Pattern <: Node {
     public var ctxExpr: Option<Expr> = None
 
@@ -22,6 +38,10 @@ public class InvalidPattern <: Pattern {
         begin = pos
         end = pos
     }
+
+    public override func ToString(): String {
+        return "<invalid>"
+    }
 }
 
 public class ConstPattern <: Pattern {
@@ -30,6 +50,13 @@ public class ConstPattern <: Pattern {
 
     public init() {
         super(ASTKind.CONST_PATTERN)
+    }
+
+    public override func ToString(): String {
+        if (let Some(value) <- literal) {
+            return value.ToString()
+        }
+        return ""
     }
 }
 
@@ -42,6 +69,10 @@ public class WildcardPattern <: Pattern {
         super(ASTKind.WILDCARD_PATTERN)
         this.begin = begin
         end = begin + Len(TokenKind.WILDCARD)
+    }
+
+    public override func ToString(): String {
+        return "_"
     }
 }
 
@@ -68,7 +99,7 @@ public class VarPattern <: Pattern {
 
     public override func ToString(): String {
         if (let Some(decl) <- varDecl) {
-            return decl.identifier.GetRawText()
+            return decl.identifier.Val()
         }
         return ""
     }
@@ -83,6 +114,10 @@ public class TuplePattern <: Pattern {
     public init() {
         super(ASTKind.TUPLE_PATTERN)
     }
+
+    public override func ToString(): String {
+        return "(" + joinPatternStrings(patterns, ", ") + ")"
+    }
 }
 
 public class TypePattern <: Pattern {
@@ -96,6 +131,17 @@ public class TypePattern <: Pattern {
 
     public init() {
         super(ASTKind.TYPE_PATTERN)
+    }
+
+    public override func ToString(): String {
+        var out = if (let Some(value) <- pattern) { value.ToString() } else { "" }
+        if (let Some(value) <- typeNode) {
+            if (!out.isEmpty()) {
+                out += ": "
+            }
+            out += value.ToString()
+        }
+        return out
     }
 }
 
@@ -121,6 +167,14 @@ public class EnumPattern <: Pattern {
         }
         return ""
     }
+
+    public override func ToString(): String {
+        var out = if (let Some(value) <- constructor) { value.ToString() } else { "" }
+        if (!patterns.isEmpty()) {
+            out += "(" + joinPatternStrings(patterns, ", ") + ")"
+        }
+        return out
+    }
 }
 
 public class VarOrEnumPattern <: Pattern {
@@ -130,6 +184,13 @@ public class VarOrEnumPattern <: Pattern {
     public init(id: SrcIdentifier) {
         super(ASTKind.VAR_OR_ENUM_PATTERN)
         identifier = id
+    }
+
+    public override func ToString(): String {
+        if (let Some(value) <- pattern) {
+            return value.ToString()
+        }
+        return identifier.Val()
     }
 }
 
@@ -143,6 +204,17 @@ public class ExceptTypePattern <: Pattern {
     public init() {
         super(ASTKind.EXCEPT_TYPE_PATTERN)
     }
+
+    public override func ToString(): String {
+        var out = if (let Some(value) <- pattern) { value.ToString() } else { "" }
+        if (!types.isEmpty()) {
+            if (!out.isEmpty()) {
+                out += ": "
+            }
+            out += joinPatternTypeStrings(types, " | ")
+        }
+        return out
+    }
 }
 
 public class CommandTypePattern <: Pattern {
@@ -154,5 +226,16 @@ public class CommandTypePattern <: Pattern {
 
     public init() {
         super(ASTKind.COMMAND_TYPE_PATTERN)
+    }
+
+    public override func ToString(): String {
+        var out = if (let Some(value) <- pattern) { value.ToString() } else { "" }
+        if (!types.isEmpty()) {
+            if (!out.isEmpty()) {
+                out += ": "
+            }
+            out += joinPatternTypeStrings(types, " | ")
+        }
+        return out
     }
 }

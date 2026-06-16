@@ -70,7 +70,26 @@ public open class Decl <: Node {
     }
 
     public func GetMemberDeclPtrs(): ArrayList<Decl> {
-        return GetMemberDecls()
+        let results = ArrayList<Decl>()
+        if (let Some(classDecl) <- (this as ClassDecl)) {
+            if (let Some(body) <- classDecl.body) {
+                for (decl in body.decls) { results.add(decl) }
+            }
+        } else if (let Some(interfaceDecl) <- (this as InterfaceDecl)) {
+            if (let Some(body) <- interfaceDecl.body) {
+                for (decl in body.decls) { results.add(decl) }
+            }
+        } else if (let Some(structDecl) <- (this as StructDecl)) {
+            if (let Some(body) <- structDecl.body) {
+                for (decl in body.decls) { results.add(decl) }
+            }
+        } else if (let Some(enumDecl) <- (this as EnumDecl)) {
+            for (constructor in enumDecl.constructors) { results.add(constructor) }
+            for (decl in enumDecl.members) { results.add(decl) }
+        } else if (let Some(extendDecl) <- (this as ExtendDecl)) {
+            for (decl in extendDecl.members) { results.add(decl) }
+        }
+        return results
     }
 
     public func IsBuiltIn(): Bool {
@@ -86,6 +105,15 @@ public open class Decl <: Node {
                 if (let Some(parentEnum) <- body.parentEnum) {
                     if (funcDecl.TestAttr(Attribute.ENUM_CONSTRUCTOR)) {
                         return parentEnum.generic
+                    }
+                }
+            }
+        }
+        if (let Some(varDecl) <- (this as VarDecl)) {
+            if (let Some(outer) <- varDecl.outerDecl) {
+                if (outer.astKind == ASTKind.ENUM_DECL) {
+                    if (let Some(enumOuter) <- (outer as EnumDecl)) {
+                        return enumOuter.generic
                     }
                 }
             }
@@ -179,7 +207,7 @@ public open class InheritableDecl <: Decl {
         for (typeNode in inheritedTypes) {
             if (let Some(ty) <- typeNode.GetTy()) {
                 if (let Some(interfaceTy) <- (ty as InterfaceTy)) {
-                    out.add(interfaceTy)
+                    addInterfaceTyUnique(out, interfaceTy)
                 }
             }
         }
@@ -187,16 +215,224 @@ public open class InheritableDecl <: Decl {
     }
 
     public func GetStableSuperInterfaceTys(): ArrayList<InterfaceTy> {
-        return GetSuperInterfaceTys()
+        let out = ArrayList<InterfaceTy>()
+        for (interfaceTy in GetSuperInterfaceTys()) {
+            insertInterfaceTyByName(out, interfaceTy)
+        }
+        return out
     }
 
     public func GetAllSuperDecls(): ArrayList<ClassLikeDecl> {
         let out = ArrayList<ClassLikeDecl>()
+        let workList = ArrayList<InheritableDecl>()
         if (let Some(selfClassLike) <- (this as ClassLikeDecl)) {
             out.add(selfClassLike)
+            workList.add(selfClassLike)
+        } else {
+            workList.add(this)
+        }
+        var workIdx: Int64 = 0
+        while (workIdx < workList.size) {
+            let current = workList[workIdx]
+            workIdx++
+            for (typeNode in current.inheritedTypes) {
+                if (let Some(ty) <- typeNode.GetTy()) {
+                    if (let Some(classTy) <- (ty as ClassTy)) {
+                        if (let Some(classDecl) <- classTy.declPtr) {
+                            if (!containsClassLikeDecl(out, classDecl)) {
+                                workList.add(classDecl)
+                                out.add(classDecl)
+                            }
+                        }
+                    } else if (let Some(interfaceTy) <- (ty as InterfaceTy)) {
+                        if (let Some(interfaceDecl) <- interfaceTy.declPtr) {
+                            if (!containsClassLikeDecl(out, interfaceDecl)) {
+                                workList.add(interfaceDecl)
+                                out.add(interfaceDecl)
+                            }
+                        }
+                    }
+                }
+            }
         }
         return out
     }
+}
+
+private func addInterfaceTyUnique(values: ArrayList<InterfaceTy>, ty: InterfaceTy): Unit {
+    for (value in values) {
+        if (sameInterfaceTy(value, ty)) {
+            return
+        }
+    }
+    values.add(ty)
+}
+
+private func insertInterfaceTyByName(values: ArrayList<InterfaceTy>, ty: InterfaceTy): Unit {
+    var idx: Int64 = 0
+    while (idx < values.size) {
+        if (sameInterfaceTyForStableOrder(values[idx], ty)) {
+            return
+        }
+        if (CompTyByNames(ty, values[idx])) {
+            values.add(ty, at: idx)
+            return
+        }
+        idx++
+    }
+    values.add(ty)
+}
+
+private func sameInterfaceTy(left: InterfaceTy, right: InterfaceTy): Bool {
+    if (left.String() != right.String() || left.Hash() != right.Hash()) {
+        return false
+    }
+    if (let Some(leftDecl) <- left.declPtr) {
+        if (let Some(rightDecl) <- right.declPtr) {
+            return SameDecl(leftDecl, rightDecl)
+        }
+        return false
+    }
+    if (let Some(_) <- right.declPtr) {
+        return false
+    }
+    return true
+}
+
+private func sameInterfaceTyForStableOrder(left: InterfaceTy, right: InterfaceTy): Bool {
+    return !CompTyByNames(left, right) && !CompTyByNames(right, left)
+}
+
+private func containsClassLikeDecl(values: ArrayList<ClassLikeDecl>, decl: ClassLikeDecl): Bool {
+    for (value in values) {
+        if (SameDecl(value, decl)) {
+            return true
+        }
+    }
+    return false
+}
+
+private func extendTypeArgsAllExported(decl: ExtendDecl): Bool {
+    if (let Some(extended) <- decl.extendedType) {
+        for (typeArg in extended.GetTypeArgs()) {
+            if (let Some(target) <- typeArg.GetTarget()) {
+                if (!target.IsExportedDecl()) {
+                    return false
+                }
+            }
+        }
+    }
+    return true
+}
+
+private func extendUpperBoundsAllExported(decl: ExtendDecl): Bool {
+    if (let Some(generic) <- decl.generic) {
+        var allExported = true
+        for (constraint in generic.genericConstraints) {
+            for (upperBound in constraint.upperBounds) {
+                if (let Some(target) <- upperBound.GetTarget()) {
+                    allExported = target.IsExportedDecl() && allExported
+                }
+            }
+        }
+        return allExported
+    }
+    return true
+}
+
+private func hasExportedInheritedInterface(decl: ExtendDecl): Bool {
+    for (inheritedType in decl.inheritedTypes) {
+        if (let Some(target) <- inheritedType.GetTarget()) {
+            if (target.IsExportedDecl()) {
+                return true
+            }
+        }
+    }
+    return false
+}
+
+private func isExtendMemberExported(decl: Decl, baseExported: Bool): Bool {
+    if (let Some(outer) <- decl.outerDecl) {
+        if (outer.astKind != ASTKind.EXTEND_DECL) {
+            return baseExported
+        }
+        if (let Some(extendDecl) <- (outer as ExtendDecl)) {
+            if (let Some(extendedDecl) <- Ty.GetDeclPtrOfTy(extendDecl.GetTy())) {
+                if (extendedDecl.fullPackageName == extendDecl.fullPackageName) {
+                    return baseExported
+                }
+            } else {
+                return baseExported
+            }
+            if (extendDecl.inheritedTypes.isEmpty()) {
+                return false
+            }
+            return baseExported && decl.TestAttr(Attribute.INTERFACE_IMPL)
+        }
+    }
+    return baseExported
+}
+
+private func hasFuncBodyBlock(body: Option<FuncBody>): Bool {
+    if (let Some(funcBody) <- body) {
+        if (let Some(_) <- funcBody.body) {
+            return true
+        }
+    }
+    return false
+}
+
+private func isOpenMemberDecl(decl: Decl, hasBodyOrAccessor: Bool): Bool {
+    if (let Some(outer) <- decl.outerDecl) {
+        if (!outer.IsOpen() || decl.TestAttr(Attribute.STATIC)) {
+            return false
+        }
+    } else {
+        return false
+    }
+    if (decl.TestAnyAttr(Attribute.OPEN, Attribute.ABSTRACT)) {
+        return true
+    }
+    return !decl.TestAttr(Attribute.IMPORTED) && !hasBodyOrAccessor
+}
+
+private func modifierPrefix(modifiers: ArrayList<Modifier>): String {
+    var out = ""
+    for (modifier in modifiers) {
+        let text = modifier.ToString()
+        if (!text.isEmpty()) {
+            out += text + " "
+        }
+    }
+    return out
+}
+
+private func joinFuncParamLists(values: ArrayList<FuncParamList>): String {
+    let parts = ArrayList<String>()
+    for (value in values) {
+        parts.add(value.ToString())
+    }
+    return JoinStrings(parts, " ")
+}
+
+private func joinGenericConstraints(values: ArrayList<GenericConstraint>): String {
+    let parts = ArrayList<String>()
+    for (value in values) {
+        parts.add(value.ToString())
+    }
+    return JoinStrings(parts, ", ")
+}
+
+private func declBlockString(values: ArrayList<Decl>): String {
+    var out = "{"
+    for (decl in values) {
+        out += "\n" + decl.ToString()
+    }
+    if (!values.isEmpty()) {
+        out += "\n"
+    }
+    out += "}"
+    return out
 }
 
 public enum BuiltInType {
@@ -322,7 +558,14 @@ public open class FuncParam <: VarDecl {
     }
 
     public open override func ToString(): String {
-        return identifier.GetRawText()
+        var out = identifier.Val()
+        if (isNamedParam) {
+            out += "!"
+        }
+        if (let Some(value) <- typeNode) {
+            out += ": " + value.ToString()
+        }
+        return out
     }
 }
 
@@ -361,7 +604,14 @@ public class TypeAliasDecl <: Decl {
     }
 
     public override func ToString(): String {
-        return "type " + identifier.GetRawText()
+        var out = modifierPrefix(modifiers) + "type " + identifier.Val()
+        if (let Some(value) <- generic) {
+            out += value.ToString()
+        }
+        if (let Some(value) <- typeNode) {
+            out += " = " + value.ToString()
+        }
+        return out
     }
 }
 
@@ -414,6 +664,31 @@ public class FuncBody <: Node {
         super.Clear()
         capturedVars.clear()
     }
+
+    public override func ToString(): String {
+        var out = ""
+        if (let Some(value) <- generic) {
+            out += value.ToString()
+        }
+        out += joinFuncParamLists(paramLists)
+        if (let Some(value) <- retType) {
+            if (!colonPos.IsZero()) {
+                out += ": "
+            } else if (!doubleArrowPos.IsZero()) {
+                out += " => "
+            }
+            out += value.ToString()
+        }
+        if (let Some(value) <- generic) {
+            if (!value.genericConstraints.isEmpty()) {
+                out += " where " + joinGenericConstraints(value.genericConstraints)
+            }
+        }
+        if (let Some(value) <- body) {
+            out += " " + value.ToString()
+        }
+        return out
+    }
 }
 
 public enum ConstructorCall {
@@ -449,12 +724,20 @@ public class FuncDecl <: Decl {
         return identifier == "~init"
     }
 
+    public override func IsExportedDecl(): Bool {
+        return isExtendMemberExported(this, super.IsExportedDecl())
+    }
+
     public override func IsOpen(): Bool {
-        return TestAnyAttr(Attribute.OPEN, Attribute.ABSTRACT)
+        return isOpenMemberDecl(this, hasFuncBodyBlock(funcBody))
     }
 
     public override func ToString(): String {
-        return "func " + identifier.GetRawText()
+        var out = modifierPrefix(modifiers) + "func " + identifier.Val()
+        if (let Some(body) <- funcBody) {
+            out += body.ToString()
+        }
+        return out
     }
 }
 
@@ -501,8 +784,12 @@ public class PropDecl <: VarDecl {
         super(ASTKind.PROP_DECL)
     }
 
+    public override func IsExportedDecl(): Bool {
+        return isExtendMemberExported(this, super.IsExportedDecl())
+    }
+
     public override func IsOpen(): Bool {
-        return TestAnyAttr(Attribute.OPEN, Attribute.ABSTRACT)
+        return isOpenMemberDecl(this, !getters.isEmpty() || !setters.isEmpty())
     }
 }
 
@@ -513,6 +800,10 @@ public class StructBody <: Node {
 
     public init() {
         super(ASTKind.STRUCT_BODY)
+    }
+
+    public override func ToString(): String {
+        return declBlockString(decls)
     }
 }
 
@@ -550,6 +841,10 @@ public class InterfaceBody <: Node {
     public init() {
         super(ASTKind.INTERFACE_BODY)
     }
+
+    public override func ToString(): String {
+        return declBlockString(decls)
+    }
 }
 
 public open class ClassLikeDecl <: InheritableDecl {
@@ -586,6 +881,10 @@ public class ClassBody <: Node {
 
     public init() {
         super(ASTKind.CLASS_BODY)
+    }
+
+    public override func ToString(): String {
+        return declBlockString(decls)
     }
 }
 
@@ -645,6 +944,42 @@ public class ExtendDecl <: InheritableDecl {
     public override func GetMemberDecls(): ArrayList<Decl> {
         return members
     }
+
+    public override func IsExportedDecl(): Bool {
+        if (!extendTypeArgsAllExported(this)) {
+            return false
+        }
+        let extendedDecl = Ty.GetInheritableDeclPtrOfTy(GetTy())
+        let isInSamePkg = if (let Some(value) <- extendedDecl) {
+            value.fullPackageName == fullPackageName
+        } else {
+            false
+        }
+        if (inheritedTypes.isEmpty()) {
+            if (fullPackageName == "std.core") {
+                return true
+            }
+            if (isInSamePkg) {
+                if (let Some(value) <- extendedDecl) {
+                    if (let Some(_) <- generic) {
+                        return value.IsExportedDecl() && extendUpperBoundsAllExported(this)
+                    }
+                    return value.IsExportedDecl()
+                }
+            }
+            return false
+        }
+        if (isInSamePkg) {
+            if (let Some(value) <- extendedDecl) {
+                return value.IsExportedDecl()
+            }
+        }
+        let inheritedExported = hasExportedInheritedInterface(this)
+        if (let Some(_) <- generic) {
+            return inheritedExported && extendUpperBoundsAllExported(this)
+        }
+        return inheritedExported
+    }
 }
 
 public class InvalidDecl <: Decl {
@@ -654,5 +989,9 @@ public class InvalidDecl <: Decl {
         begin = pos
         end = pos
         doNotExport = true
+    }
+
+    public override func ToString(): String {
+        return "<invalid>"
     }
 }

@@ -32,6 +32,40 @@ private func typeArgsString(values: ArrayList<Ty>, delimiter: String): String {
     return JoinStrings(parts, delimiter)
 }
 
+private func typeLessByStableName(left: Ty, right: Ty): Bool {
+    let leftStr = left.String()
+    let rightStr = right.String()
+    return leftStr < rightStr || (leftStr == rightStr && left.Hash() < right.Hash())
+}
+
+private func sameStableTypeName(left: Ty, right: Ty): Bool {
+    return !typeLessByStableName(left, right) && !typeLessByStableName(right, left)
+}
+
+private func stableTypeArgsString(values: ArrayList<Ty>, delimiter: String): String {
+    let sorted = ArrayList<Ty>()
+    for (value in values) {
+        var idx: Int64 = 0
+        var inserted = false
+        while (idx < sorted.size) {
+            if (sameStableTypeName(sorted[idx], value)) {
+                inserted = true
+                break
+            }
+            if (typeLessByStableName(value, sorted[idx])) {
+                sorted.add(value, at: idx)
+                inserted = true
+                break
+            }
+            idx++
+        }
+        if (!inserted) {
+            sorted.add(value)
+        }
+    }
+    return typeArgsString(sorted, delimiter)
+}
+
 private func hashCombine(seed: Int64, value: Int64): Int64 {
     return seed * 1315423911 + value + 0x9e3779b9
 }
@@ -149,6 +183,60 @@ private func anyChildTypeMatches(ty: Ty, pred: (Ty) -> Bool): Bool {
         }
     }
     return false
+}
+
+private func sameGenericArg(left: Ty, right: Ty): Bool {
+    return left.Hash() == right.Hash() && left.String() == right.String()
+}
+
+private func containsGenericArg(values: ArrayList<Ty>, ty: Ty): Bool {
+    for (value in values) {
+        if (sameGenericArg(value, ty)) {
+            return true
+        }
+    }
+    return false
+}
+
+private func containsGenericCandidate(values: ArrayList<GenericsTy>, ty: GenericsTy): Bool {
+    for (value in values) {
+        if (sameGenericArg(value, ty)) {
+            return true
+        }
+    }
+    return false
+}
+
+private func collectGenericTyArgs(ty: Ty, out: ArrayList<Ty>): Unit {
+    if (ty.IsGeneric()) {
+        if (!containsGenericArg(out, ty)) {
+            out.add(ty)
+        }
+        return
+    }
+    for (arg in ty.typeArgs) {
+        if (arg.HasGeneric()) {
+            collectGenericTyArgs(arg, out)
+        }
+    }
+}
+
+private func collectCandidateGenericTyArgs(
+    ty: Ty,
+    candidates: ArrayList<GenericsTy>,
+    out: ArrayList<GenericsTy>
+): Unit {
+    if (let Some(genericTy) <- (ty as GenericsTy)) {
+        if (containsGenericCandidate(candidates, genericTy) && !containsGenericCandidate(out, genericTy)) {
+            out.add(genericTy)
+        }
+        return
+    }
+    for (arg in ty.typeArgs) {
+        if (arg.HasGeneric()) {
+            collectCandidateGenericTyArgs(arg, candidates, out)
+        }
+    }
 }
 
 private func hashTypeArgs(seed: Int64, values: ArrayList<Ty>): Int64 {
@@ -506,6 +594,18 @@ public open class Ty {
         return typeArgs.size == 1
     }
 
+    public func GetGenericTyArgs(): ArrayList<Ty> {
+        let out = ArrayList<Ty>()
+        collectGenericTyArgs(this, out)
+        return out
+    }
+
+    public func GetGenericTyArgs(candidates: ArrayList<GenericsTy>): ArrayList<GenericsTy> {
+        let out = ArrayList<GenericsTy>()
+        collectCandidateGenericTyArgs(this, candidates, out)
+        return out
+    }
+
     public open func String(): String {
         return TypeKindName(kind)
     }
@@ -540,11 +640,209 @@ public open class Ty {
         return "Invalid"
     }
 
+    public static func GetTypesToStr(tys: ArrayList<Ty>, delimiter: String): String {
+        return typeArgsString(tys, delimiter)
+    }
+
+    public static func GetTypesToStableStr(tys: ArrayList<Ty>, delimiter: String): String {
+        return stableTypeArgsString(tys, delimiter)
+    }
+
     public static func IsTyCorrect(ty: Option<Ty>): Bool {
         if (let Some(value) <- ty) {
             return !value.HasInvalidTy()
         }
         return false
+    }
+
+    public static func IsTyCorrect(ty: Ty): Bool {
+        return !ty.HasInvalidTy()
+    }
+
+    public static func GetPrimitiveUpperBound(ty: Ty): Ty {
+        if (let Some(genTy) <- (ty as GenericsTy)) {
+            if (!genTy.isPlaceholder) {
+                if (let Some(lower) <- genTy.lowerBound) {
+                    return lower
+                }
+            }
+        }
+        return ty
+    }
+
+    public static func GetPrimitiveUpperBound(ty: Option<Ty>): Option<Ty> {
+        if (let Some(value) <- ty) {
+            return Ty.GetPrimitiveUpperBound(value)
+        }
+        return None
+    }
+
+    public static func IsPrimitiveCType(ty: Ty): Bool {
+        return ty.kind == TypeKind.TYPE_UNIT || ty.kind == TypeKind.TYPE_BOOLEAN ||
+            ty.kind == TypeKind.TYPE_INT8 || ty.kind == TypeKind.TYPE_UINT8 ||
+            ty.kind == TypeKind.TYPE_INT16 || ty.kind == TypeKind.TYPE_UINT16 ||
+            ty.kind == TypeKind.TYPE_INT32 || ty.kind == TypeKind.TYPE_UINT32 ||
+            ty.kind == TypeKind.TYPE_INT64 || ty.kind == TypeKind.TYPE_UINT64 ||
+            ty.kind == TypeKind.TYPE_INT_NATIVE || ty.kind == TypeKind.TYPE_UINT_NATIVE ||
+            ty.kind == TypeKind.TYPE_FLOAT32 || ty.kind == TypeKind.TYPE_FLOAT64
+    }
+
+    public static func IsCStructType(ty: Ty): Bool {
+        if (let Some(structTy) <- (ty as StructTy)) {
+            if (let Some(decl) <- structTy.declPtr) {
+                return decl.TestAttr(Attribute.C)
+            }
+        }
+        return false
+    }
+
+    public static func IsMetCType(ty: Ty): Bool {
+        if (let Some(varrayTy) <- (ty as VArrayTy)) {
+            if (!varrayTy.typeArgs.isEmpty() && Ty.IsTyCorrect(varrayTy.typeArgs[0])) {
+                return Ty.IsMetCType(varrayTy.typeArgs[0])
+            }
+            return false
+        }
+        let isCType = Ty.IsPrimitiveCType(ty) || ty.IsPointer() || ty.IsCString() ||
+            ty.IsCFunc() || Ty.IsCStructType(ty)
+        return isCType || ty.kind == TypeKind.TYPE_QUEST
+    }
+
+    public static func IsCTypeConstraint(ty: Ty): Bool {
+        if (Ty.IsMetCType(ty) && !Ty.IsPrimitiveCType(ty)) {
+            if (let Some(structTy) <- (ty as StructTy)) {
+                return structTy.name != "String"
+            }
+        }
+        return false
+    }
+
+    public static func IsTyArgsSizeEqual(ty1: Ty, ty2: Ty): Bool {
+        return ty1.typeArgs.size == ty2.typeArgs.size
+    }
+
+    public static func GetDeclOfTy(ty: Option<Ty>): Option<Decl> {
+        if (let Some(value) <- ty) {
+            if (let Some(classTy) <- (value as ClassTy)) {
+                if (let Some(decl) <- classTy.decl) {
+                    return decl
+                }
+                return None
+            }
+            if (let Some(interfaceTy) <- (value as InterfaceTy)) {
+                if (let Some(decl) <- interfaceTy.decl) {
+                    return decl
+                }
+                return None
+            }
+            if (let Some(structTy) <- (value as StructTy)) {
+                if (let Some(decl) <- structTy.decl) {
+                    return decl
+                }
+                return None
+            }
+            if (let Some(enumTy) <- (value as EnumTy)) {
+                if (let Some(decl) <- enumTy.decl) {
+                    return decl
+                }
+                return None
+            }
+            if (let Some(aliasTy) <- (value as TypeAliasTy)) {
+                if (let Some(decl) <- aliasTy.declPtr) {
+                    return decl
+                }
+                return None
+            }
+        }
+        return None
+    }
+
+    public static func GetDeclPtrOfTy(ty: Option<Ty>): Option<Decl> {
+        if (let Some(value) <- ty) {
+            if (let Some(classTy) <- (value as ClassTy)) {
+                if (let Some(decl) <- classTy.declPtr) {
+                    return Ty.MapSpecificImplementation(decl)
+                }
+                return None
+            }
+            if (let Some(interfaceTy) <- (value as InterfaceTy)) {
+                if (let Some(decl) <- interfaceTy.declPtr) {
+                    return Ty.MapSpecificImplementation(decl)
+                }
+                return None
+            }
+            if (let Some(structTy) <- (value as StructTy)) {
+                if (let Some(decl) <- structTy.declPtr) {
+                    return Ty.MapSpecificImplementation(decl)
+                }
+                return None
+            }
+            if (let Some(enumTy) <- (value as EnumTy)) {
+                if (let Some(decl) <- enumTy.declPtr) {
+                    return Ty.MapSpecificImplementation(decl)
+                }
+                return None
+            }
+            if (let Some(aliasTy) <- (value as TypeAliasTy)) {
+                if (let Some(decl) <- aliasTy.declPtr) {
+                    return Ty.MapSpecificImplementation(decl)
+                }
+                return None
+            }
+        }
+        return None
+    }
+
+    public static func GetInheritableDeclPtrOfTy(ty: Option<Ty>): Option<InheritableDecl> {
+        if (let Some(decl) <- Ty.GetDeclPtrOfTy(ty)) {
+            return decl as InheritableDecl
+        }
+        return None
+    }
+
+    private static func MapSpecificImplementation(decl: Decl): Decl {
+        if (let Some(specific) <- decl.specificImplementation) {
+            return specific
+        }
+        return decl
+    }
+
+    public static func GetGenericTyOfInsTy(ty: Ty): Option<Ty> {
+        if (!Ty.IsTyCorrect(ty)) {
+            return None
+        }
+        if (let Some(classTy) <- (ty as ClassTy)) {
+            if (let Some(genericTy) <- classTy.GetGenericTy()) {
+                return genericTy
+            }
+            return None
+        }
+        if (let Some(interfaceTy) <- (ty as InterfaceTy)) {
+            if (let Some(genericTy) <- interfaceTy.GetGenericTy()) {
+                return genericTy
+            }
+            return None
+        }
+        if (let Some(structTy) <- (ty as StructTy)) {
+            if (let Some(genericTy) <- structTy.GetGenericTy()) {
+                return genericTy
+            }
+            return None
+        }
+        if (let Some(enumTy) <- (ty as EnumTy)) {
+            if (let Some(genericTy) <- enumTy.GetGenericTy()) {
+                return genericTy
+            }
+            return None
+        }
+        return None
+    }
+
+    public static func IsInitialTy(ty: Option<Ty>): Bool {
+        if (let Some(value) <- ty) {
+            return value.kind == TypeKind.TYPE_INITIAL
+        }
+        return true
     }
 
     public static func AreTysCorrect(tys: ArrayList<Ty>): Bool {
@@ -790,7 +1088,7 @@ public class UnionTy <: Ty {
     }
 
     public override func String(): String {
-        return typeArgsString(tys, " | ")
+        return stableTypeArgsString(tys, " | ")
     }
 
     public override func Hash(): Int64 {
@@ -809,7 +1107,7 @@ public class IntersectionTy <: Ty {
     }
 
     public override func String(): String {
-        return typeArgsString(tys, " & ")
+        return stableTypeArgsString(tys, " & ")
     }
 
     public override func Hash(): Int64 {
