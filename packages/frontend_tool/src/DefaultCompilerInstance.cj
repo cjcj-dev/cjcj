@@ -178,6 +178,9 @@ public open class DefaultCompilerInstance {
     }
 
     protected func SaveCjos(pkgs: ArrayList<Package>): Bool {
+        if (pkgs.size > 1) {
+            PreMangleExportDecls(pkgs)
+        }
         var ret = true
         for (pkg in pkgs) {
             ret = SaveCjo(pkg) && ret
@@ -203,6 +206,47 @@ public open class DefaultCompilerInstance {
         core.chirData.SetCurrentCHIRPackage(savedPackage)
         core.FreeCHIRData()
         return ret
+    }
+
+    private func PreMangleExportDecls(pkgs: ArrayList<Package>): Unit {
+        let mangler = BaseMangler()
+        let seen = HashSet<String>()
+        for (pkg in pkgs) {
+            if (pkg.IsEmpty()) {
+                continue
+            }
+            for (file in pkg.files) {
+                for (decl in file.decls) {
+                    PreMangleDeclTree(mangler, pkg.fullPackageName, decl, seen)
+                }
+            }
+            for (decl in pkg.genericInstantiatedDecls) {
+                PreMangleDeclTree(mangler, pkg.fullPackageName, decl, seen)
+            }
+        }
+    }
+
+    private func PreMangleDeclTree(
+        mangler: BaseMangler,
+        pkgName: String,
+        decl: Decl,
+        seen: HashSet<String>
+    ): Unit {
+        let key = pkgName + "|" + ASTKindName(decl.astKind) + "|" + decl.identifier.Val() + "|" +
+            decl.begin.line.toString() + ":" + decl.begin.column.toString()
+        if (seen.contains(key)) {
+            return
+        }
+        seen.add(key)
+        if (decl.fullPackageName.isEmpty()) {
+            decl.fullPackageName = pkgName
+        }
+        if (decl.mangledName.isEmpty()) {
+            decl.mangledName = mangler.Mangle(decl)
+        }
+        for (member in decl.members) {
+            PreMangleDeclTree(mangler, pkgName, member, seen)
+        }
     }
 
     private func PerformStage(stage: CompileStage): Bool {
@@ -311,9 +355,40 @@ private func RenderPackageCjo(pkg: Package): String {
         fileIdx++
     }
     builder.append("],\n")
-    builder.append("  \"declCount\": " + CountPackageDecls(pkg).toString() + "\n")
+    builder.append("  \"declCount\": " + CountPackageDecls(pkg).toString() + ",\n")
+    builder.append("  \"decls\": [")
+    var declIdx: Int64 = 0
+    for (file in pkg.files) {
+        for (decl in file.decls) {
+            if (declIdx > 0) {
+                builder.append(", ")
+            }
+            AppendDeclCjo(builder, decl)
+            declIdx++
+        }
+    }
+    builder.append("]\n")
     builder.append("}\n")
     return builder.toString()
+}
+
+private func AppendDeclCjo(builder: StringBuilder, decl: Decl): Unit {
+    builder.append("{\"kind\":\"" + EscapeJson(ASTKindName(decl.astKind)) + "\",")
+    builder.append("\"name\":\"" + EscapeJson(decl.identifier.Val()) + "\",")
+    builder.append("\"mangled\":\"" + EscapeJson(decl.mangledName) + "\"")
+    if (!decl.members.isEmpty()) {
+        builder.append(",\"members\":[")
+        var memberIdx: Int64 = 0
+        for (member in decl.members) {
+            if (memberIdx > 0) {
+                builder.append(",")
+            }
+            AppendDeclCjo(builder, member)
+            memberIdx++
+        }
+        builder.append("]")
+    }
+    builder.append("}")
 }
 
 private func CountPackageDecls(pkg: Package): Int64 {

@@ -15,6 +15,10 @@ Current status:
   detection are implemented with the public data exposed by the current self-host frontend package.
 - Common-part/CJMP-style CJO output is delayed to result saving, matching the C++ FrontendTool split between
   `PerformCjoSaving` and `PerformResultsSaving`.
+- Multi-package CJO saving now pre-mangles source declarations that still lack package-scoped names before writing
+  package summaries, mirroring the C++ sibling-package export-id stabilization within the current frontend AST model.
+- FrontendTool-local CJO summaries include nested declaration identities and mangled names so saved package output
+  preserves the public declaration surface exposed by the current self-host frontend AST.
 - `NeedCreateIncrementalCompilerInstance` also exposes an overload for the richer `option.GlobalOptions` model with
   the same mock, coverage, CHIR-output, and common-part-CJO guards as the C++ helper.
 - The implementation is intentionally conservative where the current package graph does not yet expose the C++ surfaces
