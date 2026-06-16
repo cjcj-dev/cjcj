@@ -24,6 +24,7 @@ This pass de-isolated compiler options: `packages/modules` now depends on the re
 - Implemented `PackageManager` Tarjan SCC ordering and source package reordering behavior.
 - Added a compiling local AST writer/loader wire format so exported package/import/member data can round-trip inside this package while the real flatbuffer/AST dependencies are unavailable.
 - Continued the local serialization layer with type interning, cached declaration diffing, resolved dependency-name extraction, import reference loading, expression table serialization/deserialization, reference resolution maps, incremental removed-mangle parsing, node source-range/attribute preservation, and package file ownership normalization.
+- Added local-format CJMP common-part validation matching the C++ loader control flow for package-name mismatch, common/specific feature-set subset diagnostics, serialized debug/optimization option checks, and option-mismatch aborts before later compilation stages.
 
 ## Important Blockers
 
@@ -34,7 +35,7 @@ This pass de-isolated compiler options: `packages/modules` now depends on the re
 ## Remaining Work
 
 - Replace module-local AST/Basic compatibility models with the real packages and adapt Modules call sites to AST `Identifier`, `Modifier`, `AttributePack`, and typed declaration subclasses.
-- Bind the real flatbuffer module format and implement full `ASTWriter`, `ASTLoader`, expression writer/loader, reference loader, CJMP common-part loading, and incremental cache loading.
+- Bind the real flatbuffer module format and implement full `ASTWriter`, `ASTLoader`, expression writer/loader, reference loader, production CJMP common-part loading, and incremental cache loading.
 - Wire diagnostics to the real `DiagnosticEngine` and diagnostic IDs from the Basic module.
 - Audit import/package lookup behavior against the C++ test corpus after downstream Sema/Frontend callers are available.
 

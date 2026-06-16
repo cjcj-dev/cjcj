@@ -18,6 +18,17 @@ public func OptimizationLevelToString(level: OptimizationLevel): String {
     }
 }
 
+public func WireToOptimizationLevel(value: String): OptimizationLevel {
+    return match (value) {
+        case "O1" => OptimizationLevel.O1
+        case "O2" => OptimizationLevel.O2
+        case "O3" => OptimizationLevel.O3
+        case "Os" => OptimizationLevel.Os
+        case "Oz" => OptimizationLevel.Oz
+        case _ => OptimizationLevel.O0
+    }
+}
+
 public class CjoManagerConfig {
     public var diag: DiagnosticEngine = DiagnosticEngine()
     public var globalOptions: GlobalOptions = GlobalOptions()

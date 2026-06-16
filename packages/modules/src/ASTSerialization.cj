@@ -155,6 +155,10 @@ public class ASTLoader {
     private var packageDepInfo: String = ""
     private var importSourceCode: Bool = true
     private var isChirNow: Bool = false
+    private var loadedHasOptions: Bool = false
+    private var loadedSerializingCommon: Bool = false
+    private var loadedDebugOption: Bool = false
+    private var loadedOptimizationLevel: OptimizationLevel = OptimizationLevel.O0
     private let loadedTypes: HashMap<FormattedIndex, String> = HashMap<FormattedIndex, String>()
 
     public init(data: Array<UInt8>, fullPackageName: String, cjoManager: CjoManager, opts: GlobalOptions) {
@@ -259,11 +263,19 @@ public class ASTLoader {
     public func PreloadCommonPartOfPackage(pkg: Package): Bool {
         if (let Some(commonPkg) <- LoadPackageDependencies()) {
             if (commonPkg.fullPackageName != pkg.fullPackageName) {
+                cjoManager.GetDiag().ReportError(
+                    "module_common_cjo_wrong_package",
+                    "common cjo package '${commonPkg.fullPackageName}' does not match expected '${pkg.fullPackageName}'"
+                )
                 return false
             }
+            ValidateCommonSpecificFeatureSetsRelations(commonPkg, pkg)
             for (file in commonPkg.files) {
                 file.EnableAttr(Attribute.FROM_COMMON_PART)
                 pkg.AddFile(file)
+            }
+            if (!ValidateCommonPartOptions()) {
+                return false
             }
         }
         return true
@@ -322,6 +334,12 @@ public class ASTLoader {
                         pkg = Package(fields[1])
                         pkg.isMacroPackage = WireToBool(fields[2])
                         pkg.accessible = WireToAccessLevel(fields[3])
+                        if (fields.size > 6) {
+                            loadedHasOptions = true
+                            loadedSerializingCommon = WireToBool(fields[4])
+                            loadedDebugOption = WireToBool(fields[5])
+                            loadedOptimizationLevel = WireToOptimizationLevel(fields[6])
+                        }
                         if (fields.size > 13) {
                             LoadNodeFields(fields, 7, pkg)
                         }
@@ -417,6 +435,73 @@ public class ASTLoader {
             }
         }
         return Some(pkg)
+    }
+
+    private func ValidateCommonSpecificFeatureSetsRelations(commonPkg: Package, specificPkg: Package): Unit {
+        let specificFeatures = CollectFeaturesFromPackage(specificPkg)
+        for (commonFile in commonPkg.files) {
+            let extraFeatures = ArrayList<String>()
+            for (feature in CollectUniqueStrings(commonFile.features)) {
+                if (!specificFeatures.contains(feature)) {
+                    extraFeatures.add("'${feature}'")
+                }
+            }
+            if (!extraFeatures.isEmpty()) {
+                cjoManager.GetDiag().ReportError(
+                    "feature_is_not_subset_of_child_set",
+                    "extra feature from common part file '${commonFile.filePath}': " +
+                        JoinStrings(extraFeatures, " "),
+                    range: MakeRange(commonFile.begin, commonFile.end)
+                )
+            }
+        }
+    }
+
+    private func ValidateCommonPartOptions(): Bool {
+        if (!loadedHasOptions) {
+            cjoManager.GetDiag().ReportWarning(
+                "module_common_cjo_no_options",
+                "common cjo does not contain compilation options"
+            )
+            return true
+        }
+        var ok = true
+        if (loadedDebugOption != opts.enableCompileDebug) {
+            let before = if (loadedDebugOption) { "enabled" } else { "disabled" }
+            let after = if (opts.enableCompileDebug) { "enabled" } else { "disabled" }
+            cjoManager.GetDiag().ReportError(
+                "module_common_cjo_debug_mismatch",
+                "common cjo compile debug was ${before}, current compile debug is ${after}"
+            )
+            ok = false
+        }
+        if (loadedOptimizationLevel != opts.optimizationLevel) {
+            cjoManager.GetDiag().ReportError(
+                "module_common_cjo_opt_mismatch",
+                "common cjo optimization level was ${OptimizationLevelToString(loadedOptimizationLevel)}, " +
+                    "current optimization level is ${OptimizationLevelToString(opts.optimizationLevel)}"
+            )
+            ok = false
+        }
+        return ok
+    }
+
+    private func CollectFeaturesFromPackage(pkg: Package): TreeSet<String> {
+        let features = TreeSet<String>()
+        if (!pkg.files.isEmpty()) {
+            for (feature in pkg.files[0].features) {
+                features.add(feature)
+            }
+        }
+        return features
+    }
+
+    private func CollectUniqueStrings(values: ArrayList<String>): TreeSet<String> {
+        let out = TreeSet<String>()
+        for (value in values) {
+            out.add(value)
+        }
+        return out
     }
 }
 
