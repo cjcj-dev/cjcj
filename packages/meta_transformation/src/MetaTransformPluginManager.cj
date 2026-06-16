@@ -2,6 +2,10 @@ package cangjie_compiler::meta_transformation
 
 import std.collection.*
 
+public struct MetaKind {
+    public init() {}
+}
+
 public struct MetaKindCHIR {
     public init() {}
 }

@@ -25,6 +25,8 @@ Implemented:
   public getter.
 - Tightened construction to match the C++ ownership model: kind-setting constructors are protected, and
   the CHIR meta-kind marker is a value marker rather than a heap class.
+- Ported the public `MetaKind` marker and the CHIR manager marker used by `CHIRPluginManager`; Cangjie
+  keeps the nested `MetaKind::CHIR` shape flattened as `MetaKindCHIR`.
 - Matched the C++ constructor sequence more closely: `MetaTransformConcept` now only default-constructs
   with `UNKNOWN`, and `MetaTransform` assigns the protected kind during its own construction.
 - Exposed the public callback type aliases used by plugin registration and plugin-info registration, so
@@ -46,5 +48,7 @@ Known fidelity caveats:
   helpers when they need the C++ macro's CHIR function/package behavior.
 - Cangjie has no direct preprocessor macro equivalent for `CHIR_PLUGIN`; `MakeCHIRPluginInfo` preserves
   the registration behavior but not the C++ macro spelling.
+- Cangjie does not expose C++-style nested tag declarations in the style used by `MetaKind::CHIR`, so the
+  CHIR tag is represented as `MetaKindCHIR` alongside the public `MetaKind` marker.
 
 Remaining MetaTransformation selfhost markers: 0.
