@@ -146,7 +146,9 @@ public class InteropCJPackageConfigReader {
                 parseDefaultEntry(key, value)
             } else if (currentSection == "package") {
                 if (let Some(pkg) <- currentPackage) {
-                    parsePackageEntry(pkg, key, value)
+                    if (!parsePackageEntry(pkg, key, value)) {
+                        return false
+                    }
                 }
             }
         }
@@ -160,29 +162,57 @@ public class InteropCJPackageConfigReader {
 
     public func GetApiStrategy(packageName: String): InteropCJStrategy {
         if (let Some(pkg) <- packages.get(packageName)) {
-            return if (pkg.apiStrategy == InteropCJStrategy.UNKNOWN) { defaultApiStrategy } else { pkg.apiStrategy }
+            return pkg.apiStrategy
         }
         return defaultApiStrategy
     }
 
     public func GetGenericTypeStrategy(packageName: String): InteropCJGenericStrategyType {
         if (let Some(pkg) <- packages.get(packageName)) {
-            return if (pkg.genericTypeStrategy == InteropCJGenericStrategyType.UNKNOWN) {
-                defaultGenericTypeStrategy
-            } else {
-                pkg.genericTypeStrategy
-            }
+            return pkg.genericTypeStrategy
         }
         return defaultGenericTypeStrategy
     }
 
     public func Validate(): Bool {
-        if (defaultApiStrategy == InteropCJStrategy.UNKNOWN ||
-            defaultGenericTypeStrategy == InteropCJGenericStrategyType.UNKNOWN) {
+        if (defaultApiStrategy == InteropCJStrategy.UNKNOWN) {
+            WriteError("Validation failed: Default API strategy is unknown\n")
             return false
         }
-        for ((_, pkg) in packages) {
+        if (defaultGenericTypeStrategy == InteropCJGenericStrategyType.UNKNOWN) {
+            WriteError("Validation failed: Default generic type  strategy is unknown\n")
+            return false
+        }
+        for ((name, pkg) in packages) {
             if (pkg.name.isEmpty()) {
+                return false
+            }
+            if (pkg.apiStrategy == InteropCJStrategy.UNKNOWN) {
+                WriteError("Validation failed: '" + name + "' API strategy is unknown\n")
+                return false
+            }
+            if (pkg.genericTypeStrategy == InteropCJGenericStrategyType.UNKNOWN) {
+                WriteError("Validation failed: '" + name + "' generic type strategy is unknown\n")
+                return false
+            }
+            if (pkg.apiStrategy == InteropCJStrategy.FULL && !pkg.interopCJIncludedApis.isEmpty()) {
+                WriteError("Validation failed for package '" + name +
+                    "': API strategy is Full but IncludedApis is Configured \n")
+                return false
+            }
+            if (pkg.apiStrategy == InteropCJStrategy.NONE && !pkg.interopCJExcludedApis.isEmpty()) {
+                WriteError("Validation failed for package '" + name +
+                    "': API strategy is None but ExcludedApis is Configured \n")
+                return false
+            }
+            if (!pkg.interopCJIncludedApis.isEmpty() && !pkg.interopCJExcludedApis.isEmpty()) {
+                WriteError("Validation failed for package '" + name + "': Cannot hava both included and excluded APIs\n")
+                return false
+            }
+            if (pkg.genericTypeStrategy == InteropCJGenericStrategyType.NONE &&
+                !pkg.allowedInteropCJGenericInstantiations.isEmpty()) {
+                WriteError("Validation failed for package '" + name +
+                    "': None generic strategy cannot hava generic instantiations\n")
                 return false
             }
         }
@@ -197,7 +227,7 @@ public class InteropCJPackageConfigReader {
         }
     }
 
-    private func parsePackageEntry(pkg: PackageConfig, key: String, value: String): Unit {
+    private func parsePackageEntry(pkg: PackageConfig, key: String, value: String): Bool {
         if (key == "name") {
             pkg.name = parseString(value)
         } else if (key == "APIStrategy") {
@@ -216,10 +246,11 @@ public class InteropCJPackageConfigReader {
             let retType = parseReturnType(signature)
             pkg.lambdaPatterns.add(LambdaPattern(signature, params, retType))
         } else if (key == "generic_object_configuration") {
-            parseGenericObjectConfiguration(pkg, value)
+            return parseGenericObjectConfiguration(pkg, value)
         } else if (key == "lambda_patterns") {
             parseLambdaPatternsConfiguration(pkg, value)
         }
+        return true
     }
 
     private func storePackage(pkgOpt: Option<PackageConfig>): Unit {

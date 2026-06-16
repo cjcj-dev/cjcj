@@ -14,6 +14,8 @@ Implemented:
 - Matched more C++ diagnostic emission behavior: buffered category diagnostics are sorted by begin/end range before emission, macro-origin notes are prepended ahead of existing subdiagnostics, range-error checking is deferred after existing lex/parse errors for later phases, and JSON-format reporting caches counts and emits the assembled JSON payload from `ReportErrorAndWarningCount`.
 - Replaced the remaining Basic selfhost markers with working code:
   deterministic `DiagnosticBuilder.close()/Emit()` cleanup with `Resource` support for try-with-resource use, C++-schema diagnostic JSON formatting, multi-line/control-character-aware diagnostic text rendering, same-line hint composition, macro-call message/note swapping, compressed long source excerpts, C++-style help substitution source rendering, macro expansion excerpts, generic object and lambda pattern parsing for interop package configs, and UTF-8/GBK encoding detection with optional normalization.
+- Corrected `MacroCallDiagInfo` and `DiagnosticEngineImpl` macro-position lookups to match the C++ `std::map::lower_bound` behavior, including the LSP exact-key successor case used when mapping macro-generated positions back to source positions.
+- Tightened interop package config validation to mirror the C++ reader: per-package unknown strategies now fail validation, invalid include/exclude combinations are rejected, `GenericTypeStrategy = "None"` rejects generic instantiations, and invalid `generic_object_configuration` entries now fail parsing instead of being ignored.
 - Kept LLVM/native backend out of scope as required; Basic does not bind LLVM directly.
 
 Known fidelity caveats:
