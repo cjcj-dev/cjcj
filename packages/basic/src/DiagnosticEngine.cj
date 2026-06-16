@@ -1,6 +1,7 @@
 package cangjie_compiler::basic
 
 import std.collection.*
+import std.sort.*
 
 public let MAIN_HINT_COLOR: DiagColor = DiagColor.RED
 public let OTHER_HINT_COLOR: DiagColor = DiagColor.CYAN
@@ -390,6 +391,13 @@ public enum DiagHandlerKind {
     | LSP_HANDLER
 }
 
+public func IsCompilerDiagnosticHandlerKind(kind: DiagHandlerKind): Bool {
+    return match (kind) {
+        case DiagHandlerKind.COMPILER_HANDLER => true
+        case _ => false
+    }
+}
+
 public open class DiagnosticHandler {
     protected let diag: DiagnosticEngine
     private let kind: DiagHandlerKind
@@ -426,6 +434,8 @@ public open class DiagnosticHandler {
     public open func EmitDiagnoseGroup(): Unit {}
 
     public open func EmitDiagnosesInJson(): Unit {}
+
+    public open func CacheTheCountInJsonFormat(): Unit {}
 
     public open func GetCategoryDiagnostic(cate: DiagCategory): Array<Diagnostic> {
         if (DiagCategoryIndex(cate) < 0) {
@@ -608,6 +618,21 @@ public class CompilerDiagnosticHandler <: DiagnosticHandler {
         for (diagnostic in GetCategoryDiagnostic(category)) {
             sorted.add(diagnostic)
         }
+        sort(sorted, by: { left: Diagnostic, right: Diagnostic =>
+            let leftRange = left.mainHint.range
+            let rightRange = right.mainHint.range
+            if (leftRange.begin < rightRange.begin) {
+                Ordering.LT
+            } else if (rightRange.begin < leftRange.begin) {
+                Ordering.GT
+            } else if (leftRange.end < rightRange.end) {
+                Ordering.LT
+            } else if (rightRange.end < leftRange.end) {
+                Ordering.GT
+            } else {
+                Ordering.EQ
+            }
+        }, stable: true)
         return sorted.toArray()
     }
 
@@ -640,7 +665,7 @@ public class CompilerDiagnosticHandler <: DiagnosticHandler {
         }
     }
 
-    public func CacheTheCountInJsonFormat(): Unit {
+    public override func CacheTheCountInJsonFormat(): Unit {
         let formatter = DiagnosticJsonFormatter(diag)
         diagNumJsonBuff = formatter.FormatDiagnosticCountToJsonString()
     }

@@ -6298,18 +6298,29 @@ public func GetDiagnoseCategory(diagKind: DiagKind): DiagCategory {
     let idx = DiagKindIndex(diagKind)
     if (idx > 16 && idx <= 57) { return DiagCategory.MACRO_EXPAND }
     if (idx > 58 && idx <= 287) { return DiagCategory.SEMA }
-    if (idx > 0 && idx <= 15) { return DiagCategory.CHIR }
     return DiagCategory.OTHER
 }
 
 public func GetDiagnoseCategory(diagKind: DiagKindRefactor): DiagCategory {
     let idx = DiagKindRefactorIndex(diagKind)
-    if (idx > 196 && idx <= 424) { return DiagCategory.PARSE }
-    if (idx > 425 && idx <= 441) { return DiagCategory.PARSE_QUERY }
-    if (idx > 30 && idx <= 40) { return DiagCategory.CONDITIONAL_COMPILATION }
-    if (idx > 155 && idx <= 168) { return DiagCategory.MODULE }
-    if (idx > 442 && idx <= 737) { return DiagCategory.SEMA }
-    if (idx > 0 && idx <= 29) { return DiagCategory.CHIR }
+    if (idx > DiagKindRefactorIndex(DiagKindRefactor.lex_diag_begin) &&
+        idx < DiagKindRefactorIndex(DiagKindRefactor.lex_diag_end)) { return DiagCategory.LEX }
+    if (idx > DiagKindRefactorIndex(DiagKindRefactor.parse_diag_begin) &&
+        idx < DiagKindRefactorIndex(DiagKindRefactor.parse_diag_end)) { return DiagCategory.PARSE }
+    if (idx > DiagKindRefactorIndex(DiagKindRefactor.sema_diag_begin) &&
+        idx < DiagKindRefactorIndex(DiagKindRefactor.sema_diag_end)) { return DiagCategory.SEMA }
+    if (idx > DiagKindRefactorIndex(DiagKindRefactor.chir_diag_begin) &&
+        idx < DiagKindRefactorIndex(DiagKindRefactor.chir_diag_end)) { return DiagCategory.CHIR }
+    if (idx > DiagKindRefactorIndex(DiagKindRefactor.import_package_diag_begin) &&
+        idx < DiagKindRefactorIndex(DiagKindRefactor.import_package_diag_end)) { return DiagCategory.IMPORT_PACKAGE }
+    if (idx > DiagKindRefactorIndex(DiagKindRefactor.module_diag_begin) &&
+        idx < DiagKindRefactorIndex(DiagKindRefactor.module_diag_end)) { return DiagCategory.MODULE }
+    if (idx > DiagKindRefactorIndex(DiagKindRefactor.parse_query_diag_begin) &&
+        idx < DiagKindRefactorIndex(DiagKindRefactor.parse_query_diag_end)) { return DiagCategory.PARSE_QUERY }
+    if (idx > DiagKindRefactorIndex(DiagKindRefactor.conditional_compilation_diag_begin) &&
+        idx < DiagKindRefactorIndex(DiagKindRefactor.conditional_compilation_diag_end)) {
+        return DiagCategory.CONDITIONAL_COMPILATION
+    }
     return DiagCategory.OTHER
 }
 

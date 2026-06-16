@@ -1,50 +1,7 @@
 package cangjie_compiler::basic
 
+import cangjie_compiler::option.WarningOptionMgr as OptionWarningOptionMgr
 import std.collection.*
-
-public class WarningOptionMgr {
-    private let suppressedFlags: ArrayList<Bool> = ArrayList<Bool>()
-
-    public init() {
-        for (_ in 0..WarnGroupIndex(WarnGroup.NONE)) {
-            suppressedFlags.add(false)
-        }
-    }
-
-    public static func GetInstance(): WarningOptionMgr {
-        return WarningOptionMgr()
-    }
-
-    public func IsSuppressed(group: WarnGroup): Bool {
-        let idx = WarnGroupIndex(group)
-        if (idx < 0 || idx >= suppressedFlags.size) {
-            return false
-        }
-        return suppressedFlags[idx]
-    }
-
-    public func IsSuppressed(index: Int64): Bool {
-        if (index < 0 || index >= suppressedFlags.size) {
-            return false
-        }
-        return suppressedFlags[index]
-    }
-
-    public func UpdateFlags(flags: Array<Bool>): Unit {
-        suppressedFlags.clear()
-        for (flag in flags) {
-            suppressedFlags.add(flag)
-        }
-    }
-
-    public func Reset(): Unit {
-        var idx: Int64 = 0
-        while (idx < suppressedFlags.size) {
-            suppressedFlags[idx] = false
-            idx++
-        }
-    }
-}
 
 public class DiagnosticEngineImpl {
     private var errorCount: UInt64 = 0
@@ -70,7 +27,6 @@ public class DiagnosticEngineImpl {
     private var firstErrorCategory: Option<DiagCategory> = None
     private let pos2MacroCallDiagInfoMap: ArrayList<(UInt64, Option<MacroCallDiagInfo>)> =
         ArrayList<(UInt64, Option<MacroCallDiagInfo>)>()
-    private let warningOption: WarningOptionMgr = WarningOptionMgr.GetInstance()
 
     public init() {}
 
@@ -251,7 +207,7 @@ public class DiagnosticEngineImpl {
             return
         }
         if (diagnostic.diagSeverity == DiagSeverity.DS_WARNING) {
-            if (disableWarning || warningOption.IsSuppressed(diagnostic.warnGroup) || IsSupressedUnusedMain(diagnostic)) {
+            if (disableWarning || isWarningSuppressed(diagnostic.warnGroup) || IsSupressedUnusedMain(diagnostic)) {
                 return
             }
             if (diagnostic.warnGroup != WarnGroup.UNGROUPED && diagnostic.warnGroup != WarnGroup.NONE) {
@@ -270,8 +226,16 @@ public class DiagnosticEngineImpl {
     }
 
     public func IsSupressedUnusedMain(diagnostic: Diagnostic): Bool {
-        return warningOption.IsSuppressed(WarnGroup.UNUSED_MAIN) &&
+        return isWarningSuppressed(WarnGroup.UNUSED_MAIN) &&
             diagnostic.rKind == DiagKindRefactor.chir_dce_unused_function_main
+    }
+
+    private func isWarningSuppressed(group: WarnGroup): Bool {
+        let index = WarnGroupIndex(group)
+        if (index < 0) {
+            return false
+        }
+        return OptionWarningOptionMgr.IsSuppressed(UInt64(index))
     }
 
     public func Prepare(): Unit {
@@ -366,6 +330,13 @@ public class DiagnosticEngineImpl {
         if (!GetIsDumpErrCnt()) {
             return
         }
+        if (let Some(activeHandler) <- handler) {
+            if (IsCompilerDiagnosticHandlerKind(activeHandler.GetKind()) && activeHandler.IsJsonFormat()) {
+                activeHandler.CacheTheCountInJsonFormat()
+                activeHandler.EmitDiagnosesInJson()
+                return
+            }
+        }
         if (GetErrorCount() > 0) {
             let count = GetErrorCount()
             WriteError("${count} error" + if (count > 1) { "s" } else { "" } +
@@ -417,10 +388,6 @@ public class DiagnosticEngineImpl {
         if (!range.begin.IsZero() && !range.end.IsZero()) {
             return
         }
-        if (checkRangeErrorCodeRatherICE) {
-            diagEngineErrorCode = DiagEngineErrorCode.DIAG_RANGE_ERROR
-            return
-        }
         if (cate == DiagCategory.LEX || cate == DiagCategory.PARSE) {
             diagEngineErrorCode = DiagEngineErrorCode.DIAG_RANGE_ERROR
             return
@@ -465,7 +432,7 @@ public class DiagnosticEngineImpl {
         }
         let message = sevInfo + " originates in the macro `" + info.fullName +
             "` (consider using `--debug-macro` for more info)"
-        diagnostic.subDiags.add(SubDiagnostic(MakeRange(mcBegin, info.macroCallEnd), message))
+        diagnostic.subDiags.add(SubDiagnostic(MakeRange(mcBegin, info.macroCallEnd), message), at: 0)
     }
 
     public func FindMacroCallInfo(pos: Position): Option<MacroCallDiagInfo> {
