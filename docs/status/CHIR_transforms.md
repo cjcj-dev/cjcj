@@ -1,6 +1,6 @@
 # CHIR Transform/Optimization Deepening Status
 
-This pass deepens three existing CHIR transform/optimization files against the
+This pass deepens existing CHIR transform/optimization files against the
 C++ CHIR reference while staying inside `packages/chir/src` pass-owned code.
 
 - `DeadCodeElimination.cj`: tightened unused-expression deletion to mirror the
@@ -69,7 +69,14 @@ Third continuation pass:
   for ref-typed captured values, including lambdas reached through direct
   lambda applies, mirroring the C++ `GetLambdaCapturedVarsRecursively` helper.
 
+Fourth continuation pass:
+
+- `UnitUnify.cj`: now recursively visits non-lambda child block groups while
+  sharing one synthesized unit constant for the function body, matching the C++
+  visitor behavior that continues through structured block groups but skips
+  lambda bodies to avoid creating unit constants inside lambdas.
+
 Estimated behavior coverage for the touched transform/optimization surface is
-about 29% versus the C++ reference. The changes above remove several unsafe
+about 30% versus the C++ reference. The changes above remove several unsafe
 behavior differences but the overall CHIR transform/optimization module remains
 far from complete.
