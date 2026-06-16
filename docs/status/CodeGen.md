@@ -46,10 +46,11 @@ Implemented:
   use LLVM get-or-insert behavior through `LLVMGetNamedGlobal`/`LLVMAddGlobal`, cache the result on the owning
   `CGType`, register newly seen static-generic type-info names, and avoid emitting duplicate metadata globals.
 - Added `IRBuilder2` wrappers for selected LLVM builder operations, primitive constants, default literal constants,
-  call and invoke construction, bitcasts, pointer casts, integer/float extension and truncation, int/float and
-  pointer/int conversions, address-space casts, aggregate insertion, GEP construction, unreachable terminators,
-  insertion-point inspection/clearing, scoped debug-location restoration, and named LLVM intrinsic declaration/call
-  helpers for overloaded and non-overloaded intrinsics.
+  call and invoke construction, switch construction and case insertion through `LLVMBuildSwitch`/`LLVMAddCase`,
+  bitcasts, pointer casts, integer/float extension and truncation, int/float and pointer/int conversions,
+  address-space casts, aggregate insertion, GEP construction, unreachable terminators, insertion-point
+  inspection/clearing, scoped debug-location restoration, and named LLVM intrinsic declaration/call helpers for
+  overloaded and non-overloaded intrinsics.
 - Added a C++-shaped `CGUtils` component for pure CodeGen helpers: basic-block naming, class object layout naming,
   compiler-added class mangling, SipHash/`Out64`-style Cangjie string and constant global names through
   `Utils.HashString64`, reference stripping, and generic/class/struct/varray reference predicates. `IRBuilder2`
@@ -70,10 +71,12 @@ Implemented:
   families. The current implementation lowers typed constants, unary integer/float operations, signed/unsigned
   and floating binary operations through C++-shaped `ArithmeticOpImpl` and `LogicalOpImpl` components, including
   right-hand shift operand normalization and constant `Unit`/`Nothing` equality, allocation/load/store/GEP memory
-  expressions through C++-named `AllocateImpl` and `ArrayImpl` components, `GOTO`/`BRANCH`/`EXIT`
-  terminators, `RAISE_EXCEPTION` through the LLVM exception intrinsic path, with-exception call-like/typecast/
-  allocation/raw-array-allocation terminators through unwind-block scoped invoke emission and normal-successor
-  branching, call-like expressions through a C++-shaped `ApplyImpl` component using call-or-invoke emission,
+  expressions through C++-named `AllocateImpl` and `ArrayImpl` components, `GOTO`/`BRANCH`/`MULTIBRANCH`/`EXIT`
+  terminators, with multi-branch lowering using successor 0 as the default destination and subsequent flattened
+  operands as switch case constants when present, `RAISE_EXCEPTION` through the LLVM exception intrinsic path,
+  with-exception call-like/typecast/allocation/raw-array-allocation terminators through unwind-block scoped invoke
+  emission and normal-successor branching, call-like expressions through a C++-shaped `ApplyImpl` component using
+  call-or-invoke emission,
   `GET_EXCEPTION` through the patched LLVM exception-wrapper intrinsic, raw-array allocation through
   `llvm.cj.malloc.array`/`llvm.cj.malloc.array.generic` with signed negative-size branching to the runtime
   negative-array-size helper, tuple/aggregate and varray construction through C++-named component files, and
@@ -113,4 +116,4 @@ Known gaps:
 
 Remaining CodeGen selfhost markers: 0.
 
-Current CodeGen package size: 54 `.cj` files, approximately 5077 total lines.
+Current CodeGen package size: 54 `.cj` files, approximately 5109 total lines.

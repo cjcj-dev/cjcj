@@ -107,6 +107,14 @@ public class IRBuilder2 {
         return unsafe { LLVMBuildCondBr(builder.raw, cond, trueBranch, falseBranch) }
     }
 
+    public func CreateSwitch(cond: LLVMValueRef, defaultDest: LLVMBasicBlockRef, caseCountHint: UInt32): LLVMValueRef {
+        return unsafe { LLVMBuildSwitch(builder.raw, cond, defaultDest, caseCountHint) }
+    }
+
+    public func AddSwitchCase(switchValue: LLVMValueRef, caseValue: LLVMValueRef, dest: LLVMBasicBlockRef): Unit {
+        unsafe { LLVMAddCase(switchValue, caseValue, dest) }
+    }
+
     public func CreateICmp(predicate: LLVMIntPredicate, left: LLVMValueRef, right: LLVMValueRef,
         name!: String = ""): LLVMValueRef {
         var result = LLVMNullValue()

@@ -23,6 +23,9 @@ public func HandleTerminatorExpression(irBuilder: IRBuilder2, chirExpr: Expressi
         }
         return LLVMNullValue()
     }
+    if (kind == ExprKind.MULTIBRANCH) {
+        return HandleMultiBranchTerminator(irBuilder, chirExpr)
+    }
     if (kind == ExprKind.EXIT) {
         if (chirExpr.GetNumOfOperands() == 0) {
             return irBuilder.CreateRetVoid()
@@ -54,6 +57,24 @@ public func HandleTerminatorExpression(irBuilder: IRBuilder2, chirExpr: Expressi
         })
     }
     return LLVMNullValue()
+}
+
+private func HandleMultiBranchTerminator(irBuilder: IRBuilder2, chirExpr: Expression): LLVMValueRef {
+    let successors = GetTerminatorSuccessors(chirExpr)
+    if (chirExpr.GetNumOfOperands() == 0 || successors.isEmpty()) {
+        return LLVMNullValue()
+    }
+    let condValue = irBuilder.GetCGModule().MaterializeValue(irBuilder, chirExpr.GetOperand(0)).GetRawValue()
+    let defaultDest = GetOrCreateTerminatorDest(irBuilder, successors[0])
+    let caseCountHint = if (successors.size > 1) { UInt32(successors.size - 1) } else { 0u32 }
+    let switchValue = irBuilder.CreateSwitch(condValue, defaultDest, caseCountHint)
+    var caseIdx: Int64 = 1
+    while (caseIdx < successors.size && caseIdx < chirExpr.GetNumOfOperands()) {
+        let caseValue = irBuilder.GetCGModule().MaterializeValue(irBuilder, chirExpr.GetOperand(caseIdx)).GetRawValue()
+        irBuilder.AddSwitchCase(switchValue, caseValue, GetOrCreateTerminatorDest(irBuilder, successors[caseIdx]))
+        caseIdx++
+    }
+    return switchValue
 }
 
 private func HandleRaiseException(irBuilder: IRBuilder2, chirExpr: Expression): LLVMValueRef {

@@ -188,6 +188,9 @@ foreign {
     func LLVMBuildRet(builder: LLVMBuilderRef, value: LLVMValueRef): LLVMValueRef
     func LLVMBuildBr(builder: LLVMBuilderRef, dest: LLVMBasicBlockRef): LLVMValueRef
     func LLVMBuildCondBr(builder: LLVMBuilderRef, cond: LLVMValueRef, trueDest: LLVMBasicBlockRef, falseDest: LLVMBasicBlockRef): LLVMValueRef
+    func LLVMBuildSwitch(builder: LLVMBuilderRef, value: LLVMValueRef, elseBlock: LLVMBasicBlockRef,
+        numCases: UInt32): LLVMValueRef
+    func LLVMAddCase(switchValue: LLVMValueRef, onValue: LLVMValueRef, dest: LLVMBasicBlockRef): Unit
     func LLVMBuildAlloca(builder: LLVMBuilderRef, valueType: LLVMTypeRef, name: CString): LLVMValueRef
     func LLVMBuildLoad2(builder: LLVMBuilderRef, valueType: LLVMTypeRef, pointer: LLVMValueRef, name: CString): LLVMValueRef
     func LLVMBuildStore(builder: LLVMBuilderRef, value: LLVMValueRef, pointer: LLVMValueRef): LLVMValueRef
