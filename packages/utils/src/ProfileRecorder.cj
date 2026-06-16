@@ -37,7 +37,11 @@ public class ProfileRecorder <: Resource {
         if (closed) {
             return
         }
-        Stop(title, subtitle, desc: desc)
+        try {
+            Stop(title, subtitle, desc: desc)
+        } catch (e: Exception) {
+            ()
+        }
         closed = true
     }
 

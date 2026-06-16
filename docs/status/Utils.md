@@ -1,6 +1,6 @@
 # Utils Port Status
 
-Date: 2026-06-16
+Date: 2026-06-17
 
 Build: `cjpm build` passes.
 
@@ -10,14 +10,22 @@ Implemented:
 - Added working ports for constants, check/assert helpers, pointer wrappers, partially persistent set helpers, SipHash, string/numeric helpers, C++ header-style hash/collection predicates, bounded native random hex generation, file/path helpers with C++-style canonicalized I/O and length checks, Unicode conversion/range helpers, generated NFC/width/XID tables with C++-style salted NFC lookups, floating point formatting, ICE helpers, semaphore/task queue/parallel dispatch/profile recorder utilities, user profiling output, POSIX/Windows signal registration, platform memory trimming/pressure relief, casting helpers, and standard-library metadata maps.
 - Filled in interop constants from `ConstantsUtils.h`, corrected Cangjie cast facade recursion, preserved C++ task-queue exception storage behavior, and matched `StringRef.ToUTF32` invalid UTF-8 recovery.
 - Preserved native/back-end boundaries by keeping LLVM and external native behavior behind Cangjie FFI or standard runtime APIs.
-- Kept the package self-contained within `packages/utils` and avoided manifest or cross-module package edits.
+- Kept code changes within the Utils module and added only the required `utils -> lex` package dependency for real lexer token metadata.
 - Deepened FileUtil platform fidelity: public path/injection constants now match the C++ Windows/POSIX split, normalization uses platform slash rules, empty-base `JoinPath` matches C++, environment path splitting is platform-specific, case-sensitive `FileExist` verifies the directory entry name, and package/serialization/LTO path helpers share the same separator handling.
 - Matched `FileUtil::Access` and `AccessWithResult` to the C++ `access(2)`/`_access` model: file mode flags now use native `F_OK`/`X_OK`/`W_OK`/`R_OK` values, Unix failures distinguish `ENOENT`, `EACCES`, and unknown errors, and the file-scan `_test.cj` filter now follows the C++ suffix/substring rules.
+- Tightened `FileUtil.RemoveDirectoryRecursively` to match the C++ entrypoint: regular files are rejected, symbolic links are removed without descending, and recursive deletion is reserved for real directories.
 - Deepened Semaphore startup behavior by deriving the singleton count from processor count on Linux/macOS via `sysconf`, preserving the C++ "leave two cores free, minimum one" policy.
 - Aligned `Semaphore.SetCount` with the C++ implementation by updating the count under lock without broadcasting to waiters.
 - Corrected Unicode identifier classification to match the lexer token tables: raw identifiers can wrap keywords, `_` and built-in type token names are rejected as identifiers, and contextual modifier keywords are allowed only when requested.
 - De-isolated Unicode keyword and ICE version/color handling to real sibling packages: Utils now depends on `basic` for compiler version and ANSI ICE prefix constants, and on `lex` for `TOKENS`, `TokenKind.IDENTIFIER`, and contextual keyword classification instead of local compatibility copies.
+- Matched the C++ identifier keyword set construction by deriving keywords from lexer `TOKENS[0..<TokenKind.IDENTIFIER]` plus boolean literals, so future lexer keyword changes are reflected without another Utils-local copy.
+- Added the C++ UTF-32 raw-byte conversion path in Unicode utilities, including multiple-of-four validation, native/scalar BOM skipping, and swapped-BOM byte-order correction before strict UTF-8 emission.
+- Restored the C++ `UserTimer` unfinished-scope diagnostic when profile output is collected while a timer has a beginning time but no ending time, including the Windows/plain and non-Windows/red message split.
+- Aligned `ProfileRecorder` resource cleanup with the C++ destructor by swallowing `Stop` exceptions during close so profiling cleanup cannot leak exceptions.
 - Deepened `StdUtils` integer conversion fidelity: `Sto*` helpers now follow the C++ `std::sto*` family more closely for leading ASCII whitespace, optional signs, base-0 autodetection, hexadecimal prefixes, partial numeric consumption, and range failures.
+- Switched `StdUtils.Stod`/`Stold` to libc `strtod` behind C FFI with C++-style subject detection, preserving leading whitespace, `inf`/`nan`, and partial numeric consumption behavior that `std::stod` accepts.
+- Added libc `errno`/`ERANGE` handling around `StdUtils.Stod`/`Stold`, so floating overflow and underflow now map to `None` like the C++ wrappers catching `std::out_of_range`.
+- Brought `UserBase` profiling output closer to the C++ implementation: result-generation exceptions now print the same `OutputResult` diagnostic, and JSON profile writes no longer auto-create missing parent directories.
 - Restored the C++ signal utility split with `SignalUtil.cj`, and brought Unix alternate signal stack setup closer to `SignalUnix.cpp` by querying/preserving the old stack and reusing an existing active or sufficiently large alternate stack.
 
 Known fidelity caveats:
