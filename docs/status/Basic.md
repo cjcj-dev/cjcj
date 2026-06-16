@@ -53,6 +53,9 @@ Deepening pass updates:
   behavior implemented by Basic-local helpers because importing `utils.FileUtil` from Basic would create a cycle.
   `IsInMacroCallSourceFile` follows the C++ size/source-id guard shape, but full path-helper de-isolation remains
   blocked on package graph work.
+- Matched the C++ `DisplayWidth(std::string)` malformed UTF-8 behavior by validating the input byte sequence before
+  display-width decoding and returning the raw byte length for invalid, overlong, surrogate, truncated, or out-of-range
+  UTF-8 sequences.
 
 Implemented:
 
@@ -70,6 +73,8 @@ Implemented:
   deterministic `DiagnosticBuilder.close()/Emit()` cleanup with `Resource` support for try-with-resource use, C++-schema diagnostic JSON formatting, multi-line/control-character-aware diagnostic text rendering, same-line hint composition, macro-call message/note swapping, compressed long source excerpts, C++-style help substitution source rendering, macro expansion excerpts, generic object and lambda pattern parsing for interop package configs, and UTF-8/GBK encoding detection with optional normalization.
 - Corrected `MacroCallDiagInfo` and `DiagnosticEngineImpl` macro-position lookups to match the C++ `std::map::lower_bound` behavior, including the LSP exact-key successor case used when mapping macro-generated positions back to source positions.
 - Tightened interop package config validation to mirror the C++ reader: per-package unknown strategies now fail validation, invalid include/exclude combinations are rejected, `GenericTypeStrategy = "None"` rejects generic instantiations, and invalid `generic_object_configuration` entries now fail parsing instead of being ignored.
+- Aligned `DisplayWidth(String)` with the C++ `std::range_error` fallback path for malformed UTF-8 so diagnostics keep
+  byte-count spacing instead of decoding permissive replacement code points.
 - Kept LLVM/native backend out of scope as required; Basic does not bind LLVM directly.
 
 Known fidelity caveats:
