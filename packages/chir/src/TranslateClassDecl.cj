@@ -24,7 +24,7 @@ extend AST2CHIRDeclTranslator {
         }
         RegisterTypeDef(spec.name, def)
         if (let Some(pkg) <- currentPackage) {
-            AddTypeDefToPackage(pkg, spec.kind, def)
+            AddTypeDefToPackage(pkg, spec, def)
         }
         return def
     }
@@ -65,19 +65,74 @@ extend AST2CHIRDeclTranslator {
     }
 
     public func LowerMemberVarsAndMethods(spec: AST2CHIRNominalSpec, def: CustomTypeDef): Unit {
-        for (varSpec in spec.instanceVars) {
-            if (ShouldTranslateMember(spec, varSpec.sourceFileKey)) {
-                if (ShouldAddMemberVar(def, varSpec)) {
-                    AddMemberVarDecl(def, varSpec)
-                    LowerMemberVarInitializer(spec, varSpec)
-                }
+        if (!spec.memberDecls.isEmpty()) {
+            for (memberSpec in spec.memberDecls) {
+                LowerNominalMember(spec, def, memberSpec)
             }
+            return
+        }
+        LowerLegacyMemberLists(spec, def)
+    }
+
+    private func LowerLegacyMemberLists(spec: AST2CHIRNominalSpec, def: CustomTypeDef): Unit {
+        for (varSpec in spec.instanceVars) {
+            LowerMemberVarSpec(spec, def, varSpec)
         }
         for (methodSpec in spec.methods) {
-            if (ShouldTranslateFunctionMember(spec, methodSpec)) {
-                methodSpec.SetOwnerType(spec.name, isInstanceMember: !methodSpec.attributes.contains(Attribute.STATIC))
-                LowerFunction(ActivePackageName(spec.packageName), methodSpec)
+            LowerMemberMethodSpec(spec, methodSpec)
+        }
+        for (propertySpec in spec.properties) {
+            LowerPropertySpec(spec, propertySpec)
+        }
+    }
+
+    private func LowerNominalMember(spec: AST2CHIRNominalSpec, def: CustomTypeDef,
+        memberSpec: AST2CHIRNominalMemberSpec): Unit {
+        match (memberSpec.kind) {
+            case AST2CHIRNominalMemberKind.VAR =>
+                if (let Some(varSpec) <- memberSpec.varSpec) {
+                    LowerMemberVarSpec(spec, def, varSpec)
+                }
+            case AST2CHIRNominalMemberKind.METHOD =>
+                if (let Some(methodSpec) <- memberSpec.methodSpec) {
+                    LowerMemberMethodSpec(spec, methodSpec)
+                }
+            case AST2CHIRNominalMemberKind.PROPERTY =>
+                if (let Some(propertySpec) <- memberSpec.propertySpec) {
+                    LowerPropertySpec(spec, propertySpec)
+                }
+        }
+    }
+
+    private func LowerMemberVarSpec(owner: AST2CHIRNominalSpec, def: CustomTypeDef,
+        varSpec: AST2CHIRMemberVarSpec): Unit {
+        if (ShouldTranslateMember(owner, varSpec.sourceFileKey)) {
+            if (ShouldAddMemberVar(def, varSpec)) {
+                AddMemberVarDecl(def, varSpec)
+                LowerMemberVarInitializer(owner, varSpec)
             }
+        }
+    }
+
+    private func LowerMemberMethodSpec(owner: AST2CHIRNominalSpec, methodSpec: AST2CHIRFunctionSpec): Unit {
+        if (ShouldTranslateFunctionMember(owner, methodSpec)) {
+            methodSpec.SetOwnerType(owner.name, isInstanceMember: !methodSpec.attributes.contains(Attribute.STATIC))
+            LowerFunction(ActivePackageName(owner.packageName), methodSpec)
+        }
+    }
+
+    private func LowerPropertySpec(owner: AST2CHIRNominalSpec, propertySpec: AST2CHIRPropertySpec): Unit {
+        if (propertySpec.isCommonMatchedWithSpecific) {
+            return
+        }
+        if (!ShouldTranslateMember(owner, propertySpec.sourceFileKey)) {
+            return
+        }
+        for (getterSpec in propertySpec.getters) {
+            LowerMemberMethodSpec(owner, getterSpec)
+        }
+        for (setterSpec in propertySpec.setters) {
+            LowerMemberMethodSpec(owner, setterSpec)
         }
     }
 
@@ -110,18 +165,30 @@ extend AST2CHIRDeclTranslator {
         return ShouldTranslateMember(owner, methodSpec.sourceFileKey)
     }
 
-    private func AddTypeDefToPackage(pkg: Package, kind: AST2CHIRNominalKind, def: CustomTypeDef): Unit {
-        match (kind) {
+    private func AddTypeDefToPackage(pkg: Package, spec: AST2CHIRNominalSpec, def: CustomTypeDef): Unit {
+        let useImportedList = spec.attributes.contains(Attribute.IMPORTED) &&
+            !spec.attributes.contains(Attribute.SRC_CODE_IMPORTED)
+        match (spec.kind) {
             case AST2CHIRNominalKind.CLASS =>
-                if (let Some(classDef) <- (def as ClassDef)) { pkg.AddClass(classDef) }
+                if (let Some(classDef) <- (def as ClassDef)) {
+                    if (useImportedList) { pkg.AddImportedClass(classDef) } else { pkg.AddClass(classDef) }
+                }
             case AST2CHIRNominalKind.INTERFACE =>
-                if (let Some(interfaceDef) <- (def as ClassDef)) { pkg.AddClass(interfaceDef) }
+                if (let Some(interfaceDef) <- (def as ClassDef)) {
+                    if (useImportedList) { pkg.AddImportedClass(interfaceDef) } else { pkg.AddClass(interfaceDef) }
+                }
             case AST2CHIRNominalKind.STRUCT =>
-                if (let Some(structDef) <- (def as StructDef)) { pkg.AddStruct(structDef) }
+                if (let Some(structDef) <- (def as StructDef)) {
+                    if (useImportedList) { pkg.AddImportedStruct(structDef) } else { pkg.AddStruct(structDef) }
+                }
             case AST2CHIRNominalKind.ENUM =>
-                if (let Some(enumDef) <- (def as EnumDef)) { pkg.AddEnum(enumDef) }
+                if (let Some(enumDef) <- (def as EnumDef)) {
+                    if (useImportedList) { pkg.AddImportedEnum(enumDef) } else { pkg.AddEnum(enumDef) }
+                }
             case AST2CHIRNominalKind.EXTEND =>
-                if (let Some(extendDef) <- (def as ExtendDef)) { pkg.AddExtend(extendDef) }
+                if (let Some(extendDef) <- (def as ExtendDef)) {
+                    if (useImportedList) { pkg.AddImportedExtend(extendDef) } else { pkg.AddExtend(extendDef) }
+                }
         }
     }
 }

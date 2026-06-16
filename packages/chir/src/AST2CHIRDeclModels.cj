@@ -10,6 +10,12 @@ public enum AST2CHIRNominalKind {
     | EXTEND
 }
 
+public enum AST2CHIRNominalMemberKind {
+    | VAR
+    | METHOD
+    | PROPERTY
+}
+
 public func AST2CHIRNominalKindIndex(kind: AST2CHIRNominalKind): Int64 {
     return match (kind) {
         case AST2CHIRNominalKind.CLASS => 0
@@ -26,6 +32,24 @@ extend AST2CHIRNominalKind <: Equatable<AST2CHIRNominalKind> {
     }
 
     public operator func !=(right: AST2CHIRNominalKind): Bool {
+        return !(this == right)
+    }
+}
+
+public func AST2CHIRNominalMemberKindIndex(kind: AST2CHIRNominalMemberKind): Int64 {
+    return match (kind) {
+        case AST2CHIRNominalMemberKind.VAR => 0
+        case AST2CHIRNominalMemberKind.METHOD => 1
+        case AST2CHIRNominalMemberKind.PROPERTY => 2
+    }
+}
+
+extend AST2CHIRNominalMemberKind <: Equatable<AST2CHIRNominalMemberKind> {
+    public operator func ==(right: AST2CHIRNominalMemberKind): Bool {
+        return AST2CHIRNominalMemberKindIndex(this) == AST2CHIRNominalMemberKindIndex(right)
+    }
+
+    public operator func !=(right: AST2CHIRNominalMemberKind): Bool {
         return !(this == right)
     }
 }
@@ -98,6 +122,63 @@ public class AST2CHIREnumCtorSpec {
     }
 }
 
+public class AST2CHIRPropertySpec {
+    public let getters: ArrayList<AST2CHIRFunctionSpec> = ArrayList<AST2CHIRFunctionSpec>()
+    public let setters: ArrayList<AST2CHIRFunctionSpec> = ArrayList<AST2CHIRFunctionSpec>()
+    public var sourceFileKey: String = ""
+    public var isCommonMatchedWithSpecific: Bool = false
+
+    public init() {}
+
+    public func AddGetter(spec: AST2CHIRFunctionSpec): AST2CHIRPropertySpec {
+        getters.add(spec)
+        return this
+    }
+
+    public func AddSetter(spec: AST2CHIRFunctionSpec): AST2CHIRPropertySpec {
+        setters.add(spec)
+        return this
+    }
+
+    public func SetSourceFileKey(key: String): AST2CHIRPropertySpec {
+        sourceFileKey = key
+        return this
+    }
+
+    public func SetCommonMatchedWithSpecific(value: Bool): AST2CHIRPropertySpec {
+        isCommonMatchedWithSpecific = value
+        return this
+    }
+}
+
+public class AST2CHIRNominalMemberSpec {
+    public let kind: AST2CHIRNominalMemberKind
+    public let varSpec: Option<AST2CHIRMemberVarSpec>
+    public let methodSpec: Option<AST2CHIRFunctionSpec>
+    public let propertySpec: Option<AST2CHIRPropertySpec>
+
+    public init(spec: AST2CHIRMemberVarSpec) {
+        kind = AST2CHIRNominalMemberKind.VAR
+        varSpec = Some(spec)
+        methodSpec = None
+        propertySpec = None
+    }
+
+    public init(spec: AST2CHIRFunctionSpec) {
+        kind = AST2CHIRNominalMemberKind.METHOD
+        varSpec = None
+        methodSpec = Some(spec)
+        propertySpec = None
+    }
+
+    public init(spec: AST2CHIRPropertySpec) {
+        kind = AST2CHIRNominalMemberKind.PROPERTY
+        varSpec = None
+        methodSpec = None
+        propertySpec = Some(spec)
+    }
+}
+
 public class AST2CHIRNominalSpec {
     public let kind: AST2CHIRNominalKind
     public let name: String
@@ -108,6 +189,8 @@ public class AST2CHIRNominalSpec {
     public let attributes: ArrayList<Attribute> = ArrayList<Attribute>()
     public let instanceVars: ArrayList<AST2CHIRMemberVarSpec> = ArrayList<AST2CHIRMemberVarSpec>()
     public let methods: ArrayList<AST2CHIRFunctionSpec> = ArrayList<AST2CHIRFunctionSpec>()
+    public let properties: ArrayList<AST2CHIRPropertySpec> = ArrayList<AST2CHIRPropertySpec>()
+    public let memberDecls: ArrayList<AST2CHIRNominalMemberSpec> = ArrayList<AST2CHIRNominalMemberSpec>()
     public let enumCtors: ArrayList<AST2CHIREnumCtorSpec> = ArrayList<AST2CHIREnumCtorSpec>()
     public let implementedInterfaces: ArrayList<String> = ArrayList<String>()
     public var superClassName: Option<String> = None
@@ -146,12 +229,20 @@ public class AST2CHIRNominalSpec {
 
     public func AddInstanceVar(spec: AST2CHIRMemberVarSpec): AST2CHIRNominalSpec {
         instanceVars.add(spec)
+        memberDecls.add(AST2CHIRNominalMemberSpec(spec))
         return this
     }
 
     public func AddMethod(spec: AST2CHIRFunctionSpec): AST2CHIRNominalSpec {
         spec.SetOwnerType(name, isInstanceMember: !spec.attributes.contains(Attribute.STATIC))
         methods.add(spec)
+        memberDecls.add(AST2CHIRNominalMemberSpec(spec))
+        return this
+    }
+
+    public func AddProperty(spec: AST2CHIRPropertySpec): AST2CHIRNominalSpec {
+        properties.add(spec)
+        memberDecls.add(AST2CHIRNominalMemberSpec(spec))
         return this
     }
 

@@ -6,10 +6,12 @@ extend AST2CHIRDeclTranslator {
     public func LowerFunction(defaultPackage: String, spec: AST2CHIRFunctionSpec): Function {
         if (let Some(existing) <- TryGetFunction(spec.name)) {
             AttachFunctionToOwner(existing, spec)
+            LowerDefaultParamFunctions(defaultPackage, existing, spec)
+            LowerGenericInstantiationFunctions(defaultPackage, existing, spec)
             return existing
         }
         let funcTy = BuildFunctionType(spec)
-        let packageName = ResolvePackageName(defaultPackage, "")
+        let packageName = ResolvePackageName(defaultPackage, spec.packageName)
         let fn = builder.CreateFunction(funcTy, spec.name, srcCodeIdentifier: spec.srcCodeIdentifier,
             rawMangledName: spec.rawMangledName, packageName: packageName)
         fn.SetFuncKind(spec.funcKind)
@@ -25,6 +27,7 @@ extend AST2CHIRDeclTranslator {
         }
         AttachFunctionToOwner(fn, spec)
         LowerDefaultParamFunctions(defaultPackage, fn, spec)
+        LowerGenericInstantiationFunctions(defaultPackage, fn, spec)
         return fn
     }
 
@@ -99,6 +102,21 @@ extend AST2CHIRDeclTranslator {
             }
             let defaultFn = LowerFunction(defaultPackage, defaultSpec)
             defaultFn.SetParamDftValHostFunc(host)
+        }
+    }
+
+    private func LowerGenericInstantiationFunctions(defaultPackage: String, host: Function,
+        spec: AST2CHIRFunctionSpec): Unit {
+        for (instSpec in spec.genericInstantiations) {
+            if (let Some(ownerName) <- spec.ownerTypeName) {
+                if (instSpec.ownerTypeName.isNone()) {
+                    instSpec.SetOwnerType(ownerName, isInstanceMember: spec.isInstanceMember)
+                }
+            }
+            if (instSpec.genericDeclName.isNone()) {
+                instSpec.SetGenericDeclName(host.GetIdentifier())
+            }
+            LowerFunction(defaultPackage, instSpec)
         }
     }
 

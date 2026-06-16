@@ -14,16 +14,18 @@ public class AST2CHIRGlobalSpec {
     public let name: String
     public let srcCodeIdentifier: String
     public let rawMangledName: String
+    public let packageName: String
     public let ty: Type
     public let initialValue: Option<LiteralValue>
     public let attributes: ArrayList<Attribute> = ArrayList<Attribute>()
     public var useRefStorage: Bool = false
 
     public init(name: String, ty: Type, srcCodeIdentifier!: String = "", rawMangledName!: String = "",
-        initialValue!: Option<LiteralValue> = None) {
+        packageName!: String = "", initialValue!: Option<LiteralValue> = None) {
         this.name = name
         this.srcCodeIdentifier = srcCodeIdentifier
         this.rawMangledName = rawMangledName
+        this.packageName = packageName
         this.ty = ty
         this.initialValue = initialValue
     }
@@ -43,6 +45,7 @@ public class AST2CHIRFunctionSpec {
     public let name: String
     public let srcCodeIdentifier: String
     public let rawMangledName: String
+    public let packageName: String
     public let paramTypes: ArrayList<Type> = ArrayList<Type>()
     public let returnType: Type
     public let funcKind: FuncKind
@@ -51,6 +54,7 @@ public class AST2CHIRFunctionSpec {
     public let attributes: ArrayList<Attribute> = ArrayList<Attribute>()
     public let genericTypeParams: ArrayList<GenericType> = ArrayList<GenericType>()
     public let defaultParamFunctions: ArrayList<AST2CHIRFunctionSpec> = ArrayList<AST2CHIRFunctionSpec>()
+    public let genericInstantiations: ArrayList<AST2CHIRFunctionSpec> = ArrayList<AST2CHIRFunctionSpec>()
     public var ownerTypeName: Option<String> = None
     public var isInstanceMember: Bool = false
     public var genericDeclName: Option<String> = None
@@ -58,10 +62,12 @@ public class AST2CHIRFunctionSpec {
     public var isCommonMatchedWithSpecific: Bool = false
 
     public init(name: String, paramTypes: ArrayList<Type>, returnType: Type, srcCodeIdentifier!: String = "",
-        rawMangledName!: String = "", funcKind!: FuncKind = FuncKind.DEFAULT, emitBody!: Bool = true) {
+        rawMangledName!: String = "", packageName!: String = "", funcKind!: FuncKind = FuncKind.DEFAULT,
+        emitBody!: Bool = true) {
         this.name = name
         this.srcCodeIdentifier = srcCodeIdentifier
         this.rawMangledName = rawMangledName
+        this.packageName = packageName
         for (ty in paramTypes) {
             this.paramTypes.add(ty)
         }
@@ -101,6 +107,11 @@ public class AST2CHIRFunctionSpec {
         return this
     }
 
+    public func AddGenericInstantiation(spec: AST2CHIRFunctionSpec): AST2CHIRFunctionSpec {
+        genericInstantiations.add(spec)
+        return this
+    }
+
     public func SetSourceFileKey(key: String): AST2CHIRFunctionSpec {
         sourceFileKey = key
         return this
@@ -118,6 +129,8 @@ public class AST2CHIRPackageSpec {
     public let globals: ArrayList<AST2CHIRGlobalSpec> = ArrayList<AST2CHIRGlobalSpec>()
     public let functions: ArrayList<AST2CHIRFunctionSpec> = ArrayList<AST2CHIRFunctionSpec>()
     public var mergingSpecific: Bool = false
+    public var packageInitFunction: Option<AST2CHIRFunctionSpec> = None
+    public var packageLiteralInitFunction: Option<AST2CHIRFunctionSpec> = None
 
     public init(name: String) {
         this.name = name
@@ -140,6 +153,16 @@ public class AST2CHIRPackageSpec {
 
     public func AddFunction(spec: AST2CHIRFunctionSpec): AST2CHIRPackageSpec {
         functions.add(spec)
+        return this
+    }
+
+    public func SetPackageInitFunction(spec: AST2CHIRFunctionSpec): AST2CHIRPackageSpec {
+        packageInitFunction = Some(spec)
+        return this
+    }
+
+    public func SetPackageLiteralInitFunction(spec: AST2CHIRFunctionSpec): AST2CHIRPackageSpec {
+        packageLiteralInitFunction = Some(spec)
         return this
     }
 }

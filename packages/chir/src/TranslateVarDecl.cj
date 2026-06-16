@@ -8,7 +8,7 @@ extend AST2CHIRDeclTranslator {
             return existing
         }
         let storageTy = if (spec.useRefStorage) { builder.context.GetRefTy(spec.ty) } else { spec.ty }
-        let packageName = ResolvePackageName(defaultPackage, "")
+        let packageName = ResolvePackageName(defaultPackage, spec.packageName)
         let globalVar = builder.CreateGlobalVar(storageTy, spec.name, srcCodeIdentifier: spec.srcCodeIdentifier,
             rawMangledName: spec.rawMangledName, packageName: packageName)
         ApplyAttributes(globalVar, spec.attributes)
@@ -38,7 +38,7 @@ extend AST2CHIRDeclTranslator {
         } else {
             spec.rawMangledName + "$init"
         }
-        let packageName = ResolvePackageName(defaultPackage, "")
+        let packageName = ResolvePackageName(defaultPackage, spec.packageName)
         let initFn = builder.CreateFunction(initFnTy, initIdentifier, srcCodeIdentifier: initSrcCodeIdentifier,
             rawMangledName: initRawMangledName, packageName: packageName)
         initFn.SetFuncKind(FuncKind.GLOBALVAR_INIT)

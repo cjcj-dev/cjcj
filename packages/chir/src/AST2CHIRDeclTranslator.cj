@@ -143,6 +143,14 @@ extend AST2CHIRDeclTranslator {
         for (funcSpec in spec.functions) {
             LowerFunction(spec.name, funcSpec)
         }
+        if (let Some(initSpec) <- spec.packageInitFunction) {
+            let initFn = LowerFunction(spec.name, initSpec)
+            pkg.SetPackageInitFunc(initFn)
+        }
+        if (let Some(literalInitSpec) <- spec.packageLiteralInitFunction) {
+            let literalInitFn = LowerFunction(spec.name, literalInitSpec)
+            pkg.SetPackageLiteralInitFunc(literalInitFn)
+        }
         for (typeSpec in spec.types) {
             LowerNominalDecl(spec.name, typeSpec)
         }

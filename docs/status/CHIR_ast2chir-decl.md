@@ -22,9 +22,11 @@ Deepened `packages/chir/src` declaration lowering for the existing CHIR self-hos
   - fill nominal contents after symbols are available
 - Extended the existing compatibility specs to describe declaration behavior now needed by the translator:
   - global attributes and optional C++-style ref storage
-  - function attributes, source parameter names, owner type, instance-member handling, and generic-decl linking
+  - declared package names for globals/functions
+  - function attributes, source parameter names, owner type, instance-member handling, generic-decl linking, and generic instantiation children
   - nominal declaration specs for class, interface, struct, enum, and extend
-  - member variables and enum constructors
+  - ordered nominal members, member variables, properties, and enum constructors
+  - package init and package literal-init function hooks
 - Ported behavior that the current CHIR IR can represent:
   - global variables with literal initializer functions
   - function signatures with implicit `this` parameter for instance members
@@ -32,13 +34,18 @@ Deepened `packages/chir/src` declaration lowering for the existing CHIR self-hos
   - no-body handling for abstract and foreign functions
   - package-level function registration plus owner `CustomTypeDef` method attachment
   - default-parameter desugar functions with host-function linkage
+  - generic instantiation child functions linked back to their generic declaration
+  - package init and package literal-init functions stored on the CHIR package
+  - imported nominal definitions routed to package imported type lists
   - class superclass and implemented-interface links
   - interface-as-class-def lowering with abstract attribute
-  - struct member/method lowering
+  - struct member/method/property lowering
+  - class/interface/enum/extend property accessor attachment as member functions
+  - member lowering in C++ declaration order when specs are populated through the builder API
   - C++-style member filtering for specific/common merge using descriptor source-file keys
   - instance member initializer functions emitted as owner methods
   - enum constructor payload lowering
-  - duplicate enum constructor suppression at the descriptor level
+  - duplicate enum constructor suppression at the descriptor level with payload type matching
   - extend target type setup and registration on custom or builtin extended type
 
 ## Remaining Gaps
@@ -54,4 +61,4 @@ Deepened `packages/chir/src` declaration lowering for the existing CHIR self-hos
 
 ## Coverage Estimate
 
-For declaration lowering in this constrained CHIR package source area: about 25% behavior coverage versus the C++ AST2CHIR declaration paths. The pass materially improves symbol/nominal/member lowering over the previous package-spec summary lowering, but full typed-AST fidelity is still blocked by the package dependency boundary and missing IR features listed above.
+For declaration lowering in this constrained CHIR package source area: about 28% behavior coverage versus the C++ AST2CHIR declaration paths. The pass materially improves symbol/nominal/member lowering over the previous package-spec summary lowering, but full typed-AST fidelity is still blocked by the package dependency boundary and missing IR features listed above.
