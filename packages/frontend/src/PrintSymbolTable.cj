@@ -55,6 +55,7 @@ private func AddSymbolToInfo(packages: ArrayList<Symbol>, file2nodesMap: HashMap
 }
 
 private func HandleFileNode(file2nodesMap: HashMap<String, (File, ArrayList<Node>)>, symbol: Symbol, node: Node): Unit {
+    let _ = symbol
     if (node.astKind != ASTKind.FILE) {
         return
     }

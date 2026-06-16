@@ -19,6 +19,9 @@ public class CompilerInvocation {
             return false
         }
         frontendOptions.SetCompilationCachedPath()
+        if (!SetupConditionalCompilationCfg(frontendOptions)) {
+            return false
+        }
         globalOptions.CopyBaseFrom(frontendOptions)
         return true
     }

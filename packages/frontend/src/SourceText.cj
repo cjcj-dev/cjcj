@@ -377,6 +377,18 @@ public func RemoveDirectoryRecursively(path: String): Bool {
     }
 }
 
+public func CreateDirs(path: String): Bool {
+    if (path.isEmpty()) {
+        return false
+    }
+    try {
+        FSDirectory.create(path, recursive: true)
+        return true
+    } catch (e: Exception) {
+        return IsDir(path)
+    }
+}
+
 public func GetAllFilesUnderCurrentPath(path: String, extension: String, shouldSkipTestFiles!: Bool = true,
     shouldSkipRegularFiles!: Bool = false): ArrayList<String> {
     let out = ArrayList<String>()

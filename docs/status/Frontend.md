@@ -22,12 +22,13 @@ the C++ Frontend component split:
 The package now contains real argument parsing for frontend actions, source
 management, tokenization for `DumpTokens`, package/file/declaration bookkeeping,
 module/package parsing from source files or cache buffers, package consistency
-checks, conditional directive pruning, APILevel macro-declaration materialization,
+checks, `--cfg` and `--int-overflow` option handling, cfg-file loading,
+conditional directive pruning, APILevel macro-declaration materialization,
 dependency-scan JSON data, symbol-table JSON output, APILevel custom annotation
-merging from `.cj.d` packages, observer dispatch, compile-stage ordering, dump
-AST rendering, incremental summary collection, generic declaration collection,
-deterministic CHIR summary generation, result/CJO summary writing, cache-path
-handling, and CHIR-data bookkeeping.
+merging from `.cj.d` packages, observer dispatch, compile-stage ordering,
+numbered AST dump directory creation, incremental summary collection, generic
+declaration collection, deterministic CHIR summary generation, result/CJO
+summary writing, cache-path handling, and CHIR-data bookkeeping.
 
 ## Important Blocker
 

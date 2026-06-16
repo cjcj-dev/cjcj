@@ -28,6 +28,8 @@ public enum OptionID {
     | VERBOSE
     | ENABLE_MACRO_IN_LSP
     | NO_SUB_PACKAGE
+    | CONDITIONAL_COMPILATION_CONFIG
+    | INT_OVERFLOW_MODE
     | INPUT
 }
 
@@ -58,7 +60,9 @@ private func OptionIDIndex(id: OptionID): Int64 {
         case OptionID.VERBOSE => 22
         case OptionID.ENABLE_MACRO_IN_LSP => 23
         case OptionID.NO_SUB_PACKAGE => 24
-        case OptionID.INPUT => 25
+        case OptionID.CONDITIONAL_COMPILATION_CONFIG => 25
+        case OptionID.INT_OVERFLOW_MODE => 26
+        case OptionID.INPUT => 27
     }
 }
 
@@ -171,6 +175,8 @@ public class OptionTable {
         add("--verbose", OptionID.VERBOSE, OptionKind.FLAG, alias: "-V")
         add("--enable-macro-in-lsp", OptionID.ENABLE_MACRO_IN_LSP, OptionKind.FLAG)
         add("--no-sub-pkg", OptionID.NO_SUB_PACKAGE, OptionKind.FLAG)
+        add("--cfg", OptionID.CONDITIONAL_COMPILATION_CONFIG, OptionKind.SEPARATED)
+        add("--int-overflow", OptionID.INT_OVERFLOW_MODE, OptionKind.SEPARATED)
     }
 
     private func add(spelling: String, id: OptionID, kind: OptionKind, alias!: String = ""): Unit {
@@ -285,6 +291,7 @@ public open class GlobalOptions {
     public let directBuiltinDependencies: HashSet<String> = HashSet<String>()
     public let indirectBuiltinDependencies: HashSet<String> = HashSet<String>()
     public let passedWhenKeyValue: HashMap<String, String> = HashMap<String, String>()
+    public let passedWhenCfgPaths: ArrayList<String> = ArrayList<String>()
     public var compilePackage: Bool = false
     public var parseTest: Bool = false
     public var compileTestsOnly: Bool = false
@@ -309,7 +316,7 @@ public open class GlobalOptions {
     public var enableCompileDebug: Bool = false
     public var displayLineInfo: Bool = false
     public var interpreter: Bool = false
-    public var overflowStrategy: OverflowStrategy = OverflowStrategy.NA
+    public var overflowStrategy: OverflowStrategy = OverflowStrategy.THROWING
     public var jobs: Int64 = 1
     public var compilationCachedPath: String = ""
     public var compilationCachedDir: String = ""
@@ -333,6 +340,7 @@ public open class GlobalOptions {
     }
 
     protected open func ParseOption(arg: OptionArgInstance): Option<Bool> {
+        let _ = arg
         return None
     }
 
@@ -389,6 +397,20 @@ public open class GlobalOptions {
             enableMacroInLSP = true
         } else if (id == OptionID.NO_SUB_PACKAGE) {
             noSubPkg = true
+        } else if (id == OptionID.CONDITIONAL_COMPILATION_CONFIG) {
+            if (!ParsePassedWhenOption(this, arg.value)) {
+                return false
+            }
+        } else if (id == OptionID.INT_OVERFLOW_MODE) {
+            if (arg.value == "throwing") {
+                overflowStrategy = OverflowStrategy.THROWING
+            } else if (arg.value == "wrapping") {
+                overflowStrategy = OverflowStrategy.WRAPPING
+            } else if (arg.value == "saturating") {
+                overflowStrategy = OverflowStrategy.SATURATING
+            } else {
+                return false
+            }
         } else if (id == OptionID.UNKNOWN) {
             ()
         }
@@ -494,6 +516,7 @@ public open class GlobalOptions {
         copyStringSet(directBuiltinDependencies, other.directBuiltinDependencies)
         copyStringSet(indirectBuiltinDependencies, other.indirectBuiltinDependencies)
         copyStringMap(passedWhenKeyValue, other.passedWhenKeyValue)
+        replaceArrayList(passedWhenCfgPaths, other.passedWhenCfgPaths)
         compilePackage = other.compilePackage
         parseTest = other.parseTest
         compileTestsOnly = other.compileTestsOnly
@@ -525,6 +548,27 @@ public open class GlobalOptions {
         compilationCachedFileName = other.compilationCachedFileName
         argList = other.argList
     }
+}
+
+public func SetupConditionalCompilationCfg(opts: GlobalOptions): Bool {
+    if (!opts.passedWhenKeyValue.isEmpty()) {
+        return true
+    }
+    for (path in opts.passedWhenCfgPaths) {
+        let filePath = JoinPath(path, "cfg.toml")
+        if (FileExist(filePath)) {
+            return LoadCfgToml(filePath, opts.passedWhenKeyValue)
+        }
+    }
+    let defaultCfgFilePath = if (opts.packagePaths.isEmpty()) {
+        "cfg.toml"
+    } else {
+        JoinPath(opts.packagePaths[0], "cfg.toml")
+    }
+    if (!FileExist(defaultCfgFilePath)) {
+        return true
+    }
+    return LoadCfgToml(defaultCfgFilePath, opts.passedWhenKeyValue)
 }
 
 public enum DumpAction {
@@ -636,4 +680,158 @@ private func copyStringMap(target: HashMap<String, String>, source: HashMap<Stri
     for ((key, value) in source) {
         target.add(key, value)
     }
+}
+
+private func ParsePassedWhenOption(opts: GlobalOptions, value: String): Bool {
+    if (value.isEmpty()) {
+        return false
+    }
+    if (IsCfgPathMode(value)) {
+        let path = value.replace("\\=", "=")
+        if (!IsDir(path)) {
+            return false
+        }
+        opts.passedWhenCfgPaths.add(path)
+        return true
+    }
+    let entries = SplitStringByByte(value, b',')
+    for (entry in entries) {
+        if (!ParseCfgEntry(entry, opts.passedWhenKeyValue)) {
+            return false
+        }
+    }
+    return true
+}
+
+private func ParseCfgEntry(entry: String, target: HashMap<String, String>): Bool {
+    if (entry.isEmpty()) {
+        return false
+    }
+    if (let Some(eqPos) <- entry.indexOf("=")) {
+        let rawKey = TrimAscii(entry[0..eqPos])
+        let rawValue = TrimAscii(entry[eqPos + 1..])
+        let key = NormalizeCfgKey(rawKey)
+        if (key.isEmpty() || rawValue.isEmpty() || IsBuiltinCfgKey(key) || target.contains(key)) {
+            return false
+        }
+        target.add(key, rawValue)
+        return true
+    }
+    return false
+}
+
+private func LoadCfgToml(path: String, target: HashMap<String, String>): Bool {
+    let readResult = ReadFileContent(path)
+    if (!readResult[0]) {
+        return false
+    }
+    let lines = SplitLines(readResult[1])
+    for (line in lines) {
+        let content = StripLineComment(TrimAscii(line))
+        if (content.isEmpty()) {
+            continue
+        }
+        if (!ParseCfgEntry(content, target)) {
+            return false
+        }
+    }
+    return true
+}
+
+private func StripLineComment(value: String): String {
+    if (let Some(pos) <- value.indexOf("#")) {
+        return TrimAscii(value[0..pos])
+    }
+    return value
+}
+
+private func IsCfgPathMode(value: String): Bool {
+    return CountOccurrences(value, "=") == CountOccurrences(value, "\\=")
+}
+
+private func CountOccurrences(input: String, needle: String): Int64 {
+    if (needle.isEmpty()) {
+        return 0
+    }
+    var count: Int64 = 0
+    var offset: Int64 = 0
+    var foundPos = input.indexOf(needle, offset)
+    while (let Some(found) <- foundPos) {
+        count++
+        offset = found + needle.size
+        foundPos = input.indexOf(needle, offset)
+    }
+    return count
+}
+
+private func NormalizeCfgKey(rawKey: String): String {
+    if (rawKey.size > 2 && rawKey[0] == b'`' && rawKey[rawKey.size - 1] == b'`') {
+        return rawKey[1..rawKey.size - 1]
+    }
+    if (!IsIdentifierLike(rawKey)) {
+        return ""
+    }
+    return rawKey
+}
+
+private func IsIdentifierLike(value: String): Bool {
+    if (value.isEmpty()) {
+        return false
+    }
+    let bytes = value.toArray()
+    if (!IsIdentifierStartByte(bytes[0])) {
+        return false
+    }
+    var idx: Int64 = 1
+    while (idx < bytes.size) {
+        if (!IsIdentifierContinueByte(bytes[idx])) {
+            return false
+        }
+        idx++
+    }
+    return true
+}
+
+private func IsIdentifierStartByte(byte: UInt8): Bool {
+    return (byte >= b'a' && byte <= b'z') || (byte >= b'A' && byte <= b'Z') || byte == b'_'
+}
+
+private func IsIdentifierContinueByte(byte: UInt8): Bool {
+    return IsIdentifierStartByte(byte) || (byte >= b'0' && byte <= b'9')
+}
+
+private func IsBuiltinCfgKey(key: String): Bool {
+    return key == "os" || key == "backend" || key == "arch" || key == "debug" ||
+        key == "cjc_version" || key == "test"
+}
+
+private func SplitStringByByte(value: String, delimiter: UInt8): ArrayList<String> {
+    let out = ArrayList<String>()
+    var start: Int64 = 0
+    var idx: Int64 = 0
+    while (idx < value.size) {
+        if (value[idx] == delimiter) {
+            out.add(value[start..idx])
+            start = idx + 1
+        }
+        idx++
+    }
+    out.add(value[start..])
+    return out
+}
+
+private func TrimAscii(value: String): String {
+    var start: Int64 = 0
+    var end = value.size
+    while (start < end && IsAsciiSpace(value[start])) {
+        start++
+    }
+    while (end > start && IsAsciiSpace(value[end - 1])) {
+        end--
+    }
+    return value[start..end]
+}
+
+private func IsAsciiSpace(byte: UInt8): Bool {
+    return byte == b' ' || byte == b'\t' || byte == b'\r' || byte == b'\n'
 }

@@ -277,6 +277,9 @@ private class FullCompileStrategyImpl {
         let pkg = Package(defaultPackageName)
         addParsedFilesToPackage(pkg, fileInfos)
         CheckPackageConsistency(pkg)
+        if (!mutableSuccess) {
+            pkg.SetAttr("PARSE_FAILED")
+        }
         return pkg
     }
 

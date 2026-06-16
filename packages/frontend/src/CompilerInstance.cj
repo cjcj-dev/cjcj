@@ -1037,6 +1037,10 @@ private func IsNeedSaveIncrCompilationLogFile(globalOpts: GlobalOptions, frontOp
     return true
 }
 
+private var astDumpDir: String = ""
+private var astDumpDirInitialized: Bool = false
+private var astDumpFileNum: Int64 = 0
+
 private func DumpASTToScreen(srcPkgs: ArrayList<Package>): Unit {
     for (pkg in srcPkgs) {
         println(RenderPackageTree(pkg))
@@ -1052,14 +1056,30 @@ private func DumpAST(srcPkgs: ArrayList<Package>, outputOfProduct: String, prefi
         return
     }
     let pkgName = srcPkgs[0].fullPackageName
-    let dumpDir = if (IsDir(outputOfProduct)) {
-        JoinPath(outputOfProduct, pkgName + "_AST")
-    } else {
-        GetFileBase(outputOfProduct) + "_AST"
+    if (!astDumpDirInitialized) {
+        astDumpDir = if (IsDir(outputOfProduct)) {
+            JoinPath(outputOfProduct, pkgName + "_AST")
+        } else {
+            GetFileBase(outputOfProduct) + "_AST"
+        }
+        if (FileExist(astDumpDir)) {
+            let _ = RemoveDirectoryRecursively(astDumpDir)
+        }
+        if (!CreateDirs(astDumpDir)) {
+            return
+        }
+        astDumpDirInitialized = true
+        astDumpFileNum = 0
     }
-    let dumpPath = JoinPath(dumpDir, "0_" + prefix + "_ast.txt")
+    let realDirPath = GetAbsPath(astDumpDir)
+    if (let None <- realDirPath) {
+        return
+    }
+    let dumpPath = JoinPath(realDirPath.getOrThrow(), astDumpFileNum.toString() + "_" + prefix + "_ast.txt")
     let rendered = RenderPackageTree(srcPkgs[0])
-    let _ = WriteFileContent(dumpPath, rendered)
+    if (WriteFileContent(dumpPath, rendered)) {
+        astDumpFileNum++
+    }
 }
 
 private func RenderPackageTree(pkg: Package): String {
