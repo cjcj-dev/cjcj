@@ -22,13 +22,21 @@ What changed:
   - `for-in` element inference now accepts direct `Iterable<T>` interface values in addition to arrays, ranges, strings, VArray, and generic fallbacks.
   - Try catch-pattern checking now rejects non-catch pattern shapes, validates wildcard and exception-type catch patterns structurally, joins listed exception types, and checks the nested catch pattern against that joined type.
   - Shift compound assignment now rejects literal negative shift counts and counts that overflow the left integer type width, matching the C++ post-check.
+- Continuation pass:
+  - Built-in equality now follows the C++ scalar candidate set more closely: numeric/rune, `Bool`, `Unit`, and `Nothing`; it no longer accepts arbitrary mutually compatible nominal types as built-in `==`/`!=`.
+  - Tuple equality now recursively validates element comparability instead of accepting any equal-length tuple pair.
+  - Coalescing expressions now require a core `Option<T>` left operand. Synthesis checks the right operand against `T`; check mode uses the contextual target when `T` is compatible with that target, matching the C++ `ChkCoalescingExpr` shape.
+  - Binary expressions with an existing desugared call now propagate the resolved call target to the original binary node.
+  - `for-in` element inference now inspects real declared supertypes via `TypeManager.GetAllSuperTys` to detect implemented `Iterable<T>`, not just direct `Iterable<T>` types.
 - Verification: `cjpm build` passes after the continuation pass. `grep -rn "TODO(selfhost:Sema)" packages/sema/src` reports only out-of-scope Sema placeholders; the scoped `TypeCheckExpr.cj` and `TypeCheckExpr/*` files have zero matching markers.
 
 Remaining fidelity gaps:
 - Full overload resolution/desugar paths for operator, subscript, and compound assignment still depend on broader call/lookup/desugar infrastructure.
+- Tuple equality still validates built-in element comparability only; full C++ parity needs generated/desugared element comparison expressions and operator overload checks.
+- Coalescing placeholder-`Option` constraints still need the import-manager/core-decl path used by C++ for unconstrained type variables.
 - Name lookup, accessibility filtering, capture diagnostics, generic constraint solving, and full C++ diagnostic parity remain limited by sibling sema systems that are still partial.
 - Try-with-resources currently checks resource declarations structurally but cannot validate the imported `Resource` interface without the full import manager path.
 - Try-handle command pattern promotion is still approximated from the available self-hosted type arguments; full parity needs the broader promotion/import-manager path used by C++ `ChkCommandTypePattern`.
 - Catch pattern validation cannot yet prove subtype-of-core-`Exception`/`Error` without an import-manager/core-decl path in this helper; it conservatively validates catchable classlike/generic shapes.
 
-Completeness estimate: 50% of C++ behavior for this scoped expression type-checking area, weighted by behavior rather than line count.
+Completeness estimate: 52% of C++ behavior for this scoped expression type-checking area, weighted by behavior rather than line count.

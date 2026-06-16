@@ -11,9 +11,31 @@ private func LoopInvalid(expr: Expr): Ty {
     return TcInvalid(expr)
 }
 
+private func IterablePayload(ty: Ty): Option<Ty> {
+    if (ty.name == "Iterable" && ty.typeArgs.size == 1) {
+        return Some(ty.typeArgs[0])
+    }
+    return None
+}
+
+private func PromotedIterableElementTy(typeManager: TypeManager, inTy: Ty): Option<Ty> {
+    if (let Some(payload) <- IterablePayload(inTy)) {
+        return Some(payload)
+    }
+    for (superTy in typeManager.GetAllSuperTys(inTy).values) {
+        if (let Some(payload) <- IterablePayload(superTy)) {
+            return Some(payload)
+        }
+    }
+    return None
+}
+
 private func IterableElementTy(typeManager: TypeManager, inTy: Ty): Ty {
-    if (inTy.name == "Iterable" && inTy.typeArgs.size == 1) {
-        return inTy.typeArgs[0]
+    if (inTy.IsNothing()) {
+        return TypeManager.GetInvalidTy()
+    }
+    if (let Some(elemTy) <- PromotedIterableElementTy(typeManager, inTy)) {
+        return elemTy
     }
     if (inTy.IsArray() && inTy.typeArgs.size == 1) {
         return inTy.typeArgs[0]
