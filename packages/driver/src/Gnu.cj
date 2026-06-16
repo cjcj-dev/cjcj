@@ -99,6 +99,7 @@ public open class Gnu <: ToolChain {
         tool.AppendArg("-m")
         tool.AppendArg(GetEmulation())
         tool.AppendArg("--hash-style=both")
+        tool.AppendArgIf(driverOptions.enableGcSections, "-gc-sections")
         HandleLibrarySearchPaths(tool)
         SortInputlibraryFileAndAppend(tool, objFiles)
         GenerateLinkOptionsOfBuiltinLibs(tool)

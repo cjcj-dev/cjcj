@@ -78,9 +78,11 @@ public class DriverOptions {
     public var displayLineInfo: Bool = true
     public var enableFuncSections: Bool = false
     public var enableDataSections: Bool = false
+    public var enableGcSections: Bool = false
     public var enablePgoInstrGen: Bool = false
     public var enablePgoInstrUse: Bool = false
     public var pgoProfileFile: String = ""
+    public var discardEhFrame: Bool = false
     public var optPassOptions: String = ""
     public var stackTraceFormat: String = "--stack-trace-format=default"
     public var linkStaticStd: Option<Bool> = None
@@ -89,11 +91,23 @@ public class DriverOptions {
     public var ltoHideAllPkgs: Bool = false
     public let ltoVisiblePkgs: ArrayList<String> = ArrayList<String>()
     public var outputMode: OutputMode = OutputMode.EXECUTABLE
+    public var enableOutputType: Bool = false
+    public var enableHotReload: Bool = false
+    public var emitCHIRPhase: String = ""
     public var compileTarget: CompileTarget = CompileTarget.DEFAULT
     public var optimizationLevel: OptimizationLevel = OptimizationLevel.O0
+    public var sanitizerType: SanitizerType = SanitizerType.NONE
     public var enIncrementalCompilation: Bool = false
+    public var printIncrementalInfo: Bool = false
+    public var jobs: Option<UInt64> = None
     public var aggressiveParallelCompile: Option<Int64> = None
+    public var aggressiveParallelCompileWithoutArg: Bool = false
     public var compileMacro: Bool = false
+    public var enableMacroDebug: Bool = false
+    public var enableParallelMacro: Bool = false
+    public var compileCjd: Bool = false
+    public var implicitPrelude: Bool = true
+    public var exportForTest: Bool = false
     public var parseTest: Bool = false
     public var compileTestsOnly: Bool = false
     public var compilationCachedPath: String = ""
@@ -109,6 +123,7 @@ public class DriverOptions {
     public let orderedInputObjs: ArrayList<OrderedInput> = ArrayList<OrderedInput>()
     public let orderedLibraries: ArrayList<OrderedInput> = ArrayList<OrderedInput>()
     public let orderedLinkOptions: ArrayList<OrderedInput> = ArrayList<OrderedInput>()
+    public let frontendForwardArgs: ArrayList<String> = ArrayList<String>()
     public let directBuiltinDependencies: HashSet<String> = HashSet<String>()
     public let indirectBuiltinDependencies: HashSet<String> = HashSet<String>()
 
@@ -174,12 +189,12 @@ public class DriverOptions {
 
     public func IsLTOEnabled(): Bool { return ltoMod != LTOMode.NO_LTO }
     public func IsFullLTOEnabled(): Bool { return ltoMod == LTOMode.FULL_LTO }
-    public func IsEmitCHIREnable(): Bool { return outputMode == OutputMode.CHIR }
+    public func IsEmitCHIREnable(): Bool { return outputMode == OutputMode.CHIR || !emitCHIRPhase.isEmpty() }
     public func GetLtoVisiblePkgs(): Array<String> { return ltoVisiblePkgs.toArray() }
     public func IsCompileAsExeEnabled(): Bool { return outputMode == OutputMode.EXECUTABLE || compileTarget == CompileTarget.EXECUTABLE }
-    public func EnableAsan(): Bool { return false }
-    public func EnableTsan(): Bool { return false }
-    public func EnableHwAsan(): Bool { return false }
+    public func EnableAsan(): Bool { return sanitizerType == SanitizerType.ADDRESS }
+    public func EnableTsan(): Bool { return sanitizerType == SanitizerType.THREAD }
+    public func EnableHwAsan(): Bool { return sanitizerType == SanitizerType.HWADDRESS }
     public func EnableSanitizer(): Bool { return EnableAsan() || EnableTsan() || EnableHwAsan() }
 
     public func IsCrossCompiling(): Bool {
@@ -201,24 +216,33 @@ public class DriverOptions {
 
     public func GenerateFrontendOptions(): Array<String> {
         let out = ArrayList<String>()
-        if (compilePackage) { out.add("--package") }
-        if (noSubPkg) { out.add("--no-sub-pkg") }
-        if (scanDepPkg) { out.add("--scan-dependency") }
-        if (enableCompileDebug) { out.add("-g") }
-        if (parseTest) { out.add("--test") }
-        if (compileTestsOnly) { out.add("--test-only") }
-        out.add("--output")
-        out.add(output)
-        if (let Some(dir) <- outputDir) {
-            out.add("--output-dir")
-            out.add(dir)
+        if (!frontendForwardArgs.isEmpty()) {
+            for (arg in frontendForwardArgs) {
+                out.add(arg)
+            }
+        } else {
+            if (compilePackage) { out.add("--package") }
+            if (noSubPkg) { out.add("--no-sub-pkg") }
+            if (scanDepPkg) { out.add("--scan-dependency") }
+            if (enableCompileDebug) { out.add("-g") }
+            if (parseTest) { out.add("--test") }
+            if (compileTestsOnly) { out.add("--test-only") }
+            if (let Some(dir) <- outputDir) {
+                out.add("--output-dir")
+                out.add(dir)
+            }
+            if (moduleName != "main") {
+                out.add("--module-name")
+                out.add(moduleName)
+            }
+            for (file in srcFiles) {
+                out.add(file)
+            }
         }
-        if (moduleName != "main") {
-            out.add("--module-name")
-            out.add(moduleName)
-        }
-        for (file in srcFiles) {
-            out.add(file)
+        let multiBC = if (let Some(count) <- aggressiveParallelCompile) { count > 1 } else { false }
+        if (!frontendOutputFiles.isEmpty() && !multiBC) {
+            out.add("-o")
+            out.add(frontendOutputFiles[0].filePath)
         }
         return out.toArray()
     }

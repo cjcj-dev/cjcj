@@ -18,10 +18,13 @@ Current status:
 - Native backend execution is represented by external tool invocation through
   the current Cangjie process APIs. LLVM remains external; no LLVM reimplementation
   was added.
-- The implementation is intentionally conservative at package boundaries: this
-  module-only pass did not change project manifests or adjacent packages, so the
-  executable Driver cannot yet call the self-hosted FrontendTool package through
-  a typed package dependency.
+- Driver now preserves frontend/global arguments in parse order, filters out
+  driver-only linker/toolchain options, and passes a pre-created temporary
+  bitcode output path to the self-hosted FrontendTool bridge.
+- Sanitizer selection, `--sanitize-set-rpath` validation, CHIR emit mode,
+  `chir`/`obj`/`hotreload` output-type parsing, PGO flags, section flags, jobs,
+  warning forwarding, and target-triple validation are represented in Driver
+  options.
 
 Residual fidelity risks:
 
@@ -30,7 +33,8 @@ Residual fidelity risks:
   self-hosted FrontendTool package.
 - GNU/Mach-O/platform toolchains are functional command builders but still omit
   many C++ driver details around SDK/sysroot discovery, exact sanitizer/runtime
-  library selection, and linker flag parity.
+  library selection, GCC runtime discovery, LTO linker parity, and platform
+  linker script handling.
 - Main frontend support is a compiling shim rather than the full C++
   `main-frontend.cpp` standalone flow.
 

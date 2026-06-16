@@ -107,6 +107,13 @@ public enum LTOMode {
     | THIN_LTO
 }
 
+public enum SanitizerType {
+    | NONE
+    | ADDRESS
+    | THREAD
+    | HWADDRESS
+}
+
 public enum CompileTarget {
     | DEFAULT
     | EXECUTABLE
@@ -241,6 +248,20 @@ private func ltoModeIndex(value: LTOMode): Int64 {
 extend LTOMode <: Equatable<LTOMode> {
     public operator func ==(right: LTOMode): Bool { return ltoModeIndex(this) == ltoModeIndex(right) }
     public operator func !=(right: LTOMode): Bool { return !(this == right) }
+}
+
+private func sanitizerTypeIndex(value: SanitizerType): Int64 {
+    return match (value) {
+        case SanitizerType.NONE => 0
+        case SanitizerType.ADDRESS => 1
+        case SanitizerType.THREAD => 2
+        case SanitizerType.HWADDRESS => 3
+    }
+}
+
+extend SanitizerType <: Equatable<SanitizerType> {
+    public operator func ==(right: SanitizerType): Bool { return sanitizerTypeIndex(this) == sanitizerTypeIndex(right) }
+    public operator func !=(right: SanitizerType): Bool { return !(this == right) }
 }
 
 private func compileTargetIndex(value: CompileTarget): Int64 {

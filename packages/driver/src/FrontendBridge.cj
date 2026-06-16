@@ -4,6 +4,9 @@ import std.collection.*
 import cangjie_compiler::frontend_tool.ExecuteFrontend
 
 public func ExecuteFrontendPhase(driver: Driver): Bool {
+    if (!PrepareFrontendOutputs(driver.driverOptions)) {
+        return false
+    }
     let frontendArgs = driver.driverOptions.GenerateFrontendOptions()
     if (driver.driverOptions.enableVerbose) {
         PrintFrontendCommand(driver.cangjieHome, frontendArgs)
@@ -13,6 +16,21 @@ public func ExecuteFrontendPhase(driver: Driver): Bool {
         return false
     }
     return ReconcileFrontendOutputs(driver.driverOptions)
+}
+
+private func PrepareFrontendOutputs(opts: DriverOptions): Bool {
+    if (opts.srcFiles.isEmpty() || opts.IsEmitCHIREnable() || opts.scanDepPkg || !opts.frontendOutputFiles.isEmpty()) {
+        return true
+    }
+    let expectedOutputs = PredictFrontendBitcodeOutputs(opts)
+    if (expectedOutputs.isEmpty()) {
+        eprintln("error: failed to create frontend bitcode output path.")
+        return false
+    }
+    for (output in expectedOutputs) {
+        opts.frontendOutputFiles.add(output)
+    }
+    return true
 }
 
 private func PrintFrontendCommand(cangjieHome: String, args: Array<String>): Unit {
@@ -34,21 +52,7 @@ private func ReconcileFrontendOutputs(opts: DriverOptions): Bool {
     if (opts.IsEmitCHIREnable() || opts.scanDepPkg) {
         return true
     }
-    if (!opts.frontendOutputFiles.isEmpty()) {
-        return VerifyFrontendOutputs(opts.frontendOutputFiles)
-    }
-    let expectedOutputs = PredictFrontendBitcodeOutputs(opts)
-    if (expectedOutputs.isEmpty()) {
-        eprintln("error: frontend completed but did not report bitcode outputs.")
-        return false
-    }
-    if (!VerifyFrontendOutputs(expectedOutputs)) {
-        return false
-    }
-    for (output in expectedOutputs) {
-        opts.frontendOutputFiles.add(output)
-    }
-    return true
+    return VerifyFrontendOutputs(opts.frontendOutputFiles)
 }
 
 private func VerifyFrontendOutputs(outputs: ArrayList<TempFileInfo>): Bool {
