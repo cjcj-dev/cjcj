@@ -12,6 +12,12 @@ private func LambdaInvalid(le: LambdaExpr): Ty {
     return TcInvalid(le)
 }
 
+private class LambdaParamInference {
+    public let placeholders: ArrayList<GenericsTy> = ArrayList<GenericsTy>()
+
+    public init() {}
+}
+
 private func LambdaParamList(le: LambdaExpr): Option<FuncParamList> {
     if (let Some(funcBody) <- le.funcBody) {
         if (!funcBody.paramLists.isEmpty()) {
@@ -21,7 +27,31 @@ private func LambdaParamList(le: LambdaExpr): Option<FuncParamList> {
     return None
 }
 
-private func InferParamTyFromNode(typeManager: TypeManager, param: FuncParam): Ty {
+private func ClearLambdaBodyForReCheck(le: LambdaExpr): Unit {
+    if (let Some(funcBody) <- le.funcBody) {
+        if (let Some(body) <- funcBody.body) {
+            let walker = Walker(body, visitPre: { node: Node =>
+                if (let Some(_) <- (node as Type)) {
+                    return VisitAction.SKIP_CHILDREN
+                }
+                if (let Some(_) <- (node as Generic)) {
+                    return VisitAction.SKIP_CHILDREN
+                }
+                if (let Some(funcParam) <- (node as FuncParam)) {
+                    if (funcParam.TestAttr(Attribute.HAS_INITIAL)) {
+                        return VisitAction.SKIP_CHILDREN
+                    }
+                }
+                node.Clear()
+                VisitAction.WALK_CHILDREN
+            })
+            let _ = walker.Walk()
+        }
+    }
+}
+
+private func InferParamTyFromNode(typeManager: TypeManager, param: FuncParam,
+    placeholders: ArrayList<GenericsTy>, allowPlaceholder: Bool): Ty {
     if (let Some(typeNode) <- param.typeNode) {
         if (let Some(typeTy) <- typeNode.GetTy()) {
             param.SetTy(typeTy)
@@ -30,27 +60,103 @@ private func InferParamTyFromNode(typeManager: TypeManager, param: FuncParam): T
     }
     if (let Some(paramTy) <- param.GetTy()) {
         if (Ty.IsTyCorrect(paramTy)) {
+            if (paramTy.IsPlaceholder() || paramTy.IsAny()) {
+                if (allowPlaceholder) {
+                    let freshTyVar = typeManager.AllocTyVar(srcId: "T-Lam", needSolving: true)
+                    param.SetTy(freshTyVar)
+                    placeholders.add(freshTyVar)
+                    return freshTyVar
+                }
+                return TypeManager.GetInvalidTy()
+            }
             return paramTy
         }
     }
-    let anyTy = typeManager.GetAnyTy()
-    param.SetTy(anyTy)
-    return anyTy
+    if (allowPlaceholder) {
+        let freshTyVar2 = typeManager.AllocTyVar(srcId: "T-Lam", needSolving: true)
+        param.SetTy(freshTyVar2)
+        placeholders.add(freshTyVar2)
+        return freshTyVar2
+    }
+    return TypeManager.GetInvalidTy()
 }
 
-private func CollectLambdaParamTys(typeManager: TypeManager, le: LambdaExpr): Option<ArrayList<Ty>> {
+private func CollectLambdaParamTys(typeManager: TypeManager, le: LambdaExpr,
+    allowPlaceholder!: Bool = false): Option<LambdaParamInference> {
     if (let Some(paramList) <- LambdaParamList(le)) {
-        let paramTys = ArrayList<Ty>()
+        let inference = LambdaParamInference()
         for (param in paramList.params) {
-            let paramTy = InferParamTyFromNode(typeManager, param)
+            let paramTy = InferParamTyFromNode(typeManager, param, inference.placeholders, allowPlaceholder)
             if (!Ty.IsTyCorrect(paramTy)) {
                 return None
             }
-            paramTys.add(paramTy)
         }
-        return Some(paramTys)
+        return Some(inference)
     }
     return None
+}
+
+private func CopyConstraintForTyVar(source: Constraint, target: Constraint, tyVar: GenericsTy): Bool {
+    for (entry in source.entries) {
+        if (SameTy(entry.tyVar, tyVar)) {
+            let bounds = target.GetOrCreate(tyVar)
+            bounds.lbs.AddAll(entry.bounds.lbs)
+            bounds.ubs.AddAll(entry.bounds.ubs)
+            bounds.sum.AddAll(entry.bounds.sum)
+            bounds.eq.AddAll(entry.bounds.eq)
+            return true
+        }
+    }
+    return false
+}
+
+private func BuildLambdaConstraint(typeManager: TypeManager, placeholders: ArrayList<GenericsTy>): Option<Constraint> {
+    let constraint = Constraint()
+    for (tyVar in placeholders) {
+        if (!CopyConstraintForTyVar(typeManager.constraints, constraint, tyVar)) {
+            return None
+        }
+    }
+    return Some(constraint)
+}
+
+private func LambdaSubstSolvesAll(placeholders: ArrayList<GenericsTy>, subst: TypeSubst): Bool {
+    for (tyVar in placeholders) {
+        if (let None <- subst.Get(tyVar)) {
+            return false
+        }
+    }
+    return true
+}
+
+private func ApplyLambdaParamSubst(typeManager: TypeManager, funcBody: FuncBody, subst: TypeSubst): Unit {
+    if (funcBody.paramLists.isEmpty()) {
+        return
+    }
+    for (param in funcBody.paramLists[0].params) {
+        if (let Some(paramTy) <- param.GetTy()) {
+            param.SetTy(typeManager.GetInstantiatedTy(paramTy, subst))
+        }
+    }
+}
+
+private func SolveLambdaParamPlaceholders(typeManager: TypeManager, le: LambdaExpr,
+    inference: LambdaParamInference, funcTy: Ty): Ty {
+    if (inference.placeholders.isEmpty()) {
+        return funcTy
+    }
+    if (let Some(lambdaConstraint) <- BuildLambdaConstraint(typeManager, inference.placeholders)) {
+        if (let Some(subst) <- LocalTypeArgumentSynthesis.SolveConstraints(typeManager, lambdaConstraint)) {
+            if (LambdaSubstSolvesAll(inference.placeholders, subst)) {
+                if (let Some(funcBody) <- le.funcBody) {
+                    ApplyLambdaParamSubst(typeManager, funcBody, subst)
+                    ClearLambdaBodyForReCheck(le)
+                    return SynFuncBodyForLambda(typeManager, funcBody)
+                }
+            }
+        }
+    }
+    return TypeManager.GetInvalidTy()
 }
 
 private func SynFuncBodyForLambda(typeManager: TypeManager, funcBody: FuncBody): Ty {
@@ -96,11 +202,20 @@ public func SynLamExpr(typeManager: TypeManager, le: LambdaExpr): Ty {
     if (let None <- LambdaParamList(le)) {
         return LambdaInvalid(le)
     }
-    if (let None <- CollectLambdaParamTys(typeManager, le)) {
+    let tyVarScope = BeginTyVarScope(typeManager)
+    let inferenceOpt = CollectLambdaParamTys(typeManager, le, allowPlaceholder: true)
+    if (let None <- inferenceOpt) {
+        EndTyVarScope(tyVarScope)
         return LambdaInvalid(le)
     }
+    let inference = inferenceOpt.getOrThrow()
     let funcBody = le.funcBody.getOrThrow()
-    let funcTy = SynFuncBodyForLambda(typeManager, funcBody)
+    let rawFuncTy = SynFuncBodyForLambda(typeManager, funcBody)
+    var funcTy = rawFuncTy
+    if (Ty.IsTyCorrect(rawFuncTy)) {
+        funcTy = SolveLambdaParamPlaceholders(typeManager, le, inference, rawFuncTy)
+    }
+    EndTyVarScope(tyVarScope)
     if (Ty.IsTyCorrect(funcTy)) {
         le.SetTy(funcTy)
         return funcTy

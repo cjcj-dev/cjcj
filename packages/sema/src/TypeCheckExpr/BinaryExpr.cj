@@ -36,8 +36,24 @@ private func IsOrderedRelationalOperator(op: TokenKind): Bool {
     return op == TokenKind.GT || op == TokenKind.LT || op == TokenKind.GE || op == TokenKind.LE
 }
 
+private func IsBuiltinRelationNumericTy(ty: Ty): Bool {
+    return ty.IsNumeric() || ty.IsRune()
+}
+
+private func IsBuiltinEqualityScalarTy(ty: Ty): Bool {
+    return IsBuiltinRelationNumericTy(ty) || ty.IsBoolean() || ty.IsUnit() || ty.IsNothing()
+}
+
 private func BinaryInvalid(be: BinaryExpr): Ty {
     return TcInvalid(be)
+}
+
+private func PropagateBinaryDesugarTarget(be: BinaryExpr, desugar: Expr): Unit {
+    if (let Some(callExpr) <- (desugar as CallExpr)) {
+        if (let Some(resolved) <- callExpr.resolvedFunction) {
+            ReplaceTarget(be, Some(resolved))
+        }
+    }
 }
 
 private func PrimitiveRank(kind: TypeKind): Int64 {
@@ -157,35 +173,87 @@ private func SynRelationalExpr(typeManager: TypeManager, be: BinaryExpr): Ty {
         let rightTy = tys[1]
         if (leftTy.IsTuple() || rightTy.IsTuple()) {
             if ((be.op == TokenKind.EQUAL || be.op == TokenKind.NOTEQ) && leftTy.IsTuple() && rightTy.IsTuple()) {
-                if (let Some(leftTuple) <- (leftTy as TupleTy)) {
-                    if (let Some(rightTuple) <- (rightTy as TupleTy)) {
-                        if (leftTuple.typeArgs.size == rightTuple.typeArgs.size) {
-                            let boolTy = TcBoolTy()
-                            be.SetTy(boolTy)
-                            return boolTy
-                        }
-                    }
+                if (TupleCanEqual(typeManager, leftTy, rightTy)) {
+                    let boolTy = TcBoolTy()
+                    be.SetTy(boolTy)
+                    return boolTy
                 }
             }
             return BinaryInvalid(be)
         }
         if (IsOrderedRelationalOperator(be.op)) {
-            if ((let Some(_) <- PickNumericTy(typeManager, leftTy, rightTy)) || leftTy.IsNothing() || rightTy.IsNothing()) {
+            if (CanBuiltinOrderedCompare(typeManager, leftTy, rightTy)) {
                 let boolTy = TcBoolTy()
                 be.SetTy(boolTy)
                 return boolTy
             }
             return BinaryInvalid(be)
         }
-        if (typeManager.CheckTypeCompatibility(leftTy, rightTy) != TypeCompatibility.INCOMPATIBLE ||
-            typeManager.CheckTypeCompatibility(rightTy, leftTy) != TypeCompatibility.INCOMPATIBLE ||
-            leftTy.IsNothing() || rightTy.IsNothing()) {
+        if (CanBuiltinEqualityCompare(typeManager, leftTy, rightTy)) {
             let boolTy2 = TcBoolTy()
             be.SetTy(boolTy2)
             return boolTy2
         }
     }
     return BinaryInvalid(be)
+}
+
+private func CanBuiltinOrderedCompare(typeManager: TypeManager, leftTy: Ty, rightTy: Ty): Bool {
+    if (leftTy.IsNothing() || rightTy.IsNothing()) {
+        return true
+    }
+    if (leftTy.IsRune() && rightTy.IsRune()) {
+        return true
+    }
+    if (let Some(_) <- PickNumericTy(typeManager, leftTy, rightTy)) {
+        return true
+    }
+    return false
+}
+
+private func CanBuiltinEqualityCompare(typeManager: TypeManager, leftTy: Ty, rightTy: Ty): Bool {
+    if (leftTy.IsNothing() || rightTy.IsNothing()) {
+        return true
+    }
+    if (!IsBuiltinEqualityScalarTy(leftTy) || !IsBuiltinEqualityScalarTy(rightTy)) {
+        return false
+    }
+    if (leftTy.IsBoolean() || rightTy.IsBoolean()) {
+        return leftTy.IsBoolean() && rightTy.IsBoolean()
+    }
+    if (leftTy.IsUnit() || rightTy.IsUnit()) {
+        return leftTy.IsUnit() && rightTy.IsUnit()
+    }
+    if (leftTy.IsRune() || rightTy.IsRune()) {
+        return leftTy.IsRune() && rightTy.IsRune()
+    }
+    if (let Some(_) <- PickNumericTy(typeManager, leftTy, rightTy)) {
+        return true
+    }
+    return false
+}
+
+private func TupleCanEqual(typeManager: TypeManager, leftTy: Ty, rightTy: Ty): Bool {
+    if (let Some(leftTuple) <- (leftTy as TupleTy)) {
+        if (let Some(rightTuple) <- (rightTy as TupleTy)) {
+            if (leftTuple.typeArgs.size != rightTuple.typeArgs.size) {
+                return false
+            }
+            for (idx in 0..leftTuple.typeArgs.size) {
+                let leftArg = leftTuple.typeArgs[idx]
+                let rightArg = rightTuple.typeArgs[idx]
+                if (leftArg.IsTuple() || rightArg.IsTuple()) {
+                    if (!TupleCanEqual(typeManager, leftArg, rightArg)) {
+                        return false
+                    }
+                } else if (!CanBuiltinEqualityCompare(typeManager, leftArg, rightArg)) {
+                    return false
+                }
+            }
+            return true
+        }
+    }
+    return false
 }
 
 private func SynLogicalExpr(typeManager: TypeManager, be: BinaryExpr): Ty {
@@ -255,35 +323,58 @@ private func SynCompositionExpr(typeManager: TypeManager, be: BinaryExpr): Ty {
 }
 
 private func SynCoalescingExpr(typeManager: TypeManager, be: BinaryExpr): Ty {
-    if (let Some(tys) <- SynthesizeOperands(typeManager, be)) {
-        let leftTy = tys[0]
-        let rightTy = tys[1]
-        if (leftTy.IsCoreOptionType() && leftTy.typeArgs.size == 1) {
-            let unboxedTy = leftTy.typeArgs[0]
-            if (typeManager.CheckTypeCompatibility(unboxedTy, rightTy) != TypeCompatibility.INCOMPATIBLE) {
+    if (let Some(leftExpr) <- be.leftExpr) {
+        let leftTy = SynExprShallow(typeManager, leftExpr)
+        if (!Ty.IsTyCorrect(leftTy)) {
+            return BinaryInvalid(be)
+        }
+        let concreteLeftTy = TcReplaceIdeal(typeManager, leftExpr)
+        if (!concreteLeftTy.IsCoreOptionType() || concreteLeftTy.typeArgs.size != 1) {
+            return BinaryInvalid(be)
+        }
+        let unboxedTy = concreteLeftTy.typeArgs[0]
+        if (let Some(rightExpr) <- be.rightExpr) {
+            if (ChkExprShallow(typeManager, unboxedTy, rightExpr)) {
                 be.SetTy(unboxedTy)
                 return unboxedTy
             }
-            if (typeManager.CheckTypeCompatibility(rightTy, unboxedTy) != TypeCompatibility.INCOMPATIBLE) {
-                be.SetTy(rightTy)
-                return rightTy
-            }
-        }
-        if (typeManager.CheckTypeCompatibility(leftTy, rightTy) != TypeCompatibility.INCOMPATIBLE) {
-            be.SetTy(leftTy)
-            return leftTy
-        }
-        if (typeManager.CheckTypeCompatibility(rightTy, leftTy) != TypeCompatibility.INCOMPATIBLE) {
-            be.SetTy(rightTy)
-            return rightTy
         }
     }
     return BinaryInvalid(be)
 }
 
+private func ChkCoalescingExpr(typeManager: TypeManager, target: Ty, be: BinaryExpr): Bool {
+    if (let Some(leftExpr) <- be.leftExpr) {
+        let leftTy = SynExprShallow(typeManager, leftExpr)
+        if (!Ty.IsTyCorrect(leftTy)) {
+            let _ = BinaryInvalid(be)
+            return false
+        }
+        let concreteLeftTy = TcReplaceIdeal(typeManager, leftExpr)
+        if (!concreteLeftTy.IsCoreOptionType() || concreteLeftTy.typeArgs.size != 1) {
+            let _ = BinaryInvalid(be)
+            return false
+        }
+        let unboxedTy = concreteLeftTy.typeArgs[0]
+        if (typeManager.CheckTypeCompatibility(target, unboxedTy) == TypeCompatibility.INCOMPATIBLE) {
+            let _ = BinaryInvalid(be)
+            return false
+        }
+        if (let Some(rightExpr) <- be.rightExpr) {
+            if (ChkExprShallow(typeManager, target, rightExpr)) {
+                be.SetTy(target)
+                return true
+            }
+        }
+    }
+    let _ = BinaryInvalid(be)
+    return false
+}
+
 public func SynBinaryExpr(typeManager: TypeManager, be: BinaryExpr): Ty {
     if (let Some(desugar) <- be.desugarExpr) {
         if (let Some(desugarTy) <- desugar.GetTy()) {
+            PropagateBinaryDesugarTarget(be, desugar)
             be.SetTy(desugarTy)
             return desugarTy
         }
@@ -316,6 +407,9 @@ public func SynBinaryExpr(typeManager: TypeManager, be: BinaryExpr): Ty {
 }
 
 public func ChkBinaryExpr(typeManager: TypeManager, target: Ty, be: BinaryExpr): Bool {
+    if (be.op == TokenKind.COALESCING) {
+        return ChkCoalescingExpr(typeManager, target, be)
+    }
     let actualTy = SynBinaryExpr(typeManager, be)
     if (!Ty.IsTyCorrect(actualTy)) {
         return false

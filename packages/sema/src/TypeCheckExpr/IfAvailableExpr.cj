@@ -2,6 +2,7 @@ package cangjie_compiler::sema.TypeCheckExpr
 
 import cangjie_compiler::ast.*
 import cangjie_compiler::sema.*
+import cangjie_compiler::sema.Plugin.*
 
 public func SelfhostPortStatus_TypeCheckExpr_IfAvailableExpr(): Bool {
     return true
@@ -16,7 +17,16 @@ private func IfAvailableInvalid(iae: IfAvailableExpr): Ty {
 
 private func IsValidIfAvailableLevelLiteral(expr: Expr): Bool {
     if (let Some(lit) <- (expr as LitConstExpr)) {
-        return lit.kind == LitConstKind.INTEGER || lit.kind == LitConstKind.STRING
+        if (lit.kind == LitConstKind.INTEGER) {
+            return true
+        }
+        if (lit.kind == LitConstKind.STRING) {
+            return if (let Some(_) <- APILevelVersion.ParseChecked(lit.stringValue, APILevelParseRule.TRIPLE_ONLY)) {
+                true
+            } else {
+                false
+            }
+        }
     }
     return false
 }

@@ -139,6 +139,24 @@ private func CheckAssignRight(typeManager: TypeManager, leftTy: Ty, ae: AssignEx
     return false
 }
 
+private func IsShiftAssignValid(ae: AssignExpr, leftTy: Ty): Bool {
+    if (ae.op != TokenKind.LSHIFT_ASSIGN && ae.op != TokenKind.RSHIFT_ASSIGN) {
+        return true
+    }
+    if (let Some(rightExpr) <- ae.rightExpr) {
+        if (let Some(lit) <- (rightExpr as LitConstExpr)) {
+            InitializeLitConstValue(lit)
+            if (lit.constNumValue.asInt.IsNegativeNum()) {
+                return false
+            }
+            if (leftTy.IsIntegerSubType() && lit.constNumValue.asInt.GreaterThanOrEqualBitLen(leftTy.kind)) {
+                return false
+            }
+        }
+    }
+    return true
+}
+
 private func SynMultipleAssignExpr(typeManager: TypeManager, ae: AssignExpr): Ty {
     if (let Some(desugar) <- ae.desugarExpr) {
         let desugarTy = SynExprShallow(typeManager, desugar)
@@ -208,6 +226,9 @@ public func SynAssignExpr(typeManager: TypeManager, ae: AssignExpr): Ty {
         return AssignInvalid(ae)
     }
     if (!CheckAssignRight(typeManager, concreteLeftTy, ae)) {
+        return AssignInvalid(ae)
+    }
+    if (!IsShiftAssignValid(ae, concreteLeftTy)) {
         return AssignInvalid(ae)
     }
     ae.SetTy(unitTy)
