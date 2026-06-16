@@ -126,13 +126,15 @@ public open class CompileStrategy {
         }
         option.compileCjd = true
         for ((pkgName, cjdPath) in ci.importManager.GetDepPkgCjdPaths()) {
-            let readResult = ReadFileContent(cjdPath)
-            if (!readResult[0]) {
+            let cjdSource = ReadCjdSource(pkgName, cjdPath, ci.importManager.GetSearchPath())
+            if (!cjdSource[0]) {
                 continue
             }
-            let fileID = ci.GetSourceManager().AddSource(cjdPath, readResult[1], packageName: Some(pkgName),
+            let sourcePath = cjdSource[1]
+            let sourceCode = cjdSource[2]
+            let fileID = ci.GetSourceManager().AddSource(sourcePath, sourceCode, packageName: Some(pkgName),
                 isCjmpFile: option.IsCompilingCJMP())
-            let parsedFile = ParseSourceFile(fileID, cjdPath, readResult[1], ci.diag, ci.GetSourceManager(),
+            let parsedFile = ParseSourceFile(fileID, sourcePath, sourceCode, ci.diag, ci.GetSourceManager(),
                 option.enableAddCommentToAst, option.compileCjd)
             let sourcePkg = Package(pkgName)
             sourcePkg.AddFile(parsedFile)
@@ -167,6 +169,81 @@ public open class CompileStrategy {
         }
         ci.RefreshASTContexts()
     }
+}
+
+private func ReadCjdSource(pkgName: String, configuredPath: String, searchPaths: ArrayList<String>): (Bool, String, String) {
+    let configuredRead = ReadFileContent(configuredPath)
+    if (configuredRead[0]) {
+        return (true, configuredPath, configuredRead[1])
+    }
+    let discoveredPath = FindSerializationFile(pkgName, CJ_D_FILE_EXTENSION, searchPaths)
+    if (discoveredPath.isEmpty()) {
+        return (false, "", "")
+    }
+    let discoveredRead = ReadFileContent(discoveredPath)
+    if (!discoveredRead[0]) {
+        return (false, "", "")
+    }
+    let sourcePath = if (configuredPath.isEmpty()) { discoveredPath } else { configuredPath }
+    return (true, sourcePath, discoveredRead[1])
+}
+
+private func FindSerializationFile(fullPackageName: String, suffix: String, searchPaths: ArrayList<String>): String {
+    let names = SplitQualifiedNameForSerialization(fullPackageName)
+    let packageFileName = ToCjoFileNameForSerialization(fullPackageName)
+    if (!names.isEmpty()) {
+        let nestedName = ToCjoFileNameForSerialization(names[0]) + "/" + packageFileName + suffix
+        let nestedPath = FindFileByNameInSearchPaths(nestedName, searchPaths)
+        if (!nestedPath.isEmpty()) {
+            return nestedPath
+        }
+    }
+    return FindFileByNameInSearchPaths(packageFileName + suffix, searchPaths)
+}
+
+private func FindFileByNameInSearchPaths(fileName: String, searchPaths: ArrayList<String>): String {
+    if (fileName.isEmpty()) {
+        return ""
+    }
+    for (path in searchPaths) {
+        if (path.isEmpty()) {
+            continue
+        }
+        let candidate = JoinPath(path, fileName)
+        if (FileExist(candidate)) {
+            return candidate
+        }
+    }
+    return ""
+}
+
+private func SplitQualifiedNameForSerialization(qualifiedName: String): ArrayList<String> {
+    let names = ArrayList<String>()
+    var idx: Int64 = 0
+    if (let Some(dcPos) <- qualifiedName.indexOf("::")) {
+        idx = dcPos + 2
+    }
+    while (idx < qualifiedName.size) {
+        if (qualifiedName[idx] == b'.') {
+            idx++
+        } else if (qualifiedName[idx] == b'`') {
+            let nextTick = qualifiedName.indexOf("`", idx + 1) ?? qualifiedName.size
+            names.add(qualifiedName[idx + 1..nextTick])
+            idx = if (nextTick == qualifiedName.size) { nextTick } else { nextTick + 1 }
+        } else {
+            let nextDot = qualifiedName.indexOf(".", idx + 1) ?? qualifiedName.size
+            names.add(qualifiedName[idx..nextDot])
+            idx = nextDot
+        }
+    }
+    return names
+}
+
+private func ToCjoFileNameForSerialization(fullPackageName: String): String {
+    if (let Some(dcPos) <- fullPackageName.indexOf("::")) {
+        return fullPackageName[dcPos + 2..] + "@" + fullPackageName[0..dcPos]
+    }
+    return fullPackageName
 }
 
 public class FullCompileStrategy <: CompileStrategy {

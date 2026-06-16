@@ -26,7 +26,8 @@ checks, `--cfg` and `--int-overflow` option handling, cfg-file loading with
 quoted TOML string/comment semantics, common-part option ingestion,
 conditional directive pruning, APILevel macro-declaration materialization,
 dependency-scan JSON data, symbol-table JSON output, APILevel custom annotation
-merging from `.cj.d` packages, annotation/macro-call parsing for declarations,
+merging from `.cj.d` packages with import-path fallback lookup,
+annotation/macro-call parsing for declarations,
 function parameter/return type capture, generic parameter capture, simple
 inherited-type and variable/type-alias target capture, top-level/member
 declaration separation, observer dispatch, compile-stage ordering, numbered AST
