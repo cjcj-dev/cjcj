@@ -18,6 +18,8 @@ This pass filled another import-resolution edge case from the C++ `HandleAlready
 
 This pass de-isolated CJO filename/path utilities to the real `cangjie_compiler::utils.FileUtil`: `ToCjoFileName`, `ToPackageName`, and `CjoManager` CJO discovery now use the same shared utility behavior as the C++ implementation, including nested module-directory lookup before direct-path fallback and the C++ cache-hit return value for `GetPackageCjoPath`.
 
+This pass tightened two state-management details against the C++ reference: changing `ImportManager.SetSourceCodeImportStatus` now also updates the CJO manager state used by future AST loaders, matching the C++ shared `importSrcCode` reference, and dependency CJO/CJD path recording now preserves the first recorded path and derives `.cj.d` sidecar paths with the same substring rule as `SaveDepPkgCjoPath`.
+
 ## Implemented
 
 - Replaced `ModulesScaffold.cj` with per-component source files under `packages/modules/src`.
@@ -37,6 +39,8 @@ This pass de-isolated CJO filename/path utilities to the real `cangjie_compiler:
 - Added the C++ already-parsed package collision behavior for source packages that shadow indirect dependencies, plus the corresponding Basic diagnostic forwarding.
 - Added `ImportManager.SetImportedPackageFromASTNode` to register tool-provided package AST nodes through the CJO manager.
 - Added a real dependency on `cangjie_compiler::utils` for Modules CJO filename conversion and serialization-file discovery, replacing local ad hoc lookup with `FileUtil.FindSerializationFile`.
+- Matched `ImportManager` source-code import status propagation into `CjoManagerImpl` so newly created AST loaders observe LSP/source-import toggles.
+- Matched C++ dependency path bookkeeping for first-write CJO path storage and unconditional `.cj.d` sidecar derivation.
 - Implemented `DependencyGraph` direct/transitive dependency collection with macro re-export handling and cache invalidation.
 - Implemented `PackageManager` Tarjan SCC ordering and source package reordering behavior.
 - Added a compiling local AST writer/loader wire format so exported package/import/member data can round-trip inside this package while the real flatbuffer/AST dependencies are unavailable.

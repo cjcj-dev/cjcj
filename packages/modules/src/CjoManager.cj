@@ -18,6 +18,10 @@ public class CjoManager {
         return impl
     }
 
+    public func SetImportSourceCode(enable: Bool): Unit {
+        impl.SetImportSourceCode(enable)
+    }
+
     public func AddSourcePackage(pkg: Package): Unit {
         NormalizePackageFiles(pkg)
         let info = CjoPackageInfo(pkg)

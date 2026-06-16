@@ -138,6 +138,10 @@ public class CjoManagerImpl {
         return globalOptions
     }
 
+    public func SetImportSourceCode(enable: Bool): Unit {
+        importSrcCode = enable
+    }
+
     public func GetPackageNameMap(): HashMap<String, CjoPackageInfo> {
         return packageNameMap
     }

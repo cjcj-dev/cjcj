@@ -606,6 +606,7 @@ public class ImportManager {
 
     public func SetSourceCodeImportStatus(shouldImport: Bool): Unit {
         importSrcCode = shouldImport
+        cjoManager.SetImportSourceCode(shouldImport)
     }
 
     public func IsSourceCodeImported(): Bool {
@@ -764,13 +765,17 @@ public class ImportManager {
     }
 
     private func SaveDepPkgCjoPath(fullPackageName: String, cjoPath: String): Unit {
-        if (fullPackageName.isEmpty()) {
-            return
+        if (!cjoFilePaths.contains(fullPackageName)) {
+            cjoFilePaths[fullPackageName] = cjoPath
         }
-        cjoFilePaths[fullPackageName] = cjoPath
-        if (cjoPath.endsWith(SERIALIZED_FILE_EXTENSION)) {
-            cjdFilePaths[fullPackageName] = cjoPath[0..cjoPath.size - SERIALIZED_FILE_EXTENSION.size] + CJ_D_FILE_EXTENSION
+        if (!cjdFilePaths.contains(fullPackageName)) {
+            cjdFilePaths[fullPackageName] = ToCjdPath(cjoPath)
         }
+    }
+
+    private func ToCjdPath(cjoPath: String): String {
+        let end = cjoPath.lastIndexOf(SERIALIZED_FILE_EXTENSION) ?? cjoPath.size
+        return cjoPath[0..end] + CJ_D_FILE_EXTENSION
     }
 
     private func HandleStdPackage(fullPackageName: String, cjoPath: String, isRecursive!: Bool = false): Unit {
