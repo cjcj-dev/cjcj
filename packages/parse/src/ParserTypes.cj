@@ -1,6 +1,10 @@
 package cangjie_compiler::parse
 
-import std.collection.*
+import cangjie_compiler::option.BackendType as OptionBackendType
+import cangjie_compiler::option.GlobalOptions as OptionGlobalOptions
+import cangjie_compiler::option.InteropLanguage as OptionInteropLanguage
+import cangjie_compiler::option.OutputMode as OptionOutputMode
+import cangjie_compiler::option.TripleInfo as OptionTripleInfo
 
 public enum ScopeKind {
     | TOPLEVEL | CLASS_BODY | INTERFACE_BODY | STRUCT_BODY | EXTEND_BODY | FUNC_BODY | MACRO_BODY
@@ -97,40 +101,8 @@ extend ExprKind <: Equatable<ExprKind> {
     public operator func !=(right: ExprKind): Bool { return !(this == right) }
 }
 
-public enum InteropLanguage {
-    | NA | C | JAVA | OBJC
-}
-
-public enum OutputMode {
-    | UNKNOWN | CHIR | OBJECT | EXECUTABLE
-}
-
-private func OutputModeIndex(kind: OutputMode): Int64 {
-    return match (kind) {
-        case OutputMode.UNKNOWN => 0
-        case OutputMode.CHIR => 1
-        case OutputMode.OBJECT => 2
-        case OutputMode.EXECUTABLE => 3
-    }
-}
-
-extend OutputMode <: Equatable<OutputMode> {
-    public operator func ==(right: OutputMode): Bool { return OutputModeIndex(this) == OutputModeIndex(right) }
-    public operator func !=(right: OutputMode): Bool { return !(this == right) }
-}
-
-public class GlobalOptions {
-    public var enableEH: Bool = false
-    public var interopLanguage: InteropLanguage = InteropLanguage.NA
-    public var outputMode: OutputMode = OutputMode.UNKNOWN
-    public let commonPartCjos: ArrayList<String> = ArrayList<String>()
-    public init() {}
-}
-
-public enum BackendType {
-    | CJNATIVE | JVM | JS
-}
-
-public class Triple {
-    public init() {}
-}
+public type InteropLanguage = OptionInteropLanguage
+public type OutputMode = OptionOutputMode
+public type GlobalOptions = OptionGlobalOptions
+public type BackendType = OptionBackendType
+public type Triple = OptionTripleInfo

@@ -8,9 +8,9 @@ Build: `cjpm build` passes.
 
 Replaced the Parse scaffold with a multi-file Cangjie package that mirrors the C++
 Parse component split. The package now imports real Basic positions/source
-manager, real Lex tokens/token tables, and real AST kind/attribute/annotation
-enums. It still has local parser-facing diagnostics, AST node shapes, a lexer,
-parser state, top-level parsing,
+manager, real Lex tokens/token tables, real AST kind/attribute/annotation
+enums, and real Option compiler configuration types. It still has local
+parser-facing diagnostics, AST node shapes, a lexer, parser state, top-level parsing,
 declaration parsing, expression parsing, type parsing, pattern parsing, imports,
 annotations, modifiers, features, macro-call capture, quote capture, comment
 collection, modifier-rule queries, AST checking, AST hashing, CJMP entry wiring,
@@ -18,12 +18,14 @@ and Java/ObjC native FFI parser checks.
 
 ## Current De-Isolation
 
-`packages/parse/cjpm.toml` now depends on `basic`, `lex`, and `ast`.
+`packages/parse/cjpm.toml` now depends on `basic`, `lex`, `ast`, and `option`.
 `Position.cj` and `Token.cj` no longer own compatibility copies of the Basic
 position/source types or Lex token types. `ASTCore.cj` no longer owns local
 copies of `ASTKind`, `Attribute`, or `AnnotationKind`; it imports the real AST
 definitions and keeps only Parse-local lightweight node classes that still
-diverge from the real AST class layout.
+diverge from the real AST class layout. `ParserTypes.cj` no longer owns local
+copies of `GlobalOptions`, `OutputMode`, `InteropLanguage`, `BackendType`, or
+`Triple`; those names are public aliases of the real Option package types.
 
 ## Implemented In This Pass
 
@@ -96,12 +98,26 @@ diverge from the real AST class layout.
   class/interface/struct/enum/extend body, constructor, property, package, and
   interface warning rules. `INOUT` and `const` now follow the C++ mapping:
   `INOUT` has no AST attribute, and `const` is carried by declaration fields.
+- Continued de-isolating compiler-wide option state by replacing Parse-local
+  compatibility copies of `GlobalOptions`, `OutputMode`, `InteropLanguage`,
+  `BackendType`, and `Triple` with real imports from `cangjie_compiler::option`.
+  CJMP common-mode checks now use the real Option `OutputModeIndex` helper when
+  comparing against `OutputMode.CHIR`.
+- Reworked feature directive parsing to match `ParseFeatures.cpp` more closely:
+  `features` now expects a `{ ... }` set instead of the previous parenthesized
+  shape, records left/right brace positions, comma positions, dotted feature
+  identifiers, feature annotations, and broken-node state for malformed sets.
+  The local `FeatureId`, `FeaturesSet`, and `FeaturesDirective` scaffolding now
+  mirrors the real AST/C++ field layout for feature directives.
 
 ## Remaining Work
 
 - Replace the remaining Parse-local AST node classes, parser diagnostics, and
   parser lexer implementation with real sibling package APIs where their public
   surfaces are sufficiently complete.
+- Feature raw-identifier diagnostics still depend on finishing lexer
+  de-isolation: the local Parse lexer strips backticks before parser recovery,
+  while the real Lex lexer preserves raw identifier spelling in `Token.Value()`.
 - Audit grammar and diagnostic parity against the full C++ Parse test corpus;
   the current parser is substantial and compiling, but not a complete faithful
   replacement for all 17k+ lines of C++ parser behavior.

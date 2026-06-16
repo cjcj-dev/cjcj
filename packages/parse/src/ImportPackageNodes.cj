@@ -49,24 +49,57 @@ public class PackageSpec <: Node {
 }
 
 public class FeatureId <: Node {
-    public var identifier: SrcIdentifier = SrcIdentifier()
+    public let identifiers: ArrayList<SrcIdentifier> = ArrayList<SrcIdentifier>()
+    public let dotPoses: ArrayList<Position> = ArrayList<Position>()
+
+    public init() {
+        super(ASTKind.FEATURE_ID)
+    }
+
     public init(identifier: SrcIdentifier) {
         super(ASTKind.FEATURE_ID)
-        this.identifier = identifier
+        identifiers.add(identifier)
         begin = identifier.Begin()
         end = identifier.End()
+    }
+
+    public override func ToString(): String {
+        let parts = ArrayList<String>()
+        for (identifier in identifiers) {
+            parts.add(identifier.Val())
+        }
+        return JoinStrings(parts, ".")
     }
 }
 
 public class FeaturesSet <: Node {
-    public let features: ArrayList<FeatureId> = ArrayList<FeatureId>()
+    public var lCurlPos: Position = INVALID_POSITION
+    public let content: ArrayList<FeatureId> = ArrayList<FeatureId>()
+    public let commaPoses: ArrayList<Position> = ArrayList<Position>()
+    public var rCurlPos: Position = INVALID_POSITION
+
     public init() { super(ASTKind.FEATURES_SET) }
+
+    public override func Children(): ArrayList<Node> {
+        let out = ArrayList<Node>()
+        for (feature in content) { out.add(feature) }
+        return out
+    }
 }
 
 public class FeaturesDirective <: Node {
+    public let annotations: ArrayList<Annotation> = ArrayList<Annotation>()
+    public var featuresSet: Option<FeaturesSet> = None
     public var featuresPos: Position = INVALID_POSITION
-    public let featureSets: ArrayList<FeaturesSet> = ArrayList<FeaturesSet>()
+
     public init() { super(ASTKind.FEATURES_DIRECTIVE) }
+
+    public override func Children(): ArrayList<Node> {
+        let out = ArrayList<Node>()
+        for (anno in annotations) { out.add(anno) }
+        if (let Some(set) <- featuresSet) { out.add(set) }
+        return out
+    }
 }
 
 public class File <: Node {
