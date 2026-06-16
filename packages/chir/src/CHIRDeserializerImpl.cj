@@ -42,6 +42,7 @@ class CHIRDeserializerImpl {
         configureCustomDefs()
         configureGlobalsAndFunctions()
         createExpressions()
+        configureBlockPredecessors()
         configureBlockGroups()
         configurePackageFunctions(pkg)
         return pkg
@@ -130,7 +131,7 @@ class CHIRDeserializerImpl {
                 srcCodeIdentifier: CHIRFieldAt(fields, 3), rawMangledName: CHIRFieldAt(fields, 4),
                 packageName: ownerPackage)
             CHIRApplyAnnoInfo(globalVar.GetAnnoInfo(), CHIRFieldAt(fields, 10))
-            CHIRApplyBaseInfo(globalVar, CHIRFieldAt(fields, 11), CHIRFieldAt(fields, 12))
+            CHIRApplyBaseInfo(globalVar, CHIRFieldAt(fields, 11), CHIRFieldAt(fields, 12), annotationText: CHIRFieldAt(fields, 13))
             for (feature in CHIRWireSplitList(CHIRFieldAt(fields, 8))) {
                 if (!feature.isEmpty()) {
                     globalVar.AddFeature(feature)
@@ -154,7 +155,7 @@ class CHIRDeserializerImpl {
                 rawMangledName: CHIRFieldAt(fields, 4), packageName: ownerPackage)
             fn.SetFuncKind(CHIRFuncKindFromIndex(CHIRSafeI64(CHIRFieldAt(fields, 6))))
             CHIRApplyAnnoInfo(fn.GetAnnoInfo(), CHIRFieldAt(fields, 16))
-            CHIRApplyBaseInfo(fn, CHIRFieldAt(fields, 17), CHIRFieldAt(fields, 18))
+            CHIRApplyBaseInfo(fn, CHIRFieldAt(fields, 17), CHIRFieldAt(fields, 18), annotationText: CHIRFieldAt(fields, 19))
             fn.SetPropLocation(CHIRParseDebugLocation(CHIRFieldAt(fields, 15)))
             for (feature in CHIRWireSplitList(CHIRFieldAt(fields, 12))) {
                 if (!feature.isEmpty()) {
@@ -180,7 +181,7 @@ class CHIRDeserializerImpl {
             let param = builder.CreateParameter(paramTy, CHIRFieldAt(fields, 1), fn)
             param.SetSrcCodeIdentifier(CHIRFieldAt(fields, 2))
             CHIRApplyAnnoInfo(param.GetAnnoInfo(), CHIRFieldAt(fields, 4))
-            CHIRApplyBaseInfo(param, CHIRFieldAt(fields, 5), CHIRFieldAt(fields, 6))
+            CHIRApplyBaseInfo(param, CHIRFieldAt(fields, 5), CHIRFieldAt(fields, 6), annotationText: CHIRFieldAt(fields, 7))
             valuesById[CHIRFieldAt(fields, 0)] = param
         }
     }
@@ -197,14 +198,14 @@ class CHIRDeserializerImpl {
     private func createBlockGroupsAndBlocks(): Unit {
         for (fields in blockGroupRecords) {
             let group = builder.CreateBlockGroup(CHIRFieldAt(fields, 2))
-            CHIRApplyBaseInfo(group, CHIRFieldAt(fields, 7), CHIRFieldAt(fields, 8))
+            CHIRApplyBaseInfo(group, CHIRFieldAt(fields, 7), CHIRFieldAt(fields, 8), annotationText: CHIRFieldAt(fields, 9))
             valuesById[CHIRFieldAt(fields, 1)] = group
         }
         for (fields in blockRecords) {
             if (let Some(groupValue) <- valuesById.get(CHIRFieldAt(fields, 2))) {
                 if (let Some(group) <- (groupValue as BlockGroup)) {
                     let block = builder.CreateBlock(CHIRFieldAt(fields, 3), group)
-                    CHIRApplyBaseInfo(block, CHIRFieldAt(fields, 5), CHIRFieldAt(fields, 6))
+                    CHIRApplyBaseInfo(block, CHIRFieldAt(fields, 5), CHIRFieldAt(fields, 6), annotationText: CHIRFieldAt(fields, 8))
                     let exceptions = ArrayList<ClassType>()
                     for (exceptionText in CHIRWireSplitList(CHIRFieldAt(fields, 4))) {
                         if (let Some(classTy) <- (CHIRParseType(exceptionText, builder, customDefs) as ClassType)) {
@@ -223,7 +224,7 @@ class CHIRDeserializerImpl {
     private func configureCustomDefs(): Unit {
         for (fields in customRecords) {
             let def = customDefsById.get(CHIRFieldAt(fields, 1)) ?? continue
-            CHIRApplyBaseInfo(def, CHIRFieldAt(fields, 14), CHIRFieldAt(fields, 15))
+            CHIRApplyBaseInfo(def, CHIRFieldAt(fields, 14), CHIRFieldAt(fields, 15), annotationText: CHIRFieldAt(fields, 16))
             for (paramText in CHIRWireSplitList(CHIRFieldAt(fields, 6))) {
                 if (let Some(genericTy) <- (CHIRParseType(paramText, builder, customDefs) as GenericType)) {
                     def.AddGenericTypeParam(genericTy)
@@ -325,7 +326,7 @@ class CHIRDeserializerImpl {
                 if (let Some(block) <- (blockValue as Block)) {
                     let expr = createExpression(fields, block)
                     expressionsById[CHIRFieldAt(fields, 1)] = expr
-                    CHIRApplyBaseInfo(expr, CHIRFieldAt(fields, 11), CHIRFieldAt(fields, 12))
+                    CHIRApplyBaseInfo(expr, CHIRFieldAt(fields, 11), CHIRFieldAt(fields, 12), annotationText: CHIRFieldAt(fields, 14))
                     if (let Some(result) <- expr.GetResult()) {
                         result.SetIdentifier(CHIRFieldAt(fields, 6))
                         valuesById[CHIRFieldAt(fields, 5)] = result
@@ -355,9 +356,13 @@ class CHIRDeserializerImpl {
             CHIRParseType(resultTyText, builder, customDefs)
         }
         let operands = resolveOperands(CHIRFieldAt(fields, 8))
+        let blockGroups = resolveBlockGroups(CHIRFieldAt(fields, 13))
         if (kind == ExprKind.CONSTANT) {
             let constantTy = if (let Some(ty) <- resultTy) { ty } else { builder.context.GetInvalidTy() }
             return builder.CreateConstant(constantTy, parseLiteral(CHIRFieldAt(fields, 10)), block)
+        }
+        if (kind == ExprKind.LAMBDA && !blockGroups.isEmpty()) {
+            return createLambdaExpression(operands, blockGroups[0], block, resultTy)
         }
         let successors = resolveBlocks(CHIRFieldAt(fields, 9))
         if (kind == ExprKind.GOTO && !successors.isEmpty()) {
@@ -380,7 +385,7 @@ class CHIRDeserializerImpl {
                 return builder.CreateBinaryExpression(kind, ty, operands[0], operands[1], block)
             }
         }
-        return builder.CreateExpression(kind, resultTy, operands, block)
+        return createGenericExpression(kind, resultTy, operands, blockGroups, block)
     }
 
     private func resolveOperands(value: String): ArrayList<Value> {
@@ -403,6 +408,59 @@ class CHIRDeserializerImpl {
             }
         }
         return out
+    }
+
+    private func resolveBlockGroups(value: String): ArrayList<BlockGroup> {
+        let out = ArrayList<BlockGroup>()
+        for (id in CHIRWireSplitList(value)) {
+            if (let Some(valueRef) <- valuesById.get(id)) {
+                if (let Some(group) <- (valueRef as BlockGroup)) {
+                    out.add(group)
+                }
+            }
+        }
+        return out
+    }
+
+    private func createLambdaExpression(operands: ArrayList<Value>, body: BlockGroup, block: Block,
+        resultTy: Option<Type>): Expression {
+        let expr = Lambda(operands, body, block)
+        block.AppendExpression(expr)
+        builder.context.RegisterExpression(expr)
+        attachResult(expr, resultTy)
+        return expr
+    }
+
+    private func createGenericExpression(kind: ExprKind, resultTy: Option<Type>, operands: ArrayList<Value>,
+        blockGroups: ArrayList<BlockGroup>, block: Block): Expression {
+        let expr = Expression(kind, operands, blockGroups, block)
+        block.AppendExpression(expr)
+        builder.context.RegisterExpression(expr)
+        attachResult(expr, resultTy)
+        return expr
+    }
+
+    private func attachResult(expr: Expression, resultTy: Option<Type>): Unit {
+        if (let Some(ty) <- resultTy) {
+            builder.CreateLocalVar(ty, "%${builder.context.GetAllNodesNum()}", expr)
+        }
+    }
+
+    private func configureBlockPredecessors(): Unit {
+        for (fields in blockRecords) {
+            let predecessorText = CHIRFieldAt(fields, 7)
+            if (predecessorText.isEmpty()) {
+                continue
+            }
+            if (let Some(value) <- valuesById.get(CHIRFieldAt(fields, 1))) {
+                if (let Some(block) <- (value as Block)) {
+                    block.ClearPredecessorsOnly()
+                    for (predecessor in resolveBlocks(predecessorText)) {
+                        block.AddPredecessor(predecessor)
+                    }
+                }
+            }
+        }
     }
 
     private func configureBlockGroups(): Unit {

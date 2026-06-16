@@ -3,6 +3,8 @@ package cangjie_compiler::chir
 import std.collection.*
 
 class CHIRSerializerImpl {
+    private let serializedBlockGroups: HashSet<Int64> = HashSet<Int64>()
+
     public init() {}
 
     public func SerializePackage(pkg: Package): String {
@@ -72,6 +74,7 @@ class CHIRSerializerImpl {
         fields.add(serializeExtendedType(def))
         fields.add(CHIRSerializeDebugLocation(def.GetDebugLocation()))
         fields.add(CHIRSerializeAttributes(def))
+        fields.add(CHIRSerializeBaseAnnotations(def))
         lines.add(CHIRWireJoinFields(fields))
     }
 
@@ -89,6 +92,7 @@ class CHIRSerializerImpl {
         fields.add(CHIRSerializeAnnoInfo(globalVar.GetAnnoInfo()))
         fields.add(CHIRSerializeDebugLocation(globalVar.GetDebugLocation()))
         fields.add(CHIRSerializeAttributes(globalVar))
+        fields.add(CHIRSerializeBaseAnnotations(globalVar))
         lines.add(CHIRWireJoinFields(fields))
     }
 
@@ -112,10 +116,15 @@ class CHIRSerializerImpl {
         fields.add(CHIRSerializeAnnoInfo(fn.GetAnnoInfo()))
         fields.add(CHIRSerializeDebugLocation(fn.GetDebugLocation()))
         fields.add(CHIRSerializeAttributes(fn))
+        fields.add(CHIRSerializeBaseAnnotations(fn))
         lines.add(CHIRWireJoinFields(fields))
     }
 
     private func appendBlockGroup(lines: ArrayList<String>, group: BlockGroup): Unit {
+        if (serializedBlockGroups.contains(group.nodeId)) {
+            return
+        }
+        serializedBlockGroups.add(group.nodeId)
         let fields = CHIRLineFields("blockGroup")
         fields.add(CHIRValueId(group))
         fields.add(group.GetIdentifier())
@@ -125,6 +134,7 @@ class CHIRSerializerImpl {
         fields.add(serializeBlockRefs(group.GetBlocks()))
         fields.add(CHIRSerializeDebugLocation(group.GetDebugLocation()))
         fields.add(CHIRSerializeAttributes(group))
+        fields.add(CHIRSerializeBaseAnnotations(group))
         lines.add(CHIRWireJoinFields(fields))
         for (block in group.GetBlocks()) {
             appendBlock(lines, group, block)
@@ -139,6 +149,8 @@ class CHIRSerializerImpl {
         fields.add(serializeClassTypes(block.GetExceptions()))
         fields.add(CHIRSerializeDebugLocation(block.GetDebugLocation()))
         fields.add(CHIRSerializeAttributes(block))
+        fields.add(serializeBlockRefs(block.GetPredecessors()))
+        fields.add(CHIRSerializeBaseAnnotations(block))
         lines.add(CHIRWireJoinFields(fields))
         var index: Int64 = 0
         for (expr in block.GetExpressions()) {
@@ -165,7 +177,12 @@ class CHIRSerializerImpl {
         fields.add(serializeLiteral(expr))
         fields.add(CHIRSerializeDebugLocation(expr.GetDebugLocation()))
         fields.add(CHIRSerializeAttributes(expr))
+        fields.add(serializeBlockGroupRefs(expr.GetBlockGroups()))
+        fields.add(CHIRSerializeBaseAnnotations(expr))
         lines.add(CHIRWireJoinFields(fields))
+        for (group in expr.GetBlockGroups()) {
+            appendBlockGroup(lines, group)
+        }
     }
 
     private func serializeGenericParams(params: ArrayList<GenericType>): String {
@@ -198,6 +215,14 @@ class CHIRSerializerImpl {
     }
 
     private func serializeBlockRefs(values: ArrayList<Block>): String {
+        let out = ArrayList<String>()
+        for (value in values) {
+            out.add(CHIRValueId(value))
+        }
+        return CHIRWireJoinList(out)
+    }
+
+    private func serializeBlockGroupRefs(values: ArrayList<BlockGroup>): String {
         let out = ArrayList<String>()
         for (value in values) {
             out.add(CHIRValueId(value))
@@ -285,6 +310,7 @@ class CHIRSerializerImpl {
             fields.add(CHIRSerializeAnnoInfo(param.GetAnnoInfo()))
             fields.add(CHIRSerializeDebugLocation(param.GetDebugLocation()))
             fields.add(CHIRSerializeAttributes(param))
+            fields.add(CHIRSerializeBaseAnnotations(param))
             out.add(CHIRWireJoinFields(fields))
         }
         return CHIRWireJoinList(out)

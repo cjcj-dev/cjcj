@@ -169,15 +169,40 @@ func CHIRSerializeAttributes(base: Base): String {
     return CHIRWireJoinList(parts)
 }
 
-func CHIRApplyBaseInfo(base: Base, locText: String, attrText: String): Unit {
+func CHIRApplyBaseInfo(base: Base, locText: String, attrText: String, annotationText!: String = ""): Unit {
     if (!locText.isEmpty()) {
         base.SetDebugLocation(CHIRParseDebugLocation(locText))
     }
+    CHIRApplyBaseAnnotations(base, annotationText)
     for (attrIndex in CHIRWireSplitList(attrText)) {
         if (attrIndex.isEmpty()) {
             continue
         }
         base.EnableAttr(CHIRAttributeFromIndex(CHIRSafeI64(attrIndex)))
+    }
+}
+
+func CHIRSerializeBaseAnnotations(base: Base): String {
+    return base.GetAnno().ToString()
+}
+
+func CHIRApplyBaseAnnotations(base: Base, value: String): Unit {
+    if (value.isEmpty()) {
+        return
+    }
+    base.GetAnno().Clear()
+    for (rawLine in value.split("\n")) {
+        let line = rawLine
+        if (!line.startsWith("@")) {
+            continue
+        }
+        if (let Some(openPos) <- line.indexOf("(")) {
+            if (let Some(closePos) <- line.lastIndexOf(")")) {
+                if (openPos > 1 && closePos > openPos) {
+                    base.SetAnnotation(line[1..openPos], line[openPos + 1..closePos])
+                }
+            }
+        }
     }
 }
 
