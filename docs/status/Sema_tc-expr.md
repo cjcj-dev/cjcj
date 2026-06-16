@@ -33,7 +33,9 @@ What changed:
   - Lambda body rechecking now clears previously synthesized expression/decl state while preserving type and generic nodes, mirroring the C++ `ClearLambdaBodyForReCheck` shape.
   - Try catch-pattern checking now carries an included-type set across wildcard and exception-type catch patterns, rejecting duplicate or already-covered catch types instead of accepting every structurally valid pattern.
   - Try handler command-pattern checking now carries a separate included-command set and rejects non-`Command<T>`-shaped patterns or already-covered command types before checking the nested pattern.
-- Verification: `cjpm build` passes after the follow-up pass. `grep -rn "TODO(selfhost:Sema)" packages/sema/src` reports only out-of-scope Sema placeholders; the scoped `TypeCheckExpr.cj` and `TypeCheckExpr/*` files have zero matching markers.
+- Resume pass:
+  - `@IfAvailable(level:)` string literal validation now uses the real `sema.Plugin.APILevelVersion` parser with the C++ `TRIPLE_ONLY` rule, while preserving the C++ expression checker behavior that accepts integer literals as literals in this path.
+- Verification: `cjpm build` passes after the resume pass. `grep -rn "TODO(selfhost:Sema)" packages/sema/src` reports only out-of-scope Sema placeholders; the scoped `TypeCheckExpr.cj` and `TypeCheckExpr/*` files have zero matching markers.
 
 Remaining fidelity gaps:
 - Full overload resolution/desugar paths for operator, subscript, and compound assignment still depend on broader call/lookup/desugar infrastructure.
@@ -44,5 +46,6 @@ Remaining fidelity gaps:
 - Try-with-resources currently checks resource declarations structurally but cannot validate the imported `Resource` interface without the full import manager path.
 - Try-handle command pattern promotion is still approximated from the available self-hosted type arguments; full parity needs the broader promotion/import-manager path used by C++ `ChkCommandTypePattern`.
 - Catch pattern validation cannot yet prove subtype-of-core-`Exception`/`Error` without an import-manager/core-decl path in this helper; it conservatively validates catchable classlike/generic shapes.
+- `@IfAvailable` still lacks the C++ import-manager checks for `ohos.device_info` and `ohos.base` package availability.
 
-Completeness estimate: 54% of C++ behavior for this scoped expression type-checking area, weighted by behavior rather than line count.
+Completeness estimate: 55% of C++ behavior for this scoped expression type-checking area, weighted by behavior rather than line count.
