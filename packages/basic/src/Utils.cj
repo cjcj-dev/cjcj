@@ -119,26 +119,3 @@ public func GetLineTerminatorLength(bytes: Array<Byte>, index: Int64): UInt8 {
 public func GetLineTerminator(): String {
     return "\n"
 }
-
-public func NormalizePath(path: String): String {
-    if (path.isEmpty()) {
-        return path
-    }
-    return path.replace("\\", "/")
-}
-
-public func FileExtension(path: String): String {
-    let slash = path.lastIndexOf("/") ?? -1
-    let dot = path.lastIndexOf(".") ?? -1
-    if (dot <= slash || dot + 1 >= path.size) {
-        return ""
-    }
-    return path[dot + 1..]
-}
-
-public func FileName(path: String): String {
-    let slash1 = path.lastIndexOf("/") ?? -1
-    let slash2 = path.lastIndexOf("\\") ?? -1
-    let slash = if (slash1 > slash2) { slash1 } else { slash2 }
-    return if (slash + 1 < path.size) { path[slash + 1..] } else { path }
-}

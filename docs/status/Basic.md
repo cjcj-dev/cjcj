@@ -28,6 +28,10 @@ Deepening pass updates:
   emission and `GetDiagnosticInfo`, matching the C++ `DiagnosticEmitter::Emit()` result handling.
 - Added the C++ Basic `PrintCommandDesc` helper for option/help text alignment and matched `ErrorWithColor` emission
   order/reset behavior from `Print.cpp` without changing diagnostic emitter color formatting.
+- De-isolated Basic path handling to the real `cangjie_compiler::utils.FileUtil`: source registration now uses the
+  C++ `FileUtil::Normalize` path, macrocall/source-existence checks use C++-style extension and existence helpers,
+  package-qualified diagnostic display uses `FileUtil::GetFileName`, and the non-reference-owned Basic-local path
+  helper exports were removed. `IsInMacroCallSourceFile` also now follows the C++ size-based source-id guard.
 
 Implemented:
 
@@ -35,6 +39,8 @@ Implemented:
 - Added real implementations for positions, source buffers, line offsets, source slicing, string conversion, display width, printing/color helpers, version/linkage/type enums, macro-call diagnostic mapping, diagnostic metadata tables generated from the C++ `.def` files, diagnostic engine state, text/json diagnostic output, and interop package config parsing.
 - Preserved the C++ diagnostic IDs/messages/severities/warning groups by generating tables from the reference `DiagnosticsAll.def`, `DiagRefactor/DiagnosticAll.def`, and `DiagnosticWarnGroupKind.def`.
 - De-isolated diagnostic warning suppression from a Basic-local manager to the real `cangjie_compiler::option.WarningOptionMgr`, keeping Basic warning group indices aligned with Option so `-Woff` state is shared with the diagnostics engine.
+- De-isolated source path normalization, extension checks, existence checks, and package display file names from
+  Basic-local helpers to the real `cangjie_compiler::utils.FileUtil` package.
 - Corrected refactor diagnostic category classification to mirror the C++ sentinel ranges, including lexer, import-package, module, parse-query, conditional-compilation, CHIR, parse, and sema ranges with exclusive end sentinels. Legacy `DiagKind` category mapping now follows the C++ Basic implementation for macro expansion and sema.
 - Matched more C++ diagnostic emission behavior: buffered category diagnostics are sorted by begin/end range before emission, macro-origin notes are prepended ahead of existing subdiagnostics, range-error checking is deferred after existing lex/parse errors for later phases, and JSON-format reporting caches counts and emits the assembled JSON payload from `ReportErrorAndWarningCount`.
 - Replaced the remaining Basic selfhost markers with working code:

@@ -1,7 +1,7 @@
 package cangjie_compiler::basic
 
 import std.collection.*
-import std.fs.*
+import cangjie_compiler::utils.FileUtil
 
 public class Token {
     private var beginPos: Position
@@ -188,29 +188,29 @@ public class SourceManager {
         packageName!: Option<String> = None,
         isCjmpFile!: Bool = false
     ): UInt64 {
-        let normalizedPath = NormalizePath(path)
+        let normalizedPath = FileUtil.Normalize(path)
         let fileHash = GetHash(normalizedPath)
         return GetFileId(normalizedPath, buffer, fileHash, packageName, isCjmpFile, false)
     }
 
     public func AppendSource(path: String, buffer: String, isCjmpFile!: Bool = false): UInt64 {
-        let normalizedPath = NormalizePath(path)
+        let normalizedPath = FileUtil.Normalize(path)
         let fileHash = GetHash(normalizedPath)
         return GetFileId(normalizedPath, buffer, fileHash, None, isCjmpFile, true)
     }
 
     public func IsInMacroCallSourceFile(pos: Position): Bool {
-        if (pos.fileID == 0 || !sources.contains(pos.fileID)) {
+        if (pos.fileID == 0 || pos.fileID >= UInt64(sources.size) || !sources.contains(pos.fileID)) {
             return false
         }
-        return FileExtension(GetSource(pos.fileID).path) == "macrocall"
+        return FileUtil.GetFileExtension(GetSource(pos.fileID).path) == "macrocall"
     }
 
     public func IsSourceFileExist(id: UInt64): Bool {
         if (sources.contains(id)) {
             let path = GetSource(id).path
-            if (!path.isEmpty() && FileExtension(path) != "cj") {
-                return exists(path)
+            if (!path.isEmpty() && FileUtil.GetFileExtension(path) != "cj") {
+                return FileUtil.FileExist(path)
             }
         }
         return true

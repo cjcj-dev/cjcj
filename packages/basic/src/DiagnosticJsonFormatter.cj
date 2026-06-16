@@ -1,6 +1,7 @@
 package cangjie_compiler::basic
 
 import std.collection.*
+import cangjie_compiler::utils.FileUtil
 
 private let DIAG_JSON_DEEP: Int64 = 3
 private let INDENT_WIDTH: Int64 = 4
@@ -146,7 +147,7 @@ public class DiagnosticJsonFormatter {
         if (diag.HasSourceManager() && diag.GetSourceManager().IsSourceFileExist(pos.fileID)) {
             let source = diag.GetSourceManager().GetSource(pos.fileID)
             if (let Some(pkgName) <- source.packageName) {
-                fileStr = "(package " + pkgName + ")" + FileName(source.path)
+                fileStr = "(package " + pkgName + ")" + FileUtil.GetFileName(source.path)
             } else {
                 fileStr = source.path
             }
