@@ -8,6 +8,7 @@ public type LLVMBasicBlockRef = CPointer<Unit>
 public type LLVMBuilderRef = CPointer<Unit>
 public type LLVMMemoryBufferRef = CPointer<Unit>
 public type LLVMMetadataRef = CPointer<Unit>
+public type LLVMAttributeRef = CPointer<Unit>
 
 public enum LLVMLinkage {
     | External
@@ -30,6 +31,10 @@ public enum LLVMVerifierFailureAction {
 
 public enum LLVMIntPredicate {
     | EQ | NE | UGT | UGE | ULT | ULE | SGT | SGE | SLT | SLE
+}
+
+public enum LLVMRealPredicate {
+    | False | OEQ | OGT | OGE | OLT | OLE | ONE | ORD | UNO | UEQ | UGT | UGE | ULT | ULE | UNE | True
 }
 
 public func LLVMLinkageValue(linkage: LLVMLinkage): Int32 {
@@ -70,6 +75,27 @@ public func LLVMIntPredicateValue(predicate: LLVMIntPredicate): Int32 {
     }
 }
 
+public func LLVMRealPredicateValue(predicate: LLVMRealPredicate): Int32 {
+    return match (predicate) {
+        case LLVMRealPredicate.False => 0
+        case LLVMRealPredicate.OEQ => 1
+        case LLVMRealPredicate.OGT => 2
+        case LLVMRealPredicate.OGE => 3
+        case LLVMRealPredicate.OLT => 4
+        case LLVMRealPredicate.OLE => 5
+        case LLVMRealPredicate.ONE => 6
+        case LLVMRealPredicate.ORD => 7
+        case LLVMRealPredicate.UNO => 8
+        case LLVMRealPredicate.UEQ => 9
+        case LLVMRealPredicate.UGT => 10
+        case LLVMRealPredicate.UGE => 11
+        case LLVMRealPredicate.ULT => 12
+        case LLVMRealPredicate.ULE => 13
+        case LLVMRealPredicate.UNE => 14
+        case LLVMRealPredicate.True => 15
+    }
+}
+
 foreign {
     func LLVMContextCreate(): LLVMContextRef
     func LLVMContextDispose(context: LLVMContextRef): Unit
@@ -77,6 +103,7 @@ foreign {
     func LLVMDisposeModule(module: LLVMModuleRef): Unit
     func LLVMSetDataLayout(module: LLVMModuleRef, dataLayout: CString): Unit
     func LLVMSetTarget(module: LLVMModuleRef, triple: CString): Unit
+    func LLVMGetModuleContext(module: LLVMModuleRef): LLVMContextRef
     func LLVMVerifyModule(module: LLVMModuleRef, action: Int32, outMessage: CPointer<CString>): Int32
     func LLVMWriteBitcodeToFile(module: LLVMModuleRef, path: CString): Int32
     func LLVMDisposeMessage(message: CString): Unit
@@ -97,13 +124,27 @@ foreign {
 
     func LLVMAddFunction(module: LLVMModuleRef, name: CString, functionType: LLVMTypeRef): LLVMValueRef
     func LLVMAddGlobal(module: LLVMModuleRef, globalType: LLVMTypeRef, name: CString): LLVMValueRef
+    func LLVMGetGlobalParent(global: LLVMValueRef): LLVMModuleRef
     func LLVMSetLinkage(global: LLVMValueRef, linkage: Int32): Unit
+    func LLVMSetInitializer(global: LLVMValueRef, constantVal: LLVMValueRef): Unit
+    func LLVMGetParam(fn: LLVMValueRef, index: UInt32): LLVMValueRef
+    func LLVMGetFirstBasicBlock(fn: LLVMValueRef): LLVMBasicBlockRef
+    func LLVMGetNextBasicBlock(block: LLVMBasicBlockRef): LLVMBasicBlockRef
+    func LLVMGetBasicBlockTerminator(block: LLVMBasicBlockRef): LLVMValueRef
+    func LLVMGetNumSuccessors(term: LLVMValueRef): UInt32
+    func LLVMGetSuccessor(term: LLVMValueRef, index: UInt32): LLVMBasicBlockRef
+    func LLVMDeleteBasicBlock(block: LLVMBasicBlockRef): Unit
+    func LLVMInstructionEraseFromParent(inst: LLVMValueRef): Unit
     func LLVMConstNull(valueType: LLVMTypeRef): LLVMValueRef
+    func LLVMGetUndef(valueType: LLVMTypeRef): LLVMValueRef
     func LLVMConstInt(intType: LLVMTypeRef, value: UInt64, signExtend: Int32): LLVMValueRef
     func LLVMConstReal(realType: LLVMTypeRef, value: Float64): LLVMValueRef
+    func LLVMConstStringInContext(context: LLVMContextRef, str: CString, length: UInt32, dontNullTerminate: Int32): LLVMValueRef
 
     func LLVMCreateBuilderInContext(context: LLVMContextRef): LLVMBuilderRef
     func LLVMDisposeBuilder(builder: LLVMBuilderRef): Unit
+    func LLVMGetCurrentDebugLocation2(builder: LLVMBuilderRef): LLVMMetadataRef
+    func LLVMSetCurrentDebugLocation2(builder: LLVMBuilderRef, location: LLVMMetadataRef): Unit
     func LLVMAppendBasicBlockInContext(context: LLVMContextRef, fn: LLVMValueRef, name: CString): LLVMBasicBlockRef
     func LLVMPositionBuilderAtEnd(builder: LLVMBuilderRef, block: LLVMBasicBlockRef): Unit
     func LLVMBuildRetVoid(builder: LLVMBuilderRef): LLVMValueRef
@@ -118,12 +159,31 @@ foreign {
     func LLVMBuildMul(builder: LLVMBuilderRef, left: LLVMValueRef, right: LLVMValueRef, name: CString): LLVMValueRef
     func LLVMBuildSDiv(builder: LLVMBuilderRef, left: LLVMValueRef, right: LLVMValueRef, name: CString): LLVMValueRef
     func LLVMBuildUDiv(builder: LLVMBuilderRef, left: LLVMValueRef, right: LLVMValueRef, name: CString): LLVMValueRef
+    func LLVMBuildSRem(builder: LLVMBuilderRef, left: LLVMValueRef, right: LLVMValueRef, name: CString): LLVMValueRef
+    func LLVMBuildURem(builder: LLVMBuilderRef, left: LLVMValueRef, right: LLVMValueRef, name: CString): LLVMValueRef
+    func LLVMBuildShl(builder: LLVMBuilderRef, left: LLVMValueRef, right: LLVMValueRef, name: CString): LLVMValueRef
+    func LLVMBuildAShr(builder: LLVMBuilderRef, left: LLVMValueRef, right: LLVMValueRef, name: CString): LLVMValueRef
+    func LLVMBuildLShr(builder: LLVMBuilderRef, left: LLVMValueRef, right: LLVMValueRef, name: CString): LLVMValueRef
+    func LLVMBuildFAdd(builder: LLVMBuilderRef, left: LLVMValueRef, right: LLVMValueRef, name: CString): LLVMValueRef
+    func LLVMBuildFSub(builder: LLVMBuilderRef, left: LLVMValueRef, right: LLVMValueRef, name: CString): LLVMValueRef
+    func LLVMBuildFMul(builder: LLVMBuilderRef, left: LLVMValueRef, right: LLVMValueRef, name: CString): LLVMValueRef
+    func LLVMBuildFDiv(builder: LLVMBuilderRef, left: LLVMValueRef, right: LLVMValueRef, name: CString): LLVMValueRef
+    func LLVMBuildFRem(builder: LLVMBuilderRef, left: LLVMValueRef, right: LLVMValueRef, name: CString): LLVMValueRef
     func LLVMBuildNeg(builder: LLVMBuilderRef, value: LLVMValueRef, name: CString): LLVMValueRef
+    func LLVMBuildFNeg(builder: LLVMBuilderRef, value: LLVMValueRef, name: CString): LLVMValueRef
     func LLVMBuildNot(builder: LLVMBuilderRef, value: LLVMValueRef, name: CString): LLVMValueRef
     func LLVMBuildAnd(builder: LLVMBuilderRef, left: LLVMValueRef, right: LLVMValueRef, name: CString): LLVMValueRef
     func LLVMBuildOr(builder: LLVMBuilderRef, left: LLVMValueRef, right: LLVMValueRef, name: CString): LLVMValueRef
     func LLVMBuildXor(builder: LLVMBuilderRef, left: LLVMValueRef, right: LLVMValueRef, name: CString): LLVMValueRef
     func LLVMBuildICmp(builder: LLVMBuilderRef, op: Int32, left: LLVMValueRef, right: LLVMValueRef, name: CString): LLVMValueRef
+    func LLVMBuildFCmp(builder: LLVMBuilderRef, op: Int32, left: LLVMValueRef, right: LLVMValueRef, name: CString): LLVMValueRef
+    func LLVMBuildBitCast(builder: LLVMBuilderRef, value: LLVMValueRef, destType: LLVMTypeRef, name: CString): LLVMValueRef
+    func LLVMBuildInsertValue(builder: LLVMBuilderRef, aggregate: LLVMValueRef, element: LLVMValueRef, index: UInt32, name: CString): LLVMValueRef
+    func LLVMBuildCall2(builder: LLVMBuilderRef, functionType: LLVMTypeRef, fn: LLVMValueRef, args: CPointer<LLVMValueRef>, numArgs: UInt32, name: CString): LLVMValueRef
+    func LLVMBuildGEP2(builder: LLVMBuilderRef, elementType: LLVMTypeRef, pointer: LLVMValueRef, indices: CPointer<LLVMValueRef>, numIndices: UInt32, name: CString): LLVMValueRef
+    func LLVMGetEnumAttributeKindForName(name: CString, len: UIntNative): UInt32
+    func LLVMCreateEnumAttribute(context: LLVMContextRef, kindID: UInt32, value: UInt64): LLVMAttributeRef
+    func LLVMAddAttributeAtIndex(fn: LLVMValueRef, index: UInt32, attr: LLVMAttributeRef): Unit
 }
 
 public func LLVMNullContext(): LLVMContextRef { return CPointer<Unit>() }
@@ -132,6 +192,8 @@ public func LLVMNullType(): LLVMTypeRef { return CPointer<Unit>() }
 public func LLVMNullValue(): LLVMValueRef { return CPointer<Unit>() }
 public func LLVMNullBasicBlock(): LLVMBasicBlockRef { return CPointer<Unit>() }
 public func LLVMNullBuilder(): LLVMBuilderRef { return CPointer<Unit>() }
+public func LLVMNullMetadata(): LLVMMetadataRef { return CPointer<Unit>() }
+public func LLVMNullAttribute(): LLVMAttributeRef { return CPointer<Unit>() }
 
 public class LLVMContextHandle {
     public let raw: LLVMContextRef

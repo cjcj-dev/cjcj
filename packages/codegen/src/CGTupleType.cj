@@ -1,7 +1,6 @@
 package cangjie_compiler::codegen
 
 import cangjie_compiler::chir.Type
-import cangjie_compiler::chir.TupleType
 
 public class CGTupleType <: CGType {
     private let extraInfo: TypeExtraInfo

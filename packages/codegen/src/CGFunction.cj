@@ -30,8 +30,13 @@ public class CGFunction <: CGValue {
     public func GetWrapperFunction(): LLVMValueRef { return wrapperF }
     public func SetWrapperFunction(wrapper: LLVMValueRef): Unit { wrapperF = wrapper }
 
+    public func GetArgByIndexFromCHIR(index: Int64): LLVMValueRef {
+        let offset = if (IsSRet()) { 1 } else { 0 }
+        return unsafe { LLVMGetParam(GetRawFunction(), UInt32(index + offset)) }
+    }
+
     public func Opt(): Unit {
-        // TODO(selfhost:CodeGen): port CGFunction::Opt and post-lowering function cleanups.
+        CGFunction.RemoveUnreachableBlocks(GetRawFunction())
     }
 
     public func DumpIR(): Unit {
@@ -39,6 +44,9 @@ public class CGFunction <: CGValue {
     }
 
     public static func RemoveUnreachableBlocks(function: LLVMValueRef): Unit {
+        if (function.isNull()) {
+            return
+        }
         // TODO(selfhost:CodeGen): port unreachable-block removal through LLVM CFG iteration.
     }
 }

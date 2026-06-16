@@ -65,8 +65,35 @@ public class CGFunctionType <: CGType {
             } else {
                 retCGType.GetLLVMType()
             }
-            // TODO(selfhost:CodeGen): pass full parameter type arrays to LLVMFunctionType via C interop memory.
-            llvmFunctionType = unsafe { LLVMFunctionType(retLLVMType, CPointer<LLVMTypeRef>(), 0u32, if (funcTy.HasVarArg()) { 1 } else { 0 }) }
+            let paramLLVMTypes = ArrayList<LLVMTypeRef>()
+            if (hasSRet) {
+                paramLLVMTypes.add(unsafe { LLVMPointerType(retCGType.GetLLVMType(), 0u32) })
+            }
+            for (paramTy in funcTy.GetParamTypes()) {
+                let paramCGType = CGType.GetOrCreate(cgMod, paramTy)
+                if (ShouldNeedBasePtr(paramTy) && allowBasePtr) {
+                    paramLLVMTypes.add(unsafe { LLVMPointerType(paramCGType.GetLLVMType(), 0u32) })
+                } else {
+                    paramLLVMTypes.add(paramCGType.GetLLVMType())
+                }
+            }
+            if (paramLLVMTypes.isEmpty()) {
+                llvmFunctionType = unsafe {
+                    LLVMFunctionType(retLLVMType, CPointer<LLVMTypeRef>(), 0u32, if (funcTy.HasVarArg()) { 1 } else { 0 })
+                }
+            } else {
+                try (paramPtr = LibC.malloc<LLVMTypeRef>(count: paramLLVMTypes.size).asResource()) {
+                    var idx: Int64 = 0
+                    while (idx < paramLLVMTypes.size) {
+                        unsafe { (paramPtr.value + idx).write(paramLLVMTypes[idx]) }
+                        idx++
+                    }
+                    llvmFunctionType = unsafe {
+                        LLVMFunctionType(retLLVMType, paramPtr.value, UInt32(paramLLVMTypes.size),
+                            if (funcTy.HasVarArg()) { 1 } else { 0 })
+                    }
+                }
+            }
             return unsafe { LLVMPointerType(GetLLVMFunctionType(), 0u32) }
         }
         let voidTy = unsafe { LLVMVoidTypeInContext(cgCtx.GetLLVMContext().raw) }

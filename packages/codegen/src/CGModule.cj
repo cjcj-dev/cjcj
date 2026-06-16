@@ -1,10 +1,12 @@
 package cangjie_compiler::codegen
 
 import std.collection.*
-import cangjie_compiler::chir.FuncType
+import cangjie_compiler::chir.Block
 import cangjie_compiler::chir.Function
 import cangjie_compiler::chir.GlobalVar
+import cangjie_compiler::chir.LocalVar
 import cangjie_compiler::chir.Type
+import cangjie_compiler::chir.TypeKind
 import cangjie_compiler::chir.Value
 import cangjie_compiler::option.ArchType
 import cangjie_compiler::option.EnvironmentType
@@ -44,6 +46,7 @@ public class CGModule {
     private let functions: HashMap<String, CGFunction> = HashMap<String, CGFunction>()
     private let valueMapping: HashMap<String, CGValue> = HashMap<String, CGValue>()
     private let globalVariables: HashMap<String, CGValue> = HashMap<String, CGValue>()
+    private let basicBlocks: HashMap<Int64, LLVMBasicBlockRef> = HashMap<Int64, LLVMBasicBlockRef>()
     private let linkNameUsedInMeta: HashSet<String> = HashSet<String>()
     private let externalExtensionDefs: ArrayList<LLVMValueRef> = ArrayList<LLVMValueRef>()
     private let nonExternalExtensionDefs: ArrayList<LLVMValueRef> = ArrayList<LLVMValueRef>()
@@ -138,6 +141,60 @@ public class CGModule {
         valueMapping[chirValue.GetIdentifierWithoutPrefix()] = value
     }
 
+    public func MaterializeValue(irBuilder: IRBuilder2, chirValue: Value): CGValue {
+        if (let Some(mappedValue) <- GetMappedValue(chirValue)) {
+            return mappedValue
+        }
+        if (let Some(functionValue) <- (chirValue as Function)) {
+            return GetOrInsertCGFunction(functionValue)
+        }
+        if (let Some(globalValue) <- (chirValue as GlobalVar)) {
+            return GetOrInsertGlobalVariable(globalValue)
+        }
+        if (let Some(localValue) <- (chirValue as LocalVar)) {
+            if (let Some(ownerExpr) <- localValue.GetExpr()) {
+                let emitted = DispatchExpression(irBuilder, ownerExpr)
+                let cgValue = CGValue(emitted, GetCGTypeForValue(localValue))
+                SetOrUpdateMappedCGValue(localValue, cgValue)
+                return cgValue
+            }
+        }
+        let fallback = CGValue(LLVMNullValue(), GetCGTypeForValue(chirValue))
+        SetOrUpdateMappedCGValue(chirValue, fallback)
+        return fallback
+    }
+
+    public func SetOrUpdateMappedBB(chirBlock: Block, llvmBlock: LLVMBasicBlockRef): Unit {
+        basicBlocks[chirBlock.nodeId] = llvmBlock
+    }
+
+    public func GetMappedBB(chirBlock: Block): Option<LLVMBasicBlockRef> {
+        if (basicBlocks.contains(chirBlock.nodeId)) {
+            return basicBlocks[chirBlock.nodeId]
+        }
+        return None
+    }
+
+    public func CreateOrGetMappedBB(irBuilder: IRBuilder2, functionValue: LLVMValueRef, chirBlock: Block): LLVMBasicBlockRef {
+        if (let Some(mappedBlock) <- GetMappedBB(chirBlock)) {
+            return mappedBlock
+        }
+        let blockName = PREFIX_FOR_BB_NAME + chirBlock.GetIdentifierWithoutPrefix()
+        let createdBlock = irBuilder.CreateEntryBasicBlock(functionValue, blockName)
+        SetOrUpdateMappedBB(chirBlock, createdBlock)
+        return createdBlock
+    }
+
+    public func MapFunctionParameters(chirFunc: Function, cgFunc: CGFunction): Unit {
+        var idx: Int64 = 0
+        while (idx < chirFunc.GetNumOfParams()) {
+            let param = chirFunc.GetParam(idx)
+            let rawArg = cgFunc.GetArgByIndexFromCHIR(idx)
+            SetOrUpdateMappedCGValue(param, CGValue(rawArg, GetCGTypeForValue(param)))
+            idx++
+        }
+    }
+
     public func EraseUselessInstsAndDeclarations(): Unit {
         // TODO(selfhost:CodeGen): port EraseUselessIRs.cpp once generated LLVM ownership and use-lists are available.
     }
@@ -147,7 +204,9 @@ public class CGModule {
     }
 
     public func Opt(): Unit {
-        // TODO(selfhost:CodeGen): port CGFunction/CGModule optimization passes and native LICM pipeline.
+        for ((_, cgFunction) in functions) {
+            cgFunction.Opt()
+        }
     }
 
     public func Verify(): Bool {
@@ -203,5 +262,12 @@ public class CGModule {
             return "armv7a-linux-gnu"
         }
         return target.GetEffectiveTripleString()
+    }
+
+    private func GetCGTypeForValue(chirValue: Value): CGType {
+        if (let Some(valueType) <- chirValue.GetType()) {
+            return CGType.GetOrCreate(this, valueType)
+        }
+        return CGType(this, cgCtx, Type(TypeKind.TYPE_INVALID))
     }
 }

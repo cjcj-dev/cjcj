@@ -6,8 +6,17 @@ public func EmitFunctionIR(cgMod: CGModule, chirFunc: Function): Option<CGFuncti
     let cgFunc = cgMod.GetOrInsertCGFunction(chirFunc)
     if (let Some(body) <- chirFunc.GetBody()) {
         let builder = IRBuilder2(cgMod)
+        builder.SetInsertCGFunction(cgFunc)
+        cgMod.MapFunctionParameters(chirFunc, cgFunc)
         for (block in body.GetBlocks()) {
-            let llvmBlock = builder.CreateEntryBasicBlock(cgFunc.GetRawFunction(), block.GetIdentifier())
+            cgMod.CreateOrGetMappedBB(builder, cgFunc.GetRawFunction(), block)
+        }
+        for (block in body.GetBlocks()) {
+            let llvmBlock = if (let Some(mappedBlock) <- cgMod.GetMappedBB(block)) {
+                mappedBlock
+            } else {
+                cgMod.CreateOrGetMappedBB(builder, cgFunc.GetRawFunction(), block)
+            }
             builder.SetInsertPoint(llvmBlock)
             EmitBasicBlockIR(cgMod, builder, block)
         }

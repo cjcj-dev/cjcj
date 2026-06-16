@@ -4,7 +4,16 @@ import cangjie_compiler::chir.FuncKind
 import cangjie_compiler::chir.Function
 
 public func AddAttributeAtIndex(callBase: LLVMValueRef, idx: UInt32, attrName: String): Unit {
-    // TODO(selfhost:CodeGen): bind LLVM attribute APIs for calls/functions/arguments.
+    try (attrCString = unsafe { LibC.mallocCString(attrName) }.asResource()) {
+        let attrKind = unsafe { LLVMGetEnumAttributeKindForName(attrCString.value, UIntNative(attrName.size)) }
+        if (attrKind == 0u32) {
+            return
+        }
+        let parentModule = unsafe { LLVMGetGlobalParent(callBase) }
+        let attrContext = unsafe { LLVMGetModuleContext(parentModule) }
+        let attr = unsafe { LLVMCreateEnumAttribute(attrContext, attrKind, 0u64) }
+        unsafe { LLVMAddAttributeAtIndex(callBase, idx, attr) }
+    }
 }
 
 public func AddParamAttr(callBase: LLVMValueRef, paramIdx: UInt32, attrName: String): Unit {
@@ -16,7 +25,7 @@ public func AddRetAttr(callBase: LLVMValueRef, attrName: String): Unit {
 }
 
 public func AddSRetAttribute(value: LLVMValueRef): Unit {
-    // TODO(selfhost:CodeGen): attach sret(<element type>) through LLVM C API or native adapter.
+    AddAttributeAtIndex(value, 1u32, "sret")
 }
 
 public func ShouldReturnVoid(fn: Function): Bool {

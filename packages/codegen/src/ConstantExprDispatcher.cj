@@ -11,6 +11,5 @@ public func HandleConstantExpression(irBuilder: IRBuilder2, chirConst: Constant)
 }
 
 public func HandleLiteralValue(irBuilder: IRBuilder2, chirLiteral: LiteralValue): LLVMValueRef {
-    // TODO(selfhost:CodeGen): thread the CHIR result type through every literal-only call site.
-    return LLVMNullValue()
+    return irBuilder.CreateDefaultLiteralValue(chirLiteral)
 }

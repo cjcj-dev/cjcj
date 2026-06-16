@@ -19,28 +19,37 @@ Implemented:
   `CGFunction`, `IRBuilder`, `IRAttribute`, CHIR expression wrappers, expression dispatchers, constants/common
   definitions, CHIR splitting, and the `CGType` family.
 - Added LLVM as an external dependency boundary through Cangjie C FFI declarations for LLVM C handles, contexts,
-  modules, builders, primitive/composite/function types, constants, basic arithmetic instructions, calls,
-  branches, returns, verification, and bitcode writing. LLVM itself is not reimplemented.
+  modules, builders, primitive/composite/function types, constants, integer and floating arithmetic instructions,
+  comparisons, casts, GEPs, calls, branches, returns, attributes, debug locations, global initializers,
+  verification, and bitcode writing. LLVM itself is not reimplemented.
 - Added CodeGen-owned LLVM handle wrappers and module/context ownership helpers.
 - Added a package-level lowering entry point shaped like the C++ `EmitPackageIR`, including CHIR package splitting,
   per-submodule context/module construction, global and function declaration materialization, function emission
   traversal, verification, and optional bitcode emission.
-- Added a C++-shaped `CGModule` with function/global value caches, target triple/data-layout storage, LLVM module
-  accessors, intrinsic declaration helpers, and placeholder pass orchestration hooks.
+- Added a C++-shaped `CGModule` with function/global/local value caches, basic-block mapping, target
+  triple/data-layout storage, LLVM module accessors, intrinsic declaration helpers, function-parameter mapping,
+  CHIR value materialization, and pass orchestration hooks.
 - Added `CGType` interning and concrete type classes for primitive, tuple, function, C string, C pointer, reference,
   array, varray, custom, struct, class, enum, generic, box, and `This` types. The current implementation computes
   LLVM type handles plus conservative size/alignment metadata for the subset exposed by the current CHIR package.
-- Added `IRBuilder2` wrappers for selected LLVM builder operations and primitive constants.
+- Added `IRBuilder2` wrappers for selected LLVM builder operations, primitive constants, default literal constants,
+  call construction, bitcasts, aggregate insertion, GEP construction, and scoped debug-location restoration.
 - Added expression dispatch structure for constants, unary, binary, memory, terminator, and other expression
-  families. Literal constants and basic unary/binary builder operations have concrete lowering; the full CHIR
-  expression taxonomy remains marked.
+  families. The current implementation lowers typed constants, unary integer/float operations, signed/unsigned
+  and floating binary operations, allocation/load/store/GEP memory expressions, `GOTO`/`BRANCH`/`EXIT`
+  terminators, simple call-like expressions, simple aggregate construction, and basic cast/box/unbox forwarding.
+- Added two-phase function body emission: all LLVM basic blocks are created and mapped before expression emission,
+  and CHIR function parameters are mapped to LLVM arguments before the body is lowered.
+- Added global initializer emission for initializer values representable by the current CHIR value materializer.
+- Added LLVM enum-attribute attachment helpers for function/call attributes.
 
 Known gaps:
 
-- This is not a complete faithful port of C++ CodeGen. The full CHIR-to-LLVM lowering surface is still missing:
-  allocation, loads/stores, GEPs, calls/invokes, closures, generics, RTTI/type info, metadata, debug info,
-  exception paths, overflow/runtime helpers, intrinsics, array/tuple/object construction, casts, C/FFI lowering,
-  incremental generation, native backend-specific metadata, and post-generation optimization/cleanup passes.
+- This is not a complete faithful port of C++ CodeGen. The remaining full CHIR-to-LLVM surface still includes
+  object/class allocation, precise field and enum layout access, closures, generics, RTTI/type info, package and
+  native metadata, debug info, exception paths, checked overflow/runtime helpers, intrinsics, complete
+  array/tuple/object construction, precise casts, C/FFI lowering, incremental generation, native backend-specific
+  metadata, and post-generation optimization/cleanup passes.
 - Only 39 `.cj` files are present in this pass, compared with 118 reference CodeGen source/header files. Additional
   C++-named component files still need to be split out for `DIBuilder`, `EmitExpressionIR`, `EraseUselessIRs`,
   `LICMOptimizer`, `IRGenerator`, `CGUtils`, `BlockScopeImpl`, incremental generation, Cangjie-native metadata,
@@ -49,4 +58,4 @@ Known gaps:
   packages so the CodeGen package can compile against the current CHIR model.
 - Remaining CodeGen self-host TODO markers are intentionally compiling stop-points, not completed behavior.
 
-Remaining CodeGen selfhost markers: 20.
+Remaining CodeGen selfhost markers: 5.
