@@ -24,6 +24,10 @@ Last updated: 2026-06-17
 - Added a package-local before-type-check desugar traversal in `packages/sema/src/Desugar/DesugarBeforeTypeCheck.cj` with concrete lowering for synchronized expressions, optional chains, increment/decrement, tuple assignment, option types, main declarations, trailing closures, and branch unitification.
 - Added after-type-check package traversal in `packages/sema/src/Desugar/AfterTypeCheck.cj` and connected it to the existing local desugar helpers for range expressions, calls, binary/coalescing expressions, casts, type checks, `if`, `spawn`, and function parameters.
 - Implemented `??` discovery in `AfterTypeCheck/Coalescing.cj` so existing coalescing lowering is applied through a tree walk.
+- Replaced the `AutoBoxing.cj` status stub with a real option-boxing walker modeled on the C++ `AutoBoxing` pass:
+  - uses the real `TypeManager`, AST types, `CountOptionNestedLevel`, instantiated `Some` constructor lookup, and type mapping helpers rather than local compatibility copies;
+  - inserts compiler-added `Some(expr)` calls for variable initializers, assignments, call/default arguments, returns, array constructors/literals, tuple literals, and `if`/`try`/`match` block result positions;
+  - preserves recursive nested-option boxing, pre-existing `desugarExpr` reuse, block result wrapping for serialization, `curFile`, function argument type repair, and after-type-check pass staging.
 - Replaced the `ForInExpr` placeholder with real range-for lowering in `AfterTypeCheck/ForInExpr.cj`, including closed and half-open ranges, `where` guards, first-iteration handling, loop variable binding, and break/continue target repair.
 - Removed all scoped `// TODO(selfhost:Sema)` markers from the Sema desugar area. Files that still depend on missing sibling infrastructure now keep compiling status bodies rather than TODO markers.
 
@@ -38,9 +42,9 @@ Last updated: 2026-06-17
 - The new after-type-check traversal is implemented in `sema.Desugar`, but the root type-checker facade is outside this pass's edit surface, so full pipeline wiring remains pending.
 - `ForInExpr` currently has real range lowering only. String and iterator lowering still need faithful lookup/import-manager behavior from the C++ implementation.
 - In-type-check desugar now has real flow, operator-overload, subscript-overload, `operator()` call, variadic-call, pointer-call, array-call, and primary-constructor helpers. Root typechecker call-site wiring, primary-constructor diagnostics before merge, pointer excess-argument diagnostics, and cache invalidation through `ASTContext` remain pending.
-- After-instantiation desugar now covers declaration attributes and generic-instantiation coverage positions, but recursive type elimination, used-import marking, option/extend boxing, and dependency pruning remain pending.
+- After-instantiation desugar now covers declaration attributes and generic-instantiation coverage positions, and after-type-check desugar now runs real option boxing. Recursive type elimination, used-import marking, extend boxing/boxed-type usage recording, and dependency pruning remain pending.
 - String interpolation and try-with-resources/finally details still need faithful import-manager lookup and synthesis context that are not currently threaded through the self-hosted desugar facade. Effect handlers, semantic usage collection, macro desugar, property desugar, Java/ObjC interop branches, main invocation synthesis, and linkage refresh behavior remain below C++ fidelity.
 
 ## Coverage estimate
 
-Real behavior coverage for this scoped desugar area is about 37% versus the C++ reference. The implemented pieces now perform meaningful AST transformations, including in-typecheck operator/variadic/builtin-call and primary-constructor helper lowering, token-call position refresh, the API-level `@IfAvailable` path, and more faithful discarded-context branch handling, but substantial C++ behavior remains either not wired into the root pipeline or represented by compiling compatibility bodies.
+Real behavior coverage for this scoped desugar area is about 40% versus the C++ reference. The implemented pieces now perform meaningful AST transformations, including in-typecheck operator/variadic/builtin-call and primary-constructor helper lowering, after-type-check option boxing, token-call position refresh, the API-level `@IfAvailable` path, and more faithful discarded-context branch handling, but substantial C++ behavior remains either not wired into the root pipeline or represented by compiling compatibility bodies.
