@@ -1,5 +1,8 @@
 package cangjie_compiler::utils
 
+import cangjie_compiler::basic.ANSI_COLOR_RED
+import cangjie_compiler::basic.ANSI_COLOR_RESET
+import cangjie_compiler::basic.CANGJIE_COMPILER_VERSION
 import std.sync.AtomicBool
 
 public enum CompileStage {
@@ -9,7 +12,7 @@ public enum CompileStage {
 
 public class ICE {
     public static let EXIT_CODE: Int64 = 2
-    public static let MSG_PART_ONE: String = "Internal Compiler Error: "
+    public static let MSG_PART_ONE: String = ANSI_COLOR_RED + "Internal Compiler Error: " + ANSI_COLOR_RESET
     public static let MSG_PART_TWO: String = "\nPlease report this to Cangjie team and include the project. Error Code: "
     public static let FRONTEND_TP: Int64 = -1
     public static let UNITTEST_TP: Int64 = -2
@@ -19,7 +22,7 @@ public class ICE {
     private static var removeTempFileSignalSafeHook: Option<() -> Unit> = None
 
     public static func PrintVersionFromError(): Unit {
-        eprintln("cangjie selfhost")
+        eprintln(CANGJIE_COMPILER_VERSION)
     }
 
     public static func RegisterRemoveTempFileHook(hook: () -> Unit): Unit {

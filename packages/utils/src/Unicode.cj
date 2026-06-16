@@ -1,5 +1,9 @@
 package cangjie_compiler::utils
 
+import cangjie_compiler::lex.IsContextualKeyword as LexIsContextualKeyword
+import cangjie_compiler::lex.TOKENS as LEX_TOKENS
+import cangjie_compiler::lex.TokenKind as LexTokenKind
+import cangjie_compiler::lex.TokenKindIndex as LexTokenKindIndex
 import std.collection.*
 
 public type UTF8 = UInt8
@@ -316,10 +320,12 @@ public func IsCangjieIdentifier(str: String, useContextualKeyWords: Bool): Bool 
         return false
     }
     var content = str
+    var isRawIdentifier = false
     if (str[0] == b'`') {
         if (str.size < 3 || str[str.size - 1] != b'`') {
             return false
         }
+        isRawIdentifier = true
         content = str[1..str.size - 1]
     }
     let (status, codepoints) = ConvertUTF8ToUTF32(content.toArray())
@@ -337,28 +343,24 @@ public func IsCangjieIdentifier(str: String, useContextualKeyWords: Bool): Bool 
             return false
         }
     }
-    if (IsKeyword(content)) {
-        return useContextualKeyWords && IsContextualKeyword(content)
+    if (!isRawIdentifier && IsKeyword(str)) {
+        return useContextualKeyWords && IsContextualKeyword(str)
     }
     return true
 }
 
-private let KEYWORDS: Array<String> = [
-    "as", "break", "case", "catch", "class", "const", "continue", "do", "else", "enum", "extend", "false",
-    "finally", "for", "foreign", "func", "if", "import", "in", "init", "interface", "is", "let", "macro",
-    "main", "match", "mut", "open", "operator", "override", "package", "private", "prop", "protected",
-    "public", "redef", "return", "spawn", "static", "struct", "super", "synchronized", "this", "throw",
-    "true", "try", "type", "unsafe", "var", "where", "while"
-]
-
-private let CONTEXTUAL_KEYWORDS: Array<String> = [
-    "abstract", "sealed", "default", "deriving", "get", "set"
-]
-
 private func IsKeyword(str: String): Bool {
-    return KEYWORDS.contains(str)
+    let identifierIndex = LexTokenKindIndex(LexTokenKind.IDENTIFIER)
+    var idx: Int64 = 0
+    while (idx < identifierIndex) {
+        if (LEX_TOKENS[idx] == str) {
+            return true
+        }
+        idx++
+    }
+    return str == "true" || str == "false"
 }
 
 private func IsContextualKeyword(str: String): Bool {
-    return CONTEXTUAL_KEYWORDS.contains(str)
+    return LexIsContextualKeyword(str)
 }

@@ -10,12 +10,40 @@ import std.fs.exists
 import std.fs.remove
 
 public let FILE_NAME_MAX_LENGTH: Int64 = 255
+
+@When[os == "Windows"]
+public let INJECTION_STRING: String = "^\";|&"
+@When[os != "Windows"]
 public let INJECTION_STRING: String = "|;&$><\\!\n"
+
+@When[os == "Windows"]
+public let DIR_SEPARATOR: String = "\\/"
+@When[os != "Windows"]
 public let DIR_SEPARATOR: String = "/"
+
+@When[os == "Windows"]
+public let CURRENT_PATH: String = ".\\"
+@When[os != "Windows"]
 public let CURRENT_PATH: String = "./"
+
+@When[os == "Windows"]
+public let UPPERLEVEL_PATH: String = "..\\"
+@When[os != "Windows"]
 public let UPPERLEVEL_PATH: String = "../"
+
+@When[os == "Windows"]
+public let FILE_PATH_MAX_LENGTH: Int64 = 260
+@When[os != "Windows"]
 public let FILE_PATH_MAX_LENGTH: Int64 = 4096
+
+@When[os == "Windows"]
+public let DIR_PATH_MAX_LENGTH: Int64 = 248
+@When[os != "Windows"]
 public let DIR_PATH_MAX_LENGTH: Int64 = 4096
+
+private let ENOENT_ERRNO: Int32 = 2
+
+private let EACCES_ERRNO: Int32 = 13
 
 private let SHORT_HASH_NUM: Int64 = 8
 private let BOM_ENCODING_LEN: Int64 = 3
@@ -73,23 +101,206 @@ public class FailureReason {
     public init() {}
 }
 
+@When[os == "Windows"]
+foreign {
+    func _access(pathname: CString, mode: Int32): Int32
+}
+
+@When[os != "Windows"]
+foreign {
+    func access(pathname: CString, mode: Int32): Int32
+}
+
+@When[os == "Linux"]
+foreign {
+    func __errno_location(): CPointer<Int32>
+}
+
+@When[os == "macOS"]
+foreign {
+    func __error(): CPointer<Int32>
+}
+
+@When[os == "Windows"]
+private func isPathSlashByte(byte: UInt8): Bool {
+    return byte == b'/' || byte == b'\\'
+}
+
+@When[os != "Windows"]
+private func isPathSlashByte(byte: UInt8): Bool {
+    return byte == b'/'
+}
+
+@When[os == "Windows"]
+private func preferredDirSeparator(toUnix: Bool): String {
+    return if (toUnix) { "/" } else { "\\" }
+}
+
+@When[os != "Windows"]
+private func preferredDirSeparator(toUnix: Bool): String {
+    let _ = toUnix
+    return "/"
+}
+
+@When[os == "Windows"]
+private func environmentPathSeparator(): String {
+    return ";"
+}
+
+@When[os != "Windows"]
+private func environmentPathSeparator(): String {
+    return ":"
+}
+
+@When[os == "Windows"]
+private func normalizeCaseForPrefixMatch(path: String): String {
+    return path.toAsciiLower()
+}
+
+@When[os != "Windows"]
+private func normalizeCaseForPrefixMatch(path: String): String {
+    return path
+}
+
+@When[os == "Windows"]
+private func fileModeAccessFlag(mode: FileMode): Int32 {
+    return match (mode) {
+        case FileMode.FM_EXIST => 0
+        case FileMode.FM_EXE => 0
+        case FileMode.FM_WRITE => 2
+        case FileMode.FM_READ => 4
+    }
+}
+
+@When[os != "Windows"]
+private func fileModeAccessFlag(mode: FileMode): Int32 {
+    return match (mode) {
+        case FileMode.FM_EXIST => 0
+        case FileMode.FM_EXE => 1
+        case FileMode.FM_WRITE => 2
+        case FileMode.FM_READ => 4
+    }
+}
+
+@When[os == "Linux"]
+private func currentErrno(): Int32 {
+    unsafe {
+        let errnoPtr = __errno_location()
+        if (errnoPtr.isNull()) {
+            return 0
+        }
+        return errnoPtr.read()
+    }
+}
+
+@When[os == "macOS"]
+private func currentErrno(): Int32 {
+    unsafe {
+        let errnoPtr = __error()
+        if (errnoPtr.isNull()) {
+            return 0
+        }
+        return errnoPtr.read()
+    }
+}
+
+@When[os != "Linux" && os != "macOS"]
+private func currentErrno(): Int32 {
+    return 0
+}
+
+@When[os == "Windows"]
+private func accessPath(path: String, mode: FileMode): Int32 {
+    var result: Int32 = -1
+    try (cPath = unsafe { LibC.mallocCString(path) }.asResource()) {
+        if (!cPath.value.isNull()) {
+            unsafe {
+                result = _access(cPath.value, fileModeAccessFlag(mode))
+            }
+        }
+    } catch (e: Exception) {
+        result = -1
+    }
+    return result
+}
+
+@When[os != "Windows"]
+private func accessPath(path: String, mode: FileMode): Int32 {
+    var result: Int32 = -1
+    try (cPath = unsafe { LibC.mallocCString(path) }.asResource()) {
+        if (!cPath.value.isNull()) {
+            unsafe {
+                result = access(cPath.value, fileModeAccessFlag(mode))
+            }
+        }
+    } catch (e: Exception) {
+        result = -1
+    }
+    return result
+}
+
 private func lastDirSplit(str: String): Option<Int64> {
-    return str.lastIndexOf("/")
+    var idx = str.size - 1
+    while (idx >= 0) {
+        if (isPathSlashByte(str[idx])) {
+            return idx
+        }
+        idx--
+    }
+    return None
 }
 
 private func isLastCharDirSplit(str: String): Bool {
-    return !str.isEmpty() && str[str.size - 1] == b'/'
+    return !str.isEmpty() && isPathSlashByte(str[str.size - 1])
 }
 
 private func hasDirSplit(str: String): Bool {
-    return str.contains("/")
+    for (byte in str.toArray()) {
+        if (isPathSlashByte(byte)) {
+            return true
+        }
+    }
+    return false
 }
 
 private func appendPath(p1: String, p2: String): String {
     if (isLastCharDirSplit(p1)) {
         return p1 + p2
     }
-    return p1 + "/" + p2
+    return p1 + preferredDirSeparator(false) + p2
+}
+
+@When[os == "Windows"]
+private func transferEscapeBacktickImpl(s: String): String {
+    return s
+}
+
+@When[os != "Windows"]
+private func transferEscapeBacktickImpl(s: String): String {
+    let builder = StringBuilder()
+    for (byte in s.toArray()) {
+        if (byte == b'`') {
+            builder.append("\\`")
+        } else {
+            builder.append(String.fromUtf8([byte]))
+        }
+    }
+    return builder.toString()
+}
+
+@When[os == "Windows"]
+private func isAbsolutePathImpl(filePath: String): Bool {
+    if (filePath.size < 3) {
+        return false
+    }
+    let first = filePath[0]
+    let isAlpha = (first >= b'a' && first <= b'z') || (first >= b'A' && first <= b'Z')
+    return isAlpha && filePath[1] == b':' && isPathSlashByte(filePath[2])
+}
+
+@When[os != "Windows"]
+private func isAbsolutePathImpl(filePath: String): Bool {
+    return !filePath.isEmpty() && filePath[0] == b'/'
 }
 
 private func addFileIfNeeded(
@@ -98,11 +309,16 @@ private func addFileIfNeeded(
     shouldSkipTestFiles: Bool,
     shouldSkipRegularFiles: Bool
 ): Bool {
-    let hasTestSuffix = fileName.endsWith(TEST_FILE_NAME)
+    let testSuffixPos = fileName.indexOf(TEST_FILE_NAME)
+    let hasTestSuffix = if (let Some(pos) <- testSuffixPos) {
+        fileName.size - pos == TEST_FILE_NAME.size
+    } else {
+        false
+    }
     if (shouldSkipTestFiles && hasTestSuffix) {
         return false
     }
-    if (shouldSkipRegularFiles && !hasTestSuffix) {
+    if (shouldSkipRegularFiles && (let None <- testSuffixPos)) {
         return false
     }
     allFiles.add(fileName)
@@ -126,15 +342,7 @@ public class FileUtil {
     }
 
     public static func TransferEscapeBacktick(s: String): String {
-        let builder = StringBuilder()
-        for (byte in s.toArray()) {
-            if (byte == b'`') {
-                builder.append("\\`")
-            } else {
-                builder.append(String.fromUtf8([byte]))
-            }
-        }
-        return builder.toString()
+        return transferEscapeBacktickImpl(s)
     }
 
     public static func RemoveDirectoryRecursively(dirPath: String): Bool {
@@ -227,19 +435,19 @@ public class FileUtil {
     }
 
     public static func Normalize(input: String, toUnix!: Bool = false): String {
-        let _ = toUnix
         let builder = StringBuilder()
         var previousIsSlash = false
+        let slash = preferredDirSeparator(toUnix)
         for (byte in input.toArray()) {
             if (byte == 0u8) {
                 break
             }
-            let isSlashByte = byte == b'/' || byte == b'\\'
+            let isSlashByte = isPathSlashByte(byte)
             if (previousIsSlash && isSlashByte) {
                 continue
             }
             if (isSlashByte) {
-                builder.append("/")
+                builder.append(slash)
                 previousIsSlash = true
             } else {
                 builder.append(String.fromUtf8([byte]))
@@ -258,7 +466,7 @@ public class FileUtil {
     }
 
     public static func IsAbsolutePath(filePath: String): Bool {
-        return !filePath.isEmpty() && filePath[0] == b'/'
+        return isAbsolutePathImpl(filePath)
     }
 
     public static func Remove(itemPath: String): Bool {
@@ -331,7 +539,7 @@ public class FileUtil {
     public static func WriteBufferToASTFile(filePath: String, buffer: Array<UInt8>): Bool {
         let baseDir = GetDirPath(filePath)
         if (!FileExist(baseDir)) {
-            if (CreateDirs(baseDir + "/") != 0) {
+            if (CreateDirs(baseDir + preferredDirSeparator(false)) != 0) {
                 return false
             }
         }
@@ -490,8 +698,8 @@ public class FileUtil {
 
     public static func JoinPath(base: String, append: String): String {
         var joinedPath = base
-        if (base.isEmpty() || base[base.size - 1] != b'/') {
-            joinedPath += "/"
+        if (!base.isEmpty() && !isPathSlashByte(base[base.size - 1])) {
+            joinedPath += preferredDirSeparator(false)
         }
         joinedPath += append
         return Normalize(joinedPath)
@@ -536,7 +744,15 @@ public class FileUtil {
         while (let Some(pos) <- packageName.indexOf(CURRENT_PATH)) {
             packageName = packageName[0..pos] + packageName[pos + CURRENT_PATH.size..]
         }
-        packageName = packageName.replace("/", ".")
+        let builder = StringBuilder()
+        for (byte in packageName.toArray()) {
+            if (isPathSlashByte(byte)) {
+                builder.append(".")
+            } else {
+                builder.append(String.fromUtf8([byte]))
+            }
+        }
+        packageName = builder.toString()
         while (!packageName.isEmpty() && packageName[packageName.size - 1] == b'.') {
             packageName = packageName[0..packageName.size - 1]
         }
@@ -585,43 +801,47 @@ public class FileUtil {
 
     public static func ConvertFilenameToLtoLibCangjieFormat(objectFile: String): String {
         let dotPos = objectFile.lastIndexOf(".") ?? objectFile.size
-        let dirSplitPos = objectFile.lastIndexOf("/") ?? 0
+        let dirSplitPos = lastDirSplit(objectFile) ?? 0
         let path = objectFile[0..dirSplitPos]
         let libName = objectFile[dirSplitPos + 1..dotPos]
-        return path + "/" + "lib" + libName + ".bc"
+        return path + preferredDirSeparator(false) + "lib" + libName + ".bc"
     }
 
     public static func AccessWithResult(path: String, mode: FileMode): AccessResultType {
-        if (!FileExist(path)) {
-            return AccessResultType.NOT_EXIST
-        }
-        if (Access(path, mode)) {
+        if (accessPath(path, mode) == 0) {
             return AccessResultType.OK
         }
-        return AccessResultType.NO_PERMISSION
+        let lastErrno = currentErrno()
+        if (lastErrno == ENOENT_ERRNO) {
+            return AccessResultType.NOT_EXIST
+        }
+        if (lastErrno == EACCES_ERRNO) {
+            return AccessResultType.NO_PERMISSION
+        }
+        return AccessResultType.FAILED_WITH_UNKNOWN_REASON
     }
 
     public static func Access(path: String, mode: FileMode): Bool {
-        try {
-            if (mode == FileMode.FM_EXIST) {
-                return exists(path)
-            }
-            let info = FileInfo(path)
-            return match (mode) {
-                case FileMode.FM_EXE => info.canExecute()
-                case FileMode.FM_WRITE => info.canWrite()
-                case FileMode.FM_READ => info.canRead()
-                case FileMode.FM_EXIST => true
-            }
-        } catch (e: Exception) {
-            return false
-        }
+        return accessPath(path, mode) == 0
     }
 
     public static func FileExist(path: String, caseSensitive!: Bool = false): Bool {
-        let _ = caseSensitive
         try {
-            return exists(path)
+            if (!exists(path)) {
+                return false
+            }
+            if (!caseSensitive) {
+                return true
+            }
+            let splitPos = lastDirSplit(path)
+            let fileName = if (let Some(pos) <- splitPos) { path[pos + 1..] } else { path }
+            let dirPath = if (let Some(pos) <- splitPos) { path[0..pos] } else { "." }
+            for (info in FSDirectory.readFrom(dirPath)) {
+                if (info.name == fileName) {
+                    return true
+                }
+            }
+            return false
         } catch (e: Exception) {
             return false
         }
@@ -665,7 +885,7 @@ public class FileUtil {
     public static func FindSerializationFile(fullPackageName: String, suffix: String, searchPaths: Array<String>): String {
         let names = SplitQualifiedName(fullPackageName)
         let packageName = ToCjoFileName(fullPackageName)
-        let fileName = ToCjoFileName(names[0]) + "/" + packageName
+        let fileName = ToCjoFileName(names[0]) + preferredDirSeparator(false) + packageName
         let filePath = FindFileByName(fileName + suffix, searchPaths, caseSensitive: true) ?? ""
         if (filePath.isEmpty()) {
             return FindFileByName(packageName + suffix, searchPaths, caseSensitive: true) ?? ""
@@ -682,7 +902,7 @@ public class FileUtil {
         var idx: Int64 = 0
         while (idx < directoryPath.size) {
             current += String.fromUtf8([directoryPath[idx]])
-            if (directoryPath[idx] != b'/') {
+            if (!isPathSlashByte(directoryPath[idx])) {
                 idx++
                 continue
             }
@@ -705,7 +925,7 @@ public class FileUtil {
     }
 
     public static func SplitEnvironmentPaths(pathsString: String): Array<String> {
-        let strings = SplitString(pathsString, ":")
+        let strings = SplitString(pathsString, environmentPathSeparator())
         let paths = ArrayList<String>()
         for (entry in strings) {
             if (entry.isEmpty()) {
@@ -723,14 +943,17 @@ public class FileUtil {
     }
 
     public static func RemovePathPrefix(absolutePath: String, removedPathPrefix: Array<String>): String {
-        var res = absolutePath + "/"
+        let split = preferredDirSeparator(false)
+        var res = absolutePath + split
+        var matchRes = normalizeCaseForPrefixMatch(res)
         for (prefix in removedPathPrefix) {
-            if (res.startsWith(prefix)) {
+            if (matchRes.startsWith(normalizeCaseForPrefixMatch(prefix))) {
                 res = res[prefix.size..]
+                matchRes = matchRes[prefix.size..]
                 if (res.isEmpty()) {
                     return res
                 }
-                if (res[0] == b'/') {
+                if (isPathSlashByte(res[0])) {
                     res = res[1..]
                 }
                 break
@@ -740,7 +963,7 @@ public class FileUtil {
     }
 
     public static func IsSlash(c: UInt8): Bool {
-        return c == b'/'
+        return isPathSlashByte(c)
     }
 
     public static func ToCjoFileName(fullPackageName: String): String {
