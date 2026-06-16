@@ -185,6 +185,20 @@ private func containsString(values: ArrayList<String>, target: String): Bool {
     return false
 }
 
+private func optionValueBelongsBackend(values: Array<Backend>, target: Backend): Bool {
+    for (value in values) {
+        if (value == Backend.ALL || value == target) { return true }
+    }
+    return false
+}
+
+private func optionValueBelongsGroup(values: Array<Group>, target: Group): Bool {
+    for (value in values) {
+        if (value == target) { return true }
+    }
+    return false
+}
+
 private func replaceStrings(target: ArrayList<String>, values: Array<String>): Unit {
     target.clear()
     for (value in values) { target.add(value) }
@@ -373,6 +387,10 @@ public open class GlobalOptions <: Option {
                 Errorln(opt.str + " is an experimental feature. \"--experimental\" option is required.")
                 return false
             }
+            if (!experimentalMode && OptionValueRequiresExperimental(opt)) {
+                Errorln(opt.str + " is an experimental feature. \"--experimental\" option is required.")
+                return false
+            }
             let optionResult = ParseOption(opt)
             if (!optionResult.hasValue || !optionResult.value) { return false }
             OccurrenceCheck(opt, argList)
@@ -384,6 +402,16 @@ public open class GlobalOptions <: Option {
         let result = ParseAction(this, arg)
         if (!result.handled) { return MaybeBool() }
         return MaybeBool(result.success)
+    }
+
+    private func OptionValueRequiresExperimental(arg: OptionArgInstance): Bool {
+        for (optionValue in arg.info.values) {
+            if (optionValue.value == arg.value &&
+                optionValueBelongsBackend(optionValue.backends, GetOptionsBackend())) {
+                return !optionValueBelongsGroup(optionValue.groups, Group.STABLE)
+            }
+        }
+        return false
     }
 
     private func CollectOrderedInputFiles(entry: ArgListEntry, index: UInt64): Unit {
@@ -692,7 +720,7 @@ public open class GlobalOptions <: Option {
                 bcInputFiles.add(bcPath.value)
                 ReplaceInputFileName(input, bcPath.value)
             } else if (ext == "cjo") {
-                if (compilePackage || !inputCjoFile.isEmpty()) { return false }
+                if (!inputCjoFile.isEmpty()) { return false }
                 let cjoPath = ValidateInputFilePath(input)
                 if (!cjoPath.hasValue) { return false }
                 inputCjoFile = input
@@ -806,6 +834,11 @@ public open class GlobalOptions <: Option {
             }
         }
         if (EnableSanitizer()) {
+            let runtimeDirPath = JoinPath(cangjieHome, "runtime")
+            let libraryDirPath = JoinPath(JoinPath(runtimeDirPath, "lib"), GetCangjieLibTargetPathName())
+            let sanitizerPath = JoinPath(libraryDirPath, SanitizerTypeToShortString())
+            let runtimePath = JoinPath(sanitizerPath, "libcangjie-runtime" + GetSharedLibraryExtension(target.os))
+            if (!FileExist(runtimePath)) { return false }
             if (IsLTOEnabled() || discardEhFrame || compileMacroPackage) { return false }
             if ((EnableAsan() || EnableHwAsan()) && target.GetOSFamily() != OSType.LINUX) { return false }
             if (EnableHwAsan() && target.arch != ArchType.X86_64 && target.arch != ArchType.AARCH64) { return false }

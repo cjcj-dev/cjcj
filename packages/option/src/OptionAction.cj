@@ -583,13 +583,26 @@ private func parseStackTraceFormat(opts: GlobalOptions, value: String): ActionRe
     return handled(success: false)
 }
 
+private func parseJobsValue(optionName: String, value: String): MaybeUInt64 {
+    let maxLen: Int64 = 9
+    if (value.isEmpty() || value.size > maxLen) { return MaybeUInt64() }
+    let parsed = TryParseUInt64(value)
+    if (!parsed.hasValue) { return MaybeUInt64() }
+    if (parsed.value < 1u64) {
+        Warningln("'" + optionName + "' value must be greater than 0, the compiler will use 1 as the value.")
+        return MaybeUInt64(1u64)
+    }
+    return parsed
+}
+
 private func parseJobs(opts: GlobalOptions, value: String, aggressive: Bool): ActionResult {
     if (value.isEmpty() && aggressive) {
         opts.aggressiveParallelCompileWithoutArg = true
         return handled()
     }
-    let parsed = TryParseUInt64(value)
-    if (!parsed.hasValue || parsed.value < 1u64) { return handled(success: false) }
+    let optionName = if (aggressive) { "--aggressive-parallel-compile" } else { "--jobs" }
+    let parsed = parseJobsValue(optionName, value)
+    if (!parsed.hasValue) { return handled(success: false) }
     if (aggressive) {
         opts.aggressiveParallelCompile = parsed
     } else {

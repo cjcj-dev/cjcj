@@ -2,6 +2,41 @@ package cangjie_compiler::option
 
 import std.collection.*
 
+private let OPTION_WIDTH: Int64 = 28
+
+private func spaces(count: Int64): String {
+    var result = ""
+    var idx: Int64 = 0
+    while (idx < count) {
+        result += " "
+        idx++
+    }
+    return result
+}
+
+private func printIndentOnly(indent: Int64, numSpaces!: Int64 = 2): Unit {
+    print(spaces(indent * numSpaces))
+}
+
+private func printCommandDesc(option: String, desc: String): Unit {
+    let padding = if (option.size < OPTION_WIDTH) { OPTION_WIDTH - option.size } else { 0 }
+    Println("  " + option + spaces(padding) + desc)
+}
+
+private func containsBackendValue(values: Array<Backend>, target: Backend): Bool {
+    for (value in values) {
+        if (value == Backend.ALL || value == target) { return true }
+    }
+    return false
+}
+
+private func containsGroupValue(values: Array<Group>, target: Group): Bool {
+    for (value in values) {
+        if (value == target) { return true }
+    }
+    return false
+}
+
 public class OptionValue {
     public let value: String
     public let help: String
@@ -267,6 +302,10 @@ public class OptionTable {
         arg.value = value
         arg.hasJoinedValue = parsed.hasValue
         if (arg.hasJoinedValue || arg.info.GetKind() == Kind.CONTINOUS || joinedWithoutSpace) {
+            if ((arg.hasJoinedValue || arg.info.GetKind() == Kind.CONTINOUS) && value.isEmpty() &&
+                arg.info.GetID() != ID.LTO_KEEP_PKG_VISIBILITY) {
+                Warningln("option '" + arg.name + "' requires some values, format: option=value or option=\"v1, v2...\"")
+            }
             if (!checkValue(value, arg.info)) {
                 Errorln("invalid value: '" + value + "'")
                 return OptionArgParseResult(false, arg)
@@ -319,18 +358,35 @@ public class OptionTable {
     }
 
     public func Usage(backend: Backend, groups: Array<Group>, showExperimental!: Bool = false): Unit {
+        if (optionInfos.isEmpty()) { return }
         Println("Usage:")
-        if (containsGroup(groups, Group.FRONTEND)) { Println("  cjc-frontend [option] file...") }
-        else { Println("  cjc [option] file...") }
+        printIndentOnly("Usage:".size, numSpaces: 1)
+        if (containsGroup(groups, Group.FRONTEND)) { Println("cjc-frontend [option] file...") }
+        else { Println("cjc [option] file...") }
         Println()
         Println("Options:")
         for (info in optionInfos) {
             if (info.BelongsToAnyOfGroup(groups) && info.BelongsToBackend(backend)) {
-                if (!showExperimental && !info.BelongsGroup(Group.STABLE)) { continue }
                 var name = info.name
                 if (!info.alias.isEmpty()) { name = info.alias + ", " + name }
                 if (info.kind == Kind.SEPARATED) { name += " <value>" }
-                Println(name + "    " + info.help)
+                else if (info.kind == Kind.CONTINOUS) { name += "<value>" }
+                var desc = info.help
+                if (!info.BelongsGroup(Group.STABLE)) { desc += " (Experimental)" }
+                if (name.size < OPTION_WIDTH) {
+                    printCommandDesc(name, desc)
+                } else {
+                    printCommandDesc(name, "")
+                    printCommandDesc("", desc)
+                }
+                for (optionValue in info.values) {
+                    if (!containsBackendValue(optionValue.backends, backend)) { continue }
+                    if (!containsGroupValue(optionValue.groups, Group.STABLE) && !showExperimental) { continue }
+                    let valueName = "  <value>=" + optionValue.value
+                    var valueHelp = "  " + optionValue.help
+                    if (!containsGroupValue(optionValue.groups, Group.STABLE)) { valueHelp += " (Experimental)" }
+                    printCommandDesc(valueName, valueHelp)
+                }
             }
         }
     }

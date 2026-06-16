@@ -80,6 +80,22 @@ matches the C++ two-phase flow more closely: `--help`/`--version` mark normal
 parsing to be skipped after all first-pass arguments have been scanned, instead
 of returning immediately and ignoring later pre-actions.
 
+This pass restores more of the C++ `OptionTable`/`Options.inc` behavior. Help
+formatting now follows the reference `Usage`/`PrintInfo` layout, including the
+28-column command width, continuous-option value spelling, per-value help rows,
+experimental labels, backend filtering, and the C++ rule that experimental
+options themselves are still listed in normal help. Joined and continuous
+options now warn on empty values except for `--lto-keep-pkg-visibility=""`.
+The predefined option values in `Options.cj` now carry the C++ help text,
+backend tags, and stability tags instead of a flat local stable list, and
+`GlobalOptions` rejects experimental option values without `--experimental`.
+Input and post-action behavior also moved closer to the reference: `.cjo`
+inputs are no longer rejected solely because package mode is enabled, sanitizer
+post-checks validate the target sanitizer runtime library under
+`cangjieHome/runtime/lib/<target>/<sanitizer>`, and `--jobs`/`--apc` parsing now
+matches the C++ digit, maximum-length, empty-value, and zero-normalization
+rules except for the remaining hardware-concurrency clamp.
+
 Remaining fidelity gaps are not hidden behind self-host markers: this package
 still uses local diagnostics instead of Basic diagnostic IDs. Importing Basic
 directly is currently blocked by the existing `basic -> option` dependency for
