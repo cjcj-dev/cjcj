@@ -109,6 +109,10 @@ public func IsGetOrThrowFunction(expr: Expression): Bool {
     return false
 }
 
+public func ReturnTypeShouldBeVoid(fn: Function): Bool {
+    return fn.IsGVInit() || fn.IsFinalizer() || (fn.IsConstructor() && !fn.TestAttr(Attribute.STATIC))
+}
+
 public func IndentToString(indent: Int64): String {
     var out = ""
     var idx: Int64 = 0

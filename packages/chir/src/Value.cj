@@ -860,6 +860,34 @@ public class Function <: GlobalValue {
         ret.SetRetValue(true)
     }
 
+    public func ReplaceReturnValue(newReturn: Option<LocalVar>, builder: CHIRBuilder): Unit {
+        if (let Some(curFuncTy) <- GetFuncType()) {
+            let paramTys = curFuncTy.GetParamTypes()
+            let newReturnTy = if (let Some(newRet) <- newReturn) {
+                if (let Some(retTy) <- newRet.GetType()) {
+                    if (let Some(refTy) <- (retTy as RefType)) {
+                        refTy.GetBaseType()
+                    } else {
+                        retTy
+                    }
+                } else {
+                    builder.context.GetVoidTy()
+                }
+            } else {
+                builder.context.GetVoidTy()
+            }
+            SetType(builder.context.GetFuncTy(paramTys, newReturnTy, hasVarLenParam: curFuncTy.HasVarArg(),
+                isCFunc: curFuncTy.IsCFunc()))
+        }
+        if (let Some(oldRet) <- returnValue) {
+            oldRet.SetRetValue(false)
+        }
+        returnValue = newReturn
+        if (let Some(newRetValue) <- returnValue) {
+            newRetValue.SetRetValue(true)
+        }
+    }
+
     public func GetExpressionsNum(): Int64 {
         if (let Some(funcBody) <- body) {
             return funcBody.GetExpressionsNum()

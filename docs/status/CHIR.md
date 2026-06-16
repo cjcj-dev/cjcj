@@ -125,6 +125,9 @@ Implemented:
 - Added `DevirtualizationInfo`, collecting concrete runtime return-type summaries, class/interface subtype
   inheritance summaries, type-to-definition mappings, and const-member-derived-type data through
   `ConstMemberVarCollector` for the current CHIR package model.
+- Added `OptFuncRetType` plus `Function.ReplaceReturnValue` and `ReturnTypeShouldBeVoid`, converting eligible
+  constructor/finalizer/global-init functions from `Unit` return to `Void`, clearing old return slots, removing
+  removable unit return storage, and updating generic `APPLY`/`APPLY_WITH_EXCEPTION` call sites.
 - Added C++-named BCHIR interpreter component files for `OpCodes`, `BCHIR`, `BCHIRPrinter`,
   `BCHIRInterpreter`, `InterpreterValue`, `InterpreterValueUtils`, `InterpreterArena`,
   `InterpreterEnv`, and `InterpreterStack`.
@@ -196,6 +199,9 @@ Known gaps:
   exact `GlobalOptions`, `Modules::GetPackageRelation`, `Attribute::SKIP_ANALYSIS`/`INTERNAL`, closure-conversion
   auto-env metadata, and specialized `Apply`/`TypeCast` source-type accessors are approximated by current package
   names, annotations, and generic expression operands.
+- `OptFuncRetType` implements the C++ unit-to-void function rewrite over the current generic expression model, but
+  exact `Apply`/`ApplyWithException` reconstruction, instantiated type arguments, `this` type, and super-call flags
+  remain limited until specialized call-expression classes are ported.
 - The BCHIR translator/linker/interpreter now has the first real end-to-end package/function/global/control
   path, but exact float/rune byte encoding, the complete expression taxonomy, intrinsics/syscalls, exception
   machinery, object method dispatch, raw-array operations, type casts, full serialization, and FFI execution
