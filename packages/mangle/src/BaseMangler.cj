@@ -39,6 +39,16 @@ private class WildcardBucket {
     }
 }
 
+private class AnnotationLambdaKey {
+    public var owner: MangleDecl
+    public var annotationKey: MangleDecl
+
+    public init(owner: MangleDecl, annotationKey: MangleDecl) {
+        this.owner = owner
+        this.annotationKey = annotationKey
+    }
+}
+
 private class FileWildcardBucket {
     public var file: MangleFile
     public let vars: ArrayList<MangleDecl> = ArrayList<MangleDecl>()
@@ -147,6 +157,7 @@ public class ManglerContext {
     private let file2GlobalWildcardVar: ArrayList<FileWildcardBucket> = ArrayList<FileWildcardBucket>()
     private let node2LocalWildcardVar: ArrayList<WildcardBucket> = ArrayList<WildcardBucket>()
     private let node2Lambda: ArrayList<LambdaBucket> = ArrayList<LambdaBucket>()
+    private let owner2AnnotationLambdaKey: ArrayList<AnnotationLambdaKey> = ArrayList<AnnotationLambdaKey>()
     private let node2LocalVar: ArrayList<VarBucket> = ArrayList<VarBucket>()
     private let node2LocalFunc: ArrayList<FuncBucket> = ArrayList<FuncBucket>()
     private let file2ExtendDecl: ArrayList<ExtendBucket> = ArrayList<ExtendBucket>()
@@ -207,6 +218,24 @@ public class ManglerContext {
         let bucket = LambdaBucket(node)
         node2Lambda.add(bucket)
         return bucket
+    }
+
+    private func findLambdaBucket(node: MangleDecl): Option<LambdaBucket> {
+        for (bucket in node2Lambda) {
+            if (sameDecl(bucket.key, node)) {
+                return bucket
+            }
+        }
+        return None
+    }
+
+    private func findAnnotationLambdaKey(node: MangleDecl): Option<MangleDecl> {
+        for (item in owner2AnnotationLambdaKey) {
+            if (sameDecl(item.owner, node)) {
+                return item.annotationKey
+            }
+        }
+        return None
     }
 
     private func extendBucket(file: MangleFile, extendedTypeName: String): ExtendBucket {
@@ -351,9 +380,18 @@ public class ManglerContext {
     }
 
     public func GetIndexOfLambda(node: MangleDecl, target: MangleDecl): Option<Int64> {
-        for (bucket in node2Lambda) {
-            if (sameDecl(bucket.key, node)) {
-                return findDeclIndex(bucket.lambdas, target)
+        var bodyLambdaCount: Int64 = 0
+        if (let Some(bodyBucket) <- findLambdaBucket(node)) {
+            bodyLambdaCount = bodyBucket.lambdas.size
+            if (let Some(index) <- findDeclIndex(bodyBucket.lambdas, target)) {
+                return index
+            }
+        }
+        if (let Some(annotationKey) <- findAnnotationLambdaKey(node)) {
+            if (let Some(annotationBucket) <- findLambdaBucket(annotationKey)) {
+                if (let Some(index) <- findDeclIndex(annotationBucket.lambdas, target)) {
+                    return bodyLambdaCount + index
+                }
             }
         }
         return None
@@ -450,6 +488,15 @@ public class ManglerContext {
 
     public func RegisterLambda(node: MangleDecl, target: MangleDecl): Unit {
         addUniqueDecl(lambdaBucket(node).lambdas, target)
+    }
+
+    public func RegisterLambdaAnnotationKey(owner: MangleDecl, annotationKey: MangleDecl): Unit {
+        for (item in owner2AnnotationLambdaKey) {
+            if (sameDecl(item.owner, owner)) {
+                return
+            }
+        }
+        owner2AnnotationLambdaKey.add(AnnotationLambdaKey(owner, annotationKey))
     }
 
     public static func CheckAllElementsWildcard(root: ManglePattern): Bool {
@@ -656,7 +703,7 @@ public open class BaseMangler {
                                     reverseIndex--
                                 }
                                 if (!found) {
-                                    name = MANGLE_GENERIC_TYPE_PREFIX + DecimalToManglingNumber("0")
+                                    throw IllegalArgumentException("Using undeclared generic type: " + genericsTy.name)
                                 }
                             }
                         }
@@ -1021,7 +1068,7 @@ public open class BaseMangler {
                 reverseIndex--
             }
             if (!found) {
-                index = 0
+                throw IllegalArgumentException("Using undeclared generic type: " + ty.name)
             }
         }
         return MANGLE_GENERIC_TYPE_PREFIX + DecimalToManglingNumber("${index}")

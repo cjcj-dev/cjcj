@@ -23,6 +23,16 @@ private class AstLambdaPair {
     }
 }
 
+private class AstAnnotationArrayPair {
+    public var source: ArrayLit
+    public var target: MangleDecl
+
+    public init(source: ArrayLit, target: MangleDecl) {
+        this.source = source
+        this.target = target
+    }
+}
+
 private func ConvertAstKind(kind: ASTKind): MangleAstKind {
     return match (kind) {
         case ASTKind.MAIN_DECL => MangleAstKind.MAIN_DECL
@@ -182,6 +192,7 @@ private func CopyParamAttributes(source: FuncParam, target: MangleFuncParam): Un
 public class MangleAstAdapter {
     private let declPairs: ArrayList<AstDeclPair> = ArrayList<AstDeclPair>()
     private let lambdaPairs: ArrayList<AstLambdaPair> = ArrayList<AstLambdaPair>()
+    private let annotationArrayPairs: ArrayList<AstAnnotationArrayPair> = ArrayList<AstAnnotationArrayPair>()
 
     public init() {}
 
@@ -210,6 +221,19 @@ public class MangleAstAdapter {
 
     private func StoreLambda(source: LambdaExpr, target: MangleDecl): Unit {
         lambdaPairs.add(AstLambdaPair(source, target))
+    }
+
+    private func FindAnnotationArray(source: ArrayLit): Option<MangleDecl> {
+        for (pair in annotationArrayPairs) {
+            if (SameNode(pair.source, source)) {
+                return pair.target
+            }
+        }
+        return None
+    }
+
+    private func StoreAnnotationArray(source: ArrayLit, target: MangleDecl): Unit {
+        annotationArrayPairs.add(AstAnnotationArrayPair(source, target))
     }
 
     private func SameNode(left: Node, right: Node): Bool {
@@ -330,6 +354,17 @@ public class MangleAstAdapter {
         return target
     }
 
+    private func ConvertAnnotationArray(source: ArrayLit, owner: MangleDecl): MangleDecl {
+        if (let Some(cached) <- FindAnnotationArray(source)) {
+            return cached
+        }
+        let target = MangleDecl(MangleAstKind.INVALID, "<annotations>", fullPackageName: owner.fullPackageName)
+        target.outerDecl = owner
+        target.curFile = owner.curFile
+        StoreAnnotationArray(source, target)
+        return target
+    }
+
     private func AstScopeRoot(node: Node): Option<Node> {
         if (let Some(lambda) <- (node as LambdaExpr)) {
             if (let Some(body) <- lambda.funcBody) {
@@ -350,7 +385,7 @@ public class MangleAstAdapter {
             return None
         }
         if (let Some(varDecl) <- (node as VarDeclAbstract)) {
-            if (varDecl.TestAttr(Attribute.GLOBAL)) {
+            if (varDecl.TestAttr(Attribute.GLOBAL) || IsCompositeMemberVar(node)) {
                 return node
             }
         }
@@ -378,6 +413,18 @@ public class MangleAstAdapter {
             if (let Some(outer) <- varDecl.outerDecl) {
                 return outer.astKind == ASTKind.CLASS_DECL || outer.astKind == ASTKind.INTERFACE_DECL ||
                     outer.astKind == ASTKind.STRUCT_DECL || outer.astKind == ASTKind.ENUM_DECL
+            }
+        }
+        return false
+    }
+
+    private func IsAnnotationArrayOfRoot(root: Node, node: Node): Bool {
+        if (SameNode(root, node)) {
+            return false
+        }
+        if (let Some(owner) <- (root as Decl)) {
+            if (let Some(annotationArray) <- owner.annotationsArray) {
+                return SameNode(annotationArray, node)
             }
         }
         return false
@@ -447,6 +494,9 @@ public class MangleAstAdapter {
 
     private func RegisterAstLambdasInScope(ctx: ManglerContext, key: MangleDecl, root: Node): Unit {
         let walker = Walker(root, visitPre: { node: Node =>
+            if (IsAnnotationArrayOfRoot(root, node)) {
+                return VisitAction.SKIP_CHILDREN
+            }
             if (ShouldSkipNestedFuncBody(root, node)) {
                 return VisitAction.SKIP_CHILDREN
             }
@@ -458,6 +508,14 @@ public class MangleAstAdapter {
             VisitAction.WALK_CHILDREN
         })
         walker.Walk()
+    }
+
+    private func RegisterAstLambdasInAnnotationArray(ctx: ManglerContext, key: MangleDecl, owner: Decl): Unit {
+        if (let Some(annotationArray) <- owner.annotationsArray) {
+            let annotationKey = ConvertAnnotationArray(annotationArray, key)
+            ctx.RegisterLambdaAnnotationKey(key, annotationKey)
+            RegisterAstLambdasInScope(ctx, annotationKey, annotationArray)
+        }
     }
 
     private func RegisterGenericInstantiatedLocalFunction(ctx: ManglerContext, node: Node): Unit {
@@ -482,6 +540,9 @@ public class MangleAstAdapter {
                 RegisterAstLambdasInScope(ctx, key, root)
                 RegisterAstWildcardVarsInScope(ctx, key, root)
                 RegisterAstFuncsInScope(ctx, key, root)
+            }
+            if (let Some(owner) <- (node as Decl)) {
+                RegisterAstLambdasInAnnotationArray(ctx, key, owner)
             }
         }
     }

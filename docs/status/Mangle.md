@@ -22,6 +22,8 @@ Implemented:
 - Added AST-walker-backed mangler context collection so AST-facing mangling now discovers local
   variables, wildcard pattern declarations, nested functions, lambdas, extends, and global wildcard
   pattern declarations from real function bodies and blocks, matching the C++ walker structure.
+- Extended real-AST context collection to class/interface/struct/enum member variable initializer scopes,
+  matching the C++ local-scope collection trigger for composite member variables.
 - Added public AST-backed overloads for `BaseMangler.Mangle`, `BaseMangler.MangleExportIds`,
   `BaseMangler.MangleExportId`, `BaseMangler.MangleLambda`, `ASTMangler.Mangle`, and top-level
   `MangleAstType`; AST declaration mangling now accepts C++-shaped `ArrayList<Node>` prefix paths.
@@ -42,6 +44,10 @@ Implemented:
 - Aligned parser-AST extend generic-constraint ordering with the C++ stable sort by constrained type.
 - Aligned parser-AST constant type annotation conversion with the C++ use of literal `stringValue`.
 - Aligned descriptor and CHIR generic type references with the C++ declaration-order stack index.
+- Aligned descriptor AST generic-parameter and generic-type reference failures with the C++ assertion
+  behavior by rejecting undeclared generic references instead of aliasing them to `G0`.
+- Aligned real-AST lambda indexing for declaration annotation arrays with the C++ two-bucket lookup, so
+  lambdas in function/constructor/global/member annotation arrays are numbered after body lambdas.
 - Aligned parser-AST member-parameter accessibility mangling with C++ modifier-list based emission.
 - Implemented parser-AST type annotation mangling, including primitive, reference, qualified, option,
   constant, VArray, parenthesized, function, tuple, generic, inherited type, generic constraint,
