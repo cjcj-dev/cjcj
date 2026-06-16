@@ -111,8 +111,9 @@ public func DeleteRecompiledNodesInCHIROptEffectMap(recompiledNodes: HashSet<Inc
     effectMap: OptEffectStrMap): Unit {
     let recompiled = HashSet<String>()
     for (decl in recompiledNodes) {
-        if (!decl.rawMangleName.isEmpty()) {
-            recompiled.add(decl.rawMangleName)
+        let rawMangle = GetRecompiledCHIROptRawMangleName(decl)
+        if (!rawMangle.isEmpty()) {
+            recompiled.add(rawMangle)
         }
     }
     let keysToRemove = ArrayList<String>()
@@ -136,12 +137,17 @@ public func DeleteRecompiledNodesInCHIROptEffectMap(recompiledNodes: HashSet<Inc
 }
 
 public func IncrementalScopeAnalysis(args: IncrementalScopeAnalysisArgs): IncreResult {
+    let cachedAstPath = args.op.GenerateCachedPathName(args.srcPackage.fullPackageName, CACHED_AST_EXTENSION)
+    let serializedPath = args.op.GenerateCachedPathName(args.srcPackage.fullPackageName, SERIALIZED_FILE_EXTENSION)
     var previousCacheOpt = args.cachedInfo
     if (let None <- previousCacheOpt) {
-        previousCacheOpt = LoadCacheInfo(args.op.GenerateCachedPathName(args.srcPackage.fullPackageName,
-            CACHED_AST_EXTENSION), args.rawMangleName2DeclMap)
+        previousCacheOpt = LoadCacheInfo(cachedAstPath, args.rawMangleName2DeclMap)
     }
     if (let None <- previousCacheOpt) {
+        return TerminateAnalysisAndRollback(CompilationCache(), args,
+            "load cached info failed, roll back to full compilation")
+    }
+    if (!exists(serializedPath)) {
         return TerminateAnalysisAndRollback(CompilationCache(), args,
             "load cached info failed, roll back to full compilation")
     }

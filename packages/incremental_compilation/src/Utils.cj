@@ -128,6 +128,52 @@ public func IsOOEAffectedDecl(decl: IncrDecl): Bool {
     return false
 }
 
+public func GetDesugaredRawMangleName(decl: IncrDecl): Option<String> {
+    if (decl.astKind != IncrDeclKind.MAIN_DECL && decl.astKind != IncrDeclKind.MACRO_DECL) {
+        return None
+    }
+    if (!decl.desugaredRawMangleName.isEmpty()) {
+        return Some(decl.desugaredRawMangleName)
+    }
+    if (let Some(desugar) <- decl.desugarDecl) {
+        if (!desugar.rawMangleName.isEmpty()) {
+            return Some(desugar.rawMangleName)
+        }
+        if (!desugar.mangledName.isEmpty()) {
+            return Some(desugar.mangledName)
+        }
+    }
+    return None
+}
+
+public func GetMainDesugaredRawMangleName(decl: IncrDecl): Option<String> {
+    if (decl.astKind != IncrDeclKind.MAIN_DECL) {
+        return None
+    }
+    return GetDesugaredRawMangleName(decl)
+}
+
+public func GetCacheWriteRawMangleName(decl: IncrDecl): String {
+    if (let Some(mangle) <- GetMainDesugaredRawMangleName(decl)) {
+        return mangle
+    }
+    return decl.rawMangleName
+}
+
+public func GetRecompiledCHIROptRawMangleName(decl: IncrDecl): String {
+    if (let Some(mangle) <- GetMainDesugaredRawMangleName(decl)) {
+        return mangle
+    }
+    return decl.rawMangleName
+}
+
+public func GetSemanticUsageRawMangleName(decl: IncrDecl): String {
+    if (let Some(mangle) <- GetDesugaredRawMangleName(decl)) {
+        return mangle
+    }
+    return decl.rawMangleName
+}
+
 public func TrimPackagePath(path: String): String {
     if (path.isEmpty()) {
         return path

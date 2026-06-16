@@ -55,6 +55,14 @@ Implemented:
 - Ported the C++ fallback for deleted imported extend decls: when the cached extend-to-type relation is missing,
   the analyzer truncates the extend mangle, recovers the candidate type identifier, pollutes matching nominal decls,
   and falls back to builtin box pollution when no decl exists.
+- Added adapter support for main/macro desugared declarations. Cache writing now uses the desugared raw mangle for
+  `main`, semantic-usage serialization can use main/macro desugared raw mangles, and CHIR optimization effect-map
+  cleanup removes the desugared main entry when a main declaration is recompiled.
+- Tightened cache serialization parity by writing static/global-variable members before other members and by keeping
+  imported member cache entries out of the reconstructed source `CachedFileMap`, matching the C++ loader's `srcPkg`
+  split.
+- Matched the C++ incremental-analysis entry guard that rolls back when the serialized `.cjo` sidecar is absent,
+  even if cached AST data is otherwise available.
 
 Known gaps:
 

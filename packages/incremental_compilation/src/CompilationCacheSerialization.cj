@@ -105,7 +105,10 @@ public class HashedASTWriter {
             importedDecls[name] = cache.Clone()
         }
         for (decl in writeOrder) {
-            if (!decl.rawMangleName.isEmpty() && allAST.contains(decl.rawMangleName)) {
+            let cacheMangle = GetCacheWriteRawMangleName(decl)
+            if (!cacheMangle.isEmpty() && allAST.contains(cacheMangle)) {
+                order.add(cacheMangle)
+            } else if (!decl.rawMangleName.isEmpty() && allAST.contains(decl.rawMangleName)) {
                 order.add(decl.rawMangleName)
             }
         }
@@ -202,15 +205,16 @@ public class HashedASTWriter {
 
     private func appendSemanticInfo(lines: ArrayList<String>): Unit {
         for ((decl, usage) in semaUsages.usages) {
+            let usageMangle = GetSemanticUsageRawMangleName(decl)
             let fields = ArrayList<String>()
             fields.add("usage")
-            fields.add(decl.rawMangleName)
+            fields.add(usageMangle)
             fields.add(StringSetToWire(usage.apiUsages.usedDecls))
             fields.add(StringSetToWire(usage.bodyUsages.usedDecls))
             fields.add(StringSetToWire(usage.boxedTypes))
             lines.add(JoinCacheFields(fields))
-            appendNameUsages(lines, decl.rawMangleName, "api", usage.apiUsages.usedNames)
-            appendNameUsages(lines, decl.rawMangleName, "body", usage.bodyUsages.usedNames)
+            appendNameUsages(lines, usageMangle, "api", usage.apiUsages.usedNames)
+            appendNameUsages(lines, usageMangle, "body", usage.bodyUsages.usedNames)
         }
         appendRelations(lines, "relation", semaUsages.relations)
         appendRelations(lines, "builtin-relation", semaUsages.builtInTypeRelations)
@@ -268,7 +272,14 @@ public class HashedASTWriter {
         fields.add(JoinCacheStringList(cache.extends))
         lines.add(JoinCacheFields(fields))
         for (member in cache.members) {
-            appendMemberDecl(lines, tag + "-member", mangle, member)
+            if (member.isGV) {
+                appendMemberDecl(lines, tag + "-member", mangle, member)
+            }
+        }
+        for (member in cache.members) {
+            if (!member.isGV) {
+                appendMemberDecl(lines, tag + "-member", mangle, member)
+            }
         }
     }
 
@@ -321,18 +332,35 @@ public class HashedASTLoader {
         cached.lambdaCounter = WireToU64(first[4])
         cached.envClassCounter = WireToU64(first[5])
         cached.stringLiteralCounter = WireToU64(first[6])
+        let lookup = BuildLoaderMangleLookup(mangledName2DeclMap)
 
         let topMemberOwners = HashMap<String, DeclCacheBase>()
         var idx: Int64 = 1
         while (idx < lines.size) {
             let fields = SplitCacheFields(lines[idx])
             if (!fields.isEmpty()) {
-                loadLine(fields, cached, mangledName2DeclMap, topMemberOwners)
+                loadLine(fields, cached, lookup, topMemberOwners)
             }
             idx++
         }
         buildCachedFileMap(cached)
         return (true, cached)
+    }
+
+    private func BuildLoaderMangleLookup(mangledName2DeclMap: RawMangled2DeclMap): RawMangled2DeclMap {
+        let lookup = RawMangled2DeclMap()
+        for ((name, decl) in mangledName2DeclMap) {
+            lookup[name] = decl
+            let cacheMangle = GetCacheWriteRawMangleName(decl)
+            if (!cacheMangle.isEmpty() && !lookup.contains(cacheMangle)) {
+                lookup[cacheMangle] = decl
+            }
+            let usageMangle = GetSemanticUsageRawMangleName(decl)
+            if (!usageMangle.isEmpty() && !lookup.contains(usageMangle)) {
+                lookup[usageMangle] = decl
+            }
+        }
+        return lookup
     }
 
     private func loadLine(fields: ArrayList<String>, cached: CompilationCache,
@@ -363,7 +391,7 @@ public class HashedASTLoader {
         } else if ((tag == "top" || tag == "import") && fields.size >= 13) {
             loadTop(tag, fields, cached, owners)
         } else if ((tag == "top-member" || tag == "import-member") && fields.size >= 11) {
-            loadMember(fields, owners)
+            loadMember(fields, owners, tag == "top-member")
         }
     }
 
@@ -456,7 +484,8 @@ public class HashedASTLoader {
         owners[fields[1]] = top
     }
 
-    private func loadMember(fields: ArrayList<String>, owners: HashMap<String, DeclCacheBase>): Unit {
+    private func loadMember(fields: ArrayList<String>, owners: HashMap<String, DeclCacheBase>,
+        isSourceMember: Bool): Unit {
         let member = MemberDeclCache(fields[1])
         fillCommon(fields, member)
         let parent = fields[10]
@@ -464,7 +493,9 @@ public class HashedASTLoader {
             owner.members.add(member)
         }
         owners[member.rawMangle] = member
-        collectFileMapForMember(member)
+        if (isSourceMember) {
+            collectFileMapForMember(member)
+        }
     }
 
     private func fillCommon(fields: ArrayList<String>, cache: DeclCacheBase): Unit {

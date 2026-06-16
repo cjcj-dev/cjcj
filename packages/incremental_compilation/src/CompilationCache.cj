@@ -255,6 +255,8 @@ public class IncrDecl <: Hashable & Equatable<IncrDecl> {
     public let inheritedTypes: ArrayList<IncrDecl> = ArrayList<IncrDecl>()
     public let inheritedTypeMangles: ArrayList<String> = ArrayList<String>()
     public var outerDecl: Option<IncrDecl> = None
+    public var desugarDecl: Option<IncrDecl> = None
+    public var desugaredRawMangleName: String = ""
     public var extendedTypeMangle: Option<String> = None
     public var extendedTypeIdentifier: String = ""
     public var resolvedTypeName: String = ""
@@ -337,6 +339,24 @@ public class IncrDecl <: Hashable & Equatable<IncrDecl> {
 
     public func AddDefaultParamDesugarDecl(decl: IncrDecl): Unit {
         defaultParamDesugarDecls.add(decl)
+    }
+
+    public func SetDesugarDecl(decl: IncrDecl): Unit {
+        desugarDecl = Some(decl)
+        if (decl.fullPackageName.isEmpty()) {
+            decl.fullPackageName = fullPackageName
+        }
+        if (decl.filePath.isEmpty()) {
+            decl.filePath = filePath
+        }
+        let raw = if (!decl.rawMangleName.isEmpty()) { decl.rawMangleName } else { decl.mangledName }
+        if (!raw.isEmpty()) {
+            desugaredRawMangleName = raw
+        }
+    }
+
+    public func SetDesugaredRawMangleName(rawMangle: String): Unit {
+        desugaredRawMangleName = rawMangle
     }
 
     public func AddInheritedType(parent: IncrDecl): Unit {
