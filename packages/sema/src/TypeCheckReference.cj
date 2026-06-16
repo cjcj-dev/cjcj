@@ -8,6 +8,8 @@ import cangjie_compiler::basic.DiagKind as BasicDiagKind
 import cangjie_compiler::basic.DiagKindRefactor as BasicDiagKindRefactor
 import cangjie_compiler::basic.DiagnosticEngine as BasicDiagnosticEngine
 import cangjie_compiler::basic.Range as BasicRange
+import cangjie_compiler::modules.GetPackageRelation as ModulesGetPackageRelation
+import cangjie_compiler::modules.PackageRelation as ModulesPackageRelation
 
 private func TypeCheckReferenceRange(node: Node): BasicRange {
     var rangeEnd = node.end
@@ -49,8 +51,148 @@ private func TypeCheckReferenceAllFuncDecl(values: ArrayList<Decl>): Bool {
     return true
 }
 
+private func TypeCheckReferenceAllMemberDecl(values: ArrayList<Decl>): Bool {
+    if (values.isEmpty()) {
+        return false
+    }
+    for (value in values) {
+        if (!value.IsMemberDecl()) {
+            return false
+        }
+    }
+    return true
+}
+
 private func TypeCheckReferenceRemoveAt(values: ArrayList<Decl>, idx: Int64): Unit {
     values.remove(at: idx)
+}
+
+private func TypeCheckReferenceSameParamTypes(leftDecl: FuncDecl, rightDecl: FuncDecl): Bool {
+    let left = GetParamTys(leftDecl)
+    let right = GetParamTys(rightDecl)
+    return left.size == right.size && SameTypeArgs(left, right)
+}
+
+private func TypeCheckReferenceAddUniqueFunc(values: ArrayList<FuncDecl>, decl: FuncDecl): Unit {
+    for (value in values) {
+        if (SameDecl(value, decl)) {
+            return
+        }
+    }
+    values.add(decl)
+}
+
+private func TypeCheckReferenceFilterShadowedFuncs(targets: ArrayList<Decl>): Unit {
+    if (!TypeCheckReferenceAllFuncDecl(targets)) {
+        return
+    }
+    let out = ArrayList<FuncDecl>()
+    for (target in targets) {
+        if (let Some(funcDecl) <- (target as FuncDecl)) {
+            var shadowed = false
+            for (existing in out) {
+                if (funcDecl.identifier.Val() == existing.identifier.Val() &&
+                    funcDecl.TestAttr(Attribute.GENERIC) == existing.TestAttr(Attribute.GENERIC) &&
+                    TypeCheckReferenceSameParamTypes(funcDecl, existing) &&
+                    funcDecl.scopeLevel <= existing.scopeLevel) {
+                    shadowed = true
+                    break
+                }
+            }
+            if (!shadowed) {
+                TypeCheckReferenceAddUniqueFunc(out, funcDecl)
+            }
+        }
+    }
+    targets.clear()
+    for (funcDecl in out) {
+        targets.add(funcDecl)
+    }
+}
+
+private func TypeCheckReferenceFilterMacroFuncTargets(expr: Expr, targets: ArrayList<Decl>): Unit {
+    if (expr.TestAttr(Attribute.MACRO_INVOKE_BODY)) {
+        return
+    }
+    var idx: Int64 = 0
+    while (idx < targets.size) {
+        if (targets[idx].TestAttr(Attribute.MACRO_FUNC)) {
+            targets.remove(at: idx)
+        } else {
+            idx++
+        }
+    }
+}
+
+private func TypeCheckReferenceFilterCandidatesForRef(expr: Expr, targets: ArrayList<Decl>): Unit {
+    TypeCheckReferenceFilterMacroFuncTargets(expr, targets)
+    TypeCheckReferenceFilterShadowedFuncs(targets)
+}
+
+private func TypeCheckReferenceCheckForQuestFuncRetType(
+    diag: BasicDiagnosticEngine,
+    target: Decl,
+    expr: Expr,
+    hasTargetTy: Bool
+): Bool {
+    if (hasTargetTy) {
+        return true
+    }
+    if (target.astKind != ASTKind.FUNC_DECL) {
+        return true
+    }
+    if (let Some(targetTy) <- target.GetTy()) {
+        if (Ty.IsTyCorrect(targetTy) && targetTy.HasQuestTy()) {
+            let builder = diag.DiagnoseRefactor(
+                BasicDiagKindRefactor.sema_unable_to_infer_return_type,
+                TypeCheckReferenceRange(target))
+            builder.AddNote(TypeCheckReferenceRange(expr), "with recursive usage from")
+            builder.Emit()
+            return false
+        }
+    }
+    return true
+}
+
+private func TypeCheckReferenceCheckAmbiguousImportedNonFuncs(
+    diag: BasicDiagnosticEngine,
+    expr: Expr,
+    targets: ArrayList<Decl>,
+    name: String
+): Bool {
+    let source = ArrayList<Decl>()
+    let imported = ArrayList<Decl>()
+    for (target in targets) {
+        if (target.TestAttr(Attribute.IMPORTED)) {
+            imported.add(target)
+        } else {
+            source.add(target)
+        }
+    }
+    if (!source.isEmpty() && !TypeCheckReferenceAllFuncDecl(source)) {
+        return true
+    }
+    if (imported.size <= 1) {
+        return true
+    }
+    var hasImportedNonFunc = false
+    for (target in imported) {
+        if (target.astKind != ASTKind.FUNC_DECL) {
+            hasImportedNonFunc = true
+            break
+        }
+    }
+    if (!hasImportedNonFunc || TypeCheckReferenceAllMemberDecl(imported)) {
+        return true
+    }
+    let builder = diag.DiagnoseRefactor(BasicDiagKindRefactor.sema_ambiguous_use,
+        TypeCheckReferenceRange(expr),
+        arguments: [name])
+    for (target in imported) {
+        builder.AddNote(TypeCheckReferenceRange(target), "found candidate")
+    }
+    builder.Emit()
+    return false
 }
 
 private func TypeCheckReferenceNominalKindName(ty: Ty): String {
@@ -314,6 +456,7 @@ public func TypeCheckReferenceFilterAndCheckTargetsOfRef(
     targets: ArrayList<Decl>
 ): Bool {
     TypeCheckReferenceRemoveDuplicateTargets(targets)
+    TypeCheckReferenceFilterCandidatesForRef(re, targets)
     if (targets.isEmpty()) {
         let builder = diag.DiagnoseRefactor(BasicDiagKindRefactor.sema_undeclared_identifier,
             TypeCheckReferenceRange(re),
@@ -331,6 +474,9 @@ public func TypeCheckReferenceFilterAndCheckTargetsOfRef(
     if (!TypeCheckReferenceFilterTargetsInExtend(tm, re, re.GetTy(), targets)) {
         return false
     }
+    if (!TypeCheckReferenceCheckAmbiguousImportedNonFuncs(diag, re, targets, re.ref.identifier.Val())) {
+        return false
+    }
     if (!TypeCheckReferenceIsRefTypeArgSizeValid(diag, re, targets) ||
         !TypeCheckReferenceFilterInvalidEnumTargets(diag, re, targets)) {
         return false
@@ -343,7 +489,10 @@ public func TypeCheckReferenceFilterAndCheckTargetsOfRef(
     if (!hasTarget && re.isAlone) {
         return TypeCheckReferenceFilterTargetsForFuncReference(diag, re, targets)
     }
-    return true
+    if (targets.isEmpty()) {
+        return false
+    }
+    return TypeCheckReferenceCheckForQuestFuncRetType(diag, targets[0], re, hasTarget)
 }
 
 public func TypeCheckReferenceFilterAndCheckTargetsOfNameAccess(
@@ -376,11 +525,13 @@ public func TypeCheckReferenceFilterAndCheckTargetsOfNameAccess(
         return false
     }
     TypeCheckReferenceRemoveDuplicateTargets(targets)
+    TypeCheckReferenceFilterCandidatesForRef(ma, targets)
     var baseTy: Option<Ty> = None
     if (let Some(baseExpr) <- ma.baseExpr) {
         baseTy = baseExpr.GetTy()
     }
     if (!TypeCheckReferenceFilterTargetsInExtend(tm, ma, baseTy, targets)) {
+        TypeCheckReferenceDiagMemberAccessNotFound(diag, ma)
         return false
     }
     if (!TypeCheckReferenceIsRefTypeArgSizeValid(diag, ma, targets) ||
@@ -392,10 +543,311 @@ public func TypeCheckReferenceFilterAndCheckTargetsOfNameAccess(
         hasCallOrPattern = true
     }
     let hasTarget = ctx.HasTargetTy(ma) || ma.isInFlowExpr || hasCallOrPattern
-    if (!hasTarget && (ma.isAlone || !hasCallOrPattern) && !ma.isPattern) {
+    let referenceNeedTypeInfer = ((!hasTarget && (ma.isAlone || !hasCallOrPattern)) ||
+        (!targets.isEmpty() && targets[0].astKind != ASTKind.FUNC_DECL &&
+            !targets[0].TestAttr(Attribute.ENUM_CONSTRUCTOR))) && !ma.isPattern
+    if (referenceNeedTypeInfer) {
+        if (let Some(baseExpr) <- ma.baseExpr) {
+            if (let Some(targetOfBase) <- baseExpr.GetTarget()) {
+                if (targetOfBase.IsTypeDecl() && (let Some(_) <- targetOfBase.GetGeneric()) &&
+                    NeedFurtherInstantiation(baseExpr.GetTypeArgs())) {
+                    TypeCheckReferenceEmitGenericTypeWithoutTypeArg(diag, baseExpr)
+                    return false
+                }
+            }
+        }
         return TypeCheckReferenceFilterTargetsForFuncReference(diag, ma, targets)
     }
-    return true
+    if (targets.isEmpty()) {
+        return false
+    }
+    return TypeCheckReferenceCheckForQuestFuncRetType(diag, targets[0], ma, hasTarget)
+}
+
+private func TypeCheckReferenceEmitGenericTypeWithoutTypeArg(diag: BasicDiagnosticEngine, expr: Expr): Unit {
+    let builder = diag.Diagnose(expr.begin, expr.end, BasicDiagKind.sema_generic_type_without_type_argument)
+    builder.Emit()
+}
+
+private func TypeCheckReferencePackageNameOfAccessSite(ma: MemberAccess): String {
+    if (let Some(file) <- ma.curFile) {
+        if (let Some(pkg) <- file.curPackage) {
+            return pkg.fullPackageName
+        }
+    }
+    return ma.GetFullPackageName()
+}
+
+private func TypeCheckReferenceIsVisibleFromPackage(target: Decl, packageName: String): Bool {
+    let relation = ModulesGetPackageRelation(packageName, target.fullPackageName)
+    return target.TestAttr(Attribute.PUBLIC) || relation == ModulesPackageRelation.SAME_PACKAGE ||
+        (target.TestAttr(Attribute.PROTECTED) && relation != ModulesPackageRelation.NONE) ||
+        (target.TestAttr(Attribute.INTERNAL) &&
+            (relation == ModulesPackageRelation.CHILD || relation == ModulesPackageRelation.SAME_PACKAGE))
+}
+
+private func TypeCheckReferenceEmitRefNotType(
+    diag: BasicDiagnosticEngine,
+    usage: Node,
+    name: String,
+    target: Decl
+): Unit {
+    let builder = diag.Diagnose(usage.begin, usage.end, BasicDiagKind.sema_ref_not_be_type,
+        args: [BasicDiagArgument(name)])
+    builder.AddNote(target.begin, BasicDiagKind.sema_found_candidate_decl)
+    builder.Emit()
+}
+
+private func TypeCheckReferenceEmitAccessIssue(
+    diag: BasicDiagnosticEngine,
+    issue: TypeAccessIssue
+): Unit {
+    let targetName = if (let Some(target) <- issue.target) { target.identifier.Val() } else { "" }
+    if (issue.kind == TypeAccessIssueKind.INVALID_ACCESS_CONTROL) {
+        let builder = diag.Diagnose(issue.node.begin, issue.node.end,
+            BasicDiagKind.sema_invalid_access_control,
+            args: [BasicDiagArgument(targetName)])
+        builder.Emit()
+    } else if (issue.kind == TypeAccessIssueKind.INVALID_FUNCTION_ACCESS) {
+        let builder = diag.Diagnose(issue.node.begin, issue.node.end,
+            BasicDiagKind.sema_invalid_access_function,
+            args: [BasicDiagArgument(targetName)])
+        builder.Emit()
+    } else if (issue.kind == TypeAccessIssueKind.IMMUTABLE_ACCESS_MUT_FUNC ||
+        issue.kind == TypeAccessIssueKind.INOUT_MODIFY_HEAP_VARIABLE) {
+        let builder = diag.DiagnoseRefactor(
+            BasicDiagKindRefactor.sema_immutable_access_mutable_func,
+            TypeCheckReferenceRange(issue.node))
+        builder.Emit()
+    } else if (issue.kind == TypeAccessIssueKind.USE_MUTABLE_FUNC_ALONE) {
+        let builder = diag.DiagnoseRefactor(
+            BasicDiagKindRefactor.sema_use_mutable_func_alone,
+            TypeCheckReferenceRange(issue.node),
+            arguments: [targetName])
+        builder.Emit()
+    }
+}
+
+private func TypeCheckReferenceIsNamespaceMemberAccessLegal(
+    diag: BasicDiagnosticEngine,
+    ma: MemberAccess,
+    targetOfBaseDecl: Decl,
+    target: Decl
+): Bool {
+    var valid = true
+    let realTarget = GetRealTarget(targetOfBaseDecl)
+    if (targetOfBaseDecl.astKind == ASTKind.PACKAGE_DECL && target.TestAttr(Attribute.GLOBAL)) {
+        let packageName = TypeCheckReferencePackageNameOfAccessSite(ma)
+        let targetPackage = target.fullPackageName
+        if (!TypeCheckReferenceIsVisibleFromPackage(target, packageName)) {
+            let builder = diag.Diagnose(ma.begin, ma.end,
+                BasicDiagKind.sema_package_internal_decl_obtain_illegal,
+                args: [
+                    BasicDiagArgument(GetAccessLevelStr(target)),
+                    BasicDiagArgument(ma.field.Val()),
+                    BasicDiagArgument(targetPackage)
+                ])
+            builder.Emit()
+            valid = false
+        }
+    } else if (realTarget.IsNominalDecl() && !realTarget.TestAttr(Attribute.FOREIGN) &&
+        target.TestAttr(Attribute.ABSTRACT)) {
+        let strType = if (target.astKind == ASTKind.FUNC_DECL) { "function" } else { "property" }
+        let builder = diag.DiagnoseRefactor(
+            BasicDiagKindRefactor.sema_interface_call_with_unimplemented_call,
+            TypeCheckReferenceFieldRange(ma),
+            arguments: [strType, ma.field.Val()])
+        builder.Emit()
+        valid = false
+    }
+    if (target.TestAttr(Attribute.ENUM_CONSTRUCTOR) && !ma.typeArguments.isEmpty()) {
+        let builder = diag.Diagnose(ma.begin, ma.end,
+            BasicDiagKind.sema_invalid_type_param_of_enum_member_access,
+            args: [BasicDiagArgument(ma.field.Val()), BasicDiagArgument(targetOfBaseDecl.identifier.Val())])
+        builder.Emit()
+        valid = false
+    }
+    return valid
+}
+
+public func TypeCheckReferenceCheckStaticMemberAccessLegality(
+    diag: BasicDiagnosticEngine,
+    ma: MemberAccess,
+    target: Decl
+): Bool {
+    var valid = true
+    if (let Some(baseExpr) <- ma.baseExpr) {
+        if (let Some(targetOfBase) <- baseExpr.GetTarget()) {
+            if (!TypeCheckReferenceIsNamespaceMemberAccessLegal(diag, ma, targetOfBase, target)) {
+                valid = false
+            }
+        }
+    }
+    if (ma.isAlone && target.IsTypeDecl()) {
+        TypeCheckReferenceEmitRefNotType(diag, ma, ma.field.Val(), target)
+        valid = false
+    }
+    return valid
+}
+
+public func TypeCheckReferenceCheckInstanceMemberAccessLegality(
+    diag: BasicDiagnosticEngine,
+    ma: MemberAccess,
+    target: Decl
+): Bool {
+    var valid = true
+    for (issue in CheckLetInstanceAccessMutableFunc(ma, target)) {
+        TypeCheckReferenceEmitAccessIssue(diag, issue)
+        valid = false
+    }
+    if (let Some(baseExpr) <- ma.baseExpr) {
+        if (let Some(refExpr) <- (baseExpr as RefExpr)) {
+            if (refExpr.isSuper && target.TestAttr(Attribute.ABSTRACT)) {
+                let builder = diag.Diagnose(ma.begin, ma.end,
+                    BasicDiagKind.sema_abstract_method_cannot_be_accessed_directly,
+                    args: [BasicDiagArgument(target.identifier.Val())])
+                builder.Emit()
+                valid = false
+            }
+        }
+    }
+    return valid
+}
+
+public func TypeCheckReferenceCheckAccessLegalityOfMemberAccess(
+    diag: BasicDiagnosticEngine,
+    ma: MemberAccess
+): Bool {
+    let declOpt: Option<Decl> = if (let Some(value) <- ma.target) {
+        Some(value)
+    } else if (!ma.targets.isEmpty()) {
+        Some(ma.targets[0])
+    } else {
+        None
+    }
+    if (let None <- declOpt) {
+        return true
+    }
+    if (let None <- ma.baseExpr) {
+        return true
+    }
+    var decl = declOpt.getOrThrow()
+    if (decl.astKind == ASTKind.PACKAGE_DECL) {
+        return true
+    }
+    if (let Some(funcDecl) <- (decl as FuncDecl)) {
+        if (let Some(propDecl) <- funcDecl.propDecl) {
+            decl = propDecl
+        }
+    }
+    var valid = true
+    if (decl.IsFunc()) {
+        if (ma.isAlone) {
+            let candidates = ArrayList<Decl>()
+            candidates.add(decl)
+            let (_, issue) = CheckFuncAccessControl(ma, candidates)
+            if (let Some(accessIssue) <- issue) {
+                TypeCheckReferenceEmitAccessIssue(diag, accessIssue)
+                valid = false
+            }
+            if (decl.TestAttr(Attribute.UNSAFE) && !ma.isInFlowExpr) {
+                let builder = diag.DiagnoseRefactor(
+                    BasicDiagKindRefactor.sema_unsafe_func_can_only_be_called,
+                    TypeCheckReferenceRange(ma))
+                builder.Emit()
+                valid = false
+            }
+        }
+    } else if (let Some(issue) <- CheckNonFuncAccessControl(ma, decl)) {
+        TypeCheckReferenceEmitAccessIssue(diag, issue)
+        valid = false
+    }
+
+    let baseExpr = ma.baseExpr.getOrThrow()
+    let targetOfBase = baseExpr.GetTarget()
+    let isStaticAccessByName = if (let Some(baseTarget) <- targetOfBase) {
+        baseTarget.IsTypeDecl() && !IsThisOrSuper(baseExpr)
+    } else {
+        false
+    }
+    if (decl.IsTypeDecl() || decl.TestAttr(Attribute.GLOBAL) || decl.TestAttr(Attribute.STATIC) ||
+        isStaticAccessByName) {
+        if (!TypeCheckReferenceCheckStaticMemberAccessLegality(diag, ma, decl)) {
+            valid = false
+        }
+    } else if (!TypeCheckReferenceCheckInstanceMemberAccessLegality(diag, ma, decl)) {
+        valid = false
+    }
+    return valid
+}
+
+private func TypeCheckReferencePrimaryTargetOfRefExpr(re: RefExpr): Option<Decl> {
+    if (let Some(target) <- re.ref.target) {
+        return Some(target)
+    }
+    if (!re.ref.targets.isEmpty()) {
+        return Some(re.ref.targets[0])
+    }
+    return None
+}
+
+private func TypeCheckReferenceCopyTargetsOrSingle(targets: ArrayList<Decl>, fallback: Decl): ArrayList<Decl> {
+    let out = ArrayList<Decl>()
+    if (targets.isEmpty()) {
+        out.add(fallback)
+        return out
+    }
+    for (target in targets) {
+        out.add(target)
+    }
+    return out
+}
+
+public func TypeCheckReferenceCheckAccessLegalityOfRefExpr(
+    diag: BasicDiagnosticEngine,
+    re: RefExpr
+): Bool {
+    if (re.isThis || re.isSuper) {
+        return true
+    }
+    if (let None <- TypeCheckReferencePrimaryTargetOfRefExpr(re)) {
+        return true
+    }
+    var decl = TypeCheckReferencePrimaryTargetOfRefExpr(re).getOrThrow()
+    if (decl.astKind == ASTKind.PACKAGE_DECL) {
+        return true
+    }
+    if (let Some(funcDecl) <- (decl as FuncDecl)) {
+        if (let Some(propDecl) <- funcDecl.propDecl) {
+            decl = propDecl
+        }
+    }
+    var valid = true
+    if (decl.IsFunc()) {
+        if (re.isAlone) {
+            let candidates = TypeCheckReferenceCopyTargetsOrSingle(re.ref.targets, decl)
+            let (_, issue) = CheckFuncAccessControl(re, candidates)
+            if (let Some(accessIssue) <- issue) {
+                TypeCheckReferenceEmitAccessIssue(diag, accessIssue)
+                valid = false
+            }
+            if (decl.TestAttr(Attribute.UNSAFE) && !re.isInFlowExpr) {
+                let builder = diag.DiagnoseRefactor(
+                    BasicDiagKindRefactor.sema_unsafe_func_can_only_be_called,
+                    TypeCheckReferenceRange(re))
+                builder.Emit()
+                valid = false
+            }
+        }
+    } else if (let Some(issue) <- CheckNonFuncAccessControl(re, decl)) {
+        TypeCheckReferenceEmitAccessIssue(diag, issue)
+        valid = false
+    }
+    if (re.isAlone && decl.IsTypeDecl()) {
+        TypeCheckReferenceEmitRefNotType(diag, re, re.ref.identifier.Val(), decl)
+        valid = false
+    }
+    return valid
 }
 
 public func TypeCheckReferenceAddFuncTargetsForMemberAccess(memberAccess: MemberAccess, targets: ArrayList<Decl>): Unit {

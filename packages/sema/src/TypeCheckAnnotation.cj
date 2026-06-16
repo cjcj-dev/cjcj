@@ -128,21 +128,43 @@ public func TypeCheckAnnotationDesugarCustomAnnotation(annotation: Annotation): 
 }
 
 public func TypeCheckAnnotationRecoverCustomAnnotation(annotation: Annotation, callExpr: CallExpr): Unit {
+    RecoverToCallExpr(callExpr)
     annotation.baseExpr = callExpr.baseFunc
     callExpr.baseFunc = None
     for (arg in callExpr.args) {
         annotation.args.add(arg)
     }
     callExpr.args.clear()
-    if (let Some(base) <- annotation.baseExpr) {
-        if (let Some(refExpr) <- (base as RefExpr)) {
-            if (let Some(node) <- refExpr.callOrPattern) {
-                if (node.astKind == ASTKind.CALL_EXPR) {
-                    refExpr.callOrPattern = None
+    TypeCheckAnnotationClearRecoveredCallLink(annotation)
+}
+
+private func TypeCheckAnnotationClearRecoveredCallLink(annotation: Annotation): Unit {
+    if (let Some(baseValue) <- annotation.baseExpr) {
+        if (let Some(refExprValue) <- (baseValue as RefExpr)) {
+            if (let Some(nodeValue) <- refExprValue.callOrPattern) {
+                if (nodeValue.astKind == ASTKind.CALL_EXPR) {
+                    refExprValue.callOrPattern = None
                 }
             }
         }
     }
+}
+
+private func TypeCheckAnnotationPreserveCustomAnnotationPayload(
+    annotation: Annotation,
+    callExpr: CallExpr
+): Unit {
+    annotation.baseExpr = None
+    annotation.args.clear()
+    if (let Some(baseValue) <- callExpr.baseFunc) {
+        annotation.baseExpr = ASTCloner.Clone(baseValue) as Expr
+    }
+    for (arg in callExpr.args) {
+        if (let Some(clonedArg) <- (ASTCloner.Clone(arg) as FuncArg)) {
+            annotation.args.add(clonedArg)
+        }
+    }
+    TypeCheckAnnotationClearRecoveredCallLink(annotation)
 }
 
 public func TypeCheckAnnotationCheckCustomAnnotation(
@@ -162,6 +184,7 @@ public func TypeCheckAnnotationCheckCustomAnnotation(
         TypeCheckAnnotationRecoverCustomAnnotation(annotation, callExpr)
         return None
     }
+    TypeCheckAnnotationPreserveCustomAnnotationPayload(annotation, callExpr)
     return Some(callExpr)
 }
 
@@ -219,6 +242,9 @@ public func TypeCheckAnnotationCheckAnnotations(
             }
         } else if (annotation.kind == AstAnnotationKind.CUSTOM) {
             if (let Some(callExpr) <- TypeCheckAnnotationCheckCustomAnnotation(diag, decl, annotation)) {
+                if (!annotation.isCompileTimeVisible) {
+                    callExpr.EnableAttr(Attribute.NO_REFLECT_INFO)
+                }
                 annotationExprs.add(callExpr)
                 checkedAnnotations.add(annotation)
             } else {
