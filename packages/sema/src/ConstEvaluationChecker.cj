@@ -357,11 +357,11 @@ public class ConstEvaluationChecker {
         if (!fb.paramLists.isEmpty()) {
             for (param in fb.paramLists[0].params) {
                 if (let Some(defaultValue) <- param.assignment) {
-                    let paramIsConst = ChkExpr(defaultValue, true)
                     if (let Some(desugarDecl) <- param.desugarDecl) {
+                        let paramIsConst = ChkExpr(defaultValue, true)
                         desugarDecl.isConst = paramIsConst
+                        result = paramIsConst && result
                     }
-                    result = paramIsConst && result
                 }
             }
         }

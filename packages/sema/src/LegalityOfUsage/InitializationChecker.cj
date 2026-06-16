@@ -377,6 +377,7 @@ public class InitializationChecker {
             case ASTKind.CLASS_DECL =>
                 if (let Some(classDecl) <- (node as ClassDecl)) {
                     CheckInitInClassDecl(classDecl)
+                    CheckNonCommonVariablesInitInCommonDecl(classDecl)
                     classDecl.EnableAttr(Attribute.INITIALIZED)
                 }
             case ASTKind.ENUM_DECL =>
@@ -396,6 +397,7 @@ public class InitializationChecker {
                 if (let Some(structDecl) <- (node as StructDecl)) {
                     CheckStaticInitForTypeDecl(structDecl)
                     CheckInitInTypeDecl(structDecl)
+                    CheckNonCommonVariablesInitInCommonDecl(structDecl)
                     structDecl.EnableAttr(Attribute.INITIALIZED)
                 }
             case _ =>
@@ -1034,6 +1036,24 @@ public class InitializationChecker {
         CheckInitInTypeDecl(inheritDecl, ArrayList<Decl>())
     }
 
+    private func CheckNonCommonVariablesInitInCommonDecl(inheritDecl: InheritableDecl): Unit {
+        if (!inheritDecl.TestAttr(Attribute.COMMON)) {
+            return
+        }
+        let info = CollectDecls(inheritDecl)
+        if (!info.initFuncDecls.isEmpty()) {
+            return
+        }
+        for (decl in info.nonFuncDecls) {
+            if (let Some(varDecl) <- (decl as VarDecl)) {
+                if (!varDecl.TestAttr(Attribute.COMMON) && (let None <- varDecl.initializer)) {
+                    AddIssue(InitializationIssueKind.UNINITIALIZED_FIELD, decl, target: decl,
+                        message: decl.identifier.Val())
+                }
+            }
+        }
+    }
+
     private func CheckInitInTypeDecl(inheritDecl: Decl, superClassNonFuncDecls: ArrayList<Decl>): Unit {
         let info = CollectDecls(inheritDecl)
         for (nonFunc in info.nonFuncDecls) {
@@ -1061,12 +1081,6 @@ public class InitializationChecker {
         }
         for (funcDecl in info.staticFuncDecls) {
             CheckInitialization(funcDecl)
-        }
-        if (info.initFuncDecls.isEmpty()) {
-            for (decl in uninitNonFuncDecls) {
-                AddIssue(InitializationIssueKind.UNINITIALIZED_FIELD, inheritDecl, target: decl,
-                    message: decl.identifier.Val())
-            }
         }
         for (initFunc in info.initFuncDecls) {
             if (initFunc.TestAttr(Attribute.INITIALIZATION_CHECKED) ||
