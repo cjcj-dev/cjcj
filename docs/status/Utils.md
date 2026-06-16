@@ -30,6 +30,8 @@ Implemented:
 - Added the unsigned `FillZero` overload from the C++ header facade and matched Windows environment-variable key normalization in `StringifyEnvironmentPointer`.
 - Added the Windows-only no-argument `GetApplicationPath` overload backed by `GetModuleFileNameA`, matching the C++ `Utils.cpp` platform split while preserving the existing argv/PATH overload for non-Windows.
 - Brought `UserBase` profiling output closer to the C++ implementation: result-generation exceptions now print the same `OutputResult` diagnostic, and JSON profile writes no longer auto-create missing parent directories.
+- Matched the C++ `UserBase` default output directory by leaving it empty until configured, so default profile filenames are passed through `JoinPath` as bare filenames.
+- Aligned `CheckUtils` failure paths with C++ fatal semantics: assertions and abort helpers now call libc `abort` through C FFI, message variants write diagnostics to stderr before aborting, and `CJC_NULLPTR_CHECK` delegates to assertion failure instead of throwing a recoverable argument error.
 - Restored the C++ signal utility split with `SignalUtil.cj`, and brought Unix alternate signal stack setup closer to `SignalUnix.cpp` by querying/preserving the old stack and reusing an existing active or sufficiently large alternate stack.
 - Updated the Utils-local standard library map used by `ConvertPackageNameToLibCangjieBaseFormat` to include the same standard, deriving, and macro package entries as the real Driver table that C++ Utils consults.
 

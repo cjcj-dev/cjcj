@@ -5,7 +5,7 @@ import std.fs.File
 public open class UserBase {
     protected var enable: Bool = false
     protected var packageName: String = ""
-    protected var outputDir: String = "."
+    protected var outputDir: String = ""
 
     public init() {}
 
