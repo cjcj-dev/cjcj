@@ -75,7 +75,10 @@ public func ParseAction(opts: GlobalOptions, arg: OptionArgInstance): ActionResu
         return handled()
     }
     if (id == ID.OUTPUT_DIR) {
-        if (!IsDir(arg.value)) { return handled(success: false) }
+        if (!IsDir(arg.value)) {
+            emitDiag(BasicDiagKindRefactor.no_such_directory, arg.value)
+            return handled(success: false)
+        }
         opts.outputDir = MaybeString(arg.value)
         return handled()
     }
@@ -284,7 +287,10 @@ public func ParseAction(opts: GlobalOptions, arg: OptionArgInstance): ActionResu
         return handled()
     }
     if (id == ID.SAVE_TEMPS) {
-        if (!IsDir(arg.value)) { return handled(success: false) }
+        if (!IsDir(arg.value)) {
+            emitDiag(BasicDiagKindRefactor.no_such_directory, arg.value)
+            return handled(success: false)
+        }
         opts.saveTemps = true
         opts.tempFolderPath = arg.value
         return handled()
@@ -562,12 +568,12 @@ private func parseConditionKeyValueLine(line: String, map: HashMap<String, Strin
 }
 
 public func SetupConditionalCompilationCfgFromFile(filePath: String, map: HashMap<String, String>): Bool {
-    let content = ReadTextFile(filePath)
-    if (!content.hasValue) {
-        emitDiag(BasicDiagKindRefactor.driver_cfg_file_read_failed, filePath, "")
+    let readResult = ReadTextFileWithReason(filePath)
+    if (!readResult.content.hasValue) {
+        emitDiag(BasicDiagKindRefactor.driver_cfg_file_read_failed, filePath, readResult.failedReason)
         return false
     }
-    for (line in SplitLines(content.value)) {
+    for (line in SplitLines(readResult.content.value)) {
         if (line.isEmpty() || seeingTomlComment(line)) { continue }
         if (!parseConditionKeyValueLine(line, map)) { return false }
     }
@@ -656,10 +662,21 @@ private func parseStackTraceFormat(opts: GlobalOptions, value: String): ActionRe
     return handled(success: false)
 }
 
+private func isAsciiDigitsOnly(value: String): Bool {
+    for (byte in value.toArray()) {
+        if (byte < b'0' || byte > b'9') { return false }
+    }
+    return true
+}
+
 private func parseJobsValue(optionName: String, value: String): MaybeUInt64 {
     let maxLen: Int64 = 9
     if (value.isEmpty()) {
         Errorln("'" + optionName + "' requires a non-empty value.")
+        return MaybeUInt64()
+    }
+    if (!isAsciiDigitsOnly(value)) {
+        Errorln("'" + optionName + "' only accepts a positive integer number as value.")
         return MaybeUInt64()
     }
     if (value.size > maxLen) {
@@ -667,10 +684,7 @@ private func parseJobsValue(optionName: String, value: String): MaybeUInt64 {
         return MaybeUInt64()
     }
     let parsed = TryParseUInt64(value)
-    if (!parsed.hasValue) {
-        Errorln("'" + optionName + "' only accepts a positive integer number as value.")
-        return MaybeUInt64()
-    }
+    if (!parsed.hasValue) { return MaybeUInt64() }
     if (parsed.value < 1u64) {
         Warningln("'" + optionName + "' value must be greater than 0, the compiler will use 1 as the value.")
         return MaybeUInt64(1u64)

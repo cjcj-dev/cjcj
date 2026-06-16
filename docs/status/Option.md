@@ -162,7 +162,42 @@ This pass de-isolates conditional-compilation cfg diagnostics onto the real
 key/value input, invalid identifiers, builtin-key reuse, duplicate keys,
 non-directory cfg paths, ignored cfg paths, missing explicit `cfg.toml` files,
 and malformed cfg file lines. `SetupConditionalCompilationCfgFromFile` also
-reports `driver_cfg_file_read_failed`; the only remaining approximation in
-this path is the empty failure-reason string because the current Cangjie
-`ReadTextFile` wrapper exposes success/content but not the underlying IO error
-message that C++ passes through.
+reports `driver_cfg_file_read_failed` with the failure reason returned by the
+shared `utils.FileUtil.ReadFileContent` path, matching the C++ `%s` diagnostic
+arguments instead of using a placeholder reason. The directory-valued
+`--output-dir` and `--save-temps` actions now also emit the shared
+`no_such_directory` diagnostic before failing, as `OptionAction.cpp` does.
+
+This continuation moves the core path-validation helpers onto the C++ diagnostic
+surface. `CheckDirectoryPath` and `CheckInputFilePath` now emit the same driver
+warning IDs and ignored-argument suffix used by `RaiseArgumentUnusedMessage`,
+while `ValidateDirectoryPath` and `ValidateInputFilePath` report shared Basic
+errors for missing paths, permission denial, directory/file mismatches, invalid
+paths, and path-length overflow. Input classification now passes the C++
+source-vs-binary not-found diagnostic kind for `.cj`/`.cj.d`/`.bc` versus
+`.o`/`.a`/`.obj`/`.cjo` inputs. `--jobs` and `--apc` numeric validation also
+matches the C++ check order: non-digit values are diagnosed before the maximum
+length check.
+
+This pass continues that diagnostic migration through the post-action checks
+that already have shared Basic driver diagnostics in the reference. LTO now
+reports `driver_target_lto_unsupported` with the C++ OS spelling, compile-as-exe
+and LTO-visible-package validation use their dedicated driver errors/warnings,
+PGO conflicts and profile-file validation use the C++ diagnostic IDs, CJMP
+common-part extension/count checks use the same unexpected-extension warning
+and count error, output-mode/source/object checks use
+`driver_invalid_compile_target`, `driver_source_file_empty`, and
+`driver_require_experimental`, and OHOS `--static-std` normalization emits
+`driver_static_std_for_ohos`.
+
+This continuation tightens the remaining post-action ordering and diagnostic
+parity around input/output validation. `ReprocessInputs` now reports the C++
+`no_such_file_or_directory` and `input_file_overwritten_by_generated_output`
+diagnostics instead of failing silently. The scan-dependency post-checks now use
+`driver_not_accept_cjo_inputs_when`,
+`driver_require_package_directory_scan_dependency`, and
+`driver_source_cjo_empty`. Reflection normalization is sequenced after
+output/input reprocessing as in `Option.cpp`, output-mode validation runs before
+obfuscation and CJMP checks, and CJMP common-part validation now accumulates all
+bad extension warnings plus the count mismatch before failing, matching the C++
+`ok &= VerifyFileExtension(...)` behavior.

@@ -1,10 +1,57 @@
 package cangjie_compiler::option
 
+import cangjie_compiler::basic.DEFAULT_POSITION as BasicDefaultPosition
+import cangjie_compiler::basic.DiagnosticEngine as BasicDiagnosticEngine
+import cangjie_compiler::basic.DiagKindRefactor as BasicDiagKindRefactor
+import cangjie_compiler::utils.AccessResultType as UtilsAccessResultType
 import cangjie_compiler::utils.CJC_ABORT
 import cangjie_compiler::utils.FileMode as UtilsFileMode
 import cangjie_compiler::utils.Out64
 import cangjie_compiler::utils.OverflowStrategy
 import std.collection.*
+
+private let ARGUMENT_IGNORED_SUFFIX: String = " The argument is ignored."
+
+private func emitOptionDiag(kind: BasicDiagKindRefactor): Unit {
+    let diag = BasicDiagnosticEngine()
+    diag.DiagnoseRefactor(kind, BasicDefaultPosition).Emit()
+}
+
+private func emitOptionDiag(kind: BasicDiagKindRefactor, arg: String): Unit {
+    let diag = BasicDiagnosticEngine()
+    diag.DiagnoseRefactor(kind, BasicDefaultPosition, arguments: [arg]).Emit()
+}
+
+private func emitOptionDiag(kind: BasicDiagKindRefactor, first: String, second: String): Unit {
+    let diag = BasicDiagnosticEngine()
+    diag.DiagnoseRefactor(kind, BasicDefaultPosition, arguments: [first, second]).Emit()
+}
+
+private func emitOptionDiag(
+    kind: BasicDiagKindRefactor,
+    first: String,
+    second: String,
+    third: String,
+    fourth: String
+): Unit {
+    let diag = BasicDiagnosticEngine()
+    diag.DiagnoseRefactor(kind, BasicDefaultPosition, arguments: [first, second, third, fourth]).Emit()
+}
+
+private func emitDirectoryAccessFailure(path: String, result: UtilsAccessResultType): Unit {
+    match (result) {
+        case UtilsAccessResultType.NO_PERMISSION => emitOptionDiag(BasicDiagKindRefactor.permission_denied, path)
+        case _ => emitOptionDiag(BasicDiagKindRefactor.no_such_directory, path)
+    }
+}
+
+private func ltoUnsupportedOSName(target: TripleInfo): String {
+    let osFamily = target.GetOSFamily()
+    if (osFamily == OSType.IOS) { return "iOS" }
+    if (osFamily == OSType.DARWIN) { return "Darwin" }
+    if (osFamily == OSType.WINDOWS) { return "Windows" }
+    return target.OSToString()
+}
 
 public class Path {
     public var pathType: PathType
@@ -666,32 +713,91 @@ public open class GlobalOptions <: Option {
     }
 
     public func CheckDirectoryPath(path: String): MaybeString {
-        if (!FileExist(path) || !IsDir(path)) { return MaybeString() }
-        return GetAbsPath(path)
+        if (!FileExist(path)) {
+            emitOptionDiag(BasicDiagKindRefactor.driver_warning_no_such_directory, path, ARGUMENT_IGNORED_SUFFIX)
+            return MaybeString()
+        }
+        if (!IsDir(path)) {
+            emitOptionDiag(BasicDiagKindRefactor.driver_warning_not_a_directory, path, ARGUMENT_IGNORED_SUFFIX)
+            return MaybeString()
+        }
+        let absPath = GetAbsPath(path)
+        if (!absPath.hasValue) {
+            emitOptionDiag(BasicDiagKindRefactor.driver_warning_invalid_path, path, ARGUMENT_IGNORED_SUFFIX)
+        }
+        return absPath
     }
 
     public func ValidateDirectoryPath(path: String, mode!: UtilsFileMode = UtilsFileMode.FM_EXIST): MaybeString {
         let accessResult = AccessFileWithResult(path, mode)
-        if (!IsAccessOK(accessResult)) { return MaybeString() }
-        if (!IsDir(path)) { return MaybeString() }
+        if (!IsAccessOK(accessResult)) {
+            emitDirectoryAccessFailure(path, accessResult)
+            return MaybeString()
+        }
+        if (!IsDir(path)) {
+            emitOptionDiag(BasicDiagKindRefactor.not_a_directory, path)
+            return MaybeString()
+        }
         if (mode == UtilsFileMode.FM_WRITE) {
             let execResult = AccessFileWithResult(path, UtilsFileMode.FM_EXE)
-            if (!IsAccessOK(execResult)) { return MaybeString() }
+            if (!IsAccessOK(execResult)) {
+                emitDirectoryAccessFailure(path, execResult)
+                return MaybeString()
+            }
         }
-        return GetAbsPath(path)
+        let absPath = GetAbsPath(path)
+        if (!absPath.hasValue) {
+            emitOptionDiag(BasicDiagKindRefactor.invalid_path, path)
+        }
+        return absPath
     }
 
     public func CheckInputFilePath(path: String): MaybeString {
-        if (FileExist(path) && CanAccessFile(path, UtilsFileMode.FM_READ) && !IsDir(path)) { return GetAbsPath(path) }
-        return MaybeString()
+        if (!FileExist(path)) {
+            emitOptionDiag(BasicDiagKindRefactor.driver_warning_no_such_file_or_directory, path, ARGUMENT_IGNORED_SUFFIX)
+            return MaybeString()
+        }
+        if (!CanAccessFile(path, UtilsFileMode.FM_READ)) {
+            emitOptionDiag(BasicDiagKindRefactor.driver_warning_permission_denied, path, ARGUMENT_IGNORED_SUFFIX)
+            return MaybeString()
+        }
+        if (IsDir(path)) {
+            emitOptionDiag(BasicDiagKindRefactor.driver_warning_not_a_file, path, ARGUMENT_IGNORED_SUFFIX)
+            return MaybeString()
+        }
+        let absPath = GetAbsPath(path)
+        if (!absPath.hasValue) {
+            emitOptionDiag(BasicDiagKindRefactor.driver_warning_invalid_path, path, ARGUMENT_IGNORED_SUFFIX)
+        }
+        return absPath
     }
 
     public static func ValidateInputFilePath(path: String): MaybeString {
-        if (!IsPathAboveLengthLimit(path) && FileExist(path) && CanAccessFile(path, UtilsFileMode.FM_READ) &&
-            !IsDir(path)) {
-            return GetAbsPath(path)
+        return ValidateInputFilePath(path, BasicDiagKindRefactor.driver_invalid_source_file)
+    }
+
+    public static func ValidateInputFilePath(path: String, notFoundError: BasicDiagKindRefactor): MaybeString {
+        if (IsPathAboveLengthLimit(path)) {
+            emitOptionDiag(BasicDiagKindRefactor.driver_path_exceeds_length_limit, path, FILE_PATH_MAX_LENGTH.toString())
+            return MaybeString()
         }
-        return MaybeString()
+        if (!FileExist(path)) {
+            emitOptionDiag(notFoundError, path)
+            return MaybeString()
+        }
+        if (!CanAccessFile(path, UtilsFileMode.FM_READ)) {
+            emitOptionDiag(BasicDiagKindRefactor.permission_denied, path)
+            return MaybeString()
+        }
+        if (IsDir(path)) {
+            emitOptionDiag(BasicDiagKindRefactor.not_a_file, path)
+            return MaybeString()
+        }
+        let absPath = GetAbsPath(path)
+        if (!absPath.hasValue) {
+            emitOptionDiag(BasicDiagKindRefactor.invalid_path, path)
+        }
+        return absPath
     }
 
     public static func ParseIntOptionValue(
@@ -722,25 +828,30 @@ public open class GlobalOptions <: Option {
             let ext = GetFileExtension(input)
             if (ext == "cj" && !compileCjd) {
                 if (compilePackage) { return false }
-                if (!ValidateInputFilePath(input).hasValue) { return false }
+                if (!ValidateInputFilePath(input, BasicDiagKindRefactor.driver_invalid_source_file).hasValue) {
+                    return false
+                }
                 srcFiles.add(input)
             } else if (ext == "o" || ext == "a" || ext == "obj") {
-                let objPath = ValidateInputFilePath(input)
+                let objPath = ValidateInputFilePath(input, BasicDiagKindRefactor.driver_invalid_binary_file)
                 if (!objPath.hasValue) { return false }
                 inputObjs.add(objPath.value)
                 ReplaceInputFileName(input, objPath.value)
             } else if (ext == "bc") {
-                let bcPath = ValidateInputFilePath(input)
+                let bcPath = ValidateInputFilePath(input, BasicDiagKindRefactor.driver_invalid_source_file)
                 if (!bcPath.hasValue) { return false }
                 bcInputFiles.add(bcPath.value)
                 ReplaceInputFileName(input, bcPath.value)
             } else if (ext == "cjo") {
                 if (!inputCjoFile.isEmpty()) { return false }
-                let cjoPath = ValidateInputFilePath(input)
+                let cjoPath = ValidateInputFilePath(input, BasicDiagKindRefactor.driver_invalid_binary_file)
                 if (!cjoPath.hasValue) { return false }
                 inputCjoFile = input
             } else if (HasCJDExtension(input) && compileCjd) {
-                if (compilePackage || !ValidateInputFilePath(input).hasValue) { return false }
+                if (compilePackage ||
+                    !ValidateInputFilePath(input, BasicDiagKindRefactor.driver_invalid_source_file).hasValue) {
+                    return false
+                }
                 srcFiles.add(input)
             } else {
                 if (IsPathAboveLengthLimit(input)) { return false }
@@ -825,8 +936,14 @@ public open class GlobalOptions <: Option {
         }
         for (inputFile in inputsToCheck) {
             let absInputFile = GetAbsPath(inputFile)
-            if (!absInputFile.hasValue) { return false }
-            if (absInputFile.value == output) { return false }
+            if (!absInputFile.hasValue) {
+                emitOptionDiag(BasicDiagKindRefactor.no_such_file_or_directory, inputFile)
+                return false
+            }
+            if (absInputFile.value == output) {
+                emitOptionDiag(BasicDiagKindRefactor.input_file_overwritten_by_generated_output, inputFile)
+                return false
+            }
         }
         return true
     }
@@ -839,9 +956,9 @@ public open class GlobalOptions <: Option {
             compileTarget = CompileTarget.EXECUTABLE
         }
         if (!SetupConditionalCompilationCfg(this)) { return false }
-        if (target.IsMacOS() || target.IsArm32()) { disableReflection = true }
         if (!ReprocessOutputs()) { return false }
         if (!ReprocessInputs()) { return false }
+        if (target.IsMacOS() || target.IsArm32()) { disableReflection = true }
         if (compileMacroPackage && enableOutputType) {
             Errorln("using both '--compile-macro' and '--output-type' is not allowed.")
             return false
@@ -863,15 +980,18 @@ public open class GlobalOptions <: Option {
         if (scanDepPkg) {
             if (compilePackage) {
                 if (!inputCjoFile.isEmpty()) {
-                    Errorln("'-p' or '--package' does not accept .cjo inputs with '--scan-dependency'.")
+                    emitOptionDiag(
+                        BasicDiagKindRefactor.driver_not_accept_cjo_inputs_when,
+                        "'-p' or '--package'"
+                    )
                     return false
                 }
                 if (packagePaths.isEmpty()) {
-                    Errorln("'--scan-dependency' requires a package directory when '-p' or '--package' is specified.")
+                    emitOptionDiag(BasicDiagKindRefactor.driver_require_package_directory_scan_dependency)
                     return false
                 }
             } else if (inputCjoFile.isEmpty()) {
-                Errorln("'--scan-dependency' requires a .cjo input file.")
+                emitOptionDiag(BasicDiagKindRefactor.driver_source_cjo_empty)
                 return false
             }
         }
@@ -916,7 +1036,7 @@ public open class GlobalOptions <: Option {
         if (IsLTOEnabled()) {
             if (target.GetOSFamily() == OSType.DARWIN || target.GetOSFamily() == OSType.IOS ||
                 target.GetOSFamily() == OSType.WINDOWS) {
-                Errorln("LTO is not supported for target " + target.OSToString())
+                emitOptionDiag(BasicDiagKindRefactor.driver_target_lto_unsupported, ltoUnsupportedOSName(target))
                 return false
             }
             if (outputMode == OutputMode.OBJ) {
@@ -934,69 +1054,89 @@ public open class GlobalOptions <: Option {
         }
         if (IsCompileAsExeEnabled()) {
             if (!IsLTOEnabled()) {
-                Errorln("'--compile-as-exe' requires '--lto'.")
+                emitOptionDiag(BasicDiagKindRefactor.driver_invalid_compile_as_exe)
                 return false
             }
             if (target.GetOSFamily() == OSType.WINDOWS || target.GetOSFamily() == OSType.DARWIN ||
                 target.GetOSFamily() == OSType.IOS) {
-                Errorln("'--compile-as-exe' is not supported for this target platform.")
+                emitOptionDiag(BasicDiagKindRefactor.driver_invalid_compile_as_exe_platform)
                 return false
             }
         }
         if (IsLTOPkgVisibilityEnabled()) {
             if (!IsLTOEnabled()) {
-                Errorln("'--lto-keep-pkg-visibility' requires '--lto'.")
+                emitOptionDiag(BasicDiagKindRefactor.driver_invalid_visible_pkgs)
                 return false
             }
             if (!ltoVisiblePkgs.isEmpty() && IsCompileAsExeEnabled()) {
-                Errorln("'--lto-keep-pkg-visibility' conflicts with '--compile-as-exe'.")
+                emitOptionDiag(BasicDiagKindRefactor.driver_invalid_visible_pkgs_conflict)
                 return false
             }
             if (outputMode != OutputMode.SHARED_LIB) {
-                Warningln("'--lto-keep-pkg-visibility' only affects dynamic library output.")
+                emitOptionDiag(BasicDiagKindRefactor.driver_visible_pkgs_only_for_dylib)
             }
         }
         if (enablePgoInstrGen && enablePgoInstrUse) {
-            Errorln("using both '--pgo-instr-gen' and '--pgo-instr-use' is not allowed.")
+            emitOptionDiag(BasicDiagKindRefactor.driver_pgo_both_gen_and_use)
             return false
         }
         if (enablePgoInstrGen && target.env == EnvironmentType.OHOS && pgoProfileFile.isEmpty()) {
-            Errorln("'--pgo-instr-gen' requires a profile file when targeting OHOS.")
+            emitOptionDiag(BasicDiagKindRefactor.driver_ohos_pgo_gen_without_file)
             return false
         }
-        if (enablePgoInstrUse && (!FileExist(pgoProfileFile) || GetFileExtension(pgoProfileFile) != "profdata")) {
-            Errorln("'--pgo-instr-use' requires an existing .profdata file.")
+        if (enablePgoInstrUse) {
+            if (!FileExist(pgoProfileFile)) {
+                emitOptionDiag(BasicDiagKindRefactor.no_such_file_or_directory, pgoProfileFile)
+                return false
+            }
+            if (GetFileExtension(pgoProfileFile) != "profdata") {
+                emitOptionDiag(BasicDiagKindRefactor.driver_pgo_invalid_profile_extension, pgoProfileFile)
+                return false
+            }
+        }
+        if (outputMode != OutputMode.OBJ && compileTarget != CompileTarget.DEFAULT) {
+            compileTarget = CompileTarget.DEFAULT
+            emitOptionDiag(BasicDiagKindRefactor.driver_invalid_compile_target)
+        }
+        if (srcFiles.isEmpty() && (outputMode == OutputMode.OBJ || outputMode == OutputMode.CHIR) && !compilePackage) {
+            emitOptionDiag(BasicDiagKindRefactor.driver_source_file_empty)
+            return false
+        }
+        if (!compilePackage && srcFiles.isEmpty() && !inputObjs.isEmpty() && !experimentalMode) {
+            emitOptionDiag(BasicDiagKindRefactor.driver_require_experimental)
             return false
         }
         if (!ReprocessObfuseOption()) { return false }
+        var cjmpOk = true
         for (commonCjo in commonPartCjos) {
             if (GetFileExtension(commonCjo) != "cjo") {
-                Warningln("unexpected file extension for common cjo input: " + commonCjo)
-                return false
+                emitOptionDiag(
+                    BasicDiagKindRefactor.driver_warning_unexpected_file_extension,
+                    "cjo",
+                    commonCjo,
+                    commonCjo,
+                    ARGUMENT_IGNORED_SUFFIX
+                )
+                cjmpOk = false
             }
         }
         for (commonChir in commonPartChirs) {
             if (GetFileExtension(commonChir) != "chir") {
-                Warningln("unexpected file extension for common chir input: " + commonChir)
-                return false
+                emitOptionDiag(
+                    BasicDiagKindRefactor.driver_warning_unexpected_file_extension,
+                    "chir",
+                    commonChir,
+                    commonChir,
+                    ARGUMENT_IGNORED_SUFFIX
+                )
+                cjmpOk = false
             }
         }
         if (commonPartCjos.size != commonPartChirs.size) {
-            Errorln("'--common-part-cjo' requires one matching '--common-part-chir' for each file.")
-            return false
+            emitOptionDiag(BasicDiagKindRefactor.driver_require_common_chir_for_each_common_cjo)
+            cjmpOk = false
         }
-        if (outputMode != OutputMode.OBJ && compileTarget != CompileTarget.DEFAULT) {
-            compileTarget = CompileTarget.DEFAULT
-            Warningln("'--compile-target' is only valid with '--output-type=obj'.")
-        }
-        if (srcFiles.isEmpty() && (outputMode == OutputMode.OBJ || outputMode == OutputMode.CHIR) && !compilePackage) {
-            Errorln("source file is required for '--output-type=obj' or '--output-type=chir'.")
-            return false
-        }
-        if (!compilePackage && srcFiles.isEmpty() && !inputObjs.isEmpty() && !experimentalMode) {
-            Errorln("object-only linking requires '--experimental'.")
-            return false
-        }
+        if (!cjmpOk) { return false }
         if (!jobs.hasValue) { jobs = MaybeUInt64(GetHardwareConcurrency()) }
         if (target.os == OSType.WINDOWS || target.os == OSType.DARWIN || target.os == OSType.IOS ||
             IsObfuscationEnabled() || IsLTOEnabled() || enableCoverage) {
@@ -1013,7 +1153,7 @@ public open class GlobalOptions <: Option {
         }
         if (target.env == EnvironmentType.OHOS) {
             if (linkStaticStd.hasValue && linkStaticStd.value) {
-                Warningln("'--static-std' has no effect when targeting OHOS.")
+                emitOptionDiag(BasicDiagKindRefactor.driver_static_std_for_ohos)
             }
             linkStaticStd = MaybeBool(false)
         }

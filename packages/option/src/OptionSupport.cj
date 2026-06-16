@@ -60,6 +60,16 @@ public class MaybeInt64 {
     public init(value: Int64) { this.hasValue = true; this.value = value }
 }
 
+public class TextFileReadResult {
+    public let content: MaybeString
+    public let failedReason: String
+
+    public init(content: MaybeString, failedReason: String) {
+        this.content = content
+        this.failedReason = failedReason
+    }
+}
+
 public func SplitString(str: String, delimiter: String): Array<String> {
     if (str.isEmpty()) { return Array<String>() }
     if (delimiter.isEmpty()) { return [str] }
@@ -190,12 +200,16 @@ public func GetAllFilesUnderCurrentPath(
     )
 }
 
-public func ReadTextFile(path: String): MaybeString {
+public func ReadTextFileWithReason(path: String): TextFileReadResult {
     let failedReason = UtilsFailureReason()
     if (let Some(content) <- FileUtil.ReadFileContent(path, failedReason)) {
-        return MaybeString(content)
+        return TextFileReadResult(MaybeString(content), failedReason.value)
     }
-    return MaybeString()
+    return TextFileReadResult(MaybeString(), failedReason.value)
+}
+
+public func ReadTextFile(path: String): MaybeString {
+    return ReadTextFileWithReason(path).content
 }
 
 public func CreateDirectory(path: String): Bool {
