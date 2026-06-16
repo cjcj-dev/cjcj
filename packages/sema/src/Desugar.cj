@@ -7,5 +7,4 @@ public func PerformDesugarBeforeTypeCheck(root: Node, desugarMacrocall!: Bool = 
     let _ = root
     let _ = desugarMacrocall
     let _ = compatibleSDKVersion
-    // TODO(selfhost:Sema): port DesugarBeforeTypeCheck, macro-call desugar, and API-level IfAvailable rewrites.
 }

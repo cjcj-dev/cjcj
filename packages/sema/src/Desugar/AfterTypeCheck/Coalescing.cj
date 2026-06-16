@@ -118,7 +118,13 @@ public func DesugarForCoalescing(typeManager: TypeManager, expr: BinaryExpr): Un
 }
 
 public func TryDesugarForCoalescing(typeManager: TypeManager, root: Node): Unit {
-    let _ = typeManager
-    let _ = root
-    // TODO(selfhost:Sema): wire BinaryExpr `??` traversal after the selfhost AST TokenKind exposes COALESCING.
+    let walker = Walker(root, visitPre: { node: Node =>
+        if (let Some(expr) <- (node as BinaryExpr)) {
+            if (expr.op == TokenKind.COALESCING) {
+                DesugarForCoalescing(typeManager, expr)
+            }
+        }
+        VisitAction.WALK_CHILDREN
+    })
+    let _ = walker.Walk()
 }
