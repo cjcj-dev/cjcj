@@ -114,6 +114,10 @@ Implemented:
   maybe-init domains, line tracking for stores that initialize allocations/members, block fixed-point propagation,
   recursive lambda-body traversal, constructor super/delegating-call handling, and member initialization queries
   over the current `CustomTypeDef`/generic memory-expression model.
+- Added `ConstMemberVarCollector`, collecting readonly non-static member candidates whose declared type can hold
+  class-like values, scanning constructors for member stores, tracing forwarding local values through casts/boxing
+  conversions, invalidating ambiguous or open-class assignments, and recording unique concrete derived member types
+  by custom-definition id and member index.
 - Added C++-named BCHIR interpreter component files for `OpCodes`, `BCHIR`, `BCHIRPrinter`,
   `BCHIRInterpreter`, `InterpreterValue`, `InterpreterValueUtils`, `InterpreterArena`,
   `InterpreterEnv`, and `InterpreterStack`.
@@ -175,6 +179,9 @@ Known gaps:
 - `MaybeInitAnalysis` and `MaybeUninitAnalysis` now model the C++ gen/kill behavior for the current IR, but
   precise `Debug` expression filtering, specialized `StoreElementRef` metadata, exact `IsInitialisingMemberVar`
   semantics, and full constructor-call annotations are still limited by the not-yet-complete expression classes.
+- `ConstMemberVarCollector` mirrors the C++ constructor-scan and unique-derived-type logic over the current generic
+  expression model, but exact direct/all inherited instance-var splitting, specialized `StoreElementRef` path
+  metadata, final/inheritance flags, and full `CanBeInherited` semantics remain limited by the current IR model.
 - The BCHIR translator/linker/interpreter now has the first real end-to-end package/function/global/control
   path, but exact float/rune byte encoding, the complete expression taxonomy, intrinsics/syscalls, exception
   machinery, object method dispatch, raw-array operations, type casts, full serialization, and FFI execution
