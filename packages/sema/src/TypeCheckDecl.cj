@@ -46,6 +46,19 @@ private func TypeCheckDeclCopyTypeArgs(args: ArrayList<Ty>): Array<Ty> {
     return out.toArray()
 }
 
+private func TypeCheckDeclAccessRank(level: AccessLevel): Int64 {
+    return match (level) {
+        case AccessLevel.PRIVATE => 0
+        case AccessLevel.INTERNAL => 1
+        case AccessLevel.PROTECTED => 2
+        case AccessLevel.PUBLIC => 3
+    }
+}
+
+private func TypeCheckDeclIsCompatibleAccessLevel(srcLevel: AccessLevel, targetLevel: AccessLevel): Bool {
+    return TypeCheckDeclAccessRank(srcLevel) <= TypeCheckDeclAccessRank(targetLevel)
+}
+
 private func TypeCheckDeclIsBuiltinUnaryOperand(op: TokenKind, ty: Ty): Bool {
     if (op == TokenKind.SUB) {
         return ty.IsNumeric()
@@ -81,6 +94,42 @@ private func TypeCheckDeclIsBuiltinBinaryOperandPair(op: TokenKind, leftTy: Ty, 
         return SameTy(leftTy, rightTy) && (leftTy.IsNumeric() || leftTy.IsRune())
     }
     return false
+}
+
+private func TypeCheckDeclAddTypeArgsOfType(typeNodeOpt: Option<Type>, out: ArrayList<Type>): Unit {
+    if (let None <- typeNodeOpt) {
+        return
+    }
+    let typeNode = typeNodeOpt.getOrThrow()
+    out.add(typeNode)
+    if (let Some(refType) <- (typeNode as RefType)) {
+        for (arg in refType.typeArguments) {
+            TypeCheckDeclAddTypeArgsOfType(Some(arg), out)
+        }
+    } else if (let Some(qualifiedType) <- (typeNode as QualifiedType)) {
+        for (arg in qualifiedType.typeArguments) {
+            TypeCheckDeclAddTypeArgsOfType(Some(arg), out)
+        }
+    } else if (let Some(tupleType) <- (typeNode as TupleType)) {
+        for (fieldType in tupleType.fieldTypes) {
+            TypeCheckDeclAddTypeArgsOfType(Some(fieldType), out)
+        }
+    } else if (let Some(funcType) <- (typeNode as FuncType)) {
+        for (paramType in funcType.paramTypes) {
+            TypeCheckDeclAddTypeArgsOfType(Some(paramType), out)
+        }
+        TypeCheckDeclAddTypeArgsOfType(funcType.retType, out)
+    } else if (let Some(optionType) <- (typeNode as OptionType)) {
+        if (let Some(desugarType) <- optionType.desugarType) {
+            TypeCheckDeclAddTypeArgsOfType(Some(desugarType), out)
+        }
+    }
+}
+
+public func TypeCheckDeclGetTypeArgsOfType(typeNode: Option<Type>): ArrayList<Type> {
+    let out = ArrayList<Type>()
+    TypeCheckDeclAddTypeArgsOfType(typeNode, out)
+    return out
 }
 
 public func TypeCheckDeclInsertEnumConstructors(
@@ -453,10 +502,6 @@ public func TypeCheckDeclSetEnumElementTyForFunc(
             } else {
                 paramTys.add(TypeManager.GetInvalidTy())
             }
-        } else if (let Some(paramTy) <- param.GetTy()) {
-            paramTys.add(paramTy)
-        } else {
-            paramTys.add(TypeManager.GetInvalidTy())
         }
     }
     let retTy = funcDecl.outerDecl.getOrThrow().GetTy() ?? TypeManager.GetInvalidTy()
@@ -542,6 +587,151 @@ public func TypeCheckDeclCollectNominalMembers(decl: Decl): ArrayList<Decl> {
         TypeCheckDeclAddUniqueDecl(out, member)
     }
     return out
+}
+
+public func TypeCheckDeclCheckTypeAliasAccess(diag: BasicDiagnosticEngine, tad: TypeAliasDecl): Bool {
+    if (tad.TestAttr(Attribute.PRIVATE)) {
+        return true
+    }
+    let tadLevel = GetAccessLevel(tad)
+    let tadLevelStr = GetAccessLevelStr(tad)
+    var valid = true
+    for (typeNode in TypeCheckDeclGetTypeArgsOfType(tad.typeNode)) {
+        if (typeNode.astKind != ASTKind.REF_TYPE) {
+            continue
+        }
+        if (let Some(refType) <- (typeNode as RefType)) {
+            if (let Some(target) <- refType.ref.target) {
+                if (target.astKind != ASTKind.GENERIC_PARAM_DECL &&
+                    !TypeCheckDeclIsCompatibleAccessLevel(tadLevel, GetAccessLevel(target))) {
+                    TypeCheckDeclEmitDiag(diag, tad, BasicDiagKind.sema_typealias_external_refer_internal,
+                        args: [
+                            BasicDiagArgument(tadLevelStr),
+                            BasicDiagArgument(tad.identifier.Val()),
+                            BasicDiagArgument(GetAccessLevelStr(target)),
+                            BasicDiagArgument(target.identifier.Val())
+                        ])
+                    valid = false
+                }
+            }
+        }
+    }
+    return valid
+}
+
+public func TypeCheckDeclCheckTypeAlias(
+    diag: BasicDiagnosticEngine,
+    tm: TypeManager,
+    tad: TypeAliasDecl
+): Bool {
+    if (tad.TestAttr(Attribute.IS_CHECK_VISITED)) {
+        return true
+    }
+    tad.EnableAttr(Attribute.IS_CHECK_VISITED)
+    if (let None <- tad.typeNode) {
+        return false
+    }
+    let typeNode = tad.typeNode.getOrThrow()
+    if (!Ty.IsTyCorrect(typeNode.GetTy())) {
+        return false
+    }
+    var valid = TypeCheckDeclCheckTypeAliasAccess(diag, tad)
+    if (let Some(_) <- tad.generic) {
+        let unusedTys = TypeCheckDeclGetUnusedTysInTypeAlias(tad)
+        if (!unusedTys.isEmpty()) {
+            TypeCheckDeclEmitDiag(diag, tad, BasicDiagKind.typealias_unused_type_parameters,
+                args: [BasicDiagArgument(Ty.GetTypesToStr(unusedTys, ","))])
+            valid = false
+        }
+    }
+    if (!typeNode.TestAttr(Attribute.IS_CHECK_VISITED)) {
+        if (!TypeCheckTypeCheckReferenceTypeLegality(diag, tm, typeNode)) {
+            valid = false
+        }
+    }
+    return valid
+}
+
+private func TypeCheckDeclAddSubtypeToInterface(interfaceDecl: InterfaceDecl, decl: Decl): Unit {
+    for (value in interfaceDecl.subDecls) {
+        if (SameDecl(value, decl)) {
+            return
+        }
+    }
+    interfaceDecl.subDecls.add(decl)
+}
+
+private func TypeCheckDeclCheckImplementedInterfaces(
+    diag: BasicDiagnosticEngine,
+    declKind: String,
+    decl: InheritableDecl
+): Bool {
+    var valid = true
+    for (interfaceType in decl.inheritedTypes) {
+        var hasInterface = false
+        if (let Some(target) <- Ty.GetDeclPtrOfTy(interfaceType.GetTy())) {
+            if (let Some(interfaceDecl) <- (target as InterfaceDecl)) {
+                TypeCheckClassLikeCheckSealedInheritance(diag, decl, interfaceType)
+                TypeCheckDeclAddSubtypeToInterface(interfaceDecl, decl)
+                hasInterface = true
+            }
+        }
+        if (!hasInterface) {
+            interfaceType.SetTy(TypeManager.GetInvalidTy())
+            TypeCheckDeclEmitDiag(diag, decl, BasicDiagKind.sema_type_implement_non_interface,
+                args: [BasicDiagArgument(declKind), BasicDiagArgument(decl.identifier.Val())])
+            valid = false
+        }
+    }
+    return valid
+}
+
+public func TypeCheckDeclCheckEnumInheritedTypes(diag: BasicDiagnosticEngine, enumDecl: EnumDecl): Bool {
+    return TypeCheckDeclCheckImplementedInterfaces(diag, "enum", enumDecl)
+}
+
+public func TypeCheckDeclCheckEnumMemberRules(diag: BasicDiagnosticEngine, enumDecl: EnumDecl): Bool {
+    var valid = true
+    for (member in enumDecl.members) {
+        if (let Some(propDecl) <- (member as PropDecl)) {
+            if (propDecl.isVar) {
+                let range = if (let Some(modifier) <- FindModifier(propDecl, TokenKind.MUT)) {
+                    MakeRange(modifier.begin, modifier.end)
+                } else {
+                    TypeCheckDeclIdentifierRange(propDecl)
+                }
+                let builder = diag.DiagnoseRefactor(
+                    BasicDiagKindRefactor.sema_immutable_type_illegal_property,
+                    range)
+                builder.Emit()
+                valid = false
+            }
+        }
+    }
+    return valid
+}
+
+public func TypeCheckDeclCheckStructInheritedTypes(diag: BasicDiagnosticEngine, structDecl: StructDecl): Bool {
+    var valid = TypeCheckDeclCheckImplementedInterfaces(diag, "struct", structDecl)
+    if (let Some(structTy) <- structDecl.GetTy()) {
+        if (Ty.IsCStructType(structTy)) {
+            if (let Some(generic) <- structDecl.generic) {
+                let builder = diag.Diagnose(generic.leftAnglePos,
+                    BasicDiagKind.sema_cffi_cannot_have_type_param,
+                    args: [BasicDiagArgument("struct with @C")])
+                builder.Emit()
+                valid = false
+            }
+            if (!structDecl.inheritedTypes.isEmpty()) {
+                let builder = diag.DiagnoseRefactor(
+                    BasicDiagKindRefactor.sema_cstruct_cannot_impl_interfaces,
+                    TypeCheckDeclIdentifierRange(structDecl))
+                builder.Emit()
+                valid = false
+            }
+        }
+    }
+    return valid
 }
 
 public func SelfhostPortStatus_TypeCheckDecl(): Bool {

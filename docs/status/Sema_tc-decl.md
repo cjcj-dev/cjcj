@@ -30,6 +30,16 @@ Reference sources inspected from `/root/cj_build/cangjie_compiler/src/Sema`:
   named parameter, arity, and return type cases, enum function constructors
   synthesize compiler-added return types, and optional diagnostics cover invalid
   enum constructors, `@C` enum constructor payloads, and C vararg function values.
+- Continued declaration parity in `TypeCheckDecl.cj`: type aliases now have a
+  C++-style access-level check over referenced `RefType` nodes, unused generic
+  parameter detection, and reference-type legality delegation; enum and struct
+  inherited interface checks now reject non-interfaces, register `subDecls`, and
+  reuse sealed-inheritance validation; `@C` structs now reject generics and
+  implemented interfaces with the C++ diagnostics.
+- Enum declaration support now includes the C++ mutable-property rejection for
+  enum properties and enum constructor function synthesis now skips parameters
+  without explicit type nodes, matching the C++ `SetEnumEleTyHandleFuncDecl`
+  behavior.
 - Deepened type checking toward `TypeCheckType.cpp`: reference and qualified
   types now run available generic instantiation checks after arity validation,
   `CFunc<...>` reference types validate their function parameter and return
@@ -67,9 +77,9 @@ are from pre-existing files outside this pass scope.
 - Full C++ parity still requires complete overload resolution, lookup/import
   recommendation, access-control context, alias substitution, promotion-based
   extend constraint filtering, exact generic specialization duplicate checks,
-  orphan-rule diagnostics, type-alias access diagnostics, and all
-  TypeChecker-owned state once those sibling surfaces are available in the
-  allowed owner files.
+  orphan-rule diagnostics, pipeline wiring for type-alias and class-like
+  declaration checks, and all TypeChecker-owned state once those sibling
+  surfaces are available in the allowed owner files.
 - Diagnostics are mapped to the available self-hosted diagnostic tables; a few
   C++ diagnostic helpers are represented by the closest currently available
   refactored/legacy diagnostic kind.
