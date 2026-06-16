@@ -127,6 +127,29 @@ private func InheritedDisplayName(decl: Decl): String {
     return decl.identifier.Val()
 }
 
+private func CountByDecl(members: ArrayList<MemberSignature>, decl: Decl): Int64 {
+    var count: Int64 = 0
+    for (member in members) {
+        if (let Some(memberDecl) <- member.decl) {
+            if (SameDecl(memberDecl, decl)) {
+                count++
+            }
+        }
+    }
+    return count
+}
+
+private func UnimplementedIdentifier(member: MemberSignature): String {
+    if (let Some(memberDecl) <- member.decl) {
+        let name = "'" + memberDecl.identifier.Val() + "'"
+        if (let Some(memberTy) <- member.ty) {
+            return name + ", of type: " + memberTy.String()
+        }
+        return name
+    }
+    return "''"
+}
+
 public class StructInheritanceChecker {
     public let diag: DiagnosticEngine
     public let typeManager: TypeManager
@@ -219,6 +242,9 @@ public class StructInheritanceChecker {
         let invisibleMembers = visiblePair[1]
         if (let Some(declTy) <- decl.GetTy()) {
             MergeInheritedMembers(visibleExtendMembers, instanceMembers, declTy)
+        }
+        for (entry in interfaceMembers.entries) {
+            CheckExtendExportDependence(decl, entry.signature, visibleExtendMembers)
         }
         for (member in decl.GetMemberDecls()) {
             if (!Ty.IsTyCorrect(member.GetTy()) || (let None <- member.outerDecl) ||
@@ -449,6 +475,48 @@ public class StructInheritanceChecker {
             }
         }
         return (interfaceMembers, invisibleInterfaceMembers)
+    }
+
+    private func CheckExtendExportDependence(
+        curDecl: InheritableDecl,
+        interfaceSig: MemberSignature,
+        implDecls: MemberMap
+    ): Unit {
+        if ((let None <- (curDecl as ExtendDecl)) || !curDecl.IsExportedDecl()) {
+            return
+        }
+        if (let None <- interfaceSig.decl) {
+            return
+        }
+        let interfaceDecl = interfaceSig.decl.getOrThrow()
+        for (child in implDecls.Get(interfaceDecl.identifier.Val())) {
+            if (let None <- child.decl) {
+                continue
+            }
+            let childDecl = child.decl.getOrThrow()
+            if (childDecl.astKind != interfaceDecl.astKind) {
+                continue
+            }
+            var implemented = interfaceDecl.astKind == ASTKind.PROP_DECL
+            if (!implemented && interfaceDecl.IsFunc()) {
+                implemented = CheckImplementationRelation(interfaceSig, child)
+            }
+            if (!implemented) {
+                continue
+            }
+            if (let Some(parentOuter) <- interfaceDecl.outerDecl) {
+                if (let Some(childOuter) <- childDecl.outerDecl) {
+                    if (parentOuter.IsExportedDecl() && !childOuter.IsExportedDecl()) {
+                        let builder = diag.DiagnoseRefactor(
+                            DiagKindRefactor.sema_export_extend_depend_non_export_extend,
+                            DeclRange(curDecl),
+                            arguments: [interfaceDecl.identifier.Val()]
+                        )
+                        builder.AddNote(DeclRange(childOuter), "following extension cannot be exported")
+                    }
+                }
+            }
+        }
     }
 
     private func CollectExtendsForTy(ty: Ty): ArrayList<ExtendDecl> {
@@ -793,6 +861,7 @@ public class StructInheritanceChecker {
             }
             let isAbstractClass = structDecl.TestAttr(Attribute.ABSTRACT) && structDecl.astKind == ASTKind.CLASS_DECL
             let isAbstractDecl = isAbstractClass || structDecl.astKind == ASTKind.INTERFACE_DECL
+            let isStaticAbsMember = memberDecl.TestAttr(Attribute.STATIC) && memberDecl.TestAttr(Attribute.ABSTRACT)
             if (memberDecl.TestAttr(Attribute.ABSTRACT) && !isAbstractDecl) {
                 unimplementedMembers.add(member.Clone())
             } else if (member.shouldBeImplemented) {
@@ -802,6 +871,16 @@ public class StructInheritanceChecker {
                     DiagKind.sema_interface_member_must_be_implemented,
                     args: [DiagArgument(DeclKindText(memberDecl)), DiagArgument(entry.name), DiagArgument(structName)]
                 )
+            } else if (isStaticAbsMember && isAbstractClass) {
+                if (let Some(outer) <- memberDecl.outerDecl) {
+                    if (!SameDecl(outer, structDecl)) {
+                        diag.DiagnoseRefactor(
+                            DiagKindRefactor.sema_inherit_abstract_class_static_unimplement_func,
+                            DeclRange(structDecl),
+                            arguments: [structName, DeclKindText(memberDecl), entry.name]
+                        )
+                    }
+                }
             } else if (!member.inconsistentTypes.IsEmpty()) {
                 if (let Some(outer) <- memberDecl.outerDecl) {
                     if (!SameDecl(outer, structDecl)) {
@@ -822,9 +901,14 @@ public class StructInheritanceChecker {
                     let abstractType = if (if (let Some(outer) <- memberDecl.outerDecl) {
                         outer.astKind == ASTKind.CLASS_DECL
                     } else { false }) { "abstract" } else { "interface" }
+                    let identifierName = if (CountByDecl(unimplementedMembers, memberDecl) > 1) {
+                        UnimplementedIdentifier(member)
+                    } else {
+                        "'" + memberDecl.identifier.Val() + "'"
+                    }
                     builder.AddNote(
                         DeclRange(memberDecl),
-                        "unimplemented ${abstractType} ${DeclKindText(memberDecl)} '${memberDecl.identifier.Val()}'"
+                        "unimplemented ${abstractType} ${DeclKindText(memberDecl)} ${identifierName}"
                     )
                 }
             }

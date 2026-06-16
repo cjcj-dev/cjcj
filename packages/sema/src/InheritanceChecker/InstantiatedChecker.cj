@@ -21,6 +21,22 @@ func TypeArgsFromTy(ty: Ty): ArrayList<Ty> {
     return out
 }
 
+private func GetReferenceTyAndTarget(node: Node): (Option<Ty>, Option<Decl>) {
+    var target = GetRealTarget(node.GetTarget())
+    var baseTy = node.GetTy()
+    if (let Some(realTarget) <- target) {
+        if (IsClassOrEnumConstructor(realTarget)) {
+            target = realTarget.outerDecl
+            if (let Some(nodeTy) <- node.GetTy()) {
+                if (let Some(funcTy) <- (nodeTy as FuncTy)) {
+                    baseTy = Some(funcTy.retTy)
+                }
+            }
+        }
+    }
+    return (baseTy, target)
+}
+
 func GenerateTypeMappingForInheritance(decl: Decl, instTys: ArrayList<Ty>): TypeSubst {
     let out = TypeSubst()
     if (let Some(generic) <- decl.GetGeneric()) {
@@ -33,6 +49,66 @@ func GenerateTypeMappingForInheritance(decl: Decl, instTys: ArrayList<Ty>): Type
                     out.Put(genericTy, instTys[idx])
                 }
             }
+        }
+    }
+    return out
+}
+
+private func HasExtendForInstantiation(values: ArrayList<ExtendDecl>, extendDecl: ExtendDecl): Bool {
+    for (value in values) {
+        if (SameDecl(value, extendDecl)) {
+            return true
+        }
+    }
+    return false
+}
+
+private func IsVisibleGenericExtendForInstantiation(
+    checker: StructInheritanceChecker,
+    contextDecl: Decl,
+    extendDecl: ExtendDecl,
+    instTys: ArrayList<Ty>
+): Bool {
+    let samePkg = extendDecl.fullPackageName == checker.pkg.fullPackageName ||
+        extendDecl.fullPackageName == contextDecl.fullPackageName
+    if (!samePkg && !extendDecl.TestAttr(Attribute.PUBLIC)) {
+        return false
+    }
+    return extendDecl.TestAttr(Attribute.GENERIC) && checker.typeManager.CheckGenericDeclInstantiation(extendDecl, instTys)
+}
+
+private func AddVisibleExtendForInstantiation(
+    checker: StructInheritanceChecker,
+    out: ArrayList<ExtendDecl>,
+    contextDecl: Decl,
+    extendDecl: ExtendDecl,
+    instTys: ArrayList<Ty>
+): Unit {
+    if (HasExtendForInstantiation(out, extendDecl)) {
+        return
+    }
+    if (IsVisibleGenericExtendForInstantiation(checker, contextDecl, extendDecl, instTys)) {
+        out.add(extendDecl)
+    }
+}
+
+private func GetVisibleExtendsForInstantiation(
+    checker: StructInheritanceChecker,
+    decl: Decl,
+    instTys: ArrayList<Ty>
+): ArrayList<ExtendDecl> {
+    let out = ArrayList<ExtendDecl>()
+    if (decl.astKind == ASTKind.EXTEND_DECL || !Ty.IsTyCorrect(decl.GetTy())) {
+        return out
+    }
+    if (let Some(declTy) <- decl.GetTy()) {
+        for (extendDecl in checker.typeManager.GetAllExtendsByTy(declTy)) {
+            AddVisibleExtendForInstantiation(checker, out, decl, extendDecl, instTys)
+        }
+    }
+    if (let Some(inheritable) <- (decl as InheritableDecl)) {
+        for (extendDecl in checker.typeManager.GetDeclExtends(inheritable)) {
+            AddVisibleExtendForInstantiation(checker, out, decl, extendDecl, instTys)
         }
     }
     return out
@@ -57,18 +133,29 @@ func CheckInstMemberSignatures(
     }
     checker.CheckMembersWithInheritedDecls(decl)
     let members = checker.GetStoredMembersForDecl(decl).Clone()
+    for (member in decl.GetMemberDecls()) {
+        if (!Ty.IsTyCorrect(member.GetTy()) || (let None <- member.outerDecl)) {
+            continue
+        }
+        if (IsInstanceConstructor(member) || member.TestAttr(Attribute.PRIVATE)) {
+            let sig = MemberSignature(decl: member, ty: member.GetTy(), structTy: decl.GetTy())
+            let _ = checker.UpdateInheritedMemberIfNeeded(members, sig)
+        }
+    }
     let genericTyMembers = MemberMap()
     var idx: Int64 = 0
     while (idx < members.entries.size) {
         let memberSig = members.entries[idx].signature
         if (let Some(memberDecl) <- memberSig.decl) {
-            if (memberDecl.astKind == ASTKind.FUNC_DECL && !memberDecl.TestAttr(Attribute.GENERIC)) {
-                if (let Some(memberTy) <- memberSig.ty) {
-                    if (memberTy.HasGeneric()) {
-                        genericTyMembers.Add(members.entries[idx].name, memberSig.Clone())
-                        members.Remove(idx)
-                        continue
-                    }
+            if (memberDecl.TestAttr(Attribute.GENERIC) || memberDecl.astKind != ASTKind.FUNC_DECL) {
+                members.Remove(idx)
+                continue
+            }
+            if (let Some(memberTy) <- memberSig.ty) {
+                if (memberTy.HasGeneric()) {
+                    genericTyMembers.Add(members.entries[idx].name, memberSig.Clone())
+                    members.Remove(idx)
+                    continue
                 }
             }
         }
@@ -97,11 +184,12 @@ func CheckInstDupFuncsRecursively(checker: StructInheritanceChecker, node: Node)
     if (!Ty.IsTyCorrect(node.GetTy()) || node.TestAttr(Attribute.HAS_BROKEN)) {
         return VisitAction.WALK_CHILDREN
     }
-    if (let Some(target) <- GetRealTarget(node.GetTarget())) {
+    let refInfo = GetReferenceTyAndTarget(node)
+    if (let Some(target) <- refInfo[1]) {
         if (target.TestAttr(Attribute.IN_REFERENCE_CYCLE)) {
             return VisitAction.WALK_CHILDREN
         }
-        if (let Some(baseTy) <- node.GetTy()) {
+        if (let Some(baseTy) <- refInfo[0]) {
             var instTys = TypeArgsFromTy(baseTy)
             if (let Some(nameRef) <- (node as NameReferenceExpr)) {
                 if (!nameRef.instTys.isEmpty()) {
@@ -112,8 +200,11 @@ func CheckInstDupFuncsRecursively(checker: StructInheritanceChecker, node: Node)
                 if (let Some(inheritable) <- (target as InheritableDecl)) {
                     CheckInstMemberSignatures(checker, inheritable, instTys)
                 }
-            checker.CheckInstWithCStructTypeArg(node)
+                for (extendDecl in GetVisibleExtendsForInstantiation(checker, target, instTys)) {
+                    CheckInstMemberSignatures(checker, extendDecl, instTys)
+                }
             }
+            checker.CheckInstWithCStructTypeArg(node)
         }
     }
     return VisitAction.WALK_CHILDREN
@@ -155,8 +246,23 @@ func CheckInstWithCStructTypeArgImpl(checker: StructInheritanceChecker, node: No
         if (nameRef.instTys.isEmpty()) {
             return
         }
-        if (let Some(refTy) <- nameRef.GetTy()) {
-            CheckCStructArguments(checker, nameRef, refTy, nameRef.begin, nameRef.GetTypeArgs())
+        if (let Some(target) <- node.GetTarget()) {
+            if (node.astKind == ASTKind.MEMBER_ACCESS && target.TestAttr(Attribute.ENUM_CONSTRUCTOR)) {
+                return
+            }
+            if (let Some(refTy) <- nameRef.GetTy()) {
+                var checkTy = refTy
+                if (node.astKind == ASTKind.REF_EXPR && target.TestAttr(Attribute.CONSTRUCTOR)) {
+                    if (let Some(outer) <- target.outerDecl) {
+                        if (let Some(outerTy) <- outer.GetTy()) {
+                            checkTy = outerTy
+                        }
+                    }
+                }
+                if (nameRef.instTys.size == nameRef.GetTypeArgs().size) {
+                    CheckCStructArguments(checker, nameRef, checkTy, nameRef.leftAnglePos, nameRef.GetTypeArgs())
+                }
+            }
         }
     }
 }
