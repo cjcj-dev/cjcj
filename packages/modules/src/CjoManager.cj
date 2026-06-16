@@ -234,6 +234,19 @@ public class CjoManager {
         if (!impl.GetGlobalOptions().IsCompilingCJMPSpecific() && impl.GetGlobalOptions().commonPartCjos.isEmpty()) {
             return true
         }
+        var removeIndex = pkg.files.size - 1
+        while (removeIndex >= 0) {
+            if (pkg.files[removeIndex].TestAttr(Attribute.FROM_COMMON_PART)) {
+                pkg.files.remove(at: removeIndex)
+            }
+            removeIndex--
+        }
+        var fileIndex: Int64 = 0
+        while (fileIndex < pkg.files.size) {
+            pkg.files[fileIndex].packageRef = Some(pkg)
+            pkg.files[fileIndex].indexOfPackage = UInt64(fileIndex)
+            fileIndex++
+        }
         for (loader in impl.GetCommonPartCjos(pkg.fullPackageName, this)) {
             if (!loader.PreloadCommonPartOfPackage(pkg)) {
                 return false
@@ -403,7 +416,13 @@ public class CjoManager {
         impl.ClearCjoCache()
     }
 
-    public func DeleteASTLoaders(): Unit {}
+    public func DeleteASTLoaders(): Unit {
+        for (fullPackageName in impl.GetPackageNameMap().keys()) {
+            if (let Some(info) <- impl.GetPackageInfo(fullPackageName)) {
+                info.loader = None
+            }
+        }
+    }
 
     public func ClearVisitedPkgs(): Unit {
         impl.ClearVisitedPkgs()

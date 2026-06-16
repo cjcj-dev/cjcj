@@ -234,11 +234,15 @@ public class CjoManagerImpl {
     }
 
     public func ClearForReBuildIndex(): Unit {
+        for (fullPackageName in packageNameMap.keys()) {
+            if (let Some(info) <- packageNameMap.get(fullPackageName)) {
+                info.loader = None
+            }
+        }
         packageNameMap.clear()
         importedPackageNameMap.clear()
         visitedPkgs.clear()
         loadedPackages.clear()
-        commonPartLoaders.clear()
         hasBuildIndex = false
     }
 
@@ -283,8 +287,9 @@ public class CjoManagerImpl {
         if (cjoPath.isEmpty() || !exists(cjoPath)) {
             if (printErr) {
                 diag.ReportError("package_search_error", "cannot find serialized package '${fullPackageName}'")
+                return None
             }
-            return None
+            return Some(ASTLoader("".toArray(), fullPackageName, cjoManager, globalOptions))
         }
         try {
             let bytes = FSFile.readFrom(cjoPath)
@@ -292,8 +297,9 @@ public class CjoManagerImpl {
         } catch (e: Exception) {
             if (printErr) {
                 diag.ReportError("cjo_read_error", "cannot read serialized package '${fullPackageName}'")
+                return None
             }
-            return None
+            return Some(ASTLoader("".toArray(), fullPackageName, cjoManager, globalOptions))
         }
     }
 
