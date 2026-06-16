@@ -389,17 +389,32 @@ public class DiagnosticEngineImpl {
         return ret
     }
 
+    private func CheckZeroRange(range: Range): Unit {
+        if (checkRangeErrorCodeRatherICE) {
+            if (range.begin.IsZero() || range.end.IsZero()) {
+                diagEngineErrorCode = DiagEngineErrorCode.DIAG_RANGE_ERROR
+                return
+            }
+        }
+        if (range.begin.IsZero()) {
+            throw IllegalStateException("begin of range is zero")
+        }
+        if (range.end.IsZero()) {
+            throw IllegalStateException("end of range is zero")
+        }
+    }
+
     public func CheckRange(cate: DiagCategory, range: Range): Unit {
         if (!range.begin.IsZero() && !range.end.IsZero()) {
             return
         }
         if (cate == DiagCategory.LEX || cate == DiagCategory.PARSE) {
-            diagEngineErrorCode = DiagEngineErrorCode.DIAG_RANGE_ERROR
+            CheckZeroRange(range)
             return
         }
         if (errorByCategory[DiagCategoryIndex(DiagCategory.LEX)] == 0 &&
             errorByCategory[DiagCategoryIndex(DiagCategory.PARSE)] == 0) {
-            diagEngineErrorCode = DiagEngineErrorCode.DIAG_RANGE_ERROR
+            CheckZeroRange(range)
         }
     }
 

@@ -58,6 +58,8 @@ Deepening pass updates:
   UTF-8 sequences.
 - Tightened refactor diagnostic `%s` substitution to match the C++ `Diagnostic::InsertArguments` invariant: missing
   replacement arguments and unused extra arguments now fail instead of silently leaving placeholders or dropping inputs.
+- Matched `DiagnosticEngineImpl::CheckRange`'s C++ fatal/internal-error split: zero ranges now raise in normal mode,
+  and only degrade to `DIAG_RANGE_ERROR` when `EnableCheckRangeErrorCodeRatherICE()` is active.
 
 Implemented:
 
@@ -78,6 +80,8 @@ Implemented:
 - Aligned `DisplayWidth(String)` with the C++ `std::range_error` fallback path for malformed UTF-8 so diagnostics keep
   byte-count spacing instead of decoding permissive replacement code points.
 - Matched the C++ refactor diagnostic formatter's placeholder-count checks for `Diagnostic.InsertArguments`.
+- Matched C++ range-check handling for zero-position diagnostics, preserving the special error-code mode used by
+  libast callers while restoring fatal behavior in the normal diagnostic path.
 - Kept LLVM/native backend out of scope as required; Basic does not bind LLVM directly.
 
 Known fidelity caveats:
