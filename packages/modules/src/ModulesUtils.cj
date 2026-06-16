@@ -1,6 +1,11 @@
 package cangjie_compiler::modules
 
 import std.collection.*
+import cangjie_compiler::basic.DEFAULT_POSITION as BASIC_DEFAULT_POSITION
+import cangjie_compiler::basic.INVALID_POSITION as BASIC_INVALID_POSITION
+import cangjie_compiler::basic.MakeRange as BasicMakeRange
+import cangjie_compiler::basic.Position as BasicPosition
+import cangjie_compiler::basic.Range as BasicRange
 
 public let SERIALIZED_FILE_EXTENSION: String = ".cjo"
 public let CJ_D_FILE_EXTENSION: String = ".cj.d"
@@ -158,84 +163,18 @@ extend Attribute <: Equatable<Attribute> {
     }
 }
 
-public struct Position <: Hashable & Equatable<Position> {
-    public var fileID: UInt64 = 0
-    public var line: Int64 = 0
-    public var column: Int64 = 0
+public type Position = BasicPosition
+public type Range = BasicRange
 
-    public init() {}
-
-    public init(fileID: UInt64, line: Int64, column: Int64) {
-        this.fileID = fileID
-        this.line = line
-        this.column = column
-    }
-
-    public operator func ==(right: Position): Bool {
-        return fileID == right.fileID && line == right.line && column == right.column
-    }
-
-    public operator func !=(right: Position): Bool {
-        return !(this == right)
-    }
-
-    public operator func <(right: Position): Bool {
-        if (fileID != right.fileID) {
-            return fileID < right.fileID
-        }
-        return line < right.line || (line == right.line && column < right.column)
-    }
-
-    public operator func +(width: Int64): Position {
-        return Position(fileID, line, column + width)
-    }
-
-    public func IsZero(): Bool {
-        return line == 0 && column == 0
-    }
-
-    public func ToString(): String {
-        return "(${fileID}, ${line}, ${column})"
-    }
-
-    public func hashCode(): Int64 {
-        return Int64((fileID << 32) ^ (UInt64(line) << 16) ^ UInt64(column))
-    }
-}
-
-public let INVALID_POSITION: Position = Position(0, 0, 0)
-public let DEFAULT_POSITION: Position = Position(0, -1, -1)
-
-public struct Range <: Hashable & Equatable<Range> {
-    public var begin: Position = DEFAULT_POSITION
-    public var end: Position = DEFAULT_POSITION
-
-    public init() {}
-
-    public init(begin: Position, end: Position) {
-        this.begin = begin
-        this.end = end
-    }
-
-    public operator func ==(right: Range): Bool {
-        return begin == right.begin && end == right.end
-    }
-
-    public operator func !=(right: Range): Bool {
-        return !(this == right)
-    }
-
-    public func HasZero(): Bool {
-        return begin.IsZero() || end.IsZero()
-    }
-
-    public func hashCode(): Int64 {
-        return begin.hashCode() ^ (end.hashCode() << 1)
-    }
-}
+public let INVALID_POSITION: Position = BASIC_INVALID_POSITION
+public let DEFAULT_POSITION: Position = BASIC_DEFAULT_POSITION
 
 public func MakeRange(begin: Position, end: Position): Range {
-    return Range(begin, end)
+    return BasicMakeRange(begin, end)
+}
+
+public func MakeRange(identifierPos: Position, identifier: String): Range {
+    return BasicMakeRange(identifierPos, identifier)
 }
 
 public open class Node {

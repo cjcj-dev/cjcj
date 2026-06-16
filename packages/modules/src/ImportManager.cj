@@ -1,6 +1,8 @@
 package cangjie_compiler::modules
 
 import std.collection.*
+import cangjie_compiler::option.GlobalOptions
+import cangjie_compiler::option.OutputMode
 
 public class ExternalLibCfg {
     public var name: String = ""

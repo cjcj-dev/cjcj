@@ -3,13 +3,9 @@ package cangjie_compiler::modules
 import std.collection.*
 import std.fs.File as FSFile
 import std.fs.exists
-
-public enum OptimizationLevel {
-    | O0
-    | O1
-    | O2
-    | O3
-}
+import cangjie_compiler::option.GlobalOptions
+import cangjie_compiler::option.OptimizationLevel
+import cangjie_compiler::option.enumIndex
 
 public func OptimizationLevelToString(level: OptimizationLevel): String {
     return match (level) {
@@ -17,78 +13,19 @@ public func OptimizationLevelToString(level: OptimizationLevel): String {
         case OptimizationLevel.O1 => "O1"
         case OptimizationLevel.O2 => "O2"
         case OptimizationLevel.O3 => "O3"
+        case OptimizationLevel.Os => "Os"
+        case OptimizationLevel.Oz => "Oz"
     }
 }
 
-private func OptimizationLevelIndex(level: OptimizationLevel): Int64 {
-    return match (level) {
-        case OptimizationLevel.O0 => 0
-        case OptimizationLevel.O1 => 1
-        case OptimizationLevel.O2 => 2
-        case OptimizationLevel.O3 => 3
-    }
-}
-
-extend OptimizationLevel <: Equatable<OptimizationLevel> {
-    public operator func ==(right: OptimizationLevel): Bool {
-        return OptimizationLevelIndex(this) == OptimizationLevelIndex(right)
-    }
-
-    public operator func !=(right: OptimizationLevel): Bool {
-        return !(this == right)
-    }
-}
-
-public enum OutputMode {
-    | OBJ
-    | CHIR
-}
-
-private func OutputModeIndex(mode: OutputMode): Int64 {
-    return match (mode) {
-        case OutputMode.OBJ => 0
-        case OutputMode.CHIR => 1
-    }
-}
-
-extend OutputMode <: Equatable<OutputMode> {
-    public operator func ==(right: OutputMode): Bool {
-        return OutputModeIndex(this) == OutputModeIndex(right)
-    }
-
-    public operator func !=(right: OutputMode): Bool {
-        return !(this == right)
-    }
-}
-
-public class ModuleEnvironment {
-    public let cangjiePaths: ArrayList<String> = ArrayList<String>()
-    public init() {}
-}
-
-public class GlobalOptions {
-    public var implicitPrelude: Bool = false
-    public var enableCompileTest: Bool = false
-    public var compileTestsOnly: Bool = false
-    public var exportForTest: Bool = false
-    public var compileCjd: Bool = false
-    public var enableCompileDebug: Bool = false
-    public var enableHotReload: Bool = false
-    public var chirLLVM: Bool = false
-    public var outputMode: OutputMode = OutputMode.OBJ
-    public var optimizationLevel: OptimizationLevel = OptimizationLevel.O0
-    public let importPaths: ArrayList<String> = ArrayList<String>()
-    public let commonPartCjos: ArrayList<String> = ArrayList<String>()
-    public var environment: ModuleEnvironment = ModuleEnvironment()
-
-    public init() {}
-
-    public func IsCompilingCJMPSpecific(): Bool {
-        return false
-    }
-
-    public func GenerateCachedPathName(fullPackageName: String, extension: String): String {
-        return ToCjoFileName(fullPackageName) + extension
+public func WireToOptimizationLevel(value: String): OptimizationLevel {
+    return match (value) {
+        case "O1" => OptimizationLevel.O1
+        case "O2" => OptimizationLevel.O2
+        case "O3" => OptimizationLevel.O3
+        case "Os" => OptimizationLevel.Os
+        case "Oz" => OptimizationLevel.Oz
+        case _ => OptimizationLevel.O0
     }
 }
 
@@ -189,7 +126,7 @@ public class CjoManagerImpl {
         globalOptions = config.globalOptions
         importSrcCode = config.importSrcCode
         canInline = config.globalOptions.chirLLVM &&
-            OptimizationLevelIndex(config.globalOptions.optimizationLevel) > OptimizationLevelIndex(OptimizationLevel.O1) &&
+            enumIndex(config.globalOptions.optimizationLevel) > enumIndex(OptimizationLevel.O1) &&
             !config.globalOptions.enableCompileTest && !config.globalOptions.enableHotReload
     }
 
@@ -308,11 +245,15 @@ public class CjoManagerImpl {
     }
 
     public func ClearForReBuildIndex(): Unit {
+        for (fullPackageName in packageNameMap.keys()) {
+            if (let Some(info) <- packageNameMap.get(fullPackageName)) {
+                info.loader = None
+            }
+        }
         packageNameMap.clear()
         importedPackageNameMap.clear()
         visitedPkgs.clear()
         loadedPackages.clear()
-        commonPartLoaders.clear()
         hasBuildIndex = false
     }
 
@@ -336,8 +277,11 @@ public class CjoManagerImpl {
         if (!commonPartLoaders.isEmpty()) {
             return commonPartLoaders
         }
+        if (globalOptions.commonPartCjos.isEmpty()) {
+            diag.ReportError("module_common_part_path_is_required", "common part cjo path is required")
+        }
         for (path in globalOptions.commonPartCjos) {
-            let loaderOpt = ReadCjo(expectedName, path, cjoManager, printErr: false)
+            let loaderOpt = ReadCjo(expectedName, path, cjoManager)
             if (let Some(loader) <- loaderOpt) {
                 commonPartLoaders.add(loader)
             }
@@ -352,23 +296,31 @@ public class CjoManagerImpl {
         printErr!: Bool = true
     ): Option<ASTLoader> {
         if (let Some(cache) <- cjoFileCacheMap.get(fullPackageName)) {
-            return Some(ASTLoader(cache.data.toArray(), fullPackageName, cjoManager, globalOptions))
+            return Some(CreateASTLoader(cache.data.toArray(), fullPackageName, cjoManager))
         }
         if (cjoPath.isEmpty() || !exists(cjoPath)) {
             if (printErr) {
                 diag.ReportError("package_search_error", "cannot find serialized package '${fullPackageName}'")
+                return None
             }
-            return None
+            return Some(CreateASTLoader("".toArray(), fullPackageName, cjoManager))
         }
         try {
             let bytes = FSFile.readFrom(cjoPath)
-            return Some(ASTLoader(bytes, fullPackageName, cjoManager, globalOptions))
+            return Some(CreateASTLoader(bytes, fullPackageName, cjoManager))
         } catch (e: Exception) {
             if (printErr) {
                 diag.ReportError("cjo_read_error", "cannot read serialized package '${fullPackageName}'")
+                return None
             }
-            return None
+            return Some(CreateASTLoader("".toArray(), fullPackageName, cjoManager))
         }
+    }
+
+    private func CreateASTLoader(data: Array<UInt8>, fullPackageName: String, cjoManager: CjoManager): ASTLoader {
+        let loader = ASTLoader(data, fullPackageName, cjoManager, globalOptions)
+        loader.SetImportSourceCode(importSrcCode)
+        return loader
     }
 
     public func IsReExportBy(srcPackage: String, reExportPackage: String): Bool {
