@@ -80,6 +80,15 @@ private func SynFuncBodyForLambda(typeManager: TypeManager, funcBody: FuncBody):
     return funcTy
 }
 
+private func CloneFuncTyConfig(funcTy: FuncTy): FuncTyConfig {
+    let cfg = FuncTyConfig()
+    cfg.isC = funcTy.isC
+    cfg.isClosureTy = funcTy.isClosureTy
+    cfg.hasVariableLenArg = funcTy.hasVariableLenArg
+    cfg.noCast = funcTy.noCast
+    return cfg
+}
+
 public func SynLamExpr(typeManager: TypeManager, le: LambdaExpr): Ty {
     if (let None <- le.funcBody) {
         return LambdaInvalid(le)
@@ -131,16 +140,17 @@ private func CheckLambdaParamsAgainstTarget(typeManager: TypeManager, le: Lambda
     return false
 }
 
-private func CheckLambdaBodyAgainstTarget(typeManager: TypeManager, le: LambdaExpr, targetRetTy: Ty): Bool {
+private func CheckLambdaBodyAgainstTarget(typeManager: TypeManager, le: LambdaExpr, targetFuncTy: FuncTy): Bool {
     if (let Some(funcBody) <- le.funcBody) {
         if (let Some(body) <- funcBody.body) {
-            if (!ChkBlock(typeManager, targetRetTy, body)) {
+            if (!ChkBlock(typeManager, targetFuncTy.retTy, body)) {
                 funcBody.SetTy(TypeManager.GetInvalidTy())
                 return false
             }
         }
         let paramTys = GetFuncBodyParamTys(funcBody)
-        let funcTy = typeManager.GetFunctionTy(paramTys.toArray(), targetRetTy)
+        let funcTy = typeManager.GetFunctionTy(paramTys.toArray(), targetFuncTy.retTy,
+            cfg: CloneFuncTyConfig(targetFuncTy))
         funcBody.SetTy(funcTy)
         return true
     }
@@ -158,11 +168,12 @@ public func ChkLamExpr(typeManager: TypeManager, target: Ty, le: LambdaExpr): Bo
             let _ = LambdaInvalid(le)
             return false
         }
-        if (!CheckLambdaBodyAgainstTarget(typeManager, le, targetFuncTy.retTy)) {
+        if (!CheckLambdaBodyAgainstTarget(typeManager, le, targetFuncTy)) {
             let _ = LambdaInvalid(le)
             return false
         }
-        let funcTy = typeManager.GetFunctionTy(paramTys.toArray(), targetFuncTy.retTy)
+        let funcTy = typeManager.GetFunctionTy(paramTys.toArray(), targetFuncTy.retTy,
+            cfg: CloneFuncTyConfig(targetFuncTy))
         le.SetTy(funcTy)
         return true
     }
