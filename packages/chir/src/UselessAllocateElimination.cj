@@ -25,12 +25,6 @@ public class UselessAllocateElimination {
             for (expr in exprs) {
                 if (expr.GetExprKind() == ExprKind.ALLOCATE && TryRemoveAllocate(expr, fn, isDebug)) {
                     changed++
-                    continue
-                }
-                if (let Some(lambdaExpr) <- (expr as Lambda)) {
-                    if (let Some(lambdaBody) <- lambdaExpr.GetBody()) {
-                        changed += RunOnBody(lambdaBody, fn, isDebug)
-                    }
                 }
             }
         }

@@ -76,7 +76,18 @@ Fourth continuation pass:
   visitor behavior that continues through structured block groups but skips
   lambda bodies to avoid creating unit constants inside lambdas.
 
+Fifth continuation pass:
+
+- `ConstPropagation.cj`: broadened the double-unary simplification guard to
+  match the C++ helper: an outer `NOT`/`BITNOT` now accepts either `NOT` or
+  `BITNOT` as the inner unary before replacing the result with the original
+  operand.
+- `UselessAllocateElimination.cj`: aligned traversal with the C++ pass by
+  scanning only the current function body's blocks. The pass no longer recurses
+  into lambda block groups, which the reference implementation does not visit
+  for this optimization.
+
 Estimated behavior coverage for the touched transform/optimization surface is
-about 30% versus the C++ reference. The changes above remove several unsafe
+about 31% versus the C++ reference. The changes above remove several unsafe
 behavior differences but the overall CHIR transform/optimization module remains
 far from complete.

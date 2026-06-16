@@ -119,7 +119,9 @@ public class ConstPropagation {
         let operand = expr.GetOperand(0)
         if (let Some(local) <- operand.AsLocalVar()) {
             if (let Some(operandExpr) <- local.GetExpr()) {
-                if (operandExpr.GetExprKind() == kind && operandExpr.GetNumOfOperands() == 1) {
+                let operandKind = operandExpr.GetExprKind()
+                if ((operandKind == ExprKind.NOT || operandKind == ExprKind.BITNOT) &&
+                    operandExpr.GetNumOfOperands() == 1) {
                     return ReplaceResultWithOperand(expr, operandExpr.GetOperand(0))
                 }
             }
