@@ -1,6 +1,6 @@
 # AST Port Status
 
-Date: 2026-06-16
+Date: 2026-06-17
 
 ## Summary
 
@@ -10,6 +10,9 @@ The AST package is a multi-file Cangjie package mirroring the C++ AST component 
 
 ## Implemented In This Pass
 
+- Added C++ `Ty` helper parity for primitive upper-bound extraction, C ABI type classification (`IsPrimitiveCType`, `IsCStructType`, `IsMetCType`, `IsCTypeConstraint`), type-argument size checks, initial-type checks, and instantiated nominal type to generic type lookup.
+- Added recursive generic type-argument collection APIs, including candidate-filtered generic collection with duplicate suppression.
+- Added C++ `GetTypesToStr` / `GetTypesToStableStr` parity and routed union/intersection type stringification through stable name/hash ordering for deterministic output.
 - Ported C++ `Decl.GetGeneric` enum-member behavior so enum-contained `VarDecl` nodes inherit the enum generic when they have no function-body generic source.
 - Deepened `Node.cpp` `ToString` parity across type nodes: invalid type spelling, qualified-type arguments, multi-question option types, varray size omission when absent, optional function-type returns, and empty generic/generic-constraint formatting.
 - Added C++ pattern stringification for invalid, const, wildcard, tuple, type, enum, var-or-enum, except-type, and command-type patterns.
