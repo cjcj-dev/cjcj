@@ -1,0 +1,18 @@
+package cangjie_compiler::codegen
+
+import cangjie_compiler::chir.Type
+
+public class CGGenericType <: CGType {
+    public init(cgMod: CGModule, cgCtx: CGContext, chirType: Type) {
+        super(cgMod, cgCtx, chirType)
+    }
+
+    protected override func GenLLVMType(): LLVMTypeRef {
+        return CGType.GetOrCreateTypeInfoPtrType(cgCtx.GetLLVMContext())
+    }
+
+    protected override func CalculateSizeAndAlign(): Unit {
+        size = None
+        align = None
+    }
+}
