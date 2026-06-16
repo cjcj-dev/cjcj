@@ -41,25 +41,28 @@ public class DeadCodeElimination {
         if (expr.IsTerminator() || expr.HasExceptionBranch()) {
             return false
         }
-        if (expr.GetExprKind() == ExprKind.STORE || expr.GetExprKind() == ExprKind.DEBUGEXPR) {
-            return false
-        }
-        if (expr.IsFuncCall() && !IsNoSideEffectCall(expr)) {
-            return false
-        }
         if (let Some(result) <- expr.GetResult()) {
-            return result.GetUsersRef().isEmpty()
+            return result.GetUsersRef().isEmpty() && IsRemovableUnusedExpression(expr)
         }
         return false
     }
 
-    private func IsNoSideEffectCall(expr: Expression): Bool {
-        if (!expr.IsFuncCall() || expr.GetNumOfOperands() == 0) {
-            return false
+    private func IsRemovableUnusedExpression(expr: Expression): Bool {
+        let kind = expr.GetExprKind()
+        match (expr.GetExprMajorKind()) {
+            case ExprMajorKind.UNARY_EXPR => return kind == ExprKind.NOT || kind == ExprKind.BITNOT
+            case ExprMajorKind.BINARY_EXPR => return IsRemovableBinaryExpression(kind)
+            case ExprMajorKind.MEMORY_EXPR => return kind == ExprKind.LOAD || kind == ExprKind.GET_ELEMENT_REF
+            case ExprMajorKind.STRUCTURED_CTRL_FLOW_EXPR => return kind == ExprKind.LAMBDA
+            case ExprMajorKind.OTHERS => return kind == ExprKind.CONSTANT || kind == ExprKind.TUPLE ||
+                kind == ExprKind.FIELD || kind == ExprKind.FIELD_BY_NAME || kind == ExprKind.VARRAY
+            case _ => return false
         }
-        if (let Some(callee) <- expr.GetOperand(0).AsFunction()) {
-            return callee.TestAttr(Attribute.NO_SIDE_EFFECT)
-        }
-        return false
+    }
+
+    private func IsRemovableBinaryExpression(kind: ExprKind): Bool {
+        return kind == ExprKind.BITAND || kind == ExprKind.BITOR || kind == ExprKind.BITXOR ||
+            kind == ExprKind.LT || kind == ExprKind.GT || kind == ExprKind.LE || kind == ExprKind.GE ||
+            kind == ExprKind.EQUAL || kind == ExprKind.NOTEQUAL || kind == ExprKind.AND || kind == ExprKind.OR
     }
 }
