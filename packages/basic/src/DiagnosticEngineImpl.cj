@@ -66,6 +66,12 @@ public class DiagnosticEngineImpl {
         }
     }
 
+    public func SetDisableDiagnoseState(enable: Bool, deep: Int64, stored: Array<Diagnostic>): Unit {
+        enableDiagnose = enable
+        disableDiagDeep = deep
+        SetStoredDiags(stored)
+    }
+
     public func GetEnableDiagnose(): Bool {
         return enableDiagnose
     }
