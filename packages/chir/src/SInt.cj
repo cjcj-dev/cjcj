@@ -56,6 +56,7 @@ public struct SInt {
     private let width: IntWidth
     private let value: Int64
 
+    @OverflowWrapping
     public init(width: IntWidth, value: Int64) {
         this.width = width
         this.value = Normalize(width, value)
@@ -64,8 +65,18 @@ public struct SInt {
     public static func Zero(width: IntWidth): SInt { return SInt(width, 0) }
     public static func UMinValue(width: IntWidth): SInt { return SInt.Zero(width) }
     public static func UMaxValue(width: IntWidth): SInt { return SInt(width, MaskForWidth(width)) }
-    public static func SMinValue(width: IntWidth): SInt { return SInt(width, ModulusForWidth(width) / 2) }
-    public static func SMaxValue(width: IntWidth): SInt { return SInt(width, ModulusForWidth(width) / 2 - 1) }
+    public static func SMinValue(width: IntWidth): SInt {
+        if (width == IntWidth.I64) {
+            return SInt(width, Int64.Min)
+        }
+        return SInt(width, ModulusForWidth(width) / 2)
+    }
+    public static func SMaxValue(width: IntWidth): SInt {
+        if (width == IntWidth.I64) {
+            return SInt(width, Int64.Max)
+        }
+        return SInt(width, ModulusForWidth(width) / 2 - 1)
+    }
     public static func AllOnes(width: IntWidth): SInt { return SInt.UMaxValue(width) }
     public static func BitMask(width: IntWidth, bit: Int64): SInt {
         if (bit < 0 || bit >= IntWidthBits(width)) {
@@ -128,7 +139,12 @@ public struct SInt {
     public func IsNeg(): Bool { return IsSignBitSet() }
     public func IsNonNeg(): Bool { return !IsSignBitSet() }
     public func IsPositive(): Bool { return IsNonNeg() && !IsZero() }
-    public func IsSignBitSet(): Bool { return (value & Pow2(WidthBits() - 1)) != 0 }
+    public func IsSignBitSet(): Bool {
+        if (width == IntWidth.I64) {
+            return value < 0
+        }
+        return (value & Pow2(WidthBits() - 1)) != 0
+    }
     public func IsSignBitClear(): Bool { return !IsSignBitSet() }
     public func IsZero(): Bool { return value == 0 }
     public func IsOne(): Bool { return value == 1 }
@@ -157,29 +173,35 @@ public struct SInt {
         return signedValue >= -limit && signedValue < limit
     }
 
+    @OverflowWrapping
     public func IsPowerOf2(): Bool {
-        return value > 0 && (value & (value - 1)) == 0
+        return value != 0 && (value & (value - 1)) == 0
     }
 
     public func IsNegatedPowerOf2(): Bool {
         if (!IsNeg()) {
             return false
         }
-        let negated = SInt(width, -SVal())
+        let negated = Neg()
         return negated.IsPowerOf2()
     }
 
     public func ToBool(): Bool { return !IsZero() }
 
+    @OverflowWrapping
     public func Add(other: SInt): SInt { return SInt(width, value + other.value) }
+    @OverflowWrapping
     public func Sub(other: SInt): SInt { return SInt(width, value - other.value) }
+    @OverflowWrapping
     public func Mul(other: SInt): SInt { return SInt(width, value * other.value) }
     public func BitAnd(other: SInt): SInt { return SInt(width, value & other.value) }
     public func BitOr(other: SInt): SInt { return SInt(width, value | other.value) }
     public func BitXor(other: SInt): SInt { return SInt(width, value ^ other.value) }
+    @OverflowWrapping
     public func Neg(): SInt { return SInt(width, -SVal()) }
     public func BitNot(): SInt { return SInt(width, value ^ MaskForWidth(width)) }
 
+    @OverflowWrapping
     public func Shl(count: Int64): SInt {
         if (count <= 0) {
             return this
@@ -218,6 +240,65 @@ public struct SInt {
         return left.UVal() == right.UVal()
     }
 
+    public func Ult(other: SInt): Bool {
+        if (width != other.width) {
+            return false
+        }
+        if (width != IntWidth.I64) {
+            return value < other.value
+        }
+        let leftHighBit = value < 0
+        let rightHighBit = other.value < 0
+        if (leftHighBit != rightHighBit) {
+            return !leftHighBit && rightHighBit
+        }
+        return value < other.value
+    }
+
+    public func Ule(other: SInt): Bool {
+        return IsSame(other) || Ult(other)
+    }
+
+    public func Ugt(other: SInt): Bool {
+        return other.Ult(this)
+    }
+
+    public func Uge(other: SInt): Bool {
+        return IsSame(other) || other.Ult(this)
+    }
+
+    public func Slt(other: SInt): Bool {
+        return width == other.width && SVal() < other.SVal()
+    }
+
+    public func Sle(other: SInt): Bool {
+        return IsSame(other) || Slt(other)
+    }
+
+    public func Sgt(other: SInt): Bool {
+        return other.Slt(this)
+    }
+
+    public func Sge(other: SInt): Bool {
+        return IsSame(other) || other.Slt(this)
+    }
+
+    public static func UMin(left: SInt, right: SInt): SInt {
+        return if (left.Ule(right)) { left } else { right }
+    }
+
+    public static func UMax(left: SInt, right: SInt): SInt {
+        return if (left.Ule(right)) { right } else { left }
+    }
+
+    public static func SMin(left: SInt, right: SInt): SInt {
+        return if (left.Sle(right)) { left } else { right }
+    }
+
+    public static func SMax(left: SInt, right: SInt): SInt {
+        return if (left.Sle(right)) { right } else { left }
+    }
+
     public func ToString(asUnsigned!: Bool = true, radix!: Radix = Radix.R10): String {
         let number = if (asUnsigned) { value } else { SVal() }
         return match (radix) {
@@ -228,6 +309,7 @@ public struct SInt {
     }
 }
 
+@OverflowWrapping
 private func Normalize(width: IntWidth, raw: Int64): Int64 {
     if (width == IntWidth.I64) {
         return raw
@@ -240,13 +322,15 @@ private func Normalize(width: IntWidth, raw: Int64): Int64 {
     return out
 }
 
+@OverflowWrapping
 private func ModulusForWidth(width: IntWidth): Int64 {
     if (width == IntWidth.I64) {
-        return 9223372036854775807
+        return 0
     }
     return Pow2(IntWidthBits(width))
 }
 
+@OverflowWrapping
 private func MaskForWidth(width: IntWidth): Int64 {
     if (width == IntWidth.I64) {
         return -1
@@ -254,6 +338,7 @@ private func MaskForWidth(width: IntWidth): Int64 {
     return ModulusForWidth(width) - 1
 }
 
+@OverflowWrapping
 private func Pow2(bits: Int64): Int64 {
     var out: Int64 = 1
     var idx: Int64 = 0
