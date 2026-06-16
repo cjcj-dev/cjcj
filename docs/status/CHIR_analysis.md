@@ -80,3 +80,22 @@
 
 - `cjpm build` passed after implementation.
 - `TODO(selfhost:CHIR)` count in `packages/chir/src`: 0.
+
+## 2026-06-17 CallGraph Analysis Pass
+
+- Reference read: C++ `include/cangjie/CHIR/Analysis/CallGraphAnalysis.h` and `src/CHIR/Analysis/CallGraphAnalysis.cpp`.
+- Split the local call graph implementation out of `Analysis.cj` into `CallGraphAnalysis.cj`, matching the C++ component file layout.
+- Replaced the prior direct-callee list with C++-shaped `CallGraph`, `CallGraphNode`, and `CallGraphEdge` structures, including entry/exit nodes and direct/virtual edge kinds.
+- Added graph population over nested block groups, direct apply/apply-with-exception edges, virtual invoke/invoke-with-exception handling matching the current C++ empty devirtual callee fallback, and compatibility `Run(pkg)`.
+- Added SCC post-order construction over the call graph so transform scheduling can consume a real call graph order rather than a flat function list.
+
+## Remaining After CallGraph Analysis Pass
+
+- The generic `Analysis`, `Engine`, `Results`, and full `ValueAnalysis` state framework remain absent compared with the C++ templates.
+- `ValueRangeAnalysis`, `TypeAnalysis`, and `ConstAnalysis` integration still need full C++-faithful state propagation over CHIR expressions and terminators.
+- Virtual call target expansion is limited by the same empty `GetAllPossibleCalleeOfInvoke` behavior present in the current C++ implementation, plus missing CHIR-specific invoke wrapper classes in the local Cangjie IR surface.
+
+## Verification After CallGraph Analysis Pass
+
+- `cjpm build` passed after implementation.
+- `TODO(selfhost:CHIR)` count in `packages/chir/src`: 0.
