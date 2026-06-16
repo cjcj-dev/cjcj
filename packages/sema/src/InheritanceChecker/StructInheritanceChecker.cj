@@ -244,6 +244,8 @@ public class StructInheritanceChecker {
     private let structInheritedMembers: ArrayList<InheritedMemberEntry> = ArrayList<InheritedMemberEntry>()
     private let checkingDecls: ArrayList<InheritableDecl> = ArrayList<InheritableDecl>()
     private let instantiatedKeys: HashSet<String> = HashSet<String>()
+    private let instantiatedMemberDiagnostics: ArrayList<InstantiatedMemberDiagnosticRecord> =
+        ArrayList<InstantiatedMemberDiagnosticRecord>()
     private let instantiationTriggers: ArrayList<InstantiationTriggerInfo> = ArrayList<InstantiationTriggerInfo>()
     private let instantiationTypeMaps: ArrayList<TypeSubst> = ArrayList<TypeSubst>()
     private var infiniteInstantiationOccurred: Bool = false
@@ -302,6 +304,37 @@ public class StructInheritanceChecker {
 
     public func AddInstantiatedKey(key: String): Unit {
         instantiatedKeys.add(key)
+    }
+
+    private func FindInstantiatedMemberDiagnosticRecord(key: String): Option<InstantiatedMemberDiagnosticRecord> {
+        for (record in instantiatedMemberDiagnostics) {
+            if (record.key == key) {
+                return record
+            }
+        }
+        return None
+    }
+
+    public func ReplayInstantiatedMemberDiagnostics(key: String): Unit {
+        if (let Some(record) <- FindInstantiatedMemberDiagnosticRecord(key)) {
+            for (pair in record.pairs) {
+                DiagnoseForInstantiatedMember(pair.parent, pair.child)
+            }
+        }
+    }
+
+    public func RecordInstantiatedMemberDiagnostic(
+        key: String,
+        parent: MemberSignature,
+        child: MemberSignature
+    ): Unit {
+        if (let Some(record) <- FindInstantiatedMemberDiagnosticRecord(key)) {
+            record.pairs.add(InstantiatedMemberDiagnosticPair(parent, child))
+            return
+        }
+        let record = InstantiatedMemberDiagnosticRecord(key)
+        record.pairs.add(InstantiatedMemberDiagnosticPair(parent, child))
+        instantiatedMemberDiagnostics.add(record)
     }
 
     public func HasInstantiationTrigger(): Bool {

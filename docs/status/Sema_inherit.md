@@ -56,6 +56,8 @@ Continuation deepening update:
 - Instantiated declaration walking now keeps a substitution stack like the C++ `institutionMaps`: nested instantiated
   type arguments are substituted through the active map, active maps participate in cyclic-substitution detection, and
   extend declarations build a combined map from the extended nominal type and the extension's own type arguments.
+- Repeated instantiated generic member checks now replay cached `(parent, member)` diagnostic pairs for the same
+  declaration/type-argument key, matching the C++ `genericMembersForInstantiatedDecl` path instead of silently returning.
 
 De-isolation status: the implementation imports `cangjie_compiler::ast`, `cangjie_compiler::basic`, and
 `cangjie_compiler::sema` directly. This pass also imports the real `cangjie_compiler::modules` package-relation helper.
@@ -65,8 +67,8 @@ types.
 Known remaining fidelity gaps are caused by sibling systems that are not yet represented in this self-hosting package:
 full import-manager extend accessibility, native backend Java/ObjC inheritance annotation checks, C++ extension ordering
 generic substitution through extended generic type arguments for cross-extension ordering, full C++ diagnostic note/hint
-parity, and replay caching for duplicate instantiated-member diagnostics. The implemented behavior is executable and
-participates in the package build, but it is not yet wired into `TypeChecker::CheckInheritance` because that owner is
-outside this pass's edit scope.
+parity, and complete C++ instantiated-type cache reuse for all member-signature substitutions. The implemented behavior
+is executable and participates in the package build, but it is not yet wired into `TypeChecker::CheckInheritance` because
+that owner is outside this pass's edit scope.
 
 Verification: `cjpm build` passes for the whole workspace after this continuation deepening pass.

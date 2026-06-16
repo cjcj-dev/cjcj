@@ -19,6 +19,25 @@ public class InstantiationTriggerInfo {
     }
 }
 
+public class InstantiatedMemberDiagnosticPair {
+    public var parent: MemberSignature
+    public var child: MemberSignature
+
+    public init(parent: MemberSignature, child: MemberSignature) {
+        this.parent = parent.Clone()
+        this.child = child.Clone()
+    }
+}
+
+public class InstantiatedMemberDiagnosticRecord {
+    public var key: String
+    public let pairs: ArrayList<InstantiatedMemberDiagnosticPair> = ArrayList<InstantiatedMemberDiagnosticPair>()
+
+    public init(key: String) {
+        this.key = key
+    }
+}
+
 func InstantiationKey(decl: Decl, instTys: ArrayList<Ty>): String {
     let parts = ArrayList<String>()
     for (ty in instTys) {
@@ -116,6 +135,7 @@ func CheckInstMemberSignatures(
     }
     let key = InstantiationKey(decl, instTys)
     if (checker.HasInstantiatedKey(key)) {
+        checker.ReplayInstantiatedMemberDiagnostics(key)
         return
     }
     checker.AddInstantiatedKey(key)
@@ -167,6 +187,7 @@ func CheckInstMemberSignatures(
                 parent.structTy = checker.typeManager.GetInstantiatedTy(parentStructTy, typeMapping)
             }
             checker.DiagnoseForInstantiatedMember(parent, memberSig)
+            checker.RecordInstantiatedMemberDiagnostic(key, parent, memberSig)
         }
         members.Add(entry.name, memberSig)
     }
