@@ -2,19 +2,180 @@ package cangjie_compiler::parse
 
 import std.collection.*
 
+public enum ImportKind {
+    | IMPORT_SINGLE | IMPORT_ALIAS | IMPORT_ALL | IMPORT_MULTI
+}
+
+private func ImportKindIndex(kind: ImportKind): Int64 {
+    return match (kind) {
+        case ImportKind.IMPORT_SINGLE => 0
+        case ImportKind.IMPORT_ALIAS => 1
+        case ImportKind.IMPORT_ALL => 2
+        case ImportKind.IMPORT_MULTI => 3
+    }
+}
+
+extend ImportKind <: Equatable<ImportKind> {
+    public operator func ==(right: ImportKind): Bool { return ImportKindIndex(this) == ImportKindIndex(right) }
+    public operator func !=(right: ImportKind): Bool { return !(this == right) }
+}
+
 public class ImportContent <: Node {
+    public var kind: ImportKind = ImportKind.IMPORT_SINGLE
+    public var hasDoubleColon: Bool = false
     public let prefixPaths: ArrayList<SrcIdentifier> = ArrayList<SrcIdentifier>()
-    public let items: ArrayList<SrcIdentifier> = ArrayList<SrcIdentifier>()
+    public let prefixDotPoses: ArrayList<Position> = ArrayList<Position>()
+    public var identifier: SrcIdentifier = SrcIdentifier()
+    public var asPos: Position = INVALID_POSITION
     public var aliasName: SrcIdentifier = SrcIdentifier()
-    public var importAll: Bool = false
+    public var leftCurlPos: Position = INVALID_POSITION
+    public let items: ArrayList<ImportContent> = ArrayList<ImportContent>()
+    public let commaPoses: ArrayList<Position> = ArrayList<Position>()
+    public var rightCurlPos: Position = INVALID_POSITION
+    public var isDecl: Bool = false
+    public var hasBroken: Bool = false
 
     public init() { super(ASTKind.IMPORT_CONTENT) }
 
+    public func MarkBroken(): Unit {
+        isBroken = true
+    }
+
+    public func MarkHasBroken(): Unit {
+        hasBroken = true
+        isBroken = true
+    }
+
+    public func IsImportMulti(): Bool {
+        return kind == ImportKind.IMPORT_MULTI
+    }
+
+    public func IsImportAll(): Bool {
+        return kind == ImportKind.IMPORT_ALL
+    }
+
+    public func IsImportAlias(): Bool {
+        return kind == ImportKind.IMPORT_ALIAS
+    }
+
+    public func GetPrefixPath(): String {
+        let builder = StringBuilder()
+        var index: Int64 = 0
+        while (index < prefixPaths.size) {
+            builder.append(prefixPaths[index].Val())
+            if (index == prefixPaths.size - 1) {
+                break
+            }
+            if (index == 0 && hasDoubleColon) {
+                builder.append("::")
+            } else {
+                builder.append(".")
+            }
+            index++
+        }
+        return builder.toString()
+    }
+
+    public func GetImportedPackageName(): String {
+        let builder = StringBuilder()
+        var index: Int64 = 0
+        while (index < prefixPaths.size) {
+            builder.append(prefixPaths[index].Val())
+            if (kind == ImportKind.IMPORT_ALL && index + 1 == prefixPaths.size) {
+                index++
+                continue
+            }
+            if (index == 0 && hasDoubleColon) {
+                builder.append("::")
+            } else {
+                builder.append(".")
+            }
+            index++
+        }
+        if (kind != ImportKind.IMPORT_ALL) {
+            builder.append(identifier.Val())
+        }
+        return builder.toString()
+    }
+
+    public func GetImportedPackageNameWithIsDecl(): String {
+        let builder = StringBuilder()
+        var index: Int64 = 0
+        while (index < prefixPaths.size) {
+            builder.append(prefixPaths[index].Val())
+            if (kind == ImportKind.IMPORT_ALL && index + 1 == prefixPaths.size) {
+                index++
+                continue
+            }
+            if (index == 0 && hasDoubleColon) {
+                builder.append("::")
+            } else if (index + 1 != prefixPaths.size) {
+                builder.append(".")
+            }
+            index++
+        }
+        if (kind != ImportKind.IMPORT_ALL && !isDecl) {
+            if (!builder.toString().isEmpty()) {
+                builder.append(".")
+            }
+            builder.append(identifier.Val())
+        }
+        return builder.toString()
+    }
+
     public func FullName(): String {
-        let parts = ArrayList<String>()
-        for (item in prefixPaths) { parts.add(item.GetRawText()) }
-        for (item in items) { parts.add(item.GetRawText()) }
-        return JoinStrings(parts, ".")
+        if (kind != ImportKind.IMPORT_MULTI) {
+            return GetImportedPackageName()
+        }
+        let builder = StringBuilder()
+        builder.append(GetPrefixPath())
+        if (!prefixPaths.isEmpty()) {
+            if (hasDoubleColon && prefixPaths.size == 1) {
+                builder.append("::")
+            } else {
+                builder.append(".")
+            }
+        }
+        builder.append("{")
+        var index: Int64 = 0
+        while (index < items.size) {
+            if (index > 0) {
+                builder.append(", ")
+            }
+            builder.append(items[index].FullName())
+            index++
+        }
+        builder.append("}")
+        return builder.toString()
+    }
+
+    public override func ToString(): String {
+        if (kind == ImportKind.IMPORT_MULTI) {
+            return FullName()
+        }
+        let builder = StringBuilder()
+        var index: Int64 = 0
+        while (index < prefixPaths.size) {
+            builder.append(prefixPaths[index].Val())
+            if (index == 0 && hasDoubleColon) {
+                builder.append("::")
+            } else {
+                builder.append(".")
+            }
+            index++
+        }
+        builder.append(identifier.Val())
+        if (kind == ImportKind.IMPORT_ALIAS) {
+            builder.append(" as ")
+            builder.append(aliasName.Val())
+        }
+        return builder.toString()
+    }
+
+    public override func Children(): ArrayList<Node> {
+        let out = ArrayList<Node>()
+        for (item in items) { out.add(item) }
+        return out
     }
 }
 
@@ -23,8 +184,32 @@ public class ImportSpec <: Node {
     public var content: ImportContent = ImportContent()
     public var importPos: Position = INVALID_POSITION
     public var modifier: Option<Modifier> = None
+    public var withImplicitExport: Bool = true
 
     public init() { super(ASTKind.IMPORT_SPEC) }
+
+    public func IsImportAll(): Bool {
+        return content.kind == ImportKind.IMPORT_ALL
+    }
+
+    public func IsImportSingle(): Bool {
+        return content.kind == ImportKind.IMPORT_SINGLE
+    }
+
+    public func IsImportAlias(): Bool {
+        return content.kind == ImportKind.IMPORT_ALIAS
+    }
+
+    public func IsImportMulti(): Bool {
+        return content.kind == ImportKind.IMPORT_MULTI
+    }
+
+    public func IsPrivateImport(): Bool {
+        if (let Some(value) <- modifier) {
+            return value.kind == ModifierKind.PRIVATE
+        }
+        return true
+    }
 
     public override func Children(): ArrayList<Node> {
         let out = ArrayList<Node>()
@@ -35,16 +220,35 @@ public class ImportSpec <: Node {
 }
 
 public class PackageSpec <: Node {
+    public var modifier: Option<Modifier> = None
+    public var macroPos: Position = INVALID_POSITION
     public var packagePos: Position = INVALID_POSITION
+    public var hasDoubleColon: Bool = false
     public let identifiers: ArrayList<SrcIdentifier> = ArrayList<SrcIdentifier>()
+    public let prefixDotPoses: ArrayList<Position> = ArrayList<Position>()
+    public var packageName: SrcIdentifier = SrcIdentifier()
     public let modifiers: ArrayList<Modifier> = ArrayList<Modifier>()
+    public var hasMacro: Bool = false
+    public var hasSpecific: Bool = false
+    public var hasCommon: Bool = false
 
     public init() { super(ASTKind.PACKAGE_SPEC) }
 
     public func FullName(): String {
-        let parts = ArrayList<String>()
-        for (id in identifiers) { parts.add(id.GetRawText()) }
-        return JoinStrings(parts, ".")
+        let builder = StringBuilder()
+        var index: Int64 = 0
+        while (index < identifiers.size) {
+            if (index > 0) {
+                if (index == 1 && hasDoubleColon) {
+                    builder.append("::")
+                } else {
+                    builder.append(".")
+                }
+            }
+            builder.append(identifiers[index].Val())
+            index++
+        }
+        return builder.toString()
     }
 }
 

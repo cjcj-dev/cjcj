@@ -122,12 +122,22 @@ the real Option package types.
   `baseExpr`, and use square-bracket arguments. Macro-call classification now
   excludes builtin annotations and expression macro calls no longer accept
   `@!`, matching the C++ split more closely.
+- Reworked package/import parsing toward `Parser.cpp` and `ParseImports.cpp`:
+  package headers now record macro-package state, `::` organization separators,
+  separator positions, package-name fields, raw-identifier errors, module-name
+  derivation, and package-name length checks. Import specs now model C++ import
+  kinds (`single`, `alias`, `all`, `multi`), `::`, prefix separator positions,
+  `as` positions, brace/comma positions, `import a.{b, c as d}` parsing,
+  import-all parsing, import annotation validation, multi-import desugaring, and
+  import package-name length checks.
 
 ## Remaining Work
 
 - Replace the remaining Parse-local AST node classes, parser diagnostics, and
   parser lexer implementation with real sibling package APIs where their public
   surfaces are sufficiently complete.
+- Top-level preamble ordering still follows the compatibility loop rather than
+  the exact C++ `feature? package? import* decl*` reset/recovery structure.
 - Feature raw-identifier diagnostics still depend on finishing lexer
   de-isolation: the local Parse lexer strips backticks before parser recovery,
   while the real Lex lexer preserves raw identifier spelling in `Token.Value()`.

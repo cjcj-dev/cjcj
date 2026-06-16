@@ -14,12 +14,12 @@ extend ParserImpl {
             ParseAnnotations(pendingAnnos)
             let modifiers = ArrayList<Modifier>()
             ParseModifiers(modifiers)
-            if (Seeing(TokenKind.PACKAGE)) {
+            if (Seeing(TokenKind.PACKAGE) || Seeing([TokenKind.MACRO, TokenKind.PACKAGE])) {
                 file.packageSpec = ParsePackageHeader(modifiers)
             } else if (Seeing(TokenKind.FEATURES)) {
                 file.features.add(ParseTopLvlFeatures(pendingAnnos))
             } else if (SeeingImport()) {
-                file.imports.add(ParseImportSpec(pendingAnnos))
+                ParseImportSpecInTop(file.imports, pendingAnnos)
             } else if (SeeingDecl() || Seeing(TokenKind.AT) || Seeing(TokenKind.AT_EXCL)) {
                 let decl = ParseDecl(ScopeKind.TOPLEVEL, modifiers, pendingAnnos)
                 FinalizeDeclTree(decl)
