@@ -285,8 +285,8 @@ public func ParseAction(opts: GlobalOptions, arg: OptionArgInstance): ActionResu
     }
     if (id == ID.STACK_TRACE_FORMAT) { return parseStackTraceFormat(opts, arg.value) }
     if (id == ID.DISCARD_EH_FRAME) { opts.discardEhFrame = true; return handled() }
-    if (id == ID.JOBS) { return parseJobs(opts, arg.value, false) }
-    if (id == ID.AGGRESSIVE_PARALLEL_COMPILE) { return parseJobs(opts, arg.value, true) }
+    if (id == ID.JOBS) { return parseJobs(opts, arg, false) }
+    if (id == ID.AGGRESSIVE_PARALLEL_COMPILE) { return parseJobs(opts, arg, true) }
     return missing()
 }
 
@@ -511,12 +511,18 @@ public func SetupConditionalCompilationCfgFromFile(filePath: String, map: HashMa
 }
 
 public func SetupConditionalCompilationCfg(opts: GlobalOptions): Bool {
-    if (!opts.passedWhenKeyValue.isEmpty()) { return true }
+    if (!opts.passedWhenKeyValue.isEmpty()) {
+        if (!opts.passedWhenCfgPaths.isEmpty()) {
+            Warningln("cfg paths are ignored because key-value cfg options are already specified")
+        }
+        return true
+    }
     for (path in opts.passedWhenCfgPaths) {
         let filePath = JoinPath(path, "cfg.toml")
         if (FileExist(filePath)) {
             return SetupConditionalCompilationCfgFromFile(filePath, opts.passedWhenKeyValue)
         }
+        Warningln("no such file: " + filePath)
     }
     let defaultCfgFilePath = if (opts.packagePaths.isEmpty()) { "cfg.toml" } else { JoinPath(opts.packagePaths[0], "cfg.toml") }
     if (!FileExist(defaultCfgFilePath)) { return true }
@@ -592,16 +598,17 @@ private func parseJobsValue(optionName: String, value: String): MaybeUInt64 {
         Warningln("'" + optionName + "' value must be greater than 0, the compiler will use 1 as the value.")
         return MaybeUInt64(1u64)
     }
+    let threadNum = GetHardwareConcurrency()
+    if (parsed.value > threadNum) { return MaybeUInt64(threadNum) }
     return parsed
 }
 
-private func parseJobs(opts: GlobalOptions, value: String, aggressive: Bool): ActionResult {
-    if (value.isEmpty() && aggressive) {
+private func parseJobs(opts: GlobalOptions, arg: OptionArgInstance, aggressive: Bool): ActionResult {
+    if (arg.value.isEmpty() && aggressive) {
         opts.aggressiveParallelCompileWithoutArg = true
         return handled()
     }
-    let optionName = if (aggressive) { "--aggressive-parallel-compile" } else { "--jobs" }
-    let parsed = parseJobsValue(optionName, value)
+    let parsed = parseJobsValue(arg.name, arg.value)
     if (!parsed.hasValue) { return handled(success: false) }
     if (aggressive) {
         opts.aggressiveParallelCompile = parsed

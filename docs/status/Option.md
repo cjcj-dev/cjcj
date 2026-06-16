@@ -94,7 +94,17 @@ inputs are no longer rejected solely because package mode is enabled, sanitizer
 post-checks validate the target sanitizer runtime library under
 `cangjieHome/runtime/lib/<target>/<sanitizer>`, and `--jobs`/`--apc` parsing now
 matches the C++ digit, maximum-length, empty-value, and zero-normalization
-rules except for the remaining hardware-concurrency clamp.
+rules.
+
+This continuation closes that jobs gap for Linux hosts: Option now obtains
+hardware concurrency through a small C FFI binding to `get_nprocs`, uses it for
+the default `jobs` value, and clamps explicit `--jobs`/`--apc` values to the
+host thread count like the C++ `std::thread::hardware_concurrency` flow. Normal
+and pre-action option processing now both run deprecated-option checks and
+duplicate occurrence tracking, and duplicate warnings include aliases in the
+C++ spelling. Conditional-compilation setup also reports ignored cfg paths when
+key/value cfgs are already present and warns for missing explicit `cfg.toml`
+files before continuing to later paths.
 
 Remaining fidelity gaps are not hidden behind self-host markers: this package
 still uses local diagnostics instead of Basic diagnostic IDs. Importing Basic

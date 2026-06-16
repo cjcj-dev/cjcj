@@ -374,6 +374,7 @@ public open class GlobalOptions <: Option {
                 let pre = ParsePreAction(this, opt)
                 if (pre.handled) {
                     OccurrenceCheck(opt, argList)
+                    DeprecatedOptionCheck(opt)
                     if (!pre.success) { return false }
                     skipParsing = skipParsing || pre.skipParsing
                 } else {
@@ -391,6 +392,7 @@ public open class GlobalOptions <: Option {
                 Errorln(opt.str + " is an experimental feature. \"--experimental\" option is required.")
                 return false
             }
+            DeprecatedOptionCheck(opt)
             let optionResult = ParseOption(opt)
             if (!optionResult.hasValue || !optionResult.value) { return false }
             OccurrenceCheck(opt, argList)
@@ -412,6 +414,13 @@ public open class GlobalOptions <: Option {
             }
         }
         return false
+    }
+
+    private func DeprecatedOptionCheck(arg: OptionArgInstance): Unit {
+        let id = arg.info.GetID()
+        if (id == ID.STATIC_LIBS || id == ID.DY_LIBS || id == ID.COMPILE_AS_EXE) {
+            Warningln("option '" + arg.str + "' is deprecated and will be removed in the future")
+        }
     }
 
     private func CollectOrderedInputFiles(entry: ArgListEntry, index: UInt64): Unit {
@@ -443,7 +452,9 @@ public open class GlobalOptions <: Option {
     private func OccurrenceCheck(arg: OptionArgInstance, argList: ArgList): Unit {
         if (argList.IsSpecified(arg.info.GetID()) &&
             arg.info.GetOccurrenceType() == Occurrence.SINGLE_OCCURRENCE && !argList.IsWarned(arg.info.GetID())) {
-            Warningln("'" + arg.info.GetName() + "' is specified multiple times. The last one is chosen.")
+            var name = arg.info.GetName()
+            if (!arg.info.GetAlias().isEmpty()) { name += "' or '" + arg.info.GetAlias() }
+            Warningln("'" + name + "' is specified multiple times. The last one is chosen.")
             argList.MarkWarned(arg.info.GetID())
         }
         argList.MarkSpecified(arg)
@@ -886,7 +897,7 @@ public open class GlobalOptions <: Option {
             return false
         }
         if (!compilePackage && srcFiles.isEmpty() && !inputObjs.isEmpty() && !experimentalMode) { return false }
-        if (!jobs.hasValue) { jobs = MaybeUInt64(1u64) }
+        if (!jobs.hasValue) { jobs = MaybeUInt64(GetHardwareConcurrency()) }
         if (target.os == OSType.WINDOWS || target.os == OSType.DARWIN || target.os == OSType.IOS ||
             IsObfuscationEnabled() || IsLTOEnabled() || enableCoverage) {
             aggressiveParallelCompile = MaybeUInt64(1u64)

@@ -11,6 +11,23 @@ public let DEFAULT_ANDROID_API: String = "31"
 public let MIN_ANDROID_API: String = "26"
 public let FILE_PATH_MAX_LENGTH: Int64 = UTILS_FILE_PATH_MAX_LENGTH
 
+@When[os == "Linux"]
+foreign {
+    func get_nprocs(): Int32
+}
+
+@When[os == "Linux"]
+public func GetHardwareConcurrency(): UInt64 {
+    let count = unsafe { get_nprocs() }
+    if (count > 0) { return UInt64(count) }
+    return 1u64
+}
+
+@When[os != "Linux"]
+public func GetHardwareConcurrency(): UInt64 {
+    return 1u64
+}
+
 public class MaybeString {
     public var hasValue: Bool = false
     public var value: String = ""
