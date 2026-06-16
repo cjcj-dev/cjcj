@@ -7,6 +7,7 @@ import cangjie_compiler::basic.MakeRange as BasicMakeRange
 import cangjie_compiler::basic.Position as BasicPosition
 import cangjie_compiler::basic.Range as BasicRange
 import cangjie_compiler::basic.SplitQualifiedName as BasicSplitQualifiedName
+import cangjie_compiler::utils.FileUtil
 
 public let SERIALIZED_FILE_EXTENSION: String = ".cjo"
 public let CJ_D_FILE_EXTENSION: String = ".cj.d"
@@ -567,17 +568,11 @@ public func JoinStrings(values: ArrayList<String>, delimiter: String): String {
 }
 
 public func ToCjoFileName(fullPackageName: String): String {
-    if (let Some(pos) <- fullPackageName.indexOf("::")) {
-        return fullPackageName[pos + 2..] + ORG_NAME_SEPARATOR + fullPackageName[0..pos]
-    }
-    return fullPackageName
+    return FileUtil.ToCjoFileName(fullPackageName)
 }
 
 public func ToPackageName(cjoName: String): String {
-    if (let Some(pos) <- cjoName.indexOf(ORG_NAME_SEPARATOR)) {
-        return cjoName[pos + 1..] + "::" + cjoName[0..pos]
-    }
-    return cjoName
+    return FileUtil.ToPackageName(cjoName)
 }
 
 public func IsTestPackage(pkgName: String): Bool {

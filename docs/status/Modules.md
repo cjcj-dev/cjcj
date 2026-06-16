@@ -16,6 +16,8 @@ This continuation aligned more `ImportManager`/`CjoManager` behavior with C++: `
 
 This pass filled another import-resolution edge case from the C++ `HandleAlreadyParsedPackage` path: when an imported package resolves to an already-loaded source package while the current package was imported, Modules now reports `module_same_name_with_indirect_dependent_pkg` and fails that import resolution instead of silently accepting the collision. The diagnostic bridge now forwards that module diagnostic to Basic. The public `SetImportedPackageFromASTNode` API was also added and delegates to `CjoManager.AddImportedPackageFromASTNode`, matching the C++ ImportManager surface within the local ownership model.
 
+This pass de-isolated CJO filename/path utilities to the real `cangjie_compiler::utils.FileUtil`: `ToCjoFileName`, `ToPackageName`, and `CjoManager` CJO discovery now use the same shared utility behavior as the C++ implementation, including nested module-directory lookup before direct-path fallback and the C++ cache-hit return value for `GetPackageCjoPath`.
+
 ## Implemented
 
 - Replaced `ModulesScaffold.cj` with per-component source files under `packages/modules/src`.
@@ -34,6 +36,7 @@ This pass filled another import-resolution edge case from the C++ `HandleAlready
 - Matched the C++ standard-library dependency JSON shape more closely by recursively loading std package headers and recording each std package's import set.
 - Added the C++ already-parsed package collision behavior for source packages that shadow indirect dependencies, plus the corresponding Basic diagnostic forwarding.
 - Added `ImportManager.SetImportedPackageFromASTNode` to register tool-provided package AST nodes through the CJO manager.
+- Added a real dependency on `cangjie_compiler::utils` for Modules CJO filename conversion and serialization-file discovery, replacing local ad hoc lookup with `FileUtil.FindSerializationFile`.
 - Implemented `DependencyGraph` direct/transitive dependency collection with macro re-export handling and cache invalidation.
 - Implemented `PackageManager` Tarjan SCC ordering and source package reordering behavior.
 - Added a compiling local AST writer/loader wire format so exported package/import/member data can round-trip inside this package while the real flatbuffer/AST dependencies are unavailable.
