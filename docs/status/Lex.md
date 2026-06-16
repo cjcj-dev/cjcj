@@ -2,7 +2,7 @@
 
 Date: 2026-06-15
 
-Update: 2026-06-16
+Update: 2026-06-17
 
 Build: `cjpm build` passes.
 
@@ -28,6 +28,7 @@ Implemented:
 - Matched the C++ `ReserveToken` EOF-padding behavior used by `Seeing` instead of stopping after the first `END` token.
 - Fixed macro-provided ambiguous-token splitting to preserve the C++ left-token source range while mutating the cached right token for `??`, `>>=`, `>>`, and `>=`.
 - Matched C++ invalid composite symbol consumption for `+&=`, `-&=`, `*&=`, and `**&=` so those forms are diagnosed as one illegal token.
+- Replaced the remaining peek-only symbol scanner with C++-style per-symbol scan helpers, preserving the reference rollback behavior for invalid partial composites such as `+&x`, `-&x`, `*&x`, and `**&x` as single illegal symbol spans.
 - Expanded numeric, unicode-escape, unknown-token, and dollar-identifier diagnostics with the C++ helper behavior: secondary hints, notes, and fix-it substitutions.
 - Added C++-style diagnostics for non-ASCII numeric junk, illegal Unicode identifier continuations, and missing multiline/raw-string delimiter hints.
 - Reworked string-interpolation hole scanning to mirror the C++ helper split for nested braces, strings, comments, linebreak diagnostics, and raw-string failure propagation.

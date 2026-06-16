@@ -2220,112 +2220,228 @@ public class LexerImpl {
         return ScanSymbol(pStart)
     }
 
+    private func ScanSymbolPlus(): Unit {
+        ReadUTF8Char()
+        if (currentChar == Int64(b'+')) {
+            return
+        }
+        if (currentChar == Int64(b'&')) {
+            ReadUTF8Char()
+            if (currentChar == Int64(b'=')) {
+                return
+            }
+        } else if (currentChar == Int64(b'=')) {
+            return
+        }
+        Back()
+    }
+
+    private func ScanSymbolHyphen(): Unit {
+        ReadUTF8Char()
+        if (currentChar == Int64(b'-')) {
+            return
+        }
+        if (currentChar == Int64(b'=')) {
+            return
+        }
+        if (currentChar == Int64(b'&')) {
+            ReadUTF8Char()
+            if (currentChar == Int64(b'=')) {
+                return
+            }
+        } else if (currentChar == Int64(b'>')) {
+            return
+        }
+        Back()
+    }
+
+    private func ScanSymbolAsterisk(): Unit {
+        ReadUTF8Char()
+        if (currentChar == Int64(b'*')) {
+            ReadUTF8Char()
+            if (currentChar == Int64(b'&')) {
+                ReadUTF8Char()
+                if (currentChar == Int64(b'=')) {
+                    return
+                }
+            } else if (currentChar == Int64(b'=')) {
+                return
+            }
+        } else if (currentChar == Int64(b'=')) {
+            return
+        } else if (currentChar == Int64(b'&')) {
+            ReadUTF8Char()
+            if (currentChar == Int64(b'=')) {
+                return
+            }
+        }
+        Back()
+    }
+
+    private func ScanSymbolAmpersand(): Unit {
+        ReadUTF8Char()
+        if (currentChar == Int64(b'&')) {
+            ReadUTF8Char()
+            if (currentChar == Int64(b'=')) {
+                return
+            }
+        } else if (currentChar == Int64(b'=')) {
+            return
+        }
+        Back()
+    }
+
+    private func ScanSymbolExclamation(): Unit {
+        if (getNextChar(0) == b'i' && getNextChar(1) == b'n' &&
+            (getNextChar(2) == b' ' || getNextChar(2) == b'\r' || getNextChar(2) == b'\n')) {
+            ReadUTF8Char()
+            ReadUTF8Char()
+            return
+        }
+        ReadUTF8Char()
+        if (currentChar == Int64(b'=')) {
+            return
+        }
+        Back()
+    }
+
+    private func ScanSymbolLessThan(): Unit {
+        ReadUTF8Char()
+        if (currentChar == Int64(b'<')) {
+            ReadUTF8Char()
+            if (currentChar == Int64(b'=')) {
+                return
+            }
+        } else if (currentChar == Int64(b'=')) {
+            return
+        } else if (currentChar == Int64(b':')) {
+            return
+        } else if (currentChar == Int64(b'-')) {
+            return
+        }
+        Back()
+    }
+
+    private func ScanSymbolGreaterThan(): Unit {
+        if (splitAmbiguousToken) {
+            return
+        }
+        ReadUTF8Char()
+        if (currentChar == Int64(b'>')) {
+            ReadUTF8Char()
+            if (currentChar == Int64(b'=')) {
+                return
+            }
+        } else if (currentChar == Int64(b'=')) {
+            return
+        }
+        Back()
+    }
+
+    private func ScanSymbolAt(): Unit {
+        ReadUTF8Char()
+        if (currentChar == Int64(b'!')) {
+            return
+        }
+        Back()
+    }
+
+    private func ScanSymbolEqual(): Unit {
+        ReadUTF8Char()
+        if (currentChar == Int64(b'=')) {
+            return
+        }
+        if (currentChar == Int64(b'>')) {
+            return
+        }
+        Back()
+    }
+
+    private func ScanSymbolPercentSign(): Unit {
+        ReadUTF8Char()
+        if (currentChar == Int64(b'=')) {
+            return
+        }
+        Back()
+    }
+
+    private func ScanSymbolVerticalBar(): Unit {
+        ReadUTF8Char()
+        if (currentChar == Int64(b'|')) {
+            ReadUTF8Char()
+            if (currentChar == Int64(b'=')) {
+                return
+            }
+        } else if (currentChar == Int64(b'=')) {
+            return
+        } else if (currentChar == Int64(b'>')) {
+            return
+        }
+        Back()
+    }
+
+    private func ScanSymbolTilde(): Unit {
+        ReadUTF8Char()
+        if (currentChar != Int64(b'>')) {
+            Back()
+        }
+    }
+
+    private func ScanSymbolCaret(): Unit {
+        if (getNextChar(0) == b'=') {
+            ReadUTF8Char()
+        }
+    }
+
+    private func ScanSymbolQuest(): Unit {
+        if (splitAmbiguousToken) {
+            return
+        }
+        if (getNextChar(0) == b'?') {
+            ReadUTF8Char()
+        }
+    }
+
+    private func ScanSymbolColon(): Unit {
+        ReadUTF8Char()
+        if (currentChar != Int64(b':')) {
+            Back()
+        }
+    }
+
     private func scanSimpleSymbolLiteral(): String {
         let start = pCurrent
         let first = currentByte()
         if (first == b'~') {
-            if (getNextChar(0) == b'>') {
-                ReadUTF8Char()
-            }
+            ScanSymbolTilde()
         } else if (first == b'+') {
-            if (getNextChar(0) == b'+' || getNextChar(0) == b'=') {
-                ReadUTF8Char()
-            } else if (getNextChar(0) == b'&' && getNextChar(1) == b'=') {
-                ReadUTF8Char()
-                ReadUTF8Char()
-            }
+            ScanSymbolPlus()
         } else if (first == b'-') {
-            if (getNextChar(0) == b'-' || getNextChar(0) == b'=' || getNextChar(0) == b'>') {
-                ReadUTF8Char()
-            } else if (getNextChar(0) == b'&' && getNextChar(1) == b'=') {
-                ReadUTF8Char()
-                ReadUTF8Char()
-            }
+            ScanSymbolHyphen()
         } else if (first == b'*') {
-            if (getNextChar(0) == b'*') {
-                ReadUTF8Char()
-                if (getNextChar(0) == b'&' && getNextChar(1) == b'=') {
-                    ReadUTF8Char()
-                    ReadUTF8Char()
-                } else if (getNextChar(0) == b'=') {
-                    ReadUTF8Char()
-                }
-            } else if (getNextChar(0) == b'=') {
-                ReadUTF8Char()
-            } else if (getNextChar(0) == b'&' && getNextChar(1) == b'=') {
-                ReadUTF8Char()
-                ReadUTF8Char()
-            }
+            ScanSymbolAsterisk()
         } else if (first == b'&') {
-            if (getNextChar(0) == b'&') {
-                ReadUTF8Char()
-                if (getNextChar(0) == b'=') {
-                    ReadUTF8Char()
-                }
-            } else if (getNextChar(0) == b'=') {
-                ReadUTF8Char()
-            }
+            ScanSymbolAmpersand()
         } else if (first == b'^') {
-            if (getNextChar(0) == b'=') {
-                ReadUTF8Char()
-            }
+            ScanSymbolCaret()
         } else if (first == b'!') {
-            if (getNextChar(0) == b'i' && getNextChar(1) == b'n' &&
-                (getNextChar(2) == b' ' || getNextChar(2) == b'\r' || getNextChar(2) == b'\n')) {
-                ReadUTF8Char()
-                ReadUTF8Char()
-            } else if (getNextChar(0) == b'=') {
-                ReadUTF8Char()
-            }
+            ScanSymbolExclamation()
         } else if (first == b'<') {
-            if (getNextChar(0) == b'<') {
-                ReadUTF8Char()
-                if (getNextChar(0) == b'=') {
-                    ReadUTF8Char()
-                }
-            } else if (getNextChar(0) == b'=' || getNextChar(0) == b':' || getNextChar(0) == b'-') {
-                ReadUTF8Char()
-            }
+            ScanSymbolLessThan()
         } else if (first == b'>') {
-            if (!splitAmbiguousToken) {
-                if (getNextChar(0) == b'>') {
-                    ReadUTF8Char()
-                    if (getNextChar(0) == b'=') {
-                        ReadUTF8Char()
-                    }
-                } else if (getNextChar(0) == b'=') {
-                    ReadUTF8Char()
-                }
-            }
+            ScanSymbolGreaterThan()
         } else if (first == b'=') {
-            if (getNextChar(0) == b'=' || getNextChar(0) == b'>') {
-                ReadUTF8Char()
-            }
+            ScanSymbolEqual()
         } else if (first == b'%') {
-            if (getNextChar(0) == b'=') {
-                ReadUTF8Char()
-            }
+            ScanSymbolPercentSign()
         } else if (first == b'|') {
-            if (getNextChar(0) == b'|') {
-                ReadUTF8Char()
-                if (getNextChar(0) == b'=') {
-                    ReadUTF8Char()
-                }
-            } else if (getNextChar(0) == b'=' || getNextChar(0) == b'>') {
-                ReadUTF8Char()
-            }
+            ScanSymbolVerticalBar()
         } else if (first == b'?') {
-            if (!splitAmbiguousToken && getNextChar(0) == b'?') {
-                ReadUTF8Char()
-            }
+            ScanSymbolQuest()
         } else if (first == b'@') {
-            if (getNextChar(0) == b'!') {
-                ReadUTF8Char()
-            }
+            ScanSymbolAt()
         } else if (first == b':') {
-            if (getNextChar(0) == b':') {
-                ReadUTF8Char()
-            }
+            ScanSymbolColon()
         }
         return input[start..pNext]
     }
