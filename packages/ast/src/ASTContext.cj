@@ -8,6 +8,11 @@ public class InvertedIndex {
     public let astKindIndexes: HashMap<String, ArrayList<Symbol>> = HashMap<String, ArrayList<Symbol>>()
     public let scopeGateMap: HashMap<String, Symbol> = HashMap<String, Symbol>()
     public let scopeLevelIndexes: HashMap<UInt32, ArrayList<Symbol>> = HashMap<UInt32, ArrayList<Symbol>>()
+    public let nameTrie: Trie = Trie()
+    public let scopeNameTrie: Trie = Trie()
+    public let astKindTrie: Trie = Trie()
+    public let posBeginTrie: Trie = Trie()
+    public let posEndTrie: Trie = Trie()
     public var minPos: Position = BEGIN_POSITION
     public var maxPos: Position = Position(0, 1000000, 10000)
 
@@ -19,6 +24,11 @@ public class InvertedIndex {
         astKindIndexes.clear()
         scopeGateMap.clear()
         scopeLevelIndexes.clear()
+        nameTrie.Reset()
+        scopeNameTrie.Reset(TOPLEVEL_SCOPE_NAME)
+        astKindTrie.Reset()
+        posBeginTrie.Reset()
+        posEndTrie.Reset()
     }
 
     public func Index(symbol: Symbol, withTrie!: Bool = true): Unit {
@@ -30,9 +40,15 @@ public class InvertedIndex {
             scopeGateMap[symbol.scopeName] = symbol
         }
         putLevel(scopeLevelIndexes, symbol.scopeLevel, symbol)
-        putString(astKindIndexes, ASTKindName(symbol.astKind), symbol)
+        let astKindName = ASTKindName(symbol.astKind)
+        putString(astKindIndexes, astKindName, symbol)
+        scopeNameTrie.Insert(symbol.scopeName)
+        astKindTrie.Insert(astKindName)
         if (withTrie) {
+            nameTrie.Insert(symbol.name, symbol)
             if (let Some(node) <- symbol.node) {
+                posBeginTrie.Insert(PosSearchApi.PosToStr(node.begin), symbol)
+                posEndTrie.Insert(PosSearchApi.PosToStr(node.end), symbol)
                 updatePositionRange(node.begin)
                 updatePositionRange(node.end)
             }
@@ -51,6 +67,11 @@ public class InvertedIndex {
         }
         removeLevel(scopeLevelIndexes, symbol.scopeLevel, symbol)
         removeString(astKindIndexes, ASTKindName(symbol.astKind), symbol)
+        nameTrie.Delete(symbol.name, symbol)
+        if (let Some(node) <- symbol.node) {
+            posBeginTrie.Delete(PosSearchApi.PosToStr(node.begin), symbol)
+            posEndTrie.Delete(PosSearchApi.PosToStr(node.end), symbol)
+        }
         symbol.invertedIndexBeenDeleted = true
     }
 

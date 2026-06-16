@@ -279,14 +279,39 @@ public class Sort {
     public static func PosAsc(left: Symbol, right: Symbol): Bool {
         if (let Some(leftNode) <- left.node) {
             if (let Some(rightNode) <- right.node) {
-                return leftNode.begin < rightNode.begin
+                if (leftNode.begin.fileID < rightNode.begin.fileID) {
+                    return true
+                }
+                if (leftNode.begin.fileID > rightNode.begin.fileID) {
+                    return false
+                }
+                if (leftNode.begin < rightNode.begin) {
+                    return true
+                }
+                if (rightNode.begin < leftNode.begin) {
+                    return false
+                }
+                if (leftNode.end == rightNode.end) {
+                    return ASTKindIndex(left.astKind) < ASTKindIndex(right.astKind)
+                }
+                return rightNode.end < leftNode.end
             }
+            return false
         }
-        return left.name < right.name
+        if (let Some(_) <- right.node) {
+            return true
+        }
+        if (left.hashID != right.hashID) {
+            return left.hashID < right.hashID
+        }
+        if (left.name != right.name) {
+            return left.name < right.name
+        }
+        return left.scopeName < right.scopeName
     }
 
     public static func PosDesc(left: Symbol, right: Symbol): Bool {
-        return !Sort.PosAsc(left, right)
+        return Sort.PosAsc(right, left)
     }
 }
 
@@ -307,9 +332,10 @@ public class Searcher {
     }
 
     public func Search(ctx: ASTContext, query: Query): ArrayList<Symbol> {
+        let ids = PerformSearch(ctx, query)
         let out = ArrayList<Symbol>()
-        for (symbol in ctx.symbolTable) {
-            if (query.Match(symbol)) {
+        for (symbol in ids) {
+            if (!symbol.invertedIndexBeenDeleted) {
                 insertByPosition(out, symbol)
             }
         }
@@ -321,21 +347,238 @@ public class Searcher {
     }
 
     public func InvalidateCacheBut(query: String): Unit {
-        let keep = cache.get(query)
-        cache.clear()
-        if (let Some(values) <- keep) {
-            cache[query] = values
+        let keysToRemove = ArrayList<String>()
+        for ((key, _) in cache) {
+            if (!key.contains(query)) {
+                keysToRemove.add(key)
+            }
+        }
+        for (key in keysToRemove) {
+            cache.remove(key)
         }
     }
 
     public func GetScopeNamesByPrefix(ctx: ASTContext, prefix: String): ArrayList<String> {
+        if (!ctx.invertedIndex.scopeNameIndexes.isEmpty()) {
+            return ctx.invertedIndex.scopeNameTrie.PrefixMatch(prefix)
+        }
         let out = ArrayList<String>()
         for (symbol in ctx.symbolTable) {
-            if (symbol.scopeName.startsWith(prefix)) {
-                addUniqueString(out, symbol.scopeName)
+            if (!symbol.invertedIndexBeenDeleted && symbol.scopeName.startsWith(prefix)) {
+                AddUniqueString(out, symbol.scopeName)
             }
         }
         return out
+    }
+
+    private func PerformSearch(ctx: ASTContext, query: Query): ArrayList<Symbol> {
+        if (let Some(compound) <- (query as CompoundQuery)) {
+            return PerformCompoundSearch(ctx, compound)
+        }
+        if (let Some(nameQuery) <- (query as NameQuery)) {
+            return GetIDsByName(ctx, nameQuery)
+        }
+        if (let Some(scopeQuery) <- (query as ScopeQuery)) {
+            return GetIDsByScopeName(ctx, scopeQuery)
+        }
+        if (let Some(kindQuery) <- (query as ASTKindQuery)) {
+            return GetIDsByASTKind(ctx, kindQuery)
+        }
+        if (let Some(levelQuery) <- (query as ScopeLevelQuery)) {
+            return GetIDsByScopeLevel(ctx, levelQuery.level)
+        }
+        return FilterByMatcher(ctx, query)
+    }
+
+    private func PerformCompoundSearch(ctx: ASTContext, query: CompoundQuery): ArrayList<Symbol> {
+        if (query.children.isEmpty()) {
+            return AllLiveSymbols(ctx)
+        }
+        if (query.kind == QueryKind.AND) {
+            var out = PerformSearch(ctx, query.children[0])
+            var idx: Int64 = 1
+            while (idx < query.children.size) {
+                out = Intersection(out, PerformSearch(ctx, query.children[idx]))
+                idx++
+            }
+            return out
+        }
+        if (query.kind == QueryKind.OR) {
+            let out = ArrayList<Symbol>()
+            for (child in query.children) {
+                AddAllUnique(out, PerformSearch(ctx, child))
+            }
+            return out
+        }
+        if (query.kind == QueryKind.NOT) {
+            if (query.children.size == 1) {
+                return Difference(AllLiveSymbols(ctx), PerformSearch(ctx, query.children[0]))
+            }
+            return Difference(PerformSearch(ctx, query.children[0]), PerformSearch(ctx, query.children[1]))
+        }
+        return FilterByMatcher(ctx, query)
+    }
+
+    private func GetIDsByName(ctx: ASTContext, query: NameQuery): ArrayList<Symbol> {
+        if (ctx.invertedIndex.nameIndexes.isEmpty()) {
+            return FilterByMatcher(ctx, query)
+        }
+        if (query.value.isEmpty()) {
+            return ValuesFromStringIndex(ctx.invertedIndex.nameIndexes)
+        }
+        if (query.matchKind == MatchKind.PRECISE) {
+            return SymbolsForKey(ctx.invertedIndex.nameIndexes, query.value)
+        }
+        let names = if (query.matchKind == MatchKind.PREFIX) {
+            ctx.invertedIndex.nameTrie.PrefixMatch(query.value)
+        } else {
+            ctx.invertedIndex.nameTrie.SuffixMatch(query.value)
+        }
+        return SymbolsForKeys(ctx.invertedIndex.nameIndexes, names)
+    }
+
+    private func GetIDsByScopeName(ctx: ASTContext, query: ScopeQuery): ArrayList<Symbol> {
+        if (ctx.invertedIndex.scopeNameIndexes.isEmpty()) {
+            return FilterByMatcher(ctx, query)
+        }
+        if (query.matchKind == MatchKind.SUFFIX) {
+            return ArrayList<Symbol>()
+        }
+        if (query.value.isEmpty()) {
+            return ValuesFromStringIndex(ctx.invertedIndex.scopeNameIndexes)
+        }
+        if (query.matchKind == MatchKind.PRECISE) {
+            return SymbolsForKey(ctx.invertedIndex.scopeNameIndexes, query.value)
+        }
+        let out = ArrayList<Symbol>()
+        for (scopeName in ctx.invertedIndex.scopeNameTrie.PrefixMatch(query.value)) {
+            AddAllUnique(out, SymbolsForKey(ctx.invertedIndex.scopeNameIndexes, GetScopeNameWithoutTail(scopeName)))
+        }
+        return out
+    }
+
+    private func GetIDsByScopeLevel(ctx: ASTContext, level: UInt32): ArrayList<Symbol> {
+        if (ctx.invertedIndex.scopeLevelIndexes.isEmpty()) {
+            return FilterByMatcher(ctx, ScopeLevelQuery(level))
+        }
+        let out = ArrayList<Symbol>()
+        if (let Some(values) <- ctx.invertedIndex.scopeLevelIndexes.get(level)) {
+            AddAllUnique(out, values)
+        }
+        return out
+    }
+
+    private func GetIDsByASTKind(ctx: ASTContext, query: ASTKindQuery): ArrayList<Symbol> {
+        if (ctx.invertedIndex.astKindIndexes.isEmpty()) {
+            return FilterByMatcher(ctx, query)
+        }
+        if (query.matchKind == MatchKind.PREFIX) {
+            return ArrayList<Symbol>()
+        }
+        if (query.valueText.isEmpty()) {
+            return ValuesFromStringIndex(ctx.invertedIndex.astKindIndexes)
+        }
+        if (query.matchKind == MatchKind.PRECISE) {
+            return SymbolsForKey(ctx.invertedIndex.astKindIndexes, query.valueText)
+        }
+        return SymbolsForKeys(ctx.invertedIndex.astKindIndexes, ctx.invertedIndex.astKindTrie.SuffixMatch(query.valueText))
+    }
+
+    private func SymbolsForKeys(map: HashMap<String, ArrayList<Symbol>>, keys: ArrayList<String>): ArrayList<Symbol> {
+        let out = ArrayList<Symbol>()
+        for (key in keys) {
+            AddAllUnique(out, SymbolsForKey(map, key))
+        }
+        return out
+    }
+
+    private func SymbolsForKey(map: HashMap<String, ArrayList<Symbol>>, key: String): ArrayList<Symbol> {
+        let out = ArrayList<Symbol>()
+        if (let Some(values) <- map.get(key)) {
+            AddAllUnique(out, values)
+        }
+        return out
+    }
+
+    private func ValuesFromStringIndex(map: HashMap<String, ArrayList<Symbol>>): ArrayList<Symbol> {
+        let out = ArrayList<Symbol>()
+        for ((_, values) in map) {
+            AddAllUnique(out, values)
+        }
+        return out
+    }
+
+    private func FilterByMatcher(ctx: ASTContext, query: Query): ArrayList<Symbol> {
+        let out = ArrayList<Symbol>()
+        for (symbol in ctx.symbolTable) {
+            if (!symbol.invertedIndexBeenDeleted && query.Match(symbol)) {
+                AddUnique(out, symbol)
+            }
+        }
+        return out
+    }
+
+    private func AllLiveSymbols(ctx: ASTContext): ArrayList<Symbol> {
+        let out = ArrayList<Symbol>()
+        for (symbol in ctx.symbolTable) {
+            if (!symbol.invertedIndexBeenDeleted) {
+                AddUnique(out, symbol)
+            }
+        }
+        return out
+    }
+
+    private func Intersection(left: ArrayList<Symbol>, right: ArrayList<Symbol>): ArrayList<Symbol> {
+        let out = ArrayList<Symbol>()
+        for (item in left) {
+            if (ContainsSymbol(right, item)) {
+                AddUnique(out, item)
+            }
+        }
+        return out
+    }
+
+    private func Difference(left: ArrayList<Symbol>, right: ArrayList<Symbol>): ArrayList<Symbol> {
+        let out = ArrayList<Symbol>()
+        for (item in left) {
+            if (!ContainsSymbol(right, item)) {
+                AddUnique(out, item)
+            }
+        }
+        return out
+    }
+
+    private func AddAllUnique(out: ArrayList<Symbol>, values: ArrayList<Symbol>): Unit {
+        for (value in values) {
+            AddUnique(out, value)
+        }
+    }
+
+    private func AddUnique(out: ArrayList<Symbol>, symbol: Symbol): Unit {
+        if (symbol.invertedIndexBeenDeleted) {
+            return
+        }
+        if (!ContainsSymbol(out, symbol)) {
+            out.add(symbol)
+        }
+    }
+
+    private func ContainsSymbol(values: ArrayList<Symbol>, symbol: Symbol): Bool {
+        for (value in values) {
+            if (SameSymbol(value, symbol)) {
+                return true
+            }
+        }
+        return false
+    }
+
+    private func AddUniqueString(out: ArrayList<String>, value: String): Unit {
+        for (item in out) {
+            if (item == value) {
+                return
+            }
+        }
+        out.add(value)
     }
 
     private func insertByPosition(out: ArrayList<Symbol>, symbol: Symbol): Unit {
@@ -348,14 +591,5 @@ public class Searcher {
             idx++
         }
         out.add(symbol)
-    }
-
-    private func addUniqueString(out: ArrayList<String>, value: String): Unit {
-        for (item in out) {
-            if (item == value) {
-                return
-            }
-        }
-        out.add(value)
     }
 }

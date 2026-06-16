@@ -150,7 +150,7 @@ public class ScopeQuery <: Query {
         if (matchKind == MatchKind.SUFFIX) {
             return false
         }
-        return stringMatches(symbol.scopeName, value, matchKind)
+        return stringMatches(GetScopeNameWithoutTail(symbol.scopeName), value, matchKind)
     }
 
     public override func PrettyPrint(): String {
@@ -246,20 +246,20 @@ public class PositionQuery <: Query {
         if (let Some(node) <- symbol.node) {
             let begin = node.GetBegin()
             let end = node.GetEnd()
-            let contains = begin <= pos && pos < end
+            let contains = ComparePosition(begin, pos) <= 0 && ComparePosition(pos, end) < 0
             if (comparator == PositionCompare.EQ) {
                 return contains
             }
             if (comparator == PositionCompare.LT) {
-                return end < pos
+                return ComparePosition(end, pos) < 0
             }
             if (comparator == PositionCompare.LE) {
-                return end < pos || contains
+                return ComparePosition(end, pos) < 0 || contains
             }
             if (comparator == PositionCompare.GT) {
-                return begin > pos
+                return ComparePosition(begin, pos) > 0
             }
-            return begin > pos || contains
+            return ComparePosition(begin, pos) > 0 || contains
         }
         return false
     }
@@ -274,6 +274,22 @@ public class PositionQuery <: Query {
         }
         return "_${op}${pos.ToString()}"
     }
+}
+
+private func ComparePosition(left: Position, right: Position): Int64 {
+    if (left.fileID < right.fileID) {
+        return -1
+    }
+    if (left.fileID > right.fileID) {
+        return 1
+    }
+    if (left < right) {
+        return -1
+    }
+    if (right < left) {
+        return 1
+    }
+    return 0
 }
 
 private func printPattern(value: String, matchKind: MatchKind): String {
