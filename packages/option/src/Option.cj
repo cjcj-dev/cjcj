@@ -12,6 +12,11 @@ import std.collection.*
 
 private let ARGUMENT_IGNORED_SUFFIX: String = " The argument is ignored."
 
+private func emitOptionDiag(kind: BasicDiagKindRefactor): Unit {
+    let diag = BasicDiagnosticEngine()
+    diag.DiagnoseRefactor(kind, BasicDefaultPosition).Emit()
+}
+
 private func emitOptionDiag(kind: BasicDiagKindRefactor, arg: String): Unit {
     let diag = BasicDiagnosticEngine()
     diag.DiagnoseRefactor(kind, BasicDefaultPosition, arguments: [arg]).Emit()
@@ -22,11 +27,30 @@ private func emitOptionDiag(kind: BasicDiagKindRefactor, first: String, second: 
     diag.DiagnoseRefactor(kind, BasicDefaultPosition, arguments: [first, second]).Emit()
 }
 
+private func emitOptionDiag(
+    kind: BasicDiagKindRefactor,
+    first: String,
+    second: String,
+    third: String,
+    fourth: String
+): Unit {
+    let diag = BasicDiagnosticEngine()
+    diag.DiagnoseRefactor(kind, BasicDefaultPosition, arguments: [first, second, third, fourth]).Emit()
+}
+
 private func emitDirectoryAccessFailure(path: String, result: UtilsAccessResultType): Unit {
     match (result) {
         case UtilsAccessResultType.NO_PERMISSION => emitOptionDiag(BasicDiagKindRefactor.permission_denied, path)
         case _ => emitOptionDiag(BasicDiagKindRefactor.no_such_directory, path)
     }
+}
+
+private func ltoUnsupportedOSName(target: TripleInfo): String {
+    let osFamily = target.GetOSFamily()
+    if (osFamily == OSType.IOS) { return "iOS" }
+    if (osFamily == OSType.DARWIN) { return "Darwin" }
+    if (osFamily == OSType.WINDOWS) { return "Windows" }
+    return target.OSToString()
 }
 
 public class Path {
@@ -1003,7 +1027,7 @@ public open class GlobalOptions <: Option {
         if (IsLTOEnabled()) {
             if (target.GetOSFamily() == OSType.DARWIN || target.GetOSFamily() == OSType.IOS ||
                 target.GetOSFamily() == OSType.WINDOWS) {
-                Errorln("LTO is not supported for target " + target.OSToString())
+                emitOptionDiag(BasicDiagKindRefactor.driver_target_lto_unsupported, ltoUnsupportedOSName(target))
                 return false
             }
             if (outputMode == OutputMode.OBJ) {
@@ -1021,67 +1045,85 @@ public open class GlobalOptions <: Option {
         }
         if (IsCompileAsExeEnabled()) {
             if (!IsLTOEnabled()) {
-                Errorln("'--compile-as-exe' requires '--lto'.")
+                emitOptionDiag(BasicDiagKindRefactor.driver_invalid_compile_as_exe)
                 return false
             }
             if (target.GetOSFamily() == OSType.WINDOWS || target.GetOSFamily() == OSType.DARWIN ||
                 target.GetOSFamily() == OSType.IOS) {
-                Errorln("'--compile-as-exe' is not supported for this target platform.")
+                emitOptionDiag(BasicDiagKindRefactor.driver_invalid_compile_as_exe_platform)
                 return false
             }
         }
         if (IsLTOPkgVisibilityEnabled()) {
             if (!IsLTOEnabled()) {
-                Errorln("'--lto-keep-pkg-visibility' requires '--lto'.")
+                emitOptionDiag(BasicDiagKindRefactor.driver_invalid_visible_pkgs)
                 return false
             }
             if (!ltoVisiblePkgs.isEmpty() && IsCompileAsExeEnabled()) {
-                Errorln("'--lto-keep-pkg-visibility' conflicts with '--compile-as-exe'.")
+                emitOptionDiag(BasicDiagKindRefactor.driver_invalid_visible_pkgs_conflict)
                 return false
             }
             if (outputMode != OutputMode.SHARED_LIB) {
-                Warningln("'--lto-keep-pkg-visibility' only affects dynamic library output.")
+                emitOptionDiag(BasicDiagKindRefactor.driver_visible_pkgs_only_for_dylib)
             }
         }
         if (enablePgoInstrGen && enablePgoInstrUse) {
-            Errorln("using both '--pgo-instr-gen' and '--pgo-instr-use' is not allowed.")
+            emitOptionDiag(BasicDiagKindRefactor.driver_pgo_both_gen_and_use)
             return false
         }
         if (enablePgoInstrGen && target.env == EnvironmentType.OHOS && pgoProfileFile.isEmpty()) {
-            Errorln("'--pgo-instr-gen' requires a profile file when targeting OHOS.")
+            emitOptionDiag(BasicDiagKindRefactor.driver_ohos_pgo_gen_without_file)
             return false
         }
-        if (enablePgoInstrUse && (!FileExist(pgoProfileFile) || GetFileExtension(pgoProfileFile) != "profdata")) {
-            Errorln("'--pgo-instr-use' requires an existing .profdata file.")
-            return false
+        if (enablePgoInstrUse) {
+            if (!FileExist(pgoProfileFile)) {
+                emitOptionDiag(BasicDiagKindRefactor.no_such_file_or_directory, pgoProfileFile)
+                return false
+            }
+            if (GetFileExtension(pgoProfileFile) != "profdata") {
+                emitOptionDiag(BasicDiagKindRefactor.driver_pgo_invalid_profile_extension, pgoProfileFile)
+                return false
+            }
         }
         if (!ReprocessObfuseOption()) { return false }
         for (commonCjo in commonPartCjos) {
             if (GetFileExtension(commonCjo) != "cjo") {
-                Warningln("unexpected file extension for common cjo input: " + commonCjo)
+                emitOptionDiag(
+                    BasicDiagKindRefactor.driver_warning_unexpected_file_extension,
+                    "cjo",
+                    commonCjo,
+                    commonCjo,
+                    ARGUMENT_IGNORED_SUFFIX
+                )
                 return false
             }
         }
         for (commonChir in commonPartChirs) {
             if (GetFileExtension(commonChir) != "chir") {
-                Warningln("unexpected file extension for common chir input: " + commonChir)
+                emitOptionDiag(
+                    BasicDiagKindRefactor.driver_warning_unexpected_file_extension,
+                    "chir",
+                    commonChir,
+                    commonChir,
+                    ARGUMENT_IGNORED_SUFFIX
+                )
                 return false
             }
         }
         if (commonPartCjos.size != commonPartChirs.size) {
-            Errorln("'--common-part-cjo' requires one matching '--common-part-chir' for each file.")
+            emitOptionDiag(BasicDiagKindRefactor.driver_require_common_chir_for_each_common_cjo)
             return false
         }
         if (outputMode != OutputMode.OBJ && compileTarget != CompileTarget.DEFAULT) {
             compileTarget = CompileTarget.DEFAULT
-            Warningln("'--compile-target' is only valid with '--output-type=obj'.")
+            emitOptionDiag(BasicDiagKindRefactor.driver_invalid_compile_target)
         }
         if (srcFiles.isEmpty() && (outputMode == OutputMode.OBJ || outputMode == OutputMode.CHIR) && !compilePackage) {
-            Errorln("source file is required for '--output-type=obj' or '--output-type=chir'.")
+            emitOptionDiag(BasicDiagKindRefactor.driver_source_file_empty)
             return false
         }
         if (!compilePackage && srcFiles.isEmpty() && !inputObjs.isEmpty() && !experimentalMode) {
-            Errorln("object-only linking requires '--experimental'.")
+            emitOptionDiag(BasicDiagKindRefactor.driver_require_experimental)
             return false
         }
         if (!jobs.hasValue) { jobs = MaybeUInt64(GetHardwareConcurrency()) }
@@ -1100,7 +1142,7 @@ public open class GlobalOptions <: Option {
         }
         if (target.env == EnvironmentType.OHOS) {
             if (linkStaticStd.hasValue && linkStaticStd.value) {
-                Warningln("'--static-std' has no effect when targeting OHOS.")
+                emitOptionDiag(BasicDiagKindRefactor.driver_static_std_for_ohos)
             }
             linkStaticStd = MaybeBool(false)
         }

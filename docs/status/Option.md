@@ -178,3 +178,14 @@ source-vs-binary not-found diagnostic kind for `.cj`/`.cj.d`/`.bc` versus
 `.o`/`.a`/`.obj`/`.cjo` inputs. `--jobs` and `--apc` numeric validation also
 matches the C++ check order: non-digit values are diagnosed before the maximum
 length check.
+
+This pass continues that diagnostic migration through the post-action checks
+that already have shared Basic driver diagnostics in the reference. LTO now
+reports `driver_target_lto_unsupported` with the C++ OS spelling, compile-as-exe
+and LTO-visible-package validation use their dedicated driver errors/warnings,
+PGO conflicts and profile-file validation use the C++ diagnostic IDs, CJMP
+common-part extension/count checks use the same unexpected-extension warning
+and count error, output-mode/source/object checks use
+`driver_invalid_compile_target`, `driver_source_file_empty`, and
+`driver_require_experimental`, and OHOS `--static-std` normalization emits
+`driver_static_std_for_ohos`.
