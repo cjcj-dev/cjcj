@@ -85,8 +85,10 @@ public class LambdaPattern {
 
 public class PackageConfig {
     public var name: String = ""
-    public var apiStrategy: InteropCJStrategy = InteropCJStrategy.NONE
-    public var genericTypeStrategy: InteropCJGenericStrategyType = InteropCJGenericStrategyType.NONE
+    public var apiStrategy: InteropCJStrategy = InteropCJStrategy.UNKNOWN
+    public var genericTypeStrategy: InteropCJGenericStrategyType = InteropCJGenericStrategyType.UNKNOWN
+    public var hasApiStrategy: Bool = false
+    public var hasGenericTypeStrategy: Bool = false
     public let interopCJIncludedApis: ArrayList<String> = ArrayList<String>()
     public let interopCJExcludedApis: ArrayList<String> = ArrayList<String>()
     public let allowedInteropCJGenericInstantiations: HashMap<String, HashMap<String, GenericTypeArguments>> =
@@ -105,7 +107,12 @@ public class InteropCJPackageConfigReader {
     public init() {}
 
     public func Parse(filePath: String): Bool {
-        let content = String.fromUtf8(File.readFrom(filePath))
+        let content = try {
+            String.fromUtf8(File.readFrom(filePath))
+        } catch (e: Exception) {
+            WriteError("Error: Cannot open configuration file." + filePath + "\n")
+            return false
+        }
         if (content.contains("/*")) {
             WriteError("Failed to open configuration file. Error: Unsupported block comment '/*' detected. Please use line comment '#' instead.\n")
             return false
@@ -232,8 +239,10 @@ public class InteropCJPackageConfigReader {
             pkg.name = parseString(value)
         } else if (key == "APIStrategy") {
             pkg.apiStrategy = stringToStrategy(parseString(value))
+            pkg.hasApiStrategy = true
         } else if (key == "GenericTypeStrategy") {
             pkg.genericTypeStrategy = stringToGenericStrategy(parseString(value))
+            pkg.hasGenericTypeStrategy = true
         } else if (key == "included_apis") {
             appendStrings(pkg.interopCJIncludedApis, parseStringArray(value))
         } else if (key == "excluded_apis") {
@@ -256,6 +265,12 @@ public class InteropCJPackageConfigReader {
     private func storePackage(pkgOpt: Option<PackageConfig>): Unit {
         if (let Some(pkg) <- pkgOpt) {
             if (!pkg.name.isEmpty()) {
+                if (!pkg.hasApiStrategy) {
+                    pkg.apiStrategy = InteropCJStrategy.NONE
+                }
+                if (!pkg.hasGenericTypeStrategy) {
+                    pkg.genericTypeStrategy = InteropCJGenericStrategyType.NONE
+                }
                 if (packages.contains(pkg.name)) {
                     packages.remove(pkg.name)
                 }

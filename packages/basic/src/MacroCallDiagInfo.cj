@@ -79,9 +79,9 @@ public class DescPositionMap {
     public func lowerBound(key: UInt32): Option<(UInt32, Position)> {
         var best: Option<(UInt32, Position)> = None
         for (entry in entries) {
-            if (entry[0] >= key) {
+            if (entry[0] <= key) {
                 if (let Some(current) <- best) {
-                    if (entry[0] < current[0]) {
+                    if (entry[0] > current[0]) {
                         best = entry
                     }
                 } else {
@@ -98,9 +98,9 @@ public class DescPositionMap {
         for (entry in entries) {
             if (entry[0] == key) {
                 foundExact = true
-            } else if (entry[0] > key) {
+            } else if (entry[0] < key) {
                 if (let Some(current) <- bestAfter) {
-                    if (entry[0] < current[0]) {
+                    if (entry[0] > current[0]) {
                         bestAfter = entry
                     }
                 } else {

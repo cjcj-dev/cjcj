@@ -63,7 +63,7 @@ public func SplitString(str: String, delimiter: String): Array<String> {
     var foundPos = str.indexOf(delimiter)
     while (let Some(found) <- foundPos) {
         res.add(str[pos..found])
-        pos = found + delimiter.size
+        pos = found + 1
         foundPos = str.indexOf(delimiter, pos)
     }
     if (pos < str.size) {

@@ -4,6 +4,20 @@ Date: 2026-06-16
 
 Build: `cjpm build` passes.
 
+Deepening pass updates:
+
+- Matched `MacroCallDiagInfo` lookup with the C++ descending `std::map<unsigned, Position, std::greater<...>>`
+  behavior. `lower_bound` now selects the largest key not greater than the queried position, and the LSP exact-key
+  path advances to the next lower key before falling back, matching the reference macro position remapping.
+- Aligned `PackageConfig` defaults with the C++ public structure by starting package-local API and generic strategies
+  as `UNKNOWN`, while preserving the C++ parser behavior that absent package strategy keys default to `None`.
+  Explicit invalid strategy strings remain `UNKNOWN` and fail validation.
+- Made `InteropCJPackageConfigReader.Parse` return `false` on file read failures instead of allowing the filesystem
+  exception to escape, matching the C++ reader's caught parse/open failure path.
+- Matched two byte-level utility behaviors from C++ Basic: `SplitString` advances one byte past a found delimiter, and
+  `StringConvertor.Normalize` drops an unrecognized escape backslash while preserving the escaped byte for later
+  processing.
+
 Implemented:
 
 - Replaced the Basic scaffold with a multi-file Cangjie package mirroring the C++ Basic components.
