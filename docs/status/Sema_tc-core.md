@@ -57,6 +57,31 @@ Verification:
 - `cjpm build` passes after this pass.
 - Remaining `TODO(selfhost:Sema)` markers in the tc-core-owned files listed by the task: 0.
 
+## 2026-06-17 Continue Pass 4
+
+Files deepened:
+
+- `packages/sema/src/TypeManager.cj`
+
+Implemented behavior:
+
+- Added persistent top-level type-variable scope storage, matching the C++ `TypeManager` model that always has a top `TyVarScope` for placeholder variables.
+- Added explicit placeholder type-variable scope-depth tracking. `AllocTyVar` now records each placeholder's scope depth, and placeholders derived from another type variable are registered in the parent variable's scope rather than always in the current scope.
+- Replaced the stub `ScopeDepthOfTyVar` implementation with scope-depth lookup over the recorded depth table and active scopes.
+- Replaced `GetInnermostUnsolvedTyVars` with active-scope filtering, so lambda/type-inference callers see only unsolved variables introduced in the innermost scope.
+- Matched C++ unsolved-placeholder bookkeeping more closely by adding the `Any` sum-bound sentinel when marking a placeholder unsolved and checking that sentinel in `TyVarHasNoSum`.
+
+Remaining gaps:
+
+- Type-variable resource pooling from C++ is not modeled yet; released placeholders are removed from active tracking but not reused.
+- The `SubstPack` contextual generic mapping overload still needs the C++ placeholder-aware traversal.
+
+Verification:
+
+- `cjpm build` passes after this pass.
+- `grep -rn "TODO(selfhost:Sema)" packages/sema/src` reports 4 remaining package-level markers, all outside the tc-core-owned files.
+- Remaining `TODO(selfhost:Sema)` markers in the tc-core-owned files listed by the task: 0.
+
 ## 2026-06-17 Continue Pass 3
 
 Files deepened:

@@ -46,6 +46,26 @@ public class TyVarScope {
         tyVars.add(tyVar)
     }
 
+    public func ContainsTyVar(tyVar: GenericsTy): Bool {
+        for (value in tyVars) {
+            if (SameTy(value, tyVar)) {
+                return true
+            }
+        }
+        return false
+    }
+
+    public func AddUnsolvedTyVars(out: ArrayList<GenericsTy>, unsolved: ArrayList<GenericsTy>): Unit {
+        for (tyVar in tyVars) {
+            for (candidate in unsolved) {
+                if (SameTy(tyVar, candidate)) {
+                    out.add(tyVar)
+                    break
+                }
+            }
+        }
+    }
+
     public func Close(): Unit {
         if (closed) {
             return
@@ -186,6 +206,16 @@ private class CheckedTyExtendRelation {
     }
 }
 
+private class TyVarScopeDepthEntry {
+    public var tyVar: GenericsTy
+    public var depth: Int64
+
+    public init(tyVar: GenericsTy, depth: Int64) {
+        this.tyVar = tyVar
+        this.depth = depth
+    }
+}
+
 public class TypeManager {
     public let constraints: Constraint = Constraint()
     public let builtinTyToExtendMap: ArrayList<TyExtendsEntry> = ArrayList<TyExtendsEntry>()
@@ -202,10 +232,13 @@ public class TypeManager {
     private let checkedTyExtendRelation: ArrayList<CheckedTyExtendRelation> = ArrayList<CheckedTyExtendRelation>()
     private let unsolvedTyVars: ArrayList<GenericsTy> = ArrayList<GenericsTy>()
     private let tyVarScopes: ArrayList<TyVarScope> = ArrayList<TyVarScope>()
+    private let tyVarScopeDepth: ArrayList<TyVarScopeDepthEntry> = ArrayList<TyVarScopeDepthEntry>()
     private let instCtxScopes: ArrayList<InstCtxScope> = ArrayList<InstCtxScope>()
     private var nextUniqId: UInt64 = 0u64
 
-    public init() {}
+    public init() {
+        tyVarScopes.add(TyVarScope())
+    }
 
     public static func GetPrimitiveTy(kind: TypeKind): PrimitiveTy {
         if (kind == TypeKind.TYPE_NOTHING) {
@@ -1368,6 +1401,62 @@ public class TypeManager {
         return None
     }
 
+    private func putTyVarScopeDepth(tyVar: GenericsTy, depth: Int64): Unit {
+        for (entry in tyVarScopeDepth) {
+            if (SameTy(entry.tyVar, tyVar)) {
+                entry.depth = depth
+                return
+            }
+        }
+        tyVarScopeDepth.add(TyVarScopeDepthEntry(tyVar, depth))
+    }
+
+    private func removeTyVarScopeDepth(tyVar: GenericsTy): Unit {
+        var idx: Int64 = 0
+        while (idx < tyVarScopeDepth.size) {
+            if (SameTy(tyVarScopeDepth[idx].tyVar, tyVar)) {
+                tyVarScopeDepth.remove(at: idx)
+                return
+            }
+            idx++
+        }
+    }
+
+    private func findTyVarScopeDepth(tyVar: GenericsTy): Option<Int64> {
+        for (entry in tyVarScopeDepth) {
+            if (SameTy(entry.tyVar, tyVar)) {
+                return entry.depth
+            }
+        }
+        var idx: Int64 = 0
+        while (idx < tyVarScopes.size) {
+            if (tyVarScopes[idx].ContainsTyVar(tyVar)) {
+                putTyVarScopeDepth(tyVar, idx)
+                return idx
+            }
+            idx++
+        }
+        return None
+    }
+
+    private func currentTyVarScopeDepth(): Int64 {
+        if (tyVarScopes.isEmpty()) {
+            tyVarScopes.add(TyVarScope())
+        }
+        return tyVarScopes.size - 1
+    }
+
+    private func addTyVarToScope(tyVar: GenericsTy, depth: Int64): Unit {
+        if (depth >= 0 && depth < tyVarScopes.size) {
+            tyVarScopes[depth].AddTyVar(tyVar)
+            putTyVarScopeDepth(tyVar, depth)
+            return
+        }
+        let fallbackDepth = currentTyVarScopeDepth()
+        tyVarScopes[fallbackDepth].AddTyVar(tyVar)
+        putTyVarScopeDepth(tyVar, fallbackDepth)
+    }
+
     public func AllocTyVar(srcId!: String = "Ti", needSolving!: Bool = false,
         derivedFrom!: Option<GenericsTy> = None): GenericsTy {
         let decl = GenericParamDecl()
@@ -1381,11 +1470,17 @@ public class TypeManager {
             }
             tv.lowerBound = parent.lowerBound
         }
+        if (let Some(parent) <- derivedFrom) {
+            if (let Some(parentDepth) <- findTyVarScopeDepth(parent)) {
+                addTyVarToScope(tv, parentDepth)
+            } else {
+                addTyVarToScope(tv, currentTyVarScopeDepth())
+            }
+        } else {
+            addTyVarToScope(tv, currentTyVarScopeDepth())
+        }
         if (needSolving) {
             MarkAsUnsolvedTyVar(tv)
-        }
-        if (!tyVarScopes.isEmpty()) {
-            tyVarScopes[tyVarScopes.size - 1].AddTyVar(tv)
         }
         return tv
     }
@@ -1415,6 +1510,8 @@ public class TypeManager {
     }
 
     public func ReleaseTyVar(tv: GenericsTy): Unit {
+        tv.upperBounds.clear()
+        tv.lowerBound = None
         var idx: Int64 = 0
         while (idx < unsolvedTyVars.size) {
             if (SameTy(unsolvedTyVars[idx], tv)) {
@@ -1423,15 +1520,19 @@ public class TypeManager {
                 idx++
             }
         }
+        removeTyVarScopeDepth(tv)
     }
 
     public func ScopeDepthOfTyVar(tyVar: GenericsTy): Int64 {
-        let _ = tyVar
+        if (let Some(depth) <- findTyVarScopeDepth(tyVar)) {
+            return depth
+        }
         return 0
     }
 
     public func TyVarHasNoSum(tv: GenericsTy): Bool {
-        return constraints.GetOrCreate(tv).sum.IsEmpty()
+        let sum = constraints.GetOrCreate(tv).sum
+        return sum.Size() == 1 && sum.values[0].IsAny()
     }
 
     public func GetUnsolvedTyVars(): ArrayList<GenericsTy> {
@@ -1442,10 +1543,16 @@ public class TypeManager {
         if (!containsGeneric(unsolvedTyVars, tv)) {
             unsolvedTyVars.add(tv)
         }
+        constraints.GetOrCreate(tv).sum.Add(GetAnyTy())
     }
 
     public func GetInnermostUnsolvedTyVars(): ArrayList<GenericsTy> {
-        return unsolvedTyVars
+        let out = ArrayList<GenericsTy>()
+        if (tyVarScopes.isEmpty()) {
+            return out
+        }
+        tyVarScopes[tyVarScopes.size - 1].AddUnsolvedTyVars(out, unsolvedTyVars)
+        return out
     }
 
     public func TryGreedySubst(ty: Ty): Ty {
