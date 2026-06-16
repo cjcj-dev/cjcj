@@ -14,42 +14,48 @@ public func EmitTypeCastExpression(irBuilder: IRBuilder2, chirExpr: Expression):
     if (let Some(targetTy) <- chirExpr.GetResultType()) {
         let targetLLVMType = CGType.GetOrCreate(irBuilder.GetCGModule(), targetTy).GetLLVMType()
         if (let Some(sourceTy) <- sourceOperand.GetType()) {
-            if (sourceTy.IsEqual(targetTy)) {
-                return sourceValue
-            }
-            if (IsIntegerLikeType(sourceTy) && IsIntegerLikeType(targetTy)) {
-                return EmitIntegerCast(irBuilder, sourceValue, sourceTy, targetTy, targetLLVMType)
-            }
-            if (sourceTy.IsFloat() && targetTy.IsFloat()) {
-                return EmitFloatCast(irBuilder, sourceValue, sourceTy, targetTy, targetLLVMType)
-            }
-            if (IsIntegerLikeType(sourceTy) && targetTy.IsFloat()) {
-                return if (IsSignedIntegerLikeType(sourceTy)) {
-                    irBuilder.CreateSIToFP(sourceValue, targetLLVMType)
-                } else {
-                    irBuilder.CreateUIToFP(sourceValue, targetLLVMType)
-                }
-            }
-            if (sourceTy.IsFloat() && IsIntegerLikeType(targetTy)) {
-                return if (IsSignedIntegerLikeType(targetTy)) {
-                    irBuilder.CreateFPToSI(sourceValue, targetLLVMType)
-                } else {
-                    irBuilder.CreateFPToUI(sourceValue, targetLLVMType)
-                }
-            }
-            if (IsPointerLikeType(sourceTy) && IsIntegerLikeType(targetTy)) {
-                return irBuilder.CreatePtrToInt(sourceValue, targetLLVMType)
-            }
-            if (IsIntegerLikeType(sourceTy) && IsPointerLikeType(targetTy)) {
-                return irBuilder.CreateIntToPtr(sourceValue, targetLLVMType)
-            }
-            if (IsPointerLikeType(sourceTy) && IsPointerLikeType(targetTy)) {
-                return irBuilder.CreatePointerCast(sourceValue, targetLLVMType)
-            }
+            return CastValueToType(irBuilder, sourceValue, sourceTy, targetTy, targetLLVMType)
         }
         return irBuilder.CreateBitCast(sourceValue, targetLLVMType)
     }
     return sourceValue
+}
+
+public func CastValueToType(irBuilder: IRBuilder2, sourceValue: LLVMValueRef, sourceTy: Type, targetTy: Type,
+    targetLLVMType: LLVMTypeRef): LLVMValueRef {
+    if (sourceTy.IsEqual(targetTy)) {
+        return sourceValue
+    }
+    if (IsIntegerLikeType(sourceTy) && IsIntegerLikeType(targetTy)) {
+        return EmitIntegerCast(irBuilder, sourceValue, sourceTy, targetTy, targetLLVMType)
+    }
+    if (sourceTy.IsFloat() && targetTy.IsFloat()) {
+        return EmitFloatCast(irBuilder, sourceValue, sourceTy, targetTy, targetLLVMType)
+    }
+    if (IsIntegerLikeType(sourceTy) && targetTy.IsFloat()) {
+        return if (IsSignedIntegerLikeType(sourceTy)) {
+            irBuilder.CreateSIToFP(sourceValue, targetLLVMType)
+        } else {
+            irBuilder.CreateUIToFP(sourceValue, targetLLVMType)
+        }
+    }
+    if (sourceTy.IsFloat() && IsIntegerLikeType(targetTy)) {
+        return if (IsSignedIntegerLikeType(targetTy)) {
+            irBuilder.CreateFPToSI(sourceValue, targetLLVMType)
+        } else {
+            irBuilder.CreateFPToUI(sourceValue, targetLLVMType)
+        }
+    }
+    if (IsPointerLikeType(sourceTy) && IsIntegerLikeType(targetTy)) {
+        return irBuilder.CreatePtrToInt(sourceValue, targetLLVMType)
+    }
+    if (IsIntegerLikeType(sourceTy) && IsPointerLikeType(targetTy)) {
+        return irBuilder.CreateIntToPtr(sourceValue, targetLLVMType)
+    }
+    if (IsPointerLikeType(sourceTy) && IsPointerLikeType(targetTy)) {
+        return irBuilder.CreatePointerCast(sourceValue, targetLLVMType)
+    }
+    return irBuilder.CreateBitCast(sourceValue, targetLLVMType)
 }
 
 private func EmitIntegerCast(irBuilder: IRBuilder2, sourceValue: LLVMValueRef, sourceTy: Type, targetTy: Type,

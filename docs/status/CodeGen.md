@@ -61,7 +61,9 @@ Implemented:
   active.
 - Added expression dispatch structure for constants, unary, binary, memory, terminator, and other expression
   families. The current implementation lowers typed constants, unary integer/float operations, signed/unsigned
-  and floating binary operations, allocation/load/store/GEP memory expressions, `GOTO`/`BRANCH`/`EXIT`
+  and floating binary operations through C++-shaped `ArithmeticOpImpl` and `LogicalOpImpl` components, including
+  right-hand shift operand normalization and constant `Unit`/`Nothing` equality, allocation/load/store/GEP memory
+  expressions through C++-named `AllocateImpl` and `ArrayImpl` components, `GOTO`/`BRANCH`/`EXIT`
   terminators, call-like expressions through a C++-shaped `ApplyImpl` component using call-or-invoke emission,
   tuple/aggregate and varray construction through C++-named component files, and scalar/pointer typecast lowering
   through a C++-shaped `TypeCastImpl` component with real LLVM numeric conversion op selection.
@@ -89,7 +91,7 @@ Known gaps:
   intrinsics, complete
   array/object construction, full checked casts, C/FFI lowering, incremental generation, native backend-specific
   metadata, and post-generation optimization/cleanup passes.
-- Only 49 `.cj` files are present in this pass, compared with 118 reference CodeGen source/header files. Additional
+- Only 53 `.cj` files are present in this pass, compared with 118 reference CodeGen source/header files. Additional
   C++-named component files still need to be split out for `LICMOptimizer`, LLVM-specific `CGUtils`,
   incremental generation, Cangjie-native metadata, type info, CFFI, and the detailed base
   expression implementation files.
@@ -98,4 +100,4 @@ Known gaps:
 
 Remaining CodeGen selfhost markers: 0.
 
-Current CodeGen package size: 49 `.cj` files, approximately 4629 total lines.
+Current CodeGen package size: 53 `.cj` files, approximately 4721 total lines.
