@@ -1,5 +1,6 @@
 package cangjie_compiler::macro_pkg
 
+import cangjie_compiler::lex.{Lexer as RealLexer, StringPartKind}
 import std.collection.*
 import std.fs.File as FSFile
 import std.fs.exists
@@ -15,6 +16,15 @@ private func putPosition64(map: ArrayList<(UInt64, Position)>, key: UInt64, pos:
         idx++
     }
     map.add((key, pos))
+}
+
+private func hasPosition64(map: ArrayList<(UInt64, Position)>, key: UInt64): Bool {
+    for ((entryKey, _) in map) {
+        if (entryKey == key) {
+            return true
+        }
+    }
+    return false
 }
 
 private func isSpecialToken(prevTokenKind: TokenKind, curTokenKind: TokenKind): Bool {
@@ -64,6 +74,89 @@ private func syncMacroCallDiagInfo(node: Node, invocation: MacroInvocation): Uni
     invocation.macroCallDiagInfo.macroCallEnd = node.end
 }
 
+private func collectMacroDebugPosition(invocation: MacroInvocation, token: Token, lastColumn: Int64): Unit {
+    if (!token.Begin().isCurFile || token.kind == TokenKind.COMMENT || token.kind == TokenKind.NL) {
+        return
+    }
+    let key = token.Begin().Hash64()
+    if (hasPosition64(invocation.origin2newPosMap, key)) {
+        return
+    }
+    if (!invocation.macroDebugMap.isEmpty()) {
+        let lastPos = invocation.macroDebugMap[invocation.macroDebugMap.size - 1][1]
+        if (lastPos == token.Begin()) {
+            return
+        }
+    }
+    putPosition64(invocation.macroDebugMap, UInt64(lastColumn), token.Begin())
+    putPosition64(invocation.macroDebugMap, UInt64(lastColumn + getTokenLengthForMap(token)), token.End())
+}
+
+private func countNewLines(value: String): Int64 {
+    var count: Int64 = 0
+    for (byte in value.toArray()) {
+        if (byte == b'\n') {
+            count++
+        }
+    }
+    return count
+}
+
+private func shiftedPosition(pos: Position, start: Position, tokenBegin: Position): Position {
+    let line = pos.line + start.line - tokenBegin.line
+    var column = pos.column
+    if (pos.line == tokenBegin.line) {
+        column = pos.column + start.column - tokenBegin.column
+    }
+    return Position(start.fileID, line, column, pos.isCurFile)
+}
+
+private func handleInterpolationStringPosMap(strToken: Token, newStartPos: Position,
+    invocation: MacroInvocation, ci: CompilerInstance, isMacroMap!: Bool = false): Unit {
+    let lexer = RealLexer([strToken], ci.diag, ci.GetSourceManager())
+    let strParts = lexer.GetStrParts(strToken)
+    var multiStrDeltaLine: Int64 = 1
+    for (part in strParts) {
+        if (part.strKind == StringPartKind.STR && strToken.kind == TokenKind.MULTILINE_STRING) {
+            multiStrDeltaLine += countNewLines(part.value)
+            continue
+        }
+        if (part.strKind != StringPartKind.EXPR) {
+            continue
+        }
+        let tokens = GetTokensFromString(part.value, ci.diag, pos: part.begin)
+        if (tokens.size <= 2) {
+            continue
+        }
+        var idx: Int64 = 2
+        while (idx < tokens.size - 1) {
+            var token = tokens[idx]
+            if (token.kind != TokenKind.COMMENT) {
+                token.SetCurFile(strToken.Begin().isCurFile)
+                let newPos = shiftedPosition(token.Begin(), newStartPos, strToken.Begin())
+                if (isMacroMap) {
+                    let key = if (invocation.macroCallDiagInfo.isCurFile) { newPos.Hash32() } else {
+                        UInt32(newPos.column)
+                    }
+                    invocation.macroCallDiagInfo.new2macroCallPosMap.put(key, token.Begin())
+                } else if (token.kind != TokenKind.NL) {
+                    var begin = Position(newStartPos.fileID, newStartPos.line, newPos.column, token.Begin().isCurFile)
+                    if (strToken.kind == TokenKind.MULTILINE_STRING) {
+                        begin = Position(newStartPos.fileID, newStartPos.line + multiStrDeltaLine,
+                            token.Begin().column, token.Begin().isCurFile)
+                    }
+                    invocation.macroCallDiagInfo.new2originPosMap.put(newPos.Hash32(), token.Begin())
+                    let key = token.Begin().Hash64()
+                    if (!hasPosition64(invocation.origin2newPosMap, key)) {
+                        putPosition64(invocation.origin2newPosMap, key, begin)
+                    }
+                }
+            }
+            idx++
+        }
+    }
+}
+
 private func isPureCustomAnnotation(invocation: MacroInvocation, ci: CompilerInstance): Bool {
     if (!invocation.macroCallDiagInfo.isCustom || invocation.newTokens.isEmpty()) {
         return false
@@ -102,17 +195,36 @@ public func RefreshNewTokensPos(node: Node, sm: SourceManager, ci: CompilerInsta
             }
             if (mcPos.fileID != token.Begin().fileID) {
                 token.SetCurFile(false)
+            } else {
+                var isAtMacroPosition = false
+                for (atPos in invocation.macroAtPosition) {
+                    if (token.Begin() == atPos || token.Begin() == atPos + 1) {
+                        isAtMacroPosition = true
+                        break
+                    }
+                }
+                token.SetCurFile(!isAtMacroPosition)
             }
             if (!isSpecialToken(prevTokenKind, token.kind)) {
                 lastColumn++
             }
+            if (ci.invocation.globalOptions.enableCompileDebug || ci.invocation.globalOptions.displayLineInfo) {
+                collectMacroDebugPosition(invocation, token, lastColumn)
+            }
             let keyPos = Position(mcPos.fileID, mcPos.line, lastColumn)
-            invocation.macroCallDiagInfo.new2originPosMap.put(keyPos.Hash32(), token.Begin())
+            if (token.kind == TokenKind.STRING_LITERAL || token.kind == TokenKind.MULTILINE_STRING) {
+                invocation.macroCallDiagInfo.new2originPosMap.put(keyPos.Hash32(), token.Begin())
+                handleInterpolationStringPosMap(token, Position(mcPos.fileID, mcPos.line, lastColumn), invocation, ci)
+            } else if (token.kind != TokenKind.NL && token.kind != TokenKind.COMMENT) {
+                invocation.macroCallDiagInfo.new2originPosMap.put(keyPos.Hash32(), token.Begin())
+            }
             let originalKey = token.Begin().Hash64()
             let begin = Position(mcPos.fileID, mcPos.line, lastColumn, token.Begin().isCurFile)
             let end = Position(mcPos.fileID, mcPos.line, lastColumn + getTokenLengthForMap(token), token.End().isCurFile)
             token.SetValuePos(token.Value(), begin, end)
-            putPosition64(invocation.origin2newPosMap, originalKey, token.Begin())
+            if (!hasPosition64(invocation.origin2newPosMap, originalKey)) {
+                putPosition64(invocation.origin2newPosMap, originalKey, token.Begin())
+            }
             lastColumn = end.column
             prevTokenKind = token.kind
             invocation.newTokens[tokenIdx] = token
@@ -159,6 +271,10 @@ public func RefreshTokensPosMap(node: Node, sm: SourceManager, ci: CompilerInsta
                 let pos = invocation.newTokens[idx].Begin()
                 let key = if (invocation.macroCallDiagInfo.isCurFile) { pos.Hash32() } else { UInt32(pos.column) }
                 invocation.macroCallDiagInfo.new2macroCallPosMap.put(key, tokens[idx].Begin())
+            }
+            if (tokens[idx].kind == TokenKind.STRING_LITERAL || tokens[idx].kind == TokenKind.MULTILINE_STRING) {
+                handleInterpolationStringPosMap(tokens[idx], invocation.newTokens[idx].Begin(), invocation, ci,
+                    isMacroMap: true)
             }
             idx++
         }

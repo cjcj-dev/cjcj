@@ -169,7 +169,7 @@ private func findMacro(med: MacroExpandDecl, target: String): Bool {
 
 private func getDeclFromMacro(med: MacroExpandDecl, expectedKind: ASTKind): Option<Decl> {
     if (let Some(innerDecl) <- med.invocation.decl) {
-        if (innerDecl.astKind == expectedKind) {
+        if (ASTKindEquals(innerDecl.astKind, expectedKind)) {
             return Some(innerDecl)
         }
         if (let Some(nextMed) <- (innerDecl as MacroExpandDecl)) {
@@ -200,7 +200,7 @@ private func getClassFromMacro(med: MacroExpandDecl): Option<ClassDecl> {
 private func isUnitFunction(fd: FuncDecl): Bool {
     if (let Some(retType) <- fd.funcBody.retType) {
         if (let Some(primitiveType) <- (retType as PrimitiveType)) {
-            return primitiveType.kind == TypeKind.TYPE_UNIT
+            return TypeKindEquals(primitiveType.kind, TypeKind.TYPE_UNIT)
         }
         return retType.name == "Unit"
     }
@@ -332,7 +332,7 @@ public class TestEntryConstructor {
             CheckFunctionWithAtTest(med, funcs, "TestCase")
             CheckClassWithMacro(med)
             if (let Some(expandedDecl) <- med.invocation.decl) {
-                if (expandedDecl.astKind == ASTKind.CLASS_DECL) {
+                if (ASTKindEquals(expandedDecl.astKind, ASTKind.CLASS_DECL)) {
                     CheckTestSuiteConstraints(expandedDecl, funcs)
                 }
             }

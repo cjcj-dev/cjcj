@@ -1,248 +1,89 @@
 package cangjie_compiler::macro_pkg
 
 import std.collection.*
+import cangjie_compiler::ast.ASTKind as RealASTKind
+import cangjie_compiler::ast.ASTKindIndex as RealASTKindIndex
+import cangjie_compiler::ast.Attribute as RealAttribute
+import cangjie_compiler::ast.AttributeIndex as RealAttributeIndex
+import cangjie_compiler::ast.ExprKind as RealExprKind
+import cangjie_compiler::ast.Identifier as RealIdentifier
+import cangjie_compiler::ast.Modifier as RealModifier
+import cangjie_compiler::ast.ScopeKind as RealScopeKind
+import cangjie_compiler::ast.TypeKind as RealTypeKind
+import cangjie_compiler::ast.TypeKindIndex as RealTypeKindIndex
+import cangjie_compiler::ast.TypeKindName as RealTypeKindName
 import cangjie_compiler::basic.MakeRange as BasicMakeRange
 import cangjie_compiler::basic.Range as BasicRange
+import cangjie_compiler::option.GlobalOptions as RealGlobalOptions
 
 public import cangjie_compiler::basic.{
-    BEGIN_POSITION, DEFAULT_POSITION, INVALID_POSITION, MacroCallDiagInfo, Position, Source, SourceManager
+    BEGIN_POSITION, DEFAULT_POSITION, INVALID_POSITION, DiagArgument, DiagKind, DiagKindRefactor, DiagSeverity,
+    Diagnostic, DiagnosticEngine, MacroCallDiagInfo, Position, Source, SourceManager
 }
 public import cangjie_compiler::lex.{Token, TokenKind, TokenKindIndex, TokenKindLiteral}
+public import cangjie_compiler::option.MockMode
 
 public type Range = BasicRange
+public type ASTKind = RealASTKind
+public type Attribute = RealAttribute
+public type CompilerGlobalOptions = RealGlobalOptions
+public type Identifier = RealIdentifier
+public type Modifier = RealModifier
+public type ScopeKind = RealScopeKind
+public type ExprKind = RealExprKind
+public type TypeKind = RealTypeKind
 
 public func MakeRange(begin: Position, end: Position): Range {
     return BasicMakeRange(begin, end)
 }
 
-public enum DiagSeverity {
-    | DS_ERROR
-    | DS_WARNING
-    | DS_NOTE
+public func ASTKindIndex(kind: ASTKind): Int64 {
+    return RealASTKindIndex(kind)
 }
 
-private func DiagSeverityIndex(value: DiagSeverity): Int64 {
-    return match (value) {
-        case DiagSeverity.DS_ERROR => 0
-        case DiagSeverity.DS_WARNING => 1
-        case DiagSeverity.DS_NOTE => 2
-    }
+public func AttributeIndex(attr: Attribute): Int64 {
+    return RealAttributeIndex(attr)
 }
 
-extend DiagSeverity <: Equatable<DiagSeverity> {
-    public operator func ==(right: DiagSeverity): Bool {
-        return DiagSeverityIndex(this) == DiagSeverityIndex(right)
-    }
-
-    public operator func !=(right: DiagSeverity): Bool {
-        return !(this == right)
-    }
+public func TypeKindIndex(kind: TypeKind): Int64 {
+    return RealTypeKindIndex(kind)
 }
 
-public class Diagnostic {
-    public var severity: DiagSeverity = DiagSeverity.DS_ERROR
-    public var range: Range = Range()
-    public var message: String = ""
-    public var hint: String = ""
-
-    public init() {}
-
-    public init(severity: DiagSeverity, range: Range, message: String, hint!: String = "") {
-        this.severity = severity
-        this.range = range
-        this.message = message
-        this.hint = hint
-    }
+public func TypeKindName(kind: TypeKind): String {
+    return RealTypeKindName(kind)
 }
 
-public class DiagnosticEngine {
-    public let diagnostics: ArrayList<Diagnostic> = ArrayList<Diagnostic>()
-    public var sourceManager: SourceManager = SourceManager()
+public func ASTKindEquals(left: ASTKind, right: ASTKind): Bool {
+    return ASTKindIndex(left) == ASTKindIndex(right)
+}
 
-    public init() {}
+public func AttributeEquals(left: Attribute, right: Attribute): Bool {
+    return AttributeIndex(left) == AttributeIndex(right)
+}
 
+public func TypeKindEquals(left: TypeKind, right: TypeKind): Bool {
+    return TypeKindIndex(left) == TypeKindIndex(right)
+}
+
+extend DiagnosticEngine {
     public func Diagnose(pos: Position, message: String): Unit {
-        diagnostics.add(Diagnostic(DiagSeverity.DS_ERROR, Range(pos, pos), message))
+        let builder = DiagnoseRefactor(DiagKindRefactor.parse_diag_error, pos, arguments: [message])
+        builder.Emit()
     }
 
     public func Diagnose(range: Range, message: String): Unit {
-        diagnostics.add(Diagnostic(DiagSeverity.DS_ERROR, range, message))
+        let builder = DiagnoseRefactor(DiagKindRefactor.parse_diag_error, range, arguments: [message])
+        builder.Emit()
     }
 
     public func Warn(range: Range, message: String): Unit {
-        diagnostics.add(Diagnostic(DiagSeverity.DS_WARNING, range, message))
-    }
-
-    public func Reset(): Unit {
-        diagnostics.clear()
-    }
-
-    public func GetErrorCount(): Int64 {
-        var count: Int64 = 0
-        for (diag in diagnostics) {
-            if (diag.severity == DiagSeverity.DS_ERROR) {
-                count++
-            }
-        }
-        return count
-    }
-
-    public func GetSourceManager(): SourceManager {
-        return sourceManager
+        let builder = DiagnoseRefactor(DiagKindRefactor.parse_diag_warning, range, arguments: [message])
+        builder.Emit()
     }
 }
 
 public func TokenKindText(kind: TokenKind): String {
     return TokenKindLiteral(kind)
-}
-
-public enum ASTKind {
-    | NODE | FILE | PACKAGE | BLOCK | TOKEN_PART | MACRO_DECL | MACRO_EXPAND_EXPR | MACRO_EXPAND_DECL
-    | MACRO_EXPAND_PARAM | FUNC_DECL | MAIN_DECL | VAR_DECL | PROP_DECL | CLASS_DECL | STRUCT_DECL
-    | INTERFACE_DECL | ENUM_DECL | EXTEND_DECL | TYPE_ALIAS_DECL | PRIMARY_CTOR_DECL | FUNC_PARAM
-    | FUNC_PARAM_LIST | ANNOTATION | MODIFIER | IMPORT_SPEC | PACKAGE_DECL | REF_EXPR | CALL_EXPR
-    | MEMBER_ACCESS | LIT_CONST_EXPR | RETURN_EXPR | IF_EXPR | BINARY_EXPR | UNKNOWN
-}
-
-public func ASTKindIndex(kind: ASTKind): Int64 {
-    return match (kind) {
-        case ASTKind.NODE => 0
-        case ASTKind.FILE => 1
-        case ASTKind.PACKAGE => 2
-        case ASTKind.BLOCK => 3
-        case ASTKind.TOKEN_PART => 4
-        case ASTKind.MACRO_DECL => 5
-        case ASTKind.MACRO_EXPAND_EXPR => 6
-        case ASTKind.MACRO_EXPAND_DECL => 7
-        case ASTKind.MACRO_EXPAND_PARAM => 8
-        case ASTKind.FUNC_DECL => 9
-        case ASTKind.MAIN_DECL => 10
-        case ASTKind.VAR_DECL => 11
-        case ASTKind.PROP_DECL => 12
-        case ASTKind.CLASS_DECL => 13
-        case ASTKind.STRUCT_DECL => 14
-        case ASTKind.INTERFACE_DECL => 15
-        case ASTKind.ENUM_DECL => 16
-        case ASTKind.EXTEND_DECL => 17
-        case ASTKind.TYPE_ALIAS_DECL => 18
-        case ASTKind.PRIMARY_CTOR_DECL => 19
-        case ASTKind.FUNC_PARAM => 20
-        case ASTKind.FUNC_PARAM_LIST => 21
-        case ASTKind.ANNOTATION => 22
-        case ASTKind.MODIFIER => 23
-        case ASTKind.IMPORT_SPEC => 24
-        case ASTKind.PACKAGE_DECL => 25
-        case ASTKind.REF_EXPR => 26
-        case ASTKind.CALL_EXPR => 27
-        case ASTKind.MEMBER_ACCESS => 28
-        case ASTKind.LIT_CONST_EXPR => 29
-        case ASTKind.RETURN_EXPR => 30
-        case ASTKind.IF_EXPR => 31
-        case ASTKind.BINARY_EXPR => 32
-        case ASTKind.UNKNOWN => 33
-    }
-}
-
-extend ASTKind <: Equatable<ASTKind> {
-    public operator func ==(right: ASTKind): Bool {
-        return ASTKindIndex(this) == ASTKindIndex(right)
-    }
-
-    public operator func !=(right: ASTKind): Bool {
-        return !(this == right)
-    }
-}
-
-public enum Attribute {
-    | MACRO_FUNC
-    | COMPILER_ADD
-    | ENUM_CONSTRUCTOR
-    | CONSTRUCTOR
-    | GLOBAL
-    | IS_BROKEN
-    | MOCK_SUPPORTED
-}
-
-public func AttributeIndex(attr: Attribute): Int64 {
-    return match (attr) {
-        case Attribute.MACRO_FUNC => 0
-        case Attribute.COMPILER_ADD => 1
-        case Attribute.ENUM_CONSTRUCTOR => 2
-        case Attribute.CONSTRUCTOR => 3
-        case Attribute.GLOBAL => 4
-        case Attribute.IS_BROKEN => 5
-        case Attribute.MOCK_SUPPORTED => 6
-    }
-}
-
-extend Attribute <: Equatable<Attribute> {
-    public operator func ==(right: Attribute): Bool {
-        return AttributeIndex(this) == AttributeIndex(right)
-    }
-
-    public operator func !=(right: Attribute): Bool {
-        return !(this == right)
-    }
-}
-
-public enum ScopeKind {
-    | UNKNOWN_SCOPE | TOPLEVEL | CLASS_BODY | STRUCT_BODY | INTERFACE_BODY | EXTEND_BODY | ENUM_BODY
-    | FUNC_BODY | PRIMARY_CONSTRUCTOR_FUNC_PARAM | PRIMARY_CONSTRUCTOR_BODY_FOR_CLASS
-    | PRIMARY_CONSTRUCTOR_BODY_FOR_STRUCT
-}
-
-private func ScopeKindIndex(kind: ScopeKind): Int64 {
-    return match (kind) {
-        case ScopeKind.UNKNOWN_SCOPE => 0
-        case ScopeKind.TOPLEVEL => 1
-        case ScopeKind.CLASS_BODY => 2
-        case ScopeKind.STRUCT_BODY => 3
-        case ScopeKind.INTERFACE_BODY => 4
-        case ScopeKind.EXTEND_BODY => 5
-        case ScopeKind.ENUM_BODY => 6
-        case ScopeKind.FUNC_BODY => 7
-        case ScopeKind.PRIMARY_CONSTRUCTOR_FUNC_PARAM => 8
-        case ScopeKind.PRIMARY_CONSTRUCTOR_BODY_FOR_CLASS => 9
-        case ScopeKind.PRIMARY_CONSTRUCTOR_BODY_FOR_STRUCT => 10
-    }
-}
-
-extend ScopeKind <: Equatable<ScopeKind> {
-    public operator func ==(right: ScopeKind): Bool {
-        return ScopeKindIndex(this) == ScopeKindIndex(right)
-    }
-
-    public operator func !=(right: ScopeKind): Bool {
-        return !(this == right)
-    }
-}
-
-public enum ExprKind {
-    | UNKNOWN
-}
-
-public class Identifier {
-    public var text: String = ""
-    public var pos: Position = INVALID_POSITION
-
-    public init() {}
-
-    public init(text: String, pos!: Position = INVALID_POSITION) {
-        this.text = text
-        this.pos = pos
-    }
-
-    public func Val(): String {
-        return text
-    }
-
-    public func GetRawText(): String {
-        return text
-    }
-
-    public func Begin(): Position {
-        return pos
-    }
 }
 
 public open class Node {
@@ -277,7 +118,7 @@ public open class Node {
 
     public func TestAttr(attr: Attribute): Bool {
         for (item in attrs) {
-            if (item == attr) {
+            if (AttributeEquals(item, attr)) {
                 return true
             }
         }
@@ -289,8 +130,9 @@ public open class Node {
     }
 
     public func IsMacroCallNode(): Bool {
-        return astKind == ASTKind.MACRO_EXPAND_EXPR || astKind == ASTKind.MACRO_EXPAND_DECL ||
-            astKind == ASTKind.MACRO_EXPAND_PARAM
+        return ASTKindEquals(astKind, ASTKind.MACRO_EXPAND_EXPR) ||
+            ASTKindEquals(astKind, ASTKind.MACRO_EXPAND_DECL) ||
+            ASTKindEquals(astKind, ASTKind.MACRO_EXPAND_PARAM)
     }
 
     public func IsDecl(): Bool {
@@ -298,8 +140,8 @@ public open class Node {
     }
 
     public func IsNominalDecl(): Bool {
-        return astKind == ASTKind.CLASS_DECL || astKind == ASTKind.STRUCT_DECL ||
-            astKind == ASTKind.INTERFACE_DECL || astKind == ASTKind.ENUM_DECL
+        return ASTKindEquals(astKind, ASTKind.CLASS_DECL) || ASTKindEquals(astKind, ASTKind.STRUCT_DECL) ||
+            ASTKindEquals(astKind, ASTKind.INTERFACE_DECL) || ASTKindEquals(astKind, ASTKind.ENUM_DECL)
     }
 
     public func GetInvocation(): Option<MacroInvocation> {
@@ -318,7 +160,7 @@ public open class Node {
 
 public open class Expr <: Node {
     public init() {
-        super(ASTKind.UNKNOWN)
+        super(ASTKind.EXPR)
     }
 
     public init(kind: ASTKind) {
@@ -334,7 +176,7 @@ public open class Decl <: Node {
     public let modifiers: ArrayList<Modifier> = ArrayList<Modifier>()
 
     public init() {
-        super(ASTKind.UNKNOWN)
+        super(ASTKind.DECL)
     }
 
     public init(kind: ASTKind) {
@@ -354,36 +196,12 @@ public open class Type <: Node {
     public var name: String = ""
 
     public init() {
-        super(ASTKind.UNKNOWN)
-    }
-}
-
-public enum TypeKind {
-    | TYPE_UNKNOWN
-    | TYPE_UNIT
-    | TYPE_INT64
-}
-
-private func TypeKindIndex(kind: TypeKind): Int64 {
-    return match (kind) {
-        case TypeKind.TYPE_UNKNOWN => 0
-        case TypeKind.TYPE_UNIT => 1
-        case TypeKind.TYPE_INT64 => 2
-    }
-}
-
-extend TypeKind <: Equatable<TypeKind> {
-    public operator func ==(right: TypeKind): Bool {
-        return TypeKindIndex(this) == TypeKindIndex(right)
-    }
-
-    public operator func !=(right: TypeKind): Bool {
-        return !(this == right)
+        super(ASTKind.TYPE)
     }
 }
 
 public class PrimitiveType <: Type {
-    public var kind: TypeKind = TypeKind.TYPE_UNKNOWN
+    public var kind: TypeKind = TypeKind.TYPE_INVALID
 
     public init() {
         super()
@@ -392,11 +210,7 @@ public class PrimitiveType <: Type {
     public init(kind: TypeKind) {
         super()
         this.kind = kind
-        name = match (kind) {
-            case TypeKind.TYPE_UNIT => "Unit"
-            case TypeKind.TYPE_INT64 => "Int64"
-            case TypeKind.TYPE_UNKNOWN => ""
-        }
+        name = TypeKindName(kind)
     }
 }
 
@@ -413,7 +227,7 @@ public class RefType <: Type {
 
 public open class Pattern <: Node {
     public init() {
-        super(ASTKind.UNKNOWN)
+        super(ASTKind.PATTERN)
     }
 }
 
@@ -429,26 +243,12 @@ public class Annotation <: Node {
     }
 }
 
-public class Modifier <: Node {
-    public var modifier: TokenKind = TokenKind.ILLEGAL
-    public var isExplicit: Bool = true
-
-    public init() {
-        super(ASTKind.MODIFIER)
-    }
-
-    public init(modifier: TokenKind) {
-        super(ASTKind.MODIFIER)
-        this.modifier = modifier
-    }
-}
-
 public class FuncArg <: Node {
     public var name: Identifier = Identifier()
     public var expr: Option<Expr> = None
 
     public init() {
-        super(ASTKind.UNKNOWN)
+        super(ASTKind.FUNC_ARG)
     }
 
     public override func Children(): ArrayList<Node> {
@@ -550,7 +350,7 @@ public class FuncBody <: Node {
     public var funcDecl: Option<FuncDecl> = None
 
     public init() {
-        super(ASTKind.UNKNOWN)
+        super(ASTKind.FUNC_BODY)
     }
 }
 
@@ -794,7 +594,7 @@ public class MacroInvocation {
     public let macroAtPosition: ArrayList<Position> = ArrayList<Position>()
     public let newTokens: ArrayList<Token> = ArrayList<Token>()
     public var newTokensStr: String = ""
-    public var scopeKind: ScopeKind = ScopeKind.UNKNOWN_SCOPE
+    public var scopeKind: ScopeKind = ScopeKind.UNKNOWN
     public var exprKind: ExprKind = ExprKind.UNKNOWN
     public var hasParenthesis: Bool = false
     public var hasAttr: Bool = false
@@ -839,29 +639,6 @@ public class MacroExpandParam <: FuncParam {
     public init() {
         super(ASTKind.MACRO_EXPAND_PARAM)
         invocation.isFuncParam = true
-    }
-}
-
-public class CompilerGlobalOptions {
-    public var enableParallelMacro: Bool = false
-    public var enableMacroInLSP: Bool = false
-    public var enableMacroDebug: Bool = false
-    public var enableCompileDebug: Bool = false
-    public var displayLineInfo: Bool = false
-    public var enableCompileTest: Bool = false
-    public var compileTestsOnly: Bool = false
-    public var compileCjd: Bool = false
-    public var enableAddCommentToAst: Bool = false
-    public var mockEnabled: Bool = false
-    public var moduleName: String = ""
-    public var executablePath: String = ""
-    public let macroLib: ArrayList<String> = ArrayList<String>()
-    public let environment: ArrayList<(String, String)> = ArrayList<(String, String)>()
-
-    public init() {}
-
-    public func CompileExecutable(): Bool {
-        return true
     }
 }
 

@@ -238,7 +238,7 @@ private func firstParamCount(fd: FuncDecl): Int64 {
 }
 
 private func isMacroFuncDecl(decl: Decl): Bool {
-    return decl.astKind == ASTKind.FUNC_DECL && decl.TestAttr(Attribute.MACRO_FUNC)
+    return ASTKindEquals(decl.astKind, ASTKind.FUNC_DECL) && decl.TestAttr(Attribute.MACRO_FUNC)
 }
 
 private func isDeclInMacroPackage(decl: Decl): Bool {
@@ -404,7 +404,7 @@ extend MacroCall {
         if (let Some(value) <- GetNode()) {
             if (let Some(decl) <- (value as MacroExpandDecl)) {
                 if (let Some(innerDecl) <- decl.invocation.decl) {
-                    if (innerDecl.astKind == ASTKind.TYPE_ALIAS_DECL) {
+                    if (ASTKindEquals(innerDecl.astKind, ASTKind.TYPE_ALIAS_DECL)) {
                         return false
                     }
                 }
