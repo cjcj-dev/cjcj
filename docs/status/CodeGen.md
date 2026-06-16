@@ -48,17 +48,19 @@ Implemented:
   families. The current implementation lowers typed constants, unary integer/float operations, signed/unsigned
   and floating binary operations, allocation/load/store/GEP memory expressions, `GOTO`/`BRANCH`/`EXIT`
   terminators, simple call-like expressions, simple aggregate construction, and basic cast/box/unbox forwarding.
+- Added a C++-shaped `EmitExpressionIR` component that emits expression sequences through a local `IRBuilder2`,
+  sets the insertion function from the top-level CHIR function, dispatches each expression by major kind, and maps
+  non-null results back into `CGModule` with sret result tagging.
 - Added two-phase function body emission: all LLVM basic blocks are created and mapped before expression emission,
   and CHIR function parameters are mapped to LLVM arguments before the body is lowered.
 - Added global initializer emission for initializer values representable by the current CHIR value materializer.
 - Added LLVM enum-attribute attachment helpers for function/call attributes.
-- Added a real LLVM CFG cleanup path for generated functions: declarations are skipped, reachable blocks are marked
-  from the entry block through LLVM terminator successors, unreachable basic blocks are erased, unused load
-  instructions are removed from all blocks, and unused entry-block allocas are removed.
-- Added module cleanup/pruning hooks mirroring the C++ phase shape: metadata link-name bookkeeping is cleared,
-  unused declarations are removed, stale builder insertion points are cleared, and at `-O2` or above non-coverage
-  builds prune unused local/declaration globals and functions while preserving compile-unit globals, metadata-linked
-  names, and explicit LLVM-used symbols.
+- Added a C++-shaped `EraseUselessIRs` component for generated module cleanup: declarations are skipped, reachable
+  blocks are marked from the entry block through LLVM terminator successors, unreachable basic blocks are erased,
+  unused load instructions are removed from all blocks, unused entry-block allocas are removed, unused declarations
+  are pruned, stale builder insertion points are cleared, and at `-O2` or above non-coverage builds unused
+  local/declaration globals and functions are pruned while preserving compile-unit globals, metadata-linked names,
+  and explicit LLVM-used symbols.
 
 Known gaps:
 
@@ -68,13 +70,13 @@ Known gaps:
   intrinsics, complete
   array/tuple/object construction, precise casts, C/FFI lowering, incremental generation, native backend-specific
   metadata, and post-generation optimization/cleanup passes.
-- Only 40 `.cj` files are present in this pass, compared with 118 reference CodeGen source/header files. Additional
-  C++-named component files still need to be split out for `EmitExpressionIR`, `EraseUselessIRs`,
-  `LICMOptimizer`, `IRGenerator`, `CGUtils`, `BlockScopeImpl`, incremental generation, Cangjie-native metadata,
-  type info, CFFI, and the detailed base expression implementation files.
+- Only 42 `.cj` files are present in this pass, compared with 118 reference CodeGen source/header files. Additional
+  C++-named component files still need to be split out for `LICMOptimizer`, `IRGenerator`, `CGUtils`,
+  `BlockScopeImpl`, incremental generation, Cangjie-native metadata, type info, CFFI, and the detailed base
+  expression implementation files.
 - The package manifest now depends on the existing self-hosted `basic`, `chir`, `mangle`, `option`, and `utils`
   packages so the CodeGen package can compile against the current CHIR model.
 
 Remaining CodeGen selfhost markers: 0.
 
-Current CodeGen package size: 40 `.cj` files, approximately 3750 total lines.
+Current CodeGen package size: 42 `.cj` files, approximately 3839 total lines.

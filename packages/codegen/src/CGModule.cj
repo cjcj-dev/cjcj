@@ -10,9 +10,7 @@ import cangjie_compiler::chir.TypeKind
 import cangjie_compiler::chir.Value
 import cangjie_compiler::option.ArchType
 import cangjie_compiler::option.EnvironmentType
-import cangjie_compiler::option.OptimizationLevel
 import cangjie_compiler::option.TripleInfo
-import cangjie_compiler::option.enumIndex
 
 public open class CGValue {
     private var rawVal: LLVMValueRef
@@ -201,29 +199,11 @@ public class CGModule {
     }
 
     public func EraseUselessInstsAndDeclarations(): Unit {
-        ClearLinkNameUsedInMeta()
-        for ((functionName, cgFunction) in functions) {
-            if (functionName != FOR_KEEPING_SOME_TYPES_FUNC_NAME) {
-                cgFunction.Opt()
-                CGFunction.EraseUselessLoadAndAlloca(cgFunction.GetRawFunction())
-            }
-        }
-        let irBuilder = IRBuilder2(this)
-        irBuilder.ClearInsertionPoint()
-        if (let Some(moduleHandle) <- module) {
-            EraseUnusedGVsAndFunctions(moduleHandle.raw, declarationsOnly: true)
-        }
+        EraseUselessInstsAndDeclarationsImpl(this)
     }
 
     public func EraseUselessGVAndFunctions(): Unit {
-        let options = cgCtx.GetCompileOptions()
-        if (enumIndex(options.optimizationLevel) < enumIndex(OptimizationLevel.O2) || options.enableCoverage) {
-            return
-        }
-        if (let Some(moduleHandle) <- module) {
-            ClearLinkNameUsedInMeta()
-            EraseUnusedGVsAndFunctions(moduleHandle.raw, declarationsOnly: false)
-        }
+        EraseUselessGVAndFunctionsImpl(this)
     }
 
     public func Opt(): Unit {
@@ -274,93 +254,13 @@ public class CGModule {
         }
     }
 
-    private func EraseUnusedGVsAndFunctions(moduleRef: LLVMModuleRef, declarationsOnly!: Bool): Unit {
-        var erased = true
-        while (erased) {
-            erased = false
-            let globals = CollectGlobals(moduleRef)
-            for (global in globals) {
-                if (CanEraseGlobal(global, declarationsOnly: declarationsOnly)) {
-                    unsafe { LLVMDeleteGlobal(global) }
-                    erased = true
-                }
-            }
-            let functionValues = CollectFunctions(moduleRef)
-            for (functionValue in functionValues) {
-                if (CanEraseFunction(functionValue, declarationsOnly: declarationsOnly)) {
-                    unsafe { LLVMDeleteFunction(functionValue) }
-                    erased = true
-                }
-            }
-        }
-    }
-
-    private func CollectGlobals(moduleRef: LLVMModuleRef): ArrayList<LLVMValueRef> {
-        let globals = ArrayList<LLVMValueRef>()
-        var global = unsafe { LLVMGetFirstGlobal(moduleRef) }
-        while (!global.isNull()) {
-            globals.add(global)
-            global = unsafe { LLVMGetNextGlobal(global) }
-        }
-        return globals
-    }
-
-    private func CollectFunctions(moduleRef: LLVMModuleRef): ArrayList<LLVMValueRef> {
-        let functionValues = ArrayList<LLVMValueRef>()
-        var functionValue = unsafe { LLVMGetFirstFunction(moduleRef) }
-        while (!functionValue.isNull()) {
-            functionValues.add(functionValue)
-            functionValue = unsafe { LLVMGetNextFunction(functionValue) }
-        }
-        return functionValues
-    }
-
-    private func CanEraseGlobal(global: LLVMValueRef, declarationsOnly!: Bool): Bool {
-        if (!CGFunction.HasNoUse(global) || IsRetainedGlobalValue(global, checkCompileUnit: true)) {
-            return false
-        }
-        if (declarationsOnly) {
-            return unsafe { LLVMIsDeclaration(global) } != 0
-        }
-        return unsafe { LLVMIsDeclaration(global) } != 0 || IsLocalLinkage(global)
-    }
-
-    private func CanEraseFunction(functionValue: LLVMValueRef, declarationsOnly!: Bool): Bool {
-        if (!CGFunction.HasNoUse(functionValue) || IsRetainedGlobalValue(functionValue, checkCompileUnit: false)) {
-            return false
-        }
-        if (declarationsOnly) {
-            return unsafe { LLVMIsDeclaration(functionValue) } != 0
-        }
-        return unsafe { LLVMIsDeclaration(functionValue) } != 0 || IsLocalLinkage(functionValue)
-    }
-
-    private func IsRetainedGlobalValue(global: LLVMValueRef, checkCompileUnit!: Bool): Bool {
-        let name = unsafe { LLVMGetValueName(global) }
-        if (name.isNull()) {
-            return false
-        }
-        if (checkCompileUnit && cgCtx.IsGlobalsOfCompileUnitCString(name)) {
-            return true
-        }
-        if (CGContext.ContainsCString(linkNameUsedInMeta, name)) {
-            return true
-        }
-        return CGContext.ContainsCString(cgCtx.GetLLVMUsedVars(), name)
-    }
-
-    private func IsLocalLinkage(global: LLVMValueRef): Bool {
-        let linkage = unsafe { LLVMGetLinkage(global) }
-        return linkage == LLVMLinkageValue(LLVMLinkage.Internal) ||
-            linkage == LLVMLinkageValue(LLVMLinkage.Private)
-    }
-
     public func GenerateUnitTypeValue(): LLVMValueRef {
         return unsafe { LLVMConstNull(CGType.GetUnitType(GetLLVMContext())) }
     }
 
     public func ClearLinkNameUsedInMeta(): Unit { linkNameUsedInMeta.clear() }
     public func IsLinkNameUsedInMeta(linkageName: String): Bool { return linkNameUsedInMeta.contains(linkageName) }
+    public func GetLinkNamesUsedInMeta(): HashSet<String> { return linkNameUsedInMeta }
     public func AddNonExternalExtensionDef(extensionDef: LLVMValueRef): Unit { nonExternalExtensionDefs.add(extensionDef) }
     public func AddExternalExtensionDef(extensionDef: LLVMValueRef): Unit { externalExtensionDefs.add(extensionDef) }
     public func GetNonExternalExtensionDefs(): ArrayList<LLVMValueRef> { return nonExternalExtensionDefs }
