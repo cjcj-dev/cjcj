@@ -32,7 +32,8 @@ public func GetChildScopeName(scopeName: String): String {
     if (found < 0) {
         return scopeName
     }
-    return scopeName[0..found] + SCOPE_NAME_SPLIT + scopeName[(found + CHILD_SCOPE_SEPARATOR.size)..]
+    let first = indexOf(scopeName, CHILD_SCOPE_SEPARATOR)
+    return scopeName[0..first] + SCOPE_NAME_SPLIT + scopeName[(first + CHILD_SCOPE_SEPARATOR.size)..]
 }
 
 public func GetScopeGate(ctx: ASTContext, scopeName: String): Option<Symbol> {
@@ -63,6 +64,20 @@ private func lastIndexOf(value: String, needle: String): Int64 {
             return idx
         }
         idx--
+    }
+    return -1
+}
+
+private func indexOf(value: String, needle: String): Int64 {
+    if (needle.isEmpty() || value.size < needle.size) {
+        return -1
+    }
+    var idx: Int64 = 0
+    while (idx <= value.size - needle.size) {
+        if (value[idx..(idx + needle.size)] == needle) {
+            return idx
+        }
+        idx++
     }
     return -1
 }

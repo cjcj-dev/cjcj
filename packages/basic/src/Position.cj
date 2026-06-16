@@ -92,6 +92,10 @@ public struct Position <: Hashable & Equatable<Position> {
         return "(${fileID}, ${line}, ${column})"
     }
 
+    public func ToString(): String {
+        return toString()
+    }
+
     public func IsZero(): Bool {
         return line == 0 && column == 0
     }

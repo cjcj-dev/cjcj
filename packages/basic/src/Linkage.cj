@@ -17,3 +17,13 @@ public func LinkageToInt(value: Linkage): Int64 {
         case Linkage.EXTERNAL_WEAK => 4
     }
 }
+
+extend Linkage <: Equatable<Linkage> {
+    public operator func ==(right: Linkage): Bool {
+        return LinkageToInt(this) == LinkageToInt(right)
+    }
+
+    public operator func !=(right: Linkage): Bool {
+        return !(this == right)
+    }
+}
