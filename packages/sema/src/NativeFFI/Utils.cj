@@ -11,6 +11,7 @@ public let NSSTRING_CLASS_IDENT: String = "NSString"
 public let NSOBJECT_CLASS_IDENT: String = "NSObject"
 public let TOSTRING_METHOD_IDENT: String = "toString"
 public let INIT_IDENT: String = "init"
+private let STD_LIB_STRING_IDENT: String = "String"
 
 public enum ArrayOperationKind {
     | CREATE
@@ -134,7 +135,76 @@ public func IsSuperConstructorCall(call: CallExpr): Bool {
 public func IsThisConstructorCall(call: CallExpr): Bool {
     if (let Some(base) <- call.baseFunc) {
         if (let Some(refExpr) <- (base as RefExpr)) {
-            return refExpr.isThis && call.callKind == CallKind.CALL_OBJECT_CREATION
+            return refExpr.isThis && call.callKind == CallKind.CALL_DECLARED_FUNCTION
+        }
+    }
+    return false
+}
+
+public func IsObjCGeneratedNSStringCtor(target: Decl): Bool {
+    if (let Some(funcDecl) <- (target as FuncDecl)) {
+        if (funcDecl.identifier.Val() != INIT_IDENT ||
+            !funcDecl.TestAttr(Attribute.CONSTRUCTOR) || !funcDecl.TestAttr(Attribute.COMPILER_ADD)) {
+            return false
+        }
+        if (let Some(body) <- funcDecl.funcBody) {
+            if (body.paramLists.isEmpty()) {
+                return false
+            }
+            let params = body.paramLists[0].params
+            if (params.size != 1) {
+                return false
+            }
+            if (let Some(typeNode) <- params[0].typeNode) {
+                if (let Some(refType) <- (typeNode as RefType)) {
+                    return refType.ref.identifier.Val() == STD_LIB_STRING_IDENT
+                }
+                return typeNode.ToString() == STD_LIB_STRING_IDENT
+            }
+        }
+    }
+    return false
+}
+
+public func IsObjCGeneratedNSObjectToString(target: Decl): Bool {
+    if (let Some(funcDecl) <- (target as FuncDecl)) {
+        if (funcDecl.identifier.Val() != TOSTRING_METHOD_IDENT ||
+            !funcDecl.TestAttr(Attribute.COMPILER_ADD)) {
+            return false
+        }
+        if (let Some(body) <- funcDecl.funcBody) {
+            if (body.paramLists.isEmpty()) {
+                return false
+            }
+            return body.paramLists[0].params.isEmpty()
+        }
+    }
+    return false
+}
+
+public func IsObjCGeneratedMember(target: Decl): Bool {
+    if (let Some(outer) <- target.outerDecl) {
+        if (let Some(classLikeDecl) <- (outer as ClassLikeDecl)) {
+            let foreignName = GetObjCMirrorForeignName(classLikeDecl)
+            return (foreignName == NSSTRING_CLASS_IDENT && IsObjCGeneratedNSStringCtor(target)) ||
+                (foreignName == NSOBJECT_CLASS_IDENT && IsObjCGeneratedNSObjectToString(target))
+        }
+    }
+    return false
+}
+
+public func IsCJMappingGeneric(decl: Decl): Bool {
+    if (let Some(classDecl) <- (decl as ClassDecl)) {
+        if (!classDecl.TestAnyAttr(Attribute.ABSTRACT, Attribute.OPEN)) {
+            if (let Some(ty) <- classDecl.GetTy()) {
+                return ty.HasGeneric()
+            }
+        }
+        return false
+    }
+    if ((decl as StructDecl).isSome() || (decl as EnumDecl).isSome() || (decl as InterfaceDecl).isSome()) {
+        if (let Some(ty) <- decl.GetTy()) {
+            return ty.HasGeneric()
         }
     }
     return false
@@ -190,6 +260,22 @@ public func GetTyByName(typeName: String): Ty {
     return TypeManager.GetPrimitiveTy(typeKind)
 }
 
+public func GetPrimitiveType(typeName: String, typeKind: TypeKind): PrimitiveType {
+    let typeNode = PrimitiveType()
+    typeNode.str = typeName
+    typeNode.kind = typeKind
+    typeNode.SetTy(TypeManager.GetPrimitiveTy(typeKind))
+    return typeNode
+}
+
+public func GetTypeByName(typeName: String): Type {
+    let typeKind = GetActualTypeKind(typeName)
+    if (typeKind == TypeKind.TYPE_INVALID) {
+        return InvalidType(INVALID_POSITION)
+    }
+    return GetPrimitiveType(typeName, typeKind)
+}
+
 public func GetGenericActualType(config: GenericConfigInfo, genericName: String): String {
     for (inst in config.instTypes) {
         if (inst[0] == genericName) {
@@ -205,6 +291,11 @@ public func GetGenericInstTy(config: GenericConfigInfo, genericName: String): Ty
         return Ty.GetInitialTy()
     }
     return GetTyByName(actualTypeName)
+}
+
+public func GetGenericInstType(config: GenericConfigInfo, genericName: String): Type {
+    let actualTypeName = GetGenericActualType(config, genericName)
+    return GetTypeByName(actualTypeName)
 }
 
 public func GetGenericInstTy(config: GenericConfigInfo, genericTy: Ty, typeManager: TypeManager): Ty {
@@ -239,6 +330,84 @@ public func GetGenericInstTy(config: GenericConfigInfo, genericTy: Ty, typeManag
         return typeManager.GetTupleTy(elements.toArray())
     }
     return genericTy
+}
+
+public func GetGenericInstType(config: GenericConfigInfo, genericTy: Ty, typeManager: TypeManager): Type {
+    let instantiatedTy = GetGenericInstTy(config, genericTy, typeManager)
+    if (instantiatedTy.IsPrimitive()) {
+        return GetPrimitiveType(instantiatedTy.String(), instantiatedTy.kind)
+    }
+    if (let Some(funcTy) <- (instantiatedTy as FuncTy)) {
+        let funcType = FuncType()
+        funcType.SetTy(instantiatedTy)
+        for (paramTy in funcTy.paramTys) {
+            funcType.paramTypes.add(GetGenericInstType(config, paramTy, typeManager))
+        }
+        funcType.retType = GetGenericInstType(config, funcTy.retTy, typeManager)
+        return funcType
+    }
+    if (instantiatedTy.IsTuple()) {
+        let tupleType = TupleType()
+        tupleType.SetTy(instantiatedTy)
+        return tupleType
+    }
+    return InvalidType(INVALID_POSITION)
+}
+
+public func IsGenericParam(ty: Ty, decl: Decl, config: GenericConfigInfo): Bool {
+    if (!IsCJMappingGeneric(decl) || !ty.HasGeneric()) {
+        return false
+    }
+    if (ty.IsGeneric()) {
+        return !GetGenericActualType(config, ty.name).isEmpty()
+    }
+    if (ty.IsTuple()) {
+        for (typeArg in ty.typeArgs) {
+            if (typeArg.HasGeneric() && !IsGenericParam(typeArg, decl, config)) {
+                return false
+            }
+        }
+        return true
+    }
+    if (let Some(funcTy) <- (ty as FuncTy)) {
+        for (paramTy in funcTy.paramTys) {
+            if (paramTy.HasGeneric() && !IsGenericParam(paramTy, decl, config)) {
+                return false
+            }
+        }
+        if (funcTy.retTy.HasGeneric()) {
+            return IsGenericParam(funcTy.retTy, decl, config)
+        }
+        return true
+    }
+    return false
+}
+
+public func IsVisibalFunc(funcDecl: FuncDecl, decl: Decl, config: GenericConfigInfo): Bool {
+    var hasGenericParam = false
+    if (let Some(body) <- funcDecl.funcBody) {
+        if (!body.paramLists.isEmpty()) {
+            for (param in body.paramLists[0].params) {
+                if (let Some(paramTy) <- param.GetTy()) {
+                    if (IsGenericParam(paramTy, decl, config)) {
+                        hasGenericParam = true
+                        break
+                    }
+                }
+            }
+        }
+        if (!hasGenericParam) {
+            if (let Some(retType) <- body.retType) {
+                if (let Some(retTy) <- retType.GetTy()) {
+                    hasGenericParam = IsGenericParam(retTy, decl, config)
+                }
+            }
+        }
+    }
+    if (!hasGenericParam) {
+        return true
+    }
+    return config.funcNames.contains(funcDecl.identifier.Val())
 }
 
 public func SelfhostPortStatus_NativeFFI_Utils(): Bool {
