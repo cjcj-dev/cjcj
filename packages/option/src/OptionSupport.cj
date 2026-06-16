@@ -1,5 +1,9 @@
 package cangjie_compiler::option
 
+import cangjie_compiler::basic.Errorln as BasicErrorln
+import cangjie_compiler::basic.Infoln as BasicInfoln
+import cangjie_compiler::basic.Println as BasicPrintln
+import cangjie_compiler::basic.Warningln as BasicWarningln
 import cangjie_compiler::utils.AccessResultType as UtilsAccessResultType
 import cangjie_compiler::utils.FILE_PATH_MAX_LENGTH as UTILS_FILE_PATH_MAX_LENGTH
 import cangjie_compiler::utils.FailureReason as UtilsFailureReason
@@ -360,17 +364,21 @@ private func LoadRemainingLittleEndian(data: Array<UInt8>, start: Int64): UInt64
 }
 
 public func Errorln(value: String): Unit {
-    eprintln("error: " + value)
+    BasicErrorln(value)
 }
 
 public func Warningln(value: String): Unit {
-    eprintln("warning: " + value)
+    BasicWarningln(value)
+}
+
+public func Infoln(value: String): Unit {
+    BasicInfoln(value)
 }
 
 public func Println(): Unit {
-    println("")
+    BasicPrintln()
 }
 
 public func Println(value: String): Unit {
-    println(value)
+    BasicPrintln(value: value)
 }

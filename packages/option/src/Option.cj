@@ -343,6 +343,8 @@ public open class GlobalOptions <: Option {
     public var aggressiveParallelCompileWithoutArg: Bool = false
     public let bitcodeFilesName: ArrayList<String> = ArrayList<String>()
     public let symbolsNeedLocalized: ArrayList<String> = ArrayList<String>()
+    public let symbolsNeedLocalizedPerPkg: HashMap<String, ArrayList<String>> =
+        HashMap<String, ArrayList<String>>()
     public var overflowStrategy: OverflowStrategy = OverflowStrategy.THROWING
     public var targetCPU: String = ""
     public var sysroot: String = ""
@@ -742,6 +744,9 @@ public open class GlobalOptions <: Option {
                 if (IsPathAboveLengthLimit(input)) { return false }
                 if (!FileExist(input)) { return false }
                 if (IsDir(input)) {
+                    if (!compilePackage) {
+                        Warningln("source path is only supported with '-p' or '--package': " + input)
+                    }
                     let packagePath = CheckDirectoryPath(input)
                     if (!packagePath.hasValue) { return false }
                     packagePaths.add(input)
@@ -781,7 +786,10 @@ public open class GlobalOptions <: Option {
 
     private func ReprocessOutputs(): Bool {
         if (outputDir.hasValue) {
-            if (IsAbsolutePath(output)) { return false }
+            if (IsAbsolutePath(output)) {
+                Errorln("'-o' does not accept absolute path when '--output-dir' is specified")
+                return false
+            }
             output = JoinPath(outputDir.value, output)
             let outputDirAbs = ValidateDirectoryPath(outputDir.value, mode: UtilsFileMode.FM_WRITE)
             if (!outputDirAbs.hasValue) { return false }
@@ -795,7 +803,10 @@ public open class GlobalOptions <: Option {
         if (!saveDirAbs.hasValue) { return false }
         output = if (outputIsDir) { saveDirAbs.value } else { JoinPath(saveDirAbs.value, GetFileName(output)) }
         if (!CheckOutputPathLength()) { return false }
-        if (!compileMacroPackage && StartsWith(GetFileName(output), "lib-macro_")) { return false }
+        if (!compileMacroPackage && StartsWith(GetFileName(output), "lib-macro_")) {
+            Errorln("Cannot support specify file prefix 'lib-macro_' without '--compile-macro' option.")
+            return false
+        }
         return true
     }
 
@@ -829,18 +840,36 @@ public open class GlobalOptions <: Option {
         if (target.IsMacOS() || target.IsArm32()) { disableReflection = true }
         if (!ReprocessOutputs()) { return false }
         if (!ReprocessInputs()) { return false }
-        if (compileMacroPackage && enableOutputType) { return false }
-        if (compileMacroPackage && !output.isEmpty() && !IsDir(output)) { return false }
+        if (compileMacroPackage && enableOutputType) {
+            Errorln("using both '--compile-macro' and '--output-type' is not allowed.")
+            return false
+        }
+        if (compileMacroPackage && !output.isEmpty() && !IsDir(output)) {
+            Errorln("Cannot support specify output file name with '--compile-macro' option.")
+            return false
+        }
         if (enableCoverage) {
             if (optimizationLevel != OptimizationLevel.O0) {
+                Warningln("'--coverage' should be used without optimizations.")
                 let _ = SetOptimizationLevel(OptimizationLevel.O0)
             }
-            removedPathPrefix.clear()
+            if (!removedPathPrefix.isEmpty()) {
+                Warningln("'--coverage' should be used without option '--trimpath'.")
+                removedPathPrefix.clear()
+            }
         }
         if (scanDepPkg) {
             if (compilePackage) {
-                if (!inputCjoFile.isEmpty() || packagePaths.isEmpty()) { return false }
+                if (!inputCjoFile.isEmpty()) {
+                    Errorln("'-p' or '--package' does not accept .cjo inputs with '--scan-dependency'.")
+                    return false
+                }
+                if (packagePaths.isEmpty()) {
+                    Errorln("'--scan-dependency' requires a package directory when '-p' or '--package' is specified.")
+                    return false
+                }
             } else if (inputCjoFile.isEmpty()) {
+                Errorln("'--scan-dependency' requires a .cjo input file.")
                 return false
             }
         }
@@ -849,57 +878,130 @@ public open class GlobalOptions <: Option {
             let libraryDirPath = JoinPath(JoinPath(runtimeDirPath, "lib"), GetCangjieLibTargetPathName())
             let sanitizerPath = JoinPath(libraryDirPath, SanitizerTypeToShortString())
             let runtimePath = JoinPath(sanitizerPath, "libcangjie-runtime" + GetSharedLibraryExtension(target.os))
-            if (!FileExist(runtimePath)) { return false }
-            if (IsLTOEnabled() || discardEhFrame || compileMacroPackage) { return false }
-            if ((EnableAsan() || EnableHwAsan()) && target.GetOSFamily() != OSType.LINUX) { return false }
-            if (EnableHwAsan() && target.arch != ArchType.X86_64 && target.arch != ArchType.AARCH64) { return false }
+            if (!FileExist(runtimePath)) {
+                Errorln(SanitizerTypeToSerializedString() + " sanitizer feature is not supported.")
+                return false
+            }
+            if (IsLTOEnabled()) {
+                Errorln("Option '--sanitize' and '--lto' cannot be enabled together.")
+                return false
+            }
+            if (discardEhFrame) {
+                Errorln("Option '--sanitize' and '--discard-eh-frame' cannot be enabled together.")
+                return false
+            }
+            if (compileMacroPackage) {
+                Errorln("Option '--sanitize' and '--compile-macro' cannot be enabled together.")
+                return false
+            }
+            if (EnableAsan() && target.GetOSFamily() != OSType.LINUX) {
+                Errorln("Address Sanitizer is only supported on Linux")
+                return false
+            }
+            if (EnableHwAsan() && target.GetOSFamily() != OSType.LINUX) {
+                Errorln("Hardware-Assisted Address Sanitizer is only supported on Linux")
+                return false
+            }
+            if (EnableHwAsan() && target.arch != ArchType.X86_64 && target.arch != ArchType.AARCH64) {
+                Errorln("Hardware-Assisted Address Sanitizer is only supported on X86_64 or aarch64")
+                return false
+            }
             if (EnableTsan() && target.GetOSFamily() != OSType.LINUX && target.GetOSFamily() != OSType.WINDOWS) {
+                Errorln("Thread Sanitizer is only supported on Linux/Windows")
                 return false
             }
         }
         if (IsLTOEnabled()) {
             if (target.GetOSFamily() == OSType.DARWIN || target.GetOSFamily() == OSType.IOS ||
                 target.GetOSFamily() == OSType.WINDOWS) {
+                Errorln("LTO is not supported for target " + target.OSToString())
                 return false
             }
-            if (outputMode == OutputMode.OBJ) { return false }
-            if (outputMode == OutputMode.STATIC_LIB && !bcInputFiles.isEmpty()) { return false }
-            if (optimizationLevel == OptimizationLevel.Os || optimizationLevel == OptimizationLevel.Oz) { return false }
+            if (outputMode == OutputMode.OBJ) {
+                Errorln("--output-type=obj is not allowed in LTO mode")
+                return false
+            }
+            if (outputMode == OutputMode.STATIC_LIB && !bcInputFiles.isEmpty()) {
+                Errorln("The input file cannot be bc files When generating a static library in LTO mode.")
+                return false
+            }
+            if (optimizationLevel == OptimizationLevel.Os || optimizationLevel == OptimizationLevel.Oz) {
+                Errorln("-Os and -Oz optimize options are not supported in LTO mode.")
+                return false
+            }
         }
         if (IsCompileAsExeEnabled()) {
-            if (!IsLTOEnabled()) { return false }
+            if (!IsLTOEnabled()) {
+                Errorln("'--compile-as-exe' requires '--lto'.")
+                return false
+            }
             if (target.GetOSFamily() == OSType.WINDOWS || target.GetOSFamily() == OSType.DARWIN ||
                 target.GetOSFamily() == OSType.IOS) {
+                Errorln("'--compile-as-exe' is not supported for this target platform.")
                 return false
             }
         }
         if (IsLTOPkgVisibilityEnabled()) {
-            if (!IsLTOEnabled()) { return false }
-            if (!ltoVisiblePkgs.isEmpty() && IsCompileAsExeEnabled()) { return false }
+            if (!IsLTOEnabled()) {
+                Errorln("'--lto-keep-pkg-visibility' requires '--lto'.")
+                return false
+            }
+            if (!ltoVisiblePkgs.isEmpty() && IsCompileAsExeEnabled()) {
+                Errorln("'--lto-keep-pkg-visibility' conflicts with '--compile-as-exe'.")
+                return false
+            }
+            if (outputMode != OutputMode.SHARED_LIB) {
+                Warningln("'--lto-keep-pkg-visibility' only affects dynamic library output.")
+            }
         }
-        if (enablePgoInstrGen && enablePgoInstrUse) { return false }
-        if (enablePgoInstrGen && target.env == EnvironmentType.OHOS && pgoProfileFile.isEmpty()) { return false }
+        if (enablePgoInstrGen && enablePgoInstrUse) {
+            Errorln("using both '--pgo-instr-gen' and '--pgo-instr-use' is not allowed.")
+            return false
+        }
+        if (enablePgoInstrGen && target.env == EnvironmentType.OHOS && pgoProfileFile.isEmpty()) {
+            Errorln("'--pgo-instr-gen' requires a profile file when targeting OHOS.")
+            return false
+        }
         if (enablePgoInstrUse && (!FileExist(pgoProfileFile) || GetFileExtension(pgoProfileFile) != "profdata")) {
+            Errorln("'--pgo-instr-use' requires an existing .profdata file.")
             return false
         }
         if (!ReprocessObfuseOption()) { return false }
         for (commonCjo in commonPartCjos) {
-            if (GetFileExtension(commonCjo) != "cjo") { return false }
+            if (GetFileExtension(commonCjo) != "cjo") {
+                Warningln("unexpected file extension for common cjo input: " + commonCjo)
+                return false
+            }
         }
         for (commonChir in commonPartChirs) {
-            if (GetFileExtension(commonChir) != "chir") { return false }
+            if (GetFileExtension(commonChir) != "chir") {
+                Warningln("unexpected file extension for common chir input: " + commonChir)
+                return false
+            }
         }
-        if (commonPartCjos.size != commonPartChirs.size) { return false }
-        if (outputMode != OutputMode.OBJ && compileTarget != CompileTarget.DEFAULT) {
-            compileTarget = CompileTarget.DEFAULT
-        }
-        if (srcFiles.isEmpty() && (outputMode == OutputMode.OBJ || outputMode == OutputMode.CHIR) && !compilePackage) {
+        if (commonPartCjos.size != commonPartChirs.size) {
+            Errorln("'--common-part-cjo' requires one matching '--common-part-chir' for each file.")
             return false
         }
-        if (!compilePackage && srcFiles.isEmpty() && !inputObjs.isEmpty() && !experimentalMode) { return false }
+        if (outputMode != OutputMode.OBJ && compileTarget != CompileTarget.DEFAULT) {
+            compileTarget = CompileTarget.DEFAULT
+            Warningln("'--compile-target' is only valid with '--output-type=obj'.")
+        }
+        if (srcFiles.isEmpty() && (outputMode == OutputMode.OBJ || outputMode == OutputMode.CHIR) && !compilePackage) {
+            Errorln("source file is required for '--output-type=obj' or '--output-type=chir'.")
+            return false
+        }
+        if (!compilePackage && srcFiles.isEmpty() && !inputObjs.isEmpty() && !experimentalMode) {
+            Errorln("object-only linking requires '--experimental'.")
+            return false
+        }
         if (!jobs.hasValue) { jobs = MaybeUInt64(GetHardwareConcurrency()) }
         if (target.os == OSType.WINDOWS || target.os == OSType.DARWIN || target.os == OSType.IOS ||
             IsObfuscationEnabled() || IsLTOEnabled() || enableCoverage) {
+            if ((target.os == OSType.WINDOWS || target.os == OSType.DARWIN || target.os == OSType.IOS) &&
+                (aggressiveParallelCompile.hasValue || aggressiveParallelCompileWithoutArg)) {
+                Warningln("'--apc' is not supported when targeting " + target.OSToString() + ".")
+            }
             aggressiveParallelCompile = MaybeUInt64(1u64)
         } else if (!aggressiveParallelCompile.hasValue && (optimizationLevel == OptimizationLevel.O0 ||
             aggressiveParallelCompileWithoutArg)) {
@@ -907,7 +1009,12 @@ public open class GlobalOptions <: Option {
         } else if (!aggressiveParallelCompile.hasValue) {
             aggressiveParallelCompile = MaybeUInt64(1u64)
         }
-        if (target.env == EnvironmentType.OHOS) { linkStaticStd = MaybeBool(false) }
+        if (target.env == EnvironmentType.OHOS) {
+            if (linkStaticStd.hasValue && linkStaticStd.value) {
+                Warningln("'--static-std' has no effect when targeting OHOS.")
+            }
+            linkStaticStd = MaybeBool(false)
+        }
         return true
     }
 

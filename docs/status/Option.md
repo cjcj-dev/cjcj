@@ -111,3 +111,24 @@ still uses local diagnostics instead of Basic diagnostic IDs. Importing Basic
 directly is currently blocked by the existing `basic -> option` dependency for
 `WarningOptionMgr`, so diagnostic de-isolation needs a dependency-shape change
 outside this package before it can faithfully use `DiagnosticEngine`.
+
+This pass de-isolates the remaining local print/usage formatting wrappers that
+could be safely moved inside the current dependency graph: Option now delegates
+`Errorln`, `Warningln`, `Infoln`, `Println`, help indentation, and command
+description formatting to the real `cangjie_compiler::basic` print helpers
+while preserving Option's public wrapper surface for existing call sites. The
+driver-owned `TempFileInfo` duplicate is still local because importing
+`driver` from `option` would invert the current package layering
+(`driver -> frontend_tool -> option`) and pull tool/frontend dependencies into
+the core option package.
+
+The same pass restores more C++ post-action behavior and state. `GlobalOptions`
+now carries the C++ `symbolsNeedLocalizedPerPkg` map, reports C++-matching
+errors or warnings for output-dir conflicts, `lib-macro_` outputs,
+compile-macro/output-type conflicts, coverage normalization, scan-dependency
+mode errors, sanitizer/LTO/compile-as-exe/LTO-visibility/PGO conflicts, CJMP
+common-part mismatches, invalid compile-target placement, object-only linking
+without `--experimental`, unsupported APC targets, and OHOS `--static-std`
+normalization. Target triple parsing, custom optimization, sancov level,
+error-count, and jobs/APC value parsing now emit the reference diagnostics
+instead of failing silently.

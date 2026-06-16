@@ -345,7 +345,10 @@ private func parseMockMode(opts: GlobalOptions, value: String): ActionResult {
 
 private func parseCustomOptimization(opts: GlobalOptions, value: String): ActionResult {
     let parsed = TryParseUInt64(value)
-    if (!parsed.hasValue) { return handled(success: false) }
+    if (!parsed.hasValue) {
+        Errorln("Optimization level " + value + " is invalid")
+        return handled(success: false)
+    }
     if (parsed.value == 0u64) { return handled(success: opts.SetOptimizationLevel(OptimizationLevel.O0)) }
     if (parsed.value == 1u64) { return handled(success: opts.SetOptimizationLevel(OptimizationLevel.O1)) }
     if (parsed.value == 2u64) { return handled(success: opts.SetOptimizationLevel(OptimizationLevel.O2)) }
@@ -384,7 +387,10 @@ private func parseErrorLimit(opts: GlobalOptions, value: String): ActionResult {
         return handled()
     }
     let parsed = TryParseUInt64(value)
-    if (!parsed.hasValue) { return handled(success: false) }
+    if (!parsed.hasValue) {
+        Errorln("The value of --error-count-limit is invalid.")
+        return handled(success: false)
+    }
     opts.errorCountLimit = parsed
     return handled()
 }
@@ -557,7 +563,10 @@ private func parseOverflowStrategy(opts: GlobalOptions, value: String): ActionRe
 
 private func parseSancovLevel(opts: GlobalOptions, value: String): ActionResult {
     let parsed = TryParseUInt64(value)
-    if (!parsed.hasValue) { return handled(success: false) }
+    if (!parsed.hasValue) {
+        Errorln("Sancov level " + value + " is invalid")
+        return handled(success: false)
+    }
     if (parsed.value == 0u64) { opts.sancovOption.SetSancovLevel(SanitizerCoverageType.SCK_NONE); return handled() }
     if (parsed.value == 1u64) { opts.sancovOption.SetSancovLevel(SanitizerCoverageType.SCK_FUNCTION); return handled() }
     opts.sancovOption.SetSancovLevel(SanitizerCoverageType.SCK_BB)
@@ -591,9 +600,19 @@ private func parseStackTraceFormat(opts: GlobalOptions, value: String): ActionRe
 
 private func parseJobsValue(optionName: String, value: String): MaybeUInt64 {
     let maxLen: Int64 = 9
-    if (value.isEmpty() || value.size > maxLen) { return MaybeUInt64() }
+    if (value.isEmpty()) {
+        Errorln("'" + optionName + "' requires a non-empty value.")
+        return MaybeUInt64()
+    }
+    if (value.size > maxLen) {
+        Errorln("'" + optionName + "' gets an invalid number input.")
+        return MaybeUInt64()
+    }
     let parsed = TryParseUInt64(value)
-    if (!parsed.hasValue) { return MaybeUInt64() }
+    if (!parsed.hasValue) {
+        Errorln("'" + optionName + "' only accepts a positive integer number as value.")
+        return MaybeUInt64()
+    }
     if (parsed.value < 1u64) {
         Warningln("'" + optionName + "' value must be greater than 0, the compiler will use 1 as the value.")
         return MaybeUInt64(1u64)
@@ -620,13 +639,19 @@ private func parseJobs(opts: GlobalOptions, arg: OptionArgInstance, aggressive: 
 
 public func ParseTargetTriple(opts: GlobalOptions, triple: String): Bool {
     let parts = SplitString(triple, "-")
-    if (parts.size != 3 && parts.size != 4) { return false }
+    if (parts.size != 3 && parts.size != 4) {
+        Errorln("The target must be in either form of {ARCH}-{VENDOR}-{SYSTEM}-{ENV} or {ARCH}-{SYSTEM}-{ENV}.")
+        return false
+    }
     opts.target.vendor = Vendor.UNKNOWN
     if (parts[0] == "x86_64") { opts.target.arch = ArchType.X86_64 }
     else if (parts[0] == "aarch64" || parts[0] == "arm64") { opts.target.arch = ArchType.AARCH64 }
     else if (parts[0] == "arm") { opts.target.arch = ArchType.ARM32 }
     else if (parts[0] == "unknown") { opts.target.arch = ArchType.UNKNOWN }
-    else { return false }
+    else {
+        Errorln("The architecture \"" + parts[0] + "\" is not found or supported!")
+        return false
+    }
     if (parts.size >= 3 && parts[1] == "apple") {
         opts.target.vendor = Vendor.APPLE
         if (StartsWith(parts[2], "ios")) {
@@ -641,6 +666,7 @@ public func ParseTargetTriple(opts: GlobalOptions, triple: String): Bool {
                 opts.target.env = EnvironmentType.NOT_AVAILABLE
                 return true
             }
+            Errorln("The environment \"" + parts[3] + "\" is not found or supported!")
             return false
         }
         if (parts[2] == "darwin") {
@@ -648,6 +674,8 @@ public func ParseTargetTriple(opts: GlobalOptions, triple: String): Bool {
             opts.target.env = EnvironmentType.NOT_AVAILABLE
             return true
         }
+        Errorln("The OS \"" + parts[2] + "\" is not found or supported!")
+        return false
     }
     let osStr = parts[parts.size - 2]
     if (osStr == "linux") { opts.target.os = OSType.LINUX }
@@ -655,11 +683,19 @@ public func ParseTargetTriple(opts: GlobalOptions, triple: String): Bool {
     else if (osStr == "darwin") { opts.target.os = OSType.DARWIN }
     else if (osStr == "ios") { opts.target.os = OSType.IOS }
     else if (osStr == "unknown") { opts.target.os = OSType.UNKNOWN }
-    else { return false }
+    else {
+        Errorln("The OS \"" + osStr + "\" is not found or supported!")
+        return false
+    }
     let envStr = parts[parts.size - 1]
     if (envStr == "gnu" || envStr == "mingw32") { opts.target.env = EnvironmentType.GNU }
     else if (envStr == "ohos") { opts.target.env = EnvironmentType.OHOS }
-    else if (envStr == "android") { opts.target.env = EnvironmentType.ANDROID; opts.target.apiLevel = MIN_ANDROID_API }
+    else if (envStr == "android") {
+        opts.target.env = EnvironmentType.ANDROID
+        opts.target.apiLevel = MIN_ANDROID_API
+        Infoln("ANDROID API level is not suggested in the target. Use API level " + opts.target.apiLevel +
+            " by default.")
+    }
     else if (StartsWith(envStr, "android")) {
         opts.target.env = EnvironmentType.ANDROID
         opts.target.apiLevel = ""
@@ -682,6 +718,9 @@ public func ParseTargetTriple(opts: GlobalOptions, triple: String): Bool {
     }
     else if (envStr == "simulator") { opts.target.env = EnvironmentType.SIMULATOR }
     else if (envStr == "") { opts.target.env = EnvironmentType.NOT_AVAILABLE }
-    else { return false }
+    else {
+        Errorln("The environment \"" + envStr + "\" is not found or supported!")
+        return false
+    }
     return true
 }
