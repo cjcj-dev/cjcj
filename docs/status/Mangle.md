@@ -1,6 +1,6 @@
 # Mangle Port Status
 
-Date: 2026-06-16
+Date: 2026-06-17
 
 Build: `cjpm build` passes.
 
@@ -61,6 +61,8 @@ Implemented:
   wrapper class names, abstract dispatch helpers, and override helper names.
 - Aligned real and descriptor CHIR generic type handling with the C++ assertion behavior by rejecting
   undeclared generic type references instead of silently mapping them to `G0`.
+- Aligned real-CHIR virtual/wrapper helper names with the C++ `CustomTypeDef::GetIdentifierWithoutPrefix`
+  behavior and made CHIR prefix replacement reject non-`_C` inputs instead of silently preserving them.
 
 Known fidelity caveats:
 

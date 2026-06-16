@@ -58,7 +58,7 @@ private func ReplaceManglePrefixWith(mangledName: String, newPrefix: String): St
     if (StartsWith(mangledName, MANGLE_CANGJIE_PREFIX)) {
         return newPrefix + mangledName[MANGLE_PREFIX_LEN..]
     }
-    return mangledName
+    throw IllegalArgumentException("Mangle name has no _C prefix to be replaced: " + mangledName)
 }
 
 private func FunctionIdentifierForPrefix(function: Function): String {
@@ -73,8 +73,12 @@ private func FunctionIdentifierForPrefix(function: Function): String {
     return identifier
 }
 
-private func CustomTypeDefIdentifierForPrefix(def: CustomTypeDef): String {
-    return def.GetIdentifier()
+private func CustomTypeDefIdentifierWithoutPrefix(def: CustomTypeDef): String {
+    let identifier = def.GetIdentifier()
+    if (identifier.isEmpty()) {
+        throw IllegalArgumentException("Custom type identifier has no prefix to strip.")
+    }
+    return identifier[1..]
 }
 
 private func sortedMangledTypes(types: ArrayList<CHIRType>, genericsTypeStack: ArrayList<String>): ArrayList<String> {
@@ -131,7 +135,7 @@ public func GenerateVirtualFuncMangleName(rawFunc: Function, customTypeDef: Cust
         }
         out += "${customTypeDef.GetPackageName().size}" + customTypeDef.GetPackageName()
     } else {
-        out += MANGLE_DOLLAR_PREFIX + ReplaceManglePrefixWith(CustomTypeDefIdentifierForPrefix(customTypeDef), "")
+        out += MANGLE_DOLLAR_PREFIX + ReplaceManglePrefixWith(CustomTypeDefIdentifierWithoutPrefix(customTypeDef), "")
     }
     out += MANGLE_DOLLAR_PREFIX + MangleCHIRType(parentTy, customTyGenericTypeStack)
     return out
@@ -238,7 +242,7 @@ public func GenerateWrapperClassMangleName(def: CHIRCustomTypeDef): String {
 }
 
 public func GenerateWrapperClassMangleName(def: ClassDef): String {
-    return MANGLE_CLOSURE_WRAPPER_PREFIX + CustomTypeDefIdentifierForPrefix(def)
+    return MANGLE_CLOSURE_WRAPPER_PREFIX + CustomTypeDefIdentifierWithoutPrefix(def)
 }
 
 public func GenerateGenericAbstractFuncMangleName(def: CHIRCustomTypeDef): String {
@@ -280,7 +284,7 @@ public func GenerateWrapperClassGenericOverrideFuncMangleName(def: CHIRCustomTyp
 }
 
 public func GenerateWrapperClassGenericOverrideFuncMangleName(def: ClassDef): String {
-    return MANGLE_CHIR_FUNC_PREFIX + CustomTypeDefIdentifierForPrefix(def) + MANGLE_CHIR_GENERIC_SUFFIX
+    return MANGLE_CHIR_FUNC_PREFIX + CustomTypeDefIdentifierWithoutPrefix(def) + MANGLE_CHIR_GENERIC_SUFFIX
 }
 
 public func GenerateWrapperClassInstOverrideFuncMangleName(def: CHIRCustomTypeDef): String {
@@ -288,5 +292,5 @@ public func GenerateWrapperClassInstOverrideFuncMangleName(def: CHIRCustomTypeDe
 }
 
 public func GenerateWrapperClassInstOverrideFuncMangleName(def: ClassDef): String {
-    return MANGLE_CHIR_FUNC_PREFIX + CustomTypeDefIdentifierForPrefix(def) + MANGLE_ABSTRACT_INST_PREFIX
+    return MANGLE_CHIR_FUNC_PREFIX + CustomTypeDefIdentifierWithoutPrefix(def) + MANGLE_ABSTRACT_INST_PREFIX
 }
