@@ -308,6 +308,19 @@ public class SubstPack {
         this.u2i = u2i
         this.inst = inst
     }
+
+    public func Clone(): SubstPack {
+        return SubstPack(u2i.Clone(), inst.Clone())
+    }
+
+    public func Merge(other: SubstPack): Unit {
+        for (entry in other.u2i.entries) {
+            u2i.Put(entry.tyVar, entry.ty)
+        }
+        for (entry in other.inst.entries) {
+            inst.PutAll(entry.tyVar, entry.tys)
+        }
+    }
 }
 
 public class ConstraintEntry {

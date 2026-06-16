@@ -31,11 +31,97 @@ public let FUTURE_TYPE_NAME: String = "Future"
 public let INT32_SIZE: Int64 = 4
 
 public class TyVarScope {
+    private var manager: Option<TypeManager> = None
+    private let tyVars: ArrayList<GenericsTy> = ArrayList<GenericsTy>()
+    private var closed: Bool = false
+
     public init() {}
+
+    public init(typeManager: TypeManager) {
+        manager = typeManager
+        typeManager.PushTyVarScope(this)
+    }
+
+    public func AddTyVar(tyVar: GenericsTy): Unit {
+        tyVars.add(tyVar)
+    }
+
+    public func Close(): Unit {
+        if (closed) {
+            return
+        }
+        if (let Some(typeManager) <- manager) {
+            for (tyVar in tyVars) {
+                typeManager.ReleaseTyVar(tyVar)
+            }
+            typeManager.PopTyVarScope(this)
+        }
+        closed = true
+    }
 }
 
 public class InstCtxScope {
+    public var curMaps: SubstPack = SubstPack()
+    public var refMaps: SubstPack = SubstPack()
+    public var maps: SubstPack = SubstPack()
+    private var manager: Option<TypeManager> = None
+    private var closed: Bool = false
+
     public init() {}
+
+    public init(typeManager: TypeManager) {
+        manager = typeManager
+        typeManager.PushInstCtxScope(this)
+    }
+
+    public func SetRefDecl(decl: Decl, instTy: Ty): Unit {
+        if (let Some(generic) <- decl.GetGeneric()) {
+            if (generic.typeParameters.size != instTy.typeArgs.size) {
+                return
+            }
+            refMaps = SubstPack()
+            var idx: Int64 = 0
+            while (idx < instTy.typeArgs.size) {
+                if (let Some(paramTy) <- generic.typeParameters[idx].GetTy()) {
+                    if (let Some(genericTy) <- (paramTy as GenericsTy)) {
+                        if (let Some(typeManager) <- manager) {
+                            let instVar = typeManager.AllocTyVar()
+                            refMaps.u2i.Put(genericTy, instVar)
+                            refMaps.inst.Put(instVar, instTy.typeArgs[idx])
+                        }
+                    }
+                }
+                idx++
+            }
+            maps = curMaps.Clone()
+            maps.Merge(refMaps)
+        }
+    }
+
+    public func SetRefDeclSimple(typeManager: TypeManager, fd: FuncDecl): Unit {
+        if (let Some(generic) <- fd.GetGeneric()) {
+            refMaps = SubstPack()
+            for (param in generic.typeParameters) {
+                if (let Some(paramTy) <- param.GetTy()) {
+                    if (let Some(genericTy) <- (paramTy as GenericsTy)) {
+                        typeManager.MakeInstTyVar(refMaps, genericTy)
+                    }
+                }
+            }
+            maps = curMaps.Clone()
+            maps.Merge(refMaps)
+        }
+    }
+
+    public func Close(): Unit {
+        if (closed) {
+            return
+        }
+        if (let Some(typeManager) <- manager) {
+            typeManager.PopInstCtxScope(this)
+        }
+        closed = true
+    }
 }
 
 private class OverrideCacheEntry {
@@ -115,6 +201,8 @@ public class TypeManager {
     private let tyUsedExtends: ArrayList<TyUsedExtendsEntry> = ArrayList<TyUsedExtendsEntry>()
     private let checkedTyExtendRelation: ArrayList<CheckedTyExtendRelation> = ArrayList<CheckedTyExtendRelation>()
     private let unsolvedTyVars: ArrayList<GenericsTy> = ArrayList<GenericsTy>()
+    private let tyVarScopes: ArrayList<TyVarScope> = ArrayList<TyVarScope>()
+    private let instCtxScopes: ArrayList<InstCtxScope> = ArrayList<InstCtxScope>()
     private var nextUniqId: UInt64 = 0u64
 
     public init() {}
@@ -1191,7 +1279,45 @@ public class TypeManager {
         if (needSolving) {
             MarkAsUnsolvedTyVar(tv)
         }
+        if (!tyVarScopes.isEmpty()) {
+            tyVarScopes[tyVarScopes.size - 1].AddTyVar(tv)
+        }
         return tv
+    }
+
+    public func PushTyVarScope(scope: TyVarScope): Unit {
+        tyVarScopes.add(scope)
+    }
+
+    public func PopTyVarScope(scope: TyVarScope): Unit {
+        let _ = scope
+        if (tyVarScopes.isEmpty()) {
+            return
+        }
+        tyVarScopes.remove(at: tyVarScopes.size - 1)
+    }
+
+    public func PushInstCtxScope(scope: InstCtxScope): Unit {
+        instCtxScopes.add(scope)
+    }
+
+    public func PopInstCtxScope(scope: InstCtxScope): Unit {
+        let _ = scope
+        if (instCtxScopes.isEmpty()) {
+            return
+        }
+        instCtxScopes.remove(at: instCtxScopes.size - 1)
+    }
+
+    public func ReleaseTyVar(tv: GenericsTy): Unit {
+        var idx: Int64 = 0
+        while (idx < unsolvedTyVars.size) {
+            if (SameTy(unsolvedTyVars[idx], tv)) {
+                unsolvedTyVars.remove(at: idx)
+            } else {
+                idx++
+            }
+        }
     }
 
     public func ScopeDepthOfTyVar(tyVar: GenericsTy): Int64 {
