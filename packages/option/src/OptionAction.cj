@@ -75,7 +75,10 @@ public func ParseAction(opts: GlobalOptions, arg: OptionArgInstance): ActionResu
         return handled()
     }
     if (id == ID.OUTPUT_DIR) {
-        if (!IsDir(arg.value)) { return handled(success: false) }
+        if (!IsDir(arg.value)) {
+            emitDiag(BasicDiagKindRefactor.no_such_directory, arg.value)
+            return handled(success: false)
+        }
         opts.outputDir = MaybeString(arg.value)
         return handled()
     }
@@ -284,7 +287,10 @@ public func ParseAction(opts: GlobalOptions, arg: OptionArgInstance): ActionResu
         return handled()
     }
     if (id == ID.SAVE_TEMPS) {
-        if (!IsDir(arg.value)) { return handled(success: false) }
+        if (!IsDir(arg.value)) {
+            emitDiag(BasicDiagKindRefactor.no_such_directory, arg.value)
+            return handled(success: false)
+        }
         opts.saveTemps = true
         opts.tempFolderPath = arg.value
         return handled()
@@ -562,12 +568,12 @@ private func parseConditionKeyValueLine(line: String, map: HashMap<String, Strin
 }
 
 public func SetupConditionalCompilationCfgFromFile(filePath: String, map: HashMap<String, String>): Bool {
-    let content = ReadTextFile(filePath)
-    if (!content.hasValue) {
-        emitDiag(BasicDiagKindRefactor.driver_cfg_file_read_failed, filePath, "")
+    let readResult = ReadTextFileWithReason(filePath)
+    if (!readResult.content.hasValue) {
+        emitDiag(BasicDiagKindRefactor.driver_cfg_file_read_failed, filePath, readResult.failedReason)
         return false
     }
-    for (line in SplitLines(content.value)) {
+    for (line in SplitLines(readResult.content.value)) {
         if (line.isEmpty() || seeingTomlComment(line)) { continue }
         if (!parseConditionKeyValueLine(line, map)) { return false }
     }

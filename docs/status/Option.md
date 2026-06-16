@@ -162,7 +162,8 @@ This pass de-isolates conditional-compilation cfg diagnostics onto the real
 key/value input, invalid identifiers, builtin-key reuse, duplicate keys,
 non-directory cfg paths, ignored cfg paths, missing explicit `cfg.toml` files,
 and malformed cfg file lines. `SetupConditionalCompilationCfgFromFile` also
-reports `driver_cfg_file_read_failed`; the only remaining approximation in
-this path is the empty failure-reason string because the current Cangjie
-`ReadTextFile` wrapper exposes success/content but not the underlying IO error
-message that C++ passes through.
+reports `driver_cfg_file_read_failed` with the failure reason returned by the
+shared `utils.FileUtil.ReadFileContent` path, matching the C++ `%s` diagnostic
+arguments instead of using a placeholder reason. The directory-valued
+`--output-dir` and `--save-temps` actions now also emit the shared
+`no_such_directory` diagnostic before failing, as `OptionAction.cpp` does.
