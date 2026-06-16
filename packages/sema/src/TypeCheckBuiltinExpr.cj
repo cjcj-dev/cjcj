@@ -327,11 +327,27 @@ public func SynVArrayExpr(typeManager: TypeManager, arrayExpr: ArrayExpr): Ty {
     return InvalidExprTy(arrayExpr)
 }
 
+private func CanInferPointerTyFromTarget(pointerTy: Ty, targetTy: Ty): Bool {
+    if (!targetTy.IsPointer() || targetTy.typeArgs.isEmpty() || !Ty.IsTyCorrect(targetTy.typeArgs[0])) {
+        return false
+    }
+    if (!pointerTy.IsPointer() || pointerTy.typeArgs.isEmpty()) {
+        return false
+    }
+    return !Ty.IsTyCorrect(pointerTy.typeArgs[0]) || pointerTy.HasGeneric()
+}
+
 public func ChkPointerExpr(typeManager: TypeManager, target: Ty, pointerExpr: PointerExpr): Bool {
     if (let None <- pointerExpr.typeNode) {
         return false
     }
-    let pointerTy = pointerExpr.typeNode.getOrThrow().GetTy() ?? TypeManager.GetInvalidTy()
+    let targetTy = UnboxOptionType(target)
+    let pointerTypeNode = pointerExpr.typeNode.getOrThrow()
+    var pointerTy = pointerTypeNode.GetTy() ?? TypeManager.GetInvalidTy()
+    if (CanInferPointerTyFromTarget(pointerTy, targetTy)) {
+        pointerTy = targetTy
+        pointerTypeNode.SetTy(pointerTy)
+    }
     if (!pointerTy.IsPointer()) {
         pointerExpr.SetTy(TypeManager.GetInvalidTy())
         return false
@@ -348,7 +364,6 @@ public func ChkPointerExpr(typeManager: TypeManager, target: Ty, pointerExpr: Po
             return false
         }
     }
-    let targetTy = UnboxOptionType(target)
     if (!targetTy.IsInvalid() && typeManager.CheckTypeCompatibility(targetTy, pointerTy) == TypeCompatibility.INCOMPATIBLE) {
         pointerExpr.SetTy(TypeManager.GetInvalidTy())
         return false
@@ -368,7 +383,12 @@ public func SynCFuncCall(typeManager: TypeManager, ce: CallExpr): Bool {
         ce.SetTy(TypeManager.GetInvalidTy())
         return false
     }
-    let baseTy = ce.baseFunc.getOrThrow().GetTy() ?? TypeManager.GetInvalidTy()
+    let base = ce.baseFunc.getOrThrow()
+    if (let None <- (base as RefExpr)) {
+        ce.SetTy(TypeManager.GetInvalidTy())
+        return false
+    }
+    let baseTy = base.GetTy() ?? TypeManager.GetInvalidTy()
     ce.SetTy(baseTy)
     if (!baseTy.IsCFunc()) {
         ce.SetTy(TypeManager.GetInvalidTy())

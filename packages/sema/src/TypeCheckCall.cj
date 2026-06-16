@@ -40,6 +40,19 @@ private func DiagOld(diag: BasicDiagnosticEngine, node: Node, kind: BasicDiagKin
     let _ = diag.Diagnose(ToBasicPosition(node.begin), ToBasicPosition(node.end), kind, args: args)
 }
 
+private func StringDiagArgs(values: Array<String>): Array<BasicDiagArgument> {
+    let args = ArrayList<BasicDiagArgument>()
+    for (value in values) {
+        args.add(BasicDiagArgument(value))
+    }
+    return args.toArray()
+}
+
+private func DiagOldStrings(diag: BasicDiagnosticEngine, node: Node, kind: BasicDiagKind,
+    values: Array<String>): Unit {
+    DiagOld(diag, node, kind, args: StringDiagArgs(values))
+}
+
 private func DiagRef(diag: BasicDiagnosticEngine, node: Node, kind: BasicDiagKindRefactor,
     args!: Array<String> = Array<String>()): Unit {
     let _ = diag.DiagnoseRefactor(kind, NodeRange(node), arguments: args)
@@ -74,6 +87,13 @@ private func GetExprTy(arg: FuncArg): Ty {
         }
     }
     return arg.GetTy() ?? TypeManager.GetInvalidTy()
+}
+
+private func IsVArrayTy(ty: Ty): Bool {
+    if (let Some(_) <- (ty as VArrayTy)) {
+        return true
+    }
+    return false
 }
 
 private func RealNonOptionTy(ty: Ty): Ty {
@@ -692,7 +712,7 @@ private func SortCallArgumentByParamOrder(fd: FuncDecl, ce: CallExpr): ArrayList
     return out
 }
 
-private func CheckCallCompatible(typeManager: TypeManager, ce: CallExpr, fd: FuncDecl,
+private func CheckCallCompatible(typeManager: TypeManager, diag: Option<BasicDiagnosticEngine>, ce: CallExpr, fd: FuncDecl,
     unit: FunctionMatchingUnit): Bool {
     let paramTys = GetParamTysInArgsOrder(typeManager, ce, fd)
     if (paramTys.size != ce.args.size) {
@@ -703,6 +723,27 @@ private func CheckCallCompatible(typeManager: TypeManager, ce: CallExpr, fd: Fun
         let argTy = GetExprTy(ce.args[idx])
         let paramTy = paramTys[idx]
         if (typeManager.CheckTypeCompatibility(paramTy, argTy) == TypeCompatibility.INCOMPATIBLE) {
+            if (let Some(diagValue) <- diag) {
+                DiagOld(diagValue, ce.args[idx], BasicDiagKind.sema_parameters_and_arguments_mismatch)
+            }
+            return false
+        }
+        if (fd.TestAttr(Attribute.C) && argTy.IsUnit()) {
+            if (let Some(diagValue) <- diag) {
+                DiagOld(diagValue, ce.args[idx], BasicDiagKind.sema_unit_cannot_as_cfunc_arg)
+            }
+            return false
+        }
+        if (fd.TestAttr(Attribute.FOREIGN) && fd.hasVariableLenArg && idx >= GetParamTys(fd).size) {
+            unit.matchedArgs++
+            idx++
+            continue
+        }
+        if (Ty.IsCStructType(argTy) && !SameTy(argTy, paramTy)) {
+            if (let Some(diagValue) <- diag) {
+                DiagOldStrings(diagValue, ce.args[idx], BasicDiagKind.sema_cstruct_cannot_autobox,
+                    [paramTy.String()])
+            }
             return false
         }
         unit.matchedArgs++
@@ -737,7 +778,7 @@ private func CheckCandidate(typeManager: TypeManager, diag: Option<BasicDiagnost
     }
     let unit = FunctionMatchingUnit(fd, paramTyInArgOrder, typeMapping)
     unit.argNameValid = argNamesValid
-    if (!CheckCallCompatible(typeManager, ce, fd, unit)) {
+    if (!CheckCallCompatible(typeManager, diag, ce, fd, unit)) {
         return None
     }
     if (let Some(targetTy) <- target) {
@@ -799,7 +840,8 @@ private func CheckCallKind(diag: Option<BasicDiagnosticEngine>, ce: CallExpr, de
     match (decl.astKind) {
         case ASTKind.INTERFACE_DECL =>
             if (let Some(diagValue) <- diag) {
-                DiagRef(diagValue, ce, BasicDiagKindRefactor.sema_invalid_called_object)
+                DiagOldStrings(diagValue, ce, BasicDiagKind.sema_interface_can_not_be_instantiated,
+                    [decl.identifier.Val()])
             }
             ce.callKind = CallKind.CALL_INVALID
             true
@@ -811,6 +853,14 @@ private func CheckCallKind(diag: Option<BasicDiagnosticEngine>, ce: CallExpr, de
                     isSuper = refExpr.isSuper
                     isThis = refExpr.isThis
                 }
+            }
+            if (decl.TestAttr(Attribute.ABSTRACT) && !isSuper && !isThis) {
+                if (let Some(diagValue) <- diag) {
+                    DiagOldStrings(diagValue, ce, BasicDiagKind.sema_abstract_class_can_not_be_instantiated,
+                        [decl.identifier.Val()])
+                }
+                ce.callKind = CallKind.CALL_INVALID
+                return true
             }
             if (isThis) {
                 ce.callKind = CallKind.CALL_DECLARED_FUNCTION
@@ -838,6 +888,95 @@ private func CheckCallKind(diag: Option<BasicDiagnosticEngine>, ce: CallExpr, de
             true
         case _ => false
     }
+}
+
+private func DynamicBindingThisType(typeManager: TypeManager, ce: CallExpr, fd: FuncDecl,
+    typeMapping: SubstPack): Option<Ty> {
+    if (!IsFuncReturnThisType(fd)) {
+        return None
+    }
+    if (let None <- ce.baseFunc) {
+        return None
+    }
+    let base = ce.baseFunc.getOrThrow()
+    let baseTy = if (Ty.IsTyCorrect(base.GetTy()) && (base.GetTy().getOrThrow()).IsFunc()) {
+        base.GetTy().getOrThrow()
+    } else {
+        fd.GetTy() ?? TypeManager.GetInvalidTy()
+    }
+    if (let None <- (baseTy as FuncTy)) {
+        return None
+    }
+    let funcTy = baseTy as FuncTy
+    if (let Some(member) <- (base as MemberAccess)) {
+        if (let Some(memberBase) <- member.baseExpr) {
+            let memberBaseTy = memberBase.GetTy() ?? TypeManager.GetInvalidTy()
+            if (let Some(genericTy) <- (memberBaseTy as GenericsTy)) {
+                base.SetTy(typeManager.GetFunctionTy(funcTy.getOrThrow().paramTys.toArray(), genericTy))
+                return Some(genericTy)
+            }
+            if (let Some(classTy) <- (memberBaseTy as ClassTy)) {
+                if (let Some(classDecl) <- classTy.declPtr) {
+                    let thisTy = typeManager.ApplySubstPack(
+                        typeManager.GetClassThisTy(classDecl, classTy.typeArgs.toArray()), typeMapping)
+                    base.SetTy(typeManager.GetFunctionTy(funcTy.getOrThrow().paramTys.toArray(), thisTy))
+                    return Some(thisTy)
+                }
+            }
+        }
+    }
+    return None
+}
+
+private func PostCheckCallExpr(typeManager: TypeManager, diag: Option<BasicDiagnosticEngine>, ce: CallExpr,
+    unit: FunctionMatchingUnit): Bool {
+    let fd = unit.fd
+    ce.resolvedFunction = Some(fd)
+    UpdateCallTargets(ce, fd)
+    let _ = DynamicBindingThisType(typeManager, ce, fd, unit.typeMapping)
+    if (!fd.TestAttr(Attribute.FOREIGN) && !fd.TestAttr(Attribute.C)) {
+        var valid = true
+        for (arg in ce.args) {
+            if (arg.withInout) {
+                if (let Some(diagValue) <- diag) {
+                    DiagRef(diagValue, arg, BasicDiagKindRefactor.sema_inout_can_only_used_in_cfunc_calling)
+                }
+                valid = false
+            }
+        }
+        if (!valid) {
+            ce.SetTy(TypeManager.GetInvalidTy())
+            ce.callKind = CallKind.CALL_INVALID
+            return false
+        }
+    } else {
+        for (arg in ce.args) {
+            if (IsVArrayTy(GetExprTy(arg)) && !arg.withInout) {
+                if (let Some(diagValue) <- diag) {
+                    DiagRef(diagValue, arg, BasicDiagKindRefactor.sema_inout_mismatch, args: ["VArray"])
+                }
+                ce.SetTy(TypeManager.GetInvalidTy())
+                ce.callKind = CallKind.CALL_INVALID
+                return false
+            }
+        }
+    }
+    if (fd.TestAttr(Attribute.C) && !ce.TestAttr(Attribute.UNSAFE)) {
+        if (let Some(diagValue) <- diag) {
+            DiagOld(diagValue, ce, BasicDiagKind.sema_unsafe_function_invoke_failed)
+        }
+        ce.SetTy(TypeManager.GetInvalidTy())
+        ce.callKind = CallKind.CALL_INVALID
+        return false
+    }
+    if (let Some(fdTy) <- fd.GetTy()) {
+        if (fdTy.HasQuestTy()) {
+            ce.SetTy(TypeManager.GetInvalidTy())
+            ce.callKind = CallKind.CALL_INVALID
+            return false
+        }
+    }
+    return true
 }
 
 private func MatchFunctionForCall(typeManager: TypeManager, diag: Option<BasicDiagnosticEngine>,
@@ -888,7 +1027,9 @@ private func MatchFunctionForCall(typeManager: TypeManager, diag: Option<BasicDi
         ce.SetTy(GetCallTy(typeManager, ce, unit.fd, unit.typeMapping))
         ce.resolvedFunction = Some(unit.fd)
         UpdateCallTargets(ce, unit.fd)
-        out.add(unit.fd)
+        if (PostCheckCallExpr(typeManager, diag, ce, unit)) {
+            out.add(unit.fd)
+        }
     }
     return out
 }
@@ -954,7 +1095,36 @@ private func CheckFuncPtrCall(typeManager: TypeManager, diag: Option<BasicDiagno
             }
             return false
         }
+        if (funcTy.isC && argTy.IsUnit()) {
+            if (let Some(diagValue) <- diag) {
+                DiagOld(diagValue, ce.args[idx], BasicDiagKind.sema_unit_cannot_as_cfunc_arg)
+            }
+            return false
+        }
+        if (Ty.IsCStructType(argTy) && !SameTy(argTy, param)) {
+            if (let Some(diagValue) <- diag) {
+                DiagOldStrings(diagValue, ce.args[idx], BasicDiagKind.sema_cstruct_cannot_autobox,
+                    [param.String()])
+            }
+            return false
+        }
         idx++
+    }
+    if (funcTy.isC) {
+        for (arg in ce.args) {
+            if (IsVArrayTy(GetExprTy(arg)) && !arg.withInout) {
+                if (let Some(diagValue) <- diag) {
+                    DiagRef(diagValue, arg, BasicDiagKindRefactor.sema_inout_mismatch, args: ["VArray"])
+                }
+                return false
+            }
+        }
+        if (!ce.TestAttr(Attribute.UNSAFE)) {
+            if (let Some(diagValue) <- diag) {
+                DiagOld(diagValue, ce, BasicDiagKind.sema_unsafe_function_invoke_failed)
+            }
+            return false
+        }
     }
     ce.SetTy(typeManager.ApplySubstPack(funcTy.retTy, typeMapping))
     if (let Some(targetTy) <- target) {
