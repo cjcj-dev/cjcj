@@ -1,6 +1,5 @@
 package cangjie_compiler::utils
 
-import cangjie_compiler::lex.{IsContextualKeyword, TOKENS, TokenKind, TokenKindIndex}
 import std.collection.*
 
 public type UTF8 = UInt8
@@ -237,6 +236,22 @@ public let UNI_MAX_UTF8_BYTES_PER_CODE_POINT: Int64 = 4
 private let UNI_UTF32_BYTE_ORDER_MARK_NATIVE: UTF32 = 0x0000feffu32
 private let UNI_UTF32_BYTE_ORDER_MARK_SWAPPED: UTF32 = 0xfffe0000u32
 
+private let RESERVED_IDENTIFIER_WORDS: Array<String> = [
+    "_", "Int8", "Int16", "Int32", "Int64", "IntNative", "UInt8", "UInt16", "UInt32", "UInt64",
+    "UIntNative", "Float16", "Float32", "Float64", "Rune", "Bool", "Nothing", "Unit", "struct", "enum",
+    "VArray", "This", "is", "as", "package", "import", "class", "interface", "func", "macro", "quote", "let", "var", "const",
+    "type", "init", "this", "super", "if", "else", "case", "try", "catch", "finally", "for", "do", "while",
+    "throw", "return", "continue", "break", "in", "match", "where", "extend", "with", "prop", "static",
+    "public", "private", "internal", "protected", "override", "redef", "abstract", "sealed", "open",
+    "foreign", "inout", "mut", "unsafe", "operator", "spawn", "synchronized", "main",
+    "true", "false"
+]
+
+private let CONTEXTUAL_IDENTIFIER_WORDS: Array<String> = [
+    "public", "private", "internal", "protected", "override", "redef", "abstract", "sealed", "open",
+    "common", "specific", "features"
+]
+
 public func ConvertCodepointToUTF8(codepoint: UTF32): Option<Array<UTF8>> {
     if (!IsLegalUnicode(codepoint)) {
         return None
@@ -405,16 +420,19 @@ public func IsCangjieIdentifier(str: String, useContextualKeyWords: Bool): Bool 
 }
 
 private func IsKeyword(str: String): Bool {
-    let end = TokenKindIndex(TokenKind.IDENTIFIER)
-    var idx: Int64 = 0
-    while (idx < end) {
-        if (TOKENS[idx] == str) {
+    for (word in RESERVED_IDENTIFIER_WORDS) {
+        if (word == str) {
             return true
         }
-        idx++
     }
-    if (str == "true" || str == "false") {
-        return true
+    return false
+}
+
+private func IsContextualKeyword(str: String): Bool {
+    for (word in CONTEXTUAL_IDENTIFIER_WORDS) {
+        if (word == str) {
+            return true
+        }
     }
     return false
 }
