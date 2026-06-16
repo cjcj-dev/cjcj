@@ -25,10 +25,13 @@ module/package parsing from source files or cache buffers, package consistency
 checks, `--cfg` and `--int-overflow` option handling, cfg-file loading,
 conditional directive pruning, APILevel macro-declaration materialization,
 dependency-scan JSON data, symbol-table JSON output, APILevel custom annotation
-merging from `.cj.d` packages, observer dispatch, compile-stage ordering,
-numbered AST dump directory creation, incremental summary collection, generic
-declaration collection, deterministic CHIR summary generation, result/CJO
-summary writing, cache-path handling, and CHIR-data bookkeeping.
+merging from `.cj.d` packages, annotation/macro-call parsing for declarations,
+function parameter/return type capture, generic parameter capture, simple
+inherited-type and variable/type-alias target capture, top-level/member
+declaration separation, observer dispatch, compile-stage ordering, numbered AST
+dump directory creation, incremental summary collection, generic declaration
+collection, deterministic CHIR summary generation, result/CJO summary writing,
+cache-path handling, and CHIR-data bookkeeping.
 
 ## Important Blocker
 

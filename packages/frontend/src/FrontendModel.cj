@@ -832,6 +832,8 @@ public class MacroInvocation {
     public var fullName: String = ""
     public var decl: Option<Decl> = None
     public let attrs: ArrayList<FrontendToken> = ArrayList<FrontendToken>()
+    public var begin: Position = INVALID_POSITION
+    public var end: Position = INVALID_POSITION
     public init() {}
 }
 

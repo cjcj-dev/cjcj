@@ -456,16 +456,40 @@ private func parsePackageAndImports(file: File, tokens: ArrayList<FrontendToken>
 private func parseTopLevelDecls(file: File, tokens: ArrayList<FrontendToken>): Unit {
     var idx: Int64 = 0
     while (idx < tokens.size) {
-        let tok = tokens[idx]
-        if (!isDeclKeyword(tok.value)) {
+        idx = skipTrivia(tokens, idx)
+        if (idx >= tokens.size) {
+            break
+        }
+        let annoInfo = parseLeadingAnnotations(tokens, idx)
+        let declStart = annoInfo[2]
+        if (declStart >= tokens.size || !isDeclKeyword(tokens[declStart].value)) {
             idx++
             continue
         }
-        let declInfo = createDeclFromKeyword(tokens, idx)
-        if (let Some(decl) <- declInfo[0]) {
-            decl.begin = tok.Begin()
+        let declInfo = createDeclFromKeyword(tokens, declStart)
+        if (let Some(rawDecl) <- declInfo[0]) {
+            let decl = rawDecl
+            for (anno in annoInfo[0]) {
+                decl.annotations.add(anno)
+            }
+            let tok = tokens[declStart]
+            if (!annoInfo[3].IsZero()) {
+                decl.begin = annoInfo[3]
+            } else {
+                decl.begin = tok.Begin()
+            }
             decl.end = declInfo[1]
-            file.decls.add(decl)
+            if (let Some(invocation) <- annoInfo[1]) {
+                invocation.decl = Some(decl)
+                let macroDecl = MacroExpandDecl()
+                macroDecl.invocation = invocation
+                macroDecl.identifier = decl.identifier
+                macroDecl.begin = invocationBegin(invocation, decl.begin)
+                macroDecl.end = decl.end
+                file.decls.add(macroDecl)
+            } else {
+                file.decls.add(decl)
+            }
         }
         idx = declInfo[2]
     }
@@ -474,8 +498,7 @@ private func parseTopLevelDecls(file: File, tokens: ArrayList<FrontendToken>): U
 private func createDeclFromKeyword(tokens: ArrayList<FrontendToken>, start: Int64): (Option<Decl>, Position, Int64) {
     let keyword = tokens[start].value
     var nameIdx = start + 1
-    if (keyword == "public" || keyword == "protected" || keyword == "internal" || keyword == "private" ||
-        keyword == "static" || keyword == "abstract" || keyword == "open" || keyword == "sealed") {
+    if (isModifierKeyword(keyword)) {
         if (nameIdx >= tokens.size) {
             return (None, tokens[start].End(), start + 1)
         }
@@ -522,18 +545,496 @@ private func createDeclFromKeyword(tokens: ArrayList<FrontendToken>, start: Int6
         if (let Some(extendDecl) <- (decl as ExtendDecl)) {
             extendDecl.extendedType = Some(RefType(parsed[0]))
         }
-        return (Some(decl), parsed[1], parsed[2])
+        return finishParsedDecl(tokens, keyword, decl, parsed[2], parsed[1])
     }
     if (nameIdx < tokens.size && (tokens[nameIdx].kind == FrontendTokenKind.IDENTIFIER ||
         tokens[nameIdx].kind == FrontendTokenKind.KEYWORD || tokens[nameIdx].kind == FrontendTokenKind.OPERATOR)) {
         decl.identifier = SrcIdentifier(tokens[nameIdx].value, begin: tokens[nameIdx].Begin(), end: tokens[nameIdx].End())
-        return (Some(decl), tokens[nameIdx].End(), nameIdx + 1)
+        return finishParsedDecl(tokens, keyword, decl, nameIdx + 1, tokens[nameIdx].End())
     }
     if (keyword == "init") {
         decl.identifier = SrcIdentifier("init", begin: tokens[start].Begin(), end: tokens[start].End())
-        return (Some(decl), tokens[start].End(), start + 1)
+        return finishParsedDecl(tokens, keyword, decl, start + 1, tokens[start].End())
     }
     return (None, tokens[start].End(), start + 1)
+}
+
+private func finishParsedDecl(tokens: ArrayList<FrontendToken>, keyword: String, decl: Decl, start: Int64,
+    fallbackEnd: Position): (Option<Decl>, Position, Int64) {
+    var idx = skipTrivia(tokens, start)
+    let genericInfo = parseGenericAt(tokens, idx)
+    if (let Some(generic) <- genericInfo[0]) {
+        decl.generic = Some(generic)
+        if (let Some(funcDecl) <- (decl as FuncDecl)) {
+            funcDecl.funcBody.generic = Some(generic)
+        }
+    }
+    idx = skipTrivia(tokens, genericInfo[1])
+    if (let Some(funcDecl) <- (decl as FuncDecl)) {
+        if (idx < tokens.size && tokens[idx].value == "(") {
+            idx = parseParameterListInto(tokens, idx, funcDecl.funcBody)
+        }
+        idx = skipTrivia(tokens, idx)
+        if (idx < tokens.size && tokens[idx].value == "->") {
+            let typeInfo = parseTypeAt(tokens, idx + 1)
+            funcDecl.funcBody.retType = typeInfo[0]
+            idx = typeInfo[1]
+        }
+    } else if (let Some(varDecl) <- (decl as VarDecl)) {
+        idx = parseVarLikeType(tokens, idx, varDecl)
+    } else if (let Some(typeAliasDecl) <- (decl as TypeAliasDecl)) {
+        idx = parseTypeAliasTarget(tokens, idx, typeAliasDecl)
+    } else if (let Some(inheritableDecl) <- (decl as InheritableDecl)) {
+        idx = parseInheritedTypes(tokens, idx, inheritableDecl)
+    }
+    let bodyInfo = finishDeclExtent(tokens, keyword, decl, idx, fallbackEnd)
+    return (Some(decl), bodyInfo[0], bodyInfo[1])
+}
+
+private func skipTrivia(tokens: ArrayList<FrontendToken>, start: Int64): Int64 {
+    var idx = start
+    while (idx < tokens.size && (tokens[idx].kind == FrontendTokenKind.NL ||
+        tokens[idx].kind == FrontendTokenKind.COMMENT)) {
+        idx++
+    }
+    return idx
+}
+
+private func isModifierKeyword(value: String): Bool {
+    return value == "public" || value == "protected" || value == "internal" || value == "private" ||
+        value == "static" || value == "abstract" || value == "open" || value == "sealed" ||
+        value == "foreign" || value == "unsafe" || value == "mut" || value == "operator" ||
+        value == "override" || value == "redef"
+}
+
+private func parseLeadingAnnotations(tokens: ArrayList<FrontendToken>, start: Int64):
+    (ArrayList<Annotation>, Option<MacroInvocation>, Int64, Position) {
+    let annotations = ArrayList<Annotation>()
+    var macroInvocation: Option<MacroInvocation> = None
+    var idx = skipTrivia(tokens, start)
+    var begin = INVALID_POSITION
+    while (idx < tokens.size && tokens[idx].value == "@") {
+        if (begin.IsZero()) {
+            begin = tokens[idx].Begin()
+        }
+        let parsed = parseAnnotationOrMacro(tokens, idx)
+        if (let Some(anno) <- parsed[0]) {
+            annotations.add(anno)
+        }
+        if (let Some(invocation) <- parsed[1]) {
+            macroInvocation = Some(invocation)
+        }
+        if (parsed[2] <= idx) {
+            idx++
+        } else {
+            idx = skipTrivia(tokens, parsed[2])
+        }
+    }
+    return (annotations, macroInvocation, idx, begin)
+}
+
+private func parseAnnotationOrMacro(tokens: ArrayList<FrontendToken>, start: Int64):
+    (Option<Annotation>, Option<MacroInvocation>, Int64) {
+    var idx = start + 1
+    var isMacro = false
+    if (idx < tokens.size && tokens[idx].value == "!") {
+        isMacro = true
+        idx++
+    }
+    let nameInfo = parseQualifiedName(tokens, idx)
+    let name = nameInfo[0]
+    if (name.isEmpty()) {
+        return (None, None, start + 1)
+    }
+    idx = nameInfo[2]
+    let argsInfo = parseDelimitedArgumentTokens(tokens, idx)
+    idx = argsInfo[1]
+    if (isMacro) {
+        let invocation = MacroInvocation()
+        invocation.fullName = name
+        invocation.identifier = lastQualifiedNamePart(name)
+        invocation.begin = tokens[start].Begin()
+        invocation.end = argsInfo[2]
+        for (argToken in argsInfo[0]) {
+            invocation.attrs.add(argToken)
+        }
+        return (None, Some(invocation), idx)
+    }
+    let anno = Annotation()
+    anno.identifier = SrcIdentifier(lastQualifiedNamePart(name), begin: tokens[start].Begin(), end: nameInfo[1])
+    anno.begin = tokens[start].Begin()
+    anno.end = argsInfo[2]
+    for (argToken in argsInfo[0]) {
+        if (argToken.value != ",") {
+            anno.args.add(argToken.value)
+        }
+    }
+    return (Some(anno), None, idx)
+}
+
+private func parseDelimitedArgumentTokens(tokens: ArrayList<FrontendToken>, start: Int64):
+    (ArrayList<FrontendToken>, Int64, Position) {
+    let out = ArrayList<FrontendToken>()
+    if (start >= tokens.size || (tokens[start].value != "(" && tokens[start].value != "[")) {
+        let pos = if (start > 0 && start - 1 < tokens.size) { tokens[start - 1].End() } else { INVALID_POSITION }
+        return (out, start, pos)
+    }
+    let openValue = tokens[start].value
+    let closeValue = if (openValue == "(") { ")" } else { "]" }
+    var depth: Int64 = 1
+    var idx = start + 1
+    var endPos = tokens[start].End()
+    while (idx < tokens.size && depth > 0) {
+        if (tokens[idx].value == openValue) {
+            depth++
+            out.add(tokens[idx])
+        } else if (tokens[idx].value == closeValue) {
+            depth--
+            if (depth > 0) {
+                out.add(tokens[idx])
+            }
+            endPos = tokens[idx].End()
+        } else {
+            out.add(tokens[idx])
+        }
+        idx++
+    }
+    return (out, idx, endPos)
+}
+
+private func invocationBegin(invocation: MacroInvocation, fallback: Position): Position {
+    if (!invocation.begin.IsZero()) {
+        return invocation.begin
+    }
+    return fallback
+}
+
+private func parseGenericAt(tokens: ArrayList<FrontendToken>, start: Int64): (Option<Generic>, Int64) {
+    if (start >= tokens.size || tokens[start].value != "<") {
+        return (None, start)
+    }
+    if (start + 1 < tokens.size && tokens[start + 1].value == ":") {
+        return (None, start)
+    }
+    let generic = Generic()
+    var idx = start + 1
+    var currentName = ""
+    while (idx < tokens.size) {
+        let tok = tokens[idx]
+        if (tok.value == ">") {
+            if (!currentName.isEmpty()) {
+                generic.typeParameters.add(currentName)
+            }
+            return (Some(generic), idx + 1)
+        }
+        if (tok.value == ",") {
+            if (!currentName.isEmpty()) {
+                generic.typeParameters.add(currentName)
+                currentName = ""
+            }
+        } else if (tok.value == "where") {
+            let constraints = collectUntilTopLevel(tokens, idx + 1, "{")
+            generic.genericConstraints.add(constraints[0])
+            return (Some(generic), constraints[1])
+        } else if (isNameToken(tok) && currentName.isEmpty()) {
+            currentName = tok.value
+        }
+        idx++
+    }
+    return (Some(generic), idx)
+}
+
+private func parseParameterListInto(tokens: ArrayList<FrontendToken>, start: Int64, body: FuncBody): Int64 {
+    var idx = start + 1
+    var depth: Int64 = 1
+    var paramStart = idx
+    while (idx < tokens.size && depth > 0) {
+        if (tokens[idx].value == "(") {
+            depth++
+        } else if (tokens[idx].value == ")") {
+            depth--
+            if (depth == 0) {
+                parseOneParam(tokens, paramStart, idx, body)
+                return idx + 1
+            }
+        } else if (tokens[idx].value == "," && depth == 1) {
+            parseOneParam(tokens, paramStart, idx, body)
+            paramStart = idx + 1
+        }
+        idx++
+    }
+    return idx
+}
+
+private func parseOneParam(tokens: ArrayList<FrontendToken>, start: Int64, end: Int64, body: FuncBody): Unit {
+    var idx = skipTrivia(tokens, start)
+    if (idx >= end) {
+        return
+    }
+    let annotations = ArrayList<Annotation>()
+    while (idx < end && tokens[idx].value == "@") {
+        let parsed = parseAnnotationOrMacro(tokens, idx)
+        if (let Some(anno) <- parsed[0]) {
+            annotations.add(anno)
+        }
+        idx = parsed[2]
+        idx = skipTrivia(tokens, idx)
+    }
+    if (idx >= end || !isNameToken(tokens[idx])) {
+        return
+    }
+    let param = FuncParam()
+    param.identifier = SrcIdentifier(tokens[idx].value, begin: tokens[idx].Begin(), end: tokens[idx].End())
+    param.begin = tokens[idx].Begin()
+    param.end = tokens[idx].End()
+    for (anno in annotations) {
+        param.annotations.add(anno)
+    }
+    idx++
+    if (idx < end && tokens[idx].value == ":") {
+        let typeInfo = parseTypeAtBounded(tokens, idx + 1, end)
+        param.typeNode = typeInfo[0]
+        if (let Some(typeNode) <- typeInfo[0]) {
+            param.end = typeNode.end
+        }
+    }
+    body.params.add(param)
+}
+
+private func parseVarLikeType(tokens: ArrayList<FrontendToken>, start: Int64, decl: VarDecl): Int64 {
+    var idx = start
+    if (idx < tokens.size && tokens[idx].value == ":") {
+        let typeInfo = parseTypeAt(tokens, idx + 1)
+        decl.typeNode = typeInfo[0]
+        return typeInfo[1]
+    }
+    return idx
+}
+
+private func parseTypeAliasTarget(tokens: ArrayList<FrontendToken>, start: Int64, decl: TypeAliasDecl): Int64 {
+    var idx = start
+    if (idx < tokens.size && tokens[idx].value == "=") {
+        let typeInfo = parseTypeAt(tokens, idx + 1)
+        decl.typeNode = typeInfo[0]
+        return typeInfo[1]
+    }
+    return idx
+}
+
+private func parseInheritedTypes(tokens: ArrayList<FrontendToken>, start: Int64, decl: InheritableDecl): Int64 {
+    var idx = start
+    while (idx < tokens.size) {
+        if (tokens[idx].value == "<" && idx + 1 < tokens.size && tokens[idx + 1].value == ":") {
+            idx += 2
+        } else if (tokens[idx].value == ":") {
+            idx++
+        } else {
+            break
+        }
+        while (idx < tokens.size && tokens[idx].value != "{" && tokens[idx].kind != FrontendTokenKind.NL) {
+            let typeInfo = parseTypeAt(tokens, idx)
+            if (let Some(typeNode) <- typeInfo[0]) {
+                decl.inheritedTypes.add(typeNode)
+            }
+            idx = typeInfo[1]
+            if (idx < tokens.size && tokens[idx].value == ",") {
+                idx++
+            } else {
+                break
+            }
+        }
+    }
+    return idx
+}
+
+private func parseTypeAt(tokens: ArrayList<FrontendToken>, start: Int64): (Option<Type>, Int64) {
+    return parseTypeAtBounded(tokens, start, tokens.size)
+}
+
+private func parseTypeAtBounded(tokens: ArrayList<FrontendToken>, start: Int64, end: Int64): (Option<Type>, Int64) {
+    var idx = skipTrivia(tokens, start)
+    if (idx >= end) {
+        return (None, idx)
+    }
+    let parsed = parseQualifiedName(tokens, idx)
+    if (parsed[0].isEmpty()) {
+        return (None, idx)
+    }
+    idx = parsed[2]
+    let typeNode = if (isPrimitiveTypeName(parsed[0])) {
+        PrimitiveType(parsed[0])
+    } else {
+        RefType(parsed[0])
+    }
+    typeNode.begin = tokens[start].Begin()
+    typeNode.end = parsed[1]
+    if (idx < end && tokens[idx].value == "<") {
+        let argsInfo = parseTypeArguments(tokens, idx, end)
+        for (argType in argsInfo[0]) {
+            typeNode.typeArguments.add(argType)
+        }
+        idx = argsInfo[1]
+        if (idx > 0 && idx - 1 < tokens.size) {
+            typeNode.end = tokens[idx - 1].End()
+        }
+    }
+    return (Some(typeNode), idx)
+}
+
+private func parseTypeArguments(tokens: ArrayList<FrontendToken>, start: Int64, end: Int64): (ArrayList<Type>, Int64) {
+    let out = ArrayList<Type>()
+    var idx = start + 1
+    while (idx < end) {
+        if (tokens[idx].value == ">") {
+            return (out, idx + 1)
+        }
+        if (tokens[idx].value == ",") {
+            idx++
+            continue
+        }
+        let typeInfo = parseTypeAtBounded(tokens, idx, end)
+        if (let Some(typeNode) <- typeInfo[0]) {
+            out.add(typeNode)
+            idx = typeInfo[1]
+        } else {
+            idx++
+        }
+    }
+    return (out, idx)
+}
+
+private func finishDeclExtent(tokens: ArrayList<FrontendToken>, keyword: String, decl: Decl, start: Int64,
+    fallbackEnd: Position): (Position, Int64) {
+    var idx = skipTrivia(tokens, start)
+    while (idx < tokens.size && tokens[idx].kind != FrontendTokenKind.END) {
+        if (tokens[idx].value == "{") {
+            let closeIdx = findMatchingToken(tokens, idx, "{", "}")
+            if (isMemberContainer(keyword)) {
+                parseMemberDecls(decl, tokens, idx + 1, closeIdx)
+            }
+            if (closeIdx < tokens.size) {
+                return (tokens[closeIdx].End(), closeIdx + 1)
+            }
+            return (tokens[idx].End(), idx + 1)
+        }
+        if (tokens[idx].kind == FrontendTokenKind.NL) {
+            return (tokens[idx].End(), idx + 1)
+        }
+        if (tokens[idx].value == "}") {
+            return (fallbackEnd, idx)
+        }
+        idx++
+    }
+    return (fallbackEnd, idx)
+}
+
+private func parseMemberDecls(parent: Decl, tokens: ArrayList<FrontendToken>, start: Int64, end: Int64): Unit {
+    var idx = start
+    var depth: Int64 = 0
+    while (idx < end) {
+        if (tokens[idx].value == "{") {
+            depth++
+            idx++
+            continue
+        }
+        if (tokens[idx].value == "}") {
+            if (depth > 0) {
+                depth--
+            }
+            idx++
+            continue
+        }
+        if (depth != 0) {
+            idx++
+            continue
+        }
+        idx = skipTrivia(tokens, idx)
+        if (idx >= end) {
+            break
+        }
+        let annoInfo = parseLeadingAnnotations(tokens, idx)
+        let declStart = annoInfo[2]
+        if (declStart >= end || !isDeclKeyword(tokens[declStart].value)) {
+            idx++
+            continue
+        }
+        let declInfo = createDeclFromKeyword(tokens, declStart)
+        if (let Some(memberDecl) <- declInfo[0]) {
+            for (anno in annoInfo[0]) {
+                memberDecl.annotations.add(anno)
+            }
+            if (!annoInfo[3].IsZero()) {
+                memberDecl.begin = annoInfo[3]
+            }
+            memberDecl.end = declInfo[1]
+            if (let Some(invocation) <- annoInfo[1]) {
+                invocation.decl = Some(memberDecl)
+                let macroDecl = MacroExpandDecl()
+                macroDecl.invocation = invocation
+                macroDecl.identifier = memberDecl.identifier
+                macroDecl.begin = invocationBegin(invocation, memberDecl.begin)
+                macroDecl.end = memberDecl.end
+                parent.members.add(macroDecl)
+            } else {
+                parent.members.add(memberDecl)
+            }
+        }
+        idx = declInfo[2]
+    }
+}
+
+private func findMatchingToken(tokens: ArrayList<FrontendToken>, start: Int64, openValue: String, closeValue: String): Int64 {
+    var depth: Int64 = 0
+    var idx = start
+    while (idx < tokens.size) {
+        if (tokens[idx].value == openValue) {
+            depth++
+        } else if (tokens[idx].value == closeValue) {
+            depth--
+            if (depth == 0) {
+                return idx
+            }
+        }
+        idx++
+    }
+    return tokens.size
+}
+
+private func collectUntilTopLevel(tokens: ArrayList<FrontendToken>, start: Int64, stopValue: String): (String, Int64) {
+    let builder = StringBuilder()
+    var idx = start
+    while (idx < tokens.size && tokens[idx].value != stopValue && tokens[idx].kind != FrontendTokenKind.NL) {
+        if (builder.size > 0) {
+            builder.append(" ")
+        }
+        builder.append(tokens[idx].value)
+        idx++
+    }
+    return (builder.toString(), idx)
+}
+
+private func isMemberContainer(keyword: String): Bool {
+    return keyword == "class" || keyword == "interface" || keyword == "struct" ||
+        keyword == "enum" || keyword == "extend"
+}
+
+private func isNameToken(tok: FrontendToken): Bool {
+    return tok.kind == FrontendTokenKind.IDENTIFIER || tok.kind == FrontendTokenKind.KEYWORD ||
+        tok.kind == FrontendTokenKind.OPERATOR
+}
+
+private func isPrimitiveTypeName(name: String): Bool {
+    return name == "Unit" || name == "Bool" || name == "Rune" || name == "Int8" ||
+        name == "Int16" || name == "Int32" || name == "Int64" || name == "IntNative" ||
+        name == "UInt8" || name == "UInt16" || name == "UInt32" || name == "UInt64" ||
+        name == "UIntNative" || name == "Float16" || name == "Float32" || name == "Float64"
+}
+
+private func lastQualifiedNamePart(name: String): String {
+    if (let Some(pos) <- name.lastIndexOf(".")) {
+        return name[pos + 1..]
+    }
+    return name
 }
 
 private func parseQualifiedName(tokens: ArrayList<FrontendToken>, start: Int64): (String, Position, Int64) {
