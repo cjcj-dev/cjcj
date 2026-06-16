@@ -90,9 +90,9 @@ private func parseGeneratedNodes(tokens: ArrayList<Token>, macroNode: MacroCall)
     if (tokens.isEmpty()) {
         return out
     }
-    // The isolated Macro package has no manifest dependency on Parse, so it recovers the replacement shape here.
+    // The remaining local AST bridge recovers replacement shape here until generated nodes can be parsed as real AST.
     let first = tokens[0]
-    if (macroNode.RequireNode().astKind == ASTKind.MACRO_EXPAND_PARAM) {
+    if (ASTKindEquals(macroNode.RequireNode().astKind, ASTKind.MACRO_EXPAND_PARAM)) {
         let param = FuncParam()
         param.identifier = if (tokens.size > 0) { tokens[0].Value() } else { "" }
         param.begin = first.Begin()
@@ -101,7 +101,7 @@ private func parseGeneratedNodes(tokens: ArrayList<Token>, macroNode: MacroCall)
         out.add(param)
         return out
     }
-    if (macroNode.RequireNode().astKind == ASTKind.MACRO_EXPAND_DECL) {
+    if (ASTKindEquals(macroNode.RequireNode().astKind, ASTKind.MACRO_EXPAND_DECL)) {
         if (first.kind == TokenKind.FUNC || first.kind == TokenKind.MACRO) {
             let fd = FuncDecl()
             fd.identifier = findFollowingIdentifier(tokens, 1)
@@ -120,7 +120,7 @@ private func parseGeneratedNodes(tokens: ArrayList<Token>, macroNode: MacroCall)
             out.add(varDecl)
             return out
         }
-        let decl = Decl(ASTKind.UNKNOWN)
+        let decl = Decl(ASTKind.DECL)
         decl.identifier = findFollowingIdentifier(tokens, 0)
         decl.begin = first.Begin()
         decl.end = tokens[tokens.size - 1].End()

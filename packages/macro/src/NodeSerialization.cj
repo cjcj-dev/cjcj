@@ -105,11 +105,7 @@ public class NodeWriter {
 
     public func SerializeType(ty: Type): String {
         if (let Some(primitive) <- (ty as PrimitiveType)) {
-            let kindName = match (primitive.kind) {
-                case TypeKind.TYPE_UNIT => "Unit"
-                case TypeKind.TYPE_INT64 => "Int64"
-                case TypeKind.TYPE_UNKNOWN => "Unknown"
-            }
+            let kindName = TypeKindName(primitive.kind)
             return "primitiveType(" + kindName + ")"
         }
         if (let Some(refType) <- (ty as RefType)) {

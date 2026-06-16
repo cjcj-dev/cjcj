@@ -7,7 +7,8 @@ macro collection and expansion, macro call state and resolution, token and node 
 
 Current constraints:
 
-- `packages/macro/cjpm.toml` now depends on `ast`, `basic`, `lex`, `option`, and `parse`; Macro re-exports the real Basic `Position`/`Range`/`SourceManager`/`MacroCallDiagInfo`/`DiagnosticEngine`/`Diagnostic`, real Lex `Token`/`TokenKind`, real Option `GlobalOptions`, real AST `ScopeKind`/`ExprKind`, and calls Parse's built-in annotation classifier instead of carrying those local copies/tables.
+- `packages/macro/cjpm.toml` now depends on `ast`, `basic`, `lex`, `option`, and `parse`; Macro re-exports the real Basic `Position`/`Range`/`SourceManager`/`MacroCallDiagInfo`/`DiagnosticEngine`/`Diagnostic`, real Lex `Token`/`TokenKind`, real Option `GlobalOptions`, real AST `ASTKind`/`Attribute`/`TypeKind`/`ScopeKind`/`ExprKind`, and calls Parse's built-in annotation classifier instead of carrying those local copies/tables.
+- Macro-local AST kind, attribute, and primitive type kind enum mirrors have been deleted; remaining compatibility nodes compare and serialize against the real AST enum/index/name helpers.
 - Macro still carries a local compatibility model for the AST node graph and import-manager/compiler-instance surfaces until the remaining sibling APIs can replace those call sites without a full-package rewrite.
 - Native dynamic loading now uses C FFI (`dlopen`/`dlsym`/`dlclose` or Windows equivalents), runtime init/fini symbols are resolved through the native library, and macro function pointers can be invoked with serialized token buffers.
 - The in-package macro server path now classifies staged/server exits, deserializes macro-call batches, evaluates calls, serializes results, and resets per-stage state through the local process-message bridge.
