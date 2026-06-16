@@ -183,12 +183,16 @@ public func OverflowStrategyToString(ovf: MangleOverflowStrategy): String {
     }
 }
 
+private func OverflowOperatorMangleCode(name: String): String {
+    if (let Some(op) <- OperatorTypeMangle(name)) {
+        return op
+    }
+    throw IllegalArgumentException("Unsupported name for overflow operator mangling: " + name)
+}
+
 public func GenerateOverflowOperatorFuncMangleName(name: String, ovf: MangleOverflowStrategy, isBinary: Bool,
     typeInfo: CHIRType): String {
-    var out = MANGLE_OPERATOR_PREFIX + OverflowStrategyToString(ovf)
-    if (let Some(op) <- OperatorTypeMangle(name)) {
-        out += op
-    }
+    var out = MANGLE_OPERATOR_PREFIX + OverflowStrategyToString(ovf) + OverflowOperatorMangleCode(name)
     out += MANGLE_FUNC_PARAM_TYPE_PREFIX + MangleCHIRType(typeInfo)
     if (isBinary) {
         out += MangleCHIRType(typeInfo)
@@ -198,10 +202,7 @@ public func GenerateOverflowOperatorFuncMangleName(name: String, ovf: MangleOver
 
 public func GenerateOverflowOperatorFuncMangleName(name: String, ovf: MangleOverflowStrategy, isBinary: Bool,
     typeInfo: BuiltinType): String {
-    var out = MANGLE_OPERATOR_PREFIX + OverflowStrategyToString(ovf)
-    if (let Some(op) <- OperatorTypeMangle(name)) {
-        out += op
-    }
+    var out = MANGLE_OPERATOR_PREFIX + OverflowStrategyToString(ovf) + OverflowOperatorMangleCode(name)
     out += MANGLE_FUNC_PARAM_TYPE_PREFIX + MangleCHIRType(typeInfo)
     if (isBinary) {
         out += MangleCHIRType(typeInfo)

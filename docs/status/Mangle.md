@@ -65,6 +65,8 @@ Implemented:
   behavior and made CHIR prefix replacement reject non-`_C` inputs instead of silently preserving them.
 - Aligned real-CHIR custom type identifier fallback in type mangling and type qualified-name rendering so
   C++-shaped `@`-prefixed `CustomTypeDef` identifiers are normalized before use.
+- Aligned CHIR overflow-operator helper-name generation with the C++ assertion behavior by rejecting
+  unsupported operator spellings instead of emitting a malformed `_CO` name.
 
 Known fidelity caveats:
 
@@ -74,8 +76,9 @@ Known fidelity caveats:
   descriptor layer is fully retired.
 - Real CHIR overloads now use `cangjie_compiler::chir` objects directly where the scaffold carries the
   needed metadata. Some C++ CHIR details are still not represented in the self-hosted CHIR package, notably
-  raw-array dimensions, extend implemented-interface type lists, custom type source-code identifiers, and
-  internal linkage info. Those paths remain descriptor-backed or use the currently available CHIR fields.
+  raw-array dimensions, extend implemented-interface type lists, custom type source-code identifiers,
+  lambda expression identifiers, and internal linkage info. Those paths remain descriptor-backed or use
+  the currently available CHIR fields.
 - The AST adapter maps the currently available self-hosted AST package into the Mangle descriptor model
   and prepares package context from `curFile.curPackage` when available. Byte-for-byte validation against
   full parser/sema output still depends on downstream packages producing complete annotation arrays,
