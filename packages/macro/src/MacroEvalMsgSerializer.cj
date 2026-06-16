@@ -1,5 +1,6 @@
 package cangjie_compiler::macro_pkg
 
+import cangjie_compiler::basic.DiagCategory
 import std.collection.*
 import std.convert.*
 
@@ -197,6 +198,7 @@ private func diagSeverityIndex(value: DiagSeverity): Int64 {
         case DiagSeverity.DS_ERROR => 0
         case DiagSeverity.DS_WARNING => 1
         case DiagSeverity.DS_NOTE => 2
+        case DiagSeverity.DS_HINT => 3
     }
 }
 
@@ -204,8 +206,16 @@ private func diagSeverityFromIndex(value: Int64): DiagSeverity {
     return match (value) {
         case 0 => DiagSeverity.DS_ERROR
         case 1 => DiagSeverity.DS_WARNING
-        case _ => DiagSeverity.DS_NOTE
+        case 2 => DiagSeverity.DS_NOTE
+        case _ => DiagSeverity.DS_HINT
     }
+}
+
+private func diagnosticRange(diag: Diagnostic): Range {
+    if (!diag.mainHint.range.IsDefault()) {
+        return diag.mainHint.range
+    }
+    return Range(diag.GetBegin(), diag.GetEnd())
 }
 
 private func encodeDiagnostics(diags: ArrayList<Diagnostic>): String {
@@ -216,14 +226,22 @@ private func encodeDiagnostics(diags: ArrayList<Diagnostic>): String {
             builder.append(";")
         }
         let diag = diags[idx]
-        builder.append(diagSeverityIndex(diag.severity).toString() + ",")
-        builder.append(encodePosition(diag.range.begin) + ",")
-        builder.append(encodePosition(diag.range.end) + ",")
-        builder.append(escapeField(diag.message) + ",")
-        builder.append(escapeField(diag.hint))
+        let range = diagnosticRange(diag)
+        builder.append(diagSeverityIndex(diag.diagSeverity).toString() + ",")
+        builder.append(encodePosition(range.begin) + ",")
+        builder.append(encodePosition(range.end) + ",")
+        builder.append(escapeField(diag.GetErrorMessage()) + ",")
+        builder.append(escapeField(diag.mainHint.str))
         idx++
     }
     return builder.toString()
+}
+
+private func diagnosticKindForSeverity(severity: DiagSeverity): DiagKindRefactor {
+    if (severity == DiagSeverity.DS_WARNING) {
+        return DiagKindRefactor.parse_diag_warning
+    }
+    return DiagKindRefactor.parse_diag_error
 }
 
 private func decodeDiagnostics(value: String, out: ArrayList<Diagnostic>): Unit {
@@ -239,13 +257,25 @@ private func decodeDiagnostics(value: String, out: ArrayList<Diagnostic>): Unit 
         let severity = diagSeverityFromIndex(Int64.parse(fields[0]))
         let begin = Position(UInt64.parse(fields[1]), Int64.parse(fields[2]), Int64.parse(fields[3]))
         let end = Position(UInt64.parse(fields[4]), Int64.parse(fields[5]), Int64.parse(fields[6]))
-        out.add(Diagnostic(severity, Range(begin, end), unescapeField(fields[7]), hint: unescapeField(fields[8])))
+        let message = unescapeField(fields[7])
+        let hint = unescapeField(fields[8])
+        let diag = Diagnostic(true, Range(begin, end), diagnosticKindForSeverity(severity), arguments: [message])
+        diag.start = begin
+        diag.end = end
+        diag.diagSeverity = severity
+        diag.errorMessage = message
+        diag.mainHint.str = hint
+        out.add(diag)
     }
 }
 
 private func getCallDiagnostics(macCall: MacroCall): ArrayList<Diagnostic> {
     if (let Some(instance) <- macCall.ci) {
-        return instance.diag.diagnostics
+        let out = ArrayList<Diagnostic>()
+        for (diag in instance.diag.GetCategoryDiagnostic(DiagCategory.PARSE)) {
+            out.add(diag)
+        }
+        return out
     }
     return ArrayList<Diagnostic>()
 }

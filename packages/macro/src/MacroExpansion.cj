@@ -248,7 +248,7 @@ public class MacroExpansion {
         if (ci.invocation.globalOptions.enableCompileTest && ci.invocation.globalOptions.CompileExecutable()) {
             TestEntryConstructor.ConstructTestSuite(ci.invocation.globalOptions.moduleName, packages,
                 ci.importManager.GetAllImportedPackages(), ci.invocation.globalOptions.compileTestsOnly,
-                ci.invocation.globalOptions.mockEnabled)
+                ci.invocation.globalOptions.mock == MockMode.ON)
         }
         for (pkg in packages) {
             AddCurFile(pkg)

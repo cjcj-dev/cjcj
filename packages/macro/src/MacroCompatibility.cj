@@ -1,94 +1,42 @@
 package cangjie_compiler::macro_pkg
 
 import std.collection.*
+import cangjie_compiler::ast.ExprKind as RealExprKind
+import cangjie_compiler::ast.ScopeKind as RealScopeKind
 import cangjie_compiler::basic.MakeRange as BasicMakeRange
 import cangjie_compiler::basic.Range as BasicRange
+import cangjie_compiler::option.GlobalOptions as RealGlobalOptions
 
 public import cangjie_compiler::basic.{
-    BEGIN_POSITION, DEFAULT_POSITION, INVALID_POSITION, MacroCallDiagInfo, Position, Source, SourceManager
+    BEGIN_POSITION, DEFAULT_POSITION, INVALID_POSITION, DiagKindRefactor, DiagSeverity, Diagnostic, DiagnosticEngine,
+    MacroCallDiagInfo, Position, Source, SourceManager
 }
 public import cangjie_compiler::lex.{Token, TokenKind, TokenKindIndex, TokenKindLiteral}
+public import cangjie_compiler::option.MockMode
 
 public type Range = BasicRange
+public type CompilerGlobalOptions = RealGlobalOptions
+public type ScopeKind = RealScopeKind
+public type ExprKind = RealExprKind
 
 public func MakeRange(begin: Position, end: Position): Range {
     return BasicMakeRange(begin, end)
 }
 
-public enum DiagSeverity {
-    | DS_ERROR
-    | DS_WARNING
-    | DS_NOTE
-}
-
-private func DiagSeverityIndex(value: DiagSeverity): Int64 {
-    return match (value) {
-        case DiagSeverity.DS_ERROR => 0
-        case DiagSeverity.DS_WARNING => 1
-        case DiagSeverity.DS_NOTE => 2
-    }
-}
-
-extend DiagSeverity <: Equatable<DiagSeverity> {
-    public operator func ==(right: DiagSeverity): Bool {
-        return DiagSeverityIndex(this) == DiagSeverityIndex(right)
-    }
-
-    public operator func !=(right: DiagSeverity): Bool {
-        return !(this == right)
-    }
-}
-
-public class Diagnostic {
-    public var severity: DiagSeverity = DiagSeverity.DS_ERROR
-    public var range: Range = Range()
-    public var message: String = ""
-    public var hint: String = ""
-
-    public init() {}
-
-    public init(severity: DiagSeverity, range: Range, message: String, hint!: String = "") {
-        this.severity = severity
-        this.range = range
-        this.message = message
-        this.hint = hint
-    }
-}
-
-public class DiagnosticEngine {
-    public let diagnostics: ArrayList<Diagnostic> = ArrayList<Diagnostic>()
-    public var sourceManager: SourceManager = SourceManager()
-
-    public init() {}
-
+extend DiagnosticEngine {
     public func Diagnose(pos: Position, message: String): Unit {
-        diagnostics.add(Diagnostic(DiagSeverity.DS_ERROR, Range(pos, pos), message))
+        let builder = DiagnoseRefactor(DiagKindRefactor.parse_diag_error, pos, arguments: [message])
+        builder.Emit()
     }
 
     public func Diagnose(range: Range, message: String): Unit {
-        diagnostics.add(Diagnostic(DiagSeverity.DS_ERROR, range, message))
+        let builder = DiagnoseRefactor(DiagKindRefactor.parse_diag_error, range, arguments: [message])
+        builder.Emit()
     }
 
     public func Warn(range: Range, message: String): Unit {
-        diagnostics.add(Diagnostic(DiagSeverity.DS_WARNING, range, message))
-    }
-
-    public func Reset(): Unit {
-        diagnostics.clear()
-    }
-
-    public func GetErrorCount(): Int64 {
-        var count: Int64 = 0
-        for (diag in diagnostics) {
-            if (diag.severity == DiagSeverity.DS_ERROR) {
-                count++
-            }
-        }
-        return count
-    }
-
-    public func GetSourceManager(): SourceManager {
-        return sourceManager
+        let builder = DiagnoseRefactor(DiagKindRefactor.parse_diag_warning, range, arguments: [message])
+        builder.Emit()
     }
 }
 
@@ -183,42 +131,6 @@ extend Attribute <: Equatable<Attribute> {
     public operator func !=(right: Attribute): Bool {
         return !(this == right)
     }
-}
-
-public enum ScopeKind {
-    | UNKNOWN_SCOPE | TOPLEVEL | CLASS_BODY | STRUCT_BODY | INTERFACE_BODY | EXTEND_BODY | ENUM_BODY
-    | FUNC_BODY | PRIMARY_CONSTRUCTOR_FUNC_PARAM | PRIMARY_CONSTRUCTOR_BODY_FOR_CLASS
-    | PRIMARY_CONSTRUCTOR_BODY_FOR_STRUCT
-}
-
-private func ScopeKindIndex(kind: ScopeKind): Int64 {
-    return match (kind) {
-        case ScopeKind.UNKNOWN_SCOPE => 0
-        case ScopeKind.TOPLEVEL => 1
-        case ScopeKind.CLASS_BODY => 2
-        case ScopeKind.STRUCT_BODY => 3
-        case ScopeKind.INTERFACE_BODY => 4
-        case ScopeKind.EXTEND_BODY => 5
-        case ScopeKind.ENUM_BODY => 6
-        case ScopeKind.FUNC_BODY => 7
-        case ScopeKind.PRIMARY_CONSTRUCTOR_FUNC_PARAM => 8
-        case ScopeKind.PRIMARY_CONSTRUCTOR_BODY_FOR_CLASS => 9
-        case ScopeKind.PRIMARY_CONSTRUCTOR_BODY_FOR_STRUCT => 10
-    }
-}
-
-extend ScopeKind <: Equatable<ScopeKind> {
-    public operator func ==(right: ScopeKind): Bool {
-        return ScopeKindIndex(this) == ScopeKindIndex(right)
-    }
-
-    public operator func !=(right: ScopeKind): Bool {
-        return !(this == right)
-    }
-}
-
-public enum ExprKind {
-    | UNKNOWN
 }
 
 public class Identifier {
@@ -794,7 +706,7 @@ public class MacroInvocation {
     public let macroAtPosition: ArrayList<Position> = ArrayList<Position>()
     public let newTokens: ArrayList<Token> = ArrayList<Token>()
     public var newTokensStr: String = ""
-    public var scopeKind: ScopeKind = ScopeKind.UNKNOWN_SCOPE
+    public var scopeKind: ScopeKind = ScopeKind.UNKNOWN
     public var exprKind: ExprKind = ExprKind.UNKNOWN
     public var hasParenthesis: Bool = false
     public var hasAttr: Bool = false
@@ -839,29 +751,6 @@ public class MacroExpandParam <: FuncParam {
     public init() {
         super(ASTKind.MACRO_EXPAND_PARAM)
         invocation.isFuncParam = true
-    }
-}
-
-public class CompilerGlobalOptions {
-    public var enableParallelMacro: Bool = false
-    public var enableMacroInLSP: Bool = false
-    public var enableMacroDebug: Bool = false
-    public var enableCompileDebug: Bool = false
-    public var displayLineInfo: Bool = false
-    public var enableCompileTest: Bool = false
-    public var compileTestsOnly: Bool = false
-    public var compileCjd: Bool = false
-    public var enableAddCommentToAst: Bool = false
-    public var mockEnabled: Bool = false
-    public var moduleName: String = ""
-    public var executablePath: String = ""
-    public let macroLib: ArrayList<String> = ArrayList<String>()
-    public let environment: ArrayList<(String, String)> = ArrayList<(String, String)>()
-
-    public init() {}
-
-    public func CompileExecutable(): Bool {
-        return true
     }
 }
 

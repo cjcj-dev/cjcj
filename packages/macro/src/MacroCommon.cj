@@ -1,6 +1,5 @@
 package cangjie_compiler::macro_pkg
 
-import cangjie_compiler::basic.DiagSeverity as BasicDiagSeverity
 import cangjie_compiler::basic.DiagnosticEngine as BasicDiagnosticEngine
 import cangjie_compiler::lex.Lexer as RealLexer
 import std.collection.*
@@ -285,15 +284,8 @@ public func IsIdentifierOrContextualKeyword(kind: TokenKind): Bool {
 
 private func appendLexerDiagnostics(fromDiag: BasicDiagnosticEngine, toDiag: DiagnosticEngine): Unit {
     for (diagnostic in fromDiag.GetStoredDiags()) {
-        let severity = if (diagnostic.diagSeverity == BasicDiagSeverity.DS_WARNING) {
-            DiagSeverity.DS_WARNING
-        } else if (diagnostic.diagSeverity == BasicDiagSeverity.DS_NOTE) {
-            DiagSeverity.DS_NOTE
-        } else {
-            DiagSeverity.DS_ERROR
-        }
-        toDiag.diagnostics.add(Diagnostic(severity, Range(diagnostic.GetBegin(), diagnostic.GetEnd()),
-            diagnostic.GetErrorMessage()))
+        let builder = toDiag.Diagnose(diagnostic)
+        builder.Emit()
     }
 }
 
