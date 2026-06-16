@@ -56,7 +56,21 @@ public class AST2CHIRDeclTranslator {
         let body = builder.CreateBlockGroup(fn.GetIdentifier() + ".body")
         fn.InitBody(body)
         let entry = builder.CreateBlock("entry", body)
+        EnsureReturnSlot(fn, entry)
         builder.CreateExit(None, entry)
+    }
+
+    public func EnsureReturnSlot(fn: Function, entry: Block): Unit {
+        if (let Some(returnTy) <- fn.GetReturnType()) {
+            if (!returnTy.IsVoid()) {
+                let retRefTy = builder.context.GetRefTy(returnTy)
+                let allocate = builder.CreateExpression(ExprKind.ALLOCATE, Some(retRefTy),
+                    ArrayList<Value>(), entry)
+                if (let Some(result) <- allocate.GetResult()) {
+                    fn.SetReturnValue(result)
+                }
+            }
+        }
     }
 
     public func ShouldEmitBody(spec: AST2CHIRFunctionSpec): Bool {
@@ -134,6 +148,13 @@ extend AST2CHIRDeclTranslator {
         let pkg = builder.CreatePackage(spec.name)
         currentPackage = Some(pkg)
         mergingSpecific = spec.mergingSpecific
+        var sourceFileIndex: Int64 = 0
+        while (sourceFileIndex < spec.sourceFileIds.size && sourceFileIndex < spec.sourceFileNames.size) {
+            builder.context.RegisterSourceFileName(spec.sourceFileIds[sourceFileIndex],
+                spec.sourceFileNames[sourceFileIndex])
+            sourceFileIndex++
+        }
+        pkg.SetPackageAccessLevel(spec.accessLevel)
         for (typeSpec in spec.types) {
             CreateNominalDef(spec.name, typeSpec)
         }

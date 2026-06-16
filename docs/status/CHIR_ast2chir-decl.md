@@ -22,14 +22,20 @@ Deepened `packages/chir/src` declaration lowering for the existing CHIR self-hos
   - fill nominal contents after symbols are available
 - Extended the existing compatibility specs to describe declaration behavior now needed by the translator:
   - global attributes and optional C++-style ref storage
+  - package access level and source-file registration data
   - declared package names for globals/functions
-  - function attributes, source parameter names, owner type, instance-member handling, generic-decl linking, and generic instantiation children
+  - function attributes, source parameter names, owner type, instance-member handling, generic-decl linking, generic instantiation children, debug locations, and property locations
   - nominal declaration specs for class, interface, struct, enum, and extend
+  - nominal/global debug locations
   - ordered nominal members, member variables, properties, and enum constructors
   - package init and package literal-init function hooks
 - Ported behavior that the current CHIR IR can represent:
+  - package access-level setup and source-file registration in `CHIRContext`
   - global variables with literal initializer functions
   - function signatures with implicit `this` parameter for instance members
+  - source debug locations on globals, functions, and nominal definitions
+  - property source locations on getter/setter functions when supplied by specs
+  - return-value allocation slots for non-`Void` lowered function bodies and global literal initializer functions
   - constructor/finalizer return normalization to `Unit`
   - no-body handling for abstract and foreign functions
   - package-level function registration plus owner `CustomTypeDef` method attachment
@@ -61,4 +67,4 @@ Deepened `packages/chir/src` declaration lowering for the existing CHIR self-hos
 
 ## Coverage Estimate
 
-For declaration lowering in this constrained CHIR package source area: about 28% behavior coverage versus the C++ AST2CHIR declaration paths. The pass materially improves symbol/nominal/member lowering over the previous package-spec summary lowering, but full typed-AST fidelity is still blocked by the package dependency boundary and missing IR features listed above.
+For declaration lowering in this constrained CHIR package source area: about 30% behavior coverage versus the C++ AST2CHIR declaration paths. The pass materially improves symbol/nominal/member lowering over the previous package-spec summary lowering, but full typed-AST fidelity is still blocked by the package dependency boundary and missing IR features listed above.

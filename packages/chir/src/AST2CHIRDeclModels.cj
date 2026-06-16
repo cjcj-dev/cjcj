@@ -197,6 +197,7 @@ public class AST2CHIRNominalSpec {
     public var extendedType: Option<Type> = None
     public var sourceFileKey: String = ""
     public var isSpecificDecl: Bool = false
+    public var debugLocation: Option<DebugLocation> = None
 
     public init(kind: AST2CHIRNominalKind, name: String, packageName!: String = "", srcCodeIdentifier!: String = "",
         rawMangledName!: String = "") {
@@ -224,6 +225,11 @@ public class AST2CHIRNominalSpec {
 
     public func SetSpecificDecl(value: Bool): AST2CHIRNominalSpec {
         isSpecificDecl = value
+        return this
+    }
+
+    public func SetDebugLocation(loc: DebugLocation): AST2CHIRNominalSpec {
+        debugLocation = Some(loc)
         return this
     }
 

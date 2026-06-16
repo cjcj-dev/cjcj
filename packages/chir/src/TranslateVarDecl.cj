@@ -5,6 +5,7 @@ import std.collection.*
 extend AST2CHIRDeclTranslator {
     public func LowerGlobalVar(defaultPackage: String, spec: AST2CHIRGlobalSpec): GlobalVar {
         if (let Some(existing) <- globals.get(spec.name)) {
+            ApplyGlobalSourceInfo(existing, spec)
             return existing
         }
         let storageTy = if (spec.useRefStorage) { builder.context.GetRefTy(spec.ty) } else { spec.ty }
@@ -12,6 +13,7 @@ extend AST2CHIRDeclTranslator {
         let globalVar = builder.CreateGlobalVar(storageTy, spec.name, srcCodeIdentifier: spec.srcCodeIdentifier,
             rawMangledName: spec.rawMangledName, packageName: packageName)
         ApplyAttributes(globalVar, spec.attributes)
+        ApplyGlobalSourceInfo(globalVar, spec)
         RegisterGlobal(globalVar)
         if (let Some(literal) <- spec.initialValue) {
             LowerGlobalLiteralInitializer(defaultPackage, globalVar, spec, literal)
@@ -22,6 +24,12 @@ extend AST2CHIRDeclTranslator {
             }
         }
         return globalVar
+    }
+
+    private func ApplyGlobalSourceInfo(globalVar: GlobalVar, spec: AST2CHIRGlobalSpec): Unit {
+        if (let Some(loc) <- spec.debugLocation) {
+            globalVar.SetDebugLocation(loc)
+        }
     }
 
     private func LowerGlobalLiteralInitializer(defaultPackage: String, globalVar: GlobalVar,
@@ -42,9 +50,16 @@ extend AST2CHIRDeclTranslator {
         let initFn = builder.CreateFunction(initFnTy, initIdentifier, srcCodeIdentifier: initSrcCodeIdentifier,
             rawMangledName: initRawMangledName, packageName: packageName)
         initFn.SetFuncKind(FuncKind.GLOBALVAR_INIT)
+        if (spec.attributes.contains(Attribute.CONST)) {
+            initFn.EnableAttr(Attribute.CONST)
+        }
+        if (let Some(loc) <- spec.debugLocation) {
+            initFn.SetDebugLocation(loc)
+        }
         let body = builder.CreateBlockGroup(initFn.GetIdentifier() + ".body")
         initFn.InitBody(body)
         let entry = builder.CreateBlock("entry", body)
+        EnsureReturnSlot(initFn, entry)
         let constant = builder.CreateConstant(spec.ty, literal, entry)
         if (let Some(result) <- constant.GetResult()) {
             globalVar.SetInitializerValue(result)

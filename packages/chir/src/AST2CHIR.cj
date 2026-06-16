@@ -19,6 +19,7 @@ public class AST2CHIRGlobalSpec {
     public let initialValue: Option<LiteralValue>
     public let attributes: ArrayList<Attribute> = ArrayList<Attribute>()
     public var useRefStorage: Bool = false
+    public var debugLocation: Option<DebugLocation> = None
 
     public init(name: String, ty: Type, srcCodeIdentifier!: String = "", rawMangledName!: String = "",
         packageName!: String = "", initialValue!: Option<LiteralValue> = None) {
@@ -37,6 +38,11 @@ public class AST2CHIRGlobalSpec {
 
     public func SetUseRefStorage(value: Bool): AST2CHIRGlobalSpec {
         useRefStorage = value
+        return this
+    }
+
+    public func SetDebugLocation(loc: DebugLocation): AST2CHIRGlobalSpec {
+        debugLocation = Some(loc)
         return this
     }
 }
@@ -60,6 +66,8 @@ public class AST2CHIRFunctionSpec {
     public var genericDeclName: Option<String> = None
     public var sourceFileKey: String = ""
     public var isCommonMatchedWithSpecific: Bool = false
+    public var debugLocation: Option<DebugLocation> = None
+    public var propertyLocation: Option<DebugLocation> = None
 
     public init(name: String, paramTypes: ArrayList<Type>, returnType: Type, srcCodeIdentifier!: String = "",
         rawMangledName!: String = "", packageName!: String = "", funcKind!: FuncKind = FuncKind.DEFAULT,
@@ -121,6 +129,16 @@ public class AST2CHIRFunctionSpec {
         isCommonMatchedWithSpecific = value
         return this
     }
+
+    public func SetDebugLocation(loc: DebugLocation): AST2CHIRFunctionSpec {
+        debugLocation = Some(loc)
+        return this
+    }
+
+    public func SetPropertyLocation(loc: DebugLocation): AST2CHIRFunctionSpec {
+        propertyLocation = Some(loc)
+        return this
+    }
 }
 
 public class AST2CHIRPackageSpec {
@@ -128,6 +146,9 @@ public class AST2CHIRPackageSpec {
     public let types: ArrayList<AST2CHIRNominalSpec> = ArrayList<AST2CHIRNominalSpec>()
     public let globals: ArrayList<AST2CHIRGlobalSpec> = ArrayList<AST2CHIRGlobalSpec>()
     public let functions: ArrayList<AST2CHIRFunctionSpec> = ArrayList<AST2CHIRFunctionSpec>()
+    public let sourceFileIds: ArrayList<UInt32> = ArrayList<UInt32>()
+    public let sourceFileNames: ArrayList<String> = ArrayList<String>()
+    public var accessLevel: AccessLevel = AccessLevel.INVALID
     public var mergingSpecific: Bool = false
     public var packageInitFunction: Option<AST2CHIRFunctionSpec> = None
     public var packageLiteralInitFunction: Option<AST2CHIRFunctionSpec> = None
@@ -138,6 +159,17 @@ public class AST2CHIRPackageSpec {
 
     public func SetMergingSpecific(value: Bool): AST2CHIRPackageSpec {
         mergingSpecific = value
+        return this
+    }
+
+    public func SetAccessLevel(level: AccessLevel): AST2CHIRPackageSpec {
+        accessLevel = level
+        return this
+    }
+
+    public func RegisterSourceFile(fileId: UInt32, fileName: String): AST2CHIRPackageSpec {
+        sourceFileIds.add(fileId)
+        sourceFileNames.add(fileName)
         return this
     }
 

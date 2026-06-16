@@ -5,6 +5,7 @@ import std.collection.*
 extend AST2CHIRDeclTranslator {
     public func LowerFunction(defaultPackage: String, spec: AST2CHIRFunctionSpec): Function {
         if (let Some(existing) <- TryGetFunction(spec.name)) {
+            ApplyFunctionSourceInfo(existing, spec)
             AttachFunctionToOwner(existing, spec)
             LowerDefaultParamFunctions(defaultPackage, existing, spec)
             LowerGenericInstantiationFunctions(defaultPackage, existing, spec)
@@ -16,6 +17,7 @@ extend AST2CHIRDeclTranslator {
             rawMangledName: spec.rawMangledName, packageName: packageName)
         fn.SetFuncKind(spec.funcKind)
         ApplyAttributes(fn, spec.attributes)
+        ApplyFunctionSourceInfo(fn, spec)
         CreateFunctionParameters(fn, spec)
         if (ShouldEmitBody(spec)) {
             CreateEmptyBody(fn)
@@ -29,6 +31,15 @@ extend AST2CHIRDeclTranslator {
         LowerDefaultParamFunctions(defaultPackage, fn, spec)
         LowerGenericInstantiationFunctions(defaultPackage, fn, spec)
         return fn
+    }
+
+    private func ApplyFunctionSourceInfo(fn: Function, spec: AST2CHIRFunctionSpec): Unit {
+        if (let Some(loc) <- spec.debugLocation) {
+            fn.SetDebugLocation(loc)
+        }
+        if (let Some(propLoc) <- spec.propertyLocation) {
+            fn.SetPropLocation(propLoc)
+        }
     }
 
     private func BuildFunctionType(spec: AST2CHIRFunctionSpec): FuncType {

@@ -5,6 +5,7 @@ import std.collection.*
 extend AST2CHIRDeclTranslator {
     public func CreateNominalDef(defaultPackage: String, spec: AST2CHIRNominalSpec): CustomTypeDef {
         if (let Some(existing) <- TryGetTypeDef(spec.name)) {
+            ApplyNominalSourceInfo(existing, spec)
             return existing
         }
         let packageName = ResolvePackageName(defaultPackage, spec.packageName)
@@ -16,6 +17,7 @@ extend AST2CHIRDeclTranslator {
             case AST2CHIRNominalKind.EXTEND => builder.CreateExtendDef(packageName, spec.name)
         }
         ApplyAttributes(def, spec.attributes)
+        ApplyNominalSourceInfo(def, spec)
         if (spec.kind == AST2CHIRNominalKind.INTERFACE) {
             def.EnableAttr(Attribute.ABSTRACT)
         }
@@ -27,6 +29,12 @@ extend AST2CHIRDeclTranslator {
             AddTypeDefToPackage(pkg, spec, def)
         }
         return def
+    }
+
+    private func ApplyNominalSourceInfo(def: CustomTypeDef, spec: AST2CHIRNominalSpec): Unit {
+        if (let Some(loc) <- spec.debugLocation) {
+            def.SetDebugLocation(loc)
+        }
     }
 
     public func LowerNominalDecl(defaultPackage: String, spec: AST2CHIRNominalSpec): Unit {
