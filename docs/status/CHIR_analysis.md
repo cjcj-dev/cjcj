@@ -61,3 +61,22 @@
 
 - `cjpm build` passed after implementation.
 - `TODO(selfhost:CHIR)` count in `packages/chir/src`: 0.
+
+## 2026-06-17 SIntDomain Transfer Pass
+
+- Reference read: C++ `SIntDomain.cpp` arithmetic, relational, equality, symbolic merge, and numeric conversion/type-cast sections.
+- De-isolated overflow strategy use by importing `cangjie_compiler::utils.OverflowStrategy` into CHIR and adding the CHIR package dependency needed for that real sibling package.
+- Added C++-style `CHIRArithmeticBinopArgs`, `CHIRRelIntBinopArgs`, `ComputeArithmeticBinop`, `ComputeRelIntBinop`, `ComputeEqualityBoolBinop`, `NumericConversion`, and `ComputeTypeCastNumericBound`.
+- Ported symbolic add/sub propagation, total-order and equality comparison refinement, unsigned/signed/same-sign conversion, throwing/wrapping/saturating narrowing, and type-cast numeric bound logic.
+- Adjusted `SIntDomain.IsSame` and symbolic merge bottom handling to match the C++ reference behavior.
+
+## Remaining After SIntDomain Transfer Pass
+
+- Higher-level CHIR analysis orchestration remains partial compared with C++ `AnalysisWrapper`, `Engine`, `Results`, `ConstAnalysis`, `TypeAnalysis`, `ValueAnalysis`, and `ValueRangeAnalysis`.
+- `ValueRangeAnalysis` integration is still missing the full C++ cache/projection/update engine that consumes the new transfer helpers.
+- `SInt` still lacks full string construction/format parity and some non-core bit-counting/shift helper APIs.
+
+## Verification After SIntDomain Transfer Pass
+
+- `cjpm build` passed after implementation.
+- `TODO(selfhost:CHIR)` count in `packages/chir/src`: 0.
