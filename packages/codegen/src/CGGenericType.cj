@@ -8,7 +8,7 @@ public class CGGenericType <: CGType {
     }
 
     protected override func GenLLVMType(): LLVMTypeRef {
-        return CGType.GetOrCreateTypeInfoPtrType(cgCtx.GetLLVMContext())
+        return CGType.GetRefType(cgMod.GetLLVMContext())
     }
 
     protected override func CalculateSizeAndAlign(): Unit {

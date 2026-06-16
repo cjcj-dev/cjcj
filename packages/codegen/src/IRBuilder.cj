@@ -478,10 +478,6 @@ public class IRBuilder2 {
         return result
     }
 
-    private func GetCjStringLiteralName(value: String): String {
-        return CJSTRING_LITERAL_PREFIX + UInt64(value.hashCode()).toString()
-    }
-
     private func IsFloatOperand(ty: Option<Type>): Bool {
         if (let Some(valueType) <- ty) {
             return valueType.IsFloat()

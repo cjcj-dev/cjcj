@@ -36,6 +36,10 @@ Implemented:
 - Added `IRBuilder2` wrappers for selected LLVM builder operations, primitive constants, default literal constants,
   call and invoke construction, bitcasts, address-space casts, aggregate insertion, GEP construction, unreachable
   terminators, and scoped debug-location restoration.
+- Added a C++-shaped `CGUtils` component for pure CodeGen helpers: basic-block naming, class object layout naming,
+  compiler-added class mangling, SipHash/`Out64`-style Cangjie string and constant global names through
+  `Utils.HashString64`, reference stripping, and generic/class/struct/varray reference predicates. `IRBuilder2`
+  string literal globals now use this shared naming path instead of a local decimal `hashCode` conversion.
 - Added LLVM debug-info initialization via a CodeGen `DIBuilder` component: module debug/DWARF flags, compile-unit
   metadata, package namespace metadata, debug-location creation, finalization, and builder disposal are now driven
   through LLVM C FFI.
@@ -70,8 +74,8 @@ Known gaps:
   intrinsics, complete
   array/tuple/object construction, precise casts, C/FFI lowering, incremental generation, native backend-specific
   metadata, and post-generation optimization/cleanup passes.
-- Only 42 `.cj` files are present in this pass, compared with 118 reference CodeGen source/header files. Additional
-  C++-named component files still need to be split out for `LICMOptimizer`, `IRGenerator`, `CGUtils`,
+- Only 43 `.cj` files are present in this pass, compared with 118 reference CodeGen source/header files. Additional
+  C++-named component files still need to be split out for `LICMOptimizer`, `IRGenerator`, LLVM-specific `CGUtils`,
   `BlockScopeImpl`, incremental generation, Cangjie-native metadata, type info, CFFI, and the detailed base
   expression implementation files.
 - The package manifest now depends on the existing self-hosted `basic`, `chir`, `mangle`, `option`, and `utils`
@@ -79,4 +83,4 @@ Known gaps:
 
 Remaining CodeGen selfhost markers: 0.
 
-Current CodeGen package size: 42 `.cj` files, approximately 3839 total lines.
+Current CodeGen package size: 43 `.cj` files, approximately 3938 total lines.
