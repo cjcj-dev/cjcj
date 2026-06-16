@@ -110,11 +110,7 @@ private func IsStringBinaryExpr(expr: Expr): Bool {
     if (expr.astKind != ASTKind.BINARY_EXPR) {
         return false
     }
-    if (let Some(ty) <- expr.GetTy()) {
-        if (!ty.IsString()) {
-            return false
-        }
-    } else {
+    if (!Ty.IsTyCorrect(expr.GetTy())) {
         return false
     }
     if (let Some(desugar) <- expr.desugarExpr) {
@@ -361,11 +357,11 @@ public class ConstEvaluationChecker {
         if (!fb.paramLists.isEmpty()) {
             for (param in fb.paramLists[0].params) {
                 if (let Some(defaultValue) <- param.assignment) {
-                    let paramIsConst = ChkExpr(defaultValue, true)
                     if (let Some(desugarDecl) <- param.desugarDecl) {
+                        let paramIsConst = ChkExpr(defaultValue, true)
                         desugarDecl.isConst = paramIsConst
+                        result = paramIsConst && result
                     }
-                    result = paramIsConst && result
                 }
             }
         }
@@ -551,8 +547,8 @@ public class ConstEvaluationChecker {
     private func ChkDesugaredMultipleAssignment(block: Block, isWeak: Bool): Bool {
         var result = true
         for (node in block.body) {
-            if (let Some(decl) <- (node as Decl)) {
-                result = ChkConstDecl(decl) && result
+            if (let Some(varDecl) <- (node as VarDecl)) {
+                result = ChkVarDecl(varDecl) && result
             } else if (let Some(expr) <- (node as Expr)) {
                 result = ChkExpr(expr, isWeak) && result
             }

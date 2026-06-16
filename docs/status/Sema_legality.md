@@ -24,6 +24,15 @@ This pass covers the self-hosted Cangjie port under:
 - Continued fidelity work by porting the C++ const-evaluation special case for desugared `std.core.String` binary operators.
 - Added the global-variable initialization issue for illegal `common static let` initialization inside a `static init`, while preserving the C++ dependency collection order for that assignment.
 - Aligned constructor initialization checking with the C++ skip rule for already-checked constructors and CJMP common constructors without `COMMON_WITH_DEFAULT`.
+- Refined the `std.core.String` binary-operator check so string comparisons with non-string result types follow the C++ const-evaluation path.
+- Added the C++ common-part skip in initialization checking for declarations deserialized from a common compilation unit.
+- Added C++ do-while initialization rollback behavior for variables initialized after an early jump in a body that otherwise executes at least once.
+- Aligned const default-parameter checking with C++ by checking only when the desugared backing declaration is present and can receive the const result.
+- Replaced the earlier no-constructor member-field approximation with the C++ CJMP-specific check for non-common fields without initializers in common class/struct declarations.
+- Matched C++ desugared multiple-assignment const checking by processing only `VarDecl` temporaries and expression nodes in the expanded block.
+- Routed function bodies with resolved symbols through loop-style initialization rollback, matching the C++ `CheckInitInFuncBody` path more closely.
+- Ported the C++ conditional-initialization branch merge for `if`, `else if`, `match`, and condition let-pattern destructors, including control-transfer suppression and the generic-bound rule used by immutable struct-member assignment checks.
+- Added function-body stack tracking for initialization checking so member uses outside constructors are skipped like C++, constructor assignment context is related-type aware, and assignments no longer mark captured/different-function declarations initialized.
 
 ## Remaining Fidelity Gaps
 
@@ -34,4 +43,4 @@ This pass covers the self-hosted Cangjie port under:
 
 ## Estimate
 
-Honest behavior coverage for this legality/const-evaluation scope is about 54% versus the C++ reference. The port now has real traversal and issue production in the scoped files, plus several targeted C++ edge cases, but production completeness still requires diagnostic integration and the remaining exact semantic edge cases above.
+Honest behavior coverage for this legality/const-evaluation scope is about 62% versus the C++ reference. The port now has real traversal and issue production in the scoped files, plus several targeted C++ edge cases, the main conditional-initialization merge path, and more faithful assignment/capture handling, but production completeness still requires diagnostic integration and the remaining exact semantic edge cases above.
