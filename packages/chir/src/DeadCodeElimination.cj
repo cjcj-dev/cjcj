@@ -14,9 +14,19 @@ public class DeadCodeElimination {
     public func RunOnFunction(fn: Function): Int64 {
         var removed: Int64 = 0
         if (let Some(body) <- fn.GetBody()) {
-            for (block in body.GetBlocksRef()) {
-                removed += RunOnBlock(block)
+            var passRemoved: Int64 = -1
+            while (passRemoved != 0) {
+                passRemoved = RunOnBody(body)
+                removed += passRemoved
             }
+        }
+        return removed
+    }
+
+    private func RunOnBody(body: BlockGroup): Int64 {
+        var removed: Int64 = 0
+        for (block in body.GetBlocksRef()) {
+            removed += RunOnBlock(block)
         }
         return removed
     }

@@ -57,7 +57,19 @@ Second continuation pass:
   `GetGlobalFuncsWithoutBody()` default filtering, so pure abstract no-body
   declarations are no longer marked `NO_SIDE_EFFECT` by this pass.
 
+Third continuation pass:
+
+- `DeadCodeElimination.cj`: now repeats the unused-expression sweep to a fixed
+  point for each function body, matching the C++ worklist behavior where
+  removing a dead consumer can expose a newly dead producer in the same pass.
+- `ReachingDefinitionAnalysis.cj`: narrowed call invalidation to the C++
+  `mut` callee receiver case for tracked struct refs instead of clearing every
+  non-readonly operand around calls.
+- `ReachingDefinitionAnalysis.cj`: added recursive lambda capture invalidation
+  for ref-typed captured values, including lambdas reached through direct
+  lambda applies, mirroring the C++ `GetLambdaCapturedVarsRecursively` helper.
+
 Estimated behavior coverage for the touched transform/optimization surface is
-about 27% versus the C++ reference. The changes above remove several unsafe
+about 29% versus the C++ reference. The changes above remove several unsafe
 behavior differences but the overall CHIR transform/optimization module remains
 far from complete.
