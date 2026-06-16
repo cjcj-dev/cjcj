@@ -1,5 +1,6 @@
 package cangjie_compiler::sema.TypeCheckExpr
 
+import std.collection.*
 import cangjie_compiler::ast.*
 import cangjie_compiler::sema.*
 
@@ -44,7 +45,25 @@ private func CommandPayloadTy(ty: Ty): Option<Ty> {
     return None
 }
 
-private func CheckCommandPattern(typeManager: TypeManager, handler: Handler, commandPattern: CommandTypePattern): Bool {
+private func IsIncludedType(typeManager: TypeManager, included: ArrayList<Ty>, candidate: Ty): Bool {
+    for (includedTy in included) {
+        if (SameTy(candidate, includedTy) || typeManager.IsSubtype(candidate, includedTy)) {
+            return true
+        }
+    }
+    return false
+}
+
+private func AddIncludedType(typeManager: TypeManager, included: ArrayList<Ty>, candidate: Ty): Bool {
+    if (IsIncludedType(typeManager, included, candidate)) {
+        return false
+    }
+    included.add(candidate)
+    return true
+}
+
+private func CheckCommandPattern(typeManager: TypeManager, handler: Handler, commandPattern: CommandTypePattern,
+    included: ArrayList<Ty>): Bool {
     if (commandPattern.types.size != 1) {
         commandPattern.SetTy(TypeManager.GetInvalidTy())
         return false
@@ -55,17 +74,29 @@ private func CheckCommandPattern(typeManager: TypeManager, handler: Handler, com
     }
     let commandTy = commandPattern.types[0].GetTy().getOrThrow()
     commandPattern.SetTy(commandTy)
+    var ok = AddIncludedType(typeManager, included, commandTy)
     if (let Some(payloadTy) <- CommandPayloadTy(commandTy)) {
         handler.commandResultTy = payloadTy
+    } else {
+        ok = false
     }
     if (let Some(innerPattern) <- commandPattern.pattern) {
-        return TcPatternCheck(typeManager, commandTy, innerPattern)
+        ok = TcPatternCheck(typeManager, commandTy, innerPattern) && ok
     }
-    return true
+    if (!ok) {
+        commandPattern.SetTy(TypeManager.GetInvalidTy())
+    }
+    return ok
 }
 
-private func CheckWildcardCatchPattern(typeManager: TypeManager, pattern: WildcardPattern): Bool {
-    pattern.SetTy(typeManager.GetAnyTy())
+private func CheckWildcardCatchPattern(typeManager: TypeManager, pattern: WildcardPattern,
+    included: ArrayList<Ty>): Bool {
+    let wildcardTy = typeManager.GetAnyTy()
+    pattern.SetTy(wildcardTy)
+    if (!AddIncludedType(typeManager, included, wildcardTy)) {
+        pattern.SetTy(TypeManager.GetInvalidTy())
+        return false
+    }
     return true
 }
 
@@ -73,14 +104,19 @@ private func IsCatchableExceptionTy(ty: Ty): Bool {
     return !ty.IsNothing() && (ty.IsClassLike() || ty.IsGeneric() || ty.IsAny())
 }
 
-private func CheckExceptTypePattern(typeManager: TypeManager, exceptPattern: ExceptTypePattern): Bool {
+private func CheckExceptTypePattern(typeManager: TypeManager, exceptPattern: ExceptTypePattern,
+    included: ArrayList<Ty>): Bool {
     var ok = true
     var joinedTy: Ty = TypeManager.GetNothingTy()
     for (typeNode in exceptPattern.types) {
         if (let Some(typeTy) <- typeNode.GetTy()) {
             if (Ty.IsTyCorrect(typeTy) && IsCatchableExceptionTy(typeTy)) {
-                joinedTy = JoinTryTy(typeManager, joinedTy, typeTy)
-                ok = Ty.IsTyCorrect(joinedTy) && ok
+                if (AddIncludedType(typeManager, included, typeTy)) {
+                    joinedTy = JoinTryTy(typeManager, joinedTy, typeTy)
+                    ok = Ty.IsTyCorrect(joinedTy) && ok
+                } else {
+                    ok = false
+                }
             } else {
                 ok = false
             }
@@ -104,20 +140,22 @@ private func CheckExceptTypePattern(typeManager: TypeManager, exceptPattern: Exc
 
 private func ChkTryExprCatchPatterns(typeManager: TypeManager, te: TryExpr): Bool {
     var ok = true
+    let includedCatchTys = ArrayList<Ty>()
     for (pattern in te.catchPatterns) {
         if (let Some(wildcardPattern) <- (pattern as WildcardPattern)) {
-            ok = CheckWildcardCatchPattern(typeManager, wildcardPattern) && ok
+            ok = CheckWildcardCatchPattern(typeManager, wildcardPattern, includedCatchTys) && ok
         } else if (let Some(exceptPattern) <- (pattern as ExceptTypePattern)) {
-            ok = CheckExceptTypePattern(typeManager, exceptPattern) && ok
+            ok = CheckExceptTypePattern(typeManager, exceptPattern, includedCatchTys) && ok
         } else {
             pattern.SetTy(TypeManager.GetInvalidTy())
             ok = false
         }
     }
+    let includedCommandTys = ArrayList<Ty>()
     for (handler in te.handlers) {
         if (let Some(commandPattern) <- handler.commandPattern) {
             if (let Some(commandTypePattern) <- (commandPattern as CommandTypePattern)) {
-                ok = CheckCommandPattern(typeManager, handler, commandTypePattern) && ok
+                ok = CheckCommandPattern(typeManager, handler, commandTypePattern, includedCommandTys) && ok
             } else {
                 ok = false
             }
