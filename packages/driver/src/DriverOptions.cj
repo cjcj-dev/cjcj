@@ -127,6 +127,8 @@ public class DriverOptions {
     public let bcInputFiles: ArrayList<String> = ArrayList<String>()
     public let bcPackageNames: ArrayList<String> = ArrayList<String>()
     public let frontendOutputFiles: ArrayList<TempFileInfo> = ArrayList<TempFileInfo>()
+    public let symbolsNeedLocalized: ArrayList<String> = ArrayList<String>()
+    public let symbolsNeedLocalizedPerPkg: HashMap<String, ArrayList<String>> = HashMap<String, ArrayList<String>>()
     public let orderedInputObjs: ArrayList<OrderedInput> = ArrayList<OrderedInput>()
     public let orderedLibraries: ArrayList<OrderedInput> = ArrayList<OrderedInput>()
     public let orderedLinkOptions: ArrayList<OrderedInput> = ArrayList<OrderedInput>()
@@ -286,6 +288,16 @@ public class DriverOptions {
             SetCompilationCachedPath()
         }
         return FileUtil.JoinPath(compilationCachedDir, fileName)
+    }
+
+    public func GetHashedObjFileNameForPackage(fullPackageName: String, fileName: String): String {
+        if (compilationCachedPath.isEmpty()) {
+            SetCompilationCachedPath()
+        }
+        if (!compilePackage || fullPackageName == fileName) {
+            return FileUtil.JoinPath(compilationCachedDir, fileName)
+        }
+        return FileUtil.JoinPath(compilationCachedDir, fullPackageName + "-" + fileName)
     }
 
     private func PerformPostActions(): Bool {

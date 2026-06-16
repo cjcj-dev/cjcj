@@ -8,6 +8,15 @@ private func LinkStaticLibrary(tool: Tool, lib: String): Unit {
     tool.AppendArg("--no-whole-archive")
 }
 
+private func RenderSymbolLocalizationFile(symbols: ArrayList<String>): String {
+    let builder = StringBuilder()
+    for (symbol in symbols) {
+        builder.append(symbol)
+        builder.append("\n")
+    }
+    return builder.toString()
+}
+
 public open class Gnu <: ToolChain {
     protected var ldPath: String = ""
     protected var arPath: String = ""
@@ -132,7 +141,9 @@ public open class Gnu <: ToolChain {
         let processedObjFiles = ArrayList<TempFileInfo>()
         var groupIdx: Int64 = 0
         while (groupIdx < packageNames.size) {
-            PartialLinkOnePackage(packageNames[groupIdx], packageModules[groupIdx], processedObjFiles)
+            if (!PartialLinkOnePackage(packageNames[groupIdx], packageModules[groupIdx], processedObjFiles)) {
+                return false
+            }
             groupIdx++
         }
         for (foreignInput in foreignInputs) {
@@ -145,9 +156,9 @@ public open class Gnu <: ToolChain {
         pkgName: String,
         modules: ArrayList<TempFileInfo>,
         processedObjFiles: ArrayList<TempFileInfo>
-    ): Unit {
+    ): Bool {
         if (modules.isEmpty()) {
-            return
+            return true
         }
         let dirPath = FileUtil.GetDirPath(modules[0].filePath)
         let outputFile = FileUtil.JoinPath(dirPath, pkgName + ObjSuffix(driverOptions.target.os))
@@ -161,8 +172,39 @@ public open class Gnu <: ToolChain {
             }
             backendCmds.add(MakeSingleToolBatch(tool))
         }
+
+        let outputDir = FileUtil.GetAbsPath(FileUtil.GetDirPath(outputFile)) ?? FileUtil.GetDirPath(outputFile)
+        let symbolFile = FileUtil.JoinPath(outputDir, pkgName + ".__symbols")
+        let symbolsToLocalize = if (let Some(perPkgSymbols) <- driverOptions.symbolsNeedLocalizedPerPkg.get(pkgName)) {
+            perPkgSymbols
+        } else {
+            driverOptions.symbolsNeedLocalized
+        }
+        if (!FileUtil.WriteToFile(symbolFile, RenderSymbolLocalizationFile(symbolsToLocalize))) {
+            eprintln("error: failed to write symbol localization list: " + symbolFile)
+            return false
+        }
+        if (!symbolsToLocalize.isEmpty()) {
+            if (objcopyPath.isEmpty()) {
+                eprintln("error: not found `objcopy` in search paths. You may add search path by `-B` option.")
+                return false
+            }
+            let changeSymVis = Tool(objcopyPath, ToolType.BACKEND, driverOptions.environment.allVariables)
+            changeSymVis.AppendArg(outputFile)
+            changeSymVis.AppendArg("--localize-symbols=" + symbolFile)
+            backendCmds.add(MakeSingleToolBatch(changeSymVis))
+        }
+
         processedObjFiles.add(TempFileInfo(fileName: FileUtil.GetFileNameWithoutExtension(outputFile),
             filePath: outputFile, rawPath: outputFile, isFrontendOutput: true))
+        if ((driverOptions.aggressiveParallelCompile ?? 1) > 1) {
+            let destFile = driverOptions.GetHashedObjFileNameForPackage(pkgName, pkgName) + ObjSuffix(driverOptions.target.os)
+            let cacheCopyTool = Tool("CacheCopy", ToolType.INTERNAL_IMPLEMENTED, driverOptions.environment.allVariables)
+            cacheCopyTool.AppendArg(outputFile)
+            cacheCopyTool.AppendArg(destFile)
+            backendCmds.add(MakeSingleToolBatch(cacheCopyTool))
+        }
+        return true
     }
 
     protected open func GenerateArchiveTool(objFiles: ArrayList<TempFileInfo>): Unit {

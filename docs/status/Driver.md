@@ -45,6 +45,10 @@ Current status:
   scripts, OHOS page-size/unwind/profile runtime behavior, MinGW sysroot
   library search, PE security flags, CRT object ordering, archive LD_LIBRARY_PATH
   handling, and the full MinGW system-library tail are represented.
+- GNU partial linking now writes per-package `.__symbols` files, selects
+  package-specific symbol-localization lists when available, schedules the
+  `objcopy --localize-symbols` visibility pass, and copies combined package
+  objects into the aggressive-parallel cache slot.
 
 Residual fidelity risks:
 
@@ -52,9 +56,10 @@ Residual fidelity risks:
   through LLVM C API bindings, and source compilation now invokes the
   self-hosted FrontendTool package.
 - GNU/Mach-O/platform toolchains are functional command builders with
-  substantially more C++ parity, but exact symbol-localization data from codegen
-  partial-linking and some platform-specific runtime library edge cases remain
-  below the C++ driver.
+  substantially more C++ parity, but symbol-localization data still depends on
+  the frontend/codegen package boundary exposing the C++ in-process
+  `GlobalOptions` state to Driver, and some platform-specific runtime library
+  edge cases remain below the C++ driver.
 - The Windows-specific `main-frontend.cpp` process wrapper is represented by a
   direct Cangjie frontend shim rather than a separate `CreateProcess`-style
   executable launcher.
