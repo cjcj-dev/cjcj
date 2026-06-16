@@ -15,6 +15,7 @@ class CHIRDeserializerImpl {
     private let blockGroupRecords: ArrayList<ArrayList<String>> = ArrayList<ArrayList<String>>()
     private let blockRecords: ArrayList<ArrayList<String>> = ArrayList<ArrayList<String>>()
     private let expressionRecords: ArrayList<ArrayList<String>> = ArrayList<ArrayList<String>>()
+    private let sourceFileRecords: ArrayList<ArrayList<String>> = ArrayList<ArrayList<String>>()
     private var packageRecord: Option<ArrayList<String>> = None
 
     public init(builder: CHIRBuilder) {
@@ -35,6 +36,7 @@ class CHIRDeserializerImpl {
         }
         parseRecords(lines)
         let pkg = createPackage()
+        registerSourceFiles()
         createCustomDefs(pkg)
         createGlobalVars(pkg)
         createFunctions(pkg)
@@ -68,6 +70,7 @@ class CHIRDeserializerImpl {
                 case "blockGroup" => blockGroupRecords.add(fields)
                 case "block" => blockRecords.add(fields)
                 case "expression" => expressionRecords.add(fields)
+                case "sourceFile" => sourceFileRecords.add(fields)
                 case _ => ()
             }
         }
@@ -80,6 +83,16 @@ class CHIRDeserializerImpl {
             return pkg
         }
         return builder.CreatePackage("<deserialized>")
+    }
+
+    private func registerSourceFiles(): Unit {
+        for (fields in sourceFileRecords) {
+            let fileId = CHIRSafeU32(CHIRFieldAt(fields, 1))
+            let fileName = CHIRFieldAt(fields, 2)
+            if (!fileName.isEmpty()) {
+                builder.context.RegisterSourceFileName(fileId, fileName)
+            }
+        }
     }
 
     private func createCustomDefs(pkg: Package): Unit {

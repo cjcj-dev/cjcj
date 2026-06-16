@@ -19,6 +19,9 @@ Implemented in this pass:
   implementation files: `CHIRSerializer`, `CHIRDeserializer`, `CHIRSerializerImpl`,
   `CHIRDeserializerImpl`, and `CHIRSerializationFormat`.
 - Added a versioned `CHIR-TEXT\t2` wire format while keeping the previous `CHIR-TEXT\t1` reader path.
+- Added a context-aware `SerializePackage(pkg, context)` overload that emits deterministic source-file map
+  records from `CHIRContext`, and deserialization registers those records back into the builder context before
+  debug-location-bearing nodes are configured.
 - Added real type round-tripping for builtins, tuples, function types including C-function and vararg flags,
   raw arrays, varrays, refs, boxes, generic types with source names and upper bounds, `This`, and nominal
   struct/class/enum types.
@@ -54,9 +57,10 @@ Known gaps:
   kind, operands, result, literals, and successors. Full C++ expression-class payload parity remains.
 - Function local/block/block-group id counters and C++ original lambda signature metadata are not exposed by the
   current Cangjie `Function` API and are not serialized yet.
-- Source file path tables cannot be emitted by the current `SerializePackage(pkg)` API because `Package` does not
-  expose the owning `CHIRContext`; debug locations still preserve file ids, lines, columns, and lengths.
+- Callers that still use `SerializePackage(pkg)` without a `CHIRContext` cannot emit source file path tables because
+  `Package` does not expose the owning context; the new `SerializePackage(pkg, context)` overload covers callers
+  that have the builder/context available.
 - `TYPE_CPOINTER` exists in the enum but has no concrete Cangjie type/context constructor in this package, so
   deserialization falls back to `Invalid` for that kind.
 
-Honest coverage estimate for CHIR serializer/deserializer scope: 38%.
+Honest coverage estimate for CHIR serializer/deserializer scope: 40%.

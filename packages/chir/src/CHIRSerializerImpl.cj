@@ -8,9 +8,20 @@ class CHIRSerializerImpl {
     public init() {}
 
     public func SerializePackage(pkg: Package): String {
+        return serializePackage(pkg, None)
+    }
+
+    public func SerializePackage(pkg: Package, context: CHIRContext): String {
+        return serializePackage(pkg, context)
+    }
+
+    private func serializePackage(pkg: Package, context: Option<CHIRContext>): String {
         let lines = ArrayList<String>()
         lines.add(CHIR_TEXT_HEADER_V2)
         appendPackage(lines, pkg)
+        if (let Some(chirContext) <- context) {
+            appendSourceFiles(lines, chirContext)
+        }
         appendCustomDefs(lines, "local", pkg.GetStructs(), pkg.GetClasses(), pkg.GetEnums(), pkg.GetExtends())
         appendCustomDefs(lines, "import", pkg.GetImportedStructs(), pkg.GetImportedClasses(), pkg.GetImportedEnums(),
             pkg.GetImportedExtends())
@@ -26,6 +37,35 @@ class CHIRSerializerImpl {
             }
         }
         return JoinStrings(lines, "\n")
+    }
+
+    private func appendSourceFiles(lines: ArrayList<String>, context: CHIRContext): Unit {
+        let fileIds = ArrayList<UInt32>()
+        let fileNameMap = context.GetFileNameMap()
+        for ((fileId, _) in fileNameMap) {
+            insertSortedFileId(fileIds, fileId)
+        }
+        for (fileId in fileIds) {
+            let fields = CHIRLineFields("sourceFile")
+            fields.add(fileId.toString())
+            fields.add(fileNameMap[fileId])
+            lines.add(CHIRWireJoinFields(fields))
+        }
+    }
+
+    private func insertSortedFileId(fileIds: ArrayList<UInt32>, fileId: UInt32): Unit {
+        var idx: Int64 = 0
+        while (idx < fileIds.size) {
+            if (fileIds[idx] == fileId) {
+                return
+            }
+            if (fileId < fileIds[idx]) {
+                fileIds.add(fileId, at: idx)
+                return
+            }
+            idx++
+        }
+        fileIds.add(fileId)
     }
 
     private func appendPackage(lines: ArrayList<String>, pkg: Package): Unit {

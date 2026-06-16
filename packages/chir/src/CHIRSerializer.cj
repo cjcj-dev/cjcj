@@ -6,4 +6,8 @@ public class CHIRSerializer {
     public func SerializePackage(pkg: Package): String {
         return CHIRSerializerImpl().SerializePackage(pkg)
     }
+
+    public func SerializePackage(pkg: Package, context: CHIRContext): String {
+        return CHIRSerializerImpl().SerializePackage(pkg, context)
+    }
 }
