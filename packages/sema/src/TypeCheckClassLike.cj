@@ -47,6 +47,27 @@ private func TypeCheckClassLikeAddUniqueSubDecl(owner: ClassLikeDecl, child: Dec
     owner.subDecls.add(child)
 }
 
+private func TypeCheckClassLikeFindCorrespondingCommonDecl(specificDecl: Decl): Option<Decl> {
+    if (let Some(file) <- specificDecl.curFile) {
+        if (let Some(pkg) <- file.curPackage) {
+            for (pkgFile in pkg.files) {
+                for (decl in pkgFile.decls) {
+                    if (let Some(specificImpl) <- decl.specificImplementation) {
+                        if (SameDecl(specificImpl, specificDecl)) {
+                            return Some(decl)
+                        }
+                    }
+                }
+            }
+        }
+    }
+    return None
+}
+
+private func TypeCheckClassLikeIsDeclOpenToMock(decl: Decl): Bool {
+    return decl.TestAttr(Attribute.OPEN) && decl.TestAttr(Attribute.OPEN_TO_MOCK)
+}
+
 public func TypeCheckClassLikeCheckAnnotationHasConstInit(
     diag: BasicDiagnosticEngine,
     classDecl: ClassDecl
@@ -104,12 +125,16 @@ public func TypeCheckClassLikeCheckSealedInheritance(
         return false
     }
     if (target.TestAttr(Attribute.SPECIFIC)) {
-        if (!child.TestAttr(Attribute.FROM_COMMON_PART) && !child.TestAttr(Attribute.SPECIFIC)) {
-            let builder = diag.DiagnoseRefactor(BasicDiagKindRefactor.sema_cannot_inherit_sealed,
-                TypeCheckClassLikeRange(parent),
-                arguments: [target.identifier.Val()])
-            builder.Emit()
-            return false
+        if (let Some(commonDecl) <- TypeCheckClassLikeFindCorrespondingCommonDecl(target)) {
+            if (commonDecl.TestAttr(Attribute.SEALED)) {
+                if (!child.TestAttr(Attribute.FROM_COMMON_PART) && !child.TestAttr(Attribute.SPECIFIC)) {
+                    let builder = diag.DiagnoseRefactor(BasicDiagKindRefactor.sema_cannot_inherit_sealed,
+                        TypeCheckClassLikeRange(parent),
+                        arguments: [target.identifier.Val()])
+                    builder.Emit()
+                    return false
+                }
+            }
         }
     }
     return true
@@ -188,7 +213,8 @@ public func TypeCheckClassLikeCheckAndAddSubDecls(
                 result.valid = false
             }
             TypeCheckClassLikeAddUniqueSubDecl(superClass, classDecl)
-            if (!superClass.TestAttr(Attribute.ABSTRACT) && !superClass.TestAttr(Attribute.OPEN)) {
+            if ((!superClass.TestAttr(Attribute.ABSTRACT) && !superClass.TestAttr(Attribute.OPEN)) ||
+                TypeCheckClassLikeIsDeclOpenToMock(superClass)) {
                 TypeCheckClassLikeEmitOld(diag, typeNode, BasicDiagKind.sema_non_inheritable_super_class,
                     args: [BasicDiagArgument(superClass.identifier.Val())])
                 result.valid = false

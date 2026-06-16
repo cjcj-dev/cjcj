@@ -62,6 +62,11 @@ Reference sources inspected from `/root/cj_build/cangjie_compiler/src/Sema`:
   visibility with the real module package-relation utility, reject abstract
   interface calls through type access, reject enum constructor type arguments on
   member access, and reject direct `super` access to abstract members.
+- Continued class-like parity in `TypeCheckClassLike.cj`: sealed inheritance
+  from `specific` declarations now mirrors the C++ package scan for a matching
+  common declaration before reporting the specific-sealed diagnostic, and
+  superclass validation now rejects `OPEN_TO_MOCK` classes like the C++
+  `TestManager::IsDeclOpenToMock` path.
 - Deepened extend checking toward `TypeCheckExtend.cpp`: extend-map construction
   now checks duplicate direct interface implementations, duplicate inherited
   interface implementations, and non-extendable `std.core.Any`/`std.core.CType`
