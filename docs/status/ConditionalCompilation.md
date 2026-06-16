@@ -17,6 +17,9 @@ and recomputes the file `hasMacro` flag after filtering.
 - This package imports the real sibling `ast`, `basic`, and `option` packages.
   AST now re-exports Basic/Lex primitives, so diagnostics use `basic.Position`
   directly with no local position conversion.
+- Default diagnostics now use Basic's `DEFAULT_POSITION`, and LSP cfg.toml
+  content errors are emitted without extra format arguments, matching the C++
+  diagnostic definition.
 - The package still exposes `ConditionalCompilationCompilerInstance` as a small
   provider interface for the real `option.GlobalOptions` and
   `basic.DiagnosticEngine`. The current `frontend.CompilerInstance` in this

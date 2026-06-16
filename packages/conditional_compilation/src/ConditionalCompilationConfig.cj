@@ -79,7 +79,7 @@ public class ConditionalCompilationConfig {
                 continue
             }
             if (!SetupConditionalCompilationCfgFromFile(filePath, passedCondition)) {
-                reporter.DiagnoseDefault(BasicDiagKindRefactor.driver_cfg_toml_content_err, args: [filePath])
+                reporter.DiagnoseDefault(BasicDiagKindRefactor.driver_cfg_toml_content_err)
             }
             return
         }
@@ -91,7 +91,7 @@ public class ConditionalCompilationConfig {
         }
         if (FileExist(defaultCfgFilePath)) {
             if (!SetupConditionalCompilationCfgFromFile(defaultCfgFilePath, passedCondition)) {
-                reporter.DiagnoseDefault(BasicDiagKindRefactor.driver_cfg_toml_content_err, args: [defaultCfgFilePath])
+                reporter.DiagnoseDefault(BasicDiagKindRefactor.driver_cfg_toml_content_err)
             }
         }
     }
