@@ -203,7 +203,8 @@ public class DiagnosticEmitter {
         if (line.isEmpty()) {
             return
         }
-        builder.append(sourceLinePrefix(mainHint.range.begin.line, width) + printableSourceLine(line) + "\n")
+        builder.append(sourceLinePrefix(mainHint.range.begin.fileID, mainHint.range.begin.line, width) +
+            printableSourceLine(line) + "\n")
         renderInlineMarker(builder, line, mainHint.range.begin.column, mainHint.range.end.column, MAIN_HINT_MARKER,
             mainHint.str, mainHint.color, width)
         for (hint in otherHints) {
@@ -263,7 +264,7 @@ public class DiagnosticEmitter {
             line = line[0..replaceBegin] + substitution.str + line[fixedEnd..]
             replacementRanges.add(MakeRange(range.begin, range.begin + substitution.str.size))
         }
-        builder.append(sourceLinePrefix(firstPos.line, width) + printableSourceLine(line) + "\n")
+        builder.append(sourceLinePrefix(firstPos.fileID, firstPos.line, width) + printableSourceLine(line) + "\n")
         for (range in replacementRanges) {
             renderInlineMarker(builder, line, range.begin.column, range.end.column, OTHER_HINT_MARKER, "", HELP_COLOR, width)
         }
@@ -281,6 +282,9 @@ public class DiagnosticEmitter {
     }
 
     private func renderLocation(builder: StringBuilder, pos: Position, width: Int64): Unit {
+        if (!sourceManager.IsSourceFileExist(pos.fileID)) {
+            return
+        }
         let source = sourceManager.GetSource(pos.fileID)
         let path = sourceDisplayName(source)
         builder.append(repeatString(" ", width) + colorForEmitter(noColor, OTHER_HINT_COLOR, LINE_SYMBOL) +
@@ -356,7 +360,7 @@ public class DiagnosticEmitter {
             return
         }
         let printableLine = printableSourceLine(line)
-        builder.append(sourceLinePrefix(lineNumber, width) + printableLine + "\n")
+        builder.append(sourceLinePrefix(fileID, lineNumber, width) + printableLine + "\n")
         let before = if (beginColumn > 1) { GetSpaceBeforeTarget(line, beginColumn) } else { "" }
         let markerWidth = displayedRangeWidth(line, range.begin.column, range.end.column)
         var indicator = repeatString(marker, markerWidth)
@@ -400,7 +404,7 @@ public class DiagnosticEmitter {
             renderGutterLine(builder, width)
             var lineNo = info.mcBegin.line
             for (line in SplitLines(content)) {
-                builder.append(sourceLinePrefix(lineNo, width) + printableSourceLine(line) + "\n")
+                builder.append(sourceLinePrefix(info.mcBegin.fileID, lineNo, width) + printableSourceLine(line) + "\n")
                 lineNo++
             }
             renderGutterLine(builder, width)
@@ -548,7 +552,10 @@ public class DiagnosticEmitter {
         return result
     }
 
-    private func sourceLinePrefix(lineNumber: Int64, width: Int64): String {
+    private func sourceLinePrefix(fileID: UInt64, lineNumber: Int64, width: Int64): String {
+        if (!sourceManager.IsSourceFileExist(fileID)) {
+            return emptyLinePrefix(width)
+        }
         let lineText = "${lineNumber}"
         let padding = repeatString(" ", width - lineText.size + 1)
         return colorForEmitter(noColor, OTHER_HINT_COLOR, lineText) + padding +

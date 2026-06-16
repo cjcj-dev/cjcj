@@ -160,7 +160,7 @@ public class InteropCJPackageConfigReader {
             }
         }
         storePackage(currentPackage)
-        return Validate()
+        return true
     }
 
     public func GetPackage(name: String): Option<PackageConfig> {
@@ -250,7 +250,7 @@ public class InteropCJPackageConfigReader {
         } else if (key == "tuple_configuration") {
             appendStrings(pkg.interopTuples, parseStringArray(value))
         } else if (key == "signature") {
-            let signature = parseString(value)
+            let signature = parseString(value).trimAscii()
             let params = parseSignatureParameterList(signature)
             let retType = parseReturnType(signature)
             pkg.lambdaPatterns.add(LambdaPattern(signature, params, retType))
@@ -354,11 +354,20 @@ private func stringToGenericStrategy(value: String): InteropCJGenericStrategyTyp
 
 private func stripComment(line: String): String {
     var inString = false
+    var escaped = false
     var idx: Int64 = 0
     while (idx < line.size) {
         let ch = line[idx]
-        if (ch == b'"') {
-            inString = !inString
+        if (inString) {
+            if (escaped) {
+                escaped = false
+            } else if (ch == b'\\') {
+                escaped = true
+            } else if (ch == b'"') {
+                inString = false
+            }
+        } else if (ch == b'"') {
+            inString = true
         } else if (ch == b'#' && !inString) {
             return line[0..idx]
         }
@@ -381,23 +390,12 @@ private func parseStringArray(value: String): Array<String> {
     if (trimmed.size < 2 || trimmed[0] != b'[' || trimmed[trimmed.size - 1] != b']') {
         return result.toArray()
     }
-    var idx: Int64 = 1
-    var builder = StringBuilder()
-    var inString = false
-    while (idx < trimmed.size - 1) {
-        let ch = trimmed[idx]
-        if (ch == b'"') {
-            if (inString) {
-                result.add(StringConvertor.Normalize(builder.toString()))
-                builder = StringBuilder()
-                inString = false
-            } else {
-                inString = true
-            }
-        } else if (inString) {
-            builder.append(String.fromUtf8([ch]))
+    let body = trimmed[1..trimmed.size - 1]
+    for (entry in splitTopLevel(body, b',')) {
+        let item = entry.trimAscii()
+        if (item.size >= 2 && item[0] == b'"' && item[item.size - 1] == b'"') {
+            result.add(parseString(item))
         }
-        idx++
     }
     return result.toArray()
 }
@@ -588,11 +586,25 @@ private func isValidInteropType(value: String): Bool {
     return false
 }
 
-private func parseTypeString(typeString: String): Array<String> {
+private func writeInvalidTypeError(pkgName: String, invalidType: String): Unit {
+    WriteError("Error: Invalid type detected in package '${pkgName}' configuration\n")
+    WriteError("  Invalid type: '${invalidType}'\n")
+    WriteError("  Supported types (Exist difference between Java and Objc): Int, Int8, Int16, Int32, Int64, " +
+        "IntNative, UInt8, UInt16, UInt32, UInt64, UIntNative, Float16, Float32, Float64, Bool, Boolean, Unit\n")
+}
+
+private func validateAndProcessTypeString(typeString: String, pkgName: String): Option<Array<String>> {
     let result = ArrayList<String>()
     for (segment in splitTopLevel(typeString, b',')) {
         let trimmed = segment.trimAscii()
-        if (!trimmed.isEmpty() && isValidInteropType(trimmed)) {
+        if (trimmed.isEmpty()) {
+            continue
+        }
+        if (!isValidInteropType(trimmed)) {
+            writeInvalidTypeError(pkgName, trimmed)
+            return None
+        }
+        if (!trimmed.isEmpty()) {
             result.add(trimmed)
         }
     }
@@ -659,9 +671,14 @@ private func collectTypeArguments(
         }
         if (let Some(rawTypeArguments) <- table.get("type_arguments")) {
             for (typeString in parseStringArray(rawTypeArguments)) {
-                let validatedTypes = parseTypeString(typeString)
+                let validatedOpt = validateAndProcessTypeString(typeString, pkg.name)
+                if (let None <- validatedOpt) {
+                    return false
+                }
+                let validatedTypes = validatedOpt.getOrThrow()
                 if (validatedTypes.isEmpty()) {
-                    WriteError("Error: Empty or invalid type definition in package '${pkg.name}'\n")
+                    WriteError("Error: Empty type definition in package '${pkg.name}'\n")
+                    WriteError("  Type string: '${typeString}'\n")
                     return false
                 }
                 let combined = combineTypes(validatedTypes)
@@ -723,7 +740,12 @@ private func parseLambdaPatternsConfiguration(pkg: PackageConfig, value: String)
     for (table in parseArrayOfTables(value)) {
         if (let Some(rawSignature) <- table.get("signature")) {
             let signature = parseString(rawSignature)
-            let lambdaPattern = LambdaPattern(signature, parseSignatureParameterList(signature), parseReturnType(signature))
+            let trimmedSignature = signature.trimAscii()
+            let lambdaPattern = LambdaPattern(
+                trimmedSignature,
+                parseSignatureParameterList(trimmedSignature),
+                parseReturnType(trimmedSignature)
+            )
             if (let Some(rawClassMappings) <- table.get("class_mappings")) {
                 for (classMapping in parseClassMappings(rawClassMappings)) {
                     lambdaPattern.classMappings.add(classMapping)
@@ -735,14 +757,19 @@ private func parseLambdaPatternsConfiguration(pkg: PackageConfig, value: String)
 }
 
 private func parseSignatureParameterList(signature: String): Array<String> {
-    if (!signature.startsWith("(")) {
+    let trimmed = signature.trimAscii()
+    if (!trimmed.startsWith("(")) {
         return Array<String>()
     }
-    let end = signature.indexOf(")") ?? -1
+    let arrowPos = trimmed.indexOf("->") ?? -1
+    let end = trimmed.indexOf(")") ?? -1
+    if (arrowPos >= 0 && end >= arrowPos) {
+        return Array<String>()
+    }
     if (end <= 1) {
         return Array<String>()
     }
-    let paramsStr = signature[1..end]
+    let paramsStr = trimmed[1..end]
     let parameters = ArrayList<String>()
     var currentParam = StringBuilder()
     var genericDepth: Int64 = 0
@@ -771,8 +798,9 @@ private func parseSignatureParameterList(signature: String): Array<String> {
 }
 
 private func parseReturnType(signature: String): String {
-    if (let Some(pos) <- signature.indexOf("->")) {
-        return signature[pos + 2..].trimAscii()
+    let trimmed = signature.trimAscii()
+    if (let Some(pos) <- trimmed.indexOf("->")) {
+        return trimmed[pos + 2..].trimAscii()
     }
     return ""
 }

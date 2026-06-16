@@ -116,6 +116,12 @@ public func GetLineTerminatorLength(bytes: Array<Byte>, index: Int64): UInt8 {
     return 0u8
 }
 
+@When[os == "Windows"]
+public func GetLineTerminator(): String {
+    return "\r\n"
+}
+
+@When[os != "Windows"]
 public func GetLineTerminator(): String {
     return "\n"
 }

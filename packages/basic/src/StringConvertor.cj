@@ -198,7 +198,7 @@ public class StringConvertor {
                         idx++
                     }
                     builder.append(CodepointToUTF8(point))
-                    if (idx < bytes.size && bytes[idx] == b'}') {
+                    if (idx < bytes.size) {
                         idx++
                     }
                     continue
