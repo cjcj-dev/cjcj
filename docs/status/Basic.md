@@ -1,11 +1,14 @@
 # Basic Port Status
 
-Date: 2026-06-16
+Date: 2026-06-17
 
 Build: `cjpm build` passes.
 
 Deepening pass updates:
 
+- Matched two C++ edge cases in core Basic value handling: `Position - Position` now returns a default
+  non-current-file result like the C++ constructor path, and Unicode escape normalization consumes the first
+  non-hex delimiter after `\u{...` exactly as the C++ iterator loop does.
 - Separated `InteropCJPackageConfigReader.Parse` from semantic validation to match the C++ reader flow: parse now
   reports file/read/TOML-shape failures, while strategy consistency checks remain in the explicit `Validate()` step.
 - Added the C++ `DiagnosticEngine::StashDisableDiagnoseStatus` behavior as a Cangjie `Resource`, including

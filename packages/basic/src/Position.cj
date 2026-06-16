@@ -67,9 +67,7 @@ public struct Position <: Hashable & Equatable<Position> {
     }
 
     public operator func -(rhs: Position): Position {
-        var ret = Position(fileID - rhs.fileID, line - rhs.line, column - rhs.column)
-        ret.isCurFile = isCurFile
-        return ret
+        return Position(fileID - rhs.fileID, line - rhs.line, column - rhs.column)
     }
 
     public operator func -(width: Int64): Position {
