@@ -4,16 +4,6 @@ import std.collection.*
 import cangjie_compiler::ast.*
 import cangjie_compiler::sema.*
 
-func MultiTypeSubstToTypeSubstForInheritance(mts: MultiTypeSubst): TypeSubst {
-    let out = TypeSubst()
-    for (entry in mts.entries) {
-        if (!entry.tys.values.isEmpty()) {
-            out.Put(entry.tyVar, entry.tys.values[0])
-        }
-    }
-    return out
-}
-
 func UpdateUpperBoundsSetForInheritance(
     typeManager: TypeManager,
     upperBounds: ArrayList<TySet>,

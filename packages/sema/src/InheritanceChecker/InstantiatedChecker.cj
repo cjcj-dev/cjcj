@@ -5,20 +5,26 @@ import cangjie_compiler::ast.*
 import cangjie_compiler::basic.{DiagArgument, DiagKind, DiagKindRefactor, MakeRange}
 import cangjie_compiler::sema.*
 
+public class InstantiationTriggerInfo {
+    public var node: Node
+    public var decl: Decl
+    public let instTys: ArrayList<Ty> = ArrayList<Ty>()
+
+    public init(node: Node, decl: Decl, instTys: ArrayList<Ty>) {
+        this.node = node
+        this.decl = decl
+        for (ty in instTys) {
+            this.instTys.add(ty)
+        }
+    }
+}
+
 func InstantiationKey(decl: Decl, instTys: ArrayList<Ty>): String {
     let parts = ArrayList<String>()
     for (ty in instTys) {
         parts.add(ty.String())
     }
     return "${decl.fullPackageName}:${decl.identifier.Val()}:${decl.begin.ToString()}:${JoinStrings(parts, ",")}"
-}
-
-func TypeArgsFromTy(ty: Ty): ArrayList<Ty> {
-    let out = ArrayList<Ty>()
-    for (arg in ty.typeArgs) {
-        out.add(arg)
-    }
-    return out
 }
 
 private func GetReferenceTyAndTarget(node: Node): (Option<Ty>, Option<Decl>) {
@@ -35,23 +41,6 @@ private func GetReferenceTyAndTarget(node: Node): (Option<Ty>, Option<Decl>) {
         }
     }
     return (baseTy, target)
-}
-
-func GenerateTypeMappingForInheritance(decl: Decl, instTys: ArrayList<Ty>): TypeSubst {
-    let out = TypeSubst()
-    if (let Some(generic) <- decl.GetGeneric()) {
-        if (generic.typeParameters.size != instTys.size) {
-            return out
-        }
-        for (idx in 0..generic.typeParameters.size) {
-            if (let Some(paramTy) <- generic.typeParameters[idx].GetTy()) {
-                if (let Some(genericTy) <- (paramTy as GenericsTy)) {
-                    out.Put(genericTy, instTys[idx])
-                }
-            }
-        }
-    }
-    return out
 }
 
 private func HasExtendForInstantiation(values: ArrayList<ExtendDecl>, extendDecl: ExtendDecl): Bool {
@@ -119,6 +108,9 @@ func CheckInstMemberSignatures(
     decl: InheritableDecl,
     instTys: ArrayList<Ty>
 ): Unit {
+    if (!checker.HasInstantiationTrigger()) {
+        return
+    }
     if (instTys.isEmpty()) {
         return
     }
@@ -127,7 +119,7 @@ func CheckInstMemberSignatures(
         return
     }
     checker.AddInstantiatedKey(key)
-    let typeMapping = GenerateTypeMappingForInheritance(decl, instTys)
+    let typeMapping = GenerateTypeMapping(decl, instTys)
     if (typeMapping.IsEmpty()) {
         return
     }
@@ -180,7 +172,50 @@ func CheckInstMemberSignatures(
     }
 }
 
+private func HasSelfRecursiveInstantiation(genericTy: Ty, instTy: Ty): Bool {
+    for (arg in instTy.typeArgs) {
+        if (arg.Contains(genericTy)) {
+            return true
+        }
+    }
+    return false
+}
+
+private func WillCauseInfiniteInstantiation(
+    checker: StructInheritanceChecker,
+    triggerNode: Node,
+    decl: Decl,
+    instTys: ArrayList<Ty>,
+    typeMapping: TypeSubst
+): Bool {
+    if (HaveCyclicSubstitution(checker.typeManager, typeMapping)) {
+        checker.diag.Diagnose(triggerNode.begin, DiagKind.sema_generic_infinite_instantiation)
+        checker.MarkInfiniteInstantiationOccurred()
+        return true
+    }
+    if (let None <- decl.GetGeneric()) {
+        return false
+    }
+    let generic = decl.GetGeneric().getOrThrow()
+    if (generic.typeParameters.size != instTys.size) {
+        return false
+    }
+    for (idx in 0..instTys.size) {
+        if (let Some(genericTy) <- generic.typeParameters[idx].GetTy()) {
+            if (HasSelfRecursiveInstantiation(genericTy, instTys[idx])) {
+                checker.diag.Diagnose(triggerNode.begin, DiagKind.sema_generic_infinite_instantiation)
+                checker.MarkInfiniteInstantiationOccurred()
+                return true
+            }
+        }
+    }
+    return false
+}
+
 func CheckInstDupFuncsRecursively(checker: StructInheritanceChecker, node: Node): VisitAction {
+    if (checker.HasInfiniteInstantiationOccurred()) {
+        return VisitAction.STOP_NOW
+    }
     if (!Ty.IsTyCorrect(node.GetTy()) || node.TestAttr(Attribute.HAS_BROKEN)) {
         return VisitAction.WALK_CHILDREN
     }
@@ -190,21 +225,36 @@ func CheckInstDupFuncsRecursively(checker: StructInheritanceChecker, node: Node)
             return VisitAction.WALK_CHILDREN
         }
         if (let Some(baseTy) <- refInfo[0]) {
-            var instTys = TypeArgsFromTy(baseTy)
+            if (target.IsNominalDecl() && target.TestAttr(Attribute.GENERIC)) {
+                let emptyInstTys = ArrayList<Ty>()
+                let emptyKey = InstantiationKey(target, emptyInstTys)
+                if (!checker.HasInstantiatedKey(emptyKey)) {
+                    checker.AddInstantiatedKey(emptyKey)
+                    CheckInstantiatedDecl(checker, target, emptyInstTys)
+                }
+            }
+            checker.CheckInstWithCStructTypeArg(node)
+            var instTys = checker.typeManager.GetTypeArgs(baseTy)
             if (let Some(nameRef) <- (node as NameReferenceExpr)) {
                 if (!nameRef.instTys.isEmpty()) {
                     instTys = nameRef.instTys
                 }
             }
-            if (!instTys.isEmpty()) {
-                if (let Some(inheritable) <- (target as InheritableDecl)) {
-                    CheckInstMemberSignatures(checker, inheritable, instTys)
-                }
-                for (extendDecl in GetVisibleExtendsForInstantiation(checker, target, instTys)) {
-                    CheckInstMemberSignatures(checker, extendDecl, instTys)
-                }
+            let typeMapping = GenerateTypeMapping(target, instTys)
+            if (typeMapping.IsEmpty()) {
+                return VisitAction.WALK_CHILDREN
             }
-            checker.CheckInstWithCStructTypeArg(node)
+            if (WillCauseInfiniteInstantiation(checker, node, target, instTys, typeMapping)) {
+                return VisitAction.STOP_NOW
+            }
+            checker.PushInstantiationTrigger(node, target, instTys)
+            if (let Some(inheritable) <- (target as InheritableDecl)) {
+                CheckInstMemberSignatures(checker, inheritable, instTys)
+            }
+            for (extendDecl in GetVisibleExtendsForInstantiation(checker, target, instTys)) {
+                CheckInstMemberSignatures(checker, extendDecl, instTys)
+            }
+            checker.PopInstantiationTrigger()
         }
     }
     return VisitAction.WALK_CHILDREN
@@ -336,16 +386,25 @@ func DiagnoseForInstantiatedMemberImpl(
     parent: MemberSignature,
     child: MemberSignature
 ): Unit {
+    if (let None <- checker.CurrentInstantiationTrigger()) {
+        return
+    }
+    let trigger = checker.CurrentInstantiationTrigger().getOrThrow()
     if (let Some(parentDecl) <- parent.decl) {
         if (let Some(childDecl) <- child.decl) {
             if (let Some(parentFuncTy) <- FuncTyFromOption(parent.ty)) {
                 if (let Some(childFuncTy) <- FuncTyFromOption(child.ty)) {
                     let sameStatic = parentDecl.TestAttr(Attribute.STATIC) == childDecl.TestAttr(Attribute.STATIC)
                     if (sameStatic && checker.typeManager.IsFuncParameterTypesIdentical(parentFuncTy, childFuncTy)) {
+                        let triggerTyParts = ArrayList<String>()
+                        for (instTy in trigger.instTys) {
+                            triggerTyParts.add(instTy.String())
+                        }
+                        let triggeredDeclType = trigger.decl.identifier.Val() + "<" + JoinStrings(triggerTyParts, ", ") + ">"
                         let builder = checker.diag.DiagnoseRefactor(
                             DiagKindRefactor.sema_generic_instantiation_causes_ambiguous_functions,
-                            MakeRange(childDecl.begin, childDecl.end),
-                            arguments: [childDecl.identifier.Val(), childDecl.identifier.Val()]
+                            MakeRange(trigger.node.begin, trigger.node.end),
+                            arguments: [triggeredDeclType, childDecl.identifier.Val()]
                         )
                         builder.AddNote(MakeRange(parentDecl.begin, parentDecl.end), "found candidate")
                         builder.AddNote(MakeRange(childDecl.begin, childDecl.end), "found candidate")
