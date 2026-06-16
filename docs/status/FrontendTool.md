@@ -15,6 +15,8 @@ Current status:
   detection are implemented with the public data exposed by the current self-host frontend package.
 - Common-part/CJMP-style CJO output is delayed to result saving, matching the C++ FrontendTool split between
   `PerformCjoSaving` and `PerformResultsSaving`.
+- `NeedCreateIncrementalCompilerInstance` also exposes an overload for the richer `option.GlobalOptions` model with
+  the same mock, coverage, CHIR-output, and common-part-CJO guards as the C++ helper.
 - The implementation is intentionally conservative where the current package graph does not yet expose the C++ surfaces
   used by FrontendTool: native `TempFileManager`, the production driver option object, shared CHIR/CodeGen models, and
   the full C++ incremental AST-diff/pollution data structures.

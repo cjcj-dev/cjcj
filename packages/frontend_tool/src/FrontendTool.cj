@@ -4,6 +4,9 @@ import std.collection.*
 import cangjie_compiler::basic.PrintVersion
 import cangjie_compiler::basic.WriteError
 import cangjie_compiler::frontend.*
+import cangjie_compiler::option.GlobalOptions as OptionGlobalOptions
+import cangjie_compiler::option.MockMode
+import cangjie_compiler::option.OutputMode
 import cangjie_compiler::utils.FileUtil
 
 public class DriverOptions {
@@ -104,6 +107,11 @@ public func NeedCreateIncrementalCompilerInstance(opts: GlobalOptions): Bool {
         return false
     }
     return true
+}
+
+public func NeedCreateIncrementalCompilerInstance(opts: OptionGlobalOptions): Bool {
+    return opts.enIncrementalCompilation && opts.mock != MockMode.ON && !opts.enableCoverage &&
+        opts.outputMode != OutputMode.CHIR && opts.commonPartCjos.isEmpty()
 }
 
 private func InitializeCompilerInvocation(ci: CompilerInvocation, args: Array<String>): Bool {
