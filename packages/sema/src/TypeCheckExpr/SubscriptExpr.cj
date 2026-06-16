@@ -1,5 +1,6 @@
 package cangjie_compiler::sema.TypeCheckExpr
 
+import std.collection.*
 import cangjie_compiler::ast.*
 import cangjie_compiler::sema.*
 
@@ -9,6 +10,14 @@ public func SelfhostPortStatus_TypeCheckExpr_SubscriptExpr(): Bool {
 
 private func SubscriptInvalid(se: SubscriptExpr): Ty {
     return TcInvalid(se)
+}
+
+private func PropagateSubscriptDesugarTarget(se: SubscriptExpr, desugar: Expr): Unit {
+    if (let Some(callExpr) <- (desugar as CallExpr)) {
+        if (let Some(resolved) <- callExpr.resolvedFunction) {
+            ReplaceTarget(se, Some(resolved))
+        }
+    }
 }
 
 private func CheckIndexAsInt64(typeManager: TypeManager, expr: Expr): Bool {
@@ -45,9 +54,19 @@ private func ChkTupleAccess(typeManager: TypeManager, target: Option<Ty>, se: Su
             if (let Some(baseTupleLit) <- (se.baseExpr.getOrThrow() as TupleLit)) {
                 if (index < baseTupleLit.children.size) {
                     if (!ChkExprShallow(typeManager, targetTy, baseTupleLit.children[index])) {
+                        baseTupleLit.SetTy(TypeManager.GetInvalidTy())
                         let _ = SubscriptInvalid(se)
                         return false
                     }
+                    let elemTys = ArrayList<Ty>()
+                    for (child in baseTupleLit.children) {
+                        elemTys.add(TcReplaceIdeal(typeManager, child))
+                    }
+                    baseTupleLit.SetTy(typeManager.GetTupleTy(elemTys.toArray()))
+                    let updatedTy = elemTys[index]
+                    se.isTupleAccess = true
+                    se.SetTy(updatedTy)
+                    return true
                 }
             } else if (typeManager.CheckTypeCompatibility(targetTy, elementTy) == TypeCompatibility.INCOMPATIBLE) {
                 let _ = SubscriptInvalid(se)
@@ -97,6 +116,7 @@ private func SynIndexExprs(typeManager: TypeManager, se: SubscriptExpr): Bool {
 public func ChkSubscriptExpr(typeManager: TypeManager, target: Ty, se: SubscriptExpr): Bool {
     if (let Some(desugar) <- se.desugarExpr) {
         if (ChkExprShallow(typeManager, target, desugar)) {
+            PropagateSubscriptDesugarTarget(se, desugar)
             se.SetTy(TcTyOrInvalid(desugar))
             return true
         }
@@ -130,6 +150,7 @@ public func SynSubscriptExpr(typeManager: TypeManager, se: SubscriptExpr): Ty {
     if (let Some(desugar) <- se.desugarExpr) {
         let desugarTy = SynExprShallow(typeManager, desugar)
         if (Ty.IsTyCorrect(desugarTy)) {
+            PropagateSubscriptDesugarTarget(se, desugar)
             se.SetTy(desugarTy)
             return desugarTy
         }

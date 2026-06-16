@@ -12,6 +12,9 @@ private func LoopInvalid(expr: Expr): Ty {
 }
 
 private func IterableElementTy(typeManager: TypeManager, inTy: Ty): Ty {
+    if (inTy.name == "Iterable" && inTy.typeArgs.size == 1) {
+        return inTy.typeArgs[0]
+    }
     if (inTy.IsArray() && inTy.typeArgs.size == 1) {
         return inTy.typeArgs[0]
     }

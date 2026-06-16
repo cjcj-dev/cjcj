@@ -64,10 +64,55 @@ private func CheckCommandPattern(typeManager: TypeManager, handler: Handler, com
     return true
 }
 
+private func CheckWildcardCatchPattern(typeManager: TypeManager, pattern: WildcardPattern): Bool {
+    pattern.SetTy(typeManager.GetAnyTy())
+    return true
+}
+
+private func IsCatchableExceptionTy(ty: Ty): Bool {
+    return !ty.IsNothing() && (ty.IsClassLike() || ty.IsGeneric() || ty.IsAny())
+}
+
+private func CheckExceptTypePattern(typeManager: TypeManager, exceptPattern: ExceptTypePattern): Bool {
+    var ok = true
+    var joinedTy: Ty = TypeManager.GetNothingTy()
+    for (typeNode in exceptPattern.types) {
+        if (let Some(typeTy) <- typeNode.GetTy()) {
+            if (Ty.IsTyCorrect(typeTy) && IsCatchableExceptionTy(typeTy)) {
+                joinedTy = JoinTryTy(typeManager, joinedTy, typeTy)
+                ok = Ty.IsTyCorrect(joinedTy) && ok
+            } else {
+                ok = false
+            }
+        } else {
+            ok = false
+        }
+    }
+    if (!ok || exceptPattern.types.isEmpty()) {
+        exceptPattern.SetTy(TypeManager.GetInvalidTy())
+        return false
+    }
+    exceptPattern.SetTy(joinedTy)
+    if (let Some(innerPattern) <- exceptPattern.pattern) {
+        ok = TcPatternCheck(typeManager, joinedTy, innerPattern) && ok
+    }
+    if (!ok) {
+        exceptPattern.SetTy(TypeManager.GetInvalidTy())
+    }
+    return ok
+}
+
 private func ChkTryExprCatchPatterns(typeManager: TypeManager, te: TryExpr): Bool {
     var ok = true
     for (pattern in te.catchPatterns) {
-        ok = TcPatternCheck(typeManager, typeManager.GetAnyTy(), pattern) && ok
+        if (let Some(wildcardPattern) <- (pattern as WildcardPattern)) {
+            ok = CheckWildcardCatchPattern(typeManager, wildcardPattern) && ok
+        } else if (let Some(exceptPattern) <- (pattern as ExceptTypePattern)) {
+            ok = CheckExceptTypePattern(typeManager, exceptPattern) && ok
+        } else {
+            pattern.SetTy(TypeManager.GetInvalidTy())
+            ok = false
+        }
     }
     for (handler in te.handlers) {
         if (let Some(commandPattern) <- handler.commandPattern) {

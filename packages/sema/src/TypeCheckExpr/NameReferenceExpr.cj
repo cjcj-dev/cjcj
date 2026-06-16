@@ -51,6 +51,9 @@ func TcSetTyFromTarget(node: Node, target: Decl): Ty {
 
 func TcPatternCheck(typeManager: TypeManager, target: Ty, pattern: Pattern): Bool {
     pattern.SetTy(target)
+    if (let Some(_) <- (pattern as WildcardPattern)) {
+        return Ty.IsTyCorrect(target)
+    }
     if (let Some(varPattern) <- (pattern as VarPattern)) {
         if (let Some(varDecl) <- varPattern.varDecl) {
             varDecl.SetTy(target)
