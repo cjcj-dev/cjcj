@@ -1,6 +1,7 @@
 package cangjie_compiler::macro_pkg
 
 import std.collection.*
+import std.sort.*
 
 private func hasNoMacros(mc: MacroCollector): Bool {
     return mc.macroDefFuncs.isEmpty() && mc.macCalls.isEmpty()
@@ -63,6 +64,24 @@ private func collectMacroEachFile(file: File, collector: MacroCollector): Unit {
         UpdateMacroInfo(curNode, collector)
         return !curNode.IsMacroCallNode()
     })
+}
+
+private func sortMacroCalls(calls: ArrayList<MacroCall>): Unit {
+    sort(calls, by: { left: MacroCall, right: MacroCall =>
+        let leftPos = left.GetBeginPos()
+        let rightPos = right.GetBeginPos()
+        if (leftPos.fileID < rightPos.fileID) {
+            Ordering.LT
+        } else if (leftPos.fileID > rightPos.fileID) {
+            Ordering.GT
+        } else if (leftPos < rightPos) {
+            Ordering.LT
+        } else if (rightPos < leftPos) {
+            Ordering.GT
+        } else {
+            Ordering.EQ
+        }
+    }, stable: true)
 }
 
 private func hasMacroCallInNode(node: Node, diag: DiagnosticEngine, skipIfAvailable!: Bool = false): Bool {
@@ -440,6 +459,7 @@ public class MacroExpansion {
             }
             collectMacroEachFile(file, macroCollector)
         }
+        sortMacroCalls(macroCollector.macCalls)
         for (pkg in ci.importManager.GetImportedPkgsForMacro()) {
             macroCollector.importedMacroPkgs.add(pkg)
         }
@@ -464,6 +484,7 @@ public class MacroExpansion {
             }
             idx++
         }
+        sortMacroCalls(collector.macCalls)
     }
 
     public func ReplaceMacroCallsInDecls(macroCalls: ArrayList<MacroCall>): Unit {

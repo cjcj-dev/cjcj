@@ -6,6 +6,7 @@ import cangjie_compiler::ast.ASTKindIndex as RealASTKindIndex
 import cangjie_compiler::ast.Attribute as RealAttribute
 import cangjie_compiler::ast.AttributeIndex as RealAttributeIndex
 import cangjie_compiler::ast.ExprKind as RealExprKind
+import cangjie_compiler::ast.Identifier as RealIdentifier
 import cangjie_compiler::ast.ScopeKind as RealScopeKind
 import cangjie_compiler::ast.TypeKind as RealTypeKind
 import cangjie_compiler::ast.TypeKindIndex as RealTypeKindIndex
@@ -25,6 +26,7 @@ public type Range = BasicRange
 public type ASTKind = RealASTKind
 public type Attribute = RealAttribute
 public type CompilerGlobalOptions = RealGlobalOptions
+public type Identifier = RealIdentifier
 public type ScopeKind = RealScopeKind
 public type ExprKind = RealExprKind
 public type TypeKind = RealTypeKind
@@ -80,30 +82,6 @@ extend DiagnosticEngine {
 
 public func TokenKindText(kind: TokenKind): String {
     return TokenKindLiteral(kind)
-}
-
-public class Identifier {
-    public var text: String = ""
-    public var pos: Position = INVALID_POSITION
-
-    public init() {}
-
-    public init(text: String, pos!: Position = INVALID_POSITION) {
-        this.text = text
-        this.pos = pos
-    }
-
-    public func Val(): String {
-        return text
-    }
-
-    public func GetRawText(): String {
-        return text
-    }
-
-    public func Begin(): Position {
-        return pos
-    }
 }
 
 public open class Node {
