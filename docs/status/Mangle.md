@@ -88,6 +88,9 @@ Implemented:
 - Aligned CHIR type and type-qualified-name fallthrough behavior with C++ `CJC_ASSERT` paths by rejecting
   invalid or unsupported type kinds, missing descriptor element/base payloads, malformed CPointer types,
   and AutoEnv descriptor misuse instead of emitting empty or partial names.
+- Aligned descriptor semantic-type and extend-entity failure behavior with C++ `CJC_ASSERT`/null-check paths
+  by rejecting unsupported user-defined type kinds, missing nominal declarations, malformed raw-array and
+  CPointer payloads, missing function-parameter semantic types, and incomplete extend context/index data.
 
 Known fidelity caveats:
 

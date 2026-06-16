@@ -97,20 +97,6 @@ private func findDeclIndex(values: ArrayList<MangleDecl>, target: MangleDecl): O
     return None
 }
 
-private func declIdentifierFromType(ty: MangleType): String {
-    if (let Some(decl) <- ty.decl) {
-        return decl.identifier
-    }
-    return ty.name
-}
-
-private func declPackageFromType(ty: MangleType): String {
-    if (let Some(decl) <- ty.decl) {
-        return decl.fullPackageName
-    }
-    return ""
-}
-
 private func extendedTypeKey(extendDecl: MangleDecl): String {
     if (let Some(typeNode) <- extendDecl.extendedType) {
         if (let Some(ty) <- typeNode.ty) {
@@ -119,6 +105,10 @@ private func extendedTypeKey(extendDecl: MangleDecl): String {
         return typeNode.name
     }
     return ""
+}
+
+private func unsupportedMangleType(kind: TypeKind, context: String): String {
+    throw IllegalArgumentException(context + ": " + TypeKindName(kind))
 }
 
 private func isMangledToExportForTestBefore(decl: MangleDecl, prefix: ArrayList<MangleDecl>): Bool {
@@ -844,7 +834,7 @@ public open class BaseMangler {
             case TypeKind.TYPE_INTERFACE => MANGLE_TYPE_CLASS_PREFIX
             case TypeKind.TYPE_CLASS => MANGLE_TYPE_CLASS_PREFIX
             case TypeKind.TYPE_STRUCT => MANGLE_TYPE_STRUCT_PREFIX
-            case _ => ""
+            case _ => unsupportedMangleType(ty.kind, "Unexpected user-defined type")
         }
     }
 
@@ -894,37 +884,36 @@ public open class BaseMangler {
         if (ty.kind == TypeKind.TYPE_CSTRING) {
             return MangleCStringType()
         }
-        return ""
+        return unsupportedMangleType(ty.kind, "Unexpected semantic type to be mangled")
     }
 
     public func MangleUserDefinedType(ty: MangleType, genericsTypeStack: ArrayList<String>, declare: Bool,
         isCollectGTy!: Bool = true): String {
-        if (let Some(decl) <- ty.decl) {
-            if (IsAutoBoxedBaseDecl(decl)) {
-                return decl.mangledName
-            }
+        let decl = if (let Some(value) <- ty.decl) {
+            value
+        } else {
+            return unsupportedMangleType(ty.kind, "User-defined type has no declaration")
+        }
+        if (IsAutoBoxedBaseDecl(decl)) {
+            return decl.mangledName
         }
         var mangledName = GetPrefixOfType(ty) + MANGLE_NESTED_PREFIX
-        let genericPkgName = if (let Some(decl) <- ty.decl) { ManglePackageNameForGeneric(decl) } else { "" }
+        let genericPkgName = ManglePackageNameForGeneric(decl)
         if (!genericPkgName.isEmpty()) {
             mangledName += genericPkgName
-        } else if (let Some(decl) <- ty.decl) {
+        } else {
             mangledName += MangleFullPackageName(decl)
-        } else {
-            mangledName += MangleFullPackageName(declPackageFromType(ty))
         }
-        if (let Some(decl) <- ty.decl) {
-            if (decl.TestAttr(Attribute.PRIVATE) && decl.linkage == Linkage.INTERNAL) {
-                if (let Some(file) <- decl.curFile) {
-                    mangledName += MANGLE_FILE_ID_PREFIX + fileIdFor(file)
-                }
+        if (decl.TestAttr(Attribute.PRIVATE) && decl.linkage == Linkage.INTERNAL) {
+            if (let Some(file) <- decl.curFile) {
+                mangledName += MANGLE_FILE_ID_PREFIX + fileIdFor(file)
+            } else {
+                throw IllegalArgumentException("Private internal type declaration has no current file.")
             }
-            mangledName += MangleName(decl.identifier)
-            if (let Some(_) <- decl.GetGeneric()) {
-                mangledName += MANGLE_GENERIC_PREFIX
-            }
-        } else {
-            mangledName += MangleName(declIdentifierFromType(ty))
+        }
+        mangledName += MangleName(decl.identifier)
+        if (let Some(_) <- decl.GetGeneric()) {
+            mangledName += MANGLE_GENERIC_PREFIX
         }
         for (arg in ty.typeArgs) {
             mangledName += MangleSemaType(arg, genericsTypeStack, declare: declare, isCollectGTy: isCollectGTy)
@@ -985,7 +974,7 @@ public open class BaseMangler {
     public func MangleRawArrayType(ty: MangleType, genericsTypeStack: ArrayList<String>, declare: Bool,
         isCollectGTy!: Bool = true): String {
         if (ty.typeArgs.isEmpty()) {
-            return ""
+            return unsupportedMangleType(ty.kind, "RawArray type has no element type")
         }
         return MANGLE_TYPE_ARRAY_PREFIX + DecimalToManglingNumber("${ty.dims}") +
             MangleSemaType(ty.typeArgs[0], genericsTypeStack, declare: declare, isCollectGTy: isCollectGTy)
@@ -1041,6 +1030,8 @@ public open class BaseMangler {
                     if (ty.kind != TypeKind.TYPE_INITIAL) {
                         mangled += MangleSemaType(ty, genericsTypeStack, declare: declare, isCollectGTy: isCollectGTy)
                     }
+                } else {
+                    throw IllegalArgumentException("Function parameter has no semantic type: " + param.identifier)
                 }
             }
             return mangled
@@ -1051,7 +1042,7 @@ public open class BaseMangler {
     public func MangleCPointerType(ty: MangleType, genericsTypeStack: ArrayList<String>, declare: Bool,
         isCollectGTy!: Bool = true): String {
         if (ty.typeArgs.isEmpty()) {
-            return ""
+            return unsupportedMangleType(ty.kind, "CPointer type has no element type")
         }
         return MANGLE_POINTER_PREFIX + MangleSemaType(ty.typeArgs[0], genericsTypeStack, declare: declare,
             isCollectGTy: isCollectGTy)
@@ -1145,20 +1136,35 @@ public open class BaseMangler {
     }
 
     public func MangleExtendEntity(extendDecl: MangleDecl, genericsTypeStack: ArrayList<String>, declare: Bool): String {
-        var mangled = ""
-        if (let Some(extendedType) <- extendDecl.extendedType) {
-            if (let Some(ty) <- extendedType.ty) {
-                mangled += MANGLE_EXTEND_PREFIX + MangleSemaType(ty, genericsTypeStack, declare: declare)
-            }
+        let extNode = if (let Some(value) <- extendDecl.extendedType) {
+            value
+        } else {
+            throw IllegalArgumentException("Extend declaration has no extended type.")
         }
-        if (let Some(file) <- extendDecl.curFile) {
-            mangled += MANGLE_FILE_ID_PREFIX + fileIdFor(file)
-            if (let Some(ctx) <- manglerCtxTable.get(ManglerContext.ReduceUnitTestPackageName(extendDecl.fullPackageName))) {
-                if (let Some(index) <- ctx.GetIndexOfExtend(file, extendDecl)) {
-                    mangled += MANGLE_COUNT_PREFIX + DecimalToManglingNumber("${index}")
-                }
-            }
+        let extTy = if (let Some(value) <- extNode.ty) {
+            value
+        } else {
+            throw IllegalArgumentException("Extend declaration extended type has no semantic type.")
         }
+        let targetFile = if (let Some(value) <- extendDecl.curFile) {
+            value
+        } else {
+            throw IllegalArgumentException("Extend declaration has no current file.")
+        }
+        let ctxValue = if (let Some(value) <- manglerCtxTable.get(
+            ManglerContext.ReduceUnitTestPackageName(extendDecl.fullPackageName))) {
+            value
+        } else {
+            throw IllegalArgumentException("Mangler context not prepared for package: " + extendDecl.fullPackageName)
+        }
+        let extendIndex = if (let Some(value) <- ctxValue.GetIndexOfExtend(targetFile, extendDecl)) {
+            value
+        } else {
+            throw IllegalArgumentException("Extend declaration not registered in mangler context.")
+        }
+        var mangled = MANGLE_EXTEND_PREFIX + MangleSemaType(extTy, genericsTypeStack, declare: declare)
+        mangled += MANGLE_FILE_ID_PREFIX + fileIdFor(targetFile)
+        mangled += MANGLE_COUNT_PREFIX + DecimalToManglingNumber("${extendIndex}")
         return mangled
     }
 
