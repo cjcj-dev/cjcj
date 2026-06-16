@@ -1,6 +1,6 @@
 package cangjie_compiler::lex
 
-public let NUM_TOKENS: UInt8 = 165u8
+public let NUM_TOKENS: UInt8 = 200u8
 public let INVALID_PRECEDENCE: UInt8 = 0u8
 
 public enum TokenKind {
@@ -404,7 +404,9 @@ public let TOKEN_TO_OPERATOR_PRECEDENCE: Array<UInt8> = [
     0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8,
     0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8,
     0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8,
-    0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8
+    0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8,
+    0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8,
+    0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8
 ]
 
 public func Len(tokenKind: TokenKind): Int64 {
