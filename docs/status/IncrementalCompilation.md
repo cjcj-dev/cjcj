@@ -63,6 +63,9 @@ Implemented:
   split.
 - Matched the C++ incremental-analysis entry guard that rolls back when the serialized `.cjo` sidecar is absent,
   even if cached AST data is otherwise available.
+- Added adapter-backed source import records and wired `PollutionMapGen::CollectAlias` parity: package aliases and
+  single/aliased declaration imports now populate the same alias maps used by unqualified and package-qualified
+  pollution propagation.
 
 Known gaps:
 

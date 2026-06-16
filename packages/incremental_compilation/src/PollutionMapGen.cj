@@ -168,7 +168,39 @@ public class PollutionMapGen {
     }
 
     private func CollectAlias(importManager: IncrImportManager): Unit {
-        let _ = importManager
+        for (importInfo in importManager.GetSourceImports()) {
+            if (!importInfo.isImportAlias && !importInfo.isImportSingle) {
+                continue
+            }
+            let importedPackageName = importInfo.importedPackageName
+            let accessibleName = importInfo.AccessibleName()
+            if (accessibleName.isEmpty()) {
+                continue
+            }
+            if (let Some(_) <- importManager.GetPackageDecl(importedPackageName)) {
+                addPackageAlias(importedPackageName, accessibleName)
+            } else {
+                let declAliasName = importInfo.DeclAliasName()
+                if (!declAliasName.isEmpty()) {
+                    addDeclAlias(importInfo.prefixPath, importInfo.identifier, declAliasName)
+                }
+            }
+        }
+    }
+
+    private func addPackageAlias(fullPackageName: String, aliasName: String): Unit {
+        if (!resp.packageAliasMap.contains(fullPackageName)) {
+            resp.packageAliasMap[fullPackageName] = HashSet<String>()
+        }
+        resp.packageAliasMap[fullPackageName].add(aliasName)
+    }
+
+    private func addDeclAlias(fullPackageName: String, identifier: String, aliasName: String): Unit {
+        let key = DeclAliasKey(fullPackageName, identifier)
+        if (!resp.declAliasMap.contains(key)) {
+            resp.declAliasMap[key] = HashSet<String>()
+        }
+        resp.declAliasMap[key].add(aliasName)
     }
 
     private func addUnqualified(container: UnqualifiedName2Usages, usedName: String, scope: IncrDecl,

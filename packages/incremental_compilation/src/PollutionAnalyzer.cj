@@ -138,6 +138,10 @@ public type UnqualifiedName2Usages = HashMap<String, HashMap<IncrDecl, HashSet<I
 public type QualifiedName2Usages = HashMap<QualifiedUsage, HashSet<IncrDecl>>
 public type PackageQualifiedUsages = HashMap<String, HashMap<String, HashSet<IncrDecl>>>
 
+public func DeclAliasKey(fullPackageName: String, identifier: String): String {
+    return fullPackageName + "::" + identifier
+}
+
 public class ChangePollutedMap {
     public let unqBody: UnqualifiedName2Usages = UnqualifiedName2Usages()
     public let unqApi: UnqualifiedName2Usages = UnqualifiedName2Usages()
@@ -195,7 +199,7 @@ public class ChangePollutedMap {
     }
 
     public func GetAccessibleDeclName(decl: IncrDecl): HashSet<String> {
-        let key = decl.fullPackageName + "::" + decl.identifier
+        let key = DeclAliasKey(decl.fullPackageName, decl.identifier)
         if (let Some(values) <- declAliasMap.get(key)) {
             return values
         }

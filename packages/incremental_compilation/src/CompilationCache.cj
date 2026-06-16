@@ -501,6 +501,7 @@ public class IncrFile {
     public var filePath: String = ""
     public let decls: ArrayList<IncrDecl> = ArrayList<IncrDecl>()
     public let exportedInternalDecls: ArrayList<IncrDecl> = ArrayList<IncrDecl>()
+    public let imports: ArrayList<IncrImportInfo> = ArrayList<IncrImportInfo>()
 
     public init() {}
 
@@ -512,6 +513,54 @@ public class IncrFile {
     public func AddDecl(decl: IncrDecl): Unit {
         decl.filePath = filePath
         decls.add(decl)
+    }
+
+    public func AddImport(importInfo: IncrImportInfo): Unit {
+        imports.add(importInfo)
+    }
+}
+
+public class IncrImportInfo {
+    public var prefixPath: String = ""
+    public var importedPackageName: String = ""
+    public var identifier: String = ""
+    public var aliasName: String = ""
+    public var isImportAlias: Bool = false
+    public var isImportSingle: Bool = false
+
+    public init() {}
+
+    public init(prefixPath: String, importedPackageName: String, identifier: String, aliasName: String,
+        isImportAlias: Bool, isImportSingle: Bool) {
+        this.prefixPath = prefixPath
+        this.importedPackageName = importedPackageName
+        this.identifier = identifier
+        this.aliasName = aliasName
+        this.isImportAlias = isImportAlias
+        this.isImportSingle = isImportSingle
+    }
+
+    public static func Alias(prefixPath: String, importedPackageName: String, aliasName: String): IncrImportInfo {
+        return IncrImportInfo(prefixPath, importedPackageName, "", aliasName, true, false)
+    }
+
+    public static func Single(prefixPath: String, importedPackageName: String, identifier: String,
+        aliasName!: String = ""): IncrImportInfo {
+        return IncrImportInfo(prefixPath, importedPackageName, identifier, aliasName, false, true)
+    }
+
+    public func AccessibleName(): String {
+        if (isImportAlias) {
+            return aliasName
+        }
+        return identifier
+    }
+
+    public func DeclAliasName(): String {
+        if (!aliasName.isEmpty()) {
+            return aliasName
+        }
+        return identifier
     }
 }
 
@@ -551,6 +600,7 @@ public class IncrPackage {
 
 public class IncrImportManager {
     public let importedPackages: ArrayList<IncrPackage> = ArrayList<IncrPackage>()
+    private let sourceImports: ArrayList<IncrImportInfo> = ArrayList<IncrImportInfo>()
     private let packageDecls: HashMap<String, IncrDecl> = HashMap<String, IncrDecl>()
 
     public init() {}
@@ -561,6 +611,22 @@ public class IncrImportManager {
 
     public func GetAllImportedPackages(): ArrayList<IncrPackage> {
         return importedPackages
+    }
+
+    public func AddSourceImport(importInfo: IncrImportInfo): Unit {
+        sourceImports.add(importInfo)
+    }
+
+    public func RegisterSourcePackageImports(pkg: IncrPackage): Unit {
+        for (file in pkg.files) {
+            for (importInfo in file.imports) {
+                sourceImports.add(importInfo)
+            }
+        }
+    }
+
+    public func GetSourceImports(): ArrayList<IncrImportInfo> {
+        return sourceImports
     }
 
     public func RegisterPackageDecl(packageName: String, decl: IncrDecl): Unit {
