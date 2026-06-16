@@ -112,8 +112,36 @@ extend ParserImpl {
         ret.begin = token.Begin()
         ret.leftAnglePos = Expect(TokenKind.LT, "expected '<' after VArray").Begin()
         ret.typeArgument = ParseType()
-        if (Skip(TokenKind.COMMA)) {
+        if (!Skip(TokenKind.COMMA)) {
+            diag.DiagnoseRefactor(
+                DiagKindRefactor.EXPECTED_TOKEN,
+                Peek().Begin(),
+                "expected ',' and '$' size argument in VArray type")
+            ret.isBroken = true
+        } else if (!Skip(TokenKind.DOLLAR)) {
+            diag.DiagnoseRefactor(
+                DiagKindRefactor.EXPECTED_TOKEN,
+                Peek().Begin(),
+                "expected '$' before VArray size literal")
+            ret.isBroken = true
             ret.constantType = ParseType()
+        } else {
+            let constType = ConstantType()
+            constType.dollarPos = lastToken.Begin()
+            constType.begin = constType.dollarPos
+            if (Seeing(TokenKind.INTEGER_LITERAL)) {
+                constType.constantExpr = ParseLitConst()
+                if (let Some(expr) <- constType.constantExpr) { constType.end = expr.end }
+            } else {
+                diag.DiagnoseRefactor(
+                    DiagKindRefactor.EXPECTED_TOKEN,
+                    Peek().Begin(),
+                    "expected integer literal after '$' in VArray type")
+                constType.constantExpr = ParseExpr()
+                constType.isBroken = true
+                if (let Some(expr) <- constType.constantExpr) { constType.end = expr.end }
+            }
+            ret.constantType = constType
         }
         ret.rightAnglePos = Expect(TokenKind.GT, "expected '>' after VArray type").Begin()
         ret.end = ret.rightAnglePos + 1

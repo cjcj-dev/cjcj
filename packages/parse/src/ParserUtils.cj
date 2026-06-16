@@ -12,6 +12,51 @@ extend ParserImpl {
             Seeing(TokenKind.INIT) || Seeing(TokenKind.THIS) || Seeing(TokenKind.SUPER)
     }
 
+    public func SeeingPrimaryIdentifier(): Bool {
+        if (curPrimaryDeclIdent.isEmpty() || !SeeingIdentifierLike()) {
+            return false
+        }
+        let distance = LevenshteinDistance(Peek().Value(), GetPrimaryDeclIdentRawValue())
+        if (distance > 1u64) {
+            return false
+        }
+        let ahead = lexer.LookAheadSkipNL(1)
+        if (ahead.isEmpty()) {
+            return false
+        }
+        let nextKind = ahead[0].kind
+        return nextKind == TokenKind.LT || nextKind == TokenKind.LPAREN ||
+            nextKind == TokenKind.LSQUARE || nextKind == TokenKind.LCURL
+    }
+
+    public func SeeingPrimaryConstructor(scopeKind: ScopeKind): Bool {
+        return (scopeKind == ScopeKind.CLASS_BODY || scopeKind == ScopeKind.STRUCT_BODY) &&
+            SeeingPrimaryIdentifier()
+    }
+
+    public func SeeingFinalizer(): Bool {
+        return Seeing([TokenKind.BITNOT, TokenKind.INIT], skipNewline: false)
+    }
+
+    public func IsConditionExprKind(ek: ExprKind): Bool {
+        return ek == ExprKind.IF_COND_EXPR || ek == ExprKind.WHILE_COND_EXPR ||
+            ek == ExprKind.EXPR_IN_IF_COND_TUPLE || ek == ExprKind.EXPR_IN_WHILE_COND_TUPLE
+    }
+
+    public func SeeingInvalidParamListInLambdaExpr(): Bool {
+        if (SeeingIdentifierLike() || Seeing(TokenKind.WILDCARD)) {
+            let ahead = lexer.LookAheadSkipNL(2)
+            if (ahead.isEmpty()) {
+                return true
+            }
+            let firstKind = ahead[0].kind
+            if (firstKind == TokenKind.COMMA || firstKind == TokenKind.COLON || firstKind == TokenKind.DOUBLE_ARROW) {
+                return false
+            }
+        }
+        return true
+    }
+
     public func SeeingPrimitiveTypeToken(kind: TokenKind): Bool {
         let idx = TokenKindIndex(kind)
         return idx >= TokenKindIndex(TokenKind.INT8) && idx <= TokenKindIndex(TokenKind.UNIT)

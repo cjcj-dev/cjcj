@@ -138,6 +138,26 @@ the real Option package types.
   the package probe, late package/import/features forms are diagnosed, top-level
   declarations get `Attribute.GLOBAL`, and `macro package` now diagnoses public
   non-macro declarations.
+- Deepened atom/declaration parity with C++ `ParseAtom.cpp` and
+  `ParseDecl.cpp`: bare `{...}` atoms now enter the lambda parser instead of
+  becoming block expressions, lambda parameter parsing uses C++-style lookahead
+  so tail closures with omitted `=>` keep their body tokens, `if`/`while`
+  conditions validate that `let pattern <- expr` subconditions are only joined
+  with `&&`/`||`, call arguments record `inout`, and negative numeric/rune-byte
+  literals are preserved in constant patterns.
+- Added local C++-shaped string interpolation scaffolding: the Parse lexer now
+  records `StringPart` slices for `${...}` holes, `LitConstExpr` can own a
+  `StrInterpolationExpr`, and each interpolation hole is reparsed as a block
+  via a nested parser using the hole source position.
+- Added class/struct primary-constructor and class finalizer parsing paths:
+  class-like body parsing now tracks the enclosing primary declaration name,
+  recognizes `C(...)`/near-match primary constructors only in class/struct
+  scope, builds `PrimaryCtorDecl` with constructor/primary/in-classlike or
+  in-struct attributes, and parses `~init` finalizers with parameter/return-type
+  diagnostics.
+- Tightened `VArray` type parsing toward the C++ grammar by requiring the
+  second type argument to use the `$` constant-size form (`VArray<T, $n>`) and
+  diagnosing missing comma, missing `$`, or non-integer size literals.
 
 ## Remaining Work
 

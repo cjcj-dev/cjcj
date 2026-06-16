@@ -50,6 +50,9 @@ public class ASTHasher {
         for (modifier in decl.modifiers) {
             acc = CombineHash(acc, UInt64(ModifierKindIndexForHash(modifier.kind)))
         }
+        for (attr in decl.GetAttrs()) {
+            acc = CombineHash(acc, UInt64(AttributeIndex(attr)))
+        }
         return acc
     }
 

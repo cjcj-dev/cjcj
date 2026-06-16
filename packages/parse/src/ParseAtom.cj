@@ -14,6 +14,9 @@ extend ParserImpl {
     }
 
     public func ParseAtom(ek: ExprKind): Expr {
+        if (IsConditionExprKind(ek) && Seeing(TokenKind.LPAREN)) {
+            return ParseLeftParenExprInKind(ek)
+        }
         if (SeeingLiteral()) { return ParseLitConst() }
         if (Seeing(TokenKind.LET)) { return ParseLetPattern(ek) }
         if (Seeing([TokenKind.UNSAFE, TokenKind.LCURL])) { return ParseUnsafeBlock() }
@@ -34,7 +37,7 @@ extend ParserImpl {
         }
         if (Seeing(TokenKind.LPAREN)) { return ParseLeftParenExpr() }
         if (Seeing(TokenKind.LSQUARE)) { return ParseArrayLitExpr() }
-        if (Seeing(TokenKind.LCURL)) { return ParseBlock(ScopeKind.FUNC_BODY) }
+        if (Seeing(TokenKind.LCURL)) { return ParseLambdaExpr() }
         if (Seeing(TokenKind.IF)) { return ParseIfExpr() }
         if (Seeing(TokenKind.MATCH)) { return ParseMatchExpr() }
         if (Seeing(TokenKind.TRY)) { return ParseTryExpr() }
@@ -84,7 +87,77 @@ extend ParserImpl {
             LitConstKind.STRING
         }
         Next()
+        if (kind == LitConstKind.STRING || kind == LitConstKind.JSTRING || kind == LitConstKind.MULTILINE_STRING) {
+            return ProcessStringInterpolation(token, kind)
+        }
         return LitConstExpr(kind, token)
+    }
+
+    public func ParseNegativeLiteral(): Expr {
+        let subToken = Expect(TokenKind.SUB, "expected '-'")
+        let literalToken = Peek()
+        if (literalToken.kind != TokenKind.INTEGER_LITERAL && literalToken.kind != TokenKind.FLOAT_LITERAL &&
+            literalToken.kind != TokenKind.RUNE_BYTE_LITERAL) {
+            diag.DiagnoseRefactor(DiagKindRefactor.EXPECTED_TOKEN, literalToken.Begin(), "expected numeric literal after '-'")
+            return InvalidExpr(subToken.Begin())
+        }
+        let kind = if (literalToken.kind == TokenKind.FLOAT_LITERAL) {
+            LitConstKind.FLOAT
+        } else if (literalToken.kind == TokenKind.RUNE_BYTE_LITERAL) {
+            LitConstKind.RUNE_BYTE
+        } else {
+            LitConstKind.INTEGER
+        }
+        var token = literalToken
+        token.SetValuePos("-" + literalToken.Value(), subToken.Begin(), literalToken.End())
+        Next()
+        return LitConstExpr(kind, token)
+    }
+
+    public func ProcessStringInterpolation(token: Token, kind: LitConstKind): Expr {
+        let parts = lexer.GetStrParts(token)
+        let lit = LitConstExpr(kind, token)
+        var hasInterpolation = false
+        for (part in parts) {
+            if (part.strKind == StringPartKind.EXPR) {
+                hasInterpolation = true
+                break
+            }
+        }
+        if (!hasInterpolation) {
+            return lit
+        }
+        let strExpr = StrInterpolationExpr()
+        strExpr.begin = token.Begin()
+        strExpr.end = token.End()
+        strExpr.rawString = token.Value()
+        for (part in parts) {
+            strExpr.strParts.add(part)
+            if (part.strKind == StringPartKind.STR) {
+                let partLit = LitConstExpr(kind, Token(token.kind, part.value, part.begin, part.end))
+                strExpr.strPartExprs.add(partLit)
+            } else {
+                strExpr.strPartExprs.add(ParseInterpolationExpr(part))
+            }
+        }
+        lit.siExpr = strExpr
+        return lit
+    }
+
+    public func ParseInterpolationExpr(part: StringPart): Expr {
+        let ret = InterpolationExpr()
+        ret.begin = part.begin
+        ret.end = part.end
+        ret.dollarPos = part.begin
+        ret.rawString = part.value
+        if (part.value.size >= 2) {
+            let nested = ParserImpl(part.value[1..], diag, sourceManager, part.begin + 1, enableAttachComment, parseDeclFile)
+            nested.SetCompileOptions(compileOptions)
+            ret.block = nested.ParseBlock(ScopeKind.FUNC_BODY)
+        } else {
+            ret.isBroken = true
+        }
+        return ret
     }
 
     public func ParseTypeConvExpr(): Expr {
@@ -164,11 +237,22 @@ extend ParserImpl {
     }
 
     public func ParseLeftParenExpr(): Expr {
+        return ParseLeftParenExprInKind(ExprKind.ALL)
+    }
+
+    public func ParseLeftParenExprInKind(ek: ExprKind): Expr {
         let left = Expect(TokenKind.LPAREN, "expected '('")
         if (Skip(TokenKind.RPAREN)) {
             return LitConstExpr(LitConstKind.UNIT, Token(TokenKind.UNIT_LITERAL, "()", left.Begin(), lastToken.End()))
         }
-        let first = ParseExpr(ExprKind.EXPR_IN_TUPLE)
+        let childKind = if (ek == ExprKind.IF_COND_EXPR || ek == ExprKind.EXPR_IN_IF_COND_TUPLE) {
+            ExprKind.EXPR_IN_IF_COND_TUPLE
+        } else if (ek == ExprKind.WHILE_COND_EXPR || ek == ExprKind.EXPR_IN_WHILE_COND_TUPLE) {
+            ExprKind.EXPR_IN_WHILE_COND_TUPLE
+        } else {
+            ExprKind.EXPR_IN_TUPLE
+        }
+        let first = ParseExpr(childKind)
         if (Skip(TokenKind.COMMA)) {
             let tuple = TupleLit()
             tuple.leftParenPos = left.Begin()
@@ -176,7 +260,7 @@ extend ParserImpl {
             tuple.children.add(first)
             tuple.commaPosVector.add(lastToken.Begin())
             while (!Seeing(TokenKind.END) && !Seeing(TokenKind.RPAREN)) {
-                tuple.children.add(ParseExpr(ExprKind.EXPR_IN_TUPLE))
+                tuple.children.add(ParseExpr(childKind))
                 if (Skip(TokenKind.COMMA)) {
                     tuple.commaPosVector.add(lastToken.Begin())
                 } else {

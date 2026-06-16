@@ -20,6 +20,7 @@ public class Lexer {
     private let bytes: Array<UInt8>
     private let tokens: ArrayList<Token> = ArrayList<Token>()
     private let comments: ArrayList<Token> = ArrayList<Token>()
+    private let stringPartsMap: HashMap<Int64, ArrayList<StringPart>> = HashMap<Int64, ArrayList<StringPart>>()
     private var cursor: Int64 = 0
     private var fileID: UInt64 = 0
     private var baseLine: Int64 = 1
@@ -121,9 +122,14 @@ public class Lexer {
     }
 
     public func GetStrParts(token: Token): ArrayList<StringPart> {
-        let parts = ArrayList<StringPart>()
-        parts.add(StringPart(StringPartKind.STR, token.Value(), token.Begin(), token.End()))
-        return parts
+        if (let Some(parts) <- stringPartsMap.get(token.hashCode())) {
+            let out = ArrayList<StringPart>()
+            for (part in parts) { out.add(part) }
+            return out
+        }
+        let out = ArrayList<StringPart>()
+        out.add(StringPart(StringPartKind.STR, token.Value(), token.Begin(), token.End()))
+        return out
     }
 
     private func Tokenize(diag: DiagnosticEngine): Unit {
@@ -182,7 +188,9 @@ public class Lexer {
             if (ch == b'"') {
                 let scanned = ScanString(index, line, column, false)
                 let value = scanned.value
-                tokens.add(Token(scanned.kind, value, begin, scanned.end))
+                let token = Token(scanned.kind, value, begin, scanned.end)
+                tokens.add(token)
+                StoreStringParts(token, CollectStringParts(index, scanned.nextIndex, line, column, false))
                 index = scanned.nextIndex
                 line = scanned.end.line
                 column = scanned.end.column
@@ -327,6 +335,104 @@ public class Lexer {
         }
         let kind = if (multiline) { TokenKind.MULTILINE_STRING } else { TokenKind.STRING_LITERAL }
         return LexerScanResult(SliceString(start, end), end, Position(fileID, curLine, curColumn), kind)
+    }
+
+    private func StoreStringParts(token: Token, parts: ArrayList<StringPart>): Unit {
+        var hasInterpolation = false
+        for (part in parts) {
+            if (part.strKind == StringPartKind.EXPR) {
+                hasInterpolation = true
+                break
+            }
+        }
+        if (!hasInterpolation) {
+            return
+        }
+        let key = token.hashCode()
+        if (stringPartsMap.contains(key)) {
+            stringPartsMap.remove(key)
+        }
+        stringPartsMap.add(key, parts)
+    }
+
+    private func CollectStringParts(start: Int64, end: Int64, line: Int64, column: Int64, raw: Bool): ArrayList<StringPart> {
+        let parts = ArrayList<StringPart>()
+        let quoteWidth: Int64 = if (start + 2 < end && bytes[start + 1] == b'"' && bytes[start + 2] == b'"') { 3 } else { 1 }
+        let contentStart = start + quoteWidth
+        let contentEnd = end - quoteWidth
+        var partStart = contentStart
+        var index = contentStart
+        while (index < contentEnd) {
+            if (!raw && bytes[index] == b'\\' && index + 1 < contentEnd) {
+                index += 2
+                continue
+            }
+            if (bytes[index] == b'$' && index + 1 < contentEnd && bytes[index + 1] == b'{') {
+                let close = FindInterpolationEnd(index + 1, contentEnd, raw)
+                if (close >= 0) {
+                    if (partStart < index) {
+                        parts.add(MakeStringPart(StringPartKind.STR, partStart, index, start, line, column))
+                    }
+                    parts.add(MakeStringPart(StringPartKind.EXPR, index, close + 1, start, line, column))
+                    index = close + 1
+                    partStart = index
+                    continue
+                }
+            }
+            index++
+        }
+        if (partStart < contentEnd || !parts.isEmpty()) {
+            parts.add(MakeStringPart(StringPartKind.STR, partStart, contentEnd, start, line, column))
+        }
+        if (parts.isEmpty()) {
+            parts.add(MakeStringPart(StringPartKind.STR, start, end, start, line, column))
+        }
+        return parts
+    }
+
+    private func FindInterpolationEnd(openBrace: Int64, contentEnd: Int64, raw: Bool): Int64 {
+        var index = openBrace
+        var depth: Int64 = 0
+        while (index < contentEnd) {
+            if (!raw && bytes[index] == b'\\' && index + 1 < contentEnd) {
+                index += 2
+                continue
+            }
+            if (bytes[index] == b'{') {
+                depth++
+            } else if (bytes[index] == b'}') {
+                depth--
+                if (depth == 0) {
+                    return index
+                }
+            }
+            index++
+        }
+        return -1
+    }
+
+    private func MakeStringPart(kind: StringPartKind, start: Int64, end: Int64, tokenStart: Int64, line: Int64, column: Int64): StringPart {
+        return StringPart(
+            kind,
+            SliceString(start, end),
+            PositionFromIndex(tokenStart, start, line, column),
+            PositionFromIndex(tokenStart, end, line, column))
+    }
+
+    private func PositionFromIndex(start: Int64, target: Int64, line: Int64, column: Int64): Position {
+        var index = start
+        var curLine = line
+        var curColumn = column
+        while (index < target && index < bytes.size) {
+            if (bytes[index] == b'\n') {
+                curLine++
+                curColumn = 1
+            } else {
+                curColumn++
+            }
+            index++
+        }
+        return Position(fileID, curLine, curColumn)
     }
 
     private func ScanRune(start: Int64, line: Int64, column: Int64): LexerScanResult {
