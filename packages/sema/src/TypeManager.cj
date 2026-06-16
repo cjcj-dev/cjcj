@@ -46,6 +46,26 @@ public class TyVarScope {
         tyVars.add(tyVar)
     }
 
+    public func ContainsTyVar(tyVar: GenericsTy): Bool {
+        for (value in tyVars) {
+            if (SameTy(value, tyVar)) {
+                return true
+            }
+        }
+        return false
+    }
+
+    public func AddUnsolvedTyVars(out: ArrayList<GenericsTy>, unsolved: ArrayList<GenericsTy>): Unit {
+        for (tyVar in tyVars) {
+            for (candidate in unsolved) {
+                if (SameTy(tyVar, candidate)) {
+                    out.add(tyVar)
+                    break
+                }
+            }
+        }
+    }
+
     public func Close(): Unit {
         if (closed) {
             return
@@ -186,6 +206,16 @@ private class CheckedTyExtendRelation {
     }
 }
 
+private class TyVarScopeDepthEntry {
+    public var tyVar: GenericsTy
+    public var depth: Int64
+
+    public init(tyVar: GenericsTy, depth: Int64) {
+        this.tyVar = tyVar
+        this.depth = depth
+    }
+}
+
 public class TypeManager {
     public let constraints: Constraint = Constraint()
     public let builtinTyToExtendMap: ArrayList<TyExtendsEntry> = ArrayList<TyExtendsEntry>()
@@ -202,10 +232,13 @@ public class TypeManager {
     private let checkedTyExtendRelation: ArrayList<CheckedTyExtendRelation> = ArrayList<CheckedTyExtendRelation>()
     private let unsolvedTyVars: ArrayList<GenericsTy> = ArrayList<GenericsTy>()
     private let tyVarScopes: ArrayList<TyVarScope> = ArrayList<TyVarScope>()
+    private let tyVarScopeDepth: ArrayList<TyVarScopeDepthEntry> = ArrayList<TyVarScopeDepthEntry>()
     private let instCtxScopes: ArrayList<InstCtxScope> = ArrayList<InstCtxScope>()
     private var nextUniqId: UInt64 = 0u64
 
-    public init() {}
+    public init() {
+        tyVarScopes.add(TyVarScope())
+    }
 
     public static func GetPrimitiveTy(kind: TypeKind): PrimitiveTy {
         if (kind == TypeKind.TYPE_NOTHING) {
@@ -460,43 +493,111 @@ public class TypeManager {
         return out
     }
 
+    private func getSolvedU2I(maps: SubstPack): TypeSubst {
+        let out = TypeSubst()
+        for (entry in maps.u2i.entries) {
+            if (let Some(instTv) <- (entry.ty as GenericsTy)) {
+                if (let Some(_) <- maps.inst.Get(instTv)) {
+                    out.Put(entry.tyVar, entry.ty)
+                }
+            }
+        }
+        return out
+    }
+
     public func ApplySubstPack(declaredTy: Ty, maps: SubstPack, ignoreUnsolved!: Bool = false): Ty {
-        let _ = ignoreUnsolved
-        let afterU2I = GetInstantiatedTy(declaredTy, maps.u2i)
+        let u2i = if (ignoreUnsolved) { getSolvedU2I(maps) } else { maps.u2i }
+        let afterU2I = GetInstantiatedTy(declaredTy, u2i)
         return GetBestInstantiatedTy(afterU2I, maps.inst)
     }
 
     public func ApplySubstPackNonUniq(declaredTy: Ty, maps: SubstPack, ignoreUnsolved!: Bool = false): TySet {
-        let _ = ignoreUnsolved
-        return GetInstantiatedTys(GetInstantiatedTy(declaredTy, maps.u2i), maps.inst)
+        let u2i = if (ignoreUnsolved) { getSolvedU2I(maps) } else { maps.u2i }
+        return GetInstantiatedTys(GetInstantiatedTy(declaredTy, u2i), maps.inst)
     }
 
     public func InstOf(ty: Ty): Ty {
-        return ty
+        if (instCtxScopes.isEmpty()) {
+            return ty
+        }
+        let topIndex = instCtxScopes.size - 1
+        return ApplySubstPack(ty, instCtxScopes[topIndex].maps)
     }
 
     public func RecoverUnivTyVar(ty: Ty): Ty {
-        return ty
+        if (instCtxScopes.isEmpty()) {
+            return ty
+        }
+        let mapping = GetInstMapping()
+        let i2uMap = TypeSubst()
+        for (entry in mapping.u2i.entries) {
+            if (let Some(instTv) <- (entry.ty as GenericsTy)) {
+                i2uMap.Put(instTv, entry.tyVar)
+            }
+        }
+        return GetInstantiatedTy(ty, i2uMap)
     }
 
     public func GetInstMapping(): SubstPack {
-        return SubstPack()
+        if (instCtxScopes.isEmpty()) {
+            return SubstPack()
+        }
+        let topIndex = instCtxScopes.size - 1
+        return instCtxScopes[topIndex].maps.Clone()
+    }
+
+    private func ensureInstTyVar(maps: SubstPack, tv: GenericsTy): Option<GenericsTy> {
+        if (let Some(existing) <- maps.u2i.Get(tv)) {
+            if (let Some(existingGen) <- (existing as GenericsTy)) {
+                return existingGen
+            }
+        }
+        if (tv.isPlaceholder) {
+            return None
+        }
+        let instTv = AllocTyVar(srcId: tv.name)
+        maps.u2i.Put(tv, instTv)
+        return instTv
     }
 
     public func PackMapping(maps: SubstPack, m: MultiTypeSubst): Unit {
         for (entry in m.entries) {
-            maps.inst.PutAll(entry.tyVar, entry.tys)
+            if (entry.tyVar.isPlaceholder) {
+                let instTys = entry.tys.Clone()
+                let _ = instTys.Remove(entry.tyVar)
+                maps.inst.PutAll(entry.tyVar, instTys)
+            } else if (!entry.tys.IsEmpty()) {
+                if (let Some(instTv) <- ensureInstTyVar(maps, entry.tyVar)) {
+                    maps.inst.PutAll(instTv, entry.tys)
+                }
+            }
         }
     }
 
     public func PackMapping(maps: SubstPack, m: TypeSubst): Unit {
         for (entry in m.entries) {
-            maps.u2i.Put(entry.tyVar, entry.ty)
+            if (entry.tyVar.isPlaceholder) {
+                if (!SameTy(entry.tyVar, entry.ty)) {
+                    maps.inst.Put(entry.tyVar, entry.ty)
+                }
+            } else {
+                if (let Some(instTv) <- ensureInstTyVar(maps, entry.tyVar)) {
+                    maps.inst.Put(instTv, entry.ty)
+                }
+            }
         }
     }
 
     public func PackMapping(maps: SubstPack, tv: GenericsTy, instTy: Ty): Unit {
-        maps.inst.Put(tv, instTy)
+        if (tv.isPlaceholder) {
+            if (!SameTy(tv, instTy)) {
+                maps.inst.Put(tv, instTy)
+            }
+        } else {
+            if (let Some(instTv) <- ensureInstTyVar(maps, tv)) {
+                maps.inst.Put(instTv, instTy)
+            }
+        }
     }
 
     public func ZipSubstPack(mapping: SubstPack): MultiTypeSubst {
@@ -516,12 +617,7 @@ public class TypeManager {
     }
 
     public func MakeInstTyVar(maps: SubstPack, uTv: GenericsTy): Unit {
-        let decl = GenericParamDecl()
-        decl.identifier = SrcIdentifier("Ti${nextUniqId}")
-        nextUniqId++
-        let inst = GenericsTy(decl.identifier.Val(), decl)
-        inst.isPlaceholder = true
-        maps.u2i.Put(uTv, inst)
+        let _ = ensureInstTyVar(maps, uTv)
     }
 
     public func MakeInstTyVar(maps: SubstPack, d: Decl): Unit {
@@ -846,44 +942,134 @@ public class TypeManager {
         return out
     }
 
-    public func GenerateStructDeclGenericMapping(m: MultiTypeSubst, decl: InheritableDecl, targetTy: Ty): Unit {
-        generateDeclGenericMapping(m, decl, targetTy)
+    private func hasVisitedGenericMappingTy(visited: ArrayList<Ty>, ty: Ty): Bool {
+        for (value in visited) {
+            if (SameTy(value, ty)) {
+                return true
+            }
+        }
+        return false
     }
 
-    public func GenerateGenericMapping(m: MultiTypeSubst, baseType: Ty): Unit {
-        if (let Some(classTy) <- (baseType as ClassTy)) {
-            if (let Some(decl) <- classTy.declPtr) {
-                generateDeclGenericMapping(m, decl, baseType)
-            }
-        } else if (let Some(interfaceTy) <- (baseType as InterfaceTy)) {
-            if (let Some(decl) <- interfaceTy.declPtr) {
-                generateDeclGenericMapping(m, decl, baseType)
-            }
-        } else if (let Some(structTy) <- (baseType as StructTy)) {
-            if (let Some(decl) <- structTy.declPtr) {
-                generateDeclGenericMapping(m, decl, baseType)
-            }
-        } else if (let Some(enumTy) <- (baseType as EnumTy)) {
-            if (let Some(decl) <- enumTy.declPtr) {
-                generateDeclGenericMapping(m, decl, baseType)
+    private func isInheritableTypeForGenericMapping(ty: Ty): Bool {
+        if (!Ty.IsTyCorrect(ty) || !ty.IsClassLike()) {
+            return false
+        }
+        if (let Some(decl) <- Ty.GetInheritableDeclPtrOfTy(Some(ty))) {
+            return !decl.TestAttr(Attribute.IN_REFERENCE_CYCLE)
+        }
+        return false
+    }
+
+    private func generateGenericMappingVisit(m: MultiTypeSubst, baseType: Ty, visited: ArrayList<Ty>): Unit {
+        if (!Ty.IsTyCorrect(baseType) || hasVisitedGenericMappingTy(visited, baseType)) {
+            return
+        }
+        visited.add(baseType)
+        generateExtendGenericMappingVisit(m, baseType, visited)
+        if (let Some(decl) <- Ty.GetInheritableDeclPtrOfTy(Some(baseType))) {
+            generateStructDeclGenericMappingVisit(m, decl, baseType, visited)
+        }
+    }
+
+    private func generateExtendGenericMappingVisit(m: MultiTypeSubst, baseType: Ty, visited: ArrayList<Ty>): Unit {
+        if (!Ty.IsTyCorrect(baseType)) {
+            return
+        }
+        for (extendDecl in GetAllExtendsByTy(baseType)) {
+            generateStructDeclGenericMappingVisit(m, extendDecl, baseType, visited)
+        }
+    }
+
+    private func generateStructDeclGenericMappingVisit(m: MultiTypeSubst, decl: InheritableDecl, targetTy: Ty,
+        visited: ArrayList<Ty>): Unit {
+        if (!Ty.IsTyCorrect(targetTy)) {
+            return
+        }
+        generateDeclGenericMapping(m, decl, targetTy)
+        for (inheritedType in decl.inheritedTypes) {
+            if (let Some(inheritedTy) <- inheritedType.GetTy()) {
+                if (isInheritableTypeForGenericMapping(inheritedTy)) {
+                    generateGenericMappingVisit(m, inheritedTy, visited)
+                }
             }
         }
     }
 
+    private func generateGenericMappingVisit(m: SubstPack, baseType: Ty, visited: ArrayList<Ty>, contextual: Bool): Unit {
+        if (!Ty.IsTyCorrect(baseType) || hasVisitedGenericMappingTy(visited, baseType)) {
+            return
+        }
+        visited.add(baseType)
+        generateExtendGenericMappingVisit(m, baseType, visited, contextual)
+        if (let Some(decl) <- Ty.GetInheritableDeclPtrOfTy(Some(baseType))) {
+            generateStructDeclGenericMappingVisit(m, decl, baseType, visited, contextual)
+        }
+    }
+
+    private func generateExtendGenericMappingVisit(m: SubstPack, baseType: Ty, visited: ArrayList<Ty>,
+        contextual: Bool): Unit {
+        if (!Ty.IsTyCorrect(baseType)) {
+            return
+        }
+        for (extendDecl in GetAllExtendsByTy(baseType)) {
+            generateStructDeclGenericMappingVisit(m, extendDecl, baseType, visited, contextual)
+        }
+    }
+
+    private func generateStructDeclGenericMappingVisit(m: SubstPack, decl: InheritableDecl, targetTy: Ty,
+        visited: ArrayList<Ty>, contextual: Bool): Unit {
+        if (!Ty.IsTyCorrect(targetTy)) {
+            return
+        }
+        if (contextual) {
+            GenerateTypeMapping(this, m, decl, targetTy.typeArgs)
+        } else {
+            let typeArgs = ArrayList<Ty>()
+            for (argTy in targetTy.typeArgs) {
+                typeArgs.add(GetInstantiatedTy(argTy, m.u2i))
+            }
+            GenerateTypeMapping(this, m, decl, typeArgs)
+        }
+        for (inheritedType in decl.inheritedTypes) {
+            if (let Some(inheritedTy) <- inheritedType.GetTy()) {
+                if (isInheritableTypeForGenericMapping(inheritedTy)) {
+                    generateGenericMappingVisit(m, inheritedTy, visited, false)
+                }
+            }
+        }
+    }
+
+    public func GenerateStructDeclGenericMapping(m: MultiTypeSubst, decl: InheritableDecl, targetTy: Ty): Unit {
+        let visited = ArrayList<Ty>()
+        generateStructDeclGenericMappingVisit(m, decl, targetTy, visited)
+    }
+
+    public func GenerateGenericMapping(m: MultiTypeSubst, baseType: Ty): Unit {
+        let visited = ArrayList<Ty>()
+        generateGenericMappingVisit(m, baseType, visited)
+    }
+
     public func GenerateGenericMapping(m: SubstPack, baseType: Ty): Unit {
-        let multi = MultiTypeSubst()
-        GenerateGenericMapping(multi, baseType)
-        PackMapping(m, multi)
+        let visited = ArrayList<Ty>()
+        generateGenericMappingVisit(m, baseType, visited, true)
     }
 
     public func GenerateGenericMappingFromGeneric(parentDecl: Decl, childDecl: Decl): TypeSubst {
-        let _ = childDecl
         let out = TypeSubst()
-        if (let Some(generic) <- parentDecl.GetGeneric()) {
-            for (param in generic.typeParameters) {
-                if (let Some(paramTy) <- param.GetTy()) {
-                    if (let Some(genTy) <- (paramTy as GenericsTy)) {
-                        out.Put(genTy, genTy)
+        if (let Some(parentGeneric) <- parentDecl.GetGeneric()) {
+            if (let Some(childGeneric) <- childDecl.GetGeneric()) {
+                if (parentGeneric.typeParameters.size == childGeneric.typeParameters.size) {
+                    var idx: Int64 = 0
+                    while (idx < parentGeneric.typeParameters.size) {
+                        if (let Some(parentParamTy) <- parentGeneric.typeParameters[idx].GetTy()) {
+                            if (let Some(parentGenTy) <- (parentParamTy as GenericsTy)) {
+                                if (let Some(childParamTy) <- childGeneric.typeParameters[idx].GetTy()) {
+                                    out.Put(parentGenTy, childParamTy)
+                                }
+                            }
+                        }
+                        idx++
                     }
                 }
             }
@@ -892,8 +1078,22 @@ public class TypeManager {
     }
 
     public func GenerateStructDeclTypeMapping(decl: Decl): MultiTypeSubst {
-        let _ = decl
-        return MultiTypeSubst()
+        let out = MultiTypeSubst()
+        if (!decl.IsNominalDecl()) {
+            return out
+        }
+        var parentTy = decl.GetTy()
+        if (let Some(extendDecl) <- (decl as ExtendDecl)) {
+            if (let Some(extendedType) <- extendDecl.extendedType) {
+                parentTy = extendedType.GetTy()
+            } else {
+                return out
+            }
+        }
+        if (let Some(value) <- parentTy) {
+            GenerateGenericMapping(out, value)
+        }
+        return out
     }
 
     public func ReplaceIdealTy(ty: Ty): Ty {
@@ -932,10 +1132,51 @@ public class TypeManager {
     }
 
     public func GetTyForExtendMap(ty: Ty): Ty {
+        if (ty.IsArray()) {
+            return GetArrayTy()
+        }
+        if (ty.IsPointer()) {
+            return GetPointerTy(TypeManager.GetInvalidTy())
+        }
+        if (let Some(genericTy) <- Ty.GetGenericTyOfInsTy(ty)) {
+            return genericTy
+        }
         return ty
     }
 
+    private func addBuiltinExtendsForTy(out: ArrayList<ExtendDecl>, ty: Ty): Unit {
+        for (entry in builtinTyToExtendMap) {
+            if (SameTy(entry.ty, ty)) {
+                addUniqueExtends(out, entry.extends)
+            }
+        }
+    }
+
+    private func collectIdealBuiltinExtends(ty: Ty): ArrayList<ExtendDecl> {
+        let out = ArrayList<ExtendDecl>()
+        if (ty.kind == TypeKind.TYPE_IDEAL_INT) {
+            addBuiltinExtendsForTy(out, GetPrimitiveTy(TypeKind.TYPE_INT64))
+            addBuiltinExtendsForTy(out, GetPrimitiveTy(TypeKind.TYPE_UINT64))
+            addBuiltinExtendsForTy(out, GetPrimitiveTy(TypeKind.TYPE_INT32))
+            addBuiltinExtendsForTy(out, GetPrimitiveTy(TypeKind.TYPE_UINT32))
+            addBuiltinExtendsForTy(out, GetPrimitiveTy(TypeKind.TYPE_INT16))
+            addBuiltinExtendsForTy(out, GetPrimitiveTy(TypeKind.TYPE_UINT16))
+            addBuiltinExtendsForTy(out, GetPrimitiveTy(TypeKind.TYPE_INT8))
+            addBuiltinExtendsForTy(out, GetPrimitiveTy(TypeKind.TYPE_UINT8))
+            addBuiltinExtendsForTy(out, GetPrimitiveTy(TypeKind.TYPE_INT_NATIVE))
+            addBuiltinExtendsForTy(out, GetPrimitiveTy(TypeKind.TYPE_UINT_NATIVE))
+        } else if (ty.kind == TypeKind.TYPE_IDEAL_FLOAT) {
+            addBuiltinExtendsForTy(out, GetPrimitiveTy(TypeKind.TYPE_FLOAT64))
+            addBuiltinExtendsForTy(out, GetPrimitiveTy(TypeKind.TYPE_FLOAT32))
+            addBuiltinExtendsForTy(out, GetPrimitiveTy(TypeKind.TYPE_FLOAT16))
+        }
+        return out
+    }
+
     public func GetBuiltinTyExtends(ty: Ty): ArrayList<ExtendDecl> {
+        if (ty.IsIdeal()) {
+            return collectIdealBuiltinExtends(ty)
+        }
         for (entry in builtinTyToExtendMap) {
             if (SameTy(entry.ty, ty)) {
                 return entry.extends
@@ -974,7 +1215,10 @@ public class TypeManager {
     }
 
     public func GetAllExtendsByTy(ty: Ty): ArrayList<ExtendDecl> {
-        return GetBuiltinTyExtends(ty)
+        if (let Some(decl) <- declOfInheritableTy(ty)) {
+            return GetDeclExtends(decl)
+        }
+        return GetBuiltinTyExtends(GetTyForExtendMap(ty))
     }
 
     public func GetAllExtendedDecls(): ArrayList<InheritableDecl> {
@@ -1263,6 +1507,62 @@ public class TypeManager {
         return None
     }
 
+    private func putTyVarScopeDepth(tyVar: GenericsTy, depth: Int64): Unit {
+        for (entry in tyVarScopeDepth) {
+            if (SameTy(entry.tyVar, tyVar)) {
+                entry.depth = depth
+                return
+            }
+        }
+        tyVarScopeDepth.add(TyVarScopeDepthEntry(tyVar, depth))
+    }
+
+    private func removeTyVarScopeDepth(tyVar: GenericsTy): Unit {
+        var idx: Int64 = 0
+        while (idx < tyVarScopeDepth.size) {
+            if (SameTy(tyVarScopeDepth[idx].tyVar, tyVar)) {
+                tyVarScopeDepth.remove(at: idx)
+                return
+            }
+            idx++
+        }
+    }
+
+    private func findTyVarScopeDepth(tyVar: GenericsTy): Option<Int64> {
+        for (entry in tyVarScopeDepth) {
+            if (SameTy(entry.tyVar, tyVar)) {
+                return entry.depth
+            }
+        }
+        var idx: Int64 = 0
+        while (idx < tyVarScopes.size) {
+            if (tyVarScopes[idx].ContainsTyVar(tyVar)) {
+                putTyVarScopeDepth(tyVar, idx)
+                return idx
+            }
+            idx++
+        }
+        return None
+    }
+
+    private func currentTyVarScopeDepth(): Int64 {
+        if (tyVarScopes.isEmpty()) {
+            tyVarScopes.add(TyVarScope())
+        }
+        return tyVarScopes.size - 1
+    }
+
+    private func addTyVarToScope(tyVar: GenericsTy, depth: Int64): Unit {
+        if (depth >= 0 && depth < tyVarScopes.size) {
+            tyVarScopes[depth].AddTyVar(tyVar)
+            putTyVarScopeDepth(tyVar, depth)
+            return
+        }
+        let fallbackDepth = currentTyVarScopeDepth()
+        tyVarScopes[fallbackDepth].AddTyVar(tyVar)
+        putTyVarScopeDepth(tyVar, fallbackDepth)
+    }
+
     public func AllocTyVar(srcId!: String = "Ti", needSolving!: Bool = false,
         derivedFrom!: Option<GenericsTy> = None): GenericsTy {
         let decl = GenericParamDecl()
@@ -1276,11 +1576,17 @@ public class TypeManager {
             }
             tv.lowerBound = parent.lowerBound
         }
+        if (let Some(parent) <- derivedFrom) {
+            if (let Some(parentDepth) <- findTyVarScopeDepth(parent)) {
+                addTyVarToScope(tv, parentDepth)
+            } else {
+                addTyVarToScope(tv, currentTyVarScopeDepth())
+            }
+        } else {
+            addTyVarToScope(tv, currentTyVarScopeDepth())
+        }
         if (needSolving) {
             MarkAsUnsolvedTyVar(tv)
-        }
-        if (!tyVarScopes.isEmpty()) {
-            tyVarScopes[tyVarScopes.size - 1].AddTyVar(tv)
         }
         return tv
     }
@@ -1310,6 +1616,8 @@ public class TypeManager {
     }
 
     public func ReleaseTyVar(tv: GenericsTy): Unit {
+        tv.upperBounds.clear()
+        tv.lowerBound = None
         var idx: Int64 = 0
         while (idx < unsolvedTyVars.size) {
             if (SameTy(unsolvedTyVars[idx], tv)) {
@@ -1318,15 +1626,19 @@ public class TypeManager {
                 idx++
             }
         }
+        removeTyVarScopeDepth(tv)
     }
 
     public func ScopeDepthOfTyVar(tyVar: GenericsTy): Int64 {
-        let _ = tyVar
+        if (let Some(depth) <- findTyVarScopeDepth(tyVar)) {
+            return depth
+        }
         return 0
     }
 
     public func TyVarHasNoSum(tv: GenericsTy): Bool {
-        return constraints.GetOrCreate(tv).sum.IsEmpty()
+        let sum = constraints.GetOrCreate(tv).sum
+        return sum.Size() == 1 && sum.values[0].IsAny()
     }
 
     public func GetUnsolvedTyVars(): ArrayList<GenericsTy> {
@@ -1337,10 +1649,16 @@ public class TypeManager {
         if (!containsGeneric(unsolvedTyVars, tv)) {
             unsolvedTyVars.add(tv)
         }
+        constraints.GetOrCreate(tv).sum.Add(GetAnyTy())
     }
 
     public func GetInnermostUnsolvedTyVars(): ArrayList<GenericsTy> {
-        return unsolvedTyVars
+        let out = ArrayList<GenericsTy>()
+        if (tyVarScopes.isEmpty()) {
+            return out
+        }
+        tyVarScopes[tyVarScopes.size - 1].AddUnsolvedTyVars(out, unsolvedTyVars)
+        return out
     }
 
     public func TryGreedySubst(ty: Ty): Ty {
@@ -1382,6 +1700,9 @@ public class TypeManager {
         let _ = needSubstituteGeneric
         if (let Some(aliasTy) <- (ty as TypeAliasTy)) {
             if (let Some(decl) <- aliasTy.declPtr) {
+                if (decl.TestAttr(Attribute.IN_REFERENCE_CYCLE)) {
+                    return GetInstantiatedTy(ty, typeMapping)
+                }
                 if (let Some(typeNode) <- decl.typeNode) {
                     if (let Some(targetTy) <- typeNode.GetTy()) {
                         return GetInstantiatedTy(targetTy, typeMapping)

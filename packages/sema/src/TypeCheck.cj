@@ -132,16 +132,54 @@ private func getTyFromBuiltinDecl(typeManager: TypeManager, bid: BuiltInDecl, ty
         return TypeManager.GetCStringTy()
     }
     if (bid.IsType(BuiltInType.VARRAY)) {
-        let elemTy = if (typeArgs.isEmpty()) { TypeManager.GetInvalidTy() } else { typeArgs[0] }
-        return typeManager.GetVArrayTy(elemTy, 0)
+        if (typeArgs.size != 1) {
+            return TypeManager.GetInvalidTy()
+        }
+        return typeManager.GetVArrayTy(typeArgs[0], 0)
     }
     if (bid.IsType(BuiltInType.CFUNC)) {
         if (typeArgs.size != 1) {
             return TypeManager.GetInvalidTy()
         }
+        if (let Some(funcTy) <- (typeArgs[0] as FuncTy)) {
+            let cfg = FuncTyConfig()
+            cfg.isC = true
+            return typeManager.GetFunctionTy(funcTy.paramTys.toArray(), funcTy.retTy, cfg: cfg)
+        }
+        return TypeManager.GetInvalidTy()
+    }
+    return TypeManager.GetInvalidTy()
+}
+
+private func getTyFromASTCFuncType(typeManager: TypeManager, ctx: ASTContext, rt: RefType): Ty {
+    if (rt.typeArguments.size != 1) {
+        return TypeManager.GetInvalidTy()
+    }
+    if (let Some(funcType) <- (rt.typeArguments[0] as FuncType)) {
+        let paramTys = ArrayList<Ty>()
+        for (paramType in funcType.paramTypes) {
+            paramType.SetTy(GetTyFromASTType(typeManager, ctx, paramType))
+            if (let Some(paramTy) <- paramType.GetTy()) {
+                paramTys.add(paramTy)
+            } else {
+                return TypeManager.GetInvalidTy()
+            }
+        }
+        var retTy: Ty = TypeManager.GetInvalidTy()
+        if (let Some(retType) <- funcType.retType) {
+            retType.SetTy(GetTyFromASTType(typeManager, ctx, retType))
+            if (let Some(retTypeTy) <- retType.GetTy()) {
+                retTy = retTypeTy
+            } else {
+                return TypeManager.GetInvalidTy()
+            }
+        } else {
+            return TypeManager.GetInvalidTy()
+        }
+        funcType.SetTy(GetTyFromASTFuncType(typeManager, ctx, funcType))
         let cfg = FuncTyConfig()
         cfg.isC = true
-        return typeManager.GetFunctionTy(typeArgs.toArray(), typeArgs[0], cfg: cfg)
+        return typeManager.GetFunctionTy(paramTys.toArray(), retTy, cfg: cfg)
     }
     return TypeManager.GetInvalidTy()
 }
@@ -216,6 +254,90 @@ private func collectDeclsFromDecl(decl: Decl, out: ArrayList<Decl>): Unit {
     } else if (let Some(interfaceDecl) <- (decl as InterfaceDecl)) {
         for (subDecl in interfaceDecl.subDecls) {
             collectDeclsFromDecl(subDecl, out)
+        }
+    }
+}
+
+private func markTypeAliasCycle(root: TypeAliasDecl, path: ArrayList<Decl>): String {
+    var inCycle = false
+    var diagInfo = ""
+    for (decl in path) {
+        if (SameDecl(decl, root)) {
+            inCycle = true
+        }
+        if (inCycle) {
+            decl.EnableAttr(Attribute.IN_REFERENCE_CYCLE)
+            diagInfo += decl.identifier.Val() + "->"
+        }
+    }
+    root.EnableAttr(Attribute.IN_REFERENCE_CYCLE)
+    return diagInfo + root.identifier.Val()
+}
+
+private func isVisitStatus(value: InheritanceVisitStatus, expected: InheritanceVisitStatus): Bool {
+    return match (value) {
+        case InheritanceVisitStatus.UNVISITED => match (expected) {
+            case InheritanceVisitStatus.UNVISITED => true
+            case _ => false
+        }
+        case InheritanceVisitStatus.VISITING => match (expected) {
+            case InheritanceVisitStatus.VISITING => true
+            case _ => false
+        }
+        case InheritanceVisitStatus.VISITED => match (expected) {
+            case InheritanceVisitStatus.VISITED => true
+            case _ => false
+        }
+    }
+}
+
+private func checkTypeAliasCycleForOneDecl(tad: TypeAliasDecl, path: ArrayList<Decl>): Unit {
+    if (isVisitStatus(tad.checkFlag, InheritanceVisitStatus.VISITING)) {
+        let _ = markTypeAliasCycle(tad, path)
+        return
+    }
+    if (isVisitStatus(tad.checkFlag, InheritanceVisitStatus.VISITED)) {
+        return
+    }
+    tad.checkFlag = InheritanceVisitStatus.VISITING
+    path.add(tad)
+    if (let Some(typeNode) <- tad.typeNode) {
+        checkTypeAliasCycleForOneType(typeNode, path)
+    }
+    path.remove(at: path.size - 1)
+    tad.checkFlag = InheritanceVisitStatus.VISITED
+}
+
+private func checkTypeAliasCycleForOneType(typeNode: Type, path: ArrayList<Decl>): Unit {
+    let walker = Walker(typeNode, visitPre: { node: Node =>
+        if (let Some(currentType) <- (node as Type)) {
+            if (let Some(target) <- currentType.GetTarget()) {
+                if (let Some(aliasDecl) <- (target as TypeAliasDecl)) {
+                    checkTypeAliasCycleForOneDecl(aliasDecl, path)
+                }
+            }
+        }
+        VisitAction.WALK_CHILDREN
+    })
+    let _ = walker.Walk()
+}
+
+public func TypeAliasCircleCheck(ctx: ASTContext): Unit {
+    if (let Some(pkg) <- ctx.curPackage) {
+        if (pkg.TestAttr(Attribute.IMPORTED)) {
+            return
+        }
+    }
+    let decls = if (let Some(pkg) <- ctx.curPackage) { collectDeclsFromPackage(pkg) } else { GetAllDecls(ctx) }
+    for (decl in decls) {
+        if (let Some(tad) <- (decl as TypeAliasDecl)) {
+            tad.checkFlag = InheritanceVisitStatus.UNVISITED
+        }
+    }
+    for (decl in decls) {
+        if (let Some(tad) <- (decl as TypeAliasDecl)) {
+            let path = ArrayList<Decl>()
+            checkTypeAliasCycleForOneDecl(tad, path)
         }
     }
 }
@@ -352,9 +474,8 @@ public func GetTyFromASTRefType(typeManager: TypeManager, ctx: ASTContext, rt: R
     let target = targets[0]
     if (let Some(builtin) <- (target as BuiltInDecl)) {
         if (builtin.IsType(BuiltInType.CFUNC)) {
-            let typeArgs = getTypeArgTys(typeManager, ctx, rt.typeArguments)
             ReplaceTarget(rt, Some(target))
-            return getTyFromBuiltinDecl(typeManager, builtin, typeArgs)
+            return getTyFromASTCFuncType(typeManager, ctx, rt)
         }
     }
     ReplaceTarget(rt, Some(target))
@@ -563,6 +684,7 @@ public func ResolveTypeAlias(typeManager: TypeManager, ctx: ASTContext): Unit {
             SetTypeAliasDeclTy(typeManager, ctx, tad)
         }
     }
+    TypeAliasCircleCheck(ctx)
     for (decl in decls) {
         if (let Some(tad) <- (decl as TypeAliasDecl)) {
             SubstituteTypeAliasForAlias(typeManager, tad)
