@@ -36,6 +36,7 @@ Implemented:
 - Tightened `GetStrParts` to assert string-token kinds and require scanned string-part map entries just like C++, while still rebuilding macro-provided string tokens through a temporary lexer.
 - Delegated current-character diagnostic rendering to Basic `ConvertChar` after newline detection, matching C++ handling for EOF and control characters.
 - Preserved the C++ lexer `success` state for illegal Unicode scalar escape diagnostics and unexpected dollar-keyword diagnostics instead of treating those recoverable diagnostics as scan failure.
+- Matched C++ lexer context-stack preconditions by asserting quote/normal mode exits and quote-context reads instead of silently ignoring mismatched state, and restored the string-dispatch quote assertion.
 
 Known validation caveats:
 

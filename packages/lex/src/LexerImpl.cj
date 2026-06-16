@@ -364,9 +364,8 @@ public class LexerImpl {
     }
 
     public func ExitQuoteMod(): Unit {
-        if (!ctx.isEmpty() && ctx[ctx.size - 1] == LexerContext.QUOTE) {
-            ctx.remove(at: ctx.size - 1)
-        }
+        CJC_ASSERT(!ctx.isEmpty() && ctx[ctx.size - 1] == LexerContext.QUOTE)
+        ctx.remove(at: ctx.size - 1)
     }
 
     public func EnterNormalMod(): Unit {
@@ -374,9 +373,8 @@ public class LexerImpl {
     }
 
     public func ExitNormalMod(): Unit {
-        if (!ctx.isEmpty() && ctx[ctx.size - 1] == LexerContext.NORMAL) {
-            ctx.remove(at: ctx.size - 1)
-        }
+        CJC_ASSERT(!ctx.isEmpty() && ctx[ctx.size - 1] == LexerContext.NORMAL)
+        ctx.remove(at: ctx.size - 1)
     }
 
     public func SetResetPoint(): Unit {
@@ -494,7 +492,8 @@ public class LexerImpl {
     }
 
     private func IsQuoteContext(): Bool {
-        return !ctx.isEmpty() && ctx[ctx.size - 1] == LexerContext.QUOTE
+        CJC_ASSERT(!ctx.isEmpty())
+        return ctx[ctx.size - 1] == LexerContext.QUOTE
     }
 
     private func ReserveToken(num: Int64, skipNewline: Bool, skipComments: Bool): Unit {
@@ -2191,6 +2190,7 @@ public class LexerImpl {
 
     private func ScanSingleOrMultiLineString(pStart: Int64): Token {
         success = true
+        CJC_ASSERT(currentChar == Int64(b'\'') || currentChar == Int64(b'"'))
         if (getNextChar(0) == UInt8(currentChar) && getNextChar(1) == UInt8(currentChar)) {
             return ScanMultiLineString(pStart)[0]
         }
