@@ -10,7 +10,8 @@
   output-type = "executable"
   compile-option = ""
   override-compile-option = ""
-  link-option = ""
+  link-option = "-L/usr/lib/llvm-20/lib -lLLVM-20"
   package-configuration = {}
 
 [dependencies]
+  "cangjie_compiler::frontend_tool" = { path = "../frontend_tool" }

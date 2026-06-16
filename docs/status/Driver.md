@@ -25,9 +25,9 @@ Current status:
 
 Residual fidelity risks:
 
-- Two Driver self-host markers remain in source. One covers LLVM bitcode
-  source-file-name extraction through an LLVM C FFI binding; the other covers
-  typed FrontendTool invocation once the package graph exposes that dependency.
+- Driver self-host markers have been removed. Bitcode package names are read
+  through LLVM C API bindings, and source compilation now invokes the
+  self-hosted FrontendTool package.
 - GNU/Mach-O/platform toolchains are functional command builders but still omit
   many C++ driver details around SDK/sysroot discovery, exact sanitizer/runtime
   library selection, and linker flag parity.
@@ -36,6 +36,6 @@ Residual fidelity risks:
 
 Module completion:
 
-- Not complete. The build passes, but the remaining Driver self-host markers and
-  toolchain/frontend fidelity gaps must be eliminated before this module can be
-  marked production-grade and behavior-faithful.
+- Not complete. The build passes, but frontend/codegen package boundaries still
+  do not expose the full C++ in-process `DefaultCompilerInstance` behavior to
+  Driver, and platform toolchain parity remains incomplete.

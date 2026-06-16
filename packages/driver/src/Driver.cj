@@ -26,14 +26,12 @@ public class Driver {
 
     public func ExtractBCPackageNames(): Bool {
         for (bcPath in driverOptions.bcInputFiles) {
-            let fileName = FileUtil.GetFileNameWithoutExtension(bcPath)
-            if (fileName.isEmpty()) {
-                eprintln("error: invalid bitcode input '${bcPath}'")
+            let result = ExtractBitcodePackageNameFromLLVM(bcPath)
+            if (!result.ok) {
+                ReportBitcodePackageNameError(bcPath, result.error)
                 return false
             }
-            // TODO(selfhost:Driver): Bind LLVM bitcode reader through C FFI and extract Module::sourceFileName,
-            // matching Driver::ExtractBCPackageNames instead of using the filename fallback.
-            driverOptions.bcPackageNames.add(fileName)
+            driverOptions.bcPackageNames.add(result.packageName)
         }
         return true
     }
@@ -64,10 +62,9 @@ public class Driver {
             return false
         }
         if (!driverOptions.srcFiles.isEmpty()) {
-            // TODO(selfhost:Driver): Invoke the self-hosted FrontendTool package once Driver can depend on it
-            // without changing package metadata in this module-only port step.
-            eprintln("error: frontend execution from Driver is not wired in this package build yet.")
-            return false
+            if (!ExecuteFrontendPhase(this)) {
+                return false
+            }
         }
         if (driverOptions.frontendOutputFiles.isEmpty() && driverOptions.inputObjs.isEmpty() &&
             driverOptions.bcInputFiles.isEmpty()) {
@@ -85,6 +82,16 @@ public class Driver {
             return false
         }
         return job.Execute()
+    }
+}
+
+private func ReportBitcodePackageNameError(bcPath: String, error: BitcodePackageNameError): Unit {
+    if (error == BitcodePackageNameError.OPEN_FAILED) {
+        eprintln("error: failed to open bitcode file '${bcPath}'")
+    } else if (error == BitcodePackageNameError.PARSE_FAILED) {
+        eprintln("error: failed to parse bitcode file '${bcPath}'")
+    } else {
+        eprintln("error: invalid bitcode package name in '${bcPath}'")
     }
 }
 

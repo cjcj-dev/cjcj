@@ -1,7 +1,7 @@
 package cangjie_compiler::driver
 
 import std.collection.*
-import std.process.*
+import cangjie_compiler::frontend_tool.ExecuteFrontend
 
 public func QuoteForWindowsFrontendShim(value: String): String {
     let builder = StringBuilder()
@@ -26,10 +26,5 @@ public func ExecuteFrontendShim(args: Array<String>, cjcPath: String): Int64 {
         forwarded.add(args[idx])
         idx++
     }
-    try {
-        return execute(cjcPath, forwarded.toArray())
-    } catch (e: Exception) {
-        eprintln(e.message)
-        return 1
-    }
+    return ExecuteFrontend(cjcPath, forwarded.toArray(), StringifyEnvironment())
 }
