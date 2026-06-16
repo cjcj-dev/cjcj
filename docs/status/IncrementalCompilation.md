@@ -72,6 +72,9 @@ Implemented:
 - Tightened order-change parity further by reconstructing cached file maps after top-level cache entries are fully
   loaded, preserving the C++ static-member/property-accessor collection order, and by treating
   `VAR_WITH_PATTERN_DECL` as global-like for file-move invalidation.
+- Added explicit adapter support for var-with-pattern bound variables and routed cache calculation, member traversal,
+  signature pollution, and CHIR optimization pollution through the same flattened pattern-variable view used by the
+  C++ `FlattenVarWithPatternDecl` paths.
 
 Known gaps:
 

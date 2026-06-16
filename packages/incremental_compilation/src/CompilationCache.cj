@@ -247,6 +247,7 @@ public class IncrDecl <: Hashable & Equatable<IncrDecl> {
     public let members: ArrayList<IncrDecl> = ArrayList<IncrDecl>()
     public let getters: ArrayList<IncrDecl> = ArrayList<IncrDecl>()
     public let setters: ArrayList<IncrDecl> = ArrayList<IncrDecl>()
+    public let patternVariables: ArrayList<IncrDecl> = ArrayList<IncrDecl>()
     public let constructorMangles: ArrayList<String> = ArrayList<String>()
     public let enumConstructorMangles: ArrayList<String> = ArrayList<String>()
     public let sourceImportedTargets: HashSet<IncrDecl> = HashSet<IncrDecl>()
@@ -325,6 +326,17 @@ public class IncrDecl <: Hashable & Equatable<IncrDecl> {
             member.filePath = filePath
         }
         members.add(member)
+    }
+
+    public func AddPatternVar(variable: IncrDecl): Unit {
+        variable.outerDecl = Some(this)
+        if (variable.fullPackageName.isEmpty()) {
+            variable.fullPackageName = fullPackageName
+        }
+        if (variable.filePath.isEmpty()) {
+            variable.filePath = filePath
+        }
+        patternVariables.add(variable)
     }
 
     public func AddSourceImportedTarget(target: IncrDecl): Unit {

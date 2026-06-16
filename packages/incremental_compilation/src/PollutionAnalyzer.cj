@@ -1081,6 +1081,11 @@ public class PollutionAnalyzer {
     }
 
     public func PolluteCHIROptAffectDecl(decl: IncrDecl): Unit {
+        if (decl.astKind == IncrDeclKind.VAR_WITH_PATTERN_DECL) {
+            for (member in GetMembers(decl)) {
+                PolluteCHIROptAffectDecl(member)
+            }
+        }
         if (let Some(affected) <- chirOptMap.get(decl.rawMangleName)) {
             let record = GetOtherRecord(decl.rawMangleName)
             if (record.chirOpt) {
@@ -1094,11 +1099,6 @@ public class PollutionAnalyzer {
                 } else {
                     PolluteBodyOfDecl(user)
                 }
-            }
-        }
-        if (decl.astKind == IncrDeclKind.VAR_WITH_PATTERN_DECL) {
-            for (member in decl.members) {
-                PolluteCHIROptAffectDecl(member)
             }
         }
     }

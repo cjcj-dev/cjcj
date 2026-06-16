@@ -186,7 +186,7 @@ public class ASTCacheCalculator {
             case IncrDeclKind.VAR_WITH_PATTERN_DECL =>
                 gid++
                 inVarWithPattern = true
-                for (member in decl.members) {
+                for (member in GetMembers(decl)) {
                     WalkDecl(member)
                 }
                 inVarWithPattern = false

@@ -97,6 +97,12 @@ public func GetMembers(decl: IncrDecl): ArrayList<IncrDecl> {
         }
         return out
     }
+    if (decl.astKind == IncrDeclKind.VAR_WITH_PATTERN_DECL && !decl.patternVariables.isEmpty()) {
+        for (variable in decl.patternVariables) {
+            out.add(variable)
+        }
+        return out
+    }
     for (member in decl.members) {
         out.add(member)
     }
