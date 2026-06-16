@@ -138,6 +138,10 @@ public class CjoManagerImpl {
         return globalOptions
     }
 
+    public func SetImportSourceCode(enable: Bool): Unit {
+        importSrcCode = enable
+    }
+
     public func GetPackageNameMap(): HashMap<String, CjoPackageInfo> {
         return packageNameMap
     }
@@ -204,9 +208,7 @@ public class CjoManagerImpl {
         for (path in globalOptions.environment.cangjiePaths) {
             searchPath.add(path)
         }
-        if (!cangjieModules.isEmpty()) {
-            searchPath.add(cangjieModules)
-        }
+        searchPath.add(cangjieModules)
     }
 
     public func GetSearchPath(): ArrayList<String> {

@@ -1,7 +1,7 @@
 package cangjie_compiler::modules
 
 import std.collection.*
-import std.fs.exists
+import cangjie_compiler::utils.FileUtil
 
 public class CjoManager {
     private var impl: CjoManagerImpl
@@ -16,6 +16,10 @@ public class CjoManager {
 
     public func GetImpl(): CjoManagerImpl {
         return impl
+    }
+
+    public func SetImportSourceCode(enable: Bool): Unit {
+        impl.SetImportSourceCode(enable)
     }
 
     public func AddSourcePackage(pkg: Package): Unit {
@@ -304,7 +308,7 @@ public class CjoManager {
     }
 
     public func GetPackageCjoPath(fullPackageName: String): String {
-        return FindCjoPath(fullPackageName, ToCjoFileName(fullPackageName), GetSearchPath())
+        return FindCjoPath(fullPackageName, fullPackageName, GetSearchPath())
     }
 
     public func GetPackageCjo(importSpec: ImportSpec): (String, String) {
@@ -455,20 +459,9 @@ public class CjoManager {
         if (let Some(cached) <- impl.GetCjoPathFromFindCache(fullPackageName)) {
             return cached
         }
-        let names = ArrayList<String>()
-        names.add(cjoName + SERIALIZED_FILE_EXTENSION)
-        names.add(cjoName)
-        for (dir in paths) {
-            for (name in names) {
-                let candidate = if (dir.isEmpty() || dir == ".") { name } else { dir + "/" + name }
-                if (exists(candidate)) {
-                    impl.CacheCjoPathForFind(fullPackageName, candidate)
-                    return candidate
-                }
-            }
-        }
-        impl.CacheCjoPathForFind(fullPackageName, "")
-        return ""
+        let cjoPath = FileUtil.FindSerializationFile(fullPackageName, SERIALIZED_FILE_EXTENSION, paths.toArray())
+        impl.CacheCjoPathForFind(fullPackageName, cjoPath)
+        return cjoPath
     }
 
     private func IsReExportByResolved(srcPackage: String, reExportPackage: String): Bool {

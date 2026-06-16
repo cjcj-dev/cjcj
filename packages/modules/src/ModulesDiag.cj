@@ -112,6 +112,8 @@ private func ModuleDiagKindToBasic(kind: String): Option<BasicDiagKindRefactor> 
         case "module_common_cjo_no_options" => BasicDiagKindRefactor.module_common_cjo_no_options
         case "module_common_cjo_debug_mismatch" => BasicDiagKindRefactor.module_common_cjo_debug_mismatch
         case "module_common_cjo_opt_mismatch" => BasicDiagKindRefactor.module_common_cjo_opt_mismatch
+        case "module_same_name_with_indirect_dependent_pkg" =>
+            BasicDiagKindRefactor.module_same_name_with_indirect_dependent_pkg
         case "package_search_error" => BasicDiagKindRefactor.package_search_error
         case "package_missed_cjo_main_pkg_part_for_test_pkg" =>
             BasicDiagKindRefactor.package_missed_cjo_main_pkg_part_for_test_pkg

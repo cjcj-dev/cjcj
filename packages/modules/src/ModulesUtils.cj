@@ -6,6 +6,8 @@ import cangjie_compiler::basic.INVALID_POSITION as BASIC_INVALID_POSITION
 import cangjie_compiler::basic.MakeRange as BasicMakeRange
 import cangjie_compiler::basic.Position as BasicPosition
 import cangjie_compiler::basic.Range as BasicRange
+import cangjie_compiler::basic.SplitQualifiedName as BasicSplitQualifiedName
+import cangjie_compiler::utils.FileUtil
 
 public let SERIALIZED_FILE_EXTENSION: String = ".cjo"
 public let CJ_D_FILE_EXTENSION: String = ".cj.d"
@@ -261,6 +263,17 @@ public open class Decl <: Node {
     }
 
     public func IsExportedDecl(): Bool {
+        if (TestAnyAttr(Attribute.PUBLIC, Attribute.PROTECTED)) {
+            return true
+        }
+        if (TestAttr(Attribute.INTERNAL)) {
+            if (let Some(file) <- curFile) {
+                if (let Some(pkg) <- file.packageRef) {
+                    return !pkg.noSubPkg
+                }
+            }
+            return true
+        }
         if (TestAttr(Attribute.PRIVATE)) {
             return false
         }
@@ -535,25 +548,8 @@ public class ImportSpec <: Node {
 
 public func SplitQualifiedName(qualifiedName: String, splitDc!: Bool = false): ArrayList<String> {
     let names = ArrayList<String>()
-    var idx: Int64 = 0
-    if (splitDc) {
-        if (let Some(next) <- qualifiedName.indexOf("::")) {
-            names.add(qualifiedName[0..next])
-            idx = next + 2
-        }
-    }
-    while (idx < qualifiedName.size) {
-        if (qualifiedName[idx] == b'.') {
-            idx++
-        } else if (qualifiedName[idx] == b'`') {
-            let next = qualifiedName.indexOf("`", idx + 1) ?? qualifiedName.size
-            names.add(qualifiedName[idx + 1..next])
-            idx = if (next == qualifiedName.size) { next } else { next + 1 }
-        } else {
-            let next = qualifiedName.indexOf(".", idx + 1) ?? qualifiedName.size
-            names.add(qualifiedName[idx..next])
-            idx = next
-        }
+    for (name in BasicSplitQualifiedName(qualifiedName, splitDc: splitDc)) {
+        names.add(name)
     }
     return names
 }
@@ -572,17 +568,11 @@ public func JoinStrings(values: ArrayList<String>, delimiter: String): String {
 }
 
 public func ToCjoFileName(fullPackageName: String): String {
-    if (let Some(pos) <- fullPackageName.indexOf("::")) {
-        return fullPackageName[pos + 2..] + ORG_NAME_SEPARATOR + fullPackageName[0..pos]
-    }
-    return fullPackageName
+    return FileUtil.ToCjoFileName(fullPackageName)
 }
 
 public func ToPackageName(cjoName: String): String {
-    if (let Some(pos) <- cjoName.indexOf(ORG_NAME_SEPARATOR)) {
-        return cjoName[pos + 1..] + "::" + cjoName[0..pos]
-    }
-    return cjoName
+    return FileUtil.ToPackageName(cjoName)
 }
 
 public func IsTestPackage(pkgName: String): Bool {
