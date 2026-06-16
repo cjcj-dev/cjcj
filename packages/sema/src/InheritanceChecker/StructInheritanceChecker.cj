@@ -246,6 +246,7 @@ public class StructInheritanceChecker {
     private let instantiatedKeys: HashSet<String> = HashSet<String>()
     private let instantiatedMemberDiagnostics: ArrayList<InstantiatedMemberDiagnosticRecord> =
         ArrayList<InstantiatedMemberDiagnosticRecord>()
+    private let instantiatedTyCaches: ArrayList<InstantiatedTyCacheRecord> = ArrayList<InstantiatedTyCacheRecord>()
     private let instantiationTriggers: ArrayList<InstantiationTriggerInfo> = ArrayList<InstantiationTriggerInfo>()
     private let instantiationTypeMaps: ArrayList<TypeSubst> = ArrayList<TypeSubst>()
     private var infiniteInstantiationOccurred: Bool = false
@@ -335,6 +336,33 @@ public class StructInheritanceChecker {
         let record = InstantiatedMemberDiagnosticRecord(key)
         record.pairs.add(InstantiatedMemberDiagnosticPair(parent, child))
         instantiatedMemberDiagnostics.add(record)
+    }
+
+    private func FindInstantiatedTyCacheRecord(key: String): Option<InstantiatedTyCacheRecord> {
+        for (record in instantiatedTyCaches) {
+            if (record.key == key) {
+                return record
+            }
+        }
+        return None
+    }
+
+    public func GetCachedInstantiatedTy(key: String, ty: Ty, typeMapping: TypeSubst): Ty {
+        if (let Some(record) <- FindInstantiatedTyCacheRecord(key)) {
+            for (entry in record.entries) {
+                if (SameTy(entry.source, ty)) {
+                    return entry.instantiated
+                }
+            }
+            let instantiatedTy = typeManager.GetInstantiatedTy(ty, typeMapping)
+            record.entries.add(InstantiatedTyCacheEntry(ty, instantiatedTy))
+            return instantiatedTy
+        }
+        let record = InstantiatedTyCacheRecord(key)
+        let instantiatedTy = typeManager.GetInstantiatedTy(ty, typeMapping)
+        record.entries.add(InstantiatedTyCacheEntry(ty, instantiatedTy))
+        instantiatedTyCaches.add(record)
+        return instantiatedTy
     }
 
     public func HasInstantiationTrigger(): Bool {

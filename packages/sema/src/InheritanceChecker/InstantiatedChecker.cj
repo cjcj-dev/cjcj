@@ -38,6 +38,25 @@ public class InstantiatedMemberDiagnosticRecord {
     }
 }
 
+public class InstantiatedTyCacheEntry {
+    public var source: Ty
+    public var instantiated: Ty
+
+    public init(source: Ty, instantiated: Ty) {
+        this.source = source
+        this.instantiated = instantiated
+    }
+}
+
+public class InstantiatedTyCacheRecord {
+    public var key: String
+    public let entries: ArrayList<InstantiatedTyCacheEntry> = ArrayList<InstantiatedTyCacheEntry>()
+
+    public init(key: String) {
+        this.key = key
+    }
+}
+
 func InstantiationKey(decl: Decl, instTys: ArrayList<Ty>): String {
     let parts = ArrayList<String>()
     for (ty in instTys) {
@@ -122,6 +141,18 @@ private func GetVisibleExtendsForInstantiation(
     return out
 }
 
+private func MarkUpperBoundIgnored(node: Node, generic: Generic): Unit {
+    for (constraint in generic.genericConstraints) {
+        for (upperBound in constraint.upperBounds) {
+            if (let Some(upperTy) <- upperBound.GetTy()) {
+                if (upperTy.HasGeneric()) {
+                    upperBound.visitedByWalkerID = node.visitedByWalkerID
+                }
+            }
+        }
+    }
+}
+
 func CheckInstMemberSignatures(
     checker: StructInheritanceChecker,
     decl: InheritableDecl,
@@ -138,7 +169,6 @@ func CheckInstMemberSignatures(
         checker.ReplayInstantiatedMemberDiagnostics(key)
         return
     }
-    checker.AddInstantiatedKey(key)
     let typeMapping = GenerateTypeMapping(decl, instTys)
     if (typeMapping.IsEmpty()) {
         return
@@ -176,15 +206,15 @@ func CheckInstMemberSignatures(
     for (entry in genericTyMembers.entries) {
         let memberSig = entry.signature.Clone()
         if (let Some(memberTy) <- memberSig.ty) {
-            memberSig.ty = checker.typeManager.GetInstantiatedTy(memberTy, typeMapping)
+            memberSig.ty = checker.GetCachedInstantiatedTy(key, memberTy, typeMapping)
         }
         if (let Some(memberStructTy) <- memberSig.structTy) {
-            memberSig.structTy = checker.typeManager.GetInstantiatedTy(memberStructTy, typeMapping)
+            memberSig.structTy = checker.GetCachedInstantiatedTy(key, memberStructTy, typeMapping)
         }
         for (candidate in members.Get(entry.name)) {
             let parent = candidate.Clone()
             if (let Some(parentStructTy) <- parent.structTy) {
-                parent.structTy = checker.typeManager.GetInstantiatedTy(parentStructTy, typeMapping)
+                parent.structTy = checker.GetCachedInstantiatedTy(key, parentStructTy, typeMapping)
             }
             checker.DiagnoseForInstantiatedMember(parent, memberSig)
             checker.RecordInstantiatedMemberDiagnostic(key, parent, memberSig)
@@ -193,9 +223,51 @@ func CheckInstMemberSignatures(
     }
 }
 
-private func HasSelfRecursiveInstantiation(genericTy: Ty, instTy: Ty): Bool {
+private func InstantiationTriggeredInside(checker: StructInheritanceChecker, decl: Decl): Bool {
+    if (let Some(trigger) <- checker.CurrentInstantiationTrigger()) {
+        return SameDecl(trigger.decl, decl)
+    }
+    return false
+}
+
+private func ContainsRecursiveInstantiationArg(
+    checker: StructInheritanceChecker,
+    genericTy: Ty,
+    arg: Ty,
+    currentMapping: Option<TypeSubst>,
+    triggeredInside: Bool
+): Bool {
+    var substitutedTy = arg
+    if (let Some(mapping) <- currentMapping) {
+        substitutedTy = checker.typeManager.GetInstantiatedTy(arg, mapping)
+    }
+    if (arg.Contains(genericTy) || substitutedTy.Contains(genericTy)) {
+        return true
+    }
+    var noRecursion = !triggeredInside
+    if (!noRecursion) {
+        if (let Some(directGenericArg) <- Ty.GetGenericTyOfInsTy(arg)) {
+            noRecursion = directGenericArg.Contains(genericTy)
+        }
+    }
+    if (noRecursion) {
+        return false
+    }
+    if (let Some(substitutedGenericArg) <- Ty.GetGenericTyOfInsTy(substitutedTy)) {
+        return substitutedGenericArg.Contains(genericTy)
+    }
+    return false
+}
+
+private func HasSelfRecursiveInstantiation(
+    checker: StructInheritanceChecker,
+    genericTy: Ty,
+    instTy: Ty,
+    currentMapping: Option<TypeSubst>,
+    triggeredInside: Bool
+): Bool {
     for (arg in instTy.typeArgs) {
-        if (arg.Contains(genericTy)) {
+        if (ContainsRecursiveInstantiationArg(checker, genericTy, arg, currentMapping, triggeredInside)) {
             return true
         }
     }
@@ -228,9 +300,11 @@ private func WillCauseInfiniteInstantiation(
     if (generic.typeParameters.size != instTys.size) {
         return false
     }
+    let currentMapping = checker.CurrentInstantiationTypeMap()
+    let triggeredInside = InstantiationTriggeredInside(checker, decl)
     for (idx in 0..instTys.size) {
         if (let Some(genericTy) <- generic.typeParameters[idx].GetTy()) {
-            if (HasSelfRecursiveInstantiation(genericTy, instTys[idx])) {
+            if (HasSelfRecursiveInstantiation(checker, genericTy, instTys[idx], currentMapping, triggeredInside)) {
                 checker.diag.Diagnose(triggerNode.begin, DiagKind.sema_generic_infinite_instantiation)
                 checker.MarkInfiniteInstantiationOccurred()
                 return true
@@ -275,6 +349,9 @@ func CheckInstDupFuncsRecursively(checker: StructInheritanceChecker, node: Node)
     if (checker.HasInfiniteInstantiationOccurred()) {
         return VisitAction.STOP_NOW
     }
+    if (let Some(generic) <- (node as Generic)) {
+        MarkUpperBoundIgnored(node, generic)
+    }
     if (!Ty.IsTyCorrect(node.GetTy()) || node.TestAttr(Attribute.HAS_BROKEN)) {
         return VisitAction.WALK_CHILDREN
     }
@@ -314,8 +391,16 @@ func CheckInstDupFuncsRecursively(checker: StructInheritanceChecker, node: Node)
             if (let Some(inheritable) <- (target as InheritableDecl)) {
                 CheckInstMemberSignatures(checker, inheritable, instTys)
             }
+            let targetKey = InstantiationKey(target, instTys)
             for (extendDecl in GetVisibleExtendsForInstantiation(checker, target, instTys)) {
                 CheckInstMemberSignatures(checker, extendDecl, instTys)
+                if (!checker.HasInstantiatedKey(targetKey)) {
+                    checker.AddInstantiatedKey(targetKey)
+                }
+            }
+            if (!checker.HasInstantiatedKey(targetKey)) {
+                checker.AddInstantiatedKey(targetKey)
+                CheckInstantiatedDecl(checker, target, instTys)
             }
             if (shouldUpdateTrigger) {
                 checker.PopInstantiationTrigger()
@@ -342,7 +427,11 @@ func CheckInstDupFuncsInNominalDecls(checker: StructInheritanceChecker): Unit {
     for (file in checker.pkg.files) {
         for (decl in file.decls) {
             let empty = ArrayList<Ty>()
-            CheckInstantiatedDecl(checker, decl, empty)
+            let emptyKey = InstantiationKey(decl, empty)
+            if (!checker.HasInstantiatedKey(emptyKey)) {
+                checker.AddInstantiatedKey(emptyKey)
+                CheckInstantiatedDecl(checker, decl, empty)
+            }
         }
     }
 }
