@@ -234,6 +234,9 @@ public func ReadOneUnicodeChar(source: Array<UTF8>, start: Int64): UTF32 {
 
 public let UNI_MAX_UTF8_BYTES_PER_CODE_POINT: Int64 = 4
 
+private let UNI_UTF32_BYTE_ORDER_MARK_NATIVE: UTF32 = 0x0000feffu32
+private let UNI_UTF32_BYTE_ORDER_MARK_SWAPPED: UTF32 = 0xfffe0000u32
+
 public func ConvertCodepointToUTF8(codepoint: UTF32): Option<Array<UTF8>> {
     if (!IsLegalUnicode(codepoint)) {
         return None
@@ -257,7 +260,42 @@ public func ConvertCodepointToUTF8(codepoint: UTF32): Option<Array<UTF8>> {
     return bytes.toArray()
 }
 
-public func ConvertUTF32ToUTF8String(src: Array<UTF32>): Option<String> {
+private func byteSwapUTF32(value: UTF32): UTF32 {
+    return ((value & 0x000000ffu32) << 24) | ((value & 0x0000ff00u32) << 8) |
+        ((value & 0x00ff0000u32) >> 8) | ((value & 0xff000000u32) >> 24)
+}
+
+private func loadNativeUTF32(bytes: Array<UTF8>, start: Int64): UTF32 {
+    return UInt32(bytes[start]) | (UInt32(bytes[start + 1]) << 8) |
+        (UInt32(bytes[start + 2]) << 16) | (UInt32(bytes[start + 3]) << 24)
+}
+
+private func normalizedUTF32Scalars(src: Array<UTF32>): Array<UTF32> {
+    if (src.isEmpty()) {
+        return src
+    }
+    let result = ArrayList<UTF32>()
+    var index: Int64 = 0
+    if (src[0] == UNI_UTF32_BYTE_ORDER_MARK_SWAPPED) {
+        while (index < src.size) {
+            result.add(byteSwapUTF32(src[index]))
+            index++
+        }
+        index = 0
+    }
+    let scalars = if (result.isEmpty()) { src } else { result.toArray() }
+    if (!scalars.isEmpty() && scalars[0] == UNI_UTF32_BYTE_ORDER_MARK_NATIVE) {
+        index = 1
+    }
+    let output = ArrayList<UTF32>()
+    while (index < scalars.size) {
+        output.add(scalars[index])
+        index++
+    }
+    return output.toArray()
+}
+
+private func convertUTF32ScalarsToUTF8String(src: Array<UTF32>): Option<String> {
     let bytes = ArrayList<UTF8>()
     for (codepoint in src) {
         if (let Some(encoded) <- ConvertCodepointToUTF8(codepoint)) {
@@ -269,6 +307,26 @@ public func ConvertUTF32ToUTF8String(src: Array<UTF32>): Option<String> {
         }
     }
     return String.fromUtf8(bytes.toArray())
+}
+
+public func ConvertUTF32ToUTF8String(src: Array<UTF8>): Option<String> {
+    if (src.size % 4 != 0) {
+        return None
+    }
+    if (src.isEmpty()) {
+        return ""
+    }
+    let scalars = ArrayList<UTF32>()
+    var index: Int64 = 0
+    while (index < src.size) {
+        scalars.add(loadNativeUTF32(src, index))
+        index += 4
+    }
+    return convertUTF32ScalarsToUTF8String(normalizedUTF32Scalars(scalars.toArray()))
+}
+
+public func ConvertUTF32ToUTF8String(src: Array<UTF32>): Option<String> {
+    return convertUTF32ScalarsToUTF8String(normalizedUTF32Scalars(src))
 }
 
 public func IsASCII(v: UTF32): Bool {
