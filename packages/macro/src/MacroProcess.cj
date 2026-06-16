@@ -91,9 +91,13 @@ public func RefreshNewTokensPos(node: Node, sm: SourceManager, ci: CompilerInsta
         var lastColumn = sm.GetLineEnd(mcPos) + 1
         var prevTokenKind = TokenKind.END
         invocation.macroAtPosition.add(mcPos)
-        for (token in invocation.newTokens) {
+        var tokenIdx: Int64 = 0
+        while (tokenIdx < invocation.newTokens.size) {
+            var token = invocation.newTokens[tokenIdx]
             if (token.kind == TokenKind.NL || token.kind == TokenKind.COMMENT) {
                 token.SetCurFile(true)
+                invocation.newTokens[tokenIdx] = token
+                tokenIdx++
                 continue
             }
             if (mcPos.fileID != token.Begin().fileID) {
@@ -103,7 +107,7 @@ public func RefreshNewTokensPos(node: Node, sm: SourceManager, ci: CompilerInsta
                 lastColumn++
             }
             let keyPos = Position(mcPos.fileID, mcPos.line, lastColumn)
-            invocation.macroCallDiagInfo.PutOriginPos(keyPos.Hash32(), token.Begin())
+            invocation.macroCallDiagInfo.new2originPosMap.put(keyPos.Hash32(), token.Begin())
             let originalKey = token.Begin().Hash64()
             let begin = Position(mcPos.fileID, mcPos.line, lastColumn, token.Begin().isCurFile)
             let end = Position(mcPos.fileID, mcPos.line, lastColumn + getTokenLengthForMap(token), token.End().isCurFile)
@@ -111,6 +115,8 @@ public func RefreshNewTokensPos(node: Node, sm: SourceManager, ci: CompilerInsta
             putPosition64(invocation.origin2newPosMap, originalKey, token.Begin())
             lastColumn = end.column
             prevTokenKind = token.kind
+            invocation.newTokens[tokenIdx] = token
+            tokenIdx++
         }
         if (ci.invocation.globalOptions.enableCompileDebug || ci.invocation.globalOptions.displayLineInfo) {
             invocation.macroDebugMap.add((UInt64(lastColumn), node.end))
@@ -152,7 +158,7 @@ public func RefreshTokensPosMap(node: Node, sm: SourceManager, ci: CompilerInsta
             if (tokens[idx].kind != TokenKind.COMMENT) {
                 let pos = invocation.newTokens[idx].Begin()
                 let key = if (invocation.macroCallDiagInfo.isCurFile) { pos.Hash32() } else { UInt32(pos.column) }
-                invocation.macroCallDiagInfo.PutMacroCallPos(key, tokens[idx].Begin())
+                invocation.macroCallDiagInfo.new2macroCallPosMap.put(key, tokens[idx].Begin())
             }
             idx++
         }
@@ -174,7 +180,8 @@ private func macroCallSucceededForPackage(call: MacroCall, ci: CompilerInstance)
 }
 
 private func sourceEndPosition(sm: SourceManager, fileID: UInt64): Position {
-    if (let Some(source) <- sm.GetSource(fileID)) {
+    let source = sm.GetSource(fileID)
+    if (source.fileID == fileID) {
         return source.GetEndPos()
     }
     return Position(fileID, 1, 1)
@@ -233,10 +240,9 @@ private func generateMacroCallFile(file: File, nodes: ArrayList<Node>, ci: Compi
     }
     appendOriginalSource(sm, path, curFilePosBase, file.end)
     if (ci.invocation.globalOptions.enableMacroInLSP || ci.invocation.globalOptions.enableMacroDebug) {
-        if (let Some(source) <- sm.GetSource(fileID)) {
-            if (!writeStringToFile(path, source.buffer)) {
-                ci.diag.Diagnose(file.begin, "failed to save macro call file '" + path + "'")
-            }
+        let source = sm.GetSource(fileID)
+        if (!writeStringToFile(path, source.buffer)) {
+            ci.diag.Diagnose(file.begin, "failed to save macro call file '" + path + "'")
         }
     } else {
         removeMacroCallFile(path)

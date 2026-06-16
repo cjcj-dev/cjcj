@@ -841,12 +841,15 @@ public class MacroEvaluation {
             let beginComment = "/* ===== Emitted by MacroCall " + macCall.GetMacroInfo() + " ===== */"
             let endComment = "/* ===== End of the Emit ===== */"
             let rebuilt = ArrayList<Token>()
-            rebuilt.add(Token(TokenKind.COMMENT, beginComment, macCall.GetBeginPos(), macCall.GetEndPos(), true))
+            rebuilt.add(Token(TokenKind.COMMENT, beginComment, macCall.GetBeginPos(), macCall.GetEndPos(),
+                cmtForMacDebug: true))
             if (macCall.RequireNode().IsDecl() || subline > 1) {
-                rebuilt.add(Token(TokenKind.NL, "\n", macCall.GetBeginPos(), macCall.GetBeginPos() + 1, true))
+                rebuilt.add(Token(TokenKind.NL, "\n", macCall.GetBeginPos(), macCall.GetBeginPos() + 1,
+                    cmtForMacDebug: true))
             }
             appendTokens(rebuilt, invocation.newTokens)
-            rebuilt.add(Token(TokenKind.COMMENT, endComment, macCall.GetEndPos(), macCall.GetEndPos() + 1, true))
+            rebuilt.add(Token(TokenKind.COMMENT, endComment, macCall.GetEndPos(), macCall.GetEndPos() + 1,
+                cmtForMacDebug: true))
             invocation.newTokens.clear()
             appendTokens(invocation.newTokens, rebuilt)
         }
