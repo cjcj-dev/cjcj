@@ -2,6 +2,7 @@ package cangjie_compiler::sema.Test
 
 import std.collection.*
 import cangjie_compiler::ast.*
+import cangjie_compiler::basic.SourceManager
 
 public class MockContext {
     public let manglerCtxs: HashSet<String> = HashSet<String>()
@@ -22,7 +23,7 @@ public class MockContext {
 }
 
 public func ReduceUnitTestPackageName(pkgName: String): String {
-    let suffix = "$test"
+    let suffix = SourceManager.testPkgSuffix
     if (pkgName.endsWith(suffix)) {
         return pkgName[0..pkgName.size - suffix.size]
     }

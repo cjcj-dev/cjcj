@@ -2,6 +2,31 @@ package cangjie_compiler::sema.CJMP
 
 import cangjie_compiler::ast.*
 import cangjie_compiler::sema.*
+import cangjie_compiler::basic.DiagArgument as BasicDiagArgument
+import cangjie_compiler::basic.DiagKind as BasicDiagKind
+import cangjie_compiler::basic.DiagKindRefactor as BasicDiagKindRefactor
+import cangjie_compiler::basic.Position as BasicPosition
+import cangjie_compiler::basic.Range as BasicRange
+
+private func ToBasicPosition(pos: Position): BasicPosition {
+    return BasicPosition(pos.fileID, pos.line, pos.column)
+}
+
+private func ToBasicRange(begin: Position, end: Position): BasicRange {
+    var fixedEnd = end
+    if (begin.fileID != end.fileID) {
+        fixedEnd = begin + 1
+    }
+    return BasicRange(ToBasicPosition(begin), ToBasicPosition(fixedEnd))
+}
+
+private func NodeRange(node: Node): BasicRange {
+    return ToBasicRange(node.begin, node.end)
+}
+
+private func IdentifierRange(identifier: SrcIdentifier): BasicRange {
+    return ToBasicRange(identifier.GetRawPos(), identifier.GetRawEndPos())
+}
 
 private func HasDefaultArgument(param: FuncParam): Bool {
     return param.isNamedParam && param.TestAttr(Attribute.HAS_INITIAL)
@@ -42,13 +67,22 @@ extend MPTypeCheckerImpl {
             let commonParam = commonParams.params[idx]
             let specificParam = specificParams.params[idx]
             if (commonParam.isNamedParam != specificParam.isNamedParam) {
+                let builder = diag.DiagnoseRefactor(
+                    BasicDiagKindRefactor.sema_specific_has_different_parameter, NodeRange(specificParam))
+                builder.Emit()
                 return false
             }
             if (commonParam.isNamedParam && specificParam.isNamedParam &&
                 commonParam.identifier.GetRawText() != specificParam.identifier.GetRawText()) {
+                let builder = diag.DiagnoseRefactor(
+                    BasicDiagKindRefactor.sema_specific_has_different_parameter, NodeRange(specificParam))
+                builder.Emit()
                 return false
             }
             if (commonParam.isMemberParam != specificParam.isMemberParam) {
+                let builder = diag.DiagnoseRefactor(
+                    BasicDiagKindRefactor.sema_specific_primary_unmatched_var_decl, NodeRange(specificParam))
+                builder.Emit()
                 return false
             }
         }
@@ -59,6 +93,11 @@ extend MPTypeCheckerImpl {
         let commonGenericsCount = commonFunc.GetGenericsCount()
         let specificGenericsCount = specificFunc.GetGenericsCount()
         if (commonGenericsCount != specificGenericsCount) {
+            let builder = diag.Diagnose(
+                specificFunc.begin,
+                BasicDiagKind.sema_generic_member_type_argument_different,
+                args: [BasicDiagArgument(specificFunc.identifier.Val())])
+            builder.Emit()
             return false
         }
         if (commonGenericsCount > 0) {
@@ -142,7 +181,14 @@ extend MPTypeCheckerImpl {
                 continue
             }
             let commonParam = commonParams.params[idx]
-            if (HasDefaultArgument(commonParam) && !HasDefaultArgument(specificParam)) {
+            if (HasDefaultArgument(commonParam) && HasDefaultArgument(specificParam)) {
+                let builder = diag.DiagnoseRefactor(
+                    BasicDiagKindRefactor.sema_cjmp_parameter_default_value_both_sides,
+                    IdentifierRange(specificParam.identifier))
+                builder.Emit()
+                continue
+            }
+            if (HasDefaultArgument(commonParam)) {
                 CloneDefaultArgument(commonParam, specificParam, specificFunc)
             }
         }
