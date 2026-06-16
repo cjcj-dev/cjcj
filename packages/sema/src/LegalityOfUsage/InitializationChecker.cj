@@ -1016,6 +1016,10 @@ public class InitializationChecker {
             }
         }
         for (initFunc in info.initFuncDecls) {
+            if (initFunc.TestAttr(Attribute.INITIALIZATION_CHECKED) ||
+                (initFunc.TestAttr(Attribute.COMMON) && !initFunc.TestAttr(Attribute.COMMON_WITH_DEFAULT))) {
+                continue
+            }
             CheckInitInConstructor(initFunc, uninitNonFuncDecls)
         }
         for (funcDecl in info.funcDecls) {

@@ -7,12 +7,14 @@ import cangjie_compiler::sema.*
 public enum GlobalVarInitIssueKind {
     | USED_BEFORE_INITIALIZATION
     | INITIALIZATION_CYCLE
+    | COMMON_STATIC_LET_INITIALIZED_IN_STATIC_INIT
 }
 
 private func GlobalVarInitIssueKindIndex(kind: GlobalVarInitIssueKind): Int64 {
     return match (kind) {
         case GlobalVarInitIssueKind.USED_BEFORE_INITIALIZATION => 0
         case GlobalVarInitIssueKind.INITIALIZATION_CYCLE => 1
+        case GlobalVarInitIssueKind.COMMON_STATIC_LET_INITIALIZED_IN_STATIC_INIT => 2
     }
 }
 
@@ -32,13 +34,16 @@ public class GlobalVarInitializationIssue {
     public var refName: String
     public var user: Decl
     public var used: Decl
+    public var message: String
 
-    public init(kind: GlobalVarInitIssueKind, refNode: Node, refName: String, user: Decl, used: Decl) {
+    public init(kind: GlobalVarInitIssueKind, refNode: Node, refName: String, user: Decl, used: Decl,
+        message!: String = "") {
         this.kind = kind
         this.refNode = refNode
         this.refName = refName
         this.user = user
         this.used = used
+        this.message = message
     }
 }
 
@@ -308,6 +313,17 @@ public class GlobalVarInitializationChecker {
                             if (let Some(varTarget) <- (target as VarDecl)) {
                                 if (ContainsDecl(staticVars, varTarget) && !ContainsDecl(visited, varTarget)) {
                                     varTarget.EnableAttr(Attribute.INITIALIZED)
+                                    if (!varTarget.isVar && varTarget.TestAttr(Attribute.COMMON) &&
+                                        varTarget.TestAttr(Attribute.STATIC)) {
+                                        issues.add(GlobalVarInitializationIssue(
+                                            GlobalVarInitIssueKind.COMMON_STATIC_LET_INITIALIZED_IN_STATIC_INIT,
+                                            assign,
+                                            varTarget.identifier.Val(),
+                                            staticInit,
+                                            varTarget,
+                                            message: "common static let cannot be initialized in static init"
+                                        ))
+                                    }
                                     let staticNode = graph.GetOrBuildNode(varTarget)
                                     currentNode = staticNode
                                     staticNode.visitOrder = visitOrder

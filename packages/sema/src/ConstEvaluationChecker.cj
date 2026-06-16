@@ -4,6 +4,8 @@ import std.collection.*
 import cangjie_compiler::ast.*
 import cangjie_compiler::ast.AnnotationKind as AstAnnotationKind
 
+private let CORE_PACKAGE_NAME: String = "std.core"
+
 public enum ConstEvaluationIssueKind {
     | EXPECT_CONST_FUNCTION
     | EXPECT_CONST_EXPRESSION
@@ -99,6 +101,40 @@ private func IsTupleOrVArrayExpr(expr: Expr): Bool {
         }
         if (let Some(_) <- (ty as VArrayTy)) {
             return true
+        }
+    }
+    return false
+}
+
+private func IsStringBinaryExpr(expr: Expr): Bool {
+    if (expr.astKind != ASTKind.BINARY_EXPR) {
+        return false
+    }
+    if (let Some(ty) <- expr.GetTy()) {
+        if (!ty.IsString()) {
+            return false
+        }
+    } else {
+        return false
+    }
+    if (let Some(desugar) <- expr.desugarExpr) {
+        if (let Some(callExpr) <- (desugar as CallExpr)) {
+            if (let Some(baseFunc) <- callExpr.baseFunc) {
+                if (let Some(memberAccess) <- (baseFunc as MemberAccess)) {
+                    if (let Some(baseExpr) <- memberAccess.baseExpr) {
+                        if (let Some(baseTy) <- baseExpr.GetTy()) {
+                            if (!baseTy.IsString()) {
+                                return false
+                            }
+                        } else {
+                            return false
+                        }
+                        if (let Some(target) <- memberAccess.GetTarget()) {
+                            return target.fullPackageName == CORE_PACKAGE_NAME && !callExpr.args.isEmpty()
+                        }
+                    }
+                }
+            }
         }
     }
     return false
@@ -475,6 +511,23 @@ public class ConstEvaluationChecker {
     }
 
     private func ChkDesugarExpr(expr: Expr, isWeak: Bool): Bool {
+        if (IsStringBinaryExpr(expr)) {
+            if (let Some(desugar) <- expr.desugarExpr) {
+                if (let Some(callExpr) <- (desugar as CallExpr)) {
+                    if (let Some(baseFunc) <- callExpr.baseFunc) {
+                        if (let Some(memberAccess) <- (baseFunc as MemberAccess)) {
+                            if (let Some(baseExpr) <- memberAccess.baseExpr) {
+                                var result = ChkExpr(baseExpr, isWeak)
+                                for (arg in callExpr.args) {
+                                    result = ChkOptionalExpr(arg.expr, isWeak) && result
+                                }
+                                return result
+                            }
+                        }
+                    }
+                }
+            }
+        }
         if (let Some(desugar) <- expr.desugarExpr) {
             if (expr.astKind == ASTKind.INC_OR_DEC_EXPR || expr.astKind == ASTKind.TRAIL_CLOSURE_EXPR) {
                 return ChkExpr(desugar, isWeak)
