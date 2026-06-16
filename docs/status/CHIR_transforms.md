@@ -47,7 +47,17 @@ Continuation pass:
   and scopes algebraic result replacement to the expression's parent block
   group, matching the C++ helper's scoped `ReplaceWith` usage more closely.
 
+Second continuation pass:
+
+- `ConstPropagation.cj`: added the C++-style terminator rewrite for branches
+  whose condition is already a constant `Bool`, replacing the branch with a
+  `GoTo` to the taken successor while preserving the original debug location
+  and updating CFG predecessor/successor links through terminator removal.
+- `NoSideEffectMarker.cj`: aligned the no-body function scan with the C++
+  `GetGlobalFuncsWithoutBody()` default filtering, so pure abstract no-body
+  declarations are no longer marked `NO_SIDE_EFFECT` by this pass.
+
 Estimated behavior coverage for the touched transform/optimization surface is
-about 26% versus the C++ reference. The changes above remove several unsafe
+about 27% versus the C++ reference. The changes above remove several unsafe
 behavior differences but the overall CHIR transform/optimization module remains
 far from complete.

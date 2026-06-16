@@ -44,7 +44,9 @@ public class ConstPropagation {
         var idx: Int64 = 0
         while (idx < exprs.size) {
             let expr = exprs[idx]
-            if (TryFoldToConstant(expr)) {
+            if (TryRewriteConstantBranch(expr)) {
+                changed++
+            } else if (TryFoldToConstant(expr)) {
                 changed++
             } else if (TrySimplifyUnary(expr)) {
                 changed++
@@ -74,6 +76,31 @@ public class ConstPropagation {
                             expr.ReplaceWith(newExpr)
                             return true
                         }
+                    }
+                }
+            }
+        }
+        return false
+    }
+
+    private func TryRewriteConstantBranch(expr: Expression): Bool {
+        if (expr.GetExprKind() != ExprKind.BRANCH || expr.GetNumOfOperands() != 1 || builder.isNone()) {
+            return false
+        }
+        if (let Some(takenTrue) <- BoolLiteralValue(expr.GetOperand(0))) {
+            if (let Some(term) <- expr.AsTerminator()) {
+                let successors = term.GetSuccessors()
+                if (successors.size < 2) {
+                    return false
+                }
+                if (let Some(parentBlock) <- expr.GetParentBlock()) {
+                    let target = if (takenTrue) { successors[0] } else { successors[1] }
+                    let loc = expr.GetDebugLocation()
+                    expr.RemoveSelfFromBlock()
+                    if (let Some(chirBuilder) <- builder) {
+                        let gotoExpr = chirBuilder.CreateGoTo(target, parentBlock)
+                        gotoExpr.SetDebugLocation(loc)
+                        return true
                     }
                 }
             }
@@ -146,5 +173,25 @@ public class ConstPropagation {
             }
         }
         return false
+    }
+
+    private func BoolLiteralValue(value: Value): Option<Bool> {
+        if (let Some(local) <- value.AsLocalVar()) {
+            if (let Some(expr) <- local.GetExpr()) {
+                if (let Some(literal) <- constEval.EvaluateToLiteral(expr)) {
+                    if (let Some(boolLiteral) <- (literal as BoolLiteral)) {
+                        return boolLiteral.value
+                    }
+                }
+            }
+        }
+        if (let Some(globalVar) <- value.AsGlobalVar()) {
+            if (let Some(initValue) <- globalVar.GetInitializerValue()) {
+                if (initValue.nodeId != value.nodeId) {
+                    return BoolLiteralValue(initValue)
+                }
+            }
+        }
+        return None
     }
 }
