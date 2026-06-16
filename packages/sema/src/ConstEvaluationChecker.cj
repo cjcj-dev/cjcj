@@ -547,8 +547,8 @@ public class ConstEvaluationChecker {
     private func ChkDesugaredMultipleAssignment(block: Block, isWeak: Bool): Bool {
         var result = true
         for (node in block.body) {
-            if (let Some(decl) <- (node as Decl)) {
-                result = ChkConstDecl(decl) && result
+            if (let Some(varDecl) <- (node as VarDecl)) {
+                result = ChkVarDecl(varDecl) && result
             } else if (let Some(expr) <- (node as Expr)) {
                 result = ChkExpr(expr, isWeak) && result
             }

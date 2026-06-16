@@ -488,7 +488,17 @@ public class InitializationChecker {
         for (paramList in body.paramLists) {
             CheckInitialization(paramList)
         }
-        CheckBlockOption(body.body)
+        var needCheckInLoop = true
+        if (let Some(funcDecl) <- body.funcDecl) {
+            if (let None <- funcDecl.symbol) {
+                needCheckInLoop = false
+            }
+        }
+        if (needCheckInLoop) {
+            CheckInitInLoop(body.body)
+        } else {
+            CheckBlockOption(body.body)
+        }
     }
 
     private func CheckInitInVarWithPatternDecl(vpd: VarWithPatternDecl): Unit {

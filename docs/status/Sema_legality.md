@@ -29,6 +29,8 @@ This pass covers the self-hosted Cangjie port under:
 - Added C++ do-while initialization rollback behavior for variables initialized after an early jump in a body that otherwise executes at least once.
 - Aligned const default-parameter checking with C++ by checking only when the desugared backing declaration is present and can receive the const result.
 - Replaced the earlier no-constructor member-field approximation with the C++ CJMP-specific check for non-common fields without initializers in common class/struct declarations.
+- Matched C++ desugared multiple-assignment const checking by processing only `VarDecl` temporaries and expression nodes in the expanded block.
+- Routed function bodies with resolved symbols through loop-style initialization rollback, matching the C++ `CheckInitInFuncBody` path more closely.
 
 ## Remaining Fidelity Gaps
 
@@ -39,4 +41,4 @@ This pass covers the self-hosted Cangjie port under:
 
 ## Estimate
 
-Honest behavior coverage for this legality/const-evaluation scope is about 56% versus the C++ reference. The port now has real traversal and issue production in the scoped files, plus several targeted C++ edge cases, but production completeness still requires diagnostic integration and the remaining exact semantic edge cases above.
+Honest behavior coverage for this legality/const-evaluation scope is about 57% versus the C++ reference. The port now has real traversal and issue production in the scoped files, plus several targeted C++ edge cases, but production completeness still requires diagnostic integration and the remaining exact semantic edge cases above.
