@@ -67,6 +67,30 @@ Implemented:
   C++-shaped `@`-prefixed `CustomTypeDef` identifiers are normalized before use.
 - Aligned CHIR overflow-operator helper-name generation with the C++ assertion behavior by rejecting
   unsupported operator spellings instead of emitting a malformed `_CO` name.
+- De-isolated Mangle linkage handling to the real `Linkage` enum re-exported by `cangjie_compiler::ast`,
+  removing the module-local `MangleLinkage` clone and adapter conversion.
+- De-isolated CHIR overflow helper APIs to the real `OverflowStrategy` enum re-exported by
+  `cangjie_compiler::ast`, removing the module-local overflow-strategy clone.
+- De-isolated descriptor declaration/type-annotation/pattern kind handling to the real
+  `cangjie_compiler::ast.ASTKind`, removing the module-local `MangleAstKind` clone and the adapter's
+  kind conversion layer.
+- De-isolated descriptor declaration and function-parameter attributes to the real
+  `cangjie_compiler::ast.Attribute`, removing the module-local `MangleAttribute` clone.
+- De-isolated descriptor semantic type kinds to the real `cangjie_compiler::ast.TypeKind` and
+  `TypeKindName`, removing the module-local `MangleTypeKind` clone and conversion layer.
+- De-isolated descriptor CHIR type kinds to the real `cangjie_compiler::chir.TypeKind`, removing the
+  module-local `CHIRTypeKind` clone and sharing the same primitive dispatcher as real CHIR overloads.
+- Aligned parser-AST `FuncParam` declaration suffix mangling with C++ `IsMemberParam`: ordinary function
+  parameters no longer receive the member-var type discriminator, while primary-constructor member
+  parameters still do.
+- Aligned extend indexing buckets with C++ semantic-type grouping by using the converted extended
+  semantic type string when available instead of the parsed annotation spelling.
+- Aligned CHIR type and type-qualified-name fallthrough behavior with C++ `CJC_ASSERT` paths by rejecting
+  invalid or unsupported type kinds, missing descriptor element/base payloads, malformed CPointer types,
+  and AutoEnv descriptor misuse instead of emitting empty or partial names.
+- Aligned descriptor semantic-type and extend-entity failure behavior with C++ `CJC_ASSERT`/null-check paths
+  by rejecting unsupported user-defined type kinds, missing nominal declarations, malformed raw-array and
+  CPointer payloads, missing function-parameter semantic types, and incomplete extend context/index data.
 
 Known fidelity caveats:
 

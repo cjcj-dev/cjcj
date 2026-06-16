@@ -2,6 +2,7 @@ package cangjie_compiler::mangle
 
 import std.collection.*
 import std.sort.*
+import cangjie_compiler::ast.OverflowStrategy
 import cangjie_compiler::chir.*
 
 public let MANGLE_VIRTUAL_PREFIX: String = "_CV"
@@ -21,14 +22,6 @@ public let MANGLE_ABSTRACT_INST_PREFIX: String = "$i"
 public let MANGLE_ABSTRACT_GENERIC_PREFIX: String = "$vg"
 public let MANGLE_ABSTRACT_INSTANTIATED_PREFIX: String = "$vi"
 public let MANGLE_CHIR_GENERIC_SUFFIX: String = "$g"
-
-public enum MangleOverflowStrategy {
-    | NA
-    | CHECKED
-    | WRAPPING
-    | THROWING
-    | SATURATING
-}
 
 public class CHIRFunction {
     public var identifier: String = ""
@@ -175,10 +168,10 @@ public func GenerateLambdaFuncMangleName(baseFunc: Function, counter: Int64): St
         MANGLE_DOLLAR_PREFIX + "${counter}" + MANGLE_WILDCARD_PREFIX
 }
 
-public func OverflowStrategyToString(ovf: MangleOverflowStrategy): String {
+public func OverflowStrategyToString(ovf: OverflowStrategy): String {
     return match (ovf) {
-        case MangleOverflowStrategy.WRAPPING => "&"
-        case MangleOverflowStrategy.THROWING => "~"
+        case OverflowStrategy.WRAPPING => "&"
+        case OverflowStrategy.THROWING => "~"
         case _ => "%"
     }
 }
@@ -190,7 +183,7 @@ private func OverflowOperatorMangleCode(name: String): String {
     throw IllegalArgumentException("Unsupported name for overflow operator mangling: " + name)
 }
 
-public func GenerateOverflowOperatorFuncMangleName(name: String, ovf: MangleOverflowStrategy, isBinary: Bool,
+public func GenerateOverflowOperatorFuncMangleName(name: String, ovf: OverflowStrategy, isBinary: Bool,
     typeInfo: CHIRType): String {
     var out = MANGLE_OPERATOR_PREFIX + OverflowStrategyToString(ovf) + OverflowOperatorMangleCode(name)
     out += MANGLE_FUNC_PARAM_TYPE_PREFIX + MangleCHIRType(typeInfo)
@@ -200,7 +193,7 @@ public func GenerateOverflowOperatorFuncMangleName(name: String, ovf: MangleOver
     return out
 }
 
-public func GenerateOverflowOperatorFuncMangleName(name: String, ovf: MangleOverflowStrategy, isBinary: Bool,
+public func GenerateOverflowOperatorFuncMangleName(name: String, ovf: OverflowStrategy, isBinary: Bool,
     typeInfo: BuiltinType): String {
     var out = MANGLE_OPERATOR_PREFIX + OverflowStrategyToString(ovf) + OverflowOperatorMangleCode(name)
     out += MANGLE_FUNC_PARAM_TYPE_PREFIX + MangleCHIRType(typeInfo)

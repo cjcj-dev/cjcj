@@ -33,158 +33,68 @@ private class AstAnnotationArrayPair {
     }
 }
 
-private func ConvertAstKind(kind: ASTKind): MangleAstKind {
-    return match (kind) {
-        case ASTKind.MAIN_DECL => MangleAstKind.MAIN_DECL
-        case ASTKind.FUNC_DECL => MangleAstKind.FUNC_DECL
-        case ASTKind.MACRO_DECL => MangleAstKind.MACRO_DECL
-        case ASTKind.CLASS_DECL => MangleAstKind.CLASS_DECL
-        case ASTKind.INTERFACE_DECL => MangleAstKind.INTERFACE_DECL
-        case ASTKind.EXTEND_DECL => MangleAstKind.EXTEND_DECL
-        case ASTKind.ENUM_DECL => MangleAstKind.ENUM_DECL
-        case ASTKind.STRUCT_DECL => MangleAstKind.STRUCT_DECL
-        case ASTKind.TYPE_ALIAS_DECL => MangleAstKind.TYPE_ALIAS_DECL
-        case ASTKind.PRIMARY_CTOR_DECL => MangleAstKind.PRIMARY_CTOR_DECL
-        case ASTKind.BUILTIN_DECL => MangleAstKind.BUILTIN_DECL
-        case ASTKind.VAR_DECL => MangleAstKind.VAR_DECL
-        case ASTKind.PROP_DECL => MangleAstKind.PROP_DECL
-        case ASTKind.FUNC_PARAM => MangleAstKind.FUNC_PARAM
-        case ASTKind.VAR_WITH_PATTERN_DECL => MangleAstKind.VAR_WITH_PATTERN_DECL
-        case ASTKind.GENERIC_PARAM_DECL => MangleAstKind.GENERIC_PARAM_DECL
-        case ASTKind.PACKAGE => MangleAstKind.PACKAGE
-        case ASTKind.FILE => MangleAstKind.FILE
-        case ASTKind.LAMBDA_EXPR => MangleAstKind.LAMBDA_EXPR
-        case ASTKind.REF_TYPE => MangleAstKind.REF_TYPE
-        case ASTKind.QUALIFIED_TYPE => MangleAstKind.QUALIFIED_TYPE
-        case ASTKind.OPTION_TYPE => MangleAstKind.OPTION_TYPE
-        case ASTKind.CONSTANT_TYPE => MangleAstKind.CONSTANT_TYPE
-        case ASTKind.VARRAY_TYPE => MangleAstKind.VARRAY_TYPE
-        case ASTKind.PRIMITIVE_TYPE => MangleAstKind.PRIMITIVE_TYPE
-        case ASTKind.PAREN_TYPE => MangleAstKind.PAREN_TYPE
-        case ASTKind.FUNC_TYPE => MangleAstKind.FUNC_TYPE
-        case ASTKind.TUPLE_TYPE => MangleAstKind.TUPLE_TYPE
-        case ASTKind.THIS_TYPE => MangleAstKind.THIS_TYPE
-        case ASTKind.WILDCARD_PATTERN => MangleAstKind.WILDCARD_PATTERN
-        case ASTKind.VAR_PATTERN => MangleAstKind.VAR_PATTERN
-        case ASTKind.TUPLE_PATTERN => MangleAstKind.TUPLE_PATTERN
-        case ASTKind.ENUM_PATTERN => MangleAstKind.ENUM_PATTERN
-        case _ => MangleAstKind.INVALID
-    }
-}
-
-private func ConvertTypeKind(kind: TypeKind): MangleTypeKind {
-    return match (kind) {
-        case TypeKind.TYPE_UNIT => MangleTypeKind.TYPE_UNIT
-        case TypeKind.TYPE_INT8 => MangleTypeKind.TYPE_INT8
-        case TypeKind.TYPE_INT16 => MangleTypeKind.TYPE_INT16
-        case TypeKind.TYPE_INT32 => MangleTypeKind.TYPE_INT32
-        case TypeKind.TYPE_INT64 => MangleTypeKind.TYPE_INT64
-        case TypeKind.TYPE_INT_NATIVE => MangleTypeKind.TYPE_INT_NATIVE
-        case TypeKind.TYPE_IDEAL_INT => MangleTypeKind.TYPE_IDEAL_INT
-        case TypeKind.TYPE_UINT8 => MangleTypeKind.TYPE_UINT8
-        case TypeKind.TYPE_UINT16 => MangleTypeKind.TYPE_UINT16
-        case TypeKind.TYPE_UINT32 => MangleTypeKind.TYPE_UINT32
-        case TypeKind.TYPE_UINT64 => MangleTypeKind.TYPE_UINT64
-        case TypeKind.TYPE_UINT_NATIVE => MangleTypeKind.TYPE_UINT_NATIVE
-        case TypeKind.TYPE_FLOAT16 => MangleTypeKind.TYPE_FLOAT16
-        case TypeKind.TYPE_FLOAT32 => MangleTypeKind.TYPE_FLOAT32
-        case TypeKind.TYPE_FLOAT64 => MangleTypeKind.TYPE_FLOAT64
-        case TypeKind.TYPE_IDEAL_FLOAT => MangleTypeKind.TYPE_IDEAL_FLOAT
-        case TypeKind.TYPE_RUNE => MangleTypeKind.TYPE_RUNE
-        case TypeKind.TYPE_NOTHING => MangleTypeKind.TYPE_NOTHING
-        case TypeKind.TYPE_BOOLEAN => MangleTypeKind.TYPE_BOOLEAN
-        case TypeKind.TYPE_TUPLE => MangleTypeKind.TYPE_TUPLE
-        case TypeKind.TYPE_ENUM => MangleTypeKind.TYPE_ENUM
-        case TypeKind.TYPE_FUNC => MangleTypeKind.TYPE_FUNC
-        case TypeKind.TYPE_STRUCT => MangleTypeKind.TYPE_STRUCT
-        case TypeKind.TYPE_ARRAY => MangleTypeKind.TYPE_ARRAY
-        case TypeKind.TYPE_VARRAY => MangleTypeKind.TYPE_VARRAY
-        case TypeKind.TYPE_POINTER => MangleTypeKind.TYPE_POINTER
-        case TypeKind.TYPE_CSTRING => MangleTypeKind.TYPE_CSTRING
-        case TypeKind.TYPE_CLASS => MangleTypeKind.TYPE_CLASS
-        case TypeKind.TYPE_INTERFACE => MangleTypeKind.TYPE_INTERFACE
-        case TypeKind.TYPE_GENERICS => MangleTypeKind.TYPE_GENERICS
-        case TypeKind.TYPE_ANY => MangleTypeKind.TYPE_ANY
-        case TypeKind.TYPE_INTERSECTION => MangleTypeKind.TYPE_INTERSECTION
-        case TypeKind.TYPE_UNION => MangleTypeKind.TYPE_UNION
-        case TypeKind.TYPE_QUEST => MangleTypeKind.TYPE_QUEST
-        case TypeKind.TYPE_INITIAL => MangleTypeKind.TYPE_INITIAL
-        case _ => MangleTypeKind.TYPE_INVALID
-    }
-}
-
-private func ConvertLinkage(linkage: Linkage): MangleLinkage {
-    return match (linkage) {
-        case Linkage.WEAK_ODR => MangleLinkage.WEAK_ODR
-        case Linkage.EXTERNAL => MangleLinkage.EXTERNAL
-        case Linkage.INTERNAL => MangleLinkage.INTERNAL
-        case Linkage.LINKONCE_ODR => MangleLinkage.LINKONCE_ODR
-        case Linkage.EXTERNAL_WEAK => MangleLinkage.EXTERNAL_WEAK
-    }
-}
-
-private func AddAttrIf(target: MangleDecl, condition: Bool, attr: MangleAttribute): Unit {
+private func AddAttrIf(target: MangleDecl, condition: Bool, attr: Attribute): Unit {
     if (condition) {
         target.attrs.add(attr)
     }
 }
 
-private func AddParamAttrIf(target: MangleFuncParam, condition: Bool, attr: MangleAttribute): Unit {
+private func AddParamAttrIf(target: MangleFuncParam, condition: Bool, attr: Attribute): Unit {
     if (condition) {
         target.attrs.add(attr)
     }
 }
 
 private func CopyDeclAttributes(source: Decl, target: MangleDecl): Unit {
-    AddAttrIf(target, source.TestAttr(Attribute.GLOBAL), MangleAttribute.GLOBAL)
-    AddAttrIf(target, source.TestAttr(Attribute.STATIC), MangleAttribute.STATIC)
-    AddAttrIf(target, source.TestAttr(Attribute.PUBLIC), MangleAttribute.PUBLIC)
-    AddAttrIf(target, source.TestAttr(Attribute.PRIVATE), MangleAttribute.PRIVATE)
-    AddAttrIf(target, source.TestAttr(Attribute.PROTECTED), MangleAttribute.PROTECTED)
-    AddAttrIf(target, source.TestAttr(Attribute.INTERNAL), MangleAttribute.INTERNAL)
-    AddAttrIf(target, source.TestAttr(Attribute.NO_MANGLE), MangleAttribute.NO_MANGLE)
-    AddAttrIf(target, source.TestAttr(Attribute.GENERIC), MangleAttribute.GENERIC)
-    AddAttrIf(target, source.TestAttr(Attribute.GENERIC_INSTANTIATED), MangleAttribute.GENERIC_INSTANTIATED)
-    AddAttrIf(target, source.TestAttr(Attribute.HAS_INITIAL), MangleAttribute.HAS_INITIAL)
-    AddAttrIf(target, source.TestAttr(Attribute.CONSTRUCTOR), MangleAttribute.CONSTRUCTOR)
-    AddAttrIf(target, source.TestAttr(Attribute.MAIN_ENTRY), MangleAttribute.MAIN_ENTRY)
-    AddAttrIf(target, source.TestAttr(Attribute.OPERATOR), MangleAttribute.OPERATOR)
-    AddAttrIf(target, source.TestAttr(Attribute.DEFAULT), MangleAttribute.DEFAULT)
-    AddAttrIf(target, source.TestAttr(Attribute.ABSTRACT), MangleAttribute.ABSTRACT)
-    AddAttrIf(target, source.TestAttr(Attribute.COMMON), MangleAttribute.COMMON)
-    AddAttrIf(target, source.TestAttr(Attribute.SPECIFIC), MangleAttribute.SPECIFIC)
-    AddAttrIf(target, source.TestAttr(Attribute.FOR_TEST), MangleAttribute.FOR_TEST)
+    AddAttrIf(target, source.TestAttr(Attribute.GLOBAL), Attribute.GLOBAL)
+    AddAttrIf(target, source.TestAttr(Attribute.STATIC), Attribute.STATIC)
+    AddAttrIf(target, source.TestAttr(Attribute.PUBLIC), Attribute.PUBLIC)
+    AddAttrIf(target, source.TestAttr(Attribute.PRIVATE), Attribute.PRIVATE)
+    AddAttrIf(target, source.TestAttr(Attribute.PROTECTED), Attribute.PROTECTED)
+    AddAttrIf(target, source.TestAttr(Attribute.INTERNAL), Attribute.INTERNAL)
+    AddAttrIf(target, source.TestAttr(Attribute.NO_MANGLE), Attribute.NO_MANGLE)
+    AddAttrIf(target, source.TestAttr(Attribute.GENERIC), Attribute.GENERIC)
+    AddAttrIf(target, source.TestAttr(Attribute.GENERIC_INSTANTIATED), Attribute.GENERIC_INSTANTIATED)
+    AddAttrIf(target, source.TestAttr(Attribute.HAS_INITIAL), Attribute.HAS_INITIAL)
+    AddAttrIf(target, source.TestAttr(Attribute.CONSTRUCTOR), Attribute.CONSTRUCTOR)
+    AddAttrIf(target, source.TestAttr(Attribute.MAIN_ENTRY), Attribute.MAIN_ENTRY)
+    AddAttrIf(target, source.TestAttr(Attribute.OPERATOR), Attribute.OPERATOR)
+    AddAttrIf(target, source.TestAttr(Attribute.DEFAULT), Attribute.DEFAULT)
+    AddAttrIf(target, source.TestAttr(Attribute.ABSTRACT), Attribute.ABSTRACT)
+    AddAttrIf(target, source.TestAttr(Attribute.COMMON), Attribute.COMMON)
+    AddAttrIf(target, source.TestAttr(Attribute.SPECIFIC), Attribute.SPECIFIC)
+    AddAttrIf(target, source.TestAttr(Attribute.FOR_TEST), Attribute.FOR_TEST)
     for (modifier in source.modifiers) {
         if (modifier.modifier == TokenKind.PUBLIC) {
-            AddAttrIf(target, true, MangleAttribute.PUBLIC)
+            AddAttrIf(target, true, Attribute.PUBLIC)
         } else if (modifier.modifier == TokenKind.PRIVATE) {
-            AddAttrIf(target, true, MangleAttribute.PRIVATE)
+            AddAttrIf(target, true, Attribute.PRIVATE)
         } else if (modifier.modifier == TokenKind.PROTECTED) {
-            AddAttrIf(target, true, MangleAttribute.PROTECTED)
+            AddAttrIf(target, true, Attribute.PROTECTED)
         } else if (modifier.modifier == TokenKind.INTERNAL) {
-            AddAttrIf(target, true, MangleAttribute.INTERNAL)
+            AddAttrIf(target, true, Attribute.INTERNAL)
         }
     }
 }
 
 private func CopyParamAttributes(source: FuncParam, target: MangleFuncParam): Unit {
-    AddParamAttrIf(target, source.TestAttr(Attribute.PUBLIC), MangleAttribute.PUBLIC)
-    AddParamAttrIf(target, source.TestAttr(Attribute.PRIVATE), MangleAttribute.PRIVATE)
-    AddParamAttrIf(target, source.TestAttr(Attribute.PROTECTED), MangleAttribute.PROTECTED)
-    AddParamAttrIf(target, source.TestAttr(Attribute.INTERNAL), MangleAttribute.INTERNAL)
+    AddParamAttrIf(target, source.TestAttr(Attribute.PUBLIC), Attribute.PUBLIC)
+    AddParamAttrIf(target, source.TestAttr(Attribute.PRIVATE), Attribute.PRIVATE)
+    AddParamAttrIf(target, source.TestAttr(Attribute.PROTECTED), Attribute.PROTECTED)
+    AddParamAttrIf(target, source.TestAttr(Attribute.INTERNAL), Attribute.INTERNAL)
     target.hasAccessibilityModifiers = true
     for (modifier in source.modifiers) {
         if (modifier.modifier == TokenKind.PUBLIC) {
             target.accessibilityModifiers += MANGLE_PUBLIC_PREFIX
-            AddParamAttrIf(target, true, MangleAttribute.PUBLIC)
+            AddParamAttrIf(target, true, Attribute.PUBLIC)
         } else if (modifier.modifier == TokenKind.PRIVATE) {
             target.accessibilityModifiers += MANGLE_PRIVATE_PREFIX
-            AddParamAttrIf(target, true, MangleAttribute.PRIVATE)
+            AddParamAttrIf(target, true, Attribute.PRIVATE)
         } else if (modifier.modifier == TokenKind.PROTECTED) {
             target.accessibilityModifiers += MANGLE_PROTECTED_PREFIX
-            AddParamAttrIf(target, true, MangleAttribute.PROTECTED)
+            AddParamAttrIf(target, true, Attribute.PROTECTED)
         } else if (modifier.modifier == TokenKind.INTERNAL) {
-            AddParamAttrIf(target, true, MangleAttribute.INTERNAL)
+            AddParamAttrIf(target, true, Attribute.INTERNAL)
         }
     }
 }
@@ -264,7 +174,7 @@ public class MangleAstAdapter {
     }
 
     public func ConvertPackage(pkg: Package): MangleDecl {
-        let target = MangleDecl(MangleAstKind.PACKAGE, pkg.fullPackageName, fullPackageName: pkg.fullPackageName)
+        let target = MangleDecl(ASTKind.PACKAGE, pkg.fullPackageName, fullPackageName: pkg.fullPackageName)
         for (file in pkg.files) {
             for (decl in file.decls) {
                 let member = ConvertDecl(decl)
@@ -293,7 +203,7 @@ public class MangleAstAdapter {
         if (let Some(cached) <- FindDecl(source)) {
             return cached
         }
-        let target = MangleDecl(ConvertAstKind(source.astKind), source.identifier.Val(),
+        let target = MangleDecl(source.astKind, source.identifier.Val(),
             fullPackageName: PackageNameOf(source))
         StoreDecl(source, target)
 
@@ -301,7 +211,7 @@ public class MangleAstAdapter {
         target.mangledName = source.mangledName
         target.exportId = source.exportId
         target.moduleName = source.moduleName
-        target.linkage = ConvertLinkage(source.linkage)
+        target.linkage = source.linkage
         if (let Some(file) <- source.curFile) {
             target.curFile = ConvertFile(file)
         }
@@ -339,7 +249,7 @@ public class MangleAstAdapter {
         if (let Some(cached) <- FindLambda(source)) {
             return cached
         }
-        let target = MangleDecl(MangleAstKind.LAMBDA_EXPR, "", fullPackageName: PackageNameOf(source))
+        let target = MangleDecl(ASTKind.LAMBDA_EXPR, "", fullPackageName: PackageNameOf(source))
         StoreLambda(source, target)
         target.mangledName = source.mangledName
         if (let Some(file) <- source.curFile) {
@@ -358,7 +268,7 @@ public class MangleAstAdapter {
         if (let Some(cached) <- FindAnnotationArray(source)) {
             return cached
         }
-        let target = MangleDecl(MangleAstKind.INVALID, "<annotations>", fullPackageName: owner.fullPackageName)
+        let target = MangleDecl(ASTKind.NODE, "<annotations>", fullPackageName: owner.fullPackageName)
         target.outerDecl = owner
         target.curFile = owner.curFile
         StoreAnnotationArray(source, target)
@@ -575,6 +485,9 @@ public class MangleAstAdapter {
                 target.typeAnnotation = ConvertTypeAnnotation(typeNode)
             }
         }
+        if (let Some(funcParam) <- (source as FuncParam)) {
+            target.isMemberParam = funcParam.isMemberParam
+        }
         if (let Some(typeAlias) <- (source as TypeAliasDecl)) {
             if (let Some(typeNode) <- typeAlias.typeNode) {
                 target.typeAnnotation = ConvertTypeAnnotation(typeNode)
@@ -693,7 +606,7 @@ public class MangleAstAdapter {
     }
 
     public func ConvertPattern(pattern: Pattern): ManglePattern {
-        let target = ManglePattern(ConvertAstKind(pattern.astKind))
+        let target = ManglePattern(pattern.astKind)
         if (let Some(varPattern) <- (pattern as VarPattern)) {
             if (let Some(varDecl) <- varPattern.varDecl) {
                 target.varDecl = ConvertDecl(varDecl)
@@ -713,7 +626,7 @@ public class MangleAstAdapter {
     }
 
     public func ConvertTypeAnnotation(typeNode: Type): MangleTypeAnnotation {
-        let target = MangleTypeAnnotation(ConvertAstKind(typeNode.astKind), typeNode.ToString())
+        let target = MangleTypeAnnotation(typeNode.astKind, typeNode.ToString())
         if (let Some(ty) <- typeNode.GetTy()) {
             target.ty = ConvertTy(ty)
         }
@@ -783,7 +696,7 @@ public class MangleAstAdapter {
             }
         }
 
-        let target = MangleType(ConvertTypeKind(source.kind), source.name)
+        let target = MangleType(source.kind, source.name)
         for (arg in source.typeArgs) {
             target.typeArgs.add(ConvertTy(arg))
         }

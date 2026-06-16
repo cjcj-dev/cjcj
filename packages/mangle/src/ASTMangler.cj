@@ -127,16 +127,16 @@ private func MangleQualifiedTypeAnnotation(typeAnnotation: MangleTypeAnnotation)
 
 public func MangleAstType(typeAnnotation: MangleTypeAnnotation): String {
     return match (typeAnnotation.astKind) {
-        case MangleAstKind.PRIMITIVE_TYPE => ASTMangler.ManglePrimitiveType(typeAnnotation)
-        case MangleAstKind.REF_TYPE => MangleRefTypeAnnotation(typeAnnotation)
-        case MangleAstKind.PAREN_TYPE => MangleParenTypeAnnotation(typeAnnotation)
-        case MangleAstKind.OPTION_TYPE => MangleOptionTypeAnnotation(typeAnnotation)
-        case MangleAstKind.CONSTANT_TYPE => MangleConstantTypeAnnotation(typeAnnotation)
-        case MangleAstKind.VARRAY_TYPE => MangleVArrayTypeAnnotation(typeAnnotation)
-        case MangleAstKind.FUNC_TYPE => MangleFuncTypeAnnotation(typeAnnotation)
-        case MangleAstKind.TUPLE_TYPE => MangleTupleTypeAnnotation(typeAnnotation)
-        case MangleAstKind.QUALIFIED_TYPE => MangleQualifiedTypeAnnotation(typeAnnotation)
-        case MangleAstKind.THIS_TYPE => MANGLE_THIS_PREFIX
+        case ASTKind.PRIMITIVE_TYPE => ASTMangler.ManglePrimitiveType(typeAnnotation)
+        case ASTKind.REF_TYPE => MangleRefTypeAnnotation(typeAnnotation)
+        case ASTKind.PAREN_TYPE => MangleParenTypeAnnotation(typeAnnotation)
+        case ASTKind.OPTION_TYPE => MangleOptionTypeAnnotation(typeAnnotation)
+        case ASTKind.CONSTANT_TYPE => MangleConstantTypeAnnotation(typeAnnotation)
+        case ASTKind.VARRAY_TYPE => MangleVArrayTypeAnnotation(typeAnnotation)
+        case ASTKind.FUNC_TYPE => MangleFuncTypeAnnotation(typeAnnotation)
+        case ASTKind.TUPLE_TYPE => MangleTupleTypeAnnotation(typeAnnotation)
+        case ASTKind.QUALIFIED_TYPE => MangleQualifiedTypeAnnotation(typeAnnotation)
+        case ASTKind.THIS_TYPE => MANGLE_THIS_PREFIX
         case _ => ""
     }
 }
@@ -151,31 +151,31 @@ private func MangleAccessibility(param: MangleFuncParam): String {
         return param.accessibilityModifiers
     }
     var res = ""
-    if (param.TestAttr(MangleAttribute.PUBLIC)) {
+    if (param.TestAttr(Attribute.PUBLIC)) {
         res += MANGLE_PUBLIC_PREFIX
     }
-    if (param.TestAttr(MangleAttribute.PROTECTED)) {
+    if (param.TestAttr(Attribute.PROTECTED)) {
         res += MANGLE_PROTECTED_PREFIX
     }
-    if (param.TestAttr(MangleAttribute.PRIVATE)) {
+    if (param.TestAttr(Attribute.PRIVATE)) {
         res += MANGLE_PRIVATE_PREFIX
     }
     return res
 }
 
-private func MangleDeclAstKind(kind: MangleAstKind): String {
+private func MangleDeclAstKind(kind: ASTKind): String {
     return match (kind) {
-        case MangleAstKind.FUNC_DECL => "F"
-        case MangleAstKind.MACRO_DECL => "M"
-        case MangleAstKind.CLASS_DECL => "C"
-        case MangleAstKind.INTERFACE_DECL => "I"
-        case MangleAstKind.EXTEND_DECL => "X"
-        case MangleAstKind.ENUM_DECL => "U"
-        case MangleAstKind.STRUCT_DECL => "S"
-        case MangleAstKind.TYPE_ALIAS_DECL => "T"
-        case MangleAstKind.PRIMARY_CTOR_DECL => "Y"
-        case MangleAstKind.VAR_DECL => "V"
-        case MangleAstKind.PROP_DECL => "P"
+        case ASTKind.FUNC_DECL => "F"
+        case ASTKind.MACRO_DECL => "M"
+        case ASTKind.CLASS_DECL => "C"
+        case ASTKind.INTERFACE_DECL => "I"
+        case ASTKind.EXTEND_DECL => "X"
+        case ASTKind.ENUM_DECL => "U"
+        case ASTKind.STRUCT_DECL => "S"
+        case ASTKind.TYPE_ALIAS_DECL => "T"
+        case ASTKind.PRIMARY_CTOR_DECL => "Y"
+        case ASTKind.VAR_DECL => "V"
+        case ASTKind.PROP_DECL => "P"
         case _ => ""
     }
 }
@@ -225,11 +225,11 @@ private func sortedGenericConstraints(values: ArrayList<GenericConstraintMangle>
 }
 
 private func flattenVarWithPattern(pattern: ManglePattern, out: ArrayList<ManglePattern>): Unit {
-    if (pattern.astKind == MangleAstKind.VAR_PATTERN || pattern.astKind == MangleAstKind.WILDCARD_PATTERN) {
+    if (pattern.astKind == ASTKind.VAR_PATTERN || pattern.astKind == ASTKind.WILDCARD_PATTERN) {
         out.add(pattern)
         return
     }
-    if (pattern.astKind == MangleAstKind.TUPLE_PATTERN || pattern.astKind == MangleAstKind.ENUM_PATTERN) {
+    if (pattern.astKind == ASTKind.TUPLE_PATTERN || pattern.astKind == ASTKind.ENUM_PATTERN) {
         for (child in pattern.patterns) {
             flattenVarWithPattern(child, out)
         }
@@ -245,10 +245,10 @@ public class ASTMangler {
     }
 
     public func Mangle(decl: MangleDecl): String {
-        if (decl.astKind == MangleAstKind.VAR_WITH_PATTERN_DECL) {
+        if (decl.astKind == ASTKind.VAR_WITH_PATTERN_DECL) {
             return MangleVarWithPatternDecl(decl)
         }
-        if (decl.astKind == MangleAstKind.EXTEND_DECL) {
+        if (decl.astKind == ASTKind.EXTEND_DECL) {
             var mangled = ""
             MangleExtendDecl(decl, mangledRef: StringRef(mangled))
             return MangleExtendDeclString(decl)
@@ -266,7 +266,7 @@ public class ASTMangler {
             return value
         }
         if (let Some(ty) <- typeAnnotation.ty) {
-            if (ty.kind == MangleTypeKind.TYPE_INITIAL) {
+            if (ty.kind == TypeKind.TYPE_INITIAL) {
                 return MANGLE_INITIAL_PREFIX
             }
         }
@@ -297,7 +297,7 @@ public class ASTMangler {
 
     private func MangleFullPackageName(decl: MangleDecl): String {
         let ret = MangleName(fullPackageName)
-        if (decl.TestAttr(MangleAttribute.GLOBAL) && decl.TestAttr(MangleAttribute.PRIVATE)) {
+        if (decl.TestAttr(Attribute.GLOBAL) && decl.TestAttr(Attribute.PRIVATE)) {
             return ret + MangleFilePrivate(decl)
         }
         return ret
@@ -330,8 +330,8 @@ public class ASTMangler {
         var mangled = MangleFullPackageName(decl)
         mangled += MangleExtendLiteralIfInExtend(decl)
         mangled += MangleNestedDecl(decl)
-        let useInternalIdent = decl.TestAnyAttr(MangleAttribute.CONSTRUCTOR, MangleAttribute.MAIN_ENTRY) &&
-            decl.astKind != MangleAstKind.PRIMARY_CTOR_DECL
+        let useInternalIdent = decl.TestAnyAttr(Attribute.CONSTRUCTOR, Attribute.MAIN_ENTRY) &&
+            decl.astKind != ASTKind.PRIMARY_CTOR_DECL
         if (useInternalIdent) {
             mangled += MangleName(MANGLE_LT_PREFIX + decl.identifier + MANGLE_GT_PREFIX)
         } else {
@@ -339,10 +339,10 @@ public class ASTMangler {
         }
         mangled += MangleGenericArguments(decl)
         mangled += MangleDeclAstKind(decl.astKind)
-        if (decl.astKind == MangleAstKind.FUNC_DECL && decl.TestAttr(MangleAttribute.CONSTRUCTOR) &&
-            decl.TestAttr(MangleAttribute.STATIC)) {
+        if (decl.astKind == ASTKind.FUNC_DECL && decl.TestAttr(Attribute.CONSTRUCTOR) &&
+            decl.TestAttr(Attribute.STATIC)) {
             let initSuffix = MangleName(MANGLE_LT_PREFIX + decl.identifier + MANGLE_GT_PREFIX) +
-                MangleDeclAstKind(MangleAstKind.FUNC_DECL)
+                MangleDeclAstKind(ASTKind.FUNC_DECL)
             if (EndsWith(mangled, initSuffix)) {
                 mangled = mangled[0..mangled.size - initSuffix.size] + MangleName(STATIC_INIT_FUNC)
             }
@@ -353,28 +353,29 @@ public class ASTMangler {
 
     private func MangleOthers(decl: MangleDecl): String {
         var mangled = ""
-        if (decl.astKind == MangleAstKind.VAR_DECL || decl.astKind == MangleAstKind.FUNC_PARAM) {
+        if (decl.astKind == ASTKind.VAR_DECL ||
+            (decl.astKind == ASTKind.FUNC_PARAM && decl.isMemberParam)) {
             mangled += MANGLE_DIDOLLAR_PREFIX
             if (let Some(typeAnnotation) <- decl.typeAnnotation) {
                 mangled += MangleAstType(typeAnnotation)
             }
         }
-        if (decl.astKind == MangleAstKind.MAIN_DECL || decl.astKind == MangleAstKind.FUNC_DECL ||
-            decl.astKind == MangleAstKind.MACRO_DECL || decl.astKind == MangleAstKind.PRIMARY_CTOR_DECL) {
+        if (decl.astKind == ASTKind.MAIN_DECL || decl.astKind == ASTKind.FUNC_DECL ||
+            decl.astKind == ASTKind.MACRO_DECL || decl.astKind == ASTKind.PRIMARY_CTOR_DECL) {
             if (let Some(body) <- decl.funcBody) {
                 mangled += MangleFuncParameters(body.params)
-                if (decl.astKind == MangleAstKind.FUNC_DECL) {
+                if (decl.astKind == ASTKind.FUNC_DECL) {
                     mangled += MANGLE_DIDOLLAR_PREFIX
                     if (let Some(retType) <- body.retType) {
                         mangled += MangleAstType(retType)
                     } else if (let Some(outer) <- decl.outerDecl) {
-                        if (outer.astKind == MangleAstKind.PROP_DECL) {
+                        if (outer.astKind == ASTKind.PROP_DECL) {
                             if (let Some(typeAnnotation) <- outer.typeAnnotation) {
                                 mangled += MangleAstType(typeAnnotation)
                             }
                         }
                     }
-                } else if (decl.astKind == MangleAstKind.MAIN_DECL) {
+                } else if (decl.astKind == ASTKind.MAIN_DECL) {
                     if (let Some(retType) <- body.retType) {
                         mangled += MangleAstType(retType)
                     }
@@ -386,7 +387,7 @@ public class ASTMangler {
 
     private func MangleExtendLiteralIfInExtend(decl: MangleDecl): String {
         if (let Some(outer) <- decl.outerDecl) {
-            if (outer.astKind == MangleAstKind.EXTEND_DECL) {
+            if (outer.astKind == ASTKind.EXTEND_DECL) {
                 return MangleName(MANGLE_EXIG_PREFIX)
             }
         }
@@ -395,7 +396,7 @@ public class ASTMangler {
 
     private func MangleGenericArguments(decl: MangleDecl): String {
         let args = ArrayList<String>()
-        if (decl.astKind == MangleAstKind.FUNC_DECL) {
+        if (decl.astKind == ASTKind.FUNC_DECL) {
             if (let Some(body) <- decl.funcBody) {
                 if (let Some(generic) <- body.generic) {
                     for (arg in generic.typeParameters) {
@@ -404,7 +405,7 @@ public class ASTMangler {
                 }
             }
         } else if (let Some(generic) <- decl.generic) {
-            if (decl.astKind == MangleAstKind.EXTEND_DECL) {
+            if (decl.astKind == ASTKind.EXTEND_DECL) {
                 for (arg in generic.typeParameters) {
                     args.add(arg.identifier)
                 }
@@ -427,10 +428,10 @@ public class ASTMangler {
         var mangled = ""
         var outerDecl = decl.outerDecl
         while (let Some(outer) <- outerDecl) {
-            if (outer.TestAttr(MangleAttribute.GLOBAL) && outer.TestAttr(MangleAttribute.PRIVATE)) {
+            if (outer.TestAttr(Attribute.GLOBAL) && outer.TestAttr(Attribute.PRIVATE)) {
                 mangled += MangleFilePrivate(outer)
             }
-            if (outer.astKind == MangleAstKind.EXTEND_DECL) {
+            if (outer.astKind == ASTKind.EXTEND_DECL) {
                 mangled += MangleExtendDeclString(outer)
             } else {
                 mangled += MangleName(outer.identifier)
@@ -464,7 +465,7 @@ public class ASTMangler {
         if (let Some(generic) <- decl.generic) {
             mangled += MangleGenericConstraints(generic)
         }
-        mangled += MangleDeclAstKind(MangleAstKind.EXTEND_DECL)
+        mangled += MangleDeclAstKind(ASTKind.EXTEND_DECL)
         return mangled
     }
 
@@ -503,7 +504,7 @@ public class ASTMangler {
             let patterns = ArrayList<ManglePattern>()
             flattenVarWithPattern(pattern, patterns)
             for (item in patterns) {
-                if (item.astKind == MangleAstKind.VAR_PATTERN) {
+                if (item.astKind == ASTKind.VAR_PATTERN) {
                     if (let Some(varDecl) <- item.varDecl) {
                         ret += MangleName(varDecl.identifier)
                     }
