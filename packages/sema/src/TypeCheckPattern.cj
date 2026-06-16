@@ -10,17 +10,97 @@ private func InvalidPatternTy(pattern: Pattern): Bool {
     return false
 }
 
-private func LiteralDefaultTy(lit: LitConstExpr): Ty {
+private func ConstPatternDefaultLiteralTy(lit: LitConstExpr): Ty {
     return match (lit.kind) {
         case LitConstKind.BOOL => TypeManager.GetPrimitiveTy(TypeKind.TYPE_BOOLEAN)
         case LitConstKind.UNIT => TypeManager.GetPrimitiveTy(TypeKind.TYPE_UNIT)
-        case LitConstKind.INTEGER => TypeManager.GetPrimitiveTy(lit.GetNumLitTypeKind())
+        case LitConstKind.INTEGER => TypeManager.GetPrimitiveTy(
+            if (lit.GetNumLitTypeKind() == TypeKind.TYPE_IDEAL_INT) {
+                TypeKind.TYPE_INT64
+            } else {
+                lit.GetNumLitTypeKind()
+            })
         case LitConstKind.RUNE_BYTE => TypeManager.GetPrimitiveTy(lit.GetNumLitTypeKind())
-        case LitConstKind.FLOAT => TypeManager.GetPrimitiveTy(lit.GetNumLitTypeKind())
+        case LitConstKind.FLOAT => TypeManager.GetPrimitiveTy(
+            if (lit.GetNumLitTypeKind() == TypeKind.TYPE_IDEAL_FLOAT) {
+                TypeKind.TYPE_FLOAT64
+            } else {
+                lit.GetNumLitTypeKind()
+            })
         case LitConstKind.RUNE => TypeManager.GetPrimitiveTy(TypeKind.TYPE_RUNE)
         case LitConstKind.STRING => lit.GetTy() ?? TypeManager.GetInvalidTy()
         case LitConstKind.JSTRING => lit.GetTy() ?? TypeManager.GetInvalidTy()
         case LitConstKind.NONE => TypeManager.GetInvalidTy()
+    }
+}
+
+private func CheckConstPatternIntegerLiteral(target: Ty, lit: LitConstExpr): Bool {
+    let suffixKind = lit.GetNumLitTypeKind()
+    if (suffixKind == TypeKind.TYPE_INVALID) {
+        lit.SetTy(TypeManager.GetInvalidTy())
+        return false
+    }
+    if (target.IsIntegerSubType() && (suffixKind == target.kind || suffixKind == TypeKind.TYPE_IDEAL_INT)) {
+        lit.SetTy(target)
+        return ChkLitConstExprRange(lit)
+    }
+    lit.SetTy(ConstPatternDefaultLiteralTy(lit))
+    return true
+}
+
+private func CheckConstPatternFloatLiteral(target: Ty, lit: LitConstExpr): Bool {
+    let suffixKind = lit.GetNumLitTypeKind()
+    if (suffixKind == TypeKind.TYPE_INVALID) {
+        lit.SetTy(TypeManager.GetInvalidTy())
+        return false
+    }
+    if (target.IsFloatingSubType() && (suffixKind == target.kind || suffixKind == TypeKind.TYPE_IDEAL_FLOAT)) {
+        lit.SetTy(target)
+        return ChkLitConstExprRange(lit)
+    }
+    lit.SetTy(ConstPatternDefaultLiteralTy(lit))
+    return true
+}
+
+private func CheckConstPatternLiteral(target: Ty, lit: LitConstExpr): Bool {
+    return match (lit.kind) {
+        case LitConstKind.BOOL =>
+            if (target.IsBooleanSubType()) {
+                lit.SetTy(target)
+            } else {
+                lit.SetTy(ConstPatternDefaultLiteralTy(lit))
+            }
+            true
+        case LitConstKind.UNIT =>
+            if (target.IsUnit()) {
+                lit.SetTy(target)
+            } else {
+                lit.SetTy(ConstPatternDefaultLiteralTy(lit))
+            }
+            true
+        case LitConstKind.INTEGER => CheckConstPatternIntegerLiteral(target, lit)
+        case LitConstKind.RUNE_BYTE => CheckConstPatternIntegerLiteral(target, lit)
+        case LitConstKind.FLOAT => CheckConstPatternFloatLiteral(target, lit)
+        case LitConstKind.RUNE =>
+            if (target.IsRune()) {
+                lit.SetTy(target)
+            } else {
+                lit.SetTy(ConstPatternDefaultLiteralTy(lit))
+            }
+            true
+        case LitConstKind.STRING =>
+            if (!Ty.IsTyCorrect(lit.GetTy())) {
+                lit.SetTy(ConstPatternDefaultLiteralTy(lit))
+            }
+            true
+        case LitConstKind.JSTRING =>
+            if (!Ty.IsTyCorrect(lit.GetTy())) {
+                lit.SetTy(ConstPatternDefaultLiteralTy(lit))
+            }
+            true
+        case LitConstKind.NONE =>
+            lit.SetTy(TypeManager.GetInvalidTy())
+            false
     }
 }
 
@@ -122,6 +202,78 @@ private func FindEnumPatternTargets(ctx: ASTContext, enumDecl: Option<EnumDecl>,
     return ArrayList<Decl>()
 }
 
+private func FillEnumPatternMemberAccessTypeArgumentsTy(typeManager: TypeManager, targetTy: EnumTy,
+    member: MemberAccess): Unit {
+    if (let None <- member.baseExpr) {
+        return
+    }
+    let base = member.baseExpr.getOrThrow()
+    if (let None <- member.GetTarget()) {
+        return
+    }
+    let targetDecl = member.GetTarget().getOrThrow()
+    if (let None <- targetDecl.outerDecl) {
+        return
+    }
+    if (let None <- (targetDecl.outerDecl.getOrThrow() as EnumDecl)) {
+        return
+    }
+    let enumDecl = (targetDecl.outerDecl.getOrThrow() as EnumDecl).getOrThrow()
+    if (let None <- enumDecl.generic) {
+        return
+    }
+
+    let typeMapping = MultiTypeSubst()
+    if (let Some(refBase) <- (base as NameReferenceExpr)) {
+        if (refBase.instTys.isEmpty()) {
+            typeManager.GenerateGenericMapping(typeMapping, targetTy)
+            let generic = enumDecl.generic.getOrThrow()
+            for (typeParam in generic.typeParameters) {
+                if (let Some(paramTy) <- typeParam.GetTy()) {
+                    if (let Some(genericTy) <- (paramTy as GenericsTy)) {
+                        refBase.instTys.add(typeManager.GetBestInstantiatedTy(genericTy, typeMapping))
+                    }
+                }
+            }
+        } else if (let Some(baseTy) <- base.GetTy()) {
+            typeManager.GenerateGenericMapping(typeMapping, baseTy)
+        }
+    } else if (let Some(baseTy) <- base.GetTy()) {
+        typeManager.GenerateGenericMapping(typeMapping, baseTy)
+    }
+
+    if (let Some(enumTy) <- enumDecl.GetTy()) {
+        base.SetTy(typeManager.GetBestInstantiatedTy(enumTy, typeMapping))
+    }
+    if (let Some(memberTy) <- member.GetTy()) {
+        member.SetTy(typeManager.GetBestInstantiatedTy(memberTy, typeMapping))
+    }
+}
+
+private func SetTyForEnumPatternConstructor(typeManager: TypeManager, targetTy: EnumTy, pattern: EnumPattern): Unit {
+    if (let None <- pattern.constructor) {
+        return
+    }
+    let constructor = pattern.constructor.getOrThrow()
+    if (let Some(member) <- (constructor as MemberAccess)) {
+        if (let None <- member.baseExpr) {
+            return
+        }
+        let base = member.baseExpr.getOrThrow()
+        if (let Some(_) <- ((base.GetTy() ?? TypeManager.GetInvalidTy()) as EnumTy)) {
+            FillEnumPatternMemberAccessTypeArgumentsTy(typeManager, targetTy, member)
+        }
+        return
+    }
+    if (let Some(_) <- targetTy.GetGenericTy()) {
+        let typeMapping = MultiTypeSubst()
+        typeManager.GenerateGenericMapping(typeMapping, targetTy)
+        if (let Some(constructorTy) <- constructor.GetTy()) {
+            constructor.SetTy(typeManager.GetBestInstantiatedTy(constructorTy, typeMapping))
+        }
+    }
+}
+
 public func FindEnumPatternTarget(typeManager: TypeManager, ctx: ASTContext,
     enumDecl: Option<EnumDecl>, pattern: EnumPattern): Bool {
     if (let None <- pattern.constructor) {
@@ -178,10 +330,16 @@ public func ChkConstPattern(typeManager: TypeManager, target: Ty, pattern: Const
     }
     let literal = pattern.literal.getOrThrow()
     if (let Some(lit) <- (literal as LitConstExpr)) {
-        if (!Ty.IsTyCorrect(lit.GetTy())) {
-            lit.SetTy(LiteralDefaultTy(lit))
-        }
-        if (let Some(_) <- lit.siExpr) {
+        if (target.IsRune() && IsSingleRuneStringLiteral(literal)) {
+            lit.SetTy(target)
+            pattern.SetTy(target)
+        } else if (target.kind == TypeKind.TYPE_UINT8 && IsSingleByteStringLiteral(literal)) {
+            lit.SetTy(target)
+            pattern.SetTy(target)
+            if (!ChkLitConstExprRange(lit)) {
+                return InvalidPatternTy(pattern)
+            }
+        } else if (!CheckConstPatternLiteral(target, lit)) {
             return InvalidPatternTy(pattern)
         }
     }
@@ -191,6 +349,11 @@ public func ChkConstPattern(typeManager: TypeManager, target: Ty, pattern: Const
     let literalTy = literal.GetTy().getOrThrow()
     if (!typeManager.IsTyEqual(literalTy, target)) {
         return InvalidPatternTy(pattern)
+    }
+    if (let Some(lit) <- (literal as LitConstExpr)) {
+        if (let Some(_) <- lit.siExpr) {
+            return InvalidPatternTy(pattern)
+        }
     }
     pattern.SetTy(typeManager.TryGreedySubst(target))
     return true
@@ -267,8 +430,28 @@ public func ChkEnumPattern(typeManager: TypeManager, ctx: ASTContext, target: Ty
     let maybeInferred = typeManager.TryGreedySubst(target)
     if (let Some(enumTy) <- (maybeInferred as EnumTy)) {
         mayMatch = FindEnumPatternTarget(typeManager, ctx, enumTy.declPtr, pattern)
+        if (mayMatch) {
+            SetTyForEnumPatternConstructor(typeManager, enumTy, pattern)
+        }
     } else if (target.IsPlaceholder()) {
         mayMatch = FindEnumPatternTarget(typeManager, ctx, None, pattern)
+        if (mayMatch) {
+            if (let Some(constructor) <- pattern.constructor) {
+                let constructorTy = constructor.GetTy() ?? TypeManager.GetInvalidTy()
+                let enumCtorTy = if (let Some(funcTy) <- (constructorTy as FuncTy)) {
+                    funcTy.retTy
+                } else {
+                    constructorTy
+                }
+                if (let Some(targetVar) <- (target as GenericsTy)) {
+                    if (let Some(placeholderEnumTy) <- typeManager.ConstrainByCtor(targetVar, enumCtorTy)) {
+                        if (let Some(constrainedEnumTy) <- (placeholderEnumTy as EnumTy)) {
+                            SetTyForEnumPatternConstructor(typeManager, constrainedEnumTy, pattern)
+                        }
+                    }
+                }
+            }
+        }
     }
     if (mayMatch) {
         if (let Some(constructor) <- pattern.constructor) {
