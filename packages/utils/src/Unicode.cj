@@ -316,10 +316,12 @@ public func IsCangjieIdentifier(str: String, useContextualKeyWords: Bool): Bool 
         return false
     }
     var content = str
+    var isRawIdentifier = false
     if (str[0] == b'`') {
         if (str.size < 3 || str[str.size - 1] != b'`') {
             return false
         }
+        isRawIdentifier = true
         content = str[1..str.size - 1]
     }
     let (status, codepoints) = ConvertUTF8ToUTF32(content.toArray())
@@ -337,22 +339,27 @@ public func IsCangjieIdentifier(str: String, useContextualKeyWords: Bool): Bool 
             return false
         }
     }
-    if (IsKeyword(content)) {
-        return useContextualKeyWords && IsContextualKeyword(content)
+    if (!isRawIdentifier && IsKeyword(str)) {
+        return useContextualKeyWords && IsContextualKeyword(str)
     }
     return true
 }
 
 private let KEYWORDS: Array<String> = [
-    "as", "break", "case", "catch", "class", "const", "continue", "do", "else", "enum", "extend", "false",
-    "finally", "for", "foreign", "func", "if", "import", "in", "init", "interface", "is", "let", "macro",
-    "main", "match", "mut", "open", "operator", "override", "package", "private", "prop", "protected",
-    "public", "redef", "return", "spawn", "static", "struct", "super", "synchronized", "this", "throw",
-    "true", "try", "type", "unsafe", "var", "where", "while"
+    "is", "as", "_",
+    "Int8", "Int16", "Int32", "Int64", "IntNative", "UInt8", "UInt16", "UInt32", "UInt64", "UIntNative",
+    "Float16", "Float32", "Float64", "Rune", "Bool", "Nothing", "Unit", "VArray", "This",
+    "struct", "enum", "package", "import", "class", "interface", "func", "macro", "quote", "let", "var",
+    "const", "type", "init", "this", "super", "if", "else", "case", "try", "catch", "finally", "for",
+    "do", "while", "throw", "return", "continue", "break", "in", "match", "where", "extend", "with",
+    "prop", "static", "public", "private", "internal", "protected", "override", "redef", "abstract",
+    "sealed", "open", "foreign", "inout", "mut", "unsafe", "operator", "spawn", "synchronized", "main",
+    "true", "false"
 ]
 
 private let CONTEXTUAL_KEYWORDS: Array<String> = [
-    "abstract", "sealed", "default", "deriving", "get", "set"
+    "public", "private", "internal", "protected", "override", "redef", "abstract", "sealed", "open",
+    "common", "specific", "features"
 ]
 
 private func IsKeyword(str: String): Bool {
