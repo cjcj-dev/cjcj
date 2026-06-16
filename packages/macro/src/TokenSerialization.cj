@@ -200,7 +200,7 @@ public class TokenSerialization {
             } else {
                 begin + GetTokenLength(value.size, kind, delimiterNum)
             }
-            let token = Token(kind, value, begin, end)
+            var token = Token(kind, value, begin, end)
             token.delimiterNum = delimiterNum
             token.isSingleQuote = isSingle == 1u16
             out.add(token)
@@ -235,7 +235,7 @@ public class TokenSerialization {
             } else {
                 begin + GetTokenLength(value.size, kind, delimiterNum)
             }
-            let token = Token(kind, value, begin, end)
+            var token = Token(kind, value, begin, end)
             token.delimiterNum = delimiterNum
             token.isSingleQuote = isSingleQuote
             out.add(token)

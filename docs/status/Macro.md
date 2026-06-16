@@ -7,17 +7,20 @@ macro collection and expansion, macro call state and resolution, token and node 
 
 Current constraints:
 
-- `packages/macro/cjpm.toml` has no package dependencies, so this port includes a local compatibility model for the Basic, AST, and Parse surfaces that Macro needs.
+- `packages/macro/cjpm.toml` now depends on `basic`, `lex`, and `parse`; Macro re-exports the real Basic `Position`/`Range`/`SourceManager`/`MacroCallDiagInfo`, real Lex `Token`/`TokenKind`, and calls Parse's built-in annotation classifier instead of carrying those local copies/tables.
+- Macro still carries a local compatibility model for AST nodes, the simplified diagnostic collector, compiler options, and import-manager surfaces until the remaining sibling APIs can replace those call sites without a full-package rewrite.
 - Native dynamic loading now uses C FFI (`dlopen`/`dlsym`/`dlclose` or Windows equivalents), runtime init/fini symbols are resolved through the native library, and macro function pointers can be invoked with serialized token buffers.
 - The in-package macro server path now classifies staged/server exits, deserializes macro-call batches, evaluates calls, serializes results, and resets per-stage state through the local process-message bridge.
 - Macro-call collection now follows represented expression fields (function parameter defaults, function arguments, call bases, member bases, returns, if conditions, and binary operands) and writes expanded expression replacements back to their parent AST fields.
-- The local generated-token scanner now handles comments, escaped string and rune forms, multiline/raw strings, built-in type keywords, and the common multi-character operators used when reparsing macro output.
+- Generated-token parsing now goes through the real Lex lexer; Basic lexer diagnostics are bridged back into Macro's current simplified diagnostic list.
+- Macro evaluation now mirrors more of the C++ token-rewrite path: annotation re-evaluation preserves parenthesized arguments, inserts the annotation/content newline where the C++ does, validates escaped `@` in attribute tokens, replaces built-in attribute macros in place, skips built-in annotations during child macro scanning, and re-enters custom annotations only when generated tokens contain another real macro call.
 - Test-entry construction now participates in the package expansion flow, handles `$test` main-package pairing, models primitive/ref/variable declaration nodes locally, checks `@Test`/`@TestCase` Unit-return and constructor constraints, and collects macro calls in variable initializers.
-- Message and AST serialization use deterministic compiling codecs because generated flatbuffer schema packages are not available to this isolated package.
-- Generated-token parsing uses a local bridge until the real Parse entry point can be imported without changing package manifests.
+- Message and AST serialization still use deterministic compiling codecs because generated flatbuffer schema packages are not available to this package.
+- Generated-node parsing still uses a local AST bridge until the real Parse entry point and real AST node graph can replace the compatibility model.
 - Token/native decoding and the deterministic node codec now preserve quoted/raw token widths, primitive/ref types, variable initializers, function parameters and returns, call arguments, if bodies, and block statement payloads for the local AST surface.
 - Macro processing now preserves original source slices around expanded macro calls in `.macrocall` buffers, reports token mapping mismatches, handles pure custom annotations like the C++ path, persists/removes debug/LSP macrocall files through `std.fs`, and re-tokenizes generated identifier tokens that spell keywords/operators.
 - Macro-call resolution now follows the C++ qualified-name path more closely: imported package qualifiers are resolved and diagnosed, non-macro-package declarations are filtered out, LSP child-process parent macro names are captured for macro context, and dynamic library paths are derived from std-macro/search-path naming before falling back to opened macro-lib handles.
+- Native macro-with-context callbacks still need a real object-to-opaque-pointer/runtime callback bridge before the C++ `MacroCall*` context ABI can be behavior-faithful in the direct native path.
 
 Verification:
 
