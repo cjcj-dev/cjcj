@@ -1182,6 +1182,7 @@ public class ImportManager {
     private let searchPath: ArrayList<String> = ArrayList<String>()
     private let importedPackages: ArrayList<Package> = ArrayList<Package>()
     private let depPkgCjdPaths: HashMap<String, String> = HashMap<String, String>()
+    private let directDependencies: HashMap<String, HashSet<String>> = HashMap<String, HashSet<String>>()
 
     public init(diag: DiagnosticEngine) {
         this.diag = diag
@@ -1194,6 +1195,19 @@ public class ImportManager {
         }
     }
 
+    private func AppendSearchPath(path: String): Unit {
+        let normalized = NormalizePath(path)
+        if (normalized.isEmpty()) {
+            return
+        }
+        for (entry in searchPath) {
+            if (entry == normalized) {
+                return
+            }
+        }
+        searchPath.add(normalized)
+    }
+
     public func GetSearchPath(): ArrayList<String> {
         return searchPath
     }
@@ -1201,7 +1215,9 @@ public class ImportManager {
     public func GeneratePkgDepInfo(pkgs: ArrayList<Package>): ArrayList<String> {
         let out = ArrayList<String>()
         for (pkg in pkgs) {
-            out.add("{\"package\":\"" + EscapeJson(pkg.fullPackageName) + "\",\"deps\":[]}")
+            let deps = CollectDirectDependencyNames(pkg)
+            out.add("{\"package\":\"" + EscapeJson(pkg.fullPackageName) + "\",\"deps\":" +
+                StringSetToJsonArray(deps) + "}")
         }
         return out
     }
@@ -1213,13 +1229,36 @@ public class ImportManager {
     }
 
     public func BuildIndex(cangjieModules: String, opts: GlobalOptions, pkgs: ArrayList<Package>): Bool {
-        let _ = opts
         UpdateSearchPath(cangjieModules)
+        for (path in opts.importPaths) {
+            AppendSearchPath(path)
+        }
+        depPkgCjdPaths.clear()
+        directDependencies.clear()
+        let sourcePackages = HashSet<String>()
         for (pkg in pkgs) {
             if (pkg.fullPackageName.isEmpty()) {
                 diag.Diagnose(DiagCategory.IMPORT_PACKAGE, DEFAULT_POSITION, "empty package name")
                 return false
             }
+            sourcePackages.add(pkg.fullPackageName)
+        }
+        for (pkg in pkgs) {
+            let deps = CollectDirectDependencyNames(pkg)
+            let filteredDeps = HashSet<String>()
+            for (dep in deps) {
+                if (dep.isEmpty() || dep == pkg.fullPackageName) {
+                    continue
+                }
+                filteredDeps.add(dep)
+                if (!sourcePackages.contains(dep) && !depPkgCjdPaths.contains(dep)) {
+                    let cjdPath = FindSerializationFileForImport(dep, ".cj.d", searchPath)
+                    if (!cjdPath.isEmpty()) {
+                        depPkgCjdPaths.add(dep, cjdPath)
+                    }
+                }
+            }
+            directDependencies.add(pkg.fullPackageName, filteredDeps)
         }
         return true
     }
@@ -1252,6 +1291,119 @@ public class ImportManager {
         }
         return None
     }
+
+    private func CollectDirectDependencyNames(pkg: Package): HashSet<String> {
+        let deps = HashSet<String>()
+        for (file in pkg.files) {
+            for (importSpec in file.imports) {
+                let depName = NormalizeImportedPackageName(importSpec.content)
+                if (!depName.isEmpty() && depName != pkg.fullPackageName) {
+                    deps.add(depName)
+                }
+            }
+        }
+        return deps
+    }
+
+    private func NormalizeImportedPackageName(content: ImportContent): String {
+        let importedName = GetImportedItemFullName(content)
+        if (importedName.isEmpty()) {
+            return ""
+        }
+        return importedName
+    }
+}
+
+private func StringSetToJsonArray(values: HashSet<String>): String {
+    let orderedValues = ArrayList<String>()
+    for (value in values) {
+        orderedValues.add(value)
+    }
+    sort(orderedValues, by: { left: String, right: String =>
+        if (left < right) {
+            Ordering.LT
+        } else if (left > right) {
+            Ordering.GT
+        } else {
+            Ordering.EQ
+        }
+    })
+    let parts = ArrayList<String>()
+    for (value in orderedValues) {
+        parts.add("\"" + EscapeJson(value) + "\"")
+    }
+    return "[" + JoinStringList(parts, ",") + "]"
+}
+
+private func JoinStringList(values: ArrayList<String>, delimiter: String): String {
+    let builder = StringBuilder()
+    var idx: Int64 = 0
+    while (idx < values.size) {
+        if (idx > 0) {
+            builder.append(delimiter)
+        }
+        builder.append(values[idx])
+        idx++
+    }
+    return builder.toString()
+}
+
+private func FindSerializationFileForImport(fullPackageName: String, suffix: String, searchPaths: ArrayList<String>): String {
+    let names = SplitQualifiedNameForImport(fullPackageName)
+    let packageFileName = ToCjoFileNameForImport(fullPackageName)
+    if (!names.isEmpty()) {
+        let nestedName = ToCjoFileNameForImport(names[0]) + "/" + packageFileName + suffix
+        let nestedPath = FindFileByNameForImport(nestedName, searchPaths)
+        if (!nestedPath.isEmpty()) {
+            return nestedPath
+        }
+    }
+    return FindFileByNameForImport(packageFileName + suffix, searchPaths)
+}
+
+private func FindFileByNameForImport(fileName: String, searchPaths: ArrayList<String>): String {
+    if (fileName.isEmpty()) {
+        return ""
+    }
+    for (path in searchPaths) {
+        if (path.isEmpty()) {
+            continue
+        }
+        let candidate = JoinPath(path, fileName)
+        if (FileExist(candidate)) {
+            return candidate
+        }
+    }
+    return ""
+}
+
+private func SplitQualifiedNameForImport(qualifiedName: String): ArrayList<String> {
+    let names = ArrayList<String>()
+    var idx: Int64 = 0
+    if (let Some(dcPos) <- qualifiedName.indexOf("::")) {
+        idx = dcPos + 2
+    }
+    while (idx < qualifiedName.size) {
+        if (qualifiedName[idx] == b'.') {
+            idx++
+        } else if (qualifiedName[idx] == b'`') {
+            let nextTick = qualifiedName.indexOf("`", idx + 1) ?? qualifiedName.size
+            names.add(qualifiedName[idx + 1..nextTick])
+            idx = if (nextTick == qualifiedName.size) { nextTick } else { nextTick + 1 }
+        } else {
+            let nextDot = qualifiedName.indexOf(".", idx + 1) ?? qualifiedName.size
+            names.add(qualifiedName[idx..nextDot])
+            idx = nextDot
+        }
+    }
+    return names
+}
+
+private func ToCjoFileNameForImport(fullPackageName: String): String {
+    if (let Some(dcPos) <- fullPackageName.indexOf("::")) {
+        return fullPackageName[dcPos + 2..] + "@" + fullPackageName[0..dcPos]
+    }
+    return fullPackageName
 }
 
 public class PackageManager {
