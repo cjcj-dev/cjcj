@@ -26,6 +26,8 @@ Deepening pass updates:
   and source-backed empty-path position formatting.
 - Propagated diagnostic emitter range-check failures back into `DiagEngineErrorCode.DIAG_RANGE_ERROR` from normal
   emission and `GetDiagnosticInfo`, matching the C++ `DiagnosticEmitter::Emit()` result handling.
+- Added the C++ Basic `PrintCommandDesc` helper for option/help text alignment and matched `ErrorWithColor` emission
+  order/reset behavior from `Print.cpp` without changing diagnostic emitter color formatting.
 
 Implemented:
 
