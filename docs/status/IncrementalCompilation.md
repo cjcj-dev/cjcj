@@ -69,6 +69,9 @@ Implemented:
 - Matched more of the C++ cache writer/loader ordering behavior: CHIR var/function dependencies, semantic usages,
   name usages, relations, and compiler-added usages are serialized by raw mangle/name order, and cached file-map
   reconstruction now applies the C++ top-level/member affected-declaration filters separately.
+- Tightened order-change parity further by reconstructing cached file maps after top-level cache entries are fully
+  loaded, preserving the C++ static-member/property-accessor collection order, and by treating
+  `VAR_WITH_PATTERN_DECL` as global-like for file-move invalidation.
 
 Known gaps:
 

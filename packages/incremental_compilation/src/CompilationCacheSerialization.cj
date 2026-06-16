@@ -436,7 +436,7 @@ public class HashedASTLoader {
         } else if ((tag == "top" || tag == "import") && fields.size >= 13) {
             loadTop(tag, fields, cached, owners)
         } else if ((tag == "top-member" || tag == "import-member") && fields.size >= 11) {
-            loadMember(fields, owners, tag == "top-member")
+            loadMember(fields, owners)
         }
     }
 
@@ -522,15 +522,13 @@ public class HashedASTLoader {
         }
         if (tag == "top") {
             cached.curPkgASTCache[fields[1]] = top
-            collectFileMapForTop(fields[1], top)
         } else {
             cached.importedASTCache[fields[1]] = top
         }
         owners[fields[1]] = top
     }
 
-    private func loadMember(fields: ArrayList<String>, owners: HashMap<String, DeclCacheBase>,
-        isSourceMember: Bool): Unit {
+    private func loadMember(fields: ArrayList<String>, owners: HashMap<String, DeclCacheBase>): Unit {
         let member = MemberDeclCache(fields[1])
         fillCommon(fields, member)
         let parent = fields[10]
@@ -538,9 +536,6 @@ public class HashedASTLoader {
             owner.members.add(member)
         }
         owners[member.rawMangle] = member
-        if (isSourceMember) {
-            collectFileMapForMember(member)
-        }
     }
 
     private func fillCommon(fields: ArrayList<String>, cache: DeclCacheBase): Unit {
@@ -588,6 +583,11 @@ public class HashedASTLoader {
     }
 
     private func buildCachedFileMap(cached: CompilationCache): Unit {
+        fileMap.clear()
+        cached.fileMap.clear()
+        for ((mangle, topCache) in cached.curPkgASTCache) {
+            collectFileMapForLoadedTop(mangle, topCache)
+        }
         for ((file, values) in fileMap) {
             sortPairs(values)
             let names = ArrayList<String>()
@@ -595,6 +595,24 @@ public class HashedASTLoader {
                 names.add(pair[0])
             }
             cached.fileMap[file] = names
+        }
+    }
+
+    private func collectFileMapForLoadedTop(mangle: String, cache: TopLevelDeclCache): Unit {
+        collectFileMapForTop(mangle, cache)
+        for (member in cache.members) {
+            if (member.isGV) {
+                addFileMapEntry(member.gvid.file, member.rawMangle, member.gvid.id)
+            }
+        }
+        for (member in cache.members) {
+            if (member.isGV) {
+                continue
+            }
+            for (child in member.members) {
+                addFileMapEntry(child.gvid.file, child.rawMangle, child.gvid.id)
+            }
+            collectFileMapForMember(member)
         }
     }
 

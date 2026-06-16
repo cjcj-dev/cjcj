@@ -271,6 +271,10 @@ public func IsGlobalOrStaticVar(decl: IncrDecl): Bool {
     return decl.IsGlobalOrStaticVar()
 }
 
+public func IsOrderAffectingGlobal(decl: IncrDecl): Bool {
+    return decl.IsGlobalOrStaticVar() || decl.astKind == IncrDeclKind.VAR_WITH_PATTERN_DECL
+}
+
 public func ComputeDeclSigHash(decl: IncrDecl): UInt64 {
     if (let Some(value) <- decl.precomputedSigHash) {
         return value

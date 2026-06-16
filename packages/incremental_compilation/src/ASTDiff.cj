@@ -304,7 +304,7 @@ private class OrderDiffCompare {
                 let maxid = if (currentId > last) { currentId } else { last }
                 maxids.add(maxid)
                 if (let Some(decl) <- mangled2Decl.get(mangle)) {
-                    if (decl.IsGlobalOrStaticVar() || decl.astKind == IncrDeclKind.VAR_WITH_PATTERN_DECL) {
+                    if (IsOrderAffectingGlobal(decl)) {
                         last = maxid
                     }
                 }
@@ -344,7 +344,7 @@ private class OrderDiffCompare {
                 continue
             }
             result.add(decl)
-            if (decl.IsGlobalOrStaticVar()) {
+            if (IsOrderAffectingGlobal(decl)) {
                 var prefix: Int64 = 0
                 while (prefix < curIdx) {
                     result.add(curOrder[prefix])
