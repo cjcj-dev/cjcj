@@ -37,6 +37,27 @@ public class MemberSignature {
         return out
     }
 
+    public func HasDecl(): Bool {
+        if (let Some(_) <- decl) {
+            return true
+        }
+        return false
+    }
+
+    public func IsFunc(): Bool {
+        if (let Some(realDecl) <- decl) {
+            return realDecl.IsFunc()
+        }
+        return false
+    }
+
+    public func IsProp(): Bool {
+        if (let Some(realDecl) <- decl) {
+            return realDecl.astKind == ASTKind.PROP_DECL
+        }
+        return false
+    }
+
     public func Name(): String {
         if (let Some(realDecl) <- decl) {
             return realDecl.identifier.Val()
@@ -82,7 +103,50 @@ public class MemberMap {
         entries.clear()
     }
 
+    public func Remove(index: Int64): Unit {
+        entries.remove(at: index)
+    }
+
+    public func Clone(): MemberMap {
+        let out = MemberMap()
+        for (entry in entries) {
+            out.Add(entry.name, entry.signature.Clone())
+        }
+        return out
+    }
+
+    public func Size(): Int64 {
+        return entries.size
+    }
+
     public func IsEmpty(): Bool {
         return entries.isEmpty()
+    }
+
+    public func Names(): ArrayList<String> {
+        let out = ArrayList<String>()
+        for (entry in entries) {
+            var found = false
+            for (name in out) {
+                if (name == entry.name) {
+                    found = true
+                    break
+                }
+            }
+            if (!found) {
+                out.add(entry.name)
+            }
+        }
+        return out
+    }
+}
+
+public class InheritedMemberEntry {
+    public var decl: InheritableDecl
+    public var members: MemberMap
+
+    public init(decl: InheritableDecl, members: MemberMap) {
+        this.decl = decl
+        this.members = members
     }
 }
