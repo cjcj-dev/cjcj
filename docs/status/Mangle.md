@@ -78,11 +78,16 @@ Implemented:
   `cangjie_compiler::ast.Attribute`, removing the module-local `MangleAttribute` clone.
 - De-isolated descriptor semantic type kinds to the real `cangjie_compiler::ast.TypeKind` and
   `TypeKindName`, removing the module-local `MangleTypeKind` clone and conversion layer.
+- De-isolated descriptor CHIR type kinds to the real `cangjie_compiler::chir.TypeKind`, removing the
+  module-local `CHIRTypeKind` clone and sharing the same primitive dispatcher as real CHIR overloads.
 - Aligned parser-AST `FuncParam` declaration suffix mangling with C++ `IsMemberParam`: ordinary function
   parameters no longer receive the member-var type discriminator, while primary-constructor member
   parameters still do.
 - Aligned extend indexing buckets with C++ semantic-type grouping by using the converted extended
   semantic type string when available instead of the parsed annotation spelling.
+- Aligned CHIR type and type-qualified-name fallthrough behavior with C++ `CJC_ASSERT` paths by rejecting
+  invalid or unsupported type kinds, missing descriptor element/base payloads, malformed CPointer types,
+  and AutoEnv descriptor misuse instead of emitting empty or partial names.
 
 Known fidelity caveats:
 
