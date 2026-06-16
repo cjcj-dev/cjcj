@@ -50,7 +50,7 @@ public class Lexer {
         return impl.GetComments().toArray()
     }
 
-    public func GetTokenStream(): HashSet<Token> {
+    public func GetTokenStream(): TreeSet<Token> {
         return impl.GetTokenStream()
     }
 

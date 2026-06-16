@@ -1,6 +1,14 @@
 package cangjie_compiler::lex
 
 import cangjie_compiler::basic.*
+import cangjie_compiler::utils.IsAlnum as UtilsIsAlnum
+import cangjie_compiler::utils.IsASCIIIdContinue as UtilsIsASCIIIdContinue
+import cangjie_compiler::utils.IsASCIIIdStart as UtilsIsASCIIIdStart
+import cangjie_compiler::utils.IsCJXIDStart as UtilsIsCJXIDStart
+import cangjie_compiler::utils.IsDigit as UtilsIsDigit
+import cangjie_compiler::utils.IsXDigit as UtilsIsXDigit
+import cangjie_compiler::utils.IsXIDContinue as UtilsIsXIDContinue
+import cangjie_compiler::utils.NFC as UtilsNFC
 import std.collection.*
 
 public let BYTE_X_FLAG: UInt8 = 0x80u8
@@ -110,20 +118,15 @@ private func byteString(value: UInt8): String {
 }
 
 private func isDigit(value: Int64): Bool {
-    return value >= Int64(b'0') && value <= Int64(b'9')
+    return UtilsIsDigit(value)
 }
 
 private func isHexDigit(value: Int64): Bool {
-    return isDigit(value) || (value >= Int64(b'a') && value <= Int64(b'f')) ||
-        (value >= Int64(b'A') && value <= Int64(b'F'))
-}
-
-private func isAlpha(value: Int64): Bool {
-    return (value >= Int64(b'a') && value <= Int64(b'z')) || (value >= Int64(b'A') && value <= Int64(b'Z'))
+    return UtilsIsXDigit(value)
 }
 
 private func isAlnum(value: Int64): Bool {
-    return isAlpha(value) || isDigit(value)
+    return UtilsIsAlnum(value)
 }
 
 private func lowerByte(value: UInt8): UInt8 {
@@ -134,11 +137,35 @@ private func lowerByte(value: UInt8): UInt8 {
 }
 
 private func isAsciiIdentifierStart(value: Int64): Bool {
-    return isAlpha(value) || value == Int64(b'_')
+    if (value < 0 || value > 127) {
+        return false
+    }
+    return UtilsIsASCIIIdStart(UInt32(value))
 }
 
 private func isAsciiIdentifierContinue(value: Int64): Bool {
-    return isAsciiIdentifierStart(value) || isDigit(value)
+    if (value < 0 || value > 127) {
+        return false
+    }
+    return UtilsIsASCIIIdContinue(UInt32(value))
+}
+
+private func isCJXIDStart(value: Int64): Bool {
+    if (value < 0 || value > 0x10ffff) {
+        return false
+    }
+    return UtilsIsCJXIDStart(UInt32(value))
+}
+
+private func isXIDContinue(value: Int64): Bool {
+    if (value < 0 || value > 0x10ffff) {
+        return false
+    }
+    return UtilsIsXIDContinue(UInt32(value))
+}
+
+private func NormalizeIdentifierNFC(value: String): String {
+    return UtilsNFC(value)
 }
 
 private func isLegalEscape(value: Int64): Bool {
@@ -184,7 +211,7 @@ public class LexerImpl {
     private var enableCollectTokenStream: Bool = false
     private let collectTokensFindCache: HashSet<Position> = HashSet<Position>()
     private let collectTokens: ArrayList<Token> = ArrayList<Token>()
-    private let tokenStream: HashSet<Token> = HashSet<Token>()
+    private let tokenStream: TreeSet<Token> = TreeSet<Token>()
     private let stringPartsMap: HashMap<Token, ArrayList<StringPart>> = HashMap<Token, ArrayList<StringPart>>()
     private let comments: ArrayList<Token> = ArrayList<Token>()
     private var success: Bool = true
@@ -327,7 +354,7 @@ public class LexerImpl {
         return ret
     }
 
-    public func GetTokenStream(): HashSet<Token> {
+    public func GetTokenStream(): TreeSet<Token> {
         return tokenStream
     }
 
