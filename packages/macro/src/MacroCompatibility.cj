@@ -15,8 +15,8 @@ import cangjie_compiler::basic.Range as BasicRange
 import cangjie_compiler::option.GlobalOptions as RealGlobalOptions
 
 public import cangjie_compiler::basic.{
-    BEGIN_POSITION, DEFAULT_POSITION, INVALID_POSITION, DiagKindRefactor, DiagSeverity, Diagnostic, DiagnosticEngine,
-    MacroCallDiagInfo, Position, Source, SourceManager
+    BEGIN_POSITION, DEFAULT_POSITION, INVALID_POSITION, DiagArgument, DiagKind, DiagKindRefactor, DiagSeverity,
+    Diagnostic, DiagnosticEngine, MacroCallDiagInfo, Position, Source, SourceManager
 }
 public import cangjie_compiler::lex.{Token, TokenKind, TokenKindIndex, TokenKindLiteral}
 public import cangjie_compiler::option.MockMode

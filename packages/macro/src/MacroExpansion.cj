@@ -12,11 +12,19 @@ private func hasDefAndCallInSamePkg(macroCollector: MacroCollector, diag: Diagno
         for (call in macroCollector.macCalls) {
             if (fd.identifier == call.GetFullName()) {
                 ret = true
-                diag.Diagnose(call.GetBeginPos(), "macro's call and definition can not in one package")
+                diag.Diagnose(call.GetBeginPos(), DiagKind.macro_unexpect_def_and_call_in_same_pkg).Emit()
             }
         }
     }
     return ret
+}
+
+private func emitMacroDiag(diag: DiagnosticEngine, pos: Position, kind: DiagKind): Unit {
+    diag.Diagnose(pos, kind).Emit()
+}
+
+private func emitMacroDiagArg(diag: DiagnosticEngine, pos: Position, kind: DiagKind, arg: String): Unit {
+    diag.Diagnose(pos, kind, args: [DiagArgument(arg)]).Emit()
 }
 
 private func walkNode(node: Node, visit: (Node) -> Bool): Unit {
@@ -57,20 +65,45 @@ private func collectMacroEachFile(file: File, collector: MacroCollector): Unit {
     })
 }
 
-private func hasMacroCallInNode(node: Node, diag: DiagnosticEngine): Bool {
+private func hasMacroCallInNode(node: Node, diag: DiagnosticEngine, skipIfAvailable!: Bool = false): Bool {
     let hasMacroCall = Box<Bool>(false)
     walkNode(node, { curNode: Node =>
         if (curNode.IsMacroCallNode()) {
+            if (skipIfAvailable) {
+                if (let Some(invocation) <- curNode.GetInvocation()) {
+                    if (invocation.IsIfAvailable()) {
+                        return true
+                    }
+                }
+            }
             hasMacroCall.value = true
             if (let Some(invocation) <- curNode.GetInvocation()) {
-                diag.Diagnose(invocation.macroCallDiagInfo.identifierPos,
-                    "undeclared macro identifier '" + invocation.macroCallDiagInfo.identifier + "'")
+                emitMacroDiagArg(diag, invocation.macroCallDiagInfo.identifierPos,
+                    DiagKind.macro_undeclared_identifier, invocation.macroCallDiagInfo.identifier)
             }
             return false
         }
         return true
     })
     return hasMacroCall.value
+}
+
+private func isWhenAnnotation(anno: Annotation): Bool {
+    return anno.kind == "WHEN" || anno.kind == "When" || anno.identifier.Val() == "When"
+}
+
+private func checkWhenAfterMacroExpand(node: Node, diag: DiagnosticEngine): Unit {
+    walkNode(node, { curNode: Node =>
+        if (let Some(decl) <- (curNode as Decl)) {
+            for (anno in decl.annotations) {
+                if (isWhenAnnotation(anno)) {
+                    diag.DiagnoseRefactor(DiagKindRefactor.conditional_compilation_unexpected_after_macro,
+                        anno.begin).Emit()
+                }
+            }
+        }
+        return true
+    })
 }
 
 private func checkUnhandledMacroCall(pkg: Package, diag: DiagnosticEngine): Unit {
@@ -81,7 +114,7 @@ private func checkUnhandledMacroCall(pkg: Package, diag: DiagnosticEngine): Unit
         if (!file.hasMacro) {
             continue
         }
-        let _ = hasMacroCallInNode(file, diag)
+        let _ = hasMacroCallInNode(file, diag, skipIfAvailable: true)
     }
 }
 
@@ -148,6 +181,9 @@ private func findFollowingIdentifier(tokens: ArrayList<Token>, start: Int64): St
 }
 
 private func replaceNodeVector(container: ArrayList<Node>, loc: Int64, newNodes: ArrayList<Node>): Unit {
+    if (loc < 0 || loc >= container.size) {
+        return
+    }
     let rebuilt = ArrayList<Node>()
     var idx: Int64 = 0
     while (idx < container.size) {
@@ -166,17 +202,86 @@ private func replaceNodeVector(container: ArrayList<Node>, loc: Int64, newNodes:
     }
 }
 
-private func replaceDeclVector(container: ArrayList<Decl>, loc: Int64, newNodes: ArrayList<Node>, diag: DiagnosticEngine): Unit {
+private func checkReplacedEnumCaseMember(macroNode: MacroCall, newDecls: ArrayList<Decl>, diag: DiagnosticEngine): Unit {
+    let invocation = macroNode.RequireInvocation()
+    if (let Some(parent) <- invocation.parent) {
+        if (!ASTKindEquals(parent.astKind, ASTKind.ENUM_DECL)) {
+            return
+        }
+        if (macroNode.RequireNode().TestAttr(Attribute.ENUM_CONSTRUCTOR)) {
+            if (!newDecls.isEmpty() && !newDecls[0].TestAttr(Attribute.ENUM_CONSTRUCTOR)) {
+                emitMacroDiag(diag, newDecls[0].begin, DiagKind.macro_expect_enum_constructor)
+            }
+            if (newDecls.size > 1) {
+                emitMacroDiag(diag, newDecls[1].begin, DiagKind.macro_expect_one_enum_constructor)
+            }
+        } else {
+            for (decl in newDecls) {
+                if (decl.TestAttr(Attribute.ENUM_CONSTRUCTOR)) {
+                    emitMacroDiagArg(diag, decl.begin, DiagKind.macro_expect_decl_not_enum_constructor,
+                        decl.identifier)
+                }
+            }
+        }
+    }
+}
+
+private func replacementFile(macroNode: MacroCall, fallback: Option<File>): Option<File> {
+    if (let Some(file) <- macroNode.RequireNode().curFile) {
+        return Some(file)
+    }
+    return fallback
+}
+
+private func preserveOriginalMacroNode(macroNode: MacroCall, fallback: Option<File>): Unit {
+    if (let Some(file) <- replacementFile(macroNode, fallback)) {
+        file.originalMacroCallNodes.add(macroNode.RequireNode())
+    }
+}
+
+private func replaceDeclVector(
+    container: ArrayList<Decl>,
+    loc: Int64,
+    newNodes: ArrayList<Node>,
+    macroNode: MacroCall,
+    diag: DiagnosticEngine
+): Unit {
+    if (loc < 0 || loc >= container.size) {
+        return
+    }
+    let original = container[loc]
+    if (newNodes.isEmpty()) {
+        preserveOriginalMacroNode(macroNode, original.curFile)
+        replaceDeclVectorWith(container, loc, ArrayList<Decl>())
+        return
+    }
+    let replacements = ArrayList<Decl>()
+    for (node in newNodes) {
+        if (let Some(decl) <- (node as Decl)) {
+            decl.outerDecl = original.outerDecl
+            if (decl.curFile.isNone()) {
+                decl.curFile = original.curFile
+            }
+            replacements.add(decl)
+        } else {
+            emitMacroDiag(diag, node.begin, DiagKind.macro_expect_declaration)
+        }
+    }
+    if (replacements.isEmpty()) {
+        return
+    }
+    checkReplacedEnumCaseMember(macroNode, replacements, diag)
+    preserveOriginalMacroNode(macroNode, original.curFile)
+    replaceDeclVectorWith(container, loc, replacements)
+}
+
+private func replaceDeclVectorWith(container: ArrayList<Decl>, loc: Int64, newDecls: ArrayList<Decl>): Unit {
     let rebuilt = ArrayList<Decl>()
     var idx: Int64 = 0
     while (idx < container.size) {
         if (idx == loc) {
-            for (node in newNodes) {
-                if (let Some(decl) <- (node as Decl)) {
-                    rebuilt.add(decl)
-                } else {
-                    diag.Diagnose(node.begin, "expect declaration from macro expansion")
-                }
+            for (decl in newDecls) {
+                rebuilt.add(decl)
             }
         } else {
             rebuilt.add(container[idx])
@@ -189,21 +294,69 @@ private func replaceDeclVector(container: ArrayList<Decl>, loc: Int64, newNodes:
     }
 }
 
-private func replaceParamVector(container: ArrayList<FuncParam>, loc: Int64, newNodes: ArrayList<Node>, diag: DiagnosticEngine): Unit {
-    if (newNodes.isEmpty()) {
-        diag.Diagnose(DEFAULT_POSITION, "unexpected empty tokens after the macro expansion for the func parameters.")
+private func checkReplacedFuncParamList(
+    macroNode: MacroCall,
+    params: ArrayList<FuncParam>,
+    diag: DiagnosticEngine
+): Unit {
+    let invocation = macroNode.RequireInvocation()
+    if (let Some(parent) <- invocation.parent) {
+        if (!ASTKindEquals(parent.astKind, ASTKind.FUNC_PARAM_LIST)) {
+            return
+        }
+        var meetNamedParameter = false
+        for (param in params) {
+            if (!meetNamedParameter && param.isNamedParam) {
+                meetNamedParameter = true
+            } else if (meetNamedParameter && !param.isNamedParam) {
+                emitMacroDiag(diag, param.begin, DiagKind.macro_named_parameter_after_unnamed)
+            }
+        }
+    }
+}
+
+private func replaceParamVector(
+    container: ArrayList<FuncParam>,
+    loc: Int64,
+    newNodes: ArrayList<Node>,
+    macroNode: MacroCall,
+    diag: DiagnosticEngine
+): Unit {
+    if (loc < 0 || loc >= container.size) {
         return
     }
+    if (newNodes.isEmpty()) {
+        emitMacroDiag(diag, macroNode.GetBeginPos(), DiagKind.macro_unexpected_empty_parameter)
+        return
+    }
+    let original = container[loc]
+    let replacements = ArrayList<FuncParam>()
+    for (node in newNodes) {
+        if (let Some(param) <- (node as FuncParam)) {
+            param.outerDecl = original.outerDecl
+            if (param.curFile.isNone()) {
+                param.curFile = original.curFile
+            }
+            replacements.add(param)
+        } else {
+            emitMacroDiag(diag, node.begin, DiagKind.macro_expect_declaration)
+        }
+    }
+    if (replacements.isEmpty()) {
+        return
+    }
+    preserveOriginalMacroNode(macroNode, original.curFile)
+    replaceParamVectorWith(container, loc, replacements)
+    checkReplacedFuncParamList(macroNode, container, diag)
+}
+
+private func replaceParamVectorWith(container: ArrayList<FuncParam>, loc: Int64, newParams: ArrayList<FuncParam>): Unit {
     let rebuilt = ArrayList<FuncParam>()
     var idx: Int64 = 0
     while (idx < container.size) {
         if (idx == loc) {
-            for (node in newNodes) {
-                if (let Some(param) <- (node as FuncParam)) {
-                    rebuilt.add(param)
-                } else {
-                    diag.Diagnose(node.begin, "expect function parameter from macro expansion")
-                }
+            for (param in newParams) {
+                rebuilt.add(param)
             }
         } else {
             rebuilt.add(container[idx])
@@ -358,6 +511,7 @@ public class MacroExpansion {
             if (hasMacroCallInNode(node, ci.diag)) {
                 return
             }
+            checkWhenAfterMacroExpand(node, ci.diag)
         }
         ReplaceEachMacroHelper(macCall, nodes)
     }
@@ -365,7 +519,9 @@ public class MacroExpansion {
     public func ReplaceEachMacroHelper(macroNode: MacroCall, newNodes: ArrayList<Node>): Unit {
         let target = macroNode.replaceLoc
         if (target.kind == ReplaceTargetKind.EXPR_BOX) {
-            if (newNodes.size == 1) {
+            if (newNodes.isEmpty()) {
+                emitMacroDiag(ci.diag, macroNode.GetBeginPos(), DiagKind.macro_unexpect_no_expr)
+            } else if (newNodes.size == 1) {
                 if (let Some(replacementExpr) <- (newNodes[0] as Expr)) {
                     if (AssignExprReplacement(target, replacementExpr)) {
                         if (let Some(file) <- macroNode.RequireNode().curFile) {
@@ -373,25 +529,26 @@ public class MacroExpansion {
                         }
                     }
                 } else {
-                    ci.diag.Diagnose(newNodes[0].begin, "expect one expression from macro expansion")
+                    emitMacroDiag(ci.diag, newNodes[0].begin, DiagKind.macro_expect_one_expr)
                 }
             } else {
-                ci.diag.Diagnose(macroNode.GetBeginPos(), "expect one expression from macro expansion")
+                emitMacroDiag(ci.diag, newNodes[newNodes.size - 1].begin, DiagKind.macro_expect_one_expr)
             }
         } else if (target.kind == ReplaceTargetKind.NODE_VECTOR) {
             if (let Some(nodes) <- target.nodes) {
+                preserveOriginalMacroNode(macroNode, macroNode.RequireNode().curFile)
                 replaceNodeVector(nodes, target.loc, newNodes)
             }
         } else if (target.kind == ReplaceTargetKind.DECL_VECTOR) {
             if (let Some(decls) <- target.decls) {
-                replaceDeclVector(decls, target.loc, newNodes, ci.diag)
+                replaceDeclVector(decls, target.loc, newNodes, macroNode, ci.diag)
             }
         } else if (target.kind == ReplaceTargetKind.PARAM_VECTOR) {
             if (let Some(params) <- target.params) {
-                replaceParamVector(params, target.loc, newNodes, ci.diag)
+                replaceParamVector(params, target.loc, newNodes, macroNode, ci.diag)
             }
         } else {
-            ci.diag.Diagnose(macroNode.GetBeginPos(), "invalid node expanded in macro call's father node")
+            emitMacroDiag(ci.diag, macroNode.GetBeginPos(), DiagKind.macro_expand_invalid_node_replace)
         }
     }
 }
