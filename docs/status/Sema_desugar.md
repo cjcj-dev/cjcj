@@ -4,6 +4,10 @@ Last updated: 2026-06-17
 
 ## Current pass
 
+- Deepened `packages/sema/src/Desugar/DesugarInTypeCheck.cj` against the C++ `DesugarInTypeCheck.cpp` reference:
+  - added real helper lowerings for binary/unary operator overload calls, subscript overload calls, subscript assignment overload calls, compound assignment overload calls, `operator()` call lowering, and variadic-call packing;
+  - reused the real lexer/AST `TokenKindLiteral` mapping instead of a local compatibility operator table;
+  - preserved C++ side-effect markers, unsafe propagation, `sourceExpr`, operator field positions, `mapExpr` repair for compound/subscript assignments, fixed positional argument preservation, named-argument preservation, and vararg `ArrayLit` packing.
 - Deepened `packages/sema/src/Desugar/AfterTypeCheck/CallExpr.cj` against the C++ `AfterTypeCheck/CallExpr.cpp` reference:
   - replaced the empty token-call body with real `std.ast.Token(...)` desugaring to `std.ast.refreshPos(Token(...), fileID, line, column)`;
   - preserved the C++ guards for invalid types, already-desugared calls, `TOKEN_CALL` recursion avoidance, non-ref callees, wrong package targets, empty argument lists, and calls that already carry position arguments;
@@ -32,10 +36,10 @@ Last updated: 2026-06-17
 - The `desugarMacrocall` switch is not faithfully represented: the generic self-hosted walker already visits `File.originalMacroCallNodes`, so the C++ file-dispatch loop cannot be copied directly without double-walking macro-call nodes. Macro declaration and quote desugar remain substantially incomplete.
 - The new after-type-check traversal is implemented in `sema.Desugar`, but the root type-checker facade is outside this pass's edit surface, so full pipeline wiring remains pending.
 - `ForInExpr` currently has real range lowering only. String and iterator lowering still need faithful lookup/import-manager behavior from the C++ implementation.
-- In-type-check desugar is still limited to pipeline/composition. Primary constructor lowering, compound assignment overload lowering, and other C++ in-typecheck transformations remain pending.
+- In-type-check desugar now has real flow, operator-overload, subscript-overload, `operator()` call, and variadic-call helpers. Primary constructor lowering, pointer/array call lowering, cache invalidation through `ASTContext`, and root typechecker wiring remain pending.
 - After-instantiation desugar now covers declaration attributes and generic-instantiation coverage positions, but recursive type elimination, used-import marking, option/extend boxing, and dependency pruning remain pending.
 - String interpolation and try-with-resources/finally details still need faithful import-manager lookup and synthesis context that are not currently threaded through the self-hosted desugar facade. Effect handlers, semantic usage collection, macro desugar, property desugar, Java/ObjC interop branches, main invocation synthesis, and linkage refresh behavior remain below C++ fidelity.
 
 ## Coverage estimate
 
-Real behavior coverage for this scoped desugar area is about 32% versus the C++ reference. The implemented pieces now perform meaningful AST transformations, including token-call position refresh, the API-level `@IfAvailable` path, and more faithful discarded-context branch handling, but substantial C++ behavior remains either not wired into the root pipeline or represented by compiling compatibility bodies.
+Real behavior coverage for this scoped desugar area is about 34% versus the C++ reference. The implemented pieces now perform meaningful AST transformations, including in-typecheck operator/variadic helper lowering, token-call position refresh, the API-level `@IfAvailable` path, and more faithful discarded-context branch handling, but substantial C++ behavior remains either not wired into the root pipeline or represented by compiling compatibility bodies.
