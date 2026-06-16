@@ -1,6 +1,5 @@
 package cangjie_compiler::conditional_compilation
 
-import cangjie_compiler::ast.Position as AstPosition
 import cangjie_compiler::basic.DiagnosticEngine as BasicDiagnosticEngine
 import cangjie_compiler::basic.DiagKindRefactor as BasicDiagKindRefactor
 import cangjie_compiler::basic.Position as BasicPosition
@@ -21,9 +20,9 @@ class ConditionalDiagnosticReporter {
         return 0u64
     }
 
-    public func Diagnose(kind: BasicDiagKindRefactor, pos: AstPosition, args!: Array<String> = Array<String>()): Unit {
+    public func Diagnose(kind: BasicDiagKindRefactor, pos: BasicPosition, args!: Array<String> = Array<String>()): Unit {
         if (let Some(diag) <- engine) {
-            diag.DiagnoseRefactor(kind, ToBasicPosition(pos), arguments: args).Emit()
+            diag.DiagnoseRefactor(kind, pos, arguments: args).Emit()
         }
     }
 
@@ -35,20 +34,14 @@ class ConditionalDiagnosticReporter {
 
     public func DiagnoseWithNote(
         kind: BasicDiagKindRefactor,
-        pos: AstPosition,
+        pos: BasicPosition,
         note: String,
         args!: Array<String> = Array<String>()
     ): Unit {
         if (let Some(diag) <- engine) {
-            let builder = diag.DiagnoseRefactor(kind, ToBasicPosition(pos), arguments: args)
+            let builder = diag.DiagnoseRefactor(kind, pos, arguments: args)
             builder.AddNote(note)
             builder.Emit()
         }
     }
-}
-
-private func ToBasicPosition(pos: AstPosition): BasicPosition {
-    var out = BasicPosition(pos.fileID, pos.line, pos.column)
-    out.isCurFile = pos.isCurFile
-    return out
 }
