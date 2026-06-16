@@ -17,6 +17,7 @@ Implemented:
 - Aligned `Semaphore.SetCount` with the C++ implementation by updating the count under lock without broadcasting to waiters.
 - Corrected Unicode identifier classification to match the lexer token tables: raw identifiers can wrap keywords, `_` and built-in type token names are rejected as identifiers, and contextual modifier keywords are allowed only when requested.
 - De-isolated Unicode keyword and ICE version/color handling to real sibling packages: Utils now depends on `basic` for compiler version and ANSI ICE prefix constants, and on `lex` for `TOKENS`, `TokenKind.IDENTIFIER`, and contextual keyword classification instead of local compatibility copies.
+- Deepened `StdUtils` integer conversion fidelity: `Sto*` helpers now follow the C++ `std::sto*` family more closely for leading ASCII whitespace, optional signs, base-0 autodetection, hexadecimal prefixes, partial numeric consumption, and range failures.
 
 Known fidelity caveats:
 
