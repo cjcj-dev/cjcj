@@ -110,11 +110,7 @@ private func IsStringBinaryExpr(expr: Expr): Bool {
     if (expr.astKind != ASTKind.BINARY_EXPR) {
         return false
     }
-    if (let Some(ty) <- expr.GetTy()) {
-        if (!ty.IsString()) {
-            return false
-        }
-    } else {
+    if (!Ty.IsTyCorrect(expr.GetTy())) {
         return false
     }
     if (let Some(desugar) <- expr.desugarExpr) {

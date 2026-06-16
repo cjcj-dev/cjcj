@@ -24,6 +24,9 @@ This pass covers the self-hosted Cangjie port under:
 - Continued fidelity work by porting the C++ const-evaluation special case for desugared `std.core.String` binary operators.
 - Added the global-variable initialization issue for illegal `common static let` initialization inside a `static init`, while preserving the C++ dependency collection order for that assignment.
 - Aligned constructor initialization checking with the C++ skip rule for already-checked constructors and CJMP common constructors without `COMMON_WITH_DEFAULT`.
+- Refined the `std.core.String` binary-operator check so string comparisons with non-string result types follow the C++ const-evaluation path.
+- Added the C++ common-part skip in initialization checking for declarations deserialized from a common compilation unit.
+- Added C++ do-while initialization rollback behavior for variables initialized after an early jump in a body that otherwise executes at least once.
 
 ## Remaining Fidelity Gaps
 
@@ -34,4 +37,4 @@ This pass covers the self-hosted Cangjie port under:
 
 ## Estimate
 
-Honest behavior coverage for this legality/const-evaluation scope is about 54% versus the C++ reference. The port now has real traversal and issue production in the scoped files, plus several targeted C++ edge cases, but production completeness still requires diagnostic integration and the remaining exact semantic edge cases above.
+Honest behavior coverage for this legality/const-evaluation scope is about 55% versus the C++ reference. The port now has real traversal and issue production in the scoped files, plus several targeted C++ edge cases, but production completeness still requires diagnostic integration and the remaining exact semantic edge cases above.

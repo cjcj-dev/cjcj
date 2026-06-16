@@ -151,6 +151,16 @@ private func IsSameFile(left: Node, right: Node): Bool {
     return false
 }
 
+private func FromCommonPart(decl: Decl): Bool {
+    if (decl.TestAttr(Attribute.FROM_COMMON_PART)) {
+        return true
+    }
+    if (let Some(file) <- decl.curFile) {
+        return file.TestAttr(Attribute.FROM_COMMON_PART)
+    }
+    return false
+}
+
 private func CollectUninitializedReferences(node: Node, excluded: ArrayList<Decl>): ArrayList<Decl> {
     let result = ArrayList<Decl>()
     let walker = Walker(node, visitPre: { current: Node =>
@@ -171,6 +181,37 @@ private func CollectUninitializedReferences(node: Node, excluded: ArrayList<Decl
 
 private func CollectUninitializedReferences(node: Node): ArrayList<Decl> {
     return CollectUninitializedReferences(node, ArrayList<Decl>())
+}
+
+private func CollectReferencedDeclsBeforeJumpExpr(block: Block): ArrayList<Decl> {
+    let result = ArrayList<Decl>()
+    let walker = Walker(block, visitPre: { node: Node =>
+        if (let Some(_) <- (node as FuncBody)) {
+            return VisitAction.SKIP_CHILDREN
+        }
+        if (let Some(_) <- (node as WhileExpr)) {
+            return VisitAction.SKIP_CHILDREN
+        }
+        if (let Some(_) <- (node as DoWhileExpr)) {
+            return VisitAction.SKIP_CHILDREN
+        }
+        if (let Some(_) <- (node as ForInExpr)) {
+            return VisitAction.SKIP_CHILDREN
+        }
+        if (let Some(_) <- (node as JumpExpr)) {
+            return VisitAction.STOP_NOW
+        }
+        if (let Some(expr) <- (node as Expr)) {
+            if (expr.IsReferenceExpr()) {
+                if (let Some(target) <- expr.GetTarget()) {
+                    AddUniqueDecl(result, target)
+                }
+            }
+        }
+        VisitAction.WALK_CHILDREN
+    })
+    walker.Walk()
+    return result
 }
 
 private func CollectPatternVars(pattern: Pattern, out: ArrayList<VarDecl>): Unit {
@@ -260,6 +301,11 @@ public class InitializationChecker {
             return
         }
         node.EnableAttr(Attribute.INITIALIZATION_CHECKED)
+        if (let Some(decl) <- (node as Decl)) {
+            if (FromCommonPart(decl)) {
+                return
+            }
+        }
         match (node.astKind) {
             case ASTKind.PACKAGE =>
                 if (let Some(pkg) <- (node as Package)) {
@@ -970,6 +1016,13 @@ public class InitializationChecker {
             if (shouldUnset) {
                 for (decl in uninitedDecls) {
                     if (decl.TestAttr(Attribute.INITIALIZED)) {
+                        decl.DisableAttr(Attribute.INITIALIZED)
+                    }
+                }
+            } else {
+                let referencedBeforeJump = CollectReferencedDeclsBeforeJumpExpr(loopBlock)
+                for (decl in uninitedDecls) {
+                    if (!ContainsInitDecl(referencedBeforeJump, decl) && decl.TestAttr(Attribute.INITIALIZED)) {
                         decl.DisableAttr(Attribute.INITIALIZED)
                     }
                 }
