@@ -1,26 +1,17 @@
 package cangjie_compiler::option
 
+import cangjie_compiler::basic.PrintCommandDesc as BasicPrintCommandDesc
+import cangjie_compiler::basic.PrintIndentOnly as BasicPrintIndentOnly
 import std.collection.*
 
 private let OPTION_WIDTH: Int64 = 28
 
-private func spaces(count: Int64): String {
-    var result = ""
-    var idx: Int64 = 0
-    while (idx < count) {
-        result += " "
-        idx++
-    }
-    return result
-}
-
 private func printIndentOnly(indent: Int64, numSpaces!: Int64 = 2): Unit {
-    print(spaces(indent * numSpaces))
+    BasicPrintIndentOnly(UInt64(indent), numSpaces: UInt64(numSpaces))
 }
 
 private func printCommandDesc(option: String, desc: String): Unit {
-    let padding = if (option.size < OPTION_WIDTH) { OPTION_WIDTH - option.size } else { 0 }
-    Println("  " + option + spaces(padding) + desc)
+    BasicPrintCommandDesc(option, desc, OPTION_WIDTH)
 }
 
 private func containsBackendValue(values: Array<Backend>, target: Backend): Bool {

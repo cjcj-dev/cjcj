@@ -107,7 +107,62 @@ key/value cfgs are already present and warns for missing explicit `cfg.toml`
 files before continuing to later paths.
 
 Remaining fidelity gaps are not hidden behind self-host markers: this package
-still uses local diagnostics instead of Basic diagnostic IDs. Importing Basic
-directly is currently blocked by the existing `basic -> option` dependency for
-`WarningOptionMgr`, so diagnostic de-isolation needs a dependency-shape change
-outside this package before it can faithfully use `DiagnosticEngine`.
+still uses local diagnostic text for many driver errors instead of reporting the
+exact Basic `DiagnosticEngine` IDs and ranges everywhere. The dependency shape
+now permits selected `option -> basic` de-isolation, but a full diagnostic pass
+still needs careful call-site-by-call-site migration to preserve behavior.
+
+This pass de-isolates the remaining local print/usage formatting wrappers that
+could be safely moved inside the current dependency graph: Option now delegates
+`Errorln`, `Warningln`, `Infoln`, `Println`, help indentation, and command
+description formatting to the real `cangjie_compiler::basic` print helpers
+while preserving Option's public wrapper surface for existing call sites. The
+driver-owned `TempFileInfo` duplicate is still local because importing
+`driver` from `option` would invert the current package layering
+(`driver -> frontend_tool -> option`) and pull tool/frontend dependencies into
+the core option package.
+
+The same pass restores more C++ post-action behavior and state. `GlobalOptions`
+now carries the C++ `symbolsNeedLocalizedPerPkg` map, reports C++-matching
+errors or warnings for output-dir conflicts, `lib-macro_` outputs,
+compile-macro/output-type conflicts, coverage normalization, scan-dependency
+mode errors, sanitizer/LTO/compile-as-exe/LTO-visibility/PGO conflicts, CJMP
+common-part mismatches, invalid compile-target placement, object-only linking
+without `--experimental`, unsupported APC targets, and OHOS `--static-std`
+normalization. Target triple parsing, custom optimization, sancov level,
+error-count, and jobs/APC value parsing now emit the reference diagnostics
+instead of failing silently.
+
+This continuation removes Option's local compatibility copy of the diagnostic
+warning-group enum and index table. `-Woff`/`-Won` now use the real
+`cangjie_compiler::basic` `WarnGroup`/`WarnGroupIndex` definitions that back the
+shared `WarningOptionMgr`, and unknown warning-group values now fail option
+processing like the C++ `WARN_GROUP_MAP` path instead of being accepted
+silently.
+
+This pass removes another compatibility enum: Option's local
+`OverflowStrategy` copy is replaced by the real `cangjie_compiler::utils`
+definition, re-exported through Option to preserve the public include-like
+surface. `GlobalOptions.overflowStrategy` now has the same type consumed by sema,
+so the old sema-side conversion bridge is gone. `--int-overflow-mode` also uses
+the shared Utils parser/validator, accepting the full C++ set (`no`, `checked`,
+`wrapping`, `throwing`, `saturating`) and preserving the C++ abort-on-invalid
+serialization path.
+
+This continuation tightens action-level parity with `OptionAction.cpp`.
+`--common-part-cjo` and `--common-part-chir` now match the C++ action contract:
+invalid paths are not added, but the option action itself still succeeds so
+diagnostics/post-action processing can proceed. `--render-chir=na` is also
+accepted by the action path, matching the C++ `DUMP_CHIR_MODE_MAP` entry even
+though the visible predefined value list remains unchanged.
+
+This pass de-isolates conditional-compilation cfg diagnostics onto the real
+`cangjie_compiler::basic.DiagnosticEngine` surface for the paths owned by
+`OptionAction.cpp`. `--cfg` now reports the C++ diagnostic IDs for malformed
+key/value input, invalid identifiers, builtin-key reuse, duplicate keys,
+non-directory cfg paths, ignored cfg paths, missing explicit `cfg.toml` files,
+and malformed cfg file lines. `SetupConditionalCompilationCfgFromFile` also
+reports `driver_cfg_file_read_failed`; the only remaining approximation in
+this path is the empty failure-reason string because the current Cangjie
+`ReadTextFile` wrapper exposes success/content but not the underlying IO error
+message that C++ passes through.

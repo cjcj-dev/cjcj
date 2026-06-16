@@ -1,5 +1,7 @@
 package cangjie_compiler::option
 
+public import cangjie_compiler::utils.{OverflowStrategy, OverflowStrategyIndex}
+
 public enum Kind {
     | UNKNOWN | FLAG | FLAG_WITH_ARG | SEPARATED | CONTINOUS
 }
@@ -65,10 +67,6 @@ public enum ID {
 public enum ArgInstanceType { | Input | Option }
 public enum ArgType { | FullyParsed | PartiallyParsed }
 public enum PathType { | FILE | DIRECTORY }
-public enum WarnGroup {
-    | UNUSED | UNUSED_MAIN | DRIVER_ARG | DEPRECATED | UNSUPPORT_COMPILE_SOURCE | PACKAGE_IMPORT
-    | PARSER | SEMANTICS | INTERPRETER | APILEVEL_CHECK | UNGROUPED | NONE
-}
 public enum DiagFormat { | JSON | NO_COLOR | DEFAULT }
 public enum MockMode { | ON | OFF | RUNTIME_ERROR | DEFAULT }
 public enum BackendType { | CJNATIVE | UNKNOWN }
@@ -93,7 +91,6 @@ public enum PrintBCHIROption { | DESERIALIED | LINKED | CHIR2BCHIR | CE_CHIR2BCH
 public enum CHIRMode { | NA | STANDARD | WITH_ID | ALL }
 public enum SanitizerType { | NONE | ADDRESS | THREAD | HWADDRESS }
 public enum CandidateEmitCHIRPhase { | NA | RAW | OPT }
-public enum OverflowStrategy { | NA | CHECKED | WRAPPING | THROWING | SATURATING }
 
 public func KindIndex(value: Kind): Int64 {
     return match (value) {
@@ -345,27 +342,6 @@ public func IDIndex(value: ID): Int64 {
 extend ID <: Equatable<ID> {
     public operator func ==(right: ID): Bool { return IDIndex(this) == IDIndex(right) }
     public operator func !=(right: ID): Bool { return !(this == right) }
-}
-
-public func WarnGroupIndex(value: WarnGroup): Int64 {
-    return match (value) {
-        case WarnGroup.UNUSED => 0
-        case WarnGroup.UNUSED_MAIN => 1
-        case WarnGroup.DRIVER_ARG => 2
-        case WarnGroup.DEPRECATED => 3
-        case WarnGroup.UNSUPPORT_COMPILE_SOURCE => 4
-        case WarnGroup.PACKAGE_IMPORT => 5
-        case WarnGroup.PARSER => 6
-        case WarnGroup.SEMANTICS => 7
-        case WarnGroup.INTERPRETER => 8
-        case WarnGroup.APILEVEL_CHECK => 9
-        case WarnGroup.UNGROUPED => 10
-        case WarnGroup.NONE => 11
-    }
-}
-extend WarnGroup <: Equatable<WarnGroup> {
-    public operator func ==(right: WarnGroup): Bool { return WarnGroupIndex(this) == WarnGroupIndex(right) }
-    public operator func !=(right: WarnGroup): Bool { return !(this == right) }
 }
 
 public func enumIndex(value: OptimizationLevel): Int64 {
@@ -626,20 +602,4 @@ extend CandidateEmitCHIRPhase <: Equatable<CandidateEmitCHIRPhase> {
         return CandidateEmitCHIRPhaseIndex(this) == CandidateEmitCHIRPhaseIndex(right)
     }
     public operator func !=(right: CandidateEmitCHIRPhase): Bool { return !(this == right) }
-}
-
-public func OverflowStrategyIndex(value: OverflowStrategy): Int64 {
-    return match (value) {
-        case OverflowStrategy.NA => 0
-        case OverflowStrategy.CHECKED => 1
-        case OverflowStrategy.WRAPPING => 2
-        case OverflowStrategy.THROWING => 3
-        case OverflowStrategy.SATURATING => 4
-    }
-}
-extend OverflowStrategy <: Equatable<OverflowStrategy> {
-    public operator func ==(right: OverflowStrategy): Bool {
-        return OverflowStrategyIndex(this) == OverflowStrategyIndex(right)
-    }
-    public operator func !=(right: OverflowStrategy): Bool { return !(this == right) }
 }

@@ -1,6 +1,13 @@
 package cangjie_compiler::option
 
+import cangjie_compiler::basic.DEFAULT_POSITION as BasicDefaultPosition
+import cangjie_compiler::basic.DiagnosticEngine as BasicDiagnosticEngine
+import cangjie_compiler::basic.DiagKindRefactor as BasicDiagKindRefactor
+import cangjie_compiler::basic.WarnGroup as BasicWarnGroup
+import cangjie_compiler::basic.WarnGroupIndex as BasicWarnGroupIndex
 import cangjie_compiler::utils.FileUtil
+import cangjie_compiler::utils.StringToOverflowStrategy
+import cangjie_compiler::utils.ValidOverflowStrategy
 import std.collection.*
 
 public class ActionResult {
@@ -16,6 +23,21 @@ public class ActionResult {
 
 private func handled(success!: Bool = true): ActionResult { return ActionResult(true, success) }
 private func missing(): ActionResult { return ActionResult(false, true) }
+
+private func emitDiag(kind: BasicDiagKindRefactor): Unit {
+    let diag = BasicDiagnosticEngine()
+    diag.DiagnoseRefactor(kind, BasicDefaultPosition).Emit()
+}
+
+private func emitDiag(kind: BasicDiagKindRefactor, arg: String): Unit {
+    let diag = BasicDiagnosticEngine()
+    diag.DiagnoseRefactor(kind, BasicDefaultPosition, arguments: [arg]).Emit()
+}
+
+private func emitDiag(kind: BasicDiagKindRefactor, first: String, second: String): Unit {
+    let diag = BasicDiagnosticEngine()
+    diag.DiagnoseRefactor(kind, BasicDefaultPosition, arguments: [first, second]).Emit()
+}
 
 public func ParsePreAction(opts: GlobalOptions, arg: OptionArgInstance): ActionResult {
     let id = arg.info.GetID()
@@ -80,12 +102,12 @@ public func ParseAction(opts: GlobalOptions, arg: OptionArgInstance): ActionResu
     if (id == ID.COMMON_PART_CJO) {
         let commonCjo = opts.CheckInputFilePath(arg.value)
         if (commonCjo.hasValue) { opts.commonPartCjos.add(commonCjo.value) }
-        return handled(success: commonCjo.hasValue)
+        return handled()
     }
     if (id == ID.COMMON_PART_CHIR) {
         let commonChir = opts.CheckInputFilePath(arg.value)
         if (commonChir.hasValue) { opts.commonPartChirs.add(commonChir.value) }
-        return handled(success: commonChir.hasValue)
+        return handled()
     }
     if (id == ID.INCRE_COMPILE) { opts.enIncrementalCompilation = true; return handled() }
     if (id == ID.INCRE_DEBUG) { opts.printIncrementalInfo = true; return handled() }
@@ -123,8 +145,8 @@ public func ParseAction(opts: GlobalOptions, arg: OptionArgInstance): ActionResu
     if (id == ID.OPTIMIZATION_S) { return handled(success: opts.SetOptimizationLevel(OptimizationLevel.Os)) }
     if (id == ID.OPTIMIZATION_Z) { return handled(success: opts.SetOptimizationLevel(OptimizationLevel.Oz)) }
     if (id == ID.OPTIMIZATION_CUSTOM) { return parseCustomOptimization(opts, arg.value) }
-    if (id == ID.WARN_OFF) { parseWarn(arg.value, true); return handled() }
-    if (id == ID.WARN_ON) { parseWarn(arg.value, false); return handled() }
+    if (id == ID.WARN_OFF) { return handled(success: parseWarn(arg.value, true)) }
+    if (id == ID.WARN_ON) { return handled(success: parseWarn(arg.value, false)) }
     if (id == ID.ERROR_COUNT_LIMIT) { return parseErrorLimit(opts, arg.value) }
     if (id == ID.DIAG_FORMAT) { return parseDiagFormat(opts, arg.value) }
     if (id == ID.CONDITIONAL_COMPILATION_CONFIG) { return parsePassedWhen(opts, arg.value) }
@@ -345,37 +367,43 @@ private func parseMockMode(opts: GlobalOptions, value: String): ActionResult {
 
 private func parseCustomOptimization(opts: GlobalOptions, value: String): ActionResult {
     let parsed = TryParseUInt64(value)
-    if (!parsed.hasValue) { return handled(success: false) }
+    if (!parsed.hasValue) {
+        Errorln("Optimization level " + value + " is invalid")
+        return handled(success: false)
+    }
     if (parsed.value == 0u64) { return handled(success: opts.SetOptimizationLevel(OptimizationLevel.O0)) }
     if (parsed.value == 1u64) { return handled(success: opts.SetOptimizationLevel(OptimizationLevel.O1)) }
     if (parsed.value == 2u64) { return handled(success: opts.SetOptimizationLevel(OptimizationLevel.O2)) }
     return handled(success: opts.SetOptimizationLevel(OptimizationLevel.O3))
 }
 
-private func parseWarn(value: String, suppress: Bool): Unit {
+private func parseWarn(value: String, suppress: Bool): Bool {
     if (value == "all") {
         WarningOptionMgr.UpdateFlags(suppress)
     } else if (value == "unused") {
-        WarningOptionMgr.UpdateFlag(UInt64(WarnGroupIndex(WarnGroup.UNUSED)), suppress)
+        WarningOptionMgr.UpdateFlag(UInt64(BasicWarnGroupIndex(BasicWarnGroup.UNUSED)), suppress)
     } else if (value == "unused-main") {
-        WarningOptionMgr.UpdateFlag(UInt64(WarnGroupIndex(WarnGroup.UNUSED_MAIN)), suppress)
+        WarningOptionMgr.UpdateFlag(UInt64(BasicWarnGroupIndex(BasicWarnGroup.UNUSED_MAIN)), suppress)
     } else if (value == "driver-arg") {
-        WarningOptionMgr.UpdateFlag(UInt64(WarnGroupIndex(WarnGroup.DRIVER_ARG)), suppress)
+        WarningOptionMgr.UpdateFlag(UInt64(BasicWarnGroupIndex(BasicWarnGroup.DRIVER_ARG)), suppress)
     } else if (value == "deprecated") {
-        WarningOptionMgr.UpdateFlag(UInt64(WarnGroupIndex(WarnGroup.DEPRECATED)), suppress)
+        WarningOptionMgr.UpdateFlag(UInt64(BasicWarnGroupIndex(BasicWarnGroup.DEPRECATED)), suppress)
     } else if (value == "unsupport-compile-source") {
-        WarningOptionMgr.UpdateFlag(UInt64(WarnGroupIndex(WarnGroup.UNSUPPORT_COMPILE_SOURCE)), suppress)
+        WarningOptionMgr.UpdateFlag(UInt64(BasicWarnGroupIndex(BasicWarnGroup.UNSUPPORT_COMPILE_SOURCE)), suppress)
     } else if (value == "package-import") {
-        WarningOptionMgr.UpdateFlag(UInt64(WarnGroupIndex(WarnGroup.PACKAGE_IMPORT)), suppress)
+        WarningOptionMgr.UpdateFlag(UInt64(BasicWarnGroupIndex(BasicWarnGroup.PACKAGE_IMPORT)), suppress)
     } else if (value == "parser") {
-        WarningOptionMgr.UpdateFlag(UInt64(WarnGroupIndex(WarnGroup.PARSER)), suppress)
+        WarningOptionMgr.UpdateFlag(UInt64(BasicWarnGroupIndex(BasicWarnGroup.PARSER)), suppress)
     } else if (value == "semantics") {
-        WarningOptionMgr.UpdateFlag(UInt64(WarnGroupIndex(WarnGroup.SEMANTICS)), suppress)
+        WarningOptionMgr.UpdateFlag(UInt64(BasicWarnGroupIndex(BasicWarnGroup.SEMANTICS)), suppress)
     } else if (value == "interpreter") {
-        WarningOptionMgr.UpdateFlag(UInt64(WarnGroupIndex(WarnGroup.INTERPRETER)), suppress)
+        WarningOptionMgr.UpdateFlag(UInt64(BasicWarnGroupIndex(BasicWarnGroup.INTERPRETER)), suppress)
     } else if (value == "apilevel-check") {
-        WarningOptionMgr.UpdateFlag(UInt64(WarnGroupIndex(WarnGroup.APILEVEL_CHECK)), suppress)
+        WarningOptionMgr.UpdateFlag(UInt64(BasicWarnGroupIndex(BasicWarnGroup.APILEVEL_CHECK)), suppress)
+    } else {
+        return false
     }
+    return true
 }
 
 private func parseErrorLimit(opts: GlobalOptions, value: String): ActionResult {
@@ -384,27 +412,44 @@ private func parseErrorLimit(opts: GlobalOptions, value: String): ActionResult {
         return handled()
     }
     let parsed = TryParseUInt64(value)
-    if (!parsed.hasValue) { return handled(success: false) }
+    if (!parsed.hasValue) {
+        Errorln("The value of --error-count-limit is invalid.")
+        return handled(success: false)
+    }
     opts.errorCountLimit = parsed
     return handled()
 }
 
 private func parsePassedWhen(opts: GlobalOptions, value: String): ActionResult {
-    if (value.isEmpty()) { return handled(success: false) }
+    if (value.isEmpty()) {
+        emitDiag(BasicDiagKindRefactor.driver_cfg_value_err)
+        return handled(success: false)
+    }
     if (isCfgPathMode(value)) {
         let path = value.replace("\\=", "=")
-        if (!IsDir(path)) { return handled(success: false) }
+        if (!IsDir(path)) {
+            emitDiag(BasicDiagKindRefactor.dirver_cfg_not_a_dir, path)
+            return handled(success: false)
+        }
         opts.passedWhenCfgPaths.add(path)
         return handled()
     }
     let parts = SplitString(value, ",")
     for (part in parts) {
         let kv = SplitString(part, "=")
-        if (kv.size != 2) { return handled(success: false) }
-        let maybeKey = normalizeCfgKey(kv[0].trimAscii())
+        if (kv.size != 2) {
+            emitDiag(BasicDiagKindRefactor.driver_cfg_value_err)
+            return handled(success: false)
+        }
+        let rawKey = kv[0].trimAscii()
         let val = kv[1].trimAscii()
-        if (!maybeKey.hasValue || val.isEmpty()) { return handled(success: false) }
-        if (!addCfgKeyValue(opts.passedWhenKeyValue, maybeKey.value, val)) { return handled(success: false) }
+        if (rawKey.isEmpty() || val.isEmpty()) {
+            emitDiag(BasicDiagKindRefactor.driver_cfg_value_err)
+            return handled(success: false)
+        }
+        let maybeKey = parseCfgKey(rawKey, opts.passedWhenKeyValue)
+        if (!maybeKey.hasValue) { return handled(success: false) }
+        opts.passedWhenKeyValue.add(maybeKey.value, val)
     }
     return handled()
 }
@@ -431,20 +476,29 @@ private func isBuiltinCondition(key: String): Bool {
         key == "cjc_version" || key == "test"
 }
 
-private func normalizeCfgKey(rawKey: String): MaybeString {
-    if (rawKey.isEmpty() || !FileUtil.IsIdentifier(rawKey)) { return MaybeString() }
-    var key = rawKey
-    if (key.size > 2 && key[0] == b'`' && key[key.size - 1] == b'`') {
-        key = key[1..key.size - 1]
+private func checkCfgIdentifier(rawKey: String): Bool {
+    if (!FileUtil.IsIdentifier(rawKey)) {
+        emitDiag(BasicDiagKindRefactor.dirver_cfg_invaild_identifier)
+        return false
     }
-    if (isBuiltinCondition(key)) { return MaybeString() }
-    return MaybeString(key)
+    return true
 }
 
-private func addCfgKeyValue(map: HashMap<String, String>, key: String, value: String): Bool {
-    if (map.contains(key)) { return false }
-    map.add(key, value)
-    return true
+private func parseCfgKey(rawKey: String, map: HashMap<String, String>): MaybeString {
+    if (!checkCfgIdentifier(rawKey)) { return MaybeString() }
+    var key = rawKey
+    if (key.size > 2 && key[0] == b'`') {
+        key = key[1..key.size - 1]
+    }
+    if (isBuiltinCondition(key)) {
+        emitDiag(BasicDiagKindRefactor.dirver_cfg_same_with_builtin)
+        return MaybeString()
+    }
+    if (map.contains(key)) {
+        emitDiag(BasicDiagKindRefactor.dirver_cfg_key_repeat)
+        return MaybeString()
+    }
+    return MaybeString(key)
 }
 
 private func isEscaped(input: String, index: Int64): Bool {
@@ -489,20 +543,30 @@ private func parseConditionKeyValueLine(line: String, map: HashMap<String, Strin
     let commentPos = findTomlComment(line)
     let processedLine = if (commentPos >= 0) { line[0..commentPos] } else { line }
     let kv = SplitString(processedLine, "=")
-    if (kv.size != 2) { return false }
-    let maybeKey = normalizeCfgKey(kv[0].trimAscii())
-    let quotedValue = kv[1].trimAscii()
-    if (!maybeKey.hasValue || quotedValue.size <= 2 || quotedValue[0] != b'"' ||
-        quotedValue[quotedValue.size - 1] != b'"') {
+    if (kv.size != 2) {
+        emitDiag(BasicDiagKindRefactor.driver_cfg_toml_content_err)
         return false
     }
+    let rawKey = kv[0].trimAscii()
+    let quotedValue = kv[1].trimAscii()
+    if (rawKey.isEmpty() || quotedValue.size <= 2 || quotedValue[0] != b'"' ||
+        quotedValue[quotedValue.size - 1] != b'"') {
+        emitDiag(BasicDiagKindRefactor.driver_cfg_toml_content_err)
+        return false
+    }
+    let maybeKey = parseCfgKey(rawKey, map)
+    if (!maybeKey.hasValue) { return false }
     let unquotedValue = quotedValue[1..quotedValue.size - 1].replace("\\\"", "\"")
-    return addCfgKeyValue(map, maybeKey.value, unquotedValue)
+    map.add(maybeKey.value, unquotedValue)
+    return true
 }
 
 public func SetupConditionalCompilationCfgFromFile(filePath: String, map: HashMap<String, String>): Bool {
     let content = ReadTextFile(filePath)
-    if (!content.hasValue) { return false }
+    if (!content.hasValue) {
+        emitDiag(BasicDiagKindRefactor.driver_cfg_file_read_failed, filePath, "")
+        return false
+    }
     for (line in SplitLines(content.value)) {
         if (line.isEmpty() || seeingTomlComment(line)) { continue }
         if (!parseConditionKeyValueLine(line, map)) { return false }
@@ -513,7 +577,7 @@ public func SetupConditionalCompilationCfgFromFile(filePath: String, map: HashMa
 public func SetupConditionalCompilationCfg(opts: GlobalOptions): Bool {
     if (!opts.passedWhenKeyValue.isEmpty()) {
         if (!opts.passedWhenCfgPaths.isEmpty()) {
-            Warningln("cfg paths are ignored because key-value cfg options are already specified")
+            emitDiag(BasicDiagKindRefactor.driver_cfg_path_ignored)
         }
         return true
     }
@@ -522,7 +586,7 @@ public func SetupConditionalCompilationCfg(opts: GlobalOptions): Bool {
         if (FileExist(filePath)) {
             return SetupConditionalCompilationCfgFromFile(filePath, opts.passedWhenKeyValue)
         }
-        Warningln("no such file: " + filePath)
+        emitDiag(BasicDiagKindRefactor.driver_warning_no_such_file, filePath)
     }
     let defaultCfgFilePath = if (opts.packagePaths.isEmpty()) { "cfg.toml" } else { JoinPath(opts.packagePaths[0], "cfg.toml") }
     if (!FileExist(defaultCfgFilePath)) { return true }
@@ -542,6 +606,7 @@ private func parseEmitCHIR(opts: GlobalOptions, value: String): ActionResult {
 }
 
 private func parseChirMode(opts: GlobalOptions, value: String): ActionResult {
+    if (value == "na") { opts.chirRenderMode = CHIRMode.NA; return handled() }
     if (value == "standard") { opts.chirRenderMode = CHIRMode.STANDARD; return handled() }
     if (value == "withID") { opts.chirRenderMode = CHIRMode.WITH_ID; return handled() }
     if (value == "all") { opts.chirRenderMode = CHIRMode.ALL; return handled() }
@@ -549,15 +614,17 @@ private func parseChirMode(opts: GlobalOptions, value: String): ActionResult {
 }
 
 private func parseOverflowStrategy(opts: GlobalOptions, value: String): ActionResult {
-    if (value == "throwing") { opts.overflowStrategy = OverflowStrategy.THROWING; return handled() }
-    if (value == "wrapping") { opts.overflowStrategy = OverflowStrategy.WRAPPING; return handled() }
-    if (value == "saturating") { opts.overflowStrategy = OverflowStrategy.SATURATING; return handled() }
-    return handled(success: false)
+    if (!ValidOverflowStrategy(value)) { return handled(success: false) }
+    opts.overflowStrategy = StringToOverflowStrategy(value)
+    return handled()
 }
 
 private func parseSancovLevel(opts: GlobalOptions, value: String): ActionResult {
     let parsed = TryParseUInt64(value)
-    if (!parsed.hasValue) { return handled(success: false) }
+    if (!parsed.hasValue) {
+        Errorln("Sancov level " + value + " is invalid")
+        return handled(success: false)
+    }
     if (parsed.value == 0u64) { opts.sancovOption.SetSancovLevel(SanitizerCoverageType.SCK_NONE); return handled() }
     if (parsed.value == 1u64) { opts.sancovOption.SetSancovLevel(SanitizerCoverageType.SCK_FUNCTION); return handled() }
     opts.sancovOption.SetSancovLevel(SanitizerCoverageType.SCK_BB)
@@ -591,9 +658,19 @@ private func parseStackTraceFormat(opts: GlobalOptions, value: String): ActionRe
 
 private func parseJobsValue(optionName: String, value: String): MaybeUInt64 {
     let maxLen: Int64 = 9
-    if (value.isEmpty() || value.size > maxLen) { return MaybeUInt64() }
+    if (value.isEmpty()) {
+        Errorln("'" + optionName + "' requires a non-empty value.")
+        return MaybeUInt64()
+    }
+    if (value.size > maxLen) {
+        Errorln("'" + optionName + "' gets an invalid number input.")
+        return MaybeUInt64()
+    }
     let parsed = TryParseUInt64(value)
-    if (!parsed.hasValue) { return MaybeUInt64() }
+    if (!parsed.hasValue) {
+        Errorln("'" + optionName + "' only accepts a positive integer number as value.")
+        return MaybeUInt64()
+    }
     if (parsed.value < 1u64) {
         Warningln("'" + optionName + "' value must be greater than 0, the compiler will use 1 as the value.")
         return MaybeUInt64(1u64)
@@ -620,13 +697,19 @@ private func parseJobs(opts: GlobalOptions, arg: OptionArgInstance, aggressive: 
 
 public func ParseTargetTriple(opts: GlobalOptions, triple: String): Bool {
     let parts = SplitString(triple, "-")
-    if (parts.size != 3 && parts.size != 4) { return false }
+    if (parts.size != 3 && parts.size != 4) {
+        Errorln("The target must be in either form of {ARCH}-{VENDOR}-{SYSTEM}-{ENV} or {ARCH}-{SYSTEM}-{ENV}.")
+        return false
+    }
     opts.target.vendor = Vendor.UNKNOWN
     if (parts[0] == "x86_64") { opts.target.arch = ArchType.X86_64 }
     else if (parts[0] == "aarch64" || parts[0] == "arm64") { opts.target.arch = ArchType.AARCH64 }
     else if (parts[0] == "arm") { opts.target.arch = ArchType.ARM32 }
     else if (parts[0] == "unknown") { opts.target.arch = ArchType.UNKNOWN }
-    else { return false }
+    else {
+        Errorln("The architecture \"" + parts[0] + "\" is not found or supported!")
+        return false
+    }
     if (parts.size >= 3 && parts[1] == "apple") {
         opts.target.vendor = Vendor.APPLE
         if (StartsWith(parts[2], "ios")) {
@@ -641,6 +724,7 @@ public func ParseTargetTriple(opts: GlobalOptions, triple: String): Bool {
                 opts.target.env = EnvironmentType.NOT_AVAILABLE
                 return true
             }
+            Errorln("The environment \"" + parts[3] + "\" is not found or supported!")
             return false
         }
         if (parts[2] == "darwin") {
@@ -648,6 +732,8 @@ public func ParseTargetTriple(opts: GlobalOptions, triple: String): Bool {
             opts.target.env = EnvironmentType.NOT_AVAILABLE
             return true
         }
+        Errorln("The OS \"" + parts[2] + "\" is not found or supported!")
+        return false
     }
     let osStr = parts[parts.size - 2]
     if (osStr == "linux") { opts.target.os = OSType.LINUX }
@@ -655,11 +741,19 @@ public func ParseTargetTriple(opts: GlobalOptions, triple: String): Bool {
     else if (osStr == "darwin") { opts.target.os = OSType.DARWIN }
     else if (osStr == "ios") { opts.target.os = OSType.IOS }
     else if (osStr == "unknown") { opts.target.os = OSType.UNKNOWN }
-    else { return false }
+    else {
+        Errorln("The OS \"" + osStr + "\" is not found or supported!")
+        return false
+    }
     let envStr = parts[parts.size - 1]
     if (envStr == "gnu" || envStr == "mingw32") { opts.target.env = EnvironmentType.GNU }
     else if (envStr == "ohos") { opts.target.env = EnvironmentType.OHOS }
-    else if (envStr == "android") { opts.target.env = EnvironmentType.ANDROID; opts.target.apiLevel = MIN_ANDROID_API }
+    else if (envStr == "android") {
+        opts.target.env = EnvironmentType.ANDROID
+        opts.target.apiLevel = MIN_ANDROID_API
+        Infoln("ANDROID API level is not suggested in the target. Use API level " + opts.target.apiLevel +
+            " by default.")
+    }
     else if (StartsWith(envStr, "android")) {
         opts.target.env = EnvironmentType.ANDROID
         opts.target.apiLevel = ""
@@ -682,6 +776,9 @@ public func ParseTargetTriple(opts: GlobalOptions, triple: String): Bool {
     }
     else if (envStr == "simulator") { opts.target.env = EnvironmentType.SIMULATOR }
     else if (envStr == "") { opts.target.env = EnvironmentType.NOT_AVAILABLE }
-    else { return false }
+    else {
+        Errorln("The environment \"" + envStr + "\" is not found or supported!")
+        return false
+    }
     return true
 }
