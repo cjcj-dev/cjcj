@@ -662,10 +662,21 @@ private func parseStackTraceFormat(opts: GlobalOptions, value: String): ActionRe
     return handled(success: false)
 }
 
+private func isAsciiDigitsOnly(value: String): Bool {
+    for (byte in value.toArray()) {
+        if (byte < b'0' || byte > b'9') { return false }
+    }
+    return true
+}
+
 private func parseJobsValue(optionName: String, value: String): MaybeUInt64 {
     let maxLen: Int64 = 9
     if (value.isEmpty()) {
         Errorln("'" + optionName + "' requires a non-empty value.")
+        return MaybeUInt64()
+    }
+    if (!isAsciiDigitsOnly(value)) {
+        Errorln("'" + optionName + "' only accepts a positive integer number as value.")
         return MaybeUInt64()
     }
     if (value.size > maxLen) {
@@ -673,10 +684,7 @@ private func parseJobsValue(optionName: String, value: String): MaybeUInt64 {
         return MaybeUInt64()
     }
     let parsed = TryParseUInt64(value)
-    if (!parsed.hasValue) {
-        Errorln("'" + optionName + "' only accepts a positive integer number as value.")
-        return MaybeUInt64()
-    }
+    if (!parsed.hasValue) { return MaybeUInt64() }
     if (parsed.value < 1u64) {
         Warningln("'" + optionName + "' value must be greater than 0, the compiler will use 1 as the value.")
         return MaybeUInt64(1u64)

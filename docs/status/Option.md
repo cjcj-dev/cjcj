@@ -167,3 +167,14 @@ shared `utils.FileUtil.ReadFileContent` path, matching the C++ `%s` diagnostic
 arguments instead of using a placeholder reason. The directory-valued
 `--output-dir` and `--save-temps` actions now also emit the shared
 `no_such_directory` diagnostic before failing, as `OptionAction.cpp` does.
+
+This continuation moves the core path-validation helpers onto the C++ diagnostic
+surface. `CheckDirectoryPath` and `CheckInputFilePath` now emit the same driver
+warning IDs and ignored-argument suffix used by `RaiseArgumentUnusedMessage`,
+while `ValidateDirectoryPath` and `ValidateInputFilePath` report shared Basic
+errors for missing paths, permission denial, directory/file mismatches, invalid
+paths, and path-length overflow. Input classification now passes the C++
+source-vs-binary not-found diagnostic kind for `.cj`/`.cj.d`/`.bc` versus
+`.o`/`.a`/`.obj`/`.cjo` inputs. `--jobs` and `--apc` numeric validation also
+matches the C++ check order: non-digit values are diagnosed before the maximum
+length check.

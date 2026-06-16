@@ -1,10 +1,33 @@
 package cangjie_compiler::option
 
+import cangjie_compiler::basic.DEFAULT_POSITION as BasicDefaultPosition
+import cangjie_compiler::basic.DiagnosticEngine as BasicDiagnosticEngine
+import cangjie_compiler::basic.DiagKindRefactor as BasicDiagKindRefactor
+import cangjie_compiler::utils.AccessResultType as UtilsAccessResultType
 import cangjie_compiler::utils.CJC_ABORT
 import cangjie_compiler::utils.FileMode as UtilsFileMode
 import cangjie_compiler::utils.Out64
 import cangjie_compiler::utils.OverflowStrategy
 import std.collection.*
+
+private let ARGUMENT_IGNORED_SUFFIX: String = " The argument is ignored."
+
+private func emitOptionDiag(kind: BasicDiagKindRefactor, arg: String): Unit {
+    let diag = BasicDiagnosticEngine()
+    diag.DiagnoseRefactor(kind, BasicDefaultPosition, arguments: [arg]).Emit()
+}
+
+private func emitOptionDiag(kind: BasicDiagKindRefactor, first: String, second: String): Unit {
+    let diag = BasicDiagnosticEngine()
+    diag.DiagnoseRefactor(kind, BasicDefaultPosition, arguments: [first, second]).Emit()
+}
+
+private func emitDirectoryAccessFailure(path: String, result: UtilsAccessResultType): Unit {
+    match (result) {
+        case UtilsAccessResultType.NO_PERMISSION => emitOptionDiag(BasicDiagKindRefactor.permission_denied, path)
+        case _ => emitOptionDiag(BasicDiagKindRefactor.no_such_directory, path)
+    }
+}
 
 public class Path {
     public var pathType: PathType
@@ -666,32 +689,91 @@ public open class GlobalOptions <: Option {
     }
 
     public func CheckDirectoryPath(path: String): MaybeString {
-        if (!FileExist(path) || !IsDir(path)) { return MaybeString() }
-        return GetAbsPath(path)
+        if (!FileExist(path)) {
+            emitOptionDiag(BasicDiagKindRefactor.driver_warning_no_such_directory, path, ARGUMENT_IGNORED_SUFFIX)
+            return MaybeString()
+        }
+        if (!IsDir(path)) {
+            emitOptionDiag(BasicDiagKindRefactor.driver_warning_not_a_directory, path, ARGUMENT_IGNORED_SUFFIX)
+            return MaybeString()
+        }
+        let absPath = GetAbsPath(path)
+        if (!absPath.hasValue) {
+            emitOptionDiag(BasicDiagKindRefactor.driver_warning_invalid_path, path, ARGUMENT_IGNORED_SUFFIX)
+        }
+        return absPath
     }
 
     public func ValidateDirectoryPath(path: String, mode!: UtilsFileMode = UtilsFileMode.FM_EXIST): MaybeString {
         let accessResult = AccessFileWithResult(path, mode)
-        if (!IsAccessOK(accessResult)) { return MaybeString() }
-        if (!IsDir(path)) { return MaybeString() }
+        if (!IsAccessOK(accessResult)) {
+            emitDirectoryAccessFailure(path, accessResult)
+            return MaybeString()
+        }
+        if (!IsDir(path)) {
+            emitOptionDiag(BasicDiagKindRefactor.not_a_directory, path)
+            return MaybeString()
+        }
         if (mode == UtilsFileMode.FM_WRITE) {
             let execResult = AccessFileWithResult(path, UtilsFileMode.FM_EXE)
-            if (!IsAccessOK(execResult)) { return MaybeString() }
+            if (!IsAccessOK(execResult)) {
+                emitDirectoryAccessFailure(path, execResult)
+                return MaybeString()
+            }
         }
-        return GetAbsPath(path)
+        let absPath = GetAbsPath(path)
+        if (!absPath.hasValue) {
+            emitOptionDiag(BasicDiagKindRefactor.invalid_path, path)
+        }
+        return absPath
     }
 
     public func CheckInputFilePath(path: String): MaybeString {
-        if (FileExist(path) && CanAccessFile(path, UtilsFileMode.FM_READ) && !IsDir(path)) { return GetAbsPath(path) }
-        return MaybeString()
+        if (!FileExist(path)) {
+            emitOptionDiag(BasicDiagKindRefactor.driver_warning_no_such_file_or_directory, path, ARGUMENT_IGNORED_SUFFIX)
+            return MaybeString()
+        }
+        if (!CanAccessFile(path, UtilsFileMode.FM_READ)) {
+            emitOptionDiag(BasicDiagKindRefactor.driver_warning_permission_denied, path, ARGUMENT_IGNORED_SUFFIX)
+            return MaybeString()
+        }
+        if (IsDir(path)) {
+            emitOptionDiag(BasicDiagKindRefactor.driver_warning_not_a_file, path, ARGUMENT_IGNORED_SUFFIX)
+            return MaybeString()
+        }
+        let absPath = GetAbsPath(path)
+        if (!absPath.hasValue) {
+            emitOptionDiag(BasicDiagKindRefactor.driver_warning_invalid_path, path, ARGUMENT_IGNORED_SUFFIX)
+        }
+        return absPath
     }
 
     public static func ValidateInputFilePath(path: String): MaybeString {
-        if (!IsPathAboveLengthLimit(path) && FileExist(path) && CanAccessFile(path, UtilsFileMode.FM_READ) &&
-            !IsDir(path)) {
-            return GetAbsPath(path)
+        return ValidateInputFilePath(path, BasicDiagKindRefactor.driver_invalid_source_file)
+    }
+
+    public static func ValidateInputFilePath(path: String, notFoundError: BasicDiagKindRefactor): MaybeString {
+        if (IsPathAboveLengthLimit(path)) {
+            emitOptionDiag(BasicDiagKindRefactor.driver_path_exceeds_length_limit, path, FILE_PATH_MAX_LENGTH.toString())
+            return MaybeString()
         }
-        return MaybeString()
+        if (!FileExist(path)) {
+            emitOptionDiag(notFoundError, path)
+            return MaybeString()
+        }
+        if (!CanAccessFile(path, UtilsFileMode.FM_READ)) {
+            emitOptionDiag(BasicDiagKindRefactor.permission_denied, path)
+            return MaybeString()
+        }
+        if (IsDir(path)) {
+            emitOptionDiag(BasicDiagKindRefactor.not_a_file, path)
+            return MaybeString()
+        }
+        let absPath = GetAbsPath(path)
+        if (!absPath.hasValue) {
+            emitOptionDiag(BasicDiagKindRefactor.invalid_path, path)
+        }
+        return absPath
     }
 
     public static func ParseIntOptionValue(
@@ -722,25 +804,30 @@ public open class GlobalOptions <: Option {
             let ext = GetFileExtension(input)
             if (ext == "cj" && !compileCjd) {
                 if (compilePackage) { return false }
-                if (!ValidateInputFilePath(input).hasValue) { return false }
+                if (!ValidateInputFilePath(input, BasicDiagKindRefactor.driver_invalid_source_file).hasValue) {
+                    return false
+                }
                 srcFiles.add(input)
             } else if (ext == "o" || ext == "a" || ext == "obj") {
-                let objPath = ValidateInputFilePath(input)
+                let objPath = ValidateInputFilePath(input, BasicDiagKindRefactor.driver_invalid_binary_file)
                 if (!objPath.hasValue) { return false }
                 inputObjs.add(objPath.value)
                 ReplaceInputFileName(input, objPath.value)
             } else if (ext == "bc") {
-                let bcPath = ValidateInputFilePath(input)
+                let bcPath = ValidateInputFilePath(input, BasicDiagKindRefactor.driver_invalid_source_file)
                 if (!bcPath.hasValue) { return false }
                 bcInputFiles.add(bcPath.value)
                 ReplaceInputFileName(input, bcPath.value)
             } else if (ext == "cjo") {
                 if (!inputCjoFile.isEmpty()) { return false }
-                let cjoPath = ValidateInputFilePath(input)
+                let cjoPath = ValidateInputFilePath(input, BasicDiagKindRefactor.driver_invalid_binary_file)
                 if (!cjoPath.hasValue) { return false }
                 inputCjoFile = input
             } else if (HasCJDExtension(input) && compileCjd) {
-                if (compilePackage || !ValidateInputFilePath(input).hasValue) { return false }
+                if (compilePackage ||
+                    !ValidateInputFilePath(input, BasicDiagKindRefactor.driver_invalid_source_file).hasValue) {
+                    return false
+                }
                 srcFiles.add(input)
             } else {
                 if (IsPathAboveLengthLimit(input)) { return false }
