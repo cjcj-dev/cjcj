@@ -73,6 +73,7 @@ public class DriverOptions {
     public var diagFormat: String = "default"
     public var errorCountLimit: UInt64 = 8u64
     public var scanDepPkg: Bool = false
+    public var frontendOnlyAction: Bool = false
     public var compilePackage: Bool = false
     public var noSubPkg: Bool = false
     public var saveTemps: Bool = false

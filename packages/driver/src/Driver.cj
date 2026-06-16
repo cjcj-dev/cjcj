@@ -66,6 +66,9 @@ public class Driver {
                 return false
             }
         }
+        if (driverOptions.frontendOnlyAction) {
+            return true
+        }
         if (driverOptions.frontendOutputFiles.isEmpty() && driverOptions.inputObjs.isEmpty() &&
             driverOptions.bcInputFiles.isEmpty()) {
             return true

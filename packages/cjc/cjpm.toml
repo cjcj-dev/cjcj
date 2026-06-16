@@ -1,17 +1,17 @@
 [package]
   cjc-version = "1.1.0"
-  name = "driver"
+  name = "cjc"
   organization = "cangjie_compiler"
-  description = "Self-hosted Cangjie compiler Driver module"
+  description = "Self-hosted Cangjie compiler executable entry"
   version = "0.1.0"
   target-dir = ""
   script-dir = ""
   src-dir = "src"
-  output-type = "static"
+  output-type = "executable"
   compile-option = ""
   override-compile-option = ""
-  link-option = ""
+  link-option = "-L/usr/lib/llvm-20/lib -lLLVM-20"
   package-configuration = {}
 
 [dependencies]
-  "cangjie_compiler::frontend_tool" = { path = "../frontend_tool" }
+  "cangjie_compiler::driver" = { path = "../driver" }

@@ -19,7 +19,8 @@ public func ExecuteFrontendPhase(driver: Driver): Bool {
 }
 
 private func PrepareFrontendOutputs(opts: DriverOptions): Bool {
-    if (opts.srcFiles.isEmpty() || opts.IsEmitCHIREnable() || opts.scanDepPkg || !opts.frontendOutputFiles.isEmpty()) {
+    if (opts.srcFiles.isEmpty() || opts.IsEmitCHIREnable() || opts.frontendOnlyAction ||
+        !opts.frontendOutputFiles.isEmpty()) {
         return true
     }
     let expectedOutputs = PredictFrontendBitcodeOutputs(opts)
@@ -49,17 +50,20 @@ private func ReconcileFrontendOutputs(opts: DriverOptions): Bool {
     if (opts.srcFiles.isEmpty()) {
         return true
     }
-    if (opts.IsEmitCHIREnable() || opts.scanDepPkg) {
+    if (opts.IsEmitCHIREnable() || opts.frontendOnlyAction) {
         return true
     }
-    return VerifyFrontendOutputs(opts.frontendOutputFiles)
+    return VerifyFrontendOutputs(opts)
 }
 
-private func VerifyFrontendOutputs(outputs: ArrayList<TempFileInfo>): Bool {
-    for (output in outputs) {
+private func VerifyFrontendOutputs(opts: DriverOptions): Bool {
+    for (output in opts.frontendOutputFiles) {
         if (!FileUtil.FileExist(output.filePath) || FileUtil.IsDir(output.filePath)) {
-            eprintln("error: frontend output bitcode was not generated: " + output.filePath)
-            return false
+            // TODO(selfhost:Driver): remove this gate once self-host CodeGen emits LLVM bitcode for the native backend.
+            eprintln("warning: self-host frontend completed, but native bitcode output is not implemented yet; stopping before backend.")
+            opts.frontendOutputFiles.clear()
+            opts.frontendOnlyAction = true
+            return true
         }
     }
     return true

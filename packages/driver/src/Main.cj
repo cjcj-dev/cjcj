@@ -1,9 +1,6 @@
 package cangjie_compiler::driver
 
-import std.env.*
-
-main(): Int64 {
-    let args = getCommandLine()
+public func RunDriverMain(args: Array<String>): Int64 {
     let environmentVars = StringifyEnvironment()
     if (args.isEmpty()) {
         return 1

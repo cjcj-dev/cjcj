@@ -19,7 +19,8 @@
     "packages/incremental_compilation",
     "packages/frontend",
     "packages/frontend_tool",
-    "packages/driver"
+    "packages/driver",
+    "packages/cjc"
   ]
   build-members = [
     "packages/basic",
@@ -39,7 +40,8 @@
     "packages/incremental_compilation",
     "packages/frontend",
     "packages/frontend_tool",
-    "packages/driver"
+    "packages/driver",
+    "packages/cjc"
   ]
   test-members = [
     "packages/basic",
@@ -59,7 +61,8 @@
     "packages/incremental_compilation",
     "packages/frontend",
     "packages/frontend_tool",
-    "packages/driver"
+    "packages/driver",
+    "packages/cjc"
   ]
   compile-option = ""
   override-compile-option = ""

@@ -471,7 +471,7 @@ public func ParseSourceFile(fileID: UInt64, filePath: String, sourceCode: String
     let file = File()
     file.filePath = NormalizePath(filePath)
     file.fileName = GetFileName(file.filePath)
-    file.fileHash = UInt64(file.filePath.hashCode())
+    file.fileHash = StableSourcePathHash(file.filePath)
     file.begin = Position(fileID, 1, 1)
     file.end = sm.GetSource(fileID).GetEndPos()
     let tokens = Tokenize(fileID, sourceCode)

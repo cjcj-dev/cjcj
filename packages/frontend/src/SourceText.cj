@@ -120,11 +120,11 @@ public class SourceManager {
     public func AddSource(path: String, buffer: String, packageName!: Option<String> = None, isCjmpFile!: Bool = false): UInt64 {
         let normalizedPath = NormalizePath(path)
         if (let Some(existingID) <- filePathToFileIDMap.get(normalizedPath)) {
-            putSource(existingID, Source(existingID, normalizedPath, buffer, fileHash: UInt64(normalizedPath.hashCode()), packageName: packageName))
+            putSource(existingID, Source(existingID, normalizedPath, buffer, fileHash: StableSourcePathHash(normalizedPath), packageName: packageName))
             return existingID
         }
-        let fileID = if (isCjmpFile) { UInt64(normalizedPath.hashCode()) } else { UInt64(sources.size) }
-        putSource(fileID, Source(fileID, normalizedPath, buffer, fileHash: UInt64(normalizedPath.hashCode()), packageName: packageName))
+        let fileID = if (isCjmpFile) { StableSourcePathHash(normalizedPath) } else { UInt64(sources.size) }
+        putSource(fileID, Source(fileID, normalizedPath, buffer, fileHash: StableSourcePathHash(normalizedPath), packageName: packageName))
         putPath(normalizedPath, fileID)
         return fileID
     }
@@ -154,6 +154,16 @@ public class SourceManager {
         }
         return source.buffer[startOffset..endOffset]
     }
+}
+
+public func StableSourcePathHash(path: String): UInt64 {
+    var hash = 0u64
+    var index = 1u64
+    for (byte in path.toArray()) {
+        hash += UInt64(byte) * index
+        index++
+    }
+    return hash
 }
 
 public class FrontendLexer {

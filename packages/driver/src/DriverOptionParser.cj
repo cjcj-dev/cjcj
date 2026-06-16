@@ -143,7 +143,12 @@ private func ParseOption(opts: DriverOptions, cursor: ParseCursor, arg: String):
     if (arg == "--dy-libs") { opts.linkStaticLibs = false; return true }
     if (arg == "--set-runtime-rpath") { opts.useRuntimeRpath = true; return true }
     if (arg == "--sanitize-set-rpath") { opts.sanitizerEnableRpath = true; return true }
-    if (arg == "--scan-dependency") { opts.scanDepPkg = true; addFrontendFlag(opts, arg); return true }
+    if (arg == "--scan-dependency") {
+        opts.scanDepPkg = true
+        opts.frontendOnlyAction = true
+        addFrontendFlag(opts, arg)
+        return true
+    }
     if (arg == "-p" || arg == "--package") { opts.compilePackage = true; addFrontendFlag(opts, arg); return true }
     if (arg == "--no-sub-pkg") { opts.noSubPkg = true; addFrontendFlag(opts, arg); return true }
     if (arg == "--profile-compile-time") { opts.enableTimer = true; addFrontendFlag(opts, arg); return true }
@@ -163,6 +168,9 @@ private func ParseOption(opts: DriverOptions, cursor: ParseCursor, arg: String):
     if (arg == "--no-prelude") { opts.implicitPrelude = false; addFrontendFlag(opts, arg); return true }
     if (arg == "--dump-ast" || arg == "--dump-chir" || arg == "--dump-ir" || arg == "--dump-all" ||
         arg == "--dump-to-screen" || arg == "--typecheck" || arg == "--dump-tokens" || arg == "--dump-symbols") {
+        if (arg == "--typecheck" || arg == "--dump-tokens" || arg == "--dump-symbols") {
+            opts.frontendOnlyAction = true
+        }
         addFrontendFlag(opts, arg)
         return true
     }
@@ -264,6 +272,14 @@ private func ParseOptionWithValue(opts: DriverOptions, cursor: ParseCursor, arg:
         if (let Some(value) <- readOptionValue(cursor, arg, "--output-dir")) {
             opts.outputDir = value
             addFrontendSeparated(opts, "--output-dir", value)
+            return true
+        }
+        return false
+    }
+    if (arg == "--deserialize-chir-and-dump" || arg.startsWith("--deserialize-chir-and-dump=")) {
+        if (let Some(value) <- readOptionValue(cursor, arg, "--deserialize-chir-and-dump")) {
+            opts.frontendOnlyAction = true
+            addFrontendSeparated(opts, "--deserialize-chir-and-dump", value)
             return true
         }
         return false
