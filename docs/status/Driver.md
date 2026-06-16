@@ -30,17 +30,23 @@ Current status:
   script placement, sanitizer runtime lookup/fallbacks, PGO runtime placement,
   LTO linker options, target runtime rpath, standard-library static/dynamic
   grouping, and multi-module package partial linking are implemented.
+- Mach-O native linking now mirrors the C++ Darwin/iOS command builders more
+  closely: SDK version probing, `ld64.lld` `-platform_version` arguments,
+  target-qualified runtime/library search paths, `section.o`/`cjstart.o`
+  placement, PGO/coverage runtime placement, dSYM plus ad-hoc codesign command
+  scheduling, strip-to-final-output behavior, and Darwin/iOS runtime archive
+  selection are implemented.
 
 Residual fidelity risks:
 
 - Driver self-host markers have been removed. Bitcode package names are read
   through LLVM C API bindings, and source compilation now invokes the
   self-hosted FrontendTool package.
-- GNU/Mach-O/platform toolchains are functional command builders. Linux/GNU
-  linkage has substantially more C++ parity, but exact symbol-localization data
-  from codegen partial-linking, some Android/OHOS/MinGW specialized linker
-  arguments, Darwin SDK/codesign behavior, and full platform-specific runtime
-  library edge cases remain below the C++ driver.
+- GNU/Mach-O/platform toolchains are functional command builders. Linux/GNU and
+  Darwin/iOS linkage have substantially more C++ parity, but exact
+  symbol-localization data from codegen partial-linking, some Android/OHOS/MinGW
+  specialized linker arguments, and full platform-specific runtime library edge
+  cases remain below the C++ driver.
 - Main frontend support is a compiling shim rather than the full C++
   `main-frontend.cpp` standalone flow.
 
