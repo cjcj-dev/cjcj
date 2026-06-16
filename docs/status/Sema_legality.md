@@ -32,6 +32,7 @@ This pass covers the self-hosted Cangjie port under:
 - Matched C++ desugared multiple-assignment const checking by processing only `VarDecl` temporaries and expression nodes in the expanded block.
 - Routed function bodies with resolved symbols through loop-style initialization rollback, matching the C++ `CheckInitInFuncBody` path more closely.
 - Ported the C++ conditional-initialization branch merge for `if`, `else if`, `match`, and condition let-pattern destructors, including control-transfer suppression and the generic-bound rule used by immutable struct-member assignment checks.
+- Added function-body stack tracking for initialization checking so member uses outside constructors are skipped like C++, constructor assignment context is related-type aware, and assignments no longer mark captured/different-function declarations initialized.
 
 ## Remaining Fidelity Gaps
 
@@ -42,4 +43,4 @@ This pass covers the self-hosted Cangjie port under:
 
 ## Estimate
 
-Honest behavior coverage for this legality/const-evaluation scope is about 60% versus the C++ reference. The port now has real traversal and issue production in the scoped files, plus several targeted C++ edge cases and the main conditional-initialization merge path, but production completeness still requires diagnostic integration and the remaining exact semantic edge cases above.
+Honest behavior coverage for this legality/const-evaluation scope is about 62% versus the C++ reference. The port now has real traversal and issue production in the scoped files, plus several targeted C++ edge cases, the main conditional-initialization merge path, and more faithful assignment/capture handling, but production completeness still requires diagnostic integration and the remaining exact semantic edge cases above.
