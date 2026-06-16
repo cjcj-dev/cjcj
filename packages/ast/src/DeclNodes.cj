@@ -70,7 +70,26 @@ public open class Decl <: Node {
     }
 
     public func GetMemberDeclPtrs(): ArrayList<Decl> {
-        return GetMemberDecls()
+        let results = ArrayList<Decl>()
+        if (let Some(classDecl) <- (this as ClassDecl)) {
+            if (let Some(body) <- classDecl.body) {
+                for (decl in body.decls) { results.add(decl) }
+            }
+        } else if (let Some(interfaceDecl) <- (this as InterfaceDecl)) {
+            if (let Some(body) <- interfaceDecl.body) {
+                for (decl in body.decls) { results.add(decl) }
+            }
+        } else if (let Some(structDecl) <- (this as StructDecl)) {
+            if (let Some(body) <- structDecl.body) {
+                for (decl in body.decls) { results.add(decl) }
+            }
+        } else if (let Some(enumDecl) <- (this as EnumDecl)) {
+            for (constructor in enumDecl.constructors) { results.add(constructor) }
+            for (decl in enumDecl.members) { results.add(decl) }
+        } else if (let Some(extendDecl) <- (this as ExtendDecl)) {
+            for (decl in extendDecl.members) { results.add(decl) }
+        }
+        return results
     }
 
     public func IsBuiltIn(): Bool {
@@ -179,7 +198,7 @@ public open class InheritableDecl <: Decl {
         for (typeNode in inheritedTypes) {
             if (let Some(ty) <- typeNode.GetTy()) {
                 if (let Some(interfaceTy) <- (ty as InterfaceTy)) {
-                    out.add(interfaceTy)
+                    addInterfaceTyUnique(out, interfaceTy)
                 }
             }
         }
@@ -187,16 +206,101 @@ public open class InheritableDecl <: Decl {
     }
 
     public func GetStableSuperInterfaceTys(): ArrayList<InterfaceTy> {
-        return GetSuperInterfaceTys()
+        let out = ArrayList<InterfaceTy>()
+        for (interfaceTy in GetSuperInterfaceTys()) {
+            insertInterfaceTyByName(out, interfaceTy)
+        }
+        return out
     }
 
     public func GetAllSuperDecls(): ArrayList<ClassLikeDecl> {
         let out = ArrayList<ClassLikeDecl>()
+        let workList = ArrayList<InheritableDecl>()
         if (let Some(selfClassLike) <- (this as ClassLikeDecl)) {
             out.add(selfClassLike)
+            workList.add(selfClassLike)
+        } else {
+            workList.add(this)
+        }
+        var workIdx: Int64 = 0
+        while (workIdx < workList.size) {
+            let current = workList[workIdx]
+            workIdx++
+            for (typeNode in current.inheritedTypes) {
+                if (let Some(ty) <- typeNode.GetTy()) {
+                    if (let Some(classTy) <- (ty as ClassTy)) {
+                        if (let Some(classDecl) <- classTy.declPtr) {
+                            if (!containsClassLikeDecl(out, classDecl)) {
+                                workList.add(classDecl)
+                                out.add(classDecl)
+                            }
+                        }
+                    } else if (let Some(interfaceTy) <- (ty as InterfaceTy)) {
+                        if (let Some(interfaceDecl) <- interfaceTy.declPtr) {
+                            if (!containsClassLikeDecl(out, interfaceDecl)) {
+                                workList.add(interfaceDecl)
+                                out.add(interfaceDecl)
+                            }
+                        }
+                    }
+                }
+            }
         }
         return out
     }
+}
+
+private func addInterfaceTyUnique(values: ArrayList<InterfaceTy>, ty: InterfaceTy): Unit {
+    for (value in values) {
+        if (sameInterfaceTy(value, ty)) {
+            return
+        }
+    }
+    values.add(ty)
+}
+
+private func insertInterfaceTyByName(values: ArrayList<InterfaceTy>, ty: InterfaceTy): Unit {
+    var idx: Int64 = 0
+    while (idx < values.size) {
+        if (sameInterfaceTyForStableOrder(values[idx], ty)) {
+            return
+        }
+        if (CompTyByNames(ty, values[idx])) {
+            values.add(ty, at: idx)
+            return
+        }
+        idx++
+    }
+    values.add(ty)
+}
+
+private func sameInterfaceTy(left: InterfaceTy, right: InterfaceTy): Bool {
+    if (left.String() != right.String() || left.Hash() != right.Hash()) {
+        return false
+    }
+    if (let Some(leftDecl) <- left.declPtr) {
+        if (let Some(rightDecl) <- right.declPtr) {
+            return SameDecl(leftDecl, rightDecl)
+        }
+        return false
+    }
+    if (let Some(_) <- right.declPtr) {
+        return false
+    }
+    return true
+}
+
+private func sameInterfaceTyForStableOrder(left: InterfaceTy, right: InterfaceTy): Bool {
+    return !CompTyByNames(left, right) && !CompTyByNames(right, left)
+}
+
+private func containsClassLikeDecl(values: ArrayList<ClassLikeDecl>, decl: ClassLikeDecl): Bool {
+    for (value in values) {
+        if (SameDecl(value, decl)) {
+            return true
+        }
+    }
+    return false
 }
 
 public enum BuiltInType {
