@@ -64,6 +64,11 @@ Continuation deepening update:
   cached the key, and member-signature type substitution reuses a per-instantiation type cache.
 - Infinite-instantiation detection now checks recursive type arguments after applying the active instantiation map and
   handles the C++ "triggered inside the same declaration" path using `Ty.GetGenericTyOfInsTy`.
+- Extension ordering for generic extended types now instantiates the current extension's inherited interface types through
+  the other extension's extended-type arguments before comparing sub/super interface relationships, matching the C++
+  `GenerateTypeMappingByTy` path for generic same-target extensions.
+- Inherited kind/type conflict diagnostics and return-type incompatibility diagnostics now prefer declaration identifier
+  ranges where the C++ emits identifier-focused ranges, instead of always highlighting the full declaration.
 
 De-isolation status: the implementation imports `cangjie_compiler::ast`, `cangjie_compiler::basic`, and
 `cangjie_compiler::sema` directly. This pass also imports the real `cangjie_compiler::modules` package-relation helper.
@@ -71,9 +76,9 @@ It does not define local compatibility copies of AST, Basic, Lex, diagnostics, T
 types.
 
 Known remaining fidelity gaps are caused by sibling systems that are not yet represented in this self-hosting package:
-full import-manager extend accessibility, native backend Java/ObjC inheritance annotation checks, C++ extension ordering
-generic substitution through extended generic type arguments for cross-extension ordering, and full C++ diagnostic
-note/hint parity. The implemented behavior is executable and participates in the package build, but it is not yet wired
-into `TypeChecker::CheckInheritance` because that owner is outside this pass's edit scope.
+full import-manager extend accessibility, native backend Java/ObjC inheritance annotation checks, platform-specific
+replacement of inherited interface type nodes through CJMP specific implementations during extension ordering, and full
+C++ diagnostic note/hint parity. The implemented behavior is executable and participates in the package build, but it is
+not yet wired into `TypeChecker::CheckInheritance` because that owner is outside this pass's edit scope.
 
 Verification: `cjpm build` passes for the whole workspace after this continuation deepening pass.

@@ -11,8 +11,22 @@ private func DeclRange(decl: Decl): BasicRange {
     return MakeRange(decl.begin, decl.end)
 }
 
+private func DeclIdentifierRange(decl: Decl): BasicRange {
+    if (!decl.identifier.Empty() && !decl.identifier.ZeroPos()) {
+        return MakeRange(decl.identifier.Begin(), decl.identifier.End())
+    }
+    return DeclRange(decl)
+}
+
 private func NodeRange(node: Node): BasicRange {
     return MakeRange(node.begin, node.end)
+}
+
+private func NodeConflictRange(node: Node): BasicRange {
+    if (let Some(decl) <- (node as Decl)) {
+        return DeclIdentifierRange(decl)
+    }
+    return NodeRange(node)
 }
 
 private func DeclKindText(decl: Decl): String {
@@ -613,6 +627,7 @@ public class StructInheritanceChecker {
         curDecl: ExtendDecl
     ): ArrayList<ExtendDecl> {
         let ordered = ArrayList<ExtendDecl>()
+        let extendedDecl = GetOrderingExtendedDecl(curDecl)
         for (otherExtend in otherExtends) {
             if (SameDecl(otherExtend, curDecl)) {
                 continue
@@ -621,7 +636,7 @@ public class StructInheritanceChecker {
                 !IsExtendVisibleForPackage(curDecl.fullPackageName, otherExtend)) {
                 continue
             }
-            let skipExtend = DeterminingSkipExtendByInheritanceRelationship(curDecl, otherExtend)
+            let skipExtend = DeterminingSkipExtendByInheritanceRelationship(curDecl, otherExtend, extendedDecl)
             if ((let None <- skipExtend) || !skipExtend.getOrThrow()) {
                 AddExtendUniqueByPosition(ordered, otherExtend)
             }
@@ -629,18 +644,87 @@ public class StructInheritanceChecker {
         return ordered
     }
 
+    private func GetOrderingExtendedDecl(curDecl: ExtendDecl): Option<Decl> {
+        if (let Some(curTy) <- curDecl.GetTy()) {
+            if (let Some(decl) <- Ty.GetDeclPtrOfTy(curTy)) {
+                return Some(decl)
+            }
+        }
+        if (let Some(extendedType) <- curDecl.extendedType) {
+            if (let Some(refType) <- (extendedType as RefType)) {
+                if (let Some(target) <- refType.GetTarget()) {
+                    return Some(GetRealTarget(target))
+                }
+            }
+        }
+        return None
+    }
+
+    private func MergeTypeSubstForExtendOrdering(target: TypeSubst, source: TypeSubst): Unit {
+        for (entry in source.entries) {
+            target.Put(entry.tyVar, entry.ty)
+        }
+    }
+
+    private func BuildCurrentToOtherExtendTypeMapping(
+        curDecl: ExtendDecl,
+        otherExtend: ExtendDecl,
+        extendedDecl: Option<Decl>
+    ): TypeSubst {
+        let out = TypeSubst()
+        if (let None <- extendedDecl) {
+            return out
+        }
+        let realExtendedDecl = extendedDecl.getOrThrow()
+        if (let None <- curDecl.extendedType) {
+            return out
+        }
+        if (let None <- otherExtend.extendedType) {
+            return out
+        }
+        let curExtendedType = curDecl.extendedType.getOrThrow()
+        let otherExtendedType = otherExtend.extendedType.getOrThrow()
+        if (let None <- curExtendedType.GetTy()) {
+            return out
+        }
+        if (let None <- otherExtendedType.GetTy()) {
+            return out
+        }
+        let curExtendedTy = curExtendedType.GetTy().getOrThrow()
+        let otherExtendedTy = otherExtendedType.GetTy().getOrThrow()
+        let mappingOfExtendedToCur = GenerateTypeMapping(realExtendedDecl, curExtendedTy.typeArgs)
+        let mappingOfExtendedToOther = GenerateTypeMapping(realExtendedDecl, otherExtendedTy.typeArgs)
+        if (let Some(originalTy) <- realExtendedDecl.GetTy()) {
+            for (typeArg in originalTy.typeArgs) {
+                if (let Some(genericTy) <- (typeArg as GenericsTy)) {
+                    let mapping = GenerateTypeMappingByTy(
+                        mappingOfExtendedToCur.Get(genericTy),
+                        mappingOfExtendedToOther.Get(genericTy)
+                    )
+                    MergeTypeSubstForExtendOrdering(out, mapping)
+                }
+            }
+        }
+        return out
+    }
+
     private func DeterminingSkipExtendByInheritanceRelationship(
         curDecl: ExtendDecl,
-        otherExtend: ExtendDecl
+        otherExtend: ExtendDecl,
+        extendedDecl: Option<Decl>
     ): Option<Bool> {
         var skipExtend: Option<Bool> = None
         var lastLeft: Option<Ty> = None
         var lastRight: Option<Ty> = None
+        let curToOtherMapping = BuildCurrentToOtherExtendTypeMapping(curDecl, otherExtend, extendedDecl)
         for (curDeclSuper in curDecl.inheritedTypes) {
             if (let None <- curDeclSuper.GetTy()) {
                 continue
             }
-            let curDeclSuperTy = curDeclSuper.GetTy().getOrThrow()
+            var curDeclSuperTy = curDeclSuper.GetTy().getOrThrow()
+            if (!curToOtherMapping.IsEmpty()) {
+                curDeclSuperTy = typeManager.GetInstantiatedTy(curDeclSuperTy, curToOtherMapping)
+            }
             var hasSubImpl: Option<Ty> = None
             var hasSuperImpl: Option<Ty> = None
             for (otherSuper in otherExtend.inheritedTypes) {
@@ -1239,12 +1323,12 @@ public class StructInheritanceChecker {
             if (found.size > 1 && !allFunc) {
                 let builder = diag.DiagnoseRefactor(
                     DiagKindRefactor.sema_inherit_super_member_kind_inconsistent,
-                    DeclRange(decl),
+                    DeclIdentifierRange(decl),
                     arguments: [name]
                 )
                 for (member in found) {
                     if (let Some(memberDecl) <- member.decl) {
-                        builder.AddNote(DeclRange(memberDecl), DeclKindText(memberDecl) + " member")
+                        builder.AddNote(DeclIdentifierRange(memberDecl), DeclKindText(memberDecl) + " member")
                     }
                 }
             } else {
@@ -1262,7 +1346,7 @@ public class StructInheritanceChecker {
             let typeName = if (memberDecl.astKind == ASTKind.PROP_DECL) { "type" } else { "return type" }
             let builder = diag.DiagnoseRefactor(
                 DiagKindRefactor.sema_inherit_member_type_inconsistent,
-                NodeRange(node),
+                NodeConflictRange(node),
                 arguments: [typeName, DeclKindText(memberDecl), memberDecl.identifier.Val()]
             )
             builder.AddNote("conflict types are " + StringifyInconsistentTypes(member.inconsistentTypes))
@@ -1295,10 +1379,10 @@ public class StructInheritanceChecker {
             if ((let Some(_) <- parent.extendDecl) || parent.isInheritedInterface || CheckExtendMemberValid(parent, child)) {
                 let builder = diag.DiagnoseRefactor(
                     DiagKindRefactor.sema_inherit_member_kind_inconsistent,
-                    DeclRange(child),
+                    DeclIdentifierRange(child),
                     arguments: [DeclKindText(child), name, DeclKindText(parentDecl), inheritance]
                 )
-                builder.AddNote(DeclRange(parentDecl), "found conflict here")
+                builder.AddNote(DeclIdentifierRange(parentDecl), "found conflict here")
             }
         } else if (parentDecl.astKind == ASTKind.VAR_DECL) {
             diag.Diagnose(
@@ -1492,11 +1576,11 @@ public class StructInheritanceChecker {
                                 }
                                 let builder = diag.DiagnoseRefactor(
                                     DiagKindRefactor.sema_return_type_incompatible,
-                                    DeclRange(childFunc),
+                                    DeclIdentifierRange(childFunc),
                                     arguments: [childFunc.identifier.Val()]
                                 )
                                 builder.AddNote(
-                                    DeclRange(targetFunc),
+                                    DeclIdentifierRange(targetFunc),
                                     "'" + childFuncTy.retTy.String() + "' is not a subtype of " + inconsistentTypesText
                                 )
                             }
