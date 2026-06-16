@@ -3,7 +3,7 @@ package cangjie_compiler::meta_transformation
 import cangjie_compiler::chir.CHIRBuilder
 import std.collection.*
 
-private type CHIRPluginCallback = (CHIRPluginManager, CHIRBuilder) -> Unit
+public type CHIRPluginCallback = (CHIRPluginManager, CHIRBuilder) -> Unit
 
 public class MetaTransformPluginBuilder {
     private let chirPluginCallbacks: ArrayList<CHIRPluginCallback> = ArrayList<CHIRPluginCallback>()

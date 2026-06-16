@@ -18,9 +18,12 @@ Implemented:
 - De-isolated the CHIR boundary: `MetaTransformation` now imports the real sibling `chir` package and
   uses `CHIRBuilder`, `Function`, and `Package` directly instead of local compatibility interfaces.
 - Matched the C++ enum-ordering surface more closely: `MetaTransformKind` now exposes its ordinal helper
-  and relational operators, and `IsForCHIR` uses the same range comparison as the C++ implementation.
+  and relational operators, formally implements `Comparable`, and `IsForCHIR` uses the same range
+  comparison as the C++ implementation.
 - Tightened construction to match the C++ ownership model: kind-setting constructors are protected, and
   the CHIR meta-kind marker is a value marker rather than a heap class.
+- Exposed the public callback type aliases used by plugin registration and plugin-info registration, so
+  the Cangjie API surface no longer hides public C++ callback signatures behind private aliases.
 - Added `MakeCHIRPluginInfo`, the Cangjie equivalent of the C++ `CHIR_PLUGIN` macro expansion: it wraps
   a transform factory in a plugin-info registration callback that appends the produced transform to the
   CHIR plugin manager. The default overload reports the real `basic.CANGJIE_VERSION`, matching the C++

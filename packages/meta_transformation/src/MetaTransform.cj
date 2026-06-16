@@ -5,6 +5,8 @@ import cangjie_compiler::chir.CHIRBuilder
 import cangjie_compiler::chir.Function as CHIRFunction
 import cangjie_compiler::chir.Package as CHIRPackage
 
+public type MetaTransformRegisterCallback = (MetaTransformPluginBuilder) -> Unit
+
 public enum MetaTransformKind {
     | UNKNOWN
     | FOR_CHIR_FUNC
@@ -21,7 +23,7 @@ public func MetaTransformKindIndex(kind: MetaTransformKind): Int64 {
     }
 }
 
-extend MetaTransformKind <: Equatable<MetaTransformKind> {
+extend MetaTransformKind <: Equatable<MetaTransformKind> & Comparable<MetaTransformKind> {
     public operator func ==(right: MetaTransformKind): Bool {
         return MetaTransformKindIndex(this) == MetaTransformKindIndex(right)
     }
@@ -44,6 +46,18 @@ extend MetaTransformKind <: Equatable<MetaTransformKind> {
 
     public operator func >=(right: MetaTransformKind): Bool {
         return MetaTransformKindIndex(this) >= MetaTransformKindIndex(right)
+    }
+
+    public func compare(right: MetaTransformKind): Ordering {
+        let leftIndex = MetaTransformKindIndex(this)
+        let rightIndex = MetaTransformKindIndex(right)
+        if (leftIndex < rightIndex) {
+            return Ordering.LT
+        }
+        if (leftIndex > rightIndex) {
+            return Ordering.GT
+        }
+        return Ordering.EQ
     }
 }
 
@@ -101,9 +115,9 @@ public abstract class CHIRPackageMetaTransform <: MetaTransform<CHIRPackage> {
 
 public struct MetaTransformPluginInfo {
     public let cjcVersion: String
-    public let registerTo: (MetaTransformPluginBuilder) -> Unit
+    public let registerTo: MetaTransformRegisterCallback
 
-    public init(cjcVersion: String, registerTo: (MetaTransformPluginBuilder) -> Unit) {
+    public init(cjcVersion: String, registerTo: MetaTransformRegisterCallback) {
         this.cjcVersion = cjcVersion
         this.registerTo = registerTo
     }
