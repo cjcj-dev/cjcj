@@ -28,6 +28,7 @@ conditional directive pruning, APILevel macro-declaration materialization,
 dependency-scan JSON data with direct import dependencies, import search-path
 indexing for CJD hints, symbol-table JSON output, APILevel custom annotation
 merging from `.cj.d` packages with import-path fallback lookup,
+package/import access-modifier header parsing, import-all normalization,
 annotation/macro-call parsing for declarations,
 function parameter/return type capture, generic parameter capture, simple
 inherited-type and variable/type-alias target capture, top-level/member

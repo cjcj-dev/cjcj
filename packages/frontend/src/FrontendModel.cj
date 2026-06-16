@@ -850,6 +850,7 @@ public class ImportContent <: Node {
     public var identifier: SrcIdentifier = SrcIdentifier()
     public var aliasName: SrcIdentifier = SrcIdentifier()
     public var asPos: Position = INVALID_POSITION
+    public var isImportAll: Bool = false
 
     public init() {
         super(ASTKind.IMPORT_CONTENT)
@@ -861,6 +862,7 @@ public class ImportContent <: Node {
 }
 
 public class ImportSpec <: Node {
+    public var modifier: Option<Modifier> = None
     public var importPos: Position = INVALID_POSITION
     public var fromPos: Position = INVALID_POSITION
     public var content: ImportContent = ImportContent()
@@ -871,6 +873,23 @@ public class ImportSpec <: Node {
 
     public func IsImportAlias(): Bool {
         return content.IsImportAlias()
+    }
+
+    public func IsReExport(noSubPkg!: Bool = false): Bool {
+        if (let Some(importModifier) <- modifier) {
+            if (importModifier.name == "private") {
+                return false
+            }
+            return if (noSubPkg) { importModifier.name != "internal" } else { true }
+        }
+        return false
+    }
+
+    public func IsPrivateImport(): Bool {
+        if (let Some(importModifier) <- modifier) {
+            return importModifier.name == "private"
+        }
+        return true
     }
 }
 
@@ -1306,6 +1325,9 @@ public class ImportManager {
     }
 
     private func NormalizeImportedPackageName(content: ImportContent): String {
+        if (content.isImportAll) {
+            return JoinStringList(content.prefixPaths, ".")
+        }
         let importedName = GetImportedItemFullName(content)
         if (importedName.isEmpty()) {
             return ""

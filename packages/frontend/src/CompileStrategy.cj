@@ -488,36 +488,46 @@ private func parsePackageAndImports(file: File, tokens: ArrayList<FrontendToken>
             idx++
             continue
         }
-        if (tok.value == "macro" && idx + 1 < tokens.size && tokens[idx + 1].value == "package") {
+        var headerIdx = idx
+        var headerModifier: Option<Modifier> = None
+        if (IsAccessModifier(tok.value) && idx + 1 < tokens.size && IsHeaderKeywordAfterModifier(tokens, idx + 1)) {
+            headerModifier = Some(MakeModifier(tok))
+            headerIdx = idx + 1
+        }
+        let headerTok = tokens[headerIdx]
+        if (headerTok.value == "macro" && headerIdx + 1 < tokens.size && tokens[headerIdx + 1].value == "package") {
             let spec = PackageSpec()
+            spec.modifier = headerModifier
             spec.hasMacro = true
-            spec.macroPos = tok.Begin()
-            spec.packagePos = tokens[idx + 1].Begin()
-            let parsed = parseQualifiedName(tokens, idx + 2)
-            spec.packageName = SrcIdentifier(parsed[0], begin: tokens[idx + 1].Begin(), end: tokens[idx + 1].End())
-            spec.begin = tok.Begin()
+            spec.macroPos = headerTok.Begin()
+            spec.packagePos = tokens[headerIdx + 1].Begin()
+            let parsed = parseQualifiedName(tokens, headerIdx + 2)
+            spec.packageName = SrcIdentifier(parsed[0], begin: tokens[headerIdx + 1].Begin(), end: tokens[headerIdx + 1].End())
+            spec.begin = if (let Some(modifier) <- headerModifier) { modifier.begin } else { headerTok.Begin() }
             spec.end = parsed[1]
             file.packageSpec = Some(spec)
             idx = parsed[2]
             continue
         }
-        if (tok.value == "package") {
+        if (headerTok.value == "package") {
             let spec = PackageSpec()
-            spec.packagePos = tok.Begin()
-            let parsed = parseQualifiedName(tokens, idx + 1)
-            spec.packageName = SrcIdentifier(parsed[0], begin: tok.Begin(), end: parsed[1])
-            spec.begin = tok.Begin()
+            spec.modifier = headerModifier
+            spec.packagePos = headerTok.Begin()
+            let parsed = parseQualifiedName(tokens, headerIdx + 1)
+            spec.packageName = SrcIdentifier(parsed[0], begin: headerTok.Begin(), end: parsed[1])
+            spec.begin = if (let Some(modifier) <- headerModifier) { modifier.begin } else { headerTok.Begin() }
             spec.end = parsed[1]
             file.packageSpec = Some(spec)
             idx = parsed[2]
             continue
         }
-        if (tok.value == "import") {
+        if (headerTok.value == "import") {
             let importSpec = ImportSpec()
-            importSpec.importPos = tok.Begin()
-            let parsed = parseImportContent(tokens, idx + 1)
+            importSpec.modifier = headerModifier
+            importSpec.importPos = headerTok.Begin()
+            let parsed = parseImportContent(tokens, headerIdx + 1)
             importSpec.content = parsed[0]
-            importSpec.begin = tok.Begin()
+            importSpec.begin = if (let Some(modifier) <- headerModifier) { modifier.begin } else { headerTok.Begin() }
             importSpec.end = parsed[1]
             file.imports.add(importSpec)
             idx = parsed[2]
@@ -528,6 +538,28 @@ private func parsePackageAndImports(file: File, tokens: ArrayList<FrontendToken>
         }
         idx++
     }
+}
+
+private func IsAccessModifier(value: String): Bool {
+    return value == "public" || value == "protected" || value == "internal" || value == "private"
+}
+
+private func IsHeaderKeywordAfterModifier(tokens: ArrayList<FrontendToken>, idx: Int64): Bool {
+    if (idx >= tokens.size) {
+        return false
+    }
+    if (tokens[idx].value == "package" || tokens[idx].value == "import") {
+        return true
+    }
+    return tokens[idx].value == "macro" && idx + 1 < tokens.size && tokens[idx + 1].value == "package"
+}
+
+private func MakeModifier(tok: FrontendToken): Modifier {
+    let modifier = Modifier()
+    modifier.name = tok.value
+    modifier.begin = tok.Begin()
+    modifier.end = tok.End()
+    return modifier
 }
 
 private func parseTopLevelDecls(file: File, tokens: ArrayList<FrontendToken>): Unit {
@@ -1155,6 +1187,15 @@ private func parseImportContent(tokens: ArrayList<FrontendToken>, start: Int64):
     }
     var endPos = parsed[1]
     var nextIdx = parsed[2]
+    if (nextIdx < tokens.size && tokens[nextIdx].value == "*") {
+        if (!content.identifier.Empty()) {
+            content.prefixPaths.add(content.identifier.Val())
+        }
+        content.identifier = SrcIdentifier("*", begin: tokens[nextIdx].Begin(), end: tokens[nextIdx].End())
+        content.isImportAll = true
+        endPos = tokens[nextIdx].End()
+        nextIdx++
+    }
     if (nextIdx + 1 < tokens.size && tokens[nextIdx].value == "as") {
         content.asPos = tokens[nextIdx].Begin()
         content.aliasName = SrcIdentifier(tokens[nextIdx + 1].value, begin: tokens[nextIdx + 1].Begin(),
