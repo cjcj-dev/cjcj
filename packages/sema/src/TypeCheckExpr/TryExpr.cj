@@ -8,6 +8,9 @@ public func SelfhostPortStatus_TypeCheckExpr_TryExpr(): Bool {
     return true
 }
 
+private let EFFECT_PACKAGE_NAME: String = "stdx.effect"
+private let COMMAND_TYPE_NAME: String = "Command"
+
 private func TryInvalid(te: TryExpr): Ty {
     return TcInvalid(te)
 }
@@ -35,12 +38,43 @@ private func JoinTryTy(typeManager: TypeManager, currentTy: Ty, branchTy: Ty): T
     return TypeManager.GetInvalidTy()
 }
 
-private func CommandPayloadTy(ty: Ty): Option<Ty> {
-    if (ty.name == "Command" && ty.typeArgs.size == 1) {
-        return ty.typeArgs[0]
+private func IsCommandTy(ty: Ty): Bool {
+    if (ty.typeArgs.size != 1) {
+        return false
     }
-    if (ty.typeArgs.size == 1) {
-        return ty.typeArgs[0]
+    if (let Some(decl) <- Ty.GetDeclPtrOfTy(Some(ty))) {
+        if (!decl.fullPackageName.isEmpty()) {
+            return decl.fullPackageName == EFFECT_PACKAGE_NAME && decl.identifier.Val() == COMMAND_TYPE_NAME
+        }
+    }
+    return ty.name == COMMAND_TYPE_NAME
+}
+
+private func PromotedCommandTy(typeManager: TypeManager, ty: Ty): Option<Ty> {
+    if (!Ty.IsTyCorrect(ty) || ty.IsNothing()) {
+        return None
+    }
+    if (IsCommandTy(ty)) {
+        return Some(ty)
+    }
+    if (let Some(genericTy) <- (ty as GenericsTy)) {
+        for (upperTy in genericTy.upperBounds) {
+            if (let Some(promotedUpper) <- PromotedCommandTy(typeManager, upperTy)) {
+                return Some(promotedUpper)
+            }
+        }
+    }
+    for (superTy in typeManager.GetAllSuperTys(ty).values) {
+        if (IsCommandTy(superTy)) {
+            return Some(superTy)
+        }
+    }
+    return None
+}
+
+private func CommandPayloadTy(typeManager: TypeManager, ty: Ty): Option<Ty> {
+    if (let Some(commandTy) <- PromotedCommandTy(typeManager, ty)) {
+        return Some(commandTy.typeArgs[0])
     }
     return None
 }
@@ -75,7 +109,7 @@ private func CheckCommandPattern(typeManager: TypeManager, handler: Handler, com
     let commandTy = commandPattern.types[0].GetTy().getOrThrow()
     commandPattern.SetTy(commandTy)
     var ok = AddIncludedType(typeManager, included, commandTy)
-    if (let Some(payloadTy) <- CommandPayloadTy(commandTy)) {
+    if (let Some(payloadTy) <- CommandPayloadTy(typeManager, commandTy)) {
         handler.commandResultTy = payloadTy
     } else {
         ok = false

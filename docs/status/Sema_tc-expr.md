@@ -37,7 +37,9 @@ What changed:
   - `@IfAvailable(level:)` string literal validation now uses the real `sema.Plugin.APILevelVersion` parser with the C++ `TRIPLE_ONLY` rule, while preserving the C++ expression checker behavior that accepts integer literals as literals in this path.
 - Current continuation:
   - `for-in` expression checking now reuses the real sibling `IsIrrefutablePattern` helper and rejects refutable iteration patterns after type-checking the iterable, guard, and body, matching the C++ `SynForInExpr` control flow.
-- Verification: `cjpm build` passes after the current continuation. `grep -rn "TODO(selfhost:Sema)" packages/sema/src` reports only out-of-scope Sema placeholders; the scoped `TypeCheckExpr.cj` and `TypeCheckExpr/*` files have zero matching markers.
+- Command-pattern continuation:
+  - Try-handle command patterns now derive `handler.commandResultTy` from a direct or promoted `stdx.effect.Command<T>` view found through real declaration metadata, generic upper bounds, and declared supertypes, instead of accepting any single-argument generic type as command-shaped.
+- Verification: `cjpm build` passes after the command-pattern continuation. `grep -rn "TODO(selfhost:Sema)" packages/sema/src` reports only out-of-scope Sema placeholders; the scoped `TypeCheckExpr.cj` and `TypeCheckExpr/*` files have zero matching markers.
 
 Remaining fidelity gaps:
 - Full overload resolution/desugar paths for operator, subscript, and compound assignment still depend on broader call/lookup/desugar infrastructure.
@@ -46,9 +48,9 @@ Remaining fidelity gaps:
 - Coalescing placeholder-`Option` constraints still need the import-manager/core-decl path used by C++ for unconstrained type variables.
 - Name lookup, accessibility filtering, capture diagnostics, generic constraint solving, and full C++ diagnostic parity remain limited by sibling sema systems that are still partial.
 - Try-with-resources currently checks resource declarations structurally but cannot validate the imported `Resource` interface without the full import manager path.
-- Try-handle command pattern promotion is still approximated from the available self-hosted type arguments; full parity needs the broader promotion/import-manager path used by C++ `ChkCommandTypePattern`.
+- Try-handle command pattern promotion now follows direct/generic-upper/supertype `Command<T>` shapes, but full parity still needs the import-manager target lookup and exact diagnostics used by C++ `ChkCommandTypePattern`.
 - Catch pattern validation cannot yet prove subtype-of-core-`Exception`/`Error` without an import-manager/core-decl path in this helper; it conservatively validates catchable classlike/generic shapes.
 - `@IfAvailable` still lacks the C++ import-manager checks for `ohos.device_info` and `ohos.base` package availability.
 - `for-in` refutable-pattern rejection now has the C++ behavior but not the exact `sema_forin_pattern_must_be_irrefutable` diagnostic emission in this shallow helper.
 
-Completeness estimate: 56% of C++ behavior for this scoped expression type-checking area, weighted by behavior rather than line count.
+Completeness estimate: 57% of C++ behavior for this scoped expression type-checking area, weighted by behavior rather than line count.
