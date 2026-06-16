@@ -113,7 +113,15 @@ public class IRBuilder2 {
     }
 
     public func SetInsertPoint(block: LLVMBasicBlockRef): Unit {
+        if (block.isNull()) {
+            ClearInsertionPoint()
+            return
+        }
         unsafe { LLVMPositionBuilderAtEnd(builder.raw, block) }
+    }
+
+    public func GetInsertBlock(): LLVMBasicBlockRef {
+        return unsafe { LLVMGetInsertBlock(builder.raw) }
     }
 
     public func ClearInsertionPoint(): Unit {

@@ -35,11 +35,14 @@ Implemented:
   LLVM type handles plus conservative size/alignment metadata for the subset exposed by the current CHIR package.
 - Added `IRBuilder2` wrappers for selected LLVM builder operations, primitive constants, default literal constants,
   call and invoke construction, bitcasts, address-space casts, aggregate insertion, GEP construction, unreachable
-  terminators, and scoped debug-location restoration.
+  terminators, insertion-point inspection/clearing, and scoped debug-location restoration.
 - Added a C++-shaped `CGUtils` component for pure CodeGen helpers: basic-block naming, class object layout naming,
   compiler-added class mangling, SipHash/`Out64`-style Cangjie string and constant global names through
   `Utils.HashString64`, reference stripping, and generic/class/struct/varray reference predicates. `IRBuilder2`
   string literal globals now use this shared naming path instead of a local decimal `hashCode` conversion.
+- Added a C++-shaped `BlockScopeImpl` component using Cangjie `Resource` scopes for block insertion-point
+  restoration, function entry-block insertion scopes, and unwind-block stack push/pop. Block scopes restore the
+  prior insertion block or clear the insertion point when the builder previously had none.
 - Added LLVM debug-info initialization via a CodeGen `DIBuilder` component: module debug/DWARF flags, compile-unit
   metadata, package namespace metadata, debug-location creation, finalization, and builder disposal are now driven
   through LLVM C FFI.
@@ -55,8 +58,10 @@ Implemented:
 - Added a C++-shaped `EmitExpressionIR` component that emits expression sequences through a local `IRBuilder2`,
   sets the insertion function from the top-level CHIR function, dispatches each expression by major kind, and maps
   non-null results back into `CGModule` with sret result tagging.
-- Added two-phase function body emission: all LLVM basic blocks are created and mapped before expression emission,
-  and CHIR function parameters are mapped to LLVM arguments before the body is lowered.
+- Added entry-reachable two-phase function body emission matching the C++ basic-block generator shape: LLVM basic
+  blocks are DFS-created and mapped from the CHIR entry block before expression emission, expressions are emitted in
+  a second DFS pass under `CodeGenBlockScope`, and CHIR function parameters are mapped to LLVM arguments before the
+  body is lowered.
 - Added global initializer emission for initializer values representable by the current CHIR value materializer.
 - Added LLVM enum-attribute attachment helpers for function/call attributes.
 - Added a C++-shaped `EraseUselessIRs` component for generated module cleanup: declarations are skipped, reachable
@@ -74,13 +79,13 @@ Known gaps:
   intrinsics, complete
   array/tuple/object construction, precise casts, C/FFI lowering, incremental generation, native backend-specific
   metadata, and post-generation optimization/cleanup passes.
-- Only 43 `.cj` files are present in this pass, compared with 118 reference CodeGen source/header files. Additional
+- Only 44 `.cj` files are present in this pass, compared with 118 reference CodeGen source/header files. Additional
   C++-named component files still need to be split out for `LICMOptimizer`, `IRGenerator`, LLVM-specific `CGUtils`,
-  `BlockScopeImpl`, incremental generation, Cangjie-native metadata, type info, CFFI, and the detailed base
+  incremental generation, Cangjie-native metadata, type info, CFFI, and the detailed base
   expression implementation files.
 - The package manifest now depends on the existing self-hosted `basic`, `chir`, `mangle`, `option`, and `utils`
   packages so the CodeGen package can compile against the current CHIR model.
 
 Remaining CodeGen selfhost markers: 0.
 
-Current CodeGen package size: 43 `.cj` files, approximately 3938 total lines.
+Current CodeGen package size: 44 `.cj` files, approximately 4093 total lines.
