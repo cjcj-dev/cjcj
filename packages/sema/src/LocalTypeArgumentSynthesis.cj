@@ -1,6 +1,615 @@
 package cangjie_compiler::sema
 
-public func SelfhostPortStatus_LocalTypeArgumentSynthesis(): Bool {
-    // TODO(selfhost:Sema): port src/Sema/LocalTypeArgumentSynthesis.cpp and .h.
+import std.collection.*
+import cangjie_compiler::ast.*
+
+public class LocTyArgSynArgPack {
+    public let tyVarsToSolve: ArrayList<GenericsTy> = ArrayList<GenericsTy>()
+    public let argTys: ArrayList<Ty> = ArrayList<Ty>()
+    public let paramTys: ArrayList<Ty> = ArrayList<Ty>()
+    public let argBlames: ArrayList<Blame> = ArrayList<Blame>()
+    public var funcRetTy: Option<Ty> = None
+    public var retTyUB: Option<Ty> = None
+    public var retBlame: Blame = Blame(src: None, lb: None, ub: None, style: BlameStyle.ARGUMENT)
+
+    public init() {}
+}
+
+private func containsTyVar(values: ArrayList<GenericsTy>, tyVar: GenericsTy): Bool {
+    for (value in values) {
+        if (SameTy(value, tyVar)) {
+            return true
+        }
+    }
     return false
+}
+
+private func typeArgsCanUnify(synthesis: LocalTypeArgumentSynthesis, argTy: Ty, paramTy: Ty): Bool {
+    if (argTy.typeArgs.size != paramTy.typeArgs.size) {
+        return false
+    }
+    for (idx in 0..argTy.typeArgs.size) {
+        if (!synthesis.UnifyOne(argTy.typeArgs[idx], paramTy.typeArgs[idx])) {
+            return false
+        }
+    }
+    return true
+}
+
+private func insertOptionIndex(options: ArrayList<Int64>, tys: ArrayList<Ty>, idx: Int64): Unit {
+    let level = CountOptionNestedLevel(tys[idx])
+    var insertAt = options.size
+    var pos: Int64 = 0
+    while (pos < options.size) {
+        if (CountOptionNestedLevel(tys[options[pos]]) < level) {
+            insertAt = pos
+            break
+        }
+        pos++
+    }
+    options.add(idx)
+    var move = options.size - 1
+    while (move > insertAt) {
+        options[move] = options[move - 1]
+        move--
+    }
+    options[insertAt] = idx
+}
+
+private func getOrderedCheckingIndexes(tys: ArrayList<Ty>): ArrayList<Int64> {
+    let options = ArrayList<Int64>()
+    let others = ArrayList<Int64>()
+    let ideals = ArrayList<Int64>()
+    for (idx in 0..tys.size) {
+        let ty = tys[idx]
+        if (Ty.IsTyCorrect(ty)) {
+            if (ty.IsIdeal()) {
+                ideals.add(idx)
+            } else if (ty.IsCoreOptionType()) {
+                insertOptionIndex(options, tys, idx)
+            } else {
+                others.add(idx)
+            }
+        } else {
+            others.add(idx)
+        }
+    }
+    for (idx in others) {
+        options.add(idx)
+    }
+    for (idx in ideals) {
+        options.add(idx)
+    }
+    return options
+}
+
+public class LocalTypeArgumentSynthesis {
+    private var tyMgr: TypeManager
+    private var argPack: LocTyArgSynArgPack
+    private var needDiagMsg: Bool
+    private var constraints: Constraint = Constraint()
+    private var errInfo: SolvingErrInfo = SolvingErrInfo()
+
+    public init(typeManager: TypeManager, argPack: LocTyArgSynArgPack, needDiagMsg!: Bool = false) {
+        tyMgr = typeManager
+        this.argPack = argPack
+        this.needDiagMsg = needDiagMsg
+    }
+
+    public func SynthesizeTypeArguments(allowPartial!: Bool = false): Option<TypeSubst> {
+        if (argPack.argTys.size != argPack.paramTys.size) {
+            errInfo.style = SolvingErrStyle.ARG_MISMATCH
+            return None
+        }
+        constraints = InitConstraints(argPack.tyVarsToSolve)
+        let orderedIndexes = getOrderedCheckingIndexes(argPack.argTys)
+        for (idx in orderedIndexes) {
+            if (!Ty.IsTyCorrect(argPack.argTys[idx]) || !Ty.IsTyCorrect(argPack.paramTys[idx])) {
+                errInfo.style = SolvingErrStyle.ARG_MISMATCH
+                return None
+            }
+            if (!UnifyOne(argPack.argTys[idx], argPack.paramTys[idx])) {
+                errInfo.style = SolvingErrStyle.ARG_MISMATCH
+                return None
+            }
+        }
+        if (let Some(funcRetTy) <- argPack.funcRetTy) {
+            if (let Some(retTyUB) <- argPack.retTyUB) {
+                if (funcRetTy.HasGeneric() && !UnifyOne(funcRetTy, retTyUB)) {
+                    errInfo.style = SolvingErrStyle.RET_MISMATCH
+                    return None
+                }
+            }
+        }
+        return SolveCurrentConstraints(allowPartial: allowPartial)
+    }
+
+    public func HasUnsolvedTyVars(subst: TypeSubst): Bool {
+        return CountUnsolvedTyVars(subst) > 0
+    }
+
+    public func CountUnsolvedTyVars(subst: TypeSubst): Int64 {
+        var count: Int64 = 0
+        for (tyVar in argPack.tyVarsToSolve) {
+            if (let None <- subst.Get(tyVar)) {
+                count++
+            }
+        }
+        return count
+    }
+
+    public func GetErrInfo(): SolvingErrInfo {
+        return errInfo
+    }
+
+    public static func Unify(typeManager: TypeManager, cst: Constraint, argTy: Ty, paramTy: Ty): Bool {
+        let pack = LocTyArgSynArgPack()
+        for (entry in cst.entries) {
+            pack.tyVarsToSolve.add(entry.tyVar)
+        }
+        let synthesis = LocalTypeArgumentSynthesis(typeManager, pack)
+        synthesis.constraints = cloneConstraint(cst)
+        let ok = synthesis.UnifyOne(argTy, paramTy)
+        if (ok) {
+            cst.Clear()
+            for (entry in synthesis.constraints.entries) {
+                let bounds = cst.GetOrCreate(entry.tyVar)
+                bounds.lbs.AddAll(entry.bounds.lbs)
+                bounds.ubs.AddAll(entry.bounds.ubs)
+                bounds.sum.AddAll(entry.bounds.sum)
+                bounds.eq.AddAll(entry.bounds.eq)
+            }
+        }
+        return ok
+    }
+
+    public static func SolveConstraints(typeManager: TypeManager, cst: Constraint): Option<TypeSubst> {
+        let pack = LocTyArgSynArgPack()
+        for (entry in cst.entries) {
+            pack.tyVarsToSolve.add(entry.tyVar)
+        }
+        let synthesis = LocalTypeArgumentSynthesis(typeManager, pack)
+        synthesis.constraints = cloneConstraint(cst)
+        return synthesis.SolveCurrentConstraints(allowPartial: false)
+    }
+
+    public func InitConstraints(tyVarsToSolve: ArrayList<GenericsTy>): Constraint {
+        let out = Constraint()
+        for (tyVar in tyVarsToSolve) {
+            let bounds = out.GetOrCreate(tyVar)
+            for (upper in tyVar.upperBounds) {
+                bounds.ubs.Add(upper)
+            }
+            if (let Some(lower) <- tyVar.lowerBound) {
+                bounds.lbs.Add(lower)
+            }
+        }
+        return out
+    }
+
+    public func UnifyOne(argTy: Ty, paramTy: Ty): Bool {
+        if (SameTy(argTy, paramTy) || argTy.IsQuest() || paramTy.IsQuest()) {
+            return true
+        }
+        if (let Some(paramIntersection) <- (paramTy as IntersectionTy)) {
+            return UnifyParamIntersectionTy(argTy, paramIntersection)
+        }
+        if (let Some(argIntersection) <- (argTy as IntersectionTy)) {
+            return UnifyArgIntersectionTy(argIntersection, paramTy)
+        }
+        if (let Some(argUnion) <- (argTy as UnionTy)) {
+            return UnifyArgUnionTy(argUnion, paramTy)
+        }
+        if (let Some(paramUnion) <- (paramTy as UnionTy)) {
+            return UnifyParamUnionTy(argTy, paramUnion)
+        }
+        if (let Some(paramVar) <- (paramTy as GenericsTy)) {
+            if (paramVar.isPlaceholder && containsTyVar(argPack.tyVarsToSolve, paramVar)) {
+                constraints.GetOrCreate(paramVar).lbs.Add(normalizeInferredTy(argTy))
+                return true
+            }
+        }
+        if (let Some(argVar) <- (argTy as GenericsTy)) {
+            if (argVar.isPlaceholder && containsTyVar(argPack.tyVarsToSolve, argVar)) {
+                constraints.GetOrCreate(argVar).ubs.Add(normalizeInferredTy(paramTy))
+                return true
+            }
+            if (!argVar.isPlaceholder) {
+                if (argVar.upperBounds.isEmpty()) {
+                    return UnifyOne(tyMgr.GetAnyTy(), paramTy)
+                }
+                for (upper in argVar.upperBounds) {
+                    if (UnifyOne(upper, paramTy)) {
+                        return true
+                    }
+                }
+                return false
+            }
+        }
+        if (paramTy.IsCoreOptionType() && paramTy.typeArgs.size == 1 &&
+            CountOptionNestedLevel(paramTy) > CountOptionNestedLevel(argTy)) {
+            if (argTy.IsCoreOptionType() && argTy.typeArgs.size == 1) {
+                return UnifyOne(argTy.typeArgs[0], paramTy.typeArgs[0])
+            }
+            return UnifyOne(argTy, paramTy.typeArgs[0])
+        }
+        if (let Some(argFunc) <- (argTy as FuncTy)) {
+            if (let Some(paramFunc) <- (paramTy as FuncTy)) {
+                return UnifyFuncTy(argFunc, paramFunc)
+            }
+        }
+        if (let Some(argTuple) <- (argTy as TupleTy)) {
+            if (let Some(paramTuple) <- (paramTy as TupleTy)) {
+                return typeArgsCanUnify(this, argTuple, paramTuple)
+            }
+        }
+        if ((argTy.IsArray() && paramTy.IsArray()) || (argTy.IsPointer() && paramTy.IsPointer())) {
+            return UnifyBuiltInTy(argTy, paramTy)
+        }
+        if (argTy.IsNominal() && paramTy.IsNominal()) {
+            return UnifyNominal(argTy, paramTy)
+        }
+        if (argTy.IsPrimitive() && paramTy.IsPrimitive()) {
+            return tyMgr.IsSubtype(argTy, paramTy)
+        }
+        return tyMgr.IsSubtype(argTy, paramTy)
+    }
+
+    private func UnifyParamIntersectionTy(argTy: Ty, paramTy: IntersectionTy): Bool {
+        for (candidate in paramTy.tys) {
+            if (!UnifyOne(argTy, candidate)) {
+                return false
+            }
+        }
+        return true
+    }
+
+    private func UnifyArgIntersectionTy(argTy: IntersectionTy, paramTy: Ty): Bool {
+        if (argTy.tys.isEmpty()) {
+            return UnifyOne(tyMgr.GetAnyTy(), paramTy)
+        }
+        if (argTy.tys.size == 1) {
+            return UnifyOne(argTy.tys[0], paramTy)
+        }
+        let saved = cloneConstraint(constraints)
+        for (candidate in argTy.tys) {
+            constraints = cloneConstraint(saved)
+            if (UnifyOne(candidate, paramTy)) {
+                return true
+            }
+        }
+        constraints = saved
+        return false
+    }
+
+    private func UnifyParamUnionTy(argTy: Ty, paramTy: UnionTy): Bool {
+        if (paramTy.tys.isEmpty()) {
+            return argTy.IsNothing()
+        }
+        if (paramTy.tys.size == 1) {
+            return UnifyOne(argTy, paramTy.tys[0])
+        }
+        let saved = cloneConstraint(constraints)
+        for (candidate in paramTy.tys) {
+            constraints = cloneConstraint(saved)
+            if (UnifyOne(argTy, candidate)) {
+                return true
+            }
+        }
+        constraints = saved
+        return false
+    }
+
+    private func UnifyArgUnionTy(argTy: UnionTy, paramTy: Ty): Bool {
+        for (candidate in argTy.tys) {
+            if (!UnifyOne(candidate, paramTy)) {
+                return false
+            }
+        }
+        return true
+    }
+
+    private func UnifyFuncTy(argTy: FuncTy, paramTy: FuncTy): Bool {
+        if (argTy.paramTys.size != paramTy.paramTys.size) {
+            return false
+        }
+        for (idx in 0..argTy.paramTys.size) {
+            if (!UnifyOne(paramTy.paramTys[idx], argTy.paramTys[idx])) {
+                return false
+            }
+        }
+        return UnifyOne(argTy.retTy, paramTy.retTy)
+    }
+
+    private func UnifyBuiltInTy(argTy: Ty, paramTy: Ty): Bool {
+        if (argTy.typeArgs.size != 1 || paramTy.typeArgs.size != 1) {
+            return false
+        }
+        return UnifyOne(argTy.typeArgs[0], paramTy.typeArgs[0]) &&
+            UnifyOne(paramTy.typeArgs[0], argTy.typeArgs[0])
+    }
+
+    private func UnifyNominal(argTy: Ty, paramTy: Ty): Bool {
+        let promoted = Promotion(tyMgr).Promote(argTy, paramTy)
+        if (promoted.IsEmpty()) {
+            return false
+        }
+        let saved = cloneConstraint(constraints)
+        for (candidate in promoted.values) {
+            if (candidate.typeArgs.size != paramTy.typeArgs.size) {
+                continue
+            }
+            constraints = cloneConstraint(saved)
+            var localOk = true
+            for (idx in 0..candidate.typeArgs.size) {
+                if (!UnifyOne(candidate.typeArgs[idx], paramTy.typeArgs[idx]) ||
+                    !UnifyOne(paramTy.typeArgs[idx], candidate.typeArgs[idx])) {
+                    localOk = false
+                    break
+                }
+            }
+            if (localOk) {
+                return true
+            }
+        }
+        constraints = saved
+        return false
+    }
+
+    private func SolveCurrentConstraints(allowPartial!: Bool = false): Option<TypeSubst> {
+        let subst = TypeSubst()
+        for (tyVar in argPack.tyVarsToSolve) {
+            if (let Some(solution) <- FindSolution(tyVar)) {
+                subst.Put(tyVar, solution)
+            } else if (!allowPartial) {
+                errInfo.style = SolvingErrStyle.NO_CONSTRAINT
+                errInfo.tyVar = tyVar
+                return None
+            }
+        }
+        return subst
+    }
+
+    private func FindSolution(tyVar: GenericsTy): Option<Ty> {
+        let bounds = constraints.GetOrCreate(tyVar)
+        for (eqTy in bounds.eq.values) {
+            let normalizedEq = NormalizeSolution(eqTy)
+            if (IsValidSolution(normalizedEq, bounds)) {
+                return normalizedEq
+            }
+        }
+        if (let Some(joinedLb) <- JoinLowerBounds(bounds.lbs)) {
+            let normalizedJoined = NormalizeSolution(joinedLb)
+            if (IsValidSolution(normalizedJoined, bounds)) {
+                return normalizedJoined
+            }
+        }
+        if (let Some(metUb) <- MeetUpperBounds(tyVar, bounds.ubs)) {
+            let normalizedMet = NormalizeSolution(metUb)
+            if (IsValidSolution(normalizedMet, bounds)) {
+                return normalizedMet
+            }
+        }
+        for (lb in bounds.lbs.values) {
+            let normalizedLb = NormalizeSolution(lb)
+            if (IsValidSolution(normalizedLb, bounds)) {
+                return normalizedLb
+            }
+        }
+        for (ub in bounds.ubs.values) {
+            let normalizedUb = NormalizeSolution(ub)
+            if (IsValidSolution(normalizedUb, bounds)) {
+                return normalizedUb
+            }
+        }
+        return None
+    }
+
+    private func JoinLowerBounds(lbs: TySet): Option<Ty> {
+        if (lbs.values.isEmpty()) {
+            return None
+        }
+        var result = lbs.values[0]
+        var idx: Int64 = 1
+        while (idx < lbs.values.size) {
+            result = Join(tyMgr, result, lbs.values[idx])
+            idx++
+        }
+        return result
+    }
+
+    private func MeetUpperBounds(tyVar: GenericsTy, ubs: TySet): Option<Ty> {
+        if (ubs.values.isEmpty()) {
+            return None
+        }
+        let tysWithoutTyVar = TySet()
+        let tysWithTyVar = TySet()
+        for (upper in ubs.values) {
+            if (upper.Contains(tyVar)) {
+                tysWithTyVar.Add(upper)
+            } else {
+                tysWithoutTyVar.Add(upper)
+            }
+        }
+        var resultOpt = MeetTypes(tysWithoutTyVar)
+        if (tysWithTyVar.IsEmpty()) {
+            return resultOpt
+        }
+        if (let Some(result) <- resultOpt) {
+            let subst = TypeSubst()
+            subst.Put(tyVar, result)
+            let instantiated = TySet()
+            instantiated.Add(result)
+            for (upperWithTyVar in tysWithTyVar.values) {
+                instantiated.Add(tyMgr.GetInstantiatedTy(upperWithTyVar, subst))
+            }
+            resultOpt = MeetTypes(instantiated)
+        }
+        return resultOpt
+    }
+
+    private func MeetTypes(values: TySet): Option<Ty> {
+        if (values.values.isEmpty()) {
+            return None
+        }
+        var result = values.values[0]
+        var idx: Int64 = 1
+        while (idx < values.values.size) {
+            result = Meet(tyMgr, result, values.values[idx])
+            idx++
+        }
+        return result
+    }
+
+    private func NormalizeSolution(ty: Ty): Ty {
+        let inferred = normalizeInferredTy(ty)
+        if (inferred.HasIdealTy()) {
+            return ReplaceIdealTyInSolution(inferred)
+        }
+        return inferred
+    }
+
+    private func ReplaceIdealTyInSolution(ty: Ty): Ty {
+        if (!ty.HasIdealTy()) {
+            return ty
+        }
+        if (ty.IsIdeal()) {
+            return tyMgr.ReplaceIdealTy(ty)
+        }
+        if (let Some(arrayTy) <- (ty as ArrayTy)) {
+            if (arrayTy.typeArgs.size == 1) {
+                return tyMgr.GetArrayTy(ReplaceIdealTyInSolution(arrayTy.typeArgs[0]), arrayTy.dims)
+            }
+        }
+        if (let Some(varrayTy) <- (ty as VArrayTy)) {
+            if (varrayTy.typeArgs.size == 1) {
+                return tyMgr.GetVArrayTy(ReplaceIdealTyInSolution(varrayTy.typeArgs[0]), varrayTy.size)
+            }
+        }
+        if (let Some(pointerTy) <- (ty as PointerTy)) {
+            if (pointerTy.typeArgs.size == 1) {
+                return tyMgr.GetPointerTy(ReplaceIdealTyInSolution(pointerTy.typeArgs[0]))
+            }
+        }
+        if (let Some(tupleTy) <- (ty as TupleTy)) {
+            return tyMgr.GetTupleTy(replaceIdealArgs(tupleTy.typeArgs), isClosureTy: tupleTy.isClosureTy)
+        }
+        if (let Some(funcTy) <- (ty as FuncTy)) {
+            let cfg = FuncTyConfig()
+            cfg.isC = funcTy.isC
+            cfg.isClosureTy = funcTy.isClosureTy
+            cfg.hasVariableLenArg = funcTy.hasVariableLenArg
+            cfg.noCast = funcTy.noCast
+            return tyMgr.GetFunctionTy(replaceIdealArgs(funcTy.paramTys),
+                ReplaceIdealTyInSolution(funcTy.retTy), cfg: cfg)
+        }
+        if (let Some(classThisTy) <- (ty as ClassThisTy)) {
+            if (let Some(decl) <- classThisTy.declPtr) {
+                return tyMgr.GetClassThisTy(decl, replaceIdealArgs(classThisTy.typeArgs))
+            }
+        }
+        if (let Some(classTy) <- (ty as ClassTy)) {
+            if (let Some(decl) <- classTy.declPtr) {
+                return tyMgr.GetClassTy(decl, replaceIdealArgs(classTy.typeArgs))
+            }
+        }
+        if (let Some(interfaceTy) <- (ty as InterfaceTy)) {
+            if (let Some(decl) <- interfaceTy.declPtr) {
+                return tyMgr.GetInterfaceTy(decl, replaceIdealArgs(interfaceTy.typeArgs))
+            }
+        }
+        if (let Some(structTy) <- (ty as StructTy)) {
+            if (let Some(decl) <- structTy.declPtr) {
+                return tyMgr.GetStructTy(decl, replaceIdealArgs(structTy.typeArgs))
+            }
+        }
+        if (let Some(refEnumTy) <- (ty as RefEnumTy)) {
+            if (let Some(decl) <- refEnumTy.declPtr) {
+                return tyMgr.GetRefEnumTy(decl, replaceIdealArgs(refEnumTy.typeArgs))
+            }
+        }
+        if (let Some(enumTy) <- (ty as EnumTy)) {
+            if (let Some(decl) <- enumTy.declPtr) {
+                return tyMgr.GetEnumTy(decl, typeArgs: replaceIdealArgs(enumTy.typeArgs))
+            }
+        }
+        if (let Some(aliasTy) <- (ty as TypeAliasTy)) {
+            if (let Some(decl) <- aliasTy.declPtr) {
+                return tyMgr.GetTypeAliasTy(decl, replaceIdealArgs(aliasTy.typeArgs))
+            }
+        }
+        if (let Some(unionTy) <- (ty as UnionTy)) {
+            return tyMgr.GetUnionTy(replaceIdealArgs(unionTy.tys))
+        }
+        if (let Some(intersectionTy) <- (ty as IntersectionTy)) {
+            return tyMgr.GetIntersectionTy(replaceIdealArgs(intersectionTy.tys))
+        }
+        return ty
+    }
+
+    private func replaceIdealArgs(values: ArrayList<Ty>): Array<Ty> {
+        let out = ArrayList<Ty>()
+        for (value in values) {
+            out.add(ReplaceIdealTyInSolution(value))
+        }
+        return out.toArray()
+    }
+
+    private func IsValidSolution(candidate: Ty, bounds: TyVarBounds): Bool {
+        if (candidate.HasInvalidTy() || candidate.IsNothing() || candidate.IsAny() || candidate.HasIdealTy() ||
+            candidate.IsCType()) {
+            return false
+        }
+        for (lb in bounds.lbs.values) {
+            if (!tyMgr.IsSubtype(lb, candidate)) {
+                return false
+            }
+        }
+        for (ub in bounds.ubs.values) {
+            if (!tyMgr.IsSubtype(candidate, ub)) {
+                return false
+            }
+        }
+        return true
+    }
+
+    private func normalizeInferredTy(ty: Ty): Ty {
+        if (let Some(thisTy) <- (ty as ClassThisTy)) {
+            if (let Some(decl) <- thisTy.declPtr) {
+                return tyMgr.GetClassTy(decl, CopyTypeArgs(thisTy.typeArgs))
+            }
+        }
+        return ty
+    }
+}
+
+private func cloneTyBlameEntries(entries: ArrayList<TyBlameEntry>): ArrayList<TyBlameEntry> {
+    let out = ArrayList<TyBlameEntry>()
+    for (entry in entries) {
+        out.add(TyBlameEntry(entry.ty, blames: entry.blames.Clone()))
+    }
+    return out
+}
+
+private func cloneTyVarBounds(bounds: TyVarBounds): TyVarBounds {
+    let out = TyVarBounds()
+    out.lbs = bounds.lbs.Clone()
+    out.ubs = bounds.ubs.Clone()
+    out.sum = bounds.sum.Clone()
+    out.eq = bounds.eq.Clone()
+    for (entry in cloneTyBlameEntries(bounds.lb2Blames)) {
+        out.lb2Blames.add(entry)
+    }
+    for (entry in cloneTyBlameEntries(bounds.ub2Blames)) {
+        out.ub2Blames.add(entry)
+    }
+    return out
+}
+
+private func cloneConstraint(cst: Constraint): Constraint {
+    let out = Constraint()
+    for (entry in cst.entries) {
+        out.entries.add(ConstraintEntry(entry.tyVar, bounds: cloneTyVarBounds(entry.bounds)))
+    }
+    return out
 }
