@@ -246,7 +246,9 @@ private func fieldLookupExtend(typeManager: TypeManager, ty: Ty, fieldName: Stri
                         continue
                     }
                     if (let Some(inheritedTy) <- inheritedType.GetTy()) {
-                        if (let Some(interfaceTy) <- (inheritedTy as InterfaceTy)) {
+                        let mapping = GenerateTypeMappingByTy(extendDecl.GetTy(), Some(ty))
+                        let instantiatedTy = typeManager.GetInstantiatedTy(inheritedTy, mapping)
+                        if (let Some(interfaceTy) <- (instantiatedTy as InterfaceTy)) {
                             fieldLookupInterfaceTy(typeManager, interfaceTy, fieldName, results, info)
                         }
                     }
@@ -261,7 +263,15 @@ private func fieldLookupClass(typeManager: TypeManager, cd: ClassDecl, fieldName
     if (let Some(body) <- cd.body) {
         for (member in body.decls) {
             if (member.identifier == fieldName && !ignoredMember(member)) {
-                addMemberIfValidForLookup(results, typeManager, info.baseTy, info.isSetter, member)
+                var foundTy = info.baseTy
+                if (!member.IsClassLikeDecl() && member.TestAttr(Attribute.STATIC)) {
+                    if (let Some(baseTy) <- foundTy) {
+                        if (let Some(genericTy) <- Ty.GetGenericTyOfInsTy(baseTy)) {
+                            foundTy = Some(genericTy)
+                        }
+                    }
+                }
+                addMemberIfValidForLookup(results, typeManager, foundTy, info.isSetter, member)
             }
         }
     }
@@ -279,7 +289,7 @@ private func fieldLookupClass(typeManager: TypeManager, cd: ClassDecl, fieldName
                 fieldLookupClass(typeManager, superClass, fieldName, results, superInfo)
             } else if (let Some(inheritedTy) <- inheritedType.GetTy()) {
                 if (let Some(interfaceTy) <- (inheritedTy as InterfaceTy)) {
-                    fieldLookupInterfaceTy(typeManager, interfaceTy, fieldName, results, info)
+                    fieldLookupInterfaceTy(typeManager, interfaceTy, fieldName, results, LookupInfo(baseTy: info.baseTy))
                 }
             }
         }
@@ -314,7 +324,18 @@ private func fieldLookupInterfaceTy(typeManager: TypeManager, idTy: InterfaceTy,
                 if (let Some(interfaceTy) <- (inheritedTy as InterfaceTy)) {
                     if (let Some(interfaceDecl) <- interfaceTy.declPtr) {
                         if (!interfaceDecl.TestAttr(Attribute.IN_REFERENCE_CYCLE)) {
-                            fieldLookupInterfaceTy(typeManager, interfaceTy, fieldName, results, info)
+                            let promotedTys = Promotion(typeManager).Promote(idTy, inheritedTy)
+                            let parentInfo = LookupInfo(baseTy: info.baseTy)
+                            if (promotedTys.values.isEmpty()) {
+                                fieldLookupInterfaceTy(typeManager, interfaceTy, fieldName, results, parentInfo)
+                            } else {
+                                for (promotedTy in promotedTys.values) {
+                                    if (let Some(promotedInterfaceTy) <- (promotedTy as InterfaceTy)) {
+                                        fieldLookupInterfaceTy(typeManager, promotedInterfaceTy, fieldName, results,
+                                            parentInfo)
+                                    }
+                                }
+                            }
                         }
                     }
                 }

@@ -32,3 +32,27 @@ Verification:
 - `cjpm build` passes after this pass, with only pre-existing unused-symbol warnings plus no new errors.
 - `grep -rn "TODO(selfhost:Sema)" packages/sema/src` reports 65 remaining Sema markers, all outside the tc-core files touched in this pass.
 - Remaining `TODO(selfhost:Sema)` markers in this tc-core touched scope: 0.
+
+## 2026-06-17 Deepening Pass
+
+Files deepened:
+
+- `packages/sema/src/LookUpImpl.cj`
+- `packages/sema/src/TypeCheck.cj`
+
+Implemented behavior:
+
+- Ported the C++ `CFunc` precheck behavior more faithfully. `CFunc<(A, B) -> R>` now resolves to a C function type with parameters `A, B` and return `R`, instead of incorrectly treating the whole function type argument as both the single parameter and return type.
+- Updated builtin `CFunc` ty construction to require a `FuncTy` argument, matching the C++ `GetBuiltinCFuncType` contract rather than accepting arbitrary type arguments.
+- Improved field lookup through extends by instantiating inherited interface types with the extend-to-base type mapping before recursing into interface member lookup.
+- Matched the C++ static-member lookup adjustment that uses the generic form of an instantiated base type when looking up static non-classlike members.
+- Improved inherited interface traversal by using `Promotion(typeManager).Promote` so generic interface inheritance follows promoted/instantiated parent interface types where available.
+
+De-isolation finding:
+
+- Attempted to wire `cangjie_compiler::modules.ImportManager` into lookup, but the current self-hosted `modules` package still owns local compatibility `File`, `Package`, and `Decl` definitions. Those are type-incompatible with the real `cangjie_compiler::ast` types used by Sema, so imported-declaration lookup and extend accessibility filtering cannot be made real from tc-core without editing `modules` outside this scope. The attempted calls were removed to keep the workspace green.
+
+Verification:
+
+- `cjpm build` passes after this pass.
+- Remaining `TODO(selfhost:Sema)` markers in the tc-core-owned files listed by the task: 0.

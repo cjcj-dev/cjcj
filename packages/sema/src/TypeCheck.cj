@@ -139,9 +139,45 @@ private func getTyFromBuiltinDecl(typeManager: TypeManager, bid: BuiltInDecl, ty
         if (typeArgs.size != 1) {
             return TypeManager.GetInvalidTy()
         }
+        if (let Some(funcTy) <- (typeArgs[0] as FuncTy)) {
+            let cfg = FuncTyConfig()
+            cfg.isC = true
+            return typeManager.GetFunctionTy(funcTy.paramTys.toArray(), funcTy.retTy, cfg: cfg)
+        }
+        return TypeManager.GetInvalidTy()
+    }
+    return TypeManager.GetInvalidTy()
+}
+
+private func getTyFromASTCFuncType(typeManager: TypeManager, ctx: ASTContext, rt: RefType): Ty {
+    if (rt.typeArguments.size != 1) {
+        return TypeManager.GetInvalidTy()
+    }
+    if (let Some(funcType) <- (rt.typeArguments[0] as FuncType)) {
+        let paramTys = ArrayList<Ty>()
+        for (paramType in funcType.paramTypes) {
+            paramType.SetTy(GetTyFromASTType(typeManager, ctx, paramType))
+            if (let Some(paramTy) <- paramType.GetTy()) {
+                paramTys.add(paramTy)
+            } else {
+                return TypeManager.GetInvalidTy()
+            }
+        }
+        var retTy: Ty = TypeManager.GetInvalidTy()
+        if (let Some(retType) <- funcType.retType) {
+            retType.SetTy(GetTyFromASTType(typeManager, ctx, retType))
+            if (let Some(retTypeTy) <- retType.GetTy()) {
+                retTy = retTypeTy
+            } else {
+                return TypeManager.GetInvalidTy()
+            }
+        } else {
+            return TypeManager.GetInvalidTy()
+        }
+        funcType.SetTy(GetTyFromASTFuncType(typeManager, ctx, funcType))
         let cfg = FuncTyConfig()
         cfg.isC = true
-        return typeManager.GetFunctionTy(typeArgs.toArray(), typeArgs[0], cfg: cfg)
+        return typeManager.GetFunctionTy(paramTys.toArray(), retTy, cfg: cfg)
     }
     return TypeManager.GetInvalidTy()
 }
@@ -352,9 +388,8 @@ public func GetTyFromASTRefType(typeManager: TypeManager, ctx: ASTContext, rt: R
     let target = targets[0]
     if (let Some(builtin) <- (target as BuiltInDecl)) {
         if (builtin.IsType(BuiltInType.CFUNC)) {
-            let typeArgs = getTypeArgTys(typeManager, ctx, rt.typeArguments)
             ReplaceTarget(rt, Some(target))
-            return getTyFromBuiltinDecl(typeManager, builtin, typeArgs)
+            return getTyFromASTCFuncType(typeManager, ctx, rt)
         }
     }
     ReplaceTarget(rt, Some(target))
