@@ -29,7 +29,7 @@ public open class Decl <: Node {
         if (!TestAttr(attr)) {
             attributes.add(attr)
         }
-        if (attr == Attribute.IS_BROKEN || attr == Attribute.BROKEN) {
+        if (attr == Attribute.IS_BROKEN || attr == Attribute.HAS_BROKEN) {
             isBroken = true
         }
     }

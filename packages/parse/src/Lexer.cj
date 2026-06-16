@@ -2,24 +2,6 @@ package cangjie_compiler::parse
 
 import std.collection.*
 
-public enum StringPartKind {
-    | STR | EXPR
-}
-
-public struct StringPart {
-    public var strKind: StringPartKind = StringPartKind.STR
-    public var value: String = ""
-    public var begin: Position = INVALID_POSITION
-    public var end: Position = INVALID_POSITION
-    public init() {}
-    public init(strKind: StringPartKind, value: String, begin: Position, end: Position) {
-        this.strKind = strKind
-        this.value = value
-        this.begin = begin
-        this.end = end
-    }
-}
-
 private struct LexerScanResult {
     public var value: String
     public var nextIndex: Int64

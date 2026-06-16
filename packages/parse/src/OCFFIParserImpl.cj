@@ -117,7 +117,7 @@ public class OCFFIParserImpl {
                 decl.EnableAttr(Attribute.IS_BROKEN)
             }
         }
-        if (decl.isConst || decl.TestAttr(Attribute.CONST)) {
+        if (decl.isConst) {
             DiagObjCMirrorFuncCannotBeConst(decl)
             decl.EnableAttr(Attribute.IS_BROKEN)
         }

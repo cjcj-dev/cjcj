@@ -7,22 +7,23 @@ Build: `cjpm build` passes.
 ## Summary
 
 Replaced the Parse scaffold with a multi-file Cangjie package that mirrors the C++
-Parse component split. The package now has local parser-facing source positions,
-tokens, diagnostics, AST node shapes, a lexer, parser state, top-level parsing,
+Parse component split. The package now imports real Basic positions/source
+manager, real Lex tokens/token tables, and real AST kind/attribute/annotation
+enums. It still has local parser-facing diagnostics, AST node shapes, a lexer,
+parser state, top-level parsing,
 declaration parsing, expression parsing, type parsing, pattern parsing, imports,
 annotations, modifiers, features, macro-call capture, quote capture, comment
 collection, modifier-rule queries, AST checking, AST hashing, CJMP entry wiring,
 and Java/ObjC native FFI parser checks.
 
-## Important Blocker
+## Current De-Isolation
 
-`packages/parse/cjpm.toml` currently has no dependencies, and this task forbids
-editing manifests. A faithful production Parse port must import the real
-`cangjie_compiler::lex`, `cangjie_compiler::ast`, and
-`cangjie_compiler::basic` packages. Without those manifest dependencies, this
-pass keeps a local compatibility layer so the workspace still compiles. That
-means the parser is behavior-bearing but not yet wired to the real sibling
-package public APIs.
+`packages/parse/cjpm.toml` now depends on `basic`, `lex`, and `ast`.
+`Position.cj` and `Token.cj` no longer own compatibility copies of the Basic
+position/source types or Lex token types. `ASTCore.cj` no longer owns local
+copies of `ASTKind`, `Attribute`, or `AnnotationKind`; it imports the real AST
+definitions and keeps only Parse-local lightweight node classes that still
+diverge from the real AST class layout.
 
 ## Implemented In This Pass
 
@@ -86,11 +87,21 @@ package public APIs.
 - Added builtin annotation-lambda recognition so `@Anno { ... }` parses as a
   lambda expression where the C++ parser accepts annotation lambdas, including
   the `spawn` task position.
+- Continued the de-isolation pass by importing real Basic `Position`, `Range`,
+  `Source`, and `SourceManager`; real Lex `Token`, `TokenKind`, `StringPart`,
+  `TokenVecMap`, and token helper tables; and real AST `ASTKind`, `Attribute`,
+  and `AnnotationKind`.
+- Replaced the simplified modifier allowance/conflict/warning placeholders with
+  C++-shaped rule mappings from `ParserModifierRules.cpp`, including top-level,
+  class/interface/struct/enum/extend body, constructor, property, package, and
+  interface warning rules. `INOUT` and `const` now follow the C++ mapping:
+  `INOUT` has no AST attribute, and `const` is carried by declaration fields.
 
 ## Remaining Work
 
-- Replace the local compatibility layer with the real Basic/Lex/AST APIs when
-  manifest edits are allowed.
+- Replace the remaining Parse-local AST node classes, parser diagnostics, and
+  parser lexer implementation with real sibling package APIs where their public
+  surfaces are sufficiently complete.
 - Audit grammar and diagnostic parity against the full C++ Parse test corpus;
   the current parser is substantial and compiling, but not a complete faithful
   replacement for all 17k+ lines of C++ parser behavior.
