@@ -113,16 +113,6 @@ private func ConvertTypeKind(kind: TypeKind): MangleTypeKind {
     }
 }
 
-private func ConvertLinkage(linkage: Linkage): MangleLinkage {
-    return match (linkage) {
-        case Linkage.WEAK_ODR => MangleLinkage.WEAK_ODR
-        case Linkage.EXTERNAL => MangleLinkage.EXTERNAL
-        case Linkage.INTERNAL => MangleLinkage.INTERNAL
-        case Linkage.LINKONCE_ODR => MangleLinkage.LINKONCE_ODR
-        case Linkage.EXTERNAL_WEAK => MangleLinkage.EXTERNAL_WEAK
-    }
-}
-
 private func AddAttrIf(target: MangleDecl, condition: Bool, attr: MangleAttribute): Unit {
     if (condition) {
         target.attrs.add(attr)
@@ -301,7 +291,7 @@ public class MangleAstAdapter {
         target.mangledName = source.mangledName
         target.exportId = source.exportId
         target.moduleName = source.moduleName
-        target.linkage = ConvertLinkage(source.linkage)
+        target.linkage = source.linkage
         if (let Some(file) <- source.curFile) {
             target.curFile = ConvertFile(file)
         }
@@ -574,6 +564,9 @@ public class MangleAstAdapter {
             if (let Some(typeNode) <- varDecl.typeNode) {
                 target.typeAnnotation = ConvertTypeAnnotation(typeNode)
             }
+        }
+        if (let Some(funcParam) <- (source as FuncParam)) {
+            target.isMemberParam = funcParam.isMemberParam
         }
         if (let Some(typeAlias) <- (source as TypeAliasDecl)) {
             if (let Some(typeNode) <- typeAlias.typeNode) {

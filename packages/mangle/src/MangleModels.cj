@@ -1,6 +1,7 @@
 package cangjie_compiler::mangle
 
 import std.collection.*
+import cangjie_compiler::ast.Linkage
 
 private var nextMangleDeclIdentity: Int64 = 1
 
@@ -67,34 +68,6 @@ public enum MangleAttribute {
     | COMMON
     | SPECIFIC
     | FOR_TEST
-}
-
-public enum MangleLinkage {
-    | WEAK_ODR
-    | EXTERNAL
-    | INTERNAL
-    | LINKONCE_ODR
-    | EXTERNAL_WEAK
-}
-
-private func MangleLinkageIndex(linkage: MangleLinkage): Int64 {
-    return match (linkage) {
-        case MangleLinkage.WEAK_ODR => 0
-        case MangleLinkage.EXTERNAL => 1
-        case MangleLinkage.INTERNAL => 2
-        case MangleLinkage.LINKONCE_ODR => 3
-        case MangleLinkage.EXTERNAL_WEAK => 4
-    }
-}
-
-extend MangleLinkage <: Equatable<MangleLinkage> {
-    public operator func ==(right: MangleLinkage): Bool {
-        return MangleLinkageIndex(this) == MangleLinkageIndex(right)
-    }
-
-    public operator func !=(right: MangleLinkage): Bool {
-        return !(this == right)
-    }
 }
 
 public enum MangleTypeKind {
@@ -429,7 +402,7 @@ public class MangleDecl {
     public var curFile: Option<MangleFile> = None
     public var outerDecl: Option<MangleDecl> = None
     public var genericDecl: Option<MangleDecl> = None
-    public var linkage: MangleLinkage = MangleLinkage.EXTERNAL
+    public var linkage: Linkage = Linkage.EXTERNAL
     public var generic: Option<MangleGeneric> = None
     public var semaTy: Option<MangleType> = None
     public var typeAnnotation: Option<MangleTypeAnnotation> = None
@@ -437,6 +410,7 @@ public class MangleDecl {
     public var ownerFunc: Option<MangleDecl> = None
     public var irrefutablePattern: Option<ManglePattern> = None
     public var extendedType: Option<MangleTypeAnnotation> = None
+    public var isMemberParam: Bool = false
     public let inheritedTypes: ArrayList<MangleTypeAnnotation> = ArrayList<MangleTypeAnnotation>()
     public let members: ArrayList<MangleDecl> = ArrayList<MangleDecl>()
     public let getters: ArrayList<MangleDecl> = ArrayList<MangleDecl>()

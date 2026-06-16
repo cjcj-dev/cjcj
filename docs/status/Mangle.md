@@ -67,6 +67,15 @@ Implemented:
   C++-shaped `@`-prefixed `CustomTypeDef` identifiers are normalized before use.
 - Aligned CHIR overflow-operator helper-name generation with the C++ assertion behavior by rejecting
   unsupported operator spellings instead of emitting a malformed `_CO` name.
+- De-isolated Mangle linkage handling to the real `Linkage` enum re-exported by `cangjie_compiler::ast`,
+  removing the module-local `MangleLinkage` clone and adapter conversion.
+- De-isolated CHIR overflow helper APIs to the real `OverflowStrategy` enum re-exported by
+  `cangjie_compiler::ast`, removing the module-local overflow-strategy clone.
+- Aligned parser-AST `FuncParam` declaration suffix mangling with C++ `IsMemberParam`: ordinary function
+  parameters no longer receive the member-var type discriminator, while primary-constructor member
+  parameters still do.
+- Aligned extend indexing buckets with C++ semantic-type grouping by using the converted extended
+  semantic type string when available instead of the parsed annotation spelling.
 
 Known fidelity caveats:
 

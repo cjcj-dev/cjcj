@@ -111,6 +111,16 @@ private func declPackageFromType(ty: MangleType): String {
     return ""
 }
 
+private func extendedTypeKey(extendDecl: MangleDecl): String {
+    if (let Some(typeNode) <- extendDecl.extendedType) {
+        if (let Some(ty) <- typeNode.ty) {
+            return ty.String()
+        }
+        return typeNode.name
+    }
+    return ""
+}
+
 private func isMangledToExportForTestBefore(decl: MangleDecl, prefix: ArrayList<MangleDecl>): Bool {
     if (decl.TestAttr(MangleAttribute.FOR_TEST)) {
         return true
@@ -398,7 +408,7 @@ public class ManglerContext {
     }
 
     public func GetIndexOfExtend(file: MangleFile, target: MangleDecl): Option<Int64> {
-        let typeName = if (let Some(typeNode) <- target.extendedType) { typeNode.name } else { "" }
+        let typeName = extendedTypeKey(target)
         for (bucket in file2ExtendDecl) {
             if (sameFile(bucket.file, file) && bucket.extendedTypeName == typeName) {
                 return findDeclIndex(bucket.extends, target)
@@ -448,7 +458,7 @@ public class ManglerContext {
     }
 
     public func SaveExtend2CurFile(file: MangleFile, node: MangleDecl): Unit {
-        let typeName = if (let Some(typeNode) <- node.extendedType) { typeNode.name } else { "" }
+        let typeName = extendedTypeKey(node)
         addUniqueDecl(extendBucket(file, typeName).extends, node)
     }
 
@@ -904,7 +914,7 @@ public open class BaseMangler {
             mangledName += MangleFullPackageName(declPackageFromType(ty))
         }
         if (let Some(decl) <- ty.decl) {
-            if (decl.TestAttr(MangleAttribute.PRIVATE) && decl.linkage == MangleLinkage.INTERNAL) {
+            if (decl.TestAttr(MangleAttribute.PRIVATE) && decl.linkage == Linkage.INTERNAL) {
                 if (let Some(file) <- decl.curFile) {
                     mangledName += MANGLE_FILE_ID_PREFIX + fileIdFor(file)
                 }

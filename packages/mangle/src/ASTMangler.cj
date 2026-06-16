@@ -353,7 +353,8 @@ public class ASTMangler {
 
     private func MangleOthers(decl: MangleDecl): String {
         var mangled = ""
-        if (decl.astKind == MangleAstKind.VAR_DECL || decl.astKind == MangleAstKind.FUNC_PARAM) {
+        if (decl.astKind == MangleAstKind.VAR_DECL ||
+            (decl.astKind == MangleAstKind.FUNC_PARAM && decl.isMemberParam)) {
             mangled += MANGLE_DIDOLLAR_PREFIX
             if (let Some(typeAnnotation) <- decl.typeAnnotation) {
                 mangled += MangleAstType(typeAnnotation)
