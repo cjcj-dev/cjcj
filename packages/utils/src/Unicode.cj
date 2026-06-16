@@ -1,25 +1,11 @@
 package cangjie_compiler::utils
 
+import cangjie_compiler::lex.{IsContextualKeyword, TOKENS, TokenKind, TokenKindIndex}
 import std.collection.*
 
 public type UTF8 = UInt8
 public type UTF16 = UInt16
 public type UTF32 = UInt32
-
-private let CANGJIE_RESERVED_KEYWORDS: Array<String> = [
-    "is", "as", "Int8", "Int16", "Int32", "Int64", "IntNative", "UInt8", "UInt16", "UInt32", "UInt64",
-    "UIntNative", "Float16", "Float32", "Float64", "Rune", "Bool", "Nothing", "Unit", "struct", "enum",
-    "VArray", "This", "package", "import", "class", "interface", "func", "macro", "quote", "let", "var",
-    "const", "type", "init", "this", "super", "if", "else", "case", "try", "catch", "finally", "for", "do",
-    "while", "throw", "return", "continue", "break", "in", "_", "match", "where", "extend", "with", "prop",
-    "static", "public", "private", "internal", "protected", "override", "redef", "abstract", "sealed", "open",
-    "foreign", "inout", "mut", "unsafe", "operator", "spawn", "synchronized", "main", "true", "false"
-]
-
-private let CANGJIE_CONTEXTUAL_KEYWORDS: Array<String> = [
-    "public", "private", "internal", "protected", "override", "redef", "abstract", "sealed", "open",
-    "common", "specific", "features"
-]
 
 public enum ConversionResult {
     | OK
@@ -361,19 +347,16 @@ public func IsCangjieIdentifier(str: String, useContextualKeyWords: Bool): Bool 
 }
 
 private func IsKeyword(str: String): Bool {
-    for (keyword in CANGJIE_RESERVED_KEYWORDS) {
-        if (keyword == str) {
+    let end = TokenKindIndex(TokenKind.IDENTIFIER)
+    var idx: Int64 = 0
+    while (idx < end) {
+        if (TOKENS[idx] == str) {
             return true
         }
+        idx++
     }
-    return false
-}
-
-private func IsContextualKeyword(str: String): Bool {
-    for (keyword in CANGJIE_CONTEXTUAL_KEYWORDS) {
-        if (keyword == str) {
-            return true
-        }
+    if (str == "true" || str == "false") {
+        return true
     }
     return false
 }

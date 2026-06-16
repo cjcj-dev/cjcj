@@ -62,6 +62,7 @@ public class UserTimer <: UserBase {
         let order = ArrayList<String>()
         for (info in infoList) {
             if (!info.isDone) {
+                printUnfinishedTimer(info.title)
                 continue
             }
             let currentEntries = result.get(info.title)
@@ -108,4 +109,14 @@ public class UserTimer <: UserBase {
     protected override func GetSuffix(): String {
         return ".time.prof"
     }
+}
+
+@When[os == "Windows"]
+private func printUnfinishedTimer(title: String): Unit {
+    println("[ ${title} ] only has beginning time, does not have ending time")
+}
+
+@When[os != "Windows"]
+private func printUnfinishedTimer(title: String): Unit {
+    println("[ \u{001b}[31;1m${title}\u{001b}[0m ] only has beginning time, does not have ending time")
 }
