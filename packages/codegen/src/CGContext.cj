@@ -185,6 +185,10 @@ public class CGContext {
         return globalsOfCompileUnit.contains(globalsName)
     }
 
+    public func IsGlobalsOfCompileUnitCString(globalsName: CString): Bool {
+        return CGContext.ContainsCString(globalsOfCompileUnit, globalsName)
+    }
+
     public func RegisterStaticGIName(staticGIName: String): Unit {
         staticGINames.add(staticGIName)
     }
@@ -215,6 +219,20 @@ public class CGContext {
 
     public func GetLLVMUsedVars(): HashSet<String> {
         return llvmUsedGVs
+    }
+
+    public static func ContainsCString(values: HashSet<String>, name: CString): Bool {
+        if (name.isNull()) {
+            return false
+        }
+        for (value in values) {
+            try (valueCString = unsafe { LibC.mallocCString(value) }.asResource()) {
+                if (unsafe { strcmp(name, valueCString.value) } == 0) {
+                    return true
+                }
+            }
+        }
+        return false
     }
 
     public func Add2CGTypePool(cgType: CGType): Unit {

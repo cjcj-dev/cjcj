@@ -112,6 +112,10 @@ public class IRBuilder2 {
         unsafe { LLVMPositionBuilderAtEnd(builder.raw, block) }
     }
 
+    public func ClearInsertionPoint(): Unit {
+        unsafe { LLVMClearInsertionPosition(builder.raw) }
+    }
+
     public func CreateBinary(kind: ExprKind, left: LLVMValueRef, right: LLVMValueRef, name!: String = ""): LLVMValueRef {
         return CreateBinaryTyped(kind, left, right, None, None, name: name)
     }

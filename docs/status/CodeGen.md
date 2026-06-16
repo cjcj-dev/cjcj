@@ -21,7 +21,8 @@ Implemented:
 - Added LLVM as an external dependency boundary through Cangjie C FFI declarations for LLVM C handles, contexts,
   modules, builders, primitive/composite/function types, constants, integer and floating arithmetic instructions,
   comparisons, casts, GEPs, calls, branches, returns, attributes, debug locations, global initializers,
-  verification, and bitcode writing. LLVM itself is not reimplemented.
+  verification, bitcode writing, basic-block/instruction iteration, use-list checks, declaration/global/function
+  iteration, deletion APIs, and insertion-point clearing. LLVM itself is not reimplemented.
 - Added CodeGen-owned LLVM handle wrappers and module/context ownership helpers.
 - Added a package-level lowering entry point shaped like the C++ `EmitPackageIR`, including CHIR package splitting,
   per-submodule context/module construction, global and function declaration materialization, function emission
@@ -42,6 +43,13 @@ Implemented:
   and CHIR function parameters are mapped to LLVM arguments before the body is lowered.
 - Added global initializer emission for initializer values representable by the current CHIR value materializer.
 - Added LLVM enum-attribute attachment helpers for function/call attributes.
+- Added a real LLVM CFG cleanup path for generated functions: declarations are skipped, reachable blocks are marked
+  from the entry block through LLVM terminator successors, unreachable basic blocks are erased, unused load
+  instructions are removed from all blocks, and unused entry-block allocas are removed.
+- Added module cleanup/pruning hooks mirroring the C++ phase shape: metadata link-name bookkeeping is cleared,
+  unused declarations are removed, stale builder insertion points are cleared, and at `-O2` or above non-coverage
+  builds prune unused local/declaration globals and functions while preserving compile-unit globals, metadata-linked
+  names, and explicit LLVM-used symbols.
 
 Known gaps:
 
@@ -58,4 +66,6 @@ Known gaps:
   packages so the CodeGen package can compile against the current CHIR model.
 - Remaining CodeGen self-host TODO markers are intentionally compiling stop-points, not completed behavior.
 
-Remaining CodeGen selfhost markers: 5.
+Remaining CodeGen selfhost markers: 2.
+
+Current CodeGen package size: 39 `.cj` files, approximately 3401 total lines.
