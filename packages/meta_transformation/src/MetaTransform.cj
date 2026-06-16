@@ -1,5 +1,10 @@
 package cangjie_compiler::meta_transformation
 
+import cangjie_compiler::basic.CANGJIE_VERSION
+import cangjie_compiler::chir.CHIRBuilder
+import cangjie_compiler::chir.Function as CHIRFunction
+import cangjie_compiler::chir.Package as CHIRPackage
+
 public enum MetaTransformKind {
     | UNKNOWN
     | FOR_CHIR_FUNC
@@ -25,12 +30,6 @@ extend MetaTransformKind <: Equatable<MetaTransformKind> {
         return !(this == right)
     }
 }
-
-public interface MetaTransformCHIRBuilder {}
-
-public interface MetaTransformCHIRFunction {}
-
-public interface MetaTransformCHIRPackage {}
 
 public open class MetaTransformConcept {
     protected var kind: MetaTransformKind = MetaTransformKind.UNKNOWN
@@ -73,13 +72,13 @@ public abstract class MetaTransform<DeclT> <: MetaTransformConcept & MetaTransfo
     }
 }
 
-public abstract class CHIRFunctionMetaTransform <: MetaTransform<MetaTransformCHIRFunction> {
+public abstract class CHIRFunctionMetaTransform <: MetaTransform<CHIRFunction> {
     public init() {
         super(MetaTransformKind.FOR_CHIR_FUNC)
     }
 }
 
-public abstract class CHIRPackageMetaTransform <: MetaTransform<MetaTransformCHIRPackage> {
+public abstract class CHIRPackageMetaTransform <: MetaTransform<CHIRPackage> {
     public init() {
         super(MetaTransformKind.FOR_CHIR_PACKAGE)
     }
@@ -97,11 +96,15 @@ public struct MetaTransformPluginInfo {
 
 public func MakeCHIRPluginInfo(
     cjcVersion: String,
-    factory: (MetaTransformCHIRBuilder) -> MetaTransformConcept
+    factory: (CHIRBuilder) -> MetaTransformConcept
 ): MetaTransformPluginInfo {
     return MetaTransformPluginInfo(cjcVersion, { builder: MetaTransformPluginBuilder =>
-        builder.RegisterCHIRPluginCallback({ manager: CHIRPluginManager, chirBuilder: MetaTransformCHIRBuilder =>
+        builder.RegisterCHIRPluginCallback({ manager: CHIRPluginManager, chirBuilder: CHIRBuilder =>
             manager.AddMetaTransform(factory(chirBuilder))
         })
     })
+}
+
+public func MakeCHIRPluginInfo(factory: (CHIRBuilder) -> MetaTransformConcept): MetaTransformPluginInfo {
+    return MakeCHIRPluginInfo(CANGJIE_VERSION, factory)
 }

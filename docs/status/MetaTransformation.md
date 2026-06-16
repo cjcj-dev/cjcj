@@ -1,6 +1,6 @@
 # MetaTransformation Port Status
 
-Date: 2026-06-16
+Date: 2026-06-17
 
 Build: `cjpm build` passes.
 
@@ -15,20 +15,20 @@ Implemented:
   so concrete transforms must implement `Run`.
 - Implemented CHIR plugin callback registration and manager construction in source order, matching the
   C++ builder behavior.
-- Added CHIR function/package/builder boundary interfaces and convenience abstract bases for CHIR
-  function and package transforms. These provide a dependency boundary until the real CHIR package is
-  ported and can implement the interfaces.
+- De-isolated the CHIR boundary: `MetaTransformation` now imports the real sibling `chir` package and
+  uses `CHIRBuilder`, `Function`, and `Package` directly instead of local compatibility interfaces.
 - Added `MakeCHIRPluginInfo`, the Cangjie equivalent of the C++ `CHIR_PLUGIN` macro expansion: it wraps
   a transform factory in a plugin-info registration callback that appends the produced transform to the
-  CHIR plugin manager.
+  CHIR plugin manager. The default overload reports the real `basic.CANGJIE_VERSION`, matching the C++
+  macro's version source, while the explicit-version overload remains useful for tests.
 
 Known fidelity caveats:
 
-- The C++ header names concrete `CHIR::CHIRBuilder`, `CHIR::Function`, and `CHIR::Package` types. The
-  current self-hosting workspace still has only a CHIR scaffold, so this package exposes narrow CHIR
-  boundary interfaces instead of importing concrete CHIR classes.
+- The C++ `MetaTransform<DeclT>` default constructor uses `if constexpr` to infer function/package
+  transform kind from the template argument. Cangjie does not currently have an equivalent specialization
+  mechanism in this port, so direct subclasses of `MetaTransform<DeclT>` must pass a kind explicitly or
+  use the provided `CHIRFunctionMetaTransform`/`CHIRPackageMetaTransform` bases.
 - Cangjie has no direct preprocessor macro equivalent for `CHIR_PLUGIN`; `MakeCHIRPluginInfo` preserves
   the registration behavior but not the C++ macro spelling.
 
 Remaining MetaTransformation selfhost markers: 0.
-
