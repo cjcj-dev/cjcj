@@ -128,6 +128,9 @@ Implemented:
 - Added `OptFuncRetType` plus `Function.ReplaceReturnValue` and `ReturnTypeShouldBeVoid`, converting eligible
   constructor/finalizer/global-init functions from `Unit` return to `Void`, clearing old return slots, removing
   removable unit return storage, and updating generic `APPLY`/`APPLY_WITH_EXCEPTION` call sites.
+- Added `UnreachableBranchCheck`, detecting constant-boolean `BRANCH` terminators, collecting structured
+  unreachable-block warnings, recursively walking unreachable branch subgraphs, preserving processed-block guards,
+  and evaluating local/global constant conditions through the CHIR constant evaluator.
 - Added C++-named BCHIR interpreter component files for `OpCodes`, `BCHIR`, `BCHIRPrinter`,
   `BCHIRInterpreter`, `InterpreterValue`, `InterpreterValueUtils`, `InterpreterArena`,
   `InterpreterEnv`, and `InterpreterStack`.
@@ -202,6 +205,9 @@ Known gaps:
 - `OptFuncRetType` implements the C++ unit-to-void function rewrite over the current generic expression model, but
   exact `Apply`/`ApplyWithException` reconstruction, instantiated type arguments, `this` type, and super-call flags
   remain limited until specialized call-expression classes are ported.
+- `UnreachableBranchCheck` implements the C++ constant-branch warning core over current CHIR terminators, but exact
+  `DiagnosticEngine`, `ConstAnalysisWrapper` result visitation, source-expression-specific messages, cross-package
+  suppression, `SkipCheck`, and full `MULTIBRANCH` semantics remain blocked by missing dependencies/metadata.
 - The BCHIR translator/linker/interpreter now has the first real end-to-end package/function/global/control
   path, but exact float/rune byte encoding, the complete expression taxonomy, intrinsics/syscalls, exception
   machinery, object method dispatch, raw-array operations, type casts, full serialization, and FFI execution
