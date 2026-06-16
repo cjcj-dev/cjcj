@@ -79,3 +79,24 @@ Verification:
 
 - `cjpm build` passes after this pass.
 - Remaining `TODO(selfhost:Sema)` markers in the tc-core-owned files listed by the task: 0.
+
+## 2026-06-17 Continue Pass 2
+
+Files deepened:
+
+- `packages/sema/src/TypeManager.cj`
+
+Implemented behavior:
+
+- Matched the C++ `TypeManager::GetAllExtendsByTy` lookup order more closely. Nominal class/interface/struct/enum types now return declaration-owned extend declarations from `declToExtendMap` before falling back to builtin extend lookup.
+- Added ideal numeric builtin extend expansion for `IdealInt` and `IdealFloat`, collecting extends registered on the concrete primitive integer and floating-point types instead of looking up only the ideal type key.
+
+Remaining gaps:
+
+- `GetTyForExtendMap` is still a thin identity helper; the C++ compatibility normalization for several builtin/instantiated cases remains to be ported.
+- Full extend generic mapping and import-manager dependent lookup remain outside this pass.
+
+Verification:
+
+- `cjpm build` passes after this pass.
+- Remaining `TODO(selfhost:Sema)` markers in the tc-core-owned files listed by the task: 0.

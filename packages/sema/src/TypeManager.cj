@@ -935,7 +935,39 @@ public class TypeManager {
         return ty
     }
 
+    private func addBuiltinExtendsForTy(out: ArrayList<ExtendDecl>, ty: Ty): Unit {
+        for (entry in builtinTyToExtendMap) {
+            if (SameTy(entry.ty, ty)) {
+                addUniqueExtends(out, entry.extends)
+            }
+        }
+    }
+
+    private func collectIdealBuiltinExtends(ty: Ty): ArrayList<ExtendDecl> {
+        let out = ArrayList<ExtendDecl>()
+        if (ty.kind == TypeKind.TYPE_IDEAL_INT) {
+            addBuiltinExtendsForTy(out, GetPrimitiveTy(TypeKind.TYPE_INT64))
+            addBuiltinExtendsForTy(out, GetPrimitiveTy(TypeKind.TYPE_UINT64))
+            addBuiltinExtendsForTy(out, GetPrimitiveTy(TypeKind.TYPE_INT32))
+            addBuiltinExtendsForTy(out, GetPrimitiveTy(TypeKind.TYPE_UINT32))
+            addBuiltinExtendsForTy(out, GetPrimitiveTy(TypeKind.TYPE_INT16))
+            addBuiltinExtendsForTy(out, GetPrimitiveTy(TypeKind.TYPE_UINT16))
+            addBuiltinExtendsForTy(out, GetPrimitiveTy(TypeKind.TYPE_INT8))
+            addBuiltinExtendsForTy(out, GetPrimitiveTy(TypeKind.TYPE_UINT8))
+            addBuiltinExtendsForTy(out, GetPrimitiveTy(TypeKind.TYPE_INT_NATIVE))
+            addBuiltinExtendsForTy(out, GetPrimitiveTy(TypeKind.TYPE_UINT_NATIVE))
+        } else if (ty.kind == TypeKind.TYPE_IDEAL_FLOAT) {
+            addBuiltinExtendsForTy(out, GetPrimitiveTy(TypeKind.TYPE_FLOAT64))
+            addBuiltinExtendsForTy(out, GetPrimitiveTy(TypeKind.TYPE_FLOAT32))
+            addBuiltinExtendsForTy(out, GetPrimitiveTy(TypeKind.TYPE_FLOAT16))
+        }
+        return out
+    }
+
     public func GetBuiltinTyExtends(ty: Ty): ArrayList<ExtendDecl> {
+        if (ty.IsIdeal()) {
+            return collectIdealBuiltinExtends(ty)
+        }
         for (entry in builtinTyToExtendMap) {
             if (SameTy(entry.ty, ty)) {
                 return entry.extends
@@ -974,7 +1006,10 @@ public class TypeManager {
     }
 
     public func GetAllExtendsByTy(ty: Ty): ArrayList<ExtendDecl> {
-        return GetBuiltinTyExtends(ty)
+        if (let Some(decl) <- declOfInheritableTy(ty)) {
+            return GetDeclExtends(decl)
+        }
+        return GetBuiltinTyExtends(GetTyForExtendMap(ty))
     }
 
     public func GetAllExtendedDecls(): ArrayList<InheritableDecl> {
