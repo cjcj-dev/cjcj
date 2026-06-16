@@ -99,12 +99,17 @@ public open class DefaultCompilerInstance {
     }
 
     public open func PerformCjoSaving(): Bool {
-        return ProfiledBool("Main Stage", "Save cjo", { => SaveCjos(core.GetSourcePackages()) })
+        return ProfiledBool("Main Stage", "Save cjo", { =>
+            if (invocation.globalOptions.IsCompilingCJMP()) {
+                return true
+            }
+            return SaveCjos(core.GetSourcePackages())
+        })
     }
 
     public open func PerformResultsSaving(): Bool {
         return ProfiledBool("Main Stage", "Save results", { =>
-            if (invocation.frontendOptions.chirDeserialize) {
+            if (invocation.globalOptions.IsCompilingCJMP() || invocation.frontendOptions.chirDeserialize) {
                 return SaveCjos(core.GetSourcePackages())
             }
             return core.PerformResultsSaving()

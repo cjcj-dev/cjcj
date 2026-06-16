@@ -29,6 +29,13 @@ public class CjdCompilerInstance <: DefaultCompilerInstance {
     }
 
     public override func PerformResultsSaving(): Bool {
-        return true
+        if (!invocation.globalOptions.IsCompilingCJMP() && !invocation.globalOptions.IsEmitCHIREnable()) {
+            return true
+        }
+        var ret = true
+        for (pkg in core.GetSourcePackages()) {
+            ret = SaveCjo(pkg) && ret
+        }
+        return ret
     }
 }
