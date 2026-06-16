@@ -60,6 +60,8 @@ Deepening pass updates:
   replacement arguments and unused extra arguments now fail instead of silently leaving placeholders or dropping inputs.
 - Matched `DiagnosticEngineImpl::CheckRange`'s C++ fatal/internal-error split: zero ranges now raise in normal mode,
   and only degrade to `DIAG_RANGE_ERROR` when `EnableCheckRangeErrorCodeRatherICE()` is active.
+- Tightened the Basic-local `WarningOptionMgr` compatibility shim to match the C++ warning manager's vector
+  replacement API and invalid-index assertions while retaining the selfhost bulk boolean helper used by `option`.
 
 Implemented:
 
@@ -82,6 +84,8 @@ Implemented:
 - Matched the C++ refactor diagnostic formatter's placeholder-count checks for `Diagnostic.InsertArguments`.
 - Matched C++ range-check handling for zero-position diagnostics, preserving the special error-code mode used by
   libast callers while restoring fatal behavior in the normal diagnostic path.
+- Extended the Basic-local warning suppression manager with the C++ whole-vector `UpdateFlags` shape and C++-style
+  range checks for single-flag updates/lookups.
 - Kept LLVM/native backend out of scope as required; Basic does not bind LLVM directly.
 
 Known fidelity caveats:
