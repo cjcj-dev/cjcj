@@ -69,7 +69,7 @@ public struct Token <: Hashable & Equatable<Token> {
     }
 
     public operator func ==(right: Token): Bool {
-        return Begin() == right.Begin() && End() == right.End() && kind == right.kind && value == right.value
+        return Begin() == right.Begin()
     }
 
     public operator func !=(right: Token): Bool {
@@ -81,7 +81,7 @@ public struct Token <: Hashable & Equatable<Token> {
     }
 
     public func hashCode(): Int64 {
-        return begin.hashCode() ^ (end.hashCode() << 1) ^ (TokenKindIndex(kind) << 2) ^ value.hashCode()
+        return Int64(begin.Hash32())
     }
 }
 

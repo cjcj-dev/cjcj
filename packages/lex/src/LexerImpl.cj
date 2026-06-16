@@ -21,10 +21,25 @@ public let UTF8_3_MAX: UInt32 = 0xffffu32
 public let UTF8_4_MAX: UInt32 = 0x10ffffu32
 public let UTF8_5_MAX: UInt32 = 0x3ffffffu32
 public let UTF8_6_MAX: UInt32 = 0x7fffffffu32
+public let LEFT_SHIFT_30: UInt8 = 30u8
+public let LEFT_SHIFT_24: UInt8 = 24u8
+public let LEFT_SHIFT_18: UInt8 = 18u8
+public let LEFT_SHIFT_12: UInt8 = 12u8
+public let LEFT_SHIFT_6: UInt8 = 6u8
 private let BYTE_4_BASE: UInt32 = 65536u32
 private let BYTE_3_BASE: UInt32 = 2048u32
 private let BYTE_2_BASE: UInt32 = 128u32
+public let BYTE_1_STEP: UInt8 = 1u8
+public let BYTE_2_STEP: UInt8 = 2u8
+public let BYTE_3_STEP: UInt8 = 3u8
+public let BYTE_4_STEP: UInt8 = 4u8
+public let BYTE_5_STEP: UInt8 = 5u8
+public let BYTE_6_STEP: UInt8 = 6u8
 public let ERROR_UTF8: Int64 = -2
+public let BYTE_3_INDEX: UInt8 = 2u8
+public let BYTE_4_INDEX: UInt8 = 3u8
+public let BYTE_5_INDEX: UInt8 = 4u8
+public let BYTE_6_INDEX: UInt8 = 5u8
 public let UNICODE_MAX_NUM: Int64 = 8
 public let BIN_BASE: Int64 = 2
 public let OCT_BASE: Int64 = 8
@@ -472,9 +487,6 @@ public class LexerImpl {
             lookAheadCache.add(token)
             if (!skipNewline || token.kind != TokenKind.NL) {
                 index++
-            }
-            if (token.kind == TokenKind.END) {
-                break
             }
         }
     }
@@ -973,6 +985,23 @@ public class LexerImpl {
         }
     }
 
+    private func DiagUnexpectedDecimalPoint(reasonPoint: Int64): Unit {
+        let baseChar = lowerByte(getByte(reasonPoint))
+        let prefix = PrefixName(baseChar)
+        let builder = diag.DiagnoseRefactor(
+            DiagKindRefactor.lex_unexpected_decimal_point, GetPos(pCurrent), arguments: [prefix]
+        )
+        let reasonRange = MakeRange(GetPos(reasonPoint - 1), GetPos(reasonPoint) + 1)
+        builder.AddHint(reasonRange, arguments: [prefix])
+        builder.AddNote("only decimal or hexadecimal number can support fractional part")
+        let decimalHelp = DiagHelp("if you expect a decimal fraction, could remove the prefix")
+        decimalHelp.AddSubstitution(reasonRange, " ")
+        builder.AddHelp(decimalHelp)
+        let hexadecimalHelp = DiagHelp("if you expect a hexadecimal fraction, could use hexadecimal prefix")
+        hexadecimalHelp.AddSubstitution(reasonRange, "0x")
+        builder.AddHelp(hexadecimalHelp)
+    }
+
     private func DiagExpectedDigit(base: UInt8): Unit {
         let name = PrefixName(base)
         let builder = diag.DiagnoseRefactor(
@@ -1002,6 +1031,58 @@ public class LexerImpl {
             builder.AddHint(MakeRange(GetPos(reasonPoint), GetPos(pCurrent)), arguments: ["the default base is decimal"])
         }
         builder.AddNote(name + " may only contain digit within " + DigitRangeText(rangePrefix))
+    }
+
+    private func DiagUnexpectedExponentPart(exp: UInt8, prefix: UInt8, reasonPoint: Int64): Unit {
+        let prefixName = PrefixName(prefix)
+        if (prefix != b'd' && prefix != b'x') {
+            let reasonRange = MakeRange(GetPos(reasonPoint - 1), GetPos(reasonPoint) + 1)
+            let builder = diag.DiagnoseRefactor(
+                DiagKindRefactor.lex_unexpected_exponent_part, GetPos(pCurrent),
+                arguments: [byteString(UInt8(currentChar)), prefixName]
+            )
+            builder.AddHint(reasonRange, arguments: ["of this " + prefixName + " prefix"])
+            builder.AddNote("only decimal or hexadecimal number can support exponent part")
+            return
+        }
+        if (exp == b'e' && prefix == b'x') {
+            let reasonRange = MakeRange(GetPos(reasonPoint - 1), GetPos(reasonPoint) + 1)
+            let builder = diag.DiagnoseRefactor(
+                DiagKindRefactor.lex_unexpected_exponent_part, GetPos(pCurrent),
+                arguments: [byteString(UInt8(currentChar)), prefixName]
+            )
+            builder.AddHint(reasonRange, arguments: ["of this " + prefixName + " prefix"])
+            let help = DiagHelp("could try to modify it to hexadecimal exponent type")
+            help.AddSubstitution(GetPos(pCurrent), "p")
+            builder.AddHelp(help)
+            return
+        }
+        if (exp == b'p' && prefix == b'd') {
+            let reasonRange = MakeRange(GetPos(reasonPoint), GetPos(pCurrent))
+            let builder = diag.DiagnoseRefactor(
+                DiagKindRefactor.lex_unexpected_exponent_part, GetPos(pCurrent),
+                arguments: [byteString(UInt8(currentChar)), prefixName]
+            )
+            builder.AddHint(reasonRange, arguments: ["the default base is decimal"])
+            let help = DiagHelp("could try to modify it to " + prefixName + " exponent type")
+            help.AddSubstitution(GetPos(pCurrent), "e")
+            builder.AddHelp(help)
+        }
+    }
+
+    private func DiagExpectedExponentPart(reasonPoint: Int64): Unit {
+        let start = reasonPoint - 1
+        let reasonRange = MakeRange(GetPos(start), GetPos(pCurrent))
+        let builder = diag.DiagnoseRefactor(
+            DiagKindRefactor.lex_expected_exponent_part, GetPos(pCurrent), arguments: [input[start..pCurrent]]
+        )
+        builder.AddHint(reasonRange)
+    }
+
+    private func DiagIllegalUnicodeAtCurrent(): Unit {
+        let args = ConvertUnicode(currentChar)
+        let builder = diag.DiagnoseRefactor(DiagKindRefactor.lex_illegal_unicode, GetPos(pCurrent), arguments: [args])
+        builder.AddMainHintArguments([args])
     }
 
     private func DiagSmallExpectedDigit(hasDigit: Bool, base: UInt8): Unit {
@@ -1048,7 +1129,10 @@ public class LexerImpl {
         ReadUTF8Char()
         if (currentChar != Int64(b'{')) {
             if (success) {
-                lexDiagnose(diag, DiagKindRefactor.lex_expected_left_bracket, GetPos(pCurrent), ConvertCurrentChar())
+                let builder = diag.DiagnoseRefactor(
+                    DiagKindRefactor.lex_expected_left_bracket, GetPos(pCurrent), arguments: [ConvertCurrentChar()]
+                )
+                builder.AddHint(MakeRange(GetPos(pCurrent - 2), GetPos(pCurrent)))
                 success = false
             }
             return
@@ -1149,7 +1233,12 @@ public class LexerImpl {
         var isFloat = isFloatRef
         var hasTypeSuffix = false
         while (true) {
-            if (isDigit(currentChar)) {
+            if (currentChar > Int64(ASCII_BASE)) {
+                if (success) {
+                    DiagExpectedDigit(lowerByte(getByte(reasonPoint)))
+                    success = false
+                }
+            } else if (isDigit(currentChar)) {
                 hasDigit = true
                 if (base <= DEC_BASE && currentChar >= Int64(b'0') + base && success) {
                     DiagUnexpectedDigit(base, reasonPoint)
@@ -1337,7 +1426,7 @@ public class LexerImpl {
                 return Token(tokenKind, input[pStart..pNext], pos, GetPos(pNext))
             }
             if ((prefix == b'o' || prefix == b'b') && success) {
-                lexDiagnose(diag, DiagKindRefactor.lex_unexpected_decimal_point, GetPos(pCurrent), PrefixName(prefix))
+                DiagUnexpectedDecimalPoint(reasonPoint)
                 success = false
             }
             if (IsIllegalStartDecimalPart(pStart, pCurrent)) {
@@ -1359,17 +1448,14 @@ public class LexerImpl {
         if (exp == b'e' || exp == b'p') {
             if (success && ((prefix != b'd' && prefix != b'x') || (exp == b'e' && prefix == b'x') ||
                 (exp == b'p' && prefix == b'd'))) {
-                lexDiagnose2(
-                    diag, DiagKindRefactor.lex_unexpected_exponent_part, GetPos(pCurrent),
-                    byteString(UInt8(currentChar)), PrefixName(prefix)
-                )
+                DiagUnexpectedExponentPart(exp, prefix, reasonPoint)
                 success = false
             }
             isFloat = true
             tokenKind = TokenKind.FLOAT_LITERAL
             ScanNumberExponentPart(reasonPoint)
         } else if (success && prefix == b'x' && tokenKind == TokenKind.FLOAT_LITERAL && isFloat) {
-            lexDiagnose(diag, DiagKindRefactor.lex_expected_exponent_part, MakeRange(GetPos(reasonPoint), GetPos(pCurrent)))
+            DiagExpectedExponentPart(reasonPoint)
             success = false
         }
         ProcessNumberFloatSuffix(prefix, isFloat, hasDot)
@@ -1381,6 +1467,7 @@ public class LexerImpl {
     }
 
     private func ScanNumberExponentPart(reasonPoint: Int64): Unit {
+        let expReasonPoint = if (reasonPoint == pCurrent) { reasonPoint } else { pCurrent }
         ReadUTF8Char()
         tokenKind = TokenKind.FLOAT_LITERAL
         if (currentChar == Int64(b'-')) {
@@ -1391,7 +1478,7 @@ public class LexerImpl {
             success = false
         }
         var expHasDigit = false
-        let digits = ProcessDigits(DEC_BASE, expHasDigit, reasonPoint, false)
+        let digits = ProcessDigits(DEC_BASE, expHasDigit, expReasonPoint, false)
         expHasDigit = digits[0]
         if (!expHasDigit && success) {
             DiagExpectedDigit(b'd')
@@ -1442,7 +1529,6 @@ public class LexerImpl {
                 arguments: [args]
             )
             builder.AddMainHintArguments([args])
-            success = false
         }
         Back()
     }
@@ -1484,6 +1570,10 @@ public class LexerImpl {
             }
             ReadUTF8Char()
             if (!isXIDContinue(currentChar)) {
+                if (success) {
+                    DiagIllegalUnicodeAtCurrent()
+                    success = false
+                }
                 res.kind = TokenKind.ILLEGAL
                 break
             }
@@ -1720,23 +1810,57 @@ public class LexerImpl {
         return balanced && currentChar == Int64(b'}')
     }
 
+    private func ScanInterpolationStringLiteralHoleComment(allowNewline: Bool): Bool {
+        if (getNextChar(0) == b'/' && !allowNewline) {
+            while (true) {
+                ReadUTF8Char()
+                if (IsCurrentCharLineTerminator() || currentChar == -1) {
+                    break
+                }
+            }
+            if (success) {
+                DiagUnterminatedInterpolation()
+                success = false
+            }
+            Back()
+            return false
+        }
+        if (getNextChar(0) == b'*' || getNextChar(0) == b'/') {
+            return ScanComment(pCurrent, allowNewLine: allowNewline)[1]
+        }
+        return true
+    }
+
+    private func ProcessInterpolationStringLiteralLineBreak(allowNewline: Bool): Bool {
+        if (IsCurrentCharLineTerminator() && allowNewline) {
+            return true
+        }
+        if (success) {
+            let interpolation = if (interpolations.isEmpty()) { pCurrent } else { interpolations[interpolations.size - 1] }
+            let builder = diag.DiagnoseRefactor(
+                DiagKindRefactor.lex_unterminated_interpolation,
+                MakeRange(GetPos(interpolation), GetPos(pCurrent) + 1)
+            )
+            if (!allowNewline && currentChar != -1 && !stringStarts.isEmpty()) {
+                builder.AddHint(GetPos(stringStarts[stringStarts.size - 1][0]))
+            }
+            success = false
+        }
+        return false
+    }
+
+    private func ScanInterpolationStringLiteralHoleBalancedTextString(): Bool {
+        if (getNextChar(0) == UInt8(currentChar) && getNextChar(1) == UInt8(currentChar)) {
+            return ScanMultiLineString(pCurrent, needStringParts: false)[1]
+        }
+        return ScanStringOrJString(pCurrent, needStringParts: false)[1]
+    }
+
     private func ScanInterpolationStringLiteralHoleBalancedText(endingChar: UInt8, allowNewline: Bool): Bool {
-        var level: Int64 = 0
         while (true) {
             ReadUTF8Char()
-            if (currentChar == -1 || (IsCurrentCharLineTerminator() && !allowNewline)) {
-                if (success) {
-                    DiagUnterminatedInterpolation()
-                    success = false
-                }
-                return false
-            }
             if (isQuote(currentChar)) {
-                if (getNextChar(0) == UInt8(currentChar) && getNextChar(1) == UInt8(currentChar)) {
-                    if (!ScanMultiLineString(pCurrent, needStringParts: false)[1]) {
-                        return false
-                    }
-                } else if (!ScanStringOrJString(pCurrent, needStringParts: false)[1]) {
+                if (!ScanInterpolationStringLiteralHoleBalancedTextString()) {
                     return false
                 }
             } else if (currentChar == Int64(b'#') && getNextChar(0) == b'#') {
@@ -1744,31 +1868,18 @@ public class LexerImpl {
                     return false
                 }
             } else if (currentChar == Int64(b'{')) {
-                level++
-            } else if (currentChar == Int64(endingChar)) {
-                if (level == 0) {
-                    return true
+                if (!ScanInterpolationStringLiteralHoleBalancedText(b'}', allowNewline)) {
+                    return false
                 }
-                level--
+            } else if (currentChar == Int64(endingChar)) {
+                return true
+            } else if (currentChar == -1 || IsCurrentCharLineTerminator()) {
+                if (!ProcessInterpolationStringLiteralLineBreak(allowNewline)) {
+                    return false
+                }
             } else if (currentChar == Int64(b'/')) {
-                if (getNextChar(0) == b'*' || getNextChar(0) == b'/') {
-                    if (getNextChar(0) == b'/' && !allowNewline) {
-                        while (true) {
-                            ReadUTF8Char()
-                            if (IsCurrentCharLineTerminator() || currentChar == -1) {
-                                break
-                            }
-                        }
-                        if (success) {
-                            DiagUnterminatedInterpolation()
-                            success = false
-                        }
-                        Back()
-                        return false
-                    }
-                    if (!ScanComment(pCurrent, allowNewLine: allowNewline)[1]) {
-                        return false
-                    }
+                if (!ScanInterpolationStringLiteralHoleComment(allowNewline)) {
+                    return false
                 }
             }
         }
@@ -1809,7 +1920,8 @@ public class LexerImpl {
         if (terminatorLength > 0) {
             beginOffset += terminatorLength
         } else if (success) {
-            lexDiagnose(diag, DiagKindRefactor.lex_multiline_string_start_from_newline, GetPos(pNext))
+            let builder = diag.DiagnoseRefactor(DiagKindRefactor.lex_multiline_string_start_from_newline, GetPos(pNext))
+            builder.AddHint(MakeRange(GetPos(pStart), GetPos(pNext)))
             success = false
         }
         var begin = pStart + beginOffset
@@ -1863,7 +1975,11 @@ public class LexerImpl {
                 return (Token(TokenKind.HASH, "#", GetPos(pStart), GetPos(pNext)), false)
             }
             if (success) {
-                lexDiagnose(diag, DiagKindRefactor.lex_expected_quote_in_raw_string, GetPos(pCurrent), ConvertCurrentChar())
+                let builder = diag.DiagnoseRefactor(
+                    DiagKindRefactor.lex_expected_quote_in_raw_string, GetPos(pCurrent),
+                    arguments: [ConvertCurrentChar()]
+                )
+                builder.AddHint(MakeRange(GetPos(pStart), GetPos(pCurrent)))
                 success = false
             }
             return (Token(TokenKind.MULTILINE_RAW_STRING, "", pos, GetPos(pCurrent)), false)
@@ -1903,7 +2019,7 @@ public class LexerImpl {
         )
         tok.delimiterNum = delimiterNum
         tok.isSingleQuote = quoteChar == Int64(b'\'')
-        return (tok, true)
+        return (tok, false)
     }
 
     private func ScanMultiLineComment(pStart: Int64, allowNewLine: Bool): (Token, Bool) {
@@ -2089,18 +2205,30 @@ public class LexerImpl {
         } else if (first == b'+') {
             if (getNextChar(0) == b'+' || getNextChar(0) == b'=') {
                 ReadUTF8Char()
+            } else if (getNextChar(0) == b'&' && getNextChar(1) == b'=') {
+                ReadUTF8Char()
+                ReadUTF8Char()
             }
         } else if (first == b'-') {
             if (getNextChar(0) == b'-' || getNextChar(0) == b'=' || getNextChar(0) == b'>') {
+                ReadUTF8Char()
+            } else if (getNextChar(0) == b'&' && getNextChar(1) == b'=') {
+                ReadUTF8Char()
                 ReadUTF8Char()
             }
         } else if (first == b'*') {
             if (getNextChar(0) == b'*') {
                 ReadUTF8Char()
-                if (getNextChar(0) == b'=') {
+                if (getNextChar(0) == b'&' && getNextChar(1) == b'=') {
+                    ReadUTF8Char()
+                    ReadUTF8Char()
+                } else if (getNextChar(0) == b'=') {
                     ReadUTF8Char()
                 }
             } else if (getNextChar(0) == b'=') {
+                ReadUTF8Char()
+            } else if (getNextChar(0) == b'&' && getNextChar(1) == b'=') {
+                ReadUTF8Char()
                 ReadUTF8Char()
             }
         } else if (first == b'&') {
@@ -2182,7 +2310,11 @@ public class LexerImpl {
         let kind = LookupKeyword(literal)
         if (kind == TokenKind.IDENTIFIER) {
             if (success) {
-                lexDiagnose(diag, DiagKindRefactor.lex_unknown_start_of_token, GetPos(pStart), literal)
+                let arg = ConvertCurrentChar()
+                let builder = diag.DiagnoseRefactor(
+                    DiagKindRefactor.lex_unknown_start_of_token, GetPos(pStart), arguments: [arg]
+                )
+                builder.AddMainHintArguments([arg])
                 success = false
             }
             return Token(TokenKind.ILLEGAL, literal, pos, GetPos(pNext))
@@ -2190,13 +2322,29 @@ public class LexerImpl {
         return Token(kind, literal, pos, GetPos(pNext))
     }
 
+    private func DiagUnexpectedDollarIdentifier(t: Token): Unit {
+        let foundWildcard = t.kind == TokenKind.WILDCARD
+        let foundMsg = (if (foundWildcard) { "symbol '" } else { "keyword '" }) + t.Value() + "'"
+        let builder = diag.DiagnoseRefactor(
+            DiagKindRefactor.lex_expected_identifier_after_dollar, MakeRange(t.Begin(), t.End()),
+            arguments: [foundMsg]
+        )
+        if (foundWildcard) {
+            builder.diagnostic.mainHint.str = "expected a Unicode XID_Continue after underscore"
+            return
+        }
+        let help = DiagHelp("you could escape keyword as identifier using '`'")
+        help.AddSubstitution(MakeRange(t.Begin(), t.End()), "`" + t.Value() + "`")
+        builder.AddHelp(help)
+    }
+
     private func ScanSymbol(pStart: Int64): Token {
         if (currentChar == Int64(b'$')) {
             ReadUTF8Char()
             if (isCJXIDStart(currentChar)) {
                 let tok = ScanIdentifierOrKeyword(Token(TokenKind.IDENTIFIER), pStart + 1)
-                if (tok.kind != TokenKind.IDENTIFIER && success) {
-                    lexDiagnose(diag, DiagKindRefactor.lex_expected_identifier_after_dollar, tok.Begin(), tok.Value())
+                if (tok.kind != TokenKind.IDENTIFIER) {
+                    DiagUnexpectedDollarIdentifier(tok)
                     success = false
                 }
                 return Token(TokenKind.DOLLAR_IDENTIFIER, "$" + tok.Value(), pos, GetPos(pNext))
@@ -2219,28 +2367,36 @@ public class LexerImpl {
         if (splitAmbiguousToken) {
             var currentToken = tokens[curToken]
             if (currentToken.kind == TokenKind.COALESCING) {
+                let curPos = currentToken.Begin()
+                let endPos = currentToken.End()
                 currentToken.kind = TokenKind.QUEST
-                currentToken.SetValuePos("?", currentToken.Begin() + 1, currentToken.End() + 1)
+                currentToken.SetValuePos("?", curPos + 1, endPos + 1)
                 tokens[curToken] = currentToken
-                return Token(TokenKind.QUEST, "?", currentToken.Begin(), currentToken.End())
+                return Token(TokenKind.QUEST, "?", curPos, endPos)
             }
             if (currentToken.kind == TokenKind.RSHIFT_ASSIGN) {
+                let curPos = currentToken.Begin()
+                let endPos = currentToken.End()
                 currentToken.kind = TokenKind.GE
-                currentToken.SetValuePos(">=", currentToken.Begin() + 1, currentToken.End() + 1)
+                currentToken.SetValuePos(">=", curPos + 1, endPos + 1)
                 tokens[curToken] = currentToken
-                return Token(TokenKind.GT, ">", currentToken.Begin(), currentToken.End())
+                return Token(TokenKind.GT, ">", curPos, endPos)
             }
             if (currentToken.kind == TokenKind.RSHIFT) {
+                let curPos = currentToken.Begin()
+                let endPos = currentToken.End()
                 currentToken.kind = TokenKind.GT
-                currentToken.SetValuePos(">", currentToken.Begin() + 1, currentToken.End() + 1)
+                currentToken.SetValuePos(">", curPos + 1, endPos + 1)
                 tokens[curToken] = currentToken
-                return Token(TokenKind.GT, ">", currentToken.Begin(), currentToken.End())
+                return Token(TokenKind.GT, ">", curPos, endPos)
             }
             if (currentToken.kind == TokenKind.GE) {
+                let curPos = currentToken.Begin()
+                let endPos = currentToken.End()
                 currentToken.kind = TokenKind.ASSIGN
-                currentToken.SetValuePos("=", currentToken.Begin() + 1, currentToken.End() + 1)
+                currentToken.SetValuePos("=", curPos + 1, endPos + 1)
                 tokens[curToken] = currentToken
-                return Token(TokenKind.GT, ">", currentToken.Begin(), currentToken.End())
+                return Token(TokenKind.GT, ">", curPos, endPos)
             }
         }
         let token = tokens[curToken]
@@ -2306,9 +2462,6 @@ public class LexerImpl {
         }
         if (currentChar == Int64(b'\\') && isMacroEscape(getNextChar(0))) {
             return Token(TokenKind.ILLEGAL, "\\", pos, pos + 1)
-        }
-        if (currentChar > Int64(ASCII_BASE)) {
-            return ScanIllegalSymbol(pStart)
         }
         return ScanSymbol(pStart)
     }

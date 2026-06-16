@@ -2,6 +2,8 @@
 
 Date: 2026-06-15
 
+Update: 2026-06-16
+
 Build: `cjpm build` passes.
 
 Implemented:
@@ -19,6 +21,16 @@ Implemented:
 - Expanded number diagnostic parity for expected/unexpected digit and illegal integer/float suffix cases with C++ main-hint substitutions, contextual hints, and notes.
 - Expanded string, rune, byte-rune, unicode-escape, and interpolation diagnostic parity with C++ hints, notes, range choices, unicode scalar validation, escape-note text, rune-overflow help, and byte-literal ASCII checks.
 - Added Lex-local Unicode 15.0 NFC canonical decomposition/recomposition data and logic, and normalized identifier token values at the same point as C++ `LexerImpl::ScanIdentifierContinue`.
+- Aligned `Token` identity with the C++ `Token::operator==`/ordering contract by keying equality and hashing on begin position only, which makes token-stream and string-part maps match the reference's position-based token identity.
+- Restored C++ public lexer/token constants that the earlier port omitted (`NUM_TOKENS == 200`, UTF-8 byte step/index constants, and shift constants) and padded the precedence table to the reference capacity.
+- Matched the C++ `ReserveToken` EOF-padding behavior used by `Seeing` instead of stopping after the first `END` token.
+- Fixed macro-provided ambiguous-token splitting to preserve the C++ left-token source range while mutating the cached right token for `??`, `>>=`, `>>`, and `>=`.
+- Matched C++ invalid composite symbol consumption for `+&=`, `-&=`, `*&=`, and `**&=` so those forms are diagnosed as one illegal token.
+- Expanded numeric, unicode-escape, unknown-token, and dollar-identifier diagnostics with the C++ helper behavior: secondary hints, notes, and fix-it substitutions.
+- Added C++-style diagnostics for non-ASCII numeric junk, illegal Unicode identifier continuations, and missing multiline/raw-string delimiter hints.
+- Reworked string-interpolation hole scanning to mirror the C++ helper split for nested braces, strings, comments, linebreak diagnostics, and raw-string failure propagation.
+- Routed non-identifier Unicode token starts through the C++ symbol fallback path so they produce `lex_unknown_start_of_token` behavior instead of Lex-local unrecognized-symbol handling.
+- Aligned numeric exponent/suffix diagnostics with C++ by anchoring exponent digit scanning at the exponent marker and preserving the reference `success` state after unknown-suffix reporting.
 
 Known validation caveats:
 
