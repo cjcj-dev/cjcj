@@ -1,5 +1,6 @@
 package cangjie_compiler::option
 
+import cangjie_compiler::utils.FileUtil
 import std.collection.*
 
 public class ActionResult {
@@ -431,7 +432,7 @@ private func isBuiltinCondition(key: String): Bool {
 }
 
 private func normalizeCfgKey(rawKey: String): MaybeString {
-    if (rawKey.isEmpty() || !IsIdentifier(rawKey)) { return MaybeString() }
+    if (rawKey.isEmpty() || !FileUtil.IsIdentifier(rawKey)) { return MaybeString() }
     var key = rawKey
     if (key.size > 2 && key[0] == b'`' && key[key.size - 1] == b'`') {
         key = key[1..key.size - 1]
@@ -471,12 +472,23 @@ private func findTomlComment(line: String): Int64 {
     return -1
 }
 
+private func seeingTomlComment(line: String): Bool {
+    if (line.isEmpty() || !line.contains("#")) { return false }
+    var idx: Int64 = 0
+    while (idx < line.size) {
+        if (line[idx] == b' ' || line[idx] == b'\t') {
+            idx++
+            continue
+        }
+        return line[idx] == b'#'
+    }
+    return true
+}
+
 private func parseConditionKeyValueLine(line: String, map: HashMap<String, String>): Bool {
     let commentPos = findTomlComment(line)
     let processedLine = if (commentPos >= 0) { line[0..commentPos] } else { line }
-    let trimmedLine = processedLine.trimAscii()
-    if (trimmedLine.isEmpty()) { return true }
-    let kv = SplitString(trimmedLine, "=")
+    let kv = SplitString(processedLine, "=")
     if (kv.size != 2) { return false }
     let maybeKey = normalizeCfgKey(kv[0].trimAscii())
     let quotedValue = kv[1].trimAscii()
@@ -492,6 +504,7 @@ public func SetupConditionalCompilationCfgFromFile(filePath: String, map: HashMa
     let content = ReadTextFile(filePath)
     if (!content.hasValue) { return false }
     for (line in SplitLines(content.value)) {
+        if (line.isEmpty() || seeingTomlComment(line)) { continue }
         if (!parseConditionKeyValueLine(line, map)) { return false }
     }
     return true
@@ -588,9 +601,11 @@ private func parseJobs(opts: GlobalOptions, value: String, aggressive: Bool): Ac
 public func ParseTargetTriple(opts: GlobalOptions, triple: String): Bool {
     let parts = SplitString(triple, "-")
     if (parts.size != 3 && parts.size != 4) { return false }
+    opts.target.vendor = Vendor.UNKNOWN
     if (parts[0] == "x86_64") { opts.target.arch = ArchType.X86_64 }
     else if (parts[0] == "aarch64" || parts[0] == "arm64") { opts.target.arch = ArchType.AARCH64 }
     else if (parts[0] == "arm") { opts.target.arch = ArchType.ARM32 }
+    else if (parts[0] == "unknown") { opts.target.arch = ArchType.UNKNOWN }
     else { return false }
     if (parts.size >= 3 && parts[1] == "apple") {
         opts.target.vendor = Vendor.APPLE
@@ -619,6 +634,7 @@ public func ParseTargetTriple(opts: GlobalOptions, triple: String): Bool {
     else if (osStr == "windows" || osStr == "w64") { opts.target.os = OSType.WINDOWS }
     else if (osStr == "darwin") { opts.target.os = OSType.DARWIN }
     else if (osStr == "ios") { opts.target.os = OSType.IOS }
+    else if (osStr == "unknown") { opts.target.os = OSType.UNKNOWN }
     else { return false }
     let envStr = parts[parts.size - 1]
     if (envStr == "gnu" || envStr == "mingw32") { opts.target.env = EnvironmentType.GNU }
@@ -626,11 +642,26 @@ public func ParseTargetTriple(opts: GlobalOptions, triple: String): Bool {
     else if (envStr == "android") { opts.target.env = EnvironmentType.ANDROID; opts.target.apiLevel = MIN_ANDROID_API }
     else if (StartsWith(envStr, "android")) {
         opts.target.env = EnvironmentType.ANDROID
-        opts.target.apiLevel = envStr[7..]
-        let parsed = TryParseUInt64(opts.target.apiLevel)
-        if (!parsed.hasValue || parsed.value < 23u64 || parsed.value > 10000u64) { return false }
+        opts.target.apiLevel = ""
+        var idx: Int64 = 0
+        while (idx < envStr.size) {
+            if (envStr[idx] >= b'0' && envStr[idx] <= b'9') {
+                opts.target.apiLevel = envStr[idx..]
+                break
+            }
+            idx++
+        }
+        if (!opts.target.apiLevel.isEmpty()) {
+            let parsed = TryParseUInt64(opts.target.apiLevel)
+            if (parsed.hasValue && (parsed.value < 23u64 || parsed.value > 10000u64)) {
+                Errorln("The Android API level is not supported in the target. Please use a valid API level which is larger than 23.")
+            } else if (!parsed.hasValue) {
+                Errorln("The Android API level is illegal. Please use a valid API level which is greater than or equal to 26.")
+            }
+        }
     }
     else if (envStr == "simulator") { opts.target.env = EnvironmentType.SIMULATOR }
+    else if (envStr == "") { opts.target.env = EnvironmentType.NOT_AVAILABLE }
     else { return false }
     return true
 }

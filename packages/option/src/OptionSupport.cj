@@ -185,27 +185,6 @@ public func CreateDirectory(path: String): Bool {
     return IsDir(path)
 }
 
-public func IsIdentifier(value: String): Bool {
-    if (value.isEmpty()) { return false }
-    if (value.size > 2 && value[0] == b'`' && value[value.size - 1] == b'`') {
-        return IsIdentifier(value[1..value.size - 1])
-    }
-    let first = value[0]
-    if (!((first >= b'a' && first <= b'z') || (first >= b'A' && first <= b'Z') || first == b'_')) {
-        return false
-    }
-    var idx: Int64 = 1
-    while (idx < value.size) {
-        let ch = value[idx]
-        if (!((ch >= b'a' && ch <= b'z') || (ch >= b'A' && ch <= b'Z') ||
-            (ch >= b'0' && ch <= b'9') || ch == b'_')) {
-            return false
-        }
-        idx++
-    }
-    return true
-}
-
 public func BoolToSerializedString(value: Bool): String {
     return if (value) { "t" } else { "f" }
 }

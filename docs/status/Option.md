@@ -60,6 +60,16 @@ already owns the real position model. `--trimpath` intentionally uses
 `FileUtil.Normalize` while other C++ call sites use `NormalizePath`, preserving
 the distinction in the reference implementation.
 
+This pass removes the remaining local ASCII-only conditional-compilation
+identifier checker and uses `utils.FileUtil.IsIdentifier`, so raw identifiers,
+keywords, and Unicode identifier rules come from the same shared implementation
+as the C++ `Utils::IsIdentifier` path. `cfg.toml` loading now mirrors the C++
+line discipline: empty lines and full-line comments are skipped by the file
+reader, while malformed/blank content passed to the key-value parser is rejected.
+Target-triple parsing now accepts the reference `unknown` arch/OS spellings,
+empty environment fields, `arm64` as `aarch64`, `mingw32` as GNU, and Android
+API suffixes with the same non-fatal diagnostic behavior as the C++ parser.
+
 Remaining fidelity gaps are not hidden behind self-host markers: this package
 still uses local diagnostics instead of Basic diagnostic IDs. Importing Basic
 directly is currently blocked by the existing `basic -> option` dependency for
