@@ -39,9 +39,6 @@ private func walkNode(node: Node, visit: (Node) -> Bool): Unit {
         for (anno in decl.annotations) {
             walkNode(anno, visit)
         }
-        for (modifier in decl.modifiers) {
-            walkNode(modifier, visit)
-        }
         for (member in decl.GetMemberDecls()) {
             walkNode(member, visit)
         }

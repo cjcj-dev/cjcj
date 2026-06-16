@@ -401,8 +401,8 @@ public class MacroCall {
         }
         if (!success && report) {
             if (let Some(instance) <- ci) {
-                instance.diag.Diagnose(begin, "The macro call '" + GetFullName() +
-                    "' should with the surround code contains a call '" + parentStr + "'.")
+                instance.diag.Diagnose(begin, DiagKind.macro_assert_parent_context_failed,
+                    args: [DiagArgument(GetFullName()), DiagArgument(parentStr)]).Emit()
             } else {
                 assertParents.add(parentStr)
             }
