@@ -22,7 +22,8 @@ the C++ Frontend component split:
 The package now contains real argument parsing for frontend actions, source
 management, tokenization for `DumpTokens`, package/file/declaration bookkeeping,
 module/package parsing from source files or cache buffers, package consistency
-checks, `--cfg` and `--int-overflow` option handling, cfg-file loading,
+checks, `--cfg` and `--int-overflow` option handling, cfg-file loading with
+quoted TOML string/comment semantics, common-part option ingestion,
 conditional directive pruning, APILevel macro-declaration materialization,
 dependency-scan JSON data, symbol-table JSON output, APILevel custom annotation
 merging from `.cj.d` packages, annotation/macro-call parsing for declarations,

@@ -28,6 +28,8 @@ public enum OptionID {
     | VERBOSE
     | ENABLE_MACRO_IN_LSP
     | NO_SUB_PACKAGE
+    | COMMON_PART_CJO
+    | COMMON_PART_CHIR
     | CONDITIONAL_COMPILATION_CONFIG
     | INT_OVERFLOW_MODE
     | INPUT
@@ -60,9 +62,11 @@ private func OptionIDIndex(id: OptionID): Int64 {
         case OptionID.VERBOSE => 22
         case OptionID.ENABLE_MACRO_IN_LSP => 23
         case OptionID.NO_SUB_PACKAGE => 24
-        case OptionID.CONDITIONAL_COMPILATION_CONFIG => 25
-        case OptionID.INT_OVERFLOW_MODE => 26
-        case OptionID.INPUT => 27
+        case OptionID.COMMON_PART_CJO => 25
+        case OptionID.COMMON_PART_CHIR => 26
+        case OptionID.CONDITIONAL_COMPILATION_CONFIG => 27
+        case OptionID.INT_OVERFLOW_MODE => 28
+        case OptionID.INPUT => 29
     }
 }
 
@@ -175,6 +179,8 @@ public class OptionTable {
         add("--verbose", OptionID.VERBOSE, OptionKind.FLAG, alias: "-V")
         add("--enable-macro-in-lsp", OptionID.ENABLE_MACRO_IN_LSP, OptionKind.FLAG)
         add("--no-sub-pkg", OptionID.NO_SUB_PACKAGE, OptionKind.FLAG)
+        add("--common-part-cjo", OptionID.COMMON_PART_CJO, OptionKind.SEPARATED)
+        add("--common-part-chir", OptionID.COMMON_PART_CHIR, OptionKind.SEPARATED)
         add("--cfg", OptionID.CONDITIONAL_COMPILATION_CONFIG, OptionKind.SEPARATED)
         add("--int-overflow", OptionID.INT_OVERFLOW_MODE, OptionKind.SEPARATED)
     }
@@ -397,6 +403,10 @@ public open class GlobalOptions {
             enableMacroInLSP = true
         } else if (id == OptionID.NO_SUB_PACKAGE) {
             noSubPkg = true
+        } else if (id == OptionID.COMMON_PART_CJO) {
+            commonPartCjos.add(arg.value)
+        } else if (id == OptionID.COMMON_PART_CHIR) {
+            commonPartChirs.add(arg.value)
         } else if (id == OptionID.CONDITIONAL_COMPILATION_CONFIG) {
             if (!ParsePassedWhenOption(this, arg.value)) {
                 return false
@@ -704,17 +714,43 @@ private func ParsePassedWhenOption(opts: GlobalOptions, value: String): Bool {
 }
 
 private func ParseCfgEntry(entry: String, target: HashMap<String, String>): Bool {
-    if (entry.isEmpty()) {
+    let content = TrimAscii(entry)
+    if (content.isEmpty() || CountOccurrences(content, "=") != 1) {
         return false
     }
-    if (let Some(eqPos) <- entry.indexOf("=")) {
-        let rawKey = TrimAscii(entry[0..eqPos])
-        let rawValue = TrimAscii(entry[eqPos + 1..])
+    if (let Some(eqPos) <- content.indexOf("=")) {
+        let rawKey = TrimAscii(content[0..eqPos])
+        let rawValue = TrimAscii(content[eqPos + 1..])
         let key = NormalizeCfgKey(rawKey)
         if (key.isEmpty() || rawValue.isEmpty() || IsBuiltinCfgKey(key) || target.contains(key)) {
             return false
         }
         target.add(key, rawValue)
+        return true
+    }
+    return false
+}
+
+private func ParseCfgTomlEntry(line: String, target: HashMap<String, String>): Bool {
+    let content = StripTomlLineComment(line)
+    if (content.isEmpty() || CountOccurrences(content, "=") != 1) {
+        return false
+    }
+    if (let Some(eqPos) <- content.indexOf("=")) {
+        let rawKey = TrimAscii(content[0..eqPos])
+        let rawValue = TrimAscii(content[eqPos + 1..])
+        let key = NormalizeCfgKey(rawKey)
+        if (key.isEmpty() || IsBuiltinCfgKey(key) || target.contains(key)) {
+            return false
+        }
+        if (rawValue.size <= 2 || rawValue[0] != b'"' || rawValue[rawValue.size - 1] != b'"') {
+            return false
+        }
+        let valueBody = rawValue[1..rawValue.size - 1]
+        if (valueBody.isEmpty()) {
+            return false
+        }
+        target.add(key, RemoveEscapedTomlQuotes(valueBody))
         return true
     }
     return false
@@ -727,22 +763,68 @@ private func LoadCfgToml(path: String, target: HashMap<String, String>): Bool {
     }
     let lines = SplitLines(readResult[1])
     for (line in lines) {
-        let content = StripLineComment(TrimAscii(line))
+        let content = StripTomlLineComment(line)
         if (content.isEmpty()) {
             continue
         }
-        if (!ParseCfgEntry(content, target)) {
+        if (!ParseCfgTomlEntry(content, target)) {
             return false
         }
     }
     return true
 }
 
-private func StripLineComment(value: String): String {
-    if (let Some(pos) <- value.indexOf("#")) {
-        return TrimAscii(value[0..pos])
+private func StripTomlLineComment(inputLine: String): String {
+    var insideString = false
+    var idx: Int64 = 0
+    while (idx < inputLine.size) {
+        let byte = inputLine[idx]
+        if (!insideString && byte == b'#') {
+            return TrimAscii(inputLine[0..idx])
+        }
+        if (byte == b'"' && !IsEscapedBefore(inputLine, idx)) {
+            insideString = !insideString
+        }
+        idx++
     }
-    return value
+    return TrimAscii(inputLine)
+}
+
+private func IsEscapedBefore(value: String, index: Int64): Bool {
+    if (index <= 0) {
+        return false
+    }
+    var cursor = index - 1
+    var count: Int64 = 0
+    var scanning = true
+    while (scanning) {
+        if (cursor >= 0 && value[cursor] == b'\\') {
+            count++
+            if (cursor == 0) {
+                scanning = false
+            } else {
+                cursor--
+            }
+        } else {
+            scanning = false
+        }
+    }
+    return count % 2 == 1
+}
+
+private func RemoveEscapedTomlQuotes(value: String): String {
+    let builder = StringBuilder()
+    var idx: Int64 = 0
+    while (idx < value.size) {
+        if (value[idx] == b'\\' && idx + 1 < value.size && value[idx + 1] == b'"') {
+            builder.append("\"")
+            idx += 2
+        } else {
+            builder.append(String.fromUtf8([value[idx]]))
+            idx++
+        }
+    }
+    return builder.toString()
 }
 
 private func IsCfgPathMode(value: String): Bool {
