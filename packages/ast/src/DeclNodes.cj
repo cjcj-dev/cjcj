@@ -109,6 +109,15 @@ public open class Decl <: Node {
                 }
             }
         }
+        if (let Some(varDecl) <- (this as VarDecl)) {
+            if (let Some(outer) <- varDecl.outerDecl) {
+                if (outer.astKind == ASTKind.ENUM_DECL) {
+                    if (let Some(enumOuter) <- (outer as EnumDecl)) {
+                        return enumOuter.generic
+                    }
+                }
+            }
+        }
         return generic
     }
 
@@ -387,6 +396,45 @@ private func isOpenMemberDecl(decl: Decl, hasBodyOrAccessor: Bool): Bool {
     return !decl.TestAttr(Attribute.IMPORTED) && !hasBodyOrAccessor
 }
 
+private func modifierPrefix(modifiers: ArrayList<Modifier>): String {
+    var out = ""
+    for (modifier in modifiers) {
+        let text = modifier.ToString()
+        if (!text.isEmpty()) {
+            out += text + " "
+        }
+    }
+    return out
+}
+
+private func joinFuncParamLists(values: ArrayList<FuncParamList>): String {
+    let parts = ArrayList<String>()
+    for (value in values) {
+        parts.add(value.ToString())
+    }
+    return JoinStrings(parts, " ")
+}
+
+private func joinGenericConstraints(values: ArrayList<GenericConstraint>): String {
+    let parts = ArrayList<String>()
+    for (value in values) {
+        parts.add(value.ToString())
+    }
+    return JoinStrings(parts, ", ")
+}
+
+private func declBlockString(values: ArrayList<Decl>): String {
+    var out = "{"
+    for (decl in values) {
+        out += "\n" + decl.ToString()
+    }
+    if (!values.isEmpty()) {
+        out += "\n"
+    }
+    out += "}"
+    return out
+}
+
 public enum BuiltInType {
     | ARRAY
     | POINTER
@@ -510,7 +558,14 @@ public open class FuncParam <: VarDecl {
     }
 
     public open override func ToString(): String {
-        return identifier.GetRawText()
+        var out = identifier.Val()
+        if (isNamedParam) {
+            out += "!"
+        }
+        if (let Some(value) <- typeNode) {
+            out += ": " + value.ToString()
+        }
+        return out
     }
 }
 
@@ -549,7 +604,14 @@ public class TypeAliasDecl <: Decl {
     }
 
     public override func ToString(): String {
-        return "type " + identifier.GetRawText()
+        var out = modifierPrefix(modifiers) + "type " + identifier.Val()
+        if (let Some(value) <- generic) {
+            out += value.ToString()
+        }
+        if (let Some(value) <- typeNode) {
+            out += " = " + value.ToString()
+        }
+        return out
     }
 }
 
@@ -602,6 +664,31 @@ public class FuncBody <: Node {
         super.Clear()
         capturedVars.clear()
     }
+
+    public override func ToString(): String {
+        var out = ""
+        if (let Some(value) <- generic) {
+            out += value.ToString()
+        }
+        out += joinFuncParamLists(paramLists)
+        if (let Some(value) <- retType) {
+            if (!colonPos.IsZero()) {
+                out += ": "
+            } else if (!doubleArrowPos.IsZero()) {
+                out += " => "
+            }
+            out += value.ToString()
+        }
+        if (let Some(value) <- generic) {
+            if (!value.genericConstraints.isEmpty()) {
+                out += " where " + joinGenericConstraints(value.genericConstraints)
+            }
+        }
+        if (let Some(value) <- body) {
+            out += " " + value.ToString()
+        }
+        return out
+    }
 }
 
 public enum ConstructorCall {
@@ -646,7 +733,11 @@ public class FuncDecl <: Decl {
     }
 
     public override func ToString(): String {
-        return "func " + identifier.GetRawText()
+        var out = modifierPrefix(modifiers) + "func " + identifier.Val()
+        if (let Some(body) <- funcBody) {
+            out += body.ToString()
+        }
+        return out
     }
 }
 
@@ -710,6 +801,10 @@ public class StructBody <: Node {
     public init() {
         super(ASTKind.STRUCT_BODY)
     }
+
+    public override func ToString(): String {
+        return declBlockString(decls)
+    }
 }
 
 public class StructDecl <: InheritableDecl {
@@ -745,6 +840,10 @@ public class InterfaceBody <: Node {
 
     public init() {
         super(ASTKind.INTERFACE_BODY)
+    }
+
+    public override func ToString(): String {
+        return declBlockString(decls)
     }
 }
 
@@ -782,6 +881,10 @@ public class ClassBody <: Node {
 
     public init() {
         super(ASTKind.CLASS_BODY)
+    }
+
+    public override func ToString(): String {
+        return declBlockString(decls)
     }
 }
 
@@ -886,5 +989,9 @@ public class InvalidDecl <: Decl {
         begin = pos
         end = pos
         doNotExport = true
+    }
+
+    public override func ToString(): String {
+        return "<invalid>"
     }
 }

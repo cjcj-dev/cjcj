@@ -10,6 +10,11 @@ The AST package is a multi-file Cangjie package mirroring the C++ AST component 
 
 ## Implemented In This Pass
 
+- Ported C++ `Decl.GetGeneric` enum-member behavior so enum-contained `VarDecl` nodes inherit the enum generic when they have no function-body generic source.
+- Deepened `Node.cpp` `ToString` parity across type nodes: invalid type spelling, qualified-type arguments, multi-question option types, varray size omission when absent, optional function-type returns, and empty generic/generic-constraint formatting.
+- Added C++ pattern stringification for invalid, const, wildcard, tuple, type, enum, var-or-enum, except-type, and command-type patterns.
+- Added C++ declaration stringification for function parameters, function bodies, functions, type aliases, class/struct/interface bodies, and invalid declarations, including explicit modifier prefixes and generic constraints.
+- Added C++ expression stringification for blocks, if/for/while/do-while/match/try forms, let-pattern destructors, token/quote/interpolation expressions, throw/perform/resume/return/jump, casts, parens, lambdas/trailing closures, optional chains, arrays, pointers, type conversions, invalid expressions, spawn, and synchronized expressions.
 - Added C++ `Ty::GetDeclOfTy` / `Ty::GetDeclPtrOfTy` parity helpers in `Types.cj`, including nominal class/interface/struct/enum/type-alias declaration lookup and `specificImplementation` remapping for generic-declaration lookups.
 - Ported `ExtendDecl.IsExportedDecl` from `Node.cpp`: extended type-argument export checks, same-package direct-extension rules, `std.core` direct-extension export behavior, interface-extension inherited-interface export checks, and generic upper-bound export constraints.
 - Ported extend-member export behavior for `FuncDecl` and `PropDecl`, so direct extensions of foreign-package types hide members while interface implementations export only interface-implementation members.

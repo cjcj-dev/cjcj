@@ -41,7 +41,7 @@ public class InvalidType <: Type {
     }
 
     public override func ToString(): String {
-        return "<invalid type>"
+        return "<invalid>"
     }
 }
 
@@ -153,8 +153,16 @@ public class QualifiedType <: Type {
     }
 
     public override func ToString(): String {
-        let base = if (let Some(value) <- baseType) { value.ToString() + "." } else { "" }
-        return base + field.GetRawText()
+        var out = if (let Some(value) <- baseType) { value.ToString() + "." } else { "" }
+        out += field.GetRawText()
+        if (!typeArguments.isEmpty()) {
+            let parts = ArrayList<String>()
+            for (arg in typeArguments) {
+                parts.add(arg.ToString())
+            }
+            out += "<" + JoinStrings(parts, ", ") + ">"
+        }
+        return out
     }
 }
 
@@ -169,8 +177,15 @@ public class OptionType <: Type {
     }
 
     public override func ToString(): String {
+        var out = ""
+        let count = if (questNum > 0u64) { questNum } else { UInt64(questVector.size) }
+        var idx: UInt64 = 0u64
+        while (idx < count) {
+            out += "?"
+            idx++
+        }
         let component = if (let Some(value) <- componentType) { value.ToString() } else { "" }
-        return "?" + component
+        return out + component
     }
 }
 
@@ -199,9 +214,12 @@ public class VArrayType <: Type {
     }
 
     public override func ToString(): String {
-        let elem = if (let Some(value) <- typeArgument) { value.ToString() } else { "" }
-        let size = if (let Some(value) <- constantType) { value.ToString() } else { "" }
-        return "VArray<${elem}, ${size}>"
+        var out = "VArray<" + (if (let Some(value) <- typeArgument) { value.ToString() } else { "" })
+        if (let Some(value) <- constantType) {
+            out += ", " + value.ToString()
+        }
+        out += ">"
+        return out
     }
 }
 
@@ -222,8 +240,11 @@ public class FuncType <: Type {
         for (param in paramTypes) {
             parts.add(param.ToString())
         }
-        let ret = if (let Some(value) <- retType) { value.ToString() } else { "Unit" }
-        return "(" + JoinStrings(parts, ", ") + ") -> " + ret
+        var out = "(" + JoinStrings(parts, ", ") + ")"
+        if (let Some(value) <- retType) {
+            out += " -> " + value.ToString()
+        }
+        return out
     }
 }
 
@@ -271,6 +292,9 @@ public class GenericConstraint <: Node {
             bounds.add(bound.ToString())
         }
         let lhs = if (let Some(value) <- refType) { value.ToString() } else { "" }
+        if (bounds.isEmpty()) {
+            return lhs
+        }
         return lhs + " <: " + JoinStrings(bounds, " & ")
     }
 }
@@ -286,6 +310,9 @@ public class Generic <: Node {
     }
 
     public override func ToString(): String {
+        if (typeParameters.isEmpty()) {
+            return ""
+        }
         let params = ArrayList<String>()
         for (param in typeParameters) {
             params.add(param.identifier.Val())
