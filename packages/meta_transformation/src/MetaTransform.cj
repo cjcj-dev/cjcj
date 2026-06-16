@@ -1,5 +1,12 @@
 package cangjie_compiler::meta_transformation
 
+import cangjie_compiler::basic.CANGJIE_VERSION
+import cangjie_compiler::chir.CHIRBuilder
+import cangjie_compiler::chir.Function as CHIRFunction
+import cangjie_compiler::chir.Package as CHIRPackage
+
+public type MetaTransformRegisterCallback = (MetaTransformPluginBuilder) -> Unit
+
 public enum MetaTransformKind {
     | UNKNOWN
     | FOR_CHIR_FUNC
@@ -7,7 +14,7 @@ public enum MetaTransformKind {
     | FOR_CHIR
 }
 
-private func MetaTransformKindIndex(kind: MetaTransformKind): Int64 {
+public func MetaTransformKindIndex(kind: MetaTransformKind): Int64 {
     return match (kind) {
         case MetaTransformKind.UNKNOWN => 0
         case MetaTransformKind.FOR_CHIR_FUNC => 1
@@ -16,7 +23,7 @@ private func MetaTransformKindIndex(kind: MetaTransformKind): Int64 {
     }
 }
 
-extend MetaTransformKind <: Equatable<MetaTransformKind> {
+extend MetaTransformKind <: Equatable<MetaTransformKind> & Comparable<MetaTransformKind> {
     public operator func ==(right: MetaTransformKind): Bool {
         return MetaTransformKindIndex(this) == MetaTransformKindIndex(right)
     }
@@ -24,30 +31,47 @@ extend MetaTransformKind <: Equatable<MetaTransformKind> {
     public operator func !=(right: MetaTransformKind): Bool {
         return !(this == right)
     }
+
+    public operator func <(right: MetaTransformKind): Bool {
+        return MetaTransformKindIndex(this) < MetaTransformKindIndex(right)
+    }
+
+    public operator func <=(right: MetaTransformKind): Bool {
+        return MetaTransformKindIndex(this) <= MetaTransformKindIndex(right)
+    }
+
+    public operator func >(right: MetaTransformKind): Bool {
+        return MetaTransformKindIndex(this) > MetaTransformKindIndex(right)
+    }
+
+    public operator func >=(right: MetaTransformKind): Bool {
+        return MetaTransformKindIndex(this) >= MetaTransformKindIndex(right)
+    }
+
+    public func compare(right: MetaTransformKind): Ordering {
+        let leftIndex = MetaTransformKindIndex(this)
+        let rightIndex = MetaTransformKindIndex(right)
+        if (leftIndex < rightIndex) {
+            return Ordering.LT
+        }
+        if (leftIndex > rightIndex) {
+            return Ordering.GT
+        }
+        return Ordering.EQ
+    }
 }
-
-public interface MetaTransformCHIRBuilder {}
-
-public interface MetaTransformCHIRFunction {}
-
-public interface MetaTransformCHIRPackage {}
 
 public open class MetaTransformConcept {
     protected var kind: MetaTransformKind = MetaTransformKind.UNKNOWN
 
     public init() {}
 
-    public init(kind: MetaTransformKind) {
-        this.kind = kind
-    }
-
     public func GetKind(): MetaTransformKind {
         return kind
     }
 
     public func IsForCHIR(): Bool {
-        return MetaTransformKindIndex(kind) > MetaTransformKindIndex(MetaTransformKind.UNKNOWN) &&
-            MetaTransformKindIndex(kind) < MetaTransformKindIndex(MetaTransformKind.FOR_CHIR)
+        return kind > MetaTransformKind.UNKNOWN && kind < MetaTransformKind.FOR_CHIR
     }
 
     public func IsForFunc(): Bool {
@@ -65,21 +89,22 @@ public interface MetaTransformRunner<DeclT> {
 
 public abstract class MetaTransform<DeclT> <: MetaTransformConcept & MetaTransformRunner<DeclT> {
     public init() {
-        super(MetaTransformKind.UNKNOWN)
+        super()
     }
 
-    public init(kind: MetaTransformKind) {
-        super(kind)
+    protected init(kind: MetaTransformKind) {
+        super()
+        this.kind = kind
     }
 }
 
-public abstract class CHIRFunctionMetaTransform <: MetaTransform<MetaTransformCHIRFunction> {
+public abstract class CHIRFunctionMetaTransform <: MetaTransform<CHIRFunction> {
     public init() {
         super(MetaTransformKind.FOR_CHIR_FUNC)
     }
 }
 
-public abstract class CHIRPackageMetaTransform <: MetaTransform<MetaTransformCHIRPackage> {
+public abstract class CHIRPackageMetaTransform <: MetaTransform<CHIRPackage> {
     public init() {
         super(MetaTransformKind.FOR_CHIR_PACKAGE)
     }
@@ -87,9 +112,9 @@ public abstract class CHIRPackageMetaTransform <: MetaTransform<MetaTransformCHI
 
 public struct MetaTransformPluginInfo {
     public let cjcVersion: String
-    public let registerTo: (MetaTransformPluginBuilder) -> Unit
+    public let registerTo: MetaTransformRegisterCallback
 
-    public init(cjcVersion: String, registerTo: (MetaTransformPluginBuilder) -> Unit) {
+    public init(cjcVersion: String, registerTo: MetaTransformRegisterCallback) {
         this.cjcVersion = cjcVersion
         this.registerTo = registerTo
     }
@@ -97,11 +122,15 @@ public struct MetaTransformPluginInfo {
 
 public func MakeCHIRPluginInfo(
     cjcVersion: String,
-    factory: (MetaTransformCHIRBuilder) -> MetaTransformConcept
+    factory: (CHIRBuilder) -> MetaTransformConcept
 ): MetaTransformPluginInfo {
     return MetaTransformPluginInfo(cjcVersion, { builder: MetaTransformPluginBuilder =>
-        builder.RegisterCHIRPluginCallback({ manager: CHIRPluginManager, chirBuilder: MetaTransformCHIRBuilder =>
+        builder.RegisterCHIRPluginCallback({ manager: CHIRPluginManager, chirBuilder: CHIRBuilder =>
             manager.AddMetaTransform(factory(chirBuilder))
         })
     })
+}
+
+public func MakeCHIRPluginInfo(factory: (CHIRBuilder) -> MetaTransformConcept): MetaTransformPluginInfo {
+    return MakeCHIRPluginInfo(CANGJIE_VERSION, factory)
 }
