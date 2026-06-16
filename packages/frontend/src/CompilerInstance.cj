@@ -1,0 +1,782 @@
+package cangjie_compiler::frontend
+
+import std.collection.*
+
+public enum CompileStage {
+    | LOAD_PLUGINS
+    | PARSE
+    | CONDITION_COMPILE
+    | IMPORT_PACKAGE
+    | MACRO_EXPAND
+    | AST_DIFF
+    | SEMA
+    | DESUGAR_AFTER_SEMA
+    | GENERIC_INSTANTIATION
+    | OVERFLOW_STRATEGY
+    | MANGLING
+    | SAVE_CJO
+    | CHIR
+    | CODEGEN
+    | SAVE_RESULTS
+    | COMPILE_STAGE_NUMBER
+}
+
+public func CompileStageIndex(stage: CompileStage): Int64 {
+    return match (stage) {
+        case CompileStage.LOAD_PLUGINS => 0
+        case CompileStage.PARSE => 1
+        case CompileStage.CONDITION_COMPILE => 2
+        case CompileStage.IMPORT_PACKAGE => 3
+        case CompileStage.MACRO_EXPAND => 4
+        case CompileStage.AST_DIFF => 5
+        case CompileStage.SEMA => 6
+        case CompileStage.DESUGAR_AFTER_SEMA => 7
+        case CompileStage.GENERIC_INSTANTIATION => 8
+        case CompileStage.OVERFLOW_STRATEGY => 9
+        case CompileStage.MANGLING => 10
+        case CompileStage.SAVE_CJO => 11
+        case CompileStage.CHIR => 12
+        case CompileStage.CODEGEN => 13
+        case CompileStage.SAVE_RESULTS => 14
+        case CompileStage.COMPILE_STAGE_NUMBER => 15
+    }
+}
+
+extend CompileStage <: Equatable<CompileStage> {
+    public operator func ==(rhs: CompileStage): Bool {
+        return CompileStageIndex(this) == CompileStageIndex(rhs)
+    }
+
+    public operator func !=(rhs: CompileStage): Bool {
+        return !(this == rhs)
+    }
+}
+
+private func StageFromIndex(idx: Int64): CompileStage {
+    if (idx == 0) { return CompileStage.LOAD_PLUGINS }
+    if (idx == 1) { return CompileStage.PARSE }
+    if (idx == 2) { return CompileStage.CONDITION_COMPILE }
+    if (idx == 3) { return CompileStage.IMPORT_PACKAGE }
+    if (idx == 4) { return CompileStage.MACRO_EXPAND }
+    if (idx == 5) { return CompileStage.AST_DIFF }
+    if (idx == 6) { return CompileStage.SEMA }
+    if (idx == 7) { return CompileStage.DESUGAR_AFTER_SEMA }
+    if (idx == 8) { return CompileStage.GENERIC_INSTANTIATION }
+    if (idx == 9) { return CompileStage.OVERFLOW_STRATEGY }
+    if (idx == 10) { return CompileStage.MANGLING }
+    if (idx == 11) { return CompileStage.SAVE_CJO }
+    if (idx == 12) { return CompileStage.CHIR }
+    if (idx == 13) { return CompileStage.CODEGEN }
+    return CompileStage.SAVE_RESULTS
+}
+
+public class CHIRInfo {
+    public let optEffectMap: HashMap<String, String> = HashMap<String, String>()
+    public let ccOutFuncsRawMangle: HashSet<String> = HashSet<String>()
+    public let varInitDepMap: HashMap<String, String> = HashMap<String, String>()
+    public init() {}
+}
+
+public class CompilerInstance {
+    public let invocation: CompilerInvocation
+    public var cangjieHome: String = ""
+    public var cangjieModules: String = ""
+    public let srcFilePaths: ArrayList<String> = ArrayList<String>()
+    public let srcDirs: HashSet<String> = HashSet<String>()
+    public let diag: DiagnosticEngine
+    public let cachedInfo: CompilationCache = CompilationCache()
+    public let chirInfo: CHIRInfo = CHIRInfo()
+    public let sm: SourceManager = SourceManager()
+    public let typeManager: TypeManager = TypeManager()
+    public let importManager: ImportManager
+    public let packageManager: PackageManager
+    public let testManager: TestManager = TestManager()
+    public var gim: Option<GenericInstantiationManager> = None
+    public var compileOnePackageFromSrcFiles: Bool = false
+    public var loadSrcFilesFromCache: Bool = false
+    public let bufferCache: HashMap<String, SrcCodeCacheInfo> = HashMap<String, SrcCodeCacheInfo>()
+    public let tokensEvalInMacro: ArrayList<String> = ArrayList<String>()
+    public var currentPkg: Option<Package> = None
+    public let mangler: BaseMangler = BaseMangler()
+    public let mangledName2DeclMap: HashMap<String, Decl> = HashMap<String, Decl>()
+    public var releaseCHIRMemory: Bool = true
+    public var needToOptString: Bool = false
+    public var needToOptGenericDecl: Bool = false
+    public var isCJLint: Bool = false
+    public var buildTrie: Bool = true
+    public let srcPkgs: ArrayList<Package> = ArrayList<Package>()
+    public let chirData: CHIRData = CHIRData()
+    private let pkgs: ArrayList<Package> = ArrayList<Package>()
+    private let pkgCtxMap: HashMap<String, ASTContext> = HashMap<String, ASTContext>()
+    private let depPackageInfo: ArrayList<String> = ArrayList<String>()
+    private var astResourcesDestroyed: Bool = false
+    private var compileStrategy: Option<CompileStrategy> = None
+    private var hasTypeCheckerFlag: Bool = false
+    private let fileNameMap: HashMap<UInt64, String> = HashMap<UInt64, String>()
+
+    public init(invocation: CompilerInvocation, diag: DiagnosticEngine) {
+        this.invocation = invocation
+        this.diag = diag
+        importManager = ImportManager(diag)
+        packageManager = PackageManager(importManager)
+        compileStrategy = Some(FullCompileStrategy(this))
+        chirData.InitData(fileNameMap, invocation.globalOptions.GetJobs())
+        if (invocation.globalOptions.compilePackage) {
+            for (pkgPath in invocation.globalOptions.packagePaths) {
+                srcDirs.add(pkgPath)
+            }
+            compileOnePackageFromSrcFiles = srcDirs.isEmpty()
+        } else {
+            compileOnePackageFromSrcFiles = true
+            for (srcFile in invocation.globalOptions.srcFiles) {
+                srcFilePaths.add(srcFile)
+            }
+        }
+        diag.SetSourceManager(sm)
+    }
+
+    public func DestroyASTResources(): Unit {
+        if (astResourcesDestroyed || invocation.globalOptions.enIncrementalCompilation || invocation.globalOptions.cjdbMode) {
+            return
+        }
+        astResourcesDestroyed = true
+        srcPkgs.clear()
+        pkgs.clear()
+        pkgCtxMap.clear()
+        gim = None
+        hasTypeCheckerFlag = false
+    }
+
+    public func SetCompileStrategy(newCompileStrategy: CompileStrategy): Unit {
+        compileStrategy = Some(newCompileStrategy)
+    }
+
+    public func InitCompilerInstance(): Bool {
+        return true
+    }
+
+    public func Compile(stage!: CompileStage = CompileStage.CHIR): Bool {
+        if (!InitCompilerInstance()) {
+            diag.ReportErrorAndWarningCount()
+            return false
+        }
+        let endStageNum = CompileStageIndex(stage)
+        var idx: Int64 = 0
+        var success = true
+        while (idx <= endStageNum) {
+            if (!performStage(StageFromIndex(idx))) {
+                success = false
+                break
+            }
+            idx++
+        }
+        if (invocation.globalOptions.NeedDumpASTToScreen() && idx < CompileStageIndex(CompileStage.MANGLING)) {
+            DumpASTToScreen(GetSourcePackages())
+        }
+        diag.ReportErrorAndWarningCount()
+        return success
+    }
+
+    private func performStage(stage: CompileStage): Bool {
+        if (stage == CompileStage.LOAD_PLUGINS) { return PerformPluginLoad() }
+        if (stage == CompileStage.PARSE) { return PerformParse() }
+        if (stage == CompileStage.CONDITION_COMPILE) { return PerformConditionCompile() }
+        if (stage == CompileStage.IMPORT_PACKAGE) { return PerformImportPackage() }
+        if (stage == CompileStage.MACRO_EXPAND) { return PerformMacroExpand() }
+        if (stage == CompileStage.AST_DIFF) { return PerformIncrementalScopeAnalysis() }
+        if (stage == CompileStage.SEMA) { return PerformSema() }
+        if (stage == CompileStage.DESUGAR_AFTER_SEMA) { return PerformDesugarAfterSema() }
+        if (stage == CompileStage.GENERIC_INSTANTIATION) { return PerformGenericInstantiation() }
+        if (stage == CompileStage.OVERFLOW_STRATEGY) { return PerformOverflowStrategy() }
+        if (stage == CompileStage.MANGLING) { return PerformMangling() }
+        if (stage == CompileStage.SAVE_CJO) { return PerformCjoSaving() }
+        if (stage == CompileStage.CHIR) { return PerformCHIRCompilation() }
+        if (stage == CompileStage.CODEGEN) { return PerformCodeGen() }
+        if (stage == CompileStage.SAVE_RESULTS) { return PerformResultsSaving() }
+        return true
+    }
+
+    public func PerformPluginLoad(): Bool {
+        // TODO(selfhost:Frontend): load MetaTransform plugins through the Cangjie runtime FFI equivalent of InvokeRuntime.
+        return true
+    }
+
+    public func PerformParse(): Bool {
+        let ret = getCompileStrategy().Parse()
+        if (!srcPkgs.isEmpty()) {
+            let globalOpts = invocation.globalOptions
+            srcPkgs[0].noSubPkg = globalOpts.noSubPkg
+            if (IsNeedSaveIncrCompilationLogFile(globalOpts, invocation.frontendOptions)) {
+                let incrLogPath = globalOpts.GenerateCachedPathName(srcPkgs[0].fullPackageName, CACHED_LOG_EXTENSION)
+                let _ = WriteFileContent(incrLogPath, "")
+            }
+            if (globalOpts.NeedDumpASTToFile()) {
+                DumpAST(GetSourcePackages(), globalOpts.output, "parse")
+            }
+        }
+        return ret
+    }
+
+    public func PerformConditionCompile(): Bool {
+        let ret = getCompileStrategy().ConditionCompile()
+        if (!srcPkgs.isEmpty() && invocation.globalOptions.NeedDumpASTToFile()) {
+            DumpAST(GetSourcePackages(), invocation.globalOptions.output, "condcomp")
+        }
+        return ret
+    }
+
+    public func PerformImportPackage(): Bool {
+        let ret = getCompileStrategy().ImportPackages()
+        if (!srcPkgs.isEmpty() && invocation.globalOptions.NeedDumpASTToFile()) {
+            DumpAST(GetSourcePackages(), invocation.globalOptions.output, "import")
+        }
+        return ret
+    }
+
+    public func PerformMacroExpand(): Bool {
+        let ret = getCompileStrategy().MacroExpand()
+        if (ret) {
+            importManager.ReindexSourcePackagesAfterMacroExpand(GetSourcePackages())
+        }
+        if (!invocation.globalOptions.IsConstEvalEnabled() && !invocation.globalOptions.interpreter) {
+            importManager.DeleteASTLoaders()
+        }
+        importManager.ClearPackageBCHIRCache()
+        if (!srcPkgs.isEmpty() && invocation.globalOptions.NeedDumpASTToFile()) {
+            DumpAST(GetSourcePackages(), invocation.globalOptions.output, "macroexp")
+        }
+        return ret
+    }
+
+    public func ExpandDecl(decl: Decl): ArrayList<Decl> {
+        // TODO(selfhost:Frontend): delegate to MacroExpansion.ExpandDecl when macro is importable.
+        let out = ArrayList<Decl>()
+        out.add(decl)
+        return out
+    }
+
+    public func PerformIncrementalScopeAnalysis(): Bool {
+        if (invocation.globalOptions.compileCjd) {
+            return true
+        }
+        // TODO(selfhost:Frontend): run IncrementalCompilation.ASTCacheCalculator and AST diff.
+        CalculateASTCache()
+        return true
+    }
+
+    public func CalculateASTCache(): Bool {
+        CacheCompileArgs()
+        return !srcPkgs.isEmpty() && diag.GetErrorCount() == 0
+    }
+
+    public func PerformSema(): Bool {
+        let ret = getCompileStrategy().Sema()
+        hasTypeCheckerFlag = true
+        if (!srcPkgs.isEmpty() && invocation.globalOptions.NeedDumpASTToFile()) {
+            DumpAST(GetSourcePackages(), invocation.globalOptions.output, "sema")
+        }
+        return ret
+    }
+
+    public func PerformDesugarAfterSema(): Bool {
+        testManager.MarkDeclsForTestIfNeeded(GetSourcePackages())
+        getCompileStrategy().DesugarAfterSema()
+        if (!srcPkgs.isEmpty() && invocation.globalOptions.NeedDumpASTToFile()) {
+            DumpAST(GetSourcePackages(), invocation.globalOptions.output, "desugar")
+        }
+        return true
+    }
+
+    public func PerformGenericInstantiation(): Bool {
+        if (let None <- gim) {
+            gim = Some(GenericInstantiationManager(this))
+        }
+        // TODO(selfhost:Frontend): perform real generic instantiation and post-instantiation desugar.
+        if (!srcPkgs.isEmpty() && invocation.globalOptions.NeedDumpASTToFile()) {
+            DumpAST(GetSourcePackages(), invocation.globalOptions.output, "genericinst")
+        }
+        return true
+    }
+
+    public func PerformOverflowStrategy(): Bool {
+        if (invocation.globalOptions.overflowStrategy == OverflowStrategy.NA) {
+            return true
+        }
+        let _ = getCompileStrategy().OverflowStrategy()
+        if (!srcPkgs.isEmpty() && invocation.globalOptions.NeedDumpASTToFile()) {
+            DumpAST(GetSourcePackages(), invocation.globalOptions.output, "overflow")
+        }
+        return true
+    }
+
+    public func PerformMangling(): Bool {
+        mangler.lambdaCounter = cachedInfo.lambdaCounter
+        ManglingHelpFunction(mangler)
+        cachedInfo.lambdaCounter = mangler.lambdaCounter
+        if (!srcPkgs.isEmpty() && invocation.globalOptions.NeedDumpAST()) {
+            DumpAST(GetSourcePackages(), invocation.globalOptions.output, "mangle", dumpToScreen: invocation.globalOptions.dumpToScreen)
+        }
+        return true
+    }
+
+    public func GenerateCHIRForPkg(pkg: Package): Bool {
+        if (pkg.files.isEmpty()) {
+            return true
+        }
+        // TODO(selfhost:Frontend): lower typed AST to CHIR.ToCHIR when the CHIR package is importable.
+        let chirPkg = CHIRPackage(pkg.fullPackageName)
+        chirData.AppendNewPackage(chirPkg)
+        return true
+    }
+
+    public func PerformCHIRCompilation(): Bool {
+        typeManager.ReleasePostSemaCaches()
+        var ret = true
+        let sourcePackagesCHIR = GetSourcePackages()
+        let pkgsOrderedCHIR = packageManager.GetBuildOrders(sourcePackagesCHIR)
+        let emitted = HashSet<String>()
+        for (group in pkgsOrderedCHIR) {
+            if (group.isEmpty()) {
+                continue
+            }
+            let wanted = group[0].fullPackageName
+            for (pkg in sourcePackagesCHIR) {
+                if (pkg.fullPackageName == wanted && !emitted.contains(pkg.fullPackageName)) {
+                    ret = ret && GenerateCHIRForPkg(pkg)
+                    emitted.add(pkg.fullPackageName)
+                }
+            }
+        }
+        for (pkg in sourcePackagesCHIR) {
+            if (!emitted.contains(pkg.fullPackageName)) {
+                ret = ret && GenerateCHIRForPkg(pkg)
+            }
+        }
+        diag.EmitCategoryDiagnostics(DiagCategory.CHIR)
+        return ret
+    }
+
+    public func DumpTokens(): Bool {
+        var ret = true
+        for (filePath in srcFilePaths) {
+            let readResult = ReadFileContent(filePath)
+            if (!readResult[0]) {
+                diag.Diagnose(DiagCategory.IMPORT_PACKAGE, DEFAULT_POSITION,
+                    "failed to read source file '" + filePath + "': " + readResult[2])
+                ret = false
+                continue
+            }
+            let fileID = GetSourceManager().AddSource(GetAbsPath(filePath) ?? filePath, readResult[1])
+            let lexer = FrontendLexer(fileID, readResult[1])
+            while (true) {
+                let tok = lexer.Next()
+                if (tok.kind == FrontendTokenKind.END) {
+                    break
+                }
+                let position = "<" + filePath + ":" + tok.Begin().line.toString() + ":" +
+                    tok.Begin().column.toString() + ">"
+                if (tok.kind == FrontendTokenKind.NL) {
+                    println((if (tok.value == "\n") { "\\n" } else { "\\r\\n" }) + " " +
+                        FrontendTokenKindName(tok.kind) + " " + position)
+                } else {
+                    println(tok.value + " " + FrontendTokenKindName(tok.kind) + " " + position)
+                }
+            }
+        }
+        return ret
+    }
+
+    public func DumpSymbols(): Unit {
+        PrintSymbolTable(this)
+    }
+
+    public func DumpMacro(): Unit {
+        println("Dump tokens after macro expansion.")
+        println("==== Start Dumping ====\n")
+        for (tokens in tokensEvalInMacro) {
+            println(tokens)
+        }
+    }
+
+    public func PerformCodeGen(): Bool {
+        // TODO(selfhost:Frontend): frontend base instance returns true; concrete frontend_tool/codegen instances override.
+        return true
+    }
+
+    public func PerformCjoSaving(): Bool {
+        // TODO(selfhost:Frontend): frontend base instance returns true; concrete module serialization overrides.
+        return true
+    }
+
+    public func PerformResultsSaving(): Bool {
+        // TODO(selfhost:Frontend): frontend base instance returns true; concrete result serializer overrides.
+        return true
+    }
+
+    public func GetPackages(): ArrayList<Package> {
+        return pkgs
+    }
+
+    public func GetSourcePackages(): ArrayList<Package> {
+        let out = ArrayList<Package>()
+        for (pkg in srcPkgs) {
+            out.add(pkg)
+        }
+        return out
+    }
+
+    public func GetSourceManager(): SourceManager {
+        return sm
+    }
+
+    public func GetASTContextByPackage(pkg: Package): Option<ASTContext> {
+        return pkgCtxMap.get(pkg.fullPackageName)
+    }
+
+    public func GetDepPkgInfo(): ArrayList<String> {
+        return depPackageInfo
+    }
+
+    public func ImportPackages(): Bool {
+        if (cangjieHome.isEmpty()) {
+            if (!DetectCangjieHome()) {
+                return false
+            }
+        }
+        if (cangjieModules.isEmpty()) {
+            if (!DetectCangjieModules()) {
+                return false
+            }
+        }
+        AddSourceToMember()
+        if (invocation.globalOptions.scanDepPkg) {
+            importManager.UpdateSearchPath(cangjieModules)
+            depPackageInfo.clear()
+            let generated = if (!invocation.globalOptions.inputCjoFile.isEmpty()) {
+                importManager.GeneratePkgDepInfoByCjo(invocation.globalOptions.inputCjoFile)
+            } else {
+                importManager.GeneratePkgDepInfo(pkgs)
+            }
+            for (info in generated) {
+                depPackageInfo.add(info)
+            }
+            return true
+        }
+        if (!importManager.BuildIndex(cangjieModules, invocation.globalOptions, pkgs)) {
+            return false
+        }
+        MergePackages()
+        return ModularizeCompilation()
+    }
+
+    public func GetExtendDecls(typeName: String): ArrayList<ExtendDecl> {
+        let out = ArrayList<ExtendDecl>()
+        for (pkg in GetPackages()) {
+            for (file in pkg.files) {
+                for (decl in file.decls) {
+                    if (let Some(extendDecl) <- (decl as ExtendDecl)) {
+                        if (let Some(extendedType) <- extendDecl.extendedType) {
+                            if (extendedType.name == typeName) {
+                                out.add(extendDecl)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        return out
+    }
+
+    public func GetAllVisibleExtendMembers(typeName: String, curFile: File): ArrayList<Decl> {
+        let _ = curFile
+        let out = ArrayList<Decl>()
+        for (extendDecl in GetExtendDecls(typeName)) {
+            for (member in extendDecl.members) {
+                out.add(member)
+            }
+        }
+        return out
+    }
+
+    public func GetGivenReferenceTarget(ctx: ASTContext, scopeName: String, exprName: String, hasLocalDecl: Bool): Candidate {
+        let _ = scopeName
+        let _ = hasLocalDecl
+        let out = Candidate()
+        for (sym in ctx.symbolTable) {
+            if (sym.name == exprName) {
+                if (let Some(node) <- sym.node) {
+                    if (let Some(decl) <- (node as Decl)) {
+                        out.decls.add(decl)
+                    }
+                }
+            }
+        }
+        return out
+    }
+
+    public func UpdateAndWriteCachedInfoToDisk(): Bool {
+        if (!ShouldWriteCacheFile()) {
+            return true
+        }
+        UpdateCachedInfo()
+        return WriteCachedInfo()
+    }
+
+    public func GetCHIRContext(): CHIRContext {
+        return chirData.GetCHIRContext()
+    }
+
+    public func GetAllCHIRPackages(): ArrayList<CHIRPackage> {
+        return chirData.GetAllCHIRPackages()
+    }
+
+    public func FreeCHIRData(): Unit {
+        chirData.GetCHIRContext().packages.clear()
+    }
+
+    public func HasTypeChecker(): Bool {
+        return hasTypeCheckerFlag
+    }
+
+    public func IsBuildTrie(): Bool {
+        return buildTrie
+    }
+
+    public func SetBuildTrie(flag: Bool): Unit {
+        buildTrie = flag
+    }
+
+    public func DeserializeCHIR(): Bool {
+        // TODO(selfhost:Frontend): call CHIRDeserializer and CHIRPrinter when CHIR serialization is importable.
+        return invocation.frontendOptions.chirDeserialize && !invocation.frontendOptions.chirDeserializePath.isEmpty()
+    }
+
+    private func AddSourceToMember(): Unit {
+        pkgs.clear()
+        for (pkg in GetSourcePackages()) {
+            pkgs.add(pkg)
+        }
+    }
+
+    private func getCompileStrategy(): CompileStrategy {
+        if (let Some(strategy) <- compileStrategy) {
+            return strategy
+        }
+        let strategy = FullCompileStrategy(this)
+        compileStrategy = Some(strategy)
+        return strategy
+    }
+
+    private func MergePackages(): Unit {
+        pkgCtxMap.clear()
+        for (pkg in srcPkgs) {
+            if (pkgCtxMap.contains(pkg.fullPackageName)) {
+                pkgCtxMap.remove(pkg.fullPackageName)
+            }
+            pkgCtxMap.add(pkg.fullPackageName, ASTContext(diag, pkg))
+        }
+    }
+
+    private func DetectCangjieHome(): Bool {
+        if (let Some(home) <- invocation.globalOptions.environment.cangjieHome) {
+            cangjieHome = home
+            return true
+        }
+        if (!invocation.globalOptions.cangjieHome.isEmpty()) {
+            cangjieHome = invocation.globalOptions.cangjieHome
+            return true
+        }
+        if (invocation.globalOptions.executablePath.isEmpty()) {
+            diag.Diagnose(DiagCategory.IMPORT_PACKAGE, DEFAULT_POSITION,
+                "failed to detect CANGJIE_HOME: can not resolve executable path")
+            return false
+        }
+        let exeAbs = GetAbsPath(invocation.globalOptions.executablePath) ?? invocation.globalOptions.executablePath
+        cangjieHome = JoinPath(GetDirPath(exeAbs), "..")
+        if (!FileExist(cangjieHome) || !FileExist(JoinPath(cangjieHome, "modules"))) {
+            diag.Diagnose(DiagCategory.IMPORT_PACKAGE, DEFAULT_POSITION,
+                "failed to detect CANGJIE_HOME: invalid cjc home")
+            return false
+        }
+        return true
+    }
+
+    private func DetectCangjieModules(): Bool {
+        if (cangjieHome.isEmpty()) {
+            diag.Diagnose(DiagCategory.IMPORT_PACKAGE, DEFAULT_POSITION,
+                "failed to detect Cangjie modules: cangjie home is empty")
+            return false
+        }
+        let libPathName = invocation.globalOptions.GetCangjieLibTargetPathName()
+        if (libPathName.isEmpty()) {
+            diag.Diagnose(DiagCategory.IMPORT_PACKAGE, DEFAULT_POSITION,
+                "failed to detect Cangjie modules: target library path name is empty")
+            return false
+        }
+        cangjieModules = JoinPath(JoinPath(cangjieHome, "modules"), libPathName)
+        if (!FileExist(cangjieModules)) {
+            diag.Diagnose(DiagCategory.IMPORT_PACKAGE, DEFAULT_POSITION,
+                "failed to detect Cangjie modules: target library path is not exist: " + cangjieModules)
+            return false
+        }
+        return true
+    }
+
+    private func ModularizeCompilation(): Bool {
+        return packageManager.ResolveDependence(pkgs)
+    }
+
+    private func CacheCompileArgs(): Unit {
+        cachedInfo.compileArgs = invocation.globalOptions.ToSerialized()
+    }
+
+    private func UpdateCachedInfo(): Unit {
+        ()
+    }
+
+    private func WriteCachedInfo(): Bool {
+        if (srcPkgs.isEmpty()) {
+            return true
+        }
+        let path = invocation.globalOptions.GenerateCachedPathName(srcPkgs[0].fullPackageName, CACHED_AST_EXTENSION)
+        return WriteFileContent(path, cachedInfo.compileArgs)
+    }
+
+    private func ShouldWriteCacheFile(): Bool {
+        if (!invocation.globalOptions.enIncrementalCompilation) {
+            return false
+        }
+        if (invocation.frontendOptions.dumpAction != DumpAction.NO_ACTION) {
+            return false
+        }
+        if (invocation.globalOptions.IsEmitCHIREnable()) {
+            return false
+        }
+        if (invocation.globalOptions.compileCjd) {
+            return false
+        }
+        if (srcPkgs.size != 1) {
+            return false
+        }
+        if (srcPkgs[0].IsEmpty()) {
+            return false
+        }
+        return true
+    }
+
+    private func ManglingHelpFunction(baseMangler: BaseMangler): Unit {
+        let seen = HashSet<String>()
+        for (pkg in GetPackages()) {
+            for (file in pkg.files) {
+                for (decl in file.decls) {
+                    mangleDeclTree(baseMangler, pkg.fullPackageName, decl, seen)
+                }
+            }
+            for (decl in pkg.genericInstantiatedDecls) {
+                mangleDeclTree(baseMangler, pkg.fullPackageName, decl, seen)
+            }
+        }
+        for (pkg in importManager.GetAllImportedPackages()) {
+            for (file in pkg.files) {
+                for (decl in file.decls) {
+                    if (decl.isUsedImports || !decl.TestAttr("IMPORTED")) {
+                        mangleDeclTree(baseMangler, pkg.fullPackageName, decl, seen)
+                    }
+                }
+            }
+        }
+    }
+
+    private func mangleDeclTree(baseMangler: BaseMangler, pkgName: String, decl: Decl, seen: HashSet<String>): Unit {
+        let key = pkgName + "::" + decl.identifier.Val() + "::" + ASTKindName(decl.astKind)
+        if (seen.contains(key)) {
+            return
+        }
+        seen.add(key)
+        decl.fullPackageName = pkgName
+        decl.mangledName = baseMangler.Mangle(decl)
+        if (mangledName2DeclMap.contains(decl.mangledName)) {
+            mangledName2DeclMap.remove(decl.mangledName)
+        }
+        mangledName2DeclMap.add(decl.mangledName, decl)
+        for (member in decl.members) {
+            mangleDeclTree(baseMangler, pkgName, member, seen)
+        }
+    }
+}
+
+private func IsNeedSaveIncrCompilationLogFile(globalOpts: GlobalOptions, frontOpts: FrontendOptions): Bool {
+    if (!globalOpts.enIncrementalCompilation) {
+        return false
+    }
+    if (globalOpts.scanDepPkg) {
+        return false
+    }
+    if (frontOpts.dumpAction != DumpAction.NO_ACTION) {
+        return false
+    }
+    if (globalOpts.compileCjd) {
+        return false
+    }
+    return true
+}
+
+private func DumpASTToScreen(srcPkgs: ArrayList<Package>): Unit {
+    for (pkg in srcPkgs) {
+        println(RenderPackageTree(pkg))
+    }
+}
+
+private func DumpAST(srcPkgs: ArrayList<Package>, outputOfProduct: String, prefix: String, dumpToScreen!: Bool = false): Unit {
+    if (srcPkgs.isEmpty()) {
+        return
+    }
+    if (dumpToScreen) {
+        DumpASTToScreen(srcPkgs)
+        return
+    }
+    let pkgName = srcPkgs[0].fullPackageName
+    let dumpDir = if (IsDir(outputOfProduct)) {
+        JoinPath(outputOfProduct, pkgName + "_AST")
+    } else {
+        GetFileBase(outputOfProduct) + "_AST"
+    }
+    let dumpPath = JoinPath(dumpDir, "0_" + prefix + "_ast.txt")
+    let rendered = RenderPackageTree(srcPkgs[0])
+    let _ = WriteFileContent(dumpPath, rendered)
+}
+
+private func RenderPackageTree(pkg: Package): String {
+    let builder = StringBuilder()
+    builder.append("Package(" + pkg.fullPackageName + ")\n")
+    for (file in pkg.files) {
+        builder.append("  File(" + file.filePath + ")\n")
+        if (let Some(packageSpec) <- file.packageSpec) {
+            builder.append("    package " + packageSpec.GetPackageName() + "\n")
+        }
+        for (importSpec in file.imports) {
+            builder.append("    import " + GetImportedItemFullName(importSpec.content) + "\n")
+        }
+        for (decl in file.decls) {
+            appendDecl(builder, decl, 2)
+        }
+    }
+    return builder.toString()
+}
+
+private func appendDecl(builder: StringBuilder, decl: Decl, indent: Int64): Unit {
+    var spaces = ""
+    var idx: Int64 = 0
+    while (idx < indent) {
+        spaces += "  "
+        idx++
+    }
+    builder.append(spaces + ASTKindName(decl.astKind) + " " + decl.identifier.Val())
+    if (!decl.mangledName.isEmpty()) {
+        builder.append(" [" + decl.mangledName + "]")
+    }
+    builder.append("\n")
+    for (member in decl.members) {
+        appendDecl(builder, member, indent + 1)
+    }
+}
