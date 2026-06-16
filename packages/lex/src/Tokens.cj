@@ -449,7 +449,6 @@ public func IsContextualKeyword(s: String): Bool {
 
 public func GetEscapeTokenKinds(): Array<TokenKind> {
     return [
-        TokenKind.RUNE_LITERAL, TokenKind.RUNE_BYTE_LITERAL, TokenKind.STRING_LITERAL, TokenKind.JSTRING_LITERAL,
-        TokenKind.MULTILINE_STRING
+        TokenKind.DOLLAR_IDENTIFIER, TokenKind.AT, TokenKind.DOLLAR, TokenKind.LPAREN, TokenKind.RPAREN
     ]
 }

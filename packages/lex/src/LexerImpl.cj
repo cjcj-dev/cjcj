@@ -1253,9 +1253,14 @@ public class LexerImpl {
 
     private func ProcessDigits(base: Int64, hasDigitRef: Bool, reasonPoint: Int64, isFloatRef: Bool): (Bool, Bool, Bool) {
         var hasDigit = hasDigitRef
-        var isFloat = isFloatRef
+        var isFloat = false
         var hasTypeSuffix = false
+        var digitIndex: Int64 = 0
         while (true) {
+            if (digitIndex == 0 && isFloatRef && isDigit(currentChar)) {
+                isFloat = true
+                tokenKind = TokenKind.FLOAT_LITERAL
+            }
             if (currentChar > Int64(ASCII_BASE)) {
                 if (success) {
                     DiagExpectedDigit(lowerByte(getByte(reasonPoint)))
@@ -1287,6 +1292,7 @@ public class LexerImpl {
                 break
             }
             ReadUTF8Char()
+            digitIndex++
         }
         return (hasDigit, isFloat, hasTypeSuffix)
     }
@@ -1456,12 +1462,10 @@ public class LexerImpl {
                 lexDiagnose2(diag, DiagKindRefactor.lex_cannot_start_with_digit, GetPos(pStart), "float", "0")
             }
             ReadUTF8Char()
-            tokenKind = TokenKind.FLOAT_LITERAL
             hasDigit = false
-            isFloat = true
             let decimalDigits = ProcessDigits(base, hasDigit, reasonPoint, true)
             hasDigit = decimalDigits[0]
-            isFloat = true
+            isFloat = decimalDigits[1]
             hasDot = true
         } else if (IsIllegalStartDecimalPart(pStart, pCurrent)) {
             lexDiagnose2(diag, DiagKindRefactor.lex_cannot_start_with_digit, GetPos(pStart), "integer", "0")
@@ -1666,11 +1670,15 @@ public class LexerImpl {
             }
         }
 
+        res.SetValuePos("`" + res.Value(), GetPos(pStart), GetPos(pNext))
+        res.kind = if (isPackageIdent) { TokenKind.PACKAGE_IDENTIFIER } else { TokenKind.IDENTIFIER }
+
         if (currentChar == Int64(b'`')) {
             if (IsAdjacent(pStart, pCurrent) && success) {
                 lexDiagnose(diag, DiagKindRefactor.lex_expected_identifier, GetPos(pCurrent), ConvertCurrentChar())
                 success = false
             }
+            res.SetValuePos(res.Value() + "`", res.Begin(), res.End())
         } else {
             Back()
             if (!IsAdjacent(pStart, pCurrent) && success) {
@@ -1688,10 +1696,6 @@ public class LexerImpl {
                 ReadUTF8Char()
             }
         }
-        let endOffset = if (currentChar == Int64(b'`') && pNext > pCurrent) { pNext } else { pCurrent }
-        let kind = if (isPackageIdent) { TokenKind.PACKAGE_IDENTIFIER } else { TokenKind.IDENTIFIER }
-        res.kind = kind
-        res.SetValuePos(input[pStart..endOffset], GetPos(pStart), GetPos(endOffset))
         return res
     }
 
@@ -2220,112 +2224,228 @@ public class LexerImpl {
         return ScanSymbol(pStart)
     }
 
+    private func ScanSymbolPlus(): Unit {
+        ReadUTF8Char()
+        if (currentChar == Int64(b'+')) {
+            return
+        }
+        if (currentChar == Int64(b'&')) {
+            ReadUTF8Char()
+            if (currentChar == Int64(b'=')) {
+                return
+            }
+        } else if (currentChar == Int64(b'=')) {
+            return
+        }
+        Back()
+    }
+
+    private func ScanSymbolHyphen(): Unit {
+        ReadUTF8Char()
+        if (currentChar == Int64(b'-')) {
+            return
+        }
+        if (currentChar == Int64(b'=')) {
+            return
+        }
+        if (currentChar == Int64(b'&')) {
+            ReadUTF8Char()
+            if (currentChar == Int64(b'=')) {
+                return
+            }
+        } else if (currentChar == Int64(b'>')) {
+            return
+        }
+        Back()
+    }
+
+    private func ScanSymbolAsterisk(): Unit {
+        ReadUTF8Char()
+        if (currentChar == Int64(b'*')) {
+            ReadUTF8Char()
+            if (currentChar == Int64(b'&')) {
+                ReadUTF8Char()
+                if (currentChar == Int64(b'=')) {
+                    return
+                }
+            } else if (currentChar == Int64(b'=')) {
+                return
+            }
+        } else if (currentChar == Int64(b'=')) {
+            return
+        } else if (currentChar == Int64(b'&')) {
+            ReadUTF8Char()
+            if (currentChar == Int64(b'=')) {
+                return
+            }
+        }
+        Back()
+    }
+
+    private func ScanSymbolAmpersand(): Unit {
+        ReadUTF8Char()
+        if (currentChar == Int64(b'&')) {
+            ReadUTF8Char()
+            if (currentChar == Int64(b'=')) {
+                return
+            }
+        } else if (currentChar == Int64(b'=')) {
+            return
+        }
+        Back()
+    }
+
+    private func ScanSymbolExclamation(): Unit {
+        if (getNextChar(0) == b'i' && getNextChar(1) == b'n' &&
+            (getNextChar(2) == b' ' || getNextChar(2) == b'\r' || getNextChar(2) == b'\n')) {
+            ReadUTF8Char()
+            ReadUTF8Char()
+            return
+        }
+        ReadUTF8Char()
+        if (currentChar == Int64(b'=')) {
+            return
+        }
+        Back()
+    }
+
+    private func ScanSymbolLessThan(): Unit {
+        ReadUTF8Char()
+        if (currentChar == Int64(b'<')) {
+            ReadUTF8Char()
+            if (currentChar == Int64(b'=')) {
+                return
+            }
+        } else if (currentChar == Int64(b'=')) {
+            return
+        } else if (currentChar == Int64(b':')) {
+            return
+        } else if (currentChar == Int64(b'-')) {
+            return
+        }
+        Back()
+    }
+
+    private func ScanSymbolGreaterThan(): Unit {
+        if (splitAmbiguousToken) {
+            return
+        }
+        ReadUTF8Char()
+        if (currentChar == Int64(b'>')) {
+            ReadUTF8Char()
+            if (currentChar == Int64(b'=')) {
+                return
+            }
+        } else if (currentChar == Int64(b'=')) {
+            return
+        }
+        Back()
+    }
+
+    private func ScanSymbolAt(): Unit {
+        ReadUTF8Char()
+        if (currentChar == Int64(b'!')) {
+            return
+        }
+        Back()
+    }
+
+    private func ScanSymbolEqual(): Unit {
+        ReadUTF8Char()
+        if (currentChar == Int64(b'=')) {
+            return
+        }
+        if (currentChar == Int64(b'>')) {
+            return
+        }
+        Back()
+    }
+
+    private func ScanSymbolPercentSign(): Unit {
+        ReadUTF8Char()
+        if (currentChar == Int64(b'=')) {
+            return
+        }
+        Back()
+    }
+
+    private func ScanSymbolVerticalBar(): Unit {
+        ReadUTF8Char()
+        if (currentChar == Int64(b'|')) {
+            ReadUTF8Char()
+            if (currentChar == Int64(b'=')) {
+                return
+            }
+        } else if (currentChar == Int64(b'=')) {
+            return
+        } else if (currentChar == Int64(b'>')) {
+            return
+        }
+        Back()
+    }
+
+    private func ScanSymbolTilde(): Unit {
+        ReadUTF8Char()
+        if (currentChar != Int64(b'>')) {
+            Back()
+        }
+    }
+
+    private func ScanSymbolCaret(): Unit {
+        if (getNextChar(0) == b'=') {
+            ReadUTF8Char()
+        }
+    }
+
+    private func ScanSymbolQuest(): Unit {
+        if (splitAmbiguousToken) {
+            return
+        }
+        if (getNextChar(0) == b'?') {
+            ReadUTF8Char()
+        }
+    }
+
+    private func ScanSymbolColon(): Unit {
+        ReadUTF8Char()
+        if (currentChar != Int64(b':')) {
+            Back()
+        }
+    }
+
     private func scanSimpleSymbolLiteral(): String {
         let start = pCurrent
         let first = currentByte()
         if (first == b'~') {
-            if (getNextChar(0) == b'>') {
-                ReadUTF8Char()
-            }
+            ScanSymbolTilde()
         } else if (first == b'+') {
-            if (getNextChar(0) == b'+' || getNextChar(0) == b'=') {
-                ReadUTF8Char()
-            } else if (getNextChar(0) == b'&' && getNextChar(1) == b'=') {
-                ReadUTF8Char()
-                ReadUTF8Char()
-            }
+            ScanSymbolPlus()
         } else if (first == b'-') {
-            if (getNextChar(0) == b'-' || getNextChar(0) == b'=' || getNextChar(0) == b'>') {
-                ReadUTF8Char()
-            } else if (getNextChar(0) == b'&' && getNextChar(1) == b'=') {
-                ReadUTF8Char()
-                ReadUTF8Char()
-            }
+            ScanSymbolHyphen()
         } else if (first == b'*') {
-            if (getNextChar(0) == b'*') {
-                ReadUTF8Char()
-                if (getNextChar(0) == b'&' && getNextChar(1) == b'=') {
-                    ReadUTF8Char()
-                    ReadUTF8Char()
-                } else if (getNextChar(0) == b'=') {
-                    ReadUTF8Char()
-                }
-            } else if (getNextChar(0) == b'=') {
-                ReadUTF8Char()
-            } else if (getNextChar(0) == b'&' && getNextChar(1) == b'=') {
-                ReadUTF8Char()
-                ReadUTF8Char()
-            }
+            ScanSymbolAsterisk()
         } else if (first == b'&') {
-            if (getNextChar(0) == b'&') {
-                ReadUTF8Char()
-                if (getNextChar(0) == b'=') {
-                    ReadUTF8Char()
-                }
-            } else if (getNextChar(0) == b'=') {
-                ReadUTF8Char()
-            }
+            ScanSymbolAmpersand()
         } else if (first == b'^') {
-            if (getNextChar(0) == b'=') {
-                ReadUTF8Char()
-            }
+            ScanSymbolCaret()
         } else if (first == b'!') {
-            if (getNextChar(0) == b'i' && getNextChar(1) == b'n' &&
-                (getNextChar(2) == b' ' || getNextChar(2) == b'\r' || getNextChar(2) == b'\n')) {
-                ReadUTF8Char()
-                ReadUTF8Char()
-            } else if (getNextChar(0) == b'=') {
-                ReadUTF8Char()
-            }
+            ScanSymbolExclamation()
         } else if (first == b'<') {
-            if (getNextChar(0) == b'<') {
-                ReadUTF8Char()
-                if (getNextChar(0) == b'=') {
-                    ReadUTF8Char()
-                }
-            } else if (getNextChar(0) == b'=' || getNextChar(0) == b':' || getNextChar(0) == b'-') {
-                ReadUTF8Char()
-            }
+            ScanSymbolLessThan()
         } else if (first == b'>') {
-            if (!splitAmbiguousToken) {
-                if (getNextChar(0) == b'>') {
-                    ReadUTF8Char()
-                    if (getNextChar(0) == b'=') {
-                        ReadUTF8Char()
-                    }
-                } else if (getNextChar(0) == b'=') {
-                    ReadUTF8Char()
-                }
-            }
+            ScanSymbolGreaterThan()
         } else if (first == b'=') {
-            if (getNextChar(0) == b'=' || getNextChar(0) == b'>') {
-                ReadUTF8Char()
-            }
+            ScanSymbolEqual()
         } else if (first == b'%') {
-            if (getNextChar(0) == b'=') {
-                ReadUTF8Char()
-            }
+            ScanSymbolPercentSign()
         } else if (first == b'|') {
-            if (getNextChar(0) == b'|') {
-                ReadUTF8Char()
-                if (getNextChar(0) == b'=') {
-                    ReadUTF8Char()
-                }
-            } else if (getNextChar(0) == b'=' || getNextChar(0) == b'>') {
-                ReadUTF8Char()
-            }
+            ScanSymbolVerticalBar()
         } else if (first == b'?') {
-            if (!splitAmbiguousToken && getNextChar(0) == b'?') {
-                ReadUTF8Char()
-            }
+            ScanSymbolQuest()
         } else if (first == b'@') {
-            if (getNextChar(0) == b'!') {
-                ReadUTF8Char()
-            }
+            ScanSymbolAt()
         } else if (first == b':') {
-            if (getNextChar(0) == b':') {
-                ReadUTF8Char()
-            }
+            ScanSymbolColon()
         }
         return input[start..pNext]
     }
