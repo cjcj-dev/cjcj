@@ -104,6 +104,8 @@ public class FailureReason {
 @When[os == "Windows"]
 foreign {
     func _access(pathname: CString, mode: Int32): Int32
+    func GetFileAttributesA(pathname: CString): UInt32
+    func SetFileAttributesA(pathname: CString, attributes: UInt32): Int32
 }
 
 @When[os != "Windows"]
@@ -120,6 +122,12 @@ foreign {
 foreign {
     func __error(): CPointer<Int32>
 }
+
+@When[os == "Windows"]
+private let FILE_ATTRIBUTE_HIDDEN: UInt32 = 0x2u32
+
+@When[os == "Windows"]
+private let INVALID_FILE_ATTRIBUTES: UInt32 = 0xffffffffu32
 
 @When[os == "Windows"]
 private func isPathSlashByte(byte: UInt8): Bool {
@@ -325,6 +333,16 @@ private func addFileIfNeeded(
     return true
 }
 
+@When[os == "Windows"]
+private func skipSymlinkInRecursiveDirectorySearch(): Bool {
+    return false
+}
+
+@When[os != "Windows"]
+private func skipSymlinkInRecursiveDirectorySearch(): Bool {
+    return true
+}
+
 public class FileUtil {
     public static func CheckCommandLineInjection(cmd: String): Bool {
         for (byte in cmd.toArray()) {
@@ -517,9 +535,11 @@ public class FileUtil {
 
     public static func ReadBinaryFileToBuffer(filePath: String, buffer: ArrayList<UInt8>, failedReason: FailureReason): Bool {
         let (ok, data, reason) = ReadBinaryFileToBuffer(filePath)
-        buffer.clear()
-        for (byte in data) {
-            buffer.add(byte)
+        if (ok) {
+            buffer.clear()
+            for (byte in data) {
+                buffer.add(byte)
+            }
         }
         failedReason.value = reason
         return ok
@@ -660,10 +680,17 @@ public class FileUtil {
         while (head < queue.size) {
             let tmpPath = queue[head]
             head++
-            let dirs = GetDirectories(tmpPath)
-            for (dir in dirs) {
-                allDirs.add(dir.path)
-                queue.add(dir.path)
+            try {
+                for (info in FSDirectory.readFrom(tmpPath)) {
+                    if (!info.isDirectory() || (skipSymlinkInRecursiveDirectorySearch() && info.isSymbolicLink())) {
+                        continue
+                    }
+                    let dirPath = JoinPath(tmpPath, info.name)
+                    allDirs.add(dirPath)
+                    queue.add(dirPath)
+                }
+            } catch (e: Exception) {
+                return allDirs.toArray()
             }
         }
         return allDirs.toArray()
@@ -968,6 +995,23 @@ public class FileUtil {
             }
         }
         return if (res.isEmpty()) { res } else { res[0..res.size - 1] }
+    }
+
+    @When[os == "Windows"]
+    public static func HideFile(path: String): Unit {
+        try (cPath = unsafe { LibC.mallocCString(path) }.asResource()) {
+            if (cPath.value.isNull()) {
+                return
+            }
+            unsafe {
+                let attributes = GetFileAttributesA(cPath.value)
+                if (attributes != INVALID_FILE_ATTRIBUTES) {
+                    let _ = SetFileAttributesA(cPath.value, attributes | FILE_ATTRIBUTE_HIDDEN)
+                }
+            }
+        } catch (e: Exception) {
+            ()
+        }
     }
 
     public static func IsSlash(c: UInt8): Bool {

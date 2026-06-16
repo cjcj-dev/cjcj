@@ -1,8 +1,10 @@
 package cangjie_compiler::utils
 
+import cangjie_compiler::basic.JoinStrings as BasicJoinStrings
+import cangjie_compiler::basic.SplitQualifiedName as BasicSplitQualifiedName
+import cangjie_compiler::basic.SplitString as BasicSplitString
 import std.collection.*
 import std.convert.*
-import std.time.DateTime
 
 private let OVERFLOW_NAMES: Array<(String, OverflowStrategy)> = [
     ("no", OverflowStrategy.NA),
@@ -25,9 +27,23 @@ foreign {
 @When[os == "Windows"]
 foreign {
     func rand_s(randomValue: CPointer<UInt32>): Int32
+    func GetModuleFileNameA(module: CPointer<Unit>, filename: CPointer<UInt8>, size: UInt32): UInt32
 }
 
 public func FillZero(num: Int64, len: Int64): String {
+    let raw = num.toString()
+    if (raw.size >= len) {
+        return raw
+    }
+    let builder = StringBuilder()
+    for (_ in 0..(len - raw.size)) {
+        builder.append("0")
+    }
+    builder.append(raw)
+    return builder.toString()
+}
+
+public func FillZero(num: UInt64, len: Int64): String {
     let raw = num.toString()
     if (raw.size >= len) {
         return raw
@@ -290,55 +306,15 @@ public func RemoveFromVec<T>(values: ArrayList<T>, item: T): Unit where T <: Equ
 }
 
 public func SplitString(str: String, delimiter: String): Array<String> {
-    if (str.isEmpty()) {
-        return Array<String>()
-    }
-    if (delimiter.isEmpty()) {
-        return [str]
-    }
-    let res = ArrayList<String>()
-    var pos: Int64 = 0
-    var foundPos = str.indexOf(delimiter)
-    while (let Some(found) <- foundPos) {
-        res.add(str[pos..found])
-        pos = found + delimiter.size
-        foundPos = str.indexOf(delimiter, pos)
-    }
-    if (pos < str.size) {
-        res.add(str[pos..])
-    } else if (pos == str.size) {
-        res.add("")
-    }
-    return res.toArray()
+    return BasicSplitString(str, delimiter)
 }
 
 public func SplitQualifiedName(qualifiedName: String, splitDc!: Bool = false): Array<String> {
-    let names = ArrayList<String>()
-    var idx: Int64 = 0
-    if (splitDc) {
-        if (let Some(next) <- qualifiedName.indexOf("::")) {
-            names.add(qualifiedName[0..next])
-            idx = next + 2
-        }
-    }
-    while (idx < qualifiedName.size) {
-        if (qualifiedName[idx] == b'.') {
-            idx++
-        } else if (qualifiedName[idx] == b'`') {
-            let next = qualifiedName.indexOf("`", idx + 1) ?? qualifiedName.size
-            names.add(qualifiedName[idx + 1..next])
-            idx = if (next == qualifiedName.size) { next } else { next + 1 }
-        } else {
-            let next = qualifiedName.indexOf(".", idx + 1) ?? qualifiedName.size
-            names.add(qualifiedName[idx..next])
-            idx = next
-        }
-    }
-    return names.toArray()
+    return BasicSplitQualifiedName(qualifiedName, splitDc: splitDc)
 }
 
 public func JoinStrings(strs: Array<String>, delimiter: String): String {
-    return String.join(strs, delimiter: delimiter)
+    return BasicJoinStrings(strs, delimiter)
 }
 
 public func StrToLower(str: String): String {
@@ -373,7 +349,7 @@ public func OverflowStrategyName(strategy: OverflowStrategy): String {
     return "no"
 }
 
-public func TryParseInt(str: String): Option<Int64> {
+public func TryParseInt(str: String): Option<Int32> {
     if (str.isEmpty()) {
         return None
     }
@@ -382,70 +358,80 @@ public func TryParseInt(str: String): Option<Int64> {
             return None
         }
     }
-    return Stoi(str)
-}
-
-@When[os == "Windows"]
-private func ReadRandomUInt32(): Option<UInt32> {
-    try (randomPtr = LibC.malloc<UInt32>().asResource()) {
-        if (randomPtr.value.isNull()) {
-            return None
-        }
-        unsafe {
-            if (rand_s(randomPtr.value) == 0) {
-                return randomPtr.value.read()
-            }
-        }
+    if (let Some(value) <- Stoi(str)) {
+        return Int32(value)
     }
     return None
 }
 
+@When[os == "Windows"]
+private func ReadRandomUInt32(): UInt32 {
+    var randomValue: UInt32 = 0u32
+    try (randomPtr = LibC.malloc<UInt32>().asResource()) {
+        if (randomPtr.value.isNull()) {
+            return randomValue
+        }
+        unsafe {
+            randomPtr.value.write(0u32)
+            let _ = rand_s(randomPtr.value)
+            randomValue = randomPtr.value.read()
+        }
+    } catch (e: Exception) {
+        ()
+    }
+    return randomValue
+}
+
 @When[os != "Windows"]
-private func ReadRandomUInt32(): Option<UInt32> {
+private func ReadRandomUInt32(): UInt32 {
+    var randomValue: UInt32 = 0u32
     try (path = unsafe { LibC.mallocCString("/dev/urandom") }.asResource()) {
         let fd = unsafe { open(path.value, O_RDONLY) }
-        if (fd < 0) {
-            return None
-        }
-        try (randomPtr = LibC.malloc<UInt32>().asResource()) {
-            if (randomPtr.value.isNull()) {
-                unsafe {
-                    let _ = close(fd)
+        if (fd > 0) {
+            try (randomPtr = LibC.malloc<UInt32>().asResource()) {
+                if (!randomPtr.value.isNull()) {
+                    unsafe {
+                        randomPtr.value.write(0u32)
+                        let _ = read(fd, CPointer<UInt8>(randomPtr.value), UIntNative(4))
+                        randomValue = randomPtr.value.read()
+                    }
                 }
-                return None
             }
-            let bytesRead = unsafe { read(fd, CPointer<UInt8>(randomPtr.value), UIntNative(4)) }
+        }
+        if (fd >= 0) {
             unsafe {
                 let _ = close(fd)
-            }
-            if (bytesRead == 4) {
-                unsafe {
-                    return randomPtr.value.read()
-                }
             }
         }
     } catch (e: Exception) {
         ()
     }
-    return None
+    return randomValue
 }
 
 public func GenerateRandomHexString(): String {
-    if (let Some(value) <- ReadRandomUInt32()) {
-        return UInt64(value).toString(radix: 16)
-    }
-    return UInt64(DateTime.nowUTC().hashCode()).toString(radix: 16)
+    return UInt64(ReadRandomUInt32()).toString(radix: 16)
 }
 
 public func StringifyArgumentVector(args: Array<String>): Array<String> {
     return args
 }
 
+@When[os == "Windows"]
+private func normalizeEnvironmentKey(key: String): String {
+    return key.toAsciiUpper()
+}
+
+@When[os != "Windows"]
+private func normalizeEnvironmentKey(key: String): String {
+    return key
+}
+
 public func StringifyEnvironmentPointer(entries: Array<String>): HashMap<String, String> {
     let environmentVars = HashMap<String, String>()
     for (item in entries) {
         if (let Some(pos) <- item.indexOf("=")) {
-            environmentVars.add(item[0..pos], item[pos + 1..])
+            environmentVars.add(normalizeEnvironmentKey(item[0..pos]), item[pos + 1..])
         }
     }
     return environmentVars
@@ -472,6 +458,32 @@ public func GetRootPackageName(fullPackageName: String): String {
         return fullPackageName[0..dotPos + 1]
     }
     return fullPackageName
+}
+
+@When[os == "Windows"]
+public func GetApplicationPath(): Option<String> {
+    try (buffer = LibC.malloc<UInt8>(count: FILE_PATH_MAX_LENGTH).asResource()) {
+        if (buffer.value.isNull()) {
+            return None
+        }
+        let length = unsafe { GetModuleFileNameA(CPointer<Unit>(), buffer.value, UInt32(FILE_PATH_MAX_LENGTH)) }
+        if (length == 0u32) {
+            return None
+        }
+        let bytes = ArrayList<UInt8>()
+        var idx: Int64 = 0
+        while (idx < Int64(length)) {
+            let byte = unsafe { (buffer.value + idx).read() }
+            if (byte == 0u8) {
+                break
+            }
+            bytes.add(byte)
+            idx++
+        }
+        return String.fromUtf8(bytes.toArray())
+    } catch (e: Exception) {
+        return None
+    }
 }
 
 public func GetApplicationPath(argv0: String, environmentVars: HashMap<String, String>): Option<String> {
