@@ -16,6 +16,24 @@ private class GenericInstantiationRecord {
     }
 }
 
+private func containsDecl(values: ArrayList<Decl>, decl: Decl): Bool {
+    for (value in values) {
+        if (SameDecl(value, decl)) {
+            return true
+        }
+    }
+    return false
+}
+
+private func containsExtendDecl(values: ArrayList<ExtendDecl>, decl: ExtendDecl): Bool {
+    for (value in values) {
+        if (SameDecl(value, decl)) {
+            return true
+        }
+    }
+    return false
+}
+
 private func sameSubst(lhs: TypeSubst, rhs: TypeSubst): Bool {
     if (lhs.entries.size != rhs.entries.size) {
         return false
@@ -30,6 +48,142 @@ private func sameSubst(lhs: TypeSubst, rhs: TypeSubst): Bool {
         }
     }
     return true
+}
+
+private func copyTypeArgs(ty: Option<Ty>): ArrayList<Ty> {
+    let out = ArrayList<Ty>()
+    if (let Some(value) <- ty) {
+        for (arg in value.typeArgs) {
+            out.add(arg)
+        }
+    }
+    return out
+}
+
+private func getGenericParamTys(decl: Decl): ArrayList<GenericsTy> {
+    let out = ArrayList<GenericsTy>()
+    if (let Some(generic) <- decl.GetGeneric()) {
+        for (param in generic.typeParameters) {
+            if (let Some(paramTy) <- param.GetTy()) {
+                if (let Some(genericTy) <- (paramTy as GenericsTy)) {
+                    out.add(genericTy)
+                }
+            }
+        }
+    }
+    return out
+}
+
+private func typeMappingFromArgs(genericParams: ArrayList<GenericsTy>, typeArgs: ArrayList<Ty>): TypeSubst {
+    let out = TypeSubst()
+    if (genericParams.size != typeArgs.size) {
+        return out
+    }
+    for (idx in 0..genericParams.size) {
+        out.Put(genericParams[idx], typeArgs[idx])
+    }
+    return out
+}
+
+private func buildTypeMappingFromDecl(genericDecl: Decl, instantiatedDecl: Decl): TypeSubst {
+    let byTy = GenerateTypeMappingByTy(GetDeclTy(genericDecl), GetDeclTy(instantiatedDecl))
+    if (!byTy.IsEmpty()) {
+        return byTy
+    }
+    let genericParams = getGenericParamTys(genericDecl)
+    let instantiatedArgs = GetDeclTypeParams(instantiatedDecl)
+    if (!instantiatedArgs.isEmpty()) {
+        return typeMappingFromArgs(genericParams, instantiatedArgs)
+    }
+    return typeMappingFromArgs(genericParams, copyTypeArgs(instantiatedDecl.GetTy()))
+}
+
+private func markNoReflectInfo(decl: Decl): Unit {
+    decl.EnableAttr(Attribute.NO_REFLECT_INFO)
+    for (member in decl.GetMemberDecls()) {
+        member.EnableAttr(Attribute.NO_REFLECT_INFO)
+        if (let Some(propDecl) <- (member as PropDecl)) {
+            for (getter in propDecl.getters) {
+                getter.EnableAttr(Attribute.NO_REFLECT_INFO)
+            }
+            for (setter in propDecl.setters) {
+                setter.EnableAttr(Attribute.NO_REFLECT_INFO)
+            }
+        }
+    }
+}
+
+private func applyPackageAttrs(decl: Decl, pkg: Package): Unit {
+    decl.fullPackageName = pkg.fullPackageName
+    decl.moduleName = pkg.fullPackageName
+    decl.toBeCompiled = true
+    decl.DisableAttr(Attribute.IMPORTED)
+}
+
+private func updateClonedNode(genericNode: Node, clonedNode: Node, typeManager: TypeManager, typeMapping: TypeSubst,
+    pkg: Package): Unit {
+    if (let Some(sourceTy) <- genericNode.GetTy()) {
+        clonedNode.SetTy(typeManager.GetInstantiatedTy(sourceTy, typeMapping))
+    }
+    if (let Some(refExpr) <- (clonedNode as NameReferenceExpr)) {
+        if (let Some(parentTy) <- refExpr.matchedParentTy) {
+            refExpr.matchedParentTy = typeManager.GetInstantiatedTy(parentTy, typeMapping)
+        }
+        var idx: Int64 = 0
+        while (idx < refExpr.instTys.size) {
+            refExpr.instTys[idx] = typeManager.GetInstantiatedTy(refExpr.instTys[idx], typeMapping)
+            idx++
+        }
+    }
+    if (let Some(clonedDecl) <- (clonedNode as Decl)) {
+        applyPackageAttrs(clonedDecl, pkg)
+    }
+}
+
+private func appendGenericInstantiation(pkg: Package, decl: Decl): Unit {
+    if (!containsDecl(pkg.genericInstantiatedDecls, decl)) {
+        pkg.genericInstantiatedDecls.add(decl)
+    }
+}
+
+private func addDeclExtendUnique(typeManager: TypeManager, decl: InheritableDecl, extendDecl: ExtendDecl): Unit {
+    for (entry in typeManager.declToExtendMap) {
+        if (SameDecl(entry.decl, decl)) {
+            if (!containsExtendDecl(entry.extends, extendDecl)) {
+                entry.extends.add(extendDecl)
+            }
+            return
+        }
+    }
+    let entry = DeclExtendsEntry(decl)
+    entry.extends.add(extendDecl)
+    typeManager.declToExtendMap.add(entry)
+}
+
+private func updateInstantiatedExtendMap(typeManager: TypeManager, pkg: Package): Unit {
+    for (decl in pkg.genericInstantiatedDecls) {
+        if (let Some(extendDecl) <- (decl as ExtendDecl)) {
+            if (let Some(extendTy) <- decl.GetTy()) {
+                if (extendTy.IsBuiltin()) {
+                    typeManager.UpdateBuiltInTyExtendDecl(extendTy, extendDecl)
+                } else if (let Some(extendedDecl) <- Ty.GetInheritableDeclPtrOfTy(extendTy)) {
+                    addDeclExtendUnique(typeManager, extendedDecl, extendDecl)
+                }
+            }
+        }
+    }
+}
+
+private func updateInstantiatedDeclsLinkage(pkg: Package): Unit {
+    for (decl in pkg.genericInstantiatedDecls) {
+        let walker = Walker(decl, visitPre: { node: Node =>
+            if (let Some(funcDecl) <- (node as FuncDecl)) {
+                funcDecl.linkage = Linkage.INTERNAL
+            }
+            VisitAction.WALK_CHILDREN
+        })
+        let _ = walker.Walk()
+    }
 }
 
 public class GenericInstantiationManagerImpl {
@@ -47,24 +201,36 @@ public class GenericInstantiationManagerImpl {
         if (resetGlobalState) {
             ResetGenericInstantiationStage()
         }
+        InstantiatedExtendRecorder(ci.typeManager).Record(pkg)
         for (file in pkg.files) {
             for (decl in file.decls) {
                 collectIdentityInstantiation(decl)
             }
         }
         for (decl in pkg.genericInstantiatedDecls) {
-            collectIdentityInstantiation(decl)
+            collectExistingInstantiation(decl)
         }
+        updateInstantiatedExtendMap(ci.typeManager, pkg)
+        updateInstantiatedDeclsLinkage(pkg)
     }
 
     public func GetInstantiatedDeclWithGenericInfo(genericInfo: GenericInfo, pkg: Package): Option<Decl> {
-        let _ = pkg
         if (let Some(cached) <- FindInCache(genericInfo)) {
             return cached
         }
         if (let Some(genericDecl) <- genericInfo.decl) {
-            let instantiatedDecl = InstantiateGenericDecl(genericDecl, genericInfo.gTyToTyMap)
-            instantiations.add(GenericInstantiationRecord(genericDecl, instantiatedDecl, genericInfo.gTyToTyMap.Clone()))
+            if (genericInfo.gTyToTyMap.IsEmpty()) {
+                collectIdentityInstantiation(genericDecl)
+                return genericDecl
+            }
+            let instantiatedDecl = InstantiateGenericDecl(genericDecl, genericInfo.gTyToTyMap, pkg)
+            addInstantiationRecord(genericDecl, instantiatedDecl, genericInfo.gTyToTyMap)
+            if (!SameDecl(genericDecl, instantiatedDecl)) {
+                appendGenericInstantiation(pkg, instantiatedDecl)
+                InstantiatedExtendRecorder(ci.typeManager).Record(instantiatedDecl)
+                updateInstantiatedExtendMap(ci.typeManager, pkg)
+                updateInstantiatedDeclsLinkage(pkg)
+            }
             return instantiatedDecl
         }
         return None
@@ -124,34 +290,52 @@ public class GenericInstantiationManagerImpl {
         return None
     }
 
-    public func InstantiateGenericDecl(decl: Decl, typeMapping: TypeSubst): Decl {
+    public func InstantiateGenericDecl(decl: Decl, typeMapping: TypeSubst, pkg: Package): Decl {
         if (typeMapping.IsEmpty()) {
             collectIdentityInstantiation(decl)
             return decl
         }
         let cloned = PartialInstantiation.Instantiate(decl, { source: Node, target: Node =>
-            if (let Some(sourceTy) <- source.GetTy()) {
-                target.SetTy(ci.typeManager.GetInstantiatedTy(sourceTy, typeMapping))
-            }
+            updateClonedNode(source, target, ci.typeManager, typeMapping, pkg)
         })
         if (let Some(clonedDecl) <- (cloned as Decl)) {
             clonedDecl.EnableAttr(Attribute.GENERIC_INSTANTIATED)
+            clonedDecl.EnableAttr(Attribute.NO_REFLECT_INFO)
+            clonedDecl.DisableAttr(Attribute.GENERIC)
+            clonedDecl.DisableAttr(Attribute.IMPORTED)
             clonedDecl.genericDecl = decl
+            markNoReflectInfo(clonedDecl)
             PartialInstantiation.RegisterInstantiation(decl, clonedDecl)
             return clonedDecl
         }
         return decl
     }
 
+    private func addInstantiationRecord(genericDecl: Decl, instantiatedDecl: Decl, subst: TypeSubst): Unit {
+        if (!hasInstantiation(genericDecl, instantiatedDecl, subst)) {
+            instantiations.add(GenericInstantiationRecord(genericDecl, instantiatedDecl, subst.Clone()))
+        }
+    }
+
     private func collectIdentityInstantiation(decl: Decl): Unit {
         if (let Some(_) <- decl.GetGeneric()) {
-            if (!hasInstantiation(decl, decl, TypeSubst())) {
-                instantiations.add(GenericInstantiationRecord(decl, decl, TypeSubst()))
-                PartialInstantiation.RegisterInstantiation(decl, decl)
-            }
+            addInstantiationRecord(decl, decl, TypeSubst())
+            PartialInstantiation.RegisterInstantiation(decl, decl)
         }
         for (member in decl.GetMemberDecls()) {
             collectIdentityInstantiation(member)
+        }
+    }
+
+    private func collectExistingInstantiation(decl: Decl): Unit {
+        if (let Some(genericDecl) <- decl.genericDecl) {
+            addInstantiationRecord(genericDecl, decl, buildTypeMappingFromDecl(genericDecl, decl))
+            PartialInstantiation.RegisterInstantiation(genericDecl, decl)
+        } else {
+            collectIdentityInstantiation(decl)
+        }
+        for (member in decl.GetMemberDecls()) {
+            collectExistingInstantiation(member)
         }
     }
 
