@@ -189,3 +189,15 @@ and count error, output-mode/source/object checks use
 `driver_invalid_compile_target`, `driver_source_file_empty`, and
 `driver_require_experimental`, and OHOS `--static-std` normalization emits
 `driver_static_std_for_ohos`.
+
+This continuation tightens the remaining post-action ordering and diagnostic
+parity around input/output validation. `ReprocessInputs` now reports the C++
+`no_such_file_or_directory` and `input_file_overwritten_by_generated_output`
+diagnostics instead of failing silently. The scan-dependency post-checks now use
+`driver_not_accept_cjo_inputs_when`,
+`driver_require_package_directory_scan_dependency`, and
+`driver_source_cjo_empty`. Reflection normalization is sequenced after
+output/input reprocessing as in `Option.cpp`, output-mode validation runs before
+obfuscation and CJMP checks, and CJMP common-part validation now accumulates all
+bad extension warnings plus the count mismatch before failing, matching the C++
+`ok &= VerifyFileExtension(...)` behavior.

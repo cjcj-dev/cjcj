@@ -936,8 +936,14 @@ public open class GlobalOptions <: Option {
         }
         for (inputFile in inputsToCheck) {
             let absInputFile = GetAbsPath(inputFile)
-            if (!absInputFile.hasValue) { return false }
-            if (absInputFile.value == output) { return false }
+            if (!absInputFile.hasValue) {
+                emitOptionDiag(BasicDiagKindRefactor.no_such_file_or_directory, inputFile)
+                return false
+            }
+            if (absInputFile.value == output) {
+                emitOptionDiag(BasicDiagKindRefactor.input_file_overwritten_by_generated_output, inputFile)
+                return false
+            }
         }
         return true
     }
@@ -950,9 +956,9 @@ public open class GlobalOptions <: Option {
             compileTarget = CompileTarget.EXECUTABLE
         }
         if (!SetupConditionalCompilationCfg(this)) { return false }
-        if (target.IsMacOS() || target.IsArm32()) { disableReflection = true }
         if (!ReprocessOutputs()) { return false }
         if (!ReprocessInputs()) { return false }
+        if (target.IsMacOS() || target.IsArm32()) { disableReflection = true }
         if (compileMacroPackage && enableOutputType) {
             Errorln("using both '--compile-macro' and '--output-type' is not allowed.")
             return false
@@ -974,15 +980,18 @@ public open class GlobalOptions <: Option {
         if (scanDepPkg) {
             if (compilePackage) {
                 if (!inputCjoFile.isEmpty()) {
-                    Errorln("'-p' or '--package' does not accept .cjo inputs with '--scan-dependency'.")
+                    emitOptionDiag(
+                        BasicDiagKindRefactor.driver_not_accept_cjo_inputs_when,
+                        "'-p' or '--package'"
+                    )
                     return false
                 }
                 if (packagePaths.isEmpty()) {
-                    Errorln("'--scan-dependency' requires a package directory when '-p' or '--package' is specified.")
+                    emitOptionDiag(BasicDiagKindRefactor.driver_require_package_directory_scan_dependency)
                     return false
                 }
             } else if (inputCjoFile.isEmpty()) {
-                Errorln("'--scan-dependency' requires a .cjo input file.")
+                emitOptionDiag(BasicDiagKindRefactor.driver_source_cjo_empty)
                 return false
             }
         }
@@ -1085,35 +1094,6 @@ public open class GlobalOptions <: Option {
                 return false
             }
         }
-        if (!ReprocessObfuseOption()) { return false }
-        for (commonCjo in commonPartCjos) {
-            if (GetFileExtension(commonCjo) != "cjo") {
-                emitOptionDiag(
-                    BasicDiagKindRefactor.driver_warning_unexpected_file_extension,
-                    "cjo",
-                    commonCjo,
-                    commonCjo,
-                    ARGUMENT_IGNORED_SUFFIX
-                )
-                return false
-            }
-        }
-        for (commonChir in commonPartChirs) {
-            if (GetFileExtension(commonChir) != "chir") {
-                emitOptionDiag(
-                    BasicDiagKindRefactor.driver_warning_unexpected_file_extension,
-                    "chir",
-                    commonChir,
-                    commonChir,
-                    ARGUMENT_IGNORED_SUFFIX
-                )
-                return false
-            }
-        }
-        if (commonPartCjos.size != commonPartChirs.size) {
-            emitOptionDiag(BasicDiagKindRefactor.driver_require_common_chir_for_each_common_cjo)
-            return false
-        }
         if (outputMode != OutputMode.OBJ && compileTarget != CompileTarget.DEFAULT) {
             compileTarget = CompileTarget.DEFAULT
             emitOptionDiag(BasicDiagKindRefactor.driver_invalid_compile_target)
@@ -1126,6 +1106,37 @@ public open class GlobalOptions <: Option {
             emitOptionDiag(BasicDiagKindRefactor.driver_require_experimental)
             return false
         }
+        if (!ReprocessObfuseOption()) { return false }
+        var cjmpOk = true
+        for (commonCjo in commonPartCjos) {
+            if (GetFileExtension(commonCjo) != "cjo") {
+                emitOptionDiag(
+                    BasicDiagKindRefactor.driver_warning_unexpected_file_extension,
+                    "cjo",
+                    commonCjo,
+                    commonCjo,
+                    ARGUMENT_IGNORED_SUFFIX
+                )
+                cjmpOk = false
+            }
+        }
+        for (commonChir in commonPartChirs) {
+            if (GetFileExtension(commonChir) != "chir") {
+                emitOptionDiag(
+                    BasicDiagKindRefactor.driver_warning_unexpected_file_extension,
+                    "chir",
+                    commonChir,
+                    commonChir,
+                    ARGUMENT_IGNORED_SUFFIX
+                )
+                cjmpOk = false
+            }
+        }
+        if (commonPartCjos.size != commonPartChirs.size) {
+            emitOptionDiag(BasicDiagKindRefactor.driver_require_common_chir_for_each_common_cjo)
+            cjmpOk = false
+        }
+        if (!cjmpOk) { return false }
         if (!jobs.hasValue) { jobs = MaybeUInt64(GetHardwareConcurrency()) }
         if (target.os == OSType.WINDOWS || target.os == OSType.DARWIN || target.os == OSType.IOS ||
             IsObfuscationEnabled() || IsLTOEnabled() || enableCoverage) {
