@@ -186,6 +186,21 @@ private func updateInstantiatedDeclsLinkage(pkg: Package): Unit {
     }
 }
 
+private func ignoredInstantiationKind(decl: Decl): Bool {
+    return decl.astKind == ASTKind.TYPE_ALIAS_DECL || decl.astKind == ASTKind.BUILTIN_DECL ||
+        decl.astKind == ASTKind.GENERIC_PARAM_DECL || decl.astKind == ASTKind.PACKAGE_DECL
+}
+
+private func addTyUnique(values: ArrayList<Ty>, ty: Ty): Bool {
+    for (value in values) {
+        if (SameTy(value, ty)) {
+            return false
+        }
+    }
+    values.add(ty)
+    return true
+}
+
 public class GenericInstantiationManagerImpl {
     private var ci: CompilerInstance
     private var context: GenericInstantiationContext
@@ -210,12 +225,13 @@ public class GenericInstantiationManagerImpl {
         for (decl in pkg.genericInstantiatedDecls) {
             collectExistingInstantiation(decl)
         }
+        InstantiateReferencedGenerics(pkg)
         updateInstantiatedExtendMap(ci.typeManager, pkg)
         updateInstantiatedDeclsLinkage(pkg)
     }
 
     public func GetInstantiatedDeclWithGenericInfo(genericInfo: GenericInfo, pkg: Package): Option<Decl> {
-        if (let Some(cached) <- FindInCache(genericInfo)) {
+        if (let Some(cached) <- FindInCache(genericInfo, pkg)) {
             return cached
         }
         if (let Some(genericDecl) <- genericInfo.decl) {
@@ -228,6 +244,7 @@ public class GenericInstantiationManagerImpl {
             if (!SameDecl(genericDecl, instantiatedDecl)) {
                 appendGenericInstantiation(pkg, instantiatedDecl)
                 InstantiatedExtendRecorder(ci.typeManager).Record(instantiatedDecl)
+                InstantiateReferencedGenericsInNode(instantiatedDecl, pkg)
                 updateInstantiatedExtendMap(ci.typeManager, pkg)
                 updateInstantiatedDeclsLinkage(pkg)
             }
@@ -280,10 +297,24 @@ public class GenericInstantiationManagerImpl {
     }
 
     public func FindInCache(info: GenericInfo): Option<Decl> {
+        return FindInCache(info, None)
+    }
+
+    private func FindInCache(info: GenericInfo, pkg: Package): Option<Decl> {
+        return FindInCache(info, Some(pkg))
+    }
+
+    private func FindInCache(info: GenericInfo, pkg: Option<Package>): Option<Decl> {
         if (let Some(genericDecl) <- info.decl) {
             for (entry in instantiations) {
                 if (SameDecl(entry.genericDecl, genericDecl) && sameSubst(entry.subst, info.gTyToTyMap)) {
-                    return entry.instantiatedDecl
+                    if (let Some(currentPkg) <- pkg) {
+                        if (entry.instantiatedDecl.fullPackageName == currentPkg.fullPackageName) {
+                            return entry.instantiatedDecl
+                        }
+                    } else {
+                        return entry.instantiatedDecl
+                    }
                 }
             }
         }
@@ -336,6 +367,207 @@ public class GenericInstantiationManagerImpl {
         }
         for (member in decl.GetMemberDecls()) {
             collectExistingInstantiation(member)
+        }
+    }
+
+    private func InstantiateReferencedGenerics(pkg: Package): Unit {
+        for (file in pkg.files) {
+            InstantiateReferencedGenericsInNode(file, pkg)
+        }
+        for (decl in pkg.srcImportedNonGenericDecls) {
+            InstantiateReferencedGenericsInNode(decl, pkg)
+        }
+    }
+
+    private func InstantiateReferencedGenericsInNode(root: Node, pkg: Package): Unit {
+        let walker = Walker(root, visitPre: { node: Node =>
+            CheckNodeInstantiation(node, pkg)
+        })
+        let _ = walker.Walk()
+    }
+
+    private func CheckNodeInstantiation(node: Node, pkg: Package): VisitAction {
+        if (ShouldSkipInstantiationNode(node)) {
+            return VisitAction.SKIP_CHILDREN
+        }
+        if (let Some(expr) <- (node as Expr)) {
+            if (let Some(desugar) <- expr.desugarExpr) {
+                InstantiateReferencedGenericsInNode(desugar, pkg)
+                return VisitAction.SKIP_CHILDREN
+            }
+        }
+        InstantiateGenericTysForNode(node, pkg)
+        if (let Some(refExpr) <- (node as RefExpr)) {
+            GenericRefExprInstantiate(refExpr, pkg)
+        } else if (let Some(memberAccess) <- (node as MemberAccess)) {
+            GenericMemberAccessInstantiate(memberAccess, pkg)
+        } else if (let Some(typeNode) <- (node as Type)) {
+            GenericTypeInstantiate(typeNode, pkg)
+        } else if (let Some(arrayExpr) <- (node as ArrayExpr)) {
+            GenericArrayExprInstantiate(arrayExpr, pkg)
+        } else if (let Some(arrayLit) <- (node as ArrayLit)) {
+            GenericArrayLitInstantiate(arrayLit, pkg)
+        }
+        return VisitAction.WALK_CHILDREN
+    }
+
+    private func ShouldSkipInstantiationNode(node: Node): Bool {
+        if (node.astKind == ASTKind.GENERIC_PARAM_DECL || node.astKind == ASTKind.GENERIC_CONSTRAINT ||
+            node.astKind == ASTKind.PRIMARY_CTOR_DECL || node.astKind == ASTKind.MODIFIER) {
+            return true
+        }
+        if (let Some(decl) <- (node as Decl)) {
+            if (decl.TestAttr(Attribute.GENERIC) && !decl.TestAttr(Attribute.GENERIC_INSTANTIATED)) {
+                return true
+            }
+        }
+        return false
+    }
+
+    private func InstantiateGenericTysForNode(node: Node, pkg: Package): Unit {
+        if (let Some(ty) <- node.GetTy()) {
+            if (Ty.IsTyCorrect(ty) && !ty.HasIntersectionTy()) {
+                let visited = ArrayList<Ty>()
+                InstantiateGenericTy(ty, pkg, visited)
+            }
+        }
+    }
+
+    private func InstantiateGenericTy(ty: Ty, pkg: Package, visited: ArrayList<Ty>): Unit {
+        if (!Ty.IsTyCorrect(ty) || ty.HasGeneric() || !addTyUnique(visited, ty)) {
+            return
+        }
+        for (arg in ty.typeArgs) {
+            InstantiateGenericTy(arg, pkg, visited)
+        }
+        if (let Some(target) <- Ty.GetDeclPtrOfTy(ty)) {
+            InstantiateGenericDeclWithInstTys(target, copyTypeArgs(Some(ty)), pkg)
+        }
+        for (extendDecl in ci.typeManager.GetTyUsedExtends(ty)) {
+            if (let Some(extendTy) <- GetDeclTy(extendDecl)) {
+                if (!extendTy.HasGeneric() && ci.typeManager.CheckExtendWithConstraint(ty, Some(extendDecl))) {
+                    InstantiateGenericDeclWithInstTys(extendDecl, copyTypeArgs(Some(extendTy)), pkg)
+                }
+            }
+        }
+    }
+
+    private func GenericRefExprInstantiate(refExpr: RefExpr, pkg: Package): Unit {
+        if (let Some(target) <- refExpr.GetTarget()) {
+            if (target.astKind == ASTKind.GENERIC_PARAM_DECL || target.astKind == ASTKind.PACKAGE_DECL) {
+                return
+            }
+            var targetDecl = target
+            let instTys = ArrayList<Ty>()
+            for (ty in refExpr.instTys) {
+                instTys.add(ty)
+            }
+            if (refExpr.isThis || refExpr.isSuper) {
+                instTys.clear()
+                if (let Some(thisTy) <- refExpr.GetTy()) {
+                    for (arg in thisTy.typeArgs) {
+                        instTys.add(arg)
+                    }
+                }
+            }
+            if (IsClassOrEnumConstructor(targetDecl)) {
+                if (let Some(outer) <- targetDecl.outerDecl) {
+                    targetDecl = outer
+                    instTys.clear()
+                    if (let Some(refTy) <- refExpr.GetTy()) {
+                        let baseTy = if (let Some(funcTy) <- (refTy as FuncTy)) { funcTy.retTy } else { refTy }
+                        for (arg in baseTy.typeArgs) {
+                            instTys.add(arg)
+                        }
+                    }
+                }
+            }
+            InstantiateGenericDeclWithInstTys(targetDecl, instTys, pkg)
+        }
+    }
+
+    private func GenericMemberAccessInstantiate(memberAccess: MemberAccess, pkg: Package): Unit {
+        if (let Some(target) <- memberAccess.GetTarget()) {
+            if (target.astKind == ASTKind.PACKAGE_DECL) {
+                return
+            }
+            var targetDecl = target
+            let instTys = ArrayList<Ty>()
+            for (ty in memberAccess.instTys) {
+                instTys.add(ty)
+            }
+            if (IsClassOrEnumConstructor(targetDecl)) {
+                if (let Some(outer) <- targetDecl.outerDecl) {
+                    targetDecl = outer
+                    instTys.clear()
+                    if (let Some(memberTy) <- memberAccess.GetTy()) {
+                        let baseTy = if (let Some(funcTy) <- (memberTy as FuncTy)) { funcTy.retTy } else { memberTy }
+                        for (arg in baseTy.typeArgs) {
+                            instTys.add(arg)
+                        }
+                    }
+                }
+            } else if (let Some(outer) <- targetDecl.outerDecl) {
+                if (outer.IsNominalDecl() && outer.TestAttr(Attribute.GENERIC)) {
+                    if (let Some(baseExpr) <- memberAccess.baseExpr) {
+                        if (let Some(baseTy) <- baseExpr.GetTy()) {
+                            let promotedTys = Promotion(ci.typeManager).Promote(baseTy, GetDeclTy(outer) ?? baseTy)
+                            if (!promotedTys.IsEmpty()) {
+                                InstantiateGenericDeclWithInstTys(outer, copyTypeArgs(Some(promotedTys.values[0])), pkg)
+                            }
+                        }
+                    }
+                }
+            }
+            InstantiateGenericDeclWithInstTys(targetDecl, instTys, pkg)
+        }
+    }
+
+    private func GenericTypeInstantiate(typeNode: Type, pkg: Package): Unit {
+        if (!Ty.IsTyCorrect(typeNode.GetTy())) {
+            return
+        }
+        if (let Some(ty) <- typeNode.GetTy()) {
+            if (ty.HasGeneric() || ty.HasIntersectionTy()) {
+                return
+            }
+            if (let Some(target) <- Ty.GetDeclPtrOfTy(ty)) {
+                InstantiateGenericDeclWithInstTys(target, copyTypeArgs(Some(ty)), pkg)
+            }
+        }
+    }
+
+    private func GenericArrayExprInstantiate(arrayExpr: ArrayExpr, pkg: Package): Unit {
+        if (let Some(initFunc) <- arrayExpr.initFunc) {
+            if (let Some(arrayTy) <- arrayExpr.GetTy()) {
+                InstantiateGenericDeclWithInstTys(initFunc, copyTypeArgs(Some(arrayTy)), pkg)
+            }
+        }
+    }
+
+    private func GenericArrayLitInstantiate(arrayLit: ArrayLit, pkg: Package): Unit {
+        if (let Some(initFunc) <- arrayLit.initFunc) {
+            if (let Some(arrayTy) <- arrayLit.GetTy()) {
+                InstantiateGenericDeclWithInstTys(initFunc, copyTypeArgs(Some(arrayTy)), pkg)
+            }
+        } else if (let Some(arrayTy) <- arrayLit.GetTy()) {
+            if (let Some(target) <- Ty.GetDeclPtrOfTy(arrayTy)) {
+                InstantiateGenericDeclWithInstTys(target, copyTypeArgs(Some(arrayTy)), pkg)
+            }
+        }
+    }
+
+    private func InstantiateGenericDeclWithInstTys(decl: Decl, instTys: ArrayList<Ty>, pkg: Package): Unit {
+        let generalDecl = PartialInstantiation.GetGeneralDecl(decl)
+        if (ignoredInstantiationKind(generalDecl) || !RequireInstantiation(generalDecl)) {
+            return
+        }
+        if ((let None <- generalDecl.GetGeneric()) || instTys.isEmpty() || Ty.ExistGeneric(instTys)) {
+            return
+        }
+        let genericInfo = ConstructGenericInfo(generalDecl, instTys)
+        if (!genericInfo.gTyToTyMap.IsEmpty()) {
+            let _ = GetInstantiatedDeclWithGenericInfo(genericInfo, pkg)
         }
     }
 
