@@ -21,6 +21,9 @@ Current status:
 - Driver now preserves frontend/global arguments in parse order, filters out
   driver-only linker/toolchain options, and passes a pre-created temporary
   bitcode output path to the self-hosted FrontendTool bridge.
+- The main entry now mirrors the C++ `cjc-frontend` dispatch path by checking
+  the invoked executable name before normal driver parsing and calling the
+  self-hosted FrontendTool entry directly.
 - Sanitizer selection, `--sanitize-set-rpath` validation, CHIR emit mode,
   `chir`/`obj`/`hotreload` output-type parsing, PGO flags, section flags, jobs,
   warning forwarding, and target-triple validation are represented in Driver
@@ -36,22 +39,28 @@ Current status:
   placement, PGO/coverage runtime placement, dSYM plus ad-hoc codesign command
   scheduling, strip-to-final-output behavior, and Darwin/iOS runtime archive
   selection are implemented.
+- Android, OHOS, and MinGW native linking now have platform-specific command
+  builders rather than only generic Linux/Windows option tails: Android
+  toolchain/sysroot library deduction, Android/OHOS CRT ordering and linker
+  scripts, OHOS page-size/unwind/profile runtime behavior, MinGW sysroot
+  library search, PE security flags, CRT object ordering, archive LD_LIBRARY_PATH
+  handling, and the full MinGW system-library tail are represented.
 
 Residual fidelity risks:
 
 - Driver self-host markers have been removed. Bitcode package names are read
   through LLVM C API bindings, and source compilation now invokes the
   self-hosted FrontendTool package.
-- GNU/Mach-O/platform toolchains are functional command builders. Linux/GNU and
-  Darwin/iOS linkage have substantially more C++ parity, but exact
-  symbol-localization data from codegen partial-linking, some Android/OHOS/MinGW
-  specialized linker arguments, and full platform-specific runtime library edge
-  cases remain below the C++ driver.
-- Main frontend support is a compiling shim rather than the full C++
-  `main-frontend.cpp` standalone flow.
+- GNU/Mach-O/platform toolchains are functional command builders with
+  substantially more C++ parity, but exact symbol-localization data from codegen
+  partial-linking and some platform-specific runtime library edge cases remain
+  below the C++ driver.
+- The Windows-specific `main-frontend.cpp` process wrapper is represented by a
+  direct Cangjie frontend shim rather than a separate `CreateProcess`-style
+  executable launcher.
 
 Module completion:
 
 - Not complete. The build passes, but frontend/codegen package boundaries still
   do not expose the full C++ in-process `DefaultCompilerInstance` behavior to
-  Driver, and platform toolchain parity remains incomplete.
+  Driver, and cross-target behavior still needs runtime-backed validation.

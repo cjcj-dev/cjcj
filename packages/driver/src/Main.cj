@@ -9,6 +9,12 @@ main(): Int64 {
         return 1
     }
     let executablePath = GetApplicationPath(args[0], environmentVars) ?? args[0]
+    let executableName = FileUtil.GetFileName(args[0])
+    if (executableName == "cjc-frontend" || executableName == "cjc-frontend.exe") {
+        let exitCode = ExecuteFrontendShim(args, executablePath)
+        TempFileManager.Instance().DeleteTempFiles()
+        return exitCode
+    }
     let driver = Driver(args, executableName: executablePath)
     driver.EnvironmentSetup(environmentVars)
     if (!driver.ParseArgs()) {

@@ -28,7 +28,7 @@ public open class Linux_CJNATIVE <: Gnu {
         return cjldScript
     }
 
-    protected override func GenerateLinkingTool(
+    protected open override func GenerateLinkingTool(
         objFiles: ArrayList<TempFileInfo>,
         gccLibPath: String,
         gccCrtFilePair: (String, String)
