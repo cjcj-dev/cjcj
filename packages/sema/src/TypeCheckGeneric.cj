@@ -45,7 +45,8 @@ public func CheckInstTyWithUpperbound(typeManager: TypeManager, typeMapping: Typ
         let genericTy = entry.tyVar
         for (upperBound in genericTy.upperBounds) {
             let upperBoundTy = typeManager.GetInstantiatedTy(upperBound, typeMapping)
-            if (!typeManager.IsSubtype(entry.ty, upperBoundTy, implicitBoxed: true, allowOptionBox: false)) {
+            if ((SameTy(entry.ty, upperBoundTy) && entry.ty.IsCType()) ||
+                !typeManager.IsSubtype(entry.ty, upperBoundTy, implicitBoxed: true, allowOptionBox: false)) {
                 return false
             }
         }

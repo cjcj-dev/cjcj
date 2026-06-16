@@ -23,10 +23,12 @@ private func addExtendUnique(values: ArrayList<ExtendDecl>, extendDecl: ExtendDe
 
 public class InstantiatedExtendRecorder {
     private var typeManager: TypeManager
+    private var promotion: Promotion
     private let usedExtends: ArrayList<ExtendDecl> = ArrayList<ExtendDecl>()
 
     public init(typeManager: TypeManager) {
         this.typeManager = typeManager
+        promotion = Promotion(typeManager)
     }
 
     public func Record(node: Node): Unit {
@@ -53,7 +55,7 @@ public class InstantiatedExtendRecorder {
         if (let Some(refExpr) <- (node as RefExpr)) {
             RecordExtendForTarget(refExpr.GetTarget())
         } else if (let Some(memberAccess) <- (node as MemberAccess)) {
-            RecordExtendForTarget(memberAccess.GetTarget())
+            RecordExtendForMemberAccess(memberAccess)
             if (let Some(baseExpr) <- memberAccess.baseExpr) {
                 RecordExtendForTy(baseExpr.GetTy())
             }
@@ -61,15 +63,58 @@ public class InstantiatedExtendRecorder {
         RecordExtendForTy(node.GetTy())
     }
 
+    private func RememberExtend(extendDecl: ExtendDecl): Unit {
+        let _ = addExtendUnique(usedExtends, extendDecl)
+    }
+
+    private func RecordExactUsedExtend(baseTy: Ty, extendDecl: ExtendDecl): Unit {
+        RememberExtend(extendDecl)
+        if (let Some(extendTy) <- GetDeclTy(extendDecl)) {
+            let promotedTys = promotion.Promote(baseTy, extendTy)
+            if (!promotedTys.IsEmpty()) {
+                typeManager.RecordUsedGenericExtend(promotedTys.values[0], extendDecl: extendDecl)
+                return
+            }
+        }
+        typeManager.RecordUsedGenericExtend(baseTy, extendDecl: extendDecl)
+    }
+
+    private func RecordFallbackUsedExtend(extendDecl: ExtendDecl): Unit {
+        RememberExtend(extendDecl)
+        if (let Some(extendTy) <- GetDeclTy(extendDecl)) {
+            typeManager.RecordUsedGenericExtend(extendTy, extendDecl: extendDecl)
+        }
+    }
+
+    private func RecordExtendForMemberAccess(memberAccess: MemberAccess): Unit {
+        if (let Some(target) <- memberAccess.GetTarget()) {
+            if (let Some(outerDecl) <- target.outerDecl) {
+                if (let Some(extendDecl) <- (outerDecl as ExtendDecl)) {
+                    if (let Some(baseExpr) <- memberAccess.baseExpr) {
+                        if (let Some(baseTy) <- baseExpr.GetTy()) {
+                            if (!baseTy.HasGeneric()) {
+                                RecordExactUsedExtend(baseTy, extendDecl)
+                                return
+                            }
+                        }
+                    }
+                    RecordFallbackUsedExtend(extendDecl)
+                    return
+                }
+            }
+        }
+        RecordExtendForTarget(memberAccess.GetTarget())
+    }
+
     private func RecordExtendForTarget(target: Option<Decl>): Unit {
         if (let Some(decl) <- target) {
             if (let Some(extendDecl) <- (decl as ExtendDecl)) {
-                let _ = addExtendUnique(usedExtends, extendDecl)
+                RecordFallbackUsedExtend(extendDecl)
                 return
             }
             if (let Some(outerDecl) <- decl.outerDecl) {
                 if (let Some(extendDecl) <- (outerDecl as ExtendDecl)) {
-                    let _ = addExtendUnique(usedExtends, extendDecl)
+                    RecordFallbackUsedExtend(extendDecl)
                 }
             }
         }
@@ -78,7 +123,8 @@ public class InstantiatedExtendRecorder {
     private func RecordExtendForTy(ty: Option<Ty>): Unit {
         if (let Some(value) <- ty) {
             for (extendDecl in typeManager.GetAllExtendsByTy(value)) {
-                let _ = addExtendUnique(usedExtends, extendDecl)
+                RememberExtend(extendDecl)
+                typeManager.RecordUsedGenericExtend(value, extendDecl: extendDecl)
             }
         }
     }

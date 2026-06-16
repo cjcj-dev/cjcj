@@ -296,6 +296,12 @@ public func MultiTypeSubstToTypeSubst(mts: MultiTypeSubst): TypeSubst {
 public func GetDeclTypeParams(decl: Decl): ArrayList<Ty> {
     let out = ArrayList<Ty>()
     if (let Some(extendDecl) <- (decl as ExtendDecl)) {
+        if (let Some(declTy) <- decl.GetTy()) {
+            for (typeArg in declTy.typeArgs) {
+                out.add(typeArg)
+            }
+            return out
+        }
         if (let Some(extendedType) <- extendDecl.extendedType) {
             if (let Some(extendedTy) <- extendedType.GetTy()) {
                 for (typeArg in extendedTy.typeArgs) {
