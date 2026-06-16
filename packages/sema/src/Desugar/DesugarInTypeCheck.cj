@@ -2,12 +2,15 @@ package cangjie_compiler::sema.Desugar
 
 import std.collection.*
 import cangjie_compiler::ast.*
+import cangjie_compiler::ast.AnnotationKind as AstAnnotationKind
 import cangjie_compiler::sema.*
 
 private let COMPOSITION_FUNC_NAME: String = "composition"
 private let CALL_OPERATOR_NAME: String = "()"
 private let SUBSCRIPT_OPERATOR_NAME: String = "[]"
 private let VARIADIC_VALUE_NAME: String = "value"
+private let INIT_FUNC_NAME: String = "init"
+private let THIS_NAME: String = "this"
 
 private func TryDesugarFunctionCallExpr(base: Expr): Expr {
     if (!Ty.IsInitialTy(base.GetTy()) && base.TyKind() != TypeKind.TYPE_FUNC) {
@@ -58,6 +61,47 @@ private func CloneExpr(expr: Expr): Option<Expr> {
     return ASTCloner.Clone(expr) as Expr
 }
 
+private func CloneType(typeNode: Type): Option<Type> {
+    return ASTCloner.Clone(typeNode, SetIsClonedSourceCode) as Type
+}
+
+private func CloneExprAsSource(expr: Expr): Option<Expr> {
+    return ASTCloner.Clone(expr, SetIsClonedSourceCode) as Expr
+}
+
+private func CloneAnnotationAsSource(annotation: Annotation): Option<Annotation> {
+    return ASTCloner.Clone(annotation, SetIsClonedSourceCode) as Annotation
+}
+
+private func CloneNodeAsSource(node: Node): Option<Node> {
+    return ASTCloner.Clone(node, SetIsClonedSourceCode)
+}
+
+private func CloneTypeOptionAsSource(typeNode: Option<Type>): Option<Type> {
+    if (let Some(value) <- typeNode) {
+        return CloneType(value)
+    }
+    return None
+}
+
+private func CloneExprOptionAsSource(expr: Option<Expr>): Option<Expr> {
+    if (let Some(value) <- expr) {
+        return CloneExprAsSource(value)
+    }
+    return None
+}
+
+private func CloneAnnotationOption(annotationArray: Option<ArrayLit>): Option<ArrayLit> {
+    if (let Some(value) <- annotationArray) {
+        return ASTCloner.Clone(value, SetIsClonedSourceCode) as ArrayLit
+    }
+    return None
+}
+
+private func CloneSrcIdentifier(source: SrcIdentifier): SrcIdentifier {
+    return SrcIdentifier(source.Val(), source.Begin(), source.End(), source.IsRaw())
+}
+
 private func CreateOperatorMemberAccess(source: Node, base: Expr, fieldName: String, pos: Position): MemberAccess {
     let memberAccess = MemberAccess()
     CopyBasicInfo(source, memberAccess)
@@ -105,6 +149,216 @@ private func GetBuiltinCtorBaseTy(typeManager: TypeManager, callExpr: CallExpr):
         }
     }
     return None
+}
+
+private func AppendDeclToClassOrStructBody(decl: Decl, member: Decl): Unit {
+    if (let Some(classDecl) <- (decl as ClassDecl)) {
+        if (let Some(body) <- classDecl.body) {
+            body.decls.add(member)
+        }
+    } else if (let Some(structDecl) <- (decl as StructDecl)) {
+        if (let Some(body) <- structDecl.body) {
+            body.decls.add(member)
+        }
+    }
+}
+
+private func CopyModifiersInto(source: ArrayList<Modifier>, target: ArrayList<Modifier>): Unit {
+    for (modifier in source) {
+        if (let Some(cloned) <- (ASTCloner.Clone(modifier, SetIsClonedSourceCode) as Modifier)) {
+            target.add(cloned)
+        }
+    }
+}
+
+private func CopyParamAnnotationsInto(source: FuncParam, target: FuncParam): Unit {
+    for (annotation in source.annotations) {
+        if (annotation.kind == AstAnnotationKind.DEPRECATED || annotation.kind == AstAnnotationKind.CUSTOM) {
+            if (let Some(cloned) <- CloneAnnotationAsSource(annotation)) {
+                target.annotations.add(cloned)
+            }
+        }
+    }
+}
+
+private func MoveAnnotationsInto(source: ArrayList<Annotation>, target: ArrayList<Annotation>): Unit {
+    for (annotation in source) {
+        target.add(annotation)
+    }
+    source.clear()
+}
+
+private func IsLeadingSuperCall(node: Node): Bool {
+    if (let Some(callExpr) <- (node as CallExpr)) {
+        if (let Some(baseFunc) <- callExpr.baseFunc) {
+            if (let Some(refExpr) <- (baseFunc as RefExpr)) {
+                return refExpr.isSuper
+            }
+        }
+    }
+    return false
+}
+
+private func DesugarPrimaryCtorHandleSuper(decl: Decl, sourceBody: FuncBody, targetBody: FuncBody): Int64 {
+    if (decl.astKind != ASTKind.CLASS_DECL) {
+        return 0
+    }
+    if (let Some(block) <- sourceBody.body) {
+        if (!block.body.isEmpty() && IsLeadingSuperCall(block.body[0])) {
+            if (let Some(cloned) <- CloneNodeAsSource(block.body[0])) {
+                targetBody.body.getOrThrow().body.add(cloned)
+                return 1
+            }
+        }
+    }
+    return 0
+}
+
+private func CreatePrimaryCtorMemberDecl(decl: Decl, ctor: PrimaryCtorDecl, param: FuncParam): VarDecl {
+    let member = VarDecl()
+    CopyBasicInfo(param, member)
+    for (annotation in param.annotations) {
+        if (let Some(cloned) <- CloneAnnotationAsSource(annotation)) {
+            member.annotations.add(cloned)
+        }
+    }
+    member.annotationsArray = CloneAnnotationOption(param.annotationsArray)
+    member.isVar = param.isVar
+    member.isConst = param.isConst
+    CopyModifiersInto(param.modifiers, member.modifiers)
+    member.CloneAttrs(param)
+    member.keywordPos = param.begin
+    member.colonPos = param.colonPos
+    member.typeNode = CloneTypeOptionAsSource(param.typeNode)
+    member.identifier = CloneSrcIdentifier(param.identifier)
+    member.isMemberParam = true
+    member.rawMangleName = param.rawMangleName
+    member.toBeCompiled = ctor.toBeCompiled
+    member.outerDecl = decl
+    member.EnableAttr(Attribute.COMPILER_ADD)
+    member.EnableAttr(Attribute.IS_CLONED_SOURCE_CODE)
+    return member
+}
+
+private func CreatePrimaryCtorMemberAssign(ctor: PrimaryCtorDecl, param: FuncParam): AssignExpr {
+    let thisExpr = CreateRefExpr(THIS_NAME)
+    thisExpr.isThis = true
+    thisExpr.EnableAttr(Attribute.IMPLICIT_ADD)
+    CopyBasicInfo(param, thisExpr)
+    if (let Some(funcBody) <- ctor.funcBody) {
+        thisExpr.ref.identifier.SetFileID(funcBody.begin.fileID)
+    }
+
+    let left = CreateMemberAccess(thisExpr, param.identifier.Val())
+    left.field = CloneSrcIdentifier(param.identifier)
+    left.EnableAttr(Attribute.IMPLICIT_ADD)
+    CopyBasicInfo(param, left)
+
+    let right = CreateRefExpr(param.identifier.Val())
+    right.ref.identifier = CloneSrcIdentifier(param.identifier)
+    right.EnableAttr(Attribute.IMPLICIT_ADD)
+    if (let Some(typeNode) <- param.typeNode) {
+        CopyBasicInfo(typeNode, right)
+    } else {
+        CopyBasicInfo(param, right)
+    }
+    right.sourceExpr = left
+    if (let Some(funcBody) <- ctor.funcBody) {
+        right.ref.identifier.SetFileID(funcBody.begin.fileID)
+    }
+
+    let assignment = AssignExpr()
+    CopyBasicInfo(param, assignment)
+    assignment.EnableAttr(Attribute.COMPILER_ADD)
+    assignment.leftValue = left
+    assignment.rightExpr = right
+    assignment.op = TokenKind.ASSIGN
+    return assignment
+}
+
+private func DesugarPrimaryCtorHandleParamSetEachParam(
+    decl: Decl, ctor: PrimaryCtorDecl, targetBody: FuncBody): Unit {
+    if (let Some(sourceBody) <- ctor.funcBody) {
+        if (sourceBody.paramLists.isEmpty()) {
+            return
+        }
+        for (param in sourceBody.paramLists[0].params) {
+            if (!param.isMemberParam || param.TestAttr(Attribute.STATIC)) {
+                continue
+            }
+            let member = CreatePrimaryCtorMemberDecl(decl, ctor, param)
+            AppendDeclToClassOrStructBody(decl, member)
+            if (let Some(block) <- targetBody.body) {
+                block.body.add(CreatePrimaryCtorMemberAssign(ctor, param))
+            }
+        }
+    }
+}
+
+private func DesugarPrimaryCtorHandleParam(
+    decl: Decl, ctor: PrimaryCtorDecl, targetBody: FuncBody, targetParamList: FuncParamList): Unit {
+    if (let Some(sourceBody) <- ctor.funcBody) {
+        if (sourceBody.paramLists.isEmpty()) {
+            return
+        }
+        let sourceParamList = sourceBody.paramLists[0]
+        CopyBasicInfo(sourceParamList, targetParamList)
+        for (param in sourceParamList.params) {
+            let clonedParam = CreateFuncParam(
+                param.identifier.Val(), CloneTypeOptionAsSource(param.typeNode),
+                CloneExprOptionAsSource(param.assignment), param.GetTy())
+            clonedParam.EnableAttr(Attribute.IS_CLONED_SOURCE_CODE)
+            param.EnableAttr(Attribute.COMPILER_ADD)
+            CopyBasicInfo(param, clonedParam)
+            clonedParam.identifier.SetPos(param.identifier.Begin(), param.identifier.End())
+            clonedParam.identifier.SetRaw(param.identifier.IsRaw())
+            clonedParam.isNamedParam = param.isNamedParam
+            clonedParam.isMemberParam = param.isMemberParam
+            CopyParamAnnotationsInto(param, clonedParam)
+            targetParamList.params.add(clonedParam)
+        }
+        DesugarPrimaryCtorHandleParamSetEachParam(decl, ctor, targetBody)
+    }
+}
+
+private func DesugarPrimaryCtorSetPrimaryFunc(decl: Decl, ctor: PrimaryCtorDecl, targetBody: FuncBody): Unit {
+    let primaryFunc = FuncDecl()
+    CopyBasicInfo(ctor, primaryFunc)
+    primaryFunc.toBeCompiled = ctor.toBeCompiled
+    primaryFunc.funcBody = targetBody
+    targetBody.funcDecl = primaryFunc
+    primaryFunc.identifier = SrcIdentifier(INIT_FUNC_NAME, ctor.identifier.Begin(), ctor.identifier.End(), false)
+    primaryFunc.identifierForLsp = ctor.identifier.Val()
+    CopyModifiersInto(ctor.modifiers, primaryFunc.modifiers)
+    primaryFunc.constructorCall = ConstructorCall.NONE
+    primaryFunc.CloneAttrs(ctor)
+    primaryFunc.EnableAttr(Attribute.COMPILER_ADD)
+    primaryFunc.EnableAttr(Attribute.IS_CLONED_SOURCE_CODE)
+    primaryFunc.EnableAttr(Attribute.CONSTRUCTOR)
+    primaryFunc.EnableAttr(Attribute.PRIMARY_CONSTRUCTOR)
+    MoveAnnotationsInto(ctor.annotations, primaryFunc.annotations)
+    primaryFunc.overflowStrategy = ctor.overflowStrategy
+    primaryFunc.isFastNative = ctor.isFastNative
+    primaryFunc.isConst = ctor.isConst
+    primaryFunc.isFrozen = primaryFunc.HasAnno(AstAnnotationKind.FROZEN)
+    primaryFunc.rawMangleName = ctor.rawMangleName
+    primaryFunc.moduleName = ctor.moduleName
+    primaryFunc.fullPackageName = ctor.fullPackageName
+    if (let Some(classDecl) <- (decl as ClassDecl)) {
+        targetBody.parentClassLike = classDecl
+        primaryFunc.outerDecl = classDecl
+        primaryFunc.EnableAttr(Attribute.IN_CLASSLIKE)
+        if (let Some(body) <- classDecl.body) {
+            body.decls.add(primaryFunc)
+        }
+    } else if (let Some(structDecl) <- (decl as StructDecl)) {
+        targetBody.parentStruct = structDecl
+        primaryFunc.outerDecl = structDecl
+        primaryFunc.EnableAttr(Attribute.IN_STRUCT)
+        if (let Some(body) <- structDecl.body) {
+            body.decls.add(primaryFunc)
+        }
+    }
 }
 
 private func MoveSubscriptIndicesIntoArgs(callExpr: CallExpr, subscript: SubscriptExpr,
@@ -468,6 +722,40 @@ public func DesugarArrayCall(typeManager: TypeManager, expr: CallExpr): Unit {
             AddCurFile(arrayExpr, file: expr.curFile)
             expr.desugarExpr = arrayExpr
         }
+    }
+}
+
+public func DesugarPrimaryCtor(decl: Decl, ctor: PrimaryCtorDecl): Unit {
+    if (decl.astKind != ASTKind.CLASS_DECL && decl.astKind != ASTKind.STRUCT_DECL) {
+        return
+    }
+    if (let Some(sourceBody) <- ctor.funcBody) {
+        let targetBody = FuncBody()
+        CopyBasicInfo(sourceBody, targetBody)
+        let targetBlock = Block()
+        CopyBasicInfo(sourceBody, targetBlock)
+        targetBody.body = targetBlock
+        targetBody.retType = CloneTypeOptionAsSource(sourceBody.retType)
+        if (let Some(retType) <- targetBody.retType) {
+            retType.DisableAttr(Attribute.COMPILER_ADD)
+        }
+        let targetParamList = FuncParamList()
+        CopyFileID(targetParamList, ctor)
+        var bodyStartIndex = DesugarPrimaryCtorHandleSuper(decl, sourceBody, targetBody)
+        DesugarPrimaryCtorHandleParam(decl, ctor, targetBody, targetParamList)
+
+        if (let Some(sourceBlock) <- sourceBody.body) {
+            while (bodyStartIndex < sourceBlock.body.size) {
+                if (let Some(cloned) <- CloneNodeAsSource(sourceBlock.body[bodyStartIndex])) {
+                    targetBody.body.getOrThrow().body.add(cloned)
+                }
+                bodyStartIndex++
+            }
+        } else if (ctor.TestAttr(Attribute.COMMON)) {
+            targetBody.body = None
+        }
+        targetBody.paramLists.add(targetParamList)
+        DesugarPrimaryCtorSetPrimaryFunc(decl, ctor, targetBody)
     }
 }
 
