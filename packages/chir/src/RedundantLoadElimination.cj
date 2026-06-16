@@ -15,19 +15,22 @@ public class RedundantLoadElimination {
 
     public func RunOnFunction(fn: Function, isDebug!: Bool = false): Int64 {
         if (let Some(body) <- fn.GetBody()) {
-            return RunOnBody(body, isDebug)
+            let analysis = ReachingDefinitionAnalysis(fn)
+            let result = analysis.Run()
+            return RunOnBody(body, analysis, result, isDebug) + RunLocalFallbackOnBody(body, isDebug)
         }
         return 0
     }
 
-    private func RunOnBody(body: BlockGroup, isDebug: Bool): Int64 {
+    private func RunOnBody(body: BlockGroup, analysis: ReachingDefinitionAnalysis, result: ReachingDefinitionResult,
+        isDebug: Bool): Int64 {
         var changed: Int64 = 0
         for (block in body.GetBlocksRef()) {
-            changed += RunOnBlock(block, body, isDebug)
+            changed += RunOnBlock(block, body, analysis, result, isDebug)
             for (expr in block.GetExpressions()) {
                 if (let Some(lambdaExpr) <- (expr as Lambda)) {
                     if (let Some(lambdaBody) <- lambdaExpr.GetBody()) {
-                        changed += RunOnBody(lambdaBody, isDebug)
+                        changed += RunOnBody(lambdaBody, analysis, result, isDebug)
                     }
                 }
             }
@@ -35,7 +38,69 @@ public class RedundantLoadElimination {
         return changed
     }
 
-    private func RunOnBlock(block: Block, scope: BlockGroup, isDebug: Bool): Int64 {
+    private func RunOnBlock(block: Block, scope: BlockGroup, analysis: ReachingDefinitionAnalysis,
+        result: ReachingDefinitionResult, isDebug: Bool): Int64 {
+        var changed: Int64 = 0
+        let state = if (let Some(entryState) <- result.GetEntryState(block)) { entryState } else { analysis.Bottom() }
+        let exprs = block.GetExpressions()
+        for (expr in exprs) {
+            if (expr.GetParentBlock().isNone()) {
+                continue
+            }
+            if (let Some(term) <- expr.AsTerminator()) {
+                analysis.PropagateTerminatorEffect(state, term)
+            } else {
+                analysis.PropagateExpressionEffect(state, expr)
+            }
+            if (expr.GetParentBlock().isSome() && expr.GetExprKind() == ExprKind.LOAD && expr.GetNumOfOperands() == 1) {
+                if (TryReplaceLoad(expr, state, scope, isDebug)) {
+                    changed++
+                }
+            }
+        }
+        return changed
+    }
+
+    private func TryReplaceLoad(loadExpr: Expression, state: ReachingDefinitionDomain, scope: BlockGroup,
+        isDebug: Bool): Bool {
+        let location = loadExpr.GetOperand(0)
+        if (let Some(storeExpr) <- state.CheckReachingDef(location)) {
+            if (storeExpr.GetNumOfOperands() >= 1) {
+                let storedValue = storeExpr.GetOperand(0)
+                if (ReplaceLoad(loadExpr, storedValue, scope, isDebug)) {
+                    return true
+                }
+            }
+        }
+        if (let Some(validLoad) <- state.CheckReachingLoadDef(location)) {
+            if (validLoad.nodeId == loadExpr.nodeId) {
+                return false
+            }
+            if (let Some(validResult) <- validLoad.GetResult()) {
+                if (ReplaceLoad(loadExpr, validResult, scope, isDebug)) {
+                    return true
+                }
+            }
+        }
+        return false
+    }
+
+    private func RunLocalFallbackOnBody(body: BlockGroup, isDebug: Bool): Int64 {
+        var changed: Int64 = 0
+        for (block in body.GetBlocksRef()) {
+            changed += RunLocalFallbackOnBlock(block, body, isDebug)
+            for (expr in block.GetExpressions()) {
+                if (let Some(lambdaExpr) <- (expr as Lambda)) {
+                    if (let Some(lambdaBody) <- lambdaExpr.GetBody()) {
+                        changed += RunLocalFallbackOnBody(lambdaBody, isDebug)
+                    }
+                }
+            }
+        }
+        return changed
+    }
+
+    private func RunLocalFallbackOnBlock(block: Block, scope: BlockGroup, isDebug: Bool): Int64 {
         let knownStores = HashMap<Int64, Value>()
         var changed: Int64 = 0
         let exprs = block.GetExpressions()

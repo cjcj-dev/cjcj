@@ -87,6 +87,9 @@ Implemented:
 - Added a conservative `RedundantLoadElimination` component that performs exact-location straight-line
   store/load forwarding over the current generic `STORE` and `LOAD` expression representation, clears
   knowledge across calls and memory-affecting expressions, and recurses into lambda bodies.
+- Extended `RedundantLoadElimination` to use a reaching-definition analysis before its local fallback,
+  replacing loads from exact reaching stores and repeated loads across block boundaries when the domain proves
+  a single reaching definition.
 - Added `UselessAllocateElimination` for allocations whose result is unused except by exact stores and
   debug expressions, preserving function return-value allocations and deleting the allocation plus its
   removable users.
@@ -102,6 +105,10 @@ Implemented:
   relation mapping, intersection/union, same-domain checks, and basic arithmetic composition.
 - Added `ValueDomain`, including abstract objects, reference roots/caching, reference representation checks,
   and the C++-shaped bottom/ref/value/top join behavior used by later value-analysis passes.
+- Added `FlatSet` and `ReachingDefinitionAnalysis`, mirroring the C++ reaching-definition lattice shape for
+  tracked allocation results: bottom/single/top facts, reaching store/load queries, fixed-point propagation over
+  block successors, conservative invalidation for mutable calls/intrinsics/lambda captures, recursive lambda block
+  discovery, and block entry/exit result storage.
 - Added C++-named BCHIR interpreter component files for `OpCodes`, `BCHIR`, `BCHIRPrinter`,
   `BCHIRInterpreter`, `InterpreterValue`, `InterpreterValueUtils`, `InterpreterArena`,
   `InterpreterEnv`, and `InterpreterStack`.
@@ -149,8 +156,9 @@ Known gaps:
   C++ BCHIR/flatbuffer serializer and deserializer.
 - Closure conversion currently records captures and marks lambda representation/captured value attributes;
   it does not yet synthesize the full C++ closure environment classes and rewritten call paths.
-- `RedundantLoadElimination` is currently the safe local subset; the C++ reaching-definition dataflow
-  engine, static-member call adjustment, and cross-block fixed-point propagation are not fully ported.
+- `RedundantLoadElimination` now has the C++ reaching-definition shape and cross-block fixed-point
+  propagation, but static-member call adjustment, precise specialized memory-expression classes, and the
+  complete C++ alias/intrinsic model remain incomplete.
 - `UselessAllocateElimination` cannot yet honor class finalizer exclusions because the current Cangjie
   `ClassDef` model has not ported the finalizer link.
 - `SInt` and `ConstantRange` cover the core value/range domain semantics needed by later passes, but the full
