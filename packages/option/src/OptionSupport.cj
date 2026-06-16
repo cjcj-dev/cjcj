@@ -1,25 +1,15 @@
 package cangjie_compiler::option
 
+import cangjie_compiler::utils.AccessResultType as UtilsAccessResultType
+import cangjie_compiler::utils.FILE_PATH_MAX_LENGTH as UTILS_FILE_PATH_MAX_LENGTH
+import cangjie_compiler::utils.FailureReason as UtilsFailureReason
+import cangjie_compiler::utils.FileMode as UtilsFileMode
+import cangjie_compiler::utils.FileUtil
 import std.collection.*
-import std.fs.*
 
 public let DEFAULT_ANDROID_API: String = "31"
 public let MIN_ANDROID_API: String = "26"
-public let FILE_PATH_MAX_LENGTH: Int64 = 4096
-
-public struct Position {
-    public var fileID: UInt64 = 0u64
-    public var line: Int64 = -1
-    public var column: Int64 = -1
-    public init() {}
-    public init(fileID: UInt64, line: Int64, column: Int64) {
-        this.fileID = fileID
-        this.line = line
-        this.column = column
-    }
-}
-
-public let DEFAULT_POSITION: Position = Position(0u64, -1, -1)
+public let FILE_PATH_MAX_LENGTH: Int64 = UTILS_FILE_PATH_MAX_LENGTH
 
 public class MaybeString {
     public var hasValue: Bool = false
@@ -86,79 +76,83 @@ public func StartsWith(value: String, prefix: String): Bool {
 }
 
 public func NormalizePath(path: String): String {
-    return path.replace("\\", "/")
+    return FileUtil.NormalizePath(path)
+}
+
+public func NormalizeRawPath(path: String): String {
+    return FileUtil.Normalize(path)
 }
 
 public func GetFileExtension(path: String): String {
-    let normalized = NormalizePath(path)
-    let slash = normalized.lastIndexOf("/") ?? -1
-    let dot = normalized.lastIndexOf(".") ?? -1
-    if (dot <= slash || dot + 1 >= normalized.size) { return "" }
-    return normalized[dot + 1..]
+    return FileUtil.GetFileExtension(path)
 }
 
 public func HasCJDExtension(path: String): Bool {
-    return path.size >= 5 && path[path.size - 5..] == ".cj.d"
+    return FileUtil.HasCJDExtension(path)
 }
 
 public func GetFileName(path: String): String {
-    let normalized = NormalizePath(path)
-    let slash = normalized.lastIndexOf("/") ?? -1
-    return if (slash + 1 < normalized.size) { normalized[slash + 1..] } else { normalized }
+    return FileUtil.GetFileName(path)
 }
 
 public func GetDirPath(path: String): String {
-    let normalized = NormalizePath(path)
-    let slash = normalized.lastIndexOf("/") ?? -1
-    if (slash <= 0) { return if (slash == 0) { "/" } else { "" } }
-    return normalized[0..slash]
+    return FileUtil.GetDirPath(path)
 }
 
 public func JoinPath(left: String, right: String): String {
-    if (left.isEmpty()) { return NormalizePath(right) }
-    if (right.isEmpty()) { return NormalizePath(left) }
-    let l = NormalizePath(left)
-    let r = NormalizePath(right)
-    if (l[l.size - 1] == b'/') { return l + r }
-    return l + "/" + r
+    return FileUtil.JoinPath(left, right)
 }
 
 public func SplitEnvironmentPaths(value: String): Array<String> {
-    let delimiter = if (value.contains(";")) { ";" } else { ":" }
-    let ret = ArrayList<String>()
-    for (rawPath in SplitString(value, delimiter)) {
-        let path = rawPath.trimAscii()
-        if (!path.isEmpty()) { ret.add(path) }
-    }
-    return ret.toArray()
+    return FileUtil.SplitEnvironmentPaths(value)
 }
 
 public func FileExist(path: String): Bool {
-    return exists(path)
+    return FileUtil.FileExist(path)
 }
 
 public func IsDir(path: String): Bool {
-    if (!exists(path)) { return false }
-    return FileInfo(path).isDirectory()
-}
-
-public func IsRegularFile(path: String): Bool {
-    if (!exists(path)) { return false }
-    return FileInfo(path).isRegular()
+    return FileUtil.IsDir(path)
 }
 
 public func IsAbsolutePath(path: String): Bool {
-    return !path.isEmpty() && (path[0] == b'/' || (path.size > 2 && path[1] == b':'))
+    return FileUtil.IsAbsolutePath(path)
 }
 
 public func GetAbsPath(path: String): MaybeString {
     if (path.isEmpty()) { return MaybeString() }
-    if (exists(path)) { return MaybeString(NormalizePath(canonicalize(path).toString())) }
-    return MaybeString(NormalizePath(path))
+    if (let Some(absPath) <- FileUtil.GetAbsPath(path)) {
+        return MaybeString(absPath)
+    }
+    return MaybeString()
 }
 
 public func IsPathAboveLengthLimit(path: String): Bool {
-    return path.size > FILE_PATH_MAX_LENGTH
+    return FileUtil.IsAbsolutePathAboveLengthLimit(path)
+}
+
+public func CanAccessFile(path: String, mode: UtilsFileMode): Bool {
+    return FileUtil.Access(path, mode)
+}
+
+public func AccessFileWithResult(path: String, mode: UtilsFileMode): UtilsAccessResultType {
+    return FileUtil.AccessWithResult(path, mode)
+}
+
+public func IsAccessOK(result: UtilsAccessResultType): Bool {
+    return match (result) {
+        case UtilsAccessResultType.OK => true
+        case UtilsAccessResultType.NOT_EXIST => false
+        case UtilsAccessResultType.NO_PERMISSION => false
+        case UtilsAccessResultType.FAILED_WITH_UNKNOWN_REASON => false
+    }
+}
+
+public func GetRelativePath(basePath: String, path: String): MaybeString {
+    if (let Some(relativePath) <- FileUtil.GetRelativePath(basePath, path)) {
+        return MaybeString(relativePath)
+    }
+    return MaybeString()
 }
 
 public func GetAllFilesUnderCurrentPath(
@@ -167,33 +161,27 @@ public func GetAllFilesUnderCurrentPath(
     shouldSkipTestFiles!: Bool = true,
     shouldSkipRegularFiles!: Bool = false
 ): Array<String> {
-    let files = ArrayList<String>()
-    try {
-        for (info in Directory.readFrom(path)) {
-            if (!info.isRegular()) { continue }
-            let fileName = info.name
-            if (fileName.isEmpty() || fileName[0] == b'.') { continue }
-            if (GetFileExtension(fileName) != extension) { continue }
-            let isTestFile = fileName.endsWith("_test.cj")
-            if (shouldSkipTestFiles && isTestFile) { continue }
-            if (shouldSkipRegularFiles && !isTestFile) { continue }
-            files.add(fileName)
-        }
-    } catch (_: Exception) {
-        return files.toArray()
-    }
-    return files.toArray()
+    return FileUtil.GetAllFilesUnderCurrentPath(
+        path,
+        extension,
+        shouldSkipTestFiles: shouldSkipTestFiles,
+        shouldSkipRegularFiles: shouldSkipRegularFiles
+    )
 }
 
 public func ReadTextFile(path: String): MaybeString {
-    if (!IsRegularFile(path)) { return MaybeString() }
-    return MaybeString(String.fromUtf8(File.readFrom(path)))
+    let failedReason = UtilsFailureReason()
+    if (let Some(content) <- FileUtil.ReadFileContent(path, failedReason)) {
+        return MaybeString(content)
+    }
+    return MaybeString()
 }
 
 public func CreateDirectory(path: String): Bool {
     if (path.isEmpty()) { return false }
     if (IsDir(path)) { return true }
-    Directory.create(path)
+    let directoryPath = if (path[path.size - 1] == b'/') { path } else { path + "/" }
+    if (FileUtil.CreateDirs(directoryPath) != 0) { return false }
     return IsDir(path)
 }
 

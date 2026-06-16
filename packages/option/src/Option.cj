@@ -1,5 +1,6 @@
 package cangjie_compiler::option
 
+import cangjie_compiler::utils.FileMode as UtilsFileMode
 import std.collection.*
 
 public class Path {
@@ -570,10 +571,8 @@ public open class GlobalOptions <: Option {
         if (compilationCachedPath.isEmpty()) { return GetFileName(filePath) }
         let absFilePath = GetAbsPath(filePath)
         if (!absFilePath.hasValue) { return GetFileName(filePath) }
-        var base = NormalizePath(compilationCachedPath)
-        if (!base.isEmpty() && base[base.size - 1] != b'/') { base += "/" }
-        let normalized = NormalizePath(absFilePath.value)
-        if (StartsWith(normalized, base)) { return normalized[base.size..] }
+        let relativePath = GetRelativePath(JoinPath(compilationCachedPath, ""), absFilePath.value)
+        if (relativePath.hasValue) { return relativePath.value }
         return GetFileName(filePath)
     }
 
@@ -621,22 +620,31 @@ public open class GlobalOptions <: Option {
     }
 
     public func CheckDirectoryPath(path: String): MaybeString {
-        if (FileExist(path) && IsDir(path)) { return GetAbsPath(path) }
-        return MaybeString()
+        if (!FileExist(path) || !IsDir(path)) { return MaybeString() }
+        return GetAbsPath(path)
     }
 
-    public func ValidateDirectoryPath(path: String): MaybeString {
-        if (FileExist(path) && IsDir(path)) { return GetAbsPath(path) }
-        return MaybeString()
+    public func ValidateDirectoryPath(path: String, mode!: UtilsFileMode = UtilsFileMode.FM_EXIST): MaybeString {
+        let accessResult = AccessFileWithResult(path, mode)
+        if (!IsAccessOK(accessResult)) { return MaybeString() }
+        if (!IsDir(path)) { return MaybeString() }
+        if (mode == UtilsFileMode.FM_WRITE) {
+            let execResult = AccessFileWithResult(path, UtilsFileMode.FM_EXE)
+            if (!IsAccessOK(execResult)) { return MaybeString() }
+        }
+        return GetAbsPath(path)
     }
 
     public func CheckInputFilePath(path: String): MaybeString {
-        if (FileExist(path) && !IsDir(path)) { return GetAbsPath(path) }
+        if (FileExist(path) && CanAccessFile(path, UtilsFileMode.FM_READ) && !IsDir(path)) { return GetAbsPath(path) }
         return MaybeString()
     }
 
     public static func ValidateInputFilePath(path: String): MaybeString {
-        if (!IsPathAboveLengthLimit(path) && FileExist(path) && !IsDir(path)) { return GetAbsPath(path) }
+        if (!IsPathAboveLengthLimit(path) && FileExist(path) && CanAccessFile(path, UtilsFileMode.FM_READ) &&
+            !IsDir(path)) {
+            return GetAbsPath(path)
+        }
         return MaybeString()
     }
 
@@ -733,7 +741,7 @@ public open class GlobalOptions <: Option {
         if (outputDir.hasValue) {
             if (IsAbsolutePath(output)) { return false }
             output = JoinPath(outputDir.value, output)
-            let outputDirAbs = CheckDirectoryPath(outputDir.value)
+            let outputDirAbs = ValidateDirectoryPath(outputDir.value, mode: UtilsFileMode.FM_WRITE)
             if (!outputDirAbs.hasValue) { return false }
             outputDir = MaybeString(outputDirAbs.value)
         }
@@ -741,7 +749,7 @@ public open class GlobalOptions <: Option {
         let outputIsDir = IsDir(output)
         let dirPath = GetDirPath(output)
         let saveDir = if (outputIsDir) { output } else if (dirPath.isEmpty()) { "/" } else { dirPath }
-        let saveDirAbs = CheckDirectoryPath(saveDir)
+        let saveDirAbs = ValidateDirectoryPath(saveDir, mode: UtilsFileMode.FM_WRITE)
         if (!saveDirAbs.hasValue) { return false }
         output = if (outputIsDir) { saveDirAbs.value } else { JoinPath(saveDirAbs.value, GetFileName(output)) }
         if (!CheckOutputPathLength()) { return false }

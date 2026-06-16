@@ -132,7 +132,7 @@ public func ParseAction(opts: GlobalOptions, arg: OptionArgInstance): ActionResu
     if (id == ID.PARALLEL_MACRO_EXPANSION) { opts.enableParallelMacro = true; return handled() }
     if (id == ID.COMPILE_DEBUG) { opts.enableCompileDebug = true; return handled() }
     if (id == ID.TRIMPATH) {
-        let normalized = NormalizePath(arg.value)
+        let normalized = NormalizeRawPath(arg.value)
         if (!normalized.isEmpty()) {
             opts.removedPathPrefix.add(if (normalized[normalized.size - 1] == b'/') { normalized } else { normalized + "/" })
         }

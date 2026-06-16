@@ -48,7 +48,20 @@ and aggressive-parallel-compile normalization, and small public helpers such as
 serialization now follows the C++ empty-environment separator behavior and
 `GetArchType` is exposed.
 
+This deepening pass de-isolates Option's path and filesystem layer to the real
+`cangjie_compiler::utils.FileUtil` package, matching the C++ ownership model in
+`Option.cpp`/`OptionAction.cpp`. Option now delegates normalization, extension
+parsing, directory/file existence checks, absolute-path resolution, environment
+path splitting, recursive directory creation, directory scans, file reads,
+relative cache path computation, and `FileMode` read/write/execute permission
+checks through `FileUtil`. The unused local `Position`/`DEFAULT_POSITION` copy
+was removed from Option rather than retained as a compatibility type; `basic`
+already owns the real position model. `--trimpath` intentionally uses
+`FileUtil.Normalize` while other C++ call sites use `NormalizePath`, preserving
+the distinction in the reference implementation.
+
 Remaining fidelity gaps are not hidden behind self-host markers: this package
-still uses local diagnostics instead of Basic diagnostic IDs, and some file-mode
-permission checks are represented by the currently available Cangjie filesystem
-predicates rather than the exact C++ `FileUtil::Access` surface.
+still uses local diagnostics instead of Basic diagnostic IDs. Importing Basic
+directly is currently blocked by the existing `basic -> option` dependency for
+`WarningOptionMgr`, so diagnostic de-isolation needs a dependency-shape change
+outside this package before it can faithfully use `DiagnosticEngine`.
