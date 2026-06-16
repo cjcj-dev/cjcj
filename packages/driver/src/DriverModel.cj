@@ -387,6 +387,23 @@ public class TripleInfo {
     }
 }
 
+@When[os == "Linux"]
 public func HostOS(): OSType { return OSType.LINUX }
 
+@When[os == "Windows"]
+public func HostOS(): OSType { return OSType.WINDOWS }
+
+@When[os == "macOS"]
+public func HostOS(): OSType { return OSType.DARWIN }
+
+@When[os != "Linux" && os != "Windows" && os != "macOS"]
+public func HostOS(): OSType { return OSType.UNKNOWN }
+
+@When[arch == "x86_64"]
 public func HostArch(): ArchType { return ArchType.X86_64 }
+
+@When[arch == "aarch64"]
+public func HostArch(): ArchType { return ArchType.AARCH64 }
+
+@When[arch != "x86_64" && arch != "aarch64"]
+public func HostArch(): ArchType { return ArchType.UNKNOWN }

@@ -11,6 +11,18 @@ public func MakeSingleToolBatch(tool: Tool): ToolBatch {
     return result
 }
 
+@When[os == "macOS"]
+private let DYNAMIC_LIBRARY_PATH_ENV: String = "DYLD_LIBRARY_PATH"
+
+@When[os != "macOS"]
+private let DYNAMIC_LIBRARY_PATH_ENV: String = "LD_LIBRARY_PATH"
+
+@When[os == "macOS"]
+private let DYNAMIC_PRELOAD_ENV: String = "DYLD_INSERT_LIBRARIES"
+
+@When[os != "macOS"]
+private let DYNAMIC_PRELOAD_ENV: String = "LD_PRELOAD"
+
 @When[os != "Windows"]
 foreign {
     func posix_spawn(
@@ -30,6 +42,7 @@ foreign {
         envp: CPointer<CString>
     ): Int32
     func waitpid(pid: Int32, status: CPointer<Int32>, options: Int32): Int32
+    func strerror(errnum: Int32): CString
     func free(ptr: CString): Unit
 }
 
@@ -72,6 +85,16 @@ private func DecodeWaitStatus(status: Int32): Int64 {
         return 1
     }
     return Int64(128 + signalBits)
+}
+
+@When[os != "Windows"]
+private func GetSystemErrorMessage(error: Int32): String {
+    let message = unsafe { strerror(error) }
+    if (message.isNull()) {
+        return "Unknown system error code: ${error}"
+    }
+    let text = message.toString()
+    return if (text.isEmpty()) { "Unknown system error code: ${error}" } else { text }
 }
 
 public class Tool {
@@ -180,9 +203,12 @@ public class Tool {
     private func GenerateCommand(): String {
         let builder = StringBuilder()
         if (!ldLibraryPath.isEmpty()) {
-            builder.append("LD_LIBRARY_PATH=")
+            builder.append(DYNAMIC_LIBRARY_PATH_ENV)
+            builder.append("=")
             builder.append(GetSingleQuoted(ldLibraryPath))
-            builder.append(":$LD_LIBRARY_PATH ")
+            builder.append(":$")
+            builder.append(DYNAMIC_LIBRARY_PATH_ENV)
+            builder.append(" ")
         }
         builder.append(GetSingleQuoted(name))
         for (arg in args) {
@@ -206,17 +232,17 @@ public class Tool {
     public func BuildEnvironmentVector(): Array<String> {
         let environment = ArrayList<String>()
         if (!ldLibraryPath.isEmpty()) {
-            let inherited = environmentVars.get("LD_LIBRARY_PATH") ?? ""
+            let inherited = environmentVars.get(DYNAMIC_LIBRARY_PATH_ENV) ?? ""
             let value = if (inherited.isEmpty()) { ldLibraryPath } else { ldLibraryPath + ":" + inherited }
-            environment.add("LD_LIBRARY_PATH=" + value)
-        } else if (let Some(value) <- environmentVars.get("LD_LIBRARY_PATH")) {
-            environment.add("LD_LIBRARY_PATH=" + value)
+            environment.add(DYNAMIC_LIBRARY_PATH_ENV + "=" + value)
+        } else if (let Some(value) <- environmentVars.get(DYNAMIC_LIBRARY_PATH_ENV)) {
+            environment.add(DYNAMIC_LIBRARY_PATH_ENV + "=" + value)
         }
         for ((key, value) in environmentVars) {
             if (IsBlockedEnvironmentVariable(key)) {
                 continue
             }
-            if (key == "LD_LIBRARY_PATH") {
+            if (key == DYNAMIC_LIBRARY_PATH_ENV) {
                 continue
             }
             environment.add(key + "=" + value)
@@ -259,7 +285,7 @@ public class Tool {
             }
             FreeCStringList(allocatedStrings)
             if (spawnStatus != 0) {
-                throw Exception("posix_spawn failed with error ${spawnStatus}")
+                throw Exception(GetSystemErrorMessage(spawnStatus))
             }
             let pid = unsafe { pidPtr.value.read() }
             let waited = unsafe { waitpid(pid, statusPtr.value, 0) }
@@ -273,9 +299,9 @@ public class Tool {
 }
 
 private func IsBlockedEnvironmentVariable(key: String): Bool {
-    return key == "LD_PRELOAD" || key == "LD_AUDIT" || key == "LD_DEBUG" || key == "LD_PROFILE" ||
-        key == "LD_TRACE_LOADED_OBJECTS" || key == "DYLD_INSERT_LIBRARIES" || key == "DYLD_FRAMEWORK_PATH" ||
-        key == "DYLD_FALLBACK_FRAMEWORK_PATH" || key == "DYLD_FALLBACK_LIBRARY_PATH" ||
+    return key == DYNAMIC_LIBRARY_PATH_ENV || key == DYNAMIC_PRELOAD_ENV || key == "LD_AUDIT" ||
+        key == "LD_DEBUG" || key == "LD_PROFILE" || key == "LD_TRACE_LOADED_OBJECTS" ||
+        key == "DYLD_FRAMEWORK_PATH" || key == "DYLD_FALLBACK_FRAMEWORK_PATH" || key == "DYLD_FALLBACK_LIBRARY_PATH" ||
         key == "DYLD_VERSIONED_FRAMEWORK_PATH" || key == "DYLD_VERSIONED_LIBRARY_PATH" ||
         key == "DYLD_PRINT_LIBRARIES" || key == "DYLD_PRINT_TO_FILE" || key == "RUSTC_WRAPPER" ||
         key.startsWith("LLVM_SYS_") || key.startsWith("MLIR_SYS_") || key.startsWith("TABLEGEN_")

@@ -16,8 +16,8 @@ Current status:
   backend command generation, and executable driver entry are implemented in
   Cangjie files mirroring the C++ Driver decomposition.
 - Native backend execution is represented by external tool invocation through
-  the current Cangjie process APIs. LLVM remains external; no LLVM reimplementation
-  was added.
+  direct POSIX process FFI on non-Windows hosts. LLVM remains external; no LLVM
+  reimplementation was added.
 - Driver now preserves frontend/global arguments in parse order, filters out
   driver-only linker/toolchain options, and passes a pre-created temporary
   bitcode output path to the self-hosted FrontendTool bridge.
@@ -28,6 +28,8 @@ Current status:
   `chir`/`obj`/`hotreload` output-type parsing, PGO flags, section flags, jobs,
   warning forwarding, and target-triple validation are represented in Driver
   options.
+- Host triple defaults now use compile-time `@When` OS/architecture selection
+  instead of hardcoded Linux/x86_64 values.
 - GNU/Linux native linking now mirrors the C++ driver more closely: target-
   specific Cangjie library directories, GCC CRT scanning, Linux CRT/linker
   script placement, sanitizer runtime lookup/fallbacks, PGO runtime placement,
@@ -53,9 +55,9 @@ Current status:
   within a `ToolBatch` through a bounded worker set derived from `--jobs`, while
   keeping dependency-ordered batches sequential.
 - External tool execution now uses direct POSIX `posix_spawn`/`posix_spawnp`
-  and `waitpid` FFI with the Driver's sanitized environment vector, so
-  `LD_LIBRARY_PATH` and blocked loader/compiler-wrapper variables are applied to
-  the actual process rather than only to verbose command text.
+  and `waitpid` FFI with the Driver's sanitized environment vector, host-specific
+  loader path variables (`LD_LIBRARY_PATH`/`DYLD_LIBRARY_PATH`), and libc spawn
+  error text.
 
 Residual fidelity risks:
 
