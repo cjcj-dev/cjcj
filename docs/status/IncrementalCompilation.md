@@ -1,0 +1,55 @@
+# IncrementalCompilation Port Status
+
+Date: 2026-06-16
+
+Build: `cjpm build` passes.
+
+Reference inspected:
+
+- Public headers under `/root/cj_build/cangjie_compiler/include/cangjie/IncrementalCompilation`.
+- Source/internal files under `/root/cj_build/cangjie_compiler/src/IncrementalCompilation`.
+- Components covered: `ASTCacheCalculator`, `ASTDiff`, `CompilationCache`, `CachedMangleMap`,
+  `IncrementalCompilationLogger`, `IncrementalScopeAnalysis`, cache/dependency serialization,
+  `PollutionAnalyzer`, `PollutionMapGen`, and `Utils`.
+
+Implemented:
+
+- Replaced the single scaffold with C++-named multi-file Cangjie components under
+  `packages/incremental_compilation/src`.
+- Added the compilation-cache data model: raw mangle maps, AST/member/top-level caches, semantic usage
+  graphs, type relations, CHIR optimization effect maps, file-order maps, cached mangle maps, and
+  incremental result records.
+- Added a package-local `IncrDecl`/`IncrPackage` adapter model so this package builds without manifest
+  changes while retaining the C++ cache fields needed by the incremental algorithms.
+- Ported AST cache calculation over the adapter model, including direct-extend coalescing, member cache
+  recursion, global/static-var order ids, source-file order maps, duplicate mangle detection, virtual/member
+  layout hashes, and source/body/signature hash separation.
+- Ported AST diffing for current and imported caches: additions, deletions, type aliases, common decl changes,
+  type/member changes, member add/delete/change sets, and order-change detection against cached file maps.
+- Added pollution graph generation from semantic usages, source-imported dependency data, type relations,
+  builtin relations, CHIR optimization effects, direct/API/body usages, qualified/unqualified/package-qualified
+  usages, and boxed-type usages.
+- Ported a working pollution analyzer for added/deleted/changed type and non-type declarations, signature/body/
+  source-use changes, layout and vtable changes, constructor propagation, extend propagation, downstream type
+  propagation, box-use propagation, generic-instantiation propagation, CHIR optimization effects, and rollback
+  triggers for unsupported type-alias/removal cases.
+- Added incremental scope analysis orchestration: cache load, argument/spec checks, imported package cache walk,
+  AST diff, pollution analysis, closure-conversion rollback check, deleted CodeGen mangle lookup, cache update,
+  CHIR optimization effect-map merge/delete helpers, and debug logging.
+- Added deterministic text serialization/deserialization for the implemented cache schema, including AST cache
+  entries, members, semantic usage/name-usage/relation data, dependency data, CHIR effects, virtual/var-init deps,
+  closure-converted functions, counters, args, specs, and bitcode file names.
+- Added a logger matching the C++ singleton behavior for debug printing, buffered output, and `.log` file output.
+- Added C++-shaped utility helpers for virtual/typed/imported/enum-constructor/member/order-affected decl checks,
+  sorting, trimmed paths, stable hashes, and fallback mangle generation.
+
+Known gaps:
+
+- The package manifest still has no dependencies and this task forbids manifest edits, so the implementation uses
+  `IncrDecl`/`IncrPackage` adapters instead of the real AST/Sema/Modules/Mangle/Parse public types.
+- The cache wire format is a deterministic self-host text format, not the C++ FlatBuffers `CachedASTFormat`.
+- Imported source dependency collection cannot yet walk real AST expressions and targets.
+- Hashing and fallback mangling are behavior-shaped but not byte-identical to C++ `ASTHasher`/`ASTMangler` until
+  those packages can be wired directly.
+
+Self-host TODOs remaining in package: 3.
