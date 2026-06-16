@@ -107,10 +107,10 @@ key/value cfgs are already present and warns for missing explicit `cfg.toml`
 files before continuing to later paths.
 
 Remaining fidelity gaps are not hidden behind self-host markers: this package
-still uses local diagnostics instead of Basic diagnostic IDs. Importing Basic
-directly is currently blocked by the existing `basic -> option` dependency for
-`WarningOptionMgr`, so diagnostic de-isolation needs a dependency-shape change
-outside this package before it can faithfully use `DiagnosticEngine`.
+still uses local diagnostic text for many driver errors instead of reporting the
+exact Basic `DiagnosticEngine` IDs and ranges everywhere. The dependency shape
+now permits selected `option -> basic` de-isolation, but a full diagnostic pass
+still needs careful call-site-by-call-site migration to preserve behavior.
 
 This pass de-isolates the remaining local print/usage formatting wrappers that
 could be safely moved inside the current dependency graph: Option now delegates
@@ -132,3 +132,10 @@ without `--experimental`, unsupported APC targets, and OHOS `--static-std`
 normalization. Target triple parsing, custom optimization, sancov level,
 error-count, and jobs/APC value parsing now emit the reference diagnostics
 instead of failing silently.
+
+This continuation removes Option's local compatibility copy of the diagnostic
+warning-group enum and index table. `-Woff`/`-Won` now use the real
+`cangjie_compiler::basic` `WarnGroup`/`WarnGroupIndex` definitions that back the
+shared `WarningOptionMgr`, and unknown warning-group values now fail option
+processing like the C++ `WARN_GROUP_MAP` path instead of being accepted
+silently.

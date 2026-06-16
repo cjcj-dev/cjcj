@@ -1,5 +1,7 @@
 package cangjie_compiler::option
 
+import cangjie_compiler::basic.WarnGroup as BasicWarnGroup
+import cangjie_compiler::basic.WarnGroupIndex as BasicWarnGroupIndex
 import cangjie_compiler::utils.FileUtil
 import std.collection.*
 
@@ -123,8 +125,8 @@ public func ParseAction(opts: GlobalOptions, arg: OptionArgInstance): ActionResu
     if (id == ID.OPTIMIZATION_S) { return handled(success: opts.SetOptimizationLevel(OptimizationLevel.Os)) }
     if (id == ID.OPTIMIZATION_Z) { return handled(success: opts.SetOptimizationLevel(OptimizationLevel.Oz)) }
     if (id == ID.OPTIMIZATION_CUSTOM) { return parseCustomOptimization(opts, arg.value) }
-    if (id == ID.WARN_OFF) { parseWarn(arg.value, true); return handled() }
-    if (id == ID.WARN_ON) { parseWarn(arg.value, false); return handled() }
+    if (id == ID.WARN_OFF) { return handled(success: parseWarn(arg.value, true)) }
+    if (id == ID.WARN_ON) { return handled(success: parseWarn(arg.value, false)) }
     if (id == ID.ERROR_COUNT_LIMIT) { return parseErrorLimit(opts, arg.value) }
     if (id == ID.DIAG_FORMAT) { return parseDiagFormat(opts, arg.value) }
     if (id == ID.CONDITIONAL_COMPILATION_CONFIG) { return parsePassedWhen(opts, arg.value) }
@@ -355,30 +357,33 @@ private func parseCustomOptimization(opts: GlobalOptions, value: String): Action
     return handled(success: opts.SetOptimizationLevel(OptimizationLevel.O3))
 }
 
-private func parseWarn(value: String, suppress: Bool): Unit {
+private func parseWarn(value: String, suppress: Bool): Bool {
     if (value == "all") {
         WarningOptionMgr.UpdateFlags(suppress)
     } else if (value == "unused") {
-        WarningOptionMgr.UpdateFlag(UInt64(WarnGroupIndex(WarnGroup.UNUSED)), suppress)
+        WarningOptionMgr.UpdateFlag(UInt64(BasicWarnGroupIndex(BasicWarnGroup.UNUSED)), suppress)
     } else if (value == "unused-main") {
-        WarningOptionMgr.UpdateFlag(UInt64(WarnGroupIndex(WarnGroup.UNUSED_MAIN)), suppress)
+        WarningOptionMgr.UpdateFlag(UInt64(BasicWarnGroupIndex(BasicWarnGroup.UNUSED_MAIN)), suppress)
     } else if (value == "driver-arg") {
-        WarningOptionMgr.UpdateFlag(UInt64(WarnGroupIndex(WarnGroup.DRIVER_ARG)), suppress)
+        WarningOptionMgr.UpdateFlag(UInt64(BasicWarnGroupIndex(BasicWarnGroup.DRIVER_ARG)), suppress)
     } else if (value == "deprecated") {
-        WarningOptionMgr.UpdateFlag(UInt64(WarnGroupIndex(WarnGroup.DEPRECATED)), suppress)
+        WarningOptionMgr.UpdateFlag(UInt64(BasicWarnGroupIndex(BasicWarnGroup.DEPRECATED)), suppress)
     } else if (value == "unsupport-compile-source") {
-        WarningOptionMgr.UpdateFlag(UInt64(WarnGroupIndex(WarnGroup.UNSUPPORT_COMPILE_SOURCE)), suppress)
+        WarningOptionMgr.UpdateFlag(UInt64(BasicWarnGroupIndex(BasicWarnGroup.UNSUPPORT_COMPILE_SOURCE)), suppress)
     } else if (value == "package-import") {
-        WarningOptionMgr.UpdateFlag(UInt64(WarnGroupIndex(WarnGroup.PACKAGE_IMPORT)), suppress)
+        WarningOptionMgr.UpdateFlag(UInt64(BasicWarnGroupIndex(BasicWarnGroup.PACKAGE_IMPORT)), suppress)
     } else if (value == "parser") {
-        WarningOptionMgr.UpdateFlag(UInt64(WarnGroupIndex(WarnGroup.PARSER)), suppress)
+        WarningOptionMgr.UpdateFlag(UInt64(BasicWarnGroupIndex(BasicWarnGroup.PARSER)), suppress)
     } else if (value == "semantics") {
-        WarningOptionMgr.UpdateFlag(UInt64(WarnGroupIndex(WarnGroup.SEMANTICS)), suppress)
+        WarningOptionMgr.UpdateFlag(UInt64(BasicWarnGroupIndex(BasicWarnGroup.SEMANTICS)), suppress)
     } else if (value == "interpreter") {
-        WarningOptionMgr.UpdateFlag(UInt64(WarnGroupIndex(WarnGroup.INTERPRETER)), suppress)
+        WarningOptionMgr.UpdateFlag(UInt64(BasicWarnGroupIndex(BasicWarnGroup.INTERPRETER)), suppress)
     } else if (value == "apilevel-check") {
-        WarningOptionMgr.UpdateFlag(UInt64(WarnGroupIndex(WarnGroup.APILEVEL_CHECK)), suppress)
+        WarningOptionMgr.UpdateFlag(UInt64(BasicWarnGroupIndex(BasicWarnGroup.APILEVEL_CHECK)), suppress)
+    } else {
+        return false
     }
+    return true
 }
 
 private func parseErrorLimit(opts: GlobalOptions, value: String): ActionResult {
