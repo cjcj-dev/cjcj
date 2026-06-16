@@ -3,6 +3,7 @@ package cangjie_compiler::sema.NativeFFI
 import std.collection.*
 import cangjie_compiler::ast.*
 import cangjie_compiler::ast.AnnotationKind as AstAnnotationKind
+import cangjie_compiler::basic.LambdaPattern as BasicLambdaPattern
 import cangjie_compiler::option.GetFileName as OptionGetFileName
 import cangjie_compiler::option.IsDir as OptionIsDir
 import cangjie_compiler::sema.TypeManager
@@ -12,6 +13,12 @@ public let NSOBJECT_CLASS_IDENT: String = "NSObject"
 public let TOSTRING_METHOD_IDENT: String = "toString"
 public let INIT_IDENT: String = "init"
 private let STD_LIB_STRING_IDENT: String = "String"
+private let INTEROP_JARRAY_NAME: String = "JArray"
+private let INTEROP_JAVA_LANG_PACKAGE: String = "java.lang"
+private let JAVA_ARRAY_GET_FOR_REF_TYPES: String = "$javaarrayget"
+private let JAVA_ARRAY_SET_FOR_REF_TYPES: String = "$javaarrayset"
+private let ARRAY_SUBSCRIPT_IDENT: String = "[]"
+private let ARRAY_LENGTH_IDENT: String = "length"
 
 public enum ArrayOperationKind {
     | CREATE
@@ -65,6 +72,154 @@ public func GetParamTys(params: FuncParamList): ArrayList<Ty> {
         }
     }
     return paramTys
+}
+
+public func CreateThisRef(target: Option<Decl>, ty: Option<Ty>, curFile: Option<File>): RefExpr {
+    let thisRef = RefExpr()
+    thisRef.isThis = true
+    thisRef.ref.identifier = SrcIdentifier("this")
+    thisRef.ref.target = target
+    thisRef.curFile = curFile
+    if (let Some(value) <- ty) {
+        thisRef.SetTy(value)
+    }
+    return thisRef
+}
+
+public func CreateThisRef(target: Decl, ty: Ty, curFile: File): RefExpr {
+    return CreateThisRef(Some(target), Some(ty), Some(curFile))
+}
+
+public func CreateSuperRef(target: Option<Decl>, ty: Option<Ty>): RefExpr {
+    let superRef = RefExpr()
+    superRef.isSuper = true
+    superRef.ref.identifier = SrcIdentifier("super")
+    superRef.ref.target = target
+    if (let Some(value) <- ty) {
+        superRef.SetTy(value)
+    }
+    return superRef
+}
+
+public func CreateSuperRef(target: Decl, ty: Ty): RefExpr {
+    return CreateSuperRef(Some(target), Some(ty))
+}
+
+public func CreateThisCall(target: Decl, baseTarget: FuncDecl, funcTy: Ty, curFile: File): CallExpr {
+    return CreateThisCall(target, baseTarget, funcTy, curFile, ArrayList<FuncArg>())
+}
+
+public func CreateThisCall(target: Decl, baseTarget: FuncDecl, funcTy: Ty, curFile: File,
+    args: ArrayList<FuncArg>): CallExpr {
+    let callExpr = CreateCallExpr(CreateThisRef(baseTarget, funcTy, curFile), args)
+    callExpr.callKind = CallKind.CALL_OBJECT_CREATION
+    if (let Some(targetTy) <- target.GetTy()) {
+        callExpr.SetTy(targetTy)
+    }
+    callExpr.resolvedFunction = baseTarget
+    return callExpr
+}
+
+public func CreateSuperCall(target: Decl, baseTarget: FuncDecl, funcTy: Ty): CallExpr {
+    let callExpr = CreateCallExpr(CreateSuperRef(baseTarget, funcTy), ArrayList<FuncArg>())
+    callExpr.callKind = CallKind.CALL_SUPER_FUNCTION
+    if (let Some(targetTy) <- target.GetTy()) {
+        callExpr.SetTy(targetTy)
+    }
+    callExpr.resolvedFunction = baseTarget
+    return callExpr
+}
+
+public func CreateUnitType(curFile: Option<File>): PrimitiveType {
+    let unitType = PrimitiveType()
+    unitType.str = "Unit"
+    unitType.kind = TypeKind.TYPE_UNIT
+    unitType.SetTy(TypeManager.GetPrimitiveTy(TypeKind.TYPE_UNIT))
+    unitType.curFile = curFile
+    return unitType
+}
+
+public func CreateUnitType(curFile: File): PrimitiveType {
+    return CreateUnitType(Some(curFile))
+}
+
+public func CreateType(ty: Ty): Type {
+    let typeNode = Type()
+    typeNode.SetTy(ty)
+    return typeNode
+}
+
+public func CreateFuncType(ty: FuncTy): FuncType {
+    let typeNode = FuncType()
+    typeNode.SetTy(ty)
+    for (paramTy in ty.paramTys) {
+        typeNode.paramTypes.add(CreateType(paramTy))
+    }
+    typeNode.retType = CreateType(ty.retTy)
+    return typeNode
+}
+
+public func IsJArray(decl: Decl): Bool {
+    if ((decl as ClassLikeDecl).isNone()) {
+        return false
+    }
+    if (!decl.TestAttr(Attribute.JAVA_MIRROR)) {
+        return false
+    }
+    if (decl.identifier.Val() != INTEROP_JARRAY_NAME || decl.fullPackageName != INTEROP_JAVA_LANG_PACKAGE) {
+        return false
+    }
+    if (let Some(attr) <- GetSingleArgumentAnnotationValue(decl, AstAnnotationKind.JAVA_MIRROR)) {
+        return attr == ARRAY_SUBSCRIPT_IDENT
+    }
+    return false
+}
+
+public func IsJArray(ty: Ty): Bool {
+    if (let Some(classLikeTy) <- (ty as ClassLikeTy)) {
+        if (let Some(decl) <- classLikeTy.commonDecl) {
+            return IsJArray(decl)
+        }
+    }
+    return false
+}
+
+public func TryGetArrayOperationKind(decl: Decl): Option<ArrayOperationKind> {
+    if (let Some(propDecl) <- (decl as PropDecl)) {
+        if (propDecl.identifier.Val() == ARRAY_LENGTH_IDENT) {
+            return Some(ArrayOperationKind.GET_LENGTH)
+        }
+    }
+    if (let Some(funcDecl) <- (decl as FuncDecl)) {
+        let funcName = funcDecl.identifier.Val()
+        if (funcName == ARRAY_SUBSCRIPT_IDENT) {
+            if (let Some(body) <- funcDecl.funcBody) {
+                if (!body.paramLists.isEmpty()) {
+                    let paramsNumber = body.paramLists[0].params.size
+                    if (paramsNumber == 1) {
+                        return Some(ArrayOperationKind.GET)
+                    }
+                    if (paramsNumber == 2) {
+                        return Some(ArrayOperationKind.SET)
+                    }
+                }
+            }
+        }
+        if (funcName == JAVA_ARRAY_GET_FOR_REF_TYPES) {
+            return Some(ArrayOperationKind.GET)
+        }
+        if (funcName == JAVA_ARRAY_SET_FOR_REF_TYPES) {
+            return Some(ArrayOperationKind.SET)
+        }
+    }
+    return None
+}
+
+public func GetArrayOperationKind(decl: Decl): ArrayOperationKind {
+    if (let Some(kind) <- TryGetArrayOperationKind(decl)) {
+        return kind
+    }
+    return ArrayOperationKind.CREATE
 }
 
 public func GetCangjieLibName(outputLibPath: String, fullPackageName: String, trimmed!: Bool = true): String {
@@ -354,6 +509,13 @@ public func GetGenericInstType(config: GenericConfigInfo, genericTy: Ty, typeMan
     return InvalidType(INVALID_POSITION)
 }
 
+public func ReplaceGenericTyForFuncTy(ty: Ty, config: GenericConfigInfo, typeManager: TypeManager): Ty {
+    if (!ty.HasGeneric()) {
+        return ty
+    }
+    return GetGenericInstTy(config, ty, typeManager)
+}
+
 public func ReplaceGenericTyForFunc(funcDecl: FuncDecl, config: GenericConfigInfo, typeManager: TypeManager): Unit {
     if (let None <- funcDecl.funcBody) {
         return
@@ -544,6 +706,16 @@ public func GetLambdaJavaClassName(ty: Ty): String {
         return builder.toString()
     }
     return ""
+}
+
+public func GetLambdaJavaClassName(pattern: BasicLambdaPattern): String {
+    let builder = StringBuilder()
+    for (paramType in pattern.parameterTypes) {
+        builder.append(paramType)
+    }
+    builder.append("To")
+    builder.append(pattern.returnType)
+    return builder.toString()
 }
 
 public func AreParamTypeKindsValid(fd: FuncDecl, typeKinds: ArrayList<TypeKind>): Bool {
