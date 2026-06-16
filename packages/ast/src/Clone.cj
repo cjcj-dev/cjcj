@@ -48,6 +48,22 @@ private func cloneCommentGroups(source: CommentGroups): CommentGroups {
     return target
 }
 
+private func cloneMacroCallDiagInfo(source: MacroCallDiagInfo): MacroCallDiagInfo {
+    let target = MacroCallDiagInfo()
+    target.macroCallBegin = source.macroCallBegin
+    target.macroCallEnd = source.macroCallEnd
+    target.identifierPos = source.identifierPos
+    target.identifier = source.identifier
+    target.fullName = source.fullName
+    target.mcBegin = source.mcBegin
+    target.mcEnd = source.mcEnd
+    target.isForLSP = source.isForLSP
+    target.isCurFile = source.isCurFile
+    target.isCustom = source.isCustom
+    target.hasShownCode = source.hasShownCode
+    return target
+}
+
 public func CopyBasicInfo(source: Node, target: Node): Unit {
     target.begin = source.begin
     target.end = source.end
@@ -63,7 +79,7 @@ public func CopyBasicInfo(source: Node, target: Node): Unit {
 
 public func CloneMacroInvocation(source: MacroInvocation): MacroInvocation {
     let target = MacroInvocation()
-    target.macroCallDiagInfo = source.macroCallDiagInfo
+    target.macroCallDiagInfo = cloneMacroCallDiagInfo(source.macroCallDiagInfo)
     for (pos in source.fullNameDotPos) { target.fullNameDotPos.add(pos) }
     target.leftSquarePos = source.leftSquarePos
     target.rightSquarePos = source.rightSquarePos

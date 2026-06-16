@@ -21,6 +21,23 @@ public enum SuffixKind {
     | QUEST
 }
 
+private func GetOutermostMacroInvocation(node: Node): Option<MacroInvocation> {
+    var cur = node
+    while (let Some(parent) <- cur.curMacroCall) {
+        cur = parent
+    }
+    return cur.GetInvocation()
+}
+
+private func FindPositionByUInt64Key(entries: ArrayList<(UInt64, Position)>, key: UInt64): Option<Position> {
+    for (entry in entries) {
+        if (entry[0] == key) {
+            return entry[1]
+        }
+    }
+    return None
+}
+
 public open class Node {
     public var begin: Position = INVALID_POSITION
     public var end: Position = INVALID_POSITION
@@ -294,11 +311,20 @@ public open class Node {
 
     public func GetMacroCallPos(originPos: Position, isLowerBound!: Bool = false): Position {
         if (let Some(macroCall) <- curMacroCall) {
+            if (originPos.line != macroCall.begin.line) {
+                return originPos
+            }
             if (let Some(invocation) <- macroCall.GetConstInvocation()) {
+                if (IsPureAnnotation(invocation)) {
+                    return originPos
+                }
                 return invocation.macroCallDiagInfo.MapPos(originPos, isLowerBound: isLowerBound)
             }
         }
         if (let Some(invocation) <- GetConstInvocation()) {
+            if (begin.fileID != originPos.fileID) {
+                return originPos
+            }
             return invocation.macroCallDiagInfo.MapPos(originPos, isLowerBound: isLowerBound)
         }
         return originPos
@@ -318,10 +344,57 @@ public open class Node {
     }
 
     public func GetMacroCallNewPos(originPos: Position): Position {
-        return originPos
+        var invocation: Option<MacroInvocation> = None
+        if (isInMacroCall) {
+            if (let Some(macroCall) <- curMacroCall) {
+                invocation = GetOutermostMacroInvocation(macroCall)
+            }
+        }
+        if (IsMacroCallNode()) {
+            invocation = GetOutermostMacroInvocation(this)
+        }
+        if (let Some(value) <- invocation) {
+            if (value.macroCallDiagInfo.originPosMap.size() == 0 || value.origin2newPosMap.isEmpty()) {
+                return INVALID_POSITION
+            }
+            let key = originPos.Hash32()
+            if (let Some(entry) <- value.macroCallDiagInfo.originPosMap.lowerBound(key)) {
+                let newKey = entry[1].Hash64()
+                if (let Some(pos) <- FindPositionByUInt64Key(value.origin2newPosMap, newKey)) {
+                    return pos
+                }
+            }
+        }
+        return INVALID_POSITION
     }
 
     public func GetDebugPos(curPos: Position): Position {
+        var invocation = GetConstInvocation()
+        if (let None <- invocation) {
+            if (curPos == INVALID_POSITION) {
+                return curPos
+            }
+            if (let Some(macroCall) <- curMacroCall) {
+                invocation = macroCall.GetConstInvocation()
+            } else {
+                return curPos
+            }
+            if (let Some(value) <- invocation) {
+                if (value.macroDebugMap.isEmpty()) {
+                    return curPos
+                }
+            } else {
+                return curPos
+            }
+        }
+        if (curPos.column < 0) {
+            return curPos
+        }
+        if (let Some(value) <- invocation) {
+            if (let Some(pos) <- FindPositionByUInt64Key(value.macroDebugMap, UInt64(curPos.column))) {
+                return pos
+            }
+        }
         return curPos
     }
 
