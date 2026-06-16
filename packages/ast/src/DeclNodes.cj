@@ -303,6 +303,90 @@ private func containsClassLikeDecl(values: ArrayList<ClassLikeDecl>, decl: Class
     return false
 }
 
+private func extendTypeArgsAllExported(decl: ExtendDecl): Bool {
+    if (let Some(extended) <- decl.extendedType) {
+        for (typeArg in extended.GetTypeArgs()) {
+            if (let Some(target) <- typeArg.GetTarget()) {
+                if (!target.IsExportedDecl()) {
+                    return false
+                }
+            }
+        }
+    }
+    return true
+}
+
+private func extendUpperBoundsAllExported(decl: ExtendDecl): Bool {
+    if (let Some(generic) <- decl.generic) {
+        var allExported = true
+        for (constraint in generic.genericConstraints) {
+            for (upperBound in constraint.upperBounds) {
+                if (let Some(target) <- upperBound.GetTarget()) {
+                    allExported = target.IsExportedDecl() && allExported
+                }
+            }
+        }
+        return allExported
+    }
+    return true
+}
+
+private func hasExportedInheritedInterface(decl: ExtendDecl): Bool {
+    for (inheritedType in decl.inheritedTypes) {
+        if (let Some(target) <- inheritedType.GetTarget()) {
+            if (target.IsExportedDecl()) {
+                return true
+            }
+        }
+    }
+    return false
+}
+
+private func isExtendMemberExported(decl: Decl, baseExported: Bool): Bool {
+    if (let Some(outer) <- decl.outerDecl) {
+        if (outer.astKind != ASTKind.EXTEND_DECL) {
+            return baseExported
+        }
+        if (let Some(extendDecl) <- (outer as ExtendDecl)) {
+            if (let Some(extendedDecl) <- Ty.GetDeclPtrOfTy(extendDecl.GetTy())) {
+                if (extendedDecl.fullPackageName == extendDecl.fullPackageName) {
+                    return baseExported
+                }
+            } else {
+                return baseExported
+            }
+            if (extendDecl.inheritedTypes.isEmpty()) {
+                return false
+            }
+            return baseExported && decl.TestAttr(Attribute.INTERFACE_IMPL)
+        }
+    }
+    return baseExported
+}
+
+private func hasFuncBodyBlock(body: Option<FuncBody>): Bool {
+    if (let Some(funcBody) <- body) {
+        if (let Some(_) <- funcBody.body) {
+            return true
+        }
+    }
+    return false
+}
+
+private func isOpenMemberDecl(decl: Decl, hasBodyOrAccessor: Bool): Bool {
+    if (let Some(outer) <- decl.outerDecl) {
+        if (!outer.IsOpen() || decl.TestAttr(Attribute.STATIC)) {
+            return false
+        }
+    } else {
+        return false
+    }
+    if (decl.TestAnyAttr(Attribute.OPEN, Attribute.ABSTRACT)) {
+        return true
+    }
+    return !decl.TestAttr(Attribute.IMPORTED) && !hasBodyOrAccessor
+}
+
 public enum BuiltInType {
     | ARRAY
     | POINTER
@@ -553,8 +637,12 @@ public class FuncDecl <: Decl {
         return identifier == "~init"
     }
 
+    public override func IsExportedDecl(): Bool {
+        return isExtendMemberExported(this, super.IsExportedDecl())
+    }
+
     public override func IsOpen(): Bool {
-        return TestAnyAttr(Attribute.OPEN, Attribute.ABSTRACT)
+        return isOpenMemberDecl(this, hasFuncBodyBlock(funcBody))
     }
 
     public override func ToString(): String {
@@ -605,8 +693,12 @@ public class PropDecl <: VarDecl {
         super(ASTKind.PROP_DECL)
     }
 
+    public override func IsExportedDecl(): Bool {
+        return isExtendMemberExported(this, super.IsExportedDecl())
+    }
+
     public override func IsOpen(): Bool {
-        return TestAnyAttr(Attribute.OPEN, Attribute.ABSTRACT)
+        return isOpenMemberDecl(this, !getters.isEmpty() || !setters.isEmpty())
     }
 }
 
@@ -748,6 +840,42 @@ public class ExtendDecl <: InheritableDecl {
 
     public override func GetMemberDecls(): ArrayList<Decl> {
         return members
+    }
+
+    public override func IsExportedDecl(): Bool {
+        if (!extendTypeArgsAllExported(this)) {
+            return false
+        }
+        let extendedDecl = Ty.GetInheritableDeclPtrOfTy(GetTy())
+        let isInSamePkg = if (let Some(value) <- extendedDecl) {
+            value.fullPackageName == fullPackageName
+        } else {
+            false
+        }
+        if (inheritedTypes.isEmpty()) {
+            if (fullPackageName == "std.core") {
+                return true
+            }
+            if (isInSamePkg) {
+                if (let Some(value) <- extendedDecl) {
+                    if (let Some(_) <- generic) {
+                        return value.IsExportedDecl() && extendUpperBoundsAllExported(this)
+                    }
+                    return value.IsExportedDecl()
+                }
+            }
+            return false
+        }
+        if (isInSamePkg) {
+            if (let Some(value) <- extendedDecl) {
+                return value.IsExportedDecl()
+            }
+        }
+        let inheritedExported = hasExportedInheritedInterface(this)
+        if (let Some(_) <- generic) {
+            return inheritedExported && extendUpperBoundsAllExported(this)
+        }
+        return inheritedExported
     }
 }
 

@@ -10,6 +10,10 @@ The AST package is a multi-file Cangjie package mirroring the C++ AST component 
 
 ## Implemented In This Pass
 
+- Added C++ `Ty::GetDeclOfTy` / `Ty::GetDeclPtrOfTy` parity helpers in `Types.cj`, including nominal class/interface/struct/enum/type-alias declaration lookup and `specificImplementation` remapping for generic-declaration lookups.
+- Ported `ExtendDecl.IsExportedDecl` from `Node.cpp`: extended type-argument export checks, same-package direct-extension rules, `std.core` direct-extension export behavior, interface-extension inherited-interface export checks, and generic upper-bound export constraints.
+- Ported extend-member export behavior for `FuncDecl` and `PropDecl`, so direct extensions of foreign-package types hide members while interface implementations export only interface-implementation members.
+- Aligned `FuncDecl.IsOpen` and `PropDecl.IsOpen` with the C++ outer-declaration rules, static/imported checks, and body/accessor absence handling instead of treating local `open`/`abstract` attributes alone as sufficient.
 - Deepened `InheritableDecl` inheritance helpers: direct interface types are de-duplicated, stable interface lists now use the existing `CompTyByNames` ordering, and `GetAllSuperDecls` now performs the C++ breadth-first traversal through class/interface inherited types with cycle/duplicate guards.
 - Aligned `Decl.GetMemberDeclPtrs` with the C++ helper by returning a fresh member list per nominal/extend declaration and including enum constructors before enum members without changing mutable `GetMemberDecls` behavior.
 - Deepened macro-call source-position recovery in `Node`: `GetMacroCallPos` now follows the C++ same-line guard for expanded nodes, skips pure custom annotations, and refuses cross-file direct macro mappings.

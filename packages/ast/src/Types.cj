@@ -547,6 +547,92 @@ public open class Ty {
         return false
     }
 
+    public static func GetDeclOfTy(ty: Option<Ty>): Option<Decl> {
+        if (let Some(value) <- ty) {
+            if (let Some(classTy) <- (value as ClassTy)) {
+                if (let Some(decl) <- classTy.decl) {
+                    return decl
+                }
+                return None
+            }
+            if (let Some(interfaceTy) <- (value as InterfaceTy)) {
+                if (let Some(decl) <- interfaceTy.decl) {
+                    return decl
+                }
+                return None
+            }
+            if (let Some(structTy) <- (value as StructTy)) {
+                if (let Some(decl) <- structTy.decl) {
+                    return decl
+                }
+                return None
+            }
+            if (let Some(enumTy) <- (value as EnumTy)) {
+                if (let Some(decl) <- enumTy.decl) {
+                    return decl
+                }
+                return None
+            }
+            if (let Some(aliasTy) <- (value as TypeAliasTy)) {
+                if (let Some(decl) <- aliasTy.declPtr) {
+                    return decl
+                }
+                return None
+            }
+        }
+        return None
+    }
+
+    public static func GetDeclPtrOfTy(ty: Option<Ty>): Option<Decl> {
+        if (let Some(value) <- ty) {
+            if (let Some(classTy) <- (value as ClassTy)) {
+                if (let Some(decl) <- classTy.declPtr) {
+                    return Ty.MapSpecificImplementation(decl)
+                }
+                return None
+            }
+            if (let Some(interfaceTy) <- (value as InterfaceTy)) {
+                if (let Some(decl) <- interfaceTy.declPtr) {
+                    return Ty.MapSpecificImplementation(decl)
+                }
+                return None
+            }
+            if (let Some(structTy) <- (value as StructTy)) {
+                if (let Some(decl) <- structTy.declPtr) {
+                    return Ty.MapSpecificImplementation(decl)
+                }
+                return None
+            }
+            if (let Some(enumTy) <- (value as EnumTy)) {
+                if (let Some(decl) <- enumTy.declPtr) {
+                    return Ty.MapSpecificImplementation(decl)
+                }
+                return None
+            }
+            if (let Some(aliasTy) <- (value as TypeAliasTy)) {
+                if (let Some(decl) <- aliasTy.declPtr) {
+                    return Ty.MapSpecificImplementation(decl)
+                }
+                return None
+            }
+        }
+        return None
+    }
+
+    public static func GetInheritableDeclPtrOfTy(ty: Option<Ty>): Option<InheritableDecl> {
+        if (let Some(decl) <- Ty.GetDeclPtrOfTy(ty)) {
+            return decl as InheritableDecl
+        }
+        return None
+    }
+
+    private static func MapSpecificImplementation(decl: Decl): Decl {
+        if (let Some(specific) <- decl.specificImplementation) {
+            return specific
+        }
+        return decl
+    }
+
     public static func AreTysCorrect(tys: ArrayList<Ty>): Bool {
         for (ty in tys) {
             if (ty.HasInvalidTy()) {
