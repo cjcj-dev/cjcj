@@ -9,6 +9,7 @@ import cangjie_compiler::utils.IsDigit as UtilsIsDigit
 import cangjie_compiler::utils.IsXDigit as UtilsIsXDigit
 import cangjie_compiler::utils.IsXIDContinue as UtilsIsXIDContinue
 import cangjie_compiler::utils.NFC as UtilsNFC
+import cangjie_compiler::utils.CJC_ASSERT
 import std.collection.*
 
 public let BYTE_X_FLAG: UInt8 = 0x80u8
@@ -420,22 +421,25 @@ public class LexerImpl {
     }
 
     public func GetStrParts(t: Token): ArrayList<StringPart> {
+        CJC_ASSERT(t.kind == TokenKind.STRING_LITERAL || t.kind == TokenKind.MULTILINE_STRING)
         if (let Some(parts) <- stringPartsMap.get(t)) {
             return parts
         }
-        let syntheticInput = if (t.kind == TokenKind.MULTILINE_STRING) {
-            "\"\"\"\n" + ProcessQuotaMarks(t.Value()) + "\"\"\""
-        } else {
-            "\"" + ProcessQuotaMarks(t.Value(), processSingle: true) + "\""
+        if (!enableScan) {
+            let syntheticInput = if (t.kind == TokenKind.MULTILINE_STRING) {
+                "\"\"\"\n" + ProcessQuotaMarks(t.Value()) + "\"\"\""
+            } else {
+                "\"" + ProcessQuotaMarks(t.Value(), processSingle: true) + "\""
+            }
+            let tempLexer = LexerImpl(syntheticInput, diag, source, LexerConfig(posBase: t.Begin()))
+            tempLexer.Scan()
+            stringPartsMap.add(t, tempLexer.TakeFirstStringParts())
         }
-        let tempLexer = LexerImpl(syntheticInput, diag, source, LexerConfig(posBase: t.Begin()))
-        tempLexer.Scan()
-        let rebuilt = tempLexer.TakeFirstStringParts()
-        if (rebuilt.isEmpty()) {
-            rebuilt.add(StringPart(StringPartKind.STR, t.Value(), t.Begin(), t.End()))
+        if (let Some(parts) <- stringPartsMap.get(t)) {
+            return parts
         }
-        stringPartsMap.add(t, rebuilt)
-        return rebuilt
+        CJC_ASSERT(false)
+        return ArrayList<StringPart>()
     }
 
     private func TakeFirstStringParts(): ArrayList<StringPart> {
@@ -985,13 +989,7 @@ public class LexerImpl {
         if (IsCurrentCharLineTerminator()) {
             return "new line character"
         }
-        if (currentChar < 0) {
-            return "end of file"
-        }
-        if (currentChar <= 127) {
-            return byteString(UInt8(currentChar))
-        }
-        return Char32ToUTF8(UInt32(currentChar))
+        return ConvertChar(currentChar)
     }
 
     private func PrefixName(prefix: UInt8): String {
@@ -1203,7 +1201,6 @@ public class LexerImpl {
                 diag, DiagKindRefactor.lex_illegal_uni_character_literal,
                 MakeRange(GetPos(escapeStart), GetPos(pNext)), TrimmedHex(hexVal)
             )
-            success = false
         }
     }
 
@@ -2372,7 +2369,6 @@ public class LexerImpl {
                 let tok = ScanIdentifierOrKeyword(Token(TokenKind.IDENTIFIER), pStart + 1)
                 if (tok.kind != TokenKind.IDENTIFIER) {
                     DiagUnexpectedDollarIdentifier(tok)
-                    success = false
                 }
                 return Token(TokenKind.DOLLAR_IDENTIFIER, "$" + tok.Value(), pos, GetPos(pNext))
             }

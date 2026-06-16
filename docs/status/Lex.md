@@ -32,6 +32,9 @@ Implemented:
 - Reworked string-interpolation hole scanning to mirror the C++ helper split for nested braces, strings, comments, linebreak diagnostics, and raw-string failure propagation.
 - Routed non-identifier Unicode token starts through the C++ symbol fallback path so they produce `lex_unknown_start_of_token` behavior instead of Lex-local unrecognized-symbol handling.
 - Aligned numeric exponent/suffix diagnostics with C++ by anchoring exponent digit scanning at the exponent marker and preserving the reference `success` state after unknown-suffix reporting.
+- Tightened `GetStrParts` to assert string-token kinds and require scanned string-part map entries just like C++, while still rebuilding macro-provided string tokens through a temporary lexer.
+- Delegated current-character diagnostic rendering to Basic `ConvertChar` after newline detection, matching C++ handling for EOF and control characters.
+- Preserved the C++ lexer `success` state for illegal Unicode scalar escape diagnostics and unexpected dollar-keyword diagnostics instead of treating those recoverable diagnostics as scan failure.
 
 Known validation caveats:
 
