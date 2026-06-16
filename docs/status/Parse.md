@@ -130,14 +130,23 @@ the real Option package types.
   `as` positions, brace/comma positions, `import a.{b, c as d}` parsing,
   import-all parsing, import annotation validation, multi-import desugaring, and
   import package-name length checks.
+- Reworked top-level parsing toward the C++ `Parser.cpp` preamble shape:
+  `features? package? import* decl*` is now parsed in distinct phases instead
+  of allowing package/import/features repeatedly anywhere, import annotations
+  are preserved for the first declaration when they are not followed by an
+  import, modifiers before non-package declarations are no longer consumed by
+  the package probe, late package/import/features forms are diagnosed, top-level
+  declarations get `Attribute.GLOBAL`, and `macro package` now diagnoses public
+  non-macro declarations.
 
 ## Remaining Work
 
 - Replace the remaining Parse-local AST node classes, parser diagnostics, and
   parser lexer implementation with real sibling package APIs where their public
   surfaces are sufficiently complete.
-- Top-level preamble ordering still follows the compatibility loop rather than
-  the exact C++ `feature? package? import* decl*` reset/recovery structure.
+- Top-level recovery still uses local message diagnostics rather than the exact
+  C++ diagnostic IDs, suggestions, parser-scope reset objects, and bracket-stack
+  cleanup.
 - Feature raw-identifier diagnostics still depend on finishing lexer
   de-isolation: the local Parse lexer strips backticks before parser recovery,
   while the real Lex lexer preserves raw identifier spelling in `Token.Value()`.
