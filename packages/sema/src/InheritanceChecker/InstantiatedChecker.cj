@@ -5,20 +5,64 @@ import cangjie_compiler::ast.*
 import cangjie_compiler::basic.{DiagArgument, DiagKind, DiagKindRefactor, MakeRange}
 import cangjie_compiler::sema.*
 
+public class InstantiationTriggerInfo {
+    public var node: Node
+    public var decl: Decl
+    public let instTys: ArrayList<Ty> = ArrayList<Ty>()
+
+    public init(node: Node, decl: Decl, instTys: ArrayList<Ty>) {
+        this.node = node
+        this.decl = decl
+        for (ty in instTys) {
+            this.instTys.add(ty)
+        }
+    }
+}
+
+public class InstantiatedMemberDiagnosticPair {
+    public var parent: MemberSignature
+    public var child: MemberSignature
+
+    public init(parent: MemberSignature, child: MemberSignature) {
+        this.parent = parent.Clone()
+        this.child = child.Clone()
+    }
+}
+
+public class InstantiatedMemberDiagnosticRecord {
+    public var key: String
+    public let pairs: ArrayList<InstantiatedMemberDiagnosticPair> = ArrayList<InstantiatedMemberDiagnosticPair>()
+
+    public init(key: String) {
+        this.key = key
+    }
+}
+
+public class InstantiatedTyCacheEntry {
+    public var source: Ty
+    public var instantiated: Ty
+
+    public init(source: Ty, instantiated: Ty) {
+        this.source = source
+        this.instantiated = instantiated
+    }
+}
+
+public class InstantiatedTyCacheRecord {
+    public var key: String
+    public let entries: ArrayList<InstantiatedTyCacheEntry> = ArrayList<InstantiatedTyCacheEntry>()
+
+    public init(key: String) {
+        this.key = key
+    }
+}
+
 func InstantiationKey(decl: Decl, instTys: ArrayList<Ty>): String {
     let parts = ArrayList<String>()
     for (ty in instTys) {
         parts.add(ty.String())
     }
     return "${decl.fullPackageName}:${decl.identifier.Val()}:${decl.begin.ToString()}:${JoinStrings(parts, ",")}"
-}
-
-func TypeArgsFromTy(ty: Ty): ArrayList<Ty> {
-    let out = ArrayList<Ty>()
-    for (arg in ty.typeArgs) {
-        out.add(arg)
-    }
-    return out
 }
 
 private func GetReferenceTyAndTarget(node: Node): (Option<Ty>, Option<Decl>) {
@@ -35,23 +79,6 @@ private func GetReferenceTyAndTarget(node: Node): (Option<Ty>, Option<Decl>) {
         }
     }
     return (baseTy, target)
-}
-
-func GenerateTypeMappingForInheritance(decl: Decl, instTys: ArrayList<Ty>): TypeSubst {
-    let out = TypeSubst()
-    if (let Some(generic) <- decl.GetGeneric()) {
-        if (generic.typeParameters.size != instTys.size) {
-            return out
-        }
-        for (idx in 0..generic.typeParameters.size) {
-            if (let Some(paramTy) <- generic.typeParameters[idx].GetTy()) {
-                if (let Some(genericTy) <- (paramTy as GenericsTy)) {
-                    out.Put(genericTy, instTys[idx])
-                }
-            }
-        }
-    }
-    return out
 }
 
 private func HasExtendForInstantiation(values: ArrayList<ExtendDecl>, extendDecl: ExtendDecl): Bool {
@@ -114,20 +141,35 @@ private func GetVisibleExtendsForInstantiation(
     return out
 }
 
+private func MarkUpperBoundIgnored(node: Node, generic: Generic): Unit {
+    for (constraint in generic.genericConstraints) {
+        for (upperBound in constraint.upperBounds) {
+            if (let Some(upperTy) <- upperBound.GetTy()) {
+                if (upperTy.HasGeneric()) {
+                    upperBound.visitedByWalkerID = node.visitedByWalkerID
+                }
+            }
+        }
+    }
+}
+
 func CheckInstMemberSignatures(
     checker: StructInheritanceChecker,
     decl: InheritableDecl,
     instTys: ArrayList<Ty>
 ): Unit {
+    if (!checker.HasInstantiationTrigger()) {
+        return
+    }
     if (instTys.isEmpty()) {
         return
     }
     let key = InstantiationKey(decl, instTys)
     if (checker.HasInstantiatedKey(key)) {
+        checker.ReplayInstantiatedMemberDiagnostics(key)
         return
     }
-    checker.AddInstantiatedKey(key)
-    let typeMapping = GenerateTypeMappingForInheritance(decl, instTys)
+    let typeMapping = GenerateTypeMapping(decl, instTys)
     if (typeMapping.IsEmpty()) {
         return
     }
@@ -164,23 +206,152 @@ func CheckInstMemberSignatures(
     for (entry in genericTyMembers.entries) {
         let memberSig = entry.signature.Clone()
         if (let Some(memberTy) <- memberSig.ty) {
-            memberSig.ty = checker.typeManager.GetInstantiatedTy(memberTy, typeMapping)
+            memberSig.ty = checker.GetCachedInstantiatedTy(key, memberTy, typeMapping)
         }
         if (let Some(memberStructTy) <- memberSig.structTy) {
-            memberSig.structTy = checker.typeManager.GetInstantiatedTy(memberStructTy, typeMapping)
+            memberSig.structTy = checker.GetCachedInstantiatedTy(key, memberStructTy, typeMapping)
         }
         for (candidate in members.Get(entry.name)) {
             let parent = candidate.Clone()
             if (let Some(parentStructTy) <- parent.structTy) {
-                parent.structTy = checker.typeManager.GetInstantiatedTy(parentStructTy, typeMapping)
+                parent.structTy = checker.GetCachedInstantiatedTy(key, parentStructTy, typeMapping)
             }
             checker.DiagnoseForInstantiatedMember(parent, memberSig)
+            checker.RecordInstantiatedMemberDiagnostic(key, parent, memberSig)
         }
         members.Add(entry.name, memberSig)
     }
 }
 
+private func InstantiationTriggeredInside(checker: StructInheritanceChecker, decl: Decl): Bool {
+    if (let Some(trigger) <- checker.CurrentInstantiationTrigger()) {
+        return SameDecl(trigger.decl, decl)
+    }
+    return false
+}
+
+private func ContainsRecursiveInstantiationArg(
+    checker: StructInheritanceChecker,
+    genericTy: Ty,
+    arg: Ty,
+    currentMapping: Option<TypeSubst>,
+    triggeredInside: Bool
+): Bool {
+    var substitutedTy = arg
+    if (let Some(mapping) <- currentMapping) {
+        substitutedTy = checker.typeManager.GetInstantiatedTy(arg, mapping)
+    }
+    if (arg.Contains(genericTy) || substitutedTy.Contains(genericTy)) {
+        return true
+    }
+    var noRecursion = !triggeredInside
+    if (!noRecursion) {
+        if (let Some(directGenericArg) <- Ty.GetGenericTyOfInsTy(arg)) {
+            noRecursion = directGenericArg.Contains(genericTy)
+        }
+    }
+    if (noRecursion) {
+        return false
+    }
+    if (let Some(substitutedGenericArg) <- Ty.GetGenericTyOfInsTy(substitutedTy)) {
+        return substitutedGenericArg.Contains(genericTy)
+    }
+    return false
+}
+
+private func HasSelfRecursiveInstantiation(
+    checker: StructInheritanceChecker,
+    genericTy: Ty,
+    instTy: Ty,
+    currentMapping: Option<TypeSubst>,
+    triggeredInside: Bool
+): Bool {
+    for (arg in instTy.typeArgs) {
+        if (ContainsRecursiveInstantiationArg(checker, genericTy, arg, currentMapping, triggeredInside)) {
+            return true
+        }
+    }
+    return false
+}
+
+private func WillCauseInfiniteInstantiation(
+    checker: StructInheritanceChecker,
+    triggerNode: Node,
+    decl: Decl,
+    instTys: ArrayList<Ty>,
+    typeMapping: TypeSubst
+): Bool {
+    if (HaveCyclicSubstitution(checker.typeManager, typeMapping)) {
+        checker.diag.Diagnose(triggerNode.begin, DiagKind.sema_generic_infinite_instantiation)
+        checker.MarkInfiniteInstantiationOccurred()
+        return true
+    }
+    if (let Some(currentMapping) <- checker.CurrentInstantiationTypeMap()) {
+        if (HaveCyclicSubstitution(checker.typeManager, currentMapping)) {
+            checker.diag.Diagnose(triggerNode.begin, DiagKind.sema_generic_infinite_instantiation)
+            checker.MarkInfiniteInstantiationOccurred()
+            return true
+        }
+    }
+    if (let None <- decl.GetGeneric()) {
+        return false
+    }
+    let generic = decl.GetGeneric().getOrThrow()
+    if (generic.typeParameters.size != instTys.size) {
+        return false
+    }
+    let currentMapping = checker.CurrentInstantiationTypeMap()
+    let triggeredInside = InstantiationTriggeredInside(checker, decl)
+    for (idx in 0..instTys.size) {
+        if (let Some(genericTy) <- generic.typeParameters[idx].GetTy()) {
+            if (HasSelfRecursiveInstantiation(checker, genericTy, instTys[idx], currentMapping, triggeredInside)) {
+                checker.diag.Diagnose(triggerNode.begin, DiagKind.sema_generic_infinite_instantiation)
+                checker.MarkInfiniteInstantiationOccurred()
+                return true
+            }
+        }
+    }
+    return false
+}
+
+private func ApplyCurrentInstantiationMap(checker: StructInheritanceChecker, instTys: ArrayList<Ty>): Unit {
+    if (let Some(currentMapping) <- checker.CurrentInstantiationTypeMap()) {
+        var idx: Int64 = 0
+        while (idx < instTys.size) {
+            instTys[idx] = checker.typeManager.GetInstantiatedTy(instTys[idx], currentMapping)
+            idx++
+        }
+    }
+}
+
+private func MergeTypeSubstForInstantiation(target: TypeSubst, source: TypeSubst): Unit {
+    for (entry in source.entries) {
+        target.Put(entry.tyVar, entry.ty)
+    }
+}
+
+private func BuildInstantiationTypeMap(decl: Decl, instTys: ArrayList<Ty>): TypeSubst {
+    if (let Some(extendDecl) <- (decl as ExtendDecl)) {
+        if (let Some(extendTy) <- extendDecl.GetTy()) {
+            if (extendTy.IsNominal()) {
+                if (let Some(targetDecl) <- Ty.GetDeclPtrOfTy(extendTy)) {
+                    let typeMapping = GenerateTypeMapping(targetDecl, instTys)
+                    MergeTypeSubstForInstantiation(typeMapping, GenerateTypeMapping(decl, extendTy.typeArgs))
+                    return typeMapping
+                }
+            }
+        }
+    }
+    return GenerateTypeMapping(decl, instTys)
+}
+
 func CheckInstDupFuncsRecursively(checker: StructInheritanceChecker, node: Node): VisitAction {
+    if (checker.HasInfiniteInstantiationOccurred()) {
+        return VisitAction.STOP_NOW
+    }
+    if (let Some(generic) <- (node as Generic)) {
+        MarkUpperBoundIgnored(node, generic)
+    }
     if (!Ty.IsTyCorrect(node.GetTy()) || node.TestAttr(Attribute.HAS_BROKEN)) {
         return VisitAction.WALK_CHILDREN
     }
@@ -190,21 +361,50 @@ func CheckInstDupFuncsRecursively(checker: StructInheritanceChecker, node: Node)
             return VisitAction.WALK_CHILDREN
         }
         if (let Some(baseTy) <- refInfo[0]) {
-            var instTys = TypeArgsFromTy(baseTy)
+            if (target.IsNominalDecl() && target.TestAttr(Attribute.GENERIC)) {
+                let emptyInstTys = ArrayList<Ty>()
+                let emptyKey = InstantiationKey(target, emptyInstTys)
+                if (!checker.HasInstantiatedKey(emptyKey)) {
+                    checker.AddInstantiatedKey(emptyKey)
+                    CheckInstantiatedDecl(checker, target, emptyInstTys)
+                }
+            }
+            checker.CheckInstWithCStructTypeArg(node)
+            var instTys = checker.typeManager.GetTypeArgs(baseTy)
             if (let Some(nameRef) <- (node as NameReferenceExpr)) {
                 if (!nameRef.instTys.isEmpty()) {
                     instTys = nameRef.instTys
                 }
             }
-            if (!instTys.isEmpty()) {
-                if (let Some(inheritable) <- (target as InheritableDecl)) {
-                    CheckInstMemberSignatures(checker, inheritable, instTys)
-                }
-                for (extendDecl in GetVisibleExtendsForInstantiation(checker, target, instTys)) {
-                    CheckInstMemberSignatures(checker, extendDecl, instTys)
+            let typeMapping = GenerateTypeMapping(target, instTys)
+            if (typeMapping.IsEmpty()) {
+                return VisitAction.WALK_CHILDREN
+            }
+            if (WillCauseInfiniteInstantiation(checker, node, target, instTys, typeMapping)) {
+                return VisitAction.STOP_NOW
+            }
+            ApplyCurrentInstantiationMap(checker, instTys)
+            let shouldUpdateTrigger = !baseTy.HasGeneric() || !checker.HasInstantiationTypeMap()
+            if (shouldUpdateTrigger) {
+                checker.PushInstantiationTrigger(node, target, instTys)
+            }
+            if (let Some(inheritable) <- (target as InheritableDecl)) {
+                CheckInstMemberSignatures(checker, inheritable, instTys)
+            }
+            let targetKey = InstantiationKey(target, instTys)
+            for (extendDecl in GetVisibleExtendsForInstantiation(checker, target, instTys)) {
+                CheckInstMemberSignatures(checker, extendDecl, instTys)
+                if (!checker.HasInstantiatedKey(targetKey)) {
+                    checker.AddInstantiatedKey(targetKey)
                 }
             }
-            checker.CheckInstWithCStructTypeArg(node)
+            if (!checker.HasInstantiatedKey(targetKey)) {
+                checker.AddInstantiatedKey(targetKey)
+                CheckInstantiatedDecl(checker, target, instTys)
+            }
+            if (shouldUpdateTrigger) {
+                checker.PopInstantiationTrigger()
+            }
         }
     }
     return VisitAction.WALK_CHILDREN
@@ -214,18 +414,24 @@ func CheckInstantiatedDecl(checker: StructInheritanceChecker, decl: Decl, instTy
     if (decl.IsBuiltIn()) {
         return
     }
-    let _ = instTys
+    let typeMapping = BuildInstantiationTypeMap(decl, instTys)
+    checker.PushInstantiationTypeMap(typeMapping)
     let walker = Walker(decl, visitPre: { node: Node =>
         CheckInstDupFuncsRecursively(checker, node)
     })
     walker.Walk()
+    checker.PopInstantiationTypeMap()
 }
 
 func CheckInstDupFuncsInNominalDecls(checker: StructInheritanceChecker): Unit {
     for (file in checker.pkg.files) {
         for (decl in file.decls) {
             let empty = ArrayList<Ty>()
-            CheckInstantiatedDecl(checker, decl, empty)
+            let emptyKey = InstantiationKey(decl, empty)
+            if (!checker.HasInstantiatedKey(emptyKey)) {
+                checker.AddInstantiatedKey(emptyKey)
+                CheckInstantiatedDecl(checker, decl, empty)
+            }
         }
     }
 }
@@ -336,16 +542,25 @@ func DiagnoseForInstantiatedMemberImpl(
     parent: MemberSignature,
     child: MemberSignature
 ): Unit {
+    if (let None <- checker.CurrentInstantiationTrigger()) {
+        return
+    }
+    let trigger = checker.CurrentInstantiationTrigger().getOrThrow()
     if (let Some(parentDecl) <- parent.decl) {
         if (let Some(childDecl) <- child.decl) {
             if (let Some(parentFuncTy) <- FuncTyFromOption(parent.ty)) {
                 if (let Some(childFuncTy) <- FuncTyFromOption(child.ty)) {
                     let sameStatic = parentDecl.TestAttr(Attribute.STATIC) == childDecl.TestAttr(Attribute.STATIC)
                     if (sameStatic && checker.typeManager.IsFuncParameterTypesIdentical(parentFuncTy, childFuncTy)) {
+                        let triggerTyParts = ArrayList<String>()
+                        for (instTy in trigger.instTys) {
+                            triggerTyParts.add(instTy.String())
+                        }
+                        let triggeredDeclType = trigger.decl.identifier.Val() + "<" + JoinStrings(triggerTyParts, ", ") + ">"
                         let builder = checker.diag.DiagnoseRefactor(
                             DiagKindRefactor.sema_generic_instantiation_causes_ambiguous_functions,
-                            MakeRange(childDecl.begin, childDecl.end),
-                            arguments: [childDecl.identifier.Val(), childDecl.identifier.Val()]
+                            MakeRange(trigger.node.begin, trigger.node.end),
+                            arguments: [triggeredDeclType, childDecl.identifier.Val()]
                         )
                         builder.AddNote(MakeRange(parentDecl.begin, parentDecl.end), "found candidate")
                         builder.AddNote(MakeRange(childDecl.begin, childDecl.end), "found candidate")

@@ -80,14 +80,9 @@ private func RemoveAnyTy(typeManager: TypeManager, tys: TySet): Unit {
 
 private func IsChildConstraintLooser(
     typeManager: TypeManager,
-    parentUppers: TySet,
+    instUppers: TySet,
     childUppers: TySet,
-    typeMapping: TypeSubst
 ): Bool {
-    let instUppers = TySet()
-    for (upper in parentUppers.values) {
-        instUppers.Add(typeManager.GetInstantiatedTy(upper, typeMapping))
-    }
     for (childUpper in childUppers.values) {
         var matched = false
         for (parentUpper in instUppers.values) {
@@ -110,6 +105,37 @@ private func IsChildConstraintLooser(
     return true
 }
 
+private func InstantiateUpperBounds(typeManager: TypeManager, parentUppers: TySet, typeMapping: TypeSubst): TySet {
+    let instUppers = TySet()
+    for (upper in parentUppers.values) {
+        instUppers.Add(typeManager.GetInstantiatedTy(upper, typeMapping))
+    }
+    return instUppers
+}
+
+private func ParentConstraintText(uppers: TySet): String {
+    if (uppers.IsEmpty()) {
+        return "empty"
+    }
+    return "'" + Ty.GetTypesToStableStr(uppers.values, "', '") + "'"
+}
+
+private func GetConstraintNodeByIndex(index: Int64, generic: Generic): Node {
+    if (index >= generic.typeParameters.size) {
+        return generic
+    }
+    let paramDecl = generic.typeParameters[index]
+    let paramTy = paramDecl.GetTy()
+    for (constraint in generic.genericConstraints) {
+        if (let Some(refType) <- constraint.refType) {
+            if (SameTy(refType.GetTy(), paramTy)) {
+                return constraint
+            }
+        }
+    }
+    return paramDecl
+}
+
 public func CheckGenericTypeBoundsMapped(
     parent: Decl,
     child: Decl,
@@ -130,6 +156,10 @@ public func CheckGenericTypeBoundsMapped(
     if (parentBounds.size != childBounds.size) {
         return
     }
+    if (let None <- child.GetGeneric()) {
+        return
+    }
+    let childGeneric = child.GetGeneric().getOrThrow()
     let typeMapping = typeManager.GenerateGenericMappingFromGeneric(parent, child)
     for (idx in 0..parentBounds.size) {
         let childUppers = childBounds[idx].Clone()
@@ -137,11 +167,12 @@ public func CheckGenericTypeBoundsMapped(
         if (childUppers.IsEmpty()) {
             continue
         }
-        if (!IsChildConstraintLooser(typeManager, parentBounds[idx], childUppers, typeMapping)) {
-            let range = MakeRange(child.begin, child.end)
+        let instUppers = InstantiateUpperBounds(typeManager, parentBounds[idx], typeMapping)
+        if (!IsChildConstraintLooser(typeManager, instUppers, childUppers)) {
+            let diagNode = GetConstraintNodeByIndex(idx, childGeneric)
+            let range = MakeRange(diagNode.begin, diagNode.end)
             let builder = diag.DiagnoseRefactor(DiagKindRefactor.sema_generic_constraint_not_looser, range)
-            let parentText = if (parentBounds[idx].IsEmpty()) { "empty" } else { parentBounds[idx].ToString() }
-            builder.AddNote("parent constraint is " + parentText)
+            builder.AddNote("parent constraint is " + ParentConstraintText(instUppers))
         }
     }
 }

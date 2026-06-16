@@ -27,14 +27,58 @@ Continuation update:
 - Unimplemented-member reporting now includes the C++ static abstract member diagnostic for abstract classes and
   disambiguates duplicate unimplemented member notes with the member type.
 
+Deepening update:
+
+- Inheritance member visibility now uses the real modules package relation helper and applies the C++ public/protected/
+  internal visibility table to real AST nodes, replacing the earlier same-package approximation.
+- Common-part declarations now follow the C++ `NeedRecheck` rule: non-common declarations from the common part are
+  rechecked only when they inherit/extend common declarations or an extended target has a specific implementation.
+- Inherited interface type collection and extension collection are now stable-ordered. Extensions of the same target are
+  filtered with the C++ parent/sub-interface ordering rule and report `sema_extend_check_sequence_cannot_decide` when
+  cross-inherited extension ordering cannot be decided.
+- Class/extend base-member lookup now switches to a base declaration's `specificImplementation` when present, matching
+  the C++ common/specific implementation path.
+- Local inheritance-only copies of generic substitution utilities were removed. Instantiated checking now calls the real
+  `GenerateTypeMapping`, `TypeManager.GetTypeArgs`, and `MultiTypeSubstToTypeSubst` helpers from `cangjie_compiler::sema`.
+- Instantiated generic member checking now keeps a trigger stack, reports ambiguous instantiated function diagnostics at
+  the instantiation use site with the instantiated declaration text, pre-walks referenced generic nominal declarations,
+  and diagnoses direct/cyclic generic infinite instantiation with the real substitution cycle helper.
+
+Continuation deepening update:
+
+- Generic override constraint diagnostics now mirror the C++ mapped-bound check more closely: parent constraints are
+  instantiated before formatting, rendered in stable type order, and reported on the exact child generic constraint node
+  when available instead of on the whole child declaration.
+- Return-type inconsistency diagnostics now use stable quoted conflict-type text and exclude the child return type from
+  the inherited conflict list when matching the C++ override failure note.
+- Function override return checking now includes the C++ extension-relation invariance branch before falling back to
+  subtype-incompatible diagnostics.
+- Instantiated declaration walking now keeps a substitution stack like the C++ `institutionMaps`: nested instantiated
+  type arguments are substituted through the active map, active maps participate in cyclic-substitution detection, and
+  extend declarations build a combined map from the extended nominal type and the extension's own type arguments.
+- Repeated instantiated generic member checks now replay cached `(parent, member)` diagnostic pairs for the same
+  declaration/type-argument key, matching the C++ `genericMembersForInstantiatedDecl` path instead of silently returning.
+- Instantiated declaration traversal now mirrors the C++ seen-key flow more closely: top-level declarations are cached
+  with the empty type-argument key, generic upper-bound type nodes are marked with the active walker id to avoid recursive
+  constraint walks, non-empty instantiations recursively walk the instantiated declaration when no visible extend already
+  cached the key, and member-signature type substitution reuses a per-instantiation type cache.
+- Infinite-instantiation detection now checks recursive type arguments after applying the active instantiation map and
+  handles the C++ "triggered inside the same declaration" path using `Ty.GetGenericTyOfInsTy`.
+- Extension ordering for generic extended types now instantiates the current extension's inherited interface types through
+  the other extension's extended-type arguments before comparing sub/super interface relationships, matching the C++
+  `GenerateTypeMappingByTy` path for generic same-target extensions.
+- Inherited kind/type conflict diagnostics and return-type incompatibility diagnostics now prefer declaration identifier
+  ranges where the C++ emits identifier-focused ranges, instead of always highlighting the full declaration.
+
 De-isolation status: the implementation imports `cangjie_compiler::ast`, `cangjie_compiler::basic`, and
-`cangjie_compiler::sema` directly. It does not define local compatibility copies of AST, Basic, Lex, diagnostics, or
-TypeManager types.
+`cangjie_compiler::sema` directly. This pass also imports the real `cangjie_compiler::modules` package-relation helper.
+It does not define local compatibility copies of AST, Basic, Lex, diagnostics, TypeManager, or generic substitution
+types.
 
 Known remaining fidelity gaps are caused by sibling systems that are not yet represented in this self-hosting package:
-full import-manager extend accessibility, native backend Java/ObjC inheritance annotation checks, C++ extension ordering
-ambiguity diagnostics for cross-inherited interface extensions, full C++ diagnostic note parity, and the C++ infinite-
-instantiation trigger stack. The implemented behavior is executable and participates in the package build, but it is not
-yet wired into `TypeChecker::CheckInheritance` because that owner is outside this pass's edit scope.
+full import-manager extend accessibility, native backend Java/ObjC inheritance annotation checks, platform-specific
+replacement of inherited interface type nodes through CJMP specific implementations during extension ordering, and full
+C++ diagnostic note/hint parity. The implemented behavior is executable and participates in the package build, but it is
+not yet wired into `TypeChecker::CheckInheritance` because that owner is outside this pass's edit scope.
 
-Verification: `cjpm build` passes for the whole workspace after this continuation pass.
+Verification: `cjpm build` passes for the whole workspace after this continuation deepening pass.

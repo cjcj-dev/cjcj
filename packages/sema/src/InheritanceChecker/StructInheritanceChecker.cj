@@ -4,14 +4,29 @@ import std.collection.*
 import cangjie_compiler::ast.*
 import cangjie_compiler::basic.{DiagnosticEngine, DiagArgument, DiagKind, DiagKindRefactor, MakeRange}
 import cangjie_compiler::basic.Range as BasicRange
+import cangjie_compiler::modules.{GetPackageRelation, PackageRelation}
 import cangjie_compiler::sema.*
 
 private func DeclRange(decl: Decl): BasicRange {
     return MakeRange(decl.begin, decl.end)
 }
 
+private func DeclIdentifierRange(decl: Decl): BasicRange {
+    if (!decl.identifier.Empty() && !decl.identifier.ZeroPos()) {
+        return MakeRange(decl.identifier.Begin(), decl.identifier.End())
+    }
+    return DeclRange(decl)
+}
+
 private func NodeRange(node: Node): BasicRange {
     return MakeRange(node.begin, node.end)
+}
+
+private func NodeConflictRange(node: Node): BasicRange {
+    if (let Some(decl) <- (node as Decl)) {
+        return DeclIdentifierRange(decl)
+    }
+    return NodeRange(node)
 }
 
 private func DeclKindText(decl: Decl): String {
@@ -27,23 +42,72 @@ private func HasExtend(values: ArrayList<ExtendDecl>, decl: ExtendDecl): Bool {
     return false
 }
 
-private func AddExtendUnique(values: ArrayList<ExtendDecl>, decl: ExtendDecl): Unit {
-    if (!HasExtend(values, decl)) {
-        values.add(decl)
+private func AddExtendUniqueByPosition(values: ArrayList<ExtendDecl>, decl: ExtendDecl): Unit {
+    if (HasExtend(values, decl)) {
+        return
     }
+    var idx: Int64 = 0
+    while (idx < values.size) {
+        if (decl.begin < values[idx].begin ||
+            (decl.begin == values[idx].begin && ASTKindIndex(decl.astKind) < ASTKindIndex(values[idx].astKind))) {
+            values.add(decl, at: idx)
+            return
+        }
+        idx++
+    }
+    values.add(decl)
+}
+
+private func AddTyUniqueByName(values: ArrayList<Ty>, ty: Ty): Unit {
+    for (value in values) {
+        if (SameTy(value, ty)) {
+            return
+        }
+    }
+    var idx: Int64 = 0
+    while (idx < values.size) {
+        if (CompTyByNames(Some(ty), Some(values[idx]))) {
+            values.add(ty, at: idx)
+            return
+        }
+        idx++
+    }
+    values.add(ty)
+}
+
+private func AddTyUniqueByNameSkipping(values: ArrayList<Ty>, ty: Ty, skipTy: Option<Ty>): Unit {
+    if (SameTy(Some(ty), skipTy)) {
+        return
+    }
+    AddTyUniqueByName(values, ty)
+}
+
+private func StringifyInconsistentTypes(inconsistentTypes: TySet, childTy!: Option<Ty> = None): String {
+    let sortedTys = ArrayList<Ty>()
+    for (ty in inconsistentTypes.values) {
+        AddTyUniqueByNameSkipping(sortedTys, ty, childTy)
+    }
+    return "'" + Ty.GetTypesToStableStr(sortedTys, "', '") + "'"
+}
+
+private func IsExtendVisibleForPackage(currentPkg: String, extendDecl: ExtendDecl): Bool {
+    let relation = GetPackageRelation(currentPkg, extendDecl.fullPackageName)
+    return IsAstVisibleInRelation(extendDecl, relation)
+}
+
+private func IsAstVisibleInRelation(node: Node, relation: PackageRelation): Bool {
+    return node.TestAttr(Attribute.PUBLIC) || relation == PackageRelation.SAME_PACKAGE ||
+        (node.TestAttr(Attribute.PROTECTED) && relation != PackageRelation.NONE) ||
+        (node.TestAttr(Attribute.INTERNAL) &&
+            (relation == PackageRelation.CHILD || relation == PackageRelation.SAME_PACKAGE))
 }
 
 private func IsInvisibleMember(member: Decl, currentPkg: String): Bool {
     if (member.TestAttr(Attribute.PRIVATE)) {
         return true
     }
-    if (member.TestAttr(Attribute.PUBLIC) || member.TestAttr(Attribute.PROTECTED)) {
-        return false
-    }
-    if (member.fullPackageName.isEmpty()) {
-        return false
-    }
-    return member.fullPackageName != currentPkg && !member.TestAttr(Attribute.INTERNAL)
+    let relation = GetPackageRelation(currentPkg, member.fullPackageName)
+    return !IsAstVisibleInRelation(member, relation) && !member.TestAttr(Attribute.PROTECTED)
 }
 
 private func RemoveMembersShouldNotInherit(members: MemberMap): Unit {
@@ -104,6 +168,36 @@ private func DiagnoseParameterName(diag: DiagnosticEngine, parent: FuncDecl, chi
     builder.AddNote(DeclRange(parent), "the corresponding function of the supertype is")
 }
 
+private func HasCommonDecl(decls: ArrayList<ClassLikeDecl>): Bool {
+    for (decl in decls) {
+        if (decl.TestAttr(Attribute.COMMON)) {
+            return true
+        }
+    }
+    return false
+}
+
+private func NeedRecheck(decl: InheritableDecl): Bool {
+    let superDecls = decl.GetAllSuperDecls()
+    let extendedSuperDecls = ArrayList<ClassLikeDecl>()
+    if (let Some(extendDecl) <- (decl as ExtendDecl)) {
+        if (let Some(extendedType) <- extendDecl.extendedType) {
+            if (let Some(extendedTarget) <- extendedType.GetTarget()) {
+                let realTarget = GetRealTarget(extendedTarget)
+                if (realTarget.TestAttr(Attribute.SPECIFIC)) {
+                    return true
+                }
+                if (let Some(targetInheritable) <- (realTarget as InheritableDecl)) {
+                    for (superDecl in targetInheritable.GetAllSuperDecls()) {
+                        extendedSuperDecls.add(superDecl)
+                    }
+                }
+            }
+        }
+    }
+    return HasCommonDecl(superDecls) || HasCommonDecl(extendedSuperDecls)
+}
+
 private func NeedCheck(node: Node): Bool {
     if (!node.IsNominalDecl()) {
         return false
@@ -111,7 +205,13 @@ private func NeedCheck(node: Node): Bool {
     if (node.TestAttr(Attribute.GENERIC_INSTANTIATED)) {
         return false
     }
-    if (node.TestAttr(Attribute.FROM_COMMON_PART) && node.TestAttr(Attribute.COMMON)) {
+    if (node.TestAttr(Attribute.FROM_COMMON_PART)) {
+        if (node.TestAttr(Attribute.COMMON)) {
+            return false
+        }
+        if (let Some(inheritable) <- (node as InheritableDecl)) {
+            return NeedRecheck(inheritable)
+        }
         return false
     }
     return true
@@ -158,6 +258,12 @@ public class StructInheritanceChecker {
     private let structInheritedMembers: ArrayList<InheritedMemberEntry> = ArrayList<InheritedMemberEntry>()
     private let checkingDecls: ArrayList<InheritableDecl> = ArrayList<InheritableDecl>()
     private let instantiatedKeys: HashSet<String> = HashSet<String>()
+    private let instantiatedMemberDiagnostics: ArrayList<InstantiatedMemberDiagnosticRecord> =
+        ArrayList<InstantiatedMemberDiagnosticRecord>()
+    private let instantiatedTyCaches: ArrayList<InstantiatedTyCacheRecord> = ArrayList<InstantiatedTyCacheRecord>()
+    private let instantiationTriggers: ArrayList<InstantiationTriggerInfo> = ArrayList<InstantiationTriggerInfo>()
+    private let instantiationTypeMaps: ArrayList<TypeSubst> = ArrayList<TypeSubst>()
+    private var infiniteInstantiationOccurred: Bool = false
 
     public init(diag: DiagnosticEngine, typeManager: TypeManager, pkg: Package) {
         this.diag = diag
@@ -213,6 +319,114 @@ public class StructInheritanceChecker {
 
     public func AddInstantiatedKey(key: String): Unit {
         instantiatedKeys.add(key)
+    }
+
+    private func FindInstantiatedMemberDiagnosticRecord(key: String): Option<InstantiatedMemberDiagnosticRecord> {
+        for (record in instantiatedMemberDiagnostics) {
+            if (record.key == key) {
+                return record
+            }
+        }
+        return None
+    }
+
+    public func ReplayInstantiatedMemberDiagnostics(key: String): Unit {
+        if (let Some(record) <- FindInstantiatedMemberDiagnosticRecord(key)) {
+            for (pair in record.pairs) {
+                DiagnoseForInstantiatedMember(pair.parent, pair.child)
+            }
+        }
+    }
+
+    public func RecordInstantiatedMemberDiagnostic(
+        key: String,
+        parent: MemberSignature,
+        child: MemberSignature
+    ): Unit {
+        if (let Some(record) <- FindInstantiatedMemberDiagnosticRecord(key)) {
+            record.pairs.add(InstantiatedMemberDiagnosticPair(parent, child))
+            return
+        }
+        let record = InstantiatedMemberDiagnosticRecord(key)
+        record.pairs.add(InstantiatedMemberDiagnosticPair(parent, child))
+        instantiatedMemberDiagnostics.add(record)
+    }
+
+    private func FindInstantiatedTyCacheRecord(key: String): Option<InstantiatedTyCacheRecord> {
+        for (record in instantiatedTyCaches) {
+            if (record.key == key) {
+                return record
+            }
+        }
+        return None
+    }
+
+    public func GetCachedInstantiatedTy(key: String, ty: Ty, typeMapping: TypeSubst): Ty {
+        if (let Some(record) <- FindInstantiatedTyCacheRecord(key)) {
+            for (entry in record.entries) {
+                if (SameTy(entry.source, ty)) {
+                    return entry.instantiated
+                }
+            }
+            let instantiatedTy = typeManager.GetInstantiatedTy(ty, typeMapping)
+            record.entries.add(InstantiatedTyCacheEntry(ty, instantiatedTy))
+            return instantiatedTy
+        }
+        let record = InstantiatedTyCacheRecord(key)
+        let instantiatedTy = typeManager.GetInstantiatedTy(ty, typeMapping)
+        record.entries.add(InstantiatedTyCacheEntry(ty, instantiatedTy))
+        instantiatedTyCaches.add(record)
+        return instantiatedTy
+    }
+
+    public func HasInstantiationTrigger(): Bool {
+        return !instantiationTriggers.isEmpty()
+    }
+
+    public func PushInstantiationTrigger(node: Node, decl: Decl, instTys: ArrayList<Ty>): Unit {
+        instantiationTriggers.add(InstantiationTriggerInfo(node, decl, instTys))
+    }
+
+    public func PopInstantiationTrigger(): Unit {
+        if (!instantiationTriggers.isEmpty()) {
+            instantiationTriggers.remove(at: instantiationTriggers.size - 1)
+        }
+    }
+
+    public func CurrentInstantiationTrigger(): Option<InstantiationTriggerInfo> {
+        if (instantiationTriggers.isEmpty()) {
+            return None
+        }
+        return instantiationTriggers[instantiationTriggers.size - 1]
+    }
+
+    public func HasInstantiationTypeMap(): Bool {
+        return !instantiationTypeMaps.isEmpty()
+    }
+
+    public func PushInstantiationTypeMap(typeMapping: TypeSubst): Unit {
+        instantiationTypeMaps.add(typeMapping.Clone())
+    }
+
+    public func PopInstantiationTypeMap(): Unit {
+        if (!instantiationTypeMaps.isEmpty()) {
+            instantiationTypeMaps.remove(at: instantiationTypeMaps.size - 1)
+        }
+    }
+
+    public func CurrentInstantiationTypeMap(): Option<TypeSubst> {
+        if (instantiationTypeMaps.isEmpty()) {
+            return None
+        }
+        return instantiationTypeMaps[instantiationTypeMaps.size - 1]
+    }
+
+    public func HasInfiniteInstantiationOccurred(): Bool {
+        return infiniteInstantiationOccurred
+    }
+
+    public func MarkInfiniteInstantiationOccurred(): Unit {
+        infiniteInstantiationOccurred = true
     }
 
     public func CheckInstWithCStructTypeArg(node: Node): Unit {
@@ -305,16 +519,7 @@ public class StructInheritanceChecker {
                 if (let Some(baseDecl) <- Ty.GetInheritableDeclPtrOfTy(inheritedTy)) {
                     if (baseDecl.astKind == ASTKind.INTERFACE_DECL && !baseDecl.TestAttr(Attribute.IN_REFERENCE_CYCLE)) {
                         CheckMembersWithInheritedDecls(baseDecl)
-                        var found = false
-                        for (value in interfaceTys) {
-                            if (SameTy(value, inheritedTy)) {
-                                found = true
-                                break
-                            }
-                        }
-                        if (!found) {
-                            interfaceTys.add(inheritedTy)
-                        }
+                        AddTyUniqueByName(interfaceTys, inheritedTy)
                     }
                 }
             }
@@ -384,11 +589,17 @@ public class StructInheritanceChecker {
         }
         if (let Some(realBaseDecl) <- baseDecl) {
             if (let Some(realBaseTy) <- baseTy) {
-                if (!realBaseDecl.TestAttr(Attribute.IN_REFERENCE_CYCLE)) {
-                    CheckMembersWithInheritedDecls(realBaseDecl)
+                var effectiveBaseDecl = realBaseDecl
+                if (let Some(specificDecl) <- realBaseDecl.specificImplementation) {
+                    if (let Some(specificInheritable) <- (specificDecl as InheritableDecl)) {
+                        effectiveBaseDecl = specificInheritable
+                    }
+                }
+                if (!effectiveBaseDecl.TestAttr(Attribute.IN_REFERENCE_CYCLE)) {
+                    CheckMembersWithInheritedDecls(effectiveBaseDecl)
                     if (let Some(curFile) <- decl.curFile) {
                         return GetInheritedSuperMembers(
-                            realBaseDecl,
+                            effectiveBaseDecl,
                             realBaseTy,
                             curFile,
                             ignoreExtends: decl.astKind == ASTKind.EXTEND_DECL
@@ -403,12 +614,196 @@ public class StructInheritanceChecker {
     private func CollectExtendsForDecl(decl: InheritableDecl, baseTy: Ty): ArrayList<ExtendDecl> {
         let out = ArrayList<ExtendDecl>()
         for (extendDecl in typeManager.GetDeclExtends(decl)) {
-            AddExtendUnique(out, extendDecl)
+            AddExtendUniqueByPosition(out, extendDecl)
         }
         for (extendDecl in typeManager.GetAllExtendsByTy(baseTy)) {
-            AddExtendUnique(out, extendDecl)
+            AddExtendUniqueByPosition(out, extendDecl)
         }
         return out
+    }
+
+    private func CollectExtendByInterfaceInherit(
+        otherExtends: ArrayList<ExtendDecl>,
+        curDecl: ExtendDecl
+    ): ArrayList<ExtendDecl> {
+        let ordered = ArrayList<ExtendDecl>()
+        let extendedDecl = GetOrderingExtendedDecl(curDecl)
+        for (otherExtend in otherExtends) {
+            if (SameDecl(otherExtend, curDecl)) {
+                continue
+            }
+            if (otherExtend.fullPackageName != curDecl.fullPackageName &&
+                !IsExtendVisibleForPackage(curDecl.fullPackageName, otherExtend)) {
+                continue
+            }
+            let skipExtend = DeterminingSkipExtendByInheritanceRelationship(curDecl, otherExtend, extendedDecl)
+            if ((let None <- skipExtend) || !skipExtend.getOrThrow()) {
+                AddExtendUniqueByPosition(ordered, otherExtend)
+            }
+        }
+        return ordered
+    }
+
+    private func GetOrderingExtendedDecl(curDecl: ExtendDecl): Option<Decl> {
+        if (let Some(curTy) <- curDecl.GetTy()) {
+            if (let Some(decl) <- Ty.GetDeclPtrOfTy(curTy)) {
+                return Some(decl)
+            }
+        }
+        if (let Some(extendedType) <- curDecl.extendedType) {
+            if (let Some(refType) <- (extendedType as RefType)) {
+                if (let Some(target) <- refType.GetTarget()) {
+                    return Some(GetRealTarget(target))
+                }
+            }
+        }
+        return None
+    }
+
+    private func MergeTypeSubstForExtendOrdering(target: TypeSubst, source: TypeSubst): Unit {
+        for (entry in source.entries) {
+            target.Put(entry.tyVar, entry.ty)
+        }
+    }
+
+    private func BuildCurrentToOtherExtendTypeMapping(
+        curDecl: ExtendDecl,
+        otherExtend: ExtendDecl,
+        extendedDecl: Option<Decl>
+    ): TypeSubst {
+        let out = TypeSubst()
+        if (let None <- extendedDecl) {
+            return out
+        }
+        let realExtendedDecl = extendedDecl.getOrThrow()
+        if (let None <- curDecl.extendedType) {
+            return out
+        }
+        if (let None <- otherExtend.extendedType) {
+            return out
+        }
+        let curExtendedType = curDecl.extendedType.getOrThrow()
+        let otherExtendedType = otherExtend.extendedType.getOrThrow()
+        if (let None <- curExtendedType.GetTy()) {
+            return out
+        }
+        if (let None <- otherExtendedType.GetTy()) {
+            return out
+        }
+        let curExtendedTy = curExtendedType.GetTy().getOrThrow()
+        let otherExtendedTy = otherExtendedType.GetTy().getOrThrow()
+        let mappingOfExtendedToCur = GenerateTypeMapping(realExtendedDecl, curExtendedTy.typeArgs)
+        let mappingOfExtendedToOther = GenerateTypeMapping(realExtendedDecl, otherExtendedTy.typeArgs)
+        if (let Some(originalTy) <- realExtendedDecl.GetTy()) {
+            for (typeArg in originalTy.typeArgs) {
+                if (let Some(genericTy) <- (typeArg as GenericsTy)) {
+                    let mapping = GenerateTypeMappingByTy(
+                        mappingOfExtendedToCur.Get(genericTy),
+                        mappingOfExtendedToOther.Get(genericTy)
+                    )
+                    MergeTypeSubstForExtendOrdering(out, mapping)
+                }
+            }
+        }
+        return out
+    }
+
+    private func DeterminingSkipExtendByInheritanceRelationship(
+        curDecl: ExtendDecl,
+        otherExtend: ExtendDecl,
+        extendedDecl: Option<Decl>
+    ): Option<Bool> {
+        var skipExtend: Option<Bool> = None
+        var lastLeft: Option<Ty> = None
+        var lastRight: Option<Ty> = None
+        let curToOtherMapping = BuildCurrentToOtherExtendTypeMapping(curDecl, otherExtend, extendedDecl)
+        for (curDeclSuper in curDecl.inheritedTypes) {
+            if (let None <- curDeclSuper.GetTy()) {
+                continue
+            }
+            var curDeclSuperTy = curDeclSuper.GetTy().getOrThrow()
+            if (!curToOtherMapping.IsEmpty()) {
+                curDeclSuperTy = typeManager.GetInstantiatedTy(curDeclSuperTy, curToOtherMapping)
+            }
+            var hasSubImpl: Option<Ty> = None
+            var hasSuperImpl: Option<Ty> = None
+            for (otherSuper in otherExtend.inheritedTypes) {
+                if (let None <- otherSuper.GetTy()) {
+                    continue
+                }
+                let otherSuperTy = otherSuper.GetTy().getOrThrow()
+                if (SameTy(otherSuperTy, curDeclSuperTy)) {
+                    continue
+                }
+                if (typeManager.IsSubtype(otherSuperTy, curDeclSuperTy)) {
+                    hasSubImpl = otherSuperTy
+                }
+                if (typeManager.IsSubtype(curDeclSuperTy, otherSuperTy)) {
+                    hasSuperImpl = otherSuperTy
+                }
+            }
+            if (let Some(subTy) <- hasSubImpl) {
+                if (let Some(superTy) <- hasSuperImpl) {
+                    let builder = diag.DiagnoseRefactor(
+                        DiagKindRefactor.sema_extend_check_sequence_cannot_decide,
+                        DeclRange(curDecl)
+                    )
+                    let inherChain = subTy.String() + " <: " + curDeclSuperTy.String() + " <: " + superTy.String()
+                    builder.AddNote(
+                        DeclRange(otherExtend),
+                        "conflict with this extension, because of '" + inherChain + "'"
+                    )
+                    return None
+                }
+            }
+            var noRelatedImpl = false
+            if (let None <- hasSubImpl) {
+                noRelatedImpl = true
+            }
+            if (let Some(_) <- hasSuperImpl) {
+                noRelatedImpl = false
+            }
+            if (noRelatedImpl) {
+                continue
+            }
+            let nextSkip = if (let Some(_) <- hasSubImpl) { true } else { false }
+            if (let Some(previousSkip) <- skipExtend) {
+                if (previousSkip != nextSkip) {
+                    let builder = diag.DiagnoseRefactor(
+                        DiagKindRefactor.sema_extend_check_sequence_cannot_decide,
+                        DeclRange(curDecl)
+                    )
+                    let lastInherit = if ((let Some(leftTy) <- lastLeft) && (let Some(rightTy) <- lastRight)) {
+                        leftTy.String() + " <: " + rightTy.String()
+                    } else {
+                        ""
+                    }
+                    let currentInherit = if (let Some(subTy) <- hasSubImpl) {
+                        subTy.String() + " <: " + curDeclSuperTy.String()
+                    } else if (let Some(superTy) <- hasSuperImpl) {
+                        curDeclSuperTy.String() + " <: " + superTy.String()
+                    } else {
+                        ""
+                    }
+                    builder.AddNote(
+                        DeclRange(otherExtend),
+                        "conflict with this extension, because of '" + lastInherit + "' and '" + currentInherit + "'"
+                    )
+                    return None
+                }
+            }
+            skipExtend = nextSkip
+            if (nextSkip) {
+                if (let Some(subTy) <- hasSubImpl) {
+                    lastLeft = subTy
+                    lastRight = curDeclSuperTy
+                }
+            } else if (let Some(superTy) <- hasSuperImpl) {
+                lastLeft = curDeclSuperTy
+                lastRight = superTy
+            }
+        }
+        return skipExtend
     }
 
     private func GetVisibleExtendMembersForExtend(decl: InheritableDecl): (MemberMap, MemberMap) {
@@ -419,7 +814,7 @@ public class StructInheritanceChecker {
         if (let Some(ed) <- (decl as ExtendDecl)) {
             if (let Some(extendedType) <- ed.extendedType) {
                 if (let Some(extendedTy) <- extendedType.GetTy()) {
-                    let allExtends = CollectExtendsForTy(extendedTy)
+                    let allExtends = CollectExtendByInterfaceInherit(CollectExtendsForTy(extendedTy), ed)
                     let mts = MultiTypeSubst()
                     typeManager.GenerateGenericMapping(mts, extendedTy)
                     for (otherExtend in allExtends) {
@@ -440,7 +835,7 @@ public class StructInheritanceChecker {
                             entry.signature.extendDecl = otherExtend
                         }
                         MergeInheritedMembers(targetInterfaceMap, curInterfaceMap, extendedTy)
-                        let typeMapping = MultiTypeSubstToTypeSubstForInheritance(mts)
+                        let typeMapping = MultiTypeSubstToTypeSubst(mts)
                         for (edMember in otherExtend.GetMemberDecls()) {
                             if (!Ty.IsTyCorrect(edMember.GetTy()) || IsInvisibleMember(edMember, decl.fullPackageName)) {
                                 continue
@@ -522,11 +917,11 @@ public class StructInheritanceChecker {
     private func CollectExtendsForTy(ty: Ty): ArrayList<ExtendDecl> {
         let out = ArrayList<ExtendDecl>()
         for (extendDecl in typeManager.GetAllExtendsByTy(ty)) {
-            AddExtendUnique(out, extendDecl)
+            AddExtendUniqueByPosition(out, extendDecl)
         }
         if (let Some(decl) <- Ty.GetInheritableDeclPtrOfTy(ty)) {
             for (extendDecl in typeManager.GetDeclExtends(decl)) {
-                AddExtendUnique(out, extendDecl)
+                AddExtendUniqueByPosition(out, extendDecl)
             }
         }
         return out
@@ -704,7 +1099,7 @@ public class StructInheritanceChecker {
         }
         let mts = MultiTypeSubst()
         typeManager.GenerateGenericMapping(mts, structTy)
-        let typeMapping = MultiTypeSubstToTypeSubstForInheritance(mts)
+        let typeMapping = MultiTypeSubstToTypeSubst(mts)
         for (entry in otherMembers.entries) {
             if (typeMapping.IsEmpty() && !inheritedInterfaces) {
                 let _ = UpdateInheritedMemberIfNeeded(members, entry.signature, inheritedInterfaces: false)
@@ -928,12 +1323,12 @@ public class StructInheritanceChecker {
             if (found.size > 1 && !allFunc) {
                 let builder = diag.DiagnoseRefactor(
                     DiagKindRefactor.sema_inherit_super_member_kind_inconsistent,
-                    DeclRange(decl),
+                    DeclIdentifierRange(decl),
                     arguments: [name]
                 )
                 for (member in found) {
                     if (let Some(memberDecl) <- member.decl) {
-                        builder.AddNote(DeclRange(memberDecl), DeclKindText(memberDecl) + " member")
+                        builder.AddNote(DeclIdentifierRange(memberDecl), DeclKindText(memberDecl) + " member")
                     }
                 }
             } else {
@@ -951,10 +1346,10 @@ public class StructInheritanceChecker {
             let typeName = if (memberDecl.astKind == ASTKind.PROP_DECL) { "type" } else { "return type" }
             let builder = diag.DiagnoseRefactor(
                 DiagKindRefactor.sema_inherit_member_type_inconsistent,
-                NodeRange(node),
+                NodeConflictRange(node),
                 arguments: [typeName, DeclKindText(memberDecl), memberDecl.identifier.Val()]
             )
-            builder.AddNote("conflict types are " + member.inconsistentTypes.ToString())
+            builder.AddNote("conflict types are " + StringifyInconsistentTypes(member.inconsistentTypes))
         }
     }
 
@@ -984,10 +1379,10 @@ public class StructInheritanceChecker {
             if ((let Some(_) <- parent.extendDecl) || parent.isInheritedInterface || CheckExtendMemberValid(parent, child)) {
                 let builder = diag.DiagnoseRefactor(
                     DiagKindRefactor.sema_inherit_member_kind_inconsistent,
-                    DeclRange(child),
+                    DeclIdentifierRange(child),
                     arguments: [DeclKindText(child), name, DeclKindText(parentDecl), inheritance]
                 )
-                builder.AddNote(DeclRange(parentDecl), "found conflict here")
+                builder.AddNote(DeclIdentifierRange(parentDecl), "found conflict here")
             }
         } else if (parentDecl.astKind == ASTKind.VAR_DECL) {
             diag.Diagnose(
@@ -1141,6 +1536,7 @@ public class StructInheritanceChecker {
                     if (let Some(childFuncTy) <- FuncTyFromOption(child.ty)) {
                         let sameSignature = typeManager.IsFuncParameterTypesIdentical(parentFuncTy, childFuncTy)
                         if (sameSignature) {
+                            let inheritedByExtension = typeManager.HasExtensionRelation(childFuncTy.retTy, parentFuncTy.retTy)
                             if (!AreFuncParameterNameIdentical(parentFunc, childFunc)) {
                                 DiagnoseParameterName(diag, parentFunc, childFunc)
                             } else if (!CheckThisTypeCompatibility(parentFunc, childFunc)) {
@@ -1160,7 +1556,7 @@ public class StructInheritanceChecker {
                                 }
                                 CheckAccessVisibility(parentFunc, childFunc, diagNode)
                                 CheckGenericTypeArgInfo(parent, child)
-                            } else if (!CheckReturnOverrideByGeneric(parentFuncTy, childFuncTy)) {
+                            } else if (inheritedByExtension || !CheckReturnOverrideByGeneric(parentFuncTy, childFuncTy)) {
                                 let builder = diag.Diagnose(
                                     childFunc.begin,
                                     childFunc.end,
@@ -1169,14 +1565,23 @@ public class StructInheritanceChecker {
                                 )
                                 builder.AddNote(DeclRange(parentFunc), "cannot override/implement the following function")
                             } else {
+                                var targetFunc: FuncDecl = parentFunc
+                                var inconsistentTypesText = "'" + parentFuncTy.retTy.String() + "'"
+                                if (!parent.inconsistentTypes.IsEmpty()) {
+                                    targetFunc = childFunc
+                                    inconsistentTypesText = StringifyInconsistentTypes(
+                                        parent.inconsistentTypes,
+                                        childTy: Some(childFuncTy.retTy)
+                                    )
+                                }
                                 let builder = diag.DiagnoseRefactor(
                                     DiagKindRefactor.sema_return_type_incompatible,
-                                    DeclRange(childFunc),
+                                    DeclIdentifierRange(childFunc),
                                     arguments: [childFunc.identifier.Val()]
                                 )
                                 builder.AddNote(
-                                    DeclRange(parentFunc),
-                                    "'" + childFuncTy.retTy.String() + "' is not a subtype of '" + parentFuncTy.retTy.String() + "'"
+                                    DeclIdentifierRange(targetFunc),
+                                    "'" + childFuncTy.retTy.String() + "' is not a subtype of " + inconsistentTypesText
                                 )
                             }
                             if (!childFunc.IsConst() && parentDecl.IsConst()) {
