@@ -103,6 +103,12 @@ Reference sources inspected from `/root/cj_build/cangjie_compiler/src/Sema`:
   `this`, and CFunc lambda capture), reuses the real struct-mutation checker for
   assignment/inc-dec/inout arguments, and performs member-access legality in
   post-order after child reference checks.
+- This pass deepened that reference-legality traversal with the C++
+  constructor-member-use check: instance constructors now scan default parameter
+  expressions and `this(...)`/`super(...)` constructor-call arguments, reject
+  standalone `this` and direct `this`/`super` member accesses in those contexts,
+  and report same-declaration instance-member references through
+  `sema_assignment_of_member_variable_cannot_use_this_or_super`.
 - Continued class-like parity in `TypeCheckClassLike.cj`: sealed inheritance
   from `specific` declarations now mirrors the C++ package scan for a matching
   common declaration before reporting the specific-sealed diagnostic, and
@@ -171,10 +177,10 @@ are from pre-existing files outside this pass scope.
   recommendation, exact access-control context, custom annotation expression
   synthesis/type checking, annotation target-array type checking, pipeline
   wiring from the coarse `TypeCheckerImpl` package pass into the declaration,
-  type, reference-legality, and deprecated-usage helpers, exact C++ constructor
-  parameter/member-access checks, instantiated-type completeness checks, and all
-  remaining TypeChecker-owned state once those sibling surfaces are available in
-  the allowed owner files.
+  type, reference-legality, and deprecated-usage helpers, full inherited-decl
+  subtype relation checks for constructor member-use diagnostics, instantiated
+  type completeness checks, and all remaining TypeChecker-owned state once those
+  sibling surfaces are available in the allowed owner files.
 - Diagnostics are mapped to the available self-hosted diagnostic tables; a few
   C++ diagnostic helpers are represented by the closest currently available
   refactored/legacy diagnostic kind.
