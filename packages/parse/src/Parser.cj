@@ -82,6 +82,11 @@ public class Parser {
     public func Seeing(left: TokenKind, right: TokenKind): Bool { return impl.Seeing(left, right) }
     public func SeeingAny(kinds: Array<TokenKind>): Bool { return impl.SeeingAny(kinds) }
     public func Seeing(kinds: Array<TokenKind>, skipNewline!: Bool = true): Bool { return impl.Seeing(kinds, skipNewline: skipNewline) }
+    public func SeeingCombinator(kinds: Array<TokenKind>): Bool { return impl.SeeingCombinator(kinds) }
+    public func SeeingTokenAndCombinator(kind: TokenKind, cmb: Array<TokenKind>): Bool {
+        return impl.SeeingTokenAndCombinator(kind, cmb)
+    }
+    public func SkipCombinator(kinds: Array<TokenKind>): Bool { return impl.SkipCombinator(kinds) }
     public func LookAhead(): Token { return impl.LookAhead() }
     public func LastToken(): Token { return impl.LastToken() }
     public func CurMacroCall(): Option<Node> { return impl.CurMacroCall() }

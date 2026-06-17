@@ -2,8 +2,8 @@ package cangjie_compiler::parse
 
 public import cangjie_compiler::lex.{
     GetContextualKeyword, GetEscapeTokenKinds, INVALID_PRECEDENCE, IsContextualKeyword, IsExperimental, Len,
-    NUM_TOKENS, StringPart, StringPartKind, StringPartKindIndex, Token, TokenKind, TokenKindIndex, TokenKindLiteral,
-    TokenKindValue, TokenPrecedence, TokenVecMap
+    Lexer, NUM_TOKENS, StringPart, StringPartKind, StringPartKindIndex, Token, TokenKind, TokenKindIndex,
+    TokenKindLiteral, TokenKindValue, TokenPrecedence, TokenVecMap
 }
 
 public func ConvertToken(token: Token): String {

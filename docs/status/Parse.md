@@ -11,7 +11,7 @@ Parse component split. The package now imports real Basic positions/source
 manager, real Lex tokens/token tables, real AST kind/attribute/annotation
 enums, real Utils overflow strategy helpers, and real Option compiler
 configuration types. It still has local
-parser-facing diagnostics, AST node shapes, a lexer, parser state, top-level parsing,
+parser-facing diagnostics, AST node shapes, parser state, top-level parsing,
 declaration parsing, expression parsing, type parsing, pattern parsing, imports,
 annotations, modifiers, features, macro-call capture, quote capture, comment
 collection, modifier-rule queries, AST checking, AST hashing, CJMP entry wiring,
@@ -30,14 +30,20 @@ the real Utils `OverflowStrategy` type rather than a Parse-local copy.
 `ParserTypes.cj` no longer owns local copies of `GlobalOptions`, `OutputMode`,
 `InteropLanguage`, `BackendType`, or `Triple`; those names are public aliases of
 the real Option package types.
+`Lexer.cj` has been removed from Parse. The parser now imports and constructs the
+real `cangjie_compiler::lex.Lexer`, with a real Basic diagnostic engine reserved
+for lexing while the remaining parser-facing diagnostics still use the local
+Parse shim.
 
 ## Implemented In This Pass
 
 - Removed `ParseScaffold.cj`.
 - Added 35 `.cj` files under `packages/parse/src`, following the C++ Parse file
   breakdown and keeping all source files in package `cangjie_compiler::parse`.
-- Implemented a local lexer for Cangjie keywords, identifiers, raw identifiers,
-  literals, nested block comments, line comments, delimiters, and operators.
+- Initially implemented a local lexer for Cangjie keywords, identifiers, raw
+  identifiers, literals, nested block comments, line comments, delimiters, and
+  operators; that scanner has since been deleted in favor of the real Lex
+  package.
 - Implemented parser entry points for `ParseTopLevel`, `ParseDecl`, `ParseExpr`,
   `ParseExprLibast`, `ParseType`, `ParsePattern`, annotation argument parsing,
   macro-node parsing, comment attachment, and public parser state helpers.
@@ -145,8 +151,8 @@ the real Option package types.
   conditions validate that `let pattern <- expr` subconditions are only joined
   with `&&`/`||`, call arguments record `inout`, and negative numeric/rune-byte
   literals are preserved in constant patterns.
-- Added local C++-shaped string interpolation scaffolding: the Parse lexer now
-  records `StringPart` slices for `${...}` holes, `LitConstExpr` can own a
+- Added local C++-shaped string interpolation scaffolding: lexer string-part
+  records are consumed for `${...}` holes, `LitConstExpr` can own a
   `StrInterpolationExpr`, and each interpolation hole is reparsed as a block
   via a nested parser using the hole source position.
 - Added class/struct primary-constructor and class finalizer parsing paths:
@@ -158,21 +164,37 @@ the real Option package types.
 - Tightened `VArray` type parsing toward the C++ grammar by requiring the
   second type argument to use the `$` constant-size form (`VArray<T, $n>`) and
   diagnosing missing comma, missing `$`, or non-integer size literals.
+- Continued the de-isolation pass by deleting the Parse-local scanner and
+  switching parser tokenization, lookahead, string-part extraction, comments, and
+  token-stream access to the real Lex package. Comment attachment now adapts the
+  real Lex comment array into the existing `TokenVecMap`, and parser line counts
+  are recorded as tokens are consumed so `GetLineNum` no longer depends on a
+  cached local token list.
+- Added C++-shaped parser combinator helpers from `ParserUtils.cpp`:
+  adjacent-token `SeeingCombinator`, `SeeingTokenAndCombinator`,
+  `SkipCombinator`, `SkipCombinedDoubleArrow`, `SkipCombinedBackarrow`,
+  `LookupSeenCombinator`, and `SkipAmbiguousToken`. Match cases, selectorless
+  match cases, lambda arrows, let-pattern back arrows, operator overload names,
+  optional suffix checks, and Pratt expression parsing now handle the same
+  adjacent split-token forms (`=>`, `<-`, `>>`, `>=`, `>>=`, `??`) that the C++
+  parser accepts during macro/token-stream parsing and recovery.
+- Replaced the local hand-maintained expression precedence table with the real
+  Lex `TokenPrecedence` table while preserving the local Pratt parser's explicit
+  assignment precedence. This restores missing C++ precedence for shift,
+  pipeline, composition, exponent, range, comparison, and logical operators.
 
 ## Remaining Work
 
-- Replace the remaining Parse-local AST node classes, parser diagnostics, and
-  parser lexer implementation with real sibling package APIs where their public
-  surfaces are sufficiently complete.
+- Replace the remaining Parse-local AST node classes and parser diagnostics with
+  real sibling package APIs where their public surfaces are sufficiently
+  complete.
 - Top-level recovery still uses local message diagnostics rather than the exact
   C++ diagnostic IDs, suggestions, parser-scope reset objects, and bracket-stack
   cleanup.
-- Feature raw-identifier diagnostics still depend on finishing lexer
-  de-isolation: the local Parse lexer strips backticks before parser recovery,
-  while the real Lex lexer preserves raw identifier spelling in `Token.Value()`.
-- Annotation diagnostics are still message-based through the local Parse
-  diagnostic shim; converting them to real Basic diagnostic IDs remains part of
-  the broader diagnostics de-isolation.
+- Lex diagnostics now flow through a Basic diagnostic engine owned by
+  `ParserImpl`, while parser diagnostics are still message-based through the
+  local Parse diagnostic shim. Converting parser diagnostics to real Basic
+  diagnostic IDs remains the next major de-isolation step.
 - Audit grammar and diagnostic parity against the full C++ Parse test corpus;
   the current parser is substantial and compiling, but not a complete faithful
   replacement for all 17k+ lines of C++ parser behavior.

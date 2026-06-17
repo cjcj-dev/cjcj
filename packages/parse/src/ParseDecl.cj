@@ -296,16 +296,14 @@ extend ParserImpl {
         if (Skip(TokenKind.GE)) {
             return lastToken
         }
-        if (Seeing([TokenKind.GT, TokenKind.GT])) {
+        if (SeeingCombinator([TokenKind.GT, TokenKind.GT])) {
             let start = Peek().Begin()
-            Skip(TokenKind.GT)
-            Skip(TokenKind.GT)
+            SkipCombinator([TokenKind.GT, TokenKind.GT])
             return Token(TokenKind.RSHIFT, ">>", start, lastToken.End())
         }
-        if (Seeing([TokenKind.GT, TokenKind.ASSIGN])) {
+        if (SeeingCombinator([TokenKind.GT, TokenKind.ASSIGN])) {
             let start = Peek().Begin()
-            Skip(TokenKind.GT)
-            Skip(TokenKind.ASSIGN)
+            SkipCombinator([TokenKind.GT, TokenKind.ASSIGN])
             return Token(TokenKind.GE, ">=", start, lastToken.End())
         }
         if (Seeing([TokenKind.LSQUARE, TokenKind.RSQUARE])) {

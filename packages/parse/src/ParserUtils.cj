@@ -3,6 +3,141 @@ package cangjie_compiler::parse
 import std.collection.*
 
 extend ParserImpl {
+    public func SeeingCombinator(kinds: Array<TokenKind>): Bool {
+        if (kinds.isEmpty() || !Seeing(kinds, skipNewline: false)) {
+            return false
+        }
+        let ahead = lexer.LookAhead(kinds.size - 1)
+        if (ahead.size + 1 < kinds.size) {
+            return false
+        }
+        var previous = Peek()
+        var index: Int64 = 1
+        while (index < kinds.size) {
+            let token = ahead[index - 1]
+            if (token.kind != kinds[index]) {
+                return false
+            }
+            if (token.Begin().line != previous.Begin().line || token.Begin().column != previous.Begin().column + 1) {
+                return false
+            }
+            previous = token
+            index++
+        }
+        return true
+    }
+
+    public func SeeingTokenAndCombinator(kind: TokenKind, cmb: Array<TokenKind>): Bool {
+        if (!Seeing(kind) || cmb.isEmpty()) {
+            return false
+        }
+        let ahead = lexer.LookAhead(cmb.size)
+        if (ahead.size < cmb.size) {
+            return false
+        }
+        var index: Int64 = 0
+        while (index < cmb.size) {
+            if (ahead[index].kind != cmb[index]) {
+                return false
+            }
+            index++
+        }
+        index = 1
+        while (index < cmb.size) {
+            if (ahead[index].Begin().line != ahead[index - 1].Begin().line ||
+                ahead[index].Begin().column != ahead[index - 1].Begin().column + 1) {
+                return false
+            }
+            index++
+        }
+        return true
+    }
+
+    public func SkipCombinator(kinds: Array<TokenKind>): Bool {
+        if (!SeeingCombinator(kinds)) {
+            return false
+        }
+        var index: Int64 = 0
+        while (index < kinds.size) {
+            Next()
+            index++
+        }
+        return true
+    }
+
+    public func SkipCombinedDoubleArrow(): Bool {
+        if (!SeeingCombinator([TokenKind.ASSIGN, TokenKind.GT])) {
+            return false
+        }
+        let begin = Peek().Begin()
+        SkipCombinator([TokenKind.ASSIGN, TokenKind.GT])
+        lastToken = Token(TokenKind.DOUBLE_ARROW, "=>", begin, begin + 2)
+        return true
+    }
+
+    public func SkipCombinedBackarrow(): Bool {
+        if (!SeeingCombinator([TokenKind.LT, TokenKind.SUB])) {
+            return false
+        }
+        let begin = Peek().Begin()
+        SkipCombinator([TokenKind.LT, TokenKind.SUB])
+        lastToken = Token(TokenKind.BACKARROW, "<-", begin, begin + 2)
+        return true
+    }
+
+    public func SeeingDoubleArrow(): Bool {
+        return Seeing(TokenKind.DOUBLE_ARROW) || SeeingCombinator([TokenKind.ASSIGN, TokenKind.GT])
+    }
+
+    public func SeeingBackarrow(): Bool {
+        return Seeing(TokenKind.BACKARROW) || SeeingCombinator([TokenKind.LT, TokenKind.SUB])
+    }
+
+    public func SkipDoubleArrow(): Bool {
+        return Skip(TokenKind.DOUBLE_ARROW) || SkipCombinedDoubleArrow()
+    }
+
+    public func SkipBackarrow(): Bool {
+        return Skip(TokenKind.BACKARROW) || SkipCombinedBackarrow()
+    }
+
+    public func LookupSeenCombinator(): Option<Token> {
+        if (SeeingCombinator([TokenKind.GT, TokenKind.GT, TokenKind.ASSIGN])) {
+            let begin = Peek().Begin()
+            return Token(TokenKind.RSHIFT_ASSIGN, ">>=", begin, begin + 3)
+        }
+        if (SeeingCombinator([TokenKind.GT, TokenKind.GT])) {
+            let begin = Peek().Begin()
+            return Token(TokenKind.RSHIFT, ">>", begin, begin + 2)
+        }
+        if (SeeingCombinator([TokenKind.GT, TokenKind.ASSIGN])) {
+            let begin = Peek().Begin()
+            return Token(TokenKind.GE, ">=", begin, begin + 2)
+        }
+        if (SeeingCombinator([TokenKind.QUEST, TokenKind.QUEST])) {
+            let begin = Peek().Begin()
+            return Token(TokenKind.COALESCING, "??", begin, begin + 2)
+        }
+        return None
+    }
+
+    public func SkipAmbiguousToken(): Bool {
+        if (let Some(token) <- LookupSeenCombinator()) {
+            let consumed = match (token.kind) {
+                case TokenKind.RSHIFT_ASSIGN => 3
+                case _ => 2
+            }
+            var index: Int64 = 0
+            while (index < consumed) {
+                Next()
+                index++
+            }
+            lastToken = token
+            return true
+        }
+        return false
+    }
+
     public func IsIdentifierOrContextualKeyword(kind: TokenKind): Bool {
         return kind == TokenKind.IDENTIFIER || kind == TokenKind.PACKAGE_IDENTIFIER
     }
