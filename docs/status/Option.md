@@ -365,3 +365,17 @@ compatibility surface for current sibling package imports; several print-style
 diagnostics still use local wrapper text where the C++ uses formatted print
 helpers; and driver-layer obfuscation option handling is not yet fully folded
 into the base Option action surface.
+
+This continuation aligns environment ingestion ownership with
+`GlobalOptions::ReadPathsFromEnvironmentVars` in the C++ reference. Reading
+`CANGJIE_HOME` now updates only `environment.cangjieHome`; the top-level
+`cangjieHome` field is left for the driver/frontend setup layer to choose from
+the environment value or executable-derived fallback, as the C++ driver and
+frontend tool do.
+
+Remaining gaps: `Options.cj`/`OptionEnums.cj` remain hand-maintained mirrors of
+`Options.inc`; `MaybeString`, `MaybeUInt64`, and `TryParseUInt64` remain as
+compatibility surface for current sibling package imports; several print-style
+diagnostics still use local wrapper text where the C++ uses formatted print
+helpers; and driver-layer obfuscation option handling is not yet fully folded
+into the base Option action surface.

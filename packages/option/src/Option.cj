@@ -627,7 +627,6 @@ public open class GlobalOptions <: Option {
         }
         if (let Some(value) <- environmentVars.get("CANGJIE_HOME")) {
             environment.cangjieHome = GetAbsPath(value)
-            if (environment.cangjieHome.hasValue) { cangjieHome = environment.cangjieHome.value }
         }
         if (let Some(value) <- environmentVars.get("LIBRARY_PATH")) {
             replaceStrings(environment.libraryPaths, SplitEnvironmentPaths(value))
