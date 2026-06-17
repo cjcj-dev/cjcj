@@ -612,6 +612,29 @@ private func CompareParamTys(typeManager: TypeManager, leftTys: ArrayList<Ty>, r
     return true
 }
 
+private func IsInterfaceFuncWithSameSignature(typeManager: TypeManager, left: FunctionMatchingUnit,
+    right: FunctionMatchingUnit): Bool {
+    if (let None <- left.fd.outerDecl) {
+        return false
+    }
+    if (let None <- right.fd.outerDecl) {
+        return false
+    }
+    let leftOuter = left.fd.outerDecl.getOrThrow()
+    let rightOuter = right.fd.outerDecl.getOrThrow()
+    if (leftOuter.astKind != ASTKind.INTERFACE_DECL || rightOuter.astKind != ASTKind.INTERFACE_DECL ||
+        !left.fd.TestAttr(Attribute.ABSTRACT) || !right.fd.TestAttr(Attribute.ABSTRACT)) {
+        return false
+    }
+    if (let Some(leftTy) <- left.fd.GetTy()) {
+        if (let Some(rightTy) <- right.fd.GetTy()) {
+            return SameTy(typeManager.ApplySubstPack(leftTy, left.typeMapping),
+                typeManager.ApplySubstPack(rightTy, right.typeMapping))
+        }
+    }
+    return false
+}
+
 private func CompareFuncCandidates(typeManager: TypeManager, left: FunctionMatchingUnit,
     right: FunctionMatchingUnit): Bool {
     if (let Some(leftOuter) <- left.fd.outerDecl) {
@@ -653,6 +676,10 @@ private func ResolveOverload(typeManager: TypeManager, candidates: ArrayList<Fun
             if (leftToRight && !rightToLeft) {
                 targetMark[otherIdx] = false
             } else if (!leftToRight && rightToLeft) {
+                targetMark[idx] = false
+                break
+            }
+            if (IsInterfaceFuncWithSameSignature(typeManager, candidates[idx], candidates[otherIdx])) {
                 targetMark[idx] = false
                 break
             }
@@ -1065,6 +1092,9 @@ private func CheckCallArgs(diag: Option<BasicDiagnosticEngine>, typeManager: Typ
 
 private func CheckFuncPtrCall(typeManager: TypeManager, diag: Option<BasicDiagnosticEngine>, target: Option<Ty>,
     ce: CallExpr, funcTy: FuncTy): Bool {
+    if (IsValidCFuncConstructorCall(ce)) {
+        return true
+    }
     if (let Some(base) <- ce.baseFunc) {
         if (let Some(targetDecl) <- base.GetTarget()) {
             if (targetDecl.astKind == ASTKind.TYPE_ALIAS_DECL) {

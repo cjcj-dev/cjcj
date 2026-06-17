@@ -201,7 +201,7 @@ private class PatternCtor {
             }
             if (let Some(leftTy) <- typeTy) {
                 if (let Some(rightTy) <- other.typeTy) {
-                    return typeManager.IsSubtype(leftTy, rightTy, allowOptionBox: false)
+                    return typeManager.IsSubtype(leftTy, rightTy, implicitBoxed: true, allowOptionBox: false)
                 }
             }
         }
@@ -306,8 +306,8 @@ private class DestructedPattern {
             if (goalTy.HasGeneric() || patternTy.HasGeneric() || !IsSealedLike(goalTy) || !IsSealedLike(patternTy)) {
                 return false
             }
-            let goalIsSubtype = typeManager.IsSubtype(goalTy, patternTy, allowOptionBox: false)
-            let patternIsSubtype = typeManager.IsSubtype(patternTy, goalTy, allowOptionBox: false)
+            let goalIsSubtype = typeManager.IsSubtype(goalTy, patternTy, implicitBoxed: true, allowOptionBox: false)
+            let patternIsSubtype = typeManager.IsSubtype(patternTy, goalTy, implicitBoxed: true, allowOptionBox: false)
             return !goalIsSubtype && !patternIsSubtype
         }
         return true
@@ -398,7 +398,8 @@ private class DestructedPattern {
 
     private static func FromTypePattern(typeManager: TypeManager, goalTy: Ty, pattern: TypePattern): DestructedPattern {
         let patternTy = pattern.GetTy() ?? TypeManager.GetInvalidTy()
-        if (!patternTy.IsNothing() && typeManager.IsSubtype(goalTy, patternTy, allowOptionBox: false)) {
+        if (!patternTy.IsNothing() &&
+            typeManager.IsSubtype(goalTy, patternTy, implicitBoxed: true, allowOptionBox: false)) {
             return DestructedPattern(PatternCtor.Wildcard(), ArrayList<DestructedPattern>(), goalTy, pattern)
         }
         return DestructedPattern(PatternCtor.Type(patternTy), ArrayList<DestructedPattern>(), goalTy, pattern)
