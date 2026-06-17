@@ -117,7 +117,9 @@ public func InternalError(message: String): Unit {
             return
         }
         ICE.RemoveTempFile()
-        throw IllegalStateException(message)
+        unsafe {
+            _exit(Int32(ICE.EXIT_CODE))
+        }
     }
 }
 

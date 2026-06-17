@@ -431,7 +431,10 @@ public func StringifyEnvironmentPointer(entries: Array<String>): HashMap<String,
     let environmentVars = HashMap<String, String>()
     for (item in entries) {
         if (let Some(pos) <- item.indexOf("=")) {
-            environmentVars.add(normalizeEnvironmentKey(item[0..pos]), item[pos + 1..])
+            let key = normalizeEnvironmentKey(item[0..pos])
+            if (!environmentVars.contains(key)) {
+                environmentVars.add(key, item[pos + 1..])
+            }
         }
     }
     return environmentVars

@@ -49,7 +49,11 @@ private let SHORT_HASH_NUM: Int64 = 8
 private let BOM_ENCODING_LEN: Int64 = 3
 private let TEST_FILE_NAME: String = "_test.cj"
 private let FILE_LEN_LIMIT: Int64 = 4 * 1024 * 1024 * 1024
+
 private let FILE_LEN_LIMIT_STR: String = "4 GB"
+
+@When[os == "Windows"]
+private let ERROR_FILENAME_EXCED_RANGE: UInt32 = 206u32
 
 public enum FileMode {
     | FM_EXIST
@@ -106,6 +110,9 @@ foreign {
     func _access(pathname: CString, mode: Int32): Int32
     func GetFileAttributesA(pathname: CString): UInt32
     func SetFileAttributesA(pathname: CString, attributes: UInt32): Int32
+    func GetFullPathNameA(pathname: CString, bufferLength: UInt32, buffer: CPointer<UInt8>,
+        filePart: CPointer<CString>): UInt32
+    func GetLastError(): UInt32
 }
 
 @When[os != "Windows"]
@@ -127,7 +134,70 @@ foreign {
 private let FILE_ATTRIBUTE_HIDDEN: UInt32 = 0x2u32
 
 @When[os == "Windows"]
+private let FILE_ATTRIBUTE_READONLY: UInt32 = 0x1u32
+
+@When[os == "Windows"]
+private let FILE_ATTRIBUTE_SYSTEM: UInt32 = 0x4u32
+
+@When[os == "Windows"]
+private let FILE_ATTRIBUTE_DEVICE: UInt32 = 0x40u32
+
+@When[os == "Windows"]
+private let FILE_ATTRIBUTE_VIRTUAL: UInt32 = 0x10000u32
+
+@When[os == "Windows"]
 private let INVALID_FILE_ATTRIBUTES: UInt32 = 0xffffffffu32
+
+@When[os == "Windows"]
+private func hasRejectedWindowsRemoveAttribute(attributes: UInt32): Bool {
+    return (attributes & FILE_ATTRIBUTE_READONLY) == 1u32 ||
+        (attributes & FILE_ATTRIBUTE_SYSTEM) == 1u32 ||
+        (attributes & FILE_ATTRIBUTE_DEVICE) == 1u32 ||
+        (attributes & FILE_ATTRIBUTE_VIRTUAL) == 1u32
+}
+
+@When[os == "Windows"]
+private func canRemovePath(path: String): Bool {
+    let attributes = fileAttributes(path)
+    return attributes != INVALID_FILE_ATTRIBUTES && !hasRejectedWindowsRemoveAttribute(attributes)
+}
+
+@When[os != "Windows"]
+private func canRemovePath(path: String): Bool {
+    try {
+        let info = FileInfo(path)
+        return info.isRegular() || info.isDirectory() || info.isSymbolicLink()
+    } catch (e: Exception) {
+        return false
+    }
+}
+
+@When[os == "Windows"]
+private func fileAttributes(path: String): UInt32 {
+    var attributes = INVALID_FILE_ATTRIBUTES
+    try (cPath = unsafe { LibC.mallocCString(path) }.asResource()) {
+        if (!cPath.value.isNull()) {
+            unsafe {
+                attributes = GetFileAttributesA(cPath.value)
+            }
+        }
+    } catch (e: Exception) {
+        attributes = INVALID_FILE_ATTRIBUTES
+    }
+    return attributes
+}
+
+@When[os == "Windows"]
+private func canWritePath(path: String): Bool {
+    let attributes = fileAttributes(path)
+    return attributes != INVALID_FILE_ATTRIBUTES &&
+        (attributes & FILE_ATTRIBUTE_READONLY) != FILE_ATTRIBUTE_READONLY
+}
+
+@When[os != "Windows"]
+private func canWritePath(path: String): Bool {
+    return accessPath(path, FileMode.FM_WRITE) == 0
+}
 
 @When[os == "Windows"]
 private func isPathSlashByte(byte: UInt8): Bool {
@@ -343,6 +413,37 @@ private func skipSymlinkInRecursiveDirectorySearch(): Bool {
     return true
 }
 
+@When[os == "Windows"]
+private func isAbsolutePathAboveLengthLimit(path: String): Bool {
+    if (path.size > FILE_PATH_MAX_LENGTH) {
+        return true
+    }
+    try (cPath = unsafe { LibC.mallocCString(path) }.asResource()) {
+        if (cPath.value.isNull()) {
+            return false
+        }
+        try (buffer = LibC.malloc<UInt8>(count: FILE_PATH_MAX_LENGTH).asResource()) {
+            if (buffer.value.isNull()) {
+                return false
+            }
+            let retval = unsafe {
+                GetFullPathNameA(cPath.value, UInt32(FILE_PATH_MAX_LENGTH), buffer.value, CPointer<CString>())
+            }
+            if (retval == 0u32 && unsafe { GetLastError() } == ERROR_FILENAME_EXCED_RANGE) {
+                return true
+            }
+        }
+    } catch (e: Exception) {
+        ()
+    }
+    return false
+}
+
+@When[os != "Windows"]
+private func isAbsolutePathAboveLengthLimit(path: String): Bool {
+    return path.size > FILE_PATH_MAX_LENGTH
+}
+
 public class FileUtil {
     public static func CheckCommandLineInjection(cmd: String): Bool {
         for (byte in cmd.toArray()) {
@@ -496,6 +597,9 @@ public class FileUtil {
     }
 
     public static func Remove(itemPath: String): Bool {
+        if (!canRemovePath(itemPath)) {
+            return false
+        }
         try {
             remove(itemPath)
             return true
@@ -619,7 +723,7 @@ public class FileUtil {
     }
 
     public static func IsAbsolutePathAboveLengthLimit(path: String): Bool {
-        return path.size > FILE_PATH_MAX_LENGTH
+        return isAbsolutePathAboveLengthLimit(path)
     }
 
     public static func GetAbsPath(path: String): Option<String> {
@@ -974,7 +1078,7 @@ public class FileUtil {
     }
 
     public static func CanWrite(path: String): Bool {
-        return Access(path, FileMode.FM_WRITE)
+        return canWritePath(path)
     }
 
     public static func RemovePathPrefix(absolutePath: String, removedPathPrefix: Array<String>): String {
