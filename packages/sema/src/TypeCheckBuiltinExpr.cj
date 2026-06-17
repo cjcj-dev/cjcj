@@ -63,6 +63,33 @@ private func GetArrayElementTy(typeManager: TypeManager, arrayTy: ArrayTy): Ty {
     return typeManager.GetArrayTy(arrayTy.typeArgs[0], arrayTy.dims - 1u64)
 }
 
+private func IsCollectionInterfaceTy(ty: Ty): Bool {
+    if (let Some(interfaceTy) <- (ty as InterfaceTy)) {
+        if (interfaceTy.typeArgs.size != 1) {
+            return false
+        }
+        if (interfaceTy.name == "Collection") {
+            return true
+        }
+        if (let Some(decl) <- interfaceTy.declPtr) {
+            return decl.identifier.Val() == "Collection" || decl.identifier.GetRawText() == "Collection"
+        }
+    }
+    return false
+}
+
+private func CollectionElementTy(typeManager: TypeManager, ty: Ty): Option<Ty> {
+    if (IsCollectionInterfaceTy(ty)) {
+        return Some(ty.typeArgs[0])
+    }
+    for (superTy in typeManager.GetAllSuperTys(ty).values) {
+        if (IsCollectionInterfaceTy(superTy)) {
+            return Some(superTy.typeArgs[0])
+        }
+    }
+    return None
+}
+
 private func IsBuiltinTypeAlias(decl: Decl, kind: TypeKind): Bool {
     if (let Some(aliasDecl) <- (decl as TypeAliasDecl)) {
         if (let Some(typeNode) <- aliasDecl.typeNode) {
@@ -292,6 +319,11 @@ public func ChkSizedArrayExpr(typeManager: TypeManager, target: Ty, arrayExpr: A
 }
 
 public func ChkSingleArgArrayExpr(typeManager: TypeManager, target: Ty, arrayExpr: ArrayExpr): Bool {
+    return ChkSingleArgArrayExpr(typeManager, target, arrayExpr, diag: None)
+}
+
+public func ChkSingleArgArrayExpr(typeManager: TypeManager, target: Ty, arrayExpr: ArrayExpr,
+    diag!: Option<BasicDiagnosticEngine> = None): Bool {
     if (let None <- arrayExpr.typeNode) {
         return false
     }
@@ -300,10 +332,26 @@ public func ChkSingleArgArrayExpr(typeManager: TypeManager, target: Ty, arrayExp
     }
     let arrayTy = arrayExpr.typeNode.getOrThrow().GetTy() ?? TypeManager.GetInvalidTy()
     if (let Some(rawArrayTy) <- (arrayTy as ArrayTy)) {
+        let argElemTyOpt = CollectionElementTy(typeManager, FuncArgTy(arrayExpr.args[0]))
+        if (let None <- argElemTyOpt) {
+            if (let Some(diagValue) <- diag) {
+                DiagOld(diagValue, arrayExpr.args[0], BasicDiagKind.sema_array_single_element_type_error)
+            }
+            arrayExpr.SetTy(TypeManager.GetInvalidTy())
+            return false
+        }
+        let argElemTy = argElemTyOpt.getOrThrow()
         if (rawArrayTy.typeArgs.isEmpty() || rawArrayTy.typeArgs[0].IsInvalid()) {
-            let elemTy = FuncArgTy(arrayExpr.args[0])
-            arrayExpr.SetTy(typeManager.GetArrayTy(elemTy, rawArrayTy.dims))
+            arrayExpr.SetTy(typeManager.GetArrayTy(argElemTy, rawArrayTy.dims))
         } else {
+            let elemTy = GetArrayElementTy(typeManager, rawArrayTy)
+            if (typeManager.CheckTypeCompatibility(elemTy, argElemTy) == TypeCompatibility.INCOMPATIBLE) {
+                if (let Some(diagValue) <- diag) {
+                    DiagOld(diagValue, arrayExpr.args[0], BasicDiagKind.sema_array_single_element_type_error)
+                }
+                arrayExpr.SetTy(TypeManager.GetInvalidTy())
+                return false
+            }
             arrayExpr.SetTy(rawArrayTy)
         }
         return target.IsInvalid() ||
@@ -328,7 +376,7 @@ public func ChkArrayExpr(typeManager: TypeManager, target: Ty, arrayExpr: ArrayE
     if (arrayExpr.args.isEmpty()) {
         ok = targetTy.IsInvalid() || typeManager.CheckTypeCompatibility(targetTy, arrayTy) != TypeCompatibility.INCOMPATIBLE
     } else if (arrayExpr.args.size == 1) {
-        ok = ChkSingleArgArrayExpr(typeManager, targetTy, arrayExpr)
+        ok = ChkSingleArgArrayExpr(typeManager, targetTy, arrayExpr, diag: diag)
     } else if (arrayExpr.args.size == 2) {
         ok = ChkSizedArrayExpr(typeManager, targetTy, arrayExpr)
     } else {
@@ -339,6 +387,9 @@ public func ChkArrayExpr(typeManager: TypeManager, target: Ty, arrayExpr: ArrayE
     }
     if (!ChkArrayArgs(typeManager, arrayExpr, diag: diag)) {
         ok = false
+    }
+    if (ok && Ty.IsTyCorrect(arrayExpr.GetTy()) && !Ty.IsTyCorrect(arrayExpr.typeNode.getOrThrow().GetTy())) {
+        arrayExpr.typeNode.getOrThrow().SetTy(arrayExpr.GetTy().getOrThrow())
     }
     if (!ok) {
         arrayExpr.SetTy(TypeManager.GetInvalidTy())

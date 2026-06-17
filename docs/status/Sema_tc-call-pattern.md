@@ -32,6 +32,7 @@ Continuation updates:
 - `PatternUsefulness.cj`: aligned selector-match unreachable-case diagnostics with the C++ pattern span, reporting the range from the first pattern to the last pattern in the unreachable case instead of the whole match-case node.
 - `PatternUsefulness.cj`: aligned selector-match non-exhaustive diagnostics with the C++ builder flow by diagnosing the selector range, applying the selector type through main-hint arguments, and using the same file-boundary range clamp as `MakeRange`.
 - `TypeCheckCall.cj`: ported the C++ `FilterOverriden` overload-resolution pre-pass for already-instantiated candidates, pruning overridden parent candidates when the selected candidate outer type is a subtype, function signatures match after substitution, and generic function parameter shapes agree.
+- `TypeCheckBuiltinExpr.cj`: aligned single-argument `Array` constructor checking with the C++ `Collection<T>` path, inferring omitted element types from a real `Collection` supertype, rejecting non-collection operands, reporting `sema_array_single_element_type_error`, and updating the desugared array type after successful inference.
 
 Build status:
 
@@ -46,4 +47,4 @@ Known fidelity gaps:
 - Pattern usefulness/checking is functional but still conservative around complete sealed hierarchy discovery, full intersection/union/Option refinements, and diagnostics that depend on richer C++ Sema context.
 - Builtin and match checking use real AST and type data but still lack the full TypeCheckerImpl cache/synthesis integration present in C++.
 
-Honest coverage estimate for this scoped pass: about 74% of C++ behavior, materially higher than the prior compiling stubs but not module-complete.
+Honest coverage estimate for this scoped pass: about 75% of C++ behavior, materially higher than the prior compiling stubs but not module-complete.
