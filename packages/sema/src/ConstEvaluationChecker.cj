@@ -696,7 +696,10 @@ public class ConstEvaluationChecker {
     }
 
     private func ChkCallExpr(callExpr: CallExpr, isWeak: Bool): Bool {
-        var result = ChkOptionalExpr(callExpr.baseFunc, isWeak)
+        if (!ChkOptionalExpr(callExpr.baseFunc, isWeak)) {
+            return false
+        }
+        var result = true
         for (arg in callExpr.args) {
             result = ChkOptionalExpr(arg.expr, isWeak) && result
         }
@@ -806,7 +809,10 @@ public class ConstEvaluationChecker {
                 AddIssue(ConstEvaluationIssueKind.EXPECT_CONST_EXPRESSION, subscript)
                 return false
             }
-            var result = ChkExpr(base, isWeak)
+            if (!ChkExpr(base, isWeak)) {
+                return false
+            }
+            var result = true
             for (indexExpr in subscript.indexExprs) {
                 result = ChkExpr(indexExpr, isWeak) && result
             }

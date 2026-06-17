@@ -40,6 +40,8 @@ This pass covers the self-hosted Cangjie port under:
 - Switched member-field collection in type initialization checking to `GetVarsInitializationOrderWithPositions`, preserving the C++ common/specific field dependency order.
 - Ported the missing `CheckLetFlagInMemberAccess` immutable-assignment cases for struct values returned by calls/subscripts and struct-valued property bases, using real AST type information and desugared base expressions.
 - Added C++-style illegal member-access checks before full initialization: member functions/properties in member initializers, captured `this` through nested function/lambda bodies, `this.member`, `super.memberFunc`, and the distinct `super` member-variable issue before a valid member function context exists.
+- Aligned global-variable def-use graph iteration with the C++ source-position ordered map, and matched static-initializer collection of uninitialized member `VarDecl`s before checking assignments in `static init`.
+- Matched C++ const-evaluation short-circuiting for calls and subscript expressions so argument/index checks are skipped after a non-const callee or base has already failed.
 
 ## Remaining Fidelity Gaps
 
@@ -47,8 +49,8 @@ This pass covers the self-hosted Cangjie port under:
 - Some initialization edge cases still depend on sibling components that are only partially represented in the self-hosted port, especially exact scope-manager cache behavior, constructor delegation state, reachability/termination analysis, and AST context profile hooks.
 - The new termination and illegal-member tracking is local and uses available scope names/function-body stacks; it does not yet reproduce every C++ `ScopeManager` symbol-cache query, top-level symbol lookup, or exact `IsNode1ScopeVisibleForNode2` case.
 - Const-evaluation coverage follows the C++ legality shape but does not yet reproduce every target-specific profile check and diagnostic specialization from the C++ implementation.
-- Global-variable initialization checking models C++ def/use and cycle behavior, but final integration with compilation-unit import ordering, diagnostic formatting, and type-checker phase scheduling remains incomplete.
+- Global-variable initialization checking now preserves source-order graph traversal, but final integration with compilation-unit import ordering, diagnostic formatting, and type-checker phase scheduling remains incomplete.
 
 ## Estimate
 
-Honest behavior coverage for this legality/const-evaluation scope is about 70% versus the C++ reference. The port now has real traversal and issue production in the scoped files, several targeted C++ edge cases, the main conditional-initialization merge path, termination-aware initialization state, constructor early-return field tracking, string interpolation block traversal, dependency-aware member initialization order, immutable struct-base assignment checks, and illegal member-use checks before full initialization, but production completeness still requires diagnostic integration and the remaining exact semantic edge cases above.
+Honest behavior coverage for this legality/const-evaluation scope is about 71% versus the C++ reference. The port now has real traversal and issue production in the scoped files, several targeted C++ edge cases, the main conditional-initialization merge path, termination-aware initialization state, constructor early-return field tracking, string interpolation block traversal, dependency-aware member initialization order, immutable struct-base assignment checks, illegal member-use checks before full initialization, source-ordered global def-use traversal, and const-eval call/subscript short-circuiting, but production completeness still requires diagnostic integration and the remaining exact semantic edge cases above.
