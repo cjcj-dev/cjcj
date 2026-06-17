@@ -182,6 +182,11 @@ Parse shim.
   Lex `TokenPrecedence` table while preserving the local Pratt parser's explicit
   assignment precedence. This restores missing C++ precedence for shift,
   pipeline, composition, exponent, range, comparison, and logical operators.
+- Deepened quote parsing toward `ParseQuote.cpp`: `quote(...)` now records the
+  quote and delimiter positions, enters/exits the real lexer quote mode, emits
+  `TokenPart` expression nodes for literal token runs, parses `$identifier` as a
+  quote-dollar reference expression, parses `$(expr)` by temporarily restoring
+  normal lexer mode, and removed the non-C++ brace quote form.
 
 ## Remaining Work
 
