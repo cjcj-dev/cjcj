@@ -356,7 +356,7 @@ public class CjoManagerImpl {
         }
         let pkgInfo = pkgInfoOpt.getOrThrow()
         let importLevel = GetAccessLevel(importSpec)
-        if (importSpec.content.kind == ImportKind.IMPORT_ALL) {
+        if (SameImportKind(importSpec.content.kind, ImportKind.IMPORT_ALL)) {
             for (name in pkgInfo.declMap.keys()) {
                 if (let Some(decls) <- pkgInfo.declMap.get(name)) {
                     if (!declMap.contains(name)) {
@@ -371,7 +371,7 @@ public class CjoManagerImpl {
         }
         let sourceName = importSpec.content.identifier
         if (let Some(decls) <- pkgInfo.declMap.get(sourceName)) {
-            let targetName = if (importSpec.content.kind == ImportKind.IMPORT_ALIAS) {
+            let targetName = if (SameImportKind(importSpec.content.kind, ImportKind.IMPORT_ALIAS)) {
                 importSpec.content.aliasName
             } else {
                 sourceName

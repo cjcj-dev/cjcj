@@ -897,8 +897,8 @@ public class ImportManager {
                     continue
                 }
                 let relation = GetPackageRelation(pkg.fullPackageName, fullPackageName)
-                if ((packageValue.accessible == AccessLevel.PROTECTED && relation == PackageRelation.NONE) ||
-                    (packageValue.accessible == AccessLevel.INTERNAL && relation != PackageRelation.CHILD &&
+                if ((SameAccessLevel(packageValue.accessible, AccessLevel.PROTECTED) && relation == PackageRelation.NONE) ||
+                    (SameAccessLevel(packageValue.accessible, AccessLevel.INTERNAL) && relation != PackageRelation.CHILD &&
                         !IsSuperPackage(pkg.fullPackageName, fullPackageName))) {
                     diag.ReportError("package_accessibility",
                         "package '${fullPackageName}' is ${GetAccessLevelStr(packageValue)} and is not visible from '${pkg.fullPackageName}'",
@@ -943,7 +943,7 @@ public class ImportManager {
                 if (importSpec.IsImportMulti() || importSpec.IsImportAll()) {
                     continue
                 }
-                let name = if (importSpec.content.kind == ImportKind.IMPORT_SINGLE) {
+                let name = if (SameImportKind(importSpec.content.kind, ImportKind.IMPORT_SINGLE)) {
                     importSpec.content.identifier
                 } else {
                     importSpec.content.aliasName
@@ -1049,7 +1049,7 @@ public class ImportManager {
                 } else {
                     GetFileImportedDeclMap(file.fileHash)
                 }
-                if (importSpec.content.kind == ImportKind.IMPORT_ALL) {
+                if (SameImportKind(importSpec.content.kind, ImportKind.IMPORT_ALL)) {
                     let members = cjoManager.GetPackageMembers(fullPackageName)
                     for (memberName in members.keys()) {
                         if (let Some(memberDecls) <- members.get(memberName)) {
@@ -1068,7 +1068,7 @@ public class ImportManager {
                     continue
                 }
                 if (cjoManager.IsImportPackage(importSpec)) {
-                    let importedName = if (importSpec.content.kind == ImportKind.IMPORT_SINGLE) {
+                    let importedName = if (SameImportKind(importSpec.content.kind, ImportKind.IMPORT_SINGLE)) {
                         lastPackageName(fullPackageName)
                     } else {
                         importSpec.content.aliasName
@@ -1077,7 +1077,7 @@ public class ImportManager {
                     RecordImportOfDecl(pkg.fullPackageName, pkgDeclOpt.getOrThrow(), importSpec)
                 } else {
                     let members = cjoManager.GetPackageMembersByName(fullPackageName, importSpec.content.identifier)
-                    let importedName = if (importSpec.content.kind == ImportKind.IMPORT_SINGLE) {
+                    let importedName = if (SameImportKind(importSpec.content.kind, ImportKind.IMPORT_SINGLE)) {
                         importSpec.content.identifier
                     } else {
                         importSpec.content.aliasName
@@ -1291,7 +1291,8 @@ public class ImportManager {
     private func AddImplicitImportAll(file: File, fullPackageName: String): Unit {
         let names = SplitQualifiedName(fullPackageName)
         for (importSpec in file.imports) {
-            if (!importSpec.TestAttr(Attribute.IMPLICIT_ADD) || importSpec.content.kind != ImportKind.IMPORT_ALL) {
+            if (!importSpec.TestAttr(Attribute.IMPLICIT_ADD) ||
+                !SameImportKind(importSpec.content.kind, ImportKind.IMPORT_ALL)) {
                 continue
             }
             if (sameStringList(importSpec.content.prefixPaths, names)) {

@@ -32,11 +32,15 @@ This pass tightened import validation and diagnostics against the C++ reference:
 
 This pass tightened package-order and import-node fidelity: `PackageManager` now uses a single monotonically increasing Tarjan discovery index like the C++ implementation, recursive standard-library dependency handling records CJO/CJD sidecar paths before classifying the dependency, and local import nodes now render C++-style alias and multi-import strings through `ToString`. The local `Package.IsEmpty` helper now follows the C++ AST rule that a package with only compiler-added imports and no declarations is empty.
 
+This pass de-isolated the first AST enum layer used by Modules: `AccessLevel`, `Attribute`, and `ImportKind` now alias the real `cangjie_compiler::ast` definitions instead of local compatibility enums. Attribute wire conversion now accepts the full real AST attribute name set, preserves the existing legacy `MACRO_EXPAND_DECL` spelling by mapping it to `MACRO_EXPANDED_NODE`, and Modules call sites use local comparison helpers because imported enum equality operators are not exported across the package alias boundary.
+
 ## Implemented
 
 - Replaced `ModulesScaffold.cj` with per-component source files under `packages/modules/src`.
 - Ported package/import name handling, including `::` organization names, `.cjo` file naming, test package suffix handling, access-level comparison, package relation classification, super-package checks, import-kind behavior, and visibility filtering.
 - Added module-local equivalents for `Package`, `File`, `Decl`, `PackageDecl`, `ImportSpec`, `ImportContent`, `ExternalLibCfg`, `DepType`, `ExportConfig`, and diagnostics needed by the ported logic.
+- Replaced the module-local `AccessLevel`, `Attribute`, and `ImportKind` compatibility enums with aliases to the real `cangjie_compiler::ast` enums and added Modules-local comparison helpers for those imported enum values.
+- Expanded attribute serialization/deserialization to the full real AST attribute set, including compatibility handling for the old Modules-only `MACRO_EXPAND_DECL` spelling.
 - Replaced the module-local `GlobalOptions`, `OutputMode`, `OptimizationLevel`, and option environment copies with imports from `cangjie_compiler::option`; option serialization now preserves `Os` and `Oz`.
 - Replaced module-local `Position`/`Range` compatibility structs with public aliases to `cangjie_compiler::basic` and delegated range construction to Basic `MakeRange`.
 - Replaced the module-local qualified-name splitting algorithm with a wrapper around `cangjie_compiler::basic.SplitQualifiedName`, keeping the existing Modules return type for callers.
@@ -80,13 +84,13 @@ This pass tightened package-order and import-node fidelity: `PackageManager` now
 
 ## Important Blockers
 
-- Real C++ parity still requires dependencies on AST, full Basic diagnostic builder/source-manager call-site conversion, Sema/TypeManager, and flatbuffers/native CJO format support. Option, Basic source location types, Utils package constants/stdlib lookup, and a first diagnostic forwarding bridge are now wired to the real packages.
+- Real C++ parity still requires full AST node/declaration integration, full Basic diagnostic builder/source-manager call-site conversion, Sema/TypeManager, and flatbuffers/native CJO format support. Option, Basic source location types, Utils package constants/stdlib lookup, AST access/import/attribute enums, and a first diagnostic forwarding bridge are now wired to the real packages.
 - The local serialization format is not the production `.cjo` flatbuffer format. It is a compiling, behavior-bearing bridge for the isolated package, not a faithful replacement for C++ AST serialization.
 - Type/reference/expression/incremental deserialization has package-local working logic, but it still cannot consume the production C++ flatbuffer schema until real AST/Sema dependencies are available.
 
 ## Remaining Work
 
-- Replace module-local AST/Basic compatibility models with the real packages and adapt Modules call sites to AST `Identifier`, `Modifier`, `AttributePack`, and typed declaration subclasses.
+- Replace the remaining module-local AST/Basic compatibility models with the real packages and adapt Modules call sites to AST `Identifier`, `Modifier`, `AttributePack`, and typed declaration subclasses.
 - Bind the real flatbuffer module format and implement full `ASTWriter`, `ASTLoader`, expression writer/loader, reference loader, production CJMP common-part loading, and incremental cache loading.
 - Replace remaining free-form compatibility diagnostics with exact Basic diagnostic builder calls and C++ note/hint structure.
 - Audit import/package lookup behavior against the C++ test corpus after downstream Sema/Frontend callers are available.
