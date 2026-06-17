@@ -1,285 +1,101 @@
 package cangjie_compiler::frontend
 
+public import cangjie_compiler::basic.{
+    BEGIN_POSITION, DEFAULT_POSITION, INVALID_POSITION, DiagCategory, DiagColor, DiagSeverity, IntegratedString,
+    MakeRange, Position, PositionStatus, Range, Source, SourceManager
+}
+import cangjie_compiler::basic.Diagnostic as BasicDiagnostic
+import cangjie_compiler::basic.DiagnosticEngine as BasicDiagnosticEngine
+import cangjie_compiler::basic.Range as BasicRange
+import cangjie_compiler::utils.FileUtil
 import std.collection.*
 import std.sort.*
 
-public enum PositionStatus {
-    | KEEP
-    | IGNORE
-}
-
-public struct Position <: Hashable & Equatable<Position> {
-    public var fileID: UInt64 = 0
-    public var line: Int64 = 0
-    public var column: Int64 = 0
-    public var isCurFile: Bool = false
-    private var status: PositionStatus = PositionStatus.KEEP
-
-    public init() {}
-
-    public init(fileID: UInt64, line: Int64, column: Int64) {
-        this.fileID = fileID
-        this.line = line
-        this.column = column
-    }
-
-    public init(line: Int64, column: Int64) {
-        this.line = line
-        this.column = column
-    }
-
-    public operator func ==(rhs: Position): Bool {
-        return fileID == rhs.fileID && line == rhs.line && column == rhs.column
-    }
-
-    public operator func !=(rhs: Position): Bool {
-        return !(this == rhs)
-    }
-
-    public operator func <(rhs: Position): Bool {
-        if (fileID != rhs.fileID) {
-            return fileID < rhs.fileID
-        }
-        return line < rhs.line || (line == rhs.line && column < rhs.column)
-    }
-
-    public operator func <=(rhs: Position): Bool {
-        return this < rhs || this == rhs
-    }
-
-    public operator func >(rhs: Position): Bool {
-        return !(this <= rhs)
-    }
-
-    public operator func >=(rhs: Position): Bool {
-        return !(this < rhs)
-    }
-
-    public operator func +(width: Int64): Position {
-        var out = Position(fileID, line, column + width)
-        out.isCurFile = isCurFile
-        return out
-    }
-
-    public operator func -(width: Int64): Position {
-        var out = Position(fileID, line, column - width)
-        out.isCurFile = isCurFile
-        return out
-    }
-
-    public mut func Mark(newStatus: PositionStatus): Unit {
-        status = newStatus
-    }
-
-    public func GetStatus(): PositionStatus {
-        return status
-    }
-
-    public func IsZero(): Bool {
-        return fileID == 0 && line == 0 && column == 0
-    }
-
-    public func Hash64(): UInt64 {
-        return (fileID << 32) ^ (UInt64(line) << 16) ^ UInt64(column)
-    }
-
-    public func hashCode(): Int64 {
-        return Int64(Hash64())
-    }
-
-    public func ToString(): String {
-        return "(" + fileID.toString() + ", " + line.toString() + ", " + column.toString() + ")"
-    }
-}
-
-public let INVALID_POSITION: Position = Position(0, 0, 0)
-public let BEGIN_POSITION: Position = Position(0, 1, 1)
-public let DEFAULT_POSITION: Position = Position(0, -1, -1)
-
-public struct Range <: Equatable<Range> {
-    public var begin: Position = DEFAULT_POSITION
-    public var end: Position = DEFAULT_POSITION
-
-    public init() {}
-
-    public init(begin: Position, end: Position) {
-        this.begin = begin
-        this.end = end
-    }
-
-    public operator func ==(rhs: Range): Bool {
-        return begin == rhs.begin && end == rhs.end
-    }
-
-    public operator func !=(rhs: Range): Bool {
-        return !(this == rhs)
-    }
-}
-
-public func MakeRange(begin: Position, end: Position): Range {
-    var fixedEnd = end
-    if (begin.fileID != end.fileID) {
-        fixedEnd = begin + 1
-    }
-    return Range(begin, fixedEnd)
-}
-
-public enum DiagCategory {
-    | LEX
-    | PARSE
-    | CONDITIONAL_COMPILATION
-    | IMPORT_PACKAGE
-    | MACRO_EXPAND
-    | SEMA
-    | CHIR
-    | OTHER
-}
-
-private func DiagCategoryIndex(category: DiagCategory): Int64 {
-    return match (category) {
-        case DiagCategory.LEX => 0
-        case DiagCategory.PARSE => 1
-        case DiagCategory.CONDITIONAL_COMPILATION => 2
-        case DiagCategory.IMPORT_PACKAGE => 3
-        case DiagCategory.MACRO_EXPAND => 4
-        case DiagCategory.SEMA => 5
-        case DiagCategory.CHIR => 6
-        case DiagCategory.OTHER => 7
-    }
-}
-
-extend DiagCategory <: Equatable<DiagCategory> {
-    public operator func ==(rhs: DiagCategory): Bool {
-        return DiagCategoryIndex(this) == DiagCategoryIndex(rhs)
-    }
-
-    public operator func !=(rhs: DiagCategory): Bool {
-        return !(this == rhs)
-    }
-}
-
-public enum DiagSeverity {
-    | ERROR
-    | WARNING
-    | NOTE
-}
-
-private func DiagSeverityIndex(severity: DiagSeverity): Int64 {
-    return match (severity) {
-        case DiagSeverity.ERROR => 0
-        case DiagSeverity.WARNING => 1
-        case DiagSeverity.NOTE => 2
-    }
-}
-
-extend DiagSeverity <: Equatable<DiagSeverity> {
-    public operator func ==(rhs: DiagSeverity): Bool {
-        return DiagSeverityIndex(this) == DiagSeverityIndex(rhs)
-    }
-
-    public operator func !=(rhs: DiagSeverity): Bool {
-        return !(this == rhs)
-    }
-}
-
-public class Diagnostic {
-    public var severity: DiagSeverity
-    public var category: DiagCategory
-    public var position: Position
-    public var message: String
-
-    public init(severity: DiagSeverity, category: DiagCategory, position: Position, message: String) {
-        this.severity = severity
-        this.category = category
-        this.position = position
-        this.message = message
-    }
-}
-
 public class DiagnosticEngine {
-    private var sm: Option<SourceManager> = None
-    public let diagnostics: ArrayList<Diagnostic> = ArrayList<Diagnostic>()
+    private let impl: BasicDiagnosticEngine = BasicDiagnosticEngine()
 
     public init() {}
 
     public func SetSourceManager(sourceManager: SourceManager): Unit {
-        sm = Some(sourceManager)
+        impl.SetSourceManager(sourceManager)
     }
 
     public func GetSourceManager(): SourceManager {
-        if (let Some(sourceManager) <- sm) {
-            return sourceManager
-        }
-        let fallback = SourceManager()
-        sm = Some(fallback)
-        return fallback
+        return impl.GetSourceManager()
+    }
+
+    func AsBasicDiagnosticEngine(): BasicDiagnosticEngine {
+        return impl
     }
 
     public func Diagnose(category: DiagCategory, position: Position, message: String): Unit {
-        diagnostics.add(Diagnostic(DiagSeverity.ERROR, category, position, message))
+        emitFrontendDiagnostic(this, category, position, message, DiagSeverity.DS_ERROR)
     }
 
     public func Warn(category: DiagCategory, position: Position, message: String): Unit {
-        diagnostics.add(Diagnostic(DiagSeverity.WARNING, category, position, message))
+        emitFrontendDiagnostic(this, category, position, message, DiagSeverity.DS_WARNING)
     }
 
     public func Note(category: DiagCategory, position: Position, message: String): Unit {
-        diagnostics.add(Diagnostic(DiagSeverity.NOTE, category, position, message))
+        emitFrontendDiagnostic(this, category, position, message, DiagSeverity.DS_NOTE)
     }
 
-    public func GetErrorCount(): Int64 {
-        var count: Int64 = 0
-        for (diag in diagnostics) {
-            if (diag.severity == DiagSeverity.ERROR) {
-                count++
-            }
-        }
-        return count
+    public func GetErrorCount(): UInt64 {
+        return impl.GetErrorCount()
     }
 
-    public func GetWarningCount(): Int64 {
-        var count: Int64 = 0
-        for (diag in diagnostics) {
-            if (diag.severity == DiagSeverity.WARNING) {
-                count++
-            }
-        }
-        return count
+    public func GetWarningCount(): UInt64 {
+        return impl.GetWarningCount()
     }
 
     public func EmitCategoryDiagnostics(category: DiagCategory): Unit {
-        for (diag in diagnostics) {
-            if (diag.category == category) {
-                println(FormatDiagnostic(diag))
-            }
-        }
+        impl.EmitCategoryDiagnostics(category)
     }
 
     public func EmitCategoryGroup(): Unit {
-        ()
+        impl.EmitCategoryGroup()
     }
 
     public func ReportErrorAndWarningCount(): Unit {
-        let errCount = GetErrorCount()
-        let warnCount = GetWarningCount()
-        if (errCount != 0 || warnCount != 0) {
-            println(errCount.toString() + " error(s), " + warnCount.toString() + " warning(s)")
-        }
+        impl.ReportErrorAndWarningCount()
     }
 
-    private func FormatDiagnostic(diag: Diagnostic): String {
-        let sourceName = GetSourceManager().GetSource(diag.position.fileID).path
-        let whereText = if (sourceName.isEmpty()) {
-            "<unknown>"
-        } else {
-            sourceName + ":" + diag.position.line.toString() + ":" + diag.position.column.toString()
-        }
-        let severity = match (diag.severity) {
-            case DiagSeverity.ERROR => "error"
-            case DiagSeverity.WARNING => "warning"
-            case DiagSeverity.NOTE => "note"
-        }
-        return whereText + ": " + severity + ": " + diag.message
+    public func HandleDiagnostic(diagnostic: BasicDiagnostic): Unit {
+        impl.HandleDiagnostic(diagnostic)
+    }
+}
+
+private func emitFrontendDiagnostic(
+    diag: DiagnosticEngine,
+    category: DiagCategory,
+    position: Position,
+    message: String,
+    severity: DiagSeverity
+): Unit {
+    let diagnostic = BasicDiagnostic()
+    diagnostic.isRefactor = true
+    diagnostic.diagCategory = category
+    diagnostic.diagSeverity = severity
+    diagnostic.errorMessage = message
+    diagnostic.start = INVALID_POSITION
+    diagnostic.end = INVALID_POSITION
+    diagnostic.mainHint = IntegratedString(frontendDiagnosticRange(position), "", frontendDiagnosticColor(severity))
+    diag.HandleDiagnostic(diagnostic)
+}
+
+private func frontendDiagnosticRange(position: Position): BasicRange {
+    if (position == DEFAULT_POSITION || position.IsZero()) {
+        return MakeRange(DEFAULT_POSITION, DEFAULT_POSITION)
+    }
+    return MakeRange(position, position + 1)
+}
+
+private func frontendDiagnosticColor(severity: DiagSeverity): DiagColor {
+    return match (severity) {
+        case DiagSeverity.DS_ERROR => DiagColor.RED
+        case DiagSeverity.DS_WARNING => DiagColor.YELLOW
+        case DiagSeverity.DS_NOTE => DiagColor.BLUE
+        case DiagSeverity.DS_HINT => DiagColor.GREEN
     }
 }
 
@@ -810,10 +626,12 @@ public class FrontendToken {
     private var endPos: Position
     public var kind: FrontendTokenKind
     public var value: String
+    private var rawKindName: String = ""
 
-    public init(kind: FrontendTokenKind, value: String, begin: Position, end: Position) {
+    public init(kind: FrontendTokenKind, value: String, begin: Position, end: Position, rawKindName!: String = "") {
         this.kind = kind
         this.value = value
+        this.rawKindName = rawKindName
         beginPos = begin
         endPos = end
     }
@@ -824,6 +642,10 @@ public class FrontendToken {
 
     public func End(): Position {
         return endPos
+    }
+
+    public func KindName(): String {
+        return if (rawKindName.isEmpty()) { FrontendTokenKindName(kind) } else { rawKindName }
     }
 }
 
@@ -949,8 +771,16 @@ public class Package <: Node {
 
     public func IsEmpty(): Bool {
         for (file in files) {
+            if (let Some(_) <- file.packageSpec) {
+                return false
+            }
             if (!file.decls.isEmpty()) {
                 return false
+            }
+            for (importSpec in file.imports) {
+                if (!importSpec.TestAttr("COMPILER_ADD")) {
+                    return false
+                }
             }
         }
         return true
@@ -1271,7 +1101,7 @@ public class ImportManager {
                 }
                 filteredDeps.add(dep)
                 if (!sourcePackages.contains(dep) && !depPkgCjdPaths.contains(dep)) {
-                    let cjdPath = FindSerializationFileForImport(dep, ".cj.d", searchPath)
+                    let cjdPath = FileUtil.FindSerializationFile(dep, ".cj.d", searchPath.toArray())
                     if (!cjdPath.isEmpty()) {
                         depPkgCjdPaths.add(dep, cjdPath)
                     }
@@ -1370,64 +1200,6 @@ private func JoinStringList(values: ArrayList<String>, delimiter: String): Strin
     return builder.toString()
 }
 
-private func FindSerializationFileForImport(fullPackageName: String, suffix: String, searchPaths: ArrayList<String>): String {
-    let names = SplitQualifiedNameForImport(fullPackageName)
-    let packageFileName = ToCjoFileNameForImport(fullPackageName)
-    if (!names.isEmpty()) {
-        let nestedName = ToCjoFileNameForImport(names[0]) + "/" + packageFileName + suffix
-        let nestedPath = FindFileByNameForImport(nestedName, searchPaths)
-        if (!nestedPath.isEmpty()) {
-            return nestedPath
-        }
-    }
-    return FindFileByNameForImport(packageFileName + suffix, searchPaths)
-}
-
-private func FindFileByNameForImport(fileName: String, searchPaths: ArrayList<String>): String {
-    if (fileName.isEmpty()) {
-        return ""
-    }
-    for (path in searchPaths) {
-        if (path.isEmpty()) {
-            continue
-        }
-        let candidate = JoinPath(path, fileName)
-        if (FileExist(candidate)) {
-            return candidate
-        }
-    }
-    return ""
-}
-
-private func SplitQualifiedNameForImport(qualifiedName: String): ArrayList<String> {
-    let names = ArrayList<String>()
-    var idx: Int64 = 0
-    if (let Some(dcPos) <- qualifiedName.indexOf("::")) {
-        idx = dcPos + 2
-    }
-    while (idx < qualifiedName.size) {
-        if (qualifiedName[idx] == b'.') {
-            idx++
-        } else if (qualifiedName[idx] == b'`') {
-            let nextTick = qualifiedName.indexOf("`", idx + 1) ?? qualifiedName.size
-            names.add(qualifiedName[idx + 1..nextTick])
-            idx = if (nextTick == qualifiedName.size) { nextTick } else { nextTick + 1 }
-        } else {
-            let nextDot = qualifiedName.indexOf(".", idx + 1) ?? qualifiedName.size
-            names.add(qualifiedName[idx..nextDot])
-            idx = nextDot
-        }
-    }
-    return names
-}
-
-private func ToCjoFileNameForImport(fullPackageName: String): String {
-    if (let Some(dcPos) <- fullPackageName.indexOf("::")) {
-        return fullPackageName[dcPos + 2..] + "@" + fullPackageName[0..dcPos]
-    }
-    return fullPackageName
-}
-
 public class PackageManager {
     private let importManager: ImportManager
     public init(importManager: ImportManager) {
@@ -1486,9 +1258,4 @@ public func EscapeJson(text: String): String {
     return text.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n").replace("\r", "\\r")
 }
 
-public let DEFAULT_PACKAGE_NAME: String = "default"
-public let CACHED_LOG_EXTENSION: String = ".log"
-public let CACHED_AST_EXTENSION: String = ".astcache"
-public let SERIALIZED_FILE_EXTENSION: String = ".cjo"
-public let CJ_D_FILE_EXTENSION: String = ".cj.d"
 public let DIR_SEPARATOR: String = "/"

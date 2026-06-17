@@ -1,6 +1,14 @@
 package cangjie_compiler::frontend
 
+public import cangjie_compiler::utils.{
+    CACHED_AST_EXTENSION, CACHED_LOG_EXTENSION, CJ_D_FILE_EXTENSION, DEFAULT_PACKAGE_NAME, SERIALIZED_FILE_EXTENSION,
+    OverflowStrategy, OverflowStrategyName, StringToOverflowStrategy, ValidOverflowStrategy
+}
+import cangjie_compiler::option.SetupConditionalCompilationCfgFromFile as OptionSetupConditionalCompilationCfgFromFile
+import cangjie_compiler::option.StableHashString as OptionStableHashString
+import cangjie_compiler::utils.FileUtil
 import std.collection.*
+import std.sort.*
 
 public enum OptionID {
     | UNKNOWN
@@ -238,32 +246,6 @@ public func CreateOptionTable(frontendMode: Bool): OptionTable {
     return OptionTable()
 }
 
-public enum OverflowStrategy {
-    | NA
-    | THROWING
-    | WRAPPING
-    | SATURATING
-}
-
-private func OverflowStrategyIndex(strategy: OverflowStrategy): Int64 {
-    return match (strategy) {
-        case OverflowStrategy.NA => 0
-        case OverflowStrategy.THROWING => 1
-        case OverflowStrategy.WRAPPING => 2
-        case OverflowStrategy.SATURATING => 3
-    }
-}
-
-extend OverflowStrategy <: Equatable<OverflowStrategy> {
-    public operator func ==(rhs: OverflowStrategy): Bool {
-        return OverflowStrategyIndex(this) == OverflowStrategyIndex(rhs)
-    }
-
-    public operator func !=(rhs: OverflowStrategy): Bool {
-        return !(this == rhs)
-    }
-}
-
 public class MaybeString {
     public var value: Option<String> = None
     public init() {}
@@ -412,15 +394,10 @@ public open class GlobalOptions {
                 return false
             }
         } else if (id == OptionID.INT_OVERFLOW_MODE) {
-            if (arg.value == "throwing") {
-                overflowStrategy = OverflowStrategy.THROWING
-            } else if (arg.value == "wrapping") {
-                overflowStrategy = OverflowStrategy.WRAPPING
-            } else if (arg.value == "saturating") {
-                overflowStrategy = OverflowStrategy.SATURATING
-            } else {
+            if (!ValidOverflowStrategy(arg.value)) {
                 return false
             }
+            overflowStrategy = StringToOverflowStrategy(arg.value)
         } else if (id == OptionID.UNKNOWN) {
             ()
         }
@@ -428,24 +405,94 @@ public open class GlobalOptions {
     }
 
     public func SetCompilationCachedPath(): Unit {
-        if (compilationCachedPath.isEmpty() && !output.isEmpty()) {
+        if (outputDir.hasValue()) {
+            compilationCachedPath = outputDir.value.getOrThrow()
+        } else if (IsDir(output)) {
             compilationCachedPath = output
+        } else {
+            compilationCachedPath = GetDirPath(output)
+        }
+        if (compilationCachedPath.isEmpty()) {
+            compilationCachedPath = "."
         }
     }
 
-    public func GenerateCachedPathName(packageName: String, extension: String): String {
-        let safePkg = packageName.replace(".", "_")
-        if (!compilationCachedFileName.isEmpty()) {
-            return JoinPath(compilationCachedDir, compilationCachedFileName + extension)
+    public func GetCacheRelativeFilePath(filePath: String): String {
+        if (compilationCachedPath.isEmpty()) {
+            return GetFileName(filePath)
         }
-        let base = if (compilationCachedPath.isEmpty()) { output } else { compilationCachedPath }
-        if (base.isEmpty() || base == "./") {
-            return safePkg + extension
+        let absFilePath = FileUtil.GetAbsPath(filePath)
+        if (let None <- absFilePath) {
+            return GetFileName(filePath)
         }
-        if (IsDir(base)) {
-            return JoinPath(base, safePkg + extension)
+        let relativePath = FileUtil.GetRelativePath(JoinPath(compilationCachedPath, ""), absFilePath.getOrThrow())
+        if (let Some(value) <- relativePath) {
+            return value
         }
-        return GetFileBase(base) + "_" + safePkg + extension
+        return GetFileName(filePath)
+    }
+
+    public func GenerateNamesOfCachedDirAndFile(fullPackageName: String): (String, String) {
+        var fileName = ""
+        if (compilePackage) {
+            fileName = fullPackageName
+        } else {
+            let sortedSrcFiles = ArrayList<String>()
+            for (srcFile in srcFiles) {
+                sortedSrcFiles.add(GetCacheRelativeFilePath(srcFile))
+            }
+            sort(sortedSrcFiles, by: { left: String, right: String =>
+                if (left < right) {
+                    Ordering.LT
+                } else if (left > right) {
+                    Ordering.GT
+                } else {
+                    Ordering.EQ
+                }
+            })
+            let builder = StringBuilder()
+            for (srcFile in sortedSrcFiles) {
+                builder.append(srcFile)
+            }
+            fileName = builder.toString()
+        }
+        return (JoinPath(compilationCachedPath, ".cached"), OptionStableHashString(fileName))
+    }
+
+    public func GenerateCachedPathName(fullPackageName: String, extension: String): String {
+        let names = GenerateNamesOfCachedDirAndFile(fullPackageName)
+        let folder = names[0]
+        if (!FileExist(folder)) {
+            let _ = CreateDirs(folder + DIR_SEPARATOR)
+        }
+        return JoinPath(folder, names[1] + extension)
+    }
+
+    public func GenerateCachedPathNameForCodeGen(subModuleName: String, extension: String): String {
+        let hashedFileName = OptionStableHashString(subModuleName)
+        let folder = JoinPath(compilationCachedPath, ".cached")
+        if (!FileExist(folder)) {
+            let _ = CreateDirs(folder + DIR_SEPARATOR)
+        }
+        return JoinPath(folder, hashedFileName + extension)
+    }
+
+    public func GetHashedObjFileName(objFileName: String): String {
+        return JoinPath(compilationCachedDir, OptionStableHashString(compilationCachedFileName + objFileName))
+    }
+
+    public func GetHashedObjFileNameForPackage(fullPackageName: String, objFileName: String): String {
+        let names = GenerateNamesOfCachedDirAndFile(fullPackageName)
+        return JoinPath(names[0], OptionStableHashString(names[1] + objFileName))
+    }
+
+    public func UpdateCachedDirName(fullPackageName: String): Unit {
+        let names = GenerateNamesOfCachedDirAndFile(fullPackageName)
+        compilationCachedDir = names[0]
+        compilationCachedFileName = names[1]
+        if (!FileExist(compilationCachedDir)) {
+            let _ = CreateDirs(compilationCachedDir + DIR_SEPARATOR)
+        }
     }
 
     public func GetJobs(): Int64 {
@@ -567,7 +614,7 @@ public func SetupConditionalCompilationCfg(opts: GlobalOptions): Bool {
     for (path in opts.passedWhenCfgPaths) {
         let filePath = JoinPath(path, "cfg.toml")
         if (FileExist(filePath)) {
-            return LoadCfgToml(filePath, opts.passedWhenKeyValue)
+            return OptionSetupConditionalCompilationCfgFromFile(filePath, opts.passedWhenKeyValue)
         }
     }
     let defaultCfgFilePath = if (opts.packagePaths.isEmpty()) {
@@ -578,7 +625,7 @@ public func SetupConditionalCompilationCfg(opts: GlobalOptions): Bool {
     if (!FileExist(defaultCfgFilePath)) {
         return true
     }
-    return LoadCfgToml(defaultCfgFilePath, opts.passedWhenKeyValue)
+    return OptionSetupConditionalCompilationCfgFromFile(defaultCfgFilePath, opts.passedWhenKeyValue)
 }
 
 public enum DumpAction {
@@ -731,102 +778,6 @@ private func ParseCfgEntry(entry: String, target: HashMap<String, String>): Bool
     return false
 }
 
-private func ParseCfgTomlEntry(line: String, target: HashMap<String, String>): Bool {
-    let content = StripTomlLineComment(line)
-    if (content.isEmpty() || CountOccurrences(content, "=") != 1) {
-        return false
-    }
-    if (let Some(eqPos) <- content.indexOf("=")) {
-        let rawKey = TrimAscii(content[0..eqPos])
-        let rawValue = TrimAscii(content[eqPos + 1..])
-        let key = NormalizeCfgKey(rawKey)
-        if (key.isEmpty() || IsBuiltinCfgKey(key) || target.contains(key)) {
-            return false
-        }
-        if (rawValue.size <= 2 || rawValue[0] != b'"' || rawValue[rawValue.size - 1] != b'"') {
-            return false
-        }
-        let valueBody = rawValue[1..rawValue.size - 1]
-        if (valueBody.isEmpty()) {
-            return false
-        }
-        target.add(key, RemoveEscapedTomlQuotes(valueBody))
-        return true
-    }
-    return false
-}
-
-private func LoadCfgToml(path: String, target: HashMap<String, String>): Bool {
-    let readResult = ReadFileContent(path)
-    if (!readResult[0]) {
-        return false
-    }
-    let lines = SplitLines(readResult[1])
-    for (line in lines) {
-        let content = StripTomlLineComment(line)
-        if (content.isEmpty()) {
-            continue
-        }
-        if (!ParseCfgTomlEntry(content, target)) {
-            return false
-        }
-    }
-    return true
-}
-
-private func StripTomlLineComment(inputLine: String): String {
-    var insideString = false
-    var idx: Int64 = 0
-    while (idx < inputLine.size) {
-        let byte = inputLine[idx]
-        if (!insideString && byte == b'#') {
-            return TrimAscii(inputLine[0..idx])
-        }
-        if (byte == b'"' && !IsEscapedBefore(inputLine, idx)) {
-            insideString = !insideString
-        }
-        idx++
-    }
-    return TrimAscii(inputLine)
-}
-
-private func IsEscapedBefore(value: String, index: Int64): Bool {
-    if (index <= 0) {
-        return false
-    }
-    var cursor = index - 1
-    var count: Int64 = 0
-    var scanning = true
-    while (scanning) {
-        if (cursor >= 0 && value[cursor] == b'\\') {
-            count++
-            if (cursor == 0) {
-                scanning = false
-            } else {
-                cursor--
-            }
-        } else {
-            scanning = false
-        }
-    }
-    return count % 2 == 1
-}
-
-private func RemoveEscapedTomlQuotes(value: String): String {
-    let builder = StringBuilder()
-    var idx: Int64 = 0
-    while (idx < value.size) {
-        if (value[idx] == b'\\' && idx + 1 < value.size && value[idx + 1] == b'"') {
-            builder.append("\"")
-            idx += 2
-        } else {
-            builder.append(String.fromUtf8([value[idx]]))
-            idx++
-        }
-    }
-    return builder.toString()
-}
-
 private func IsCfgPathMode(value: String): Bool {
     return CountOccurrences(value, "=") == CountOccurrences(value, "\\=")
 }
@@ -850,36 +801,10 @@ private func NormalizeCfgKey(rawKey: String): String {
     if (rawKey.size > 2 && rawKey[0] == b'`' && rawKey[rawKey.size - 1] == b'`') {
         return rawKey[1..rawKey.size - 1]
     }
-    if (!IsIdentifierLike(rawKey)) {
+    if (!FileUtil.IsIdentifier(rawKey)) {
         return ""
     }
     return rawKey
-}
-
-private func IsIdentifierLike(value: String): Bool {
-    if (value.isEmpty()) {
-        return false
-    }
-    let bytes = value.toArray()
-    if (!IsIdentifierStartByte(bytes[0])) {
-        return false
-    }
-    var idx: Int64 = 1
-    while (idx < bytes.size) {
-        if (!IsIdentifierContinueByte(bytes[idx])) {
-            return false
-        }
-        idx++
-    }
-    return true
-}
-
-private func IsIdentifierStartByte(byte: UInt8): Bool {
-    return (byte >= b'a' && byte <= b'z') || (byte >= b'A' && byte <= b'Z') || byte == b'_'
-}
-
-private func IsIdentifierContinueByte(byte: UInt8): Bool {
-    return IsIdentifierStartByte(byte) || (byte >= b'0' && byte <= b'9')
 }
 
 private func IsBuiltinCfgKey(key: String): Bool {

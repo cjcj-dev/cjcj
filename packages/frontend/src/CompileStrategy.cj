@@ -1,5 +1,6 @@
 package cangjie_compiler::frontend
 
+import cangjie_compiler::utils.FileUtil
 import std.collection.*
 import std.sort.*
 
@@ -80,7 +81,7 @@ public open class CompileStrategy {
     }
 
     public func OverflowStrategy(): Bool {
-        let strategyName = FrontendOverflowStrategyName(ci.invocation.globalOptions.overflowStrategy)
+        let strategyName = OverflowStrategyName(ci.invocation.globalOptions.overflowStrategy)
         for (pkg in ci.GetSourcePackages()) {
             for (file in pkg.files) {
                 for (decl in file.decls) {
@@ -176,7 +177,7 @@ private func ReadCjdSource(pkgName: String, configuredPath: String, searchPaths:
     if (configuredRead[0]) {
         return (true, configuredPath, configuredRead[1])
     }
-    let discoveredPath = FindSerializationFile(pkgName, CJ_D_FILE_EXTENSION, searchPaths)
+    let discoveredPath = FileUtil.FindSerializationFile(pkgName, CJ_D_FILE_EXTENSION, searchPaths.toArray())
     if (discoveredPath.isEmpty()) {
         return (false, "", "")
     }
@@ -186,64 +187,6 @@ private func ReadCjdSource(pkgName: String, configuredPath: String, searchPaths:
     }
     let sourcePath = if (configuredPath.isEmpty()) { discoveredPath } else { configuredPath }
     return (true, sourcePath, discoveredRead[1])
-}
-
-private func FindSerializationFile(fullPackageName: String, suffix: String, searchPaths: ArrayList<String>): String {
-    let names = SplitQualifiedNameForSerialization(fullPackageName)
-    let packageFileName = ToCjoFileNameForSerialization(fullPackageName)
-    if (!names.isEmpty()) {
-        let nestedName = ToCjoFileNameForSerialization(names[0]) + "/" + packageFileName + suffix
-        let nestedPath = FindFileByNameInSearchPaths(nestedName, searchPaths)
-        if (!nestedPath.isEmpty()) {
-            return nestedPath
-        }
-    }
-    return FindFileByNameInSearchPaths(packageFileName + suffix, searchPaths)
-}
-
-private func FindFileByNameInSearchPaths(fileName: String, searchPaths: ArrayList<String>): String {
-    if (fileName.isEmpty()) {
-        return ""
-    }
-    for (path in searchPaths) {
-        if (path.isEmpty()) {
-            continue
-        }
-        let candidate = JoinPath(path, fileName)
-        if (FileExist(candidate)) {
-            return candidate
-        }
-    }
-    return ""
-}
-
-private func SplitQualifiedNameForSerialization(qualifiedName: String): ArrayList<String> {
-    let names = ArrayList<String>()
-    var idx: Int64 = 0
-    if (let Some(dcPos) <- qualifiedName.indexOf("::")) {
-        idx = dcPos + 2
-    }
-    while (idx < qualifiedName.size) {
-        if (qualifiedName[idx] == b'.') {
-            idx++
-        } else if (qualifiedName[idx] == b'`') {
-            let nextTick = qualifiedName.indexOf("`", idx + 1) ?? qualifiedName.size
-            names.add(qualifiedName[idx + 1..nextTick])
-            idx = if (nextTick == qualifiedName.size) { nextTick } else { nextTick + 1 }
-        } else {
-            let nextDot = qualifiedName.indexOf(".", idx + 1) ?? qualifiedName.size
-            names.add(qualifiedName[idx..nextDot])
-            idx = nextDot
-        }
-    }
-    return names
-}
-
-private func ToCjoFileNameForSerialization(fullPackageName: String): String {
-    if (let Some(dcPos) <- fullPackageName.indexOf("::")) {
-        return fullPackageName[dcPos + 2..] + "@" + fullPackageName[0..dcPos]
-    }
-    return fullPackageName
 }
 
 public class FullCompileStrategy <: CompileStrategy {
@@ -263,11 +206,12 @@ public class FullCompileStrategy <: CompileStrategy {
             if (incrParse) {
                 strategyImpl.ParseOnePackageInPlace(ci.srcPkgs[0])
             } else {
-                let pkg = strategyImpl.ParseOnePackage(ci.srcFilePaths, ret, DEFAULT_PACKAGE_NAME)
-                ci.srcPkgs.add(pkg)
+                let parsed = strategyImpl.ParseOnePackage(ci.srcFilePaths, DEFAULT_PACKAGE_NAME)
+                ci.srcPkgs.add(parsed[0])
+                ret = parsed[1]
             }
         } else {
-            strategyImpl.ParseModule(ret)
+            ret = strategyImpl.ParseModule()
         }
         return ret
     }
@@ -287,8 +231,8 @@ private class FullCompileStrategyImpl {
         s = strategy
     }
 
-    public func ParseModule(success: Bool): Unit {
-        var mutableSuccess = success
+    public func ParseModule(): Bool {
+        var success = true
         let moduleSrcPath = s.ci.invocation.globalOptions.moduleSrcPath
         let includeFileSet = HashSet<String>()
         for (srcPath in s.ci.invocation.globalOptions.srcFiles) {
@@ -299,7 +243,7 @@ private class FullCompileStrategyImpl {
             var currentPkg = DEFAULT_PACKAGE_NAME
             if (!moduleSrcPath.isEmpty()) {
                 let basePath = if (IsDir(moduleSrcPath)) { JoinPath(moduleSrcPath, "") } else { moduleSrcPath }
-                currentPkg = GetPkgNameFromRelativePath(GetRelativePath(basePath, srcDir))
+                currentPkg = FileUtil.GetPkgNameFromRelativePath(FileUtil.GetRelativePath(basePath, srcDir) ?? "")
             }
             let parseTest = s.ci.invocation.globalOptions.parseTest
             let compileTestsOnly = s.ci.invocation.globalOptions.compileTestsOnly
@@ -311,7 +255,9 @@ private class FullCompileStrategyImpl {
                     allSrcFiles.add(filename)
                 }
             }
-            let parsedPkg = ParseOnePackage(allSrcFiles, mutableSuccess, currentPkg)
+            let parsed = ParseOnePackage(allSrcFiles, currentPkg)
+            let parsedPkg = parsed[0]
+            success = success && parsed[1]
             if (srcDir == moduleSrcPath) {
                 parsedPkg.needExported = false
             }
@@ -320,10 +266,11 @@ private class FullCompileStrategyImpl {
         for (pkg in s.ci.srcPkgs) {
             sort(pkg.files, by: { left: File, right: File => compareString(left.fileName, right.fileName) })
         }
+        return success
     }
 
-    public func ParseOnePackage(files: ArrayList<String>, success: Bool, defaultPackageName: String): Package {
-        var mutableSuccess = success
+    public func ParseOnePackage(files: ArrayList<String>, defaultPackageName: String): (Package, Bool) {
+        var success = true
         let fileInfos = ArrayList<(String, UInt64, String)>()
         if (s.ci.loadSrcFilesFromCache) {
             for ((path, cacheInfo) in s.ci.bufferCache) {
@@ -344,7 +291,7 @@ private class FullCompileStrategyImpl {
                 if (!readResult[0]) {
                     s.ci.diag.Diagnose(DiagCategory.IMPORT_PACKAGE, DEFAULT_POSITION,
                         "failed to read source file '" + filePath + "': " + readResult[2])
-                    mutableSuccess = false
+                    success = false
                     continue
                 }
                 let fileID = addSourceForParse(filePath, readResult[1])
@@ -354,10 +301,10 @@ private class FullCompileStrategyImpl {
         let pkg = Package(defaultPackageName)
         addParsedFilesToPackage(pkg, fileInfos)
         CheckPackageConsistency(pkg)
-        if (!mutableSuccess) {
+        if (!success) {
             pkg.SetAttr("PARSE_FAILED")
         }
-        return pkg
+        return (pkg, success)
     }
 
     public func ParseOnePackageInPlace(pkg: Package): Unit {
@@ -465,8 +412,6 @@ private class FullCompileStrategyImpl {
 
 public func ParseSourceFile(fileID: UInt64, filePath: String, sourceCode: String, diag: DiagnosticEngine,
     sm: SourceManager, attachComment: Bool, parseDeclFile: Bool): File {
-    let _ = diag
-    let _ = attachComment
     let _ = parseDeclFile
     let file = File()
     file.filePath = NormalizePath(filePath)
@@ -474,7 +419,7 @@ public func ParseSourceFile(fileID: UInt64, filePath: String, sourceCode: String
     file.fileHash = StableSourcePathHash(file.filePath)
     file.begin = Position(fileID, 1, 1)
     file.end = sm.GetSource(fileID).GetEndPos()
-    let tokens = Tokenize(fileID, sourceCode)
+    let tokens = Tokenize(fileID, sourceCode, diag, sm, attachComment: attachComment)
     parsePackageAndImports(file, tokens)
     parseTopLevelDecls(file, tokens)
     return file
@@ -1233,27 +1178,6 @@ private func splitByDot(value: String): ArrayList<String> {
     return out
 }
 
-private func GetRelativePath(base: String, path: String): String {
-    let normalizedBase = NormalizePath(base)
-    let normalizedPath = NormalizePath(path)
-    if (normalizedPath.startsWith(normalizedBase)) {
-        var rest = normalizedPath[normalizedBase.size..]
-        if (!rest.isEmpty() && rest[0] == b'/') {
-            rest = rest[1..]
-        }
-        return rest
-    }
-    return normalizedPath
-}
-
-private func GetPkgNameFromRelativePath(path: String): String {
-    let normalized = NormalizePath(path)
-    if (normalized.isEmpty() || normalized == ".") {
-        return DEFAULT_PACKAGE_NAME
-    }
-    return normalized.replace("/", ".")
-}
-
 private func expandMacrosInPackage(pkg: Package): Unit {
     for (file in pkg.files) {
         let expandedDecls = ArrayList<Decl>()
@@ -1492,15 +1416,6 @@ private func stripQuotes(value: String): String {
         return value[1..value.size - 1]
     }
     return value
-}
-
-private func FrontendOverflowStrategyName(strategy: OverflowStrategy): String {
-    return match (strategy) {
-        case OverflowStrategy.NA => "na"
-        case OverflowStrategy.THROWING => "throwing"
-        case OverflowStrategy.WRAPPING => "wrapping"
-        case OverflowStrategy.SATURATING => "saturating"
-    }
 }
 
 private func compareString(left: String, right: String): Ordering {
