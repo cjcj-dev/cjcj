@@ -4,6 +4,7 @@ import std.collection.*
 import std.convert.*
 import cangjie_compiler::basic.SourceManager
 import cangjie_compiler::parse.Decl as ParseDecl
+import cangjie_compiler::parse.Node as ParseNode
 import cangjie_compiler::lex.TokenKind
 import cangjie_compiler::parse.Parser as RealParser
 import cangjie_compiler::parse.DiagnosticEngine as ParseDiagnosticEngine
@@ -39,6 +40,7 @@ import cangjie_compiler::parse.SubscriptExpr as ParseSubscriptExpr
 import cangjie_compiler::parse.MemberAccess as ParseMemberAccess
 import cangjie_compiler::parse.EnumDecl as ParseEnumDecl
 import cangjie_compiler::parse.StructDecl as ParseStructDecl
+import cangjie_compiler::parse.ClassDecl as ParseClassDecl
 import cangjie_compiler::lex.StringPartKind
 import cangjie_compiler::chir.AST2CHIRStmtSpec as ChirStmtSpec
 import cangjie_compiler::chir.AST2CHIRExprSpec as ChirExprSpec
@@ -115,6 +117,18 @@ public func AdaptRealBodies(file: File, fileID: UInt64, sourceCode: String, sm: 
             }
         }
     }
+    // Likewise for classes: register each supported class's own desugared methods, and also register
+    // any inherited (parent) method under the subclass name so `s.greet()` on a subclass that does not
+    // override resolves. (Inherited methods are emitted as subclass-named synthetic functions below.)
+    for (decl in parsedFile.decls) {
+        if (let Some(classDecl) <- (decl as ParseClassDecl)) {
+            let className = classDecl.identifier.Val()
+            if (!structs.isClass(className)) {
+                continue
+            }
+            registerClassMethodNames(className, funcNames, structs)
+        }
+    }
     for (decl in file.decls) {
         if (let Some(funcDecl) <- (decl as FuncDecl)) {
             tryAdaptFunction(funcDecl, parsedFile, funcNames, strReturningFuncs, enums, structs,
@@ -131,6 +145,69 @@ public func AdaptRealBodies(file: File, fileID: UInt64, sourceCode: String, sm: 
                 structReturningFuncs, floatReturningFuncs)
         }
     }
+    // Adapt class instance methods the same way (synthetic `$struct$Class$method` top-level functions
+    // whose leading `this` parameter carries the receiver as an Int64). A class needs an index of every
+    // class decl by name so inherited methods are adapted from the declaring ancestor's body.
+    let classDeclsByName = HashMap<String, ParseClassDecl>()
+    for (decl in parsedFile.decls) {
+        if (let Some(classDecl) <- (decl as ParseClassDecl)) {
+            let n = classDecl.identifier.Val()
+            if (!n.isEmpty()) {
+                classDeclsByName[n] = classDecl
+            }
+        }
+    }
+    for (decl in parsedFile.decls) {
+        if (let Some(classDecl) <- (decl as ParseClassDecl)) {
+            adaptClassMethods(classDecl, classDeclsByName, file, funcNames, strReturningFuncs, enums,
+                structs, structReturningFuncs, floatReturningFuncs)
+        }
+    }
+}
+
+// Emit a synthetic top-level function for every method visible on a class (own + inherited). For an
+// inherited method, the declaring ancestor's parsed body is adapted but emitted under the subclass name
+// (`$struct$Sub$method`), with `this` typed as the subclass; since fields keep their slot indices
+// through inheritance, the ancestor body's field accesses resolve correctly against the subclass layout.
+private func adaptClassMethods(classDecl: ParseClassDecl, classDeclsByName: HashMap<String, ParseClassDecl>,
+    file: File, funcNames: HashSet<String>, strReturningFuncs: HashSet<String>, enums: EnumRegistry,
+    structs: StructRegistry, structReturningFuncs: HashMap<String, String>,
+    floatReturningFuncs: HashSet<String>): Unit {
+    let className = classDecl.identifier.Val()
+    if (!structs.isClass(className)) {
+        return
+    }
+    for (mname in resolveClassMethodNames(className, structs)) {
+        // Find the nearest declaring class for this method (the subclass overrides ancestors).
+        match (findClassMethodDecl(className, mname, classDeclsByName, structs)) {
+            case Some(funcDecl) =>
+                // Emit under the SUBCLASS name so the call site `s.m()` (desugared with the static
+                // receiver class) resolves, while the body comes from the declaring class.
+                adaptOneStructMethod(className, mname, funcDecl, file, funcNames, strReturningFuncs,
+                    enums, structs, structReturningFuncs, floatReturningFuncs)
+            case None => ()
+        }
+    }
+}
+
+// Find the parsed FuncDecl for method `mname` on class `className`, walking up the parent chain to the
+// nearest ancestor that declares it. None if no ancestor declares it.
+private func findClassMethodDecl(className: String, mname: String,
+    classDeclsByName: HashMap<String, ParseClassDecl>, structs: StructRegistry): Option<ParseFuncDecl> {
+    var cur: Option<String> = Some(className)
+    while (let Some(c) <- cur) {
+        if (let Some(classDecl) <- classDeclsByName.get(c)) {
+            for (member in classDecl.bodyDecls) {
+                if (let Some(funcDecl) <- (member as ParseFuncDecl)) {
+                    if (funcDecl.identifier.Val() == mname) {
+                        return Some(funcDecl)
+                    }
+                }
+            }
+        }
+        cur = structs.parentOf(c)
+    }
+    return None
 }
 
 // Whether `structs` registered a struct named `name`.
@@ -407,9 +484,29 @@ private class StructInfo {
 
 private class StructRegistry {
     let structs = HashMap<String, StructInfo>()
+    // Names registered that are CLASSES (reference types), not structs. A class value is the heap
+    // buffer address carried as an Int64; copying the value copies the reference, so `let b = a`
+    // aliases the same object (mutation through one ref is visible through the other). This set
+    // distinguishes that reference semantics from struct value semantics.
+    let classNames = HashSet<String>()
+    // For a registered class, the name of its declared supertype (the `<: Parent`), if any. Used so a
+    // subclass method call `s.greet()` that has no own override resolves up the chain to the parent's
+    // desugared method function.
+    let classParent = HashMap<String, String>()
+    // For a registered class, the set of instance-method names it DECLARES itself (excluding `init`).
+    // An inherited method (declared by a parent but not overridden) is resolved by walking `classParent`.
+    let classOwnMethods = HashMap<String, HashSet<String>>()
 
     func isStruct(name: String): Bool {
         return structs.contains(name)
+    }
+
+    func isClass(name: String): Bool {
+        return classNames.contains(name)
+    }
+
+    func parentOf(name: String): Option<String> {
+        return classParent.get(name)
     }
 
     func infoOf(name: String): Option<StructInfo> {
@@ -436,7 +533,259 @@ private func collectStructRegistry(parsedFile: ParseFile): StructRegistry {
             }
         }
     }
+    // Classes reuse the same heap-buffer representation as structs (a value is the buffer address as an
+    // Int64), with REFERENCE semantics: copying the value copies the address, so aliasing is free. They
+    // are registered into the same StructInfo machinery (so field read/write/method-call/construction
+    // adapters work unchanged), tagged in `classNames`, and may inherit a parent's fields/init/methods.
+    collectClassRegistry(parsedFile, registry)
     return registry
+}
+
+// Collect class decls into the registry, resolving single inheritance. Each class is registered with a
+// flattened StructInfo: the parent's fields precede the subclass's own fields (so a parent field keeps
+// slot index, matching the parent's own layout for inherited-method bodies), and the init's stored
+// values combine the parent init's assignments (via `super()`) with the subclass's own assignments.
+private func collectClassRegistry(parsedFile: ParseFile, registry: StructRegistry): Unit {
+    // Index class decls by name so a subclass can look up its parent.
+    let classDecls = HashMap<String, ParseClassDecl>()
+    for (decl in parsedFile.decls) {
+        if (let Some(classDecl) <- (decl as ParseClassDecl)) {
+            let name = classDecl.identifier.Val()
+            if (!name.isEmpty()) {
+                classDecls[name] = classDecl
+            }
+        }
+    }
+    // Analyze in dependency order: a class is analyzed only after its parent (if registered). Iterate
+    // to a fixpoint so a subclass declared before its parent still resolves.
+    let done = HashSet<String>()
+    var progress = true
+    while (progress) {
+        progress = false
+        for ((name, classDecl) in classDecls) {
+            if (done.contains(name)) {
+                continue
+            }
+            let parent = classSuperName(classDecl, classDecls)
+            match (parent) {
+                case Some(p) =>
+                    // Defer until the parent is analyzed (or known-unsupported).
+                    if (classDecls.contains(p) && !done.contains(p)) {
+                        continue
+                    }
+                case None => ()
+            }
+            done.add(name)
+            progress = true
+            match (analyzeClass(classDecl, parent, registry)) {
+                case Some(info) =>
+                    registry.structs[name] = info
+                    registry.classNames.add(name)
+                    if (let Some(p) <- parent) {
+                        registry.classParent[name] = p
+                    }
+                    let own = HashSet<String>()
+                    for (member in classDecl.bodyDecls) {
+                        if (let Some(funcDecl) <- (member as ParseFuncDecl)) {
+                            let mname = funcDecl.identifier.Val()
+                            if (!mname.isEmpty() && mname != "init") {
+                                own.add(mname)
+                            }
+                        }
+                    }
+                    registry.classOwnMethods[name] = own
+                case None => ()
+            }
+        }
+    }
+}
+
+// The declared supertype name of a class (`class Sub <: Base`), restricted to a class declared in this
+// file. Interfaces / non-class supertypes are ignored (None) so only true class inheritance is modeled.
+private func classSuperName(classDecl: ParseClassDecl, classDecls: HashMap<String, ParseClassDecl>): Option<String> {
+    for (ty in classDecl.inheritedTypes) {
+        let tn = ty.ToString().trimAscii()
+        if (classDecls.contains(tn)) {
+            return Some(tn)
+        }
+    }
+    return None
+}
+
+// Analyze a class decl into a flattened StructInfo, or None if it is outside the supported shape.
+// Supported shape: Int64 fields; a single `init`; the init body is either `super()` followed by zero or
+// more `this.field = <expr>` assignments, or just assignments (no super). With a parent, the parent must
+// itself be registered as a supported class; the parent's fields/init-assigns are prepended.
+private func analyzeClass(classDecl: ParseClassDecl, parent: Option<String>,
+    registry: StructRegistry): Option<StructInfo> {
+    let info = StructInfo()
+    // Inherit the parent's fields (same slot order) and init assignments.
+    match (parent) {
+        case Some(p) =>
+            match (registry.infoOf(p)) {
+                case Some(pi) =>
+                    for (fn in pi.fieldNames) {
+                        info.fieldIndex[fn] = info.fieldNames.size
+                        info.fieldNames.add(fn)
+                    }
+                    for (a in pi.initAssigns) {
+                        info.initAssigns.add(a)
+                    }
+                case None => return None // parent not supported -> subclass not supported
+            }
+        case None => ()
+    }
+    var initDecl: Option<ParseFuncDecl> = None
+    for (member in classDecl.bodyDecls) {
+        if (let Some(varDecl) <- (member as ParseVarDecl)) {
+            let fieldName = varDecl.identifier.Val()
+            if (fieldName.isEmpty()) {
+                return None
+            }
+            let typeName = match (varDecl.typeNode) {
+                case Some(t) => t.ToString().trimAscii()
+                case None => return None
+            }
+            if (typeName != "Int64" && typeName != "Int") {
+                return None
+            }
+            if (info.fieldIndex.contains(fieldName)) {
+                return None // field shadows an inherited field -> out of grammar
+            }
+            info.fieldIndex[fieldName] = info.fieldNames.size
+            info.fieldNames.add(fieldName)
+            continue
+        }
+        if (let Some(funcDecl) <- (member as ParseFuncDecl)) {
+            if (funcDecl.identifier.Val() == "init") {
+                if (initDecl.isSome()) {
+                    return None
+                }
+                initDecl = Some(funcDecl)
+            }
+            continue
+        }
+        return None // PrimaryCtorDecl or other member -> out of grammar
+    }
+    // A class MAY have no fields (a method-only base like `class Base { func greet() ... }`); its value
+    // is then a 1-slot buffer (just the reserved dummy tag slot 0). This differs from structs, which
+    // require at least one field.
+    // The init: collect the subclass's own `this.field = rhs` assignments (and accept a leading
+    // `super()` whose effect is the parent's init assignments, already prepended above).
+    match (initDecl) {
+        case Some(i) =>
+            if (!collectClassInitInfo(i, info, parent.isSome())) {
+                return None
+            }
+        case None => ()  // No explicit init: the implicit no-arg constructor (no params, no assigns).
+    }
+    // Every declared field must be assigned exactly once across parent + own init.
+    if (info.initAssigns.size != info.fieldNames.size) {
+        return None
+    }
+    let seen = HashSet<String>()
+    for (a in info.initAssigns) {
+        if (!info.fieldIndex.contains(a.fieldName) || seen.contains(a.fieldName)) {
+            return None
+        }
+        seen.add(a.fieldName)
+    }
+    return Some(info)
+}
+
+// Populate `info.initParams` and append the class init's own `this.field = rhs` assignments. The body
+// may begin with a `super()` call (allowed only when `hasParent`); any other statement shape -> false.
+private func collectClassInitInfo(initDecl: ParseFuncDecl, info: StructInfo, hasParent: Bool): Bool {
+    let body = match (initDecl.funcBody) {
+        case Some(fb) => fb
+        case None => return false
+    }
+    for (paramList in body.paramLists) {
+        for (param in paramList.params) {
+            let pname = param.identifier.Val()
+            if (pname.isEmpty()) {
+                return false
+            }
+            info.initParams.add(pname)
+        }
+    }
+    let block = match (body.body) {
+        case Some(b) => b
+        case None => return false
+    }
+    var first = true
+    for (node in block.body) {
+        // A leading `super()` call: its effect (running the parent's init) is modeled by the parent's
+        // init assignments already prepended. Accept it only as the first statement and only with a
+        // parent. (Only zero-arg `super()` is supported for now.)
+        if (first && hasParent && isSuperCall(node)) {
+            first = false
+            continue
+        }
+        first = false
+        let assign = match (node as ParseAssignExpr) {
+            case Some(a) => a
+            case None => return false
+        }
+        if (assign.op.kind != TokenKind.ASSIGN) {
+            return false
+        }
+        let fieldName = match (thisFieldName(assign.leftExpr)) {
+            case Some(f) => f
+            case None => return false
+        }
+        let rhs = match (assign.rightExpr) {
+            case Some(e) => e
+            case None => return false
+        }
+        info.initAssigns.add(StructInitAssign(fieldName, rhs))
+    }
+    return true
+}
+
+// Register the desugared method names a class can resolve: its own methods plus every method inherited
+// from an ancestor (resolved by walking the parent chain), each under the class's own desugared name.
+// The corresponding synthetic function bodies are emitted by adaptClassMethods below.
+private func registerClassMethodNames(className: String, funcNames: HashSet<String>,
+    structs: StructRegistry): Unit {
+    for (mname in resolveClassMethodNames(className, structs)) {
+        funcNames.add(desugarStructMethodName(className, mname))
+    }
+}
+
+// The full set of instance-method names visible on a class: its own declared methods unioned with all
+// methods declared by ancestors (a subclass that declares a method overrides the ancestor's by name).
+private func resolveClassMethodNames(className: String, structs: StructRegistry): HashSet<String> {
+    let names = HashSet<String>()
+    var cur: Option<String> = Some(className)
+    while (let Some(c) <- cur) {
+        match (structs.classOwnMethods.get(c)) {
+            case Some(own) => for (m in own) { names.add(m) }
+            case None => ()
+        }
+        cur = structs.parentOf(c)
+    }
+    return names
+}
+
+// Whether a parsed node is a zero-argument `super()` call.
+private func isSuperCall(node: ParseNode): Bool {
+    let call = match (node as ParseCallExpr) {
+        case Some(c) => c
+        case None => return false
+    }
+    if (!call.args.isEmpty()) {
+        return false
+    }
+    let base = match (call.baseFunc) {
+        case Some(b) => b
+        case None => return false
+    }
+    let baseRef = match (base as ParseRefExpr) {
+        case Some(r) => r
+        case None => return false
+    }
+    return baseRef.identifier.Val() == "super"
 }
 
 // Analyze a struct decl into a StructInfo, or None if it is outside the supported shape. Collects the
@@ -680,16 +1029,23 @@ private func adaptOneStructMethod(structType: String, mname: String, parsedFunc:
             synthetic.funcBody.params.add(fp)
         }
     }
-    // Return type: a struct return is an Int64 (the struct ABI); otherwise infer from the parsed type.
-    let retName = match (body.retType) {
+    // Return type: a struct/class return is an Int64 (the buffer-address ABI); otherwise infer from the
+    // parsed type. A Unit-returning method (e.g. `func inc(): Unit`) is lowered as an Int64-returning
+    // function that returns a dummy 0 -- the call site discards the result (ExprStmt), and this avoids a
+    // Unit-typed Apply whose unused result would otherwise emit invalid IR.
+    var retName = match (body.retType) {
         case Some(rt) =>
             let tn = rt.ToString().trimAscii()
             if (structs.isStruct(tn)) { "Int64" } else { tn }
         case None => ""
     }
-    if (!retName.isEmpty()) {
-        synthetic.funcBody.retType = Some(PrimitiveType(retName))
+    if (retName.isEmpty() || retName == "Unit" || retName == "()") {
+        retName = "Int64"
+        // Falls through to a dummy `return 0` so the Int64-returning body is well-formed; any earlier
+        // explicit return short-circuits this (LowerStatements stops at the first terminating return).
+        statements.add(ChirStmtSpec.Return(ChirExprSpec.Literal(0)))
     }
+    synthetic.funcBody.retType = Some(PrimitiveType(retName))
     synthetic.funcBody.hasRealBody = true
     synthetic.funcBody.realStatements = statements
     file.decls.add(synthetic)
@@ -998,6 +1354,15 @@ private func adaptStatements(block: ParseBlock, scope: AdaptScope): Option<Array
             continue
         }
         if (let Some(callExpr) <- (node as ParseCallExpr)) {
+            // A bare `p.m(args)` instance-method call statement: the method runs for its side effects
+            // (e.g. a field write through `this`). Lower it by binding the call result to a fresh,
+            // collision-free discard local so the CALL is emitted and its result is dropped. This is the
+            // statement form for class/struct mutating methods like `c.inc()`.
+            if (let Some(callSpec) <- adaptStructMethodCall(callExpr, scope)) {
+                scope.needsRuntime = true
+                out.add(ChirStmtSpec.ExprStmt(callSpec))
+                continue
+            }
             // A bare `println(<expr>)` / `print(<expr>)` statement: lower to a runtime PRINT when its
             // argument is a supported Int64 expression. (Calls to user functions are expressions, not
             // statements, so only print built-ins reach here as statement-level calls.)
@@ -2869,6 +3234,19 @@ private func adaptStructConstruction(expr: ParseExpr, scope: AdaptScope): Option
 // `Point(...)` or a call to a struct-returning top-level function `mk(...)`. None otherwise. Used to
 // track `let p = <expr>` as a struct local so `p.x` / `p.m()` resolve.
 private func structTypeOfExpr(expr: ParseExpr, scope: AdaptScope): Option<String> {
+    // REFERENCE ALIASING: `let b = a` where `a` is a CLASS local. A class value is the heap buffer
+    // address (an Int64); copying it shares the object, so `b` is tracked as the same class type and a
+    // mutation through `b` is visible through `a`. This is done only for classes -- struct locals keep
+    // value semantics (a bare struct ref is not propagated as a struct local).
+    if (let Some(refExpr) <- (expr as ParseRefExpr)) {
+        let rn = refExpr.identifier.Val()
+        if (let Some(t) <- scope.structTypeOf(rn)) {
+            if (scope.structs.isClass(t)) {
+                return Some(t)
+            }
+        }
+        return None
+    }
     let call = match (expr as ParseCallExpr) {
         case Some(c) => c
         case None => return None

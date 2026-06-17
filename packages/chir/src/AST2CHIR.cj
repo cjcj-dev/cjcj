@@ -287,6 +287,10 @@ let AST2CHIR_STMT_ARRAY_FOR: Int64 = 12
 // inttoptr + GEP + Store machinery as the enum heap buffer. Used for mutable struct field writes
 // (`p.x = expr`).
 let AST2CHIR_STMT_STRUCT_SET_FIELD: Int64 = 13
+// EXPR: an expression statement evaluated for its side effects, discarding the result. Used for a bare
+// method-call statement (e.g. `c.inc()`) where the method mutates through `this` and may return Unit;
+// the CALL is emitted in the current block and its result (if any) is simply not bound to a slot.
+let AST2CHIR_STMT_EXPR: Int64 = 14
 
 public class AST2CHIRStmtSpec {
     public let kind: Int64
@@ -328,6 +332,12 @@ public class AST2CHIRStmtSpec {
     public func IsArrayAssign(): Bool { return kind == AST2CHIR_STMT_ARRAY_ASSIGN }
     public func IsArrayFor(): Bool { return kind == AST2CHIR_STMT_ARRAY_FOR }
     public func IsStructSetField(): Bool { return kind == AST2CHIR_STMT_STRUCT_SET_FIELD }
+    public func IsExprStmt(): Bool { return kind == AST2CHIR_STMT_EXPR }
+
+    public static func ExprStmt(expr: AST2CHIRExprSpec): AST2CHIRStmtSpec {
+        return AST2CHIRStmtSpec(AST2CHIR_STMT_EXPR, "", false, Some(expr), None,
+            ArrayList<AST2CHIRStmtSpec>(), ArrayList<AST2CHIRStmtSpec>())
+    }
 
     public static func Let(name: String, expr: AST2CHIRExprSpec, isVar!: Bool = false): AST2CHIRStmtSpec {
         return AST2CHIRStmtSpec(AST2CHIR_STMT_LET, name, isVar, Some(expr), None,

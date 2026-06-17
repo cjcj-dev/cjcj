@@ -162,6 +162,12 @@ extend AST2CHIRDeclTranslator {
             LowerStructSetField(fn, stmt, state)
             return
         }
+        if (stmt.IsExprStmt()) {
+            // An expression statement: evaluate for side effects, discard the result. Used for a bare
+            // method-call statement (e.g. `c.inc()`) that mutates through `this` and returns Unit.
+            EvalExpr(stmt.expr, state)
+            return
+        }
         if (stmt.IsPrint()) {
             LowerPrint(fn, stmt, state)
             return

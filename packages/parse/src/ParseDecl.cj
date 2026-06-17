@@ -771,7 +771,9 @@ extend ParserImpl {
             ret.generic = generic
             ret.EnableAttr(Attribute.GENERIC)
         }
-        if (Skip(TokenKind.COLON)) {
+        // The supertype clause is introduced by `<:` (the subtype operator, lexed as UPPERBOUND), e.g.
+        // `class Sub <: Base & I`. (A bare `:` is accepted too for leniency.)
+        if (Skip(TokenKind.UPPERBOUND) || Skip(TokenKind.COLON)) {
             ret.inheritedTypes.add(ParseType())
             while (Skip(TokenKind.BITAND)) {
                 ret.inheritedTypes.add(ParseType())

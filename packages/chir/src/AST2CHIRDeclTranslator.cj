@@ -175,7 +175,9 @@ public class AST2CHIRDeclTranslator {
 
     public func EnsureReturnSlot(fn: Function, entry: Block): Unit {
         if (let Some(returnTy) <- fn.GetReturnType()) {
-            if (!returnTy.IsVoid()) {
+            // A Unit/Nothing return is value-less (like void): no return slot is allocated, so a
+            // Unit-returning real body (e.g. a class `func inc(): Unit`) simply Exits with None.
+            if (!IsVoidLikeReturn(returnTy)) {
                 let retRefTy = builder.context.GetRefTy(returnTy)
                 let allocate = builder.CreateExpression(ExprKind.ALLOCATE, Some(retRefTy),
                     ArrayList<Value>(), entry)
