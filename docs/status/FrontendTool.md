@@ -37,6 +37,10 @@ Current status:
   package summaries, mirroring the C++ sibling-package export-id stabilization within the current frontend AST model.
 - FrontendTool-local CJO summaries include nested declaration identities and mangled names so saved package output
   preserves the public declaration surface exposed by the current self-host frontend AST.
+- FrontendTool-local CJO summaries now retain their existing path-list and declaration-tree fields while adding detailed
+  file summaries with file hashes, package specs, imports, exported-internal declarations, source ranges, annotations,
+  generic parameters/constraints, and generic-instantiated declarations. This keeps the compatibility summary
+  backward-readable while preserving more of the source package surface that the C++ binary AST serializer records.
 - `NeedCreateIncrementalCompilerInstance` also exposes an overload for the richer `option.GlobalOptions` model with
   the same mock, coverage, CHIR-output, and common-part-CJO guards and incremental logger side effects as the C++
   helper; the current frontend-options overload now uses the same available common-part-CJO guard instead of adding
