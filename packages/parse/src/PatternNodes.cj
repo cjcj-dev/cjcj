@@ -55,6 +55,8 @@ public class TuplePattern <: Pattern {
     public let commaPosVector: ArrayList<Position> = ArrayList<Position>()
     public var leftParenPos: Position = INVALID_POSITION
     public var rightParenPos: Position = INVALID_POSITION
+    public var leftBracePos: Position = INVALID_POSITION
+    public var rightBracePos: Position = INVALID_POSITION
 
     public init() { super(ASTKind.TUPLE_PATTERN) }
 

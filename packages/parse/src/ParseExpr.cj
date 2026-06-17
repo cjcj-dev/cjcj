@@ -8,8 +8,28 @@ extend ParserImpl {
     }
 
     public func ParseExpr(ek: ExprKind): Expr {
+        if (ExprKindEquals(ek, ExprKind.UNKNOWN_EXPR) && Seeing(TokenKind.LET)) {
+            return ParseLetPattern(ek)
+        }
         let left = ParseUnaryExpr(ek)
-        return ParseExprRhs(0, left, ek)
+        let ret = ParseExprRhs(0, left, ek)
+        if (ExprKindEquals(ek, ExprKind.VAR_INIT) && IsAssignmentExpressionRoot(ret)) {
+            diag.DiagnoseRefactor(
+                DiagKindRefactor.PARSE_ERROR,
+                ret.begin,
+                "assignment expression cannot be used as a variable initializer")
+            ret.isBroken = true
+        }
+        if (!SeeingExprOperator() && !ExprKindEquals(ek, ExprKind.EXPR_IN_TUPLE) &&
+            !ExprKindEquals(ek, ExprKind.EXPR_IN_IF_COND_TUPLE) &&
+            !ExprKindEquals(ek, ExprKind.EXPR_IN_WHILE_COND_TUPLE)) {
+            CheckWildcardInExpr(ret)
+        }
+        if (SeeingFakeOperator()) {
+            DiagExpectedOperatorOrEnd()
+            ConsumeUntilAny([TokenKind.NL])
+        }
+        return ret
     }
 
     public func ParseUnaryExpr(): Expr {
@@ -17,15 +37,42 @@ extend ParserImpl {
     }
 
     public func ParseUnaryExpr(ek: ExprKind): Expr {
+        if (Seeing([TokenKind.SUB, TokenKind.NL], skipNewline: false) ||
+            Seeing([TokenKind.NOT, TokenKind.NL], skipNewline: false)) {
+            diag.DiagnoseRefactor(DiagKindRefactor.EXPECTED_TOKEN, Peek().Begin(), "expected expression without newline after unary operator")
+            return InvalidExpr(Peek().Begin())
+        }
         if (Seeing(TokenKind.NOT) || Seeing(TokenKind.ADD) || Seeing(TokenKind.SUB) || Seeing(TokenKind.BITNOT)) {
             let op = Peek()
             Next()
             let unary = UnaryExpr(op)
-            unary.expr = ParseUnaryExpr(ek)
+            let child = ParseUnaryExpr(RemoveParsingIfCondExpr(ek))
+            if (op.kind == TokenKind.SUB) {
+                if (let Some(lit) <- (child as LitConstExpr)) {
+                    if ((lit.kind == LitConstKind.INTEGER || lit.kind == LitConstKind.FLOAT) &&
+                        !lit.stringValue.isEmpty() && lit.stringValue[0] != b'-') {
+                        lit.stringValue = "-" + lit.stringValue
+                        lit.rawString = lit.stringValue
+                        lit.begin = op.Begin()
+                        return lit
+                    }
+                }
+            }
+            unary.expr = child
             if (let Some(child) <- unary.expr) { unary.end = child.end }
             return unary
         }
         return ParseBaseExpr(ParseAtom(ek), ek)
+    }
+
+    public func RemoveParsingIfCondExpr(ek: ExprKind): ExprKind {
+        if (ExprKindEquals(ek, ExprKind.EXPR_IN_IF_COND_TUPLE) ||
+            ExprKindEquals(ek, ExprKind.EXPR_IN_WHILE_COND_TUPLE) ||
+            ExprKindEquals(ek, ExprKind.IF_COND_EXPR) ||
+            ExprKindEquals(ek, ExprKind.WHILE_COND_EXPR)) {
+            return ExprKind.ALL
+        }
+        return ek
     }
 
     public func ParseBaseExpr(expr: Expr): Expr {
@@ -88,7 +135,7 @@ extend ParserImpl {
                 base = sub
                 continue
             }
-            if (Seeing(TokenKind.INCR) || Seeing(TokenKind.DECR)) {
+            if ((Seeing(TokenKind.INCR) || Seeing(TokenKind.DECR)) && !newlineSkipped) {
                 let op = Peek()
                 Next()
                 let incOrDec = IncOrDecExpr()
@@ -140,6 +187,10 @@ extend ParserImpl {
     }
 
     public func ParseExprRhs(minPrec: UInt8, left: Expr, ek: ExprKind): Expr {
+        return ParseExprRhsWithPre(minPrec, left, ek, Token(TokenKind.SENTINEL))
+    }
+
+    private func ParseExprRhsWithPre(minPrec: UInt8, left: Expr, ek: ExprKind, preOp: Token): Expr {
         var lhs = left
         while (true) {
             var op = Peek()
@@ -151,6 +202,19 @@ extend ParserImpl {
             let prec = Precedence(op.kind)
             if (prec < minPrec || prec == INVALID_PRECEDENCE) {
                 return lhs
+            }
+            if (ExprKindEquals(ek, ExprKind.LET_PATTERN) && prec < Precedence(TokenKind.RANGEOP)) {
+                return lhs
+            }
+            if (IsConditionExprKind(ek) && lhs.astKind == ASTKind.LET_PATTERN_DESTRUCTOR &&
+                prec < Precedence(TokenKind.RANGEOP) && op.kind != TokenKind.AND && op.kind != TokenKind.OR) {
+                return lhs
+            }
+            if (IsAssignment(op.kind)) {
+                CheckLeftExpression(lhs, op)
+            }
+            if (!CheckMacroExprRules(preOp, op, lhs)) {
+                lhs.isBroken = true
             }
             if (combinedOperator) {
                 SkipAmbiguousToken()
@@ -177,13 +241,19 @@ extend ParserImpl {
                 continue
             }
             var rhs = ParseUnaryExpr(ek)
-            var nextKind = Peek().kind
+            var nextOp = Peek()
             if (let Some(nextCombined) <- LookupSeenCombinator()) {
-                nextKind = nextCombined.kind
+                nextOp = nextCombined
             }
-            let nextPrec = Precedence(nextKind)
+            let nextPrec = Precedence(nextOp.kind)
             if (prec < nextPrec) {
-                rhs = ParseExprRhs(prec + 1, rhs, ek)
+                rhs = ParseExprRhsWithPre(prec + 1, rhs, ek, op)
+            } else if (prec == nextPrec && IsNoneAssociative(nextOp.kind) && !rhs.isBroken) {
+                DiagNoneAssociativeOp(op, nextOp)
+                rhs.isBroken = true
+            }
+            if (!CheckMacroExprRules(op, Token(TokenKind.DOT), rhs)) {
+                rhs.isBroken = true
             }
             let node = MakeBinaryExpr(lhs, op, rhs)
             lhs = node
@@ -203,12 +273,84 @@ extend ParserImpl {
         expr.rightExpr = right
         expr.begin = left.begin
         expr.end = right.end
+        if (IsAssignment(op.kind)) {
+            if (op.kind == TokenKind.ASSIGN) {
+                CheckWildcardInExpr(right)
+            }
+            expr.isBroken = left.isBroken || right.isBroken
+            expr.hasQuestSuffix = left.hasQuestSuffix
+            if (expr.hasQuestSuffix) {
+                let chain = OptionalChainExpr()
+                chain.expr = expr
+                chain.begin = expr.begin
+                chain.end = expr.end
+                chain.hasQuestSuffix = true
+                return chain
+            }
+        } else {
+            expr.isBroken = left.isBroken || right.isBroken
+        }
         return expr
     }
 
     public func Precedence(kind: TokenKind): UInt8 {
         if (IsAssignment(kind)) { return 1u8 }
         return TokenPrecedence(kind)
+    }
+
+    public func SeeingExprOperator(): Bool {
+        let token = Peek()
+        if (newlineSkipped && (token.kind == TokenKind.SUB || token.kind == TokenKind.QUEST)) {
+            return false
+        }
+        if (let Some(_) <- LookupSeenCombinator()) {
+            return true
+        }
+        return Precedence(token.kind) != INVALID_PRECEDENCE
+    }
+
+    private func SeeingFakeOperator(): Bool {
+        return Seeing(TokenKind.COLON)
+    }
+
+    private func DiagExpectedOperatorOrEnd(): Unit {
+        diag.DiagnoseRefactor(
+            DiagKindRefactor.PARSE_ERROR,
+            Peek().Begin(),
+            "expected operator or end of expression, found '${Peek().Value()}'")
+    }
+
+    private func CheckMacroExprRules(preT: Token, tok: Token, expr: Expr): Bool {
+        if (let Some(macroExpr) <- (expr as MacroExpandExpr)) {
+            if (!MacroInvocationHasExpandedDecl(macroExpr.invocation)) {
+                return true
+            }
+            if (!preT.Begin().IsZero() && !expr.isBroken) {
+                diag.DiagnoseRefactor(
+                    DiagKindRefactor.PARSE_ERROR,
+                    expr.begin,
+                    "macro expansion after '${preT.Value()}' must produce an expression")
+                return false
+            }
+            if (!expr.isBroken) {
+                diag.DiagnoseRefactor(
+                    DiagKindRefactor.PARSE_ERROR,
+                    tok.Begin(),
+                    "unrecognized token '${tok.Value()}' after macro expansion")
+            }
+            return false
+        }
+        return true
+    }
+
+    private func MacroInvocationHasExpandedDecl(invocation: MacroInvocation): Bool {
+        if (let Some(decl) <- invocation.decl) {
+            if (let Some(macroDecl) <- (decl as MacroExpandDecl)) {
+                return MacroInvocationHasExpandedDecl(macroDecl.invocation)
+            }
+            return true
+        }
+        return false
     }
 
     public func IsAssignment(kind: TokenKind): Bool {
@@ -219,10 +361,177 @@ extend ParserImpl {
             kind == TokenKind.LSHIFT_ASSIGN || kind == TokenKind.RSHIFT_ASSIGN
     }
 
+    private func IsNoneAssociative(kind: TokenKind): Bool {
+        if (let Some(_) <- NoneAssociativeName(kind)) {
+            return true
+        }
+        return false
+    }
+
+    private func NoneAssociativeName(kind: TokenKind): Option<String> {
+        if (IsAssignment(kind)) {
+            return "assignment"
+        }
+        let prec = Precedence(kind)
+        if (prec == Precedence(TokenKind.RANGEOP)) {
+            return "range"
+        }
+        if (prec == Precedence(TokenKind.EQUAL)) {
+            return "equality"
+        }
+        if (prec == Precedence(TokenKind.LT)) {
+            return "comparison"
+        }
+        return None
+    }
+
+    private func DiagNoneAssociativeOp(preT: Token, tok: Token): Unit {
+        if (let Some(name) <- NoneAssociativeName(tok.kind)) {
+            diag.DiagnoseRefactor(
+                DiagKindRefactor.PARSE_ERROR,
+                tok.Begin(),
+                "chained ${name} operators are not associative after '${preT.Value()}'")
+        }
+    }
+
+    private func CheckLeftExpression(base: Expr, tok: Token): Unit {
+        if (!IsLeftValueExpression(base, tok) && !base.isBroken) {
+            DiagInvalidLeftHandExpr(base, tok)
+            base.isBroken = true
+        }
+        if (base.astKind == ASTKind.TUPLE_LIT && tok.kind != TokenKind.ASSIGN) {
+            diag.DiagnoseRefactor(
+                DiagKindRefactor.PARSE_ERROR,
+                tok.Begin(),
+                "tuple literal cannot be used with operator '${tok.Value()}'")
+        }
+    }
+
+    private func CheckWildcardInExpr(root: Expr): Unit {
+        CheckWildcardInExprNode(root)
+    }
+
+    private func CheckWildcardInExprNode(node: Node): Unit {
+        if (node.astKind == ASTKind.MATCH_CASE_OTHER) {
+            return
+        }
+        if (let Some(assign) <- (node as AssignExpr)) {
+            if (assign.op.kind == TokenKind.ASSIGN) {
+                return
+            }
+        }
+        if (node.astKind == ASTKind.WILDCARD_EXPR) {
+            if (node.begin.line == Peek().Begin().line && Peek().Begin().line == lastToken.Begin().line &&
+                Peek().kind != TokenKind.SENTINEL) {
+                ConsumeUntilAny(
+                    [TokenKind.NL, TokenKind.RPAREN, TokenKind.COMMA, TokenKind.RCURL],
+                    targetTokenConsumed: false)
+            }
+            diag.DiagnoseRefactor(
+                DiagKindRefactor.PARSE_ERROR,
+                node.begin,
+                "expected expression, found wildcard")
+            node.isBroken = true
+            return
+        }
+        for (child in node.Children()) {
+            CheckWildcardInExprNode(child)
+        }
+    }
+
+    private func IsAssignmentExpressionRoot(expr: Expr): Bool {
+        if (expr.astKind == ASTKind.ASSIGN_EXPR) {
+            return true
+        }
+        if (expr.astKind == ASTKind.OPTIONAL_CHAIN_EXPR) {
+            if (let Some(chain) <- (expr as OptionalChainExpr)) {
+                if (let Some(child) <- chain.expr) {
+                    return IsAssignmentExpressionRoot(child)
+                }
+            }
+        }
+        return false
+    }
+
+    private func DiagInvalidLeftHandExpr(expr: Expr, tok: Token): Unit {
+        diag.DiagnoseRefactor(
+            DiagKindRefactor.PARSE_ERROR,
+            expr.begin,
+            "invalid left-hand side of assignment before '${tok.Value()}'")
+    }
+
+    private func IsLeftValueExpression(expr: Expr, tok: Token): Bool {
+        if (expr.astKind == ASTKind.REF_EXPR || expr.astKind == ASTKind.WILDCARD_EXPR ||
+            expr.astKind == ASTKind.OPTIONAL_CHAIN_EXPR) {
+            return true
+        }
+        if (expr.astKind == ASTKind.TUPLE_LIT) {
+            if (let Some(tuple) <- (expr as TupleLit)) {
+                for (child in tuple.children) {
+                    if (!IsLeftValueExpression(child, tok) && !child.isBroken) {
+                        DiagInvalidLeftHandExpr(child, tok)
+                    }
+                }
+            }
+            return true
+        }
+        if (expr.astKind == ASTKind.MEMBER_ACCESS) {
+            if (let Some(member) <- (expr as MemberAccess)) {
+                return IsLeftAuxExpressionOption(member.baseExpr, tok)
+            }
+            return false
+        }
+        if (expr.astKind == ASTKind.SUBSCRIPT_EXPR) {
+            if (let Some(subscript) <- (expr as SubscriptExpr)) {
+                return IsLeftAuxExpressionOption(subscript.baseExpr, tok)
+            }
+            return false
+        }
+        return false
+    }
+
+    private func IsLeftAuxExpressionOption(expr: Option<Expr>, tok: Token): Bool {
+        if (let Some(base) <- expr) {
+            return IsLeftAuxExpression(base, tok)
+        }
+        return false
+    }
+
+    private func IsLeftAuxExpression(expr: Expr, tok: Token): Bool {
+        if (expr.astKind == ASTKind.REF_EXPR || expr.astKind == ASTKind.PRIMITIVE_TYPE_EXPR) {
+            return true
+        }
+        if (expr.astKind == ASTKind.OPTIONAL_EXPR) {
+            if (let Some(optional) <- (expr as OptionalExpr)) {
+                return IsLeftAuxExpressionOption(optional.baseExpr, tok)
+            }
+            return false
+        }
+        if (expr.astKind == ASTKind.MEMBER_ACCESS) {
+            if (let Some(member) <- (expr as MemberAccess)) {
+                return IsLeftAuxExpressionOption(member.baseExpr, tok)
+            }
+            return false
+        }
+        if (expr.astKind == ASTKind.CALL_EXPR) {
+            if (let Some(call) <- (expr as CallExpr)) {
+                return IsLeftAuxExpressionOption(call.baseFunc, tok)
+            }
+            return false
+        }
+        if (expr.astKind == ASTKind.SUBSCRIPT_EXPR) {
+            if (let Some(subscript) <- (expr as SubscriptExpr)) {
+                return IsLeftAuxExpressionOption(subscript.baseExpr, tok)
+            }
+            return false
+        }
+        return false
+    }
+
     public func ParseLetPattern(ek: ExprKind): LetPatternDestructor {
         let ret = LetPatternDestructor()
         let letToken = Expect(TokenKind.LET, "expected 'let'")
-        let conditionName = if (ek == ExprKind.WHILE_COND_EXPR) { "while-let" } else { "if-let" }
+        let conditionName = if (ExprKindEquals(ek, ExprKind.WHILE_COND_EXPR)) { "while-let" } else { "if-let" }
         ret.begin = letToken.Begin()
         ret.patterns.add(ParsePattern())
         while (Skip(TokenKind.BITOR)) {

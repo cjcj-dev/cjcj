@@ -13,34 +13,6 @@ public enum ScopeKind {
     | PRIMARY_CONSTRUCTOR_FUNC_PARAM | MAIN_BODY | UNKNOWN_SCOPE
 }
 
-private func ScopeKindIndex(kind: ScopeKind): Int64 {
-    return match (kind) {
-        case ScopeKind.TOPLEVEL => 0
-        case ScopeKind.CLASS_BODY => 1
-        case ScopeKind.INTERFACE_BODY => 2
-        case ScopeKind.STRUCT_BODY => 3
-        case ScopeKind.EXTEND_BODY => 4
-        case ScopeKind.FUNC_BODY => 5
-        case ScopeKind.MACRO_BODY => 6
-        case ScopeKind.PRIMARY_CONSTRUCTOR_BODY_FOR_CLASS => 7
-        case ScopeKind.PRIMARY_CONSTRUCTOR_BODY_FOR_STRUCT => 8
-        case ScopeKind.PROP_MEMBER_SETTER_BODY => 9
-        case ScopeKind.PROP_MEMBER_GETTER_BODY => 10
-        case ScopeKind.ENUM_BODY => 11
-        case ScopeKind.ENUM_CONSTRUCTOR => 12
-        case ScopeKind.PRIMARY_CONSTRUCTOR_FUNC_PARAM => 13
-        case ScopeKind.MAIN_BODY => 14
-        case ScopeKind.UNKNOWN_SCOPE => 15
-    }
-}
-
-extend ScopeKind <: Equatable<ScopeKind> {
-    public operator func ==(right: ScopeKind): Bool {
-        return ScopeKindIndex(this) == ScopeKindIndex(right)
-    }
-    public operator func !=(right: ScopeKind): Bool { return !(this == right) }
-}
-
 public enum DefKind {
     | FUNC | MAIN | MACRO | CLASS | INTERFACE | VARIABLE | ENUM | STRUCT | EXTEND | TYPE
     | CONSTRUCTOR | PRIMARY_CONSTRUCTOR | PROPERTY | FINALIZER | PACKAGE
@@ -71,6 +43,38 @@ extend DefKind <: Equatable<DefKind> {
     public operator func !=(right: DefKind): Bool { return !(this == right) }
 }
 
+private func ScopeKindIndex(kind: ScopeKind): Int64 {
+    return match (kind) {
+        case ScopeKind.TOPLEVEL => 0
+        case ScopeKind.CLASS_BODY => 1
+        case ScopeKind.INTERFACE_BODY => 2
+        case ScopeKind.STRUCT_BODY => 3
+        case ScopeKind.EXTEND_BODY => 4
+        case ScopeKind.FUNC_BODY => 5
+        case ScopeKind.MACRO_BODY => 6
+        case ScopeKind.PRIMARY_CONSTRUCTOR_BODY_FOR_CLASS => 7
+        case ScopeKind.PRIMARY_CONSTRUCTOR_BODY_FOR_STRUCT => 8
+        case ScopeKind.PROP_MEMBER_SETTER_BODY => 9
+        case ScopeKind.PROP_MEMBER_GETTER_BODY => 10
+        case ScopeKind.ENUM_BODY => 11
+        case ScopeKind.ENUM_CONSTRUCTOR => 12
+        case ScopeKind.PRIMARY_CONSTRUCTOR_FUNC_PARAM => 13
+        case ScopeKind.MAIN_BODY => 14
+        case ScopeKind.UNKNOWN_SCOPE => 15
+    }
+}
+
+public func ScopeKindEquals(left: ScopeKind, right: ScopeKind): Bool {
+    return ScopeKindIndex(left) == ScopeKindIndex(right)
+}
+
+extend ScopeKind <: Equatable<ScopeKind> {
+    public operator func ==(right: ScopeKind): Bool {
+        return ScopeKindEquals(this, right)
+    }
+    public operator func !=(right: ScopeKind): Bool { return !(this == right) }
+}
+
 public enum ExprKind {
     | ALL | VAR_INIT | INDEX_EXPR | IF_COND_EXPR | WHILE_COND_EXPR | LET_PATTERN | LEFT_EXPR
     | EXPR_IN_TUPLE | EXPR_IN_IF_COND_TUPLE | EXPR_IN_WHILE_COND_TUPLE | EXPR_IN_ARRAY
@@ -96,8 +100,12 @@ private func ExprKindIndex(kind: ExprKind): Int64 {
     }
 }
 
+public func ExprKindEquals(left: ExprKind, right: ExprKind): Bool {
+    return ExprKindIndex(left) == ExprKindIndex(right)
+}
+
 extend ExprKind <: Equatable<ExprKind> {
-    public operator func ==(right: ExprKind): Bool { return ExprKindIndex(this) == ExprKindIndex(right) }
+    public operator func ==(right: ExprKind): Bool { return ExprKindEquals(this, right) }
     public operator func !=(right: ExprKind): Bool { return !(this == right) }
 }
 

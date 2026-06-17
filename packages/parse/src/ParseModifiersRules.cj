@@ -379,83 +379,85 @@ private func AggregateBodyInitRule(modifier: TokenKind): Option<Array<TokenKind>
 }
 
 private func EmptyScopeRule(defKind: DefKind, scopeKind: ScopeKind): Bool {
-    return (defKind == DefKind.EXTEND && scopeKind == ScopeKind.TOPLEVEL) ||
-        (defKind == DefKind.FINALIZER && scopeKind == ScopeKind.CLASS_BODY)
+    return (defKind == DefKind.EXTEND && ScopeKindEquals(scopeKind, ScopeKind.TOPLEVEL)) ||
+        (defKind == DefKind.FINALIZER && ScopeKindEquals(scopeKind, ScopeKind.CLASS_BODY))
 }
 
 private func FindRule(defKind: DefKind, scopeKind: ScopeKind, modifier: TokenKind): Option<Array<TokenKind>> {
     if (defKind == DefKind.FUNC) {
-        if (scopeKind == ScopeKind.TOPLEVEL) { return TopLevelFuncRule(modifier) }
-        if (scopeKind == ScopeKind.CLASS_BODY) { return ClassBodyFuncRule(modifier) }
-        if (scopeKind == ScopeKind.INTERFACE_BODY) { return InterfaceBodyFuncRule(modifier) }
-        if (scopeKind == ScopeKind.STRUCT_BODY) { return StructBodyFuncRule(modifier) }
-        if (scopeKind == ScopeKind.EXTEND_BODY) { return ExtendBodyFuncRule(modifier) }
-        if (scopeKind == ScopeKind.FUNC_BODY) { return FuncBodyFuncRule(modifier) }
-        if (scopeKind == ScopeKind.ENUM_BODY) { return EnumBodyFuncRule(modifier) }
+        if (ScopeKindEquals(scopeKind, ScopeKind.TOPLEVEL)) { return TopLevelFuncRule(modifier) }
+        if (ScopeKindEquals(scopeKind, ScopeKind.CLASS_BODY)) { return ClassBodyFuncRule(modifier) }
+        if (ScopeKindEquals(scopeKind, ScopeKind.INTERFACE_BODY)) { return InterfaceBodyFuncRule(modifier) }
+        if (ScopeKindEquals(scopeKind, ScopeKind.STRUCT_BODY)) { return StructBodyFuncRule(modifier) }
+        if (ScopeKindEquals(scopeKind, ScopeKind.EXTEND_BODY)) { return ExtendBodyFuncRule(modifier) }
+        if (ScopeKindEquals(scopeKind, ScopeKind.FUNC_BODY)) { return FuncBodyFuncRule(modifier) }
+        if (ScopeKindEquals(scopeKind, ScopeKind.ENUM_BODY)) { return EnumBodyFuncRule(modifier) }
         return None
     }
     if (defKind == DefKind.MAIN) {
-        if (scopeKind == ScopeKind.TOPLEVEL) { return TopLevelMainRule(modifier) }
+        if (ScopeKindEquals(scopeKind, ScopeKind.TOPLEVEL)) { return TopLevelMainRule(modifier) }
         return None
     }
     if (defKind == DefKind.MACRO) {
-        if (scopeKind == ScopeKind.TOPLEVEL) { return TopLevelMacroRule(modifier) }
+        if (ScopeKindEquals(scopeKind, ScopeKind.TOPLEVEL)) { return TopLevelMacroRule(modifier) }
         return None
     }
     if (defKind == DefKind.CLASS) {
-        if (scopeKind == ScopeKind.TOPLEVEL) { return TopLevelClassRule(modifier) }
+        if (ScopeKindEquals(scopeKind, ScopeKind.TOPLEVEL)) { return TopLevelClassRule(modifier) }
         return None
     }
     if (defKind == DefKind.INTERFACE) {
-        if (scopeKind == ScopeKind.TOPLEVEL) { return TopLevelInterfaceRule(modifier) }
+        if (ScopeKindEquals(scopeKind, ScopeKind.TOPLEVEL)) { return TopLevelInterfaceRule(modifier) }
         return None
     }
     if (defKind == DefKind.VARIABLE) {
-        if (scopeKind == ScopeKind.TOPLEVEL) { return TopLevelVariableRule(modifier) }
-        if (scopeKind == ScopeKind.CLASS_BODY || scopeKind == ScopeKind.STRUCT_BODY) {
+        if (ScopeKindEquals(scopeKind, ScopeKind.TOPLEVEL)) { return TopLevelVariableRule(modifier) }
+        if (ScopeKindEquals(scopeKind, ScopeKind.CLASS_BODY) || ScopeKindEquals(scopeKind, ScopeKind.STRUCT_BODY)) {
             return ClassStructBodyVarRule(modifier)
         }
-        if (scopeKind == ScopeKind.FUNC_BODY || scopeKind == ScopeKind.MACRO_BODY) { return FuncBodyVarRule(modifier) }
-        if (scopeKind == ScopeKind.PRIMARY_CONSTRUCTOR_BODY_FOR_CLASS ||
-            scopeKind == ScopeKind.PRIMARY_CONSTRUCTOR_BODY_FOR_STRUCT) {
+        if (ScopeKindEquals(scopeKind, ScopeKind.FUNC_BODY) || ScopeKindEquals(scopeKind, ScopeKind.MACRO_BODY)) {
+            return FuncBodyVarRule(modifier)
+        }
+        if (ScopeKindEquals(scopeKind, ScopeKind.PRIMARY_CONSTRUCTOR_BODY_FOR_CLASS) ||
+            ScopeKindEquals(scopeKind, ScopeKind.PRIMARY_CONSTRUCTOR_BODY_FOR_STRUCT)) {
             return AggregateBodyInstanceInitRule(modifier)
         }
         return None
     }
     if (defKind == DefKind.ENUM) {
-        if (scopeKind == ScopeKind.TOPLEVEL) { return TopLevelEnumStructRule(modifier) }
+        if (ScopeKindEquals(scopeKind, ScopeKind.TOPLEVEL)) { return TopLevelEnumStructRule(modifier) }
         return None
     }
     if (defKind == DefKind.STRUCT) {
-        if (scopeKind == ScopeKind.TOPLEVEL) { return TopLevelEnumStructRule(modifier) }
+        if (ScopeKindEquals(scopeKind, ScopeKind.TOPLEVEL)) { return TopLevelEnumStructRule(modifier) }
         return None
     }
     if (defKind == DefKind.TYPE) {
-        if (scopeKind == ScopeKind.TOPLEVEL) { return TopLevelCommonRule(modifier) }
+        if (ScopeKindEquals(scopeKind, ScopeKind.TOPLEVEL)) { return TopLevelCommonRule(modifier) }
         return None
     }
     if (defKind == DefKind.CONSTRUCTOR) {
-        if (scopeKind == ScopeKind.CLASS_BODY || scopeKind == ScopeKind.STRUCT_BODY) {
+        if (ScopeKindEquals(scopeKind, ScopeKind.CLASS_BODY) || ScopeKindEquals(scopeKind, ScopeKind.STRUCT_BODY)) {
             return AggregateBodyInitRule(modifier)
         }
         return None
     }
     if (defKind == DefKind.PRIMARY_CONSTRUCTOR) {
-        if (scopeKind == ScopeKind.CLASS_BODY || scopeKind == ScopeKind.STRUCT_BODY) {
+        if (ScopeKindEquals(scopeKind, ScopeKind.CLASS_BODY) || ScopeKindEquals(scopeKind, ScopeKind.STRUCT_BODY)) {
             return AggregateBodyInstanceInitRule(modifier)
         }
         return None
     }
     if (defKind == DefKind.PROPERTY) {
-        if (scopeKind == ScopeKind.CLASS_BODY) { return ClassBodyPropRule(modifier) }
-        if (scopeKind == ScopeKind.INTERFACE_BODY) { return InterfaceBodyPropRule(modifier) }
-        if (scopeKind == ScopeKind.STRUCT_BODY) { return StructBodyPropRule(modifier) }
-        if (scopeKind == ScopeKind.EXTEND_BODY) { return ExtendBodyPropRule(modifier) }
-        if (scopeKind == ScopeKind.ENUM_BODY) { return EnumBodyPropRule(modifier) }
+        if (ScopeKindEquals(scopeKind, ScopeKind.CLASS_BODY)) { return ClassBodyPropRule(modifier) }
+        if (ScopeKindEquals(scopeKind, ScopeKind.INTERFACE_BODY)) { return InterfaceBodyPropRule(modifier) }
+        if (ScopeKindEquals(scopeKind, ScopeKind.STRUCT_BODY)) { return StructBodyPropRule(modifier) }
+        if (ScopeKindEquals(scopeKind, ScopeKind.EXTEND_BODY)) { return ExtendBodyPropRule(modifier) }
+        if (ScopeKindEquals(scopeKind, ScopeKind.ENUM_BODY)) { return EnumBodyPropRule(modifier) }
         return None
     }
     if (defKind == DefKind.PACKAGE) {
-        if (scopeKind == ScopeKind.TOPLEVEL) { return PackageRule(modifier) }
+        if (ScopeKindEquals(scopeKind, ScopeKind.TOPLEVEL)) { return PackageRule(modifier) }
         return None
     }
     return None
@@ -491,22 +493,23 @@ public func GetConflictingModifiers(defKind: DefKind, scopeKind: ScopeKind, modi
 }
 
 public func HasWarningRules(defKind: DefKind, scopeKind: ScopeKind): Bool {
-    return (defKind == DefKind.FUNC && scopeKind == ScopeKind.INTERFACE_BODY) ||
-        (defKind == DefKind.CLASS && scopeKind == ScopeKind.TOPLEVEL) ||
-        (defKind == DefKind.INTERFACE && scopeKind == ScopeKind.TOPLEVEL) ||
-        (defKind == DefKind.PROPERTY && scopeKind == ScopeKind.INTERFACE_BODY)
+    return (defKind == DefKind.FUNC && ScopeKindEquals(scopeKind, ScopeKind.INTERFACE_BODY)) ||
+        (defKind == DefKind.CLASS && ScopeKindEquals(scopeKind, ScopeKind.TOPLEVEL)) ||
+        (defKind == DefKind.INTERFACE && ScopeKindEquals(scopeKind, ScopeKind.TOPLEVEL)) ||
+        (defKind == DefKind.PROPERTY && ScopeKindEquals(scopeKind, ScopeKind.INTERFACE_BODY))
 }
 
 public func GetWarningConflicts(defKind: DefKind, scopeKind: ScopeKind, modifier: TokenKind): ConflictArray {
-    if (defKind == DefKind.CLASS && scopeKind == ScopeKind.TOPLEVEL) {
+    if (defKind == DefKind.CLASS && ScopeKindEquals(scopeKind, ScopeKind.TOPLEVEL)) {
         if (modifier == TokenKind.PUBLIC) { return ConflictArray(PublicSealed()) }
         if (modifier == TokenKind.OPEN) { return ConflictArray([TokenKind.SEALED, TokenKind.ABSTRACT]) }
     }
-    if (defKind == DefKind.INTERFACE && scopeKind == ScopeKind.TOPLEVEL) {
+    if (defKind == DefKind.INTERFACE && ScopeKindEquals(scopeKind, ScopeKind.TOPLEVEL)) {
         if (modifier == TokenKind.PUBLIC) { return ConflictArray(PublicSealed()) }
         if (modifier == TokenKind.OPEN) { return ConflictArray([TokenKind.SEALED, TokenKind.ILLEGAL]) }
     }
-    if ((defKind == DefKind.FUNC || defKind == DefKind.PROPERTY) && scopeKind == ScopeKind.INTERFACE_BODY) {
+    if ((defKind == DefKind.FUNC || defKind == DefKind.PROPERTY) &&
+        ScopeKindEquals(scopeKind, ScopeKind.INTERFACE_BODY)) {
         if (modifier == TokenKind.PUBLIC) { return ConflictArray(IllegalOnly()) }
         if (modifier == TokenKind.OPEN) { return ConflictArray(IllegalOnly()) }
     }

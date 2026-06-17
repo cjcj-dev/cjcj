@@ -151,7 +151,7 @@ public class OCFFIParserImpl {
         if (decl.astKind == ASTKind.CLASS_DECL || decl.astKind == ASTKind.INTERFACE_DECL) {
             return
         }
-        if (decl.astKind == ASTKind.FUNC_DECL && scopeKind == ScopeKind.TOPLEVEL) {
+        if (decl.astKind == ASTKind.FUNC_DECL && ScopeKindEquals(scopeKind, ScopeKind.TOPLEVEL)) {
             return
         }
         decl.EnableAttr(Attribute.IS_BROKEN)

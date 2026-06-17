@@ -18,7 +18,9 @@ extend ParserImpl {
             return ParseLeftParenExprInKind(ek)
         }
         if (SeeingLiteral()) { return ParseLitConst() }
-        if (Seeing(TokenKind.LET)) { return ParseLetPattern(ek) }
+        if ((IsConditionExprKind(ek) || ExprKindEquals(ek, ExprKind.UNKNOWN_EXPR)) && Seeing(TokenKind.LET)) {
+            return ParseLetPattern(ek)
+        }
         if (Seeing([TokenKind.UNSAFE, TokenKind.LCURL])) { return ParseUnsafeBlock() }
         if (Seeing(TokenKind.VARRAY)) { return ParseVArrayExpr() }
         if (SeeingPrimitiveTypeAndLParen()) { return ParseTypeConvExpr() }
@@ -331,9 +333,11 @@ extend ParserImpl {
         if (Skip(TokenKind.RPAREN)) {
             return LitConstExpr(LitConstKind.UNIT, Token(TokenKind.UNIT_LITERAL, "()", left.Begin(), lastToken.End()))
         }
-        let childKind = if (ek == ExprKind.IF_COND_EXPR || ek == ExprKind.EXPR_IN_IF_COND_TUPLE) {
+        let childKind = if (ExprKindEquals(ek, ExprKind.IF_COND_EXPR) ||
+            ExprKindEquals(ek, ExprKind.EXPR_IN_IF_COND_TUPLE)) {
             ExprKind.EXPR_IN_IF_COND_TUPLE
-        } else if (ek == ExprKind.WHILE_COND_EXPR || ek == ExprKind.EXPR_IN_WHILE_COND_TUPLE) {
+        } else if (ExprKindEquals(ek, ExprKind.WHILE_COND_EXPR) ||
+            ExprKindEquals(ek, ExprKind.EXPR_IN_WHILE_COND_TUPLE)) {
             ExprKind.EXPR_IN_WHILE_COND_TUPLE
         } else {
             ExprKind.EXPR_IN_TUPLE

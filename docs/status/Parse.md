@@ -1,6 +1,6 @@
 # Parse Port Status
 
-Date: 2026-06-17
+Date: 2026-06-18
 
 Build: `cjpm build` passes.
 
@@ -220,12 +220,51 @@ Parse shim.
   declaration patterns in class/struct bodies, and enum-pattern starts now
   consume qualified names and generic argument lists via the shared
   `SeeingIdentifierAndTargetOp` helper.
+- Deepened pattern parsing further toward `ParsePattern.cpp`: pattern constants
+  now include split-token unit literals `(` `)` for macro/token-stream inputs,
+  wildcard type patterns (`_: T`) are parsed as `TypePattern`, bare identifiers
+  in non-declaration patterns now produce `VarOrEnumPattern`, tuple patterns
+  diagnose illegal nested `|` patterns and single-field tuple patterns, and
+  tuple nodes now preserve C++-shaped left/right brace position aliases.
+- Audited `ScopeKind` and `ExprKind` de-isolation against the real AST package.
+  The real AST enums currently expose an additional `UNKNOWN` variant that
+  breaks downstream exhaustive matches through Parse's public API, so Parse
+  keeps its local subset for now and uses explicit comparison helpers internally
+  to prepare for a future API-aligned swap.
+- Deepened expression parsing toward `ParseExpr.cpp`: `ParseExprLibast` now
+  enters the `UNKNOWN_EXPR` context, `let pattern <- expr` atoms are restricted
+  to condition/libast contexts, let-pattern initializers stop before operators
+  lower than range precedence, variable initializers reject assignment-shaped
+  root expressions, postfix `++`/`--` no longer crosses newlines, and unary
+  minus folds integer/float literals into a single negative literal node.
+- Continued expression parity with C++ assignment parsing: assignment and
+  compound-assignment left sides now run C++-shaped left-value validation for
+  references, wildcard expressions, tuple elements, member/subscript suffixes,
+  optional/call auxiliary bases, and optional-chain expressions; tuple compound
+  assignments are diagnosed, assignment nodes inherit question-suffix state, and
+  optional-chain assignments are wrapped in an outer `OptionalChainExpr`.
+- Continued expression diagnostics toward `ParseExpr.cpp`/`ParserDiag.cpp`:
+  standalone expression results and plain-assignment right operands now traverse
+  for illegal wildcard expressions while skipping selectorless match wildcard
+  cases and nested plain assignments, and same-precedence chains in the C++
+  non-associative operator classes (`assignment`, `range`, `equality`, and
+  `comparison`) are diagnosed and marked broken.
+- Continued expression recovery and macro-expression parity: `ConsumeUntilAny`
+  now exposes newline tokens during recovery like the C++ parser, wildcard
+  expression recovery can stop at newline/comma/right-delimiter boundaries,
+  colon fake-operator recovery diagnoses `expected operator or end of
+  expression` and consumes through newline, and Pratt expression parsing now
+  applies the C++ `CheckMacroExprRules` shape to macro expansions on both
+  operator-left and operator-right paths.
 
 ## Remaining Work
 
 - Replace the remaining Parse-local AST node classes and parser diagnostics with
   real sibling package APIs where their public surfaces are sufficiently
   complete.
+- Replace Parse-local `ScopeKind` and `ExprKind` only after downstream users can
+  accept the real AST package's additional `UNKNOWN` variants, or after the AST
+  package exposes a Parse-compatible subset.
 - Top-level recovery still uses local message diagnostics rather than the exact
   C++ diagnostic IDs, suggestions, parser-scope reset objects, and bracket-stack
   cleanup.
@@ -236,6 +275,9 @@ Parse shim.
 - Macro expansion parsing still lacks the full C++ parameter-macro and
   expression-scope no-parentheses reparsing behavior, exact macro diagnostic IDs,
   and interpolation string origin-position remapping.
+- Expression parsing still lacks exact C++ diagnostic IDs/hints for
+  fake-operator, wildcard, and macro-expression recovery, plus the full
+  macro-expansion no-parentheses reparsing behavior.
 - Type parsing still uses local message diagnostics and simplified recovery in
   several malformed generic/empty-parenthesis cases instead of the exact C++
   diagnostic IDs and parser cleanup paths.
