@@ -11,11 +11,16 @@ public class FeatureId <: Node {
     }
 
     public override func ToString(): String {
-        let parts = ArrayList<String>()
+        let builder = StringBuilder()
+        var idx: Int64 = 0
         for (id in identifiers) {
-            parts.add(id.Val())
+            builder.append(id.Val())
+            if (idx < dotPoses.size) {
+                builder.append(".")
+            }
+            idx++
         }
-        return JoinStrings(parts, ".")
+        return builder.toString()
     }
 }
 
@@ -87,35 +92,137 @@ public class ImportContent <: Node {
 
     public func GetPrefixPath(): String {
         let builder = StringBuilder()
-        for (idx in 0..prefixPaths.size) {
+        var idx: Int64 = 0
+        while (idx < prefixPaths.size) {
             builder.append(prefixPaths[idx])
-            if (idx + 1 < prefixPaths.size) {
-                builder.append(if (idx == 0 && hasDoubleColon) { "::" } else { "." })
+            if (idx == prefixPaths.size - 1) {
+                break
             }
+            if (idx == 0 && hasDoubleColon) {
+                builder.append("::")
+            } else {
+                builder.append(".")
+            }
+            idx++
         }
         return builder.toString()
     }
 
     public func GetImportedPackageName(): String {
-        let prefix = GetPrefixPath()
-        if (prefix.isEmpty()) {
-            return identifier.Val()
+        let builder = StringBuilder()
+        var idx: Int64 = 0
+        while (idx < prefixPaths.size) {
+            builder.append(prefixPaths[idx])
+            if (kind == ImportKind.IMPORT_ALL && idx + 1 == prefixPaths.size) {
+                idx++
+                continue
+            }
+            if (idx == 0 && hasDoubleColon) {
+                builder.append("::")
+            } else {
+                builder.append(".")
+            }
+            idx++
         }
-        return prefix + "." + identifier.Val()
+        if (kind != ImportKind.IMPORT_ALL) {
+            builder.append(identifier.Val())
+        }
+        return builder.toString()
     }
 
     public func GetImportedPackageNameWithIsDecl(): String {
-        return GetImportedPackageName() + if (isDecl) { "#decl" } else { "" }
+        let builder = StringBuilder()
+        var idx: Int64 = 0
+        while (idx < prefixPaths.size) {
+            builder.append(prefixPaths[idx])
+            if (kind == ImportKind.IMPORT_ALL && idx + 1 == prefixPaths.size) {
+                idx++
+                continue
+            }
+            if (idx == 0 && hasDoubleColon) {
+                builder.append("::")
+            } else if (idx + 1 != prefixPaths.size) {
+                builder.append(".")
+            }
+            idx++
+        }
+        if (kind != ImportKind.IMPORT_ALL && !isDecl) {
+            if (!builder.toString().isEmpty()) {
+                builder.append(".")
+            }
+            builder.append(identifier.Val())
+        }
+        return builder.toString()
     }
 
     public func GetPossiblePackageNames(): ArrayList<String> {
         let out = ArrayList<String>()
-        out.add(GetImportedPackageName())
+        if (prefixPaths.isEmpty()) {
+            out.add(identifier.Val())
+            return out
+        }
+        let builder = StringBuilder()
+        var idx: Int64 = 0
+        while (idx < prefixPaths.size) {
+            builder.append(prefixPaths[idx])
+            if (idx + 1 == prefixPaths.size) {
+                break
+            }
+            if (idx == 0 && hasDoubleColon) {
+                builder.append("::")
+            } else {
+                builder.append(".")
+            }
+            idx++
+        }
+        let prefix = builder.toString()
+        if (kind == ImportKind.IMPORT_ALL) {
+            out.add(prefix)
+            return out
+        }
+        if (hasDoubleColon && prefixPaths.size == 1) {
+            out.add(prefix + "::" + identifier.Val())
+            return out
+        }
+        out.add(prefix + "." + identifier.Val())
+        out.add(prefix)
         return out
     }
 
     public override func ToString(): String {
-        return GetImportedPackageName()
+        let builder = StringBuilder()
+        appendImportContentString(builder, this)
+        if (kind != ImportKind.IMPORT_MULTI) {
+            return builder.toString()
+        }
+        builder.append("{\n")
+        for (item in items) {
+            builder.append("    ")
+            appendImportContentString(builder, item)
+            builder.append("\n")
+        }
+        builder.append("}")
+        return builder.toString()
+    }
+}
+
+private func appendImportContentString(builder: StringBuilder, content: ImportContent): Unit {
+    var idx: Int64 = 0
+    while (idx < content.prefixPaths.size) {
+        builder.append(content.prefixPaths[idx])
+        if (idx == 0 && content.hasDoubleColon) {
+            builder.append("::")
+        } else {
+            builder.append(".")
+        }
+        idx++
+    }
+    if (content.kind != ImportKind.IMPORT_MULTI) {
+        builder.append(content.identifier.Val())
+        if (content.kind == ImportKind.IMPORT_ALIAS) {
+            builder.append(" as ")
+            builder.append(content.aliasName.Val())
+        }
     }
 }
 
@@ -151,6 +258,20 @@ public class ImportSpec <: Node {
         }
         return true
     }
+
+    public override func ToString(): String {
+        let builder = StringBuilder()
+        builder.append("import ")
+        if (let Some(mod) <- modifier) {
+            let modStr = mod.ToString()
+            if (!modStr.isEmpty()) {
+                builder.append(modStr)
+                builder.append(" ")
+            }
+        }
+        builder.append(content.ToString())
+        return builder.toString()
+    }
 }
 
 public class PackageSpec <: Node {
@@ -181,7 +302,7 @@ public class PackageSpec <: Node {
     }
 
     public override func ToString(): String {
-        return GetPackageName()
+        return "package " + GetPackageName()
     }
 }
 
@@ -218,6 +339,23 @@ public class File <: Node {
             }
         }
         return out
+    }
+
+    public override func ToString(): String {
+        let builder = StringBuilder()
+        if (let Some(spec) <- packageSpec) {
+            builder.append(spec.ToString())
+            builder.append("\n")
+        }
+        for (importSpec in imports) {
+            builder.append(importSpec.ToString())
+            builder.append("\n")
+        }
+        for (decl in decls) {
+            builder.append(decl.ToString())
+            builder.append("\n")
+        }
+        return builder.toString()
     }
 }
 
@@ -297,6 +435,14 @@ public class Package <: Node {
 
     public func GetLambdaPatterns(): ArrayList<LambdaPattern> {
         return lambdaPatterns
+    }
+
+    public override func ToString(): String {
+        let builder = StringBuilder()
+        for (file in files) {
+            builder.append(file.ToString())
+        }
+        return builder.toString()
     }
 }
 
