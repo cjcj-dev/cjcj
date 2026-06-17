@@ -3,23 +3,15 @@ package cangjie_compiler::conditional_compilation
 import cangjie_compiler::basic.CANGJIE_VERSION
 import cangjie_compiler::basic.DiagnosticEngine as BasicDiagnosticEngine
 import cangjie_compiler::basic.DiagKindRefactor as BasicDiagKindRefactor
+import cangjie_compiler::basic.SplitLines
+import cangjie_compiler::basic.SplitString
 import cangjie_compiler::option.BackendType
-import cangjie_compiler::option.FileExist
 import cangjie_compiler::option.GlobalOptions
-import cangjie_compiler::option.JoinPath
-import cangjie_compiler::option.SplitLines
-import cangjie_compiler::option.SplitString
 import cangjie_compiler::option.TripleInfo
-import cangjie_compiler::option.Vendor
 import cangjie_compiler::utils.FailureReason as UtilsFailureReason
 import cangjie_compiler::utils.FileUtil
 import cangjie_compiler::utils.NFC as UtilsNFC
 import std.collection.*
-
-public interface ConditionalCompilationCompilerInstance {
-    func GetGlobalOptions(): GlobalOptions
-    func GetDiagnosticEngine(): BasicDiagnosticEngine
-}
 
 public class ConditionalCompilationConfig {
     public var backendType: BackendType = BackendType.CJNATIVE
@@ -34,11 +26,6 @@ public class ConditionalCompilationConfig {
 
     public init(options: GlobalOptions) {
         LoadFromOptions(options)
-    }
-
-    public init(instance: ConditionalCompilationCompilerInstance) {
-        diag = instance.GetDiagnosticEngine()
-        LoadFromOptions(instance.GetGlobalOptions())
     }
 
     public init(options: GlobalOptions, diag: BasicDiagnosticEngine) {
@@ -77,8 +64,8 @@ public class ConditionalCompilationConfig {
 
         let cfgFileName = "cfg.toml"
         for (path in options.passedWhenCfgPaths) {
-            let filePath = JoinPath(path, cfgFileName)
-            if (!FileExist(filePath)) {
+            let filePath = FileUtil.JoinPath(path, cfgFileName)
+            if (!FileUtil.FileExist(filePath)) {
                 reporter.DiagnoseDefault(BasicDiagKindRefactor.driver_warning_no_such_file, args: [filePath])
                 continue
             }
@@ -89,15 +76,15 @@ public class ConditionalCompilationConfig {
         let defaultCfgFilePath = if (options.packagePaths.isEmpty()) {
             cfgFileName
         } else {
-            JoinPath(options.packagePaths[0], cfgFileName)
+            FileUtil.JoinPath(options.packagePaths[0], cfgFileName)
         }
-        if (FileExist(defaultCfgFilePath)) {
+        if (FileUtil.FileExist(defaultCfgFilePath)) {
             let _ = SetupLSPConditionalCompilationCfgFromFile(defaultCfgFilePath, passedCondition, reporter)
         }
     }
 }
 
-private func IsLSPBuiltinCfgCondition(key: String): Bool {
+private func IsLSPCfgFileBuiltinCondition(key: String): Bool {
     return key == "os" || key == "backend" || key == "arch" || key == "debug" ||
         key == "cjc_version" || key == "test"
 }
@@ -156,7 +143,7 @@ private func ParseAndCheckLSPConditionVar(
         normalizedKey = normalizedKey[1..normalizedKey.size - 1]
     }
     normalizedKey = UtilsNFC(normalizedKey)
-    if (IsLSPBuiltinCfgCondition(normalizedKey)) {
+    if (IsLSPCfgFileBuiltinCondition(normalizedKey)) {
         reporter.DiagnoseDefault(BasicDiagKindRefactor.dirver_cfg_same_with_builtin)
         return None
     }
@@ -222,11 +209,5 @@ public func CopyTripleInfo(src: TripleInfo): TripleInfo {
     out.os = src.os
     out.env = src.env
     out.apiLevel = src.apiLevel
-    return out
-}
-
-public func DefaultTargetTriple(): TripleInfo {
-    let out = TripleInfo()
-    out.vendor = Vendor.UNKNOWN
     return out
 }

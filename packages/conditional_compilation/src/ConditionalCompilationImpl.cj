@@ -377,8 +377,6 @@ class ConditionalCompilationImpl {
         let isBuiltin = IsTargetCondition(conditionStr)
         let isUserDefined = !isBuiltin && passedCondition.contains(conditionStr)
         if (!isBuiltin && !isUserDefined) {
-            diag.Diagnose(BasicDiagKindRefactor.conditional_compilation_not_support_this_condition,
-                begin, args: [conditionStr])
             return false
         }
         if (!ConditionSupportsValue(conditionStr, right)) {
@@ -509,7 +507,6 @@ class ConditionalCompilationImpl {
                 evalResult = EvalCachedConditionExpr(condExpr)
             } else {
                 diag.Diagnose(BasicDiagKindRefactor.conditional_compilation_not_have_condition_expr, anno.begin)
-                evalResult = false
             }
             annotations.remove(at: idx)
         }
