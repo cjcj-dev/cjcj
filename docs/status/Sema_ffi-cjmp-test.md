@@ -5,6 +5,13 @@ Build: `cjpm build` passes.
 Scoped selfhost TODO comments: 0 remaining in the requested files.
 Whole-package selfhost TODO grep: 4 existing markers remain outside the allowed ffi-cjmp-test edit area.
 
+## 2026-06-18 NativeFFI helper parity pass
+
+- Aligned `SplitAndTrim` with the C++ helper: the single-token case is preserved verbatim, and trimming is only applied when the configuration string is comma-separated.
+- Matched the C++ `GetArrayOperationKind` precondition and invalid-shape behavior: declarations must belong to `JArray`, invalid operation declarations abort, and the post-abort fallback returns `GET`.
+- Kept the abort path external through a private C FFI declaration for `abort`, avoiding a new package dependency while preserving the C++ `CJC_ABORT` behavior.
+- Verified with `cjpm build`; `grep -rn "TODO(selfhost:Sema)" packages/sema/src` still reports the four existing out-of-scope root Sema markers and none in the scoped files.
+
 ## 2026-06-18 FFI diagnostic range pass
 
 - Mirrored the C++ `GetFuncBodyRange` helper for C function return-type diagnostics: use the return type source range when present, otherwise fall back to the function identifier range.
@@ -83,7 +90,7 @@ Whole-package selfhost TODO grep: 4 existing markers remain outside the allowed 
 - CJMP nominal common-to-specific member merging is now present for non-extension declarations, but extension declaration-map updates and symbol-table rebuilding remain partial because their C++ dependencies sit outside this scoped edit area.
 - Plugin checking now has the core reference-check helpers, external-weak marking hooks, scoped traversal, macro-order checks, IfAvailable branch walking, and override-hide comparison when a `TypeManager` is supplied, but still lacks full option/import-manager parsing, dependency annotation clearing, and call-site wiring from the complete C++ checker.
 - Mock/test support now has stronger semantic classification, naming, lookup, accessor metadata, package usage detection, and preparation plumbing, but generated wrapper/body synthesis and full injection behavior are still incomplete.
-- NativeFFI utilities now cover more reference, generic, type-node, Java-array, and naming helpers, but larger AST synthesis/desugaring helpers, mangler-driven method naming, import-manager core declaration helpers, abort-on-invalid array classification, and full Java/ObjC interop manager behavior remain incomplete.
+- NativeFFI utilities now cover more reference, generic, type-node, Java-array, and naming helpers, but larger AST synthesis/desugaring helpers, mangler-driven method naming, import-manager core declaration helpers, and full Java/ObjC interop manager behavior remain incomplete.
 - LSP base-name, scope-name, and relative-position helpers are present, but the C++ type synthesizer half remains outside the current self-host surface.
 
-Honest real-behavior coverage for this scoped pass is estimated at 59% versus the corresponding C++ reference surface.
+Honest real-behavior coverage for this scoped pass is estimated at 60% versus the corresponding C++ reference surface.
