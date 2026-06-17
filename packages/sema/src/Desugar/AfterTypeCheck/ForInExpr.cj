@@ -3,7 +3,6 @@ package cangjie_compiler::sema.Desugar.AfterTypeCheck
 import std.collection.*
 import cangjie_compiler::ast.*
 import cangjie_compiler::sema.*
-import cangjie_compiler::sema.TypeCheckExpr.*
 
 private let INDEX_COMPILER: String = "$index-compiler"
 private let IS_FIRST_COMPILER: String = "$isFirst-compiler"
@@ -14,6 +13,19 @@ private let SUBSCRIPT_OPERATOR_NAME: String = "[]"
 
 private func CloneExpr(expr: Expr): Option<Expr> {
     return ASTCloner.Clone(expr) as Expr
+}
+
+// After type-checking, desugar-created calls have a fully resolved callee, so the
+// result type is simply the callee's function return type. Reading it directly
+// avoids re-running expression synthesis (which would couple this after-typecheck
+// package to TypeCheckExpr and form a sema subpackage dependency cycle).
+private func FuncRetTyOf(decl: Decl): Option<Ty> {
+    if (let Some(t) <- decl.GetTy()) {
+        if (let Some(funcTy) <- (t as FuncTy)) {
+            return funcTy.retTy
+        }
+    }
+    return None
 }
 
 private func UnitTy(): Ty {
@@ -128,9 +140,8 @@ private func CreateSizeCall(typeManager: TypeManager, forInExpr: ForInExpr, tmp:
         let call = CreateCallExpr(base, args, Some(getter), callTy, CallKind.CALL_DECLARED_FUNCTION)
         CopyBasicInfo(forInExpr, call)
         AddCurFile(call, file: forInExpr.curFile)
-        let synthesizedTy = SynExprShallow(typeManager, call)
-        if (Ty.IsTyCorrect(synthesizedTy)) {
-            call.SetTy(synthesizedTy)
+        if (let Some(retTy) <- FuncRetTyOf(getter)) {
+            call.SetTy(retTy)
         } else if (let Some(ty) <- callTy) {
             call.SetTy(ty)
         } else {
@@ -184,10 +195,11 @@ private func CreateStringElementCall(typeManager: TypeManager, forInExpr: ForInE
     let call = CreateCallExpr(base, args)
     CopyBasicInfo(forInExpr, call)
     AddCurFile(call, file: forInExpr.curFile)
-    let callTy = SynExprShallow(typeManager, call)
-    if (Ty.IsTyCorrect(callTy)) {
-        call.SetTy(callTy)
-        return call
+    if (!subscriptTargets.isEmpty()) {
+        if (let Some(retTy) <- FuncRetTyOf(subscriptTargets[0])) {
+            call.SetTy(retTy)
+            return call
+        }
     }
     return None
 }
@@ -503,11 +515,8 @@ private func DesugarForInStringExpr(typeManager: TypeManager, forInExpr: ForInEx
             if (let Some(letValue) <- CreateStringLetIter(typeManager, forInExpr, tmp, index)) {
                 bodyNodes.add(letValue)
             }
+            // CreateStringUpdate already assigns the Unit type to this compound assignment.
             let update = CreateStringUpdate(forInExpr, index)
-            let updateTy = SynExprShallow(typeManager, update)
-            if (Ty.IsTyCorrect(updateTy)) {
-                update.SetTy(updateTy)
-            }
             bodyNodes.add(update)
             bodyNodes.add(guardExpr)
             let whileBody = CreateBlock(bodyNodes, UnitTy())
