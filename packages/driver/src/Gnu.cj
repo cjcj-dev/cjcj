@@ -211,7 +211,7 @@ public open class Gnu <: ToolChain {
         let tool = Tool(arPath, ToolType.BACKEND, driverOptions.environment.allVariables)
         tool.AppendArg("crD")
         let outputFile = CreateNewFileInfoWrapper(objFiles, TempFileKind.O_STATICLIB).filePath
-        let _ = FileUtil.RemovePath(outputFile)
+        let _ = RemovePath(outputFile)
         tool.AppendArg(outputFile)
         if (objFiles.isEmpty()) {
             for (inputObj in driverOptions.inputObjs) {
@@ -257,7 +257,7 @@ public open class Gnu <: ToolChain {
         if (filename.isEmpty()) {
             return ""
         }
-        if (let Some(crtFile) <- FileUtil.FindFileByName(filename, GetCRuntimeLibraryPath())) {
+        if (let Some(crtFile) <- FileUtil.FindFileByName(filename, GetCRuntimeLibraryPath().toArray())) {
             return crtFile
         }
         if (!gccLibPath.isEmpty()) {
@@ -351,11 +351,11 @@ public open class Gnu <: ToolChain {
             searchPaths.add(path)
         }
         let prefix = "libclang_rt."
-        if (let Some(found) <- FileUtil.FindFileByName(prefix + libName + libSuffix, searchPaths)) {
+        if (let Some(found) <- FileUtil.FindFileByName(prefix + libName + libSuffix, searchPaths.toArray())) {
             return found
         }
         return FileUtil.FindFileByName(prefix + libName + "-" + driverOptions.target.ArchToString() + libSuffix,
-            searchPaths)
+            searchPaths.toArray())
     }
 
     protected open func HandleSanitizerDependencies(tool: Tool): Unit {

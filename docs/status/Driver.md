@@ -18,6 +18,22 @@ Current status:
 - Native backend execution is represented by external tool invocation through
   direct POSIX process FFI on non-Windows hosts. LLVM remains external; no LLVM
   reimplementation was added.
+- Driver now depends directly on the real `basic`, `option`, and `utils`
+  packages instead of carrying local compatibility copies for compiler version
+  printing, target/optimization/output/sanitizer enums, `TripleInfo`, and
+  `FileUtil`. Driver-owned model types remain only for Driver concepts such as
+  tool IDs, tool futures, ordered inputs, environment options, and temp-file
+  records.
+- Driver help output now delegates to the shared `option.OptionTable.Usage`
+  path with the real global/driver option groups and experimental-mode
+  filtering, replacing the local abbreviated compatibility usage text. Version
+  and help no-op warnings now consider all classified input kinds, matching the
+  C++ Driver's `ArgList::GetInputs()` behavior more closely.
+- Target parsing now fills the real option `TripleInfo` shape, including
+  vendor, Android API, Apple/iOS simulator environments, and the C++ `dylib`
+  compile-target mapping to `SHARED_LIB`. Host/target defaults are initialized
+  through Driver helpers that mirror the C++ host triple defaults while using
+  the shared option type.
 - Driver now preserves frontend/global arguments in parse order, filters out
   driver-only linker/toolchain options, and passes a pre-created temporary
   bitcode output path to the self-hosted FrontendTool bridge.
@@ -28,6 +44,23 @@ Current status:
   `chir`/`obj`/`hotreload` output-type parsing, PGO flags, section flags, jobs,
   warning forwarding, and target-triple validation are represented in Driver
   options.
+- Driver post-action validation now carries more of the C++ `GlobalOptions`
+  behavior needed by Driver: `--compile-as-exe` is tracked separately from
+  `--compile-target`, LTO mode rejects unsupported targets/options, PGO gen/use
+  conflicts and profile files are checked, compile-target is normalized for
+  non-object output, and aggressive parallel compile defaults/disable rules are
+  derived from jobs, target OS, LTO, coverage, and obfuscation.
+- Driver option parsing now matches additional C++ `OptionTable` behaviors for
+  path-bearing driver options: `-L`, `-B`, and `--sysroot` validate directories
+  and store absolute paths, obfuscation mapping/config inputs are validated as
+  readable files, and joined separated aliases such as `-Bpath`, `-opath`, and
+  `-j4` are accepted.
+- Driver input and linker argument ordering now tracks raw argv positions more
+  closely: source/object/archive/bitcode inputs are validated during Driver
+  parsing, object/archive/bitcode/shared-library inputs are normalized to
+  absolute paths, `.a` inputs follow the C++ object/archive path, and `-l`,
+  `--link-option`, and split `--link-options` values are emitted through the
+  sorted input tuple stream instead of delayed synthetic positions.
 - Host triple defaults now use compile-time `@When` OS/architecture selection
   instead of hardcoded Linux/x86_64 values.
 - GNU/Linux native linking now mirrors the C++ driver more closely: target-
@@ -63,12 +96,18 @@ Residual fidelity risks:
 
 - Driver self-host markers have been removed. Bitcode package names are read
   through LLVM C API bindings, and source compilation now invokes the
-  self-hosted FrontendTool package.
+  self-hosted FrontendTool package. If the current frontend/codegen package
+  boundary reports success without materializing the requested native bitcode,
+  Driver keeps the run in frontend-only mode rather than invoking the backend
+  on a missing file.
 - GNU/Mach-O/platform toolchains are functional command builders with
   substantially more C++ parity, but symbol-localization data still depends on
   the frontend/codegen package boundary exposing the C++ in-process
   `GlobalOptions` state to Driver, and some platform-specific runtime library
   edge cases remain below the C++ driver.
+- Package-directory input handling is still below the C++ `ProcessInputs`
+  model because the Driver package has not yet grown the full package path and
+  duplicate-canonicalization state owned by the shared option layer.
 - The Windows-specific `main-frontend.cpp` process wrapper is represented by a
   direct Cangjie frontend shim rather than a separate `CreateProcess`-style
   executable launcher.

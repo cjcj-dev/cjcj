@@ -119,7 +119,7 @@ public open class MachO <: ToolChain {
         let tool = Tool(arPath, ToolType.BACKEND, driverOptions.environment.allVariables)
         tool.AppendArg("cr")
         let outputFile = CreateNewFileInfoWrapper(objFiles, TempFileKind.O_STATICLIB).filePath
-        let _ = FileUtil.RemovePath(outputFile)
+        let _ = RemovePath(outputFile)
         tool.AppendArg(outputFile)
         if (objFiles.isEmpty()) {
             for (inputObj in driverOptions.inputObjs) {

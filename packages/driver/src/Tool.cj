@@ -224,7 +224,7 @@ public class Tool {
             if (full.size < 3) {
                 return false
             }
-            return FileUtil.CopyFile(full[1], full[2])
+            return CopyFile(full[1], full[2])
         }
         return false
     }

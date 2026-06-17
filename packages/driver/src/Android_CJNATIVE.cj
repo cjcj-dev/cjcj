@@ -134,7 +134,7 @@ public class Android_CJNATIVE <: Linux_CJNATIVE {
         } else {
             "crtbegin_so.o"
         }
-        if (let Some(crtBegin) <- FileUtil.FindFileByName(crtBeginName, GetCRuntimeLibraryPath())) {
+        if (let Some(crtBegin) <- FileUtil.FindFileByName(crtBeginName, GetCRuntimeLibraryPath().toArray())) {
             tool.AppendArg(crtBegin)
         } else {
             tool.AppendArg(crtBeginName)
@@ -145,7 +145,7 @@ public class Android_CJNATIVE <: Linux_CJNATIVE {
         } else {
             "crtend_so.o"
         }
-        if (let Some(crtEnd) <- FileUtil.FindFileByName(crtEndName, GetCRuntimeLibraryPath())) {
+        if (let Some(crtEnd) <- FileUtil.FindFileByName(crtEndName, GetCRuntimeLibraryPath().toArray())) {
             tool.AppendArg(crtEnd)
         } else {
             tool.AppendArg(crtEndName)

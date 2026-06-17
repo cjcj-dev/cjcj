@@ -56,13 +56,13 @@ public open class Linux_CJNATIVE <: Gnu {
         let cjldScript = GetCjldScript(tool)
         if (driverOptions.outputMode == OutputMode.EXECUTABLE) {
             tool.AppendArg("-pie")
-            if (let Some(crt1) <- FileUtil.FindFileByName("Scrt1.o", GetCRuntimeLibraryPath())) {
+            if (let Some(crt1) <- FileUtil.FindFileByName("Scrt1.o", GetCRuntimeLibraryPath().toArray())) {
                 tool.AppendArg(crt1)
             } else {
                 tool.AppendArg("Scrt1.o")
             }
         }
-        if (let Some(crti) <- FileUtil.FindFileByName("crti.o", GetCRuntimeLibraryPath())) {
+        if (let Some(crti) <- FileUtil.FindFileByName("crti.o", GetCRuntimeLibraryPath().toArray())) {
             tool.AppendArg(crti)
         } else {
             tool.AppendArg("crti.o")
@@ -77,7 +77,7 @@ public open class Linux_CJNATIVE <: Gnu {
         HandleLLVMLinkOptions(objFiles, gccLibPath, tool, cjldScript)
         GenerateRuntimePath(tool)
         tool.AppendArg(GetGccLibFile(gccCrtFilePair[1], gccLibPath))
-        if (let Some(crtn) <- FileUtil.FindFileByName("crtn.o", GetCRuntimeLibraryPath())) {
+        if (let Some(crtn) <- FileUtil.FindFileByName("crtn.o", GetCRuntimeLibraryPath().toArray())) {
             tool.AppendArg(crtn)
         } else {
             tool.AppendArg("crtn.o")

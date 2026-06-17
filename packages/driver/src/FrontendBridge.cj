@@ -59,7 +59,7 @@ private func ReconcileFrontendOutputs(opts: DriverOptions): Bool {
 private func VerifyFrontendOutputs(opts: DriverOptions): Bool {
     for (output in opts.frontendOutputFiles) {
         if (!FileUtil.FileExist(output.filePath) || FileUtil.IsDir(output.filePath)) {
-            // TODO(selfhost:Driver): remove this gate once self-host CodeGen emits LLVM bitcode for the native backend.
+            // Frontend/codegen can currently report success before native bitcode is materialized.
             eprintln("warning: self-host frontend completed, but native bitcode output is not implemented yet; stopping before backend.")
             opts.frontendOutputFiles.clear()
             opts.frontendOnlyAction = true

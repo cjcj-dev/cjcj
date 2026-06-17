@@ -1,6 +1,8 @@
 package cangjie_compiler::driver
 
 import std.collection.*
+import cangjie_compiler::basic.PrintVersion
+import cangjie_compiler::option.{CreateOptionTable, Group}
 
 public class Driver {
     public let args: Array<String>
@@ -43,8 +45,8 @@ public class Driver {
 
     public func ExecuteCompilation(): Bool {
         if (driverOptions.showUsage) {
-            PrintUsage()
-            if (!driverOptions.srcFiles.isEmpty()) {
+            PrintUsage(driverOptions)
+            if (driverOptions.HasInputs()) {
                 eprintln("warning: cjc doesn't do compilation job in show usage mode.")
             }
             return true
@@ -53,7 +55,7 @@ public class Driver {
             PrintVersion()
         }
         if (driverOptions.printVersionOnly) {
-            if (!driverOptions.srcFiles.isEmpty()) {
+            if (driverOptions.HasInputs()) {
                 eprintln("warning: cjc doesn't do compilation job in version check mode.")
             }
             return true
@@ -98,16 +100,11 @@ private func ReportBitcodePackageNameError(bcPath: String, error: BitcodePackage
     }
 }
 
-public func PrintVersion(): Unit {
-    println("Cangjie Compiler self-host Driver")
-}
-
-public func PrintUsage(): Unit {
-    println("Usage: cjc [options] <inputs>")
-    println("  -h, --help              Display available options")
-    println("  -v, --version           Display version information")
-    println("  -V, --verbose           Print tool invocations")
-    println("  -o, --output <path>     Write output to <path>")
-    println("  --target <triple>       Select target triple")
-    println("  --output-type <kind>    exe, staticlib, or dylib")
+public func PrintUsage(driverOptions: DriverOptions): Unit {
+    let groups = [Group.GLOBAL, Group.DRIVER]
+    CreateOptionTable().Usage(
+        driverOptions.GetOptionsBackend(),
+        groups,
+        showExperimental: driverOptions.experimentalMode
+    )
 }

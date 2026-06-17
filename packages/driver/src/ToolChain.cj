@@ -310,20 +310,18 @@ public open class ToolChain {
     }
 
     protected func AppendLinkOptionFromInput(inputOrderTuples: ArrayList<(String, UInt64)>): Unit {
-        var base = UInt64(1000000)
-        for (item in driverOptions.linkOption) {
-            inputOrderTuples.add((item, base))
-            base++
+        for (item in driverOptions.orderedLinkOptions) {
+            if (!item.value.isEmpty()) {
+                inputOrderTuples.add((item.value, item.index))
+            }
         }
     }
 
     protected func AppendLinkOptionsFromInput(inputOrderTuples: ArrayList<(String, UInt64)>): Unit {
-        var base = UInt64(2000000)
-        for (item in driverOptions.linkOptions) {
-            for (part in SplitString(item, " ")) {
+        for (item in driverOptions.orderedLinkOptionGroups) {
+            for (part in SplitString(item.value, " ")) {
                 if (!part.isEmpty()) {
-                    inputOrderTuples.add((part, base))
-                    base++
+                    inputOrderTuples.add((part, item.index))
                 }
             }
         }
@@ -394,6 +392,7 @@ public open class ToolChain {
         return match (arch) {
             case ArchType.X86_64 => "lib64"
             case ArchType.AARCH64 => "lib64"
+            case ArchType.ARM64 => "lib64"
             case ArchType.ARM32 => "lib"
             case ArchType.UNKNOWN => ""
         }
