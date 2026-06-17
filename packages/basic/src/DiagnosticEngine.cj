@@ -67,7 +67,7 @@ public class DiagArgument {
     public let positionValue: Position
 
     public init() {
-        kind = DiagArgumentKind.STRING
+        kind = DiagArgumentKind.INT
         intValue = 0
         stringValue = ""
         positionValue = DEFAULT_POSITION
