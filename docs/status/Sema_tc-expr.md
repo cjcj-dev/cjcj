@@ -39,10 +39,13 @@ What changed:
   - `for-in` expression checking now reuses the real sibling `IsIrrefutablePattern` helper and rejects refutable iteration patterns after type-checking the iterable, guard, and body, matching the C++ `SynForInExpr` control flow.
 - Command-pattern continuation:
   - Try-handle command patterns now derive `handler.commandResultTy` from a direct or promoted `stdx.effect.Command<T>` view found through real declaration metadata, generic upper bounds, and declared supertypes, instead of accepting any single-argument generic type as command-shaped.
-- Verification: `cjpm build` passes after the command-pattern continuation. `grep -rn "TODO(selfhost:Sema)" packages/sema/src` reports only out-of-scope Sema placeholders; the scoped `TypeCheckExpr.cj` and `TypeCheckExpr/*` files have zero matching markers.
+- Subscript-overload continuation:
+  - Shallow expression dispatch now handles `CallExpr` by synthesizing the call base and arguments before forwarding to the real sibling `SynCallExpr`/`ChkCallExpr` implementation.
+  - Non-tuple/non-VArray subscript expressions now follow the C++ fallback path: desugar through the real `DesugarOperatorOverloadExpr`, type-check the desugared call, propagate the resolved call target back to the original subscript on success, and recover the original subscript shape on failure.
+- Verification: `cjpm build` passes after the subscript-overload continuation. `grep -rn "TODO(selfhost:Sema)" packages/sema/src` reports only out-of-scope Sema placeholders; the scoped `TypeCheckExpr.cj` and `TypeCheckExpr/*` files have zero matching markers.
 
 Remaining fidelity gaps:
-- Full overload resolution/desugar paths for operator, subscript, and compound assignment still depend on broader call/lookup/desugar infrastructure.
+- Full overload/desugar parity for binary, unary, and compound assignment still depends on broader call/lookup/desugar infrastructure; subscript now has the real fallback path, but not the C++ diagnostic suppression and exact recovery diagnostics.
 - Lambda syntax-driven inference from member access/calls still needs the C++ `ASTContext` candidate maps and cache invalidation path to be threaded into this self-hosted expression layer.
 - Tuple equality still validates built-in element comparability only; full C++ parity needs generated/desugared element comparison expressions and operator overload checks.
 - Coalescing placeholder-`Option` constraints still need the import-manager/core-decl path used by C++ for unconstrained type variables.
@@ -53,4 +56,4 @@ Remaining fidelity gaps:
 - `@IfAvailable` still lacks the C++ import-manager checks for `ohos.device_info` and `ohos.base` package availability.
 - `for-in` refutable-pattern rejection now has the C++ behavior but not the exact `sema_forin_pattern_must_be_irrefutable` diagnostic emission in this shallow helper.
 
-Completeness estimate: 57% of C++ behavior for this scoped expression type-checking area, weighted by behavior rather than line count.
+Completeness estimate: 59% of C++ behavior for this scoped expression type-checking area, weighted by behavior rather than line count.
