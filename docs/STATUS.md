@@ -25,10 +25,15 @@ returns lower through `CreateLiteralReturnBody`).
 The following programs compile with the self-host `cjc`
 (`./target/release/bin/cangjie_compiler::cjc`) and run with the verified behavior
 shown. Each was re-verified by real compile-and-run on 2026-06-17 after merging
-`opus2/int-arith-return`, `opus2/println-int`, and `opus3/real-expr` into `main`:
+`opus2/int-arith-return`, `opus2/println-int`, `opus3/real-expr`, and
+`opus4/control-flow` (var/assign, relational ops, `if`/`while` via real CHIR
+blocks) into `main`:
 
 | Source | Verified behavior |
 | --- | --- |
+| `main(): Int64 { var sum=0; var i=1; while (i<=5){ sum=sum+i; i=i+1 }; return sum }` | exits with code 15, computed at **runtime** by a genuine CHIR `while` loop (no folding; sum 1..10 separately verified -> 55) |
+| `main(): Int64 { var x = 2; x = x + 3; return x }` | exits with code 5 (`var` slot + reassignment Store) |
+| `main(): Int64 { let a = 7; if (a > 3) { return 1 } else { return 0 } }` | exits with code 1 (real `if`/`else` CHIR blocks + relational branch condition) |
 | `main(): Int64 { let a = 2; let b = 3; return a + b }` | exits with code 5, computed at **runtime** by a real CHIR `Add` (not folded) |
 | `main() { println("hello selfhost") }` | prints `hello selfhost` + newline |
 | `main() { print("a"); print("b"); println("c") }` | prints `abc` + newline |
@@ -67,6 +72,28 @@ Capability detail:
   the already-verified slices regress. This is the seam (per
   `docs/DEISOLATION_PLAN.md` section 4) where the token-summary frontend is
   replaced by the real parser one slice at a time.
+- **Control-flow milestone (`opus4/control-flow`):** the real body-lowering path
+  now compiles, for `Int64` locals, mutable `var`/reassignment, relational
+  operators in expressions, and `if`/`while` using genuine CHIR basic blocks plus
+  conditional-branch terminators -- still additive and still gated, so any body
+  outside the supported real grammar falls back to the summary/fold path with no
+  regression. The statement model in `packages/chir/src/AST2CHIR.cj` is now a
+  recursive `AST2CHIRExprSpec` (LITERAL / REF / BINARY over arithmetic or
+  relational `ExprKind`) and `AST2CHIRStmtSpec` (LET[isVar] / ASSIGN / RETURN /
+  IF / WHILE with nested statement lists), replacing the old flat parallel-array
+  model. `packages/chir/src/TranslateFuncBody.cj` `CreateRealBody` threads a
+  `RealBodyState` (current block, terminated flag, locals map) through a recursive
+  lowering: a `var`/`let` is an Allocate slot + Store; reassignment is a Store into
+  the existing slot; `if`/`while` emit real CHIR blocks (`if.then`/`if.else`/
+  `if.join`, `while.cond`/`while.body`/`while.exit`) with `CreateBranch`/`CreateGoTo`
+  terminators; relational ops produce a `Bool`-typed `BinaryExpression` used as the
+  branch condition. The real parser adapter (`RealParseBridge.cj`) builds the
+  recursive spec tree directly from the parse AST (`VarDecl` let/var, `AssignExpr`,
+  `IfExpr` incl. else-if chains, `WhileExpr`, `BinaryExpr`, `ParenExpr`); promotion
+  is gated on a body genuinely needing runtime computation (a binary op, var,
+  assign, if, or while). Verified at runtime with no folding: while-loop sum 1..5
+  -> exit 15 (and 1..10 -> 55); `var x=2; x=x+3` -> 5; `let a=7; if (a>3){1}else{0}`
+  -> 1.
 
 These are the only source constructs the integrated pipeline lowers end to end
 today; anything else still flows through the compatibility models described
@@ -74,12 +101,23 @@ below.
 
 ### Remaining de-isolation follow-ups
 
-- Extend the real-body adapter to more statement kinds (additional operators,
-  multi-statement arithmetic, control flow, more types beyond `Int64`).
-- Retire the frontend token-summary parser
+- **Function calls.** The real body path lowers `let`/`var`/assign/return,
+  arithmetic + relational operators, and `if`/`while`, but does not yet lower
+  user-defined function calls (call expressions, argument passing, multiple
+  function decls in a module). This is the next runtime construct to add.
+- **`println` of runtime values.** `println`/`print` still only emit string
+  literals or *literal*/let-bound integers through the summary path; printing a
+  runtime-computed value (e.g. a loop accumulator or function result) is not yet
+  wired through the real body path. Lower `println(<expr>)` to a real call against
+  the computed CHIR value.
+- **Retire the summary parser.** Once the real parser drives every supported
+  construct, remove the frontend token-summary scanner
   (`packages/frontend/src/CompileStrategy.cj` `parseLiteralReturn` /
-  `resolveLetLiteral` / `captureFunctionBodyPrints`) once the real parser drives
-  every supported construct.
+  `resolveLetLiteral` / `captureFunctionBodyPrints`) and the compile-time
+  arithmetic fold, so all bodies flow through `RealParseBridge` ->
+  `AST2CHIRStmtSpec` -> `CreateRealBody`.
+- Extend the real-body adapter to more statement kinds and types beyond `Int64`
+  (other integer/float/bool widths, `for-in`, `match`, early `break`/`continue`).
 - Converge `frontend.*` / `parse.*` / `ast.*` (make the bridge consume `ast.*`
   produced from `parse.*`, or have `parse` emit `ast.*` directly) and delete the
   frontend minimal AST (`FrontendModel.cj`).
