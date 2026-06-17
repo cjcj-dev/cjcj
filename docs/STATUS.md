@@ -25,7 +25,7 @@ returns lower through `CreateLiteralReturnBody`).
 The following programs compile with the self-host `cjc`
 (`./target/release/bin/cangjie_compiler::cjc`) and run with the verified behavior
 shown. Each was re-verified by real compile-and-run on 2026-06-18 (latest: the
-payload-carrying `enum` milestone) after merging
+`struct` milestone, `opus20/structs`) after merging
 `opus2/int-arith-return`, `opus2/println-int`, `opus3/real-expr`,
 `opus4/control-flow` (var/assign, relational ops, `if`/`while` via real CHIR
 blocks), `opus5/func-calls` (user-defined function calls + recursion via
@@ -50,7 +50,10 @@ tag+payload into one `Int64`, and a destructuring `case Some(n) =>` match decode
 the tag and binds the payload), and `opus18/enum-multi2` (multi-`Int64`-field
 `enum` variants -- `Add(Int64, Int64)` / `P(Int64, Int64, Int64)` constructed and
 destructured; each field lives in its OWN Int64 slot of a `{tag, f0, f1, ...}`
-buffer, NOT bit-packed, so arbitrarily large field values round-trip losslessly)
+buffer, NOT bit-packed, so arbitrarily large field values round-trip losslessly), and
+`opus20/structs` (`struct` with `Int64` fields -- construction via `init`, field read/write,
+instance methods, and structs as function parameters/returns; a struct value is a heap buffer
+of its field slots whose address travels through the `Int64` ABI)
 into `main`:
 
 | Source | Verified behavior |
@@ -94,6 +97,10 @@ into `main`:
 | `enum E { \| Num(Int64) \| Add(Int64,Int64) \| Mul(Int64,Int64) }` ⏎ `func ev(e: E): Int64 { match(e){ case Num(n)=>return n; case Add(a,b)=>return a+b; case Mul(a,b)=>return a*b } }` ⏎ `main(){ println(ev(Add(3,4))); println(ev(Mul(6,7))); println(ev(Num(99))) }` | prints `7`/`42`/`99` -- a small ADT interpreter: multi-`Int64`-field variants constructed and destructured, each field in its own slot of a `{tag, f0, f1}` buffer (multi-field enum) |
 | `enum Tri { \| P(Int64,Int64,Int64) \| Z }` ⏎ `func sum3(t: Tri): Int64 { match(t){ case P(a,b,c)=>return a+b+c; case Z=>return 0 } }` ⏎ `main(): Int64 { return sum3(P(10,20,5)) }` | exits with code `35` -- a 3-field variant alongside a payload-less variant in the same (heap-represented) enum |
 | `enum E { \| Add(Int64,Int64) }` ⏎ `func ev(e: E): Int64 { match(e){ case Add(a,b)=>return a+b } }` ⏎ `main(){ println(ev(Add(1000000000,2000000000))) }` | prints `3000000000` -- LARGE-VALUE proof the fields are NOT bit-packed: each keeps a full Int64 slot (a 9.0e18 field separately round-trips losslessly) |
+| `struct Point{var x:Int64; var y:Int64; init(x,y){this.x=x; this.y=y}}` ⏎ `main(): Int64 { let p=Point(3,4); return p.x+p.y }` | exits with code `7` -- a `struct` constructed via its `init`, then two fields read by name (struct CUT 1) |
+| `... main(): Int64 { var p=Point(1,1); p.x=5; return p.x+p.y }` | exits with code `6` -- a mutable struct field write `p.x=5`, then read back (struct CUT 2) |
+| `struct Point{...; func dist2():Int64{return this.x*this.x+this.y*this.y}}` ⏎ `main(): Int64 { let p=Point(3,4); return p.dist2() }` | exits with code `25` -- an instance method reading `this.x`/`this.y` (struct CUT 3) |
+| `func sx(p:Point):Int64{return p.x}` ⏎ `func mk(a,b):Point{return Point(a,b)}` ⏎ `main(): Int64 { return sx(mk(8,2)) }` | exits with code `8` -- a struct passed as a function parameter and returned from a function across real CHIR `Apply`s (struct CUT 4) |
 | `main() { let ok = 5 > 3; println("ok=${ok}") }` | prints `ok=true` -- a `Bool` interpolated expression stringified to `true`/`false` |
 | `main() { println("hello selfhost") }` | prints `hello selfhost` + newline |
 | `main() { print("a"); print("b"); println("c") }` | prints `abc` + newline |
@@ -461,6 +468,44 @@ Capability detail:
   Int64,Int64) | Z }; sum3(P(10,20,5))` exit `35`; LARGE-VALUE `Add(1000000000,2000000000)` ->
   `3000000000` (and a 9.0e18 field round-trips), proving the no-bit-packing representation.
 
+- **`struct` milestone (`opus20/structs`, CUT 1+2+3+4):** the real body-lowering path now
+  compiles a `struct` with `Int64` fields end to end -- construction, field read/write,
+  instance methods, and structs as function parameters/returns. The representation reuses the
+  multi-field enum heap-buffer machinery WITHOUT a real tag: a struct value is a buffer of its
+  `Int64` field slots whose address (as an `Int64`, via `ptrtoint`) is the value, so it crosses
+  the `Int64` ABI through locals, parameters, and returns unchanged; field `i` lives at buffer
+  slot `i+1` (slot 0 is the reserved dummy-tag slot the existing `EnumMake`/`EnumField` 1-based
+  layout uses). Four cuts landed, all verified by real compile+run: **CUT 1** -- a `struct` decl
+  with `Int64` fields plus an `init`; constructing `Point(a, b)` inlines the `init` (each declared
+  field's stored value is the `init`'s `this.field = <rhs>` assignment with the `init` parameters
+  substituted by the actual argument expressions, lowered to an `EnumMake` with dummy tag 0), and a
+  field read `p.x` lowers to `EnumField(Ref(p), index+1)` (`let p=Point(3,4); return p.x+p.y` ->
+  exit `7`); **CUT 2** -- a mutable field write `p.x = expr` via a new `STRUCT_SET_FIELD`
+  `AST2CHIRStmtSpec` kind: it loads the struct value from the local, reinterprets it as a buffer
+  pointer (`inttoptr`), GEPs the field slot, and `Store`s -- the same buffer machinery as the enum
+  path, but a write (`var p=Point(1,1); p.x=5; return p.x+p.y` -> exit `6`); **CUT 3** -- instance
+  methods, each desugared to a synthetic top-level function `$struct$Type$method` whose leading
+  `this` parameter carries the receiver struct value as an `Int64`, with `p.m(args)` lowering to a
+  `CALL` passing the receiver followed by the arguments (`func dist2(){return this.x*this.x+
+  this.y*this.y}; p.dist2()` -> exit `25`); **CUT 4** -- a struct as a function parameter and
+  return value (a struct-typed param/return lowers to `Int64`, and a struct-returning top-level
+  function is tracked so `let p = mk(...)` keeps `p` a struct local for field/method access)
+  (`func sx(p:Point){return p.x} func mk(a,b):Point{return Point(a,b)}; sx(mk(8,2))` -> exit `8`).
+  It is additive and gated like the prior milestones: a struct shape outside the supported grammar
+  (a non-`Int64` field type, etc.) is skipped whole, leaving `hasRealBody == false` so unsupported
+  programs stay on the existing path with no regression. CHIR adds the `AST2CHIR_STMT_STRUCT_SET_FIELD`
+  spec + `StructSetField` factory (`packages/chir/src/AST2CHIR.cj`) and `LowerStructSetField`
+  (`packages/chir/src/TranslateFuncBody.cj`); no codegen changes were needed. The frontend adapter
+  (`packages/frontend/src/RealParseBridge.cj`) gains a `StructRegistry` collected from top-level
+  struct decls (Int64 fields + a canonical `init` of `this.field = <expr>` assignments), the
+  construction / field-read / field-write / method-call adapters, struct-typed-param and
+  struct-returning-function tracking, and synthetic method-function emission. Verified at runtime
+  (no folding): CUT 1 -> exit `7`; CUT 2 -> exit `6`; CUT 3 -> exit `25`; CUT 4 -> exit `8`; and a
+  recursive AST eval (`Add(Lit(3),Mul(Lit(4),Lit(5)))`) -> `23`, cons-list sum -> `6`, multi-field
+  `Add(1000000000,2000000000)` -> `3000000000`, `color` -> `1`, array find-max -> `8`, interp
+  `x=42`, FizzBuzz, fib loop -> `55`, `repeat("ab",3)` -> `ababab`, `fact(5)` -> `120`, and the
+  mixed-print body -> `123` all still pass (no regression).
+
 These are the only source constructs the integrated pipeline lowers end to end
 today; anything else still flows through the compatibility models described
 below.
@@ -491,7 +536,10 @@ and silently fall back:
   codegen error). Multi-payload (`Pair(Int64, Int64)`), multi-field, and other-typed payload
   constructors are unsupported and skip the whole enum (it never registers, so it never
   mis-lowers).
-- **`struct` / `class`** declarations, fields, methods, and member access.
+- **`class`** declarations, fields, methods, inheritance, and member access (a `struct` with
+  `Int64` fields -- construction, field read/write, instance methods, and struct
+  params/returns -- is now supported on the real path, `opus20/structs`; a struct with a
+  non-`Int64` field type and any `class` still fall back to the summary path).
 - **`Float64`** (and other non-`Int64` numeric widths) -- literals, arithmetic, and
   printing of a `Float`/other-width integer value.
 - **Lambdas / closures** (`{ x => ... }`) and first-class function values.
@@ -533,8 +581,10 @@ slice must be confirmed by a real compile-and-run with a known expected output.
   integer or `Float` value is also still not wired -- extend the PRINT lowering /
   `EmitRuntime*Print` (format selection) once those value types flow through the real body.
 - **More operators and statement kinds on the real path.** Compound
-  assignment (`+=` etc.), `struct`/`class`, `Float64`, and lambdas/closures are
-  still unsupported (the body falls back to the summary path). `match` on an `Int64` selector
+  assignment (`+=` etc.), `class` (and inheritance), `Float64`, and lambdas/closures are
+  still unsupported (the body falls back to the summary path); an `Int64`-field `struct`
+  with construction, field read/write, instance methods, and struct params/returns is now
+  supported (`opus20/structs`). `match` on an `Int64` selector
   (literal / wildcard / single-variable-binding patterns, statement and value forms) is now
   supported (`opus14/match`); match over a payload-less `enum` is now supported
   (`opus15/enums`, CUT 1); single-`Int64`-payload enum variants -- construct `Some(42)` and
@@ -584,7 +634,7 @@ return a + b` slice that exits 5 via a runtime CHIR `Add`) is in
 | C++ reference components with no same-named `.cj` component | 172 |
 | Required build command | `cjpm build` |
 | Build result | pass |
-| Build notes | `cjpm build` succeeds (a few unused-variable/unused-import warnings on the real-body + match/enum adapter sources) |
+| Build notes | `cjpm build` succeeds (a few unused-variable/unused-import warnings on the real-body + match/enum/struct adapter sources) |
 
 Only source markers are counted as remaining work markers. Historical mentions
 inside `docs/status/*.md` are documentation references, not live source TODOs.
