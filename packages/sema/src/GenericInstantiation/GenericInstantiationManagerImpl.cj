@@ -275,6 +275,7 @@ public class GenericInstantiationManagerImpl {
     private var context: GenericInstantiationContext
     private let instantiations: ArrayList<GenericInstantiationRecord> = ArrayList<GenericInstantiationRecord>()
     private let structContext: ArrayList<Decl> = ArrayList<Decl>()
+    private let usedSrcImportedDecls: ArrayList<Decl> = ArrayList<Decl>()
 
     public init(ci: CompilerInstance) {
         this.ci = ci
@@ -338,6 +339,7 @@ public class GenericInstantiationManagerImpl {
     public func ResetGenericInstantiationStage(): Unit {
         instantiations.clear()
         structContext.clear()
+        usedSrcImportedDecls.clear()
         context.Clear()
         PartialInstantiation.ResetGlobalMap()
     }
@@ -448,9 +450,6 @@ public class GenericInstantiationManagerImpl {
     private func InstantiateReferencedGenerics(pkg: Package): Unit {
         for (file in pkg.files) {
             InstantiateReferencedGenericsInNode(file, pkg)
-        }
-        for (decl in pkg.srcImportedNonGenericDecls) {
-            InstantiateReferencedGenericsInNode(decl, pkg)
         }
     }
 
@@ -727,9 +726,43 @@ public class GenericInstantiationManagerImpl {
         }
     }
 
+    private func MarkAndInstantiateSrcImportedDecl(keyDecl: Decl, rootDecl: Decl, pkg: Package): Unit {
+        if (containsDecl(usedSrcImportedDecls, keyDecl)) {
+            return
+        }
+        usedSrcImportedDecls.add(keyDecl)
+        InstantiateReferencedGenericsInNode(rootDecl, pkg)
+    }
+
+    private func InstantiateSrcImportedDefaultParamDecls(decl: Decl, pkg: Package): Unit {
+        if (let Some(funcDecl) <- (decl as FuncDecl)) {
+            if (let Some(body) <- funcDecl.funcBody) {
+                if (!body.paramLists.isEmpty()) {
+                    for (param in body.paramLists[0].params) {
+                        if (let Some(desugarDecl) <- param.desugarDecl) {
+                            if (desugarDecl.TestAttr(Attribute.SRC_IMPORTED)) {
+                                MarkAndInstantiateSrcImportedDecl(desugarDecl, desugarDecl, pkg)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     private func InstantiateGenericDeclWithInstTys(decl: Decl, instTys: ArrayList<Ty>, pkg: Package): Unit {
         let generalDecl = PartialInstantiation.GetGeneralDecl(decl)
-        if (ignoredInstantiationKind(generalDecl) || !RequireInstantiation(generalDecl)) {
+        if (ignoredInstantiationKind(generalDecl)) {
+            return
+        }
+        if ((let None <- generalDecl.GetGeneric()) || !RequireInstantiation(generalDecl)) {
+            if (!decl.TestAnyAttr(Attribute.IMPORTED, Attribute.GENERATED_TO_MOCK)) {
+                return
+            }
+            InstantiateSrcImportedDefaultParamDecls(generalDecl, pkg)
+            if (generalDecl.TestAttr(Attribute.SRC_IMPORTED)) {
+                MarkAndInstantiateSrcImportedDecl(generalDecl, decl, pkg)
+            }
             return
         }
         if ((let None <- generalDecl.GetGeneric()) || instTys.isEmpty() || Ty.ExistGeneric(instTys)) {
@@ -749,7 +782,9 @@ public class GenericInstantiationManagerImpl {
             RearrangeReferencesInNode(file, pkg)
         }
         for (decl in pkg.srcImportedNonGenericDecls) {
-            RearrangeReferencesInNode(decl, pkg)
+            if (decl.IsConst() || containsDecl(usedSrcImportedDecls, decl)) {
+                RearrangeReferencesInNode(decl, pkg)
+            }
         }
     }
 
