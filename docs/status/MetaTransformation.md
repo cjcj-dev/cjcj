@@ -37,10 +37,32 @@ Implemented:
   macro's version source, while the explicit-version overload remains useful for tests. The helper is
   generic over the concrete transform subclass, so callers do not need to pre-widen plugin factories to
   `MetaTransformConcept` before registration.
+- Exposed the C++ macro's getter-level contract in Cangjie: `META_TRANSFORM_PLUGIN_INFO_SYMBOL` records
+  the exact `getMetaTransformPluginInfo` symbol spelling used by the C++ loader, and
+  `MetaTransformPluginInfoGetter` plus CHIR getter helpers model the zero-argument function that returns
+  plugin info.
 - Added typed CHIR transform factory aliases and function/package-specific plugin-info helpers. These
   preserve the C++ macro's type-specific construction path more closely for Cangjie plugins that derive
   from `CHIRFunctionMetaTransform` or `CHIRPackageMetaTransform`; the helpers are generic over the
   concrete transform subclass so plugin factories can return the actual plugin type like the C++ macro.
+- Tightened `MetaTransformPluginInfo` nullability: the C++ `registerTo` function pointer can be absent
+  and the C++ frontend validity check rejects that state, so the Cangjie port now stores it as
+  `Option<MetaTransformRegisterCallback>`. Valid factory helpers still use the direct callback
+  constructor, while invalid/no-callback plugin info can be represented explicitly.
+- Tightened the plugin version side of the same ABI model: the C++ field is a raw `const char*`, so the
+  self-hosted representation now stores `cjcVersion` as `Option<String>`. Valid plugin-info helpers still
+  accept a plain `String`; malformed/no-version plugin info can be represented as `None` instead of an
+  impossible empty-string sentinel.
+- Added an explicit default invalid `MetaTransformPluginInfo` state with no version and no registration
+  callback. This gives the self-hosted API a safe representation for the invalid/default plugin-info
+  states that the C++ loader must reject before registration.
+- Added plugin-info validation and registration helpers (`HasRegisterCallback`, `IsValidForVersion`,
+  `HasVersion`, `VersionMatches`, `IsValid`, and `RegisterTo`) so the version/callback checks used by
+  the C++ plugin loader are available in the self-hosted API without using null.
+- Refined registration helper behavior: `RegisterTo` is now the required, void-style registration path
+  and throws if plugin info has no callback, while `TryRegisterTo` preserves a checked boolean path for
+  callers that validate malformed plugin info before invoking it. This better matches the C++ loader's
+  non-optional callback invocation after plugin validation.
 
 Known fidelity caveats:
 
@@ -49,9 +71,13 @@ Known fidelity caveats:
   mechanism in this port, so direct subclasses of `MetaTransform<DeclT>` must pass a kind explicitly.
   Plugins should use `CHIRFunctionMetaTransform`/`CHIRPackageMetaTransform` and the typed plugin-info
   helpers when they need the C++ macro's CHIR function/package behavior.
+- A constructor-time runtime type check was tested as a possible workaround for the generic kind
+  inference gap, but cjc rejects use of `this` as an expression inside abstract-class constructors.
 - Cangjie has no direct preprocessor macro equivalent for `CHIR_PLUGIN`; `MakeCHIRPluginInfo` preserves
   the registration behavior but not the C++ macro spelling.
 - Cangjie does not expose C++-style nested tag declarations in the style used by `MetaKind::CHIR`, so the
   CHIR tag is represented as `MetaKindCHIR` alongside the public `MetaKind` marker.
+- Cross-module plugin loading and execution are still not wired through the self-hosted frontend/CHIR
+  pipeline; this status file tracks only the scoped `packages/meta_transformation/src` port.
 
 Remaining MetaTransformation selfhost markers: 0.
