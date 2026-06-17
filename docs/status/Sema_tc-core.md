@@ -158,6 +158,28 @@ Verification:
 - `grep -rn "TODO(selfhost:Sema)" packages/sema/src` reports 4 package-level markers, all outside the tc-core-owned files.
 - Remaining `TODO(selfhost:Sema)` markers in the tc-core-owned files listed by the task: 0.
 
+## 2026-06-18 Continue Pass 2
+
+Files deepened:
+
+- `packages/sema/src/LookUpImpl.cj`
+
+Implemented behavior:
+
+- Tightened extension member lookup to honor package-level visibility when the lookup site file is known. `FieldLookupExtend` now filters candidate `ExtendDecl`s before both direct member lookup and inherited-interface lookup.
+- The filter mirrors the visible relation used by the real modules package (`GetPackageRelation` plus public/protected/internal package rules), matching the first visibility gate in C++ `ImportManager::IsExtendAccessible` instead of accepting every extend returned by `TypeManager.GetAllExtendsByTy`.
+
+Remaining gaps:
+
+- Full C++ `ImportManager::IsExtendAccessible` also checks file-specific imports, upper-bound importability, test-only package imports, and inherited-interface importability. Those still require threading the real `ImportManager` through the self-host Sema facade.
+- Global imported-name lookup remains partial for the same reason.
+
+Verification:
+
+- `cjpm build` passes after this pass.
+- `grep -rn "TODO(selfhost:Sema)" packages/sema/src` reports 2 package-level markers, both outside the tc-core-owned files in `TestManager.cj`.
+- Remaining `TODO(selfhost:Sema)` markers in the tc-core-owned files listed by the task: 0.
+
 ## 2026-06-18 Continue Pass
 
 Files deepened:

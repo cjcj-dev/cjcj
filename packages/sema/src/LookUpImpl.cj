@@ -2,6 +2,8 @@ package cangjie_compiler::sema
 
 import std.collection.*
 import cangjie_compiler::ast.*
+import cangjie_compiler::modules.GetPackageRelation as ModulesGetPackageRelation
+import cangjie_compiler::modules.PackageRelation as ModulesPackageRelation
 
 public class LookupInfo {
     public var baseTy: Option<Ty> = None
@@ -145,6 +147,22 @@ private func propAccessibleForAccess(propDecl: PropDecl, isSetter: Bool): Bool {
     return !propDecl.getters.isEmpty()
 }
 
+private func extendAccessibleForLookup(info: LookupInfo, extendDecl: ExtendDecl): Bool {
+    if (let Some(file) <- info.file) {
+        if (let Some(pkg) <- file.curPackage) {
+            if (extendDecl.fullPackageName == pkg.fullPackageName) {
+                return true
+            }
+            let relation = ModulesGetPackageRelation(pkg.fullPackageName, extendDecl.fullPackageName)
+            return extendDecl.TestAttr(Attribute.PUBLIC) || relation == ModulesPackageRelation.SAME_PACKAGE ||
+                (extendDecl.TestAttr(Attribute.PROTECTED) && relation != ModulesPackageRelation.NONE) ||
+                (extendDecl.TestAttr(Attribute.INTERNAL) &&
+                    (relation == ModulesPackageRelation.CHILD || relation == ModulesPackageRelation.SAME_PACKAGE))
+        }
+    }
+    return true
+}
+
 private func addMemberIfValidForLookup(results: ArrayList<Decl>, typeManager: TypeManager, baseTy: Option<Ty>,
     isSetter: Bool, decl: Decl): Unit {
     if (let Some(propDecl) <- (decl as PropDecl)) {
@@ -231,6 +249,9 @@ private func fieldLookupExtend(typeManager: TypeManager, ty: Ty, fieldName: Stri
     let orderedExtends = sortedDecls(extendDecls)
     for (decl in orderedExtends) {
         if (let Some(extendDecl) <- (decl as ExtendDecl)) {
+            if (!extendAccessibleForLookup(info, extendDecl)) {
+                continue
+            }
             for (member in extendDecl.members) {
                 if (member.identifier == fieldName && !ignoredMember(member)) {
                     addDeclUnique(results, member)
@@ -240,6 +261,9 @@ private func fieldLookupExtend(typeManager: TypeManager, ty: Ty, fieldName: Stri
     }
     for (decl in orderedExtends) {
         if (let Some(extendDecl) <- (decl as ExtendDecl)) {
+            if (!extendAccessibleForLookup(info, extendDecl)) {
+                continue
+            }
             for (inheritedType in extendDecl.inheritedTypes) {
                 if (let Some(interfaceDecl) <- Ty.GetDeclPtrOfTy(inheritedType.GetTy())) {
                     if (interfaceDecl.TestAttr(Attribute.IN_REFERENCE_CYCLE)) {
