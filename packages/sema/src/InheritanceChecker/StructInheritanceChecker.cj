@@ -58,6 +58,24 @@ private func AddExtendUniqueByPosition(values: ArrayList<ExtendDecl>, decl: Exte
     values.add(decl)
 }
 
+private func AddInheritableUniqueByPosition(values: ArrayList<InheritableDecl>, decl: InheritableDecl): Unit {
+    for (value in values) {
+        if (SameDecl(value, decl)) {
+            return
+        }
+    }
+    var idx: Int64 = 0
+    while (idx < values.size) {
+        if (decl.begin < values[idx].begin ||
+            (decl.begin == values[idx].begin && ASTKindIndex(decl.astKind) < ASTKindIndex(values[idx].astKind))) {
+            values.add(decl, at: idx)
+            return
+        }
+        idx++
+    }
+    values.add(decl)
+}
+
 private func AddTyUniqueByName(values: ArrayList<Ty>, ty: Ty): Unit {
     for (value in values) {
         if (SameTy(value, ty)) {
@@ -90,7 +108,7 @@ private func StringifyInconsistentTypes(inconsistentTypes: TySet, childTy!: Opti
     return "'" + Ty.GetTypesToStableStr(sortedTys, "', '") + "'"
 }
 
-private func IsExtendVisibleForPackage(currentPkg: String, extendDecl: ExtendDecl): Bool {
+func IsExtendVisibleForPackage(currentPkg: String, extendDecl: ExtendDecl): Bool {
     let relation = GetPackageRelation(currentPkg, extendDecl.fullPackageName)
     return IsAstVisibleInRelation(extendDecl, relation)
 }
@@ -286,7 +304,9 @@ public class StructInheritanceChecker {
             }
             if (let Some(inheritable) <- (node as InheritableDecl)) {
                 if (let Some(extendDecl) <- (node as ExtendDecl)) {
-                    extendDecls.add(extendDecl)
+                    if (IsExtendVisibleForPackage(pkg.fullPackageName, extendDecl)) {
+                        extendDecls.add(extendDecl)
+                    }
                 } else {
                     nominalDecls.add(inheritable)
                 }
@@ -296,6 +316,12 @@ public class StructInheritanceChecker {
         walker.Walk()
         for (decl in nominalDecls) {
             CheckMembersWithInheritedDecls(decl)
+        }
+        for (decl in GetAllNeedCheckExtended()) {
+            if (!HasExtend(extendDecls, decl) && !decl.TestAttr(Attribute.IS_BROKEN) &&
+                Ty.IsTyCorrect(decl.GetTy()) && IsExtendVisibleForPackage(pkg.fullPackageName, decl)) {
+                extendDecls.add(decl)
+            }
         }
         for (decl in extendDecls) {
             CheckMembersWithInheritedDecls(decl)
@@ -622,6 +648,59 @@ public class StructInheritanceChecker {
         return out
     }
 
+    private func AllExtendsImportedFromSamePackage(extends: ArrayList<ExtendDecl>): Bool {
+        if (extends.isEmpty()) {
+            return true
+        }
+        var packageName: Option<String> = None
+        for (extendDecl in extends) {
+            if (!extendDecl.TestAttr(Attribute.IMPORTED)) {
+                return false
+            }
+            if (let Some(existing) <- packageName) {
+                if (existing != extendDecl.fullPackageName) {
+                    return false
+                }
+            } else {
+                packageName = extendDecl.fullPackageName
+            }
+        }
+        return true
+    }
+
+    private func CollectPublicNeedCheckExtends(extends: ArrayList<ExtendDecl>, out: ArrayList<ExtendDecl>): Unit {
+        if (AllExtendsImportedFromSamePackage(extends)) {
+            return
+        }
+        for (extendDecl in extends) {
+            if (extendDecl.TestAttr(Attribute.PUBLIC)) {
+                AddExtendUniqueByPosition(out, extendDecl)
+            }
+        }
+    }
+
+    private func GetAllNeedCheckExtended(): ArrayList<ExtendDecl> {
+        let out = ArrayList<ExtendDecl>()
+        let extendedDecls = ArrayList<InheritableDecl>()
+        for (decl in typeManager.GetAllExtendedDecls()) {
+            AddInheritableUniqueByPosition(extendedDecls, decl)
+        }
+        for (decl in extendedDecls) {
+            if (decl.TestAttr(Attribute.IMPORTED) && decl.TestAttr(Attribute.PUBLIC)) {
+                CollectPublicNeedCheckExtends(typeManager.GetDeclExtends(decl), out)
+            }
+        }
+
+        let extendedBuiltInTys = ArrayList<Ty>()
+        for (ty in typeManager.GetAllExtendedBuiltIn().values) {
+            AddTyUniqueByName(extendedBuiltInTys, ty)
+        }
+        for (ty in extendedBuiltInTys) {
+            CollectPublicNeedCheckExtends(typeManager.GetBuiltinTyExtends(ty), out)
+        }
+        return out
+    }
+
     private func CollectExtendByInterfaceInherit(
         otherExtends: ArrayList<ExtendDecl>,
         curDecl: ExtendDecl
@@ -632,9 +711,17 @@ public class StructInheritanceChecker {
             if (SameDecl(otherExtend, curDecl)) {
                 continue
             }
-            if (otherExtend.fullPackageName != curDecl.fullPackageName &&
-                !IsExtendVisibleForPackage(curDecl.fullPackageName, otherExtend)) {
-                continue
+            if (otherExtend.fullPackageName != curDecl.fullPackageName) {
+                let bothVisibleFromCheckingPackage = otherExtend.fullPackageName != pkg.fullPackageName &&
+                    curDecl.fullPackageName != pkg.fullPackageName &&
+                    IsExtendVisibleForPackage(pkg.fullPackageName, otherExtend)
+                if (!bothVisibleFromCheckingPackage) {
+                    if (IsExtendVisibleForPackage(curDecl.fullPackageName, otherExtend) ||
+                        IsExtendVisibleForPackage(pkg.fullPackageName, otherExtend)) {
+                        AddExtendUniqueByPosition(ordered, otherExtend)
+                    }
+                    continue
+                }
             }
             let skipExtend = DeterminingSkipExtendByInheritanceRelationship(curDecl, otherExtend, extendedDecl)
             if ((let None <- skipExtend) || !skipExtend.getOrThrow()) {

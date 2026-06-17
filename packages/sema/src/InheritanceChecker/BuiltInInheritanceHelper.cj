@@ -61,6 +61,14 @@ func IsBuiltInOperatorFuncInExtend(
     return false
 }
 
+private func CreateBuiltinReturnType(returnTy: Ty): PrimitiveType {
+    let retType = PrimitiveType()
+    retType.kind = returnTy.kind
+    retType.SetTy(returnTy)
+    retType.EnableAttr(Attribute.COMPILER_ADD)
+    return retType
+}
+
 func CreateBuiltInUnaryOperatorFunc(
     typeManager: TypeManager,
     op: TokenKind,
@@ -86,6 +94,7 @@ func CreateBuiltInUnaryOperatorFunc(
     funcBody.paramLists.add(params)
     funcBody.funcDecl = fd
     funcBody.SetTy(typeManager.GetFunctionTy(Array<Ty>(), returnTy))
+    funcBody.retType = Some(CreateBuiltinReturnType(returnTy))
 
     let thisExpr = CreateRefExpr("this")
     thisExpr.isThis = true
@@ -129,6 +138,7 @@ func CreateBuiltInBinaryOperatorFunc(
     let funcBody = FuncBody()
     funcBody.funcDecl = fd
     funcBody.SetTy(typeManager.GetFunctionTy([rightTy], returnTy))
+    funcBody.retType = Some(CreateBuiltinReturnType(returnTy))
     let rightParam = FuncParam()
     rightParam.identifier = SrcIdentifier("right")
     rightParam.SetTy(rightTy)

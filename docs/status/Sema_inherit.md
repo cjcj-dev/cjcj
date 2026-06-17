@@ -82,3 +82,23 @@ C++ diagnostic note/hint parity. The implemented behavior is executable and part
 not yet wired into `TypeChecker::CheckInheritance` because that owner is outside this pass's edit scope.
 
 Verification: `cjpm build` passes for the whole workspace after this continuation deepening pass.
+
+Imported-extend and synthesis fidelity update:
+
+- `StructInheritanceChecker.Check` now filters walked extensions through the package visibility relation before scheduling
+  them, matching the C++ intent that invisible extensions are not checked as current-package visible members.
+- Public imported extensions recorded in `TypeManager` are now pulled into the inheritance pass for conflict checking when
+  they extend an imported public declaration or a built-in type and are not all from a single imported package. This mirrors
+  the C++ native-backend `GetAllNeedCheckExtended` path using the self-hosted `TypeManager` maps available in this scope.
+- Extension ordering across packages now keeps visible different-package extensions in the ordered set instead of dropping
+  them solely because their defining package differs from the current extension package.
+- Instantiated generic extension checks now use the same package-relation visibility helper as non-instantiated extension
+  checking instead of the earlier same-package/public approximation.
+- Synthesized built-in operator functions now include compiler-added return type nodes on their function bodies, preserving
+  the C++ helper's observable AST shape for later passes that inspect `FuncBody.retType`.
+
+De-isolation note: `cangjie_compiler::modules.IsVisible` was tested but is currently typed over the modules package's
+compatibility `Node`, not the real `cangjie_compiler::ast.Node`, so this area still keeps the AST-typed local visibility
+predicate while importing the real `GetPackageRelation` and `PackageRelation`.
+
+Verification: `cjpm build` passes for the whole workspace after this imported-extend and synthesis fidelity update.
