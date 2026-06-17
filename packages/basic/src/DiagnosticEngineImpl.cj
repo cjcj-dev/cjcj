@@ -319,8 +319,6 @@ public class DiagnosticEngineImpl {
     public func Reset(): Unit {
         errorCount = 0
         warningCount = 0
-        errorPrintCount = 0
-        warningPrintCount = 0
         errorByCategory = [0u64, 0u64, 0u64, 0u64, 0u64, 0u64, 0u64, 0u64, 0u64, 0u64]
         warningByCategory = [0u64, 0u64, 0u64, 0u64, 0u64, 0u64, 0u64, 0u64, 0u64, 0u64]
         firstErrorCategory = None

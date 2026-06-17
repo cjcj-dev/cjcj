@@ -14,6 +14,8 @@ Deepening pass updates:
   the source excerpt.
 - Restored the public `Display.escapePrintMap` surface from the C++ header with the same six printable escape entries
   used by reference lexer diagnostics (`\b`, `\t`, `\n`, `\v`, `\f`, and `\r`).
+- Matched `DiagnosticEngineImpl.Reset()` with the C++ implementation by clearing generated diagnostic counts and
+  category buffers while preserving already-printed error/warning counts used by later print limits and summaries.
 - Replaced the Basic-local placeholder polynomial `Utils::GetHash` with the C++ reference's platform string-hash
   behavior for this selfhost target: the non-Windows path now implements libstdc++ `_Hash_bytes`/`std::hash<string>`
   mixing, with a Windows FNV path matching MSVC-style string hashing. This makes source file hashes and CJMP hash IDs
