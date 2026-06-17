@@ -136,6 +136,46 @@ Script: `/root/.claude/projects/-root-cj-build-cangjie-compiler-selfhost/4e6fc3b
   lowering + BCHIR/serializer parity; broaden CHIR→LLVM CodeGen coverage;
   production-compatible Modules / Macro / CJO / incremental artifacts.
 
+## 5b. CRITICAL architecture finding (2026-06-17, hand audit)
+
+The "~50%" figures are per-module **code-volume** estimates, NOT integrated
+capability. The real integrated end-to-end path is a **literal-spec facade**:
+
+- **Two disconnected worlds.** (A) The real but mutually **isolated** packages
+  `ast / parse / sema / chir / codegen` — each re-declares its own copies of the
+  shared node types. Verified: `packages/parse` defines its OWN `File, Decl,
+  Expr, FuncDecl, FuncBody, CallExpr, Block, …` (40+ classes) duplicating
+  `packages/ast`, so `parse.File` ≠ `ast.File` even though parse depends on ast.
+  (B) The `frontend` integration layer with a local body-less mini-parser
+  (`CompileStrategy.cj`) + a spec-based CHIR/codegen bridge.
+- **The frontend does NOT use `packages/parse`** (not in its cjpm deps). Its local
+  scanner parses decl *signatures* (params, return type, generics) but NEVER
+  parses function *bodies* — `finishDeclExtent`/`captureFunctionBodySummary` only
+  extract a single literal `return <const>` value.
+- **The bridge is spec-only.** `CodeGenBridge.buildFunctionSpec` carries just
+  `funcBody.literalReturnKind/literalReturnValue` into `AST2CHIRPackageSpec`;
+  `BuildRealCHIRForFrontendPackage` calls the REAL `chir.AST2CHIR.LowerPackage`
+  and REAL `codegen.GenPackageModules`, but on that degenerate spec — so real
+  statements/expressions are never lowered.
+- **Observed capability (self-host cjc, verified):** compiles function signatures
+  + literal-constant `return`. `return 7`→exit 7, `return -5`→exit 255 (correct),
+  empty/unit main→0. Non-literal bodies (`let x=5; return x`) silently return 0.
+  `println("…")` is dropped entirely (binary has zero print symbols; the real
+  `cjc` prints fine). No crashes in the supported subset.
+
+**Therefore "make println work" = the remaining real-fidelity work:** unify the
+AST islands (make `parse` emit `ast` nodes, or add a `parse.*`→`ast.*` adapter),
+parse real bodies into `ast` statements, lower real `ast` bodies via chir's real
+AST→CHIR (not the spec path), resolve stdlib symbols (import real stdlib AST /
+CJO), and complete CodeGen call lowering. This is the M0 de-isolation grind the
+Codex waves target — large, multi-package, cross-cascading; not a localized fix.
+
+Build-breaking regressions found + fixed by hand this session (commits 79fc770,
+c5c9a70): sema subpackage cycle (TypeCheckExpr↔Desugar.AfterTypeCheck) and two
+hash OverflowExceptions (libStdCxxHashBytes / sipRound → `@OverflowWrapping`).
+These had broken `cjpm build` entirely because sweep 2 was stopped before its
+integrate/wfix pass ran.
+
 ## 6. To resume Codex-driven work after quota resets
 
 1. Verify quota restored: a small `node "<companion>" task ... --json` probe runs.
