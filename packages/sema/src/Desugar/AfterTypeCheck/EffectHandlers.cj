@@ -9,11 +9,34 @@ private let EFFECT_INTERNALS_PACKAGE_NAME: String = "stdx.effect"
 private let CLASS_EXCEPTION_NAME: String = "Exception"
 private let CLASS_ERROR_NAME: String = "Error"
 private let CLASS_HANDLER_FRAME: String = "HandlerFrame"
+private let CLASS_IMMEDIATE_FRAME: String = "ImmediateFrame"
+private let CLASS_FRAME_EXCEPTION_WRAPPER: String = "ImmediateFrameExceptionWrapper"
+private let CLASS_FRAME_ERROR_WRAPPER: String = "ImmediateFrameErrorWrapper"
+private let CLASS_EARLY_RETURN: String = "ImmediateEarlyReturn"
 private let IMMEDIATE_HANDLER_RETURN_NAME: String = "ImmediateHandlerReturn"
 private let IMMEDIATE_HANDLER_RETURN_RESULT: String = "Result"
 private let IMMEDIATE_HANDLER_RETURN_EXC: String = "Exc"
 private let IMMEDIATE_HANDLER_RETURN_ERR: String = "Err"
 private let PERF_METHOD_NAME: String = "perf"
+private let INIT_METHOD_NAME: String = "init"
+private let GET_ACTIVE_FRAME_NAME: String = "getActiveFrame"
+private let SET_IMMEDIATE_HANDLER_NAME: String = "setImmediateHandler"
+private let SET_FINALLY_NAME: String = "setFinally"
+private let START_METHOD_NAME: String = "start"
+private let V_COMPILER_NAME: String = "v-compiler"
+private let FRAME_VAR_NAME: String = "frame"
+private let FRAME_LAMBDA_VAR_NAME: String = "$frameLambda"
+private let HANDLER_LAMBDA_VAR_NAME: String = "$handlerLambda"
+
+private class GeneratedCatchClause {
+    public let pattern: ExceptTypePattern
+    public let block: Block
+
+    public init(pattern: ExceptTypePattern, block: Block) {
+        this.pattern = pattern
+        this.block = block
+    }
+}
 
 private func IsNamedDecl(decl: Decl, fullPackageName: String, name: String): Bool {
     return decl.identifier.Val() == name && (fullPackageName.isEmpty() || decl.fullPackageName == fullPackageName)
@@ -67,10 +90,84 @@ private func RefTargetFunc(refExpr: RefExpr): Option<FuncDecl> {
     return AsFuncDecl(refExpr.ref.target)
 }
 
+private func FuncRetTy(decl: Option<Decl>): Option<Ty> {
+    if (let Some(value) <- decl) {
+        if (let Some(declTy) <- value.GetTy()) {
+            if (let Some(funcTy) <- (declTy as FuncTy)) {
+                return Some(funcTy.retTy)
+            }
+        }
+    }
+    return None
+}
+
 private func AddTargetIfFunc(memberAccess: MemberAccess): Unit {
     if (let Some(funcDecl) <- AsFuncDecl(memberAccess.target)) {
         memberAccess.targets.add(funcDecl)
     }
+}
+
+private func CopyGeneratedPosition(source: Node, target: Node): Unit {
+    target.begin = source.begin
+    target.end = source.end
+    target.curMacroCall = source.curMacroCall
+    target.isInMacroCall = source.isInMacroCall
+    CopyNodeScopeInfo(target, source)
+}
+
+private func UnitTy(): Ty {
+    return TypeManager.GetPrimitiveTy(TypeKind.TYPE_UNIT)
+}
+
+private func MakeTypeArg(ty: Ty): Type {
+    let typeArg = Type()
+    typeArg.SetTy(ty)
+    return typeArg
+}
+
+private func CloneOrMakeTypeArg(typeNode: Type, ty: Ty): Type {
+    if (let Some(cloned) <- (ASTCloner.Clone(typeNode) as Type)) {
+        return cloned
+    }
+    return MakeTypeArg(ty)
+}
+
+private func FindConstructor(classDecl: ClassDecl): Option<FuncDecl> {
+    for (member in classDecl.GetMemberDeclPtrs()) {
+        if (let Some(funcDecl) <- (member as FuncDecl)) {
+            if (funcDecl.TestAttr(Attribute.CONSTRUCTOR)) {
+                return funcDecl
+            }
+        }
+    }
+    return None
+}
+
+private func CreateClassConstructorCall(typeManager: TypeManager, source: Node, className: String,
+    classDecl: ClassDecl, typeArgs: ArrayList<Ty>, args: ArrayList<FuncArg>): Option<CallExpr> {
+    if (let Some(initDecl) <- FindConstructor(classDecl)) {
+        let classTy = typeManager.GetClassTy(classDecl, typeArgs.toArray())
+        let ctorRef = CreateRefExpr(className)
+        ctorRef.isAlone = false
+        ctorRef.ref.target = initDecl
+        ctorRef.ref.targets.add(initDecl)
+        if (let Some(initTy) <- initDecl.GetTy()) {
+            ctorRef.SetTy(initTy)
+        }
+        for (typeArg in typeArgs) {
+            ctorRef.instTys.add(typeArg)
+        }
+        CopyGeneratedPosition(source, ctorRef)
+        let callExpr = CreateCallExpr(ctorRef, args, Some(initDecl), Some(classTy), CallKind.CALL_OBJECT_CREATION)
+        if (!ChkCallExpr(typeManager, None, Some(classTy), callExpr)) {
+            return None
+        }
+        callExpr.callKind = CallKind.CALL_OBJECT_CREATION
+        callExpr.SetTy(classTy)
+        AddCurFile(callExpr, file: source.curFile)
+        return callExpr
+    }
+    return None
 }
 
 // Mirrors the C++ CreateRefValue/CreateRefExc/CreateRefErr helpers for
@@ -111,6 +208,20 @@ private func CreateHandlerFrameMethod(typeManager: TypeManager, pkg: Package, so
         memberAccess.end = source.end
         CopyNodeScopeInfo(memberAccess, source)
         return memberAccess
+    }
+    return None
+}
+
+private func CreateHandlerFrameCall(typeManager: TypeManager, pkg: Package, source: Node,
+    methodName: String, typeArgs: ArrayList<Ty>): Option<CallExpr> {
+    if (let Some(method) <- CreateHandlerFrameMethod(typeManager, pkg, source, methodName, typeArgs)) {
+        if (let Some(retTy) <- FuncRetTy(method.target)) {
+            let callExpr = CreateCallExpr(method, ArrayList<FuncArg>())
+            if (FinishEffectCall(typeManager, retTy, callExpr)) {
+                AddCurFile(callExpr, file: source.curFile)
+                return callExpr
+            }
+        }
     }
     return None
 }
@@ -241,6 +352,433 @@ public func DesugarResumeExpr(typeManager: TypeManager, pkg: Package, resumeExpr
             }
         }
     }
+}
+
+private func CreateExceptPattern(source: Node, catchDecl: ClassDecl, catchTy: Ty, varPattern: VarPattern):
+    ExceptTypePattern {
+    let exceptPattern = ExceptTypePattern()
+    exceptPattern.pattern = varPattern
+    let catchType = CreateRefType(catchDecl)
+    CopyGeneratedPosition(source, catchType)
+    exceptPattern.types.add(catchType)
+    exceptPattern.SetTy(catchTy)
+    CopyGeneratedPosition(source, exceptPattern)
+    return exceptPattern
+}
+
+private func CreateThrowExprFromCall(source: Node, callExpr: CallExpr): ThrowExpr {
+    let throwExpr = ThrowExpr()
+    throwExpr.expr = callExpr
+    throwExpr.SetTy(TypeManager.GetNothingTy())
+    CopyGeneratedPosition(source, throwExpr)
+    return throwExpr
+}
+
+private func CreateWrapperCatchClause(typeManager: TypeManager, pkg: Package, source: Node, catchDecl: ClassDecl,
+    wrapperDecl: ClassDecl, wrapperName: String): Option<GeneratedCatchClause> {
+    if (let Some(catchTy) <- catchDecl.GetTy()) {
+        let catchPattern = CreateVarPattern(V_COMPILER_NAME, catchTy)
+        CopyGeneratedPosition(source, catchPattern)
+        if (let Some(catchVar) <- catchPattern.varDecl) {
+            CopyGeneratedPosition(source, catchVar)
+            if (let Some(activeFrame) <- CreateHandlerFrameCall(typeManager, pkg, source,
+                GET_ACTIVE_FRAME_NAME, ArrayList<Ty>())) {
+                let wrapperArgs = ArrayList<FuncArg>()
+                wrapperArgs.add(CreateFuncArg(activeFrame))
+                wrapperArgs.add(CreateFuncArg(CreateRefExpr(catchVar, source)))
+                if (let Some(wrapperCall) <- CreateClassConstructorCall(typeManager, source, wrapperName,
+                    wrapperDecl, ArrayList<Ty>(), wrapperArgs)) {
+                    let catchNodes = ArrayList<Node>()
+                    catchNodes.add(CreateThrowExprFromCall(source, wrapperCall))
+                    let catchBlock = CreateBlock(catchNodes, Some(TypeManager.GetNothingTy()))
+                    AddCurFile(catchBlock, file: source.curFile)
+                    let exceptPattern = CreateExceptPattern(source, catchDecl, catchTy, catchPattern)
+                    return GeneratedCatchClause(exceptPattern, catchBlock)
+                }
+            }
+        }
+    }
+    return None
+}
+
+private func ReplaceTrailingReturnWithExpr(block: Block): Unit {
+    if (block.body.isEmpty()) {
+        return
+    }
+    let lastIdx = block.body.size - 1
+    if (let Some(returnExpr) <- (block.body[lastIdx] as ReturnExpr)) {
+        if (let Some(expr) <- returnExpr.expr) {
+            block.body[lastIdx] = expr
+            if (let Some(exprTy) <- expr.GetTy()) {
+                block.SetTy(exprTy)
+            }
+        }
+    }
+}
+
+private func HandlerLambdaOriginalReturnTy(lambda: LambdaExpr, fallback: Ty): Ty {
+    if (let Some(lambdaTy) <- lambda.GetTy()) {
+        if (let Some(funcTy) <- (lambdaTy as FuncTy)) {
+            return funcTy.retTy
+        }
+    }
+    if (let Some(funcBody) <- lambda.funcBody) {
+        if (let Some(bodyTy) <- funcBody.GetTy()) {
+            if (let Some(funcTy) <- (bodyTy as FuncTy)) {
+                return funcTy.retTy
+            }
+        }
+        if (let Some(block) <- funcBody.body) {
+            if (let Some(blockTy) <- block.GetTy()) {
+                return blockTy
+            }
+        }
+    }
+    return fallback
+}
+
+private func UpdateHandlerLambdaReturnTy(typeManager: TypeManager, lambda: LambdaExpr, resultTy: EnumTy): Unit {
+    var paramTys = Array<Ty>()
+    if (let Some(lambdaTy) <- lambda.GetTy()) {
+        if (let Some(funcTy) <- (lambdaTy as FuncTy)) {
+            paramTys = funcTy.paramTys.toArray()
+        }
+    }
+    let newFuncTy = typeManager.GetFunctionTy(paramTys, resultTy)
+    lambda.SetTy(newFuncTy)
+    if (let Some(funcBody) <- lambda.funcBody) {
+        funcBody.SetTy(newFuncTy)
+        if (let Some(resultDecl) <- resultTy.declPtr) {
+            funcBody.retType = CreateRefType(resultDecl, Some(resultTy))
+        }
+    }
+}
+
+private func WrapHandlerLambda(typeManager: TypeManager, pkg: Package, handler: Handler, lambda: LambdaExpr,
+    tryResultTy: Ty): Bool {
+    if (let None <- lambda.funcBody) {
+        return false
+    }
+    let funcBody = lambda.funcBody.getOrThrow()
+    if (let None <- funcBody.body) {
+        return false
+    }
+    if (let None <- handler.commandResultTy) {
+        return false
+    }
+    let commandResultTy = handler.commandResultTy.getOrThrow()
+    if (let None <- FindEffectEnumDecl(pkg, IMMEDIATE_HANDLER_RETURN_NAME)) {
+        return false
+    }
+    let resultDecl = FindEffectEnumDecl(pkg, IMMEDIATE_HANDLER_RETURN_NAME).getOrThrow()
+    let resultTy = typeManager.GetEnumTy(resultDecl, typeArgs: [commandResultTy])
+    if (let None <- FindCoreClassDecl(pkg, CLASS_EXCEPTION_NAME)) {
+        return false
+    }
+    if (let None <- FindCoreClassDecl(pkg, CLASS_ERROR_NAME)) {
+        return false
+    }
+    if (let None <- FindEffectClassDecl(pkg, CLASS_FRAME_EXCEPTION_WRAPPER)) {
+        return false
+    }
+    if (let None <- FindEffectClassDecl(pkg, CLASS_FRAME_ERROR_WRAPPER)) {
+        return false
+    }
+    if (let None <- FindEffectClassDecl(pkg, CLASS_EARLY_RETURN)) {
+        return false
+    }
+
+    let sourceBlock = funcBody.body.getOrThrow()
+    let originalReturnTy = HandlerLambdaOriginalReturnTy(lambda, tryResultTy)
+    ReplaceTrailingReturnWithExpr(sourceBlock)
+
+    let wrappedTry = TryExpr()
+    CopyBasicInfo(sourceBlock, wrappedTry)
+    wrappedTry.tryBlock = sourceBlock
+    wrappedTry.SetTy(originalReturnTy)
+
+    let exceptionDecl = FindCoreClassDecl(pkg, CLASS_EXCEPTION_NAME).getOrThrow()
+    let exceptionWrapper = FindEffectClassDecl(pkg, CLASS_FRAME_EXCEPTION_WRAPPER).getOrThrow()
+    if (let Some(exceptionCatch) <- CreateWrapperCatchClause(typeManager, pkg, sourceBlock, exceptionDecl,
+        exceptionWrapper, CLASS_FRAME_EXCEPTION_WRAPPER)) {
+        wrappedTry.catchPatterns.add(exceptionCatch.pattern)
+        wrappedTry.catchBlocks.add(exceptionCatch.block)
+    } else {
+        return false
+    }
+    let errorDecl = FindCoreClassDecl(pkg, CLASS_ERROR_NAME).getOrThrow()
+    let errorWrapper = FindEffectClassDecl(pkg, CLASS_FRAME_ERROR_WRAPPER).getOrThrow()
+    if (let Some(errorCatch) <- CreateWrapperCatchClause(typeManager, pkg, sourceBlock, errorDecl,
+        errorWrapper, CLASS_FRAME_ERROR_WRAPPER)) {
+        wrappedTry.catchPatterns.add(errorCatch.pattern)
+        wrappedTry.catchBlocks.add(errorCatch.block)
+    } else {
+        return false
+    }
+
+    let resultVar = CreateVarDecl(V_COMPILER_NAME, wrappedTry, None)
+    resultVar.SetTy(originalReturnTy)
+    CopyGeneratedPosition(sourceBlock, resultVar)
+    let earlyReturnDecl = FindEffectClassDecl(pkg, CLASS_EARLY_RETURN).getOrThrow()
+    if (let Some(activeFrame) <- CreateHandlerFrameCall(typeManager, pkg, resultVar,
+        GET_ACTIVE_FRAME_NAME, ArrayList<Ty>())) {
+        let earlyArgs = ArrayList<FuncArg>()
+        earlyArgs.add(CreateFuncArg(activeFrame))
+        earlyArgs.add(CreateFuncArg(CreateRefExpr(resultVar, sourceBlock)))
+        if (let Some(earlyReturnCall) <- CreateClassConstructorCall(typeManager, sourceBlock, CLASS_EARLY_RETURN,
+            earlyReturnDecl, ArrayList<Ty>(), earlyArgs)) {
+            let resultNodes = ArrayList<Node>()
+            resultNodes.add(resultVar)
+            resultNodes.add(CreateThrowExprFromCall(sourceBlock, earlyReturnCall))
+            let resultBlock = CreateBlock(resultNodes, Some(TypeManager.GetNothingTy()))
+            AddCurFile(resultBlock, file: sourceBlock.curFile)
+            funcBody.body = resultBlock
+            UpdateHandlerLambdaReturnTy(typeManager, lambda, resultTy)
+            return true
+        }
+    }
+    return false
+}
+
+private func CreateFrame(typeManager: TypeManager, pkg: Package, tryExpr: TryExpr, nodes: ArrayList<Node>):
+    Option<VarDecl> {
+    if (let None <- tryExpr.tryLambda) {
+        return None
+    }
+    let tryLambda = tryExpr.tryLambda.getOrThrow()
+    if (let None <- FindEffectClassDecl(pkg, CLASS_IMMEDIATE_FRAME)) {
+        return None
+    }
+    if (let None <- tryLambda.GetTy()) {
+        return None
+    }
+    let lambdaTy = tryLambda.GetTy().getOrThrow()
+    if (let None <- (lambdaTy as FuncTy)) {
+        return None
+    }
+    let tryLambdaTy = (lambdaTy as FuncTy).getOrThrow()
+    let tryReturnTy = tryLambdaTy.retTy
+    let frameDecl = FindEffectClassDecl(pkg, CLASS_IMMEDIATE_FRAME).getOrThrow()
+    let frameTypeArgs = ArrayList<Ty>()
+    frameTypeArgs.add(tryReturnTy)
+    let frameTy = typeManager.GetClassTy(frameDecl, frameTypeArgs.toArray())
+
+    let lambdaVar = CreateVarDecl(FRAME_LAMBDA_VAR_NAME, tryLambda, None)
+    CopyGeneratedPosition(tryLambda, lambdaVar)
+    nodes.add(lambdaVar)
+
+    let frameRef = CreateRefExpr(CLASS_IMMEDIATE_FRAME)
+    frameRef.isAlone = false
+    frameRef.ref.target = frameDecl
+    frameRef.SetTy(frameTy)
+    frameRef.instTys.add(tryReturnTy)
+    CopyGeneratedPosition(tryLambda, frameRef)
+    let frameInit = CreateMemberAccess(frameRef, INIT_METHOD_NAME)
+    AddTargetIfFunc(frameInit)
+    let frameArgs = ArrayList<FuncArg>()
+    frameArgs.add(CreateFuncArg(CreateRefExpr(lambdaVar, tryExpr)))
+    let frameCreation = CreateCallExpr(frameInit, frameArgs, None, Some(frameTy), CallKind.CALL_OBJECT_CREATION)
+    if (!ChkCallExpr(typeManager, None, Some(frameTy), frameCreation)) {
+        return None
+    }
+    frameCreation.callKind = CallKind.CALL_OBJECT_CREATION
+    frameCreation.SetTy(frameTy)
+    AddCurFile(frameCreation, file: tryExpr.curFile)
+
+    let frameVar = CreateVarDecl(FRAME_VAR_NAME, frameCreation, None)
+    frameVar.SetTy(frameTy)
+    CopyGeneratedPosition(tryExpr, frameVar)
+    nodes.add(frameVar)
+    return frameVar
+}
+
+private func AddSetFinally(typeManager: TypeManager, tryExpr: TryExpr, frame: VarDecl,
+    nodes: ArrayList<Node>): Bool {
+    if (let None <- tryExpr.finallyLambda) {
+        return true
+    }
+    let frameRef = CreateRefExpr(frame, tryExpr)
+    let setFinally = CreateMemberAccess(frameRef, SET_FINALLY_NAME)
+    AddTargetIfFunc(setFinally)
+    let args = ArrayList<FuncArg>()
+    args.add(CreateFuncArg(tryExpr.finallyLambda.getOrThrow()))
+    let setFinallyCall = CreateCallExpr(setFinally, args)
+    if (!FinishEffectCall(typeManager, UnitTy(), setFinallyCall)) {
+        return false
+    }
+    setFinallyCall.callKind = CallKind.CALL_DECLARED_FUNCTION
+    AddCurFile(setFinallyCall, file: tryExpr.curFile)
+    nodes.add(setFinallyCall)
+    return true
+}
+
+private func AddSetHandler(typeManager: TypeManager, pkg: Package, tryExpr: TryExpr, frame: VarDecl,
+    handler: Handler, commandPattern: CommandTypePattern, nodes: ArrayList<Node>): Bool {
+    if (commandPattern.types.size != 1) {
+        return false
+    }
+    if (let None <- commandPattern.types[0].GetTy()) {
+        return false
+    }
+    if (let None <- handler.desugaredLambda) {
+        return false
+    }
+    if (let None <- handler.commandResultTy) {
+        return false
+    }
+    if (let None <- tryExpr.GetTy()) {
+        return false
+    }
+    let handlerLambda = handler.desugaredLambda.getOrThrow()
+    let tryResultTy = tryExpr.GetTy().getOrThrow()
+    if (!WrapHandlerLambda(typeManager, pkg, handler, handlerLambda, tryResultTy)) {
+        return false
+    }
+
+    let frameRef = CreateRefExpr(frame, handlerLambda)
+    let setHandler = CreateMemberAccess(frameRef, SET_IMMEDIATE_HANDLER_NAME)
+    let commandTy = commandPattern.types[0].GetTy().getOrThrow()
+    setHandler.typeArguments.add(CloneOrMakeTypeArg(commandPattern.types[0], commandTy))
+    setHandler.instTys.add(commandTy)
+    let commandResultTy = handler.commandResultTy.getOrThrow()
+    setHandler.typeArguments.add(MakeTypeArg(commandResultTy))
+    setHandler.instTys.add(commandResultTy)
+    setHandler.typeArguments.add(MakeTypeArg(tryResultTy))
+    setHandler.instTys.add(tryResultTy)
+    AddTargetIfFunc(setHandler)
+
+    let lambdaVar = CreateVarDecl(HANDLER_LAMBDA_VAR_NAME, handlerLambda, None)
+    CopyGeneratedPosition(handlerLambda, lambdaVar)
+    nodes.add(lambdaVar)
+    let args = ArrayList<FuncArg>()
+    args.add(CreateFuncArg(CreateRefExpr(lambdaVar, tryExpr)))
+    let setHandlerCall = CreateCallExpr(setHandler, args)
+    if (!FinishEffectCall(typeManager, UnitTy(), setHandlerCall)) {
+        return false
+    }
+    setHandlerCall.callKind = CallKind.CALL_DECLARED_FUNCTION
+    AddCurFile(setHandlerCall, file: tryExpr.curFile)
+    nodes.add(setHandlerCall)
+    return true
+}
+
+private func AddSetHandlers(typeManager: TypeManager, pkg: Package, tryExpr: TryExpr, frame: VarDecl,
+    nodes: ArrayList<Node>): Bool {
+    for (handler in tryExpr.handlers) {
+        if (let None <- handler.commandPattern) {
+            return false
+        }
+        if (let None <- (handler.commandPattern.getOrThrow() as CommandTypePattern)) {
+            return false
+        }
+        let commandPattern = (handler.commandPattern.getOrThrow() as CommandTypePattern).getOrThrow()
+        if (!AddSetHandler(typeManager, pkg, tryExpr, frame, handler, commandPattern, nodes)) {
+            return false
+        }
+    }
+    return true
+}
+
+private func AddFrameStartResult(typeManager: TypeManager, tryExpr: TryExpr, frame: VarDecl,
+    nodes: ArrayList<Node>): Bool {
+    if (let None <- tryExpr.GetTy()) {
+        return false
+    }
+    let tryTy = tryExpr.GetTy().getOrThrow()
+    let frameRef = CreateRefExpr(frame, tryExpr)
+    let startAccess = CreateMemberAccess(frameRef, START_METHOD_NAME)
+    AddTargetIfFunc(startAccess)
+    let startCall = CreateCallExpr(startAccess, ArrayList<FuncArg>())
+    if (!FinishEffectCall(typeManager, tryTy, startCall)) {
+        return false
+    }
+    let varPattern = CreateVarPattern(V_COMPILER_NAME, tryTy)
+    if (let Some(varDecl) <- varPattern.varDecl) {
+        varDecl.curFile = tryExpr.curFile
+        let fakeType = CreateRefType(V_COMPILER_NAME)
+        fakeType.SetTy(tryTy)
+        let typePattern = CreateRuntimePreparedTypePattern(typeManager, varPattern, fakeType, startCall)
+        let valueRef = CreateRefExpr(varDecl, tryExpr)
+        valueRef.SetTy(tryTy)
+        let matchCases = ArrayList<MatchCase>()
+        matchCases.add(CreateMatchCase(typePattern, valueRef))
+        let matchExpr = CreateMatchExpr(startCall, matchCases, tryTy)
+        CopyBasicInfo(tryExpr, matchExpr)
+        AddCurFile(matchExpr, file: tryExpr.curFile)
+        nodes.add(matchExpr)
+        return true
+    }
+    return false
+}
+
+private func CanDesugarTryToFrame(pkg: Package, tryExpr: TryExpr): Bool {
+    if (let None <- tryExpr.tryLambda) {
+        return false
+    }
+    if ((let None <- FindEffectClassDecl(pkg, CLASS_HANDLER_FRAME)) ||
+        (let None <- FindEffectClassDecl(pkg, CLASS_IMMEDIATE_FRAME)) ||
+        (let None <- FindEffectClassDecl(pkg, CLASS_FRAME_EXCEPTION_WRAPPER)) ||
+        (let None <- FindEffectClassDecl(pkg, CLASS_FRAME_ERROR_WRAPPER)) ||
+        (let None <- FindEffectClassDecl(pkg, CLASS_EARLY_RETURN)) ||
+        (let None <- FindEffectEnumDecl(pkg, IMMEDIATE_HANDLER_RETURN_NAME)) ||
+        (let None <- FindCoreClassDecl(pkg, CLASS_EXCEPTION_NAME)) ||
+        (let None <- FindCoreClassDecl(pkg, CLASS_ERROR_NAME))) {
+        return false
+    }
+    for (handler in tryExpr.handlers) {
+        if ((let None <- handler.commandPattern) || (let None <- handler.desugaredLambda) ||
+            (let None <- handler.commandResultTy)) {
+            return false
+        }
+        if (let None <- (handler.commandPattern.getOrThrow() as CommandTypePattern)) {
+            return false
+        }
+        let commandPattern = (handler.commandPattern.getOrThrow() as CommandTypePattern).getOrThrow()
+        if (commandPattern.types.size != 1 || (let None <- commandPattern.types[0].GetTy())) {
+            return false
+        }
+    }
+    return true
+}
+
+private func ClearOriginalTryHandleSurface(tryExpr: TryExpr): Unit {
+    tryExpr.tryBlock = None
+    tryExpr.catchPatterns.clear()
+    tryExpr.catchBlocks.clear()
+    tryExpr.finallyBlock = None
+    tryExpr.tryLambda = None
+    tryExpr.finallyLambda = None
+}
+
+public func DesugarTryToFrame(typeManager: TypeManager, pkg: Package, tryExpr: TryExpr): Unit {
+    if (tryExpr.handlers.isEmpty() || !Ty.IsTyCorrect(tryExpr.GetTy())) {
+        return
+    }
+    if (let Some(_) <- tryExpr.desugarExpr) {
+        return
+    }
+    if (!CanDesugarTryToFrame(pkg, tryExpr)) {
+        return
+    }
+    let nodes = ArrayList<Node>()
+    if (let Some(frameVar) <- CreateFrame(typeManager, pkg, tryExpr, nodes)) {
+        if (!AddSetHandlers(typeManager, pkg, tryExpr, frameVar, nodes)) {
+            return
+        }
+        if (!AddSetFinally(typeManager, tryExpr, frameVar, nodes)) {
+            return
+        }
+        if (!AddFrameStartResult(typeManager, tryExpr, frameVar, nodes)) {
+            return
+        }
+    } else {
+        return
+    }
+    let resultBlock = CreateBlock(nodes, tryExpr.GetTy())
+    CopyBasicInfo(tryExpr, resultBlock)
+    AddCurFile(resultBlock, file: tryExpr.curFile)
+    tryExpr.desugarExpr = resultBlock
+    ClearOriginalTryHandleSurface(tryExpr)
 }
 
 public func SelfhostPortStatus_Desugar_AfterTypeCheck_EffectHandlers(): Bool {

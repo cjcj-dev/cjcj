@@ -56,6 +56,7 @@ public func PerformDesugarAfterTypeCheck(typeManager: TypeManager, pkg: Package,
             case ASTKind.TRY_EXPR =>
                 if (let Some(tryExpr) <- (node as TryExpr)) {
                     DesugarTryWithResourcesExpr(typeManager, pkg, tryExpr)
+                    DesugarTryToFrame(typeManager, pkg, tryExpr)
                 }
             case ASTKind.PERFORM_EXPR =>
                 if (let Some(performExpr) <- (node as PerformExpr)) {
