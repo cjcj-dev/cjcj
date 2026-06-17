@@ -227,6 +227,234 @@ private func TypeCheckReferenceNeedPoint(str: String): Bool {
     return (last >= b'a' && last <= b'z') || (last >= b'A' && last <= b'Z') || (last >= b'0' && last <= b'9')
 }
 
+private enum TypeCheckReferenceScopeSymbolKind {
+    | FUNC
+    | FUNC_LIKE
+    | STRUCT
+    | TOPLEVEL
+}
+
+private func TypeCheckReferenceSymbolSatisfies(kind: TypeCheckReferenceScopeSymbolKind, symbol: Symbol): Bool {
+    if (let None <- symbol.node) {
+        return false
+    }
+    let node = symbol.node.getOrThrow()
+    return match (kind) {
+        case TypeCheckReferenceScopeSymbolKind.FUNC => node.IsFunc()
+        case TypeCheckReferenceScopeSymbolKind.FUNC_LIKE => node.IsFuncLike()
+        case TypeCheckReferenceScopeSymbolKind.STRUCT => node.IsNominalDecl()
+        case TypeCheckReferenceScopeSymbolKind.TOPLEVEL => symbol.scopeLevel == 0u32
+    }
+}
+
+private func TypeCheckReferenceGetCurSymbolByKind(
+    ctx: ASTContext,
+    kind: TypeCheckReferenceScopeSymbolKind,
+    scopeName: String
+): Option<Symbol> {
+    var scopeGateName = GetScopeGateName(scopeName)
+    while (!scopeGateName.isEmpty()) {
+        if (let Some(symbol) <- GetScopeGate(ctx, scopeGateName)) {
+            if (TypeCheckReferenceSymbolSatisfies(kind, symbol)) {
+                return Some(symbol)
+            }
+        }
+        scopeGateName = GetScopeGateName(scopeGateName)
+    }
+    return None
+}
+
+private func TypeCheckReferenceGetOutMostSymbol(
+    ctx: ASTContext,
+    kind: TypeCheckReferenceScopeSymbolKind,
+    scopeName: String
+): Option<Symbol> {
+    var currentOpt = TypeCheckReferenceGetCurSymbolByKind(ctx, kind, scopeName)
+    var insideOpt = currentOpt
+    while (let Some(current) <- currentOpt) {
+        if (current.scopeName.isEmpty()) {
+            break
+        }
+        insideOpt = Some(current)
+        let nextOpt = TypeCheckReferenceGetCurSymbolByKind(ctx, kind, current.scopeName)
+        if (let Some(nextSymbol) <- nextOpt) {
+            if (SameSymbol(current, nextSymbol)) {
+                break
+            }
+        }
+        currentOpt = nextOpt
+    }
+    return insideOpt
+}
+
+private func TypeCheckReferenceGetCurInheritableDecl(ctx: ASTContext, scopeName: String): Option<InheritableDecl> {
+    if (let Some(symbol) <- TypeCheckReferenceGetCurSymbolByKind(
+        ctx, TypeCheckReferenceScopeSymbolKind.STRUCT, scopeName)) {
+        if (let Some(node) <- symbol.node) {
+            if (let Some(decl) <- (node as InheritableDecl)) {
+                return Some(decl)
+            }
+        }
+    }
+    return None
+}
+
+private func TypeCheckReferenceGetFuncBodyOfNode(node: Node): Option<FuncBody> {
+    if (let Some(funcDecl) <- (node as FuncDecl)) {
+        return funcDecl.funcBody
+    }
+    if (let Some(lambdaExpr) <- (node as LambdaExpr)) {
+        return lambdaExpr.funcBody
+    }
+    if (let Some(macroDecl) <- (node as MacroDecl)) {
+        if (let Some(desugarDecl) <- macroDecl.desugarDecl) {
+            return desugarDecl.funcBody
+        }
+        return macroDecl.funcBody
+    }
+    if (let Some(primaryCtor) <- (node as PrimaryCtorDecl)) {
+        return primaryCtor.funcBody
+    }
+    return None
+}
+
+private func TypeCheckReferenceGetCurFuncBody(ctx: ASTContext, scopeName: String): Option<FuncBody> {
+    if (let Some(symbol) <- TypeCheckReferenceGetCurSymbolByKind(
+        ctx, TypeCheckReferenceScopeSymbolKind.FUNC_LIKE, scopeName)) {
+        if (let Some(node) <- symbol.node) {
+            return TypeCheckReferenceGetFuncBodyOfNode(node)
+        }
+    }
+    return None
+}
+
+private func TypeCheckReferenceGetCurOuterDeclOfScopeLevel(
+    ctx: ASTContext,
+    checkNode: Node,
+    scopeLevel: UInt32
+): Option<Symbol> {
+    if (checkNode.scopeLevel < scopeLevel) {
+        return None
+    }
+    var scopeGateName = GetScopeGateName(checkNode.scopeName)
+    while (!scopeGateName.isEmpty()) {
+        if (let Some(symbol) <- GetScopeGate(ctx, scopeGateName)) {
+            if (symbol.scopeLevel == scopeLevel) {
+                return Some(symbol)
+            }
+            scopeGateName = GetScopeGateName(symbol.scopeName)
+        } else {
+            return None
+        }
+    }
+    return None
+}
+
+private func TypeCheckReferenceIsInCFunc(ctx: ASTContext, re: RefExpr): Bool {
+    var symbolOpt = TypeCheckReferenceGetCurSymbolByKind(
+        ctx, TypeCheckReferenceScopeSymbolKind.FUNC_LIKE, re.scopeName)
+    while (let Some(symbol) <- symbolOpt) {
+        if (let Some(node) <- symbol.node) {
+            if (let Some(lambdaExpr) <- (node as LambdaExpr)) {
+                if (let Some(lambdaTy) <- lambdaExpr.GetTy()) {
+                    if (Ty.IsTyCorrect(lambdaTy) && lambdaTy.IsCFunc()) {
+                        return true
+                    }
+                }
+            }
+        }
+        if (symbol.scopeName.isEmpty()) {
+            break
+        }
+        let nextOpt = TypeCheckReferenceGetCurSymbolByKind(
+            ctx, TypeCheckReferenceScopeSymbolKind.FUNC_LIKE, symbol.scopeName)
+        if (let Some(nextSymbol) <- nextOpt) {
+            if (SameSymbol(symbol, nextSymbol)) {
+                break
+            }
+        }
+        symbolOpt = nextOpt
+    }
+    return false
+}
+
+private func TypeCheckReferenceCheckMutationInStruct(
+    diag: BasicDiagnosticEngine,
+    ctx: ASTContext,
+    expr: Expr
+): Unit {
+    if (let None <- expr.GetTarget()) {
+        return
+    }
+    let target = expr.GetTarget().getOrThrow()
+    if (target.astKind != ASTKind.VAR_DECL || target.TestAttr(Attribute.STATIC)) {
+        return
+    }
+    if (let None <- TypeCheckReferenceGetOutMostSymbol(
+        ctx, TypeCheckReferenceScopeSymbolKind.FUNC_LIKE, expr.scopeName)) {
+        return
+    }
+    let outFuncSymbol = TypeCheckReferenceGetOutMostSymbol(
+        ctx, TypeCheckReferenceScopeSymbolKind.FUNC_LIKE, expr.scopeName).getOrThrow()
+    if (let None <- outFuncSymbol.node) {
+        return
+    }
+    let outFuncNode = outFuncSymbol.node.getOrThrow()
+    if (outFuncNode.TestAnyAttr(Attribute.CONSTRUCTOR, Attribute.MUT)) {
+        return
+    }
+    if (let None <- TypeCheckReferenceGetCurOuterDeclOfScopeLevel(ctx, expr, 0u32)) {
+        return
+    }
+    let outDeclSymbol = TypeCheckReferenceGetCurOuterDeclOfScopeLevel(ctx, expr, 0u32).getOrThrow()
+    if (let None <- outDeclSymbol.node) {
+        return
+    }
+    let outDeclNode = outDeclSymbol.node.getOrThrow()
+    if (let Some(outDeclTy) <- outDeclNode.GetTy()) {
+        if (Ty.IsTyCorrect(outDeclTy) && outDeclTy.IsStruct()) {
+            if (let Some(structTy) <- (outDeclTy as StructTy)) {
+                if (let Some(structDecl) <- structTy.declPtr) {
+                    for (issue in CheckMutationInStructNonMut(structDecl, expr)) {
+                        if (issue.kind == TypeAccessIssueKind.CANNOT_MODIFY_STRUCT_VAR) {
+                            let targetName = if (let Some(issueTarget) <- issue.target) {
+                                issueTarget.identifier.Val()
+                            } else {
+                                target.identifier.Val()
+                            }
+                            let builder = diag.Diagnose(
+                                issue.node.begin,
+                                issue.node.end,
+                                BasicDiagKind.sema_cannot_modify_var,
+                                args: [BasicDiagArgument(targetName)])
+                            builder.Emit()
+                        } else {
+                            TypeCheckReferenceEmitAccessIssue(diag, issue)
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+private func TypeCheckReferenceCheckInvalidThisOrSuperInCFunc(
+    diag: BasicDiagnosticEngine,
+    ctx: ASTContext,
+    re: RefExpr
+): Unit {
+    if (!TypeCheckReferenceIsInCFunc(ctx, re)) {
+        return
+    }
+    let name = if (re.isThis) { "this" } else { "super" }
+    let builder = diag.Diagnose(
+        re.begin,
+        re.end,
+        BasicDiagKind.sema_cfunc_cannot_capture_this,
+        args: [BasicDiagArgument(name)])
+    builder.Emit()
+}
+
 private func TypeCheckReferenceDiagMemberAccessNotFound(
     diag: BasicDiagnosticEngine,
     ma: MemberAccess
@@ -912,6 +1140,294 @@ public func TypeCheckReferenceCheckThisOrSuperInInitializer(
         return false
     }
     return true
+}
+
+private func TypeCheckReferenceCheckUsageOfThis(
+    diag: BasicDiagnosticEngine,
+    ctx: ASTContext,
+    re: RefExpr
+): Bool {
+    if (let None <- TypeCheckReferenceGetCurInheritableDecl(ctx, re.scopeName)) {
+        return true
+    }
+    let outerDecl = TypeCheckReferenceGetCurInheritableDecl(ctx, re.scopeName).getOrThrow()
+    let curFuncBodyOpt = TypeCheckReferenceGetCurFuncBody(ctx, re.scopeName)
+    var valid = true
+    if (let Some(curFuncBody) <- curFuncBodyOpt) {
+        if (curFuncBody.TestAttr(Attribute.STATIC)) {
+            let builder = diag.Diagnose(
+                re.begin,
+                re.end,
+                BasicDiagKind.sema_static_members_cannot_call_members,
+                args: [BasicDiagArgument(re.ref.identifier.Val())])
+            builder.Emit()
+            valid = false
+        }
+    }
+    if (outerDecl.astKind == ASTKind.INTERFACE_DECL) {
+        if (let Some(_) <- re.callOrPattern) {
+            let builder = diag.Diagnose(re.begin, re.end, BasicDiagKind.sema_illegal_this_in_interface)
+            builder.Emit()
+            valid = false
+        }
+    }
+
+    let outMostFuncSymbolOpt = TypeCheckReferenceGetOutMostSymbol(
+        ctx, TypeCheckReferenceScopeSymbolKind.FUNC_LIKE, re.scopeName)
+    var outMostFuncOpt: Option<FuncDecl> = None
+    if (let Some(outMostFuncSymbol) <- outMostFuncSymbolOpt) {
+        if (let Some(outMostNode) <- outMostFuncSymbol.node) {
+            outMostFuncOpt = outMostNode as FuncDecl
+        }
+    }
+    var insideConstructor = false
+    if (let Some(outMostFunc) <- outMostFuncOpt) {
+        insideConstructor = IsInstanceConstructor(outMostFunc)
+        var lambdaOrNestedFuncInMutFunc = false
+        if (outMostFunc.TestAttr(Attribute.MUT)) {
+            if (let Some(curFuncBody) <- curFuncBodyOpt) {
+                if (let Some(curFuncDecl) <- curFuncBody.funcDecl) {
+                    lambdaOrNestedFuncInMutFunc = !SameDecl(curFuncDecl, outMostFunc)
+                } else {
+                    lambdaOrNestedFuncInMutFunc = true
+                }
+            }
+        }
+        if (lambdaOrNestedFuncInMutFunc) {
+            let builder = diag.Diagnose(
+                re.begin,
+                re.end,
+                BasicDiagKind.sema_capture_this_or_instance_field_in_func,
+                args: [
+                    BasicDiagArgument(re.ref.identifier.Val()),
+                    BasicDiagArgument("mutable function '" + outMostFunc.identifier.Val() + "'")
+                ])
+            builder.Emit()
+            valid = false
+        }
+        let referenceNotAllowed = re.isAlone &&
+            (outMostFunc.TestAttr(Attribute.MUT) || outMostFunc.IsFinalizer() ||
+            (insideConstructor && IsInheritableClass(outerDecl)))
+        if (referenceNotAllowed) {
+            let info = if (outMostFunc.TestAttr(Attribute.MUT)) {
+                "mutable function '" + outMostFunc.identifier.Val() + "'"
+            } else if (outMostFunc.IsFinalizer()) {
+                "finalizer"
+            } else {
+                "constructor of " + (if (outerDecl.TestAttr(Attribute.OPEN)) { "open" } else { "abstract" }) + " class"
+            }
+            let builder = diag.Diagnose(
+                re.begin,
+                re.end,
+                BasicDiagKind.sema_use_this_as_an_expression_in_func,
+                args: [BasicDiagArgument(info)])
+            builder.Emit()
+            valid = false
+        }
+    }
+
+    var referenceInStruct = false
+    if (outerDecl.astKind == ASTKind.STRUCT_DECL) {
+        if (let None <- re.callOrPattern) {
+            referenceInStruct = true
+        }
+    }
+    if (referenceInStruct) {
+        var notInConstructor = false
+        if (let Some(curFuncBody) <- curFuncBodyOpt) {
+            if (let Some(curFuncDecl) <- curFuncBody.funcDecl) {
+                notInConstructor = !curFuncDecl.TestAttr(Attribute.CONSTRUCTOR)
+            } else {
+                notInConstructor = true
+            }
+        }
+        if (notInConstructor && insideConstructor) {
+            let builder = diag.Diagnose(
+                re.begin,
+                re.end,
+                BasicDiagKind.sema_illegal_capture_this,
+                args: [BasicDiagArgument("struct")])
+            builder.Emit()
+            valid = false
+        }
+        var inInvalidCtx = false
+        if (let None <- curFuncBodyOpt) {
+            inInvalidCtx = true
+        } else if (let Some(outMostFuncSymbol) <- outMostFuncSymbolOpt) {
+            if (outMostFuncSymbol.astKind == ASTKind.LAMBDA_EXPR) {
+                inInvalidCtx = true
+            }
+        }
+        if (inInvalidCtx) {
+            let builder = diag.Diagnose(
+                re.begin,
+                re.end,
+                BasicDiagKind.sema_illegal_this_outside_struct_constructor)
+            builder.Emit()
+            valid = false
+        }
+    }
+    var referenceInInitializer = false
+    if (let None <- curFuncBodyOpt) {
+        referenceInInitializer = !ctx.currentCheckingNodes.isEmpty()
+    }
+    if (referenceInInitializer) {
+        let currentNode = ctx.currentCheckingNodes[ctx.currentCheckingNodes.size - 1]
+        valid = TypeCheckReferenceCheckThisOrSuperInInitializer(diag, currentNode, re) && valid
+    }
+    TypeCheckReferenceCheckInvalidThisOrSuperInCFunc(diag, ctx, re)
+    return valid
+}
+
+private func TypeCheckReferenceCheckUsageOfSuper(
+    diag: BasicDiagnosticEngine,
+    ctx: ASTContext,
+    re: RefExpr
+): Bool {
+    if (let None <- TypeCheckReferenceGetCurInheritableDecl(ctx, re.scopeName)) {
+        return true
+    }
+    let outerDecl = TypeCheckReferenceGetCurInheritableDecl(ctx, re.scopeName).getOrThrow()
+    let curFuncBodyOpt = TypeCheckReferenceGetCurFuncBody(ctx, re.scopeName)
+    var valid = true
+    if (let Some(curFuncBody) <- curFuncBodyOpt) {
+        if (curFuncBody.TestAttr(Attribute.STATIC)) {
+            let builder = diag.Diagnose(
+                re.begin,
+                re.end,
+                BasicDiagKind.sema_static_members_cannot_call_members,
+                args: [BasicDiagArgument(re.ref.identifier.Val())])
+            builder.Emit()
+            valid = false
+        }
+    }
+    if (outerDecl.astKind == ASTKind.INTERFACE_DECL) {
+        let builder = diag.Diagnose(re.begin, re.end, BasicDiagKind.sema_use_super_in_interface)
+        builder.Emit()
+        valid = false
+    }
+    if (outerDecl.astKind == ASTKind.EXTEND_DECL) {
+        let builder = diag.DiagnoseRefactor(BasicDiagKindRefactor.sema_extend_use_super, TypeCheckReferenceRange(re))
+        builder.Emit()
+        valid = false
+    } else if (outerDecl.astKind != ASTKind.CLASS_DECL) {
+        let builder = diag.Diagnose(re.begin, re.end, BasicDiagKind.sema_super_use_error_inside_non_class)
+        builder.Emit()
+        valid = false
+    } else if (re.isAlone) {
+        let builder = diag.Diagnose(re.begin, re.end, BasicDiagKind.sema_illegal_super_alone)
+        builder.Emit()
+        valid = false
+    }
+    var referenceInInitializer = false
+    if (let None <- curFuncBodyOpt) {
+        referenceInInitializer = !ctx.currentCheckingNodes.isEmpty()
+    }
+    if (referenceInInitializer) {
+        let currentNode = ctx.currentCheckingNodes[ctx.currentCheckingNodes.size - 1]
+        valid = TypeCheckReferenceCheckThisOrSuperInInitializer(diag, currentNode, re) && valid
+    }
+    TypeCheckReferenceCheckInvalidThisOrSuperInCFunc(diag, ctx, re)
+    return valid
+}
+
+private func TypeCheckReferenceCheckLegalityIsSkip(node: Node): Bool {
+    if (node.astKind == ASTKind.PRIMARY_CTOR_DECL || node.astKind == ASTKind.ANNOTATION) {
+        return true
+    }
+    if (node.astKind == ASTKind.FUNC_DECL || node.astKind == ASTKind.PROP_DECL) {
+        return node.TestAttr(Attribute.FROM_COMMON_PART)
+    }
+    if (node.astKind == ASTKind.FUNC_ARG) {
+        return node.TestAttr(Attribute.HAS_INITIAL)
+    }
+    return false
+}
+
+private func TypeCheckReferenceCheckLegalityForNameReferenceExpr(
+    diag: BasicDiagnosticEngine,
+    ctx: ASTContext,
+    nameRef: NameReferenceExpr
+): Unit {
+    if (let Some(refExpr) <- (nameRef as RefExpr)) {
+        if (refExpr.isThis) {
+            let _ = TypeCheckReferenceCheckUsageOfThis(diag, ctx, refExpr)
+        } else if (refExpr.isSuper) {
+            let _ = TypeCheckReferenceCheckUsageOfSuper(diag, ctx, refExpr)
+        } else {
+            let _ = TypeCheckReferenceCheckAccessLegalityOfRefExpr(diag, refExpr)
+        }
+    }
+}
+
+private func TypeCheckReferenceCheckLegalityForExpr(
+    diag: BasicDiagnosticEngine,
+    ctx: ASTContext,
+    walkerID: UInt32,
+    expr: Expr
+): VisitAction {
+    if (let Some(desugarExpr) <- expr.desugarExpr) {
+        TypeCheckReferenceCheckLegalityOfReferenceInternal(diag, ctx, desugarExpr, walkerID)
+        return VisitAction.SKIP_CHILDREN
+    }
+    if (let Some(nameRef) <- (expr as NameReferenceExpr)) {
+        TypeCheckReferenceCheckLegalityForNameReferenceExpr(diag, ctx, nameRef)
+        return VisitAction.WALK_CHILDREN
+    }
+    if (let Some(assignExpr) <- (expr as AssignExpr)) {
+        if (let Some(leftValue) <- assignExpr.leftValue) {
+            TypeCheckReferenceCheckMutationInStruct(diag, ctx, leftValue)
+        }
+    } else if (let Some(incOrDecExpr) <- (expr as IncOrDecExpr)) {
+        if (let Some(targetExpr) <- incOrDecExpr.expr) {
+            TypeCheckReferenceCheckMutationInStruct(diag, ctx, targetExpr)
+        }
+    }
+    return VisitAction.WALK_CHILDREN
+}
+
+private func TypeCheckReferenceCheckLegalityOfReferenceInternal(
+    diag: BasicDiagnosticEngine,
+    ctx: ASTContext,
+    root: Node,
+    walkerID: UInt32
+): Unit {
+    let walker = Walker(root, walkerID, visitPre: { current: Node =>
+        if (TypeCheckReferenceCheckLegalityIsSkip(current)) {
+            return VisitAction.SKIP_CHILDREN
+        }
+        if (current.astKind == ASTKind.VAR_DECL) {
+            ctx.currentCheckingNodes.add(current)
+        }
+        if (let Some(expr) <- (current as Expr)) {
+            return TypeCheckReferenceCheckLegalityForExpr(diag, ctx, walkerID, expr)
+        }
+        if (let Some(funcArg) <- (current as FuncArg)) {
+            if (funcArg.withInout) {
+                if (let Some(argExpr) <- funcArg.expr) {
+                    TypeCheckReferenceCheckMutationInStruct(diag, ctx, argExpr)
+                }
+            }
+        }
+        return VisitAction.WALK_CHILDREN
+    }, visitPost: { current: Node =>
+        if (current.astKind == ASTKind.VAR_DECL && !ctx.currentCheckingNodes.isEmpty()) {
+            ctx.currentCheckingNodes.remove(at: ctx.currentCheckingNodes.size - 1)
+        }
+        if (let Some(memberAccess) <- (current as MemberAccess)) {
+            let _ = TypeCheckReferenceCheckAccessLegalityOfMemberAccess(diag, memberAccess)
+        }
+        return VisitAction.KEEP_DECISION
+    })
+    let _ = walker.Walk()
+}
+
+public func TypeCheckReferenceCheckLegalityOfReference(
+    diag: BasicDiagnosticEngine,
+    ctx: ASTContext,
+    root: Node
+): Unit {
+    TypeCheckReferenceCheckLegalityOfReferenceInternal(diag, ctx, root, GetNextWalkerID())
 }
 
 public func TypeCheckReferenceAddFuncTargetsForMemberAccess(memberAccess: MemberAccess, targets: ArrayList<Decl>): Unit {

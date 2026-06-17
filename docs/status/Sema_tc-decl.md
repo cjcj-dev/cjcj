@@ -92,6 +92,17 @@ Reference sources inspected from `/root/cj_build/cangjie_compiler/src/Sema`:
   and `TypeCheckReferenceCheckThisOrSuperInInitializer` now mirrors the C++
   initializer restriction diagnostics for `this`/`super` in static and
   non-static member initializers.
+- This pass added the C++-style reference-legality traversal entry point in
+  `TypeCheckReference.cj`: it reconstructs current enclosing symbols from the
+  real `ASTContext` scope-gate index, skips the same primary-constructor,
+  annotation, common-part, and desugared-default-argument subtrees as C++,
+  walks desugared expressions with the same walker id, preserves the
+  `currentCheckingNodes` var-initializer stack, checks `this`/`super` usage
+  diagnostics (static context, interface/extend/non-class `super`, illegal
+  standalone `super`, struct constructor capture, inheritable constructor/finalizer
+  `this`, and CFunc lambda capture), reuses the real struct-mutation checker for
+  assignment/inc-dec/inout arguments, and performs member-access legality in
+  post-order after child reference checks.
 - Continued class-like parity in `TypeCheckClassLike.cj`: sealed inheritance
   from `specific` declarations now mirrors the C++ package scan for a matching
   common declaration before reporting the specific-sealed diagnostic, and
@@ -159,10 +170,11 @@ are from pre-existing files outside this pass scope.
 - Full C++ parity still requires complete overload resolution, lookup/import
   recommendation, exact access-control context, custom annotation expression
   synthesis/type checking, annotation target-array type checking, pipeline
-  wiring for type-alias and class-like declaration checks, reference-legality
-  walker wiring, full deprecated-usage traversal/override checks, and all
-  TypeChecker-owned state once those sibling surfaces are available in the
-  allowed owner files.
+  wiring from the coarse `TypeCheckerImpl` package pass into the declaration,
+  type, reference-legality, and deprecated-usage helpers, exact C++ constructor
+  parameter/member-access checks, instantiated-type completeness checks, and all
+  remaining TypeChecker-owned state once those sibling surfaces are available in
+  the allowed owner files.
 - Diagnostics are mapped to the available self-hosted diagnostic tables; a few
   C++ diagnostic helpers are represented by the closest currently available
   refactored/legacy diagnostic kind.
