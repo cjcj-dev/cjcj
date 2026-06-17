@@ -5,6 +5,23 @@ import std.sort.*
 import cangjie_compiler::ast.*
 import cangjie_compiler::basic.DiagnosticEngine as BasicDiagnosticEngine
 import cangjie_compiler::basic.DiagKindRefactor as BasicDiagKindRefactor
+import cangjie_compiler::basic.Position as BasicPosition
+import cangjie_compiler::basic.Range as BasicRange
+
+private func ToBasicPosition(pos: Position): BasicPosition {
+    return BasicPosition(pos.fileID, pos.line, pos.column)
+}
+
+private func MakeBasicRange(begin: Position, end: Position): BasicRange {
+    return BasicRange(ToBasicPosition(begin), ToBasicPosition(end))
+}
+
+private func MatchCasePatternRange(mc: MatchCase): BasicRange {
+    if (mc.patterns.isEmpty()) {
+        return MakeBasicRange(mc.begin, mc.end)
+    }
+    return MakeBasicRange(mc.patterns[0].begin, mc.patterns[mc.patterns.size - 1].end)
+}
 
 private enum PatternCtorKind {
     | UNIT
@@ -917,7 +934,8 @@ public func CheckMatchExprHasSelectorExhaustivenessAndReachability(
             }
         } else {
             mc.EnableAttr(Attribute.UNREACHABLE)
-            SemaDiag(diag, BasicDiagKindRefactor.sema_unreachable_pattern, mc)
+            let _ = diag.DiagnoseRefactor(BasicDiagKindRefactor.sema_unreachable_pattern,
+                MatchCasePatternRange(mc))
         }
     }
     let stack = PatternStack(DestructedPattern(PatternCtor.Wildcard(),

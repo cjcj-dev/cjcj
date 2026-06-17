@@ -29,6 +29,7 @@ Continuation updates:
 - `PatternUsefulness.cj`: matched the C++ deterministic witness ordering for sealed class-like wildcard splitting by sorting direct subtypes by stable type name/hash before recursive constructor expansion.
 - `TypeCheckCall.cj`: aligned call-base target normalization with the C++ `COMMON`/`specificImplementation` path so common declarations are replaced by their specific implementations before candidate collection and call-kind classification, and constructor collection now excludes static initializers by using the real `IsInstanceConstructor` helper.
 - `TypeCheckCall.cj`: ported the C++ `FilterExtendImplAbstractFunc` behavior for overload candidate filtering, removing abstract interface methods when an extension candidate implements the same instantiated parameter signature with a subtype-compatible return type.
+- `PatternUsefulness.cj`: aligned selector-match unreachable-case diagnostics with the C++ pattern span, reporting the range from the first pattern to the last pattern in the unreachable case instead of the whole match-case node.
 
 Build status:
 
@@ -43,4 +44,4 @@ Known fidelity gaps:
 - Pattern usefulness/checking is functional but still conservative around complete sealed hierarchy discovery, full intersection/union/Option refinements, and diagnostics that depend on richer C++ Sema context.
 - Builtin and match checking use real AST and type data but still lack the full TypeCheckerImpl cache/synthesis integration present in C++.
 
-Honest coverage estimate for this scoped pass: about 71% of C++ behavior, materially higher than the prior compiling stubs but not module-complete.
+Honest coverage estimate for this scoped pass: about 72% of C++ behavior, materially higher than the prior compiling stubs but not module-complete.
