@@ -89,8 +89,10 @@ public func CHIR2BCHIRTranslateBinaryExpression(context: CHIR2BCHIRContext, expr
 public func CHIR2BCHIRTranslateMemoryExpression(context: CHIR2BCHIRContext, expr: Expression): Unit {
     if (expr.GetExprKind() == ExprKind.ALLOCATE) {
         context.definition.PushOp(OpCode.ALLOCATE)
+    } else if (expr.GetExprKind() == ExprKind.LOAD) {
+        context.definition.PushOp(OpCode.DEREF)
     } else if (expr.GetExprKind() == ExprKind.STORE) {
-        context.definition.PushOp(OpCode.STORE)
+        context.definition.PushOp(OpCode.ASG)
     } else {
         context.definition.PushOp(OpCode.NOT_SUPPORTED)
     }
