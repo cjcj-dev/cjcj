@@ -3,6 +3,7 @@ package cangjie_compiler::sema.TypeCheckExpr
 import std.collection.*
 import cangjie_compiler::ast.*
 import cangjie_compiler::sema.*
+import cangjie_compiler::sema.Desugar.*
 
 public func SelfhostPortStatus_TypeCheckExpr_BinaryExpr(): Bool {
     return true
@@ -54,6 +55,207 @@ private func PropagateBinaryDesugarTarget(be: BinaryExpr, desugar: Expr): Unit {
             ReplaceTarget(be, Some(resolved))
         }
     }
+}
+
+private func HasTupleEqualityOperands(be: BinaryExpr): Bool {
+    if (be.op != TokenKind.EQUAL && be.op != TokenKind.NOTEQ) {
+        return false
+    }
+    if (let Some(leftExpr) <- be.leftExpr) {
+        if (let Some(rightExpr) <- be.rightExpr) {
+            if (let Some(leftTy) <- leftExpr.GetTy()) {
+                if (let Some(rightTy) <- rightExpr.GetTy()) {
+                    return leftTy.IsTuple() && rightTy.IsTuple()
+                }
+            }
+        }
+    }
+    return false
+}
+
+private func ShouldTryBinaryOverload(be: BinaryExpr): Bool {
+    return IsOverloadableOperator(be.op) && !HasTupleEqualityOperands(be)
+}
+
+private func BinaryOperandsReady(typeManager: TypeManager, be: BinaryExpr): Bool {
+    if (let Some(leftExpr) <- be.leftExpr) {
+        if (let Some(rightExpr) <- be.rightExpr) {
+            let leftTy = SynExprShallow(typeManager, leftExpr)
+            let rightTy = SynExprShallow(typeManager, rightExpr)
+            if (Ty.IsTyCorrect(leftTy) && Ty.IsTyCorrect(rightTy)) {
+                let _ = TcReplaceIdeal(typeManager, leftExpr)
+                let _ = TcReplaceIdeal(typeManager, rightExpr)
+                return true
+            }
+        }
+    }
+    return false
+}
+
+private func TrySynBinaryOverload(typeManager: TypeManager, be: BinaryExpr): Option<Ty> {
+    if (!ShouldTryBinaryOverload(be) || !BinaryOperandsReady(typeManager, be)) {
+        return None
+    }
+    DesugarOperatorOverloadExpr(be)
+    if (let Some(desugar) <- be.desugarExpr) {
+        let desugarTy = SynExprShallow(typeManager, desugar)
+        if (Ty.IsTyCorrect(desugarTy)) {
+            PropagateBinaryDesugarTarget(be, desugar)
+            be.SetTy(desugarTy)
+            return Some(desugarTy)
+        }
+        RecoverToBinaryExpr(be)
+    }
+    be.SetTy(TypeManager.GetInvalidTy())
+    return None
+}
+
+private func TryChkBinaryOverload(typeManager: TypeManager, target: Ty, be: BinaryExpr): Bool {
+    if (!ShouldTryBinaryOverload(be) || !BinaryOperandsReady(typeManager, be)) {
+        return false
+    }
+    DesugarOperatorOverloadExpr(be)
+    if (let Some(desugar) <- be.desugarExpr) {
+        if (ChkExprShallow(typeManager, target, desugar)) {
+            PropagateBinaryDesugarTarget(be, desugar)
+            be.SetTy(TcTyOrInvalid(desugar))
+            return true
+        }
+        RecoverToBinaryExpr(be)
+    }
+    return false
+}
+
+private func IsFlowOperator(op: TokenKind): Bool {
+    return op == TokenKind.PIPELINE || op == TokenKind.COMPOSITION
+}
+
+private func IsAloneThisOrSuperExpr(expr: Expr): Bool {
+    if (let Some(refExpr) <- (expr as RefExpr)) {
+        return refExpr.isAlone && (refExpr.isThis || refExpr.isSuper)
+    }
+    return false
+}
+
+private func FlowOperandsValid(be: BinaryExpr): Bool {
+    if (let Some(rightExpr) <- be.rightExpr) {
+        if (IsAloneThisOrSuperExpr(rightExpr)) {
+            return false
+        }
+    } else {
+        return false
+    }
+    if (be.op == TokenKind.COMPOSITION) {
+        if (let Some(leftExpr) <- be.leftExpr) {
+            if (IsAloneThisOrSuperExpr(leftExpr)) {
+                return false
+            }
+        } else {
+            return false
+        }
+    }
+    return true
+}
+
+private func PrepareFlowOperands(typeManager: TypeManager, be: BinaryExpr): Bool {
+    if ((let None <- be.leftExpr) || (let None <- be.rightExpr)) {
+        return false
+    }
+    let leftValue = be.leftExpr.getOrThrow()
+    let rightValue = be.rightExpr.getOrThrow()
+    rightValue.isInFlowExpr = true
+    let leftTy = SynExprShallow(typeManager, leftValue)
+    let rightTy = SynExprShallow(typeManager, rightValue)
+    if (!Ty.IsTyCorrect(leftTy) || !Ty.IsTyCorrect(rightTy)) {
+        if (be.op == TokenKind.COMPOSITION) {
+            let _ = BinaryInvalid(be)
+            return false
+        }
+        leftValue.Clear()
+        rightValue.Clear()
+    }
+    return FlowOperandsValid(be)
+}
+
+private func FuncDeclHasNamedParam(fd: FuncDecl): Bool {
+    if (let Some(body) <- fd.funcBody) {
+        if (!body.paramLists.isEmpty()) {
+            for (param in body.paramLists[0].params) {
+                if (param.isNamedParam) {
+                    return true
+                }
+            }
+        }
+    }
+    return false
+}
+
+private func RefExprTargetIsFuncDeclAndHasNamedParam(re: RefExpr): Bool {
+    if (let Some(target) <- re.ref.target) {
+        if (let Some(funcDecl) <- (target as FuncDecl)) {
+            return FuncDeclHasNamedParam(funcDecl)
+        }
+    }
+    return false
+}
+
+private func FlowOperandsHaveNamedParam(callExpr: CallExpr): Bool {
+    for (arg in callExpr.args) {
+        if (let Some(argExpr) <- arg.expr) {
+            if (let Some(refExpr) <- (argExpr as RefExpr)) {
+                if (RefExprTargetIsFuncDeclAndHasNamedParam(refExpr)) {
+                    return true
+                }
+            }
+        }
+    }
+    return false
+}
+
+private func TrySynFlowDesugar(typeManager: TypeManager, be: BinaryExpr): (Bool, Ty) {
+    if (!PrepareFlowOperands(typeManager, be)) {
+        return (true, TypeManager.GetInvalidTy())
+    }
+    DesugarInTypeCheck(be)
+    if (let Some(desugar) <- be.desugarExpr) {
+        let desugarTy = SynExprShallow(typeManager, desugar)
+        if (Ty.IsTyCorrect(desugarTy)) {
+            if (let Some(callExpr) <- (desugar as CallExpr)) {
+                if (FlowOperandsHaveNamedParam(callExpr)) {
+                    RecoverToBinaryExpr(be)
+                    return (true, BinaryInvalid(be))
+                }
+            }
+            PropagateBinaryDesugarTarget(be, desugar)
+            be.SetTy(desugarTy)
+            return (true, desugarTy)
+        }
+        RecoverToBinaryExpr(be)
+    }
+    return (false, TypeManager.GetInvalidTy())
+}
+
+private func TryChkFlowDesugar(typeManager: TypeManager, target: Ty, be: BinaryExpr): (Bool, Bool) {
+    if (!PrepareFlowOperands(typeManager, be)) {
+        return (true, false)
+    }
+    DesugarInTypeCheck(be)
+    if (let Some(desugar) <- be.desugarExpr) {
+        if (ChkExprShallow(typeManager, target, desugar)) {
+            if (let Some(callExpr) <- (desugar as CallExpr)) {
+                if (FlowOperandsHaveNamedParam(callExpr)) {
+                    RecoverToBinaryExpr(be)
+                    let _ = BinaryInvalid(be)
+                    return (true, false)
+                }
+            }
+            PropagateBinaryDesugarTarget(be, desugar)
+            be.SetTy(TcTyOrInvalid(desugar))
+            return (true, true)
+        }
+        RecoverToBinaryExpr(be)
+    }
+    return (false, false)
 }
 
 private func PrimitiveRank(kind: TypeKind): Int64 {
@@ -322,6 +524,43 @@ private func SynCompositionExpr(typeManager: TypeManager, be: BinaryExpr): Ty {
     return BinaryInvalid(be)
 }
 
+private func SynFlowExpr(typeManager: TypeManager, be: BinaryExpr): Ty {
+    let desugarResult = TrySynFlowDesugar(typeManager, be)
+    if (desugarResult[0]) {
+        return desugarResult[1]
+    }
+    if (be.op == TokenKind.PIPELINE) {
+        return SynPipelineExpr(typeManager, be)
+    }
+    if (be.op == TokenKind.COMPOSITION) {
+        return SynCompositionExpr(typeManager, be)
+    }
+    return BinaryInvalid(be)
+}
+
+private func ChkFlowExpr(typeManager: TypeManager, target: Ty, be: BinaryExpr): Bool {
+    if (let Some(existingTy) <- be.GetTy()) {
+        if (Ty.IsTyCorrect(existingTy)) {
+            return typeManager.CheckTypeCompatibility(target, existingTy) != TypeCompatibility.INCOMPATIBLE
+        }
+    }
+    let desugarResult = TryChkFlowDesugar(typeManager, target, be)
+    if (desugarResult[0]) {
+        return desugarResult[1]
+    }
+    let actualTy = if (be.op == TokenKind.PIPELINE) {
+        SynPipelineExpr(typeManager, be)
+    } else {
+        SynCompositionExpr(typeManager, be)
+    }
+    if (Ty.IsTyCorrect(actualTy) &&
+        typeManager.CheckTypeCompatibility(target, actualTy) != TypeCompatibility.INCOMPATIBLE) {
+        return true
+    }
+    let _ = BinaryInvalid(be)
+    return false
+}
+
 private func SynCoalescingExpr(typeManager: TypeManager, be: BinaryExpr): Ty {
     if (let Some(leftExpr) <- be.leftExpr) {
         let leftTy = SynExprShallow(typeManager, leftExpr)
@@ -386,22 +625,40 @@ public func SynBinaryExpr(typeManager: TypeManager, be: BinaryExpr): Ty {
         return SynLogicalExpr(typeManager, be)
     }
     if (IsArithmeticOperator(be.op)) {
-        return SynArithmeticExpr(typeManager, be)
+        let builtinTy = SynArithmeticExpr(typeManager, be)
+        if (Ty.IsTyCorrect(builtinTy)) {
+            return builtinTy
+        }
+        if (let Some(overloadTy) <- TrySynBinaryOverload(typeManager, be)) {
+            return overloadTy
+        }
+        return BinaryInvalid(be)
     }
     if (IsRelationalOperator(be.op)) {
-        return SynRelationalExpr(typeManager, be)
+        let builtinTy2 = SynRelationalExpr(typeManager, be)
+        if (Ty.IsTyCorrect(builtinTy2)) {
+            return builtinTy2
+        }
+        if (let Some(overloadTy2) <- TrySynBinaryOverload(typeManager, be)) {
+            return overloadTy2
+        }
+        return BinaryInvalid(be)
     }
     if (IsShiftOperator(be.op)) {
-        return SynShiftExpr(typeManager, be)
+        let builtinTy3 = SynShiftExpr(typeManager, be)
+        if (Ty.IsTyCorrect(builtinTy3)) {
+            return builtinTy3
+        }
+        if (let Some(overloadTy3) <- TrySynBinaryOverload(typeManager, be)) {
+            return overloadTy3
+        }
+        return BinaryInvalid(be)
     }
     if (be.op == TokenKind.COALESCING) {
         return SynCoalescingExpr(typeManager, be)
     }
-    if (be.op == TokenKind.PIPELINE) {
-        return SynPipelineExpr(typeManager, be)
-    }
-    if (be.op == TokenKind.COMPOSITION) {
-        return SynCompositionExpr(typeManager, be)
+    if (IsFlowOperator(be.op)) {
+        return SynFlowExpr(typeManager, be)
     }
     return BinaryInvalid(be)
 }
@@ -410,11 +667,20 @@ public func ChkBinaryExpr(typeManager: TypeManager, target: Ty, be: BinaryExpr):
     if (be.op == TokenKind.COALESCING) {
         return ChkCoalescingExpr(typeManager, target, be)
     }
+    if (IsFlowOperator(be.op)) {
+        return ChkFlowExpr(typeManager, target, be)
+    }
     let actualTy = SynBinaryExpr(typeManager, be)
     if (!Ty.IsTyCorrect(actualTy)) {
+        if (TryChkBinaryOverload(typeManager, target, be)) {
+            return true
+        }
         return false
     }
     if (typeManager.CheckTypeCompatibility(target, actualTy) != TypeCompatibility.INCOMPATIBLE) {
+        return true
+    }
+    if (TryChkBinaryOverload(typeManager, target, be)) {
         return true
     }
     let _ = BinaryInvalid(be)

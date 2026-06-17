@@ -3,6 +3,7 @@ package cangjie_compiler::sema.TypeCheckExpr
 import std.collection.*
 import cangjie_compiler::ast.*
 import cangjie_compiler::sema.*
+import cangjie_compiler::sema.Desugar.*
 
 public func SelfhostPortStatus_TypeCheckExpr_SubscriptExpr(): Bool {
     return true
@@ -113,6 +114,25 @@ private func SynIndexExprs(typeManager: TypeManager, se: SubscriptExpr): Bool {
     return ok
 }
 
+private func ChkSubscriptOverload(typeManager: TypeManager, target: Option<Ty>, se: SubscriptExpr): Bool {
+    DesugarOperatorOverloadExpr(se)
+    if (let Some(desugar) <- se.desugarExpr) {
+        let ok = if (let Some(targetTy) <- target) {
+            ChkExprShallow(typeManager, targetTy, desugar)
+        } else {
+            Ty.IsTyCorrect(SynExprShallow(typeManager, desugar))
+        }
+        if (ok) {
+            PropagateSubscriptDesugarTarget(se, desugar)
+            se.SetTy(TcTyOrInvalid(desugar))
+            return true
+        }
+        RecoverToSubscriptExpr(se)
+    }
+    let _ = SubscriptInvalid(se)
+    return false
+}
+
 public func ChkSubscriptExpr(typeManager: TypeManager, target: Ty, se: SubscriptExpr): Bool {
     if (let Some(desugar) <- se.desugarExpr) {
         if (ChkExprShallow(typeManager, target, desugar)) {
@@ -142,8 +162,7 @@ public func ChkSubscriptExpr(typeManager: TypeManager, target: Ty, se: Subscript
     if (let Some(varrayTy) <- (baseTy as VArrayTy)) {
         return ChkVArrayAccess(typeManager, Some(target), se, varrayTy)
     }
-    let _ = SubscriptInvalid(se)
-    return false
+    return ChkSubscriptOverload(typeManager, Some(target), se)
 }
 
 public func SynSubscriptExpr(typeManager: TypeManager, se: SubscriptExpr): Ty {
@@ -178,6 +197,9 @@ public func SynSubscriptExpr(typeManager: TypeManager, se: SubscriptExpr): Ty {
             return TcTyOrInvalid(se)
         }
         return SubscriptInvalid(se)
+    }
+    if (ChkSubscriptOverload(typeManager, None, se)) {
+        return TcTyOrInvalid(se)
     }
     return SubscriptInvalid(se)
 }

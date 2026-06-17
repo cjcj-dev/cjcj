@@ -9,7 +9,9 @@ public func SelfhostPortStatus_TypeCheckExpr_TryExpr(): Bool {
 }
 
 private let EFFECT_PACKAGE_NAME: String = "stdx.effect"
+private let CORE_PACKAGE_NAME: String = "std.core"
 private let COMMAND_TYPE_NAME: String = "Command"
+private let RESOURCE_TYPE_NAME: String = "Resource"
 
 private func TryInvalid(te: TryExpr): Ty {
     return TcInvalid(te)
@@ -77,6 +79,37 @@ private func CommandPayloadTy(typeManager: TypeManager, ty: Ty): Option<Ty> {
         return Some(commandTy.typeArgs[0])
     }
     return None
+}
+
+private func IsCoreNamedTy(ty: Ty, name: String): Bool {
+    if (let Some(decl) <- Ty.GetDeclPtrOfTy(Some(ty))) {
+        if (!decl.fullPackageName.isEmpty()) {
+            return decl.fullPackageName == CORE_PACKAGE_NAME && decl.identifier.Val() == name
+        }
+    }
+    return ty.name == name
+}
+
+private func IsResourceTy(typeManager: TypeManager, ty: Ty): Bool {
+    if (!Ty.IsTyCorrect(ty) || ty.IsNothing()) {
+        return false
+    }
+    if (IsCoreNamedTy(ty, RESOURCE_TYPE_NAME)) {
+        return true
+    }
+    if (let Some(genericTy) <- (ty as GenericsTy)) {
+        for (upperTy in genericTy.upperBounds) {
+            if (IsResourceTy(typeManager, upperTy)) {
+                return true
+            }
+        }
+    }
+    for (superTy in typeManager.GetAllSuperTys(ty).values) {
+        if (IsCoreNamedTy(superTy, RESOURCE_TYPE_NAME)) {
+            return true
+        }
+    }
+    return false
 }
 
 private func IsIncludedType(typeManager: TypeManager, included: ArrayList<Ty>, candidate: Ty): Bool {
@@ -278,10 +311,17 @@ private func ValidateHandler(handler: Handler): Bool {
     return true
 }
 
-private func HandlerCommandTy(typeManager: TypeManager, handler: Handler): Ty {
+private func HandlerPatternTy(typeManager: TypeManager, handler: Handler): Ty {
     if (let Some(commandPattern) <- handler.commandPattern) {
-        if (let Some(commandTy) <- commandPattern.GetTy()) {
-            return commandTy
+        if (let Some(commandTypePattern) <- (commandPattern as CommandTypePattern)) {
+            if (let Some(innerPattern) <- commandTypePattern.pattern) {
+                if (let Some(patternTy) <- innerPattern.GetTy()) {
+                    return patternTy
+                }
+            }
+        }
+        if (let Some(patternTy) <- commandPattern.GetTy()) {
+            return patternTy
         }
     }
     return typeManager.GetAnyTy()
@@ -304,28 +344,52 @@ private func ChkTryExprFinallyBlock(typeManager: TypeManager, te: TryExpr): Bool
     return true
 }
 
+private func ChkResourceSpec(typeManager: TypeManager, resource: VarDecl): Bool {
+    var ok = true
+    var declaredTy: Option<Ty> = None
+    if (let Some(typeNode) <- resource.typeNode) {
+        if (let Some(typeTy) <- typeNode.GetTy()) {
+            declaredTy = Some(typeTy)
+            resource.SetTy(typeTy)
+        } else {
+            ok = false
+        }
+    }
+    if (let Some(initializer) <- resource.initializer) {
+        let initTy = SynExprShallow(typeManager, initializer)
+        if (Ty.IsTyCorrect(initTy)) {
+            let concreteInitTy = TcReplaceIdeal(typeManager, initializer)
+            if (let Some(targetTy) <- declaredTy) {
+                if (typeManager.CheckTypeCompatibility(targetTy, concreteInitTy) == TypeCompatibility.INCOMPATIBLE) {
+                    ok = false
+                }
+            } else {
+                resource.SetTy(concreteInitTy)
+            }
+        } else {
+            ok = false
+        }
+    }
+    if (!Ty.IsTyCorrect(resource.GetTy())) {
+        ok = false
+    }
+    if (ok) {
+        if (let Some(resourceTy) <- resource.GetTy()) {
+            ok = IsResourceTy(typeManager, resourceTy)
+        } else {
+            ok = false
+        }
+    }
+    if (!ok) {
+        resource.SetTy(TypeManager.GetInvalidTy())
+    }
+    return ok
+}
+
 private func SynTryWithResourcesExpr(typeManager: TypeManager, te: TryExpr): Ty {
     var ok = true
     for (resource in te.resourceSpec) {
-        if (let Some(typeNode) <- resource.typeNode) {
-            if (let Some(typeTy) <- typeNode.GetTy()) {
-                resource.SetTy(typeTy)
-            }
-        }
-        if (let Some(initializer) <- resource.initializer) {
-            let initTy = SynExprShallow(typeManager, initializer)
-            if (Ty.IsTyCorrect(initTy)) {
-                if (let None <- resource.GetTy()) {
-                    resource.SetTy(initTy)
-                }
-            } else {
-                resource.SetTy(TypeManager.GetInvalidTy())
-                ok = false
-            }
-        }
-        if (!Ty.IsTyCorrect(resource.GetTy())) {
-            ok = false
-        }
+        ok = ChkResourceSpec(typeManager, resource) && ok
     }
     if (let Some(tryBlock) <- te.tryBlock) {
         ok = Ty.IsTyCorrect(SynBlock(typeManager, tryBlock)) && ok
@@ -382,8 +446,8 @@ private func SynTryExprCatchesAndHandles(typeManager: TypeManager, te: TryExpr, 
             ok = false
         }
         if (let Some(lambda) <- handler.desugaredLambda) {
-            let commandTy = HandlerCommandTy(typeManager, handler)
-            let handleTy = typeManager.GetFunctionTy([commandTy], joinedTy)
+            let patternTy = HandlerPatternTy(typeManager, handler)
+            let handleTy = typeManager.GetFunctionTy([patternTy], joinedTy)
             ok = ChkLamExpr(typeManager, handleTy, lambda) && ok
         }
     }
@@ -439,7 +503,7 @@ private func ChkTryExprCatchesAndHandles(typeManager: TypeManager, target: Ty, t
             ok = false
         }
         if (let Some(lambda) <- handler.desugaredLambda) {
-            let handleTy = typeManager.GetFunctionTy([HandlerCommandTy(typeManager, handler)], target)
+            let handleTy = typeManager.GetFunctionTy([HandlerPatternTy(typeManager, handler)], target)
             ok = ChkLamExpr(typeManager, handleTy, lambda) && ok
         }
     }
