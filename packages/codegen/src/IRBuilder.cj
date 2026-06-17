@@ -124,6 +124,21 @@ public class IRBuilder2 {
         return CreateStore(value, dest.GetRawValue())
     }
 
+    public func CreateMemSet(pointer: LLVMValueRef, value: LLVMValueRef, len: LLVMValueRef,
+        align!: UInt32 = 0u32): LLVMValueRef {
+        return unsafe { LLVMBuildMemSet(builder.raw, pointer, value, len, align) }
+    }
+
+    public func CreateMemCpy(dest: LLVMValueRef, destAlign: UInt32, src: LLVMValueRef, srcAlign: UInt32,
+        size: LLVMValueRef): LLVMValueRef {
+        return unsafe { LLVMBuildMemCpy(builder.raw, dest, destAlign, src, srcAlign, size) }
+    }
+
+    public func CreateMemMove(dest: LLVMValueRef, destAlign: UInt32, src: LLVMValueRef, srcAlign: UInt32,
+        size: LLVMValueRef): LLVMValueRef {
+        return unsafe { LLVMBuildMemMove(builder.raw, dest, destAlign, src, srcAlign, size) }
+    }
+
     public func CreateBr(dest: LLVMBasicBlockRef): LLVMValueRef {
         return unsafe { LLVMBuildBr(builder.raw, dest) }
     }
@@ -341,6 +356,7 @@ public class IRBuilder2 {
                 }
             }
         }
+        PropagateSRetAttributeFromCallee(callee, result)
         return result
     }
 
@@ -367,6 +383,7 @@ public class IRBuilder2 {
                 }
             }
         }
+        PropagateSRetAttributeFromCallee(callee, result)
         return result
     }
 
@@ -477,6 +494,85 @@ public class IRBuilder2 {
             }
         }
         return result
+    }
+
+    public func CreateInBoundsGEP(elementType: LLVMTypeRef, pointer: LLVMValueRef, indices: ArrayList<LLVMValueRef>,
+        name!: String = ""): LLVMValueRef {
+        var result = LLVMNullValue()
+        try (nameCString = unsafe { LibC.mallocCString(name) }.asResource()) {
+            if (indices.isEmpty()) {
+                return pointer
+            }
+            try (idxPtr = LibC.malloc<LLVMValueRef>(count: indices.size).asResource()) {
+                var idx: Int64 = 0
+                while (idx < indices.size) {
+                    unsafe { (idxPtr.value + idx).write(indices[idx]) }
+                    idx++
+                }
+                result = unsafe {
+                    LLVMBuildInBoundsGEP2(builder.raw, elementType, pointer, idxPtr.value, UInt32(indices.size),
+                        nameCString.value)
+                }
+            }
+        }
+        return result
+    }
+
+    public func CreateStructGEP(elementType: LLVMTypeRef, pointer: LLVMValueRef, index: UInt32,
+        name!: String = ""): LLVMValueRef {
+        var result = LLVMNullValue()
+        try (nameCString = unsafe { LibC.mallocCString(name) }.asResource()) {
+            result = unsafe { LLVMBuildStructGEP2(builder.raw, elementType, pointer, index, nameCString.value) }
+        }
+        return result
+    }
+
+    public func CreateVArrayGEP(arrayType: LLVMTypeRef, pointer: LLVMValueRef, indices: ArrayList<LLVMValueRef>,
+        name!: String = ""): LLVMValueRef {
+        let gepIndices = ArrayList<LLVMValueRef>()
+        gepIndices.add(GetInt64(0))
+        for (index in indices) {
+            gepIndices.add(index)
+        }
+        return CreateInBoundsGEP(arrayType, pointer, gepIndices, name: name)
+    }
+
+    public func CreatePHI(valueType: LLVMTypeRef, name!: String = ""): LLVMValueRef {
+        var result = LLVMNullValue()
+        try (nameCString = unsafe { LibC.mallocCString(name) }.asResource()) {
+            result = unsafe { LLVMBuildPhi(builder.raw, valueType, nameCString.value) }
+        }
+        return ApplyFastMathIfNeeded(result)
+    }
+
+    public func AddIncoming(phi: LLVMValueRef, values: ArrayList<LLVMValueRef>,
+        blocks: ArrayList<LLVMBasicBlockRef>): Unit {
+        if (values.size != blocks.size) {
+            throw IllegalArgumentException("PHI incoming values and blocks must have the same length")
+        }
+        if (values.isEmpty()) {
+            return
+        }
+        try (valuePtr = LibC.malloc<LLVMValueRef>(count: values.size).asResource()) {
+            try (blockPtr = LibC.malloc<LLVMBasicBlockRef>(count: blocks.size).asResource()) {
+                var idx: Int64 = 0
+                while (idx < values.size) {
+                    unsafe { (valuePtr.value + idx).write(values[idx]) }
+                    unsafe { (blockPtr.value + idx).write(blocks[idx]) }
+                    idx++
+                }
+                unsafe { LLVMAddIncoming(phi, valuePtr.value, blockPtr.value, UInt32(values.size)) }
+            }
+        }
+    }
+
+    public func CreateSelect(cond: LLVMValueRef, trueValue: LLVMValueRef, falseValue: LLVMValueRef,
+        name!: String = ""): LLVMValueRef {
+        var result = LLVMNullValue()
+        try (nameCString = unsafe { LibC.mallocCString(name) }.asResource()) {
+            result = unsafe { LLVMBuildSelect(builder.raw, cond, trueValue, falseValue, nameCString.value) }
+        }
+        return ApplyFastMathIfNeeded(result)
     }
 
     public func CreateBitCast(value: LLVMValueRef, destType: LLVMTypeRef, name!: String = "bitcast"): LLVMValueRef {
@@ -606,6 +702,14 @@ public class IRBuilder2 {
             idx++
         }
         return aggregate
+    }
+
+    public func CreateExtractValue(aggregate: LLVMValueRef, index: UInt32, name!: String = ""): LLVMValueRef {
+        var result = LLVMNullValue()
+        try (nameCString = unsafe { LibC.mallocCString(name) }.asResource()) {
+            result = unsafe { LLVMBuildExtractValue(builder.raw, aggregate, index, nameCString.value) }
+        }
+        return result
     }
 
     public func CreateOverflowOrArithmeticException(ident: String, isOverflow!: Bool = true): Unit {

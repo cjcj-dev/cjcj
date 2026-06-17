@@ -168,6 +168,7 @@ foreign {
     func LLVMDeleteBasicBlock(block: LLVMBasicBlockRef): Unit
     func LLVMGetFirstInstruction(block: LLVMBasicBlockRef): LLVMValueRef
     func LLVMGetNextInstruction(inst: LLVMValueRef): LLVMValueRef
+    func LLVMGetInstructionParent(inst: LLVMValueRef): LLVMBasicBlockRef
     func LLVMGetInstructionOpcode(inst: LLVMValueRef): Int32
     func LLVMGetFirstUse(value: LLVMValueRef): LLVMUseRef
     func LLVMInstructionEraseFromParent(inst: LLVMValueRef): Unit
@@ -181,6 +182,9 @@ foreign {
     func LLVMMetadataAsValue(context: LLVMContextRef, metadata: LLVMMetadataRef): LLVMValueRef
     func LLVMValueAsMetadata(value: LLVMValueRef): LLVMMetadataRef
     func LLVMTypeOf(value: LLVMValueRef): LLVMTypeRef
+    func LLVMGetValueContext(value: LLVMValueRef): LLVMContextRef
+    func LLVMIsAFunction(value: LLVMValueRef): LLVMValueRef
+    func LLVMIsAInstruction(value: LLVMValueRef): LLVMValueRef
     func LLVMGetIntTypeWidth(integerTy: LLVMTypeRef): UInt32
 
     func LLVMCreateBuilderInContext(context: LLVMContextRef): LLVMBuilderRef
@@ -204,6 +208,12 @@ foreign {
     func LLVMBuildAlloca(builder: LLVMBuilderRef, valueType: LLVMTypeRef, name: CString): LLVMValueRef
     func LLVMBuildLoad2(builder: LLVMBuilderRef, valueType: LLVMTypeRef, pointer: LLVMValueRef, name: CString): LLVMValueRef
     func LLVMBuildStore(builder: LLVMBuilderRef, value: LLVMValueRef, pointer: LLVMValueRef): LLVMValueRef
+    func LLVMBuildMemSet(builder: LLVMBuilderRef, pointer: LLVMValueRef, value: LLVMValueRef, len: LLVMValueRef,
+        align: UInt32): LLVMValueRef
+    func LLVMBuildMemCpy(builder: LLVMBuilderRef, dest: LLVMValueRef, destAlign: UInt32, src: LLVMValueRef,
+        srcAlign: UInt32, size: LLVMValueRef): LLVMValueRef
+    func LLVMBuildMemMove(builder: LLVMBuilderRef, dest: LLVMValueRef, destAlign: UInt32, src: LLVMValueRef,
+        srcAlign: UInt32, size: LLVMValueRef): LLVMValueRef
     func LLVMBuildAdd(builder: LLVMBuilderRef, left: LLVMValueRef, right: LLVMValueRef, name: CString): LLVMValueRef
     func LLVMBuildSub(builder: LLVMBuilderRef, left: LLVMValueRef, right: LLVMValueRef, name: CString): LLVMValueRef
     func LLVMBuildMul(builder: LLVMBuilderRef, left: LLVMValueRef, right: LLVMValueRef, name: CString): LLVMValueRef
@@ -242,17 +252,33 @@ foreign {
     func LLVMBuildBitCast(builder: LLVMBuilderRef, value: LLVMValueRef, destType: LLVMTypeRef, name: CString): LLVMValueRef
     func LLVMBuildAddrSpaceCast(builder: LLVMBuilderRef, value: LLVMValueRef, destType: LLVMTypeRef, name: CString): LLVMValueRef
     func LLVMBuildInsertValue(builder: LLVMBuilderRef, aggregate: LLVMValueRef, element: LLVMValueRef, index: UInt32, name: CString): LLVMValueRef
+    func LLVMBuildExtractValue(builder: LLVMBuilderRef, aggregate: LLVMValueRef, index: UInt32, name: CString): LLVMValueRef
     func LLVMBuildCall2(builder: LLVMBuilderRef, functionType: LLVMTypeRef, fn: LLVMValueRef, args: CPointer<LLVMValueRef>, numArgs: UInt32, name: CString): LLVMValueRef
     func LLVMBuildInvoke2(builder: LLVMBuilderRef, functionType: LLVMTypeRef, fn: LLVMValueRef,
         args: CPointer<LLVMValueRef>, numArgs: UInt32, thenBlock: LLVMBasicBlockRef, catchBlock: LLVMBasicBlockRef,
         name: CString): LLVMValueRef
     func LLVMBuildGEP2(builder: LLVMBuilderRef, elementType: LLVMTypeRef, pointer: LLVMValueRef, indices: CPointer<LLVMValueRef>, numIndices: UInt32, name: CString): LLVMValueRef
+    func LLVMBuildInBoundsGEP2(builder: LLVMBuilderRef, elementType: LLVMTypeRef, pointer: LLVMValueRef,
+        indices: CPointer<LLVMValueRef>, numIndices: UInt32, name: CString): LLVMValueRef
+    func LLVMBuildStructGEP2(builder: LLVMBuilderRef, elementType: LLVMTypeRef, pointer: LLVMValueRef, index: UInt32,
+        name: CString): LLVMValueRef
+    func LLVMBuildPhi(builder: LLVMBuilderRef, valueType: LLVMTypeRef, name: CString): LLVMValueRef
+    func LLVMAddIncoming(phiNode: LLVMValueRef, incomingValues: CPointer<LLVMValueRef>,
+        incomingBlocks: CPointer<LLVMBasicBlockRef>, count: UInt32): Unit
+    func LLVMBuildSelect(builder: LLVMBuilderRef, cond: LLVMValueRef, trueValue: LLVMValueRef,
+        falseValue: LLVMValueRef, name: CString): LLVMValueRef
     func LLVMBuildUnreachable(builder: LLVMBuilderRef): LLVMValueRef
     func LLVMCanValueUseFastMathFlags(inst: LLVMValueRef): Int32
     func LLVMSetFastMathFlags(inst: LLVMValueRef, flags: UInt32): Unit
     func LLVMGetEnumAttributeKindForName(name: CString, len: UIntNative): UInt32
     func LLVMCreateEnumAttribute(context: LLVMContextRef, kindID: UInt32, value: UInt64): LLVMAttributeRef
+    func LLVMCreateTypeAttribute(context: LLVMContextRef, kindID: UInt32, attrType: LLVMTypeRef): LLVMAttributeRef
+    func LLVMGetEnumAttributeKind(attr: LLVMAttributeRef): UInt32
+    func LLVMGetTypeAttributeValue(attr: LLVMAttributeRef): LLVMTypeRef
+    func LLVMIsTypeAttribute(attr: LLVMAttributeRef): Int32
     func LLVMAddAttributeAtIndex(fn: LLVMValueRef, index: UInt32, attr: LLVMAttributeRef): Unit
+    func LLVMGetAttributeCountAtIndex(fn: LLVMValueRef, index: UInt32): UInt32
+    func LLVMGetAttributesAtIndex(fn: LLVMValueRef, index: UInt32, attrs: CPointer<LLVMAttributeRef>): Unit
     func strcmp(lhs: CString, rhs: CString): Int32
     func strlen(str: CString): UIntNative
     func memcpy(dest: CPointer<UInt8>, src: CString, count: UIntNative): CPointer<UInt8>

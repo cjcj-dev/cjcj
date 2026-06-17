@@ -151,6 +151,68 @@ public func LLVMNormalizeTargetTripleString(triple: String): String {
     return result
 }
 
+public class LLVMTargetLookupResult {
+    public let ok: Bool
+    public let target: LLVMTargetRef
+    public let message: String
+
+    public init(target: LLVMTargetRef) {
+        ok = true
+        this.target = target
+        message = ""
+    }
+
+    public init(message: String) {
+        ok = false
+        target = LLVMNullTarget()
+        this.message = message
+    }
+}
+
+public class LLVMTargetEmissionResult {
+    public let ok: Bool
+    public let message: String
+    public let buffer: Option<LLVMMemoryBufferHandle>
+
+    public init(ok: Bool, message: String, buffer: Option<LLVMMemoryBufferHandle>) {
+        this.ok = ok
+        this.message = message
+        this.buffer = buffer
+    }
+
+    public static func Success(): LLVMTargetEmissionResult {
+        return LLVMTargetEmissionResult(true, "", None)
+    }
+
+    public static func Success(buffer: LLVMMemoryBufferHandle): LLVMTargetEmissionResult {
+        return LLVMTargetEmissionResult(true, "", Some(buffer))
+    }
+
+    public static func Failure(message: String): LLVMTargetEmissionResult {
+        return LLVMTargetEmissionResult(false, message, None)
+    }
+}
+
+public func LLVMGetTargetFromTripleChecked(triple: String): LLVMTargetLookupResult {
+    var result = LLVMTargetLookupResult("failed to get LLVM target for triple: " + triple)
+    try (tripleCString = unsafe { LibC.mallocCString(triple) }.asResource(),
+        outTarget = LibC.malloc<LLVMTargetRef>().asResource(),
+        outMessage = LibC.malloc<CString>().asResource()) {
+        unsafe { outTarget.value.write(LLVMNullTarget()) }
+        unsafe { outMessage.value.write(CString(CPointer<UInt8>())) }
+        let status = unsafe { LLVMGetTargetFromTriple(tripleCString.value, outTarget.value, outMessage.value) }
+        if (status == 0) {
+            result = LLVMTargetLookupResult(unsafe { outTarget.value.read() })
+        } else {
+            let message = LLVMConsumeMessage(unsafe { outMessage.value.read() })
+            if (!message.isEmpty()) {
+                result = LLVMTargetLookupResult(message)
+            }
+        }
+    }
+    return result
+}
+
 public class LLVMTargetMachineOptionsHandle <: Resource {
     public let raw: LLVMTargetMachineOptionsRef
     private var closed: Bool = false
@@ -161,6 +223,51 @@ public class LLVMTargetMachineOptionsHandle <: Resource {
 
     public static func Create(): LLVMTargetMachineOptionsHandle {
         return LLVMTargetMachineOptionsHandle(unsafe { LLVMCreateTargetMachineOptions() })
+    }
+
+    public func SetCPU(cpu: String): Unit {
+        if (raw.isNull()) {
+            return
+        }
+        try (cpuCString = unsafe { LibC.mallocCString(cpu) }.asResource()) {
+            unsafe { LLVMTargetMachineOptionsSetCPU(raw, cpuCString.value) }
+        }
+    }
+
+    public func SetFeatures(features: String): Unit {
+        if (raw.isNull()) {
+            return
+        }
+        try (featuresCString = unsafe { LibC.mallocCString(features) }.asResource()) {
+            unsafe { LLVMTargetMachineOptionsSetFeatures(raw, featuresCString.value) }
+        }
+    }
+
+    public func SetABI(abi: String): Unit {
+        if (raw.isNull()) {
+            return
+        }
+        try (abiCString = unsafe { LibC.mallocCString(abi) }.asResource()) {
+            unsafe { LLVMTargetMachineOptionsSetABI(raw, abiCString.value) }
+        }
+    }
+
+    public func SetCodeGenOptLevel(level: LLVMCodeGenOptLevel): Unit {
+        if (!raw.isNull()) {
+            unsafe { LLVMTargetMachineOptionsSetCodeGenOptLevel(raw, LLVMCodeGenOptLevelValue(level)) }
+        }
+    }
+
+    public func SetRelocMode(mode: LLVMRelocMode): Unit {
+        if (!raw.isNull()) {
+            unsafe { LLVMTargetMachineOptionsSetRelocMode(raw, LLVMRelocModeValue(mode)) }
+        }
+    }
+
+    public func SetCodeModel(model: LLVMCodeModel): Unit {
+        if (!raw.isNull()) {
+            unsafe { LLVMTargetMachineOptionsSetCodeModel(raw, LLVMCodeModelValue(model)) }
+        }
     }
 
     public func close(): Unit {
@@ -199,4 +306,116 @@ public class LLVMTargetMachineHandle <: Resource {
     public func isClosed(): Bool {
         return closed
     }
+}
+
+public func LLVMCreateTargetMachineWithOptionsChecked(target: LLVMTargetRef, triple: String,
+    options: LLVMTargetMachineOptionsHandle): Option<LLVMTargetMachineHandle> {
+    if (target.isNull() || options.raw.isNull()) {
+        return None
+    }
+    var result: Option<LLVMTargetMachineHandle> = None
+    try (tripleCString = unsafe { LibC.mallocCString(triple) }.asResource()) {
+        let rawTargetMachine = unsafe { LLVMCreateTargetMachineWithOptions(target, tripleCString.value, options.raw) }
+        if (!rawTargetMachine.isNull()) {
+            result = LLVMTargetMachineHandle(rawTargetMachine)
+        }
+    }
+    return result
+}
+
+public func LLVMCreateTargetMachineForTriple(triple: String, cpu!: String = "", features!: String = "",
+    level!: LLVMCodeGenOptLevel = LLVMCodeGenOptLevel.CodeGenLevelDefault,
+    reloc!: LLVMRelocMode = LLVMRelocMode.RelocDefault,
+    codeModel!: LLVMCodeModel = LLVMCodeModel.CodeModelDefault): Option<LLVMTargetMachineHandle> {
+    let targetResult = LLVMGetTargetFromTripleChecked(triple)
+    if (!targetResult.ok || targetResult.target.isNull()) {
+        return None
+    }
+    var result: Option<LLVMTargetMachineHandle> = None
+    try (tripleCString = unsafe { LibC.mallocCString(triple) }.asResource(),
+        cpuCString = unsafe { LibC.mallocCString(cpu) }.asResource(),
+        featuresCString = unsafe { LibC.mallocCString(features) }.asResource()) {
+        let rawTargetMachine = unsafe {
+            LLVMCreateTargetMachine(targetResult.target, tripleCString.value, cpuCString.value, featuresCString.value,
+                LLVMCodeGenOptLevelValue(level), LLVMRelocModeValue(reloc), LLVMCodeModelValue(codeModel))
+        }
+        if (!rawTargetMachine.isNull()) {
+            result = LLVMTargetMachineHandle(rawTargetMachine)
+        }
+    }
+    return result
+}
+
+public func LLVMCreateHostTargetMachine(level!: LLVMCodeGenOptLevel = LLVMCodeGenOptLevel.CodeGenLevelDefault,
+    reloc!: LLVMRelocMode = LLVMRelocMode.RelocDefault,
+    codeModel!: LLVMCodeModel = LLVMCodeModel.CodeModelDefault): Option<LLVMTargetMachineHandle> {
+    let triple = LLVMGetDefaultTargetTripleString()
+    let cpu = LLVMConsumeMessage(unsafe { LLVMGetHostCPUName() })
+    let features = LLVMConsumeMessage(unsafe { LLVMGetHostCPUFeatures() })
+    return LLVMCreateTargetMachineForTriple(triple, cpu: cpu, features: features, level: level, reloc: reloc,
+        codeModel: codeModel)
+}
+
+public func LLVMTargetMachineEmitToFileChecked(targetMachine: LLVMTargetMachineHandle, module: LLVMModuleHandle,
+    filename: String, fileType: LLVMCodeGenFileType): LLVMTargetEmissionResult {
+    if (targetMachine.raw.isNull() || module.raw.isNull()) {
+        return LLVMTargetEmissionResult.Failure("cannot emit LLVM module with null target machine or module")
+    }
+    var result = LLVMTargetEmissionResult.Failure("failed to emit LLVM module: " + filename)
+    try (filenameCString = unsafe { LibC.mallocCString(filename) }.asResource(),
+        outMessage = LibC.malloc<CString>().asResource()) {
+        unsafe { outMessage.value.write(CString(CPointer<UInt8>())) }
+        let status = unsafe {
+            LLVMTargetMachineEmitToFile(targetMachine.raw, module.raw, filenameCString.value,
+                LLVMCodeGenFileTypeValue(fileType), outMessage.value)
+        }
+        if (status == 0) {
+            result = LLVMTargetEmissionResult.Success()
+            let rawMessage = unsafe { outMessage.value.read() }
+            if (!rawMessage.isNull()) {
+                let _ = LLVMConsumeMessage(rawMessage)
+            }
+        } else {
+            let message = LLVMConsumeMessage(unsafe { outMessage.value.read() })
+            if (!message.isEmpty()) {
+                result = LLVMTargetEmissionResult.Failure(message)
+            }
+        }
+    }
+    return result
+}
+
+public func LLVMTargetMachineEmitToMemoryBufferChecked(targetMachine: LLVMTargetMachineHandle,
+    module: LLVMModuleHandle, fileType: LLVMCodeGenFileType): LLVMTargetEmissionResult {
+    if (targetMachine.raw.isNull() || module.raw.isNull()) {
+        return LLVMTargetEmissionResult.Failure("cannot emit LLVM module with null target machine or module")
+    }
+    var result = LLVMTargetEmissionResult.Failure("failed to emit LLVM module to memory buffer")
+    try (outMessage = LibC.malloc<CString>().asResource(),
+        outBuffer = LibC.malloc<LLVMMemoryBufferRef>().asResource()) {
+        unsafe { outMessage.value.write(CString(CPointer<UInt8>())) }
+        unsafe { outBuffer.value.write(CPointer<Unit>()) }
+        let status = unsafe {
+            LLVMTargetMachineEmitToMemoryBuffer(targetMachine.raw, module.raw, LLVMCodeGenFileTypeValue(fileType),
+                outMessage.value, outBuffer.value)
+        }
+        if (status == 0) {
+            let rawBuffer = unsafe { outBuffer.value.read() }
+            if (rawBuffer.isNull()) {
+                result = LLVMTargetEmissionResult.Failure("LLVM target emission returned a null memory buffer")
+            } else {
+                result = LLVMTargetEmissionResult.Success(LLVMMemoryBufferHandle(rawBuffer))
+            }
+            let rawMessage = unsafe { outMessage.value.read() }
+            if (!rawMessage.isNull()) {
+                let _ = LLVMConsumeMessage(rawMessage)
+            }
+        } else {
+            let message = LLVMConsumeMessage(unsafe { outMessage.value.read() })
+            if (!message.isEmpty()) {
+                result = LLVMTargetEmissionResult.Failure(message)
+            }
+        }
+    }
+    return result
 }

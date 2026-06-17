@@ -2,6 +2,7 @@ package cangjie_compiler::codegen
 
 import std.collection.*
 import cangjie_compiler::chir.Block
+import cangjie_compiler::chir.FuncType
 import cangjie_compiler::chir.Function
 import cangjie_compiler::chir.GlobalVar
 import cangjie_compiler::chir.LocalVar
@@ -105,9 +106,31 @@ public class CGModule {
             LLVMNullValue()
         }
         let cgFunc = CGFunction(rawFunction, cgFuncType, chirValue, this)
+        ApplyFunctionABIAttributes(rawFunction, chirValue, cgFuncType)
         functions[name] = cgFunc
         valueMapping[name] = cgFunc
         return cgFunc
+    }
+
+    private func ApplyFunctionABIAttributes(rawFunction: LLVMValueRef, chirValue: Value, cgFuncType: CGType): Unit {
+        if (rawFunction.isNull()) {
+            return
+        }
+        if (let Some(functionCGType) <- (cgFuncType as CGFunctionType)) {
+            if (!functionCGType.HasSRet()) {
+                return
+            }
+            if (let Some(chirType) <- chirValue.GetType()) {
+                if (let Some(funcType) <- (chirType as FuncType)) {
+                    let retCGType = CGType.GetOrCreate(this, funcType.GetReturnType())
+                    AddSRetAttribute(rawFunction, retCGType.GetLLVMType())
+                    AddNoAliasAttribute(rawFunction)
+                    return
+                }
+            }
+            AddSRetAttribute(rawFunction)
+            AddNoAliasAttribute(rawFunction)
+        }
     }
 
     public func GetOrInsertGlobalVariable(chirGV: GlobalVar): CGValue {
