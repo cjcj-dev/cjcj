@@ -1,6 +1,6 @@
 # Utils Port Status
 
-Date: 2026-06-17
+Date: 2026-06-18
 
 Build: `cjpm build` passes.
 
@@ -44,6 +44,7 @@ Implemented:
 - Aligned the Windows `FileUtil.IsAbsolutePathAboveLengthLimit` path with the C++ `GetFullPathNameA`/`ERROR_FILENAME_EXCED_RANGE` check instead of only comparing the raw input length.
 - Tightened `FileUtil.Remove` and `CanWrite` against the C++ platform logic: removal now rejects paths that are not regular files, directories, or symbolic links before delegating to `remove`, and Windows writeability is based on file attributes rather than `_access`.
 - Matched `InternalError` release-style fatal behavior more closely by deleting registered temp files and exiting with the C++ ICE code instead of throwing a recoverable exception, while preserving the C++ LSP/unit-test early return.
+- Restored the C++ response-file command-line helper: `ExpandResponseFiles` now expands `@file` arguments into non-empty file lines, strips trailing CR from CRLF input, leaves unreadable response-file arguments untouched, and `StringifyArgumentVector` routes through that expansion.
 
 Known fidelity caveats:
 
