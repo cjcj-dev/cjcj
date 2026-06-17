@@ -6,9 +6,14 @@ import cangjie_compiler::chir.Function as CHIRFunction
 import cangjie_compiler::chir.Package as CHIRPackage
 import std.reflect.TypeInfo
 
+foreign {
+    func strcmp(lhs: CString, rhs: CString): Int32
+}
+
 public type MetaTransformRegisterCallback = (MetaTransformPluginBuilder) -> Unit
 public type MetaTransformPluginInfoGetter = () -> MetaTransformPluginInfo
-public type NativeMetaTransformRegisterCallback = CFunc<(CPointer<Unit>) -> Unit>
+public type NativeMetaTransformPluginBuilderRef = CPointer<NativeMetaTransformPluginBuilder>
+public type NativeMetaTransformRegisterCallback = CFunc<(NativeMetaTransformPluginBuilderRef) -> Unit>
 public type NativeMetaTransformPluginInfoGetter = CFunc<() -> NativeMetaTransformPluginInfo>
 public type CHIRMetaTransformFactory = (CHIRBuilder) -> MetaTransformConcept
 public type CHIRFunctionMetaTransformFactory = (CHIRBuilder) -> CHIRFunctionMetaTransform
@@ -128,6 +133,13 @@ public abstract class CHIRPackageMetaTransform <: MetaTransform<CHIRPackage> {
 }
 
 @C
+public struct NativeMetaTransformPluginBuilder {
+    public init() {
+        throw Exception("NativeMetaTransformPluginBuilder is an opaque C++ MetaTransformPluginBuilder reference")
+    }
+}
+
+@C
 public struct NativeMetaTransformPluginInfo {
     public let cjcVersion: CString
     public let registerTo: NativeMetaTransformRegisterCallback
@@ -152,6 +164,45 @@ public struct NativeMetaTransformPluginInfo {
 
     public func IsStructurallyValid(): Bool {
         return HasVersion() && HasRegisterCallback()
+    }
+
+    public func VersionMatches(version: String): Bool {
+        if (!HasVersion()) {
+            return false
+        }
+        var matched = false
+        try (expectedVersion = unsafe { LibC.mallocCString(version) }.asResource()) {
+            matched = unsafe { strcmp(cjcVersion, expectedVersion.value) } == 0
+        } catch (e: Exception) {
+            matched = false
+        }
+        return matched
+    }
+
+    public func IsValidForVersion(version: String): Bool {
+        return VersionMatches(version) && HasRegisterCallback()
+    }
+
+    public func IsValid(): Bool {
+        return IsValidForVersion(CANGJIE_VERSION)
+    }
+
+    public func TryRegisterTo(builder: NativeMetaTransformPluginBuilderRef): Bool {
+        if (!IsStructurallyValid() || builder.isNull()) {
+            return false
+        }
+        unsafe { registerTo(builder) }
+        return true
+    }
+
+    public func RegisterTo(builder: NativeMetaTransformPluginBuilderRef): Unit {
+        if (!HasRegisterCallback()) {
+            throw IllegalStateException("native MetaTransform plugin info has no registration callback")
+        }
+        if (builder.isNull()) {
+            throw IllegalArgumentException("native MetaTransform plugin builder reference is null")
+        }
+        unsafe { registerTo(builder) }
     }
 }
 
