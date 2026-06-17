@@ -31,6 +31,44 @@ private func load64LittleEndian(data: Array<UInt8>, start: Int64, count: Int64):
     return value
 }
 
+private func unsignedBytesLittleEndian(value: UInt64, byteCount: Int64): Array<UInt8> {
+    let bytes = Array<UInt8>(byteCount, repeat: 0u8)
+    var idx: Int64 = 0
+    while (idx < byteCount) {
+        bytes[idx] = UInt8((value >> UInt64(idx * 8)) & 0xffu64)
+        idx++
+    }
+    return bytes
+}
+
+private func signedInt8Bits(value: Int8): UInt64 {
+    if (value >= 0) {
+        return UInt64(value)
+    }
+    return 0x80u64 + UInt64(value - Int8.Min)
+}
+
+private func signedInt16Bits(value: Int16): UInt64 {
+    if (value >= 0) {
+        return UInt64(value)
+    }
+    return 0x8000u64 + UInt64(value - Int16.Min)
+}
+
+private func signedInt32Bits(value: Int32): UInt64 {
+    if (value >= 0) {
+        return UInt64(value)
+    }
+    return 0x80000000u64 + UInt64(value - Int32.Min)
+}
+
+private func signedInt64Bits(value: Int64): UInt64 {
+    if (value >= 0) {
+        return UInt64(value)
+    }
+    return 0x8000000000000000u64 + UInt64(value - Int64.Min)
+}
+
 public class SipHash {
     private static let k0: UInt64 = 0x00000000deadbeefu64
     private static let k1: UInt64 = 0x0000000012345678u64
@@ -43,14 +81,48 @@ public class SipHash {
         return SipHash_2_4(data)
     }
 
+    public static func GetHashValue(data: Bool): UInt64 {
+        return SipHash_2_4(unsignedBytesLittleEndian(if (data) { 1u64 } else { 0u64 }, 1))
+    }
+
+    public static func GetHashValue(data: UInt8): UInt64 {
+        return SipHash_2_4(unsignedBytesLittleEndian(UInt64(data), 1))
+    }
+
+    public static func GetHashValue(data: UInt16): UInt64 {
+        return SipHash_2_4(unsignedBytesLittleEndian(UInt64(data), 2))
+    }
+
+    public static func GetHashValue(data: UInt32): UInt64 {
+        return SipHash_2_4(unsignedBytesLittleEndian(UInt64(data), 4))
+    }
+
     public static func GetHashValue(data: UInt64): UInt64 {
-        let bytes = Array<UInt8>(8, repeat: 0u8)
-        var idx = 0
-        while (idx < 8) {
-            bytes[idx] = UInt8((data >> UInt64(idx * 8)) & 0xffu64)
-            idx++
-        }
-        return SipHash_2_4(bytes)
+        return SipHash_2_4(unsignedBytesLittleEndian(data, 8))
+    }
+
+    public static func GetHashValue(data: Int8): UInt64 {
+        return SipHash_2_4(unsignedBytesLittleEndian(signedInt8Bits(data), 1))
+    }
+
+    public static func GetHashValue(data: Int16): UInt64 {
+        return SipHash_2_4(unsignedBytesLittleEndian(signedInt16Bits(data), 2))
+    }
+
+    public static func GetHashValue(data: Int32): UInt64 {
+        return SipHash_2_4(unsignedBytesLittleEndian(signedInt32Bits(data), 4))
+    }
+
+    public static func GetHashValue(data: Int64): UInt64 {
+        return SipHash_2_4(unsignedBytesLittleEndian(signedInt64Bits(data), 8))
+    }
+
+    public static func GetHashValue(data: Float32): UInt64 {
+        return SipHash_2_4(unsignedBytesLittleEndian(UInt64(data.toBits()), 4))
+    }
+
+    public static func GetHashValue(data: Float64): UInt64 {
+        return SipHash_2_4(unsignedBytesLittleEndian(data.toBits(), 8))
     }
 
     private static func SipHash_2_4(data: Array<UInt8>): UInt64 {
@@ -85,4 +157,3 @@ public class SipHash {
         return v0.value ^ v1.value ^ v2.value ^ v3.value
     }
 }
-
