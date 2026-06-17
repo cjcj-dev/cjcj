@@ -1244,11 +1244,16 @@ public open class BaseMangler {
         let ctx = PrepareContextForPackage(convertedPkg)
         adapter.CollectLocalDecls(ctx, pkg)
         exportIdMode = true
-        for (decl in convertedPkg.members) {
-            if (decl.TestAttr(Attribute.GLOBAL)) {
-                decl.exportId = MangleExportId(decl)
+        let walker = Walker(pkg, visitPre: { node: Node =>
+            if (let Some(decl) <- (node as Decl)) {
+                if (Ty.IsTyCorrect(decl.GetTy()) && decl.TestAttr(Attribute.GLOBAL)) {
+                    let convertedDecl = adapter.ConvertDecl(decl)
+                    convertedDecl.exportId = MangleExportId(convertedDecl)
+                }
             }
-        }
+            VisitAction.WALK_CHILDREN
+        })
+        walker.Walk()
         adapter.CopyExportIdsToAst()
     }
 

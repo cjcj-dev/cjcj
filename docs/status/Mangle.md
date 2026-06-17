@@ -91,6 +91,18 @@ Implemented:
 - Aligned descriptor semantic-type and extend-entity failure behavior with C++ `CJC_ASSERT`/null-check paths
   by rejecting unsupported user-defined type kinds, missing nominal declarations, malformed raw-array and
   CPointer payloads, missing function-parameter semantic types, and incomplete extend context/index data.
+- Aligned real-CHIR virtual/mutable wrapper names for extend definitions with the C++ implementation by
+  appending sorted implemented-interface type mangles before the package suffix.
+- Aligned real-CHIR raw-array type mangling with C++ `RawArrayType::GetDims()` instead of assuming a
+  single-dimensional raw array, and switched real-CHIR CPointer mangling/qualified-name rendering to the
+  concrete `CPointerType` element API.
+- Aligned real-CHIR custom type qualified-name rendering with C++ generic-instantiation behavior by using
+  the generic declaration package when `CustomTypeDef.GetGenericDecl()` is present.
+- Aligned AST-facing package export-id generation with the C++ package walker by visiting real AST nodes,
+  requiring `Ty.IsTyCorrect`, and then copying export IDs back through the adapter.
+- Aligned parser-AST malformed type-annotation handling with C++ assertion/null-check behavior for missing
+  parenthesized, option, function-return, VArray element/constant, qualified-base, and constant-literal
+  payloads, and for unsupported AST type-annotation kinds.
 
 Known fidelity caveats:
 
@@ -100,9 +112,8 @@ Known fidelity caveats:
   descriptor layer is fully retired.
 - Real CHIR overloads now use `cangjie_compiler::chir` objects directly where the scaffold carries the
   needed metadata. Some C++ CHIR details are still not represented in the self-hosted CHIR package, notably
-  raw-array dimensions, extend implemented-interface type lists, custom type source-code identifiers,
-  lambda expression identifiers, and internal linkage info. Those paths remain descriptor-backed or use
-  the currently available CHIR fields.
+  lambda expression identifiers and `LinkTypeInfo`-style internal linkage queries for custom type defs.
+  Those paths remain descriptor-backed or use the currently available CHIR fields.
 - The AST adapter maps the currently available self-hosted AST package into the Mangle descriptor model
   and prepares package context from `curFile.curPackage` when available. Byte-for-byte validation against
   full parser/sema output still depends on downstream packages producing complete annotation arrays,

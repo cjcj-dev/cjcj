@@ -63,6 +63,8 @@ private func MangleParenTypeAnnotation(typeAnnotation: MangleTypeAnnotation): St
     var mangledName = MANGLE_PAREN_PREFIX + MANGLE_WILDCARD_PREFIX
     if (let Some(inner) <- typeAnnotation.innerType) {
         mangledName += MangleAstType(inner)
+    } else {
+        throw IllegalArgumentException("Parenthesized type annotation has no inner type.")
     }
     return mangledName
 }
@@ -71,6 +73,8 @@ private func MangleOptionTypeAnnotation(typeAnnotation: MangleTypeAnnotation): S
     var mangledName = MANGLE_OPTION_PREFIX + "${typeAnnotation.questNum}" + MANGLE_WILDCARD_PREFIX
     if (let Some(component) <- typeAnnotation.componentType) {
         mangledName += MangleAstType(component)
+    } else {
+        throw IllegalArgumentException("Option type annotation has no component type.")
     }
     return mangledName
 }
@@ -79,6 +83,8 @@ private func MangleFuncTypeAnnotation(typeAnnotation: MangleTypeAnnotation): Str
     var mangledName = if (typeAnnotation.isC) { MANGLE_AST_CFUNC_PREFIX } else { MANGLE_AST_FUNC_PREFIX }
     if (let Some(ret) <- typeAnnotation.retType) {
         mangledName += MangleAstType(ret)
+    } else {
+        throw IllegalArgumentException("Function type annotation has no return type.")
     }
     for (param in typeAnnotation.paramTypes) {
         mangledName += MangleAstType(param)
@@ -94,9 +100,13 @@ private func MangleVArrayTypeAnnotation(typeAnnotation: MangleTypeAnnotation): S
     var mangledName = MANGLE_VARRAY_PREFIX + MANGLE_WILDCARD_PREFIX
     if (let Some(typeArg) <- typeAnnotation.typeArgument) {
         mangledName += MangleAstType(typeArg)
+    } else {
+        throw IllegalArgumentException("VArray type annotation has no element type.")
     }
     if (let Some(constantType) <- typeAnnotation.constantType) {
         mangledName += MangleAstType(constantType)
+    } else {
+        throw IllegalArgumentException("VArray type annotation has no constant size type.")
     }
     return mangledName
 }
@@ -113,6 +123,8 @@ private func MangleQualifiedTypeAnnotation(typeAnnotation: MangleTypeAnnotation)
     var mangledName = MANGLE_QUALIFIED_PREFIX
     if (let Some(baseType) <- typeAnnotation.baseType) {
         mangledName += MangleAstType(baseType)
+    } else {
+        throw IllegalArgumentException("Qualified type annotation has no base type.")
     }
     mangledName += MANGLE_DOT_PREFIX + MangleName(typeAnnotation.field)
     if (!typeAnnotation.typeArguments.isEmpty()) {
@@ -137,7 +149,8 @@ public func MangleAstType(typeAnnotation: MangleTypeAnnotation): String {
         case ASTKind.TUPLE_TYPE => MangleTupleTypeAnnotation(typeAnnotation)
         case ASTKind.QUALIFIED_TYPE => MangleQualifiedTypeAnnotation(typeAnnotation)
         case ASTKind.THIS_TYPE => MANGLE_THIS_PREFIX
-        case _ => ""
+        case _ => throw IllegalArgumentException("Unexpected type annotation for AST mangling: " +
+            ASTKindName(typeAnnotation.astKind))
     }
 }
 
@@ -270,7 +283,7 @@ public class ASTMangler {
                 return MANGLE_INITIAL_PREFIX
             }
         }
-        return MANGLE_INITIAL_PREFIX
+        throw IllegalArgumentException("Unexpected primitive type annotation: " + typeAnnotation.name)
     }
 
     public static func ManglePrimitiveType(typeNode: Type): String {

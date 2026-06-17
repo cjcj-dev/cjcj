@@ -196,7 +196,7 @@ public func MangleCHIRType(t: Type, genericsTypeStack: ArrayList<String>, useGen
         return out + MANGLE_SUFFIX
     }
     if (let Some(rawArrayTy) <- (t as RawArrayType)) {
-        return MANGLE_TYPE_ARRAY_PREFIX + DecimalToManglingNumber("1") +
+        return MANGLE_TYPE_ARRAY_PREFIX + DecimalToManglingNumber("${rawArrayTy.GetDims()}") +
             MangleCHIRType(rawArrayTy.GetElementType(), genericsTypeStack, useGenericName: useGenericName)
     }
     if (let Some(refTy) <- (t as RefType)) {
@@ -206,12 +206,9 @@ public func MangleCHIRType(t: Type, genericsTypeStack: ArrayList<String>, useGen
         return MANGLE_VARRAY_PREFIX + DecimalToManglingNumber("${varrayTy.size}") +
             MangleCHIRType(varrayTy.GetElementType(), genericsTypeStack, useGenericName: useGenericName)
     }
-    if (t.GetTypeKind() == TypeKind.TYPE_CPOINTER) {
-        let args = t.GetTypeArgs()
-        if (!args.isEmpty()) {
-            return MANGLE_POINTER_PREFIX + MangleCHIRType(args[0], genericsTypeStack, useGenericName: useGenericName)
-        }
-        return UnsupportedCHIRType(t.GetTypeKind(), "CPointer type has no element type")
+    if (let Some(cPointerTy) <- (t as CPointerType)) {
+        return MANGLE_POINTER_PREFIX + MangleCHIRType(cPointerTy.GetElementType(), genericsTypeStack,
+            useGenericName: useGenericName)
     }
     if (let Some(genericTy) <- (t as GenericType)) {
         return MangleGenericTypeByName(genericTy.GetSrcCodeIdentifier(), genericsTypeStack, useGenericName)
@@ -403,13 +400,9 @@ public func GetTypeQualifiedName(t: Type, forNameFieldOfTi!: Bool = false): Stri
         return MANGLE_VARR_STR + MANGLE_LT_PREFIX + GetTypeQualifiedName(varrayTy.GetElementType(),
             forNameFieldOfTi: forNameFieldOfTi) + "," + "${varrayTy.size}" + MANGLE_GT_PREFIX
     }
-    if (t.GetTypeKind() == TypeKind.TYPE_CPOINTER) {
-        let args = t.GetTypeArgs()
-        if (!args.isEmpty()) {
-            return MANGLE_CPTR_STR + MANGLE_LT_PREFIX + GetTypeQualifiedName(args[0],
-                forNameFieldOfTi: forNameFieldOfTi) + MANGLE_GT_PREFIX
-        }
-        return UnsupportedCHIRType(t.GetTypeKind(), "CPointer type has no element type")
+    if (let Some(cPointerTy) <- (t as CPointerType)) {
+        return MANGLE_CPTR_STR + MANGLE_LT_PREFIX + GetTypeQualifiedName(cPointerTy.GetElementType(),
+            forNameFieldOfTi: forNameFieldOfTi) + MANGLE_GT_PREFIX
     }
     if (t.GetTypeKind() == TypeKind.TYPE_CSTRING) {
         return MANGLE_CSTRING_STR
@@ -472,7 +465,8 @@ public func GetTypeQualifiedNameOfCustomType(typeInfo: CHIRType, forNameFieldOfT
 }
 
 private func PackageNameForQualifiedName(def: CustomTypeDef): String {
-    var packageName = def.GetPackageName()
+    let packageOwner = if (let Some(genericDecl) <- def.GetGenericDecl()) { genericDecl } else { def }
+    var packageName = packageOwner.GetPackageName()
     if (let Some(pos) <- packageName.indexOf("::")) {
         packageName = packageName[0..pos] + "/" + packageName[pos + 2..]
     }

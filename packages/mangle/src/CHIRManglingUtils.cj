@@ -91,6 +91,23 @@ private func sortedMangledTypes(types: ArrayList<CHIRType>, genericsTypeStack: A
     return values
 }
 
+private func sortedMangledClassTypes(types: ArrayList<ClassType>, genericsTypeStack: ArrayList<String>): ArrayList<String> {
+    let values = ArrayList<String>()
+    for (ty in types) {
+        values.add(MangleCHIRType(ty, genericsTypeStack))
+    }
+    sort(values, by: { left: String, right: String =>
+        if (left < right) {
+            Ordering.LT
+        } else if (left > right) {
+            Ordering.GT
+        } else {
+            Ordering.EQ
+        }
+    }, stable: true)
+    return values
+}
+
 public func GenerateVirtualFuncMangleName(rawFunc: CHIRFunction, customTypeDef: CHIRCustomTypeDef,
     parentTy: CHIRType, isVirtual: Bool): String {
     let prefix = if (isVirtual) { MANGLE_VIRTUAL_PREFIX } else { MANGLE_MUTABLE_PREFIX }
@@ -125,6 +142,10 @@ public func GenerateVirtualFuncMangleName(rawFunc: Function, customTypeDef: Cust
     if (let Some(extendDef) <- (customTypeDef as ExtendDef)) {
         if (let Some(extendedType) <- extendDef.extendedType) {
             out += MANGLE_CHIR_EXTEND_PREFIX + MangleCHIRType(extendedType, customTyGenericTypeStack)
+        }
+        for (implementType in sortedMangledClassTypes(customTypeDef.GetImplementedInterfaceTys(),
+            customTyGenericTypeStack)) {
+            out += implementType
         }
         out += "${customTypeDef.GetPackageName().size}" + customTypeDef.GetPackageName()
     } else {
