@@ -424,6 +424,9 @@ public func ParseSourceFile(fileID: UInt64, filePath: String, sourceCode: String
     let tokens = Tokenize(fileID, sourceCode, diag, sm, attachComment: attachComment)
     parsePackageAndImports(file, tokens)
     parseTopLevelDecls(file, tokens)
+    // First real-expression slice (additive, gated): promote bodies that need genuine runtime
+    // computation to a real CHIR body via the real parser. No-op for every summary-path slice.
+    AdaptRealBodies(file, fileID, sourceCode, sm)
     return file
 }
 

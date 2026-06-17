@@ -164,8 +164,10 @@ public func GenerateStore(irBuilder: IRBuilder2, chirExpr: Expression): LLVMValu
     if (chirExpr.GetNumOfOperands() < 2) {
         return LLVMNullValue()
     }
-    let addr = irBuilder.GetCGModule().MaterializeValue(irBuilder, chirExpr.GetOperand(0))
-    let value = irBuilder.GetCGModule().MaterializeValue(irBuilder, chirExpr.GetOperand(1))
+    // CHIR Store operands are (value, location): operand 0 is the value being stored, operand 1
+    // is the destination address (a Ref). See chir Store.GetValue()/GetLocation().
+    let value = irBuilder.GetCGModule().MaterializeValue(irBuilder, chirExpr.GetOperand(0))
+    let addr = irBuilder.GetCGModule().MaterializeValue(irBuilder, chirExpr.GetOperand(1))
     return irBuilder.CreateStore(value.GetRawValue(), addr.GetRawValue())
 }
 

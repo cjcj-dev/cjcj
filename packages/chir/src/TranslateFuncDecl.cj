@@ -23,7 +23,9 @@ extend AST2CHIRDeclTranslator {
         ApplyFunctionSourceInfo(fn, spec)
         CreateFunctionParameters(fn, spec)
         if (ShouldEmitBody(spec)) {
-            if (spec.hasLiteralReturn) {
+            if (spec.hasRealBody) {
+                CreateRealBody(fn, spec)
+            } else if (spec.hasLiteralReturn) {
                 CreateLiteralReturnBody(fn, BuildLiteralReturn(spec))
             } else {
                 CreateEmptyBody(fn)

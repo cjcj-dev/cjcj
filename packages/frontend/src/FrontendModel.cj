@@ -443,6 +443,22 @@ public class FuncBody <: Node {
     public var printStrings: ArrayList<String> = ArrayList<String>()
     public var printNewlines: ArrayList<Bool> = ArrayList<Bool>()
     public var printIsInt: ArrayList<Bool> = ArrayList<Bool>()
+    // Real-expression slice: when the body matches the small supported grammar (Int64 locals,
+    // a single ADD, and a return), the real parser adapter fills this ordered statement model and
+    // sets hasRealBody = true. The CHIR bridge then emits a genuine runtime body instead of a
+    // literal/print summary. Each statement is encoded as parallel-array entries indexed by
+    // realStmtKind (see REAL_STMT_* in RealParseBridge.cj). Default empty / false (no regression).
+    public var hasRealBody: Bool = false
+    public var realStmtKind: ArrayList<Int64> = ArrayList<Int64>()
+    public var realStmtName: ArrayList<String> = ArrayList<String>()
+    public var realStmtLiteral: ArrayList<Int64> = ArrayList<Int64>()
+    public var realStmtOp: ArrayList<Int64> = ArrayList<Int64>()
+    public var realStmtLhsIsLiteral: ArrayList<Bool> = ArrayList<Bool>()
+    public var realStmtLhsName: ArrayList<String> = ArrayList<String>()
+    public var realStmtLhsLiteral: ArrayList<Int64> = ArrayList<Int64>()
+    public var realStmtRhsIsLiteral: ArrayList<Bool> = ArrayList<Bool>()
+    public var realStmtRhsName: ArrayList<String> = ArrayList<String>()
+    public var realStmtRhsLiteral: ArrayList<Int64> = ArrayList<Int64>()
 
     public init() {
         super(ASTKind.FUNC_BODY)

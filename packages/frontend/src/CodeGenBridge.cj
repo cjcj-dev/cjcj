@@ -5,6 +5,8 @@ import std.convert.*
 import cangjie_compiler::chir.AccessLevel as ChirAccessLevel
 import cangjie_compiler::chir.AST2CHIR as ChirAST2CHIR
 import cangjie_compiler::chir.AST2CHIRFunctionSpec as ChirFunctionSpec
+import cangjie_compiler::chir.AST2CHIRStmtSpec as ChirStmtSpec
+import cangjie_compiler::chir.ExprKind as ChirExprKind
 import cangjie_compiler::chir.AST2CHIRGlobalSpec as ChirGlobalSpec
 import cangjie_compiler::chir.AST2CHIRMemberVarSpec as ChirMemberVarSpec
 import cangjie_compiler::chir.AST2CHIRNominalKind as ChirNominalKind
@@ -12,6 +14,7 @@ import cangjie_compiler::chir.AST2CHIRNominalSpec as ChirNominalSpec
 import cangjie_compiler::chir.AST2CHIRPackageSpec as ChirPackageSpec
 import cangjie_compiler::chir.Attribute as ChirAttribute
 import cangjie_compiler::chir.CHIRBuilder as ChirBuilder
+import cangjie_compiler::chir.CHIRPrinter as ChirCHIRPrinter
 import cangjie_compiler::chir.CHIRContext as ChirContext
 import cangjie_compiler::chir.FuncKind as ChirFuncKind
 import cangjie_compiler::chir.Package as RealCHIRPackage
@@ -29,6 +32,9 @@ public func BuildRealCHIRForFrontendPackage(instance: CompilerInstance, pkg: Pac
     let builder = ChirBuilder(instance.chirData.GetRealCHIRContext())
     let packageSpec = buildRealPackageSpec(pkg, builder.context)
     let lowered = ChirAST2CHIR(builder).LowerPackage(packageSpec).pkg
+    if (instance.invocation.globalOptions.NeedDumpCHIRToScreen()) {
+        print(ChirCHIRPrinter().PrintPackage(lowered))
+    }
     return Some(lowered)
 }
 
@@ -180,13 +186,27 @@ private func buildFunctionSpec(pkg: Package, decl: Decl, context: ChirContext, s
         sourceLiteralReturnKind = funcDecl.funcBody.literalReturnKind
         sourceLiteralReturnValue = funcDecl.funcBody.literalReturnValue
     }
+    var hasSourceRealBody = false
+    if (let Some(funcDecl) <- (decl as FuncDecl)) {
+        hasSourceRealBody = funcDecl.funcBody.hasRealBody
+    }
     let fnName = stableMangledName(pkg, decl)
-    let returnTy = lowerFunctionReturnType(context, sourceReturnType, hasSourceLiteralReturn, sourceLiteralReturnKind,
-        sourceLiteralReturnValue)
+    // When a real body is present the return type comes straight from the parsed retType
+    // (Int64 here) via lowerValueType, bypassing the literal-return special casing.
+    let returnTy = if (hasSourceRealBody) {
+        lowerValueType(context, sourceReturnType)
+    } else {
+        lowerFunctionReturnType(context, sourceReturnType, hasSourceLiteralReturn, sourceLiteralReturnKind,
+            sourceLiteralReturnValue)
+    }
     let fnSpec = ChirFunctionSpec(fnName, paramTypes, returnTy,
         srcCodeIdentifier: decl.identifier.Val(), rawMangledName: fnName,
         packageName: pkg.fullPackageName, funcKind: toChirFuncKind(decl), emitBody: true)
-    if (hasSourceLiteralReturn) {
+    if (hasSourceRealBody) {
+        if (let Some(funcDecl) <- (decl as FuncDecl)) {
+            applyRealBody(fnSpec, funcDecl.funcBody)
+        }
+    } else if (hasSourceLiteralReturn) {
         setLiteralReturn(fnSpec, sourceLiteralReturnKind, sourceLiteralReturnValue)
     }
     applyDeclAttributes(decl, fnSpec)
@@ -403,6 +423,38 @@ private func literalReturnCanLower(literalReturnKind: Int64, literalReturnValue:
     }
     return literalReturnKind == FRONTEND_LITERAL_BOOL || literalReturnKind == FRONTEND_LITERAL_UNIT ||
         literalReturnKind == FRONTEND_LITERAL_RUNE
+}
+
+// Translate the frontend FuncBody's real-body statement model (filled by the real-parser
+// adapter in RealParseBridge.cj) into CHIR AST2CHIRStmtSpec entries and enable the real body.
+private func applyRealBody(fnSpec: ChirFunctionSpec, funcBody: FuncBody): Unit {
+    fnSpec.EnableRealBody()
+    var idx = 0
+    while (idx < funcBody.realStmtKind.size) {
+        let kind = funcBody.realStmtKind[idx]
+        if (kind == REAL_STMT_LET_LITERAL) {
+            fnSpec.AddBodyStatement(ChirStmtSpec.LetLiteral(funcBody.realStmtName[idx], funcBody.realStmtLiteral[idx]))
+        } else if (kind == REAL_STMT_LET_BINARY) {
+            // Only ref+ref ADD is modeled in this slice; the adapter guarantees both operands
+            // are locals for the LET_BINARY case it emits.
+            let op = toChirBinaryOp(funcBody.realStmtOp[idx])
+            fnSpec.AddBodyStatement(ChirStmtSpec.LetBinaryRefRef(funcBody.realStmtName[idx], op,
+                funcBody.realStmtLhsName[idx], funcBody.realStmtRhsName[idx]))
+        } else if (kind == REAL_STMT_RETURN) {
+            if (funcBody.realStmtLhsIsLiteral[idx]) {
+                fnSpec.AddBodyStatement(ChirStmtSpec.ReturnLiteral(funcBody.realStmtLhsLiteral[idx]))
+            } else {
+                fnSpec.AddBodyStatement(ChirStmtSpec.ReturnRef(funcBody.realStmtLhsName[idx]))
+            }
+        }
+        idx++
+    }
+}
+
+private func toChirBinaryOp(op: Int64): ChirExprKind {
+    // REAL_OP_ADD is the only modeled op in this slice; future ops branch on `op` here.
+    let _ = op
+    return ChirExprKind.ADD
 }
 
 private func setLiteralReturn(fnSpec: ChirFunctionSpec, literalReturnKind: Int64, literalReturnValue: String): Unit {

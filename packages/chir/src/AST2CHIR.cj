@@ -59,6 +59,69 @@ public class AST2CHIRGlobalSpec {
     }
 }
 
+// Minimal ordered statement model for the first real-expression slice. Int64-only.
+// Kept deliberately tiny: a let binding to an Int64 literal, a let binding to a binary
+// (currently ADD) over two operands (each a local name or an Int64 literal), and a return
+// of a single operand (local name or Int64 literal). This keeps `packages/chir` decoupled
+// from `parse`/`frontend`: the frontend adapter flattens real parse expr trees into this.
+let AST2CHIR_STMT_LET_LITERAL: Int64 = 0
+let AST2CHIR_STMT_LET_BINARY: Int64 = 1
+let AST2CHIR_STMT_RETURN: Int64 = 2
+
+public class AST2CHIRStmtSpec {
+    public let kind: Int64
+    // For LET_LITERAL / LET_BINARY: the bound local name. Empty for RETURN.
+    public let name: String
+    // For LET_LITERAL: the literal value. For LET_BINARY / RETURN: unused.
+    public let literalValue: Int64
+    // For LET_BINARY: ExprKind of the binary op (e.g. ExprKind.ADD).
+    public let op: ExprKind
+    // Operands. lhs is used by LET_BINARY and RETURN; rhs only by LET_BINARY.
+    // Each operand is either a reference to a local (operandIsLiteral == false, operandName set)
+    // or an Int64 literal (operandIsLiteral == true, operandLiteral set).
+    public let lhsIsLiteral: Bool
+    public let lhsName: String
+    public let lhsLiteral: Int64
+    public let rhsIsLiteral: Bool
+    public let rhsName: String
+    public let rhsLiteral: Int64
+
+    private init(kind: Int64, name: String, literalValue: Int64, op: ExprKind, lhsIsLiteral: Bool, lhsName: String,
+        lhsLiteral: Int64, rhsIsLiteral: Bool, rhsName: String, rhsLiteral: Int64) {
+        this.kind = kind
+        this.name = name
+        this.literalValue = literalValue
+        this.op = op
+        this.lhsIsLiteral = lhsIsLiteral
+        this.lhsName = lhsName
+        this.lhsLiteral = lhsLiteral
+        this.rhsIsLiteral = rhsIsLiteral
+        this.rhsName = rhsName
+        this.rhsLiteral = rhsLiteral
+    }
+
+    public func IsLetLiteral(): Bool { return kind == AST2CHIR_STMT_LET_LITERAL }
+    public func IsLetBinary(): Bool { return kind == AST2CHIR_STMT_LET_BINARY }
+    public func IsReturn(): Bool { return kind == AST2CHIR_STMT_RETURN }
+
+    public static func LetLiteral(name: String, value: Int64): AST2CHIRStmtSpec {
+        return AST2CHIRStmtSpec(AST2CHIR_STMT_LET_LITERAL, name, value, ExprKind.ADD, true, "", 0, true, "", 0)
+    }
+
+    public static func LetBinaryRefRef(name: String, op: ExprKind, lhsName: String,
+        rhsName: String): AST2CHIRStmtSpec {
+        return AST2CHIRStmtSpec(AST2CHIR_STMT_LET_BINARY, name, 0, op, false, lhsName, 0, false, rhsName, 0)
+    }
+
+    public static func ReturnRef(name: String): AST2CHIRStmtSpec {
+        return AST2CHIRStmtSpec(AST2CHIR_STMT_RETURN, "", 0, ExprKind.ADD, false, name, 0, true, "", 0)
+    }
+
+    public static func ReturnLiteral(value: Int64): AST2CHIRStmtSpec {
+        return AST2CHIRStmtSpec(AST2CHIR_STMT_RETURN, "", 0, ExprKind.ADD, true, "", value, true, "", 0)
+    }
+}
+
 public class AST2CHIRFunctionSpec {
     public let name: String
     public let srcCodeIdentifier: String
@@ -84,6 +147,11 @@ public class AST2CHIRFunctionSpec {
     public var hasVariableLenArg: Bool = false
     public var isCFunc: Bool = false
     public var hasLiteralReturn: Bool = false
+    // When true, LowerFunction emits a real CHIR body from `bodyStatements` (Allocate/Constant/
+    // Store/Load/BinaryExpression/Exit) instead of the literal-return/empty summary paths.
+    // Default false so every existing (already-verified) path is byte-for-byte unchanged.
+    public var hasRealBody: Bool = false
+    public let bodyStatements: ArrayList<AST2CHIRStmtSpec> = ArrayList<AST2CHIRStmtSpec>()
     public var literalReturnKind: Int64 = AST2CHIR_LITERAL_NONE
     public var literalReturnBoolValue: Bool = false
     public var literalReturnIntValue: Int64 = 0
@@ -115,6 +183,16 @@ public class AST2CHIRFunctionSpec {
         printStrings.add(value)
         printNewlines.add(newline)
         printIsInt.add(isInt)
+        return this
+    }
+
+    public func EnableRealBody(): AST2CHIRFunctionSpec {
+        hasRealBody = true
+        return this
+    }
+
+    public func AddBodyStatement(stmt: AST2CHIRStmtSpec): AST2CHIRFunctionSpec {
+        bodyStatements.add(stmt)
         return this
     }
 
