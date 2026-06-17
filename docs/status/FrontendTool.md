@@ -11,8 +11,13 @@ Current status:
 
 - Frontend entry orchestration, dump actions, empty-input diagnostics, CJD compile skipping, default stage profiling,
   CJO/result saving, and driver-result handoff are implemented against the current self-host `frontend` package.
-- AST screen dumping, object-only builtin dependency normalization, and FrontendTool-local incremental no-change/change
+- AST screen dumping, object-only builtin dependency normalization, and FrontendTool incremental no-change/change
   detection are implemented with the public data exposed by the current self-host frontend package.
+- The FrontendTool incremental instance now imports the real `incremental_compilation.IncreKind`,
+  `CachedMangleMap`, and `IncrementalCompilationLogger` instead of carrying local compatibility copies of those
+  types.
+- FrontendTool incremental cache comparison now validates the cache format version, rolls back when plugins are
+  enabled, and treats source-file summary changes as incremental work instead of incorrectly reporting no-change.
 - Common-part/CJMP-style CJO output is delayed to result saving, matching the C++ FrontendTool split between
   `PerformCjoSaving` and `PerformResultsSaving`.
 - Multi-package CJO saving now pre-mangles source declarations that still lack package-scoped names before writing
@@ -20,13 +25,16 @@ Current status:
 - FrontendTool-local CJO summaries include nested declaration identities and mangled names so saved package output
   preserves the public declaration surface exposed by the current self-host frontend AST.
 - `NeedCreateIncrementalCompilerInstance` also exposes an overload for the richer `option.GlobalOptions` model with
-  the same mock, coverage, CHIR-output, and common-part-CJO guards as the C++ helper; the current frontend-options
-  overload now uses the same available common-part-CJO guard instead of adding CJD/common-part-CHIR exclusions.
+  the same mock, coverage, CHIR-output, and common-part-CJO guards and incremental logger side effects as the C++
+  helper; the current frontend-options overload now uses the same available common-part-CJO guard instead of adding
+  CJD/common-part-CHIR exclusions.
 - The local `ExecuteFrontendByDriver` handoff preserves the frontend option state currently exposed by the self-host
   frontend package, including object inputs, package/import/plugin paths, CJMP inputs, output paths, and cache fields.
 - The implementation is intentionally conservative where the current package graph does not yet expose the C++ surfaces
   used by FrontendTool: native `TempFileManager`, the production driver option object, shared CHIR/CodeGen models, and
   the full C++ incremental AST-diff/pollution data structures.
+- CJO and FrontendTool incremental cache writes use the shared `utils.FileUtil.WriteToFile` path so parent directories
+  are created consistently with the shared file utility behavior.
 - `DefaultCompilerInstance` wraps `frontend.CompilerInstance` instead of inheriting from it because `CompilerInstance`
   is not currently `open` in the frontend package and this module is not allowed to edit frontend.
 
@@ -34,4 +42,5 @@ Residual fidelity risks:
 
 - There are zero FrontendTool self-host TODO markers.
 - Complete C++ parity still depends on the adjacent self-host packages exposing the same public contracts that the C++
-  FrontendTool uses for native code generation, temp-file management, driver options, and incremental cache structures.
+  FrontendTool uses for native code generation, temp-file management, production driver options, and full incremental
+  AST-diff/pollution analysis.

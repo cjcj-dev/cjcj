@@ -4,6 +4,8 @@ import std.collection.*
 import cangjie_compiler::basic.PrintVersion
 import cangjie_compiler::basic.WriteError
 import cangjie_compiler::frontend.*
+import cangjie_compiler::incremental_compilation.IncreKind
+import cangjie_compiler::incremental_compilation.IncrementalCompilationLogger
 import cangjie_compiler::option.GlobalOptions as OptionGlobalOptions
 import cangjie_compiler::option.MockMode
 import cangjie_compiler::option.OutputMode
@@ -128,6 +130,19 @@ public func NeedCreateIncrementalCompilerInstance(opts: GlobalOptions): Bool {
 }
 
 public func NeedCreateIncrementalCompilerInstance(opts: OptionGlobalOptions): Bool {
+    let logger = IncrementalCompilationLogger.GetInstance()
+    logger.SetDebugPrint(opts.printIncrementalInfo)
+    if (opts.enIncrementalCompilation) {
+        if (opts.mock == MockMode.ON) {
+            logger.LogLn("enable mock, roll back to full compilation")
+        } else if (opts.enableCoverage) {
+            logger.LogLn("enable coverage, roll back to full compilation")
+        } else if (opts.outputMode == OutputMode.CHIR) {
+            logger.LogLn("enable compile common part mode, roll back to full compilation")
+        } else if (!opts.commonPartCjos.isEmpty()) {
+            logger.LogLn("enable compile platform part mode, roll back to full compilation")
+        }
+    }
     return opts.enIncrementalCompilation && opts.mock != MockMode.ON && !opts.enableCoverage &&
         opts.outputMode != OutputMode.CHIR && opts.commonPartCjos.isEmpty()
 }

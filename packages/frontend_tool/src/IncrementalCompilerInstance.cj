@@ -2,41 +2,11 @@ package cangjie_compiler::frontend_tool
 
 import std.collection.*
 import cangjie_compiler::frontend.*
+import cangjie_compiler::incremental_compilation.CachedMangleMap
+import cangjie_compiler::incremental_compilation.IncreKind
+import cangjie_compiler::incremental_compilation.IncrementalCompilationLogger
+import cangjie_compiler::utils.FileUtil
 import cangjie_compiler::utils.ProfileRecorder
-
-public enum IncreKind {
-    | NO_CHANGE
-    | INCR
-    | ROLLBACK
-    | EMPTY_PKG
-    | INVALID
-}
-
-private func IncreKindIndex(kind: IncreKind): Int64 {
-    return match (kind) {
-        case IncreKind.NO_CHANGE => 0
-        case IncreKind.INCR => 1
-        case IncreKind.ROLLBACK => 2
-        case IncreKind.EMPTY_PKG => 3
-        case IncreKind.INVALID => 4
-    }
-}
-
-extend IncreKind <: Equatable<IncreKind> {
-    public operator func ==(right: IncreKind): Bool {
-        return IncreKindIndex(this) == IncreKindIndex(right)
-    }
-
-    public operator func !=(right: IncreKind): Bool {
-        return !(this == right)
-    }
-}
-
-public class CachedMangleMap {
-    public let incrRemovedDecls: HashSet<String> = HashSet<String>()
-    public let newExternalDecls: HashSet<String> = HashSet<String>()
-    public init() {}
-}
 
 public class IncrementalCompilerInstance <: DefaultCompilerInstance {
     public let cacheMangles: CachedMangleMap = CachedMangleMap()
@@ -62,6 +32,12 @@ public class IncrementalCompilerInstance <: DefaultCompilerInstance {
         let calculated = core.CalculateASTCache()
         if (!calculated || core.GetSourcePackages().isEmpty()) {
             kind = IncreKind.EMPTY_PKG
+        } else if (!invocation.globalOptions.pluginPaths.isEmpty()) {
+            kind = IncreKind.ROLLBACK
+            IncrementalCompilationLogger.GetInstance().LogLn(
+                "enable plugin, roll back to full compilation")
+            diag.Warn(DiagCategory.OTHER, DEFAULT_POSITION,
+                "`--incremental-compile` is incompatible with `--plugin` and will be ignored.")
         } else {
             kind = AnalyseCurrentFrontendCache()
         }
@@ -169,7 +145,7 @@ public class IncrementalCompilerInstance <: DefaultCompilerInstance {
         }
         let cachePath = GetFrontendToolIncrementalCachePath()
         if (!cachePath.isEmpty()) {
-            let _ = WriteFileContent(cachePath, currentCacheText)
+            let _ = FileUtil.WriteToFile(cachePath, currentCacheText)
         }
         for (pkg in core.GetSourcePackages()) {
             if (pkg.IsEmpty()) {
@@ -190,14 +166,17 @@ public class IncrementalCompilerInstance <: DefaultCompilerInstance {
             return IncreKind.ROLLBACK
         }
         let previousCache = readResult[1]
+        if (GetCacheLineValue(previousCache, "version:") != "1") {
+            return IncreKind.ROLLBACK
+        }
         if (previousCache == currentCacheText) {
             return IncreKind.NO_CHANGE
         }
         if (GetCacheLineValue(previousCache, "args:") != EscapeCacheLine(core.cachedInfo.compileArgs)) {
             return IncreKind.ROLLBACK
         }
-        CollectCacheDelta(previousCache, currentCacheText)
-        return if (declsToBeReCompiled.isEmpty() && rawIncrRemovedDecls.isEmpty()) {
+        let changedFiles = CollectCacheDelta(previousCache, currentCacheText)
+        return if (declsToBeReCompiled.isEmpty() && rawIncrRemovedDecls.isEmpty() && !changedFiles) {
             IncreKind.NO_CHANGE
         } else {
             IncreKind.INCR
@@ -225,7 +204,20 @@ public class IncrementalCompilerInstance <: DefaultCompilerInstance {
         return builder.toString()
     }
 
-    private func CollectCacheDelta(previousCache: String, newCache: String): Unit {
+    private func CollectCacheDelta(previousCache: String, newCache: String): Bool {
+        var filesChanged = false
+        let previousFiles = CollectCacheLines(previousCache, "file:")
+        let newFiles = CollectCacheLines(newCache, "file:")
+        for (oldFile in previousFiles) {
+            if (!newFiles.contains(oldFile)) {
+                filesChanged = true
+            }
+        }
+        for (newFile in newFiles) {
+            if (!previousFiles.contains(newFile)) {
+                filesChanged = true
+            }
+        }
         let previousDecls = CollectCacheLines(previousCache, "decl:")
         let newDecls = CollectCacheLines(newCache, "decl:")
         for (oldDecl in previousDecls) {
@@ -238,6 +230,7 @@ public class IncrementalCompilerInstance <: DefaultCompilerInstance {
                 declsToBeReCompiled.add(newDecl)
             }
         }
+        return filesChanged
     }
 }
 

@@ -16,5 +16,6 @@
 [dependencies]
   "cangjie_compiler::basic" = { path = "../basic" }
   "cangjie_compiler::frontend" = { path = "../frontend" }
+  "cangjie_compiler::incremental_compilation" = { path = "../incremental_compilation" }
   "cangjie_compiler::option" = { path = "../option" }
   "cangjie_compiler::utils" = { path = "../utils" }

@@ -2,6 +2,7 @@ package cangjie_compiler::frontend_tool
 
 import std.collection.*
 import cangjie_compiler::frontend.*
+import cangjie_compiler::utils.FileUtil
 import cangjie_compiler::utils.ProfileRecorder
 
 public open class DefaultCompilerInstance {
@@ -155,7 +156,7 @@ public open class DefaultCompilerInstance {
             return true
         }
         let cjoPath = invocation.globalOptions.GenerateCachedPathName(pkg.fullPackageName, SERIALIZED_FILE_EXTENSION)
-        if (!WriteFileContent(cjoPath, RenderPackageCjo(pkg))) {
+        if (!FileUtil.WriteToFile(cjoPath, RenderPackageCjo(pkg))) {
             diag.Warn(DiagCategory.IMPORT_PACKAGE, DEFAULT_POSITION, "failed to write CJO summary: " + cjoPath)
             return false
         }
@@ -337,7 +338,7 @@ private func AppendDeclTree(builder: StringBuilder, decl: Decl, indent: Int64): 
 
 private func RecordIncrementalCodegenPackage(pkg: Package, markerPath: String): Unit {
     if (!markerPath.isEmpty()) {
-        let _ = WriteFileContent(markerPath, RenderPackageCjo(pkg))
+        let _ = FileUtil.WriteToFile(markerPath, RenderPackageCjo(pkg))
     }
 }
 
