@@ -5,6 +5,13 @@ Build: `cjpm build` passes.
 Scoped selfhost TODO comments: 0 remaining in the requested files.
 Whole-package selfhost TODO grep: 4 existing markers remain outside the allowed ffi-cjmp-test edit area.
 
+## 2026-06-17 override/mock propagation pass
+
+- Added `TypeManager`-backed `@Hide` override-function checking in `PluginCustomAnnoChecker`, including fallback to the enclosing declaration's `@Hide` annotation and the C++ missing/different-parameter diagnostics against the top overridden function.
+- Made plugin annotation cache merging authoritative for syscap and lowest API level, matching the C++ `MergeCachedAnnoInfo` behavior when cached declarations have no syscap or a lower/zero level.
+- Added the TestManager fixed-point walk that marks generic functions containing `createMock`/`createSpy`-relevant calls, including propagation through already marked generic callees and the post-visit reset used by the C++ pass.
+- Verified with `cjpm build`; scoped files still have no `TODO(selfhost:Sema)` markers.
+
 ## 2026-06-17 continuation pass
 
 - Added LSP relative-position lookup using the real `ASTContext` searcher, `Query` tree, and scope-gate APIs.
@@ -43,9 +50,9 @@ Whole-package selfhost TODO grep: 4 existing markers remain outside the allowed 
 
 - C FFI still lacks backend-option-sensitive unsafe-call gating and the full platform ABI diagnostic matrix from the C++ checker.
 - CJMP common member symbol-table rewriting, some extension declaration-map updates, and several merged-member ownership details remain partial.
-- Plugin checking now has the core reference-check helpers, external-weak marking hooks, scoped traversal, macro-order checks, and IfAvailable branch walking, but still lacks full option/import-manager parsing, dependency annotation clearing, and override-hide comparison from the C++ implementation.
+- Plugin checking now has the core reference-check helpers, external-weak marking hooks, scoped traversal, macro-order checks, IfAvailable branch walking, and override-hide comparison when a `TypeManager` is supplied, but still lacks full option/import-manager parsing, dependency annotation clearing, and call-site wiring from the complete C++ checker.
 - Mock/test support now has stronger semantic classification, naming, lookup, package usage detection, and preparation plumbing, but generated wrapper/body synthesis and full injection behavior are still incomplete.
 - NativeFFI utilities now cover more reference, generic, type-node, Java-array, and naming helpers, but larger AST synthesis/desugaring helpers, mangler-driven method naming, import-manager core declaration helpers, abort-on-invalid array classification, and full Java/ObjC interop manager behavior remain incomplete.
 - LSP base-name, scope-name, and relative-position helpers are present, but the C++ type synthesizer half remains outside the current self-host surface.
 
-Honest real-behavior coverage for this scoped pass is estimated at 52% versus the corresponding C++ reference surface.
+Honest real-behavior coverage for this scoped pass is estimated at 54% versus the corresponding C++ reference surface.
