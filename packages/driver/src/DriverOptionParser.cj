@@ -27,6 +27,18 @@ private class ParseCursor {
         index += 1
         return args[index]
     }
+
+    func takeOptionalValue(): Option<String> {
+        if (index + 1 >= args.size) {
+            return None
+        }
+        let candidate = args[index + 1]
+        if (candidate.startsWith("-")) {
+            return None
+        }
+        index += 1
+        return Some(args[index])
+    }
 }
 
 public func ParseDriverArgs(opts: DriverOptions, arguments: Array<String>): Bool {
@@ -90,6 +102,11 @@ private func addFrontendSeparated(opts: DriverOptions, spelling: String, value: 
     opts.frontendForwardArgs.add(value)
 }
 
+private func setPackageSourcePath(opts: DriverOptions, value: String): Unit {
+    opts.moduleSrcPath = value
+    addFrontendSeparated(opts, "--module-src-path", value)
+}
+
 private func canonicalSpelling(arg: String, shortName: String, longName: String): String {
     return if (arg == shortName || arg.startsWith(shortName) && !shortName.isEmpty() && !shortName.startsWith("--")) {
         shortName
@@ -150,7 +167,16 @@ private func ParseOption(opts: DriverOptions, cursor: ParseCursor, arg: String):
         addFrontendFlag(opts, arg)
         return true
     }
-    if (arg == "-p" || arg == "--package") { opts.compilePackage = true; addFrontendFlag(opts, arg); return true }
+    if (arg == "-p" || arg == "--package" || arg.startsWith("--package=")) {
+        opts.compilePackage = true
+        addFrontendFlag(opts, "--package")
+        if (let Some(inlinePackagePath) <- optionValueInline(arg, "--package")) {
+            setPackageSourcePath(opts, inlinePackagePath)
+        } else if (let Some(separatedPackagePath) <- cursor.takeOptionalValue()) {
+            setPackageSourcePath(opts, separatedPackagePath)
+        }
+        return true
+    }
     if (arg == "--no-sub-pkg") { opts.noSubPkg = true; addFrontendFlag(opts, arg); return true }
     if (arg == "--profile-compile-time") { opts.enableTimer = true; addFrontendFlag(opts, arg); return true }
     if (arg == "--profile-compile-memory") { opts.enableMemoryCollect = true; addFrontendFlag(opts, arg); return true }

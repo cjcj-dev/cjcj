@@ -69,7 +69,7 @@ public class Driver {
         if (!TempFileManager.Instance().Init(driverOptions, false)) {
             return false
         }
-        if (!driverOptions.srcFiles.isEmpty()) {
+        if (!driverOptions.srcFiles.isEmpty() || driverOptions.compilePackage) {
             if (!ExecuteFrontendPhase(this)) {
                 return false
             }

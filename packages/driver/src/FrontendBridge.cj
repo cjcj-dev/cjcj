@@ -19,7 +19,7 @@ public func ExecuteFrontendPhase(driver: Driver): Bool {
 }
 
 private func PrepareFrontendOutputs(opts: DriverOptions): Bool {
-    if (opts.srcFiles.isEmpty() || opts.IsEmitCHIREnable() || opts.frontendOnlyAction ||
+    if (!HasFrontendSourceInput(opts) || opts.IsEmitCHIREnable() || opts.frontendOnlyAction ||
         !opts.frontendOutputFiles.isEmpty()) {
         return true
     }
@@ -47,13 +47,17 @@ private func PrintFrontendCommand(cangjieHome: String, args: Array<String>): Uni
 }
 
 private func ReconcileFrontendOutputs(opts: DriverOptions): Bool {
-    if (opts.srcFiles.isEmpty()) {
+    if (!HasFrontendSourceInput(opts)) {
         return true
     }
     if (opts.IsEmitCHIREnable() || opts.frontendOnlyAction) {
         return true
     }
     return VerifyFrontendOutputs(opts)
+}
+
+private func HasFrontendSourceInput(opts: DriverOptions): Bool {
+    return !opts.srcFiles.isEmpty() || opts.compilePackage
 }
 
 private func VerifyFrontendOutputs(opts: DriverOptions): Bool {

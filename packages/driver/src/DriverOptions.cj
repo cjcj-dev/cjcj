@@ -212,7 +212,8 @@ public class DriverOptions {
     }
 
     public func HasInputs(): Bool {
-        return !srcFiles.isEmpty() || !inputObjs.isEmpty() || !inputLibraries.isEmpty() || !bcInputFiles.isEmpty()
+        return compilePackage || !srcFiles.isEmpty() || !inputObjs.isEmpty() || !inputLibraries.isEmpty() ||
+            !bcInputFiles.isEmpty()
     }
 
     public func CheckDirectoryPath(path: String): Option<String> {
@@ -298,6 +299,10 @@ public class DriverOptions {
             }
         } else {
             if (compilePackage) { out.add("--package") }
+            if (!moduleSrcPath.isEmpty()) {
+                out.add("--module-src-path")
+                out.add(moduleSrcPath)
+            }
             if (noSubPkg) { out.add("--no-sub-pkg") }
             if (scanDepPkg) { out.add("--scan-dependency") }
             if (enableCompileDebug) { out.add("-g") }
