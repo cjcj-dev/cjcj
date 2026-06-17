@@ -256,6 +256,21 @@ private func FindMemberInEnum(enumDecl: EnumDecl, name: String): ArrayList<Decl>
     return result
 }
 
+private func IsEnumOwnedDecl(decl: Decl): Bool {
+    if (let Some(outer) <- decl.outerDecl) {
+        if (let Some(_) <- (outer as EnumDecl)) {
+            return true
+        }
+    }
+    return false
+}
+
+private func AddEnumOwnedDecl(result: ArrayList<Decl>, decl: Decl): Unit {
+    if (IsEnumOwnedDecl(decl)) {
+        result.add(decl)
+    }
+}
+
 private func CandidateMatchesEnumPattern(decl: Decl, pattern: EnumPattern): Bool {
     if (pattern.patterns.isEmpty()) {
         if (let Some(ty) <- decl.GetTy()) {
@@ -274,10 +289,10 @@ private func FindEnumPatternTargets(ctx: ASTContext, enumDecl: Option<EnumDecl>,
         if (let Some(member) <- (constructor as MemberAccess)) {
             let result = ArrayList<Decl>()
             if (let Some(target) <- member.target) {
-                result.add(target)
+                AddEnumOwnedDecl(result, target)
             }
             for (target in member.targets) {
-                result.add(target)
+                AddEnumOwnedDecl(result, target)
             }
             return result
         }
@@ -292,10 +307,10 @@ private func FindEnumPatternTargets(ctx: ASTContext, enumDecl: Option<EnumDecl>,
             }
             let result = ArrayList<Decl>()
             if (let Some(target) <- refExpr.ref.target) {
-                result.add(target)
+                AddEnumOwnedDecl(result, target)
             }
             for (target in refExpr.ref.targets) {
-                result.add(target)
+                AddEnumOwnedDecl(result, target)
             }
             return result
         }
@@ -475,7 +490,7 @@ public func ChkTypePattern(typeManager: TypeManager, ctx: ASTContext, target: Ty
         return InvalidPatternTy(pattern)
     }
     let patternTy = typeNode.GetTy().getOrThrow()
-    if (typeManager.IsSubtype(target, patternTy, allowOptionBox: false)) {
+    if (typeManager.IsSubtype(target, patternTy, implicitBoxed: true, allowOptionBox: false)) {
         pattern.needRuntimeTypeCheck = false
         pattern.matchBeforeRuntime = true
     } else {
