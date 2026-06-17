@@ -5,6 +5,13 @@ Build: `cjpm build` passes.
 Scoped selfhost TODO comments: 0 remaining in the requested files.
 Whole-package selfhost TODO grep: 4 existing markers remain outside the allowed ffi-cjmp-test edit area.
 
+## 2026-06-18 mock accessor classification pass
+
+- Switched `MockUtils.ComputeAccessorKind` to the real `GetUsableGetterForProperty` and `GetUsableSetterForProperty` helpers, matching the C++ behavior for inherited/usable property accessors instead of assuming the first getter/setter slot.
+- Matched the C++ invalid property-accessor path by aborting when a `FuncDecl` has a property owner but is neither the usable getter nor usable setter.
+- Matched the C++ `FindAccessor` invalid-kind and missing-member-access precondition behavior with a private C FFI `abort` path, avoiding a new package dependency while preserving `CJC_ABORT` semantics.
+- Verified with `cjpm build`; `grep -rn "TODO(selfhost:Sema)" packages/sema/src` still reports the four existing out-of-scope root Sema markers and none in the scoped files.
+
 ## 2026-06-18 NativeFFI helper parity pass
 
 - Aligned `SplitAndTrim` with the C++ helper: the single-token case is preserved verbatim, and trimming is only applied when the configuration string is comma-separated.
@@ -93,4 +100,4 @@ Whole-package selfhost TODO grep: 4 existing markers remain outside the allowed 
 - NativeFFI utilities now cover more reference, generic, type-node, Java-array, and naming helpers, but larger AST synthesis/desugaring helpers, mangler-driven method naming, import-manager core declaration helpers, and full Java/ObjC interop manager behavior remain incomplete.
 - LSP base-name, scope-name, and relative-position helpers are present, but the C++ type synthesizer half remains outside the current self-host surface.
 
-Honest real-behavior coverage for this scoped pass is estimated at 60% versus the corresponding C++ reference surface.
+Honest real-behavior coverage for this scoped pass is estimated at 61% versus the corresponding C++ reference surface.

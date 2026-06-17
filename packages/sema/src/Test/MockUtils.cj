@@ -2,8 +2,14 @@ package cangjie_compiler::sema.Test
 
 import std.collection.*
 import cangjie_compiler::ast.*
+import cangjie_compiler::sema.GetUsableGetterForProperty
+import cangjie_compiler::sema.GetUsableSetterForProperty
 import cangjie_compiler::sema.SameTy
 import cangjie_compiler::sema.TypeManager
+
+foreign {
+    func abort(): Unit
+}
 
 private let MOCKED_ACCESSOR_SUFFIX: String = "$ToMock"
 private let GETTER_SUFFIX: String = "$get"
@@ -52,6 +58,12 @@ extend AccessorKind <: Equatable<AccessorKind> {
 
     public operator func !=(right: AccessorKind): Bool {
         return !(this == right)
+    }
+}
+
+private func AbortForInvalidMockAccessor(): Unit {
+    unsafe {
+        abort()
     }
 }
 
@@ -302,20 +314,27 @@ public class MockUtils {
 
     public static func ComputeAccessorKind(accessorDecl: FuncDecl): AccessorKind {
         if (let Some(propDecl) <- accessorDecl.propDecl) {
-            if (!propDecl.getters.isEmpty() && SameDecl(accessorDecl, propDecl.getters[0])) {
-                return if (accessorDecl.TestAttr(Attribute.STATIC)) {
-                    AccessorKind.STATIC_PROP_GETTER
-                } else {
-                    AccessorKind.PROP_GETTER
+            if (let Some(getter) <- GetUsableGetterForProperty(propDecl)) {
+                if (SameDecl(accessorDecl, getter)) {
+                    return if (accessorDecl.TestAttr(Attribute.STATIC)) {
+                        AccessorKind.STATIC_PROP_GETTER
+                    } else {
+                        AccessorKind.PROP_GETTER
+                    }
                 }
             }
-            if (propDecl.isVar && !propDecl.setters.isEmpty() && SameDecl(accessorDecl, propDecl.setters[0])) {
-                return if (accessorDecl.TestAttr(Attribute.STATIC)) {
-                    AccessorKind.STATIC_PROP_SETTER
-                } else {
-                    AccessorKind.PROP_SETTER
+            if (propDecl.isVar) {
+                if (let Some(setter) <- GetUsableSetterForProperty(propDecl)) {
+                    if (SameDecl(accessorDecl, setter)) {
+                        return if (accessorDecl.TestAttr(Attribute.STATIC)) {
+                            AccessorKind.STATIC_PROP_SETTER
+                        } else {
+                            AccessorKind.PROP_SETTER
+                        }
+                    }
                 }
             }
+            AbortForInvalidMockAccessor()
             return AccessorKind.PROP
         }
         let name = accessorDecl.identifier.Val()
@@ -445,6 +464,8 @@ public class MockUtils {
                         return accessorDecl as FuncDecl
                     }
                 }
+            } else {
+                AbortForInvalidMockAccessor()
             }
             return None
         }
@@ -453,6 +474,7 @@ public class MockUtils {
                 return FindTopLevelAccessor(member, kind)
             }
         }
+        AbortForInvalidMockAccessor()
         return None
     }
 
