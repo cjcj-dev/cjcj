@@ -14,7 +14,7 @@ Implemented:
 - Ported the C++ compression parser/tree renderer for variables, functions, default-parameter functions,
   paths, composite types, function types, tuple types, and recursive entity/type output.
 - Added descriptor-backed equivalents for declarations, files, semantic types, parser type annotations,
-  generic constraints, function parameters, patterns, CHIR functions, CHIR custom types, and CHIR types.
+  generic constraints, function parameters, and patterns.
 - Added a module-local dependency on `cangjie_compiler::ast` and an AST adapter that converts real
   AST packages, declarations, files, semantic `Ty` instances, parser type nodes, generics, function
   bodies, function parameters, patterns, inheritance, properties, and member trees into the Mangle
@@ -80,6 +80,9 @@ Implemented:
   `TypeKindName`, removing the module-local `MangleTypeKind` clone and conversion layer.
 - De-isolated descriptor CHIR type kinds to the real `cangjie_compiler::chir.TypeKind`, removing the
   module-local `CHIRTypeKind` clone and sharing the same primitive dispatcher as real CHIR overloads.
+- De-isolated CHIR helper APIs to the real `cangjie_compiler::chir` value/type/definition classes by
+  removing the module-local `CHIRType`, `CHIRFunction`, and `CHIRCustomTypeDef` compatibility models and
+  the duplicate descriptor overloads that depended on them.
 - Aligned parser-AST `FuncParam` declaration suffix mangling with C++ `IsMemberParam`: ordinary function
   parameters no longer receive the member-var type discriminator, while primary-constructor member
   parameters still do.
@@ -91,6 +94,27 @@ Implemented:
 - Aligned descriptor semantic-type and extend-entity failure behavior with C++ `CJC_ASSERT`/null-check paths
   by rejecting unsupported user-defined type kinds, missing nominal declarations, malformed raw-array and
   CPointer payloads, missing function-parameter semantic types, and incomplete extend context/index data.
+- Aligned real-CHIR virtual/mutable wrapper names for extend definitions with the C++ implementation by
+  appending sorted implemented-interface type mangles before the package suffix.
+- Aligned real-CHIR raw-array type mangling with C++ `RawArrayType::GetDims()` instead of assuming a
+  single-dimensional raw array, and switched real-CHIR CPointer mangling/qualified-name rendering to the
+  concrete `CPointerType` element API.
+- Aligned real-CHIR custom type qualified-name rendering with C++ generic-instantiation behavior by using
+  the generic declaration package when `CustomTypeDef.GetGenericDecl()` is present.
+- Aligned real-CHIR custom type identifier normalization with the C++ `CustomTypeDef::GetIdentifierWithoutPrefix`
+  contract for `@_C...` names while preserving self-hosted `_C...` and source-name identifiers, and made
+  qualified-name rendering prefer public source identifiers while falling back to normalized mangled names
+  for private/internal-style definitions.
+- Aligned lambda prefix package selection with the C++ `ManglePrefix` rule by deriving lambda package
+  mangling from the nearest declaration in the prefix instead of relying on lambda descriptor package
+  metadata.
+- De-isolated `CHIRMangler.MangleCFuncSignature` to accept the real `cangjie_compiler::ast.FuncTy`
+  alongside the descriptor overload, matching the C++ `AST::FuncTy` API shape.
+- Aligned AST-facing package export-id generation with the C++ package walker by visiting real AST nodes,
+  requiring `Ty.IsTyCorrect`, and then copying export IDs back through the adapter.
+- Aligned parser-AST malformed type-annotation handling with C++ assertion/null-check behavior for missing
+  parenthesized, option, function-return, VArray element/constant, qualified-base, and constant-literal
+  payloads, and for unsupported AST type-annotation kinds.
 
 Known fidelity caveats:
 
@@ -100,14 +124,10 @@ Known fidelity caveats:
   descriptor layer is fully retired.
 - Real CHIR overloads now use `cangjie_compiler::chir` objects directly where the scaffold carries the
   needed metadata. Some C++ CHIR details are still not represented in the self-hosted CHIR package, notably
-  raw-array dimensions, extend implemented-interface type lists, custom type source-code identifiers,
-  lambda expression identifiers, and internal linkage info. Those paths remain descriptor-backed or use
-  the currently available CHIR fields.
+  `CustomType.IsAutoEnvGenericBase`/`IsAutoEnvInstBase` and `LinkTypeInfo`-style internal linkage queries
+  for custom type defs, so those assertion-guarded branches use the currently available CHIR fields.
 - The AST adapter maps the currently available self-hosted AST package into the Mangle descriptor model
   and prepares package context from `curFile.curPackage` when available. Byte-for-byte validation against
   full parser/sema output still depends on downstream packages producing complete annotation arrays,
   semantic types, parent links, and file/package metadata.
-- The descriptor CHIR model preserves the CHIR mangling grammar and indexing algorithms, but it depends
-  on callers to populate CHIR-equivalent fields that the C++ implementation obtains from real CHIR IR.
-
 Remaining Mangle selfhost markers: 0.

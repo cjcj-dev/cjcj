@@ -798,8 +798,23 @@ public open class BaseMangler {
                 mangled = MANGLE_FILE_ID_PREFIX + fileIdFor(file) + mangled
             }
         }
-        mangled = ManglePackage(node) + mangled
+        mangled = ManglePackageForPrefixNode(node, prefix) + mangled
         return mangled
+    }
+
+    private func ManglePackageForPrefixNode(node: MangleDecl, prefix: ArrayList<MangleDecl>): String {
+        if (node.astKind == ASTKind.LAMBDA_EXPR) {
+            var idx = prefix.size - 1
+            while (idx >= 0) {
+                let prefixDecl = prefix[idx]
+                if (prefixDecl.astKind != ASTKind.LAMBDA_EXPR && prefixDecl.astKind != ASTKind.NODE &&
+                    !prefixDecl.fullPackageName.isEmpty()) {
+                    return ManglePackage(prefixDecl)
+                }
+                idx--
+            }
+        }
+        return ManglePackage(node)
     }
 
     public func ManglePackage(decl: MangleDecl): String {
@@ -1244,11 +1259,16 @@ public open class BaseMangler {
         let ctx = PrepareContextForPackage(convertedPkg)
         adapter.CollectLocalDecls(ctx, pkg)
         exportIdMode = true
-        for (decl in convertedPkg.members) {
-            if (decl.TestAttr(Attribute.GLOBAL)) {
-                decl.exportId = MangleExportId(decl)
+        let walker = Walker(pkg, visitPre: { node: Node =>
+            if (let Some(decl) <- (node as Decl)) {
+                if (Ty.IsTyCorrect(decl.GetTy()) && decl.TestAttr(Attribute.GLOBAL)) {
+                    let convertedDecl = adapter.ConvertDecl(decl)
+                    convertedDecl.exportId = MangleExportId(convertedDecl)
+                }
             }
-        }
+            VisitAction.WALK_CHILDREN
+        })
+        walker.Walk()
         adapter.CopyExportIdsToAst()
     }
 

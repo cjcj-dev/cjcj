@@ -651,8 +651,10 @@ public class MangleAstAdapter {
                 if (let Some(literal) <- (expr as LitConstExpr)) {
                     target.constantValue = literal.stringValue
                 } else {
-                    target.constantValue = expr.ToString()
+                    throw IllegalArgumentException("Constant type annotation requires a literal constant expression.")
                 }
+            } else {
+                throw IllegalArgumentException("Constant type annotation has no constant expression.")
             }
         } else if (let Some(varrayType) <- (typeNode as VArrayType)) {
             if (let Some(typeArg) <- varrayType.typeArgument) {
