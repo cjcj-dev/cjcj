@@ -104,9 +104,12 @@ let ENUM_TAG_MASK: Int64 = 255 // (1 << ENUM_TAG_BITS) - 1
 //   NONE    -- payload-less (`| Red`), encodes as just its tag.
 //   INT     -- single Int64 payload (`| Some(Int64)`).
 //   STRING  -- single String payload (`| Text(String)`), CUT 3.
+//   MULTI   -- two or more Int64 payload fields (`| Add(Int64, Int64)`). Represented as separate
+//              slots of a heap-style {tag, f0, f1, ...} Int64 buffer (NOT bit-packed) -- see below.
 let ENUM_PAYLOAD_NONE: Int64 = 0
 let ENUM_PAYLOAD_INT: Int64 = 1
 let ENUM_PAYLOAD_STRING: Int64 = 2
+let ENUM_PAYLOAD_MULTI: Int64 = 3
 
 // A registry of enum variants discovered among the file's top-level enum declarations. `variantTags`
 // maps each variant identifier to its Int64 tag (index within its enum); `variantPayloads` maps it to
@@ -118,6 +121,17 @@ let ENUM_PAYLOAD_STRING: Int64 = 2
 private class EnumRegistry {
     let variantTags = HashMap<String, Int64>()
     let variantPayloads = HashMap<String, Int64>()
+    // For a variant in a heap-represented enum, the number of Int64 payload fields it carries (0 for a
+    // payload-less variant, 1 for a single-Int64 variant, N for a multi-field variant). Only populated
+    // for variants whose declaring enum is heap-represented (`variantHeap`).
+    let variantFieldCounts = HashMap<String, Int64>()
+    // Whether `name`'s declaring enum uses the separate-slot heap representation (a {tag, f0, f1, ...}
+    // Int64 buffer with each field in its own slot, NOT bit-packed). An enum is heap-represented iff at
+    // least one of its constructors carries two or more Int64 fields; then ALL its variants -- including
+    // payload-less and single-Int64 ones -- use the buffer form so one enum type has one uniform value
+    // representation. An enum with only payload-less / single-Int64/String variants keeps the existing
+    // single-Int64 bit-packed encoding.
+    let variantHeap = HashSet<String>()
 
     func isVariant(name: String): Bool {
         return variantTags.contains(name)
@@ -131,12 +145,22 @@ private class EnumRegistry {
         return variantPayloads.get(name)
     }
 
-    // Whether `name` names a variant that carries a payload (Int or String).
+    // Whether `name` names a variant that carries a payload (Int, String, or multi-field).
     func hasPayload(name: String): Bool {
         match (variantPayloads.get(name)) {
             case Some(k) => return k != ENUM_PAYLOAD_NONE
             case None => return false
         }
+    }
+
+    // Whether `name`'s enum uses the separate-slot heap representation.
+    func isHeap(name: String): Bool {
+        return variantHeap.contains(name)
+    }
+
+    // The number of Int64 payload fields `name` carries (heap-represented variants only).
+    func fieldCountOf(name: String): Option<Int64> {
+        return variantFieldCounts.get(name)
     }
 }
 
@@ -155,11 +179,19 @@ private func collectEnumRegistry(parsedFile: ParseFile): EnumRegistry {
             // Classify each constructor's payload; reject the whole enum on any unsupported shape so a
             // partially-supported enum never registers (keeps construction/match decisions sound).
             let payloads = ArrayList<Int64>()
+            let fieldCounts = ArrayList<Int64>()
             var enumOk = true
+            var enumHeap = false
             for (ctor in enumDecl.constructors) {
-                let kind = classifyEnumCtorPayload(ctor)
-                match (kind) {
-                    case Some(k) => payloads.add(k)
+                match (classifyEnumCtorPayload(ctor)) {
+                    case Some((k, n)) =>
+                        payloads.add(k)
+                        fieldCounts.add(n)
+                        // Any multi-field constructor makes the whole enum use the separate-slot heap
+                        // representation (so the enum type has one uniform value form).
+                        if (k == ENUM_PAYLOAD_MULTI) {
+                            enumHeap = true
+                        }
                     case None =>
                         enumOk = false
                         break
@@ -167,6 +199,19 @@ private func collectEnumRegistry(parsedFile: ParseFile): EnumRegistry {
             }
             if (!enumOk) {
                 continue
+            }
+            // A heap-represented enum cannot mix in a String-payload variant (the heap buffer stores
+            // Int64 slots only). Reject the whole enum if it would mix String with multi-field.
+            if (enumHeap) {
+                for (k in payloads) {
+                    if (k == ENUM_PAYLOAD_STRING) {
+                        enumOk = false
+                        break
+                    }
+                }
+                if (!enumOk) {
+                    continue
+                }
             }
             var tag: Int64 = 0
             for (ctor in enumDecl.constructors) {
@@ -177,6 +222,10 @@ private func collectEnumRegistry(parsedFile: ParseFile): EnumRegistry {
                     } else {
                         registry.variantTags[name] = tag
                         registry.variantPayloads[name] = payloads[tag]
+                        if (enumHeap) {
+                            registry.variantHeap.add(name)
+                            registry.variantFieldCounts[name] = fieldCounts[tag]
+                        }
                     }
                 }
                 tag++
@@ -186,34 +235,48 @@ private func collectEnumRegistry(parsedFile: ParseFile): EnumRegistry {
     for (name in collided) {
         registry.variantTags.remove(name)
         registry.variantPayloads.remove(name)
+        registry.variantFieldCounts.remove(name)
+        registry.variantHeap.remove(name)
     }
     return registry
 }
 
 // Classify an enum constructor's payload from its parsed payload-type list (recorded by the parser on
-// the constructor VarDecl). Returns NONE for a payload-less constructor (`| Red`), INT for a single
-// `Int64`/`Int` payload, or STRING for a single `String` payload. Returns None (reject the enum) for
-// anything else: a multi-field constructor, or a payload of an unsupported type.
-private func classifyEnumCtorPayload(ctor: ParseDecl): Option<Int64> {
+// the constructor VarDecl). Returns (kind, fieldCount):
+//   (NONE,   0) for a payload-less constructor (`| Red`);
+//   (INT,    1) for a single `Int64`/`Int` payload;
+//   (STRING, 1) for a single `String` payload;
+//   (MULTI,  N) for two or more all-`Int64` payload fields (`| Add(Int64, Int64)`).
+// Returns None (reject the enum) for any unsupported shape: a multi-field constructor with a non-Int64
+// field, or a single payload of an unsupported type.
+private func classifyEnumCtorPayload(ctor: ParseDecl): Option<(Int64, Int64)> {
     let varDecl = match (ctor as ParseVarDecl) {
         case Some(v) => v
         case None => return None
     }
     let types = varDecl.constructorTypes
     if (types.isEmpty()) {
-        return Some(ENUM_PAYLOAD_NONE)
+        return Some((ENUM_PAYLOAD_NONE, 0))
     }
-    if (types.size != 1) {
-        return None // multi-field constructor, out of grammar
+    if (types.size == 1) {
+        let typeName = types[0].ToString().trimAscii()
+        if (typeName == "Int64" || typeName == "Int") {
+            return Some((ENUM_PAYLOAD_INT, 1))
+        }
+        if (typeName == "String") {
+            return Some((ENUM_PAYLOAD_STRING, 1))
+        }
+        return None
     }
-    let typeName = types[0].ToString().trimAscii()
-    if (typeName == "Int64" || typeName == "Int") {
-        return Some(ENUM_PAYLOAD_INT)
+    // Two or more fields: only an all-Int64 field list is supported. Each field is stored in its own
+    // slot of the heap buffer (no bit-packing), so any field width / value is preserved.
+    for (t in types) {
+        let typeName = t.ToString().trimAscii()
+        if (typeName != "Int64" && typeName != "Int") {
+            return None
+        }
     }
-    if (typeName == "String") {
-        return Some(ENUM_PAYLOAD_STRING)
-    }
-    return None
+    return Some((ENUM_PAYLOAD_MULTI, types.size))
 }
 
 // Whether the parsed function declares a `String` return type.
@@ -707,10 +770,15 @@ private class MatchArm {
     let isCatchAll: Bool
     let bindingName: Option<String>
     let body: ArrayList<ChirStmtSpec>
-    // For a destructuring enum-constructor arm `case Ctor(n) =>`: the name `n` bound to the variant's
-    // decoded payload (`$sel >> ENUM_TAG_BITS`). The arm matches on its tag (held in `literals`); the
-    // payload binding is prepended to the arm body when the tag matches. None for non-destructuring arms.
+    // For a destructuring enum-constructor arm `case Ctor(n) =>` over a PACKED (single-Int64) enum: the
+    // name `n` bound to the variant's decoded payload (`$sel >> ENUM_TAG_BITS`). None for non-packed-
+    // destructuring arms. (Heap destructuring uses `heapFieldBindings` instead.)
     var payloadBindingName: Option<String> = None
+    // For a destructuring enum-constructor arm `case Ctor(a, b, ...) =>` over a HEAP-represented enum:
+    // the binding name for each payload field, in order (None for a `_` wildcard field). Each name is
+    // bound to `EnumField($sel, i+1)` (slot i+1 of the buffer) when the tag matches. Empty for a
+    // non-heap-destructuring arm.
+    let heapFieldBindings = ArrayList<Option<String>>()
 
     init(literals: ArrayList<Int64>, isCatchAll: Bool, bindingName: Option<String>,
         body: ArrayList<ChirStmtSpec>) {
@@ -731,6 +799,31 @@ private func matchUsesTagMask(matchExpr: ParseMatchExpr): Bool {
         for (pattern in matchCase.patterns) {
             if (let Some(_) <- (pattern as ParseEnumPattern)) {
                 return true
+            }
+        }
+    }
+    return false
+}
+
+// Whether the match is over a HEAP-represented enum (its selector value is a {tag, f0, ...} buffer
+// address). Detected from the patterns: a destructuring constructor pattern naming a heap variant, or
+// a bare variant VarPattern naming a heap variant. A heap match tests the tag via the buffer's slot-0
+// load (`EnumField($sel, 0) == tag`) and binds destructured fields via per-slot loads, rather than the
+// bit-packed mask/shift used for the single-Int64 packed enums. Mutually exclusive with the packed
+// tag-mask path (an enum is heap or packed, never both).
+private func matchUsesHeap(matchExpr: ParseMatchExpr, scope: AdaptScope): Bool {
+    for (matchCase in matchExpr.matchCases) {
+        for (pattern in matchCase.patterns) {
+            if (let Some(enumPat) <- (pattern as ParseEnumPattern)) {
+                if (scope.enums.isHeap(enumPat.constructor.Val())) {
+                    return true
+                }
+            }
+            if (let Some(varPat) <- (pattern as ParseVarPattern)) {
+                let n = varPat.identifier.Val()
+                if (scope.isEnumVariant(n) && scope.enums.isHeap(n)) {
+                    return true
+                }
             }
         }
     }
@@ -783,6 +876,54 @@ private func enumPatternMatch(pattern: ParsePattern, scope: AdaptScope): Option<
         return Some((tag, None))
     }
     return None
+}
+
+// Parse a destructuring enum-constructor pattern over a HEAP-represented enum into (tag, fieldBindings).
+// Handles every variant arity of a heap enum: a payload-less variant (`case Z =>` parses as a bare
+// VarPattern, handled elsewhere -- not here), a single-field `case P(x) =>`, and a multi-field
+// `case Add(a, b) =>`. Each sub-pattern must be a simple VarPattern (binds the field) or a
+// WildcardPattern (`_`, no binding); the sub-pattern count must equal the variant's declared field
+// count. Returns None for a non-heap enum, an unknown/qualified constructor, type args, a nested or
+// non-simple sub-pattern, or an arity mismatch (the whole match then falls back).
+private func heapEnumPatternMatch(pattern: ParsePattern,
+    scope: AdaptScope): Option<(Int64, ArrayList<Option<String>>)> {
+    let enumPat = match (pattern as ParseEnumPattern) {
+        case Some(p) => p
+        case None => return None
+    }
+    if (!enumPat.typeArguments.isEmpty() || enumPat.constructorParts.size > 1) {
+        return None
+    }
+    let ctorName = enumPat.constructor.Val()
+    if (!scope.isEnumVariant(ctorName) || !scope.enums.isHeap(ctorName)) {
+        return None
+    }
+    let tag = match (scope.enums.tagOf(ctorName)) {
+        case Some(t) => t
+        case None => return None
+    }
+    let fieldCount = match (scope.enums.fieldCountOf(ctorName)) {
+        case Some(n) => n
+        case None => return None
+    }
+    if (enumPat.patterns.size != fieldCount) {
+        return None
+    }
+    let bindings = ArrayList<Option<String>>()
+    for (sub in enumPat.patterns) {
+        if (let Some(varPat) <- (sub as ParseVarPattern)) {
+            let n = varPat.identifier.Val()
+            if (n.isEmpty()) {
+                return None
+            }
+            bindings.add(Some(n))
+        } else if (let Some(_) <- (sub as ParseWildcardPattern)) {
+            bindings.add(None)
+        } else {
+            return None
+        }
+    }
+    return Some((tag, bindings))
 }
 
 // Desugar a statement-position `match (sel) { case L => ... case _ => ... }` over an Int64 selector
@@ -857,6 +998,7 @@ private func normalizeMatchArms(matchExpr: ParseMatchExpr, scope: AdaptScope): O
         var isCatchAll = false
         var bindingName: Option<String> = None
         var payloadBindingName: Option<String> = None
+        let heapFieldBindings = ArrayList<Option<String>>()
         for (pattern in matchCase.patterns) {
             if (let Some(constPat) <- (pattern as ParseConstPattern)) {
                 let lit = match (constPat.literal) {
@@ -869,6 +1011,16 @@ private func normalizeMatchArms(matchExpr: ParseMatchExpr, scope: AdaptScope): O
                 }
             } else if (let Some(_) <- (pattern as ParseWildcardPattern)) {
                 isCatchAll = true
+            } else if (let Some((tag, fieldBindings)) <- heapEnumPatternMatch(pattern, scope)) {
+                // A destructuring enum-constructor pattern over a heap enum `case Add(a, b) =>`: match
+                // the variant's tag and bind each payload field to its own per-slot load (later).
+                literals.add(tag)
+                if (matchCase.patterns.size != 1) {
+                    return None // a destructuring pattern cannot be OR-combined
+                }
+                for (b in fieldBindings) {
+                    heapFieldBindings.add(b)
+                }
             } else if (let Some((tag, payloadName)) <- enumPatternMatch(pattern, scope)) {
                 // A destructuring enum-constructor pattern `case Ctor(n) =>` / `case Ctor(_) =>`:
                 // match the variant's tag and (optionally) bind the decoded payload to `n`.
@@ -912,12 +1064,20 @@ private func normalizeMatchArms(matchExpr: ParseMatchExpr, scope: AdaptScope): O
         if (let Some(name) <- payloadBindingName) {
             scope.locals.add(name)
         }
+        for (b in heapFieldBindings) {
+            if (let Some(name) <- b) {
+                scope.locals.add(name)
+            }
+        }
         let bodyStmts = match (adaptStatements(armBlock, scope)) {
             case Some(s) => s
             case None => return None
         }
         let arm = MatchArm(literals, isCatchAll, bindingName, bodyStmts)
         arm.payloadBindingName = payloadBindingName
+        for (b in heapFieldBindings) {
+            arm.heapFieldBindings.add(b)
+        }
         arms.add(arm)
     }
     return Some(arms)
@@ -945,7 +1105,9 @@ private func buildMatchChain(matchExpr: ParseMatchExpr, arms: ArrayList<MatchArm
     // A match that destructures any enum constructor is over a payload-carrying enum: tag tests mask
     // off the payload bits, and a `case Ctor(n) =>` arm binds the decoded payload. A match with only
     // bare-variant / literal / wildcard patterns keeps the direct-compare path (no regression).
-    let useTagMask = matchUsesTagMask(matchExpr)
+    let useHeap = matchUsesHeap(matchExpr, scope)
+    // A heap match never uses the packed tag mask (an enum is heap or packed, never both).
+    let useTagMask = !useHeap && matchUsesTagMask(matchExpr)
     let out = ArrayList<ChirStmtSpec>()
     let selName = scope.freshTemp("match_sel")
     scope.locals.add(selName)
@@ -975,7 +1137,7 @@ private func buildMatchChain(matchExpr: ParseMatchExpr, arms: ArrayList<MatchArm
         let arm = arms[i]
         // A catch-all may only be the final arm (already enforced in normalize), so any arm here has
         // literal values.
-        let cond = match (literalCond(selName, arm.literals, useTagMask)) {
+        let cond = match (literalCond(selName, arm.literals, useTagMask, useHeap)) {
             case Some(c) => c
             case None => return None
         }
@@ -995,8 +1157,10 @@ private func buildMatchChain(matchExpr: ParseMatchExpr, arms: ArrayList<MatchArm
 
 // The arm body, prefixed with the bindings it introduces so they read from the selector temp:
 //   - a `case n =>` var-binding catch-all prepends `let n = $sel` (the whole selector value);
-//   - a `case Ctor(p) =>` destructuring arm prepends `let p = $sel >> ENUM_TAG_BITS` (the decoded
-//     payload). Both may be present only on distinct arms, never together on one arm.
+//   - a PACKED `case Ctor(p) =>` arm prepends `let p = $sel >> ENUM_TAG_BITS` (the decoded payload);
+//   - a HEAP `case Ctor(a, b, ...) =>` arm prepends one `let a = EnumField($sel, 1)`,
+//     `let b = EnumField($sel, 2)`, ... per bound field (each loads its own buffer slot; a `_` field
+//     binds nothing). Only one binding form is present on any one arm.
 private func withBinding(arm: MatchArm, selName: String): ArrayList<ChirStmtSpec> {
     var prefixed = false
     let body = ArrayList<ChirStmtSpec>()
@@ -1012,6 +1176,19 @@ private func withBinding(arm: MatchArm, selName: String): ArrayList<ChirStmtSpec
             prefixed = true
         case None => ()
     }
+    // Heap field bindings: bind each named field to its own slot load (slot 0 is the tag, so payload
+    // field i is at slot i+1).
+    var fieldIdx = 0
+    for (b in arm.heapFieldBindings) {
+        match (b) {
+            case Some(name) =>
+                body.add(ChirStmtSpec.Let(name,
+                    ChirExprSpec.EnumField(ChirExprSpec.Ref(selName), fieldIdx + 1), isVar: false))
+                prefixed = true
+            case None => ()
+        }
+        fieldIdx++
+    }
     if (!prefixed) {
         return arm.body
     }
@@ -1021,18 +1198,21 @@ private func withBinding(arm: MatchArm, selName: String): ArrayList<ChirStmtSpec
     return body
 }
 
-// Build the OR-combined equality condition for an arm's literal values. With `useTagMask` the test
-// compares the selector's decoded tag (`($sel & ENUM_TAG_MASK) == L`), so a payload-carrying enum
-// value matches its variant regardless of the payload bits; otherwise it compares the whole selector
-// value (`$sel == L`), preserving the existing payload-less / Int64-literal match behavior. Requires
-// at least one literal.
-private func literalCond(selName: String, literals: ArrayList<Int64>, useTagMask: Bool): Option<ChirExprSpec> {
+// Build the OR-combined equality condition for an arm's literal values. The compared left-hand side is:
+//   - `useHeap`:    the buffer's tag slot load `EnumField($sel, 0)` (heap-represented enum);
+//   - `useTagMask`: the packed selector's decoded tag `($sel & ENUM_TAG_MASK)` (single-Int64 enum);
+//   - otherwise:    the whole selector value `$sel` (payload-less enum / Int64-literal match, unchanged).
+// `useHeap` and `useTagMask` are mutually exclusive. Requires at least one literal.
+private func literalCond(selName: String, literals: ArrayList<Int64>, useTagMask: Bool,
+    useHeap: Bool): Option<ChirExprSpec> {
     if (literals.isEmpty()) {
         return None
     }
     var acc: Option<ChirExprSpec> = None
     for (lit in literals) {
-        let lhs = if (useTagMask) {
+        let lhs = if (useHeap) {
+            ChirExprSpec.EnumField(ChirExprSpec.Ref(selName), 0)
+        } else if (useTagMask) {
             enumTagDecode(ChirExprSpec.Ref(selName))
         } else {
             ChirExprSpec.Ref(selName)
@@ -1092,6 +1272,7 @@ private func adaptMatchValue(matchExpr: ParseMatchExpr, scope: AdaptScope): Opti
         var isCatchAll = false
         var bindingName: Option<String> = None
         var payloadBindingName: Option<String> = None
+        let heapFieldBindings = ArrayList<Option<String>>()
         for (pattern in matchCase.patterns) {
             if (let Some(constPat) <- (pattern as ParseConstPattern)) {
                 let lit = match (constPat.literal) {
@@ -1104,6 +1285,16 @@ private func adaptMatchValue(matchExpr: ParseMatchExpr, scope: AdaptScope): Opti
                 }
             } else if (let Some(_) <- (pattern as ParseWildcardPattern)) {
                 isCatchAll = true
+            } else if (let Some((tag, fieldBindings)) <- heapEnumPatternMatch(pattern, scope)) {
+                // A destructuring enum-constructor pattern over a heap enum `case Add(a, b) => <expr>`:
+                // match the tag and bind each payload field (per-slot load) for use in the value expr.
+                literals.add(tag)
+                if (matchCase.patterns.size != 1) {
+                    return None
+                }
+                for (b in fieldBindings) {
+                    heapFieldBindings.add(b)
+                }
             } else if (let Some((tag, payloadName)) <- enumPatternMatch(pattern, scope)) {
                 // A destructuring enum-constructor pattern `case Ctor(n) => <expr>`: match the tag and
                 // bind the decoded payload to `n` for use in the yielded value expression.
@@ -1144,6 +1335,11 @@ private func adaptMatchValue(matchExpr: ParseMatchExpr, scope: AdaptScope): Opti
         if (let Some(name) <- payloadBindingName) {
             scope.locals.add(name)
         }
+        for (b in heapFieldBindings) {
+            if (let Some(name) <- b) {
+                scope.locals.add(name)
+            }
+        }
         if (armBlock.body.size != 1) {
             return None
         }
@@ -1163,6 +1359,9 @@ private func adaptMatchValue(matchExpr: ParseMatchExpr, scope: AdaptScope): Opti
         armStmts.add(ChirStmtSpec.Assign(resName, valueSpec))
         let arm = MatchArm(literals, isCatchAll, bindingName, armStmts)
         arm.payloadBindingName = payloadBindingName
+        for (b in heapFieldBindings) {
+            arm.heapFieldBindings.add(b)
+        }
         arms.add(arm)
     }
     // Declare the result var (initialized to 0; every reachable path assigns it) before the chain.
@@ -1296,6 +1495,12 @@ private func adaptExpr(expr: ParseExpr, scope: AdaptScope): Option<ChirExprSpec>
     // A string-interpolation literal (`"a=${x} b=${y+1}"`): lower to a concat of the literal text
     // parts and the stringified interpolated expressions, in order.
     if (let Some(spec) <- adaptInterpolation(expr, scope)) {
+        return Some(spec)
+    }
+    // A bare reference to a payload-less variant of a HEAP-represented enum (`Z` in an enum that also
+    // has multi-field variants) must build the {tag} buffer form (a 1-slot buffer) so it shares the
+    // uniform heap value representation -- not a plain tag literal. Checked before the packed path.
+    if (let Some(spec) <- adaptHeapBareVariant(expr, scope)) {
         return Some(spec)
     }
     // A bare reference to a payload-less enum variant (`Green`, `N`) is the variant's value: its
@@ -1890,6 +2095,25 @@ private func enumVariantTag(expr: ParseExpr, scope: AdaptScope): Option<Int64> {
     return None
 }
 
+// If `expr` is a bare RefExpr naming a payload-less variant of a HEAP-represented enum, build its
+// {tag} buffer value (a 1-slot heap buffer) so it shares the enum's uniform heap representation.
+// Otherwise None (the variant is in a non-heap enum, or this is not a bare variant reference).
+private func adaptHeapBareVariant(expr: ParseExpr, scope: AdaptScope): Option<ChirExprSpec> {
+    if (let Some(refExpr) <- (expr as ParseRefExpr)) {
+        if (!refExpr.typeArguments.isEmpty()) {
+            return None
+        }
+        let name = refExpr.identifier.Val()
+        if (scope.isEnumVariant(name) && scope.enums.isHeap(name) && !scope.enums.hasPayload(name)) {
+            if (let Some(tag) <- scope.enums.tagOf(name)) {
+                scope.needsRuntime = true
+                return Some(ChirExprSpec.EnumMake(tag, ArrayList<ChirExprSpec>()))
+            }
+        }
+    }
+    return None
+}
+
 // Construct a payload-carrying variant `Ctor(<payload>)`: encode the value as a single Int64 =
 // (payload << ENUM_TAG_BITS) | tag, lowered as `(<payload-expr> LSHIFT bits) BITOR tag`. The callee
 // must be a bare RefExpr naming a single-payload variant in scope (not shadowed by a local, no type
@@ -1919,6 +2143,13 @@ private func adaptEnumConstruction(expr: ParseExpr, scope: AdaptScope): Option<C
     let payloadKind = match (scope.enums.payloadKindOf(name)) {
         case Some(k) => k
         case None => return None
+    }
+    // A heap-represented enum: `Ctor(a, b, ...)` stores each field in its OWN Int64 slot of a
+    // {tag, f0, f1, ...} buffer (no bit-packing). Accept exactly the variant's declared number of
+    // positional Int64 args. A payload-less variant in a heap enum (`Z`) is built as a bare reference
+    // (handled in enumVariantTag), not a call, so it is not reached here.
+    if (scope.enums.isHeap(name)) {
+        return adaptHeapEnumConstruction(name, call, scope)
     }
     if (payloadKind == ENUM_PAYLOAD_NONE) {
         return None // payload-less variant cannot be applied to an argument
@@ -1956,6 +2187,47 @@ private func adaptEnumConstruction(expr: ParseExpr, scope: AdaptScope): Option<C
     // ENUM_PAYLOAD_STRING is handled in CUT 3 (a String payload cannot be packed into the Int64
     // encoding); leave it on the existing path for now.
     return None
+}
+
+// Construct a heap-represented enum variant `Ctor(a, b, ...)`: each field is stored in its OWN Int64
+// slot of a {tag, f0, f1, ...} buffer (NOT bit-packed), so large field values round-trip losslessly.
+// Accepts exactly the variant's declared field count of positional Int64 arguments; any named arg,
+// inout, arity mismatch, or non-Int64 (String/Bool) argument returns None (fall back). The materialized
+// value is the buffer address as an Int64 so it crosses the Int64 enum ABI.
+private func adaptHeapEnumConstruction(name: String, call: ParseCallExpr,
+    scope: AdaptScope): Option<ChirExprSpec> {
+    let tag = match (scope.enums.tagOf(name)) {
+        case Some(t) => t
+        case None => return None
+    }
+    let fieldCount = match (scope.enums.fieldCountOf(name)) {
+        case Some(n) => n
+        case None => return None
+    }
+    if (call.args.size != fieldCount) {
+        return None
+    }
+    let fields = ArrayList<ChirExprSpec>()
+    for (arg in call.args) {
+        if (!arg.name.Empty() || arg.withInout) {
+            return None
+        }
+        let argExpr = match (arg.expr) {
+            case Some(e) => e
+            case None => return None
+        }
+        // Each field must be an Int64 value (the heap buffer stores Int64 slots only).
+        if (exprIsString(argExpr, scope) || exprIsBool(argExpr, scope)) {
+            return None
+        }
+        let fieldSpec = match (adaptExpr(argExpr, scope)) {
+            case Some(e) => e
+            case None => return None
+        }
+        fields.add(fieldSpec)
+    }
+    scope.needsRuntime = true
+    return Some(ChirExprSpec.EnumMake(tag, fields))
 }
 
 // Decode the payload Int64 out of an enum value reference: `<enumRef> RSHIFT ENUM_TAG_BITS`. RSHIFT

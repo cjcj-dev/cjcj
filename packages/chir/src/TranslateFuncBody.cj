@@ -600,10 +600,74 @@ extend AST2CHIRDeclTranslator {
             let load = builder.CreateLoad(int64Ty, elemPtr, state.current)
             return AsValue(load.GetResult())
         }
+        if (expr.IsEnumMake()) {
+            return EvalEnumMake(expr, state)
+        }
+        if (expr.IsEnumField()) {
+            return EvalEnumField(expr, state)
+        }
         if (expr.IsCall()) {
             return EvalCall(expr, state)
         }
         return None
+    }
+
+    // Construct a MULTI-field enum value. Each payload field is stored in its OWN Int64 slot of a
+    // (1 + N) VArray<Int64> buffer: slot 0 = the variant tag, slots 1..N = the N payload fields. The
+    // buffer is allocated in the constructing frame; the value materialized for this expr is the
+    // buffer's address reinterpreted as an Int64 (a TypeCast Ref<VArray> -> Int64, which codegen
+    // lowers to ptrtoint) so it travels through the Int64 enum ABI. Each field keeps a full,
+    // independent slot -- nothing is bit-packed, so arbitrarily large field values round-trip
+    // losslessly. The buffer lives for the constructing frame, which is the lifetime over which the
+    // supported construction-at-use programs consume the value.
+    private func EvalEnumMake(expr: AST2CHIRExprSpec, state: RealBodyState): Option<Value> {
+        let int64Ty = builder.context.GetInt64Ty()
+        let fieldCount = expr.args.size
+        let slotCount = fieldCount + 1
+        let varrayTy = builder.context.GetVArrayTy(int64Ty, UInt64(slotCount))
+        let slot = AllocateSlot(varrayTy, state.current)
+        // Slot 0: the variant tag.
+        let tagValue = builder.CreateConstant(int64Ty, IntLiteral(expr.literalValue), state.current)
+            .GetResult().getOrThrow()
+        builder.CreateStore(tagValue, ArrayElementPtr(slot, 0, state), state.current)
+        // Slots 1..N: each payload field, evaluated in order, stored in its own slot.
+        var idx: Int64 = 0
+        while (idx < fieldCount) {
+            let fieldValue = match (EvalExpr(expr.args[idx], state)) {
+                case Some(v) => v
+                case None => return None
+            }
+            builder.CreateStore(fieldValue, ArrayElementPtr(slot, idx + 1, state), state.current)
+            idx++
+        }
+        // Reinterpret the buffer address as an Int64 so the value crosses the Int64 enum ABI.
+        let cast = builder.CreateTypeCast(int64Ty, slot, state.current)
+        return AsValue(cast.GetResult())
+    }
+
+    // Load one slot of a multi-field enum value. `expr.lhs` is the enum value (an Int64 holding the
+    // buffer address); `expr.literalValue` is the slot index (0 = tag, 1.. = payload fields). Lowers
+    // to: reinterpret the Int64 as a CPointer<Int64> (a TypeCast Int64 -> CPointer, codegen inttoptr),
+    // GEP to the slot, Load the Int64.
+    private func EvalEnumField(expr: AST2CHIRExprSpec, state: RealBodyState): Option<Value> {
+        let int64Ty = builder.context.GetInt64Ty()
+        let enumValue = match (EvalExpr(expr.lhs, state)) {
+            case Some(v) => v
+            case None => return None
+        }
+        let cptrTy = builder.context.GetCPointerTy(int64Ty)
+        let basePtr = builder.CreateTypeCast(cptrTy, enumValue, state.current).GetResult().getOrThrow()
+        let idxValue = builder.CreateConstant(int64Ty, IntLiteral(expr.literalValue), state.current)
+            .GetResult().getOrThrow()
+        // A CPointer<Int64> base GEPs directly with a single index (element type Int64), so the slot
+        // pointer is &base[index]. No leading aggregate-zero index (unlike a VArray-Ref base).
+        let indices = ArrayList<Value>()
+        indices.add(idxValue)
+        let refTy = builder.context.GetRefTy(int64Ty)
+        let elemPtr = builder.CreateDynamicElementRef(refTy, basePtr, indices, state.current)
+            .GetResult().getOrThrow()
+        let load = builder.CreateLoad(int64Ty, elemPtr, state.current)
+        return AsValue(load.GetResult())
     }
 
     // Lower a CALL spec into a genuine CHIR Apply targeting the resolved callee Function. The callee

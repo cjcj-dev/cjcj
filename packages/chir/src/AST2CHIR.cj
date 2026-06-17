@@ -101,6 +101,18 @@ let AST2CHIR_EXPR_TO_STRING: Int64 = 7
 // length is statically known at adapt time and carried in `literalValue`).
 let AST2CHIR_EXPR_ARRAY_INDEX: Int64 = 8
 let AST2CHIR_EXPR_ARRAY_SIZE: Int64 = 9
+// ENUM_MAKE: construct a MULTI-field enum variant value. Each payload field is stored in its OWN slot
+// of an (1 + N)-length Int64 buffer: slot 0 holds the variant tag (carried in `literalValue`), slots
+// 1..N hold the N payload-field expressions (carried in `args`, in order). The buffer is a VArray
+// allocated in the constructing frame; the value materialized for this expr is the buffer's address
+// reinterpreted as an Int64 so it travels through the Int64 enum ABI (params/returns/locals). It is
+// NOT bit-packed -- each field keeps a full, independent Int64 slot, so arbitrarily large field
+// values round-trip losslessly.
+// ENUM_FIELD: load one slot of such a multi-field enum value. `lhs` is the enum value expression (an
+// Int64 holding the buffer address); `literalValue` is the slot index (0 = tag, 1.. = payload fields).
+// Lowered to: reinterpret the Int64 as a buffer pointer, GEP to the slot, Load the Int64.
+let AST2CHIR_EXPR_ENUM_MAKE: Int64 = 10
+let AST2CHIR_EXPR_ENUM_FIELD: Int64 = 11
 
 public class AST2CHIRExprSpec {
     public let kind: Int64
@@ -135,6 +147,8 @@ public class AST2CHIRExprSpec {
     public func IsToString(): Bool { return kind == AST2CHIR_EXPR_TO_STRING }
     public func IsArrayIndex(): Bool { return kind == AST2CHIR_EXPR_ARRAY_INDEX }
     public func IsArraySize(): Bool { return kind == AST2CHIR_EXPR_ARRAY_SIZE }
+    public func IsEnumMake(): Bool { return kind == AST2CHIR_EXPR_ENUM_MAKE }
+    public func IsEnumField(): Bool { return kind == AST2CHIR_EXPR_ENUM_FIELD }
 
     public static func Literal(value: Int64): AST2CHIRExprSpec {
         return AST2CHIRExprSpec(AST2CHIR_EXPR_LITERAL, value, false, "", ExprKind.ADD, None, None,
@@ -178,6 +192,24 @@ public class AST2CHIRExprSpec {
     public static func ArraySize(size: Int64): AST2CHIRExprSpec {
         return AST2CHIRExprSpec(AST2CHIR_EXPR_ARRAY_SIZE, size, false, "", ExprKind.ADD, None, None,
             ArrayList<AST2CHIRExprSpec>())
+    }
+
+    // ENUM_MAKE: construct a multi-field enum value with variant `tag` and payload-field expressions
+    // `fields` (in declared order). Each field is stored in its own Int64 slot of a (1 + fields.size)
+    // buffer; the materialized value is the buffer address as an Int64. NOT bit-packed.
+    public static func EnumMake(tag: Int64, fields: ArrayList<AST2CHIRExprSpec>): AST2CHIRExprSpec {
+        let copied = ArrayList<AST2CHIRExprSpec>()
+        for (f in fields) {
+            copied.add(f)
+        }
+        return AST2CHIRExprSpec(AST2CHIR_EXPR_ENUM_MAKE, tag, false, "", ExprKind.ADD, None, None, copied)
+    }
+
+    // ENUM_FIELD: load slot `index` (0 = tag, 1.. = payload fields) of the multi-field enum value
+    // `enumValue` (an Int64 holding the buffer address).
+    public static func EnumField(enumValue: AST2CHIRExprSpec, index: Int64): AST2CHIRExprSpec {
+        return AST2CHIRExprSpec(AST2CHIR_EXPR_ENUM_FIELD, index, false, "", ExprKind.ADD, Some(enumValue),
+            None, ArrayList<AST2CHIRExprSpec>())
     }
 
     public static func Binary(op: ExprKind, lhs: AST2CHIRExprSpec, rhs: AST2CHIRExprSpec): AST2CHIRExprSpec {
