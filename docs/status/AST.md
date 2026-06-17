@@ -10,6 +10,7 @@ The AST package is a multi-file Cangjie package mirroring the C++ AST component 
 
 ## Implemented In This Pass
 
+- Added C++ `Ty::IsCTypeBasePointer` API parity for C ABI pointer-like types and changed `Ty.GetInitialTy` to return a shared `InitialTy` sentinel like the C++ static object instead of allocating a fresh sentinel for each call.
 - Aligned `CommentGroups.ToString` with `Comment.cpp` inner-comment formatting by using the C++ no-space separator for `innerComments` groups while preserving the spaced separators for leading and trailing groups.
 - Aligned `File.GetFeatures` with the C++ `std::set` result semantics by returning feature names in sorted order with duplicates suppressed while preserving the Cangjie `ArrayList<String>` API.
 - Added C++ `InvertedIndex::Reset` parity for AST-kind suffix searches: AST now keeps a shared `AST_KIND_VALUES` string table and preloads `astKindTrie` with every AST kind name after reset, matching the reference behavior for fresh contexts before symbols are indexed.

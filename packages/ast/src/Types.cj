@@ -256,6 +256,8 @@ private func hashNominalTy(kind: TypeKind, name: String, typeArgs: ArrayList<Ty>
 }
 
 public open class Ty {
+    private static let initialTy: Ty = InitialTy()
+
     public let kind: TypeKind
     public var name: String = ""
     public let typeArgs: ArrayList<Ty> = ArrayList<Ty>()
@@ -708,6 +710,10 @@ public open class Ty {
         return isCType || ty.kind == TypeKind.TYPE_QUEST
     }
 
+    public static func IsCTypeBasePointer(ty: Ty): Bool {
+        return ty.IsPointer() || ty.IsCString() || ty.IsCFunc()
+    }
+
     public static func IsCTypeConstraint(ty: Ty): Bool {
         if (Ty.IsMetCType(ty) && !Ty.IsPrimitiveCType(ty)) {
             if (let Some(structTy) <- (ty as StructTy)) {
@@ -859,7 +865,7 @@ public open class Ty {
     }
 
     public static func GetInitialTy(): Ty {
-        return InitialTy()
+        return initialTy
     }
 }
 
