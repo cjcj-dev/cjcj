@@ -156,6 +156,11 @@ public func AssignExprReplacement(target: ReplaceTarget, expr: Expr): Bool {
                 parentUnaryExpr.expr = Some(expr)
                 return true
             }
+        } else if (target.exprField == ExprFieldKind.INC_OR_DEC_EXPR_VALUE) {
+            if (let Some(parentIncOrDecExpr) <- (parentNode as IncOrDecExpr)) {
+                parentIncOrDecExpr.expr = Some(expr)
+                return true
+            }
         } else if (target.exprField == ExprFieldKind.TYPE_CONV_EXPR_VALUE) {
             if (let Some(parentTypeConvExpr) <- (parentNode as TypeConvExpr)) {
                 parentTypeConvExpr.expr = Some(expr)
@@ -298,6 +303,8 @@ public func UpdateMacroInfo(node: Node, collector: MacroCollector): Unit {
         updateExprField(parenExpr.expr, parenExpr, ExprFieldKind.PAREN_EXPR_VALUE, collector)
     } else if (let Some(unaryExpr) <- (node as UnaryExpr)) {
         updateExprField(unaryExpr.expr, unaryExpr, ExprFieldKind.UNARY_EXPR_VALUE, collector)
+    } else if (let Some(incOrDecExpr) <- (node as IncOrDecExpr)) {
+        updateExprField(incOrDecExpr.expr, incOrDecExpr, ExprFieldKind.INC_OR_DEC_EXPR_VALUE, collector)
     } else if (let Some(typeConvExpr) <- (node as TypeConvExpr)) {
         updateExprField(typeConvExpr.expr, typeConvExpr, ExprFieldKind.TYPE_CONV_EXPR_VALUE, collector)
     } else if (let Some(subscriptExpr) <- (node as SubscriptExpr)) {

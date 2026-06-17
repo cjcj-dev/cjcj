@@ -287,6 +287,12 @@ public class TokenPart <: Expr {
     }
 }
 
+public class WildcardExpr <: Expr {
+    public init() {
+        super(ASTKind.WILDCARD_EXPR)
+    }
+}
+
 public class File <: Node {
     public var fileName: String = ""
     public var filePath: String = ""
@@ -563,6 +569,19 @@ public class LitConstExpr <: Expr {
     }
 }
 
+public class PrimitiveTypeExpr <: Expr {
+    public var typeKind: TypeKind = TypeKind.TYPE_INVALID
+
+    public init() {
+        super(ASTKind.PRIMITIVE_TYPE_EXPR)
+    }
+
+    public init(typeKind: TypeKind) {
+        super(ASTKind.PRIMITIVE_TYPE_EXPR)
+        this.typeKind = typeKind
+    }
+}
+
 public class MemberAccess <: Expr {
     public var baseExpr: Option<Expr> = None
     public var field: String = ""
@@ -618,9 +637,18 @@ public class ReturnExpr <: Expr {
     }
 }
 
+public class JumpExpr <: Expr {
+    public var isBreak: Bool = false
+
+    public init() {
+        super(ASTKind.JUMP_EXPR)
+    }
+}
+
 public class IfExpr <: Expr {
     public var condExpr: Option<Expr> = None
     public var thenBody: Option<Block> = None
+    public var elseBody: Option<Expr> = None
     public var hasElse: Bool = false
 
     public init() {
@@ -634,6 +662,9 @@ public class IfExpr <: Expr {
         }
         if (let Some(body) <- thenBody) {
             out.add(body)
+        }
+        if (let Some(elseExpr) <- elseBody) {
+            out.add(elseExpr)
         }
         return out
     }
@@ -800,6 +831,23 @@ public class UnaryExpr <: Expr {
 
     public init(kind: ASTKind) {
         super(kind)
+    }
+
+    public override func Children(): ArrayList<Node> {
+        let out = ArrayList<Node>()
+        if (let Some(child) <- expr) {
+            out.add(child)
+        }
+        return out
+    }
+}
+
+public class IncOrDecExpr <: Expr {
+    public var expr: Option<Expr> = None
+    public var op: TokenKind = TokenKind.ILLEGAL
+
+    public init() {
+        super(ASTKind.INC_OR_DEC_EXPR)
     }
 
     public override func Children(): ArrayList<Node> {
@@ -991,11 +1039,20 @@ public class MatchExpr <: Expr {
     }
 }
 
+public class Handler {
+    public var commandPattern: Option<Pattern> = None
+    public var block: Option<Block> = None
+
+    public init() {}
+}
+
 public class TryExpr <: Expr {
     public let resourceSpec: ArrayList<VarDecl> = ArrayList<VarDecl>()
     public var tryBlock: Option<Block> = None
+    public let catchPatterns: ArrayList<Pattern> = ArrayList<Pattern>()
     public let catchBlocks: ArrayList<Block> = ArrayList<Block>()
     public var finallyBlock: Option<Block> = None
+    public let handlers: ArrayList<Handler> = ArrayList<Handler>()
 
     public init() {
         super(ASTKind.TRY_EXPR)
@@ -1009,11 +1066,22 @@ public class TryExpr <: Expr {
         if (let Some(block) <- tryBlock) {
             out.add(block)
         }
+        for (pattern in catchPatterns) {
+            out.add(pattern)
+        }
         for (block in catchBlocks) {
             out.add(block)
         }
         if (let Some(block) <- finallyBlock) {
             out.add(block)
+        }
+        for (handler in handlers) {
+            if (let Some(pattern) <- handler.commandPattern) {
+                out.add(pattern)
+            }
+            if (let Some(block) <- handler.block) {
+                out.add(block)
+            }
         }
         return out
     }

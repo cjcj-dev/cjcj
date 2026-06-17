@@ -207,6 +207,7 @@ public enum ExprFieldKind {
     | RANGE_STOP_EXPR
     | RANGE_STEP_EXPR
     | VAR_WITH_PATTERN_INITIALIZER
+    | INC_OR_DEC_EXPR_VALUE
 }
 
 private func ExprFieldKindIndex(kind: ExprFieldKind): Int64 {
@@ -246,6 +247,7 @@ private func ExprFieldKindIndex(kind: ExprFieldKind): Int64 {
         case ExprFieldKind.RANGE_STOP_EXPR => 32
         case ExprFieldKind.RANGE_STEP_EXPR => 33
         case ExprFieldKind.VAR_WITH_PATTERN_INITIALIZER => 34
+        case ExprFieldKind.INC_OR_DEC_EXPR_VALUE => 35
     }
 }
 

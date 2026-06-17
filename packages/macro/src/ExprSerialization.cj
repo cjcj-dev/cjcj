@@ -3,6 +3,9 @@ package cangjie_compiler::macro_pkg
 import std.collection.*
 
 public func SerializeExprForNodeWriter(writer: NodeWriter, expr: Expr): String {
+    if (let Some(_) <- (expr as WildcardExpr)) {
+        return "wildcard()"
+    }
     if (let Some(tokenPart) <- (expr as TokenPart)) {
         return "tokenPart(" + writer.SerializeTokenVector(tokenPart.tokens) + ")"
     }
@@ -18,6 +21,9 @@ public func SerializeExprForNodeWriter(writer: NodeWriter, expr: Expr): String {
     if (let Some(lit) <- (expr as LitConstExpr)) {
         return "lit(" + TokenKindIndex(lit.kind).toString() + ":" + writer.EscapeText(lit.rawString) + ")"
     }
+    if (let Some(primitiveTypeExpr) <- (expr as PrimitiveTypeExpr)) {
+        return "primitiveTypeExpr(" + TypeKindName(primitiveTypeExpr.typeKind) + ")"
+    }
     if (let Some(exprList) <- (expr as ExprListExpr)) {
         return SerializeExprVectorForNodeWriter(writer, "exprList:" + ASTKindIndex(exprList.astKind).toString(),
             exprList.children)
@@ -32,6 +38,10 @@ public func SerializeExprForNodeWriter(writer: NodeWriter, expr: Expr): String {
     if (let Some(unaryExpr) <- (expr as UnaryExpr)) {
         return "unary(op=" + TokenKindIndex(unaryExpr.op).toString() + ";expr=" +
             SerializeExprOptionForNodeWriter(writer, unaryExpr.expr) + ")"
+    }
+    if (let Some(incOrDecExpr) <- (expr as IncOrDecExpr)) {
+        return "incOrDec(op=" + TokenKindIndex(incOrDecExpr.op).toString() + ";expr=" +
+            SerializeExprOptionForNodeWriter(writer, incOrDecExpr.expr) + ")"
     }
     if (let Some(typeConvExpr) <- (expr as TypeConvExpr)) {
         return "typeConv(type=" + SerializeTypeOptionForNodeWriter(writer, typeConvExpr.typeNode) + ";expr=" +
@@ -58,6 +68,9 @@ public func SerializeExprForNodeWriter(writer: NodeWriter, expr: Expr): String {
             return "return(" + SerializeExprForNodeWriter(writer, inner) + ")"
         }
         return "return()"
+    }
+    if (let Some(jumpExpr) <- (expr as JumpExpr)) {
+        return "jump(isBreak=" + jumpExpr.isBreak.toString() + ")"
     }
     if (let Some(ifExpr) <- (expr as IfExpr)) {
         return SerializeIfExprForNodeWriter(writer, ifExpr)
@@ -259,7 +272,13 @@ public func SerializeIfExprForNodeWriter(writer: NodeWriter, ifExpr: IfExpr): St
     } else {
         builder.append("none")
     }
-    builder.append(";hasElse=" + ifExpr.hasElse.toString() + ")")
+    builder.append(";hasElse=" + ifExpr.hasElse.toString() + ";else=")
+    if (let Some(elseBody) <- ifExpr.elseBody) {
+        builder.append(SerializeExprForNodeWriter(writer, elseBody))
+    } else {
+        builder.append("none")
+    }
+    builder.append(")")
     return builder.toString()
 }
 
@@ -308,7 +327,16 @@ public func SerializeTryExprForNodeWriter(writer: NodeWriter, tryExpr: TryExpr):
         builder.append(writer.SerializeDecl(tryExpr.resourceSpec[resourceIdx]))
         resourceIdx++
     }
-    builder.append("];tryBlock=" + SerializeBlockOptionForNodeWriter(writer, tryExpr.tryBlock) + ";catchBlocks=[")
+    builder.append("];tryBlock=" + SerializeBlockOptionForNodeWriter(writer, tryExpr.tryBlock) + ";catchPatterns=[")
+    var catchPatternIdx: Int64 = 0
+    while (catchPatternIdx < tryExpr.catchPatterns.size) {
+        if (catchPatternIdx > 0) {
+            builder.append(",")
+        }
+        builder.append(writer.SerializePattern(tryExpr.catchPatterns[catchPatternIdx]))
+        catchPatternIdx++
+    }
+    builder.append("];catchBlocks=[")
     var catchIdx: Int64 = 0
     while (catchIdx < tryExpr.catchBlocks.size) {
         if (catchIdx > 0) {
@@ -316,6 +344,22 @@ public func SerializeTryExprForNodeWriter(writer: NodeWriter, tryExpr: TryExpr):
         }
         builder.append(writer.SerializeBlock(tryExpr.catchBlocks[catchIdx]))
         catchIdx++
+    }
+    builder.append("];handlers=[")
+    var handlerIdx: Int64 = 0
+    while (handlerIdx < tryExpr.handlers.size) {
+        if (handlerIdx > 0) {
+            builder.append(",")
+        }
+        let handler = tryExpr.handlers[handlerIdx]
+        builder.append("handler(pattern=")
+        if (let Some(pattern) <- handler.commandPattern) {
+            builder.append(writer.SerializePattern(pattern))
+        } else {
+            builder.append("none")
+        }
+        builder.append(";block=" + SerializeBlockOptionForNodeWriter(writer, handler.block) + ")")
+        handlerIdx++
     }
     builder.append("];finally=" + SerializeBlockOptionForNodeWriter(writer, tryExpr.finallyBlock) + ")")
     return builder.toString()
