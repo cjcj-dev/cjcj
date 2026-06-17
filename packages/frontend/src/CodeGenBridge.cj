@@ -383,6 +383,10 @@ private func lowerValueType(context: ChirContext, sourceType: Option<Type>): Chi
         if (typeNode.name == "Float32" || typeNode.name == "float32") { return context.GetFloat32Ty() }
         if (typeNode.name == "Float64" || typeNode.name == "float64") { return context.GetFloat64Ty() }
         if (typeNode.name == "CString") { return context.GetCStringTy() }
+        // String on the real body-lowering path is modeled as a CString (i8*) value, so String params
+        // and String return types lower to CString -- keeping the whole real-body String signature
+        // consistent with how literals, concat, and prints materialize String values.
+        if (typeNode.name == "String") { return context.GetCStringTy() }
         if (typeNode.name == "Unit" || typeNode.name == "()") { return context.GetUnitTy() }
     }
     return context.GetInt64Ty()

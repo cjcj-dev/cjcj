@@ -82,6 +82,11 @@ let AST2CHIR_EXPR_CALL: Int64 = 3
 // model with first-class Bool values; the relational/AND/OR binary ops already produce Bool results.
 let AST2CHIR_EXPR_BOOL_LITERAL: Int64 = 4
 let AST2CHIR_EXPR_UNARY: Int64 = 5
+// STR_LITERAL: a String constant. Modeled at runtime as a CString (i8*) value -- a private constant
+// C-string global whose first-byte pointer is the value. The literal text is carried in `name`.
+// String concatenation reuses BINARY with op == ADD; the translator detects CString operands at
+// lowering time and emits a runtime concat (libc strlen/malloc/strcpy/strcat) instead of an int add.
+let AST2CHIR_EXPR_STR_LITERAL: Int64 = 6
 
 public class AST2CHIRExprSpec {
     public let kind: Int64
@@ -112,6 +117,7 @@ public class AST2CHIRExprSpec {
     public func IsBinary(): Bool { return kind == AST2CHIR_EXPR_BINARY }
     public func IsUnary(): Bool { return kind == AST2CHIR_EXPR_UNARY }
     public func IsCall(): Bool { return kind == AST2CHIR_EXPR_CALL }
+    public func IsStrLiteral(): Bool { return kind == AST2CHIR_EXPR_STR_LITERAL }
 
     public static func Literal(value: Int64): AST2CHIRExprSpec {
         return AST2CHIRExprSpec(AST2CHIR_EXPR_LITERAL, value, false, "", ExprKind.ADD, None, None,
@@ -125,6 +131,13 @@ public class AST2CHIRExprSpec {
 
     public static func Ref(name: String): AST2CHIRExprSpec {
         return AST2CHIRExprSpec(AST2CHIR_EXPR_REF, 0, false, name, ExprKind.ADD, None, None,
+            ArrayList<AST2CHIRExprSpec>())
+    }
+
+    // STR_LITERAL: a String constant whose text is `text` (carried in the name slot). Lowered to a
+    // CString (i8*) CHIR Constant -- the first-byte pointer of a private constant C-string global.
+    public static func StrLit(text: String): AST2CHIRExprSpec {
+        return AST2CHIRExprSpec(AST2CHIR_EXPR_STR_LITERAL, 0, false, text, ExprKind.ADD, None, None,
             ArrayList<AST2CHIRExprSpec>())
     }
 

@@ -163,11 +163,15 @@ extend AST2CHIRDeclTranslator {
                     case Some(t) => t.IsBoolean()
                     case None => false
                 }
+                // A CString-typed value is a runtime String: codegen prints the i8* directly via
+                // puts/fputs rather than as an integer.
+                let isStrValue = IsCStringValue(value)
                 fn.runtimePrintValueIds.add(valueId)
                 fn.runtimePrintNewlines.add(stmt.isVar)
                 fn.runtimePrintIsStr.add(false)
                 fn.runtimePrintStrings.add("")
                 fn.runtimePrintIsBool.add(isBool)
+                fn.runtimePrintIsStrValue.add(isStrValue)
             }
         }
     }
@@ -189,6 +193,7 @@ extend AST2CHIRDeclTranslator {
                 fn.runtimePrintIsStr.add(true)
                 fn.runtimePrintStrings.add(stmt.name)
                 fn.runtimePrintIsBool.add(false)
+                fn.runtimePrintIsStrValue.add(false)
             }
         }
     }
@@ -356,6 +361,13 @@ extend AST2CHIRDeclTranslator {
             let constant = builder.CreateConstant(boolTy, BoolLiteral(expr.boolValue), state.current)
             return AsValue(constant.GetResult())
         }
+        if (expr.IsStrLiteral()) {
+            // A String literal is modeled as a CString (i8*) value: a Constant of CString type whose
+            // StringLiteral text codegen materializes as the first-byte pointer of a private global.
+            let cstringTy = builder.context.GetCStringTy()
+            let constant = builder.CreateConstant(cstringTy, StringLiteral(expr.name), state.current)
+            return AsValue(constant.GetResult())
+        }
         if (expr.IsRef()) {
             if (let Some(slot) <- state.locals.get(expr.name)) {
                 // Load using the slot's recorded element type so Bool locals stay i1.
@@ -386,6 +398,15 @@ extend AST2CHIRDeclTranslator {
             let lhsValue = EvalExpr(expr.lhs, state)
             let rhsValue = EvalExpr(expr.rhs, state)
             if (let (Some(lv), Some(rv)) <- (lhsValue, rhsValue)) {
+                // String concatenation: `a + b` over CString operands produces a CString result.
+                // The BinaryExpression keeps op == ADD but carries a CString result type; codegen
+                // recognizes an ADD with CString result and emits a runtime concat (libc
+                // strlen/malloc/strcpy/strcat) rather than an integer add.
+                if (expr.op == ExprKind.ADD && (IsCStringValue(lv) || IsCStringValue(rv))) {
+                    let cstringTy = builder.context.GetCStringTy()
+                    let binary = builder.CreateBinaryExpression(expr.op, cstringTy, lv, rv, state.current)
+                    return AsValue(binary.GetResult())
+                }
                 // Relational ops and the logical AND/OR over i1 operands produce a Bool result;
                 // arithmetic ops keep the Int64 operand type.
                 let resultTy = if (IsRelationalOp(expr.op) || IsLogicalOp(expr.op)) {
@@ -461,15 +482,27 @@ extend AST2CHIRDeclTranslator {
         }
     }
 
-    // The element type a value occupies in a slot: Bool stays Bool, everything else is treated as
-    // Int64 (the real-body path models only Int64 and Bool values).
+    // The element type a value occupies in a slot: Bool stays Bool, CString (a String value) stays
+    // CString, everything else is treated as Int64 (the real-body path models Int64, Bool and String
+    // values). A correct slot element type keeps each local round-tripping at its real LLVM type.
     private func ValueElemType(value: Value): Type {
         if (let Some(t) <- value.GetType()) {
             if (t.IsBoolean()) {
                 return builder.context.GetBoolTy()
             }
+            if (t.IsCString()) {
+                return builder.context.GetCStringTy()
+            }
         }
         return builder.context.GetInt64Ty()
+    }
+
+    // Whether a materialized CHIR value is a CString (i8*) -- i.e. a String value on the real path.
+    private func IsCStringValue(value: Value): Bool {
+        if (let Some(t) <- value.GetType()) {
+            return t.IsCString()
+        }
+        return false
     }
 
     // Allocate a fresh `Ref<elemTy>` local slot.

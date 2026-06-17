@@ -51,22 +51,39 @@ public func AdaptRealBodies(file: File, fileID: UInt64, sourceCode: String, sm: 
     // Collect the names of all top-level functions in this file so a call site can be recognized as
     // a user-defined function call (vs an unknown reference) and lowered to a real CHIR Apply.
     let funcNames = HashSet<String>()
+    // Top-level functions whose declared return type is String, so a call to one classifies as a
+    // String-valued expression (for concat / print promotion).
+    let strReturningFuncs = HashSet<String>()
     for (decl in parsedFile.decls) {
         if (let Some(parsedFunc) <- (decl as ParseFuncDecl)) {
             let n = parsedFunc.identifier.Val()
             if (!n.isEmpty()) {
                 funcNames.add(n)
+                if (parsedFuncReturnsString(parsedFunc)) {
+                    strReturningFuncs.add(n)
+                }
             }
         }
     }
     for (decl in file.decls) {
         if (let Some(funcDecl) <- (decl as FuncDecl)) {
-            tryAdaptFunction(funcDecl, parsedFile, funcNames)
+            tryAdaptFunction(funcDecl, parsedFile, funcNames, strReturningFuncs)
         }
     }
 }
 
-private func tryAdaptFunction(funcDecl: FuncDecl, parsedFile: ParseFile, funcNames: HashSet<String>): Unit {
+// Whether the parsed function declares a `String` return type.
+private func parsedFuncReturnsString(parsedFunc: ParseFuncDecl): Bool {
+    if (let Some(fb) <- parsedFunc.funcBody) {
+        if (let Some(rt) <- fb.retType) {
+            return rt.ToString() == "String"
+        }
+    }
+    return false
+}
+
+private func tryAdaptFunction(funcDecl: FuncDecl, parsedFile: ParseFile, funcNames: HashSet<String>,
+    strReturningFuncs: HashSet<String>): Unit {
     // Note: a non-empty printStrings (the summary side-channel captured one or more literal
     // string/int prints) no longer forces the summary path. The real-parse adapter can lower
     // literal-int/string prints as in-body printf calls too, so a body that MIXES literal prints
@@ -78,7 +95,7 @@ private func tryAdaptFunction(funcDecl: FuncDecl, parsedFile: ParseFile, funcNam
     let name = funcDecl.identifier.Val()
     let matched = findParsedFunc(parsedFile, name, funcDecl.begin.line)
     if (let Some(parsedFunc) <- matched) {
-        adaptParsedFunc(funcDecl, parsedFunc, funcNames)
+        adaptParsedFunc(funcDecl, parsedFunc, funcNames, strReturningFuncs)
     }
 }
 
@@ -118,18 +135,30 @@ private class AdaptScope {
     // bool-producing expression, or a Bool parameter). Used so a bare `println(boolLocal)` promotes
     // and lowers as a runtime Bool print rather than falling back to the int-only summary path.
     let boolNames = HashSet<String>()
+    // Names of locals/params known to hold a String value (a `let`/`var` bound to a string literal, a
+    // String-producing concat, a String parameter, or a call returning String). Used so a bare
+    // `println(strLocal)` and `a + b` concat are recognized as String operations and promote to the
+    // real path (lowered as a runtime CString print / concat) rather than falling back.
+    let strNames = HashSet<String>()
     let funcNames: HashSet<String>
+    // Names of top-level functions whose declared return type is String, so a call to one is treated
+    // as a String-valued expression for concat / print classification.
+    let strReturningFuncs = HashSet<String>()
     var needsRuntime: Bool = false
     // Depth of enclosing `for`/`while` loops currently being adapted. A `break`/`continue` is only
     // accepted (promotable) when loopDepth > 0; otherwise the body falls back to the summary path.
     var loopDepth: Int64 = 0
 
-    init(funcNames: HashSet<String>) {
+    init(funcNames: HashSet<String>, strReturningFuncs: HashSet<String>) {
         this.funcNames = funcNames
+        for (n in strReturningFuncs) {
+            this.strReturningFuncs.add(n)
+        }
     }
 }
 
-private func adaptParsedFunc(funcDecl: FuncDecl, parsedFunc: ParseFuncDecl, funcNames: HashSet<String>): Unit {
+private func adaptParsedFunc(funcDecl: FuncDecl, parsedFunc: ParseFuncDecl, funcNames: HashSet<String>,
+    strReturningFuncs: HashSet<String>): Unit {
     let body = match (parsedFunc.funcBody) {
         case Some(fb) => fb
         case None => return
@@ -138,7 +167,7 @@ private func adaptParsedFunc(funcDecl: FuncDecl, parsedFunc: ParseFuncDecl, func
         case Some(b) => b
         case None => return
     }
-    let scope = AdaptScope(funcNames)
+    let scope = AdaptScope(funcNames, strReturningFuncs)
     // Seed parameters as in-scope locals so references to them lower to runtime loads. Parameters
     // are also tracked separately: a reference to a parameter is inherently runtime (it cannot be
     // folded), so it promotes even a trivial body like `return x` to the real path -- needed so the
@@ -155,6 +184,11 @@ private func adaptParsedFunc(funcDecl: FuncDecl, parsedFunc: ParseFuncDecl, func
                     let tn = typeNode.ToString()
                     if (tn == "Bool" || tn == "bool") {
                         scope.boolNames.add(pname)
+                    }
+                    // A String parameter is tracked so references to it lower as a CString value (and
+                    // a bare print of it / a concat using it promote as String operations).
+                    if (tn == "String") {
+                        scope.strNames.add(pname)
                     }
                 }
             }
@@ -269,6 +303,10 @@ private func adaptVarDecl(varDecl: ParseVarDecl, scope: AdaptScope): Option<Chir
     if (exprIsBool(initExpr, scope)) {
         scope.boolNames.add(name)
     }
+    // Track String-typed locals so a later bare `println(name)` / concat lowers as a String op.
+    if (exprIsString(initExpr, scope)) {
+        scope.strNames.add(name)
+    }
     return Some(ChirStmtSpec.Let(name, valueSpec, isVar: varDecl.isVar))
 }
 
@@ -301,6 +339,11 @@ private func adaptReturn(returnExpr: ParseReturnExpr, scope: AdaptScope): Option
     let expr = match (returnExpr.expr) {
         case Some(e) => e
         case None => return Some(ChirStmtSpec.ReturnNone())
+    }
+    // A `return <stringExpr>` is a String-valued return: promote so the real path lowers a CString
+    // return (the summary path cannot represent a String literal return -- it would mis-lower it).
+    if (exprIsString(expr, scope)) {
+        scope.needsRuntime = true
     }
     let valueSpec = match (adaptExpr(expr, scope)) {
         case Some(e) => e
@@ -474,6 +517,10 @@ private func adaptExpr(expr: ParseExpr, scope: AdaptScope): Option<ChirExprSpec>
     }
     if (let Some(boolValue) <- boolLiteralValue(expr)) {
         return Some(ChirExprSpec.BoolLit(boolValue))
+    }
+    // A plain string literal lowers to a CString (i8*) String value.
+    if (let Some(text) <- plainStringLiteralValue(expr)) {
+        return Some(ChirExprSpec.StrLit(text))
     }
     if (let Some(refName) <- localRefName(expr, scope)) {
         return Some(ChirExprSpec.Ref(refName))
@@ -705,6 +752,57 @@ private func exprIsBool(expr: ParseExpr, scope: AdaptScope): Bool {
             case TokenKind.OR => true
             case _ => false
         }
+    }
+    return false
+}
+
+// Decide (syntactically) whether `expr` produces a String value: a plain string literal, a reference
+// to a known String local/param, a parenthesized String expression, a call to a String-returning
+// top-level function, or a `+` concatenation where at least one side is a String. Used to classify a
+// value for String let/var tracking and concat/print promotion; unknown shapes return false.
+private func exprIsString(expr: ParseExpr, scope: AdaptScope): Bool {
+    if (plainStringLiteralValue(expr).isSome()) {
+        return true
+    }
+    if (let Some(refExpr) <- (expr as ParseRefExpr)) {
+        return scope.strNames.contains(refExpr.identifier.Val())
+    }
+    if (let Some(paren) <- (expr as ParseParenExpr)) {
+        if (let Some(inner) <- paren.expr) {
+            return exprIsString(inner, scope)
+        }
+        return false
+    }
+    // A call to a String-returning top-level function (and not shadowed by a local).
+    if (let Some(call) <- (expr as ParseCallExpr)) {
+        if (let Some(base) <- call.baseFunc) {
+            if (let Some(calleeRef) <- (base as ParseRefExpr)) {
+                let cn = calleeRef.identifier.Val()
+                if (!scope.locals.contains(cn) && scope.strReturningFuncs.contains(cn)) {
+                    return true
+                }
+            }
+        }
+        return false
+    }
+    // AssignExpr is also a BinaryExpr; never treat it as a String-producing value here.
+    if (let Some(_) <- (expr as ParseAssignExpr)) {
+        return false
+    }
+    // `a + b` is a String concat when either operand is a String.
+    if (let Some(binary) <- (expr as ParseBinaryExpr)) {
+        if (binary.op.kind != TokenKind.ADD) {
+            return false
+        }
+        let leftIsStr = match (binary.leftExpr) {
+            case Some(e) => exprIsString(e, scope)
+            case None => false
+        }
+        let rightIsStr = match (binary.rightExpr) {
+            case Some(e) => exprIsString(e, scope)
+            case None => false
+        }
+        return leftIsStr || rightIsStr
     }
     return false
 }

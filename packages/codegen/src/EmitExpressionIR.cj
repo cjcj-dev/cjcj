@@ -75,7 +75,12 @@ private func MaybeEmitRuntimePrint(cgMod: CGModule, irBuilder: IRBuilder2, chirE
             }
             let isStr = idx < topLevelFunc.runtimePrintIsStr.size && topLevelFunc.runtimePrintIsStr[idx]
             let isBool = idx < topLevelFunc.runtimePrintIsBool.size && topLevelFunc.runtimePrintIsBool[idx]
-            if (isStr) {
+            let isStrValue = idx < topLevelFunc.runtimePrintIsStrValue.size &&
+                topLevelFunc.runtimePrintIsStrValue[idx]
+            if (isStrValue) {
+                // The matched value is a runtime CString (i8*) String value; print it via puts/fputs.
+                let _ = EmitRuntimeStringValuePrint(cgMod, irBuilder.GetBuilder().raw, rawRet, newline)
+            } else if (isStr) {
                 let text = if (idx < topLevelFunc.runtimePrintStrings.size) {
                     topLevelFunc.runtimePrintStrings[idx]
                 } else {

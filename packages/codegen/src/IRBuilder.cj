@@ -257,6 +257,16 @@ public class IRBuilder2 {
 
     public func CreateBinaryTyped(kind: ExprKind, left: LLVMValueRef, right: LLVMValueRef,
         operandType: Option<Type>, resultType: Option<Type>, name!: String = ""): LLVMValueRef {
+        // String concatenation: an ADD whose result is a CString (i8*) is `a + b` over String values.
+        // Lower it to a runtime concat (libc strlen/malloc/strcpy/strcat) producing a fresh i8*,
+        // rather than an integer add on the pointers.
+        if (kind == ExprKind.ADD) {
+            if (let Some(rt) <- resultType) {
+                if (rt.IsCString()) {
+                    return EmitCStringConcat(cgMod, builder.raw, GetLLVMContext().raw, left, right)
+                }
+            }
+        }
         var result = LLVMNullValue()
         try (nameCString = unsafe { LibC.mallocCString(name) }.asResource()) {
             let compareType = if (operandType.isSome()) { operandType } else { resultType }
@@ -355,13 +365,10 @@ public class IRBuilder2 {
         }
         if (let Some(stringLiteral) <- (literal as StringLiteral)) {
             if (resultType.IsCString()) {
-                var result = LLVMNullValue()
-                try (valueCString = unsafe { LibC.mallocCString(stringLiteral.value) }.asResource()) {
-                    result = unsafe {
-                        LLVMConstStringInContext(GetLLVMContext().raw, valueCString.value, UInt32(stringLiteral.value.size), 0)
-                    }
-                }
-                return result
+                // A CString value is an i8* pointer to a NUL-terminated C-string. Materialize it as
+                // the first-byte pointer of a private constant global rather than an inline [N x i8]
+                // array, so it round-trips through CString-typed slots and feeds runtime concat/print.
+                return EmitCStringLiteralPointer(cgMod, builder.raw, GetLLVMContext().raw, stringLiteral.value)
             }
         }
         return CreateNullValue(resultType)

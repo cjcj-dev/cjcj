@@ -753,6 +753,11 @@ public class Function <: GlobalValue {
     // Bool; codegen prints the literal text "true"/"false" selected on that i1 instead of "%ld". For a
     // non-bool directive the entry is false.
     public let runtimePrintIsBool: ArrayList<Bool> = ArrayList<Bool>()
+    // Parallel to runtimePrintValueIds: when runtimePrintIsStrValue[i] is true the matched value is a
+    // runtime CString (i8*) String value; codegen prints it directly via puts/fputs (no static text).
+    // This is the String-variable / String-expression print path (vs runtimePrintIsStr, which prints a
+    // compile-time-known literal text). For a non-string-value directive the entry is false.
+    public let runtimePrintIsStrValue: ArrayList<Bool> = ArrayList<Bool>()
 
     public init(funcType: FuncType, identifier: String, srcCodeIdentifier: String, rawMangledName: String,
         packageName: String) {
