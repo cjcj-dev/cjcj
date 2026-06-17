@@ -29,14 +29,18 @@ encoding them as scattered branch logic.
 - Default diagnostics now use Basic's `DEFAULT_POSITION`, and LSP cfg.toml
   loading now mirrors the C++ constructor path: file read failures, malformed
   TOML entries, invalid identifiers, built-in keys, and duplicate keys emit the
-  corresponding Basic diagnostics while preserving Option's identifier and NFC
-  normalization behavior. The cfg-file builtin-key set intentionally follows
-  Option's parser (`os`, `backend`, `arch`, `debug`, `cjc_version`, `test`);
-  `env` remains a target condition for expression evaluation but is not rejected
-  by cfg.toml parsing, matching the C++ split.
+  corresponding Basic diagnostics. The local LSP reader now uses Basic's real
+  `SplitLines`/`SplitString` helpers, matching the C++ `Basic/Utils` call path,
+  while preserving Option's identifier and NFC normalization behavior. The
+  cfg-file builtin-key set intentionally follows Option's parser (`os`,
+  `backend`, `arch`, `debug`, `cjc_version`, `test`); `env` remains a target
+  condition for expression evaluation but is not rejected by cfg.toml parsing,
+  matching the C++ split.
 - Malformed `@When` annotations without a condition emit the reference
   diagnostic and remove only the annotation; the annotated node is left in place
   as in `ConditionalCompilationImpl::EvalNodeCondition`.
+- Removed the unused `DefaultTargetTriple` shim from this module; target triples
+  are owned by the real Option package just as in the C++ compiler.
 - The package still exposes `ConditionalCompilationCompilerInstance` as a small
   provider interface for the real `option.GlobalOptions` and
   `basic.DiagnosticEngine`. The current `frontend.CompilerInstance` in this

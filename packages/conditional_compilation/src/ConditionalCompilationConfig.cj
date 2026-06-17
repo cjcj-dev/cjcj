@@ -3,14 +3,13 @@ package cangjie_compiler::conditional_compilation
 import cangjie_compiler::basic.CANGJIE_VERSION
 import cangjie_compiler::basic.DiagnosticEngine as BasicDiagnosticEngine
 import cangjie_compiler::basic.DiagKindRefactor as BasicDiagKindRefactor
+import cangjie_compiler::basic.SplitLines
+import cangjie_compiler::basic.SplitString
 import cangjie_compiler::option.BackendType
 import cangjie_compiler::option.FileExist
 import cangjie_compiler::option.GlobalOptions
 import cangjie_compiler::option.JoinPath
-import cangjie_compiler::option.SplitLines
-import cangjie_compiler::option.SplitString
 import cangjie_compiler::option.TripleInfo
-import cangjie_compiler::option.Vendor
 import cangjie_compiler::utils.FailureReason as UtilsFailureReason
 import cangjie_compiler::utils.FileUtil
 import cangjie_compiler::utils.NFC as UtilsNFC
@@ -222,11 +221,5 @@ public func CopyTripleInfo(src: TripleInfo): TripleInfo {
     out.os = src.os
     out.env = src.env
     out.apiLevel = src.apiLevel
-    return out
-}
-
-public func DefaultTargetTriple(): TripleInfo {
-    let out = TripleInfo()
-    out.vendor = Vendor.UNKNOWN
     return out
 }
