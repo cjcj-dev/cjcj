@@ -110,6 +110,7 @@ public class LocalTypeArgumentSynthesis {
     private var curTyVar: Option<GenericsTy> = None
     private var hasNothingTy: Bool = false
     private var hasAnyTy: Bool = false
+    private var deterministic: Bool = false
     private let activeBoundChecks: ArrayList<(Ty, Ty)> = ArrayList<(Ty, Ty)>()
 
     public init(typeManager: TypeManager, argPack: LocTyArgSynArgPack, needDiagMsg!: Bool = false) {
@@ -195,7 +196,8 @@ public class LocalTypeArgumentSynthesis {
         }
         let synthesis = LocalTypeArgumentSynthesis(typeManager, pack)
         synthesis.constraints = cloneConstraint(cst)
-        return synthesis.SolveCurrentConstraints(allowPartial: false)
+        synthesis.deterministic = true
+        return synthesis.SolveCurrentConstraints(allowPartial: true)
     }
 
     public func InitConstraints(tyVarsToSolve: ArrayList<GenericsTy>): Constraint {
@@ -312,14 +314,35 @@ public class LocalTypeArgumentSynthesis {
         curTyVar = Some(tyVar)
         NoteSpecialBound(lowerBound)
         let bounds = constraints.GetOrCreate(tyVar)
-        if (!bounds.lbs.Add(lowerBound)) {
-            return true
+        let addedLower = bounds.lbs.Add(lowerBound)
+        var addedGreedyUpper = false
+        if (deterministic && IsGreedySolution(tyVar, lowerBound, false)) {
+            if (bounds.eq.IsEmpty()) {
+                bounds.eq.Add(lowerBound)
+            }
+            addedGreedyUpper = bounds.ubs.Add(lowerBound)
         }
-        let upperBounds = bounds.ubs.Clone()
-        for (upperBound in upperBounds.values) {
-            if (Ty.IsTyCorrect(upperBound) && !UnifyBoundPair(lowerBound, upperBound)) {
+        if (addedLower) {
+            let upperBounds = bounds.ubs.Clone()
+            for (upperBound in upperBounds.values) {
+                if (Ty.IsTyCorrect(upperBound) && !UnifyBoundPair(lowerBound, upperBound)) {
+                    return false
+                }
+            }
+            if (deterministic && !CheckKnownSumLowerBound(tyVar, bounds, lowerBound)) {
                 return false
             }
+        }
+        if (addedGreedyUpper) {
+            let lowerBounds = bounds.lbs.Clone()
+            for (existingLower in lowerBounds.values) {
+                if (Ty.IsTyCorrect(existingLower) && !UnifyBoundPair(existingLower, lowerBound)) {
+                    return false
+                }
+            }
+        }
+        if (!CheckKnownSumEqBound(tyVar, bounds)) {
+            return false
         }
         return true
     }
@@ -328,16 +351,79 @@ public class LocalTypeArgumentSynthesis {
         curTyVar = Some(tyVar)
         NoteSpecialBound(upperBound)
         let bounds = constraints.GetOrCreate(tyVar)
-        if (!bounds.ubs.Add(upperBound)) {
-            return true
+        let addedUpper = bounds.ubs.Add(upperBound)
+        var addedGreedyLower = false
+        if (deterministic && IsGreedySolution(tyVar, upperBound, true)) {
+            if (bounds.eq.IsEmpty()) {
+                bounds.eq.Add(upperBound)
+            }
+            addedGreedyLower = bounds.lbs.Add(upperBound)
         }
-        let lowerBounds = bounds.lbs.Clone()
-        for (lowerBound in lowerBounds.values) {
-            if (Ty.IsTyCorrect(lowerBound) && !UnifyBoundPair(lowerBound, upperBound)) {
+        if (addedUpper) {
+            let lowerBounds = bounds.lbs.Clone()
+            for (lowerBound in lowerBounds.values) {
+                if (Ty.IsTyCorrect(lowerBound) && !UnifyBoundPair(lowerBound, upperBound)) {
+                    return false
+                }
+            }
+        }
+        if (addedGreedyLower) {
+            let upperBounds = bounds.ubs.Clone()
+            for (existingUpper in upperBounds.values) {
+                if (Ty.IsTyCorrect(existingUpper) && !UnifyBoundPair(upperBound, existingUpper)) {
+                    return false
+                }
+            }
+            if (deterministic && !CheckKnownSumLowerBound(tyVar, bounds, upperBound)) {
                 return false
             }
         }
+        if (!CheckKnownSumEqBound(tyVar, bounds)) {
+            return false
+        }
         return true
+    }
+
+    private func CheckKnownSumLowerBound(tyVar: GenericsTy, bounds: TyVarBounds, lowerBound: Ty): Bool {
+        if (!deterministic || tyMgr.TyVarHasNoSum(tyVar)) {
+            return true
+        }
+        if (lowerBound.IsNothing()) {
+            return true
+        }
+        return bounds.sum.Contains(lowerBound)
+    }
+
+    private func CheckKnownSumEqBound(tyVar: GenericsTy, bounds: TyVarBounds): Bool {
+        if (!deterministic || tyMgr.TyVarHasNoSum(tyVar) || bounds.eq.IsEmpty()) {
+            return true
+        }
+        let eqTy = bounds.eq.values[0]
+        if (eqTy.IsNothing()) {
+            return true
+        }
+        return bounds.sum.Contains(eqTy)
+    }
+
+    private func IsGreedySolution(tyVar: GenericsTy, bound: Ty, isUpperbound: Bool): Bool {
+        let tyParam = bound.IsGeneric() && !bound.IsPlaceholder()
+        var outerTyVar = false
+        if (let Some(boundVar) <- (bound as GenericsTy)) {
+            outerTyVar = boundVar.isPlaceholder &&
+                tyMgr.ScopeDepthOfTyVar(boundVar) <= tyMgr.ScopeDepthOfTyVar(tyVar)
+        }
+        var finalClass = false
+        if (isUpperbound) {
+            if (let Some(classTy) <- (bound as ClassTy)) {
+                if (let Some(classDecl) <- classTy.declPtr) {
+                    finalClass = !IsInheritableClass(classDecl)
+                }
+            }
+        }
+        let finalType = finalClass ||
+            (!bound.IsGeneric() && !bound.IsClassLike() && !bound.IsAny() && !bound.IsNothing())
+        let anyOrNothing = (bound.IsAny() && !isUpperbound) || (bound.IsNothing() && isUpperbound)
+        return tyParam || outerTyVar || finalType || anyOrNothing
     }
 
     private func HasActiveBoundCheck(argTy: Ty, paramTy: Ty): Bool {
