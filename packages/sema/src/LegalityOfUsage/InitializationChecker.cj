@@ -785,6 +785,16 @@ public class InitializationChecker {
         }
         if (let Some(initFunc) <- staticInit) {
             CheckInitialization(initFunc)
+            if (let None <- initFunc.funcBody) {
+                return
+            }
+            let body = initFunc.funcBody.getOrThrow()
+            let bodyScopeGate = CurrentScopeGate(body.scopeName)
+            if (let Some(terminated) <- FindTerminatedScope(terminatedScopes, bodyScopeGate)) {
+                if (terminated.terminationKind == ASTKind.THROW_EXPR) {
+                    return
+                }
+            }
         }
         for (member in staticMembers) {
             if (!member.TestAnyAttr(Attribute.INITIALIZED, Attribute.TOOL_ADD, Attribute.COMMON)) {
