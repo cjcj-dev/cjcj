@@ -1294,14 +1294,10 @@ public class LexerImpl {
                     success = false
                 }
             } else if (isHexDigit(currentChar)) {
-                if (base != HEX_BASE && (currentChar == Int64(b'e') || currentChar == Int64(b'E') ||
-                    currentChar == Int64(b'f'))) {
+                let xdigitResult = ProcessXdigit(base, hasDigit, reasonPoint)
+                hasDigit = xdigitResult[0]
+                if (!xdigitResult[1]) {
                     break
-                }
-                hasDigit = true
-                if (base != HEX_BASE && success) {
-                    DiagUnexpectedDigit(base, reasonPoint)
-                    success = false
                 }
             } else if (tokenKind != TokenKind.FLOAT_LITERAL && hasDigit &&
                 (currentChar == Int64(b'i') || currentChar == Int64(b'u'))) {
@@ -1316,6 +1312,22 @@ public class LexerImpl {
             digitIndex++
         }
         return (hasDigit, isFloat, hasTypeSuffix)
+    }
+
+    private func ProcessXdigit(base: Int64, hasDigitRef: Bool, reasonPoint: Int64): (Bool, Bool) {
+        var hasDigit = hasDigitRef
+        if (base != HEX_BASE && (currentChar == Int64(b'e') || currentChar == Int64(b'E'))) {
+            return (hasDigit, false)
+        }
+        if (base != HEX_BASE && currentChar == Int64(b'f')) {
+            return (hasDigit, false)
+        }
+        hasDigit = true
+        if (base != HEX_BASE && success) {
+            DiagUnexpectedDigit(base, reasonPoint)
+            success = false
+        }
+        return (hasDigit, true)
     }
 
     private func GetSuffix(pSuffixStart: Int64): String {
@@ -1419,6 +1431,26 @@ public class LexerImpl {
         return (base, prefix, digitsResult[0], reasonPoint, digitsResult[2])
     }
 
+    private func ScanNumberDecimalPart(
+        base: Int64,
+        prefix: UInt8,
+        hasDigitRef: Bool,
+        isFloatRef: Bool,
+        reasonPoint: Int64
+    ): (Bool, Bool) {
+        var hasDigit = hasDigitRef
+        var isFloat = isFloatRef
+        if ((prefix == b'o' || prefix == b'b') && success) {
+            DiagUnexpectedDecimalPoint(reasonPoint)
+            success = false
+        }
+        ReadUTF8Char()
+        let digits = ProcessDigits(base, hasDigit, reasonPoint, true)
+        hasDigit = digits[0]
+        isFloat = digits[1]
+        return (hasDigit, isFloat)
+    }
+
     private func IsIllegalStartDecimalPart(pStart: Int64, pEnd: Int64): Bool {
         if (pStart > pEnd || getByte(pStart) != b'0') {
             return false
@@ -1475,23 +1507,29 @@ public class LexerImpl {
                 Back()
                 return Token(tokenKind, input[pStart..pNext], pos, GetPos(pNext))
             }
-            if ((prefix == b'o' || prefix == b'b') && success) {
-                DiagUnexpectedDecimalPoint(reasonPoint)
-                success = false
-            }
             if (IsIllegalStartDecimalPart(pStart, pCurrent)) {
                 lexDiagnose2(diag, DiagKindRefactor.lex_cannot_start_with_digit, GetPos(pStart), "float", "0")
             }
-            ReadUTF8Char()
             hasDigit = false
-            let decimalDigits = ProcessDigits(base, hasDigit, reasonPoint, true)
-            hasDigit = decimalDigits[0]
-            isFloat = decimalDigits[1]
+            let decimalPart = ScanNumberDecimalPart(base, prefix, hasDigit, isFloat, reasonPoint)
+            hasDigit = decimalPart[0]
+            isFloat = decimalPart[1]
             hasDot = true
         } else if (IsIllegalStartDecimalPart(pStart, pCurrent)) {
             lexDiagnose2(diag, DiagKindRefactor.lex_cannot_start_with_digit, GetPos(pStart), "integer", "0")
         }
         DiagSmallExpectedDigit(hasDigit, prefix)
+        isFloat = ProcessNumberExponentPart(prefix, reasonPoint, isFloat)
+        ProcessNumberFloatSuffix(prefix, isFloat, hasDot)
+        if (!isFloat && hasDot && success && dotPos > 0) {
+            pNext = dotPos
+            pCurrent = dotPos - 1
+        }
+        return Token(tokenKind, input[pStart..pNext], pos, GetPos(pNext))
+    }
+
+    private func ProcessNumberExponentPart(prefix: UInt8, reasonPoint: Int64, isFloatRef: Bool): Bool {
+        var isFloat = isFloatRef
         let exp = lowerByte(UInt8(currentChar))
         if (exp == b'e' || exp == b'p') {
             if (success && ((prefix != b'd' && prefix != b'x') || (exp == b'e' && prefix == b'x') ||
@@ -1506,12 +1544,7 @@ public class LexerImpl {
             DiagExpectedExponentPart(reasonPoint)
             success = false
         }
-        ProcessNumberFloatSuffix(prefix, isFloat, hasDot)
-        if (!isFloat && hasDot && success && dotPos > 0) {
-            pNext = dotPos
-            pCurrent = dotPos - 1
-        }
-        return Token(tokenKind, input[pStart..pNext], pos, GetPos(pNext))
+        return isFloat
     }
 
     private func ScanNumberExponentPart(reasonPoint: Int64): Unit {
@@ -2471,16 +2504,18 @@ public class LexerImpl {
         let kind = LookupKeyword(literal)
         if (kind == TokenKind.IDENTIFIER) {
             if (success) {
-                let arg = ConvertCurrentChar()
-                let builder = diag.DiagnoseRefactor(
-                    DiagKindRefactor.lex_unknown_start_of_token, GetPos(pStart), arguments: [arg]
-                )
-                builder.AddMainHintArguments([arg])
+                DiagUnknownStartOfToken(GetPos(pStart))
                 success = false
             }
             return Token(TokenKind.ILLEGAL, literal, pos, GetPos(pNext))
         }
         return Token(kind, literal, pos, GetPos(pNext))
+    }
+
+    private func DiagUnknownStartOfToken(curPos: Position): Unit {
+        let arg = ConvertCurrentChar()
+        let builder = diag.DiagnoseRefactor(DiagKindRefactor.lex_unknown_start_of_token, curPos, arguments: [arg])
+        builder.AddMainHintArguments([arg])
     }
 
     private func DiagUnexpectedDollarIdentifier(t: Token): Unit {

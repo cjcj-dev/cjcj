@@ -4,6 +4,8 @@ Date: 2026-06-15
 
 Update: 2026-06-17
 
+Update: 2026-06-18
+
 Build: `cjpm build` passes.
 
 Implemented:
@@ -43,6 +45,7 @@ Implemented:
 - Preserved the C++ lexer `success` state for illegal Unicode scalar escape diagnostics and unexpected dollar-keyword diagnostics instead of treating those recoverable diagnostics as scan failure.
 - Matched C++ lexer context-stack preconditions by asserting quote/normal mode exits and quote-context reads instead of silently ignoring mismatched state, and restored the string-dispatch quote assertion.
 - Reworked Lex `ProcessQuotaMarks` to preserve raw UTF-8 bytes while applying the C++ quote/interpolation transform, and restored the C++ assertion for nested interpolation string scanning.
+- Matched the remaining C++ number-scanner helper boundaries for hexadecimal digit handling, decimal fractional scanning, exponent scanning, and unknown-token diagnostics so the Cangjie implementation follows the same recovery and diagnostic flow as `LexerImpl`.
 
 Known validation caveats:
 
