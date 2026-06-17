@@ -1383,6 +1383,7 @@ public class StructInheritanceChecker {
                         CheckPropertyInheritance(interfaceSig, childDecl)
                     } else if (interfaceDecl.IsFunc()) {
                         if (CheckImplementationRelation(interfaceSig, child)) {
+                            CheckIncompleteOverrideOrImplOfExtend(interfaceSig, child)
                             CheckInheritanceForInterface(interfaceSig, child)
                             CheckMutModifierCompatible(interfaceSig, childDecl)
                         }
@@ -1392,6 +1393,128 @@ public class StructInheritanceChecker {
             if (interfaceDecl.TestAttr(Attribute.DEFAULT)) {
                 interfaceDecl.EnableAttr(Attribute.INTERFACE_IMPL)
             }
+        }
+    }
+
+    private func CheckIncompleteOverrideOrImplOfExtend(interfaceSig: MemberSignature, child: MemberSignature): Unit {
+        if (checkingDecls.isEmpty()) {
+            return
+        }
+        if (let None <- interfaceSig.decl) {
+            return
+        }
+        if (let None <- child.decl) {
+            return
+        }
+        let interfaceDecl = interfaceSig.decl.getOrThrow()
+        let childDecl = child.decl.getOrThrow()
+        if (let None <- childDecl.outerDecl) {
+            return
+        }
+        let childOuter = childDecl.outerDecl.getOrThrow()
+        if (let None <- (childOuter as ExtendDecl)) {
+            return
+        }
+        let childOuterExtend = (childOuter as ExtendDecl).getOrThrow()
+        if (let None <- childOuterExtend.extendedType) {
+            return
+        }
+        let extendedType = childOuterExtend.extendedType.getOrThrow()
+        if (let None <- extendedType.GetTarget()) {
+            return
+        }
+        let childOuterDecl = extendedType.GetTarget().getOrThrow()
+        if (IsExtendImplementationInCurrentCheck(childOuterDecl)) {
+            return
+        }
+        if (let None <- childOuterDecl.GetTy()) {
+            return
+        }
+        let childOuterTy = childOuterDecl.GetTy().getOrThrow()
+        if (!childOuterTy.HasGeneric()) {
+            return
+        }
+        if (childOuterDecl.astKind != ASTKind.CLASS_DECL) {
+            return
+        }
+        let checkingDecl = checkingDecls[0]
+        if (let None <- checkingDecl.GetTy()) {
+            return
+        }
+        if (let None <- (checkingDecl.GetTy().getOrThrow() as ClassTy)) {
+            return
+        }
+        let currentClassTy = (checkingDecl.GetTy().getOrThrow() as ClassTy).getOrThrow()
+        let mapping = MultiTypeSubst()
+        typeManager.GenerateGenericMapping(mapping, currentClassTy)
+        let instantiatedSupers = typeManager.GetInstantiatedTys(childOuterTy, mapping)
+        for (instTy in instantiatedSupers.values) {
+            if (!typeManager.CheckGenericDeclInstantiation(Some(childOuterExtend), instTy.typeArgs)) {
+                DiagnoseIncompleteOverrideOrImpl(interfaceDecl, childDecl, childOuterDecl)
+                return
+            }
+        }
+    }
+
+    private func IsExtendImplementationInCurrentCheck(childOuterDecl: Decl): Bool {
+        if (checkingDecls.isEmpty()) {
+            return false
+        }
+        let checkingDecl = checkingDecls[0]
+        if (SameDecl(checkingDecl, childOuterDecl)) {
+            return true
+        }
+        if (let Some(childOuterTy) <- childOuterDecl.GetTy()) {
+            for (extendDecl in typeManager.GetAllExtendsByTy(childOuterTy)) {
+                if (SameDecl(extendDecl, checkingDecl)) {
+                    return true
+                }
+            }
+        }
+        return false
+    }
+
+    private func DiagnoseIncompleteOverrideOrImpl(interfaceDecl: Decl, childDecl: Decl, childOuterDecl: Decl): Unit {
+        if (checkingDecls.isEmpty()) {
+            return
+        }
+        let checkingDecl = checkingDecls[0]
+        let funcOrProp = if (childDecl.astKind == ASTKind.FUNC_DECL) { "function" } else { "prop" }
+        let memberStr = funcOrProp + " '" + childDecl.identifier.Val() + "' in '" +
+            childOuterDecl.identifier.Val() + "''s extension"
+        let interfaceName = if (let Some(interfaceOuter) <- interfaceDecl.outerDecl) {
+            interfaceOuter.identifier.Val()
+        } else {
+            ""
+        }
+        let interfaceBeOverridden = "interface '" + interfaceName + "'"
+        if (interfaceDecl.TestAttr(Attribute.DEFAULT)) {
+            let builder = diag.DiagnoseRefactor(
+                DiagKindRefactor.sema_cannot_override,
+                DeclRange(checkingDecl),
+                arguments: [funcOrProp, childDecl.identifier.Val()]
+            )
+            builder.AddNote(
+                DeclIdentifierRange(childDecl),
+                "member " + memberStr + " conflict with that in " + interfaceBeOverridden
+            )
+        } else {
+            let prefix = if (checkingDecl.astKind == ASTKind.EXTEND_DECL) { "extend " } else { "" }
+            let classNameOverride = prefix + InheritedDisplayName(checkingDecl)
+            let builder = diag.Diagnose(
+                checkingDecl.begin,
+                checkingDecl.end,
+                DiagKind.sema_interface_member_must_be_implemented_in_struct,
+                args: [
+                    DiagArgument(funcOrProp),
+                    DiagArgument(childDecl.identifier.Val()),
+                    DiagArgument(classNameOverride)
+                ]
+            )
+            builder.AddNote(
+                DeclIdentifierRange(childDecl),
+                "member " + memberStr + " may not be visible to '" + classNameOverride + "'"
+            )
         }
     }
 

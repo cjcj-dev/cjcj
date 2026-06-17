@@ -126,3 +126,16 @@ Ordered-diagnostic continuation:
   closely.
 
 Verification: `cjpm build` passes for the whole workspace after this ordered-diagnostic continuation.
+
+Incomplete extension implementation continuation:
+
+- Inherited-interface checking now ports the native-backend C++ `CheckIncompleteOverrideOrImplOfExtend` core path. When an
+  interface function is satisfied by a member from an extension of a generic class, the checker instantiates the extended
+  class through the current class's generic mapping and verifies that the extension constraints still hold.
+- The new check preserves the C++ escape cases for implementations that belong to the declaration currently being checked
+  or one of its own extensions, and diagnoses either a default-interface override conflict or a potentially invisible
+  interface implementation with the same note wording used by the C++ implementation.
+- The CJMP `commonPartCjos`-controlled inherited-type replacement remains a known gap because this scoped checker does
+  not receive global options and the replacement helper lives outside the permitted edit area.
+
+Verification: `cjpm build` passes for the whole workspace after this incomplete extension implementation continuation.
