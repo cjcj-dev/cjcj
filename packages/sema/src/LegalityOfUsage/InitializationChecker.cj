@@ -8,6 +8,7 @@ public enum InitializationIssueKind {
     | ASSIGN_IMMUTABLE
     | CAPTURE_BEFORE_INITIALIZATION
     | ILLEGAL_MEMBER_USE
+    | ILLEGAL_SUPER_MEMBER_USE
     | UNINITIALIZED_FIELD
 }
 
@@ -17,7 +18,8 @@ private func InitializationIssueKindIndex(kind: InitializationIssueKind): Int64 
         case InitializationIssueKind.ASSIGN_IMMUTABLE => 1
         case InitializationIssueKind.CAPTURE_BEFORE_INITIALIZATION => 2
         case InitializationIssueKind.ILLEGAL_MEMBER_USE => 3
-        case InitializationIssueKind.UNINITIALIZED_FIELD => 4
+        case InitializationIssueKind.ILLEGAL_SUPER_MEMBER_USE => 4
+        case InitializationIssueKind.UNINITIALIZED_FIELD => 5
     }
 }
 
@@ -60,6 +62,36 @@ private class InitBoolBox {
 
     public init(value: Bool) {
         this.value = value
+    }
+}
+
+private class ScopedDecls {
+    public var scopeGateName: String
+    public let decls: ArrayList<Decl> = ArrayList<Decl>()
+
+    public init(scopeGateName: String) {
+        this.scopeGateName = scopeGateName
+    }
+}
+
+private class TerminatedScopeInfo {
+    public var scopeGateName: String
+    public let variablesBeforeTerminator: ArrayList<Decl> = ArrayList<Decl>()
+    public let initVarsAfterTerminator: ArrayList<Decl> = ArrayList<Decl>()
+    public var terminationKind: ASTKind
+
+    public init(scopeGateName: String, terminationKind: ASTKind) {
+        this.scopeGateName = scopeGateName
+        this.terminationKind = terminationKind
+    }
+}
+
+private class CtorUninitVars {
+    public var ctor: FuncDecl
+    public let decls: ArrayList<Decl> = ArrayList<Decl>()
+
+    public init(ctor: FuncDecl) {
+        this.ctor = ctor
     }
 }
 
@@ -206,6 +238,128 @@ private func IsOtherInit(call: ConstructorCall): Bool {
         case ConstructorCall.OTHER_INIT => true
         case _ => false
     }
+}
+
+private func IsControlTransferNode(node: Node): Bool {
+    return node.astKind == ASTKind.RETURN_EXPR || node.astKind == ASTKind.JUMP_EXPR ||
+        node.astKind == ASTKind.THROW_EXPR
+}
+
+private func CurrentScopeGate(scopeName: String): String {
+    let scopeGate = GetScopeGateName(scopeName)
+    if (!scopeGate.isEmpty()) {
+        return scopeGate
+    }
+    if (scopeName.contains(CHILD_SCOPE_SEPARATOR)) {
+        return scopeName
+    }
+    return ""
+}
+
+private func FindScopedDecls(entries: ArrayList<ScopedDecls>, scopeGateName: String): Option<ScopedDecls> {
+    for (entry in entries) {
+        if (entry.scopeGateName == scopeGateName) {
+            return entry
+        }
+    }
+    return None
+}
+
+private func EnsureScopedDecls(entries: ArrayList<ScopedDecls>, scopeGateName: String): ScopedDecls {
+    if (let Some(entry) <- FindScopedDecls(entries, scopeGateName)) {
+        return entry
+    }
+    let entry = ScopedDecls(scopeGateName)
+    entries.add(entry)
+    return entry
+}
+
+private func RemoveScopedDecls(entries: ArrayList<ScopedDecls>, scopeGateName: String): Unit {
+    var idx: Int64 = 0
+    while (idx < entries.size) {
+        if (entries[idx].scopeGateName == scopeGateName) {
+            entries.remove(at: idx)
+        } else {
+            idx++
+        }
+    }
+}
+
+private func FindTerminatedScope(entries: ArrayList<TerminatedScopeInfo>,
+    scopeGateName: String): Option<TerminatedScopeInfo> {
+    for (entry in entries) {
+        if (entry.scopeGateName == scopeGateName) {
+            return entry
+        }
+    }
+    return None
+}
+
+private func AddVisibleContextDecls(contextVariables: ArrayList<ScopedDecls>, scopeGateName: String,
+    out: ArrayList<Decl>): Unit {
+    var currentGate = scopeGateName
+    while (!currentGate.isEmpty()) {
+        if (let Some(entry) <- FindScopedDecls(contextVariables, currentGate)) {
+            for (decl in entry.decls) {
+                AddUniqueDecl(out, decl)
+            }
+        }
+        currentGate = GetScopeGateName(currentGate)
+    }
+}
+
+private func UpdateContextVariables(contextVariables: ArrayList<ScopedDecls>, decl: Decl): Unit {
+    if (decl.TestAnyAttr(Attribute.GLOBAL, Attribute.STATIC)) {
+        return
+    }
+    let scopeGateName = CurrentScopeGate(decl.scopeName)
+    if (scopeGateName.isEmpty()) {
+        return
+    }
+    let entry = EnsureScopedDecls(contextVariables, scopeGateName)
+    if (let Some(varDecl) <- (decl as VarDecl)) {
+        AddUniqueDecl(entry.decls, varDecl)
+    } else if (let Some(vpd) <- (decl as VarWithPatternDecl)) {
+        if (let Some(pattern) <- vpd.irrefutablePattern) {
+            let vars = ArrayList<VarDecl>()
+            CollectPatternVars(pattern, vars)
+            for (varDecl in vars) {
+                AddUniqueDecl(entry.decls, varDecl)
+            }
+        }
+    }
+}
+
+private func FindCtorUninitVars(entries: ArrayList<CtorUninitVars>, ctor: FuncDecl): Option<CtorUninitVars> {
+    for (entry in entries) {
+        if (SameDecl(entry.ctor, ctor)) {
+            return entry
+        }
+    }
+    return None
+}
+
+private func RemoveCtorUninitVars(entries: ArrayList<CtorUninitVars>, ctor: FuncDecl): Unit {
+    var idx: Int64 = 0
+    while (idx < entries.size) {
+        if (SameDecl(entries[idx].ctor, ctor)) {
+            entries.remove(at: idx)
+        } else {
+            idx++
+        }
+    }
+}
+
+private func HasForeignOrJavaParent(body: FuncBody): Bool {
+    if (let Some(parentClassLike) <- body.parentClassLike) {
+        if (parentClassLike.TestAttr(Attribute.FOREIGN)) {
+            return true
+        }
+        if (let Some(_) <- HasJavaAttr(parentClassLike)) {
+            return true
+        }
+    }
+    return false
 }
 
 private func MayBeStructTy(target: VarDecl): Bool {
@@ -417,6 +571,11 @@ public class InitializationChecker {
     private let issues: ArrayList<InitializationIssue> = ArrayList<InitializationIssue>()
     private var currentInitializingVarDependencies: Option<ArrayList<Decl>> = None
     private let currentFuncBodies: ArrayList<FuncBody> = ArrayList<FuncBody>()
+    private let contextVariables: ArrayList<ScopedDecls> = ArrayList<ScopedDecls>()
+    private let terminatedScopes: ArrayList<TerminatedScopeInfo> = ArrayList<TerminatedScopeInfo>()
+    private let ctorUninitVars: ArrayList<CtorUninitVars> = ArrayList<CtorUninitVars>()
+    private var optionalCtxDepth: Int64 = 0
+    private var tryDepth: Int64 = 0
 
     public init() {}
 
@@ -428,6 +587,18 @@ public class InitializationChecker {
     private func AddIssue(kind: InitializationIssueKind, node: Node, target!: Option<Decl> = None,
         message!: String = ""): Unit {
         issues.add(InitializationIssue(kind, node, target: target, message: message))
+    }
+
+    private func ClearScopeStatus(scopeName: String): Unit {
+        let scopeGateName = CurrentScopeGate(scopeName)
+        if (scopeGateName.isEmpty()) {
+            return
+        }
+        RemoveScopedDecls(contextVariables, scopeGateName)
+        if (let Some(terminated) <- FindTerminatedScope(terminatedScopes, scopeGateName)) {
+            terminated.variablesBeforeTerminator.clear()
+            terminated.initVarsAfterTerminator.clear()
+        }
     }
 
     private func CheckExprOption(expr: Option<Expr>): Bool {
@@ -464,7 +635,11 @@ public class InitializationChecker {
         }
         node.EnableAttr(Attribute.INITIALIZATION_CHECKED)
         if (let Some(decl) <- (node as Decl)) {
+            UpdateContextVariables(contextVariables, decl)
             if (FromCommonPart(decl)) {
+                if (node.scopeName.contains(CHILD_SCOPE_SEPARATOR)) {
+                    ClearScopeStatus(node.scopeName)
+                }
                 return
             }
         }
@@ -570,6 +745,9 @@ public class InitializationChecker {
                         CheckInitInExpr(expr)
                     }
                 }
+        }
+        if (node.scopeName.contains(CHILD_SCOPE_SEPARATOR)) {
+            ClearScopeStatus(node.scopeName)
         }
     }
 
@@ -739,32 +917,61 @@ public class InitializationChecker {
         }
     }
 
+    private func GetRealExpr(expr: Expr): Expr {
+        if (let Some(desugar) <- expr.desugarExpr) {
+            return desugar
+        }
+        return expr
+    }
+
+    private func IsStructBaseExpr(expr: Expr): Bool {
+        if (let Some(baseTy) <- expr.GetTy()) {
+            return baseTy.IsStruct()
+        }
+        return false
+    }
+
     private func CheckLetFlagInMemberAccess(assignExpr: Expr, member: MemberAccess, inInitFunction: Bool): Unit {
+        if (let None <- member.baseExpr) {
+            return
+        }
+        let memberBase = member.baseExpr.getOrThrow()
         if (let Some(target) <- member.target) {
             if (let Some(varDecl) <- (target as VarDecl)) {
                 if (NotAssignableVariable(varDecl, inInitFunction)) {
                     AddIssue(InitializationIssueKind.ASSIGN_IMMUTABLE, assignExpr, target: varDecl)
                 }
-            }
-        }
-        if (let Some(base) <- member.baseExpr) {
-            if (let Some(refExpr) <- (base as RefExpr)) {
-                if (let Some(target) <- refExpr.GetTarget()) {
-                    if (let Some(varDecl) <- (target as VarDecl)) {
-                        if (!varDecl.isVar && MayBeStructTy(varDecl)) {
-                            AddIssue(InitializationIssueKind.ASSIGN_IMMUTABLE, assignExpr, target: varDecl)
+                let realBase = GetRealExpr(memberBase)
+                let isStructBase = IsStructBaseExpr(realBase)
+                if ((realBase.astKind == ASTKind.CALL_EXPR || realBase.astKind == ASTKind.SUBSCRIPT_EXPR) &&
+                    isStructBase) {
+                    AddIssue(InitializationIssueKind.ASSIGN_IMMUTABLE, assignExpr, target: realBase.GetTarget())
+                }
+                if (let Some(nameRef) <- (memberBase as NameReferenceExpr)) {
+                    if (let Some(baseTarget) <- nameRef.GetTarget()) {
+                        if (baseTarget.astKind == ASTKind.PROP_DECL && isStructBase) {
+                            AddIssue(InitializationIssueKind.ASSIGN_IMMUTABLE, assignExpr, target: baseTarget)
                         }
                     }
                 }
-            } else if (let Some(baseMember) <- (base as MemberAccess)) {
-                if (let Some(target) <- baseMember.target) {
-                    if (let Some(varDecl) <- (target as VarDecl)) {
-                        if (MayBeStructTy(varDecl)) {
-                            if (!varDecl.isVar) {
-                                AddIssue(InitializationIssueKind.ASSIGN_IMMUTABLE, assignExpr, target: varDecl)
-                            } else {
-                                CheckLetFlag(assignExpr, base)
-                            }
+            }
+        }
+        if (let Some(refExpr) <- (memberBase as RefExpr)) {
+            if (let Some(target) <- refExpr.GetTarget()) {
+                if (let Some(varDecl) <- (target as VarDecl)) {
+                    if (!varDecl.isVar && MayBeStructTy(varDecl)) {
+                        AddIssue(InitializationIssueKind.ASSIGN_IMMUTABLE, assignExpr, target: varDecl)
+                    }
+                }
+            }
+        } else if (let Some(baseMember) <- (memberBase as MemberAccess)) {
+            if (let Some(target) <- baseMember.target) {
+                if (let Some(varDecl) <- (target as VarDecl)) {
+                    if (MayBeStructTy(varDecl)) {
+                        if (!varDecl.isVar) {
+                            AddIssue(InitializationIssueKind.ASSIGN_IMMUTABLE, assignExpr, target: varDecl)
+                        } else {
+                            CheckLetFlag(assignExpr, memberBase)
                         }
                     }
                 }
@@ -798,6 +1005,53 @@ public class InitializationChecker {
             return None
         }
         return currentFuncBodies[currentFuncBodies.size - 1]
+    }
+
+    private func CurrentOutermostNamedFuncDecl(): Option<FuncDecl> {
+        var idx: Int64 = 0
+        while (idx < currentFuncBodies.size) {
+            if (let Some(funcDecl) <- currentFuncBodies[idx].funcDecl) {
+                return funcDecl
+            }
+            idx++
+        }
+        return None
+    }
+
+    private func CurrentFuncBodySameAs(funcDecl: FuncDecl): Bool {
+        if (let Some(currentBody) <- CurrentFuncBody()) {
+            if (let Some(currentDecl) <- currentBody.funcDecl) {
+                return SameDecl(currentDecl, funcDecl)
+            }
+        }
+        return false
+    }
+
+    private func CurrentNominalDeclForUsage(target: Decl): Option<Decl> {
+        if (let Some(outerFunc) <- CurrentOutermostNamedFuncDecl()) {
+            if (let Some(owner) <- outerFunc.outerDecl) {
+                if (owner.IsNominalDecl()) {
+                    return owner
+                }
+            }
+        }
+        if (let Some(currentBody) <- CurrentFuncBody()) {
+            if (let Some(parentClassLike) <- currentBody.parentClassLike) {
+                return parentClassLike
+            }
+            if (let Some(parentStruct) <- currentBody.parentStruct) {
+                return parentStruct
+            }
+            if (let Some(parentEnum) <- currentBody.parentEnum) {
+                return parentEnum
+            }
+        }
+        if (let Some(targetOuter) <- target.outerDecl) {
+            if (targetOuter.IsNominalDecl()) {
+                return targetOuter
+            }
+        }
+        return None
     }
 
     private func GetOwningFuncBodyForScope(scopeName: String): Option<FuncBody> {
@@ -884,10 +1138,93 @@ public class InitializationChecker {
         if (!IsSameFile(checkNode, targetNode)) {
             return false
         }
+        if (targetNode.astKind != ASTKind.VAR_DECL) {
+            return false
+        }
         if (checkNode.IsStaticOrGlobal() && targetNode.IsStaticOrGlobal() && checkNode.begin < targetNode.begin) {
             return true
         }
-        return checkNode.scopeLevel == targetNode.scopeLevel && checkNode.begin < targetNode.begin
+        if (checkNode.scopeLevel == targetNode.scopeLevel && checkNode.begin < targetNode.begin) {
+            return true
+        }
+        if (checkNode.scopeLevel > targetNode.scopeLevel && checkNode.begin < targetNode.begin) {
+            if (let Some(varDecl) <- (targetNode as VarDecl)) {
+                if (!IsInRelatedNominalDecl(varDecl) && ScopeContains(targetNode.scopeName, checkNode.scopeName)) {
+                    return true
+                }
+            }
+        }
+        return false
+    }
+
+    private func IsInRelatedNominalDecl(varDecl: VarDecl): Bool {
+        if (let Some(outer) <- varDecl.outerDecl) {
+            return outer.IsNominalDecl()
+        }
+        return false
+    }
+
+    private func UpdateScopeStatus(node: Node): Unit {
+        if (!IsControlTransferNode(node)) {
+            return
+        }
+        let scopeGateName = CurrentScopeGate(node.scopeName)
+        let mayNotGoOn = optionalCtxDepth != 0 && (node.astKind != ASTKind.THROW_EXPR || tryDepth == 0)
+        if (scopeGateName.isEmpty() || mayNotGoOn) {
+            return
+        }
+        if (let None <- FindTerminatedScope(terminatedScopes, scopeGateName)) {
+            let terminated = TerminatedScopeInfo(scopeGateName, node.astKind)
+            AddVisibleContextDecls(contextVariables, scopeGateName, terminated.variablesBeforeTerminator)
+            terminatedScopes.add(terminated)
+        }
+        if (node.astKind != ASTKind.RETURN_EXPR) {
+            return
+        }
+        if (let Some(currentFunc) <- CurrentNamedFuncDecl()) {
+            if (!IsInstanceConstructor(currentFunc)) {
+                return
+            }
+            if (let Some(_) <- FindCtorUninitVars(ctorUninitVars, currentFunc)) {
+                return
+            }
+            let ctorVars = CtorUninitVars(currentFunc)
+            if (let Some(typeDecl) <- currentFunc.outerDecl) {
+                for (member in typeDecl.GetMemberDecls()) {
+                    if (member.astKind == ASTKind.VAR_DECL && !member.TestAttr(Attribute.STATIC) &&
+                        !member.TestAttr(Attribute.INITIALIZED)) {
+                        AddUniqueDecl(ctorVars.decls, member)
+                    }
+                }
+            }
+            ctorUninitVars.add(ctorVars)
+        }
+    }
+
+    private func UpdateInitializationStatus(assign: AssignExpr, decl: Decl): Unit {
+        let scopeGateName = CurrentScopeGate(assign.scopeName)
+        if (!scopeGateName.isEmpty()) {
+            if (let Some(terminated) <- FindTerminatedScope(terminatedScopes, scopeGateName)) {
+                if (ContainsInitDecl(terminated.variablesBeforeTerminator, decl)) {
+                    if (terminated.terminationKind != ASTKind.THROW_EXPR || tryDepth != 0) {
+                        AddUniqueDecl(terminated.initVarsAfterTerminator, decl)
+                        return
+                    }
+                }
+            }
+        }
+        decl.EnableAttr(Attribute.INITIALIZED)
+    }
+
+    private func HasInitVarsAfterTerminator(scopeName: String): Bool {
+        let scopeGateName = CurrentScopeGate(scopeName)
+        if (scopeGateName.isEmpty()) {
+            return false
+        }
+        if (let Some(terminated) <- FindTerminatedScope(terminatedScopes, scopeGateName)) {
+            return !terminated.initVarsAfterTerminator.isEmpty()
+        }
+        return false
     }
 
     private func IsOrderRelated(checkNode: Node, targetNode: Node, isClassLikeOrStruct: Bool): Bool {
@@ -895,6 +1232,82 @@ public class InitializationChecker {
             return true
         }
         return !(targetNode.scopeLevel == 0 || isClassLikeOrStruct)
+    }
+
+    private func AddIllegalMemberUse(expr: Expr, target: Decl): Unit {
+        AddIssue(InitializationIssueKind.ILLEGAL_MEMBER_USE, expr, target: target, message: target.identifier.Val())
+    }
+
+    private func CheckIllegalMemberAccess(expr: Expr, target: Decl, targetStruct: Node): Bool {
+        if (let None <- CurrentFuncBody()) {
+            if (target.IsFuncOrProp()) {
+                AddIllegalMemberUse(expr, target)
+                return false
+            }
+            return true
+        }
+        if (let None <- CurrentOutermostNamedFuncDecl()) {
+            AddIllegalMemberUse(expr, target)
+            return false
+        }
+        let outerMostFunc = CurrentOutermostNamedFuncDecl().getOrThrow()
+        if (let Some(owner) <- outerMostFunc.outerDecl) {
+            if (!owner.IsNominalDecl()) {
+                AddIllegalMemberUse(expr, target)
+                return false
+            }
+        } else {
+            AddIllegalMemberUse(expr, target)
+            return false
+        }
+        let leftVariable = expr.TestAttr(Attribute.LEFT_VALUE) && target.astKind == ASTKind.VAR_DECL
+        if (IsAllMembersInitialized(targetStruct) || leftVariable) {
+            return true
+        }
+        if (!IsInstanceConstructor(outerMostFunc)) {
+            return true
+        }
+        if (target.IsFuncOrProp() || !CurrentFuncBodySameAs(outerMostFunc)) {
+            AddIllegalMemberUse(expr, target)
+            return false
+        }
+        return true
+    }
+
+    private func CheckIllegalRefExprAccess(refExpr: RefExpr, target: Decl): Bool {
+        if (target.TestAttr(Attribute.STATIC) || target.TestAttr(Attribute.CONSTRUCTOR)) {
+            return true
+        }
+        if (let None <- target.outerDecl) {
+            return true
+        }
+        let targetOuter = target.outerDecl.getOrThrow()
+        if (!targetOuter.IsNominalDecl()) {
+            return true
+        }
+        if (let None <- CurrentNominalDeclForUsage(target)) {
+            return true
+        }
+        let currentNominal = CurrentNominalDeclForUsage(target).getOrThrow()
+        if (SameDecl(currentNominal, targetOuter)) {
+            return CheckIllegalMemberAccess(refExpr, target, currentNominal)
+        }
+        if (target.astKind == ASTKind.VAR_DECL) {
+            if (let Some(outerFunc) <- CurrentOutermostNamedFuncDecl()) {
+                if (let Some(owner) <- outerFunc.outerDecl) {
+                    if (owner.IsNominalDecl()) {
+                        return true
+                    }
+                }
+            }
+            AddIssue(InitializationIssueKind.ILLEGAL_SUPER_MEMBER_USE, refExpr, target: target,
+                message: refExpr.ref.identifier.Val())
+            return false
+        }
+        if (target.IsFuncOrProp()) {
+            return CheckIllegalMemberAccess(refExpr, target, currentNominal)
+        }
+        return true
     }
 
     private func CheckInitInRefExpr(refExpr: RefExpr): Bool {
@@ -912,6 +1325,9 @@ public class InitializationChecker {
             if (CanSkipInitCheck(target) || !IsOrderRelated(refExpr, target, target.IsNominalDecl())) {
                 return true
             }
+            if (!CheckIllegalRefExprAccess(refExpr, target)) {
+                return false
+            }
             if (let Some(_) <- (target as FuncParam)) {
                 return true
             }
@@ -919,7 +1335,9 @@ public class InitializationChecker {
                 return true
             }
             if (!target.TestAttr(Attribute.INITIALIZED)) {
-                if (IsInDifferentFunction(refExpr, target)) {
+                if (HasInitVarsAfterTerminator(refExpr.scopeName)) {
+                    return true
+                } else if (IsInDifferentFunction(refExpr, target)) {
                     AddIssue(InitializationIssueKind.CAPTURE_BEFORE_INITIALIZATION, refExpr, target: target,
                         message: target.identifier.Val())
                     return false
@@ -940,6 +1358,32 @@ public class InitializationChecker {
         var result = CheckExprOption(member.baseExpr)
         if (let Some(target) <- member.target) {
             RecordInstanceVariableUsage(target)
+            if (!target.TestAttr(Attribute.STATIC)) {
+                if (let Some(targetOuter) <- target.outerDecl) {
+                    if (targetOuter.IsNominalDecl()) {
+                        if (let Some(base) <- member.baseExpr) {
+                            if (let Some(refExpr) <- (base as RefExpr)) {
+                                if (refExpr.isThis) {
+                                    if (let Some(baseTarget) <- refExpr.GetTarget()) {
+                                        if (baseTarget.IsStructOrClassDecl()) {
+                                            if (!CheckIllegalMemberAccess(member, target, baseTarget)) {
+                                                return false
+                                            }
+                                        }
+                                    }
+                                }
+                                if (refExpr.isSuper && target.IsFuncOrProp()) {
+                                    if (let Some(currentNominal) <- CurrentNominalDeclForUsage(target)) {
+                                        if (!CheckIllegalMemberAccess(member, target, currentNominal)) {
+                                            return false
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
             if (target.IsFuncOrProp() || IsMemberUseOutsideCtor(target)) {
                 return result
             }
@@ -985,7 +1429,7 @@ public class InitializationChecker {
                 left.DisableAttr(Attribute.LEFT_VALUE)
             }
             if (target.TestAttr(Attribute.INITIALIZATION_CHECKED) && !IsInDifferentFunction(assign, target)) {
-                target.EnableAttr(Attribute.INITIALIZED)
+                UpdateInitializationStatus(assign, target)
             }
         }
         return true
@@ -1003,7 +1447,11 @@ public class InitializationChecker {
             case ASTKind.ASSIGN_EXPR =>
                 if (let Some(assign) <- (expr as AssignExpr)) { CheckInitInAssignExpr(assign) } else { true }
             case ASTKind.RETURN_EXPR =>
-                if (let Some(ret) <- (expr as ReturnExpr)) { CheckExprOption(ret.expr) } else { true }
+                if (let Some(ret) <- (expr as ReturnExpr)) {
+                    let returnResult = CheckExprOption(ret.expr)
+                    UpdateScopeStatus(ret)
+                    returnResult
+                } else { true }
             case ASTKind.TRY_EXPR =>
                 if (let Some(tryExpr) <- (expr as TryExpr)) { CheckInitInTryExpr(tryExpr) } else { true }
             case ASTKind.MATCH_EXPR =>
@@ -1114,14 +1562,24 @@ public class InitializationChecker {
                     if (let Some(strInterp) <- lit.siExpr) {
                         var result = true
                         for (partExpr in strInterp.strPartExprs) {
-                            result = CheckInitInExpr(partExpr) && result
+                            if (let Some(interpolation) <- (partExpr as InterpolationExpr)) {
+                                result = CheckBlockOption(interpolation.block) && result
+                            } else {
+                                result = CheckInitInExpr(partExpr) && result
+                            }
                         }
                         result
                     } else { true }
                 } else { true }
             case ASTKind.THROW_EXPR =>
-                if (let Some(throwExpr) <- (expr as ThrowExpr)) { CheckExprOption(throwExpr.expr) } else { true }
-            case ASTKind.JUMP_EXPR => true
+                if (let Some(throwExpr) <- (expr as ThrowExpr)) {
+                    let throwResult = CheckExprOption(throwExpr.expr)
+                    UpdateScopeStatus(throwExpr)
+                    throwResult
+                } else { true }
+            case ASTKind.JUMP_EXPR =>
+                UpdateScopeStatus(expr)
+                true
             case ASTKind.PERFORM_EXPR =>
                 if (let Some(perform) <- (expr as PerformExpr)) { CheckExprOption(perform.expr) } else { true }
             case ASTKind.RESUME_EXPR =>
@@ -1138,6 +1596,8 @@ public class InitializationChecker {
                     }
                     result
                 } else { true }
+            case ASTKind.INTERPOLATION_EXPR =>
+                if (let Some(interpolation) <- (expr as InterpolationExpr)) { CheckBlockOption(interpolation.block) } else { true }
             case ASTKind.BLOCK =>
                 CheckInitialization(expr)
                 true
@@ -1219,11 +1679,13 @@ public class InitializationChecker {
         for (resource in tryExpr.resourceSpec) {
             CheckInitialization(resource)
         }
+        tryDepth++
         if (let Some(lambda) <- tryExpr.tryLambda) {
-            CheckInitInExpr(lambda)
+            CheckInitialization(lambda)
         } else {
             CheckBlockOption(tryExpr.tryBlock)
         }
+        tryDepth--
         for (pattern in tryExpr.catchPatterns) {
             result = CheckInitInPattern(pattern) && result
         }
@@ -1330,7 +1792,9 @@ public class InitializationChecker {
             rightUninits = CollectUninitializedReferences(right, leftUninits)
         }
         var result = CheckExprOption(binary.leftExpr)
+        optionalCtxDepth++
         result = CheckExprOption(binary.rightExpr) && result
+        optionalCtxDepth--
         for (decl in rightUninits) {
             decl.DisableAttr(Attribute.INITIALIZED)
         }
@@ -1495,6 +1959,7 @@ public class InitializationChecker {
                 continue
             }
             CheckInitInConstructor(initFunc, uninitNonFuncDecls)
+            RemoveCtorUninitVars(ctorUninitVars, initFunc)
         }
         for (funcDecl in info.funcDecls) {
             CheckInitialization(funcDecl)
@@ -1511,14 +1976,37 @@ public class InitializationChecker {
             }
         }
         CheckInitialization(fd)
+        if (let None <- fd.funcBody) {
+            return
+        }
         if (IsOtherInit(fd.constructorCall)) {
             for (decl in uninitNonFuncDecls) {
                 decl.EnableAttr(Attribute.INITIALIZED)
             }
             return
         }
+        if (let Some(body) <- fd.funcBody) {
+            if (HasForeignOrJavaParent(body)) {
+                for (decl in uninitNonFuncDecls) {
+                    decl.EnableAttr(Attribute.INITIALIZED)
+                }
+                return
+            }
+            let bodyScopeGate = CurrentScopeGate(body.scopeName)
+            if (let Some(terminated) <- FindTerminatedScope(terminatedScopes, bodyScopeGate)) {
+                if (terminated.terminationKind == ASTKind.THROW_EXPR) {
+                    return
+                }
+            }
+        }
+        let definitelyUninitVars = if (let Some(entry) <- FindCtorUninitVars(ctorUninitVars, fd)) {
+            entry.decls
+        } else {
+            ArrayList<Decl>()
+        }
         for (decl in uninitNonFuncDecls) {
-            if (decl.TestAnyAttr(Attribute.INITIALIZED, Attribute.COMMON)) {
+            if (decl.TestAnyAttr(Attribute.INITIALIZED, Attribute.COMMON) &&
+                !ContainsInitDecl(definitelyUninitVars, decl)) {
                 continue
             }
             AddIssue(InitializationIssueKind.UNINITIALIZED_FIELD, fd, target: decl, message: decl.identifier.Val())
@@ -1577,11 +2065,9 @@ public class InitializationChecker {
         for (member in decl.GetMemberDecls()) {
             CollectToDeclsInfo(member, info)
         }
-        for (member in decl.GetMemberDecls()) {
-            if (member.astKind == ASTKind.VAR_DECL || member.astKind == ASTKind.VAR_WITH_PATTERN_DECL) {
-                if (!member.TestAttr(Attribute.STATIC)) {
-                    info.nonFuncDecls.add(member)
-                }
+        for (entry in GetVarsInitializationOrderWithPositions(decl)) {
+            if (let Some(member) <- entry.decl) {
+                info.nonFuncDecls.add(member)
             }
         }
         return info

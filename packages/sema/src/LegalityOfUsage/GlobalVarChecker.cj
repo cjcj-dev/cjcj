@@ -122,6 +122,30 @@ private func ContainsNode(values: ArrayList<Node>, node: Node): Bool {
     return false
 }
 
+private func DeclLessBySource(left: Decl, right: Decl): Bool {
+    if (left.begin.fileID < right.begin.fileID) {
+        return true
+    }
+    if (left.begin.fileID > right.begin.fileID) {
+        return false
+    }
+    if (left.begin < right.begin) {
+        return true
+    }
+    if (right.begin < left.begin) {
+        return false
+    }
+    let leftKind = ASTKindIndex(left.astKind)
+    let rightKind = ASTKindIndex(right.astKind)
+    if (leftKind < rightKind) {
+        return true
+    }
+    if (rightKind < leftKind) {
+        return false
+    }
+    return left.end < right.end
+}
+
 private func IsGlobalOrStaticOrConstVar(decl: Decl): Bool {
     if (decl.astKind != ASTKind.VAR_DECL && decl.astKind != ASTKind.VAR_WITH_PATTERN_DECL) {
         return false
@@ -212,6 +236,14 @@ private class DefUseGraph {
             }
         }
         let newNode = DefNode(owner)
+        var idx: Int64 = 0
+        while (idx < nodes.size) {
+            if (DeclLessBySource(owner, nodes[idx].variable)) {
+                nodes.add(newNode, at: idx)
+                return newNode
+            }
+            idx++
+        }
         nodes.add(newNode)
         return newNode
     }
@@ -270,10 +302,8 @@ public class GlobalVarInitializationChecker {
             if (IsGlobalOrStaticOrConstVar(member)) {
                 CollectForVar(member)
                 if (let Some(varDecl) <- (member as VarDecl)) {
-                    if (varDecl.TestAttr(Attribute.STATIC)) {
-                        if (let None <- varDecl.initializer) {
-                            uninitStaticVars.add(varDecl)
-                        }
+                    if (let None <- varDecl.initializer) {
+                        uninitStaticVars.add(varDecl)
                     }
                 }
             } else if (let Some(funcDecl) <- (member as FuncDecl)) {
