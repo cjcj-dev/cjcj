@@ -117,6 +117,13 @@ public class CGModule {
             return
         }
         if (let Some(functionCGType) <- (cgFuncType as CGFunctionType)) {
+            if (let Some(chirType) <- chirValue.GetType()) {
+                if (let Some(funcType) <- (chirType as FuncType)) {
+                    if (funcType.IsCFunc()) {
+                        SetZExtAttrForCFunc(rawFunction, functionCGType.GetLLVMFunctionType())
+                    }
+                }
+            }
             if (!functionCGType.HasSRet()) {
                 return
             }

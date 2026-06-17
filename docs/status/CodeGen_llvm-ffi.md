@@ -42,6 +42,12 @@ Implemented in this pass:
   varray GEP, PHI creation/incoming edges, select, and extractvalue.
 - Added checked target lookup and target-machine emission helpers that preserve LLVM diagnostic messages for file and
   memory-buffer emission, plus option setters for CPU/features/ABI/opt level/relocation/code model.
+- Added LLVM type-introspection bindings for function return/parameter types and implemented the C++ `SetZExtAttrForCFunc`
+  behavior for C ABI boolean returns/arguments. C function declarations now receive `zeroext` where their raw LLVM
+  function type uses `i1`, and direct calls propagate direct callee `zeroext` attributes to call/invoke instructions.
+- Added `IRBuilder2.CreateCallOrInvoke(CGFunctionType, ...)` and `CreateCallOrInvoke(CGFunction, ...)` wrappers that
+  mirror the C++ overload shape: they synthesize a leading struct-return slot, attach typed `sret` plus `noalias` on the
+  call, return the sret storage for struct-return calls, and normalize Unit-return calls to `GenerateUnitTypeValue()`.
 
 Known remaining gaps for this scope:
 
@@ -51,11 +57,11 @@ Known remaining gaps for this scope:
   functions/types/locals.
 - `IRBuilder2` restores insertion to the current block after entry alloca creation; the C API wrapper does not yet
   preserve an arbitrary instruction iterator the way C++ `IRBuilder` does.
-- Indirect function-pointer calls still rely on higher-level emitters to supply correct struct-return storage and
-  attributes from `CGFunctionType`; the low-level builder now mirrors the C++ direct-function overload only.
+- The new `CGFunctionType` call wrapper covers known-size struct-return setup and call attributes, but the full C++
+  unknown-size generic sret path still depends on later generic-allocation/type-info intrinsic lowering.
 - The target-machine and pass-builder wrappers are ready for callers, but the package-level emission path does not yet
   drive them end to end.
 
 Remaining `TODO(selfhost:CodeGen)` markers in this llvm-ffi slice: 0.
 
-Estimated behavior coverage for this llvm-ffi/module/context/IRBuilder slice: 52%.
+Estimated behavior coverage for this llvm-ffi/module/context/IRBuilder slice: 56%.

@@ -133,6 +133,10 @@ foreign {
     func LLVMStructSetBody(structTy: LLVMTypeRef, elementTypes: CPointer<LLVMTypeRef>, elementCount: UInt32,
         packed: Int32): Unit
     func LLVMFunctionType(returnType: LLVMTypeRef, paramTypes: CPointer<LLVMTypeRef>, paramCount: UInt32, isVarArg: Int32): LLVMTypeRef
+    func LLVMGetTypeKind(valueType: LLVMTypeRef): Int32
+    func LLVMGetReturnType(functionType: LLVMTypeRef): LLVMTypeRef
+    func LLVMCountParamTypes(functionType: LLVMTypeRef): UInt32
+    func LLVMGetParamTypes(functionType: LLVMTypeRef, dest: CPointer<LLVMTypeRef>): Unit
 
     func LLVMAddFunction(module: LLVMModuleRef, name: CString, functionType: LLVMTypeRef): LLVMValueRef
     func LLVMGetNamedFunction(module: LLVMModuleRef, name: CString): LLVMValueRef
@@ -156,6 +160,7 @@ foreign {
     func LLVMIsDeclaration(global: LLVMValueRef): Int32
     func LLVMSetGlobalConstant(global: LLVMValueRef, isConstant: Int32): Unit
     func LLVMSetInitializer(global: LLVMValueRef, constantVal: LLVMValueRef): Unit
+    func LLVMCountParams(fn: LLVMValueRef): UInt32
     func LLVMGetParam(fn: LLVMValueRef, index: UInt32): LLVMValueRef
     func LLVMGetFirstBasicBlock(fn: LLVMValueRef): LLVMBasicBlockRef
     func LLVMGetNextBasicBlock(block: LLVMBasicBlockRef): LLVMBasicBlockRef

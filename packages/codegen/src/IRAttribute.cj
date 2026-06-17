@@ -3,6 +3,9 @@ package cangjie_compiler::codegen
 import cangjie_compiler::chir.FuncKind
 import cangjie_compiler::chir.Function
 
+private let LLVM_INTEGER_TYPE_KIND: Int32 = 8
+private let LLVM_ZEROEXT_ATTR: String = "zeroext"
+
 private func GetAttributeKind(attrName: String): UInt32 {
     var attrKind: UInt32 = 0u32
     try (attrCString = unsafe { LibC.mallocCString(attrName) }.asResource()) {
@@ -20,6 +23,11 @@ private func GetLLVMValueContext(value: LLVMValueRef): LLVMContextRef {
 
 private func IsLLVMFunction(value: LLVMValueRef): Bool {
     return !value.isNull() && !unsafe { LLVMIsAFunction(value) }.isNull()
+}
+
+private func IsLLVMInt1Type(valueType: LLVMTypeRef): Bool {
+    return !valueType.isNull() && unsafe { LLVMGetTypeKind(valueType) } == LLVM_INTEGER_TYPE_KIND &&
+        unsafe { LLVMGetIntTypeWidth(valueType) } == 1u32
 }
 
 public func GetAttributeAtIndex(value: LLVMValueRef, idx: UInt32, attrName: String): LLVMAttributeRef {
@@ -99,6 +107,10 @@ public func AddRetAttr(callBase: LLVMValueRef, attrName: String): Unit {
     AddAttributeAtIndex(callBase, 0u32, attrName)
 }
 
+public func AddFnAttr(fn: LLVMValueRef, attrName: String): Unit {
+    AddAttributeAtIndex(fn, UInt32.Max, attrName)
+}
+
 public func AddSRetAttribute(value: LLVMValueRef): Unit {
     AddAttributeAtIndex(value, 1u32, "sret")
 }
@@ -111,7 +123,48 @@ public func AddNoAliasAttribute(value: LLVMValueRef): Unit {
     AddAttributeAtIndex(value, 1u32, "noalias")
 }
 
-public func PropagateSRetAttributeFromCallee(callee: LLVMValueRef, callBase: LLVMValueRef): Unit {
+public func SetZExtAttrForCFunc(callBase: LLVMValueRef, functionType: LLVMTypeRef): Unit {
+    if (callBase.isNull() || functionType.isNull()) {
+        return
+    }
+    if (IsLLVMInt1Type(unsafe { LLVMGetReturnType(functionType) })) {
+        AddRetAttr(callBase, LLVM_ZEROEXT_ATTR)
+    }
+    let paramCount = unsafe { LLVMCountParamTypes(functionType) }
+    if (paramCount == 0u32) {
+        return
+    }
+    try (paramTypes = LibC.malloc<LLVMTypeRef>(count: Int64(paramCount)).asResource()) {
+        unsafe { LLVMGetParamTypes(functionType, paramTypes.value) }
+        var idx: UInt32 = 0u32
+        while (idx < paramCount) {
+            let paramType = unsafe { (paramTypes.value + Int64(idx)).read() }
+            if (IsLLVMInt1Type(paramType)) {
+                AddParamAttr(callBase, idx, LLVM_ZEROEXT_ATTR)
+            }
+            idx++
+        }
+    }
+}
+
+private func PropagateZExtAttributeFromCallee(callee: LLVMValueRef, callBase: LLVMValueRef): Unit {
+    if (!IsLLVMFunction(callee) || callBase.isNull()) {
+        return
+    }
+    if (HasAttributeAtIndex(callee, 0u32, LLVM_ZEROEXT_ATTR)) {
+        AddRetAttr(callBase, LLVM_ZEROEXT_ATTR)
+    }
+    let paramCount = unsafe { LLVMCountParams(callee) }
+    var idx: UInt32 = 0u32
+    while (idx < paramCount) {
+        if (HasAttributeAtIndex(callee, idx + 1u32, LLVM_ZEROEXT_ATTR)) {
+            AddParamAttr(callBase, idx, LLVM_ZEROEXT_ATTR)
+        }
+        idx++
+    }
+}
+
+private func PropagateSRetAttributeFromCallee(callee: LLVMValueRef, callBase: LLVMValueRef): Unit {
     if (!IsLLVMFunction(callee) || callBase.isNull()) {
         return
     }
@@ -124,6 +177,11 @@ public func PropagateSRetAttributeFromCallee(callee: LLVMValueRef, callBase: LLV
         AddSRetAttribute(callBase)
         AddNoAliasAttribute(callBase)
     }
+}
+
+public func PropagateCallABIAttributesFromCallee(callee: LLVMValueRef, callBase: LLVMValueRef): Unit {
+    PropagateSRetAttributeFromCallee(callee, callBase)
+    PropagateZExtAttributeFromCallee(callee, callBase)
 }
 
 public func ShouldReturnVoid(fn: Function): Bool {

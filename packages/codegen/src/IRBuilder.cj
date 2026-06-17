@@ -4,6 +4,7 @@ import std.collection.*
 import cangjie_compiler::chir.BoolLiteral
 import cangjie_compiler::chir.ExprKind
 import cangjie_compiler::chir.FloatLiteral
+import cangjie_compiler::chir.FuncType
 import cangjie_compiler::chir.IntLiteral
 import cangjie_compiler::chir.LiteralValue
 import cangjie_compiler::chir.RawArrayType
@@ -356,7 +357,7 @@ public class IRBuilder2 {
                 }
             }
         }
-        PropagateSRetAttributeFromCallee(callee, result)
+        PropagateCallABIAttributesFromCallee(callee, result)
         return result
     }
 
@@ -383,7 +384,7 @@ public class IRBuilder2 {
                 }
             }
         }
-        PropagateSRetAttributeFromCallee(callee, result)
+        PropagateCallABIAttributesFromCallee(callee, result)
         return result
     }
 
@@ -403,6 +404,65 @@ public class IRBuilder2 {
             }
         }
         return CreateCall(callee, calleeType, args, name: name)
+    }
+
+    public func CreateCallOrInvoke(calleeType: CGFunctionType, callee: LLVMValueRef, args: ArrayList<CGValue>,
+        name!: String = ""): LLVMValueRef {
+        let callArgs = TransformCGFunctionArgs(calleeType, args, name: name)
+        let callBase = CreateCallOrInvoke(callee, calleeType.GetLLVMFunctionType(), callArgs, name: name)
+        if (let Some(funcType) <- (calleeType.GetOriginal() as FuncType)) {
+            if (funcType.IsCFunc()) {
+                SetZExtAttrForCFunc(callBase, calleeType.GetLLVMFunctionType())
+            }
+            if (calleeType.HasSRet() && !callArgs.isEmpty()) {
+                let retCGType = CGType.GetOrCreate(cgMod, funcType.GetReturnType())
+                AddSRetAttribute(callBase, GetSRetAttributeType(funcType.GetReturnType(), retCGType))
+                AddNoAliasAttribute(callBase)
+                return callArgs[0]
+            }
+            if (funcType.GetReturnType().IsUnit()) {
+                return cgMod.GenerateUnitTypeValue()
+            }
+        }
+        return callBase
+    }
+
+    public func CreateCallOrInvoke(callee: CGFunction, args!: ArrayList<CGValue> = ArrayList<CGValue>(),
+        name!: String = ""): LLVMValueRef {
+        if (let Some(functionType) <- callee.GetCGFunctionType()) {
+            return CreateCallOrInvoke(functionType, callee.GetRawFunction(), args, name: name)
+        }
+        return LLVMNullValue()
+    }
+
+    private func TransformCGFunctionArgs(calleeType: CGFunctionType, args: ArrayList<CGValue>,
+        name!: String = ""): ArrayList<LLVMValueRef> {
+        let callArgs = ArrayList<LLVMValueRef>()
+        if (calleeType.HasSRet()) {
+            if (let Some(funcType) <- (calleeType.GetOriginal() as FuncType)) {
+                let retCGType = CGType.GetOrCreate(cgMod, funcType.GetReturnType())
+                callArgs.add(CreateSRetAlloca(retCGType, name: name))
+            }
+        }
+        for (arg in args) {
+            callArgs.add(arg.GetRawValue())
+        }
+        return callArgs
+    }
+
+    private func CreateSRetAlloca(retCGType: CGType, name!: String = ""): LLVMValueRef {
+        let allocaName = if (name.isEmpty()) { "sret" } else { name + ".sret" }
+        if (retCGType.GetSize().isSome()) {
+            return CreateEntryAlloca(retCGType, name: allocaName)
+        }
+        return CreateEntryAlloca(retCGType.GetLLVMType(), name: allocaName)
+    }
+
+    private func GetSRetAttributeType(retType: Type, retCGType: CGType): LLVMTypeRef {
+        if (retCGType.GetSize().isNone() && !retType.IsGeneric()) {
+            return unsafe { LLVMInt8TypeInContext(GetLLVMContext().raw) }
+        }
+        return retCGType.GetLLVMType()
     }
 
     public func GetOrInsertIntrinsicDeclaration(intrinsicName: String): LLVMValueRef {
