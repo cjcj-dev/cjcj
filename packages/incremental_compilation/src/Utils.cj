@@ -255,6 +255,20 @@ public func ListsEqual(left: ArrayList<String>, right: ArrayList<String>): Bool 
     return true
 }
 
+public func ListsEqual(left: Array<String>, right: ArrayList<String>): Bool {
+    if (left.size != right.size) {
+        return false
+    }
+    var idx: Int64 = 0
+    while (idx < left.size) {
+        if (left[idx] != right[idx]) {
+            return false
+        }
+        idx++
+    }
+    return true
+}
+
 public func IsInDeclWithAttribute(decl: IncrDecl, attr: IncrAttribute): Bool {
     if (decl.TestAttr(attr)) {
         return true

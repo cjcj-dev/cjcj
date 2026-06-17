@@ -3,6 +3,7 @@ package cangjie_compiler::incremental_compilation
 import std.collection.*
 import std.fs.File
 import std.fs.exists
+import cangjie_compiler::option.GlobalOptions
 
 public class IncreResult {
     public var kind: IncreKind = IncreKind.INVALID
@@ -53,7 +54,7 @@ public class IncrementalScopeAnalysisArgs {
     public var rawMangleName2DeclMap: RawMangled2DeclMap = RawMangled2DeclMap()
     public var astCacheInfo: ASTCache = ASTCache()
     public var srcPackage: IncrPackage = IncrPackage()
-    public var op: IncrGlobalOptions = IncrGlobalOptions()
+    public var op: GlobalOptions = GlobalOptions()
     public var importer: IncrImportManager = IncrImportManager()
     public var cachedInfo: Option<CompilationCache> = None
     public var fileMap: FileMap = FileMap()

@@ -81,11 +81,16 @@ Implemented:
   C++ and self-host AST both model constness as `Decl::IsConst()`/`Decl.isConst`, not as an attribute.
 - Bumped the deterministic cache wire version to `CJ-INCR-CACHE-2` so caches written with the previous package-local
   kind/attribute ordinals are rejected instead of being decoded with the real AST ordinal layout.
+- Removed the local `IncrGlobalOptions` compatibility class and changed `ASTDiffArgs`/`IncrementalScopeAnalysisArgs`
+  to carry the real `cangjie_compiler::option.GlobalOptions`. Incremental analysis now uses the same cache path
+  generation and full compile-option serialization as the C++ entry point, with an `Array<String>`/`ArrayList<String>`
+  comparison helper only at the cache boundary.
 
 Known gaps:
 
-- The package now depends on real `ast` for cache tag ordinals, but most public entry points still use
-  `IncrDecl`/`IncrPackage` adapters instead of the real AST/Sema/Modules/Mangle/Parse public types.
+- The package now depends on real `ast` for cache tag ordinals and real `option.GlobalOptions` for entry options,
+  but most declaration/package/import entry points still use `IncrDecl`/`IncrPackage`/`IncrImportManager` adapters
+  instead of the real AST/Sema/Modules/Mangle/Parse public types.
 - The cache wire format is a deterministic self-host text format, not the C++ FlatBuffers `CachedASTFormat`.
 - Hashing and fallback mangling are behavior-shaped but not byte-identical to C++ `ASTHasher`/`ASTMangler` until
   those packages can be wired directly.

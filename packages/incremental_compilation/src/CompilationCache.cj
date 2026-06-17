@@ -682,30 +682,6 @@ public class IncrImportManager {
     }
 }
 
-public class IncrGlobalOptions {
-    public var enableCompileDebug: Bool = false
-    public var displayLineInfo: Bool = false
-    public var cachedAstPath: String = ""
-    public var serializedFilePath: String = ""
-    public let compileArgs: ArrayList<String> = ArrayList<String>()
-
-    public init() {}
-
-    public func ToSerialized(): ArrayList<String> {
-        return CloneStringList(compileArgs)
-    }
-
-    public func GenerateCachedPathName(packageName: String, extension: String): String {
-        if (extension == CACHED_AST_EXTENSION && !cachedAstPath.isEmpty()) {
-            return cachedAstPath
-        }
-        if (extension == SERIALIZED_FILE_EXTENSION && !serializedFilePath.isEmpty()) {
-            return serializedFilePath
-        }
-        return packageName.replace(".", "_") + extension
-    }
-}
-
 public class GlobalVarIndex <: Hashable & Equatable<GlobalVarIndex> {
     public var file: String = ""
     public var id: Int64 = 0
