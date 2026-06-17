@@ -10,6 +10,13 @@ The AST package is a multi-file Cangjie package mirroring the C++ AST component 
 
 ## Implemented In This Pass
 
+- Aligned `CreateMemberAccess(expr, fieldName)` with the C++ class receiver lookup: generated member accesses now search superclass declarations until the first matching member is found, while preserving direct nominal lookup for structs, interfaces, and enums.
+- Expanded AST `ScopeKind` and `ExprKind` from one-value macro compatibility placeholders to the full C++/Parse value sets, added equality helpers with reference-order indexes, and switched AST `MacroInvocation` defaults to `UNKNOWN_SCOPE` / `UNKNOWN_EXPR` while preserving the old `UNKNOWN` spelling as an equality-compatible downstream alias.
+- Deepened `ASTTypeValidator` to follow the C++ pre/post visitor shape: pre-visit now records valid diagnostic ranges and check status, walks desugared expressions with the same walker ID and post visitor, and post-visit performs semantic type/target validation after children.
+- Added `ValidateUsedNodes(DiagnosticEngine, Package)` parity that emits the real `sema_invalid_node_after_check` diagnostic with the C++ note text while preserving the existing boolean validation helper for current self-hosted callers.
+- De-isolated `CacheEntry` diagnostics to the real `basic.DiagnosticCache` and aligned `CacheKey.diagKey` with the Basic diagnostic-cache key type used by `DiagnosticCache.ExtractKey`.
+- Replaced the generic `PrintNode` walker dump with a C++-style recursive AST printer dispatcher: package/file, declaration, expression, type, pattern, macro, feature/import/package, annotation, and modifier nodes now print labeled sections and children in the reference order where the self-hosted node model has equivalent fields.
+- Added `PrintNode` parity for desugared-expression forwarding, macro invocation attribute/argument token rendering, target/mangled-name printing, declaration modifier/annotation/generic sections, inherited-type/member sections, operator/overflow details, type-argument lists, and literal string recovery through the real `basic.StringConvertor`.
 - Added C++ `Searcher` file-hash filtering parity: `Query` now carries file-hash filters, string searches can receive hash filters, normalized cache keys include file hashes and sort direction, cached/fresh results are filtered through `Symbol.hashID.hash64`, and `SetCache`/`GetCache` are exposed for warmup-cache parity.
 - Aligned the AST-local `FileHashQuery` leaf to use the symbol file hash instead of mutable node file state, and normalized its pretty-printed key spelling.
 - Deepened `Clone` visitor parity with C++: `SetIsClonedSourceCode` now unconditionally marks cloned targets, `CloneGeneric` accepts a visitor callback, and `ASTCloner.Clone` has a visitor overload that applies callbacks across the cloned tree for source-to-target clone hooks.
@@ -66,10 +73,11 @@ The AST package is a multi-file Cangjie package mirroring the C++ AST component 
 
 ## Remaining Work
 
-- Wire AST validation and diagnostics through the real `DiagnosticEngine` instead of the current local validation result surface.
-- Resolve `ScopeKind` and `ExprKind` layering with Parse once the self-hosted packages can share those APIs without introducing a package cycle. The C++ AST only forward-declares the related parse concepts, so the current AST-local minimal enums are kept until that dependency direction is settled.
+- Wire downstream AST validation call sites to the `DiagnosticEngine` overload once the type-check pipeline enables the C++ post-check validation pass by default.
+- Resolve `ScopeKind` and `ExprKind` layering with Parse once the self-hosted packages can share those APIs without introducing a package cycle. The C++ AST only forward-declares the related parse concepts, so AST currently carries a value-faithful mirror plus legacy `UNKNOWN` aliases until that dependency direction is settled.
 - Finish exact C++ `Searcher` parity for diagnostic-producing query parse failures and broader downstream validation of indexed position searches once the collector/scope-manager pipeline fully populates indexes in the Cangjie port.
 - Continue auditing macro diagnostic map lifetimes through Parse/Macro/Sema; AST now avoids clone-time `MacroCallDiagInfo` aliasing, but full private Basic map reconstruction is still owned by the macro pipeline.
 - Continue auditing clone pointer rearrangement under ambiguous generated-node cases. The current Cangjie pass remaps unique structural source/target pairs and preserves external pointers; C++ still has stricter pointer-identity fidelity through `source2cloned`.
 - Continue auditing context, walker, clone, printer, recover-desugar, search/query, type, utility, and validation behavior against the complete C++ implementation under downstream Parse/Sema workloads.
+- Continue tightening `PrintNode` byte-for-byte formatting against C++ where C++ exposes raw pointer values or fields not represented in the current Cangjie AST model.
 - Replace any remaining compatibility API spellings only after downstream packages no longer depend on them.

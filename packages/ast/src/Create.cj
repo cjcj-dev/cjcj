@@ -387,7 +387,7 @@ public func CreateMemberAccess(expr: Expr, field: String): MemberAccess {
         if (let Some(baseTy) <- base.GetTy()) {
             if (let Some(classTy) <- (baseTy as ClassTy)) {
                 if (let Some(classDecl) <- classTy.decl) {
-                    setMemberTargetFromDecls(ret, classDecl.GetMemberDeclPtrs(), field)
+                    setMemberTargetFromClassHierarchy(ret, classDecl, field)
                 }
             } else if (let Some(structTy) <- (baseTy as StructTy)) {
                 if (let Some(structDecl) <- structTy.decl) {
@@ -408,15 +408,27 @@ public func CreateMemberAccess(expr: Expr, field: String): MemberAccess {
     return ret
 }
 
-private func setMemberTargetFromDecls(memberAccess: MemberAccess, decls: ArrayList<Decl>, field: String): Unit {
+private func setMemberTargetFromDecls(memberAccess: MemberAccess, decls: ArrayList<Decl>, field: String): Bool {
     for (decl in decls) {
         if (decl.identifier == field) {
             memberAccess.target = decl
             if (let Some(ty) <- decl.GetTy()) {
                 memberAccess.SetTy(ty)
             }
+            return true
+        }
+    }
+    return false
+}
+
+private func setMemberTargetFromClassHierarchy(memberAccess: MemberAccess, classDecl: ClassDecl, field: String): Unit {
+    var current: Option<ClassDecl> = classDecl
+    while (let Some(currentClass) <- current) {
+        let found = setMemberTargetFromDecls(memberAccess, currentClass.GetMemberDeclPtrs(), field)
+        if (found || !Ty.IsInitialTy(memberAccess.GetTy())) {
             return
         }
+        current = currentClass.GetSuperClassDecl()
     }
 }
 
