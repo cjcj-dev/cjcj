@@ -71,7 +71,9 @@ What changed:
 - For-in iterable continuation:
   - `for-in` element inference now recursively promotes generic upper bounds to `Iterable<T>` before reading the element type, covering bounded generic iterables whose bound implements `Iterable<T>`.
   - Removed the previous unconstrained `Any`/generic fallback for `for-in` operands. Values must now be a recognized iterable shape or promote to a declared `Iterable<T>` view, matching the C++ `GetIterableTy` failure behavior more closely.
-- Verification: `cjpm build` passes after the for-in iterable continuation. `grep -rn "TODO(selfhost:Sema)" packages/sema/src` reports only out-of-scope Sema placeholders; the scoped `TypeCheckExpr.cj` and `TypeCheckExpr/*` files have zero matching markers.
+- Loop-body context continuation:
+  - `while`, `do-while`, and `for-in` body blocks now normalize to `Unit` after successful synthesis, matching the C++ use of `SynPos::UNUSED` for loop bodies instead of leaving the block typed as its final expression.
+- Verification: `cjpm build` passes after the loop-body context continuation. `grep -rn "TODO(selfhost:Sema)" packages/sema/src` reports only out-of-scope Sema placeholders; the scoped `TypeCheckExpr.cj` and `TypeCheckExpr/*` files have zero matching markers.
 
 Remaining fidelity gaps:
 - Full overload/desugar diagnostic parity still depends on broader call/lookup/desugar infrastructure: binary, flow, subscript, and compound assignment now use the real fallback shapes, but not the C++ diagnostic suppression, negative-cache constraint rollback, return-type-inference diagnostics, or exact recovery diagnostics.
@@ -86,6 +88,6 @@ Remaining fidelity gaps:
 - Try-handle command pattern promotion now follows direct/generic-upper/supertype `Command<T>` shapes, but full parity still needs the import-manager target lookup and exact diagnostics used by C++ `ChkCommandTypePattern`.
 - Catch pattern validation cannot yet prove subtype-of-core-`Exception`/`Error` without an import-manager/core-decl path in this helper; it conservatively validates catchable classlike/generic shapes.
 - `@IfAvailable` still lacks the C++ import-manager checks for `ohos.device_info` and `ohos.base` package availability.
-- `for-in` refutable-pattern rejection and iterable failure now have the core C++ behavior, but exact diagnostics and unconstrained placeholder `Iterable<T>` construction still need the import-manager/core-decl path used by C++.
+- `for-in` refutable-pattern rejection, iterable failure, and unused body typing now have the core C++ behavior, but exact diagnostics and unconstrained placeholder `Iterable<T>` construction still need the import-manager/core-decl path used by C++.
 
-Completeness estimate: 72% of C++ behavior for this scoped expression type-checking area, weighted by behavior rather than line count.
+Completeness estimate: 73% of C++ behavior for this scoped expression type-checking area, weighted by behavior rather than line count.
