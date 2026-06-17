@@ -78,6 +78,10 @@ Reference sources inspected from `/root/cj_build/cangjie_compiler/src/Sema`:
   common declaration before reporting the specific-sealed diagnostic, and
   superclass validation now rejects `OPEN_TO_MOCK` classes like the C++
   `TestManager::IsDeclOpenToMock` path.
+- This pass tightened class-like parity further: the `ThreadContext` inheritance
+  whitelist now checks the declaration's owning file package like the C++ path,
+  with `fullPackageName` retained only as a fallback for partially constructed
+  AST nodes.
 - Deepened extend checking toward `TypeCheckExtend.cpp`: extend-map construction
   now checks duplicate direct interface implementations, duplicate inherited
   interface implementations, and non-extendable `std.core.Any`/`std.core.CType`
@@ -89,6 +93,11 @@ Reference sources inspected from `/root/cj_build/cangjie_compiler/src/Sema`:
   interface supers before reporting external-interface violations; immutable
   extension diagnostics now point at the function identifier or `mut` modifier
   like the C++ diagnostics.
+- Continued extend parity in `TypeCheckExtend.cj`: the C++ duplicate default
+  implementation check for multiple `extend` declarations implementing the same
+  generic interface with different type arguments is now wired into extend
+  declaration checking, reporting default interface members that do not depend
+  on the interface's outside generic parameters.
 - Deepened annotation checking toward `TypeCheckAnnotation.cpp` by preserving
   the C++ `NO_REFLECT_INFO` marker on custom annotation call expressions that
   are not compile-time visible.
@@ -115,12 +124,13 @@ are from pre-existing files outside this pass scope.
   pass, so these helpers are not yet wired into a full C++-faithful
   declaration/type/reference traversal pipeline.
 - Full C++ parity still requires complete overload resolution, lookup/import
-  recommendation, exact access-control context, exact generic specialization
-  duplicate checks, custom annotation expression synthesis/type checking,
-  annotation target-array type checking, pipeline wiring for type-alias and
-  class-like declaration checks, reference-legality walker wiring, full
-  deprecated-usage traversal/override checks, and all TypeChecker-owned state
-  once those sibling surfaces are available in the allowed owner files.
+  recommendation, exact access-control context, the remaining instantiated
+  interface specialization duplicate checks, custom annotation expression
+  synthesis/type checking, annotation target-array type checking, pipeline
+  wiring for type-alias and class-like declaration checks, reference-legality
+  walker wiring, full deprecated-usage traversal/override checks, and all
+  TypeChecker-owned state once those sibling surfaces are available in the
+  allowed owner files.
 - Diagnostics are mapped to the available self-hosted diagnostic tables; a few
   C++ diagnostic helpers are represented by the closest currently available
   refactored/legacy diagnostic kind.

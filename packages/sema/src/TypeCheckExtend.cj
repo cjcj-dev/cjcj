@@ -63,13 +63,19 @@ private func TypeCheckExtendAddUniqueTy(values: ArrayList<Ty>, candidate: Ty): U
     }
 }
 
-private func TypeCheckExtendAddUniqueDecl(values: ArrayList<Decl>, candidate: Decl): Unit {
+private func TypeCheckExtendHasSameDecl(values: ArrayList<Decl>, candidate: Decl): Bool {
     for (value in values) {
         if (SameDecl(value, candidate)) {
-            return
+            return true
         }
     }
-    values.add(candidate)
+    return false
+}
+
+private func TypeCheckExtendAddUniqueDecl(values: ArrayList<Decl>, candidate: Decl): Unit {
+    if (!TypeCheckExtendHasSameDecl(values, candidate)) {
+        values.add(candidate)
+    }
 }
 
 private func TypeCheckExtendFindBuiltinEntry(tm: TypeManager, ty: Ty): Option<TyExtendsEntry> {
@@ -469,6 +475,90 @@ public func TypeCheckExtendCheckOrphanRule(
     return true
 }
 
+private func TypeCheckExtendCheckDefImplWithoutOutsideGeneric(
+    diag: BasicDiagnosticEngine,
+    inheritedDecl: Decl,
+    extendDecl: ExtendDecl
+): Bool {
+    if (let None <- (inheritedDecl as InterfaceDecl)) {
+        return true
+    }
+    let interfaceDecl = (inheritedDecl as InterfaceDecl).getOrThrow()
+    if (let None <- interfaceDecl.generic) {
+        return true
+    }
+    let generic = interfaceDecl.generic.getOrThrow()
+    if (generic.typeParameters.isEmpty()) {
+        return true
+    }
+    let outerGenericParamTys = ArrayList<Ty>()
+    for (typeParam in generic.typeParameters) {
+        if (let Some(paramTy) <- typeParam.GetTy()) {
+            outerGenericParamTys.add(paramTy)
+        }
+    }
+    if (outerGenericParamTys.isEmpty()) {
+        return true
+    }
+    var valid = true
+    for (member in interfaceDecl.GetMemberDecls()) {
+        if (!member.TestAttr(Attribute.DEFAULT) || !Ty.IsTyCorrect(member.GetTy())) {
+            continue
+        }
+        let usedGenericTypeParamTys = member.GetTy().getOrThrow().GetGenericTyArgs()
+        var usedOutsideGeneric = false
+        for (outerTy in outerGenericParamTys) {
+            if (TypeCheckExtendHasSameTy(usedGenericTypeParamTys, outerTy)) {
+                usedOutsideGeneric = true
+                break
+            }
+        }
+        if (!usedOutsideGeneric) {
+            let typeName = if (let Some(extendedTy) <- extendDecl.GetTy()) {
+                "extend " + extendedTy.String()
+            } else {
+                "extend"
+            }
+            let builder = diag.DiagnoseRefactor(
+                BasicDiagKindRefactor.sema_extend_member_cannot_shadow,
+                TypeCheckExtendIdentifierRange(member),
+                arguments: [member.identifier.Val(), typeName])
+            builder.Emit()
+            valid = false
+        }
+    }
+    return valid
+}
+
+public func TypeCheckExtendCheckDupDefImplByDiffTypArgs(
+    diag: BasicDiagnosticEngine,
+    extendDecls: ArrayList<ExtendDecl>,
+    extendDecl: ExtendDecl
+): Bool {
+    let directlyImplementedInterfaces = ArrayList<Decl>()
+    for (otherExtend in extendDecls) {
+        if (SameDecl(otherExtend, extendDecl)) {
+            continue
+        }
+        for (inheritedType in otherExtend.inheritedTypes) {
+            if (let Some(inheritedDecl) <- Ty.GetDeclPtrOfTy(inheritedType.GetTy())) {
+                TypeCheckExtendAddUniqueDecl(directlyImplementedInterfaces, inheritedDecl)
+            }
+        }
+    }
+    var valid = true
+    for (inheritedType in extendDecl.inheritedTypes) {
+        if (let Some(inheritedDecl) <- Ty.GetDeclPtrOfTy(inheritedType.GetTy())) {
+            if (TypeCheckExtendHasSameDecl(directlyImplementedInterfaces, inheritedDecl)) {
+                if (!TypeCheckExtendCheckDefImplWithoutOutsideGeneric(diag, inheritedDecl, extendDecl)) {
+                    valid = false
+                }
+            }
+        }
+    }
+    return valid
+}
+
 public func TypeCheckExtendBuildMap(
     diag: BasicDiagnosticEngine,
     tm: TypeManager,
@@ -679,6 +769,14 @@ public func TypeCheckExtendCheckDecl(
                     builder.Emit()
                     valid = false
                 }
+            }
+        }
+    }
+    if (let Some(decl) <- extendedDecl) {
+        if (let Some(inheritableDecl) <- (decl as InheritableDecl)) {
+            let extends = tm.GetDeclExtends(inheritableDecl)
+            if (!TypeCheckExtendCheckDupDefImplByDiffTypArgs(diag, extends, extendDecl)) {
+                valid = false
             }
         }
     }

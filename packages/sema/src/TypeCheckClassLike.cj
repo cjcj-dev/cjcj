@@ -68,6 +68,15 @@ private func TypeCheckClassLikeIsDeclOpenToMock(decl: Decl): Bool {
     return decl.TestAttr(Attribute.OPEN) && decl.TestAttr(Attribute.OPEN_TO_MOCK)
 }
 
+private func TypeCheckClassLikeDeclPackageName(decl: Decl): String {
+    if (let Some(file) <- decl.curFile) {
+        if (let Some(pkg) <- file.curPackage) {
+            return pkg.fullPackageName
+        }
+    }
+    return decl.fullPackageName
+}
+
 public func TypeCheckClassLikeCheckAnnotationHasConstInit(
     diag: BasicDiagnosticEngine,
     classDecl: ClassDecl
@@ -161,9 +170,10 @@ public func TypeCheckClassLikeCheckThreadContextInheritance(
         return false
     }
     var whitelisted = false
-    if (decl.identifier.Val() == "ThreadContext" && decl.fullPackageName == "std.core") {
+    let packageName = TypeCheckClassLikeDeclPackageName(decl)
+    if (decl.identifier.Val() == "ThreadContext" && packageName == "std.core") {
         whitelisted = true
-    } else if (decl.identifier.Val() == "MainThreadContext" && decl.fullPackageName == "ohos.base") {
+    } else if (decl.identifier.Val() == "MainThreadContext" && packageName == "ohos.base") {
         whitelisted = true
     }
     if (!whitelisted) {
