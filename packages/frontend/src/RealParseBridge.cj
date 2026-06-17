@@ -24,6 +24,11 @@ import cangjie_compiler::parse.ForInExpr as ParseForInExpr
 import cangjie_compiler::parse.RangeExpr as ParseRangeExpr
 import cangjie_compiler::parse.JumpExpr as ParseJumpExpr
 import cangjie_compiler::parse.VarPattern as ParseVarPattern
+import cangjie_compiler::parse.WildcardPattern as ParseWildcardPattern
+import cangjie_compiler::parse.ConstPattern as ParseConstPattern
+import cangjie_compiler::parse.Pattern as ParsePattern
+import cangjie_compiler::parse.MatchExpr as ParseMatchExpr
+import cangjie_compiler::parse.MatchCase as ParseMatchCase
 import cangjie_compiler::parse.Block as ParseBlock
 import cangjie_compiler::parse.LitConstKind as ParseLitConstKind
 import cangjie_compiler::parse.InterpolationExpr as ParseInterpolationExpr
@@ -159,6 +164,16 @@ private class AdaptScope {
     // Depth of enclosing `for`/`while` loops currently being adapted. A `break`/`continue` is only
     // accepted (promotable) when loopDepth > 0; otherwise the body falls back to the summary path.
     var loopDepth: Int64 = 0
+    // Monotonic counter for synthesizing fresh, collision-free local names for match desugaring
+    // (the selector temp and value-form result temp). Source identifiers cannot contain `$`, so
+    // these names never clash with user locals.
+    var tempCounter: Int64 = 0
+
+    func freshTemp(prefix: String): String {
+        let n = tempCounter
+        tempCounter++
+        return "$" + prefix + "_" + n.toString()
+    }
 
     init(funcNames: HashSet<String>, strReturningFuncs: HashSet<String>) {
         this.funcNames = funcNames
@@ -226,6 +241,29 @@ private func adaptStatements(block: ParseBlock, scope: AdaptScope): Option<Array
     let out = ArrayList<ChirStmtSpec>()
     for (node in block.body) {
         if (let Some(varDecl) <- (node as ParseVarDecl)) {
+            // `let r = match (sel) { ... }`: a value-position match initializer desugars to a prelude
+            // (selector temp + result var + if-chain assigning the result) plus `let r = $res`.
+            if (!varDecl.isConst) {
+                if (let Some(initExpr) <- varDecl.initializer) {
+                    if (let Some(matchExpr) <- (initExpr as ParseMatchExpr)) {
+                        let name = varDecl.identifier.Val()
+                        if (name.isEmpty()) {
+                            return None
+                        }
+                        let mv = match (adaptMatchValue(matchExpr, scope)) {
+                            case Some(v) => v
+                            case None => return None
+                        }
+                        for (s in mv.prelude) {
+                            out.add(s)
+                        }
+                        scope.locals.add(name)
+                        scope.needsRuntime = true
+                        out.add(ChirStmtSpec.Let(name, mv.resultRef, isVar: varDecl.isVar))
+                        continue
+                    }
+                }
+            }
             match (adaptVarDecl(varDecl, scope)) {
                 case Some(stmt) => out.add(stmt)
                 case None => return None
@@ -233,6 +271,21 @@ private func adaptStatements(block: ParseBlock, scope: AdaptScope): Option<Array
             continue
         }
         if (let Some(returnExpr) <- (node as ParseReturnExpr)) {
+            // `return match (sel) { ... }`: desugar the value-position match, then return its result.
+            if (let Some(retExpr) <- returnExpr.expr) {
+                if (let Some(matchExpr) <- (retExpr as ParseMatchExpr)) {
+                    let mv = match (adaptMatchValue(matchExpr, scope)) {
+                        case Some(v) => v
+                        case None => return None
+                    }
+                    for (s in mv.prelude) {
+                        out.add(s)
+                    }
+                    scope.needsRuntime = true
+                    out.add(ChirStmtSpec.Return(mv.resultRef))
+                    continue
+                }
+            }
             match (adaptReturn(returnExpr, scope)) {
                 case Some(stmt) => out.add(stmt)
                 case None => return None
@@ -270,6 +323,19 @@ private func adaptStatements(block: ParseBlock, scope: AdaptScope): Option<Array
         if (let Some(jumpExpr) <- (node as ParseJumpExpr)) {
             match (adaptJump(jumpExpr, scope)) {
                 case Some(stmt) => out.add(stmt)
+                case None => return None
+            }
+            continue
+        }
+        if (let Some(matchExpr) <- (node as ParseMatchExpr)) {
+            // A statement-position `match (sel) { ... }`: desugar to a selector temp + an
+            // if/else-if chain over Int64 literal / wildcard / var-binding patterns. Each arm runs
+            // its block of statements (which may themselves return, print, etc.).
+            match (adaptMatchStatement(matchExpr, scope)) {
+                case Some(stmts) =>
+                    for (s in stmts) {
+                        out.add(s)
+                    }
                 case None => return None
             }
             continue
@@ -488,6 +554,311 @@ private func adaptWhile(whileExpr: ParseWhileExpr, scope: AdaptScope): Option<Ch
     }
     scope.needsRuntime = true
     return Some(ChirStmtSpec.While(condSpec, bodyStmts))
+}
+
+// A single normalized match arm: the list of Int64 literal values it matches (empty => catch-all,
+// i.e. a wildcard `_` or a var-binding pattern), an optional binding name (a `case n =>` var
+// pattern binds the selector to `n` in the arm body), and the adapted arm-body statements.
+private class MatchArm {
+    let literals: ArrayList<Int64>
+    let isCatchAll: Bool
+    let bindingName: Option<String>
+    let body: ArrayList<ChirStmtSpec>
+
+    init(literals: ArrayList<Int64>, isCatchAll: Bool, bindingName: Option<String>,
+        body: ArrayList<ChirStmtSpec>) {
+        this.literals = literals
+        this.isCatchAll = isCatchAll
+        this.bindingName = bindingName
+        this.body = body
+    }
+}
+
+// Desugar a statement-position `match (sel) { case L => ... case _ => ... }` over an Int64 selector
+// into: a fresh selector temp `let $sel = <selector>` followed by an if/else-if chain that compares
+// the temp against each literal value (`$sel == L`, OR-combined for `case 1 | 2 => ...`). A
+// wildcard `case _ =>` or a var-binding `case n =>` arm becomes the chain's final `else`. The
+// selector is evaluated exactly once (into the temp). Returns None on any unsupported shape (enum
+// patterns, guards, tuple patterns, non-Int64 selector, a catch-all that is not last) so the body
+// falls back to the existing path with no regression.
+private func adaptMatchStatement(matchExpr: ParseMatchExpr, scope: AdaptScope): Option<ArrayList<ChirStmtSpec>> {
+    let arms = match (normalizeMatchArms(matchExpr, scope)) {
+        case Some(a) => a
+        case None => return None
+    }
+    return buildMatchChain(matchExpr, arms, None, scope)
+}
+
+// Parse + validate every arm of a match into the normalized MatchArm list. The selector temp is NOT
+// emitted here (the caller does so via buildMatchChain); arm bodies are adapted with the var-binding
+// name (if any) seeded into scope so `case n => ... n ...` resolves. Returns None on any unsupported
+// arm so the whole match falls back.
+private func normalizeMatchArms(matchExpr: ParseMatchExpr, scope: AdaptScope): Option<ArrayList<MatchArm>> {
+    // We support only the selector form `match (sel) { case <pattern> => ... }`. The parser sets
+    // matchMode = true and a non-None selector for that form, placing pattern arms in `matchCases`.
+    // The selector-less form (`match { case <expr> => }`) uses `matchCaseOthers` and is out of grammar.
+    if (!matchExpr.matchMode || matchExpr.selector.isNone()) {
+        return None
+    }
+    if (!matchExpr.matchCaseOthers.isEmpty() || matchExpr.matchCases.isEmpty()) {
+        return None
+    }
+    let arms = ArrayList<MatchArm>()
+    var idx = 0
+    for (matchCase in matchExpr.matchCases) {
+        idx++
+        // Guards are out of grammar.
+        if (matchCase.patternGuard.isSome()) {
+            return None
+        }
+        let armBlock = match (matchCase.exprOrDecls) {
+            case Some(b) => b
+            case None => return None
+        }
+        // Collect this case's patterns. A case carries one or more patterns (`case 1 | 2 => ...`).
+        let literals = ArrayList<Int64>()
+        var isCatchAll = false
+        var bindingName: Option<String> = None
+        for (pattern in matchCase.patterns) {
+            if (let Some(constPat) <- (pattern as ParseConstPattern)) {
+                let lit = match (constPat.literal) {
+                    case Some(e) => e
+                    case None => return None
+                }
+                match (intLiteralValue(lit)) {
+                    case Some(v) => literals.add(v)
+                    case None => return None // only Int64 literal const patterns
+                }
+            } else if (let Some(_) <- (pattern as ParseWildcardPattern)) {
+                isCatchAll = true
+            } else if (let Some(varPat) <- (pattern as ParseVarPattern)) {
+                let n = varPat.identifier.Val()
+                if (n.isEmpty()) {
+                    return None
+                }
+                isCatchAll = true
+                bindingName = Some(n)
+            } else {
+                // Enum/tuple/type/etc. patterns are out of grammar.
+                return None
+            }
+        }
+        // A catch-all combined with literals (`case 1 | _ =>`) or with a binding is not supported.
+        if (isCatchAll && (!literals.isEmpty() || matchCase.patterns.size != 1)) {
+            return None
+        }
+        // A catch-all must be the final arm (nothing after it would be reachable / well-formed).
+        if (isCatchAll && idx != matchExpr.matchCases.size) {
+            return None
+        }
+        // Adapt the arm body, seeding the binding name as an in-scope Int64 local for var patterns.
+        if (let Some(name) <- bindingName) {
+            scope.locals.add(name)
+        }
+        let bodyStmts = match (adaptStatements(armBlock, scope)) {
+            case Some(s) => s
+            case None => return None
+        }
+        arms.add(MatchArm(literals, isCatchAll, bindingName, bodyStmts))
+    }
+    return Some(arms)
+}
+
+// Emit the selector temp + the if/else-if chain for a normalized arm list. `extraInit` is an
+// optional extra statement (used by the value form to declare the result temp) inserted before the
+// chain. The selector is evaluated once into `$sel`. A var-binding catch-all arm prepends a
+// `let n = $sel` to its body so the bound name reads the selector value.
+private func buildMatchChain(matchExpr: ParseMatchExpr, arms: ArrayList<MatchArm>,
+    extraInit: Option<ChirStmtSpec>, scope: AdaptScope): Option<ArrayList<ChirStmtSpec>> {
+    let selectorExpr = match (matchExpr.selector) {
+        case Some(e) => e
+        case None => return None
+    }
+    // A String/Bool selector is out of the Int64-literal grammar.
+    if (exprIsString(selectorExpr, scope) || exprIsBool(selectorExpr, scope)) {
+        return None
+    }
+    let selectorSpec = match (adaptExpr(selectorExpr, scope)) {
+        case Some(e) => e
+        case None => return None
+    }
+    let out = ArrayList<ChirStmtSpec>()
+    let selName = scope.freshTemp("match_sel")
+    scope.locals.add(selName)
+    out.add(ChirStmtSpec.Let(selName, selectorSpec, isVar: false))
+    match (extraInit) {
+        case Some(s) => out.add(s)
+        case None => ()
+    }
+    // Build the chain back-to-front so each non-final arm's else is the already-built remainder.
+    // The final arm: if it is a catch-all, its body is the base else-block; otherwise the base is an
+    // empty else (an unmatched selector simply falls through, matching exhaustive-by-construction use).
+    var chainElse = ArrayList<ChirStmtSpec>()
+    var startIdx = arms.size - 1
+    if (arms[startIdx].isCatchAll) {
+        chainElse = withBinding(arms[startIdx], selName)
+        startIdx--
+    }
+    var i = startIdx
+    while (i >= 0) {
+        let arm = arms[i]
+        // A catch-all may only be the final arm (already enforced in normalize), so any arm here has
+        // literal values.
+        let cond = match (literalCond(selName, arm.literals)) {
+            case Some(c) => c
+            case None => return None
+        }
+        let thenBody = withBinding(arm, selName)
+        let ifStmt = ChirStmtSpec.If(cond, thenBody, chainElse)
+        let wrapper = ArrayList<ChirStmtSpec>()
+        wrapper.add(ifStmt)
+        chainElse = wrapper
+        i--
+    }
+    for (s in chainElse) {
+        out.add(s)
+    }
+    scope.needsRuntime = true
+    return Some(out)
+}
+
+// The arm body, prefixed with `let <binding> = $sel` when the arm is a `case n =>` var pattern so
+// the bound name reads the selector value inside the arm.
+private func withBinding(arm: MatchArm, selName: String): ArrayList<ChirStmtSpec> {
+    match (arm.bindingName) {
+        case Some(name) =>
+            let body = ArrayList<ChirStmtSpec>()
+            body.add(ChirStmtSpec.Let(name, ChirExprSpec.Ref(selName), isVar: false))
+            for (s in arm.body) {
+                body.add(s)
+            }
+            return body
+        case None => return arm.body
+    }
+}
+
+// Build the OR-combined equality condition `$sel == L0 || $sel == L1 || ...` for an arm's literal
+// values. Requires at least one literal.
+private func literalCond(selName: String, literals: ArrayList<Int64>): Option<ChirExprSpec> {
+    if (literals.isEmpty()) {
+        return None
+    }
+    var acc: Option<ChirExprSpec> = None
+    for (lit in literals) {
+        let eq = ChirExprSpec.Binary(ChirExprKind.EQUAL, ChirExprSpec.Ref(selName), ChirExprSpec.Literal(lit))
+        acc = match (acc) {
+            case Some(prev) => Some(ChirExprSpec.Binary(ChirExprKind.OR, prev, eq))
+            case None => Some(eq)
+        }
+    }
+    return acc
+}
+
+// A value-position match desugar result: the prelude statements to emit before the use site (the
+// selector temp, the result-var declaration, and the if/else-if chain that assigns the result), and
+// `resultRef`, a REF expr that reads the result var. The caller binds `resultRef` into its `let`/
+// `return`/`print` (e.g. `let r = <resultRef>`).
+private class MatchValue {
+    let prelude: ArrayList<ChirStmtSpec>
+    let resultRef: ChirExprSpec
+    init(prelude: ArrayList<ChirStmtSpec>, resultRef: ChirExprSpec) {
+        this.prelude = prelude
+        this.resultRef = resultRef
+    }
+}
+
+// Desugar a value-position `match (sel) { case L => <expr> ... }` into a fresh `var $res` plus the
+// selector temp + if/else-if chain where each arm assigns its single value-expression to `$res`.
+// Each arm body must be a block whose single statement is an expression (the yielded value). Returns
+// None on any unsupported shape (multi-statement arm, non-expression arm, non-Int64-literal patterns,
+// etc.) so the enclosing decl/return falls back. The result var is Int64-typed (the common type of
+// the Int64-valued arms).
+private func adaptMatchValue(matchExpr: ParseMatchExpr, scope: AdaptScope): Option<MatchValue> {
+    // Validate the match shape and turn each arm's single value-expression into an assignment to the
+    // result var. We reuse normalizeMatchArms' validation by re-walking the cases here because the
+    // arm bodies in value position must each be a single expression (not arbitrary statements).
+    if (!matchExpr.matchMode || matchExpr.selector.isNone()) {
+        return None
+    }
+    if (!matchExpr.matchCaseOthers.isEmpty() || matchExpr.matchCases.isEmpty()) {
+        return None
+    }
+    let resName = scope.freshTemp("match_res")
+    scope.locals.add(resName)
+    let arms = ArrayList<MatchArm>()
+    var idx = 0
+    for (matchCase in matchExpr.matchCases) {
+        idx++
+        if (matchCase.patternGuard.isSome()) {
+            return None
+        }
+        let armBlock = match (matchCase.exprOrDecls) {
+            case Some(b) => b
+            case None => return None
+        }
+        let literals = ArrayList<Int64>()
+        var isCatchAll = false
+        var bindingName: Option<String> = None
+        for (pattern in matchCase.patterns) {
+            if (let Some(constPat) <- (pattern as ParseConstPattern)) {
+                let lit = match (constPat.literal) {
+                    case Some(e) => e
+                    case None => return None
+                }
+                match (intLiteralValue(lit)) {
+                    case Some(v) => literals.add(v)
+                    case None => return None
+                }
+            } else if (let Some(_) <- (pattern as ParseWildcardPattern)) {
+                isCatchAll = true
+            } else if (let Some(varPat) <- (pattern as ParseVarPattern)) {
+                let n = varPat.identifier.Val()
+                if (n.isEmpty()) {
+                    return None
+                }
+                isCatchAll = true
+                bindingName = Some(n)
+            } else {
+                return None
+            }
+        }
+        if (isCatchAll && (!literals.isEmpty() || matchCase.patterns.size != 1)) {
+            return None
+        }
+        if (isCatchAll && idx != matchExpr.matchCases.size) {
+            return None
+        }
+        // The arm body must be exactly one expression statement (the yielded value). Seed a var
+        // binding name first so `case n => n + 1` resolves the binding inside the value expression.
+        if (let Some(name) <- bindingName) {
+            scope.locals.add(name)
+        }
+        if (armBlock.body.size != 1) {
+            return None
+        }
+        let valueParseExpr = match (armBlock.body[0] as ParseExpr) {
+            case Some(e) => e
+            case None => return None
+        }
+        // A String/Bool arm value is out of the Int64 value-match grammar.
+        if (exprIsString(valueParseExpr, scope) || exprIsBool(valueParseExpr, scope)) {
+            return None
+        }
+        let valueSpec = match (adaptExpr(valueParseExpr, scope)) {
+            case Some(e) => e
+            case None => return None
+        }
+        let armStmts = ArrayList<ChirStmtSpec>()
+        armStmts.add(ChirStmtSpec.Assign(resName, valueSpec))
+        arms.add(MatchArm(literals, isCatchAll, bindingName, armStmts))
+    }
+    // Declare the result var (initialized to 0; every reachable path assigns it) before the chain.
+    let resInit = ChirStmtSpec.Let(resName, ChirExprSpec.Literal(0), isVar: true)
+    let prelude = match (buildMatchChain(matchExpr, arms, Some(resInit), scope)) {
+        case Some(p) => p
+        case None => return None
+    }
+    return Some(MatchValue(prelude, ChirExprSpec.Ref(resName)))
 }
 
 // Adapt `for (name in start..end)` / `for (name in start..=end)`. Only a simple `VarPattern` loop
