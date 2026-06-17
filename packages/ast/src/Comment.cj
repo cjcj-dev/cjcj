@@ -74,12 +74,12 @@ public class CommentGroups {
         return leadingComments.isEmpty() && innerComments.isEmpty() && trailingComments.isEmpty()
     }
 
-    private func groupsToString(name: String, groups: ArrayList<CommentGroup>): String {
+    private func groupsToString(name: String, groups: ArrayList<CommentGroup>, delimiter: String): String {
         let values = ArrayList<String>()
         for (group in groups) {
             values.add(group.ToString())
         }
-        return "\"${name}\":[" + JoinStrings(values, ", ") + "]"
+        return "\"${name}\":[" + JoinStrings(values, delimiter) + "]"
     }
 
     public func ToString(): String {
@@ -88,13 +88,13 @@ public class CommentGroups {
         }
         let parts = ArrayList<String>()
         if (!leadingComments.isEmpty()) {
-            parts.add(groupsToString("leadingComments", leadingComments))
+            parts.add(groupsToString("leadingComments", leadingComments, ", "))
         }
         if (!innerComments.isEmpty()) {
-            parts.add(groupsToString("innerComments", innerComments))
+            parts.add(groupsToString("innerComments", innerComments, ","))
         }
         if (!trailingComments.isEmpty()) {
-            parts.add(groupsToString("trailingComments", trailingComments))
+            parts.add(groupsToString("trailingComments", trailingComments, ", "))
         }
         return "{" + JoinStrings(parts, ", ") + "}"
     }

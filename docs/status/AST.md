@@ -1,6 +1,6 @@
 # AST Port Status
 
-Date: 2026-06-17
+Date: 2026-06-18
 
 ## Summary
 
@@ -10,6 +10,11 @@ The AST package is a multi-file Cangjie package mirroring the C++ AST component 
 
 ## Implemented In This Pass
 
+- Added C++ `Ty::IsCTypeBasePointer` API parity for C ABI pointer-like types and changed `Ty.GetInitialTy` to return a shared `InitialTy` sentinel like the C++ static object instead of allocating a fresh sentinel for each call.
+- Aligned `CommentGroups.ToString` with `Comment.cpp` inner-comment formatting by using the C++ no-space separator for `innerComments` groups while preserving the spaced separators for leading and trailing groups.
+- Aligned `File.GetFeatures` with the C++ `std::set` result semantics by returning feature names in sorted order with duplicates suppressed while preserving the Cangjie `ArrayList<String>` API.
+- Added C++ `InvertedIndex::Reset` parity for AST-kind suffix searches: AST now keeps a shared `AST_KIND_VALUES` string table and preloads `astKindTrie` with every AST kind name after reset, matching the reference behavior for fresh contexts before symbols are indexed.
+- Aligned import/package node stringification and import-name helpers with `Node.cpp`: `ImportContent` now handles import-all package names, declaration-import package names, double-colon organization prefixes, possible package-name resolution order, aliases, multi-import formatting, feature dot placement, and C++-style `ImportSpec`, `PackageSpec`, `File`, and `Package` `ToString` output.
 - Aligned `CreateMemberAccess(expr, fieldName)` with the C++ class receiver lookup: generated member accesses now search superclass declarations until the first matching member is found, while preserving direct nominal lookup for structs, interfaces, and enums.
 - Expanded AST `ScopeKind` and `ExprKind` from one-value macro compatibility placeholders to the full C++/Parse value sets, added equality helpers with reference-order indexes, and switched AST `MacroInvocation` defaults to `UNKNOWN_SCOPE` / `UNKNOWN_EXPR` while preserving the old `UNKNOWN` spelling as an equality-compatible downstream alias.
 - Deepened `ASTTypeValidator` to follow the C++ pre/post visitor shape: pre-visit now records valid diagnostic ranges and check status, walks desugared expressions with the same walker ID and post visitor, and post-visit performs semantic type/target validation after children.
