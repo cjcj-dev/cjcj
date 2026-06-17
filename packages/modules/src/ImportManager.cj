@@ -1,6 +1,7 @@
 package cangjie_compiler::modules
 
 import std.collection.*
+import std.fs.exists
 import cangjie_compiler::option.GlobalOptions
 import cangjie_compiler::option.OutputMode
 
@@ -816,7 +817,7 @@ public class ImportManager {
             }
             return
         }
-        if (IsStandardLibraryPackage(fullPackageName) && !cjoPath.isEmpty()) {
+        if (IsStandardLibraryPackage(fullPackageName) && !cjoPath.isEmpty() && exists(cjoPath)) {
             stdDepsMap[cjoPath] = StdDepEntry(depType, fullPackageName)
         }
     }

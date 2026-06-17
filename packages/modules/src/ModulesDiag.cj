@@ -106,6 +106,7 @@ public class DiagnosticEngine {
 
 private func ModuleDiagKindToBasic(kind: String): Option<BasicDiagKindRefactor> {
     return match (kind) {
+        case "module_read_file_to_buffer_failed" => BasicDiagKindRefactor.module_read_file_to_buffer_failed
         case "module_common_part_path_is_required" => BasicDiagKindRefactor.module_common_part_path_is_required
         case "module_common_cjo_wrong_package" => BasicDiagKindRefactor.module_common_cjo_wrong_package
         case "feature_is_not_subset_of_child_set" => BasicDiagKindRefactor.feature_is_not_subset_of_child_set

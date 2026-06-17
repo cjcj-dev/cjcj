@@ -24,6 +24,8 @@ This pass de-isolated standard-library package recognition and shared package co
 
 This continuation tightened import-indexing and LSP/macros behavior against the C++ reference: alias provenance is now recorded for wildcard imports and full explicit-import candidate sets, `LoadPackageFromCjo` recursively loads dependency headers before on-demand declaration loading, macro debug file replacement clones implicit import nodes instead of sharing them, and dependency JSON escaping now emits `\u00XX` for all control bytes like the C++ `Jsonfy` helper.
 
+This pass aligned additional CJO manager details with the C++ implementation: tool-added packages registered through `AddImportedPackageFromASTNode` are no longer marked as normal imported CJO packages, CJO read failures now use the `module_read_file_to_buffer_failed` diagnostic kind and Basic forwarding, and standard-library dependency recording now requires an existing CJO path like the reference `HandleStdPackage` path.
+
 ## Implemented
 
 - Replaced `ModulesScaffold.cj` with per-component source files under `packages/modules/src`.
@@ -37,6 +39,7 @@ This continuation tightened import-indexing and LSP/macros behavior against the 
 - Matched the C++ `GetPackageCjo` in-group source package rule: a registered source package candidate now outranks a less-specific on-disk ancestor CJO, and in-memory cached CJO data now returns the cached CJO name path just like the C++ helper.
 - Matched additional CJO manager lifecycle behavior: common-part reloads now remove previously loaded `FROM_COMMON_PART` files before appending fresh common files, `DeleteASTLoaders` clears loader handles, rebuild-index clearing clears package loaders while preserving common-part loader/cache state, and silent CJO read failures return an empty loader like the C++ helper.
 - Matched additional CJO manager loader behavior: common-part loader lookup now reports a missing common-part path for CJMP-specific compilation, uses normal read diagnostics for configured common CJO paths, and propagates the manager `importSrcCode` flag to every created AST loader.
+- Matched more CJO manager state and diagnostics: AST-node-provided packages are marked `TOOL_ADD` without the normal `IMPORTED` attribute, CJO read failures report `module_read_file_to_buffer_failed`, and that diagnostic now forwards to Basic.
 - Implemented `ImportManager` behavior for implicit imports, import header resolution, CJO path recording, standard-library dependency classification, source package import indexing, imported declaration lookup, imported-declaration provenance queries, source-imported package retention after indexing, macro-used declaration tracking, direct dependency collection using the same CJO lookup-name form as the C++ reference, macro package collection, reindexing after macro expansion, package accessibility checks with source ranges, local declaration shadowing checks for useless imports, package feature consistency validation, duplicate import warnings, dependency JSON generation with per-import source ranges and standard-library dependency entries, BCHIR/CJO cache plumbing, and package loading from CJO.
 - Matched the C++ AST writer lifecycle more closely: content export pre-save now stores a writer per package, later AST export reuses that writer, and writer deletion clears the cache.
 - Matched the C++ standard-library dependency JSON shape more closely by recursively loading std package headers and recording each std package's import set.
@@ -46,6 +49,7 @@ This continuation tightened import-indexing and LSP/macros behavior against the 
 - Replaced the module-local standard-library name list and duplicated core/sync/ast/default package constants with the real `cangjie_compiler::utils` standard-library map and exported package constants.
 - Matched `ImportManager` source-code import status propagation into `CjoManagerImpl` so newly created AST loaders observe LSP/source-import toggles.
 - Matched C++ dependency path bookkeeping for first-write CJO path storage and unconditional `.cj.d` sidecar derivation.
+- Matched C++ standard-library dependency filtering by recording std CJO paths only when the resolved path exists.
 - Matched the C++ package-name re-export import check by reporting `package_re_export_package_name` for re-exported package imports and forwarding that diagnostic to Basic.
 - Matched more C++ imported-declaration alias provenance: wildcard imports now remember declaration identifiers that differ from the imported map key, and explicit alias/single imports record aliases from the full candidate member set before visibility filtering.
 - Matched the C++ `LoadPackageFromCjo` LSP path by recursively loading dependent package headers before loading declarations and references on demand.

@@ -30,7 +30,6 @@ public class CjoManager {
 
     public func AddImportedPackageFromASTNode(pkg: Package): Unit {
         pkg.EnableAttr(Attribute.TOOL_ADD)
-        pkg.EnableAttr(Attribute.IMPORTED)
         NormalizePackageFiles(pkg)
         let info = CjoPackageInfo(pkg)
         impl.AddPackageInfo(pkg.fullPackageName, info)
