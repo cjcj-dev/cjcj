@@ -489,20 +489,54 @@ public class LocalTypeArgumentSynthesis {
 
     private func SolveCurrentConstraints(allowPartial!: Bool = false): Option<TypeSubst> {
         let subst = TypeSubst()
-        for (tyVar in argPack.tyVarsToSolve) {
-            if (let Some(solution) <- FindSolution(tyVar)) {
-                subst.Put(tyVar, solution)
-            } else if (!allowPartial) {
-                errInfo.style = SolvingErrStyle.NO_CONSTRAINT
-                errInfo.tyVar = tyVar
-                return None
+        let graph = TyVarConstraintGraph(constraints, argPack.tyVarsToSolve, tyMgr)
+        while (true) {
+            let nextConstraints = graph.TopoOnce(constraints)
+            if (nextConstraints.entries.isEmpty()) {
+                break
+            }
+            let substitutedConstraints = ApplyTypeSubstForConstraint(subst, nextConstraints)
+            let solved = SolveConstraintGroup(substitutedConstraints)
+            if (!solved.entries.isEmpty()) {
+                MergeTypeSubst(subst, solved)
+                graph.ApplyTypeSubst(solved)
+            }
+        }
+        if (allowPartial || !HasUnsolvedTyVars(subst)) {
+            return subst
+        }
+        if (let Some(unsolved) <- FirstUnsolvedTyVar(subst)) {
+            errInfo.style = SolvingErrStyle.NO_CONSTRAINT
+            errInfo.tyVar = unsolved
+        }
+        return None
+    }
+
+    private func SolveConstraintGroup(group: Constraint): TypeSubst {
+        let subst = TypeSubst()
+        var remaining = cloneConstraint(group)
+        var newInfo = true
+        while (newInfo) {
+            newInfo = false
+            var idx: Int64 = 0
+            while (idx < remaining.entries.size) {
+                let entry = remaining.entries[idx]
+                if (let Some(solution) <- FindSolution(entry.tyVar, entry.bounds)) {
+                    subst.Put(entry.tyVar, solution)
+                    remaining.entries.remove(at: idx)
+                    newInfo = true
+                    continue
+                }
+                idx++
+            }
+            if (newInfo) {
+                remaining = ApplyTypeSubstForConstraint(subst, remaining)
             }
         }
         return subst
     }
 
-    private func FindSolution(tyVar: GenericsTy): Option<Ty> {
-        let bounds = constraints.GetOrCreate(tyVar)
+    private func FindSolution(tyVar: GenericsTy, bounds: TyVarBounds): Option<Ty> {
         for (eqTy in bounds.eq.values) {
             let normalizedEq = NormalizeSolution(eqTy)
             if (IsValidSolution(normalizedEq, bounds)) {
@@ -534,6 +568,48 @@ public class LocalTypeArgumentSynthesis {
             }
         }
         return None
+    }
+
+    private func MergeTypeSubst(target: TypeSubst, source: TypeSubst): Unit {
+        for (entry in source.entries) {
+            target.Put(entry.tyVar, entry.ty)
+        }
+    }
+
+    private func FirstUnsolvedTyVar(subst: TypeSubst): Option<GenericsTy> {
+        for (tyVar in argPack.tyVarsToSolve) {
+            if (let None <- subst.Get(tyVar)) {
+                return tyVar
+            }
+            if (substContainsTyVar(subst, tyVar)) {
+                return tyVar
+            }
+        }
+        return None
+    }
+
+    private func ApplyTypeSubstForConstraint(typeMapping: TypeSubst, input: Constraint): Constraint {
+        if (typeMapping.IsEmpty()) {
+            return cloneConstraint(input)
+        }
+        let out = Constraint()
+        for (entry in input.entries) {
+            let bounds = TyVarBounds()
+            for (lower in entry.bounds.lbs.values) {
+                bounds.lbs.Add(tyMgr.GetInstantiatedTy(lower, typeMapping))
+            }
+            for (upper in entry.bounds.ubs.values) {
+                bounds.ubs.Add(tyMgr.GetInstantiatedTy(upper, typeMapping))
+            }
+            for (sumTy in entry.bounds.sum.values) {
+                bounds.sum.Add(tyMgr.GetInstantiatedTy(sumTy, typeMapping))
+            }
+            for (eqTy in entry.bounds.eq.values) {
+                bounds.eq.Add(tyMgr.GetInstantiatedTy(eqTy, typeMapping))
+            }
+            out.entries.add(ConstraintEntry(entry.tyVar, bounds: bounds))
+        }
+        return out
     }
 
     private func JoinLowerBounds(lbs: TySet): Option<Ty> {
