@@ -1,6 +1,6 @@
 # Frontend Port Status
 
-Date: 2026-06-16
+Date: 2026-06-17
 
 Build: `cjpm build` passes.
 
@@ -37,22 +37,33 @@ dump directory creation, incremental summary collection, generic declaration
 collection, deterministic CHIR summary generation, result/CJO summary writing,
 cache-path handling, and CHIR-data bookkeeping.
 
+This deepening pass added a real Frontend dependency on `cangjie_compiler::basic`
+and removed Frontend-local copies of Basic `Position`, `Range`, `Source`, and
+`SourceManager`. Diagnostics now use Basic's diagnostic engine for counting,
+category grouping, and emission behind a thin Frontend adapter that preserves the
+existing C++-shaped convenience calls. It also tightened several C++ reference
+behaviors: comment tokens dump without comment text, empty-package detection now
+honors package specs and non-compiler-added imports, AST cache calculation stops
+on existing diagnostics or empty packages, test-only verbose mode lists source
+files after macro expansion, and mangling now includes imported
+`exportedInternalDecls` plus nominal imported generic instantiations.
+
 ## Important Blocker
 
-`packages/frontend/cjpm.toml` currently has no dependencies, and this task
-forbids editing manifests. A faithful production Frontend port must import the
-real `basic`, `parse`, `conditional_compilation`, `modules`, `macro`, `sema`,
-`mangle`, `chir`, and incremental-compilation packages. This pass keeps a local
-compatibility model so the workspace can still compile without manifest edits.
-The remaining incompleteness is architectural rather than hidden behind
-Frontend self-host marker comments.
+`packages/frontend/cjpm.toml` now imports the real `basic` package. A faithful
+production Frontend port must still import and wire the real `ast`, `parse`,
+`conditional_compilation`, `modules`, `macro`, `sema`, `mangle`, `chir`, and
+incremental-compilation packages. This pass keeps local compatibility models for
+those still-unwired layers so the workspace can compile while Basic source and
+diagnostic primitives are no longer duplicated.
 
 Remaining Frontend self-host markers: 0.
 
 ## Remaining Work
 
-- Replace local compatibility AST/source/diagnostic/option models with the real
-  sibling package APIs once manifest changes are allowed.
+- Replace local compatibility AST/option/front-pipeline models with the real
+  sibling package APIs and remove the remaining adapters once downstream APIs
+  are wired.
 - Wire the local conditional compilation, macro expansion, Sema desugar/typecheck,
   incremental AST cache/diff, generic instantiation, CHIR lowering, plugin FFI,
   and result serialization compatibility paths to the real implementations.

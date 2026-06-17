@@ -250,6 +250,9 @@ public class CompilerInstance {
             importManager.DeleteASTLoaders()
         }
         importManager.ClearPackageBCHIRCache()
+        if (invocation.globalOptions.compileTestsOnly && invocation.globalOptions.enableVerbose) {
+            PrintTestOnlySourceFiles(srcPkgs)
+        }
         if (!srcPkgs.isEmpty() && invocation.globalOptions.NeedDumpASTToFile()) {
             DumpAST(GetSourcePackages(), invocation.globalOptions.output, "macroexp")
         }
@@ -284,6 +287,12 @@ public class CompilerInstance {
         cachedInfo.fileSummaries.clear()
         cachedInfo.declSummaries.clear()
         if (srcPkgs.isEmpty()) {
+            return false
+        }
+        if (diag.GetErrorCount() != 0) {
+            return false
+        }
+        if (srcPkgs[0].IsEmpty()) {
             return false
         }
         for (pkg in srcPkgs) {
@@ -416,6 +425,8 @@ public class CompilerInstance {
                 if (tok.kind == FrontendTokenKind.NL) {
                     println((if (tok.value == "\n") { "\\n" } else { "\\r\\n" }) + " " +
                         FrontendTokenKindName(tok.kind) + " " + position)
+                } else if (tok.kind == FrontendTokenKind.COMMENT) {
+                    println(FrontendTokenKindName(tok.kind) + " " + position)
                 } else {
                     println(tok.value + " " + FrontendTokenKindName(tok.kind) + " " + position)
                 }
@@ -756,6 +767,16 @@ public class CompilerInstance {
                         mangleDeclTree(baseMangler, pkg.fullPackageName, decl, seen)
                     }
                 }
+                for (decl in file.exportedInternalDecls) {
+                    if (decl.isUsedImports || !decl.TestAttr("IMPORTED")) {
+                        mangleDeclTree(baseMangler, pkg.fullPackageName, decl, seen)
+                    }
+                }
+            }
+            for (decl in pkg.genericInstantiatedDecls) {
+                if (decl.IsNominalDecl()) {
+                    mangleDeclTree(baseMangler, pkg.fullPackageName, decl, seen)
+                }
             }
         }
     }
@@ -1035,6 +1056,21 @@ private func IsNeedSaveIncrCompilationLogFile(globalOpts: GlobalOptions, frontOp
         return false
     }
     return true
+}
+
+private func PrintTestOnlySourceFiles(srcPkgs: ArrayList<Package>): Unit {
+    print("Source files to compile for the test-only mode: {")
+    var emitted = false
+    for (pkg in srcPkgs) {
+        for (srcFile in pkg.files) {
+            if (emitted) {
+                print(", ")
+            }
+            print(pkg.fullPackageName + "::" + srcFile.fileName)
+            emitted = true
+        }
+    }
+    println("}")
 }
 
 private var astDumpDir: String = ""
