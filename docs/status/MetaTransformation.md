@@ -49,6 +49,9 @@ Implemented:
   self-hosted representation now stores `cjcVersion` as `Option<String>`. Valid plugin-info helpers still
   accept a plain `String`; malformed/no-version plugin info can be represented as `None` instead of an
   impossible empty-string sentinel.
+- Added an explicit default invalid `MetaTransformPluginInfo` state with no version and no registration
+  callback. This gives the self-hosted API a safe representation for the invalid/default plugin-info
+  states that the C++ loader must reject before registration.
 - Added plugin-info validation and registration helpers (`HasRegisterCallback`, `IsValidForVersion`,
   `HasVersion`, `VersionMatches`, `IsValid`, and `RegisterTo`) so the version/callback checks used by
   the C++ plugin loader are available in the self-hosted API without using null.

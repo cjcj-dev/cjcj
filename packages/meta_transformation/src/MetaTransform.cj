@@ -113,6 +113,11 @@ public struct MetaTransformPluginInfo {
     public let cjcVersion: Option<String>
     public let registerTo: Option<MetaTransformRegisterCallback>
 
+    public init() {
+        cjcVersion = None
+        registerTo = None
+    }
+
     public init(cjcVersion: String, registerTo: MetaTransformRegisterCallback) {
         this.cjcVersion = Some(cjcVersion)
         this.registerTo = Some(registerTo)
