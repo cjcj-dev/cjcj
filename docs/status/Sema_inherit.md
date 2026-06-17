@@ -172,3 +172,11 @@ Generic upper-bound cycle continuation:
   `cangjie_compiler::ast` before merging interface/class upper-bound members.
 
 Verification: `cjpm build` passes for the whole workspace after this generic upper-bound cycle continuation.
+
+Instantiated signature flow continuation:
+
+- `CheckInstMemberSignatures` no longer returns early for empty instantiated type lists or empty type-substitution maps.
+  This matches the C++ flow, which still checks/replays the instantiated declaration key, re-adds constructors/private
+  members, and runs the generic-member collision path with the generated mapping even when it is empty.
+
+Verification: `cjpm build` passes for the whole workspace after this instantiated signature flow continuation.

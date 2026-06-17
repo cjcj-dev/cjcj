@@ -165,18 +165,12 @@ func CheckInstMemberSignatures(
     if (!checker.HasInstantiationTrigger()) {
         return
     }
-    if (instTys.isEmpty()) {
-        return
-    }
     let key = InstantiationKey(decl, instTys)
     if (checker.HasInstantiatedKey(key)) {
         checker.ReplayInstantiatedMemberDiagnostics(key)
         return
     }
     let typeMapping = GenerateTypeMapping(decl, instTys)
-    if (typeMapping.IsEmpty()) {
-        return
-    }
     checker.CheckMembersWithInheritedDecls(decl)
     let members = checker.GetStoredMembersForDecl(decl).Clone()
     for (member in decl.GetMemberDecls()) {
