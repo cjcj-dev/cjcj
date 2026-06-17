@@ -218,7 +218,7 @@ public class CHIR2BCHIR {
             context.definition.Push8Bytes(Int64(floatLiteral.value))
         } else if (let Some(runeLiteral) <- (literal as RuneLiteral)) {
             context.definition.PushOp(OpCode.RUNE)
-            context.definition.PushCell(runeLiteral.value.toString().hashCode())
+            context.definition.PushCell(Int64(UInt32(runeLiteral.value)))
         } else if (let Some(stringLiteral) <- (literal as StringLiteral)) {
             context.definition.PushOp(OpCode.STRING)
             context.definition.PushCell(GetStringIdx(stringLiteral.value))

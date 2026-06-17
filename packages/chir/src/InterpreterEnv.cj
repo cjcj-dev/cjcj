@@ -57,6 +57,10 @@ public class InterpreterEnv {
         return globalValues[index]
     }
 
+    public func IsGlobalIndexValid(index: Int64): Bool {
+        return index >= 0 && index < globalValues.size
+    }
+
     public func StartStackFrame(): Unit {
         basePointer = localValues.size
     }

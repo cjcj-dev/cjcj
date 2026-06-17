@@ -38,6 +38,9 @@ public class IValUtils {
         if (value.IsFloatLike()) {
             return FloatLiteral(value.GetFloat())
         }
+        if (value.kind == InterpreterValueKind.IRUNE) {
+            return RuneLiteral(Rune(value.GetInt()))
+        }
         if (value.kind == InterpreterValueKind.IBOOL) {
             return BoolLiteral(value.GetBool())
         }
@@ -80,7 +83,7 @@ public class IValUtils {
         }
         return match (value.kind) {
             case InterpreterValueKind.IINVALID => "<invalid>"
-            case InterpreterValueKind.IPOINTER => "&${value.GetPointerIndex()}"
+            case InterpreterValueKind.IPOINTER => PointerToString(value)
             case InterpreterValueKind.IFUNC => "func@${value.GetFunctionIndex()}"
             case InterpreterValueKind.ITUPLE => "(" + JoinValueStrings(value.GetElementsRef(), ", ") + ")"
             case InterpreterValueKind.IARRAY => "[" + JoinValueStrings(value.GetElementsRef(), ", ") + "]"
@@ -106,6 +109,9 @@ public class IValUtils {
         if (left.kind == InterpreterValueKind.IBOOL) {
             return left.GetBool() == right.GetBool()
         }
+        if (left.kind == InterpreterValueKind.IRUNE) {
+            return left.GetInt() == right.GetInt()
+        }
         if (left.kind == InterpreterValueKind.ISTRING) {
             return left.GetText() == right.GetText()
         }
@@ -113,7 +119,23 @@ public class IValUtils {
             return true
         }
         if (left.kind == InterpreterValueKind.IPOINTER) {
-            return left.GetPointerIndex() == right.GetPointerIndex()
+            if (left.GetPointerRootKind() != right.GetPointerRootKind() ||
+                left.GetPointerIndex() != right.GetPointerIndex()) {
+                return false
+            }
+            let leftPath = left.GetPointerPathRef()
+            let rightPath = right.GetPointerPathRef()
+            if (leftPath.size != rightPath.size) {
+                return false
+            }
+            var pathIdx: Int64 = 0
+            while (pathIdx < leftPath.size) {
+                if (leftPath[pathIdx] != rightPath[pathIdx]) {
+                    return false
+                }
+                pathIdx++
+            }
+            return true
         }
         if (left.kind == InterpreterValueKind.IFUNC) {
             return left.GetFunctionIndex() == right.GetFunctionIndex()
@@ -166,6 +188,23 @@ public class IValUtils {
         items.add(InterpreterValue.MakeUInt(InterpreterValueKind.IUINTNAT, address))
         return InterpreterValue.MakeTuple(items)
     }
+}
+
+private func PointerToString(value: InterpreterValue): String {
+    let root = match (value.GetPointerRootKind()) {
+        case InterpreterPointerRootKind.PARENA => "arena"
+        case InterpreterPointerRootKind.PGLOBAL => "global"
+        case InterpreterPointerRootKind.PINVALID => "invalid"
+    }
+    let path = value.GetPointerPathRef()
+    if (path.isEmpty()) {
+        return "&${root}:${value.GetPointerIndex()}"
+    }
+    var out = "&${root}:${value.GetPointerIndex()}"
+    for (part in path) {
+        out += ".${part}"
+    }
+    return out
 }
 
 private func JoinValueStrings(values: ArrayList<InterpreterValue>, sep: String): String {

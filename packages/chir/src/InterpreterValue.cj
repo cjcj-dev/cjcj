@@ -11,6 +11,28 @@ public enum InterpreterValueKind {
     | IPOINTER | ITUPLE | IARRAY | IOBJECT | IFUNC
 }
 
+public enum InterpreterPointerRootKind {
+    | PINVALID | PARENA | PGLOBAL
+}
+
+public func InterpreterPointerRootKindIndex(kind: InterpreterPointerRootKind): Int64 {
+    return match (kind) {
+        case InterpreterPointerRootKind.PINVALID => 0
+        case InterpreterPointerRootKind.PARENA => 1
+        case InterpreterPointerRootKind.PGLOBAL => 2
+    }
+}
+
+extend InterpreterPointerRootKind <: Equatable<InterpreterPointerRootKind> {
+    public operator func ==(right: InterpreterPointerRootKind): Bool {
+        return InterpreterPointerRootKindIndex(this) == InterpreterPointerRootKindIndex(right)
+    }
+
+    public operator func !=(right: InterpreterPointerRootKind): Bool {
+        return !(this == right)
+    }
+}
+
 public func InterpreterValueKindIndex(kind: InterpreterValueKind): Int64 {
     return match (kind) {
         case InterpreterValueKind.IINVALID => 0
@@ -58,13 +80,16 @@ public class InterpreterValue {
     private let textContent: String
     private let literalContent: Option<LiteralValue>
     private let classId: Int64
+    private let pointerRootKind: InterpreterPointerRootKind
     private let pointerIndex: Int64
+    private let pointerPath: ArrayList<Int64> = ArrayList<Int64>()
     private let functionIndex: Int64
     private let elements: ArrayList<InterpreterValue> = ArrayList<InterpreterValue>()
 
     public init(kind: InterpreterValueKind, intContent!: Int64 = 0, floatContent!: Float64 = 0.0,
         boolContent!: Bool = false, textContent!: String = "", literalContent!: Option<LiteralValue> = None,
-        classId!: Int64 = 0, pointerIndex!: Int64 = -1, functionIndex!: Int64 = 0,
+        classId!: Int64 = 0, pointerRootKind!: InterpreterPointerRootKind = InterpreterPointerRootKind.PINVALID,
+        pointerIndex!: Int64 = -1, pointerPath!: Option<ArrayList<Int64>> = None, functionIndex!: Int64 = 0,
         elements!: Option<ArrayList<InterpreterValue>> = None) {
         this.kind = kind
         this.intContent = intContent
@@ -73,8 +98,14 @@ public class InterpreterValue {
         this.textContent = textContent
         this.literalContent = literalContent
         this.classId = classId
+        this.pointerRootKind = pointerRootKind
         this.pointerIndex = pointerIndex
         this.functionIndex = functionIndex
+        if (let Some(path) <- pointerPath) {
+            for (part in path) {
+                this.pointerPath.add(part)
+            }
+        }
         if (let Some(items) <- elements) {
             for (item in items) {
                 this.elements.add(item.Clone())
@@ -103,7 +134,8 @@ public class InterpreterValue {
     }
 
     public static func MakeRune(value: Rune): InterpreterValue {
-        return InterpreterValue(InterpreterValueKind.IRUNE, literalContent: RuneLiteral(value))
+        return InterpreterValue(InterpreterValueKind.IRUNE, intContent: Int64(UInt32(value)),
+            literalContent: RuneLiteral(value))
     }
 
     public static func MakeString(value: String): InterpreterValue {
@@ -119,7 +151,19 @@ public class InterpreterValue {
     }
 
     public static func MakePointer(index: Int64): InterpreterValue {
-        return InterpreterValue(InterpreterValueKind.IPOINTER, pointerIndex: index)
+        return InterpreterValue(InterpreterValueKind.IPOINTER, pointerRootKind: InterpreterPointerRootKind.PARENA,
+            pointerIndex: index)
+    }
+
+    public static func MakeGlobalPointer(index: Int64): InterpreterValue {
+        return InterpreterValue(InterpreterValueKind.IPOINTER, pointerRootKind: InterpreterPointerRootKind.PGLOBAL,
+            pointerIndex: index)
+    }
+
+    public static func MakePointerWithPath(rootKind: InterpreterPointerRootKind, index: Int64,
+        path: ArrayList<Int64>): InterpreterValue {
+        return InterpreterValue(InterpreterValueKind.IPOINTER, pointerRootKind: rootKind, pointerIndex: index,
+            pointerPath: path)
     }
 
     public static func MakeFunction(index: Int64): InterpreterValue {
@@ -144,7 +188,16 @@ public class InterpreterValue {
     public func GetText(): String { return textContent }
     public func GetLiteral(): Option<LiteralValue> { return literalContent }
     public func GetClassId(): Int64 { return classId }
+    public func GetPointerRootKind(): InterpreterPointerRootKind { return pointerRootKind }
     public func GetPointerIndex(): Int64 { return pointerIndex }
+    public func GetPointerPath(): ArrayList<Int64> {
+        let out = ArrayList<Int64>()
+        for (part in pointerPath) {
+            out.add(part)
+        }
+        return out
+    }
+    public func GetPointerPathRef(): ArrayList<Int64> { return pointerPath }
     public func GetFunctionIndex(): Int64 { return functionIndex }
 
     public func GetElements(): ArrayList<InterpreterValue> {
@@ -174,7 +227,8 @@ public class InterpreterValue {
 
     public func Clone(): InterpreterValue {
         return InterpreterValue(kind, intContent: intContent, floatContent: floatContent, boolContent: boolContent,
-            textContent: textContent, literalContent: literalContent, classId: classId, pointerIndex: pointerIndex,
+            textContent: textContent, literalContent: literalContent, classId: classId,
+            pointerRootKind: pointerRootKind, pointerIndex: pointerIndex, pointerPath: pointerPath,
             functionIndex: functionIndex, elements: elements)
     }
 }
