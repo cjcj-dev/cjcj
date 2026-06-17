@@ -325,3 +325,22 @@ Remaining gaps: `Options.cj`/`OptionEnums.cj` remain hand-maintained mirrors of
 compatibility surface for current sibling package imports; several print-style
 diagnostics still use local wrapper text; and driver-layer obfuscation option
 handling is not yet fully folded into the base Option action surface.
+
+This continuation removes the Option-local `WarningOptionMgr` facade. Warning
+group parsing in `OptionAction.cj` now imports and updates the real
+`basic.WarningOptionMgr` directly, while continuing to use the real Basic
+`WarnGroup` indices for `--warn-on`/`--warn-off`. That eliminates another
+module-local compatibility wrapper around diagnostic state.
+
+Host parallelism fidelity also improved. `GetHardwareConcurrency` keeps the
+Linux `get_nprocs` FFI path and now adds the macOS `sysconf(_SC_NPROCESSORS_ONLN)`
+path used by the shared semaphore utility, so jobs/APC clamping and default
+job refactoring follow the C++ `std::thread::hardware_concurrency()` behavior
+on another supported host instead of falling back to one worker.
+
+Remaining gaps: `Options.cj`/`OptionEnums.cj` remain hand-maintained mirrors of
+`Options.inc`; `MaybeString`, `MaybeUInt64`, and `TryParseUInt64` remain as
+compatibility surface for current sibling package imports; several print-style
+diagnostics still use local wrapper text; Windows host hardware concurrency
+still uses the conservative fallback; and driver-layer obfuscation option
+handling is not yet fully folded into the base Option action surface.

@@ -22,6 +22,14 @@ foreign {
     func get_nprocs(): Int32
 }
 
+@When[os == "macOS"]
+private let SC_NPROCESSORS_ONLN: Int32 = 58
+
+@When[os == "macOS"]
+foreign {
+    func sysconf(name: Int32): IntNative
+}
+
 @When[os == "Linux"]
 public func GetHardwareConcurrency(): UInt64 {
     let count = unsafe { get_nprocs() }
@@ -29,7 +37,14 @@ public func GetHardwareConcurrency(): UInt64 {
     return 1u64
 }
 
-@When[os != "Linux"]
+@When[os == "macOS"]
+public func GetHardwareConcurrency(): UInt64 {
+    let count = unsafe { sysconf(SC_NPROCESSORS_ONLN) }
+    if (count > 0) { return UInt64(count) }
+    return 1u64
+}
+
+@When[os != "Linux" && os != "macOS"]
 public func GetHardwareConcurrency(): UInt64 {
     return 1u64
 }

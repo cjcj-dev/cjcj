@@ -5,6 +5,7 @@ import cangjie_compiler::basic.DiagnosticEngine as BasicDiagnosticEngine
 import cangjie_compiler::basic.DiagKindRefactor as BasicDiagKindRefactor
 import cangjie_compiler::basic.WarnGroup as BasicWarnGroup
 import cangjie_compiler::basic.WarnGroupIndex as BasicWarnGroupIndex
+import cangjie_compiler::basic.WarningOptionMgr as BasicWarningOptionMgr
 import cangjie_compiler::utils.FileUtil
 import cangjie_compiler::utils.NFC as UtilsNFC
 import cangjie_compiler::utils.Semaphore as UtilsSemaphore
@@ -406,27 +407,27 @@ private func parseCustomOptimization(opts: GlobalOptions, value: String): Action
 
 private func parseWarn(value: String, suppress: Bool): Bool {
     if (value == "all") {
-        WarningOptionMgr.UpdateFlags(suppress)
+        BasicWarningOptionMgr.UpdateFlags(suppress)
     } else if (value == "unused") {
-        WarningOptionMgr.UpdateFlag(UInt64(BasicWarnGroupIndex(BasicWarnGroup.UNUSED)), suppress)
+        BasicWarningOptionMgr.UpdateFlag(UInt64(BasicWarnGroupIndex(BasicWarnGroup.UNUSED)), suppress)
     } else if (value == "unused-main") {
-        WarningOptionMgr.UpdateFlag(UInt64(BasicWarnGroupIndex(BasicWarnGroup.UNUSED_MAIN)), suppress)
+        BasicWarningOptionMgr.UpdateFlag(UInt64(BasicWarnGroupIndex(BasicWarnGroup.UNUSED_MAIN)), suppress)
     } else if (value == "driver-arg") {
-        WarningOptionMgr.UpdateFlag(UInt64(BasicWarnGroupIndex(BasicWarnGroup.DRIVER_ARG)), suppress)
+        BasicWarningOptionMgr.UpdateFlag(UInt64(BasicWarnGroupIndex(BasicWarnGroup.DRIVER_ARG)), suppress)
     } else if (value == "deprecated") {
-        WarningOptionMgr.UpdateFlag(UInt64(BasicWarnGroupIndex(BasicWarnGroup.DEPRECATED)), suppress)
+        BasicWarningOptionMgr.UpdateFlag(UInt64(BasicWarnGroupIndex(BasicWarnGroup.DEPRECATED)), suppress)
     } else if (value == "unsupport-compile-source") {
-        WarningOptionMgr.UpdateFlag(UInt64(BasicWarnGroupIndex(BasicWarnGroup.UNSUPPORT_COMPILE_SOURCE)), suppress)
+        BasicWarningOptionMgr.UpdateFlag(UInt64(BasicWarnGroupIndex(BasicWarnGroup.UNSUPPORT_COMPILE_SOURCE)), suppress)
     } else if (value == "package-import") {
-        WarningOptionMgr.UpdateFlag(UInt64(BasicWarnGroupIndex(BasicWarnGroup.PACKAGE_IMPORT)), suppress)
+        BasicWarningOptionMgr.UpdateFlag(UInt64(BasicWarnGroupIndex(BasicWarnGroup.PACKAGE_IMPORT)), suppress)
     } else if (value == "parser") {
-        WarningOptionMgr.UpdateFlag(UInt64(BasicWarnGroupIndex(BasicWarnGroup.PARSER)), suppress)
+        BasicWarningOptionMgr.UpdateFlag(UInt64(BasicWarnGroupIndex(BasicWarnGroup.PARSER)), suppress)
     } else if (value == "semantics") {
-        WarningOptionMgr.UpdateFlag(UInt64(BasicWarnGroupIndex(BasicWarnGroup.SEMANTICS)), suppress)
+        BasicWarningOptionMgr.UpdateFlag(UInt64(BasicWarnGroupIndex(BasicWarnGroup.SEMANTICS)), suppress)
     } else if (value == "interpreter") {
-        WarningOptionMgr.UpdateFlag(UInt64(BasicWarnGroupIndex(BasicWarnGroup.INTERPRETER)), suppress)
+        BasicWarningOptionMgr.UpdateFlag(UInt64(BasicWarnGroupIndex(BasicWarnGroup.INTERPRETER)), suppress)
     } else if (value == "apilevel-check") {
-        WarningOptionMgr.UpdateFlag(UInt64(BasicWarnGroupIndex(BasicWarnGroup.APILEVEL_CHECK)), suppress)
+        BasicWarningOptionMgr.UpdateFlag(UInt64(BasicWarnGroupIndex(BasicWarnGroup.APILEVEL_CHECK)), suppress)
     } else {
         return false
     }
