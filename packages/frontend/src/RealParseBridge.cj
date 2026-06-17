@@ -3,6 +3,7 @@ package cangjie_compiler::frontend
 import std.collection.*
 import std.convert.*
 import cangjie_compiler::basic.SourceManager
+import cangjie_compiler::parse.Decl as ParseDecl
 import cangjie_compiler::lex.TokenKind
 import cangjie_compiler::parse.Parser as RealParser
 import cangjie_compiler::parse.DiagnosticEngine as ParseDiagnosticEngine
@@ -27,6 +28,7 @@ import cangjie_compiler::parse.VarPattern as ParseVarPattern
 import cangjie_compiler::parse.WildcardPattern as ParseWildcardPattern
 import cangjie_compiler::parse.ConstPattern as ParseConstPattern
 import cangjie_compiler::parse.Pattern as ParsePattern
+import cangjie_compiler::parse.EnumPattern as ParseEnumPattern
 import cangjie_compiler::parse.MatchExpr as ParseMatchExpr
 import cangjie_compiler::parse.MatchCase as ParseMatchCase
 import cangjie_compiler::parse.Block as ParseBlock
@@ -87,13 +89,35 @@ public func AdaptRealBodies(file: File, fileID: UInt64, sourceCode: String, sm: 
     }
 }
 
-// A registry of payload-less enum variants discovered among the file's top-level enum declarations.
-// `variantTags` maps each variant identifier to its Int64 tag (index within the enum). Only enums
-// whose every constructor is payload-less (no `(...)`) are registered for CUT 1 -- an enum with any
-// payload-carrying variant is skipped entirely so a `Some(Int64)`-style enum never mis-lowers as a
-// bare tag. A variant name that would collide across two enums is dropped from both to stay sound.
+// Tag/payload bit-packing for payload-carrying enum values. A payload-carrying enum value is encoded
+// in a single Int64 (so it crosses function param/return boundaries through the existing Int64 ABI,
+// which the unknown-type fallback gives an enum-typed signature). The low ENUM_TAG_BITS bits hold the
+// variant tag; the remaining high bits hold the (signed) payload. Decoding the payload uses an
+// arithmetic right shift (RSHIFT over a signed Int64 emits `ashr`), so small negative payloads would
+// round-trip too -- though the supported construction sites only build small non-negative payloads.
+// 8 tag bits allow up to 256 variants and leave 56 bits for the payload, ample for the supported
+// programs. A payload-less variant in such an enum encodes as just its tag (payload 0).
+let ENUM_TAG_BITS: Int64 = 8
+let ENUM_TAG_MASK: Int64 = 255 // (1 << ENUM_TAG_BITS) - 1
+
+// The payload classification of an enum constructor, used to gate construction/destructuring:
+//   NONE    -- payload-less (`| Red`), encodes as just its tag.
+//   INT     -- single Int64 payload (`| Some(Int64)`).
+//   STRING  -- single String payload (`| Text(String)`), CUT 3.
+let ENUM_PAYLOAD_NONE: Int64 = 0
+let ENUM_PAYLOAD_INT: Int64 = 1
+let ENUM_PAYLOAD_STRING: Int64 = 2
+
+// A registry of enum variants discovered among the file's top-level enum declarations. `variantTags`
+// maps each variant identifier to its Int64 tag (index within its enum); `variantPayloads` maps it to
+// its payload classification (NONE/INT/STRING). Only enums whose every constructor is payload-less or
+// carries a single Int64/String payload are registered -- an enum with a multi-field or other-typed
+// constructor is skipped entirely so it never mis-lowers. A variant name that collides across two
+// enums is dropped from both to stay sound. A payload-carrying enum value is encoded as a single
+// Int64 (tag in the low ENUM_TAG_BITS bits, payload above) so it travels through the Int64 ABI.
 private class EnumRegistry {
     let variantTags = HashMap<String, Int64>()
+    let variantPayloads = HashMap<String, Int64>()
 
     func isVariant(name: String): Bool {
         return variantTags.contains(name)
@@ -102,28 +126,46 @@ private class EnumRegistry {
     func tagOf(name: String): Option<Int64> {
         return variantTags.get(name)
     }
+
+    func payloadKindOf(name: String): Option<Int64> {
+        return variantPayloads.get(name)
+    }
+
+    // Whether `name` names a variant that carries a payload (Int or String).
+    func hasPayload(name: String): Bool {
+        match (variantPayloads.get(name)) {
+            case Some(k) => return k != ENUM_PAYLOAD_NONE
+            case None => return false
+        }
+    }
 }
 
-// Scan the parsed file's top-level enum decls, assigning each payload-less variant a distinct Int64
-// tag (its 0-based index within its enum). An enum that has any payload-carrying constructor is
-// skipped (left for a later cut). Variant-name collisions across enums are removed so an ambiguous
-// name is never treated as a single tag.
+// Scan the parsed file's top-level enum decls, assigning each variant a distinct Int64 tag (its
+// 0-based index within its enum) and a payload classification. An enum is registered only when every
+// one of its constructors is payload-less, single-Int64-payload, or single-String-payload; any enum
+// with an unsupported constructor (multi-field, or a non-Int64/String payload type) is skipped whole
+// (left on the existing path). Variant-name collisions across enums are removed so an ambiguous name
+// is never treated as a single tag/payload. `sourceCode` is sliced to read each constructor's payload
+// region (the parser does not retain enum-constructor param types on the AST).
 private func collectEnumRegistry(parsedFile: ParseFile): EnumRegistry {
     let registry = EnumRegistry()
     let collided = HashSet<String>()
     for (decl in parsedFile.decls) {
         if (let Some(enumDecl) <- (decl as ParseEnumDecl)) {
-            // Reject the whole enum if any constructor carries a payload (`Name(...)`). The parser
-            // records a constructor's end past its closing `)` when it has params, so a payload-less
-            // constructor's end coincides with the end of its identifier.
-            var allPayloadLess = true
+            // Classify each constructor's payload; reject the whole enum on any unsupported shape so a
+            // partially-supported enum never registers (keeps construction/match decisions sound).
+            let payloads = ArrayList<Int64>()
+            var enumOk = true
             for (ctor in enumDecl.constructors) {
-                if (ctor.identifier.End() != ctor.end) {
-                    allPayloadLess = false
-                    break
+                let kind = classifyEnumCtorPayload(ctor)
+                match (kind) {
+                    case Some(k) => payloads.add(k)
+                    case None =>
+                        enumOk = false
+                        break
                 }
             }
-            if (!allPayloadLess) {
+            if (!enumOk) {
                 continue
             }
             var tag: Int64 = 0
@@ -134,6 +176,7 @@ private func collectEnumRegistry(parsedFile: ParseFile): EnumRegistry {
                         collided.add(name)
                     } else {
                         registry.variantTags[name] = tag
+                        registry.variantPayloads[name] = payloads[tag]
                     }
                 }
                 tag++
@@ -142,8 +185,35 @@ private func collectEnumRegistry(parsedFile: ParseFile): EnumRegistry {
     }
     for (name in collided) {
         registry.variantTags.remove(name)
+        registry.variantPayloads.remove(name)
     }
     return registry
+}
+
+// Classify an enum constructor's payload from its parsed payload-type list (recorded by the parser on
+// the constructor VarDecl). Returns NONE for a payload-less constructor (`| Red`), INT for a single
+// `Int64`/`Int` payload, or STRING for a single `String` payload. Returns None (reject the enum) for
+// anything else: a multi-field constructor, or a payload of an unsupported type.
+private func classifyEnumCtorPayload(ctor: ParseDecl): Option<Int64> {
+    let varDecl = match (ctor as ParseVarDecl) {
+        case Some(v) => v
+        case None => return None
+    }
+    let types = varDecl.constructorTypes
+    if (types.isEmpty()) {
+        return Some(ENUM_PAYLOAD_NONE)
+    }
+    if (types.size != 1) {
+        return None // multi-field constructor, out of grammar
+    }
+    let typeName = types[0].ToString().trimAscii()
+    if (typeName == "Int64" || typeName == "Int") {
+        return Some(ENUM_PAYLOAD_INT)
+    }
+    if (typeName == "String") {
+        return Some(ENUM_PAYLOAD_STRING)
+    }
+    return None
 }
 
 // Whether the parsed function declares a `String` return type.
@@ -637,6 +707,10 @@ private class MatchArm {
     let isCatchAll: Bool
     let bindingName: Option<String>
     let body: ArrayList<ChirStmtSpec>
+    // For a destructuring enum-constructor arm `case Ctor(n) =>`: the name `n` bound to the variant's
+    // decoded payload (`$sel >> ENUM_TAG_BITS`). The arm matches on its tag (held in `literals`); the
+    // payload binding is prepended to the arm body when the tag matches. None for non-destructuring arms.
+    var payloadBindingName: Option<String> = None
 
     init(literals: ArrayList<Int64>, isCatchAll: Bool, bindingName: Option<String>,
         body: ArrayList<ChirStmtSpec>) {
@@ -645,6 +719,70 @@ private class MatchArm {
         this.bindingName = bindingName
         this.body = body
     }
+}
+
+// Whether any pattern in the match destructures an enum constructor (`case Ctor(...) =>`, an
+// EnumPattern). Such a match is over a payload-carrying enum, so tag comparisons must mask off the
+// payload bits (`($sel & ENUM_TAG_MASK) == tag`) rather than compare the whole encoded value. A match
+// with only bare-variant / literal / wildcard patterns keeps the existing direct-compare path so the
+// already-verified payload-less enum and Int64-literal matches stay byte-for-byte unchanged.
+private func matchUsesTagMask(matchExpr: ParseMatchExpr): Bool {
+    for (matchCase in matchExpr.matchCases) {
+        for (pattern in matchCase.patterns) {
+            if (let Some(_) <- (pattern as ParseEnumPattern)) {
+                return true
+            }
+        }
+    }
+    return false
+}
+
+// Parse a destructuring enum-constructor pattern `case Ctor(binding) =>` into (tag, payloadBinding).
+// Only a single-payload variant (Int payload for CUT 1) destructured by a single VarPattern or
+// WildcardPattern is supported. Returns None for anything else (multi-field, nested, type args, an
+// unknown constructor, a String payload) so the whole match falls back. A wildcard payload (`case
+// Ctor(_) =>`) matches the tag with no binding.
+private func enumPatternMatch(pattern: ParsePattern, scope: AdaptScope): Option<(Int64, Option<String>)> {
+    let enumPat = match (pattern as ParseEnumPattern) {
+        case Some(p) => p
+        case None => return None
+    }
+    // A qualified constructor (`Color.Red(...)`) records more than one constructor part; only a
+    // simple unqualified constructor is supported. Type arguments (`Some<Int64>(...)`) are rejected.
+    if (!enumPat.typeArguments.isEmpty() || enumPat.constructorParts.size > 1) {
+        return None
+    }
+    let ctorName = enumPat.constructor.Val()
+    if (!scope.isEnumVariant(ctorName)) {
+        return None
+    }
+    let payloadKind = match (scope.enums.payloadKindOf(ctorName)) {
+        case Some(k) => k
+        case None => return None
+    }
+    // CUT 1 destructuring supports a single Int payload only; a String payload waits for CUT 3.
+    if (payloadKind != ENUM_PAYLOAD_INT) {
+        return None
+    }
+    let tag = match (scope.enums.tagOf(ctorName)) {
+        case Some(t) => t
+        case None => return None
+    }
+    if (enumPat.patterns.size != 1) {
+        return None
+    }
+    let sub = enumPat.patterns[0]
+    if (let Some(varPat) <- (sub as ParseVarPattern)) {
+        let n = varPat.identifier.Val()
+        if (n.isEmpty()) {
+            return None
+        }
+        return Some((tag, Some(n)))
+    }
+    if (let Some(_) <- (sub as ParseWildcardPattern)) {
+        return Some((tag, None))
+    }
+    return None
 }
 
 // Desugar a statement-position `match (sel) { case L => ... case _ => ... }` over an Int64 selector
@@ -674,6 +812,10 @@ private func matchIsExhaustiveEnum(matchExpr: ParseMatchExpr, arms: ArrayList<Ma
     }
     for (matchCase in matchExpr.matchCases) {
         for (pattern in matchCase.patterns) {
+            // A destructuring enum-constructor pattern (`case Ctor(n) =>`) is over an enum.
+            if (let Some(_) <- (pattern as ParseEnumPattern)) {
+                return true
+            }
             if (let Some(varPat) <- (pattern as ParseVarPattern)) {
                 if (scope.isEnumVariant(varPat.identifier.Val())) {
                     return true
@@ -714,6 +856,7 @@ private func normalizeMatchArms(matchExpr: ParseMatchExpr, scope: AdaptScope): O
         let literals = ArrayList<Int64>()
         var isCatchAll = false
         var bindingName: Option<String> = None
+        var payloadBindingName: Option<String> = None
         for (pattern in matchCase.patterns) {
             if (let Some(constPat) <- (pattern as ParseConstPattern)) {
                 let lit = match (constPat.literal) {
@@ -726,6 +869,14 @@ private func normalizeMatchArms(matchExpr: ParseMatchExpr, scope: AdaptScope): O
                 }
             } else if (let Some(_) <- (pattern as ParseWildcardPattern)) {
                 isCatchAll = true
+            } else if (let Some((tag, payloadName)) <- enumPatternMatch(pattern, scope)) {
+                // A destructuring enum-constructor pattern `case Ctor(n) =>` / `case Ctor(_) =>`:
+                // match the variant's tag and (optionally) bind the decoded payload to `n`.
+                literals.add(tag)
+                if (matchCase.patterns.size != 1) {
+                    return None // a destructuring pattern cannot be OR-combined (`case A(n) | B =>`)
+                }
+                payloadBindingName = payloadName
             } else if (let Some(varPat) <- (pattern as ParseVarPattern)) {
                 let n = varPat.identifier.Val()
                 if (n.isEmpty()) {
@@ -741,7 +892,7 @@ private func normalizeMatchArms(matchExpr: ParseMatchExpr, scope: AdaptScope): O
                     bindingName = Some(n)
                 }
             } else {
-                // Enum/tuple/type/etc. patterns are out of grammar.
+                // Tuple/type/etc. patterns are out of grammar.
                 return None
             }
         }
@@ -753,15 +904,21 @@ private func normalizeMatchArms(matchExpr: ParseMatchExpr, scope: AdaptScope): O
         if (isCatchAll && idx != matchExpr.matchCases.size) {
             return None
         }
-        // Adapt the arm body, seeding the binding name as an in-scope Int64 local for var patterns.
+        // Adapt the arm body, seeding the binding name as an in-scope Int64 local for var patterns and
+        // the payload binding name for destructuring enum patterns.
         if (let Some(name) <- bindingName) {
+            scope.locals.add(name)
+        }
+        if (let Some(name) <- payloadBindingName) {
             scope.locals.add(name)
         }
         let bodyStmts = match (adaptStatements(armBlock, scope)) {
             case Some(s) => s
             case None => return None
         }
-        arms.add(MatchArm(literals, isCatchAll, bindingName, bodyStmts))
+        let arm = MatchArm(literals, isCatchAll, bindingName, bodyStmts)
+        arm.payloadBindingName = payloadBindingName
+        arms.add(arm)
     }
     return Some(arms)
 }
@@ -785,6 +942,10 @@ private func buildMatchChain(matchExpr: ParseMatchExpr, arms: ArrayList<MatchArm
         case Some(e) => e
         case None => return None
     }
+    // A match that destructures any enum constructor is over a payload-carrying enum: tag tests mask
+    // off the payload bits, and a `case Ctor(n) =>` arm binds the decoded payload. A match with only
+    // bare-variant / literal / wildcard patterns keeps the direct-compare path (no regression).
+    let useTagMask = matchUsesTagMask(matchExpr)
     let out = ArrayList<ChirStmtSpec>()
     let selName = scope.freshTemp("match_sel")
     scope.locals.add(selName)
@@ -814,7 +975,7 @@ private func buildMatchChain(matchExpr: ParseMatchExpr, arms: ArrayList<MatchArm
         let arm = arms[i]
         // A catch-all may only be the final arm (already enforced in normalize), so any arm here has
         // literal values.
-        let cond = match (literalCond(selName, arm.literals)) {
+        let cond = match (literalCond(selName, arm.literals, useTagMask)) {
             case Some(c) => c
             case None => return None
         }
@@ -832,30 +993,51 @@ private func buildMatchChain(matchExpr: ParseMatchExpr, arms: ArrayList<MatchArm
     return Some(out)
 }
 
-// The arm body, prefixed with `let <binding> = $sel` when the arm is a `case n =>` var pattern so
-// the bound name reads the selector value inside the arm.
+// The arm body, prefixed with the bindings it introduces so they read from the selector temp:
+//   - a `case n =>` var-binding catch-all prepends `let n = $sel` (the whole selector value);
+//   - a `case Ctor(p) =>` destructuring arm prepends `let p = $sel >> ENUM_TAG_BITS` (the decoded
+//     payload). Both may be present only on distinct arms, never together on one arm.
 private func withBinding(arm: MatchArm, selName: String): ArrayList<ChirStmtSpec> {
+    var prefixed = false
+    let body = ArrayList<ChirStmtSpec>()
     match (arm.bindingName) {
         case Some(name) =>
-            let body = ArrayList<ChirStmtSpec>()
             body.add(ChirStmtSpec.Let(name, ChirExprSpec.Ref(selName), isVar: false))
-            for (s in arm.body) {
-                body.add(s)
-            }
-            return body
-        case None => return arm.body
+            prefixed = true
+        case None => ()
     }
+    match (arm.payloadBindingName) {
+        case Some(name) =>
+            body.add(ChirStmtSpec.Let(name, enumPayloadDecode(ChirExprSpec.Ref(selName)), isVar: false))
+            prefixed = true
+        case None => ()
+    }
+    if (!prefixed) {
+        return arm.body
+    }
+    for (s in arm.body) {
+        body.add(s)
+    }
+    return body
 }
 
-// Build the OR-combined equality condition `$sel == L0 || $sel == L1 || ...` for an arm's literal
-// values. Requires at least one literal.
-private func literalCond(selName: String, literals: ArrayList<Int64>): Option<ChirExprSpec> {
+// Build the OR-combined equality condition for an arm's literal values. With `useTagMask` the test
+// compares the selector's decoded tag (`($sel & ENUM_TAG_MASK) == L`), so a payload-carrying enum
+// value matches its variant regardless of the payload bits; otherwise it compares the whole selector
+// value (`$sel == L`), preserving the existing payload-less / Int64-literal match behavior. Requires
+// at least one literal.
+private func literalCond(selName: String, literals: ArrayList<Int64>, useTagMask: Bool): Option<ChirExprSpec> {
     if (literals.isEmpty()) {
         return None
     }
     var acc: Option<ChirExprSpec> = None
     for (lit in literals) {
-        let eq = ChirExprSpec.Binary(ChirExprKind.EQUAL, ChirExprSpec.Ref(selName), ChirExprSpec.Literal(lit))
+        let lhs = if (useTagMask) {
+            enumTagDecode(ChirExprSpec.Ref(selName))
+        } else {
+            ChirExprSpec.Ref(selName)
+        }
+        let eq = ChirExprSpec.Binary(ChirExprKind.EQUAL, lhs, ChirExprSpec.Literal(lit))
         acc = match (acc) {
             case Some(prev) => Some(ChirExprSpec.Binary(ChirExprKind.OR, prev, eq))
             case None => Some(eq)
@@ -909,6 +1091,7 @@ private func adaptMatchValue(matchExpr: ParseMatchExpr, scope: AdaptScope): Opti
         let literals = ArrayList<Int64>()
         var isCatchAll = false
         var bindingName: Option<String> = None
+        var payloadBindingName: Option<String> = None
         for (pattern in matchCase.patterns) {
             if (let Some(constPat) <- (pattern as ParseConstPattern)) {
                 let lit = match (constPat.literal) {
@@ -921,6 +1104,14 @@ private func adaptMatchValue(matchExpr: ParseMatchExpr, scope: AdaptScope): Opti
                 }
             } else if (let Some(_) <- (pattern as ParseWildcardPattern)) {
                 isCatchAll = true
+            } else if (let Some((tag, payloadName)) <- enumPatternMatch(pattern, scope)) {
+                // A destructuring enum-constructor pattern `case Ctor(n) => <expr>`: match the tag and
+                // bind the decoded payload to `n` for use in the yielded value expression.
+                literals.add(tag)
+                if (matchCase.patterns.size != 1) {
+                    return None
+                }
+                payloadBindingName = payloadName
             } else if (let Some(varPat) <- (pattern as ParseVarPattern)) {
                 let n = varPat.identifier.Val()
                 if (n.isEmpty()) {
@@ -945,8 +1136,12 @@ private func adaptMatchValue(matchExpr: ParseMatchExpr, scope: AdaptScope): Opti
             return None
         }
         // The arm body must be exactly one expression statement (the yielded value). Seed a var
-        // binding name first so `case n => n + 1` resolves the binding inside the value expression.
+        // binding name first so `case n => n + 1` resolves the binding inside the value expression,
+        // and the payload binding for a destructuring `case Ctor(n) => ... n ...`.
         if (let Some(name) <- bindingName) {
+            scope.locals.add(name)
+        }
+        if (let Some(name) <- payloadBindingName) {
             scope.locals.add(name)
         }
         if (armBlock.body.size != 1) {
@@ -966,7 +1161,9 @@ private func adaptMatchValue(matchExpr: ParseMatchExpr, scope: AdaptScope): Opti
         }
         let armStmts = ArrayList<ChirStmtSpec>()
         armStmts.add(ChirStmtSpec.Assign(resName, valueSpec))
-        arms.add(MatchArm(literals, isCatchAll, bindingName, armStmts))
+        let arm = MatchArm(literals, isCatchAll, bindingName, armStmts)
+        arm.payloadBindingName = payloadBindingName
+        arms.add(arm)
     }
     // Declare the result var (initialized to 0; every reachable path assigns it) before the chain.
     let resInit = ChirStmtSpec.Let(resName, ChirExprSpec.Literal(0), isVar: true)
@@ -1107,6 +1304,11 @@ private func adaptExpr(expr: ParseExpr, scope: AdaptScope): Option<ChirExprSpec>
     if (let Some(tag) <- enumVariantTag(expr, scope)) {
         scope.needsRuntime = true
         return Some(ChirExprSpec.Literal(tag))
+    }
+    // Constructing a payload-carrying variant `Ctor(<payload>)`: encode the value as a single Int64
+    // = (payload << ENUM_TAG_BITS) | tag. The Int64 ABI then carries it through params/returns/locals.
+    if (let Some(spec) <- adaptEnumConstruction(expr, scope)) {
+        return Some(spec)
     }
     if (let Some(refName) <- localRefName(expr, scope)) {
         return Some(ChirExprSpec.Ref(refName))
@@ -1669,20 +1871,104 @@ private func enumVariantPatternTag(varPat: ParseVarPattern, scope: AdaptScope): 
     return None
 }
 
-// If `expr` is a bare RefExpr naming a payload-less enum variant in scope (and not shadowed by a
-// local), return that variant's Int64 tag; otherwise None. A variant reference with type arguments
-// (`Green<...>`) is not a simple value reference and is rejected.
+// If `expr` is a bare RefExpr naming a payload-LESS enum variant in scope (and not shadowed by a
+// local), return that variant's encoded Int64 value; otherwise None. A payload-less variant -- whether
+// in an all-payload-less enum (`Green`) or a payload-carrying enum (`None`) -- encodes as just its tag
+// (the tag occupies the low ENUM_TAG_BITS bits with a zero payload), so the encoded value equals the
+// tag. A bare reference to a payload-CARRYING variant (`Some` with no args) is a partial application,
+// not a value, and is rejected. A variant reference with type arguments (`Green<...>`) is rejected.
 private func enumVariantTag(expr: ParseExpr, scope: AdaptScope): Option<Int64> {
     if (let Some(refExpr) <- (expr as ParseRefExpr)) {
         if (!refExpr.typeArguments.isEmpty()) {
             return None
         }
         let name = refExpr.identifier.Val()
-        if (scope.isEnumVariant(name)) {
+        if (scope.isEnumVariant(name) && !scope.enums.hasPayload(name)) {
             return scope.enums.tagOf(name)
         }
     }
     return None
+}
+
+// Construct a payload-carrying variant `Ctor(<payload>)`: encode the value as a single Int64 =
+// (payload << ENUM_TAG_BITS) | tag, lowered as `(<payload-expr> LSHIFT bits) BITOR tag`. The callee
+// must be a bare RefExpr naming a single-payload variant in scope (not shadowed by a local, no type
+// arguments) called with exactly one positional argument whose classified value matches the variant's
+// payload type (Int64 vs String). Anything else returns None (fall back). Constructing a value is
+// genuine runtime computation -> promote. Returns None for CUT 3 (String payload) until that cut.
+private func adaptEnumConstruction(expr: ParseExpr, scope: AdaptScope): Option<ChirExprSpec> {
+    let call = match (expr as ParseCallExpr) {
+        case Some(c) => c
+        case None => return None
+    }
+    let base = match (call.baseFunc) {
+        case Some(b) => b
+        case None => return None
+    }
+    let calleeRef = match (base as ParseRefExpr) {
+        case Some(r) => r
+        case None => return None
+    }
+    if (!calleeRef.typeArguments.isEmpty()) {
+        return None
+    }
+    let name = calleeRef.identifier.Val()
+    if (!scope.isEnumVariant(name)) {
+        return None
+    }
+    let payloadKind = match (scope.enums.payloadKindOf(name)) {
+        case Some(k) => k
+        case None => return None
+    }
+    if (payloadKind == ENUM_PAYLOAD_NONE) {
+        return None // payload-less variant cannot be applied to an argument
+    }
+    let tag = match (scope.enums.tagOf(name)) {
+        case Some(t) => t
+        case None => return None
+    }
+    if (call.args.size != 1) {
+        return None
+    }
+    let arg = call.args[0]
+    if (!arg.name.Empty() || arg.withInout) {
+        return None
+    }
+    let argExpr = match (arg.expr) {
+        case Some(e) => e
+        case None => return None
+    }
+    // Gate the argument against the declared payload type so a value never mis-encodes.
+    if (payloadKind == ENUM_PAYLOAD_INT) {
+        if (exprIsString(argExpr, scope) || exprIsBool(argExpr, scope)) {
+            return None
+        }
+        let payloadSpec = match (adaptExpr(argExpr, scope)) {
+            case Some(e) => e
+            case None => return None
+        }
+        scope.needsRuntime = true
+        // (payload << ENUM_TAG_BITS) | tag
+        let shifted = ChirExprSpec.Binary(ChirExprKind.LSHIFT, payloadSpec,
+            ChirExprSpec.Literal(ENUM_TAG_BITS))
+        return Some(ChirExprSpec.Binary(ChirExprKind.BITOR, shifted, ChirExprSpec.Literal(tag)))
+    }
+    // ENUM_PAYLOAD_STRING is handled in CUT 3 (a String payload cannot be packed into the Int64
+    // encoding); leave it on the existing path for now.
+    return None
+}
+
+// Decode the payload Int64 out of an enum value reference: `<enumRef> RSHIFT ENUM_TAG_BITS`. RSHIFT
+// over a signed Int64 emits an arithmetic shift, so the payload sign-extends. Used to bind `case
+// Ctor(n) => ... n ...` to the variant's stored payload.
+private func enumPayloadDecode(enumRef: ChirExprSpec): ChirExprSpec {
+    return ChirExprSpec.Binary(ChirExprKind.RSHIFT, enumRef, ChirExprSpec.Literal(ENUM_TAG_BITS))
+}
+
+// Decode the tag Int64 out of an enum value reference: `<enumRef> BITAND ENUM_TAG_MASK`. Used to test
+// which variant a value is when matching.
+private func enumTagDecode(enumRef: ChirExprSpec): ChirExprSpec {
+    return ChirExprSpec.Binary(ChirExprKind.BITAND, enumRef, ChirExprSpec.Literal(ENUM_TAG_MASK))
 }
 
 private func localRefName(expr: ParseExpr, scope: AdaptScope): Option<String> {

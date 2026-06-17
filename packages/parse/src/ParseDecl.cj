@@ -746,8 +746,12 @@ extend ParserImpl {
         decl.identifier = ExpectIdentifierWithPos(decl)
         decl.begin = if (decl.begin.IsZero()) { decl.identifier.Begin() } else { decl.begin }
         if (Skip(TokenKind.LPAREN)) {
+            // An enum constructor's payload is a comma-separated list of TYPES (`Some(Int64)`,
+            // `Pair(Int64, String)`), not named parameters. Parse each as a type so primitive type
+            // keywords (Int64, Bool, ...) are accepted; a named-parameter form would mis-expect an
+            // identifier before the type and reject the payload.
             while (!Seeing(TokenKind.END) && !Seeing(TokenKind.RPAREN)) {
-                ParseFuncParam()
+                decl.constructorTypes.add(ParseType())
                 if (!Skip(TokenKind.COMMA)) { break }
             }
             decl.end = Expect(TokenKind.RPAREN, "expected ')' after enum constructor").End()

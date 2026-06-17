@@ -191,6 +191,10 @@ public open class VarDeclAbstract <: Decl {
 }
 
 public class VarDecl <: VarDeclAbstract {
+    // For an enum constructor with a payload (`Some(Int64)`, `Pair(Int64, String)`): the payload
+    // types in declaration order. Empty for a payload-less constructor or a plain variable decl.
+    public let constructorTypes: ArrayList<Type> = ArrayList<Type>()
+
     public init() { super(ASTKind.VAR_DECL) }
 }
 
