@@ -47,7 +47,10 @@ private func CustomTypeDefIdentifierWithoutPrefix(def: CustomTypeDef): String {
     if (identifier.isEmpty()) {
         throw IllegalArgumentException("Custom type identifier has no prefix to strip.")
     }
-    return identifier[1..]
+    if (StartsWith(identifier, MANGLE_AT_PREFIX)) {
+        return identifier[MANGLE_CHAR_LEN..]
+    }
+    return identifier
 }
 
 private func sortedMangledClassTypes(types: ArrayList<ClassType>, genericsTypeStack: ArrayList<String>): ArrayList<String> {

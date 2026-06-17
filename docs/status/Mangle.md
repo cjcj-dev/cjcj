@@ -101,6 +101,10 @@ Implemented:
   concrete `CPointerType` element API.
 - Aligned real-CHIR custom type qualified-name rendering with C++ generic-instantiation behavior by using
   the generic declaration package when `CustomTypeDef.GetGenericDecl()` is present.
+- Aligned real-CHIR custom type identifier normalization with the C++ `CustomTypeDef::GetIdentifierWithoutPrefix`
+  contract for `@_C...` names while preserving self-hosted `_C...` and source-name identifiers, and made
+  qualified-name rendering prefer public source identifiers while falling back to normalized mangled names
+  for private/internal-style definitions.
 - Aligned AST-facing package export-id generation with the C++ package walker by visiting real AST nodes,
   requiring `Ty.IsTyCorrect`, and then copying export IDs back through the adapter.
 - Aligned parser-AST malformed type-annotation handling with C++ assertion/null-check behavior for missing

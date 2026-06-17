@@ -15,7 +15,7 @@ public let MANGLE_TUPLE_STR: String = "Tuple"
 public let MANGLE_BOX_STR: String = "Box"
 
 public func StripCangjiePrefix(identifier: String): String {
-    if (identifier.size >= MANGLE_PREFIX_LEN) {
+    if (StartsWith(identifier, MANGLE_CANGJIE_PREFIX)) {
         return identifier[MANGLE_PREFIX_LEN..]
     }
     return identifier
@@ -47,15 +47,23 @@ public func ManglePrimitive(kind: TypeKind): String {
 }
 
 private func IdentifierForMangledCHIRType(def: CustomTypeDef): String {
-    return StripCangjiePrefix(CustomTypeDefIdentifierForTypeMangle(def))
+    return StripCangjiePrefix(CustomTypeDefMangledIdentifier(def))
 }
 
-private func CustomTypeDefIdentifierForTypeMangle(def: CustomTypeDef): String {
+private func CustomTypeDefMangledIdentifier(def: CustomTypeDef): String {
     let identifier = def.GetIdentifier()
     if (StartsWith(identifier, MANGLE_AT_PREFIX)) {
         return identifier[MANGLE_CHAR_LEN..]
     }
     return identifier
+}
+
+private func CustomTypeDefIdentifierForQualifiedName(def: CustomTypeDef): String {
+    let srcCodeIdentifier = def.GetSrcCodeIdentifier()
+    if (!srcCodeIdentifier.isEmpty() && !def.TestAttr(Attribute.PRIVATE)) {
+        return srcCodeIdentifier
+    }
+    return CustomTypeDefMangledIdentifier(def)
 }
 
 private func MangleGenericTypeByName(srcCodeIdentifier: String, genericsTypeStack: ArrayList<String>,
@@ -237,5 +245,5 @@ public func GetCustomTypeIdentifier(typeInfo: CustomType): String {
 }
 
 public func GetCustomTypeDefIdentifier(def: CustomTypeDef): String {
-    return CustomTypeDefIdentifierForTypeMangle(def)
+    return CustomTypeDefIdentifierForQualifiedName(def)
 }
