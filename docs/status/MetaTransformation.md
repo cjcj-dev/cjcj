@@ -52,6 +52,10 @@ Implemented:
 - Added plugin-info validation and registration helpers (`HasRegisterCallback`, `IsValidForVersion`,
   `HasVersion`, `VersionMatches`, `IsValid`, and `RegisterTo`) so the version/callback checks used by
   the C++ plugin loader are available in the self-hosted API without using null.
+- Refined registration helper behavior: `RegisterTo` is now the required, void-style registration path
+  and throws if plugin info has no callback, while `TryRegisterTo` preserves a checked boolean path for
+  callers that validate malformed plugin info before invoking it. This better matches the C++ loader's
+  non-optional callback invocation after plugin validation.
 
 Known fidelity caveats:
 

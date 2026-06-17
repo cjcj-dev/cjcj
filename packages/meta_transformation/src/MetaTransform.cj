@@ -156,12 +156,18 @@ public struct MetaTransformPluginInfo {
         return IsValidForVersion(CANGJIE_VERSION)
     }
 
-    public func RegisterTo(builder: MetaTransformPluginBuilder): Bool {
+    public func TryRegisterTo(builder: MetaTransformPluginBuilder): Bool {
         if (let Some(callback) <- registerTo) {
             callback(builder)
             return true
         }
         return false
+    }
+
+    public func RegisterTo(builder: MetaTransformPluginBuilder): Unit {
+        if (!TryRegisterTo(builder)) {
+            throw IllegalStateException("MetaTransform plugin info has no registration callback")
+        }
     }
 }
 
