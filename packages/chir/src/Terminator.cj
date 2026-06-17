@@ -99,6 +99,11 @@ public class GoTo <: Terminator {
     public func GetDestination(): Block {
         return GetSuccessor(0)
     }
+
+    public override func Clone(builder: CHIRBuilder, parent: Block): Expression {
+        let cloned = builder.CreateGoTo(GetDestination(), parent)
+        return FinishExpressionClone(this, cloned)
+    }
 }
 
 public class Branch <: Terminator {
@@ -137,6 +142,12 @@ public class Branch <: Terminator {
             return SourceExprName(sourceExpr)
         }
         return base + " " + SourceExprName(sourceExpr)
+    }
+
+    public override func Clone(builder: CHIRBuilder, parent: Block): Expression {
+        let cloned = builder.CreateBranch(GetCondition(), GetTrueBlock(), GetFalseBlock(), parent)
+        cloned.SetSourceExpr(GetSourceExpr())
+        return FinishExpressionClone(this, cloned)
     }
 }
 
@@ -196,11 +207,26 @@ public class MultiBranch <: Terminator {
         }
         return JoinStrings(parts, ", ")
     }
+
+    public override func Clone(builder: CHIRBuilder, parent: Block): Expression {
+        let cloned = builder.CreateMultiBranch(GetCondition(), GetDefaultBlock(), GetCaseVals(), GetNormalBlocks(),
+            parent)
+        return FinishExpressionClone(this, cloned)
+    }
 }
 
 public class Exit <: Terminator {
     public init(value: Option<Value>, parent: Option<Block>) {
         super(ExprKind.EXIT, MakeOptionalTermOperands(value), ArrayList<Block>(), parent)
+    }
+
+    public override func Clone(builder: CHIRBuilder, parent: Block): Expression {
+        var exitValue: Option<Value> = None
+        if (GetNumOfOperands() > 0) {
+            exitValue = GetOperand(0)
+        }
+        let cloned = builder.CreateExit(exitValue, parent)
+        return FinishExpressionClone(this, cloned)
     }
 }
 
@@ -222,6 +248,15 @@ public class RaiseException <: Terminator {
             return None
         }
         return GetSuccessor(0)
+    }
+
+    public override func Clone(builder: CHIRBuilder, parent: Block): Expression {
+        let cloned = if (let Some(exceptionBlock) <- GetExceptionBlock()) {
+            builder.CreateRaiseException(GetExceptionValue(), exceptionBlock, parent)
+        } else {
+            builder.CreateRaiseException(GetExceptionValue(), parent)
+        }
+        return FinishExpressionClone(this, cloned)
     }
 }
 
@@ -315,6 +350,14 @@ public class ApplyWithException <: FuncCallWithException {
         parts.add(TerminatorValueIdsToString(GetArgs()))
         return JoinStrings(parts, ", ")
     }
+
+    public override func Clone(builder: CHIRBuilder, parent: Block): Expression {
+        let callContext = FuncCallContext(args: GetArgs(), instTypeArgs: GetInstantiatedTypeArgs(),
+            thisType: GetThisType())
+        let cloned = builder.CreateApplyWithException(RequiredResultType(this), GetCallee(), callContext,
+            GetSuccessBlock(), GetErrorBlock(), parent)
+        return FinishExpressionClone(this, cloned)
+    }
 }
 
 public open class DynamicDispatchWithException <: FuncCallWithException {
@@ -369,6 +412,20 @@ public class InvokeWithException <: DynamicDispatchWithException {
     public override func GetArgs(): ArrayList<Value> {
         return GetOperands()
     }
+
+    public override func Clone(builder: CHIRBuilder, parent: Block): Expression {
+        let funcContext = FuncCallContext(args: ValuesWithoutFirst(GetArgs()), instTypeArgs: GetInstantiatedTypeArgs(),
+            thisType: GetThisType())
+        let methodContext = FuncSigInfo(GetMethodType(), funcName: GetMethodName(),
+            genericTypeParams: GetGenericTypeParams())
+        let invokeContext = InvokeCallContext(GetObject(), funcContext, methodContext)
+        let cloned = builder.CreateInvokeWithException(RequiredResultType(this), invokeContext, GetSuccessBlock(),
+            GetErrorBlock(), parent)
+        if (let Some(offset) <- GetVirtualMethodOffset()) {
+            cloned.SetVirtualMethodOffset(offset)
+        }
+        return FinishExpressionClone(this, cloned)
+    }
 }
 
 public class InvokeStaticWithException <: DynamicDispatchWithException {
@@ -388,6 +445,20 @@ public class InvokeStaticWithException <: DynamicDispatchWithException {
             idx++
         }
         return out
+    }
+
+    public override func Clone(builder: CHIRBuilder, parent: Block): Expression {
+        let funcContext = FuncCallContext(args: GetArgs(), instTypeArgs: GetInstantiatedTypeArgs(),
+            thisType: GetThisType())
+        let methodContext = FuncSigInfo(GetMethodType(), funcName: GetMethodName(),
+            genericTypeParams: GetGenericTypeParams())
+        let invokeContext = InvokeCallContext(GetRTTIValue(), funcContext, methodContext)
+        let cloned = builder.CreateInvokeStaticWithException(RequiredResultType(this), invokeContext,
+            GetSuccessBlock(), GetErrorBlock(), parent)
+        if (let Some(offset) <- GetVirtualMethodOffset()) {
+            cloned.SetVirtualMethodOffset(offset)
+        }
+        return FinishExpressionClone(this, cloned)
     }
 }
 
@@ -432,6 +503,17 @@ public class IntOpWithException <: ExpressionWithException {
         }
         return base + " " + opText
     }
+
+    public override func Clone(builder: CHIRBuilder, parent: Block): Expression {
+        let cloned = if (let Some(rhs) <- GetRHSOperand()) {
+            builder.CreateBinaryIntOpWithException(RequiredResultType(this), GetOpKind(), GetLHSOperand(), rhs,
+                GetSuccessBlock(), GetErrorBlock(), parent)
+        } else {
+            builder.CreateUnaryIntOpWithException(RequiredResultType(this), GetOpKind(), GetLHSOperand(),
+                GetSuccessBlock(), GetErrorBlock(), parent)
+        }
+        return FinishExpressionClone(this, cloned)
+    }
 }
 
 public class TypeCastWithException <: ExpressionWithException {
@@ -452,6 +534,12 @@ public class TypeCastWithException <: ExpressionWithException {
             return res.GetType()
         }
         return None
+    }
+
+    public override func Clone(builder: CHIRBuilder, parent: Block): Expression {
+        let cloned = builder.CreateTypeCastWithException(RequiredResultType(this), GetSourceValue(),
+            GetSuccessBlock(), GetErrorBlock(), parent)
+        return FinishExpressionClone(this, cloned)
     }
 }
 
@@ -485,6 +573,14 @@ public class IntrinsicWithException <: ExpressionWithException {
         parts.add(TerminatorValueIdsToString(GetArgs()))
         return JoinStrings(parts, ", ")
     }
+
+    public override func Clone(builder: CHIRBuilder, parent: Block): Expression {
+        let callContext = IntrisicCallContext(kind: GetIntrinsicKind(), args: GetArgs(),
+            instTypeArgs: GetInstantiatedTypeArgs())
+        let cloned = builder.CreateIntrinsicWithException(RequiredResultType(this), callContext, GetSuccessBlock(),
+            GetErrorBlock(), parent)
+        return FinishExpressionClone(this, cloned)
+    }
 }
 
 public class AllocateWithException <: ExpressionWithException {
@@ -501,6 +597,12 @@ public class AllocateWithException <: ExpressionWithException {
 
     public override func OperandsToString(): String {
         return allocatedType.ToString()
+    }
+
+    public override func Clone(builder: CHIRBuilder, parent: Block): Expression {
+        let cloned = builder.CreateAllocateWithException(RequiredResultType(this), GetType(), GetSuccessBlock(),
+            GetErrorBlock(), parent)
+        return FinishExpressionClone(this, cloned)
     }
 }
 
@@ -522,6 +624,12 @@ public class RawArrayAllocateWithException <: ExpressionWithException {
 
     public override func OperandsToString(): String {
         return elementType.ToString() + ", " + GetSize().GetIdentifier()
+    }
+
+    public override func Clone(builder: CHIRBuilder, parent: Block): Expression {
+        let cloned = builder.CreateRawArrayAllocateWithException(RequiredResultType(this), GetElementType(), GetSize(),
+            GetSuccessBlock(), GetErrorBlock(), parent)
+        return FinishExpressionClone(this, cloned)
     }
 }
 
@@ -573,6 +681,20 @@ public class SpawnWithException <: ExpressionWithException {
             return base + " " + closureText
         }
         return base
+    }
+
+    public override func Clone(builder: CHIRBuilder, parent: Block): Expression {
+        let cloned = if (let Some(spawnArg) <- GetSpawnArg()) {
+            builder.CreateSpawnWithException(RequiredResultType(this), GetFuture(), spawnArg, GetSuccessBlock(),
+                GetErrorBlock(), parent)
+        } else {
+            builder.CreateSpawnWithException(RequiredResultType(this), GetFuture(), GetSuccessBlock(),
+                GetErrorBlock(), parent)
+        }
+        if (let Some(fn) <- GetExecuteClosure()) {
+            cloned.SetExecuteClosure(fn)
+        }
+        return FinishExpressionClone(this, cloned)
     }
 }
 

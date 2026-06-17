@@ -51,6 +51,11 @@ Implemented in this pass:
 - Deepened `Lambda` with function type, identifiers, source identifier, generic params, local/compile-time flags,
   parameter-default host links, body initialization, return-value tracking, lambda-owned parameter creation, and
   C++-style captured-variable discovery that skips nested lambda bodies.
+- Added concrete C++-style clone overrides for non-structured expression and terminator IR nodes, including unary/binary
+  ops, constants, memory access, calls, virtual dispatch, RTTI, casts, boxing/transforms, tuples/fields, raw-array/VArray
+  nodes, intrinsics, debug/spawn, normal terminators, and exceptional terminators. Clones now rebuild through the matching
+  builder factory and carry base metadata plus result-local metadata forward instead of falling back to lossy generic
+  `Expression` cloning.
 
 De-isolation:
 
@@ -59,8 +64,9 @@ De-isolation:
 
 Known remaining gaps:
 
-- Full lambda body cloning/identifier regeneration and complete clone behavior for all expression subclasses remain
-  incomplete.
+- Structured `Lambda` and `ForIn*` clone paths still need faithful deep block-group cloning with C++ owner handling and
+  lambda identifier regeneration. `GetInstantiateValue.Clone` currently preserves instantiated types; it does not yet
+  implement the C++ inlining-aware outer-definition type substitution path.
 - Interpreter/codegen-specific intrinsic tables outside `IntrinsicKind.h`, such as AST FFI and concrete-width atomic
   lowering maps, still need downstream porting outside this IR node/type model slice.
 - Full C++ generic constraint solving, vtable search/update, inheritance traversal through extends, and precise
@@ -72,4 +78,4 @@ Known remaining gaps:
 
 Remaining `TODO(selfhost:CHIR)` markers in `packages/chir/src`: 0.
 
-Estimated real behavior coverage for this IR-model scope: 60%.
+Estimated real behavior coverage for this IR-model scope: 64%.
