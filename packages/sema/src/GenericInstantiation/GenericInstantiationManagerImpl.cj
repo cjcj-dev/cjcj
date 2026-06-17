@@ -121,18 +121,79 @@ private func applyPackageAttrs(decl: Decl, pkg: Package): Unit {
     decl.DisableAttr(Attribute.IMPORTED)
 }
 
+private func buildDefaultParamGenericsTyMap(funcDecl: FuncDecl): TypeSubst {
+    let out = TypeSubst()
+    if ((let None <- funcDecl.GetGeneric()) || (let None <- funcDecl.funcBody)) {
+        return out
+    }
+    let body = funcDecl.funcBody.getOrThrow()
+    if (body.paramLists.isEmpty()) {
+        return out
+    }
+    let ownerGeneric = funcDecl.GetGeneric().getOrThrow()
+    let ownerTypeParams = ownerGeneric.typeParameters
+    for (param in body.paramLists[0].params) {
+        if (let Some(desugarDecl) <- param.desugarDecl) {
+            if (let Some(desugarGeneric) <- desugarDecl.GetGeneric()) {
+                if (desugarGeneric.typeParameters.size == ownerTypeParams.size) {
+                    var idx: Int64 = 0
+                    while (idx < ownerTypeParams.size) {
+                        if (let Some(desugarParamTy) <- desugarGeneric.typeParameters[idx].GetTy()) {
+                            if (let Some(desugarGenTy) <- (desugarParamTy as GenericsTy)) {
+                                if (let Some(ownerParamTy) <- ownerTypeParams[idx].GetTy()) {
+                                    out.Put(desugarGenTy, ownerParamTy)
+                                }
+                            }
+                        }
+                        idx++
+                    }
+                }
+            }
+        }
+    }
+    return out
+}
+
+private func buildCloneGenericToGenericMap(decl: Decl): TypeSubst {
+    if (let Some(funcDecl) <- (decl as FuncDecl)) {
+        return buildDefaultParamGenericsTyMap(funcDecl)
+    }
+    return TypeSubst()
+}
+
+private func instantiateCloneTy(ty: Ty, typeManager: TypeManager, typeMapping: TypeSubst, g2gTyMap: TypeSubst): Ty {
+    if (!g2gTyMap.IsEmpty()) {
+        return typeManager.GetInstantiatedTy(typeManager.GetInstantiatedTy(ty, g2gTyMap), typeMapping)
+    }
+    return typeManager.GetInstantiatedTy(ty, typeMapping)
+}
+
+private func disableDefaultParamDesugarGenericAttr(decl: Decl): Unit {
+    if (let Some(funcDecl) <- (decl as FuncDecl)) {
+        if (let Some(body) <- funcDecl.funcBody) {
+            if (!body.paramLists.isEmpty()) {
+                for (param in body.paramLists[0].params) {
+                    if (let Some(desugarDecl) <- param.desugarDecl) {
+                        desugarDecl.DisableAttr(Attribute.GENERIC)
+                    }
+                }
+            }
+        }
+    }
+}
+
 private func updateClonedNode(genericNode: Node, clonedNode: Node, typeManager: TypeManager, typeMapping: TypeSubst,
-    pkg: Package): Unit {
+    g2gTyMap: TypeSubst, pkg: Package): Unit {
     if (let Some(sourceTy) <- genericNode.GetTy()) {
-        clonedNode.SetTy(typeManager.GetInstantiatedTy(sourceTy, typeMapping))
+        clonedNode.SetTy(instantiateCloneTy(sourceTy, typeManager, typeMapping, g2gTyMap))
     }
     if (let Some(refExpr) <- (clonedNode as NameReferenceExpr)) {
         if (let Some(parentTy) <- refExpr.matchedParentTy) {
-            refExpr.matchedParentTy = typeManager.GetInstantiatedTy(parentTy, typeMapping)
+            refExpr.matchedParentTy = instantiateCloneTy(parentTy, typeManager, typeMapping, g2gTyMap)
         }
         var idx: Int64 = 0
         while (idx < refExpr.instTys.size) {
-            refExpr.instTys[idx] = typeManager.GetInstantiatedTy(refExpr.instTys[idx], typeMapping)
+            refExpr.instTys[idx] = instantiateCloneTy(refExpr.instTys[idx], typeManager, typeMapping, g2gTyMap)
             idx++
         }
     }
@@ -338,8 +399,9 @@ public class GenericInstantiationManagerImpl {
             collectIdentityInstantiation(decl)
             return decl
         }
+        let g2gTyMap = buildCloneGenericToGenericMap(decl)
         let cloned = PartialInstantiation.Instantiate(decl, { source: Node, target: Node =>
-            updateClonedNode(source, target, ci.typeManager, typeMapping, pkg)
+            updateClonedNode(source, target, ci.typeManager, typeMapping, g2gTyMap, pkg)
         })
         if (let Some(clonedDecl) <- (cloned as Decl)) {
             clonedDecl.EnableAttr(Attribute.GENERIC_INSTANTIATED)
@@ -348,6 +410,7 @@ public class GenericInstantiationManagerImpl {
             clonedDecl.DisableAttr(Attribute.IMPORTED)
             clonedDecl.genericDecl = decl
             markNoReflectInfo(clonedDecl)
+            disableDefaultParamDesugarGenericAttr(clonedDecl)
             PartialInstantiation.RegisterInstantiation(decl, clonedDecl)
             return clonedDecl
         }
