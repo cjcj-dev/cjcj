@@ -13,6 +13,7 @@ import cangjie_compiler::parse.Expr as ParseExpr
 import cangjie_compiler::parse.BinaryExpr as ParseBinaryExpr
 import cangjie_compiler::parse.AssignExpr as ParseAssignExpr
 import cangjie_compiler::parse.RefExpr as ParseRefExpr
+import cangjie_compiler::parse.CallExpr as ParseCallExpr
 import cangjie_compiler::parse.LitConstExpr as ParseLitConstExpr
 import cangjie_compiler::parse.ReturnExpr as ParseReturnExpr
 import cangjie_compiler::parse.ParenExpr as ParseParenExpr
@@ -42,14 +43,25 @@ public func AdaptRealBodies(file: File, fileID: UInt64, sourceCode: String, sm: 
     if (parseDiag.HasError()) {
         return
     }
+    // Collect the names of all top-level functions in this file so a call site can be recognized as
+    // a user-defined function call (vs an unknown reference) and lowered to a real CHIR Apply.
+    let funcNames = HashSet<String>()
+    for (decl in parsedFile.decls) {
+        if (let Some(parsedFunc) <- (decl as ParseFuncDecl)) {
+            let n = parsedFunc.identifier.Val()
+            if (!n.isEmpty()) {
+                funcNames.add(n)
+            }
+        }
+    }
     for (decl in file.decls) {
         if (let Some(funcDecl) <- (decl as FuncDecl)) {
-            tryAdaptFunction(funcDecl, parsedFile)
+            tryAdaptFunction(funcDecl, parsedFile, funcNames)
         }
     }
 }
 
-private func tryAdaptFunction(funcDecl: FuncDecl, parsedFile: ParseFile): Unit {
+private func tryAdaptFunction(funcDecl: FuncDecl, parsedFile: ParseFile, funcNames: HashSet<String>): Unit {
     // Leave print bodies entirely to the summary path.
     if (!funcDecl.funcBody.printStrings.isEmpty()) {
         return
@@ -57,7 +69,7 @@ private func tryAdaptFunction(funcDecl: FuncDecl, parsedFile: ParseFile): Unit {
     let name = funcDecl.identifier.Val()
     let matched = findParsedFunc(parsedFile, name, funcDecl.begin.line)
     if (let Some(parsedFunc) <- matched) {
-        adaptParsedFunc(funcDecl, parsedFunc)
+        adaptParsedFunc(funcDecl, parsedFunc, funcNames)
     }
 }
 
@@ -87,13 +99,21 @@ private func findParsedFunc(parsedFile: ParseFile, name: String, line: Int64): O
     return nameMatch
 }
 
-// Tracks the known local names in scope and whether the body needs runtime computation.
+// Tracks the known local names in scope, the known top-level function names, and whether the body
+// needs runtime computation. `locals` is seeded with the function's parameter names so references to
+// parameters lower as runtime loads.
 private class AdaptScope {
     let locals = HashSet<String>()
+    let params = HashSet<String>()
+    let funcNames: HashSet<String>
     var needsRuntime: Bool = false
+
+    init(funcNames: HashSet<String>) {
+        this.funcNames = funcNames
+    }
 }
 
-private func adaptParsedFunc(funcDecl: FuncDecl, parsedFunc: ParseFuncDecl): Unit {
+private func adaptParsedFunc(funcDecl: FuncDecl, parsedFunc: ParseFuncDecl, funcNames: HashSet<String>): Unit {
     let body = match (parsedFunc.funcBody) {
         case Some(fb) => fb
         case None => return
@@ -102,7 +122,20 @@ private func adaptParsedFunc(funcDecl: FuncDecl, parsedFunc: ParseFuncDecl): Uni
         case Some(b) => b
         case None => return
     }
-    let scope = AdaptScope()
+    let scope = AdaptScope(funcNames)
+    // Seed parameters as in-scope locals so references to them lower to runtime loads. Parameters
+    // are also tracked separately: a reference to a parameter is inherently runtime (it cannot be
+    // folded), so it promotes even a trivial body like `return x` to the real path -- needed so the
+    // function emits a real typed body (matching its declared Int64 return) for callers.
+    for (param in body.paramLists) {
+        for (funcParam in param.params) {
+            let pname = funcParam.identifier.Val()
+            if (!pname.isEmpty()) {
+                scope.locals.add(pname)
+                scope.params.add(pname)
+            }
+        }
+    }
     let statements = match (adaptStatements(block, scope)) {
         case Some(stmts) => stmts
         case None => return
@@ -307,6 +340,9 @@ private func adaptExpr(expr: ParseExpr, scope: AdaptScope): Option<ChirExprSpec>
         }
         return adaptExpr(inner, scope)
     }
+    if (let Some(call) <- (expr as ParseCallExpr)) {
+        return adaptCall(call, scope)
+    }
     // AssignExpr is also a BinaryExpr; exclude it (handled only as a statement).
     if (let Some(_) <- (expr as ParseAssignExpr)) {
         return None
@@ -338,6 +374,47 @@ private func adaptExpr(expr: ParseExpr, scope: AdaptScope): Option<ChirExprSpec>
     return None
 }
 
+// Adapt a call `f(arg0, arg1, ...)` over a simple top-level function name into a CHIR CALL expr
+// spec. Only direct calls whose callee is a bare RefExpr naming a known top-level function and whose
+// arguments are positional Int64 expressions are accepted; anything else fails the match (fallback).
+private func adaptCall(call: ParseCallExpr, scope: AdaptScope): Option<ChirExprSpec> {
+    let base = match (call.baseFunc) {
+        case Some(b) => b
+        case None => return None
+    }
+    let calleeRef = match (base as ParseRefExpr) {
+        case Some(r) => r
+        case None => return None
+    }
+    // Reject generic call type arguments.
+    if (!calleeRef.typeArguments.isEmpty()) {
+        return None
+    }
+    let calleeName = calleeRef.identifier.Val()
+    // Must name a known top-level function, and must not be shadowed by a local.
+    if (calleeName.isEmpty() || scope.locals.contains(calleeName) || !scope.funcNames.contains(calleeName)) {
+        return None
+    }
+    let argSpecs = ArrayList<ChirExprSpec>()
+    for (funcArg in call.args) {
+        // No named or inout arguments in the supported grammar.
+        if (!funcArg.name.Empty() || funcArg.withInout) {
+            return None
+        }
+        let argExpr = match (funcArg.expr) {
+            case Some(e) => e
+            case None => return None
+        }
+        let argSpec = match (adaptExpr(argExpr, scope)) {
+            case Some(e) => e
+            case None => return None
+        }
+        argSpecs.add(argSpec)
+    }
+    scope.needsRuntime = true
+    return Some(ChirExprSpec.Call(calleeName, argSpecs))
+}
+
 // Map a parse binary-op token to a CHIR ExprKind. Only the Int64 arithmetic and relational ops
 // modeled by the lowering path are accepted; anything else fails the match (fallback).
 private func toChirBinaryOp(kind: TokenKind): Option<ChirExprKind> {
@@ -361,6 +438,10 @@ private func localRefName(expr: ParseExpr, scope: AdaptScope): Option<String> {
     if (let Some(refExpr) <- (expr as ParseRefExpr)) {
         let name = refExpr.identifier.Val()
         if (scope.locals.contains(name)) {
+            // A parameter reference is genuine runtime computation (cannot be folded); promote.
+            if (scope.params.contains(name)) {
+                scope.needsRuntime = true
+            }
             return Some(name)
         }
     }

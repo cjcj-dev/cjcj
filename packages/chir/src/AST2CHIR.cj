@@ -73,39 +73,58 @@ public class AST2CHIRGlobalSpec {
 let AST2CHIR_EXPR_LITERAL: Int64 = 0
 let AST2CHIR_EXPR_REF: Int64 = 1
 let AST2CHIR_EXPR_BINARY: Int64 = 2
+let AST2CHIR_EXPR_CALL: Int64 = 3
 
 public class AST2CHIRExprSpec {
     public let kind: Int64
     public let literalValue: Int64       // LITERAL
-    public let name: String              // REF
+    public let name: String              // REF / CALL (callee source identifier)
     public let op: ExprKind              // BINARY
     public let lhs: Option<AST2CHIRExprSpec> // BINARY
     public let rhs: Option<AST2CHIRExprSpec> // BINARY
+    public let args: ArrayList<AST2CHIRExprSpec> // CALL argument expressions, in order
 
     private init(kind: Int64, literalValue: Int64, name: String, op: ExprKind,
-        lhs: Option<AST2CHIRExprSpec>, rhs: Option<AST2CHIRExprSpec>) {
+        lhs: Option<AST2CHIRExprSpec>, rhs: Option<AST2CHIRExprSpec>,
+        args: ArrayList<AST2CHIRExprSpec>) {
         this.kind = kind
         this.literalValue = literalValue
         this.name = name
         this.op = op
         this.lhs = lhs
         this.rhs = rhs
+        this.args = args
     }
 
     public func IsLiteral(): Bool { return kind == AST2CHIR_EXPR_LITERAL }
     public func IsRef(): Bool { return kind == AST2CHIR_EXPR_REF }
     public func IsBinary(): Bool { return kind == AST2CHIR_EXPR_BINARY }
+    public func IsCall(): Bool { return kind == AST2CHIR_EXPR_CALL }
 
     public static func Literal(value: Int64): AST2CHIRExprSpec {
-        return AST2CHIRExprSpec(AST2CHIR_EXPR_LITERAL, value, "", ExprKind.ADD, None, None)
+        return AST2CHIRExprSpec(AST2CHIR_EXPR_LITERAL, value, "", ExprKind.ADD, None, None,
+            ArrayList<AST2CHIRExprSpec>())
     }
 
     public static func Ref(name: String): AST2CHIRExprSpec {
-        return AST2CHIRExprSpec(AST2CHIR_EXPR_REF, 0, name, ExprKind.ADD, None, None)
+        return AST2CHIRExprSpec(AST2CHIR_EXPR_REF, 0, name, ExprKind.ADD, None, None,
+            ArrayList<AST2CHIRExprSpec>())
     }
 
     public static func Binary(op: ExprKind, lhs: AST2CHIRExprSpec, rhs: AST2CHIRExprSpec): AST2CHIRExprSpec {
-        return AST2CHIRExprSpec(AST2CHIR_EXPR_BINARY, 0, "", op, Some(lhs), Some(rhs))
+        return AST2CHIRExprSpec(AST2CHIR_EXPR_BINARY, 0, "", op, Some(lhs), Some(rhs),
+            ArrayList<AST2CHIRExprSpec>())
+    }
+
+    // CALL: invoke a user-defined top-level function named `calleeName` (the source identifier) with
+    // `args` evaluated in order. The translator resolves the callee Function by name at lowering time
+    // so call sites do not depend on lowering order.
+    public static func Call(calleeName: String, args: ArrayList<AST2CHIRExprSpec>): AST2CHIRExprSpec {
+        let copied = ArrayList<AST2CHIRExprSpec>()
+        for (arg in args) {
+            copied.add(arg)
+        }
+        return AST2CHIRExprSpec(AST2CHIR_EXPR_CALL, 0, calleeName, ExprKind.ADD, None, None, copied)
     }
 }
 

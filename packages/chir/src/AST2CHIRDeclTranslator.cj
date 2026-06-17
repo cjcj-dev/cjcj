@@ -28,6 +28,12 @@ public class AST2CHIRDeclTranslator {
         RegisterFunction(fn)
         RegisterFunctionAlias(spec.rawMangledName, fn)
         RegisterFunctionAlias(ScopedDeclName(ResolvePackageName(defaultPackage, spec.packageName), spec.name), fn)
+        // Also expose the plain source identifier so the real-body call translator can resolve a
+        // user-defined callee by the name written at the call site (e.g. `add`). Only register
+        // top-level (non-member) functions this way to avoid colliding method names across types.
+        if (spec.ownerTypeName.isNone() && !spec.srcCodeIdentifier.isEmpty()) {
+            RegisterFunctionAlias(spec.srcCodeIdentifier, fn)
+        }
     }
 
     public func RegisterGlobal(globalVar: GlobalVar): Unit {
@@ -274,6 +280,11 @@ extend AST2CHIRDeclTranslator {
         }
         for (globalSpec in spec.globals) {
             LowerGlobalVar(spec.name, globalSpec)
+        }
+        // Pre-declare all top-level functions before emitting any body so a real body can resolve a
+        // callee Function by name regardless of source order (and for self-recursion).
+        for (funcSpec in spec.functions) {
+            PredeclareFunction(spec.name, funcSpec)
         }
         for (funcSpec in spec.functions) {
             LowerFunction(spec.name, funcSpec)

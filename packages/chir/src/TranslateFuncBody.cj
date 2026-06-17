@@ -33,6 +33,7 @@ extend AST2CHIRDeclTranslator {
         EnsureReturnSlot(fn, entry)
 
         let state = RealBodyState(entry, body)
+        BindParameterSlots(fn, spec, state)
         LowerStatements(fn, spec.bodyStatements, state)
 
         // A body that fell through without a terminating return needs a trailing Exit so the
@@ -40,6 +41,25 @@ extend AST2CHIRDeclTranslator {
         if (!state.terminated) {
             builder.CreateExit(None, state.current)
             state.terminated = true
+        }
+    }
+
+    // Copy each Int64 parameter value into a fresh local slot keyed by the parameter's source name,
+    // so REF expressions (and reassignment of a parameter) lower uniformly through `state.locals`.
+    // Only Int64 parameters are bound; the real-body path is Int64-only.
+    private func BindParameterSlots(fn: Function, spec: AST2CHIRFunctionSpec, state: RealBodyState): Unit {
+        let int64Ty = builder.context.GetInt64Ty()
+        let refInt64Ty = builder.context.GetRefTy(int64Ty)
+        var idx: Int64 = 0
+        while (idx < fn.GetNumOfParams() && idx < spec.paramNames.size) {
+            let param = fn.GetParam(idx)
+            let paramName = spec.paramNames[idx]
+            if (!paramName.isEmpty()) {
+                let slot = AllocateInt64Slot(refInt64Ty, int64Ty, state.current)
+                builder.CreateStore(param, slot, state.current)
+                state.locals[paramName] = slot
+            }
+            idx++
         }
     }
 
@@ -195,7 +215,39 @@ extend AST2CHIRDeclTranslator {
             }
             return None
         }
+        if (expr.IsCall()) {
+            return EvalCall(expr, state)
+        }
         return None
+    }
+
+    // Lower a CALL spec into a genuine CHIR Apply targeting the resolved callee Function. The callee
+    // is resolved by its source identifier among the lowered package functions (all top-level
+    // functions are declared before any body is emitted, so order does not matter). Each argument is
+    // evaluated to a runtime Value first. The Apply result type is the callee's return type.
+    private func EvalCall(expr: AST2CHIRExprSpec, state: RealBodyState): Option<Value> {
+        let callee = match (ResolveCallee(expr.name)) {
+            case Some(fn) => fn
+            case None => return None
+        }
+        let argValues = ArrayList<Value>()
+        for (argSpec in expr.args) {
+            match (EvalExpr(argSpec, state)) {
+                case Some(v) => argValues.add(v)
+                case None => return None
+            }
+        }
+        let resultTy = match (callee.GetReturnType()) {
+            case Some(ty) => ty
+            case None => builder.context.GetInt64Ty()
+        }
+        let callContext = FuncCallContext(args: argValues)
+        let apply = builder.CreateApply(resultTy, callee, callContext, state.current)
+        return AsValue(apply.GetResult())
+    }
+
+    private func ResolveCallee(name: String): Option<Function> {
+        return TryGetFunction(name)
     }
 
     // Upcast a node's Option<LocalVar> result to Option<Value> (LocalVar <: Value).

@@ -9,10 +9,38 @@ extend AST2CHIRDeclTranslator {
             ApplyFunctionSemanticAttributes(existing, spec)
             ApplyFunctionSourceInfo(existing, spec)
             AttachFunctionToOwner(existing, spec)
+            // The function may have been pre-declared (shell only) so that call sites in other
+            // function bodies could resolve it regardless of lowering order. If so, emit its body now.
+            if (existing.GetBody().isNone() && ShouldEmitBody(spec)) {
+                EmitFunctionBody(existing, spec)
+            }
             LowerDefaultParamFunctions(defaultPackage, existing, spec)
             LowerGenericInstantiationFunctions(defaultPackage, existing, spec)
             return existing
         }
+        let fn = DeclareFunctionShell(defaultPackage, spec)
+        if (ShouldEmitBody(spec)) {
+            EmitFunctionBody(fn, spec)
+        }
+        LowerDefaultParamFunctions(defaultPackage, fn, spec)
+        LowerGenericInstantiationFunctions(defaultPackage, fn, spec)
+        return fn
+    }
+
+    // Pre-declare every top-level function spec (create the Function, parameters, registration, and
+    // package wiring) WITHOUT emitting a body. Running this before any body is lowered lets a real
+    // body resolve a callee Function by name even when the callee appears later in source / is the
+    // function itself (recursion). Idempotent: an already-declared spec is skipped.
+    public func PredeclareFunction(defaultPackage: String, spec: AST2CHIRFunctionSpec): Unit {
+        if (TryGetFunctionSpec(defaultPackage, spec).isSome()) {
+            return
+        }
+        DeclareFunctionShell(defaultPackage, spec)
+    }
+
+    // Create the Function shell: signature, attributes, parameters, print metadata, registration,
+    // and package attachment. Does not emit a body.
+    private func DeclareFunctionShell(defaultPackage: String, spec: AST2CHIRFunctionSpec): Function {
         let funcTy = BuildFunctionType(spec)
         let packageName = ResolvePackageName(defaultPackage, spec.packageName)
         let fn = builder.CreateFunction(funcTy, spec.name, srcCodeIdentifier: spec.srcCodeIdentifier,
@@ -22,15 +50,6 @@ extend AST2CHIRDeclTranslator {
         ApplyFunctionSemanticAttributes(fn, spec)
         ApplyFunctionSourceInfo(fn, spec)
         CreateFunctionParameters(fn, spec)
-        if (ShouldEmitBody(spec)) {
-            if (spec.hasRealBody) {
-                CreateRealBody(fn, spec)
-            } else if (spec.hasLiteralReturn) {
-                CreateLiteralReturnBody(fn, BuildLiteralReturn(spec))
-            } else {
-                CreateEmptyBody(fn)
-            }
-        }
         var printIdx = 0
         for (printString in spec.printStrings) {
             fn.printStrings.add(printString)
@@ -54,9 +73,17 @@ extend AST2CHIRDeclTranslator {
             AddFunctionToPackage(pkg, fn)
         }
         AttachFunctionToOwner(fn, spec)
-        LowerDefaultParamFunctions(defaultPackage, fn, spec)
-        LowerGenericInstantiationFunctions(defaultPackage, fn, spec)
         return fn
+    }
+
+    private func EmitFunctionBody(fn: Function, spec: AST2CHIRFunctionSpec): Unit {
+        if (spec.hasRealBody) {
+            CreateRealBody(fn, spec)
+        } else if (spec.hasLiteralReturn) {
+            CreateLiteralReturnBody(fn, BuildLiteralReturn(spec))
+        } else {
+            CreateEmptyBody(fn)
+        }
     }
 
     private func BuildLiteralReturn(spec: AST2CHIRFunctionSpec): LiteralValue {
@@ -109,7 +136,10 @@ extend AST2CHIRDeclTranslator {
         if (spec.isInstanceMember) {
             if (let Some(funcTy) <- fn.GetFuncType()) {
                 if (funcTy.GetNumOfParams() > 0) {
-                    let thisParam = builder.CreateParameter(funcTy.GetParamType(0), "this", fn)
+                    // Each parameter needs a unique value identifier (codegen keys the value mapping
+                    // by GetIdentifierWithoutPrefix); use a %-prefixed, per-index name and keep the
+                    // source name as the srcCodeIdentifier.
+                    let thisParam = builder.CreateParameter(funcTy.GetParamType(0), "%this", fn)
                     thisParam.SetSrcCodeIdentifier("this")
                 }
             }
@@ -117,15 +147,18 @@ extend AST2CHIRDeclTranslator {
         var specParamIndex: Int64 = 0
         while (specParamIndex < spec.paramTypes.size) {
             let typeIndex = if (spec.isInstanceMember) { specParamIndex + 1 } else { specParamIndex }
-            let paramName = if (specParamIndex < spec.paramNames.size) {
+            let srcName = if (specParamIndex < spec.paramNames.size) {
                 spec.paramNames[specParamIndex]
             } else {
-                "%arg${specParamIndex}"
+                "arg${specParamIndex}"
             }
+            // Distinct %-prefixed identifier so two parameters never collide in codegen's value map
+            // (which is keyed by the identifier with its leading prefix char stripped).
+            let paramIdentifier = "%arg${typeIndex}"
             if (let Some(funcTy) <- fn.GetFuncType()) {
                 if (typeIndex < funcTy.GetNumOfParams()) {
-                    let param = builder.CreateParameter(funcTy.GetParamType(typeIndex), paramName, fn)
-                    param.SetSrcCodeIdentifier(paramName)
+                    let param = builder.CreateParameter(funcTy.GetParamType(typeIndex), paramIdentifier, fn)
+                    param.SetSrcCodeIdentifier(srcName)
                 }
             }
             specParamIndex++
