@@ -885,6 +885,35 @@ public func TypeCheckReferenceCheckAccessLegalityOfRefExpr(
     return valid
 }
 
+public func TypeCheckReferenceCheckThisOrSuperInInitializer(
+    diag: BasicDiagnosticEngine,
+    node: Node,
+    re: RefExpr
+): Bool {
+    if (node.astKind != ASTKind.VAR_DECL) {
+        return true
+    }
+    if (node.TestAttr(Attribute.STATIC)) {
+        let builder = diag.Diagnose(
+            re.begin,
+            re.end,
+            BasicDiagKind.sema_this_or_super_not_allowed_to_initialize_static_member,
+            args: [BasicDiagArgument(re.ref.identifier.Val())])
+        builder.Emit()
+        return false
+    }
+    if (re.isSuper || (re.isThis && re.isAlone)) {
+        let builder = diag.Diagnose(
+            re.begin,
+            re.end,
+            BasicDiagKind.sema_this_or_super_not_allowed_to_initialize_non_static_member,
+            args: [BasicDiagArgument(re.ref.identifier.Val())])
+        builder.Emit()
+        return false
+    }
+    return true
+}
+
 public func TypeCheckReferenceAddFuncTargetsForMemberAccess(memberAccess: MemberAccess, targets: ArrayList<Decl>): Unit {
     memberAccess.targets.clear()
     for (target in targets) {
@@ -1253,7 +1282,7 @@ private func TypeCheckReferenceDiagnoseDeprecatedTargetWithContext(
         strictDeprecatedContext: state.strictDeprecatedContext)
 }
 
-private func TypeCheckReferenceCollectCallArgs(callExpr: CallExpr): ArrayList<FuncArg> {
+private func TypeCheckReferenceCollectCallArgsInSourceOrder(callExpr: CallExpr): ArrayList<FuncArg> {
     let args = ArrayList<FuncArg>()
     for (arg in callExpr.args) {
         args.add(arg)
@@ -1262,6 +1291,49 @@ private func TypeCheckReferenceCollectCallArgs(callExpr: CallExpr): ArrayList<Fu
         args.add(arg)
     }
     return args
+}
+
+private func TypeCheckReferenceBodyParamList(fd: FuncDecl): Option<FuncParamList> {
+    if (let Some(body) <- fd.funcBody) {
+        if (!body.paramLists.isEmpty()) {
+            return Some(body.paramLists[0])
+        }
+    }
+    return None
+}
+
+private func TypeCheckReferenceCollectParamArgPairs(fd: FuncDecl, callExpr: CallExpr): ArrayList<(FuncParam, FuncArg)> {
+    let out = ArrayList<(FuncParam, FuncArg)>()
+    if (let None <- TypeCheckReferenceBodyParamList(fd)) {
+        return out
+    }
+    let params = TypeCheckReferenceBodyParamList(fd).getOrThrow().params
+    let args = TypeCheckReferenceCollectCallArgsInSourceOrder(callExpr)
+    var namedArgFound = false
+    var pos: Int64 = 0
+    for (arg in args) {
+        let argName = GetArgName(fd, arg)
+        if (argName.isEmpty()) {
+            if (namedArgFound) {
+                break
+            }
+            if (pos < params.size) {
+                out.add((params[pos], arg))
+            }
+            pos++
+            continue
+        }
+        namedArgFound = true
+        var paramIdx: Int64 = 0
+        while (paramIdx < params.size) {
+            if (params[paramIdx].identifier.Val() == argName) {
+                out.add((params[paramIdx], arg))
+                break
+            }
+            paramIdx++
+        }
+    }
+    return out
 }
 
 private func TypeCheckReferenceCheckUsageOfDeprecatedParameters(
@@ -1280,20 +1352,12 @@ private func TypeCheckReferenceCheckUsageOfDeprecatedParameters(
     if (funcBody.paramLists.isEmpty()) {
         return
     }
-    let args = TypeCheckReferenceCollectCallArgs(callExpr)
-    for (paramList in funcBody.paramLists) {
-        let params = paramList.params
-        if (params.size != args.size) {
-            continue
-        }
-        var idx: Int64 = 0
-        while (idx < args.size) {
-            let param = params[idx]
-            let arg = args[idx]
-            if (param.HasAnno(AstAnnotationKind.DEPRECATED) && !arg.TestAttr(Attribute.COMPILER_ADD)) {
-                let _ = TypeCheckReferenceDiagnoseDeprecatedWithContext(diag, arg, param, state)
-            }
-            idx++
+    let pairs = TypeCheckReferenceCollectParamArgPairs(funcDecl, callExpr)
+    for (pair in pairs) {
+        let param = pair[0]
+        let arg = pair[1]
+        if (param.HasAnno(AstAnnotationKind.DEPRECATED) && !arg.TestAttr(Attribute.COMPILER_ADD)) {
+            let _ = TypeCheckReferenceDiagnoseDeprecatedWithContext(diag, arg, param, state)
         }
     }
 }

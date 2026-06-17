@@ -86,6 +86,12 @@ Reference sources inspected from `/root/cj_build/cangjie_compiler/src/Sema`:
   checks constructor/type-alias mediated targets, and reports deprecated
   override/redefinition and inheritor strictness issues through existing
   `TypeManager`, property-accessor, and AST walker APIs.
+- This pass tightened reference parity further: deprecated parameter diagnostics
+  now match arguments back to function parameters using the shared `GetArgName`
+  rules and default/source argument lists instead of positional-only matching,
+  and `TypeCheckReferenceCheckThisOrSuperInInitializer` now mirrors the C++
+  initializer restriction diagnostics for `this`/`super` in static and
+  non-static member initializers.
 - Continued class-like parity in `TypeCheckClassLike.cj`: sealed inheritance
   from `specific` declarations now mirrors the C++ package scan for a matching
   common declaration before reporting the specific-sealed diagnostic, and
