@@ -77,8 +77,10 @@ public func SynIfExpr(typeManager: TypeManager, ie: IfExpr): Ty {
     }
     if (let Some(thenBody) <- ie.thenBody) {
         if (let Some(elseExpr) <- ie.elseBody) {
-            let thenTy = TcReplaceIdeal(typeManager, thenBody)
-            let elseTy = TcReplaceIdeal(typeManager, elseExpr)
+            let thenTy = typeManager.GetThisRealTy(TcReplaceIdeal(typeManager, thenBody))
+            let elseTy = typeManager.GetThisRealTy(TcReplaceIdeal(typeManager, elseExpr))
+            thenBody.SetTy(thenTy)
+            elseExpr.SetTy(elseTy)
             let joinedTy = JoinIfBranchTys(typeManager, thenTy, elseTy)
             if (Ty.IsTyCorrect(joinedTy)) {
                 ie.SetTy(joinedTy)

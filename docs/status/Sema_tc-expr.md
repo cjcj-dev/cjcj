@@ -55,7 +55,10 @@ What changed:
 - Condition-checking continuation:
   - `let` pattern conditions now replace ideal initializer types before checking patterns, propagate the destructed expression context into nested variable patterns, reject mixed OR-pattern shapes, and reject explicit variable bindings introduced by OR-pattern alternatives.
   - Recursive `&&`/`||` condition checking now rejects explicit variable bindings under `||` while still type-checking both sides, matching the C++ control-flow rule for condition-local bindings.
-- Verification: `cjpm build` passes after the condition-checking continuation. `grep -rn "TODO(selfhost:Sema)" packages/sema/src` reports only out-of-scope Sema placeholders; the scoped `TypeCheckExpr.cj` and `TypeCheckExpr/*` files have zero matching markers.
+- Binary/if continuation:
+  - Built-in arithmetic and relational synthesis now follows the C++ `SynLiteralInBinaryExpr` shape more closely: synthesize from the right operand, check the left against that exact primitive candidate, clear and retry from the left when needed, and use the C++ candidate sets instead of rank-based numeric widening.
+  - `if` branch joining now replaces ideal types and normalizes `This` types on both branches before computing the joined type, matching the C++ pre-join normalization step.
+- Verification: `cjpm build` passes after the binary exact-candidate and if-join normalization continuation. `grep -rn "TODO(selfhost:Sema)" packages/sema/src` reports only out-of-scope Sema placeholders; the scoped `TypeCheckExpr.cj` and `TypeCheckExpr/*` files have zero matching markers.
 
 Remaining fidelity gaps:
 - Full overload/desugar diagnostic parity still depends on broader call/lookup/desugar infrastructure: binary, flow, subscript, and compound assignment now use the real fallback shapes, but not the C++ diagnostic suppression, negative-cache constraint rollback, return-type-inference diagnostics, or exact recovery diagnostics.
@@ -70,4 +73,4 @@ Remaining fidelity gaps:
 - `@IfAvailable` still lacks the C++ import-manager checks for `ohos.device_info` and `ohos.base` package availability.
 - `for-in` refutable-pattern rejection now has the C++ behavior but not the exact `sema_forin_pattern_must_be_irrefutable` diagnostic emission in this shallow helper.
 
-Completeness estimate: 67% of C++ behavior for this scoped expression type-checking area, weighted by behavior rather than line count.
+Completeness estimate: 68% of C++ behavior for this scoped expression type-checking area, weighted by behavior rather than line count.

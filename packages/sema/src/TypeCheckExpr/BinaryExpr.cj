@@ -28,15 +28,6 @@ private func IsShiftOperator(op: TokenKind): Bool {
     return op == TokenKind.LSHIFT || op == TokenKind.RSHIFT
 }
 
-private func IsIntegerOperator(op: TokenKind): Bool {
-    return op == TokenKind.MOD || op == TokenKind.BITAND || op == TokenKind.BITOR ||
-        op == TokenKind.BITXOR || IsShiftOperator(op)
-}
-
-private func IsOrderedRelationalOperator(op: TokenKind): Bool {
-    return op == TokenKind.GT || op == TokenKind.LT || op == TokenKind.GE || op == TokenKind.LE
-}
-
 private func IsBuiltinRelationNumericTy(ty: Ty): Bool {
     return ty.IsNumeric() || ty.IsRune()
 }
@@ -258,68 +249,132 @@ private func TryChkFlowDesugar(typeManager: TypeManager, target: Ty, be: BinaryE
     return (false, false)
 }
 
-private func PrimitiveRank(kind: TypeKind): Int64 {
-    return match (kind) {
-        case TypeKind.TYPE_INT8 => 1
-        case TypeKind.TYPE_INT16 => 2
-        case TypeKind.TYPE_INT32 => 3
-        case TypeKind.TYPE_INT64 => 4
-        case TypeKind.TYPE_INT_NATIVE => 5
-        case TypeKind.TYPE_UINT8 => 6
-        case TypeKind.TYPE_UINT16 => 7
-        case TypeKind.TYPE_UINT32 => 8
-        case TypeKind.TYPE_UINT64 => 9
-        case TypeKind.TYPE_UINT_NATIVE => 10
-        case TypeKind.TYPE_FLOAT16 => 11
-        case TypeKind.TYPE_FLOAT32 => 12
-        case TypeKind.TYPE_FLOAT64 => 13
-        case TypeKind.TYPE_IDEAL_INT => 0
-        case TypeKind.TYPE_IDEAL_FLOAT => 14
-        case _ => -1
-    }
+private func IsArithmeticIntegerKind(kind: TypeKind): Bool {
+    return kind == TypeKind.TYPE_INT8 || kind == TypeKind.TYPE_INT16 || kind == TypeKind.TYPE_INT32 ||
+        kind == TypeKind.TYPE_INT64 || kind == TypeKind.TYPE_INT_NATIVE || kind == TypeKind.TYPE_UINT8 ||
+        kind == TypeKind.TYPE_UINT16 || kind == TypeKind.TYPE_UINT32 || kind == TypeKind.TYPE_UINT64 ||
+        kind == TypeKind.TYPE_UINT_NATIVE || kind == TypeKind.TYPE_IDEAL_INT
 }
 
-private func NormalizeIdealNumericKind(kind: TypeKind): TypeKind {
-    if (kind == TypeKind.TYPE_IDEAL_INT) {
-        return TypeKind.TYPE_INT64
-    }
-    if (kind == TypeKind.TYPE_IDEAL_FLOAT) {
-        return TypeKind.TYPE_FLOAT64
-    }
-    return kind
+private func IsArithmeticNumericKind(kind: TypeKind): Bool {
+    return IsArithmeticIntegerKind(kind) || kind == TypeKind.TYPE_FLOAT16 || kind == TypeKind.TYPE_FLOAT32 ||
+        kind == TypeKind.TYPE_FLOAT64 || kind == TypeKind.TYPE_IDEAL_FLOAT
 }
 
-private func PickNumericTy(typeManager: TypeManager, leftTy: Ty, rightTy: Ty): Option<Ty> {
-    let leftUpper = Ty.GetPrimitiveUpperBound(leftTy)
-    let rightUpper = Ty.GetPrimitiveUpperBound(rightTy)
-    if (leftUpper.IsNothing()) {
-        return Some(rightUpper)
+private func IsRelationNumericKind(kind: TypeKind): Bool {
+    return IsArithmeticNumericKind(kind) || kind == TypeKind.TYPE_RUNE
+}
+
+private func IsBinaryCandidateKind(op: TokenKind, kind: TypeKind): Bool {
+    if (op == TokenKind.ADD || op == TokenKind.SUB || op == TokenKind.MUL || op == TokenKind.DIV) {
+        return IsArithmeticNumericKind(kind)
     }
-    if (rightUpper.IsNothing()) {
-        return Some(leftUpper)
+    if (op == TokenKind.MOD || op == TokenKind.BITAND || op == TokenKind.BITOR || op == TokenKind.BITXOR ||
+        op == TokenKind.LSHIFT || op == TokenKind.RSHIFT) {
+        return IsArithmeticIntegerKind(kind)
     }
-    if (!leftUpper.IsNumeric() || !rightUpper.IsNumeric()) {
+    if (op == TokenKind.EQUAL || op == TokenKind.NOTEQ) {
+        return IsRelationNumericKind(kind) || kind == TypeKind.TYPE_BOOLEAN || kind == TypeKind.TYPE_UNIT
+    }
+    if (op == TokenKind.GT || op == TokenKind.LT || op == TokenKind.GE || op == TokenKind.LE) {
+        return IsRelationNumericKind(kind)
+    }
+    return false
+}
+
+private func IsBinaryCandidateTy(op: TokenKind, ty: Ty): Bool {
+    if (ty.IsNothing() || ty.IsPlaceholder()) {
+        return true
+    }
+    let upper = Ty.GetPrimitiveUpperBound(ty)
+    if (upper.IsNothing() || upper.IsPlaceholder()) {
+        return true
+    }
+    return IsBinaryCandidateKind(op, upper.kind)
+}
+
+private func BuiltinBinaryResultTy(op: TokenKind, operandTy: Ty, isArithmetic: Bool): Ty {
+    if (!isArithmetic || IsRelationalOperator(op)) {
+        return TcBoolTy()
+    }
+    return operandTy
+}
+
+private func SynBuiltinBinaryFromRight(typeManager: TypeManager, be: BinaryExpr,
+    isArithmetic: Bool): Option<Ty> {
+    if ((let None <- be.leftExpr) || (let None <- be.rightExpr)) {
+        be.SetTy(TypeManager.GetInvalidTy())
+        return Some(TypeManager.GetInvalidTy())
+    }
+    let leftExpr = be.leftExpr.getOrThrow()
+    let rightExpr = be.rightExpr.getOrThrow()
+    let rightTy = SynExprShallow(typeManager, rightExpr)
+    if (!Ty.IsTyCorrect(rightTy)) {
+        be.SetTy(TypeManager.GetInvalidTy())
         return None
     }
-    if (SameTy(leftUpper, rightUpper)) {
-        return Some(leftUpper)
+    let targetRight = Ty.GetPrimitiveUpperBound(TcReplaceIdeal(typeManager, rightExpr))
+    if (!IsBinaryCandidateTy(be.op, targetRight)) {
+        let _ = SynExprShallow(typeManager, leftExpr)
+        be.SetTy(TypeManager.GetInvalidTy())
+        return Some(TypeManager.GetInvalidTy())
     }
-    if (leftUpper.IsIdeal()) {
-        if (rightUpper.IsNumeric()) {
-            return Some(rightUpper)
+    leftExpr.Clear()
+    if (ChkExprShallow(typeManager, targetRight, leftExpr)) {
+        let solvedRight = typeManager.TryGreedySubst(targetRight)
+        rightExpr.SetTy(solvedRight)
+        let resultTy = BuiltinBinaryResultTy(be.op, solvedRight, isArithmetic)
+        be.SetTy(resultTy)
+        return Some(resultTy)
+    }
+    be.SetTy(TypeManager.GetInvalidTy())
+    return None
+}
+
+private func SynBuiltinBinaryFromLeft(typeManager: TypeManager, be: BinaryExpr,
+    isArithmetic: Bool): Ty {
+    if ((let None <- be.leftExpr) || (let None <- be.rightExpr)) {
+        return BinaryInvalid(be)
+    }
+    let leftExpr = be.leftExpr.getOrThrow()
+    let rightExpr = be.rightExpr.getOrThrow()
+    let leftTy = SynExprShallow(typeManager, leftExpr)
+    if (!Ty.IsTyCorrect(leftTy)) {
+        let _ = SynExprShallow(typeManager, rightExpr)
+        return BinaryInvalid(be)
+    }
+    let targetLeft = Ty.GetPrimitiveUpperBound(TcReplaceIdeal(typeManager, leftExpr))
+    if (!IsBinaryCandidateTy(be.op, targetLeft)) {
+        let _ = SynExprShallow(typeManager, rightExpr)
+        return BinaryInvalid(be)
+    }
+    rightExpr.Clear()
+    if (ChkExprShallow(typeManager, targetLeft, rightExpr)) {
+        let solvedLeft = typeManager.TryGreedySubst(targetLeft)
+        leftExpr.SetTy(solvedLeft)
+        let resultTy = BuiltinBinaryResultTy(be.op, solvedLeft, isArithmetic)
+        be.SetTy(resultTy)
+        return resultTy
+    }
+    return BinaryInvalid(be)
+}
+
+private func SynArithmeticOrRelationalExpr(typeManager: TypeManager, be: BinaryExpr,
+    isArithmetic!: Bool = true): Ty {
+    if (isArithmetic && be.op == TokenKind.EXP) {
+        if (let Some(tys) <- SynthesizeOperands(typeManager, be)) {
+            return SynExpoExpr(typeManager, be, tys[0], tys[1])
         }
+        return BinaryInvalid(be)
     }
-    if (rightUpper.IsIdeal()) {
-        if (leftUpper.IsNumeric()) {
-            return Some(leftUpper)
+    if (let Some(resultTy) <- SynBuiltinBinaryFromRight(typeManager, be, isArithmetic)) {
+        if (Ty.IsTyCorrect(resultTy)) {
+            return resultTy
         }
+        return BinaryInvalid(be)
     }
-    let leftRank = PrimitiveRank(leftUpper.kind)
-    let rightRank = PrimitiveRank(rightUpper.kind)
-    let pickedKind = if (leftRank >= rightRank) { leftUpper.kind } else { rightUpper.kind }
-    let normalizedKind = NormalizeIdealNumericKind(pickedKind)
-    let _ = typeManager
-    return Some(TypeManager.GetPrimitiveTy(normalizedKind))
+    be.Clear()
+    return SynBuiltinBinaryFromLeft(typeManager, be, isArithmetic)
 }
 
 private func SynthesizeOperands(typeManager: TypeManager, be: BinaryExpr): Option<(Ty, Ty)> {
@@ -336,21 +391,7 @@ private func SynthesizeOperands(typeManager: TypeManager, be: BinaryExpr): Optio
 }
 
 private func SynArithmeticExpr(typeManager: TypeManager, be: BinaryExpr): Ty {
-    if (let Some(tys) <- SynthesizeOperands(typeManager, be)) {
-        let leftTy = tys[0]
-        let rightTy = tys[1]
-        if (be.op == TokenKind.EXP) {
-            return SynExpoExpr(typeManager, be, leftTy, rightTy)
-        }
-        if (IsIntegerOperator(be.op) && (!leftTy.IsIntegerSubType() || !rightTy.IsIntegerSubType())) {
-            return BinaryInvalid(be)
-        }
-        if (let Some(resultTy) <- PickNumericTy(typeManager, leftTy, rightTy)) {
-            be.SetTy(resultTy)
-            return resultTy
-        }
-    }
-    return BinaryInvalid(be)
+    return SynArithmeticOrRelationalExpr(typeManager, be, isArithmetic: true)
 }
 
 private func SynExpoExpr(typeManager: TypeManager, be: BinaryExpr, leftTy: Ty, rightTy: Ty): Ty {
@@ -383,34 +424,9 @@ private func SynRelationalExpr(typeManager: TypeManager, be: BinaryExpr): Ty {
             }
             return BinaryInvalid(be)
         }
-        if (IsOrderedRelationalOperator(be.op)) {
-            if (CanBuiltinOrderedCompare(typeManager, leftTy, rightTy)) {
-                let boolTy = TcBoolTy()
-                be.SetTy(boolTy)
-                return boolTy
-            }
-            return BinaryInvalid(be)
-        }
-        if (CanBuiltinEqualityCompare(typeManager, leftTy, rightTy)) {
-            let boolTy2 = TcBoolTy()
-            be.SetTy(boolTy2)
-            return boolTy2
-        }
     }
-    return BinaryInvalid(be)
-}
-
-private func CanBuiltinOrderedCompare(typeManager: TypeManager, leftTy: Ty, rightTy: Ty): Bool {
-    if (leftTy.IsNothing() || rightTy.IsNothing()) {
-        return true
-    }
-    if (leftTy.IsRune() && rightTy.IsRune()) {
-        return true
-    }
-    if (let Some(_) <- PickNumericTy(typeManager, leftTy, rightTy)) {
-        return true
-    }
-    return false
+    be.Clear()
+    return SynArithmeticOrRelationalExpr(typeManager, be, isArithmetic: false)
 }
 
 private func CanBuiltinEqualityCompare(typeManager: TypeManager, leftTy: Ty, rightTy: Ty): Bool {
@@ -420,16 +436,11 @@ private func CanBuiltinEqualityCompare(typeManager: TypeManager, leftTy: Ty, rig
     if (!IsBuiltinEqualityScalarTy(leftTy) || !IsBuiltinEqualityScalarTy(rightTy)) {
         return false
     }
-    if (leftTy.IsBoolean() || rightTy.IsBoolean()) {
-        return leftTy.IsBoolean() && rightTy.IsBoolean()
+    if (SameTy(leftTy, rightTy)) {
+        return true
     }
-    if (leftTy.IsUnit() || rightTy.IsUnit()) {
-        return leftTy.IsUnit() && rightTy.IsUnit()
-    }
-    if (leftTy.IsRune() || rightTy.IsRune()) {
-        return leftTy.IsRune() && rightTy.IsRune()
-    }
-    if (let Some(_) <- PickNumericTy(typeManager, leftTy, rightTy)) {
+    if (typeManager.IsSubtype(leftTy, rightTy, implicitBoxed: false, allowOptionBox: false) ||
+        typeManager.IsSubtype(rightTy, leftTy, implicitBoxed: false, allowOptionBox: false)) {
         return true
     }
     return false
