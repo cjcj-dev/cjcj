@@ -44,6 +44,11 @@ Current status:
   `chir`/`obj`/`hotreload` output-type parsing, PGO flags, section flags, jobs,
   warning forwarding, and target-triple validation are represented in Driver
   options.
+- Driver option parsing now matches additional C++ `OptionTable` behaviors for
+  path-bearing driver options: `-L`, `-B`, and `--sysroot` validate directories
+  and store absolute paths, obfuscation mapping/config inputs are validated as
+  readable files, and joined separated aliases such as `-Bpath`, `-opath`, and
+  `-j4` are accepted.
 - Host triple defaults now use compile-time `@When` OS/architecture selection
   instead of hardcoded Linux/x86_64 values.
 - GNU/Linux native linking now mirrors the C++ driver more closely: target-

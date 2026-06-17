@@ -264,6 +264,10 @@ private func ParseObfuscationFlag(opts: DriverOptions, cursor: ParseCursor, arg:
 }
 
 private func ParseOptionWithValue(opts: DriverOptions, cursor: ParseCursor, arg: String): Bool {
+    if (arg.startsWith("-o") && arg.size > 2) {
+        opts.output = arg[2..]
+        return true
+    }
     if (arg == "-o" || arg == "--output" || arg.startsWith("--output=")) {
         if (let Some(value) <- readOptionValue(cursor, arg, "--output")) { opts.output = value; return true }
         return false
@@ -300,15 +304,28 @@ private func ParseOptionWithValue(opts: DriverOptions, cursor: ParseCursor, arg:
         }
         return false
     }
+    if (arg.startsWith("-B") && arg.size > 2) {
+        if (let Some(path) <- opts.CheckDirectoryPath(arg[2..])) { opts.toolChainPaths.add(path) }
+        return true
+    }
     if (arg == "-B" || arg == "--toolchain" || arg.startsWith("--toolchain=")) {
-        if (let Some(value) <- readOptionValue(cursor, arg, "--toolchain")) { opts.toolChainPaths.add(value); return true }
+        if (let Some(value) <- readOptionValue(cursor, arg, "--toolchain")) {
+            if (let Some(path) <- opts.CheckDirectoryPath(value)) { opts.toolChainPaths.add(path) }
+            return true
+        }
         return false
     }
     if (arg == "-L" || arg == "--library-path" || arg.startsWith("--library-path=")) {
-        if (let Some(value) <- readOptionValue(cursor, arg, "--library-path")) { opts.librarySearchPaths.add(value); return true }
+        if (let Some(value) <- readOptionValue(cursor, arg, "--library-path")) {
+            if (let Some(path) <- opts.CheckDirectoryPath(value)) { opts.librarySearchPaths.add(path) }
+            return true
+        }
         return false
     }
-    if (arg.startsWith("-L") && arg.size > 2) { opts.librarySearchPaths.add(arg[2..]); return true }
+    if (arg.startsWith("-L") && arg.size > 2) {
+        if (let Some(path) <- opts.CheckDirectoryPath(arg[2..])) { opts.librarySearchPaths.add(path) }
+        return true
+    }
     if (arg == "-l" || arg == "--library" || arg.startsWith("--library=")) {
         if (let Some(value) <- readOptionValue(cursor, arg, "--library")) { opts.libraries.add(value); return true }
         return false
@@ -338,7 +355,13 @@ private func ParseOptionWithValue(opts: DriverOptions, cursor: ParseCursor, arg:
         return false
     }
     if (arg == "--sysroot" || arg.startsWith("--sysroot=")) {
-        if (let Some(value) <- readOptionValue(cursor, arg, "--sysroot")) { opts.sysroot = value; opts.customizedSysroot = true; return true }
+        if (let Some(value) <- readOptionValue(cursor, arg, "--sysroot")) {
+            if (let Some(path) <- opts.CheckDirectoryPath(value)) {
+                opts.sysroot = path
+                opts.customizedSysroot = true
+            }
+            return true
+        }
         return false
     }
     if (arg == "--save-temps" || arg.startsWith("--save-temps=")) {
@@ -527,6 +550,16 @@ private func ParseOptionWithValue(opts: DriverOptions, cursor: ParseCursor, arg:
         }
         return false
     }
+    if (arg.startsWith("-j") && arg.size > 2) {
+        let value = arg[2..]
+        if (let Some(parsed) <- ParseJobsValue(value)) {
+            opts.jobs = parsed
+            addFrontendSeparated(opts, "-j", value)
+            return true
+        }
+        eprintln("error: --jobs expects a positive integer")
+        return false
+    }
     if (arg == "-j" || arg == "--jobs" || arg.startsWith("--jobs=")) {
         if (let Some(value) <- readOptionValue(cursor, arg, "--jobs")) {
             if (let Some(parsed) <- ParseJobsValue(value)) {
@@ -594,7 +627,12 @@ private func ParseOptionWithValue(opts: DriverOptions, cursor: ParseCursor, arg:
         return false
     }
     if (arg == "--obf-apply-mapping-file" || arg.startsWith("--obf-apply-mapping-file=")) {
-        if (let Some(value) <- readOptionValue(cursor, arg, "--obf-apply-mapping-file")) { opts.layoutObfUserMappingFile = value; return true }
+        if (let Some(value) <- readOptionValue(cursor, arg, "--obf-apply-mapping-file")) {
+            if (let Some(path) <- opts.ValidateInputFilePath(value)) {
+                opts.layoutObfUserMappingFile = path
+                return true
+            }
+        }
         return false
     }
     if (arg == "--obf-sym-prefix" || arg.startsWith("--obf-sym-prefix=")) {
@@ -602,7 +640,12 @@ private func ParseOptionWithValue(opts: DriverOptions, cursor: ParseCursor, arg:
         return false
     }
     if (arg == "--obf-config" || arg.startsWith("--obf-config=")) {
-        if (let Some(value) <- readOptionValue(cursor, arg, "--obf-config")) { opts.obfuscationConfigFile = value; return true }
+        if (let Some(value) <- readOptionValue(cursor, arg, "--obf-config")) {
+            if (let Some(path) <- opts.ValidateInputFilePath(value)) {
+                opts.obfuscationConfigFile = path
+                return true
+            }
+        }
         return false
     }
     eprintln("error: unrecognized driver option '${arg}'")

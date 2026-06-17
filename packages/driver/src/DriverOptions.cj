@@ -3,6 +3,7 @@ package cangjie_compiler::driver
 import std.collection.*
 import cangjie_compiler::option.Backend as OptionBackend
 import cangjie_compiler::option.BackendToString as OptionBackendToString
+import cangjie_compiler::utils.FileMode
 
 public let OBFUCATION_LEVEL_MIN: Int64 = 1
 public let OBFUCATION_LEVEL_MAX: Int64 = 9
@@ -208,6 +209,42 @@ public class DriverOptions {
 
     public func HasInputs(): Bool {
         return !srcFiles.isEmpty() || !inputObjs.isEmpty() || !inputLibraries.isEmpty() || !bcInputFiles.isEmpty()
+    }
+
+    public func CheckDirectoryPath(path: String): Option<String> {
+        if (!FileUtil.FileExist(path)) {
+            eprintln("warning: no such directory '${path}', argument ignored.")
+            return None
+        }
+        if (!FileUtil.IsDir(path)) {
+            eprintln("warning: not a directory '${path}', argument ignored.")
+            return None
+        }
+        if (let Some(absPath) <- FileUtil.GetAbsPath(path)) {
+            return absPath
+        }
+        eprintln("warning: invalid path '${path}', argument ignored.")
+        return None
+    }
+
+    public func ValidateInputFilePath(path: String): Option<String> {
+        if (!FileUtil.FileExist(path)) {
+            eprintln("error: no such file or directory '${path}'")
+            return None
+        }
+        if (!FileUtil.Access(path, FileMode.FM_READ)) {
+            eprintln("error: permission denied '${path}'")
+            return None
+        }
+        if (FileUtil.IsDir(path)) {
+            eprintln("error: not a file '${path}'")
+            return None
+        }
+        if (let Some(absPath) <- FileUtil.GetAbsPath(path)) {
+            return absPath
+        }
+        eprintln("error: invalid path '${path}'")
+        return None
     }
 
     public func IsCrossCompiling(): Bool {
