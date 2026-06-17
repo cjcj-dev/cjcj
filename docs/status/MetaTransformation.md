@@ -1,6 +1,6 @@
 # MetaTransformation Port Status
 
-Date: 2026-06-17
+Date: 2026-06-18
 
 Build: `cjpm build` passes.
 
@@ -63,6 +63,11 @@ Implemented:
   and throws if plugin info has no callback, while `TryRegisterTo` preserves a checked boolean path for
   callers that validate malformed plugin info before invoking it. This better matches the C++ loader's
   non-optional callback invocation after plugin validation.
+- Added `RunCHIRMetaTransforms`, a self-hosted equivalent of the C++ CHIR plugin execution loop in
+  `ToCHIR::PerformPlugin`: it skips non-CHIR transform concepts, runs function transforms over every
+  `Package.GetGlobalFuncsWithBody()` result, runs package transforms once, and throws on impossible
+  kind/type mismatches instead of silently ignoring them. The result reports whether any CHIR plugin was
+  seen plus function/package run counts so callers can mirror the C++ `hasPluginForCHIR` branch.
 
 Known fidelity caveats:
 
@@ -77,7 +82,8 @@ Known fidelity caveats:
   the registration behavior but not the C++ macro spelling.
 - Cangjie does not expose C++-style nested tag declarations in the style used by `MetaKind::CHIR`, so the
   CHIR tag is represented as `MetaKindCHIR` alongside the public `MetaKind` marker.
-- Cross-module plugin loading and execution are still not wired through the self-hosted frontend/CHIR
-  pipeline; this status file tracks only the scoped `packages/meta_transformation/src` port.
+- Cross-module dynamic plugin loading is still not wired through the self-hosted frontend pipeline, and
+  CHIR has not yet been updated to call `RunCHIRMetaTransforms`; this status file tracks only the scoped
+  `packages/meta_transformation/src` port.
 
 Remaining MetaTransformation selfhost markers: 0.
