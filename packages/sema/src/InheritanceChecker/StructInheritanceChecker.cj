@@ -688,15 +688,12 @@ public class StructInheritanceChecker {
         if (!Ty.IsTyCorrect(decl.GetTy())) {
             return MemberMap()
         }
-        var baseDecl: Option<InheritableDecl> = None
-        var baseTy: Option<Ty> = None
         if (let Some(classDecl) <- (decl as ClassDecl)) {
-            for (typeNode in classDecl.inheritedTypes) {
-                if (let Some(ty) <- typeNode.GetTy()) {
-                    if (let Some(classTy) <- (ty as ClassTy)) {
-                        if (let Some(superDecl) <- classTy.declPtr) {
-                            baseDecl = superDecl
-                            baseTy = ty
+            if (let Some(superDecl) <- classDecl.GetSuperClassDecl()) {
+                if (let Some(declTy) <- classDecl.GetTy()) {
+                    if (let Some(classTy) <- (declTy as ClassTy)) {
+                        if (let Some(superTy) <- classTy.GetSuperClassTy()) {
+                            return GetInheritedMembersFromBase(decl, superDecl, superTy)
                         }
                     }
                 }
@@ -704,31 +701,37 @@ public class StructInheritanceChecker {
         } else if (let Some(extendDecl) <- (decl as ExtendDecl)) {
             if (let Some(extendedType) <- extendDecl.extendedType) {
                 if (let Some(extendedTy) <- extendedType.GetTy()) {
-                    baseDecl = Ty.GetInheritableDeclPtrOfTy(extendedTy)
-                    baseTy = extendedTy
+                    if (let Some(baseDecl) <- Ty.GetInheritableDeclPtrOfTy(extendedTy)) {
+                        return GetInheritedMembersFromBase(decl, baseDecl, extendedTy)
+                    }
                 }
             }
         }
-        if (let Some(realBaseDecl) <- baseDecl) {
-            if (let Some(realBaseTy) <- baseTy) {
-                var effectiveBaseDecl = realBaseDecl
-                if (let Some(specificDecl) <- realBaseDecl.specificImplementation) {
-                    if (let Some(specificInheritable) <- (specificDecl as InheritableDecl)) {
-                        effectiveBaseDecl = specificInheritable
-                    }
-                }
-                if (!effectiveBaseDecl.TestAttr(Attribute.IN_REFERENCE_CYCLE)) {
-                    CheckMembersWithInheritedDecls(effectiveBaseDecl)
-                    if (let Some(curFile) <- decl.curFile) {
-                        return GetInheritedSuperMembers(
-                            effectiveBaseDecl,
-                            realBaseTy,
-                            curFile,
-                            ignoreExtends: decl.astKind == ASTKind.EXTEND_DECL
-                        )
-                    }
-                }
+        return MemberMap()
+    }
+
+    private func GetInheritedMembersFromBase(
+        decl: InheritableDecl,
+        baseDecl: InheritableDecl,
+        baseTy: Ty
+    ): MemberMap {
+        var effectiveBaseDecl = baseDecl
+        if (let Some(specificDecl) <- baseDecl.specificImplementation) {
+            if (let Some(specificInheritable) <- (specificDecl as InheritableDecl)) {
+                effectiveBaseDecl = specificInheritable
             }
+        }
+        if (effectiveBaseDecl.TestAttr(Attribute.IN_REFERENCE_CYCLE)) {
+            return MemberMap()
+        }
+        CheckMembersWithInheritedDecls(effectiveBaseDecl)
+        if (let Some(curFile) <- decl.curFile) {
+            return GetInheritedSuperMembers(
+                effectiveBaseDecl,
+                baseTy,
+                curFile,
+                ignoreExtends: decl.astKind == ASTKind.EXTEND_DECL
+            )
         }
         return MemberMap()
     }

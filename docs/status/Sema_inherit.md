@@ -150,3 +150,17 @@ Extend diagnostic parity continuation:
 - The `This`-return mismatch note now points at the parent function identifier and uses the C++ note wording.
 
 Verification: `cjpm build` passes for the whole workspace after this extend diagnostic parity continuation.
+
+Built-in inheritance and base lookup continuation:
+
+- Built-in operator synthesis in `BuiltInInheritanceHelper.cj` now uses local table-driven return-kind checks mirroring
+  the C++ `BuiltInOperatorUtil` maps for unary arithmetic/logical operators, binary arithmetic, exponent, shift, bitwise,
+  relation, equality, and boolean operators. This avoids synthesizing implicit operators for broad token-only matches and
+  preserves C++ primitive return-type selection.
+- Generic upper-bound collection now follows the C++ invalid/non-generic parameter skip path: `GetAllGenericUpperBounds`
+  only appends an entry for type parameters whose type is a real `GenericsTy`.
+- Class inherited-member lookup now uses the real `ClassDecl.GetSuperClassDecl()` and `ClassTy.GetSuperClassTy()` APIs
+  before the shared specific-implementation/reference-cycle/member-merge path, reducing local duplicate superclass
+  discovery logic.
+
+Verification: `cjpm build` passes for the whole workspace after this built-in inheritance and base lookup continuation.
