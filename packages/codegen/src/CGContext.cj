@@ -118,9 +118,17 @@ public class CGContext {
         if (!cjStringType.isNull()) {
             return cjStringType
         }
+        let fields = ArrayList<LLVMTypeRef>()
+        fields.add(unsafe { LLVMPointerType(LLVMInt8TypeInContext(llvmContext.raw), 1u32) })
+        fields.add(unsafe { LLVMInt32TypeInContext(llvmContext.raw) })
+        fields.add(unsafe { LLVMInt32TypeInContext(llvmContext.raw) })
         var result = LLVMNullType()
         try (nameCString = unsafe { LibC.mallocCString("record.std.core:String") }.asResource()) {
-            result = unsafe { LLVMStructCreateNamed(llvmContext.raw, nameCString.value) }
+            result = unsafe { LLVMGetTypeByName2(llvmContext.raw, nameCString.value) }
+            if (result.isNull()) {
+                result = unsafe { LLVMStructCreateNamed(llvmContext.raw, nameCString.value) }
+                SetStructTypeBody(result, fields)
+            }
         }
         cjStringType = result
         return cjStringType

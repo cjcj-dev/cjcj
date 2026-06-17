@@ -4,6 +4,7 @@ import std.collection.*
 import cangjie_compiler::chir.BoolLiteral
 import cangjie_compiler::chir.ExprKind
 import cangjie_compiler::chir.FloatLiteral
+import cangjie_compiler::chir.FuncType
 import cangjie_compiler::chir.IntLiteral
 import cangjie_compiler::chir.LiteralValue
 import cangjie_compiler::chir.RawArrayType
@@ -20,6 +21,7 @@ private let GET_EXCEPTION_WRAPPER_INTRINSIC_NAME: String = "llvm.cj.get.exceptio
 private let POST_THROW_EXCEPTION_INTRINSIC_NAME: String = "llvm.cj.post.throw.exception"
 private let MALLOC_ARRAY_INTRINSIC_NAME: String = "llvm.cj.malloc.array"
 private let MALLOC_ARRAY_GENERIC_INTRINSIC_NAME: String = "llvm.cj.malloc.array.generic"
+private let LLVM_FAST_MATH_ALL: UInt32 = 127u32
 
 public class IRBuilder2 {
     private let cgMod: CGModule
@@ -68,6 +70,30 @@ public class IRBuilder2 {
     }
 
     public func CreateEntryAlloca(valueType: LLVMTypeRef, name!: String = ""): LLVMValueRef {
+        let currentBlock = unsafe { LLVMGetInsertBlock(builder.raw) }
+        if (currentBlock.isNull()) {
+            return CreateAllocaAtCurrentPoint(valueType, name)
+        }
+        let currentFunction = unsafe { LLVMGetBasicBlockParent(currentBlock) }
+        if (currentFunction.isNull()) {
+            return CreateAllocaAtCurrentPoint(valueType, name)
+        }
+        let allocaBlock = GetOrCreateAllocaBlock(currentFunction)
+        if (allocaBlock.isNull()) {
+            return CreateAllocaAtCurrentPoint(valueType, name)
+        }
+        let terminator = unsafe { LLVMGetBasicBlockTerminator(allocaBlock) }
+        if (terminator.isNull()) {
+            unsafe { LLVMPositionBuilderAtEnd(builder.raw, allocaBlock) }
+        } else {
+            unsafe { LLVMPositionBuilderBefore(builder.raw, terminator) }
+        }
+        let result = CreateAllocaAtCurrentPoint(valueType, name)
+        unsafe { LLVMPositionBuilderAtEnd(builder.raw, currentBlock) }
+        return result
+    }
+
+    private func CreateAllocaAtCurrentPoint(valueType: LLVMTypeRef, name: String): LLVMValueRef {
         var result = LLVMNullValue()
         try (nameCString = unsafe { LibC.mallocCString(name) }.asResource()) {
             result = unsafe { LLVMBuildAlloca(builder.raw, valueType, nameCString.value) }
@@ -97,6 +123,21 @@ public class IRBuilder2 {
 
     public func CreateStore(value: LLVMValueRef, dest: CGValue): LLVMValueRef {
         return CreateStore(value, dest.GetRawValue())
+    }
+
+    public func CreateMemSet(pointer: LLVMValueRef, value: LLVMValueRef, len: LLVMValueRef,
+        align!: UInt32 = 0u32): LLVMValueRef {
+        return unsafe { LLVMBuildMemSet(builder.raw, pointer, value, len, align) }
+    }
+
+    public func CreateMemCpy(dest: LLVMValueRef, destAlign: UInt32, src: LLVMValueRef, srcAlign: UInt32,
+        size: LLVMValueRef): LLVMValueRef {
+        return unsafe { LLVMBuildMemCpy(builder.raw, dest, destAlign, src, srcAlign, size) }
+    }
+
+    public func CreateMemMove(dest: LLVMValueRef, destAlign: UInt32, src: LLVMValueRef, srcAlign: UInt32,
+        size: LLVMValueRef): LLVMValueRef {
+        return unsafe { LLVMBuildMemMove(builder.raw, dest, destAlign, src, srcAlign, size) }
     }
 
     public func CreateBr(dest: LLVMBasicBlockRef): LLVMValueRef {
@@ -136,6 +177,53 @@ public class IRBuilder2 {
         var result = LLVMNullBasicBlock()
         try (nameCString = unsafe { LibC.mallocCString(name) }.asResource()) {
             result = unsafe { LLVMAppendBasicBlockInContext(GetLLVMContext().raw, parent, nameCString.value) }
+        }
+        return result
+    }
+
+    public func CreateEntryBasicBlockBeforeFirst(parent: LLVMValueRef, name: String): LLVMBasicBlockRef {
+        var result = LLVMNullBasicBlock()
+        try (nameCString = unsafe { LibC.mallocCString(name) }.asResource()) {
+            let oldEntry = unsafe { LLVMGetFirstBasicBlock(parent) }
+            if (oldEntry.isNull()) {
+                result = unsafe { LLVMAppendBasicBlockInContext(GetLLVMContext().raw, parent, nameCString.value) }
+            } else {
+                result = unsafe { LLVMInsertBasicBlockInContext(GetLLVMContext().raw, oldEntry, nameCString.value) }
+            }
+        }
+        return result
+    }
+
+    public func CreateAndInsertBasicBlock(name: String): LLVMBasicBlockRef {
+        let currentBlock = GetInsertBlock()
+        if (currentBlock.isNull()) {
+            return LLVMNullBasicBlock()
+        }
+        let currentFunction = unsafe { LLVMGetBasicBlockParent(currentBlock) }
+        if (currentFunction.isNull()) {
+            return LLVMNullBasicBlock()
+        }
+        let inserted = CreateEntryBasicBlock(currentFunction, name)
+        unsafe { LLVMMoveBasicBlockAfter(inserted, currentBlock) }
+        return inserted
+    }
+
+    public func CreateAndInsertBasicBlocks(names: ArrayList<String>): ArrayList<LLVMBasicBlockRef> {
+        let result = ArrayList<LLVMBasicBlockRef>()
+        let currentBlock = GetInsertBlock()
+        if (currentBlock.isNull()) {
+            return result
+        }
+        let currentFunction = unsafe { LLVMGetBasicBlockParent(currentBlock) }
+        if (currentFunction.isNull()) {
+            return result
+        }
+        var insertAfter = currentBlock
+        for (name in names) {
+            let created = CreateEntryBasicBlock(currentFunction, name)
+            unsafe { LLVMMoveBasicBlockAfter(created, insertAfter) }
+            result.add(created)
+            insertAfter = created
         }
         return result
     }
@@ -214,7 +302,7 @@ public class IRBuilder2 {
                 }
             }
         }
-        return result
+        return ApplyFastMathIfNeeded(result)
     }
 
     public func CreateUnary(kind: ExprKind, value: LLVMValueRef, name!: String = ""): LLVMValueRef {
@@ -234,7 +322,7 @@ public class IRBuilder2 {
                 case _ => LLVMNullValue()
             }
         }
-        return result
+        return ApplyFastMathIfNeeded(result)
     }
 
     public func CreateNullValue(ty: Type): LLVMValueRef {
@@ -256,7 +344,7 @@ public class IRBuilder2 {
         }
         if (let Some(runeLiteral) <- (literal as RuneLiteral)) {
             let runeTy = CGType.GetOrCreate(cgMod, resultType).GetLLVMType()
-            return unsafe { LLVMConstInt(runeTy, UInt64(runeLiteral.value.toString().hashCode()), 1) }
+            return unsafe { LLVMConstInt(runeTy, UInt64(UInt32(runeLiteral.value)), 0) }
         }
         if (let Some(stringLiteral) <- (literal as StringLiteral)) {
             if (resultType.IsCString()) {
@@ -284,7 +372,7 @@ public class IRBuilder2 {
         }
         if (let Some(runeLiteral) <- (literal as RuneLiteral)) {
             return unsafe {
-                LLVMConstInt(LLVMInt32TypeInContext(GetLLVMContext().raw), UInt64(runeLiteral.value.toString().hashCode()), 1)
+                LLVMConstInt(LLVMInt32TypeInContext(GetLLVMContext().raw), UInt64(UInt32(runeLiteral.value)), 0)
             }
         }
         if (let Some(stringLiteral) <- (literal as StringLiteral)) {
@@ -316,6 +404,7 @@ public class IRBuilder2 {
                 }
             }
         }
+        PropagateCallABIAttributesFromCallee(callee, result)
         return result
     }
 
@@ -342,6 +431,7 @@ public class IRBuilder2 {
                 }
             }
         }
+        PropagateCallABIAttributesFromCallee(callee, result)
         return result
     }
 
@@ -361,6 +451,65 @@ public class IRBuilder2 {
             }
         }
         return CreateCall(callee, calleeType, args, name: name)
+    }
+
+    public func CreateCallOrInvoke(calleeType: CGFunctionType, callee: LLVMValueRef, args: ArrayList<CGValue>,
+        name!: String = ""): LLVMValueRef {
+        let callArgs = TransformCGFunctionArgs(calleeType, args, name: name)
+        let callBase = CreateCallOrInvoke(callee, calleeType.GetLLVMFunctionType(), callArgs, name: name)
+        if (let Some(funcType) <- (calleeType.GetOriginal() as FuncType)) {
+            if (funcType.IsCFunc()) {
+                SetZExtAttrForCFunc(callBase, calleeType.GetLLVMFunctionType())
+            }
+            if (calleeType.HasSRet() && !callArgs.isEmpty()) {
+                let retCGType = CGType.GetOrCreate(cgMod, funcType.GetReturnType())
+                AddSRetAttribute(callBase, GetSRetAttributeType(funcType.GetReturnType(), retCGType))
+                AddNoAliasAttribute(callBase)
+                return callArgs[0]
+            }
+            if (funcType.GetReturnType().IsUnit()) {
+                return cgMod.GenerateUnitTypeValue()
+            }
+        }
+        return callBase
+    }
+
+    public func CreateCallOrInvoke(callee: CGFunction, args!: ArrayList<CGValue> = ArrayList<CGValue>(),
+        name!: String = ""): LLVMValueRef {
+        if (let Some(functionType) <- callee.GetCGFunctionType()) {
+            return CreateCallOrInvoke(functionType, callee.GetRawFunction(), args, name: name)
+        }
+        return LLVMNullValue()
+    }
+
+    private func TransformCGFunctionArgs(calleeType: CGFunctionType, args: ArrayList<CGValue>,
+        name!: String = ""): ArrayList<LLVMValueRef> {
+        let callArgs = ArrayList<LLVMValueRef>()
+        if (calleeType.HasSRet()) {
+            if (let Some(funcType) <- (calleeType.GetOriginal() as FuncType)) {
+                let retCGType = CGType.GetOrCreate(cgMod, funcType.GetReturnType())
+                callArgs.add(CreateSRetAlloca(retCGType, name: name))
+            }
+        }
+        for (arg in args) {
+            callArgs.add(arg.GetRawValue())
+        }
+        return callArgs
+    }
+
+    private func CreateSRetAlloca(retCGType: CGType, name!: String = ""): LLVMValueRef {
+        let allocaName = if (name.isEmpty()) { "sret" } else { name + ".sret" }
+        if (retCGType.GetSize().isSome()) {
+            return CreateEntryAlloca(retCGType, name: allocaName)
+        }
+        return CreateEntryAlloca(retCGType.GetLLVMType(), name: allocaName)
+    }
+
+    private func GetSRetAttributeType(retType: Type, retCGType: CGType): LLVMTypeRef {
+        if (retCGType.GetSize().isNone() && !retType.IsGeneric()) {
+            return unsafe { LLVMInt8TypeInContext(GetLLVMContext().raw) }
+        }
+        return retCGType.GetLLVMType()
     }
 
     public func GetOrInsertIntrinsicDeclaration(intrinsicName: String): LLVMValueRef {
@@ -452,6 +601,85 @@ public class IRBuilder2 {
             }
         }
         return result
+    }
+
+    public func CreateInBoundsGEP(elementType: LLVMTypeRef, pointer: LLVMValueRef, indices: ArrayList<LLVMValueRef>,
+        name!: String = ""): LLVMValueRef {
+        var result = LLVMNullValue()
+        try (nameCString = unsafe { LibC.mallocCString(name) }.asResource()) {
+            if (indices.isEmpty()) {
+                return pointer
+            }
+            try (idxPtr = LibC.malloc<LLVMValueRef>(count: indices.size).asResource()) {
+                var idx: Int64 = 0
+                while (idx < indices.size) {
+                    unsafe { (idxPtr.value + idx).write(indices[idx]) }
+                    idx++
+                }
+                result = unsafe {
+                    LLVMBuildInBoundsGEP2(builder.raw, elementType, pointer, idxPtr.value, UInt32(indices.size),
+                        nameCString.value)
+                }
+            }
+        }
+        return result
+    }
+
+    public func CreateStructGEP(elementType: LLVMTypeRef, pointer: LLVMValueRef, index: UInt32,
+        name!: String = ""): LLVMValueRef {
+        var result = LLVMNullValue()
+        try (nameCString = unsafe { LibC.mallocCString(name) }.asResource()) {
+            result = unsafe { LLVMBuildStructGEP2(builder.raw, elementType, pointer, index, nameCString.value) }
+        }
+        return result
+    }
+
+    public func CreateVArrayGEP(arrayType: LLVMTypeRef, pointer: LLVMValueRef, indices: ArrayList<LLVMValueRef>,
+        name!: String = ""): LLVMValueRef {
+        let gepIndices = ArrayList<LLVMValueRef>()
+        gepIndices.add(GetInt64(0))
+        for (index in indices) {
+            gepIndices.add(index)
+        }
+        return CreateInBoundsGEP(arrayType, pointer, gepIndices, name: name)
+    }
+
+    public func CreatePHI(valueType: LLVMTypeRef, name!: String = ""): LLVMValueRef {
+        var result = LLVMNullValue()
+        try (nameCString = unsafe { LibC.mallocCString(name) }.asResource()) {
+            result = unsafe { LLVMBuildPhi(builder.raw, valueType, nameCString.value) }
+        }
+        return ApplyFastMathIfNeeded(result)
+    }
+
+    public func AddIncoming(phi: LLVMValueRef, values: ArrayList<LLVMValueRef>,
+        blocks: ArrayList<LLVMBasicBlockRef>): Unit {
+        if (values.size != blocks.size) {
+            throw IllegalArgumentException("PHI incoming values and blocks must have the same length")
+        }
+        if (values.isEmpty()) {
+            return
+        }
+        try (valuePtr = LibC.malloc<LLVMValueRef>(count: values.size).asResource()) {
+            try (blockPtr = LibC.malloc<LLVMBasicBlockRef>(count: blocks.size).asResource()) {
+                var idx: Int64 = 0
+                while (idx < values.size) {
+                    unsafe { (valuePtr.value + idx).write(values[idx]) }
+                    unsafe { (blockPtr.value + idx).write(blocks[idx]) }
+                    idx++
+                }
+                unsafe { LLVMAddIncoming(phi, valuePtr.value, blockPtr.value, UInt32(values.size)) }
+            }
+        }
+    }
+
+    public func CreateSelect(cond: LLVMValueRef, trueValue: LLVMValueRef, falseValue: LLVMValueRef,
+        name!: String = ""): LLVMValueRef {
+        var result = LLVMNullValue()
+        try (nameCString = unsafe { LibC.mallocCString(name) }.asResource()) {
+            result = unsafe { LLVMBuildSelect(builder.raw, cond, trueValue, falseValue, nameCString.value) }
+        }
+        return ApplyFastMathIfNeeded(result)
     }
 
     public func CreateBitCast(value: LLVMValueRef, destType: LLVMTypeRef, name!: String = "bitcast"): LLVMValueRef {
@@ -570,6 +798,127 @@ public class IRBuilder2 {
         return unsafe { LLVMBuildUnreachable(builder.raw) }
     }
 
+    public func GetLandingPadType(): LLVMTypeRef {
+        return unsafe { LLVMTokenTypeInContext(GetLLVMContext().raw) }
+    }
+
+    public func CreateLandingPad(landingPadType: LLVMTypeRef, numClauses: UInt32,
+        name!: String = "landingpad"): LLVMValueRef {
+        var result = LLVMNullValue()
+        try (nameCString = unsafe { LibC.mallocCString(name) }.asResource()) {
+            result = unsafe {
+                LLVMBuildLandingPad(builder.raw, landingPadType, LLVMNullValue(), numClauses, nameCString.value)
+            }
+        }
+        return result
+    }
+
+    public func CreateLandingPad(numClauses: UInt32, name!: String = "landingpad"): LLVMValueRef {
+        return CreateLandingPad(GetLandingPadType(), numClauses, name: name)
+    }
+
+    public func AddLandingPadClause(landingPad: LLVMValueRef, clause: LLVMValueRef): Unit {
+        if (!landingPad.isNull() && !clause.isNull()) {
+            unsafe { LLVMAddClause(landingPad, clause) }
+        }
+    }
+
+    public func AddLandingPadCatchAllClause(landingPad: LLVMValueRef): Unit {
+        let catchAll = unsafe {
+            LLVMConstNull(LLVMPointerType(LLVMInt8TypeInContext(GetLLVMContext().raw), 0u32))
+        }
+        AddLandingPadClause(landingPad, catchAll)
+    }
+
+    public func GetLandingPadClauseCount(landingPad: LLVMValueRef): UInt32 {
+        if (landingPad.isNull()) {
+            return 0u32
+        }
+        return unsafe { LLVMGetNumClauses(landingPad) }
+    }
+
+    public func GetLandingPadClause(landingPad: LLVMValueRef, index: UInt32): LLVMValueRef {
+        if (landingPad.isNull() || index >= GetLandingPadClauseCount(landingPad)) {
+            return LLVMNullValue()
+        }
+        return unsafe { LLVMGetClause(landingPad, index) }
+    }
+
+    public func SetLandingPadCleanup(landingPad: LLVMValueRef, cleanup: Bool): Unit {
+        if (!landingPad.isNull()) {
+            unsafe { LLVMSetCleanup(landingPad, if (cleanup) { 1 } else { 0 }) }
+        }
+    }
+
+    public func IsLandingPadCleanup(landingPad: LLVMValueRef): Bool {
+        return !landingPad.isNull() && unsafe { LLVMIsCleanup(landingPad) } != 0
+    }
+
+    public func CreateResume(exceptionValue: LLVMValueRef): LLVMValueRef {
+        return unsafe { LLVMBuildResume(builder.raw, exceptionValue) }
+    }
+
+    public func CreateCleanupRet(catchPad: LLVMValueRef, block: LLVMBasicBlockRef): LLVMValueRef {
+        return unsafe { LLVMBuildCleanupRet(builder.raw, catchPad, block) }
+    }
+
+    public func CreateCatchRet(catchPad: LLVMValueRef, block: LLVMBasicBlockRef): LLVMValueRef {
+        return unsafe { LLVMBuildCatchRet(builder.raw, catchPad, block) }
+    }
+
+    public func CreateCatchPad(parentPad: LLVMValueRef, args: ArrayList<LLVMValueRef>,
+        name!: String = "catchpad"): LLVMValueRef {
+        return CreateFuncletPad(parentPad, args, true, name: name)
+    }
+
+    public func CreateCleanupPad(parentPad: LLVMValueRef, args: ArrayList<LLVMValueRef>,
+        name!: String = "cleanuppad"): LLVMValueRef {
+        return CreateFuncletPad(parentPad, args, false, name: name)
+    }
+
+    private func CreateFuncletPad(parentPad: LLVMValueRef, args: ArrayList<LLVMValueRef>, isCatch: Bool,
+        name!: String): LLVMValueRef {
+        var result = LLVMNullValue()
+        try (nameCString = unsafe { LibC.mallocCString(name) }.asResource()) {
+            if (args.isEmpty()) {
+                result = if (isCatch) {
+                    unsafe { LLVMBuildCatchPad(builder.raw, parentPad, CPointer<LLVMValueRef>(), 0u32, nameCString.value) }
+                } else {
+                    unsafe { LLVMBuildCleanupPad(builder.raw, parentPad, CPointer<LLVMValueRef>(), 0u32, nameCString.value) }
+                }
+            } else {
+                try (argPtr = LibC.malloc<LLVMValueRef>(count: args.size).asResource()) {
+                    var idx: Int64 = 0
+                    while (idx < args.size) {
+                        unsafe { (argPtr.value + idx).write(args[idx]) }
+                        idx++
+                    }
+                    result = if (isCatch) {
+                        unsafe { LLVMBuildCatchPad(builder.raw, parentPad, argPtr.value, UInt32(args.size), nameCString.value) }
+                    } else {
+                        unsafe { LLVMBuildCleanupPad(builder.raw, parentPad, argPtr.value, UInt32(args.size), nameCString.value) }
+                    }
+                }
+            }
+        }
+        return result
+    }
+
+    public func CreateCatchSwitch(parentPad: LLVMValueRef, unwindBlock: LLVMBasicBlockRef, handlerCountHint: UInt32,
+        name!: String = "catchswitch"): LLVMValueRef {
+        var result = LLVMNullValue()
+        try (nameCString = unsafe { LibC.mallocCString(name) }.asResource()) {
+            result = unsafe { LLVMBuildCatchSwitch(builder.raw, parentPad, unwindBlock, handlerCountHint, nameCString.value) }
+        }
+        return result
+    }
+
+    public func AddCatchSwitchHandler(catchSwitch: LLVMValueRef, dest: LLVMBasicBlockRef): Unit {
+        if (!catchSwitch.isNull() && !dest.isNull()) {
+            unsafe { LLVMAddHandler(catchSwitch, dest) }
+        }
+    }
+
     public func CreateAggregateValue(aggregateType: LLVMTypeRef, elements: ArrayList<LLVMValueRef>,
         name!: String = "agg"): LLVMValueRef {
         var aggregate = unsafe { LLVMGetUndef(aggregateType) }
@@ -581,6 +930,14 @@ public class IRBuilder2 {
             idx++
         }
         return aggregate
+    }
+
+    public func CreateExtractValue(aggregate: LLVMValueRef, index: UInt32, name!: String = ""): LLVMValueRef {
+        var result = LLVMNullValue()
+        try (nameCString = unsafe { LibC.mallocCString(name) }.asResource()) {
+            result = unsafe { LLVMBuildExtractValue(builder.raw, aggregate, index, nameCString.value) }
+        }
+        return result
     }
 
     public func CreateOverflowOrArithmeticException(ident: String, isOverflow!: Bool = true): Unit {
@@ -774,6 +1131,35 @@ public class IRBuilder2 {
             intrinsicID = unsafe { LLVMLookupIntrinsicID(nameCString.value, UIntNative(intrinsicName.size)) }
         }
         return intrinsicID
+    }
+
+    private func GetOrCreateAllocaBlock(parentFunction: LLVMValueRef): LLVMBasicBlockRef {
+        let entryBlock = unsafe { LLVMGetEntryBasicBlock(parentFunction) }
+        if (entryBlock.isNull()) {
+            return LLVMNullBasicBlock()
+        }
+        var result = LLVMNullBasicBlock()
+        try (allocasName = unsafe { LibC.mallocCString("allocas") }.asResource()) {
+            let entryName = unsafe { LLVMGetBasicBlockName(entryBlock) }
+            if (!entryName.isNull() && unsafe { strcmp(entryName, allocasName.value) } == 0) {
+                result = entryBlock
+            } else {
+                result = unsafe {
+                    LLVMInsertBasicBlockInContext(GetLLVMContext().raw, entryBlock, allocasName.value)
+                }
+                unsafe { LLVMPositionBuilderAtEnd(builder.raw, result) }
+                let _ = unsafe { LLVMBuildBr(builder.raw, entryBlock) }
+            }
+        }
+        return result
+    }
+
+    private func ApplyFastMathIfNeeded(value: LLVMValueRef): LLVMValueRef {
+        if (!value.isNull() && GetCGContext().GetCompileOptions().fastMathMode &&
+            unsafe { LLVMCanValueUseFastMathFlags(value) } != 0) {
+            unsafe { LLVMSetFastMathFlags(value, LLVM_FAST_MATH_ALL) }
+        }
+        return value
     }
 
     private func IsFloatOperand(ty: Option<Type>): Bool {
