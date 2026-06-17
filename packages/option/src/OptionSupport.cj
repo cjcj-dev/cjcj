@@ -30,6 +30,14 @@ foreign {
     func sysconf(name: Int32): IntNative
 }
 
+@When[os == "Windows"]
+private let ALL_PROCESSOR_GROUPS: UInt16 = 0xffffu16
+
+@When[os == "Windows"]
+foreign {
+    func GetActiveProcessorCount(groupNumber: UInt16): UInt32
+}
+
 @When[os == "Linux"]
 public func GetHardwareConcurrency(): UInt64 {
     let count = unsafe { get_nprocs() }
@@ -44,7 +52,14 @@ public func GetHardwareConcurrency(): UInt64 {
     return 1u64
 }
 
-@When[os != "Linux" && os != "macOS"]
+@When[os == "Windows"]
+public func GetHardwareConcurrency(): UInt64 {
+    let count = unsafe { GetActiveProcessorCount(ALL_PROCESSOR_GROUPS) }
+    if (count > 0u32) { return UInt64(count) }
+    return 1u64
+}
+
+@When[os != "Linux" && os != "macOS" && os != "Windows"]
 public func GetHardwareConcurrency(): UInt64 {
     return 1u64
 }

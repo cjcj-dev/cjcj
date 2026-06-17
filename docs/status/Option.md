@@ -351,3 +351,17 @@ compatibility surface for current sibling package imports; several print-style
 diagnostics still use local wrapper text where the C++ uses formatted print
 helpers; and driver-layer obfuscation option handling is not yet fully folded
 into the base Option action surface.
+
+This continuation completes the native host parallelism path for the supported
+desktop hosts. `GetHardwareConcurrency` now has a Windows C FFI binding to
+`GetActiveProcessorCount(ALL_PROCESSOR_GROUPS)`, so unset `--jobs`, default APC
+normalization, and explicit job/APC clamping no longer fall back to one worker
+on Windows. Linux and macOS continue to use their existing native queries, and
+only unknown hosts keep the conservative fallback.
+
+Remaining gaps: `Options.cj`/`OptionEnums.cj` remain hand-maintained mirrors of
+`Options.inc`; `MaybeString`, `MaybeUInt64`, and `TryParseUInt64` remain as
+compatibility surface for current sibling package imports; several print-style
+diagnostics still use local wrapper text where the C++ uses formatted print
+helpers; and driver-layer obfuscation option handling is not yet fully folded
+into the base Option action surface.
