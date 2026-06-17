@@ -93,6 +93,51 @@ private func emitGenericConstraintMismatch(diag: Option<BasicDiagnosticEngine>, 
     }
 }
 
+private func collectStaticMembers(decl: InheritableDecl, out: ArrayList<Decl>): Unit {
+    for (member in decl.GetMemberDecls()) {
+        if (member.IsFuncOrProp() && member.TestAttr(Attribute.STATIC)) {
+            out.add(member)
+        }
+    }
+    for (inheritedType in decl.inheritedTypes) {
+        if (let Some(inheritedDecl) <- Ty.GetDeclPtrOfTy(inheritedType.GetTy())) {
+            if (let Some(interfaceDecl) <- (inheritedDecl as InterfaceDecl)) {
+                collectStaticMembers(interfaceDecl, out)
+            }
+        }
+    }
+}
+
+private func getInstDiagNode(expr: NameReferenceExpr, instTy: Ty): Node {
+    for (typeArg in expr.GetTypeArgs()) {
+        if (!typeArg.TestAttr(Attribute.COMPILER_ADD)) {
+            if (let Some(typeArgTy) <- typeArg.GetTy()) {
+                if (SameTy(typeArgTy, instTy)) {
+                    return typeArg
+                }
+            }
+        }
+    }
+    return expr
+}
+
+private func emitIncompleteInstantiation(diag: Option<BasicDiagnosticEngine>, node: Node,
+    genericTy: GenericsTy, instTy: Ty, isNothing: Bool): Unit {
+    if (let Some(diagEngine) <- diag) {
+        let typeString = if (isNothing) {
+            "'Nothing'"
+        } else {
+            "interface or abstract class '" + instTy.String() + "'"
+        }
+        let builder = diagEngine.Diagnose(node.begin, node.end,
+            BasicDiagKind.sema_cannot_instantiated_by_incomplete_type,
+            args: [BasicDiagArgument(genericTy.String()), BasicDiagArgument(typeString)])
+        if (isNothing) {
+            builder.AddNote("'Nothing' type has no members")
+        }
+    }
+}
+
 public func CheckUpperBound(genericConstraint: GenericConstraint): Bool {
     if (let Some(refType) <- genericConstraint.refType) {
         if (!Ty.IsTyCorrect(refType.GetTy())) {
@@ -234,6 +279,118 @@ public func GenerateGenericTypeMapping(typeManager: TypeManager, expr: Expr): Su
 }
 
 extend TypeCheckerImpl {
+    private func candidateImplementsStaticRequirement(candidate: Decl, required: Decl): Bool {
+        if (candidate.TestAttr(Attribute.ABSTRACT)) {
+            return false
+        }
+        if (candidate.IsFunc() && required.IsFunc()) {
+            return typeManager.PairIsOverrideOrImpl(candidate, required)
+        }
+        if (candidate.astKind == ASTKind.PROP_DECL && required.astKind == ASTKind.PROP_DECL) {
+            return typeManager.PairIsOverrideOrImpl(candidate, required)
+        }
+        return false
+    }
+
+    private func HasIncompleteStaticFuncOrProp(ctx: ASTContext, decl: InheritableDecl,
+        staticMembers: ArrayList<Decl>): Bool {
+        if (!decl.TestAttr(Attribute.ABSTRACT) && decl.astKind != ASTKind.INTERFACE_DECL) {
+            return false
+        }
+        for (staticMember in staticMembers) {
+            let candidates = FieldLookup(ctx, Some(decl), staticMember.identifier.Val(),
+                info: LookupInfo(file: decl.curFile))
+            var found = false
+            for (candidate in candidates) {
+                if (candidateImplementsStaticRequirement(candidate, staticMember)) {
+                    found = true
+                    break
+                }
+            }
+            if (!found) {
+                return true
+            }
+        }
+        return false
+    }
+
+    private func CheckInstTyWithUpperbound(ctx: ASTContext, typeMapping: TypeSubst,
+        expr: NameReferenceExpr): Bool {
+        if (typeMapping.IsEmpty()) {
+            return true
+        }
+        for (entry in typeMapping.entries) {
+            let genericTy = entry.tyVar
+            var satisfiesConstraints = true
+            for (upperBound in genericTy.upperBounds) {
+                let upperBoundTy = typeManager.GetInstantiatedTy(upperBound, typeMapping)
+                if (!typeManager.IsSubtype(entry.ty, upperBoundTy)) {
+                    satisfiesConstraints = false
+                    break
+                }
+            }
+            if (!satisfiesConstraints) {
+                return true
+            }
+
+            let staticMembers = ArrayList<Decl>()
+            for (upperBound in genericTy.upperBounds) {
+                if (let Some(upperDecl) <- Ty.GetDeclPtrOfTy(Some(upperBound))) {
+                    if (let Some(inheritable) <- (upperDecl as InheritableDecl)) {
+                        collectStaticMembers(inheritable, staticMembers)
+                    }
+                }
+            }
+            if (staticMembers.isEmpty()) {
+                continue
+            }
+
+            var isIncompleteInterface = false
+            if (let Some(interfaceTy) <- (entry.ty as InterfaceTy)) {
+                if (let Some(interfaceDecl) <- interfaceTy.declPtr) {
+                    let interfaceStaticMembers = ArrayList<Decl>()
+                    collectStaticMembers(interfaceDecl, interfaceStaticMembers)
+                    isIncompleteInterface = HasIncompleteStaticFuncOrProp(ctx, interfaceDecl, interfaceStaticMembers)
+                } else {
+                    isIncompleteInterface = true
+                }
+            }
+            let isInstByNothing = entry.ty.IsNothing()
+            if (isIncompleteInterface || isInstByNothing) {
+                emitIncompleteInstantiation(diag, getInstDiagNode(expr, entry.ty), genericTy, entry.ty, isInstByNothing)
+                return false
+            }
+        }
+        return true
+    }
+
+    public func CheckInstTypeCompleteness(ctx: ASTContext, expr: NameReferenceExpr): Bool {
+        if (let None <- exprTarget(expr)) {
+            return true
+        }
+        var genericDecl = GetRealTarget(exprTarget(expr).getOrThrow())
+        if (genericDecl.TestAttr(Attribute.CONSTRUCTOR)) {
+            if (let Some(outer) <- genericDecl.outerDecl) {
+                genericDecl = outer
+            } else {
+                return true
+            }
+        }
+        let typeMapping = GenerateTypeMapping(genericDecl, expr.instTys)
+        if (!CheckInstTyWithUpperbound(ctx, typeMapping, expr)) {
+            return false
+        }
+        if (let Some(genericTy) <- genericDecl.GetTy()) {
+            for (extendDecl in typeManager.GetAllExtendsByTy(genericTy)) {
+                let extendMapping = GenerateTypeMapping(extendDecl, expr.instTys)
+                if (!CheckInstTyWithUpperbound(ctx, extendMapping, expr)) {
+                    return false
+                }
+            }
+        }
+        return true
+    }
+
     public func CheckUpperBound(ctx: ASTContext, genericConstraint: GenericConstraint): Unit {
         let _ = ctx
         if (let Some(diagEngine) <- diag) {
