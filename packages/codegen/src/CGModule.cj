@@ -1,6 +1,7 @@
 package cangjie_compiler::codegen
 
 import std.collection.*
+import cangjie_compiler::chir.Attribute
 import cangjie_compiler::chir.Block
 import cangjie_compiler::chir.FuncType
 import cangjie_compiler::chir.Function
@@ -12,6 +13,8 @@ import cangjie_compiler::chir.Value
 import cangjie_compiler::option.ArchType
 import cangjie_compiler::option.EnvironmentType
 import cangjie_compiler::option.TripleInfo
+
+private let CJ_PERSONALITY_FUNC_NAME: String = "__cj_personality_v0$"
 
 public open class CGValue {
     private var rawVal: LLVMValueRef
@@ -107,9 +110,84 @@ public class CGModule {
         }
         let cgFunc = CGFunction(rawFunction, cgFuncType, chirValue, this)
         ApplyFunctionABIAttributes(rawFunction, chirValue, cgFuncType)
+        MaybeAttachExceptionPersonality(rawFunction, chirValue)
         functions[name] = cgFunc
         valueMapping[name] = cgFunc
         return cgFunc
+    }
+
+    public func GetOrInsertFunction(funcName: String, functionType: LLVMTypeRef): LLVMValueRef {
+        if (let Some(moduleHandle) <- module) {
+            var result = LLVMNullValue()
+            try (nameCString = unsafe { LibC.mallocCString(funcName) }.asResource()) {
+                result = unsafe { LLVMGetNamedFunction(moduleHandle.raw, nameCString.value) }
+                if (result.isNull()) {
+                    result = unsafe { LLVMAddFunction(moduleHandle.raw, nameCString.value, functionType) }
+                }
+            }
+            return result
+        }
+        return LLVMNullValue()
+    }
+
+    public func GetExceptionIntrinsicPersonality(): LLVMValueRef {
+        let returnType = unsafe { LLVMInt32TypeInContext(GetLLVMContext().raw) }
+        let functionType = unsafe { LLVMFunctionType(returnType, CPointer<LLVMTypeRef>(), 0u32, 1) }
+        if (cgCtx.GetCompileOptions().target.IsMacOS()) {
+            return GetOrInsertFunction(CJ_PERSONALITY_FUNC_NAME, functionType)
+        }
+        if (let Some(moduleHandle) <- module) {
+            var result = LLVMNullValue()
+            var created = false
+            try (nameCString = unsafe { LibC.mallocCString(CJ_PERSONALITY_FUNC_NAME) }.asResource()) {
+                result = unsafe { LLVMGetNamedFunction(moduleHandle.raw, nameCString.value) }
+                if (result.isNull()) {
+                    result = unsafe { LLVMAddFunction(moduleHandle.raw, nameCString.value, functionType) }
+                    created = true
+                }
+            }
+            if (created && !result.isNull()) {
+                AddLinkageTypeMetadata(result, LLVMLinkage.Private, false)
+                let entryBlock = IRBuilder2(this).CreateEntryBasicBlock(result, "entry")
+                let personalityBuilder = IRBuilder2(this, entryBlock)
+                _ = personalityBuilder.CreateRet(unsafe { LLVMConstInt(returnType, 0u64, 0) })
+            }
+            return result
+        }
+        return LLVMNullValue()
+    }
+
+    public func SetExceptionIntrinsicPersonality(rawFunction: LLVMValueRef): Unit {
+        if (rawFunction.isNull()) {
+            return
+        }
+        let personality = GetExceptionIntrinsicPersonality()
+        if (!personality.isNull()) {
+            unsafe { LLVMSetPersonalityFn(rawFunction, personality) }
+        }
+    }
+
+    public func HasPersonalityFunction(rawFunction: LLVMValueRef): Bool {
+        return !rawFunction.isNull() && unsafe { LLVMHasPersonalityFn(rawFunction) } != 0
+    }
+
+    public func GetPersonalityFunction(rawFunction: LLVMValueRef): LLVMValueRef {
+        if (rawFunction.isNull() || !HasPersonalityFunction(rawFunction)) {
+            return LLVMNullValue()
+        }
+        return unsafe { LLVMGetPersonalityFn(rawFunction) }
+    }
+
+    private func MaybeAttachExceptionPersonality(rawFunction: LLVMValueRef, chirValue: Value): Unit {
+        if (rawFunction.isNull() || !chirValue.IsFuncWithBody() || chirValue.TestAttr(Attribute.FOREIGN)) {
+            return
+        }
+        if (let Some(functionValue) <- (chirValue as Function)) {
+            if (functionValue.IsCFFIWrapper()) {
+                return
+            }
+        }
+        SetExceptionIntrinsicPersonality(rawFunction)
     }
 
     private func ApplyFunctionABIAttributes(rawFunction: LLVMValueRef, chirValue: Value, cgFuncType: CGType): Unit {

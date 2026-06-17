@@ -163,6 +163,9 @@ foreign {
     func LLVMSetInitializer(global: LLVMValueRef, constantVal: LLVMValueRef): Unit
     func LLVMCountParams(fn: LLVMValueRef): UInt32
     func LLVMGetParam(fn: LLVMValueRef, index: UInt32): LLVMValueRef
+    func LLVMHasPersonalityFn(fn: LLVMValueRef): Int32
+    func LLVMGetPersonalityFn(fn: LLVMValueRef): LLVMValueRef
+    func LLVMSetPersonalityFn(fn: LLVMValueRef, personalityFn: LLVMValueRef): Unit
     func LLVMGetFirstBasicBlock(fn: LLVMValueRef): LLVMBasicBlockRef
     func LLVMGetNextBasicBlock(block: LLVMBasicBlockRef): LLVMBasicBlockRef
     func LLVMGetEntryBasicBlock(fn: LLVMValueRef): LLVMBasicBlockRef

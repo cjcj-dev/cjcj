@@ -12,6 +12,7 @@ Reference inspected:
 - `/root/cj_build/cangjie_compiler/src/CodeGen/DIBuilder.{h,cpp}`
 - `/root/cj_build/cangjie_compiler/src/CodeGen/IRAttribute.h`
 - `/root/cj_build/cangjie_compiler/src/CodeGen/CGFunction.cpp`
+- `/root/cj_build/cangjie_compiler/src/CodeGen/EmitFunctionIR.cpp`
 - `/root/cj_build/cangjie_compiler/src/CodeGen/CJNative/CJNativeIRBuilder.cpp`
 - LLVM C API headers installed under `/usr/include/llvm-c-20/llvm-c`
 
@@ -54,6 +55,10 @@ Implemented in this pass:
 - Added C++-style basic-block insertion helpers: create-before-first-entry for true entry insertion and
   create-and-insert-after-current variants that preserve the C++ block ordering used by overflow/type-info helper
   generation.
+- Added LLVM personality-function C API bindings and the C++ `CGModule::GetExceptionIntrinsicPersonality` behavior:
+  macOS uses the runtime declaration, while other targets materialize a private `__cj_personality_v0$` shim returning
+  `i32 0`. `CGModule` now exposes set/get/has personality helpers and attaches the exception personality to real CHIR
+  function bodies while skipping foreign/CFFI-wrapper functions.
 
 Known remaining gaps for this scope:
 
@@ -65,11 +70,12 @@ Known remaining gaps for this scope:
   preserve an arbitrary instruction iterator the way C++ `IRBuilder` does.
 - The new `CGFunctionType` call wrapper covers known-size struct-return setup and call attributes, but the full C++
   unknown-size generic sret path still depends on later generic-allocation/type-info intrinsic lowering.
-- Landing-pad construction now has the LLVM wrapper surface, but higher-level CHIR landing-pad block emission and
-  personality-function assignment are still incomplete in the partial self-host port.
+- Landing-pad construction now has the LLVM wrapper surface and ordinary `GetOrInsertCGFunction` bodies get the Cangjie
+  personality function, but higher-level CHIR landing-pad block emission and special package-entry/helper personality
+  call sites are still incomplete in the partial self-host port.
 - The target-machine and pass-builder wrappers are ready for callers, but the package-level emission path does not yet
   drive them end to end.
 
 Remaining `TODO(selfhost:CodeGen)` markers in this llvm-ffi slice: 0.
 
-Estimated behavior coverage for this llvm-ffi/module/context/IRBuilder slice: 59%.
+Estimated behavior coverage for this llvm-ffi/module/context/IRBuilder slice: 61%.
