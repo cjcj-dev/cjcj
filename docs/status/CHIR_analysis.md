@@ -99,3 +99,23 @@
 
 - `cjpm build` passed after implementation.
 - `TODO(selfhost:CHIR)` count in `packages/chir/src`: 0.
+
+## 2026-06-17 ValueRange Analysis Pass
+
+- Reference read: C++ `include/cangjie/CHIR/Analysis/ValueRangeAnalysis.h` and `src/CHIR/Analysis/ValueRangeAnalysis.cpp`.
+- Added `ValueRangeAnalysis.cj` to mirror the C++ component split instead of leaving range analysis folded into the numeric-domain helpers.
+- Ported the C++ `ValueRange`, `BoolRange`, `SIntRange`, and `RangeValueDomain` lattice behavior, including clone, join, top/bottom, string, literal, default integer/bool range, and tracked-global helpers.
+- Added a concrete `RangeDomain` over the current self-hosted CHIR `Value` IDs, with clone, join, update, bound-setting, clear, and abstract-value lookup behavior needed by transform-driving range analysis.
+- Added a C++-shaped `RangeAnalysis` subset over the real local CHIR IR: integer arithmetic transfer through `ComputeArithmeticBinop`, integer relation transfer through `ComputeRelIntBinop`, bool equality transfer, constant seeding, typecast numeric-bound transfer, in-queue limiting, and simple branch pruning.
+- Kept `OverflowStrategy` de-isolated through the real `cangjie_compiler::utils` package import.
+
+## Remaining After ValueRange Analysis Pass
+
+- Full C++ `ValueAnalysis`/`State` infrastructure is still not present in the self-hosted CHIR package, so this pass provides the range-specific state and transfer layer rather than the complete template framework.
+- The local Cangjie IR surface still lacks typed C++ nodes such as `TypeCast`, `TypeCastWithException`, `MultiBranch`, and expression-level overflow strategy access, so exception routing, multibranch pruning, single-value diagnostic overflow emission, and exact per-expression overflow strategies remain incomplete.
+- Higher-level wiring into `AnalysisWrapper`, `Engine`, `Results`, `ConstAnalysis`, and `TypeAnalysis` remains partial compared with the C++ pipeline.
+
+## Verification After ValueRange Analysis Pass
+
+- `cjpm build` passed after implementation.
+- `TODO(selfhost:CHIR)` count in `packages/chir/src`: 0.
