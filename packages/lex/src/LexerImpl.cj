@@ -865,6 +865,9 @@ public class LexerImpl {
         if (first < BYTE_2_FLAG) {
             return (Int64(first), index, false)
         }
+        if (first >= BYTE_5_FLAG) {
+            return (Int64(first), index, false)
+        }
         if (index + 1 >= bytes.size) {
             return (Int64(first), index, false)
         }
