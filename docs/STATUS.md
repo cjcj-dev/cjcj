@@ -25,7 +25,7 @@ returns lower through `CreateLiteralReturnBody`).
 The following programs compile with the self-host `cjc`
 (`./target/release/bin/cangjie_compiler::cjc`) and run with the verified behavior
 shown. Each was re-verified by real compile-and-run on 2026-06-18 (latest: the
-`Array<Int64>` milestone) after merging
+`match`-on-`Int64` milestone) after merging
 `opus2/int-arith-return`, `opus2/println-int`, `opus3/real-expr`,
 `opus4/control-flow` (var/assign, relational ops, `if`/`while` via real CHIR
 blocks), `opus5/func-calls` (user-defined function calls + recursion via
@@ -39,7 +39,9 @@ runtime `String`), `opus12/interp` (string interpolation
 `"...${expr}..."` of `Int64`/`Bool`/`String` interpolated expressions), and
 `opus13/arrays` (first-class `Array<Int64>`: array literals, indexing,
 `.size`, element writes, `for-in` over an array, and the sized constructor
-`Array<Int64>(n, repeat:/item: v)`) into `main`:
+`Array<Int64>(n, repeat:/item: v)`), and `opus14/match` (`match` on an `Int64`
+selector: literal patterns, wildcard `_`, and a variable-binding pattern, as
+both a statement and a value-producing expression) into `main`:
 
 | Source | Verified behavior |
 | --- | --- |
@@ -72,6 +74,10 @@ runtime `String`), `opus12/interp` (string interpolation
 | `main(): Int64 { let a=[1,2,3,4]; var s=0; for (x in a){ s=s+x }; return s }` | exits with code 10 -- `for-in` iteration over an `Array<Int64>` (CUT 3) |
 | `main(): Int64 { let a = Array<Int64>(3, repeat: 7); return a[0]+a[1]+a[2] }` | exits with code 21 -- the sized array constructor fills `n` copies of the literal value (CUT 4) |
 | `main() { let a = Array<Int64>(4, item: 5); println(a.size); println(a[2]) }` | prints `4` then `5` -- sized constructor with the `item:` label (CUT 4) |
+| `main() { let d=3; match (d) { case 1 => println("one"); case 2 => println("two"); case _ => println("many") } }` | prints `many` -- `match` as a statement with `Int64` literal patterns + wildcard (CUT 1) |
+| `main(): Int64 { let x=2; let r = match (x) { case 1 => 100; case _ => 200 }; return r }` | exits with code 200 -- `match` as a value-producing expression bound to a `let` (CUT 2) |
+| `main(): Int64 { let x=2; match (x) { case 1 => return 10; case 2 => return 20; case _ => return 0 } }` | exits with code 20 -- `match` arms that `return` directly (CUT 2) |
+| `main(): Int64 { let x=7; match (x) { case 0 => return -1; case n => return n + 1 } }` | exits with code 8 -- a variable-binding pattern (`case n =>` binds the selector) (CUT 3) |
 | `main() { let ok = 5 > 3; println("ok=${ok}") }` | prints `ok=true` -- a `Bool` interpolated expression stringified to `true`/`false` |
 | `main() { println("hello selfhost") }` | prints `hello selfhost` + newline |
 | `main() { print("a"); print("b"); println("c") }` | prints `abc` + newline |
@@ -342,6 +348,31 @@ Capability detail:
   `3`; `let a=[0,0,0]; a[1]=7; return a[1]` -> exit `7`; `let a=[1,2,3,4]; var s=0; for (x in
   a){s=s+x}; return s` -> exit `10`; `Array<Int64>(3, repeat: 7)` summed -> exit `21`;
   `Array<Int64>(4, item: 5)` -> `.size` `4`, `a[2]` `5`.
+- **`match`-on-`Int64` milestone (`opus14/match`):** the real body-lowering path now compiles a
+  `match` over an `Int64` selector. Three cuts landed, all verified by real compile+run:
+  **CUT 1** -- `match` as a STATEMENT with `Int64` literal patterns (`case 1 =>`), a wildcard
+  catch-all (`case _ =>`), and each arm an arbitrary block of statements
+  (`let d=3; match (d){ case 1 => ...; case 2 => ...; case _ => ... }` -> `many`); **CUT 2** --
+  `match` as a value-producing EXPRESSION whose arms each yield a value, usable in `let`/`var`/`return`
+  (`let r = match (x){ case 1 => 100; case _ => 200 }; return r` -> exit `200`), including arms that
+  `return` directly (`match (x){ case 1 => return 10; case 2 => return 20; case _ => return 0 }` ->
+  exit `20`); **CUT 3** -- a variable-binding pattern (`case n =>` binds the selector value to `n`
+  in that arm) (`let x=7; match (x){ case 0 => return -1; case n => return n + 1 }` -> exit `8`). It
+  is additive and gated like the prior milestones: any unsupported `match` shape (enum / tuple / range
+  patterns, a `case L1 | L2` alternation, a `where` pattern guard, a non-`Int64` selector, the
+  selector-less `match { case <expr> => }` form, or a catch-all that is not the last arm) leaves
+  `hasRealBody == false` and falls back to the summary path, so the already-verified slices stay
+  byte-for-byte. The whole milestone is implemented in the real parser adapter
+  (`packages/frontend/src/RealParseBridge.cj`) by **desugaring**, so no new CHIR/codegen surface was
+  needed: a statement-position `match` lowers to a fresh selector temp (`let $sel = <selector>`,
+  evaluating the selector exactly once) followed by an `if`/else-if chain comparing the temp to each
+  literal pattern (the wildcard / variable-binding arm becomes the trailing `else`); a value-position
+  `match` adds a result `var` that each arm assigns, then the surrounding `let`/`var`/`return` reads the
+  result temp. A variable-binding `case n =>` desugars by seeding `n` as an in-scope alias of the
+  selector temp inside that arm. `normalizeMatchArms` validates every arm and bails to fallback on any
+  out-of-grammar shape (a synthesized `$`-prefixed temp name -- illegal in source -- guarantees no
+  collision with user identifiers). Verified at runtime (no folding): CUT 1 -> `many`; CUT 2 -> exit
+  `200` and exit `20`; CUT 3 -> exit `8`.
 
 These are the only source constructs the integrated pipeline lowers end to end
 today; anything else still flows through the compatibility models described
@@ -352,13 +383,17 @@ below.
 The real body-lowering path is additive and gated on `hasRealBody`. Any body using a
 construct outside the supported grammar leaves `hasRealBody == false` and quietly flows
 through the token-summary scanner / compile-time fold instead. As of the
-`Array<Int64>` milestone, the following are still **not** supported on the real path
+`match`-on-`Int64` milestone, the following are still **not** supported on the real path
 and silently fall back:
 
 - **Arrays of non-`Int64` element types** (`Array<String>`, `Array<Bool>`, nested arrays,
   etc.) and array methods beyond `.size` / indexing / element write / `for-in`
   (`Array<Int64>` of those four shapes is now supported -- `opus13/arrays`).
-- **`match`** expressions / pattern matching of any kind.
+- **`match` beyond an `Int64` selector with literal / wildcard / single-variable-binding
+  patterns.** `match` on an `Int64` selector is now supported (`opus14/match`), but
+  match-on-`enum` (constructor patterns), tuple / range / type patterns, a `case L1 | L2`
+  literal alternation, a `where` pattern guard, the selector-less `match { case <expr> => }`
+  form, and matching a non-`Int64` selector all still fall back to the summary path.
 - **`struct` / `class`** declarations, fields, methods, and member access.
 - **`Float64`** (and other non-`Int64` numeric widths) -- literals, arithmetic, and
   printing of a `Float`/other-width integer value.
@@ -400,9 +435,12 @@ slice must be confirmed by a real compile-and-run with a known expected output.
   construct/concat/print symbols. Printing (or otherwise computing with) an other-width
   integer or `Float` value is also still not wired -- extend the PRINT lowering /
   `EmitRuntime*Print` (format selection) once those value types flow through the real body.
-- **More operators and statement kinds on the real path.** `match`, compound
+- **More operators and statement kinds on the real path.** Compound
   assignment (`+=` etc.), `struct`/`class`, `Float64`, and lambdas/closures are
-  still unsupported (the body falls back to the summary path). String interpolation is now
+  still unsupported (the body falls back to the summary path). `match` on an `Int64` selector
+  (literal / wildcard / single-variable-binding patterns, statement and value forms) is now
+  supported (`opus14/match`); match-on-`enum`, `|`-alternation, range/tuple/type patterns, and
+  `where` guards remain follow-ups. String interpolation is now
   supported (`opus12/interp`); `Array<Int64>` literals/indexing/`.size`/writes/`for-in`/sized
   constructor are now supported (`opus13/arrays`); `for-in` over integer ranges plus
   `break`/`continue` are now supported (`opus9/loops`);
@@ -446,7 +484,7 @@ return a + b` slice that exits 5 via a runtime CHIR `Add`) is in
 | C++ reference components with no same-named `.cj` component | 172 |
 | Required build command | `cjpm build` |
 | Build result | pass |
-| Build notes | clean `cjpm build` (0 warnings on a full rebuild) |
+| Build notes | `cjpm build` succeeds (a few unused-variable/unused-import warnings on the real-body + match adapter sources) |
 
 Only source markers are counted as remaining work markers. Historical mentions
 inside `docs/status/*.md` are documentation references, not live source TODOs.
