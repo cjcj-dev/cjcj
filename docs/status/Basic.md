@@ -9,6 +9,9 @@ Deepening pass updates:
 - Matched two remaining Basic helper edge cases with the C++ reference: unsigned `Display.ToHexString` default
   widths now follow the template `sizeof(T) >> 1` rule for `UInt32`, `UInt16`, and `UInt8`, and stored diagnostic
   main-hint color selection for `DS_HINT` now follows the C++ severity color map fallback to red.
+- Matched the C++ diagnostic emitter's distinction between a missing source line and a present-but-empty source line:
+  diagnostics on blank lines now still render the numbered gutter and a one-column marker instead of silently dropping
+  the source excerpt.
 - Replaced the Basic-local placeholder polynomial `Utils::GetHash` with the C++ reference's platform string-hash
   behavior for this selfhost target: the non-Windows path now implements libstdc++ `_Hash_bytes`/`std::hash<string>`
   mixing, with a Windows FNV path matching MSVC-style string hashing. This makes source file hashes and CJMP hash IDs

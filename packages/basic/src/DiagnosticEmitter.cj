@@ -211,10 +211,11 @@ public class DiagnosticEmitter {
         otherHints: ArrayList<IntegratedString>,
         width: Int64
     ): Unit {
-        let line = sourceLine(mainHint.range.begin)
-        if (line.isEmpty()) {
+        let maybeLine = sourceLineOpt(mainHint.range.begin)
+        if (let None <- maybeLine) {
             return
         }
+        let line = maybeLine.getOrThrow()
         builder.append(sourceLinePrefix(mainHint.range.begin.fileID, mainHint.range.begin.line, width) +
             printableSourceLine(line) + "\n")
         renderInlineMarker(builder, line, mainHint.range.begin.column, mainHint.range.end.column, MAIN_HINT_MARKER,
@@ -367,10 +368,11 @@ public class DiagnosticEmitter {
         width: Int64
     ): Unit {
         let range = MakeRange(Position(fileID, lineNumber, beginColumn), Position(fileID, lineNumber, endColumn))
-        let line = sourceLine(range.begin)
-        if (line.isEmpty()) {
+        let maybeLine = sourceLineOpt(range.begin)
+        if (let None <- maybeLine) {
             return
         }
+        let line = maybeLine.getOrThrow()
         let printableLine = printableSourceLine(line)
         builder.append(sourceLinePrefix(fileID, lineNumber, width) + printableLine + "\n")
         let before = if (beginColumn > 1) { GetSpaceBeforeTarget(line, beginColumn) } else { "" }
@@ -423,13 +425,17 @@ public class DiagnosticEmitter {
         }
     }
 
-    private func sourceLine(pos: Position): String {
+    private func sourceLineOpt(pos: Position): Option<String> {
         let source = sourceManager.GetSource(pos.fileID)
         let lines = SplitLines(source.buffer)
         if (pos.line <= 0 || pos.line > lines.size) {
-            return ""
+            return None
         }
-        return lines[pos.line - 1]
+        return Some(lines[pos.line - 1])
+    }
+
+    private func sourceLine(pos: Position): String {
+        return sourceLineOpt(pos) ?? ""
     }
 
     private func hasRangeError(): Bool {
