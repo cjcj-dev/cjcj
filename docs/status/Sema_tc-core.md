@@ -137,6 +137,28 @@ Verification:
 - `grep -rn "TODO(selfhost:Sema)" packages/sema/src` reports 4 package-level markers, all outside the tc-core-owned files.
 - Remaining `TODO(selfhost:Sema)` markers in the tc-core-owned files listed by the task: 0.
 
+## 2026-06-17 Continue Pass 9
+
+Files deepened:
+
+- `packages/sema/src/TypeManager.cj`
+
+Implemented behavior:
+
+- Replaced the no-op `RestoreJavaGenericsTy` with real C++-shaped Java generic restoration. TypeManager now records class/interface type objects created by `GetClassTy`, `GetClassThisTy`, and `GetInterfaceTy`, and retargets matching Java generic-instantiated class/interface types from the generic declaration to the instantiated declaration.
+- Updated the TypeManager clear path to discard the class/interface type registry together with the other manager-owned caches, matching the C++ allocated-type lifecycle within the self-hosted object model.
+
+Remaining gaps:
+
+- The self-hosted registry tracks the nominal type objects TypeManager constructs, not a full C++ `allocatedTys` arena for every type kind.
+- The self-hosted `ClassTy`/`InterfaceTy` model has `decl` and `declPtr` but no separate C++ `commonDecl` field to retarget.
+
+Verification:
+
+- `cjpm build` passes after this pass.
+- `grep -rn "TODO(selfhost:Sema)" packages/sema/src` reports 4 package-level markers, all outside the tc-core-owned files.
+- Remaining `TODO(selfhost:Sema)` markers in the tc-core-owned files listed by the task: 0.
+
 ## 2026-06-17 Continue Pass 8
 
 Files deepened:

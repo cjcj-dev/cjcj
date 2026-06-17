@@ -247,6 +247,7 @@ public class TypeManager {
     private let tyUsedExtends: ArrayList<TyUsedExtendsEntry> = ArrayList<TyUsedExtendsEntry>()
     private let checkedTyExtendRelation: ArrayList<CheckedTyExtendRelation> = ArrayList<CheckedTyExtendRelation>()
     private let subtypeCache: ArrayList<SubtypeCacheEntry> = ArrayList<SubtypeCacheEntry>()
+    private let allocatedClassLikeTys: ArrayList<Ty> = ArrayList<Ty>()
     private let unsolvedTyVars: ArrayList<GenericsTy> = ArrayList<GenericsTy>()
     private let tyVarScopes: ArrayList<TyVarScope> = ArrayList<TyVarScope>()
     private let tyVarScopeDepth: ArrayList<TyVarScopeDepthEntry> = ArrayList<TyVarScopeDepthEntry>()
@@ -353,15 +354,21 @@ public class TypeManager {
     }
 
     public func GetClassTy(cd: ClassDecl, typeArgs: Array<Ty>): ClassTy {
-        return ClassTy(declName(cd), cd, typeArgs)
+        let ty = ClassTy(declName(cd), cd, typeArgs)
+        recordAllocatedClassLikeTy(ty)
+        return ty
     }
 
     public func GetClassThisTy(cd: ClassDecl, typeArgs: Array<Ty>): ClassThisTy {
-        return ClassThisTy(declName(cd), cd, typeArgs)
+        let ty = ClassThisTy(declName(cd), cd, typeArgs)
+        recordAllocatedClassLikeTy(ty)
+        return ty
     }
 
     public func GetInterfaceTy(id: InterfaceDecl, typeArgs: Array<Ty>): InterfaceTy {
-        return InterfaceTy(declName(id), id, typeArgs)
+        let ty = InterfaceTy(declName(id), id, typeArgs)
+        recordAllocatedClassLikeTy(ty)
+        return ty
     }
 
     public func GetTypeAliasTy(tad: TypeAliasDecl, typeArgs: Array<Ty>): TypeAliasTy {
@@ -405,6 +412,10 @@ public class TypeManager {
 
     public func SetSemaCTypeTy(semCTypeTy: Ty): Unit {
         ctypeTy = semCTypeTy
+    }
+
+    private func recordAllocatedClassLikeTy(ty: Ty): Unit {
+        allocatedClassLikeTys.add(ty)
     }
 
     public func GetInstantiatedTys(ty: Ty, mts: MultiTypeSubst): TySet {
@@ -1253,7 +1264,33 @@ public class TypeManager {
     }
 
     public func RestoreJavaGenericsTy(decl: Decl): Unit {
-        let _ = decl
+        if (!decl.TestAttr(Attribute.GENERIC_INSTANTIATED)) {
+            return
+        }
+        if (let None <- HasJavaAttr(decl)) {
+            return
+        }
+        if (let Some(genericDecl) <- decl.genericDecl) {
+            if (let Some(classDecl) <- (decl as ClassDecl)) {
+                for (ty in allocatedClassLikeTys) {
+                    if (SameDeclOption(Ty.GetDeclPtrOfTy(ty), Some(genericDecl))) {
+                        if (let Some(classTy) <- (ty as ClassTy)) {
+                            classTy.declPtr = classDecl
+                            classTy.decl = classDecl
+                        }
+                    }
+                }
+            } else if (let Some(interfaceDecl) <- (decl as InterfaceDecl)) {
+                for (ty in allocatedClassLikeTys) {
+                    if (SameDeclOption(Ty.GetDeclPtrOfTy(ty), Some(genericDecl))) {
+                        if (let Some(interfaceTy) <- (ty as InterfaceTy)) {
+                            interfaceTy.declPtr = interfaceDecl
+                            interfaceTy.decl = interfaceDecl
+                        }
+                    }
+                }
+            }
+        }
     }
 
     public func GetAllExtendInterfaceTy(ty: Ty): TySet {
@@ -1469,6 +1506,7 @@ public class TypeManager {
     public func Clear(): Unit {
         constraints.Clear()
         ClearMapCache()
+        allocatedClassLikeTys.clear()
         unsolvedTyVars.clear()
         subtypeCache.clear()
     }
