@@ -6,6 +6,7 @@ import cangjie_compiler::ast.Attribute as ASTAttribute
 import cangjie_compiler::ast.AttributeIndex as ASTAttributeIndex
 import cangjie_compiler::ast.AttributeName as ASTAttributeName
 import cangjie_compiler::ast.ImportKind as ASTImportKind
+import cangjie_compiler::ast.PackageSpec as ASTPackageSpec
 import cangjie_compiler::basic.DEFAULT_POSITION as BASIC_DEFAULT_POSITION
 import cangjie_compiler::basic.INVALID_POSITION as BASIC_INVALID_POSITION
 import cangjie_compiler::basic.MakeRange as BasicMakeRange
@@ -191,6 +192,7 @@ public func SameAttribute(left: Attribute, right: Attribute): Bool {
 
 public type Position = BasicPosition
 public type Range = BasicRange
+public type PackageSpec = ASTPackageSpec
 
 public let INVALID_POSITION: Position = BASIC_INVALID_POSITION
 public let DEFAULT_POSITION: Position = BASIC_DEFAULT_POSITION
@@ -329,6 +331,7 @@ public class File <: Node {
     public var fileName: String = ""
     public var filePath: String = ""
     public var fileHash: UInt64 = 0
+    public var packageSpec: Option<PackageSpec> = None
     public let imports: ArrayList<ImportSpec> = ArrayList<ImportSpec>()
     public let decls: ArrayList<Decl> = ArrayList<Decl>()
     public let exportedInternalDecls: ArrayList<Decl> = ArrayList<Decl>()

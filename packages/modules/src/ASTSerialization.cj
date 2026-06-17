@@ -2,6 +2,10 @@ package cangjie_compiler::modules
 
 import std.collection.*
 import std.convert.*
+import cangjie_compiler::ast.Identifier as ASTIdentifier
+import cangjie_compiler::ast.Modifier as ASTModifier
+import cangjie_compiler::lex.TokenKind
+import cangjie_compiler::lex.TokenKindIndex
 import cangjie_compiler::option.GlobalOptions
 import cangjie_compiler::option.OptimizationLevel
 
@@ -105,6 +109,7 @@ public class ASTWriter {
             fileFields.add(JoinStringList(file.features))
             fileFields.add(BoolToWire(file.isProduct))
             AppendNodeFields(fileFields, file)
+            AppendPackageSpecFields(fileFields, file.packageSpec)
             lines.add(JoinFields(fileFields))
             for (importSpec in file.imports) {
                 let importFields = ArrayList<String>()
@@ -374,6 +379,9 @@ public class ASTLoader {
                     if (fields.size > 12) {
                         LoadNodeFields(fields, 6, file)
                     }
+                    if (fields.size > 13) {
+                        file.packageSpec = LoadPackageSpecFields(fields, 13)
+                    }
                     pkg.AddFile(file)
                     currentFile = Some(file)
                 case "import" =>
@@ -568,6 +576,89 @@ public func AppendNodeFields(fields: ArrayList<String>, node: Node): Unit {
     fields.add(node.end.line.toString())
     fields.add(node.end.column.toString())
     fields.add(JoinAttributes(node.GetAttrs()))
+}
+
+private func AppendPackageSpecFields(fields: ArrayList<String>, packageSpec: Option<PackageSpec>): Unit {
+    if (let None <- packageSpec) {
+        fields.add(BoolToWire(false))
+        return
+    }
+    let spec = packageSpec.getOrThrow()
+    fields.add(BoolToWire(true))
+    fields.add(AccessLevelToWire(PackageSpecAccessLevel(spec)))
+    fields.add(BoolToWire(spec.hasDoubleColon))
+    fields.add(JoinStringList(spec.prefixPaths))
+    fields.add(spec.packageName.Val())
+    fields.add(BoolToWire(spec.hasMacro))
+    AppendPositionFields(fields, spec.begin)
+    AppendPositionFields(fields, spec.end)
+    AppendPositionFields(fields, spec.packageName.Begin())
+    AppendPositionFields(fields, spec.packageName.End())
+}
+
+private func LoadPackageSpecFields(fields: ArrayList<String>, start: Int64): Option<PackageSpec> {
+    if (fields.size <= start || !WireToBool(fields[start])) {
+        return None
+    }
+    let spec = PackageSpec()
+    let accessLevel = if (fields.size > start + 1) { WireToAccessLevel(fields[start + 1]) } else { AccessLevel.PUBLIC }
+    if (fields.size > start + 2) { spec.hasDoubleColon = WireToBool(fields[start + 2]) }
+    if (fields.size > start + 3) {
+        for (prefix in SplitStringList(fields[start + 3])) {
+            spec.prefixPaths.add(prefix)
+        }
+    }
+    let packageName = if (fields.size > start + 4) { fields[start + 4] } else { "" }
+    if (fields.size > start + 5) { spec.hasMacro = WireToBool(fields[start + 5]) }
+    if (fields.size > start + 11) {
+        spec.begin = ParsePositionFields(fields, start + 6)
+        spec.end = ParsePositionFields(fields, start + 9)
+    }
+    var nameBegin = spec.begin
+    var nameEnd = spec.end
+    if (fields.size > start + 17) {
+        nameBegin = ParsePositionFields(fields, start + 12)
+        nameEnd = ParsePositionFields(fields, start + 15)
+    }
+    spec.packageName = ASTIdentifier(packageName, nameBegin, nameEnd)
+    if (!SameAccessLevel(accessLevel, AccessLevel.PUBLIC)) {
+        spec.modifier = Some(ASTModifier(TokenKindFromAccessLevel(accessLevel), spec.begin))
+    }
+    return Some(spec)
+}
+
+private func AppendPositionFields(fields: ArrayList<String>, pos: Position): Unit {
+    fields.add(pos.fileID.toString())
+    fields.add(pos.line.toString())
+    fields.add(pos.column.toString())
+}
+
+private func ParsePositionFields(fields: ArrayList<String>, start: Int64): Position {
+    return Position(
+        ParseUInt64Field(fields[start]),
+        ParseInt64Field(fields[start + 1]),
+        ParseInt64Field(fields[start + 2])
+    )
+}
+
+private func PackageSpecAccessLevel(spec: PackageSpec): AccessLevel {
+    if (let Some(modifier) <- spec.modifier) {
+        if (SameTokenKind(modifier.modifier, TokenKind.PRIVATE)) { return AccessLevel.PRIVATE }
+        if (SameTokenKind(modifier.modifier, TokenKind.INTERNAL)) { return AccessLevel.INTERNAL }
+        if (SameTokenKind(modifier.modifier, TokenKind.PROTECTED)) { return AccessLevel.PROTECTED }
+    }
+    return AccessLevel.PUBLIC
+}
+
+private func TokenKindFromAccessLevel(level: AccessLevel): TokenKind {
+    if (SameAccessLevel(level, AccessLevel.PRIVATE)) { return TokenKind.PRIVATE }
+    if (SameAccessLevel(level, AccessLevel.INTERNAL)) { return TokenKind.INTERNAL }
+    if (SameAccessLevel(level, AccessLevel.PROTECTED)) { return TokenKind.PROTECTED }
+    return TokenKind.PUBLIC
+}
+
+private func SameTokenKind(left: TokenKind, right: TokenKind): Bool {
+    return TokenKindIndex(left) == TokenKindIndex(right)
 }
 
 public func LoadNodeFields(fields: ArrayList<String>, start: Int64, node: Node): Unit {

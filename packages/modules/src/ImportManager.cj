@@ -2,6 +2,8 @@ package cangjie_compiler::modules
 
 import std.collection.*
 import std.fs.exists
+import cangjie_compiler::lex.TokenKind
+import cangjie_compiler::lex.TokenKindIndex
 import cangjie_compiler::option.GlobalOptions
 import cangjie_compiler::option.OutputMode
 
@@ -73,6 +75,42 @@ private class DependencyInfoItem {
     public let imports: ArrayList<ImportSpec> = ArrayList<ImportSpec>()
 
     public init() {}
+}
+
+private class PackageSpecDiagRecord {
+    public var fullPackageName: String
+    public var accessLevel: AccessLevel
+    public var position: Position
+    public var hasExplicitPackageSpec: Bool
+    public var shouldCheckRoot: Bool
+    public var hasDoubleColon: Bool
+    public var prefixPathSize: Int64
+
+    public init(
+        fullPackageName: String,
+        accessLevel: AccessLevel,
+        position: Position,
+        hasExplicitPackageSpec: Bool,
+        shouldCheckRoot: Bool,
+        hasDoubleColon: Bool,
+        prefixPathSize: Int64
+    ) {
+        this.fullPackageName = fullPackageName
+        this.accessLevel = accessLevel
+        this.position = position
+        this.hasExplicitPackageSpec = hasExplicitPackageSpec
+        this.shouldCheckRoot = shouldCheckRoot
+        this.hasDoubleColon = hasDoubleColon
+        this.prefixPathSize = prefixPathSize
+    }
+
+    public func Key(): String {
+        return fullPackageName + "|" + GetAccessLevelStr(accessLevel)
+    }
+
+    public func DisplayText(): String {
+        return GetAccessLevelStr(accessLevel) + " package " + fullPackageName
+    }
 }
 
 public class ImportManager {
@@ -387,6 +425,7 @@ public class ImportManager {
             if (pkg.HasFtrDirective()) {
                 CheckPackageFeatureSpec(pkg)
             }
+            CheckPackageSpecsIdentical(pkg)
             if (globalOptions.compileTestsOnly && !IsTestPackage(pkg.fullPackageName)) {
                 pkg.fullPackageName = pkg.fullPackageName + TEST_PKG_SUFFIX
             }
@@ -1414,6 +1453,155 @@ public class ImportManager {
             idx++
         }
         return true
+    }
+
+    private func CheckPackageSpecsIdentical(pkg: Package): Unit {
+        let records = ArrayList<PackageSpecDiagRecord>()
+        let hasExplicitPackageSpec = PackageHasExplicitPackageSpec(pkg)
+        for (file in pkg.files) {
+            let record = PackageSpecRecordForFile(pkg, file, hasExplicitPackageSpec)
+            if (record.shouldCheckRoot && IsRootPackage(record) &&
+                !SameAccessLevel(record.accessLevel, AccessLevel.PUBLIC)) {
+                DiagRootPackageModifier(diag, record.fullPackageName, MakeRange(record.position, record.fullPackageName))
+            }
+            AddPackageSpecRecord(records, record)
+        }
+        if (records.size > 1) {
+            DiagForDifferentPackageSpecRecords(records)
+        }
+    }
+
+    private func PackageHasExplicitPackageSpec(pkg: Package): Bool {
+        for (file in pkg.files) {
+            if (file.packageSpec.isSome()) {
+                return true
+            }
+        }
+        return false
+    }
+
+    private func PackageSpecRecordForFile(
+        pkg: Package,
+        file: File,
+        hasExplicitPackageSpec: Bool
+    ): PackageSpecDiagRecord {
+        if (let Some(packageSpec) <- file.packageSpec) {
+            return PackageSpecDiagRecord(
+                packageSpec.GetPackageName(),
+                PackageSpecAccessLevel(packageSpec),
+                PackageSpecDiagnosticPosition(packageSpec),
+                true,
+                true,
+                packageSpec.hasDoubleColon,
+                packageSpec.prefixPaths.size
+            )
+        }
+        if (hasExplicitPackageSpec || pkg.fullPackageName == DEFAULT_PACKAGE_NAME || SamePosition(file.begin, file.end)) {
+            return PackageSpecDiagRecord(
+                DEFAULT_PACKAGE_NAME,
+                AccessLevel.PUBLIC,
+                file.begin,
+                false,
+                false,
+                false,
+                0
+            )
+        }
+        return PackageSpecDiagRecord(
+            pkg.fullPackageName,
+            pkg.accessible,
+            file.begin,
+            true,
+            true,
+            false,
+            PackagePrefixSizeFromFullName(pkg.fullPackageName)
+        )
+    }
+
+    private func AddPackageSpecRecord(records: ArrayList<PackageSpecDiagRecord>, record: PackageSpecDiagRecord): Unit {
+        for (existing in records) {
+            if (existing.Key() == record.Key()) {
+                return
+            }
+        }
+        records.add(record)
+    }
+
+    private func IsRootPackage(record: PackageSpecDiagRecord): Bool {
+        if (record.hasDoubleColon && record.prefixPathSize == 1) {
+            return true
+        }
+        return record.prefixPathSize == 0
+    }
+
+    private func PackageSpecAccessLevel(packageSpec: PackageSpec): AccessLevel {
+        if (let Some(modifier) <- packageSpec.modifier) {
+            if (SameTokenKind(modifier.modifier, TokenKind.PRIVATE)) { return AccessLevel.PRIVATE }
+            if (SameTokenKind(modifier.modifier, TokenKind.INTERNAL)) { return AccessLevel.INTERNAL }
+            if (SameTokenKind(modifier.modifier, TokenKind.PROTECTED)) { return AccessLevel.PROTECTED }
+        }
+        return AccessLevel.PUBLIC
+    }
+
+    private func PackageSpecDiagnosticPosition(packageSpec: PackageSpec): Position {
+        if (!packageSpec.prefixPoses.isEmpty()) {
+            return packageSpec.prefixPoses[0]
+        }
+        if (!packageSpec.packageName.Begin().IsZero()) {
+            return packageSpec.packageName.Begin()
+        }
+        return packageSpec.begin
+    }
+
+    private func DiagForDifferentPackageSpecRecords(records: ArrayList<PackageSpecDiagRecord>): Unit {
+        let primary = SelectPrimaryPackageSpecRecord(records)
+        let names = ArrayList<String>()
+        for (record in records) {
+            names.add(record.DisplayText())
+        }
+        diag.ReportError("package_name_inconsistent", "source files declare different package names: " +
+            JoinStrings(names, ", "), range: MakeRange(primary.position, primary.fullPackageName))
+        var counter: Int64 = 0
+        for (record in records) {
+            if (counter >= 2) {
+                return
+            }
+            if (SamePosition(record.position, primary.position)) {
+                continue
+            }
+            diag.ReportNote("package_name_inconsistent_other",
+                "another different package declaration '" + record.DisplayText() + "'",
+                range: MakeRange(record.position, record.fullPackageName))
+            counter++
+        }
+    }
+
+    private func SelectPrimaryPackageSpecRecord(records: ArrayList<PackageSpecDiagRecord>): PackageSpecDiagRecord {
+        for (record in records) {
+            if (record.hasExplicitPackageSpec) {
+                return record
+            }
+        }
+        return records[0]
+    }
+
+    private func PackagePrefixSizeFromFullName(fullPackageName: String): Int64 {
+        if (fullPackageName.isEmpty()) {
+            return 0
+        }
+        let names = SplitQualifiedName(fullPackageName)
+        if (names.isEmpty()) {
+            return 0
+        }
+        return names.size - 1
+    }
+
+    private func SamePosition(left: Position, right: Position): Bool {
+        return left.fileID == right.fileID && left.line == right.line && left.column == right.column
+    }
+
+    private func SameTokenKind(left: TokenKind, right: TokenKind): Bool {
+        return TokenKindIndex(left) == TokenKindIndex(right)
     }
 
     private func ContainsStringValue(values: ArrayList<String>, target: String): Bool {

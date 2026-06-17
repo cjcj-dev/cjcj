@@ -130,6 +130,8 @@ private func ModuleDiagKindToBasic(kind: String): Option<BasicDiagKindRefactor> 
         case "package_feature_missing" => BasicDiagKindRefactor.feature_null_declaration
         case "package_feature_inconsistent" => BasicDiagKindRefactor.feature_different_consistency
         case "package_name_inconsistent" => BasicDiagKindRefactor.package_multiple_package_declarations
+        case "package_root_package_should_be_public" =>
+            BasicDiagKindRefactor.package_root_package_should_be_public
         case _ => None
     }
 }
@@ -172,4 +174,11 @@ public func DiagForDifferentPackageFeatureConsistency(
 public func DiagForDifferentPackageNames(diag: DiagnosticEngine, packageNames: ArrayList<String>): Unit {
     diag.ReportError("package_name_inconsistent", "source files declare different package names: " +
         JoinStrings(packageNames, ", "))
+}
+
+public func DiagRootPackageModifier(diag: DiagnosticEngine, packageName: String, range: Range): Unit {
+    diag.ReportError("package_root_package_should_be_public",
+        "root package '${packageName}' should use public visibility", range: range)
+    diag.ReportNote("package_root_package_should_be_public_default",
+        "default modifier of 'package' is 'public', you can use 'package ${packageName}' instead", range: range)
 }
