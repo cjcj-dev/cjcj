@@ -25,7 +25,7 @@ returns lower through `CreateLiteralReturnBody`).
 The following programs compile with the self-host `cjc`
 (`./target/release/bin/cangjie_compiler::cjc`) and run with the verified behavior
 shown. Each was re-verified by real compile-and-run on 2026-06-18 (latest: the
-String milestone) after merging
+string-interpolation milestone) after merging
 `opus2/int-arith-return`, `opus2/println-int`, `opus3/real-expr`,
 `opus4/control-flow` (var/assign, relational ops, `if`/`while` via real CHIR
 blocks), `opus5/func-calls` (user-defined function calls + recursion via
@@ -33,9 +33,11 @@ real CHIR `Apply`), `opus6/print-runtime` (`println`/`print` of a
 runtime-computed value), `opus8/bool` (first-class `Bool` values: literals,
 `Bool` locals/params/returns, `&&`/`||`/`!`, relational results as values,
 `println(<Bool>)`), `opus9/loops` (`for-in` over `..`/`..=` integer ranges,
-`break`, `continue`), and `opus11/string` (first-class `String` values:
+`break`, `continue`), `opus11/string` (first-class `String` values:
 literals, locals/params/returns, `+` concatenation, `println`/`print` of a
-runtime `String`) into `main`:
+runtime `String`), and `opus12/interp` (string interpolation
+`"...${expr}..."` of `Int64`/`Bool`/`String` interpolated expressions) into
+`main`:
 
 | Source | Verified behavior |
 | --- | --- |
@@ -59,6 +61,10 @@ runtime `String`) into `main`:
 | `main() { let s = "hello"; println(s) }` | prints `hello` -- a `String` local bound from a literal, then printed at runtime (CUT 1) |
 | `main() { let a = "foo"; let b = "bar"; println(a + b) }` | prints `foobar` -- runtime `String` concatenation via `+` (CUT 2) |
 | `func greet(name: String): String { return "hi " + name }` ⏎ `main() { println(greet("cj")) }` | prints `hi cj` -- a `String` parameter + `String` return + concat across a real CHIR `Apply` (CUT 3) |
+| `main() { let x = 42; println("x=${x}") }` | prints `x=42` -- a runtime `Int64` interpolated into a `String` literal (`Int64`->String via `snprintf`, concatenated with the literal parts) |
+| `main() { let a=3; let b=4; println("${a} + ${b} = ${a + b}") }` | prints `3 + 4 = 7` -- multiple interpolations including an arithmetic expression, each stringified and concatenated in order |
+| `main() { let name="cj"; println("hi ${name}") }` | prints `hi cj` -- a `String`-typed interpolated expression passes through the conversion unchanged |
+| `main() { let ok = 5 > 3; println("ok=${ok}") }` | prints `ok=true` -- a `Bool` interpolated expression stringified to `true`/`false` |
 | `main() { println("hello selfhost") }` | prints `hello selfhost` + newline |
 | `main() { print("a"); print("b"); println("c") }` | prints `abc` + newline |
 | `main(): Int64 { return 7 }` | exits with code 7 |
@@ -282,10 +288,68 @@ Capability detail:
   runtime (no folding): `let s="hello"; println(s)` -> `hello`; `let a="foo"; let b="bar";
   println(a + b)` -> `foobar`; `var`-reassigned concat -> `abc`; `greet("cj")` -> `hi cj`;
   bare `String`-literal return -> `hello` (previously crashed in LLVM verify).
+- **String-interpolation milestone (`opus12/interp`):** the real body-lowering path now
+  lowers a string-interpolation literal (e.g. `"a=${x} b=${y+1}"`) to a `String` built by
+  concatenating the literal text parts with the stringified interpolated expressions, in
+  source order. Interpolated `Int64` and `Bool` expressions are converted to their textual
+  form at runtime (`42` -> `"42"`, `true` -> `"true"`); a `String` interpolated expression
+  passes through unchanged. It is additive and gated like the prior milestones: an
+  unsupported interpolation shape (escapes in a literal part, a multi-statement
+  interpolation block) leaves `hasRealBody == false` and falls back to the summary path, so
+  plain `String` literals and the already-verified slices stay byte-for-byte. The spec model
+  (`packages/chir/src/AST2CHIR.cj`) gains a `TO_STRING` `AST2CHIRExprSpec` kind wrapping an
+  `Int64`/`Bool` sub-expression; `TranslateFuncBody.cj` materializes the operand and, unless
+  it is already a CString (a `String` value, which passes through), emits a `UnaryExpression`
+  carrying a CString result type as the conversion marker. Codegen
+  (`packages/codegen/src/UnaryExprDispatcher.cj`) threads the unary result type through; a
+  unary whose result is a CString is the int/bool -> String conversion, emitting a runtime
+  `Int64` -> C-string via `malloc` + `snprintf("%ld")` (`EmitIntToCString`) and a `Bool` ->
+  C-string by selecting between the `"true"`/`"false"` constant globals (`EmitBoolToCString`,
+  in `packages/codegen/src/EmitStringIR.cj`); the resulting `i8*` feeds the existing CString
+  concat. The real parser adapter (`RealParseBridge.cj`) maps the parser's
+  `StrInterpolationExpr` parts into a left-folded concat of (literal-part `StrLit`,
+  `ToStringConv` interpolated expr); an interpolation literal classifies as a `String` value
+  so `let`/`var`/`return` and `println`/`print` promote correctly, and
+  `plainStringLiteralValue` now excludes interpolated literals so they no longer mis-lower as
+  raw text. Verified at runtime (no folding): `let x=42; println("x=${x}")` -> `x=42`;
+  `let a=3; let b=4; println("${a} + ${b} = ${a + b}")` -> `3 + 4 = 7`;
+  `let name="cj"; println("hi ${name}")` -> `hi cj`; `let ok=5>3; println("ok=${ok}")` ->
+  `ok=true`.
 
 These are the only source constructs the integrated pipeline lowers end to end
 today; anything else still flows through the compatibility models described
 below.
+
+### Known gaps (still unsupported -- silently fall back to the summary path)
+
+The real body-lowering path is additive and gated on `hasRealBody`. Any body using a
+construct outside the supported grammar leaves `hasRealBody == false` and quietly flows
+through the token-summary scanner / compile-time fold instead. As of the
+string-interpolation milestone, the following are still **not** supported on the real path
+and silently fall back:
+
+- **Arrays** (`Array<T>`, array literals, indexing, iteration over an array).
+- **`match`** expressions / pattern matching of any kind.
+- **`struct` / `class`** declarations, fields, methods, and member access.
+- **`Float64`** (and other non-`Int64` numeric widths) -- literals, arithmetic, and
+  printing of a `Float`/other-width integer value.
+- **Lambdas / closures** (`{ x => ... }`) and first-class function values.
+- **`for-in` over a `String`** (and over arrays / other non-range iterables).
+- **`String.size`, `String` indexing / slicing, `String` comparison**, and other
+  `String` methods (only literals, `+` concat, interpolation, and print are wired).
+- **Compound assignment** (`+=`, `-=`, etc.), short-circuit `&&`/`||` (currently lowered
+  as non-short-circuit `And`/`Or` on i1), and a `where` guard on `for-in`.
+
+**Latent silent-fallback issue.** Because the gate is silent, a program that uses an
+unsupported construct does not error or warn -- it falls back to the summary/fold path,
+which may (a) compile a *different, narrower* behavior than the source intends, or
+(b) succeed only because the summary scanner happened to recognize a literal-shaped
+subset, while genuinely runtime semantics are dropped. The mixed-print milestone already
+fixed one instance (a runtime print silently dropped when interleaved with literal prints);
+the general risk remains until the summary parser is retired and every construct either
+lowers on the real path or produces an explicit diagnostic. Until then, "compiles and runs"
+on this path does not by itself prove the source was lowered faithfully -- each supported
+slice must be confirmed by a real compile-and-run with a known expected output.
 
 ### Remaining de-isolation follow-ups
 
@@ -296,16 +360,20 @@ below.
   (`i8*`): literals, locals/params/returns, `+` concat (libc
   `strlen`/`malloc`/`strcpy`/`strcat`), and print all work, but this is **not** the
   production Cangjie `String` struct/array representation the reference cjc emits, the
-  concat `malloc` is never freed (leaks), and only the `+` operator / println-print are
-  wired (no `.size`, indexing, interpolation, comparison, `String`-keyed collections, or
-  other `String` methods). Replace the CString model with the real runtime `String`
+  concat `malloc` is never freed (leaks), and only the `+` operator / println-print /
+  interpolation are wired (no `.size`, indexing, comparison, `String`-keyed collections, or
+  other `String` methods). String interpolation (`"...${expr}..."` over `Int64`/`Bool`/
+  `String`) is now lowered (`opus12/interp`), but its `Int64`/`Bool` -> String conversion
+  (`malloc` + `snprintf` / `"true"`/`"false"` globals) is likewise not the production
+  `String` machinery and also leaks the `malloc`. Replace the CString model with the real runtime `String`
   representation and route concat/print/compare through the runtime's `String`
   construct/concat/print symbols. Printing (or otherwise computing with) an other-width
   integer or `Float` value is also still not wired -- extend the PRINT lowering /
   `EmitRuntime*Print` (format selection) once those value types flow through the real body.
-- **More operators and statement kinds on the real path.** `match` and compound
-  assignment (`+=` etc.) are still unsupported (the body falls back to the summary path).
-  `for-in` over integer ranges plus `break`/`continue` are now supported (`opus9/loops`);
+- **More operators and statement kinds on the real path.** `match`, compound
+  assignment (`+=` etc.), arrays, `struct`/`class`, `Float64`, and lambdas/closures are
+  still unsupported (the body falls back to the summary path). String interpolation is now
+  supported (`opus12/interp`); `for-in` over integer ranges plus `break`/`continue` are now supported (`opus9/loops`);
   `for-in` over other iterables (arrays, collections, `String`) and a `where` guard are
   follow-ups. Logical `&&`/`||` and unary `!` are supported (`opus8/bool`), though
   `&&`/`||` are currently lowered as non-short-circuit `And`/`Or` on i1 -- real
