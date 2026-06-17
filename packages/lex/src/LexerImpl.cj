@@ -1109,6 +1109,27 @@ public class LexerImpl {
         builder.AddMainHintArguments([args])
     }
 
+    private func TryConsumeIdentifierUTF8Char(): Bool {
+        CJC_ASSERT(pNext != pCurrent)
+        pCurrent = pNext
+        let decoded = DecodeUTF8At(pNext)
+        if (!decoded[2]) {
+            currentChar = decoded[0]
+            pNext = pCurrent + 1
+            DiagIllegalUnicodeAtCurrent()
+            success = false
+            return false
+        }
+        currentChar = decoded[0]
+        pNext = decoded[1]
+        if (!isXIDContinue(currentChar)) {
+            DiagIllegalUnicodeAtCurrent()
+            success = false
+            return false
+        }
+        return true
+    }
+
     private func DiagSmallExpectedDigit(hasDigit: Bool, base: UInt8): Unit {
         if (!hasDigit && success) {
             DiagExpectedDigit(base)
@@ -1595,12 +1616,7 @@ public class LexerImpl {
             if (nextValue <= 127) {
                 break
             }
-            ReadUTF8Char()
-            if (!isXIDContinue(currentChar)) {
-                if (success) {
-                    DiagIllegalUnicodeAtCurrent()
-                    success = false
-                }
+            if (!TryConsumeIdentifierUTF8Char()) {
                 res.kind = TokenKind.ILLEGAL
                 break
             }
