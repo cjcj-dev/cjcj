@@ -112,39 +112,6 @@ private func TypeCheckExtendTyKey(ty: Ty): String {
     return ty.String()
 }
 
-private func TypeCheckExtendContainsKey(keys: ArrayList<String>, key: String): Bool {
-    for (value in keys) {
-        if (value == key) {
-            return true
-        }
-    }
-    return false
-}
-
-private func TypeCheckExtendRecordKey(keys: ArrayList<String>, key: String): Bool {
-    if (TypeCheckExtendContainsKey(keys, key)) {
-        return false
-    }
-    keys.add(key)
-    return true
-}
-
-private func TypeCheckExtendHasInheritedInterface(tm: TypeManager, extendedTy: Ty, interfaceTy: Ty): Bool {
-    if (let Some(extendedDecl) <- Ty.GetDeclPtrOfTy(Some(extendedTy))) {
-        if (let Some(inheritableDecl) <- (extendedDecl as InheritableDecl)) {
-            if (let Some(declTy) <- inheritableDecl.GetTy()) {
-                let superTys = tm.GetAllSuperTys(declTy, withExtended: false)
-                for (superTy in superTys.values) {
-                    if (superTy.IsInterface() && SameTy(superTy, interfaceTy)) {
-                        return true
-                    }
-                }
-            }
-        }
-    }
-    return false
-}
-
 private func TypeCheckExtendDiagDuplicateInterface(
     diag: BasicDiagnosticEngine,
     interfaceType: Type,
@@ -736,50 +703,136 @@ public func TypeCheckExtendCheckDuplicateInterfaces(
     tm: TypeManager,
     extends: ArrayList<ExtendDecl>
 ): Bool {
+    let _ = extends
     var valid = true
-    let seenExtendTyKeys = ArrayList<String>()
-    let seenInterfaceKeys = ArrayList<String>()
+    for (entry in tm.builtinTyToExtendMap) {
+        if (!TypeCheckExtendCheckInterfacesForTy(diag, tm, entry.ty, entry.extends)) {
+            valid = false
+        }
+    }
+    for (entry in tm.declToExtendMap) {
+        if (let Some(baseTy) <- entry.decl.GetTy()) {
+            if (!TypeCheckExtendCheckInterfacesForTy(diag, tm, baseTy, entry.extends)) {
+                valid = false
+            }
+        }
+    }
+    return valid
+}
+
+private func TypeCheckExtendCollectInheritedInterfaces(tm: TypeManager, baseTy: Ty): TySet {
+    let out = TySet()
+    if (let Some(extendedDecl) <- Ty.GetInheritableDeclPtrOfTy(Some(baseTy))) {
+        for (inheritedType in extendedDecl.inheritedTypes) {
+            if (let Some(inheritedTy) <- inheritedType.GetTy()) {
+                let superTys = tm.GetAllSuperTys(inheritedTy)
+                for (superTy in superTys.values) {
+                    if (superTy.IsInterface()) {
+                        out.Add(superTy)
+                    }
+                }
+            }
+        }
+    }
+    return out
+}
+
+private func TypeCheckExtendInterfaceGroupIndex(keys: ArrayList<String>, key: String): Int64 {
+    for (idx in 0..keys.size) {
+        if (keys[idx] == key) {
+            return idx
+        }
+    }
+    return -1
+}
+
+private func TypeCheckExtendRecordInterfaceType(
+    keys: ArrayList<String>,
+    interfaceTys: ArrayList<Ty>,
+    interfaceTypes: ArrayList<ArrayList<Type>>,
+    interfaceTy: Ty,
+    interfaceType: Type
+): Unit {
+    let key = TypeCheckExtendTyKey(interfaceTy)
+    let idx = TypeCheckExtendInterfaceGroupIndex(keys, key)
+    if (idx >= 0) {
+        interfaceTypes[idx].add(interfaceType)
+        return
+    }
+    keys.add(key)
+    interfaceTys.add(interfaceTy)
+    let values = ArrayList<Type>()
+    values.add(interfaceType)
+    interfaceTypes.add(values)
+}
+
+private func TypeCheckExtendIsLaterType(left: Type, right: Type): Bool {
+    if (left.begin.fileID != right.begin.fileID) {
+        return left.begin.fileID > right.begin.fileID
+    }
+    if (left.begin != right.begin) {
+        return left.begin > right.begin
+    }
+    if (left.end.fileID != right.end.fileID) {
+        return left.end.fileID > right.end.fileID
+    }
+    return left.end > right.end
+}
+
+private func TypeCheckExtendLatestType(values: ArrayList<Type>): Option<Type> {
+    if (values.isEmpty()) {
+        return None
+    }
+    var latest = values[0]
+    for (idx in 1..values.size) {
+        if (TypeCheckExtendIsLaterType(values[idx], latest)) {
+            latest = values[idx]
+        }
+    }
+    return Some(latest)
+}
+
+private func TypeCheckExtendCheckInterfacesForTy(
+    diag: BasicDiagnosticEngine,
+    tm: TypeManager,
+    baseTy: Ty,
+    extends: ArrayList<ExtendDecl>
+): Bool {
+    var valid = true
+    let inheritedInterfaces = TypeCheckExtendCollectInheritedInterfaces(tm, baseTy)
+    let interfaceKeys = ArrayList<String>()
+    let interfaceTys = ArrayList<Ty>()
+    let interfaceTypes = ArrayList<ArrayList<Type>>()
+    let promotion = Promotion(tm)
     for (extendDecl in extends) {
         if (let None <- extendDecl.extendedType) {
             continue
         }
+        var typeMapping = MultiTypeSubst()
         let extendedType = extendDecl.extendedType.getOrThrow()
-        if (!Ty.IsTyCorrect(extendedType.GetTy())) {
-            continue
+        if (Ty.IsTyCorrect(extendedType.GetTy())) {
+            typeMapping = promotion.GetPromoteTypeMapping(baseTy, extendedType.GetTy().getOrThrow())
         }
-        let extendedTy = extendedType.GetTy().getOrThrow()
-        let extendedKey = TypeCheckExtendTyKey(extendedTy)
-        var localSeen = ArrayList<String>()
         for (interfaceType in extendDecl.inheritedTypes) {
             if (!Ty.IsTyCorrect(interfaceType.GetTy())) {
                 continue
             }
-            let interfaceTy = interfaceType.GetTy().getOrThrow()
+            let interfaceTy = tm.GetBestInstantiatedTy(interfaceType.GetTy().getOrThrow(), typeMapping)
             if (!interfaceTy.IsInterface()) {
                 continue
             }
             TypeCheckExtendDiagNonExtendableCoreInterface(diag, interfaceType, interfaceTy)
-            let interfaceKey = TypeCheckExtendTyKey(interfaceTy)
-            let pairKey = extendedKey + "<:" + interfaceKey
-            var duplicate = TypeCheckExtendContainsKey(localSeen, interfaceKey)
-            if (!duplicate) {
-                duplicate = TypeCheckExtendHasInheritedInterface(tm, extendedTy, interfaceTy)
-            }
-            if (!duplicate && TypeCheckExtendContainsKey(seenInterfaceKeys, pairKey)) {
-                duplicate = true
-            }
-            if (duplicate) {
-                TypeCheckExtendDiagDuplicateInterface(diag, interfaceType, interfaceTy, extendedTy)
-                valid = false
-            }
-            let _ = TypeCheckExtendRecordKey(localSeen, interfaceKey)
-            if (TypeCheckExtendContainsKey(seenExtendTyKeys, extendedKey)) {
-                let _ = TypeCheckExtendRecordKey(seenInterfaceKeys, pairKey)
-            }
+            TypeCheckExtendRecordInterfaceType(interfaceKeys, interfaceTys, interfaceTypes, interfaceTy, interfaceType)
         }
-        let _ = TypeCheckExtendRecordKey(seenExtendTyKeys, extendedKey)
-        for (interfaceKey in localSeen) {
-            let _ = TypeCheckExtendRecordKey(seenInterfaceKeys, extendedKey + "<:" + interfaceKey)
+    }
+    for (idx in 0..interfaceKeys.size) {
+        if (inheritedInterfaces.Contains(interfaceTys[idx]) || interfaceTypes[idx].size > 1) {
+            if (let Some(interfaceType) <- TypeCheckExtendLatestType(interfaceTypes[idx])) {
+                if (!interfaceType.TestAttr(Attribute.IMPORTED)) {
+                    TypeCheckExtendDiagDuplicateInterface(diag, interfaceType, interfaceTys[idx], baseTy)
+                    valid = false
+                }
+            }
         }
     }
     return valid

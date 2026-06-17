@@ -107,6 +107,11 @@ Reference sources inspected from `/root/cj_build/cangjie_compiler/src/Sema`:
   now mirror the C++ primitive precheck by finding the `std.core` generic
   pointer extend and checking user pointer extends against that core
   declaration for instantiated duplicate interface implementations.
+- Continued duplicate-interface parity: extend interface prechecking now groups
+  builtin and declaration extend-map entries by the actual extended type,
+  instantiates implemented interfaces through the real `Promotion` type mapping,
+  and diagnoses the last source implementation when a promoted interface
+  duplicates a base inherited interface or another extend implementation.
 - Deepened annotation checking toward `TypeCheckAnnotation.cpp` by preserving
   the C++ `NO_REFLECT_INFO` marker on custom annotation call expressions that
   are not compile-time visible.
@@ -133,11 +138,10 @@ are from pre-existing files outside this pass scope.
   pass, so these helpers are not yet wired into a full C++-faithful
   declaration/type/reference traversal pipeline.
 - Full C++ parity still requires complete overload resolution, lookup/import
-  recommendation, exact access-control context, exact promoted
-  duplicate-interface ordering, custom annotation expression synthesis/type
-  checking, annotation target-array type checking, pipeline wiring for
-  type-alias and class-like declaration checks, reference-legality walker
-  wiring, full deprecated-usage traversal/override checks, and all
+  recommendation, exact access-control context, custom annotation expression
+  synthesis/type checking, annotation target-array type checking, pipeline
+  wiring for type-alias and class-like declaration checks, reference-legality
+  walker wiring, full deprecated-usage traversal/override checks, and all
   TypeChecker-owned state once those sibling surfaces are available in the
   allowed owner files.
 - Diagnostics are mapped to the available self-hosted diagnostic tables; a few
