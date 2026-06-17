@@ -1,7 +1,15 @@
 package cangjie_compiler::macro_pkg
 
 import cangjie_compiler::basic.SplitQualifiedName as BasicSplitQualifiedName
+import cangjie_compiler::lex.{Lexer as RealLexer, StringPartKind}
+import cangjie_compiler::parse.DiagSeverity as EvalParsedDiagSeverity
+import cangjie_compiler::parse.DiagnosticEngine as EvalParsedDiagnosticEngine
+import cangjie_compiler::parse.File as EvalParsedFile
 import cangjie_compiler::parse.IsBuiltinAnnotation as ParseIsBuiltinAnnotation
+import cangjie_compiler::parse.PackageSpec as EvalParsedPackageSpec
+import cangjie_compiler::parse.Parser as EvalParser
+import cangjie_compiler::parse.ScopeKind as EvalParsedScopeKind
+import cangjie_compiler::parse.SrcIdentifier as EvalParsedSrcIdentifier
 import std.collection.*
 
 private func appendTokens(target: ArrayList<Token>, source: ArrayList<Token>): Unit {
@@ -150,6 +158,56 @@ private func moduleNameForMacroCall(macCall: MacroCall): String {
         }
     }
     return ""
+}
+
+private func toEvaluationParsedScopeKind(scope: ScopeKind): EvalParsedScopeKind {
+    return match (scope) {
+        case ScopeKind.TOPLEVEL => EvalParsedScopeKind.TOPLEVEL
+        case ScopeKind.CLASS_BODY => EvalParsedScopeKind.CLASS_BODY
+        case ScopeKind.INTERFACE_BODY => EvalParsedScopeKind.INTERFACE_BODY
+        case ScopeKind.STRUCT_BODY => EvalParsedScopeKind.STRUCT_BODY
+        case ScopeKind.EXTEND_BODY => EvalParsedScopeKind.EXTEND_BODY
+        case ScopeKind.FUNC_BODY => EvalParsedScopeKind.FUNC_BODY
+        case ScopeKind.MACRO_BODY => EvalParsedScopeKind.MACRO_BODY
+        case ScopeKind.PRIMARY_CONSTRUCTOR_BODY_FOR_CLASS => EvalParsedScopeKind.PRIMARY_CONSTRUCTOR_BODY_FOR_CLASS
+        case ScopeKind.PRIMARY_CONSTRUCTOR_BODY_FOR_STRUCT => EvalParsedScopeKind.PRIMARY_CONSTRUCTOR_BODY_FOR_STRUCT
+        case ScopeKind.PROP_MEMBER_SETTER_BODY => EvalParsedScopeKind.PROP_MEMBER_SETTER_BODY
+        case ScopeKind.PROP_MEMBER_GETTER_BODY => EvalParsedScopeKind.PROP_MEMBER_GETTER_BODY
+        case ScopeKind.ENUM_BODY => EvalParsedScopeKind.ENUM_BODY
+        case ScopeKind.ENUM_CONSTRUCTOR => EvalParsedScopeKind.ENUM_CONSTRUCTOR
+        case ScopeKind.PRIMARY_CONSTRUCTOR_FUNC_PARAM => EvalParsedScopeKind.PRIMARY_CONSTRUCTOR_FUNC_PARAM
+        case ScopeKind.MAIN_BODY => EvalParsedScopeKind.MAIN_BODY
+        case ScopeKind.UNKNOWN_SCOPE => EvalParsedScopeKind.UNKNOWN_SCOPE
+        case ScopeKind.UNKNOWN => EvalParsedScopeKind.UNKNOWN_SCOPE
+    }
+}
+
+private func makeEvaluationParsedFile(macroFile: File): EvalParsedFile {
+    let parsedFile = EvalParsedFile()
+    parsedFile.fileID = macroFile.begin.fileID
+    parsedFile.begin = macroFile.begin
+    parsedFile.end = macroFile.end
+    let parsedPackage = EvalParsedPackageSpec()
+    parsedPackage.begin = macroFile.begin
+    parsedPackage.end = macroFile.begin
+    parsedPackage.hasMacro = macroFile.hasMacro
+    if (let Some(pkg) <- macroFile.curPackage) {
+        parsedPackage.hasMacro = parsedPackage.hasMacro || pkg.isMacroPackage
+        let names = BasicSplitQualifiedName(pkg.fullPackageName)
+        var nameIdx: Int64 = 0
+        var cursor = macroFile.begin
+        while (nameIdx < names.size) {
+            let part = names[nameIdx]
+            let identEnd = cursor + part.size
+            let parsedIdent = EvalParsedSrcIdentifier(part, part, cursor, identEnd, false)
+            parsedPackage.identifiers.add(parsedIdent)
+            parsedPackage.packageName = parsedIdent
+            cursor = identEnd + 1
+            nameIdx++
+        }
+    }
+    parsedFile.packageSpec = Some(parsedPackage)
+    return parsedFile
 }
 
 private func calculateCallEnd(inputTokens: ArrayList<Token>, atIndex: Int64): Int64 {
@@ -359,8 +417,113 @@ private func handleBeforeMacroCallEval(macCall: MacroCall, diag: DiagnosticEngin
     return true
 }
 
+private func refreshTokensPosForMacroArgCheck(inputTokens: ArrayList<Token>, pos: Position,
+    sm: SourceManager): ArrayList<Token> {
+    let out = ArrayList<Token>()
+    if (inputTokens.isEmpty()) {
+        return out
+    }
+    var meFileID = pos.fileID
+    var meLine = pos.line
+    var lastColumn = pos.column + inputTokens[0].Length() + 1
+    var tokenIdx: Int64 = 0
+    while (tokenIdx < inputTokens.size) {
+        var token = inputTokens[tokenIdx]
+        if (IsCurFile(sm, token)) {
+            meFileID = token.Begin().fileID
+            meLine = token.Begin().line
+            lastColumn = token.Begin().column + token.Value().size + 1
+        } else {
+            token.SetValuePos(token.Value(), Position(meFileID, meLine, lastColumn, token.Begin().isCurFile),
+                Position(meFileID, meLine, lastColumn + token.Value().size, token.End().isCurFile))
+        }
+        out.add(token)
+        tokenIdx++
+    }
+    return out
+}
+
+private func forwardEvaluationParserDiagnostics(parserDiag: EvalParsedDiagnosticEngine, diag: DiagnosticEngine): Unit {
+    for (diagnostic in parserDiag.Diagnostics()) {
+        if (diagnostic.severity == EvalParsedDiagSeverity.WARNING) {
+            diag.Warn(MakeRange(diagnostic.pos, diagnostic.pos), diagnostic.message)
+        } else {
+            diag.Diagnose(diagnostic.pos, diagnostic.message)
+        }
+    }
+}
+
+private func checkMacroCallArgs(macCall: MacroCall, diag: DiagnosticEngine, compileCjd: Bool): Unit {
+    if (macCall.status != MacroEvalStatus.READY) {
+        return
+    }
+    let invocation = macCall.RequireInvocation()
+    if (macCall.isOuterMost || invocation.hasParenthesis || invocation.nodes.isEmpty()) {
+        return
+    }
+    let parsePos = macCall.GetBeginPos() + macCall.GetIdentifier().size
+    let refreshedTokens = refreshTokensPosForMacroArgCheck(invocation.args, parsePos, diag.GetSourceManager())
+    let parserDiag = EvalParsedDiagnosticEngine()
+    let parser = EvalParser(refreshedTokens.toArray(), parserDiag, diag.GetSourceManager(), parseDeclFile: compileCjd)
+    parser.SetPrimaryDecl(invocation.outerDeclIdent)
+    if (let Some(macroFile) <- macCall.RequireNode().curFile) {
+        parser.SetCurFile(makeEvaluationParsedFile(macroFile))
+    }
+    let _ = parser.ParseDecl(toEvaluationParsedScopeKind(invocation.scopeKind))
+    let hasParseError = parserDiag.HasError()
+    forwardEvaluationParserDiagnostics(parserDiag, diag)
+    if (hasParseError) {
+        macCall.status = MacroEvalStatus.FAIL
+    }
+}
+
+private func isDeprecatedAnnotation(anno: Annotation): Bool {
+    return anno.kind == "DEPRECATED" || anno.kind == "Deprecated" || anno.identifier.Val() == "Deprecated"
+}
+
+private func needDeprecatedPoint(value: String): Bool {
+    if (value.isEmpty()) {
+        return false
+    }
+    let last = value[value.size - 1]
+    return (last >= b'a' && last <= b'z') || (last >= b'A' && last <= b'Z') || (last >= b'0' && last <= b'9')
+}
+
+private func deprecatedLiteralValue(arg: FuncArg): Option<String> {
+    if (let Some(argExpr) <- arg.expr) {
+        if (let Some(litExpr) <- (argExpr as LitConstExpr)) {
+            return Some(litExpr.ToString())
+        }
+    }
+    return None
+}
+
+private func extractDeprecatedAnnotationArgs(anno: Annotation): (String, String, Bool) {
+    var message = " "
+    var since = "."
+    var strict = false
+    for (arg in anno.args) {
+        if (let Some(litValue) <- deprecatedLiteralValue(arg)) {
+            let argName = arg.name.Val()
+            if (argName.isEmpty() || argName == "message") {
+                message = " " + litValue
+            } else if (argName == "since") {
+                since = " since " + litValue
+            } else if (argName == "strict") {
+                strict = litValue == "true"
+            }
+        }
+    }
+    if (needDeprecatedPoint(message)) {
+        message += "."
+    }
+    if (needDeprecatedPoint(since)) {
+        since += "."
+    }
+    return (message, since, strict)
+}
+
 private func isMacroCallReadyForEval(macCall: MacroCall, diag: DiagnosticEngine, compileCjd: Bool): Bool {
-    let _ = compileCjd
     if (handleBeforeMacroCallEval(macCall, diag)) {
         return false
     }
@@ -379,6 +542,7 @@ private func isMacroCallReadyForEval(macCall: MacroCall, diag: DiagnosticEngine,
             refreshMacroCallArgs(macCall, diag)
         }
     }
+    checkMacroCallArgs(macCall, diag, compileCjd)
     if (macCall.status == MacroEvalStatus.READY) {
         macCall.status = MacroEvalStatus.EVAL
         return true
@@ -671,17 +835,24 @@ public class MacroEvaluation {
 
     public func ProcessTokensInQuoteExpr(input: ArrayList<Token>, startIndex: Box<Int64>,
         curIndex: Box<Int64>, macCall: MacroCall, retEval!: Bool = false): Unit {
-        let _ = macCall
-        let _ = retEval
         var balance: Int64 = 0
+        var inQuoteInterpolation = false
         while (curIndex.value < input.size) {
-            if (input[curIndex.value].kind == TokenKind.LPAREN) {
+            if (inQuoteInterpolation && input[curIndex.value].kind == TokenKind.AT) {
+                CreateChildMacroCall(input, startIndex, curIndex, macCall, reEval: retEval)
+                inQuoteInterpolation = false
+            }
+            if (input[curIndex.value].kind == TokenKind.DOLLAR && curIndex.value + 1 < input.size &&
+                input[curIndex.value + 1].kind == TokenKind.LPAREN) {
+                inQuoteInterpolation = true
+            }
+            if (input[curIndex.value].kind == TokenKind.LPAREN &&
+                input[curIndex.value].Begin() + input[curIndex.value].Value().size + 1 != input[curIndex.value].End()) {
                 balance++
-            } else if (input[curIndex.value].kind == TokenKind.RPAREN) {
+            } else if (input[curIndex.value].kind == TokenKind.RPAREN &&
+                input[curIndex.value].Begin() + input[curIndex.value].Value().size + 1 != input[curIndex.value].End()) {
                 balance--
                 if (balance == 0) {
-                    curIndex.value++
-                    startIndex.value = curIndex.value
                     return
                 }
             }
@@ -690,20 +861,81 @@ public class MacroEvaluation {
     }
 
     public func HasMacroCallInStrInterpolation(str: String, macCall: MacroCall): Bool {
-        let _ = macCall
-        return str.contains("@")
+        let strExprStart = String.fromUtf8([b'$', b'{'])
+        let strExprEnd = "}"
+        let interpStr = if (str.startsWith(strExprStart) && str.endsWith(strExprEnd) &&
+            str.size >= strExprStart.size + strExprEnd.size) {
+            str[strExprStart.size..(str.size - strExprEnd.size)]
+        } else {
+            str
+        }
+        let tmpMacExpr = MacroExpandExpr()
+        tmpMacExpr.curFile = macCall.RequireNode().curFile
+        let tmpMacCall = MacroCall(tmpMacExpr)
+        tmpMacCall.isForInterpolation = true
+        let tmpInvocation = tmpMacCall.RequireInvocation()
+        appendTokens(tmpInvocation.args, GetTokensFromString(interpStr, ci.diag))
+        CreateMacroCallTree(tmpMacCall)
+        if (tmpInvocation.nodes.isEmpty()) {
+            return false
+        }
+        macCall.newStr += strExprStart
+        var childIdx: Int64 = 0
+        while (childIdx < tmpMacCall.children.size) {
+            let nestedChild = tmpMacCall.children[childIdx]
+            nestedChild.parentMacroCall = Some(macCall)
+            macCall.children.add(nestedChild, at: childIdx)
+            childIdx++
+        }
+        let invocation = macCall.RequireInvocation()
+        invocation.nodes.add(TokenPart(GetTokensFromString(macCall.newStr, ci.diag)))
+        for (innerNode in tmpInvocation.nodes) {
+            invocation.nodes.add(innerNode)
+        }
+        macCall.newStr = strExprEnd
+        return true
     }
 
     public func HasMacroCallInStrInterpolation(input: ArrayList<Token>, startIndex: Int64,
         curIndex: Int64, parentMacCall: MacroCall): Bool {
-        let _ = startIndex
-        let _ = parentMacCall
         if (curIndex >= input.size) {
             return false
         }
         let token = input[curIndex]
-        return (token.kind == TokenKind.STRING_LITERAL || token.kind == TokenKind.MULTILINE_STRING) &&
-            token.Value().contains("@")
+        let strExprStart = String.fromUtf8([b'$', b'{'])
+        if ((token.kind != TokenKind.STRING_LITERAL && token.kind != TokenKind.MULTILINE_STRING) ||
+            !token.Value().contains(strExprStart)) {
+            return false
+        }
+        let interpExpr = MacroExpandExpr()
+        interpExpr.curFile = parentMacCall.RequireNode().curFile
+        let interpCall = MacroCall(interpExpr)
+        interpCall.parentMacroCall = Some(parentMacCall)
+        interpCall.isForInterpolation = true
+        interpCall.strKind = token.kind
+
+        let lexer = RealLexer([token], ci.diag, ci.GetSourceManager())
+        let strParts = lexer.GetStrParts(token)
+        for (strPart in strParts) {
+            if (strPart.strKind == StringPartKind.EXPR && HasMacroCallInStrInterpolation(strPart.value, interpCall)) {
+                continue
+            }
+            interpCall.newStr += strPart.value
+        }
+        let interpInvocation = interpCall.RequireInvocation()
+        if (interpInvocation.nodes.isEmpty()) {
+            return false
+        }
+        interpInvocation.nodes.add(TokenPart(GetTokensFromString(interpCall.newStr, ci.diag)))
+
+        let parentInvocation = parentMacCall.RequireInvocation()
+        if (curIndex > startIndex) {
+            parentInvocation.nodes.add(TokenPart(tokenListFromRange(input, startIndex, curIndex)))
+        }
+        parentInvocation.nodes.add(interpExpr)
+        parentMacCall.children.add(interpCall)
+        pMacroCalls.add(interpCall)
+        return true
     }
 
     public func CreateChildMacroCall(inputTokens: ArrayList<Token>, startIndex: Box<Int64>,
@@ -732,9 +964,15 @@ public class MacroEvaluation {
     public func CheckDeprecatedMacrosUsage(macCall: MacroCall): Unit {
         if (let Some(definition) <- macCall.GetDefinition()) {
             for (anno in definition.annotations) {
-                if (anno.kind == "DEPRECATED") {
-                    ci.diag.Warn(Range(macCall.GetBeginPos(), macCall.GetEndPos()),
-                        "macro '" + macCall.GetFullName() + "' is deprecated")
+                if (isDeprecatedAnnotation(anno)) {
+                    let (message, since, strict) = extractDeprecatedAnnotationArgs(anno)
+                    let diagKind = if (strict) {
+                        DiagKind.macro_is_deprecated_error
+                    } else {
+                        DiagKind.macro_is_deprecated_warning
+                    }
+                    ci.diag.Diagnose(macCall.GetBeginPos(), diagKind,
+                        args: [DiagArgument(macCall.GetFullName()), DiagArgument(since), DiagArgument(message)]).Emit()
                 }
             }
         }

@@ -448,6 +448,50 @@ public class StructDecl <: Decl {
     }
 }
 
+public class InterfaceDecl <: Decl {
+    public let members: ArrayList<Decl> = ArrayList<Decl>()
+
+    public init() {
+        super(ASTKind.INTERFACE_DECL)
+    }
+
+    public override func GetMemberDecls(): ArrayList<Decl> {
+        return members
+    }
+}
+
+public class EnumDecl <: Decl {
+    public let constructors: ArrayList<Decl> = ArrayList<Decl>()
+    public let members: ArrayList<Decl> = ArrayList<Decl>()
+
+    public init() {
+        super(ASTKind.ENUM_DECL)
+    }
+
+    public override func GetMemberDecls(): ArrayList<Decl> {
+        let out = ArrayList<Decl>()
+        for (ctor in constructors) {
+            out.add(ctor)
+        }
+        for (member in members) {
+            out.add(member)
+        }
+        return out
+    }
+}
+
+public class ExtendDecl <: Decl {
+    public let members: ArrayList<Decl> = ArrayList<Decl>()
+
+    public init() {
+        super(ASTKind.EXTEND_DECL)
+    }
+
+    public override func GetMemberDecls(): ArrayList<Decl> {
+        return members
+    }
+}
+
 public class RefExpr <: Expr {
     public var refName: String = ""
 
