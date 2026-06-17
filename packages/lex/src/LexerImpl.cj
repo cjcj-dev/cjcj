@@ -35,9 +35,9 @@ public let LEFT_SHIFT_24: UInt8 = 24u8
 public let LEFT_SHIFT_18: UInt8 = 18u8
 public let LEFT_SHIFT_12: UInt8 = 12u8
 public let LEFT_SHIFT_6: UInt8 = 6u8
-private let BYTE_4_BASE: UInt32 = 65536u32
-private let BYTE_3_BASE: UInt32 = 2048u32
-private let BYTE_2_BASE: UInt32 = 128u32
+public let BYTE_4_BASE: UInt32 = 65536u32
+public let BYTE_3_BASE: UInt32 = 2048u32
+public let BYTE_2_BASE: UInt32 = 128u32
 public let BYTE_1_STEP: UInt8 = 1u8
 public let BYTE_2_STEP: UInt8 = 2u8
 public let BYTE_3_STEP: UInt8 = 3u8
@@ -1644,6 +1644,7 @@ public class LexerImpl {
 
     private func ScanIdentifierContinue(resRef: Token, pStart: Int64): Token {
         var res = resRef
+        CJC_ASSERT(pCurrent == pStart)
         res.kind = TokenKind.IDENTIFIER
         while (pNext < bytes.size) {
             let nextValue = Int64(getNextChar(0))
@@ -2210,6 +2211,7 @@ public class LexerImpl {
     }
 
     private func DiagUnrecognizedCharInByte(c: Int64, str: String, pStart: Int64, range: (Position, Position)): Unit {
+        CJC_ASSERT(c > Int64(ASCII_BASE))
         let builder = diag.DiagnoseRefactor(
             DiagKindRefactor.lex_unrecognized_char_in_binary_string,
             MakeRange(range[0], range[1]), arguments: [ConvertChar(c), str]
