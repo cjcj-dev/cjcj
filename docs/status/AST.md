@@ -10,6 +10,7 @@ The AST package is a multi-file Cangjie package mirroring the C++ AST component 
 
 ## Implemented In This Pass
 
+- Added C++ `InvertedIndex::Reset` parity for AST-kind suffix searches: AST now keeps a shared `AST_KIND_VALUES` string table and preloads `astKindTrie` with every AST kind name after reset, matching the reference behavior for fresh contexts before symbols are indexed.
 - Aligned import/package node stringification and import-name helpers with `Node.cpp`: `ImportContent` now handles import-all package names, declaration-import package names, double-colon organization prefixes, possible package-name resolution order, aliases, multi-import formatting, feature dot placement, and C++-style `ImportSpec`, `PackageSpec`, `File`, and `Package` `ToString` output.
 - Aligned `CreateMemberAccess(expr, fieldName)` with the C++ class receiver lookup: generated member accesses now search superclass declarations until the first matching member is found, while preserving direct nominal lookup for structs, interfaces, and enums.
 - Expanded AST `ScopeKind` and `ExprKind` from one-value macro compatibility placeholders to the full C++/Parse value sets, added equality helpers with reference-order indexes, and switched AST `MacroInvocation` defaults to `UNKNOWN_SCOPE` / `UNKNOWN_EXPR` while preserving the old `UNKNOWN` spelling as an equality-compatible downstream alias.

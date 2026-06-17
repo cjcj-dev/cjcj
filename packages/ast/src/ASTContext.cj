@@ -27,6 +27,9 @@ public class InvertedIndex {
         nameTrie.Reset()
         scopeNameTrie.Reset(TOPLEVEL_SCOPE_NAME)
         astKindTrie.Reset()
+        for (kindName in AST_KIND_VALUES) {
+            astKindTrie.Insert(kindName)
+        }
         posBeginTrie.Reset()
         posEndTrie.Reset()
     }
