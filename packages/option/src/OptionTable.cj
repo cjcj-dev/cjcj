@@ -292,6 +292,10 @@ public class OptionTable {
         arg.str = argStr
         arg.value = value
         arg.hasJoinedValue = parsed.hasValue
+        if (!frontendMode && arg.info.BelongsGroup(Group.FRONTEND)) {
+            Errorln("invalid option: '" + argName + "'.")
+            return OptionArgParseResult(false, arg)
+        }
         if (arg.hasJoinedValue || arg.info.GetKind() == Kind.CONTINOUS || joinedWithoutSpace) {
             if ((arg.hasJoinedValue || arg.info.GetKind() == Kind.CONTINOUS) && value.isEmpty() &&
                 arg.info.GetID() != ID.LTO_KEEP_PKG_VISIBILITY) {

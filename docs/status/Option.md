@@ -201,3 +201,107 @@ output/input reprocessing as in `Option.cpp`, output-mode validation runs before
 obfuscation and CJMP checks, and CJMP common-part validation now accumulates all
 bad extension warnings plus the count mismatch before failing, matching the C++
 `ok &= VerifyFileExtension(...)` behavior.
+
+This pass deepens the remaining high-traffic parser/action paths. Cache path
+hashing now delegates to the real sibling `utils.SipHash` implementation instead
+of an Option-local fallback hash. `OptionTable.ParseOptionArg` now rejects
+frontend-only options when the table is in driver mode after the normal
+backend/group lookup, matching the explicit C++ guard. Deprecated options and
+`--module-name` now use the shared Basic diagnostic IDs
+`driver_deprecated_option` and `driver_useless_option`.
+
+Input classification has been split into C++-shaped handlers for
+object/archive inputs, `.cj`, `.cj.d`, `.bc`, `.cjo`, directories, and unknown
+files. These handlers now preserve the C++ source-vs-binary diagnostic kinds,
+rewrite object/bitcode ordered inputs to absolute paths, verify resolved file
+extensions before adding inputs, report duplicate `.cjo` scan-dependency inputs
+with `driver_require_one_package_directory_scan_dependency`, warn on unused
+non-directory files with `driver_warning_argument_unused`, and report missing
+package paths with `driver_require_package_directory`. Output path length
+warnings/errors now also use the C++ diagnostic IDs rather than local warning
+text.
+
+Action-level parity also moved forward: plugin suffix failures now report the
+reference error text, common-part CJO/CHIR actions use
+`ValidateInputFilePath` like `OptionAction.cpp`, cfg keys are NFC-normalized
+through the real utils Unicode normalization path, `--error-count-limit`
+diagnostics name the actual option spelling, and explicit/default APC enablement
+updates the shared utils semaphore count with the C++ two-slot allowance.
+
+Remaining gaps: the generated-looking `Options.cj`/`OptionEnums.cj` are still
+hand-maintained Cangjie mirrors rather than being produced directly from
+`Options.inc`; a few diagnostics still use local `Errorln` strings where the C++
+reference also uses formatted print helpers rather than `DiagnosticEngine`; host
+triple defaults are static to the current build assumptions instead of being
+fully preprocessor-derived for every target; and external users still see local
+`Maybe*` compatibility wrappers until the wider port standardizes on native
+`Option<T>` across package boundaries.
+
+This continuation removes another small layer of Option-local compatibility
+logic. The `SplitLines` shim now delegates to the real Basic package splitter.
+Custom optimization levels, sancov levels, `--error-count-limit`, and
+`GlobalOptions.ParseIntOptionValue` now use the shared utils `TryParseInt`
+semantics that the C++ reference uses for those paths, so non-digit input,
+overflow, and signed/negative spellings fail at the same decision point. Android
+API suffix validation now uses the shared `Stoi` helper instead, matching the
+reference `std::stoi` numeric-prefix behavior for targets such as
+`android24foo` while preserving the existing support/illegal diagnostics.
+
+Remaining gaps: `Options.cj`/`OptionEnums.cj` remain hand-maintained mirrors
+rather than generated artifacts from `Options.inc`; local `Maybe*` wrappers and
+some compatibility helper entry points remain to keep current sibling packages
+building; host target defaults are still statically modeled for this port; and
+obfuscation-specific option handling still lives in the driver subclass layer
+rather than the base Option action surface.
+
+This pass continues the same de-isolation and action-parity work. The
+Option-level `SplitString` compatibility wrapper now delegates to the shared
+utils splitter, and jobs/APC numeric parsing uses the same shared
+`TryParseInt` path as the other C++ `Utils::TryParseInt`-backed options while
+preserving the C++ digit-only and nine-character prechecks. The `--output`
+action now emits the reference non-empty-value error, missing `--plugin` inputs
+now emit the plugin-specific "existing dynamic library path" error after the
+shared path warning, and `CompileTargetToSerializedString` now aborts on
+`DEFAULT` instead of serializing an invented sentinel, matching the C++
+internal-error behavior.
+
+Remaining gaps: the option table/enums are still hand-maintained mirrors of
+`Options.inc`; public `Maybe*` and numeric compatibility wrappers remain where
+other current packages import them; several print-style diagnostics still use
+local `Errorln` text rather than a formatted-print wrapper; and host target
+defaults/driver obfuscation option handling remain outside the base Option
+module's fully faithful surface.
+
+This continuation trims another stale compatibility entry point and aligns the
+Apple target-triple path with `OptionAction.cpp`. The unused Option-local
+`TryParseInt64` wrapper was removed after all current signed parsing in this
+package had moved to shared utils parsing or driver-owned helpers. Apple target
+parsing now lives in a C++-shaped helper that handles `darwin`, `ios`, default
+iOS API level, real-device triples, and simulator triples directly, then
+returns `false` for unsupported Apple spellings so the general triple parser
+continues with the same partial target state and diagnostics/fallback behavior
+as the reference.
+
+Remaining gaps: `Options.cj`/`OptionEnums.cj` remain hand-maintained mirrors of
+`Options.inc`; the public `Maybe*` wrappers and `TryParseUInt64` compatibility
+entry point remain for current sibling package imports; several print-style
+diagnostics still use local wrapper text; host target defaults are still static
+for this port; and driver-layer obfuscation option handling is not yet fully
+folded into the base Option action surface.
+
+This continuation removes two more Option-local optional wrappers. The C++
+`std::optional<bool>` shape for `linkStaticStd` and `ParseOption` is now modeled
+with the real stdlib `Option<Bool>` (aliased as `CoreOption` to avoid the local
+`Option` class name), and `GlobalOptions.ParseIntOptionValue` now returns
+`CoreOption<Int64>` instead of the deleted local `MaybeInt64`. The action paths
+for `--static-std`, `--dy-std`, hot reload, and OHOS static-std normalization
+now use `Some`/`None` directly. Custom `-O<N>` and sanitizer coverage level
+parsing also now rejects negative values before the greater-than-two fallback,
+matching `ParseOptimizationValue` and `ParseSancovValue` in `OptionAction.cpp`.
+
+Remaining gaps: `Options.cj`/`OptionEnums.cj` remain hand-maintained mirrors of
+`Options.inc`; `MaybeString`, `MaybeUInt64`, and `TryParseUInt64` remain as
+compatibility surface for current sibling package imports; several print-style
+diagnostics still use local wrapper text; host target defaults are still static
+for this port; and driver-layer obfuscation option handling is not yet fully
+folded into the base Option action surface.

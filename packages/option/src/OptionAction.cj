@@ -6,7 +6,11 @@ import cangjie_compiler::basic.DiagKindRefactor as BasicDiagKindRefactor
 import cangjie_compiler::basic.WarnGroup as BasicWarnGroup
 import cangjie_compiler::basic.WarnGroupIndex as BasicWarnGroupIndex
 import cangjie_compiler::utils.FileUtil
+import cangjie_compiler::utils.NFC as UtilsNFC
+import cangjie_compiler::utils.Semaphore as UtilsSemaphore
+import cangjie_compiler::utils.Stoi as UtilsStoi
 import cangjie_compiler::utils.StringToOverflowStrategy
+import cangjie_compiler::utils.TryParseInt as UtilsTryParseInt
 import cangjie_compiler::utils.ValidOverflowStrategy
 import std.collection.*
 
@@ -70,7 +74,10 @@ public func ParsePreAction(opts: GlobalOptions, arg: OptionArgInstance): ActionR
 public func ParseAction(opts: GlobalOptions, arg: OptionArgInstance): ActionResult {
     let id = arg.info.GetID()
     if (id == ID.OUTPUT_FILE) {
-        if (arg.value.isEmpty()) { return handled(success: false) }
+        if (arg.value.isEmpty()) {
+            Errorln("'" + arg.name + "' requires a non-empty value.")
+            return handled(success: false)
+        }
         opts.output = arg.value
         return handled()
     }
@@ -84,10 +91,7 @@ public func ParseAction(opts: GlobalOptions, arg: OptionArgInstance): ActionResu
     }
     if (id == ID.OUTPUT_JAVA_GEN_DIR) { opts.outputJavaGenDir = MaybeString(arg.value); return handled() }
     if (id == ID.OUTPUT_OBJC_GEN_DIR) { opts.outputObjCGenDir = arg.value; return handled() }
-    if (id == ID.MODULE_NAME) {
-        Warningln("option '" + arg.name + "' is deprecated and will be removed in the future")
-        return handled()
-    }
+    if (id == ID.MODULE_NAME) { emitDiag(BasicDiagKindRefactor.driver_useless_option, arg.name); return handled() }
     if (id == ID.PACKAGE_COMPILE) { opts.compilePackage = true; return handled() }
     if (id == ID.IMPORT_PATH) {
         let path = opts.CheckDirectoryPath(arg.value)
@@ -96,20 +100,34 @@ public func ParseAction(opts: GlobalOptions, arg: OptionArgInstance): ActionResu
     }
     if (id == ID.PLUGIN_PATH) {
         let pluginPath = opts.CheckInputFilePath(arg.value)
-        if (!pluginPath.hasValue) { return handled(success: false) }
+        if (!pluginPath.hasValue) {
+            Errorln("'" + arg.name + "' only accepts an existing dynamic library path.")
+            return handled(success: false)
+        }
         let suffix = GetSharedLibraryExtension(opts.host.os)
-        if ("." + GetFileExtension(pluginPath.value) != suffix) { return handled(success: false) }
+        if ("." + GetFileExtension(pluginPath.value) != suffix) {
+            Errorln("'" + arg.name + "' requires a dynamic library path with '" + suffix + "' suffix.")
+            return handled(success: false)
+        }
         opts.pluginPaths.add(pluginPath.value)
         return handled()
     }
     if (id == ID.COMMON_PART_CJO) {
-        let commonCjo = opts.CheckInputFilePath(arg.value)
-        if (commonCjo.hasValue) { opts.commonPartCjos.add(commonCjo.value) }
+        let commonCjo = GlobalOptions.ValidateInputFilePath(arg.value, BasicDiagKindRefactor.driver_invalid_binary_file)
+        if (commonCjo.hasValue) {
+            opts.commonPartCjos.add(commonCjo.value)
+        } else {
+            emitDiag(BasicDiagKindRefactor.no_such_file_or_directory, arg.value)
+        }
         return handled()
     }
     if (id == ID.COMMON_PART_CHIR) {
-        let commonChir = opts.CheckInputFilePath(arg.value)
-        if (commonChir.hasValue) { opts.commonPartChirs.add(commonChir.value) }
+        let commonChir = GlobalOptions.ValidateInputFilePath(arg.value, BasicDiagKindRefactor.no_such_file_or_directory)
+        if (commonChir.hasValue) {
+            opts.commonPartChirs.add(commonChir.value)
+        } else {
+            emitDiag(BasicDiagKindRefactor.no_such_file_or_directory, arg.value)
+        }
         return handled()
     }
     if (id == ID.INCRE_COMPILE) { opts.enIncrementalCompilation = true; return handled() }
@@ -150,7 +168,7 @@ public func ParseAction(opts: GlobalOptions, arg: OptionArgInstance): ActionResu
     if (id == ID.OPTIMIZATION_CUSTOM) { return parseCustomOptimization(opts, arg.value) }
     if (id == ID.WARN_OFF) { return handled(success: parseWarn(arg.value, true)) }
     if (id == ID.WARN_ON) { return handled(success: parseWarn(arg.value, false)) }
-    if (id == ID.ERROR_COUNT_LIMIT) { return parseErrorLimit(opts, arg.value) }
+    if (id == ID.ERROR_COUNT_LIMIT) { return parseErrorLimit(opts, arg) }
     if (id == ID.DIAG_FORMAT) { return parseDiagFormat(opts, arg.value) }
     if (id == ID.CONDITIONAL_COMPILATION_CONFIG) { return parsePassedWhen(opts, arg.value) }
     if (id == ID.COMPILE_CJD) { opts.compileCjd = true; return handled() }
@@ -187,8 +205,8 @@ public func ParseAction(opts: GlobalOptions, arg: OptionArgInstance): ActionResu
     if (id == ID.PROFILE_COMPILE_TIME) { opts.enableTimer = true; return handled() }
     if (id == ID.PROFILE_COMPILE_MEMORY) { opts.enableMemoryCollect = true; return handled() }
     if (id == ID.ENABLE_EFFECTS) { opts.enableEH = true; return handled() }
-    if (id == ID.STATIC_STD) { opts.linkStaticStd = MaybeBool(true); return handled() }
-    if (id == ID.DY_STD) { opts.linkStaticStd = MaybeBool(false); return handled() }
+    if (id == ID.STATIC_STD) { opts.linkStaticStd = Some(true); return handled() }
+    if (id == ID.DY_STD) { opts.linkStaticStd = Some(false); return handled() }
     if (id == ID.STATIC_LIBS || id == ID.DY_LIBS || id == ID.STATIC) { return handled() }
     if (id == ID.LTO) { return parseLto(opts, arg.value) }
     if (id == ID.COMPILE_AS_EXE) { opts.enableCompileAsExe = true; return handled() }
@@ -342,7 +360,7 @@ private func parseOutputType(opts: GlobalOptions, value: String): ActionResult {
     else if (value == "hotreload") {
         opts.outputMode = OutputMode.SHARED_LIB
         opts.enableHotReload = true
-        opts.linkStaticStd = MaybeBool(false)
+        opts.linkStaticStd = Some(false)
     }
     else { return handled(success: false) }
     opts.enableOutputType = true
@@ -372,15 +390,18 @@ private func parseMockMode(opts: GlobalOptions, value: String): ActionResult {
 }
 
 private func parseCustomOptimization(opts: GlobalOptions, value: String): ActionResult {
-    let parsed = TryParseUInt64(value)
-    if (!parsed.hasValue) {
-        Errorln("Optimization level " + value + " is invalid")
-        return handled(success: false)
+    if (let Some(level) <- UtilsTryParseInt(value)) {
+        if (level < 0) {
+            Errorln("Optimization level " + value + " is invalid")
+            return handled(success: false)
+        }
+        if (level == 0) { return handled(success: opts.SetOptimizationLevel(OptimizationLevel.O0)) }
+        if (level == 1) { return handled(success: opts.SetOptimizationLevel(OptimizationLevel.O1)) }
+        if (level == 2) { return handled(success: opts.SetOptimizationLevel(OptimizationLevel.O2)) }
+        return handled(success: opts.SetOptimizationLevel(OptimizationLevel.O3))
     }
-    if (parsed.value == 0u64) { return handled(success: opts.SetOptimizationLevel(OptimizationLevel.O0)) }
-    if (parsed.value == 1u64) { return handled(success: opts.SetOptimizationLevel(OptimizationLevel.O1)) }
-    if (parsed.value == 2u64) { return handled(success: opts.SetOptimizationLevel(OptimizationLevel.O2)) }
-    return handled(success: opts.SetOptimizationLevel(OptimizationLevel.O3))
+    Errorln("Optimization level " + value + " is invalid")
+    return handled(success: false)
 }
 
 private func parseWarn(value: String, suppress: Bool): Bool {
@@ -412,18 +433,21 @@ private func parseWarn(value: String, suppress: Bool): Bool {
     return true
 }
 
-private func parseErrorLimit(opts: GlobalOptions, value: String): ActionResult {
-    if (value == "all") {
+private func parseErrorLimit(opts: GlobalOptions, arg: OptionArgInstance): ActionResult {
+    if (arg.value == "all") {
         opts.errorCountLimit = MaybeUInt64()
         return handled()
     }
-    let parsed = TryParseUInt64(value)
-    if (!parsed.hasValue) {
-        Errorln("The value of --error-count-limit is invalid.")
-        return handled(success: false)
+    if (let Some(limit) <- UtilsTryParseInt(arg.value)) {
+        if (limit < 0) {
+            Errorln("The value of " + arg.name + " is invalid.")
+            return handled(success: false)
+        }
+        opts.errorCountLimit = MaybeUInt64(UInt64(limit))
+        return handled()
     }
-    opts.errorCountLimit = parsed
-    return handled()
+    Errorln("The value of " + arg.name + " is invalid.")
+    return handled(success: false)
 }
 
 private func parsePassedWhen(opts: GlobalOptions, value: String): ActionResult {
@@ -496,6 +520,7 @@ private func parseCfgKey(rawKey: String, map: HashMap<String, String>): MaybeStr
     if (key.size > 2 && key[0] == b'`') {
         key = key[1..key.size - 1]
     }
+    key = UtilsNFC(key)
     if (isBuiltinCondition(key)) {
         emitDiag(BasicDiagKindRefactor.dirver_cfg_same_with_builtin)
         return MaybeString()
@@ -626,15 +651,18 @@ private func parseOverflowStrategy(opts: GlobalOptions, value: String): ActionRe
 }
 
 private func parseSancovLevel(opts: GlobalOptions, value: String): ActionResult {
-    let parsed = TryParseUInt64(value)
-    if (!parsed.hasValue) {
-        Errorln("Sancov level " + value + " is invalid")
-        return handled(success: false)
+    if (let Some(level) <- UtilsTryParseInt(value)) {
+        if (level < 0) {
+            Errorln("Sancov level " + value + " is invalid")
+            return handled(success: false)
+        }
+        if (level == 0) { opts.sancovOption.SetSancovLevel(SanitizerCoverageType.SCK_NONE); return handled() }
+        if (level == 1) { opts.sancovOption.SetSancovLevel(SanitizerCoverageType.SCK_FUNCTION); return handled() }
+        opts.sancovOption.SetSancovLevel(SanitizerCoverageType.SCK_BB)
+        return handled()
     }
-    if (parsed.value == 0u64) { opts.sancovOption.SetSancovLevel(SanitizerCoverageType.SCK_NONE); return handled() }
-    if (parsed.value == 1u64) { opts.sancovOption.SetSancovLevel(SanitizerCoverageType.SCK_FUNCTION); return handled() }
-    opts.sancovOption.SetSancovLevel(SanitizerCoverageType.SCK_BB)
-    return handled()
+    Errorln("Sancov level " + value + " is invalid")
+    return handled(success: false)
 }
 
 private func parsePrintBCHIR(opts: GlobalOptions, value: String): ActionResult {
@@ -683,15 +711,16 @@ private func parseJobsValue(optionName: String, value: String): MaybeUInt64 {
         Errorln("'" + optionName + "' gets an invalid number input.")
         return MaybeUInt64()
     }
-    let parsed = TryParseUInt64(value)
-    if (!parsed.hasValue) { return MaybeUInt64() }
-    if (parsed.value < 1u64) {
+    let parsed = UtilsTryParseInt(value)
+    if (let None <- parsed) { return MaybeUInt64() }
+    let parsedValue = UInt64(parsed.getOrThrow())
+    if (parsedValue < 1u64) {
         Warningln("'" + optionName + "' value must be greater than 0, the compiler will use 1 as the value.")
         return MaybeUInt64(1u64)
     }
     let threadNum = GetHardwareConcurrency()
-    if (parsed.value > threadNum) { return MaybeUInt64(threadNum) }
-    return parsed
+    if (parsedValue > threadNum) { return MaybeUInt64(threadNum) }
+    return MaybeUInt64(parsedValue)
 }
 
 private func parseJobs(opts: GlobalOptions, arg: OptionArgInstance, aggressive: Bool): ActionResult {
@@ -703,10 +732,40 @@ private func parseJobs(opts: GlobalOptions, arg: OptionArgInstance, aggressive: 
     if (!parsed.hasValue) { return handled(success: false) }
     if (aggressive) {
         opts.aggressiveParallelCompile = parsed
+        UtilsSemaphore.Get().SetCount(Int64(parsed.value + 2u64))
     } else {
         opts.jobs = parsed
     }
     return handled()
+}
+
+private func parseAppleTargetTriple(opts: GlobalOptions, parts: Array<String>): Bool {
+    if (parts.size < 3) {
+        return false
+    }
+    if (parts[1] != "apple") {
+        return false
+    }
+    opts.target.vendor = Vendor.APPLE
+    if (parts[2] == "darwin") {
+        opts.target.os = OSType.DARWIN
+        opts.target.env = EnvironmentType.NOT_AVAILABLE
+        return true
+    }
+    if (StartsWith(parts[2], "ios")) {
+        opts.target.os = OSType.IOS
+        opts.target.apiLevel = parts[2][3..]
+        if (opts.target.apiLevel.isEmpty()) { opts.target.apiLevel = "11" }
+        if (parts.size == 4 && parts[3] == "simulator") {
+            opts.target.env = EnvironmentType.SIMULATOR
+            return true
+        }
+        if (parts.size == 3) {
+            opts.target.env = EnvironmentType.NOT_AVAILABLE
+            return true
+        }
+    }
+    return false
 }
 
 public func ParseTargetTriple(opts: GlobalOptions, triple: String): Bool {
@@ -724,31 +783,7 @@ public func ParseTargetTriple(opts: GlobalOptions, triple: String): Bool {
         Errorln("The architecture \"" + parts[0] + "\" is not found or supported!")
         return false
     }
-    if (parts.size >= 3 && parts[1] == "apple") {
-        opts.target.vendor = Vendor.APPLE
-        if (StartsWith(parts[2], "ios")) {
-            opts.target.os = OSType.IOS
-            opts.target.apiLevel = parts[2][3..]
-            if (opts.target.apiLevel.isEmpty()) { opts.target.apiLevel = "11" }
-            if (parts.size == 4 && parts[3] == "simulator") {
-                opts.target.env = EnvironmentType.SIMULATOR
-                return true
-            }
-            if (parts.size == 3) {
-                opts.target.env = EnvironmentType.NOT_AVAILABLE
-                return true
-            }
-            Errorln("The environment \"" + parts[3] + "\" is not found or supported!")
-            return false
-        }
-        if (parts[2] == "darwin") {
-            opts.target.os = OSType.DARWIN
-            opts.target.env = EnvironmentType.NOT_AVAILABLE
-            return true
-        }
-        Errorln("The OS \"" + parts[2] + "\" is not found or supported!")
-        return false
-    }
+    if (parseAppleTargetTriple(opts, parts)) { return true }
     let osStr = parts[parts.size - 2]
     if (osStr == "linux") { opts.target.os = OSType.LINUX }
     else if (osStr == "windows" || osStr == "w64") { opts.target.os = OSType.WINDOWS }
@@ -780,10 +815,12 @@ public func ParseTargetTriple(opts: GlobalOptions, triple: String): Bool {
             idx++
         }
         if (!opts.target.apiLevel.isEmpty()) {
-            let parsed = TryParseUInt64(opts.target.apiLevel)
-            if (parsed.hasValue && (parsed.value < 23u64 || parsed.value > 10000u64)) {
-                Errorln("The Android API level is not supported in the target. Please use a valid API level which is larger than 23.")
-            } else if (!parsed.hasValue) {
+            let parsedApiLevel = UtilsStoi(opts.target.apiLevel)
+            if (let Some(apiLevel) <- parsedApiLevel) {
+                if (apiLevel < 23 || apiLevel > 10000) {
+                    Errorln("The Android API level is not supported in the target. Please use a valid API level which is larger than 23.")
+                }
+            } else {
                 Errorln("The Android API level is illegal. Please use a valid API level which is greater than or equal to 26.")
             }
         }

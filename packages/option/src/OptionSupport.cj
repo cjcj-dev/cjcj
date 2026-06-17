@@ -3,13 +3,15 @@ package cangjie_compiler::option
 import cangjie_compiler::basic.Errorln as BasicErrorln
 import cangjie_compiler::basic.Infoln as BasicInfoln
 import cangjie_compiler::basic.Println as BasicPrintln
+import cangjie_compiler::basic.SplitLines as BasicSplitLines
 import cangjie_compiler::basic.Warningln as BasicWarningln
 import cangjie_compiler::utils.AccessResultType as UtilsAccessResultType
 import cangjie_compiler::utils.FILE_PATH_MAX_LENGTH as UTILS_FILE_PATH_MAX_LENGTH
 import cangjie_compiler::utils.FailureReason as UtilsFailureReason
 import cangjie_compiler::utils.FileMode as UtilsFileMode
 import cangjie_compiler::utils.FileUtil
-import std.collection.*
+import cangjie_compiler::utils.SipHash
+import cangjie_compiler::utils.SplitString as UtilsSplitString
 
 public let DEFAULT_ANDROID_API: String = "31"
 public let MIN_ANDROID_API: String = "26"
@@ -39,25 +41,11 @@ public class MaybeString {
     public init(value: String) { this.hasValue = true; this.value = value }
 }
 
-public class MaybeBool {
-    public var hasValue: Bool = false
-    public var value: Bool = false
-    public init() {}
-    public init(value: Bool) { this.hasValue = true; this.value = value }
-}
-
 public class MaybeUInt64 {
     public var hasValue: Bool = false
     public var value: UInt64 = 0u64
     public init() {}
     public init(value: UInt64) { this.hasValue = true; this.value = value }
-}
-
-public class MaybeInt64 {
-    public var hasValue: Bool = false
-    public var value: Int64 = 0
-    public init() {}
-    public init(value: Int64) { this.hasValue = true; this.value = value }
 }
 
 public class TextFileReadResult {
@@ -71,35 +59,11 @@ public class TextFileReadResult {
 }
 
 public func SplitString(str: String, delimiter: String): Array<String> {
-    if (str.isEmpty()) { return Array<String>() }
-    if (delimiter.isEmpty()) { return [str] }
-    let res = ArrayList<String>()
-    var pos: Int64 = 0
-    var foundPos = str.indexOf(delimiter)
-    while (let Some(found) <- foundPos) {
-        res.add(str[pos..found])
-        pos = found + delimiter.size
-        foundPos = str.indexOf(delimiter, pos)
-    }
-    if (pos < str.size) {
-        res.add(str[pos..])
-    } else if (pos == str.size) {
-        res.add("")
-    }
-    return res.toArray()
+    return UtilsSplitString(str, delimiter)
 }
 
 public func SplitLines(str: String): Array<String> {
-    let ret = ArrayList<String>()
-    let rawLines = SplitString(str, "\n")
-    for (rawLine in rawLines) {
-        if (!rawLine.isEmpty() && rawLine[rawLine.size - 1] == b'\r') {
-            ret.add(rawLine[0..rawLine.size - 1])
-        } else {
-            ret.add(rawLine)
-        }
-    }
-    return ret.toArray()
+    return BasicSplitLines(str)
 }
 
 public func StartsWith(value: String, prefix: String): Bool {
@@ -237,34 +201,6 @@ public func TryParseUInt64(value: String): MaybeUInt64 {
     return MaybeUInt64(result)
 }
 
-public func TryParseInt64(value: String): MaybeInt64 {
-    if (value.isEmpty()) { return MaybeInt64() }
-    var idx: Int64 = 0
-    var isNegative = false
-    if (value[0] == b'+' || value[0] == b'-') {
-        isNegative = value[0] == b'-'
-        idx = 1
-    }
-    if (idx == value.size) { return MaybeInt64() }
-
-    let limit: UInt64 = if (isNegative) { 2147483648u64 } else { 2147483647u64 }
-    var result: UInt64 = 0u64
-    while (idx < value.size) {
-        let ch = value[idx]
-        if (ch < b'0' || ch > b'9') { return MaybeInt64() }
-        let digit = UInt64(ch - b'0')
-        result = result * 10u64 + digit
-        if (result > limit) { return MaybeInt64() }
-        idx++
-    }
-
-    if (isNegative) {
-        if (result == 2147483648u64) { return MaybeInt64(-2147483648) }
-        return MaybeInt64(-Int64(result))
-    }
-    return MaybeInt64(Int64(result))
-}
-
 private func hexDigit(value: UInt64): String {
     if (value == 0u64) { return "0" }
     if (value == 1u64) { return "1" }
@@ -296,13 +232,7 @@ public func UInt64ToHex(value: UInt64): String {
 }
 
 public func StableHashString(value: String): String {
-    let modulus = 4294967291u64
-    var hash = 2166136261u64
-    for (byte in value.toArray()) {
-        hash = (hash * 16777619u64 + UInt64(byte)) % modulus
-    }
-    hash = (hash * 16777619u64 + UInt64(value.size)) % modulus
-    return UInt64ToHex(hash)
+    return UInt64ToHex(SipHash.GetHashValue(value))
 }
 
 public func Errorln(value: String): Unit {
