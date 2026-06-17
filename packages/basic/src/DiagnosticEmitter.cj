@@ -20,6 +20,10 @@ private func emitterSeverityColor(severity: DiagSeverity): DiagColor {
     }
 }
 
+private func isTextOnlyWarning(warnGroup: WarnGroup): Bool {
+    return warnGroup == WarnGroup.DRIVER_ARG || warnGroup == WarnGroup.UNSUPPORT_COMPILE_SOURCE
+}
+
 private let LINE_SYMBOL: String = "==>"
 private let SOURCE_GUTTER: String = "|"
 private let WITHOUT_SOURCE_SYMBOL: String = "#"
@@ -91,6 +95,14 @@ public class DiagnosticEmitter {
         let builder = StringBuilder()
         if (!showSourceOnly) {
             renderHeader(builder)
+        }
+        if (isTextOnlyWarning(diagnostic.warnGroup)) {
+            for (subDiag in diagnostic.subDiags) {
+                renderSubDiagnostic(builder, subDiag)
+            }
+        }
+        if (diagnostic.mainHint.range.begin == DEFAULT_POSITION) {
+            return builder.toString()
         }
         renderMainDiagnosticSource(builder)
         renderMacroExpansion(builder)

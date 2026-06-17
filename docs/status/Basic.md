@@ -79,6 +79,9 @@ Deepening pass updates:
 - Restored the C++ diagnostic formatter's mismatch side effects: unsupported `%` directives and wrong argument kinds
   now emit `Errorln` diagnostics while leaving the original placeholder in the formatted message, and `%c` has a real
   byte-character `DiagArgument` constructor.
+- Matched the C++ diagnostic emitter's default-position branch: source-less notes are emitted before the early return
+  only for the reference text-only warning groups (`DRIVER_ARG` and `UNSUPPORT_COMPILE_SOURCE`), so unrelated
+  default-position diagnostics no longer leak notes or helps.
 
 Implemented:
 
@@ -109,6 +112,8 @@ Implemented:
   differ from their original 64-bit representation.
 - Aligned `SplitString` and legacy diagnostic format-argument handling with the C++ edge cases for empty delimiters,
   `%c` character arguments, bad argument kinds, and illegal format characters.
+- Aligned default-position diagnostic emission with the C++ text-only warning gate, including the duplicate-note
+  behavior for text-only warnings that later receive a source range.
 - Kept LLVM/native backend out of scope as required; Basic does not bind LLVM directly.
 
 Known fidelity caveats:
