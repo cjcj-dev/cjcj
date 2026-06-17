@@ -41,6 +41,11 @@ Implemented:
   the exact `getMetaTransformPluginInfo` symbol spelling used by the C++ loader, and
   `MetaTransformPluginInfoGetter` plus CHIR getter helpers model the zero-argument function that returns
   plugin info.
+- Added the raw native plugin-info ABI surface used by dynamically loaded plugins:
+  `NativeMetaTransformPluginInfo` is an `@C` struct with the C++ fields (`const char*` version and
+  registration function pointer), `NativeMetaTransformPluginInfoGetter` models the exported getter
+  function pointer, and `GetNativeMetaTransformPluginInfo` casts a non-null native symbol pointer and
+  invokes it under `unsafe`.
 - Added typed CHIR transform factory aliases and function/package-specific plugin-info helpers. These
   preserve the C++ macro's type-specific construction path more closely for Cangjie plugins that derive
   from `CHIRFunctionMetaTransform` or `CHIRPackageMetaTransform`; the helpers are generic over the
@@ -90,8 +95,11 @@ Known fidelity caveats:
   CHIR tag is represented as `MetaKindCHIR` alongside the public `MetaKind` marker.
 - Cangjie does not have C++ `unique_ptr`, so manager transfers move references between managers and clear
   the source rather than enforcing single ownership at the type-system level.
-- Cross-module dynamic plugin loading is still not wired through the self-hosted frontend pipeline, and
-  CHIR has not yet been updated to call `RunCHIRMetaTransforms`; this status file tracks only the scoped
+- Cross-module dynamic plugin loading is still not wired through the self-hosted frontend pipeline. This
+  module now exposes the raw `getMetaTransformPluginInfo` symbol type, but the caller-side loader still
+  needs to adapt the C++ `MetaTransformPluginBuilder&` callback ABI to the self-hosted builder before
+  native C++ plugins can register directly.
+- CHIR has not yet been updated to call `RunCHIRMetaTransforms`; this status file tracks only the scoped
   `packages/meta_transformation/src` port.
 
 Remaining MetaTransformation selfhost markers: 0.

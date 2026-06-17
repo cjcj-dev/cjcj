@@ -8,6 +8,8 @@ import std.reflect.TypeInfo
 
 public type MetaTransformRegisterCallback = (MetaTransformPluginBuilder) -> Unit
 public type MetaTransformPluginInfoGetter = () -> MetaTransformPluginInfo
+public type NativeMetaTransformRegisterCallback = CFunc<(CPointer<Unit>) -> Unit>
+public type NativeMetaTransformPluginInfoGetter = CFunc<() -> NativeMetaTransformPluginInfo>
 public type CHIRMetaTransformFactory = (CHIRBuilder) -> MetaTransformConcept
 public type CHIRFunctionMetaTransformFactory = (CHIRBuilder) -> CHIRFunctionMetaTransform
 public type CHIRPackageMetaTransformFactory = (CHIRBuilder) -> CHIRPackageMetaTransform
@@ -123,6 +125,42 @@ public abstract class CHIRPackageMetaTransform <: MetaTransform<CHIRPackage> {
     public init() {
         super(MetaTransformKind.FOR_CHIR_PACKAGE)
     }
+}
+
+@C
+public struct NativeMetaTransformPluginInfo {
+    public let cjcVersion: CString
+    public let registerTo: NativeMetaTransformRegisterCallback
+
+    public init() {
+        cjcVersion = CString(CPointer<UInt8>())
+        registerTo = NativeMetaTransformRegisterCallback(CPointer<Unit>())
+    }
+
+    public init(cjcVersion: CString, registerTo: NativeMetaTransformRegisterCallback) {
+        this.cjcVersion = cjcVersion
+        this.registerTo = registerTo
+    }
+
+    public func HasVersion(): Bool {
+        return !cjcVersion.isNull()
+    }
+
+    public func HasRegisterCallback(): Bool {
+        return !CPointer<Unit>(registerTo).isNull()
+    }
+
+    public func IsStructurallyValid(): Bool {
+        return HasVersion() && HasRegisterCallback()
+    }
+}
+
+public func GetNativeMetaTransformPluginInfo(symbol: CPointer<Unit>): Option<NativeMetaTransformPluginInfo> {
+    if (symbol.isNull()) {
+        return None
+    }
+    let getter = NativeMetaTransformPluginInfoGetter(symbol)
+    return Some(unsafe { getter() })
 }
 
 public struct MetaTransformPluginInfo {
