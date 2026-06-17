@@ -754,6 +754,30 @@ public func ResolveTypeAlias(typeManager: TypeManager, ctx: ASTContext): Unit {
     }
 }
 
+private func markAliasGenericParameter(decl: Decl): Unit {
+    if (let Some(tad) <- (decl as TypeAliasDecl)) {
+        if (tad.typeNode.isNone()) {
+            return
+        }
+        if (let Some(generic) <- tad.generic) {
+            for (typeParameter in generic.typeParameters) {
+                if (let Some(paramTy) <- typeParameter.GetTy()) {
+                    if (let Some(genericTy) <- (paramTy as GenericsTy)) {
+                        genericTy.isAliasParam = true
+                    }
+                }
+            }
+        }
+    }
+}
+
+public func MarkAliasGenericParameters(ctx: ASTContext): Unit {
+    let decls = if (let Some(pkg) <- ctx.curPackage) { collectDeclsFromPackage(pkg) } else { GetAllDecls(ctx) }
+    for (decl in decls) {
+        markAliasGenericParameter(decl)
+    }
+}
+
 public func ResolveNames(typeManager: TypeManager, ctx: ASTContext): Unit {
     let box = ResolveTypeWalkerBox(typeManager, ctx)
     let resolveSingleType = { node: Node =>
@@ -783,6 +807,7 @@ public func ResolveNames(typeManager: TypeManager, ctx: ASTContext): Unit {
 public func PreSetDeclType(typeManager: TypeManager, ctx: ASTContext): Unit {
     ResolveDecls(typeManager, ctx)
     ResolveTypeAlias(typeManager, ctx)
+    MarkAliasGenericParameters(ctx)
     ResolveNames(typeManager, ctx)
 }
 

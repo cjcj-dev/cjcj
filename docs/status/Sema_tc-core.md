@@ -158,6 +158,28 @@ Verification:
 - `grep -rn "TODO(selfhost:Sema)" packages/sema/src` reports 4 package-level markers, all outside the tc-core-owned files.
 - Remaining `TODO(selfhost:Sema)` markers in the tc-core-owned files listed by the task: 0.
 
+## 2026-06-18 Continue Pass
+
+Files deepened:
+
+- `packages/sema/src/TypeCheck.cj`
+
+Implemented behavior:
+
+- Ported the C++ `IgnoreAssumptionForTypeAliasDecls` effect into the self-host type preset flow. After type aliases are resolved, generic parameters owned by generic type aliases are now marked through `GenericsTy.isAliasParam`.
+- This connects the alias-generic path to the existing self-host `TypeManager.IsSubtype` behavior, which already mirrors the C++ shortcut that treats alias generic parameters as satisfying their bound comparison without recursively walking alias-expanded upper bounds.
+
+Remaining gaps:
+
+- The broader C++ `CollectAndCheckAssumption` pipeline still cannot be fully mirrored here because the current self-host AST does not expose C++'s `Generic::assumptionCollection` or `ASTContext::gcBlames` storage.
+- Exact assumption diagnostics and import-manager dependent lookup remain incomplete in the surrounding partial port.
+
+Verification:
+
+- `cjpm build` passes after this pass.
+- `grep -rn "TODO(selfhost:Sema)" packages/sema/src` reports 2 package-level markers, both outside the tc-core-owned files in `TestManager.cj`.
+- Remaining `TODO(selfhost:Sema)` markers in the tc-core-owned files listed by the task: 0.
+
 ## 2026-06-18 Deepening Pass
 
 Files deepened:
