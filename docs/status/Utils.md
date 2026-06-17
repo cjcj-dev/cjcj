@@ -41,6 +41,7 @@ Implemented:
 - Deepened `SipHash` API fidelity by adding typed byte-representation hashing overloads for booleans, signed and unsigned fixed-width integers, and `Float32`/`Float64`, matching the C++ template entrypoint for arithmetic values instead of requiring callers to widen everything to `UInt64`.
 - Matched `FloatFormat.IsUnderFlowFloat` to the C++ stream-extraction behavior by parsing directly through native `strtod` and intentionally ignoring `ERANGE`, so representational underflow such as `1e-400` is classified as underflow instead of being rejected by `StdUtils.Stod`.
 - Aligned `StringifyEnvironmentPointer` duplicate handling with C++ `unordered_map::emplace`: the first normalized environment-variable key now wins instead of relying on `HashMap.add` duplicate semantics.
+- Aligned the Windows `FileUtil.IsAbsolutePathAboveLengthLimit` path with the C++ `GetFullPathNameA`/`ERROR_FILENAME_EXCED_RANGE` check instead of only comparing the raw input length.
 
 Known fidelity caveats:
 

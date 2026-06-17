@@ -49,7 +49,11 @@ private let SHORT_HASH_NUM: Int64 = 8
 private let BOM_ENCODING_LEN: Int64 = 3
 private let TEST_FILE_NAME: String = "_test.cj"
 private let FILE_LEN_LIMIT: Int64 = 4 * 1024 * 1024 * 1024
+
 private let FILE_LEN_LIMIT_STR: String = "4 GB"
+
+@When[os == "Windows"]
+private let ERROR_FILENAME_EXCED_RANGE: UInt32 = 206u32
 
 public enum FileMode {
     | FM_EXIST
@@ -106,6 +110,9 @@ foreign {
     func _access(pathname: CString, mode: Int32): Int32
     func GetFileAttributesA(pathname: CString): UInt32
     func SetFileAttributesA(pathname: CString, attributes: UInt32): Int32
+    func GetFullPathNameA(pathname: CString, bufferLength: UInt32, buffer: CPointer<UInt8>,
+        filePart: CPointer<CString>): UInt32
+    func GetLastError(): UInt32
 }
 
 @When[os != "Windows"]
@@ -341,6 +348,37 @@ private func skipSymlinkInRecursiveDirectorySearch(): Bool {
 @When[os != "Windows"]
 private func skipSymlinkInRecursiveDirectorySearch(): Bool {
     return true
+}
+
+@When[os == "Windows"]
+private func isAbsolutePathAboveLengthLimit(path: String): Bool {
+    if (path.size > FILE_PATH_MAX_LENGTH) {
+        return true
+    }
+    try (cPath = unsafe { LibC.mallocCString(path) }.asResource()) {
+        if (cPath.value.isNull()) {
+            return false
+        }
+        try (buffer = LibC.malloc<UInt8>(count: FILE_PATH_MAX_LENGTH).asResource()) {
+            if (buffer.value.isNull()) {
+                return false
+            }
+            let retval = unsafe {
+                GetFullPathNameA(cPath.value, UInt32(FILE_PATH_MAX_LENGTH), buffer.value, CPointer<CString>())
+            }
+            if (retval == 0u32 && unsafe { GetLastError() } == ERROR_FILENAME_EXCED_RANGE) {
+                return true
+            }
+        }
+    } catch (e: Exception) {
+        ()
+    }
+    return false
+}
+
+@When[os != "Windows"]
+private func isAbsolutePathAboveLengthLimit(path: String): Bool {
+    return path.size > FILE_PATH_MAX_LENGTH
 }
 
 public class FileUtil {
@@ -619,7 +657,7 @@ public class FileUtil {
     }
 
     public static func IsAbsolutePathAboveLengthLimit(path: String): Bool {
-        return path.size > FILE_PATH_MAX_LENGTH
+        return isAbsolutePathAboveLengthLimit(path)
     }
 
     public static func GetAbsPath(path: String): Option<String> {
