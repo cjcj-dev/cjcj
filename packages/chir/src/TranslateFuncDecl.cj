@@ -38,6 +38,12 @@ extend AST2CHIRDeclTranslator {
                 true
             }
             fn.printNewlines.add(newline)
+            let isInt = if (printIdx < spec.printIsInt.size) {
+                spec.printIsInt[printIdx]
+            } else {
+                false
+            }
+            fn.printIsInt.add(isInt)
             printIdx++
         }
         RegisterFunctionSpec(defaultPackage, spec, fn)
