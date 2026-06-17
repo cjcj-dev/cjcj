@@ -148,6 +148,25 @@ public class AST2CHIRDeclTranslator {
         builder.CreateExit(None, entry)
     }
 
+    public func CreateLiteralReturnBody(fn: Function, literal: LiteralValue): Unit {
+        let body = builder.CreateBlockGroup(fn.GetIdentifier() + ".body")
+        fn.InitBody(body)
+        let entry = builder.CreateBlock("entry", body)
+        EnsureReturnSlot(fn, entry)
+        if (let Some(returnTy) <- fn.GetReturnType()) {
+            if (IsVoidLikeReturn(returnTy)) {
+                builder.CreateExit(None, entry)
+                return
+            }
+            let constant = builder.CreateConstant(returnTy, literal, entry)
+            if (let Some(result) <- constant.GetResult()) {
+                builder.CreateExit(Some(result), entry)
+                return
+            }
+        }
+        builder.CreateExit(None, entry)
+    }
+
     public func EnsureReturnSlot(fn: Function, entry: Block): Unit {
         if (let Some(returnTy) <- fn.GetReturnType()) {
             if (!returnTy.IsVoid()) {
@@ -172,6 +191,10 @@ public class AST2CHIRDeclTranslator {
             return false
         }
         return true
+    }
+
+    private func IsVoidLikeReturn(returnTy: Type): Bool {
+        return returnTy.IsVoid() || returnTy.IsUnit() || returnTy.IsNothing()
     }
 
     public func ShouldTranslateMember(owner: AST2CHIRNominalSpec, memberFileKey: String): Bool {

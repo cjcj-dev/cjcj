@@ -1,6 +1,7 @@
 package cangjie_compiler::frontend
 
 import std.collection.*
+import std.convert.*
 import cangjie_compiler::chir.AccessLevel as ChirAccessLevel
 import cangjie_compiler::chir.AST2CHIR as ChirAST2CHIR
 import cangjie_compiler::chir.AST2CHIRFunctionSpec as ChirFunctionSpec
@@ -166,15 +167,28 @@ private func addDeclToPackageSpec(
 
 private func buildFunctionSpec(pkg: Package, decl: Decl, context: ChirContext, sourceFileKey: String): ChirFunctionSpec {
     let paramTypes = ArrayList<ChirType>()
+    var sourceReturnType: Option<Type> = None
+    var hasSourceLiteralReturn = false
+    var sourceLiteralReturnKind = FRONTEND_LITERAL_UNKNOWN
+    var sourceLiteralReturnValue = ""
     if (let Some(funcDecl) <- (decl as FuncDecl)) {
         for (param in funcDecl.funcBody.params) {
             paramTypes.add(lowerValueType(context, param.typeNode))
         }
+        sourceReturnType = funcDecl.funcBody.retType
+        hasSourceLiteralReturn = funcDecl.funcBody.hasLiteralReturn
+        sourceLiteralReturnKind = funcDecl.funcBody.literalReturnKind
+        sourceLiteralReturnValue = funcDecl.funcBody.literalReturnValue
     }
     let fnName = stableMangledName(pkg, decl)
-    let fnSpec = ChirFunctionSpec(fnName, paramTypes, context.GetVoidTy(),
+    let returnTy = lowerFunctionReturnType(context, sourceReturnType, hasSourceLiteralReturn, sourceLiteralReturnKind,
+        sourceLiteralReturnValue)
+    let fnSpec = ChirFunctionSpec(fnName, paramTypes, returnTy,
         srcCodeIdentifier: decl.identifier.Val(), rawMangledName: fnName,
         packageName: pkg.fullPackageName, funcKind: toChirFuncKind(decl), emitBody: true)
+    if (hasSourceLiteralReturn) {
+        setLiteralReturn(fnSpec, sourceLiteralReturnKind, sourceLiteralReturnValue)
+    }
     applyDeclAttributes(decl, fnSpec)
     if (!sourceFileKey.isEmpty()) {
         fnSpec.SetSourceFileKey(sourceFileKey)
@@ -320,6 +334,124 @@ private func lowerValueType(context: ChirContext, sourceType: Option<Type>): Chi
         if (typeNode.name == "Unit" || typeNode.name == "()") { return context.GetUnitTy() }
     }
     return context.GetInt64Ty()
+}
+
+private func lowerFunctionReturnType(
+    context: ChirContext,
+    sourceReturnType: Option<Type>,
+    hasLiteralReturn: Bool,
+    literalReturnKind: Int64,
+    literalReturnValue: String
+): ChirType {
+    if (hasLiteralReturn) {
+        if (literalReturnCanLower(literalReturnKind, literalReturnValue, sourceReturnType)) {
+            if (let Some(_) <- sourceReturnType) {
+                return lowerValueType(context, sourceReturnType)
+            }
+            return inferLiteralReturnType(context, literalReturnKind)
+        }
+    }
+    if (let None <- sourceReturnType) {
+        return context.GetUnitTy()
+    }
+    return context.GetVoidTy()
+}
+
+private func inferLiteralReturnType(context: ChirContext, literalReturnKind: Int64): ChirType {
+    if (literalReturnKind == FRONTEND_LITERAL_BOOL) { return context.GetBoolTy() }
+    if (literalReturnKind == FRONTEND_LITERAL_INT) { return context.GetInt64Ty() }
+    if (literalReturnKind == FRONTEND_LITERAL_FLOAT) { return context.GetFloat64Ty() }
+    if (literalReturnKind == FRONTEND_LITERAL_UNIT) { return context.GetUnitTy() }
+    if (literalReturnKind == FRONTEND_LITERAL_RUNE) { return context.GetRuneTy() }
+    return context.GetUnitTy()
+}
+
+private func literalReturnCanLower(literalReturnKind: Int64, literalReturnValue: String, sourceReturnType: Option<Type>): Bool {
+    if (let Some(typeNode) <- sourceReturnType) {
+        let typeName = typeNode.name
+        if (literalReturnKind == FRONTEND_LITERAL_BOOL) { return isBoolTypeName(typeName) }
+        if (literalReturnKind == FRONTEND_LITERAL_INT) {
+            return isIntegerTypeName(typeName) && tryParseIntLiteral(literalReturnValue).isSome()
+        }
+        if (literalReturnKind == FRONTEND_LITERAL_FLOAT) {
+            return isFloatTypeName(typeName) && tryParseFloatLiteral(literalReturnValue).isSome()
+        }
+        if (literalReturnKind == FRONTEND_LITERAL_UNIT) { return isUnitTypeName(typeName) }
+        if (literalReturnKind == FRONTEND_LITERAL_RUNE) { return isRuneTypeName(typeName) }
+        return false
+    }
+    if (literalReturnKind == FRONTEND_LITERAL_INT) {
+        return tryParseIntLiteral(literalReturnValue).isSome()
+    }
+    if (literalReturnKind == FRONTEND_LITERAL_FLOAT) {
+        return tryParseFloatLiteral(literalReturnValue).isSome()
+    }
+    return literalReturnKind == FRONTEND_LITERAL_BOOL || literalReturnKind == FRONTEND_LITERAL_UNIT ||
+        literalReturnKind == FRONTEND_LITERAL_RUNE
+}
+
+private func setLiteralReturn(fnSpec: ChirFunctionSpec, literalReturnKind: Int64, literalReturnValue: String): Unit {
+    if (literalReturnKind == FRONTEND_LITERAL_BOOL) {
+        fnSpec.SetBoolLiteralReturn(literalReturnValue == "true")
+        return
+    }
+    if (literalReturnKind == FRONTEND_LITERAL_INT) {
+        if (let Some(parsedIntValue) <- tryParseIntLiteral(literalReturnValue)) {
+            fnSpec.SetIntLiteralReturn(parsedIntValue)
+        }
+        return
+    }
+    if (literalReturnKind == FRONTEND_LITERAL_FLOAT) {
+        if (let Some(parsedFloatValue) <- tryParseFloatLiteral(literalReturnValue)) {
+            fnSpec.SetFloatLiteralReturn(parsedFloatValue)
+        }
+        return
+    }
+    if (literalReturnKind == FRONTEND_LITERAL_UNIT) {
+        fnSpec.SetUnitLiteralReturn()
+    }
+}
+
+private func tryParseIntLiteral(value: String): Option<Int64> {
+    let normalized = value.replace("_", "")
+    try {
+        return Some(Int64.parse(normalized))
+    } catch (e: Exception) {
+        return None
+    }
+}
+
+private func tryParseFloatLiteral(value: String): Option<Float64> {
+    let normalized = value.replace("_", "")
+    try {
+        return Some(Float64.parse(normalized))
+    } catch (e: Exception) {
+        return None
+    }
+}
+
+private func isBoolTypeName(name: String): Bool {
+    return name == "Bool" || name == "bool"
+}
+
+private func isRuneTypeName(name: String): Bool {
+    return name == "Rune" || name == "rune"
+}
+
+private func isUnitTypeName(name: String): Bool {
+    return name == "Unit" || name == "()"
+}
+
+private func isIntegerTypeName(name: String): Bool {
+    return name == "Int8" || name == "int8" || name == "Int16" || name == "int16" ||
+        name == "Int32" || name == "int32" || name == "Int64" || name == "Int" || name == "int64" ||
+        name == "UInt8" || name == "uint8" || name == "UInt16" || name == "uint16" ||
+        name == "UInt32" || name == "uint32" || name == "UInt64" || name == "uint64"
+}
+
+private func isFloatTypeName(name: String): Bool {
+    return name == "Float16" || name == "float16" || name == "Float32" || name == "float32" ||
+        name == "Float64" || name == "float64"
 }
 
 private func stableMangledName(pkg: Package, decl: Decl): String {

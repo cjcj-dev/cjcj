@@ -964,6 +964,7 @@ private func finishDeclExtent(tokens: ArrayList<FrontendToken>, keyword: String,
     while (idx < tokens.size && tokens[idx].kind != FrontendTokenKind.END) {
         if (tokens[idx].value == "{") {
             let closeIdx = findMatchingToken(tokens, idx, "{", "}")
+            captureFunctionBodySummary(tokens, idx, closeIdx, decl)
             if (isMemberContainer(keyword)) {
                 parseMemberDecls(decl, tokens, idx + 1, closeIdx)
             }
@@ -981,6 +982,76 @@ private func finishDeclExtent(tokens: ArrayList<FrontendToken>, keyword: String,
         idx++
     }
     return (fallbackEnd, idx)
+}
+
+private func captureFunctionBodySummary(tokens: ArrayList<FrontendToken>, openIdx: Int64, closeIdx: Int64,
+    decl: Decl): Unit {
+    if (let Some(funcDecl) <- (decl as FuncDecl)) {
+        let literalInfo = parseLiteralReturn(tokens, openIdx + 1, closeIdx)
+        funcDecl.funcBody.hasLiteralReturn = literalInfo[0]
+        funcDecl.funcBody.literalReturnKind = literalInfo[1]
+        funcDecl.funcBody.literalReturnValue = literalInfo[2]
+        funcDecl.funcBody.literalReturnBegin = literalInfo[3]
+        funcDecl.funcBody.literalReturnEnd = literalInfo[4]
+    }
+}
+
+private func parseLiteralReturn(tokens: ArrayList<FrontendToken>, start: Int64, end: Int64):
+    (Bool, Int64, String, Position, Position) {
+    var idx = start
+    var depth: Int64 = 0
+    while (idx < end && idx < tokens.size) {
+        if (tokens[idx].value == "{" || tokens[idx].value == "(" || tokens[idx].value == "[") {
+            depth++
+            idx++
+            continue
+        }
+        if (tokens[idx].value == "}" || tokens[idx].value == ")" || tokens[idx].value == "]") {
+            if (depth > 0) {
+                depth--
+            }
+            idx++
+            continue
+        }
+        if (depth == 0 && tokens[idx].value == "return") {
+            let valueIdx = skipTrivia(tokens, idx + 1)
+            return parseLiteralReturnValue(tokens, valueIdx, end)
+        }
+        idx++
+    }
+    return (false, FRONTEND_LITERAL_UNKNOWN, "", INVALID_POSITION, INVALID_POSITION)
+}
+
+private func parseLiteralReturnValue(tokens: ArrayList<FrontendToken>, idx: Int64,
+    end: Int64): (Bool, Int64, String, Position, Position) {
+    if (idx >= end || idx >= tokens.size) {
+        return (false, FRONTEND_LITERAL_UNKNOWN, "", INVALID_POSITION, INVALID_POSITION)
+    }
+    let tok = tokens[idx]
+    if (tok.kind == FrontendTokenKind.BOOL_LITERAL) {
+        return (true, FRONTEND_LITERAL_BOOL, tok.value, tok.Begin(), tok.End())
+    }
+    if (tok.kind == FrontendTokenKind.INTEGER_LITERAL) {
+        return (true, FRONTEND_LITERAL_INT, tok.value, tok.Begin(), tok.End())
+    }
+    if (tok.kind == FrontendTokenKind.FLOAT_LITERAL) {
+        return (true, FRONTEND_LITERAL_FLOAT, tok.value, tok.Begin(), tok.End())
+    }
+    if (tok.kind == FrontendTokenKind.STRING_LITERAL) {
+        return (true, FRONTEND_LITERAL_STRING, StripLiteralQuotes(tok.value), tok.Begin(), tok.End())
+    }
+    if (tok.value == "(" && idx + 1 < end && idx + 1 < tokens.size && tokens[idx + 1].value == ")") {
+        return (true, FRONTEND_LITERAL_UNIT, "", tok.Begin(), tokens[idx + 1].End())
+    }
+    return (false, FRONTEND_LITERAL_UNKNOWN, "", INVALID_POSITION, INVALID_POSITION)
+}
+
+private func StripLiteralQuotes(value: String): String {
+    if (value.size >= 2 && ((value.startsWith("\"") && value.endsWith("\"")) ||
+        (value.startsWith("'") && value.endsWith("'")))) {
+        return value[1..value.size - 1]
+    }
+    return value
 }
 
 private func parseMemberDecls(parent: Decl, tokens: ArrayList<FrontendToken>, start: Int64, end: Int64): Unit {

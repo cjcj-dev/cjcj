@@ -418,10 +418,23 @@ public class FuncParam <: Node {
     }
 }
 
+let FRONTEND_LITERAL_UNKNOWN: Int64 = 0
+let FRONTEND_LITERAL_BOOL: Int64 = 1
+let FRONTEND_LITERAL_INT: Int64 = 2
+let FRONTEND_LITERAL_FLOAT: Int64 = 3
+let FRONTEND_LITERAL_RUNE: Int64 = 4
+let FRONTEND_LITERAL_STRING: Int64 = 5
+let FRONTEND_LITERAL_UNIT: Int64 = 6
+
 public class FuncBody <: Node {
     public let params: ArrayList<FuncParam> = ArrayList<FuncParam>()
     public var retType: Option<Type> = None
     public var generic: Option<Generic> = None
+    public var hasLiteralReturn: Bool = false
+    public var literalReturnKind: Int64 = FRONTEND_LITERAL_UNKNOWN
+    public var literalReturnValue: String = ""
+    public var literalReturnBegin: Position = INVALID_POSITION
+    public var literalReturnEnd: Position = INVALID_POSITION
 
     public init() {
         super(ASTKind.FUNC_BODY)

@@ -23,7 +23,11 @@ extend AST2CHIRDeclTranslator {
         ApplyFunctionSourceInfo(fn, spec)
         CreateFunctionParameters(fn, spec)
         if (ShouldEmitBody(spec)) {
-            CreateEmptyBody(fn)
+            if (spec.hasLiteralReturn) {
+                CreateLiteralReturnBody(fn, BuildLiteralReturn(spec))
+            } else {
+                CreateEmptyBody(fn)
+            }
         }
         RegisterFunctionSpec(defaultPackage, spec, fn)
         WireGenericDecl(fn, spec)
@@ -34,6 +38,19 @@ extend AST2CHIRDeclTranslator {
         LowerDefaultParamFunctions(defaultPackage, fn, spec)
         LowerGenericInstantiationFunctions(defaultPackage, fn, spec)
         return fn
+    }
+
+    private func BuildLiteralReturn(spec: AST2CHIRFunctionSpec): LiteralValue {
+        if (spec.literalReturnKind == AST2CHIR_LITERAL_BOOL) {
+            return BoolLiteral(spec.literalReturnBoolValue)
+        }
+        if (spec.literalReturnKind == AST2CHIR_LITERAL_INT) {
+            return IntLiteral(spec.literalReturnIntValue)
+        }
+        if (spec.literalReturnKind == AST2CHIR_LITERAL_FLOAT) {
+            return FloatLiteral(spec.literalReturnFloatValue)
+        }
+        return UnitLiteral()
     }
 
     private func ApplyFunctionSemanticAttributes(fn: Function, spec: AST2CHIRFunctionSpec): Unit {

@@ -2,6 +2,12 @@ package cangjie_compiler::chir
 
 import std.collection.*
 
+let AST2CHIR_LITERAL_NONE: Int64 = 0
+let AST2CHIR_LITERAL_BOOL: Int64 = 1
+let AST2CHIR_LITERAL_INT: Int64 = 2
+let AST2CHIR_LITERAL_FLOAT: Int64 = 3
+let AST2CHIR_LITERAL_UNIT: Int64 = 4
+
 public class AST2CHIRResult {
     public let pkg: Package
 
@@ -77,6 +83,11 @@ public class AST2CHIRFunctionSpec {
     public var propertyLocation: Option<DebugLocation> = None
     public var hasVariableLenArg: Bool = false
     public var isCFunc: Bool = false
+    public var hasLiteralReturn: Bool = false
+    public var literalReturnKind: Int64 = AST2CHIR_LITERAL_NONE
+    public var literalReturnBoolValue: Bool = false
+    public var literalReturnIntValue: Int64 = 0
+    public var literalReturnFloatValue: Float64 = 0.0
 
     public init(name: String, paramTypes: ArrayList<Type>, returnType: Type, srcCodeIdentifier!: String = "",
         rawMangledName!: String = "", packageName!: String = "", funcKind!: FuncKind = FuncKind.DEFAULT,
@@ -164,6 +175,33 @@ public class AST2CHIRFunctionSpec {
 
     public func SetCFunc(value: Bool): AST2CHIRFunctionSpec {
         isCFunc = value
+        return this
+    }
+
+    public func SetBoolLiteralReturn(value: Bool): AST2CHIRFunctionSpec {
+        hasLiteralReturn = true
+        literalReturnKind = AST2CHIR_LITERAL_BOOL
+        literalReturnBoolValue = value
+        return this
+    }
+
+    public func SetIntLiteralReturn(value: Int64): AST2CHIRFunctionSpec {
+        hasLiteralReturn = true
+        literalReturnKind = AST2CHIR_LITERAL_INT
+        literalReturnIntValue = value
+        return this
+    }
+
+    public func SetFloatLiteralReturn(value: Float64): AST2CHIRFunctionSpec {
+        hasLiteralReturn = true
+        literalReturnKind = AST2CHIR_LITERAL_FLOAT
+        literalReturnFloatValue = value
+        return this
+    }
+
+    public func SetUnitLiteralReturn(): AST2CHIRFunctionSpec {
+        hasLiteralReturn = true
+        literalReturnKind = AST2CHIR_LITERAL_UNIT
         return this
     }
 }
