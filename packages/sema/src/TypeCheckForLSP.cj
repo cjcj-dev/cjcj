@@ -4,6 +4,7 @@ import std.collection.*
 import cangjie_compiler::ast.*
 
 private let LSP_TYPE_PLACEHOLDER_NAME: String = "$type"
+private let LSP_DEFAULT_RELATIVE_LINE: Int64 = 2147483647
 
 private func FindBaseNameFromOption(expr: Option<Expr>): String {
     if (let Some(value) <- expr) {
@@ -119,6 +120,37 @@ public func SetLSPReferenceScopeName(expr: Expr, scopeName: String): Unit {
             SetLSPReferenceScopeName(child, scopeName)
         }
     }
+}
+
+private func CreateLocalReferenceQuery(scopeName: String, baseName: String): Query {
+    let root = CompoundQuery(QueryKind.AND)
+    root.children.add(ScopeQuery(scopeName))
+    root.children.add(NameQuery(baseName))
+
+    let declKinds = CompoundQuery(QueryKind.OR)
+    declKinds.children.add(ASTKindQuery(ASTKind.VAR_DECL))
+    declKinds.children.add(ASTKindQuery(ASTKind.FUNC_DECL))
+    root.children.add(declKinds)
+    return root
+}
+
+public func GetLSPRelativePos(ctx: ASTContext, scopeName: String, baseName: String, hasLocalDecl: Bool): Position {
+    var pos = Position(0, LSP_DEFAULT_RELATIVE_LINE, 0)
+    if (hasLocalDecl) {
+        let syms = ctx.searcher.Search(ctx, CreateLocalReferenceQuery(scopeName, baseName))
+        if (!syms.isEmpty()) {
+            if (let Some(node) <- syms[0].node) {
+                pos = node.end + Position(0, 0, 1)
+            }
+        }
+        return pos
+    }
+    if (let Some(sym) <- GetScopeGate(ctx, GetScopeGateName(scopeName))) {
+        if (let Some(node) <- sym.node) {
+            pos = node.begin + Position(0, 0, 1)
+        }
+    }
+    return pos
 }
 
 public func SelfhostPortStatus_TypeCheckForLSP(): Bool {

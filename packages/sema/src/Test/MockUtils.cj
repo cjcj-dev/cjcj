@@ -352,6 +352,84 @@ public class MockUtils {
         return None
     }
 
+    public static func FindAccessor(outerClass: ClassDecl, member: Decl, kind: AccessorKind): Option<Decl> {
+        if (member.TestAttr(Attribute.IN_EXTEND)) {
+            return None
+        }
+        var accessorIdentifier = BuildMockAccessorIdentifier(member, kind)
+        if (let Some(_) <- (member as FuncDecl)) {
+            accessorIdentifier += BuildArgumentList(member)
+        }
+        for (superDecl in outerClass.GetAllSuperDecls()) {
+            if (superDecl.astKind != ASTKind.CLASS_DECL) {
+                continue
+            }
+            if (let Some(accessorDecl) <- FindMemberDeclByIdentifier(superDecl, accessorIdentifier)) {
+                return accessorDecl
+            }
+        }
+        return None
+    }
+
+    public static func FindAccessorForMemberAccess(ty: Option<Ty>, resolvedMember: Option<Decl>,
+        kind: AccessorKind): Option<Decl> {
+        if (let None <- resolvedMember) {
+            return None
+        }
+        let member = resolvedMember.getOrThrow()
+        if (!IsMockAccessorRequired(member)) {
+            return None
+        }
+        if (let Some(baseDecl) <- Ty.GetDeclOfTy(ty)) {
+            if (let Some(baseClass) <- (baseDecl as ClassDecl)) {
+                if (!baseClass.TestAttr(Attribute.MOCK_SUPPORTED)) {
+                    return None
+                }
+                var outerClass = baseClass
+                if (!baseClass.TestAttr(Attribute.GENERIC)) {
+                    if (let Some(genericDecl) <- baseClass.genericDecl) {
+                        if (let Some(genericClass) <- (genericDecl as ClassDecl)) {
+                            outerClass = genericClass
+                        }
+                    }
+                }
+                return FindAccessor(outerClass, member, kind)
+            }
+        }
+        return None
+    }
+
+    public static func FindTopLevelAccessor(member: Decl, kind: AccessorKind): Option<FuncDecl> {
+        if (let Some(file) <- member.curFile) {
+            let accessorIdentifier = BuildMockAccessorIdentifier(member, kind)
+            if (let Some(decl) <- FindGlobalDeclByIdentifier(file, accessorIdentifier)) {
+                return decl as FuncDecl
+            }
+        }
+        return None
+    }
+
+    public static func FindAccessor(memberAccess: Option<MemberAccess>, target: Option<Decl>,
+        kind: AccessorKind): Option<FuncDecl> {
+        if (kind == AccessorKind.FIELD_GETTER || kind == AccessorKind.FIELD_SETTER ||
+            kind == AccessorKind.STATIC_FIELD_GETTER || kind == AccessorKind.STATIC_FIELD_SETTER) {
+            if (let Some(ma) <- memberAccess) {
+                if (let Some(baseExpr) <- ma.baseExpr) {
+                    if (let Some(accessorDecl) <- FindAccessorForMemberAccess(baseExpr.GetTy(), target, kind)) {
+                        return accessorDecl as FuncDecl
+                    }
+                }
+            }
+            return None
+        }
+        if (kind == AccessorKind.TOP_LEVEL_VARIABLE_GETTER || kind == AccessorKind.TOP_LEVEL_VARIABLE_SETTER) {
+            if (let Some(member) <- target) {
+                return FindTopLevelAccessor(member, kind)
+            }
+        }
+        return None
+    }
+
     public static func IsGetterForMutField(accessorDecl: FuncDecl): Bool {
         let accessorKind = ComputeAccessorKind(accessorDecl)
         if (accessorKind != AccessorKind.FIELD_GETTER &&
