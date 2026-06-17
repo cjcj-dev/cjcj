@@ -41,6 +41,9 @@ public class BCHIRInterpreter {
             } else if (opCode == OpCode.BOOL) {
                 interpStack.ArgsPush(InterpreterValue.MakeBool(code.Get(pc + 1) != 0))
                 pc += 2
+            } else if (opCode == OpCode.RUNE) {
+                interpStack.ArgsPush(InterpreterValue.MakeRune(Rune(code.Get(pc + 1))))
+                pc += 2
             } else if (opCode == OpCode.UNIT) {
                 interpStack.ArgsPush(InterpreterValue.MakeUnit())
                 pc += 1
@@ -59,6 +62,13 @@ public class BCHIRInterpreter {
             } else if (opCode == OpCode.ARRAY || opCode == OpCode.VARRAY) {
                 interpStack.ArgsPush(InterpreterValue.MakeArray(interpStack.ArgsPop(code.Get(pc + 1))))
                 pc += 2
+            } else if (opCode == OpCode.VARRAY_GET) {
+                if (let Some(value) <- InterpretVArrayGet(pc)) {
+                    interpStack.ArgsPush(value)
+                    pc += 1 + GetOpCodeArgSize(opCode)
+                } else {
+                    return Finish(BCHIRResult(BCHIRResultKind.TRAP, message: "invalid VARRAY_GET path"))
+                }
             } else if (opCode == OpCode.ALLOCATE_RAW_ARRAY || opCode == OpCode.ALLOCATE_RAW_ARRAY_EXC) {
                 let sizeValue = interpStack.ArgsPopIVal()
                 if (!sizeValue.IsIntLike()) {
@@ -158,6 +168,26 @@ public class BCHIRInterpreter {
                 interpStack.CtrlPush(ControlState(opCode, interpStack.ArgsSize() - argCount,
                     pc + 1 + GetOpCodeArgSize(opCode), env.GetBP()))
                 pc = functionValue.GetFunctionIndex()
+            } else if (opCode == OpCode.INVOKE || opCode == OpCode.INVOKE_EXC) {
+                let argCount = code.Get(pc + 1)
+                if (argCount <= 0 || interpStack.ArgsSize() < argCount) {
+                    return Finish(BCHIRResult(BCHIRResultKind.TRAP, message: "invalid INVOKE argument count"))
+                }
+                let receiver = interpStack.ArgsGet(argCount, 0)
+                if (let Some(receiverObject) <- DereferencePointer(receiver)) {
+                    if (receiverObject.kind != InterpreterValueKind.IOBJECT) {
+                        return Finish(BCHIRResult(BCHIRResultKind.TRAP, message: "INVOKE receiver is not an object"))
+                    }
+                    if (let Some(functionIndex) <- FindMethod(receiverObject.GetClassId(), code.Get(pc + 2))) {
+                        interpStack.CtrlPush(ControlState(opCode, interpStack.ArgsSize() - argCount,
+                            pc + 1 + GetOpCodeArgSize(opCode), env.GetBP()))
+                        pc = functionIndex
+                    } else {
+                        return Finish(BCHIRResult(BCHIRResultKind.TRAP, message: "method not found in vtable"))
+                    }
+                } else {
+                    return Finish(BCHIRResult(BCHIRResultKind.TRAP, message: "invalid INVOKE receiver"))
+                }
             } else if (opCode == OpCode.ASG) {
                 let pointer = interpStack.ArgsPopIVal()
                 let value = interpStack.ArgsPopIVal()
@@ -237,6 +267,28 @@ public class BCHIRInterpreter {
                     }
                 } else {
                     return Finish(BCHIRResult(BCHIRResultKind.TRAP, message: "invalid INSTANCEOF target"))
+                }
+            } else if (opCode == OpCode.TYPECAST || opCode == OpCode.TYPECAST_EXC) {
+                if (let Some(sourceKind) <- TypeKindFromCell(code.Get(pc + 1))) {
+                    if (let Some(targetKind) <- TypeKindFromCell(code.Get(pc + 2))) {
+                        if (let Some(casted) <- CastValueToTypeKind(interpStack.ArgsPopIVal(), sourceKind,
+                            targetKind)) {
+                            interpStack.ArgsPush(casted)
+                            pc += 1 + GetOpCodeArgSize(opCode)
+                        } else {
+                            return Finish(BCHIRResult(BCHIRResultKind.TRAP, message: "invalid TYPECAST operand"))
+                        }
+                    } else {
+                        return Finish(BCHIRResult(BCHIRResultKind.TRAP, message: "invalid TYPECAST target type"))
+                    }
+                } else {
+                    return Finish(BCHIRResult(BCHIRResultKind.TRAP, message: "invalid TYPECAST source type"))
+                }
+            } else if (opCode == OpCode.SWITCH) {
+                if (let Some(target) <- InterpretSwitch(pc)) {
+                    pc = target
+                } else {
+                    return Finish(BCHIRResult(BCHIRResultKind.TRAP, message: "invalid SWITCH selector or table"))
                 }
             } else if (IsUnaryOp(opCode)) {
                 if (!EvaluateUnary(opCode)) {
@@ -497,6 +549,81 @@ public class BCHIRInterpreter {
         return false
     }
 
+    private func FindMethod(classId: Int64, methodId: Int64): Option<Int64> {
+        if (let Some(classInfo) <- bchir.GetClass(classId)) {
+            return classInfo.vtable.get(methodId)
+        }
+        return None
+    }
+
+    private func InterpretVArrayGet(varrayGetPc: Int64): Option<InterpreterValue> {
+        let code = bchir.GetLinkedByteCode()
+        let pathSize = code.Get(varrayGetPc + 1)
+        if (pathSize <= 0) {
+            return None
+        }
+        let path = interpStack.ArgsPop(pathSize)
+        let arrayValue = interpStack.ArgsPopIVal()
+        if (arrayValue.kind != InterpreterValueKind.IARRAY) {
+            return None
+        }
+        var current = arrayValue
+        var pathIdx: Int64 = 0
+        while (pathIdx < pathSize) {
+            if (current.kind != InterpreterValueKind.IARRAY || !path[pathIdx].IsIntLike()) {
+                return None
+            }
+            let index = path[pathIdx].GetInt()
+            let elements = current.GetElementsRef()
+            if (index < 0 || index >= elements.size) {
+                return None
+            }
+            current = elements[index]
+            pathIdx++
+        }
+        return current.Clone()
+    }
+
+    private func InterpretSwitch(switchPc: Int64): Option<Int64> {
+        let selector = interpStack.ArgsPopIVal()
+        if (let Some(selectorValue) <- SwitchSelectorToInt(selector)) {
+            let code = bchir.GetLinkedByteCode()
+            let caseCount = code.Get(switchPc + 2)
+            if (caseCount < 0) {
+                return None
+            }
+            let caseStart = switchPc + 3
+            let defaultTargetIndex = caseStart + caseCount * 2
+            let targetStart = defaultTargetIndex + 1
+            var left: Int64 = 0
+            var right = caseCount
+            while (left < right) {
+                let mid = (left + right) / 2
+                let caseValue = code.Get8Bytes(caseStart + mid * 2)
+                if (caseValue < selectorValue) {
+                    left = mid + 1
+                } else {
+                    right = mid
+                }
+            }
+            if (left < caseCount && code.Get8Bytes(caseStart + left * 2) == selectorValue) {
+                return code.Get(targetStart + left)
+            }
+            return code.Get(defaultTargetIndex)
+        }
+        return None
+    }
+
+    private func SwitchSelectorToInt(value: InterpreterValue): Option<Int64> {
+        if (value.IsIntLike() || value.kind == InterpreterValueKind.IRUNE) {
+            return value.GetInt()
+        }
+        if (value.kind == InterpreterValueKind.IBOOL) {
+            return if (value.GetBool()) { 1 } else { 0 }
+        }
+        return None
+    }
+
     private func ValueToResult(value: InterpreterValue): BCHIRResult {
         if (let Some(literal) <- IValUtils.ToLiteral(value)) {
             return BCHIRResult(BCHIRResultKind.OK, value: literal)
@@ -543,6 +670,9 @@ public class BCHIRInterpreter {
         }
         if (left.kind == InterpreterValueKind.IBOOL && right.kind == InterpreterValueKind.IBOOL) {
             return EvaluateBoolBinary(opCode, left.GetBool(), right.GetBool())
+        }
+        if (left.kind == InterpreterValueKind.IRUNE && right.kind == InterpreterValueKind.IRUNE) {
+            return EvaluateRuneBinary(opCode, left.GetInt(), right.GetInt())
         }
         if (left.kind == InterpreterValueKind.ISTRING && right.kind == InterpreterValueKind.ISTRING) {
             if (opCode == OpCode.BIN_EQUAL || opCode == OpCode.BIN_NOTEQ) {
@@ -634,6 +764,23 @@ public class BCHIRInterpreter {
         interpStack.ArgsPush(result)
         return true
     }
+
+    private func EvaluateRuneBinary(opCode: OpCode, left: Int64, right: Int64): Bool {
+        let result = match (opCode) {
+            case OpCode.BIN_LT => InterpreterValue.MakeBool(left < right)
+            case OpCode.BIN_GT => InterpreterValue.MakeBool(left > right)
+            case OpCode.BIN_LE => InterpreterValue.MakeBool(left <= right)
+            case OpCode.BIN_GE => InterpreterValue.MakeBool(left >= right)
+            case OpCode.BIN_EQUAL => InterpreterValue.MakeBool(left == right)
+            case OpCode.BIN_NOTEQ => InterpreterValue.MakeBool(left != right)
+            case _ => InterpreterValue.MakeInvalid()
+        }
+        if (result.IsInvalid()) {
+            return false
+        }
+        interpStack.ArgsPush(result)
+        return true
+    }
 }
 
 private func IntOpKind(opCode: OpCode): InterpreterValueKind {
@@ -700,4 +847,142 @@ private func IntPowValue(kind: InterpreterValueKind, lhs: Int64, rhs: Int64): In
         idx++
     }
     return InterpreterValue.MakeInt(kind, out)
+}
+
+private func TypeKindFromCell(cell: Int64): Option<TypeKind> {
+    return match (cell) {
+        case 1 => TypeKind.TYPE_INT8
+        case 2 => TypeKind.TYPE_INT16
+        case 3 => TypeKind.TYPE_INT32
+        case 4 => TypeKind.TYPE_INT64
+        case 5 => TypeKind.TYPE_INT_NATIVE
+        case 6 => TypeKind.TYPE_UINT8
+        case 7 => TypeKind.TYPE_UINT16
+        case 8 => TypeKind.TYPE_UINT32
+        case 9 => TypeKind.TYPE_UINT64
+        case 10 => TypeKind.TYPE_UINT_NATIVE
+        case 11 => TypeKind.TYPE_FLOAT16
+        case 12 => TypeKind.TYPE_FLOAT32
+        case 13 => TypeKind.TYPE_FLOAT64
+        case 14 => TypeKind.TYPE_RUNE
+        case 15 => TypeKind.TYPE_BOOLEAN
+        case 16 => TypeKind.TYPE_UNIT
+        case _ => None
+    }
+}
+
+private func CastValueToTypeKind(value: InterpreterValue, sourceKind: TypeKind,
+    targetKind: TypeKind): Option<InterpreterValue> {
+    if (sourceKind == TypeKind.TYPE_RUNE) {
+        if (value.kind != InterpreterValueKind.IRUNE) {
+            return None
+        }
+        if (targetKind == TypeKind.TYPE_UINT32) {
+            return InterpreterValue.MakeUInt(InterpreterValueKind.IUINT32, TruncateUnsigned(value.GetInt(), 32))
+        }
+        if (targetKind == TypeKind.TYPE_UINT64) {
+            return InterpreterValue.MakeUInt(InterpreterValueKind.IUINT64, value.GetInt())
+        }
+        return None
+    }
+    if (IsIntegerTypeKind(sourceKind) || sourceKind == TypeKind.TYPE_BOOLEAN) {
+        if (let Some(raw) <- ValueAsInt(value)) {
+            return CastIntegerToTypeKind(raw, targetKind)
+        }
+        return None
+    }
+    if (IsFloatTypeKind(sourceKind)) {
+        if (value.IsFloatLike()) {
+            return CastFloatToTypeKind(value.GetFloat(), targetKind)
+        }
+        return None
+    }
+    return None
+}
+
+private func ValueAsInt(value: InterpreterValue): Option<Int64> {
+    if (value.IsIntLike() || value.kind == InterpreterValueKind.IRUNE) {
+        return value.GetInt()
+    }
+    if (value.kind == InterpreterValueKind.IBOOL) {
+        return if (value.GetBool()) { 1 } else { 0 }
+    }
+    return None
+}
+
+private func CastIntegerToTypeKind(raw: Int64, targetKind: TypeKind): Option<InterpreterValue> {
+    if (targetKind == TypeKind.TYPE_RUNE) {
+        return InterpreterValue.MakeRune(Rune(TruncateUnsigned(raw, 32)))
+    }
+    if (IsIntegerTypeKind(targetKind)) {
+        return IntegerValueForTypeKind(targetKind, raw)
+    }
+    if (IsFloatTypeKind(targetKind)) {
+        return FloatValueForTypeKind(targetKind, Float64(raw))
+    }
+    return None
+}
+
+private func CastFloatToTypeKind(raw: Float64, targetKind: TypeKind): Option<InterpreterValue> {
+    if (IsIntegerTypeKind(targetKind)) {
+        return IntegerValueForTypeKind(targetKind, Int64(raw))
+    }
+    if (IsFloatTypeKind(targetKind)) {
+        return FloatValueForTypeKind(targetKind, raw)
+    }
+    return None
+}
+
+private func IntegerValueForTypeKind(targetKind: TypeKind, raw: Int64): Option<InterpreterValue> {
+    return match (targetKind) {
+        case TypeKind.TYPE_INT8 => InterpreterValue.MakeInt(InterpreterValueKind.IINT8, TruncateSigned(raw, 8))
+        case TypeKind.TYPE_INT16 => InterpreterValue.MakeInt(InterpreterValueKind.IINT16, TruncateSigned(raw, 16))
+        case TypeKind.TYPE_INT32 => InterpreterValue.MakeInt(InterpreterValueKind.IINT32, TruncateSigned(raw, 32))
+        case TypeKind.TYPE_INT64 => InterpreterValue.MakeInt(InterpreterValueKind.IINT64, raw)
+        case TypeKind.TYPE_INT_NATIVE => InterpreterValue.MakeInt(InterpreterValueKind.IINTNAT, raw)
+        case TypeKind.TYPE_UINT8 => InterpreterValue.MakeUInt(InterpreterValueKind.IUINT8, TruncateUnsigned(raw, 8))
+        case TypeKind.TYPE_UINT16 => InterpreterValue.MakeUInt(InterpreterValueKind.IUINT16, TruncateUnsigned(raw, 16))
+        case TypeKind.TYPE_UINT32 => InterpreterValue.MakeUInt(InterpreterValueKind.IUINT32, TruncateUnsigned(raw, 32))
+        case TypeKind.TYPE_UINT64 => InterpreterValue.MakeUInt(InterpreterValueKind.IUINT64, raw)
+        case TypeKind.TYPE_UINT_NATIVE => InterpreterValue.MakeUInt(InterpreterValueKind.IUINTNAT, raw)
+        case _ => None
+    }
+}
+
+private func FloatValueForTypeKind(targetKind: TypeKind, raw: Float64): Option<InterpreterValue> {
+    return match (targetKind) {
+        case TypeKind.TYPE_FLOAT16 => InterpreterValue.MakeFloat(InterpreterValueKind.IFLOAT16, raw)
+        case TypeKind.TYPE_FLOAT32 => InterpreterValue.MakeFloat(InterpreterValueKind.IFLOAT32, raw)
+        case TypeKind.TYPE_FLOAT64 => InterpreterValue.MakeFloat(InterpreterValueKind.IFLOAT64, raw)
+        case _ => None
+    }
+}
+
+private func IsIntegerTypeKind(kind: TypeKind): Bool {
+    let idx = TypeKindIndex(kind)
+    return idx >= TypeKindIndex(TypeKind.TYPE_INT8) && idx <= TypeKindIndex(TypeKind.TYPE_UINT_NATIVE)
+}
+
+private func IsFloatTypeKind(kind: TypeKind): Bool {
+    let idx = TypeKindIndex(kind)
+    return idx >= TypeKindIndex(TypeKind.TYPE_FLOAT16) && idx <= TypeKindIndex(TypeKind.TYPE_FLOAT64)
+}
+
+private func TruncateUnsigned(raw: Int64, width: Int64): Int64 {
+    if (width >= 64) {
+        return raw
+    }
+    return raw & ((1 << width) - 1)
+}
+
+private func TruncateSigned(raw: Int64, width: Int64): Int64 {
+    if (width >= 64) {
+        return raw
+    }
+    let masked = TruncateUnsigned(raw, width)
+    let signBit = 1 << (width - 1)
+    if ((masked & signBit) != 0) {
+        return masked - (1 << width)
+    }
+    return masked
 }

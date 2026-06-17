@@ -38,6 +38,9 @@ public class IValUtils {
         if (value.IsFloatLike()) {
             return FloatLiteral(value.GetFloat())
         }
+        if (value.kind == InterpreterValueKind.IRUNE) {
+            return RuneLiteral(Rune(value.GetInt()))
+        }
         if (value.kind == InterpreterValueKind.IBOOL) {
             return BoolLiteral(value.GetBool())
         }
@@ -105,6 +108,9 @@ public class IValUtils {
         }
         if (left.kind == InterpreterValueKind.IBOOL) {
             return left.GetBool() == right.GetBool()
+        }
+        if (left.kind == InterpreterValueKind.IRUNE) {
+            return left.GetInt() == right.GetInt()
         }
         if (left.kind == InterpreterValueKind.ISTRING) {
             return left.GetText() == right.GetText()

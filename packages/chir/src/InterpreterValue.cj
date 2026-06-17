@@ -134,7 +134,8 @@ public class InterpreterValue {
     }
 
     public static func MakeRune(value: Rune): InterpreterValue {
-        return InterpreterValue(InterpreterValueKind.IRUNE, literalContent: RuneLiteral(value))
+        return InterpreterValue(InterpreterValueKind.IRUNE, intContent: Int64(UInt32(value)),
+            literalContent: RuneLiteral(value))
     }
 
     public static func MakeString(value: String): InterpreterValue {

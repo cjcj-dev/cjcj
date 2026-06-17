@@ -115,8 +115,11 @@ public func CHIR2BCHIRTranslateOtherExpression(compiler: CHIR2BCHIR, context: CH
     } else if (expr.GetExprKind() == ExprKind.APPLY) {
         context.definition.PushOp(OpCode.APPLY)
         context.definition.PushCell(expr.GetNumOfOperands())
-    } else if (expr.GetExprKind() == ExprKind.RAW_ARRAY_LITERAL_INIT || expr.GetExprKind() == ExprKind.VARRAY) {
-        context.definition.PushOp(OpCode.ARRAY)
+    } else if (expr.GetExprKind() == ExprKind.RAW_ARRAY_LITERAL_INIT) {
+        context.definition.PushOp(OpCode.RAW_ARRAY_LITERAL_INIT)
+        context.definition.PushCell(if (expr.GetNumOfOperands() > 0) { expr.GetNumOfOperands() - 1 } else { 0 })
+    } else if (expr.GetExprKind() == ExprKind.VARRAY) {
+        context.definition.PushOp(OpCode.VARRAY)
         context.definition.PushCell(expr.GetNumOfOperands())
     } else {
         context.definition.PushOp(OpCode.NOT_SUPPORTED)
