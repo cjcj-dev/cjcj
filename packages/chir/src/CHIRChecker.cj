@@ -783,6 +783,9 @@ public class CHIRChecker {
         }
         let operand = expr.GetOperand(0)
         if (let Some(operandTy) <- operand.GetType()) {
+            if (operandTy.IsNothing()) {
+                return
+            }
             if (let Some(resultTy) <- expr.GetResultType()) {
                 match (expr.GetExprKind()) {
                     case ExprKind.NEG =>
@@ -820,42 +823,104 @@ public class CHIRChecker {
             if (let Some(rightTy) <- right.GetType()) {
                 if (let Some(resultTy) <- expr.GetResultType()) {
                     let kind = expr.GetExprKind()
+                    if (leftTy.IsNothing() || rightTy.IsNothing()) {
+                        return
+                    }
                     if (CHIRCheckerIsCalculExpr(kind)) {
-                        if (!leftTy.IsNumeric()) {
-                            TypeCheckError(expr, left, "Int or Float", topLevelFunc, result)
-                        }
-                        if (!CHIRCheckerTypesEqual(leftTy, rightTy)) {
-                            TypeCheckError(expr, right, leftTy.ToString(), topLevelFunc, result)
-                        }
-                        CheckResultType(expr, resultTy, leftTy, topLevelFunc, result)
+                        CheckCalculExpression(expr, left, right, leftTy, rightTy, resultTy, topLevelFunc, result)
+                    } else if (kind == ExprKind.EXP) {
+                        CheckExponentiationExpression(expr, left, right, leftTy, rightTy, resultTy, topLevelFunc, result)
                     } else if (CHIRCheckerIsBitExpr(kind)) {
-                        if (!leftTy.IsInteger()) {
-                            TypeCheckError(expr, left, "Int", topLevelFunc, result)
-                        }
-                        if (!CHIRCheckerTypesEqual(leftTy, rightTy)) {
-                            TypeCheckError(expr, right, leftTy.ToString(), topLevelFunc, result)
-                        }
-                        CheckResultType(expr, resultTy, leftTy, topLevelFunc, result)
+                        CheckBitExpression(expr, left, right, leftTy, rightTy, topLevelFunc, result)
                     } else if (CHIRCheckerIsCompareExpr(kind)) {
-                        if (!CHIRCheckerTypesEqual(leftTy, rightTy)) {
-                            TypeCheckError(expr, right, leftTy.ToString(), topLevelFunc, result)
-                        }
-                        if (!resultTy.IsBoolean()) {
-                            TypeCheckResultError(expr, "Bool", topLevelFunc, result)
-                        }
+                        CheckCompareExpression(expr, right, leftTy, rightTy, resultTy, topLevelFunc, result)
                     } else if (kind == ExprKind.AND || kind == ExprKind.OR) {
-                        if (!leftTy.IsBoolean()) {
-                            TypeCheckError(expr, left, "Bool", topLevelFunc, result)
-                        }
-                        if (!rightTy.IsBoolean()) {
-                            TypeCheckError(expr, right, "Bool", topLevelFunc, result)
-                        }
-                        if (!resultTy.IsBoolean()) {
-                            TypeCheckResultError(expr, "Bool", topLevelFunc, result)
-                        }
+                        CheckLogicExpression(expr, left, right, leftTy, rightTy, resultTy, topLevelFunc, result)
                     }
                 }
             }
+        }
+    }
+
+    private func CheckCalculExpression(expr: Expression, left: Value, right: Value, leftTy: Type, rightTy: Type,
+        resultTy: Type, topLevelFunc: Function, result: CHIRCheckResult): Unit {
+        if (expr.GetExprKind() == ExprKind.MOD) {
+            if (!leftTy.IsInteger()) {
+                TypeCheckError(expr, left, "Int or UInt", topLevelFunc, result)
+            }
+            if (!rightTy.IsInteger()) {
+                TypeCheckError(expr, right, "Int or UInt", topLevelFunc, result)
+            }
+        } else {
+            if (!leftTy.IsNumeric()) {
+                TypeCheckError(expr, left, "numeric", topLevelFunc, result)
+            }
+            if (!rightTy.IsNumeric()) {
+                TypeCheckError(expr, right, "numeric", topLevelFunc, result)
+            }
+        }
+        if (!CHIRCheckerTypesEqual(leftTy, rightTy)) {
+            TypeCheckError(expr, right, leftTy.ToString(), topLevelFunc, result)
+        } else {
+            CheckResultType(expr, resultTy, leftTy, topLevelFunc, result)
+        }
+    }
+
+    private func CheckExponentiationExpression(expr: Expression, left: Value, right: Value, leftTy: Type, rightTy: Type,
+        resultTy: Type, topLevelFunc: Function, result: CHIRCheckResult): Unit {
+        let leftKind = leftTy.GetTypeKind()
+        let rightKind = rightTy.GetTypeKind()
+        if (leftKind != TypeKind.TYPE_INT64 && leftKind != TypeKind.TYPE_FLOAT64) {
+            TypeCheckError(expr, left, "Int64 or Float64", topLevelFunc, result)
+            return
+        }
+        if (leftKind == TypeKind.TYPE_INT64) {
+            if (rightKind != TypeKind.TYPE_UINT64) {
+                TypeCheckError(expr, right, "UInt64", topLevelFunc, result)
+            }
+            if (resultTy.GetTypeKind() != TypeKind.TYPE_INT64) {
+                TypeCheckResultError(expr, "Int64", topLevelFunc, result)
+            }
+        } else if (leftKind == TypeKind.TYPE_FLOAT64) {
+            if (rightKind != TypeKind.TYPE_INT64 && rightKind != TypeKind.TYPE_FLOAT64) {
+                TypeCheckError(expr, right, "Int64 or Float64", topLevelFunc, result)
+            }
+            if (resultTy.GetTypeKind() != TypeKind.TYPE_FLOAT64) {
+                TypeCheckResultError(expr, "Float64", topLevelFunc, result)
+            }
+        }
+    }
+
+    private func CheckBitExpression(expr: Expression, left: Value, right: Value, leftTy: Type, rightTy: Type,
+        topLevelFunc: Function, result: CHIRCheckResult): Unit {
+        if (!leftTy.IsInteger()) {
+            TypeCheckError(expr, left, "Int", topLevelFunc, result)
+        }
+        if (!rightTy.IsInteger()) {
+            TypeCheckError(expr, right, "Int", topLevelFunc, result)
+        }
+    }
+
+    private func CheckCompareExpression(expr: Expression, right: Value, leftTy: Type, rightTy: Type, resultTy: Type,
+        topLevelFunc: Function, result: CHIRCheckResult): Unit {
+        if (!CHIRCheckerTypesEqual(leftTy, rightTy)) {
+            TypeCheckError(expr, right, leftTy.ToString(), topLevelFunc, result)
+        }
+        if (!resultTy.IsBoolean()) {
+            TypeCheckResultError(expr, "Bool", topLevelFunc, result)
+        }
+    }
+
+    private func CheckLogicExpression(expr: Expression, left: Value, right: Value, leftTy: Type, rightTy: Type,
+        resultTy: Type, topLevelFunc: Function, result: CHIRCheckResult): Unit {
+        if (!leftTy.IsBoolean()) {
+            TypeCheckError(expr, left, "Bool", topLevelFunc, result)
+        }
+        if (!rightTy.IsBoolean()) {
+            TypeCheckError(expr, right, "Bool", topLevelFunc, result)
+        }
+        if (!resultTy.IsBoolean()) {
+            TypeCheckResultError(expr, "Bool", topLevelFunc, result)
         }
     }
 
@@ -1569,7 +1634,7 @@ private func CHIRCheckerGenericTypeIsInContainer(ty: Type, container: ArrayList<
 
 private func CHIRCheckerIsCalculExpr(kind: ExprKind): Bool {
     return kind == ExprKind.ADD || kind == ExprKind.SUB || kind == ExprKind.MUL || kind == ExprKind.DIV ||
-        kind == ExprKind.MOD || kind == ExprKind.EXP
+        kind == ExprKind.MOD
 }
 
 private func CHIRCheckerIsBitExpr(kind: ExprKind): Bool {
