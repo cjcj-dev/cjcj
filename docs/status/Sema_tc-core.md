@@ -109,6 +109,34 @@ Verification:
 - `cjpm build` passes after this pass.
 - Remaining `TODO(selfhost:Sema)` markers in the tc-core-owned files listed by the task: 0.
 
+## 2026-06-17 Continue Pass 6
+
+Files deepened:
+
+- `packages/sema/src/TypeManager.cj`
+
+Implemented behavior:
+
+- Replaced the flattened `IsSubtype` implementation with C++-ordered subtype helper logic: quest/invalid/fast-path handling, placeholder unification through `LocalTypeArgumentSynthesis`, generic upper-bound and alias-parameter checks, classlike supertype comparison, struct/enum interface boxing, exact array/VArray/pointer checks, primitive ideal-literal handling, and extend-interface boxing.
+- Added a subtype query cache keyed by `(leaf, root, implicitBoxed, allowOptionBox)` to match the C++ recursion guard behavior; placeholder-involving entries are dropped after each query like the C++ cache.
+- Ported C++ `implicitBoxed` and `allowOptionBox` semantics that had previously been ignored, including the stricter `Any` behavior when boxing is disabled and nested `Option` auto-boxing only when allowed.
+- Tightened function, tuple, array, VArray, pointer, and primitive subtype checks toward the C++ contracts: function parameters use `noCast`, C-function and vararg flags must match, tuple element checks disable implicit boxing, array dimensions and VArray sizes must match, and non-ideal primitive numeric widening is no longer treated as a general subtype.
+- Deepened `IsTyEqual`, `IsLitBoxableType`, and `CheckTypeCompatibility` with C++-shaped generic equality, enum/ref-enum compatibility, common/specific declaration matching, and constraint snapshot/restore around equality checks.
+- Cleared subtype query state from `Clear` and `ReleaseSemaQueryCaches`, matching the C++ query-cache lifecycle.
+
+Remaining gaps:
+
+- `CheckTypeCompatibility` still preserves the current self-hosted call-site convention (`target, actual`) instead of migrating all callers to the C++ parameter direction in one pass.
+- C++ subtype cache uses pointer-identity/hash containers; the self-hosted version uses linear `SameTy` lookup because shared map/hash support for compound type keys is still local to this port.
+- Placeholder unification is delegated to the current self-hosted `LocalTypeArgumentSynthesis`; any fidelity gaps in that sibling logic remain visible through subtype checks.
+- Imported-declaration lookup, exact diagnostic emission, and alias-export diagnostics remain outside this pass.
+
+Verification:
+
+- `cjpm build` passes after this pass.
+- `grep -rn "TODO(selfhost:Sema)" packages/sema/src` reports 4 package-level markers, all outside the tc-core-owned files.
+- Remaining `TODO(selfhost:Sema)` markers in the tc-core-owned files listed by the task: 0.
+
 ## 2026-06-17 Continue Pass 3
 
 Files deepened:

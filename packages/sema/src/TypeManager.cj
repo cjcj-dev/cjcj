@@ -206,6 +206,22 @@ private class CheckedTyExtendRelation {
     }
 }
 
+private class SubtypeCacheEntry {
+    public var leaf: Ty
+    public var root: Ty
+    public var implicitBoxed: Bool
+    public var allowOptionBox: Bool
+    public var value: Bool
+
+    public init(leaf: Ty, root: Ty, implicitBoxed: Bool, allowOptionBox: Bool, value: Bool) {
+        this.leaf = leaf
+        this.root = root
+        this.implicitBoxed = implicitBoxed
+        this.allowOptionBox = allowOptionBox
+        this.value = value
+    }
+}
+
 private class TyVarScopeDepthEntry {
     public var tyVar: GenericsTy
     public var depth: Int64
@@ -230,6 +246,7 @@ public class TypeManager {
     private let boxedTys: ArrayList<Ty> = ArrayList<Ty>()
     private let tyUsedExtends: ArrayList<TyUsedExtendsEntry> = ArrayList<TyUsedExtendsEntry>()
     private let checkedTyExtendRelation: ArrayList<CheckedTyExtendRelation> = ArrayList<CheckedTyExtendRelation>()
+    private let subtypeCache: ArrayList<SubtypeCacheEntry> = ArrayList<SubtypeCacheEntry>()
     private let unsolvedTyVars: ArrayList<GenericsTy> = ArrayList<GenericsTy>()
     private let tyVarScopes: ArrayList<TyVarScope> = ArrayList<TyVarScope>()
     private let tyVarScopeDepth: ArrayList<TyVarScopeDepthEntry> = ArrayList<TyVarScopeDepthEntry>()
@@ -822,73 +839,61 @@ public class TypeManager {
     }
 
     public func IsSubtype(leaf: Ty, root: Ty, implicitBoxed!: Bool = true, allowOptionBox!: Bool = true): Bool {
-        let _ = implicitBoxed
-        let _ = allowOptionBox
-        if (leaf.HasInvalidTy() || root.HasInvalidTy()) {
+        if (!Ty.IsTyCorrect(leaf) || !Ty.IsTyCorrect(root)) {
             return false
         }
-        if (SameTy(leaf, root)) {
+        if (leaf.IsQuest() || root.IsQuest()) {
             return true
         }
-        if (root.IsAny() || leaf.IsNothing()) {
+        let ffiFastCheck = Ty.IsMetCType(leaf) && root.IsCType()
+        let fastCheck = ffiFastCheck || SameTy(leaf, root) || (leaf.IsNothing() && !root.IsPlaceholder()) ||
+            ((implicitBoxed || leaf.IsClassLike()) && root.IsAny() && !leaf.IsPlaceholder())
+        if (fastCheck) {
             return true
         }
-        if (IsPrimitiveNumericWidening(leaf, root)) {
-            return true
-        }
-        if (let Some(rootUnion) <- (root as UnionTy)) {
-            for (candidate in rootUnion.tys) {
-                if (IsSubtype(leaf, candidate)) {
-                    return true
-                }
-            }
+        if (root.IsNothing()) {
             return false
         }
-        if (let Some(leafUnion) <- (leaf as UnionTy)) {
-            for (candidate in leafUnion.tys) {
-                if (!IsSubtype(candidate, root)) {
-                    return false
-                }
-            }
-            return true
+        if (let Some(cached) <- getSubtypeCache(leaf, root, implicitBoxed, allowOptionBox)) {
+            return cached
         }
-        if (let Some(rootIntersection) <- (root as IntersectionTy)) {
-            for (candidate in rootIntersection.tys) {
-                if (!IsSubtype(leaf, candidate)) {
-                    return false
-                }
-            }
-            return true
-        }
-        if (let Some(leafIntersection) <- (leaf as IntersectionTy)) {
-            for (candidate in leafIntersection.tys) {
-                if (IsSubtype(candidate, root)) {
-                    return true
-                }
-            }
-        }
-        if (leaf.IsFunc() && root.IsFunc()) {
-            return IsFuncSubtype(leaf, root)
-        }
-        if (leaf.IsTuple() && root.IsTuple()) {
-            return IsTupleSubtype(leaf, root)
-        }
-        if (leaf.IsArray() && root.IsArray()) {
-            return SameTypeArgs(leaf.typeArgs, root.typeArgs)
-        }
-        if (leaf.IsPointer() && root.IsPointer()) {
-            return SameTypeArgs(leaf.typeArgs, root.typeArgs)
-        }
-        if (leaf.IsGeneric()) {
-            if (let Some(gen) <- (leaf as GenericsTy)) {
-                for (upper in gen.upperBounds) {
-                    if (IsSubtype(upper, root)) {
-                        return true
-                    }
-                }
+        addSubtypeCache(leaf, root, implicitBoxed, allowOptionBox, false)
+        var result = false
+        if (isCommonAndSpecificRelation(leaf, root)) {
+            result = true
+        } else if (isPlaceholderSubtype(leaf, root)) {
+            result = true
+        } else if (isGenericSubtype(leaf, root, implicitBoxed, allowOptionBox)) {
+            result = true
+        } else if (isClassLikeSubtype(leaf, root, implicitBoxed, allowOptionBox)) {
+            result = true
+        } else if (isPointerSubtype(leaf, root)) {
+            result = true
+        } else if (isStructOrEnumSubtype(leaf, root, implicitBoxed, allowOptionBox)) {
+            result = true
+        } else if (IsFuncSubtype(leaf, root)) {
+            result = true
+        } else if (IsTupleSubtype(leaf, root)) {
+            result = true
+        } else if (isArraySubtype(leaf, root)) {
+            result = true
+        } else if (isVArraySubtype(leaf, root)) {
+            result = true
+        } else if (isPrimitiveSubtype(leaf, root)) {
+            result = true
+        } else if (implicitBoxed && !leaf.IsGeneric() && root.IsInterface()) {
+            if (GetAllExtendInterfaceTy(leaf).Contains(root)) {
+                result = true
+            } else if ((leaf.HasPlaceholder() || root.HasPlaceholder()) &&
+                LocalTypeArgumentSynthesis.Unify(this, constraints, leaf, root)) {
+                result = true
             }
         }
-        return HasSuperTy(leaf, root, TypeSubst())
+        setSubtypeCache(leaf, root, implicitBoxed, allowOptionBox, result)
+        if (leaf.HasPlaceholder() || root.HasPlaceholder()) {
+            removeSubtypeCache(leaf, root, implicitBoxed, allowOptionBox)
+        }
+        return result
     }
 
     public func IsFuncSubtype(leaf: Ty, root: Ty): Bool {
@@ -904,12 +909,13 @@ public class TypeManager {
         if (leaf.paramTys.size != root.paramTys.size) {
             return false
         }
+        let noCast = leaf.noCast || root.noCast
         for (idx in 0..leaf.paramTys.size) {
-            if (!IsSubtype(root.paramTys[idx], leaf.paramTys[idx])) {
+            if (!IsSubtype(root.paramTys[idx], leaf.paramTys[idx], implicitBoxed: noCast)) {
                 return false
             }
         }
-        return true
+        return leaf.isC == root.isC && leaf.hasVariableLenArg == root.hasVariableLenArg
     }
 
     public func IsTupleSubtype(leaf: Ty, root: Ty): Bool {
@@ -919,7 +925,7 @@ public class TypeManager {
                     return false
                 }
                 for (idx in 0..leftTuple.typeArgs.size) {
-                    if (!IsSubtype(leftTuple.typeArgs[idx], rightTuple.typeArgs[idx])) {
+                    if (!IsSubtype(leftTuple.typeArgs[idx], rightTuple.typeArgs[idx], implicitBoxed: false)) {
                         return false
                     }
                 }
@@ -930,7 +936,11 @@ public class TypeManager {
     }
 
     public func IsTyEqual(subTy: Ty, baseTy: Ty): Bool {
-        return SameTy(subTy, baseTy)
+        let savedConstraints = cloneTypeManagerConstraint()
+        let result = IsSubtype(subTy, baseTy, implicitBoxed: false, allowOptionBox: false) &&
+            IsSubtype(baseTy, subTy, implicitBoxed: false, allowOptionBox: false)
+        restoreTypeManagerConstraint(savedConstraints)
+        return result
     }
 
     public func IsPlaceholderEqual(leaf: Ty, root: Ty): Bool {
@@ -938,7 +948,20 @@ public class TypeManager {
     }
 
     public func IsLitBoxableType(leaf: Ty, root: Ty): Bool {
-        return IsPrimitiveNumericWidening(leaf, root)
+        if (!Ty.IsTyCorrect(leaf) || !Ty.IsTyCorrect(root)) {
+            return false
+        }
+        if (SameTy(leaf, root) || (root.IsInteger() && leaf.IsInteger()) ||
+            (root.IsFloating() && leaf.IsFloating())) {
+            return true
+        }
+        if (IsSubtype(leaf, root)) {
+            return true
+        }
+        if (root.IsCoreOptionType() && root.typeArgs.size == 1) {
+            return IsLitBoxableType(leaf, root.typeArgs[0])
+        }
+        return false
     }
 
     public func HasExtensionRelation(childTy: Ty, interfaceTy: Ty): Bool {
@@ -978,12 +1001,26 @@ public class TypeManager {
 
     public func CheckTypeCompatibility(lvalue: Ty, rvalue: Ty, implicitBoxed!: Bool = true,
         isGeneric!: Bool = false): TypeCompatibility {
-        let _ = isGeneric
-        if (SameTy(lvalue, rvalue)) {
+        if (!Ty.IsTyCorrect(lvalue) || !Ty.IsTyCorrect(rvalue)) {
+            return TypeCompatibility.INCOMPATIBLE
+        }
+        if (SameTy(lvalue, rvalue) || isCommonAndSpecificRelation(lvalue, rvalue)) {
             return TypeCompatibility.IDENTICAL
         }
         if (IsSubtype(rvalue, lvalue, implicitBoxed: implicitBoxed)) {
             return TypeCompatibility.SUBTYPE
+        }
+        if (isGeneric && checkGenericType(lvalue, rvalue, implicitBoxed)) {
+            return TypeCompatibility.IDENTICAL
+        }
+        if (lvalue.IsEnum() && rvalue.IsEnum()) {
+            if (let Some(leftEnum) <- (lvalue as EnumTy)) {
+                if (let Some(rightEnum) <- (rvalue as EnumTy)) {
+                    if (isEnumCompatibleForSubtype(leftEnum, rightEnum, implicitBoxed)) {
+                        return TypeCompatibility.IDENTICAL
+                    }
+                }
+            }
         }
         return TypeCompatibility.INCOMPATIBLE
     }
@@ -1433,6 +1470,7 @@ public class TypeManager {
         constraints.Clear()
         ClearMapCache()
         unsolvedTyVars.clear()
+        subtypeCache.clear()
     }
 
     public func ClearMapCache(): Unit {
@@ -1466,6 +1504,7 @@ public class TypeManager {
 
     public func ReleaseSemaQueryCaches(): Unit {
         overrideCache.clear()
+        subtypeCache.clear()
     }
 
     public func ReleasePostSemaCaches(): Unit {
@@ -1938,6 +1977,381 @@ public class TypeManager {
             return GetIntersectionTy(intersectionArgs.toArray())
         }
         return substituteTypeArgs(ty, typeArgs)
+    }
+
+    private func sameSubtypeCacheKey(entry: SubtypeCacheEntry, leaf: Ty, root: Ty, implicitBoxed: Bool,
+        allowOptionBox: Bool): Bool {
+        return entry.implicitBoxed == implicitBoxed && entry.allowOptionBox == allowOptionBox &&
+            SameTy(entry.leaf, leaf) && SameTy(entry.root, root)
+    }
+
+    private func getSubtypeCache(leaf: Ty, root: Ty, implicitBoxed: Bool, allowOptionBox: Bool): Option<Bool> {
+        for (entry in subtypeCache) {
+            if (sameSubtypeCacheKey(entry, leaf, root, implicitBoxed, allowOptionBox)) {
+                return entry.value
+            }
+        }
+        return None
+    }
+
+    private func addSubtypeCache(leaf: Ty, root: Ty, implicitBoxed: Bool, allowOptionBox: Bool, value: Bool): Unit {
+        subtypeCache.add(SubtypeCacheEntry(leaf, root, implicitBoxed, allowOptionBox, value))
+    }
+
+    private func setSubtypeCache(leaf: Ty, root: Ty, implicitBoxed: Bool, allowOptionBox: Bool, value: Bool): Unit {
+        for (entry in subtypeCache) {
+            if (sameSubtypeCacheKey(entry, leaf, root, implicitBoxed, allowOptionBox)) {
+                entry.value = value
+                return
+            }
+        }
+        addSubtypeCache(leaf, root, implicitBoxed, allowOptionBox, value)
+    }
+
+    private func removeSubtypeCache(leaf: Ty, root: Ty, implicitBoxed: Bool, allowOptionBox: Bool): Unit {
+        var idx: Int64 = 0
+        while (idx < subtypeCache.size) {
+            if (sameSubtypeCacheKey(subtypeCache[idx], leaf, root, implicitBoxed, allowOptionBox)) {
+                subtypeCache.remove(at: idx)
+                return
+            }
+            idx++
+        }
+    }
+
+    private func cloneTypeManagerConstraint(): Constraint {
+        let out = Constraint()
+        copyConstraintEntries(out, constraints)
+        return out
+    }
+
+    private func restoreTypeManagerConstraint(saved: Constraint): Unit {
+        constraints.Clear()
+        copyConstraintEntries(constraints, saved)
+    }
+
+    private func copyConstraintEntries(target: Constraint, source: Constraint): Unit {
+        for (entry in source.entries) {
+            let bounds = target.GetOrCreate(entry.tyVar)
+            bounds.lbs.AddAll(entry.bounds.lbs)
+            bounds.ubs.AddAll(entry.bounds.ubs)
+            bounds.sum.AddAll(entry.bounds.sum)
+            bounds.eq.AddAll(entry.bounds.eq)
+            for (blameEntry in entry.bounds.lb2Blames) {
+                bounds.lb2Blames.add(TyBlameEntry(blameEntry.ty, blames: blameEntry.blames.Clone()))
+            }
+            for (blameEntry in entry.bounds.ub2Blames) {
+                bounds.ub2Blames.add(TyBlameEntry(blameEntry.ty, blames: blameEntry.blames.Clone()))
+            }
+        }
+    }
+
+    private func isPlaceholderSubtype(leaf: Ty, root: Ty): Bool {
+        if (leaf.IsPlaceholder() || root.IsPlaceholder()) {
+            return LocalTypeArgumentSynthesis.Unify(this, constraints, leaf, root)
+        }
+        return false
+    }
+
+    private func isGenericSubtype(leaf: Ty, root: Ty, implicitBoxed: Bool, allowOptionBox: Bool): Bool {
+        if (let Some(genTy) <- (leaf as GenericsTy)) {
+            if (root.IsAny() && !implicitBoxed) {
+                for (upper in genTy.upperBounds) {
+                    if (upper.IsClass()) {
+                        return true
+                    }
+                }
+                return false
+            }
+            for (upper in genTy.upperBounds) {
+                if (SameTy(upper, root)) {
+                    return true
+                }
+            }
+            if (!genTy.isUpperBoundLegal) {
+                return false
+            }
+            if (genTy.isAliasParam) {
+                return true
+            }
+            for (upper in genTy.upperBounds) {
+                if (IsSubtype(upper, root, implicitBoxed: implicitBoxed, allowOptionBox: allowOptionBox)) {
+                    return true
+                }
+            }
+        }
+        if (let Some(intersectionTy) <- (leaf as IntersectionTy)) {
+            for (ty in intersectionTy.tys) {
+                if (IsSubtype(ty, root, implicitBoxed: implicitBoxed, allowOptionBox: allowOptionBox)) {
+                    return true
+                }
+            }
+        }
+        if (let Some(intersectionTy) <- (root as IntersectionTy)) {
+            for (ty in intersectionTy.tys) {
+                if (!IsSubtype(leaf, ty, implicitBoxed: implicitBoxed, allowOptionBox: allowOptionBox)) {
+                    return false
+                }
+            }
+            return true
+        }
+        if (let Some(unionTy) <- (leaf as UnionTy)) {
+            for (ty in unionTy.tys) {
+                if (!IsSubtype(ty, root, implicitBoxed: implicitBoxed, allowOptionBox: allowOptionBox)) {
+                    return false
+                }
+            }
+            return true
+        }
+        return false
+    }
+
+    private func isCommonAndSpecificRelation(leafTy: Ty, rootTy: Ty): Bool {
+        if (!leafTy.IsNominal() || !rootTy.IsNominal()) {
+            return false
+        }
+        if (let Some(leafDeclRaw) <- Ty.GetDeclOfTy(Some(leafTy))) {
+            if (let Some(rootDeclRaw) <- Ty.GetDeclOfTy(Some(rootTy))) {
+                let leafDecl = if (let Some(specific) <- leafDeclRaw.specificImplementation) {
+                    specific
+                } else {
+                    leafDeclRaw
+                }
+                let rootDecl = if (let Some(specific) <- rootDeclRaw.specificImplementation) {
+                    specific
+                } else {
+                    rootDeclRaw
+                }
+                if (!leafDecl.TestAttr(Attribute.SPECIFIC) || !rootDecl.TestAttr(Attribute.SPECIFIC)) {
+                    return false
+                }
+                return SameDecl(leafDecl, rootDecl)
+            }
+        }
+        return false
+    }
+
+    private func isClassLikeSubtype(leaf: Ty, root: Ty, implicitBoxed: Bool, allowOptionBox: Bool): Bool {
+        if (let Some(thisTyOfLeaf) <- (leaf as ClassThisTy)) {
+            if (let Some(leafDecl) <- thisTyOfLeaf.declPtr) {
+                let leafClassTy = GetClassTy(leafDecl, CopyTypeArgs(thisTyOfLeaf.typeArgs))
+                if (let Some(thisTyOfRoot) <- (root as ClassThisTy)) {
+                    if (let Some(rootDecl) <- thisTyOfRoot.declPtr) {
+                        return IsSubtype(leafClassTy, GetClassTy(rootDecl, CopyTypeArgs(thisTyOfRoot.typeArgs)))
+                    }
+                }
+                return IsSubtype(leafClassTy, root, implicitBoxed: implicitBoxed, allowOptionBox: allowOptionBox)
+            }
+        }
+        if (leaf.IsClassLike() && root.IsClassLike()) {
+            let superTys = GetAllSuperTys(leaf, typeMapping: TypeSubst(), withExtended: true)
+            for (superTy in superTys.values) {
+                if (isClassTyEqual(superTy, root)) {
+                    return true
+                }
+            }
+        }
+        return false
+    }
+
+    private func isClassTyEqual(leaf: Ty, root: Ty): Bool {
+        if (SameTy(leaf, root) || isCommonAndSpecificRelation(leaf, root)) {
+            return true
+        }
+        if (isClassThisType(leaf) || isClassThisType(root)) {
+            return false
+        }
+        if (!leaf.IsClassLike() || !root.IsClassLike() || leaf.IsClass()) {
+            return false
+        }
+        if (leaf.typeArgs.size != root.typeArgs.size) {
+            return false
+        }
+        if (let Some(leftClassLike) <- (leaf as ClassLikeTy)) {
+            if (let Some(rightClassLike) <- (root as ClassLikeTy)) {
+                if (let Some(leftDecl) <- leftClassLike.commonDecl) {
+                    if (let Some(rightDecl) <- rightClassLike.commonDecl) {
+                        if (!SameDecl(leftDecl, rightDecl)) {
+                            return false
+                        }
+                    } else {
+                        return false
+                    }
+                } else {
+                    return false
+                }
+            }
+        }
+        var idx: Int64 = 0
+        while (idx < leaf.typeArgs.size) {
+            let leafArg = leaf.typeArgs[idx]
+            let rootArg = root.typeArgs[idx]
+            if (rootArg.IsIntersection()) {
+                if (!IsSubtype(leafArg, rootArg)) {
+                    return false
+                }
+            } else if (!SameTy(rootArg, leafArg) && !IsPlaceholderEqual(rootArg, leafArg)) {
+                return false
+            }
+            idx++
+        }
+        return true
+    }
+
+    private func isEnumCompatibleForSubtype(left: EnumTy, right: EnumTy, implicitBoxed: Bool): Bool {
+        if (left.typeArgs.size != right.typeArgs.size || left.name != right.name ||
+            !sameEnumDeclOption(left.declPtr, right.declPtr)) {
+            return false
+        }
+        var idx: Int64 = 0
+        while (idx < left.typeArgs.size) {
+            if (CheckTypeCompatibility(left.typeArgs[idx], right.typeArgs[idx], implicitBoxed: implicitBoxed,
+                isGeneric: left.typeArgs[idx].IsGeneric()) == TypeCompatibility.INCOMPATIBLE) {
+                return false
+            }
+            idx++
+        }
+        return true
+    }
+
+    private func isStructOrEnumSubtype(leaf: Ty, root: Ty, implicitBoxed: Bool, allowOptionBox: Bool): Bool {
+        let enumRefCompatible = (isRefEnumType(leaf) && leaf.IsEnum() && root.IsEnum()) ||
+            (isRefEnumType(root) && root.IsEnum() && leaf.IsEnum())
+        if (enumRefCompatible) {
+            if (let Some(leftEnum) <- (leaf as EnumTy)) {
+                if (let Some(rightEnum) <- (root as EnumTy)) {
+                    if (isEnumCompatibleForSubtype(leftEnum, rightEnum, implicitBoxed)) {
+                        return true
+                    }
+                }
+            }
+        }
+        if (implicitBoxed) {
+            if (leaf.IsStruct() && root.kind == TypeKind.TYPE_INTERFACE &&
+                HasSuperTy(leaf, root, TypeSubst(), withExtended: implicitBoxed)) {
+                return true
+            }
+            if (root.IsCoreOptionType() && root.typeArgs.size == 1 && allowOptionBox &&
+                CountOptionNestedLevel(leaf) < CountOptionNestedLevel(root)) {
+                return IsSubtype(leaf, root.typeArgs[0], implicitBoxed: implicitBoxed)
+            }
+            if (leaf.IsEnum() && root.kind == TypeKind.TYPE_INTERFACE &&
+                HasSuperTy(leaf, root, TypeSubst(), withExtended: implicitBoxed)) {
+                return true
+            }
+        }
+        return false
+    }
+
+    private func isArraySubtype(leaf: Ty, root: Ty): Bool {
+        if (let Some(leftArray) <- (leaf as ArrayTy)) {
+            if (let Some(rightArray) <- (root as ArrayTy)) {
+                return leftArray.dims == rightArray.dims && !leftArray.typeArgs.isEmpty() &&
+                    !rightArray.typeArgs.isEmpty() && IsTyEqual(leftArray.typeArgs[0], rightArray.typeArgs[0])
+            }
+        }
+        return false
+    }
+
+    private func isVArraySubtype(leaf: Ty, root: Ty): Bool {
+        if (let Some(leftArray) <- (leaf as VArrayTy)) {
+            if (let Some(rightArray) <- (root as VArrayTy)) {
+                return leftArray.size == rightArray.size && !leftArray.typeArgs.isEmpty() &&
+                    !rightArray.typeArgs.isEmpty() && IsTyEqual(leftArray.typeArgs[0], rightArray.typeArgs[0])
+            }
+        }
+        return false
+    }
+
+    private func isPointerSubtype(leaf: Ty, root: Ty): Bool {
+        if (let Some(leftPointer) <- (leaf as PointerTy)) {
+            if (let Some(rightPointer) <- (root as PointerTy)) {
+                return !leftPointer.typeArgs.isEmpty() && !rightPointer.typeArgs.isEmpty() &&
+                    IsTyEqual(leftPointer.typeArgs[0], rightPointer.typeArgs[0])
+            }
+        }
+        return false
+    }
+
+    private func isPrimitiveSubtype(leaf: Ty, root: Ty): Bool {
+        if (leaf.kind == TypeKind.TYPE_IDEAL_INT && root.IsInteger()) {
+            return true
+        }
+        if (leaf.kind == TypeKind.TYPE_IDEAL_FLOAT && root.IsFloating()) {
+            return true
+        }
+        if (leaf.kind == TypeKind.TYPE_IDEAL_INT) {
+            return IsSubtype(GetPrimitiveTy(TypeKind.TYPE_INT64), root) ||
+                IsSubtype(GetPrimitiveTy(TypeKind.TYPE_UINT64), root) ||
+                IsSubtype(GetPrimitiveTy(TypeKind.TYPE_INT32), root) ||
+                IsSubtype(GetPrimitiveTy(TypeKind.TYPE_UINT32), root) ||
+                IsSubtype(GetPrimitiveTy(TypeKind.TYPE_INT16), root) ||
+                IsSubtype(GetPrimitiveTy(TypeKind.TYPE_UINT16), root) ||
+                IsSubtype(GetPrimitiveTy(TypeKind.TYPE_INT8), root) ||
+                IsSubtype(GetPrimitiveTy(TypeKind.TYPE_UINT8), root)
+        }
+        if (leaf.kind == TypeKind.TYPE_IDEAL_FLOAT) {
+            return IsSubtype(GetPrimitiveTy(TypeKind.TYPE_FLOAT64), root) ||
+                IsSubtype(GetPrimitiveTy(TypeKind.TYPE_FLOAT32), root) ||
+                IsSubtype(GetPrimitiveTy(TypeKind.TYPE_FLOAT16), root)
+        }
+        return leaf.IsPrimitive() && root.IsPrimitive() && leaf.kind == root.kind
+    }
+
+    private func checkGenericType(lvalue: Ty, rvalue: Ty, implicitBoxed: Bool): Bool {
+        if (Ty.IsTyCorrect(lvalue) && Ty.IsTyCorrect(rvalue) &&
+            lvalue.kind == TypeKind.TYPE_GENERICS && rvalue.kind == TypeKind.TYPE_GENERICS) {
+            if (let Some(leftGen) <- (lvalue as GenericsTy)) {
+                if (let Some(rightGen) <- (rvalue as GenericsTy)) {
+                    if (leftGen.isPlaceholder || rightGen.isPlaceholder) {
+                        return false
+                    }
+                    if (leftGen.upperBounds.isEmpty() && rightGen.upperBounds.isEmpty()) {
+                        return true
+                    }
+                    if (leftGen.upperBounds.size != rightGen.upperBounds.size) {
+                        return false
+                    }
+                    var idx: Int64 = 0
+                    while (idx < leftGen.upperBounds.size) {
+                        if (CheckTypeCompatibility(leftGen.upperBounds[idx], rightGen.upperBounds[idx],
+                            implicitBoxed: implicitBoxed) != TypeCompatibility.IDENTICAL) {
+                            return false
+                        }
+                        idx++
+                    }
+                    return true
+                }
+            }
+        }
+        return IsSubtype(rvalue, lvalue, implicitBoxed: implicitBoxed, allowOptionBox: false)
+    }
+
+    private func isClassThisType(ty: Ty): Bool {
+        if (let Some(_) <- (ty as ClassThisTy)) {
+            return true
+        }
+        return false
+    }
+
+    private func isRefEnumType(ty: Ty): Bool {
+        if (let Some(_) <- (ty as RefEnumTy)) {
+            return true
+        }
+        return false
+    }
+
+    private func sameEnumDeclOption(left: Option<EnumDecl>, right: Option<EnumDecl>): Bool {
+        if (let Some(leftDecl) <- left) {
+            if (let Some(rightDecl) <- right) {
+                return SameDecl(leftDecl, rightDecl)
+            }
+            return false
+        }
+        if (let Some(_) <- right) {
+            return false
+        }
+        return true
     }
 
     private func replaceThisArgs(args: ArrayList<Ty>): Array<Ty> {
