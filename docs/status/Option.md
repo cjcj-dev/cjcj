@@ -305,3 +305,23 @@ compatibility surface for current sibling package imports; several print-style
 diagnostics still use local wrapper text; host target defaults are still static
 for this port; and driver-layer obfuscation option handling is not yet fully
 folded into the base Option action surface.
+
+This pass removes the static host-triple assumption from Option. `TripleInfo`
+now derives its default arch, OS, vendor, and environment through Cangjie
+`@When` conditions, matching the C++ `GlobalOptions::host` preprocessor-derived
+defaults for Linux, Windows, macOS, x86_64, and aarch64 hosts while preserving
+the unknown fallback. Android target parsing also no longer clears a previous
+API level before scanning an `android*` environment suffix, preserving the C++
+state behavior for repeated `--target` actions.
+
+Serialization parity also improved: vector-valued `GlobalOptions.ToSerialized`
+fields now use the C++ `VectorStrToSerializedString` behavior and append the
+separator after every value. This affects trim-path, interpreter search path,
+interpreter load library, and interpreter argument serialization, which feed
+cache- and frontend-visible option state.
+
+Remaining gaps: `Options.cj`/`OptionEnums.cj` remain hand-maintained mirrors of
+`Options.inc`; `MaybeString`, `MaybeUInt64`, and `TryParseUInt64` remain as
+compatibility surface for current sibling package imports; several print-style
+diagnostics still use local wrapper text; and driver-layer obfuscation option
+handling is not yet fully folded into the base Option action surface.

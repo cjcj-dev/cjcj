@@ -805,7 +805,6 @@ public func ParseTargetTriple(opts: GlobalOptions, triple: String): Bool {
     }
     else if (StartsWith(envStr, "android")) {
         opts.target.env = EnvironmentType.ANDROID
-        opts.target.apiLevel = ""
         var idx: Int64 = 0
         while (idx < envStr.size) {
             if (envStr[idx] >= b'0' && envStr[idx] <= b'9') {

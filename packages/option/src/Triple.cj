@@ -1,10 +1,43 @@
 package cangjie_compiler::option
 
+@When[arch == "x86_64"]
+private func DefaultHostArch(): ArchType { return ArchType.X86_64 }
+
+@When[arch == "aarch64"]
+private func DefaultHostArch(): ArchType { return ArchType.AARCH64 }
+
+@When[arch != "x86_64" && arch != "aarch64"]
+private func DefaultHostArch(): ArchType { return ArchType.UNKNOWN }
+
+@When[os == "Linux"]
+private func DefaultHostOS(): OSType { return OSType.LINUX }
+
+@When[os == "Windows"]
+private func DefaultHostOS(): OSType { return OSType.WINDOWS }
+
+@When[os == "macOS"]
+private func DefaultHostOS(): OSType { return OSType.DARWIN }
+
+@When[os != "Linux" && os != "Windows" && os != "macOS"]
+private func DefaultHostOS(): OSType { return OSType.UNKNOWN }
+
+@When[os == "macOS"]
+private func DefaultHostVendor(): Vendor { return Vendor.APPLE }
+
+@When[os != "macOS"]
+private func DefaultHostVendor(): Vendor { return Vendor.UNKNOWN }
+
+@When[os == "macOS"]
+private func DefaultHostEnvironment(): EnvironmentType { return EnvironmentType.NOT_AVAILABLE }
+
+@When[os != "macOS"]
+private func DefaultHostEnvironment(): EnvironmentType { return EnvironmentType.GNU }
+
 public class TripleInfo {
-    public var arch: ArchType = ArchType.X86_64
-    public var vendor: Vendor = Vendor.UNKNOWN
-    public var os: OSType = OSType.LINUX
-    public var env: EnvironmentType = EnvironmentType.GNU
+    public var arch: ArchType = DefaultHostArch()
+    public var vendor: Vendor = DefaultHostVendor()
+    public var os: OSType = DefaultHostOS()
+    public var env: EnvironmentType = DefaultHostEnvironment()
     public var apiLevel: String = ""
 
     public init() {}

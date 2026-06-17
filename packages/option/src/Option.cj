@@ -202,13 +202,10 @@ private func removeOptimizationFlag(values: ArrayList<OptimizationFlag>, flag: O
     }
 }
 
-private func joinStrings(values: ArrayList<String>, delimiter: String): String {
+private func vectorStrToSerializedString(values: ArrayList<String>, delimiter: String): String {
     var result = ""
-    var idx: Int64 = 0
-    while (idx < values.size) {
-        if (idx > 0) { result += delimiter }
-        result += values[idx]
-        idx++
+    for (value in values) {
+        result += value + delimiter
     }
     return result
 }
@@ -1387,7 +1384,7 @@ public open class GlobalOptions <: Option {
             BoolToSerializedString(displayLineInfo),
             moduleName,
             LTOModeToSerializedString(),
-            joinStrings(removedPathPrefix, ":"),
+            vectorStrToSerializedString(removedPathPrefix, ":"),
             BackendTypeToSerializedString(),
             BoolToSerializedString(enableMacroInLSP),
             BoolToSerializedString(enableCompileTest),
@@ -1410,9 +1407,9 @@ public open class GlobalOptions <: Option {
             BoolToSerializedString(experimentalMode),
             OverflowStrategyToSerializedString(),
             BoolToSerializedString(interpreter),
-            joinStrings(interpreterSearchPaths, ":"),
-            joinStrings(interpLoadLib, ":"),
-            joinStrings(interpreterArgs, "\\"),
+            vectorStrToSerializedString(interpreterSearchPaths, ":"),
+            vectorStrToSerializedString(interpLoadLib, ":"),
+            vectorStrToSerializedString(interpreterArgs, "\\"),
             BoolToSerializedString(interpreterPrintResult),
             BoolToSerializedString(interpMainNoLinkage),
             BoolToSerializedString(disableCodeGen),
