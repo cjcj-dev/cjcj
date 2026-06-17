@@ -13,6 +13,8 @@ Reference inspected:
 - `/root/cj_build/cangjie_compiler/src/CodeGen/IRAttribute.h`
 - `/root/cj_build/cangjie_compiler/src/CodeGen/CGFunction.cpp`
 - `/root/cj_build/cangjie_compiler/src/CodeGen/EmitFunctionIR.cpp`
+- `/root/cj_build/cangjie_compiler/src/CodeGen/Utils/CGUtils.cpp`
+- `/root/cj_build/cangjie_compiler/src/CodeGen/Base/CGTypes`
 - `/root/cj_build/cangjie_compiler/src/CodeGen/CJNative/CJNativeIRBuilder.cpp`
 - LLVM C API headers installed under `/usr/include/llvm-c-20/llvm-c`
 
@@ -59,6 +61,11 @@ Implemented in this pass:
   macOS uses the runtime declaration, while other targets materialize a private `__cj_personality_v0$` shim returning
   `i32 0`. `CGModule` now exposes set/get/has personality helpers and attaches the exception personality to real CHIR
   function bodies while skipping foreign/CFFI-wrapper functions.
+- Added target-data bindings for the C++ `DataLayout` queries used throughout CodeGen: type bit/store/alloc size,
+  ABI/call-frame/preferred alignment, preferred global alignment, pointer-sized integer types, pointer sizes, and
+  struct element offset lookup. `LLVMTargetMachineHandle` now exposes target/cpu/feature/triple queries, target-data
+  creation, and target-machine tuning switches; `CGModule` exposes borrowed module data-layout helpers matching the
+  C++ `GetTypeSize`/alignment/offset query shape.
 
 Known remaining gaps for this scope:
 
@@ -73,9 +80,9 @@ Known remaining gaps for this scope:
 - Landing-pad construction now has the LLVM wrapper surface and ordinary `GetOrInsertCGFunction` bodies get the Cangjie
   personality function, but higher-level CHIR landing-pad block emission and special package-entry/helper personality
   call sites are still incomplete in the partial self-host port.
-- The target-machine and pass-builder wrappers are ready for callers, but the package-level emission path does not yet
-  drive them end to end.
+- The target-machine, target-data, and pass-builder wrappers are ready for callers, but the package-level emission path
+  does not yet drive target creation, pass execution, and object/assembly output end to end.
 
 Remaining `TODO(selfhost:CodeGen)` markers in this llvm-ffi slice: 0.
 
-Estimated behavior coverage for this llvm-ffi/module/context/IRBuilder slice: 61%.
+Estimated behavior coverage for this llvm-ffi/module/context/IRBuilder slice: 63%.

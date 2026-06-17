@@ -132,6 +132,17 @@ foreign {
     func LLVMIntPtrType(targetData: LLVMTargetDataRef): LLVMTypeRef
     func LLVMIntPtrTypeForAS(targetData: LLVMTargetDataRef, addressSpace: UInt32): LLVMTypeRef
     func LLVMIntPtrTypeInContext(context: LLVMContextRef, targetData: LLVMTargetDataRef): LLVMTypeRef
+    func LLVMIntPtrTypeForASInContext(context: LLVMContextRef, targetData: LLVMTargetDataRef,
+        addressSpace: UInt32): LLVMTypeRef
+    func LLVMSizeOfTypeInBits(targetData: LLVMTargetDataRef, valueType: LLVMTypeRef): UInt64
+    func LLVMStoreSizeOfType(targetData: LLVMTargetDataRef, valueType: LLVMTypeRef): UInt64
+    func LLVMABISizeOfType(targetData: LLVMTargetDataRef, valueType: LLVMTypeRef): UInt64
+    func LLVMABIAlignmentOfType(targetData: LLVMTargetDataRef, valueType: LLVMTypeRef): UInt32
+    func LLVMCallFrameAlignmentOfType(targetData: LLVMTargetDataRef, valueType: LLVMTypeRef): UInt32
+    func LLVMPreferredAlignmentOfType(targetData: LLVMTargetDataRef, valueType: LLVMTypeRef): UInt32
+    func LLVMPreferredAlignmentOfGlobal(targetData: LLVMTargetDataRef, globalVar: LLVMValueRef): UInt32
+    func LLVMElementAtOffset(targetData: LLVMTargetDataRef, structTy: LLVMTypeRef, offset: UInt64): UInt32
+    func LLVMOffsetOfElement(targetData: LLVMTargetDataRef, structTy: LLVMTypeRef, element: UInt32): UInt64
 }
 
 public func LLVMNullTargetMachine(): LLVMTargetMachineRef { return CPointer<Unit>() }
@@ -293,12 +304,218 @@ public class LLVMTargetMachineHandle <: Resource {
         this.raw = raw
     }
 
+    public func GetTarget(): LLVMTargetRef {
+        if (raw.isNull()) {
+            return LLVMNullTarget()
+        }
+        return unsafe { LLVMGetTargetMachineTarget(raw) }
+    }
+
+    public func GetTriple(): String {
+        if (raw.isNull()) {
+            return ""
+        }
+        return LLVMConsumeMessage(unsafe { LLVMGetTargetMachineTriple(raw) })
+    }
+
+    public func GetCPU(): String {
+        if (raw.isNull()) {
+            return ""
+        }
+        return LLVMConsumeMessage(unsafe { LLVMGetTargetMachineCPU(raw) })
+    }
+
+    public func GetFeatureString(): String {
+        if (raw.isNull()) {
+            return ""
+        }
+        return LLVMConsumeMessage(unsafe { LLVMGetTargetMachineFeatureString(raw) })
+    }
+
+    public func CreateDataLayout(): Option<LLVMTargetDataHandle> {
+        if (raw.isNull()) {
+            return None
+        }
+        let targetData = unsafe { LLVMCreateTargetDataLayout(raw) }
+        if (targetData.isNull()) {
+            return None
+        }
+        return LLVMTargetDataHandle(targetData)
+    }
+
+    public func SetAsmVerbosity(verboseAsm: Bool): Unit {
+        if (!raw.isNull()) {
+            unsafe { LLVMSetTargetMachineAsmVerbosity(raw, if (verboseAsm) { 1 } else { 0 }) }
+        }
+    }
+
+    public func SetFastISel(enable: Bool): Unit {
+        if (!raw.isNull()) {
+            unsafe { LLVMSetTargetMachineFastISel(raw, if (enable) { 1 } else { 0 }) }
+        }
+    }
+
+    public func SetGlobalISel(enable: Bool): Unit {
+        if (!raw.isNull()) {
+            unsafe { LLVMSetTargetMachineGlobalISel(raw, if (enable) { 1 } else { 0 }) }
+        }
+    }
+
+    public func SetGlobalISelAbort(mode: LLVMGlobalISelAbortMode): Unit {
+        if (!raw.isNull()) {
+            unsafe { LLVMSetTargetMachineGlobalISelAbort(raw, LLVMGlobalISelAbortModeValue(mode)) }
+        }
+    }
+
+    public func SetMachineOutliner(enable: Bool): Unit {
+        if (!raw.isNull()) {
+            unsafe { LLVMSetTargetMachineMachineOutliner(raw, if (enable) { 1 } else { 0 }) }
+        }
+    }
+
     public func close(): Unit {
         if (closed) {
             return
         }
         if (!raw.isNull()) {
             unsafe { LLVMDisposeTargetMachine(raw) }
+        }
+        closed = true
+    }
+
+    public func isClosed(): Bool {
+        return closed
+    }
+}
+
+public class LLVMTargetDataHandle <: Resource {
+    public let raw: LLVMTargetDataRef
+    private let owned: Bool
+    private var closed: Bool = false
+
+    public init(raw: LLVMTargetDataRef, owned!: Bool = true) {
+        this.raw = raw
+        this.owned = owned
+    }
+
+    public static func Create(dataLayout: String): Option<LLVMTargetDataHandle> {
+        var result: Option<LLVMTargetDataHandle> = None
+        try (layoutCString = unsafe { LibC.mallocCString(dataLayout) }.asResource()) {
+            let targetData = unsafe { LLVMCreateTargetData(layoutCString.value) }
+            if (!targetData.isNull()) {
+                result = LLVMTargetDataHandle(targetData)
+            }
+        }
+        return result
+    }
+
+    public static func FromModule(module: LLVMModuleHandle): LLVMTargetDataHandle {
+        return LLVMTargetDataHandle(unsafe { LLVMGetModuleDataLayout(module.raw) }, owned: false)
+    }
+
+    public func CopyStringRep(): String {
+        if (raw.isNull()) {
+            return ""
+        }
+        return LLVMConsumeMessage(unsafe { LLVMCopyStringRepOfTargetData(raw) })
+    }
+
+    public func GetByteOrder(): Int32 {
+        if (raw.isNull()) {
+            return 0
+        }
+        return unsafe { LLVMByteOrder(raw) }
+    }
+
+    public func GetPointerSize(addressSpace!: UInt32 = 0u32): UInt32 {
+        if (raw.isNull()) {
+            return 0u32
+        }
+        if (addressSpace == 0u32) {
+            return unsafe { LLVMPointerSize(raw) }
+        }
+        return unsafe { LLVMPointerSizeForAS(raw, addressSpace) }
+    }
+
+    public func GetIntPtrType(context: LLVMContextHandle, addressSpace!: UInt32 = 0u32): LLVMTypeRef {
+        if (raw.isNull()) {
+            return LLVMNullType()
+        }
+        if (addressSpace == 0u32) {
+            return unsafe { LLVMIntPtrTypeInContext(context.raw, raw) }
+        }
+        return unsafe { LLVMIntPtrTypeForASInContext(context.raw, raw, addressSpace) }
+    }
+
+    public func GetTypeSizeInBits(valueType: LLVMTypeRef): UInt64 {
+        if (raw.isNull() || valueType.isNull()) {
+            return 0u64
+        }
+        return unsafe { LLVMSizeOfTypeInBits(raw, valueType) }
+    }
+
+    public func GetTypeStoreSize(valueType: LLVMTypeRef): UInt64 {
+        if (raw.isNull() || valueType.isNull()) {
+            return 0u64
+        }
+        return unsafe { LLVMStoreSizeOfType(raw, valueType) }
+    }
+
+    public func GetTypeAllocSize(valueType: LLVMTypeRef): UInt64 {
+        if (raw.isNull() || valueType.isNull()) {
+            return 0u64
+        }
+        return unsafe { LLVMABISizeOfType(raw, valueType) }
+    }
+
+    public func GetABITypeAlignment(valueType: LLVMTypeRef): UInt32 {
+        if (raw.isNull() || valueType.isNull()) {
+            return 0u32
+        }
+        return unsafe { LLVMABIAlignmentOfType(raw, valueType) }
+    }
+
+    public func GetCallFrameTypeAlignment(valueType: LLVMTypeRef): UInt32 {
+        if (raw.isNull() || valueType.isNull()) {
+            return 0u32
+        }
+        return unsafe { LLVMCallFrameAlignmentOfType(raw, valueType) }
+    }
+
+    public func GetPrefTypeAlignment(valueType: LLVMTypeRef): UInt32 {
+        if (raw.isNull() || valueType.isNull()) {
+            return 0u32
+        }
+        return unsafe { LLVMPreferredAlignmentOfType(raw, valueType) }
+    }
+
+    public func GetPreferredAlignmentOfGlobal(globalVar: LLVMValueRef): UInt32 {
+        if (raw.isNull() || globalVar.isNull()) {
+            return 0u32
+        }
+        return unsafe { LLVMPreferredAlignmentOfGlobal(raw, globalVar) }
+    }
+
+    public func GetElementContainingOffset(structTy: LLVMTypeRef, offset: UInt64): UInt32 {
+        if (raw.isNull() || structTy.isNull()) {
+            return 0u32
+        }
+        return unsafe { LLVMElementAtOffset(raw, structTy, offset) }
+    }
+
+    public func GetOffsetOfElement(structTy: LLVMTypeRef, element: UInt32): UInt64 {
+        if (raw.isNull() || structTy.isNull()) {
+            return 0u64
+        }
+        return unsafe { LLVMOffsetOfElement(raw, structTy, element) }
+    }
+
+    public func close(): Unit {
+        if (closed) {
+            return
+        }
+        if (owned && !raw.isNull()) {
+            unsafe { LLVMDisposeTargetData(raw) }
         }
         closed = true
     }

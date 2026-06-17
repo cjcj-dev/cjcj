@@ -432,6 +432,61 @@ public class CGModule {
         return unsafe { LLVMConstNull(unitType) }
     }
 
+    public func GetModuleTargetData(): LLVMTargetDataHandle {
+        if (let Some(moduleHandle) <- module) {
+            return LLVMTargetDataHandle.FromModule(moduleHandle)
+        }
+        return LLVMTargetDataHandle(LLVMNullTargetData(), owned: false)
+    }
+
+    public func CopyDataLayoutString(): String {
+        return GetModuleTargetData().CopyStringRep()
+    }
+
+    public func GetPointerSize(addressSpace!: UInt32 = 0u32): UInt32 {
+        return GetModuleTargetData().GetPointerSize(addressSpace: addressSpace)
+    }
+
+    public func GetIntPtrType(addressSpace!: UInt32 = 0u32): LLVMTypeRef {
+        return GetModuleTargetData().GetIntPtrType(GetLLVMContext(), addressSpace: addressSpace)
+    }
+
+    public func GetTypeSize(codeGenType: LLVMTypeRef): UInt64 {
+        return GetModuleTargetData().GetTypeAllocSize(codeGenType)
+    }
+
+    public func GetTypeSizeInBits(codeGenType: LLVMTypeRef): UInt64 {
+        return GetModuleTargetData().GetTypeSizeInBits(codeGenType)
+    }
+
+    public func GetTypeStoreSize(codeGenType: LLVMTypeRef): UInt64 {
+        return GetModuleTargetData().GetTypeStoreSize(codeGenType)
+    }
+
+    public func GetABITypeAlignment(codeGenType: LLVMTypeRef): UInt32 {
+        return GetModuleTargetData().GetABITypeAlignment(codeGenType)
+    }
+
+    public func GetCallFrameTypeAlignment(codeGenType: LLVMTypeRef): UInt32 {
+        return GetModuleTargetData().GetCallFrameTypeAlignment(codeGenType)
+    }
+
+    public func GetPrefTypeAlignment(codeGenType: LLVMTypeRef): UInt32 {
+        return GetModuleTargetData().GetPrefTypeAlignment(codeGenType)
+    }
+
+    public func GetPreferredAlignmentOfGlobal(globalVar: LLVMValueRef): UInt32 {
+        return GetModuleTargetData().GetPreferredAlignmentOfGlobal(globalVar)
+    }
+
+    public func GetElementContainingOffset(structTy: LLVMTypeRef, offset: UInt64): UInt32 {
+        return GetModuleTargetData().GetElementContainingOffset(structTy, offset)
+    }
+
+    public func GetOffsetOfElement(structTy: LLVMTypeRef, element: UInt32): UInt64 {
+        return GetModuleTargetData().GetOffsetOfElement(structTy, element)
+    }
+
     public func ClearLinkNameUsedInMeta(): Unit { linkNameUsedInMeta.clear() }
     public func IsLinkNameUsedInMeta(linkageName: String): Bool { return linkNameUsedInMeta.contains(linkageName) }
     public func GetLinkNamesUsedInMeta(): HashSet<String> { return linkNameUsedInMeta }
