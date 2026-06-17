@@ -68,7 +68,10 @@ What changed:
 - Branch-join continuation:
   - `if` branch synthesis now uses the real sibling `Join` helper instead of the older compatibility/common-super-only approximation, preserving union results for disjoint branch types like the C++ `JoinAndMeet` path.
   - Try expression result joining and catch exception type-pattern joining now use the same shared `Join` helper, so try/catch/handle synthesis can carry union branch types instead of collapsing to invalid when there is no single common supertype.
-- Verification: `cjpm build` passes after the branch-join continuation. `grep -rn "TODO(selfhost:Sema)" packages/sema/src` reports only out-of-scope Sema placeholders; the scoped `TypeCheckExpr.cj` and `TypeCheckExpr/*` files have zero matching markers.
+- For-in iterable continuation:
+  - `for-in` element inference now recursively promotes generic upper bounds to `Iterable<T>` before reading the element type, covering bounded generic iterables whose bound implements `Iterable<T>`.
+  - Removed the previous unconstrained `Any`/generic fallback for `for-in` operands. Values must now be a recognized iterable shape or promote to a declared `Iterable<T>` view, matching the C++ `GetIterableTy` failure behavior more closely.
+- Verification: `cjpm build` passes after the for-in iterable continuation. `grep -rn "TODO(selfhost:Sema)" packages/sema/src` reports only out-of-scope Sema placeholders; the scoped `TypeCheckExpr.cj` and `TypeCheckExpr/*` files have zero matching markers.
 
 Remaining fidelity gaps:
 - Full overload/desugar diagnostic parity still depends on broader call/lookup/desugar infrastructure: binary, flow, subscript, and compound assignment now use the real fallback shapes, but not the C++ diagnostic suppression, negative-cache constraint rollback, return-type-inference diagnostics, or exact recovery diagnostics.
@@ -83,6 +86,6 @@ Remaining fidelity gaps:
 - Try-handle command pattern promotion now follows direct/generic-upper/supertype `Command<T>` shapes, but full parity still needs the import-manager target lookup and exact diagnostics used by C++ `ChkCommandTypePattern`.
 - Catch pattern validation cannot yet prove subtype-of-core-`Exception`/`Error` without an import-manager/core-decl path in this helper; it conservatively validates catchable classlike/generic shapes.
 - `@IfAvailable` still lacks the C++ import-manager checks for `ohos.device_info` and `ohos.base` package availability.
-- `for-in` refutable-pattern rejection now has the C++ behavior but not the exact `sema_forin_pattern_must_be_irrefutable` diagnostic emission in this shallow helper.
+- `for-in` refutable-pattern rejection and iterable failure now have the core C++ behavior, but exact diagnostics and unconstrained placeholder `Iterable<T>` construction still need the import-manager/core-decl path used by C++.
 
-Completeness estimate: 71% of C++ behavior for this scoped expression type-checking area, weighted by behavior rather than line count.
+Completeness estimate: 72% of C++ behavior for this scoped expression type-checking area, weighted by behavior rather than line count.
