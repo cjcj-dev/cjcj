@@ -8,6 +8,7 @@ public class BCHIRInterpreter {
     private let arena: InterpreterArena = InterpreterArena()
     private let env: InterpreterEnv
     private var lastResult: BCHIRResult = BCHIRResult(BCHIRResultKind.UNSUPPORTED, message: "not run")
+    private var currentException: Option<InterpreterValue> = None
 
     public init(bchir: BCHIR) {
         this.bchir = bchir
@@ -16,6 +17,7 @@ public class BCHIRInterpreter {
 
     public func Run(baseIndex!: Int64 = 0, expectsReturn!: Bool = true): BCHIRResult {
         interpStack.ArgsClear()
+        currentException = None
         var pc = baseIndex
         let code = bchir.GetLinkedByteCode()
         while (pc >= 0 && pc < code.Size()) {
@@ -96,6 +98,11 @@ public class BCHIRInterpreter {
                     return Finish(BCHIRResult(BCHIRResultKind.TRAP, message: "invalid raw array literal init"))
                 }
                 pc += 2
+            } else if (opCode == OpCode.RAW_ARRAY_INIT_BY_VALUE) {
+                if (!RawArrayInitByValue()) {
+                    return Finish(BCHIRResult(BCHIRResultKind.TRAP, message: "invalid raw array init by value"))
+                }
+                pc += 1
             } else if (opCode == OpCode.ALLOCATE_STRUCT || opCode == OpCode.ALLOCATE_STRUCT_EXC) {
                 let fields = ArrayList<InterpreterValue>()
                 var fieldIdx: Int64 = 0
@@ -289,6 +296,45 @@ public class BCHIRInterpreter {
                     pc = target
                 } else {
                     return Finish(BCHIRResult(BCHIRResultKind.TRAP, message: "invalid SWITCH selector or table"))
+                }
+            } else if (opCode == OpCode.RAISE) {
+                currentException = interpStack.ArgsPopIVal()
+                return Finish(BCHIRResult(BCHIRResultKind.TRAP, message: "uncaught exception"))
+            } else if (opCode == OpCode.RAISE_EXC) {
+                currentException = interpStack.ArgsPopIVal()
+                pc = code.Get(pc + 1)
+            } else if (opCode == OpCode.GET_EXCEPTION) {
+                if (let Some(exceptionValue) <- currentException) {
+                    interpStack.ArgsPush(exceptionValue)
+                    currentException = None
+                    pc += 1
+                } else {
+                    return Finish(BCHIRResult(BCHIRResultKind.TRAP, message: "GET_EXCEPTION without exception"))
+                }
+            } else if (opCode == OpCode.INTRINSIC0 || opCode == OpCode.INTRINSIC0_EXC) {
+                let intrinsicKind = code.Get(pc + 1)
+                if (BCHIRIntrinsic.IsReferenceEquality(intrinsicKind)) {
+                    let right = interpStack.ArgsPopIVal()
+                    let left = interpStack.ArgsPopIVal()
+                    interpStack.ArgsPush(InterpreterValue.MakeBool(BCHIRIntrinsic.ReferenceEquals(left, right)))
+                    pc += 1 + GetOpCodeArgSize(opCode)
+                } else {
+                    return Finish(BCHIRResult(BCHIRResultKind.UNSUPPORTED,
+                        message: "unsupported INTRINSIC0 kind ${intrinsicKind}"))
+                }
+            } else if (opCode == OpCode.INTRINSIC1 || opCode == OpCode.INTRINSIC1_EXC) {
+                let intrinsicKind = code.Get(pc + 1)
+                if (BCHIRIntrinsic.IsArrayGetUnchecked(intrinsicKind)) {
+                    if (let Some(value) <- InterpretArrayGetUnchecked()) {
+                        interpStack.ArgsPush(value)
+                        pc += 1 + GetOpCodeArgSize(opCode)
+                    } else {
+                        return Finish(BCHIRResult(BCHIRResultKind.TRAP,
+                            message: "invalid ARRAY_GET_UNCHECKED intrinsic operands"))
+                    }
+                } else {
+                    return Finish(BCHIRResult(BCHIRResultKind.UNSUPPORTED,
+                        message: "unsupported INTRINSIC1 kind ${intrinsicKind}"))
                 }
             } else if (IsUnaryOp(opCode)) {
                 if (!EvaluateUnary(opCode)) {
@@ -535,6 +581,38 @@ public class BCHIRInterpreter {
         return true
     }
 
+    private func RawArrayInitByValue(): Bool {
+        let initValue = interpStack.ArgsPopIVal()
+        let sizeValue = interpStack.ArgsPopIVal()
+        let pointer = interpStack.ArgsPopIVal()
+        if (!sizeValue.IsIntLike()) {
+            return false
+        }
+        let size = sizeValue.GetInt()
+        if (size < 0) {
+            return false
+        }
+        if (let Some(arrayValue) <- DereferencePointer(pointer)) {
+            if (arrayValue.kind != InterpreterValueKind.IARRAY || arrayValue.GetElementsRef().size < size + 1) {
+                return false
+            }
+        } else {
+            return false
+        }
+        var idx: Int64 = 0
+        while (idx < size) {
+            let path = pointer.GetPointerPath()
+            path.add(idx)
+            if (!StoreThroughPointer(InterpreterValue.MakePointerWithPath(pointer.GetPointerRootKind(),
+                pointer.GetPointerIndex(), path), initValue)) {
+                return false
+            }
+            idx++
+        }
+        interpStack.ArgsPush(InterpreterValue.MakeUnit())
+        return true
+    }
+
     private func IsSubclass(lhs: Int64, rhs: Int64): Bool {
         if (lhs == rhs) {
             return true
@@ -582,6 +660,26 @@ public class BCHIRInterpreter {
             pathIdx++
         }
         return current.Clone()
+    }
+
+    private func InterpretArrayGetUnchecked(): Option<InterpreterValue> {
+        let indexValue = interpStack.ArgsPopIVal()
+        let arrayPointer = interpStack.ArgsPopIVal()
+        if (!indexValue.IsIntLike()) {
+            return None
+        }
+        if (let Some(arrayValue) <- DereferencePointer(arrayPointer)) {
+            if (arrayValue.kind != InterpreterValueKind.IARRAY) {
+                return None
+            }
+            let index = indexValue.GetInt() + 1
+            let elements = arrayValue.GetElementsRef()
+            if (index < 0 || index >= elements.size) {
+                return None
+            }
+            return elements[index].Clone()
+        }
+        return None
     }
 
     private func InterpretSwitch(switchPc: Int64): Option<Int64> {

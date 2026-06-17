@@ -48,6 +48,17 @@ public func CHIR2BCHIRTranslateTerminatorExpression(compiler: CHIR2BCHIR, contex
             context.definition.PushOp(OpCode.UNIT)
         }
         context.definition.PushOp(OpCode.RETURN)
+    } else if (expr.GetExprKind() == ExprKind.RAISE_EXCEPTION) {
+        if (let Some(raiseTerminator) <- expr.AsTerminator()) {
+            let raiseSuccessors = raiseTerminator.GetSuccessors()
+            context.definition.PushOp(if (raiseSuccessors.isEmpty()) { OpCode.RAISE } else { OpCode.RAISE_EXC })
+            if (!raiseSuccessors.isEmpty()) {
+                let raisePlaceholder = context.definition.NextIndex()
+                context.definition.PushCell(compiler.BlockIndex(context, raiseSuccessors[0], raisePlaceholder))
+            }
+        } else {
+            context.definition.PushOp(OpCode.NOT_SUPPORTED)
+        }
     } else {
         context.definition.PushOp(OpCode.NOT_SUPPORTED)
     }
@@ -118,6 +129,10 @@ public func CHIR2BCHIRTranslateOtherExpression(compiler: CHIR2BCHIR, context: CH
     } else if (expr.GetExprKind() == ExprKind.RAW_ARRAY_LITERAL_INIT) {
         context.definition.PushOp(OpCode.RAW_ARRAY_LITERAL_INIT)
         context.definition.PushCell(if (expr.GetNumOfOperands() > 0) { expr.GetNumOfOperands() - 1 } else { 0 })
+    } else if (expr.GetExprKind() == ExprKind.RAW_ARRAY_INIT_BY_VALUE) {
+        context.definition.PushOp(OpCode.RAW_ARRAY_INIT_BY_VALUE)
+    } else if (expr.GetExprKind() == ExprKind.GET_EXCEPTION) {
+        context.definition.PushOp(OpCode.GET_EXCEPTION)
     } else if (expr.GetExprKind() == ExprKind.VARRAY) {
         context.definition.PushOp(OpCode.VARRAY)
         context.definition.PushCell(expr.GetNumOfOperands())
