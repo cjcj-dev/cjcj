@@ -206,6 +206,22 @@ private class CheckedTyExtendRelation {
     }
 }
 
+private class SubtypeCacheEntry {
+    public var leaf: Ty
+    public var root: Ty
+    public var implicitBoxed: Bool
+    public var allowOptionBox: Bool
+    public var value: Bool
+
+    public init(leaf: Ty, root: Ty, implicitBoxed: Bool, allowOptionBox: Bool, value: Bool) {
+        this.leaf = leaf
+        this.root = root
+        this.implicitBoxed = implicitBoxed
+        this.allowOptionBox = allowOptionBox
+        this.value = value
+    }
+}
+
 private class TyVarScopeDepthEntry {
     public var tyVar: GenericsTy
     public var depth: Int64
@@ -230,6 +246,8 @@ public class TypeManager {
     private let boxedTys: ArrayList<Ty> = ArrayList<Ty>()
     private let tyUsedExtends: ArrayList<TyUsedExtendsEntry> = ArrayList<TyUsedExtendsEntry>()
     private let checkedTyExtendRelation: ArrayList<CheckedTyExtendRelation> = ArrayList<CheckedTyExtendRelation>()
+    private let subtypeCache: ArrayList<SubtypeCacheEntry> = ArrayList<SubtypeCacheEntry>()
+    private let allocatedClassLikeTys: ArrayList<Ty> = ArrayList<Ty>()
     private let unsolvedTyVars: ArrayList<GenericsTy> = ArrayList<GenericsTy>()
     private let tyVarScopes: ArrayList<TyVarScope> = ArrayList<TyVarScope>()
     private let tyVarScopeDepth: ArrayList<TyVarScopeDepthEntry> = ArrayList<TyVarScopeDepthEntry>()
@@ -307,7 +325,19 @@ public class TypeManager {
     }
 
     public func GetArrayTy(elemTy: Ty, dims: UInt64): ArrayTy {
-        return ArrayTy(elemTy, dims)
+        var realElemTy = elemTy
+        var realDims = dims
+        if (Ty.IsTyCorrect(elemTy)) {
+            if (let Some(arrayTy) <- (elemTy as ArrayTy)) {
+                if (!arrayTy.typeArgs.isEmpty()) {
+                    realElemTy = arrayTy.typeArgs[0]
+                    realDims += arrayTy.dims
+                }
+            }
+        } else {
+            realElemTy = GetInvalidTy()
+        }
+        return ArrayTy(realElemTy, realDims)
     }
 
     public func GetVArrayTy(elemTy: Ty, size: Int64): VArrayTy {
@@ -315,7 +345,8 @@ public class TypeManager {
     }
 
     public func GetPointerTy(elemTy: Ty): PointerTy {
-        return PointerTy(elemTy)
+        let realElemTy = if (Ty.IsTyCorrect(elemTy)) { elemTy } else { GetInvalidTy() }
+        return PointerTy(realElemTy)
     }
 
     public func GetArrayTy(): ArrayTy {
@@ -323,15 +354,21 @@ public class TypeManager {
     }
 
     public func GetClassTy(cd: ClassDecl, typeArgs: Array<Ty>): ClassTy {
-        return ClassTy(declName(cd), cd, typeArgs)
+        let ty = ClassTy(declName(cd), cd, typeArgs)
+        recordAllocatedClassLikeTy(ty)
+        return ty
     }
 
     public func GetClassThisTy(cd: ClassDecl, typeArgs: Array<Ty>): ClassThisTy {
-        return ClassThisTy(declName(cd), cd, typeArgs)
+        let ty = ClassThisTy(declName(cd), cd, typeArgs)
+        recordAllocatedClassLikeTy(ty)
+        return ty
     }
 
     public func GetInterfaceTy(id: InterfaceDecl, typeArgs: Array<Ty>): InterfaceTy {
-        return InterfaceTy(declName(id), id, typeArgs)
+        let ty = InterfaceTy(declName(id), id, typeArgs)
+        recordAllocatedClassLikeTy(ty)
+        return ty
     }
 
     public func GetTypeAliasTy(tad: TypeAliasDecl, typeArgs: Array<Ty>): TypeAliasTy {
@@ -377,6 +414,10 @@ public class TypeManager {
         ctypeTy = semCTypeTy
     }
 
+    private func recordAllocatedClassLikeTy(ty: Ty): Unit {
+        allocatedClassLikeTys.add(ty)
+    }
+
     public func GetInstantiatedTys(ty: Ty, mts: MultiTypeSubst): TySet {
         if (let Some(gen) <- (ty as GenericsTy)) {
             if (let Some(values) <- mts.Get(gen)) {
@@ -407,10 +448,7 @@ public class TypeManager {
 
     public func GetInstantiatedTy(ty: Ty, typeMapping: TypeSubst): Ty {
         if (let Some(gen) <- (ty as GenericsTy)) {
-            if (let Some(mapped) <- typeMapping.Get(gen)) {
-                return mapped
-            }
-            return gen
+            return getInstantiatedGenericTy(gen, typeMapping)
         }
         if (let Some(arrayTy) <- (ty as ArrayTy)) {
             if (arrayTy.typeArgs.size == 1) {
@@ -634,6 +672,18 @@ public class TypeManager {
 
     public func GetTypeArgs(ty: Ty): ArrayList<Ty> {
         let out = ArrayList<Ty>()
+        if (let Some(arrayTy) <- (ty as ArrayTy)) {
+            if (arrayTy.dims == 1u64) {
+                for (arg in arrayTy.typeArgs) {
+                    out.add(arg)
+                }
+                return out
+            }
+            if (!arrayTy.typeArgs.isEmpty() && arrayTy.dims > 1u64) {
+                out.add(GetArrayTy(arrayTy.typeArgs[0], arrayTy.dims - 1u64))
+                return out
+            }
+        }
         for (arg in ty.typeArgs) {
             out.add(arg)
         }
@@ -641,6 +691,31 @@ public class TypeManager {
     }
 
     public func GetBlockRealTy(block: Block): Ty {
+        if (let Some(desugar) <- block.desugarExpr) {
+            if (let Some(desugarTy) <- desugar.GetTy()) {
+                return desugarTy
+            }
+            return GetInvalidTy()
+        }
+        if (block.body.isEmpty()) {
+            return GetPrimitiveTy(TypeKind.TYPE_UNIT)
+        }
+        let lastNode = block.body[block.body.size - 1]
+        if (lastNode.IsDecl()) {
+            return GetPrimitiveTy(TypeKind.TYPE_UNIT)
+        }
+        if (let Some(expr) <- (lastNode as Expr)) {
+            if (let Some(desugar) <- expr.desugarExpr) {
+                if (let Some(desugarTy) <- desugar.GetTy()) {
+                    return desugarTy
+                }
+                return GetInvalidTy()
+            }
+            if (let Some(exprTy) <- expr.GetTy()) {
+                return exprTy
+            }
+            return GetInvalidTy()
+        }
         if (let Some(ty) <- block.GetTy()) {
             return ty
         }
@@ -648,23 +723,65 @@ public class TypeManager {
     }
 
     public func GetRealExtendedTy(child: Ty, interfaceTy: Ty): Ty {
-        let _ = interfaceTy
+        if (interfaceTy.IsInterface() && child.IsClass() && !isTyExtendInterface(child, interfaceTy)) {
+            if (let Some(superTy) <- getExtendInterfaceSuperTy(child, interfaceTy)) {
+                return superTy
+            }
+        }
         return child
     }
 
     public func GetAllSuperTys(ty: Ty, typeMapping!: TypeSubst = TypeSubst(), withExtended!: Bool = true): TySet {
-        let _ = typeMapping
-        let _ = withExtended
         let out = TySet()
-        out.Add(ty)
-        collectDeclaredSupers(ty, out)
-        out.Add(anyTy)
+        if (!Ty.IsTyCorrect(ty)) {
+            return out
+        }
+        let maybeInstTy = if (typeMapping.IsEmpty()) { ty } else { GetInstantiatedTy(ty, typeMapping) }
+        if (maybeInstTy.IsClassLike() || maybeInstTy.IsStruct()) {
+            out.Add(maybeInstTy)
+        } else if (let Some(genTy) <- (maybeInstTy as GenericsTy)) {
+            out.AddAll(collectAllUpperBounds(genTy))
+            out.Add(genTy)
+        } else if (let Some(intersectionTy) <- (maybeInstTy as IntersectionTy)) {
+            for (item in intersectionTy.tys) {
+                out.AddAll(GetAllSuperTys(item, typeMapping: typeMapping, withExtended: withExtended))
+            }
+            out.Add(intersectionTy)
+        }
+        if (ty.IsNominal()) {
+            collectNominalSuperTys(ty, typeMapping, withExtended, out)
+        }
+        if (withExtended) {
+            for (extendInterfaceTy in GetAllExtendInterfaceTy(ty).values) {
+                out.Add(GetInstantiatedTy(extendInterfaceTy, typeMapping))
+            }
+        }
         return out
     }
 
     public func HasSuperTy(ty: Ty, superTy: Ty, typeMapping: TypeSubst, withExtended!: Bool = true): Bool {
-        let supers = GetAllSuperTys(ty, typeMapping: typeMapping, withExtended: withExtended)
-        return supers.Contains(superTy)
+        if (!Ty.IsTyCorrect(ty) || !Ty.IsTyCorrect(superTy)) {
+            return false
+        }
+        let maybeInstTy = if (typeMapping.IsEmpty()) { ty } else { GetInstantiatedTy(ty, typeMapping) }
+        if (SameTy(maybeInstTy, superTy)) {
+            return true
+        }
+        if (let Some(genTy) <- (maybeInstTy as GenericsTy)) {
+            if (collectAllUpperBounds(genTy).Contains(superTy)) {
+                return true
+            }
+        } else if (let Some(intersectionTy) <- (maybeInstTy as IntersectionTy)) {
+            for (item in intersectionTy.tys) {
+                if (HasSuperTy(item, superTy, typeMapping, withExtended: withExtended)) {
+                    return true
+                }
+            }
+        }
+        if (ty.IsNominal() && hasNominalSuperTy(ty, superTy, typeMapping, withExtended)) {
+            return true
+        }
+        return withExtended && HasExtendedInterfaceTy(ty, superTy, typeMapping)
     }
 
     public func GetAllCommonSuperTys(tys: TySet): TySet {
@@ -689,24 +806,43 @@ public class TypeManager {
     }
 
     public func GetSubstituteMapping(nominalTy: Ty, typeMapping: TypeSubst): TypeSubst {
-        let _ = nominalTy
-        return typeMapping.Clone()
+        if (let Some(decl) <- Ty.GetInheritableDeclPtrOfTy(Some(nominalTy))) {
+            let substituteMapping = GenerateTypeMapping(decl, nominalTy.typeArgs)
+            for (entry in substituteMapping.entries) {
+                entry.ty = GetInstantiatedTy(entry.ty, typeMapping)
+            }
+            return substituteMapping
+        }
+        return TypeSubst()
     }
 
     public func GetAllSuperInterfaceTysBFS(decl: InheritableDecl): ArrayList<InterfaceTy> {
         let out = ArrayList<InterfaceTy>()
         let queue = ArrayList<InterfaceTy>()
+        let mappings = ArrayList<TypeSubst>()
         for (ty in decl.GetSuperInterfaceTys()) {
             queue.add(ty)
+            mappings.add(GetSubstituteMapping(ty, TypeSubst()))
         }
         var index: Int64 = 0
         while (index < queue.size) {
             let item = queue[index]
+            let itemMapping = mappings[index]
             index++
             if (!containsInterface(out, item)) {
                 out.add(item)
-                for (parent in item.GetSuperInterfaceTys()) {
-                    queue.add(parent)
+                if (let Some(interfaceDecl) <- item.declPtr) {
+                    for (parentType in interfaceDecl.inheritedTypes) {
+                        if (let Some(parentTy) <- parentType.GetTy()) {
+                            if (let Some(parentInterfaceTy) <- (parentTy as InterfaceTy)) {
+                                let parentMapping = GetSubstituteMapping(parentInterfaceTy, itemMapping)
+                                if (let Some(instParent) <- (GetInstantiatedTy(parentInterfaceTy, itemMapping) as InterfaceTy)) {
+                                    queue.add(instParent)
+                                    mappings.add(parentMapping)
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -714,73 +850,61 @@ public class TypeManager {
     }
 
     public func IsSubtype(leaf: Ty, root: Ty, implicitBoxed!: Bool = true, allowOptionBox!: Bool = true): Bool {
-        let _ = implicitBoxed
-        let _ = allowOptionBox
-        if (leaf.HasInvalidTy() || root.HasInvalidTy()) {
+        if (!Ty.IsTyCorrect(leaf) || !Ty.IsTyCorrect(root)) {
             return false
         }
-        if (SameTy(leaf, root)) {
+        if (leaf.IsQuest() || root.IsQuest()) {
             return true
         }
-        if (root.IsAny() || leaf.IsNothing()) {
+        let ffiFastCheck = Ty.IsMetCType(leaf) && root.IsCType()
+        let fastCheck = ffiFastCheck || SameTy(leaf, root) || (leaf.IsNothing() && !root.IsPlaceholder()) ||
+            ((implicitBoxed || leaf.IsClassLike()) && root.IsAny() && !leaf.IsPlaceholder())
+        if (fastCheck) {
             return true
         }
-        if (IsPrimitiveNumericWidening(leaf, root)) {
-            return true
-        }
-        if (let Some(rootUnion) <- (root as UnionTy)) {
-            for (candidate in rootUnion.tys) {
-                if (IsSubtype(leaf, candidate)) {
-                    return true
-                }
-            }
+        if (root.IsNothing()) {
             return false
         }
-        if (let Some(leafUnion) <- (leaf as UnionTy)) {
-            for (candidate in leafUnion.tys) {
-                if (!IsSubtype(candidate, root)) {
-                    return false
-                }
-            }
-            return true
+        if (let Some(cached) <- getSubtypeCache(leaf, root, implicitBoxed, allowOptionBox)) {
+            return cached
         }
-        if (let Some(rootIntersection) <- (root as IntersectionTy)) {
-            for (candidate in rootIntersection.tys) {
-                if (!IsSubtype(leaf, candidate)) {
-                    return false
-                }
-            }
-            return true
-        }
-        if (let Some(leafIntersection) <- (leaf as IntersectionTy)) {
-            for (candidate in leafIntersection.tys) {
-                if (IsSubtype(candidate, root)) {
-                    return true
-                }
-            }
-        }
-        if (leaf.IsFunc() && root.IsFunc()) {
-            return IsFuncSubtype(leaf, root)
-        }
-        if (leaf.IsTuple() && root.IsTuple()) {
-            return IsTupleSubtype(leaf, root)
-        }
-        if (leaf.IsArray() && root.IsArray()) {
-            return SameTypeArgs(leaf.typeArgs, root.typeArgs)
-        }
-        if (leaf.IsPointer() && root.IsPointer()) {
-            return SameTypeArgs(leaf.typeArgs, root.typeArgs)
-        }
-        if (leaf.IsGeneric()) {
-            if (let Some(gen) <- (leaf as GenericsTy)) {
-                for (upper in gen.upperBounds) {
-                    if (IsSubtype(upper, root)) {
-                        return true
-                    }
-                }
+        addSubtypeCache(leaf, root, implicitBoxed, allowOptionBox, false)
+        var result = false
+        if (isCommonAndSpecificRelation(leaf, root)) {
+            result = true
+        } else if (isPlaceholderSubtype(leaf, root)) {
+            result = true
+        } else if (isGenericSubtype(leaf, root, implicitBoxed, allowOptionBox)) {
+            result = true
+        } else if (isClassLikeSubtype(leaf, root, implicitBoxed, allowOptionBox)) {
+            result = true
+        } else if (isPointerSubtype(leaf, root)) {
+            result = true
+        } else if (isStructOrEnumSubtype(leaf, root, implicitBoxed, allowOptionBox)) {
+            result = true
+        } else if (IsFuncSubtype(leaf, root)) {
+            result = true
+        } else if (IsTupleSubtype(leaf, root)) {
+            result = true
+        } else if (isArraySubtype(leaf, root)) {
+            result = true
+        } else if (isVArraySubtype(leaf, root)) {
+            result = true
+        } else if (isPrimitiveSubtype(leaf, root)) {
+            result = true
+        } else if (implicitBoxed && !leaf.IsGeneric() && root.IsInterface()) {
+            if (GetAllExtendInterfaceTy(leaf).Contains(root)) {
+                result = true
+            } else if ((leaf.HasPlaceholder() || root.HasPlaceholder()) &&
+                LocalTypeArgumentSynthesis.Unify(this, constraints, leaf, root)) {
+                result = true
             }
         }
-        return HasSuperTy(leaf, root, TypeSubst())
+        setSubtypeCache(leaf, root, implicitBoxed, allowOptionBox, result)
+        if (leaf.HasPlaceholder() || root.HasPlaceholder()) {
+            removeSubtypeCache(leaf, root, implicitBoxed, allowOptionBox)
+        }
+        return result
     }
 
     public func IsFuncSubtype(leaf: Ty, root: Ty): Bool {
@@ -796,12 +920,13 @@ public class TypeManager {
         if (leaf.paramTys.size != root.paramTys.size) {
             return false
         }
+        let noCast = leaf.noCast || root.noCast
         for (idx in 0..leaf.paramTys.size) {
-            if (!IsSubtype(root.paramTys[idx], leaf.paramTys[idx])) {
+            if (!IsSubtype(root.paramTys[idx], leaf.paramTys[idx], implicitBoxed: noCast)) {
                 return false
             }
         }
-        return true
+        return leaf.isC == root.isC && leaf.hasVariableLenArg == root.hasVariableLenArg
     }
 
     public func IsTupleSubtype(leaf: Ty, root: Ty): Bool {
@@ -811,7 +936,7 @@ public class TypeManager {
                     return false
                 }
                 for (idx in 0..leftTuple.typeArgs.size) {
-                    if (!IsSubtype(leftTuple.typeArgs[idx], rightTuple.typeArgs[idx])) {
+                    if (!IsSubtype(leftTuple.typeArgs[idx], rightTuple.typeArgs[idx], implicitBoxed: false)) {
                         return false
                     }
                 }
@@ -822,7 +947,11 @@ public class TypeManager {
     }
 
     public func IsTyEqual(subTy: Ty, baseTy: Ty): Bool {
-        return SameTy(subTy, baseTy)
+        let savedConstraints = cloneTypeManagerConstraint()
+        let result = IsSubtype(subTy, baseTy, implicitBoxed: false, allowOptionBox: false) &&
+            IsSubtype(baseTy, subTy, implicitBoxed: false, allowOptionBox: false)
+        restoreTypeManagerConstraint(savedConstraints)
+        return result
     }
 
     public func IsPlaceholderEqual(leaf: Ty, root: Ty): Bool {
@@ -830,24 +959,38 @@ public class TypeManager {
     }
 
     public func IsLitBoxableType(leaf: Ty, root: Ty): Bool {
-        return IsPrimitiveNumericWidening(leaf, root)
+        if (!Ty.IsTyCorrect(leaf) || !Ty.IsTyCorrect(root)) {
+            return false
+        }
+        if (SameTy(leaf, root) || (root.IsInteger() && leaf.IsInteger()) ||
+            (root.IsFloating() && leaf.IsFloating())) {
+            return true
+        }
+        if (IsSubtype(leaf, root)) {
+            return true
+        }
+        if (root.IsCoreOptionType() && root.typeArgs.size == 1) {
+            return IsLitBoxableType(leaf, root.typeArgs[0])
+        }
+        return false
     }
 
     public func HasExtensionRelation(childTy: Ty, interfaceTy: Ty): Bool {
-        for (entry in builtinTyToExtendMap) {
-            if (SameTy(entry.ty, childTy)) {
-                for (extendDecl in entry.extends) {
-                    for (inherited in extendDecl.inheritedTypes) {
-                        if (let Some(ty) <- inherited.GetTy()) {
-                            if (SameTy(ty, interfaceTy)) {
-                                return true
-                            }
-                        }
-                    }
-                }
-            }
+        if (!Ty.IsTyCorrect(childTy) || !Ty.IsTyCorrect(interfaceTy)) {
+            return false
         }
-        return false
+        let validRelation = childTy.kind != TypeKind.TYPE_INTERFACE && childTy.kind != TypeKind.TYPE_NOTHING &&
+            interfaceTy.kind == TypeKind.TYPE_INTERFACE
+        if (!validRelation) {
+            return false
+        }
+        if (interfaceTy.IsAny()) {
+            return true
+        }
+        if (!childTy.IsClass()) {
+            return GetAllSuperTys(childTy, typeMapping: TypeSubst(), withExtended: true).Contains(interfaceTy)
+        }
+        return GetAllExtendInterfaceTy(childTy).Contains(interfaceTy)
     }
 
     public func IsFuncParameterTypesIdentical(t1: FuncTy, t2: FuncTy): Bool {
@@ -869,12 +1012,26 @@ public class TypeManager {
 
     public func CheckTypeCompatibility(lvalue: Ty, rvalue: Ty, implicitBoxed!: Bool = true,
         isGeneric!: Bool = false): TypeCompatibility {
-        let _ = isGeneric
-        if (SameTy(lvalue, rvalue)) {
+        if (!Ty.IsTyCorrect(lvalue) || !Ty.IsTyCorrect(rvalue)) {
+            return TypeCompatibility.INCOMPATIBLE
+        }
+        if (SameTy(lvalue, rvalue) || isCommonAndSpecificRelation(lvalue, rvalue)) {
             return TypeCompatibility.IDENTICAL
         }
         if (IsSubtype(rvalue, lvalue, implicitBoxed: implicitBoxed)) {
             return TypeCompatibility.SUBTYPE
+        }
+        if (isGeneric && checkGenericType(lvalue, rvalue, implicitBoxed)) {
+            return TypeCompatibility.IDENTICAL
+        }
+        if (lvalue.IsEnum() && rvalue.IsEnum()) {
+            if (let Some(leftEnum) <- (lvalue as EnumTy)) {
+                if (let Some(rightEnum) <- (rvalue as EnumTy)) {
+                    if (isEnumCompatibleForSubtype(leftEnum, rightEnum, implicitBoxed)) {
+                        return TypeCompatibility.IDENTICAL
+                    }
+                }
+            }
         }
         return TypeCompatibility.INCOMPATIBLE
     }
@@ -1107,18 +1264,49 @@ public class TypeManager {
     }
 
     public func RestoreJavaGenericsTy(decl: Decl): Unit {
-        let _ = decl
+        if (!decl.TestAttr(Attribute.GENERIC_INSTANTIATED)) {
+            return
+        }
+        if (let None <- HasJavaAttr(decl)) {
+            return
+        }
+        if (let Some(genericDecl) <- decl.genericDecl) {
+            if (let Some(classDecl) <- (decl as ClassDecl)) {
+                for (ty in allocatedClassLikeTys) {
+                    if (SameDeclOption(Ty.GetDeclPtrOfTy(ty), Some(genericDecl))) {
+                        if (let Some(classTy) <- (ty as ClassTy)) {
+                            classTy.declPtr = classDecl
+                            classTy.decl = classDecl
+                        }
+                    }
+                }
+            } else if (let Some(interfaceDecl) <- (decl as InterfaceDecl)) {
+                for (ty in allocatedClassLikeTys) {
+                    if (SameDeclOption(Ty.GetDeclPtrOfTy(ty), Some(genericDecl))) {
+                        if (let Some(interfaceTy) <- (ty as InterfaceTy)) {
+                            interfaceTy.declPtr = interfaceDecl
+                            interfaceTy.decl = interfaceDecl
+                        }
+                    }
+                }
+            }
+        }
     }
 
     public func GetAllExtendInterfaceTy(ty: Ty): TySet {
-        let out = TySet()
-        for (entry in builtinTyToExtendMap) {
-            if (SameTy(entry.ty, ty)) {
-                for (extendDecl in entry.extends) {
-                    for (inherited in extendDecl.inheritedTypes) {
-                        if (let Some(inheritedTy) <- inherited.GetTy()) {
-                            out.Add(inheritedTy)
-                        }
+        if (!Ty.IsTyCorrect(ty)) {
+            return TySet()
+        }
+        let out = getAllExtendInterfaceTyHelper(GetAllExtendsByTy(ty), GetTypeArgs(ty))
+        if (ty.IsClass()) {
+            let directSupers = GetAllSuperTys(ty, typeMapping: TypeSubst(), withExtended: false)
+            for (superTy in directSupers.values) {
+                if (SameTy(superTy, ty)) {
+                    continue
+                }
+                if (let Some(classTy) <- (superTy as ClassTy)) {
+                    if (let Some(classDecl) <- classTy.declPtr) {
+                        out.AddAll(getAllExtendInterfaceTyHelper(GetDeclExtends(classDecl), GetTypeArgs(superTy)))
                     }
                 }
             }
@@ -1127,8 +1315,27 @@ public class TypeManager {
     }
 
     public func HasExtendedInterfaceTy(ty: Ty, superTy: Ty, typeMapping: TypeSubst): Bool {
-        let _ = typeMapping
-        return GetAllExtendInterfaceTy(ty).Contains(superTy)
+        if (!Ty.IsTyCorrect(ty) || !Ty.IsTyCorrect(superTy)) {
+            return false
+        }
+        if (hasExtendInterfaceTyHelper(superTy, GetAllExtendsByTy(ty), GetTypeArgs(ty), typeMapping)) {
+            return true
+        }
+        if (ty.IsClass()) {
+            if (let Some(decl) <- Ty.GetInheritableDeclPtrOfTy(Some(ty))) {
+                let substituteMapping = GetSubstituteMapping(ty, typeMapping)
+                for (inheritedType in decl.inheritedTypes) {
+                    if (let Some(inheritedTy) <- inheritedType.GetTy()) {
+                        if (inheritedTy.IsClass() && isInheritableTypeForGenericMapping(inheritedTy)) {
+                            if (HasExtendedInterfaceTy(inheritedTy, superTy, substituteMapping)) {
+                                return true
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        return false
     }
 
     public func GetTyForExtendMap(ty: Ty): Ty {
@@ -1299,7 +1506,9 @@ public class TypeManager {
     public func Clear(): Unit {
         constraints.Clear()
         ClearMapCache()
+        allocatedClassLikeTys.clear()
         unsolvedTyVars.clear()
+        subtypeCache.clear()
     }
 
     public func ClearMapCache(): Unit {
@@ -1333,6 +1542,7 @@ public class TypeManager {
 
     public func ReleaseSemaQueryCaches(): Unit {
         overrideCache.clear()
+        subtypeCache.clear()
     }
 
     public func ReleasePostSemaCaches(): Unit {
@@ -1341,11 +1551,28 @@ public class TypeManager {
 
     public func GetOverrideDeclInClassLike(baseDecl: Decl, funcDecl: FuncDecl,
         withAbstractOverrides!: Bool = false): Option<Decl> {
-        let _ = withAbstractOverrides
         for (member in baseDecl.GetMemberDecls()) {
+            if (member.astKind != ASTKind.FUNC_DECL && member.astKind != ASTKind.PROP_DECL) {
+                continue
+            }
+            if ((!withAbstractOverrides && member.TestAttr(Attribute.ABSTRACT)) ||
+                member.TestAttr(Attribute.GENERIC)) {
+                continue
+            }
             if (let Some(memberFunc) <- (member as FuncDecl)) {
-                if (IsFuncDeclEqualType(memberFunc, funcDecl)) {
-                    return member
+                if (IsFuncDeclSubType(memberFunc, funcDecl)) {
+                    return memberFunc
+                }
+            } else if (let Some(propDecl) <- (member as PropDecl)) {
+                for (getter in propDecl.getters) {
+                    if (IsFuncDeclSubType(getter, funcDecl)) {
+                        return getter
+                    }
+                }
+                for (setter in propDecl.setters) {
+                    if (IsFuncDeclSubType(setter, funcDecl)) {
+                        return setter
+                    }
                 }
             }
         }
@@ -1395,34 +1622,28 @@ public class TypeManager {
     }
 
     public func IsFuncDeclSubType(decl: FuncDecl, funcDecl: FuncDecl): Bool {
+        if (decl.identifier != funcDecl.identifier) {
+            return false
+        }
         if (let Some(leftTy) <- decl.GetTy()) {
-            if (let Some(rightTy) <- funcDecl.GetTy()) {
-                return IsFuncSubtype(leftTy, rightTy)
+            if (let Some(leftFuncTy) <- (leftTy as FuncTy)) {
+                if (let Some(rightTy) <- funcDecl.GetTy()) {
+                    if (let Some(rightFuncTy) <- (rightTy as FuncTy)) {
+                        return IsFuncTySubType(leftFuncTy, rightFuncTy)
+                    }
+                }
             }
         }
         return false
     }
 
     public func IsFuncTySubType(type1: FuncTy, type2: FuncTy): Bool {
-        if (type1.paramTys.size != type2.paramTys.size) {
-            return false
-        }
-        if (type1.isC != type2.isC || type1.hasVariableLenArg != type2.hasVariableLenArg) {
-            return false
-        }
-        if (!IsSubtype(type1.retTy, type2.retTy)) {
-            return false
-        }
-        return IsFuncParametersSubtype(type1, type2)
+        return IsFuncParameterTypesIdentical(type1.paramTys, type2.paramTys) &&
+            IsSubtype(type1.retTy, type2.retTy)
     }
 
     public func IsFuncDeclEqualType(decl: FuncDecl, funcDecl: FuncDecl): Bool {
-        if (let Some(leftTy) <- decl.GetTy()) {
-            if (let Some(rightTy) <- funcDecl.GetTy()) {
-                return SameTy(leftTy, rightTy)
-            }
-        }
-        return decl.identifier == funcDecl.identifier
+        return IsFuncDeclSubType(decl, funcDecl) && IsFuncDeclSubType(funcDecl, decl)
     }
 
     public func IsExtendInheritRelation(r: ExtendDecl, l: ExtendDecl): (Bool, Bool) {
@@ -1446,34 +1667,284 @@ public class TypeManager {
 
     public func PairIsOverrideOrImpl(child: Decl, parent: Decl, baseTy!: Option<Ty> = None,
         parentTy!: Option<Ty> = None): Bool {
-        let _ = baseTy
-        let _ = parentTy
-        if (child.identifier != parent.identifier) {
+        if (child.astKind != parent.astKind || child.identifier != parent.identifier) {
             return false
         }
         if (let Some(childFunc) <- (child as FuncDecl)) {
             if (let Some(parentFunc) <- (parent as FuncDecl)) {
-                return IsFuncDeclSubType(childFunc, parentFunc) || IsFuncDeclEqualType(childFunc, parentFunc)
+                return IsOverrideOrShadow(childFunc, parentFunc, baseTy, parentTy)
+            }
+        } else if (let Some(childProp) <- (child as PropDecl)) {
+            if (let Some(parentProp) <- (parent as PropDecl)) {
+                return IsOverrideOrShadow(childProp, parentProp, baseTy)
             }
         }
         return false
     }
 
+    private func IsOverrideOrShadow(src: FuncDecl, target: FuncDecl, baseTy: Option<Ty>,
+        expectInstParent: Option<Ty>): Bool {
+        if (let Some(cached) <- GetOverrideCache(Some(src), Some(target), baseTy, expectInstParent)) {
+            return cached
+        }
+        if (src.TestAttr(Attribute.STATIC) != target.TestAttr(Attribute.STATIC)) {
+            return false
+        }
+        let srcFuncTy = GetFuncTyForOverride(src)
+        let targetFuncTy = GetFuncTyForOverride(target)
+        let mts = GenerateOverrideTypeMapping(src, target, expectInstParent)
+        let usefulTys = CollectOverrideUsefulTys(srcFuncTy, targetFuncTy, src, target)
+        for (typeMapping in ExpandMultiTypeSubst(mts, usefulTys)) {
+            let srcParamTys = GetOverrideParamTys(src, srcFuncTy)
+            let targetParamTys = GetOverrideParamTys(target, targetFuncTy)
+            if (srcParamTys.size != targetParamTys.size) {
+                AddOverrideCache(src, target, baseTy, expectInstParent, false)
+                return false
+            }
+            AddInterfaceBaseMappingIfNeeded(typeMapping, src.outerDecl, target.outerDecl, baseTy)
+            let instantiatedSrcParams = InstantiateTyList(srcParamTys, typeMapping)
+            let instantiatedTargetParams = InstantiateTyList(targetParamTys, typeMapping)
+            if (IsFuncParameterTypesIdentical(instantiatedSrcParams, instantiatedTargetParams)) {
+                if (IsCrossPlatformPair(src, target)) {
+                    continue
+                }
+                AddOverrideCache(src, target, baseTy, expectInstParent, true)
+                return true
+            }
+        }
+        AddOverrideCache(src, target, baseTy, expectInstParent, false)
+        return false
+    }
+
+    private func IsOverrideOrShadow(src: PropDecl, target: PropDecl, baseTy: Option<Ty>): Bool {
+        if (let None <- src.outerDecl) {
+            return false
+        }
+        let outerDecl = src.outerDecl.getOrThrow()
+        let mts = GenerateStructDeclTypeMapping(outerDecl)
+        let typeMapping = MultiTypeSubstToTypeSubst(mts)
+        AddInterfaceBaseMappingIfNeeded(typeMapping, src.outerDecl, target.outerDecl, baseTy)
+        if (let Some(srcTy) <- GetPropOverrideTy(src)) {
+            if (let Some(targetTy) <- GetPropOverrideTy(target)) {
+                let ret = SameTy(srcTy, GetInstantiatedTy(targetTy, typeMapping))
+                if (ret && SameDeclOption(src.outerDecl, GetDeclPtrOfOptionTy(baseTy)) &&
+                    src.TestAttr(Attribute.STATIC) == target.TestAttr(Attribute.STATIC)) {
+                    UpdateTopOverriddenFuncDeclMap(Some(src), Some(target))
+                }
+                return ret
+            }
+        }
+        return false
+    }
+
+    private func GenerateOverrideTypeMapping(src: FuncDecl, target: FuncDecl,
+        expectInstParent: Option<Ty>): MultiTypeSubst {
+        let mts = MultiTypeSubst()
+        if (let Some(parentTy) <- expectInstParent) {
+            if (let Some(targetOuter) <- target.outerDecl) {
+                MergeTypeSubstToMultiTypeSubst(mts, GenerateTypeMappingByTy(targetOuter.GetTy(), Some(parentTy)))
+            }
+            if (let Some(srcOuter) <- src.outerDecl) {
+                if (let Some(targetOuter) <- target.outerDecl) {
+                    if (let Some(srcOuterTy) <- srcOuter.GetTy()) {
+                        if (let Some(targetOuterTy) <- targetOuter.GetTy()) {
+                            for (promotedTy in Promotion(this).Promote(srcOuterTy, targetOuterTy).values) {
+                                MergeTypeSubstToMultiTypeSubst(mts,
+                                    GenerateTypeMappingByTy(Some(promotedTy), Some(parentTy)))
+                            }
+                        }
+                    }
+                }
+            }
+            if (target.TestAttr(Attribute.GENERIC) && src.TestAttr(Attribute.GENERIC)) {
+                MergeTypeSubstToMultiTypeSubst(mts, GenerateGenericMappingFromGeneric(target, src))
+            }
+            return mts
+        }
+        if (let Some(srcOuter) <- src.outerDecl) {
+            if (Ty.IsTyCorrect(srcOuter.GetTy())) {
+                MergeMultiTypeSubsts(mts, GenerateStructDeclTypeMapping(srcOuter))
+            }
+        }
+        if (target.TestAttr(Attribute.GENERIC) && src.TestAttr(Attribute.GENERIC)) {
+            MergeTypeSubstToMultiTypeSubst(mts, GenerateGenericMappingFromGeneric(target, src))
+        }
+        return mts
+    }
+
+    private func AddInterfaceBaseMappingIfNeeded(typeMapping: TypeSubst, srcOuter: Option<Decl>,
+        targetOuter: Option<Decl>, baseTy: Option<Ty>): Unit {
+        if (let Some(base) <- baseTy) {
+            if (!Ty.IsTyCorrect(base)) {
+                return
+            }
+            if (let Some(srcOuterDecl) <- srcOuter) {
+                if (let Some(targetOuterDecl) <- targetOuter) {
+                    if ((let Some(_) <- (srcOuterDecl as InterfaceDecl)) &&
+                        (let Some(_) <- (targetOuterDecl as InterfaceDecl))) {
+                        if (let Some(targetOuterTy) <- targetOuterDecl.GetTy()) {
+                            if (let Some(srcOuterTy) <- srcOuterDecl.GetTy()) {
+                                let parentStructTy = GetInstantiatedTy(targetOuterTy, typeMapping)
+                                let childStructTy = GetInstantiatedTy(srcOuterTy, typeMapping)
+                                if (!IsSubtype(childStructTy, parentStructTy)) {
+                                    let baseMapping = MultiTypeSubst()
+                                    GenerateGenericMapping(baseMapping, base)
+                                    mergeTypeSubst(typeMapping, MultiTypeSubstToTypeSubst(baseMapping))
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private func CollectOverrideUsefulTys(srcFuncTy: Option<FuncTy>, targetFuncTy: Option<FuncTy>,
+        src: FuncDecl, target: FuncDecl): TySet {
+        let usefulTys = TySet()
+        if (let Some(srcTy) <- srcFuncTy) {
+            usefulTys.Add(srcTy)
+        } else {
+            for (ty in GetParamTys(src)) {
+                usefulTys.Add(ty)
+            }
+        }
+        if (let Some(targetTy) <- targetFuncTy) {
+            usefulTys.Add(targetTy)
+        } else {
+            for (ty in GetParamTys(target)) {
+                usefulTys.Add(ty)
+            }
+        }
+        return usefulTys
+    }
+
+    private func GetOverrideParamTys(fd: FuncDecl, funcTy: Option<FuncTy>): ArrayList<Ty> {
+        if (let Some(value) <- funcTy) {
+            return CopyTyList(value.paramTys)
+        }
+        return GetParamTys(fd)
+    }
+
+    private func GetFuncTyForOverride(fd: FuncDecl): Option<FuncTy> {
+        if (let Some(ty) <- fd.GetTy()) {
+            return ty as FuncTy
+        }
+        return None
+    }
+
+    private func GetPropOverrideTy(propDecl: PropDecl): Option<Ty> {
+        if (let Some(typeNode) <- propDecl.typeNode) {
+            if (let Some(ty) <- typeNode.GetTy()) {
+                return ty
+            }
+        }
+        return propDecl.GetTy()
+    }
+
+    private func InstantiateTyList(values: ArrayList<Ty>, typeMapping: TypeSubst): ArrayList<Ty> {
+        let out = ArrayList<Ty>()
+        for (ty in values) {
+            out.add(GetInstantiatedTy(ty, typeMapping))
+        }
+        return out
+    }
+
+    private func CopyTyList(values: ArrayList<Ty>): ArrayList<Ty> {
+        let out = ArrayList<Ty>()
+        for (ty in values) {
+            out.add(ty)
+        }
+        return out
+    }
+
+    private func IsCrossPlatformPair(src: Decl, target: Decl): Bool {
+        return (src.TestAttr(Attribute.COMMON) && target.TestAttr(Attribute.SPECIFIC)) ||
+            (src.TestAttr(Attribute.SPECIFIC) && target.TestAttr(Attribute.COMMON))
+    }
+
+    private func GetDeclPtrOfOptionTy(ty: Option<Ty>): Option<Decl> {
+        if (let Some(value) <- ty) {
+            return Ty.GetDeclPtrOfTy(value)
+        }
+        return None
+    }
+
+    private func SameDeclOption(left: Option<Decl>, right: Option<Decl>): Bool {
+        if (let Some(leftDecl) <- left) {
+            if (let Some(rightDecl) <- right) {
+                return SameDecl(leftDecl, rightDecl)
+            }
+            return false
+        }
+        if (let Some(_) <- right) {
+            return false
+        }
+        return true
+    }
+
     public func ConstrainByCtor(tv: GenericsTy, tyCtor: Ty): Option<Ty> {
         let bounds = constraints.GetOrCreate(tv)
-        bounds.ubs.Add(tyCtor)
-        return tyCtor
+        for (upper in bounds.ubs.values) {
+            if (OfSameCtor(upper, tyCtor)) {
+                return upper
+            }
+        }
+        let mapping = TypeSubst()
+        for (tyArg in tyCtor.typeArgs) {
+            if (let Some(ctorArg) <- (tyArg as GenericsTy)) {
+                mapping.Put(ctorArg, AllocTyVar(srcId: "T-Fly", needSolving: true, derivedFrom: tv))
+            } else {
+                return None
+            }
+        }
+        let placeholderTy = GetInstantiatedTy(tyCtor, mapping)
+        if (IsSubtype(tv, placeholderTy, implicitBoxed: true, allowOptionBox: false)) {
+            return placeholderTy
+        }
+        return None
     }
 
     public func AddSumByCtor(tv: GenericsTy, tyCtor: Ty, tyArgs: ArrayList<GenericsTy>): Option<Ty> {
-        let _ = tyArgs
+        var idx: Int64 = tyArgs.size
+        while (idx < tyCtor.typeArgs.size) {
+            tyArgs.add(AllocTyVar(srcId: "T-Fly", needSolving: true, derivedFrom: tv))
+            idx++
+        }
+        let mapping = TypeSubst()
+        idx = 0
+        while (idx < tyCtor.typeArgs.size) {
+            if (let Some(ctorArg) <- (tyCtor.typeArgs[idx] as GenericsTy)) {
+                mapping.Put(ctorArg, tyArgs[idx])
+            } else {
+                return None
+            }
+            idx++
+        }
+        let placeholderTy = GetInstantiatedTy(tyCtor, mapping)
         let bounds = constraints.GetOrCreate(tv)
-        bounds.sum.Add(tyCtor)
-        return tyCtor
+        bounds.sum.Add(placeholderTy)
+        return placeholderTy
     }
 
     public func OfSameCtor(ty: Ty, tyCtor: Ty): Bool {
-        return ty.kind == tyCtor.kind && ty.name == tyCtor.name && ty.typeArgs.size == tyCtor.typeArgs.size
+        if (!Ty.IsTyCorrect(ty) || !Ty.IsTyCorrect(tyCtor)) {
+            return false
+        }
+        if (ty.typeArgs.size != tyCtor.typeArgs.size) {
+            return false
+        }
+        let mapping = TypeSubst()
+        var idx: Int64 = 0
+        while (idx < tyCtor.typeArgs.size) {
+            if (let Some(ctorArg) <- (tyCtor.typeArgs[idx] as GenericsTy)) {
+                mapping.Put(ctorArg, ty.typeArgs[idx])
+            } else {
+                return false
+            }
+            idx++
+        }
+        return SameTy(GetInstantiatedTy(tyCtor, mapping), ty)
     }
 
     public func GetDummyBuiltInDecl(ty: Ty): Decl {
@@ -1484,10 +1955,14 @@ public class TypeManager {
     }
 
     public func GetExtendDeclByInterface(baseTy: Ty, interfaceTy: Ty): Option<ExtendDecl> {
-        for (extendDecl in GetBuiltinTyExtends(baseTy)) {
+        if (!interfaceTy.IsInterface()) {
+            return None
+        }
+        let extendedTy = GetRealExtendedTy(baseTy, interfaceTy)
+        for (extendDecl in GetAllExtendsByTy(extendedTy)) {
             for (inherited in extendDecl.inheritedTypes) {
                 if (let Some(ty) <- inherited.GetTy()) {
-                    if (SameTy(ty, interfaceTy)) {
+                    if (IsSubtype(ty, interfaceTy)) {
                         return extendDecl
                     }
                 }
@@ -1497,11 +1972,13 @@ public class TypeManager {
     }
 
     public func GetExtendDeclByMember(member: Decl, baseTy: Ty): Option<ExtendDecl> {
-        for (extendDecl in GetBuiltinTyExtends(baseTy)) {
-            for (decl in extendDecl.GetMemberDecls()) {
-                if (SameDecl(decl, member)) {
-                    return extendDecl
+        if (let Some(outer) <- member.outerDecl) {
+            if (outer.astKind == ASTKind.INTERFACE_DECL) {
+                if (let Some(outerTy) <- outer.GetTy()) {
+                    return GetExtendDeclByInterface(baseTy, outerTy)
                 }
+            } else if (let Some(extendDecl) <- (outer as ExtendDecl)) {
+                return extendDecl
             }
         }
         return None
@@ -1674,7 +2151,75 @@ public class TypeManager {
     public func ReplaceThisTy(now: Ty): Ty {
         if (let Some(thisTy) <- (now as ClassThisTy)) {
             if (let Some(decl) <- thisTy.declPtr) {
-                return GetClassTy(decl, CopyTypeArgs(thisTy.typeArgs))
+                return GetClassTy(decl, replaceThisArgs(thisTy.typeArgs))
+            }
+        }
+        if (now.typeArgs.isEmpty()) {
+            return now
+        }
+        let replacedArgs = replaceThisArgs(now.typeArgs)
+        if (!typeArgsChanged(now.typeArgs, replacedArgs)) {
+            return now
+        }
+        if (let Some(funcTy) <- (now as FuncTy)) {
+            let params = ArrayList<Ty>()
+            for (paramTy in funcTy.paramTys) {
+                params.add(ReplaceThisTy(paramTy))
+            }
+            let cfg = FuncTyConfig()
+            cfg.isC = funcTy.isC
+            cfg.isClosureTy = funcTy.isClosureTy
+            cfg.hasVariableLenArg = funcTy.hasVariableLenArg
+            cfg.noCast = funcTy.noCast
+            return GetFunctionTy(params.toArray(), ReplaceThisTy(funcTy.retTy), cfg: cfg)
+        }
+        if (let Some(tupleTy) <- (now as TupleTy)) {
+            return GetTupleTy(replacedArgs, isClosureTy: tupleTy.isClosureTy)
+        }
+        if (let Some(arrayTy) <- (now as ArrayTy)) {
+            if (!replacedArgs.isEmpty()) {
+                return GetArrayTy(replacedArgs[0], arrayTy.dims)
+            }
+        }
+        if (let Some(varrayTy) <- (now as VArrayTy)) {
+            if (!replacedArgs.isEmpty()) {
+                return GetVArrayTy(replacedArgs[0], varrayTy.size)
+            }
+        }
+        if (let Some(pointerTy) <- (now as PointerTy)) {
+            let _ = pointerTy
+            if (!replacedArgs.isEmpty()) {
+                return GetPointerTy(replacedArgs[0])
+            }
+        }
+        if (let Some(classTy) <- (now as ClassTy)) {
+            if (let Some(decl) <- classTy.declPtr) {
+                return GetClassTy(decl, replacedArgs)
+            }
+        }
+        if (let Some(interfaceTy) <- (now as InterfaceTy)) {
+            if (let Some(decl) <- interfaceTy.declPtr) {
+                return GetInterfaceTy(decl, replacedArgs)
+            }
+        }
+        if (let Some(structTy) <- (now as StructTy)) {
+            if (let Some(decl) <- structTy.declPtr) {
+                return GetStructTy(decl, replacedArgs)
+            }
+        }
+        if (let Some(refEnumTy) <- (now as RefEnumTy)) {
+            if (let Some(decl) <- refEnumTy.declPtr) {
+                return GetRefEnumTy(decl, replacedArgs)
+            }
+        }
+        if (let Some(enumTy) <- (now as EnumTy)) {
+            if (let Some(decl) <- enumTy.declPtr) {
+                return GetEnumTy(decl, typeArgs: replacedArgs)
+            }
+        }
+        if (let Some(aliasTy) <- (now as TypeAliasTy)) {
+            if (let Some(decl) <- aliasTy.declPtr) {
+                return GetTypeAliasTy(decl, replacedArgs)
             }
         }
         return now
@@ -1697,25 +2242,698 @@ public class TypeManager {
 
     public func SubstituteTypeAliasInTy(ty: Ty, needSubstituteGeneric!: Bool = false,
         typeMapping!: TypeSubst = TypeSubst()): Ty {
-        let _ = needSubstituteGeneric
+        if (!Ty.IsTyCorrect(ty)) {
+            return GetInvalidTy()
+        }
+        let typeArgs = substituteAliasArgs(ty, needSubstituteGeneric, typeMapping)
         if (let Some(aliasTy) <- (ty as TypeAliasTy)) {
             if (let Some(decl) <- aliasTy.declPtr) {
                 if (decl.TestAttr(Attribute.IN_REFERENCE_CYCLE)) {
-                    return GetInstantiatedTy(ty, typeMapping)
+                    return GetTypeAliasTy(decl, typeArgs)
                 }
                 if (let Some(typeNode) <- decl.typeNode) {
                     if (let Some(targetTy) <- typeNode.GetTy()) {
-                        return GetInstantiatedTy(targetTy, typeMapping)
+                        let aliasMapping = GenerateTypeMapping(decl, arrayToTypeList(typeArgs))
+                        let instAliasedTy = GetInstantiatedTy(targetTy, aliasMapping)
+                        if (instAliasedTy.HasAliasTy()) {
+                            return SubstituteTypeAliasInTy(instAliasedTy, needSubstituteGeneric: needSubstituteGeneric,
+                                typeMapping: typeMapping)
+                        }
+                        return instAliasedTy
                     }
                 }
             }
         }
-        return GetInstantiatedTy(ty, typeMapping)
+        if (let Some(genTy) <- (ty as GenericsTy)) {
+            if (!needSubstituteGeneric) {
+                return genTy
+            }
+            if (let Some(mapped) <- typeMapping.Get(genTy)) {
+                return mapped
+            }
+            let intersectionArgs = ArrayList<Ty>()
+            intersectionArgs.add(genTy)
+            return GetIntersectionTy(intersectionArgs.toArray())
+        }
+        return substituteTypeArgs(ty, typeArgs)
+    }
+
+    private func sameSubtypeCacheKey(entry: SubtypeCacheEntry, leaf: Ty, root: Ty, implicitBoxed: Bool,
+        allowOptionBox: Bool): Bool {
+        return entry.implicitBoxed == implicitBoxed && entry.allowOptionBox == allowOptionBox &&
+            SameTy(entry.leaf, leaf) && SameTy(entry.root, root)
+    }
+
+    private func getSubtypeCache(leaf: Ty, root: Ty, implicitBoxed: Bool, allowOptionBox: Bool): Option<Bool> {
+        for (entry in subtypeCache) {
+            if (sameSubtypeCacheKey(entry, leaf, root, implicitBoxed, allowOptionBox)) {
+                return entry.value
+            }
+        }
+        return None
+    }
+
+    private func addSubtypeCache(leaf: Ty, root: Ty, implicitBoxed: Bool, allowOptionBox: Bool, value: Bool): Unit {
+        subtypeCache.add(SubtypeCacheEntry(leaf, root, implicitBoxed, allowOptionBox, value))
+    }
+
+    private func setSubtypeCache(leaf: Ty, root: Ty, implicitBoxed: Bool, allowOptionBox: Bool, value: Bool): Unit {
+        for (entry in subtypeCache) {
+            if (sameSubtypeCacheKey(entry, leaf, root, implicitBoxed, allowOptionBox)) {
+                entry.value = value
+                return
+            }
+        }
+        addSubtypeCache(leaf, root, implicitBoxed, allowOptionBox, value)
+    }
+
+    private func removeSubtypeCache(leaf: Ty, root: Ty, implicitBoxed: Bool, allowOptionBox: Bool): Unit {
+        var idx: Int64 = 0
+        while (idx < subtypeCache.size) {
+            if (sameSubtypeCacheKey(subtypeCache[idx], leaf, root, implicitBoxed, allowOptionBox)) {
+                subtypeCache.remove(at: idx)
+                return
+            }
+            idx++
+        }
+    }
+
+    private func cloneTypeManagerConstraint(): Constraint {
+        let out = Constraint()
+        copyConstraintEntries(out, constraints)
+        return out
+    }
+
+    private func restoreTypeManagerConstraint(saved: Constraint): Unit {
+        constraints.Clear()
+        copyConstraintEntries(constraints, saved)
+    }
+
+    private func copyConstraintEntries(target: Constraint, source: Constraint): Unit {
+        for (entry in source.entries) {
+            let bounds = target.GetOrCreate(entry.tyVar)
+            bounds.lbs.AddAll(entry.bounds.lbs)
+            bounds.ubs.AddAll(entry.bounds.ubs)
+            bounds.sum.AddAll(entry.bounds.sum)
+            bounds.eq.AddAll(entry.bounds.eq)
+            for (blameEntry in entry.bounds.lb2Blames) {
+                bounds.lb2Blames.add(TyBlameEntry(blameEntry.ty, blames: blameEntry.blames.Clone()))
+            }
+            for (blameEntry in entry.bounds.ub2Blames) {
+                bounds.ub2Blames.add(TyBlameEntry(blameEntry.ty, blames: blameEntry.blames.Clone()))
+            }
+        }
+    }
+
+    private func isPlaceholderSubtype(leaf: Ty, root: Ty): Bool {
+        if (leaf.IsPlaceholder() || root.IsPlaceholder()) {
+            return LocalTypeArgumentSynthesis.Unify(this, constraints, leaf, root)
+        }
+        return false
+    }
+
+    private func isGenericSubtype(leaf: Ty, root: Ty, implicitBoxed: Bool, allowOptionBox: Bool): Bool {
+        if (let Some(genTy) <- (leaf as GenericsTy)) {
+            if (root.IsAny() && !implicitBoxed) {
+                for (upper in genTy.upperBounds) {
+                    if (upper.IsClass()) {
+                        return true
+                    }
+                }
+                return false
+            }
+            for (upper in genTy.upperBounds) {
+                if (SameTy(upper, root)) {
+                    return true
+                }
+            }
+            if (!genTy.isUpperBoundLegal) {
+                return false
+            }
+            if (genTy.isAliasParam) {
+                return true
+            }
+            for (upper in genTy.upperBounds) {
+                if (IsSubtype(upper, root, implicitBoxed: implicitBoxed, allowOptionBox: allowOptionBox)) {
+                    return true
+                }
+            }
+        }
+        if (let Some(intersectionTy) <- (leaf as IntersectionTy)) {
+            for (ty in intersectionTy.tys) {
+                if (IsSubtype(ty, root, implicitBoxed: implicitBoxed, allowOptionBox: allowOptionBox)) {
+                    return true
+                }
+            }
+        }
+        if (let Some(intersectionTy) <- (root as IntersectionTy)) {
+            for (ty in intersectionTy.tys) {
+                if (!IsSubtype(leaf, ty, implicitBoxed: implicitBoxed, allowOptionBox: allowOptionBox)) {
+                    return false
+                }
+            }
+            return true
+        }
+        if (let Some(unionTy) <- (leaf as UnionTy)) {
+            for (ty in unionTy.tys) {
+                if (!IsSubtype(ty, root, implicitBoxed: implicitBoxed, allowOptionBox: allowOptionBox)) {
+                    return false
+                }
+            }
+            return true
+        }
+        return false
+    }
+
+    private func isCommonAndSpecificRelation(leafTy: Ty, rootTy: Ty): Bool {
+        if (!leafTy.IsNominal() || !rootTy.IsNominal()) {
+            return false
+        }
+        if (let Some(leafDeclRaw) <- Ty.GetDeclOfTy(Some(leafTy))) {
+            if (let Some(rootDeclRaw) <- Ty.GetDeclOfTy(Some(rootTy))) {
+                let leafDecl = if (let Some(specific) <- leafDeclRaw.specificImplementation) {
+                    specific
+                } else {
+                    leafDeclRaw
+                }
+                let rootDecl = if (let Some(specific) <- rootDeclRaw.specificImplementation) {
+                    specific
+                } else {
+                    rootDeclRaw
+                }
+                if (!leafDecl.TestAttr(Attribute.SPECIFIC) || !rootDecl.TestAttr(Attribute.SPECIFIC)) {
+                    return false
+                }
+                return SameDecl(leafDecl, rootDecl)
+            }
+        }
+        return false
+    }
+
+    private func isClassLikeSubtype(leaf: Ty, root: Ty, implicitBoxed: Bool, allowOptionBox: Bool): Bool {
+        if (let Some(thisTyOfLeaf) <- (leaf as ClassThisTy)) {
+            if (let Some(leafDecl) <- thisTyOfLeaf.declPtr) {
+                let leafClassTy = GetClassTy(leafDecl, CopyTypeArgs(thisTyOfLeaf.typeArgs))
+                if (let Some(thisTyOfRoot) <- (root as ClassThisTy)) {
+                    if (let Some(rootDecl) <- thisTyOfRoot.declPtr) {
+                        return IsSubtype(leafClassTy, GetClassTy(rootDecl, CopyTypeArgs(thisTyOfRoot.typeArgs)))
+                    }
+                }
+                return IsSubtype(leafClassTy, root, implicitBoxed: implicitBoxed, allowOptionBox: allowOptionBox)
+            }
+        }
+        if (leaf.IsClassLike() && root.IsClassLike()) {
+            let superTys = GetAllSuperTys(leaf, typeMapping: TypeSubst(), withExtended: true)
+            for (superTy in superTys.values) {
+                if (isClassTyEqual(superTy, root)) {
+                    return true
+                }
+            }
+        }
+        return false
+    }
+
+    private func isClassTyEqual(leaf: Ty, root: Ty): Bool {
+        if (SameTy(leaf, root) || isCommonAndSpecificRelation(leaf, root)) {
+            return true
+        }
+        if (isClassThisType(leaf) || isClassThisType(root)) {
+            return false
+        }
+        if (!leaf.IsClassLike() || !root.IsClassLike() || leaf.IsClass()) {
+            return false
+        }
+        if (leaf.typeArgs.size != root.typeArgs.size) {
+            return false
+        }
+        if (let Some(leftClassLike) <- (leaf as ClassLikeTy)) {
+            if (let Some(rightClassLike) <- (root as ClassLikeTy)) {
+                if (let Some(leftDecl) <- leftClassLike.commonDecl) {
+                    if (let Some(rightDecl) <- rightClassLike.commonDecl) {
+                        if (!SameDecl(leftDecl, rightDecl)) {
+                            return false
+                        }
+                    } else {
+                        return false
+                    }
+                } else {
+                    return false
+                }
+            }
+        }
+        var idx: Int64 = 0
+        while (idx < leaf.typeArgs.size) {
+            let leafArg = leaf.typeArgs[idx]
+            let rootArg = root.typeArgs[idx]
+            if (rootArg.IsIntersection()) {
+                if (!IsSubtype(leafArg, rootArg)) {
+                    return false
+                }
+            } else if (!SameTy(rootArg, leafArg) && !IsPlaceholderEqual(rootArg, leafArg)) {
+                return false
+            }
+            idx++
+        }
+        return true
+    }
+
+    private func isEnumCompatibleForSubtype(left: EnumTy, right: EnumTy, implicitBoxed: Bool): Bool {
+        if (left.typeArgs.size != right.typeArgs.size || left.name != right.name ||
+            !sameEnumDeclOption(left.declPtr, right.declPtr)) {
+            return false
+        }
+        var idx: Int64 = 0
+        while (idx < left.typeArgs.size) {
+            if (CheckTypeCompatibility(left.typeArgs[idx], right.typeArgs[idx], implicitBoxed: implicitBoxed,
+                isGeneric: left.typeArgs[idx].IsGeneric()) == TypeCompatibility.INCOMPATIBLE) {
+                return false
+            }
+            idx++
+        }
+        return true
+    }
+
+    private func isStructOrEnumSubtype(leaf: Ty, root: Ty, implicitBoxed: Bool, allowOptionBox: Bool): Bool {
+        let enumRefCompatible = (isRefEnumType(leaf) && leaf.IsEnum() && root.IsEnum()) ||
+            (isRefEnumType(root) && root.IsEnum() && leaf.IsEnum())
+        if (enumRefCompatible) {
+            if (let Some(leftEnum) <- (leaf as EnumTy)) {
+                if (let Some(rightEnum) <- (root as EnumTy)) {
+                    if (isEnumCompatibleForSubtype(leftEnum, rightEnum, implicitBoxed)) {
+                        return true
+                    }
+                }
+            }
+        }
+        if (implicitBoxed) {
+            if (leaf.IsStruct() && root.kind == TypeKind.TYPE_INTERFACE &&
+                HasSuperTy(leaf, root, TypeSubst(), withExtended: implicitBoxed)) {
+                return true
+            }
+            if (root.IsCoreOptionType() && root.typeArgs.size == 1 && allowOptionBox &&
+                CountOptionNestedLevel(leaf) < CountOptionNestedLevel(root)) {
+                return IsSubtype(leaf, root.typeArgs[0], implicitBoxed: implicitBoxed)
+            }
+            if (leaf.IsEnum() && root.kind == TypeKind.TYPE_INTERFACE &&
+                HasSuperTy(leaf, root, TypeSubst(), withExtended: implicitBoxed)) {
+                return true
+            }
+        }
+        return false
+    }
+
+    private func isArraySubtype(leaf: Ty, root: Ty): Bool {
+        if (let Some(leftArray) <- (leaf as ArrayTy)) {
+            if (let Some(rightArray) <- (root as ArrayTy)) {
+                return leftArray.dims == rightArray.dims && !leftArray.typeArgs.isEmpty() &&
+                    !rightArray.typeArgs.isEmpty() && IsTyEqual(leftArray.typeArgs[0], rightArray.typeArgs[0])
+            }
+        }
+        return false
+    }
+
+    private func isVArraySubtype(leaf: Ty, root: Ty): Bool {
+        if (let Some(leftArray) <- (leaf as VArrayTy)) {
+            if (let Some(rightArray) <- (root as VArrayTy)) {
+                return leftArray.size == rightArray.size && !leftArray.typeArgs.isEmpty() &&
+                    !rightArray.typeArgs.isEmpty() && IsTyEqual(leftArray.typeArgs[0], rightArray.typeArgs[0])
+            }
+        }
+        return false
+    }
+
+    private func isPointerSubtype(leaf: Ty, root: Ty): Bool {
+        if (let Some(leftPointer) <- (leaf as PointerTy)) {
+            if (let Some(rightPointer) <- (root as PointerTy)) {
+                return !leftPointer.typeArgs.isEmpty() && !rightPointer.typeArgs.isEmpty() &&
+                    IsTyEqual(leftPointer.typeArgs[0], rightPointer.typeArgs[0])
+            }
+        }
+        return false
+    }
+
+    private func isPrimitiveSubtype(leaf: Ty, root: Ty): Bool {
+        if (leaf.kind == TypeKind.TYPE_IDEAL_INT && root.IsInteger()) {
+            return true
+        }
+        if (leaf.kind == TypeKind.TYPE_IDEAL_FLOAT && root.IsFloating()) {
+            return true
+        }
+        if (leaf.kind == TypeKind.TYPE_IDEAL_INT) {
+            return IsSubtype(GetPrimitiveTy(TypeKind.TYPE_INT64), root) ||
+                IsSubtype(GetPrimitiveTy(TypeKind.TYPE_UINT64), root) ||
+                IsSubtype(GetPrimitiveTy(TypeKind.TYPE_INT32), root) ||
+                IsSubtype(GetPrimitiveTy(TypeKind.TYPE_UINT32), root) ||
+                IsSubtype(GetPrimitiveTy(TypeKind.TYPE_INT16), root) ||
+                IsSubtype(GetPrimitiveTy(TypeKind.TYPE_UINT16), root) ||
+                IsSubtype(GetPrimitiveTy(TypeKind.TYPE_INT8), root) ||
+                IsSubtype(GetPrimitiveTy(TypeKind.TYPE_UINT8), root)
+        }
+        if (leaf.kind == TypeKind.TYPE_IDEAL_FLOAT) {
+            return IsSubtype(GetPrimitiveTy(TypeKind.TYPE_FLOAT64), root) ||
+                IsSubtype(GetPrimitiveTy(TypeKind.TYPE_FLOAT32), root) ||
+                IsSubtype(GetPrimitiveTy(TypeKind.TYPE_FLOAT16), root)
+        }
+        return leaf.IsPrimitive() && root.IsPrimitive() && leaf.kind == root.kind
+    }
+
+    private func checkGenericType(lvalue: Ty, rvalue: Ty, implicitBoxed: Bool): Bool {
+        if (Ty.IsTyCorrect(lvalue) && Ty.IsTyCorrect(rvalue) &&
+            lvalue.kind == TypeKind.TYPE_GENERICS && rvalue.kind == TypeKind.TYPE_GENERICS) {
+            if (let Some(leftGen) <- (lvalue as GenericsTy)) {
+                if (let Some(rightGen) <- (rvalue as GenericsTy)) {
+                    if (leftGen.isPlaceholder || rightGen.isPlaceholder) {
+                        return false
+                    }
+                    if (leftGen.upperBounds.isEmpty() && rightGen.upperBounds.isEmpty()) {
+                        return true
+                    }
+                    if (leftGen.upperBounds.size != rightGen.upperBounds.size) {
+                        return false
+                    }
+                    var idx: Int64 = 0
+                    while (idx < leftGen.upperBounds.size) {
+                        if (CheckTypeCompatibility(leftGen.upperBounds[idx], rightGen.upperBounds[idx],
+                            implicitBoxed: implicitBoxed) != TypeCompatibility.IDENTICAL) {
+                            return false
+                        }
+                        idx++
+                    }
+                    return true
+                }
+            }
+        }
+        return IsSubtype(rvalue, lvalue, implicitBoxed: implicitBoxed, allowOptionBox: false)
+    }
+
+    private func isClassThisType(ty: Ty): Bool {
+        if (let Some(_) <- (ty as ClassThisTy)) {
+            return true
+        }
+        return false
+    }
+
+    private func isRefEnumType(ty: Ty): Bool {
+        if (let Some(_) <- (ty as RefEnumTy)) {
+            return true
+        }
+        return false
+    }
+
+    private func sameEnumDeclOption(left: Option<EnumDecl>, right: Option<EnumDecl>): Bool {
+        if (let Some(leftDecl) <- left) {
+            if (let Some(rightDecl) <- right) {
+                return SameDecl(leftDecl, rightDecl)
+            }
+            return false
+        }
+        if (let Some(_) <- right) {
+            return false
+        }
+        return true
+    }
+
+    private func replaceThisArgs(args: ArrayList<Ty>): Array<Ty> {
+        let out = ArrayList<Ty>()
+        for (arg in args) {
+            out.add(ReplaceThisTy(arg))
+        }
+        return out.toArray()
+    }
+
+    private func arrayToTypeList(args: Array<Ty>): ArrayList<Ty> {
+        let out = ArrayList<Ty>()
+        for (arg in args) {
+            out.add(arg)
+        }
+        return out
+    }
+
+    private func typeArgsChanged(original: ArrayList<Ty>, replaced: Array<Ty>): Bool {
+        if (original.size != replaced.size) {
+            return true
+        }
+        var idx: Int64 = 0
+        while (idx < original.size) {
+            if (!SameTy(original[idx], replaced[idx])) {
+                return true
+            }
+            idx++
+        }
+        return false
+    }
+
+    private func substituteAliasArgs(ty: Ty, needSubstituteGeneric: Bool, typeMapping: TypeSubst): Array<Ty> {
+        let out = ArrayList<Ty>()
+        for (arg in ty.typeArgs) {
+            if (Ty.IsTyCorrect(arg) || needSubstituteGeneric) {
+                out.add(SubstituteTypeAliasInTy(arg, needSubstituteGeneric: needSubstituteGeneric,
+                    typeMapping: typeMapping))
+            } else {
+                out.add(arg)
+            }
+        }
+        return out.toArray()
+    }
+
+    private func substituteTypeArgs(ty: Ty, typeArgs: Array<Ty>): Ty {
+        if (let Some(thisTy) <- (ty as ClassThisTy)) {
+            if (let Some(decl) <- thisTy.declPtr) {
+                return GetClassThisTy(decl, typeArgs)
+            }
+        }
+        if (let Some(classTy) <- (ty as ClassTy)) {
+            if (let Some(decl) <- classTy.declPtr) {
+                return GetClassTy(decl, typeArgs)
+            }
+        }
+        if (let Some(interfaceTy) <- (ty as InterfaceTy)) {
+            if (let Some(decl) <- interfaceTy.declPtr) {
+                return GetInterfaceTy(decl, typeArgs)
+            }
+        }
+        if (let Some(structTy) <- (ty as StructTy)) {
+            if (let Some(decl) <- structTy.declPtr) {
+                return GetStructTy(decl, typeArgs)
+            }
+        }
+        if (let Some(refEnumTy) <- (ty as RefEnumTy)) {
+            if (let Some(decl) <- refEnumTy.declPtr) {
+                return GetRefEnumTy(decl, typeArgs)
+            }
+        }
+        if (let Some(enumTy) <- (ty as EnumTy)) {
+            if (let Some(decl) <- enumTy.declPtr) {
+                return GetEnumTy(decl, typeArgs: typeArgs)
+            }
+        }
+        if (let Some(funcTy) <- (ty as FuncTy)) {
+            if (typeArgs.isEmpty()) {
+                return GetInvalidTy()
+            }
+            let params = ArrayList<Ty>()
+            var idx: Int64 = 0
+            while (idx + 1 < typeArgs.size) {
+                params.add(typeArgs[idx])
+                idx++
+            }
+            let cfg = FuncTyConfig()
+            cfg.isC = funcTy.isC
+            cfg.isClosureTy = funcTy.isClosureTy
+            cfg.hasVariableLenArg = funcTy.hasVariableLenArg
+            cfg.noCast = funcTy.noCast
+            return GetFunctionTy(params.toArray(), typeArgs[typeArgs.size - 1], cfg: cfg)
+        }
+        if (let Some(tupleTy) <- (ty as TupleTy)) {
+            return GetTupleTy(typeArgs, isClosureTy: tupleTy.isClosureTy)
+        }
+        if (let Some(arrayTy) <- (ty as ArrayTy)) {
+            if (!typeArgs.isEmpty()) {
+                return GetArrayTy(typeArgs[0], arrayTy.dims)
+            }
+        }
+        if (let Some(varrayTy) <- (ty as VArrayTy)) {
+            if (!typeArgs.isEmpty()) {
+                return GetVArrayTy(typeArgs[0], varrayTy.size)
+            }
+        }
+        if (let Some(pointerTy) <- (ty as PointerTy)) {
+            let _ = pointerTy
+            if (!typeArgs.isEmpty()) {
+                return GetPointerTy(typeArgs[0])
+            }
+        }
+        if (let Some(aliasTy) <- (ty as TypeAliasTy)) {
+            if (let Some(decl) <- aliasTy.declPtr) {
+                return GetTypeAliasTy(decl, typeArgs)
+            }
+        }
+        if (let Some(unionTy) <- (ty as UnionTy)) {
+            let _ = unionTy
+            return GetUnionTy(typeArgs)
+        }
+        if (let Some(intersectionTy) <- (ty as IntersectionTy)) {
+            let _ = intersectionTy
+            return GetIntersectionTy(typeArgs)
+        }
+        return ty
+    }
+
+    private func collectAllUpperBounds(genTy: GenericsTy): TySet {
+        let out = TySet()
+        let worklist = ArrayList<Ty>()
+        for (upper in genTy.upperBounds) {
+            if (out.Add(upper) && upper.IsGeneric()) {
+                worklist.add(upper)
+            }
+        }
+        while (!worklist.isEmpty()) {
+            let last = worklist[worklist.size - 1]
+            worklist.remove(at: worklist.size - 1)
+            if (let Some(currentGen) <- (last as GenericsTy)) {
+                for (upper in currentGen.upperBounds) {
+                    if (out.Add(upper) && upper.IsGeneric()) {
+                        worklist.add(upper)
+                    }
+                }
+            }
+        }
+        return out
+    }
+
+    private func collectNominalSuperTys(ty: Ty, typeMapping: TypeSubst, withExtended: Bool, out: TySet): Unit {
+        if (let Some(decl) <- Ty.GetInheritableDeclPtrOfTy(Some(ty))) {
+            let substituteMapping = GetSubstituteMapping(ty, typeMapping)
+            for (inheritedType in decl.inheritedTypes) {
+                if (let Some(inheritedTy) <- inheritedType.GetTy()) {
+                    if (isInheritableTypeForGenericMapping(inheritedTy)) {
+                        out.AddAll(GetAllSuperTys(inheritedTy, typeMapping: substituteMapping,
+                            withExtended: withExtended))
+                    }
+                }
+            }
+        }
+    }
+
+    private func hasNominalSuperTy(ty: Ty, superTy: Ty, typeMapping: TypeSubst, withExtended: Bool): Bool {
+        if (let Some(decl) <- Ty.GetInheritableDeclPtrOfTy(Some(ty))) {
+            let substituteMapping = GetSubstituteMapping(ty, typeMapping)
+            for (inheritedType in decl.inheritedTypes) {
+                if (let Some(inheritedTy) <- inheritedType.GetTy()) {
+                    if (isInheritableTypeForGenericMapping(inheritedTy) &&
+                        HasSuperTy(inheritedTy, superTy, substituteMapping, withExtended: withExtended)) {
+                        return true
+                    }
+                }
+            }
+        }
+        return false
+    }
+
+    private func mergeTypeSubst(target: TypeSubst, source: TypeSubst): Unit {
+        for (entry in source.entries) {
+            target.Put(entry.tyVar, entry.ty)
+        }
+    }
+
+    private func getAllExtendInterfaceTyHelper(extends: ArrayList<ExtendDecl>, typeArgs: ArrayList<Ty>): TySet {
+        let out = TySet()
+        for (extendDecl in extends) {
+            if (!CheckGenericDeclInstantiation(Some(extendDecl), typeArgs)) {
+                continue
+            }
+            let typeMapping = TypeSubst()
+            if (let Some(extendedType) <- extendDecl.extendedType) {
+                if (let Some(extendedTy) <- extendedType.GetTy()) {
+                    if (extendedTy.typeArgs.size != typeArgs.size) {
+                        continue
+                    }
+                    var idx: Int64 = 0
+                    while (idx < typeArgs.size) {
+                        mergeTypeSubst(typeMapping,
+                            GenerateTypeMappingByTy(Some(extendedTy.typeArgs[idx]), Some(typeArgs[idx])))
+                        idx++
+                    }
+                }
+            }
+            for (superInterfaceTy in extendDecl.inheritedTypes) {
+                if (let Some(inheritedTy) <- superInterfaceTy.GetTy()) {
+                    if (isInheritableTypeForGenericMapping(inheritedTy)) {
+                        let instTy = GetInstantiatedTy(inheritedTy, typeMapping)
+                        out.AddAll(GetAllSuperTys(instTy, typeMapping: TypeSubst(), withExtended: true))
+                    }
+                }
+            }
+        }
+        return out
+    }
+
+    private func hasExtendInterfaceTyHelper(superTy: Ty, extends: ArrayList<ExtendDecl>, typeArgs: ArrayList<Ty>,
+        typeMapping: TypeSubst): Bool {
+        let interfaceTys = getAllExtendInterfaceTyHelper(extends, typeArgs)
+        for (interfaceTy in interfaceTys.values) {
+            let instTy = GetInstantiatedTy(interfaceTy, typeMapping)
+            if (SameTy(instTy, superTy) || HasSuperTy(instTy, superTy, typeMapping, withExtended: true)) {
+                return true
+            }
+        }
+        return false
+    }
+
+    private func isTyExtendInterface(classTy: Ty, interfaceTy: Ty): Bool {
+        if (let Some(decl) <- Ty.GetInheritableDeclPtrOfTy(Some(classTy))) {
+            return getAllExtendInterfaceTyHelper(GetDeclExtends(decl), GetTypeArgs(classTy)).Contains(interfaceTy)
+        }
+        return false
+    }
+
+    private func getExtendInterfaceSuperTy(classTy: Ty, interfaceTy: Ty): Option<Ty> {
+        if (let Some(decl) <- Ty.GetDeclPtrOfTy(Some(classTy))) {
+            if (let Some(classDecl) <- (decl as ClassDecl)) {
+                let mapping = MultiTypeSubst()
+                GenerateGenericMapping(mapping, classTy)
+                let typeMapping = MultiTypeSubstToTypeSubst(mapping)
+                var current = classDecl.GetSuperClassDecl()
+                while (let Some(superDecl) <- current) {
+                    if (let Some(superTy) <- superDecl.GetTy()) {
+                        let instTy = GetInstantiatedTy(superTy, typeMapping)
+                        if (isTyExtendInterface(instTy, interfaceTy)) {
+                            return instTy
+                        }
+                    }
+                    current = superDecl.GetSuperClassDecl()
+                }
+            }
+        }
+        return None
     }
 
     private func declName(decl: Decl): String {
         let name = decl.identifier.Val()
         return if (name.isEmpty()) { decl.identifier.GetRawText() } else { name }
+    }
+
+    private func getInstantiatedGenericTy(ty: GenericsTy, typeMapping: TypeSubst): Ty {
+        var current: Ty = ty
+        let visited = ArrayList<GenericsTy>()
+        var searching = true
+        while (searching) {
+            searching = false
+            if (let Some(currentGen) <- (current as GenericsTy)) {
+                if (containsGeneric(visited, currentGen)) {
+                    return current
+                }
+                visited.add(currentGen)
+                if (let Some(mapped) <- typeMapping.Get(currentGen)) {
+                    current = mapped
+                    searching = true
+                }
+            }
+        }
+        if (!current.IsGeneric() && current.HasGeneric()) {
+            return GetInstantiatedTy(current, typeMapping)
+        }
+        return current
     }
 
     private func instantiateArgs(args: ArrayList<Ty>, typeMapping: TypeSubst): Array<Ty> {

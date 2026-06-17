@@ -82,6 +82,108 @@ Verification:
 - `grep -rn "TODO(selfhost:Sema)" packages/sema/src` reports 4 remaining package-level markers, all outside the tc-core-owned files.
 - Remaining `TODO(selfhost:Sema)` markers in the tc-core-owned files listed by the task: 0.
 
+## 2026-06-17 Continue Pass 5
+
+Files deepened:
+
+- `packages/sema/src/TypeManager.cj`
+
+Implemented behavior:
+
+- Ported C++ array/pointer type canonicalization: nested raw arrays now fold dimensions during construction, invalid array/pointer element types canonicalize to `Invalid`, and multi-dimensional `Array` type arguments project as `Array<elem, dims - 1>` for extend/generic mapping.
+- Replaced one-step generic substitution with C++-shaped chained substitution, including generic-to-generic mapping traversal and composite mapped type instantiation.
+- Deepened block real-type calculation to follow desugared blocks, empty/declaration-ending blocks, and desugared final expressions before falling back to the block type.
+- Replaced thin supertype traversal with instantiated nominal inheritance traversal, transitive generic upper-bound collection, substitution mapping generation from nominal type arguments, and BFS interface inheritance with per-edge mappings.
+- Reworked extend-interface queries to use registered extend declarations for nominal and builtin types, check generic extend instantiation, instantiate inherited interface types from extend target mappings, and resolve the actual superclass that provides an inherited class-to-interface boxing relation.
+- Deepened `HasExtensionRelation`, `GetExtendDeclByInterface`, and `GetExtendDeclByMember` so boxing/extend queries consider direct interface inheritance, superclass-provided extends, interface member origins, and subtype-compatible inherited interfaces.
+- Ported recursive `This` replacement and recursive alias substitution across class/interface/struct/enum/ref-enum/tuple/function/array/VArray/pointer/union/intersection types, preserving cyclic alias nodes and C++ generic-substitution behavior.
+
+Remaining gaps:
+
+- TypeManager still lacks C++ subtype cache/resource-pool behavior and placeholder unification through `LocalTypeArgumentSynthesis` in several subtype branches.
+- Extend lookup still uses the self-hosted map representation only; import-manager-dependent filtering and exact accessibility side effects remain blocked by surrounding modules surfaces.
+- Alias substitution does not yet reproduce alias-export diagnostics or alias-preservation choices for external declaration serialization.
+
+Verification:
+
+- `cjpm build` passes after this pass.
+- Remaining `TODO(selfhost:Sema)` markers in the tc-core-owned files listed by the task: 0.
+
+## 2026-06-17 Continue Pass 6
+
+Files deepened:
+
+- `packages/sema/src/TypeManager.cj`
+
+Implemented behavior:
+
+- Replaced the flattened `IsSubtype` implementation with C++-ordered subtype helper logic: quest/invalid/fast-path handling, placeholder unification through `LocalTypeArgumentSynthesis`, generic upper-bound and alias-parameter checks, classlike supertype comparison, struct/enum interface boxing, exact array/VArray/pointer checks, primitive ideal-literal handling, and extend-interface boxing.
+- Added a subtype query cache keyed by `(leaf, root, implicitBoxed, allowOptionBox)` to match the C++ recursion guard behavior; placeholder-involving entries are dropped after each query like the C++ cache.
+- Ported C++ `implicitBoxed` and `allowOptionBox` semantics that had previously been ignored, including the stricter `Any` behavior when boxing is disabled and nested `Option` auto-boxing only when allowed.
+- Tightened function, tuple, array, VArray, pointer, and primitive subtype checks toward the C++ contracts: function parameters use `noCast`, C-function and vararg flags must match, tuple element checks disable implicit boxing, array dimensions and VArray sizes must match, and non-ideal primitive numeric widening is no longer treated as a general subtype.
+- Deepened `IsTyEqual`, `IsLitBoxableType`, and `CheckTypeCompatibility` with C++-shaped generic equality, enum/ref-enum compatibility, common/specific declaration matching, and constraint snapshot/restore around equality checks.
+- Cleared subtype query state from `Clear` and `ReleaseSemaQueryCaches`, matching the C++ query-cache lifecycle.
+
+Remaining gaps:
+
+- `CheckTypeCompatibility` still preserves the current self-hosted call-site convention (`target, actual`) instead of migrating all callers to the C++ parameter direction in one pass.
+- C++ subtype cache uses pointer-identity/hash containers; the self-hosted version uses linear `SameTy` lookup because shared map/hash support for compound type keys is still local to this port.
+- Placeholder unification is delegated to the current self-hosted `LocalTypeArgumentSynthesis`; any fidelity gaps in that sibling logic remain visible through subtype checks.
+- Imported-declaration lookup, exact diagnostic emission, and alias-export diagnostics remain outside this pass.
+
+Verification:
+
+- `cjpm build` passes after this pass.
+- `grep -rn "TODO(selfhost:Sema)" packages/sema/src` reports 4 package-level markers, all outside the tc-core-owned files.
+- Remaining `TODO(selfhost:Sema)` markers in the tc-core-owned files listed by the task: 0.
+
+## 2026-06-17 Continue Pass 9
+
+Files deepened:
+
+- `packages/sema/src/TypeManager.cj`
+
+Implemented behavior:
+
+- Replaced the no-op `RestoreJavaGenericsTy` with real C++-shaped Java generic restoration. TypeManager now records class/interface type objects created by `GetClassTy`, `GetClassThisTy`, and `GetInterfaceTy`, and retargets matching Java generic-instantiated class/interface types from the generic declaration to the instantiated declaration.
+- Updated the TypeManager clear path to discard the class/interface type registry together with the other manager-owned caches, matching the C++ allocated-type lifecycle within the self-hosted object model.
+
+Remaining gaps:
+
+- The self-hosted registry tracks the nominal type objects TypeManager constructs, not a full C++ `allocatedTys` arena for every type kind.
+- The self-hosted `ClassTy`/`InterfaceTy` model has `decl` and `declPtr` but no separate C++ `commonDecl` field to retarget.
+
+Verification:
+
+- `cjpm build` passes after this pass.
+- `grep -rn "TODO(selfhost:Sema)" packages/sema/src` reports 4 package-level markers, all outside the tc-core-owned files.
+- Remaining `TODO(selfhost:Sema)` markers in the tc-core-owned files listed by the task: 0.
+
+## 2026-06-17 Continue Pass 8
+
+Files deepened:
+
+- `packages/sema/src/TypeManager.cj`
+
+Implemented behavior:
+
+- Ported the C++ `GetOverrideDeclInClassLike` member scan shape. The self-hosted path now skips non-function/property members, honors `withAbstractOverrides`, ignores generic members, and checks property getter/setter functions as override candidates.
+- Tightened `IsFuncDeclSubType`, `IsFuncTySubType`, and `IsFuncDeclEqualType` toward the C++ declaration-override contract: identifiers must match, both declaration types must be function types, parameter types are checked for identity, returns are checked covariantly, and equality is subtype in both directions.
+- Replaced the name-only `PairIsOverrideOrImpl` approximation with C++-shaped function and property override checks. Function matching now uses static/non-static filtering, override cache lookup/update, instantiated outer/generic type mappings, expected instantiated parent mappings, promoted parent-interface mappings, parameter instantiation before identity comparison, and common/specific cross-platform exclusion.
+- Added property override matching through instantiated property types, interface-base generic mapping fallback, and top-overridden accessor map updates for same-instantiated-type property overrides.
+
+Remaining gaps:
+
+- The override cache remains a linear self-hosted table keyed by `SameDecl`/`SameTy` rather than the C++ pointer-keyed hash containers.
+- Property matching uses structural `SameTy` for instantiated target type equality because the self-hosted type manager does not model C++ allocated type pointer identity.
+- Exact diagnostics, import-manager dependent lookup, and full inherited-member accessibility filtering remain outside this pass.
+
+Verification:
+
+- `cjpm build` passes after this pass.
+- `grep -rn "TODO(selfhost:Sema)" packages/sema/src` reports 4 package-level markers, all outside the tc-core-owned files.
+- Remaining `TODO(selfhost:Sema)` markers in the tc-core-owned files listed by the task: 0.
+
 ## 2026-06-17 Continue Pass 3
 
 Files deepened:
@@ -173,4 +275,27 @@ Verification:
 
 - `cjpm build` passes after the code changes in this pass.
 - `grep -rn "TODO(selfhost:Sema)" packages/sema/src` reports 4 remaining package-level markers, all outside the tc-core-owned files.
+- Remaining `TODO(selfhost:Sema)` markers in the tc-core-owned files listed by the task: 0.
+
+## 2026-06-17 Continue Pass 7
+
+Files deepened:
+
+- `packages/sema/src/TypeManager.cj`
+
+Implemented behavior:
+
+- Ported the C++ constructor-shaped placeholder constraint helpers. `AddSumByCtor` now pads missing constructor type arguments with fresh solving placeholders derived from the constrained type variable, builds the constructor generic substitution, records the instantiated placeholder type in the sum bound, and returns that instantiated type.
+- Replaced `ConstrainByCtor`'s previous direct upper-bound insertion with the C++ flow: reuse an existing upper bound with the same constructor shape, otherwise instantiate the constructor with fresh placeholders and accept it only when the constrained placeholder is a subtype under `allowOptionBox: false`.
+- Replaced the kind/name-only `OfSameCtor` check with C++-style constructor substitution equality over valid types and matching type-argument arity.
+
+Remaining gaps:
+
+- The helpers conservatively return `None`/`false` when a constructor type argument is not represented by a `GenericsTy`; the C++ reference asserts that shape through `StaticCast`.
+- Full override/property matching and import-manager dependent lookup remain outside this focused pass.
+
+Verification:
+
+- `cjpm build` passes after this pass.
+- `grep -rn "TODO(selfhost:Sema)" packages/sema/src` reports 4 package-level markers, all outside the tc-core-owned files.
 - Remaining `TODO(selfhost:Sema)` markers in the tc-core-owned files listed by the task: 0.
