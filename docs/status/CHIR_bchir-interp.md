@@ -21,6 +21,9 @@ Completed in this pass:
 - Ported successful interpreter execution for reference-equality intrinsics (`OBJECT_REFEQ`, `RAW_ARRAY_REFEQ`, `FUNC_REFEQ`) and `ARRAY_GET_UNCHECKED`.
 - Added explicit exception-slot handling for `RAISE_EXC` and `GET_EXCEPTION`, plus uncaught `RAISE` trapping, and taught CHIR-to-BCHIR emission to produce `RAISE(_EXC)` and `GET_EXCEPTION`.
 - Added `RAW_ARRAY_INIT_BY_VALUE` emission and interpreter fill behavior over the existing raw-array pointer/path model.
+- Deepened `BCHIRLinker` toward the C++ linker: global names are reserved before function bodies are linked, per-package file/type/string tables are remapped into the linked `BCHIR`, code-position annotations are preserved with remapped file IDs, and string operands no longer duplicate linked string table entries blindly.
+- Ported linker-specific handling for C++ BCHIR layouts that are not fixed-size raw copies: `ALLOCATE_CLASS_EXC`, `INTRINSIC1` type aux remapping, `SYSCALL`, `CAPPLY`, and sorted-table `SWITCH` target relocation.
+- Matched the C++ linker’s class-table behavior more closely by materializing class metadata for boxed/`INSTANCEOF` nominal types without local serialized class info and by recording transitive superclasses in linked `BCHIRClassInfo`.
 - Kept `cjpm build` green and confirmed no remaining `TODO(selfhost:CHIR)` markers under `packages/chir/src`.
 
 Remaining C++ fidelity gaps:
@@ -29,5 +32,6 @@ Remaining C++ fidelity gaps:
 - `INVOKE(_EXC)`, `TYPECAST(_EXC)`, and `SWITCH` now cover their ordinary successful paths, but exception-target behavior, checked/overflow-exact casts, failed casts, and diagnostic/reporting details remain incomplete relative to the C++ `BCHIRInterpreter.cpp`.
 - `VARRAY_GET` now covers ordinary reads, but bad-index exception construction/propagation is still simplified to interpreter trap behavior.
 - Interpreter intrinsics now cover reference equality and unchecked raw-array get, but syscalls, SIMD/platform intrinsics, the broader intrinsic set, and const-eval diagnostics remain incomplete relative to the C++ `BCHIRInterpreter.cpp` and `BCHIRIntrinsic.cpp`.
+- The linker now covers more bytecode layouts, but it still lacks the C++ const-eval-only manual global initializer map and generated calls to const-init functions.
 - The local CHIR IR model in this worktree exposes `GET_ELEMENT_REF` and `STORE_ELEMENT_REF` kinds but not yet the C++ path-carrying expression classes/accessors; translation for those remains blocked on that real IR surface rather than adding a duplicate compatibility type.
 - String runtime representation is still simplified versus the C++ core-compatible tuple/raw-array layout.

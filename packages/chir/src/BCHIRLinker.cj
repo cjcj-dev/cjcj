@@ -6,6 +6,9 @@ public class BCHIRLinker {
     private let topBchir: BCHIR = BCHIR()
     private let functionBodyIndex: HashMap<String, Int64> = HashMap<String, Int64>()
     private let functionPlaceholders: HashMap<String, ArrayList<Int64>> = HashMap<String, ArrayList<Int64>>()
+    private let fileNameIds: HashMap<String, Int64> = HashMap<String, Int64>()
+    private let typeIds: HashMap<Int64, Int64> = HashMap<Int64, Int64>()
+    private let stringIds: HashMap<String, Int64> = HashMap<String, Int64>()
     private let globalIds: HashMap<String, Int64> = HashMap<String, Int64>()
     private let classIds: HashMap<String, Int64> = HashMap<String, Int64>()
     private let methodIds: HashMap<String, Int64> = HashMap<String, Int64>()
@@ -24,13 +27,15 @@ public class BCHIRLinker {
         topDef.PushCell(0)
         GenerateDummyAbortFunction(topDef)
         for (pkg in packages) {
-            LinkFunctions(pkg, topDef)
             LinkGlobalNames(pkg)
             if (!pkg.GetMainMangledName().isEmpty()) {
                 topBchir.SetMainMangledName(pkg.GetMainMangledName())
                 topBchir.SetMainExpectedArgs(pkg.GetMainExpectedArgs())
             }
             topBchir.packageName = pkg.packageName
+        }
+        for (pkg in packages) {
+            LinkFunctions(pkg, topDef)
         }
         topDef.Set(jumpToInit, topDef.NextIndex())
         for (pkg in packages) {
@@ -69,8 +74,11 @@ public class BCHIRLinker {
     }
 
     private func LinkGlobalInitializers(pkg: BCHIR, topDef: BCHIRDefinition): Unit {
+        let fileMap = UnlinkedFilesToLinkedFiles(pkg.GetFileNames())
+        let typeMap = UnlinkedTypesToLinkedTypes(pkg.GetTypes())
+        let stringMap = UnlinkedStringsToLinkedStrings(pkg.GetStrings())
         for (entry in pkg.GetGlobalVars()) {
-            TraverseAndLink(pkg, entry.definition, topDef)
+            TraverseAndLink(pkg, entry.definition, topDef, fileMap, typeMap, stringMap)
             if (let Some(id) <- globalIds.get(entry.name)) {
                 topDef.PushOp(OpCode.GVAR_SET)
                 topDef.PushCell(id)
@@ -79,16 +87,20 @@ public class BCHIRLinker {
     }
 
     private func LinkFunctions(pkg: BCHIR, topDef: BCHIRDefinition): Unit {
+        let fileMap = UnlinkedFilesToLinkedFiles(pkg.GetFileNames())
+        let typeMap = UnlinkedTypesToLinkedTypes(pkg.GetTypes())
+        let stringMap = UnlinkedStringsToLinkedStrings(pkg.GetStrings())
         for (entry in pkg.GetFunctions()) {
             let bodyIndex = topDef.NextIndex()
             ResolveFunctionPlaceholders(entry.name, bodyIndex, topDef)
             BCHIRPushOpWithName(topDef, OpCode.FRAME, entry.name)
             topDef.PushCell(entry.definition.GetNumLVars())
-            TraverseAndLink(pkg, entry.definition, topDef)
+            TraverseAndLink(pkg, entry.definition, topDef, fileMap, typeMap, stringMap)
         }
     }
 
-    private func TraverseAndLink(pkg: BCHIR, definition: BCHIRDefinition, topDef: BCHIRDefinition): Unit {
+    private func TraverseAndLink(pkg: BCHIR, definition: BCHIRDefinition, topDef: BCHIRDefinition,
+        fileMap: ArrayList<Int64>, typeMap: ArrayList<Int64>, stringMap: ArrayList<Int64>): Unit {
         let offset = topDef.NextIndex()
         var current: Int64 = 0
         while (current < definition.Size()) {
@@ -99,14 +111,18 @@ public class BCHIRLinker {
             if (!mangledName.isEmpty()) {
                 topDef.AddMangledNameAnnotation(outIndex, mangledName)
             }
+            if (let Some(position) <- definition.GetCodePositionAnnotation(current)) {
+                topDef.AddCodePositionAnnotation(outIndex, BCHIRCodePosition(MapIndex(fileMap, position.fileID),
+                    position.line, position.column))
+            }
             let next = current + GetLinkedInstructionSize(definition, current, opCode)
-            LinkInstructionArguments(pkg, definition, topDef, current, opCode, offset)
+            LinkInstructionArguments(pkg, definition, topDef, current, opCode, offset, typeMap, stringMap)
             current = next
         }
     }
 
     private func LinkInstructionArguments(pkg: BCHIR, definition: BCHIRDefinition, topDef: BCHIRDefinition,
-        current: Int64, opCode: OpCode, offset: Int64): Unit {
+        current: Int64, opCode: OpCode, offset: Int64, typeMap: ArrayList<Int64>, stringMap: ArrayList<Int64>): Unit {
         if (opCode == OpCode.GVAR) {
             let name = definition.GetMangledNameAnnotation(current)
             if (let Some(id) <- globalIds.get(name)) {
@@ -119,25 +135,54 @@ public class BCHIRLinker {
             let name = definition.GetMangledNameAnnotation(current)
             topDef.PushCell(FunctionIndexOrPlaceholder(name, topDef))
         } else if (opCode == OpCode.STRING) {
-            topDef.PushCell(LinkString(pkg, definition.Get(current + 1)))
+            topDef.PushCell(MapIndex(stringMap, definition.Get(current + 1)))
         } else if (opCode == OpCode.JUMP) {
             topDef.PushCell(definition.Get(current + 1) + offset)
         } else if (opCode == OpCode.BRANCH) {
             topDef.PushCell(definition.Get(current + 1) + offset)
             topDef.PushCell(definition.Get(current + 2) + offset)
-        } else if (opCode == OpCode.ALLOCATE_CLASS || opCode == OpCode.BOX || opCode == OpCode.INSTANCEOF) {
+        } else if (opCode == OpCode.ALLOCATE_CLASS || opCode == OpCode.ALLOCATE_CLASS_EXC) {
             let name = definition.GetMangledNameAnnotation(current)
             topDef.PushCell(GetClassId(name))
-            var argIndex: Int64 = 2
-            while (argIndex <= GetOpCodeArgSize(opCode)) {
-                topDef.PushCell(definition.Get(current + argIndex))
-                argIndex++
+            topDef.PushCell(definition.Get(current + 2))
+            if (opCode == OpCode.ALLOCATE_CLASS_EXC) {
+                topDef.PushCell(definition.Get(current + 3) + offset)
             }
+        } else if (opCode == OpCode.BOX || opCode == OpCode.INSTANCEOF) {
+            let name = definition.GetMangledNameAnnotation(current)
+            let classId = GetClassId(name)
+            if (let None <- pkg.GetSClass(name)) {
+                LinkClass(pkg, name)
+            }
+            topDef.PushCell(classId)
         } else if (opCode == OpCode.INVOKE || opCode == OpCode.INVOKE_EXC) {
             topDef.PushCell(definition.Get(current + 1))
             topDef.PushCell(GetMethodId(definition.GetMangledNameAnnotation(current)))
             if (opCode == OpCode.INVOKE_EXC) {
                 topDef.PushCell(definition.Get(current + 3) + offset)
+            }
+        } else if (opCode == OpCode.INTRINSIC1) {
+            topDef.PushCell(definition.Get(current + 1))
+            topDef.PushCell(MapOptionalTypeIndex(typeMap, definition.Get(current + 2)))
+        } else if (opCode == OpCode.SYSCALL) {
+            let numberOfArgs = definition.Get(current + 2)
+            topDef.PushCell(MapIndex(stringMap, definition.Get(current + 1)))
+            topDef.PushCell(numberOfArgs)
+            topDef.PushCell(MapIndex(typeMap, definition.Get(current + 3)))
+            var argIndex: Int64 = 0
+            while (argIndex < numberOfArgs) {
+                topDef.PushCell(MapIndex(typeMap, definition.Get(current + 4 + argIndex)))
+                argIndex++
+            }
+        } else if (opCode == OpCode.SWITCH) {
+            LinkSwitch(definition, topDef, current, offset)
+        } else if (opCode == OpCode.CAPPLY) {
+            let argsSize = definition.Get(current + 1)
+            topDef.PushCell(argsSize)
+            var typeIndex: Int64 = 0
+            while (typeIndex <= argsSize) {
+                topDef.PushCell(MapIndex(typeMap, definition.Get(current + 2 + typeIndex)))
+                typeIndex++
             }
         } else if (OpHasExceptionHandler(opCode)) {
             CopyExceptionOpArgs(definition, topDef, current, opCode, offset)
@@ -170,6 +215,12 @@ public class BCHIRLinker {
             let caseCount = definition.Get(current + 2)
             return 1 + 2 + caseCount * 2 + 1 + caseCount
         }
+        if (opCode == OpCode.SYSCALL) {
+            return 4 + definition.Get(current + 2)
+        }
+        if (opCode == OpCode.CAPPLY) {
+            return 3 + definition.Get(current + 1)
+        }
         if (opCode == OpCode.GETREF || opCode == OpCode.STOREINREF || opCode == OpCode.FIELD_TPL) {
             return 2 + definition.Get(current + 1)
         }
@@ -201,10 +252,6 @@ public class BCHIRLinker {
         }
     }
 
-    private func LinkString(pkg: BCHIR, oldIndex: Int64): Int64 {
-        return topBchir.AddString(pkg.GetString(oldIndex))
-    }
-
     private func LinkClasses(pkg: BCHIR): Unit {
         for (name in pkg.GetSClassTable().keys()) {
             LinkClass(pkg, name)
@@ -220,9 +267,16 @@ public class BCHIRLinker {
         classInfo.mangledName = name
         if (let Some(serialized) <- pkg.GetSClass(name)) {
             for (superName in serialized.superClasses) {
-                let superId = GetClassId(superName)
-                classInfo.superClasses.add(superId)
                 LinkClass(pkg, superName)
+            }
+            for (superName in serialized.superClasses) {
+                let superId = GetClassId(superName)
+                AddUniqueClassId(classInfo, superId)
+                if (let Some(superInfo) <- topBchir.GetClass(superId)) {
+                    for (indirectSuperId in superInfo.superClasses) {
+                        AddUniqueClassId(classInfo, indirectSuperId)
+                    }
+                }
             }
             for (methodName in serialized.vtable.keys()) {
                 if (let Some(funcName) <- serialized.vtable.get(methodName)) {
@@ -260,5 +314,90 @@ public class BCHIRLinker {
         let next = nextGlobalId
         nextGlobalId++
         return next
+    }
+
+    private func UnlinkedFilesToLinkedFiles(fileNames: ArrayList<String>): ArrayList<Int64> {
+        let out = ArrayList<Int64>()
+        for (name in fileNames) {
+            if (let Some(index) <- fileNameIds.get(name)) {
+                out.add(index)
+            } else {
+                let next = topBchir.AddFileName(name)
+                fileNameIds[name] = next
+                out.add(next)
+            }
+        }
+        return out
+    }
+
+    private func UnlinkedTypesToLinkedTypes(types: ArrayList<Type>): ArrayList<Int64> {
+        let out = ArrayList<Int64>()
+        for (ty in types) {
+            let hash = ty.Hash()
+            if (let Some(index) <- typeIds.get(hash)) {
+                out.add(index)
+            } else {
+                let next = topBchir.AddType(ty)
+                typeIds[hash] = next
+                out.add(next)
+            }
+        }
+        return out
+    }
+
+    private func UnlinkedStringsToLinkedStrings(strings: ArrayList<String>): ArrayList<Int64> {
+        let out = ArrayList<Int64>()
+        for (text in strings) {
+            if (let Some(index) <- stringIds.get(text)) {
+                out.add(index)
+            } else {
+                let next = topBchir.AddString(text)
+                stringIds[text] = next
+                out.add(next)
+            }
+        }
+        return out
+    }
+
+    private func MapIndex(map: ArrayList<Int64>, oldIndex: Int64): Int64 {
+        if (oldIndex >= 0 && oldIndex < map.size) {
+            return map[oldIndex]
+        }
+        return oldIndex
+    }
+
+    private func MapOptionalTypeIndex(typeMap: ArrayList<Int64>, oldIndex: Int64): Int64 {
+        if (oldIndex == 4294967295) {
+            return oldIndex
+        }
+        return MapIndex(typeMap, oldIndex)
+    }
+
+    private func LinkSwitch(definition: BCHIRDefinition, topDef: BCHIRDefinition, current: Int64, offset: Int64): Unit {
+        let caseCount = definition.Get(current + 2)
+        let caseStart = current + 3
+        topDef.PushCell(definition.Get(current + 1))
+        topDef.PushCell(caseCount)
+        var caseIndex: Int64 = 0
+        while (caseIndex < caseCount) {
+            topDef.Push8Bytes(definition.Get8Bytes(caseStart + caseIndex * 2))
+            caseIndex++
+        }
+        let defaultTargetIndex = caseStart + caseCount * 2
+        topDef.PushCell(definition.Get(defaultTargetIndex) + offset)
+        var targetIndex: Int64 = 0
+        while (targetIndex < caseCount) {
+            topDef.PushCell(definition.Get(defaultTargetIndex + 1 + targetIndex) + offset)
+            targetIndex++
+        }
+    }
+
+    private func AddUniqueClassId(classInfo: BCHIRClassInfo, classId: Int64): Unit {
+        for (existing in classInfo.superClasses) {
+            if (existing == classId) {
+                return
+            }
+        }
+        classInfo.superClasses.add(classId)
     }
 }
