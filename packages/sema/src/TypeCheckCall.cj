@@ -1092,6 +1092,9 @@ private func CheckCallArgs(diag: Option<BasicDiagnosticEngine>, typeManager: Typ
 
 private func CheckFuncPtrCall(typeManager: TypeManager, diag: Option<BasicDiagnosticEngine>, target: Option<Ty>,
     ce: CallExpr, funcTy: FuncTy): Bool {
+    if (IsValidCFuncConstructorCall(ce)) {
+        return true
+    }
     if (let Some(base) <- ce.baseFunc) {
         if (let Some(targetDecl) <- base.GetTarget()) {
             if (targetDecl.astKind == ASTKind.TYPE_ALIAS_DECL) {

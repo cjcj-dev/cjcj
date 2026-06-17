@@ -5,6 +5,7 @@ import cangjie_compiler::ast.*
 import cangjie_compiler::basic.DiagnosticEngine as BasicDiagnosticEngine
 import cangjie_compiler::basic.DiagKind as BasicDiagKind
 import cangjie_compiler::basic.DiagKindRefactor as BasicDiagKindRefactor
+import cangjie_compiler::basic.DiagArgument as BasicDiagArgument
 import cangjie_compiler::basic.Position as BasicPosition
 
 private func ToBasicPosition(pos: Position): BasicPosition {
@@ -13,6 +14,19 @@ private func ToBasicPosition(pos: Position): BasicPosition {
 
 private func DiagOld(diag: BasicDiagnosticEngine, node: Node, kind: BasicDiagKind): Unit {
     let _ = diag.Diagnose(ToBasicPosition(node.begin), ToBasicPosition(node.end), kind)
+}
+
+private func StringDiagArgs(values: Array<String>): Array<BasicDiagArgument> {
+    let args = ArrayList<BasicDiagArgument>()
+    for (value in values) {
+        args.add(BasicDiagArgument(value))
+    }
+    return args.toArray()
+}
+
+private func DiagOldStrings(diag: BasicDiagnosticEngine, node: Node, kind: BasicDiagKind,
+    values: Array<String>): Unit {
+    let _ = diag.Diagnose(ToBasicPosition(node.begin), ToBasicPosition(node.end), kind, args: StringDiagArgs(values))
 }
 
 private func InvalidExprTy(expr: Expr): Ty {
@@ -443,7 +457,8 @@ public func SynPointerExpr(typeManager: TypeManager, pointerExpr: PointerExpr): 
     return InvalidExprTy(pointerExpr)
 }
 
-public func SynCFuncCall(typeManager: TypeManager, ce: CallExpr): Bool {
+public func SynCFuncCall(typeManager: TypeManager, ce: CallExpr,
+    diag!: Option<BasicDiagnosticEngine> = None): Bool {
     if (let None <- ce.baseFunc) {
         ce.SetTy(TypeManager.GetInvalidTy())
         return false
@@ -460,16 +475,32 @@ public func SynCFuncCall(typeManager: TypeManager, ce: CallExpr): Bool {
         return false
     }
     if (ce.args.size != 1) {
+        if (let Some(diagValue) <- diag) {
+            DiagOld(diagValue, base, BasicDiagKind.sema_cfunc_too_many_arguments)
+        }
         ce.SetTy(TypeManager.GetInvalidTy())
         return false
     }
     let argTy = FuncArgTy(ce.args[0])
-    if (!ce.args[0].name.Empty() || !argTy.IsPointer()) {
-        ce.SetTy(TypeManager.GetInvalidTy())
-        return false
+    var valid = true
+    if (!ce.args[0].name.Empty()) {
+        if (let Some(diagValue) <- diag) {
+            DiagOldStrings(diagValue, ce.args[0], BasicDiagKind.sema_unknown_named_argument,
+                [ce.args[0].name.Val()])
+        }
+        valid = false
     }
+    if (argTy.IsPointer()) {
+        ce.SetTy(baseTy)
+        let _ = typeManager
+        return valid
+    }
+    if (let Some(diagValue) <- diag) {
+        DiagOld(diagValue, ce.args[0], BasicDiagKind.sema_cfunc_ctor_must_be_cpointer)
+    }
+    ce.SetTy(TypeManager.GetInvalidTy())
     let _ = typeManager
-    return true
+    return false
 }
 
 public func ChkCStringCall(typeManager: TypeManager, target: Ty, ce: CallExpr): Bool {
@@ -564,7 +595,8 @@ public func ChkPointerCall(typeManager: TypeManager, target: Ty, ce: CallExpr): 
     return false
 }
 
-public func ChkCFuncCall(typeManager: TypeManager, target: Ty, ce: CallExpr): Bool {
+public func ChkCFuncCall(typeManager: TypeManager, target: Ty, ce: CallExpr,
+    diag!: Option<BasicDiagnosticEngine> = None): Bool {
     if (let None <- ce.baseFunc) {
         return false
     }
@@ -585,7 +617,11 @@ public func ChkCFuncCall(typeManager: TypeManager, target: Ty, ce: CallExpr): Bo
         return false
     }
     ce.baseFunc.getOrThrow().SetTarget(realTarget)
-    return SynCFuncCall(typeManager, ce)
+    let ok = SynCFuncCall(typeManager, ce, diag: diag)
+    if (!ok) {
+        ce.SetTy(TypeManager.GetInvalidTy())
+    }
+    return ok
 }
 
 public func ChkBuiltinCall(typeManager: TypeManager, target: Ty, ce: CallExpr,
@@ -602,7 +638,7 @@ public func ChkBuiltinCall(typeManager: TypeManager, target: Ty, ce: CallExpr,
     if (ChkVArrayCall(typeManager, target, ce)) {
         return true
     }
-    if (ChkCFuncCall(typeManager, target, ce)) {
+    if (ChkCFuncCall(typeManager, target, ce, diag: diag)) {
         return true
     }
     return false
