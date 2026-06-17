@@ -307,7 +307,19 @@ public class TypeManager {
     }
 
     public func GetArrayTy(elemTy: Ty, dims: UInt64): ArrayTy {
-        return ArrayTy(elemTy, dims)
+        var realElemTy = elemTy
+        var realDims = dims
+        if (Ty.IsTyCorrect(elemTy)) {
+            if (let Some(arrayTy) <- (elemTy as ArrayTy)) {
+                if (!arrayTy.typeArgs.isEmpty()) {
+                    realElemTy = arrayTy.typeArgs[0]
+                    realDims += arrayTy.dims
+                }
+            }
+        } else {
+            realElemTy = GetInvalidTy()
+        }
+        return ArrayTy(realElemTy, realDims)
     }
 
     public func GetVArrayTy(elemTy: Ty, size: Int64): VArrayTy {
@@ -315,7 +327,8 @@ public class TypeManager {
     }
 
     public func GetPointerTy(elemTy: Ty): PointerTy {
-        return PointerTy(elemTy)
+        let realElemTy = if (Ty.IsTyCorrect(elemTy)) { elemTy } else { GetInvalidTy() }
+        return PointerTy(realElemTy)
     }
 
     public func GetArrayTy(): ArrayTy {
@@ -407,10 +420,7 @@ public class TypeManager {
 
     public func GetInstantiatedTy(ty: Ty, typeMapping: TypeSubst): Ty {
         if (let Some(gen) <- (ty as GenericsTy)) {
-            if (let Some(mapped) <- typeMapping.Get(gen)) {
-                return mapped
-            }
-            return gen
+            return getInstantiatedGenericTy(gen, typeMapping)
         }
         if (let Some(arrayTy) <- (ty as ArrayTy)) {
             if (arrayTy.typeArgs.size == 1) {
@@ -634,6 +644,18 @@ public class TypeManager {
 
     public func GetTypeArgs(ty: Ty): ArrayList<Ty> {
         let out = ArrayList<Ty>()
+        if (let Some(arrayTy) <- (ty as ArrayTy)) {
+            if (arrayTy.dims == 1u64) {
+                for (arg in arrayTy.typeArgs) {
+                    out.add(arg)
+                }
+                return out
+            }
+            if (!arrayTy.typeArgs.isEmpty() && arrayTy.dims > 1u64) {
+                out.add(GetArrayTy(arrayTy.typeArgs[0], arrayTy.dims - 1u64))
+                return out
+            }
+        }
         for (arg in ty.typeArgs) {
             out.add(arg)
         }
@@ -641,6 +663,31 @@ public class TypeManager {
     }
 
     public func GetBlockRealTy(block: Block): Ty {
+        if (let Some(desugar) <- block.desugarExpr) {
+            if (let Some(desugarTy) <- desugar.GetTy()) {
+                return desugarTy
+            }
+            return GetInvalidTy()
+        }
+        if (block.body.isEmpty()) {
+            return GetPrimitiveTy(TypeKind.TYPE_UNIT)
+        }
+        let lastNode = block.body[block.body.size - 1]
+        if (lastNode.IsDecl()) {
+            return GetPrimitiveTy(TypeKind.TYPE_UNIT)
+        }
+        if (let Some(expr) <- (lastNode as Expr)) {
+            if (let Some(desugar) <- expr.desugarExpr) {
+                if (let Some(desugarTy) <- desugar.GetTy()) {
+                    return desugarTy
+                }
+                return GetInvalidTy()
+            }
+            if (let Some(exprTy) <- expr.GetTy()) {
+                return exprTy
+            }
+            return GetInvalidTy()
+        }
         if (let Some(ty) <- block.GetTy()) {
             return ty
         }
@@ -648,23 +695,65 @@ public class TypeManager {
     }
 
     public func GetRealExtendedTy(child: Ty, interfaceTy: Ty): Ty {
-        let _ = interfaceTy
+        if (interfaceTy.IsInterface() && child.IsClass() && !isTyExtendInterface(child, interfaceTy)) {
+            if (let Some(superTy) <- getExtendInterfaceSuperTy(child, interfaceTy)) {
+                return superTy
+            }
+        }
         return child
     }
 
     public func GetAllSuperTys(ty: Ty, typeMapping!: TypeSubst = TypeSubst(), withExtended!: Bool = true): TySet {
-        let _ = typeMapping
-        let _ = withExtended
         let out = TySet()
-        out.Add(ty)
-        collectDeclaredSupers(ty, out)
-        out.Add(anyTy)
+        if (!Ty.IsTyCorrect(ty)) {
+            return out
+        }
+        let maybeInstTy = if (typeMapping.IsEmpty()) { ty } else { GetInstantiatedTy(ty, typeMapping) }
+        if (maybeInstTy.IsClassLike() || maybeInstTy.IsStruct()) {
+            out.Add(maybeInstTy)
+        } else if (let Some(genTy) <- (maybeInstTy as GenericsTy)) {
+            out.AddAll(collectAllUpperBounds(genTy))
+            out.Add(genTy)
+        } else if (let Some(intersectionTy) <- (maybeInstTy as IntersectionTy)) {
+            for (item in intersectionTy.tys) {
+                out.AddAll(GetAllSuperTys(item, typeMapping: typeMapping, withExtended: withExtended))
+            }
+            out.Add(intersectionTy)
+        }
+        if (ty.IsNominal()) {
+            collectNominalSuperTys(ty, typeMapping, withExtended, out)
+        }
+        if (withExtended) {
+            for (extendInterfaceTy in GetAllExtendInterfaceTy(ty).values) {
+                out.Add(GetInstantiatedTy(extendInterfaceTy, typeMapping))
+            }
+        }
         return out
     }
 
     public func HasSuperTy(ty: Ty, superTy: Ty, typeMapping: TypeSubst, withExtended!: Bool = true): Bool {
-        let supers = GetAllSuperTys(ty, typeMapping: typeMapping, withExtended: withExtended)
-        return supers.Contains(superTy)
+        if (!Ty.IsTyCorrect(ty) || !Ty.IsTyCorrect(superTy)) {
+            return false
+        }
+        let maybeInstTy = if (typeMapping.IsEmpty()) { ty } else { GetInstantiatedTy(ty, typeMapping) }
+        if (SameTy(maybeInstTy, superTy)) {
+            return true
+        }
+        if (let Some(genTy) <- (maybeInstTy as GenericsTy)) {
+            if (collectAllUpperBounds(genTy).Contains(superTy)) {
+                return true
+            }
+        } else if (let Some(intersectionTy) <- (maybeInstTy as IntersectionTy)) {
+            for (item in intersectionTy.tys) {
+                if (HasSuperTy(item, superTy, typeMapping, withExtended: withExtended)) {
+                    return true
+                }
+            }
+        }
+        if (ty.IsNominal() && hasNominalSuperTy(ty, superTy, typeMapping, withExtended)) {
+            return true
+        }
+        return withExtended && HasExtendedInterfaceTy(ty, superTy, typeMapping)
     }
 
     public func GetAllCommonSuperTys(tys: TySet): TySet {
@@ -689,24 +778,43 @@ public class TypeManager {
     }
 
     public func GetSubstituteMapping(nominalTy: Ty, typeMapping: TypeSubst): TypeSubst {
-        let _ = nominalTy
-        return typeMapping.Clone()
+        if (let Some(decl) <- Ty.GetInheritableDeclPtrOfTy(Some(nominalTy))) {
+            let substituteMapping = GenerateTypeMapping(decl, nominalTy.typeArgs)
+            for (entry in substituteMapping.entries) {
+                entry.ty = GetInstantiatedTy(entry.ty, typeMapping)
+            }
+            return substituteMapping
+        }
+        return TypeSubst()
     }
 
     public func GetAllSuperInterfaceTysBFS(decl: InheritableDecl): ArrayList<InterfaceTy> {
         let out = ArrayList<InterfaceTy>()
         let queue = ArrayList<InterfaceTy>()
+        let mappings = ArrayList<TypeSubst>()
         for (ty in decl.GetSuperInterfaceTys()) {
             queue.add(ty)
+            mappings.add(GetSubstituteMapping(ty, TypeSubst()))
         }
         var index: Int64 = 0
         while (index < queue.size) {
             let item = queue[index]
+            let itemMapping = mappings[index]
             index++
             if (!containsInterface(out, item)) {
                 out.add(item)
-                for (parent in item.GetSuperInterfaceTys()) {
-                    queue.add(parent)
+                if (let Some(interfaceDecl) <- item.declPtr) {
+                    for (parentType in interfaceDecl.inheritedTypes) {
+                        if (let Some(parentTy) <- parentType.GetTy()) {
+                            if (let Some(parentInterfaceTy) <- (parentTy as InterfaceTy)) {
+                                let parentMapping = GetSubstituteMapping(parentInterfaceTy, itemMapping)
+                                if (let Some(instParent) <- (GetInstantiatedTy(parentInterfaceTy, itemMapping) as InterfaceTy)) {
+                                    queue.add(instParent)
+                                    mappings.add(parentMapping)
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -834,20 +942,21 @@ public class TypeManager {
     }
 
     public func HasExtensionRelation(childTy: Ty, interfaceTy: Ty): Bool {
-        for (entry in builtinTyToExtendMap) {
-            if (SameTy(entry.ty, childTy)) {
-                for (extendDecl in entry.extends) {
-                    for (inherited in extendDecl.inheritedTypes) {
-                        if (let Some(ty) <- inherited.GetTy()) {
-                            if (SameTy(ty, interfaceTy)) {
-                                return true
-                            }
-                        }
-                    }
-                }
-            }
+        if (!Ty.IsTyCorrect(childTy) || !Ty.IsTyCorrect(interfaceTy)) {
+            return false
         }
-        return false
+        let validRelation = childTy.kind != TypeKind.TYPE_INTERFACE && childTy.kind != TypeKind.TYPE_NOTHING &&
+            interfaceTy.kind == TypeKind.TYPE_INTERFACE
+        if (!validRelation) {
+            return false
+        }
+        if (interfaceTy.IsAny()) {
+            return true
+        }
+        if (!childTy.IsClass()) {
+            return GetAllSuperTys(childTy, typeMapping: TypeSubst(), withExtended: true).Contains(interfaceTy)
+        }
+        return GetAllExtendInterfaceTy(childTy).Contains(interfaceTy)
     }
 
     public func IsFuncParameterTypesIdentical(t1: FuncTy, t2: FuncTy): Bool {
@@ -1111,14 +1220,19 @@ public class TypeManager {
     }
 
     public func GetAllExtendInterfaceTy(ty: Ty): TySet {
-        let out = TySet()
-        for (entry in builtinTyToExtendMap) {
-            if (SameTy(entry.ty, ty)) {
-                for (extendDecl in entry.extends) {
-                    for (inherited in extendDecl.inheritedTypes) {
-                        if (let Some(inheritedTy) <- inherited.GetTy()) {
-                            out.Add(inheritedTy)
-                        }
+        if (!Ty.IsTyCorrect(ty)) {
+            return TySet()
+        }
+        let out = getAllExtendInterfaceTyHelper(GetAllExtendsByTy(ty), GetTypeArgs(ty))
+        if (ty.IsClass()) {
+            let directSupers = GetAllSuperTys(ty, typeMapping: TypeSubst(), withExtended: false)
+            for (superTy in directSupers.values) {
+                if (SameTy(superTy, ty)) {
+                    continue
+                }
+                if (let Some(classTy) <- (superTy as ClassTy)) {
+                    if (let Some(classDecl) <- classTy.declPtr) {
+                        out.AddAll(getAllExtendInterfaceTyHelper(GetDeclExtends(classDecl), GetTypeArgs(superTy)))
                     }
                 }
             }
@@ -1127,8 +1241,27 @@ public class TypeManager {
     }
 
     public func HasExtendedInterfaceTy(ty: Ty, superTy: Ty, typeMapping: TypeSubst): Bool {
-        let _ = typeMapping
-        return GetAllExtendInterfaceTy(ty).Contains(superTy)
+        if (!Ty.IsTyCorrect(ty) || !Ty.IsTyCorrect(superTy)) {
+            return false
+        }
+        if (hasExtendInterfaceTyHelper(superTy, GetAllExtendsByTy(ty), GetTypeArgs(ty), typeMapping)) {
+            return true
+        }
+        if (ty.IsClass()) {
+            if (let Some(decl) <- Ty.GetInheritableDeclPtrOfTy(Some(ty))) {
+                let substituteMapping = GetSubstituteMapping(ty, typeMapping)
+                for (inheritedType in decl.inheritedTypes) {
+                    if (let Some(inheritedTy) <- inheritedType.GetTy()) {
+                        if (inheritedTy.IsClass() && isInheritableTypeForGenericMapping(inheritedTy)) {
+                            if (HasExtendedInterfaceTy(inheritedTy, superTy, substituteMapping)) {
+                                return true
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        return false
     }
 
     public func GetTyForExtendMap(ty: Ty): Ty {
@@ -1484,10 +1617,14 @@ public class TypeManager {
     }
 
     public func GetExtendDeclByInterface(baseTy: Ty, interfaceTy: Ty): Option<ExtendDecl> {
-        for (extendDecl in GetBuiltinTyExtends(baseTy)) {
+        if (!interfaceTy.IsInterface()) {
+            return None
+        }
+        let extendedTy = GetRealExtendedTy(baseTy, interfaceTy)
+        for (extendDecl in GetAllExtendsByTy(extendedTy)) {
             for (inherited in extendDecl.inheritedTypes) {
                 if (let Some(ty) <- inherited.GetTy()) {
-                    if (SameTy(ty, interfaceTy)) {
+                    if (IsSubtype(ty, interfaceTy)) {
                         return extendDecl
                     }
                 }
@@ -1497,11 +1634,13 @@ public class TypeManager {
     }
 
     public func GetExtendDeclByMember(member: Decl, baseTy: Ty): Option<ExtendDecl> {
-        for (extendDecl in GetBuiltinTyExtends(baseTy)) {
-            for (decl in extendDecl.GetMemberDecls()) {
-                if (SameDecl(decl, member)) {
-                    return extendDecl
+        if (let Some(outer) <- member.outerDecl) {
+            if (outer.astKind == ASTKind.INTERFACE_DECL) {
+                if (let Some(outerTy) <- outer.GetTy()) {
+                    return GetExtendDeclByInterface(baseTy, outerTy)
                 }
+            } else if (let Some(extendDecl) <- (outer as ExtendDecl)) {
+                return extendDecl
             }
         }
         return None
@@ -1674,7 +1813,75 @@ public class TypeManager {
     public func ReplaceThisTy(now: Ty): Ty {
         if (let Some(thisTy) <- (now as ClassThisTy)) {
             if (let Some(decl) <- thisTy.declPtr) {
-                return GetClassTy(decl, CopyTypeArgs(thisTy.typeArgs))
+                return GetClassTy(decl, replaceThisArgs(thisTy.typeArgs))
+            }
+        }
+        if (now.typeArgs.isEmpty()) {
+            return now
+        }
+        let replacedArgs = replaceThisArgs(now.typeArgs)
+        if (!typeArgsChanged(now.typeArgs, replacedArgs)) {
+            return now
+        }
+        if (let Some(funcTy) <- (now as FuncTy)) {
+            let params = ArrayList<Ty>()
+            for (paramTy in funcTy.paramTys) {
+                params.add(ReplaceThisTy(paramTy))
+            }
+            let cfg = FuncTyConfig()
+            cfg.isC = funcTy.isC
+            cfg.isClosureTy = funcTy.isClosureTy
+            cfg.hasVariableLenArg = funcTy.hasVariableLenArg
+            cfg.noCast = funcTy.noCast
+            return GetFunctionTy(params.toArray(), ReplaceThisTy(funcTy.retTy), cfg: cfg)
+        }
+        if (let Some(tupleTy) <- (now as TupleTy)) {
+            return GetTupleTy(replacedArgs, isClosureTy: tupleTy.isClosureTy)
+        }
+        if (let Some(arrayTy) <- (now as ArrayTy)) {
+            if (!replacedArgs.isEmpty()) {
+                return GetArrayTy(replacedArgs[0], arrayTy.dims)
+            }
+        }
+        if (let Some(varrayTy) <- (now as VArrayTy)) {
+            if (!replacedArgs.isEmpty()) {
+                return GetVArrayTy(replacedArgs[0], varrayTy.size)
+            }
+        }
+        if (let Some(pointerTy) <- (now as PointerTy)) {
+            let _ = pointerTy
+            if (!replacedArgs.isEmpty()) {
+                return GetPointerTy(replacedArgs[0])
+            }
+        }
+        if (let Some(classTy) <- (now as ClassTy)) {
+            if (let Some(decl) <- classTy.declPtr) {
+                return GetClassTy(decl, replacedArgs)
+            }
+        }
+        if (let Some(interfaceTy) <- (now as InterfaceTy)) {
+            if (let Some(decl) <- interfaceTy.declPtr) {
+                return GetInterfaceTy(decl, replacedArgs)
+            }
+        }
+        if (let Some(structTy) <- (now as StructTy)) {
+            if (let Some(decl) <- structTy.declPtr) {
+                return GetStructTy(decl, replacedArgs)
+            }
+        }
+        if (let Some(refEnumTy) <- (now as RefEnumTy)) {
+            if (let Some(decl) <- refEnumTy.declPtr) {
+                return GetRefEnumTy(decl, replacedArgs)
+            }
+        }
+        if (let Some(enumTy) <- (now as EnumTy)) {
+            if (let Some(decl) <- enumTy.declPtr) {
+                return GetEnumTy(decl, typeArgs: replacedArgs)
+            }
+        }
+        if (let Some(aliasTy) <- (now as TypeAliasTy)) {
+            if (let Some(decl) <- aliasTy.declPtr) {
+                return GetTypeAliasTy(decl, replacedArgs)
             }
         }
         return now
@@ -1697,25 +1904,323 @@ public class TypeManager {
 
     public func SubstituteTypeAliasInTy(ty: Ty, needSubstituteGeneric!: Bool = false,
         typeMapping!: TypeSubst = TypeSubst()): Ty {
-        let _ = needSubstituteGeneric
+        if (!Ty.IsTyCorrect(ty)) {
+            return GetInvalidTy()
+        }
+        let typeArgs = substituteAliasArgs(ty, needSubstituteGeneric, typeMapping)
         if (let Some(aliasTy) <- (ty as TypeAliasTy)) {
             if (let Some(decl) <- aliasTy.declPtr) {
                 if (decl.TestAttr(Attribute.IN_REFERENCE_CYCLE)) {
-                    return GetInstantiatedTy(ty, typeMapping)
+                    return GetTypeAliasTy(decl, typeArgs)
                 }
                 if (let Some(typeNode) <- decl.typeNode) {
                     if (let Some(targetTy) <- typeNode.GetTy()) {
-                        return GetInstantiatedTy(targetTy, typeMapping)
+                        let aliasMapping = GenerateTypeMapping(decl, arrayToTypeList(typeArgs))
+                        let instAliasedTy = GetInstantiatedTy(targetTy, aliasMapping)
+                        if (instAliasedTy.HasAliasTy()) {
+                            return SubstituteTypeAliasInTy(instAliasedTy, needSubstituteGeneric: needSubstituteGeneric,
+                                typeMapping: typeMapping)
+                        }
+                        return instAliasedTy
                     }
                 }
             }
         }
-        return GetInstantiatedTy(ty, typeMapping)
+        if (let Some(genTy) <- (ty as GenericsTy)) {
+            if (!needSubstituteGeneric) {
+                return genTy
+            }
+            if (let Some(mapped) <- typeMapping.Get(genTy)) {
+                return mapped
+            }
+            let intersectionArgs = ArrayList<Ty>()
+            intersectionArgs.add(genTy)
+            return GetIntersectionTy(intersectionArgs.toArray())
+        }
+        return substituteTypeArgs(ty, typeArgs)
+    }
+
+    private func replaceThisArgs(args: ArrayList<Ty>): Array<Ty> {
+        let out = ArrayList<Ty>()
+        for (arg in args) {
+            out.add(ReplaceThisTy(arg))
+        }
+        return out.toArray()
+    }
+
+    private func arrayToTypeList(args: Array<Ty>): ArrayList<Ty> {
+        let out = ArrayList<Ty>()
+        for (arg in args) {
+            out.add(arg)
+        }
+        return out
+    }
+
+    private func typeArgsChanged(original: ArrayList<Ty>, replaced: Array<Ty>): Bool {
+        if (original.size != replaced.size) {
+            return true
+        }
+        var idx: Int64 = 0
+        while (idx < original.size) {
+            if (!SameTy(original[idx], replaced[idx])) {
+                return true
+            }
+            idx++
+        }
+        return false
+    }
+
+    private func substituteAliasArgs(ty: Ty, needSubstituteGeneric: Bool, typeMapping: TypeSubst): Array<Ty> {
+        let out = ArrayList<Ty>()
+        for (arg in ty.typeArgs) {
+            if (Ty.IsTyCorrect(arg) || needSubstituteGeneric) {
+                out.add(SubstituteTypeAliasInTy(arg, needSubstituteGeneric: needSubstituteGeneric,
+                    typeMapping: typeMapping))
+            } else {
+                out.add(arg)
+            }
+        }
+        return out.toArray()
+    }
+
+    private func substituteTypeArgs(ty: Ty, typeArgs: Array<Ty>): Ty {
+        if (let Some(thisTy) <- (ty as ClassThisTy)) {
+            if (let Some(decl) <- thisTy.declPtr) {
+                return GetClassThisTy(decl, typeArgs)
+            }
+        }
+        if (let Some(classTy) <- (ty as ClassTy)) {
+            if (let Some(decl) <- classTy.declPtr) {
+                return GetClassTy(decl, typeArgs)
+            }
+        }
+        if (let Some(interfaceTy) <- (ty as InterfaceTy)) {
+            if (let Some(decl) <- interfaceTy.declPtr) {
+                return GetInterfaceTy(decl, typeArgs)
+            }
+        }
+        if (let Some(structTy) <- (ty as StructTy)) {
+            if (let Some(decl) <- structTy.declPtr) {
+                return GetStructTy(decl, typeArgs)
+            }
+        }
+        if (let Some(refEnumTy) <- (ty as RefEnumTy)) {
+            if (let Some(decl) <- refEnumTy.declPtr) {
+                return GetRefEnumTy(decl, typeArgs)
+            }
+        }
+        if (let Some(enumTy) <- (ty as EnumTy)) {
+            if (let Some(decl) <- enumTy.declPtr) {
+                return GetEnumTy(decl, typeArgs: typeArgs)
+            }
+        }
+        if (let Some(funcTy) <- (ty as FuncTy)) {
+            if (typeArgs.isEmpty()) {
+                return GetInvalidTy()
+            }
+            let params = ArrayList<Ty>()
+            var idx: Int64 = 0
+            while (idx + 1 < typeArgs.size) {
+                params.add(typeArgs[idx])
+                idx++
+            }
+            let cfg = FuncTyConfig()
+            cfg.isC = funcTy.isC
+            cfg.isClosureTy = funcTy.isClosureTy
+            cfg.hasVariableLenArg = funcTy.hasVariableLenArg
+            cfg.noCast = funcTy.noCast
+            return GetFunctionTy(params.toArray(), typeArgs[typeArgs.size - 1], cfg: cfg)
+        }
+        if (let Some(tupleTy) <- (ty as TupleTy)) {
+            return GetTupleTy(typeArgs, isClosureTy: tupleTy.isClosureTy)
+        }
+        if (let Some(arrayTy) <- (ty as ArrayTy)) {
+            if (!typeArgs.isEmpty()) {
+                return GetArrayTy(typeArgs[0], arrayTy.dims)
+            }
+        }
+        if (let Some(varrayTy) <- (ty as VArrayTy)) {
+            if (!typeArgs.isEmpty()) {
+                return GetVArrayTy(typeArgs[0], varrayTy.size)
+            }
+        }
+        if (let Some(pointerTy) <- (ty as PointerTy)) {
+            let _ = pointerTy
+            if (!typeArgs.isEmpty()) {
+                return GetPointerTy(typeArgs[0])
+            }
+        }
+        if (let Some(aliasTy) <- (ty as TypeAliasTy)) {
+            if (let Some(decl) <- aliasTy.declPtr) {
+                return GetTypeAliasTy(decl, typeArgs)
+            }
+        }
+        if (let Some(unionTy) <- (ty as UnionTy)) {
+            let _ = unionTy
+            return GetUnionTy(typeArgs)
+        }
+        if (let Some(intersectionTy) <- (ty as IntersectionTy)) {
+            let _ = intersectionTy
+            return GetIntersectionTy(typeArgs)
+        }
+        return ty
+    }
+
+    private func collectAllUpperBounds(genTy: GenericsTy): TySet {
+        let out = TySet()
+        let worklist = ArrayList<Ty>()
+        for (upper in genTy.upperBounds) {
+            if (out.Add(upper) && upper.IsGeneric()) {
+                worklist.add(upper)
+            }
+        }
+        while (!worklist.isEmpty()) {
+            let last = worklist[worklist.size - 1]
+            worklist.remove(at: worklist.size - 1)
+            if (let Some(currentGen) <- (last as GenericsTy)) {
+                for (upper in currentGen.upperBounds) {
+                    if (out.Add(upper) && upper.IsGeneric()) {
+                        worklist.add(upper)
+                    }
+                }
+            }
+        }
+        return out
+    }
+
+    private func collectNominalSuperTys(ty: Ty, typeMapping: TypeSubst, withExtended: Bool, out: TySet): Unit {
+        if (let Some(decl) <- Ty.GetInheritableDeclPtrOfTy(Some(ty))) {
+            let substituteMapping = GetSubstituteMapping(ty, typeMapping)
+            for (inheritedType in decl.inheritedTypes) {
+                if (let Some(inheritedTy) <- inheritedType.GetTy()) {
+                    if (isInheritableTypeForGenericMapping(inheritedTy)) {
+                        out.AddAll(GetAllSuperTys(inheritedTy, typeMapping: substituteMapping,
+                            withExtended: withExtended))
+                    }
+                }
+            }
+        }
+    }
+
+    private func hasNominalSuperTy(ty: Ty, superTy: Ty, typeMapping: TypeSubst, withExtended: Bool): Bool {
+        if (let Some(decl) <- Ty.GetInheritableDeclPtrOfTy(Some(ty))) {
+            let substituteMapping = GetSubstituteMapping(ty, typeMapping)
+            for (inheritedType in decl.inheritedTypes) {
+                if (let Some(inheritedTy) <- inheritedType.GetTy()) {
+                    if (isInheritableTypeForGenericMapping(inheritedTy) &&
+                        HasSuperTy(inheritedTy, superTy, substituteMapping, withExtended: withExtended)) {
+                        return true
+                    }
+                }
+            }
+        }
+        return false
+    }
+
+    private func mergeTypeSubst(target: TypeSubst, source: TypeSubst): Unit {
+        for (entry in source.entries) {
+            target.Put(entry.tyVar, entry.ty)
+        }
+    }
+
+    private func getAllExtendInterfaceTyHelper(extends: ArrayList<ExtendDecl>, typeArgs: ArrayList<Ty>): TySet {
+        let out = TySet()
+        for (extendDecl in extends) {
+            if (!CheckGenericDeclInstantiation(Some(extendDecl), typeArgs)) {
+                continue
+            }
+            let typeMapping = TypeSubst()
+            if (let Some(extendedType) <- extendDecl.extendedType) {
+                if (let Some(extendedTy) <- extendedType.GetTy()) {
+                    if (extendedTy.typeArgs.size != typeArgs.size) {
+                        continue
+                    }
+                    var idx: Int64 = 0
+                    while (idx < typeArgs.size) {
+                        mergeTypeSubst(typeMapping,
+                            GenerateTypeMappingByTy(Some(extendedTy.typeArgs[idx]), Some(typeArgs[idx])))
+                        idx++
+                    }
+                }
+            }
+            for (superInterfaceTy in extendDecl.inheritedTypes) {
+                if (let Some(inheritedTy) <- superInterfaceTy.GetTy()) {
+                    if (isInheritableTypeForGenericMapping(inheritedTy)) {
+                        let instTy = GetInstantiatedTy(inheritedTy, typeMapping)
+                        out.AddAll(GetAllSuperTys(instTy, typeMapping: TypeSubst(), withExtended: true))
+                    }
+                }
+            }
+        }
+        return out
+    }
+
+    private func hasExtendInterfaceTyHelper(superTy: Ty, extends: ArrayList<ExtendDecl>, typeArgs: ArrayList<Ty>,
+        typeMapping: TypeSubst): Bool {
+        let interfaceTys = getAllExtendInterfaceTyHelper(extends, typeArgs)
+        for (interfaceTy in interfaceTys.values) {
+            let instTy = GetInstantiatedTy(interfaceTy, typeMapping)
+            if (SameTy(instTy, superTy) || HasSuperTy(instTy, superTy, typeMapping, withExtended: true)) {
+                return true
+            }
+        }
+        return false
+    }
+
+    private func isTyExtendInterface(classTy: Ty, interfaceTy: Ty): Bool {
+        if (let Some(decl) <- Ty.GetInheritableDeclPtrOfTy(Some(classTy))) {
+            return getAllExtendInterfaceTyHelper(GetDeclExtends(decl), GetTypeArgs(classTy)).Contains(interfaceTy)
+        }
+        return false
+    }
+
+    private func getExtendInterfaceSuperTy(classTy: Ty, interfaceTy: Ty): Option<Ty> {
+        if (let Some(decl) <- Ty.GetDeclPtrOfTy(Some(classTy))) {
+            if (let Some(classDecl) <- (decl as ClassDecl)) {
+                let mapping = MultiTypeSubst()
+                GenerateGenericMapping(mapping, classTy)
+                let typeMapping = MultiTypeSubstToTypeSubst(mapping)
+                var current = classDecl.GetSuperClassDecl()
+                while (let Some(superDecl) <- current) {
+                    if (let Some(superTy) <- superDecl.GetTy()) {
+                        let instTy = GetInstantiatedTy(superTy, typeMapping)
+                        if (isTyExtendInterface(instTy, interfaceTy)) {
+                            return instTy
+                        }
+                    }
+                    current = superDecl.GetSuperClassDecl()
+                }
+            }
+        }
+        return None
     }
 
     private func declName(decl: Decl): String {
         let name = decl.identifier.Val()
         return if (name.isEmpty()) { decl.identifier.GetRawText() } else { name }
+    }
+
+    private func getInstantiatedGenericTy(ty: GenericsTy, typeMapping: TypeSubst): Ty {
+        var current: Ty = ty
+        let visited = ArrayList<GenericsTy>()
+        var searching = true
+        while (searching) {
+            searching = false
+            if (let Some(currentGen) <- (current as GenericsTy)) {
+                if (containsGeneric(visited, currentGen)) {
+                    return current
+                }
+                visited.add(currentGen)
+                if (let Some(mapped) <- typeMapping.Get(currentGen)) {
+                    current = mapped
+                    searching = true
+                }
+            }
+        }
+        if (!current.IsGeneric() && current.HasGeneric()) {
+            return GetInstantiatedTy(current, typeMapping)
+        }
+        return current
     }
 
     private func instantiateArgs(args: ArrayList<Ty>, typeMapping: TypeSubst): Array<Ty> {

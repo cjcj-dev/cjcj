@@ -82,6 +82,33 @@ Verification:
 - `grep -rn "TODO(selfhost:Sema)" packages/sema/src` reports 4 remaining package-level markers, all outside the tc-core-owned files.
 - Remaining `TODO(selfhost:Sema)` markers in the tc-core-owned files listed by the task: 0.
 
+## 2026-06-17 Continue Pass 5
+
+Files deepened:
+
+- `packages/sema/src/TypeManager.cj`
+
+Implemented behavior:
+
+- Ported C++ array/pointer type canonicalization: nested raw arrays now fold dimensions during construction, invalid array/pointer element types canonicalize to `Invalid`, and multi-dimensional `Array` type arguments project as `Array<elem, dims - 1>` for extend/generic mapping.
+- Replaced one-step generic substitution with C++-shaped chained substitution, including generic-to-generic mapping traversal and composite mapped type instantiation.
+- Deepened block real-type calculation to follow desugared blocks, empty/declaration-ending blocks, and desugared final expressions before falling back to the block type.
+- Replaced thin supertype traversal with instantiated nominal inheritance traversal, transitive generic upper-bound collection, substitution mapping generation from nominal type arguments, and BFS interface inheritance with per-edge mappings.
+- Reworked extend-interface queries to use registered extend declarations for nominal and builtin types, check generic extend instantiation, instantiate inherited interface types from extend target mappings, and resolve the actual superclass that provides an inherited class-to-interface boxing relation.
+- Deepened `HasExtensionRelation`, `GetExtendDeclByInterface`, and `GetExtendDeclByMember` so boxing/extend queries consider direct interface inheritance, superclass-provided extends, interface member origins, and subtype-compatible inherited interfaces.
+- Ported recursive `This` replacement and recursive alias substitution across class/interface/struct/enum/ref-enum/tuple/function/array/VArray/pointer/union/intersection types, preserving cyclic alias nodes and C++ generic-substitution behavior.
+
+Remaining gaps:
+
+- TypeManager still lacks C++ subtype cache/resource-pool behavior and placeholder unification through `LocalTypeArgumentSynthesis` in several subtype branches.
+- Extend lookup still uses the self-hosted map representation only; import-manager-dependent filtering and exact accessibility side effects remain blocked by surrounding modules surfaces.
+- Alias substitution does not yet reproduce alias-export diagnostics or alias-preservation choices for external declaration serialization.
+
+Verification:
+
+- `cjpm build` passes after this pass.
+- Remaining `TODO(selfhost:Sema)` markers in the tc-core-owned files listed by the task: 0.
+
 ## 2026-06-17 Continue Pass 3
 
 Files deepened:
