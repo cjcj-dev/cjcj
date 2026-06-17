@@ -97,7 +97,7 @@ public class ConditionalCompilationConfig {
     }
 }
 
-private func IsLSPBuiltinCfgCondition(key: String): Bool {
+private func IsLSPCfgFileBuiltinCondition(key: String): Bool {
     return key == "os" || key == "backend" || key == "arch" || key == "debug" ||
         key == "cjc_version" || key == "test"
 }
@@ -156,7 +156,7 @@ private func ParseAndCheckLSPConditionVar(
         normalizedKey = normalizedKey[1..normalizedKey.size - 1]
     }
     normalizedKey = UtilsNFC(normalizedKey)
-    if (IsLSPBuiltinCfgCondition(normalizedKey)) {
+    if (IsLSPCfgFileBuiltinCondition(normalizedKey)) {
         reporter.DiagnoseDefault(BasicDiagKindRefactor.dirver_cfg_same_with_builtin)
         return None
     }
