@@ -343,6 +343,13 @@ private func BuildInstantiationTypeMap(decl: Decl, instTys: ArrayList<Ty>): Type
     return GenerateTypeMapping(decl, instTys)
 }
 
+private func WalkInstDupFuncsInDecl(checker: StructInheritanceChecker, decl: Decl): Unit {
+    let walker = Walker(decl, visitPre: { node: Node =>
+        CheckInstDupFuncsRecursively(checker, node)
+    })
+    walker.Walk()
+}
+
 func CheckInstDupFuncsRecursively(checker: StructInheritanceChecker, node: Node): VisitAction {
     if (checker.HasInfiniteInstantiationOccurred()) {
         return VisitAction.STOP_NOW
@@ -364,7 +371,7 @@ func CheckInstDupFuncsRecursively(checker: StructInheritanceChecker, node: Node)
                 let emptyKey = InstantiationKey(target, emptyInstTys)
                 if (!checker.HasInstantiatedKey(emptyKey)) {
                     checker.AddInstantiatedKey(emptyKey)
-                    CheckInstantiatedDecl(checker, target, emptyInstTys)
+                    WalkInstDupFuncsInDecl(checker, target)
                 }
             }
             checker.CheckInstWithCStructTypeArg(node)
@@ -428,7 +435,7 @@ func CheckInstDupFuncsInNominalDecls(checker: StructInheritanceChecker): Unit {
             let emptyKey = InstantiationKey(decl, empty)
             if (!checker.HasInstantiatedKey(emptyKey)) {
                 checker.AddInstantiatedKey(emptyKey)
-                CheckInstantiatedDecl(checker, decl, empty)
+                WalkInstDupFuncsInDecl(checker, decl)
             }
         }
     }

@@ -180,3 +180,11 @@ Instantiated signature flow continuation:
   members, and runs the generic-member collision path with the generated mapping even when it is empty.
 
 Verification: `cjpm build` passes for the whole workspace after this instantiated signature flow continuation.
+
+Instantiated empty-key walk continuation:
+
+- Empty type-argument declaration walks now use a direct `Walker` like the C++ implementation instead of routing through
+  `CheckInstantiatedDecl`. This preserves the C++ distinction between baseline declaration scans, which do not push an
+  instantiation map, and explicit instantiated declaration scans, which do.
+
+Verification: `cjpm build` passes for the whole workspace after this instantiated empty-key walk continuation.
