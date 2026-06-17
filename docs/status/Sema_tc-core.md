@@ -137,6 +137,30 @@ Verification:
 - `grep -rn "TODO(selfhost:Sema)" packages/sema/src` reports 4 package-level markers, all outside the tc-core-owned files.
 - Remaining `TODO(selfhost:Sema)` markers in the tc-core-owned files listed by the task: 0.
 
+## 2026-06-18 Deepening Pass
+
+Files deepened:
+
+- `packages/sema/src/TypeChecker.cj`
+- `packages/sema/src/TypeCheck.cj`
+
+Implemented behavior:
+
+- Replaced the tc-core entrypoint no-op bodies for post-instantiation and post-sema handling. `PerformDesugarAfterInstantiation` now runs recursive enum type elimination over the imported package declarations carried by the current `ASTContext`, then marks extend-boxing points in the package AST. `PerformDesugarAfterSema` now opens an explicit type-variable scope and marks extend-boxing points for each package instead of silently discarding the request.
+- Improved qualified-type precheck resolution toward the C++ `GetTyFromASTType(QualifiedType&)` flow. The self-hosted resolver now consults real `ASTContext.packageDecls` before treating the base as an ordinary type, binds matching package bases as `PackageDecl` targets, invalidates the package qualifier type chain like the C++ path, and then resolves the qualified member inside the package.
+- Kept the parent `cangjie_compiler::sema` package free of subpackage imports. A direct call into `cangjie_compiler::sema.Desugar` was tested and rejected because the existing child package imports `sema`, producing a Cangjie package cycle.
+
+Remaining gaps:
+
+- Exact C++ post-sema desugar coverage is still incomplete from this parent-package entrypoint: `sema.Desugar.AfterTypeCheck` and option boxing live in a child package that cannot be imported from `sema` without refactoring package boundaries.
+- Imported package resolution through `ImportManager.GetImportedPackageDecl` still cannot be used directly in tc-core because the current self-hosted modules surface remains type-incompatible with real `ast` declarations in places noted by earlier passes.
+- The qualified-package conflict branch currently returns invalid resolution by declining ambiguous package matches; exact C++ package-conflict diagnostics remain thin.
+
+Verification:
+
+- `cjpm build` passes after this pass.
+- Remaining `TODO(selfhost:Sema)` markers in the tc-core-owned files listed by the task: 0.
+
 ## 2026-06-17 Continue Pass 9
 
 Files deepened:

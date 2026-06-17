@@ -63,6 +63,38 @@ private func collectPackageTypeDecls(pkg: Package, name: String): ArrayList<Decl
     return out
 }
 
+private func findImportedPackageDecl(ctx: ASTContext, packageName: String): Option<PackageDecl> {
+    if (packageName.isEmpty()) {
+        return None
+    }
+    var found: Option<PackageDecl> = None
+    for (packageDecl in ctx.packageDecls) {
+        let matches = packageDecl.fullPackageName == packageName || packageDecl.identifier.Val() == packageName
+        if (!matches) {
+            continue
+        }
+        if (let Some(_) <- found) {
+            return None
+        }
+        found = Some(packageDecl)
+    }
+    return found
+}
+
+private func markPackageBaseType(typeNode: Type): Unit {
+    typeNode.SetTy(TypeManager.GetInvalidTy())
+    if (let Some(qualified) <- (typeNode as QualifiedType)) {
+        if (let Some(baseType) <- qualified.baseType) {
+            markPackageBaseType(baseType)
+        }
+    }
+}
+
+private func bindImportedPackageBase(baseType: Type, packageDecl: PackageDecl): Unit {
+    ReplaceTarget(baseType, Some(packageDecl))
+    markPackageBaseType(baseType)
+}
+
 private func getTypeArgTys(typeManager: TypeManager, ctx: ASTContext, typeArguments: ArrayList<Type>): ArrayList<Ty> {
     let out = ArrayList<Ty>()
     for (arg in typeArguments) {
@@ -501,7 +533,11 @@ public func GetTyFromASTQualifiedType(typeManager: TypeManager, ctx: ASTContext,
         if (baseType.astKind == ASTKind.INVALID_TYPE) {
             return TypeManager.GetInvalidTy()
         }
-        let _ = GetTyFromASTType(typeManager, ctx, baseType)
+        if (let Some(packageDecl) <- findImportedPackageDecl(ctx, ASTContext.GetPackageName(baseType))) {
+            bindImportedPackageBase(baseType, packageDecl)
+        } else {
+            let _ = GetTyFromASTType(typeManager, ctx, baseType)
+        }
         if (let Some(baseTarget) <- baseType.GetTarget()) {
             if (let Some(packageDecl) <- (baseTarget as PackageDecl)) {
                 let packageTargets = collectPackageTypeDecls(packageDecl.srcPackage, qt.field.Val())
