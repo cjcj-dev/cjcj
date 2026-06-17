@@ -35,6 +35,7 @@ import cangjie_compiler::parse.InterpolationExpr as ParseInterpolationExpr
 import cangjie_compiler::parse.ArrayLit as ParseArrayLit
 import cangjie_compiler::parse.SubscriptExpr as ParseSubscriptExpr
 import cangjie_compiler::parse.MemberAccess as ParseMemberAccess
+import cangjie_compiler::parse.EnumDecl as ParseEnumDecl
 import cangjie_compiler::lex.StringPartKind
 import cangjie_compiler::chir.AST2CHIRStmtSpec as ChirStmtSpec
 import cangjie_compiler::chir.AST2CHIRExprSpec as ChirExprSpec
@@ -64,6 +65,10 @@ public func AdaptRealBodies(file: File, fileID: UInt64, sourceCode: String, sm: 
     // Top-level functions whose declared return type is String, so a call to one classifies as a
     // String-valued expression (for concat / print promotion).
     let strReturningFuncs = HashSet<String>()
+    // Payload-less enum variants in scope: each variant name maps to a distinct Int64 tag (its index
+    // within the declaring enum). A value of such an enum is just its tag, so constructing a variant
+    // lowers to an Int64 constant and matching a constructor pattern compares the selector tag.
+    let enums = collectEnumRegistry(parsedFile)
     for (decl in parsedFile.decls) {
         if (let Some(parsedFunc) <- (decl as ParseFuncDecl)) {
             let n = parsedFunc.identifier.Val()
@@ -77,9 +82,68 @@ public func AdaptRealBodies(file: File, fileID: UInt64, sourceCode: String, sm: 
     }
     for (decl in file.decls) {
         if (let Some(funcDecl) <- (decl as FuncDecl)) {
-            tryAdaptFunction(funcDecl, parsedFile, funcNames, strReturningFuncs)
+            tryAdaptFunction(funcDecl, parsedFile, funcNames, strReturningFuncs, enums)
         }
     }
+}
+
+// A registry of payload-less enum variants discovered among the file's top-level enum declarations.
+// `variantTags` maps each variant identifier to its Int64 tag (index within the enum). Only enums
+// whose every constructor is payload-less (no `(...)`) are registered for CUT 1 -- an enum with any
+// payload-carrying variant is skipped entirely so a `Some(Int64)`-style enum never mis-lowers as a
+// bare tag. A variant name that would collide across two enums is dropped from both to stay sound.
+private class EnumRegistry {
+    let variantTags = HashMap<String, Int64>()
+
+    func isVariant(name: String): Bool {
+        return variantTags.contains(name)
+    }
+
+    func tagOf(name: String): Option<Int64> {
+        return variantTags.get(name)
+    }
+}
+
+// Scan the parsed file's top-level enum decls, assigning each payload-less variant a distinct Int64
+// tag (its 0-based index within its enum). An enum that has any payload-carrying constructor is
+// skipped (left for a later cut). Variant-name collisions across enums are removed so an ambiguous
+// name is never treated as a single tag.
+private func collectEnumRegistry(parsedFile: ParseFile): EnumRegistry {
+    let registry = EnumRegistry()
+    let collided = HashSet<String>()
+    for (decl in parsedFile.decls) {
+        if (let Some(enumDecl) <- (decl as ParseEnumDecl)) {
+            // Reject the whole enum if any constructor carries a payload (`Name(...)`). The parser
+            // records a constructor's end past its closing `)` when it has params, so a payload-less
+            // constructor's end coincides with the end of its identifier.
+            var allPayloadLess = true
+            for (ctor in enumDecl.constructors) {
+                if (ctor.identifier.End() != ctor.end) {
+                    allPayloadLess = false
+                    break
+                }
+            }
+            if (!allPayloadLess) {
+                continue
+            }
+            var tag: Int64 = 0
+            for (ctor in enumDecl.constructors) {
+                let name = ctor.identifier.Val()
+                if (!name.isEmpty()) {
+                    if (registry.variantTags.contains(name)) {
+                        collided.add(name)
+                    } else {
+                        registry.variantTags[name] = tag
+                    }
+                }
+                tag++
+            }
+        }
+    }
+    for (name in collided) {
+        registry.variantTags.remove(name)
+    }
+    return registry
 }
 
 // Whether the parsed function declares a `String` return type.
@@ -93,7 +157,7 @@ private func parsedFuncReturnsString(parsedFunc: ParseFuncDecl): Bool {
 }
 
 private func tryAdaptFunction(funcDecl: FuncDecl, parsedFile: ParseFile, funcNames: HashSet<String>,
-    strReturningFuncs: HashSet<String>): Unit {
+    strReturningFuncs: HashSet<String>, enums: EnumRegistry): Unit {
     // Note: a non-empty printStrings (the summary side-channel captured one or more literal
     // string/int prints) no longer forces the summary path. The real-parse adapter can lower
     // literal-int/string prints as in-body printf calls too, so a body that MIXES literal prints
@@ -105,7 +169,7 @@ private func tryAdaptFunction(funcDecl: FuncDecl, parsedFile: ParseFile, funcNam
     let name = funcDecl.identifier.Val()
     let matched = findParsedFunc(parsedFile, name, funcDecl.begin.line)
     if (let Some(parsedFunc) <- matched) {
-        adaptParsedFunc(funcDecl, parsedFunc, funcNames, strReturningFuncs)
+        adaptParsedFunc(funcDecl, parsedFunc, funcNames, strReturningFuncs, enums)
     }
 }
 
@@ -160,6 +224,9 @@ private class AdaptScope {
     // Names of top-level functions whose declared return type is String, so a call to one is treated
     // as a String-valued expression for concat / print classification.
     let strReturningFuncs = HashSet<String>()
+    // Payload-less enum variants in scope (variant name -> Int64 tag). A bare reference to a variant
+    // name lowers to its tag constant, and a constructor pattern in a match compares the tag.
+    let enums: EnumRegistry
     var needsRuntime: Bool = false
     // Depth of enclosing `for`/`while` loops currently being adapted. A `break`/`continue` is only
     // accepted (promotable) when loopDepth > 0; otherwise the body falls back to the summary path.
@@ -175,16 +242,22 @@ private class AdaptScope {
         return "$" + prefix + "_" + n.toString()
     }
 
-    init(funcNames: HashSet<String>, strReturningFuncs: HashSet<String>) {
+    init(funcNames: HashSet<String>, strReturningFuncs: HashSet<String>, enums: EnumRegistry) {
         this.funcNames = funcNames
+        this.enums = enums
         for (n in strReturningFuncs) {
             this.strReturningFuncs.add(n)
         }
     }
+
+    // Whether `name` is a payload-less enum variant in scope and is not shadowed by a local/param.
+    func isEnumVariant(name: String): Bool {
+        return !locals.contains(name) && enums.isVariant(name)
+    }
 }
 
 private func adaptParsedFunc(funcDecl: FuncDecl, parsedFunc: ParseFuncDecl, funcNames: HashSet<String>,
-    strReturningFuncs: HashSet<String>): Unit {
+    strReturningFuncs: HashSet<String>, enums: EnumRegistry): Unit {
     let body = match (parsedFunc.funcBody) {
         case Some(fb) => fb
         case None => return
@@ -193,7 +266,7 @@ private func adaptParsedFunc(funcDecl: FuncDecl, parsedFunc: ParseFuncDecl, func
         case Some(b) => b
         case None => return
     }
-    let scope = AdaptScope(funcNames, strReturningFuncs)
+    let scope = AdaptScope(funcNames, strReturningFuncs, enums)
     // Seed parameters as in-scope locals so references to them lower to runtime loads. Parameters
     // are also tracked separately: a reference to a parameter is inherently runtime (it cannot be
     // folded), so it promotes even a trivial body like `return x` to the real path -- needed so the
@@ -586,7 +659,29 @@ private func adaptMatchStatement(matchExpr: ParseMatchExpr, scope: AdaptScope): 
         case Some(a) => a
         case None => return None
     }
-    return buildMatchChain(matchExpr, arms, None, scope)
+    let fold = matchIsExhaustiveEnum(matchExpr, arms, scope)
+    return buildMatchChain(matchExpr, arms, None, scope, foldLastAsElse: fold)
+}
+
+// Whether a match is over enum variants and has no wildcard/binding catch-all arm. Such a match is
+// exhaustive by construction (the selector is always one of the enum's variants), so the final arm
+// can serve as the chain's `else` (no fall-through). Detected from the source patterns: at least one
+// arm pattern is a bare enum-variant VarPattern, and the final arm is not a catch-all.
+private func matchIsExhaustiveEnum(matchExpr: ParseMatchExpr, arms: ArrayList<MatchArm>,
+    scope: AdaptScope): Bool {
+    if (arms.isEmpty() || arms[arms.size - 1].isCatchAll) {
+        return false
+    }
+    for (matchCase in matchExpr.matchCases) {
+        for (pattern in matchCase.patterns) {
+            if (let Some(varPat) <- (pattern as ParseVarPattern)) {
+                if (scope.isEnumVariant(varPat.identifier.Val())) {
+                    return true
+                }
+            }
+        }
+    }
+    return false
 }
 
 // Parse + validate every arm of a match into the normalized MatchArm list. The selector temp is NOT
@@ -636,8 +731,15 @@ private func normalizeMatchArms(matchExpr: ParseMatchExpr, scope: AdaptScope): O
                 if (n.isEmpty()) {
                     return None
                 }
-                isCatchAll = true
-                bindingName = Some(n)
+                // A bare payload-less enum-variant pattern (`case Green =>`) parses as a VarPattern
+                // (the parser cannot tell a constructor from a binding). Match it as a literal-tag
+                // pattern over the variant's tag rather than a catch-all binding.
+                if (let Some(tag) <- enumVariantPatternTag(varPat, scope)) {
+                    literals.add(tag)
+                } else {
+                    isCatchAll = true
+                    bindingName = Some(n)
+                }
             } else {
                 // Enum/tuple/type/etc. patterns are out of grammar.
                 return None
@@ -669,7 +771,8 @@ private func normalizeMatchArms(matchExpr: ParseMatchExpr, scope: AdaptScope): O
 // chain. The selector is evaluated once into `$sel`. A var-binding catch-all arm prepends a
 // `let n = $sel` to its body so the bound name reads the selector value.
 private func buildMatchChain(matchExpr: ParseMatchExpr, arms: ArrayList<MatchArm>,
-    extraInit: Option<ChirStmtSpec>, scope: AdaptScope): Option<ArrayList<ChirStmtSpec>> {
+    extraInit: Option<ChirStmtSpec>, scope: AdaptScope,
+    foldLastAsElse!: Bool = false): Option<ArrayList<ChirStmtSpec>> {
     let selectorExpr = match (matchExpr.selector) {
         case Some(e) => e
         case None => return None
@@ -696,6 +799,13 @@ private func buildMatchChain(matchExpr: ParseMatchExpr, arms: ArrayList<MatchArm
     var chainElse = ArrayList<ChirStmtSpec>()
     var startIdx = arms.size - 1
     if (arms[startIdx].isCatchAll) {
+        chainElse = withBinding(arms[startIdx], selName)
+        startIdx--
+    } else if (foldLastAsElse) {
+        // An enum match with no wildcard is exhaustive by construction (every variant is covered).
+        // Make the final variant arm the chain's base `else` (dropping its tag test) so there is no
+        // fall-through path: this keeps a value/return match well-typed (no implicit Unit fall-off
+        // when the function returns a value), and is sound because the selector is always one variant.
         chainElse = withBinding(arms[startIdx], selName)
         startIdx--
     }
@@ -816,8 +926,14 @@ private func adaptMatchValue(matchExpr: ParseMatchExpr, scope: AdaptScope): Opti
                 if (n.isEmpty()) {
                     return None
                 }
-                isCatchAll = true
-                bindingName = Some(n)
+                // A bare payload-less enum-variant pattern matches the variant's tag (see the
+                // statement-form normalizer); otherwise it is a catch-all binding.
+                if (let Some(tag) <- enumVariantPatternTag(varPat, scope)) {
+                    literals.add(tag)
+                } else {
+                    isCatchAll = true
+                    bindingName = Some(n)
+                }
             } else {
                 return None
             }
@@ -854,7 +970,8 @@ private func adaptMatchValue(matchExpr: ParseMatchExpr, scope: AdaptScope): Opti
     }
     // Declare the result var (initialized to 0; every reachable path assigns it) before the chain.
     let resInit = ChirStmtSpec.Let(resName, ChirExprSpec.Literal(0), isVar: true)
-    let prelude = match (buildMatchChain(matchExpr, arms, Some(resInit), scope)) {
+    let fold = matchIsExhaustiveEnum(matchExpr, arms, scope)
+    let prelude = match (buildMatchChain(matchExpr, arms, Some(resInit), scope, foldLastAsElse: fold)) {
         case Some(p) => p
         case None => return None
     }
@@ -983,6 +1100,13 @@ private func adaptExpr(expr: ParseExpr, scope: AdaptScope): Option<ChirExprSpec>
     // parts and the stringified interpolated expressions, in order.
     if (let Some(spec) <- adaptInterpolation(expr, scope)) {
         return Some(spec)
+    }
+    // A bare reference to a payload-less enum variant (`Green`, `N`) is the variant's value: its
+    // Int64 tag constant. Checked before the local-ref path so a variant name never mis-resolves
+    // (variants are not locals). Constructing a variant is genuine runtime computation -> promote.
+    if (let Some(tag) <- enumVariantTag(expr, scope)) {
+        scope.needsRuntime = true
+        return Some(ChirExprSpec.Literal(tag))
     }
     if (let Some(refName) <- localRefName(expr, scope)) {
         return Some(ChirExprSpec.Ref(refName))
@@ -1530,6 +1654,32 @@ private func boolLiteralValue(expr: ParseExpr): Option<Bool> {
             if (lit.stringValue == "false") {
                 return Some(false)
             }
+        }
+    }
+    return None
+}
+
+// If `varPat`'s identifier names a payload-less enum variant in scope, return its Int64 tag; else
+// None (then the VarPattern is a normal catch-all binding).
+private func enumVariantPatternTag(varPat: ParseVarPattern, scope: AdaptScope): Option<Int64> {
+    let name = varPat.identifier.Val()
+    if (scope.isEnumVariant(name)) {
+        return scope.enums.tagOf(name)
+    }
+    return None
+}
+
+// If `expr` is a bare RefExpr naming a payload-less enum variant in scope (and not shadowed by a
+// local), return that variant's Int64 tag; otherwise None. A variant reference with type arguments
+// (`Green<...>`) is not a simple value reference and is rejected.
+private func enumVariantTag(expr: ParseExpr, scope: AdaptScope): Option<Int64> {
+    if (let Some(refExpr) <- (expr as ParseRefExpr)) {
+        if (!refExpr.typeArguments.isEmpty()) {
+            return None
+        }
+        let name = refExpr.identifier.Val()
+        if (scope.isEnumVariant(name)) {
+            return scope.enums.tagOf(name)
         }
     }
     return None
