@@ -25,12 +25,15 @@ returns lower through `CreateLiteralReturnBody`).
 The following programs compile with the self-host `cjc`
 (`./target/release/bin/cangjie_compiler::cjc`) and run with the verified behavior
 shown. Each was re-verified by real compile-and-run on 2026-06-17 after merging
-`opus2/int-arith-return`, `opus2/println-int`, `opus3/real-expr`, and
+`opus2/int-arith-return`, `opus2/println-int`, `opus3/real-expr`,
 `opus4/control-flow` (var/assign, relational ops, `if`/`while` via real CHIR
-blocks) into `main`:
+blocks), and `opus5/func-calls` (user-defined function calls + recursion via
+real CHIR `Apply`) into `main`:
 
 | Source | Verified behavior |
 | --- | --- |
+| `func add(a: Int64, b: Int64): Int64 { return a + b }` ⏎ `main(): Int64 { return add(2, 3) }` | exits with code 5, computed at **runtime** by a real CHIR `Apply` to the user function `add` |
+| `func fact(n: Int64): Int64 { if (n<=1){return 1} else {return n*fact(n-1)} }` ⏎ `main(): Int64 { return fact(5) }` | exits with code 120 via **recursion** (CHIR dump shows recursive `Apply(_Cdefault_fact, ...)` self-calls) |
 | `main(): Int64 { var sum=0; var i=1; while (i<=5){ sum=sum+i; i=i+1 }; return sum }` | exits with code 15, computed at **runtime** by a genuine CHIR `while` loop (no folding; sum 1..10 separately verified -> 55) |
 | `main(): Int64 { var x = 2; x = x + 3; return x }` | exits with code 5 (`var` slot + reassignment Store) |
 | `main(): Int64 { let a = 7; if (a > 3) { return 1 } else { return 0 } }` | exits with code 1 (real `if`/`else` CHIR blocks + relational branch condition) |
@@ -94,6 +97,31 @@ Capability detail:
   assign, if, or while). Verified at runtime with no folding: while-loop sum 1..5
   -> exit 15 (and 1..10 -> 55); `var x=2; x=x+3` -> 5; `let a=7; if (a>3){1}else{0}`
   -> 1.
+- **Function-calls milestone (`opus5/func-calls`):** the real body-lowering path
+  now compiles calls to user-defined top-level functions for `Int64`: value
+  arguments, using a call's return value in expressions / `let` / `var` / `return`
+  / nested call args (e.g. `add(2, mul(3,4))`), multiple top-level functions in any
+  source order, and self-recursion (`fact`, `fib`). It is still additive and gated:
+  any construct outside the supported grammar falls back to the summary/fold path
+  with no regression. The CHIR spec model (`packages/chir/src/AST2CHIR.cj`) gains a
+  `CALL` `AST2CHIRExprSpec` kind carrying a callee source identifier and an ordered
+  list of argument expr specs. `TranslateFuncBody.cj` `BindParameterSlots` copies
+  each `Int64` parameter into a fresh local slot at entry (so parameter REF /
+  reassignment lowers uniformly through the locals map), and `EvalCall` resolves the
+  callee `Function` by name and emits a genuine CHIR `Apply` over the evaluated
+  argument `Value`s, typed by the callee's return type. `TranslateFuncDecl.cj` splits
+  lowering into a body-free `DeclareFunctionShell` plus `EmitFunctionBody` with a
+  `PredeclareFunction` step; `LowerPackage` pre-declares every top-level function
+  before emitting any body, so a call site resolves its callee regardless of source
+  order and for self-recursion. Each parameter now gets a unique `%`-prefixed value
+  identifier (fixing a prior bug where every parameter stripped to the same empty
+  codegen key, aliasing all arguments to the last one). The real parser adapter
+  (`RealParseBridge.cj`) collects top-level function names, recognizes a
+  `parse.CallExpr` whose callee is a bare `RefExpr` naming a known function with
+  positional `Int64` args (`adaptCall`), and seeds parameters as in-scope locals so
+  even a body like `return x` is promoted to the real typed path. Verified at runtime
+  (no folding): `add(2,3)` -> 5; `sq(7)` -> 49; `fact(5)` -> 120 (recursion);
+  `fib(10)` -> 55; `add(2, mul(3,4))` -> 14; callee declared after `main` -> 10.
 
 These are the only source constructs the integrated pipeline lowers end to end
 today; anything else still flows through the compatibility models described
@@ -101,10 +129,6 @@ below.
 
 ### Remaining de-isolation follow-ups
 
-- **Function calls.** The real body path lowers `let`/`var`/assign/return,
-  arithmetic + relational operators, and `if`/`while`, but does not yet lower
-  user-defined function calls (call expressions, argument passing, multiple
-  function decls in a module). This is the next runtime construct to add.
 - **`println` of runtime values.** `println`/`print` still only emit string
   literals or *literal*/let-bound integers through the summary path; printing a
   runtime-computed value (e.g. a loop accumulator or function result) is not yet
