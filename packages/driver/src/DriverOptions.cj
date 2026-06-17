@@ -56,8 +56,8 @@ public class DriverOptions {
     public var obfuscationSeed: Option<Int64> = 0
 
     public let environment: EnvironmentOptions = EnvironmentOptions()
-    public var host: TripleInfo = TripleInfo()
-    public var target: TripleInfo = TripleInfo()
+    public var host: TripleInfo = HostTripleInfo()
+    public var target: TripleInfo = HostTripleInfo()
     public var backend: BackendType = BackendType.CJNATIVE
     public var cangjieHome: String = ""
     public var output: String = "./"
@@ -208,7 +208,7 @@ public class DriverOptions {
     public func EnableSanitizer(): Bool { return EnableAsan() || EnableTsan() || EnableHwAsan() }
 
     public func IsCrossCompiling(): Bool {
-        return target.arch != host.arch || target.os != host.os || target.env != host.env
+        return !host.Equal(target)
     }
 
     public func GetStackTraceFormat(): String {
@@ -216,9 +216,14 @@ public class DriverOptions {
     }
 
     public func GetCangjieLibTargetPathName(): String {
-        var name = target.OSTypeToString()
+        var name = target.OSToString()
         if (target.env != EnvironmentType.GNU && target.env != EnvironmentType.NOT_AVAILABLE) {
-            name += "_" + target.EnvironmentToString()
+            var envName = target.EnvironmentToString()
+            if (target.env == EnvironmentType.ANDROID && target.ArchToString() != "arm" &&
+                !target.apiLevel.isEmpty() && envName.endsWith(target.apiLevel)) {
+                envName = envName[0..envName.size - target.apiLevel.size]
+            }
+            name += "_" + envName
         }
         return name + "_" + target.ArchToString() + "_" + BackendToString(backend)
     }

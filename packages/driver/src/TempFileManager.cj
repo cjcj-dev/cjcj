@@ -65,7 +65,7 @@ public class TempFileManager {
         deleteState = DELETING
         var idx = deletedFiles.size - 1
         while (idx >= 0) {
-            let _ = FileUtil.RemovePath(deletedFiles[idx])
+            let _ = RemovePath(deletedFiles[idx])
             if (idx == 0) {
                 break
             }
@@ -127,7 +127,7 @@ public class TempFileManager {
         }
         var attempts: Int64 = 0
         while (attempts < 10) {
-            let candidate = FileUtil.JoinPath(baseTemp, CANGJIE_TMP_DIR_PREFIX + FileUtil.GenerateRandomHexString() +
+            let candidate = FileUtil.JoinPath(baseTemp, CANGJIE_TMP_DIR_PREFIX + GenerateRandomHexString() +
                 "-" + attempts.toString())
             try {
                 FSDirectory.create(candidate, recursive: true)

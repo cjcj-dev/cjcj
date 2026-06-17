@@ -78,7 +78,7 @@ public class MinGW_CJNATIVE <: Gnu {
         }
         tool.AppendArg("crD")
         let outputFile = CreateNewFileInfoWrapper(objFiles, TempFileKind.O_STATICLIB).filePath
-        let _ = FileUtil.RemovePath(outputFile)
+        let _ = RemovePath(outputFile)
         tool.AppendArg(outputFile)
         if (objFiles.isEmpty()) {
             for (inputObj in driverOptions.inputObjs) {

@@ -18,6 +18,17 @@ Current status:
 - Native backend execution is represented by external tool invocation through
   direct POSIX process FFI on non-Windows hosts. LLVM remains external; no LLVM
   reimplementation was added.
+- Driver now depends directly on the real `basic`, `option`, and `utils`
+  packages instead of carrying local compatibility copies for compiler version
+  printing, target/optimization/output/sanitizer enums, `TripleInfo`, and
+  `FileUtil`. Driver-owned model types remain only for Driver concepts such as
+  tool IDs, tool futures, ordered inputs, environment options, and temp-file
+  records.
+- Target parsing now fills the real option `TripleInfo` shape, including
+  vendor, Android API, Apple/iOS simulator environments, and the C++ `dylib`
+  compile-target mapping to `SHARED_LIB`. Host/target defaults are initialized
+  through Driver helpers that mirror the C++ host triple defaults while using
+  the shared option type.
 - Driver now preserves frontend/global arguments in parse order, filters out
   driver-only linker/toolchain options, and passes a pre-created temporary
   bitcode output path to the self-hosted FrontendTool bridge.
@@ -63,7 +74,10 @@ Residual fidelity risks:
 
 - Driver self-host markers have been removed. Bitcode package names are read
   through LLVM C API bindings, and source compilation now invokes the
-  self-hosted FrontendTool package.
+  self-hosted FrontendTool package. If the current frontend/codegen package
+  boundary reports success without materializing the requested native bitcode,
+  Driver keeps the run in frontend-only mode rather than invoking the backend
+  on a missing file.
 - GNU/Mach-O/platform toolchains are functional command builders with
   substantially more C++ parity, but symbol-localization data still depends on
   the frontend/codegen package boundary exposing the C++ in-process

@@ -1,6 +1,7 @@
 package cangjie_compiler::driver
 
 import std.collection.*
+import cangjie_compiler::basic.PrintVersion
 
 public class Driver {
     public let args: Array<String>
@@ -96,10 +97,6 @@ private func ReportBitcodePackageNameError(bcPath: String, error: BitcodePackage
     } else {
         eprintln("error: invalid bitcode package name in '${bcPath}'")
     }
-}
-
-public func PrintVersion(): Unit {
-    println("Cangjie Compiler self-host Driver")
 }
 
 public func PrintUsage(): Unit {

@@ -394,6 +394,7 @@ public open class ToolChain {
         return match (arch) {
             case ArchType.X86_64 => "lib64"
             case ArchType.AARCH64 => "lib64"
+            case ArchType.ARM64 => "lib64"
             case ArchType.ARM32 => "lib"
             case ArchType.UNKNOWN => ""
         }

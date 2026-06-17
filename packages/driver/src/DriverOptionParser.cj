@@ -326,7 +326,6 @@ private func ParseOptionWithValue(opts: DriverOptions, cursor: ParseCursor, arg:
         if (let Some(value) <- readOptionValue(cursor, arg, "--target")) {
             if (let Some(triple) <- TryParseTriple(value)) {
                 opts.target = triple
-                opts.backend = opts.target.backend
                 addFrontendSeparated(opts, "--target", value)
                 return true
             }
@@ -630,7 +629,7 @@ private func ParseOutputType(opts: DriverOptions, value: String): Bool {
 private func ParseCompileTarget(opts: DriverOptions, value: String): Bool {
     if (value == "exe") { opts.compileTarget = CompileTarget.EXECUTABLE; return true }
     if (value == "staticlib") { opts.compileTarget = CompileTarget.STATIC_LIB; return true }
-    if (value == "dylib") { opts.compileTarget = CompileTarget.DYNAMIC_LIB; return true }
+    if (value == "dylib") { opts.compileTarget = CompileTarget.SHARED_LIB; return true }
     eprintln("error: unsupported --compile-target value '${value}'")
     return false
 }
@@ -660,7 +659,8 @@ public func ClassifyInput(opts: DriverOptions, input: String, index: UInt64): Un
 
 public func TryParseTriple(value: String): Option<TripleInfo> {
     let info = TripleInfo()
-    info.raw = value
+    info.vendor = Vendor.UNKNOWN
+    info.apiLevel = ""
     let parts = SplitString(value.toAsciiLower(), "-")
     if (parts.size != 3 && parts.size != 4) {
         return None
@@ -676,6 +676,7 @@ public func TryParseTriple(value: String): Option<TripleInfo> {
     }
 
     if (parts.size >= 3 && parts[1] == "apple") {
+        info.vendor = Vendor.APPLE
         if (parts[2].startsWith("ios")) {
             info.os = OSType.IOS
             info.apiLevel = parts[2][3..]
@@ -716,7 +717,7 @@ public func TryParseTriple(value: String): Option<TripleInfo> {
         info.env = EnvironmentType.OHOS
     } else if (envPart == "android") {
         info.env = EnvironmentType.ANDROID
-        info.apiLevel = "23"
+        info.apiLevel = "26"
     } else if (envPart.startsWith("android")) {
         info.env = EnvironmentType.ANDROID
         info.apiLevel = envPart[7..]
@@ -734,7 +735,6 @@ public func TryParseTriple(value: String): Option<TripleInfo> {
     } else {
         return None
     }
-    info.backend = BackendType.CJNATIVE
     return info
 }
 
@@ -743,10 +743,11 @@ public func ParseTriple(value: String): TripleInfo {
         return info
     }
     let info = TripleInfo()
-    info.raw = value
     info.arch = ArchType.UNKNOWN
+    info.vendor = Vendor.UNKNOWN
     info.os = OSType.UNKNOWN
     info.env = EnvironmentType.NOT_AVAILABLE
+    info.apiLevel = ""
     return info
 }
 
