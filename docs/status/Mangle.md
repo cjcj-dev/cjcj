@@ -133,6 +133,11 @@ Implemented:
   falling back to local index `0`.
 - Aligned private prefix and global wildcard-pattern file handling with the C++ null-check behavior by rejecting
   missing `curFile` metadata before emitting file-private discriminators.
+- Aligned local variable and local function index lookup with the C++ assertion/value paths by requiring prepared
+  package context entries and registered local indexes instead of emitting partial names when context collection
+  missed a declaration.
+- Aligned descriptor lambda index lookup with the C++ context-index contract by requiring an outer container,
+  non-empty package context, and registered lambda index instead of falling back to lambda index `0`.
 
 Known fidelity caveats:
 

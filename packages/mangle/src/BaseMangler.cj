@@ -1114,6 +1114,8 @@ public open class BaseMangler {
                         mangleStr += DecimalToManglingNumber("0")
                     } else if (let Some(index) <- ctx.GetIndexOfVar(outerNode, decl)) {
                         mangleStr += DecimalToManglingNumber("${index}")
+                    } else {
+                        throw IllegalArgumentException("Index of local variable is not found: " + decl.identifier)
                     }
                 }
             }
@@ -1228,12 +1230,22 @@ public open class BaseMangler {
     public func GetMangledLocalFuncIndex(decl: MangleDecl): String {
         if (let Some(outerNode) <- GetOuterDecl(decl)) {
             let pkgName = ManglerContext.ReduceUnitTestPackageName(decl.fullPackageName)
-            if (let Some(ctx) <- manglerCtxTable.get(pkgName)) {
-                if (let Some(index) <- ctx.GetIndexOfFunc(outerNode, decl)) {
-                    if (index > 0) {
-                        return MANGLE_COUNT_PREFIX + DecimalToManglingNumber("${index - 1}")
-                    }
-                }
+            let ctx = if (let Some(value) <- manglerCtxTable.get(pkgName)) {
+                value
+            } else {
+                throw IllegalArgumentException("Mangler context not prepared for package: " + pkgName)
+            }
+            let index = if (let Some(value) <- ctx.GetIndexOfFunc(outerNode, decl)) {
+                value
+            } else {
+                throw IllegalArgumentException("Index of local function is not found: " + decl.identifier)
+            }
+            if (index > 0) {
+                return MANGLE_COUNT_PREFIX + DecimalToManglingNumber("${index - 1}")
+            }
+        } else {
+            if (IsLocalFunc(decl)) {
+                throw IllegalArgumentException("Outer declaration of local function is not found: " + decl.identifier)
             }
         }
         return ""
@@ -1455,24 +1467,33 @@ public open class BaseMangler {
     }
 
     private func GetLambdaIndex(lambda: MangleDecl, prefix: ArrayList<MangleDecl>, stopExclusive: Int64): Int64 {
-        if (let Some(outerNode) <- FindOuterNodeOfLambda(prefix, stopExclusive)) {
-            var pkgName = outerNode.fullPackageName
-            if (pkgName.isEmpty()) {
-                for (prefixDecl in prefix) {
-                    if (!prefixDecl.fullPackageName.isEmpty()) {
-                        pkgName = prefixDecl.fullPackageName
-                        break
-                    }
-                }
-            }
-            pkgName = ManglerContext.ReduceUnitTestPackageName(pkgName)
-            if (let Some(ctx) <- manglerCtxTable.get(pkgName)) {
-                if (let Some(index) <- ctx.GetIndexOfLambda(outerNode, lambda)) {
-                    return index
+        let outerNode = if (let Some(value) <- FindOuterNodeOfLambda(prefix, stopExclusive)) {
+            value
+        } else {
+            throw IllegalArgumentException("Outer container of lambda is not found.")
+        }
+        var pkgName = outerNode.fullPackageName
+        if (pkgName.isEmpty()) {
+            for (prefixDecl in prefix) {
+                if (!prefixDecl.fullPackageName.isEmpty()) {
+                    pkgName = prefixDecl.fullPackageName
+                    break
                 }
             }
         }
-        return 0
+        pkgName = ManglerContext.ReduceUnitTestPackageName(pkgName)
+        if (pkgName.isEmpty()) {
+            throw IllegalArgumentException("Package name of lambda is empty.")
+        }
+        let ctx = if (let Some(value) <- manglerCtxTable.get(pkgName)) {
+            value
+        } else {
+            throw IllegalArgumentException("Mangler context not prepared for package: " + pkgName)
+        }
+        if (let Some(index) <- ctx.GetIndexOfLambda(outerNode, lambda)) {
+            return index
+        }
+        throw IllegalArgumentException("Index of lambda is not found.")
     }
 
     private func GetSpecialFuncName(fd: MangleDecl): Option<String> {
