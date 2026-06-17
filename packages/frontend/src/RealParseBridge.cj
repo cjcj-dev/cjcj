@@ -11,30 +11,30 @@ import cangjie_compiler::parse.FuncDecl as ParseFuncDecl
 import cangjie_compiler::parse.VarDecl as ParseVarDecl
 import cangjie_compiler::parse.Expr as ParseExpr
 import cangjie_compiler::parse.BinaryExpr as ParseBinaryExpr
+import cangjie_compiler::parse.AssignExpr as ParseAssignExpr
 import cangjie_compiler::parse.RefExpr as ParseRefExpr
 import cangjie_compiler::parse.LitConstExpr as ParseLitConstExpr
 import cangjie_compiler::parse.ReturnExpr as ParseReturnExpr
+import cangjie_compiler::parse.ParenExpr as ParseParenExpr
+import cangjie_compiler::parse.IfExpr as ParseIfExpr
+import cangjie_compiler::parse.WhileExpr as ParseWhileExpr
+import cangjie_compiler::parse.Block as ParseBlock
 import cangjie_compiler::parse.LitConstKind as ParseLitConstKind
+import cangjie_compiler::chir.AST2CHIRStmtSpec as ChirStmtSpec
+import cangjie_compiler::chir.AST2CHIRExprSpec as ChirExprSpec
+import cangjie_compiler::chir.ExprKind as ChirExprKind
 
-// Statement-kind tags mirrored by FuncBody.realStmtKind. Kept in sync with the CHIR-side
-// AST2CHIRStmtSpec tags in CodeGenBridge.cj.
-let REAL_STMT_LET_LITERAL: Int64 = 0
-let REAL_STMT_LET_BINARY: Int64 = 1
-let REAL_STMT_RETURN: Int64 = 2
-
-// Binary-op tags mirrored by FuncBody.realStmtOp.
-let REAL_OP_ADD: Int64 = 0
-
-// First real-expression slice adapter. Runs the real recursive-descent parser over the same
-// source the frontend already summarized, and for any function whose body matches the small
-// supported grammar (Int64 `let` literals, a single ADD over locals, and a return of a local),
-// fills the ordered real-body statement model on the frontend FuncBody and sets hasRealBody.
+// Real-expression body-lowering adapter. Runs the real recursive-descent parser over the same
+// source the frontend already summarized, and for any function whose body matches the supported
+// grammar (Int64 locals: `let`/`var` decls, reassignment, arithmetic + relational binary ops,
+// `if`/`else`, `while`, and `return`) builds a recursive CHIR statement spec tree directly and
+// sets hasRealBody.
 //
-// Only functions that genuinely need runtime computation are promoted: the body must contain at
-// least one `let` binding consumed by the returned expression. This deliberately leaves the
-// already-verified summary slices (literal returns, let-folded returns, pure-literal arithmetic
-// folds, println/print) on their existing path, so they cannot regress. Anything outside the
-// grammar simply leaves hasRealBody == false (silent fallback).
+// Promotion is gated: a body is promoted only when it genuinely needs runtime computation -- it
+// must contain at least one non-trivial construct (a binary op, a `var`, an assignment, an `if`,
+// or a `while`). This leaves the already-verified summary slices (literal returns, let-folded
+// returns, pure-literal arithmetic folds, println/print) on their existing path with no
+// regression. Anything outside the grammar simply leaves hasRealBody == false (silent fallback).
 public func AdaptRealBodies(file: File, fileID: UInt64, sourceCode: String, sm: SourceManager): Unit {
     let parseDiag = ParseDiagnosticEngine()
     let parser = RealParser(fileID, sourceCode, parseDiag, sm)
@@ -54,12 +54,6 @@ private func tryAdaptFunction(funcDecl: FuncDecl, parsedFile: ParseFile): Unit {
     if (!funcDecl.funcBody.printStrings.isEmpty()) {
         return
     }
-    // Note: a body whose returned expression folds to a literal in the summary path
-    // (e.g. `let a=2; let b=3; return a+b`) still arrives here with hasLiteralReturn == true.
-    // We only override that fold when the body genuinely needs runtime computation (the returned
-    // expression depends on a local binding); see adaptParsedFunc / CommitTo, which clears the
-    // stale literal-return summary so the real CHIR body wins. Pure-literal folds such as
-    // `return 2 + 3 * 4` use no locals and are therefore never promoted (no regression).
     let name = funcDecl.identifier.Val()
     let matched = findParsedFunc(parsedFile, name, funcDecl.begin.line)
     if (let Some(parsedFunc) <- matched) {
@@ -93,6 +87,12 @@ private func findParsedFunc(parsedFile: ParseFile, name: String, line: Int64): O
     return nameMatch
 }
 
+// Tracks the known local names in scope and whether the body needs runtime computation.
+private class AdaptScope {
+    let locals = HashSet<String>()
+    var needsRuntime: Bool = false
+}
+
 private func adaptParsedFunc(funcDecl: FuncDecl, parsedFunc: ParseFuncDecl): Unit {
     let body = match (parsedFunc.funcBody) {
         case Some(fb) => fb
@@ -102,144 +102,265 @@ private func adaptParsedFunc(funcDecl: FuncDecl, parsedFunc: ParseFuncDecl): Uni
         case Some(b) => b
         case None => return
     }
-    // Build the statement model into a staging collection of parallel arrays. Only commit
-    // (and set hasRealBody) if the whole body matches the grammar AND it contains a genuine
-    // runtime arithmetic op (an ADD). Bodies the summary path already folds to a single literal
-    // -- e.g. `return 42`, `let x = 9; return x`, `return 2 + 3 * 4` -- contain no real ADD here
-    // and are therefore left byte-for-byte on their existing literal/fold path (no regression).
-    let staging = RealBodyStaging()
-    let locals = HashSet<String>()
-    var sawReturn = false
+    let scope = AdaptScope()
+    let statements = match (adaptStatements(block, scope)) {
+        case Some(stmts) => stmts
+        case None => return
+    }
+    // Require genuine runtime computation; otherwise leave the summary/literal path untouched.
+    if (!scope.needsRuntime) {
+        return
+    }
+    // Clear any stale literal-return summary so the real CHIR body path wins in the bridge.
+    funcDecl.funcBody.hasLiteralReturn = false
+    funcDecl.funcBody.hasRealBody = true
+    funcDecl.funcBody.realStatements = statements
+}
+
+// Adapt a parse Block's statement list into CHIR statement specs. Returns None on any grammar miss
+// (the whole body then falls back to the summary path). `scope` accumulates locals and the
+// needs-runtime flag across the (single, shared) scope.
+private func adaptStatements(block: ParseBlock, scope: AdaptScope): Option<ArrayList<ChirStmtSpec>> {
+    let out = ArrayList<ChirStmtSpec>()
     for (node in block.body) {
-        if (sawReturn) {
-            // Statements after a return are outside this minimal grammar.
-            return
-        }
         if (let Some(varDecl) <- (node as ParseVarDecl)) {
-            if (!adaptVarDecl(varDecl, staging, locals)) {
-                return
+            match (adaptVarDecl(varDecl, scope)) {
+                case Some(stmt) => out.add(stmt)
+                case None => return None
             }
             continue
         }
         if (let Some(returnExpr) <- (node as ParseReturnExpr)) {
-            if (!adaptReturn(returnExpr, staging, locals)) {
-                return
+            match (adaptReturn(returnExpr, scope)) {
+                case Some(stmt) => out.add(stmt)
+                case None => return None
             }
-            sawReturn = true
+            continue
+        }
+        if (let Some(assignExpr) <- (node as ParseAssignExpr)) {
+            match (adaptAssign(assignExpr, scope)) {
+                case Some(stmt) => out.add(stmt)
+                case None => return None
+            }
+            continue
+        }
+        if (let Some(ifExpr) <- (node as ParseIfExpr)) {
+            match (adaptIf(ifExpr, scope)) {
+                case Some(stmt) => out.add(stmt)
+                case None => return None
+            }
+            continue
+        }
+        if (let Some(whileExpr) <- (node as ParseWhileExpr)) {
+            match (adaptWhile(whileExpr, scope)) {
+                case Some(stmt) => out.add(stmt)
+                case None => return None
+            }
             continue
         }
         // Any other statement kind: unsupported -> fall back.
-        return
+        return None
     }
-    // Require a real runtime ADD; otherwise leave the summary/literal path untouched.
-    if (!sawReturn || !staging.HasBinary()) {
-        return
-    }
-    staging.CommitTo(funcDecl.funcBody)
+    return Some(out)
 }
 
-// Returns true when the VarDecl matched the grammar and was staged.
-private func adaptVarDecl(varDecl: ParseVarDecl, staging: RealBodyStaging, locals: HashSet<String>): Bool {
-    if (varDecl.isVar || varDecl.isConst) {
-        return false
+private func adaptVarDecl(varDecl: ParseVarDecl, scope: AdaptScope): Option<ChirStmtSpec> {
+    if (varDecl.isConst) {
+        return None
     }
     let name = varDecl.identifier.Val()
     if (name.isEmpty()) {
-        return false
+        return None
     }
     let initExpr = match (varDecl.initializer) {
         case Some(e) => e
-        case None => return false
+        case None => return None
     }
-    if (let Some(litValue) <- intLiteralValue(initExpr)) {
-        staging.AddLetLiteral(name, litValue)
-        locals.add(name)
-        return true
-    }
-    if (let Some(binary) <- (initExpr as ParseBinaryExpr)) {
-        if (binary.op.kind != TokenKind.ADD) {
-            return false
-        }
-        let lhs = operandOf(binary.leftExpr, locals)
-        let rhs = operandOf(binary.rightExpr, locals)
-        if (let (Some(l), Some(r)) <- (lhs, rhs)) {
-            staging.AddLetBinary(name, REAL_OP_ADD, l, r)
-            locals.add(name)
-            return true
-        }
-        return false
-    }
-    return false
-}
-
-// Returns true when the return matched the grammar, false on a grammar miss.
-private func adaptReturn(returnExpr: ParseReturnExpr, staging: RealBodyStaging,
-    locals: HashSet<String>): Bool {
-    let expr = match (returnExpr.expr) {
-        case Some(e) => e
-        case None => return false
-    }
-    if (let Some(litValue) <- intLiteralValue(expr)) {
-        staging.AddReturnLiteral(litValue)
-        return true
-    }
-    if (let Some(refName) <- localRefName(expr, locals)) {
-        staging.AddReturnRef(refName)
-        return true
-    }
-    // `return a + b`: lower the binary into an implicit temp local, then return that local.
-    if (let Some(binary) <- (expr as ParseBinaryExpr)) {
-        if (binary.op.kind != TokenKind.ADD) {
-            return false
-        }
-        let lhs = operandOf(binary.leftExpr, locals)
-        let rhs = operandOf(binary.rightExpr, locals)
-        if (let (Some(l), Some(r)) <- (lhs, rhs)) {
-            // Only ref+ref ADD is modeled by the CHIR LetBinaryRefRef builder; require locals.
-            if (l.isLiteral || r.isLiteral) {
-                return false
-            }
-            let tempName = staging.FreshTempName()
-            staging.AddLetBinary(tempName, REAL_OP_ADD, l, r)
-            locals.add(tempName)
-            staging.AddReturnRef(tempName)
-            return true
-        }
-        return false
-    }
-    return false
-}
-
-// An operand of a binary op: either a reference to a known local or an Int64 literal.
-private struct RealOperand {
-    let isLiteral: Bool
-    let name: String
-    let literal: Int64
-    init(isLiteral: Bool, name: String, literal: Int64) {
-        this.isLiteral = isLiteral
-        this.name = name
-        this.literal = literal
-    }
-}
-
-private func operandOf(maybeExpr: Option<ParseExpr>, locals: HashSet<String>): Option<RealOperand> {
-    let expr = match (maybeExpr) {
+    let valueSpec = match (adaptExpr(initExpr, scope)) {
         case Some(e) => e
         case None => return None
     }
-    if (let Some(litValue) <- intLiteralValue(expr)) {
-        return Some(RealOperand(true, "", litValue))
+    if (varDecl.isVar) {
+        scope.needsRuntime = true
     }
-    if (let Some(refName) <- localRefName(expr, locals)) {
-        return Some(RealOperand(false, refName, 0))
+    scope.locals.add(name)
+    return Some(ChirStmtSpec.Let(name, valueSpec, isVar: varDecl.isVar))
+}
+
+private func adaptAssign(assignExpr: ParseAssignExpr, scope: AdaptScope): Option<ChirStmtSpec> {
+    // Only plain `name = expr` over a known local is supported (no compound assignment).
+    if (assignExpr.op.kind != TokenKind.ASSIGN) {
+        return None
+    }
+    let target = match (assignExpr.leftExpr) {
+        case Some(e) => e
+        case None => return None
+    }
+    let name = match (localRefName(target, scope)) {
+        case Some(n) => n
+        case None => return None
+    }
+    let rhs = match (assignExpr.rightExpr) {
+        case Some(e) => e
+        case None => return None
+    }
+    let valueSpec = match (adaptExpr(rhs, scope)) {
+        case Some(e) => e
+        case None => return None
+    }
+    scope.needsRuntime = true
+    return Some(ChirStmtSpec.Assign(name, valueSpec))
+}
+
+private func adaptReturn(returnExpr: ParseReturnExpr, scope: AdaptScope): Option<ChirStmtSpec> {
+    let expr = match (returnExpr.expr) {
+        case Some(e) => e
+        case None => return Some(ChirStmtSpec.ReturnNone())
+    }
+    let valueSpec = match (adaptExpr(expr, scope)) {
+        case Some(e) => e
+        case None => return None
+    }
+    return Some(ChirStmtSpec.Return(valueSpec))
+}
+
+private func adaptIf(ifExpr: ParseIfExpr, scope: AdaptScope): Option<ChirStmtSpec> {
+    let condExpr = match (ifExpr.condExpr) {
+        case Some(e) => e
+        case None => return None
+    }
+    let condSpec = match (adaptExpr(condExpr, scope)) {
+        case Some(e) => e
+        case None => return None
+    }
+    let thenBlock = match (ifExpr.thenBody) {
+        case Some(b) => b
+        case None => return None
+    }
+    let thenStmts = match (adaptStatements(thenBlock, scope)) {
+        case Some(s) => s
+        case None => return None
+    }
+    var elseStmts = ArrayList<ChirStmtSpec>()
+    if (ifExpr.hasElse) {
+        let elseExpr = match (ifExpr.elseBody) {
+            case Some(e) => e
+            case None => return None
+        }
+        // `else { ... }` is a Block; `else if (...)` is a nested IfExpr.
+        if (let Some(elseBlock) <- (elseExpr as ParseBlock)) {
+            elseStmts = match (adaptStatements(elseBlock, scope)) {
+                case Some(s) => s
+                case None => return None
+            }
+        } else if (let Some(elseIf) <- (elseExpr as ParseIfExpr)) {
+            let nested = match (adaptIf(elseIf, scope)) {
+                case Some(s) => s
+                case None => return None
+            }
+            let single = ArrayList<ChirStmtSpec>()
+            single.add(nested)
+            elseStmts = single
+        } else {
+            return None
+        }
+    }
+    scope.needsRuntime = true
+    return Some(ChirStmtSpec.If(condSpec, thenStmts, elseStmts))
+}
+
+private func adaptWhile(whileExpr: ParseWhileExpr, scope: AdaptScope): Option<ChirStmtSpec> {
+    let condExpr = match (whileExpr.condExpr) {
+        case Some(e) => e
+        case None => return None
+    }
+    let condSpec = match (adaptExpr(condExpr, scope)) {
+        case Some(e) => e
+        case None => return None
+    }
+    let bodyBlock = match (whileExpr.body) {
+        case Some(b) => b
+        case None => return None
+    }
+    let bodyStmts = match (adaptStatements(bodyBlock, scope)) {
+        case Some(s) => s
+        case None => return None
+    }
+    scope.needsRuntime = true
+    return Some(ChirStmtSpec.While(condSpec, bodyStmts))
+}
+
+// Adapt a parse expression into a CHIR expression spec. Supports Int64 literals, references to
+// known locals, parenthesized expressions, and arithmetic/relational binary ops. A binary op over
+// any sub-expression marks the body as needing runtime computation.
+private func adaptExpr(expr: ParseExpr, scope: AdaptScope): Option<ChirExprSpec> {
+    if (let Some(litValue) <- intLiteralValue(expr)) {
+        return Some(ChirExprSpec.Literal(litValue))
+    }
+    if (let Some(refName) <- localRefName(expr, scope)) {
+        return Some(ChirExprSpec.Ref(refName))
+    }
+    if (let Some(paren) <- (expr as ParseParenExpr)) {
+        let inner = match (paren.expr) {
+            case Some(e) => e
+            case None => return None
+        }
+        return adaptExpr(inner, scope)
+    }
+    // AssignExpr is also a BinaryExpr; exclude it (handled only as a statement).
+    if (let Some(_) <- (expr as ParseAssignExpr)) {
+        return None
+    }
+    if (let Some(binary) <- (expr as ParseBinaryExpr)) {
+        let op = match (toChirBinaryOp(binary.op.kind)) {
+            case Some(o) => o
+            case None => return None
+        }
+        let leftExpr = match (binary.leftExpr) {
+            case Some(e) => e
+            case None => return None
+        }
+        let rightExpr = match (binary.rightExpr) {
+            case Some(e) => e
+            case None => return None
+        }
+        let lhsSpec = match (adaptExpr(leftExpr, scope)) {
+            case Some(e) => e
+            case None => return None
+        }
+        let rhsSpec = match (adaptExpr(rightExpr, scope)) {
+            case Some(e) => e
+            case None => return None
+        }
+        scope.needsRuntime = true
+        return Some(ChirExprSpec.Binary(op, lhsSpec, rhsSpec))
     }
     return None
 }
 
-private func localRefName(expr: ParseExpr, locals: HashSet<String>): Option<String> {
+// Map a parse binary-op token to a CHIR ExprKind. Only the Int64 arithmetic and relational ops
+// modeled by the lowering path are accepted; anything else fails the match (fallback).
+private func toChirBinaryOp(kind: TokenKind): Option<ChirExprKind> {
+    return match (kind) {
+        case TokenKind.ADD => Some(ChirExprKind.ADD)
+        case TokenKind.SUB => Some(ChirExprKind.SUB)
+        case TokenKind.MUL => Some(ChirExprKind.MUL)
+        case TokenKind.DIV => Some(ChirExprKind.DIV)
+        case TokenKind.MOD => Some(ChirExprKind.MOD)
+        case TokenKind.LT => Some(ChirExprKind.LT)
+        case TokenKind.GT => Some(ChirExprKind.GT)
+        case TokenKind.LE => Some(ChirExprKind.LE)
+        case TokenKind.GE => Some(ChirExprKind.GE)
+        case TokenKind.EQUAL => Some(ChirExprKind.EQUAL)
+        case TokenKind.NOTEQ => Some(ChirExprKind.NOTEQUAL)
+        case _ => None
+    }
+}
+
+private func localRefName(expr: ParseExpr, scope: AdaptScope): Option<String> {
     if (let Some(refExpr) <- (expr as ParseRefExpr)) {
         let name = refExpr.identifier.Val()
-        if (locals.contains(name)) {
+        if (scope.locals.contains(name)) {
             return Some(name)
         }
     }
@@ -261,83 +382,5 @@ private func parseIntText(value: String): Option<Int64> {
         return Some(Int64.parse(normalized))
     } catch (e: Exception) {
         return None
-    }
-}
-
-// Stages the ordered statement model so it is committed atomically only when the whole body
-// matched the grammar.
-private class RealBodyStaging {
-    let kinds = ArrayList<Int64>()
-    let names = ArrayList<String>()
-    let literals = ArrayList<Int64>()
-    let ops = ArrayList<Int64>()
-    let lhsIsLiteral = ArrayList<Bool>()
-    let lhsName = ArrayList<String>()
-    let lhsLiteral = ArrayList<Int64>()
-    let rhsIsLiteral = ArrayList<Bool>()
-    let rhsName = ArrayList<String>()
-    let rhsLiteral = ArrayList<Int64>()
-    var tempCounter = 0
-    var hasBinary = false
-
-    func HasBinary(): Bool { return hasBinary }
-
-    func FreshTempName(): String {
-        let name = "$ret${tempCounter}"
-        tempCounter++
-        return name
-    }
-
-    func AddLetLiteral(name: String, value: Int64): Unit {
-        kinds.add(REAL_STMT_LET_LITERAL)
-        names.add(name)
-        literals.add(value)
-        ops.add(REAL_OP_ADD)
-        lhsIsLiteral.add(true); lhsName.add(""); lhsLiteral.add(0)
-        rhsIsLiteral.add(true); rhsName.add(""); rhsLiteral.add(0)
-    }
-
-    func AddLetBinary(name: String, op: Int64, lhs: RealOperand, rhs: RealOperand): Unit {
-        hasBinary = true
-        kinds.add(REAL_STMT_LET_BINARY)
-        names.add(name)
-        literals.add(0)
-        ops.add(op)
-        lhsIsLiteral.add(lhs.isLiteral); lhsName.add(lhs.name); lhsLiteral.add(lhs.literal)
-        rhsIsLiteral.add(rhs.isLiteral); rhsName.add(rhs.name); rhsLiteral.add(rhs.literal)
-    }
-
-    func AddReturnRef(name: String): Unit {
-        kinds.add(REAL_STMT_RETURN)
-        names.add("")
-        literals.add(0)
-        ops.add(REAL_OP_ADD)
-        lhsIsLiteral.add(false); lhsName.add(name); lhsLiteral.add(0)
-        rhsIsLiteral.add(true); rhsName.add(""); rhsLiteral.add(0)
-    }
-
-    func AddReturnLiteral(value: Int64): Unit {
-        kinds.add(REAL_STMT_RETURN)
-        names.add("")
-        literals.add(0)
-        ops.add(REAL_OP_ADD)
-        lhsIsLiteral.add(true); lhsName.add(""); lhsLiteral.add(value)
-        rhsIsLiteral.add(true); rhsName.add(""); rhsLiteral.add(0)
-    }
-
-    func CommitTo(funcBody: FuncBody): Unit {
-        // Clear any stale literal-return summary so the real CHIR body path wins in the bridge.
-        funcBody.hasLiteralReturn = false
-        funcBody.hasRealBody = true
-        funcBody.realStmtKind = kinds
-        funcBody.realStmtName = names
-        funcBody.realStmtLiteral = literals
-        funcBody.realStmtOp = ops
-        funcBody.realStmtLhsIsLiteral = lhsIsLiteral
-        funcBody.realStmtLhsName = lhsName
-        funcBody.realStmtLhsLiteral = lhsLiteral
-        funcBody.realStmtRhsIsLiteral = rhsIsLiteral
-        funcBody.realStmtRhsName = rhsName
-        funcBody.realStmtRhsLiteral = rhsLiteral
     }
 }

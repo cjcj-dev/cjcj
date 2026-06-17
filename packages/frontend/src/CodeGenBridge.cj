@@ -5,8 +5,6 @@ import std.convert.*
 import cangjie_compiler::chir.AccessLevel as ChirAccessLevel
 import cangjie_compiler::chir.AST2CHIR as ChirAST2CHIR
 import cangjie_compiler::chir.AST2CHIRFunctionSpec as ChirFunctionSpec
-import cangjie_compiler::chir.AST2CHIRStmtSpec as ChirStmtSpec
-import cangjie_compiler::chir.ExprKind as ChirExprKind
 import cangjie_compiler::chir.AST2CHIRGlobalSpec as ChirGlobalSpec
 import cangjie_compiler::chir.AST2CHIRMemberVarSpec as ChirMemberVarSpec
 import cangjie_compiler::chir.AST2CHIRNominalKind as ChirNominalKind
@@ -425,36 +423,14 @@ private func literalReturnCanLower(literalReturnKind: Int64, literalReturnValue:
         literalReturnKind == FRONTEND_LITERAL_RUNE
 }
 
-// Translate the frontend FuncBody's real-body statement model (filled by the real-parser
-// adapter in RealParseBridge.cj) into CHIR AST2CHIRStmtSpec entries and enable the real body.
+// Hand the frontend FuncBody's real-body statement spec tree (built directly by the real-parser
+// adapter in RealParseBridge.cj) to the CHIR function spec and enable the real body. The tree is
+// already in CHIR's recursive AST2CHIRStmtSpec form, so no per-statement translation is needed.
 private func applyRealBody(fnSpec: ChirFunctionSpec, funcBody: FuncBody): Unit {
     fnSpec.EnableRealBody()
-    var idx = 0
-    while (idx < funcBody.realStmtKind.size) {
-        let kind = funcBody.realStmtKind[idx]
-        if (kind == REAL_STMT_LET_LITERAL) {
-            fnSpec.AddBodyStatement(ChirStmtSpec.LetLiteral(funcBody.realStmtName[idx], funcBody.realStmtLiteral[idx]))
-        } else if (kind == REAL_STMT_LET_BINARY) {
-            // Only ref+ref ADD is modeled in this slice; the adapter guarantees both operands
-            // are locals for the LET_BINARY case it emits.
-            let op = toChirBinaryOp(funcBody.realStmtOp[idx])
-            fnSpec.AddBodyStatement(ChirStmtSpec.LetBinaryRefRef(funcBody.realStmtName[idx], op,
-                funcBody.realStmtLhsName[idx], funcBody.realStmtRhsName[idx]))
-        } else if (kind == REAL_STMT_RETURN) {
-            if (funcBody.realStmtLhsIsLiteral[idx]) {
-                fnSpec.AddBodyStatement(ChirStmtSpec.ReturnLiteral(funcBody.realStmtLhsLiteral[idx]))
-            } else {
-                fnSpec.AddBodyStatement(ChirStmtSpec.ReturnRef(funcBody.realStmtLhsName[idx]))
-            }
-        }
-        idx++
+    for (stmt in funcBody.realStatements) {
+        fnSpec.AddBodyStatement(stmt)
     }
-}
-
-private func toChirBinaryOp(op: Int64): ChirExprKind {
-    // REAL_OP_ADD is the only modeled op in this slice; future ops branch on `op` here.
-    let _ = op
-    return ChirExprKind.ADD
 }
 
 private func setLiteralReturn(fnSpec: ChirFunctionSpec, literalReturnKind: Int64, literalReturnValue: String): Unit {

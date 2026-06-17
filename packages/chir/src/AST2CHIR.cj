@@ -59,66 +59,123 @@ public class AST2CHIRGlobalSpec {
     }
 }
 
-// Minimal ordered statement model for the first real-expression slice. Int64-only.
-// Kept deliberately tiny: a let binding to an Int64 literal, a let binding to a binary
-// (currently ADD) over two operands (each a local name or an Int64 literal), and a return
-// of a single operand (local name or Int64 literal). This keeps `packages/chir` decoupled
-// from `parse`/`frontend`: the frontend adapter flattens real parse expr trees into this.
-let AST2CHIR_STMT_LET_LITERAL: Int64 = 0
-let AST2CHIR_STMT_LET_BINARY: Int64 = 1
+// Recursive statement/expression model for the real-expression body-lowering path. Int64-only
+// (conditions evaluate to Bool via relational ops). This keeps `packages/chir` decoupled from
+// `parse`/`frontend`: the frontend adapter builds these spec trees directly and hands them to
+// CreateRealBody, which emits genuine runtime CHIR (Allocate/Constant/Store/Load/BinaryExpression/
+// Branch/GoTo/Exit) -- no constant folding.
+//
+// Expression spec: a tree of Int64-valued (or Bool-valued, for relational results) expressions.
+//   - LITERAL: an Int64 constant.
+//   - REF: a reference to a local slot by name.
+//   - BINARY: an arithmetic (ADD/SUB/MUL/...) or relational (LT/LE/GT/GE/EQUAL/NOTEQUAL) op over
+//             two sub-expression specs.
+let AST2CHIR_EXPR_LITERAL: Int64 = 0
+let AST2CHIR_EXPR_REF: Int64 = 1
+let AST2CHIR_EXPR_BINARY: Int64 = 2
+
+public class AST2CHIRExprSpec {
+    public let kind: Int64
+    public let literalValue: Int64       // LITERAL
+    public let name: String              // REF
+    public let op: ExprKind              // BINARY
+    public let lhs: Option<AST2CHIRExprSpec> // BINARY
+    public let rhs: Option<AST2CHIRExprSpec> // BINARY
+
+    private init(kind: Int64, literalValue: Int64, name: String, op: ExprKind,
+        lhs: Option<AST2CHIRExprSpec>, rhs: Option<AST2CHIRExprSpec>) {
+        this.kind = kind
+        this.literalValue = literalValue
+        this.name = name
+        this.op = op
+        this.lhs = lhs
+        this.rhs = rhs
+    }
+
+    public func IsLiteral(): Bool { return kind == AST2CHIR_EXPR_LITERAL }
+    public func IsRef(): Bool { return kind == AST2CHIR_EXPR_REF }
+    public func IsBinary(): Bool { return kind == AST2CHIR_EXPR_BINARY }
+
+    public static func Literal(value: Int64): AST2CHIRExprSpec {
+        return AST2CHIRExprSpec(AST2CHIR_EXPR_LITERAL, value, "", ExprKind.ADD, None, None)
+    }
+
+    public static func Ref(name: String): AST2CHIRExprSpec {
+        return AST2CHIRExprSpec(AST2CHIR_EXPR_REF, 0, name, ExprKind.ADD, None, None)
+    }
+
+    public static func Binary(op: ExprKind, lhs: AST2CHIRExprSpec, rhs: AST2CHIRExprSpec): AST2CHIRExprSpec {
+        return AST2CHIRExprSpec(AST2CHIR_EXPR_BINARY, 0, "", op, Some(lhs), Some(rhs))
+    }
+}
+
+// Statement spec:
+//   - LET:    declare a local `name` (immutable `let` or mutable `var` per isVar) initialized to `expr`.
+//   - ASSIGN: store `expr` into the existing slot `name` (var reassignment).
+//   - RETURN: Exit with `expr` (Some) or nothing (None).
+//   - IF:     branch on `cond`; run `thenBody` or `elseBody` statement lists.
+//   - WHILE:  loop while `cond`; run `body` statement list each iteration.
+let AST2CHIR_STMT_LET: Int64 = 0
+let AST2CHIR_STMT_ASSIGN: Int64 = 1
 let AST2CHIR_STMT_RETURN: Int64 = 2
+let AST2CHIR_STMT_IF: Int64 = 3
+let AST2CHIR_STMT_WHILE: Int64 = 4
 
 public class AST2CHIRStmtSpec {
     public let kind: Int64
-    // For LET_LITERAL / LET_BINARY: the bound local name. Empty for RETURN.
-    public let name: String
-    // For LET_LITERAL: the literal value. For LET_BINARY / RETURN: unused.
-    public let literalValue: Int64
-    // For LET_BINARY: ExprKind of the binary op (e.g. ExprKind.ADD).
-    public let op: ExprKind
-    // Operands. lhs is used by LET_BINARY and RETURN; rhs only by LET_BINARY.
-    // Each operand is either a reference to a local (operandIsLiteral == false, operandName set)
-    // or an Int64 literal (operandIsLiteral == true, operandLiteral set).
-    public let lhsIsLiteral: Bool
-    public let lhsName: String
-    public let lhsLiteral: Int64
-    public let rhsIsLiteral: Bool
-    public let rhsName: String
-    public let rhsLiteral: Int64
+    public let name: String                       // LET / ASSIGN
+    public let isVar: Bool                         // LET
+    public let expr: Option<AST2CHIRExprSpec>      // LET / ASSIGN / RETURN
+    public let cond: Option<AST2CHIRExprSpec>      // IF / WHILE
+    public let thenBody: ArrayList<AST2CHIRStmtSpec> // IF then / WHILE body
+    public let elseBody: ArrayList<AST2CHIRStmtSpec> // IF else
 
-    private init(kind: Int64, name: String, literalValue: Int64, op: ExprKind, lhsIsLiteral: Bool, lhsName: String,
-        lhsLiteral: Int64, rhsIsLiteral: Bool, rhsName: String, rhsLiteral: Int64) {
+    private init(kind: Int64, name: String, isVar: Bool, expr: Option<AST2CHIRExprSpec>,
+        cond: Option<AST2CHIRExprSpec>, thenBody: ArrayList<AST2CHIRStmtSpec>,
+        elseBody: ArrayList<AST2CHIRStmtSpec>) {
         this.kind = kind
         this.name = name
-        this.literalValue = literalValue
-        this.op = op
-        this.lhsIsLiteral = lhsIsLiteral
-        this.lhsName = lhsName
-        this.lhsLiteral = lhsLiteral
-        this.rhsIsLiteral = rhsIsLiteral
-        this.rhsName = rhsName
-        this.rhsLiteral = rhsLiteral
+        this.isVar = isVar
+        this.expr = expr
+        this.cond = cond
+        this.thenBody = thenBody
+        this.elseBody = elseBody
     }
 
-    public func IsLetLiteral(): Bool { return kind == AST2CHIR_STMT_LET_LITERAL }
-    public func IsLetBinary(): Bool { return kind == AST2CHIR_STMT_LET_BINARY }
+    public func IsLet(): Bool { return kind == AST2CHIR_STMT_LET }
+    public func IsAssign(): Bool { return kind == AST2CHIR_STMT_ASSIGN }
     public func IsReturn(): Bool { return kind == AST2CHIR_STMT_RETURN }
+    public func IsIf(): Bool { return kind == AST2CHIR_STMT_IF }
+    public func IsWhile(): Bool { return kind == AST2CHIR_STMT_WHILE }
 
-    public static func LetLiteral(name: String, value: Int64): AST2CHIRStmtSpec {
-        return AST2CHIRStmtSpec(AST2CHIR_STMT_LET_LITERAL, name, value, ExprKind.ADD, true, "", 0, true, "", 0)
+    public static func Let(name: String, expr: AST2CHIRExprSpec, isVar!: Bool = false): AST2CHIRStmtSpec {
+        return AST2CHIRStmtSpec(AST2CHIR_STMT_LET, name, isVar, Some(expr), None,
+            ArrayList<AST2CHIRStmtSpec>(), ArrayList<AST2CHIRStmtSpec>())
     }
 
-    public static func LetBinaryRefRef(name: String, op: ExprKind, lhsName: String,
-        rhsName: String): AST2CHIRStmtSpec {
-        return AST2CHIRStmtSpec(AST2CHIR_STMT_LET_BINARY, name, 0, op, false, lhsName, 0, false, rhsName, 0)
+    public static func Assign(name: String, expr: AST2CHIRExprSpec): AST2CHIRStmtSpec {
+        return AST2CHIRStmtSpec(AST2CHIR_STMT_ASSIGN, name, false, Some(expr), None,
+            ArrayList<AST2CHIRStmtSpec>(), ArrayList<AST2CHIRStmtSpec>())
     }
 
-    public static func ReturnRef(name: String): AST2CHIRStmtSpec {
-        return AST2CHIRStmtSpec(AST2CHIR_STMT_RETURN, "", 0, ExprKind.ADD, false, name, 0, true, "", 0)
+    public static func Return(expr: AST2CHIRExprSpec): AST2CHIRStmtSpec {
+        return AST2CHIRStmtSpec(AST2CHIR_STMT_RETURN, "", false, Some(expr), None,
+            ArrayList<AST2CHIRStmtSpec>(), ArrayList<AST2CHIRStmtSpec>())
     }
 
-    public static func ReturnLiteral(value: Int64): AST2CHIRStmtSpec {
-        return AST2CHIRStmtSpec(AST2CHIR_STMT_RETURN, "", 0, ExprKind.ADD, true, "", value, true, "", 0)
+    public static func ReturnNone(): AST2CHIRStmtSpec {
+        return AST2CHIRStmtSpec(AST2CHIR_STMT_RETURN, "", false, None, None,
+            ArrayList<AST2CHIRStmtSpec>(), ArrayList<AST2CHIRStmtSpec>())
+    }
+
+    public static func If(cond: AST2CHIRExprSpec, thenBody: ArrayList<AST2CHIRStmtSpec>,
+        elseBody: ArrayList<AST2CHIRStmtSpec>): AST2CHIRStmtSpec {
+        return AST2CHIRStmtSpec(AST2CHIR_STMT_IF, "", false, None, Some(cond), thenBody, elseBody)
+    }
+
+    public static func While(cond: AST2CHIRExprSpec, body: ArrayList<AST2CHIRStmtSpec>): AST2CHIRStmtSpec {
+        return AST2CHIRStmtSpec(AST2CHIR_STMT_WHILE, "", false, None, Some(cond), body,
+            ArrayList<AST2CHIRStmtSpec>())
     }
 }
 
