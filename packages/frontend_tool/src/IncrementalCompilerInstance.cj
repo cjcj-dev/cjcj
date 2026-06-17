@@ -30,8 +30,13 @@ public class IncrementalCompilerInstance <: DefaultCompilerInstance {
         rawIncrRemovedDecls.clear()
         currentCacheText = ""
         let calculated = core.CalculateASTCache()
-        if (!calculated || core.GetSourcePackages().isEmpty()) {
+        let sourcePackages = core.GetSourcePackages()
+        if (!calculated || sourcePackages.isEmpty()) {
             kind = IncreKind.EMPTY_PKG
+        } else if (sourcePackages.size != 1) {
+            kind = IncreKind.ROLLBACK
+            IncrementalCompilationLogger.GetInstance().LogLn(
+                "incremental compilation expects exactly one source package, roll back to full compilation")
         } else if (!invocation.globalOptions.pluginPaths.isEmpty()) {
             kind = IncreKind.ROLLBACK
             IncrementalCompilationLogger.GetInstance().LogLn(
@@ -41,11 +46,13 @@ public class IncrementalCompilerInstance <: DefaultCompilerInstance {
         } else {
             kind = AnalyseCurrentFrontendCache()
         }
+        LogIncrementalAnalysisResult()
         recorder.close()
         return true
     }
 
     public override func PerformSema(): Bool {
+        LogIncrementalStageDecision("Semantic", "no change, skip sema", "full sema", "incremental sema")
         if (kind == IncreKind.NO_CHANGE || kind == IncreKind.EMPTY_PKG) {
             return true
         }
@@ -102,6 +109,7 @@ public class IncrementalCompilerInstance <: DefaultCompilerInstance {
     }
 
     public override func PerformCjoSaving(): Bool {
+        LogCjoSavingDecision()
         if (kind == IncreKind.NO_CHANGE || kind == IncreKind.EMPTY_PKG) {
             return true
         }
@@ -119,24 +127,111 @@ public class IncrementalCompilerInstance <: DefaultCompilerInstance {
         return ret
     }
 
+    private func LogIncrementalStageDecision(
+        stageName: String,
+        noChangeMessage: String,
+        rollbackMessage: String,
+        incrementalMessage: String
+    ): Unit {
+        let logger = IncrementalCompilationLogger.GetInstance()
+        if (!logger.IsEnable()) {
+            return
+        }
+        let message = if (kind == IncreKind.NO_CHANGE) {
+            noChangeMessage
+        } else if (kind == IncreKind.ROLLBACK) {
+            rollbackMessage
+        } else if (kind == IncreKind.INCR) {
+            incrementalMessage
+        } else if (kind == IncreKind.EMPTY_PKG) {
+            "empty pkg, skip " + stageName
+        } else {
+            "invalid incremental state for " + stageName
+        }
+        logger.LogLn(message)
+    }
+
+    private func LogCjoSavingDecision(): Unit {
+        let logger = IncrementalCompilationLogger.GetInstance()
+        if (!logger.IsEnable()) {
+            return
+        }
+        let message = if (kind == IncreKind.NO_CHANGE) {
+            "no change, skip cjo saving"
+        } else if (kind == IncreKind.EMPTY_PKG) {
+            "empty pkg, skip cjo saving"
+        } else if (invocation.globalOptions.IsCompilingCJMP() || invocation.frontendOptions.chirDeserialize) {
+            " chir output mode, skip cjo saving"
+        } else {
+            "incremental cjo saving"
+        }
+        logger.LogLn(message)
+    }
+
+    private func LogIncrementalAnalysisResult(): Unit {
+        let logger = IncrementalCompilationLogger.GetInstance()
+        if (!logger.IsEnable()) {
+            return
+        }
+        if (kind == IncreKind.ROLLBACK) {
+            logger.LogLn("incremental compile result kind: rollback")
+        } else if (kind == IncreKind.EMPTY_PKG) {
+            logger.LogLn("incremental compile result kind: empty package")
+        } else if (kind == IncreKind.NO_CHANGE) {
+            logger.LogLn("incremental compile result kind: no change")
+        } else if (kind == IncreKind.INCR) {
+            logger.LogLn("incremental compilation triggered")
+            LogStringSet("decls to recompile:", declsToBeReCompiled)
+            LogStringList("deleted decls:", rawIncrRemovedDecls)
+        } else {
+            logger.LogLn("incremental compile result kind: invalid")
+        }
+    }
+
     private func CollectChangedTypeNames(): Unit {
         changedTypes.clear()
         for (pkg in core.GetSourcePackages()) {
             for (file in pkg.files) {
                 for (decl in file.decls) {
-                    CollectStructNames(decl)
+                    CollectStructNames(pkg, file, decl)
                 }
             }
         }
     }
 
-    private func CollectStructNames(decl: Decl): Unit {
-        if (decl.astKind == ASTKind.STRUCT_DECL) {
+    private func CollectStructNames(pkg: Package, file: File, decl: Decl): Unit {
+        let declSummary = EscapeCacheLine(BuildDeclCacheSummary(pkg, file, decl))
+        if (decl.astKind == ASTKind.STRUCT_DECL &&
+            (kind != IncreKind.INCR || declsToBeReCompiled.contains(declSummary))) {
             changedTypes.add(decl.identifier.Val())
         }
         for (member in decl.members) {
-            CollectStructNames(member)
+            CollectStructNames(pkg, file, member)
         }
+    }
+
+    private func BuildDeclCacheSummary(pkg: Package, file: File, decl: Decl): String {
+        let builder = StringBuilder()
+        builder.append(pkg.fullPackageName)
+        builder.append("|")
+        builder.append(file.filePath)
+        builder.append("|")
+        builder.append(ASTKindName(decl.astKind))
+        builder.append("|")
+        builder.append(decl.identifier.Val())
+        builder.append("|")
+        builder.append(decl.begin.line.toString())
+        builder.append(":")
+        builder.append(decl.begin.column.toString())
+        builder.append("-")
+        builder.append(decl.end.line.toString())
+        builder.append(":")
+        builder.append(decl.end.column.toString())
+        if (let Some(generic) <- decl.generic) {
+            builder.append("|generic:")
+            AppendCacheStringList(builder, generic.typeParameters)
+        }
+        return builder.toString()
     }
 
     private func SaveIncrementalSignatures(): Unit {
@@ -255,4 +350,37 @@ private func GetCacheLineValue(cacheText: String, prefix: String): String {
 
 private func EscapeCacheLine(text: String): String {
     return text.replace("\\", "\\\\").replace("\n", "\\n").replace("\r", "\\r")
+}
+
+private func AppendCacheStringList(builder: StringBuilder, values: ArrayList<String>): Unit {
+    var idx: Int64 = 0
+    while (idx < values.size) {
+        if (idx > 0) {
+            builder.append(",")
+        }
+        builder.append(values[idx])
+        idx++
+    }
+}
+
+private func LogStringSet(title: String, values: HashSet<String>): Unit {
+    if (values.isEmpty()) {
+        return
+    }
+    let logger = IncrementalCompilationLogger.GetInstance()
+    logger.LogLn(title)
+    for (value in values) {
+        logger.LogLn(value)
+    }
+}
+
+private func LogStringList(title: String, values: ArrayList<String>): Unit {
+    if (values.isEmpty()) {
+        return
+    }
+    let logger = IncrementalCompilationLogger.GetInstance()
+    logger.LogLn(title)
+    for (value in values) {
+        logger.LogLn(value)
+    }
 }

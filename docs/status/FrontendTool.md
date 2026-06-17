@@ -18,6 +18,12 @@ Current status:
   types.
 - FrontendTool incremental cache comparison now validates the cache format version, rolls back when plugins are
   enabled, and treats source-file summary changes as incremental work instead of incorrectly reporting no-change.
+- FrontendTool incremental scope analysis now rolls back for multi-source-package inputs instead of trying to reuse a
+  single-package cache path, matching the C++ incremental precondition that exactly one source package is analysed.
+- Incremental logging now reports analysis result kind, recompiled/deleted cache-summary sets, semantic full/incremental
+  decisions, and CJO-saving decisions through the real `IncrementalCompilationLogger`.
+- Incremental changed-struct collection is filtered by the same declaration-summary keys used by the cache delta, so
+  incremental codegen metadata no longer marks every struct as changed on every incremental compile.
 - Common-part/CJMP-style CJO output is delayed to result saving, matching the C++ FrontendTool split between
   `PerformCjoSaving` and `PerformResultsSaving`.
 - Multi-package CJO saving now pre-mangles source declarations that still lack package-scoped names before writing
@@ -35,6 +41,8 @@ Current status:
   the full C++ incremental AST-diff/pollution data structures.
 - CJO and FrontendTool incremental cache writes use the shared `utils.FileUtil.WriteToFile` path so parent directories
   are created consistently with the shared file utility behavior.
+- `CjdCompilerInstance` profiles the result-saving CJO write path with `ProfileRecorder("Main Stage", "Save results")`
+  when it actually emits CJO output, matching the C++ CJD override structure.
 - `DefaultCompilerInstance` wraps `frontend.CompilerInstance` instead of inheriting from it because `CompilerInstance`
   is not currently `open` in the frontend package and this module is not allowed to edit frontend.
 
