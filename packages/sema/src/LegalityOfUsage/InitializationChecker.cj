@@ -63,6 +63,36 @@ private class InitBoolBox {
     }
 }
 
+private class ScopedDecls {
+    public var scopeGateName: String
+    public let decls: ArrayList<Decl> = ArrayList<Decl>()
+
+    public init(scopeGateName: String) {
+        this.scopeGateName = scopeGateName
+    }
+}
+
+private class TerminatedScopeInfo {
+    public var scopeGateName: String
+    public let variablesBeforeTerminator: ArrayList<Decl> = ArrayList<Decl>()
+    public let initVarsAfterTerminator: ArrayList<Decl> = ArrayList<Decl>()
+    public var terminationKind: ASTKind
+
+    public init(scopeGateName: String, terminationKind: ASTKind) {
+        this.scopeGateName = scopeGateName
+        this.terminationKind = terminationKind
+    }
+}
+
+private class CtorUninitVars {
+    public var ctor: FuncDecl
+    public let decls: ArrayList<Decl> = ArrayList<Decl>()
+
+    public init(ctor: FuncDecl) {
+        this.ctor = ctor
+    }
+}
+
 private func ContainsInitDecl(values: ArrayList<Decl>, decl: Decl): Bool {
     for (value in values) {
         if (SameDecl(value, decl)) {
@@ -206,6 +236,128 @@ private func IsOtherInit(call: ConstructorCall): Bool {
         case ConstructorCall.OTHER_INIT => true
         case _ => false
     }
+}
+
+private func IsControlTransferNode(node: Node): Bool {
+    return node.astKind == ASTKind.RETURN_EXPR || node.astKind == ASTKind.JUMP_EXPR ||
+        node.astKind == ASTKind.THROW_EXPR
+}
+
+private func CurrentScopeGate(scopeName: String): String {
+    let scopeGate = GetScopeGateName(scopeName)
+    if (!scopeGate.isEmpty()) {
+        return scopeGate
+    }
+    if (scopeName.contains(CHILD_SCOPE_SEPARATOR)) {
+        return scopeName
+    }
+    return ""
+}
+
+private func FindScopedDecls(entries: ArrayList<ScopedDecls>, scopeGateName: String): Option<ScopedDecls> {
+    for (entry in entries) {
+        if (entry.scopeGateName == scopeGateName) {
+            return entry
+        }
+    }
+    return None
+}
+
+private func EnsureScopedDecls(entries: ArrayList<ScopedDecls>, scopeGateName: String): ScopedDecls {
+    if (let Some(entry) <- FindScopedDecls(entries, scopeGateName)) {
+        return entry
+    }
+    let entry = ScopedDecls(scopeGateName)
+    entries.add(entry)
+    return entry
+}
+
+private func RemoveScopedDecls(entries: ArrayList<ScopedDecls>, scopeGateName: String): Unit {
+    var idx: Int64 = 0
+    while (idx < entries.size) {
+        if (entries[idx].scopeGateName == scopeGateName) {
+            entries.remove(at: idx)
+        } else {
+            idx++
+        }
+    }
+}
+
+private func FindTerminatedScope(entries: ArrayList<TerminatedScopeInfo>,
+    scopeGateName: String): Option<TerminatedScopeInfo> {
+    for (entry in entries) {
+        if (entry.scopeGateName == scopeGateName) {
+            return entry
+        }
+    }
+    return None
+}
+
+private func AddVisibleContextDecls(contextVariables: ArrayList<ScopedDecls>, scopeGateName: String,
+    out: ArrayList<Decl>): Unit {
+    var currentGate = scopeGateName
+    while (!currentGate.isEmpty()) {
+        if (let Some(entry) <- FindScopedDecls(contextVariables, currentGate)) {
+            for (decl in entry.decls) {
+                AddUniqueDecl(out, decl)
+            }
+        }
+        currentGate = GetScopeGateName(currentGate)
+    }
+}
+
+private func UpdateContextVariables(contextVariables: ArrayList<ScopedDecls>, decl: Decl): Unit {
+    if (decl.TestAnyAttr(Attribute.GLOBAL, Attribute.STATIC)) {
+        return
+    }
+    let scopeGateName = CurrentScopeGate(decl.scopeName)
+    if (scopeGateName.isEmpty()) {
+        return
+    }
+    let entry = EnsureScopedDecls(contextVariables, scopeGateName)
+    if (let Some(varDecl) <- (decl as VarDecl)) {
+        AddUniqueDecl(entry.decls, varDecl)
+    } else if (let Some(vpd) <- (decl as VarWithPatternDecl)) {
+        if (let Some(pattern) <- vpd.irrefutablePattern) {
+            let vars = ArrayList<VarDecl>()
+            CollectPatternVars(pattern, vars)
+            for (varDecl in vars) {
+                AddUniqueDecl(entry.decls, varDecl)
+            }
+        }
+    }
+}
+
+private func FindCtorUninitVars(entries: ArrayList<CtorUninitVars>, ctor: FuncDecl): Option<CtorUninitVars> {
+    for (entry in entries) {
+        if (SameDecl(entry.ctor, ctor)) {
+            return entry
+        }
+    }
+    return None
+}
+
+private func RemoveCtorUninitVars(entries: ArrayList<CtorUninitVars>, ctor: FuncDecl): Unit {
+    var idx: Int64 = 0
+    while (idx < entries.size) {
+        if (SameDecl(entries[idx].ctor, ctor)) {
+            entries.remove(at: idx)
+        } else {
+            idx++
+        }
+    }
+}
+
+private func HasForeignOrJavaParent(body: FuncBody): Bool {
+    if (let Some(parentClassLike) <- body.parentClassLike) {
+        if (parentClassLike.TestAttr(Attribute.FOREIGN)) {
+            return true
+        }
+        if (let Some(_) <- HasJavaAttr(parentClassLike)) {
+            return true
+        }
+    }
+    return false
 }
 
 private func MayBeStructTy(target: VarDecl): Bool {
@@ -417,6 +569,11 @@ public class InitializationChecker {
     private let issues: ArrayList<InitializationIssue> = ArrayList<InitializationIssue>()
     private var currentInitializingVarDependencies: Option<ArrayList<Decl>> = None
     private let currentFuncBodies: ArrayList<FuncBody> = ArrayList<FuncBody>()
+    private let contextVariables: ArrayList<ScopedDecls> = ArrayList<ScopedDecls>()
+    private let terminatedScopes: ArrayList<TerminatedScopeInfo> = ArrayList<TerminatedScopeInfo>()
+    private let ctorUninitVars: ArrayList<CtorUninitVars> = ArrayList<CtorUninitVars>()
+    private var optionalCtxDepth: Int64 = 0
+    private var tryDepth: Int64 = 0
 
     public init() {}
 
@@ -428,6 +585,18 @@ public class InitializationChecker {
     private func AddIssue(kind: InitializationIssueKind, node: Node, target!: Option<Decl> = None,
         message!: String = ""): Unit {
         issues.add(InitializationIssue(kind, node, target: target, message: message))
+    }
+
+    private func ClearScopeStatus(scopeName: String): Unit {
+        let scopeGateName = CurrentScopeGate(scopeName)
+        if (scopeGateName.isEmpty()) {
+            return
+        }
+        RemoveScopedDecls(contextVariables, scopeGateName)
+        if (let Some(terminated) <- FindTerminatedScope(terminatedScopes, scopeGateName)) {
+            terminated.variablesBeforeTerminator.clear()
+            terminated.initVarsAfterTerminator.clear()
+        }
     }
 
     private func CheckExprOption(expr: Option<Expr>): Bool {
@@ -464,7 +633,11 @@ public class InitializationChecker {
         }
         node.EnableAttr(Attribute.INITIALIZATION_CHECKED)
         if (let Some(decl) <- (node as Decl)) {
+            UpdateContextVariables(contextVariables, decl)
             if (FromCommonPart(decl)) {
+                if (node.scopeName.contains(CHILD_SCOPE_SEPARATOR)) {
+                    ClearScopeStatus(node.scopeName)
+                }
                 return
             }
         }
@@ -570,6 +743,9 @@ public class InitializationChecker {
                         CheckInitInExpr(expr)
                     }
                 }
+        }
+        if (node.scopeName.contains(CHILD_SCOPE_SEPARATOR)) {
+            ClearScopeStatus(node.scopeName)
         }
     }
 
@@ -884,10 +1060,93 @@ public class InitializationChecker {
         if (!IsSameFile(checkNode, targetNode)) {
             return false
         }
+        if (targetNode.astKind != ASTKind.VAR_DECL) {
+            return false
+        }
         if (checkNode.IsStaticOrGlobal() && targetNode.IsStaticOrGlobal() && checkNode.begin < targetNode.begin) {
             return true
         }
-        return checkNode.scopeLevel == targetNode.scopeLevel && checkNode.begin < targetNode.begin
+        if (checkNode.scopeLevel == targetNode.scopeLevel && checkNode.begin < targetNode.begin) {
+            return true
+        }
+        if (checkNode.scopeLevel > targetNode.scopeLevel && checkNode.begin < targetNode.begin) {
+            if (let Some(varDecl) <- (targetNode as VarDecl)) {
+                if (!IsInRelatedNominalDecl(varDecl) && ScopeContains(targetNode.scopeName, checkNode.scopeName)) {
+                    return true
+                }
+            }
+        }
+        return false
+    }
+
+    private func IsInRelatedNominalDecl(varDecl: VarDecl): Bool {
+        if (let Some(outer) <- varDecl.outerDecl) {
+            return outer.IsNominalDecl()
+        }
+        return false
+    }
+
+    private func UpdateScopeStatus(node: Node): Unit {
+        if (!IsControlTransferNode(node)) {
+            return
+        }
+        let scopeGateName = CurrentScopeGate(node.scopeName)
+        let mayNotGoOn = optionalCtxDepth != 0 && (node.astKind != ASTKind.THROW_EXPR || tryDepth == 0)
+        if (scopeGateName.isEmpty() || mayNotGoOn) {
+            return
+        }
+        if (let None <- FindTerminatedScope(terminatedScopes, scopeGateName)) {
+            let terminated = TerminatedScopeInfo(scopeGateName, node.astKind)
+            AddVisibleContextDecls(contextVariables, scopeGateName, terminated.variablesBeforeTerminator)
+            terminatedScopes.add(terminated)
+        }
+        if (node.astKind != ASTKind.RETURN_EXPR) {
+            return
+        }
+        if (let Some(currentFunc) <- CurrentNamedFuncDecl()) {
+            if (!IsInstanceConstructor(currentFunc)) {
+                return
+            }
+            if (let Some(_) <- FindCtorUninitVars(ctorUninitVars, currentFunc)) {
+                return
+            }
+            let ctorVars = CtorUninitVars(currentFunc)
+            if (let Some(typeDecl) <- currentFunc.outerDecl) {
+                for (member in typeDecl.GetMemberDecls()) {
+                    if (member.astKind == ASTKind.VAR_DECL && !member.TestAttr(Attribute.STATIC) &&
+                        !member.TestAttr(Attribute.INITIALIZED)) {
+                        AddUniqueDecl(ctorVars.decls, member)
+                    }
+                }
+            }
+            ctorUninitVars.add(ctorVars)
+        }
+    }
+
+    private func UpdateInitializationStatus(assign: AssignExpr, decl: Decl): Unit {
+        let scopeGateName = CurrentScopeGate(assign.scopeName)
+        if (!scopeGateName.isEmpty()) {
+            if (let Some(terminated) <- FindTerminatedScope(terminatedScopes, scopeGateName)) {
+                if (ContainsInitDecl(terminated.variablesBeforeTerminator, decl)) {
+                    if (terminated.terminationKind != ASTKind.THROW_EXPR || tryDepth != 0) {
+                        AddUniqueDecl(terminated.initVarsAfterTerminator, decl)
+                        return
+                    }
+                }
+            }
+        }
+        decl.EnableAttr(Attribute.INITIALIZED)
+    }
+
+    private func HasInitVarsAfterTerminator(scopeName: String): Bool {
+        let scopeGateName = CurrentScopeGate(scopeName)
+        if (scopeGateName.isEmpty()) {
+            return false
+        }
+        if (let Some(terminated) <- FindTerminatedScope(terminatedScopes, scopeGateName)) {
+            return !terminated.initVarsAfterTerminator.isEmpty()
+        }
+        return false
     }
 
     private func IsOrderRelated(checkNode: Node, targetNode: Node, isClassLikeOrStruct: Bool): Bool {
@@ -919,7 +1178,9 @@ public class InitializationChecker {
                 return true
             }
             if (!target.TestAttr(Attribute.INITIALIZED)) {
-                if (IsInDifferentFunction(refExpr, target)) {
+                if (HasInitVarsAfterTerminator(refExpr.scopeName)) {
+                    return true
+                } else if (IsInDifferentFunction(refExpr, target)) {
                     AddIssue(InitializationIssueKind.CAPTURE_BEFORE_INITIALIZATION, refExpr, target: target,
                         message: target.identifier.Val())
                     return false
@@ -985,7 +1246,7 @@ public class InitializationChecker {
                 left.DisableAttr(Attribute.LEFT_VALUE)
             }
             if (target.TestAttr(Attribute.INITIALIZATION_CHECKED) && !IsInDifferentFunction(assign, target)) {
-                target.EnableAttr(Attribute.INITIALIZED)
+                UpdateInitializationStatus(assign, target)
             }
         }
         return true
@@ -1003,7 +1264,11 @@ public class InitializationChecker {
             case ASTKind.ASSIGN_EXPR =>
                 if (let Some(assign) <- (expr as AssignExpr)) { CheckInitInAssignExpr(assign) } else { true }
             case ASTKind.RETURN_EXPR =>
-                if (let Some(ret) <- (expr as ReturnExpr)) { CheckExprOption(ret.expr) } else { true }
+                if (let Some(ret) <- (expr as ReturnExpr)) {
+                    let returnResult = CheckExprOption(ret.expr)
+                    UpdateScopeStatus(ret)
+                    returnResult
+                } else { true }
             case ASTKind.TRY_EXPR =>
                 if (let Some(tryExpr) <- (expr as TryExpr)) { CheckInitInTryExpr(tryExpr) } else { true }
             case ASTKind.MATCH_EXPR =>
@@ -1114,14 +1379,24 @@ public class InitializationChecker {
                     if (let Some(strInterp) <- lit.siExpr) {
                         var result = true
                         for (partExpr in strInterp.strPartExprs) {
-                            result = CheckInitInExpr(partExpr) && result
+                            if (let Some(interpolation) <- (partExpr as InterpolationExpr)) {
+                                result = CheckBlockOption(interpolation.block) && result
+                            } else {
+                                result = CheckInitInExpr(partExpr) && result
+                            }
                         }
                         result
                     } else { true }
                 } else { true }
             case ASTKind.THROW_EXPR =>
-                if (let Some(throwExpr) <- (expr as ThrowExpr)) { CheckExprOption(throwExpr.expr) } else { true }
-            case ASTKind.JUMP_EXPR => true
+                if (let Some(throwExpr) <- (expr as ThrowExpr)) {
+                    let throwResult = CheckExprOption(throwExpr.expr)
+                    UpdateScopeStatus(throwExpr)
+                    throwResult
+                } else { true }
+            case ASTKind.JUMP_EXPR =>
+                UpdateScopeStatus(expr)
+                true
             case ASTKind.PERFORM_EXPR =>
                 if (let Some(perform) <- (expr as PerformExpr)) { CheckExprOption(perform.expr) } else { true }
             case ASTKind.RESUME_EXPR =>
@@ -1138,6 +1413,8 @@ public class InitializationChecker {
                     }
                     result
                 } else { true }
+            case ASTKind.INTERPOLATION_EXPR =>
+                if (let Some(interpolation) <- (expr as InterpolationExpr)) { CheckBlockOption(interpolation.block) } else { true }
             case ASTKind.BLOCK =>
                 CheckInitialization(expr)
                 true
@@ -1219,11 +1496,13 @@ public class InitializationChecker {
         for (resource in tryExpr.resourceSpec) {
             CheckInitialization(resource)
         }
+        tryDepth++
         if (let Some(lambda) <- tryExpr.tryLambda) {
-            CheckInitInExpr(lambda)
+            CheckInitialization(lambda)
         } else {
             CheckBlockOption(tryExpr.tryBlock)
         }
+        tryDepth--
         for (pattern in tryExpr.catchPatterns) {
             result = CheckInitInPattern(pattern) && result
         }
@@ -1330,7 +1609,9 @@ public class InitializationChecker {
             rightUninits = CollectUninitializedReferences(right, leftUninits)
         }
         var result = CheckExprOption(binary.leftExpr)
+        optionalCtxDepth++
         result = CheckExprOption(binary.rightExpr) && result
+        optionalCtxDepth--
         for (decl in rightUninits) {
             decl.DisableAttr(Attribute.INITIALIZED)
         }
@@ -1495,6 +1776,7 @@ public class InitializationChecker {
                 continue
             }
             CheckInitInConstructor(initFunc, uninitNonFuncDecls)
+            RemoveCtorUninitVars(ctorUninitVars, initFunc)
         }
         for (funcDecl in info.funcDecls) {
             CheckInitialization(funcDecl)
@@ -1511,14 +1793,37 @@ public class InitializationChecker {
             }
         }
         CheckInitialization(fd)
+        if (let None <- fd.funcBody) {
+            return
+        }
         if (IsOtherInit(fd.constructorCall)) {
             for (decl in uninitNonFuncDecls) {
                 decl.EnableAttr(Attribute.INITIALIZED)
             }
             return
         }
+        if (let Some(body) <- fd.funcBody) {
+            if (HasForeignOrJavaParent(body)) {
+                for (decl in uninitNonFuncDecls) {
+                    decl.EnableAttr(Attribute.INITIALIZED)
+                }
+                return
+            }
+            let bodyScopeGate = CurrentScopeGate(body.scopeName)
+            if (let Some(terminated) <- FindTerminatedScope(terminatedScopes, bodyScopeGate)) {
+                if (terminated.terminationKind == ASTKind.THROW_EXPR) {
+                    return
+                }
+            }
+        }
+        let definitelyUninitVars = if (let Some(entry) <- FindCtorUninitVars(ctorUninitVars, fd)) {
+            entry.decls
+        } else {
+            ArrayList<Decl>()
+        }
         for (decl in uninitNonFuncDecls) {
-            if (decl.TestAnyAttr(Attribute.INITIALIZED, Attribute.COMMON)) {
+            if (decl.TestAnyAttr(Attribute.INITIALIZED, Attribute.COMMON) &&
+                !ContainsInitDecl(definitelyUninitVars, decl)) {
                 continue
             }
             AddIssue(InitializationIssueKind.UNINITIALIZED_FIELD, fd, target: decl, message: decl.identifier.Val())
@@ -1577,11 +1882,9 @@ public class InitializationChecker {
         for (member in decl.GetMemberDecls()) {
             CollectToDeclsInfo(member, info)
         }
-        for (member in decl.GetMemberDecls()) {
-            if (member.astKind == ASTKind.VAR_DECL || member.astKind == ASTKind.VAR_WITH_PATTERN_DECL) {
-                if (!member.TestAttr(Attribute.STATIC)) {
-                    info.nonFuncDecls.add(member)
-                }
+        for (entry in GetVarsInitializationOrderWithPositions(decl)) {
+            if (let Some(member) <- entry.decl) {
+                info.nonFuncDecls.add(member)
             }
         }
         return info
