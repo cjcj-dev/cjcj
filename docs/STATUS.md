@@ -1,76 +1,114 @@
 # Self-Hosting Port Status
 
-Date: 2026-06-16
+Date: 2026-06-17
 
-This is the refreshed aggregate status for the Cangjie self-hosting compiler
-port. It combines the module narratives in `docs/status/*.md` with a source
-scan of the current Cangjie tree under `packages/*/src` and the read-only C++
-reference tree under `/root/cj_build/cangjie_compiler/src`.
+This is the aggregate status for the Cangjie self-hosting compiler port. It
+combines the module narratives in `docs/status/*.md` with a live scan of
+`packages/*/src` and the read-only C++ reference tree at
+`/root/cj_build/cangjie_compiler/src`.
+
+The estimate is behavior-weighted against the C++ compiler, not a line-count
+ratio. The port now contains substantial real Cangjie compiler code, but it is
+not yet a self-compiling production compiler: the remaining critical path is
+mostly package integration, root Sema/Frontend orchestration, production
+serialization, full AST-to-CHIR lowering, and complete CHIR-to-LLVM emission.
 
 ## Aggregate Totals
 
 | Metric | Value |
 | --- | ---: |
-| Overall behavior-faithful self-host estimate | 24% |
-| Remaining source self-host markers | 69 |
-| Modules with remaining source markers | Sema, Driver |
-| Cangjie `.cj` files | 496 |
-| Cangjie source lines | about 119.5K |
-| C++ reference source-like files | 733 |
-| C++ reference source lines | about 281.9K |
+| Overall behavior-faithful self-host estimate | 50% |
+| Remaining source `TODO(selfhost:*)` markers | 4 |
+| Modules with remaining source markers | Sema |
+| Cangjie `.cj` files under `packages/*/src` | 526 |
+| Cangjie source lines | about 161.7K |
+| C++ reference source-like files under `src` | 728 |
+| C++ reference source lines | about 282.0K |
+| C++ reference components with no same-named `.cj` component | 172 |
 | Required build command | `cjpm build` |
 | Build result | pass |
-| Build notes | 35 warnings printed across Parse, Sema, and CodeGen |
+| Build notes | 25 warnings: Lex 1, Parse 22, Sema 1, CodeGen 1 |
 
-The build result proves the workspace is syntactically and package-wise
-buildable. It does not prove self-hosting readiness: Frontend still writes
-summary artifacts, Driver still has a native bitcode-output gate, Sema has many
-placeholder components, and multiple packages still use local compatibility
-models instead of the real sibling package APIs.
+Only source markers are counted as remaining work markers. Historical mentions
+inside `docs/status/*.md` are documentation references, not live source TODOs.
 
 ## Module Aggregate
 
-Completeness is a behavior estimate, not a line-count ratio. Reference counts
-exclude `CMakeLists.txt` and include source-like files under the C++ `src`
-module directory. Cangjie counts include `.cj` files under the package `src`
-directory.
+Reference counts exclude `CMakeLists.txt` and include source-like C++ files
+with `.cpp`, `.h`, `.hpp`, `.inc`, or `.def` extensions. Cangjie counts include
+`.cj` files under each package's `src` directory. "Missing ref components" is a
+basename comparison after removing language extensions, so it is a layout
+signal rather than a behavior score.
 
-| Module | Package path | Ref files | Ref lines | Cangjie files | Cangjie lines | Markers | Estimate | Status |
-| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |
-| Basic | `packages/basic` | 15 | 5.3K | 18 | 11.2K | 0 | 65% | Substantial diagnostic/source implementation; exact diagnostic formatting and platform encoding parity remain. |
-| Utils | `packages/utils` | 26 | 11.6K | 30 | 7.3K | 0 | 55% | Broad utility surface exists; platform and downstream CHIR/Driver edge cases remain. |
-| Option | `packages/option` | 3 | 3.2K | 8 | 3.4K | 0 | 70% | Option table and global options are relatively mature; diagnostics and some filesystem permission behavior remain approximate. |
-| Lex | `packages/lex` | 4 | 3.0K | 9 | 10.7K | 0 | 55% | Token/lexer package builds with generated tables; still needs full parser/frontend parity validation. |
-| AST | `packages/ast` | 19 | 12.0K | 32 | 12.2K | 0 | 55% | Broad AST/type/node surface exists, but Basic/Lex compatibility copies must be replaced by real dependencies. |
-| Parse | `packages/parse` | 31 | 18.3K | 35 | 6.7K | 0 | 40% | Real grammar work exists, but it is not wired to real AST/Lex/Basic and needs full C++ parser corpus parity. |
-| ConditionalCompilation | `packages/conditional_compilation` | 2 | 1.0K | 5 | 1.0K | 0 | 50% | Useful conditional pass exists; depends on AST compatibility cleanup and broader frontend integration. |
-| Modules | `packages/modules` | 20 | 9.8K | 20 | 4.7K | 0 | 30% | Dependency/package models exist; production CJO, AST serialization, flatbuffer, and real package APIs remain. |
-| Macro | `packages/macro` | 17 | 7.9K | 19 | 7.8K | 0 | 40% | Macro flow and FFI loading are represented; local AST/Parse codecs and non-production serialization block parity. |
-| MetaTransformation | `packages/meta_transformation` | 2 | 0.0K | 3 | 0.2K | 0 | 20% | Very small package; current work is narrow and CHIR-dependent. |
-| Mangle | `packages/mangle` | 7 | 4.2K | 10 | 5.6K | 0 | 45% | Broad naming support exists; CHIR and generic/descriptor parity still depend on downstream completeness. |
-| Sema | `packages/sema` | 265 | 96.7K | 136 | 11.9K | 68 | 12% | Critical blocker: many placeholders and missing type inference, overloads, generics, inheritance, legality, FFI, and desugaring. |
-| CHIR | `packages/chir` | 147 | 62.9K | 61 | 13.0K | 0 | 25% | IR model and several analyses exist; real typed AST lowering and many IR/optimizer/serializer paths are missing. |
-| CodeGen | `packages/codegen` | 118 | 30.8K | 54 | 5.2K | 0 | 15% | LLVM FFI boundary is correct and subset lowering exists; many LLVM lowering surfaces and frontend integration remain. |
-| IncrementalCompilation | `packages/incremental_compilation` | 11 | 4.6K | 12 | 5.3K | 0 | 30% | Cache/diff structures exist; production AST/CJO/CHIR integration remains. |
-| Frontend | `packages/frontend` | 8 | 3.0K | 9 | 6.1K | 0 | 25% | Stage orchestration exists, but it uses local models and summary outputs instead of real compiler-stage artifacts. |
-| FrontendTool | `packages/frontend_tool` | 3 | 1.2K | 4 | 1.0K | 0 | 35% | CLI bridge exists; production behavior depends on Frontend/CodeGen completion. |
-| Driver | `packages/driver` | 31 | 5.6K | 30 | 6.1K | 1 | 55% | Native tool orchestration is substantial; one gate remains for missing self-host bitcode output. |
+| Module | Package path | Ref files | Ref lines | Cangjie files | Cangjie lines | Missing ref components | Markers | Estimate | Status |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| Basic | `packages/basic` | 15 | 5.3K | 19 | 11.8K | 1 | 0 | 80% | Diagnostic/source primitives are substantial and real; path-helper ownership and exact formatting edge cases remain. |
+| Utils | `packages/utils` | 26 | 11.6K | 31 | 8.0K | 5 | 0 | 74% | File, Unicode, profiling, signal, hashing, and platform helpers are broad; generated table and non-Linux parity gaps remain. |
+| Option | `packages/option` | 3 | 3.2K | 8 | 3.9K | 0 | 0 | 78% | Option parsing/tables/global options are mature; some diagnostics and filesystem-permission behavior remain approximate. |
+| Lex | `packages/lex` | 4 | 3.0K | 6 | 3.5K | 0 | 0 | 70% | Real lexer/token implementation builds; warning and corpus-level parser/frontend parity validation remain. |
+| AST | `packages/ast` | 19 | 12.0K | 32 | 14.4K | 1 | 0 | 75% | Broad node/type/context/walker/clone/search coverage uses real sibling packages; validation diagnostics and Parse layering remain. |
+| Parse | `packages/parse` | 30 | 18.3K | 35 | 8.0K | 1 | 0 | 50% | Real grammar work exists, but several parser functions still show unused parameters and full C++ recovery/corpus parity is not proven. |
+| ConditionalCompilation | `packages/conditional_compilation` | 2 | 1.0K | 6 | 1.1K | 0 | 0 | 65% | Conditional pruning/config support is real; exact frontend integration and all directive diagnostics still need validation. |
+| Modules | `packages/modules` | 20 | 9.8K | 20 | 4.9K | 0 | 0 | 47% | Import/CJO manager structure exists; production CJO/AST serialization and full package loading are still incomplete. |
+| Macro | `packages/macro` | 17 | 7.9K | 19 | 6.9K | 0 | 0 | 46% | Macro flow, native invocation, and codecs are represented; local AST compatibility and non-production serialization remain blockers. |
+| MetaTransformation | `packages/meta_transformation` | 2 | 0.0K | 3 | 0.2K | 0 | 0 | 30% | Tiny package with narrow implementation; behavior is CHIR/plugin dependent and not yet production complete. |
+| Mangle | `packages/mangle` | 7 | 4.2K | 10 | 5.5K | 0 | 0 | 62% | Broad AST/CHIR mangling support exists; descriptor/generic/CHIR parity depends on downstream completion. |
+| Sema | `packages/sema` | 261 | 96.9K | 137 | 40.4K | 68 | 4 | 45% | Many scoped algorithms are now real, but root type-check/desugar orchestration, imported lookup, diagnostics, interop, and mock/test paths remain incomplete. |
+| CHIR | `packages/chir` | 147 | 62.8K | 85 | 27.1K | 74 | 0 | 48% | Real IR/checker/analysis/serializer/BCHIR core exists; full AST lowering, expression taxonomy, binary serialization, and many transforms are missing. |
+| CodeGen | `packages/codegen` | 118 | 30.8K | 58 | 7.1K | 21 | 0 | 40% | LLVM stays external through C FFI and a real subset lowers to LLVM; CFFI, metadata, closures, generics, exceptions, and optimization coverage remain. |
+| IncrementalCompilation | `packages/incremental_compilation` | 11 | 4.6K | 12 | 5.3K | 0 | 0 | 52% | Cache/diff/serialization surfaces are useful; production AST/CJO/CHIR integration and stable artifact semantics remain. |
+| Frontend | `packages/frontend` | 8 | 3.0K | 10 | 6.2K | 0 | 0 | 42% | Source/options/lexing and stage structure are real, but AST/Parse/Macro/Sema/Mangle/CHIR/incremental boundaries still use compatibility models. |
+| FrontendTool | `packages/frontend_tool` | 3 | 1.2K | 4 | 1.4K | 0 | 0 | 48% | Compiler-instance bridge and result saving exist; CJO/incremental output still follows compatibility summaries. |
+| Driver | `packages/driver` | 31 | 5.6K | 30 | 6.0K | 1 | 0 | 70% | Native tool orchestration and platform command builders are substantial; full in-process frontend/codegen handoff and cross-target validation remain. |
+| CJC entry wrappers | `packages/cjc` | 4 | 0.6K | 1 | 0.0K | n/a | 0 | 20% | Top-level entrypoints are only lightly represented by the wrapper plus Driver/FrontendTool entry paths. |
 
-Top-level C++ entry files (`main.cpp`, `main-frontend.cpp`,
-`main-macrosrv.cpp`, and `main-chir-dis.cpp`) are only lightly represented by
-the `packages/cjc` wrapper and Driver/FrontendTool entrypoints. They should be
-tracked explicitly before declaring Driver and executable packaging complete.
+## Remaining Source Markers
+
+The live source scan reports four remaining self-host markers, all in Sema:
+
+- `packages/sema/src/TypeChecker.cj`: enum recursive type elimination and autoboxing after instantiation.
+- `packages/sema/src/TypeChecker.cj`: post-Sema desugar passes that depend on complete annotations.
+- `packages/sema/src/TestManager.cj`: mock support dependency synthesis and accessor generation.
+- `packages/sema/src/TestManager.cj`: `createMock` validation and mock class generation.
+
+## Top Gaps
+
+1. Frontend still does not drive the real compiler object graph end to end.
+   It uses real Basic/Lex/Option/Utils, but still carries compatibility models
+   for AST, Parse, ConditionalCompilation, Modules, Macro, Sema, Mangle, CHIR,
+   and incremental boundaries.
+2. Sema is the largest semantic blocker. The remaining source TODOs are only
+   four, but imported lookup, root type-check/desugar scheduling, exact
+   diagnostics, Java/ObjC/native interop checks, mock/test generation, and full
+   overload/inference parity are still not production-complete.
+3. CHIR needs production typed AST-to-CHIR lowering. The current IR, checker,
+   analyses, textual serializer, and BCHIR subset are real, but many C++ named
+   translation and optimization components are still absent.
+4. CodeGen needs the rest of the CHIR-to-LLVM surface. LLVM is correctly kept
+   external through Cangjie FFI, but native metadata, C/FFI lowering, closures,
+   generics, exceptions, checked casts, debug metadata, incremental generation,
+   and optimization passes remain incomplete.
+5. Modules, Macro, CJO, BCHIR, and incremental artifacts are not yet
+   production-compatible. Textual or deterministic local formats must be
+   replaced by the C++ compiler's real serialization/protocol behavior before a
+   self-hosted compiler can consume and produce release artifacts.
 
 ## Current Critical Path
 
-1. Wire packages through real dependencies and remove compatibility islands.
-2. Finish Sema until the compiler port can be type-checked with production
-   semantics.
-3. Replace summary CHIR generation with real typed AST-to-CHIR lowering.
-4. Complete LLVM CodeGen and connect Frontend/FrontendTool to bitcode output.
-5. Replace local CJO, macro, and module serialization with production-compatible
-   formats and protocols.
-6. Bootstrap: build the port with the C++ compiler, rebuild with the produced
-   compiler, then compare stage outputs and run the C++ test corpus.
+1. Remove compatibility islands by wiring packages to real sibling APIs.
+2. Make Frontend call the real Parse, ConditionalCompilation, Modules, Macro,
+   Sema, Mangle, CHIR, CodeGen, and incremental packages without summary
+   conversion layers.
+3. Complete root Sema orchestration, imported lookup, diagnostics, interop, and
+   the four remaining source TODOs.
+4. Replace summary/text CJO, macro, CHIR, BCHIR, and incremental formats with
+   production-compatible formats and protocols.
+5. Complete typed AST-to-CHIR lowering and CHIR checking for the compiler source
+   corpus.
+6. Complete LLVM CodeGen and Driver handoff so source compilation always
+   materializes the expected bitcode/object artifacts.
+7. Bootstrap with Stage0 C++ compiler, rebuild with Stage1 self-host output,
+   rebuild again as Stage2, and compare stable outputs against the C++ test
+   corpus.
 
 See `docs/ROADMAP.md` for milestone detail.
