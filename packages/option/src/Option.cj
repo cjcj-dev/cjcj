@@ -11,6 +11,7 @@ import cangjie_compiler::utils.OverflowStrategy
 import cangjie_compiler::utils.Semaphore as UtilsSemaphore
 import cangjie_compiler::utils.TryParseInt as UtilsTryParseInt
 import std.collection.*
+import std.core.Option as CoreOption
 
 private let ARGUMENT_IGNORED_SUFFIX: String = " The argument is ignored."
 private let CJO_EXTENSION: String = "cjo"
@@ -332,7 +333,7 @@ public open class GlobalOptions <: Option {
     public var targetInteropLanguage: InteropLanguage = InteropLanguage.NA
     public var enableTimer: Bool = false
     public var enableMemoryCollect: Bool = false
-    public var linkStaticStd: MaybeBool = MaybeBool()
+    public var linkStaticStd: CoreOption<Bool> = None
     public var ltoMod: LTOMode = LTOMode.NO_LTO
     public var enableCompileAsExe: Bool = false
     public var ltoHideAllPkgs: Bool = false
@@ -453,17 +454,20 @@ public open class GlobalOptions <: Option {
                 return false
             }
             DeprecatedOptionCheck(opt)
-            let optionResult = ParseOption(opt)
-            if (!optionResult.hasValue || !optionResult.value) { return false }
+            if (let Some(optionSuccess) <- ParseOption(opt)) {
+                if (!optionSuccess) { return false }
+            } else {
+                return false
+            }
             OccurrenceCheck(opt, argList)
         }
         return ProcessInputs(argList.GetInputs()) && PerformPostActions()
     }
 
-    protected open func ParseOption(arg: OptionArgInstance): MaybeBool {
+    protected open func ParseOption(arg: OptionArgInstance): CoreOption<Bool> {
         let result = ParseAction(this, arg)
-        if (!result.handled) { return MaybeBool() }
-        return MaybeBool(result.success)
+        if (!result.handled) { return None }
+        return Some(result.success)
     }
 
     private func OptionValueRequiresExperimental(arg: OptionArgInstance): Bool {
@@ -813,15 +817,15 @@ public open class GlobalOptions <: Option {
         arg: OptionArgInstance,
         from!: Int64 = -2147483648,
         to!: Int64 = 2147483647
-    ): MaybeInt64 {
+    ): CoreOption<Int64> {
         if (let Some(number) <- UtilsTryParseInt(arg.value)) {
             let parsedValue = Int64(number)
             if (parsedValue >= from && parsedValue <= to) {
-                return MaybeInt64(parsedValue)
+                return Some(parsedValue)
             }
         }
         Errorln("The value of " + arg.name + " is invalid.")
-        return MaybeInt64()
+        return None
     }
 
     public static func GetSharedLibraryExtension(osType: OSType): String {
@@ -1246,10 +1250,12 @@ public open class GlobalOptions <: Option {
             aggressiveParallelCompile = MaybeUInt64(1u64)
         }
         if (target.env == EnvironmentType.OHOS) {
-            if (linkStaticStd.hasValue && linkStaticStd.value) {
-                emitOptionDiag(BasicDiagKindRefactor.driver_static_std_for_ohos)
+            if (let Some(staticStd) <- linkStaticStd) {
+                if (staticStd) {
+                    emitOptionDiag(BasicDiagKindRefactor.driver_static_std_for_ohos)
+                }
             }
-            linkStaticStd = MaybeBool(false)
+            linkStaticStd = Some(false)
         }
         return true
     }

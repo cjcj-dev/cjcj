@@ -205,8 +205,8 @@ public func ParseAction(opts: GlobalOptions, arg: OptionArgInstance): ActionResu
     if (id == ID.PROFILE_COMPILE_TIME) { opts.enableTimer = true; return handled() }
     if (id == ID.PROFILE_COMPILE_MEMORY) { opts.enableMemoryCollect = true; return handled() }
     if (id == ID.ENABLE_EFFECTS) { opts.enableEH = true; return handled() }
-    if (id == ID.STATIC_STD) { opts.linkStaticStd = MaybeBool(true); return handled() }
-    if (id == ID.DY_STD) { opts.linkStaticStd = MaybeBool(false); return handled() }
+    if (id == ID.STATIC_STD) { opts.linkStaticStd = Some(true); return handled() }
+    if (id == ID.DY_STD) { opts.linkStaticStd = Some(false); return handled() }
     if (id == ID.STATIC_LIBS || id == ID.DY_LIBS || id == ID.STATIC) { return handled() }
     if (id == ID.LTO) { return parseLto(opts, arg.value) }
     if (id == ID.COMPILE_AS_EXE) { opts.enableCompileAsExe = true; return handled() }
@@ -360,7 +360,7 @@ private func parseOutputType(opts: GlobalOptions, value: String): ActionResult {
     else if (value == "hotreload") {
         opts.outputMode = OutputMode.SHARED_LIB
         opts.enableHotReload = true
-        opts.linkStaticStd = MaybeBool(false)
+        opts.linkStaticStd = Some(false)
     }
     else { return handled(success: false) }
     opts.enableOutputType = true
@@ -391,6 +391,10 @@ private func parseMockMode(opts: GlobalOptions, value: String): ActionResult {
 
 private func parseCustomOptimization(opts: GlobalOptions, value: String): ActionResult {
     if (let Some(level) <- UtilsTryParseInt(value)) {
+        if (level < 0) {
+            Errorln("Optimization level " + value + " is invalid")
+            return handled(success: false)
+        }
         if (level == 0) { return handled(success: opts.SetOptimizationLevel(OptimizationLevel.O0)) }
         if (level == 1) { return handled(success: opts.SetOptimizationLevel(OptimizationLevel.O1)) }
         if (level == 2) { return handled(success: opts.SetOptimizationLevel(OptimizationLevel.O2)) }
@@ -648,6 +652,10 @@ private func parseOverflowStrategy(opts: GlobalOptions, value: String): ActionRe
 
 private func parseSancovLevel(opts: GlobalOptions, value: String): ActionResult {
     if (let Some(level) <- UtilsTryParseInt(value)) {
+        if (level < 0) {
+            Errorln("Sancov level " + value + " is invalid")
+            return handled(success: false)
+        }
         if (level == 0) { opts.sancovOption.SetSancovLevel(SanitizerCoverageType.SCK_NONE); return handled() }
         if (level == 1) { opts.sancovOption.SetSancovLevel(SanitizerCoverageType.SCK_FUNCTION); return handled() }
         opts.sancovOption.SetSancovLevel(SanitizerCoverageType.SCK_BB)

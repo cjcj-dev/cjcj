@@ -288,3 +288,20 @@ entry point remain for current sibling package imports; several print-style
 diagnostics still use local wrapper text; host target defaults are still static
 for this port; and driver-layer obfuscation option handling is not yet fully
 folded into the base Option action surface.
+
+This continuation removes two more Option-local optional wrappers. The C++
+`std::optional<bool>` shape for `linkStaticStd` and `ParseOption` is now modeled
+with the real stdlib `Option<Bool>` (aliased as `CoreOption` to avoid the local
+`Option` class name), and `GlobalOptions.ParseIntOptionValue` now returns
+`CoreOption<Int64>` instead of the deleted local `MaybeInt64`. The action paths
+for `--static-std`, `--dy-std`, hot reload, and OHOS static-std normalization
+now use `Some`/`None` directly. Custom `-O<N>` and sanitizer coverage level
+parsing also now rejects negative values before the greater-than-two fallback,
+matching `ParseOptimizationValue` and `ParseSancovValue` in `OptionAction.cpp`.
+
+Remaining gaps: `Options.cj`/`OptionEnums.cj` remain hand-maintained mirrors of
+`Options.inc`; `MaybeString`, `MaybeUInt64`, and `TryParseUInt64` remain as
+compatibility surface for current sibling package imports; several print-style
+diagnostics still use local wrapper text; host target defaults are still static
+for this port; and driver-layer obfuscation option handling is not yet fully
+folded into the base Option action surface.

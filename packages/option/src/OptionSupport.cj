@@ -41,25 +41,11 @@ public class MaybeString {
     public init(value: String) { this.hasValue = true; this.value = value }
 }
 
-public class MaybeBool {
-    public var hasValue: Bool = false
-    public var value: Bool = false
-    public init() {}
-    public init(value: Bool) { this.hasValue = true; this.value = value }
-}
-
 public class MaybeUInt64 {
     public var hasValue: Bool = false
     public var value: UInt64 = 0u64
     public init() {}
     public init(value: UInt64) { this.hasValue = true; this.value = value }
-}
-
-public class MaybeInt64 {
-    public var hasValue: Bool = false
-    public var value: Int64 = 0
-    public init() {}
-    public init(value: Int64) { this.hasValue = true; this.value = value }
 }
 
 public class TextFileReadResult {
