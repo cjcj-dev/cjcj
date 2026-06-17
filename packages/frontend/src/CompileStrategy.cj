@@ -206,7 +206,8 @@ public class FullCompileStrategy <: CompileStrategy {
             if (incrParse) {
                 strategyImpl.ParseOnePackageInPlace(ci.srcPkgs[0])
             } else {
-                let parsed = strategyImpl.ParseOnePackage(ci.srcFilePaths, DEFAULT_PACKAGE_NAME)
+                let sourceSetPackageName = ci.invocation.globalOptions.GetDefaultPackageName()
+                let parsed = strategyImpl.ParseOnePackage(ci.srcFilePaths, sourceSetPackageName)
                 ci.srcPkgs.add(parsed[0])
                 ret = parsed[1]
             }

@@ -19,7 +19,9 @@ public enum OptionID {
     | DESERIALIZE_CHIR_AND_DUMP
     | COMPILE_CJD
     | PACKAGE_COMPILE
+    | MODULE_NAME
     | MODULE_SRC_PATH
+    | OUTPUT_TYPE
     | OUTPUT_FILE
     | OUTPUT_DIR
     | IMPORT_PATH
@@ -53,28 +55,30 @@ private func OptionIDIndex(id: OptionID): Int64 {
         case OptionID.DESERIALIZE_CHIR_AND_DUMP => 5
         case OptionID.COMPILE_CJD => 6
         case OptionID.PACKAGE_COMPILE => 7
-        case OptionID.MODULE_SRC_PATH => 8
-        case OptionID.OUTPUT_FILE => 9
-        case OptionID.OUTPUT_DIR => 10
-        case OptionID.IMPORT_PATH => 11
-        case OptionID.PLUGIN_PATH => 12
-        case OptionID.JOBS => 13
-        case OptionID.CANGJIE_HOME => 14
-        case OptionID.ENABLE_INCREMENTAL => 15
-        case OptionID.DUMP_AST => 16
-        case OptionID.DUMP_CHIR => 17
-        case OptionID.DUMP_ALL => 18
-        case OptionID.DUMP_TO_SCREEN => 19
-        case OptionID.COMPILE_TEST => 20
-        case OptionID.COMPILE_TESTS_ONLY => 21
-        case OptionID.VERBOSE => 22
-        case OptionID.ENABLE_MACRO_IN_LSP => 23
-        case OptionID.NO_SUB_PACKAGE => 24
-        case OptionID.COMMON_PART_CJO => 25
-        case OptionID.COMMON_PART_CHIR => 26
-        case OptionID.CONDITIONAL_COMPILATION_CONFIG => 27
-        case OptionID.INT_OVERFLOW_MODE => 28
-        case OptionID.INPUT => 29
+        case OptionID.MODULE_NAME => 8
+        case OptionID.MODULE_SRC_PATH => 9
+        case OptionID.OUTPUT_TYPE => 10
+        case OptionID.OUTPUT_FILE => 11
+        case OptionID.OUTPUT_DIR => 12
+        case OptionID.IMPORT_PATH => 13
+        case OptionID.PLUGIN_PATH => 14
+        case OptionID.JOBS => 15
+        case OptionID.CANGJIE_HOME => 16
+        case OptionID.ENABLE_INCREMENTAL => 17
+        case OptionID.DUMP_AST => 18
+        case OptionID.DUMP_CHIR => 19
+        case OptionID.DUMP_ALL => 20
+        case OptionID.DUMP_TO_SCREEN => 21
+        case OptionID.COMPILE_TEST => 22
+        case OptionID.COMPILE_TESTS_ONLY => 23
+        case OptionID.VERBOSE => 24
+        case OptionID.ENABLE_MACRO_IN_LSP => 25
+        case OptionID.NO_SUB_PACKAGE => 26
+        case OptionID.COMMON_PART_CJO => 27
+        case OptionID.COMMON_PART_CHIR => 28
+        case OptionID.CONDITIONAL_COMPILATION_CONFIG => 29
+        case OptionID.INT_OVERFLOW_MODE => 30
+        case OptionID.INPUT => 31
     }
 }
 
@@ -170,7 +174,9 @@ public class OptionTable {
         add("--deserialize-chir-and-dump", OptionID.DESERIALIZE_CHIR_AND_DUMP, OptionKind.SEPARATED)
         add("-d", OptionID.COMPILE_CJD, OptionKind.FLAG)
         add("--package", OptionID.PACKAGE_COMPILE, OptionKind.FLAG, alias: "-p")
+        add("--module-name", OptionID.MODULE_NAME, OptionKind.SEPARATED)
         add("--module-src-path", OptionID.MODULE_SRC_PATH, OptionKind.SEPARATED)
+        add("--output-type", OptionID.OUTPUT_TYPE, OptionKind.SEPARATED)
         add("--output", OptionID.OUTPUT_FILE, OptionKind.SEPARATED, alias: "-o")
         add("--output-dir", OptionID.OUTPUT_DIR, OptionKind.SEPARATED)
         add("--import-path", OptionID.IMPORT_PATH, OptionKind.SEPARATED)
@@ -264,8 +270,10 @@ public open class GlobalOptions {
     public let environment: EnvironmentOptions = EnvironmentOptions()
     public var cangjieHome: String = ""
     public var output: String = "./"
+    public var outputType: String = ""
     public var outputDir: MaybeString = MaybeString()
     public var executablePath: String = ""
+    public var moduleName: String = DEFAULT_PACKAGE_NAME
     public var moduleSrcPath: String = ""
     public let packagePaths: ArrayList<String> = ArrayList<String>()
     public let srcFiles: ArrayList<String> = ArrayList<String>()
@@ -317,6 +325,10 @@ public open class GlobalOptions {
         frontendMode = true
     }
 
+    public func GetDefaultPackageName(): String {
+        return if (moduleName.isEmpty()) { DEFAULT_PACKAGE_NAME } else { moduleName }
+    }
+
     public open func ParseFromArgs(argList: ArgList): Bool {
         this.argList = argList
         for (arg in argList.args) {
@@ -344,11 +356,15 @@ public open class GlobalOptions {
             if (!arg.value.isEmpty()) {
                 packagePaths.add(arg.value)
             }
+        } else if (id == OptionID.MODULE_NAME) {
+            moduleName = arg.value
         } else if (id == OptionID.MODULE_SRC_PATH) {
             moduleSrcPath = arg.value
             if (!arg.value.isEmpty()) {
                 packagePaths.add(arg.value)
             }
+        } else if (id == OptionID.OUTPUT_TYPE) {
+            outputType = arg.value
         } else if (id == OptionID.OUTPUT_FILE) {
             output = arg.value
         } else if (id == OptionID.OUTPUT_DIR) {

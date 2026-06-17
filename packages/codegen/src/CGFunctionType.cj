@@ -59,8 +59,9 @@ public class CGFunctionType <: CGType {
     protected override func GenLLVMType(): LLVMTypeRef {
         if (let Some(funcTy) <- (chirType as FuncType)) {
             let retCGType = CGType.GetOrCreate(cgMod, funcTy.GetReturnType())
-            hasSRet = ShouldUseSRet(funcTy.GetReturnType())
-            let retLLVMType = if (hasSRet) {
+            let retTy = funcTy.GetReturnType()
+            hasSRet = !IsVoidLikeReturn(retTy) && ShouldUseSRet(retTy)
+            let retLLVMType = if (IsVoidLikeReturn(retTy) || hasSRet) {
                 unsafe { LLVMVoidTypeInContext(cgCtx.GetLLVMContext().raw) }
             } else {
                 retCGType.GetLLVMType()
@@ -133,6 +134,10 @@ public class CGFunctionType <: CGType {
 
     private func ShouldUseSRet(retTy: Type): Bool {
         return retTy.IsStruct() || retTy.IsTuple() || retTy.IsVArray()
+    }
+
+    private func IsVoidLikeReturn(retTy: Type): Bool {
+        return retTy.IsUnit() || retTy.IsNothing() || retTy.IsVoid()
     }
 
     private func ShouldNeedBasePtr(paramTy: Type): Bool {
