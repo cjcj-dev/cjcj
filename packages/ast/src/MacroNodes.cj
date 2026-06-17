@@ -21,8 +21,8 @@ public class MacroInvocation {
     public let macroAtPosition: ArrayList<Position> = ArrayList<Position>()
     public let newTokens: ArrayList<Token> = ArrayList<Token>()
     public var newTokensStr: String = ""
-    public var scopeKind: ScopeKind = ScopeKind.UNKNOWN
-    public var exprKind: ExprKind = ExprKind.UNKNOWN
+    public var scopeKind: ScopeKind = ScopeKind.UNKNOWN_SCOPE
+    public var exprKind: ExprKind = ExprKind.UNKNOWN_EXPR
     public var hasParenthesis: Bool = false
     public var hasAttr: Bool = false
     public var isFuncParam: Bool = false

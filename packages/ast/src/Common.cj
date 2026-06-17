@@ -18,11 +18,105 @@ public func TokenKindText(kind: TokenKind): String {
 }
 
 public enum ScopeKind {
+    | TOPLEVEL
+    | CLASS_BODY
+    | INTERFACE_BODY
+    | STRUCT_BODY
+    | EXTEND_BODY
+    | FUNC_BODY
+    | MACRO_BODY
+    | PRIMARY_CONSTRUCTOR_BODY_FOR_CLASS
+    | PRIMARY_CONSTRUCTOR_BODY_FOR_STRUCT
+    | PROP_MEMBER_SETTER_BODY
+    | PROP_MEMBER_GETTER_BODY
+    | ENUM_BODY
+    | ENUM_CONSTRUCTOR
+    | PRIMARY_CONSTRUCTOR_FUNC_PARAM
+    | MAIN_BODY
+    | UNKNOWN_SCOPE
+    // Legacy self-host spelling kept equal to UNKNOWN_SCOPE for downstream callers.
     | UNKNOWN
 }
 
+private func ScopeKindIndex(kind: ScopeKind): Int64 {
+    return match (kind) {
+        case ScopeKind.TOPLEVEL => 0
+        case ScopeKind.CLASS_BODY => 1
+        case ScopeKind.INTERFACE_BODY => 2
+        case ScopeKind.STRUCT_BODY => 3
+        case ScopeKind.EXTEND_BODY => 4
+        case ScopeKind.FUNC_BODY => 5
+        case ScopeKind.MACRO_BODY => 6
+        case ScopeKind.PRIMARY_CONSTRUCTOR_BODY_FOR_CLASS => 7
+        case ScopeKind.PRIMARY_CONSTRUCTOR_BODY_FOR_STRUCT => 8
+        case ScopeKind.PROP_MEMBER_SETTER_BODY => 9
+        case ScopeKind.PROP_MEMBER_GETTER_BODY => 10
+        case ScopeKind.ENUM_BODY => 11
+        case ScopeKind.ENUM_CONSTRUCTOR => 12
+        case ScopeKind.PRIMARY_CONSTRUCTOR_FUNC_PARAM => 13
+        case ScopeKind.MAIN_BODY => 14
+        case ScopeKind.UNKNOWN_SCOPE => 15
+        case ScopeKind.UNKNOWN => 15
+    }
+}
+
+extend ScopeKind <: Equatable<ScopeKind> {
+    public operator func ==(right: ScopeKind): Bool {
+        return ScopeKindIndex(this) == ScopeKindIndex(right)
+    }
+
+    public operator func !=(right: ScopeKind): Bool {
+        return !(this == right)
+    }
+}
+
 public enum ExprKind {
+    | ALL
+    | VAR_INIT
+    | INDEX_EXPR
+    | IF_COND_EXPR
+    | WHILE_COND_EXPR
+    | LET_PATTERN
+    | LEFT_EXPR
+    | EXPR_IN_TUPLE
+    | EXPR_IN_IF_COND_TUPLE
+    | EXPR_IN_WHILE_COND_TUPLE
+    | EXPR_IN_ARRAY
+    | EXPR_IN_CALLSUFFIX
+    | EXPR_IN_ANNOTATION
+    | UNKNOWN_EXPR
+    // Legacy self-host spelling kept equal to UNKNOWN_EXPR for downstream callers.
     | UNKNOWN
+}
+
+private func ExprKindIndex(kind: ExprKind): Int64 {
+    return match (kind) {
+        case ExprKind.ALL => 0
+        case ExprKind.VAR_INIT => 1
+        case ExprKind.INDEX_EXPR => 2
+        case ExprKind.IF_COND_EXPR => 3
+        case ExprKind.WHILE_COND_EXPR => 4
+        case ExprKind.LET_PATTERN => 5
+        case ExprKind.LEFT_EXPR => 6
+        case ExprKind.EXPR_IN_TUPLE => 7
+        case ExprKind.EXPR_IN_IF_COND_TUPLE => 8
+        case ExprKind.EXPR_IN_WHILE_COND_TUPLE => 9
+        case ExprKind.EXPR_IN_ARRAY => 10
+        case ExprKind.EXPR_IN_CALLSUFFIX => 11
+        case ExprKind.EXPR_IN_ANNOTATION => 12
+        case ExprKind.UNKNOWN_EXPR => 13
+        case ExprKind.UNKNOWN => 13
+    }
+}
+
+extend ExprKind <: Equatable<ExprKind> {
+    public operator func ==(right: ExprKind): Bool {
+        return ExprKindIndex(this) == ExprKindIndex(right)
+    }
+
+    public operator func !=(right: ExprKind): Bool {
+        return !(this == right)
+    }
 }
 
 public enum InteropCJStrategy {
