@@ -731,6 +731,35 @@ private func parseJobs(opts: GlobalOptions, arg: OptionArgInstance, aggressive: 
     return handled()
 }
 
+private func parseAppleTargetTriple(opts: GlobalOptions, parts: Array<String>): Bool {
+    if (parts.size < 3) {
+        return false
+    }
+    if (parts[1] != "apple") {
+        return false
+    }
+    opts.target.vendor = Vendor.APPLE
+    if (parts[2] == "darwin") {
+        opts.target.os = OSType.DARWIN
+        opts.target.env = EnvironmentType.NOT_AVAILABLE
+        return true
+    }
+    if (StartsWith(parts[2], "ios")) {
+        opts.target.os = OSType.IOS
+        opts.target.apiLevel = parts[2][3..]
+        if (opts.target.apiLevel.isEmpty()) { opts.target.apiLevel = "11" }
+        if (parts.size == 4 && parts[3] == "simulator") {
+            opts.target.env = EnvironmentType.SIMULATOR
+            return true
+        }
+        if (parts.size == 3) {
+            opts.target.env = EnvironmentType.NOT_AVAILABLE
+            return true
+        }
+    }
+    return false
+}
+
 public func ParseTargetTriple(opts: GlobalOptions, triple: String): Bool {
     let parts = SplitString(triple, "-")
     if (parts.size != 3 && parts.size != 4) {
@@ -746,31 +775,7 @@ public func ParseTargetTriple(opts: GlobalOptions, triple: String): Bool {
         Errorln("The architecture \"" + parts[0] + "\" is not found or supported!")
         return false
     }
-    if (parts.size >= 3 && parts[1] == "apple") {
-        opts.target.vendor = Vendor.APPLE
-        if (StartsWith(parts[2], "ios")) {
-            opts.target.os = OSType.IOS
-            opts.target.apiLevel = parts[2][3..]
-            if (opts.target.apiLevel.isEmpty()) { opts.target.apiLevel = "11" }
-            if (parts.size == 4 && parts[3] == "simulator") {
-                opts.target.env = EnvironmentType.SIMULATOR
-                return true
-            }
-            if (parts.size == 3) {
-                opts.target.env = EnvironmentType.NOT_AVAILABLE
-                return true
-            }
-            Errorln("The environment \"" + parts[3] + "\" is not found or supported!")
-            return false
-        }
-        if (parts[2] == "darwin") {
-            opts.target.os = OSType.DARWIN
-            opts.target.env = EnvironmentType.NOT_AVAILABLE
-            return true
-        }
-        Errorln("The OS \"" + parts[2] + "\" is not found or supported!")
-        return false
-    }
+    if (parseAppleTargetTriple(opts, parts)) { return true }
     let osStr = parts[parts.size - 2]
     if (osStr == "linux") { opts.target.os = OSType.LINUX }
     else if (osStr == "windows" || osStr == "w64") { opts.target.os = OSType.WINDOWS }

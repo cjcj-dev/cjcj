@@ -271,3 +271,20 @@ other current packages import them; several print-style diagnostics still use
 local `Errorln` text rather than a formatted-print wrapper; and host target
 defaults/driver obfuscation option handling remain outside the base Option
 module's fully faithful surface.
+
+This continuation trims another stale compatibility entry point and aligns the
+Apple target-triple path with `OptionAction.cpp`. The unused Option-local
+`TryParseInt64` wrapper was removed after all current signed parsing in this
+package had moved to shared utils parsing or driver-owned helpers. Apple target
+parsing now lives in a C++-shaped helper that handles `darwin`, `ios`, default
+iOS API level, real-device triples, and simulator triples directly, then
+returns `false` for unsupported Apple spellings so the general triple parser
+continues with the same partial target state and diagnostics/fallback behavior
+as the reference.
+
+Remaining gaps: `Options.cj`/`OptionEnums.cj` remain hand-maintained mirrors of
+`Options.inc`; the public `Maybe*` wrappers and `TryParseUInt64` compatibility
+entry point remain for current sibling package imports; several print-style
+diagnostics still use local wrapper text; host target defaults are still static
+for this port; and driver-layer obfuscation option handling is not yet fully
+folded into the base Option action surface.

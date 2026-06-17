@@ -215,34 +215,6 @@ public func TryParseUInt64(value: String): MaybeUInt64 {
     return MaybeUInt64(result)
 }
 
-public func TryParseInt64(value: String): MaybeInt64 {
-    if (value.isEmpty()) { return MaybeInt64() }
-    var idx: Int64 = 0
-    var isNegative = false
-    if (value[0] == b'+' || value[0] == b'-') {
-        isNegative = value[0] == b'-'
-        idx = 1
-    }
-    if (idx == value.size) { return MaybeInt64() }
-
-    let limit: UInt64 = if (isNegative) { 2147483648u64 } else { 2147483647u64 }
-    var result: UInt64 = 0u64
-    while (idx < value.size) {
-        let ch = value[idx]
-        if (ch < b'0' || ch > b'9') { return MaybeInt64() }
-        let digit = UInt64(ch - b'0')
-        result = result * 10u64 + digit
-        if (result > limit) { return MaybeInt64() }
-        idx++
-    }
-
-    if (isNegative) {
-        if (result == 2147483648u64) { return MaybeInt64(-2147483648) }
-        return MaybeInt64(-Int64(result))
-    }
-    return MaybeInt64(Int64(result))
-}
-
 private func hexDigit(value: UInt64): String {
     if (value == 0u64) { return "0" }
     if (value == 1u64) { return "1" }
