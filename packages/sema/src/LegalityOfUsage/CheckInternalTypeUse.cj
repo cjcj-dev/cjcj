@@ -135,6 +135,9 @@ private func CollectPatternVarDecls(pattern: Pattern, out: ArrayList<VarDecl>): 
         if (let Some(child) <- typePattern.pattern) {
             CollectPatternVarDecls(child, out)
         }
+        if (let Some(desugared) <- typePattern.desugarVarPattern) {
+            CollectPatternVarDecls(desugared, out)
+        }
     } else if (let Some(enumPattern) <- (pattern as EnumPattern)) {
         for (child in enumPattern.patterns) {
             CollectPatternVarDecls(child, out)
@@ -199,8 +202,8 @@ public func CheckFuncAccessLevelValidity(fd: FuncDecl): ArrayList<AccessLevelVio
                 }
             }
         }
-        for (params in body.paramLists) {
-            CheckFuncParamList(fd, params, out)
+        if (!body.paramLists.isEmpty()) {
+            CheckFuncParamList(fd, body.paramLists[0], out)
         }
     }
     CollectGenericTyAccessibility(fd, out)
