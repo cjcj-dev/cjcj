@@ -24,15 +24,22 @@ returns lower through `CreateLiteralReturnBody`).
 
 The following programs compile with the self-host `cjc`
 (`./target/release/bin/cangjie_compiler::cjc`) and run with the verified behavior
-shown. Each was re-verified by real compile-and-run on 2026-06-17 after merging
+shown. Each was re-verified by real compile-and-run on 2026-06-17 (latest: the Bool
+milestone) after merging
 `opus2/int-arith-return`, `opus2/println-int`, `opus3/real-expr`,
 `opus4/control-flow` (var/assign, relational ops, `if`/`while` via real CHIR
 blocks), `opus5/func-calls` (user-defined function calls + recursion via
-real CHIR `Apply`), and `opus6/print-runtime` (`println`/`print` of a
-runtime-computed value) into `main`:
+real CHIR `Apply`), `opus6/print-runtime` (`println`/`print` of a
+runtime-computed value), and `opus8/bool` (first-class `Bool` values: literals,
+`Bool` locals/params/returns, `&&`/`||`/`!`, relational results as values,
+`println(<Bool>)`) into `main`:
 
 | Source | Verified behavior |
 | --- | --- |
+| `main(): Int64 { let b = 3 > 2; if (b) { return 1 } else { return 0 } }` | exits with code 1 (relational result stored in a real `Bool` local, then used as a branch condition) |
+| `main(): Int64 { let a = true; let b = false; if (a && !b) { return 7 } else { return 0 } }` | exits with code 7 (`Bool` locals + logical `&&` + unary `!` on i1) |
+| `func isEven(n: Int64): Bool { return n % 2 == 0 } ` ⏎ `main(): Int64 { if (isEven(10)) {return 1} else {return 0} }` | exits with code 1 (user function with a `Bool` return type, call result used as a branch condition) |
+| `main() { println(5 > 3); println(2 > 4) }` | prints `true` then `false` (runtime `Bool` print, selected on the i1) |
 | `func add(a: Int64, b: Int64): Int64 { return a + b }` ⏎ `main(): Int64 { return add(2, 3) }` | exits with code 5, computed at **runtime** by a real CHIR `Apply` to the user function `add` |
 | `func fact(n: Int64): Int64 { if (n<=1){return 1} else {return n*fact(n-1)} }` ⏎ `main(): Int64 { return fact(5) }` | exits with code 120 via **recursion** (CHIR dump shows recursive `Apply(_Cdefault_fact, ...)` self-calls) |
 | `main(): Int64 { var sum=0; var i=1; while (i<=5){ sum=sum+i; i=i+1 }; return sum }` | exits with code 15, computed at **runtime** by a genuine CHIR `while` loop (no folding; sum 1..10 separately verified -> 55) |
@@ -179,6 +186,35 @@ Capability detail:
   `println("start"); let n=6*7; println(n)` -> `start` then `42`;
   `print("x="); let v=5; println(v)` -> `x=5`; fully-mixed
   `print("a"); print(1); print("b"); let z=3+4; println(z)` -> `a1b7`.
+- **Bool milestone (`opus8/bool`):** the real body-lowering path now models `Bool` as a
+  first-class value, not just an inline relational branch condition. Supported: `Bool`
+  literals (`true`/`false`), `Bool`-typed `let`/`var` locals, `Bool` function parameters
+  and a `Bool` return type, a `Bool` var/param/expr used directly as an `if`/`while`
+  condition, logical `&&`/`||` (non-short-circuit `And`/`Or` on i1) and unary `!`,
+  relational results used as `Bool` values (stored in a local, returned, passed as an
+  argument), and `println`/`print` of a `Bool` (prints `true`/`false`). It is additive and
+  gated like the prior milestones: any construct outside the supported real grammar leaves
+  `hasRealBody == false` and falls back to the summary path, so the already-verified
+  Int64/loop/func/print slices stay byte-for-byte. The spec model
+  (`packages/chir/src/AST2CHIR.cj`) gains `BOOL_LITERAL` and `UNARY` `AST2CHIRExprSpec`
+  kinds (the existing relational/`AND`/`OR` binary ops already produce `Bool` results).
+  `TranslateFuncBody.cj` `CreateRealBody` now infers each value's CHIR type (`Int64` vs
+  `Bool`) from the materialized CHIR `Value` and records a per-slot element type
+  (`RealBodyState.localTypes`), so slot allocation, `Load`s, and prints stay correctly
+  typed and `Bool` locals/params round-trip as i1 (rather than being widened to i64);
+  `BindParameterSlots` allocates each parameter slot at the param's declared CHIR type, and
+  the generic `AllocateSlot(elemTy)` replaces the old Int64-only allocator. The runtime
+  print directive carries a parallel `runtimePrintIsBool` flag (`Value.cj`); codegen's
+  `MaybeEmitRuntimePrint` (`EmitExpressionIR.cj`) routes a `Bool` value to a new
+  `EmitRuntimeBoolPrint` (`EmitPrintIR.cj`) that emits `printf("%s")` over `"true"`/`"false"`
+  string globals selected on the i1. The real parser adapter (`RealParseBridge.cj`)
+  recognizes bool literals, `!`, `-`, `&&`, `||`, and `Bool` parameter/return types, and
+  promotes such bodies to the real path. Verified at runtime (no folding): `let b = 3 > 2;
+  if (b)...` -> exit 1; `let a=true; let b=false; if (a && !b)...` -> exit 7; `let a=false;
+  let b=true; if (a || b)...` -> exit 9; `var b=true; b=false; if (b)...` -> exit 0;
+  `isEven(10)` (`Bool`-returning function) -> exit 1; `gt(5,2)` returned `Bool` -> exit 4;
+  `println(true); println(false)` -> `true`/`false`; `println(5 > 3); println(2 > 4)` ->
+  `true`/`false`.
 
 These are the only source constructs the integrated pipeline lowers end to end
 today; anything else still flows through the compatibility models described
@@ -186,15 +222,19 @@ below.
 
 ### Remaining de-isolation follow-ups
 
-- **Non-`Int64` print values and `Bool`/`String` runtime values.** The runtime print
-  path lowers an `Int64` value to `printf("%ld")`; printing a runtime `Bool`,
-  `String`, or other-width integer/float value is not yet wired. Extend
-  `EmitRuntimeIntPrint` / the PRINT lowering (format selection + a real `Bool`/string
-  runtime representation) once those value types flow through the real body.
+- **Runtime `String` values and other-width numeric print values.** The runtime print
+  path now lowers an `Int64` value to `printf("%ld")` and a `Bool` value to
+  `printf("%s")` over `"true"`/`"false"`; printing (or otherwise computing with) a
+  runtime `String` value, or an other-width integer/`Float` value, is not yet wired.
+  Extend the PRINT lowering / `EmitRuntime*Print` (format selection + a real `String`
+  runtime representation) once those value types flow through the real body. A `String`
+  *local/var* and string concatenation on the real path are the next concrete step.
 - **More operators and statement kinds on the real path.** `for-in`, `match`, early
-  `break`/`continue`, logical `&&`/`||`, and compound assignment are still
-  unsupported (the body falls back to the summary path). Extend `RealParseBridge` ->
-  `AST2CHIRStmtSpec`/`AST2CHIRExprSpec` -> `CreateRealBody`.
+  `break`/`continue`, and compound assignment (`+=` etc.) are still unsupported (the
+  body falls back to the summary path). Logical `&&`/`||` and unary `!` are now
+  supported (`opus8/bool`), though `&&`/`||` are currently lowered as non-short-circuit
+  `And`/`Or` on i1 -- real short-circuit evaluation is a follow-up. Extend
+  `RealParseBridge` -> `AST2CHIRStmtSpec`/`AST2CHIRExprSpec` -> `CreateRealBody`.
 - **Retire the summary parser.** Once the real parser drives every supported
   construct, remove the frontend token-summary scanner
   (`packages/frontend/src/CompileStrategy.cj` `parseLiteralReturn` /
@@ -202,7 +242,8 @@ below.
   arithmetic fold, so all bodies flow through `RealParseBridge` ->
   `AST2CHIRStmtSpec` -> `CreateRealBody`.
 - Extend the real-body adapter to more statement kinds and types beyond `Int64`
-  (other integer/float/bool widths, `for-in`, `match`, early `break`/`continue`).
+  and `Bool` (`String`, other integer/`Float` widths, `for-in`, `match`, early
+  `break`/`continue`).
 - Converge `frontend.*` / `parse.*` / `ast.*` (make the bridge consume `ast.*`
   produced from `parse.*`, or have `parse` emit `ast.*` directly) and delete the
   frontend minimal AST (`FrontendModel.cj`).
