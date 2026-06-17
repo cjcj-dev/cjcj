@@ -782,7 +782,7 @@ public open class BaseMangler {
                 if (curPrefix.TestAttr(Attribute.GLOBAL)) {
                     if (let Some(pattern) <- curPrefix.irrefutablePattern) {
                         if (!PatternContainsVarDecl(pattern)) {
-                            let index = GetIndexOfWildcard(curPrefix, prefix) ?? 0
+                            let index = GetIndexOfWildcard(curPrefix, prefix)
                             mangled += MANGLE_ANONYMOUS_VARIABLE_PREFIX + DecimalToManglingNumber("${index}")
                         }
                     } else if (!curPrefix.identifier.isEmpty()) {
@@ -797,9 +797,12 @@ public open class BaseMangler {
         }
         let outer = outerMostNode ?? node
         if (outer.TestAttr(Attribute.PRIVATE)) {
-            if (let Some(file) <- outer.curFile) {
-                mangled = MANGLE_FILE_ID_PREFIX + fileIdFor(file) + mangled
+            let file = if (let Some(value) <- outer.curFile) {
+                value
+            } else {
+                throw IllegalArgumentException("Private prefix node has no current file.")
             }
+            mangled = MANGLE_FILE_ID_PREFIX + fileIdFor(file) + mangled
         }
         mangled = ManglePackageForPrefixNode(node, prefix) + mangled
         return mangled
@@ -1119,18 +1122,41 @@ public open class BaseMangler {
         return mangleStr
     }
 
-    public func GetIndexOfWildcard(vwpDecl: MangleDecl, prefix: ArrayList<MangleDecl>): Option<Int64> {
-        let pkgName = ManglerContext.ReduceUnitTestPackageName(vwpDecl.fullPackageName)
-        if (let Some(ctx) <- manglerCtxTable.get(pkgName)) {
-            if (vwpDecl.TestAttr(Attribute.GLOBAL)) {
-                if (let Some(file) <- vwpDecl.curFile) {
-                    return ctx.GetIndexOfGlobalWildcardVar(file, vwpDecl)
-                }
-            } else if (let Some(outerNode) <- findOuterNodeOfLocal(prefix)) {
-                return ctx.GetIndexOfLocalWildcardVar(outerNode, vwpDecl)
-            }
+    public func GetIndexOfWildcard(vwpDecl: MangleDecl, prefix: ArrayList<MangleDecl>): Int64 {
+        let pattern = if (let Some(value) <- vwpDecl.irrefutablePattern) {
+            value
+        } else {
+            throw IllegalArgumentException("VarWithPattern declaration has no irrefutable pattern.")
         }
-        return None
+        if (!ManglerContext.CheckAllElementsWildcard(pattern)) {
+            throw IllegalArgumentException("VarWithPattern declaration is not an all-wildcard pattern.")
+        }
+        let pkgName = ManglerContext.ReduceUnitTestPackageName(vwpDecl.fullPackageName)
+        if (pkgName.isEmpty()) {
+            throw IllegalArgumentException("Package name of VarWithPattern declaration is empty.")
+        }
+        let ctx = if (let Some(value) <- manglerCtxTable.get(pkgName)) {
+            value
+        } else {
+            throw IllegalArgumentException("Mangler context not prepared for package: " + pkgName)
+        }
+        if (vwpDecl.TestAttr(Attribute.GLOBAL)) {
+            let file = if (let Some(value) <- vwpDecl.curFile) {
+                value
+            } else {
+                throw IllegalArgumentException("Global VarWithPattern declaration has no current file.")
+            }
+            if (let Some(index) <- ctx.GetIndexOfGlobalWildcardVar(file, vwpDecl)) {
+                return index
+            }
+        } else if (let Some(outerNode) <- findOuterNodeOfLocal(prefix)) {
+            if (let Some(index) <- ctx.GetIndexOfLocalWildcardVar(outerNode, vwpDecl)) {
+                return index
+            }
+        } else {
+            throw IllegalArgumentException("Outer scope of local VarWithPattern declaration is not found.")
+        }
+        throw IllegalArgumentException("Index of VarWithPattern declaration is not found.")
     }
 
     public func MangleVarWithPatternDecl(vwpDecl: MangleDecl, prefix: ArrayList<MangleDecl>): String {
@@ -1139,14 +1165,17 @@ public open class BaseMangler {
                 return MangleVarDecl(varDecl, prefix)
             }
         }
-        let index = GetIndexOfWildcard(vwpDecl, prefix) ?? 0
+        let index = GetIndexOfWildcard(vwpDecl, prefix)
         var mangleStr = MANGLE_CANGJIE_PREFIX + MANGLE_NESTED_PREFIX
         let genericsTypeStack = ArrayList<String>()
         mangleStr += ManglePrefix(vwpDecl, prefix, genericsTypeStack, true)
         if (vwpDecl.TestAttr(Attribute.GLOBAL)) {
-            if (let Some(file) <- vwpDecl.curFile) {
-                mangleStr += MANGLE_FILE_ID_PREFIX + fileIdFor(file)
+            let file = if (let Some(value) <- vwpDecl.curFile) {
+                value
+            } else {
+                throw IllegalArgumentException("Global VarWithPattern declaration has no current file.")
             }
+            mangleStr += MANGLE_FILE_ID_PREFIX + fileIdFor(file)
         }
         mangleStr += MANGLE_ANONYMOUS_VARIABLE_PREFIX
         mangleStr += DecimalToManglingNumber("${index}")

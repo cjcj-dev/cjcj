@@ -128,6 +128,11 @@ Implemented:
 - Aligned parser-AST file-private suffix mangling with the C++ null-check and short-filename behavior: missing
   `curFile` now fails instead of fabricating `"$"`, and filenames shorter than `.cj` use the full filename rather
   than a hash.
+- Aligned wildcard pattern declaration mangling with the C++ assertion path: all-wildcard validation, prepared package
+  context, current file metadata, outer local scope, and registered wildcard index are now required instead of silently
+  falling back to local index `0`.
+- Aligned private prefix and global wildcard-pattern file handling with the C++ null-check behavior by rejecting
+  missing `curFile` metadata before emitting file-private discriminators.
 
 Known fidelity caveats:
 
