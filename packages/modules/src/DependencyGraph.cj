@@ -74,8 +74,7 @@ public class DependencyGraph {
     }
 
     public func GetAllDependencyPackageNames(fullPackageName: String, includeMacroPkg: Bool): ArrayList<String> {
-        let cacheKey = fullPackageName + "|" + BoolToJson(includeMacroPkg)
-        if (let Some(cached) <- cacheDependencyPackageNames.get(cacheKey)) {
+        if (let Some(cached) <- cacheDependencyPackageNames.get(fullPackageName)) {
             return CloneStringArray(cached)
         }
         let packageNames = ArrayList<String>()
@@ -97,7 +96,7 @@ public class DependencyGraph {
             }
         }
         sortStringsInPlace(packageNames)
-        cacheDependencyPackageNames[cacheKey] = CloneStringArray(packageNames)
+        cacheDependencyPackageNames[fullPackageName] = CloneStringArray(packageNames)
         return packageNames
     }
 
@@ -129,11 +128,7 @@ public class DependencyGraph {
     }
 
     private func AddDependenciesForImport(pkg: Package, importSpec: ImportSpec): Unit {
-        var fullPackageName = cjoManager.GetPackageNameByImport(importSpec)
-        if (fullPackageName.isEmpty()) {
-            let pair = cjoManager.GetPackageCjo(importSpec)
-            fullPackageName = pair[0]
-        }
+        let fullPackageName = cjoManager.GetPackageNameByImport(importSpec)
         let packageOpt = cjoManager.GetPackage(fullPackageName)
         if (let None <- packageOpt) {
             return

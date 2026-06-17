@@ -106,6 +106,7 @@ public class DiagnosticEngine {
 
 private func ModuleDiagKindToBasic(kind: String): Option<BasicDiagKindRefactor> {
     return match (kind) {
+        case "module_read_file_to_buffer_failed" => BasicDiagKindRefactor.module_read_file_to_buffer_failed
         case "module_common_part_path_is_required" => BasicDiagKindRefactor.module_common_part_path_is_required
         case "module_common_cjo_wrong_package" => BasicDiagKindRefactor.module_common_cjo_wrong_package
         case "feature_is_not_subset_of_child_set" => BasicDiagKindRefactor.feature_is_not_subset_of_child_set
@@ -121,6 +122,7 @@ private func ModuleDiagKindToBasic(kind: String): Option<BasicDiagKindRefactor> 
         case "package_import_itself_illegal" => BasicDiagKindRefactor.package_import_itself_illegal
         case "package_accessibility" => BasicDiagKindRefactor.package_accessibility
         case "package_cannot_export_macro_package" => BasicDiagKindRefactor.package_cannot_export_macro_package
+        case "package_re_export_package_name" => BasicDiagKindRefactor.package_re_export_package_name
         case "package_decl_not_find_in_package" => BasicDiagKindRefactor.package_decl_not_find_in_package
         case "package_import_conflict" => BasicDiagKindRefactor.package_conflict_import
         case "package_useless_import" => BasicDiagKindRefactor.package_shadowed_import
@@ -133,17 +135,20 @@ private func ModuleDiagKindToBasic(kind: String): Option<BasicDiagKindRefactor> 
 }
 
 public func WarnConflictImport(diag: DiagnosticEngine, name: String, current: Range, previous: Range): Unit {
-    let _ = previous
     diag.ReportWarning("package_import_conflict", "import '${name}' conflicts with an earlier import", range: current)
+    diag.ReportNote("package_import_conflict_previous", "The previous was imported here", range: previous)
 }
 
 public func WarnUselessImport(diag: DiagnosticEngine, range: Range, decl: Decl): Unit {
     diag.ReportWarning("package_useless_import", "import is shadowed by declaration '${decl.identifier}'", range: range)
+    diag.ReportNote("package_useless_import_declared_here", "'${decl.identifier}' is declared here",
+        range: MakeRange(decl.begin, decl.identifier))
 }
 
 public func WarnRepeatedFeatureName(diag: DiagnosticEngine, featureName: String, current: Range, previous: Range): Unit {
-    let _ = previous
     diag.ReportWarning("package_feature_repeated", "feature '${featureName}' is repeated", range: current)
+    diag.ReportNote("package_feature_repeated_previous", "feature '${featureName}' previously used here",
+        range: previous)
 }
 
 public func DiagForNullPackageFeature(diag: DiagnosticEngine, range: Range, referenceFeatures: ArrayList<String>): Unit {

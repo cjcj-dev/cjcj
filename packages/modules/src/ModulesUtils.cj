@@ -7,33 +7,28 @@ import cangjie_compiler::basic.MakeRange as BasicMakeRange
 import cangjie_compiler::basic.Position as BasicPosition
 import cangjie_compiler::basic.Range as BasicRange
 import cangjie_compiler::basic.SplitQualifiedName as BasicSplitQualifiedName
+import cangjie_compiler::basic.ToHexString
 import cangjie_compiler::utils.FileUtil
+import cangjie_compiler::utils.AST_PACKAGE_NAME as UTILS_AST_PACKAGE_NAME
+import cangjie_compiler::utils.CORE_PACKAGE_NAME as UTILS_CORE_PACKAGE_NAME
+import cangjie_compiler::utils.DEFAULT_PACKAGE_NAME as UTILS_DEFAULT_PACKAGE_NAME
+import cangjie_compiler::utils.SYNC_PACKAGE_NAME as UTILS_SYNC_PACKAGE_NAME
+import cangjie_compiler::utils.StandardLibName
 
 public let SERIALIZED_FILE_EXTENSION: String = ".cjo"
 public let CJ_D_FILE_EXTENSION: String = ".cj.d"
-public let CORE_PACKAGE_NAME: String = "std.core"
-public let SYNC_PACKAGE_NAME: String = "std.sync"
-public let AST_PACKAGE_NAME: String = "std.ast"
-public let DEFAULT_PACKAGE_NAME: String = "default"
+public let CORE_PACKAGE_NAME: String = UTILS_CORE_PACKAGE_NAME
+public let SYNC_PACKAGE_NAME: String = UTILS_SYNC_PACKAGE_NAME
+public let AST_PACKAGE_NAME: String = UTILS_AST_PACKAGE_NAME
+public let DEFAULT_PACKAGE_NAME: String = UTILS_DEFAULT_PACKAGE_NAME
 public let TEST_PKG_SUFFIX: String = "$test"
 public let ORG_NAME_SEPARATOR: String = "@"
 public let NO_CJO_HELP_INFO: String =
     "check if the .cjo file of the package exists in CANGJIE_PATH or CANGJIE_HOME, or use " +
     "'--import-path' to specify the .cjo file path"
 
-private let STANDARD_LIB_NAMES: Array<String> = [
-    "std.core", "std.sync", "std.math", "std.overflow", "std.runtime", "std.ast", "std.interop",
-    "std.net", "std.reflect", "std.ref", "std.unittest", "std.unittest.testmacro",
-    "std.unittest.mock.mockmacro", "std.deriving"
-]
-
 public func IsStandardLibraryPackage(fullPackageName: String): Bool {
-    for (name in STANDARD_LIB_NAMES) {
-        if (name == fullPackageName) {
-            return true
-        }
-    }
-    return false
+    return StandardLibName(fullPackageName).isSome()
 }
 
 public enum PackageRelation {
@@ -785,12 +780,9 @@ public func EscapeJson(value: String): String {
         if (byte == b'\\' || byte == b'"') {
             builder.append("\\")
             builder.append(String.fromUtf8([byte]))
-        } else if (byte == b'\n') {
-            builder.append("\\n")
-        } else if (byte == b'\r') {
-            builder.append("\\r")
-        } else if (byte == b'\t') {
-            builder.append("\\t")
+        } else if (byte <= 0x1fu8) {
+            builder.append("\\u00")
+            builder.append(ToHexString(byte, len: 2))
         } else {
             builder.append(String.fromUtf8([byte]))
         }

@@ -1,6 +1,7 @@
 package cangjie_compiler::modules
 
 import std.collection.*
+import std.fs.exists
 import cangjie_compiler::option.GlobalOptions
 import cangjie_compiler::option.OutputMode
 
@@ -438,6 +439,9 @@ public class ImportManager {
             return None
         }
         let packageValue = packageOpt.getOrThrow()
+        if (!LoadDependentPackageHeadersForLsp(packageValue)) {
+            return None
+        }
         let singleton = ArrayList<Package>()
         singleton.add(packageValue)
         cjoManager.LoadPackageDeclsOnDemand(singleton, fromLsp: true)
@@ -512,7 +516,7 @@ public class ImportManager {
         newFile.packageRef = Some(pkg)
         for (importSpec in file.imports) {
             if (importSpec.TestAttr(Attribute.IMPLICIT_ADD)) {
-                newFile.imports.add(importSpec)
+                newFile.imports.add(CloneImportSpecForFile(importSpec, newFile))
             }
         }
         for (importSpec in newFile.imports) {
@@ -676,6 +680,33 @@ public class ImportManager {
         return success
     }
 
+    private func LoadDependentPackageHeadersForLsp(pkg: Package): Bool {
+        for (file in pkg.files) {
+            for (importSpec in file.imports) {
+                if (importSpec.IsImportMulti()) {
+                    continue
+                }
+                let pair = cjoManager.GetPackageCjo(importSpec)
+                let fullDepPkgName = pair[0]
+                let depCjoPath = pair[1]
+                if (cjoManager.GetPackage(fullDepPkgName).isSome()) {
+                    continue
+                }
+                if (!cjoManager.LoadPackageHeader(fullDepPkgName, depCjoPath)) {
+                    return false
+                }
+                if (let Some(depPkg) <- cjoManager.GetPackage(fullDepPkgName)) {
+                    if (!LoadDependentPackageHeadersForLsp(depPkg)) {
+                        return false
+                    }
+                } else {
+                    return false
+                }
+            }
+        }
+        return true
+    }
+
     private func ResolveImportedPackageHeaders(pkg: Package, isRecursive!: Bool = false): Bool {
         var success = true
         for (file in pkg.files) {
@@ -786,7 +817,7 @@ public class ImportManager {
             }
             return
         }
-        if (IsStandardLibraryPackage(fullPackageName) && !cjoPath.isEmpty()) {
+        if (IsStandardLibraryPackage(fullPackageName) && !cjoPath.isEmpty() && exists(cjoPath)) {
             stdDepsMap[cjoPath] = StdDepEntry(depType, fullPackageName)
         }
     }
@@ -866,10 +897,17 @@ public class ImportManager {
                 } else if (importSpec.IsReExport() && !pkg.isMacroPackage && packageValue.isMacroPackage) {
                     diag.ReportError("package_cannot_export_macro_package",
                         "non-macro package cannot re-export a macro package", range: packageRange)
-                } else if (!importSpec.IsImportAll() && !cjoManager.IsImportPackage(importSpec)) {
+                } else if (importSpec.IsImportAll()) {
+                    continue
+                } else if (cjoManager.IsImportPackage(importSpec)) {
+                    if (importSpec.IsReExport()) {
+                        diag.ReportError("package_re_export_package_name",
+                            "package '${fullPackageName}' cannot be re-exported by a ${GetAccessLevelStr(importSpec)} package-name import",
+                            range: packageRange)
+                    }
+                } else {
                     let decls = cjoManager.GetPackageMembersByName(packageValue.fullPackageName, importSpec.content.identifier)
-                    let visibleDecls = GetVisibleDeclToMap(decls, GetAccessLevel(importSpec), relation)
-                    if (visibleDecls.isEmpty()) {
+                    if (!HasVisibleDecl(decls, relation)) {
                         diag.ReportError("package_decl_not_find_in_package",
                             "declaration '${importSpec.content.identifier}' was not found in package '${fullPackageName}'",
                             range: packageRange)
@@ -877,6 +915,15 @@ public class ImportManager {
                 }
             }
         }
+    }
+
+    private func HasVisibleDecl(decls: ArrayList<Decl>, relation: PackageRelation): Bool {
+        for (decl in decls) {
+            if (IsVisible(decl, relation)) {
+                return true
+            }
+        }
+        return false
     }
 
     private func CheckRedefinition(pkg: Package): Unit {
@@ -1002,6 +1049,11 @@ public class ImportManager {
                                 PutDeclMapValue(declMap, memberName, decl)
                                 RecordImportOfDecl(pkg.fullPackageName, decl, importSpec)
                             }
+                            for (decl in memberDecls) {
+                                if (decl.identifier != memberName) {
+                                    RecordTypeAlias(decl, decl.identifier)
+                                }
+                            }
                         }
                     }
                     continue
@@ -1021,14 +1073,16 @@ public class ImportManager {
                     } else {
                         importSpec.content.aliasName
                     }
-                    let visibleDecls = GetVisibleDeclToMap(members, importLevel, relation)
-                    for (decl in visibleDecls) {
-                        PutDeclMapValue(declMap, importedName, decl)
-                        RecordImportOfDecl(pkg.fullPackageName, decl, importSpec)
+                    for (decl in members) {
                         if (decl.identifier != importedName) {
                             RecordTypeAlias(decl, importedName)
                             RecordTypeAlias(decl, decl.identifier)
                         }
+                    }
+                    let visibleDecls = GetVisibleDeclToMap(members, importLevel, relation)
+                    for (decl in visibleDecls) {
+                        PutDeclMapValue(declMap, importedName, decl)
+                        RecordImportOfDecl(pkg.fullPackageName, decl, importSpec)
                     }
                     importSpec.content.isDecl = true
                 }
@@ -1482,6 +1536,39 @@ public class ImportManager {
             out.add(value)
         }
         return out
+    }
+
+    private func CloneImportSpecForFile(importSpec: ImportSpec, file: File): ImportSpec {
+        let cloned = ImportSpec()
+        cloned.content = CloneImportContent(importSpec.content)
+        cloned.withImplicitExport = importSpec.withImplicitExport
+        cloned.accessLevel = importSpec.accessLevel
+        cloned.hasAccessModifier = importSpec.hasAccessModifier
+        cloned.begin = importSpec.begin
+        cloned.end = importSpec.end
+        cloned.CopyAttrsFrom(importSpec)
+        cloned.curFile = Some(file)
+        cloned.content.curFile = Some(file)
+        return cloned
+    }
+
+    private func CloneImportContent(content: ImportContent): ImportContent {
+        let cloned = ImportContent()
+        cloned.kind = content.kind
+        cloned.hasDoubleColon = content.hasDoubleColon
+        for (path in content.prefixPaths) {
+            cloned.prefixPaths.add(path)
+        }
+        cloned.identifier = content.identifier
+        cloned.aliasName = content.aliasName
+        for (item in content.items) {
+            cloned.items.add(CloneImportContent(item))
+        }
+        cloned.isDecl = content.isDecl
+        cloned.begin = content.begin
+        cloned.end = content.end
+        cloned.CopyAttrsFrom(content)
+        return cloned
     }
 
     private func ContainsDecl(values: ArrayList<Decl>, decl: Decl): Bool {

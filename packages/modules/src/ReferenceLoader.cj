@@ -12,8 +12,12 @@ public class ReferenceLoader {
     }
 
     public func RegisterPackage(pkg: Package): Unit {
+        RegisterDecl(PackageDecl(pkg))
         for (file in pkg.files) {
             for (decl in file.decls) {
+                RegisterDecl(decl)
+            }
+            for (decl in file.exportedInternalDecls) {
                 RegisterDecl(decl)
             }
         }

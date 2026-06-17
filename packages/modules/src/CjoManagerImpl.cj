@@ -302,7 +302,7 @@ public class CjoManagerImpl {
         }
         if (cjoPath.isEmpty() || !exists(cjoPath)) {
             if (printErr) {
-                diag.ReportError("package_search_error", "cannot find serialized package '${fullPackageName}'")
+                ReportReadCjoFailure(fullPackageName, cjoPath, "file does not exist")
                 return None
             }
             return Some(CreateASTLoader("".toArray(), fullPackageName, cjoManager))
@@ -312,11 +312,18 @@ public class CjoManagerImpl {
             return Some(CreateASTLoader(bytes, fullPackageName, cjoManager))
         } catch (e: Exception) {
             if (printErr) {
-                diag.ReportError("cjo_read_error", "cannot read serialized package '${fullPackageName}'")
+                ReportReadCjoFailure(fullPackageName, cjoPath, e.message)
                 return None
             }
             return Some(CreateASTLoader("".toArray(), fullPackageName, cjoManager))
         }
+    }
+
+    private func ReportReadCjoFailure(fullPackageName: String, cjoPath: String, reason: String): Unit {
+        diag.ReportError(
+            "module_read_file_to_buffer_failed",
+            "cannot read serialized package '${fullPackageName}' from '${cjoPath}': ${reason}"
+        )
     }
 
     private func CreateASTLoader(data: Array<UInt8>, fullPackageName: String, cjoManager: CjoManager): ASTLoader {
