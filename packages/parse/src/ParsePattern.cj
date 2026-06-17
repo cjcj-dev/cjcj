@@ -23,23 +23,13 @@ extend ParserImpl {
             }
             return constPat
         }
+        if (SeeingIdentifierAndTargetOp([TokenKind.LPAREN, TokenKind.LT, TokenKind.DOT])) {
+            return ParseEnumPattern(attributes, isVar, inDecl)
+        }
         if (SeeingIdentifierLike()) {
             let idTok = Peek()
             let id = ParseIdentifierFromToken(idTok)
             Next()
-            if (Seeing(TokenKind.LPAREN)) {
-                let enumPat = EnumPattern()
-                enumPat.constructor = id
-                enumPat.begin = id.Begin()
-                enumPat.leftParenPos = Expect(TokenKind.LPAREN, "expected '('").Begin()
-                while (!Seeing(TokenKind.END) && !Seeing(TokenKind.RPAREN)) {
-                    enumPat.patterns.add(ParsePattern(attributes, isVar, inDecl))
-                    if (!Skip(TokenKind.COMMA)) { break }
-                }
-                enumPat.rightParenPos = Expect(TokenKind.RPAREN, "expected ')' after enum pattern").Begin()
-                enumPat.end = enumPat.rightParenPos + 1
-                return enumPat
-            }
             let varPat = VarPattern(id, isVar)
             if (Skip(TokenKind.COLON)) {
                 let typePat = TypePattern()
@@ -56,6 +46,52 @@ extend ParserImpl {
         diag.DiagnoseRefactor(DiagKindRefactor.EXPECTED_TOKEN, token.Begin(), "expected pattern")
         Next()
         return InvalidPattern(token.Begin())
+    }
+
+    public func ParseEnumPattern(attributes: ArrayList<Attribute>, isVar: Bool, inDecl: Bool): EnumPattern {
+        let enumPat = EnumPattern()
+        let first = ExpectIdentifierWithPos(enumPat)
+        enumPat.constructor = first
+        enumPat.constructorParts.add(first)
+        enumPat.begin = first.Begin()
+        enumPat.end = first.End()
+        ParseEnumPatternTypeArguments(enumPat)
+        while (Skip(TokenKind.DOT)) {
+            enumPat.dotPosVector.add(lastToken.Begin())
+            let field = ExpectIdentifierWithPos(enumPat)
+            enumPat.constructor = field
+            enumPat.constructorParts.add(field)
+            enumPat.end = field.End()
+            ParseEnumPatternTypeArguments(enumPat)
+        }
+        if (Seeing(TokenKind.LPAREN)) {
+            let tuplePattern = ParseTuplePattern(true, attributes, isVar, inDecl)
+            enumPat.leftParenPos = tuplePattern.leftParenPos
+            enumPat.rightParenPos = tuplePattern.rightParenPos
+            for (pattern in tuplePattern.patterns) {
+                enumPat.patterns.add(pattern)
+            }
+            for (commaPos in tuplePattern.commaPosVector) {
+                enumPat.commaPosVector.add(commaPos)
+            }
+            enumPat.end = tuplePattern.end
+        }
+        return enumPat
+    }
+
+    private func ParseEnumPatternTypeArguments(enumPat: EnumPattern): Unit {
+        if (!Skip(TokenKind.LT)) {
+            return
+        }
+        enumPat.leftAnglePos = lastToken.Begin()
+        while (!Seeing(TokenKind.END) && !Seeing(TokenKind.GT)) {
+            enumPat.typeArguments.add(ParseType())
+            if (!Skip(TokenKind.COMMA)) {
+                break
+            }
+        }
+        enumPat.rightAnglePos = Expect(TokenKind.GT, "expected '>' after enum pattern type arguments").Begin()
+        enumPat.end = enumPat.rightAnglePos + 1
     }
 
     public func ParseTuplePattern(isEnumPatternParams: Bool, attributes: ArrayList<Attribute>, isVar: Bool, inDecl: Bool): TuplePattern {

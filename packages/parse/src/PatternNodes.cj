@@ -67,7 +67,13 @@ public class TuplePattern <: Pattern {
 
 public class EnumPattern <: Pattern {
     public var constructor: SrcIdentifier = SrcIdentifier()
+    public let constructorParts: ArrayList<SrcIdentifier> = ArrayList<SrcIdentifier>()
+    public let dotPosVector: ArrayList<Position> = ArrayList<Position>()
+    public var leftAnglePos: Position = INVALID_POSITION
+    public let typeArguments: ArrayList<Type> = ArrayList<Type>()
+    public var rightAnglePos: Position = INVALID_POSITION
     public let patterns: ArrayList<Pattern> = ArrayList<Pattern>()
+    public let commaPosVector: ArrayList<Position> = ArrayList<Position>()
     public var leftParenPos: Position = INVALID_POSITION
     public var rightParenPos: Position = INVALID_POSITION
 
@@ -75,6 +81,7 @@ public class EnumPattern <: Pattern {
 
     public override func Children(): ArrayList<Node> {
         let out = ArrayList<Node>()
+        for (typeArg in typeArguments) { out.add(typeArg) }
         for (pattern in patterns) { out.add(pattern) }
         return out
     }

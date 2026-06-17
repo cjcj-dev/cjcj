@@ -1,11 +1,14 @@
 package cangjie_compiler::parse
 
+import cangjie_compiler::basic.DiagnosticEngine as BasicDiagnosticEngine
 import std.collection.*
 
 public class ParserImpl {
     public let diag: DiagnosticEngine
+    private let lexerDiag: BasicDiagnosticEngine = BasicDiagnosticEngine()
     public let sourceManager: SourceManager
     public let lexer: Lexer
+    private let tokenLines: HashSet<Int64> = HashSet<Int64>()
     public var lookahead: Token = Token(TokenKind.SENTINEL, "", INVALID_POSITION, INVALID_POSITION)
     public var lastToken: Token = Token(TokenKind.SENTINEL, "", INVALID_POSITION, INVALID_POSITION)
     public var lastNoneNLToken: Token = Token(TokenKind.SENTINEL, "", INVALID_POSITION, INVALID_POSITION)
@@ -29,7 +32,8 @@ public class ParserImpl {
     public init(fileID: UInt64, input: String, diag: DiagnosticEngine, sm: SourceManager, attachComment: Bool, parsingDeclFiles: Bool) {
         this.diag = diag
         this.sourceManager = sm
-        this.lexer = Lexer(fileID, input, diag, sm)
+        this.lexerDiag.SetSourceManager(sm)
+        this.lexer = Lexer(fileID, input, lexerDiag, sm)
         this.enableAttachComment = attachComment
         this.parseDeclFile = parsingDeclFiles
         Init()
@@ -38,7 +42,8 @@ public class ParserImpl {
     public init(input: String, diag: DiagnosticEngine, sm: SourceManager, pos: Position, attachComment: Bool, parsingDeclFiles: Bool) {
         this.diag = diag
         this.sourceManager = sm
-        this.lexer = Lexer(input, diag, sm, pos)
+        this.lexerDiag.SetSourceManager(sm)
+        this.lexer = Lexer(input, lexerDiag, sm, pos)
         this.enableAttachComment = attachComment
         this.parseDeclFile = parsingDeclFiles
         Init()
@@ -47,7 +52,8 @@ public class ParserImpl {
     public init(inputTokens: Array<Token>, diag: DiagnosticEngine, sm: SourceManager, attachComment: Bool, parsingDeclFiles: Bool) {
         this.diag = diag
         this.sourceManager = sm
-        this.lexer = Lexer(inputTokens, diag, sm)
+        this.lexerDiag.SetSourceManager(sm)
+        this.lexer = Lexer(inputTokens, lexerDiag, sm)
         this.enableAttachComment = attachComment
         this.parseDeclFile = parsingDeclFiles
         Init()
@@ -58,13 +64,7 @@ public class ParserImpl {
     }
 
     public func GetLineNum(): Int64 {
-        var maxLine: Int64 = 1
-        for (token in lexer.GetTokens()) {
-            if (token.End().line > maxLine) {
-                maxLine = token.End().line
-            }
-        }
-        return maxLine
+        return if (tokenLines.isEmpty()) { 1 } else { tokenLines.size }
     }
 
     public func GetProcessedTokens(): Int64 {
@@ -133,6 +133,7 @@ public class ParserImpl {
     public func Next(): Unit {
         lastToken = lookahead
         var token = lexer.Next()
+        RecordTokenLines(token)
         newlineSkipped = false
         while (token.kind == TokenKind.COMMENT || (skipNL && token.kind == TokenKind.NL)) {
             if (token.kind == TokenKind.NL) {
@@ -140,11 +141,23 @@ public class ParserImpl {
                 firstNLPosition = token.Begin()
             }
             token = lexer.Next()
+            RecordTokenLines(token)
         }
         if (lastToken.kind != TokenKind.NL && lastToken.kind != TokenKind.COMMENT && lastToken.kind != TokenKind.SENTINEL) {
             lastNoneNLToken = lastToken
         }
         lookahead = token
+    }
+
+    private func RecordTokenLines(token: Token): Unit {
+        if (token.Begin().line <= 0 || token.End().line <= 0) {
+            return
+        }
+        var line = token.Begin().line
+        while (line <= token.End().line) {
+            tokenLines.add(line)
+            line++
+        }
     }
 
     public func Skip(kind: TokenKind): Bool {

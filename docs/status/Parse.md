@@ -11,7 +11,7 @@ Parse component split. The package now imports real Basic positions/source
 manager, real Lex tokens/token tables, real AST kind/attribute/annotation
 enums, real Utils overflow strategy helpers, and real Option compiler
 configuration types. It still has local
-parser-facing diagnostics, AST node shapes, a lexer, parser state, top-level parsing,
+parser-facing diagnostics, AST node shapes, parser state, top-level parsing,
 declaration parsing, expression parsing, type parsing, pattern parsing, imports,
 annotations, modifiers, features, macro-call capture, quote capture, comment
 collection, modifier-rule queries, AST checking, AST hashing, CJMP entry wiring,
@@ -30,14 +30,23 @@ the real Utils `OverflowStrategy` type rather than a Parse-local copy.
 `ParserTypes.cj` no longer owns local copies of `GlobalOptions`, `OutputMode`,
 `InteropLanguage`, `BackendType`, or `Triple`; those names are public aliases of
 the real Option package types.
+`MacroInvocation` now reuses the real Basic `MacroCallDiagInfo` for macro
+origin/identifier diagnostic mapping while the surrounding macro node classes
+remain Parse-local until the full AST node hierarchy can be replaced.
+`Lexer.cj` has been removed from Parse. The parser now imports and constructs the
+real `cangjie_compiler::lex.Lexer`, with a real Basic diagnostic engine reserved
+for lexing while the remaining parser-facing diagnostics still use the local
+Parse shim.
 
 ## Implemented In This Pass
 
 - Removed `ParseScaffold.cj`.
 - Added 35 `.cj` files under `packages/parse/src`, following the C++ Parse file
   breakdown and keeping all source files in package `cangjie_compiler::parse`.
-- Implemented a local lexer for Cangjie keywords, identifiers, raw identifiers,
-  literals, nested block comments, line comments, delimiters, and operators.
+- Initially implemented a local lexer for Cangjie keywords, identifiers, raw
+  identifiers, literals, nested block comments, line comments, delimiters, and
+  operators; that scanner has since been deleted in favor of the real Lex
+  package.
 - Implemented parser entry points for `ParseTopLevel`, `ParseDecl`, `ParseExpr`,
   `ParseExprLibast`, `ParseType`, `ParsePattern`, annotation argument parsing,
   macro-node parsing, comment attachment, and public parser state helpers.
@@ -145,8 +154,8 @@ the real Option package types.
   conditions validate that `let pattern <- expr` subconditions are only joined
   with `&&`/`||`, call arguments record `inout`, and negative numeric/rune-byte
   literals are preserved in constant patterns.
-- Added local C++-shaped string interpolation scaffolding: the Parse lexer now
-  records `StringPart` slices for `${...}` holes, `LitConstExpr` can own a
+- Added local C++-shaped string interpolation scaffolding: lexer string-part
+  records are consumed for `${...}` holes, `LitConstExpr` can own a
   `StrInterpolationExpr`, and each interpolation hole is reparsed as a block
   via a nested parser using the hole source position.
 - Added class/struct primary-constructor and class finalizer parsing paths:
@@ -158,21 +167,82 @@ the real Option package types.
 - Tightened `VArray` type parsing toward the C++ grammar by requiring the
   second type argument to use the `$` constant-size form (`VArray<T, $n>`) and
   diagnosing missing comma, missing `$`, or non-integer size literals.
+- Continued the de-isolation pass by deleting the Parse-local scanner and
+  switching parser tokenization, lookahead, string-part extraction, comments, and
+  token-stream access to the real Lex package. Comment attachment now adapts the
+  real Lex comment array into the existing `TokenVecMap`, and parser line counts
+  are recorded as tokens are consumed so `GetLineNum` no longer depends on a
+  cached local token list.
+- Added C++-shaped parser combinator helpers from `ParserUtils.cpp`:
+  adjacent-token `SeeingCombinator`, `SeeingTokenAndCombinator`,
+  `SkipCombinator`, `SkipCombinedDoubleArrow`, `SkipCombinedBackarrow`,
+  `LookupSeenCombinator`, and `SkipAmbiguousToken`. Match cases, selectorless
+  match cases, lambda arrows, let-pattern back arrows, operator overload names,
+  optional suffix checks, and Pratt expression parsing now handle the same
+  adjacent split-token forms (`=>`, `<-`, `>>`, `>=`, `>>=`, `??`) that the C++
+  parser accepts during macro/token-stream parsing and recovery.
+- Replaced the local hand-maintained expression precedence table with the real
+  Lex `TokenPrecedence` table while preserving the local Pratt parser's explicit
+  assignment precedence. This restores missing C++ precedence for shift,
+  pipeline, composition, exponent, range, comparison, and logical operators.
+- Deepened quote parsing toward `ParseQuote.cpp`: `quote(...)` now records the
+  quote and delimiter positions, enters/exits the real lexer quote mode, emits
+  `TokenPart` expression nodes for literal token runs, parses `$identifier` as a
+  quote-dollar reference expression, parses `$(expr)` by temporarily restoring
+  normal lexer mode, and removed the non-C++ brace quote form.
+- Deepened macro parsing toward `ParseMacro.cpp`: macro invocations now carry
+  C++-shaped name, delimiter, attr/arg, parent/decl, and diagnostic fields; parse
+  dotted macro names and `@!`; preserve macro attributes separately from input
+  args; record origin positions with the real Basic `MacroCallDiagInfo`; handle
+  escaped macro-call tokens; and capture no-parentheses declaration input by
+  reparsing the following declaration into `invocation.decl` while mirroring its
+  consumed tokens in `args`/legacy `tokens`.
+- Reworked macro declarations away from the ordinary function path: `macro`
+  declarations now enable `MACRO_FUNC`, reject builtin macro/annotation names,
+  require `public`, require a macro package when a current file is available,
+  validate one or two `Tokens` parameters, synthesize a default `Tokens` return
+  type, and parse bodies in `MACRO_BODY` scope.
+- Deepened `ParseType.cpp` parity: local type nodes now carry C++/AST-shaped
+  source metadata for comma, colon, type-parameter name/raw state, option
+  question-counts, and qualified generic delimiters. Type parsing now accepts
+  contextual-keyword type names, records named tuple/function type parameters,
+  diagnoses duplicate and mixed named/unnamed parameter lists, handles
+  `() -> T`, multiple leading `?`, `onlyRef`, qualified generic delimiter
+  positions, unexpected post-type arrows, and VArray comma/source tracking.
+- Deepened declaration/pattern parsing toward `ParseDecl.cpp` and
+  `ParsePattern.cpp`: `VarWithPatternDecl` now derives from
+  `VarDeclAbstract`, uses the real AST field name `irrefutablePattern`, and
+  participates in child traversal with its pattern, type annotation, and
+  initializer. `let`/`var`/`const` dispatch now follows the C++ split between
+  ordinary identifier declarations and wildcard/tuple/enum-looking pattern
+  declarations, preserving `let x: T` as `VarDecl`. Pattern declarations reuse
+  `ParseTypeAndExpr`, check C++-shaped missing initializer/type cases, reject
+  declaration patterns in class/struct bodies, and enum-pattern starts now
+  consume qualified names and generic argument lists via the shared
+  `SeeingIdentifierAndTargetOp` helper.
 
 ## Remaining Work
 
-- Replace the remaining Parse-local AST node classes, parser diagnostics, and
-  parser lexer implementation with real sibling package APIs where their public
-  surfaces are sufficiently complete.
+- Replace the remaining Parse-local AST node classes and parser diagnostics with
+  real sibling package APIs where their public surfaces are sufficiently
+  complete.
 - Top-level recovery still uses local message diagnostics rather than the exact
   C++ diagnostic IDs, suggestions, parser-scope reset objects, and bracket-stack
   cleanup.
-- Feature raw-identifier diagnostics still depend on finishing lexer
-  de-isolation: the local Parse lexer strips backticks before parser recovery,
-  while the real Lex lexer preserves raw identifier spelling in `Token.Value()`.
-- Annotation diagnostics are still message-based through the local Parse
-  diagnostic shim; converting them to real Basic diagnostic IDs remains part of
-  the broader diagnostics de-isolation.
+- Lex diagnostics now flow through a Basic diagnostic engine owned by
+  `ParserImpl`, while parser diagnostics are still message-based through the
+  local Parse diagnostic shim. Converting parser diagnostics to real Basic
+  diagnostic IDs remains the next major de-isolation step.
+- Macro expansion parsing still lacks the full C++ parameter-macro and
+  expression-scope no-parentheses reparsing behavior, exact macro diagnostic IDs,
+  and interpolation string origin-position remapping.
+- Type parsing still uses local message diagnostics and simplified recovery in
+  several malformed generic/empty-parenthesis cases instead of the exact C++
+  diagnostic IDs and parser cleanup paths.
+- Enum-pattern constructors still use local lightweight identifier-piece
+  storage rather than the full C++ expression-backed constructor node, so target
+  binding/type-argument diagnostics remain approximate until Parse-local pattern
+  nodes are replaced by real AST nodes.
 - Audit grammar and diagnostic parity against the full C++ Parse test corpus;
   the current parser is substantial and compiling, but not a complete faithful
   replacement for all 17k+ lines of C++ parser behavior.

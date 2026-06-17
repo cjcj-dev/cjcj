@@ -39,7 +39,7 @@ extend ParserImpl {
             if (SeeingOptionalSuffix()) {
                 base = ParseQuestSuffixExpr(base)
                 hasQuestSuffix = true
-            } else if (Seeing(TokenKind.QUEST) && !Seeing([TokenKind.QUEST, TokenKind.QUEST])) {
+            } else if (Seeing(TokenKind.QUEST) && !SeeingCombinator([TokenKind.QUEST, TokenKind.QUEST])) {
                 diag.DiagnoseRefactor(DiagKindRefactor.EXPECTED_TOKEN, Peek().Begin(), "expected '.', '(', '[', '{', or '?' after '?'")
                 Next()
                 break
@@ -142,12 +142,21 @@ extend ParserImpl {
     public func ParseExprRhs(minPrec: UInt8, left: Expr, ek: ExprKind): Expr {
         var lhs = left
         while (true) {
-            let prec = Precedence(Peek().kind)
+            var op = Peek()
+            var combinedOperator = false
+            if (let Some(combined) <- LookupSeenCombinator()) {
+                op = combined
+                combinedOperator = true
+            }
+            let prec = Precedence(op.kind)
             if (prec < minPrec || prec == INVALID_PRECEDENCE) {
                 return lhs
             }
-            let op = Peek()
-            Next()
+            if (combinedOperator) {
+                SkipAmbiguousToken()
+            } else {
+                Next()
+            }
             if (op.kind == TokenKind.IS || op.kind == TokenKind.AS) {
                 let typeNode = ParseType()
                 if (op.kind == TokenKind.IS) {
@@ -168,7 +177,11 @@ extend ParserImpl {
                 continue
             }
             var rhs = ParseUnaryExpr(ek)
-            let nextPrec = Precedence(Peek().kind)
+            var nextKind = Peek().kind
+            if (let Some(nextCombined) <- LookupSeenCombinator()) {
+                nextKind = nextCombined.kind
+            }
+            let nextPrec = Precedence(nextKind)
             if (prec < nextPrec) {
                 rhs = ParseExprRhs(prec + 1, rhs, ek)
             }
@@ -195,19 +208,7 @@ extend ParserImpl {
 
     public func Precedence(kind: TokenKind): UInt8 {
         if (IsAssignment(kind)) { return 1u8 }
-        if (kind == TokenKind.COALESCING) { return 2u8 }
-        if (kind == TokenKind.OR) { return 3u8 }
-        if (kind == TokenKind.AND) { return 4u8 }
-        if (kind == TokenKind.BITOR) { return 5u8 }
-        if (kind == TokenKind.BITXOR) { return 6u8 }
-        if (kind == TokenKind.BITAND) { return 7u8 }
-        if (kind == TokenKind.EQUAL || kind == TokenKind.NOTEQ || kind == TokenKind.IS || kind == TokenKind.AS) { return 8u8 }
-        if (kind == TokenKind.LT || kind == TokenKind.LE || kind == TokenKind.GT || kind == TokenKind.GE) { return 9u8 }
-        if (kind == TokenKind.RANGEOP || kind == TokenKind.CLOSEDRANGEOP) { return 10u8 }
-        if (kind == TokenKind.ADD || kind == TokenKind.SUB || kind == TokenKind.PIPELINE || kind == TokenKind.COMPOSITION) { return 11u8 }
-        if (kind == TokenKind.MUL || kind == TokenKind.DIV || kind == TokenKind.MOD) { return 12u8 }
-        if (kind == TokenKind.EXP) { return 13u8 }
-        return INVALID_PRECEDENCE
+        return TokenPrecedence(kind)
     }
 
     public func IsAssignment(kind: TokenKind): Bool {
@@ -228,7 +229,7 @@ extend ParserImpl {
             ret.orPos.add(lastToken.Begin())
             ret.patterns.add(ParsePattern())
         }
-        if (!Skip(TokenKind.BACKARROW)) {
+        if (!SkipBackarrow()) {
             diag.DiagnoseRefactor(DiagKindRefactor.EXPECTED_TOKEN, Peek().Begin(), "expected '<-' in ${conditionName} condition")
             ConsumeUntilAny([TokenKind.AND, TokenKind.OR, TokenKind.RPAREN, TokenKind.LET, TokenKind.BACKARROW], targetTokenConsumed: false)
             let invalid = InvalidExpr(Peek().Begin())
@@ -361,7 +362,7 @@ extend ParserImpl {
             let matchCase = MatchCase()
             Expect(TokenKind.CASE, "expected 'case'")
             matchCase.begin = lastToken.Begin()
-            while (!Seeing(TokenKind.END) && !Seeing(TokenKind.DOUBLE_ARROW) && !Seeing(TokenKind.WHERE)) {
+            while (!Seeing(TokenKind.END) && !SeeingDoubleArrow() && !Seeing(TokenKind.WHERE)) {
                 matchCase.patterns.add(ParsePattern())
                 if (Skip(TokenKind.BITOR)) {
                     matchCase.bitOrPosVector.add(lastToken.Begin())
@@ -373,7 +374,10 @@ extend ParserImpl {
                 matchCase.wherePos = lastToken.Begin()
                 matchCase.patternGuard = ParseExpr()
             }
-            matchCase.arrowPos = Expect(TokenKind.DOUBLE_ARROW, "expected '=>' after match case").Begin()
+            if (!SkipDoubleArrow()) {
+                diag.DiagnoseRefactor(DiagKindRefactor.EXPECTED_TOKEN, Peek().Begin(), "expected '=>' after match case")
+            }
+            matchCase.arrowPos = lastToken.Begin()
             let block = Block()
             block.begin = Peek().Begin()
             while (!Seeing(TokenKind.END) && !Seeing(TokenKind.CASE) && !Seeing(TokenKind.RCURL)) {
@@ -409,7 +413,10 @@ extend ParserImpl {
             } else {
                 matchCase.matchExpr = ParseExpr()
             }
-            matchCase.arrowPos = Expect(TokenKind.DOUBLE_ARROW, "expected '=>' after match case").Begin()
+            if (!SkipDoubleArrow()) {
+                diag.DiagnoseRefactor(DiagKindRefactor.EXPECTED_TOKEN, Peek().Begin(), "expected '=>' after match case")
+            }
+            matchCase.arrowPos = lastToken.Begin()
             let block = Block()
             block.begin = Peek().Begin()
             while (!Seeing(TokenKind.END) && !Seeing(TokenKind.CASE) && !Seeing(TokenKind.RCURL)) {
@@ -790,13 +797,13 @@ extend ParserImpl {
         let body = FuncBody()
         if (Skip(TokenKind.LCURL)) {
             let paramList = FuncParamList()
-            if (!Seeing(TokenKind.DOUBLE_ARROW) && !SeeingInvalidParamListInLambdaExpr()) {
-                while (!Seeing(TokenKind.END) && !Seeing(TokenKind.DOUBLE_ARROW) && !Seeing(TokenKind.RCURL)) {
+            if (!SeeingDoubleArrow() && !SeeingInvalidParamListInLambdaExpr()) {
+                while (!Seeing(TokenKind.END) && !SeeingDoubleArrow() && !Seeing(TokenKind.RCURL)) {
                     paramList.params.add(ParseFuncParam())
                     if (!Skip(TokenKind.COMMA)) { break }
                 }
             }
-            if (Skip(TokenKind.DOUBLE_ARROW)) {
+            if (SkipDoubleArrow()) {
                 body.paramLists.add(paramList)
             } else if (!paramList.params.isEmpty() && !isTailClosure) {
                 diag.DiagnoseRefactor(DiagKindRefactor.EXPECTED_TOKEN, Peek().Begin(), "expected '=>' in lambda expression")

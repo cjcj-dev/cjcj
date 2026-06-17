@@ -81,6 +81,7 @@ public class LitConstExpr <: Expr {
 public class RefExpr <: Expr {
     public var identifier: SrcIdentifier = SrcIdentifier()
     public let typeArguments: ArrayList<Type> = ArrayList<Type>()
+    public var isQuoteDollar: Bool = false
 
     public init(identifier: SrcIdentifier) {
         super(ASTKind.REF_EXPR)
@@ -665,12 +666,42 @@ public class SynchronizedExpr <: Expr {
 }
 
 public class QuoteExpr <: Expr {
+    public var quotePos: Position = INVALID_POSITION
+    public var leftParenPos: Position = INVALID_POSITION
+    public var rightParenPos: Position = INVALID_POSITION
     public let tokens: ArrayList<Token> = ArrayList<Token>()
+    public let exprs: ArrayList<Expr> = ArrayList<Expr>()
     public init() { super(ASTKind.QUOTE_EXPR) }
+
+    public override func Children(): ArrayList<Node> {
+        let out = ArrayList<Node>()
+        for (expr in exprs) { out.add(expr) }
+        return out
+    }
+}
+
+public class TokenPart <: Expr {
+    public let tokens: ArrayList<Token> = ArrayList<Token>()
+
+    public init() {
+        super(ASTKind.TOKEN_PART)
+    }
+
+    public init(inputTokens: ArrayList<Token>) {
+        super(ASTKind.TOKEN_PART)
+        for (token in inputTokens) {
+            tokens.add(token)
+        }
+        if (!tokens.isEmpty()) {
+            begin = tokens[0].Begin()
+            end = tokens[tokens.size - 1].End()
+        }
+    }
 }
 
 public class MacroExpandExpr <: Expr {
     public var invocation: MacroInvocation = MacroInvocation()
+    public var identifier: SrcIdentifier = SrcIdentifier()
     public init() { super(ASTKind.MACRO_EXPAND_EXPR) }
 }
 

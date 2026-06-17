@@ -5,9 +5,25 @@ import std.collection.*
 extend ParserImpl {
     public func ParseType(): Type {
         var ty = ParsePrefixType()
+        if (Seeing(TokenKind.ARROW)) {
+            if (ty.astKind == ASTKind.FUNC_TYPE) {
+                diag.DiagnoseRefactor(
+                    DiagKindRefactor.EXPECTED_TOKEN,
+                    Peek().Begin(),
+                    "unexpected extra '->' after function type")
+                ConsumeUntilAny([TokenKind.RCURL, TokenKind.NL], targetTokenConsumed: false)
+            } else {
+                diag.DiagnoseRefactor(
+                    DiagKindRefactor.EXPECTED_TOKEN,
+                    Peek().Begin(),
+                    "function type parameters must be parenthesized before '->'")
+                ty.isBroken = true
+            }
+        }
         while (Skip(TokenKind.QUEST)) {
             let opt = OptionType()
             opt.componentType = ty
+            opt.questNum = 1u64
             opt.questVector.add(lastToken.Begin())
             opt.begin = ty.begin
             opt.end = lastToken.End()
@@ -17,12 +33,28 @@ extend ParserImpl {
     }
 
     public func ParsePrefixType(): Type {
-        if (Skip(TokenKind.QUEST)) {
+        if (Seeing(TokenKind.QUEST)) {
             let opt = OptionType()
-            opt.questVector.add(lastToken.Begin())
-            opt.componentType = ParsePrefixType()
-            opt.begin = lastToken.Begin()
-            if (let Some(child) <- opt.componentType) { opt.end = child.end }
+            opt.begin = Peek().Begin()
+            let oldSkipNL = skipNL
+            skipNL = false
+            while (Skip(TokenKind.QUEST)) {
+                opt.questNum++
+                opt.questVector.add(lastToken.Begin())
+                opt.end = lastToken.End()
+                if (Seeing(TokenKind.NL)) {
+                    diag.DiagnoseRefactor(
+                        DiagKindRefactor.UNEXPECTED_TOKEN,
+                        Peek().Begin(),
+                        "newline is not allowed between '?' and type")
+                    SkipBlank(TokenKind.NL)
+                }
+            }
+            let baseType = ParseBaseType()
+            skipNL = oldSkipNL
+            while (oldSkipNL && Skip(TokenKind.NL)) {}
+            opt.componentType = baseType
+            opt.end = baseType.end
             return opt
         }
         if (Skip(TokenKind.DOLLAR)) {
@@ -68,7 +100,7 @@ extend ParserImpl {
         let ref = RefType()
         ref.identifier = ExpectIdentifierWithPos(ref)
         ref.begin = ref.identifier.Begin()
-        if (Skip(TokenKind.LT)) {
+        if (!onlyRef && Skip(TokenKind.LT)) {
             ref.leftAnglePos = lastToken.Begin()
             while (!Seeing(TokenKind.END) && !Seeing(TokenKind.GT)) {
                 ref.typeArguments.add(ParseType())
@@ -92,14 +124,17 @@ extend ParserImpl {
             q.dotPos = lastToken.Begin()
             q.field = ExpectIdentifierWithPos(q)
             if (Skip(TokenKind.LT)) {
+                q.leftAnglePos = lastToken.Begin()
                 while (!Seeing(TokenKind.END) && !Seeing(TokenKind.GT)) {
                     q.typeArguments.add(ParseType())
                     if (!Skip(TokenKind.COMMA)) { break }
                 }
-                Expect(TokenKind.GT, "expected '>' after type arguments")
+                q.rightAnglePos = Expect(TokenKind.GT, "expected '>' after type arguments").Begin()
+                q.end = q.rightAnglePos + 1
+            } else {
+                q.end = q.field.End()
             }
             q.begin = current.begin
-            q.end = q.field.End()
             current = q
         }
         return current
@@ -118,94 +153,186 @@ extend ParserImpl {
                 Peek().Begin(),
                 "expected ',' and '$' size argument in VArray type")
             ret.isBroken = true
-        } else if (!Skip(TokenKind.DOLLAR)) {
-            diag.DiagnoseRefactor(
-                DiagKindRefactor.EXPECTED_TOKEN,
-                Peek().Begin(),
-                "expected '$' before VArray size literal")
-            ret.isBroken = true
-            ret.constantType = ParseType()
         } else {
-            let constType = ConstantType()
-            constType.dollarPos = lastToken.Begin()
-            constType.begin = constType.dollarPos
-            if (Seeing(TokenKind.INTEGER_LITERAL)) {
-                constType.constantExpr = ParseLitConst()
-                if (let Some(expr) <- constType.constantExpr) { constType.end = expr.end }
-            } else {
+            if (let Some(argType) <- ret.typeArgument) {
+                argType.commaPos = lastToken.Begin()
+            }
+            let oldSkipNL = skipNL
+            skipNL = false
+            if (!Skip(TokenKind.DOLLAR)) {
+                skipNL = oldSkipNL
                 diag.DiagnoseRefactor(
                     DiagKindRefactor.EXPECTED_TOKEN,
                     Peek().Begin(),
-                    "expected integer literal after '$' in VArray type")
-                constType.constantExpr = ParseExpr()
-                constType.isBroken = true
-                if (let Some(expr) <- constType.constantExpr) { constType.end = expr.end }
+                    "expected '$' before VArray size literal")
+                ret.isBroken = true
+                ret.constantType = ParseType()
+            } else {
+                skipNL = oldSkipNL
+                let constType = ConstantType()
+                constType.dollarPos = lastToken.Begin()
+                constType.begin = constType.dollarPos
+                if (Seeing(TokenKind.INTEGER_LITERAL)) {
+                    constType.constantExpr = ParseLitConst()
+                    if (let Some(expr) <- constType.constantExpr) { constType.end = expr.end }
+                } else {
+                    diag.DiagnoseRefactor(
+                        DiagKindRefactor.EXPECTED_TOKEN,
+                        Peek().Begin(),
+                        "expected integer literal after '$' in VArray type")
+                    constType.constantExpr = ParseExpr()
+                    constType.isBroken = true
+                    if (let Some(expr) <- constType.constantExpr) { constType.end = expr.end }
+                }
+                ret.constantType = constType
             }
-            ret.constantType = constType
         }
         ret.rightAnglePos = Expect(TokenKind.GT, "expected '>' after VArray type").Begin()
         ret.end = ret.rightAnglePos + 1
         return ret
     }
 
+    private func ParseTypeParameterInTupleType(typeNameMap: HashMap<String, Position>): Type {
+        SkipBlank(TokenKind.NL)
+        var parameterName = SrcIdentifier()
+        var parameterColonPos = INVALID_POSITION
+        if (SeeingTypeParameterNameColon()) {
+            let nameToken = Peek()
+            Next()
+            parameterName = ParseIdentifierFromToken(nameToken)
+            if (typeNameMap.contains(parameterName.Val())) {
+                diag.DiagnoseRefactor(
+                    DiagKindRefactor.PARSE_ERROR,
+                    parameterName.Begin(),
+                    "duplicate type parameter name '${parameterName.Val()}'")
+            } else {
+                typeNameMap.add(parameterName.Val(), parameterName.Begin())
+            }
+            SkipBlank(TokenKind.NL)
+            parameterColonPos = Expect(TokenKind.COLON, "expected ':' after type parameter name").Begin()
+        }
+        let parsedType = ParseType()
+        parsedType.typeParameterName = parameterName.Val()
+        parsedType.typeParameterNameIsRawId = parameterName.isRaw
+        parsedType.colonPos = parameterColonPos
+        parsedType.typePos = parsedType.begin
+        if (!parameterName.Empty()) {
+            parsedType.begin = parameterName.Begin()
+        }
+        return parsedType
+    }
+
+    private func SeeingTypeParameterNameColon(): Bool {
+        if (!SeeingIdentifierLike()) {
+            return false
+        }
+        let ahead = lexer.LookAheadSkipNL(1)
+        return !ahead.isEmpty() && ahead[0].kind == TokenKind.COLON
+    }
+
+    private func HasNamedTypeParameters(types: ArrayList<Type>): Bool {
+        for (typeNode in types) {
+            if (!typeNode.typeParameterName.isEmpty()) {
+                return true
+            }
+        }
+        return false
+    }
+
+    private func HasUnnamedTypeParameters(types: ArrayList<Type>): Bool {
+        for (typeNode in types) {
+            if (typeNode.typeParameterName.isEmpty()) {
+                return true
+            }
+        }
+        return false
+    }
+
+    private func MakeTupleType(types: ArrayList<Type>, leftParenPos: Position, rightParenPos: Position): TupleType {
+        let tuple = TupleType()
+        tuple.leftParenPos = leftParenPos
+        tuple.rightParenPos = rightParenPos
+        tuple.begin = leftParenPos
+        tuple.end = rightParenPos + 1
+        for (typeNode in types) {
+            tuple.fieldTypes.add(typeNode)
+            tuple.commaPosVector.add(typeNode.commaPos)
+        }
+        return tuple
+    }
+
+    private func MakeFuncType(
+        types: ArrayList<Type>,
+        leftParenPos: Position,
+        rightParenPos: Position,
+        arrowPos: Position,
+        parseReturnType: Bool
+    ): FuncType {
+        let funcTy = FuncType()
+        funcTy.leftParenPos = leftParenPos
+        funcTy.rightParenPos = rightParenPos
+        funcTy.arrowPos = arrowPos
+        funcTy.begin = leftParenPos
+        for (typeNode in types) {
+            funcTy.paramTypes.add(typeNode)
+        }
+        if (parseReturnType) {
+            funcTy.retType = ParseType()
+            if (let Some(ret) <- funcTy.retType) {
+                funcTy.end = ret.end
+            }
+        } else {
+            funcTy.end = rightParenPos + 1
+            funcTy.isBroken = true
+        }
+        return funcTy
+    }
+
     public func ParseTypeWithParen(): Type {
         let left = Expect(TokenKind.LPAREN, "expected '('")
-        if (Skip(TokenKind.RPAREN)) {
-            let tuple = TupleType()
-            tuple.leftParenPos = left.Begin()
-            tuple.rightParenPos = lastToken.Begin()
-            tuple.begin = left.Begin()
-            tuple.end = lastToken.End()
-            return tuple
-        }
-        let first = ParseType()
-        if (Skip(TokenKind.COMMA)) {
-            let tuple = TupleType()
-            tuple.leftParenPos = left.Begin()
-            tuple.fieldTypes.add(first)
-            tuple.commaPosVector.add(lastToken.Begin())
-            while (!Seeing(TokenKind.END) && !Seeing(TokenKind.RPAREN)) {
-                tuple.fieldTypes.add(ParseType())
-                if (Skip(TokenKind.COMMA)) {
-                    tuple.commaPosVector.add(lastToken.Begin())
-                } else {
-                    break
-                }
+        let types = ArrayList<Type>()
+        let typeNameMap = HashMap<String, Position>()
+        while (!Seeing(TokenKind.END) && !Seeing(TokenKind.RPAREN)) {
+            types.add(ParseTypeParameterInTupleType(typeNameMap))
+            if (Skip(TokenKind.COMMA)) {
+                types[types.size - 1].commaPos = lastToken.Begin()
+            } else {
+                break
             }
-            tuple.rightParenPos = Expect(TokenKind.RPAREN, "expected ')' after tuple type").Begin()
-            tuple.begin = left.Begin()
-            tuple.end = tuple.rightParenPos + 1
-            if (Skip(TokenKind.ARROW)) {
-                let funcTy = FuncType()
-                funcTy.leftParenPos = tuple.leftParenPos
-                funcTy.rightParenPos = tuple.rightParenPos
-                for (field in tuple.fieldTypes) { funcTy.paramTypes.add(field) }
-                funcTy.arrowPos = lastToken.Begin()
-                funcTy.retType = ParseType()
-                funcTy.begin = tuple.begin
-                if (let Some(ret) <- funcTy.retType) { funcTy.end = ret.end }
-                return funcTy
-            }
-            return tuple
         }
         let right = Expect(TokenKind.RPAREN, "expected ')' after type").Begin()
-        if (Skip(TokenKind.ARROW)) {
-            let funcTy = FuncType()
-            funcTy.leftParenPos = left.Begin()
-            funcTy.rightParenPos = right
-            funcTy.paramTypes.add(first)
-            funcTy.arrowPos = lastToken.Begin()
-            funcTy.retType = ParseType()
-            funcTy.begin = left.Begin()
-            if (let Some(ret) <- funcTy.retType) { funcTy.end = ret.end }
-            return funcTy
+        if (HasNamedTypeParameters(types) && HasUnnamedTypeParameters(types)) {
+            diag.DiagnoseRefactor(
+                DiagKindRefactor.PARSE_ERROR,
+                left.Begin(),
+                "all function or tuple type parameters must either be named or unnamed")
         }
-        let paren = ParenType()
-        paren.leftParenPos = left.Begin()
-        paren.innerType = first
-        paren.rightParenPos = right
-        paren.begin = left.Begin()
-        paren.end = right + 1
-        return paren
+        if (Skip(TokenKind.ARROW)) {
+            return MakeFuncType(types, left.Begin(), right, lastToken.Begin(), true)
+        }
+        if (types.size == 1) {
+            let first = types[0]
+            if (!first.typeParameterName.isEmpty()) {
+                diag.DiagnoseRefactor(
+                    DiagKindRefactor.PARSE_ERROR,
+                    first.begin,
+                    "only tuple and function types can use type parameter names")
+            }
+            let paren = ParenType()
+            paren.leftParenPos = left.Begin()
+            paren.innerType = first
+            paren.rightParenPos = right
+            paren.begin = left.Begin()
+            paren.end = right + 1
+            return paren
+        }
+        if (types.size >= 2) {
+            return MakeTupleType(types, left.Begin(), right)
+        }
+        diag.DiagnoseRefactor(
+            DiagKindRefactor.EXPECTED_TOKEN,
+            right,
+            "expected '->' in empty function type")
+        return MakeFuncType(types, left.Begin(), right, right, false)
     }
 }
