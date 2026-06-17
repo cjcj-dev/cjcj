@@ -1,9 +1,17 @@
 # Sema ffi-cjmp-test deepening status
 
-Date: 2026-06-17
+Date: 2026-06-18
 Build: `cjpm build` passes.
 Scoped selfhost TODO comments: 0 remaining in the requested files.
 Whole-package selfhost TODO grep: 4 existing markers remain outside the allowed ffi-cjmp-test edit area.
+
+## 2026-06-18 CJMP nominal merge pass
+
+- Added the C++ pre-typecheck path for platform compilation that merges common nominal declarations into their specific counterparts, excluding extensions as in the C++ split.
+- Ported the common/specific member merge behavior for instance variables: common members are reparented to the specific declaration, specific member variables replace matched common variables, member-parameter duplicates are skipped, unmatched specific variables are diagnosed, and common variables without defaults still require a specific implementation.
+- Ported dependency retargeting from common declarations to their specific implementations after merge, and marked the common nominal declaration as `doNotExport` with `specificImplementation` set.
+- Kept the out-of-scope extension merge/symbol-table rebuild path unimplemented because the C++ implementation depends on `CompilerInstance`, `ScopeManager`, `Collector`, and declaration-map updates outside the allowed file set.
+- Verified with `cjpm build`; scoped files still have no `TODO(selfhost:Sema)` markers.
 
 ## 2026-06-17 mock accessor parity pass
 
@@ -57,10 +65,10 @@ Whole-package selfhost TODO grep: 4 existing markers remain outside the allowed 
 ## Remaining fidelity gaps
 
 - C FFI still lacks backend-option-sensitive unsafe-call gating and the full platform ABI diagnostic matrix from the C++ checker.
-- CJMP common member symbol-table rewriting, some extension declaration-map updates, and several merged-member ownership details remain partial.
+- CJMP nominal common-to-specific member merging is now present for non-extension declarations, but extension declaration-map updates and symbol-table rebuilding remain partial because their C++ dependencies sit outside this scoped edit area.
 - Plugin checking now has the core reference-check helpers, external-weak marking hooks, scoped traversal, macro-order checks, IfAvailable branch walking, and override-hide comparison when a `TypeManager` is supplied, but still lacks full option/import-manager parsing, dependency annotation clearing, and call-site wiring from the complete C++ checker.
 - Mock/test support now has stronger semantic classification, naming, lookup, accessor metadata, package usage detection, and preparation plumbing, but generated wrapper/body synthesis and full injection behavior are still incomplete.
 - NativeFFI utilities now cover more reference, generic, type-node, Java-array, and naming helpers, but larger AST synthesis/desugaring helpers, mangler-driven method naming, import-manager core declaration helpers, abort-on-invalid array classification, and full Java/ObjC interop manager behavior remain incomplete.
 - LSP base-name, scope-name, and relative-position helpers are present, but the C++ type synthesizer half remains outside the current self-host surface.
 
-Honest real-behavior coverage for this scoped pass is estimated at 55% versus the corresponding C++ reference surface.
+Honest real-behavior coverage for this scoped pass is estimated at 57% versus the corresponding C++ reference surface.

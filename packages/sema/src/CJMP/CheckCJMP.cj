@@ -149,6 +149,126 @@ private func MatchNominativeDecl(checker: MPTypeCheckerImpl, commonDecl: Decl, s
     return true
 }
 
+private func IsInstanceVar(decl: Decl): Bool {
+    return decl.astKind == ASTKind.VAR_DECL && !decl.IsStaticOrGlobal()
+}
+
+private func UpdateVarDependencies(decl: Decl): Unit {
+    for (idx in 0..decl.dependencies.size) {
+        if (let Some(specificImpl) <- decl.dependencies[idx].specificImplementation) {
+            decl.dependencies[idx] = specificImpl
+        }
+    }
+}
+
+private func CheckCommonInstanceVars(checker: MPTypeCheckerImpl, specificDecl: Decl): Unit {
+    for (member in specificDecl.GetMemberDeclPtrs()) {
+        if (IsInstanceVar(member) && member.TestAttr(Attribute.COMMON) &&
+            !member.TestAttr(Attribute.COMMON_WITH_DEFAULT) && (let None <- member.specificImplementation)) {
+            DiagNotMatchedSpecificDecl(checker, member)
+        }
+    }
+}
+
+private func ReplaceDecls(target: ArrayList<Decl>, source: ArrayList<Decl>): Unit {
+    target.clear()
+    for (decl in source) {
+        target.add(decl)
+    }
+}
+
+private func MergeCommonIntoSpecific(checker: MPTypeCheckerImpl, commonDecl: Decl, specificDecl: Decl): Unit {
+    if (!MatchNominativeDecl(checker, commonDecl, specificDecl)) {
+        return
+    }
+
+    let commonMembers = commonDecl.GetMemberDecls()
+    let specificMembers = specificDecl.GetMemberDecls()
+    let mergedSpecific = ArrayList<Decl>()
+    let remainingCommon = ArrayList<Decl>()
+    let commonVariablesIds = HashMap<String, Int64>()
+    let memberParamIds = HashMap<String, Int64>()
+
+    for (commonMember in commonMembers) {
+        commonMember.outerDecl = specificDecl
+        commonMember.doNotExport = false
+        let id = mergedSpecific.size
+        if (IsInstanceVar(commonMember)) {
+            if (let Some(varDecl) <- (commonMember as VarDecl)) {
+                if (varDecl.TestAttr(Attribute.COMMON)) {
+                    commonVariablesIds[varDecl.identifier.Val()] = id
+                } else if (varDecl.isMemberParam) {
+                    memberParamIds[varDecl.identifier.Val()] = id
+                }
+            }
+        }
+        mergedSpecific.add(commonMember)
+    }
+
+    for (specificMember in specificMembers) {
+        var consumed = false
+        if (IsInstanceVar(specificMember)) {
+            if (let Some(varDecl) <- (specificMember as VarDecl)) {
+                let id = varDecl.identifier.Val()
+                if (specificMember.TestAttr(Attribute.SPECIFIC)) {
+                    if (let Some(commonIdx) <- commonVariablesIds.get(id)) {
+                        let commonMember = mergedSpecific[commonIdx]
+                        commonMember.specificImplementation = specificMember
+                        mergedSpecific[commonIdx] = specificMember
+                        remainingCommon.add(commonMember)
+                        consumed = true
+                    } else {
+                        DiagNotMatchedCommonDecl(checker, varDecl)
+                    }
+                } else if (varDecl.isMemberParam && memberParamIds.contains(id)) {
+                    consumed = true
+                }
+            }
+        }
+        if (!consumed) {
+            mergedSpecific.add(specificMember)
+        }
+    }
+
+    ReplaceDecls(specificMembers, mergedSpecific)
+    ReplaceDecls(commonMembers, remainingCommon)
+    for (member in specificMembers) {
+        UpdateVarDependencies(member)
+    }
+    CheckCommonInstanceVars(checker, specificDecl)
+    commonDecl.doNotExport = true
+    commonDecl.specificImplementation = specificDecl
+}
+
+private func MergeCJMPNominalsExceptExtension(checker: MPTypeCheckerImpl, pkg: Package): Unit {
+    let matchedDecls = HashMap<String, Decl>()
+    let walker = Walker(pkg, visitPre: { node: Node =>
+        if (!node.IsDecl()) {
+            return VisitAction.WALK_CHILDREN
+        }
+        if (let Some(decl) <- (node as Decl)) {
+            if (decl.IsNominalDecl() && decl.astKind != ASTKind.EXTEND_DECL) {
+                let id = decl.identifier.Val()
+                if (let Some(matchedDecl) <- matchedDecls.get(id)) {
+                    let hasGenericMismatch = (decl.generic.isSome() && matchedDecl.generic.isNone()) ||
+                        (decl.generic.isNone() && matchedDecl.generic.isSome())
+                    if (!hasGenericMismatch) {
+                        if (decl.TestAttr(Attribute.SPECIFIC) && matchedDecl.TestAttr(Attribute.COMMON)) {
+                            MergeCommonIntoSpecific(checker, matchedDecl, decl)
+                        } else if (decl.TestAttr(Attribute.COMMON) && matchedDecl.TestAttr(Attribute.SPECIFIC)) {
+                            MergeCommonIntoSpecific(checker, decl, matchedDecl)
+                        }
+                    }
+                } else if (decl.TestAnyAttr(Attribute.COMMON, Attribute.SPECIFIC)) {
+                    matchedDecls[id] = decl
+                }
+            }
+        }
+        return VisitAction.SKIP_CHILDREN
+    })
+    let _ = walker.Walk()
+}
+
 private func CollectDecl(decl: Decl, commonDecls: ArrayList<Decl>, specificDecls: ArrayList<Decl>): Unit {
     if (decl.TestAttr(Attribute.COMMON)) {
         commonDecls.add(decl)
@@ -287,6 +407,13 @@ private func AppendSyms(target: ArrayList<Symbol>, source: ArrayList<Symbol>): U
 }
 
 extend MPTypeCheckerImpl {
+    public func PrepareTypeCheck4CJMP(pkg: Package): Unit {
+        if (!compilePlatform) {
+            return
+        }
+        MergeCJMPNominalsExceptExtension(this, pkg)
+    }
+
     public func PreCheck4CJMP(pkg: Package): Unit {
         if (!compileCommon) {
             return
