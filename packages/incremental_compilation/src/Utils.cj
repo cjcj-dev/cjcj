@@ -326,7 +326,7 @@ public func ComputeDeclSrcUseHash(decl: IncrDecl): UInt64 {
     hash = CombineHash(hash, StableHashBool(decl.TestAttr(IncrAttribute.PRIVATE)))
     hash = CombineHash(hash, StableHashBool(decl.TestAttr(IncrAttribute.IMPORTED)))
     hash = CombineHash(hash, StableHashBool(decl.TestAttr(IncrAttribute.STATIC)))
-    hash = CombineHash(hash, StableHashBool(decl.TestAttr(IncrAttribute.CONST)))
+    hash = CombineHash(hash, StableHashBool(decl.IsConst()))
     hash = CombineHash(hash, StableHash(decl.fullPackageName))
     return hash
 }

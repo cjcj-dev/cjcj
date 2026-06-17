@@ -77,8 +77,12 @@ Implemented:
   C++ `FlattenVarWithPatternDecl` paths.
 - Added the first real sibling-package dependency for this module: `cangjie_compiler::ast` is now imported by the
   incremental package so cache declaration-kind tags use real `ASTKindIndex` values and adapter attributes that
-  correspond to AST attributes use real `AttributeIndex` values. The adapter-only `const` flag stays separate because
-  C++ and self-host AST both model constness as `Decl::IsConst()`/`Decl.isConst`, not as an attribute.
+  correspond to AST attributes use real `AttributeIndex` values.
+- Removed the adapter-only `IncrAttribute.CONST` pseudo-attribute. Constness now flows through
+  `IncrDecl.isConstValue`/`IncrDecl.IsConst()`, and fallback source-use hashing reads that path, matching the C++
+  `Decl::IsConst()` model and the self-host AST `isConst` fields instead of inventing an AST attribute.
+- Bumped the deterministic cache wire version to `CJ-INCR-CACHE-3` so caches containing the previous fallback
+  const-attribute hash semantics are rejected rather than mixed with the real constness path.
 - Bumped the deterministic cache wire version to `CJ-INCR-CACHE-2` so caches written with the previous package-local
   kind/attribute ordinals are rejected instead of being decoded with the real AST ordinal layout.
 - Removed the local `IncrGlobalOptions` compatibility class and changed `ASTDiffArgs`/`IncrementalScopeAnalysisArgs`

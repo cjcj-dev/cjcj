@@ -150,7 +150,6 @@ extend IncrDeclKind <: Hashable {
 public enum IncrAttribute {
     | ABSTRACT
     | CONSTRUCTOR
-    | CONST
     | ENUM_CONSTRUCTOR
     | FROM_COMMON_PART
     | GENERIC
@@ -168,7 +167,6 @@ public func IncrAttributeIndex(attr: IncrAttribute): Int64 {
     return match (attr) {
         case IncrAttribute.ABSTRACT => RealAttributeIndex(RealAttribute.ABSTRACT)
         case IncrAttribute.CONSTRUCTOR => RealAttributeIndex(RealAttribute.CONSTRUCTOR)
-        case IncrAttribute.CONST => RealAttributeIndex(RealAttribute.AST_ATTR_END) + 1
         case IncrAttribute.ENUM_CONSTRUCTOR => RealAttributeIndex(RealAttribute.ENUM_CONSTRUCTOR)
         case IncrAttribute.FROM_COMMON_PART => RealAttributeIndex(RealAttribute.FROM_COMMON_PART)
         case IncrAttribute.GENERIC => RealAttributeIndex(RealAttribute.GENERIC)
@@ -187,7 +185,6 @@ public func IncrAttributeName(attr: IncrAttribute): String {
     return match (attr) {
         case IncrAttribute.ABSTRACT => "ABSTRACT"
         case IncrAttribute.CONSTRUCTOR => "CONSTRUCTOR"
-        case IncrAttribute.CONST => "CONST"
         case IncrAttribute.ENUM_CONSTRUCTOR => "ENUM_CONSTRUCTOR"
         case IncrAttribute.FROM_COMMON_PART => "FROM_COMMON_PART"
         case IncrAttribute.GENERIC => "GENERIC"
@@ -206,7 +203,6 @@ public func IncrAttributeFromName(name: String): Option<IncrAttribute> {
     return match (name) {
         case "ABSTRACT" => Some(IncrAttribute.ABSTRACT)
         case "CONSTRUCTOR" => Some(IncrAttribute.CONSTRUCTOR)
-        case "CONST" => Some(IncrAttribute.CONST)
         case "ENUM_CONSTRUCTOR" => Some(IncrAttribute.ENUM_CONSTRUCTOR)
         case "FROM_COMMON_PART" => Some(IncrAttribute.FROM_COMMON_PART)
         case "GENERIC" => Some(IncrAttribute.GENERIC)
@@ -454,7 +450,7 @@ public class IncrDecl <: Hashable & Equatable<IncrDecl> {
     }
 
     public func IsConst(): Bool {
-        return isConstValue || TestAttr(IncrAttribute.CONST)
+        return isConstValue
     }
 
     public func IsStaticVar(): Bool {
