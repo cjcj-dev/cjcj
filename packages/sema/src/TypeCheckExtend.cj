@@ -14,6 +14,17 @@ private func TypeCheckExtendRange(node: Node): BasicRange {
     return MakeRange(node.begin, rangeEnd)
 }
 
+private func TypeCheckExtendIdentifierRange(decl: Decl): BasicRange {
+    let beginPos = decl.identifier.Begin()
+    if (!beginPos.IsZero()) {
+        let endPos = decl.identifier.End()
+        if (!endPos.IsZero()) {
+            return MakeRange(beginPos, endPos)
+        }
+    }
+    return TypeCheckExtendRange(decl)
+}
+
 private func TypeCheckExtendAccessRank(level: AccessLevel): Int64 {
     return match (level) {
         case AccessLevel.PRIVATE => 0
@@ -351,6 +362,113 @@ private func TypeCheckExtendContainsExtend(values: ArrayList<ExtendDecl>, candid
     return false
 }
 
+private func TypeCheckExtendAddUniqueExtends(target: ArrayList<ExtendDecl>, source: ArrayList<ExtendDecl>): Unit {
+    for (extendDecl in source) {
+        if (!TypeCheckExtendContainsExtend(target, extendDecl)) {
+            target.add(extendDecl)
+        }
+    }
+}
+
+private func TypeCheckExtendCollectRelatedExtends(tm: TypeManager, decl: InheritableDecl): ArrayList<ExtendDecl> {
+    let out = ArrayList<ExtendDecl>()
+    TypeCheckExtendAddUniqueExtends(out, tm.GetDeclExtends(decl))
+    if (let Some(classDecl) <- (decl as ClassDecl)) {
+        var current = classDecl.GetSuperClassDecl()
+        while (let Some(superClass) <- current) {
+            TypeCheckExtendAddUniqueExtends(out, tm.GetDeclExtends(superClass))
+            current = superClass.GetSuperClassDecl()
+        }
+    }
+    return out
+}
+
+public func TypeCheckExtendCheckOrphanRule(
+    diag: BasicDiagnosticEngine,
+    tm: TypeManager,
+    ctx: ASTContext,
+    extendDecl: ExtendDecl
+): Bool {
+    if (let Some(pkg) <- ctx.curPackage) {
+        if (pkg.TestAttr(Attribute.IMPORTED)) {
+            return true
+        }
+    }
+    if (let None <- extendDecl.extendedType) {
+        return true
+    }
+    let extendedType = extendDecl.extendedType.getOrThrow()
+    if (!Ty.IsTyCorrect(extendedType.GetTy())) {
+        return true
+    }
+    let extendedTy = extendedType.GetTy().getOrThrow()
+    let extendedTypeTarget = Ty.GetInheritableDeclPtrOfTy(Some(extendedTy))
+    let otherPackageExtendInterfaceTy = TySet()
+    if (let Some(target) <- extendedTypeTarget) {
+        if (let Some(targetTy) <- target.GetTy()) {
+            otherPackageExtendInterfaceTy.AddAll(tm.GetAllSuperTys(targetTy, withExtended: false))
+        }
+    }
+    let extends = if (let Some(target) <- extendedTypeTarget) {
+        TypeCheckExtendCollectRelatedExtends(tm, target)
+    } else {
+        tm.GetAllExtendsByTy(extendedTy)
+    }
+    for (relatedExtend in extends) {
+        if (relatedExtend.fullPackageName == ctx.fullPackageName) {
+            continue
+        }
+        var typeMapping = TypeSubst()
+        if (let Some(relatedTy) <- relatedExtend.GetTy()) {
+            typeMapping = InverseMapping(GenerateTypeMapping(extendDecl, relatedTy.typeArgs))
+        }
+        for (inheritedType in relatedExtend.inheritedTypes) {
+            if (let Some(inheritedTy) <- inheritedType.GetTy()) {
+                let allSuperTys = tm.GetAllSuperTys(inheritedTy)
+                for (superTy in allSuperTys.values) {
+                    otherPackageExtendInterfaceTy.Add(tm.GetInstantiatedTy(superTy, typeMapping))
+                }
+            }
+        }
+    }
+    var isImportedExtendedType = extendedTy.IsBuiltin()
+    if (let Some(target) <- extendedTypeTarget) {
+        if (target.fullPackageName != ctx.fullPackageName) {
+            isImportedExtendedType = true
+        }
+    }
+    let externalDecls = TySet()
+    for (inheritedType in extendDecl.inheritedTypes) {
+        if (let Some(inheritedTy) <- inheritedType.GetTy()) {
+            let allSuperTys = tm.GetAllSuperTys(inheritedTy)
+            for (superTy in allSuperTys.values) {
+                if (let Some(decl) <- Ty.GetDeclPtrOfTy(Some(superTy))) {
+                    if (decl.fullPackageName != ctx.fullPackageName &&
+                        !otherPackageExtendInterfaceTy.Contains(superTy)) {
+                        externalDecls.Add(superTy)
+                    }
+                }
+            }
+        }
+    }
+    if (isImportedExtendedType && !externalDecls.values.isEmpty()) {
+        let extendedTypeName = if (let Some(target) <- extendedTypeTarget) {
+            target.identifier.Val()
+        } else {
+            extendedTy.String()
+        }
+        let extendedKind = if (let Some(_) <- extendedTypeTarget) { "imported" } else { "primitive" }
+        let builder = diag.DiagnoseRefactor(
+            BasicDiagKindRefactor.sema_type_cannot_extend_imported_interface,
+            TypeCheckExtendRange(extendedType),
+            arguments: [extendedKind, extendedTypeName])
+        builder.AddNote("used external interface: " + Ty.GetTypesToStr(externalDecls.values, " "))
+        builder.Emit()
+        return false
+    }
+    return true
+}
+
 public func TypeCheckExtendBuildMap(
     diag: BasicDiagnosticEngine,
     tm: TypeManager,
@@ -517,6 +635,9 @@ public func TypeCheckExtendCheckDecl(
     }
     extendDecl.EnableAttr(Attribute.IS_CHECK_VISITED)
     var valid = TypeCheckExtendPreCheckExtend(diag, tm, ctx, extendDecl)
+    if (!TypeCheckExtendCheckOrphanRule(diag, tm, ctx, extendDecl)) {
+        valid = false
+    }
     var extendedDecl: Option<Decl> = None
     if (let Some(extendedType) <- extendDecl.extendedType) {
         extendedDecl = extendedType.GetTarget()
@@ -540,16 +661,21 @@ public func TypeCheckExtendCheckDecl(
                 if (!extendDecl.GetTy().getOrThrow().IsEnum() && TypeCheckExtendIsIndexAssignmentOperator(funcDecl)) {
                     let builder = diag.DiagnoseRefactor(
                         BasicDiagKindRefactor.sema_immutable_type_extend_assignment_index_operator,
-                        TypeCheckExtendRange(funcDecl))
+                        TypeCheckExtendIdentifierRange(funcDecl))
                     builder.Emit()
                     valid = false
                 }
             }
             if (let Some(propDecl) <- (member as PropDecl)) {
                 if (propDecl.isVar) {
+                    let range = if (let Some(modifier) <- FindModifier(propDecl, TokenKind.MUT)) {
+                        MakeRange(modifier.begin, modifier.end)
+                    } else {
+                        TypeCheckExtendIdentifierRange(propDecl)
+                    }
                     let builder = diag.DiagnoseRefactor(
                         BasicDiagKindRefactor.sema_immutable_type_illegal_property,
-                        TypeCheckExtendRange(propDecl))
+                        range)
                     builder.Emit()
                     valid = false
                 }

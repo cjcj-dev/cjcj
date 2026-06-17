@@ -83,6 +83,12 @@ Reference sources inspected from `/root/cj_build/cangjie_compiler/src/Sema`:
   interface implementations, and non-extendable `std.core.Any`/`std.core.CType`
   interfaces, and immutable type extensions now reject assignment index
   operators as well as mutable properties.
+- This pass deepened `TypeCheckExtend.cj` further: extend declaration checking
+  now mirrors the C++ orphan-rule validation for imported/primitive extended
+  types, collecting related extends from inherited class chains and inherited
+  interface supers before reporting external-interface violations; immutable
+  extension diagnostics now point at the function identifier or `mut` modifier
+  like the C++ diagnostics.
 - Deepened annotation checking toward `TypeCheckAnnotation.cpp` by preserving
   the C++ `NO_REFLECT_INFO` marker on custom annotation call expressions that
   are not compile-time visible.
@@ -110,12 +116,11 @@ are from pre-existing files outside this pass scope.
   declaration/type/reference traversal pipeline.
 - Full C++ parity still requires complete overload resolution, lookup/import
   recommendation, exact access-control context, exact generic specialization
-  duplicate checks, orphan-rule diagnostics, custom annotation expression
-  synthesis/type checking, annotation target-array type checking, pipeline
-  wiring for type-alias and class-like declaration checks, reference-legality
-  walker wiring, full deprecated-usage traversal/override checks, and all
-  TypeChecker-owned state once those sibling surfaces are available in the
-  allowed owner files.
+  duplicate checks, custom annotation expression synthesis/type checking,
+  annotation target-array type checking, pipeline wiring for type-alias and
+  class-like declaration checks, reference-legality walker wiring, full
+  deprecated-usage traversal/override checks, and all TypeChecker-owned state
+  once those sibling surfaces are available in the allowed owner files.
 - Diagnostics are mapped to the available self-hosted diagnostic tables; a few
   C++ diagnostic helpers are represented by the closest currently available
   refactored/legacy diagnostic kind.
