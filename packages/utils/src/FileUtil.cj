@@ -134,7 +134,70 @@ foreign {
 private let FILE_ATTRIBUTE_HIDDEN: UInt32 = 0x2u32
 
 @When[os == "Windows"]
+private let FILE_ATTRIBUTE_READONLY: UInt32 = 0x1u32
+
+@When[os == "Windows"]
+private let FILE_ATTRIBUTE_SYSTEM: UInt32 = 0x4u32
+
+@When[os == "Windows"]
+private let FILE_ATTRIBUTE_DEVICE: UInt32 = 0x40u32
+
+@When[os == "Windows"]
+private let FILE_ATTRIBUTE_VIRTUAL: UInt32 = 0x10000u32
+
+@When[os == "Windows"]
 private let INVALID_FILE_ATTRIBUTES: UInt32 = 0xffffffffu32
+
+@When[os == "Windows"]
+private func hasRejectedWindowsRemoveAttribute(attributes: UInt32): Bool {
+    return (attributes & FILE_ATTRIBUTE_READONLY) == 1u32 ||
+        (attributes & FILE_ATTRIBUTE_SYSTEM) == 1u32 ||
+        (attributes & FILE_ATTRIBUTE_DEVICE) == 1u32 ||
+        (attributes & FILE_ATTRIBUTE_VIRTUAL) == 1u32
+}
+
+@When[os == "Windows"]
+private func canRemovePath(path: String): Bool {
+    let attributes = fileAttributes(path)
+    return attributes != INVALID_FILE_ATTRIBUTES && !hasRejectedWindowsRemoveAttribute(attributes)
+}
+
+@When[os != "Windows"]
+private func canRemovePath(path: String): Bool {
+    try {
+        let info = FileInfo(path)
+        return info.isRegular() || info.isDirectory() || info.isSymbolicLink()
+    } catch (e: Exception) {
+        return false
+    }
+}
+
+@When[os == "Windows"]
+private func fileAttributes(path: String): UInt32 {
+    var attributes = INVALID_FILE_ATTRIBUTES
+    try (cPath = unsafe { LibC.mallocCString(path) }.asResource()) {
+        if (!cPath.value.isNull()) {
+            unsafe {
+                attributes = GetFileAttributesA(cPath.value)
+            }
+        }
+    } catch (e: Exception) {
+        attributes = INVALID_FILE_ATTRIBUTES
+    }
+    return attributes
+}
+
+@When[os == "Windows"]
+private func canWritePath(path: String): Bool {
+    let attributes = fileAttributes(path)
+    return attributes != INVALID_FILE_ATTRIBUTES &&
+        (attributes & FILE_ATTRIBUTE_READONLY) != FILE_ATTRIBUTE_READONLY
+}
+
+@When[os != "Windows"]
+private func canWritePath(path: String): Bool {
+    return accessPath(path, FileMode.FM_WRITE) == 0
+}
 
 @When[os == "Windows"]
 private func isPathSlashByte(byte: UInt8): Bool {
@@ -534,6 +597,9 @@ public class FileUtil {
     }
 
     public static func Remove(itemPath: String): Bool {
+        if (!canRemovePath(itemPath)) {
+            return false
+        }
         try {
             remove(itemPath)
             return true
@@ -1012,7 +1078,7 @@ public class FileUtil {
     }
 
     public static func CanWrite(path: String): Bool {
-        return Access(path, FileMode.FM_WRITE)
+        return canWritePath(path)
     }
 
     public static func RemovePathPrefix(absolutePath: String, removedPathPrefix: Array<String>): String {

@@ -42,6 +42,7 @@ Implemented:
 - Matched `FloatFormat.IsUnderFlowFloat` to the C++ stream-extraction behavior by parsing directly through native `strtod` and intentionally ignoring `ERANGE`, so representational underflow such as `1e-400` is classified as underflow instead of being rejected by `StdUtils.Stod`.
 - Aligned `StringifyEnvironmentPointer` duplicate handling with C++ `unordered_map::emplace`: the first normalized environment-variable key now wins instead of relying on `HashMap.add` duplicate semantics.
 - Aligned the Windows `FileUtil.IsAbsolutePathAboveLengthLimit` path with the C++ `GetFullPathNameA`/`ERROR_FILENAME_EXCED_RANGE` check instead of only comparing the raw input length.
+- Tightened `FileUtil.Remove` and `CanWrite` against the C++ platform logic: removal now rejects paths that are not regular files, directories, or symbolic links before delegating to `remove`, and Windows writeability is based on file attributes rather than `_access`.
 
 Known fidelity caveats:
 
