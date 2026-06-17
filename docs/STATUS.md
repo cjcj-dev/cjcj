@@ -25,7 +25,7 @@ returns lower through `CreateLiteralReturnBody`).
 The following programs compile with the self-host `cjc`
 (`./target/release/bin/cangjie_compiler::cjc`) and run with the verified behavior
 shown. Each was re-verified by real compile-and-run on 2026-06-18 (latest: the
-payload-less `enum` milestone) after merging
+payload-carrying `enum` milestone) after merging
 `opus2/int-arith-return`, `opus2/println-int`, `opus3/real-expr`,
 `opus4/control-flow` (var/assign, relational ops, `if`/`while` via real CHIR
 blocks), `opus5/func-calls` (user-defined function calls + recursion via
@@ -44,7 +44,10 @@ selector: literal patterns, wildcard `_`, and a variable-binding pattern, as
 both a statement and a value-producing expression), and `opus15/enums` (CUT 1:
 payload-less `enum` declarations -- each variant gets a distinct `Int64` tag;
 constructing a variant lowers to its tag constant; `match` over an enum value with
-constructor patterns lowers to tag-equality tests) into `main`:
+constructor patterns lowers to tag-equality tests), and `opus16/enum-payload`
+(CUT 1+2: single-`Int64`-payload `enum` variants -- constructing `Some(42)` packs
+tag+payload into one `Int64`, and a destructuring `case Some(n) =>` match decodes
+the tag and binds the payload) into `main`:
 
 | Source | Verified behavior |
 | --- | --- |
@@ -82,6 +85,8 @@ constructor patterns lowers to tag-equality tests) into `main`:
 | `main(): Int64 { let x=2; match (x) { case 1 => return 10; case 2 => return 20; case _ => return 0 } }` | exits with code 20 -- `match` arms that `return` directly (CUT 2) |
 | `main(): Int64 { let x=7; match (x) { case 0 => return -1; case n => return n + 1 } }` | exits with code 8 -- a variable-binding pattern (`case n =>` binds the selector) (CUT 3) |
 | `enum Color { \| Red \| Green \| Blue }` ⏎ `main(): Int64 { let c=Green; match(c){ case Red=>return 0; case Green=>return 1; case Blue=>return 2 } }` | exits with code 1 -- a payload-less `enum` (each variant a distinct `Int64` tag); `let c=Green` binds the tag, and `match` over the enum value lowers to tag-equality tests (enum CUT 1) |
+| `enum Opt { \| Some(Int64) \| None }` ⏎ `func unwrap(o: Opt, d: Int64): Int64 { match(o){ case Some(n)=>return n; case None=>return d } }` ⏎ `main(): Int64 { return unwrap(Some(42),0) }` | exits with code 42 (and `unwrap(None,7)` -> 7) -- a single-`Int64`-payload `enum`: `Some(42)` packs as `(42<<8)\|tag`, and `case Some(n) =>` decodes the tag (`sel & 0xFF`) and binds `n = sel >> 8` (enum-payload CUT 1+2) |
+| `enum Expr { \| Lit(Int64) \| Neg(Int64) }` ⏎ `func eval(e: Expr): Int64 { match(e){ case Lit(n)=>return n; case Neg(n)=>return 0-n } }` ⏎ `main(){ println(eval(Neg(5))) }` | prints `-5` (and `eval(Lit(9))` -> `9`) -- two single-`Int64`-payload variants destructured and the bound payload used in arithmetic (enum-payload CUT 1+2) |
 | `main() { let ok = 5 > 3; println("ok=${ok}") }` | prints `ok=true` -- a `Bool` interpolated expression stringified to `true`/`false` |
 | `main() { println("hello selfhost") }` | prints `hello selfhost` + newline |
 | `main() { print("a"); print("b"); println("c") }` | prints `abc` + newline |
@@ -396,6 +401,34 @@ Capability detail:
   (`packages/frontend/src/RealParseBridge.cj`); no CHIR/codegen changes were needed. Verified at
   runtime (no folding): `enum Color { | Red | Green | Blue }; main(){ let c=Green;
   match(c){ case Red=>return 0; case Green=>return 1; case Blue=>return 2 } }` -> exit `1`.
+- **Payload-carrying `enum` milestone (`opus16/enum-payload`, CUT 1+2):** the real body-lowering
+  path now compiles a single-`Int64`-payload tagged-union `enum`, both constructing a payload
+  variant and destructuring it in a `match`. **CUT 1** (parse + classify + encode) and **CUT 2**
+  (construct + destructuring `match`) landed and are verified end to end; **CUT 3** (a `String`
+  payload) is NOT implemented and falls back gracefully (no crash, no codegen error) because a
+  `String` cannot be packed into the `Int64` encoding. First, the real parser's
+  `ParseEnumConstructor` was fixed: an enum constructor payload is a comma-separated list of
+  **types** (`Some(Int64)`), not named params, so it no longer calls `ParseFuncParam` (which
+  rejected primitive type keywords and made any payload enum fail to parse); the payload types are
+  recorded on the constructor `VarDecl` (`constructorTypes`, `packages/parse/src/DeclNodes.cj` /
+  `ParseDecl.cj`). The frontend enum registry (`packages/frontend/src/RealParseBridge.cj`) then
+  classifies each variant's payload (none / single `Int64` / single `String`); an enum registers
+  only when every constructor is payload-less or single-`Int64`/`String`, so any unsupported shape
+  (multi-field or other-typed payload) skips the whole enum and never mis-lowers. A
+  payload-carrying enum value is encoded in one `Int64` (the existing enum-typed ABI): the low 8
+  bits hold the variant tag, the bits above hold the signed payload. Constructing `Ctor(payload)`
+  lowers to `(payload << 8) | tag`; a payload-less variant encodes as just its tag. A destructuring
+  `match` arm `case Ctor(n) =>` / `case Ctor(_) =>` (an `EnumPattern`) matches the variant by its
+  decoded tag (`(sel & 0xFF) == tag`) and binds `n` to the arithmetic-right-shifted payload
+  (`sel >> 8`); a match that destructures any constructor switches its tag tests to the masked form,
+  while matches with only bare-variant / literal / wildcard patterns keep the existing direct-compare
+  path (so payload-less enum and `Int64`-literal matches stay byte-for-byte unchanged). Both
+  statement-form and value-form matches handle the destructuring arm, and an enum match with no
+  wildcard stays exhaustive-by-construction (final arm folds to the chain `else`). It is additive and
+  gated like the prior milestones. Verified at runtime (no folding): `enum Opt { | Some(Int64) |
+  None }; func unwrap(o,d){ match(o){ case Some(n)=>return n; case None=>return d } }` ->
+  `unwrap(Some(42),0)` exit `42`, `unwrap(None,7)` exit `7`; `enum Expr { | Lit(Int64) | Neg(Int64)
+  }; eval(Neg(5))` -> `-5`, `eval(Lit(9))` -> `9`.
 
 These are the only source constructs the integrated pipeline lowers end to end
 today; anything else still flows through the compatibility models described
@@ -413,17 +446,20 @@ and silently fall back:
   etc.) and array methods beyond `.size` / indexing / element write / `for-in`
   (`Array<Int64>` of those four shapes is now supported -- `opus13/arrays`).
 - **`match` beyond an `Int64` selector with literal / wildcard / single-variable-binding
-  patterns.** `match` on an `Int64` selector is now supported (`opus14/match`), but
-  match-on-payload-less-`enum` (constructor patterns) is now supported (`opus15/enums`, CUT 1),
-  but enum patterns that **destructure a payload** (`case Some(n) =>`), tuple / range / type
-  patterns, a `case L1 | L2` literal alternation, a `where` pattern guard, the selector-less
-  `match { case <expr> => }` form, and matching a non-`Int64`, non-enum selector all still fall
-  back to the summary path.
-- **Payload-carrying `enum` variants** (`enum Opt { | Some(Int64) | None }` -- single- or
-  multi-payload constructors). Only payload-less enums are lowered (`opus15/enums`, CUT 1);
-  constructing or matching a payload variant (`Some(42)`, `case Some(n) =>`) still falls back to
-  the summary path (where it may silently mis-compile -- a payload `match`/construct does not
-  yet carry the payload value).
+  patterns or a single-`Int64`-payload enum destructure.** `match` on an `Int64` selector is
+  supported (`opus14/match`), match over a payload-less `enum` is supported (`opus15/enums`,
+  CUT 1), and a destructuring `case Some(n) =>` over a single-`Int64`-payload enum is now
+  supported (`opus16/enum-payload`); but tuple / range / type patterns, a `case L1 | L2` literal
+  alternation, a `where` pattern guard, the selector-less `match { case <expr> => }` form, and
+  matching a non-`Int64`, non-enum selector all still fall back to the summary path.
+- **Multi-payload, multi-field, and `String`-payload `enum` variants.** Single-`Int64`-payload
+  enums are now lowered end to end (`opus16/enum-payload`, CUT 1+2: construct `Some(42)` +
+  destructure `case Some(n) =>` via the low-8-bits-tag / high-bits-payload `Int64` encoding). A
+  **`String`-payload** variant (CUT 3) is classified but not implemented -- it cannot be packed
+  into the `Int64` encoding, so it falls back to the summary path gracefully (no crash / no
+  codegen error). Multi-payload (`Pair(Int64, Int64)`), multi-field, and other-typed payload
+  constructors are unsupported and skip the whole enum (it never registers, so it never
+  mis-lowers).
 - **`struct` / `class`** declarations, fields, methods, and member access.
 - **`Float64`** (and other non-`Int64` numeric widths) -- literals, arithmetic, and
   printing of a `Float`/other-width integer value.
@@ -470,8 +506,10 @@ slice must be confirmed by a real compile-and-run with a known expected output.
   still unsupported (the body falls back to the summary path). `match` on an `Int64` selector
   (literal / wildcard / single-variable-binding patterns, statement and value forms) is now
   supported (`opus14/match`); match over a payload-less `enum` is now supported
-  (`opus15/enums`, CUT 1); payload-carrying enum variants (`Some(Int64)`, `case Some(n) =>`),
-  `|`-alternation, range/tuple/type patterns, and `where` guards remain follow-ups. String interpolation is now
+  (`opus15/enums`, CUT 1); single-`Int64`-payload enum variants -- construct `Some(42)` and
+  destructure `case Some(n) =>` -- are now supported (`opus16/enum-payload`, CUT 1+2);
+  `String`-payload (CUT 3), multi-payload/multi-field variants, `|`-alternation,
+  range/tuple/type patterns, and `where` guards remain follow-ups. String interpolation is now
   supported (`opus12/interp`); `Array<Int64>` literals/indexing/`.size`/writes/`for-in`/sized
   constructor are now supported (`opus13/arrays`); `for-in` over integer ranges plus
   `break`/`continue` are now supported (`opus9/loops`);
