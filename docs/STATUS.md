@@ -47,7 +47,11 @@ constructing a variant lowers to its tag constant; `match` over an enum value wi
 constructor patterns lowers to tag-equality tests), and `opus16/enum-payload`
 (CUT 1+2: single-`Int64`-payload `enum` variants -- constructing `Some(42)` packs
 tag+payload into one `Int64`, and a destructuring `case Some(n) =>` match decodes
-the tag and binds the payload) into `main`:
+the tag and binds the payload), and `opus18/enum-multi2` (multi-`Int64`-field
+`enum` variants -- `Add(Int64, Int64)` / `P(Int64, Int64, Int64)` constructed and
+destructured; each field lives in its OWN Int64 slot of a `{tag, f0, f1, ...}`
+buffer, NOT bit-packed, so arbitrarily large field values round-trip losslessly)
+into `main`:
 
 | Source | Verified behavior |
 | --- | --- |
@@ -87,6 +91,9 @@ the tag and binds the payload) into `main`:
 | `enum Color { \| Red \| Green \| Blue }` ⏎ `main(): Int64 { let c=Green; match(c){ case Red=>return 0; case Green=>return 1; case Blue=>return 2 } }` | exits with code 1 -- a payload-less `enum` (each variant a distinct `Int64` tag); `let c=Green` binds the tag, and `match` over the enum value lowers to tag-equality tests (enum CUT 1) |
 | `enum Opt { \| Some(Int64) \| None }` ⏎ `func unwrap(o: Opt, d: Int64): Int64 { match(o){ case Some(n)=>return n; case None=>return d } }` ⏎ `main(): Int64 { return unwrap(Some(42),0) }` | exits with code 42 (and `unwrap(None,7)` -> 7) -- a single-`Int64`-payload `enum`: `Some(42)` packs as `(42<<8)\|tag`, and `case Some(n) =>` decodes the tag (`sel & 0xFF`) and binds `n = sel >> 8` (enum-payload CUT 1+2) |
 | `enum Expr { \| Lit(Int64) \| Neg(Int64) }` ⏎ `func eval(e: Expr): Int64 { match(e){ case Lit(n)=>return n; case Neg(n)=>return 0-n } }` ⏎ `main(){ println(eval(Neg(5))) }` | prints `-5` (and `eval(Lit(9))` -> `9`) -- two single-`Int64`-payload variants destructured and the bound payload used in arithmetic (enum-payload CUT 1+2) |
+| `enum E { \| Num(Int64) \| Add(Int64,Int64) \| Mul(Int64,Int64) }` ⏎ `func ev(e: E): Int64 { match(e){ case Num(n)=>return n; case Add(a,b)=>return a+b; case Mul(a,b)=>return a*b } }` ⏎ `main(){ println(ev(Add(3,4))); println(ev(Mul(6,7))); println(ev(Num(99))) }` | prints `7`/`42`/`99` -- a small ADT interpreter: multi-`Int64`-field variants constructed and destructured, each field in its own slot of a `{tag, f0, f1}` buffer (multi-field enum) |
+| `enum Tri { \| P(Int64,Int64,Int64) \| Z }` ⏎ `func sum3(t: Tri): Int64 { match(t){ case P(a,b,c)=>return a+b+c; case Z=>return 0 } }` ⏎ `main(): Int64 { return sum3(P(10,20,5)) }` | exits with code `35` -- a 3-field variant alongside a payload-less variant in the same (heap-represented) enum |
+| `enum E { \| Add(Int64,Int64) }` ⏎ `func ev(e: E): Int64 { match(e){ case Add(a,b)=>return a+b } }` ⏎ `main(){ println(ev(Add(1000000000,2000000000))) }` | prints `3000000000` -- LARGE-VALUE proof the fields are NOT bit-packed: each keeps a full Int64 slot (a 9.0e18 field separately round-trips losslessly) |
 | `main() { let ok = 5 > 3; println("ok=${ok}") }` | prints `ok=true` -- a `Bool` interpolated expression stringified to `true`/`false` |
 | `main() { println("hello selfhost") }` | prints `hello selfhost` + newline |
 | `main() { print("a"); print("b"); println("c") }` | prints `abc` + newline |
@@ -429,6 +436,30 @@ Capability detail:
   None }; func unwrap(o,d){ match(o){ case Some(n)=>return n; case None=>return d } }` ->
   `unwrap(Some(42),0)` exit `42`, `unwrap(None,7)` exit `7`; `enum Expr { | Lit(Int64) | Neg(Int64)
   }; eval(Neg(5))` -> `-5`, `eval(Lit(9))` -> `9`.
+
+- **Multi-field `enum` milestone (`opus18/enum-multi2`):** the real body-lowering path now
+  compiles `enum` variants carrying two or more `Int64` payload fields (`| Add(Int64, Int64)`,
+  `| P(Int64, Int64, Int64)`), both constructing and destructuring them, so a small ADT
+  interpreter compiles end to end. The representation is deliberately NOT bit-packed: an enum is
+  "heap-represented" iff at least one of its constructors carries two or more `Int64` fields, and
+  then ALL its variants -- including payload-less and single-`Int64` ones -- use a uniform
+  separate-slot buffer so the enum type has one value form. The value is a `(1 + N)`-length
+  `VArray<Int64>` allocated in the constructing frame: slot 0 holds the variant tag, slots `1..N`
+  hold the N payload fields, each in its own full Int64 slot. The materialized value is the
+  buffer's address reinterpreted as an `Int64` (`ptrtoint`) so it still travels through the
+  existing `Int64` enum ABI for params/returns/locals. Construction is `AST2CHIR_EXPR_ENUM_MAKE`
+  (`packages/chir/src/AST2CHIR.cj` spec, lowered by `EvalEnumMake` in `TranslateFuncBody.cj`);
+  a destructuring `case Ctor(a, b, ...) =>` binds each field via `AST2CHIR_EXPR_ENUM_FIELD`
+  (`EvalEnumField`: `inttoptr` the value to `CPointer<Int64>`, GEP to slot `i+1`, Load). The
+  frontend registry (`packages/frontend/src/RealParseBridge.cj`) classifies a constructor as
+  `MULTI` only when every field is `Int64`/`Int`; a heap enum cannot also carry a `String` variant
+  (rejected so the whole enum falls back rather than mis-lowering). Because each field keeps a full
+  independent Int64 slot, arbitrarily large field values round-trip losslessly -- this is the
+  load-bearing correctness property. It is additive and gated like the prior milestones. Verified
+  at runtime (no folding): `enum E { | Num(Int64) | Add(Int64,Int64) | Mul(Int64,Int64) }` with an
+  `ev` interpreter -> `Add(3,4)`=`7`, `Mul(6,7)`=`42`, `Num(99)`=`99`; `enum Tri { | P(Int64,
+  Int64,Int64) | Z }; sum3(P(10,20,5))` exit `35`; LARGE-VALUE `Add(1000000000,2000000000)` ->
+  `3000000000` (and a 9.0e18 field round-trips), proving the no-bit-packing representation.
 
 These are the only source constructs the integrated pipeline lowers end to end
 today; anything else still flows through the compatibility models described
