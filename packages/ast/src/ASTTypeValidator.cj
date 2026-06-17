@@ -1,32 +1,74 @@
 package cangjie_compiler::ast
 
+import cangjie_compiler::basic.{DiagnosticEngine, DiagKindRefactor}
+import cangjie_compiler::basic.Range as BasicRange
 import std.collection.*
+
+private class ValidRangeFrame {
+    public let kind: ASTKind
+    public let begin: Position
+    public let end: Position
+    public let range: BasicRange
+
+    public init(node: Node) {
+        kind = node.astKind
+        begin = node.begin
+        end = node.end
+        range = MakeRange(node.begin, node.end)
+    }
+
+    public func IsForNode(node: Node): Bool {
+        return kind == node.astKind && begin == node.begin && end == node.end
+    }
+}
 
 public class ASTTypeValidator {
     public var failed: Bool = false
     public var firstInvalid: Option<Node> = None
     public let messages: ArrayList<String> = ArrayList<String>()
     private var walkerID: UInt32 = 0u32
+    private let validRanges: ArrayList<ValidRangeFrame> = ArrayList<ValidRangeFrame>()
+    private let checkStatus: ArrayList<Bool> = ArrayList<Bool>()
+    private var diagEngine: Option<DiagnosticEngine> = None
 
     public init() {}
 
     public func Validate(pkg: Package): Bool {
+        diagEngine = None
+        return validateImpl(pkg)
+    }
+
+    public func Validate(diag: DiagnosticEngine, pkg: Package): Bool {
+        diagEngine = diag
+        return validateImpl(pkg)
+    }
+
+    private func validateImpl(pkg: Package): Bool {
         failed = false
         firstInvalid = None
         messages.clear()
+        validRanges.clear()
+        checkStatus.clear()
+        validRanges.add(ValidRangeFrameForDefault())
         walkerID = GetNextWalkerID()
-        let walker = Walker(pkg, walkerID, visitPre: { node: Node => preVisitor(node) })
+        let walker = Walker(pkg, walkerID, visitPre: { node: Node => PreVisitor(node) },
+            visitPost: { node: Node => PostVisitor(node) })
         walker.Walk()
         return !failed
     }
 
-    private func preVisitor(node: Node): VisitAction {
+    public func PreVisitor(node: Node): VisitAction {
+        let range = MakeRange(node.begin, node.end)
+        if (!range.HasZero()) {
+            validRanges.add(ValidRangeFrame(node))
+        }
         var strategy = getNodeValidatingStrategy(node)
         var action = strategy[0]
         var needCheck = strategy[1]
         if (let Some(expr) <- (node as Expr)) {
             if (let Some(desugar) <- expr.desugarExpr) {
-                let desugarAction = Walker(desugar, walkerID, visitPre: { child: Node => preVisitor(child) }).Walk()
+                let desugarAction = Walker(desugar, walkerID, visitPre: { child: Node => PreVisitor(child) },
+                    visitPost: { child: Node => PostVisitor(child) }).Walk()
                 if (desugarAction == VisitAction.STOP_NOW) {
                     return VisitAction.STOP_NOW
                 }
@@ -36,11 +78,28 @@ public class ASTTypeValidator {
         if (action == VisitAction.SKIP_CHILDREN) {
             needCheck = false
         }
-        if (needCheck && !validateNode(node)) {
+        checkStatus.add(needCheck)
+        return if (IsTypeNode(node)) { VisitAction.SKIP_CHILDREN } else { action }
+    }
+
+    public func PostVisitor(node: Node): VisitAction {
+        var needCheck = false
+        if (!checkStatus.isEmpty()) {
+            needCheck = checkStatus[checkStatus.size - 1]
+            checkStatus.remove(at: checkStatus.size - 1)
+        }
+        if (!needCheck) {
+            popValidRangeIfCurrent(node)
+            return VisitAction.WALK_CHILDREN
+        }
+        let valid = validateNode(node)
+        if (!valid) {
             markInvalid(node)
+            emitInvalidNodeDiagnostic()
             return VisitAction.STOP_NOW
         }
-        return if (IsTypeNode(node)) { VisitAction.SKIP_CHILDREN } else { action }
+        popValidRangeIfCurrent(node)
+        return VisitAction.WALK_CHILDREN
     }
 
     private func markInvalid(node: Node): Unit {
@@ -75,23 +134,17 @@ public class ASTTypeValidator {
         return (action, needCheck)
     }
 
-    private func isResolvedTy(ty: Option<Ty>): Bool {
-        if (let Some(value) <- ty) {
-            return !value.HasInvalidTy() && !value.HasIdealTy() && !value.HasQuestTy()
-        }
-        return false
-    }
-
     private func validateNode(node: Node): Bool {
-        if (!isResolvedTy(node.GetTy())) {
-            messages.add("invalid sema type on ${ASTKindName(node.astKind)} at ${node.begin.ToString()}")
-            return false
-        }
-        if (let Some(target) <- node.GetTarget()) {
-            if (!isIgnoredTargetNode(node) && !isIgnoreKind(target.astKind) && !isResolvedTy(target.GetTy())) {
+        let curTarget = node.GetTarget()
+        if (let Some(target) <- curTarget) {
+            if (!isIgnoredTargetNode(node) && !isIgnoreKind(target.astKind) && !Ty.IsTyCorrect(target.GetTy())) {
                 messages.add("invalid target type from ${ASTKindName(node.astKind)} to ${ASTKindName(target.astKind)}")
                 return false
             }
+        }
+        if (!Ty.IsTyCorrect(node.GetTy()) || hasUnresolvedTypeVars(node.GetTy())) {
+            messages.add("invalid sema type on ${ASTKindName(node.astKind)} at ${node.begin.ToString()}")
+            return false
         }
         if (let Some(body) <- (node as FuncBody)) {
             var parent: Option<Decl> = None
@@ -103,13 +156,45 @@ public class ASTTypeValidator {
                 parent = enumDecl
             }
             if (let Some(parentDecl) <- parent) {
-                if (!isResolvedTy(parentDecl.GetTy())) {
+                if (!Ty.IsTyCorrect(parentDecl.GetTy())) {
                     messages.add("invalid owner type for function body at ${body.begin.ToString()}")
                     return false
                 }
             }
         }
         return true
+    }
+
+    private func hasUnresolvedTypeVars(ty: Option<Ty>): Bool {
+        if (let Some(value) <- ty) {
+            return value.HasIdealTy() || value.HasQuestTy()
+        }
+        return true
+    }
+
+    private func currentValidRange(): BasicRange {
+        if (!validRanges.isEmpty()) {
+            return validRanges[validRanges.size - 1].range
+        }
+        return MakeRange(DEFAULT_POSITION, DEFAULT_POSITION)
+    }
+
+    private func popValidRangeIfCurrent(node: Node): Unit {
+        if (validRanges.isEmpty()) {
+            return
+        }
+        let last = validRanges[validRanges.size - 1]
+        if (last.IsForNode(node)) {
+            validRanges.remove(at: validRanges.size - 1)
+        }
+    }
+
+    private func emitInvalidNodeDiagnostic(): Unit {
+        if (let Some(diag) <- diagEngine) {
+            let builder = diag.DiagnoseRefactor(DiagKindRefactor.sema_invalid_node_after_check, currentValidRange())
+            builder.AddNote("please report this to Cangjie team and include the project")
+            builder.Emit()
+        }
     }
 
     private func isIgnoredTargetNode(node: Node): Bool {
@@ -139,4 +224,15 @@ public class ASTTypeValidator {
 
 public func ValidateUsedNodes(pkg: Package): Bool {
     return ASTTypeValidator().Validate(pkg)
+}
+
+public func ValidateUsedNodes(diagEngine: DiagnosticEngine, pkg: Package): Unit {
+    ASTTypeValidator().Validate(diagEngine, pkg)
+}
+
+private func ValidRangeFrameForDefault(): ValidRangeFrame {
+    let node = Node()
+    node.begin = DEFAULT_POSITION
+    node.end = DEFAULT_POSITION
+    return ValidRangeFrame(node)
 }

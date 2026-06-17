@@ -1,5 +1,6 @@
 package cangjie_compiler::ast
 
+import cangjie_compiler::basic.DiagnosticCache
 import std.collection.*
 
 public class TargetCache {
@@ -17,6 +18,7 @@ public class TargetCache {
 public class CacheEntry {
     public var successful: Bool = false
     public var result: Option<Ty> = None
+    public var diags: DiagnosticCache = DiagnosticCache()
     public var targets: TargetCache = TargetCache()
     public init() {}
 }
@@ -24,11 +26,11 @@ public class CacheEntry {
 public class CacheKey <: Hashable & Equatable<CacheKey> {
     public var target: Option<Ty> = None
     public var isDesugared: Bool = false
-    public var diagKey: UInt64 = 0
+    public var diagKey: Int64 = 0
 
     public init() {}
 
-    public init(target: Option<Ty>, isDesugared: Bool, diagKey: UInt64) {
+    public init(target: Option<Ty>, isDesugared: Bool, diagKey: Int64) {
         this.target = target
         this.isDesugared = isDesugared
         this.diagKey = diagKey
@@ -43,7 +45,7 @@ public class CacheKey <: Hashable & Equatable<CacheKey> {
     }
 
     public func hashCode(): Int64 {
-        var out = Int64(diagKey)
+        var out = diagKey
         if (isDesugared) {
             out = out ^ 0x9e3779b9
         }
