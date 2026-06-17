@@ -94,7 +94,7 @@ extend ParserImpl {
         enumPat.end = enumPat.rightAnglePos + 1
     }
 
-    public func ParseTuplePattern(isEnumPatternParams: Bool, attributes: ArrayList<Attribute>, isVar: Bool, inDecl: Bool): TuplePattern {
+    public func ParseTuplePattern(_: Bool, attributes: ArrayList<Attribute>, isVar: Bool, inDecl: Bool): TuplePattern {
         let tuple = TuplePattern()
         tuple.leftParenPos = Expect(TokenKind.LPAREN, "expected '('").Begin()
         tuple.begin = tuple.leftParenPos

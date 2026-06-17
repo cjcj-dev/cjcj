@@ -3,7 +3,7 @@ package cangjie_compiler::parse
 import std.collection.*
 
 public class ASTHasher {
-    public static func Init(op: GlobalOptions): Unit {}
+    public static func Init(_: GlobalOptions): Unit {}
 
     public static func CombineHash(acc: UInt64, value: UInt64): UInt64 {
         return acc ^ (value + 0x9e3779b9u64 + (acc << 6) + (acc >> 2))
