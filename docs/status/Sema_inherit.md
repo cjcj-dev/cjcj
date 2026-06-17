@@ -102,3 +102,15 @@ compatibility `Node`, not the real `cangjie_compiler::ast.Node`, so this area st
 predicate while importing the real `GetPackageRelation` and `PackageRelation`.
 
 Verification: `cjpm build` passes for the whole workspace after this imported-extend and synthesis fidelity update.
+
+Diagnostic fidelity continuation:
+
+- Named-parameter override mismatch diagnostics now mirror the C++ `DiagnoseParameterName` path more closely: the main
+  diagnostic is reported on the child function identifier, mismatched parameters receive precise hints explaining named vs
+  positional conflicts or the expected parent parameter name, and the parent function note points at the parent identifier.
+- Weak-visibility override diagnostics now use the C++ visibility text and structured notes: inherited implementations get
+  a main hint that the deriving member is inherited, child notes point to the actual deriving declaration and visibility,
+  and parent notes report the base declaration visibility with an interface hint when applicable. Macro-call note forwarding
+  is also wired through the available self-hosted `DiagnosticEngine.AddMacroCallNote` surface.
+
+Verification: `cjpm build` passes for the whole workspace after this diagnostic fidelity continuation.

@@ -2,7 +2,7 @@ package cangjie_compiler::sema.InheritanceChecker
 
 import std.collection.*
 import cangjie_compiler::ast.*
-import cangjie_compiler::basic.{DiagnosticEngine, DiagArgument, DiagKind, DiagKindRefactor, MakeRange}
+import cangjie_compiler::basic.{DiagnosticEngine, DiagArgument, DiagKind, DiagKindRefactor, MakeRange, SubDiagnostic}
 import cangjie_compiler::basic.Range as BasicRange
 import cangjie_compiler::modules.{GetPackageRelation, PackageRelation}
 import cangjie_compiler::sema.*
@@ -178,12 +178,103 @@ private func AreFuncParameterNameIdentical(parent: FuncDecl, child: FuncDecl): B
     return true
 }
 
+private func ParamIdentifierRange(param: FuncParam): BasicRange {
+    return MakeRange(param.GetIdentifierPos(), param.identifier.Val())
+}
+
 private func DiagnoseParameterName(diag: DiagnosticEngine, parent: FuncDecl, child: FuncDecl): Unit {
     let builder = diag.DiagnoseRefactor(
         DiagKindRefactor.sema_param_named_mismatched,
-        DeclRange(child)
+        DeclIdentifierRange(child)
     )
-    builder.AddNote(DeclRange(parent), "the corresponding function of the supertype is")
+    if (let Some(parentBody) <- parent.funcBody) {
+        if (let Some(childBody) <- child.funcBody) {
+            if (!parentBody.paramLists.isEmpty() && !childBody.paramLists.isEmpty()) {
+                let parentParams = parentBody.paramLists[0].params
+                let childParams = childBody.paramLists[0].params
+                if (parentParams.size == childParams.size) {
+                    for (idx in 0..parentParams.size) {
+                        let parentParam = parentParams[idx]
+                        let childParam = childParams[idx]
+                        if (!parentParam.isNamedParam && childParam.isNamedParam) {
+                            builder.AddHint(
+                                ParamIdentifierRange(childParam),
+                                arguments: [
+                                    "this named parameter conflicts with the corresponding positional parameter in the supertype"
+                                ]
+                            )
+                        } else if (parentParam.isNamedParam && !childParam.isNamedParam) {
+                            builder.AddHint(
+                                ParamIdentifierRange(childParam),
+                                arguments: [
+                                    "this positional parameter conflicts with the corresponding named parameter in the supertype"
+                                ]
+                            )
+                        } else if (parentParam.isNamedParam && childParam.isNamedParam &&
+                            parentParam.identifier != childParam.identifier) {
+                            builder.AddHint(
+                                ParamIdentifierRange(childParam),
+                                arguments: [
+                                    "the corresponding parameter in the supertype is named '" +
+                                        parentParam.identifier.Val() + "'"
+                                ]
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+    builder.AddNote(DeclIdentifierRange(parent), "the corresponding function of the supertype is")
+}
+
+private func VisibilityToString(decl: Decl): String {
+    if (decl.TestAttr(Attribute.PUBLIC)) {
+        return "public"
+    }
+    if (decl.TestAttr(Attribute.PROTECTED)) {
+        return "protected"
+    }
+    if (decl.TestAttr(Attribute.PRIVATE)) {
+        return "private"
+    }
+    return "internal"
+}
+
+private func DiagnoseWeakVisibility(
+    diag: DiagnosticEngine,
+    parent: Decl,
+    child: Decl,
+    diagNode: Decl
+): Unit {
+    let parentRange = DeclIdentifierRange(parent)
+    let childRange = DeclIdentifierRange(child)
+    let range = DeclIdentifierRange(diagNode)
+    let childHint = "the visibility of the deriving '" + child.identifier.Val() + "' is '" + VisibilityToString(child) + "'"
+    let builder = diag.DiagnoseRefactor(DiagKindRefactor.sema_weak_visibility, range)
+    if (let Some(macroCall) <- diagNode.curMacroCall) {
+        if (let Some(invocation) <- macroCall.GetConstInvocation()) {
+            diag.AddMacroCallNote(builder.diagnostic, invocation.macroCallDiagInfo, range.begin)
+        }
+    }
+    if (SameDecl(child, diagNode)) {
+        builder.AddMainHintArguments([childHint])
+    } else {
+        builder.AddMainHintArguments(["'" + child.identifier.Val() + "' is inherited"])
+        let childNote = SubDiagnostic(childRange, "the deriving '" + child.identifier.Val() + "' is defined here")
+        childNote.AddMainHint(childRange, childHint)
+        builder.AddNote(childNote)
+    }
+    let parentNote = SubDiagnostic(
+        parentRange,
+        "the visibility of the base '" + parent.identifier.Val() + "' is '" + VisibilityToString(parent) + "'"
+    )
+    if (let Some(parentOuter) <- parent.outerDecl) {
+        if (parentOuter.astKind == ASTKind.INTERFACE_DECL) {
+            parentNote.AddMainHint(parentRange, "the base '" + parent.identifier.Val() + "' is in 'interface'")
+        }
+    }
+    builder.AddNote(parentNote)
 }
 
 private func HasCommonDecl(decls: ArrayList<ClassLikeDecl>): Bool {
@@ -1753,9 +1844,7 @@ public class StructInheritanceChecker {
             (parent.TestAttr(Attribute.PROTECTED) && !child.TestAnyAttr(Attribute.PUBLIC, Attribute.PROTECTED)) ||
             (!parent.TestAnyAttr(Attribute.PUBLIC, Attribute.PROTECTED, Attribute.PRIVATE) && child.TestAttr(Attribute.PRIVATE))
         if (weakVisibility) {
-            let builder = diag.DiagnoseRefactor(DiagKindRefactor.sema_weak_visibility, DeclRange(diagNode))
-            builder.AddNote(DeclRange(parent), "base visibility is stronger")
-            builder.AddNote(DeclRange(child), "deriving visibility is weaker")
+            DiagnoseWeakVisibility(diag, parent, child, diagNode)
         }
     }
 
