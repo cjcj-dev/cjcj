@@ -58,12 +58,14 @@ What changed:
 - Binary/if continuation:
   - Built-in arithmetic and relational synthesis now follows the C++ `SynLiteralInBinaryExpr` shape more closely: synthesize from the right operand, check the left against that exact primitive candidate, clear and retry from the left when needed, and use the C++ candidate sets instead of rank-based numeric widening.
   - `if` branch joining now replaces ideal types and normalizes `This` types on both branches before computing the joined type, matching the C++ pre-join normalization step.
-- Verification: `cjpm build` passes after the binary exact-candidate and if-join normalization continuation. `grep -rn "TODO(selfhost:Sema)" packages/sema/src` reports only out-of-scope Sema placeholders; the scoped `TypeCheckExpr.cj` and `TypeCheckExpr/*` files have zero matching markers.
+- Tuple-equality continuation:
+  - Tuple `==`/`!=` now builds the C++-shaped desugared boolean chain (`true && ...` or `false || ...`) using real AST clone/create APIs, tuple-access nodes for non-literal tuple operands, shared `mapExpr` for side-effecting operands, and recursive synthesis of each generated element comparison.
+- Verification: `cjpm build` passes after the tuple-equality desugar continuation. `grep -rn "TODO(selfhost:Sema)" packages/sema/src` reports only out-of-scope Sema placeholders; the scoped `TypeCheckExpr.cj` and `TypeCheckExpr/*` files have zero matching markers.
 
 Remaining fidelity gaps:
 - Full overload/desugar diagnostic parity still depends on broader call/lookup/desugar infrastructure: binary, flow, subscript, and compound assignment now use the real fallback shapes, but not the C++ diagnostic suppression, negative-cache constraint rollback, return-type-inference diagnostics, or exact recovery diagnostics.
 - Lambda syntax-driven inference from member access/calls still needs the C++ `ASTContext` candidate maps and cache invalidation path to be threaded into this self-hosted expression layer.
-- Tuple equality still validates built-in element comparability only; full C++ parity needs generated/desugared element comparison expressions and operator overload checks.
+- Tuple equality now generates the element comparison tree and checks each element comparison, but exact tuple comparison diagnostics still need the C++ diagnostic text and note plumbing.
 - Coalescing placeholder-`Option` constraints still need the import-manager/core-decl path used by C++ for unconstrained type variables.
 - Name lookup, accessibility filtering, capture diagnostics, generic constraint solving, and full C++ diagnostic parity remain limited by sibling sema systems that are still partial.
 - Condition binding checks now reject explicit `VarPattern` bindings in OR contexts, but exact C++ parity still needs ASTContext enum-constructor classification for ambiguous `VarOrEnumPattern` nodes and the precise refactor diagnostics.
@@ -73,4 +75,4 @@ Remaining fidelity gaps:
 - `@IfAvailable` still lacks the C++ import-manager checks for `ohos.device_info` and `ohos.base` package availability.
 - `for-in` refutable-pattern rejection now has the C++ behavior but not the exact `sema_forin_pattern_must_be_irrefutable` diagnostic emission in this shallow helper.
 
-Completeness estimate: 68% of C++ behavior for this scoped expression type-checking area, weighted by behavior rather than line count.
+Completeness estimate: 69% of C++ behavior for this scoped expression type-checking area, weighted by behavior rather than line count.

@@ -28,14 +28,6 @@ private func IsShiftOperator(op: TokenKind): Bool {
     return op == TokenKind.LSHIFT || op == TokenKind.RSHIFT
 }
 
-private func IsBuiltinRelationNumericTy(ty: Ty): Bool {
-    return ty.IsNumeric() || ty.IsRune()
-}
-
-private func IsBuiltinEqualityScalarTy(ty: Ty): Bool {
-    return IsBuiltinRelationNumericTy(ty) || ty.IsBoolean() || ty.IsUnit() || ty.IsNothing()
-}
-
 private func BinaryInvalid(be: BinaryExpr): Ty {
     return TcInvalid(be)
 }
@@ -416,7 +408,7 @@ private func SynRelationalExpr(typeManager: TypeManager, be: BinaryExpr): Ty {
         let rightTy = tys[1]
         if (leftTy.IsTuple() || rightTy.IsTuple()) {
             if ((be.op == TokenKind.EQUAL || be.op == TokenKind.NOTEQ) && leftTy.IsTuple() && rightTy.IsTuple()) {
-                if (TupleCanEqual(typeManager, leftTy, rightTy)) {
+                if (CheckTupleCanEqual(typeManager, be, leftTy, rightTy)) {
                     let boolTy = TcBoolTy()
                     be.SetTy(boolTy)
                     return boolTy
@@ -429,43 +421,96 @@ private func SynRelationalExpr(typeManager: TypeManager, be: BinaryExpr): Ty {
     return SynArithmeticOrRelationalExpr(typeManager, be, isArithmetic: false)
 }
 
-private func CanBuiltinEqualityCompare(typeManager: TypeManager, leftTy: Ty, rightTy: Ty): Bool {
-    if (leftTy.IsNothing() || rightTy.IsNothing()) {
-        return true
-    }
-    if (!IsBuiltinEqualityScalarTy(leftTy) || !IsBuiltinEqualityScalarTy(rightTy)) {
-        return false
-    }
-    if (SameTy(leftTy, rightTy)) {
-        return true
-    }
-    if (typeManager.IsSubtype(leftTy, rightTy, implicitBoxed: false, allowOptionBox: false) ||
-        typeManager.IsSubtype(rightTy, leftTy, implicitBoxed: false, allowOptionBox: false)) {
-        return true
-    }
-    return false
+private func HasSideEffect(expr: Expr): Bool {
+    return expr.astKind != ASTKind.TUPLE_LIT && expr.astKind != ASTKind.REF_EXPR
 }
 
-private func TupleCanEqual(typeManager: TypeManager, leftTy: Ty, rightTy: Ty): Bool {
+private func CloneExprOrInvalid(expr: Expr): Option<Expr> {
+    return ASTCloner.Clone(expr) as Expr
+}
+
+private func GetTupleElements(expr: Expr): ArrayList<Expr> {
+    let elements = ArrayList<Expr>()
+    if (let Some(tupleLit) <- (expr as TupleLit)) {
+        for (child in tupleLit.children) {
+            if (let Some(clonedChild) <- CloneExprOrInvalid(child)) {
+                elements.add(clonedChild)
+            }
+        }
+        return elements
+    }
+    let exprTy = expr.GetTy() ?? TypeManager.GetInvalidTy()
+    if (let Some(tupleTy) <- (exprTy as TupleTy)) {
+        let int64Ty = TypeManager.GetPrimitiveTy(TypeKind.TYPE_INT64)
+        let hasSideEffect = HasSideEffect(expr)
+        var mapExpr: Option<Expr> = None
+        for (idx in 0..tupleTy.typeArgs.size) {
+            if (let Some(clonedBase) <- CloneExprOrInvalid(expr)) {
+                if (hasSideEffect) {
+                    if (let None <- mapExpr) {
+                        mapExpr = clonedBase
+                    }
+                    clonedBase.mapExpr = mapExpr
+                }
+                let tupleAccess = SubscriptExpr()
+                tupleAccess.isTupleAccess = true
+                tupleAccess.baseExpr = clonedBase
+                let indexExpr = CreateLitConstExpr(LitConstKind.INTEGER, "${idx}", int64Ty)
+                tupleAccess.indexExprs.add(indexExpr)
+                tupleAccess.SetTy(tupleTy.typeArgs[idx])
+                tupleAccess.curFile = expr.curFile
+                elements.add(tupleAccess)
+            }
+        }
+    }
+    return elements
+}
+
+private func CheckTupleCanEqual(typeManager: TypeManager, be: BinaryExpr, leftTy: Ty, rightTy: Ty): Bool {
     if (let Some(leftTuple) <- (leftTy as TupleTy)) {
         if (let Some(rightTuple) <- (rightTy as TupleTy)) {
             if (leftTuple.typeArgs.size != rightTuple.typeArgs.size) {
+                be.SetTy(TypeManager.GetInvalidTy())
                 return false
             }
-            for (idx in 0..leftTuple.typeArgs.size) {
-                let leftArg = leftTuple.typeArgs[idx]
-                let rightArg = rightTuple.typeArgs[idx]
-                if (leftArg.IsTuple() || rightArg.IsTuple()) {
-                    if (!TupleCanEqual(typeManager, leftArg, rightArg)) {
-                        return false
-                    }
-                } else if (!CanBuiltinEqualityCompare(typeManager, leftArg, rightArg)) {
+            if ((let None <- be.leftExpr) || (let None <- be.rightExpr)) {
+                be.SetTy(TypeManager.GetInvalidTy())
+                return false
+            }
+            let leftExpr = be.leftExpr.getOrThrow()
+            let rightExpr = be.rightExpr.getOrThrow()
+            let leftElements = GetTupleElements(leftExpr)
+            let rightElements = GetTupleElements(rightExpr)
+            if (leftElements.size != leftTuple.typeArgs.size || rightElements.size != rightTuple.typeArgs.size) {
+                be.SetTy(TypeManager.GetInvalidTy())
+                return false
+            }
+            let boolTy = TcBoolTy()
+            var tupleCmpExpr: Expr = CreateLitConstExpr(LitConstKind.BOOL,
+                if (be.op == TokenKind.EQUAL) { "true" } else { "false" }, boolTy)
+            let connectionOp = if (be.op == TokenKind.EQUAL) { TokenKind.AND } else { TokenKind.OR }
+            for (idx in 0..leftElements.size) {
+                let elementCmpExpr = CreateBinaryExpr(leftElements[idx], rightElements[idx], be.op)
+                elementCmpExpr.EnableAttr(Attribute.IMPLICIT_ADD)
+                CopyBasicInfo(be, elementCmpExpr)
+                let returnTy = SynBinaryExpr(typeManager, elementCmpExpr)
+                if (!Ty.IsTyCorrect(returnTy) || !returnTy.IsBoolean()) {
+                    be.SetTy(TypeManager.GetInvalidTy())
                     return false
                 }
+                let connectionExpr = CreateBinaryExpr(tupleCmpExpr, elementCmpExpr, connectionOp)
+                connectionExpr.SetTy(boolTy)
+                tupleCmpExpr = connectionExpr
             }
+            if (HasSideEffect(leftExpr) || HasSideEffect(rightExpr)) {
+                tupleCmpExpr.EnableAttr(Attribute.SIDE_EFFECT)
+            }
+            be.SetTy(boolTy)
+            be.desugarExpr = tupleCmpExpr
             return true
         }
     }
+    be.SetTy(TypeManager.GetInvalidTy())
     return false
 }
 
