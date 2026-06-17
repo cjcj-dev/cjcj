@@ -502,7 +502,7 @@ public class ImportManager {
         }
         if (let Some(packageValue) <- cjoManager.GetPackage(fullPackageName)) {
             for (depStdPkg in packageValue.GetAllDependentStdPkgs()) {
-                HandleStdPackage(depStdPkg, cjoManager.GetPackageCjoPath(depStdPkg), isRecursive: true)
+                HandleStdPackage(depStdPkg, FindAndSaveDepStdCjoPath(depStdPkg), isRecursive: true)
             }
         }
         return true
@@ -768,7 +768,7 @@ public class ImportManager {
                     rootPkg.isMacroPackage || macroReExportCommonPackage) {
                     HandleStdPackage(fullPackageName, cjoPath, isRecursive: isRecursive)
                     for (depStdPkg in importPkg.GetAllDependentStdPkgs()) {
-                        HandleStdPackage(depStdPkg, cjoManager.GetPackageCjoPath(depStdPkg), isRecursive: true)
+                        HandleStdPackage(depStdPkg, FindAndSaveDepStdCjoPath(depStdPkg), isRecursive: true)
                     }
                 } else {
                     cjoManager.SetOnlyUsedByMacro(fullPackageName, true)
@@ -788,7 +788,7 @@ public class ImportManager {
             cjoManager.SetOnlyUsedByMacro(pkg.fullPackageName, false)
             HandleStdPackage(pkg.fullPackageName, filePath, isRecursive: isRecursive)
             for (depStdPkg in pkg.GetAllDependentStdPkgs()) {
-                HandleStdPackage(depStdPkg, cjoManager.GetPackageCjoPath(depStdPkg), isRecursive: true)
+                HandleStdPackage(depStdPkg, FindAndSaveDepStdCjoPath(depStdPkg), isRecursive: true)
             }
             return ResolveImportedPackageHeaders(pkg, isRecursive: true)
         }
@@ -802,6 +802,15 @@ public class ImportManager {
         if (!cjdFilePaths.contains(fullPackageName)) {
             cjdFilePaths[fullPackageName] = ToCjdPath(cjoPath)
         }
+    }
+
+    private func FindAndSaveDepStdCjoPath(fullPackageName: String): String {
+        if (let Some(cachedPath) <- cjoFilePaths.get(fullPackageName)) {
+            return cachedPath
+        }
+        let cjoPath = cjoManager.GetPackageCjoPath(fullPackageName)
+        SaveDepPkgCjoPath(fullPackageName, cjoPath)
+        return cjoPath
     }
 
     private func ToCjdPath(cjoPath: String): String {

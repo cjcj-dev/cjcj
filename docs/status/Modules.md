@@ -1,6 +1,6 @@
 # Modules Port Status
 
-Date: 2026-06-17
+Date: 2026-06-18
 
 Build: `cjpm build` passes.
 
@@ -29,6 +29,8 @@ This pass aligned additional CJO manager details with the C++ implementation: to
 This pass aligned dependency graph and package-order dependency collection with the C++ assumption that imports are already resolved before these phases run: unresolved imports are now skipped instead of re-running CJO lookup during graph construction or Tarjan dependency collection, and `GetAllDependencyPackageNames` uses the same full-package-name cache key shape as the C++ implementation.
 
 This pass tightened import validation and diagnostics against the C++ reference: named declaration imports now check member existence using package visibility only, with import access level reserved for imported-declaration map insertion, import-all short-circuits before package-name import checks, and warning diagnostics now retain the secondary note locations for shadowed imports, conflicting imports, and repeated feature names.
+
+This pass tightened package-order and import-node fidelity: `PackageManager` now uses a single monotonically increasing Tarjan discovery index like the C++ implementation, recursive standard-library dependency handling records CJO/CJD sidecar paths before classifying the dependency, and local import nodes now render C++-style alias and multi-import strings through `ToString`. The local `Package.IsEmpty` helper now follows the C++ AST rule that a package with only compiler-added imports and no declarations is empty.
 
 ## Implemented
 
@@ -66,6 +68,10 @@ This pass tightened import validation and diagnostics against the C++ reference:
 - Matched the C++ dependency-name cache keying for `DependencyGraph.GetAllDependencyPackageNames`.
 - Implemented `PackageManager` Tarjan SCC ordering and source package reordering behavior.
 - Matched C++ package-manager dependency collection by using resolved package names only, preventing package-order analysis from mutating import resolution state.
+- Matched the C++ Tarjan traversal more closely by keeping the DFS discovery counter in traversal state instead of recomputing recursive indices from the number of visited packages.
+- Matched C++ recursive standard-library dependency path bookkeeping by recording dependent std package CJO and `.cj.d` paths before adding them to direct/indirect std dependency sets.
+- Matched C++ import-node string behavior for alias imports, import-all spelling, explicit import modifiers, and multi-import formatting in the local compatibility AST.
+- Added `Package.IsEmpty` behavior for the local package model, returning true only when files contain no declarations and only compiler-added imports.
 - Added a compiling local AST writer/loader wire format so exported package/import/member data can round-trip inside this package while the real flatbuffer/AST dependencies are unavailable.
 - Improved that local AST writer/loader bridge to preserve `exportedInternalDecls` records, reload them into `File.exportedInternalDecls`, and suppress `doNotExport` declarations during serialization in line with the C++ writer's export filtering.
 - Continued the local serialization layer with type interning, cached declaration diffing, resolved dependency-name extraction, import reference loading, deterministic expression table serialization/deserialization, reference resolution maps, deterministic incremental removed-mangle serialization/parsing, C++-style JSON control-byte escaping, node source-range/attribute preservation, and package file ownership normalization.

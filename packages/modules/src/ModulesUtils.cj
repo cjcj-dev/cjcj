@@ -364,6 +364,20 @@ public class Package <: Node {
         }
         return false
     }
+
+    public func IsEmpty(): Bool {
+        for (file in files) {
+            if (!file.decls.isEmpty()) {
+                return false
+            }
+            for (importSpec in file.imports) {
+                if (!importSpec.TestAttr(Attribute.COMPILER_ADD)) {
+                    return false
+                }
+            }
+        }
+        return true
+    }
 }
 
 public enum ImportKind {
@@ -480,7 +494,39 @@ public class ImportContent <: Node {
     }
 
     public override func ToString(): String {
-        return GetImportedPackageName()
+        let builder = StringBuilder()
+        appendImportContentText(builder, this)
+        if (kind != ImportKind.IMPORT_MULTI) {
+            return builder.toString()
+        }
+        builder.append("{\n")
+        for (item in items) {
+            builder.append("    ")
+            appendImportContentText(builder, item)
+            builder.append("\n")
+        }
+        builder.append("}")
+        return builder.toString()
+    }
+}
+
+private func appendImportContentText(builder: StringBuilder, content: ImportContent): Unit {
+    var idx: Int64 = 0
+    while (idx < content.prefixPaths.size) {
+        builder.append(content.prefixPaths[idx])
+        if (idx == 0 && content.hasDoubleColon) {
+            builder.append("::")
+        } else {
+            builder.append(".")
+        }
+        idx++
+    }
+    if (content.kind != ImportKind.IMPORT_MULTI) {
+        builder.append(content.identifier)
+        if (content.kind == ImportKind.IMPORT_ALIAS) {
+            builder.append(" as ")
+            builder.append(content.aliasName)
+        }
     }
 }
 
@@ -538,6 +584,17 @@ public class ImportSpec <: Node {
 
     public func IsPrivateImport(): Bool {
         return !hasAccessModifier || accessLevel == AccessLevel.PRIVATE
+    }
+
+    public override func ToString(): String {
+        let builder = StringBuilder()
+        builder.append("import ")
+        if (hasAccessModifier) {
+            builder.append(GetAccessLevelStr(accessLevel))
+            builder.append(" ")
+        }
+        builder.append(content.ToString())
+        return builder.toString()
     }
 }
 
