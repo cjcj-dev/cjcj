@@ -13,6 +13,7 @@ public func HandleUnaryExpression(irBuilder: IRBuilder2, chirExpr: CHIRUnaryExpr
     let operand = chirExpr.unaryExpr.GetOperand(0)
     let cgValue = irBuilder.GetCGModule().MaterializeValue(irBuilder, operand)
     let operandType = operand.GetType()
-    return irBuilder.CreateUnaryTyped(chirExpr.unaryExpr.GetExprKind(), cgValue.GetRawValue(), operandType,
-        name: chirExpr.unaryExpr.GetExprKindName())
+    let resultType = chirExpr.unaryExpr.GetResultType()
+    return irBuilder.CreateUnaryTypedWithResult(chirExpr.unaryExpr.GetExprKind(), cgValue.GetRawValue(),
+        operandType, resultType, name: chirExpr.unaryExpr.GetExprKindName())
 }

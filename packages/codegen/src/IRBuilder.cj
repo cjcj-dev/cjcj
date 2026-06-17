@@ -326,6 +326,25 @@ public class IRBuilder2 {
         return CreateUnaryTyped(kind, value, None, name: name)
     }
 
+    // Unary lowering with an optional result type. A unary whose result is a CString (i8*) is the
+    // real-body string-interpolation conversion marker: stringify the operand into a runtime C-string.
+    // The operand's LLVM type selects the conversion -- i1 -> "true"/"false", any other integer ->
+    // its decimal text (snprintf). For every other result type this is an ordinary unary op.
+    public func CreateUnaryTypedWithResult(kind: ExprKind, value: LLVMValueRef, operandType: Option<Type>,
+        resultType: Option<Type>, name!: String = ""): LLVMValueRef {
+        if (let Some(rt) <- resultType) {
+            if (rt.IsCString()) {
+                let valueType = unsafe { LLVMTypeOf(value) }
+                // An i1 operand stringifies to "true"/"false"; any other integer to its decimal text.
+                if (unsafe { LLVMGetTypeKind(valueType) } == 8 && unsafe { LLVMGetIntTypeWidth(valueType) } == 1u32) {
+                    return EmitBoolToCString(cgMod, builder.raw, GetLLVMContext().raw, value)
+                }
+                return EmitIntToCString(cgMod, builder.raw, GetLLVMContext().raw, value)
+            }
+        }
+        return CreateUnaryTyped(kind, value, operandType, name: name)
+    }
+
     public func CreateUnaryTyped(kind: ExprKind, value: LLVMValueRef, operandType: Option<Type>, name!: String = ""): LLVMValueRef {
         var result = LLVMNullValue()
         try (nameCString = unsafe { LibC.mallocCString(name) }.asResource()) {

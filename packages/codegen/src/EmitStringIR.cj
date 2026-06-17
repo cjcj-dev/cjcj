@@ -141,6 +141,90 @@ public func EmitRuntimeStringValuePrint(cgMod: CGModule, builderRaw: LLVMBuilder
     return false
 }
 
+// Emit a runtime Int64 -> C-string conversion: malloc a 24-byte buffer and snprintf the i64 `value`
+// into it as "%ld", returning the i8* buffer pointer. 24 bytes is enough for any 64-bit decimal
+// (at most 20 digits plus a sign and NUL). Used by string interpolation to stringify an Int64
+// interpolated expression before concatenation. The value is sign-extended to i64 if narrower.
+public func EmitIntToCString(cgMod: CGModule, builderRaw: LLVMBuilderRef, ctx: LLVMContextRef,
+    value: LLVMValueRef): LLVMValueRef {
+    if (value.isNull() || builderRaw.isNull()) {
+        return LLVMNullValue()
+    }
+    if (let Some(moduleHandle) <- cgMod.GetLLVMModule()) {
+        let i8Type = unsafe { LLVMInt8TypeInContext(ctx) }
+        let i8PtrType = unsafe { LLVMPointerType(i8Type, 0u32) }
+        let i32Type = unsafe { LLVMInt32TypeInContext(ctx) }
+        let i64Type = unsafe { LLVMInt64TypeInContext(ctx) }
+
+        // void *malloc(size_t)
+        let mallocType = BuildFnType1(i8PtrType, i64Type)
+        let mallocFn = GetOrInsertStringRuntimeFn(moduleHandle, "malloc", mallocType)
+        let bufSize = unsafe { LLVMConstInt(i64Type, 24u64, 0) }
+        let buf = CallFn1(builderRaw, mallocType, mallocFn, bufSize)
+
+        // int snprintf(char *buf, size_t n, const char *fmt, ...)
+        let snprintfType = BuildSnprintfType(i32Type, i8PtrType, i64Type)
+        let snprintfFn = GetOrInsertStringRuntimeFn(moduleHandle, "snprintf", snprintfType)
+        let fmtPtr = EmitCStringLiteralPointer(cgMod, builderRaw, ctx, "%ld")
+
+        // Widen a narrower integer operand to i64 for the %ld format.
+        var argValue = value
+        let valueType = unsafe { LLVMTypeOf(value) }
+        if (unsafe { LLVMGetTypeKind(valueType) } == 8) {
+            let width = unsafe { LLVMGetIntTypeWidth(valueType) }
+            if (width < 64u32) {
+                try (extName = unsafe { LibC.mallocCString("") }.asResource()) {
+                    argValue = unsafe { LLVMBuildSExt(builderRaw, value, i64Type, extName.value) }
+                }
+            }
+        }
+        try (emptyName = unsafe { LibC.mallocCString("") }.asResource(),
+            argPtr = LibC.malloc<LLVMValueRef>(count: 4).asResource()) {
+            unsafe {
+                (argPtr.value + 0).write(buf)
+                (argPtr.value + 1).write(bufSize)
+                (argPtr.value + 2).write(fmtPtr)
+                (argPtr.value + 3).write(argValue)
+                let _ = LLVMBuildCall2(builderRaw, snprintfType, snprintfFn, argPtr.value, 4u32, emptyName.value)
+            }
+        }
+        return buf
+    }
+    return LLVMNullValue()
+}
+
+// Emit a runtime Bool -> C-string conversion: select between the constant C-strings "true" and
+// "false" on the i1 `value`, returning the selected i8*. Used by string interpolation to stringify
+// a Bool interpolated expression before concatenation.
+public func EmitBoolToCString(cgMod: CGModule, builderRaw: LLVMBuilderRef, ctx: LLVMContextRef,
+    value: LLVMValueRef): LLVMValueRef {
+    if (value.isNull() || builderRaw.isNull()) {
+        return LLVMNullValue()
+    }
+    let truePtr = EmitCStringLiteralPointer(cgMod, builderRaw, ctx, "true")
+    let falsePtr = EmitCStringLiteralPointer(cgMod, builderRaw, ctx, "false")
+    var selected = LLVMNullValue()
+    try (selName = unsafe { LibC.mallocCString("") }.asResource()) {
+        selected = unsafe { LLVMBuildSelect(builderRaw, value, truePtr, falsePtr, selName.value) }
+    }
+    return selected
+}
+
+// int snprintf(char *, size_t, const char *, ...) -- variadic.
+private func BuildSnprintfType(i32Type: LLVMTypeRef, i8PtrType: LLVMTypeRef, i64Type: LLVMTypeRef): LLVMTypeRef {
+    var result = LLVMNullType()
+    try (paramPtr = LibC.malloc<LLVMTypeRef>(count: 3).asResource()) {
+        unsafe {
+            (paramPtr.value + 0).write(i8PtrType)
+            (paramPtr.value + 1).write(i64Type)
+            (paramPtr.value + 2).write(i8PtrType)
+            // isVarArg = 1 so the trailing value argument is accepted.
+            result = LLVMFunctionType(i32Type, paramPtr.value, 3u32, 1)
+        }
+    }
+    return result
+}
+
 // A filesystem-safe, content-derived key for a string literal so identical literals share one global.
 // Uses an FNV-1a hash of the bytes plus the length to keep names short and collision-resistant. The
 // hash multiply/xor deliberately wrap (modular), so the function opts into overflow-wrapping.

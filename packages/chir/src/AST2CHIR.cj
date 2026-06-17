@@ -87,6 +87,14 @@ let AST2CHIR_EXPR_UNARY: Int64 = 5
 // String concatenation reuses BINARY with op == ADD; the translator detects CString operands at
 // lowering time and emits a runtime concat (libc strlen/malloc/strcpy/strcat) instead of an int add.
 let AST2CHIR_EXPR_STR_LITERAL: Int64 = 6
+// TO_STRING: convert an Int64 or Bool sub-expression (carried in `lhs`) to its textual String form
+// at runtime, producing a CString (i8*) value. Used by string interpolation to stringify an
+// interpolated Int64/Bool expression before concatenation. The translator materializes the operand,
+// then emits a UnaryExpression whose result type is CString; codegen detects the CString result and
+// emits a runtime int->string (snprintf into a malloc'd buffer) or bool->string ("true"/"false")
+// conversion based on the operand's LLVM type. A String operand needs no conversion (it passes
+// through), so the adapter never wraps a String sub-expression in TO_STRING.
+let AST2CHIR_EXPR_TO_STRING: Int64 = 7
 
 public class AST2CHIRExprSpec {
     public let kind: Int64
@@ -118,6 +126,7 @@ public class AST2CHIRExprSpec {
     public func IsUnary(): Bool { return kind == AST2CHIR_EXPR_UNARY }
     public func IsCall(): Bool { return kind == AST2CHIR_EXPR_CALL }
     public func IsStrLiteral(): Bool { return kind == AST2CHIR_EXPR_STR_LITERAL }
+    public func IsToString(): Bool { return kind == AST2CHIR_EXPR_TO_STRING }
 
     public static func Literal(value: Int64): AST2CHIRExprSpec {
         return AST2CHIRExprSpec(AST2CHIR_EXPR_LITERAL, value, false, "", ExprKind.ADD, None, None,
@@ -138,6 +147,14 @@ public class AST2CHIRExprSpec {
     // CString (i8*) CHIR Constant -- the first-byte pointer of a private constant C-string global.
     public static func StrLit(text: String): AST2CHIRExprSpec {
         return AST2CHIRExprSpec(AST2CHIR_EXPR_STR_LITERAL, 0, false, text, ExprKind.ADD, None, None,
+            ArrayList<AST2CHIRExprSpec>())
+    }
+
+    // TO_STRING: stringify `operand` (an Int64 or Bool value) into a CString at runtime. The operand
+    // is carried in the `lhs` slot (the same slot UNARY uses). Used to lower the interpolated parts of
+    // a string interpolation literal before concatenating them with the literal text parts.
+    public static func ToStringConv(operand: AST2CHIRExprSpec): AST2CHIRExprSpec {
+        return AST2CHIRExprSpec(AST2CHIR_EXPR_TO_STRING, 0, false, "", ExprKind.ADD, Some(operand), None,
             ArrayList<AST2CHIRExprSpec>())
     }
 

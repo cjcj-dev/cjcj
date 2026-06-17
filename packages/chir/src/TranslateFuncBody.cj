@@ -380,6 +380,23 @@ extend AST2CHIRDeclTranslator {
             }
             return None
         }
+        if (expr.IsToString()) {
+            // Stringify an Int64 or Bool sub-expression into a runtime CString. If the operand is
+            // already a CString (a String value), pass it through unchanged -- no conversion needed.
+            // Otherwise emit a UnaryExpression carrying a CString result type; codegen recognizes the
+            // CString result and emits the runtime int->string / bool->string conversion. We reuse
+            // ExprKind.NEG purely as a carrier op (codegen short-circuits on the CString result type
+            // before interpreting the op), so no new ExprKind is needed.
+            if (let Some(operandValue) <- EvalExpr(expr.lhs, state)) {
+                if (IsCStringValue(operandValue)) {
+                    return Some(operandValue)
+                }
+                let cstringTy = builder.context.GetCStringTy()
+                let conv = builder.CreateUnaryExpression(ExprKind.NEG, cstringTy, operandValue, state.current)
+                return AsValue(conv.GetResult())
+            }
+            return None
+        }
         if (expr.IsUnary()) {
             let operandValue = EvalExpr(expr.lhs, state)
             if (let Some(ov) <- operandValue) {

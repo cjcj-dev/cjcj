@@ -26,6 +26,8 @@ import cangjie_compiler::parse.JumpExpr as ParseJumpExpr
 import cangjie_compiler::parse.VarPattern as ParseVarPattern
 import cangjie_compiler::parse.Block as ParseBlock
 import cangjie_compiler::parse.LitConstKind as ParseLitConstKind
+import cangjie_compiler::parse.InterpolationExpr as ParseInterpolationExpr
+import cangjie_compiler::lex.StringPartKind
 import cangjie_compiler::chir.AST2CHIRStmtSpec as ChirStmtSpec
 import cangjie_compiler::chir.AST2CHIRExprSpec as ChirExprSpec
 import cangjie_compiler::chir.ExprKind as ChirExprKind
@@ -522,6 +524,11 @@ private func adaptExpr(expr: ParseExpr, scope: AdaptScope): Option<ChirExprSpec>
     if (let Some(text) <- plainStringLiteralValue(expr)) {
         return Some(ChirExprSpec.StrLit(text))
     }
+    // A string-interpolation literal (`"a=${x} b=${y+1}"`): lower to a concat of the literal text
+    // parts and the stringified interpolated expressions, in order.
+    if (let Some(spec) <- adaptInterpolation(expr, scope)) {
+        return Some(spec)
+    }
     if (let Some(refName) <- localRefName(expr, scope)) {
         return Some(ChirExprSpec.Ref(refName))
     }
@@ -580,6 +587,105 @@ private func adaptExpr(expr: ParseExpr, scope: AdaptScope): Option<ChirExprSpec>
         return Some(ChirExprSpec.Binary(op, lhsSpec, rhsSpec))
     }
     return None
+}
+
+// Adapt a string-interpolation literal into a CHIR String concat spec. The parser stores the parsed
+// interpolation on `LitConstExpr.siExpr` as a `StrInterpolationExpr` whose `strParts` (a literal-text
+// STR part or an interpolated EXPR part) run parallel to `strPartExprs` (the matching parse Expr; a
+// `LitConstExpr` for STR parts, an `InterpolationExpr` for EXPR parts). We lower it to a left-folded
+// concat of: each STR part as a `StrLit`, and each EXPR part as `ToStringConv(<adapted expr>)`
+// (Int64/Bool stringified at runtime; a String expr passes through). Any unsupported shape (escapes
+// in a literal part, a non-simple interpolated expression, a multi-statement interpolation block)
+// returns None so the whole body falls back -- plain strings never regress. Building any concat marks
+// the body as needing runtime computation.
+private func adaptInterpolation(expr: ParseExpr, scope: AdaptScope): Option<ChirExprSpec> {
+    let lit = match (expr as ParseLitConstExpr) {
+        case Some(l) => l
+        case None => return None
+    }
+    if (lit.kind != ParseLitConstKind.STRING) {
+        return None
+    }
+    let si = match (lit.siExpr) {
+        case Some(s) => s
+        case None => return None
+    }
+    // strParts and strPartExprs are built in lock-step by the parser; bail if they ever diverge.
+    if (si.strParts.size != si.strPartExprs.size || si.strParts.isEmpty()) {
+        return None
+    }
+    var acc: Option<ChirExprSpec> = None
+    var idx = 0
+    while (idx < si.strParts.size) {
+        let part = si.strParts[idx]
+        let partExpr = si.strPartExprs[idx]
+        let pieceSpec = if (part.strKind == StringPartKind.STR) {
+            // A literal text segment. Reject any backslash escape so escape handling never diverges.
+            match (plainInterpolationText(part.value)) {
+                case Some(text) => ChirExprSpec.StrLit(text)
+                case None => return None
+            }
+        } else {
+            // An interpolated `${...}` segment: extract the inner expression and stringify it.
+            let inner = match (interpolationInnerExpr(partExpr)) {
+                case Some(e) => e
+                case None => return None
+            }
+            let innerSpec = match (adaptExpr(inner, scope)) {
+                case Some(e) => e
+                case None => return None
+            }
+            // A String interpolated expr passes through; Int64/Bool are stringified at runtime.
+            if (exprIsString(inner, scope)) {
+                innerSpec
+            } else {
+                ChirExprSpec.ToStringConv(innerSpec)
+            }
+        }
+        acc = match (acc) {
+            case Some(prev) => Some(ChirExprSpec.Binary(ChirExprKind.ADD, prev, pieceSpec))
+            case None => Some(pieceSpec)
+        }
+        idx++
+    }
+    match (acc) {
+        case Some(result) =>
+            scope.needsRuntime = true
+            return Some(result)
+        case None => return None
+    }
+}
+
+// Extract the single inner expression of an interpolation segment. The parser stores it as an
+// `InterpolationExpr` whose `block` is the parsed `${...}` body (parsed as a function-body block).
+// Only a block with exactly one statement that is itself an expression is supported; anything else
+// (empty/broken interpolation, a multi-statement block, a declaration) returns None (fallback).
+private func interpolationInnerExpr(partExpr: ParseExpr): Option<ParseExpr> {
+    let interp = match (partExpr as ParseInterpolationExpr) {
+        case Some(i) => i
+        case None => return None
+    }
+    let block = match (interp.block) {
+        case Some(b) => b
+        case None => return None
+    }
+    if (block.body.size != 1) {
+        return None
+    }
+    return block.body[0] as ParseExpr
+}
+
+// A literal interpolation text segment with no backslash escapes (return None on any `\` so escape
+// handling stays on the fallback path, mirroring plainStringLiteralValue).
+private func plainInterpolationText(text: String): Option<String> {
+    var idx = 0
+    while (idx < text.size) {
+        if (text[idx] == b'\\') {
+            return None
+        }
+        idx++
+    }
+    return Some(text)
 }
 
 // Adapt a statement-level `println(<expr>)` / `print(<expr>)` into a runtime PRINT stmt spec.
@@ -764,6 +870,12 @@ private func exprIsString(expr: ParseExpr, scope: AdaptScope): Bool {
     if (plainStringLiteralValue(expr).isSome()) {
         return true
     }
+    // A string-interpolation literal is a String value (it lowers to a String concat).
+    if (let Some(lit) <- (expr as ParseLitConstExpr)) {
+        if (lit.kind == ParseLitConstKind.STRING && lit.siExpr.isSome()) {
+            return true
+        }
+    }
     if (let Some(refExpr) <- (expr as ParseRefExpr)) {
         return scope.strNames.contains(refExpr.identifier.Val())
     }
@@ -852,7 +964,8 @@ private func intLiteralValue(expr: ParseExpr): Option<Int64> {
 // path. Multiline / raw / interpolated string kinds are also rejected (return None).
 private func plainStringLiteralValue(expr: ParseExpr): Option<String> {
     if (let Some(lit) <- (expr as ParseLitConstExpr)) {
-        if (lit.kind == ParseLitConstKind.STRING) {
+        // An interpolated string literal carries a parsed `siExpr`; it is not a plain literal.
+        if (lit.kind == ParseLitConstKind.STRING && lit.siExpr.isNone()) {
             let text = lit.stringValue
             var idx = 0
             while (idx < text.size) {
