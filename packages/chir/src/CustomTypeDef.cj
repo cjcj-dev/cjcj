@@ -39,11 +39,35 @@ public class MemberVarInfo {
 }
 
 public class FuncSigInfo {
+    public var funcName: String
     public var funcType: FuncType
     public let genericTypeParams: ArrayList<GenericType> = ArrayList<GenericType>()
 
-    public init(funcType: FuncType) {
+    public init(funcType: FuncType, funcName!: String = "",
+        genericTypeParams!: ArrayList<GenericType> = ArrayList<GenericType>()) {
+        this.funcName = funcName
         this.funcType = funcType
+        for (param in genericTypeParams) {
+            this.genericTypeParams.add(param)
+        }
+    }
+
+    public func GetGenericTypeParams(): ArrayList<GenericType> {
+        let out = ArrayList<GenericType>()
+        for (param in genericTypeParams) {
+            out.add(param)
+        }
+        return out
+    }
+
+    public func ToString(): String {
+        let typeParamText = GenericTypeParamsToString(genericTypeParams)
+        let paramText = TypeListKey(funcType.GetParamTypes())
+        return funcName + typeParamText + "(" + paramText + ") -> " + funcType.GetReturnType().ToString()
+    }
+
+    public func Dump(): Unit {
+        println(ToString())
     }
 }
 

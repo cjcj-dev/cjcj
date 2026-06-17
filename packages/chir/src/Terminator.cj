@@ -240,6 +240,310 @@ public open class ExpressionWithException <: Terminator {
     }
 }
 
+public open class FuncCallWithException <: ExpressionWithException {
+    private let instantiatedTypeArgs: ArrayList<Type> = ArrayList<Type>()
+    private var thisType: Option<Type> = None
+
+    public init(kind: ExprKind, operands: ArrayList<Value>, callContext: FuncCallContext, successBlock: Block,
+        errorBlock: Block, parent: Option<Block>) {
+        super(kind, operands, successBlock, errorBlock, parent)
+        for (ty in callContext.instTypeArgs) {
+            instantiatedTypeArgs.add(ty)
+        }
+        thisType = callContext.thisType
+    }
+
+    public open func GetArgs(): ArrayList<Value> {
+        return ArrayList<Value>()
+    }
+
+    public func GetThisType(): Option<Type> {
+        return thisType
+    }
+
+    public func SetThisType(ty: Type): Unit {
+        thisType = ty
+    }
+
+    public func GetInstantiatedTypeArgs(): ArrayList<Type> {
+        return CopyTypeList(instantiatedTypeArgs)
+    }
+
+    protected func CallTargetPrefix(): String {
+        if (let Some(ty) <- thisType) {
+            return ty.ToString() + "->"
+        }
+        return ""
+    }
+
+    protected func InstantiatedTypeArgsToString(): String {
+        if (instantiatedTypeArgs.isEmpty()) {
+            return ""
+        }
+        let parts = ArrayList<String>()
+        for (ty in instantiatedTypeArgs) {
+            parts.add(ty.ToString())
+        }
+        return "<" + JoinStrings(parts, ",") + ">"
+    }
+}
+
+public class ApplyWithException <: FuncCallWithException {
+    public init(callee: Value, callContext: FuncCallContext, successBlock: Block, errorBlock: Block,
+        parent: Option<Block>) {
+        super(ExprKind.APPLY_WITH_EXCEPTION, MakeApplyWithExceptionOperands(callee, callContext.args), callContext,
+            successBlock, errorBlock, parent)
+    }
+
+    public func GetCallee(): Value {
+        return GetOperand(0)
+    }
+
+    public override func GetArgs(): ArrayList<Value> {
+        let out = ArrayList<Value>()
+        var idx: Int64 = 1
+        while (idx < GetNumOfOperands()) {
+            out.add(GetOperand(idx))
+            idx++
+        }
+        return out
+    }
+
+    public override func OperandsToString(): String {
+        let parts = ArrayList<String>()
+        parts.add(CallTargetPrefix() + GetCallee().GetIdentifier() + InstantiatedTypeArgsToString())
+        parts.add(TerminatorValueIdsToString(GetArgs()))
+        return JoinStrings(parts, ", ")
+    }
+}
+
+public open class DynamicDispatchWithException <: FuncCallWithException {
+    private let virMethodCtx: FuncSigInfo
+    private var virtualMethodOffset: Option<UInt64> = None
+
+    public init(kind: ExprKind, callContext: InvokeCallContext, successBlock: Block, errorBlock: Block,
+        parent: Option<Block>) {
+        super(kind, MakeInvokeWithExceptionOperands(callContext.caller, callContext.funcCallCtx.args),
+            callContext.funcCallCtx, successBlock, errorBlock, parent)
+        virMethodCtx = callContext.virMethodCtx
+    }
+
+    public func GetMethodName(): String {
+        return virMethodCtx.funcName
+    }
+
+    public func GetMethodType(): FuncType {
+        return virMethodCtx.funcType
+    }
+
+    public func GetGenericTypeParams(): ArrayList<GenericType> {
+        return virMethodCtx.GetGenericTypeParams()
+    }
+
+    public func SetVirtualMethodOffset(offset: UInt64): Unit {
+        virtualMethodOffset = offset
+    }
+
+    public func GetVirtualMethodOffset(): Option<UInt64> {
+        return virtualMethodOffset
+    }
+
+    public override func OperandsToString(): String {
+        let parts = ArrayList<String>()
+        parts.add(CallTargetPrefix() + GetMethodName() + InstantiatedTypeArgsToString())
+        parts.add(GetMethodType().ToString())
+        parts.add(TerminatorValueIdsToString(GetOperands()))
+        return JoinStrings(parts, ", ")
+    }
+}
+
+public class InvokeWithException <: DynamicDispatchWithException {
+    public init(callContext: InvokeCallContext, successBlock: Block, errorBlock: Block, parent: Option<Block>) {
+        super(ExprKind.INVOKE_WITH_EXCEPTION, callContext, successBlock, errorBlock, parent)
+    }
+
+    public func GetObject(): Value {
+        return GetOperand(0)
+    }
+
+    public override func GetArgs(): ArrayList<Value> {
+        return GetOperands()
+    }
+}
+
+public class InvokeStaticWithException <: DynamicDispatchWithException {
+    public init(callContext: InvokeCallContext, successBlock: Block, errorBlock: Block, parent: Option<Block>) {
+        super(ExprKind.INVOKESTATIC_WITH_EXCEPTION, callContext, successBlock, errorBlock, parent)
+    }
+
+    public func GetRTTIValue(): Value {
+        return GetOperand(0)
+    }
+
+    public override func GetArgs(): ArrayList<Value> {
+        let out = ArrayList<Value>()
+        var idx: Int64 = 1
+        while (idx < GetNumOfOperands()) {
+            out.add(GetOperand(idx))
+            idx++
+        }
+        return out
+    }
+}
+
+public class IntOpWithException <: ExpressionWithException {
+    private let opKind: ExprKind
+
+    public init(opKind: ExprKind, operand: Value, successBlock: Block, errorBlock: Block, parent: Option<Block>) {
+        super(ExprKind.INT_OP_WITH_EXCEPTION, MakeUnaryTermOperands(operand), successBlock, errorBlock, parent)
+        this.opKind = opKind
+    }
+
+    public init(opKind: ExprKind, left: Value, right: Value, successBlock: Block, errorBlock: Block,
+        parent: Option<Block>) {
+        super(ExprKind.INT_OP_WITH_EXCEPTION, MakeBinaryTermOperands(left, right), successBlock, errorBlock, parent)
+        this.opKind = opKind
+    }
+
+    public func GetOpKind(): ExprKind {
+        return opKind
+    }
+
+    public func GetOpKindName(): String {
+        return ExprKindName(opKind)
+    }
+
+    public func GetLHSOperand(): Value {
+        return GetOperand(0)
+    }
+
+    public func GetRHSOperand(): Option<Value> {
+        if (GetNumOfOperands() > 1) {
+            return GetOperand(1)
+        }
+        return None
+    }
+
+    public override func AddExtraComment(): String {
+        let base = super.AddExtraComment()
+        let opText = "op: " + GetOpKindName()
+        if (base.isEmpty()) {
+            return opText
+        }
+        return base + " " + opText
+    }
+}
+
+public class TypeCastWithException <: ExpressionWithException {
+    public init(source: Value, successBlock: Block, errorBlock: Block, parent: Option<Block>) {
+        super(ExprKind.TYPECAST_WITH_EXCEPTION, MakeUnaryTermOperands(source), successBlock, errorBlock, parent)
+    }
+
+    public func GetSourceValue(): Value {
+        return GetOperand(0)
+    }
+
+    public func GetSourceTy(): Option<Type> {
+        return GetSourceValue().GetType()
+    }
+
+    public func GetTargetTy(): Option<Type> {
+        if (let Some(res) <- GetResult()) {
+            return res.GetType()
+        }
+        return None
+    }
+}
+
+public class AllocateWithException <: ExpressionWithException {
+    private let allocatedType: Type
+
+    public init(ty: Type, successBlock: Block, errorBlock: Block, parent: Option<Block>) {
+        super(ExprKind.ALLOCATE_WITH_EXCEPTION, ArrayList<Value>(), successBlock, errorBlock, parent)
+        allocatedType = ty
+    }
+
+    public func GetType(): Type {
+        return allocatedType
+    }
+
+    public override func OperandsToString(): String {
+        return allocatedType.ToString()
+    }
+}
+
+public class RawArrayAllocateWithException <: ExpressionWithException {
+    private let elementType: Type
+
+    public init(elementTy: Type, size: Value, successBlock: Block, errorBlock: Block, parent: Option<Block>) {
+        super(ExprKind.RAW_ARRAY_ALLOCATE_WITH_EXCEPTION, MakeUnaryTermOperands(size), successBlock, errorBlock, parent)
+        elementType = elementTy
+    }
+
+    public func GetSize(): Value {
+        return GetOperand(0)
+    }
+
+    public func GetElementType(): Type {
+        return elementType
+    }
+
+    public override func OperandsToString(): String {
+        return elementType.ToString() + ", " + GetSize().GetIdentifier()
+    }
+}
+
+public class SpawnWithException <: ExpressionWithException {
+    private var executeClosure: Option<Function> = None
+
+    public init(value: Value, successBlock: Block, errorBlock: Block, parent: Option<Block>) {
+        super(ExprKind.SPAWN_WITH_EXCEPTION, MakeUnaryTermOperands(value), successBlock, errorBlock, parent)
+    }
+
+    public init(value: Value, arg: Value, successBlock: Block, errorBlock: Block, parent: Option<Block>) {
+        super(ExprKind.SPAWN_WITH_EXCEPTION, MakeBinaryTermOperands(value, arg), successBlock, errorBlock, parent)
+    }
+
+    public func GetSpawnArg(): Option<Value> {
+        if (GetNumOfOperands() > 1) {
+            return GetOperand(1)
+        }
+        return None
+    }
+
+    public func IsExecuteClosure(): Bool {
+        return executeClosure.isSome()
+    }
+
+    public func SetExecuteClosure(fn: Function): Unit {
+        executeClosure = fn
+    }
+
+    public func GetFuture(): Value {
+        return GetOperand(0)
+    }
+
+    public func GetClosure(): Value {
+        return GetOperand(0)
+    }
+
+    public func GetExecuteClosure(): Option<Function> {
+        return executeClosure
+    }
+
+    public override func AddExtraComment(): String {
+        let base = super.AddExtraComment()
+        if (let Some(fn) <- executeClosure) {
+            let closureText = "executeClosure: " + fn.GetIdentifier()
+            if (base.isEmpty()) {
+                return closureText
+            }
+            return base + " " + closureText
+        }
+        return base
+    }
+}
+
 private func MakeOneSuccessor(target: Block): ArrayList<Block> {
     let successors = ArrayList<Block>()
     successors.add(target)
@@ -268,10 +572,43 @@ private func MakeUnaryTermOperands(value: Value): ArrayList<Value> {
     return operands
 }
 
+private func MakeBinaryTermOperands(left: Value, right: Value): ArrayList<Value> {
+    let operands = ArrayList<Value>()
+    operands.add(left)
+    operands.add(right)
+    return operands
+}
+
 private func MakeOptionalTermOperands(value: Option<Value>): ArrayList<Value> {
     let operands = ArrayList<Value>()
     if (let Some(retValue) <- value) {
         operands.add(retValue)
     }
     return operands
+}
+
+private func MakeApplyWithExceptionOperands(callee: Value, args: ArrayList<Value>): ArrayList<Value> {
+    let operands = ArrayList<Value>()
+    operands.add(callee)
+    for (arg in args) {
+        operands.add(arg)
+    }
+    return operands
+}
+
+private func MakeInvokeWithExceptionOperands(caller: Value, args: ArrayList<Value>): ArrayList<Value> {
+    let operands = ArrayList<Value>()
+    operands.add(caller)
+    for (arg in args) {
+        operands.add(arg)
+    }
+    return operands
+}
+
+private func TerminatorValueIdsToString(values: ArrayList<Value>): String {
+    let parts = ArrayList<String>()
+    for (value in values) {
+        parts.add(value.GetIdentifier())
+    }
+    return JoinStrings(parts, ", ")
 }

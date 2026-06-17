@@ -560,6 +560,18 @@ public class FuncCallContext {
     }
 }
 
+public class InvokeCallContext {
+    public let caller: Value
+    public let funcCallCtx: FuncCallContext
+    public let virMethodCtx: FuncSigInfo
+
+    public init(caller: Value, funcCallCtx: FuncCallContext, virMethodCtx: FuncSigInfo) {
+        this.caller = caller
+        this.funcCallCtx = funcCallCtx
+        this.virMethodCtx = virMethodCtx
+    }
+}
+
 public open class FuncCall <: Expression {
     private let instantiatedTypeArgs: ArrayList<Type> = ArrayList<Type>()
     private var thisType: Option<Type> = None
@@ -660,6 +672,470 @@ public class Apply <: FuncCall {
     }
 }
 
+public open class DynamicDispatch <: FuncCall {
+    private let virMethodCtx: FuncSigInfo
+    private var virtualMethodOffset: Option<UInt64> = None
+
+    public init(kind: ExprKind, callContext: InvokeCallContext, parent: Option<Block>) {
+        super(kind, callContext.funcCallCtx, parent)
+        virMethodCtx = callContext.virMethodCtx
+    }
+
+    public func GetMethodName(): String {
+        return virMethodCtx.funcName
+    }
+
+    public func GetMethodType(): FuncType {
+        return virMethodCtx.funcType
+    }
+
+    public func GetGenericTypeParams(): ArrayList<GenericType> {
+        return virMethodCtx.GetGenericTypeParams()
+    }
+
+    public func SetVirtualMethodOffset(offset: UInt64): Unit {
+        virtualMethodOffset = offset
+    }
+
+    public func GetVirtualMethodOffset(): Option<UInt64> {
+        return virtualMethodOffset
+    }
+
+    protected func DynamicDispatchPrefix(): String {
+        if (let Some(ty) <- GetThisType()) {
+            return ty.ToString() + "->"
+        }
+        return ""
+    }
+
+    public override func OperandsToString(): String {
+        let parts = ArrayList<String>()
+        parts.add(DynamicDispatchPrefix() + GetMethodName() + InstantiatedTypeArgsToString())
+        parts.add(GetMethodType().ToString())
+        parts.add(ValueIdsToString(GetOperands()))
+        return JoinStrings(parts, ", ")
+    }
+}
+
+public class Invoke <: DynamicDispatch {
+    public init(callContext: InvokeCallContext, parent: Option<Block>) {
+        super(ExprKind.INVOKE, callContext, parent)
+        AppendOperand(callContext.caller)
+        for (arg in callContext.funcCallCtx.args) {
+            AppendOperand(arg)
+        }
+    }
+
+    public func GetObject(): Value {
+        return GetOperand(0)
+    }
+
+    public override func GetArgs(): ArrayList<Value> {
+        return GetOperands()
+    }
+
+    public override func ReplaceOperand(idx: Int64, newOperand: Value): Unit {
+        super.ReplaceOperand(idx, newOperand)
+        if (idx == 0) {
+            UpdateThisType()
+        }
+    }
+
+    public override func ReplaceOperand(oldOperand: Value, newOperand: Value): Unit {
+        let changedObject = GetObject().nodeId == oldOperand.nodeId
+        super.ReplaceOperand(oldOperand, newOperand)
+        if (changedObject) {
+            UpdateThisType()
+        }
+    }
+
+    private func UpdateThisType(): Unit {
+        if (GetThisType().isNone()) {
+            if (let Some(objectTy) <- GetObject().GetType()) {
+                SetThisType(objectTy)
+            }
+        }
+    }
+}
+
+public class InvokeStatic <: DynamicDispatch {
+    public init(callContext: InvokeCallContext, parent: Option<Block>) {
+        super(ExprKind.INVOKESTATIC, callContext, parent)
+        AppendOperand(callContext.caller)
+        for (arg in callContext.funcCallCtx.args) {
+            AppendOperand(arg)
+        }
+    }
+
+    public func GetRTTIValue(): Value {
+        return GetOperand(0)
+    }
+
+    public override func GetArgs(): ArrayList<Value> {
+        let out = ArrayList<Value>()
+        var idx: Int64 = 1
+        while (idx < GetNumOfOperands()) {
+            out.add(GetOperand(idx))
+            idx++
+        }
+        return out
+    }
+}
+
+public class GetRTTI <: Expression {
+    public init(value: Value, parent: Option<Block>) {
+        super(ExprKind.GET_RTTI, MakeUnaryOperands(value), parent)
+    }
+
+    public func GetOperand(): Value {
+        return GetOperand(0)
+    }
+}
+
+public class GetRTTIStatic <: Expression {
+    private let rttiType: Type
+
+    public init(ty: Type, parent: Option<Block>) {
+        super(ExprKind.GET_RTTI_STATIC, ArrayList<Value>(), parent)
+        rttiType = ty
+    }
+
+    public func GetRTTIType(): Type {
+        return rttiType
+    }
+
+    public override func OperandsToString(): String {
+        return rttiType.ToString()
+    }
+}
+
+public class TypeCast <: Expression {
+    public init(source: Value, parent: Option<Block>) {
+        super(ExprKind.TYPECAST, MakeUnaryOperands(source), parent)
+    }
+
+    public func GetSourceValue(): Value {
+        return GetOperand(0)
+    }
+
+    public func GetSourceTy(): Option<Type> {
+        return GetSourceValue().GetType()
+    }
+
+    public func GetTargetTy(): Option<Type> {
+        if (let Some(res) <- GetResult()) {
+            return res.GetType()
+        }
+        return None
+    }
+}
+
+public class InstanceOf <: Expression {
+    private let testedType: Type
+
+    public init(value: Value, ty: Type, parent: Option<Block>) {
+        super(ExprKind.INSTANCEOF, MakeUnaryOperands(value), parent)
+        testedType = ty
+    }
+
+    public func GetObject(): Value {
+        return GetOperand(0)
+    }
+
+    public func GetType(): Type {
+        return testedType
+    }
+
+    public override func OperandsToString(): String {
+        return GetObject().GetIdentifier() + ", " + testedType.ToString()
+    }
+}
+
+public class Tuple <: Expression {
+    public init(values: ArrayList<Value>, parent: Option<Block>) {
+        super(ExprKind.TUPLE, values, parent)
+    }
+
+    public func GetElementValues(): ArrayList<Value> {
+        return GetOperands()
+    }
+
+    public func GetElementTypes(): ArrayList<Type> {
+        let out = ArrayList<Type>()
+        for (value in GetElementValues()) {
+            if (let Some(valueTy) <- value.GetType()) {
+                out.add(valueTy)
+            }
+        }
+        return out
+    }
+}
+
+public class Field <: Expression {
+    private let path: ArrayList<UInt64> = ArrayList<UInt64>()
+
+    public init(value: Value, path: ArrayList<UInt64>, parent: Option<Block>) {
+        super(ExprKind.FIELD, MakeUnaryOperands(value), parent)
+        for (item in path) {
+            this.path.add(item)
+        }
+    }
+
+    public func GetBase(): Value {
+        return GetOperand(0)
+    }
+
+    public func GetPath(): ArrayList<UInt64> {
+        let out = ArrayList<UInt64>()
+        for (item in path) {
+            out.add(item)
+        }
+        return out
+    }
+
+    public override func OperandsToString(): String {
+        let parts = ArrayList<String>()
+        parts.add(GetBase().GetIdentifier())
+        for (item in path) {
+            parts.add("${item}")
+        }
+        return JoinStrings(parts, ", ")
+    }
+}
+
+public class FieldByName <: Expression {
+    private let names: ArrayList<String> = ArrayList<String>()
+
+    public init(value: Value, names: ArrayList<String>, parent: Option<Block>) {
+        super(ExprKind.FIELD_BY_NAME, MakeUnaryOperands(value), parent)
+        for (name in names) {
+            this.names.add(name)
+        }
+    }
+
+    public func GetBase(): Value {
+        return GetOperand(0)
+    }
+
+    public func GetNames(): ArrayList<String> {
+        let out = ArrayList<String>()
+        for (name in names) {
+            out.add(name)
+        }
+        return out
+    }
+
+    public override func OperandsToString(): String {
+        let parts = ArrayList<String>()
+        parts.add(GetBase().GetIdentifier())
+        for (name in names) {
+            parts.add(name)
+        }
+        return JoinStrings(parts, ", ")
+    }
+}
+
+public class RawArrayAllocate <: Expression {
+    private let elementType: Type
+
+    public init(elementTy: Type, size: Value, parent: Option<Block>) {
+        super(ExprKind.RAW_ARRAY_ALLOCATE, MakeUnaryOperands(size), parent)
+        elementType = elementTy
+    }
+
+    public func GetSize(): Value {
+        return GetOperand(0)
+    }
+
+    public func GetElementType(): Type {
+        return elementType
+    }
+
+    public override func OperandsToString(): String {
+        return elementType.ToString() + ", " + GetSize().GetIdentifier()
+    }
+}
+
+public class RawArrayLiteralInit <: Expression {
+    public init(rawArray: Value, elements: ArrayList<Value>, parent: Option<Block>) {
+        super(ExprKind.RAW_ARRAY_LITERAL_INIT, MakeRawArrayLiteralOperands(rawArray, elements), parent)
+    }
+
+    public func GetRawArray(): Value {
+        return GetOperand(0)
+    }
+
+    public func GetSize(): Int64 {
+        return GetNumOfOperands() - 1
+    }
+
+    public func GetElements(): ArrayList<Value> {
+        let out = ArrayList<Value>()
+        var idx: Int64 = 1
+        while (idx < GetNumOfOperands()) {
+            out.add(GetOperand(idx))
+            idx++
+        }
+        return out
+    }
+}
+
+public class RawArrayInitByValue <: Expression {
+    public init(rawArray: Value, size: Value, initValue: Value, parent: Option<Block>) {
+        super(ExprKind.RAW_ARRAY_INIT_BY_VALUE, MakeThreeOperands(rawArray, size, initValue), parent)
+    }
+
+    public func GetRawArray(): Value {
+        return GetOperand(0)
+    }
+
+    public func GetSize(): Value {
+        return GetOperand(1)
+    }
+
+    public func GetInitValue(): Value {
+        return GetOperand(2)
+    }
+}
+
+public class `VArray` <: Expression {
+    public init(elements: ArrayList<Value>, parent: Option<Block>) {
+        super(ExprKind.VARRAY, elements, parent)
+    }
+
+    public func GetSize(): Int64 {
+        return GetNumOfOperands()
+    }
+}
+
+public class VArrayBuilder <: Expression {
+    private var item: Option<Value> = None
+    private var initFunc: Option<Value> = None
+
+    public init(size: Value, item: Option<Value>, initFunc: Option<Value>, parent: Option<Block>) {
+        super(ExprKind.VARRAY_BUILDER, MakeVArrayBuilderOperands(size, item, initFunc), parent)
+        this.item = item
+        this.initFunc = initFunc
+    }
+
+    public func GetSize(): Value {
+        return GetOperand(0)
+    }
+
+    public func GetItem(): Option<Value> {
+        return item
+    }
+
+    public func GetInitFunc(): Option<Value> {
+        return initFunc
+    }
+}
+
+public class GetException <: Expression {
+    public init(parent: Option<Block>) {
+        super(ExprKind.GET_EXCEPTION, ArrayList<Value>(), parent)
+    }
+}
+
+public class Debug <: Expression {
+    private let srcCodeIdentifier: String
+
+    public init(value: Value, srcCodeIdentifier: String, parent: Option<Block>) {
+        super(ExprKind.DEBUGEXPR, MakeUnaryOperands(value), parent)
+        this.srcCodeIdentifier = srcCodeIdentifier
+    }
+
+    public func GetSrcCodeIdentifier(): String {
+        return srcCodeIdentifier
+    }
+
+    public func GetValue(): Value {
+        return GetOperand(0)
+    }
+
+    public override func OperandsToString(): String {
+        return GetValue().GetIdentifier() + ", " + srcCodeIdentifier
+    }
+}
+
+public class Spawn <: Expression {
+    private var executeClosure: Option<Function> = None
+
+    public init(value: Value, parent: Option<Block>) {
+        super(ExprKind.SPAWN, MakeUnaryOperands(value), parent)
+    }
+
+    public init(value: Value, arg: Value, parent: Option<Block>) {
+        super(ExprKind.SPAWN, MakeBinaryOperands(value, arg), parent)
+    }
+
+    public func GetSpawnArg(): Option<Value> {
+        if (GetNumOfOperands() > 1) {
+            return GetOperand(1)
+        }
+        return None
+    }
+
+    public func IsExecuteClosure(): Bool {
+        return executeClosure.isSome()
+    }
+
+    public func SetExecuteClosure(fn: Function): Unit {
+        executeClosure = fn
+    }
+
+    public func GetFuture(): Value {
+        return GetOperand(0)
+    }
+
+    public func GetClosure(): Value {
+        return GetOperand(0)
+    }
+
+    public func GetExecuteClosure(): Option<Function> {
+        return executeClosure
+    }
+
+    public override func AddExtraComment(): String {
+        if (let Some(fn) <- executeClosure) {
+            return "executeClosure: " + fn.GetIdentifier()
+        }
+        return ""
+    }
+}
+
+public class GetInstantiateValue <: Expression {
+    private let instantiateTys: ArrayList<Type> = ArrayList<Type>()
+
+    public init(value: Value, instantiatedTypes: ArrayList<Type>, parent: Option<Block>) {
+        super(ExprKind.GET_INSTANTIATE_VALUE, MakeUnaryOperands(value), parent)
+        for (ty in instantiatedTypes) {
+            instantiateTys.add(ty)
+        }
+    }
+
+    public func GetInstantiateTypes(): ArrayList<Type> {
+        return CopyTypeList(instantiateTys)
+    }
+
+    public func GetInstantiateTypesRef(): ArrayList<Type> {
+        return instantiateTys
+    }
+
+    public func GetGenericResult(): Value {
+        return GetOperand(0)
+    }
+
+    public override func OperandsToString(): String {
+        let parts = ArrayList<String>()
+        parts.add(GetGenericResult().GetIdentifier())
+        for (ty in instantiateTys) {
+            parts.add(ty.ToString())
+        }
+        return JoinStrings(parts, ", ")
+    }
+}
+
 public class Lambda <: Expression {
     private var body: Option<BlockGroup> = None
     private let params: ArrayList<Parameter> = ArrayList<Parameter>()
@@ -697,8 +1173,45 @@ private func MakeBinaryOperands(left: Value, right: Value): ArrayList<Value> {
     return ops
 }
 
+private func MakeThreeOperands(first: Value, second: Value, third: Value): ArrayList<Value> {
+    let ops = ArrayList<Value>()
+    ops.add(first)
+    ops.add(second)
+    ops.add(third)
+    return ops
+}
+
+private func MakeRawArrayLiteralOperands(rawArray: Value, elements: ArrayList<Value>): ArrayList<Value> {
+    let ops = ArrayList<Value>()
+    ops.add(rawArray)
+    for (element in elements) {
+        ops.add(element)
+    }
+    return ops
+}
+
+private func MakeVArrayBuilderOperands(size: Value, item: Option<Value>, initFunc: Option<Value>): ArrayList<Value> {
+    let ops = ArrayList<Value>()
+    ops.add(size)
+    if (let Some(itemValue) <- item) {
+        ops.add(itemValue)
+    }
+    if (let Some(initValue) <- initFunc) {
+        ops.add(initValue)
+    }
+    return ops
+}
+
 private func MakeLambdaGroups(body: BlockGroup): ArrayList<BlockGroup> {
     let groups = ArrayList<BlockGroup>()
     groups.add(body)
     return groups
+}
+
+private func ValueIdsToString(values: ArrayList<Value>): String {
+    let parts = ArrayList<String>()
+    for (value in values) {
+        parts.add(value.GetIdentifier())
+    }
+    return JoinStrings(parts, ", ")
 }

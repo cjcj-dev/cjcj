@@ -184,6 +184,17 @@ public func TypeListKey(values: ArrayList<Type>): String {
     return JoinStrings(parts, ",")
 }
 
+public func GenericTypeParamsToString(values: ArrayList<GenericType>): String {
+    if (values.isEmpty()) {
+        return ""
+    }
+    let parts = ArrayList<String>()
+    for (value in values) {
+        parts.add(value.ToString())
+    }
+    return "<" + JoinStrings(parts, ",") + ">"
+}
+
 public func RemoveExpressionById(values: ArrayList<Expression>, nodeId: Int64): Bool {
     var idx: Int64 = 0
     while (idx < values.size) {

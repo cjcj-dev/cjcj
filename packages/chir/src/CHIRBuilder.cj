@@ -185,6 +185,163 @@ public class CHIRBuilder {
         return expr
     }
 
+    public func CreateInvoke(resultTy: Type, callContext: InvokeCallContext, parent: Block): Invoke {
+        let expr = Invoke(callContext, parent)
+        parent.AppendExpression(expr)
+        context.RegisterExpression(expr)
+        CreateLocalVar(resultTy, "%${context.GetAllNodesNum()}", expr)
+        return expr
+    }
+
+    public func CreateInvokeStatic(resultTy: Type, callContext: InvokeCallContext, parent: Block): InvokeStatic {
+        let expr = InvokeStatic(callContext, parent)
+        parent.AppendExpression(expr)
+        context.RegisterExpression(expr)
+        CreateLocalVar(resultTy, "%${context.GetAllNodesNum()}", expr)
+        return expr
+    }
+
+    public func CreateGetRTTI(resultTy: Type, value: Value, parent: Block): GetRTTI {
+        let expr = GetRTTI(value, parent)
+        parent.AppendExpression(expr)
+        context.RegisterExpression(expr)
+        CreateLocalVar(resultTy, "%${context.GetAllNodesNum()}", expr)
+        return expr
+    }
+
+    public func CreateGetRTTIStatic(resultTy: Type, ty: Type, parent: Block): GetRTTIStatic {
+        let expr = GetRTTIStatic(ty, parent)
+        parent.AppendExpression(expr)
+        context.RegisterExpression(expr)
+        CreateLocalVar(resultTy, "%${context.GetAllNodesNum()}", expr)
+        return expr
+    }
+
+    public func CreateTypeCast(resultTy: Type, source: Value, parent: Block): TypeCast {
+        let expr = TypeCast(source, parent)
+        parent.AppendExpression(expr)
+        context.RegisterExpression(expr)
+        CreateLocalVar(resultTy, "%${context.GetAllNodesNum()}", expr)
+        return expr
+    }
+
+    public func CreateInstanceOf(resultTy: Type, value: Value, ty: Type, parent: Block): InstanceOf {
+        let expr = InstanceOf(value, ty, parent)
+        parent.AppendExpression(expr)
+        context.RegisterExpression(expr)
+        CreateLocalVar(resultTy, "%${context.GetAllNodesNum()}", expr)
+        return expr
+    }
+
+    public func CreateTuple(resultTy: Type, values: ArrayList<Value>, parent: Block): Tuple {
+        let expr = Tuple(values, parent)
+        parent.AppendExpression(expr)
+        context.RegisterExpression(expr)
+        CreateLocalVar(resultTy, "%${context.GetAllNodesNum()}", expr)
+        return expr
+    }
+
+    public func CreateField(resultTy: Type, value: Value, path: ArrayList<UInt64>, parent: Block): Field {
+        let expr = Field(value, path, parent)
+        parent.AppendExpression(expr)
+        context.RegisterExpression(expr)
+        CreateLocalVar(resultTy, "%${context.GetAllNodesNum()}", expr)
+        return expr
+    }
+
+    public func CreateFieldByName(resultTy: Type, value: Value, names: ArrayList<String>, parent: Block): FieldByName {
+        let expr = FieldByName(value, names, parent)
+        parent.AppendExpression(expr)
+        context.RegisterExpression(expr)
+        CreateLocalVar(resultTy, "%${context.GetAllNodesNum()}", expr)
+        return expr
+    }
+
+    public func CreateRawArrayAllocate(resultTy: Type, elementTy: Type, size: Value,
+        parent: Block): RawArrayAllocate {
+        let expr = RawArrayAllocate(elementTy, size, parent)
+        parent.AppendExpression(expr)
+        context.RegisterExpression(expr)
+        CreateLocalVar(resultTy, "%${context.GetAllNodesNum()}", expr)
+        return expr
+    }
+
+    public func CreateRawArrayLiteralInit(resultTy: Type, rawArray: Value, elements: ArrayList<Value>,
+        parent: Block): RawArrayLiteralInit {
+        let expr = RawArrayLiteralInit(rawArray, elements, parent)
+        parent.AppendExpression(expr)
+        context.RegisterExpression(expr)
+        CreateLocalVar(resultTy, "%${context.GetAllNodesNum()}", expr)
+        return expr
+    }
+
+    public func CreateRawArrayInitByValue(resultTy: Type, rawArray: Value, size: Value, initValue: Value,
+        parent: Block): RawArrayInitByValue {
+        let expr = RawArrayInitByValue(rawArray, size, initValue, parent)
+        parent.AppendExpression(expr)
+        context.RegisterExpression(expr)
+        CreateLocalVar(resultTy, "%${context.GetAllNodesNum()}", expr)
+        return expr
+    }
+
+    public func CreateVArray(resultTy: Type, elements: ArrayList<Value>, parent: Block): `VArray` {
+        let expr = `VArray`(elements, parent)
+        parent.AppendExpression(expr)
+        context.RegisterExpression(expr)
+        CreateLocalVar(resultTy, "%${context.GetAllNodesNum()}", expr)
+        return expr
+    }
+
+    public func CreateVArrayBuilder(resultTy: Type, size: Value, item: Option<Value>, initFunc: Option<Value>,
+        parent: Block): VArrayBuilder {
+        let expr = VArrayBuilder(size, item, initFunc, parent)
+        parent.AppendExpression(expr)
+        context.RegisterExpression(expr)
+        CreateLocalVar(resultTy, "%${context.GetAllNodesNum()}", expr)
+        return expr
+    }
+
+    public func CreateGetException(resultTy: Type, parent: Block): GetException {
+        let expr = GetException(parent)
+        parent.AppendExpression(expr)
+        context.RegisterExpression(expr)
+        CreateLocalVar(resultTy, "%${context.GetAllNodesNum()}", expr)
+        return expr
+    }
+
+    public func CreateDebug(resultTy: Type, value: Value, srcCodeIdentifier: String, parent: Block): Debug {
+        let expr = Debug(value, srcCodeIdentifier, parent)
+        parent.AppendExpression(expr)
+        context.RegisterExpression(expr)
+        CreateLocalVar(resultTy, "%${context.GetAllNodesNum()}", expr)
+        return expr
+    }
+
+    public func CreateSpawn(resultTy: Type, value: Value, parent: Block): Spawn {
+        let expr = Spawn(value, parent)
+        parent.AppendExpression(expr)
+        context.RegisterExpression(expr)
+        CreateLocalVar(resultTy, "%${context.GetAllNodesNum()}", expr)
+        return expr
+    }
+
+    public func CreateSpawn(resultTy: Type, value: Value, arg: Value, parent: Block): Spawn {
+        let expr = Spawn(value, arg, parent)
+        parent.AppendExpression(expr)
+        context.RegisterExpression(expr)
+        CreateLocalVar(resultTy, "%${context.GetAllNodesNum()}", expr)
+        return expr
+    }
+
+    public func CreateGetInstantiateValue(resultTy: Type, value: Value, instantiatedTypes: ArrayList<Type>,
+        parent: Block): GetInstantiateValue {
+        let expr = GetInstantiateValue(value, instantiatedTypes, parent)
+        parent.AppendExpression(expr)
+        context.RegisterExpression(expr)
+        CreateLocalVar(resultTy, "%${context.GetAllNodesNum()}", expr)
+        return expr
+    }
+
     public func CreateGoTo(target: Block, parent: Block): GoTo {
         let term = GoTo(target, parent)
         parent.AppendExpression(term)
@@ -225,6 +382,96 @@ public class CHIRBuilder {
         let term = RaiseException(value, exceptionBlock, parent)
         parent.AppendExpression(term)
         context.RegisterExpression(term)
+        return term
+    }
+
+    public func CreateApplyWithException(resultTy: Type, callee: Value, callContext: FuncCallContext,
+        successBlock: Block, errorBlock: Block, parent: Block): ApplyWithException {
+        let term = ApplyWithException(callee, callContext, successBlock, errorBlock, parent)
+        parent.AppendExpression(term)
+        context.RegisterExpression(term)
+        CreateLocalVar(resultTy, "%${context.GetAllNodesNum()}", term)
+        return term
+    }
+
+    public func CreateInvokeWithException(resultTy: Type, callContext: InvokeCallContext, successBlock: Block,
+        errorBlock: Block, parent: Block): InvokeWithException {
+        let term = InvokeWithException(callContext, successBlock, errorBlock, parent)
+        parent.AppendExpression(term)
+        context.RegisterExpression(term)
+        CreateLocalVar(resultTy, "%${context.GetAllNodesNum()}", term)
+        return term
+    }
+
+    public func CreateInvokeStaticWithException(resultTy: Type, callContext: InvokeCallContext, successBlock: Block,
+        errorBlock: Block, parent: Block): InvokeStaticWithException {
+        let term = InvokeStaticWithException(callContext, successBlock, errorBlock, parent)
+        parent.AppendExpression(term)
+        context.RegisterExpression(term)
+        CreateLocalVar(resultTy, "%${context.GetAllNodesNum()}", term)
+        return term
+    }
+
+    public func CreateUnaryIntOpWithException(resultTy: Type, opKind: ExprKind, operand: Value, successBlock: Block,
+        errorBlock: Block, parent: Block): IntOpWithException {
+        let term = IntOpWithException(opKind, operand, successBlock, errorBlock, parent)
+        parent.AppendExpression(term)
+        context.RegisterExpression(term)
+        CreateLocalVar(resultTy, "%${context.GetAllNodesNum()}", term)
+        return term
+    }
+
+    public func CreateBinaryIntOpWithException(resultTy: Type, opKind: ExprKind, left: Value, right: Value,
+        successBlock: Block, errorBlock: Block, parent: Block): IntOpWithException {
+        let term = IntOpWithException(opKind, left, right, successBlock, errorBlock, parent)
+        parent.AppendExpression(term)
+        context.RegisterExpression(term)
+        CreateLocalVar(resultTy, "%${context.GetAllNodesNum()}", term)
+        return term
+    }
+
+    public func CreateTypeCastWithException(resultTy: Type, source: Value, successBlock: Block, errorBlock: Block,
+        parent: Block): TypeCastWithException {
+        let term = TypeCastWithException(source, successBlock, errorBlock, parent)
+        parent.AppendExpression(term)
+        context.RegisterExpression(term)
+        CreateLocalVar(resultTy, "%${context.GetAllNodesNum()}", term)
+        return term
+    }
+
+    public func CreateAllocateWithException(resultTy: Type, allocatedTy: Type, successBlock: Block, errorBlock: Block,
+        parent: Block): AllocateWithException {
+        let term = AllocateWithException(allocatedTy, successBlock, errorBlock, parent)
+        parent.AppendExpression(term)
+        context.RegisterExpression(term)
+        CreateLocalVar(resultTy, "%${context.GetAllNodesNum()}", term)
+        return term
+    }
+
+    public func CreateRawArrayAllocateWithException(resultTy: Type, elementTy: Type, size: Value,
+        successBlock: Block, errorBlock: Block, parent: Block): RawArrayAllocateWithException {
+        let term = RawArrayAllocateWithException(elementTy, size, successBlock, errorBlock, parent)
+        parent.AppendExpression(term)
+        context.RegisterExpression(term)
+        CreateLocalVar(resultTy, "%${context.GetAllNodesNum()}", term)
+        return term
+    }
+
+    public func CreateSpawnWithException(resultTy: Type, value: Value, successBlock: Block, errorBlock: Block,
+        parent: Block): SpawnWithException {
+        let term = SpawnWithException(value, successBlock, errorBlock, parent)
+        parent.AppendExpression(term)
+        context.RegisterExpression(term)
+        CreateLocalVar(resultTy, "%${context.GetAllNodesNum()}", term)
+        return term
+    }
+
+    public func CreateSpawnWithException(resultTy: Type, value: Value, arg: Value, successBlock: Block,
+        errorBlock: Block, parent: Block): SpawnWithException {
+        let term = SpawnWithException(value, arg, successBlock, errorBlock, parent)
+        parent.AppendExpression(term)
+        context.RegisterExpression(term)
+        CreateLocalVar(resultTy, "%${context.GetAllNodesNum()}", term)
         return term
     }
 }

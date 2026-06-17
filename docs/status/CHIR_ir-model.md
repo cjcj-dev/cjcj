@@ -27,6 +27,15 @@ Implemented in this pass:
   `FuncCallContext`, `FuncCall`, and `Apply`) plus builder factory methods.
 - Added terminator accessors and concrete terminator nodes for `MultiBranch`, `RaiseException`, and
   `ExpressionWithException`, plus branch source-expression metadata.
+- Continued the expression taxonomy with concrete IR classes and builders for virtual-call contexts (`FuncSigInfo`
+  function names, `InvokeCallContext`, `DynamicDispatch`, `Invoke`, `InvokeStatic`), RTTI, `TypeCast`,
+  `InstanceOf`, `Tuple`, `Field`, `FieldByName`, raw-array allocation/init forms, `VArray`, `VArrayBuilder`,
+  `GetException`, `Debug`, `Spawn`, and `GetInstantiateValue`.
+- Added concrete exceptional terminator expressions and builders for `ApplyWithException`, `InvokeWithException`,
+  `InvokeStaticWithException`, `IntOpWithException`, `TypeCastWithException`, `AllocateWithException`,
+  `RawArrayAllocateWithException`, and `SpawnWithException`.
+- Modeled C++ nullable operands such as spawn arguments and VArrayBuilder item/init function with `Option<Value>`
+  while keeping present operands in the normal CHIR use-def list.
 
 De-isolation:
 
@@ -35,15 +44,16 @@ De-isolation:
 
 Known remaining gaps:
 
-- The complete C++ expression taxonomy is still not ported: virtual dispatch, RTTI, type casts, intrinsics, raw-array
-  operations, varray builders, for-in forms, debug expressions, boxing/unboxing, spawn, and exception-call variants
-  remain incomplete.
+- The complete C++ expression taxonomy is still not ported: intrinsics, for-in forms, boxing/unboxing,
+  transform-to-generic/concrete, unbox-to-ref, full lambda metadata/body cloning, and complete clone behavior for all
+  expression subclasses remain incomplete.
 - Full C++ generic constraint solving, vtable search/update, inheritance traversal through extends, and precise
-  `CanBeInherited`/finalizer semantics are still missing.
+  `CanBeInherited`/finalizer semantics are still missing; dynamic dispatch currently records method context and optional
+  vtable offsets but does not compute vtable search results.
 - CHIR package metadata and type-lowering APIs still cannot expose exact AST/Sema/Basic signatures without package
   dependency work outside this IR-model scope.
 - Serializer/BCHIR/codegen consumers still cover only the subset represented by the current Cangjie IR model.
 
 Remaining `TODO(selfhost:CHIR)` markers in `packages/chir/src`: 0.
 
-Estimated real behavior coverage for this IR-model scope: 42%.
+Estimated real behavior coverage for this IR-model scope: 48%.
