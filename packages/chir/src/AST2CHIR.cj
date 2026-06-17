@@ -165,6 +165,13 @@ let AST2CHIR_STMT_IF: Int64 = 3
 let AST2CHIR_STMT_WHILE: Int64 = 4
 let AST2CHIR_STMT_PRINT: Int64 = 5
 let AST2CHIR_STMT_PRINT_STR: Int64 = 6
+// FOR: a `for (name in <start>..<end>)` / `..=` range loop. The loop variable `name` is an Int64
+// local; `expr` carries the start bound and `cond` the (exclusive or inclusive) end bound. isVar
+// records inclusivity (true => `..=`, the end is included). `thenBody` is the loop body.
+// BREAK / CONTINUE: loop control that jumps to the innermost loop's exit / continue target.
+let AST2CHIR_STMT_FOR: Int64 = 7
+let AST2CHIR_STMT_BREAK: Int64 = 8
+let AST2CHIR_STMT_CONTINUE: Int64 = 9
 
 public class AST2CHIRStmtSpec {
     public let kind: Int64
@@ -194,6 +201,9 @@ public class AST2CHIRStmtSpec {
     public func IsWhile(): Bool { return kind == AST2CHIR_STMT_WHILE }
     public func IsPrint(): Bool { return kind == AST2CHIR_STMT_PRINT }
     public func IsPrintStr(): Bool { return kind == AST2CHIR_STMT_PRINT_STR }
+    public func IsFor(): Bool { return kind == AST2CHIR_STMT_FOR }
+    public func IsBreak(): Bool { return kind == AST2CHIR_STMT_BREAK }
+    public func IsContinue(): Bool { return kind == AST2CHIR_STMT_CONTINUE }
 
     public static func Let(name: String, expr: AST2CHIRExprSpec, isVar!: Bool = false): AST2CHIRStmtSpec {
         return AST2CHIRStmtSpec(AST2CHIR_STMT_LET, name, isVar, Some(expr), None,
@@ -223,6 +233,24 @@ public class AST2CHIRStmtSpec {
     public static func While(cond: AST2CHIRExprSpec, body: ArrayList<AST2CHIRStmtSpec>): AST2CHIRStmtSpec {
         return AST2CHIRStmtSpec(AST2CHIR_STMT_WHILE, "", false, None, Some(cond), body,
             ArrayList<AST2CHIRStmtSpec>())
+    }
+
+    // FOR: `for (name in start..end)` (inclusive == false) or `for (name in start..=end)`
+    // (inclusive == true). `start` and `end` are Int64 bound expressions; `body` is the loop body.
+    public static func For(name: String, start: AST2CHIRExprSpec, end: AST2CHIRExprSpec,
+        inclusive: Bool, body: ArrayList<AST2CHIRStmtSpec>): AST2CHIRStmtSpec {
+        return AST2CHIRStmtSpec(AST2CHIR_STMT_FOR, name, inclusive, Some(start), Some(end), body,
+            ArrayList<AST2CHIRStmtSpec>())
+    }
+
+    public static func Break(): AST2CHIRStmtSpec {
+        return AST2CHIRStmtSpec(AST2CHIR_STMT_BREAK, "", false, None, None,
+            ArrayList<AST2CHIRStmtSpec>(), ArrayList<AST2CHIRStmtSpec>())
+    }
+
+    public static func Continue(): AST2CHIRStmtSpec {
+        return AST2CHIRStmtSpec(AST2CHIR_STMT_CONTINUE, "", false, None, None,
+            ArrayList<AST2CHIRStmtSpec>(), ArrayList<AST2CHIRStmtSpec>())
     }
 
     // PRINT: evaluate `expr` to a runtime Int64 Value and print it. `newline` (carried in the isVar

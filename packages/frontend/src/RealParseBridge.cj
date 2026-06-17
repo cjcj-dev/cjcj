@@ -20,6 +20,10 @@ import cangjie_compiler::parse.ReturnExpr as ParseReturnExpr
 import cangjie_compiler::parse.ParenExpr as ParseParenExpr
 import cangjie_compiler::parse.IfExpr as ParseIfExpr
 import cangjie_compiler::parse.WhileExpr as ParseWhileExpr
+import cangjie_compiler::parse.ForInExpr as ParseForInExpr
+import cangjie_compiler::parse.RangeExpr as ParseRangeExpr
+import cangjie_compiler::parse.JumpExpr as ParseJumpExpr
+import cangjie_compiler::parse.VarPattern as ParseVarPattern
 import cangjie_compiler::parse.Block as ParseBlock
 import cangjie_compiler::parse.LitConstKind as ParseLitConstKind
 import cangjie_compiler::chir.AST2CHIRStmtSpec as ChirStmtSpec
@@ -116,6 +120,9 @@ private class AdaptScope {
     let boolNames = HashSet<String>()
     let funcNames: HashSet<String>
     var needsRuntime: Bool = false
+    // Depth of enclosing `for`/`while` loops currently being adapted. A `break`/`continue` is only
+    // accepted (promotable) when loopDepth > 0; otherwise the body falls back to the summary path.
+    var loopDepth: Int64 = 0
 
     init(funcNames: HashSet<String>) {
         this.funcNames = funcNames
@@ -203,6 +210,20 @@ private func adaptStatements(block: ParseBlock, scope: AdaptScope): Option<Array
         }
         if (let Some(whileExpr) <- (node as ParseWhileExpr)) {
             match (adaptWhile(whileExpr, scope)) {
+                case Some(stmt) => out.add(stmt)
+                case None => return None
+            }
+            continue
+        }
+        if (let Some(forInExpr) <- (node as ParseForInExpr)) {
+            match (adaptForIn(forInExpr, scope)) {
+                case Some(stmt) => out.add(stmt)
+                case None => return None
+            }
+            continue
+        }
+        if (let Some(jumpExpr) <- (node as ParseJumpExpr)) {
+            match (adaptJump(jumpExpr, scope)) {
                 case Some(stmt) => out.add(stmt)
                 case None => return None
             }
@@ -346,12 +367,102 @@ private func adaptWhile(whileExpr: ParseWhileExpr, scope: AdaptScope): Option<Ch
         case Some(b) => b
         case None => return None
     }
+    scope.loopDepth++
     let bodyStmts = match (adaptStatements(bodyBlock, scope)) {
-        case Some(s) => s
-        case None => return None
+        case Some(s) =>
+            scope.loopDepth--
+            s
+        case None =>
+            scope.loopDepth--
+            return None
     }
     scope.needsRuntime = true
     return Some(ChirStmtSpec.While(condSpec, bodyStmts))
+}
+
+// Adapt `for (name in start..end)` / `for (name in start..=end)`. Only a simple `VarPattern` loop
+// variable iterating a literal `RangeExpr` (`..` exclusive or `..=` inclusive) over Int64 bound
+// expressions is supported; anything else fails the match (fallback). The loop variable is added to
+// scope for the body. A `where` guard is rejected.
+private func adaptForIn(forInExpr: ParseForInExpr, scope: AdaptScope): Option<ChirStmtSpec> {
+    if (forInExpr.patternGuard.isSome()) {
+        return None
+    }
+    let pattern = match (forInExpr.pattern) {
+        case Some(p) => p
+        case None => return None
+    }
+    let varPattern = match (pattern as ParseVarPattern) {
+        case Some(vp) => vp
+        case None => return None
+    }
+    let varName = varPattern.identifier.Val()
+    if (varName.isEmpty()) {
+        return None
+    }
+    let inExpr = match (forInExpr.inExpr) {
+        case Some(e) => e
+        case None => return None
+    }
+    let rangeExpr = match (inExpr as ParseRangeExpr) {
+        case Some(r) => r
+        case None => return None
+    }
+    let inclusive = match (rangeExpr.op.kind) {
+        case TokenKind.RANGEOP => false
+        case TokenKind.CLOSEDRANGEOP => true
+        case _ => return None
+    }
+    let startExpr = match (rangeExpr.leftExpr) {
+        case Some(e) => e
+        case None => return None
+    }
+    let endExpr = match (rangeExpr.rightExpr) {
+        case Some(e) => e
+        case None => return None
+    }
+    let startSpec = match (adaptExpr(startExpr, scope)) {
+        case Some(e) => e
+        case None => return None
+    }
+    let endSpec = match (adaptExpr(endExpr, scope)) {
+        case Some(e) => e
+        case None => return None
+    }
+    let body = match (forInExpr.body) {
+        case Some(b) => b
+        case None => return None
+    }
+    // The loop variable is an Int64 local in scope for the body.
+    scope.locals.add(varName)
+    scope.loopDepth++
+    let bodyStmts = match (adaptStatements(body, scope)) {
+        case Some(s) =>
+            scope.loopDepth--
+            s
+        case None =>
+            scope.loopDepth--
+            return None
+    }
+    scope.needsRuntime = true
+    return Some(ChirStmtSpec.For(varName, startSpec, endSpec, inclusive, bodyStmts))
+}
+
+// Adapt a `break` / `continue` jump. Only accepted inside a loop (loopDepth > 0); otherwise fall
+// back. A loop body is genuine runtime computation, so these mark needsRuntime.
+private func adaptJump(jumpExpr: ParseJumpExpr, scope: AdaptScope): Option<ChirStmtSpec> {
+    if (scope.loopDepth <= 0) {
+        return None
+    }
+    return match (jumpExpr.token.kind) {
+        case TokenKind.BREAK =>
+            scope.needsRuntime = true
+            Some(ChirStmtSpec.Break())
+        case TokenKind.CONTINUE =>
+            scope.needsRuntime = true
+            Some(ChirStmtSpec.Continue())
+        case _ => None
+    }
 }
 
 // Adapt a parse expression into a CHIR expression spec. Supports Int64 literals, references to

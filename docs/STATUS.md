@@ -1,6 +1,6 @@
 # Self-Hosting Port Status
 
-Date: 2026-06-17
+Date: 2026-06-18
 
 This is the aggregate status for the Cangjie self-hosting compiler port. It
 combines the module narratives in `docs/status/*.md` with a live scan of
@@ -24,15 +24,16 @@ returns lower through `CreateLiteralReturnBody`).
 
 The following programs compile with the self-host `cjc`
 (`./target/release/bin/cangjie_compiler::cjc`) and run with the verified behavior
-shown. Each was re-verified by real compile-and-run on 2026-06-17 (latest: the Bool
-milestone) after merging
+shown. Each was re-verified by real compile-and-run on 2026-06-18 (latest: the
+richer-loops milestone) after merging
 `opus2/int-arith-return`, `opus2/println-int`, `opus3/real-expr`,
 `opus4/control-flow` (var/assign, relational ops, `if`/`while` via real CHIR
 blocks), `opus5/func-calls` (user-defined function calls + recursion via
 real CHIR `Apply`), `opus6/print-runtime` (`println`/`print` of a
-runtime-computed value), and `opus8/bool` (first-class `Bool` values: literals,
+runtime-computed value), `opus8/bool` (first-class `Bool` values: literals,
 `Bool` locals/params/returns, `&&`/`||`/`!`, relational results as values,
-`println(<Bool>)`) into `main`:
+`println(<Bool>)`), and `opus9/loops` (`for-in` over `..`/`..=` integer ranges,
+`break`, `continue`) into `main`:
 
 | Source | Verified behavior |
 | --- | --- |
@@ -43,6 +44,11 @@ runtime-computed value), and `opus8/bool` (first-class `Bool` values: literals,
 | `func add(a: Int64, b: Int64): Int64 { return a + b }` ⏎ `main(): Int64 { return add(2, 3) }` | exits with code 5, computed at **runtime** by a real CHIR `Apply` to the user function `add` |
 | `func fact(n: Int64): Int64 { if (n<=1){return 1} else {return n*fact(n-1)} }` ⏎ `main(): Int64 { return fact(5) }` | exits with code 120 via **recursion** (CHIR dump shows recursive `Apply(_Cdefault_fact, ...)` self-calls) |
 | `main(): Int64 { var sum=0; var i=1; while (i<=5){ sum=sum+i; i=i+1 }; return sum }` | exits with code 15, computed at **runtime** by a genuine CHIR `while` loop (no folding; sum 1..10 separately verified -> 55) |
+| `main(): Int64 { var s=0; for (i in 0..5) { s=s+i }; return s }` | exits with code 10 -- a genuine CHIR `for-in` over the half-open range `[0,5)` (cond/body/inc/exit blocks; `i < end` guard) |
+| `main(): Int64 { var s=0; for (i in 1..=5) { s=s+i }; return s }` | exits with code 15 -- inclusive range `[1,5]` (`i <= end` guard) |
+| `main(): Int64 { var s=0; for (i in 0..100) { if (i==5){break}; s=s+i }; return s }` | exits with code 10 -- `break` jumps to the loop exit block |
+| `main(): Int64 { var s=0; for (i in 0..6) { if (i==3){continue}; s=s+i }; return s }` | exits with code 12 -- `continue` jumps to the increment block (i still advances) |
+| `main() { for (i in 0..3) { println(i) } }` | prints `0`/`1`/`2` -- the runtime loop variable printed each iteration |
 | `main() { var s=0; var i=1; while (i<=10){ s=s+i; i=i+1 }; println(s) }` | prints `55` -- the **runtime** loop accumulator, lowered through a real-body PRINT (`printf("%ld\n", <CHIR value>)`), not a folded literal |
 | `func fact(n: Int64): Int64 { ... }` ⏎ `main() { println(fact(10)) }` | prints `3628800` -- the **runtime** result of a recursive CHIR `Apply` (value exceeds the 0..255 exit-code clamp, so the printed text is the real evidence) |
 | `main(): Int64 { var x = 2; x = x + 3; return x }` | exits with code 5 (`var` slot + reassignment Store) |
@@ -215,6 +221,33 @@ Capability detail:
   `isEven(10)` (`Bool`-returning function) -> exit 1; `gt(5,2)` returned `Bool` -> exit 4;
   `println(true); println(false)` -> `true`/`false`; `println(5 > 3); println(2 > 4)` ->
   `true`/`false`.
+- **Richer-loops milestone (`opus9/loops`):** the real body-lowering path now compiles
+  `for-in` loops over integer ranges plus `break`/`continue`. Supported: `for (name in
+  start..end)` (half-open `[start,end)`) and `for (name in start..=end)` (inclusive
+  `[start,end]`) where the bounds are any supported `Int64` expression (literal, local,
+  param, arithmetic, call); `break` and `continue` inside any `for`/`while` loop; and
+  arbitrary nesting (a `for` inside a `for`/`while` and vice versa). It is additive and
+  gated like the prior milestones: a body using any unsupported construct leaves
+  `hasRealBody == false` and falls back to the summary path, so the already-verified
+  slices stay byte-for-byte. The spec model (`packages/chir/src/AST2CHIR.cj`) gains `FOR`
+  (loop variable name, start/end bound exprs, an inclusive flag, body), `BREAK`, and
+  `CONTINUE` `AST2CHIRStmtSpec` kinds. `TranslateFuncBody.cj` desugars a `for-in` to
+  genuine CHIR blocks `for.cond` / `for.body` / `for.inc` / `for.exit`: the loop variable
+  and the (once-evaluated) end bound get their own slots; `for.cond` loads `i` and the end
+  and branches on `i < end` (or `i <= end` for `..=`); `for.body` runs the body and falls
+  to `for.inc`, which does `i = i + 1` and back-edges to `for.cond`. A `RealBodyState`
+  loop-target stack (`loopBreakTargets` / `loopContinueTargets`, pushed on loop entry and
+  popped on exit) resolves `break` to the innermost loop's exit block and `continue` to its
+  continue target (a `while`'s cond block, or a `for`'s increment block so `i` still
+  advances). The real parser adapter (`RealParseBridge.cj`) recognizes a `parse.ForInExpr`
+  with a simple `VarPattern` loop variable iterating a `parse.RangeExpr` (`..` / `..=`,
+  via `RANGEOP` / `CLOSEDRANGEOP` tokens) and a `parse.JumpExpr` (`break` / `continue`),
+  tracking loop depth so a `break`/`continue` is only promoted inside a loop. Verified at
+  runtime (no folding): `for (i in 0..5){s=s+i}` -> exit 10; `for (i in 1..=5){s=s+i}` ->
+  exit 15; `for (i in 0..100){if(i==5){break}; s=s+i}` -> exit 10; `for (i in 0..6)
+  {if(i==3){continue}; s=s+i}` -> exit 12; `for (i in 0..3){println(i)}` -> `0`/`1`/`2`;
+  `while(true){if(i==4){break};...}` -> exit 6; nested `for (i in 0..3){for (j in 0..3)
+  {s=s+1}}` -> exit 9.
 
 These are the only source constructs the integrated pipeline lowers end to end
 today; anything else still flows through the compatibility models described
@@ -229,12 +262,14 @@ below.
   Extend the PRINT lowering / `EmitRuntime*Print` (format selection + a real `String`
   runtime representation) once those value types flow through the real body. A `String`
   *local/var* and string concatenation on the real path are the next concrete step.
-- **More operators and statement kinds on the real path.** `for-in`, `match`, early
-  `break`/`continue`, and compound assignment (`+=` etc.) are still unsupported (the
-  body falls back to the summary path). Logical `&&`/`||` and unary `!` are now
-  supported (`opus8/bool`), though `&&`/`||` are currently lowered as non-short-circuit
-  `And`/`Or` on i1 -- real short-circuit evaluation is a follow-up. Extend
-  `RealParseBridge` -> `AST2CHIRStmtSpec`/`AST2CHIRExprSpec` -> `CreateRealBody`.
+- **More operators and statement kinds on the real path.** `match` and compound
+  assignment (`+=` etc.) are still unsupported (the body falls back to the summary path).
+  `for-in` over integer ranges plus `break`/`continue` are now supported (`opus9/loops`);
+  `for-in` over other iterables (arrays, collections, `String`) and a `where` guard are
+  follow-ups. Logical `&&`/`||` and unary `!` are supported (`opus8/bool`), though
+  `&&`/`||` are currently lowered as non-short-circuit `And`/`Or` on i1 -- real
+  short-circuit evaluation is a follow-up. Extend `RealParseBridge` ->
+  `AST2CHIRStmtSpec`/`AST2CHIRExprSpec` -> `CreateRealBody`.
 - **Retire the summary parser.** Once the real parser drives every supported
   construct, remove the frontend token-summary scanner
   (`packages/frontend/src/CompileStrategy.cj` `parseLiteralReturn` /
@@ -242,8 +277,8 @@ below.
   arithmetic fold, so all bodies flow through `RealParseBridge` ->
   `AST2CHIRStmtSpec` -> `CreateRealBody`.
 - Extend the real-body adapter to more statement kinds and types beyond `Int64`
-  and `Bool` (`String`, other integer/`Float` widths, `for-in`, `match`, early
-  `break`/`continue`).
+  and `Bool` (`String`, other integer/`Float` widths, `for-in` over non-range
+  iterables, `match`).
 - Converge `frontend.*` / `parse.*` / `ast.*` (make the bridge consume `ast.*`
   produced from `parse.*`, or have `parse` emit `ast.*` directly) and delete the
   frontend minimal AST (`FrontendModel.cj`).

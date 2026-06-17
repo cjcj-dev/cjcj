@@ -14,6 +14,11 @@ class RealBodyState {
     // the slot using this type so Bool locals round-trip as i1 rather than being widened to i64.
     let localTypes = HashMap<String, Type>()
     let body: BlockGroup
+    // Stack of enclosing loop control targets. `break` jumps to the top entry's exit block;
+    // `continue` jumps to its continue block (a while's cond block, or a for loop's increment block).
+    // Pushed on loop entry, popped on loop exit, so a break/continue resolves to the innermost loop.
+    let loopBreakTargets = ArrayList<Block>()
+    let loopContinueTargets = ArrayList<Block>()
 
     init(entry: Block, body: BlockGroup) {
         this.current = entry
@@ -116,6 +121,24 @@ extend AST2CHIRDeclTranslator {
         }
         if (stmt.IsWhile()) {
             LowerWhile(fn, stmt, state)
+            return
+        }
+        if (stmt.IsFor()) {
+            LowerFor(fn, stmt, state)
+            return
+        }
+        if (stmt.IsBreak()) {
+            if (!state.loopBreakTargets.isEmpty()) {
+                builder.CreateGoTo(state.loopBreakTargets[state.loopBreakTargets.size - 1], state.current)
+                state.terminated = true
+            }
+            return
+        }
+        if (stmt.IsContinue()) {
+            if (!state.loopContinueTargets.isEmpty()) {
+                builder.CreateGoTo(state.loopContinueTargets[state.loopContinueTargets.size - 1], state.current)
+                state.terminated = true
+            }
             return
         }
         if (stmt.IsPrint()) {
@@ -223,13 +246,90 @@ extend AST2CHIRDeclTranslator {
         }
         builder.CreateBranch(cond, bodyBlock, exitBlock, state.current)
 
-        // Body block: run the loop body, then jump back to the condition (back-edge).
+        // Body block: run the loop body, then jump back to the condition (back-edge). `continue`
+        // jumps to the condition block; `break` jumps to the exit block.
         state.current = bodyBlock
         state.terminated = false
+        state.loopBreakTargets.add(exitBlock)
+        state.loopContinueTargets.add(condBlock)
         LowerStatements(fn, stmt.thenBody, state)
+        state.loopBreakTargets.remove(at: state.loopBreakTargets.size - 1)
+        state.loopContinueTargets.remove(at: state.loopContinueTargets.size - 1)
         if (!state.terminated) {
             builder.CreateGoTo(condBlock, state.current)
         }
+
+        // Continue after the loop at the exit block.
+        state.current = exitBlock
+        state.terminated = false
+    }
+
+    // Lower `for (name in start..end)` / `..=`. Desugars to:
+    //   slot = start; goto cond
+    //   cond:  branch (i </<= end) -> body | exit
+    //   body:  <loop body>; goto inc
+    //   inc:   i = i + 1; goto cond     (continue target)
+    //   exit:  ...                       (break target)
+    // The loop variable `name` is a fresh Int64 local in scope for the body. The end bound is
+    // evaluated once before the loop and held in its own slot so a runtime end expression is not
+    // re-evaluated each iteration (and so it cannot be perturbed by the body).
+    private func LowerFor(fn: Function, stmt: AST2CHIRStmtSpec, state: RealBodyState): Unit {
+        let int64Ty = builder.context.GetInt64Ty()
+        // Evaluate the start and end bounds in the current block.
+        let startValue = match (EvalExpr(stmt.expr, state)) {
+            case Some(v) => v
+            case None => return
+        }
+        let endValue = match (EvalExpr(stmt.cond, state)) {
+            case Some(v) => v
+            case None => return
+        }
+        // Loop variable slot (initialized to start) and a slot holding the end bound.
+        let varSlot = AllocateSlot(int64Ty, state.current)
+        builder.CreateStore(startValue, varSlot, state.current)
+        let endSlot = AllocateSlot(int64Ty, state.current)
+        builder.CreateStore(endValue, endSlot, state.current)
+        state.locals[stmt.name] = varSlot
+        state.localTypes[stmt.name] = int64Ty
+
+        let condBlock = builder.CreateBlock("for.cond", state.body)
+        let bodyBlock = builder.CreateBlock("for.body", state.body)
+        let incBlock = builder.CreateBlock("for.inc", state.body)
+        let exitBlock = builder.CreateBlock("for.exit", state.body)
+
+        builder.CreateGoTo(condBlock, state.current)
+
+        // Condition: load i and end, compare with `<` (exclusive) or `<=` (inclusive).
+        state.current = condBlock
+        state.terminated = false
+        let iVal = builder.CreateLoad(int64Ty, varSlot, state.current).GetResult().getOrThrow()
+        let endVal = builder.CreateLoad(int64Ty, endSlot, state.current).GetResult().getOrThrow()
+        let cmpOp = if (stmt.isVar) { ExprKind.LE } else { ExprKind.LT }
+        let boolTy = builder.context.GetBoolTy()
+        let cond = builder.CreateBinaryExpression(cmpOp, boolTy, iVal, endVal, state.current).GetResult().getOrThrow()
+        builder.CreateBranch(cond, bodyBlock, exitBlock, state.current)
+
+        // Body: run the loop body, then fall to the increment block. `continue` jumps to inc;
+        // `break` jumps to exit.
+        state.current = bodyBlock
+        state.terminated = false
+        state.loopBreakTargets.add(exitBlock)
+        state.loopContinueTargets.add(incBlock)
+        LowerStatements(fn, stmt.thenBody, state)
+        state.loopBreakTargets.remove(at: state.loopBreakTargets.size - 1)
+        state.loopContinueTargets.remove(at: state.loopContinueTargets.size - 1)
+        if (!state.terminated) {
+            builder.CreateGoTo(incBlock, state.current)
+        }
+
+        // Increment: i = i + 1; back-edge to cond.
+        state.current = incBlock
+        state.terminated = false
+        let curVal = builder.CreateLoad(int64Ty, varSlot, state.current).GetResult().getOrThrow()
+        let one = builder.CreateConstant(int64Ty, IntLiteral(1), state.current).GetResult().getOrThrow()
+        let next = builder.CreateBinaryExpression(ExprKind.ADD, int64Ty, curVal, one, state.current).GetResult().getOrThrow()
+        builder.CreateStore(next, varSlot, state.current)
+        builder.CreateGoTo(condBlock, state.current)
 
         // Continue after the loop at the exit block.
         state.current = exitBlock

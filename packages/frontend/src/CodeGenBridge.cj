@@ -459,7 +459,7 @@ private func stmtsReturnValue(stmts: ArrayList<ChirStmtSpec>): Bool {
         if (stmt.IsReturn() && stmt.expr.isSome()) {
             return true
         }
-        if (stmt.IsIf() || stmt.IsWhile()) {
+        if (stmt.IsIf() || stmt.IsWhile() || stmt.IsFor()) {
             if (stmtsReturnValue(stmt.thenBody) || stmtsReturnValue(stmt.elseBody)) {
                 return true
             }
