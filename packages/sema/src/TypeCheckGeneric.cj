@@ -18,6 +18,140 @@ private func typeListContainsTy(values: ArrayList<Ty>, ty: Ty): Bool {
     return false
 }
 
+private func genericListContainsTy(values: ArrayList<GenericsTy>, ty: Ty): Bool {
+    for (value in values) {
+        if (SameTy(value, ty)) {
+            return true
+        }
+    }
+    return false
+}
+
+private func mergeTypeSubst(target: TypeSubst, source: TypeSubst): Unit {
+    for (entry in source.entries) {
+        target.Put(entry.tyVar, entry.ty)
+    }
+}
+
+private func collectTypeArgTys(typeArgs: ArrayList<Type>): ArrayList<Ty> {
+    let out = ArrayList<Ty>()
+    for (typeArg in typeArgs) {
+        if (let Some(ty) <- typeArg.GetTy()) {
+            out.add(ty)
+        }
+    }
+    return out
+}
+
+private func filterPromoteMappingForExplicitBaseArgs(mapping: MultiTypeSubst, realBase: Decl,
+    baseTypeArgs: ArrayList<Type>): Unit {
+    if (let None <- realBase.GetTy()) {
+        return
+    }
+    let genericTys = GetAllGenericTys(realBase.GetTy().getOrThrow())
+    let explicitTys = collectTypeArgTys(baseTypeArgs)
+    for (entry in mapping.entries) {
+        var idx: Int64 = 0
+        while (idx < entry.tys.values.size) {
+            let mappedTy = entry.tys.values[idx]
+            if (genericListContainsTy(genericTys, mappedTy) && !typeListContainsTy(explicitTys, mappedTy)) {
+                entry.tys.values.remove(at: idx)
+            } else {
+                idx++
+            }
+        }
+    }
+}
+
+private func hasUpperBoundMapping(memberAccess: MemberAccess, target: Decl): Bool {
+    for (entry in memberAccess.foundUpperBoundMap) {
+        if (SameDecl(entry[0], target) && !entry[1].isEmpty()) {
+            return true
+        }
+    }
+    return false
+}
+
+private func isGenericUpperBoundCall(memberAccess: MemberAccess, target: Decl): Bool {
+    if (let None <- memberAccess.baseExpr) {
+        return false
+    }
+    let baseExpr = memberAccess.baseExpr.getOrThrow()
+    if (let None <- baseExpr.GetTy()) {
+        return false
+    }
+    if (!baseExpr.GetTy().getOrThrow().IsGeneric()) {
+        return false
+    }
+    if (let None <- target.outerDecl) {
+        return false
+    }
+    return hasUpperBoundMapping(memberAccess, target)
+}
+
+private func generateTypeMappingForUpperBounds(typeManager: TypeManager, memberAccess: MemberAccess,
+    target: Decl, typeMapping: MultiTypeSubst): Unit {
+    for (entry in memberAccess.foundUpperBoundMap) {
+        if (SameDecl(entry[0], target)) {
+            for (upper in entry[1]) {
+                typeManager.GenerateGenericMapping(typeMapping, upper)
+            }
+            return
+        }
+    }
+}
+
+private func generateTypeMappingForBaseExpr(typeManager: TypeManager, memberAccess: MemberAccess,
+    typeMapping: MultiTypeSubst): Unit {
+    if (let None <- memberAccess.baseExpr) {
+        return
+    }
+    let baseExpr = memberAccess.baseExpr.getOrThrow()
+    if (let None <- baseExpr.GetTy()) {
+        return
+    }
+    let baseTy = baseExpr.GetTy().getOrThrow()
+    if (!Ty.IsTyCorrect(baseTy)) {
+        return
+    }
+    if (IsThisOrSuper(baseExpr)) {
+        typeManager.GenerateGenericMapping(typeMapping, baseTy)
+        return
+    }
+
+    let realBaseOpt = GetRealTarget(baseExpr.GetTarget())
+    if (let Some(realBase) <- realBaseOpt) {
+        if (realBase.astKind == ASTKind.PACKAGE_DECL) {
+            return
+        }
+        if (let Some(memberTarget) <- memberAccess.GetTarget()) {
+            if (let Some(outerDecl) <- memberTarget.outerDecl) {
+                if (realBase.IsTypeDecl() || realBase.TestAttr(Attribute.ENUM_CONSTRUCTOR)) {
+                    if (let Some(outerTy) <- outerDecl.GetTy()) {
+                        let promoteMapping = Promotion(typeManager).GetPromoteTypeMapping(baseTy, outerTy)
+                        filterPromoteMappingForExplicitBaseArgs(promoteMapping, realBase, baseExpr.GetTypeArgs())
+                        MergeMultiTypeSubsts(typeMapping, promoteMapping)
+                    }
+                    return
+                }
+            }
+        }
+    }
+
+    typeManager.GenerateGenericMapping(typeMapping, baseTy)
+}
+
+private func generateTypeMappingForMemberAccess(typeManager: TypeManager, memberAccess: MemberAccess,
+    target: Decl): TypeSubst {
+    let instMap = MultiTypeSubst()
+    if (memberAccess.isExposedAccess && isGenericUpperBoundCall(memberAccess, target)) {
+        generateTypeMappingForUpperBounds(typeManager, memberAccess, target, instMap)
+    } else {
+        generateTypeMappingForBaseExpr(typeManager, memberAccess, instMap)
+    }
+    return MultiTypeSubstToTypeSubst(instMap)
+}
+
 private func exprTarget(expr: Expr): Option<Decl> {
     if (let Some(refExpr) <- (expr as RefExpr)) {
         if (let Some(target) <- refExpr.ref.target) {
@@ -464,7 +598,11 @@ extend TypeCheckerImpl {
         if (let None <- genericDecl) {
             return true
         }
-        let instantiateMap = GenerateTypeMapping(targetDecl, typeArgs)
+        let instantiateMap = TypeSubst()
+        if (let Some(memberAccess) <- (checkNode as MemberAccess)) {
+            mergeTypeSubst(instantiateMap, generateTypeMappingForMemberAccess(typeManager, memberAccess, targetDecl))
+        }
+        mergeTypeSubst(instantiateMap, GenerateTypeMapping(targetDecl, typeArgs))
         for (constraint in genericDecl.getOrThrow().genericConstraints) {
             if (let None <- constraint.refType) {
                 return false
