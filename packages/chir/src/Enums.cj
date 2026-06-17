@@ -209,6 +209,29 @@ extend AccessLevel <: Equatable<AccessLevel> {
     }
 }
 
+public enum CustomDefKind {
+    | TYPE_STRUCT | TYPE_ENUM | TYPE_CLASS | TYPE_EXTEND
+}
+
+public func CustomDefKindIndex(kind: CustomDefKind): Int64 {
+    return match (kind) {
+        case CustomDefKind.TYPE_STRUCT => 0
+        case CustomDefKind.TYPE_ENUM => 1
+        case CustomDefKind.TYPE_CLASS => 2
+        case CustomDefKind.TYPE_EXTEND => 3
+    }
+}
+
+extend CustomDefKind <: Equatable<CustomDefKind> {
+    public operator func ==(right: CustomDefKind): Bool {
+        return CustomDefKindIndex(this) == CustomDefKindIndex(right)
+    }
+
+    public operator func !=(right: CustomDefKind): Bool {
+        return !(this == right)
+    }
+}
+
 public enum ValueKind {
     | KIND_LITERAL | KIND_GLOBALVAR | KIND_PARAMETER | KIND_LOCALVAR
     | KIND_FUNC | KIND_BLOCK | KIND_BLOCK_GROUP
@@ -520,6 +543,49 @@ extend ExprKind <: Equatable<ExprKind> {
     }
 
     public operator func !=(right: ExprKind): Bool {
+        return !(this == right)
+    }
+}
+
+public enum SourceExpr {
+    | IF_EXPR | WHILE_EXPR | DO_WHILE_EXPR | MATCH_EXPR | IF_LET_OR_WHILE_LET
+    | QUEST | BINARY | FOR_IN_EXPR | OTHER
+}
+
+public func SourceExprIndex(kind: SourceExpr): Int64 {
+    return match (kind) {
+        case SourceExpr.IF_EXPR => 0
+        case SourceExpr.WHILE_EXPR => 1
+        case SourceExpr.DO_WHILE_EXPR => 2
+        case SourceExpr.MATCH_EXPR => 3
+        case SourceExpr.IF_LET_OR_WHILE_LET => 4
+        case SourceExpr.QUEST => 5
+        case SourceExpr.BINARY => 6
+        case SourceExpr.FOR_IN_EXPR => 7
+        case SourceExpr.OTHER => 8
+    }
+}
+
+public func SourceExprName(kind: SourceExpr): String {
+    return match (kind) {
+        case SourceExpr.IF_EXPR => "IF_EXPR"
+        case SourceExpr.WHILE_EXPR => "WHILE_EXPR"
+        case SourceExpr.DO_WHILE_EXPR => "DO_WHILE_EXPR"
+        case SourceExpr.MATCH_EXPR => "MATCH_EXPR"
+        case SourceExpr.IF_LET_OR_WHILE_LET => "IF_LET_OR_WHILE_LET"
+        case SourceExpr.QUEST => "QUEST"
+        case SourceExpr.BINARY => "BINARY"
+        case SourceExpr.FOR_IN_EXPR => "FOR_IN_EXPR"
+        case SourceExpr.OTHER => "OTHER"
+    }
+}
+
+extend SourceExpr <: Equatable<SourceExpr> {
+    public operator func ==(right: SourceExpr): Bool {
+        return SourceExprIndex(this) == SourceExprIndex(right)
+    }
+
+    public operator func !=(right: SourceExpr): Bool {
         return !(this == right)
     }
 }

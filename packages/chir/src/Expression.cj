@@ -364,6 +364,302 @@ public class Constant <: Expression {
     }
 }
 
+public class Allocate <: Expression {
+    private let allocatedType: Type
+
+    public init(ty: Type, parent: Option<Block>) {
+        super(ExprKind.ALLOCATE, ArrayList<Value>(), parent)
+        allocatedType = ty
+    }
+
+    public func GetType(): Type {
+        return allocatedType
+    }
+
+    public override func OperandsToString(): String {
+        return allocatedType.ToString()
+    }
+}
+
+public class Load <: Expression {
+    public init(location: Value, parent: Option<Block>) {
+        super(ExprKind.LOAD, MakeUnaryOperands(location), parent)
+    }
+
+    public func GetLocation(): Value {
+        return GetOperand(0)
+    }
+}
+
+public class Store <: Expression {
+    public init(value: Value, location: Value, parent: Option<Block>) {
+        super(ExprKind.STORE, MakeBinaryOperands(value, location), parent)
+    }
+
+    public func GetValue(): Value {
+        return GetOperand(0)
+    }
+
+    public func GetLocation(): Value {
+        return GetOperand(1)
+    }
+}
+
+public class GetElementRef <: Expression {
+    private let path: ArrayList<UInt64> = ArrayList<UInt64>()
+
+    public init(location: Value, path: ArrayList<UInt64>, parent: Option<Block>) {
+        super(ExprKind.GET_ELEMENT_REF, MakeUnaryOperands(location), parent)
+        for (item in path) {
+            this.path.add(item)
+        }
+    }
+
+    public func GetLocation(): Value {
+        return GetOperand(0)
+    }
+
+    public func GetPath(): ArrayList<UInt64> {
+        let out = ArrayList<UInt64>()
+        for (item in path) {
+            out.add(item)
+        }
+        return out
+    }
+
+    public override func OperandsToString(): String {
+        let parts = ArrayList<String>()
+        parts.add(GetLocation().GetIdentifier())
+        for (item in path) {
+            parts.add("${item}")
+        }
+        return JoinStrings(parts, ", ")
+    }
+}
+
+public class GetElementByName <: Expression {
+    private let names: ArrayList<String> = ArrayList<String>()
+
+    public init(location: Value, names: ArrayList<String>, parent: Option<Block>) {
+        super(ExprKind.GET_ELEMENT_BY_NAME, MakeUnaryOperands(location), parent)
+        for (name in names) {
+            this.names.add(name)
+        }
+    }
+
+    public func GetLocation(): Value {
+        return GetOperand(0)
+    }
+
+    public func GetNames(): ArrayList<String> {
+        let out = ArrayList<String>()
+        for (name in names) {
+            out.add(name)
+        }
+        return out
+    }
+
+    public override func OperandsToString(): String {
+        let parts = ArrayList<String>()
+        parts.add(GetLocation().GetIdentifier())
+        for (name in names) {
+            parts.add(name)
+        }
+        return JoinStrings(parts, ", ")
+    }
+}
+
+public class StoreElementRef <: Expression {
+    private let path: ArrayList<UInt64> = ArrayList<UInt64>()
+
+    public init(value: Value, location: Value, path: ArrayList<UInt64>, parent: Option<Block>) {
+        super(ExprKind.STORE_ELEMENT_REF, MakeBinaryOperands(value, location), parent)
+        for (item in path) {
+            this.path.add(item)
+        }
+    }
+
+    public func GetValue(): Value {
+        return GetOperand(0)
+    }
+
+    public func GetLocation(): Value {
+        return GetOperand(1)
+    }
+
+    public func GetPath(): ArrayList<UInt64> {
+        let out = ArrayList<UInt64>()
+        for (item in path) {
+            out.add(item)
+        }
+        return out
+    }
+
+    public override func OperandsToString(): String {
+        let parts = ArrayList<String>()
+        parts.add(GetValue().GetIdentifier())
+        parts.add(GetLocation().GetIdentifier())
+        for (item in path) {
+            parts.add("${item}")
+        }
+        return JoinStrings(parts, ", ")
+    }
+}
+
+public class StoreElementByName <: Expression {
+    private let names: ArrayList<String> = ArrayList<String>()
+
+    public init(value: Value, location: Value, names: ArrayList<String>, parent: Option<Block>) {
+        super(ExprKind.STORE_ELEMENT_BY_NAME, MakeBinaryOperands(value, location), parent)
+        for (name in names) {
+            this.names.add(name)
+        }
+    }
+
+    public func GetValue(): Value {
+        return GetOperand(0)
+    }
+
+    public func GetLocation(): Value {
+        return GetOperand(1)
+    }
+
+    public func GetNames(): ArrayList<String> {
+        let out = ArrayList<String>()
+        for (name in names) {
+            out.add(name)
+        }
+        return out
+    }
+
+    public override func OperandsToString(): String {
+        let parts = ArrayList<String>()
+        parts.add(GetValue().GetIdentifier())
+        parts.add(GetLocation().GetIdentifier())
+        for (name in names) {
+            parts.add(name)
+        }
+        return JoinStrings(parts, ", ")
+    }
+}
+
+public class FuncCallContext {
+    public let args: ArrayList<Value> = ArrayList<Value>()
+    public let instTypeArgs: ArrayList<Type> = ArrayList<Type>()
+    public var thisType: Option<Type> = None
+
+    public init(args!: ArrayList<Value> = ArrayList<Value>(), instTypeArgs!: ArrayList<Type> = ArrayList<Type>(),
+        thisType!: Option<Type> = None) {
+        for (arg in args) {
+            this.args.add(arg)
+        }
+        for (ty in instTypeArgs) {
+            this.instTypeArgs.add(ty)
+        }
+        this.thisType = thisType
+    }
+}
+
+public open class FuncCall <: Expression {
+    private let instantiatedTypeArgs: ArrayList<Type> = ArrayList<Type>()
+    private var thisType: Option<Type> = None
+
+    public init(kind: ExprKind, funcCallCtx: FuncCallContext, parent: Option<Block>) {
+        super(kind, ArrayList<Value>(), parent)
+        for (ty in funcCallCtx.instTypeArgs) {
+            instantiatedTypeArgs.add(ty)
+        }
+        thisType = funcCallCtx.thisType
+    }
+
+    public open func GetArgs(): ArrayList<Value> {
+        return ArrayList<Value>()
+    }
+
+    public func GetThisType(): Option<Type> {
+        return thisType
+    }
+
+    public func SetThisType(ty: Type): Unit {
+        thisType = ty
+    }
+
+    public func ClearThisType(): Unit {
+        thisType = None
+    }
+
+    public func GetInstantiatedTypeArgs(): ArrayList<Type> {
+        return CopyTypeList(instantiatedTypeArgs)
+    }
+
+    protected func CallTargetPrefix(): String {
+        if (let Some(ty) <- thisType) {
+            return ty.ToString() + "->"
+        }
+        return ""
+    }
+
+    protected func InstantiatedTypeArgsToString(): String {
+        if (instantiatedTypeArgs.isEmpty()) {
+            return ""
+        }
+        let parts = ArrayList<String>()
+        for (ty in instantiatedTypeArgs) {
+            parts.add(ty.ToString())
+        }
+        return "<" + JoinStrings(parts, ",") + ">"
+    }
+}
+
+public class Apply <: FuncCall {
+    private var isSuperCall: Bool = false
+
+    public init(callee: Value, callContext: FuncCallContext, parent: Option<Block>) {
+        super(ExprKind.APPLY, callContext, parent)
+        AppendOperand(callee)
+        for (arg in callContext.args) {
+            AppendOperand(arg)
+        }
+    }
+
+    public func GetCallee(): Value {
+        return GetOperand(0)
+    }
+
+    public override func GetArgs(): ArrayList<Value> {
+        let out = ArrayList<Value>()
+        var idx: Int64 = 1
+        while (idx < GetNumOfOperands()) {
+            out.add(GetOperand(idx))
+            idx++
+        }
+        return out
+    }
+
+    public func IsSuperCall(): Bool {
+        return isSuperCall
+    }
+
+    public func SetSuperCall(): Unit {
+        isSuperCall = true
+    }
+
+    public override func OperandsToString(): String {
+        let parts = ArrayList<String>()
+        parts.add(CallTargetPrefix() + GetCallee().GetIdentifier() + InstantiatedTypeArgsToString())
+        let argNames = ArrayList<String>()
+        for (arg in GetArgs()) {
+            argNames.add(arg.GetIdentifier())
+        }
+        parts.add(JoinStrings(argNames, ", "))
+        return JoinStrings(parts, ", ")
+    }
+
+    public override func AddExtraComment(): String {
+        return if (isSuperCall) { "isSuperCall" } else { "" }
+    }
+}
+
 public class Lambda <: Expression {
     private var body: Option<BlockGroup> = None
     private let params: ArrayList<Parameter> = ArrayList<Parameter>()

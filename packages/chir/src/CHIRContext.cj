@@ -104,6 +104,22 @@ public class CHIRContext {
     public func GetCStringTy(): CStringType { return cstringTy }
     public func GetVoidTy(): VoidType { return voidTy }
 
+    public func GetStringTy(): Option<StructType> {
+        if (let Some(pkg) <- curPackage) {
+            if (let Some(def) <- pkg.TryGetStructDef("String")) {
+                if (def.GetPackageName() == "std.core") {
+                    return GetStructTy(def, ArrayList<Type>())
+                }
+            }
+            for (def in pkg.GetAllStructDef()) {
+                if (def.GetPackageName() == "std.core" && def.GetIdentifier() == "String") {
+                    return GetStructTy(def, ArrayList<Type>())
+                }
+            }
+        }
+        return None
+    }
+
     public func SetObjectTy(ty: ClassType): Unit {
         objectTy = ty
     }
@@ -145,14 +161,26 @@ public class CHIRContext {
         return ty
     }
 
-    public func GetRawArrayTy(elementTy: Type): RawArrayType {
-        let key = "rawarray:" + elementTy.ToString()
+    public func GetRawArrayTy(elementTy: Type, dims!: UInt64 = 1u64): RawArrayType {
+        let key = "rawarray:${dims}:" + elementTy.ToString()
         if (let Some(cached) <- typeCache.get(key)) {
             if (let Some(found) <- (cached as RawArrayType)) {
                 return found
             }
         }
-        let ty = RawArrayType(elementTy)
+        let ty = RawArrayType(elementTy, dims: dims)
+        typeCache[key] = ty
+        return ty
+    }
+
+    public func GetCPointerTy(elementTy: Type): CPointerType {
+        let key = "cpointer:" + elementTy.ToString()
+        if (let Some(cached) <- typeCache.get(key)) {
+            if (let Some(found) <- (cached as CPointerType)) {
+                return found
+            }
+        }
+        let ty = CPointerType(elementTy)
         typeCache[key] = ty
         return ty
     }
@@ -213,6 +241,7 @@ public class CHIRContext {
             }
         }
         let ty = StructType(def, args)
+        def.SetType(ty)
         typeCache[key] = ty
         return ty
     }
@@ -225,6 +254,7 @@ public class CHIRContext {
             }
         }
         let ty = ClassType(def, args)
+        def.SetType(ty)
         typeCache[key] = ty
         return ty
     }
@@ -237,6 +267,7 @@ public class CHIRContext {
             }
         }
         let ty = EnumType(def, args)
+        def.SetType(ty)
         typeCache[key] = ty
         return ty
     }
