@@ -73,15 +73,25 @@ paths now uses `FileUtil.GetRelativePath` and `FileUtil.GetPkgNameFromRelativePa
 AST dump directory creation now matches the C++ Frontend's
 `CreateDirs(dumpDir + DIR_SEPARATOR)` call shape.
 
+This continuation added a real dependency on `cangjie_compiler::option` at the
+remaining Frontend compatibility boundary. Frontend now delegates cfg.toml
+loading to `option.SetupConditionalCompilationCfgFromFile`, validates inline
+`--cfg` identifiers through `FileUtil.IsIdentifier`, and uses the shared option
+`StableHashString` for C++-style cache artifact names. Compatibility
+`GlobalOptions` now derives `compilationCachedPath`, relative source paths,
+`.cached` directories, per-package cache names, codegen cache names, and hashed
+object names with the same algorithm shape as the C++ `Option::GlobalOptions`
+implementation.
+
 ## Important Blocker
 
-`packages/frontend/cjpm.toml` now imports the real `basic`, `lex`, and `utils`
-packages. A faithful production Frontend port must still import and wire the real
+`packages/frontend/cjpm.toml` now imports the real `basic`, `lex`, `option`, and
+`utils` packages. A faithful production Frontend port must still import and wire the real
 `ast`, `parse`, `conditional_compilation`, `modules`, `macro`, `sema`, `mangle`,
 `chir`, and incremental-compilation packages. This pass keeps local compatibility
 models for those still-unwired layers so the workspace can compile while Basic
 source/diagnostic primitives, Lex tokenization, and shared utility file/path,
-serialization, cache, and option primitives are no longer duplicated.
+serialization, cache, cfg-file, and option primitives are no longer duplicated.
 
 Remaining Frontend self-host markers: 0.
 
