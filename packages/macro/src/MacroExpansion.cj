@@ -11,12 +11,16 @@ import cangjie_compiler::parse.BinaryExpr as ParsedBinaryExpr
 import cangjie_compiler::parse.Block as ParsedBlock
 import cangjie_compiler::parse.CallExpr as ParsedCallExpr
 import cangjie_compiler::parse.ClassDecl as ParsedClassDecl
+import cangjie_compiler::parse.CommandTypePattern as ParsedCommandTypePattern
+import cangjie_compiler::parse.ConstPattern as ParsedConstPattern
 import cangjie_compiler::parse.Decl as ParsedDecl
 import cangjie_compiler::parse.DiagSeverity as ParsedDiagSeverity
 import cangjie_compiler::parse.DiagnosticEngine as ParsedDiagnosticEngine
 import cangjie_compiler::parse.Expr as ParsedExpr
 import cangjie_compiler::parse.ExprKind as ParsedExprKind
 import cangjie_compiler::parse.EnumDecl as ParsedEnumDecl
+import cangjie_compiler::parse.EnumPattern as ParsedEnumPattern
+import cangjie_compiler::parse.ExceptTypePattern as ParsedExceptTypePattern
 import cangjie_compiler::parse.ExtendDecl as ParsedExtendDecl
 import cangjie_compiler::parse.DoWhileExpr as ParsedDoWhileExpr
 import cangjie_compiler::parse.ForInExpr as ParsedForInExpr
@@ -71,10 +75,15 @@ import cangjie_compiler::parse.TryExpr as ParsedTryExpr
 import cangjie_compiler::parse.TupleLit as ParsedTupleLit
 import cangjie_compiler::parse.Type as ParsedType
 import cangjie_compiler::parse.TypeConvExpr as ParsedTypeConvExpr
+import cangjie_compiler::parse.TuplePattern as ParsedTuplePattern
+import cangjie_compiler::parse.TypePattern as ParsedTypePattern
 import cangjie_compiler::parse.UnaryExpr as ParsedUnaryExpr
 import cangjie_compiler::parse.VarDecl as ParsedVarDecl
+import cangjie_compiler::parse.VarOrEnumPattern as ParsedVarOrEnumPattern
+import cangjie_compiler::parse.VarPattern as ParsedVarPattern
 import cangjie_compiler::parse.VarWithPatternDecl as ParsedVarWithPatternDecl
 import cangjie_compiler::parse.WildcardExpr as ParsedWildcardExpr
+import cangjie_compiler::parse.WildcardPattern as ParsedWildcardPattern
 import cangjie_compiler::parse.WhileExpr as ParsedWhileExpr
 
 private func hasNoMacros(mc: MacroCollector): Bool {
@@ -1124,7 +1133,114 @@ private func convertParsedType(parsedType: ParsedType, fallbackFile: Option<File
     return targetType
 }
 
+private func parsedEnumPatternConstructorName(parsedEnumPattern: ParsedEnumPattern): String {
+    if (parsedEnumPattern.constructorParts.isEmpty()) {
+        return parsedEnumPattern.constructor.GetRawText()
+    }
+    let builder = StringBuilder()
+    var partIdx: Int64 = 0
+    while (partIdx < parsedEnumPattern.constructorParts.size) {
+        if (partIdx > 0) {
+            builder.append(".")
+        }
+        builder.append(parsedEnumPattern.constructorParts[partIdx].GetRawText())
+        partIdx++
+    }
+    return builder.toString()
+}
+
+private func fillTypeListPattern(
+    parsedPattern: ParsedPattern,
+    targetPattern: TypeListPattern,
+    fallbackFile: Option<File>
+): Unit {
+    if (let Some(parsedExceptPattern) <- (parsedPattern as ParsedExceptTypePattern)) {
+        if (let Some(innerPattern) <- parsedExceptPattern.pattern) {
+            targetPattern.pattern = Some(convertParsedPattern(innerPattern, fallbackFile))
+        }
+        for (patternType in parsedExceptPattern.types) {
+            targetPattern.types.add(convertParsedType(patternType, fallbackFile))
+        }
+    } else if (let Some(parsedCommandPattern) <- (parsedPattern as ParsedCommandTypePattern)) {
+        if (let Some(innerCommandPattern) <- parsedCommandPattern.pattern) {
+            targetPattern.pattern = Some(convertParsedPattern(innerCommandPattern, fallbackFile))
+        }
+        for (commandType in parsedCommandPattern.types) {
+            targetPattern.types.add(convertParsedType(commandType, fallbackFile))
+        }
+    }
+}
+
 private func convertParsedPattern(parsedPattern: ParsedPattern, fallbackFile: Option<File>): Pattern {
+    if (let Some(parsedWildcardPattern) <- (parsedPattern as ParsedWildcardPattern)) {
+        let targetWildcardPattern = WildcardPattern()
+        copyParsedNodeBase(parsedWildcardPattern, targetWildcardPattern, fallbackFile)
+        return targetWildcardPattern
+    }
+    if (let Some(parsedConstPattern) <- (parsedPattern as ParsedConstPattern)) {
+        let targetConstPattern = ConstPattern()
+        copyParsedNodeBase(parsedConstPattern, targetConstPattern, fallbackFile)
+        if (let Some(parsedLiteral) <- parsedConstPattern.literal) {
+            targetConstPattern.literal = Some(convertParsedExpr(parsedLiteral, fallbackFile))
+        }
+        return targetConstPattern
+    }
+    if (let Some(parsedVarPattern) <- (parsedPattern as ParsedVarPattern)) {
+        let targetVarPattern = VarPattern()
+        copyParsedNodeBase(parsedVarPattern, targetVarPattern, fallbackFile)
+        targetVarPattern.identifier = parsedVarPattern.identifier.GetRawText()
+        targetVarPattern.isVar = parsedVarPattern.isVar
+        return targetVarPattern
+    }
+    if (let Some(parsedTuplePattern) <- (parsedPattern as ParsedTuplePattern)) {
+        let targetTuplePattern = TuplePattern()
+        copyParsedNodeBase(parsedTuplePattern, targetTuplePattern, fallbackFile)
+        for (tuplePattern in parsedTuplePattern.patterns) {
+            targetTuplePattern.patterns.add(convertParsedPattern(tuplePattern, fallbackFile))
+        }
+        return targetTuplePattern
+    }
+    if (let Some(parsedEnumPattern) <- (parsedPattern as ParsedEnumPattern)) {
+        let targetEnumPattern = EnumPattern()
+        copyParsedNodeBase(parsedEnumPattern, targetEnumPattern, fallbackFile)
+        targetEnumPattern.constructor = parsedEnumPatternConstructorName(parsedEnumPattern)
+        for (typeArgument in parsedEnumPattern.typeArguments) {
+            targetEnumPattern.typeArguments.add(convertParsedType(typeArgument, fallbackFile))
+        }
+        for (enumInnerPattern in parsedEnumPattern.patterns) {
+            targetEnumPattern.patterns.add(convertParsedPattern(enumInnerPattern, fallbackFile))
+        }
+        return targetEnumPattern
+    }
+    if (let Some(parsedVarOrEnumPattern) <- (parsedPattern as ParsedVarOrEnumPattern)) {
+        let targetVarOrEnumPattern = VarOrEnumPattern()
+        copyParsedNodeBase(parsedVarOrEnumPattern, targetVarOrEnumPattern, fallbackFile)
+        targetVarOrEnumPattern.identifier = parsedVarOrEnumPattern.identifier.GetRawText()
+        return targetVarOrEnumPattern
+    }
+    if (let Some(parsedTypePattern) <- (parsedPattern as ParsedTypePattern)) {
+        let targetTypePattern = TypePattern()
+        copyParsedNodeBase(parsedTypePattern, targetTypePattern, fallbackFile)
+        if (let Some(innerTypePattern) <- parsedTypePattern.pattern) {
+            targetTypePattern.pattern = Some(convertParsedPattern(innerTypePattern, fallbackFile))
+        }
+        if (let Some(typePatternType) <- parsedTypePattern.typeNode) {
+            targetTypePattern.typeNode = Some(convertParsedType(typePatternType, fallbackFile))
+        }
+        return targetTypePattern
+    }
+    if (let Some(parsedExceptPattern) <- (parsedPattern as ParsedExceptTypePattern)) {
+        let targetExceptPattern = ExceptTypePattern()
+        copyParsedNodeBase(parsedExceptPattern, targetExceptPattern, fallbackFile)
+        fillTypeListPattern(parsedExceptPattern, targetExceptPattern, fallbackFile)
+        return targetExceptPattern
+    }
+    if (let Some(parsedCommandPattern) <- (parsedPattern as ParsedCommandTypePattern)) {
+        let targetCommandPattern = CommandTypePattern()
+        copyParsedNodeBase(parsedCommandPattern, targetCommandPattern, fallbackFile)
+        fillTypeListPattern(parsedCommandPattern, targetCommandPattern, fallbackFile)
+        return targetCommandPattern
+    }
     let targetPattern = Pattern()
     copyParsedNodeBase(parsedPattern, targetPattern, fallbackFile)
     return targetPattern

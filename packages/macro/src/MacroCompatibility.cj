@@ -229,6 +229,147 @@ public open class Pattern <: Node {
     public init() {
         super(ASTKind.PATTERN)
     }
+
+    public init(kind: ASTKind) {
+        super(kind)
+    }
+}
+
+public class WildcardPattern <: Pattern {
+    public init() {
+        super(ASTKind.WILDCARD_PATTERN)
+    }
+}
+
+public class ConstPattern <: Pattern {
+    public var literal: Option<Expr> = None
+
+    public init() {
+        super(ASTKind.CONST_PATTERN)
+    }
+
+    public override func Children(): ArrayList<Node> {
+        let out = ArrayList<Node>()
+        if (let Some(expr) <- literal) {
+            out.add(expr)
+        }
+        return out
+    }
+}
+
+public class VarPattern <: Pattern {
+    public var identifier: String = ""
+    public var isVar: Bool = false
+
+    public init() {
+        super(ASTKind.VAR_PATTERN)
+    }
+}
+
+public class TuplePattern <: Pattern {
+    public let patterns: ArrayList<Pattern> = ArrayList<Pattern>()
+
+    public init() {
+        super(ASTKind.TUPLE_PATTERN)
+    }
+
+    public override func Children(): ArrayList<Node> {
+        let out = ArrayList<Node>()
+        for (pattern in patterns) {
+            out.add(pattern)
+        }
+        return out
+    }
+}
+
+public class EnumPattern <: Pattern {
+    public var constructor: String = ""
+    public let typeArguments: ArrayList<Type> = ArrayList<Type>()
+    public let patterns: ArrayList<Pattern> = ArrayList<Pattern>()
+
+    public init() {
+        super(ASTKind.ENUM_PATTERN)
+    }
+
+    public override func Children(): ArrayList<Node> {
+        let out = ArrayList<Node>()
+        for (ty in typeArguments) {
+            out.add(ty)
+        }
+        for (pattern in patterns) {
+            out.add(pattern)
+        }
+        return out
+    }
+}
+
+public class VarOrEnumPattern <: Pattern {
+    public var identifier: String = ""
+    public var pattern: Option<Pattern> = None
+
+    public init() {
+        super(ASTKind.VAR_OR_ENUM_PATTERN)
+    }
+
+    public override func Children(): ArrayList<Node> {
+        let out = ArrayList<Node>()
+        if (let Some(innerPattern) <- pattern) {
+            out.add(innerPattern)
+        }
+        return out
+    }
+}
+
+public class TypePattern <: Pattern {
+    public var pattern: Option<Pattern> = None
+    public var typeNode: Option<Type> = None
+
+    public init() {
+        super(ASTKind.TYPE_PATTERN)
+    }
+
+    public override func Children(): ArrayList<Node> {
+        let out = ArrayList<Node>()
+        if (let Some(innerPattern) <- pattern) {
+            out.add(innerPattern)
+        }
+        if (let Some(ty) <- typeNode) {
+            out.add(ty)
+        }
+        return out
+    }
+}
+
+public open class TypeListPattern <: Pattern {
+    public var pattern: Option<Pattern> = None
+    public let types: ArrayList<Type> = ArrayList<Type>()
+
+    public init(kind: ASTKind) {
+        super(kind)
+    }
+
+    public override func Children(): ArrayList<Node> {
+        let out = ArrayList<Node>()
+        if (let Some(innerPattern) <- pattern) {
+            out.add(innerPattern)
+        }
+        for (ty in types) {
+            out.add(ty)
+        }
+        return out
+    }
+}
+
+public class ExceptTypePattern <: TypeListPattern {
+    public init() {
+        super(ASTKind.EXCEPT_TYPE_PATTERN)
+    }
+}
+
+public class CommandTypePattern <: TypeListPattern {
+    public init() {
+        super(ASTKind.COMMAND_TYPE_PATTERN)
+    }
 }
 
 public class Annotation <: Node {

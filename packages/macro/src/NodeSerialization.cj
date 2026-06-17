@@ -100,7 +100,81 @@ public class NodeWriter {
     }
 
     public func SerializePattern(pattern: Pattern): String {
+        if (let Some(_) <- (pattern as WildcardPattern)) {
+            return "wildcardPattern()"
+        }
+        if (let Some(constPattern) <- (pattern as ConstPattern)) {
+            return "constPattern(lit=" + SerializeExprOptionForNodeWriter(this, constPattern.literal) + ")"
+        }
+        if (let Some(varPattern) <- (pattern as VarPattern)) {
+            return "varPattern(" + EscapeNodeText(varPattern.identifier) + ";isVar=" +
+                varPattern.isVar.toString() + ")"
+        }
+        if (let Some(tuplePattern) <- (pattern as TuplePattern)) {
+            return "tuplePattern(" + SerializePatternVector(tuplePattern.patterns) + ")"
+        }
+        if (let Some(enumPattern) <- (pattern as EnumPattern)) {
+            return "enumPattern(" + EscapeNodeText(enumPattern.constructor) + ";types=" +
+                SerializeTypeVector(enumPattern.typeArguments) + ";patterns=" +
+                SerializePatternVector(enumPattern.patterns) + ")"
+        }
+        if (let Some(varOrEnumPattern) <- (pattern as VarOrEnumPattern)) {
+            return "varOrEnumPattern(" + EscapeNodeText(varOrEnumPattern.identifier) + ";pattern=" +
+                SerializePatternOption(varOrEnumPattern.pattern) + ")"
+        }
+        if (let Some(typePattern) <- (pattern as TypePattern)) {
+            return "typePattern(pattern=" + SerializePatternOption(typePattern.pattern) + ";type=" +
+                SerializeTypeOptionForNodeWriter(this, typePattern.typeNode) + ")"
+        }
+        if (let Some(exceptTypePattern) <- (pattern as ExceptTypePattern)) {
+            return SerializeTypeListPattern("exceptTypePattern", exceptTypePattern)
+        }
+        if (let Some(commandTypePattern) <- (pattern as CommandTypePattern)) {
+            return SerializeTypeListPattern("commandTypePattern", commandTypePattern)
+        }
         return "pattern(" + ASTKindIndex(pattern.astKind).toString() + ")"
+    }
+
+    private func SerializePatternOption(pattern: Option<Pattern>): String {
+        if (let Some(value) <- pattern) {
+            return SerializePattern(value)
+        }
+        return "none"
+    }
+
+    private func SerializePatternVector(patterns: ArrayList<Pattern>): String {
+        let builder = StringBuilder()
+        builder.append("[")
+        var patternIdx: Int64 = 0
+        while (patternIdx < patterns.size) {
+            if (patternIdx > 0) {
+                builder.append(",")
+            }
+            builder.append(SerializePattern(patterns[patternIdx]))
+            patternIdx++
+        }
+        builder.append("]")
+        return builder.toString()
+    }
+
+    private func SerializeTypeVector(types: ArrayList<Type>): String {
+        let builder = StringBuilder()
+        builder.append("[")
+        var typeIdx: Int64 = 0
+        while (typeIdx < types.size) {
+            if (typeIdx > 0) {
+                builder.append(",")
+            }
+            builder.append(SerializeType(types[typeIdx]))
+            typeIdx++
+        }
+        builder.append("]")
+        return builder.toString()
+    }
+
+    private func SerializeTypeListPattern(kindName: String, pattern: TypeListPattern): String {
+        return kindName + "(pattern=" + SerializePatternOption(pattern.pattern) + ";types=" +
+            SerializeTypeVector(pattern.types) + ")"
     }
 
     public func SerializeType(ty: Type): String {
