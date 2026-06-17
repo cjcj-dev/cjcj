@@ -31,8 +31,10 @@ encoding them as scattered branch logic.
   TOML entries, invalid identifiers, built-in keys, and duplicate keys emit the
   corresponding Basic diagnostics. The local LSP reader now uses Basic's real
   `SplitLines`/`SplitString` helpers, matching the C++ `Basic/Utils` call path,
-  while preserving Option's identifier and NFC normalization behavior. The
-  cfg-file builtin-key set intentionally follows Option's parser (`os`,
+  and Utils' real `FileUtil.JoinPath`/`FileUtil.FileExist`, matching the C++
+  FileUtil owner for cfg file discovery, while preserving Option's identifier
+  and NFC normalization behavior. The cfg-file builtin-key set intentionally
+  follows Option's parser (`os`,
   `backend`, `arch`, `debug`, `cjc_version`, `test`); `env` remains a target
   condition for expression evaluation but is not rejected by cfg.toml parsing,
   matching the C++ split.
@@ -41,11 +43,11 @@ encoding them as scattered branch logic.
   as in `ConditionalCompilationImpl::EvalNodeCondition`.
 - Removed the unused `DefaultTargetTriple` shim from this module; target triples
   are owned by the real Option package just as in the C++ compiler.
-- The package still exposes `ConditionalCompilationCompilerInstance` as a small
-  provider interface for the real `option.GlobalOptions` and
-  `basic.DiagnosticEngine`. The current `frontend.CompilerInstance` in this
-  worktree owns separate frontend-local compatibility models, so importing it
-  here would re-isolate this module from the real Basic/AST/Option packages.
+- Removed the package-local `ConditionalCompilationCompilerInstance`
+  compatibility interface. Until `frontend.CompilerInstance` is moved onto the
+  real AST/Basic/Option model, this package is configured through
+  `ConditionalCompilationConfig` or real `option.GlobalOptions` plus
+  `basic.DiagnosticEngine` instead of owning a fake CompilerInstance shape.
 
 ## Build
 
