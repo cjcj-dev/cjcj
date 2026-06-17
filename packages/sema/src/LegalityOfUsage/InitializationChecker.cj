@@ -568,6 +568,21 @@ private func MetControlTransferExpr(node: Node): Bool {
     return false
 }
 
+private func IsInitializedMemberAccess(member: MemberAccess): Bool {
+    let initialized = InitBoolBox(false)
+    let walker = Walker(member, visitPre: { node: Node =>
+        if (let Some(target) <- node.GetTarget()) {
+            if (target.TestAttr(Attribute.INITIALIZED)) {
+                initialized.value = true
+                return VisitAction.STOP_NOW
+            }
+        }
+        VisitAction.WALK_CHILDREN
+    })
+    walker.Walk()
+    return initialized.value
+}
+
 public class InitializationChecker {
     private let issues: ArrayList<InitializationIssue> = ArrayList<InitializationIssue>()
     private var currentInitializingVarDependencies: Option<ArrayList<Decl>> = None
@@ -1055,6 +1070,42 @@ public class InitializationChecker {
         return None
     }
 
+    private func CurrentNominalDeclForScope(): Option<Decl> {
+        if (let Some(outerFunc) <- CurrentOutermostNamedFuncDecl()) {
+            if (let Some(owner) <- outerFunc.outerDecl) {
+                if (owner.IsNominalDecl()) {
+                    return owner
+                }
+            }
+        }
+        if (let Some(currentBody) <- CurrentFuncBody()) {
+            if (let Some(parentClassLike) <- currentBody.parentClassLike) {
+                return parentClassLike
+            }
+            if (let Some(parentStruct) <- currentBody.parentStruct) {
+                return parentStruct
+            }
+            if (let Some(parentEnum) <- currentBody.parentEnum) {
+                return parentEnum
+            }
+        }
+        return None
+    }
+
+    private func IsMemberAccessInSameNominalDecl(member: MemberAccess, target: Decl): Bool {
+        if (let None <- target.outerDecl) {
+            return false
+        }
+        let targetOuter = target.outerDecl.getOrThrow()
+        if (!targetOuter.IsNominalDecl()) {
+            return false
+        }
+        if (let Some(currentNominal) <- CurrentNominalDeclForScope()) {
+            return SameDecl(currentNominal, targetOuter)
+        }
+        return ScopeContains(targetOuter.scopeName, member.scopeName)
+    }
+
     private func GetOwningFuncBodyForScope(scopeName: String): Option<FuncBody> {
         var idx = currentFuncBodies.size - 1
         while (idx >= 0) {
@@ -1396,10 +1447,10 @@ public class InitializationChecker {
                     message: target.identifier.Val())
                 return false
             }
-            if (!target.TestAttr(Attribute.INITIALIZED) && !member.TestAttr(Attribute.LEFT_VALUE)) {
+            if (IsMemberAccessInSameNominalDecl(member, target) && !IsInitializedMemberAccess(member)) {
                 AddIssue(InitializationIssueKind.USED_BEFORE_INITIALIZATION, member, target: target,
                     message: target.identifier.Val())
-                result = false
+                return false
             }
         }
         return result
