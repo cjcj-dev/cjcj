@@ -196,3 +196,12 @@ Built-in extend target type continuation:
   operator bodies still type `this` from the extend declaration itself, preserving the separate C++ body-generation path.
 
 Verification: `cjpm build` passes for the whole workspace after this built-in extend target type continuation.
+
+Implementation relation diagnostic continuation:
+
+- Function implementation checks now mirror the C++ call-site guard before comparing inherited parameter names: the
+  parameter-name mismatch diagnostic is only considered when both function bodies have a parameter list.
+- `This` return-type incompatibility and inherited `const`/non-`const` function conflicts now use identifier-focused
+  diagnostic ranges and parent notes, matching the C++ `MakeRange(identifier)` calls.
+
+Verification: `cjpm build` passes for the whole workspace after this implementation relation diagnostic continuation.

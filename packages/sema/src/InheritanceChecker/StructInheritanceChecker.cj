@@ -176,6 +176,13 @@ private func AreFuncParameterNameIdentical(parent: FuncDecl, child: FuncDecl): B
     return true
 }
 
+private func HasParamListForParameterNameCheck(funcDecl: FuncDecl): Bool {
+    if (let Some(body) <- funcDecl.funcBody) {
+        return !body.paramLists.isEmpty()
+    }
+    return false
+}
+
 private func ParamIdentifierRange(param: FuncParam): BasicRange {
     return MakeRange(param.GetIdentifierPos(), param.identifier.Val())
 }
@@ -1854,12 +1861,14 @@ public class StructInheritanceChecker {
                         let sameSignature = typeManager.IsFuncParameterTypesIdentical(parentFuncTy, childFuncTy)
                         if (sameSignature) {
                             let inheritedByExtension = typeManager.HasExtensionRelation(childFuncTy.retTy, parentFuncTy.retTy)
-                            if (!AreFuncParameterNameIdentical(parentFunc, childFunc)) {
+                            let isParamListCorrect = HasParamListForParameterNameCheck(parentFunc) &&
+                                HasParamListForParameterNameCheck(childFunc)
+                            if (isParamListCorrect && !AreFuncParameterNameIdentical(parentFunc, childFunc)) {
                                 DiagnoseParameterName(diag, parentFunc, childFunc)
                             } else if (!CheckThisTypeCompatibility(parentFunc, childFunc)) {
                                 let builder = diag.DiagnoseRefactor(
                                     DiagKindRefactor.sema_inherit_not_return_this,
-                                    DeclRange(childFunc)
+                                    DeclIdentifierRange(childFunc)
                                 )
                                 builder.AddNote(DeclIdentifierRange(parentFunc), "the overriden function")
                             } else if (AreReturnTypesCompatible(parentFuncTy, childFuncTy, inconsistentTypes: parent.inconsistentTypes)) {
@@ -1909,10 +1918,10 @@ public class StructInheritanceChecker {
                                 }
                                 let builder = diag.DiagnoseRefactor(
                                     DiagKindRefactor.sema_inherit_member_kind_inconsistent,
-                                    DeclRange(childFunc),
+                                    DeclIdentifierRange(childFunc),
                                     arguments: ["non-constant function", childFunc.identifier.Val(), "'const' function", inheritance]
                                 )
-                                builder.AddNote(DeclRange(parentDecl), "found 'const' function here")
+                                builder.AddNote(DeclIdentifierRange(parentDecl), "found 'const' function here")
                             }
                         }
                         return sameSignature
