@@ -198,8 +198,15 @@ private func buildFunctionSpec(pkg: Package, decl: Decl, context: ChirContext, s
             let paramName = if (paramDecl.identifier.Empty()) { "%arg" } else { paramDecl.identifier.Val() }
             fnSpec.AddParamName(paramName)
         }
+        var printIdx = 0
         for (printString in namedFuncDecl.funcBody.printStrings) {
-            fnSpec.AddPrintString(printString)
+            let newline = if (printIdx < namedFuncDecl.funcBody.printNewlines.size) {
+                namedFuncDecl.funcBody.printNewlines[printIdx]
+            } else {
+                true
+            }
+            fnSpec.AddPrintString(printString, newline: newline)
+            printIdx++
         }
     }
     return fnSpec

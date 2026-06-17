@@ -88,8 +88,10 @@ public class AST2CHIRFunctionSpec {
     public var literalReturnBoolValue: Bool = false
     public var literalReturnIntValue: Int64 = 0
     public var literalReturnFloatValue: Float64 = 0.0
-    // Literal strings to print (via runtime puts) when the function body runs, in source order.
+    // Literal strings to print when the function body runs, in source order. printNewlines is a
+    // parallel list: true => println (puts, trailing newline), false => print (fputs, no newline).
     public let printStrings: ArrayList<String> = ArrayList<String>()
+    public let printNewlines: ArrayList<Bool> = ArrayList<Bool>()
 
     public init(name: String, paramTypes: ArrayList<Type>, returnType: Type, srcCodeIdentifier!: String = "",
         rawMangledName!: String = "", packageName!: String = "", funcKind!: FuncKind = FuncKind.DEFAULT,
@@ -106,8 +108,9 @@ public class AST2CHIRFunctionSpec {
         this.emitBody = emitBody
     }
 
-    public func AddPrintString(value: String): AST2CHIRFunctionSpec {
+    public func AddPrintString(value: String, newline!: Bool = true): AST2CHIRFunctionSpec {
         printStrings.add(value)
+        printNewlines.add(newline)
         return this
     }
 

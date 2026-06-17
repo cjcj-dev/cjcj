@@ -729,8 +729,10 @@ public class Function <: GlobalValue {
     private var blockGroupId: UInt64 = 0u64
     private var localId: UInt64 = 0u64
     private var propLocation: DebugLocation = DebugLocation()
-    // Literal strings this function prints (via runtime puts) when executed, in source order.
+    // Literal strings this function prints when executed, in source order. printNewlines is a
+    // parallel list: true => println (puts, trailing newline), false => print (fputs, no newline).
     public let printStrings: ArrayList<String> = ArrayList<String>()
+    public let printNewlines: ArrayList<Bool> = ArrayList<Bool>()
 
     public init(funcType: FuncType, identifier: String, srcCodeIdentifier: String, rawMangledName: String,
         packageName: String) {

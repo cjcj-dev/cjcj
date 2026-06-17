@@ -1016,7 +1016,9 @@ private func captureFunctionBodyPrints(tokens: ArrayList<FrontendToken>, start: 
             idx++
             continue
         }
-        if (depth == 0 && tokens[idx].kind == FrontendTokenKind.IDENTIFIER && value == "println") {
+        if (depth == 0 && tokens[idx].kind == FrontendTokenKind.IDENTIFIER &&
+            (value == "println" || value == "print")) {
+            let newline = value == "println"
             let openParen = skipTrivia(tokens, idx + 1)
             if (openParen < end && openParen < tokens.size && tokens[openParen].value == "(") {
                 let argIdx = skipTrivia(tokens, openParen + 1)
@@ -1025,6 +1027,7 @@ private func captureFunctionBodyPrints(tokens: ArrayList<FrontendToken>, start: 
                     let closeParen = skipTrivia(tokens, argIdx + 1)
                     if (closeParen < end && closeParen < tokens.size && tokens[closeParen].value == ")") {
                         body.printStrings.add(StripLiteralQuotes(tokens[argIdx].value))
+                        body.printNewlines.add(newline)
                         idx = closeParen + 1
                         continue
                     }

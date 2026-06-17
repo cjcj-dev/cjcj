@@ -29,8 +29,16 @@ extend AST2CHIRDeclTranslator {
                 CreateEmptyBody(fn)
             }
         }
+        var printIdx = 0
         for (printString in spec.printStrings) {
             fn.printStrings.add(printString)
+            let newline = if (printIdx < spec.printNewlines.size) {
+                spec.printNewlines[printIdx]
+            } else {
+                true
+            }
+            fn.printNewlines.add(newline)
+            printIdx++
         }
         RegisterFunctionSpec(defaultPackage, spec, fn)
         WireGenericDecl(fn, spec)
