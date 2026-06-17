@@ -416,7 +416,8 @@ private func CanInferPointerTyFromTarget(pointerTy: Ty, targetTy: Ty): Bool {
     return !Ty.IsTyCorrect(pointerTy.typeArgs[0]) || pointerTy.HasGeneric()
 }
 
-public func ChkPointerExpr(typeManager: TypeManager, target: Ty, pointerExpr: PointerExpr): Bool {
+public func ChkPointerExpr(typeManager: TypeManager, target: Ty, pointerExpr: PointerExpr,
+    diag!: Option<BasicDiagnosticEngine> = None): Bool {
     if (let None <- pointerExpr.typeNode) {
         return false
     }
@@ -428,6 +429,11 @@ public func ChkPointerExpr(typeManager: TypeManager, target: Ty, pointerExpr: Po
         pointerTypeNode.SetTy(pointerTy)
     }
     if (!pointerTy.IsPointer()) {
+        if (!Ty.IsTyCorrect(pointerTy)) {
+            if (let Some(diagValue) <- diag) {
+                DiagOld(diagValue, pointerExpr, BasicDiagKind.sema_pointer_unknow_generic_type)
+            }
+        }
         pointerExpr.SetTy(TypeManager.GetInvalidTy())
         return false
     }
@@ -435,23 +441,33 @@ public func ChkPointerExpr(typeManager: TypeManager, target: Ty, pointerExpr: Po
     if (let Some(arg) <- pointerExpr.arg) {
         let argTy = FuncArgTy(arg)
         if (!argTy.IsPointer() && !argTy.IsCFunc()) {
+            if (let Some(diagValue) <- diag) {
+                DiagOld(diagValue, pointerExpr, BasicDiagKind.sema_pointer_single_element_type_error)
+            }
             pointerExpr.SetTy(TypeManager.GetInvalidTy())
             return false
         }
         if (!arg.name.Empty()) {
+            if (let Some(diagValue) <- diag) {
+                DiagOldStrings(diagValue, arg, BasicDiagKind.sema_unknown_named_argument, [arg.name.Val()])
+            }
             pointerExpr.SetTy(TypeManager.GetInvalidTy())
             return false
         }
     }
     if (!targetTy.IsInvalid() && typeManager.CheckTypeCompatibility(targetTy, pointerTy) == TypeCompatibility.INCOMPATIBLE) {
+        if (let Some(diagValue) <- diag) {
+            SemaDiag(diagValue, BasicDiagKindRefactor.sema_mismatched_types, pointerExpr)
+        }
         pointerExpr.SetTy(TypeManager.GetInvalidTy())
         return false
     }
     return true
 }
 
-public func SynPointerExpr(typeManager: TypeManager, pointerExpr: PointerExpr): Ty {
-    if (ChkPointerExpr(typeManager, TypeManager.GetInvalidTy(), pointerExpr)) {
+public func SynPointerExpr(typeManager: TypeManager, pointerExpr: PointerExpr,
+    diag!: Option<BasicDiagnosticEngine> = None): Ty {
+    if (ChkPointerExpr(typeManager, TypeManager.GetInvalidTy(), pointerExpr, diag: diag)) {
         return pointerExpr.GetTy() ?? TypeManager.GetInvalidTy()
     }
     return InvalidExprTy(pointerExpr)
@@ -572,7 +588,8 @@ public func ChkVArrayCall(typeManager: TypeManager, target: Ty, ce: CallExpr): B
     return false
 }
 
-public func ChkPointerCall(typeManager: TypeManager, target: Ty, ce: CallExpr): Bool {
+public func ChkPointerCall(typeManager: TypeManager, target: Ty, ce: CallExpr,
+    diag!: Option<BasicDiagnosticEngine> = None): Bool {
     if (!IsCallOfBuiltInType(ce, TypeKind.TYPE_POINTER)) {
         return false
     }
@@ -581,10 +598,15 @@ public func ChkPointerCall(typeManager: TypeManager, target: Ty, ce: CallExpr): 
     if (!ce.args.isEmpty()) {
         pointerExpr.arg = ce.args[0]
     }
+    if (ce.args.size > 1) {
+        if (let Some(diagValue) <- diag) {
+            DiagOld(diagValue, ce, BasicDiagKind.sema_pointer_too_much_argument)
+        }
+    }
     let ok = if (target.IsInvalid()) {
-        Ty.IsTyCorrect(SynPointerExpr(typeManager, pointerExpr))
+        Ty.IsTyCorrect(SynPointerExpr(typeManager, pointerExpr, diag: diag))
     } else {
-        ChkPointerExpr(typeManager, target, pointerExpr)
+        ChkPointerExpr(typeManager, target, pointerExpr, diag: diag)
     }
     if (ok) {
         ce.desugarExpr = pointerExpr
@@ -626,7 +648,7 @@ public func ChkCFuncCall(typeManager: TypeManager, target: Ty, ce: CallExpr,
 
 public func ChkBuiltinCall(typeManager: TypeManager, target: Ty, ce: CallExpr,
     diag!: Option<BasicDiagnosticEngine> = None): Bool {
-    if (ChkPointerCall(typeManager, target, ce)) {
+    if (ChkPointerCall(typeManager, target, ce, diag: diag)) {
         return true
     }
     if (ChkCStringCall(typeManager, target, ce)) {
