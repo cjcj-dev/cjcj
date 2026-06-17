@@ -81,8 +81,9 @@ private func EmitMainFunctionIR(cgMod: CGModule): Unit {
                 unsafe {
                     LLVMPositionBuilderAtEnd(builder, entryBlock)
                 }
-                let cjEntryFunc = CreateCJEntryFunction(cgMod, moduleHandle, llvmContext, voidType)
+                let cjEntryFunc = CreateCJEntryFunction(cgMod, moduleHandle, llvmContext, i32Type)
                 let voidFnType = unsafe { LLVMFunctionType(voidType, CPointer<LLVMTypeRef>(), 0u32, 0) }
+                let i32FnType = unsafe { LLVMFunctionType(i32Type, CPointer<LLVMTypeRef>(), 0u32, 0) }
                 let runtimeInit = GetOrInsertLLVMFunction(moduleHandle, PREFIX_OF_RUNTIME_SYMS + "CjRuntimeInit",
                     voidFnType)
                 BuildVoidCall(builder, voidFnType, runtimeInit, ArrayList<LLVMValueRef>())
@@ -99,7 +100,7 @@ private func EmitMainFunctionIR(cgMod: CGModule): Unit {
                 BuildVoidCall(builder, setArgsType, setArgsFunc, setArgsValues)
 
                 let startParamTypes = ArrayList<LLVMTypeRef>()
-                startParamTypes.add(unsafe { LLVMPointerType(voidFnType, 0u32) })
+                startParamTypes.add(unsafe { LLVMPointerType(i32FnType, 0u32) })
                 let runtimeStartType = BuildLLVMFunctionType(voidType, startParamTypes)
                 let runtimeStart = GetOrInsertLLVMFunction(moduleHandle, PREFIX_OF_RUNTIME_SYMS + "CjRuntimeStart",
                     runtimeStartType)
@@ -117,24 +118,44 @@ private func EmitMainFunctionIR(cgMod: CGModule): Unit {
 }
 
 private func CreateCJEntryFunction(cgMod: CGModule, moduleHandle: LLVMModuleHandle, llvmContext: LLVMContextRef,
-    voidType: LLVMTypeRef): LLVMValueRef {
-    let entryType = unsafe { LLVMFunctionType(voidType, CPointer<LLVMTypeRef>(), 0u32, 0) }
+    i32Type: LLVMTypeRef): LLVMValueRef {
+    let entryType = unsafe { LLVMFunctionType(i32Type, CPointer<LLVMTypeRef>(), 0u32, 0) }
     let entryFunc = GetOrInsertLLVMFunction(moduleHandle, CJ_ENTRY_FUNC_NAME, entryType)
-    try (blockName = unsafe { LibC.mallocCString("entry") }.asResource()) {
+    let zero = unsafe { LLVMConstInt(i32Type, 0u64, 0) }
+    try (blockName = unsafe { LibC.mallocCString("entry") }.asResource(),
+        callName = unsafe { LibC.mallocCString("") }.asResource()) {
         let builder = unsafe { LLVMCreateBuilderInContext(llvmContext) }
         let entryBlock = unsafe { LLVMAppendBasicBlockInContext(llvmContext, entryFunc, blockName.value) }
         unsafe {
             LLVMPositionBuilderAtEnd(builder, entryBlock)
         }
+        // Default exit status is 0. A `main(): Int64` returns its value; a `main(): Unit` returns 0.
+        var exitCode = zero
         if (let Some(mainEntry) <- FindMainEntryFunction(cgMod)) {
             let cgMain = cgMod.GetOrInsertCGFunction(mainEntry)
             if (let Some(mainFnType) <- cgMain.GetCGFunctionType()) {
-                BuildVoidCall(builder, mainFnType.GetLLVMFunctionType(), cgMain.GetRawFunction(),
-                    ArrayList<LLVMValueRef>())
+                let llvmMainType = mainFnType.GetLLVMFunctionType()
+                let callResult = unsafe {
+                    LLVMBuildCall2(builder, llvmMainType, cgMain.GetRawFunction(), CPointer<LLVMValueRef>(),
+                        0u32, callName.value)
+                }
+                let mainRetType = unsafe { LLVMGetReturnType(llvmMainType) }
+                // LLVMIntegerTypeKind == 8: an integer-returning main (e.g. `main(): Int64`)
+                // supplies the process exit code, narrowed to the i32 entry result.
+                if (unsafe { LLVMGetTypeKind(mainRetType) } == 8) {
+                    let width = unsafe { LLVMGetIntTypeWidth(mainRetType) }
+                    if (width > 32u32) {
+                        exitCode = unsafe { LLVMBuildTrunc(builder, callResult, i32Type, callName.value) }
+                    } else if (width < 32u32) {
+                        exitCode = unsafe { LLVMBuildZExt(builder, callResult, i32Type, callName.value) }
+                    } else {
+                        exitCode = callResult
+                    }
+                }
             }
         }
         unsafe {
-            LLVMBuildRetVoid(builder)
+            LLVMBuildRet(builder, exitCode)
             LLVMDisposeBuilder(builder)
         }
     }
