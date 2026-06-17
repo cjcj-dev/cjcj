@@ -12,6 +12,8 @@ Deepening pass updates:
 - Matched the C++ diagnostic emitter's distinction between a missing source line and a present-but-empty source line:
   diagnostics on blank lines now still render the numbered gutter and a one-column marker instead of silently dropping
   the source excerpt.
+- Restored the public `Display.escapePrintMap` surface from the C++ header with the same six printable escape entries
+  used by reference lexer diagnostics (`\b`, `\t`, `\n`, `\v`, `\f`, and `\r`).
 - Replaced the Basic-local placeholder polynomial `Utils::GetHash` with the C++ reference's platform string-hash
   behavior for this selfhost target: the non-Windows path now implements libstdc++ `_Hash_bytes`/`std::hash<string>`
   mixing, with a Windows FNV path matching MSVC-style string hashing. This makes source file hashes and CJMP hash IDs
