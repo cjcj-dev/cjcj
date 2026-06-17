@@ -167,11 +167,19 @@ public func TypeCheckTypeCheckOptionType(
 }
 
 public func TypeCheckTypeCheckVArrayWithRefType(ty: Ty): VArrayReferenceCheckResult {
-    let visited = ArrayList<Ty>()
-    return TypeCheckTypeCheckVArrayWithRefType(ty, visited)
+    return TypeCheckTypeCheckVArrayWithRefType(TypeManager(), ty)
 }
 
-private func TypeCheckTypeCheckVArrayWithRefType(ty: Ty, visited: ArrayList<Ty>): VArrayReferenceCheckResult {
+public func TypeCheckTypeCheckVArrayWithRefType(tm: TypeManager, ty: Ty): VArrayReferenceCheckResult {
+    let visited = ArrayList<Ty>()
+    return TypeCheckTypeCheckVArrayWithRefType(tm, ty, visited)
+}
+
+private func TypeCheckTypeCheckVArrayWithRefType(
+    tm: TypeManager,
+    ty: Ty,
+    visited: ArrayList<Ty>
+): VArrayReferenceCheckResult {
     if (ty.IsStructArray() || ty.IsClassLike() || ty.IsArray() || ty.IsEnum() || ty.IsGeneric() ||
         (ty.IsFunc() && !ty.IsCFunc())) {
         return VArrayReferenceCheckResult(true, ty.String())
@@ -182,12 +190,18 @@ private func TypeCheckTypeCheckVArrayWithRefType(ty: Ty, visited: ArrayList<Ty>)
     visited.add(ty)
     if (let Some(declPtr) <- Ty.GetDeclPtrOfTy(Some(ty))) {
         if (let Some(structDecl) <- (declPtr as StructDecl)) {
+            let typeMapping = if (let Some(structDeclTy) <- structDecl.GetTy()) {
+                Promotion(tm).GetPromoteTypeMapping(ty, structDeclTy)
+            } else {
+                MultiTypeSubst()
+            }
             for (member in structDecl.GetMemberDecls()) {
                 if (member.TestAttr(Attribute.STATIC) || member.astKind != ASTKind.VAR_DECL) {
                     continue
                 }
                 if (let Some(memberTy) <- member.GetTy()) {
-                    let memberResult = TypeCheckTypeCheckVArrayWithRefType(memberTy, visited)
+                    let instantiatedMemberTy = tm.GetBestInstantiatedTy(memberTy, typeMapping)
+                    let memberResult = TypeCheckTypeCheckVArrayWithRefType(tm, instantiatedMemberTy, visited)
                     if (memberResult.hasReference) {
                         return memberResult
                     }
@@ -196,7 +210,7 @@ private func TypeCheckTypeCheckVArrayWithRefType(ty: Ty, visited: ArrayList<Ty>)
         }
     } else if (ty.IsTuple()) {
         for (arg in ty.typeArgs) {
-            let tupleResult = TypeCheckTypeCheckVArrayWithRefType(arg, visited)
+            let tupleResult = TypeCheckTypeCheckVArrayWithRefType(tm, arg, visited)
             if (tupleResult.hasReference) {
                 return tupleResult
             }
@@ -220,7 +234,7 @@ public func TypeCheckTypeCheckVArrayType(
         return false
     }
     let typeArgTy = typeArg.GetTy().getOrThrow()
-    let result = TypeCheckTypeCheckVArrayWithRefType(typeArgTy)
+    let result = TypeCheckTypeCheckVArrayWithRefType(tm, typeArgTy)
     if (result.hasReference) {
         let builder = diag.DiagnoseRefactor(
             BasicDiagKindRefactor.sema_varray_arg_type_with_reftype,
@@ -304,6 +318,43 @@ private func TypeCheckTypeCheckRefExprCheckTyArgs(refType: RefType, target: Decl
     return false
 }
 
+private func TypeCheckTypeGenerateAliasUseMapping(aliasDecl: TypeAliasDecl, typeArgs: ArrayList<Type>): TypeSubst {
+    let typeMapping = TypeSubst()
+    if (let None <- aliasDecl.generic) {
+        return typeMapping
+    }
+    let generic = aliasDecl.generic.getOrThrow()
+    if (generic.typeParameters.size != typeArgs.size) {
+        return typeMapping
+    }
+    for (idx in 0..typeArgs.size) {
+        if (let Some(paramTy) <- generic.typeParameters[idx].GetTy()) {
+            if (let Some(genTy) <- (paramTy as GenericsTy)) {
+                if (let Some(argTy) <- typeArgs[idx].GetTy()) {
+                    typeMapping.Put(genTy, argTy)
+                }
+            }
+        }
+    }
+    return typeMapping
+}
+
+private func TypeCheckTypeGetAliasTargetTy(
+    tm: TypeManager,
+    aliasDecl: TypeAliasDecl,
+    typeArgs: ArrayList<Type>
+): Option<Ty> {
+    if (let None <- aliasDecl.typeNode) {
+        return None
+    }
+    let aliasBody = aliasDecl.typeNode.getOrThrow()
+    if (!Ty.IsTyCorrect(aliasBody.GetTy())) {
+        return None
+    }
+    let typeMapping = TypeCheckTypeGenerateAliasUseMapping(aliasDecl, typeArgs)
+    return Some(tm.SubstituteTypeAliasInTy(aliasBody.GetTy().getOrThrow(), typeMapping: typeMapping))
+}
+
 public func TypeCheckTypeCheckRefType(
     diag: BasicDiagnosticEngine,
     tm: TypeManager,
@@ -338,7 +389,28 @@ public func TypeCheckTypeCheckRefType(
     }
     let typeArgs = refType.GetTypeArgs()
     if (!typeArgs.isEmpty()) {
-        if (!CheckGenericDeclInstantiation(tm, target, typeArgs)) {
+        var checkTarget = target
+        let checkTypeArgs = ArrayList<Ty>()
+        var resolvedAliasTarget = false
+        if (let Some(aliasDecl) <- (target as TypeAliasDecl)) {
+            if (let Some(aliasTargetTy) <- TypeCheckTypeGetAliasTargetTy(tm, aliasDecl, typeArgs)) {
+                if (let Some(realTarget) <- Ty.GetDeclPtrOfTy(Some(aliasTargetTy))) {
+                    checkTarget = realTarget
+                    resolvedAliasTarget = true
+                    for (arg in aliasTargetTy.typeArgs) {
+                        checkTypeArgs.add(arg)
+                    }
+                }
+            }
+        }
+        if (!resolvedAliasTarget && checkTypeArgs.isEmpty()) {
+            for (arg in typeArgs) {
+                if (let Some(argTy) <- arg.GetTy()) {
+                    checkTypeArgs.add(argTy)
+                }
+            }
+        }
+        if (!CheckGenericDeclInstantiation(tm, checkTarget, checkTypeArgs)) {
             refType.SetTy(TypeManager.GetInvalidTy())
             return false
         }

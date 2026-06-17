@@ -50,6 +50,11 @@ Reference sources inspected from `/root/cj_build/cangjie_compiler/src/Sema`:
   emits `sema_invalid_access_control` like the C++ path, invalidating illegal
   `RefType` targets; `RefType` also mirrors the C++ Java generic type-argument
   short-circuit before normal generic-instantiation checks.
+- This pass deepened `TypeCheckType.cj` further: `VArray` reference-type
+  detection now instantiates generic struct member types through the real
+  `Promotion`/`TypeManager` path before recursing, and `RefType` generic
+  constraint checking now resolves type aliases to the substituted real target
+  type arguments instead of checking only the alias declaration surface.
 - Deepened reference filtering toward `TypeCheckReference.cpp`: name references
   now filter macro-function targets, collapse shadowed all-function candidates,
   report ambiguous imported non-function sets, detect generic base type
@@ -62,6 +67,12 @@ Reference sources inspected from `/root/cj_build/cangjie_compiler/src/Sema`:
   visibility with the real module package-relation utility, reject abstract
   interface calls through type access, reject enum constructor type arguments on
   member access, and reject direct `super` access to abstract members.
+- This pass deepened `TypeCheckReference.cj` further: extend member candidate
+  filtering now mirrors the C++ promotion path, including inherited-interface
+  extend lookup and promoted extended-type generic constraint checks, and
+  deprecated usage diagnostics now extract `message`, `since`, and `strict`
+  from the real `@Deprecated` annotation payload to choose warning vs error and
+  preserve diagnostic suffix text.
 - Continued class-like parity in `TypeCheckClassLike.cj`: sealed inheritance
   from `specific` declarations now mirrors the C++ package scan for a matching
   common declaration before reporting the specific-sealed diagnostic, and
@@ -98,11 +109,11 @@ are from pre-existing files outside this pass scope.
   pass, so these helpers are not yet wired into a full C++-faithful
   declaration/type/reference traversal pipeline.
 - Full C++ parity still requires complete overload resolution, lookup/import
-  recommendation, exact access-control context, alias substitution, promotion-based
-  extend constraint filtering, exact generic specialization duplicate checks,
-  orphan-rule diagnostics, custom annotation expression synthesis/type checking,
-  annotation target-array type checking, pipeline wiring for type-alias and
-  class-like declaration checks, reference-legality walker wiring, and all
+  recommendation, exact access-control context, exact generic specialization
+  duplicate checks, orphan-rule diagnostics, custom annotation expression
+  synthesis/type checking, annotation target-array type checking, pipeline
+  wiring for type-alias and class-like declaration checks, reference-legality
+  walker wiring, full deprecated-usage traversal/override checks, and all
   TypeChecker-owned state once those sibling surfaces are available in the
   allowed owner files.
 - Diagnostics are mapped to the available self-hosted diagnostic tables; a few
