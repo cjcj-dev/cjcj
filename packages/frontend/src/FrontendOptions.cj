@@ -1,5 +1,9 @@
 package cangjie_compiler::frontend
 
+public import cangjie_compiler::utils.{
+    CACHED_AST_EXTENSION, CACHED_LOG_EXTENSION, CJ_D_FILE_EXTENSION, DEFAULT_PACKAGE_NAME, SERIALIZED_FILE_EXTENSION,
+    OverflowStrategy, OverflowStrategyName, StringToOverflowStrategy, ValidOverflowStrategy
+}
 import std.collection.*
 
 public enum OptionID {
@@ -238,32 +242,6 @@ public func CreateOptionTable(frontendMode: Bool): OptionTable {
     return OptionTable()
 }
 
-public enum OverflowStrategy {
-    | NA
-    | THROWING
-    | WRAPPING
-    | SATURATING
-}
-
-private func OverflowStrategyIndex(strategy: OverflowStrategy): Int64 {
-    return match (strategy) {
-        case OverflowStrategy.NA => 0
-        case OverflowStrategy.THROWING => 1
-        case OverflowStrategy.WRAPPING => 2
-        case OverflowStrategy.SATURATING => 3
-    }
-}
-
-extend OverflowStrategy <: Equatable<OverflowStrategy> {
-    public operator func ==(rhs: OverflowStrategy): Bool {
-        return OverflowStrategyIndex(this) == OverflowStrategyIndex(rhs)
-    }
-
-    public operator func !=(rhs: OverflowStrategy): Bool {
-        return !(this == rhs)
-    }
-}
-
 public class MaybeString {
     public var value: Option<String> = None
     public init() {}
@@ -412,15 +390,10 @@ public open class GlobalOptions {
                 return false
             }
         } else if (id == OptionID.INT_OVERFLOW_MODE) {
-            if (arg.value == "throwing") {
-                overflowStrategy = OverflowStrategy.THROWING
-            } else if (arg.value == "wrapping") {
-                overflowStrategy = OverflowStrategy.WRAPPING
-            } else if (arg.value == "saturating") {
-                overflowStrategy = OverflowStrategy.SATURATING
-            } else {
+            if (!ValidOverflowStrategy(arg.value)) {
                 return false
             }
+            overflowStrategy = StringToOverflowStrategy(arg.value)
         } else if (id == OptionID.UNKNOWN) {
             ()
         }

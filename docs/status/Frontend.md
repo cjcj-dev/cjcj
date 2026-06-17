@@ -56,14 +56,23 @@ Basic `SourceManager.AddComments` when comment attachment is enabled. The parse
 strategy now also propagates source-read failures back to
 `FullCompileStrategy.Parse()` instead of losing them through a by-value Boolean.
 
+This continuation added a real dependency on `cangjie_compiler::utils` for
+shared compiler constants and overflow strategy handling. The local
+`OverflowStrategy` copy and duplicated serialization/cache extension constants
+were removed; Frontend now uses the shared `.cachedast` cache extension used by
+the C++ compiler. `--int-overflow` parsing now accepts the shared utility
+strategy set, and `CompilerInvocation.GetRuntimeLibPath` chooses the runtime
+library suffix by host OS as in the C++ reference.
+
 ## Important Blocker
 
-`packages/frontend/cjpm.toml` now imports the real `basic` and `lex` packages. A
-faithful production Frontend port must still import and wire the real `ast`,
-`parse`, `conditional_compilation`, `modules`, `macro`, `sema`, `mangle`, `chir`,
-and incremental-compilation packages. This pass keeps local compatibility models
-for those still-unwired layers so the workspace can compile while Basic source,
-diagnostic primitives, and Lex tokenization are no longer duplicated.
+`packages/frontend/cjpm.toml` now imports the real `basic`, `lex`, and `utils`
+packages. A faithful production Frontend port must still import and wire the real
+`ast`, `parse`, `conditional_compilation`, `modules`, `macro`, `sema`, `mangle`,
+`chir`, and incremental-compilation packages. This pass keeps local compatibility
+models for those still-unwired layers so the workspace can compile while Basic
+source/diagnostic primitives, Lex tokenization, and shared utility constants are
+no longer duplicated.
 
 Remaining Frontend self-host markers: 0.
 

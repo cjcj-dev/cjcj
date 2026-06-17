@@ -80,7 +80,7 @@ public open class CompileStrategy {
     }
 
     public func OverflowStrategy(): Bool {
-        let strategyName = FrontendOverflowStrategyName(ci.invocation.globalOptions.overflowStrategy)
+        let strategyName = OverflowStrategyName(ci.invocation.globalOptions.overflowStrategy)
         for (pkg in ci.GetSourcePackages()) {
             for (file in pkg.files) {
                 for (decl in file.decls) {
@@ -1494,15 +1494,6 @@ private func stripQuotes(value: String): String {
         return value[1..value.size - 1]
     }
     return value
-}
-
-private func FrontendOverflowStrategyName(strategy: OverflowStrategy): String {
-    return match (strategy) {
-        case OverflowStrategy.NA => "na"
-        case OverflowStrategy.THROWING => "throwing"
-        case OverflowStrategy.WRAPPING => "wrapping"
-        case OverflowStrategy.SATURATING => "saturating"
-    }
 }
 
 private func compareString(left: String, right: String): Ordering {

@@ -1315,9 +1315,4 @@ public func EscapeJson(text: String): String {
     return text.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n").replace("\r", "\\r")
 }
 
-public let DEFAULT_PACKAGE_NAME: String = "default"
-public let CACHED_LOG_EXTENSION: String = ".log"
-public let CACHED_AST_EXTENSION: String = ".astcache"
-public let SERIALIZED_FILE_EXTENSION: String = ".cjo"
-public let CJ_D_FILE_EXTENSION: String = ".cj.d"
 public let DIR_SEPARATOR: String = "/"

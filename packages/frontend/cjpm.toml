@@ -16,3 +16,4 @@
 [dependencies]
   "cangjie_compiler::basic" = { path = "../basic" }
   "cangjie_compiler::lex" = { path = "../lex" }
+  "cangjie_compiler::utils" = { path = "../utils" }
