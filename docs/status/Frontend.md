@@ -48,14 +48,22 @@ on existing diagnostics or empty packages, test-only verbose mode lists source
 files after macro expansion, and mangling now includes imported
 `exportedInternalDecls` plus nominal imported generic instantiations.
 
+This continuation added a real dependency on `cangjie_compiler::lex` and removed
+the hand-written Frontend scanner. `FrontendLexer` now delegates to the real Lex
+lexer, adapts tokens only at the current Frontend compatibility boundary, keeps
+the real token kind names for `DumpTokens`, and feeds real lexer comments into
+Basic `SourceManager.AddComments` when comment attachment is enabled. The parse
+strategy now also propagates source-read failures back to
+`FullCompileStrategy.Parse()` instead of losing them through a by-value Boolean.
+
 ## Important Blocker
 
-`packages/frontend/cjpm.toml` now imports the real `basic` package. A faithful
-production Frontend port must still import and wire the real `ast`, `parse`,
-`conditional_compilation`, `modules`, `macro`, `sema`, `mangle`, `chir`, and
-incremental-compilation packages. This pass keeps local compatibility models for
-those still-unwired layers so the workspace can compile while Basic source and
-diagnostic primitives are no longer duplicated.
+`packages/frontend/cjpm.toml` now imports the real `basic` and `lex` packages. A
+faithful production Frontend port must still import and wire the real `ast`,
+`parse`, `conditional_compilation`, `modules`, `macro`, `sema`, `mangle`, `chir`,
+and incremental-compilation packages. This pass keeps local compatibility models
+for those still-unwired layers so the workspace can compile while Basic source,
+diagnostic primitives, and Lex tokenization are no longer duplicated.
 
 Remaining Frontend self-host markers: 0.
 

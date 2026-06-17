@@ -23,6 +23,10 @@ public class DiagnosticEngine {
         return impl.GetSourceManager()
     }
 
+    func AsBasicDiagnosticEngine(): BasicDiagnosticEngine {
+        return impl
+    }
+
     public func Diagnose(category: DiagCategory, position: Position, message: String): Unit {
         emitFrontendDiagnostic(this, category, position, message, DiagSeverity.DS_ERROR)
     }
@@ -621,10 +625,12 @@ public class FrontendToken {
     private var endPos: Position
     public var kind: FrontendTokenKind
     public var value: String
+    private var rawKindName: String = ""
 
-    public init(kind: FrontendTokenKind, value: String, begin: Position, end: Position) {
+    public init(kind: FrontendTokenKind, value: String, begin: Position, end: Position, rawKindName!: String = "") {
         this.kind = kind
         this.value = value
+        this.rawKindName = rawKindName
         beginPos = begin
         endPos = end
     }
@@ -635,6 +641,10 @@ public class FrontendToken {
 
     public func End(): Position {
         return endPos
+    }
+
+    public func KindName(): String {
+        return if (rawKindName.isEmpty()) { FrontendTokenKindName(kind) } else { rawKindName }
     }
 }
 

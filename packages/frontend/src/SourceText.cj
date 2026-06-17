@@ -1,5 +1,11 @@
 package cangjie_compiler::frontend
 
+import cangjie_compiler::basic.Token as BasicToken
+import cangjie_compiler::lex.Lexer as CangjieLexer
+import cangjie_compiler::lex.Token as CangjieToken
+import cangjie_compiler::lex.TokenKind as CangjieTokenKind
+import cangjie_compiler::lex.TokenKindLiteral
+import cangjie_compiler::lex.TokenKindValue
 import std.collection.*
 import std.sort.*
 import std.fs.File as FSFile
@@ -20,175 +26,68 @@ public func StableSourcePathHash(path: String): UInt64 {
 }
 
 public class FrontendLexer {
-    private let fileID: UInt64
-    private let input: String
-    private let bytes: Array<UInt8>
-    private var idx: Int64 = 0
-    private var line: Int64 = 1
-    private var column: Int64 = 1
+    private let lexer: CangjieLexer
 
-    public init(fileID: UInt64, input: String) {
-        this.fileID = fileID
-        this.input = input
-        bytes = input.toArray()
+    public init(fileID: UInt64, input: String, diag: DiagnosticEngine, sm: SourceManager) {
+        lexer = CangjieLexer(fileID, input, diag.AsBasicDiagnosticEngine(), sm)
     }
 
     public func Next(): FrontendToken {
-        while (idx < bytes.size) {
-            let current = bytes[idx]
-            if (current == b' ' || current == b'\t' || current == b'\f') {
-                advanceOne()
-                continue
-            }
-            let newlineLen = GetLineTerminatorLength(bytes, idx)
-            if (newlineLen != 0) {
-                let begin = Position(fileID, line, column)
-                let value = if (newlineLen == 2) { "\r\n" } else { "\n" }
-                advanceNewline(newlineLen)
-                return FrontendToken(FrontendTokenKind.NL, value, begin, Position(fileID, line, column))
-            }
-            break
-        }
-        if (idx >= bytes.size) {
-            let endPos = Position(fileID, line, column)
-            return FrontendToken(FrontendTokenKind.END, "", endPos, endPos)
-        }
-        let beginPos = Position(fileID, line, column)
-        let start = idx
-        if (isIdentifierStart(bytes[idx])) {
-            advanceOne()
-            while (idx < bytes.size && isIdentifierContinue(bytes[idx])) {
-                advanceOne()
-            }
-            let value = input[start..idx]
-            let kind = if (value == "true" || value == "false") {
-                FrontendTokenKind.BOOL_LITERAL
-            } else if (IsKeyword(value)) {
-                FrontendTokenKind.KEYWORD
-            } else {
-                FrontendTokenKind.IDENTIFIER
-            }
-            return FrontendToken(kind, value, beginPos, Position(fileID, line, column))
-        }
-        if (isDigit(bytes[idx])) {
-            advanceOne()
-            var seenDot = false
-            while (idx < bytes.size) {
-                if (isDigit(bytes[idx]) || bytes[idx] == b'_') {
-                    advanceOne()
-                } else if (!seenDot && bytes[idx] == b'.' && idx + 1 < bytes.size && isDigit(bytes[idx + 1])) {
-                    seenDot = true
-                    advanceOne()
-                } else {
-                    break
-                }
-            }
-            return FrontendToken(if (seenDot) { FrontendTokenKind.FLOAT_LITERAL } else { FrontendTokenKind.INTEGER_LITERAL },
-                input[start..idx], beginPos, Position(fileID, line, column))
-        }
-        if (bytes[idx] == b'"') {
-            scanStringLiteral()
-            return FrontendToken(FrontendTokenKind.STRING_LITERAL, input[start..idx], beginPos, Position(fileID, line, column))
-        }
-        if (idx + 1 < bytes.size && bytes[idx] == b'/' && bytes[idx + 1] == b'/') {
-            scanLineComment()
-            return FrontendToken(FrontendTokenKind.COMMENT, input[start..idx], beginPos, Position(fileID, line, column))
-        }
-        if (idx + 1 < bytes.size && bytes[idx] == b'/' && bytes[idx + 1] == b'*') {
-            scanBlockComment()
-            return FrontendToken(FrontendTokenKind.COMMENT, input[start..idx], beginPos, Position(fileID, line, column))
-        }
-        scanOperator()
-        return FrontendToken(FrontendTokenKind.OPERATOR, input[start..idx], beginPos, Position(fileID, line, column))
+        return AdaptLexToken(lexer.Next())
     }
 
-    private func advanceOne(): Unit {
-        idx++
-        column++
-    }
-
-    private func advanceNewline(len: Int64): Unit {
-        idx += len
-        line++
-        column = 1
-    }
-
-    private func scanStringLiteral(): Unit {
-        advanceOne()
-        var escaped = false
-        while (idx < bytes.size) {
-            let newlineLen = GetLineTerminatorLength(bytes, idx)
-            if (newlineLen != 0) {
-                advanceNewline(newlineLen)
-                escaped = false
-                continue
-            }
-            let current = bytes[idx]
-            advanceOne()
-            if (escaped) {
-                escaped = false
-            } else if (current == b'\\') {
-                escaped = true
-            } else if (current == b'"') {
-                return
-            }
+    public func GetComments(): Array<BasicToken> {
+        let out = ArrayList<BasicToken>()
+        for (token in lexer.GetComments()) {
+            out.add(BasicToken(token.Begin(), token.End(), kind: TokenKindValue(token.kind), value: token.Value()))
         }
+        return out.toArray()
     }
+}
 
-    private func scanLineComment(): Unit {
-        advanceOne()
-        advanceOne()
-        while (idx < bytes.size && GetLineTerminatorLength(bytes, idx) == 0) {
-            advanceOne()
-        }
-    }
+private func AdaptLexToken(token: CangjieToken): FrontendToken {
+    let value = LexTokenValue(token)
+    return FrontendToken(LexTokenCategory(token.kind, value), value, token.Begin(), token.End(),
+        rawKindName: TokenKindValue(token.kind))
+}
 
-    private func scanBlockComment(): Unit {
-        advanceOne()
-        advanceOne()
-        var depth: Int64 = 1
-        while (idx < bytes.size && depth > 0) {
-            let newlineLen = GetLineTerminatorLength(bytes, idx)
-            if (newlineLen != 0) {
-                advanceNewline(newlineLen)
-            } else if (idx + 1 < bytes.size && bytes[idx] == b'/' && bytes[idx + 1] == b'*') {
-                depth++
-                advanceOne()
-                advanceOne()
-            } else if (idx + 1 < bytes.size && bytes[idx] == b'*' && bytes[idx + 1] == b'/') {
-                depth--
-                advanceOne()
-                advanceOne()
-            } else {
-                advanceOne()
-            }
-        }
+private func LexTokenValue(token: CangjieToken): String {
+    let value = token.Value()
+    if (!value.isEmpty() || token.kind == CangjieTokenKind.END) {
+        return value
     }
+    return TokenKindLiteral(token.kind)
+}
 
-    private func scanOperator(): Unit {
-        let maxLen = if (idx + 3 <= bytes.size) { 3 } else { bytes.size - idx }
-        if (maxLen >= 3) {
-            let three = input[idx..idx + 3]
-            if (three == "..." || three == ">>=" || three == "<<=") {
-                advanceOne()
-                advanceOne()
-                advanceOne()
-                return
-            }
-        }
-        if (idx + 2 <= bytes.size) {
-            let two = input[idx..idx + 2]
-            if (two == "==" || two == "!=" || two == "<=" || two == ">=" || two == "&&" || two == "||" ||
-                two == "->" || two == "=>" || two == "<-" || two == ".." || two == "**" || two == "+=" ||
-                two == "-=" || two == "*=" || two == "/=" || two == "%=" || two == "++" || two == "--" ||
-                two == "<<" || two == ">>" || two == "?.") {
-                advanceOne()
-                advanceOne()
-                return
-            }
-        }
-        advanceOne()
+private func LexTokenCategory(kind: CangjieTokenKind, value: String): FrontendTokenKind {
+    if (kind == CangjieTokenKind.IDENTIFIER || kind == CangjieTokenKind.PACKAGE_IDENTIFIER ||
+        kind == CangjieTokenKind.DOLLAR_IDENTIFIER || kind == CangjieTokenKind.WILDCARD) {
+        return FrontendTokenKind.IDENTIFIER
     }
+    if (kind == CangjieTokenKind.INTEGER_LITERAL || kind == CangjieTokenKind.RUNE_BYTE_LITERAL) {
+        return FrontendTokenKind.INTEGER_LITERAL
+    }
+    if (kind == CangjieTokenKind.FLOAT_LITERAL) {
+        return FrontendTokenKind.FLOAT_LITERAL
+    }
+    if (kind == CangjieTokenKind.STRING_LITERAL || kind == CangjieTokenKind.JSTRING_LITERAL ||
+        kind == CangjieTokenKind.MULTILINE_STRING || kind == CangjieTokenKind.MULTILINE_RAW_STRING ||
+        kind == CangjieTokenKind.RUNE_LITERAL) {
+        return FrontendTokenKind.STRING_LITERAL
+    }
+    if (kind == CangjieTokenKind.BOOL_LITERAL) {
+        return FrontendTokenKind.BOOL_LITERAL
+    }
+    if (kind == CangjieTokenKind.COMMENT) {
+        return FrontendTokenKind.COMMENT
+    }
+    if (kind == CangjieTokenKind.NL) {
+        return FrontendTokenKind.NL
+    }
+    if (kind == CangjieTokenKind.END) {
+        return FrontendTokenKind.END
+    }
+    return if (IsKeyword(value)) { FrontendTokenKind.KEYWORD } else { FrontendTokenKind.OPERATOR }
 }
 
 public func ReadFileContent(path: String): (Bool, String, String) {
@@ -389,32 +288,33 @@ public func GetLineTerminatorLength(bytes: Array<UInt8>, idx: Int64): Int64 {
     return 0
 }
 
-private func isIdentifierStart(byte: UInt8): Bool {
-    return (byte >= b'a' && byte <= b'z') || (byte >= b'A' && byte <= b'Z') || byte == b'_'
-}
-
-private func isIdentifierContinue(byte: UInt8): Bool {
-    return isIdentifierStart(byte) || isDigit(byte)
-}
-
-private func isDigit(byte: UInt8): Bool {
-    return byte >= b'0' && byte <= b'9'
-}
-
 public func IsKeyword(value: String): Bool {
-    return value == "package" || value == "import" || value == "from" || value == "as" ||
-        value == "macro" || value == "public" || value == "protected" || value == "internal" ||
-        value == "private" || value == "func" || value == "main" || value == "var" ||
-        value == "let" || value == "const" || value == "class" || value == "interface" ||
-        value == "struct" || value == "enum" || value == "extend" || value == "type" ||
-        value == "prop" || value == "init" || value == "where" || value == "if" ||
-        value == "else" || value == "match" || value == "try" || value == "catch" ||
-        value == "finally" || value == "for" || value == "while" || value == "do" ||
-        value == "return" || value == "throw" || value == "break" || value == "continue"
+    return value == "Int8" || value == "Int16" || value == "Int32" || value == "Int64" ||
+        value == "IntNative" || value == "UInt8" || value == "UInt16" || value == "UInt32" ||
+        value == "UInt64" || value == "UIntNative" || value == "Float16" || value == "Float32" ||
+        value == "Float64" || value == "Rune" || value == "Bool" || value == "Nothing" ||
+        value == "Unit" || value == "struct" || value == "enum" || value == "VArray" ||
+        value == "This" || value == "package" || value == "import" || value == "class" ||
+        value == "interface" || value == "func" || value == "macro" || value == "quote" ||
+        value == "let" || value == "var" || value == "const" || value == "type" ||
+        value == "init" || value == "this" || value == "super" || value == "if" ||
+        value == "else" || value == "case" || value == "try" || value == "catch" ||
+        value == "finally" || value == "for" || value == "do" || value == "while" ||
+        value == "throw" || value == "return" || value == "continue" || value == "break" ||
+        value == "in" || value == "!in" || value == "match" || value == "where" ||
+        value == "extend" || value == "with" || value == "prop" || value == "static" ||
+        value == "public" || value == "private" || value == "internal" || value == "protected" ||
+        value == "override" || value == "redef" || value == "abstract" || value == "sealed" ||
+        value == "open" || value == "foreign" || value == "inout" || value == "mut" ||
+        value == "unsafe" || value == "operator" || value == "spawn" || value == "synchronized" ||
+        value == "main" || value == "common" || value == "specific" || value == "perform" ||
+        value == "resume" || value == "throwing" || value == "handle" || value == "features" ||
+        value == "as" || value == "is"
 }
 
-public func Tokenize(fileID: UInt64, input: String): ArrayList<FrontendToken> {
-    let lexer = FrontendLexer(fileID, input)
+public func Tokenize(fileID: UInt64, input: String, diag: DiagnosticEngine, sm: SourceManager,
+    attachComment!: Bool = false): ArrayList<FrontendToken> {
+    let lexer = FrontendLexer(fileID, input, diag, sm)
     let out = ArrayList<FrontendToken>()
     while (true) {
         let tok = lexer.Next()
@@ -422,6 +322,11 @@ public func Tokenize(fileID: UInt64, input: String): ArrayList<FrontendToken> {
         if (tok.kind == FrontendTokenKind.END) {
             break
         }
+    }
+    if (attachComment) {
+        let commentsMap = HashMap<UInt64, Array<BasicToken>>()
+        commentsMap.add(fileID, lexer.GetComments())
+        sm.AddComments(commentsMap)
     }
     return out
 }

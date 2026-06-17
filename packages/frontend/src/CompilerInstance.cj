@@ -414,7 +414,7 @@ public class CompilerInstance {
                 continue
             }
             let fileID = GetSourceManager().AddSource(GetAbsPath(filePath) ?? filePath, readResult[1])
-            let lexer = FrontendLexer(fileID, readResult[1])
+            let lexer = FrontendLexer(fileID, readResult[1], diag, GetSourceManager())
             while (true) {
                 let tok = lexer.Next()
                 if (tok.kind == FrontendTokenKind.END) {
@@ -424,11 +424,11 @@ public class CompilerInstance {
                     tok.Begin().column.toString() + ">"
                 if (tok.kind == FrontendTokenKind.NL) {
                     println((if (tok.value == "\n") { "\\n" } else { "\\r\\n" }) + " " +
-                        FrontendTokenKindName(tok.kind) + " " + position)
+                        tok.KindName() + " " + position)
                 } else if (tok.kind == FrontendTokenKind.COMMENT) {
-                    println(FrontendTokenKindName(tok.kind) + " " + position)
+                    println(tok.KindName() + " " + position)
                 } else {
-                    println(tok.value + " " + FrontendTokenKindName(tok.kind) + " " + position)
+                    println(tok.value + " " + tok.KindName() + " " + position)
                 }
             }
         }

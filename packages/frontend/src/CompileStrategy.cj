@@ -263,11 +263,12 @@ public class FullCompileStrategy <: CompileStrategy {
             if (incrParse) {
                 strategyImpl.ParseOnePackageInPlace(ci.srcPkgs[0])
             } else {
-                let pkg = strategyImpl.ParseOnePackage(ci.srcFilePaths, ret, DEFAULT_PACKAGE_NAME)
-                ci.srcPkgs.add(pkg)
+                let parsed = strategyImpl.ParseOnePackage(ci.srcFilePaths, DEFAULT_PACKAGE_NAME)
+                ci.srcPkgs.add(parsed[0])
+                ret = parsed[1]
             }
         } else {
-            strategyImpl.ParseModule(ret)
+            ret = strategyImpl.ParseModule()
         }
         return ret
     }
@@ -287,8 +288,8 @@ private class FullCompileStrategyImpl {
         s = strategy
     }
 
-    public func ParseModule(success: Bool): Unit {
-        var mutableSuccess = success
+    public func ParseModule(): Bool {
+        var success = true
         let moduleSrcPath = s.ci.invocation.globalOptions.moduleSrcPath
         let includeFileSet = HashSet<String>()
         for (srcPath in s.ci.invocation.globalOptions.srcFiles) {
@@ -311,7 +312,9 @@ private class FullCompileStrategyImpl {
                     allSrcFiles.add(filename)
                 }
             }
-            let parsedPkg = ParseOnePackage(allSrcFiles, mutableSuccess, currentPkg)
+            let parsed = ParseOnePackage(allSrcFiles, currentPkg)
+            let parsedPkg = parsed[0]
+            success = success && parsed[1]
             if (srcDir == moduleSrcPath) {
                 parsedPkg.needExported = false
             }
@@ -320,10 +323,11 @@ private class FullCompileStrategyImpl {
         for (pkg in s.ci.srcPkgs) {
             sort(pkg.files, by: { left: File, right: File => compareString(left.fileName, right.fileName) })
         }
+        return success
     }
 
-    public func ParseOnePackage(files: ArrayList<String>, success: Bool, defaultPackageName: String): Package {
-        var mutableSuccess = success
+    public func ParseOnePackage(files: ArrayList<String>, defaultPackageName: String): (Package, Bool) {
+        var success = true
         let fileInfos = ArrayList<(String, UInt64, String)>()
         if (s.ci.loadSrcFilesFromCache) {
             for ((path, cacheInfo) in s.ci.bufferCache) {
@@ -344,7 +348,7 @@ private class FullCompileStrategyImpl {
                 if (!readResult[0]) {
                     s.ci.diag.Diagnose(DiagCategory.IMPORT_PACKAGE, DEFAULT_POSITION,
                         "failed to read source file '" + filePath + "': " + readResult[2])
-                    mutableSuccess = false
+                    success = false
                     continue
                 }
                 let fileID = addSourceForParse(filePath, readResult[1])
@@ -354,10 +358,10 @@ private class FullCompileStrategyImpl {
         let pkg = Package(defaultPackageName)
         addParsedFilesToPackage(pkg, fileInfos)
         CheckPackageConsistency(pkg)
-        if (!mutableSuccess) {
+        if (!success) {
             pkg.SetAttr("PARSE_FAILED")
         }
-        return pkg
+        return (pkg, success)
     }
 
     public func ParseOnePackageInPlace(pkg: Package): Unit {
@@ -465,8 +469,6 @@ private class FullCompileStrategyImpl {
 
 public func ParseSourceFile(fileID: UInt64, filePath: String, sourceCode: String, diag: DiagnosticEngine,
     sm: SourceManager, attachComment: Bool, parseDeclFile: Bool): File {
-    let _ = diag
-    let _ = attachComment
     let _ = parseDeclFile
     let file = File()
     file.filePath = NormalizePath(filePath)
@@ -474,7 +476,7 @@ public func ParseSourceFile(fileID: UInt64, filePath: String, sourceCode: String
     file.fileHash = StableSourcePathHash(file.filePath)
     file.begin = Position(fileID, 1, 1)
     file.end = sm.GetSource(fileID).GetEndPos()
-    let tokens = Tokenize(fileID, sourceCode)
+    let tokens = Tokenize(fileID, sourceCode, diag, sm, attachComment: attachComment)
     parsePackageAndImports(file, tokens)
     parseTopLevelDecls(file, tokens)
     return file
