@@ -254,6 +254,30 @@ private func ChkCallExprShallow(typeManager: TypeManager, target: Ty, ce: CallEx
     return false
 }
 
+private func AddTargetIfMissing(targets: ArrayList<Decl>, candidate: Decl): Unit {
+    for (target in targets) {
+        if (SameDecl(target, candidate)) {
+            return
+        }
+    }
+    targets.add(candidate)
+}
+
+private func PopulateMemberAccessTargets(typeManager: TypeManager, ma: MemberAccess, baseTy: Ty): Unit {
+    if ((let Some(_) <- ma.target) || !ma.targets.isEmpty() || !Ty.IsTyCorrect(baseTy)) {
+        return
+    }
+    let info = LookupInfo(baseTy: Some(baseTy), file: ma.curFile)
+    for (decl in FieldLookup(typeManager, Ty.GetDeclPtrOfTy(Some(baseTy)), ma.field.Val(), info: info)) {
+        AddTargetIfMissing(ma.targets, decl)
+    }
+    if (let Some(file) <- ma.curFile) {
+        for (decl in ExtendFieldLookup(typeManager, file, Some(baseTy), ma.field.Val())) {
+            AddTargetIfMissing(ma.targets, decl)
+        }
+    }
+}
+
 public func SynExprShallow(typeManager: TypeManager, expr: Expr): Ty {
     if (let Some(desugar) <- expr.desugarExpr) {
         if (let Some(desugarTy) <- desugar.GetTy()) {
@@ -379,6 +403,7 @@ private func SynMemberAccess(typeManager: TypeManager, ma: MemberAccess): Ty {
                     return sizeTy
                 }
             }
+            PopulateMemberAccessTargets(typeManager, ma, baseTy)
         }
     }
     var targetOpt = ma.target

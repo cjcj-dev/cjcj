@@ -2,6 +2,7 @@ package cangjie_compiler::sema.TypeCheckExpr
 
 import cangjie_compiler::ast.*
 import cangjie_compiler::sema.*
+import cangjie_compiler::sema.Desugar.*
 
 public func SelfhostPortStatus_TypeCheckExpr_AssignExpr(): Bool {
     return true
@@ -157,6 +158,55 @@ private func IsShiftAssignValid(ae: AssignExpr, leftTy: Ty): Bool {
     return true
 }
 
+private func PropagateAssignDesugarTarget(ae: AssignExpr, desugar: Expr): Unit {
+    if (let Some(callExpr) <- (desugar as CallExpr)) {
+        if (let Some(resolved) <- callExpr.resolvedFunction) {
+            ReplaceTarget(ae, Some(resolved))
+        }
+        return
+    }
+    if (let Some(assignExpr) <- (desugar as AssignExpr)) {
+        if (let Some(rightExpr) <- assignExpr.rightExpr) {
+            if (let Some(callExpr2) <- (rightExpr as CallExpr)) {
+                if (let Some(resolved2) <- callExpr2.resolvedFunction) {
+                    ReplaceTarget(ae, Some(resolved2))
+                }
+            }
+        }
+    }
+}
+
+private func TrySynAssignOverload(typeManager: TypeManager, ae: AssignExpr): Option<Ty> {
+    if (let Some(leftValue) <- ae.leftValue) {
+        if (let Some(_) <- (leftValue as SubscriptExpr)) {
+            DesugarSubscriptOverloadExpr(ae)
+            if (let Some(desugar) <- ae.desugarExpr) {
+                let desugarTy = SynExprShallow(typeManager, desugar)
+                if (Ty.IsTyCorrect(desugarTy)) {
+                    PropagateAssignDesugarTarget(ae, desugar)
+                    ae.SetTy(desugarTy)
+                    return Some(desugarTy)
+                }
+                RecoverToAssignExpr(ae)
+            }
+            return None
+        }
+    }
+    if (ae.isCompound) {
+        DesugarOperatorOverloadExpr(ae)
+        if (let Some(desugar2) <- ae.desugarExpr) {
+            let desugarTy2 = SynExprShallow(typeManager, desugar2)
+            if (Ty.IsTyCorrect(desugarTy2)) {
+                PropagateAssignDesugarTarget(ae, desugar2)
+                ae.SetTy(desugarTy2)
+                return Some(desugarTy2)
+            }
+            RecoverToAssignExpr(ae)
+        }
+    }
+    return None
+}
+
 private func SynMultipleAssignExpr(typeManager: TypeManager, ae: AssignExpr): Ty {
     if (let Some(desugar) <- ae.desugarExpr) {
         let desugarTy = SynExprShallow(typeManager, desugar)
@@ -196,6 +246,9 @@ public func SynAssignExpr(typeManager: TypeManager, ae: AssignExpr): Ty {
     }
     if (let None <- ae.rightExpr) {
         return AssignInvalid(ae)
+    }
+    if (let Some(overloadTy) <- TrySynAssignOverload(typeManager, ae)) {
+        return overloadTy
     }
     let unitTy = TcUnitTy()
     ae.SetTy(unitTy)
