@@ -25,7 +25,7 @@ returns lower through `CreateLiteralReturnBody`).
 The following programs compile with the self-host `cjc`
 (`./target/release/bin/cangjie_compiler::cjc`) and run with the verified behavior
 shown. Each was re-verified by real compile-and-run on 2026-06-18 (latest: the
-string-interpolation milestone) after merging
+`Array<Int64>` milestone) after merging
 `opus2/int-arith-return`, `opus2/println-int`, `opus3/real-expr`,
 `opus4/control-flow` (var/assign, relational ops, `if`/`while` via real CHIR
 blocks), `opus5/func-calls` (user-defined function calls + recursion via
@@ -35,9 +35,11 @@ runtime-computed value), `opus8/bool` (first-class `Bool` values: literals,
 `println(<Bool>)`), `opus9/loops` (`for-in` over `..`/`..=` integer ranges,
 `break`, `continue`), `opus11/string` (first-class `String` values:
 literals, locals/params/returns, `+` concatenation, `println`/`print` of a
-runtime `String`), and `opus12/interp` (string interpolation
-`"...${expr}..."` of `Int64`/`Bool`/`String` interpolated expressions) into
-`main`:
+runtime `String`), `opus12/interp` (string interpolation
+`"...${expr}..."` of `Int64`/`Bool`/`String` interpolated expressions), and
+`opus13/arrays` (first-class `Array<Int64>`: array literals, indexing,
+`.size`, element writes, `for-in` over an array, and the sized constructor
+`Array<Int64>(n, repeat:/item: v)`) into `main`:
 
 | Source | Verified behavior |
 | --- | --- |
@@ -64,6 +66,12 @@ runtime `String`), and `opus12/interp` (string interpolation
 | `main() { let x = 42; println("x=${x}") }` | prints `x=42` -- a runtime `Int64` interpolated into a `String` literal (`Int64`->String via `snprintf`, concatenated with the literal parts) |
 | `main() { let a=3; let b=4; println("${a} + ${b} = ${a + b}") }` | prints `3 + 4 = 7` -- multiple interpolations including an arithmetic expression, each stringified and concatenated in order |
 | `main() { let name="cj"; println("hi ${name}") }` | prints `hi cj` -- a `String`-typed interpolated expression passes through the conversion unchanged |
+| `main() { let a = [10,20,30]; println(a[1]) }` | prints `20` -- an `Array<Int64>` literal local, indexed at runtime (CUT 1) |
+| `main() { let a = [10,20,30]; println(a.size) }` | prints `3` -- the array length via `.size` (CUT 1) |
+| `main(): Int64 { let a=[0,0,0]; a[1]=7; return a[1] }` | exits with code 7 -- an array element write, then read back (CUT 2) |
+| `main(): Int64 { let a=[1,2,3,4]; var s=0; for (x in a){ s=s+x }; return s }` | exits with code 10 -- `for-in` iteration over an `Array<Int64>` (CUT 3) |
+| `main(): Int64 { let a = Array<Int64>(3, repeat: 7); return a[0]+a[1]+a[2] }` | exits with code 21 -- the sized array constructor fills `n` copies of the literal value (CUT 4) |
+| `main() { let a = Array<Int64>(4, item: 5); println(a.size); println(a[2]) }` | prints `4` then `5` -- sized constructor with the `item:` label (CUT 4) |
 | `main() { let ok = 5 > 3; println("ok=${ok}") }` | prints `ok=true` -- a `Bool` interpolated expression stringified to `true`/`false` |
 | `main() { println("hello selfhost") }` | prints `hello selfhost` + newline |
 | `main() { print("a"); print("b"); println("c") }` | prints `abc` + newline |
@@ -315,6 +323,25 @@ Capability detail:
   `let a=3; let b=4; println("${a} + ${b} = ${a + b}")` -> `3 + 4 = 7`;
   `let name="cj"; println("hi ${name}")` -> `hi cj`; `let ok=5>3; println("ok=${ok}")` ->
   `ok=true`.
+- **`Array<Int64>` milestone (`opus13/arrays`):** the real body-lowering path now models a
+  first-class `Array<Int64>` as a `VArray<Int64, len>` slot, supporting (CUT 1) array
+  literals `[e0, e1, ...]` of `Int64` elements, runtime indexing `a[i]`, and `.size`;
+  (CUT 2) element writes `a[i] = e`; (CUT 3) `for-in` iteration over an array
+  (`for (x in a) { ... }`, lowered to an index-counted loop bounded by the array length);
+  and (CUT 4) the sized constructor `Array<Int64>(n, repeat: v)` / `Array<Int64>(n, item: v)`
+  with a literal length and a (pure) `Int64` fill expression. It is additive and gated like
+  the prior milestones: a non-`Int64` element type, a non-literal length on the sized
+  constructor, or any other array shape leaves `hasRealBody == false` and falls back to the
+  summary path, so the already-verified slices stay byte-for-byte. The spec model
+  (`packages/chir/src/AST2CHIR.cj`) gains array-literal / index-read / index-write / `.size`
+  expr kinds and an `ARRAY_LET` statement; `TranslateFuncBody.cj` allocates the `VArray`
+  slot, fills it element-by-element, and lowers index/size/write/for-in against it via the
+  CHIR array primitives; the parser adapter (`RealParseBridge.cj`) maps the real parser's
+  `ArrayLit` / `SubscriptExpr` (and the `Array<Int64>(...)` call) into these specs. Verified
+  at runtime (no folding): `let a=[10,20,30]; println(a[1])` -> `20`; `println(a.size)` ->
+  `3`; `let a=[0,0,0]; a[1]=7; return a[1]` -> exit `7`; `let a=[1,2,3,4]; var s=0; for (x in
+  a){s=s+x}; return s` -> exit `10`; `Array<Int64>(3, repeat: 7)` summed -> exit `21`;
+  `Array<Int64>(4, item: 5)` -> `.size` `4`, `a[2]` `5`.
 
 These are the only source constructs the integrated pipeline lowers end to end
 today; anything else still flows through the compatibility models described
@@ -325,16 +352,19 @@ below.
 The real body-lowering path is additive and gated on `hasRealBody`. Any body using a
 construct outside the supported grammar leaves `hasRealBody == false` and quietly flows
 through the token-summary scanner / compile-time fold instead. As of the
-string-interpolation milestone, the following are still **not** supported on the real path
+`Array<Int64>` milestone, the following are still **not** supported on the real path
 and silently fall back:
 
-- **Arrays** (`Array<T>`, array literals, indexing, iteration over an array).
+- **Arrays of non-`Int64` element types** (`Array<String>`, `Array<Bool>`, nested arrays,
+  etc.) and array methods beyond `.size` / indexing / element write / `for-in`
+  (`Array<Int64>` of those four shapes is now supported -- `opus13/arrays`).
 - **`match`** expressions / pattern matching of any kind.
 - **`struct` / `class`** declarations, fields, methods, and member access.
 - **`Float64`** (and other non-`Int64` numeric widths) -- literals, arithmetic, and
   printing of a `Float`/other-width integer value.
 - **Lambdas / closures** (`{ x => ... }`) and first-class function values.
-- **`for-in` over a `String`** (and over arrays / other non-range iterables).
+- **`for-in` over a `String`** (and over collections / other non-range, non-`Array<Int64>`
+  iterables).
 - **`String.size`, `String` indexing / slicing, `String` comparison**, and other
   `String` methods (only literals, `+` concat, interpolation, and print are wired).
 - **Compound assignment** (`+=`, `-=`, etc.), short-circuit `&&`/`||` (currently lowered
@@ -371,11 +401,13 @@ slice must be confirmed by a real compile-and-run with a known expected output.
   integer or `Float` value is also still not wired -- extend the PRINT lowering /
   `EmitRuntime*Print` (format selection) once those value types flow through the real body.
 - **More operators and statement kinds on the real path.** `match`, compound
-  assignment (`+=` etc.), arrays, `struct`/`class`, `Float64`, and lambdas/closures are
+  assignment (`+=` etc.), `struct`/`class`, `Float64`, and lambdas/closures are
   still unsupported (the body falls back to the summary path). String interpolation is now
-  supported (`opus12/interp`); `for-in` over integer ranges plus `break`/`continue` are now supported (`opus9/loops`);
-  `for-in` over other iterables (arrays, collections, `String`) and a `where` guard are
-  follow-ups. Logical `&&`/`||` and unary `!` are supported (`opus8/bool`), though
+  supported (`opus12/interp`); `Array<Int64>` literals/indexing/`.size`/writes/`for-in`/sized
+  constructor are now supported (`opus13/arrays`); `for-in` over integer ranges plus
+  `break`/`continue` are now supported (`opus9/loops`);
+  arrays of non-`Int64` element types, `for-in` over other iterables (collections, `String`),
+  and a `where` guard are follow-ups. Logical `&&`/`||` and unary `!` are supported (`opus8/bool`), though
   `&&`/`||` are currently lowered as non-short-circuit `And`/`Or` on i1 -- real
   short-circuit evaluation is a follow-up. Extend `RealParseBridge` ->
   `AST2CHIRStmtSpec`/`AST2CHIRExprSpec` -> `CreateRealBody`.
