@@ -202,13 +202,10 @@ private func removeOptimizationFlag(values: ArrayList<OptimizationFlag>, flag: O
     }
 }
 
-private func joinStrings(values: ArrayList<String>, delimiter: String): String {
+private func vectorStrToSerializedString(values: ArrayList<String>, delimiter: String): String {
     var result = ""
-    var idx: Int64 = 0
-    while (idx < values.size) {
-        if (idx > 0) { result += delimiter }
-        result += values[idx]
-        idx++
+    for (value in values) {
+        result += value + delimiter
     }
     return result
 }
@@ -618,7 +615,7 @@ public open class GlobalOptions <: Option {
     public func NeedDumpIRToScreen(): Bool { return NeedDumpIR() && dumpToScreen }
     public func SetFrontendMode(): Unit { frontendMode = true }
     public func GetStackTraceFormat(): String { return "--" + StackTraceFormatToSerializedString() }
-    public func GetJobs(): UInt64 { return if (jobs.hasValue) { jobs.value } else { 1u64 } }
+    public func GetJobs(): UInt64 { return if (jobs.hasValue) { jobs.value } else { GetHardwareConcurrency() } }
 
     public func ReadPathsFromEnvironmentVars(environmentVars: HashMap<String, String>): Unit {
         environment.allVariables.clear()
@@ -630,7 +627,6 @@ public open class GlobalOptions <: Option {
         }
         if (let Some(value) <- environmentVars.get("CANGJIE_HOME")) {
             environment.cangjieHome = GetAbsPath(value)
-            if (environment.cangjieHome.hasValue) { cangjieHome = environment.cangjieHome.value }
         }
         if (let Some(value) <- environmentVars.get("LIBRARY_PATH")) {
             replaceStrings(environment.libraryPaths, SplitEnvironmentPaths(value))
@@ -974,7 +970,7 @@ public open class GlobalOptions <: Option {
     }
 
     private func CheckOutputPathLength(): Bool {
-        let defaultOutputNameLen: Int64 = 4
+        let defaultOutputNameLen = GetDefaultOutputNameLength()
         let fullLength = if (IsDir(output)) { output.size + defaultOutputNameLen } else { output.size }
         if (fullLength > FILE_PATH_MAX_LENGTH) {
             emitOptionDiag(
@@ -1387,7 +1383,7 @@ public open class GlobalOptions <: Option {
             BoolToSerializedString(displayLineInfo),
             moduleName,
             LTOModeToSerializedString(),
-            joinStrings(removedPathPrefix, ":"),
+            vectorStrToSerializedString(removedPathPrefix, ":"),
             BackendTypeToSerializedString(),
             BoolToSerializedString(enableMacroInLSP),
             BoolToSerializedString(enableCompileTest),
@@ -1410,9 +1406,9 @@ public open class GlobalOptions <: Option {
             BoolToSerializedString(experimentalMode),
             OverflowStrategyToSerializedString(),
             BoolToSerializedString(interpreter),
-            joinStrings(interpreterSearchPaths, ":"),
-            joinStrings(interpLoadLib, ":"),
-            joinStrings(interpreterArgs, "\\"),
+            vectorStrToSerializedString(interpreterSearchPaths, ":"),
+            vectorStrToSerializedString(interpLoadLib, ":"),
+            vectorStrToSerializedString(interpreterArgs, "\\"),
             BoolToSerializedString(interpreterPrintResult),
             BoolToSerializedString(interpMainNoLinkage),
             BoolToSerializedString(disableCodeGen),

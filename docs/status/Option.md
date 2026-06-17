@@ -305,3 +305,77 @@ compatibility surface for current sibling package imports; several print-style
 diagnostics still use local wrapper text; host target defaults are still static
 for this port; and driver-layer obfuscation option handling is not yet fully
 folded into the base Option action surface.
+
+This pass removes the static host-triple assumption from Option. `TripleInfo`
+now derives its default arch, OS, vendor, and environment through Cangjie
+`@When` conditions, matching the C++ `GlobalOptions::host` preprocessor-derived
+defaults for Linux, Windows, macOS, x86_64, and aarch64 hosts while preserving
+the unknown fallback. Android target parsing also no longer clears a previous
+API level before scanning an `android*` environment suffix, preserving the C++
+state behavior for repeated `--target` actions.
+
+Serialization parity also improved: vector-valued `GlobalOptions.ToSerialized`
+fields now use the C++ `VectorStrToSerializedString` behavior and append the
+separator after every value. This affects trim-path, interpreter search path,
+interpreter load library, and interpreter argument serialization, which feed
+cache- and frontend-visible option state.
+
+Remaining gaps: `Options.cj`/`OptionEnums.cj` remain hand-maintained mirrors of
+`Options.inc`; `MaybeString`, `MaybeUInt64`, and `TryParseUInt64` remain as
+compatibility surface for current sibling package imports; several print-style
+diagnostics still use local wrapper text; and driver-layer obfuscation option
+handling is not yet fully folded into the base Option action surface.
+
+This continuation removes the Option-local `WarningOptionMgr` facade. Warning
+group parsing in `OptionAction.cj` now imports and updates the real
+`basic.WarningOptionMgr` directly, while continuing to use the real Basic
+`WarnGroup` indices for `--warn-on`/`--warn-off`. That eliminates another
+module-local compatibility wrapper around diagnostic state.
+
+Host parallelism fidelity also improved. `GetHardwareConcurrency` keeps the
+Linux `get_nprocs` FFI path and now adds the macOS `sysconf(_SC_NPROCESSORS_ONLN)`
+path used by the shared semaphore utility, so jobs/APC clamping and default
+job refactoring follow the C++ `std::thread::hardware_concurrency()` behavior
+on another supported host instead of falling back to one worker.
+
+This continuation tightens two public defaults to the C++ `GlobalOptions`
+contract. `GetJobs()` now returns host hardware concurrency when `--jobs` was
+not explicitly set, matching the header inline `jobs.value_or(...)` behavior
+even before post-action refactoring has run. Output path-length validation now
+uses a host-conditional default executable name length: `main.exe` on Windows
+hosts and `main` elsewhere, preserving the `_WIN32` branch in `Option.cpp`.
+
+Remaining gaps: `Options.cj`/`OptionEnums.cj` remain hand-maintained mirrors of
+`Options.inc`; `MaybeString`, `MaybeUInt64`, and `TryParseUInt64` remain as
+compatibility surface for current sibling package imports; several print-style
+diagnostics still use local wrapper text where the C++ uses formatted print
+helpers; and driver-layer obfuscation option handling is not yet fully folded
+into the base Option action surface.
+
+This continuation completes the native host parallelism path for the supported
+desktop hosts. `GetHardwareConcurrency` now has a Windows C FFI binding to
+`GetActiveProcessorCount(ALL_PROCESSOR_GROUPS)`, so unset `--jobs`, default APC
+normalization, and explicit job/APC clamping no longer fall back to one worker
+on Windows. Linux and macOS continue to use their existing native queries, and
+only unknown hosts keep the conservative fallback.
+
+Remaining gaps: `Options.cj`/`OptionEnums.cj` remain hand-maintained mirrors of
+`Options.inc`; `MaybeString`, `MaybeUInt64`, and `TryParseUInt64` remain as
+compatibility surface for current sibling package imports; several print-style
+diagnostics still use local wrapper text where the C++ uses formatted print
+helpers; and driver-layer obfuscation option handling is not yet fully folded
+into the base Option action surface.
+
+This continuation aligns environment ingestion ownership with
+`GlobalOptions::ReadPathsFromEnvironmentVars` in the C++ reference. Reading
+`CANGJIE_HOME` now updates only `environment.cangjieHome`; the top-level
+`cangjieHome` field is left for the driver/frontend setup layer to choose from
+the environment value or executable-derived fallback, as the C++ driver and
+frontend tool do.
+
+Remaining gaps: `Options.cj`/`OptionEnums.cj` remain hand-maintained mirrors of
+`Options.inc`; `MaybeString`, `MaybeUInt64`, and `TryParseUInt64` remain as
+compatibility surface for current sibling package imports; several print-style
+diagnostics still use local wrapper text where the C++ uses formatted print
+helpers; and driver-layer obfuscation option handling is not yet fully folded
+into the base Option action surface.
