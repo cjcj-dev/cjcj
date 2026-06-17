@@ -501,7 +501,7 @@ extend ParserImpl {
         return body
     }
 
-    public func ParseParameterList(scopeKind: ScopeKind): FuncParamList {
+    public func ParseParameterList(_: ScopeKind): FuncParamList {
         let list = FuncParamList()
         list.leftParenPos = Expect(TokenKind.LPAREN, "expected '(' for parameter list").Begin()
         list.begin = list.leftParenPos
@@ -689,7 +689,7 @@ extend ParserImpl {
         return false
     }
 
-    public func ParseClassDecl(scopeKind: ScopeKind, modifiers: ArrayList<Modifier>, annos: ArrayList<Annotation>): ClassDecl {
+    public func ParseClassDecl(_: ScopeKind, modifiers: ArrayList<Modifier>, annos: ArrayList<Annotation>): ClassDecl {
         let ret = ClassDecl()
         ParseInheritableHeader(ret, TokenKind.CLASS, modifiers, annos)
         SetPrimaryDecl(ret.identifier.Val())
@@ -698,14 +698,14 @@ extend ParserImpl {
         return ret
     }
 
-    public func ParseInterfaceDecl(scopeKind: ScopeKind, modifiers: ArrayList<Modifier>, annos: ArrayList<Annotation>): InterfaceDecl {
+    public func ParseInterfaceDecl(_: ScopeKind, modifiers: ArrayList<Modifier>, annos: ArrayList<Annotation>): InterfaceDecl {
         let ret = InterfaceDecl()
         ParseInheritableHeader(ret, TokenKind.INTERFACE, modifiers, annos)
         ParseClassLikeBody(ret, ScopeKind.INTERFACE_BODY)
         return ret
     }
 
-    public func ParseStructDecl(scopeKind: ScopeKind, modifiers: ArrayList<Modifier>, annos: ArrayList<Annotation>): StructDecl {
+    public func ParseStructDecl(_: ScopeKind, modifiers: ArrayList<Modifier>, annos: ArrayList<Annotation>): StructDecl {
         let ret = StructDecl()
         ParseInheritableHeader(ret, TokenKind.STRUCT, modifiers, annos)
         SetPrimaryDecl(ret.identifier.Val())
@@ -714,7 +714,7 @@ extend ParserImpl {
         return ret
     }
 
-    public func ParseEnumDecl(scopeKind: ScopeKind, modifiers: ArrayList<Modifier>, annos: ArrayList<Annotation>): EnumDecl {
+    public func ParseEnumDecl(_: ScopeKind, modifiers: ArrayList<Modifier>, annos: ArrayList<Annotation>): EnumDecl {
         let ret = EnumDecl()
         ParseInheritableHeader(ret, TokenKind.ENUM, modifiers, annos)
         if (Skip(TokenKind.LCURL)) {
@@ -796,7 +796,7 @@ extend ParserImpl {
         ret.end = Expect(TokenKind.RCURL, "expected '}' after declaration body").End()
     }
 
-    public func ParseExtendDecl(scopeKind: ScopeKind, modifiers: ArrayList<Modifier>, annos: ArrayList<Annotation>): ExtendDecl {
+    public func ParseExtendDecl(_: ScopeKind, modifiers: ArrayList<Modifier>, annos: ArrayList<Annotation>): ExtendDecl {
         let ret = ExtendDecl()
         ApplyModifiersAndAnnotations(ret, modifiers, annos)
         let key = Expect(TokenKind.EXTEND, "expected 'extend'")
@@ -807,7 +807,7 @@ extend ParserImpl {
         return ret
     }
 
-    public func ParseTypeAlias(scopeKind: ScopeKind, modifiers: ArrayList<Modifier>, annos: ArrayList<Annotation>): TypeAliasDecl {
+    public func ParseTypeAlias(_: ScopeKind, modifiers: ArrayList<Modifier>, annos: ArrayList<Annotation>): TypeAliasDecl {
         let ret = TypeAliasDecl()
         ApplyModifiersAndAnnotations(ret, modifiers, annos)
         let key = Expect(TokenKind.TYPE, "expected 'type'")
@@ -821,7 +821,7 @@ extend ParserImpl {
         return ret
     }
 
-    public func ParsePropDecl(scopeKind: ScopeKind, modifiers: ArrayList<Modifier>, annos: ArrayList<Annotation>): PropDecl {
+    public func ParsePropDecl(_: ScopeKind, modifiers: ArrayList<Modifier>, annos: ArrayList<Annotation>): PropDecl {
         let ret = PropDecl()
         ApplyModifiersAndAnnotations(ret, modifiers, annos)
         let key = Expect(TokenKind.PROP, "expected 'prop'")

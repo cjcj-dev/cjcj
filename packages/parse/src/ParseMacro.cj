@@ -95,7 +95,7 @@ extend ParserImpl {
         return decl
     }
 
-    public func ParseMacroInvocation(scopeKind: ScopeKind, modifiers: ArrayList<Modifier>, invocation: MacroInvocation): Unit {
+    public func ParseMacroInvocation(scopeKind: ScopeKind, _: ArrayList<Modifier>, invocation: MacroInvocation): Unit {
         if (!ParseMacroCallIdentifier(invocation, Node())) {
             invocation.macroCallDiagInfo.macroCallEnd = lastToken.End()
             return

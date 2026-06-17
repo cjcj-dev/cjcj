@@ -502,6 +502,7 @@ private class ExternalLinkageAnalyzer {
     }
 
     private func SetFuncTargetLinkage(fd: FuncDecl, byTy!: Bool = false): Unit {
+        let _ = byTy // maybe_unused: kept for API parity with SetProp/SetVarTargetLinkage
         if (!IsGlobalOrMember(fd)) {
             return
         }

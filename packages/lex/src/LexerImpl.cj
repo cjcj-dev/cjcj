@@ -2577,17 +2577,6 @@ public class LexerImpl {
         return token
     }
 
-    private func ScanIllegalSymbol(pStart: Int64): Token {
-        if (success) {
-            while (currentChar > Int64(ASCII_BASE)) {
-                ReadUTF8Char()
-            }
-            lexDiagnose(diag, DiagKindRefactor.lex_unrecognized_symbol, MakeRange(GetPos(pStart), GetPos(pCurrent)), input[pStart..pCurrent])
-            success = false
-        }
-        return Token(TokenKind.ILLEGAL, input[pStart..pNext], pos, GetPos(pNext))
-    }
-
     private func ScanBase(): Token {
         let pStart = pNext
         success = true

@@ -276,7 +276,7 @@ public open class CGType {
         return result
     }
 
-    public static func GetCodeGenFunctionType(context: LLVMContextHandle, retType: LLVMTypeRef): LLVMTypeRef {
+    public static func GetCodeGenFunctionType(_: LLVMContextHandle, retType: LLVMTypeRef): LLVMTypeRef {
         return unsafe { LLVMFunctionType(retType, CPointer<LLVMTypeRef>(), 0u32, 0) }
     }
 

@@ -9,7 +9,7 @@ extend ParserImpl {
         diag.DiagnoseRefactor(DiagKindRefactor.EXPECTED_TOKEN, Peek().Begin(), "expected expression")
     }
 
-    public func DiagExpectedDeclaration(scopeKind: ScopeKind): Unit {
+    public func DiagExpectedDeclaration(_: ScopeKind): Unit {
         diag.DiagnoseRefactor(DiagKindRefactor.EXPECTED_TOKEN, Peek().Begin(), "expected declaration")
     }
 }

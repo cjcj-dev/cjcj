@@ -223,7 +223,7 @@ extend ParserImpl {
         return ParseTypeArguments(ExprKind.UNKNOWN_EXPR)
     }
 
-    public func ParseTypeArguments(ek: ExprKind): (Bool, ArrayList<Type>) {
+    public func ParseTypeArguments(_: ExprKind): (Bool, ArrayList<Type>) {
         let out = ArrayList<Type>()
         if (!Skip(TokenKind.LT)) {
             return (false, out)
