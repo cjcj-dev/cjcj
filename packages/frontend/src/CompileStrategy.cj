@@ -1054,7 +1054,7 @@ private func parseLiteralReturn(tokens: ArrayList<FrontendToken>, start: Int64, 
         }
         if (depth == 0 && tokens[idx].value == "return") {
             let valueIdx = skipTrivia(tokens, idx + 1)
-            return parseLiteralReturnValue(tokens, valueIdx, end)
+            return parseLiteralReturnValue(tokens, valueIdx, end, start, idx)
         }
         idx++
     }
@@ -1062,7 +1062,7 @@ private func parseLiteralReturn(tokens: ArrayList<FrontendToken>, start: Int64, 
 }
 
 private func parseLiteralReturnValue(tokens: ArrayList<FrontendToken>, idx: Int64,
-    end: Int64): (Bool, Int64, String, Position, Position) {
+    end: Int64, bodyStart: Int64, returnIdx: Int64): (Bool, Int64, String, Position, Position) {
     if (idx >= end || idx >= tokens.size) {
         return (false, FRONTEND_LITERAL_UNKNOWN, "", INVALID_POSITION, INVALID_POSITION)
     }
@@ -1091,7 +1091,132 @@ private func parseLiteralReturnValue(tokens: ArrayList<FrontendToken>, idx: Int6
     if (tok.value == "(" && idx + 1 < end && idx + 1 < tokens.size && tokens[idx + 1].value == ")") {
         return (true, FRONTEND_LITERAL_UNIT, "", tok.Begin(), tokens[idx + 1].End())
     }
+    // `return <identifier>`: fold a single-assignment, literal-initialized immutable `let`
+    // declared earlier at brace depth 0 in the same body. Conservative: bare identifier only
+    // (nothing but trivia / `}` after it), and the binding must resolve to a plain literal.
+    if (tok.kind == FrontendTokenKind.IDENTIFIER && isBareReturnIdentifier(tokens, idx + 1, end)) {
+        return resolveLetLiteral(tokens, bodyStart, returnIdx, tok.value)
+    }
     return (false, FRONTEND_LITERAL_UNKNOWN, "", INVALID_POSITION, INVALID_POSITION)
+}
+
+// True if the only thing following the returned identifier (within the body) is trivia or the
+// closing brace, so `return x` qualifies but `return x + 1` / `return f(x)` do not.
+private func isBareReturnIdentifier(tokens: ArrayList<FrontendToken>, after: Int64, end: Int64): Bool {
+    let nextIdx = skipTrivia(tokens, after)
+    if (nextIdx >= end || nextIdx >= tokens.size) {
+        return true
+    }
+    return tokens[nextIdx].value == "}"
+}
+
+// Scan brace-depth-0 statements before `returnIdx` for `let <name> = <literal>` and fold it into
+// the literal return value. Requires exactly one matching immutable binding (no `var`, no
+// reassignment, no expression initializer).
+private func resolveLetLiteral(tokens: ArrayList<FrontendToken>, bodyStart: Int64, returnIdx: Int64,
+    name: String): (Bool, Int64, String, Position, Position) {
+    var idx = bodyStart
+    var depth: Int64 = 0
+    var found = false
+    var result = (false, FRONTEND_LITERAL_UNKNOWN, "", INVALID_POSITION, INVALID_POSITION)
+    while (idx < returnIdx && idx < tokens.size) {
+        let value = tokens[idx].value
+        if (value == "{" || value == "(" || value == "[") {
+            depth++
+            idx++
+            continue
+        }
+        if (value == "}" || value == ")" || value == "]") {
+            if (depth > 0) {
+                depth--
+            }
+            idx++
+            continue
+        }
+        if (depth == 0 && (value == "let" || value == "var")) {
+            let nameIdx = skipTrivia(tokens, idx + 1)
+            if (nameIdx < returnIdx && nameIdx < tokens.size &&
+                tokens[nameIdx].kind == FrontendTokenKind.IDENTIFIER && tokens[nameIdx].value == name) {
+                // Any rebinding (a second decl or `var`) of this name is not foldable.
+                if (value == "var" || found) {
+                    return (false, FRONTEND_LITERAL_UNKNOWN, "", INVALID_POSITION, INVALID_POSITION)
+                }
+                let eqIdx = skipTrivia(tokens, nameIdx + 1)
+                if (eqIdx < returnIdx && eqIdx < tokens.size && tokens[eqIdx].value == "=") {
+                    let initIdx = skipTrivia(tokens, eqIdx + 1)
+                    let literal = parseBareLetLiteral(tokens, initIdx, returnIdx)
+                    if (literal[0]) {
+                        found = true
+                        result = literal
+                    } else {
+                        return (false, FRONTEND_LITERAL_UNKNOWN, "", INVALID_POSITION, INVALID_POSITION)
+                    }
+                } else {
+                    return (false, FRONTEND_LITERAL_UNKNOWN, "", INVALID_POSITION, INVALID_POSITION)
+                }
+            }
+            // Skip past the declared name so it is not re-scanned as a reassignment below.
+            idx = nameIdx + 1
+            continue
+        }
+        // Detect a top-level reassignment `<name> = ...` which would make folding unsound.
+        if (depth == 0 && tokens[idx].kind == FrontendTokenKind.IDENTIFIER && value == name) {
+            let nextIdx = skipTrivia(tokens, idx + 1)
+            if (nextIdx < returnIdx && nextIdx < tokens.size && tokens[nextIdx].value == "=") {
+                return (false, FRONTEND_LITERAL_UNKNOWN, "", INVALID_POSITION, INVALID_POSITION)
+            }
+        }
+        idx++
+    }
+    return result
+}
+
+// Parse a `let` initializer that must be a single bare literal: a bool/int/float/string/unit
+// literal (optionally a leading `-`) with nothing but a statement terminator following it.
+// Rejects expression initializers like `3 + 4` so folding stays sound.
+private func parseBareLetLiteral(tokens: ArrayList<FrontendToken>, idx: Int64,
+    end: Int64): (Bool, Int64, String, Position, Position) {
+    if (idx >= end || idx >= tokens.size) {
+        return (false, FRONTEND_LITERAL_UNKNOWN, "", INVALID_POSITION, INVALID_POSITION)
+    }
+    let tok = tokens[idx]
+    var kind = FRONTEND_LITERAL_UNKNOWN
+    var value = ""
+    var litEnd = INVALID_POSITION
+    var nextIdx = idx + 1
+    if (tok.kind == FrontendTokenKind.BOOL_LITERAL) {
+        kind = FRONTEND_LITERAL_BOOL; value = tok.value; litEnd = tok.End()
+    } else if (tok.kind == FrontendTokenKind.INTEGER_LITERAL) {
+        kind = FRONTEND_LITERAL_INT; value = tok.value; litEnd = tok.End()
+    } else if (tok.kind == FrontendTokenKind.FLOAT_LITERAL) {
+        kind = FRONTEND_LITERAL_FLOAT; value = tok.value; litEnd = tok.End()
+    } else if (tok.kind == FrontendTokenKind.STRING_LITERAL) {
+        kind = FRONTEND_LITERAL_STRING; value = StripLiteralQuotes(tok.value); litEnd = tok.End()
+    } else if (tok.value == "-" && idx + 1 < end && idx + 1 < tokens.size) {
+        let signedTok = tokens[idx + 1]
+        if (signedTok.kind == FrontendTokenKind.INTEGER_LITERAL) {
+            kind = FRONTEND_LITERAL_INT; value = "-" + signedTok.value; litEnd = signedTok.End(); nextIdx = idx + 2
+        } else if (signedTok.kind == FrontendTokenKind.FLOAT_LITERAL) {
+            kind = FRONTEND_LITERAL_FLOAT; value = "-" + signedTok.value; litEnd = signedTok.End(); nextIdx = idx + 2
+        }
+    } else if (tok.value == "(" && idx + 1 < end && idx + 1 < tokens.size && tokens[idx + 1].value == ")") {
+        kind = FRONTEND_LITERAL_UNIT; value = ""; litEnd = tokens[idx + 1].End(); nextIdx = idx + 2
+    }
+    if (kind == FRONTEND_LITERAL_UNKNOWN) {
+        return (false, FRONTEND_LITERAL_UNKNOWN, "", INVALID_POSITION, INVALID_POSITION)
+    }
+    // The literal must end the statement: the very next token (no trivia skipped) must be a
+    // newline, comment, `;`, `}`, or the body end. Anything else (e.g. `+`) means an expression.
+    if (nextIdx < end && nextIdx < tokens.size) {
+        let nextTok = tokens[nextIdx]
+        let isTerminator = nextTok.kind == FrontendTokenKind.NL ||
+            nextTok.kind == FrontendTokenKind.COMMENT ||
+            nextTok.value == ";" || nextTok.value == "}"
+        if (!isTerminator) {
+            return (false, FRONTEND_LITERAL_UNKNOWN, "", INVALID_POSITION, INVALID_POSITION)
+        }
+    }
+    return (true, kind, value, tok.Begin(), litEnd)
 }
 
 private func StripLiteralQuotes(value: String): String {
