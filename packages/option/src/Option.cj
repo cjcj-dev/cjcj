@@ -615,7 +615,7 @@ public open class GlobalOptions <: Option {
     public func NeedDumpIRToScreen(): Bool { return NeedDumpIR() && dumpToScreen }
     public func SetFrontendMode(): Unit { frontendMode = true }
     public func GetStackTraceFormat(): String { return "--" + StackTraceFormatToSerializedString() }
-    public func GetJobs(): UInt64 { return if (jobs.hasValue) { jobs.value } else { 1u64 } }
+    public func GetJobs(): UInt64 { return if (jobs.hasValue) { jobs.value } else { GetHardwareConcurrency() } }
 
     public func ReadPathsFromEnvironmentVars(environmentVars: HashMap<String, String>): Unit {
         environment.allVariables.clear()
@@ -971,7 +971,7 @@ public open class GlobalOptions <: Option {
     }
 
     private func CheckOutputPathLength(): Bool {
-        let defaultOutputNameLen: Int64 = 4
+        let defaultOutputNameLen = GetDefaultOutputNameLength()
         let fullLength = if (IsDir(output)) { output.size + defaultOutputNameLen } else { output.size }
         if (fullLength > FILE_PATH_MAX_LENGTH) {
             emitOptionDiag(

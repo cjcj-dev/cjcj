@@ -338,9 +338,16 @@ path used by the shared semaphore utility, so jobs/APC clamping and default
 job refactoring follow the C++ `std::thread::hardware_concurrency()` behavior
 on another supported host instead of falling back to one worker.
 
+This continuation tightens two public defaults to the C++ `GlobalOptions`
+contract. `GetJobs()` now returns host hardware concurrency when `--jobs` was
+not explicitly set, matching the header inline `jobs.value_or(...)` behavior
+even before post-action refactoring has run. Output path-length validation now
+uses a host-conditional default executable name length: `main.exe` on Windows
+hosts and `main` elsewhere, preserving the `_WIN32` branch in `Option.cpp`.
+
 Remaining gaps: `Options.cj`/`OptionEnums.cj` remain hand-maintained mirrors of
 `Options.inc`; `MaybeString`, `MaybeUInt64`, and `TryParseUInt64` remain as
 compatibility surface for current sibling package imports; several print-style
-diagnostics still use local wrapper text; Windows host hardware concurrency
-still uses the conservative fallback; and driver-layer obfuscation option
-handling is not yet fully folded into the base Option action surface.
+diagnostics still use local wrapper text where the C++ uses formatted print
+helpers; and driver-layer obfuscation option handling is not yet fully folded
+into the base Option action surface.

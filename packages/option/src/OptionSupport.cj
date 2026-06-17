@@ -49,6 +49,16 @@ public func GetHardwareConcurrency(): UInt64 {
     return 1u64
 }
 
+@When[os == "Windows"]
+public func GetDefaultOutputNameLength(): Int64 {
+    return 8
+}
+
+@When[os != "Windows"]
+public func GetDefaultOutputNameLength(): Int64 {
+    return 4
+}
+
 public class MaybeString {
     public var hasValue: Bool = false
     public var value: String = ""
