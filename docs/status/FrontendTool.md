@@ -22,6 +22,13 @@ Current status:
   single-package cache path, matching the C++ incremental precondition that exactly one source package is analysed.
 - Incremental logging now reports analysis result kind, recompiled/deleted cache-summary sets, semantic full/incremental
   decisions, and CJO-saving decisions through the real `IncrementalCompilationLogger`.
+- FrontendTool incremental fallback now emits explicit rollback reasons for missing/unreadable cache data, cache-version
+  mismatch, and compile-argument changes, matching the C++ habit of explaining each rollback path.
+- FrontendTool incremental result dumping now uses the same delimiter/count-oriented shape as
+  `incremental_compilation.IncreResult.Dump()` and includes source-file summary additions/removals alongside
+  declaration summary changes.
+- Incremental result saving now propagates failures from `.frontend_tool.incr` and cached CJO summary writes instead of
+  silently ignoring them, so the frontend result status reflects cache/signature persistence failures.
 - Incremental changed-struct collection is filtered by the same declaration-summary keys used by the cache delta, so
   incremental codegen metadata no longer marks every struct as changed on every incremental compile.
 - Common-part/CJMP-style CJO output is delayed to result saving, matching the C++ FrontendTool split between

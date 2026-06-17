@@ -14,6 +14,8 @@ public class IncrementalCompilerInstance <: DefaultCompilerInstance {
     public var kind: IncreKind = IncreKind.INVALID
     private let declsToBeReCompiled: HashSet<String> = HashSet<String>()
     private let rawIncrRemovedDecls: ArrayList<String> = ArrayList<String>()
+    private let filesToBeReCompiled: HashSet<String> = HashSet<String>()
+    private let rawIncrRemovedFiles: ArrayList<String> = ArrayList<String>()
     private var currentCacheText: String = ""
 
     public init(invocation: CompilerInvocation, diag: DiagnosticEngine) {
@@ -28,6 +30,8 @@ public class IncrementalCompilerInstance <: DefaultCompilerInstance {
         let recorder = ProfileRecorder("Main Stage", "AST Diff")
         declsToBeReCompiled.clear()
         rawIncrRemovedDecls.clear()
+        filesToBeReCompiled.clear()
+        rawIncrRemovedFiles.clear()
         currentCacheText = ""
         let calculated = core.CalculateASTCache()
         let sourcePackages = core.GetSourcePackages()
@@ -122,7 +126,7 @@ public class IncrementalCompilerInstance <: DefaultCompilerInstance {
         }
         let ret = super.PerformResultsSaving()
         if (ret) {
-            SaveIncrementalSignatures()
+            return SaveIncrementalSignatures()
         }
         return ret
     }
@@ -180,9 +184,19 @@ public class IncrementalCompilerInstance <: DefaultCompilerInstance {
         } else if (kind == IncreKind.NO_CHANGE) {
             logger.LogLn("incremental compile result kind: no change")
         } else if (kind == IncreKind.INCR) {
+            let delimiter = MakeIncrementalDumpDelimiter()
+            logger.LogLn(delimiter)
             logger.LogLn("incremental compilation triggered")
-            LogStringSet("decls to recompile:", declsToBeReCompiled)
-            LogStringList("deleted decls:", rawIncrRemovedDecls)
+            logger.LogLn("begin dump incremental compile result:")
+            LogStringSetWithCount("changed decls to recompile: ", "the changed decl after Spreading is:",
+                declsToBeReCompiled)
+            logger.LogLn(delimiter)
+            LogStringListWithCount("deleted decls: ", "the deleted decl is:", rawIncrRemovedDecls)
+            logger.LogLn(delimiter)
+            LogStringSetWithCount("changed files to recompile: ", "the changed file summary is:",
+                filesToBeReCompiled)
+            LogStringListWithCount("deleted files: ", "the deleted file summary is:", rawIncrRemovedFiles)
+            logger.LogLn(delimiter)
         } else {
             logger.LogLn("incremental compile result kind: invalid")
         }
@@ -234,40 +248,54 @@ public class IncrementalCompilerInstance <: DefaultCompilerInstance {
         return builder.toString()
     }
 
-    private func SaveIncrementalSignatures(): Unit {
+    private func SaveIncrementalSignatures(): Bool {
         if (currentCacheText.isEmpty()) {
             currentCacheText = RenderFrontendToolIncrementalCache()
         }
+        var ret = true
         let cachePath = GetFrontendToolIncrementalCachePath()
         if (!cachePath.isEmpty()) {
-            let _ = FileUtil.WriteToFile(cachePath, currentCacheText)
+            if (!FileUtil.WriteToFile(cachePath, currentCacheText)) {
+                diag.Warn(DiagCategory.IMPORT_PACKAGE, DEFAULT_POSITION,
+                    "failed to write FrontendTool incremental cache: " + cachePath)
+                ret = false
+            }
         }
         for (pkg in core.GetSourcePackages()) {
             if (pkg.IsEmpty()) {
                 continue
             }
-            let _ = SaveCjo(pkg)
+            ret = SaveCjo(pkg) && ret
         }
+        return ret
     }
 
     private func AnalyseCurrentFrontendCache(): IncreKind {
         currentCacheText = RenderFrontendToolIncrementalCache()
         let cachePath = GetFrontendToolIncrementalCachePath()
-        if (cachePath.isEmpty() || !FileExist(cachePath)) {
+        if (cachePath.isEmpty()) {
+            LogIncrementalRollback("load cached info failed, roll back to full compilation")
+            return IncreKind.ROLLBACK
+        }
+        if (!FileExist(cachePath)) {
+            LogIncrementalRollback("load cached info failed, roll back to full compilation")
             return IncreKind.ROLLBACK
         }
         let readResult = ReadFileContent(cachePath)
         if (!readResult[0]) {
+            LogIncrementalRollback("load cached info failed, roll back to full compilation")
             return IncreKind.ROLLBACK
         }
         let previousCache = readResult[1]
         if (GetCacheLineValue(previousCache, "version:") != "1") {
+            LogIncrementalRollback("cached FrontendTool incremental cache version changed, roll back to full compilation")
             return IncreKind.ROLLBACK
         }
         if (previousCache == currentCacheText) {
             return IncreKind.NO_CHANGE
         }
         if (GetCacheLineValue(previousCache, "args:") != EscapeCacheLine(core.cachedInfo.compileArgs)) {
+            LogIncrementalRollback("compile args changed, roll back to full compilation")
             return IncreKind.ROLLBACK
         }
         let changedFiles = CollectCacheDelta(previousCache, currentCacheText)
@@ -305,11 +333,13 @@ public class IncrementalCompilerInstance <: DefaultCompilerInstance {
         let newFiles = CollectCacheLines(newCache, "file:")
         for (oldFile in previousFiles) {
             if (!newFiles.contains(oldFile)) {
+                rawIncrRemovedFiles.add(oldFile)
                 filesChanged = true
             }
         }
         for (newFile in newFiles) {
             if (!previousFiles.contains(newFile)) {
+                filesToBeReCompiled.add(newFile)
                 filesChanged = true
             }
         }
@@ -326,6 +356,13 @@ public class IncrementalCompilerInstance <: DefaultCompilerInstance {
             }
         }
         return filesChanged
+    }
+}
+
+private func LogIncrementalRollback(message: String): Unit {
+    let logger = IncrementalCompilationLogger.GetInstance()
+    if (logger.IsEnable()) {
+        logger.LogLn(message)
     }
 }
 
@@ -363,24 +400,34 @@ private func AppendCacheStringList(builder: StringBuilder, values: ArrayList<Str
     }
 }
 
-private func LogStringSet(title: String, values: HashSet<String>): Unit {
+private func LogStringSetWithCount(title: String, entryPrefix: String, values: HashSet<String>): Unit {
     if (values.isEmpty()) {
         return
     }
     let logger = IncrementalCompilationLogger.GetInstance()
-    logger.LogLn(title)
+    logger.LogLn(title + values.size.toString())
     for (value in values) {
-        logger.LogLn(value)
+        logger.LogLn(entryPrefix + value)
     }
 }
 
-private func LogStringList(title: String, values: ArrayList<String>): Unit {
+private func LogStringListWithCount(title: String, entryPrefix: String, values: ArrayList<String>): Unit {
     if (values.isEmpty()) {
         return
     }
     let logger = IncrementalCompilationLogger.GetInstance()
-    logger.LogLn(title)
+    logger.LogLn(title + values.size.toString())
     for (value in values) {
-        logger.LogLn(value)
+        logger.LogLn(entryPrefix + value)
     }
+}
+
+private func MakeIncrementalDumpDelimiter(): String {
+    let builder = StringBuilder()
+    var idx: Int64 = 0
+    while (idx < 50) {
+        builder.append("=")
+        idx++
+    }
+    return builder.toString()
 }
