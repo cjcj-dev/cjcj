@@ -127,6 +127,7 @@ public class AST2CHIRPropertySpec {
     public let setters: ArrayList<AST2CHIRFunctionSpec> = ArrayList<AST2CHIRFunctionSpec>()
     public var sourceFileKey: String = ""
     public var isCommonMatchedWithSpecific: Bool = false
+    public var propertyLocation: Option<DebugLocation> = None
 
     public init() {}
 
@@ -147,6 +148,11 @@ public class AST2CHIRPropertySpec {
 
     public func SetCommonMatchedWithSpecific(value: Bool): AST2CHIRPropertySpec {
         isCommonMatchedWithSpecific = value
+        return this
+    }
+
+    public func SetPropertyLocation(loc: DebugLocation): AST2CHIRPropertySpec {
+        propertyLocation = Some(loc)
         return this
     }
 }

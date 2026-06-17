@@ -4,7 +4,8 @@ import std.collection.*
 
 extend AST2CHIRDeclTranslator {
     public func CreateNominalDef(defaultPackage: String, spec: AST2CHIRNominalSpec): CustomTypeDef {
-        if (let Some(existing) <- TryGetTypeDef(spec.name)) {
+        if (let Some(existing) <- TryGetNominalSpec(defaultPackage, spec)) {
+            ApplyAttributes(existing, spec.attributes)
             ApplyNominalSourceInfo(existing, spec)
             return existing
         }
@@ -24,7 +25,7 @@ extend AST2CHIRDeclTranslator {
         for (genericParam in spec.genericTypeParams) {
             def.AddGenericTypeParam(genericParam)
         }
-        RegisterTypeDef(spec.name, def)
+        RegisterNominalSpec(defaultPackage, spec, def)
         if (let Some(pkg) <- currentPackage) {
             AddTypeDefToPackage(pkg, spec, def)
         }
@@ -137,9 +138,19 @@ extend AST2CHIRDeclTranslator {
             return
         }
         for (getterSpec in propertySpec.getters) {
+            if (let Some(propLoc) <- propertySpec.propertyLocation) {
+                if (getterSpec.propertyLocation.isNone()) {
+                    getterSpec.SetPropertyLocation(propLoc)
+                }
+            }
             LowerMemberMethodSpec(owner, getterSpec)
         }
         for (setterSpec in propertySpec.setters) {
+            if (let Some(propLoc) <- propertySpec.propertyLocation) {
+                if (setterSpec.propertyLocation.isNone()) {
+                    setterSpec.SetPropertyLocation(propLoc)
+                }
+            }
             LowerMemberMethodSpec(owner, setterSpec)
         }
     }

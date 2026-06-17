@@ -4,7 +4,9 @@ import std.collection.*
 
 extend AST2CHIRDeclTranslator {
     public func LowerFunction(defaultPackage: String, spec: AST2CHIRFunctionSpec): Function {
-        if (let Some(existing) <- TryGetFunction(spec.name)) {
+        if (let Some(existing) <- TryGetFunctionSpec(defaultPackage, spec)) {
+            ApplyAttributes(existing, spec.attributes)
+            ApplyFunctionSemanticAttributes(existing, spec)
             ApplyFunctionSourceInfo(existing, spec)
             AttachFunctionToOwner(existing, spec)
             LowerDefaultParamFunctions(defaultPackage, existing, spec)
@@ -17,12 +19,13 @@ extend AST2CHIRDeclTranslator {
             rawMangledName: spec.rawMangledName, packageName: packageName)
         fn.SetFuncKind(spec.funcKind)
         ApplyAttributes(fn, spec.attributes)
+        ApplyFunctionSemanticAttributes(fn, spec)
         ApplyFunctionSourceInfo(fn, spec)
         CreateFunctionParameters(fn, spec)
         if (ShouldEmitBody(spec)) {
             CreateEmptyBody(fn)
         }
-        RegisterFunction(fn)
+        RegisterFunctionSpec(defaultPackage, spec, fn)
         WireGenericDecl(fn, spec)
         if (let Some(pkg) <- currentPackage) {
             AddFunctionToPackage(pkg, fn)
@@ -31,6 +34,12 @@ extend AST2CHIRDeclTranslator {
         LowerDefaultParamFunctions(defaultPackage, fn, spec)
         LowerGenericInstantiationFunctions(defaultPackage, fn, spec)
         return fn
+    }
+
+    private func ApplyFunctionSemanticAttributes(fn: Function, spec: AST2CHIRFunctionSpec): Unit {
+        if (spec.attributes.contains(Attribute.FOREIGN)) {
+            fn.EnableAttr(Attribute.IMPORTED)
+        }
     }
 
     private func ApplyFunctionSourceInfo(fn: Function, spec: AST2CHIRFunctionSpec): Unit {

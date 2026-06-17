@@ -18,12 +18,48 @@ public class AST2CHIRDeclTranslator {
         functions[fn.GetIdentifier()] = fn
     }
 
+    public func RegisterFunctionAlias(name: String, fn: Function): Unit {
+        if (!name.isEmpty()) {
+            functions[name] = fn
+        }
+    }
+
+    public func RegisterFunctionSpec(defaultPackage: String, spec: AST2CHIRFunctionSpec, fn: Function): Unit {
+        RegisterFunction(fn)
+        RegisterFunctionAlias(spec.rawMangledName, fn)
+        RegisterFunctionAlias(ScopedDeclName(ResolvePackageName(defaultPackage, spec.packageName), spec.name), fn)
+    }
+
     public func RegisterGlobal(globalVar: GlobalVar): Unit {
         globals[globalVar.GetIdentifier()] = globalVar
     }
 
+    public func RegisterGlobalAlias(name: String, globalVar: GlobalVar): Unit {
+        if (!name.isEmpty()) {
+            globals[name] = globalVar
+        }
+    }
+
+    public func RegisterGlobalSpec(defaultPackage: String, spec: AST2CHIRGlobalSpec, globalVar: GlobalVar): Unit {
+        RegisterGlobal(globalVar)
+        RegisterGlobalAlias(spec.rawMangledName, globalVar)
+        RegisterGlobalAlias(ScopedDeclName(ResolvePackageName(defaultPackage, spec.packageName), spec.name), globalVar)
+    }
+
     public func RegisterTypeDef(name: String, def: CustomTypeDef): Unit {
         typeDefs[name] = def
+    }
+
+    public func RegisterTypeDefAlias(name: String, def: CustomTypeDef): Unit {
+        if (!name.isEmpty()) {
+            typeDefs[name] = def
+        }
+    }
+
+    public func RegisterNominalSpec(defaultPackage: String, spec: AST2CHIRNominalSpec, def: CustomTypeDef): Unit {
+        RegisterTypeDef(spec.name, def)
+        RegisterTypeDefAlias(spec.rawMangledName, def)
+        RegisterTypeDefAlias(ScopedDeclName(ResolvePackageName(defaultPackage, spec.packageName), spec.name), def)
     }
 
     public func TryGetTypeDef(name: String): Option<CustomTypeDef> {
@@ -34,8 +70,54 @@ public class AST2CHIRDeclTranslator {
         return functions.get(name)
     }
 
+    public func TryGetNominalSpec(defaultPackage: String, spec: AST2CHIRNominalSpec): Option<CustomTypeDef> {
+        if (let Some(foundByScoped) <- typeDefs.get(
+            ScopedDeclName(ResolvePackageName(defaultPackage, spec.packageName), spec.name))) {
+            return foundByScoped
+        }
+        if (!spec.rawMangledName.isEmpty()) {
+            if (let Some(foundByRaw) <- typeDefs.get(spec.rawMangledName)) {
+                return foundByRaw
+            }
+        }
+        return typeDefs.get(spec.name)
+    }
+
+    public func TryGetFunctionSpec(defaultPackage: String, spec: AST2CHIRFunctionSpec): Option<Function> {
+        if (let Some(foundByScoped) <- functions.get(
+            ScopedDeclName(ResolvePackageName(defaultPackage, spec.packageName), spec.name))) {
+            return foundByScoped
+        }
+        if (!spec.rawMangledName.isEmpty()) {
+            if (let Some(foundByRaw) <- functions.get(spec.rawMangledName)) {
+                return foundByRaw
+            }
+        }
+        return functions.get(spec.name)
+    }
+
+    public func TryGetGlobalSpec(defaultPackage: String, spec: AST2CHIRGlobalSpec): Option<GlobalVar> {
+        if (let Some(foundByScoped) <- globals.get(
+            ScopedDeclName(ResolvePackageName(defaultPackage, spec.packageName), spec.name))) {
+            return foundByScoped
+        }
+        if (!spec.rawMangledName.isEmpty()) {
+            if (let Some(foundByRaw) <- globals.get(spec.rawMangledName)) {
+                return foundByRaw
+            }
+        }
+        return globals.get(spec.name)
+    }
+
     public func ResolvePackageName(defaultPackage: String, declaredPackage: String): String {
         return if (declaredPackage.isEmpty()) { defaultPackage } else { declaredPackage }
+    }
+
+    public func ScopedDeclName(packageName: String, identifier: String): String {
+        if (packageName.isEmpty()) {
+            return identifier
+        }
+        return packageName + "." + identifier
     }
 
     public func ActivePackageName(fallback: String): String {

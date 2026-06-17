@@ -4,7 +4,8 @@ import std.collection.*
 
 extend AST2CHIRDeclTranslator {
     public func LowerGlobalVar(defaultPackage: String, spec: AST2CHIRGlobalSpec): GlobalVar {
-        if (let Some(existing) <- globals.get(spec.name)) {
+        if (let Some(existing) <- TryGetGlobalSpec(defaultPackage, spec)) {
+            ApplyAttributes(existing, spec.attributes)
             ApplyGlobalSourceInfo(existing, spec)
             return existing
         }
@@ -14,7 +15,7 @@ extend AST2CHIRDeclTranslator {
             rawMangledName: spec.rawMangledName, packageName: packageName)
         ApplyAttributes(globalVar, spec.attributes)
         ApplyGlobalSourceInfo(globalVar, spec)
-        RegisterGlobal(globalVar)
+        RegisterGlobalSpec(defaultPackage, spec, globalVar)
         if (let Some(literal) <- spec.initialValue) {
             LowerGlobalLiteralInitializer(defaultPackage, globalVar, spec, literal)
         }
@@ -65,7 +66,9 @@ extend AST2CHIRDeclTranslator {
             globalVar.SetInitializerValue(result)
         }
         builder.CreateExit(None, entry)
-        RegisterFunction(initFn)
+        RegisterFunctionAlias(initFn.GetIdentifier(), initFn)
+        RegisterFunctionAlias(initRawMangledName, initFn)
+        RegisterFunctionAlias(ScopedDeclName(packageName, initIdentifier), initFn)
         if (let Some(pkg) <- currentPackage) {
             AddFunctionToPackage(pkg, initFn)
         }
