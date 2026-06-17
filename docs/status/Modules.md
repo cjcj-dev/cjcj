@@ -22,6 +22,8 @@ This pass tightened two state-management details against the C++ reference: chan
 
 This pass de-isolated standard-library package recognition and shared package constants to `cangjie_compiler::utils`, added the C++ package-name re-export import diagnostic path, made local text serialization deterministic for expression attributes and incremental removed mangles, and expanded reference indexing to include package declarations plus exported-internal declarations.
 
+This continuation tightened import-indexing and LSP/macros behavior against the C++ reference: alias provenance is now recorded for wildcard imports and full explicit-import candidate sets, `LoadPackageFromCjo` recursively loads dependency headers before on-demand declaration loading, macro debug file replacement clones implicit import nodes instead of sharing them, and dependency JSON escaping now emits `\u00XX` for all control bytes like the C++ `Jsonfy` helper.
+
 ## Implemented
 
 - Replaced `ModulesScaffold.cj` with per-component source files under `packages/modules/src`.
@@ -45,11 +47,14 @@ This pass de-isolated standard-library package recognition and shared package co
 - Matched `ImportManager` source-code import status propagation into `CjoManagerImpl` so newly created AST loaders observe LSP/source-import toggles.
 - Matched C++ dependency path bookkeeping for first-write CJO path storage and unconditional `.cj.d` sidecar derivation.
 - Matched the C++ package-name re-export import check by reporting `package_re_export_package_name` for re-exported package imports and forwarding that diagnostic to Basic.
+- Matched more C++ imported-declaration alias provenance: wildcard imports now remember declaration identifiers that differ from the imported map key, and explicit alias/single imports record aliases from the full candidate member set before visibility filtering.
+- Matched the C++ `LoadPackageFromCjo` LSP path by recursively loading dependent package headers before loading declarations and references on demand.
+- Matched the C++ macro-debug file replacement path by cloning compiler-added implicit import nodes into the replacement file rather than reusing mutable import nodes from the old file.
 - Implemented `DependencyGraph` direct/transitive dependency collection with macro re-export handling and cache invalidation.
 - Implemented `PackageManager` Tarjan SCC ordering and source package reordering behavior.
 - Added a compiling local AST writer/loader wire format so exported package/import/member data can round-trip inside this package while the real flatbuffer/AST dependencies are unavailable.
 - Improved that local AST writer/loader bridge to preserve `exportedInternalDecls` records, reload them into `File.exportedInternalDecls`, and suppress `doNotExport` declarations during serialization in line with the C++ writer's export filtering.
-- Continued the local serialization layer with type interning, cached declaration diffing, resolved dependency-name extraction, import reference loading, deterministic expression table serialization/deserialization, reference resolution maps, deterministic incremental removed-mangle serialization/parsing, node source-range/attribute preservation, and package file ownership normalization.
+- Continued the local serialization layer with type interning, cached declaration diffing, resolved dependency-name extraction, import reference loading, deterministic expression table serialization/deserialization, reference resolution maps, deterministic incremental removed-mangle serialization/parsing, C++-style JSON control-byte escaping, node source-range/attribute preservation, and package file ownership normalization.
 - Extended reference indexing to register package declarations and `exportedInternalDecls`, matching the declarations the writer can now preserve.
 - Added local-format CJMP common-part validation matching the C++ loader control flow for package-name mismatch, common/specific feature-set subset diagnostics, serialized debug/optimization option checks, and option-mismatch aborts before later compilation stages.
 

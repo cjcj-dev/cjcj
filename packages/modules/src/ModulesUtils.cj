@@ -7,6 +7,7 @@ import cangjie_compiler::basic.MakeRange as BasicMakeRange
 import cangjie_compiler::basic.Position as BasicPosition
 import cangjie_compiler::basic.Range as BasicRange
 import cangjie_compiler::basic.SplitQualifiedName as BasicSplitQualifiedName
+import cangjie_compiler::basic.ToHexString
 import cangjie_compiler::utils.FileUtil
 import cangjie_compiler::utils.AST_PACKAGE_NAME as UTILS_AST_PACKAGE_NAME
 import cangjie_compiler::utils.CORE_PACKAGE_NAME as UTILS_CORE_PACKAGE_NAME
@@ -779,12 +780,9 @@ public func EscapeJson(value: String): String {
         if (byte == b'\\' || byte == b'"') {
             builder.append("\\")
             builder.append(String.fromUtf8([byte]))
-        } else if (byte == b'\n') {
-            builder.append("\\n")
-        } else if (byte == b'\r') {
-            builder.append("\\r")
-        } else if (byte == b'\t') {
-            builder.append("\\t")
+        } else if (byte <= 0x1fu8) {
+            builder.append("\\u00")
+            builder.append(ToHexString(byte, len: 2))
         } else {
             builder.append(String.fromUtf8([byte]))
         }
