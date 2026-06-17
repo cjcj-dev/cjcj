@@ -1,6 +1,6 @@
 # Modules Port Status
 
-Date: 2026-06-17
+Date: 2026-06-18
 
 Build: `cjpm build` passes.
 
@@ -30,16 +30,31 @@ This pass aligned dependency graph and package-order dependency collection with 
 
 This pass tightened import validation and diagnostics against the C++ reference: named declaration imports now check member existence using package visibility only, with import access level reserved for imported-declaration map insertion, import-all short-circuits before package-name import checks, and warning diagnostics now retain the secondary note locations for shadowed imports, conflicting imports, and repeated feature names.
 
+This pass tightened package-order and import-node fidelity: `PackageManager` now uses a single monotonically increasing Tarjan discovery index like the C++ implementation, recursive standard-library dependency handling records CJO/CJD sidecar paths before classifying the dependency, and local import nodes now render C++-style alias and multi-import strings through `ToString`. The local `Package.IsEmpty` helper now follows the C++ AST rule that a package with only compiler-added imports and no declarations is empty.
+
+This pass de-isolated the first AST enum layer used by Modules: `AccessLevel`, `Attribute`, and `ImportKind` now alias the real `cangjie_compiler::ast` definitions instead of local compatibility enums. Attribute wire conversion now accepts the full real AST attribute name set, preserves the existing legacy `MACRO_EXPAND_DECL` spelling by mapping it to `MACRO_EXPANDED_NODE`, and Modules call sites use local comparison helpers because imported enum equality operators are not exported across the package alias boundary.
+
+This continuation de-isolated the package declaration spec used by Modules files to the real `cangjie_compiler::ast.PackageSpec`, preserved it through the local AST serialization bridge, and restored the C++ `CheckPackageSpecsIdentical` build-index validation for root-package visibility and cross-file package-name/access consistency. The new path uses real Lex `TokenKind` data from AST modifiers while keeping a compatibility fallback for package-level data until all callers populate real package specs.
+
+This pass de-isolated the package feature directive layer to the real `cangjie_compiler::ast.FeaturesDirective`: local files can now carry real feature AST nodes, the bridge reconstructs them from serialized feature data, dependency JSON/common-specific checks read real feature nodes when available, and `ImportManager.CheckPackageFeatureSpec` now follows the C++ reference algorithm for repeated feature diagnostics, reference feature selection, missing feature files, annotation consistency, and two-diagnostic limiting.
+
+This continuation tightened Modules diagnostic fidelity: note-bearing Modules helpers now forward a single real Basic diagnostic with attached notes instead of only forwarding the primary message. Shadowed imports, conflicting imports, repeated features, missing/inconsistent feature directives, package-name mismatches, and root-package modifier diagnostics now preserve their C++-style secondary note ranges in both the local diagnostic stream and the wrapped Basic `DiagnosticEngine`; missing `@NonProduct` now reports the real `parse_fail_expected_annotation` kind.
+
 ## Implemented
 
 - Replaced `ModulesScaffold.cj` with per-component source files under `packages/modules/src`.
 - Ported package/import name handling, including `::` organization names, `.cjo` file naming, test package suffix handling, access-level comparison, package relation classification, super-package checks, import-kind behavior, and visibility filtering.
 - Added module-local equivalents for `Package`, `File`, `Decl`, `PackageDecl`, `ImportSpec`, `ImportContent`, `ExternalLibCfg`, `DepType`, `ExportConfig`, and diagnostics needed by the ported logic.
+- Replaced the module-local `AccessLevel`, `Attribute`, and `ImportKind` compatibility enums with aliases to the real `cangjie_compiler::ast` enums and added Modules-local comparison helpers for those imported enum values.
+- Added a real `cangjie_compiler::ast.PackageSpec` slot to the local `File` model and preserved it in the local serializer/loader bridge.
+- Added a real `cangjie_compiler::ast.FeaturesDirective` slot to the local `File` model and made feature collection prefer real AST feature nodes over legacy string lists.
+- Expanded attribute serialization/deserialization to the full real AST attribute set, including compatibility handling for the old Modules-only `MACRO_EXPAND_DECL` spelling.
 - Replaced the module-local `GlobalOptions`, `OutputMode`, `OptimizationLevel`, and option environment copies with imports from `cangjie_compiler::option`; option serialization now preserves `Os` and `Oz`.
 - Replaced module-local `Position`/`Range` compatibility structs with public aliases to `cangjie_compiler::basic` and delegated range construction to Basic `MakeRange`.
 - Replaced the module-local qualified-name splitting algorithm with a wrapper around `cangjie_compiler::basic.SplitQualifiedName`, keeping the existing Modules return type for callers.
 - Added a Basic diagnostic bridge for Modules diagnostics: the compatibility `DiagnosticEngine` now wraps a real `cangjie_compiler::basic.DiagnosticEngine`, exposes it for downstream integration, resets it with local diagnostics, and forwards recognized module/import diagnostic kind strings to real `DiagKindRefactor` IDs.
 - Preserved C++-style diagnostic note locations for shadowed imports, conflicting imports, and repeated package feature names in the local diagnostic stream.
+- Added note-aware Basic forwarding for Modules diagnostics that mirror C++ `DiagnosticBuilder.AddNote` paths, including package features, repeated imports, package-name mismatches, and root-package visibility diagnostics.
 - Implemented `CjoManager` state for source/imported package registration, package/member maps, implicit members, CJO path cache, CJO data cache, macro-only package marking, search path updates, package declaration lookup, re-export member map construction, on-demand loader traversal with common-part loader participation, and resolved re-export dependency checks.
 - Matched the C++ `GetPackageCjo` in-group source package rule: a registered source package candidate now outranks a less-specific on-disk ancestor CJO, and in-memory cached CJO data now returns the cached CJO name path just like the C++ helper.
 - Matched additional CJO manager lifecycle behavior: common-part reloads now remove previously loaded `FROM_COMMON_PART` files before appending fresh common files, `DeleteASTLoaders` clears loader handles, rebuild-index clearing clears package loaders while preserving common-part loader/cache state, and silent CJO read failures return an empty loader like the C++ helper.
@@ -66,6 +81,12 @@ This pass tightened import validation and diagnostics against the C++ reference:
 - Matched the C++ dependency-name cache keying for `DependencyGraph.GetAllDependencyPackageNames`.
 - Implemented `PackageManager` Tarjan SCC ordering and source package reordering behavior.
 - Matched C++ package-manager dependency collection by using resolved package names only, preventing package-order analysis from mutating import resolution state.
+- Matched the C++ Tarjan traversal more closely by keeping the DFS discovery counter in traversal state instead of recomputing recursive indices from the number of visited packages.
+- Matched C++ recursive standard-library dependency path bookkeeping by recording dependent std package CJO and `.cj.d` paths before adding them to direct/indirect std dependency sets.
+- Matched C++ import-node string behavior for alias imports, import-all spelling, explicit import modifiers, and multi-import formatting in the local compatibility AST.
+- Added `Package.IsEmpty` behavior for the local package model, returning true only when files contain no declarations and only compiler-added imports.
+- Restored C++ package declaration consistency checks during `BuildIndex`, including root-package public-visibility diagnostics and duplicate package-name/access detection across files.
+- Restored the C++ package feature consistency algorithm for real AST feature directives, including repeated-name ranges, reference map comparison, missing directive detection, and non-product annotation consistency.
 - Added a compiling local AST writer/loader wire format so exported package/import/member data can round-trip inside this package while the real flatbuffer/AST dependencies are unavailable.
 - Improved that local AST writer/loader bridge to preserve `exportedInternalDecls` records, reload them into `File.exportedInternalDecls`, and suppress `doNotExport` declarations during serialization in line with the C++ writer's export filtering.
 - Continued the local serialization layer with type interning, cached declaration diffing, resolved dependency-name extraction, import reference loading, deterministic expression table serialization/deserialization, reference resolution maps, deterministic incremental removed-mangle serialization/parsing, C++-style JSON control-byte escaping, node source-range/attribute preservation, and package file ownership normalization.
@@ -74,15 +95,15 @@ This pass tightened import validation and diagnostics against the C++ reference:
 
 ## Important Blockers
 
-- Real C++ parity still requires dependencies on AST, full Basic diagnostic builder/source-manager call-site conversion, Sema/TypeManager, and flatbuffers/native CJO format support. Option, Basic source location types, Utils package constants/stdlib lookup, and a first diagnostic forwarding bridge are now wired to the real packages.
+- Real C++ parity still requires full AST node/declaration integration, full Basic diagnostic builder/source-manager call-site conversion, Sema/TypeManager, and flatbuffers/native CJO format support. Option, Basic source location types, Utils package constants/stdlib lookup, AST access/import/attribute/package-spec/feature-directive types, and a note-preserving diagnostic forwarding bridge are now wired to the real packages.
 - The local serialization format is not the production `.cjo` flatbuffer format. It is a compiling, behavior-bearing bridge for the isolated package, not a faithful replacement for C++ AST serialization.
 - Type/reference/expression/incremental deserialization has package-local working logic, but it still cannot consume the production C++ flatbuffer schema until real AST/Sema dependencies are available.
 
 ## Remaining Work
 
-- Replace module-local AST/Basic compatibility models with the real packages and adapt Modules call sites to AST `Identifier`, `Modifier`, `AttributePack`, and typed declaration subclasses.
+- Replace the remaining module-local AST/Basic compatibility models with the real packages and adapt Modules call sites to AST `Identifier`, `Modifier`, `AttributePack`, and typed declaration subclasses.
 - Bind the real flatbuffer module format and implement full `ASTWriter`, `ASTLoader`, expression writer/loader, reference loader, production CJMP common-part loading, and incremental cache loading.
-- Replace remaining free-form compatibility diagnostics with exact Basic diagnostic builder calls and C++ note/hint structure.
+- Replace remaining free-form compatibility diagnostics with exact Basic diagnostic builder calls, arguments, and hint structure.
 - Audit import/package lookup behavior against the C++ test corpus after downstream Sema/Frontend callers are available.
 
 Remaining Modules selfhost markers: 0.

@@ -2,6 +2,8 @@ package cangjie_compiler::modules
 
 import std.collection.*
 import std.fs.exists
+import cangjie_compiler::lex.TokenKind
+import cangjie_compiler::lex.TokenKindIndex
 import cangjie_compiler::option.GlobalOptions
 import cangjie_compiler::option.OutputMode
 
@@ -71,6 +73,59 @@ private class DependencyInfoItem {
     public var orPackage: String = ""
     public var isStd: Bool = false
     public let imports: ArrayList<ImportSpec> = ArrayList<ImportSpec>()
+
+    public init() {}
+}
+
+private class PackageSpecDiagRecord {
+    public var fullPackageName: String
+    public var accessLevel: AccessLevel
+    public var position: Position
+    public var hasExplicitPackageSpec: Bool
+    public var shouldCheckRoot: Bool
+    public var hasDoubleColon: Bool
+    public var prefixPathSize: Int64
+
+    public init(
+        fullPackageName: String,
+        accessLevel: AccessLevel,
+        position: Position,
+        hasExplicitPackageSpec: Bool,
+        shouldCheckRoot: Bool,
+        hasDoubleColon: Bool,
+        prefixPathSize: Int64
+    ) {
+        this.fullPackageName = fullPackageName
+        this.accessLevel = accessLevel
+        this.position = position
+        this.hasExplicitPackageSpec = hasExplicitPackageSpec
+        this.shouldCheckRoot = shouldCheckRoot
+        this.hasDoubleColon = hasDoubleColon
+        this.prefixPathSize = prefixPathSize
+    }
+
+    public func Key(): String {
+        return fullPackageName + "|" + GetAccessLevelStr(accessLevel)
+    }
+
+    public func DisplayText(): String {
+        return GetAccessLevelStr(accessLevel) + " package " + fullPackageName
+    }
+}
+
+private class FeatureDiagEntry {
+    public var name: String
+    public var range: Range
+
+    public init(name: String, range: Range) {
+        this.name = name
+        this.range = range
+    }
+}
+
+private class FeatureValidationResult {
+    public var referenceFile: Option<File> = None
+    public var hasAnnotation: Bool = false
 
     public init() {}
 }
@@ -387,6 +442,7 @@ public class ImportManager {
             if (pkg.HasFtrDirective()) {
                 CheckPackageFeatureSpec(pkg)
             }
+            CheckPackageSpecsIdentical(pkg)
             if (globalOptions.compileTestsOnly && !IsTestPackage(pkg.fullPackageName)) {
                 pkg.fullPackageName = pkg.fullPackageName + TEST_PKG_SUFFIX
             }
@@ -502,7 +558,7 @@ public class ImportManager {
         }
         if (let Some(packageValue) <- cjoManager.GetPackage(fullPackageName)) {
             for (depStdPkg in packageValue.GetAllDependentStdPkgs()) {
-                HandleStdPackage(depStdPkg, cjoManager.GetPackageCjoPath(depStdPkg), isRecursive: true)
+                HandleStdPackage(depStdPkg, FindAndSaveDepStdCjoPath(depStdPkg), isRecursive: true)
             }
         }
         return true
@@ -768,7 +824,7 @@ public class ImportManager {
                     rootPkg.isMacroPackage || macroReExportCommonPackage) {
                     HandleStdPackage(fullPackageName, cjoPath, isRecursive: isRecursive)
                     for (depStdPkg in importPkg.GetAllDependentStdPkgs()) {
-                        HandleStdPackage(depStdPkg, cjoManager.GetPackageCjoPath(depStdPkg), isRecursive: true)
+                        HandleStdPackage(depStdPkg, FindAndSaveDepStdCjoPath(depStdPkg), isRecursive: true)
                     }
                 } else {
                     cjoManager.SetOnlyUsedByMacro(fullPackageName, true)
@@ -788,7 +844,7 @@ public class ImportManager {
             cjoManager.SetOnlyUsedByMacro(pkg.fullPackageName, false)
             HandleStdPackage(pkg.fullPackageName, filePath, isRecursive: isRecursive)
             for (depStdPkg in pkg.GetAllDependentStdPkgs()) {
-                HandleStdPackage(depStdPkg, cjoManager.GetPackageCjoPath(depStdPkg), isRecursive: true)
+                HandleStdPackage(depStdPkg, FindAndSaveDepStdCjoPath(depStdPkg), isRecursive: true)
             }
             return ResolveImportedPackageHeaders(pkg, isRecursive: true)
         }
@@ -802,6 +858,15 @@ public class ImportManager {
         if (!cjdFilePaths.contains(fullPackageName)) {
             cjdFilePaths[fullPackageName] = ToCjdPath(cjoPath)
         }
+    }
+
+    private func FindAndSaveDepStdCjoPath(fullPackageName: String): String {
+        if (let Some(cachedPath) <- cjoFilePaths.get(fullPackageName)) {
+            return cachedPath
+        }
+        let cjoPath = cjoManager.GetPackageCjoPath(fullPackageName)
+        SaveDepPkgCjoPath(fullPackageName, cjoPath)
+        return cjoPath
     }
 
     private func ToCjdPath(cjoPath: String): String {
@@ -888,8 +953,8 @@ public class ImportManager {
                     continue
                 }
                 let relation = GetPackageRelation(pkg.fullPackageName, fullPackageName)
-                if ((packageValue.accessible == AccessLevel.PROTECTED && relation == PackageRelation.NONE) ||
-                    (packageValue.accessible == AccessLevel.INTERNAL && relation != PackageRelation.CHILD &&
+                if ((SameAccessLevel(packageValue.accessible, AccessLevel.PROTECTED) && relation == PackageRelation.NONE) ||
+                    (SameAccessLevel(packageValue.accessible, AccessLevel.INTERNAL) && relation != PackageRelation.CHILD &&
                         !IsSuperPackage(pkg.fullPackageName, fullPackageName))) {
                     diag.ReportError("package_accessibility",
                         "package '${fullPackageName}' is ${GetAccessLevelStr(packageValue)} and is not visible from '${pkg.fullPackageName}'",
@@ -934,7 +999,7 @@ public class ImportManager {
                 if (importSpec.IsImportMulti() || importSpec.IsImportAll()) {
                     continue
                 }
-                let name = if (importSpec.content.kind == ImportKind.IMPORT_SINGLE) {
+                let name = if (SameImportKind(importSpec.content.kind, ImportKind.IMPORT_SINGLE)) {
                     importSpec.content.identifier
                 } else {
                     importSpec.content.aliasName
@@ -976,6 +1041,10 @@ public class ImportManager {
     }
 
     private func CheckPackageFeatureSpec(pkg: Package): Unit {
+        if (PackageHasRealFeatureDirective(pkg)) {
+            CheckRealPackageFeatureSpec(pkg)
+            return
+        }
         var referenceFile: Option<File> = None
         var referenceFeatureCount: Int64 = -1
         var hasNonProductFile = false
@@ -998,13 +1067,15 @@ public class ImportManager {
         }
         let refFile = referenceFile.getOrThrow()
         let referenceFeatures = CollectUniqueFeatures(refFile)
+        let referenceRange = MakeRange(refFile.begin, refFile.end)
         var reported: Int64 = 0
         for (file in pkg.files) {
             if (reported >= 2) {
                 return
             }
             if (file.features.isEmpty()) {
-                DiagForNullPackageFeature(diag, MakeRange(file.begin, file.end), referenceFeatures)
+                DiagForNullPackageFeature(diag, MakeRange(file.begin, file.end), referenceFeatures,
+                    referenceRange: referenceRange)
                 reported++
                 continue
             }
@@ -1015,11 +1086,190 @@ public class ImportManager {
                     MakeRange(file.begin, file.end),
                     currentFeatures,
                     referenceFeatures,
-                    hasNonProductFile
+                    hasNonProductFile,
+                    referenceRange: referenceRange
                 )
                 reported++
             }
         }
+    }
+
+    private func CheckRealPackageFeatureSpec(pkg: Package): Unit {
+        let refMap = HashMap<String, Bool>()
+        let invalidFeatures = ArrayList<File>()
+        let validation = ValidateRealFileFeatureSpec(pkg, refMap)
+        if (let None <- validation.referenceFile) {
+            return
+        }
+        CollectInvalidRealFeatureFiles(pkg, invalidFeatures, refMap, validation.hasAnnotation)
+        if (invalidFeatures.isEmpty()) {
+            return
+        }
+        let referenceFile = validation.referenceFile.getOrThrow()
+        let referenceFeatures = CollectFileFeatureNames(referenceFile)
+        let referenceRange = FeatureReferenceRange(referenceFile)
+        var counter: Int64 = 0
+        for (file in invalidFeatures) {
+            if (counter >= 2) {
+                return
+            }
+            if (let None <- file.feature) {
+                DiagForNullPackageFeature(diag, MakeRange(file.begin, file.end), referenceFeatures,
+                    referenceRange: referenceRange)
+            } else {
+                DiagForDifferentPackageFeatureConsistency(
+                    diag,
+                    FeatureDirectiveDiagRange(file, validation.hasAnnotation),
+                    CollectFileFeatureNames(file),
+                    referenceFeatures,
+                    validation.hasAnnotation,
+                    referenceRange: referenceRange,
+                    missingNonProductAnnotation: validation.hasAnnotation && FeatureAnnotationsEmpty(file)
+                )
+            }
+            counter++
+        }
+    }
+
+    private func ValidateRealFileFeatureSpec(
+        pkg: Package,
+        refMap: HashMap<String, Bool>
+    ): FeatureValidationResult {
+        let result = FeatureValidationResult()
+        var refSize: Int64 = 0
+        let rangeMap = HashMap<String, Range>()
+        for (file in pkg.files) {
+            if (let Some(featureDirective) <- file.feature) {
+                for (entry in CollectFeatureEntries(featureDirective)) {
+                    if (let Some(previous) <- rangeMap.get(entry.name)) {
+                        WarnRepeatedFeatureName(diag, entry.name, entry.range, previous)
+                    } else {
+                        rangeMap[entry.name] = entry.range
+                    }
+                }
+                if (!featureDirective.annotations.isEmpty()) {
+                    result.hasAnnotation = true
+                }
+                if ((let None <- result.referenceFile) || rangeMap.size > refSize) {
+                    refSize = rangeMap.size
+                    result.referenceFile = Some(file)
+                }
+                rangeMap.clear()
+            }
+        }
+        if (let Some(file) <- result.referenceFile) {
+            for (featureName in CollectFileFeatureNames(file)) {
+                refMap[featureName] = false
+            }
+        }
+        return result
+    }
+
+    private func CollectInvalidRealFeatureFiles(
+        pkg: Package,
+        invalidFeatures: ArrayList<File>,
+        refMap: HashMap<String, Bool>,
+        hasAnnotation: Bool
+    ): Unit {
+        for (file in pkg.files) {
+            if ((let None <- file.feature) || (hasAnnotation && file.feature.getOrThrow().annotations.isEmpty())) {
+                invalidFeatures.add(file)
+                continue
+            }
+            let featureDirective = file.feature.getOrThrow()
+            var hasInvalidName = false
+            for (entry in CollectFeatureEntries(featureDirective)) {
+                if (refMap.contains(entry.name)) {
+                    refMap[entry.name] = true
+                } else {
+                    hasInvalidName = true
+                    invalidFeatures.add(file)
+                    break
+                }
+            }
+            if (!hasInvalidName) {
+                for (name in refMap.keys()) {
+                    if (let Some(seen) <- refMap.get(name)) {
+                        if (!seen) {
+                            invalidFeatures.add(file)
+                            break
+                        }
+                    }
+                }
+            }
+            for (name in refMap.keys()) {
+                refMap[name] = false
+            }
+        }
+    }
+
+    private func PackageHasRealFeatureDirective(pkg: Package): Bool {
+        for (file in pkg.files) {
+            if (file.feature.isSome()) {
+                return true
+            }
+        }
+        return false
+    }
+
+    private func CollectFeatureEntries(featureDirective: FeaturesDirective): ArrayList<FeatureDiagEntry> {
+        let out = ArrayList<FeatureDiagEntry>()
+        if (let Some(set) <- featureDirective.featuresSet) {
+            for (featureId in set.content) {
+                out.add(FeatureDiagEntry(featureId.ToString(), MakeRange(featureId.begin, featureId.end)))
+            }
+        }
+        return out
+    }
+
+    private func CollectFileFeatureNames(file: File): ArrayList<String> {
+        if (let Some(featureDirective) <- file.feature) {
+            let out = ArrayList<String>()
+            if (let Some(set) <- featureDirective.featuresSet) {
+                for (featureId in set.content) {
+                    out.add(featureId.ToString())
+                }
+            }
+            return out
+        }
+        return CloneStringArray(file.features)
+    }
+
+    private func IsProductFeatureFile(file: File): Bool {
+        if (let Some(featureDirective) <- file.feature) {
+            return file.isProduct && featureDirective.annotations.isEmpty()
+        }
+        return file.isProduct
+    }
+
+    private func FeatureDirectiveDiagRange(file: File, hasAnnotation: Bool): Range {
+        if (let Some(featureDirective) <- file.feature) {
+            if (hasAnnotation && featureDirective.annotations.isEmpty()) {
+                return MakeRange(featureDirective.featuresPos, "features")
+            }
+            if (let Some(set) <- featureDirective.featuresSet) {
+                return MakeRange(set.begin, set.end)
+            }
+            return MakeRange(featureDirective.begin, featureDirective.end)
+        }
+        return MakeRange(file.begin, file.end)
+    }
+
+    private func FeatureReferenceRange(file: File): Range {
+        if (let Some(featureDirective) <- file.feature) {
+            if (let Some(set) <- featureDirective.featuresSet) {
+                return MakeRange(set.begin, set.end)
+            }
+            return MakeRange(featureDirective.begin, featureDirective.end)
+        }
+        return MakeRange(file.begin, file.end)
+    }
+
+    private func FeatureAnnotationsEmpty(file: File): Bool {
+        if (let Some(featureDirective) <- file.feature) {
+            return featureDirective.annotations.isEmpty()
+        }
+        return true
     }
 
     private func AddImportedDeclsForSourcePackage(pkg: Package): Unit {
@@ -1040,7 +1290,7 @@ public class ImportManager {
                 } else {
                     GetFileImportedDeclMap(file.fileHash)
                 }
-                if (importSpec.content.kind == ImportKind.IMPORT_ALL) {
+                if (SameImportKind(importSpec.content.kind, ImportKind.IMPORT_ALL)) {
                     let members = cjoManager.GetPackageMembers(fullPackageName)
                     for (memberName in members.keys()) {
                         if (let Some(memberDecls) <- members.get(memberName)) {
@@ -1059,7 +1309,7 @@ public class ImportManager {
                     continue
                 }
                 if (cjoManager.IsImportPackage(importSpec)) {
-                    let importedName = if (importSpec.content.kind == ImportKind.IMPORT_SINGLE) {
+                    let importedName = if (SameImportKind(importSpec.content.kind, ImportKind.IMPORT_SINGLE)) {
                         lastPackageName(fullPackageName)
                     } else {
                         importSpec.content.aliasName
@@ -1068,7 +1318,7 @@ public class ImportManager {
                     RecordImportOfDecl(pkg.fullPackageName, pkgDeclOpt.getOrThrow(), importSpec)
                 } else {
                     let members = cjoManager.GetPackageMembersByName(fullPackageName, importSpec.content.identifier)
-                    let importedName = if (importSpec.content.kind == ImportKind.IMPORT_SINGLE) {
+                    let importedName = if (SameImportKind(importSpec.content.kind, ImportKind.IMPORT_SINGLE)) {
                         importSpec.content.identifier
                     } else {
                         importSpec.content.aliasName
@@ -1112,10 +1362,10 @@ public class ImportManager {
                     item.imports.add(importSpec)
                 }
             }
-            for (feature in file.features) {
+            for (feature in CollectFileFeatureNames(file)) {
                 features.add(feature)
             }
-            isProduct = isProduct && file.isProduct
+            isProduct = isProduct && IsProductFeatureFile(file)
         }
         return "{\"package\":\"" + EscapeJson(pkg.fullPackageName) + "\"," +
             "\"isMacro\":" + BoolToJson(pkg.isMacroPackage) + "," +
@@ -1282,7 +1532,8 @@ public class ImportManager {
     private func AddImplicitImportAll(file: File, fullPackageName: String): Unit {
         let names = SplitQualifiedName(fullPackageName)
         for (importSpec in file.imports) {
-            if (!importSpec.TestAttr(Attribute.IMPLICIT_ADD) || importSpec.content.kind != ImportKind.IMPORT_ALL) {
+            if (!importSpec.TestAttr(Attribute.IMPLICIT_ADD) ||
+                !SameImportKind(importSpec.content.kind, ImportKind.IMPORT_ALL)) {
                 continue
             }
             if (sameStringList(importSpec.content.prefixPaths, names)) {
@@ -1404,6 +1655,156 @@ public class ImportManager {
             idx++
         }
         return true
+    }
+
+    private func CheckPackageSpecsIdentical(pkg: Package): Unit {
+        let records = ArrayList<PackageSpecDiagRecord>()
+        let hasExplicitPackageSpec = PackageHasExplicitPackageSpec(pkg)
+        for (file in pkg.files) {
+            let record = PackageSpecRecordForFile(pkg, file, hasExplicitPackageSpec)
+            if (record.shouldCheckRoot && IsRootPackage(record) &&
+                !SameAccessLevel(record.accessLevel, AccessLevel.PUBLIC)) {
+                DiagRootPackageModifier(diag, record.fullPackageName, MakeRange(record.position, record.fullPackageName))
+            }
+            AddPackageSpecRecord(records, record)
+        }
+        if (records.size > 1) {
+            DiagForDifferentPackageSpecRecords(records)
+        }
+    }
+
+    private func PackageHasExplicitPackageSpec(pkg: Package): Bool {
+        for (file in pkg.files) {
+            if (file.packageSpec.isSome()) {
+                return true
+            }
+        }
+        return false
+    }
+
+    private func PackageSpecRecordForFile(
+        pkg: Package,
+        file: File,
+        hasExplicitPackageSpec: Bool
+    ): PackageSpecDiagRecord {
+        if (let Some(packageSpec) <- file.packageSpec) {
+            return PackageSpecDiagRecord(
+                packageSpec.GetPackageName(),
+                PackageSpecAccessLevel(packageSpec),
+                PackageSpecDiagnosticPosition(packageSpec),
+                true,
+                true,
+                packageSpec.hasDoubleColon,
+                packageSpec.prefixPaths.size
+            )
+        }
+        if (hasExplicitPackageSpec || pkg.fullPackageName == DEFAULT_PACKAGE_NAME || SamePosition(file.begin, file.end)) {
+            return PackageSpecDiagRecord(
+                DEFAULT_PACKAGE_NAME,
+                AccessLevel.PUBLIC,
+                file.begin,
+                false,
+                false,
+                false,
+                0
+            )
+        }
+        return PackageSpecDiagRecord(
+            pkg.fullPackageName,
+            pkg.accessible,
+            file.begin,
+            true,
+            true,
+            false,
+            PackagePrefixSizeFromFullName(pkg.fullPackageName)
+        )
+    }
+
+    private func AddPackageSpecRecord(records: ArrayList<PackageSpecDiagRecord>, record: PackageSpecDiagRecord): Unit {
+        for (existing in records) {
+            if (existing.Key() == record.Key()) {
+                return
+            }
+        }
+        records.add(record)
+    }
+
+    private func IsRootPackage(record: PackageSpecDiagRecord): Bool {
+        if (record.hasDoubleColon && record.prefixPathSize == 1) {
+            return true
+        }
+        return record.prefixPathSize == 0
+    }
+
+    private func PackageSpecAccessLevel(packageSpec: PackageSpec): AccessLevel {
+        if (let Some(modifier) <- packageSpec.modifier) {
+            if (SameTokenKind(modifier.modifier, TokenKind.PRIVATE)) { return AccessLevel.PRIVATE }
+            if (SameTokenKind(modifier.modifier, TokenKind.INTERNAL)) { return AccessLevel.INTERNAL }
+            if (SameTokenKind(modifier.modifier, TokenKind.PROTECTED)) { return AccessLevel.PROTECTED }
+        }
+        return AccessLevel.PUBLIC
+    }
+
+    private func PackageSpecDiagnosticPosition(packageSpec: PackageSpec): Position {
+        if (!packageSpec.prefixPoses.isEmpty()) {
+            return packageSpec.prefixPoses[0]
+        }
+        if (!packageSpec.packageName.Begin().IsZero()) {
+            return packageSpec.packageName.Begin()
+        }
+        return packageSpec.begin
+    }
+
+    private func DiagForDifferentPackageSpecRecords(records: ArrayList<PackageSpecDiagRecord>): Unit {
+        let primary = SelectPrimaryPackageSpecRecord(records)
+        let names = ArrayList<String>()
+        for (record in records) {
+            names.add(record.DisplayText())
+        }
+        let notes = ArrayList<ModuleDiagnostic>()
+        var counter: Int64 = 0
+        for (record in records) {
+            if (counter >= 2) {
+                break
+            }
+            if (SamePosition(record.position, primary.position)) {
+                continue
+            }
+            notes.add(ModuleDiagnostic("package_name_inconsistent_other",
+                "another different package declaration '" + record.DisplayText() + "'",
+                MakeRange(record.position, record.fullPackageName), DiagnosticSeverity.NOTE))
+            counter++
+        }
+        diag.ReportErrorWithNotes("package_name_inconsistent", "source files declare different package names: " +
+            JoinStrings(names, ", "), MakeRange(primary.position, primary.fullPackageName), notes)
+    }
+
+    private func SelectPrimaryPackageSpecRecord(records: ArrayList<PackageSpecDiagRecord>): PackageSpecDiagRecord {
+        for (record in records) {
+            if (record.hasExplicitPackageSpec) {
+                return record
+            }
+        }
+        return records[0]
+    }
+
+    private func PackagePrefixSizeFromFullName(fullPackageName: String): Int64 {
+        if (fullPackageName.isEmpty()) {
+            return 0
+        }
+        let names = SplitQualifiedName(fullPackageName)
+        if (names.isEmpty()) {
+            return 0
+        }
+        return names.size - 1
+    }
+
+    private func SamePosition(left: Position, right: Position): Bool {
+        return left.fileID == right.fileID && left.line == right.line && left.column == right.column
+    }
+
+    private func SameTokenKind(left: TokenKind, right: TokenKind): Bool {
+        return TokenKindIndex(left) == TokenKindIndex(right)
     }
 
     private func ContainsStringValue(values: ArrayList<String>, target: String): Bool {

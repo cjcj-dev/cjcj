@@ -15,6 +15,7 @@ private class TarjanContext {
     public let indices: HashMap<String, Int64> = HashMap<String, Int64>()
     public let lowlinks: HashMap<String, Int64> = HashMap<String, Int64>()
     public let onStack: HashSet<String> = HashSet<String>()
+    public var nextIndex: Int64 = 0
 
     public init() {}
 }
@@ -37,14 +38,12 @@ public class PackageManager {
         CollectDeps(pkgs)
         let ctx = TarjanContext()
         let stack = ArrayList<PackageInfo>()
-        var index: Int64 = 0
         while (ctx.indices.size < packageInfoMap.size) {
             var progressed = false
             for (name in packageInfoMap.keys()) {
                 if (!ctx.indices.contains(name)) {
                     if (let Some(info) <- packageInfoMap.get(name)) {
-                        TarjanForSCC(ctx, stack, index, info)
-                        index = ctx.indices.size
+                        TarjanForSCC(ctx, stack, info)
                         progressed = true
                     }
                 }
@@ -121,16 +120,16 @@ public class PackageManager {
         }
     }
 
-    private func TarjanForSCC(ctx: TarjanContext, stack: ArrayList<PackageInfo>, index: Int64, u: PackageInfo): Unit {
-        let nextIndex = index + 1
-        ctx.indices[u.fullPackageName] = nextIndex
-        ctx.lowlinks[u.fullPackageName] = nextIndex
+    private func TarjanForSCC(ctx: TarjanContext, stack: ArrayList<PackageInfo>, u: PackageInfo): Unit {
+        ctx.nextIndex++
+        ctx.indices[u.fullPackageName] = ctx.nextIndex
+        ctx.lowlinks[u.fullPackageName] = ctx.nextIndex
         stack.add(u)
         ctx.onStack.add(u.fullPackageName)
 
         for (w in u.deps) {
             if (!ctx.indices.contains(w.fullPackageName)) {
-                TarjanForSCC(ctx, stack, ctx.indices.size, w)
+                TarjanForSCC(ctx, stack, w)
                 let currentLow = ctx.lowlinks.get(u.fullPackageName).getOrThrow()
                 let childLow = ctx.lowlinks.get(w.fullPackageName).getOrThrow()
                 ctx.lowlinks[u.fullPackageName] = if (currentLow < childLow) { currentLow } else { childLow }

@@ -66,6 +66,28 @@ public class DiagnosticEngine {
         ForwardToBasic(kind, message, range)
     }
 
+    public func ReportErrorWithNotes(
+        kind: String,
+        message: String,
+        range: Range,
+        notes: ArrayList<ModuleDiagnostic>
+    ): Unit {
+        diagnostics.add(ModuleDiagnostic(kind, message, range, DiagnosticSeverity.ERROR))
+        AddNotes(notes)
+        ForwardToBasicWithNotes(kind, message, range, notes)
+    }
+
+    public func ReportWarningWithNotes(
+        kind: String,
+        message: String,
+        range: Range,
+        notes: ArrayList<ModuleDiagnostic>
+    ): Unit {
+        diagnostics.add(ModuleDiagnostic(kind, message, range, DiagnosticSeverity.WARNING))
+        AddNotes(notes)
+        ForwardToBasicWithNotes(kind, message, range, notes)
+    }
+
     public func ReportNote(kind: String, message: String, range!: Range = Range()): Unit {
         diagnostics.add(ModuleDiagnostic(kind, message, range, DiagnosticSeverity.NOTE))
     }
@@ -102,6 +124,27 @@ public class DiagnosticEngine {
             builder.Emit()
         }
     }
+
+    private func ForwardToBasicWithNotes(
+        kind: String,
+        message: String,
+        range: Range,
+        notes: ArrayList<ModuleDiagnostic>
+    ): Unit {
+        if (let Some(basicKind) <- ModuleDiagKindToBasic(kind)) {
+            let builder = basicEngine.DiagnoseRefactor(basicKind, range, arguments: [message])
+            for (note in notes) {
+                builder.AddNote(note.range, note.message)
+            }
+            builder.Emit()
+        }
+    }
+
+    private func AddNotes(notes: ArrayList<ModuleDiagnostic>): Unit {
+        for (note in notes) {
+            diagnostics.add(note)
+        }
+    }
 }
 
 private func ModuleDiagKindToBasic(kind: String): Option<BasicDiagKindRefactor> {
@@ -130,30 +173,47 @@ private func ModuleDiagKindToBasic(kind: String): Option<BasicDiagKindRefactor> 
         case "package_feature_missing" => BasicDiagKindRefactor.feature_null_declaration
         case "package_feature_inconsistent" => BasicDiagKindRefactor.feature_different_consistency
         case "package_name_inconsistent" => BasicDiagKindRefactor.package_multiple_package_declarations
+        case "package_root_package_should_be_public" =>
+            BasicDiagKindRefactor.package_root_package_should_be_public
+        case "parse_fail_expected_annotation" => BasicDiagKindRefactor.parse_fail_expected_annotation
         case _ => None
     }
 }
 
 public func WarnConflictImport(diag: DiagnosticEngine, name: String, current: Range, previous: Range): Unit {
-    diag.ReportWarning("package_import_conflict", "import '${name}' conflicts with an earlier import", range: current)
-    diag.ReportNote("package_import_conflict_previous", "The previous was imported here", range: previous)
+    let notes = ArrayList<ModuleDiagnostic>()
+    notes.add(ModuleDiagnostic("package_import_conflict_previous", "The previous was imported here",
+        previous, DiagnosticSeverity.NOTE))
+    diag.ReportWarningWithNotes("package_import_conflict", "import '${name}' conflicts with an earlier import",
+        current, notes)
 }
 
 public func WarnUselessImport(diag: DiagnosticEngine, range: Range, decl: Decl): Unit {
-    diag.ReportWarning("package_useless_import", "import is shadowed by declaration '${decl.identifier}'", range: range)
-    diag.ReportNote("package_useless_import_declared_here", "'${decl.identifier}' is declared here",
-        range: MakeRange(decl.begin, decl.identifier))
+    let notes = ArrayList<ModuleDiagnostic>()
+    notes.add(ModuleDiagnostic("package_useless_import_declared_here", "'${decl.identifier}' is declared here",
+        MakeRange(decl.begin, decl.identifier), DiagnosticSeverity.NOTE))
+    diag.ReportWarningWithNotes("package_useless_import", "import is shadowed by declaration '${decl.identifier}'",
+        range, notes)
 }
 
 public func WarnRepeatedFeatureName(diag: DiagnosticEngine, featureName: String, current: Range, previous: Range): Unit {
-    diag.ReportWarning("package_feature_repeated", "feature '${featureName}' is repeated", range: current)
-    diag.ReportNote("package_feature_repeated_previous", "feature '${featureName}' previously used here",
-        range: previous)
+    let notes = ArrayList<ModuleDiagnostic>()
+    notes.add(ModuleDiagnostic("package_feature_repeated_previous",
+        "feature '${featureName}' previously used here", previous, DiagnosticSeverity.NOTE))
+    diag.ReportWarningWithNotes("package_feature_repeated", "feature '${featureName}' is repeated", current, notes)
 }
 
-public func DiagForNullPackageFeature(diag: DiagnosticEngine, range: Range, referenceFeatures: ArrayList<String>): Unit {
-    diag.ReportError("package_feature_missing", "file is missing package feature specification; expected [" +
-        JoinStrings(referenceFeatures, ", ") + "]", range: range)
+public func DiagForNullPackageFeature(
+    diag: DiagnosticEngine,
+    range: Range,
+    referenceFeatures: ArrayList<String>,
+    referenceRange!: Range = Range()
+): Unit {
+    let notes = ArrayList<ModuleDiagnostic>()
+    notes.add(ModuleDiagnostic("package_feature_missing_reference", "perhaps you meant these features",
+        referenceRange, DiagnosticSeverity.NOTE))
+    diag.ReportErrorWithNotes("package_feature_missing", "file is missing package feature specification; expected [" +
+        JoinStrings(referenceFeatures, ", ") + "]", range, notes)
 }
 
 public func DiagForDifferentPackageFeatureConsistency(
@@ -161,15 +221,33 @@ public func DiagForDifferentPackageFeatureConsistency(
     range: Range,
     currentFeatures: ArrayList<String>,
     referenceFeatures: ArrayList<String>,
-    hasNonProductAnnotation: Bool
+    hasNonProductAnnotation: Bool,
+    referenceRange!: Range = Range(),
+    missingNonProductAnnotation!: Bool = false
 ): Unit {
+    if (missingNonProductAnnotation) {
+        diag.ReportError("parse_fail_expected_annotation", "@NonProduct", range: range)
+        return
+    }
     let annotationText = if (hasNonProductAnnotation) { " and matching non-product annotation state" } else { "" }
-    diag.ReportError("package_feature_inconsistent", "package feature specification [" +
+    let notes = ArrayList<ModuleDiagnostic>()
+    notes.add(ModuleDiagnostic("package_feature_inconsistent_reference", "perhaps you meant these features",
+        referenceRange, DiagnosticSeverity.NOTE))
+    diag.ReportErrorWithNotes("package_feature_inconsistent", "package feature specification [" +
         JoinStrings(currentFeatures, ", ") + "] does not match reference [" +
-        JoinStrings(referenceFeatures, ", ") + "]" + annotationText, range: range)
+        JoinStrings(referenceFeatures, ", ") + "]" + annotationText, range, notes)
 }
 
 public func DiagForDifferentPackageNames(diag: DiagnosticEngine, packageNames: ArrayList<String>): Unit {
     diag.ReportError("package_name_inconsistent", "source files declare different package names: " +
         JoinStrings(packageNames, ", "))
+}
+
+public func DiagRootPackageModifier(diag: DiagnosticEngine, packageName: String, range: Range): Unit {
+    let notes = ArrayList<ModuleDiagnostic>()
+    notes.add(ModuleDiagnostic("package_root_package_should_be_public_default",
+        "default modifier of 'package' is 'public', you can use 'package ${packageName}' instead",
+        range, DiagnosticSeverity.NOTE))
+    diag.ReportErrorWithNotes("package_root_package_should_be_public",
+        "root package '${packageName}' should use public visibility", range, notes)
 }

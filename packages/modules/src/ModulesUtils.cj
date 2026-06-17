@@ -1,6 +1,13 @@
 package cangjie_compiler::modules
 
 import std.collection.*
+import cangjie_compiler::ast.AccessLevel as ASTAccessLevel
+import cangjie_compiler::ast.Attribute as ASTAttribute
+import cangjie_compiler::ast.AttributeIndex as ASTAttributeIndex
+import cangjie_compiler::ast.AttributeName as ASTAttributeName
+import cangjie_compiler::ast.FeaturesDirective as ASTFeaturesDirective
+import cangjie_compiler::ast.ImportKind as ASTImportKind
+import cangjie_compiler::ast.PackageSpec as ASTPackageSpec
 import cangjie_compiler::basic.DEFAULT_POSITION as BASIC_DEFAULT_POSITION
 import cangjie_compiler::basic.INVALID_POSITION as BASIC_INVALID_POSITION
 import cangjie_compiler::basic.MakeRange as BasicMakeRange
@@ -57,12 +64,7 @@ extend PackageRelation <: Equatable<PackageRelation> {
     }
 }
 
-public enum AccessLevel {
-    | PRIVATE
-    | INTERNAL
-    | PROTECTED
-    | PUBLIC
-}
+public type AccessLevel = ASTAccessLevel
 
 private func AccessLevelIndex(level: AccessLevel): Int64 {
     return match (level) {
@@ -73,95 +75,126 @@ private func AccessLevelIndex(level: AccessLevel): Int64 {
     }
 }
 
-extend AccessLevel <: Equatable<AccessLevel> {
-    public operator func ==(right: AccessLevel): Bool {
-        return AccessLevelIndex(this) == AccessLevelIndex(right)
-    }
-
-    public operator func !=(right: AccessLevel): Bool {
-        return !(this == right)
-    }
+public func SameAccessLevel(left: AccessLevel, right: AccessLevel): Bool {
+    return AccessLevelIndex(left) == AccessLevelIndex(right)
 }
 
-public enum Attribute {
-    | IMPORTED
-    | TOOL_ADD
-    | IMPLICIT_ADD
-    | COMPILER_ADD
-    | PUBLIC
-    | PRIVATE
-    | PROTECTED
-    | INTERNAL
-    | IMPLICIT_USED
-    | FOR_TEST
-    | FROM_COMMON_PART
-    | MACRO_EXPAND_DECL
-}
-
-private func AttributeIndex(attr: Attribute): Int64 {
-    return match (attr) {
-        case Attribute.IMPORTED => 0
-        case Attribute.TOOL_ADD => 1
-        case Attribute.IMPLICIT_ADD => 2
-        case Attribute.COMPILER_ADD => 3
-        case Attribute.PUBLIC => 4
-        case Attribute.PRIVATE => 5
-        case Attribute.PROTECTED => 6
-        case Attribute.INTERNAL => 7
-        case Attribute.IMPLICIT_USED => 8
-        case Attribute.FOR_TEST => 9
-        case Attribute.FROM_COMMON_PART => 10
-        case Attribute.MACRO_EXPAND_DECL => 11
-    }
-}
+public type Attribute = ASTAttribute
 
 public func AttributeToWire(attr: Attribute): String {
-    return match (attr) {
-        case Attribute.IMPORTED => "IMPORTED"
-        case Attribute.TOOL_ADD => "TOOL_ADD"
-        case Attribute.IMPLICIT_ADD => "IMPLICIT_ADD"
-        case Attribute.COMPILER_ADD => "COMPILER_ADD"
-        case Attribute.PUBLIC => "PUBLIC"
-        case Attribute.PRIVATE => "PRIVATE"
-        case Attribute.PROTECTED => "PROTECTED"
-        case Attribute.INTERNAL => "INTERNAL"
-        case Attribute.IMPLICIT_USED => "IMPLICIT_USED"
-        case Attribute.FOR_TEST => "FOR_TEST"
-        case Attribute.FROM_COMMON_PART => "FROM_COMMON_PART"
-        case Attribute.MACRO_EXPAND_DECL => "MACRO_EXPAND_DECL"
-    }
+    return ASTAttributeName(attr)
 }
 
 public func WireToAttribute(value: String): Option<Attribute> {
     return match (value) {
+        case "IN_REFERENCE_CYCLE" => Some(Attribute.IN_REFERENCE_CYCLE)
+        case "UNREACHABLE" => Some(Attribute.UNREACHABLE)
+        case "IMPLICIT_USED" => Some(Attribute.IMPLICIT_USED)
         case "IMPORTED" => Some(Attribute.IMPORTED)
-        case "TOOL_ADD" => Some(Attribute.TOOL_ADD)
-        case "IMPLICIT_ADD" => Some(Attribute.IMPLICIT_ADD)
+        case "GLOBAL" => Some(Attribute.GLOBAL)
+        case "INITIALIZED" => Some(Attribute.INITIALIZED)
         case "COMPILER_ADD" => Some(Attribute.COMPILER_ADD)
+        case "GENERIC" => Some(Attribute.GENERIC)
+        case "DEFAULT" => Some(Attribute.DEFAULT)
+        case "STATIC" => Some(Attribute.STATIC)
         case "PUBLIC" => Some(Attribute.PUBLIC)
         case "PRIVATE" => Some(Attribute.PRIVATE)
         case "PROTECTED" => Some(Attribute.PROTECTED)
+        case "EXTERNAL" => Some(Attribute.EXTERNAL)
         case "INTERNAL" => Some(Attribute.INTERNAL)
-        case "IMPLICIT_USED" => Some(Attribute.IMPLICIT_USED)
+        case "OVERRIDE" => Some(Attribute.OVERRIDE)
+        case "REDEF" => Some(Attribute.REDEF)
+        case "ABSTRACT" => Some(Attribute.ABSTRACT)
+        case "SEALED" => Some(Attribute.SEALED)
+        case "OPEN" => Some(Attribute.OPEN)
+        case "OPERATOR" => Some(Attribute.OPERATOR)
+        case "FOREIGN" => Some(Attribute.FOREIGN)
+        case "UNSAFE" => Some(Attribute.UNSAFE)
+        case "MUT" => Some(Attribute.MUT)
+        case "HAS_BROKEN" => Some(Attribute.HAS_BROKEN)
+        case "IN_STRUCT" => Some(Attribute.IN_STRUCT)
+        case "IN_EXTEND" => Some(Attribute.IN_EXTEND)
+        case "IN_ENUM" => Some(Attribute.IN_ENUM)
+        case "IN_CLASSLIKE" => Some(Attribute.IN_CLASSLIKE)
+        case "IN_MACRO" => Some(Attribute.IN_MACRO)
+        case "PRIMARY_CONSTRUCTOR" => Some(Attribute.PRIMARY_CONSTRUCTOR)
+        case "CONSTRUCTOR" => Some(Attribute.CONSTRUCTOR)
+        case "ENUM_CONSTRUCTOR" => Some(Attribute.ENUM_CONSTRUCTOR)
+        case "FINALIZER" => Some(Attribute.FINALIZER)
+        case "IS_CLONED_SOURCE_CODE" => Some(Attribute.IS_CLONED_SOURCE_CODE)
+        case "IS_CAPTURE" => Some(Attribute.IS_CAPTURE)
+        case "IN_CORE" => Some(Attribute.IN_CORE)
+        case "NEED_AUTO_BOX" => Some(Attribute.NEED_AUTO_BOX)
+        case "MACRO_EXPANDED_NODE" => Some(Attribute.MACRO_EXPANDED_NODE)
+        case "MACRO_EXPANDED_NODE(deprecated)" => Some(Attribute.MACRO_EXPANDED_NODE)
+        case "MACRO_FUNC" => Some(Attribute.MACRO_FUNC)
+        case "MACRO_INVOKE_FUNC" => Some(Attribute.MACRO_INVOKE_FUNC)
+        case "MACRO_INVOKE_BODY" => Some(Attribute.MACRO_INVOKE_BODY)
+        case "LEFT_VALUE" => Some(Attribute.LEFT_VALUE)
+        case "C" => Some(Attribute.C)
+        case "SRC_IMPORTED" => Some(Attribute.SRC_IMPORTED)
+        case "JAVA_APP" => Some(Attribute.JAVA_APP)
+        case "JAVA_EXT" => Some(Attribute.JAVA_EXT)
+        case "STD_CALL" => Some(Attribute.STD_CALL)
+        case "NO_MANGLE" => Some(Attribute.NO_MANGLE)
+        case "INITIALIZATION_CHECKED" => Some(Attribute.INITIALIZATION_CHECKED)
+        case "IS_BROKEN" => Some(Attribute.IS_BROKEN)
+        case "GENERIC_INSTANTIATED" => Some(Attribute.GENERIC_INSTANTIATED)
+        case "HAS_INITIAL" => Some(Attribute.HAS_INITIAL)
+        case "IS_VOLATILE" => Some(Attribute.IS_VOLATILE)
+        case "NUMERIC_OVERFLOW" => Some(Attribute.NUMERIC_OVERFLOW)
+        case "INTRINSIC" => Some(Attribute.INTRINSIC)
+        case "TOOL_ADD" => Some(Attribute.TOOL_ADD)
+        case "IS_CHECK_VISITED" => Some(Attribute.IS_CHECK_VISITED)
+        case "INCRE_COMPILE" => Some(Attribute.INCRE_COMPILE)
+        case "SIDE_EFFECT" => Some(Attribute.SIDE_EFFECT)
+        case "IMPLICIT_ADD" => Some(Attribute.IMPLICIT_ADD)
+        case "MAIN_ENTRY" => Some(Attribute.MAIN_ENTRY)
+        case "GENERATED_TO_MOCK" => Some(Attribute.GENERATED_TO_MOCK)
+        case "IS_OUTERMOST" => Some(Attribute.IS_OUTERMOST)
+        case "IS_ANNOTATION" => Some(Attribute.IS_ANNOTATION)
+        case "NO_REFLECT_INFO" => Some(Attribute.NO_REFLECT_INFO)
+        case "MOCK_SUPPORTED" => Some(Attribute.MOCK_SUPPORTED)
+        case "OPEN_TO_MOCK" => Some(Attribute.OPEN_TO_MOCK)
+        case "INTERFACE_IMPL" => Some(Attribute.INTERFACE_IMPL)
         case "FOR_TEST" => Some(Attribute.FOR_TEST)
+        case "CONTAINS_MOCK_CREATION_CALL" => Some(Attribute.CONTAINS_MOCK_CREATION_CALL)
+        case "COMMON" => Some(Attribute.COMMON)
         case "FROM_COMMON_PART" => Some(Attribute.FROM_COMMON_PART)
-        case "MACRO_EXPAND_DECL" => Some(Attribute.MACRO_EXPAND_DECL)
+        case "COMMON_NON_EXHAUSTIVE" => Some(Attribute.COMMON_NON_EXHAUSTIVE)
+        case "SPECIFIC" => Some(Attribute.SPECIFIC)
+        case "COMMON_WITH_DEFAULT" => Some(Attribute.COMMON_WITH_DEFAULT)
+        case "JAVA_MIRROR" => Some(Attribute.JAVA_MIRROR)
+        case "JAVA_MIRROR_SUBTYPE" => Some(Attribute.JAVA_MIRROR_SUBTYPE)
+        case "JAVA_HAS_DEFAULT" => Some(Attribute.JAVA_HAS_DEFAULT)
+        case "JAVA_MIRROR_SYNTHETIC_WRAPPER" => Some(Attribute.JAVA_MIRROR_SYNTHETIC_WRAPPER)
+        case "OBJ_C_MIRROR" => Some(Attribute.OBJ_C_MIRROR)
+        case "OBJ_C_MIRROR_SUBTYPE" => Some(Attribute.OBJ_C_MIRROR_SUBTYPE)
+        case "OBJ_C_INIT" => Some(Attribute.OBJ_C_INIT)
+        case "OBJ_C_OPTIONAL" => Some(Attribute.OBJ_C_OPTIONAL)
+        case "JAVA_CJ_MAPPING" => Some(Attribute.JAVA_CJ_MAPPING)
+        case "OBJ_C_CJ_MAPPING" => Some(Attribute.OBJ_C_CJ_MAPPING)
+        case "CJ_MIRROR_JAVA_INTERFACE_FWD" => Some(Attribute.CJ_MIRROR_JAVA_INTERFACE_FWD)
+        case "DESUGARED_MIRROR_FIELD" => Some(Attribute.DESUGARED_MIRROR_FIELD)
+        case "HAS_INITED_FIELD" => Some(Attribute.HAS_INITED_FIELD)
+        case "OBJ_C_MIRROR_SYNTHETIC_WRAPPER" => Some(Attribute.OBJ_C_MIRROR_SYNTHETIC_WRAPPER)
+        case "CJ_MIRROR_JAVA_INTERFACE_DEFAULT" => Some(Attribute.CJ_MIRROR_JAVA_INTERFACE_DEFAULT)
+        case "CJ_MIRROR_OBJC_INTERFACE_FWD" => Some(Attribute.CJ_MIRROR_OBJC_INTERFACE_FWD)
+        case "ALREADY_LOADED" => Some(Attribute.ALREADY_LOADED)
+        case "AST_ATTR_END" => Some(Attribute.AST_ATTR_END)
+        case "MACRO_EXPAND_DECL" => Some(Attribute.MACRO_EXPANDED_NODE)
         case _ => None
     }
 }
 
-extend Attribute <: Equatable<Attribute> {
-    public operator func ==(right: Attribute): Bool {
-        return AttributeIndex(this) == AttributeIndex(right)
-    }
-
-    public operator func !=(right: Attribute): Bool {
-        return !(this == right)
-    }
+public func SameAttribute(left: Attribute, right: Attribute): Bool {
+    return ASTAttributeIndex(left) == ASTAttributeIndex(right)
 }
 
 public type Position = BasicPosition
 public type Range = BasicRange
+public type FeaturesDirective = ASTFeaturesDirective
+public type PackageSpec = ASTPackageSpec
 
 public let INVALID_POSITION: Position = BASIC_INVALID_POSITION
 public let DEFAULT_POSITION: Position = BASIC_DEFAULT_POSITION
@@ -195,7 +228,7 @@ public open class Node {
     public func DisableAttr(attr: Attribute): Unit {
         var idx: Int64 = 0
         while (idx < attrs.size) {
-            if (attrs[idx] == attr) {
+            if (SameAttribute(attrs[idx], attr)) {
                 attrs.remove(at: idx)
                 return
             }
@@ -205,7 +238,7 @@ public open class Node {
 
     public func TestAttr(attr: Attribute): Bool {
         for (item in attrs) {
-            if (item == attr) {
+            if (SameAttribute(item, attr)) {
                 return true
             }
         }
@@ -300,6 +333,8 @@ public class File <: Node {
     public var fileName: String = ""
     public var filePath: String = ""
     public var fileHash: UInt64 = 0
+    public var feature: Option<FeaturesDirective> = None
+    public var packageSpec: Option<PackageSpec> = None
     public let imports: ArrayList<ImportSpec> = ArrayList<ImportSpec>()
     public let decls: ArrayList<Decl> = ArrayList<Decl>()
     public let exportedInternalDecls: ArrayList<Decl> = ArrayList<Decl>()
@@ -358,20 +393,29 @@ public class Package <: Node {
 
     public func HasFtrDirective(): Bool {
         for (file in files) {
-            if (!file.features.isEmpty()) {
+            if (file.feature.isSome() || !file.features.isEmpty()) {
                 return true
             }
         }
         return false
     }
+
+    public func IsEmpty(): Bool {
+        for (file in files) {
+            if (!file.decls.isEmpty()) {
+                return false
+            }
+            for (importSpec in file.imports) {
+                if (!importSpec.TestAttr(Attribute.COMPILER_ADD)) {
+                    return false
+                }
+            }
+        }
+        return true
+    }
 }
 
-public enum ImportKind {
-    | IMPORT_SINGLE
-    | IMPORT_ALIAS
-    | IMPORT_ALL
-    | IMPORT_MULTI
-}
+public type ImportKind = ASTImportKind
 
 private func ImportKindIndex(kind: ImportKind): Int64 {
     return match (kind) {
@@ -382,14 +426,8 @@ private func ImportKindIndex(kind: ImportKind): Int64 {
     }
 }
 
-extend ImportKind <: Equatable<ImportKind> {
-    public operator func ==(right: ImportKind): Bool {
-        return ImportKindIndex(this) == ImportKindIndex(right)
-    }
-
-    public operator func !=(right: ImportKind): Bool {
-        return !(this == right)
-    }
+public func SameImportKind(left: ImportKind, right: ImportKind): Bool {
+    return ImportKindIndex(left) == ImportKindIndex(right)
 }
 
 public class ImportContent <: Node {
@@ -423,12 +461,12 @@ public class ImportContent <: Node {
         var idx: Int64 = 0
         while (idx < prefixPaths.size) {
             builder.append(prefixPaths[idx])
-            if (!(kind == ImportKind.IMPORT_ALL && idx + 1 == prefixPaths.size)) {
+            if (!(SameImportKind(kind, ImportKind.IMPORT_ALL) && idx + 1 == prefixPaths.size)) {
                 builder.append(if (idx == 0 && hasDoubleColon) { "::" } else { "." })
             }
             idx++
         }
-        if (kind != ImportKind.IMPORT_ALL) {
+        if (!SameImportKind(kind, ImportKind.IMPORT_ALL)) {
             builder.append(identifier)
         }
         return builder.toString()
@@ -439,7 +477,7 @@ public class ImportContent <: Node {
         var idx: Int64 = 0
         while (idx < prefixPaths.size) {
             builder.append(prefixPaths[idx])
-            if (kind == ImportKind.IMPORT_ALL && idx + 1 == prefixPaths.size) {
+            if (SameImportKind(kind, ImportKind.IMPORT_ALL) && idx + 1 == prefixPaths.size) {
                 idx++
                 continue
             }
@@ -450,7 +488,7 @@ public class ImportContent <: Node {
             }
             idx++
         }
-        if (kind != ImportKind.IMPORT_ALL && !isDecl) {
+        if (!SameImportKind(kind, ImportKind.IMPORT_ALL) && !isDecl) {
             if (!builder.toString().isEmpty()) {
                 builder.append(".")
             }
@@ -466,7 +504,7 @@ public class ImportContent <: Node {
             return out
         }
         let prefix = GetPrefixPath()
-        if (kind == ImportKind.IMPORT_ALL) {
+        if (SameImportKind(kind, ImportKind.IMPORT_ALL)) {
             out.add(prefix)
             return out
         }
@@ -480,7 +518,39 @@ public class ImportContent <: Node {
     }
 
     public override func ToString(): String {
-        return GetImportedPackageName()
+        let builder = StringBuilder()
+        appendImportContentText(builder, this)
+        if (!SameImportKind(kind, ImportKind.IMPORT_MULTI)) {
+            return builder.toString()
+        }
+        builder.append("{\n")
+        for (item in items) {
+            builder.append("    ")
+            appendImportContentText(builder, item)
+            builder.append("\n")
+        }
+        builder.append("}")
+        return builder.toString()
+    }
+}
+
+private func appendImportContentText(builder: StringBuilder, content: ImportContent): Unit {
+    var idx: Int64 = 0
+    while (idx < content.prefixPaths.size) {
+        builder.append(content.prefixPaths[idx])
+        if (idx == 0 && content.hasDoubleColon) {
+            builder.append("::")
+        } else {
+            builder.append(".")
+        }
+        idx++
+    }
+    if (!SameImportKind(content.kind, ImportKind.IMPORT_MULTI)) {
+        builder.append(content.identifier)
+        if (SameImportKind(content.kind, ImportKind.IMPORT_ALIAS)) {
+            builder.append(" as ")
+            builder.append(content.aliasName)
+        }
     }
 }
 
@@ -511,33 +581,44 @@ public class ImportSpec <: Node {
     }
 
     public func IsReExport(noSubPkg!: Bool = false): Bool {
-        if (!hasAccessModifier || accessLevel == AccessLevel.PRIVATE) {
+        if (!hasAccessModifier || SameAccessLevel(accessLevel, AccessLevel.PRIVATE)) {
             return false
         }
-        if (noSubPkg && accessLevel == AccessLevel.INTERNAL) {
+        if (noSubPkg && SameAccessLevel(accessLevel, AccessLevel.INTERNAL)) {
             return false
         }
         return true
     }
 
     public func IsImportAll(): Bool {
-        return content.kind == ImportKind.IMPORT_ALL
+        return SameImportKind(content.kind, ImportKind.IMPORT_ALL)
     }
 
     public func IsImportSingle(): Bool {
-        return content.kind == ImportKind.IMPORT_SINGLE
+        return SameImportKind(content.kind, ImportKind.IMPORT_SINGLE)
     }
 
     public func IsImportAlias(): Bool {
-        return content.kind == ImportKind.IMPORT_ALIAS
+        return SameImportKind(content.kind, ImportKind.IMPORT_ALIAS)
     }
 
     public func IsImportMulti(): Bool {
-        return content.kind == ImportKind.IMPORT_MULTI
+        return SameImportKind(content.kind, ImportKind.IMPORT_MULTI)
     }
 
     public func IsPrivateImport(): Bool {
-        return !hasAccessModifier || accessLevel == AccessLevel.PRIVATE
+        return !hasAccessModifier || SameAccessLevel(accessLevel, AccessLevel.PRIVATE)
+    }
+
+    public override func ToString(): String {
+        let builder = StringBuilder()
+        builder.append("import ")
+        if (hasAccessModifier) {
+            builder.append(GetAccessLevelStr(accessLevel))
+            builder.append(" ")
+        }
+        builder.append(content.ToString())
+        return builder.toString()
     }
 }
 

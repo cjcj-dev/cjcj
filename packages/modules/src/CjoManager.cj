@@ -159,7 +159,7 @@ public class CjoManager {
         }
         for (file in info.pkg.files) {
             for (decl in file.decls) {
-                if (decl.TestAttr(Attribute.MACRO_EXPAND_DECL)) {
+                if (decl.TestAttr(Attribute.MACRO_EXPANDED_NODE)) {
                     continue
                 }
                 AddDeclToMap(decl, info.declMap)
@@ -341,7 +341,7 @@ public class CjoManager {
         impl.AddImportedPackageName(
             importSpec,
             cjoPackageName,
-            cjoPackageName == possibleName && importSpec.content.kind != ImportKind.IMPORT_ALL
+            cjoPackageName == possibleName && !SameImportKind(importSpec.content.kind, ImportKind.IMPORT_ALL)
         )
         return (cjoPackageName, cjoPath)
     }
