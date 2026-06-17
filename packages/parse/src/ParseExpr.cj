@@ -64,7 +64,7 @@ extend ParserImpl {
                 member.dotPos = lastToken.Begin()
                 member.begin = base.begin
                 member.field = ExpectIdentifierWithPos(member)
-                if (Seeing(TokenKind.LT)) {
+                if (Seeing(TokenKind.LT) && LooksLikeTypeArguments()) {
                     let parsed = ParseTypeArguments(ek)
                     if (parsed[0]) {
                         for (ty in parsed[1]) { member.typeArguments.add(ty) }

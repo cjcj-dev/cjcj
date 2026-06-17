@@ -209,7 +209,7 @@ extend ParserImpl {
         let id = ParseIdentifierFromToken(Peek())
         Next()
         let expr = RefExpr(id)
-        if (Seeing(TokenKind.LT)) {
+        if (Seeing(TokenKind.LT) && LooksLikeTypeArguments()) {
             let parsed = ParseTypeArguments(ek)
             if (parsed[0]) {
                 for (ty in parsed[1]) { expr.typeArguments.add(ty) }
@@ -217,6 +217,92 @@ extend ParserImpl {
             }
         }
         return expr
+    }
+
+    // Disambiguate a `<` immediately following a reference/member identifier: is it the start of a
+    // generic type-argument list (`f<Int64>(...)`) or the binary less-than operator (`i < 10`)?
+    //
+    // The streaming parser has no cheap backtracking, so we scan the upcoming tokens (without
+    // consuming them) starting just after the `<` and require that they form a balanced, well-formed
+    // type-argument list: every token up to the matching `>` must be one that can legally appear
+    // inside a type argument (an identifier, a primitive-type keyword, `.`/`::`/`,`, the function-type
+    // punctuation `(`/`)`/`->`, the array brackets `[`/`]`, `&`, `?`, `This`, `Unit`, nested `<`/`>`).
+    // The moment we see a token that cannot appear there (an integer literal, an arithmetic/relational
+    // operator, `=`, `{`, `;`, a newline-terminated end, etc.) before the brackets balance, we know the
+    // `<` is the less-than operator and return false so the caller leaves it for the binary-expression
+    // parser. This is exactly the case `while (i < 10)` / `if (s < n)` that previously mis-parsed as a
+    // generic instantiation and aborted the whole parse with "expected type".
+    func LooksLikeTypeArguments(): Bool {
+        // depth counts open angle brackets; the leading `<` (current Peek) is depth 1.
+        var depth: Int64 = 1
+        var idx: Int64 = 1
+        // Cap the scan so a runaway `<` without a closer cannot read the whole file.
+        let limit: Int64 = 256
+        while (idx <= limit) {
+            let ahead = lexer.LookAheadSkipNL(idx)
+            if (ahead.size < idx) {
+                // Ran out of tokens before balancing -> not a type-argument list.
+                return false
+            }
+            let kind = ahead[idx - 1].kind
+            if (kind == TokenKind.LT) {
+                depth++
+            } else if (kind == TokenKind.GT) {
+                depth--
+                if (depth == 0) {
+                    return true
+                }
+            } else if (kind == TokenKind.RSHIFT) {
+                // `>>` closes two nested angle brackets at once (e.g. `Array<Array<Int>>`).
+                depth -= 2
+                if (depth <= 0) {
+                    return true
+                }
+            } else if (!IsTypeArgInnerToken(kind)) {
+                return false
+            }
+            idx++
+        }
+        return false
+    }
+
+    // Tokens that may legally appear inside a generic type-argument list (excluding the angle brackets
+    // themselves, which are handled by the depth counter in LooksLikeTypeArguments).
+    func IsTypeArgInnerToken(kind: TokenKind): Bool {
+        return match (kind) {
+            case TokenKind.IDENTIFIER => true
+            case TokenKind.PACKAGE_IDENTIFIER => true
+            case TokenKind.DOT => true
+            case TokenKind.DOUBLE_COLON => true
+            case TokenKind.COMMA => true
+            case TokenKind.LPAREN => true
+            case TokenKind.RPAREN => true
+            case TokenKind.LSQUARE => true
+            case TokenKind.RSQUARE => true
+            case TokenKind.ARROW => true
+            case TokenKind.BITAND => true
+            case TokenKind.QUEST => true
+            case TokenKind.THISTYPE => true
+            case TokenKind.UNIT => true
+            case TokenKind.NOTHING => true
+            // Primitive type keywords.
+            case TokenKind.INT8 => true
+            case TokenKind.INT16 => true
+            case TokenKind.INT32 => true
+            case TokenKind.INT64 => true
+            case TokenKind.INTNATIVE => true
+            case TokenKind.UINT8 => true
+            case TokenKind.UINT16 => true
+            case TokenKind.UINT32 => true
+            case TokenKind.UINT64 => true
+            case TokenKind.UINTNATIVE => true
+            case TokenKind.FLOAT16 => true
+            case TokenKind.FLOAT32 => true
+            case TokenKind.FLOAT64 => true
+            case TokenKind.RUNE => true
+            case TokenKind.BOOLEAN => true
+            case _ => false
+        }
     }
 
     public func ParseTypeArguments(): (Bool, ArrayList<Type>) {
