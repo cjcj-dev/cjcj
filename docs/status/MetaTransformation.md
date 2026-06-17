@@ -68,16 +68,18 @@ Implemented:
   `Package.GetGlobalFuncsWithBody()` result, runs package transforms once, and throws on impossible
   kind/type mismatches instead of silently ignoring them. The result reports whether any CHIR plugin was
   seen plus function/package run counts so callers can mirror the C++ `hasPluginForCHIR` branch.
+- Restored the C++ `MetaTransform<DeclT>` default-constructor behavior for CHIR transforms: the Cangjie
+  base constructor now compares `TypeInfo.of<DeclT>()` against the real sibling CHIR `Function` and
+  `Package` types, assigning `FOR_CHIR_FUNC`, `FOR_CHIR_PACKAGE`, or `UNKNOWN` like the C++ `if constexpr`
+  chain. Direct subclasses of `MetaTransform<CHIRFunction>` and `MetaTransform<CHIRPackage>` no longer
+  need to use the convenience wrapper classes to get the correct kind.
 
 Known fidelity caveats:
 
-- The C++ `MetaTransform<DeclT>` default constructor uses `if constexpr` to infer function/package
-  transform kind from the template argument. Cangjie does not currently have an equivalent specialization
-  mechanism in this port, so direct subclasses of `MetaTransform<DeclT>` must pass a kind explicitly.
-  Plugins should use `CHIRFunctionMetaTransform`/`CHIRPackageMetaTransform` and the typed plugin-info
-  helpers when they need the C++ macro's CHIR function/package behavior.
-- A constructor-time runtime type check was tested as a possible workaround for the generic kind
-  inference gap, but cjc rejects use of `this` as an expression inside abstract-class constructors.
+- The C++ implementation performs compile-time type selection with `std::is_same_v`; the Cangjie port uses
+  `std.reflect.TypeInfo` equality in the base constructor because Cangjie has no template-specialization
+  equivalent. This keeps behavior faithful on the supported self-hosting target where `std.reflect` is
+  available, but it is still not a source-level macro/template analogue.
 - Cangjie has no direct preprocessor macro equivalent for `CHIR_PLUGIN`; `MakeCHIRPluginInfo` preserves
   the registration behavior but not the C++ macro spelling.
 - Cangjie does not expose C++-style nested tag declarations in the style used by `MetaKind::CHIR`, so the

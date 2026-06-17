@@ -4,6 +4,7 @@ import cangjie_compiler::basic.CANGJIE_VERSION
 import cangjie_compiler::chir.CHIRBuilder
 import cangjie_compiler::chir.Function as CHIRFunction
 import cangjie_compiler::chir.Package as CHIRPackage
+import std.reflect.TypeInfo
 
 public type MetaTransformRegisterCallback = (MetaTransformPluginBuilder) -> Unit
 public type MetaTransformPluginInfoGetter = () -> MetaTransformPluginInfo
@@ -89,9 +90,21 @@ public interface MetaTransformRunner<DeclT> {
     func Run(decl: DeclT): Unit
 }
 
+private func InferMetaTransformKind<DeclT>(): MetaTransformKind {
+    let declType = TypeInfo.of<DeclT>()
+    if (declType == TypeInfo.of<CHIRFunction>()) {
+        return MetaTransformKind.FOR_CHIR_FUNC
+    }
+    if (declType == TypeInfo.of<CHIRPackage>()) {
+        return MetaTransformKind.FOR_CHIR_PACKAGE
+    }
+    return MetaTransformKind.UNKNOWN
+}
+
 public abstract class MetaTransform<DeclT> <: MetaTransformConcept & MetaTransformRunner<DeclT> {
     public init() {
         super()
+        kind = InferMetaTransformKind<DeclT>()
     }
 
     protected init(kind: MetaTransformKind) {
