@@ -685,6 +685,38 @@ public func TypeCheckExtendCheckSpecializationExtend(
     return valid
 }
 
+private func TypeCheckExtendFindCoreExtend(extends: ArrayList<ExtendDecl>): Option<ExtendDecl> {
+    for (extendDecl in extends) {
+        if (extendDecl.fullPackageName == "std.core") {
+            return Some(extendDecl)
+        }
+    }
+    return None
+}
+
+public func TypeCheckExtendCheckBuiltinPointerSpecializations(
+    diag: BasicDiagnosticEngine,
+    tm: TypeManager
+): Bool {
+    var valid = true
+    for (entry in tm.builtinTyToExtendMap) {
+        if (!entry.ty.IsPointer()) {
+            continue
+        }
+        if (let Some(coreExtend) <- TypeCheckExtendFindCoreExtend(entry.extends)) {
+            for (extendDecl in entry.extends) {
+                if (SameDecl(coreExtend, extendDecl)) {
+                    continue
+                }
+                if (!TypeCheckExtendCheckSpecializationExtend(diag, tm, coreExtend, extendDecl, entry.extends)) {
+                    valid = false
+                }
+            }
+        }
+    }
+    return valid
+}
+
 public func TypeCheckExtendBuildMap(
     diag: BasicDiagnosticEngine,
     tm: TypeManager,
@@ -696,6 +728,7 @@ public func TypeCheckExtendBuildMap(
     }
     TypeCheckExtendUpdateExtendMap(tm, extends)
     TypeCheckExtendCheckDuplicateInterfaces(diag, tm, extends)
+    TypeCheckExtendCheckBuiltinPointerSpecializations(diag, tm)
 }
 
 public func TypeCheckExtendCheckDuplicateInterfaces(
