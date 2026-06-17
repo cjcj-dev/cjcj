@@ -718,6 +718,329 @@ public func IntrinsicKindToString(kind: IntrinsicKind): String {
     }
 }
 
+public func LookupHeadlessIntrinsicKind(name: String): Option<IntrinsicKind> {
+    return match (name) {
+        case "getTypeForTypeParameter" => IntrinsicKind.GET_TYPE_FOR_TYPE_PARAMETER
+        case "isSubtypeTypes" => IntrinsicKind.IS_SUBTYPE_TYPES
+        case _ => None
+    }
+}
+
+public func LookupCoreIntrinsicKind(name: String): Option<IntrinsicKind> {
+    return match (name) {
+        case "sizeOfType" => IntrinsicKind.SIZE_OF
+        case "alignOfType" => IntrinsicKind.ALIGN_OF
+        case "acquireRawData" => IntrinsicKind.ARRAY_ACQUIRE_RAW_DATA
+        case "releaseRawData" => IntrinsicKind.ARRAY_RELEASE_RAW_DATA
+        case "intrinsicBuiltInCopyTo" => IntrinsicKind.ARRAY_BUILT_IN_COPY_TO
+        case "arrayGet" => IntrinsicKind.ARRAY_GET
+        case "arraySet" => IntrinsicKind.ARRAY_SET
+        case "arrayGetUnchecked" => IntrinsicKind.ARRAY_GET_UNCHECKED
+        case "arrayGetRefUnchecked" => IntrinsicKind.ARRAY_GET_REF_UNCHECKED
+        case "arraySetUnchecked" => IntrinsicKind.ARRAY_SET_UNCHECKED
+        case "arraySize" => IntrinsicKind.ARRAY_SIZE
+        case "arrayClone" => IntrinsicKind.ARRAY_CLONE
+        case "arraySliceInit" => IntrinsicKind.ARRAY_SLICE_INIT
+        case "arraySlice" => IntrinsicKind.ARRAY_SLICE
+        case "rawArrayOfArraySlice" => IntrinsicKind.ARRAY_SLICE_RAWARRAY
+        case "startOfArraySlice" => IntrinsicKind.ARRAY_SLICE_START
+        case "sizeOfArraySlice" => IntrinsicKind.ARRAY_SLICE_SIZE
+        case "arraySliceGet" => IntrinsicKind.ARRAY_SLICE_GET_ELEMENT
+        case "arraySliceSet" => IntrinsicKind.ARRAY_SLICE_SET_ELEMENT
+        case "arraySliceGetUnchecked" => IntrinsicKind.ARRAY_SLICE_GET_ELEMENT_UNCHECKED
+        case "arraySliceSetUnchecked" => IntrinsicKind.ARRAY_SLICE_SET_ELEMENT_UNCHECKED
+        case "vectorCompare32" => IntrinsicKind.VECTOR_COMPARE_32
+        case "vectorIndexByte32" => IntrinsicKind.VECTOR_INDEX_BYTE_32
+        case "fillInStackTrace" => IntrinsicKind.FILL_IN_STACK_TRACE
+        case "decodeStackTrace" => IntrinsicKind.DECODE_STACK_TRACE
+        case "dumpCurrentThreadInfo" => IntrinsicKind.DUMP_CURRENT_THREAD_INFO
+        case "dumpAllThreadsInfo" => IntrinsicKind.DUMP_ALL_THREADS_INFO
+        case "getPointerAddress" => IntrinsicKind.CPOINTER_GET_POINTER_ADDRESS
+        case "readPointer" => IntrinsicKind.CPOINTER_READ
+        case "writePointer" => IntrinsicKind.CPOINTER_WRITE
+        case "addPointer" => IntrinsicKind.CPOINTER_ADD
+        case "convertCStr2Ptr" => IntrinsicKind.CSTRING_CONVERT_CSTR_TO_PTR
+        case "bitCast" => IntrinsicKind.BIT_CAST
+        case "futureInit" => IntrinsicKind.FUTURE_INIT
+        case "isThreadObjectInited" => IntrinsicKind.IS_THREAD_OBJECT_INITED
+        case "getThreadObject" => IntrinsicKind.GET_THREAD_OBJECT
+        case "setThreadObject" => IntrinsicKind.SET_THREAD_OBJECT
+        case "futureIsComplete" => IntrinsicKind.FUTURE_IS_COMPLETE
+        case "futureWait" => IntrinsicKind.FUTURE_WAIT
+        case "futureNotifyAll" => IntrinsicKind.FUTURE_NOTIFYALL
+        case "intrinsicRefEq" => IntrinsicKind.OBJECT_REFEQ
+        case "intrinsicRefEqRawArray" => IntrinsicKind.RAW_ARRAY_REFEQ
+        case "zeroValue" => IntrinsicKind.OBJECT_ZERO_VALUE
+        case "sourceFile" => IntrinsicKind.SOURCE_FILE
+        case "sourceLine" => IntrinsicKind.SOURCE_LINE
+        case "identityHashCodeForRefType" => IntrinsicKind.IDENTITY_HASHCODE
+        case "identityHashCodeForArrayType" => IntrinsicKind.IDENTITY_HASHCODE_FOR_ARRAY
+        case "strlen" => IntrinsicKind.STRLEN
+        case "memcpy_s" => IntrinsicKind.MEMCPY_S
+        case "memset_s" => IntrinsicKind.MEMSET_S
+        case "free" => IntrinsicKind.FREE
+        case "malloc" => IntrinsicKind.MALLOC
+        case "strcmp" => IntrinsicKind.STRCMP
+        case "memcmp" => IntrinsicKind.MEMCMP
+        case "strncmp" => IntrinsicKind.STRNCMP
+        case "strcasecmp" => IntrinsicKind.STRCASECMP
+        case "load" => IntrinsicKind.ATOMIC_LOAD
+        case "store" => IntrinsicKind.ATOMIC_STORE
+        case "fetchAdd" => IntrinsicKind.ATOMIC_FETCH_ADD
+        case "compareAndSwap" => IntrinsicKind.ATOMIC_COMPARE_AND_SWAP
+        case "intrinsicSleep" => IntrinsicKind.SLEEP
+        case "getTypeForTypeParameter" => IntrinsicKind.GET_TYPE_FOR_TYPE_PARAMETER
+        case "isSubtypeTypes" => IntrinsicKind.IS_SUBTYPE_TYPES
+        case "exclusiveScopeImpl" => IntrinsicKind.EXCLUSIVE_SCOPE
+        case _ => None
+    }
+}
+
+public func LookupOverflowIntrinsicKind(name: String): Option<IntrinsicKind> {
+    return match (name) {
+        case "checkedAdd" => IntrinsicKind.OVERFLOW_CHECKED_ADD
+        case "checkedSub" => IntrinsicKind.OVERFLOW_CHECKED_SUB
+        case "checkedMul" => IntrinsicKind.OVERFLOW_CHECKED_MUL
+        case "checkedDiv" => IntrinsicKind.OVERFLOW_CHECKED_DIV
+        case "checkedMod" => IntrinsicKind.OVERFLOW_CHECKED_MOD
+        case "checkedPow" => IntrinsicKind.OVERFLOW_CHECKED_POW
+        case "checkedInc" => IntrinsicKind.OVERFLOW_CHECKED_INC
+        case "checkedDec" => IntrinsicKind.OVERFLOW_CHECKED_DEC
+        case "checkedNeg" => IntrinsicKind.OVERFLOW_CHECKED_NEG
+        case "throwingAdd" => IntrinsicKind.OVERFLOW_THROWING_ADD
+        case "throwingSub" => IntrinsicKind.OVERFLOW_THROWING_SUB
+        case "throwingMul" => IntrinsicKind.OVERFLOW_THROWING_MUL
+        case "throwingDiv" => IntrinsicKind.OVERFLOW_THROWING_DIV
+        case "throwingMod" => IntrinsicKind.OVERFLOW_THROWING_MOD
+        case "throwingPow" => IntrinsicKind.OVERFLOW_THROWING_POW
+        case "throwingInc" => IntrinsicKind.OVERFLOW_THROWING_INC
+        case "throwingDec" => IntrinsicKind.OVERFLOW_THROWING_DEC
+        case "throwingNeg" => IntrinsicKind.OVERFLOW_THROWING_NEG
+        case "saturatingAdd" => IntrinsicKind.OVERFLOW_SATURATING_ADD
+        case "saturatingSub" => IntrinsicKind.OVERFLOW_SATURATING_SUB
+        case "saturatingMul" => IntrinsicKind.OVERFLOW_SATURATING_MUL
+        case "saturatingDiv" => IntrinsicKind.OVERFLOW_SATURATING_DIV
+        case "saturatingMod" => IntrinsicKind.OVERFLOW_SATURATING_MOD
+        case "saturatingPow" => IntrinsicKind.OVERFLOW_SATURATING_POW
+        case "saturatingInc" => IntrinsicKind.OVERFLOW_SATURATING_INC
+        case "saturatingDec" => IntrinsicKind.OVERFLOW_SATURATING_DEC
+        case "saturatingNeg" => IntrinsicKind.OVERFLOW_SATURATING_NEG
+        case "wrappingAdd" => IntrinsicKind.OVERFLOW_WRAPPING_ADD
+        case "wrappingSub" => IntrinsicKind.OVERFLOW_WRAPPING_SUB
+        case "wrappingMul" => IntrinsicKind.OVERFLOW_WRAPPING_MUL
+        case "wrappingDiv" => IntrinsicKind.OVERFLOW_WRAPPING_DIV
+        case "wrappingMod" => IntrinsicKind.OVERFLOW_WRAPPING_MOD
+        case "wrappingPow" => IntrinsicKind.OVERFLOW_WRAPPING_POW
+        case "wrappingInc" => IntrinsicKind.OVERFLOW_WRAPPING_INC
+        case "wrappingDec" => IntrinsicKind.OVERFLOW_WRAPPING_DEC
+        case "wrappingNeg" => IntrinsicKind.OVERFLOW_WRAPPING_NEG
+        case _ => None
+    }
+}
+
+public func LookupReflectIntrinsicKind(name: String): Option<IntrinsicKind> {
+    return match (name) {
+        case "isInterface" => IntrinsicKind.IS_INTERFACE
+        case "isClass" => IntrinsicKind.IS_CLASS
+        case "isPrimitive" => IntrinsicKind.IS_PRIMITIVE
+        case "isStruct" => IntrinsicKind.IS_STRUCT
+        case "isGeneric" => IntrinsicKind.IS_GENERIC
+        case "isTuple" => IntrinsicKind.IS_TUPLE
+        case "isFunction" => IntrinsicKind.IS_FUNCTION
+        case "isEnum" => IntrinsicKind.IS_ENUM
+        case "isBox" => IntrinsicKind.IS_BOX
+        case "getOrCreateTypeInfoForReflect" => IntrinsicKind.GET_OR_CREATE_TYPEINFO_FOR_REFLECT
+        case "getTypeTemplate" => IntrinsicKind.GET_TYPETEMPLATE
+        case "checkMethodActualArgs" => IntrinsicKind.CHECK_METHOD_ACTUAL_ARGS
+        case "methodEntryPointIsNull" => IntrinsicKind.METHOD_ENTRYPOINT_IS_NULL
+        case "isReflectUnsupportedType" => IntrinsicKind.IS_RELECT_UNSUPPORTED_TYPE
+        case "getTypeForAny" => IntrinsicKind.GET_TYPE_FOR_ANY
+        case "getTypeByMangledName" => IntrinsicKind.GET_TYPE_BY_MANGLED_NAME
+        case "getTypeName" => IntrinsicKind.GET_TYPE_NAME
+        case "getTypeByQualifiedName" => IntrinsicKind.GET_TYPE_BY_QUALIFIED_NAME
+        case "getTypeQualifiedNameLength" => IntrinsicKind.GET_TYPE_QUALIFIED_NAME_LENGTH
+        case "getTypeQualifiedName" => IntrinsicKind.GET_TYPE_QUALIFIED_NAME
+        case "getNumOfInterface" => IntrinsicKind.GET_NUM_OF_INTERFACE
+        case "getInterface" => IntrinsicKind.GET_INTERFACE
+        case "isSubType" => IntrinsicKind.IS_SUBTYPE
+        case "getTypeInfoModifier" => IntrinsicKind.GET_TYPE_INFO_MODIFIER
+        case "getTypeInfoAnnotations" => IntrinsicKind.GET_TYPE_INFO_ANNOTATIONS
+        case "getObjClass" => IntrinsicKind.GET_OBJ_CLASS
+        case "getSuperTypeInfo" => IntrinsicKind.GET_SUPER_TYPE_INFO
+        case "getTypeArgs" => IntrinsicKind.GET_TYPE_ARGS
+        case "getNumOfInstanceMethodInfos" => IntrinsicKind.GET_NUM_OF_INSTANCE_METHOD_INFOS
+        case "getInstanceMethodInfo" => IntrinsicKind.GET_INSTANCE_METHOD_INFO
+        case "getNumOfStaticMethodInfos" => IntrinsicKind.GET_NUM_OF_STATIC_METHOD_INFOS
+        case "getStaticMethodInfo" => IntrinsicKind.GET_STATIC_METHOD_INFO
+        case "getMethodName" => IntrinsicKind.GET_METHOD_NAME
+        case "getMethodReturnType" => IntrinsicKind.GET_METHOD_RETURN_TYPE
+        case "getMethodModifier" => IntrinsicKind.GET_METHOD_MODIFIER
+        case "getMethodAnnotations" => IntrinsicKind.GET_METHOD_ANNOTATIONS
+        case "applyCJInstanceMethod" => IntrinsicKind.APPLY_CJ_METHOD
+        case "applyCJStaticMethod" => IntrinsicKind.APPLY_CJ_STATIC_METHOD
+        case "applyCJGenericInstanceMethod" => IntrinsicKind.APPLY_CJ_GENERIC_METHOD
+        case "applyCJGenericStaticMethod" => IntrinsicKind.APPLY_CJ_GENERIC_STATIC_METHOD
+        case "getNumOfActualParameters" => IntrinsicKind.GET_NUM_OF_ACTUAL_PARAMETERS
+        case "getNumOfGenericParameters" => IntrinsicKind.GET_NUM_OF_GENERIC_PARAMETERS
+        case "getActualParameterInfo" => IntrinsicKind.GET_ACTUAL_PARAMETER_INFO
+        case "getGenericParameterInfo" => IntrinsicKind.GET_GENERIC_PARAMETER_INFO
+        case "getNumOfInstanceFieldInfos" => IntrinsicKind.GET_NUM_OF_INSTANCE_FIELD_INFOS
+        case "getInstanceFieldInfo" => IntrinsicKind.GET_INSTANCE_FIELD_INFO
+        case "getNumOfStaticFieldInfos" => IntrinsicKind.GET_NUM_OF_STATIC_FIELD_INFOS
+        case "getStaticFieldInfo" => IntrinsicKind.GET_STATIC_FIELD_INFO
+        case "getStaticFieldName" => IntrinsicKind.GET_STATIC_FIELD_NAME
+        case "getStaticFieldType" => IntrinsicKind.GET_STATIC_FIELD_TYPE
+        case "getStaticFieldAnnotations" => IntrinsicKind.GET_STATIC_FIELD_ANNOTATIONS
+        case "getInstanceFieldName" => IntrinsicKind.GET_INSTANCE_FIELD_NAME
+        case "getInstanceFieldType" => IntrinsicKind.GET_INSTANCE_FIELD_TYPE
+        case "getInstanceFieldAnnotations" => IntrinsicKind.GET_INSTANCE_FIELD_ANNOTATIONS
+        case "getInstanceFieldModifier" => IntrinsicKind.GET_INSTANCE_FIELD_MODIFIER
+        case "getStaticFieldModifier" => IntrinsicKind.GET_STATIC_FIELD_MODIFIER
+        case "getInstanceFieldValue" => IntrinsicKind.GET_FIELD_VALUE
+        case "setInstanceFieldValue" => IntrinsicKind.SET_FIELD_VALUE
+        case "getStaticFieldValue" => IntrinsicKind.GET_STATIC_FIELD_VALUE
+        case "setStaticFieldValue" => IntrinsicKind.SET_STATIC_FIELD_VALUE
+        case "getFieldDeclaringType" => IntrinsicKind.GET_FIELD_DECLARING_TYPE
+        case "getParameterIndex" => IntrinsicKind.GET_PARAMETER_INDEX
+        case "getParameterName" => IntrinsicKind.GET_PARAMETER_NAME
+        case "getParameterType" => IntrinsicKind.GET_PARAMETER_TYPE
+        case "getParameterAnnotations" => IntrinsicKind.GET_PARAMETER_ANNOTATIONS
+        case "getRelatedPackageInfo" => IntrinsicKind.GET_RELATED_PACKAGE_INF
+        case "getPackageName" => IntrinsicKind.GET_PACKAGE_NAME
+        case "getPackageNumOfTypeInfos" => IntrinsicKind.GET_PACKAGE_NUM_OF_TYPE_INFOS
+        case "getPackageTypeInfo" => IntrinsicKind.GET_PACKAGE_TYPE_INFO
+        case "getPackageNumOfGlobalMethodInfos" => IntrinsicKind.GET_PACKAGE_NUM_OF_GLOBAL_METHODS
+        case "getPackageGlobalMethodInfo" => IntrinsicKind.GET_PACKAGE_GLOBAL_METHOD_INFO
+        case "getPackageNumOfGlobalFieldInfos" => IntrinsicKind.GET_PACKAGE_NUM_OF_GLOBAL_FIELD_INFOS
+        case "getPackageGlobalFieldInfo" => IntrinsicKind.GET_PACKAGE_GLOBAL_FIELD_INFO
+        case "loadPackage" => IntrinsicKind.LOAD_PACKAGE
+        case "getPackageByQualifiedName" => IntrinsicKind.GET_PACKAGE_BY_QUALIFIEDNAME
+        case "getPackageVersion" => IntrinsicKind.GET_PACKAGE_VERSION
+        case "getSubPackages" => IntrinsicKind.GET_SUB_PACKAGES
+        case "getNumOfFieldTypes" => IntrinsicKind.GET_NUM_OF_FIELD_TYPES
+        case "getFieldTypes" => IntrinsicKind.GET_FIELD_TYPES
+        case "newAndInitEnumTupleObject" => IntrinsicKind.NEW_AND_INIT_OBJECT
+        case "getAssociatedValues" => IntrinsicKind.GET_ASSOCIATED_VALUES
+        case "getNumOfFunctionSignatureTypes" => IntrinsicKind.GET_NUM_OF_FUNCTION_SIGNATURETYPES
+        case "getFunctionSignatureTypes" => IntrinsicKind.GET_FUNCTION_SIGNATURE_TYPES
+        case "getNumOfEnumConstructorInfos" => IntrinsicKind.GET_NUM_OF_ENUM_CONSTRUCTOR_INFOS
+        case "getEnumConstructorInfo" => IntrinsicKind.GET_ENUM_CONSTRUCTOR_INFO
+        case "getEnumConstructorName" => IntrinsicKind.GET_ENUM_CONSTRUCTOR_NAME
+        case "getEnumConstructorInfoFromAny" => IntrinsicKind.GET_ENUM_CONSTRUCTOR_INFO_FROM_ANY
+        case _ => None
+    }
+}
+
+public func LookupInteropIntrinsicKind(name: String): Option<IntrinsicKind> {
+    return match (name) {
+        case "CrossAccessBarrier" => IntrinsicKind.CROSS_ACCESS_BARRIER
+        case "CreateExportHandle" => IntrinsicKind.CREATE_EXPORT_HANDLE
+        case "GetExportedRef" => IntrinsicKind.GET_EXPORTED_REF
+        case "RemoveExportedRef" => IntrinsicKind.REMOVE_EXPORTED_REF
+        case _ => None
+    }
+}
+
+public func LookupOhosArkInteropIntrinsicKind(name: String): Option<IntrinsicKind> {
+    return match (name) {
+        case "getJSLambdaAddr" => IntrinsicKind.GET_JSLAMBDA_ADDR
+        case _ => None
+    }
+}
+
+public func LookupCjnativeSyncIntrinsicKind(name: String): Option<IntrinsicKind> {
+    return match (name) {
+        case "load" => IntrinsicKind.ATOMIC_LOAD
+        case "store" => IntrinsicKind.ATOMIC_STORE
+        case "swap" => IntrinsicKind.ATOMIC_SWAP
+        case "compareAndSwap" => IntrinsicKind.ATOMIC_COMPARE_AND_SWAP
+        case "fetchAdd" => IntrinsicKind.ATOMIC_FETCH_ADD
+        case "fetchSub" => IntrinsicKind.ATOMIC_FETCH_SUB
+        case "fetchAnd" => IntrinsicKind.ATOMIC_FETCH_AND
+        case "fetchOr" => IntrinsicKind.ATOMIC_FETCH_OR
+        case "fetchXor" => IntrinsicKind.ATOMIC_FETCH_XOR
+        case "mutexInit" => IntrinsicKind.MUTEX_INIT
+        case "mutexLock" => IntrinsicKind.CJ_MUTEX_LOCK
+        case "mutexTryLock" => IntrinsicKind.MUTEX_TRY_LOCK
+        case "mutexCheckStatus" => IntrinsicKind.MUTEX_CHECK_STATUS
+        case "mutexUnlock" => IntrinsicKind.MUTEX_UNLOCK
+        case "waitQueueInit" => IntrinsicKind.WAITQUEUE_INIT
+        case "monitorInit" => IntrinsicKind.MONITOR_INIT
+        case "monitorWait" => IntrinsicKind.MOITIOR_WAIT
+        case "monitorNotify" => IntrinsicKind.MOITIOR_NOTIFY
+        case "monitorNotifyAll" => IntrinsicKind.MOITIOR_NOTIFY_ALL
+        case "multiConditionMonitorWait" => IntrinsicKind.MULTICONDITION_WAIT
+        case "multiConditionMonitorNotify" => IntrinsicKind.MULTICONDITION_NOTIFY
+        case "multiConditionMonitorNotifyAll" => IntrinsicKind.MULTICONDITION_NOTIFY_ALL
+        case _ => None
+    }
+}
+
+public func LookupRuntimeIntrinsicKind(name: String): Option<IntrinsicKind> {
+    return match (name) {
+        case "invokeGC" => IntrinsicKind.INVOKE_GC
+        case "setCjGCThreshold" => IntrinsicKind.SET_GC_THRESHOLD
+        case "dumpCjHeapData" => IntrinsicKind.DUMP_CJ_HEAP_DATA
+        case "getCjGCCount" => IntrinsicKind.GET_GC_COUNT
+        case "getCjGCTime" => IntrinsicKind.GET_GC_TIME_US
+        case "getCjGCFreedSize" => IntrinsicKind.GET_GC_FREED_SIZE
+        case "startCjCPUProfiling" => IntrinsicKind.START_CJ_CPU_PROFILING
+        case "stopCjCPUProfiling" => IntrinsicKind.STOP_CJ_CPU_PROFILING
+        case "blackBox" => IntrinsicKind.BLACK_BOX
+        case "getMaxCjHeapSize" => IntrinsicKind.GET_MAX_HEAP_SIZE
+        case "getAllocatedCjHeapSize" => IntrinsicKind.GET_ALLOCATE_HEAP_SIZE
+        case "getRealHeapSize" => IntrinsicKind.GET_REAL_HEAP_SIZE
+        case "getThreadNumber" => IntrinsicKind.GET_THREAD_NUMBER
+        case "getBlockingThreadNumber" => IntrinsicKind.GET_BLOCKING_THREAD_NUMBER
+        case "getNativeThreadNumber" => IntrinsicKind.GET_NATIVE_THREAD_NUMBER
+        case "CrossAccessBarrier" => IntrinsicKind.CROSS_ACCESS_BARRIER
+        case "CreateExportHandle" => IntrinsicKind.CREATE_EXPORT_HANDLE
+        case "GetExportedRef" => IntrinsicKind.GET_EXPORTED_REF
+        case "RemoveExportedRef" => IntrinsicKind.REMOVE_EXPORTED_REF
+        case "intrinsicRefEqFunc" => IntrinsicKind.FUNC_REFEQ
+        case _ => None
+    }
+}
+
+public func LookupMathIntrinsicKind(name: String): Option<IntrinsicKind> {
+    return match (name) {
+        case "intrinsicAbs" => IntrinsicKind.ABS
+        case "intrinsicFabs" => IntrinsicKind.FABS
+        case "intrinsicFloor" => IntrinsicKind.FLOOR
+        case "intrinsicCeil" => IntrinsicKind.CEIL
+        case "intrinsicTrunc" => IntrinsicKind.TRUNC
+        case "intrinsicSin" => IntrinsicKind.SIN
+        case "intrinsicCos" => IntrinsicKind.COS
+        case "intrinsicExp" => IntrinsicKind.EXP
+        case "intrinsicExp2" => IntrinsicKind.EXP2
+        case "intrinsicLog" => IntrinsicKind.LOG
+        case "intrinsicLog2" => IntrinsicKind.LOG2
+        case "intrinsicLog10" => IntrinsicKind.LOG10
+        case "intrinsicSqrt" => IntrinsicKind.SQRT
+        case "intrinsicRound" => IntrinsicKind.ROUND
+        case "intrinsicPow" => IntrinsicKind.POW
+        case "intrinsicPowi" => IntrinsicKind.POWI
+        case _ => None
+    }
+}
+
+public func LookupPackageIntrinsicKind(packageName: String, name: String): Option<IntrinsicKind> {
+    if (let Some(headlessKind) <- LookupHeadlessIntrinsicKind(name)) {
+        return headlessKind
+    }
+    return match (packageName) {
+        case "std.core" => LookupCoreIntrinsicKind(name)
+        case "std.sync" => LookupCjnativeSyncIntrinsicKind(name)
+        case "std.overflow" => LookupOverflowIntrinsicKind(name)
+        case "std.runtime" => LookupRuntimeIntrinsicKind(name)
+        case "std.reflect" => LookupReflectIntrinsicKind(name)
+        case "std.math" => LookupMathIntrinsicKind(name)
+        case "std.interop" => LookupInteropIntrinsicKind(name)
+        case "ohos.ark_interop" => LookupOhosArkInteropIntrinsicKind(name)
+        case _ => None
+    }
+}
+
 extend IntrinsicKind <: Equatable<IntrinsicKind> {
     public operator func ==(right: IntrinsicKind): Bool {
         return IntrinsicKindName(this) == IntrinsicKindName(right)

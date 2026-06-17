@@ -38,6 +38,8 @@ Implemented in this pass:
   `RawArrayAllocateWithException`, and `SpawnWithException`.
 - Added `IntrinsicKind.cj` mirroring the C++ intrinsic enum, including reflection and native-only intrinsic ranges,
   plus stable enum labels and C++-style `IntrinsicKindToString` names for mapped intrinsic kinds.
+- Added C++ `IntrinsicKind.h`-style reverse lookup functions for core, overflow, reflection, interop,
+  OHOS Ark interop, cjnative sync, runtime, math, headless, and package-dispatched intrinsic classification.
 - Added `IntrisicCallContext`, concrete `Intrinsic`, concrete `IntrinsicWithException`, argument/type-argument
   accessors, C++-style operand rendering, and builder factory methods for normal and exceptional intrinsic calls.
 - Modeled C++ nullable operands such as spawn arguments and VArrayBuilder item/init function with `Option<Value>`
@@ -59,9 +61,8 @@ Known remaining gaps:
 
 - Full lambda body cloning/identifier regeneration and complete clone behavior for all expression subclasses remain
   incomplete.
-- Reverse intrinsic classification maps from C++ `IntrinsicKind.h` (`coreIntrinsicMap`, overflow/runtime/sync/math
-  maps, and FFI/name lookup integration) are not yet fully represented in Cangjie; the IR node surface and print names
-  now exist.
+- Interpreter/codegen-specific intrinsic tables outside `IntrinsicKind.h`, such as AST FFI and concrete-width atomic
+  lowering maps, still need downstream porting outside this IR node/type model slice.
 - Full C++ generic constraint solving, vtable search/update, inheritance traversal through extends, and precise
   `CanBeInherited`/finalizer semantics are still missing; dynamic dispatch currently records method context and optional
   vtable offsets but does not compute vtable search results.
@@ -71,4 +72,4 @@ Known remaining gaps:
 
 Remaining `TODO(selfhost:CHIR)` markers in `packages/chir/src`: 0.
 
-Estimated real behavior coverage for this IR-model scope: 58%.
+Estimated real behavior coverage for this IR-model scope: 60%.
