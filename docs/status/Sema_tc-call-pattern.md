@@ -22,6 +22,7 @@ Continuation updates:
 - `TypeCheckMatchExpr.cj`: threaded the real basic diagnostic engine through selector/no-selector match helpers so OR-pattern binding errors, mixed OR-pattern kinds, no-selector cases without a type, and no-selector matches without a default now emit the same diagnostic families as the C++ implementation.
 - `TypeCheckMatchExpr.cj`: aligned OR-pattern same-kind checking with the C++ raw-`ASTKind` comparison after the enum-like exemption, while keeping resolved var-or-enum names only for diagnostic text.
 - `TypeCheckBuiltinExpr.cj`: tightened two-argument `Array` constructor validation to match the C++ split between unnamed function initializers and `repeat:` element initializers, including the raw-array lambda parameter subtype direction and precise basic diagnostics for wrong array argument names/arity where the diagnostic engine is available.
+- `TypeCheckCall.cj`: mirrored the C++ `IsInterfaceFuncWithSameSignature` overload tie-breaker so duplicate abstract interface functions with the same instantiated signature are suppressed instead of producing a false ambiguity after normal candidate comparison.
 
 Build status:
 
@@ -36,4 +37,4 @@ Known fidelity gaps:
 - Pattern usefulness/checking is functional but still conservative around complete sealed hierarchy discovery, full intersection/union/Option refinements, and diagnostics that depend on richer C++ Sema context.
 - Builtin and match checking use real AST and type data but still lack the full TypeCheckerImpl cache/synthesis integration present in C++.
 
-Honest coverage estimate for this scoped pass: about 66% of C++ behavior, materially higher than the prior compiling stubs but not module-complete.
+Honest coverage estimate for this scoped pass: about 67% of C++ behavior, materially higher than the prior compiling stubs but not module-complete.
