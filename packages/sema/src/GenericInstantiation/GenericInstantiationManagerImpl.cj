@@ -202,6 +202,13 @@ private func addTyUnique(values: ArrayList<Ty>, ty: Ty): Bool {
     return true
 }
 
+private func HasJavaTargetAttr(target: Decl): Bool {
+    if (let Some(_) <- HasJavaAttr(target)) {
+        return true
+    }
+    return false
+}
+
 public class GenericInstantiationManagerImpl {
     private var ci: CompilerInstance
     private var context: GenericInstantiationContext
@@ -744,7 +751,7 @@ public class GenericInstantiationManagerImpl {
             if (let Some(target) <- memberAccess.GetTarget()) {
                 if (TargetNoLongerGeneric(target)) {
                     memberAccess.instTys.clear()
-                    if (target.astKind != ASTKind.TYPE_ALIAS_DECL) {
+                    if (target.astKind != ASTKind.TYPE_ALIAS_DECL && !HasJavaTargetAttr(target)) {
                         if (let Some(targetTy) <- target.GetTy()) {
                             memberAccess.SetTy(targetTy)
                         }
@@ -775,11 +782,13 @@ public class GenericInstantiationManagerImpl {
                 if (let Some(target) <- baseFunc.GetTarget()) {
                     if (let Some(funcDecl) <- (target as FuncDecl)) {
                         callExpr.resolvedFunction = funcDecl
-                        if (let Some(targetTy) <- target.GetTy()) {
-                            if (let Some(funcTy) <- (targetTy as FuncTy)) {
-                                if (!funcTy.retTy.HasGeneric()) {
-                                    callExpr.SetTy(funcTy.retTy)
-                                    UpdateDynamicThisCallTy(callExpr)
+                        if (!HasJavaTargetAttr(target)) {
+                            if (let Some(targetTy) <- target.GetTy()) {
+                                if (let Some(funcTy) <- (targetTy as FuncTy)) {
+                                    if (!funcTy.retTy.HasGeneric()) {
+                                        callExpr.SetTy(funcTy.retTy)
+                                        UpdateDynamicThisCallTy(callExpr)
+                                    }
                                 }
                             }
                         }

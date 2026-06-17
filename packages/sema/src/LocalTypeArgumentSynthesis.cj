@@ -108,6 +108,8 @@ public class LocalTypeArgumentSynthesis {
     private var constraints: Constraint = Constraint()
     private var errInfo: SolvingErrInfo = SolvingErrInfo()
     private var curTyVar: Option<GenericsTy> = None
+    private var hasNothingTy: Bool = false
+    private var hasAnyTy: Bool = false
 
     public init(typeManager: TypeManager, argPack: LocTyArgSynArgPack, needDiagMsg!: Bool = false) {
         tyMgr = typeManager
@@ -245,14 +247,18 @@ public class LocalTypeArgumentSynthesis {
         if (let Some(paramVar) <- (paramTy as GenericsTy)) {
             if (paramVar.isPlaceholder && containsTyVar(argPack.tyVarsToSolve, paramVar)) {
                 curTyVar = Some(paramVar)
-                constraints.GetOrCreate(paramVar).lbs.Add(normalizeInferredTy(argTy))
+                let lowerBound = normalizeInferredTy(argTy)
+                NoteSpecialBound(lowerBound)
+                constraints.GetOrCreate(paramVar).lbs.Add(lowerBound)
                 return true
             }
         }
         if (let Some(argVar) <- (argTy as GenericsTy)) {
             if (argVar.isPlaceholder && containsTyVar(argPack.tyVarsToSolve, argVar)) {
                 curTyVar = Some(argVar)
-                constraints.GetOrCreate(argVar).ubs.Add(normalizeInferredTy(paramTy))
+                let upperBound = normalizeInferredTy(paramTy)
+                NoteSpecialBound(upperBound)
+                constraints.GetOrCreate(argVar).ubs.Add(upperBound)
                 return true
             }
             if (!argVar.isPlaceholder) {
@@ -302,6 +308,14 @@ public class LocalTypeArgumentSynthesis {
             return true
         }
         return tyMgr.IsSubtype(argTy, paramTy)
+    }
+
+    private func NoteSpecialBound(ty: Ty): Unit {
+        if (ty.IsNothing()) {
+            hasNothingTy = true
+        } else if (ty.IsAny()) {
+            hasAnyTy = true
+        }
     }
 
     private func UpdateIdealTysInCurrentConstraint(targetTy: Ty): Unit {
@@ -624,8 +638,13 @@ public class LocalTypeArgumentSynthesis {
     }
 
     private func IsValidSolution(candidate: Ty, bounds: TyVarBounds): Bool {
-        if (candidate.HasInvalidTy() || candidate.IsNothing() || candidate.IsAny() || candidate.HasIdealTy() ||
-            candidate.IsCType()) {
+        if (candidate.HasInvalidTy() || candidate.HasIdealTy() || candidate.IsCType()) {
+            return false
+        }
+        if (candidate.IsNothing() && !hasNothingTy) {
+            return false
+        }
+        if (candidate.IsAny() && !hasAnyTy) {
             return false
         }
         for (lb in bounds.lbs.values) {

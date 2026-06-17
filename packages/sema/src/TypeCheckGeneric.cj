@@ -56,6 +56,13 @@ public func CheckInstTyWithUpperbound(typeManager: TypeManager, typeMapping: Typ
 
 public func CheckGenericDeclInstantiation(typeManager: TypeManager, decl: Option<Decl>, typeArgs: ArrayList<Ty>): Bool {
     if (let Some(value) <- decl) {
+        if (!Ty.IsTyCorrect(value.GetTy())) {
+            return false
+        }
+        let genericParams = GetDeclTypeParams(value)
+        if (typeArgs.isEmpty() || genericParams.size != typeArgs.size) {
+            return false
+        }
         if (!typeManager.CheckGenericDeclInstantiation(Some(value), typeArgs)) {
             return false
         }
