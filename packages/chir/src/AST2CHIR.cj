@@ -14,16 +14,42 @@ public class AST2CHIRGlobalSpec {
     public let name: String
     public let srcCodeIdentifier: String
     public let rawMangledName: String
+    public let packageName: String
     public let ty: Type
     public let initialValue: Option<LiteralValue>
+    public let attributes: ArrayList<Attribute> = ArrayList<Attribute>()
+    public let features: ArrayList<String> = ArrayList<String>()
+    public var useRefStorage: Bool = false
+    public var debugLocation: Option<DebugLocation> = None
 
     public init(name: String, ty: Type, srcCodeIdentifier!: String = "", rawMangledName!: String = "",
-        initialValue!: Option<LiteralValue> = None) {
+        packageName!: String = "", initialValue!: Option<LiteralValue> = None) {
         this.name = name
         this.srcCodeIdentifier = srcCodeIdentifier
         this.rawMangledName = rawMangledName
+        this.packageName = packageName
         this.ty = ty
         this.initialValue = initialValue
+    }
+
+    public func AddAttribute(attr: Attribute): AST2CHIRGlobalSpec {
+        AddAttributeUnique(attributes, attr)
+        return this
+    }
+
+    public func AddFeature(name: String): AST2CHIRGlobalSpec {
+        AddStringUnique(features, name)
+        return this
+    }
+
+    public func SetUseRefStorage(value: Bool): AST2CHIRGlobalSpec {
+        useRefStorage = value
+        return this
+    }
+
+    public func SetDebugLocation(loc: DebugLocation): AST2CHIRGlobalSpec {
+        debugLocation = Some(loc)
+        return this
     }
 }
 
@@ -31,16 +57,34 @@ public class AST2CHIRFunctionSpec {
     public let name: String
     public let srcCodeIdentifier: String
     public let rawMangledName: String
+    public let packageName: String
     public let paramTypes: ArrayList<Type> = ArrayList<Type>()
     public let returnType: Type
     public let funcKind: FuncKind
     public let emitBody: Bool
+    public let paramNames: ArrayList<String> = ArrayList<String>()
+    public let attributes: ArrayList<Attribute> = ArrayList<Attribute>()
+    public let features: ArrayList<String> = ArrayList<String>()
+    public let genericTypeParams: ArrayList<GenericType> = ArrayList<GenericType>()
+    public let defaultParamFunctions: ArrayList<AST2CHIRFunctionSpec> = ArrayList<AST2CHIRFunctionSpec>()
+    public let genericInstantiations: ArrayList<AST2CHIRFunctionSpec> = ArrayList<AST2CHIRFunctionSpec>()
+    public var ownerTypeName: Option<String> = None
+    public var isInstanceMember: Bool = false
+    public var genericDeclName: Option<String> = None
+    public var sourceFileKey: String = ""
+    public var isCommonMatchedWithSpecific: Bool = false
+    public var debugLocation: Option<DebugLocation> = None
+    public var propertyLocation: Option<DebugLocation> = None
+    public var hasVariableLenArg: Bool = false
+    public var isCFunc: Bool = false
 
     public init(name: String, paramTypes: ArrayList<Type>, returnType: Type, srcCodeIdentifier!: String = "",
-        rawMangledName!: String = "", funcKind!: FuncKind = FuncKind.DEFAULT, emitBody!: Bool = true) {
+        rawMangledName!: String = "", packageName!: String = "", funcKind!: FuncKind = FuncKind.DEFAULT,
+        emitBody!: Bool = true) {
         this.name = name
         this.srcCodeIdentifier = srcCodeIdentifier
         this.rawMangledName = rawMangledName
+        this.packageName = packageName
         for (ty in paramTypes) {
             this.paramTypes.add(ty)
         }
@@ -48,15 +92,117 @@ public class AST2CHIRFunctionSpec {
         this.funcKind = funcKind
         this.emitBody = emitBody
     }
+
+    public func AddParamName(name: String): AST2CHIRFunctionSpec {
+        paramNames.add(name)
+        return this
+    }
+
+    public func AddAttribute(attr: Attribute): AST2CHIRFunctionSpec {
+        AddAttributeUnique(attributes, attr)
+        return this
+    }
+
+    public func AddFeature(name: String): AST2CHIRFunctionSpec {
+        AddStringUnique(features, name)
+        return this
+    }
+
+    public func AddGenericTypeParam(param: GenericType): AST2CHIRFunctionSpec {
+        genericTypeParams.add(param)
+        return this
+    }
+
+    public func SetOwnerType(name: String, isInstanceMember!: Bool = true): AST2CHIRFunctionSpec {
+        ownerTypeName = Some(name)
+        this.isInstanceMember = isInstanceMember
+        return this
+    }
+
+    public func SetGenericDeclName(name: String): AST2CHIRFunctionSpec {
+        genericDeclName = Some(name)
+        return this
+    }
+
+    public func AddDefaultParamFunction(spec: AST2CHIRFunctionSpec): AST2CHIRFunctionSpec {
+        defaultParamFunctions.add(spec)
+        return this
+    }
+
+    public func AddGenericInstantiation(spec: AST2CHIRFunctionSpec): AST2CHIRFunctionSpec {
+        genericInstantiations.add(spec)
+        return this
+    }
+
+    public func SetSourceFileKey(key: String): AST2CHIRFunctionSpec {
+        sourceFileKey = key
+        return this
+    }
+
+    public func SetCommonMatchedWithSpecific(value: Bool): AST2CHIRFunctionSpec {
+        isCommonMatchedWithSpecific = value
+        return this
+    }
+
+    public func SetDebugLocation(loc: DebugLocation): AST2CHIRFunctionSpec {
+        debugLocation = Some(loc)
+        return this
+    }
+
+    public func SetPropertyLocation(loc: DebugLocation): AST2CHIRFunctionSpec {
+        propertyLocation = Some(loc)
+        return this
+    }
+
+    public func SetHasVariableLenArg(value: Bool): AST2CHIRFunctionSpec {
+        hasVariableLenArg = value
+        if (value) {
+            isCFunc = true
+        }
+        return this
+    }
+
+    public func SetCFunc(value: Bool): AST2CHIRFunctionSpec {
+        isCFunc = value
+        return this
+    }
 }
 
 public class AST2CHIRPackageSpec {
     public let name: String
+    public let types: ArrayList<AST2CHIRNominalSpec> = ArrayList<AST2CHIRNominalSpec>()
     public let globals: ArrayList<AST2CHIRGlobalSpec> = ArrayList<AST2CHIRGlobalSpec>()
     public let functions: ArrayList<AST2CHIRFunctionSpec> = ArrayList<AST2CHIRFunctionSpec>()
+    public let sourceFileIds: ArrayList<UInt32> = ArrayList<UInt32>()
+    public let sourceFileNames: ArrayList<String> = ArrayList<String>()
+    public var accessLevel: AccessLevel = AccessLevel.INVALID
+    public var mergingSpecific: Bool = false
+    public var packageInitFunction: Option<AST2CHIRFunctionSpec> = None
+    public var packageLiteralInitFunction: Option<AST2CHIRFunctionSpec> = None
 
     public init(name: String) {
         this.name = name
+    }
+
+    public func SetMergingSpecific(value: Bool): AST2CHIRPackageSpec {
+        mergingSpecific = value
+        return this
+    }
+
+    public func SetAccessLevel(level: AccessLevel): AST2CHIRPackageSpec {
+        accessLevel = level
+        return this
+    }
+
+    public func RegisterSourceFile(fileId: UInt32, fileName: String): AST2CHIRPackageSpec {
+        sourceFileIds.add(fileId)
+        sourceFileNames.add(fileName)
+        return this
+    }
+
+    public func AddType(spec: AST2CHIRNominalSpec): AST2CHIRPackageSpec {
+        types.add(spec)
+        return this
     }
 
     public func AddGlobal(spec: AST2CHIRGlobalSpec): AST2CHIRPackageSpec {
@@ -66,6 +212,16 @@ public class AST2CHIRPackageSpec {
 
     public func AddFunction(spec: AST2CHIRFunctionSpec): AST2CHIRPackageSpec {
         functions.add(spec)
+        return this
+    }
+
+    public func SetPackageInitFunction(spec: AST2CHIRFunctionSpec): AST2CHIRPackageSpec {
+        packageInitFunction = Some(spec)
+        return this
+    }
+
+    public func SetPackageLiteralInitFunction(spec: AST2CHIRFunctionSpec): AST2CHIRPackageSpec {
+        packageLiteralInitFunction = Some(spec)
         return this
     }
 }
@@ -82,48 +238,7 @@ public class AST2CHIR {
     }
 
     public func LowerPackage(spec: AST2CHIRPackageSpec): AST2CHIRResult {
-        let pkg = builder.CreatePackage(spec.name)
-        for (globalSpec in spec.globals) {
-            let globalVar = builder.CreateGlobalVar(globalSpec.ty, globalSpec.name,
-                srcCodeIdentifier: globalSpec.srcCodeIdentifier, rawMangledName: globalSpec.rawMangledName,
-                packageName: spec.name)
-            if (let Some(literal) <- globalSpec.initialValue) {
-                let initFnTy = builder.context.GetFuncTy(ArrayList<Type>(), builder.context.GetUnitTy())
-                let initFn = builder.CreateFunction(initFnTy, globalSpec.name + "$init",
-                    srcCodeIdentifier: globalSpec.srcCodeIdentifier + "$init",
-                    rawMangledName: globalSpec.rawMangledName + "$init", packageName: spec.name)
-                initFn.SetFuncKind(FuncKind.GLOBALVAR_INIT)
-                let body = builder.CreateBlockGroup(initFn.GetIdentifier() + ".body")
-                initFn.InitBody(body)
-                let entry = builder.CreateBlock("entry", body)
-                let constant = builder.CreateConstant(globalSpec.ty, literal, entry)
-                if (let Some(result) <- constant.GetResult()) {
-                    globalVar.SetInitializerValue(result)
-                }
-                builder.CreateExit(None, entry)
-                pkg.AddGlobalFunc(initFn)
-            }
-            pkg.AddGlobalVar(globalVar)
-        }
-        for (funcSpec in spec.functions) {
-            let funcTy = builder.context.GetFuncTy(funcSpec.paramTypes, funcSpec.returnType)
-            let fn = builder.CreateFunction(funcTy, funcSpec.name, srcCodeIdentifier: funcSpec.srcCodeIdentifier,
-                rawMangledName: funcSpec.rawMangledName, packageName: spec.name)
-            fn.SetFuncKind(funcSpec.funcKind)
-            var paramIndex: Int64 = 0
-            for (paramTy in funcSpec.paramTypes) {
-                builder.CreateParameter(paramTy, "%arg${paramIndex}", fn)
-                paramIndex++
-            }
-            if (funcSpec.emitBody) {
-                let body = builder.CreateBlockGroup(fn.GetIdentifier() + ".body")
-                fn.InitBody(body)
-                let entry = builder.CreateBlock("entry", body)
-                builder.CreateExit(None, entry)
-            }
-            pkg.AddGlobalFunc(fn)
-        }
-        return AST2CHIRResult(pkg)
+        return AST2CHIRDeclTranslator(builder).LowerPackage(spec)
     }
 }
 
