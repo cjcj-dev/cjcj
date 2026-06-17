@@ -95,6 +95,12 @@ let AST2CHIR_EXPR_STR_LITERAL: Int64 = 6
 // conversion based on the operand's LLVM type. A String operand needs no conversion (it passes
 // through), so the adapter never wraps a String sub-expression in TO_STRING.
 let AST2CHIR_EXPR_TO_STRING: Int64 = 7
+// ARRAY_INDEX: read element `lhs[rhs]` of an Int64 array local. `lhs` is a REF naming the array slot;
+// `rhs` is the Int64 index expression. Lowered to a runtime element-ref GEP + Load. ARRAY_SIZE:
+// `lhs.size` for an array local -- the element count, modeled as an Int64 constant (the literal/sized
+// length is statically known at adapt time and carried in `literalValue`).
+let AST2CHIR_EXPR_ARRAY_INDEX: Int64 = 8
+let AST2CHIR_EXPR_ARRAY_SIZE: Int64 = 9
 
 public class AST2CHIRExprSpec {
     public let kind: Int64
@@ -127,6 +133,8 @@ public class AST2CHIRExprSpec {
     public func IsCall(): Bool { return kind == AST2CHIR_EXPR_CALL }
     public func IsStrLiteral(): Bool { return kind == AST2CHIR_EXPR_STR_LITERAL }
     public func IsToString(): Bool { return kind == AST2CHIR_EXPR_TO_STRING }
+    public func IsArrayIndex(): Bool { return kind == AST2CHIR_EXPR_ARRAY_INDEX }
+    public func IsArraySize(): Bool { return kind == AST2CHIR_EXPR_ARRAY_SIZE }
 
     public static func Literal(value: Int64): AST2CHIRExprSpec {
         return AST2CHIRExprSpec(AST2CHIR_EXPR_LITERAL, value, false, "", ExprKind.ADD, None, None,
@@ -155,6 +163,20 @@ public class AST2CHIRExprSpec {
     // a string interpolation literal before concatenating them with the literal text parts.
     public static func ToStringConv(operand: AST2CHIRExprSpec): AST2CHIRExprSpec {
         return AST2CHIRExprSpec(AST2CHIR_EXPR_TO_STRING, 0, false, "", ExprKind.ADD, Some(operand), None,
+            ArrayList<AST2CHIRExprSpec>())
+    }
+
+    // ARRAY_INDEX: read element `array[index]` (Int64 element). `array` is carried in `lhs` (a REF to
+    // the array slot), `index` in `rhs`. Lowered to a runtime element-ref GEP + Load.
+    public static func ArrayIndex(array: AST2CHIRExprSpec, index: AST2CHIRExprSpec): AST2CHIRExprSpec {
+        return AST2CHIRExprSpec(AST2CHIR_EXPR_ARRAY_INDEX, 0, false, "", ExprKind.ADD, Some(array),
+            Some(index), ArrayList<AST2CHIRExprSpec>())
+    }
+
+    // ARRAY_SIZE: the element count of an array local, statically known at adapt time and carried in
+    // `literalValue`. Lowered to a plain Int64 constant.
+    public static func ArraySize(size: Int64): AST2CHIRExprSpec {
+        return AST2CHIRExprSpec(AST2CHIR_EXPR_ARRAY_SIZE, size, false, "", ExprKind.ADD, None, None,
             ArrayList<AST2CHIRExprSpec>())
     }
 
@@ -202,6 +224,14 @@ let AST2CHIR_STMT_PRINT_STR: Int64 = 6
 let AST2CHIR_STMT_FOR: Int64 = 7
 let AST2CHIR_STMT_BREAK: Int64 = 8
 let AST2CHIR_STMT_CONTINUE: Int64 = 9
+// ARRAY_LET: declare a local Int64 array `name` from an array literal whose element expressions are
+// in `arrayElems`. The element count is the literal's length; the slot is a VArray<Int64, len>.
+// ARRAY_ASSIGN: store `expr` into element `cond`-index of array local `name` (a[i] = expr); `cond`
+// carries the index expression. ARRAY_FOR: for-in over array local `name` binding each element to
+// the loop variable (carried in the `name` slot is the array; the loop var name is in `arrayVarName`).
+let AST2CHIR_STMT_ARRAY_LET: Int64 = 10
+let AST2CHIR_STMT_ARRAY_ASSIGN: Int64 = 11
+let AST2CHIR_STMT_ARRAY_FOR: Int64 = 12
 
 public class AST2CHIRStmtSpec {
     public let kind: Int64
@@ -211,6 +241,11 @@ public class AST2CHIRStmtSpec {
     public let cond: Option<AST2CHIRExprSpec>      // IF / WHILE
     public let thenBody: ArrayList<AST2CHIRStmtSpec> // IF then / WHILE body
     public let elseBody: ArrayList<AST2CHIRStmtSpec> // IF else
+    // ARRAY_LET: the array literal's element expressions (Int64), in order. The slot is a VArray of
+    // this length. ARRAY_FOR: the loop-variable name bound to each array element each iteration (the
+    // array slot is named by `name`).
+    public let arrayElems: ArrayList<AST2CHIRExprSpec> = ArrayList<AST2CHIRExprSpec>()
+    public var arrayVarName: String = ""
 
     private init(kind: Int64, name: String, isVar: Bool, expr: Option<AST2CHIRExprSpec>,
         cond: Option<AST2CHIRExprSpec>, thenBody: ArrayList<AST2CHIRStmtSpec>,
@@ -234,6 +269,9 @@ public class AST2CHIRStmtSpec {
     public func IsFor(): Bool { return kind == AST2CHIR_STMT_FOR }
     public func IsBreak(): Bool { return kind == AST2CHIR_STMT_BREAK }
     public func IsContinue(): Bool { return kind == AST2CHIR_STMT_CONTINUE }
+    public func IsArrayLet(): Bool { return kind == AST2CHIR_STMT_ARRAY_LET }
+    public func IsArrayAssign(): Bool { return kind == AST2CHIR_STMT_ARRAY_ASSIGN }
+    public func IsArrayFor(): Bool { return kind == AST2CHIR_STMT_ARRAY_FOR }
 
     public static func Let(name: String, expr: AST2CHIRExprSpec, isVar!: Bool = false): AST2CHIRStmtSpec {
         return AST2CHIRStmtSpec(AST2CHIR_STMT_LET, name, isVar, Some(expr), None,
@@ -281,6 +319,34 @@ public class AST2CHIRStmtSpec {
     public static func Continue(): AST2CHIRStmtSpec {
         return AST2CHIRStmtSpec(AST2CHIR_STMT_CONTINUE, "", false, None, None,
             ArrayList<AST2CHIRStmtSpec>(), ArrayList<AST2CHIRStmtSpec>())
+    }
+
+    // ARRAY_LET: declare a local Int64 array `name` from an array literal whose element expressions
+    // are `elems` (in order). The slot is a VArray<Int64, elems.size>; `isVar` records let vs var.
+    public static func ArrayLet(name: String, elems: ArrayList<AST2CHIRExprSpec>,
+        isVar!: Bool = false): AST2CHIRStmtSpec {
+        let stmt = AST2CHIRStmtSpec(AST2CHIR_STMT_ARRAY_LET, name, isVar, None, None,
+            ArrayList<AST2CHIRStmtSpec>(), ArrayList<AST2CHIRStmtSpec>())
+        for (e in elems) {
+            stmt.arrayElems.add(e)
+        }
+        return stmt
+    }
+
+    // ARRAY_ASSIGN: store `value` into element `index` of array local `name` (a[index] = value).
+    public static func ArrayAssign(name: String, index: AST2CHIRExprSpec,
+        value: AST2CHIRExprSpec): AST2CHIRStmtSpec {
+        return AST2CHIRStmtSpec(AST2CHIR_STMT_ARRAY_ASSIGN, name, false, Some(value), Some(index),
+            ArrayList<AST2CHIRStmtSpec>(), ArrayList<AST2CHIRStmtSpec>())
+    }
+
+    // ARRAY_FOR: for-in over array local `arrayName`, binding each element to `varName` in `body`.
+    public static func ArrayFor(varName: String, arrayName: String,
+        body: ArrayList<AST2CHIRStmtSpec>): AST2CHIRStmtSpec {
+        let stmt = AST2CHIRStmtSpec(AST2CHIR_STMT_ARRAY_FOR, arrayName, false, None, None, body,
+            ArrayList<AST2CHIRStmtSpec>())
+        stmt.arrayVarName = varName
+        return stmt
     }
 
     // PRINT: evaluate `expr` to a runtime Int64 Value and print it. `newline` (carried in the isVar

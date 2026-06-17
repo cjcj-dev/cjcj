@@ -494,6 +494,41 @@ public class GetElementRef <: Expression {
     }
 }
 
+// A GetElementRef whose indices are runtime Values rather than a compile-time static path. Operand 0
+// is the base (a Ref to an aggregate, e.g. a VArray slot); operands 1.. are the GEP indices. Reuses
+// ExprKind.GET_ELEMENT_REF so codegen routes it to GenerateGetElementRef, which already reads
+// operands 1.. as runtime GEP indices. Used by the real-body path to index Int64 arrays with a
+// runtime subscript (a[i]).
+public class DynamicElementRef <: Expression {
+    public init(base: Value, indices: ArrayList<Value>, parent: Option<Block>) {
+        super(ExprKind.GET_ELEMENT_REF, DynamicElementRef.MakeOperands(base, indices), parent)
+    }
+
+    private static func MakeOperands(base: Value, indices: ArrayList<Value>): ArrayList<Value> {
+        let out = ArrayList<Value>()
+        out.add(base)
+        for (idx in indices) {
+            out.add(idx)
+        }
+        return out
+    }
+
+    public func GetBase(): Value {
+        return GetOperand(0)
+    }
+
+    public override func Clone(builder: CHIRBuilder, parent: Block): Expression {
+        let indices = ArrayList<Value>()
+        var i: Int64 = 1
+        while (i < GetNumOfOperands()) {
+            indices.add(GetOperand(i))
+            i++
+        }
+        let cloned = builder.CreateDynamicElementRef(RequiredResultType(this), GetBase(), indices, parent)
+        return FinishExpressionClone(this, cloned)
+    }
+}
+
 public class GetElementByName <: Expression {
     private let names: ArrayList<String> = ArrayList<String>()
 

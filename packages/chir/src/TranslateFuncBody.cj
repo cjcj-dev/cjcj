@@ -13,6 +13,10 @@ class RealBodyState {
     // Parallel to `locals`: the CHIR element type stored in each slot (Int64 or Bool). A REF loads
     // the slot using this type so Bool locals round-trip as i1 rather than being widened to i64.
     let localTypes = HashMap<String, Type>()
+    // Int64-array locals: name -> (slot Value of type Ref<VArray<Int64,len>>, element count). An array
+    // slot is never loaded as a scalar; array index/size/assign/for-in consult these maps directly.
+    let arraySlots = HashMap<String, Value>()
+    let arrayLengths = HashMap<String, Int64>()
     let body: BlockGroup
     // Stack of enclosing loop control targets. `break` jumps to the top entry's exit block;
     // `continue` jumps to its continue block (a while's cond block, or a for loop's increment block).
@@ -139,6 +143,18 @@ extend AST2CHIRDeclTranslator {
                 builder.CreateGoTo(state.loopContinueTargets[state.loopContinueTargets.size - 1], state.current)
                 state.terminated = true
             }
+            return
+        }
+        if (stmt.IsArrayLet()) {
+            LowerArrayLet(fn, stmt, state)
+            return
+        }
+        if (stmt.IsArrayAssign()) {
+            LowerArrayAssign(fn, stmt, state)
+            return
+        }
+        if (stmt.IsArrayFor()) {
+            LowerArrayFor(fn, stmt, state)
             return
         }
         if (stmt.IsPrint()) {
@@ -341,6 +357,131 @@ extend AST2CHIRDeclTranslator {
         state.terminated = false
     }
 
+    // Lower `let a = [e0, e1, ...]` (Int64 elements). Allocates a VArray<Int64, len> slot, then
+    // stores each element into its slot via a runtime element-ref GEP. The slot and length are
+    // recorded so a[i] / a.size / a[i]=v / for-in resolve against this local.
+    private func LowerArrayLet(fn: Function, stmt: AST2CHIRStmtSpec, state: RealBodyState): Unit {
+        let int64Ty = builder.context.GetInt64Ty()
+        let len = stmt.arrayElems.size
+        let varrayTy = builder.context.GetVArrayTy(int64Ty, UInt64(len))
+        let slot = AllocateSlot(varrayTy, state.current)
+        var idx: Int64 = 0
+        while (idx < len) {
+            let elemValue = match (EvalExpr(stmt.arrayElems[idx], state)) {
+                case Some(v) => v
+                case None => return
+            }
+            let elemPtr = ArrayElementPtr(slot, idx, state)
+            builder.CreateStore(elemValue, elemPtr, state.current)
+            idx++
+        }
+        state.arraySlots[stmt.name] = slot
+        state.arrayLengths[stmt.name] = len
+    }
+
+    // Lower `a[i] = expr`: evaluate the value and the index, GEP to the element slot, and Store.
+    private func LowerArrayAssign(fn: Function, stmt: AST2CHIRStmtSpec, state: RealBodyState): Unit {
+        let slot = match (state.arraySlots.get(stmt.name)) {
+            case Some(s) => s
+            case None => return
+        }
+        let value = match (EvalExpr(stmt.expr, state)) {
+            case Some(v) => v
+            case None => return
+        }
+        let indexValue = match (EvalExpr(stmt.cond, state)) {
+            case Some(v) => v
+            case None => return
+        }
+        let elemPtr = ArrayElementPtrDynamic(slot, indexValue, state)
+        builder.CreateStore(value, elemPtr, state.current)
+    }
+
+    // Lower `for (x in a) { ... }` over an Int64 array local `a`. Desugars to an index loop
+    // 0..len(a): each iteration loads a[i] into the loop-variable slot, runs the body, increments.
+    private func LowerArrayFor(fn: Function, stmt: AST2CHIRStmtSpec, state: RealBodyState): Unit {
+        let int64Ty = builder.context.GetInt64Ty()
+        let slot = match (state.arraySlots.get(stmt.name)) {
+            case Some(s) => s
+            case None => return
+        }
+        let len = match (state.arrayLengths.get(stmt.name)) {
+            case Some(l) => l
+            case None => return
+        }
+        // Index slot initialized to 0; loop-variable slot for the bound element.
+        let idxSlot = AllocateSlot(int64Ty, state.current)
+        let zero = builder.CreateConstant(int64Ty, IntLiteral(0), state.current).GetResult().getOrThrow()
+        builder.CreateStore(zero, idxSlot, state.current)
+        let varSlot = AllocateSlot(int64Ty, state.current)
+        state.locals[stmt.arrayVarName] = varSlot
+        state.localTypes[stmt.arrayVarName] = int64Ty
+
+        let condBlock = builder.CreateBlock("afor.cond", state.body)
+        let bodyBlock = builder.CreateBlock("afor.body", state.body)
+        let incBlock = builder.CreateBlock("afor.inc", state.body)
+        let exitBlock = builder.CreateBlock("afor.exit", state.body)
+        builder.CreateGoTo(condBlock, state.current)
+
+        // Condition: i < len.
+        state.current = condBlock
+        state.terminated = false
+        let iVal = builder.CreateLoad(int64Ty, idxSlot, state.current).GetResult().getOrThrow()
+        let lenVal = builder.CreateConstant(int64Ty, IntLiteral(len), state.current).GetResult().getOrThrow()
+        let boolTy = builder.context.GetBoolTy()
+        let cond = builder.CreateBinaryExpression(ExprKind.LT, boolTy, iVal, lenVal, state.current).GetResult().getOrThrow()
+        builder.CreateBranch(cond, bodyBlock, exitBlock, state.current)
+
+        // Body: load a[i] into varSlot, then run the loop body.
+        state.current = bodyBlock
+        state.terminated = false
+        let iVal2 = builder.CreateLoad(int64Ty, idxSlot, state.current).GetResult().getOrThrow()
+        let elemPtr = ArrayElementPtrDynamic(slot, iVal2, state)
+        let elem = builder.CreateLoad(int64Ty, elemPtr, state.current).GetResult().getOrThrow()
+        builder.CreateStore(elem, varSlot, state.current)
+        state.loopBreakTargets.add(exitBlock)
+        state.loopContinueTargets.add(incBlock)
+        LowerStatements(fn, stmt.thenBody, state)
+        state.loopBreakTargets.remove(at: state.loopBreakTargets.size - 1)
+        state.loopContinueTargets.remove(at: state.loopContinueTargets.size - 1)
+        if (!state.terminated) {
+            builder.CreateGoTo(incBlock, state.current)
+        }
+
+        // Increment: i = i + 1.
+        state.current = incBlock
+        state.terminated = false
+        let curVal = builder.CreateLoad(int64Ty, idxSlot, state.current).GetResult().getOrThrow()
+        let one = builder.CreateConstant(int64Ty, IntLiteral(1), state.current).GetResult().getOrThrow()
+        let next = builder.CreateBinaryExpression(ExprKind.ADD, int64Ty, curVal, one, state.current).GetResult().getOrThrow()
+        builder.CreateStore(next, idxSlot, state.current)
+        builder.CreateGoTo(condBlock, state.current)
+
+        state.current = exitBlock
+        state.terminated = false
+    }
+
+    // Element-ref pointer (Ref<Int64>) into a VArray slot at a compile-time-constant index.
+    private func ArrayElementPtr(slot: Value, idx: Int64, state: RealBodyState): Value {
+        let int64Ty = builder.context.GetInt64Ty()
+        let idxValue = builder.CreateConstant(int64Ty, IntLiteral(idx), state.current).GetResult().getOrThrow()
+        return ArrayElementPtrDynamic(slot, idxValue, state)
+    }
+
+    // Element-ref pointer (Ref<Int64>) into a VArray slot at a runtime index. The VArray slot is a
+    // `[len x i64]*`, so the GEP carries a leading constant 0 (into the array aggregate) then the
+    // element index. Codegen's GenerateGetElementRef reads operands 1.. as runtime GEP indices.
+    private func ArrayElementPtrDynamic(slot: Value, indexValue: Value, state: RealBodyState): Value {
+        let int64Ty = builder.context.GetInt64Ty()
+        let zero = builder.CreateConstant(int64Ty, IntLiteral(0), state.current).GetResult().getOrThrow()
+        let indices = ArrayList<Value>()
+        indices.add(zero)
+        indices.add(indexValue)
+        let refTy = builder.context.GetRefTy(int64Ty)
+        let gep = builder.CreateDynamicElementRef(refTy, slot, indices, state.current)
+        return gep.GetResult().getOrThrow()
+    }
+
     // Evaluate an expression spec into a runtime CHIR Value in `state.current`.
     private func EvalExpr(maybeExpr: Option<AST2CHIRExprSpec>, state: RealBodyState): Option<Value> {
         let expr = match (maybeExpr) {
@@ -435,6 +576,29 @@ extend AST2CHIRDeclTranslator {
                 return AsValue(binary.GetResult())
             }
             return None
+        }
+        if (expr.IsArraySize()) {
+            // Statically known element count -> an Int64 constant.
+            let constant = builder.CreateConstant(int64Ty, IntLiteral(expr.literalValue), state.current)
+            return AsValue(constant.GetResult())
+        }
+        if (expr.IsArrayIndex()) {
+            // a[i]: `lhs` is a REF naming the array slot; `rhs` is the Int64 index. GEP + Load.
+            let arrayName = match (expr.lhs) {
+                case Some(l) => l.name
+                case None => return None
+            }
+            let slot = match (state.arraySlots.get(arrayName)) {
+                case Some(s) => s
+                case None => return None
+            }
+            let indexValue = match (EvalExpr(expr.rhs, state)) {
+                case Some(v) => v
+                case None => return None
+            }
+            let elemPtr = ArrayElementPtrDynamic(slot, indexValue, state)
+            let load = builder.CreateLoad(int64Ty, elemPtr, state.current)
+            return AsValue(load.GetResult())
         }
         if (expr.IsCall()) {
             return EvalCall(expr, state)

@@ -158,6 +158,18 @@ public class CHIRBuilder {
         return expr
     }
 
+    // Create a GetElementRef whose GEP indices are runtime Values (operands), not a static path.
+    // `indices` are appended after the base operand; codegen GEPs base[indices] at the base's pointer
+    // element type. Used to index a VArray-backed Int64 array slot with a runtime subscript.
+    public func CreateDynamicElementRef(resultTy: Type, base: Value, indices: ArrayList<Value>,
+        parent: Block): DynamicElementRef {
+        let expr = DynamicElementRef(base, indices, parent)
+        parent.AppendExpression(expr)
+        context.RegisterExpression(expr)
+        CreateLocalVar(resultTy, "%${context.GetAllNodesNum()}", expr)
+        return expr
+    }
+
     public func CreateGetElementByName(resultTy: Type, location: Value, names: ArrayList<String>,
         parent: Block): GetElementByName {
         let expr = GetElementByName(location, names, parent)

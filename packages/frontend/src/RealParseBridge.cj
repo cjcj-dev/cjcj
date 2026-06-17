@@ -27,6 +27,9 @@ import cangjie_compiler::parse.VarPattern as ParseVarPattern
 import cangjie_compiler::parse.Block as ParseBlock
 import cangjie_compiler::parse.LitConstKind as ParseLitConstKind
 import cangjie_compiler::parse.InterpolationExpr as ParseInterpolationExpr
+import cangjie_compiler::parse.ArrayLit as ParseArrayLit
+import cangjie_compiler::parse.SubscriptExpr as ParseSubscriptExpr
+import cangjie_compiler::parse.MemberAccess as ParseMemberAccess
 import cangjie_compiler::lex.StringPartKind
 import cangjie_compiler::chir.AST2CHIRStmtSpec as ChirStmtSpec
 import cangjie_compiler::chir.AST2CHIRExprSpec as ChirExprSpec
@@ -142,6 +145,12 @@ private class AdaptScope {
     // `println(strLocal)` and `a + b` concat are recognized as String operations and promote to the
     // real path (lowered as a runtime CString print / concat) rather than falling back.
     let strNames = HashSet<String>()
+    // Names of locals known to hold an Int64 array (a `let`/`var` bound to an array literal). Used to
+    // recognize a[i] subscripts, a.size, a[i]=v writes, and for-in over the array as array operations.
+    let arrayNames = HashSet<String>()
+    // Parallel to arrayNames: the statically known element count of each array local, so `a.size`
+    // lowers to an Int64 constant.
+    let arrayLengths = HashMap<String, Int64>()
     let funcNames: HashSet<String>
     // Names of top-level functions whose declared return type is String, so a call to one is treated
     // as a String-valued expression for concat / print classification.
@@ -293,6 +302,34 @@ private func adaptVarDecl(varDecl: ParseVarDecl, scope: AdaptScope): Option<Chir
         case Some(e) => e
         case None => return None
     }
+    // An array-literal initializer `let a = [e0, e1, ...]` (Int64 elements) declares an Int64 array
+    // local. Lowered to an ARRAY_LET (a VArray<Int64,len> slot filled element-by-element).
+    if (let Some(arrayLit) <- (initExpr as ParseArrayLit)) {
+        let elems = ArrayList<ChirExprSpec>()
+        for (child in arrayLit.children) {
+            // Only Int64-valued elements are supported (the array is VArray<Int64>). A String- or
+            // Bool-classified element falls the whole body back so a non-Int64 array never mis-lowers.
+            if (exprIsString(child, scope) || exprIsBool(child, scope)) {
+                return None
+            }
+            match (adaptExpr(child, scope)) {
+                case Some(e) => elems.add(e)
+                case None => return None
+            }
+        }
+        scope.locals.add(name)
+        scope.arrayNames.add(name)
+        scope.arrayLengths[name] = elems.size
+        scope.needsRuntime = true
+        return Some(ChirStmtSpec.ArrayLet(name, elems, isVar: varDecl.isVar))
+    }
+    // A sized array constructor `let a = Array<Int64>(n, repeat: v)` / `(n, item: v)` with a literal
+    // size `n` declares an Int64 array local of length n filled with v. Lowered to an ARRAY_LET whose
+    // elements are n copies of the (pure) fill expression -- the VArray representation needs a
+    // statically known length, so only a literal size is accepted (anything else falls back).
+    if (let Some(ctor) <- adaptArrayCtor(initExpr, scope, name)) {
+        return Some(ctor)
+    }
     let valueSpec = match (adaptExpr(initExpr, scope)) {
         case Some(e) => e
         case None => return None
@@ -320,6 +357,34 @@ private func adaptAssign(assignExpr: ParseAssignExpr, scope: AdaptScope): Option
     let target = match (assignExpr.leftExpr) {
         case Some(e) => e
         case None => return None
+    }
+    // `a[i] = expr`: an indexed write into an Int64 array local.
+    if (let Some(subscript) <- (target as ParseSubscriptExpr)) {
+        let base = match (subscript.baseExpr) {
+            case Some(b) => b
+            case None => return None
+        }
+        let arrayName = match (arrayRefName(base, scope)) {
+            case Some(n) => n
+            case None => return None
+        }
+        if (subscript.indexExprs.size != 1) {
+            return None
+        }
+        let indexSpec = match (adaptExpr(subscript.indexExprs[0], scope)) {
+            case Some(e) => e
+            case None => return None
+        }
+        let rhs = match (assignExpr.rightExpr) {
+            case Some(e) => e
+            case None => return None
+        }
+        let valueSpec = match (adaptExpr(rhs, scope)) {
+            case Some(e) => e
+            case None => return None
+        }
+        scope.needsRuntime = true
+        return Some(ChirStmtSpec.ArrayAssign(arrayName, indexSpec, valueSpec))
     }
     let name = match (localRefName(target, scope)) {
         case Some(n) => n
@@ -449,6 +514,25 @@ private func adaptForIn(forInExpr: ParseForInExpr, scope: AdaptScope): Option<Ch
         case Some(e) => e
         case None => return None
     }
+    // `for (x in a)` over an Int64 array local: iterate its elements.
+    if (let Some(arrayName) <- arrayRefName(inExpr, scope)) {
+        let body = match (forInExpr.body) {
+            case Some(b) => b
+            case None => return None
+        }
+        scope.locals.add(varName)
+        scope.loopDepth++
+        let bodyStmts = match (adaptStatements(body, scope)) {
+            case Some(s) =>
+                scope.loopDepth--
+                s
+            case None =>
+                scope.loopDepth--
+                return None
+        }
+        scope.needsRuntime = true
+        return Some(ChirStmtSpec.ArrayFor(varName, arrayName, bodyStmts))
+    }
     let rangeExpr = match (inExpr as ParseRangeExpr) {
         case Some(r) => r
         case None => return None
@@ -531,6 +615,14 @@ private func adaptExpr(expr: ParseExpr, scope: AdaptScope): Option<ChirExprSpec>
     }
     if (let Some(refName) <- localRefName(expr, scope)) {
         return Some(ChirExprSpec.Ref(refName))
+    }
+    // a[i]: a subscript over an Int64 array local with a single Int64 index expression.
+    if (let Some(subscript) <- (expr as ParseSubscriptExpr)) {
+        return adaptSubscript(subscript, scope)
+    }
+    // a.size: the element count of an Int64 array local (statically known at adapt time).
+    if (let Some(member) <- (expr as ParseMemberAccess)) {
+        return adaptArraySize(member, scope)
     }
     if (let Some(unary) <- (expr as ParseUnaryExpr)) {
         let op = match (toChirUnaryOp(unary.op.kind)) {
@@ -789,6 +881,144 @@ private func adaptCall(call: ParseCallExpr, scope: AdaptScope): Option<ChirExprS
     }
     scope.needsRuntime = true
     return Some(ChirExprSpec.Call(calleeName, argSpecs))
+}
+
+// Adapt a sized array constructor `Array<Int64>(n, repeat: v)` / `Array<Int64>(n, item: v)` with a
+// literal size `n` into an ARRAY_LET of n copies of the (pure Int64) fill expression. The callee must
+// be a bare RefExpr `Array` (not shadowed by a local) with a single Int64 type argument; the first
+// argument is a positional int literal (the size) and the second is named `repeat`/`item`. Anything
+// else returns None so the body falls back. Marks the new array local in scope.
+private func adaptArrayCtor(initExpr: ParseExpr, scope: AdaptScope, name: String): Option<ChirStmtSpec> {
+    let call = match (initExpr as ParseCallExpr) {
+        case Some(c) => c
+        case None => return None
+    }
+    let base = match (call.baseFunc) {
+        case Some(b) => b
+        case None => return None
+    }
+    let calleeRef = match (base as ParseRefExpr) {
+        case Some(r) => r
+        case None => return None
+    }
+    if (calleeRef.identifier.Val() != "Array" || scope.locals.contains("Array")) {
+        return None
+    }
+    // Require exactly one type argument and that it be the Int64 element type.
+    if (calleeRef.typeArguments.size != 1 || calleeRef.typeArguments[0].ToString() != "Int64") {
+        return None
+    }
+    if (call.args.size != 2) {
+        return None
+    }
+    // First argument: positional literal size.
+    let sizeArg = call.args[0]
+    if (!sizeArg.name.Empty() || sizeArg.withInout) {
+        return None
+    }
+    let sizeExpr = match (sizeArg.expr) {
+        case Some(e) => e
+        case None => return None
+    }
+    let size = match (intLiteralValue(sizeExpr)) {
+        case Some(n) => n
+        case None => return None
+    }
+    if (size < 0) {
+        return None
+    }
+    // Second argument: named `repeat:` or `item:` fill value (a pure Int64 expression).
+    let fillArg = call.args[1]
+    let fillLabel = fillArg.name.Val()
+    if (fillLabel != "repeat" && fillLabel != "item") {
+        return None
+    }
+    if (fillArg.withInout) {
+        return None
+    }
+    let fillExpr = match (fillArg.expr) {
+        case Some(e) => e
+        case None => return None
+    }
+    // Only an Int64 fill value is supported (the array is VArray<Int64>).
+    if (exprIsString(fillExpr, scope) || exprIsBool(fillExpr, scope)) {
+        return None
+    }
+    let fillSpec = match (adaptExpr(fillExpr, scope)) {
+        case Some(e) => e
+        case None => return None
+    }
+    // Replicate the (pure) fill expression `size` times. Safe for the Int64 grammar (literals, local
+    // refs, arithmetic) which has no observable side effects.
+    let elems = ArrayList<ChirExprSpec>()
+    var i: Int64 = 0
+    while (i < size) {
+        elems.add(fillSpec)
+        i++
+    }
+    scope.locals.add(name)
+    scope.arrayNames.add(name)
+    scope.arrayLengths[name] = size
+    scope.needsRuntime = true
+    return Some(ChirStmtSpec.ArrayLet(name, elems))
+}
+
+// Adapt `a[i]` over an Int64 array local: the base must be a RefExpr naming a known array local and
+// there must be exactly one index expression (an Int64 expr). Anything else fails the match (fallback).
+private func adaptSubscript(subscript: ParseSubscriptExpr, scope: AdaptScope): Option<ChirExprSpec> {
+    let base = match (subscript.baseExpr) {
+        case Some(b) => b
+        case None => return None
+    }
+    let arrayName = match (arrayRefName(base, scope)) {
+        case Some(n) => n
+        case None => return None
+    }
+    if (subscript.indexExprs.size != 1) {
+        return None
+    }
+    let indexSpec = match (adaptExpr(subscript.indexExprs[0], scope)) {
+        case Some(e) => e
+        case None => return None
+    }
+    scope.needsRuntime = true
+    return Some(ChirExprSpec.ArrayIndex(ChirExprSpec.Ref(arrayName), indexSpec))
+}
+
+// Adapt `a.size` over an Int64 array local: the base must be a RefExpr naming a known array local and
+// the member field must be `size`. The element count is statically known and emitted as a constant.
+private func adaptArraySize(member: ParseMemberAccess, scope: AdaptScope): Option<ChirExprSpec> {
+    if (member.field.GetRawText() != "size") {
+        return None
+    }
+    if (!member.typeArguments.isEmpty()) {
+        return None
+    }
+    let base = match (member.baseExpr) {
+        case Some(b) => b
+        case None => return None
+    }
+    let arrayName = match (arrayRefName(base, scope)) {
+        case Some(n) => n
+        case None => return None
+    }
+    let len = match (scope.arrayLengths.get(arrayName)) {
+        case Some(l) => l
+        case None => return None
+    }
+    scope.needsRuntime = true
+    return Some(ChirExprSpec.ArraySize(len))
+}
+
+// If `expr` is a bare RefExpr naming a known array local, return that name; otherwise None.
+private func arrayRefName(expr: ParseExpr, scope: AdaptScope): Option<String> {
+    if (let Some(refExpr) <- (expr as ParseRefExpr)) {
+        let name = refExpr.identifier.Val()
+        if (scope.arrayNames.contains(name)) {
+            return Some(name)
+        }
+    }
+    return None
 }
 
 // Map a parse binary-op token to a CHIR ExprKind. Only the Int64 arithmetic and relational ops
