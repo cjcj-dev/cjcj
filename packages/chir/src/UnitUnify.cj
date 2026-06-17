@@ -1,5 +1,11 @@
 package cangjie_compiler::chir
 
+private class UnitUnifyState {
+    public var unitConstant: Option<Constant> = None
+
+    public init() {}
+}
+
 public class UnitUnify {
     private let builder: CHIRBuilder
 
@@ -17,14 +23,14 @@ public class UnitUnify {
 
     public func RunOnFunction(fn: Function, isDebug!: Bool = false): Int64 {
         if (let Some(body) <- fn.GetBody()) {
-            return RunOnBody(body, isDebug)
+            let state = UnitUnifyState()
+            return RunOnBody(body, body, state, isDebug)
         }
         return 0
     }
 
-    private func RunOnBody(body: BlockGroup, isDebug: Bool): Int64 {
+    private func RunOnBody(body: BlockGroup, unitOwner: BlockGroup, state: UnitUnifyState, isDebug: Bool): Int64 {
         var changed: Int64 = 0
-        var unitConstant: Option<Constant> = None
         for (block in body.GetBlocksRef()) {
             let exprs = block.GetExpressions()
             for (expr in exprs) {
@@ -35,23 +41,32 @@ public class UnitUnify {
                     continue
                 }
                 if (!NeedUnify(expr)) {
-                    continue
-                }
-                if (unitConstant.isNone()) {
-                    unitConstant = LoadOrCreateUnit(body)
-                }
-                if (let Some(unitExpr) <- unitConstant) {
-                    if (let Some(unitResult) <- unitExpr.GetResult()) {
-                        if (let Some(result) <- expr.GetResult()) {
-                            result.ReplaceWith(unitResult, expr.GetParentBlockGroup())
-                            changed++
-                            if (isDebug) {
-                                println("[UnitUnify] unit unify " + expr.GetDebugLocation().ToString() + ".")
+                    changed += RunOnChildGroups(expr, unitOwner, state, isDebug)
+                } else {
+                    LoadOrCreateUnit(unitOwner, state)
+                    if (let Some(unitExpr) <- state.unitConstant) {
+                        if (let Some(unitResult) <- unitExpr.GetResult()) {
+                            if (let Some(result) <- expr.GetResult()) {
+                                result.ReplaceWith(unitResult, expr.GetParentBlockGroup())
+                                changed++
+                                if (isDebug) {
+                                    println("[UnitUnify] unit unify " + expr.GetDebugLocation().ToString() + ".")
+                                }
                             }
                         }
                     }
+                    changed += RunOnChildGroups(expr, unitOwner, state, isDebug)
                 }
             }
+        }
+        return changed
+    }
+
+    private func RunOnChildGroups(expr: Expression, unitOwner: BlockGroup, state: UnitUnifyState,
+        isDebug: Bool): Int64 {
+        var changed: Int64 = 0
+        for (child in expr.GetBlockGroups()) {
+            changed += RunOnBody(child, unitOwner, state, isDebug)
         }
         return changed
     }
@@ -81,7 +96,10 @@ public class UnitUnify {
         return false
     }
 
-    private func LoadOrCreateUnit(group: BlockGroup): Option<Constant> {
+    private func LoadOrCreateUnit(group: BlockGroup, state: UnitUnifyState): Unit {
+        if (state.unitConstant.isSome()) {
+            return
+        }
         if (let Some(entryBlock) <- group.GetEntryBlock()) {
             var oldFirst: Option<Expression> = None
             if (entryBlock.GetExpressionsNum() > 0) {
@@ -91,8 +109,7 @@ public class UnitUnify {
             if (let Some(firstExpr) <- oldFirst) {
                 unitExpr.MoveBefore(firstExpr)
             }
-            return unitExpr
+            state.unitConstant = unitExpr
         }
-        return None
     }
 }

@@ -17,10 +17,22 @@ public class ConstPropagation {
     }
 
     public func RunOnFunction(fn: Function): Int64 {
-        var changed: Int64 = 0
         if (let Some(body) <- fn.GetBody()) {
-            for (block in body.GetBlocksRef()) {
-                changed += SimplifyBlock(block)
+            return SimplifyBody(body)
+        }
+        return 0
+    }
+
+    private func SimplifyBody(body: BlockGroup): Int64 {
+        var changed: Int64 = 0
+        for (block in body.GetBlocksRef()) {
+            changed += SimplifyBlock(block)
+            for (expr in block.GetExpressions()) {
+                if (let Some(lambdaExpr) <- (expr as Lambda)) {
+                    if (let Some(lambdaBody) <- lambdaExpr.GetBody()) {
+                        changed += SimplifyBody(lambdaBody)
+                    }
+                }
             }
         }
         return changed
@@ -32,7 +44,9 @@ public class ConstPropagation {
         var idx: Int64 = 0
         while (idx < exprs.size) {
             let expr = exprs[idx]
-            if (TryFoldToConstant(expr)) {
+            if (TryRewriteConstantBranch(expr)) {
+                changed++
+            } else if (TryFoldToConstant(expr)) {
                 changed++
             } else if (TrySimplifyUnary(expr)) {
                 changed++
@@ -69,6 +83,31 @@ public class ConstPropagation {
         return false
     }
 
+    private func TryRewriteConstantBranch(expr: Expression): Bool {
+        if (expr.GetExprKind() != ExprKind.BRANCH || expr.GetNumOfOperands() != 1 || builder.isNone()) {
+            return false
+        }
+        if (let Some(takenTrue) <- BoolLiteralValue(expr.GetOperand(0))) {
+            if (let Some(term) <- expr.AsTerminator()) {
+                let successors = term.GetSuccessors()
+                if (successors.size < 2) {
+                    return false
+                }
+                if (let Some(parentBlock) <- expr.GetParentBlock()) {
+                    let target = if (takenTrue) { successors[0] } else { successors[1] }
+                    let loc = expr.GetDebugLocation()
+                    expr.RemoveSelfFromBlock()
+                    if (let Some(chirBuilder) <- builder) {
+                        let gotoExpr = chirBuilder.CreateGoTo(target, parentBlock)
+                        gotoExpr.SetDebugLocation(loc)
+                        return true
+                    }
+                }
+            }
+        }
+        return false
+    }
+
     private func TrySimplifyUnary(expr: Expression): Bool {
         if (!expr.IsUnaryExpr() || expr.GetNumOfOperands() != 1) {
             return false
@@ -80,7 +119,9 @@ public class ConstPropagation {
         let operand = expr.GetOperand(0)
         if (let Some(local) <- operand.AsLocalVar()) {
             if (let Some(operandExpr) <- local.GetExpr()) {
-                if (operandExpr.GetExprKind() == kind && operandExpr.GetNumOfOperands() == 1) {
+                let operandKind = operandExpr.GetExprKind()
+                if ((operandKind == ExprKind.NOT || operandKind == ExprKind.BITNOT) &&
+                    operandExpr.GetNumOfOperands() == 1) {
                     return ReplaceResultWithOperand(expr, operandExpr.GetOperand(0))
                 }
             }
@@ -116,7 +157,7 @@ public class ConstPropagation {
 
     private func ReplaceResultWithOperand(expr: Expression, operand: Value): Bool {
         if (let Some(result) <- expr.GetResult()) {
-            result.ReplaceWith(operand)
+            result.ReplaceWith(operand, expr.GetParentBlockGroup())
             expr.RemoveSelfFromBlock()
             return true
         }
@@ -134,5 +175,25 @@ public class ConstPropagation {
             }
         }
         return false
+    }
+
+    private func BoolLiteralValue(value: Value): Option<Bool> {
+        if (let Some(local) <- value.AsLocalVar()) {
+            if (let Some(expr) <- local.GetExpr()) {
+                if (let Some(literal) <- constEval.EvaluateToLiteral(expr)) {
+                    if (let Some(boolLiteral) <- (literal as BoolLiteral)) {
+                        return boolLiteral.value
+                    }
+                }
+            }
+        }
+        if (let Some(globalVar) <- value.AsGlobalVar()) {
+            if (let Some(initValue) <- globalVar.GetInitializerValue()) {
+                if (initValue.nodeId != value.nodeId) {
+                    return BoolLiteralValue(initValue)
+                }
+            }
+        }
+        return None
     }
 }

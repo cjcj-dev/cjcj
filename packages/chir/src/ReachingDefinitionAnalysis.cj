@@ -243,7 +243,7 @@ public class ReachingDefinitionAnalysis {
             HandleLoadExpr(state, expression)
         } else if (kind == ExprKind.GET_ELEMENT_REF) {
             HandleGetElemRefExpr(state, expression)
-        } else if (kind == ExprKind.STORE_ELEMENT_REF) {
+        } else if (kind == ExprKind.STORE_ELEMENT_REF || kind == ExprKind.STORE_ELEMENT_BY_NAME) {
             HandleStoreElemRefExpr(state, expression)
         } else if (kind == ExprKind.APPLY || kind == ExprKind.APPLY_WITH_EXCEPTION ||
             kind == ExprKind.INVOKE || kind == ExprKind.INVOKE_WITH_EXCEPTION ||
@@ -262,7 +262,7 @@ public class ReachingDefinitionAnalysis {
     }
 
     public func HandleVarStateCapturedByLambda(state: ReachingDefinitionDomain, lambdaExpr: Expression): Unit {
-        for (captured in lambdaExpr.GetOperands()) {
+        for (captured in GetLambdaCapturedVarsRecursively(lambdaExpr)) {
             state.Invalidate(captured)
         }
     }
@@ -357,8 +357,8 @@ public class ReachingDefinitionAnalysis {
     }
 
     private func HandleStoreElemRefExpr(state: ReachingDefinitionDomain, storeElemRef: Expression): Unit {
-        if (storeElemRef.GetNumOfOperands() >= 1) {
-            let location = storeElemRef.GetOperand(0)
+        if (storeElemRef.GetNumOfOperands() >= 2) {
+            let location = storeElemRef.GetOperand(1)
             if (IsTrackedStructRef(location)) {
                 state.Invalidate(location)
             }
@@ -367,19 +367,14 @@ public class ReachingDefinitionAnalysis {
 
     private func HandleApplyExpr(state: ReachingDefinitionDomain, apply: Expression): Unit {
         if (apply.GetNumOfOperands() > 1) {
-            let callee = apply.GetOperand(0)
-            if (callee.TestAttr(Attribute.MUT)) {
-                state.Invalidate(apply.GetOperand(1))
-                return
+            if (let Some(callee) <- apply.GetOperand(0).AsFunction()) {
+                if (callee.TestAttr(Attribute.MUT)) {
+                    let receiver = apply.GetOperand(1)
+                    if (IsTrackedStructRef(receiver)) {
+                        state.Invalidate(receiver)
+                    }
+                }
             }
-        }
-        var idx: Int64 = 0
-        while (idx < apply.GetNumOfOperands()) {
-            let operand = apply.GetOperand(idx)
-            if (!operand.TestAttr(Attribute.READONLY)) {
-                state.Invalidate(operand)
-            }
-            idx++
         }
     }
 
@@ -431,4 +426,82 @@ private func CollectBlocksRecursively(body: BlockGroup, out: ArrayList<Block>): 
             }
         }
     }
+}
+
+private func GetLambdaCapturedVarsRecursively(lambdaExpr: Expression): ArrayList<Value> {
+    let capturedVars = ArrayList<Value>()
+    let visitedLambdaIds = ArrayList<Int64>()
+    CollectLambdaCapturedVarsRecursively(lambdaExpr, capturedVars, visitedLambdaIds)
+    return capturedVars
+}
+
+private func CollectLambdaCapturedVarsRecursively(lambdaExpr: Expression, capturedVars: ArrayList<Value>,
+    visitedLambdaIds: ArrayList<Int64>): Unit {
+    if (ContainsInt64(visitedLambdaIds, lambdaExpr.nodeId)) {
+        return
+    }
+    visitedLambdaIds.add(lambdaExpr.nodeId)
+    if (let Some(lambda) <- (lambdaExpr as Lambda)) {
+        if (let Some(lambdaBody) <- lambda.GetBody()) {
+            for (block in lambdaBody.GetBlocksRef()) {
+                for (expr in block.GetExpressionsRef()) {
+                    let appliedLambda = GetAppliedLambda(expr)
+                    if (let Some(childLambda) <- appliedLambda) {
+                        CollectLambdaCapturedVarsRecursively(childLambda, capturedVars, visitedLambdaIds)
+                    } else {
+                        if (let Some(childLambdaExpr) <- (expr as Lambda)) {
+                            CollectLambdaCapturedVarsRecursively(childLambdaExpr, capturedVars, visitedLambdaIds)
+                        }
+                    }
+                }
+            }
+        }
+    }
+    for (captured in lambdaExpr.GetOperands()) {
+        if (IsRefValue(captured) && !ContainsValueById(capturedVars, captured)) {
+            capturedVars.add(captured)
+        }
+    }
+}
+
+private func GetAppliedLambda(expr: Expression): Option<Expression> {
+    if (expr.GetExprKind() != ExprKind.APPLY && expr.GetExprKind() != ExprKind.APPLY_WITH_EXCEPTION) {
+        return None
+    }
+    if (expr.GetNumOfOperands() == 0) {
+        return None
+    }
+    if (let Some(callee) <- expr.GetOperand(0).AsLocalVar()) {
+        if (let Some(calleeExpr) <- callee.GetExpr()) {
+            if (calleeExpr.GetExprKind() == ExprKind.LAMBDA) {
+                return calleeExpr
+            }
+        }
+    }
+    return None
+}
+
+private func IsRefValue(value: Value): Bool {
+    if (let Some(ty) <- value.GetType()) {
+        return ty.IsRef()
+    }
+    return false
+}
+
+private func ContainsInt64(values: ArrayList<Int64>, value: Int64): Bool {
+    for (item in values) {
+        if (item == value) {
+            return true
+        }
+    }
+    return false
+}
+
+private func ContainsValueById(values: ArrayList<Value>, value: Value): Bool {
+    for (item in values) {
+        if (item.nodeId == value.nodeId) {
+            return true
+        }
+    }
+    return false
 }

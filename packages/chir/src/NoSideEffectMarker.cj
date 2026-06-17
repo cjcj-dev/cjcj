@@ -21,7 +21,7 @@ public class NoSideEffectMarker {
                 marked++
             }
         }
-        for (fn in pkg.GetGlobalFuncsWithoutBody(includePureAbstract: true)) {
+        for (fn in pkg.GetGlobalFuncsWithoutBody()) {
             if (MarkFunction(fn)) {
                 marked++
             }
