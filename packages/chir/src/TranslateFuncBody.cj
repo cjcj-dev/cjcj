@@ -1,6 +1,7 @@
 package cangjie_compiler::chir
 
 import std.collection.*
+import std.convert.*
 
 // Threaded lowering state for CreateRealBody. `current` is the block expressions are appended to;
 // it moves as control flow (if/while) introduces new basic blocks. `terminated` records whether
@@ -186,12 +187,16 @@ extend AST2CHIRDeclTranslator {
                 // A CString-typed value is a runtime String: codegen prints the i8* directly via
                 // puts/fputs rather than as an integer.
                 let isStrValue = IsCStringValue(value)
+                // A Float64 value is printed via printf("%f"/"%f\n", <double>) to match the reference
+                // cjc's six-decimal float formatting (e.g. 5.500000).
+                let isFloat = IsFloatValue(value)
                 fn.runtimePrintValueIds.add(valueId)
                 fn.runtimePrintNewlines.add(stmt.isVar)
                 fn.runtimePrintIsStr.add(false)
                 fn.runtimePrintStrings.add("")
                 fn.runtimePrintIsBool.add(isBool)
                 fn.runtimePrintIsStrValue.add(isStrValue)
+                fn.runtimePrintIsFloat.add(isFloat)
             }
         }
     }
@@ -214,6 +219,7 @@ extend AST2CHIRDeclTranslator {
                 fn.runtimePrintStrings.add(stmt.name)
                 fn.runtimePrintIsBool.add(false)
                 fn.runtimePrintIsStrValue.add(false)
+                fn.runtimePrintIsFloat.add(false)
             }
         }
     }
@@ -535,6 +541,18 @@ extend AST2CHIRDeclTranslator {
             let constant = builder.CreateConstant(int64Ty, IntLiteral(expr.literalValue), state.current)
             return AsValue(constant.GetResult())
         }
+        if (expr.IsFloatLiteral()) {
+            // A Float64 constant. Parse the carried source text into a Float64 and emit a Float64-typed
+            // Constant (codegen lowers a FloatLiteral to LLVMConstReal). A distinct float value type so
+            // the slot/arith/print machinery treats it as Float64, never Int64.
+            let floatTy = builder.context.GetFloat64Ty()
+            let value = match (TryParseFloat(expr.name)) {
+                case Some(v) => v
+                case None => 0.0
+            }
+            let constant = builder.CreateConstant(floatTy, FloatLiteral(value), state.current)
+            return AsValue(constant.GetResult())
+        }
         if (expr.IsBoolLiteral()) {
             let boolTy = builder.context.GetBoolTy()
             let constant = builder.CreateConstant(boolTy, BoolLiteral(expr.boolValue), state.current)
@@ -604,9 +622,14 @@ extend AST2CHIRDeclTranslator {
                     return AsValue(binary.GetResult())
                 }
                 // Relational ops and the logical AND/OR over i1 operands produce a Bool result;
-                // arithmetic ops keep the Int64 operand type.
+                // arithmetic ops keep the operand type. A Float64 operand makes an arithmetic op
+                // Float64-typed (codegen emits fadd/fsub/fmul/fdiv); a relational compare over Float64
+                // operands still produces a Bool (codegen emits fcmp on the Float64 operands).
+                let floatOperands = IsFloatValue(lv) || IsFloatValue(rv)
                 let resultTy = if (IsRelationalOp(expr.op) || IsLogicalOp(expr.op)) {
                     builder.context.GetBoolTy()
+                } else if (floatOperands) {
+                    builder.context.GetFloat64Ty()
                 } else {
                     int64Ty
                 }
@@ -776,8 +799,32 @@ extend AST2CHIRDeclTranslator {
             if (t.IsCString()) {
                 return builder.context.GetCStringTy()
             }
+            // A Float64 value lives in a Ref<Float64> slot so it round-trips as a double, not widened
+            // to / truncated as an i64.
+            if (t.IsFloat()) {
+                return builder.context.GetFloat64Ty()
+            }
         }
         return builder.context.GetInt64Ty()
+    }
+
+    // Whether a materialized CHIR value is a floating-point value (Float64 on the real path).
+    private func IsFloatValue(value: Value): Bool {
+        if (let Some(t) <- value.GetType()) {
+            return t.IsFloat()
+        }
+        return false
+    }
+
+    // Parse a Float64 literal's source text (e.g. "3.5", "2.0", "9.0") into a Float64. Returns None on
+    // a malformed text (the caller then uses 0.0); the frontend adapter only forwards genuine float
+    // literals, so this normally succeeds.
+    private func TryParseFloat(text: String): Option<Float64> {
+        try {
+            return Some(Float64.parse(text))
+        } catch (e: Exception) {
+            return None
+        }
     }
 
     // Whether a materialized CHIR value is a CString (i8*) -- i.e. a String value on the real path.

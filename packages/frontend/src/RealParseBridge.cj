@@ -76,6 +76,9 @@ public func AdaptRealBodies(file: File, fileID: UInt64, sourceCode: String, sm: 
     // Top-level functions whose declared return type is a known struct: name -> struct type. Lets a
     // call `mk(...)` to such a function be recognized as a struct-valued expression.
     let structReturningFuncs = HashMap<String, String>()
+    // Top-level functions whose declared return type is Float64, so a call to one classifies as a
+    // Float64-valued expression (for float let/var tracking and float print promotion).
+    let floatReturningFuncs = HashSet<String>()
     for (decl in parsedFile.decls) {
         if (let Some(parsedFunc) <- (decl as ParseFuncDecl)) {
             let n = parsedFunc.identifier.Val()
@@ -83,6 +86,9 @@ public func AdaptRealBodies(file: File, fileID: UInt64, sourceCode: String, sm: 
                 funcNames.add(n)
                 if (parsedFuncReturnsString(parsedFunc)) {
                     strReturningFuncs.add(n)
+                }
+                if (parsedFuncReturnsFloat(parsedFunc)) {
+                    floatReturningFuncs.add(n)
                 }
                 if (let Some(st) <- parsedFuncReturnsStruct(parsedFunc, structs)) {
                     structReturningFuncs[n] = st
@@ -112,7 +118,7 @@ public func AdaptRealBodies(file: File, fileID: UInt64, sourceCode: String, sm: 
     for (decl in file.decls) {
         if (let Some(funcDecl) <- (decl as FuncDecl)) {
             tryAdaptFunction(funcDecl, parsedFile, funcNames, strReturningFuncs, enums, structs,
-                structReturningFuncs)
+                structReturningFuncs, floatReturningFuncs)
         }
     }
     // Adapt the desugared instance-method bodies of every supported struct. Each struct method is
@@ -122,7 +128,7 @@ public func AdaptRealBodies(file: File, fileID: UInt64, sourceCode: String, sm: 
     for (decl in parsedFile.decls) {
         if (let Some(structDecl) <- (decl as ParseStructDecl)) {
             adaptStructMethods(structDecl, file, funcNames, strReturningFuncs, enums, structs,
-                structReturningFuncs)
+                structReturningFuncs, floatReturningFuncs)
         }
     }
 }
@@ -571,6 +577,17 @@ private func parsedFuncReturnsString(parsedFunc: ParseFuncDecl): Bool {
     return false
 }
 
+// Whether the parsed function declares a `Float64` return type.
+private func parsedFuncReturnsFloat(parsedFunc: ParseFuncDecl): Bool {
+    if (let Some(fb) <- parsedFunc.funcBody) {
+        if (let Some(rt) <- fb.retType) {
+            let tn = rt.ToString().trimAscii()
+            return tn == "Float64" || tn == "float64"
+        }
+    }
+    return false
+}
+
 // Adapt each instance method of a supported struct into a synthetic top-level frontend FuncDecl
 // (`$struct$Type$method`) whose leading `this` parameter carries the receiver struct value (as an
 // Int64). The synthetic decl is appended to `file.decls` so the CHIR bridge emits it as an ordinary
@@ -579,7 +596,7 @@ private func parsedFuncReturnsString(parsedFunc: ParseFuncDecl): Bool {
 // fall back). `init` is not a method (construction is inlined at the use site).
 private func adaptStructMethods(structDecl: ParseStructDecl, file: File, funcNames: HashSet<String>,
     strReturningFuncs: HashSet<String>, enums: EnumRegistry, structs: StructRegistry,
-    structReturningFuncs: HashMap<String, String>): Unit {
+    structReturningFuncs: HashMap<String, String>, floatReturningFuncs: HashSet<String>): Unit {
     let structType = structDecl.identifier.Val()
     if (!structs.isStruct(structType)) {
         return
@@ -594,13 +611,14 @@ private func adaptStructMethods(structDecl: ParseStructDecl, file: File, funcNam
             continue
         }
         adaptOneStructMethod(structType, mname, funcDecl, file, funcNames, strReturningFuncs, enums,
-            structs, structReturningFuncs)
+            structs, structReturningFuncs, floatReturningFuncs)
     }
 }
 
 private func adaptOneStructMethod(structType: String, mname: String, parsedFunc: ParseFuncDecl,
     file: File, funcNames: HashSet<String>, strReturningFuncs: HashSet<String>, enums: EnumRegistry,
-    structs: StructRegistry, structReturningFuncs: HashMap<String, String>): Unit {
+    structs: StructRegistry, structReturningFuncs: HashMap<String, String>,
+    floatReturningFuncs: HashSet<String>): Unit {
     let body = match (parsedFunc.funcBody) {
         case Some(fb) => fb
         case None => return
@@ -612,6 +630,9 @@ private func adaptOneStructMethod(structType: String, mname: String, parsedFunc:
     let scope = AdaptScope(funcNames, strReturningFuncs, enums, structs)
     for (n in structReturningFuncs.keys()) {
         scope.structReturningFuncs[n] = structReturningFuncs[n]
+    }
+    for (n in floatReturningFuncs) {
+        scope.floatReturningFuncs.add(n)
     }
     // `this` is the receiver: a struct-typed local holding the struct value (as an Int64).
     scope.locals.add("this")
@@ -676,7 +697,7 @@ private func adaptOneStructMethod(structType: String, mname: String, parsedFunc:
 
 private func tryAdaptFunction(funcDecl: FuncDecl, parsedFile: ParseFile, funcNames: HashSet<String>,
     strReturningFuncs: HashSet<String>, enums: EnumRegistry, structs: StructRegistry,
-    structReturningFuncs: HashMap<String, String>): Unit {
+    structReturningFuncs: HashMap<String, String>, floatReturningFuncs: HashSet<String>): Unit {
     // Note: a non-empty printStrings (the summary side-channel captured one or more literal
     // string/int prints) no longer forces the summary path. The real-parse adapter can lower
     // literal-int/string prints as in-body printf calls too, so a body that MIXES literal prints
@@ -689,7 +710,7 @@ private func tryAdaptFunction(funcDecl: FuncDecl, parsedFile: ParseFile, funcNam
     let matched = findParsedFunc(parsedFile, name, funcDecl.begin.line)
     if (let Some(parsedFunc) <- matched) {
         adaptParsedFunc(funcDecl, parsedFunc, funcNames, strReturningFuncs, enums, structs,
-            structReturningFuncs)
+            structReturningFuncs, floatReturningFuncs)
     }
 }
 
@@ -734,6 +755,14 @@ private class AdaptScope {
     // `println(strLocal)` and `a + b` concat are recognized as String operations and promote to the
     // real path (lowered as a runtime CString print / concat) rather than falling back.
     let strNames = HashSet<String>()
+    // Names of locals/params known to hold a Float64 value (a `let`/`var` bound to a float literal or a
+    // float-producing expression, or a Float64 parameter). Used so a bare `println(floatLocal)` lowers
+    // as a runtime Float64 print, float arithmetic keeps Float64 typing, and floats are kept out of
+    // Int64-only contexts (arrays, match selectors).
+    let floatNames = HashSet<String>()
+    // Top-level functions whose declared return type is Float64, so a call to one classifies as a
+    // Float64-valued expression (for float let/var tracking and float print promotion).
+    let floatReturningFuncs = HashSet<String>()
     // Names of locals known to hold an Int64 array (a `let`/`var` bound to an array literal). Used to
     // recognize a[i] subscripts, a.size, a[i]=v writes, and for-in over the array as array operations.
     let arrayNames = HashSet<String>()
@@ -795,7 +824,7 @@ private class AdaptScope {
 
 private func adaptParsedFunc(funcDecl: FuncDecl, parsedFunc: ParseFuncDecl, funcNames: HashSet<String>,
     strReturningFuncs: HashSet<String>, enums: EnumRegistry, structs: StructRegistry,
-    structReturningFuncs: HashMap<String, String>): Unit {
+    structReturningFuncs: HashMap<String, String>, floatReturningFuncs: HashSet<String>): Unit {
     let body = match (parsedFunc.funcBody) {
         case Some(fb) => fb
         case None => return
@@ -807,6 +836,9 @@ private func adaptParsedFunc(funcDecl: FuncDecl, parsedFunc: ParseFuncDecl, func
     let scope = AdaptScope(funcNames, strReturningFuncs, enums, structs)
     for (n in structReturningFuncs.keys()) {
         scope.structReturningFuncs[n] = structReturningFuncs[n]
+    }
+    for (n in floatReturningFuncs) {
+        scope.floatReturningFuncs.add(n)
     }
     // Seed parameters as in-scope locals so references to them lower to runtime loads. Parameters
     // are also tracked separately: a reference to a parameter is inherently runtime (it cannot be
@@ -829,6 +861,11 @@ private func adaptParsedFunc(funcDecl: FuncDecl, parsedFunc: ParseFuncDecl, func
                     // a bare print of it / a concat using it promote as String operations).
                     if (tn == "String") {
                         scope.strNames.add(pname)
+                    }
+                    // A Float64 parameter is tracked so references to it stay Float64 (i.e. round-trip
+                    // as a double) and a bare print of it promotes as a runtime Float64 print.
+                    if (tn == "Float64" || tn == "float64") {
+                        scope.floatNames.add(pname)
                     }
                     // A struct-typed parameter: its value is the struct buffer address carried as an
                     // Int64 (the param/return ABI is Int64 for structs), so `p.x` / `p.m()` resolve
@@ -1040,6 +1077,11 @@ private func adaptVarDecl(varDecl: ParseVarDecl, scope: AdaptScope): Option<Chir
     // Track String-typed locals so a later bare `println(name)` / concat lowers as a String op.
     if (exprIsString(initExpr, scope)) {
         scope.strNames.add(name)
+    }
+    // Track Float64-typed locals so a later bare `println(name)` lowers as a runtime float print and
+    // float arithmetic / reassignment (`s = s + 1.5`) keeps Float64 typing.
+    if (exprIsFloat(initExpr, scope)) {
+        scope.floatNames.add(name)
     }
     return Some(ChirStmtSpec.Let(name, valueSpec, isVar: varDecl.isVar))
 }
@@ -1912,6 +1954,12 @@ private func adaptExpr(expr: ParseExpr, scope: AdaptScope): Option<ChirExprSpec>
     if (let Some(litValue) <- intLiteralValue(expr)) {
         return Some(ChirExprSpec.Literal(litValue))
     }
+    // A Float64 literal (`3.5`, `2.0`): lower to a FloatLit carrying its source text. A bare float
+    // literal does not by itself set needsRuntime (a body whose only statement is `let x = 3.5` with
+    // no runtime use stays on the summary path), mirroring int/string/bool literals.
+    if (let Some(floatText) <- floatLiteralValue(expr)) {
+        return Some(ChirExprSpec.FloatLit(floatText))
+    }
     if (let Some(boolValue) <- boolLiteralValue(expr)) {
         return Some(ChirExprSpec.BoolLit(boolValue))
     }
@@ -2168,6 +2216,14 @@ private func adaptPrint(call: ParseCallExpr, scope: AdaptScope): Option<ChirStmt
     // the whole body promotes and these literal prints lower in-body too -- in source order.
     if (let Some(litValue) <- intLiteralValue(argExpr)) {
         return Some(ChirStmtSpec.Print(ChirExprSpec.Literal(litValue), newline: newline))
+    }
+    // A pure Float64-literal argument (`println(3.5)`) lowers as a runtime PRINT of a Float64 constant
+    // (the real body emits a Float64 Constant and a printf("%f[\n]") of it). Same gating as integer
+    // literals: it does NOT set needsRuntime, so a body whose only statement is a literal float print
+    // stays on the summary path -- but the summary path cannot format a float, so such a lone case is
+    // left for a sibling runtime construct to promote it (matching the targets, which all do).
+    if (let Some(floatText) <- floatLiteralValue(argExpr)) {
+        return Some(ChirStmtSpec.Print(ChirExprSpec.FloatLit(floatText), newline: newline))
     }
     // A pure string-literal argument (no escape sequences) lowers as an in-body literal-string print.
     // Same gating as integer literals: it does not by itself set needsRuntime.
@@ -2489,6 +2545,65 @@ private func exprIsString(expr: ParseExpr, scope: AdaptScope): Bool {
             case None => false
         }
         return leftIsStr || rightIsStr
+    }
+    return false
+}
+
+// Decide (syntactically) whether `expr` produces a Float64 value: a float literal, a reference to a
+// known Float64 local/param, a parenthesized float expression, a call to a Float64-returning top-level
+// function, or an arithmetic binary op where at least one side is a Float64. Used to keep Float64
+// values out of Int64-only contexts (array elements, array fills, array indices, match selectors) so
+// a float never mis-lowers as an Int64, and to track Float64 locals for runtime float prints.
+private func exprIsFloat(expr: ParseExpr, scope: AdaptScope): Bool {
+    if (floatLiteralValue(expr).isSome()) {
+        return true
+    }
+    if (let Some(refExpr) <- (expr as ParseRefExpr)) {
+        return scope.floatNames.contains(refExpr.identifier.Val())
+    }
+    if (let Some(paren) <- (expr as ParseParenExpr)) {
+        if (let Some(inner) <- paren.expr) {
+            return exprIsFloat(inner, scope)
+        }
+        return false
+    }
+    // A call to a Float64-returning top-level function (and not shadowed by a local).
+    if (let Some(call) <- (expr as ParseCallExpr)) {
+        if (let Some(base) <- call.baseFunc) {
+            if (let Some(calleeRef) <- (base as ParseRefExpr)) {
+                let cn = calleeRef.identifier.Val()
+                if (!scope.locals.contains(cn) && scope.floatReturningFuncs.contains(cn)) {
+                    return true
+                }
+            }
+        }
+        return false
+    }
+    // AssignExpr is also a BinaryExpr; never treat it as a value here.
+    if (let Some(_) <- (expr as ParseAssignExpr)) {
+        return false
+    }
+    // An arithmetic `a + b` / `-` / `*` / `/` is Float64 when either operand is a Float64.
+    if (let Some(binary) <- (expr as ParseBinaryExpr)) {
+        let arithmetic = match (binary.op.kind) {
+            case TokenKind.ADD => true
+            case TokenKind.SUB => true
+            case TokenKind.MUL => true
+            case TokenKind.DIV => true
+            case _ => false
+        }
+        if (!arithmetic) {
+            return false
+        }
+        let leftIsFloat = match (binary.leftExpr) {
+            case Some(e) => exprIsFloat(e, scope)
+            case None => false
+        }
+        let rightIsFloat = match (binary.rightExpr) {
+            case Some(e) => exprIsFloat(e, scope)
+            case None => false
+        }
+        return leftIsFloat || rightIsFloat
     }
     return false
 }
@@ -3028,6 +3143,21 @@ private func intLiteralValue(expr: ParseExpr): Option<Int64> {
     if (let Some(lit) <- (expr as ParseLitConstExpr)) {
         if (lit.kind == ParseLitConstKind.INTEGER) {
             return parseIntText(lit.stringValue)
+        }
+    }
+    return None
+}
+
+// Extract a Float64 literal's source text (`3.5`, `2.0`, `9.0`) from a FLOAT literal expression; None
+// otherwise. The raw text is forwarded verbatim to the CHIR spec (FloatLit) and parsed at lowering
+// time, so the value crosses the bridge without precision loss.
+private func floatLiteralValue(expr: ParseExpr): Option<String> {
+    if (let Some(lit) <- (expr as ParseLitConstExpr)) {
+        if (lit.kind == ParseLitConstKind.FLOAT) {
+            let text = lit.stringValue.replace("_", "")
+            if (!text.isEmpty()) {
+                return Some(text)
+            }
         }
     }
     return None

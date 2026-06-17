@@ -113,12 +113,19 @@ let AST2CHIR_EXPR_ARRAY_SIZE: Int64 = 9
 // Lowered to: reinterpret the Int64 as a buffer pointer, GEP to the slot, Load the Int64.
 let AST2CHIR_EXPR_ENUM_MAKE: Int64 = 10
 let AST2CHIR_EXPR_ENUM_FIELD: Int64 = 11
+// FLOAT_LITERAL: a Float64 constant (`3.5`, `2.0`). Materialized as a CHIR Constant of Float64 type
+// (codegen emits LLVMConstReal). Tracked as a distinct slot/value type from Int64 throughout the
+// real-body path: a Float64 local lives in a Ref<Float64> slot, arithmetic over Float64 operands keeps
+// the Float64 result type (codegen emits fadd/fsub/fmul/fdiv), and a relational compare over Float64
+// operands produces a Bool (codegen emits fcmp). The literal text is carried in `name` (parsed by the
+// translator with Float64.parse) so no precision is lost crossing the Int64-keyed spec fields.
+let AST2CHIR_EXPR_FLOAT_LITERAL: Int64 = 12
 
 public class AST2CHIRExprSpec {
     public let kind: Int64
     public let literalValue: Int64       // LITERAL
     public let boolValue: Bool           // BOOL_LITERAL
-    public let name: String              // REF / CALL (callee source identifier)
+    public let name: String              // REF / CALL (callee source identifier) / FLOAT_LITERAL (text)
     public let op: ExprKind              // BINARY / UNARY
     public let lhs: Option<AST2CHIRExprSpec> // BINARY (left) / UNARY (operand)
     public let rhs: Option<AST2CHIRExprSpec> // BINARY (right)
@@ -138,6 +145,7 @@ public class AST2CHIRExprSpec {
     }
 
     public func IsLiteral(): Bool { return kind == AST2CHIR_EXPR_LITERAL }
+    public func IsFloatLiteral(): Bool { return kind == AST2CHIR_EXPR_FLOAT_LITERAL }
     public func IsBoolLiteral(): Bool { return kind == AST2CHIR_EXPR_BOOL_LITERAL }
     public func IsRef(): Bool { return kind == AST2CHIR_EXPR_REF }
     public func IsBinary(): Bool { return kind == AST2CHIR_EXPR_BINARY }
@@ -157,6 +165,14 @@ public class AST2CHIRExprSpec {
 
     public static func BoolLit(value: Bool): AST2CHIRExprSpec {
         return AST2CHIRExprSpec(AST2CHIR_EXPR_BOOL_LITERAL, 0, value, "", ExprKind.ADD, None, None,
+            ArrayList<AST2CHIRExprSpec>())
+    }
+
+    // FLOAT_LITERAL: a Float64 constant whose source text is `text` (e.g. "3.5", "2.0"). The text is
+    // carried in the name slot and parsed by the translator (Float64.parse) at lowering time, so the
+    // value crosses the Int64-keyed spec fields without precision loss.
+    public static func FloatLit(text: String): AST2CHIRExprSpec {
+        return AST2CHIRExprSpec(AST2CHIR_EXPR_FLOAT_LITERAL, 0, false, text, ExprKind.ADD, None, None,
             ArrayList<AST2CHIRExprSpec>())
     }
 

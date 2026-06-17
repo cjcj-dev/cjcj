@@ -77,6 +77,8 @@ private func MaybeEmitRuntimePrint(cgMod: CGModule, irBuilder: IRBuilder2, chirE
             let isBool = idx < topLevelFunc.runtimePrintIsBool.size && topLevelFunc.runtimePrintIsBool[idx]
             let isStrValue = idx < topLevelFunc.runtimePrintIsStrValue.size &&
                 topLevelFunc.runtimePrintIsStrValue[idx]
+            let isFloat = idx < topLevelFunc.runtimePrintIsFloat.size &&
+                topLevelFunc.runtimePrintIsFloat[idx]
             if (isStrValue) {
                 // The matched value is a runtime CString (i8*) String value; print it via puts/fputs.
                 let _ = EmitRuntimeStringValuePrint(cgMod, irBuilder.GetBuilder().raw, rawRet, newline)
@@ -88,6 +90,11 @@ private func MaybeEmitRuntimePrint(cgMod: CGModule, irBuilder: IRBuilder2, chirE
                 }
                 let strName = topLevelFunc.GetIdentifier() + ".cjsh.rtstr." + idx.toString()
                 let _ = EmitRuntimeStringPrint(cgMod, irBuilder.GetBuilder().raw, text, newline, strName)
+            } else if (isFloat) {
+                // The matched value is a Float64 (double); print via printf("%f"/"%f\n", <double>) to
+                // match the reference cjc's six-decimal float formatting.
+                let floatName = topLevelFunc.GetIdentifier() + ".cjsh.rtflt." + idx.toString()
+                let _ = EmitRuntimeFloatPrint(cgMod, irBuilder.GetBuilder().raw, rawRet, newline, floatName)
             } else if (isBool) {
                 // The matched value is an i1; print "true"/"false" selected on it.
                 let boolName = topLevelFunc.GetIdentifier() + ".cjsh.rtbool." + idx.toString()

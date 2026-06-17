@@ -119,6 +119,48 @@ public func EmitRuntimeIntPrint(cgMod: CGModule, builderRaw: LLVMBuilderRef, val
     return false
 }
 
+// Emit a runtime-value Float64 print: printf("%f"/"%f\n", <double>) using the LLVM `builder` at its
+// current insert point. `value` is an already-materialized Float64 (double) LLVM value. The "%f"
+// format matches the reference cjc's six-decimal float formatting (e.g. 5.500000). A narrower float
+// (e.g. a 32-bit float) is widened to double for the variadic %f format. Returns false if the module
+// handle / builder is unusable. `fmtName` must be unique within the module.
+public func EmitRuntimeFloatPrint(cgMod: CGModule, builderRaw: LLVMBuilderRef, value: LLVMValueRef,
+    newline: Bool, fmtName: String): Bool {
+    if (value.isNull() || builderRaw.isNull()) {
+        return false
+    }
+    if (let Some(moduleHandle) <- cgMod.GetLLVMModule()) {
+        let ctx = cgMod.GetLLVMContext().raw
+        let i8Type = unsafe { LLVMInt8TypeInContext(ctx) }
+        let i8PtrType = unsafe { LLVMPointerType(i8Type, 0u32) }
+        let i32Type = unsafe { LLVMInt32TypeInContext(ctx) }
+        let doubleType = unsafe { LLVMDoubleTypeInContext(ctx) }
+        let printfType = BuildPrintfFunctionType(i32Type, i8PtrType)
+        let printfFn = GetOrInsertRuntimePrintFunction(moduleHandle, "printf", printfType)
+        let fmt = if (newline) { "%f\n" } else { "%f" }
+        let fmtPtr = EmitStringGlobalPtr(moduleHandle, builderRaw, ctx, fmt, i32Type, fmtName)
+        // The variadic %f format expects a double; widen a narrower float operand to double.
+        var argValue = value
+        let valueType = unsafe { LLVMTypeOf(value) }
+        // LLVMTypeKind: 2 = Float (32-bit), 3 = Double (64-bit). Only widen a 32-bit float.
+        if (unsafe { LLVMGetTypeKind(valueType) } == 2) {
+            try (extName = unsafe { LibC.mallocCString("") }.asResource()) {
+                argValue = unsafe { LLVMBuildFPExt(builderRaw, value, doubleType, extName.value) }
+            }
+        }
+        try (emptyName = unsafe { LibC.mallocCString("") }.asResource(),
+            argPtr = LibC.malloc<LLVMValueRef>(count: 2).asResource()) {
+            unsafe {
+                (argPtr.value + 0).write(fmtPtr)
+                (argPtr.value + 1).write(argValue)
+                let _ = LLVMBuildCall2(builderRaw, printfType, printfFn, argPtr.value, 2u32, emptyName.value)
+            }
+        }
+        return true
+    }
+    return false
+}
+
 // Emit a runtime-value Bool print: select between the literal C-strings "true" and "false" on the
 // i1 `value`, then printf("%s"/"%s\n", selected). Lands at the LLVM `builder`'s current insert point
 // (right where the i1 was computed in body flow). `globalName` must be unique within the module.
