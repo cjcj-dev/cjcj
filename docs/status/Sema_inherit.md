@@ -188,3 +188,11 @@ Instantiated empty-key walk continuation:
   instantiation map, and explicit instantiated declaration scans, which do.
 
 Verification: `cjpm build` passes for the whole workspace after this instantiated empty-key walk continuation.
+
+Built-in extend target type continuation:
+
+- Built-in operator implementation detection now takes the candidate receiver type from
+  `ExtendDecl.extendedType.GetTy()`, matching the C++ `ed->extendedType->GetTy()` path. Generated unary and binary
+  operator bodies still type `this` from the extend declaration itself, preserving the separate C++ body-generation path.
+
+Verification: `cjpm build` passes for the whole workspace after this built-in extend target type continuation.

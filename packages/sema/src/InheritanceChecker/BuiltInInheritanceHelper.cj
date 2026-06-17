@@ -107,43 +107,45 @@ func IsBuiltInOperatorFuncInExtend(
                 }
                 if (let Some(funcTy) <- actualTy) {
                     if (let Some(realFuncTy) <- (funcTy as FuncTy)) {
-                        if (let Some(extendedTy) <- ed.GetTy()) {
-                            if (realFuncTy.paramTys.size == 1) {
-                                let expectedRetKind = GetBuiltinBinaryReturnKindForInheritance(
-                                    fd.op,
-                                    extendedTy,
-                                    realFuncTy.paramTys[0]
-                                )
-                                if (expectedRetKind == TypeKind.TYPE_INVALID) {
-                                    return false
-                                }
-                                let expectedRetTy = TypeManager.GetPrimitiveTy(expectedRetKind)
-                                if (SameTy(expectedRetTy, realFuncTy.retTy)) {
-                                    CreateBuiltInBinaryOperatorFunc(typeManager, fd.op, realFuncTy.paramTys[0], ed, expectedRetTy)
-                                } else {
-                                    diag.DiagnoseRefactor(
-                                        DiagKindRefactor.sema_return_type_incompatible,
-                                        fd.begin,
-                                        arguments: [fd.identifier.Val()]
+                        if (let Some(extendedType) <- ed.extendedType) {
+                            if (let Some(extendedTy) <- extendedType.GetTy()) {
+                                if (realFuncTy.paramTys.size == 1) {
+                                    let expectedRetKind = GetBuiltinBinaryReturnKindForInheritance(
+                                        fd.op,
+                                        extendedTy,
+                                        realFuncTy.paramTys[0]
                                     )
+                                    if (expectedRetKind == TypeKind.TYPE_INVALID) {
+                                        return false
+                                    }
+                                    let expectedRetTy = TypeManager.GetPrimitiveTy(expectedRetKind)
+                                    if (SameTy(expectedRetTy, realFuncTy.retTy)) {
+                                        CreateBuiltInBinaryOperatorFunc(typeManager, fd.op, realFuncTy.paramTys[0], ed, expectedRetTy)
+                                    } else {
+                                        diag.DiagnoseRefactor(
+                                            DiagKindRefactor.sema_return_type_incompatible,
+                                            fd.begin,
+                                            arguments: [fd.identifier.Val()]
+                                        )
+                                    }
+                                    return true
+                                } else if (realFuncTy.paramTys.isEmpty()) {
+                                    let expectedUnaryRetKind = GetBuiltinUnaryReturnKindForInheritance(fd.op, extendedTy)
+                                    if (expectedUnaryRetKind == TypeKind.TYPE_INVALID) {
+                                        return false
+                                    }
+                                    let expectedUnaryRetTy = TypeManager.GetPrimitiveTy(expectedUnaryRetKind)
+                                    if (SameTy(expectedUnaryRetTy, realFuncTy.retTy)) {
+                                        CreateBuiltInUnaryOperatorFunc(typeManager, fd.op, ed, expectedUnaryRetTy)
+                                    } else {
+                                        diag.DiagnoseRefactor(
+                                            DiagKindRefactor.sema_return_type_incompatible,
+                                            fd.begin,
+                                            arguments: [fd.identifier.Val()]
+                                        )
+                                    }
+                                    return true
                                 }
-                                return true
-                            } else if (realFuncTy.paramTys.isEmpty()) {
-                                let expectedUnaryRetKind = GetBuiltinUnaryReturnKindForInheritance(fd.op, extendedTy)
-                                if (expectedUnaryRetKind == TypeKind.TYPE_INVALID) {
-                                    return false
-                                }
-                                let expectedUnaryRetTy = TypeManager.GetPrimitiveTy(expectedUnaryRetKind)
-                                if (SameTy(expectedUnaryRetTy, realFuncTy.retTy)) {
-                                    CreateBuiltInUnaryOperatorFunc(typeManager, fd.op, ed, expectedUnaryRetTy)
-                                } else {
-                                    diag.DiagnoseRefactor(
-                                        DiagKindRefactor.sema_return_type_incompatible,
-                                        fd.begin,
-                                        arguments: [fd.identifier.Val()]
-                                    )
-                                }
-                                return true
                             }
                         }
                     }
