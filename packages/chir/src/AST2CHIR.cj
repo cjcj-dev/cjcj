@@ -140,6 +140,7 @@ let AST2CHIR_STMT_RETURN: Int64 = 2
 let AST2CHIR_STMT_IF: Int64 = 3
 let AST2CHIR_STMT_WHILE: Int64 = 4
 let AST2CHIR_STMT_PRINT: Int64 = 5
+let AST2CHIR_STMT_PRINT_STR: Int64 = 6
 
 public class AST2CHIRStmtSpec {
     public let kind: Int64
@@ -168,6 +169,7 @@ public class AST2CHIRStmtSpec {
     public func IsIf(): Bool { return kind == AST2CHIR_STMT_IF }
     public func IsWhile(): Bool { return kind == AST2CHIR_STMT_WHILE }
     public func IsPrint(): Bool { return kind == AST2CHIR_STMT_PRINT }
+    public func IsPrintStr(): Bool { return kind == AST2CHIR_STMT_PRINT_STR }
 
     public static func Let(name: String, expr: AST2CHIRExprSpec, isVar!: Bool = false): AST2CHIRStmtSpec {
         return AST2CHIRStmtSpec(AST2CHIR_STMT_LET, name, isVar, Some(expr), None,
@@ -204,6 +206,15 @@ public class AST2CHIRStmtSpec {
     // printf at the value's materialization point in body flow -- not the entry-block side-channel.
     public static func Print(expr: AST2CHIRExprSpec, newline!: Bool = true): AST2CHIRStmtSpec {
         return AST2CHIRStmtSpec(AST2CHIR_STMT_PRINT, "", newline, Some(expr), None,
+            ArrayList<AST2CHIRStmtSpec>(), ArrayList<AST2CHIRStmtSpec>())
+    }
+
+    // PRINT_STR: print a literal string `text` (carried in the name slot) in body flow order.
+    // `newline` (carried in the isVar slot) distinguishes println (puts, trailing newline) from
+    // print (fputs, no newline). Lowered to an in-body puts/fputs at an anchor point so it
+    // interleaves correctly with runtime-value prints in a mixed body.
+    public static func PrintStr(text: String, newline!: Bool = true): AST2CHIRStmtSpec {
+        return AST2CHIRStmtSpec(AST2CHIR_STMT_PRINT_STR, text, newline, None, None,
             ArrayList<AST2CHIRStmtSpec>(), ArrayList<AST2CHIRStmtSpec>())
     }
 }

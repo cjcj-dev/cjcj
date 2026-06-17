@@ -229,7 +229,14 @@ private func buildFunctionSpec(pkg: Package, decl: Decl, context: ChirContext, s
             fnSpec.AddParamName(paramName)
         }
         var printIdx = 0
+        // Suppress the entry-block side-channel string prints when the body was promoted to the real
+        // path: the real body now emits ALL of its prints (literal and runtime) as ordered in-body
+        // calls, so forwarding printStrings here would double-print the literal ones.
+        let suppressSideChannel = hasSourceRealBody
         for (printString in namedFuncDecl.funcBody.printStrings) {
+            if (suppressSideChannel) {
+                break
+            }
             let newline = if (printIdx < namedFuncDecl.funcBody.printNewlines.size) {
                 namedFuncDecl.funcBody.printNewlines[printIdx]
             } else {

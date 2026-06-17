@@ -47,6 +47,9 @@ runtime-computed value) into `main`:
 | `main(): Int64 { let x = 42` ⏎ `return x }` | exits with code 42 |
 | `main(): Int64 { return 2 + 3 * 4 }` | exits with code 14 (compile-time integer-arithmetic fold) |
 | `main() { println(42)` ⏎ `let n = 7` ⏎ `println(n) }` | prints `42` then `7` |
+| `main() { print(1)` ⏎ `print(2)` ⏎ `let y = 1 + 2` ⏎ `println(y) }` | prints `123` + newline -- a body MIXING literal-int prints with a runtime print now fully promotes to the real path (the runtime print is no longer dropped) |
+| `main() { println("start")` ⏎ `let n = 6 * 7` ⏎ `println(n) }` | prints `start` then `42` (literal-string print interleaved with a runtime print, in source order) |
+| `main() { print("x=")` ⏎ `let v = 5` ⏎ `println(v) }` | prints `x=5` |
 
 Capability detail:
 
@@ -155,6 +158,27 @@ Capability detail:
   Verified at runtime (no folding): while-loop sum 1..10 -> prints `55`;
   `println(fact(10))` -> prints `3628800`; `println(sq(7))` -> `49`;
   `print(s); println(s)` after a loop -> `1515` (15 with no newline, then 15 + newline).
+- **Mixed-print milestone:** a body that MIXES literal prints (integer or plain string)
+  with a genuine runtime construct now fully promotes to the real path instead of falling
+  back to the summary path and silently dropping the runtime print. Previously
+  `RealParseBridge.tryAdaptFunction` bailed whenever the summary scanner had captured any
+  `printStrings`, and `adaptPrint` rejected pure-literal arguments -- so
+  `main() { print(1); print(2); let y = 1 + 2; println(y) }` fell back and printed `12`
+  (the runtime `println(y)` was lost). The adapter now lowers a literal-int print as
+  `Print(Literal(v))` and a plain (escape-free) string-literal print as a new
+  `PrintStr(text)` `AST2CHIRStmtSpec` kind; neither sets `needsRuntime`, so a body whose
+  only statements are literal prints still stays on the byte-for-byte summary path, but
+  once any sibling statement is genuinely runtime the whole body promotes and ALL its
+  prints lower as ordered in-body calls. `TranslateFuncBody.LowerPrintStr` materializes a
+  throwaway anchor `Constant` and records a string directive (`runtimePrintIsStr` /
+  `runtimePrintStrings` in `Value.cj`); codegen's `MaybeEmitRuntimePrint` emits a
+  `puts`/`fputs` for string directives and the existing `printf("%ld")` for int ones, at
+  the anchor's point in body flow. To prevent double-printing, `CodeGenBridge` suppresses
+  the entry-block string side-channel entirely when `hasRealBody` is set. Verified:
+  `print(1); print(2); let y=1+2; println(y)` -> `123`+newline;
+  `println("start"); let n=6*7; println(n)` -> `start` then `42`;
+  `print("x="); let v=5; println(v)` -> `x=5`; fully-mixed
+  `print("a"); print(1); print("b"); let z=3+4; println(z)` -> `a1b7`.
 
 These are the only source constructs the integrated pipeline lowers end to end
 today; anything else still flows through the compatibility models described

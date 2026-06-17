@@ -119,6 +119,38 @@ public func EmitRuntimeIntPrint(cgMod: CGModule, builderRaw: LLVMBuilderRef, val
     return false
 }
 
+// Emit a literal-string print at the LLVM `builder`'s current insert point (so it lands at the
+// anchor in body flow). For println (newline == true) we call libc `puts` (writes the string + a
+// newline); for print (newline == false) we call `fputs(str, stdout)` (no trailing newline). This
+// is the real-body counterpart of the entry-block side-channel's string emission, used so a mixed
+// body can interleave literal-string prints with runtime-value prints in source order. `globalName`
+// must be unique within the module. Returns false if the module handle / builder is unusable.
+public func EmitRuntimeStringPrint(cgMod: CGModule, builderRaw: LLVMBuilderRef, text: String,
+    newline: Bool, globalName: String): Bool {
+    if (builderRaw.isNull()) {
+        return false
+    }
+    if (let Some(moduleHandle) <- cgMod.GetLLVMModule()) {
+        let ctx = cgMod.GetLLVMContext().raw
+        let i8Type = unsafe { LLVMInt8TypeInContext(ctx) }
+        let i8PtrType = unsafe { LLVMPointerType(i8Type, 0u32) }
+        let i32Type = unsafe { LLVMInt32TypeInContext(ctx) }
+        if (newline) {
+            let putsType = BuildPutsFunctionType(i32Type, i8PtrType)
+            let putsFn = GetOrInsertRuntimePrintFunction(moduleHandle, "puts", putsType)
+            EmitOnePutsCall(moduleHandle, builderRaw, ctx, text, i32Type, putsType, putsFn, globalName)
+        } else {
+            let fputsType = BuildFputsFunctionType(i32Type, i8PtrType)
+            let fputsFn = GetOrInsertRuntimePrintFunction(moduleHandle, "fputs", fputsType)
+            let stdoutGlobal = GetOrInsertStdoutGlobal(moduleHandle, i8PtrType)
+            EmitOneFputsCall(moduleHandle, builderRaw, ctx, text, i32Type, i8PtrType, fputsType, fputsFn,
+                stdoutGlobal, globalName)
+        }
+        return true
+    }
+    return false
+}
+
 private func BuildPutsFunctionType(i32Type: LLVMTypeRef, i8PtrType: LLVMTypeRef): LLVMTypeRef {
     var result = LLVMNullType()
     try (paramPtr = LibC.malloc<LLVMTypeRef>(count: 1).asResource()) {

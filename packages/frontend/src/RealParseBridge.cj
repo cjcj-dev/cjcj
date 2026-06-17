@@ -62,10 +62,14 @@ public func AdaptRealBodies(file: File, fileID: UInt64, sourceCode: String, sm: 
 }
 
 private func tryAdaptFunction(funcDecl: FuncDecl, parsedFile: ParseFile, funcNames: HashSet<String>): Unit {
-    // Leave print bodies entirely to the summary path.
-    if (!funcDecl.funcBody.printStrings.isEmpty()) {
-        return
-    }
+    // Note: a non-empty printStrings (the summary side-channel captured one or more literal
+    // string/int prints) no longer forces the summary path. The real-parse adapter can lower
+    // literal-int/string prints as in-body printf calls too, so a body that MIXES literal prints
+    // with a genuine runtime construct (a binary op, var, assignment, if, while, call, or a
+    // runtime-valued print) fully promotes to the real path. The CHIR bridge suppresses the
+    // side-channel when hasRealBody is set, so there is no double-printing. A body whose ONLY
+    // statements are literal prints does not set needsRuntime and stays on the summary path
+    // (byte-for-byte parity preserved).
     let name = funcDecl.identifier.Val()
     let matched = findParsedFunc(parsedFile, name, funcDecl.begin.line)
     if (let Some(parsedFunc) <- matched) {
@@ -421,9 +425,18 @@ private func adaptPrint(call: ParseCallExpr, scope: AdaptScope): Option<ChirStmt
         case Some(e) => e
         case None => return None
     }
-    // Leave a pure literal argument (int or string) to the summary path.
-    if (intLiteralValue(argExpr).isSome()) {
-        return None
+    // A pure integer-literal argument lowers as a runtime PRINT of a constant value (the real body
+    // emits a Constant and a printf("%ld[\n]") of it). Crucially this does NOT set needsRuntime: a
+    // body whose only statements are literal prints will not promote and stays on the byte-for-byte
+    // summary path. But once any sibling statement is genuinely runtime (binary op, var, call, ...),
+    // the whole body promotes and these literal prints lower in-body too -- in source order.
+    if (let Some(litValue) <- intLiteralValue(argExpr)) {
+        return Some(ChirStmtSpec.Print(ChirExprSpec.Literal(litValue), newline: newline))
+    }
+    // A pure string-literal argument (no escape sequences) lowers as an in-body literal-string print.
+    // Same gating as integer literals: it does not by itself set needsRuntime.
+    if (let Some(text) <- plainStringLiteralValue(argExpr)) {
+        return Some(ChirStmtSpec.PrintStr(text, newline: newline))
     }
     let argSpec = match (adaptExpr(argExpr, scope)) {
         case Some(e) => e
@@ -515,6 +528,28 @@ private func intLiteralValue(expr: ParseExpr): Option<Int64> {
     if (let Some(lit) <- (expr as ParseLitConstExpr)) {
         if (lit.kind == ParseLitConstKind.INTEGER) {
             return parseIntText(lit.stringValue)
+        }
+    }
+    return None
+}
+
+// Extract a plain string-literal value (a `"..."` STRING literal whose raw text contains no escape
+// sequences and no string interpolation). The parse lexer already strips the surrounding quotes from
+// `stringValue`, so the raw slice equals the intended text only when no `\` escape is present; if a
+// backslash appears we return None and fall back so escape handling never diverges from the summary
+// path. Multiline / raw / interpolated string kinds are also rejected (return None).
+private func plainStringLiteralValue(expr: ParseExpr): Option<String> {
+    if (let Some(lit) <- (expr as ParseLitConstExpr)) {
+        if (lit.kind == ParseLitConstKind.STRING) {
+            let text = lit.stringValue
+            var idx = 0
+            while (idx < text.size) {
+                if (text[idx] == b'\\') {
+                    return None
+                }
+                idx++
+            }
+            return Some(text)
         }
     }
     return None

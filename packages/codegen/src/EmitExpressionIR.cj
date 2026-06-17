@@ -73,8 +73,19 @@ private func MaybeEmitRuntimePrint(cgMod: CGModule, irBuilder: IRBuilder2, chirE
             } else {
                 true
             }
-            let fmtName = topLevelFunc.GetIdentifier() + ".cjsh.rtfmt." + idx.toString()
-            let _ = EmitRuntimeIntPrint(cgMod, irBuilder.GetBuilder().raw, rawRet, newline, fmtName)
+            let isStr = idx < topLevelFunc.runtimePrintIsStr.size && topLevelFunc.runtimePrintIsStr[idx]
+            if (isStr) {
+                let text = if (idx < topLevelFunc.runtimePrintStrings.size) {
+                    topLevelFunc.runtimePrintStrings[idx]
+                } else {
+                    ""
+                }
+                let strName = topLevelFunc.GetIdentifier() + ".cjsh.rtstr." + idx.toString()
+                let _ = EmitRuntimeStringPrint(cgMod, irBuilder.GetBuilder().raw, text, newline, strName)
+            } else {
+                let fmtName = topLevelFunc.GetIdentifier() + ".cjsh.rtfmt." + idx.toString()
+                let _ = EmitRuntimeIntPrint(cgMod, irBuilder.GetBuilder().raw, rawRet, newline, fmtName)
+            }
             // Consume this directive so a repeated value identifier is not double-printed.
             topLevelFunc.runtimePrintValueIds[idx] = ""
             return

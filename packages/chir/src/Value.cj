@@ -743,6 +743,12 @@ public class Function <: GlobalValue {
     // runtimePrintNewlines is a parallel list: true => println (trailing newline), false => print.
     public let runtimePrintValueIds: ArrayList<String> = ArrayList<String>()
     public let runtimePrintNewlines: ArrayList<Bool> = ArrayList<Bool>()
+    // Parallel to runtimePrintValueIds: when runtimePrintIsStr[i] is true the directive prints the
+    // literal string text in runtimePrintStrings[i] (puts/fputs) instead of the matched i64 value.
+    // The anchor value identifier is still used to place the call in body flow order. For an integer
+    // directive the entry is (false, "").
+    public let runtimePrintIsStr: ArrayList<Bool> = ArrayList<Bool>()
+    public let runtimePrintStrings: ArrayList<String> = ArrayList<String>()
 
     public init(funcType: FuncType, identifier: String, srcCodeIdentifier: String, rawMangledName: String,
         packageName: String) {

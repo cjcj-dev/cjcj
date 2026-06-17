@@ -115,6 +115,10 @@ extend AST2CHIRDeclTranslator {
             LowerPrint(fn, stmt, state)
             return
         }
+        if (stmt.IsPrintStr()) {
+            LowerPrintStr(fn, stmt, state)
+            return
+        }
     }
 
     // Lower `println(<expr>)` / `print(<expr>)` of a runtime Int64 value. The expression is evaluated
@@ -127,6 +131,28 @@ extend AST2CHIRDeclTranslator {
             if (!valueId.isEmpty()) {
                 fn.runtimePrintValueIds.add(valueId)
                 fn.runtimePrintNewlines.add(stmt.isVar)
+                fn.runtimePrintIsStr.add(false)
+                fn.runtimePrintStrings.add("")
+            }
+        }
+    }
+
+    // Lower a literal-string print (`print("x")` / `println("x")`) in a real (promoted) body. We
+    // materialize a throwaway Int64 Constant in the current block purely as an ordering anchor, then
+    // record a string directive keyed by that anchor's identifier. Codegen, when it reaches the
+    // anchor's emitted value, prints the recorded literal string (puts/fputs) instead of an integer.
+    // This keeps literal-string prints interleaved in correct source order with runtime-value prints
+    // in a mixed body, all emitted in-body (the entry-block side-channel is suppressed for real bodies).
+    private func LowerPrintStr(fn: Function, stmt: AST2CHIRStmtSpec, state: RealBodyState): Unit {
+        let int64Ty = builder.context.GetInt64Ty()
+        let anchor = builder.CreateConstant(int64Ty, IntLiteral(0), state.current)
+        if (let Some(value) <- AsValue(anchor.GetResult())) {
+            let valueId = value.GetIdentifierWithoutPrefix()
+            if (!valueId.isEmpty()) {
+                fn.runtimePrintValueIds.add(valueId)
+                fn.runtimePrintNewlines.add(stmt.isVar)
+                fn.runtimePrintIsStr.add(true)
+                fn.runtimePrintStrings.add(stmt.name)
             }
         }
     }
