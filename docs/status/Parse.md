@@ -202,6 +202,13 @@ Parse shim.
   require `public`, require a macro package when a current file is available,
   validate one or two `Tokens` parameters, synthesize a default `Tokens` return
   type, and parse bodies in `MACRO_BODY` scope.
+- Deepened `ParseType.cpp` parity: local type nodes now carry C++/AST-shaped
+  source metadata for comma, colon, type-parameter name/raw state, option
+  question-counts, and qualified generic delimiters. Type parsing now accepts
+  contextual-keyword type names, records named tuple/function type parameters,
+  diagnoses duplicate and mixed named/unnamed parameter lists, handles
+  `() -> T`, multiple leading `?`, `onlyRef`, qualified generic delimiter
+  positions, unexpected post-type arrows, and VArray comma/source tracking.
 
 ## Remaining Work
 
@@ -218,6 +225,9 @@ Parse shim.
 - Macro expansion parsing still lacks the full C++ parameter-macro and
   expression-scope no-parentheses reparsing behavior, exact macro diagnostic IDs,
   and interpolation string origin-position remapping.
+- Type parsing still uses local message diagnostics and simplified recovery in
+  several malformed generic/empty-parenthesis cases instead of the exact C++
+  diagnostic IDs and parser cleanup paths.
 - Audit grammar and diagnostic parity against the full C++ Parse test corpus;
   the current parser is substantial and compiling, but not a complete faithful
   replacement for all 17k+ lines of C++ parser behavior.

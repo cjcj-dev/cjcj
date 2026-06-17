@@ -3,8 +3,19 @@ package cangjie_compiler::parse
 import std.collection.*
 
 public open class Type <: Node {
+    public var commaPos: Position = INVALID_POSITION
+    public var bitAndPos: Position = INVALID_POSITION
+    public var colonPos: Position = INVALID_POSITION
+    public var typePos: Position = INVALID_POSITION
+    public var typeParameterName: String = ""
+    public var typeParameterNameIsRawId: Bool = false
+
     public init() { super(ASTKind.TYPE) }
     public init(kind: ASTKind) { super(kind) }
+
+    public func GetTypeParameterNameRawText(): String {
+        return if (typeParameterNameIsRawId) { "`" + typeParameterName + "`" } else { typeParameterName }
+    }
 }
 
 public class InvalidType <: Type {
@@ -59,7 +70,9 @@ public class QualifiedType <: Type {
     public var baseType: Option<Type> = None
     public var dotPos: Position = INVALID_POSITION
     public var field: SrcIdentifier = SrcIdentifier()
+    public var leftAnglePos: Position = INVALID_POSITION
     public let typeArguments: ArrayList<Type> = ArrayList<Type>()
+    public var rightAnglePos: Position = INVALID_POSITION
 
     public init() { super(ASTKind.QUALIFIED_TYPE) }
 
@@ -78,6 +91,7 @@ public class QualifiedType <: Type {
 
 public class OptionType <: Type {
     public var componentType: Option<Type> = None
+    public var questNum: UInt64 = 0u64
     public let questVector: ArrayList<Position> = ArrayList<Position>()
 
     public init() { super(ASTKind.OPTION_TYPE) }

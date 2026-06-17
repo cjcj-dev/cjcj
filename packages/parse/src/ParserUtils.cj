@@ -139,11 +139,19 @@ extend ParserImpl {
     }
 
     public func IsIdentifierOrContextualKeyword(kind: TokenKind): Bool {
-        return kind == TokenKind.IDENTIFIER || kind == TokenKind.PACKAGE_IDENTIFIER
+        if (kind == TokenKind.IDENTIFIER || kind == TokenKind.PACKAGE_IDENTIFIER) {
+            return true
+        }
+        for (contextual in GetContextualKeyword()) {
+            if (kind == contextual) {
+                return true
+            }
+        }
+        return false
     }
 
     public func SeeingIdentifierLike(): Bool {
-        return Seeing(TokenKind.IDENTIFIER) || Seeing(TokenKind.PACKAGE_IDENTIFIER) ||
+        return IsIdentifierOrContextualKeyword(Peek().kind) ||
             Seeing(TokenKind.INIT) || Seeing(TokenKind.THIS) || Seeing(TokenKind.SUPER)
     }
 
