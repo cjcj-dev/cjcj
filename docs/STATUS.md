@@ -13,6 +13,55 @@ not yet a self-compiling production compiler: the remaining critical path is
 mostly package integration, root Sema/Frontend orchestration, production
 serialization, full AST-to-CHIR lowering, and complete CHIR-to-LLVM emission.
 
+## Verified integrated capabilities
+
+The integrated pipeline is currently a literal-spec bridge: the frontend scanner
+(`packages/frontend/src/CompileStrategy.cj`) recognizes a small set of literal /
+compile-time-foldable constructs, threads them through
+`FuncBody -> AST2CHIRFunctionSpec -> CHIR Function` (`packages/chir`) and into
+codegen (`packages/codegen/src/EmitPrintIR.cj` emits `puts`/`fputs`; literal
+returns lower through `CreateLiteralReturnBody`).
+
+The following programs compile with the self-host `cjc`
+(`./target/release/bin/cangjie_compiler::cjc`) and run with the verified behavior
+shown. Each was re-verified by real compile-and-run on 2026-06-17 after merging
+`opus2/int-arith-return` and `opus2/println-int` into `main`:
+
+| Source | Verified behavior |
+| --- | --- |
+| `main() { println("hello selfhost") }` | prints `hello selfhost` + newline |
+| `main() { print("a"); print("b"); println("c") }` | prints `abc` + newline |
+| `main(): Int64 { return 7 }` | exits with code 7 |
+| `main(): Int64 { let x = 42` ⏎ `return x }` | exits with code 42 |
+| `main(): Int64 { return 2 + 3 * 4 }` | exits with code 14 (compile-time integer-arithmetic fold) |
+| `main() { println(42)` ⏎ `let n = 7` ⏎ `println(n) }` | prints `42` then `7` |
+
+Capability detail:
+
+- println/print of string literals (one or more calls, with/without trailing
+  newline).
+- `return <int/float/bool/string/unit literal>` and signed integer/float literals
+  lowered to the corresponding exit code or value.
+- `let <name> = <literal>` folded into a later `return <name>` at brace depth 0
+  (single-assignment, literal-initialized immutable bindings only).
+- `return <integer-arithmetic expression>` over integer literals, let-bound
+  integer literals, and `+ - * / %` with parentheses and unary minus, folded to
+  an `Int64` at compile time (conservative: any unsupported token or
+  division-by-zero falls back to the single-literal/let-fold path).
+- println/print of an integer literal (optionally signed) or a let-bound integer
+  literal, emitted as decimal text.
+
+These are the only source constructs the integrated pipeline lowers end to end
+today; anything else still flows through the compatibility models described
+below.
+
+### De-isolation roadmap pointer
+
+The plan for replacing this literal-spec bridge with a real
+`parse -> ast -> CHIR` lowering (starting with a non-folded `let a = 2; let b = 3;
+return a + b` slice that exits 5 via a runtime CHIR `Add`) is in
+`docs/DEISOLATION_PLAN.md`. Milestone framing is in `docs/ROADMAP.md`.
+
 ## Aggregate Totals
 
 | Metric | Value |
