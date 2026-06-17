@@ -79,6 +79,13 @@ Reference sources inspected from `/root/cj_build/cangjie_compiler/src/Sema`:
   `GetDiagnoseKindOfFuncDecl` path, and a target-level helper now reports
   constructor/type-alias mediated deprecations through real AST parent and alias
   links.
+- This pass added a real `TypeCheckReferenceCheckUsageOfDeprecated` walker
+  mirroring the C++ `CheckUsageOfDeprecated` flow: it tracks deprecated and
+  strict-deprecated declaration contexts, skips common-part declarations and
+  enum-pattern subtrees, diagnoses deprecated parameters and property setters,
+  checks constructor/type-alias mediated targets, and reports deprecated
+  override/redefinition and inheritor strictness issues through existing
+  `TypeManager`, property-accessor, and AST walker APIs.
 - Continued class-like parity in `TypeCheckClassLike.cj`: sealed inheritance
   from `specific` declarations now mirrors the C++ package scan for a matching
   common declaration before reporting the specific-sealed diagnostic, and

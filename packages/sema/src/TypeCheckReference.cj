@@ -1171,6 +1171,399 @@ public func TypeCheckReferenceDiagnoseDeprecatedUsageWithTarget(
     return false
 }
 
+private class TypeCheckReferenceDeprecationState {
+    public var deprecatedContext: Option<Node> = None
+    public var strictDeprecatedContext: Option<Node> = None
+
+    public init() {}
+}
+
+private func TypeCheckReferenceSameContextNode(context: Option<Node>, node: Node): Bool {
+    if (let None <- context) {
+        return false
+    }
+    let contextNode = context.getOrThrow()
+    if (let Some(leftDecl) <- (contextNode as Decl)) {
+        if (let Some(rightDecl) <- (node as Decl)) {
+            return SameDecl(leftDecl, rightDecl)
+        }
+    }
+    return contextNode.astKind == node.astKind && contextNode.begin == node.begin && contextNode.end == node.end
+}
+
+private func TypeCheckReferenceIsDeprecatedStrict(decl: Decl): Bool {
+    if (let Some(annotation) <- TypeCheckReferenceFindDeprecatedAnnotation(decl)) {
+        let (_, _, strict) = TypeCheckReferenceExtractDeprecatedArguments(annotation)
+        return strict
+    }
+    return false
+}
+
+private func TypeCheckReferenceEnterDeprecatedContext(
+    decl: Decl,
+    node: Node,
+    state: TypeCheckReferenceDeprecationState
+): Unit {
+    if (!decl.HasAnno(AstAnnotationKind.DEPRECATED)) {
+        return
+    }
+    if (TypeCheckReferenceIsDeprecatedStrict(decl) && (let None <- state.strictDeprecatedContext)) {
+        state.strictDeprecatedContext = Some(node)
+    } else if (let None <- state.deprecatedContext) {
+        state.deprecatedContext = Some(node)
+    }
+}
+
+private func TypeCheckReferenceExitDeprecatedContext(node: Node, state: TypeCheckReferenceDeprecationState): Unit {
+    if (TypeCheckReferenceSameContextNode(state.deprecatedContext, node)) {
+        state.deprecatedContext = None
+    }
+    if (TypeCheckReferenceSameContextNode(state.strictDeprecatedContext, node)) {
+        state.strictDeprecatedContext = None
+    }
+}
+
+private func TypeCheckReferenceDiagnoseDeprecatedWithContext(
+    diag: BasicDiagnosticEngine,
+    usage: Node,
+    target: Decl,
+    state: TypeCheckReferenceDeprecationState,
+    nameOfDiagnose!: String = ""
+): Bool {
+    return TypeCheckReferenceDiagnoseDeprecatedUsage(
+        diag,
+        usage,
+        target,
+        nameOfDiagnose: nameOfDiagnose,
+        deprecatedContext: state.deprecatedContext,
+        strictDeprecatedContext: state.strictDeprecatedContext)
+}
+
+private func TypeCheckReferenceDiagnoseDeprecatedTargetWithContext(
+    diag: BasicDiagnosticEngine,
+    usage: Node,
+    target: Decl,
+    state: TypeCheckReferenceDeprecationState
+): Bool {
+    return TypeCheckReferenceDiagnoseDeprecatedUsageWithTarget(
+        diag,
+        usage,
+        target,
+        deprecatedContext: state.deprecatedContext,
+        strictDeprecatedContext: state.strictDeprecatedContext)
+}
+
+private func TypeCheckReferenceCollectCallArgs(callExpr: CallExpr): ArrayList<FuncArg> {
+    let args = ArrayList<FuncArg>()
+    for (arg in callExpr.args) {
+        args.add(arg)
+    }
+    for (arg in callExpr.defaultArgs) {
+        args.add(arg)
+    }
+    return args
+}
+
+private func TypeCheckReferenceCheckUsageOfDeprecatedParameters(
+    diag: BasicDiagnosticEngine,
+    callExpr: CallExpr,
+    state: TypeCheckReferenceDeprecationState
+): Unit {
+    if (let None <- callExpr.resolvedFunction) {
+        return
+    }
+    let funcDecl = callExpr.resolvedFunction.getOrThrow()
+    if (let None <- funcDecl.funcBody) {
+        return
+    }
+    let funcBody = funcDecl.funcBody.getOrThrow()
+    if (funcBody.paramLists.isEmpty()) {
+        return
+    }
+    let args = TypeCheckReferenceCollectCallArgs(callExpr)
+    for (paramList in funcBody.paramLists) {
+        let params = paramList.params
+        if (params.size != args.size) {
+            continue
+        }
+        var idx: Int64 = 0
+        while (idx < args.size) {
+            let param = params[idx]
+            let arg = args[idx]
+            if (param.HasAnno(AstAnnotationKind.DEPRECATED) && !arg.TestAttr(Attribute.COMPILER_ADD)) {
+                let _ = TypeCheckReferenceDiagnoseDeprecatedWithContext(diag, arg, param, state)
+            }
+            idx++
+        }
+    }
+}
+
+private func TypeCheckReferenceCheckUsageOfDeprecatedSetter(
+    diag: BasicDiagnosticEngine,
+    assignExpr: AssignExpr,
+    state: TypeCheckReferenceDeprecationState
+): Unit {
+    if (let None <- assignExpr.leftValue) {
+        return
+    }
+    let leftValue = assignExpr.leftValue.getOrThrow()
+    if (let None <- leftValue.GetTarget()) {
+        return
+    }
+    let target = leftValue.GetTarget().getOrThrow()
+    if (let None <- (target as PropDecl)) {
+        return
+    }
+    let propDecl = (target as PropDecl).getOrThrow()
+    if (!propDecl.isVar) {
+        return
+    }
+    if (let Some(setter) <- GetUsableSetterForProperty(propDecl)) {
+        if (setter.HasAnno(AstAnnotationKind.DEPRECATED)) {
+            let _ = TypeCheckReferenceDiagnoseDeprecatedWithContext(
+                diag,
+                leftValue,
+                setter,
+                state,
+                nameOfDiagnose: propDecl.identifier.Val())
+        }
+    }
+}
+
+private func TypeCheckReferenceEmitDeprecationOverrideDiagnostic(
+    diag: BasicDiagnosticEngine,
+    kind: BasicDiagKindRefactor,
+    decl: Decl,
+    declType!: String = "",
+    name!: String = ""
+): Unit {
+    if (declType.isEmpty()) {
+        let builder = diag.DiagnoseRefactor(kind, TypeCheckReferenceRange(decl))
+        builder.Emit()
+    } else {
+        let builder = diag.DiagnoseRefactor(kind, TypeCheckReferenceRange(decl), arguments: [declType, name])
+        builder.Emit()
+    }
+}
+
+private func TypeCheckReferenceCheckOverridingOrRedefiningOfDeprecated(
+    diag: BasicDiagnosticEngine,
+    overridden: Decl,
+    overriding: Decl,
+    declType: String
+): Unit {
+    if (!overridden.HasAnno(AstAnnotationKind.DEPRECATED)) {
+        return
+    }
+    let overriddenStrict = TypeCheckReferenceIsDeprecatedStrict(overridden)
+    if (overriding.HasAnno(AstAnnotationKind.DEPRECATED)) {
+        if (overriddenStrict && !TypeCheckReferenceIsDeprecatedStrict(overriding)) {
+            TypeCheckReferenceEmitDeprecationOverrideDiagnostic(
+                diag, BasicDiagKindRefactor.sema_deprecation_weakening, overriding)
+        }
+        return
+    }
+    let diagKind = if (overridden.TestAttr(Attribute.STATIC)) {
+        if (overriddenStrict) {
+            BasicDiagKindRefactor.sema_deprecation_redef_error
+        } else {
+            BasicDiagKindRefactor.sema_deprecation_redef_warning
+        }
+    } else {
+        if (overriddenStrict) {
+            BasicDiagKindRefactor.sema_deprecation_override_error
+        } else {
+            BasicDiagKindRefactor.sema_deprecation_override_warning
+        }
+    }
+    let name = if (declType == "setter") { "set" } else { overriding.identifier.Val() }
+    TypeCheckReferenceEmitDeprecationOverrideDiagnostic(diag, diagKind, overriding, declType: declType, name: name)
+}
+
+private func TypeCheckReferenceDeclHasFuncTy(funcDecl: FuncDecl): Bool {
+    if (let Some(ty) <- funcDecl.GetTy()) {
+        if (let Some(_) <- (ty as FuncTy)) {
+            return true
+        }
+    }
+    return false
+}
+
+private func TypeCheckReferenceCheckOverridingOrRedefinitionOfDeprecatedFunction(
+    diag: BasicDiagnosticEngine,
+    tm: TypeManager,
+    classDecl: ClassDecl,
+    member: Decl
+): Unit {
+    if (let None <- (member as FuncDecl)) {
+        return
+    }
+    let funcOverride = (member as FuncDecl).getOrThrow()
+    if (funcOverride.TestAttr(Attribute.GENERIC)) {
+        return
+    }
+    for (inheritedType in classDecl.inheritedTypes) {
+        if (let Some(inheritedDecl) <- Ty.GetDeclPtrOfTy(inheritedType.GetTy())) {
+            for (memberDecl in inheritedDecl.GetMemberDecls()) {
+                if (let Some(baseFuncDecl) <- (memberDecl as FuncDecl)) {
+                    if (TypeCheckReferenceDeclHasFuncTy(baseFuncDecl) &&
+                        TypeCheckReferenceDeclHasFuncTy(funcOverride) &&
+                        tm.IsFuncDeclSubType(funcOverride, baseFuncDecl)) {
+                        TypeCheckReferenceCheckOverridingOrRedefiningOfDeprecated(
+                            diag, baseFuncDecl, funcOverride, "function")
+                    }
+                }
+            }
+        }
+    }
+}
+
+private func TypeCheckReferenceCheckOverridingOrRedefinitionOfDeprecatedProperty(
+    diag: BasicDiagnosticEngine,
+    tm: TypeManager,
+    classDecl: ClassDecl,
+    member: Decl
+): Unit {
+    if (let None <- (member as PropDecl)) {
+        return
+    }
+    let propOverride = (member as PropDecl).getOrThrow()
+    let getterOverride = GetUsableGetterForProperty(propOverride)
+    var setterOverride: Option<FuncDecl> = None
+    if (propOverride.isVar) {
+        setterOverride = GetUsableSetterForProperty(propOverride)
+    }
+    for (inheritedType in classDecl.inheritedTypes) {
+        if (let Some(inheritedDecl) <- Ty.GetDeclPtrOfTy(inheritedType.GetTy())) {
+            for (memberDecl in inheritedDecl.GetMemberDecls()) {
+                if (let Some(basePropDecl) <- (memberDecl as PropDecl)) {
+                    if (basePropDecl.TestAttr(Attribute.GENERIC)) {
+                        return
+                    }
+                    if (let Some(baseGetter) <- GetUsableGetterForProperty(basePropDecl)) {
+                        if (let Some(currentGetter) <- getterOverride) {
+                            if (TypeCheckReferenceDeclHasFuncTy(currentGetter) &&
+                                TypeCheckReferenceDeclHasFuncTy(baseGetter) &&
+                                tm.IsFuncDeclSubType(currentGetter, baseGetter)) {
+                                TypeCheckReferenceCheckOverridingOrRedefiningOfDeprecated(
+                                    diag, basePropDecl, propOverride, "property")
+                            }
+                        }
+                    }
+                    if (basePropDecl.isVar) {
+                        if (let Some(baseSetter) <- GetUsableSetterForProperty(basePropDecl)) {
+                            if (let Some(currentSetter) <- setterOverride) {
+                                if (TypeCheckReferenceDeclHasFuncTy(currentSetter) &&
+                                    TypeCheckReferenceDeclHasFuncTy(baseSetter) &&
+                                    tm.IsFuncDeclSubType(currentSetter, baseSetter)) {
+                                    TypeCheckReferenceCheckOverridingOrRedefiningOfDeprecated(
+                                        diag, baseSetter, currentSetter, "setter")
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+private func TypeCheckReferenceCheckOverridingOrRedefinitionOfDeprecated(
+    diag: BasicDiagnosticEngine,
+    tm: TypeManager,
+    classDecl: ClassDecl
+): Unit {
+    if (let None <- classDecl.body) {
+        return
+    }
+    let body = classDecl.body.getOrThrow()
+    for (member in body.decls) {
+        TypeCheckReferenceCheckOverridingOrRedefinitionOfDeprecatedFunction(diag, tm, classDecl, member)
+        TypeCheckReferenceCheckOverridingOrRedefinitionOfDeprecatedProperty(diag, tm, classDecl, member)
+    }
+}
+
+private func TypeCheckReferenceCheckDeprecationLevelOnInheritors(
+    diag: BasicDiagnosticEngine,
+    classLikeDecl: ClassLikeDecl
+): Unit {
+    let parentStrict = TypeCheckReferenceIsDeprecatedStrict(classLikeDecl)
+    for (subDecl in classLikeDecl.subDecls) {
+        if (subDecl.HasAnno(AstAnnotationKind.DEPRECATED)) {
+            if (parentStrict && !TypeCheckReferenceIsDeprecatedStrict(subDecl)) {
+                TypeCheckReferenceEmitDeprecationOverrideDiagnostic(
+                    diag, BasicDiagKindRefactor.sema_deprecation_weakening, subDecl)
+            }
+        } else {
+            let diagKind = if (parentStrict) {
+                BasicDiagKindRefactor.sema_deprecation_override_error
+            } else {
+                BasicDiagKindRefactor.sema_deprecation_override_warning
+            }
+            TypeCheckReferenceEmitDeprecationOverrideDiagnostic(
+                diag,
+                diagKind,
+                subDecl,
+                declType: DeclKindToString(subDecl),
+                name: subDecl.identifier.Val())
+        }
+    }
+}
+
+private func TypeCheckReferenceCheckTargetForDeprecatedUsage(
+    diag: BasicDiagnosticEngine,
+    usage: Node,
+    state: TypeCheckReferenceDeprecationState
+): Unit {
+    if (let Some(target) <- usage.GetTarget()) {
+        if (let Some(usageDecl) <- (usage as Decl)) {
+            if (SameDecl(usageDecl, target)) {
+                return
+            }
+        }
+        let _ = TypeCheckReferenceDiagnoseDeprecatedTargetWithContext(diag, usage, target, state)
+    }
+}
+
+public func TypeCheckReferenceCheckUsageOfDeprecated(
+    diag: BasicDiagnosticEngine,
+    tm: TypeManager,
+    root: Node
+): Unit {
+    let state = TypeCheckReferenceDeprecationState()
+    let walker = Walker(root, visitPre: { usage: Node =>
+        if (usage.astKind == ASTKind.ENUM_PATTERN) {
+            return VisitAction.SKIP_CHILDREN
+        }
+        if (let Some(decl) <- (usage as Decl)) {
+            if (decl.TestAttr(Attribute.FROM_COMMON_PART)) {
+                return VisitAction.SKIP_CHILDREN
+            }
+            TypeCheckReferenceEnterDeprecatedContext(decl, usage, state)
+            if (let Some(classDecl) <- (decl as ClassDecl)) {
+                TypeCheckReferenceCheckOverridingOrRedefinitionOfDeprecated(diag, tm, classDecl)
+            }
+            if (decl.HasAnno(AstAnnotationKind.DEPRECATED)) {
+                if (let Some(classLikeDecl) <- (decl as ClassLikeDecl)) {
+                    TypeCheckReferenceCheckDeprecationLevelOnInheritors(diag, classLikeDecl)
+                }
+            }
+            return VisitAction.WALK_CHILDREN
+        }
+        if (let Some(callExpr) <- (usage as CallExpr)) {
+            TypeCheckReferenceCheckUsageOfDeprecatedParameters(diag, callExpr, state)
+        } else if (let Some(assignExpr) <- (usage as AssignExpr)) {
+            TypeCheckReferenceCheckUsageOfDeprecatedSetter(diag, assignExpr, state)
+        }
+        TypeCheckReferenceCheckTargetForDeprecatedUsage(diag, usage, state)
+        return VisitAction.WALK_CHILDREN
+    }, visitPost: { usage: Node =>
+        TypeCheckReferenceExitDeprecatedContext(usage, state)
+        return VisitAction.KEEP_DECISION
+    })
+    let _ = walker.Walk()
+}
+
 public func SelfhostPortStatus_TypeCheckReference(): Bool {
     return true
 }
