@@ -1,5 +1,7 @@
 package cangjie_compiler::codegen
 
+import std.collection.*
+
 public type LLVMContextRef = CPointer<Unit>
 public type LLVMModuleRef = CPointer<Unit>
 public type LLVMTypeRef = CPointer<Unit>
@@ -106,10 +108,13 @@ foreign {
     func LLVMSetDataLayout(module: LLVMModuleRef, dataLayout: CString): Unit
     func LLVMSetTarget(module: LLVMModuleRef, triple: CString): Unit
     func LLVMGetModuleContext(module: LLVMModuleRef): LLVMContextRef
+    func LLVMSetSourceFileName(module: LLVMModuleRef, name: CString, len: UIntNative): Unit
+    func LLVMGetSourceFileName(module: LLVMModuleRef, len: CPointer<UIntNative>): CString
     func LLVMAddModuleFlag(module: LLVMModuleRef, behavior: Int32, key: CString, keyLen: UIntNative,
         value: LLVMMetadataRef): Unit
     func LLVMVerifyModule(module: LLVMModuleRef, action: Int32, outMessage: CPointer<CString>): Int32
     func LLVMWriteBitcodeToFile(module: LLVMModuleRef, path: CString): Int32
+    func LLVMPrintModuleToString(module: LLVMModuleRef): CString
     func LLVMDisposeMessage(message: CString): Unit
 
     func LLVMVoidTypeInContext(context: LLVMContextRef): LLVMTypeRef
@@ -172,6 +177,8 @@ foreign {
     func LLVMConstInt(intType: LLVMTypeRef, value: UInt64, signExtend: Int32): LLVMValueRef
     func LLVMConstReal(realType: LLVMTypeRef, value: Float64): LLVMValueRef
     func LLVMConstStringInContext(context: LLVMContextRef, str: CString, length: UInt32, dontNullTerminate: Int32): LLVMValueRef
+    func LLVMMDStringInContext2(context: LLVMContextRef, str: CString, length: UIntNative): LLVMMetadataRef
+    func LLVMMetadataAsValue(context: LLVMContextRef, metadata: LLVMMetadataRef): LLVMValueRef
     func LLVMValueAsMetadata(value: LLVMValueRef): LLVMMetadataRef
     func LLVMTypeOf(value: LLVMValueRef): LLVMTypeRef
     func LLVMGetIntTypeWidth(integerTy: LLVMTypeRef): UInt32
@@ -183,7 +190,10 @@ foreign {
     func LLVMGetInsertBlock(builder: LLVMBuilderRef): LLVMBasicBlockRef
     func LLVMClearInsertionPosition(builder: LLVMBuilderRef): Unit
     func LLVMAppendBasicBlockInContext(context: LLVMContextRef, fn: LLVMValueRef, name: CString): LLVMBasicBlockRef
+    func LLVMInsertBasicBlockInContext(context: LLVMContextRef, insertBeforeBB: LLVMBasicBlockRef,
+        name: CString): LLVMBasicBlockRef
     func LLVMPositionBuilderAtEnd(builder: LLVMBuilderRef, block: LLVMBasicBlockRef): Unit
+    func LLVMPositionBuilderBefore(builder: LLVMBuilderRef, inst: LLVMValueRef): Unit
     func LLVMBuildRetVoid(builder: LLVMBuilderRef): LLVMValueRef
     func LLVMBuildRet(builder: LLVMBuilderRef, value: LLVMValueRef): LLVMValueRef
     func LLVMBuildBr(builder: LLVMBuilderRef, dest: LLVMBasicBlockRef): LLVMValueRef
@@ -238,10 +248,14 @@ foreign {
         name: CString): LLVMValueRef
     func LLVMBuildGEP2(builder: LLVMBuilderRef, elementType: LLVMTypeRef, pointer: LLVMValueRef, indices: CPointer<LLVMValueRef>, numIndices: UInt32, name: CString): LLVMValueRef
     func LLVMBuildUnreachable(builder: LLVMBuilderRef): LLVMValueRef
+    func LLVMCanValueUseFastMathFlags(inst: LLVMValueRef): Int32
+    func LLVMSetFastMathFlags(inst: LLVMValueRef, flags: UInt32): Unit
     func LLVMGetEnumAttributeKindForName(name: CString, len: UIntNative): UInt32
     func LLVMCreateEnumAttribute(context: LLVMContextRef, kindID: UInt32, value: UInt64): LLVMAttributeRef
     func LLVMAddAttributeAtIndex(fn: LLVMValueRef, index: UInt32, attr: LLVMAttributeRef): Unit
     func strcmp(lhs: CString, rhs: CString): Int32
+    func strlen(str: CString): UIntNative
+    func memcpy(dest: CPointer<UInt8>, src: CString, count: UIntNative): CPointer<UInt8>
 
     func LLVMDebugMetadataVersion(): UInt32
     func LLVMCreateDIBuilder(module: LLVMModuleRef): LLVMDIBuilderRef
@@ -270,6 +284,46 @@ public func LLVMNullMetadata(): LLVMMetadataRef { return CPointer<Unit>() }
 public func LLVMNullAttribute(): LLVMAttributeRef { return CPointer<Unit>() }
 public func LLVMNullDIBuilder(): LLVMDIBuilderRef { return CPointer<Unit>() }
 
+public func LLVMCStringToString(raw: CString): Option<String> {
+    if (raw.isNull()) {
+        return None
+    }
+    return LLVMCStringToString(raw, unsafe { strlen(raw) })
+}
+
+public func LLVMCStringToString(raw: CString, len: UIntNative): Option<String> {
+    if (raw.isNull()) {
+        return None
+    }
+    if (len == 0) {
+        return Some("")
+    }
+    var converted: Option<String> = None
+    try (buffer = LibC.malloc<UInt8>(count: Int64(len)).asResource()) {
+        if (buffer.value.isNull()) {
+            return None
+        }
+        unsafe { memcpy(buffer.value, raw, len) }
+        let bytes = ArrayList<UInt8>()
+        var idx: Int64 = 0
+        while (idx < Int64(len)) {
+            bytes.add(unsafe { (buffer.value + idx).read() })
+            idx++
+        }
+        converted = String.fromUtf8(bytes.toArray())
+    }
+    return converted
+}
+
+public func LLVMConsumeMessage(message: CString): String {
+    if (message.isNull()) {
+        return ""
+    }
+    let converted = LLVMCStringToString(message) ?? ""
+    unsafe { LLVMDisposeMessage(message) }
+    return converted
+}
+
 public class LLVMContextHandle {
     public let raw: LLVMContextRef
 
@@ -295,6 +349,7 @@ public class LLVMModuleHandle {
         var moduleRaw = LLVMNullModule()
         try (moduleName = unsafe { LibC.mallocCString(name) }.asResource()) {
             moduleRaw = unsafe { LLVMModuleCreateWithNameInContext(moduleName.value, context.raw) }
+            unsafe { LLVMSetSourceFileName(moduleRaw, moduleName.value, UIntNative(name.size)) }
         }
         return LLVMModuleHandle(moduleRaw, name)
     }
@@ -309,6 +364,20 @@ public class LLVMModuleHandle {
         try (tripleCString = unsafe { LibC.mallocCString(triple) }.asResource()) {
             unsafe { LLVMSetTarget(raw, tripleCString.value) }
         }
+    }
+
+    public func GetSourceFileName(): String {
+        var result = ""
+        try (lenPtr = LibC.malloc<UIntNative>().asResource()) {
+            let rawName = unsafe { LLVMGetSourceFileName(raw, lenPtr.value) }
+            let nameLen = unsafe { lenPtr.value.read() }
+            result = LLVMCStringToString(rawName, nameLen) ?? ""
+        }
+        return result
+    }
+
+    public func PrintToString(): String {
+        return LLVMConsumeMessage(unsafe { LLVMPrintModuleToString(raw) })
     }
 }
 
