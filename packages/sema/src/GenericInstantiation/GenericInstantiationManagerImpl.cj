@@ -759,6 +759,18 @@ public class GenericInstantiationManagerImpl {
                 }
             }
         } else if (let Some(callExpr) <- (node as CallExpr)) {
+            if (let Some(desugarExpr) <- callExpr.desugarExpr) {
+                if (let Some(desugarTy) <- desugarExpr.GetTy()) {
+                    if (!desugarTy.HasGeneric()) {
+                        if (let Some(callBaseFunc) <- callExpr.baseFunc) {
+                            if (let Some(nameRefExpr) <- (callBaseFunc as NameReferenceExpr)) {
+                                nameRefExpr.instTys.clear()
+                                return
+                            }
+                        }
+                    }
+                }
+            }
             if (let Some(baseFunc) <- callExpr.baseFunc) {
                 ClearInstTysIfNeeded(baseFunc)
             }
