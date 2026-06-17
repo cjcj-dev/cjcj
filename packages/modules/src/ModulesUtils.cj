@@ -5,6 +5,7 @@ import cangjie_compiler::ast.AccessLevel as ASTAccessLevel
 import cangjie_compiler::ast.Attribute as ASTAttribute
 import cangjie_compiler::ast.AttributeIndex as ASTAttributeIndex
 import cangjie_compiler::ast.AttributeName as ASTAttributeName
+import cangjie_compiler::ast.FeaturesDirective as ASTFeaturesDirective
 import cangjie_compiler::ast.ImportKind as ASTImportKind
 import cangjie_compiler::ast.PackageSpec as ASTPackageSpec
 import cangjie_compiler::basic.DEFAULT_POSITION as BASIC_DEFAULT_POSITION
@@ -192,6 +193,7 @@ public func SameAttribute(left: Attribute, right: Attribute): Bool {
 
 public type Position = BasicPosition
 public type Range = BasicRange
+public type FeaturesDirective = ASTFeaturesDirective
 public type PackageSpec = ASTPackageSpec
 
 public let INVALID_POSITION: Position = BASIC_INVALID_POSITION
@@ -331,6 +333,7 @@ public class File <: Node {
     public var fileName: String = ""
     public var filePath: String = ""
     public var fileHash: UInt64 = 0
+    public var feature: Option<FeaturesDirective> = None
     public var packageSpec: Option<PackageSpec> = None
     public let imports: ArrayList<ImportSpec> = ArrayList<ImportSpec>()
     public let decls: ArrayList<Decl> = ArrayList<Decl>()
@@ -390,7 +393,7 @@ public class Package <: Node {
 
     public func HasFtrDirective(): Bool {
         for (file in files) {
-            if (!file.features.isEmpty()) {
+            if (file.feature.isSome() || !file.features.isEmpty()) {
                 return true
             }
         }

@@ -2,6 +2,11 @@ package cangjie_compiler::modules
 
 import std.collection.*
 import std.convert.*
+import cangjie_compiler::ast.Annotation as ASTAnnotation
+import cangjie_compiler::ast.AnnotationKind as ASTAnnotationKind
+import cangjie_compiler::ast.FeatureId as ASTFeatureId
+import cangjie_compiler::ast.FeaturesDirective as ASTFeaturesDirective
+import cangjie_compiler::ast.FeaturesSet as ASTFeaturesSet
 import cangjie_compiler::ast.Identifier as ASTIdentifier
 import cangjie_compiler::ast.Modifier as ASTModifier
 import cangjie_compiler::lex.TokenKind
@@ -106,8 +111,8 @@ public class ASTWriter {
             fileFields.add(file.fileName)
             fileFields.add(file.filePath)
             fileFields.add(file.fileHash.toString())
-            fileFields.add(JoinStringList(file.features))
-            fileFields.add(BoolToWire(file.isProduct))
+            fileFields.add(JoinStringList(SerializedFeatureNames(file)))
+            fileFields.add(BoolToWire(SerializedFileIsProduct(file)))
             AppendNodeFields(fileFields, file)
             AppendPackageSpecFields(fileFields, file.packageSpec)
             lines.add(JoinFields(fileFields))
@@ -382,6 +387,7 @@ public class ASTLoader {
                     if (fields.size > 13) {
                         file.packageSpec = LoadPackageSpecFields(fields, 13)
                     }
+                    file.feature = BuildFeatureDirectiveFromLegacyFields(file)
                     pkg.AddFile(file)
                     currentFile = Some(file)
                 case "import" =>
@@ -471,7 +477,7 @@ public class ASTLoader {
         let specificFeatures = CollectFeaturesFromPackage(specificPkg)
         for (commonFile in commonPkg.files) {
             let extraFeatures = ArrayList<String>()
-            for (feature in CollectUniqueStrings(commonFile.features)) {
+            for (feature in CollectUniqueStrings(SerializedFeatureNames(commonFile))) {
                 if (!specificFeatures.contains(feature)) {
                     extraFeatures.add("'${feature}'")
                 }
@@ -519,7 +525,7 @@ public class ASTLoader {
     private func CollectFeaturesFromPackage(pkg: Package): TreeSet<String> {
         let features = TreeSet<String>()
         if (!pkg.files.isEmpty()) {
-            for (feature in pkg.files[0].features) {
+            for (feature in SerializedFeatureNames(pkg.files[0])) {
                 features.add(feature)
             }
         }
@@ -566,6 +572,53 @@ public func GetDeclMangleKey(decl: Decl): String {
         return decl.fullPackageName + "." + decl.identifier
     }
     return decl.identifier
+}
+
+private func SerializedFeatureNames(file: File): ArrayList<String> {
+    if (let Some(featureDirective) <- file.feature) {
+        if (let Some(set) <- featureDirective.featuresSet) {
+            let out = ArrayList<String>()
+            for (featureId in set.content) {
+                out.add(featureId.ToString())
+            }
+            return out
+        }
+    }
+    return CloneStringArray(file.features)
+}
+
+private func SerializedFileIsProduct(file: File): Bool {
+    if (let Some(featureDirective) <- file.feature) {
+        return file.isProduct && featureDirective.annotations.isEmpty()
+    }
+    return file.isProduct
+}
+
+private func BuildFeatureDirectiveFromLegacyFields(file: File): Option<FeaturesDirective> {
+    if (file.features.isEmpty()) {
+        return None
+    }
+    let directive = ASTFeaturesDirective()
+    let set = ASTFeaturesSet()
+    directive.begin = file.begin
+    directive.end = file.end
+    directive.featuresPos = file.begin
+    set.begin = file.begin
+    set.end = file.end
+    for (featureName in file.features) {
+        let featureId = ASTFeatureId()
+        featureId.begin = file.begin
+        featureId.end = file.end
+        for (part in SplitQualifiedName(featureName)) {
+            featureId.identifiers.add(ASTIdentifier(part, file.begin, file.end))
+        }
+        set.content.add(featureId)
+    }
+    if (!file.isProduct) {
+        directive.annotations.add(ASTAnnotation("NonProduct", ASTAnnotationKind.NON_PRODUCT, file.begin))
+    }
+    directive.featuresSet = Some(set)
+    return Some(directive)
 }
 
 public func AppendNodeFields(fields: ArrayList<String>, node: Node): Unit {

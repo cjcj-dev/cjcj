@@ -113,6 +113,23 @@ private class PackageSpecDiagRecord {
     }
 }
 
+private class FeatureDiagEntry {
+    public var name: String
+    public var range: Range
+
+    public init(name: String, range: Range) {
+        this.name = name
+        this.range = range
+    }
+}
+
+private class FeatureValidationResult {
+    public var referenceFile: Option<File> = None
+    public var hasAnnotation: Bool = false
+
+    public init() {}
+}
+
 public class ImportManager {
     private let diag: DiagnosticEngine
     private let opts: GlobalOptions
@@ -1024,6 +1041,10 @@ public class ImportManager {
     }
 
     private func CheckPackageFeatureSpec(pkg: Package): Unit {
+        if (PackageHasRealFeatureDirective(pkg)) {
+            CheckRealPackageFeatureSpec(pkg)
+            return
+        }
         var referenceFile: Option<File> = None
         var referenceFeatureCount: Int64 = -1
         var hasNonProductFile = false
@@ -1068,6 +1089,162 @@ public class ImportManager {
                 reported++
             }
         }
+    }
+
+    private func CheckRealPackageFeatureSpec(pkg: Package): Unit {
+        let refMap = HashMap<String, Bool>()
+        let invalidFeatures = ArrayList<File>()
+        let validation = ValidateRealFileFeatureSpec(pkg, refMap)
+        if (let None <- validation.referenceFile) {
+            return
+        }
+        CollectInvalidRealFeatureFiles(pkg, invalidFeatures, refMap, validation.hasAnnotation)
+        if (invalidFeatures.isEmpty()) {
+            return
+        }
+        let referenceFeatures = CollectFileFeatureNames(validation.referenceFile.getOrThrow())
+        var counter: Int64 = 0
+        for (file in invalidFeatures) {
+            if (counter >= 2) {
+                return
+            }
+            if (let None <- file.feature) {
+                DiagForNullPackageFeature(diag, MakeRange(file.begin, file.end), referenceFeatures)
+            } else {
+                DiagForDifferentPackageFeatureConsistency(
+                    diag,
+                    FeatureDirectiveDiagRange(file, validation.hasAnnotation),
+                    CollectFileFeatureNames(file),
+                    referenceFeatures,
+                    validation.hasAnnotation
+                )
+            }
+            counter++
+        }
+    }
+
+    private func ValidateRealFileFeatureSpec(
+        pkg: Package,
+        refMap: HashMap<String, Bool>
+    ): FeatureValidationResult {
+        let result = FeatureValidationResult()
+        var refSize: Int64 = 0
+        let rangeMap = HashMap<String, Range>()
+        for (file in pkg.files) {
+            if (let Some(featureDirective) <- file.feature) {
+                for (entry in CollectFeatureEntries(featureDirective)) {
+                    if (let Some(previous) <- rangeMap.get(entry.name)) {
+                        WarnRepeatedFeatureName(diag, entry.name, entry.range, previous)
+                    } else {
+                        rangeMap[entry.name] = entry.range
+                    }
+                }
+                if (!featureDirective.annotations.isEmpty()) {
+                    result.hasAnnotation = true
+                }
+                if ((let None <- result.referenceFile) || rangeMap.size > refSize) {
+                    refSize = rangeMap.size
+                    result.referenceFile = Some(file)
+                }
+                rangeMap.clear()
+            }
+        }
+        if (let Some(file) <- result.referenceFile) {
+            for (featureName in CollectFileFeatureNames(file)) {
+                refMap[featureName] = false
+            }
+        }
+        return result
+    }
+
+    private func CollectInvalidRealFeatureFiles(
+        pkg: Package,
+        invalidFeatures: ArrayList<File>,
+        refMap: HashMap<String, Bool>,
+        hasAnnotation: Bool
+    ): Unit {
+        for (file in pkg.files) {
+            if ((let None <- file.feature) || (hasAnnotation && file.feature.getOrThrow().annotations.isEmpty())) {
+                invalidFeatures.add(file)
+                continue
+            }
+            let featureDirective = file.feature.getOrThrow()
+            var hasInvalidName = false
+            for (entry in CollectFeatureEntries(featureDirective)) {
+                if (refMap.contains(entry.name)) {
+                    refMap[entry.name] = true
+                } else {
+                    hasInvalidName = true
+                    invalidFeatures.add(file)
+                    break
+                }
+            }
+            if (!hasInvalidName) {
+                for (name in refMap.keys()) {
+                    if (let Some(seen) <- refMap.get(name)) {
+                        if (!seen) {
+                            invalidFeatures.add(file)
+                            break
+                        }
+                    }
+                }
+            }
+            for (name in refMap.keys()) {
+                refMap[name] = false
+            }
+        }
+    }
+
+    private func PackageHasRealFeatureDirective(pkg: Package): Bool {
+        for (file in pkg.files) {
+            if (file.feature.isSome()) {
+                return true
+            }
+        }
+        return false
+    }
+
+    private func CollectFeatureEntries(featureDirective: FeaturesDirective): ArrayList<FeatureDiagEntry> {
+        let out = ArrayList<FeatureDiagEntry>()
+        if (let Some(set) <- featureDirective.featuresSet) {
+            for (featureId in set.content) {
+                out.add(FeatureDiagEntry(featureId.ToString(), MakeRange(featureId.begin, featureId.end)))
+            }
+        }
+        return out
+    }
+
+    private func CollectFileFeatureNames(file: File): ArrayList<String> {
+        if (let Some(featureDirective) <- file.feature) {
+            let out = ArrayList<String>()
+            if (let Some(set) <- featureDirective.featuresSet) {
+                for (featureId in set.content) {
+                    out.add(featureId.ToString())
+                }
+            }
+            return out
+        }
+        return CloneStringArray(file.features)
+    }
+
+    private func IsProductFeatureFile(file: File): Bool {
+        if (let Some(featureDirective) <- file.feature) {
+            return file.isProduct && featureDirective.annotations.isEmpty()
+        }
+        return file.isProduct
+    }
+
+    private func FeatureDirectiveDiagRange(file: File, hasAnnotation: Bool): Range {
+        if (let Some(featureDirective) <- file.feature) {
+            if (hasAnnotation && featureDirective.annotations.isEmpty()) {
+                return MakeRange(featureDirective.featuresPos, "features")
+            }
+            if (let Some(set) <- featureDirective.featuresSet) {
+                return MakeRange(set.begin, set.end)
+            }
+            return MakeRange(featureDirective.begin, featureDirective.end)
+        }
+        return MakeRange(file.begin, file.end)
     }
 
     private func AddImportedDeclsForSourcePackage(pkg: Package): Unit {
@@ -1160,10 +1337,10 @@ public class ImportManager {
                     item.imports.add(importSpec)
                 }
             }
-            for (feature in file.features) {
+            for (feature in CollectFileFeatureNames(file)) {
                 features.add(feature)
             }
-            isProduct = isProduct && file.isProduct
+            isProduct = isProduct && IsProductFeatureFile(file)
         }
         return "{\"package\":\"" + EscapeJson(pkg.fullPackageName) + "\"," +
             "\"isMacro\":" + BoolToJson(pkg.isMacroPackage) + "," +

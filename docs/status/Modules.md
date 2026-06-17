@@ -36,6 +36,8 @@ This pass de-isolated the first AST enum layer used by Modules: `AccessLevel`, `
 
 This continuation de-isolated the package declaration spec used by Modules files to the real `cangjie_compiler::ast.PackageSpec`, preserved it through the local AST serialization bridge, and restored the C++ `CheckPackageSpecsIdentical` build-index validation for root-package visibility and cross-file package-name/access consistency. The new path uses real Lex `TokenKind` data from AST modifiers while keeping a compatibility fallback for package-level data until all callers populate real package specs.
 
+This pass de-isolated the package feature directive layer to the real `cangjie_compiler::ast.FeaturesDirective`: local files can now carry real feature AST nodes, the bridge reconstructs them from serialized feature data, dependency JSON/common-specific checks read real feature nodes when available, and `ImportManager.CheckPackageFeatureSpec` now follows the C++ reference algorithm for repeated feature diagnostics, reference feature selection, missing feature files, annotation consistency, and two-diagnostic limiting.
+
 ## Implemented
 
 - Replaced `ModulesScaffold.cj` with per-component source files under `packages/modules/src`.
@@ -43,6 +45,7 @@ This continuation de-isolated the package declaration spec used by Modules files
 - Added module-local equivalents for `Package`, `File`, `Decl`, `PackageDecl`, `ImportSpec`, `ImportContent`, `ExternalLibCfg`, `DepType`, `ExportConfig`, and diagnostics needed by the ported logic.
 - Replaced the module-local `AccessLevel`, `Attribute`, and `ImportKind` compatibility enums with aliases to the real `cangjie_compiler::ast` enums and added Modules-local comparison helpers for those imported enum values.
 - Added a real `cangjie_compiler::ast.PackageSpec` slot to the local `File` model and preserved it in the local serializer/loader bridge.
+- Added a real `cangjie_compiler::ast.FeaturesDirective` slot to the local `File` model and made feature collection prefer real AST feature nodes over legacy string lists.
 - Expanded attribute serialization/deserialization to the full real AST attribute set, including compatibility handling for the old Modules-only `MACRO_EXPAND_DECL` spelling.
 - Replaced the module-local `GlobalOptions`, `OutputMode`, `OptimizationLevel`, and option environment copies with imports from `cangjie_compiler::option`; option serialization now preserves `Os` and `Oz`.
 - Replaced module-local `Position`/`Range` compatibility structs with public aliases to `cangjie_compiler::basic` and delegated range construction to Basic `MakeRange`.
@@ -80,6 +83,7 @@ This continuation de-isolated the package declaration spec used by Modules files
 - Matched C++ import-node string behavior for alias imports, import-all spelling, explicit import modifiers, and multi-import formatting in the local compatibility AST.
 - Added `Package.IsEmpty` behavior for the local package model, returning true only when files contain no declarations and only compiler-added imports.
 - Restored C++ package declaration consistency checks during `BuildIndex`, including root-package public-visibility diagnostics and duplicate package-name/access detection across files.
+- Restored the C++ package feature consistency algorithm for real AST feature directives, including repeated-name ranges, reference map comparison, missing directive detection, and non-product annotation consistency.
 - Added a compiling local AST writer/loader wire format so exported package/import/member data can round-trip inside this package while the real flatbuffer/AST dependencies are unavailable.
 - Improved that local AST writer/loader bridge to preserve `exportedInternalDecls` records, reload them into `File.exportedInternalDecls`, and suppress `doNotExport` declarations during serialization in line with the C++ writer's export filtering.
 - Continued the local serialization layer with type interning, cached declaration diffing, resolved dependency-name extraction, import reference loading, deterministic expression table serialization/deserialization, reference resolution maps, deterministic incremental removed-mangle serialization/parsing, C++-style JSON control-byte escaping, node source-range/attribute preservation, and package file ownership normalization.
@@ -88,7 +92,7 @@ This continuation de-isolated the package declaration spec used by Modules files
 
 ## Important Blockers
 
-- Real C++ parity still requires full AST node/declaration integration, full Basic diagnostic builder/source-manager call-site conversion, Sema/TypeManager, and flatbuffers/native CJO format support. Option, Basic source location types, Utils package constants/stdlib lookup, AST access/import/attribute/package-spec types, and a first diagnostic forwarding bridge are now wired to the real packages.
+- Real C++ parity still requires full AST node/declaration integration, full Basic diagnostic builder/source-manager call-site conversion, Sema/TypeManager, and flatbuffers/native CJO format support. Option, Basic source location types, Utils package constants/stdlib lookup, AST access/import/attribute/package-spec/feature-directive types, and a first diagnostic forwarding bridge are now wired to the real packages.
 - The local serialization format is not the production `.cjo` flatbuffer format. It is a compiling, behavior-bearing bridge for the isolated package, not a faithful replacement for C++ AST serialization.
 - Type/reference/expression/incremental deserialization has package-local working logic, but it still cannot consume the production C++ flatbuffer schema until real AST/Sema dependencies are available.
 
