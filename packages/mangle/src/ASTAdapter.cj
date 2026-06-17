@@ -57,6 +57,7 @@ private func CopyDeclAttributes(source: Decl, target: MangleDecl): Unit {
     AddAttrIf(target, source.TestAttr(Attribute.GENERIC_INSTANTIATED), Attribute.GENERIC_INSTANTIATED)
     AddAttrIf(target, source.TestAttr(Attribute.HAS_INITIAL), Attribute.HAS_INITIAL)
     AddAttrIf(target, source.TestAttr(Attribute.CONSTRUCTOR), Attribute.CONSTRUCTOR)
+    AddAttrIf(target, source.TestAttr(Attribute.ENUM_CONSTRUCTOR), Attribute.ENUM_CONSTRUCTOR)
     AddAttrIf(target, source.TestAttr(Attribute.MAIN_ENTRY), Attribute.MAIN_ENTRY)
     AddAttrIf(target, source.TestAttr(Attribute.OPERATOR), Attribute.OPERATOR)
     AddAttrIf(target, source.TestAttr(Attribute.DEFAULT), Attribute.DEFAULT)
@@ -229,7 +230,7 @@ public class MangleAstAdapter {
             target.semaTy = ConvertTy(sourceTy)
         }
         FillDeclSubclassFields(source, target)
-        for (memberSource in source.GetMemberDecls()) {
+        for (memberSource in source.GetMemberDeclPtrs()) {
             target.members.add(ConvertDecl(memberSource))
         }
         return target

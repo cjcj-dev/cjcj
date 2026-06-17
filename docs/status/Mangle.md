@@ -1,6 +1,6 @@
 # Mangle Port Status
 
-Date: 2026-06-17
+Date: 2026-06-18
 
 Build: `cjpm build` passes.
 
@@ -115,6 +115,35 @@ Implemented:
 - Aligned parser-AST malformed type-annotation handling with C++ assertion/null-check behavior for missing
   parenthesized, option, function-return, VArray element/constant, qualified-base, and constant-literal
   payloads, and for unsupported AST type-annotation kinds.
+- Aligned descriptor enum-constructor generic ownership with the real AST `Decl.GetGeneric()` behavior by carrying
+  the real `Attribute.ENUM_CONSTRUCTOR` through the adapter and using it when a function body has a parent enum.
+- Aligned local variable mangling with C++ `BaseMangler::MangleVarDecl` by emitting the `K` count prefix whenever a
+  prepared package context exists, then appending the member/local index payload according to the discovered scope.
+- Added the C++ `VAR_WITH_PATTERN_DECL` branch to descriptor `MangleDeclName` so direct helper calls preserve the
+  reference `MangleDecl` behavior in addition to the common `Mangle` entry point.
+- Aligned AST adapter member conversion with the real AST `Decl.GetMemberDeclPtrs()` API used by C++ export-id
+  recursion, so enum constructors are preserved in descriptor member trees instead of only enum body members.
+- Aligned descriptor `GetGeneric()` with real AST enum-member behavior: `VarDecl` members of generic enums now inherit
+  the enum generic parameter list just as `Decl.GetGeneric()` does in the sibling AST package.
+- Aligned parser-AST file-private suffix mangling with the C++ null-check and short-filename behavior: missing
+  `curFile` now fails instead of fabricating `"$"`, and filenames shorter than `.cj` use the full filename rather
+  than a hash.
+- Aligned wildcard pattern declaration mangling with the C++ assertion path: all-wildcard validation, prepared package
+  context, current file metadata, outer local scope, and registered wildcard index are now required instead of silently
+  falling back to local index `0`.
+- Aligned private prefix and global wildcard-pattern file handling with the C++ null-check behavior by rejecting
+  missing `curFile` metadata before emitting file-private discriminators.
+- Aligned local variable and local function index lookup with the C++ assertion/value paths by requiring prepared
+  package context entries and registered local indexes instead of emitting partial names when context collection
+  missed a declaration.
+- Aligned descriptor lambda index lookup with the C++ context-index contract by requiring an outer container,
+  non-empty package context, and registered lambda index instead of falling back to lambda index `0`.
+- Aligned parser-AST mangling failure behavior with the C++ dereference/assertion paths by requiring function-like
+  declarations to carry function bodies, property accessors to have property type annotations when no return type is
+  present, extend declarations to have extended types, and generic constraints to have constrained type annotations.
+- Aligned parser-AST var-with-pattern mangling with the C++ flattening assumptions by requiring an irrefutable pattern,
+  requiring each encountered `VarPattern` to carry its `VarDecl`, and requiring current-file metadata before emitting
+  all-wildcard discriminator names.
 
 Known fidelity caveats:
 
@@ -126,6 +155,9 @@ Known fidelity caveats:
   needed metadata. Some C++ CHIR details are still not represented in the self-hosted CHIR package, notably
   `CustomType.IsAutoEnvGenericBase`/`IsAutoEnvInstBase` and `LinkTypeInfo`-style internal linkage queries
   for custom type defs, so those assertion-guarded branches use the currently available CHIR fields.
+- CHIR custom-type and function identifiers in the self-hosted CHIR builder can still be source-style or `_C`-prefixed
+  where the C++ CHIR API usually presents `@`-prefixed identifiers before `GetIdentifierWithoutPrefix()`. Mangle keeps
+  compatibility normalization for those current sibling-CHIR shapes until CHIR enforces the C++ identifier contract.
 - The AST adapter maps the currently available self-hosted AST package into the Mangle descriptor model
   and prepares package context from `curFile.curPackage` when available. Byte-for-byte validation against
   full parser/sema output still depends on downstream packages producing complete annotation arrays,

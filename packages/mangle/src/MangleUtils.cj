@@ -250,12 +250,17 @@ public func MangleFilePrivate(decl: MangleDecl): String {
         let filenameLen = file.fileName.size
         let cjExtLen: Int64 = 3
         let maxLen: Int64 = 16
-        if (filenameLen <= maxLen + cjExtLen && filenameLen >= cjExtLen) {
-            return MangleName(MANGLE_DOLLAR_PREFIX + file.fileName[0..filenameLen - cjExtLen])
+        if (filenameLen <= maxLen + cjExtLen) {
+            let nameWithoutExt = if (filenameLen >= cjExtLen) {
+                file.fileName[0..filenameLen - cjExtLen]
+            } else {
+                file.fileName
+            }
+            return MangleName(MANGLE_DOLLAR_PREFIX + nameWithoutExt)
         }
         return MangleName(ToHex(file.fileHash))
     }
-    return MangleName(MANGLE_DOLLAR_PREFIX)
+    throw IllegalArgumentException("Private declaration has no current file.")
 }
 
 public func MangleFilePrivate(decl: Decl): String {

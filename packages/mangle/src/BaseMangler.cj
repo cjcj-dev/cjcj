@@ -660,7 +660,10 @@ public open class BaseMangler {
             return decl.mangledName
         }
         var newMangled = MANGLE_CANGJIE_PREFIX + MANGLE_NESTED_PREFIX
-        if (decl.astKind == ASTKind.EXTEND_DECL) {
+        if (decl.astKind == ASTKind.VAR_WITH_PATTERN_DECL) {
+            newMangled += ManglePackage(decl)
+            newMangled += MangleVarWithPatternDecl(decl, prefix)
+        } else if (decl.astKind == ASTKind.EXTEND_DECL) {
             newMangled += ManglePrefix(decl, prefix, genericsTypeStack, declare)
             newMangled += MangleExtendEntity(decl, genericsTypeStack, declare)
             newMangled += MangleGenericArguments(decl, genericsTypeStack, declare)
@@ -779,7 +782,7 @@ public open class BaseMangler {
                 if (curPrefix.TestAttr(Attribute.GLOBAL)) {
                     if (let Some(pattern) <- curPrefix.irrefutablePattern) {
                         if (!PatternContainsVarDecl(pattern)) {
-                            let index = GetIndexOfWildcard(curPrefix, prefix) ?? 0
+                            let index = GetIndexOfWildcard(curPrefix, prefix)
                             mangled += MANGLE_ANONYMOUS_VARIABLE_PREFIX + DecimalToManglingNumber("${index}")
                         }
                     } else if (!curPrefix.identifier.isEmpty()) {
@@ -794,9 +797,12 @@ public open class BaseMangler {
         }
         let outer = outerMostNode ?? node
         if (outer.TestAttr(Attribute.PRIVATE)) {
-            if (let Some(file) <- outer.curFile) {
-                mangled = MANGLE_FILE_ID_PREFIX + fileIdFor(file) + mangled
+            let file = if (let Some(value) <- outer.curFile) {
+                value
+            } else {
+                throw IllegalArgumentException("Private prefix node has no current file.")
             }
+            mangled = MANGLE_FILE_ID_PREFIX + fileIdFor(file) + mangled
         }
         mangled = ManglePackageForPrefixNode(node, prefix) + mangled
         return mangled
@@ -1101,12 +1107,15 @@ public open class BaseMangler {
         mangleStr += MangleName(decl.identifier)
         if (IsLocalVariable(decl)) {
             if (let Some(ctx) <- manglerCtxTable.get(ManglerContext.ReduceUnitTestPackageName(decl.fullPackageName))) {
+                mangleStr += MANGLE_COUNT_PREFIX
                 if (let Some(outerNode) <- findOuterNodeOfLocal(prefix)) {
                     if (outerNode.astKind == ASTKind.CLASS_DECL || outerNode.astKind == ASTKind.INTERFACE_DECL ||
                         outerNode.astKind == ASTKind.STRUCT_DECL) {
-                        mangleStr += MANGLE_COUNT_PREFIX + DecimalToManglingNumber("0")
+                        mangleStr += DecimalToManglingNumber("0")
                     } else if (let Some(index) <- ctx.GetIndexOfVar(outerNode, decl)) {
-                        mangleStr += MANGLE_COUNT_PREFIX + DecimalToManglingNumber("${index}")
+                        mangleStr += DecimalToManglingNumber("${index}")
+                    } else {
+                        throw IllegalArgumentException("Index of local variable is not found: " + decl.identifier)
                     }
                 }
             }
@@ -1115,18 +1124,41 @@ public open class BaseMangler {
         return mangleStr
     }
 
-    public func GetIndexOfWildcard(vwpDecl: MangleDecl, prefix: ArrayList<MangleDecl>): Option<Int64> {
-        let pkgName = ManglerContext.ReduceUnitTestPackageName(vwpDecl.fullPackageName)
-        if (let Some(ctx) <- manglerCtxTable.get(pkgName)) {
-            if (vwpDecl.TestAttr(Attribute.GLOBAL)) {
-                if (let Some(file) <- vwpDecl.curFile) {
-                    return ctx.GetIndexOfGlobalWildcardVar(file, vwpDecl)
-                }
-            } else if (let Some(outerNode) <- findOuterNodeOfLocal(prefix)) {
-                return ctx.GetIndexOfLocalWildcardVar(outerNode, vwpDecl)
-            }
+    public func GetIndexOfWildcard(vwpDecl: MangleDecl, prefix: ArrayList<MangleDecl>): Int64 {
+        let pattern = if (let Some(value) <- vwpDecl.irrefutablePattern) {
+            value
+        } else {
+            throw IllegalArgumentException("VarWithPattern declaration has no irrefutable pattern.")
         }
-        return None
+        if (!ManglerContext.CheckAllElementsWildcard(pattern)) {
+            throw IllegalArgumentException("VarWithPattern declaration is not an all-wildcard pattern.")
+        }
+        let pkgName = ManglerContext.ReduceUnitTestPackageName(vwpDecl.fullPackageName)
+        if (pkgName.isEmpty()) {
+            throw IllegalArgumentException("Package name of VarWithPattern declaration is empty.")
+        }
+        let ctx = if (let Some(value) <- manglerCtxTable.get(pkgName)) {
+            value
+        } else {
+            throw IllegalArgumentException("Mangler context not prepared for package: " + pkgName)
+        }
+        if (vwpDecl.TestAttr(Attribute.GLOBAL)) {
+            let file = if (let Some(value) <- vwpDecl.curFile) {
+                value
+            } else {
+                throw IllegalArgumentException("Global VarWithPattern declaration has no current file.")
+            }
+            if (let Some(index) <- ctx.GetIndexOfGlobalWildcardVar(file, vwpDecl)) {
+                return index
+            }
+        } else if (let Some(outerNode) <- findOuterNodeOfLocal(prefix)) {
+            if (let Some(index) <- ctx.GetIndexOfLocalWildcardVar(outerNode, vwpDecl)) {
+                return index
+            }
+        } else {
+            throw IllegalArgumentException("Outer scope of local VarWithPattern declaration is not found.")
+        }
+        throw IllegalArgumentException("Index of VarWithPattern declaration is not found.")
     }
 
     public func MangleVarWithPatternDecl(vwpDecl: MangleDecl, prefix: ArrayList<MangleDecl>): String {
@@ -1135,14 +1167,17 @@ public open class BaseMangler {
                 return MangleVarDecl(varDecl, prefix)
             }
         }
-        let index = GetIndexOfWildcard(vwpDecl, prefix) ?? 0
+        let index = GetIndexOfWildcard(vwpDecl, prefix)
         var mangleStr = MANGLE_CANGJIE_PREFIX + MANGLE_NESTED_PREFIX
         let genericsTypeStack = ArrayList<String>()
         mangleStr += ManglePrefix(vwpDecl, prefix, genericsTypeStack, true)
         if (vwpDecl.TestAttr(Attribute.GLOBAL)) {
-            if (let Some(file) <- vwpDecl.curFile) {
-                mangleStr += MANGLE_FILE_ID_PREFIX + fileIdFor(file)
+            let file = if (let Some(value) <- vwpDecl.curFile) {
+                value
+            } else {
+                throw IllegalArgumentException("Global VarWithPattern declaration has no current file.")
             }
+            mangleStr += MANGLE_FILE_ID_PREFIX + fileIdFor(file)
         }
         mangleStr += MANGLE_ANONYMOUS_VARIABLE_PREFIX
         mangleStr += DecimalToManglingNumber("${index}")
@@ -1195,12 +1230,22 @@ public open class BaseMangler {
     public func GetMangledLocalFuncIndex(decl: MangleDecl): String {
         if (let Some(outerNode) <- GetOuterDecl(decl)) {
             let pkgName = ManglerContext.ReduceUnitTestPackageName(decl.fullPackageName)
-            if (let Some(ctx) <- manglerCtxTable.get(pkgName)) {
-                if (let Some(index) <- ctx.GetIndexOfFunc(outerNode, decl)) {
-                    if (index > 0) {
-                        return MANGLE_COUNT_PREFIX + DecimalToManglingNumber("${index - 1}")
-                    }
-                }
+            let ctx = if (let Some(value) <- manglerCtxTable.get(pkgName)) {
+                value
+            } else {
+                throw IllegalArgumentException("Mangler context not prepared for package: " + pkgName)
+            }
+            let index = if (let Some(value) <- ctx.GetIndexOfFunc(outerNode, decl)) {
+                value
+            } else {
+                throw IllegalArgumentException("Index of local function is not found: " + decl.identifier)
+            }
+            if (index > 0) {
+                return MANGLE_COUNT_PREFIX + DecimalToManglingNumber("${index - 1}")
+            }
+        } else {
+            if (IsLocalFunc(decl)) {
+                throw IllegalArgumentException("Outer declaration of local function is not found: " + decl.identifier)
             }
         }
         return ""
@@ -1422,24 +1467,33 @@ public open class BaseMangler {
     }
 
     private func GetLambdaIndex(lambda: MangleDecl, prefix: ArrayList<MangleDecl>, stopExclusive: Int64): Int64 {
-        if (let Some(outerNode) <- FindOuterNodeOfLambda(prefix, stopExclusive)) {
-            var pkgName = outerNode.fullPackageName
-            if (pkgName.isEmpty()) {
-                for (prefixDecl in prefix) {
-                    if (!prefixDecl.fullPackageName.isEmpty()) {
-                        pkgName = prefixDecl.fullPackageName
-                        break
-                    }
-                }
-            }
-            pkgName = ManglerContext.ReduceUnitTestPackageName(pkgName)
-            if (let Some(ctx) <- manglerCtxTable.get(pkgName)) {
-                if (let Some(index) <- ctx.GetIndexOfLambda(outerNode, lambda)) {
-                    return index
+        let outerNode = if (let Some(value) <- FindOuterNodeOfLambda(prefix, stopExclusive)) {
+            value
+        } else {
+            throw IllegalArgumentException("Outer container of lambda is not found.")
+        }
+        var pkgName = outerNode.fullPackageName
+        if (pkgName.isEmpty()) {
+            for (prefixDecl in prefix) {
+                if (!prefixDecl.fullPackageName.isEmpty()) {
+                    pkgName = prefixDecl.fullPackageName
+                    break
                 }
             }
         }
-        return 0
+        pkgName = ManglerContext.ReduceUnitTestPackageName(pkgName)
+        if (pkgName.isEmpty()) {
+            throw IllegalArgumentException("Package name of lambda is empty.")
+        }
+        let ctx = if (let Some(value) <- manglerCtxTable.get(pkgName)) {
+            value
+        } else {
+            throw IllegalArgumentException("Mangler context not prepared for package: " + pkgName)
+        }
+        if (let Some(index) <- ctx.GetIndexOfLambda(outerNode, lambda)) {
+            return index
+        }
+        throw IllegalArgumentException("Index of lambda is not found.")
     }
 
     private func GetSpecialFuncName(fd: MangleDecl): Option<String> {

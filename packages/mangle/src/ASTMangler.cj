@@ -375,23 +375,28 @@ public class ASTMangler {
         }
         if (decl.astKind == ASTKind.MAIN_DECL || decl.astKind == ASTKind.FUNC_DECL ||
             decl.astKind == ASTKind.MACRO_DECL || decl.astKind == ASTKind.PRIMARY_CTOR_DECL) {
-            if (let Some(body) <- decl.funcBody) {
-                mangled += MangleFuncParameters(body.params)
-                if (decl.astKind == ASTKind.FUNC_DECL) {
-                    mangled += MANGLE_DIDOLLAR_PREFIX
-                    if (let Some(retType) <- body.retType) {
-                        mangled += MangleAstType(retType)
-                    } else if (let Some(outer) <- decl.outerDecl) {
-                        if (outer.astKind == ASTKind.PROP_DECL) {
-                            if (let Some(typeAnnotation) <- outer.typeAnnotation) {
-                                mangled += MangleAstType(typeAnnotation)
-                            }
+            let body = if (let Some(value) <- decl.funcBody) {
+                value
+            } else {
+                throw IllegalArgumentException("Function-like declaration has no function body: " + decl.identifier)
+            }
+            mangled += MangleFuncParameters(body.params)
+            if (decl.astKind == ASTKind.FUNC_DECL) {
+                mangled += MANGLE_DIDOLLAR_PREFIX
+                if (let Some(retType) <- body.retType) {
+                    mangled += MangleAstType(retType)
+                } else if (let Some(outer) <- decl.outerDecl) {
+                    if (outer.astKind == ASTKind.PROP_DECL) {
+                        if (let Some(typeAnnotation) <- outer.typeAnnotation) {
+                            mangled += MangleAstType(typeAnnotation)
+                        } else {
+                            throw IllegalArgumentException("Property accessor has no property type: " + decl.identifier)
                         }
                     }
-                } else if (decl.astKind == ASTKind.MAIN_DECL) {
-                    if (let Some(retType) <- body.retType) {
-                        mangled += MangleAstType(retType)
-                    }
+                }
+            } else if (decl.astKind == ASTKind.MAIN_DECL) {
+                if (let Some(retType) <- body.retType) {
+                    mangled += MangleAstType(retType)
                 }
             }
         }
@@ -458,9 +463,12 @@ public class ASTMangler {
 
     private func MangleExtendDeclString(decl: MangleDecl): String {
         var mangled = ""
-        if (let Some(extendedType) <- decl.extendedType) {
-            mangled += MangleAstType(extendedType)
+        let extendedType = if (let Some(value) <- decl.extendedType) {
+            value
+        } else {
+            throw IllegalArgumentException("Extend declaration has no extended type.")
         }
+        mangled += MangleAstType(extendedType)
         mangled += MANGLE_LT_COLON_PREFIX
         let inherits = ArrayList<String>()
         for (inheritedType in decl.inheritedTypes) {
@@ -489,12 +497,13 @@ public class ASTMangler {
     private func MangleGenericConstraints(generic: MangleGeneric): String {
         let constraints = ArrayList<GenericConstraintMangle>()
         for (constraint in generic.genericConstraints) {
-            var constrainedType = ""
             var item = MANGLE_GEXTEND_PREFIX
-            if (let Some(typeAnnotation) <- constraint.typeAnnotation) {
-                constrainedType = MangleAstType(typeAnnotation)
-                item += constrainedType
+            let constrainedType = if (let Some(typeAnnotation) <- constraint.typeAnnotation) {
+                MangleAstType(typeAnnotation)
+            } else {
+                throw IllegalArgumentException("Generic constraint has no constrained type.")
             }
+            item += constrainedType
             let uppers = ArrayList<String>()
             for (upper in constraint.upperBounds) {
                 uppers.add(MangleAstType(upper))
@@ -513,19 +522,28 @@ public class ASTMangler {
 
     private func MangleVarWithPatternDecl(decl: MangleDecl): String {
         var ret = ""
-        if (let Some(pattern) <- decl.irrefutablePattern) {
-            let patterns = ArrayList<ManglePattern>()
-            flattenVarWithPattern(pattern, patterns)
-            for (item in patterns) {
-                if (item.astKind == ASTKind.VAR_PATTERN) {
-                    if (let Some(varDecl) <- item.varDecl) {
-                        ret += MangleName(varDecl.identifier)
-                    }
+        let pattern = if (let Some(value) <- decl.irrefutablePattern) {
+            value
+        } else {
+            throw IllegalArgumentException("VarWithPattern declaration has no irrefutable pattern.")
+        }
+        let patterns = ArrayList<ManglePattern>()
+        flattenVarWithPattern(pattern, patterns)
+        for (item in patterns) {
+            if (item.astKind == ASTKind.VAR_PATTERN) {
+                if (let Some(varDecl) <- item.varDecl) {
+                    ret += MangleName(varDecl.identifier)
+                } else {
+                    throw IllegalArgumentException("VarPattern has no variable declaration.")
                 }
             }
         }
         if (ret.isEmpty()) {
-            let filename = if (let Some(file) <- decl.curFile) { file.fileName } else { "" }
+            let filename = if (let Some(file) <- decl.curFile) {
+                file.fileName
+            } else {
+                throw IllegalArgumentException("Wildcard VarWithPattern declaration has no current file.")
+            }
             ret += MANGLE_WILDCARD_PREFIX + MangleName(filename) + "${NextWildcard(filename)}"
         }
         if (let Some(typeAnnotation) <- decl.typeAnnotation) {
