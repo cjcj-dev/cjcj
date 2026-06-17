@@ -236,3 +236,20 @@ triple defaults are static to the current build assumptions instead of being
 fully preprocessor-derived for every target; and external users still see local
 `Maybe*` compatibility wrappers until the wider port standardizes on native
 `Option<T>` across package boundaries.
+
+This continuation removes another small layer of Option-local compatibility
+logic. The `SplitLines` shim now delegates to the real Basic package splitter.
+Custom optimization levels, sancov levels, `--error-count-limit`, and
+`GlobalOptions.ParseIntOptionValue` now use the shared utils `TryParseInt`
+semantics that the C++ reference uses for those paths, so non-digit input,
+overflow, and signed/negative spellings fail at the same decision point. Android
+API suffix validation now uses the shared `Stoi` helper instead, matching the
+reference `std::stoi` numeric-prefix behavior for targets such as
+`android24foo` while preserving the existing support/illegal diagnostics.
+
+Remaining gaps: `Options.cj`/`OptionEnums.cj` remain hand-maintained mirrors
+rather than generated artifacts from `Options.inc`; local `Maybe*` wrappers and
+some compatibility helper entry points remain to keep current sibling packages
+building; host target defaults are still statically modeled for this port; and
+obfuscation-specific option handling still lives in the driver subclass layer
+rather than the base Option action surface.

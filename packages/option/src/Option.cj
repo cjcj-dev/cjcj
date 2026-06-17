@@ -9,6 +9,7 @@ import cangjie_compiler::utils.FileMode as UtilsFileMode
 import cangjie_compiler::utils.Out64
 import cangjie_compiler::utils.OverflowStrategy
 import cangjie_compiler::utils.Semaphore as UtilsSemaphore
+import cangjie_compiler::utils.TryParseInt as UtilsTryParseInt
 import std.collection.*
 
 private let ARGUMENT_IGNORED_SUFFIX: String = " The argument is ignored."
@@ -813,12 +814,14 @@ public open class GlobalOptions <: Option {
         from!: Int64 = -2147483648,
         to!: Int64 = 2147483647
     ): MaybeInt64 {
-        let parsed = TryParseInt64(arg.value)
-        if (!parsed.hasValue || parsed.value < from || parsed.value > to) {
-            Errorln("The value of " + arg.name + " is invalid.")
-            return MaybeInt64()
+        if (let Some(number) <- UtilsTryParseInt(arg.value)) {
+            let parsedValue = Int64(number)
+            if (parsedValue >= from && parsedValue <= to) {
+                return MaybeInt64(parsedValue)
+            }
         }
-        return parsed
+        Errorln("The value of " + arg.name + " is invalid.")
+        return MaybeInt64()
     }
 
     public static func GetSharedLibraryExtension(osType: OSType): String {

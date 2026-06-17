@@ -8,7 +8,9 @@ import cangjie_compiler::basic.WarnGroupIndex as BasicWarnGroupIndex
 import cangjie_compiler::utils.FileUtil
 import cangjie_compiler::utils.NFC as UtilsNFC
 import cangjie_compiler::utils.Semaphore as UtilsSemaphore
+import cangjie_compiler::utils.Stoi as UtilsStoi
 import cangjie_compiler::utils.StringToOverflowStrategy
+import cangjie_compiler::utils.TryParseInt as UtilsTryParseInt
 import cangjie_compiler::utils.ValidOverflowStrategy
 import std.collection.*
 
@@ -382,15 +384,14 @@ private func parseMockMode(opts: GlobalOptions, value: String): ActionResult {
 }
 
 private func parseCustomOptimization(opts: GlobalOptions, value: String): ActionResult {
-    let parsed = TryParseUInt64(value)
-    if (!parsed.hasValue) {
-        Errorln("Optimization level " + value + " is invalid")
-        return handled(success: false)
+    if (let Some(level) <- UtilsTryParseInt(value)) {
+        if (level == 0) { return handled(success: opts.SetOptimizationLevel(OptimizationLevel.O0)) }
+        if (level == 1) { return handled(success: opts.SetOptimizationLevel(OptimizationLevel.O1)) }
+        if (level == 2) { return handled(success: opts.SetOptimizationLevel(OptimizationLevel.O2)) }
+        return handled(success: opts.SetOptimizationLevel(OptimizationLevel.O3))
     }
-    if (parsed.value == 0u64) { return handled(success: opts.SetOptimizationLevel(OptimizationLevel.O0)) }
-    if (parsed.value == 1u64) { return handled(success: opts.SetOptimizationLevel(OptimizationLevel.O1)) }
-    if (parsed.value == 2u64) { return handled(success: opts.SetOptimizationLevel(OptimizationLevel.O2)) }
-    return handled(success: opts.SetOptimizationLevel(OptimizationLevel.O3))
+    Errorln("Optimization level " + value + " is invalid")
+    return handled(success: false)
 }
 
 private func parseWarn(value: String, suppress: Bool): Bool {
@@ -427,13 +428,16 @@ private func parseErrorLimit(opts: GlobalOptions, arg: OptionArgInstance): Actio
         opts.errorCountLimit = MaybeUInt64()
         return handled()
     }
-    let parsed = TryParseUInt64(arg.value)
-    if (!parsed.hasValue) {
-        Errorln("The value of " + arg.name + " is invalid.")
-        return handled(success: false)
+    if (let Some(limit) <- UtilsTryParseInt(arg.value)) {
+        if (limit < 0) {
+            Errorln("The value of " + arg.name + " is invalid.")
+            return handled(success: false)
+        }
+        opts.errorCountLimit = MaybeUInt64(UInt64(limit))
+        return handled()
     }
-    opts.errorCountLimit = parsed
-    return handled()
+    Errorln("The value of " + arg.name + " is invalid.")
+    return handled(success: false)
 }
 
 private func parsePassedWhen(opts: GlobalOptions, value: String): ActionResult {
@@ -637,15 +641,14 @@ private func parseOverflowStrategy(opts: GlobalOptions, value: String): ActionRe
 }
 
 private func parseSancovLevel(opts: GlobalOptions, value: String): ActionResult {
-    let parsed = TryParseUInt64(value)
-    if (!parsed.hasValue) {
-        Errorln("Sancov level " + value + " is invalid")
-        return handled(success: false)
+    if (let Some(level) <- UtilsTryParseInt(value)) {
+        if (level == 0) { opts.sancovOption.SetSancovLevel(SanitizerCoverageType.SCK_NONE); return handled() }
+        if (level == 1) { opts.sancovOption.SetSancovLevel(SanitizerCoverageType.SCK_FUNCTION); return handled() }
+        opts.sancovOption.SetSancovLevel(SanitizerCoverageType.SCK_BB)
+        return handled()
     }
-    if (parsed.value == 0u64) { opts.sancovOption.SetSancovLevel(SanitizerCoverageType.SCK_NONE); return handled() }
-    if (parsed.value == 1u64) { opts.sancovOption.SetSancovLevel(SanitizerCoverageType.SCK_FUNCTION); return handled() }
-    opts.sancovOption.SetSancovLevel(SanitizerCoverageType.SCK_BB)
-    return handled()
+    Errorln("Sancov level " + value + " is invalid")
+    return handled(success: false)
 }
 
 private func parsePrintBCHIR(opts: GlobalOptions, value: String): ActionResult {
@@ -792,10 +795,12 @@ public func ParseTargetTriple(opts: GlobalOptions, triple: String): Bool {
             idx++
         }
         if (!opts.target.apiLevel.isEmpty()) {
-            let parsed = TryParseUInt64(opts.target.apiLevel)
-            if (parsed.hasValue && (parsed.value < 23u64 || parsed.value > 10000u64)) {
-                Errorln("The Android API level is not supported in the target. Please use a valid API level which is larger than 23.")
-            } else if (!parsed.hasValue) {
+            let parsedApiLevel = UtilsStoi(opts.target.apiLevel)
+            if (let Some(apiLevel) <- parsedApiLevel) {
+                if (apiLevel < 23 || apiLevel > 10000) {
+                    Errorln("The Android API level is not supported in the target. Please use a valid API level which is larger than 23.")
+                }
+            } else {
                 Errorln("The Android API level is illegal. Please use a valid API level which is greater than or equal to 26.")
             }
         }

@@ -3,6 +3,7 @@ package cangjie_compiler::option
 import cangjie_compiler::basic.Errorln as BasicErrorln
 import cangjie_compiler::basic.Infoln as BasicInfoln
 import cangjie_compiler::basic.Println as BasicPrintln
+import cangjie_compiler::basic.SplitLines as BasicSplitLines
 import cangjie_compiler::basic.Warningln as BasicWarningln
 import cangjie_compiler::utils.AccessResultType as UtilsAccessResultType
 import cangjie_compiler::utils.FILE_PATH_MAX_LENGTH as UTILS_FILE_PATH_MAX_LENGTH
@@ -91,16 +92,7 @@ public func SplitString(str: String, delimiter: String): Array<String> {
 }
 
 public func SplitLines(str: String): Array<String> {
-    let ret = ArrayList<String>()
-    let rawLines = SplitString(str, "\n")
-    for (rawLine in rawLines) {
-        if (!rawLine.isEmpty() && rawLine[rawLine.size - 1] == b'\r') {
-            ret.add(rawLine[0..rawLine.size - 1])
-        } else {
-            ret.add(rawLine)
-        }
-    }
-    return ret.toArray()
+    return BasicSplitLines(str)
 }
 
 public func StartsWith(value: String, prefix: String): Bool {
