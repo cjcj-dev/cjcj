@@ -5,6 +5,7 @@ import cangjie_compiler::basic.SplitQualifiedName as BasicSplitQualifiedName
 import cangjie_compiler::basic.SplitString as BasicSplitString
 import std.collection.*
 import std.convert.*
+import std.fs.File
 
 private let OVERFLOW_NAMES: Array<(String, OverflowStrategy)> = [
     ("no", OverflowStrategy.NA),
@@ -413,8 +414,85 @@ public func GenerateRandomHexString(): String {
     return UInt64(ReadRandomUInt32()).toString(radix: 16)
 }
 
+private func IsResponseFileArgument(arg: String): Bool {
+    return arg.size > 1 && arg[0] == b'@'
+}
+
+private func AppendResponseFileLine(
+    bytes: Array<UInt8>,
+    start: Int64,
+    endExclusive: Int64,
+    args: ArrayList<String>
+): Unit {
+    var lineEnd = endExclusive
+    if (lineEnd > start && bytes[lineEnd - 1] == b'\r') {
+        lineEnd--
+    }
+    if (lineEnd > start) {
+        args.add(String.fromUtf8(bytes[start..lineEnd]))
+    }
+}
+
+private func TryExpandResponseFile(arg: String, expanded: ArrayList<String>): Bool {
+    try {
+        let bytes = File.readFrom(arg[1..])
+        let fileArgs = ArrayList<String>()
+        var lineStart: Int64 = 0
+        var idx: Int64 = 0
+        while (idx < bytes.size) {
+            if (bytes[idx] == b'\n') {
+                AppendResponseFileLine(bytes, lineStart, idx, fileArgs)
+                lineStart = idx + 1
+            }
+            idx++
+        }
+        if (lineStart < bytes.size) {
+            AppendResponseFileLine(bytes, lineStart, bytes.size, fileArgs)
+        }
+        for (fileArg in fileArgs) {
+            expanded.add(fileArg)
+        }
+        return true
+    } catch (e: Exception) {
+        return false
+    }
+}
+
+public func ExpandResponseFiles(args: ArrayList<String>): Unit {
+    var hasResponseFile = false
+    for (arg in args) {
+        if (IsResponseFileArgument(arg)) {
+            hasResponseFile = true
+            break
+        }
+    }
+    if (!hasResponseFile) {
+        return
+    }
+    let expanded = ArrayList<String>()
+    for (arg in args) {
+        if (IsResponseFileArgument(arg) && TryExpandResponseFile(arg, expanded)) {
+            continue
+        }
+        expanded.add(arg)
+    }
+    args.clear()
+    for (arg in expanded) {
+        args.add(arg)
+    }
+}
+
+public func ExpandResponseFiles(args: Array<String>): Array<String> {
+    let mutableArgs = ArrayList<String>()
+    for (arg in args) {
+        mutableArgs.add(arg)
+    }
+    ExpandResponseFiles(mutableArgs)
+    return mutableArgs.toArray()
+}
+
 public func StringifyArgumentVector(args: Array<String>): Array<String> {
-    return args
+    return ExpandResponseFiles(args)
 }
 
 @When[os == "Windows"]
