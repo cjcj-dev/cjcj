@@ -41,16 +41,24 @@ func IsTargetCondition(name: String): Bool {
 }
 
 func IsLogicBinaryExpr(op: TokenKind): Bool {
-    return TokenKindIndex(op) >= TokenKindIndex(TokenKind.AND) && TokenKindIndex(op) <= TokenKindIndex(TokenKind.OR)
+    return match (op) {
+        case TokenKind.AND | TokenKind.OR => true
+        case _ => false
+    }
 }
 
 func IsJudgeBinaryExpr(op: TokenKind): Bool {
-    return TokenKindIndex(op) >= TokenKindIndex(TokenKind.NOTEQ) &&
-        TokenKindIndex(op) <= TokenKindIndex(TokenKind.EQUAL)
+    return match (op) {
+        case TokenKind.NOTEQ | TokenKind.EQUAL => true
+        case _ => false
+    }
 }
 
 func IsRangeBinaryExpr(op: TokenKind): Bool {
-    return TokenKindIndex(op) >= TokenKindIndex(TokenKind.LT) && TokenKindIndex(op) <= TokenKindIndex(TokenKind.GE)
+    return match (op) {
+        case TokenKind.LT | TokenKind.GT | TokenKind.LE | TokenKind.GE => true
+        case _ => false
+    }
 }
 
 func ConditionSupportsOp(conditionStr: String, op: TokenKind): Bool {
