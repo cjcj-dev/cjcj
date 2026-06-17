@@ -51,7 +51,9 @@ encoding them as scattered branch logic.
   module-local dot-splitting helper.
 - Malformed `@When` annotations without a condition emit the reference
   diagnostic and remove only the annotation; the annotated node is left in place
-  as in `ConditionalCompilationImpl::EvalNodeCondition`.
+  as in `ConditionalCompilationImpl::EvalNodeCondition`. Annotation removal now
+  goes through Utils' real `EraseIf`, matching the C++ pass's `Utils::EraseIf`
+  path instead of a package-local removal loop.
 - Removed the unused `DefaultTargetTriple` shim from this module; target triples
   are owned by the real Option package just as in the C++ compiler.
 - Removed the package-local `ConditionalCompilationCompilerInstance`

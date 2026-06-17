@@ -9,6 +9,7 @@ import cangjie_compiler::option.BackendType
 import cangjie_compiler::option.OSType
 import cangjie_compiler::option.TripleInfo
 import cangjie_compiler::option.TryParseUInt64
+import cangjie_compiler::utils.EraseIf as UtilsEraseIf
 import std.collection.*
 
 let CJC_VERSION_LENGTH: Int64 = 6
@@ -496,22 +497,20 @@ class ConditionalCompilationImpl {
     }
 
     private func EvalAnnotations(annotations: ArrayList<Annotation>): Bool {
-        var evalResult = true
-        var idx: Int64 = 0
-        while (idx < annotations.size) {
-            let anno = annotations[idx]
+        let evalResult = ArrayList<Bool>()
+        evalResult.add(true)
+        UtilsEraseIf<Annotation>(annotations, { anno: Annotation =>
             if (anno.kind != AstAnnotationKind.WHEN) {
-                idx++
-                continue
+                return false
             }
             if (let Some(condExpr) <- anno.condExpr) {
-                evalResult = EvalCachedConditionExpr(condExpr)
+                evalResult[0] = EvalCachedConditionExpr(condExpr)
             } else {
                 diag.Diagnose(BasicDiagKindRefactor.conditional_compilation_not_have_condition_expr, anno.begin)
             }
-            annotations.remove(at: idx)
-        }
-        return evalResult
+            return true
+        })
+        return evalResult[0]
     }
 }
 
