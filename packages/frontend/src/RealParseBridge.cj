@@ -38,6 +38,7 @@ import cangjie_compiler::parse.ArrayLit as ParseArrayLit
 import cangjie_compiler::parse.SubscriptExpr as ParseSubscriptExpr
 import cangjie_compiler::parse.MemberAccess as ParseMemberAccess
 import cangjie_compiler::parse.EnumDecl as ParseEnumDecl
+import cangjie_compiler::parse.StructDecl as ParseStructDecl
 import cangjie_compiler::lex.StringPartKind
 import cangjie_compiler::chir.AST2CHIRStmtSpec as ChirStmtSpec
 import cangjie_compiler::chir.AST2CHIRExprSpec as ChirExprSpec
@@ -71,6 +72,10 @@ public func AdaptRealBodies(file: File, fileID: UInt64, sourceCode: String, sm: 
     // within the declaring enum). A value of such an enum is just its tag, so constructing a variant
     // lowers to an Int64 constant and matching a constructor pattern compares the selector tag.
     let enums = collectEnumRegistry(parsedFile)
+    let structs = collectStructRegistry(parsedFile)
+    // Top-level functions whose declared return type is a known struct: name -> struct type. Lets a
+    // call `mk(...)` to such a function be recognized as a struct-valued expression.
+    let structReturningFuncs = HashMap<String, String>()
     for (decl in parsedFile.decls) {
         if (let Some(parsedFunc) <- (decl as ParseFuncDecl)) {
             let n = parsedFunc.identifier.Val()
@@ -79,14 +84,65 @@ public func AdaptRealBodies(file: File, fileID: UInt64, sourceCode: String, sm: 
                 if (parsedFuncReturnsString(parsedFunc)) {
                     strReturningFuncs.add(n)
                 }
+                if (let Some(st) <- parsedFuncReturnsStruct(parsedFunc, structs)) {
+                    structReturningFuncs[n] = st
+                }
+            }
+        }
+    }
+    // Register the desugared top-level method functions of every supported struct so a `p.m()` call
+    // site can recognize the method and a struct return type can be detected on the method itself.
+    for (decl in parsedFile.decls) {
+        if (let Some(structDecl) <- (decl as ParseStructDecl)) {
+            let structType = structDecl.identifier.Val()
+            if (!scopeHasStruct(structs, structType)) {
+                continue
+            }
+            for (member in structDecl.bodyDecls) {
+                if (let Some(funcDecl) <- (member as ParseFuncDecl)) {
+                    let mname = funcDecl.identifier.Val()
+                    if (mname.isEmpty() || mname == "init") {
+                        continue
+                    }
+                    funcNames.add(desugarStructMethodName(structType, mname))
+                }
             }
         }
     }
     for (decl in file.decls) {
         if (let Some(funcDecl) <- (decl as FuncDecl)) {
-            tryAdaptFunction(funcDecl, parsedFile, funcNames, strReturningFuncs, enums)
+            tryAdaptFunction(funcDecl, parsedFile, funcNames, strReturningFuncs, enums, structs,
+                structReturningFuncs)
         }
     }
+    // Adapt the desugared instance-method bodies of every supported struct. Each struct method is
+    // lowered to a top-level function `$struct$Type$method` whose leading `this` parameter carries the
+    // receiver struct value (as an Int64). These are NOT in `file.decls` (they are nested in the struct
+    // decl), so they are emitted directly here as synthetic frontend FuncDecls appended to `file`.
+    for (decl in parsedFile.decls) {
+        if (let Some(structDecl) <- (decl as ParseStructDecl)) {
+            adaptStructMethods(structDecl, file, funcNames, strReturningFuncs, enums, structs,
+                structReturningFuncs)
+        }
+    }
+}
+
+// Whether `structs` registered a struct named `name`.
+private func scopeHasStruct(structs: StructRegistry, name: String): Bool {
+    return structs.isStruct(name)
+}
+
+// If the parsed function's declared return type names a known struct, return that struct type name.
+private func parsedFuncReturnsStruct(parsedFunc: ParseFuncDecl, structs: StructRegistry): Option<String> {
+    if (let Some(fb) <- parsedFunc.funcBody) {
+        if (let Some(rt) <- fb.retType) {
+            let tn = rt.ToString().trimAscii()
+            if (structs.isStruct(tn)) {
+                return Some(tn)
+            }
+        }
+    }
+    return None
 }
 
 // Tag/payload bit-packing for payload-carrying enum values. A payload-carrying enum value is encoded
@@ -306,6 +362,205 @@ private func classifyEnumCtorPayload(ctor: ParseDecl, enumTypeNames: HashSet<Str
     return Some((ENUM_PAYLOAD_MULTI, types.size))
 }
 
+// A single struct field assignment captured from an `init` body: the field name being assigned and
+// the right-hand-side parse expression (in terms of the init's parameters / literals). Construction
+// substitutes each init parameter reference in `rhs` with the matching actual argument expression to
+// build the field's stored value.
+private class StructInitAssign {
+    let fieldName: String
+    let rhs: ParseExpr
+    init(fieldName: String, rhs: ParseExpr) {
+        this.fieldName = fieldName
+        this.rhs = rhs
+    }
+}
+
+// A struct type discovered among the file's top-level struct decls. A struct value is represented as a
+// buffer of its Int64 field slots (reusing the enum heap-buffer machinery WITHOUT a tag): the value is
+// the buffer address as an Int64; a field read is inttoptr + GEP(slot) + Load; a field write is a
+// Store. Field slot 0 of the buffer is an unused dummy (the enum buffer reserves slot 0 for a tag), so
+// field i lives at buffer slot i+1 -- the EnumField/EnumMake helpers already use that 1-based layout.
+//
+// Only structs whose every stored field is `Int64`/`Int` and which have a single `init` whose body is
+// a sequence of `this.field = <expr>` assignments (one per declared field, in any order, each RHS over
+// init params / literals / arithmetic) are registered. Anything else is skipped whole so a struct
+// never mis-lowers (the body simply falls back).
+private class StructInfo {
+    // Field names in declared order (Int64 fields only). The slot index of field `fieldNames[i]` is i.
+    let fieldNames = ArrayList<String>()
+    let fieldIndex = HashMap<String, Int64>()
+    // The init's positional parameter names, in order.
+    let initParams = ArrayList<String>()
+    // The init body's `this.field = rhs` assignments, in source order.
+    let initAssigns = ArrayList<StructInitAssign>()
+
+    func indexOf(field: String): Option<Int64> {
+        return fieldIndex.get(field)
+    }
+}
+
+private class StructRegistry {
+    let structs = HashMap<String, StructInfo>()
+
+    func isStruct(name: String): Bool {
+        return structs.contains(name)
+    }
+
+    func infoOf(name: String): Option<StructInfo> {
+        return structs.get(name)
+    }
+}
+
+// Scan the parsed file's top-level struct decls into a StructRegistry. A struct is registered only when
+// every stored field is an Int64 field and it has a single `init` whose body is exactly one
+// `this.field = <expr>` assignment per declared field. Any other shape (a non-Int64 field, no init, a
+// non-canonical init body, a method-only struct) is skipped (the struct is absent from the registry, so
+// any use of it leaves the body on the fallback path). Methods are ignored here (handled at call time).
+private func collectStructRegistry(parsedFile: ParseFile): StructRegistry {
+    let registry = StructRegistry()
+    for (decl in parsedFile.decls) {
+        if (let Some(structDecl) <- (decl as ParseStructDecl)) {
+            let name = structDecl.identifier.Val()
+            if (name.isEmpty()) {
+                continue
+            }
+            match (analyzeStruct(structDecl)) {
+                case Some(info) => registry.structs[name] = info
+                case None => ()
+            }
+        }
+    }
+    return registry
+}
+
+// Analyze a struct decl into a StructInfo, or None if it is outside the supported shape. Collects the
+// stored Int64 fields (in declared order) and the single `init`'s param names + `this.field = rhs`
+// assignments. Requires: at least one field; every stored field is Int64/Int; exactly one `init`;
+// the init body is only `this.field = <expr>` statements covering each field exactly once.
+private func analyzeStruct(structDecl: ParseStructDecl): Option<StructInfo> {
+    let info = StructInfo()
+    var initDecl: Option<ParseFuncDecl> = None
+    for (member in structDecl.bodyDecls) {
+        if (let Some(varDecl) <- (member as ParseVarDecl)) {
+            // A stored field. Only Int64/Int fields are supported.
+            let fieldName = varDecl.identifier.Val()
+            if (fieldName.isEmpty()) {
+                return None
+            }
+            let typeName = match (varDecl.typeNode) {
+                case Some(t) => t.ToString().trimAscii()
+                case None => return None
+            }
+            if (typeName != "Int64" && typeName != "Int") {
+                return None
+            }
+            info.fieldIndex[fieldName] = info.fieldNames.size
+            info.fieldNames.add(fieldName)
+            continue
+        }
+        if (let Some(funcDecl) <- (member as ParseFuncDecl)) {
+            if (funcDecl.identifier.Val() == "init") {
+                if (initDecl.isSome()) {
+                    return None // more than one init is out of grammar
+                }
+                initDecl = Some(funcDecl)
+            }
+            // Other methods are ignored here (resolved at the call site).
+            continue
+        }
+        // A PrimaryCtorDecl or any other member kind is out of grammar.
+        return None
+    }
+    if (info.fieldNames.isEmpty()) {
+        return None
+    }
+    let theInit = match (initDecl) {
+        case Some(i) => i
+        case None => return None
+    }
+    if (!collectInitInfo(theInit, info)) {
+        return None
+    }
+    // The init must assign every declared field exactly once.
+    if (info.initAssigns.size != info.fieldNames.size) {
+        return None
+    }
+    let seen = HashSet<String>()
+    for (a in info.initAssigns) {
+        if (!info.fieldIndex.contains(a.fieldName) || seen.contains(a.fieldName)) {
+            return None
+        }
+        seen.add(a.fieldName)
+    }
+    return Some(info)
+}
+
+// Populate `info.initParams` and `info.initAssigns` from the struct's `init`. The init body must be a
+// block of `this.field = <expr>` assignment statements only. Returns false on any other shape.
+private func collectInitInfo(initDecl: ParseFuncDecl, info: StructInfo): Bool {
+    let body = match (initDecl.funcBody) {
+        case Some(fb) => fb
+        case None => return false
+    }
+    for (paramList in body.paramLists) {
+        for (param in paramList.params) {
+            let pname = param.identifier.Val()
+            if (pname.isEmpty()) {
+                return false
+            }
+            info.initParams.add(pname)
+        }
+    }
+    let block = match (body.body) {
+        case Some(b) => b
+        case None => return false
+    }
+    for (node in block.body) {
+        let assign = match (node as ParseAssignExpr) {
+            case Some(a) => a
+            case None => return false
+        }
+        if (assign.op.kind != TokenKind.ASSIGN) {
+            return false
+        }
+        // The left side must be `this.field`.
+        let fieldName = match (thisFieldName(assign.leftExpr)) {
+            case Some(f) => f
+            case None => return false
+        }
+        let rhs = match (assign.rightExpr) {
+            case Some(e) => e
+            case None => return false
+        }
+        info.initAssigns.add(StructInitAssign(fieldName, rhs))
+    }
+    return true
+}
+
+// If `maybeExpr` is `this.field`, return `field`; otherwise None.
+private func thisFieldName(maybeExpr: Option<ParseExpr>): Option<String> {
+    let expr = match (maybeExpr) {
+        case Some(e) => e
+        case None => return None
+    }
+    let member = match (expr as ParseMemberAccess) {
+        case Some(m) => m
+        case None => return None
+    }
+    let base = match (member.baseExpr) {
+        case Some(b) => b
+        case None => return None
+    }
+    let baseRef = match (base as ParseRefExpr) {
+        case Some(r) => r
+        case None => return None
+    }
+    if (baseRef.identifier.Val() != "this") {
+        return None
+    }
+    return Some(member.field.GetRawText())
+}
+
 // Whether the parsed function declares a `String` return type.
 private func parsedFuncReturnsString(parsedFunc: ParseFuncDecl): Bool {
     if (let Some(fb) <- parsedFunc.funcBody) {
@@ -316,8 +571,112 @@ private func parsedFuncReturnsString(parsedFunc: ParseFuncDecl): Bool {
     return false
 }
 
+// Adapt each instance method of a supported struct into a synthetic top-level frontend FuncDecl
+// (`$struct$Type$method`) whose leading `this` parameter carries the receiver struct value (as an
+// Int64). The synthetic decl is appended to `file.decls` so the CHIR bridge emits it as an ordinary
+// function with a real body. Only methods whose body fully adapts to the supported grammar are
+// emitted; a method that does not adapt is simply skipped (its call sites then fail to resolve and
+// fall back). `init` is not a method (construction is inlined at the use site).
+private func adaptStructMethods(structDecl: ParseStructDecl, file: File, funcNames: HashSet<String>,
+    strReturningFuncs: HashSet<String>, enums: EnumRegistry, structs: StructRegistry,
+    structReturningFuncs: HashMap<String, String>): Unit {
+    let structType = structDecl.identifier.Val()
+    if (!structs.isStruct(structType)) {
+        return
+    }
+    for (member in structDecl.bodyDecls) {
+        let funcDecl = match (member as ParseFuncDecl) {
+            case Some(f) => f
+            case None => continue
+        }
+        let mname = funcDecl.identifier.Val()
+        if (mname.isEmpty() || mname == "init") {
+            continue
+        }
+        adaptOneStructMethod(structType, mname, funcDecl, file, funcNames, strReturningFuncs, enums,
+            structs, structReturningFuncs)
+    }
+}
+
+private func adaptOneStructMethod(structType: String, mname: String, parsedFunc: ParseFuncDecl,
+    file: File, funcNames: HashSet<String>, strReturningFuncs: HashSet<String>, enums: EnumRegistry,
+    structs: StructRegistry, structReturningFuncs: HashMap<String, String>): Unit {
+    let body = match (parsedFunc.funcBody) {
+        case Some(fb) => fb
+        case None => return
+    }
+    let block = match (body.body) {
+        case Some(b) => b
+        case None => return
+    }
+    let scope = AdaptScope(funcNames, strReturningFuncs, enums, structs)
+    for (n in structReturningFuncs.keys()) {
+        scope.structReturningFuncs[n] = structReturningFuncs[n]
+    }
+    // `this` is the receiver: a struct-typed local holding the struct value (as an Int64).
+    scope.locals.add("this")
+    scope.params.add("this")
+    scope.structLocals["this"] = structType
+    // The method's own positional parameters (Int64 only for the supported grammar).
+    for (paramList in body.paramLists) {
+        for (funcParam in paramList.params) {
+            let pname = funcParam.identifier.Val()
+            if (!pname.isEmpty()) {
+                scope.locals.add(pname)
+                scope.params.add(pname)
+                if (let Some(typeNode) <- funcParam.typeNode) {
+                    let tn = typeNode.ToString().trimAscii()
+                    if (structs.isStruct(tn)) {
+                        scope.structLocals[pname] = tn
+                    }
+                }
+            }
+        }
+    }
+    let statements = match (adaptStatements(block, scope)) {
+        case Some(stmts) => stmts
+        case None => return
+    }
+    // Build the synthetic frontend FuncDecl: identifier = desugared name (so the call site resolves by
+    // source identifier), params = [this, <method params>], retType from the method.
+    let synthetic = FuncDecl()
+    synthetic.identifier = SrcIdentifier(desugarStructMethodName(structType, mname))
+    let thisParam = FuncParam()
+    thisParam.identifier = SrcIdentifier("this")
+    // `this` is a struct value carried as an Int64 (the struct ABI), so type it Int64.
+    thisParam.typeNode = Some(PrimitiveType("Int64"))
+    synthetic.funcBody.params.add(thisParam)
+    for (paramList in body.paramLists) {
+        for (funcParam in paramList.params) {
+            let pname = funcParam.identifier.Val()
+            if (pname.isEmpty()) {
+                return
+            }
+            let fp = FuncParam()
+            fp.identifier = SrcIdentifier(pname)
+            // Method params are Int64 in the supported grammar; a struct-typed param is also an Int64.
+            fp.typeNode = Some(PrimitiveType("Int64"))
+            synthetic.funcBody.params.add(fp)
+        }
+    }
+    // Return type: a struct return is an Int64 (the struct ABI); otherwise infer from the parsed type.
+    let retName = match (body.retType) {
+        case Some(rt) =>
+            let tn = rt.ToString().trimAscii()
+            if (structs.isStruct(tn)) { "Int64" } else { tn }
+        case None => ""
+    }
+    if (!retName.isEmpty()) {
+        synthetic.funcBody.retType = Some(PrimitiveType(retName))
+    }
+    synthetic.funcBody.hasRealBody = true
+    synthetic.funcBody.realStatements = statements
+    file.decls.add(synthetic)
+}
+
 private func tryAdaptFunction(funcDecl: FuncDecl, parsedFile: ParseFile, funcNames: HashSet<String>,
-    strReturningFuncs: HashSet<String>, enums: EnumRegistry): Unit {
+    strReturningFuncs: HashSet<String>, enums: EnumRegistry, structs: StructRegistry,
+    structReturningFuncs: HashMap<String, String>): Unit {
     // Note: a non-empty printStrings (the summary side-channel captured one or more literal
     // string/int prints) no longer forces the summary path. The real-parse adapter can lower
     // literal-int/string prints as in-body printf calls too, so a body that MIXES literal prints
@@ -329,7 +688,8 @@ private func tryAdaptFunction(funcDecl: FuncDecl, parsedFile: ParseFile, funcNam
     let name = funcDecl.identifier.Val()
     let matched = findParsedFunc(parsedFile, name, funcDecl.begin.line)
     if (let Some(parsedFunc) <- matched) {
-        adaptParsedFunc(funcDecl, parsedFunc, funcNames, strReturningFuncs, enums)
+        adaptParsedFunc(funcDecl, parsedFunc, funcNames, strReturningFuncs, enums, structs,
+            structReturningFuncs)
     }
 }
 
@@ -387,6 +747,16 @@ private class AdaptScope {
     // Payload-less enum variants in scope (variant name -> Int64 tag). A bare reference to a variant
     // name lowers to its tag constant, and a constructor pattern in a match compares the tag.
     let enums: EnumRegistry
+    // The file's top-level struct types. A struct value is a buffer of Int64 field slots (the address
+    // as an Int64); construction lowers to an EnumMake (no real tag), a field read to an EnumField, a
+    // field write to a STRUCT_SET_FIELD.
+    let structs: StructRegistry
+    // Locals/params known to hold a struct value: local name -> struct type name. Used so `p.x` and
+    // `p.x = v` resolve against the struct's field layout, and `p.m()` resolves an instance method.
+    let structLocals = HashMap<String, String>()
+    // Top-level functions whose declared return type is a known struct: function name -> struct type.
+    // A call to one is a struct-valued expression (so `let q = mk(...)` tracks q as that struct).
+    let structReturningFuncs = HashMap<String, String>()
     var needsRuntime: Bool = false
     // Depth of enclosing `for`/`while` loops currently being adapted. A `break`/`continue` is only
     // accepted (promotable) when loopDepth > 0; otherwise the body falls back to the summary path.
@@ -402,12 +772,19 @@ private class AdaptScope {
         return "$" + prefix + "_" + n.toString()
     }
 
-    init(funcNames: HashSet<String>, strReturningFuncs: HashSet<String>, enums: EnumRegistry) {
+    init(funcNames: HashSet<String>, strReturningFuncs: HashSet<String>, enums: EnumRegistry,
+        structs: StructRegistry) {
         this.funcNames = funcNames
         this.enums = enums
+        this.structs = structs
         for (n in strReturningFuncs) {
             this.strReturningFuncs.add(n)
         }
+    }
+
+    // The struct type name of local `name`, if it is a struct local in scope (and not shadowed).
+    func structTypeOf(name: String): Option<String> {
+        return structLocals.get(name)
     }
 
     // Whether `name` is a payload-less enum variant in scope and is not shadowed by a local/param.
@@ -417,7 +794,8 @@ private class AdaptScope {
 }
 
 private func adaptParsedFunc(funcDecl: FuncDecl, parsedFunc: ParseFuncDecl, funcNames: HashSet<String>,
-    strReturningFuncs: HashSet<String>, enums: EnumRegistry): Unit {
+    strReturningFuncs: HashSet<String>, enums: EnumRegistry, structs: StructRegistry,
+    structReturningFuncs: HashMap<String, String>): Unit {
     let body = match (parsedFunc.funcBody) {
         case Some(fb) => fb
         case None => return
@@ -426,7 +804,10 @@ private func adaptParsedFunc(funcDecl: FuncDecl, parsedFunc: ParseFuncDecl, func
         case Some(b) => b
         case None => return
     }
-    let scope = AdaptScope(funcNames, strReturningFuncs, enums)
+    let scope = AdaptScope(funcNames, strReturningFuncs, enums, structs)
+    for (n in structReturningFuncs.keys()) {
+        scope.structReturningFuncs[n] = structReturningFuncs[n]
+    }
     // Seed parameters as in-scope locals so references to them lower to runtime loads. Parameters
     // are also tracked separately: a reference to a parameter is inherently runtime (it cannot be
     // folded), so it promotes even a trivial body like `return x` to the real path -- needed so the
@@ -448,6 +829,12 @@ private func adaptParsedFunc(funcDecl: FuncDecl, parsedFunc: ParseFuncDecl, func
                     // a bare print of it / a concat using it promote as String operations).
                     if (tn == "String") {
                         scope.strNames.add(pname)
+                    }
+                    // A struct-typed parameter: its value is the struct buffer address carried as an
+                    // Int64 (the param/return ABI is Int64 for structs), so `p.x` / `p.m()` resolve
+                    // against the struct's field/method layout.
+                    if (scope.structs.isStruct(tn.trimAscii())) {
+                        scope.structLocals[pname] = tn.trimAscii()
                     }
                 }
             }
@@ -629,6 +1016,11 @@ private func adaptVarDecl(varDecl: ParseVarDecl, scope: AdaptScope): Option<Chir
     if (let Some(ctor) <- adaptArrayCtor(initExpr, scope, name)) {
         return Some(ctor)
     }
+    // Detect a struct-typed initializer (`let p = Point(...)` or `let q = mk(...)` returning a struct)
+    // BEFORE adapting it, so the new local is tracked as a struct local (its field/method accesses then
+    // resolve). The struct type comes from a direct struct construction or a call to a struct-returning
+    // top-level function.
+    let structTypeOfInit = structTypeOfExpr(initExpr, scope)
     let valueSpec = match (adaptExpr(initExpr, scope)) {
         case Some(e) => e
         case None => return None
@@ -637,6 +1029,10 @@ private func adaptVarDecl(varDecl: ParseVarDecl, scope: AdaptScope): Option<Chir
         scope.needsRuntime = true
     }
     scope.locals.add(name)
+    match (structTypeOfInit) {
+        case Some(t) => scope.structLocals[name] = t
+        case None => ()
+    }
     // Track Bool-typed locals so a later bare `println(name)` lowers as a runtime Bool print.
     if (exprIsBool(initExpr, scope)) {
         scope.boolNames.add(name)
@@ -656,6 +1052,10 @@ private func adaptAssign(assignExpr: ParseAssignExpr, scope: AdaptScope): Option
     let target = match (assignExpr.leftExpr) {
         case Some(e) => e
         case None => return None
+    }
+    // `p.field = expr`: a write into a field of a struct local (inttoptr + GEP(slot) + Store).
+    if (let Some(member) <- (target as ParseMemberAccess)) {
+        return adaptStructFieldAssign(member, assignExpr, scope)
     }
     // `a[i] = expr`: an indexed write into an Int64 array local.
     if (let Some(subscript) <- (target as ParseSubscriptExpr)) {
@@ -1537,6 +1937,16 @@ private func adaptExpr(expr: ParseExpr, scope: AdaptScope): Option<ChirExprSpec>
         scope.needsRuntime = true
         return Some(ChirExprSpec.Literal(tag))
     }
+    // Constructing a struct value `Point(a, b)`: build the field buffer (the value is its address as
+    // an Int64). Checked before enum construction and plain calls so a struct name never mis-resolves.
+    if (let Some(spec) <- adaptStructConstruction(expr, scope)) {
+        return Some(spec)
+    }
+    // Calling an instance method `p.m(args)` on a struct local: lower to a CALL of the desugared
+    // top-level method function, passing the struct value as the leading `this` argument.
+    if (let Some(spec) <- adaptStructMethodCall(expr, scope)) {
+        return Some(spec)
+    }
     // Constructing a payload-carrying variant `Ctor(<payload>)`: encode the value as a single Int64
     // = (payload << ENUM_TAG_BITS) | tag. The Int64 ABI then carries it through params/returns/locals.
     if (let Some(spec) <- adaptEnumConstruction(expr, scope)) {
@@ -1548,6 +1958,11 @@ private func adaptExpr(expr: ParseExpr, scope: AdaptScope): Option<ChirExprSpec>
     // a[i]: a subscript over an Int64 array local with a single Int64 index expression.
     if (let Some(subscript) <- (expr as ParseSubscriptExpr)) {
         return adaptSubscript(subscript, scope)
+    }
+    // p.field: read a field of a struct local (inttoptr + GEP(slot) + Load). Checked before a.size so
+    // a struct field access is never mistaken for an array `.size`.
+    if (let Some(spec) <- adaptStructFieldRead(expr, scope)) {
+        return Some(spec)
     }
     // a.size: the element count of an Int64 array local (statically known at adapt time).
     if (let Some(member) <- (expr as ParseMemberAccess)) {
@@ -2255,6 +2670,331 @@ private func adaptHeapEnumConstruction(name: String, call: ParseCallExpr,
     }
     scope.needsRuntime = true
     return Some(ChirExprSpec.EnumMake(tag, fields))
+}
+
+// Construct a struct value `Point(a, b)`: build a buffer of the struct's Int64 field slots (reusing
+// the enum heap-buffer EnumMake with a dummy tag of 0; field i lives at buffer slot i+1). The value is
+// the buffer address as an Int64. The callee must be a bare RefExpr naming a known struct (not shadowed
+// by a local, no type args) called with exactly the init's parameter count of positional Int64 args.
+// Each declared field's stored value is computed from the init's `this.field = rhs` assignment with the
+// init parameters substituted by the actual argument expressions. Returns None for anything else.
+private func adaptStructConstruction(expr: ParseExpr, scope: AdaptScope): Option<ChirExprSpec> {
+    let call = match (expr as ParseCallExpr) {
+        case Some(c) => c
+        case None => return None
+    }
+    let base = match (call.baseFunc) {
+        case Some(b) => b
+        case None => return None
+    }
+    let calleeRef = match (base as ParseRefExpr) {
+        case Some(r) => r
+        case None => return None
+    }
+    if (!calleeRef.typeArguments.isEmpty()) {
+        return None
+    }
+    let name = calleeRef.identifier.Val()
+    if (scope.locals.contains(name) || !scope.structs.isStruct(name)) {
+        return None
+    }
+    let info = match (scope.structs.infoOf(name)) {
+        case Some(i) => i
+        case None => return None
+    }
+    if (call.args.size != info.initParams.size) {
+        return None
+    }
+    // Map each init parameter name to its (adapted) actual argument expression.
+    let argMap = HashMap<String, ChirExprSpec>()
+    var i = 0
+    for (arg in call.args) {
+        if (!arg.name.Empty() || arg.withInout) {
+            return None
+        }
+        let argExpr = match (arg.expr) {
+            case Some(e) => e
+            case None => return None
+        }
+        // Only Int64-valued arguments are supported (the buffer stores Int64 slots).
+        if (exprIsString(argExpr, scope) || exprIsBool(argExpr, scope)) {
+            return None
+        }
+        let argSpec = match (adaptExpr(argExpr, scope)) {
+            case Some(e) => e
+            case None => return None
+        }
+        argMap[info.initParams[i]] = argSpec
+        i++
+    }
+    // Build each field's stored value (in declared field order) from the init assignment RHS, with the
+    // init params substituted by the actuals.
+    let fieldByName = HashMap<String, ParseExpr>()
+    for (a in info.initAssigns) {
+        fieldByName[a.fieldName] = a.rhs
+    }
+    let fields = ArrayList<ChirExprSpec>()
+    for (fieldName in info.fieldNames) {
+        let rhs = match (fieldByName.get(fieldName)) {
+            case Some(e) => e
+            case None => return None
+        }
+        let fieldSpec = match (adaptInitRhs(rhs, argMap, scope)) {
+            case Some(e) => e
+            case None => return None
+        }
+        fields.add(fieldSpec)
+    }
+    scope.needsRuntime = true
+    // Dummy tag 0 in slot 0; the N fields occupy slots 1..N (EnumMake's 1-based field layout).
+    return Some(ChirExprSpec.EnumMake(0, fields))
+}
+
+// The struct type of an expression that yields a struct value: a direct struct construction
+// `Point(...)` or a call to a struct-returning top-level function `mk(...)`. None otherwise. Used to
+// track `let p = <expr>` as a struct local so `p.x` / `p.m()` resolve.
+private func structTypeOfExpr(expr: ParseExpr, scope: AdaptScope): Option<String> {
+    let call = match (expr as ParseCallExpr) {
+        case Some(c) => c
+        case None => return None
+    }
+    let base = match (call.baseFunc) {
+        case Some(b) => b
+        case None => return None
+    }
+    let calleeRef = match (base as ParseRefExpr) {
+        case Some(r) => r
+        case None => return None
+    }
+    let name = calleeRef.identifier.Val()
+    if (scope.locals.contains(name)) {
+        return None
+    }
+    if (scope.structs.isStruct(name)) {
+        return Some(name)
+    }
+    return scope.structReturningFuncs.get(name)
+}
+
+// Adapt an init body RHS expression into a CHIR expr spec, substituting any reference to an init
+// parameter with the (already adapted) actual argument expression in `argMap`. Supports init-param
+// refs, Int64 literals, parenthesized exprs, unary `-`, and arithmetic/relational binary ops over the
+// same -- enough for `this.x = x`, `this.y = y`, `this.z = x + 1`, etc. Returns None on any other shape.
+private func adaptInitRhs(expr: ParseExpr, argMap: HashMap<String, ChirExprSpec>,
+    scope: AdaptScope): Option<ChirExprSpec> {
+    if (let Some(litValue) <- intLiteralValue(expr)) {
+        return Some(ChirExprSpec.Literal(litValue))
+    }
+    if (let Some(refExpr) <- (expr as ParseRefExpr)) {
+        let n = refExpr.identifier.Val()
+        match (argMap.get(n)) {
+            case Some(spec) => return Some(spec)
+            case None => return None
+        }
+    }
+    if (let Some(paren) <- (expr as ParseParenExpr)) {
+        let inner = match (paren.expr) {
+            case Some(e) => e
+            case None => return None
+        }
+        return adaptInitRhs(inner, argMap, scope)
+    }
+    if (let Some(unary) <- (expr as ParseUnaryExpr)) {
+        let op = match (toChirUnaryOp(unary.op.kind)) {
+            case Some(o) => o
+            case None => return None
+        }
+        let operandExpr = match (unary.expr) {
+            case Some(e) => e
+            case None => return None
+        }
+        let operandSpec = match (adaptInitRhs(operandExpr, argMap, scope)) {
+            case Some(e) => e
+            case None => return None
+        }
+        return Some(ChirExprSpec.Unary(op, operandSpec))
+    }
+    if (let Some(_) <- (expr as ParseAssignExpr)) {
+        return None
+    }
+    if (let Some(binary) <- (expr as ParseBinaryExpr)) {
+        let op = match (toChirBinaryOp(binary.op.kind)) {
+            case Some(o) => o
+            case None => return None
+        }
+        let leftExpr = match (binary.leftExpr) {
+            case Some(e) => e
+            case None => return None
+        }
+        let rightExpr = match (binary.rightExpr) {
+            case Some(e) => e
+            case None => return None
+        }
+        let lhsSpec = match (adaptInitRhs(leftExpr, argMap, scope)) {
+            case Some(e) => e
+            case None => return None
+        }
+        let rhsSpec = match (adaptInitRhs(rightExpr, argMap, scope)) {
+            case Some(e) => e
+            case None => return None
+        }
+        return Some(ChirExprSpec.Binary(op, lhsSpec, rhsSpec))
+    }
+    return None
+}
+
+// Adapt `p.field = expr`: the member base must be a RefExpr naming a struct local and `field` one of
+// its declared fields; the value must be a supported Int64 expression. Lowered to a STRUCT_SET_FIELD
+// that writes buffer slot index+1 (slot 0 is the reserved dummy tag). Returns None otherwise.
+private func adaptStructFieldAssign(member: ParseMemberAccess, assignExpr: ParseAssignExpr,
+    scope: AdaptScope): Option<ChirStmtSpec> {
+    if (!member.typeArguments.isEmpty()) {
+        return None
+    }
+    let base = match (member.baseExpr) {
+        case Some(b) => b
+        case None => return None
+    }
+    let baseRef = match (base as ParseRefExpr) {
+        case Some(r) => r
+        case None => return None
+    }
+    let localName = baseRef.identifier.Val()
+    let structType = match (scope.structTypeOf(localName)) {
+        case Some(t) => t
+        case None => return None
+    }
+    let info = match (scope.structs.infoOf(structType)) {
+        case Some(i) => i
+        case None => return None
+    }
+    let fieldName = member.field.GetRawText()
+    let idx = match (info.indexOf(fieldName)) {
+        case Some(n) => n
+        case None => return None
+    }
+    let rhs = match (assignExpr.rightExpr) {
+        case Some(e) => e
+        case None => return None
+    }
+    // Only Int64-valued field writes are supported.
+    if (exprIsString(rhs, scope) || exprIsBool(rhs, scope)) {
+        return None
+    }
+    let valueSpec = match (adaptExpr(rhs, scope)) {
+        case Some(e) => e
+        case None => return None
+    }
+    scope.needsRuntime = true
+    return Some(ChirStmtSpec.StructSetField(localName, idx + 1, valueSpec))
+}
+
+// Read a struct field `p.field`: the base must be a RefExpr naming a struct local in scope and `field`
+// must be one of the struct's declared fields. Lowered to an EnumField load of buffer slot index+1
+// (the struct buffer reserves slot 0 as a dummy tag; field i lives at slot i+1). Returns None otherwise.
+private func adaptStructFieldRead(expr: ParseExpr, scope: AdaptScope): Option<ChirExprSpec> {
+    let member = match (expr as ParseMemberAccess) {
+        case Some(m) => m
+        case None => return None
+    }
+    if (!member.typeArguments.isEmpty()) {
+        return None
+    }
+    let base = match (member.baseExpr) {
+        case Some(b) => b
+        case None => return None
+    }
+    let baseRef = match (base as ParseRefExpr) {
+        case Some(r) => r
+        case None => return None
+    }
+    let localName = baseRef.identifier.Val()
+    let structType = match (scope.structTypeOf(localName)) {
+        case Some(t) => t
+        case None => return None
+    }
+    let info = match (scope.structs.infoOf(structType)) {
+        case Some(i) => i
+        case None => return None
+    }
+    let fieldName = member.field.GetRawText()
+    let idx = match (info.indexOf(fieldName)) {
+        case Some(n) => n
+        case None => return None
+    }
+    scope.needsRuntime = true
+    // Field i lives at buffer slot i+1 (slot 0 is the reserved dummy tag slot).
+    return Some(ChirExprSpec.EnumField(ChirExprSpec.Ref(localName), idx + 1))
+}
+
+// Call an instance method `p.m(args)` on a struct local. The method is desugared to a top-level
+// function (see desugarStructMethodName) whose leading parameter is the receiver `this` (the struct
+// value as an Int64). Lowered to a CALL passing the struct local's value followed by the adapted
+// positional Int64 arguments. Returns None if the base is not a struct local, the method is unknown,
+// or any argument is non-Int64 / named / inout.
+private func adaptStructMethodCall(expr: ParseExpr, scope: AdaptScope): Option<ChirExprSpec> {
+    let call = match (expr as ParseCallExpr) {
+        case Some(c) => c
+        case None => return None
+    }
+    let base = match (call.baseFunc) {
+        case Some(b) => b
+        case None => return None
+    }
+    let member = match (base as ParseMemberAccess) {
+        case Some(m) => m
+        case None => return None
+    }
+    if (!member.typeArguments.isEmpty()) {
+        return None
+    }
+    let recvBase = match (member.baseExpr) {
+        case Some(b) => b
+        case None => return None
+    }
+    let recvRef = match (recvBase as ParseRefExpr) {
+        case Some(r) => r
+        case None => return None
+    }
+    let localName = recvRef.identifier.Val()
+    let structType = match (scope.structTypeOf(localName)) {
+        case Some(t) => t
+        case None => return None
+    }
+    let methodName = member.field.GetRawText()
+    let desugaredName = desugarStructMethodName(structType, methodName)
+    if (!scope.funcNames.contains(desugaredName)) {
+        return None
+    }
+    // The receiver (the struct value as an Int64) is the leading `this` argument.
+    let argSpecs = ArrayList<ChirExprSpec>()
+    argSpecs.add(ChirExprSpec.Ref(localName))
+    for (arg in call.args) {
+        if (!arg.name.Empty() || arg.withInout) {
+            return None
+        }
+        let argExpr = match (arg.expr) {
+            case Some(e) => e
+            case None => return None
+        }
+        if (exprIsString(argExpr, scope) || exprIsBool(argExpr, scope)) {
+            return None
+        }
+        let argSpec = match (adaptExpr(argExpr, scope)) {
+            case Some(e) => e
+            case None => return None
+        }
+        argSpecs.add(argSpec)
+    }
+    scope.needsRuntime = true
+    return Some(ChirExprSpec.Call(desugaredName, argSpecs))
+}
+
+// The synthesized top-level function name for a struct instance method `StructType.method`. Uses a `$`
+// separator so it never collides with a user-written top-level function (source identifiers cannot
+// contain `$`).
+private func desugarStructMethodName(structType: String, methodName: String): String {
+    return "$struct$" + structType + "$" + methodName
 }
 
 // Decode the payload Int64 out of an enum value reference: `<enumRef> RSHIFT ENUM_TAG_BITS`. RSHIFT

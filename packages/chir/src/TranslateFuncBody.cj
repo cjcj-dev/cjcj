@@ -157,6 +157,10 @@ extend AST2CHIRDeclTranslator {
             LowerArrayFor(fn, stmt, state)
             return
         }
+        if (stmt.IsStructSetField()) {
+            LowerStructSetField(fn, stmt, state)
+            return
+        }
         if (stmt.IsPrint()) {
             LowerPrint(fn, stmt, state)
             return
@@ -459,6 +463,40 @@ extend AST2CHIRDeclTranslator {
 
         state.current = exitBlock
         state.terminated = false
+    }
+
+    // Lower `p.field = value` for a struct local `p`. A struct value is a buffer of its Int64 field
+    // slots whose address (as an Int64) is stored in the local slot. The write loads that address,
+    // reinterprets it as a CPointer<Int64>, GEPs to the field slot, and Stores the value -- the same
+    // inttoptr + GEP + Store machinery as the enum heap buffer (EvalEnumField), but a write instead of
+    // a read. The field slot index is carried as a LITERAL in `stmt.cond`.
+    private func LowerStructSetField(fn: Function, stmt: AST2CHIRStmtSpec, state: RealBodyState): Unit {
+        let int64Ty = builder.context.GetInt64Ty()
+        let slot = match (state.locals.get(stmt.name)) {
+            case Some(s) => s
+            case None => return
+        }
+        let value = match (EvalExpr(stmt.expr, state)) {
+            case Some(v) => v
+            case None => return
+        }
+        let fieldIndex = match (stmt.cond) {
+            case Some(c) => c.literalValue
+            case None => return
+        }
+        // Load the struct value (the buffer address as an Int64) from the local slot.
+        let addrValue = builder.CreateLoad(int64Ty, slot, state.current).GetResult().getOrThrow()
+        // Reinterpret the address as a buffer pointer and GEP to the field slot.
+        let cptrTy = builder.context.GetCPointerTy(int64Ty)
+        let basePtr = builder.CreateTypeCast(cptrTy, addrValue, state.current).GetResult().getOrThrow()
+        let idxValue = builder.CreateConstant(int64Ty, IntLiteral(fieldIndex), state.current)
+            .GetResult().getOrThrow()
+        let indices = ArrayList<Value>()
+        indices.add(idxValue)
+        let refTy = builder.context.GetRefTy(int64Ty)
+        let elemPtr = builder.CreateDynamicElementRef(refTy, basePtr, indices, state.current)
+            .GetResult().getOrThrow()
+        builder.CreateStore(value, elemPtr, state.current)
     }
 
     // Element-ref pointer (Ref<Int64>) into a VArray slot at a compile-time-constant index.

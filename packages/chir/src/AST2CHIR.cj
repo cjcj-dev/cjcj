@@ -264,6 +264,13 @@ let AST2CHIR_STMT_CONTINUE: Int64 = 9
 let AST2CHIR_STMT_ARRAY_LET: Int64 = 10
 let AST2CHIR_STMT_ARRAY_ASSIGN: Int64 = 11
 let AST2CHIR_STMT_ARRAY_FOR: Int64 = 12
+// STRUCT_SET_FIELD: write `expr` into field slot `cond`-index of the struct value held in local
+// `name`. A struct value is a buffer of its Int64 field slots whose address (as an Int64) is stored
+// in the local slot `name`. The write loads that address, reinterprets it as a buffer pointer, GEPs
+// to the field slot (carried in `cond` as a LITERAL slot index), and Stores `expr` -- the same
+// inttoptr + GEP + Store machinery as the enum heap buffer. Used for mutable struct field writes
+// (`p.x = expr`).
+let AST2CHIR_STMT_STRUCT_SET_FIELD: Int64 = 13
 
 public class AST2CHIRStmtSpec {
     public let kind: Int64
@@ -304,6 +311,7 @@ public class AST2CHIRStmtSpec {
     public func IsArrayLet(): Bool { return kind == AST2CHIR_STMT_ARRAY_LET }
     public func IsArrayAssign(): Bool { return kind == AST2CHIR_STMT_ARRAY_ASSIGN }
     public func IsArrayFor(): Bool { return kind == AST2CHIR_STMT_ARRAY_FOR }
+    public func IsStructSetField(): Bool { return kind == AST2CHIR_STMT_STRUCT_SET_FIELD }
 
     public static func Let(name: String, expr: AST2CHIRExprSpec, isVar!: Bool = false): AST2CHIRStmtSpec {
         return AST2CHIRStmtSpec(AST2CHIR_STMT_LET, name, isVar, Some(expr), None,
@@ -370,6 +378,17 @@ public class AST2CHIRStmtSpec {
         value: AST2CHIRExprSpec): AST2CHIRStmtSpec {
         return AST2CHIRStmtSpec(AST2CHIR_STMT_ARRAY_ASSIGN, name, false, Some(value), Some(index),
             ArrayList<AST2CHIRStmtSpec>(), ArrayList<AST2CHIRStmtSpec>())
+    }
+
+    // STRUCT_SET_FIELD: write `value` into field slot `fieldIndex` of the struct value held in local
+    // `name`. The struct value is a buffer of Int64 field slots whose address (as an Int64) lives in
+    // the local; the write reinterprets that address as a buffer pointer, GEPs to the field slot, and
+    // Stores `value` (inttoptr + GEP + Store). The slot index is carried as a LITERAL in `cond`.
+    public static func StructSetField(name: String, fieldIndex: Int64,
+        value: AST2CHIRExprSpec): AST2CHIRStmtSpec {
+        return AST2CHIRStmtSpec(AST2CHIR_STMT_STRUCT_SET_FIELD, name, false, Some(value),
+            Some(AST2CHIRExprSpec.Literal(fieldIndex)), ArrayList<AST2CHIRStmtSpec>(),
+            ArrayList<AST2CHIRStmtSpec>())
     }
 
     // ARRAY_FOR: for-in over array local `arrayName`, binding each element to `varName` in `body`.
