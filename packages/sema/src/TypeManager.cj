@@ -1513,11 +1513,28 @@ public class TypeManager {
 
     public func GetOverrideDeclInClassLike(baseDecl: Decl, funcDecl: FuncDecl,
         withAbstractOverrides!: Bool = false): Option<Decl> {
-        let _ = withAbstractOverrides
         for (member in baseDecl.GetMemberDecls()) {
+            if (member.astKind != ASTKind.FUNC_DECL && member.astKind != ASTKind.PROP_DECL) {
+                continue
+            }
+            if ((!withAbstractOverrides && member.TestAttr(Attribute.ABSTRACT)) ||
+                member.TestAttr(Attribute.GENERIC)) {
+                continue
+            }
             if (let Some(memberFunc) <- (member as FuncDecl)) {
-                if (IsFuncDeclEqualType(memberFunc, funcDecl)) {
-                    return member
+                if (IsFuncDeclSubType(memberFunc, funcDecl)) {
+                    return memberFunc
+                }
+            } else if (let Some(propDecl) <- (member as PropDecl)) {
+                for (getter in propDecl.getters) {
+                    if (IsFuncDeclSubType(getter, funcDecl)) {
+                        return getter
+                    }
+                }
+                for (setter in propDecl.setters) {
+                    if (IsFuncDeclSubType(setter, funcDecl)) {
+                        return setter
+                    }
                 }
             }
         }
@@ -1567,34 +1584,28 @@ public class TypeManager {
     }
 
     public func IsFuncDeclSubType(decl: FuncDecl, funcDecl: FuncDecl): Bool {
+        if (decl.identifier != funcDecl.identifier) {
+            return false
+        }
         if (let Some(leftTy) <- decl.GetTy()) {
-            if (let Some(rightTy) <- funcDecl.GetTy()) {
-                return IsFuncSubtype(leftTy, rightTy)
+            if (let Some(leftFuncTy) <- (leftTy as FuncTy)) {
+                if (let Some(rightTy) <- funcDecl.GetTy()) {
+                    if (let Some(rightFuncTy) <- (rightTy as FuncTy)) {
+                        return IsFuncTySubType(leftFuncTy, rightFuncTy)
+                    }
+                }
             }
         }
         return false
     }
 
     public func IsFuncTySubType(type1: FuncTy, type2: FuncTy): Bool {
-        if (type1.paramTys.size != type2.paramTys.size) {
-            return false
-        }
-        if (type1.isC != type2.isC || type1.hasVariableLenArg != type2.hasVariableLenArg) {
-            return false
-        }
-        if (!IsSubtype(type1.retTy, type2.retTy)) {
-            return false
-        }
-        return IsFuncParametersSubtype(type1, type2)
+        return IsFuncParameterTypesIdentical(type1.paramTys, type2.paramTys) &&
+            IsSubtype(type1.retTy, type2.retTy)
     }
 
     public func IsFuncDeclEqualType(decl: FuncDecl, funcDecl: FuncDecl): Bool {
-        if (let Some(leftTy) <- decl.GetTy()) {
-            if (let Some(rightTy) <- funcDecl.GetTy()) {
-                return SameTy(leftTy, rightTy)
-            }
-        }
-        return decl.identifier == funcDecl.identifier
+        return IsFuncDeclSubType(decl, funcDecl) && IsFuncDeclSubType(funcDecl, decl)
     }
 
     public func IsExtendInheritRelation(r: ExtendDecl, l: ExtendDecl): (Bool, Bool) {
@@ -1618,17 +1629,220 @@ public class TypeManager {
 
     public func PairIsOverrideOrImpl(child: Decl, parent: Decl, baseTy!: Option<Ty> = None,
         parentTy!: Option<Ty> = None): Bool {
-        let _ = baseTy
-        let _ = parentTy
-        if (child.identifier != parent.identifier) {
+        if (child.astKind != parent.astKind || child.identifier != parent.identifier) {
             return false
         }
         if (let Some(childFunc) <- (child as FuncDecl)) {
             if (let Some(parentFunc) <- (parent as FuncDecl)) {
-                return IsFuncDeclSubType(childFunc, parentFunc) || IsFuncDeclEqualType(childFunc, parentFunc)
+                return IsOverrideOrShadow(childFunc, parentFunc, baseTy, parentTy)
+            }
+        } else if (let Some(childProp) <- (child as PropDecl)) {
+            if (let Some(parentProp) <- (parent as PropDecl)) {
+                return IsOverrideOrShadow(childProp, parentProp, baseTy)
             }
         }
         return false
+    }
+
+    private func IsOverrideOrShadow(src: FuncDecl, target: FuncDecl, baseTy: Option<Ty>,
+        expectInstParent: Option<Ty>): Bool {
+        if (let Some(cached) <- GetOverrideCache(Some(src), Some(target), baseTy, expectInstParent)) {
+            return cached
+        }
+        if (src.TestAttr(Attribute.STATIC) != target.TestAttr(Attribute.STATIC)) {
+            return false
+        }
+        let srcFuncTy = GetFuncTyForOverride(src)
+        let targetFuncTy = GetFuncTyForOverride(target)
+        let mts = GenerateOverrideTypeMapping(src, target, expectInstParent)
+        let usefulTys = CollectOverrideUsefulTys(srcFuncTy, targetFuncTy, src, target)
+        for (typeMapping in ExpandMultiTypeSubst(mts, usefulTys)) {
+            let srcParamTys = GetOverrideParamTys(src, srcFuncTy)
+            let targetParamTys = GetOverrideParamTys(target, targetFuncTy)
+            if (srcParamTys.size != targetParamTys.size) {
+                AddOverrideCache(src, target, baseTy, expectInstParent, false)
+                return false
+            }
+            AddInterfaceBaseMappingIfNeeded(typeMapping, src.outerDecl, target.outerDecl, baseTy)
+            let instantiatedSrcParams = InstantiateTyList(srcParamTys, typeMapping)
+            let instantiatedTargetParams = InstantiateTyList(targetParamTys, typeMapping)
+            if (IsFuncParameterTypesIdentical(instantiatedSrcParams, instantiatedTargetParams)) {
+                if (IsCrossPlatformPair(src, target)) {
+                    continue
+                }
+                AddOverrideCache(src, target, baseTy, expectInstParent, true)
+                return true
+            }
+        }
+        AddOverrideCache(src, target, baseTy, expectInstParent, false)
+        return false
+    }
+
+    private func IsOverrideOrShadow(src: PropDecl, target: PropDecl, baseTy: Option<Ty>): Bool {
+        if (let None <- src.outerDecl) {
+            return false
+        }
+        let outerDecl = src.outerDecl.getOrThrow()
+        let mts = GenerateStructDeclTypeMapping(outerDecl)
+        let typeMapping = MultiTypeSubstToTypeSubst(mts)
+        AddInterfaceBaseMappingIfNeeded(typeMapping, src.outerDecl, target.outerDecl, baseTy)
+        if (let Some(srcTy) <- GetPropOverrideTy(src)) {
+            if (let Some(targetTy) <- GetPropOverrideTy(target)) {
+                let ret = SameTy(srcTy, GetInstantiatedTy(targetTy, typeMapping))
+                if (ret && SameDeclOption(src.outerDecl, GetDeclPtrOfOptionTy(baseTy)) &&
+                    src.TestAttr(Attribute.STATIC) == target.TestAttr(Attribute.STATIC)) {
+                    UpdateTopOverriddenFuncDeclMap(Some(src), Some(target))
+                }
+                return ret
+            }
+        }
+        return false
+    }
+
+    private func GenerateOverrideTypeMapping(src: FuncDecl, target: FuncDecl,
+        expectInstParent: Option<Ty>): MultiTypeSubst {
+        let mts = MultiTypeSubst()
+        if (let Some(parentTy) <- expectInstParent) {
+            if (let Some(targetOuter) <- target.outerDecl) {
+                MergeTypeSubstToMultiTypeSubst(mts, GenerateTypeMappingByTy(targetOuter.GetTy(), Some(parentTy)))
+            }
+            if (let Some(srcOuter) <- src.outerDecl) {
+                if (let Some(targetOuter) <- target.outerDecl) {
+                    if (let Some(srcOuterTy) <- srcOuter.GetTy()) {
+                        if (let Some(targetOuterTy) <- targetOuter.GetTy()) {
+                            for (promotedTy in Promotion(this).Promote(srcOuterTy, targetOuterTy).values) {
+                                MergeTypeSubstToMultiTypeSubst(mts,
+                                    GenerateTypeMappingByTy(Some(promotedTy), Some(parentTy)))
+                            }
+                        }
+                    }
+                }
+            }
+            if (target.TestAttr(Attribute.GENERIC) && src.TestAttr(Attribute.GENERIC)) {
+                MergeTypeSubstToMultiTypeSubst(mts, GenerateGenericMappingFromGeneric(target, src))
+            }
+            return mts
+        }
+        if (let Some(srcOuter) <- src.outerDecl) {
+            if (Ty.IsTyCorrect(srcOuter.GetTy())) {
+                MergeMultiTypeSubsts(mts, GenerateStructDeclTypeMapping(srcOuter))
+            }
+        }
+        if (target.TestAttr(Attribute.GENERIC) && src.TestAttr(Attribute.GENERIC)) {
+            MergeTypeSubstToMultiTypeSubst(mts, GenerateGenericMappingFromGeneric(target, src))
+        }
+        return mts
+    }
+
+    private func AddInterfaceBaseMappingIfNeeded(typeMapping: TypeSubst, srcOuter: Option<Decl>,
+        targetOuter: Option<Decl>, baseTy: Option<Ty>): Unit {
+        if (let Some(base) <- baseTy) {
+            if (!Ty.IsTyCorrect(base)) {
+                return
+            }
+            if (let Some(srcOuterDecl) <- srcOuter) {
+                if (let Some(targetOuterDecl) <- targetOuter) {
+                    if ((let Some(_) <- (srcOuterDecl as InterfaceDecl)) &&
+                        (let Some(_) <- (targetOuterDecl as InterfaceDecl))) {
+                        if (let Some(targetOuterTy) <- targetOuterDecl.GetTy()) {
+                            if (let Some(srcOuterTy) <- srcOuterDecl.GetTy()) {
+                                let parentStructTy = GetInstantiatedTy(targetOuterTy, typeMapping)
+                                let childStructTy = GetInstantiatedTy(srcOuterTy, typeMapping)
+                                if (!IsSubtype(childStructTy, parentStructTy)) {
+                                    let baseMapping = MultiTypeSubst()
+                                    GenerateGenericMapping(baseMapping, base)
+                                    mergeTypeSubst(typeMapping, MultiTypeSubstToTypeSubst(baseMapping))
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private func CollectOverrideUsefulTys(srcFuncTy: Option<FuncTy>, targetFuncTy: Option<FuncTy>,
+        src: FuncDecl, target: FuncDecl): TySet {
+        let usefulTys = TySet()
+        if (let Some(srcTy) <- srcFuncTy) {
+            usefulTys.Add(srcTy)
+        } else {
+            for (ty in GetParamTys(src)) {
+                usefulTys.Add(ty)
+            }
+        }
+        if (let Some(targetTy) <- targetFuncTy) {
+            usefulTys.Add(targetTy)
+        } else {
+            for (ty in GetParamTys(target)) {
+                usefulTys.Add(ty)
+            }
+        }
+        return usefulTys
+    }
+
+    private func GetOverrideParamTys(fd: FuncDecl, funcTy: Option<FuncTy>): ArrayList<Ty> {
+        if (let Some(value) <- funcTy) {
+            return CopyTyList(value.paramTys)
+        }
+        return GetParamTys(fd)
+    }
+
+    private func GetFuncTyForOverride(fd: FuncDecl): Option<FuncTy> {
+        if (let Some(ty) <- fd.GetTy()) {
+            return ty as FuncTy
+        }
+        return None
+    }
+
+    private func GetPropOverrideTy(propDecl: PropDecl): Option<Ty> {
+        if (let Some(typeNode) <- propDecl.typeNode) {
+            if (let Some(ty) <- typeNode.GetTy()) {
+                return ty
+            }
+        }
+        return propDecl.GetTy()
+    }
+
+    private func InstantiateTyList(values: ArrayList<Ty>, typeMapping: TypeSubst): ArrayList<Ty> {
+        let out = ArrayList<Ty>()
+        for (ty in values) {
+            out.add(GetInstantiatedTy(ty, typeMapping))
+        }
+        return out
+    }
+
+    private func CopyTyList(values: ArrayList<Ty>): ArrayList<Ty> {
+        let out = ArrayList<Ty>()
+        for (ty in values) {
+            out.add(ty)
+        }
+        return out
+    }
+
+    private func IsCrossPlatformPair(src: Decl, target: Decl): Bool {
+        return (src.TestAttr(Attribute.COMMON) && target.TestAttr(Attribute.SPECIFIC)) ||
+            (src.TestAttr(Attribute.SPECIFIC) && target.TestAttr(Attribute.COMMON))
+    }
+
+    private func GetDeclPtrOfOptionTy(ty: Option<Ty>): Option<Decl> {
+        if (let Some(value) <- ty) {
+            return Ty.GetDeclPtrOfTy(value)
+        }
+        return None
+    }
+
+    private func SameDeclOption(left: Option<Decl>, right: Option<Decl>): Bool {
+        if (let Some(leftDecl) <- left) {
+            if (let Some(rightDecl) <- right) {
+                return SameDecl(leftDecl, rightDecl)
+            }
+            return false
+        }
+        if (let Some(_) <- right) {
+            return false
+        }
+        return true
     }
 
     public func ConstrainByCtor(tv: GenericsTy, tyCtor: Ty): Option<Ty> {

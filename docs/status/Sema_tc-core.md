@@ -137,6 +137,31 @@ Verification:
 - `grep -rn "TODO(selfhost:Sema)" packages/sema/src` reports 4 package-level markers, all outside the tc-core-owned files.
 - Remaining `TODO(selfhost:Sema)` markers in the tc-core-owned files listed by the task: 0.
 
+## 2026-06-17 Continue Pass 8
+
+Files deepened:
+
+- `packages/sema/src/TypeManager.cj`
+
+Implemented behavior:
+
+- Ported the C++ `GetOverrideDeclInClassLike` member scan shape. The self-hosted path now skips non-function/property members, honors `withAbstractOverrides`, ignores generic members, and checks property getter/setter functions as override candidates.
+- Tightened `IsFuncDeclSubType`, `IsFuncTySubType`, and `IsFuncDeclEqualType` toward the C++ declaration-override contract: identifiers must match, both declaration types must be function types, parameter types are checked for identity, returns are checked covariantly, and equality is subtype in both directions.
+- Replaced the name-only `PairIsOverrideOrImpl` approximation with C++-shaped function and property override checks. Function matching now uses static/non-static filtering, override cache lookup/update, instantiated outer/generic type mappings, expected instantiated parent mappings, promoted parent-interface mappings, parameter instantiation before identity comparison, and common/specific cross-platform exclusion.
+- Added property override matching through instantiated property types, interface-base generic mapping fallback, and top-overridden accessor map updates for same-instantiated-type property overrides.
+
+Remaining gaps:
+
+- The override cache remains a linear self-hosted table keyed by `SameDecl`/`SameTy` rather than the C++ pointer-keyed hash containers.
+- Property matching uses structural `SameTy` for instantiated target type equality because the self-hosted type manager does not model C++ allocated type pointer identity.
+- Exact diagnostics, import-manager dependent lookup, and full inherited-member accessibility filtering remain outside this pass.
+
+Verification:
+
+- `cjpm build` passes after this pass.
+- `grep -rn "TODO(selfhost:Sema)" packages/sema/src` reports 4 package-level markers, all outside the tc-core-owned files.
+- Remaining `TODO(selfhost:Sema)` markers in the tc-core-owned files listed by the task: 0.
+
 ## 2026-06-17 Continue Pass 3
 
 Files deepened:
