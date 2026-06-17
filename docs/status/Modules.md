@@ -28,6 +28,8 @@ This pass aligned additional CJO manager details with the C++ implementation: to
 
 This pass aligned dependency graph and package-order dependency collection with the C++ assumption that imports are already resolved before these phases run: unresolved imports are now skipped instead of re-running CJO lookup during graph construction or Tarjan dependency collection, and `GetAllDependencyPackageNames` uses the same full-package-name cache key shape as the C++ implementation.
 
+This pass tightened import validation and diagnostics against the C++ reference: named declaration imports now check member existence using package visibility only, with import access level reserved for imported-declaration map insertion, import-all short-circuits before package-name import checks, and warning diagnostics now retain the secondary note locations for shadowed imports, conflicting imports, and repeated feature names.
+
 ## Implemented
 
 - Replaced `ModulesScaffold.cj` with per-component source files under `packages/modules/src`.
@@ -37,6 +39,7 @@ This pass aligned dependency graph and package-order dependency collection with 
 - Replaced module-local `Position`/`Range` compatibility structs with public aliases to `cangjie_compiler::basic` and delegated range construction to Basic `MakeRange`.
 - Replaced the module-local qualified-name splitting algorithm with a wrapper around `cangjie_compiler::basic.SplitQualifiedName`, keeping the existing Modules return type for callers.
 - Added a Basic diagnostic bridge for Modules diagnostics: the compatibility `DiagnosticEngine` now wraps a real `cangjie_compiler::basic.DiagnosticEngine`, exposes it for downstream integration, resets it with local diagnostics, and forwards recognized module/import diagnostic kind strings to real `DiagKindRefactor` IDs.
+- Preserved C++-style diagnostic note locations for shadowed imports, conflicting imports, and repeated package feature names in the local diagnostic stream.
 - Implemented `CjoManager` state for source/imported package registration, package/member maps, implicit members, CJO path cache, CJO data cache, macro-only package marking, search path updates, package declaration lookup, re-export member map construction, on-demand loader traversal with common-part loader participation, and resolved re-export dependency checks.
 - Matched the C++ `GetPackageCjo` in-group source package rule: a registered source package candidate now outranks a less-specific on-disk ancestor CJO, and in-memory cached CJO data now returns the cached CJO name path just like the C++ helper.
 - Matched additional CJO manager lifecycle behavior: common-part reloads now remove previously loaded `FROM_COMMON_PART` files before appending fresh common files, `DeleteASTLoaders` clears loader handles, rebuild-index clearing clears package loaders while preserving common-part loader/cache state, and silent CJO read failures return an empty loader like the C++ helper.
@@ -53,6 +56,8 @@ This pass aligned dependency graph and package-order dependency collection with 
 - Matched C++ dependency path bookkeeping for first-write CJO path storage and unconditional `.cj.d` sidecar derivation.
 - Matched C++ standard-library dependency filtering by recording std CJO paths only when the resolved path exists.
 - Matched the C++ package-name re-export import check by reporting `package_re_export_package_name` for re-exported package imports and forwarding that diagnostic to Basic.
+- Matched C++ named import validation by filtering declaration existence with `IsVisible` only, rather than also applying the import access modifier during `CheckImports`.
+- Matched the C++ `CheckImports` branch order by skipping import-all declarations before package-name import diagnostics.
 - Matched more C++ imported-declaration alias provenance: wildcard imports now remember declaration identifiers that differ from the imported map key, and explicit alias/single imports record aliases from the full candidate member set before visibility filtering.
 - Matched the C++ `LoadPackageFromCjo` LSP path by recursively loading dependent package headers before loading declarations and references on demand.
 - Matched the C++ macro-debug file replacement path by cloning compiler-added implicit import nodes into the replacement file rather than reusing mutable import nodes from the old file.

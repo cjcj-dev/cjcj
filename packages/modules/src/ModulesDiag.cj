@@ -135,17 +135,20 @@ private func ModuleDiagKindToBasic(kind: String): Option<BasicDiagKindRefactor> 
 }
 
 public func WarnConflictImport(diag: DiagnosticEngine, name: String, current: Range, previous: Range): Unit {
-    let _ = previous
     diag.ReportWarning("package_import_conflict", "import '${name}' conflicts with an earlier import", range: current)
+    diag.ReportNote("package_import_conflict_previous", "The previous was imported here", range: previous)
 }
 
 public func WarnUselessImport(diag: DiagnosticEngine, range: Range, decl: Decl): Unit {
     diag.ReportWarning("package_useless_import", "import is shadowed by declaration '${decl.identifier}'", range: range)
+    diag.ReportNote("package_useless_import_declared_here", "'${decl.identifier}' is declared here",
+        range: MakeRange(decl.begin, decl.identifier))
 }
 
 public func WarnRepeatedFeatureName(diag: DiagnosticEngine, featureName: String, current: Range, previous: Range): Unit {
-    let _ = previous
     diag.ReportWarning("package_feature_repeated", "feature '${featureName}' is repeated", range: current)
+    diag.ReportNote("package_feature_repeated_previous", "feature '${featureName}' previously used here",
+        range: previous)
 }
 
 public func DiagForNullPackageFeature(diag: DiagnosticEngine, range: Range, referenceFeatures: ArrayList<String>): Unit {

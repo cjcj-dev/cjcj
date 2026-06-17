@@ -897,16 +897,17 @@ public class ImportManager {
                 } else if (importSpec.IsReExport() && !pkg.isMacroPackage && packageValue.isMacroPackage) {
                     diag.ReportError("package_cannot_export_macro_package",
                         "non-macro package cannot re-export a macro package", range: packageRange)
+                } else if (importSpec.IsImportAll()) {
+                    continue
                 } else if (cjoManager.IsImportPackage(importSpec)) {
                     if (importSpec.IsReExport()) {
                         diag.ReportError("package_re_export_package_name",
                             "package '${fullPackageName}' cannot be re-exported by a ${GetAccessLevelStr(importSpec)} package-name import",
                             range: packageRange)
                     }
-                } else if (!importSpec.IsImportAll() && !cjoManager.IsImportPackage(importSpec)) {
+                } else {
                     let decls = cjoManager.GetPackageMembersByName(packageValue.fullPackageName, importSpec.content.identifier)
-                    let visibleDecls = GetVisibleDeclToMap(decls, GetAccessLevel(importSpec), relation)
-                    if (visibleDecls.isEmpty()) {
+                    if (!HasVisibleDecl(decls, relation)) {
                         diag.ReportError("package_decl_not_find_in_package",
                             "declaration '${importSpec.content.identifier}' was not found in package '${fullPackageName}'",
                             range: packageRange)
@@ -914,6 +915,15 @@ public class ImportManager {
                 }
             }
         }
+    }
+
+    private func HasVisibleDecl(decls: ArrayList<Decl>, relation: PackageRelation): Bool {
+        for (decl in decls) {
+            if (IsVisible(decl, relation)) {
+                return true
+            }
+        }
+        return false
     }
 
     private func CheckRedefinition(pkg: Package): Unit {
