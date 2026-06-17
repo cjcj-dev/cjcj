@@ -62,12 +62,24 @@ public struct Position <: Hashable & Equatable<Position> {
         return ret
     }
 
+    public mut func AddAssign(rhs: Position): Unit {
+        fileID += rhs.fileID
+        line += rhs.line
+        column += rhs.column
+    }
+
     public operator func +(width: Int64): Position {
         return addColumns(width)
     }
 
     public operator func -(rhs: Position): Position {
         return Position(fileID - rhs.fileID, line - rhs.line, column - rhs.column)
+    }
+
+    public mut func SubAssign(rhs: Position): Unit {
+        fileID -= rhs.fileID
+        line -= rhs.line
+        column -= rhs.column
     }
 
     public operator func -(width: Int64): Position {

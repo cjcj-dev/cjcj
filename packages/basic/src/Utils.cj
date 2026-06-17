@@ -5,6 +5,17 @@ import std.collection.*
 public let LINUX_LINE_TERMINATOR_LENGTH: UInt8 = 1u8
 public let WINDOWS_LINE_TERMINATOR_LENGTH: UInt8 = 2u8
 
+@When[os != "Windows"]
+private let LIBSTDCXX_HASH_SEED: UInt64 = 0xc70f6907u64
+@When[os != "Windows"]
+private let LIBSTDCXX_HASH_MIX: UInt64 = 0xc6a4a7935bd1e995u64
+@When[os != "Windows"]
+private let LIBSTDCXX_HASH_SHIFT: UInt64 = 47u64
+@When[os == "Windows"]
+private let MSVC_HASH_OFFSET: UInt64 = 0xcbf29ce484222325u64
+@When[os == "Windows"]
+private let MSVC_HASH_PRIME: UInt64 = 0x100000001b3u64
+
 public func repeatString(unit: String, count: Int64): String {
     if (count <= 0) {
         return ""
@@ -16,12 +27,67 @@ public func repeatString(unit: String, count: Int64): String {
     return builder.toString()
 }
 
-public func GetHash(content: String): UInt64 {
-    var hash = 0u64
-    for (byte in content.toArray()) {
-        hash = (hash * 131u64 + UInt64(byte)) % 4294967291u64
+@When[os != "Windows"]
+private func loadUInt64LittleEndian(bytes: Array<UInt8>, start: Int64): UInt64 {
+    var value = 0u64
+    var idx = 0
+    while (idx < 8) {
+        value |= UInt64(bytes[start + idx]) << UInt64(idx * 8)
+        idx++
+    }
+    return value
+}
+
+@When[os != "Windows"]
+private func libStdCxxHashBytes(bytes: Array<UInt8>): UInt64 {
+    var remaining = bytes.size
+    var cursor = 0
+    var hash = LIBSTDCXX_HASH_SEED ^ (UInt64(remaining) * LIBSTDCXX_HASH_MIX)
+    while (remaining >= 8) {
+        var k = loadUInt64LittleEndian(bytes, cursor)
+        k *= LIBSTDCXX_HASH_MIX
+        k ^= k >> LIBSTDCXX_HASH_SHIFT
+        k *= LIBSTDCXX_HASH_MIX
+        hash ^= k
+        hash *= LIBSTDCXX_HASH_MIX
+        cursor += 8
+        remaining -= 8
+    }
+    let tailSize = remaining
+    var shift = 0u64
+    while (remaining > 0) {
+        hash ^= UInt64(bytes[cursor]) << shift
+        cursor++
+        shift += 8u64
+        remaining--
+    }
+    if (tailSize > 0) {
+        hash *= LIBSTDCXX_HASH_MIX
+    }
+    hash ^= hash >> LIBSTDCXX_HASH_SHIFT
+    hash *= LIBSTDCXX_HASH_MIX
+    hash ^= hash >> LIBSTDCXX_HASH_SHIFT
+    return hash
+}
+
+@When[os == "Windows"]
+private func msvcStringHash(bytes: Array<UInt8>): UInt64 {
+    var hash = MSVC_HASH_OFFSET
+    for (byte in bytes) {
+        hash ^= UInt64(byte)
+        hash *= MSVC_HASH_PRIME
     }
     return hash
+}
+
+@When[os == "Windows"]
+public func GetHash(content: String): UInt64 {
+    return msvcStringHash(content.toArray())
+}
+
+@When[os != "Windows"]
+public func GetHash(content: String): UInt64 {
+    return libStdCxxHashBytes(content.toArray())
 }
 
 public func SplitLines(str: String): Array<String> {
@@ -60,7 +126,11 @@ public func SplitString(str: String, delimiter: String): Array<String> {
         return Array<String>()
     }
     if (delimiter.isEmpty()) {
-        return [str]
+        let emptySplits = ArrayList<String>()
+        for (_ in 0..(str.size + 1)) {
+            emptySplits.add("")
+        }
+        return emptySplits.toArray()
     }
     let res = ArrayList<String>()
     var pos: Int64 = 0

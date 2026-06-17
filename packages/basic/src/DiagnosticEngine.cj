@@ -17,6 +17,30 @@ public enum DiagArgumentKind {
     | POSITION
 }
 
+private let DIAG_INT_MODULUS: Int64 = 4294967296
+private let DIAG_INT_SIGN_BIT: Int64 = 2147483648
+private let DIAG_UINT_MASK: UInt64 = 0xffffffffu64
+private let DIAG_UINT_SIGN_BIT: UInt64 = 0x80000000u64
+
+private func NarrowDiagnosticInt(value: Int64): Int64 {
+    var remainder = value % DIAG_INT_MODULUS
+    if (remainder < 0) {
+        remainder += DIAG_INT_MODULUS
+    }
+    if (remainder >= DIAG_INT_SIGN_BIT) {
+        return remainder - DIAG_INT_MODULUS
+    }
+    return remainder
+}
+
+private func NarrowDiagnosticUInt(value: UInt64): Int64 {
+    let lowBits = value & DIAG_UINT_MASK
+    if (lowBits >= DIAG_UINT_SIGN_BIT) {
+        return Int64(lowBits) - DIAG_INT_MODULUS
+    }
+    return Int64(lowBits)
+}
+
 private func DiagArgumentKindIndex(kind: DiagArgumentKind): Int64 {
     return match (kind) {
         case DiagArgumentKind.INT => 0
@@ -51,15 +75,22 @@ public class DiagArgument {
 
     public init(value: Int64) {
         kind = DiagArgumentKind.INT
-        intValue = value
+        intValue = NarrowDiagnosticInt(value)
         stringValue = ""
         positionValue = DEFAULT_POSITION
     }
 
     public init(value: UInt64) {
         kind = DiagArgumentKind.INT
-        intValue = Int64(value)
+        intValue = NarrowDiagnosticUInt(value)
         stringValue = ""
+        positionValue = DEFAULT_POSITION
+    }
+
+    public init(value: UInt8) {
+        kind = DiagArgumentKind.CHAR
+        intValue = 0
+        stringValue = String.fromUtf8([value])
         positionValue = DEFAULT_POSITION
     }
 

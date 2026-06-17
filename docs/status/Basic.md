@@ -6,6 +6,13 @@ Build: `cjpm build` passes.
 
 Deepening pass updates:
 
+- Replaced the Basic-local placeholder polynomial `Utils::GetHash` with the C++ reference's platform string-hash
+  behavior for this selfhost target: the non-Windows path now implements libstdc++ `_Hash_bytes`/`std::hash<string>`
+  mixing, with a Windows FNV path matching MSVC-style string hashing. This makes source file hashes and CJMP hash IDs
+  align with the C++ `Utils::GetHash` contract instead of using a port-only hash.
+- Added explicit mutating `Position.AddAssign` and `Position.SubAssign` methods for the C++ `operator+=` and
+  `operator-=` behavior. Cangjie cannot return `this` from a mutable struct method, so the methods mutate in place and
+  return `Unit` while preserving the C++ field-update semantics.
 - Aligned diagnostic text rendering for missing backing source files with the C++ emitter: location lines are skipped
   when `SourceManager::IsSourceFileExist` is false, and source excerpts omit numbered prefixes in that case while
   keeping the gutter/source body.
@@ -62,6 +69,19 @@ Deepening pass updates:
   and only degrade to `DIAG_RANGE_ERROR` when `EnableCheckRangeErrorCodeRatherICE()` is active.
 - Tightened the Basic-local `WarningOptionMgr` compatibility shim to match the C++ warning manager's vector
   replacement API and invalid-index assertions while retaining the selfhost bulk boolean helper used by `option`.
+- Matched the C++ CJMP source-file ID path in `SourceManager`: the stored `fileHash` remains the full
+  `Utils::GetHash()` value, while CJMP file IDs now use the low 32 bits just like the reference
+  `static_cast<unsigned int>(hashValue)` path.
+- Matched C++ diagnostic argument integer narrowing for `int64_t` and `size_t` inputs by storing the same
+  two's-complement 32-bit value that the reference `std::variant<int, ...>` receives before `%d` formatting.
+- Matched the C++ `Utils::SplitString` empty-delimiter edge case: non-empty strings now produce the same
+  `std::string::find("")` zero-length split slots while empty input still returns no splits.
+- Restored the C++ diagnostic formatter's mismatch side effects: unsupported `%` directives and wrong argument kinds
+  now emit `Errorln` diagnostics while leaving the original placeholder in the formatted message, and `%c` has a real
+  byte-character `DiagArgument` constructor.
+- Matched the C++ diagnostic emitter's default-position branch: source-less notes are emitted before the early return
+  only for the reference text-only warning groups (`DRIVER_ARG` and `UNSUPPORT_COMPILE_SOURCE`), so unrelated
+  default-position diagnostics no longer leak notes or helps.
 
 Implemented:
 
@@ -86,6 +106,14 @@ Implemented:
   libast callers while restoring fatal behavior in the normal diagnostic path.
 - Extended the Basic-local warning suppression manager with the C++ whole-vector `UpdateFlags` shape and C++-style
   range checks for single-flag updates/lookups.
+- Preserved C++ hash-width behavior for CJMP file IDs without changing the full source-file hash stored on each
+  `Source`.
+- Matched C++ `DiagArgument` integer storage for wide signed and unsigned inputs, including wraparound values that
+  differ from their original 64-bit representation.
+- Aligned `SplitString` and legacy diagnostic format-argument handling with the C++ edge cases for empty delimiters,
+  `%c` character arguments, bad argument kinds, and illegal format characters.
+- Aligned default-position diagnostic emission with the C++ text-only warning gate, including the duplicate-note
+  behavior for text-only warnings that later receive a source range.
 - Kept LLVM/native backend out of scope as required; Basic does not bind LLVM directly.
 
 Known fidelity caveats:

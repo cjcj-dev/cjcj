@@ -158,7 +158,11 @@ public class DiagnosticEngineImpl {
     private func getArgStr(formatChar: UInt8, formatArgs: ArrayList<DiagArgument>, index: Int64, diagnostic: Diagnostic): String {
         let arg = formatArgs[index]
         if (formatChar == b'd') {
-            return if (arg.kind == DiagArgumentKind.INT) { "${arg.intValue}" } else { "" }
+            if (arg.kind == DiagArgumentKind.INT) {
+                return "${arg.intValue}"
+            }
+            Errorln("The num ${index}format parameter does not match")
+            return ""
         }
         if (formatChar == b's') {
             if (arg.kind == DiagArgumentKind.STRING) {
@@ -167,14 +171,15 @@ public class DiagnosticEngineImpl {
                 }
                 return arg.stringValue
             }
+            Errorln("The num ${index}format parameter does not match")
             return ""
         }
         if (formatChar == b'c') {
-            return if (arg.kind == DiagArgumentKind.CHAR || arg.kind == DiagArgumentKind.STRING) {
-                arg.stringValue
-            } else {
-                ""
+            if (arg.kind == DiagArgumentKind.CHAR) {
+                return arg.stringValue
             }
+            Errorln("The num ${index}format parameter does not match")
+            return ""
         }
         if (formatChar == b'p') {
             if (arg.kind == DiagArgumentKind.POSITION) {
@@ -182,8 +187,10 @@ public class DiagnosticEngineImpl {
                 let path = GetSourceManager().GetSource(pos.fileID).path
                 return path + ":" + "${pos.line}" + ":" + "${pos.column}"
             }
+            Errorln("The num ${index}format parameter does not match")
             return ""
         }
+        Errorln("%" + String.fromUtf8([formatChar]) + " is illegal format")
         return ""
     }
 
