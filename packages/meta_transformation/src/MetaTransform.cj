@@ -111,11 +111,41 @@ public abstract class CHIRPackageMetaTransform <: MetaTransform<CHIRPackage> {
 
 public struct MetaTransformPluginInfo {
     public let cjcVersion: String
-    public let registerTo: MetaTransformRegisterCallback
+    public let registerTo: Option<MetaTransformRegisterCallback>
 
     public init(cjcVersion: String, registerTo: MetaTransformRegisterCallback) {
         this.cjcVersion = cjcVersion
+        this.registerTo = Some(registerTo)
+    }
+
+    public init(cjcVersion: String) {
+        this.cjcVersion = cjcVersion
+        this.registerTo = None
+    }
+
+    public init(cjcVersion: String, registerTo: Option<MetaTransformRegisterCallback>) {
+        this.cjcVersion = cjcVersion
         this.registerTo = registerTo
+    }
+
+    public func HasRegisterCallback(): Bool {
+        return registerTo.isSome()
+    }
+
+    public func IsValidForVersion(version: String): Bool {
+        return cjcVersion == version && HasRegisterCallback()
+    }
+
+    public func IsValid(): Bool {
+        return IsValidForVersion(CANGJIE_VERSION)
+    }
+
+    public func RegisterTo(builder: MetaTransformPluginBuilder): Bool {
+        if (let Some(callback) <- registerTo) {
+            callback(builder)
+            return true
+        }
+        return false
     }
 }
 

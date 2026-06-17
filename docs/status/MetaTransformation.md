@@ -41,6 +41,13 @@ Implemented:
   preserve the C++ macro's type-specific construction path more closely for Cangjie plugins that derive
   from `CHIRFunctionMetaTransform` or `CHIRPackageMetaTransform`; the helpers are generic over the
   concrete transform subclass so plugin factories can return the actual plugin type like the C++ macro.
+- Tightened `MetaTransformPluginInfo` nullability: the C++ `registerTo` function pointer can be absent
+  and the C++ frontend validity check rejects that state, so the Cangjie port now stores it as
+  `Option<MetaTransformRegisterCallback>`. Valid factory helpers still use the direct callback
+  constructor, while invalid/no-callback plugin info can be represented explicitly.
+- Added plugin-info validation and registration helpers (`HasRegisterCallback`, `IsValidForVersion`,
+  `IsValid`, and `RegisterTo`) so the version/callback checks used by the C++ plugin loader are
+  available in the self-hosted API without using null.
 
 Known fidelity caveats:
 
@@ -49,9 +56,13 @@ Known fidelity caveats:
   mechanism in this port, so direct subclasses of `MetaTransform<DeclT>` must pass a kind explicitly.
   Plugins should use `CHIRFunctionMetaTransform`/`CHIRPackageMetaTransform` and the typed plugin-info
   helpers when they need the C++ macro's CHIR function/package behavior.
+- A constructor-time runtime type check was tested as a possible workaround for the generic kind
+  inference gap, but cjc rejects use of `this` as an expression inside abstract-class constructors.
 - Cangjie has no direct preprocessor macro equivalent for `CHIR_PLUGIN`; `MakeCHIRPluginInfo` preserves
   the registration behavior but not the C++ macro spelling.
 - Cangjie does not expose C++-style nested tag declarations in the style used by `MetaKind::CHIR`, so the
   CHIR tag is represented as `MetaKindCHIR` alongside the public `MetaKind` marker.
+- Cross-module plugin loading and execution are still not wired through the self-hosted frontend/CHIR
+  pipeline; this status file tracks only the scoped `packages/meta_transformation/src` port.
 
 Remaining MetaTransformation selfhost markers: 0.
