@@ -25,7 +25,7 @@ returns lower through `CreateLiteralReturnBody`).
 The following programs compile with the self-host `cjc`
 (`./target/release/bin/cangjie_compiler::cjc`) and run with the verified behavior
 shown. Each was re-verified by real compile-and-run on 2026-06-18 (latest: the
-`struct` milestone, `opus20/structs`) after merging
+`Float64` milestone, `opus21/float`) after merging
 `opus2/int-arith-return`, `opus2/println-int`, `opus3/real-expr`,
 `opus4/control-flow` (var/assign, relational ops, `if`/`while` via real CHIR
 blocks), `opus5/func-calls` (user-defined function calls + recursion via
@@ -53,7 +53,10 @@ destructured; each field lives in its OWN Int64 slot of a `{tag, f0, f1, ...}`
 buffer, NOT bit-packed, so arbitrarily large field values round-trip losslessly), and
 `opus20/structs` (`struct` with `Int64` fields -- construction via `init`, field read/write,
 instance methods, and structs as function parameters/returns; a struct value is a heap buffer
-of its field slots whose address travels through the `Int64` ABI)
+of its field slots whose address travels through the `Int64` ABI), and
+`opus21/float` (`Float64` on the real path -- floating literals, `+ - * /` arithmetic,
+relational comparisons, `Float64` locals/params/returns, and `println`/`print` of a
+runtime `Float64`, all matching the reference cjc's `%f`-style text output)
 into `main`:
 
 | Source | Verified behavior |
@@ -101,6 +104,11 @@ into `main`:
 | `... main(): Int64 { var p=Point(1,1); p.x=5; return p.x+p.y }` | exits with code `6` -- a mutable struct field write `p.x=5`, then read back (struct CUT 2) |
 | `struct Point{...; func dist2():Int64{return this.x*this.x+this.y*this.y}}` ⏎ `main(): Int64 { let p=Point(3,4); return p.dist2() }` | exits with code `25` -- an instance method reading `this.x`/`this.y` (struct CUT 3) |
 | `func sx(p:Point):Int64{return p.x}` ⏎ `func mk(a,b):Point{return Point(a,b)}` ⏎ `main(): Int64 { return sx(mk(8,2)) }` | exits with code `8` -- a struct passed as a function parameter and returned from a function across real CHIR `Apply`s (struct CUT 4) |
+| `main() { let x = 3.5` ⏎ `let y = 2.0` ⏎ `println(x + y) }` | prints `5.500000` -- `Float64` locals + runtime `Add` + `Float64` print, byte-for-byte equal to the reference cjc (Float64) |
+| `main() { println(9.0 / 2.0) }` | prints `4.500000` -- a runtime `Float64` division, equal to the reference cjc (Float64) |
+| `main(): Int64 { let x = 3.5; if (x > 2.0) { return 1 } else { return 0 } }` | exits with code `1` -- a `Float64` relational comparison used as a branch condition (Float64) |
+| `func half(x: Float64): Float64 { return x / 2.0 }` ⏎ `main() { println(half(9.0)) }` | prints `4.500000` -- a `Float64` parameter + `Float64` return across a real CHIR `Apply`, equal to the reference cjc (Float64) |
+| `main() { var s=0.0; var i=0; while (i<4) { s=s+1.5; i=i+1 }; println(s) }` | prints `6.000000` -- a `Float64` loop accumulator (`var` reassignment + runtime `Add`), equal to the reference cjc (Float64) |
 | `main() { let ok = 5 > 3; println("ok=${ok}") }` | prints `ok=true` -- a `Bool` interpolated expression stringified to `true`/`false` |
 | `main() { println("hello selfhost") }` | prints `hello selfhost` + newline |
 | `main() { print("a"); print("b"); println("c") }` | prints `abc` + newline |
@@ -506,6 +514,35 @@ Capability detail:
   `x=42`, FizzBuzz, fib loop -> `55`, `repeat("ab",3)` -> `ababab`, `fact(5)` -> `120`, and the
   mixed-print body -> `123` all still pass (no regression).
 
+- **`Float64` milestone (`opus21/float`):** the real body-lowering path now models `Float64`
+  as a first-class value. Supported: floating-point literals (`3.5`, `2.0`), `Float64`-typed
+  `let`/`var` locals with reassignment, `+ - * /` arithmetic over `Float64`, relational
+  comparisons (`>`, `<`, etc.) on `Float64` producing a `Bool` branch condition, `Float64`
+  function parameters and a `Float64` return type across a real CHIR `Apply`, and
+  `println`/`print` of a runtime-computed `Float64` value. It is additive and gated like the
+  prior milestones: a body using any construct outside the supported real grammar leaves
+  `hasRealBody == false` and falls back to the summary path, so the already-verified
+  Int64/Bool/String/loop/func/array/match/enum/struct slices stay byte-for-byte. The spec
+  model (`packages/chir/src/AST2CHIR.cj`) gains a `FLOAT_LITERAL` `AST2CHIRExprSpec` kind, and
+  the existing arithmetic/relational binary ops, locals, params, and prints carry a `Float64`
+  CHIR primitive type through `Value.cj`; `TranslateFuncBody.cj` infers the `Float64` slot
+  element type and records a runtime `Float64` print directive. Codegen
+  (`packages/codegen/src/EmitExpressionIR.cj` + `EmitPrintIR.cj`) routes a runtime `Float64`
+  value to a new float print path that emits a `printf` with the reference cjc's `%f`-style
+  float format (e.g. `5.5` prints `5.500000`), so the self-host output is byte-for-byte equal
+  to `/root/.cjv/bin/cjc` on the same program. The real parser adapter
+  (`packages/frontend/src/RealParseBridge.cj`) recognizes float literals, `Float64`-typed
+  locals/params/returns, and `Float64`-returning calls, mapping the `Float64` source type
+  through the real-body machinery and promoting such bodies to the real path. Verified at
+  runtime, each compared byte-for-byte against the reference cjc on the same source (no
+  folding): `let x=3.5; let y=2.0; println(x+y)` -> `5.500000`; `println(9.0/2.0)` ->
+  `4.500000`; `let x=3.5; if (x>2.0){return 1}else{return 0}` -> exit `1`;
+  `func half(x:Float64):Float64{return x/2.0}; println(half(9.0))` -> `4.500000`;
+  `var s=0.0; var i=0; while(i<4){s=s+1.5; i=i+1}; println(s)` -> `6.000000`. All previously
+  verified slices still pass (recursive AST eval -> `23`, cons-list sum -> `6`, array
+  find-max -> `8`, interp `x=42`, FizzBuzz, fib loop -> `55`, repeat -> `ababab`, `fact(5)` ->
+  `120`, mixed-print -> `123`, struct read `7` / method `25`) -- no regression.
+
 These are the only source constructs the integrated pipeline lowers end to end
 today; anything else still flows through the compatibility models described
 below.
@@ -540,8 +577,10 @@ and silently fall back:
   `Int64` fields -- construction, field read/write, instance methods, and struct
   params/returns -- is now supported on the real path, `opus20/structs`; a struct with a
   non-`Int64` field type and any `class` still fall back to the summary path).
-- **`Float64`** (and other non-`Int64` numeric widths) -- literals, arithmetic, and
-  printing of a `Float`/other-width integer value.
+- **Other non-`Int64`/`Float64` numeric widths** (`Int32`, `UInt64`, `Float32`, etc.) --
+  literals, arithmetic, and printing. (`Float64` is now supported on the real path --
+  `opus21/float`: literals, `+ - * /`, relational comparisons, locals/params/returns, and
+  print, all matching the reference cjc.)
 - **Lambdas / closures** (`{ x => ... }`) and first-class function values.
 - **`for-in` over a `String`** (and over collections / other non-range, non-`Array<Int64>`
   iterables).
@@ -577,12 +616,15 @@ slice must be confirmed by a real compile-and-run with a known expected output.
   (`malloc` + `snprintf` / `"true"`/`"false"` globals) is likewise not the production
   `String` machinery and also leaks the `malloc`. Replace the CString model with the real runtime `String`
   representation and route concat/print/compare through the runtime's `String`
-  construct/concat/print symbols. Printing (or otherwise computing with) an other-width
-  integer or `Float` value is also still not wired -- extend the PRINT lowering /
-  `EmitRuntime*Print` (format selection) once those value types flow through the real body.
+  construct/concat/print symbols. A `Float64` value now lowers to a `printf`-`%f` print
+  matching the reference cjc (`opus21/float`); printing (or otherwise computing with) an
+  other-width integer or other-width `Float` value is still not wired -- extend the PRINT
+  lowering / `EmitRuntime*Print` (format selection) once those value types flow through the
+  real body.
 - **More operators and statement kinds on the real path.** Compound
-  assignment (`+=` etc.), `class` (and inheritance), `Float64`, and lambdas/closures are
-  still unsupported (the body falls back to the summary path); an `Int64`-field `struct`
+  assignment (`+=` etc.), `class` (and inheritance), and lambdas/closures are
+  still unsupported (the body falls back to the summary path); `Float64` (literals, arithmetic,
+  relational, locals/params/returns, print) is now supported (`opus21/float`); an `Int64`-field `struct`
   with construction, field read/write, instance methods, and struct params/returns is now
   supported (`opus20/structs`). `match` on an `Int64` selector
   (literal / wildcard / single-variable-binding patterns, statement and value forms) is now
@@ -606,7 +648,7 @@ slice must be confirmed by a real compile-and-run with a known expected output.
   arithmetic fold, so all bodies flow through `RealParseBridge` ->
   `AST2CHIRStmtSpec` -> `CreateRealBody`.
 - Extend the real-body adapter to more statement kinds and types beyond `Int64`,
-  `Bool`, and `String` (other integer/`Float` widths, `for-in` over non-range
+  `Bool`, `String`, and `Float64` (other integer/`Float` widths, `for-in` over non-range
   iterables, `match`); deepen `String` beyond literal/concat/print to the real
   runtime `String` representation with methods, indexing, and comparison.
 - Converge `frontend.*` / `parse.*` / `ast.*` (make the bridge consume `ast.*`
@@ -634,7 +676,7 @@ return a + b` slice that exits 5 via a runtime CHIR `Add`) is in
 | C++ reference components with no same-named `.cj` component | 172 |
 | Required build command | `cjpm build` |
 | Build result | pass |
-| Build notes | `cjpm build` succeeds (a few unused-variable/unused-import warnings on the real-body + match/enum/struct adapter sources) |
+| Build notes | `cjpm build` succeeds (a few unused-variable/unused-import warnings on the real-body + match/enum/struct/float adapter sources) |
 
 Only source markers are counted as remaining work markers. Historical mentions
 inside `docs/status/*.md` are documentation references, not live source TODOs.
