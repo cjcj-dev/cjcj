@@ -38,6 +38,8 @@ This continuation de-isolated the package declaration spec used by Modules files
 
 This pass de-isolated the package feature directive layer to the real `cangjie_compiler::ast.FeaturesDirective`: local files can now carry real feature AST nodes, the bridge reconstructs them from serialized feature data, dependency JSON/common-specific checks read real feature nodes when available, and `ImportManager.CheckPackageFeatureSpec` now follows the C++ reference algorithm for repeated feature diagnostics, reference feature selection, missing feature files, annotation consistency, and two-diagnostic limiting.
 
+This continuation tightened Modules diagnostic fidelity: note-bearing Modules helpers now forward a single real Basic diagnostic with attached notes instead of only forwarding the primary message. Shadowed imports, conflicting imports, repeated features, missing/inconsistent feature directives, package-name mismatches, and root-package modifier diagnostics now preserve their C++-style secondary note ranges in both the local diagnostic stream and the wrapped Basic `DiagnosticEngine`; missing `@NonProduct` now reports the real `parse_fail_expected_annotation` kind.
+
 ## Implemented
 
 - Replaced `ModulesScaffold.cj` with per-component source files under `packages/modules/src`.
@@ -52,6 +54,7 @@ This pass de-isolated the package feature directive layer to the real `cangjie_c
 - Replaced the module-local qualified-name splitting algorithm with a wrapper around `cangjie_compiler::basic.SplitQualifiedName`, keeping the existing Modules return type for callers.
 - Added a Basic diagnostic bridge for Modules diagnostics: the compatibility `DiagnosticEngine` now wraps a real `cangjie_compiler::basic.DiagnosticEngine`, exposes it for downstream integration, resets it with local diagnostics, and forwards recognized module/import diagnostic kind strings to real `DiagKindRefactor` IDs.
 - Preserved C++-style diagnostic note locations for shadowed imports, conflicting imports, and repeated package feature names in the local diagnostic stream.
+- Added note-aware Basic forwarding for Modules diagnostics that mirror C++ `DiagnosticBuilder.AddNote` paths, including package features, repeated imports, package-name mismatches, and root-package visibility diagnostics.
 - Implemented `CjoManager` state for source/imported package registration, package/member maps, implicit members, CJO path cache, CJO data cache, macro-only package marking, search path updates, package declaration lookup, re-export member map construction, on-demand loader traversal with common-part loader participation, and resolved re-export dependency checks.
 - Matched the C++ `GetPackageCjo` in-group source package rule: a registered source package candidate now outranks a less-specific on-disk ancestor CJO, and in-memory cached CJO data now returns the cached CJO name path just like the C++ helper.
 - Matched additional CJO manager lifecycle behavior: common-part reloads now remove previously loaded `FROM_COMMON_PART` files before appending fresh common files, `DeleteASTLoaders` clears loader handles, rebuild-index clearing clears package loaders while preserving common-part loader/cache state, and silent CJO read failures return an empty loader like the C++ helper.
@@ -92,7 +95,7 @@ This pass de-isolated the package feature directive layer to the real `cangjie_c
 
 ## Important Blockers
 
-- Real C++ parity still requires full AST node/declaration integration, full Basic diagnostic builder/source-manager call-site conversion, Sema/TypeManager, and flatbuffers/native CJO format support. Option, Basic source location types, Utils package constants/stdlib lookup, AST access/import/attribute/package-spec/feature-directive types, and a first diagnostic forwarding bridge are now wired to the real packages.
+- Real C++ parity still requires full AST node/declaration integration, full Basic diagnostic builder/source-manager call-site conversion, Sema/TypeManager, and flatbuffers/native CJO format support. Option, Basic source location types, Utils package constants/stdlib lookup, AST access/import/attribute/package-spec/feature-directive types, and a note-preserving diagnostic forwarding bridge are now wired to the real packages.
 - The local serialization format is not the production `.cjo` flatbuffer format. It is a compiling, behavior-bearing bridge for the isolated package, not a faithful replacement for C++ AST serialization.
 - Type/reference/expression/incremental deserialization has package-local working logic, but it still cannot consume the production C++ flatbuffer schema until real AST/Sema dependencies are available.
 
@@ -100,7 +103,7 @@ This pass de-isolated the package feature directive layer to the real `cangjie_c
 
 - Replace the remaining module-local AST/Basic compatibility models with the real packages and adapt Modules call sites to AST `Identifier`, `Modifier`, `AttributePack`, and typed declaration subclasses.
 - Bind the real flatbuffer module format and implement full `ASTWriter`, `ASTLoader`, expression writer/loader, reference loader, production CJMP common-part loading, and incremental cache loading.
-- Replace remaining free-form compatibility diagnostics with exact Basic diagnostic builder calls and C++ note/hint structure.
+- Replace remaining free-form compatibility diagnostics with exact Basic diagnostic builder calls, arguments, and hint structure.
 - Audit import/package lookup behavior against the C++ test corpus after downstream Sema/Frontend callers are available.
 
 Remaining Modules selfhost markers: 0.

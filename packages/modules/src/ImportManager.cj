@@ -1067,13 +1067,15 @@ public class ImportManager {
         }
         let refFile = referenceFile.getOrThrow()
         let referenceFeatures = CollectUniqueFeatures(refFile)
+        let referenceRange = MakeRange(refFile.begin, refFile.end)
         var reported: Int64 = 0
         for (file in pkg.files) {
             if (reported >= 2) {
                 return
             }
             if (file.features.isEmpty()) {
-                DiagForNullPackageFeature(diag, MakeRange(file.begin, file.end), referenceFeatures)
+                DiagForNullPackageFeature(diag, MakeRange(file.begin, file.end), referenceFeatures,
+                    referenceRange: referenceRange)
                 reported++
                 continue
             }
@@ -1084,7 +1086,8 @@ public class ImportManager {
                     MakeRange(file.begin, file.end),
                     currentFeatures,
                     referenceFeatures,
-                    hasNonProductFile
+                    hasNonProductFile,
+                    referenceRange: referenceRange
                 )
                 reported++
             }
@@ -1102,21 +1105,26 @@ public class ImportManager {
         if (invalidFeatures.isEmpty()) {
             return
         }
-        let referenceFeatures = CollectFileFeatureNames(validation.referenceFile.getOrThrow())
+        let referenceFile = validation.referenceFile.getOrThrow()
+        let referenceFeatures = CollectFileFeatureNames(referenceFile)
+        let referenceRange = FeatureReferenceRange(referenceFile)
         var counter: Int64 = 0
         for (file in invalidFeatures) {
             if (counter >= 2) {
                 return
             }
             if (let None <- file.feature) {
-                DiagForNullPackageFeature(diag, MakeRange(file.begin, file.end), referenceFeatures)
+                DiagForNullPackageFeature(diag, MakeRange(file.begin, file.end), referenceFeatures,
+                    referenceRange: referenceRange)
             } else {
                 DiagForDifferentPackageFeatureConsistency(
                     diag,
                     FeatureDirectiveDiagRange(file, validation.hasAnnotation),
                     CollectFileFeatureNames(file),
                     referenceFeatures,
-                    validation.hasAnnotation
+                    validation.hasAnnotation,
+                    referenceRange: referenceRange,
+                    missingNonProductAnnotation: validation.hasAnnotation && FeatureAnnotationsEmpty(file)
                 )
             }
             counter++
@@ -1245,6 +1253,23 @@ public class ImportManager {
             return MakeRange(featureDirective.begin, featureDirective.end)
         }
         return MakeRange(file.begin, file.end)
+    }
+
+    private func FeatureReferenceRange(file: File): Range {
+        if (let Some(featureDirective) <- file.feature) {
+            if (let Some(set) <- featureDirective.featuresSet) {
+                return MakeRange(set.begin, set.end)
+            }
+            return MakeRange(featureDirective.begin, featureDirective.end)
+        }
+        return MakeRange(file.begin, file.end)
+    }
+
+    private func FeatureAnnotationsEmpty(file: File): Bool {
+        if (let Some(featureDirective) <- file.feature) {
+            return featureDirective.annotations.isEmpty()
+        }
+        return true
     }
 
     private func AddImportedDeclsForSourcePackage(pkg: Package): Unit {
@@ -1736,21 +1761,22 @@ public class ImportManager {
         for (record in records) {
             names.add(record.DisplayText())
         }
-        diag.ReportError("package_name_inconsistent", "source files declare different package names: " +
-            JoinStrings(names, ", "), range: MakeRange(primary.position, primary.fullPackageName))
+        let notes = ArrayList<ModuleDiagnostic>()
         var counter: Int64 = 0
         for (record in records) {
             if (counter >= 2) {
-                return
+                break
             }
             if (SamePosition(record.position, primary.position)) {
                 continue
             }
-            diag.ReportNote("package_name_inconsistent_other",
+            notes.add(ModuleDiagnostic("package_name_inconsistent_other",
                 "another different package declaration '" + record.DisplayText() + "'",
-                range: MakeRange(record.position, record.fullPackageName))
+                MakeRange(record.position, record.fullPackageName), DiagnosticSeverity.NOTE))
             counter++
         }
+        diag.ReportErrorWithNotes("package_name_inconsistent", "source files declare different package names: " +
+            JoinStrings(names, ", "), MakeRange(primary.position, primary.fullPackageName), notes)
     }
 
     private func SelectPrimaryPackageSpecRecord(records: ArrayList<PackageSpecDiagRecord>): PackageSpecDiagRecord {
