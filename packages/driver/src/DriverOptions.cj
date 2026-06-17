@@ -1,6 +1,8 @@
 package cangjie_compiler::driver
 
 import std.collection.*
+import cangjie_compiler::option.Backend as OptionBackend
+import cangjie_compiler::option.BackendToString as OptionBackendToString
 
 public let OBFUCATION_LEVEL_MIN: Int64 = 1
 public let OBFUCATION_LEVEL_MAX: Int64 = 9
@@ -11,13 +13,6 @@ private func HasStringValue(value: Option<String>): Bool {
 
 private func HasBoolValue(value: Option<Bool>): Bool {
     return if (let Some(_) <- value) { true } else { false }
-}
-
-private func BackendToString(backend: BackendType): String {
-    return match (backend) {
-        case BackendType.CJNATIVE => "cjnative"
-        case BackendType.UNKNOWN => "unknown"
-    }
 }
 
 public class DriverOptions {
@@ -207,6 +202,14 @@ public class DriverOptions {
     public func EnableHwAsan(): Bool { return sanitizerType == SanitizerType.HWADDRESS }
     public func EnableSanitizer(): Bool { return EnableAsan() || EnableTsan() || EnableHwAsan() }
 
+    public func GetOptionsBackend(): OptionBackend {
+        return if (backend == BackendType.CJNATIVE) { OptionBackend.CJNATIVE } else { OptionBackend.UNKNOWN }
+    }
+
+    public func HasInputs(): Bool {
+        return !srcFiles.isEmpty() || !inputObjs.isEmpty() || !inputLibraries.isEmpty() || !bcInputFiles.isEmpty()
+    }
+
     public func IsCrossCompiling(): Bool {
         return !host.Equal(target)
     }
@@ -225,7 +228,7 @@ public class DriverOptions {
             }
             name += "_" + envName
         }
-        return name + "_" + target.ArchToString() + "_" + BackendToString(backend)
+        return name + "_" + target.ArchToString() + "_" + OptionBackendToString(backend)
     }
 
     public func SanitizerTypeToShortString(): String {

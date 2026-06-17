@@ -24,6 +24,11 @@ Current status:
   `FileUtil`. Driver-owned model types remain only for Driver concepts such as
   tool IDs, tool futures, ordered inputs, environment options, and temp-file
   records.
+- Driver help output now delegates to the shared `option.OptionTable.Usage`
+  path with the real global/driver option groups and experimental-mode
+  filtering, replacing the local abbreviated compatibility usage text. Version
+  and help no-op warnings now consider all classified input kinds, matching the
+  C++ Driver's `ArgList::GetInputs()` behavior more closely.
 - Target parsing now fills the real option `TripleInfo` shape, including
   vendor, Android API, Apple/iOS simulator environments, and the C++ `dylib`
   compile-target mapping to `SHARED_LIB`. Host/target defaults are initialized
