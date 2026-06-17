@@ -189,7 +189,7 @@ extend ParserImpl {
     }
 
     public func SeeingPrimaryConstructor(scopeKind: ScopeKind): Bool {
-        return (scopeKind == ScopeKind.CLASS_BODY || scopeKind == ScopeKind.STRUCT_BODY) &&
+        return (ScopeKindEquals(scopeKind, ScopeKind.CLASS_BODY) || ScopeKindEquals(scopeKind, ScopeKind.STRUCT_BODY)) &&
             SeeingPrimaryIdentifier()
     }
 
@@ -198,8 +198,9 @@ extend ParserImpl {
     }
 
     public func IsConditionExprKind(ek: ExprKind): Bool {
-        return ek == ExprKind.IF_COND_EXPR || ek == ExprKind.WHILE_COND_EXPR ||
-            ek == ExprKind.EXPR_IN_IF_COND_TUPLE || ek == ExprKind.EXPR_IN_WHILE_COND_TUPLE
+        return ExprKindEquals(ek, ExprKind.IF_COND_EXPR) || ExprKindEquals(ek, ExprKind.WHILE_COND_EXPR) ||
+            ExprKindEquals(ek, ExprKind.EXPR_IN_IF_COND_TUPLE) ||
+            ExprKindEquals(ek, ExprKind.EXPR_IN_WHILE_COND_TUPLE)
     }
 
     public func SeeingInvalidParamListInLambdaExpr(): Bool {

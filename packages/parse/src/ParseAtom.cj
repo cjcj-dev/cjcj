@@ -331,9 +331,11 @@ extend ParserImpl {
         if (Skip(TokenKind.RPAREN)) {
             return LitConstExpr(LitConstKind.UNIT, Token(TokenKind.UNIT_LITERAL, "()", left.Begin(), lastToken.End()))
         }
-        let childKind = if (ek == ExprKind.IF_COND_EXPR || ek == ExprKind.EXPR_IN_IF_COND_TUPLE) {
+        let childKind = if (ExprKindEquals(ek, ExprKind.IF_COND_EXPR) ||
+            ExprKindEquals(ek, ExprKind.EXPR_IN_IF_COND_TUPLE)) {
             ExprKind.EXPR_IN_IF_COND_TUPLE
-        } else if (ek == ExprKind.WHILE_COND_EXPR || ek == ExprKind.EXPR_IN_WHILE_COND_TUPLE) {
+        } else if (ExprKindEquals(ek, ExprKind.WHILE_COND_EXPR) ||
+            ExprKindEquals(ek, ExprKind.EXPR_IN_WHILE_COND_TUPLE)) {
             ExprKind.EXPR_IN_WHILE_COND_TUPLE
         } else {
             ExprKind.EXPR_IN_TUPLE

@@ -331,7 +331,7 @@ extend ParserImpl {
         curMacroCall = currentMacroCall
         let out = ArrayList<Node>()
         while (!Seeing(TokenKind.END)) {
-            if (scope == ScopeKind.FUNC_BODY) {
+            if (ScopeKindEquals(scope, ScopeKind.FUNC_BODY)) {
                 out.add(ParseExprOrDecl(scope))
             } else {
                 out.add(ParseDecl(scope))

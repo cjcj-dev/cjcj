@@ -222,7 +222,7 @@ extend ParserImpl {
     public func ParseLetPattern(ek: ExprKind): LetPatternDestructor {
         let ret = LetPatternDestructor()
         let letToken = Expect(TokenKind.LET, "expected 'let'")
-        let conditionName = if (ek == ExprKind.WHILE_COND_EXPR) { "while-let" } else { "if-let" }
+        let conditionName = if (ExprKindEquals(ek, ExprKind.WHILE_COND_EXPR)) { "while-let" } else { "if-let" }
         ret.begin = letToken.Begin()
         ret.patterns.add(ParsePattern())
         while (Skip(TokenKind.BITOR)) {

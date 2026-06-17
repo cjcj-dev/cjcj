@@ -1,6 +1,6 @@
 # Parse Port Status
 
-Date: 2026-06-17
+Date: 2026-06-18
 
 Build: `cjpm build` passes.
 
@@ -220,12 +220,26 @@ Parse shim.
   declaration patterns in class/struct bodies, and enum-pattern starts now
   consume qualified names and generic argument lists via the shared
   `SeeingIdentifierAndTargetOp` helper.
+- Deepened pattern parsing further toward `ParsePattern.cpp`: pattern constants
+  now include split-token unit literals `(` `)` for macro/token-stream inputs,
+  wildcard type patterns (`_: T`) are parsed as `TypePattern`, bare identifiers
+  in non-declaration patterns now produce `VarOrEnumPattern`, tuple patterns
+  diagnose illegal nested `|` patterns and single-field tuple patterns, and
+  tuple nodes now preserve C++-shaped left/right brace position aliases.
+- Audited `ScopeKind` and `ExprKind` de-isolation against the real AST package.
+  The real AST enums currently expose an additional `UNKNOWN` variant that
+  breaks downstream exhaustive matches through Parse's public API, so Parse
+  keeps its local subset for now and uses explicit comparison helpers internally
+  to prepare for a future API-aligned swap.
 
 ## Remaining Work
 
 - Replace the remaining Parse-local AST node classes and parser diagnostics with
   real sibling package APIs where their public surfaces are sufficiently
   complete.
+- Replace Parse-local `ScopeKind` and `ExprKind` only after downstream users can
+  accept the real AST package's additional `UNKNOWN` variants, or after the AST
+  package exposes a Parse-compatible subset.
 - Top-level recovery still uses local message diagnostics rather than the exact
   C++ diagnostic IDs, suggestions, parser-scope reset objects, and bracket-stack
   cleanup.

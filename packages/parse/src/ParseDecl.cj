@@ -190,7 +190,7 @@ extend ParserImpl {
     }
 
     public func SeeingDeclInScope(scopeKind: ScopeKind): Bool {
-        let seeingScopedSpecial = ((scopeKind == ScopeKind.CLASS_BODY) && SeeingFinalizer()) ||
+        let seeingScopedSpecial = (ScopeKindEquals(scopeKind, ScopeKind.CLASS_BODY) && SeeingFinalizer()) ||
             SeeingPrimaryConstructor(scopeKind)
         return seeingScopedSpecial || (SeeingModifier() && !Seeing([TokenKind.UNSAFE, TokenKind.LCURL])) ||
             SeeingAny([TokenKind.FUNC, TokenKind.MACRO, TokenKind.LET, TokenKind.VAR,
@@ -611,7 +611,7 @@ extend ParserImpl {
         }
         if ((pattern.astKind == ASTKind.TUPLE_PATTERN || pattern.astKind == ASTKind.ENUM_PATTERN ||
                 pattern.astKind == ASTKind.WILDCARD_PATTERN) &&
-            (scopeKind == ScopeKind.CLASS_BODY || scopeKind == ScopeKind.STRUCT_BODY)) {
+            (ScopeKindEquals(scopeKind, ScopeKind.CLASS_BODY) || ScopeKindEquals(scopeKind, ScopeKind.STRUCT_BODY))) {
             diag.DiagnoseRefactor(
                 DiagKindRefactor.PARSE_ERROR,
                 pattern.begin,
@@ -662,14 +662,14 @@ extend ParserImpl {
                 key.Begin(),
                 "const variable declaration requires an initializer")
             decl.EnableAttr(Attribute.IS_BROKEN)
-        } else if (!decl.isConst && scopeKind != ScopeKind.TOPLEVEL &&
+        } else if (!decl.isConst && !ScopeKindEquals(scopeKind, ScopeKind.TOPLEVEL) &&
             (let None <- decl.typeNode) && (let None <- decl.initializer)) {
             diag.DiagnoseRefactor(
                 DiagKindRefactor.EXPECTED_TOKEN,
                 key.Begin(),
                 "local variable declaration requires a type annotation or initializer")
             decl.EnableAttr(Attribute.IS_BROKEN)
-        } else if (!decl.isConst && scopeKind == ScopeKind.TOPLEVEL && (let None <- decl.initializer) &&
+        } else if (!decl.isConst && ScopeKindEquals(scopeKind, ScopeKind.TOPLEVEL) && (let None <- decl.initializer) &&
             !HasModifierToken(modifiers, TokenKind.FOREIGN) &&
             ((let None <- decl.typeNode) || !HasModifierToken(modifiers, TokenKind.COMMON))) {
             diag.DiagnoseRefactor(
@@ -924,7 +924,7 @@ extend ParserImpl {
                 "expected primary constructor name '${curPrimaryDeclIdent}'")
             ret.EnableAttr(Attribute.IS_BROKEN)
         }
-        let bodyScope = if (scopeKind == ScopeKind.STRUCT_BODY) {
+        let bodyScope = if (ScopeKindEquals(scopeKind, ScopeKind.STRUCT_BODY)) {
             ScopeKind.PRIMARY_CONSTRUCTOR_BODY_FOR_STRUCT
         } else {
             ScopeKind.PRIMARY_CONSTRUCTOR_BODY_FOR_CLASS
@@ -932,7 +932,7 @@ extend ParserImpl {
         ret.funcBody = ParseFuncBody(bodyScope)
         ret.EnableAttr(Attribute.CONSTRUCTOR)
         ret.EnableAttr(Attribute.PRIMARY_CONSTRUCTOR)
-        if (scopeKind == ScopeKind.STRUCT_BODY) {
+        if (ScopeKindEquals(scopeKind, ScopeKind.STRUCT_BODY)) {
             ret.EnableAttr(Attribute.IN_STRUCT)
         } else {
             ret.EnableAttr(Attribute.IN_CLASSLIKE)
