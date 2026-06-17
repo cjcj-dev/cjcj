@@ -550,38 +550,75 @@ extend ParserImpl {
         let isVar = key.kind == TokenKind.VAR
         let isConst = key.kind == TokenKind.CONST
         Next()
-        let pattern = ParsePattern(ArrayList<Attribute>(), isVar, true)
-        if (let Some(varPat) <- (pattern as VarPattern)) {
-            let decl = VarDecl()
-            ApplyModifiersAndAnnotations(decl, modifiers, annos)
-            decl.keywordPos = key.Begin()
-            decl.identifier = varPat.identifier
-            decl.isVar = isVar
-            decl.isConst = isConst
-            decl.begin = if (decl.begin.IsZero()) { key.Begin() } else { decl.begin }
-            ParseTypeAndExpr(decl)
-            return decl
+        if (SeeingVarWithPatternStart()) {
+            return ParseVarWithPatternDecl(scopeKind, modifiers, annos, key, isVar, isConst)
         }
-        let decl = VarWithPatternDecl()
+        if (SeeingIdentifierLike()) {
+            return ParseVarDecl(scopeKind, modifiers, annos, key, isVar, isConst)
+        }
+        diag.DiagnoseRefactor(
+            DiagKindRefactor.EXPECTED_IDENTIFIER,
+            Peek().Begin(),
+            "expected identifier or irrefutable pattern after '${key.Value()}'")
+        ConsumeUntilAny([TokenKind.NL, TokenKind.SEMI, TokenKind.RCURL], targetTokenConsumed: false)
+        return InvalidDecl(key.Begin())
+    }
+
+    private func SeeingVarWithPatternStart(): Bool {
+        return Seeing(TokenKind.WILDCARD) || Seeing(TokenKind.LPAREN) ||
+            SeeingIdentifierAndTargetOp([TokenKind.LPAREN, TokenKind.DOT, TokenKind.LT])
+    }
+
+    private func ParseVarDecl(
+        scopeKind: ScopeKind,
+        modifiers: ArrayList<Modifier>,
+        annos: ArrayList<Annotation>,
+        key: Token,
+        isVar: Bool,
+        isConst: Bool
+    ): VarDecl {
+        let decl = VarDecl()
         ApplyModifiersAndAnnotations(decl, modifiers, annos)
         decl.keywordPos = key.Begin()
-        decl.pattern = pattern
+        decl.identifier = ExpectIdentifierWithPos(decl)
         decl.isVar = isVar
         decl.isConst = isConst
         decl.begin = if (decl.begin.IsZero()) { key.Begin() } else { decl.begin }
-        if (Skip(TokenKind.COLON)) {
-            decl.typeNode = ParseType()
+        ParseTypeAndExpr(decl)
+        CheckVarDeclShape(decl, modifiers, scopeKind, key)
+        return decl
+    }
+
+    private func ParseVarWithPatternDecl(
+        scopeKind: ScopeKind,
+        modifiers: ArrayList<Modifier>,
+        annos: ArrayList<Annotation>,
+        key: Token,
+        isVar: Bool,
+        isConst: Bool
+    ): VarWithPatternDecl {
+        let pattern = ParsePattern(ArrayList<Attribute>(), isVar, true)
+        let decl = VarWithPatternDecl()
+        ApplyModifiersAndAnnotations(decl, modifiers, annos)
+        decl.keywordPos = key.Begin()
+        decl.irrefutablePattern = pattern
+        decl.isVar = isVar
+        decl.isConst = isConst
+        decl.begin = if (decl.begin.IsZero()) { key.Begin() } else { decl.begin }
+        ParseTypeAndExpr(decl)
+        if (decl.end.IsZero()) {
+            decl.end = pattern.end
         }
-        if (Skip(TokenKind.ASSIGN)) {
-            decl.initializer = ParseExpr(ExprKind.VAR_INIT)
+        if ((pattern.astKind == ASTKind.TUPLE_PATTERN || pattern.astKind == ASTKind.ENUM_PATTERN ||
+                pattern.astKind == ASTKind.WILDCARD_PATTERN) &&
+            (scopeKind == ScopeKind.CLASS_BODY || scopeKind == ScopeKind.STRUCT_BODY)) {
+            diag.DiagnoseRefactor(
+                DiagKindRefactor.PARSE_ERROR,
+                pattern.begin,
+                "declaration patterns are not allowed in class or struct body")
+            decl.EnableAttr(Attribute.IS_BROKEN)
         }
-        decl.end = if (let Some(expr) <- decl.initializer) {
-            expr.end
-        } else if (let Some(ty) <- decl.typeNode) {
-            ty.end
-        } else {
-            pattern.end
-        }
+        CheckVarDeclShape(decl, modifiers, scopeKind, key)
         return decl
     }
 
@@ -598,9 +635,58 @@ extend ParserImpl {
             expr.end
         } else if (let Some(ty) <- ret.typeNode) {
             ty.end
-        } else {
+        } else if (!ret.identifier.Empty()) {
             ret.identifier.End()
+        } else {
+            ret.end
         }
+    }
+
+    private func CheckVarDeclShape(
+        decl: VarDeclAbstract,
+        modifiers: ArrayList<Modifier>,
+        scopeKind: ScopeKind,
+        key: Token
+    ): Unit {
+        let _ = CheckDeclModifiers(modifiers, scopeKind, DefKind.VARIABLE)
+        if (!decl.isConst && HasModifierToken(modifiers, TokenKind.CONST)) {
+            diag.DiagnoseRefactor(
+                DiagKindRefactor.INVALID_MODIFIER,
+                key.Begin(),
+                "modifier 'const' cannot be used on '${key.Value()}' declaration")
+            decl.EnableAttr(Attribute.IS_BROKEN)
+        }
+        if (decl.isConst && (let None <- decl.initializer)) {
+            diag.DiagnoseRefactor(
+                DiagKindRefactor.EXPECTED_TOKEN,
+                key.Begin(),
+                "const variable declaration requires an initializer")
+            decl.EnableAttr(Attribute.IS_BROKEN)
+        } else if (!decl.isConst && scopeKind != ScopeKind.TOPLEVEL &&
+            (let None <- decl.typeNode) && (let None <- decl.initializer)) {
+            diag.DiagnoseRefactor(
+                DiagKindRefactor.EXPECTED_TOKEN,
+                key.Begin(),
+                "local variable declaration requires a type annotation or initializer")
+            decl.EnableAttr(Attribute.IS_BROKEN)
+        } else if (!decl.isConst && scopeKind == ScopeKind.TOPLEVEL && (let None <- decl.initializer) &&
+            !HasModifierToken(modifiers, TokenKind.FOREIGN) &&
+            ((let None <- decl.typeNode) || !HasModifierToken(modifiers, TokenKind.COMMON))) {
+            diag.DiagnoseRefactor(
+                DiagKindRefactor.EXPECTED_TOKEN,
+                key.Begin(),
+                "top-level variable declaration requires an initializer unless it is foreign")
+            decl.EnableAttr(Attribute.IS_BROKEN)
+        }
+    }
+
+    private func HasModifierToken(modifiers: ArrayList<Modifier>, tokenKind: TokenKind): Bool {
+        for (modifier in modifiers) {
+            if (modifier.tokenKind == tokenKind) {
+                return true
+            }
+        }
+        return false
     }
 
     public func ParseClassDecl(scopeKind: ScopeKind, modifiers: ArrayList<Modifier>, annos: ArrayList<Annotation>): ClassDecl {

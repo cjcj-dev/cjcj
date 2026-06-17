@@ -155,6 +155,22 @@ extend ParserImpl {
             Seeing(TokenKind.INIT) || Seeing(TokenKind.THIS) || Seeing(TokenKind.SUPER)
     }
 
+    public func SeeingIdentifierAndTargetOp(tokenKinds: Array<TokenKind>): Bool {
+        if (!IsIdentifierOrContextualKeyword(Peek().kind)) {
+            return false
+        }
+        let ahead = lexer.LookAheadSkipNL(1)
+        if (ahead.isEmpty()) {
+            return false
+        }
+        for (kind in tokenKinds) {
+            if (ahead[0].kind == kind) {
+                return true
+            }
+        }
+        return false
+    }
+
     public func SeeingPrimaryIdentifier(): Bool {
         if (curPrimaryDeclIdent.isEmpty() || !SeeingIdentifierLike()) {
             return false

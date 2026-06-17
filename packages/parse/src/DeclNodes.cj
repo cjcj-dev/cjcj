@@ -182,7 +182,7 @@ public open class VarDeclAbstract <: Decl {
 
     public init(kind: ASTKind) { super(kind) }
 
-    public override func Children(): ArrayList<Node> {
+    public open override func Children(): ArrayList<Node> {
         let out = ArrayList<Node>()
         if (let Some(ty) <- typeNode) { out.add(ty) }
         if (let Some(expr) <- initializer) { out.add(expr) }
@@ -194,14 +194,18 @@ public class VarDecl <: VarDeclAbstract {
     public init() { super(ASTKind.VAR_DECL) }
 }
 
-public class VarWithPatternDecl <: Decl {
-    public var pattern: Option<Pattern> = None
-    public var typeNode: Option<Type> = None
-    public var initializer: Option<Expr> = None
-    public var isVar: Bool = false
-    public var isConst: Bool = false
+public class VarWithPatternDecl <: VarDeclAbstract {
+    public var irrefutablePattern: Option<Pattern> = None
 
     public init() { super(ASTKind.VAR_WITH_PATTERN_DECL) }
+
+    public override func Children(): ArrayList<Node> {
+        let out = ArrayList<Node>()
+        if (let Some(pattern) <- irrefutablePattern) { out.add(pattern) }
+        if (let Some(ty) <- typeNode) { out.add(ty) }
+        if (let Some(expr) <- initializer) { out.add(expr) }
+        return out
+    }
 }
 
 public open class InheritableDecl <: Decl {

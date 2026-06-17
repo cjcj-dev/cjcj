@@ -209,6 +209,17 @@ Parse shim.
   diagnoses duplicate and mixed named/unnamed parameter lists, handles
   `() -> T`, multiple leading `?`, `onlyRef`, qualified generic delimiter
   positions, unexpected post-type arrows, and VArray comma/source tracking.
+- Deepened declaration/pattern parsing toward `ParseDecl.cpp` and
+  `ParsePattern.cpp`: `VarWithPatternDecl` now derives from
+  `VarDeclAbstract`, uses the real AST field name `irrefutablePattern`, and
+  participates in child traversal with its pattern, type annotation, and
+  initializer. `let`/`var`/`const` dispatch now follows the C++ split between
+  ordinary identifier declarations and wildcard/tuple/enum-looking pattern
+  declarations, preserving `let x: T` as `VarDecl`. Pattern declarations reuse
+  `ParseTypeAndExpr`, check C++-shaped missing initializer/type cases, reject
+  declaration patterns in class/struct bodies, and enum-pattern starts now
+  consume qualified names and generic argument lists via the shared
+  `SeeingIdentifierAndTargetOp` helper.
 
 ## Remaining Work
 
@@ -228,6 +239,10 @@ Parse shim.
 - Type parsing still uses local message diagnostics and simplified recovery in
   several malformed generic/empty-parenthesis cases instead of the exact C++
   diagnostic IDs and parser cleanup paths.
+- Enum-pattern constructors still use local lightweight identifier-piece
+  storage rather than the full C++ expression-backed constructor node, so target
+  binding/type-argument diagnostics remain approximate until Parse-local pattern
+  nodes are replaced by real AST nodes.
 - Audit grammar and diagnostic parity against the full C++ Parse test corpus;
   the current parser is substantial and compiling, but not a complete faithful
   replacement for all 17k+ lines of C++ parser behavior.
