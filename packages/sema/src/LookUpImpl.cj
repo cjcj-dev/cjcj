@@ -4,6 +4,7 @@ import std.collection.*
 import cangjie_compiler::ast.*
 import cangjie_compiler::modules.GetPackageRelation as ModulesGetPackageRelation
 import cangjie_compiler::modules.PackageRelation as ModulesPackageRelation
+import cangjie_compiler::modules.SplitQualifiedName as ModulesSplitQualifiedName
 
 private let LOOKUP_CORE_PACKAGE_NAME: String = "std.core"
 private let LOOKUP_AST_PACKAGE_NAME: String = "std.ast"
@@ -157,13 +158,30 @@ private func extendAccessibleForLookup(info: LookupInfo, extendDecl: ExtendDecl)
                 return true
             }
             let relation = ModulesGetPackageRelation(pkg.fullPackageName, extendDecl.fullPackageName)
-            return extendDecl.TestAttr(Attribute.PUBLIC) || relation == ModulesPackageRelation.SAME_PACKAGE ||
-                (extendDecl.TestAttr(Attribute.PROTECTED) && relation != ModulesPackageRelation.NONE) ||
-                (extendDecl.TestAttr(Attribute.INTERNAL) &&
-                    (relation == ModulesPackageRelation.CHILD || relation == ModulesPackageRelation.SAME_PACKAGE))
+            return nodeVisibleInRelation(extendDecl, relation)
         }
     }
     return true
+}
+
+private func nodeVisibleInRelation(node: Node, relation: ModulesPackageRelation): Bool {
+    return node.TestAttr(Attribute.PUBLIC) || relation == ModulesPackageRelation.SAME_PACKAGE ||
+        (node.TestAttr(Attribute.PROTECTED) && relation != ModulesPackageRelation.NONE) ||
+        (node.TestAttr(Attribute.INTERNAL) &&
+            (relation == ModulesPackageRelation.CHILD || relation == ModulesPackageRelation.SAME_PACKAGE))
+}
+
+private func accessLevelRank(level: AccessLevel): Int64 {
+    return match (level) {
+        case AccessLevel.PRIVATE => 0
+        case AccessLevel.INTERNAL => 1
+        case AccessLevel.PROTECTED => 2
+        case AccessLevel.PUBLIC => 3
+    }
+}
+
+private func importAllowsAccess(importSpec: ImportSpec, decl: Decl): Bool {
+    return accessLevelRank(GetAccessLevel(importSpec)) <= accessLevelRank(GetAccessLevel(decl))
 }
 
 private func addMemberIfValidForLookup(results: ArrayList<Decl>, typeManager: TypeManager, baseTy: Option<Ty>,
@@ -446,28 +464,37 @@ private func fieldLookupPackage(pd: PackageDecl, fieldName: String): ArrayList<D
     return results
 }
 
-private func lookupPackageMember(pkg: Package, name: String): Option<Decl> {
+private func lookupPackageMembers(pkg: Package, name: String): ArrayList<Decl> {
+    let results = ArrayList<Decl>()
     for (file in pkg.files) {
         for (decl in file.decls) {
             if (decl.identifier == name) {
-                return Some(decl)
+                addDeclUnique(results, decl)
             }
         }
     }
     for (decl in pkg.genericInstantiatedDecls) {
         if (decl.identifier == name) {
-            return Some(decl)
+            addDeclUnique(results, decl)
         }
     }
     for (decl in pkg.srcImportedNonGenericDecls) {
         if (decl.identifier == name) {
-            return Some(decl)
+            addDeclUnique(results, decl)
         }
     }
     for (decl in pkg.inlineFuncDecls) {
         if (decl.identifier == name) {
-            return Some(decl)
+            addDeclUnique(results, decl)
         }
+    }
+    return results
+}
+
+private func lookupPackageMember(pkg: Package, name: String): Option<Decl> {
+    let members = lookupPackageMembers(pkg, name)
+    if (!members.isEmpty()) {
+        return Some(members[0])
     }
     return None
 }
@@ -487,6 +514,16 @@ private func lookupKnownPackage(ctx: ASTContext, fullPackageName: String): Optio
     return None
 }
 
+private func lookupKnownPackageDecl(ctx: ASTContext, fullPackageName: String): Option<PackageDecl> {
+    for (packageDecl in ctx.packageDecls) {
+        if (packageDecl.fullPackageName == fullPackageName ||
+            packageDecl.srcPackage.fullPackageName == fullPackageName) {
+            return Some(packageDecl)
+        }
+    }
+    return None
+}
+
 private func stdLibFieldLookup(ctx: ASTContext, node: Node, fieldName: String): ArrayList<Decl> {
     let results = ArrayList<Decl>()
     var packageName: Option<String> = None
@@ -499,6 +536,103 @@ private func stdLibFieldLookup(ctx: ASTContext, node: Node, fieldName: String): 
         if (let Some(pkg) <- lookupKnownPackage(ctx, fullPackageName)) {
             if (let Some(target) <- lookupPackageMember(pkg, fieldName)) {
                 results.add(target)
+            }
+        }
+    }
+    return results
+}
+
+private func lastPackageName(fullPackageName: String): String {
+    let parts = ModulesSplitQualifiedName(fullPackageName, splitDc: true)
+    if (parts.isEmpty()) {
+        return fullPackageName
+    }
+    return parts[parts.size - 1]
+}
+
+private func importedPackageMemberVisible(sourcePkgName: String, targetPkgName: String, importSpec: ImportSpec,
+    decl: Decl): Bool {
+    let relation = ModulesGetPackageRelation(sourcePkgName, targetPkgName)
+    return importAllowsAccess(importSpec, decl) && nodeVisibleInRelation(decl, relation)
+}
+
+private func collectImportedDeclsFromSpec(ctx: ASTContext, sourcePkgName: String, importSpec: ImportSpec,
+    name: String, results: ArrayList<Decl>): Unit {
+    if (importSpec.IsImportMulti()) {
+        return
+    }
+    if (importSpec.IsImportAll()) {
+        let fullPackageName = importSpec.content.GetImportedPackageName()
+        if (let Some(pkg) <- lookupKnownPackage(ctx, fullPackageName)) {
+            for (decl in lookupPackageMembers(pkg, name)) {
+                if (importedPackageMemberVisible(sourcePkgName, fullPackageName, importSpec, decl)) {
+                    addDeclUnique(results, decl)
+                }
+            }
+        }
+        return
+    }
+    let importedPackageName = importSpec.content.GetImportedPackageName()
+    if (let Some(packageDecl) <- lookupKnownPackageDecl(ctx, importedPackageName)) {
+        let importedName = if (importSpec.IsImportAlias()) {
+            importSpec.content.aliasName.Val()
+        } else {
+            lastPackageName(importedPackageName)
+        }
+        if (name == importedName) {
+            addDeclUnique(results, packageDecl)
+        }
+        return
+    }
+    let memberPackageName = importSpec.content.GetPrefixPath()
+    if (memberPackageName.isEmpty()) {
+        return
+    }
+    let importedMemberName = if (importSpec.IsImportAlias()) {
+        importSpec.content.aliasName.Val()
+    } else {
+        importSpec.content.identifier.Val()
+    }
+    if (name != importedMemberName) {
+        return
+    }
+    if (let Some(pkg) <- lookupKnownPackage(ctx, memberPackageName)) {
+        for (decl in lookupPackageMembers(pkg, importSpec.content.identifier.Val())) {
+            if (importedPackageMemberVisible(sourcePkgName, memberPackageName, importSpec, decl)) {
+                addDeclUnique(results, decl)
+            }
+        }
+    }
+}
+
+private func lookupSourcePackageName(ctx: ASTContext, node: Node): String {
+    if (!ctx.fullPackageName.isEmpty()) {
+        return ctx.fullPackageName
+    }
+    if (let Some(file) <- node.curFile) {
+        if (let Some(pkg) <- file.curPackage) {
+            return pkg.fullPackageName
+        }
+    }
+    return ""
+}
+
+private func collectImportedDeclsByName(ctx: ASTContext, node: Node, name: String): ArrayList<Decl> {
+    let results = ArrayList<Decl>()
+    let sourcePkgName = lookupSourcePackageName(ctx, node)
+    if (let Some(pkg) <- ctx.curPackage) {
+        for (file in pkg.files) {
+            for (importSpec in file.imports) {
+                if (importSpec.IsReExport()) {
+                    collectImportedDeclsFromSpec(ctx, sourcePkgName, importSpec, name, results)
+                }
+            }
+        }
+    }
+    if (let Some(file) <- node.curFile) {
+        for (importSpec in file.imports) {
+            if (!importSpec.IsReExport()) {
+                collectImportedDeclsFromSpec(ctx, sourcePkgName, importSpec, name, results)
             }
         }
     }
@@ -677,7 +811,15 @@ private func lookupCommon(typeManager: TypeManager, ctx: ASTContext, name: Strin
     if (!results.isEmpty() || name == INVALID_IDENTIFIER || scopeName.isEmpty()) {
         return results
     }
-    let _ = lookupImpl(typeManager, ctx, name, scopeName, node, onlyLookUpTopLevel, isSetter, results)
+    if (lookupImpl(typeManager, ctx, name, scopeName, node, onlyLookUpTopLevel, isSetter, results)) {
+        return results
+    }
+    if (!results.isEmpty() && !isAllFuncDecl(results)) {
+        return results
+    }
+    for (decl in collectImportedDeclsByName(ctx, node, name)) {
+        addDeclUnique(results, decl)
+    }
     return results
 }
 

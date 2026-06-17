@@ -180,6 +180,29 @@ Verification:
 - `grep -rn "TODO(selfhost:Sema)" packages/sema/src` reports 2 package-level markers, both outside the tc-core-owned files in `TestManager.cj`.
 - Remaining `TODO(selfhost:Sema)` markers in the tc-core-owned files listed by the task: 0.
 
+## 2026-06-18 Continue Pass 4
+
+Files deepened:
+
+- `packages/sema/src/LookUpImpl.cj`
+
+Implemented behavior:
+
+- Ported the C++ post-lexical imported-declaration fallback in `LookUpImpl::Lookup`. Self-host lookup now preserves lexical results when lookup succeeds, stops before imports when a local non-function result exists, and merges imported candidates only for empty lookups or function-overload lookups.
+- Added real-AST import resolution for ordinary file imports and package-wide re-export imports. The implementation handles import-all, package-name imports, single declaration imports, and alias imports through `File.imports`, `ASTContext.packageDecls`, and parsed `ImportContent` package/member names.
+- Imported member candidates now honor package relation visibility and import access level before entering lookup results, matching the core filtering shape used by the C++ `ImportManager` maps.
+
+Remaining gaps:
+
+- Multi-import expansion, type-alias import alias maps, implicit package members, and serialized CJO package members still require the real `ImportManager`/`CjoManager` state rather than the parsed AST package list alone.
+- Exact import diagnostics are still owned by the modules import pass, not this lookup fallback.
+
+Verification:
+
+- `cjpm build` passes after this pass.
+- `grep -rn "TODO(selfhost:Sema)" packages/sema/src` reports 2 package-level markers, both outside the tc-core-owned files in `TestManager.cj`.
+- Remaining `TODO(selfhost:Sema)` markers in the tc-core-owned files listed by the task: 0.
+
 ## 2026-06-18 Continue Pass 3
 
 Files deepened:
