@@ -739,6 +739,64 @@ private func SortCallArgumentByParamOrder(fd: FuncDecl, ce: CallExpr): ArrayList
     return out
 }
 
+private func IsEmptyFuncArg(arg: FuncArg): Bool {
+    if (!arg.name.Empty() || arg.withInout) {
+        return false
+    }
+    if (let Some(_) <- arg.expr) {
+        return false
+    }
+    return true
+}
+
+private func SpreadInstantiationTy(typeManager: TypeManager, node: Node, typeMapping: SubstPack): Unit {
+    if (typeMapping.u2i.IsEmpty() || !Ty.IsTyCorrect(node.GetTy())) {
+        return
+    }
+    let walker = Walker(node, visitPre: { current: Node =>
+        if (Ty.IsTyCorrect(current.GetTy())) {
+            current.SetTy(typeManager.ApplySubstPack(current.GetTy().getOrThrow(), typeMapping))
+        }
+        VisitAction.WALK_CHILDREN
+    })
+    let _ = walker.Walk()
+}
+
+private func BuildEffectiveCallArgs(typeManager: TypeManager, fd: FuncDecl, ce: CallExpr,
+    typeMapping: SubstPack): ArrayList<FuncArg> {
+    let orderedArgs = SortCallArgumentByParamOrder(fd, ce)
+    ce.defaultArgs.clear()
+    if (let None <- BodyParamList(fd)) {
+        return orderedArgs
+    }
+    let params = BodyParamList(fd).getOrThrow().params
+    let effectiveArgs = ArrayList<FuncArg>()
+    var idx: Int64 = 0
+    while (idx < orderedArgs.size) {
+        let orderedArg = orderedArgs[idx]
+        if (idx < params.size && IsEmptyFuncArg(orderedArg) && params[idx].TestAttr(Attribute.HAS_INITIAL)) {
+            let defaultArg = CreateFuncArgForOptional(params[idx])
+            if (!fd.TestAttr(Attribute.TOOL_ADD)) {
+                defaultArg.EnableAttr(Attribute.HAS_INITIAL)
+            }
+            SpreadInstantiationTy(typeManager, defaultArg, typeMapping)
+            ce.defaultArgs.add(defaultArg)
+            effectiveArgs.add(defaultArg)
+        } else {
+            effectiveArgs.add(orderedArg)
+        }
+        idx++
+    }
+    return effectiveArgs
+}
+
+private func ReplaceCallArgsWith(ce: CallExpr, args: ArrayList<FuncArg>): Unit {
+    ce.args.clear()
+    for (arg in args) {
+        ce.args.add(arg)
+    }
+}
+
 private func CheckCallCompatible(typeManager: TypeManager, diag: Option<BasicDiagnosticEngine>, ce: CallExpr, fd: FuncDecl,
     unit: FunctionMatchingUnit): Bool {
     let paramTys = GetParamTysInArgsOrder(typeManager, ce, fd)
@@ -1043,11 +1101,8 @@ private func MatchFunctionForCall(typeManager: TypeManager, diag: Option<BasicDi
         }
     }
     if (let Some(unit) <- selected) {
-        let orderedArgs = SortCallArgumentByParamOrder(unit.fd, ce)
-        ce.defaultArgs.clear()
-        if (!orderedArgs.isEmpty()) {
-            ce.defaultArgs.clear()
-        }
+        let effectiveArgs = BuildEffectiveCallArgs(typeManager, unit.fd, ce, unit.typeMapping)
+        ReplaceCallArgsWith(ce, effectiveArgs)
         if (let Some(fdTy) <- unit.fd.GetTy()) {
             ce.baseFunc.getOrThrow().SetTy(typeManager.ApplySubstPack(fdTy, unit.typeMapping))
         }

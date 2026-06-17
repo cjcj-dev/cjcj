@@ -1,6 +1,7 @@
 package cangjie_compiler::sema
 
 import std.collection.*
+import std.sort.*
 import cangjie_compiler::ast.*
 import cangjie_compiler::basic.DiagnosticEngine as BasicDiagnosticEngine
 import cangjie_compiler::basic.DiagKindRefactor as BasicDiagKindRefactor
@@ -703,7 +704,20 @@ private class UsefulnessChecker {
     }
 
     private static func SplitWildcardForSealed(ctors: ArrayList<PatternCtor>, sealedTy: ClassLikeTy): Unit {
+        let directSubtypes = ArrayList<Ty>()
         for (subTy in sealedTy.directSubtypes) {
+            directSubtypes.add(subTy)
+        }
+        sort(directSubtypes, by: { left: Ty, right: Ty =>
+            if (CompTyByNames(Some(left), Some(right))) {
+                Ordering.LT
+            } else if (CompTyByNames(Some(right), Some(left))) {
+                Ordering.GT
+            } else {
+                Ordering.EQ
+            }
+        }, stable: true)
+        for (subTy in directSubtypes) {
             if (let Some(subSealed) <- AsSealedLikeClassLikeTy(subTy)) {
                 if (!subTy.IsCType()) {
                     SplitWildcardForSealed(ctors, subSealed)

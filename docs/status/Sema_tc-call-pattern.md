@@ -25,6 +25,8 @@ Continuation updates:
 - `TypeCheckCall.cj`: mirrored the C++ `IsInterfaceFuncWithSameSignature` overload tie-breaker so duplicate abstract interface functions with the same instantiated signature are suppressed instead of producing a false ambiguity after normal candidate comparison.
 - `TypeCheckCall.cj` / `TypeCheckBuiltinExpr.cj`: reused the real AST `IsValidCFuncConstructorCall` helper so function-pointer calls skip rechecking already validated `CFunc<...>(CPointer(...))` constructors like C++, and threaded CFunc constructor diagnostics for wrong arity, named arguments, and non-pointer operands through the existing basic diagnostic engine.
 - `TypeCheckBuiltinExpr.cj`: threaded the basic diagnostic engine through pointer expression/call checking, including C++-shaped reports for too many `CPointer` arguments, unknown pointer generic inference, named pointer constructor arguments, non-pointer/non-CFunc operands, and target-type mismatches.
+- `TypeCheckCall.cj`: replaced the discarded post-selection ordered-argument computation with effective argument construction that mirrors C++ `ReorderCallArgument` as closely as the current self-host AST allows: selected calls are put in parameter order, missing default parameters synthesize real `FuncArg`s via `CreateFuncArgForOptional`, inserted defaults are retained on `CallExpr.defaultArgs`, and default expression types are instantiated through the selected substitution pack.
+- `PatternUsefulness.cj`: matched the C++ deterministic witness ordering for sealed class-like wildcard splitting by sorting direct subtypes by stable type name/hash before recursive constructor expansion.
 
 Build status:
 
@@ -39,4 +41,4 @@ Known fidelity gaps:
 - Pattern usefulness/checking is functional but still conservative around complete sealed hierarchy discovery, full intersection/union/Option refinements, and diagnostics that depend on richer C++ Sema context.
 - Builtin and match checking use real AST and type data but still lack the full TypeCheckerImpl cache/synthesis integration present in C++.
 
-Honest coverage estimate for this scoped pass: about 69% of C++ behavior, materially higher than the prior compiling stubs but not module-complete.
+Honest coverage estimate for this scoped pass: about 70% of C++ behavior, materially higher than the prior compiling stubs but not module-complete.
