@@ -1,6 +1,7 @@
 package cangjie_compiler::macro_pkg
 
 import cangjie_compiler::basic.SplitQualifiedName as BasicSplitQualifiedName
+import cangjie_compiler::lex.{Lexer as RealLexer, StringPartKind}
 import cangjie_compiler::parse.IsBuiltinAnnotation as ParseIsBuiltinAnnotation
 import std.collection.*
 
@@ -671,17 +672,24 @@ public class MacroEvaluation {
 
     public func ProcessTokensInQuoteExpr(input: ArrayList<Token>, startIndex: Box<Int64>,
         curIndex: Box<Int64>, macCall: MacroCall, retEval!: Bool = false): Unit {
-        let _ = macCall
-        let _ = retEval
         var balance: Int64 = 0
+        var inQuoteInterpolation = false
         while (curIndex.value < input.size) {
-            if (input[curIndex.value].kind == TokenKind.LPAREN) {
+            if (inQuoteInterpolation && input[curIndex.value].kind == TokenKind.AT) {
+                CreateChildMacroCall(input, startIndex, curIndex, macCall, reEval: retEval)
+                inQuoteInterpolation = false
+            }
+            if (input[curIndex.value].kind == TokenKind.DOLLAR && curIndex.value + 1 < input.size &&
+                input[curIndex.value + 1].kind == TokenKind.LPAREN) {
+                inQuoteInterpolation = true
+            }
+            if (input[curIndex.value].kind == TokenKind.LPAREN &&
+                input[curIndex.value].Begin() + input[curIndex.value].Value().size + 1 != input[curIndex.value].End()) {
                 balance++
-            } else if (input[curIndex.value].kind == TokenKind.RPAREN) {
+            } else if (input[curIndex.value].kind == TokenKind.RPAREN &&
+                input[curIndex.value].Begin() + input[curIndex.value].Value().size + 1 != input[curIndex.value].End()) {
                 balance--
                 if (balance == 0) {
-                    curIndex.value++
-                    startIndex.value = curIndex.value
                     return
                 }
             }
@@ -690,20 +698,81 @@ public class MacroEvaluation {
     }
 
     public func HasMacroCallInStrInterpolation(str: String, macCall: MacroCall): Bool {
-        let _ = macCall
-        return str.contains("@")
+        let strExprStart = String.fromUtf8([b'$', b'{'])
+        let strExprEnd = "}"
+        let interpStr = if (str.startsWith(strExprStart) && str.endsWith(strExprEnd) &&
+            str.size >= strExprStart.size + strExprEnd.size) {
+            str[strExprStart.size..(str.size - strExprEnd.size)]
+        } else {
+            str
+        }
+        let tmpMacExpr = MacroExpandExpr()
+        tmpMacExpr.curFile = macCall.RequireNode().curFile
+        let tmpMacCall = MacroCall(tmpMacExpr)
+        tmpMacCall.isForInterpolation = true
+        let tmpInvocation = tmpMacCall.RequireInvocation()
+        appendTokens(tmpInvocation.args, GetTokensFromString(interpStr, ci.diag))
+        CreateMacroCallTree(tmpMacCall)
+        if (tmpInvocation.nodes.isEmpty()) {
+            return false
+        }
+        macCall.newStr += strExprStart
+        var childIdx: Int64 = 0
+        while (childIdx < tmpMacCall.children.size) {
+            let nestedChild = tmpMacCall.children[childIdx]
+            nestedChild.parentMacroCall = Some(macCall)
+            macCall.children.add(nestedChild, at: childIdx)
+            childIdx++
+        }
+        let invocation = macCall.RequireInvocation()
+        invocation.nodes.add(TokenPart(GetTokensFromString(macCall.newStr, ci.diag)))
+        for (innerNode in tmpInvocation.nodes) {
+            invocation.nodes.add(innerNode)
+        }
+        macCall.newStr = strExprEnd
+        return true
     }
 
     public func HasMacroCallInStrInterpolation(input: ArrayList<Token>, startIndex: Int64,
         curIndex: Int64, parentMacCall: MacroCall): Bool {
-        let _ = startIndex
-        let _ = parentMacCall
         if (curIndex >= input.size) {
             return false
         }
         let token = input[curIndex]
-        return (token.kind == TokenKind.STRING_LITERAL || token.kind == TokenKind.MULTILINE_STRING) &&
-            token.Value().contains("@")
+        let strExprStart = String.fromUtf8([b'$', b'{'])
+        if ((token.kind != TokenKind.STRING_LITERAL && token.kind != TokenKind.MULTILINE_STRING) ||
+            !token.Value().contains(strExprStart)) {
+            return false
+        }
+        let interpExpr = MacroExpandExpr()
+        interpExpr.curFile = parentMacCall.RequireNode().curFile
+        let interpCall = MacroCall(interpExpr)
+        interpCall.parentMacroCall = Some(parentMacCall)
+        interpCall.isForInterpolation = true
+        interpCall.strKind = token.kind
+
+        let lexer = RealLexer([token], ci.diag, ci.GetSourceManager())
+        let strParts = lexer.GetStrParts(token)
+        for (strPart in strParts) {
+            if (strPart.strKind == StringPartKind.EXPR && HasMacroCallInStrInterpolation(strPart.value, interpCall)) {
+                continue
+            }
+            interpCall.newStr += strPart.value
+        }
+        let interpInvocation = interpCall.RequireInvocation()
+        if (interpInvocation.nodes.isEmpty()) {
+            return false
+        }
+        interpInvocation.nodes.add(TokenPart(GetTokensFromString(interpCall.newStr, ci.diag)))
+
+        let parentInvocation = parentMacCall.RequireInvocation()
+        if (curIndex > startIndex) {
+            parentInvocation.nodes.add(TokenPart(tokenListFromRange(input, startIndex, curIndex)))
+        }
+        parentInvocation.nodes.add(interpExpr)
+        parentMacCall.children.add(interpCall)
+        pMacroCalls.add(interpCall)
+        return true
     }
 
     public func CreateChildMacroCall(inputTokens: ArrayList<Token>, startIndex: Box<Int64>,
