@@ -92,6 +92,9 @@ Implemented:
 - Removed the local stripped-down incremental position class. Adapter declarations now store
   `cangjie_compiler::basic.Position` through an `IncrPosition` alias, so file/line/column state and zero-position
   checks use the same Basic source-position type as the real AST nodes.
+- Removed two remaining silent fallback paths from incremental scope analysis. Missing source package declarations
+  and missing cached CodeGen mangles for deleted declarations now fail the same invariant class as the C++
+  `CJC_NULLPTR_CHECK`/`CJC_ABORT` sites instead of synthesizing package declarations or reusing raw mangles.
 
 Known gaps:
 
