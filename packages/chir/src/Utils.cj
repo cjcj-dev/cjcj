@@ -152,6 +152,16 @@ public func CopyValueList(values: ArrayList<Value>): ArrayList<Value> {
     return out
 }
 
+public func ValuesWithoutFirst(values: ArrayList<Value>): ArrayList<Value> {
+    let out = ArrayList<Value>()
+    var idx: Int64 = 1
+    while (idx < values.size) {
+        out.add(values[idx])
+        idx++
+    }
+    return out
+}
+
 public func CopyExpressionList(values: ArrayList<Expression>): ArrayList<Expression> {
     let out = ArrayList<Expression>()
     for (value in values) {
@@ -176,12 +186,51 @@ public func CopyFunctionList(values: ArrayList<Function>): ArrayList<Function> {
     return out
 }
 
+public func RequiredResultType(expr: Expression): Type {
+    if (let Some(resultTy) <- expr.GetResultType()) {
+        return resultTy
+    }
+    throw IllegalArgumentException("expression clone requires a result type: " + expr.GetExprKindName())
+}
+
+public func FinishExpressionClone(source: Expression, cloned: Expression): Expression {
+    cloned.CopyBaseInfoFrom(source)
+    if (let Some(sourceResult) <- source.GetResult()) {
+        if (let Some(clonedResult) <- cloned.GetResult()) {
+            clonedResult.CopyBaseInfoFrom(sourceResult)
+        }
+    }
+    return cloned
+}
+
 public func TypeListKey(values: ArrayList<Type>): String {
     let parts = ArrayList<String>()
     for (value in values) {
         parts.add(value.ToString())
     }
     return JoinStrings(parts, ",")
+}
+
+public func TypeArgsToString(values: ArrayList<Type>): String {
+    if (values.isEmpty()) {
+        return ""
+    }
+    let parts = ArrayList<String>()
+    for (value in values) {
+        parts.add(value.ToString())
+    }
+    return "<" + JoinStrings(parts, ",") + ">"
+}
+
+public func GenericTypeParamsToString(values: ArrayList<GenericType>): String {
+    if (values.isEmpty()) {
+        return ""
+    }
+    let parts = ArrayList<String>()
+    for (value in values) {
+        parts.add(value.ToString())
+    }
+    return "<" + JoinStrings(parts, ",") + ">"
 }
 
 public func RemoveExpressionById(values: ArrayList<Expression>, nodeId: Int64): Bool {

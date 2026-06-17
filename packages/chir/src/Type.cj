@@ -97,10 +97,29 @@ public open class Type {
         return IsClass() || IsRawArray()
     }
 
+    public func IsClassRef(nullable!: Bool = false): Bool {
+        let _ = nullable
+        if (!IsRef()) {
+            return false
+        }
+        if (let Some(refTy) <- (this as RefType)) {
+            return refTy.GetBaseType().IsClass()
+        }
+        return false
+    }
+
     public func IsBuiltinType(): Bool {
         let idx = TypeKindIndex(kind)
         return (idx >= TypeKindIndex(TypeKind.TYPE_INT8) && idx <= TypeKindIndex(TypeKind.TYPE_VOID)) ||
             (idx >= TypeKindIndex(TypeKind.TYPE_RAWARRAY) && idx <= TypeKindIndex(TypeKind.TYPE_CSTRING))
+    }
+
+    public func IsStructArray(): Bool {
+        if (let Some(structTy) <- (this as StructType)) {
+            let def = structTy.GetCustomTypeDef()
+            return def.GetPackageName() == "std.core" && def.GetIdentifier() == "Array"
+        }
+        return false
     }
 
     public func IsValueType(): Bool {
@@ -144,6 +163,45 @@ public open class Type {
         return false
     }
 
+    public open func IsCJFunc(): Bool {
+        if (let Some(funcTy) <- (this as FuncType)) {
+            return funcTy.IsCJFunc()
+        }
+        return false
+    }
+
+    public open func IsCFunc(): Bool {
+        if (let Some(funcTy) <- (this as FuncType)) {
+            return funcTy.IsCFunc()
+        }
+        return false
+    }
+
+    public func IsCType(): Bool {
+        if (let Some(classTy) <- (this as ClassType)) {
+            let def = classTy.GetCustomTypeDef()
+            return def.GetPackageName() == "std.core" && def.GetIdentifier() == "CType"
+        }
+        return false
+    }
+
+    public func SatisfyCType(): Bool {
+        let builtinCType = (TypeKindIndex(kind) >= TypeKindIndex(TypeKind.TYPE_INT8) &&
+            TypeKindIndex(kind) <= TypeKindIndex(TypeKind.TYPE_UNIT)) || IsCPointer() || IsCString()
+        if (builtinCType || IsCFunc()) {
+            return true
+        }
+        if (let Some(structTy) <- (this as StructType)) {
+            if (structTy.GetStructDef().IsCStruct()) {
+                return true
+            }
+        }
+        if (let Some(varrayTy) <- (this as VArrayType)) {
+            return varrayTy.GetElementType().SatisfyCType()
+        }
+        return false
+    }
+
     public func StripAllRefs(): Type {
         var current: Type = this
         while (current.IsRef()) {
@@ -154,6 +212,29 @@ public open class Type {
             }
         }
         return current
+    }
+
+    public func IsReferenceTypeWithRefDims(dims: Int64): Bool {
+        return GetRefDims() == dims && StripAllRefs().IsReferenceType()
+    }
+
+    public func IsValueOrGenericTypeWithRefDims(dims: Int64): Bool {
+        let strippedTy = StripAllRefs()
+        return GetRefDims() == dims && (strippedTy.IsValueType() || strippedTy.IsGeneric())
+    }
+
+    public func GetRefDims(): Int64 {
+        var dims: Int64 = 0
+        var current: Type = this
+        while (current.IsRef()) {
+            dims++
+            if (let Some(refTy) <- (current as RefType)) {
+                current = refTy.GetBaseType()
+            } else {
+                return dims
+            }
+        }
+        return dims
     }
 
     public func GetTypeArgs(): ArrayList<Type> {
@@ -313,11 +394,11 @@ public class FuncType <: Type {
         return hasVarArg
     }
 
-    public func IsCFunc(): Bool {
+    public override func IsCFunc(): Bool {
         return isCFunc
     }
 
-    public func IsCJFunc(): Bool {
+    public override func IsCJFunc(): Bool {
         return !isCFunc
     }
 
@@ -350,27 +431,71 @@ public class FuncType <: Type {
             params.add(argTys[idx].ToString())
             idx++
         }
-        let prefix = if (isCFunc) { "CFunc" } else { "Func" }
-        return "${prefix}(" + JoinStrings(params, ", ") + "): " + GetReturnType().ToString()
+        if (isCFunc && hasVarArg) {
+            params.add("...")
+        }
+        let funcText = "(" + JoinStrings(params, ", ") + ") -> " + GetReturnType().ToString()
+        return if (isCFunc) { "CFunc<" + funcText + ">" } else { funcText }
+    }
+
+    public override func ToSrcCodeString(): String {
+        let params = ArrayList<String>()
+        var idx: Int64 = 0
+        while (idx + 1 < argTys.size) {
+            params.add(argTys[idx].ToSrcCodeString())
+            idx++
+        }
+        if (isCFunc && hasVarArg) {
+            params.add("...")
+        }
+        let funcText = "(" + JoinStrings(params, ", ") + ") -> " + GetReturnType().ToSrcCodeString()
+        return if (isCFunc) { "CFunc<" + funcText + ">" } else { funcText }
     }
 }
 
-public class RawArrayType <: Type {
-    public init(elementTy: Type) {
+public class RawArrayType <: BuiltinType {
+    private let dims: UInt64
+
+    public init(elementTy: Type, dims!: UInt64 = 1u64) {
         super(TypeKind.TYPE_RAWARRAY)
         argTys.add(elementTy)
+        this.dims = dims
     }
 
     public func GetElementType(): Type {
         return argTys[0]
     }
 
+    public func GetDims(): UInt64 {
+        return dims
+    }
+
     public override func ToString(): String {
-        return "RawArray<${GetElementType().ToString()}>"
+        var prefix = ""
+        var suffix = ""
+        var idx: UInt64 = 0u64
+        while (idx < dims) {
+            prefix += "RawArray<"
+            suffix += ">"
+            idx++
+        }
+        return prefix + GetElementType().ToString() + suffix
+    }
+
+    public override func ToSrcCodeString(): String {
+        var prefix = ""
+        var suffix = ""
+        var idx: UInt64 = 0u64
+        while (idx < dims) {
+            prefix += "RawArray<"
+            suffix += ">"
+            idx++
+        }
+        return prefix + GetElementType().ToSrcCodeString() + suffix
     }
 }
 
-public class VArrayType <: Type {
+public class VArrayType <: BuiltinType {
     public let size: UInt64
 
     public init(elementTy: Type, size: UInt64) {
@@ -384,7 +509,30 @@ public class VArrayType <: Type {
     }
 
     public override func ToString(): String {
-        return "VArray<${GetElementType().ToString()}, ${size}>"
+        return "VArray<" + GetElementType().ToString() + ", $" + "${size}" + ">"
+    }
+
+    public override func ToSrcCodeString(): String {
+        return "VArray<" + GetElementType().ToSrcCodeString() + ", $" + "${size}" + ">"
+    }
+}
+
+public class CPointerType <: BuiltinType {
+    public init(elementTy: Type) {
+        super(TypeKind.TYPE_CPOINTER)
+        argTys.add(elementTy)
+    }
+
+    public func GetElementType(): Type {
+        return argTys[0]
+    }
+
+    public override func ToString(): String {
+        return "CPointer<${GetElementType().ToString()}>"
+    }
+
+    public override func ToSrcCodeString(): String {
+        return "CPointer<${GetElementType().ToSrcCodeString()}>"
     }
 }
 
@@ -398,8 +546,24 @@ public class RefType <: Type {
         return argTys[0]
     }
 
+    public func GetRootBaseType(): Type {
+        var root = GetBaseType()
+        while (root.IsRef()) {
+            if (let Some(refTy) <- (root as RefType)) {
+                root = refTy.GetBaseType()
+            } else {
+                return root
+            }
+        }
+        return root
+    }
+
     public override func ToString(): String {
-        return "Ref<${GetBaseType().ToString()}>"
+        return GetBaseType().ToString() + "&"
+    }
+
+    public override func ToSrcCodeString(): String {
+        return GetBaseType().ToSrcCodeString()
     }
 }
 
@@ -415,6 +579,10 @@ public class BoxType <: Type {
 
     public override func ToString(): String {
         return "Box<${GetBaseType().ToString()}>"
+    }
+
+    public override func ToSrcCodeString(): String {
+        return "Box<${GetBaseType().ToSrcCodeString()}>"
     }
 }
 
@@ -499,6 +667,10 @@ public class ThisType <: Type {
     public override func ToString(): String {
         return name
     }
+
+    public override func ToSrcCodeString(): String {
+        return name
+    }
 }
 
 public open class CustomType <: Type {
@@ -544,16 +716,46 @@ public class StructType <: CustomType {
     public init(def: StructDef, typeArgs: ArrayList<Type>) {
         super(TypeKind.TYPE_STRUCT, def, typeArgs)
     }
+
+    public func GetStructDef(): StructDef {
+        if (let Some(structDef) <- (def as StructDef)) {
+            return structDef
+        }
+        throw IllegalStateException("StructType does not reference a StructDef")
+    }
 }
 
 public class ClassType <: CustomType {
     public init(def: ClassDef, typeArgs: ArrayList<Type>) {
         super(TypeKind.TYPE_CLASS, def, typeArgs)
     }
+
+    public func GetClassDef(): ClassDef {
+        if (let Some(classDef) <- (def as ClassDef)) {
+            return classDef
+        }
+        throw IllegalStateException("ClassType does not reference a ClassDef")
+    }
+
+    public func GetSuperClassTy(builder!: Option<CHIRBuilder> = None): Option<ClassType> {
+        let _ = builder
+        return GetClassDef().GetSuperClassTy()
+    }
 }
 
 public class EnumType <: CustomType {
     public init(def: EnumDef, typeArgs: ArrayList<Type>) {
         super(TypeKind.TYPE_ENUM, def, typeArgs)
+    }
+
+    public func GetEnumDef(): EnumDef {
+        if (let Some(enumDef) <- (def as EnumDef)) {
+            return enumDef
+        }
+        throw IllegalStateException("EnumType does not reference an EnumDef")
+    }
+
+    public func IsOption(): Bool {
+        return GetEnumDef().GetPackageName() == "std.core" && GetEnumDef().GetIdentifier() == "Option"
     }
 }

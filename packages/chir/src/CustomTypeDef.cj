@@ -4,43 +4,122 @@ import std.collection.*
 
 public class MemberVarInfo {
     public var name: String
+    public var rawMangledName: String
     public var ty: Type
+    public var attributeInfo: AttributeInfo = AttributeInfo()
+    public var loc: DebugLocation = DebugLocation()
+    public var annoInfo: AnnoInfo = AnnoInfo()
+    public var initializerFunc: Option<Function> = None
+    public var outerDef: Option<CustomTypeDef> = None
     public var isStatic: Bool
     public var isReadOnly: Bool
 
-    public init(name: String, ty: Type, isStatic!: Bool = false, isReadOnly!: Bool = false) {
+    public init(name: String, ty: Type, isStatic!: Bool = false, isReadOnly!: Bool = false,
+        rawMangledName!: String = "") {
         this.name = name
+        this.rawMangledName = rawMangledName
         this.ty = ty
         this.isStatic = isStatic
         this.isReadOnly = isReadOnly
+        if (isStatic) {
+            attributeInfo.Enable(Attribute.STATIC)
+        }
+        if (isReadOnly) {
+            attributeInfo.Enable(Attribute.READONLY)
+        }
+    }
+
+    public func TestAttr(attr: Attribute): Bool {
+        return attributeInfo.Test(attr)
+    }
+
+    public func IsImmutable(): Bool {
+        return isReadOnly || attributeInfo.Test(Attribute.READONLY) || attributeInfo.Test(Attribute.CONST)
     }
 }
 
 public class FuncSigInfo {
+    public var funcName: String
     public var funcType: FuncType
     public let genericTypeParams: ArrayList<GenericType> = ArrayList<GenericType>()
 
-    public init(funcType: FuncType) {
+    public init(funcType: FuncType, funcName!: String = "",
+        genericTypeParams!: ArrayList<GenericType> = ArrayList<GenericType>()) {
+        this.funcName = funcName
         this.funcType = funcType
+        for (param in genericTypeParams) {
+            this.genericTypeParams.add(param)
+        }
+    }
+
+    public func GetGenericTypeParams(): ArrayList<GenericType> {
+        let out = ArrayList<GenericType>()
+        for (param in genericTypeParams) {
+            out.add(param)
+        }
+        return out
+    }
+
+    public func ToString(): String {
+        let typeParamText = GenericTypeParamsToString(genericTypeParams)
+        let paramText = TypeListKey(funcType.GetParamTypes())
+        return funcName + typeParamText + "(" + paramText + ") -> " + funcType.GetReturnType().ToString()
+    }
+
+    public func Dump(): Unit {
+        println(ToString())
     }
 }
 
 public open class CustomTypeDef <: Base {
+    private let customKind: CustomDefKind
     public let packageName: String
     public let identifier: String
+    private var srcCodeIdentifier: String
     public let genericTypeParams: ArrayList<GenericType> = ArrayList<GenericType>()
+    private var customType: Option<CustomType> = None
+    private var genericDecl: Option<CustomTypeDef> = None
     private let instanceVars: ArrayList<MemberVarInfo> = ArrayList<MemberVarInfo>()
+    private let staticVars: ArrayList<GlobalVar> = ArrayList<GlobalVar>()
     private let methods: ArrayList<Function> = ArrayList<Function>()
+    private let implementedInterfaceTys: ArrayList<ClassType> = ArrayList<ClassType>()
     private let extends: ArrayList<ExtendDef> = ArrayList<ExtendDef>()
+    private var varInitializationFunc: Option<Function> = None
+    private var annoInfo: AnnoInfo = AnnoInfo()
 
     public init(packageName: String, identifier: String) {
+        this(packageName, identifier, identifier, CustomDefKind.TYPE_STRUCT)
+    }
+
+    public init(packageName: String, identifier: String, srcCodeIdentifier: String, kind: CustomDefKind) {
         super()
+        this.customKind = kind
         this.packageName = packageName
         this.identifier = identifier
+        this.srcCodeIdentifier = srcCodeIdentifier
+    }
+
+    public func GetCustomKind(): CustomDefKind {
+        return customKind
     }
 
     public func GetIdentifier(): String {
         return identifier
+    }
+
+    public func GetIdentifierWithoutPrefix(): String {
+        if (identifier.size > 0 && identifier[0] == b'_') {
+            return identifier[1..]
+        }
+        return identifier
+    }
+
+    public func GetSrcCodeIdentifier(): String {
+        return srcCodeIdentifier
+    }
+
+    public func SetSrcCodeIdentifier(name: String): Unit {
+        srcCodeIdentifier = name
     }
 
     public func GetPackageName(): String {
@@ -58,16 +137,166 @@ public open class CustomTypeDef <: Base {
         genericTypeParams.add(param)
     }
 
+    public open func GetType(): Option<CustomType> {
+        return customType
+    }
+
+    public open func SetType(ty: CustomType): Unit {
+        customType = ty
+    }
+
+    public func GetGenericTypeParams(): ArrayList<GenericType> {
+        let out = ArrayList<GenericType>()
+        for (param in genericTypeParams) {
+            out.add(param)
+        }
+        return out
+    }
+
+    public func GetGenericTypeParamsRef(): ArrayList<GenericType> {
+        return genericTypeParams
+    }
+
+    public func IsGenericDef(): Bool {
+        return !genericTypeParams.isEmpty()
+    }
+
+    public func IsClass(): Bool {
+        return customKind == CustomDefKind.TYPE_CLASS
+    }
+
+    public func IsClassLike(): Bool {
+        return IsClass()
+    }
+
+    public func IsEnum(): Bool {
+        return customKind == CustomDefKind.TYPE_ENUM
+    }
+
+    public func IsExtend(): Bool {
+        return customKind == CustomDefKind.TYPE_EXTEND
+    }
+
+    public func IsInterface(): Bool {
+        return TestAttr(Attribute.ABSTRACT) && IsClassLike()
+    }
+
+    public func IsStruct(): Bool {
+        return customKind == CustomDefKind.TYPE_STRUCT
+    }
+
+    public func AddImplementedInterfaceTy(interfaceTy: ClassType): Unit {
+        if (!ContainsClassType(implementedInterfaceTys, interfaceTy)) {
+            implementedInterfaceTys.add(interfaceTy)
+        }
+    }
+
+    public open func GetImplementedInterfaceDefs(): ArrayList<ClassDef> {
+        let out = ArrayList<ClassDef>()
+        for (interfaceTy in implementedInterfaceTys) {
+            let interfaceDef = interfaceTy.GetClassDef()
+            if (!ContainsClassDef(out, interfaceDef)) {
+                out.add(interfaceDef)
+            }
+        }
+        return out
+    }
+
+    public func GetImplementedInterfaceTys(): ArrayList<ClassType> {
+        let out = ArrayList<ClassType>()
+        for (interfaceTy in implementedInterfaceTys) {
+            out.add(interfaceTy)
+        }
+        return out
+    }
+
+    public func GetImplementedInterfacesNum(): Int64 {
+        return implementedInterfaceTys.size
+    }
+
     public func AddInstanceVar(info: MemberVarInfo): Unit {
+        info.outerDef = this
         instanceVars.add(info)
     }
 
     public func GetInstanceVars(): ArrayList<MemberVarInfo> {
+        return GetAllInstanceVars()
+    }
+
+    public func GetAllInstanceVars(): ArrayList<MemberVarInfo> {
+        let out = ArrayList<MemberVarInfo>()
+        if (let Some(classDef) <- (this as ClassDef)) {
+            if (let Some(superDef) <- classDef.GetSuperClassDef()) {
+                for (info in superDef.GetAllInstanceVars()) {
+                    out.add(info)
+                }
+            }
+        }
+        for (info in instanceVars) {
+            out.add(info)
+        }
+        return out
+    }
+
+    public func GetAllInstanceVarNum(): Int64 {
+        return GetAllInstanceVars().size
+    }
+
+    public func GetInstanceVar(index: Int64): MemberVarInfo {
+        return GetAllInstanceVars()[index]
+    }
+
+    public func GetDirectInstanceVarNum(): Int64 {
+        return instanceVars.size
+    }
+
+    public func GetDirectInstanceVar(index: Int64): MemberVarInfo {
+        return instanceVars[index]
+    }
+
+    public func GetDirectInstanceVars(): ArrayList<MemberVarInfo> {
         let out = ArrayList<MemberVarInfo>()
         for (info in instanceVars) {
             out.add(info)
         }
         return out
+    }
+
+    public func SetDirectInstanceVars(vars: ArrayList<MemberVarInfo>): Unit {
+        instanceVars.clear()
+        for (info in vars) {
+            AddInstanceVar(info)
+        }
+    }
+
+    public func AddStaticMemberVar(variable: GlobalVar): Unit {
+        if (!ContainsGlobalVar(staticVars, variable)) {
+            staticVars.add(variable)
+            variable.SetOuterDeclaredOrExtendedDef(this)
+        }
+    }
+
+    public func GetStaticMemberVars(): ArrayList<GlobalVar> {
+        let out = ArrayList<GlobalVar>()
+        for (variable in staticVars) {
+            out.add(variable)
+        }
+        return out
+    }
+
+    public func SetStaticMemberVars(vars: ArrayList<GlobalVar>): Unit {
+        staticVars.clear()
+        for (variable in vars) {
+            AddStaticMemberVar(variable)
+        }
+    }
+
+    public func GetVarInitializationFunc(): Option<Function> {
+        return varInitializationFunc
+    }
+
+    public func SetVarInitializationFunc(fn: Function): Unit {
+        varInitializationFunc = fn
     }
 
     public func AddMethod(method: Function): Unit {
@@ -81,6 +310,13 @@ public open class CustomTypeDef <: Base {
         return CopyFunctionList(methods)
     }
 
+    public func SetMethods(items: ArrayList<Function>): Unit {
+        methods.clear()
+        for (item in items) {
+            AddMethod(item)
+        }
+    }
+
     public func AddExtend(extendDef: ExtendDef): Unit {
         extends.add(extendDef)
     }
@@ -91,6 +327,26 @@ public open class CustomTypeDef <: Base {
             out.add(extendDef)
         }
         return out
+    }
+
+    public func GetGenericDecl(): Option<CustomTypeDef> {
+        return genericDecl
+    }
+
+    public func SetGenericDecl(decl: CustomTypeDef): Unit {
+        genericDecl = decl
+    }
+
+    public func CanBeInherited(): Bool {
+        return IsClassLike()
+    }
+
+    public func GetAnnoInfo(): AnnoInfo {
+        return annoInfo
+    }
+
+    public func SetAnnoInfo(info: AnnoInfo): Unit {
+        annoInfo = info
     }
 
     public open func ToString(indent: Int64): String {
@@ -111,99 +367,29 @@ private func ContainsFunction(values: ArrayList<Function>, method: Function): Bo
     return false
 }
 
-public class StructDef <: CustomTypeDef {
-    public init(packageName: String, identifier: String) {
-        super(packageName, identifier)
-    }
-
-    public override func ToString(indent: Int64): String {
-        return IndentToString(indent) + "struct " + GetFullName()
-    }
-}
-
-public class ClassDef <: CustomTypeDef {
-    private var superClassDef: Option<ClassDef> = None
-    private let implementedInterfaceDefs: ArrayList<ClassDef> = ArrayList<ClassDef>()
-
-    public init(packageName: String, identifier: String) {
-        super(packageName, identifier)
-    }
-
-    public func SetSuperClassDef(def: ClassDef): Unit {
-        superClassDef = def
-    }
-
-    public func GetSuperClassDef(): Option<ClassDef> {
-        return superClassDef
-    }
-
-    public func AddImplementedInterfaceDef(def: ClassDef): Unit {
-        implementedInterfaceDefs.add(def)
-    }
-
-    public func GetImplementedInterfaceDefs(): ArrayList<ClassDef> {
-        let out = ArrayList<ClassDef>()
-        for (def in implementedInterfaceDefs) {
-            out.add(def)
-        }
-        return out
-    }
-
-    public override func ToString(indent: Int64): String {
-        return IndentToString(indent) + "class " + GetFullName()
-    }
-}
-
-public class EnumCtorInfo {
-    public let name: String
-    public let payloadTypes: ArrayList<Type> = ArrayList<Type>()
-
-    public init(name: String, payloadTypes: ArrayList<Type>) {
-        this.name = name
-        for (ty in payloadTypes) {
-            this.payloadTypes.add(ty)
+private func ContainsGlobalVar(values: ArrayList<GlobalVar>, variable: GlobalVar): Bool {
+    for (value in values) {
+        if (value.nodeId == variable.nodeId) {
+            return true
         }
     }
+    return false
 }
 
-public class EnumDef <: CustomTypeDef {
-    private let ctors: ArrayList<EnumCtorInfo> = ArrayList<EnumCtorInfo>()
-
-    public init(packageName: String, identifier: String) {
-        super(packageName, identifier)
-    }
-
-    public func AddCtor(info: EnumCtorInfo): Unit {
-        ctors.add(info)
-    }
-
-    public func GetCtors(): ArrayList<EnumCtorInfo> {
-        let out = ArrayList<EnumCtorInfo>()
-        for (ctor in ctors) {
-            out.add(ctor)
+private func ContainsClassType(values: ArrayList<ClassType>, classTy: ClassType): Bool {
+    for (value in values) {
+        if (value.GetClassDef().nodeId == classTy.GetClassDef().nodeId && value.ToString() == classTy.ToString()) {
+            return true
         }
-        return out
     }
-
-    public override func ToString(indent: Int64): String {
-        return IndentToString(indent) + "enum " + GetFullName()
-    }
+    return false
 }
 
-public class ExtendDef <: CustomTypeDef {
-    public var extendedType: Option<Type> = None
-
-    public init(packageName: String, identifier: String) {
-        super(packageName, identifier)
+private func ContainsClassDef(values: ArrayList<ClassDef>, classDef: ClassDef): Bool {
+    for (value in values) {
+        if (value.nodeId == classDef.nodeId) {
+            return true
+        }
     }
-
-    public init(packageName: String, identifier: String, extendedType: Type) {
-        super(packageName, identifier)
-        this.extendedType = extendedType
-    }
-
-    public override func ToString(indent: Int64): String {
-        let target = if (let Some(ty) <- extendedType) { ty.ToString() } else { "<unknown>" }
-        return IndentToString(indent) + "extend " + target
-    }
+    return false
 }
