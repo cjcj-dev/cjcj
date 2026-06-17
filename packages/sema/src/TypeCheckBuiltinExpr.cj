@@ -3,7 +3,17 @@ package cangjie_compiler::sema
 import std.collection.*
 import cangjie_compiler::ast.*
 import cangjie_compiler::basic.DiagnosticEngine as BasicDiagnosticEngine
+import cangjie_compiler::basic.DiagKind as BasicDiagKind
 import cangjie_compiler::basic.DiagKindRefactor as BasicDiagKindRefactor
+import cangjie_compiler::basic.Position as BasicPosition
+
+private func ToBasicPosition(pos: Position): BasicPosition {
+    return BasicPosition(pos.fileID, pos.line, pos.column)
+}
+
+private func DiagOld(diag: BasicDiagnosticEngine, node: Node, kind: BasicDiagKind): Unit {
+    let _ = diag.Diagnose(ToBasicPosition(node.begin), ToBasicPosition(node.end), kind)
+}
 
 private func InvalidExprTy(expr: Expr): Ty {
     let invalidTy = TypeManager.GetInvalidTy()
@@ -83,20 +93,70 @@ public func IsCallOfBuiltInType(ce: CallExpr, kind: TypeKind): Bool {
     return false
 }
 
-public func ChkArrayArgs(arrayExpr: ArrayExpr): Bool {
+private func IsSizedArrayFunctionInitializer(typeManager: TypeManager, arrayExpr: ArrayExpr): Bool {
+    if (arrayExpr.args.size != 2) {
+        return false
+    }
+    if (let Some(_) <- arrayExpr.initFunc) {
+        return true
+    }
+    if (!arrayExpr.args[1].name.Empty()) {
+        return false
+    }
+    if (let None <- arrayExpr.typeNode) {
+        return false
+    }
+    let arrayTy = arrayExpr.typeNode.getOrThrow().GetTy() ?? TypeManager.GetInvalidTy()
+    if (let None <- (arrayTy as ArrayTy)) {
+        return false
+    }
+    let rawArrayTy = (arrayTy as ArrayTy).getOrThrow()
+    let secondTy = FuncArgTy(arrayExpr.args[1])
+    let sizeTy = TypeManager.GetPrimitiveTy(TypeKind.TYPE_INT64)
+    if (rawArrayTy.typeArgs.isEmpty() || rawArrayTy.typeArgs[0].IsInvalid()) {
+        if (let Some(funcTy) <- (secondTy as FuncTy)) {
+            return funcTy.paramTys.size == 1 && typeManager.IsSubtype(funcTy.paramTys[0], sizeTy)
+        }
+        return false
+    }
+    let elemTy = GetArrayElementTy(typeManager, rawArrayTy)
+    if (typeManager.CheckTypeCompatibility(elemTy, secondTy) != TypeCompatibility.INCOMPATIBLE) {
+        return false
+    }
+    let expectedFuncTy = typeManager.GetFunctionTy([sizeTy], elemTy)
+    return typeManager.CheckTypeCompatibility(expectedFuncTy, secondTy) != TypeCompatibility.INCOMPATIBLE
+}
+
+public func ChkArrayArgs(typeManager: TypeManager, arrayExpr: ArrayExpr,
+    diag!: Option<BasicDiagnosticEngine> = None): Bool {
     if (arrayExpr.args.isEmpty()) {
         return true
     }
     if (!arrayExpr.args[0].name.Empty()) {
+        if (let Some(diagValue) <- diag) {
+            DiagOld(diagValue, arrayExpr.args[0], BasicDiagKind.sema_array_first_arg_cannot_be_named)
+        }
         return false
     }
     if (arrayExpr.args.size != 2) {
         return true
     }
-    if (let Some(_) <- arrayExpr.initFunc) {
-        return arrayExpr.args[1].name.Empty()
+    if (IsSizedArrayFunctionInitializer(typeManager, arrayExpr)) {
+        if (!arrayExpr.args[1].name.Empty()) {
+            if (let Some(diagValue) <- diag) {
+                DiagOld(diagValue, arrayExpr.args[1], BasicDiagKind.sema_array_second_arg_cannot_be_named)
+            }
+            return false
+        }
+        return true
     }
-    return arrayExpr.args[1].name.Empty() || arrayExpr.args[1].name.Val() == "repeat"
+    if (arrayExpr.args[1].name.Empty() || arrayExpr.args[1].name.Val() != "repeat") {
+        if (let Some(diagValue) <- diag) {
+            DiagOld(diagValue, arrayExpr.args[1], BasicDiagKind.sema_array_second_wrong_named_arg)
+        }
+        return false
+    }
+    return true
 }
 
 public func SynArrayLit(typeManager: TypeManager, arrayLit: ArrayLit): Ty {
@@ -195,7 +255,7 @@ public func ChkSizedArrayExpr(typeManager: TypeManager, target: Ty, arrayExpr: A
     if (rawArrayTy.typeArgs.isEmpty() || rawArrayTy.typeArgs[0].IsInvalid()) {
         let secondTy = FuncArgTy(arrayExpr.args[1])
         if (let Some(funcTy) <- (secondTy as FuncTy)) {
-            if (funcTy.paramTys.size == 1 && typeManager.IsSubtype(sizeTy, funcTy.paramTys[0])) {
+            if (funcTy.paramTys.size == 1 && typeManager.IsSubtype(funcTy.paramTys[0], sizeTy)) {
                 arrayExpr.SetTy(typeManager.GetArrayTy(funcTy.retTy, rawArrayTy.dims))
                 return target.IsInvalid() ||
                     typeManager.CheckTypeCompatibility(target, arrayExpr.GetTy().getOrThrow()) !=
@@ -238,7 +298,8 @@ public func ChkSingleArgArrayExpr(typeManager: TypeManager, target: Ty, arrayExp
     return false
 }
 
-public func ChkArrayExpr(typeManager: TypeManager, target: Ty, arrayExpr: ArrayExpr): Bool {
+public func ChkArrayExpr(typeManager: TypeManager, target: Ty, arrayExpr: ArrayExpr,
+    diag!: Option<BasicDiagnosticEngine> = None): Bool {
     if (let None <- arrayExpr.typeNode) {
         return false
     }
@@ -257,9 +318,12 @@ public func ChkArrayExpr(typeManager: TypeManager, target: Ty, arrayExpr: ArrayE
     } else if (arrayExpr.args.size == 2) {
         ok = ChkSizedArrayExpr(typeManager, targetTy, arrayExpr)
     } else {
+        if (let Some(diagValue) <- diag) {
+            DiagOld(diagValue, arrayExpr, BasicDiagKind.sema_array_too_much_argument)
+        }
         ok = false
     }
-    if (!ChkArrayArgs(arrayExpr)) {
+    if (!ChkArrayArgs(typeManager, arrayExpr, diag: diag)) {
         ok = false
     }
     if (!ok) {
@@ -268,8 +332,9 @@ public func ChkArrayExpr(typeManager: TypeManager, target: Ty, arrayExpr: ArrayE
     return ok
 }
 
-public func SynArrayExpr(typeManager: TypeManager, arrayExpr: ArrayExpr): Ty {
-    if (ChkArrayExpr(typeManager, TypeManager.GetInvalidTy(), arrayExpr)) {
+public func SynArrayExpr(typeManager: TypeManager, arrayExpr: ArrayExpr,
+    diag!: Option<BasicDiagnosticEngine> = None): Ty {
+    if (ChkArrayExpr(typeManager, TypeManager.GetInvalidTy(), arrayExpr, diag: diag)) {
         return arrayExpr.GetTy() ?? TypeManager.GetInvalidTy()
     }
     return InvalidExprTy(arrayExpr)
@@ -429,7 +494,8 @@ public func ChkCStringCall(typeManager: TypeManager, target: Ty, ce: CallExpr): 
     return true
 }
 
-public func ChkArrayCall(typeManager: TypeManager, target: Ty, ce: CallExpr): Bool {
+public func ChkArrayCall(typeManager: TypeManager, target: Ty, ce: CallExpr,
+    diag!: Option<BasicDiagnosticEngine> = None): Bool {
     if (!IsCallOfBuiltInType(ce, TypeKind.TYPE_ARRAY)) {
         return false
     }
@@ -439,9 +505,9 @@ public func ChkArrayCall(typeManager: TypeManager, target: Ty, ce: CallExpr): Bo
         arrayExpr.args.add(arg)
     }
     let ok = if (target.IsInvalid()) {
-        Ty.IsTyCorrect(SynArrayExpr(typeManager, arrayExpr))
+        Ty.IsTyCorrect(SynArrayExpr(typeManager, arrayExpr, diag: diag))
     } else {
-        ChkArrayExpr(typeManager, target, arrayExpr)
+        ChkArrayExpr(typeManager, target, arrayExpr, diag: diag)
     }
     if (ok) {
         ce.desugarExpr = arrayExpr
@@ -522,14 +588,15 @@ public func ChkCFuncCall(typeManager: TypeManager, target: Ty, ce: CallExpr): Bo
     return SynCFuncCall(typeManager, ce)
 }
 
-public func ChkBuiltinCall(typeManager: TypeManager, target: Ty, ce: CallExpr): Bool {
+public func ChkBuiltinCall(typeManager: TypeManager, target: Ty, ce: CallExpr,
+    diag!: Option<BasicDiagnosticEngine> = None): Bool {
     if (ChkPointerCall(typeManager, target, ce)) {
         return true
     }
     if (ChkCStringCall(typeManager, target, ce)) {
         return true
     }
-    if (ChkArrayCall(typeManager, target, ce)) {
+    if (ChkArrayCall(typeManager, target, ce, diag: diag)) {
         return true
     }
     if (ChkVArrayCall(typeManager, target, ce)) {
@@ -574,7 +641,7 @@ private func JoinCaseTysForBuiltin(typeManager: TypeManager, tys: ArrayList<Ty>)
 
 public func ChkBuiltinCallWithDiag(diag: BasicDiagnosticEngine, typeManager: TypeManager, target: Ty,
     ce: CallExpr): Bool {
-    let ok = ChkBuiltinCall(typeManager, target, ce)
+    let ok = ChkBuiltinCall(typeManager, target, ce, diag: Some(diag))
     if (!ok && ce.ShouldDiagnose()) {
         SemaDiag(diag, BasicDiagKindRefactor.sema_mismatched_types, ce)
     }
