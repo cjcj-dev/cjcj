@@ -87,6 +87,13 @@ public class DiagArgument {
         positionValue = DEFAULT_POSITION
     }
 
+    public init(value: UInt8) {
+        kind = DiagArgumentKind.CHAR
+        intValue = 0
+        stringValue = String.fromUtf8([value])
+        positionValue = DEFAULT_POSITION
+    }
+
     public init(value: String) {
         kind = DiagArgumentKind.STRING
         intValue = 0

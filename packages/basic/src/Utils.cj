@@ -126,7 +126,11 @@ public func SplitString(str: String, delimiter: String): Array<String> {
         return Array<String>()
     }
     if (delimiter.isEmpty()) {
-        return [str]
+        let emptySplits = ArrayList<String>()
+        for (_ in 0..(str.size + 1)) {
+            emptySplits.add("")
+        }
+        return emptySplits.toArray()
     }
     let res = ArrayList<String>()
     var pos: Int64 = 0

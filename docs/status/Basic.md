@@ -74,6 +74,11 @@ Deepening pass updates:
   `static_cast<unsigned int>(hashValue)` path.
 - Matched C++ diagnostic argument integer narrowing for `int64_t` and `size_t` inputs by storing the same
   two's-complement 32-bit value that the reference `std::variant<int, ...>` receives before `%d` formatting.
+- Matched the C++ `Utils::SplitString` empty-delimiter edge case: non-empty strings now produce the same
+  `std::string::find("")` zero-length split slots while empty input still returns no splits.
+- Restored the C++ diagnostic formatter's mismatch side effects: unsupported `%` directives and wrong argument kinds
+  now emit `Errorln` diagnostics while leaving the original placeholder in the formatted message, and `%c` has a real
+  byte-character `DiagArgument` constructor.
 
 Implemented:
 
@@ -102,6 +107,8 @@ Implemented:
   `Source`.
 - Matched C++ `DiagArgument` integer storage for wide signed and unsigned inputs, including wraparound values that
   differ from their original 64-bit representation.
+- Aligned `SplitString` and legacy diagnostic format-argument handling with the C++ edge cases for empty delimiters,
+  `%c` character arguments, bad argument kinds, and illegal format characters.
 - Kept LLVM/native backend out of scope as required; Basic does not bind LLVM directly.
 
 Known fidelity caveats:
