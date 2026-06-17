@@ -1338,15 +1338,18 @@ public class InitializationChecker {
             if (!target.TestAttr(Attribute.INITIALIZED)) {
                 if (HasInitVarsAfterTerminator(refExpr.scopeName)) {
                     return true
-                } else if (IsInDifferentFunction(refExpr, target)) {
-                    AddIssue(InitializationIssueKind.CAPTURE_BEFORE_INITIALIZATION, refExpr, target: target,
-                        message: target.identifier.Val())
-                    return false
                 }
-                if (!refExpr.TestAttr(Attribute.LEFT_VALUE)) {
-                    AddIssue(InitializationIssueKind.USED_BEFORE_INITIALIZATION, refExpr, target: target,
-                        message: target.identifier.Val())
-                    return false
+                if (refExpr.ShouldDiagnose(allowCompilerAdd: true)) {
+                    if (IsInDifferentFunction(refExpr, target)) {
+                        AddIssue(InitializationIssueKind.CAPTURE_BEFORE_INITIALIZATION, refExpr, target: target,
+                            message: target.identifier.Val())
+                        return false
+                    }
+                    if (!refExpr.TestAttr(Attribute.LEFT_VALUE)) {
+                        AddIssue(InitializationIssueKind.USED_BEFORE_INITIALIZATION, refExpr, target: target,
+                            message: target.identifier.Val())
+                        return false
+                    }
                 }
                 return false
             }
@@ -1499,6 +1502,9 @@ public class InitializationChecker {
                 if (let Some(call) <- (expr as CallExpr)) {
                     var result = CheckExprOption(call.baseFunc)
                     for (arg in call.args) {
+                        result = CheckExprOption(arg.expr) && result
+                    }
+                    for (arg in call.defaultArgs) {
                         result = CheckExprOption(arg.expr) && result
                     }
                     result
