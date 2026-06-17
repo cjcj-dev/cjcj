@@ -36,6 +36,7 @@ Implemented:
 - Added C++-style diagnostics for non-ASCII numeric junk, illegal Unicode identifier continuations, and missing multiline/raw-string delimiter hints.
 - Reworked string-interpolation hole scanning to mirror the C++ helper split for nested braces, strings, comments, linebreak diagnostics, and raw-string failure propagation.
 - Routed non-identifier Unicode token starts through the C++ symbol fallback path so they produce `lex_unknown_start_of_token` behavior instead of Lex-local unrecognized-symbol handling.
+- Matched the C++ dedicated identifier-continuation UTF-8 recovery path: malformed multibyte continuation scans now consume only the offending byte and report `lex_illegal_unicode`, instead of using the general UTF-8 reader that can absorb the following ASCII byte.
 - Aligned numeric exponent/suffix diagnostics with C++ by anchoring exponent digit scanning at the exponent marker and preserving the reference `success` state after unknown-suffix reporting.
 - Tightened `GetStrParts` to assert string-token kinds and require scanned string-part map entries just like C++, while still rebuilding macro-provided string tokens through a temporary lexer.
 - Delegated current-character diagnostic rendering to Basic `ConvertChar` after newline detection, matching C++ handling for EOF and control characters.
