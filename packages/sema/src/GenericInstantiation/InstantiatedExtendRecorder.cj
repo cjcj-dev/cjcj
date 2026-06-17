@@ -32,9 +32,17 @@ public class InstantiatedExtendRecorder {
     }
 
     public func Record(node: Node): Unit {
+        if (let Some(pkg) <- (node as Package)) {
+            for (file in pkg.files) {
+                Record(file)
+            }
+            for (decl in pkg.srcImportedNonGenericDecls) {
+                Record(decl)
+            }
+            return
+        }
         let walker = Walker(node, visitPre: { current: Node =>
             RecordUsedExtendDecl(current)
-            VisitAction.WALK_CHILDREN
         })
         let _ = walker.Walk()
     }
@@ -51,7 +59,13 @@ public class InstantiatedExtendRecorder {
         usedExtends.clear()
     }
 
-    private func RecordUsedExtendDecl(node: Node): Unit {
+    private func RecordUsedExtendDecl(node: Node): VisitAction {
+        if (let Some(expr) <- (node as Expr)) {
+            if (let Some(desugarExpr) <- expr.desugarExpr) {
+                Record(desugarExpr)
+                return VisitAction.SKIP_CHILDREN
+            }
+        }
         if (let Some(refExpr) <- (node as RefExpr)) {
             RecordExtendForTarget(refExpr.GetTarget())
         } else if (let Some(memberAccess) <- (node as MemberAccess)) {
@@ -61,6 +75,7 @@ public class InstantiatedExtendRecorder {
             }
         }
         RecordExtendForTy(node.GetTy())
+        return VisitAction.WALK_CHILDREN
     }
 
     private func RememberExtend(extendDecl: ExtendDecl): Unit {
