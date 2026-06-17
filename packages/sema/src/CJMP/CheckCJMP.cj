@@ -3,6 +3,7 @@ package cangjie_compiler::sema.CJMP
 import std.collection.*
 import cangjie_compiler::ast.*
 import cangjie_compiler::sema.*
+import cangjie_compiler::sema.InheritanceChecker.*
 import cangjie_compiler::basic.DiagKindRefactor as BasicDiagKindRefactor
 import cangjie_compiler::basic.Position as BasicPosition
 import cangjie_compiler::basic.Range as BasicRange
@@ -266,6 +267,25 @@ private func HasRawName(names: ArrayList<String>, name: String): Bool {
     return false
 }
 
+private func HasSpecificCandidate(funcs: ArrayList<FuncDecl>): Bool {
+    for (funcDecl in funcs) {
+        if (funcDecl.TestAttr(Attribute.SPECIFIC)) {
+            return true
+        }
+    }
+    return false
+}
+
+private func IsCommonCandidateFromCommonPart(funcDecl: FuncDecl): Bool {
+    return funcDecl.TestAttr(Attribute.COMMON) && funcDecl.TestAttr(Attribute.FROM_COMMON_PART)
+}
+
+private func AppendSyms(target: ArrayList<Symbol>, source: ArrayList<Symbol>): Unit {
+    for (sym in source) {
+        target.add(sym)
+    }
+}
+
 extend MPTypeCheckerImpl {
     public func PreCheck4CJMP(pkg: Package): Unit {
         if (!compileCommon) {
@@ -301,6 +321,22 @@ extend MPTypeCheckerImpl {
                 NodeRange(cls),
                 arguments: [cls.identifier.Val()])
             builder.Emit()
+        }
+    }
+
+    public func FilterOutCommonCandidatesIfSpecificExist(candidates: HashMap<Names, ArrayList<FuncDecl>>): Unit {
+        for ((_, funcs) in candidates) {
+            if (!HasSpecificCandidate(funcs)) {
+                continue
+            }
+            var idx: Int64 = 0
+            while (idx < funcs.size) {
+                if (IsCommonCandidateFromCommonPart(funcs[idx])) {
+                    funcs.remove(at: idx)
+                } else {
+                    idx++
+                }
+            }
         }
     }
 
@@ -431,7 +467,9 @@ extend MPTypeCheckerImpl {
     }
 
     public func CheckCommonSpecificGenericMatch(specificDecl: Decl, commonDecl: Decl): Unit {
-        let _ = typeManager.GenerateGenericMappingFromGeneric(commonDecl, specificDecl)
+        let parentBounds = GetAllGenericUpperBounds(typeManager, commonDecl)
+        let childBounds = GetAllGenericUpperBounds(typeManager, specificDecl)
+        CheckGenericTypeBoundsMapped(commonDecl, specificDecl, parentBounds, childBounds, diag, typeManager)
     }
 
     public func MatchCommonNominalDeclWithSpecific(commonDecl: InheritableDecl): Bool {
@@ -834,6 +872,74 @@ extend MPTypeCheckerImpl {
                 if (let Some(commonFunc) <- (commonDecl as FuncDecl)) {
                     if (let Some(specificFunc) <- (specificDecl as FuncDecl)) {
                         PropagateDefaultArguments(commonFunc, specificFunc)
+                    }
+                }
+            }
+        }
+    }
+
+    public func UpdateGenericTyInMemberFromCommon(genericTyMap: TypeSubst, member: Decl): Unit {
+        if (genericTyMap.IsEmpty()) {
+            return
+        }
+        let walker = Walker(member, visitPre: { node: Node =>
+            if (let Some(ty) <- node.GetTy()) {
+                node.SetTy(typeManager.GetInstantiatedTy(ty, genericTyMap))
+            }
+            if (let Some(refExpr) <- (node as NameReferenceExpr)) {
+                for (idx in 0..refExpr.instTys.size) {
+                    refExpr.instTys[idx] = typeManager.GetInstantiatedTy(refExpr.instTys[idx], genericTyMap)
+                }
+            }
+            return VisitAction.WALK_CHILDREN
+        })
+        let _ = walker.Walk()
+    }
+
+    public func UpdateSpecificMemberGenericTy(
+        ctx: ASTContext,
+        getSymsFunc: (ASTContext, ASTKind) -> ArrayList<Symbol>
+    ): Unit {
+        let syms = getSymsFunc(ctx, ASTKind.CLASS_DECL)
+        AppendSyms(syms, getSymsFunc(ctx, ASTKind.INTERFACE_DECL))
+        AppendSyms(syms, getSymsFunc(ctx, ASTKind.STRUCT_DECL))
+        AppendSyms(syms, getSymsFunc(ctx, ASTKind.ENUM_DECL))
+        AppendSyms(syms, getSymsFunc(ctx, ASTKind.EXTEND_DECL))
+
+        for (sym in syms) {
+            if (let Some(node) <- sym.node) {
+                if (let Some(decl) <- (node as Decl)) {
+                    if (!decl.TestAttr(Attribute.COMMON) || !decl.TestAttr(Attribute.GENERIC)) {
+                        continue
+                    }
+                    if (let Some(specificDecl) <- decl.specificImplementation) {
+                        let genericTyMap = TypeSubst()
+                        MapCJMPGenericTypeArgs(genericTyMap, decl, specificDecl)
+                        for (member in specificDecl.GetMemberDecls()) {
+                            if (member.TestAttr(Attribute.FROM_COMMON_PART)) {
+                                UpdateGenericTyInMemberFromCommon(genericTyMap, member)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    public func GetInheritedTypesWithSpecificImpl(inheritedTypes: ArrayList<Type>, hasSpecificImpl: Bool): Unit {
+        GetInheritedTypesWithSpecificImpl(inheritedTypes, hasSpecificImpl, compilePlatform)
+    }
+
+    public func GetInheritedTypesWithSpecificImpl(
+        inheritedTypes: ArrayList<Type>, hasSpecificImpl: Bool, compilePlatformFlag: Bool): Unit {
+        if (!compilePlatformFlag || hasSpecificImpl) {
+            return
+        }
+        for (inheritedType in inheritedTypes) {
+            if (let Some(decl) <- Ty.GetDeclOfTy(inheritedType.GetTy())) {
+                if (let Some(specificDecl) <- decl.specificImplementation) {
+                    if (let Some(specificTy) <- specificDecl.GetTy()) {
+                        inheritedType.SetTy(specificTy)
                     }
                 }
             }
