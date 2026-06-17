@@ -13,6 +13,14 @@ Whole-package selfhost TODO grep: 4 existing markers remain outside the allowed 
 - Kept the out-of-scope extension merge/symbol-table rebuild path unimplemented because the C++ implementation depends on `CompilerInstance`, `ScopeManager`, `Collector`, and declaration-map updates outside the allowed file set.
 - Verified with `cjpm build`; scoped files still have no `TODO(selfhost:Sema)` markers.
 
+## 2026-06-18 continuation pass
+
+- Tightened CJMP nominal merge preservation for duplicate member-parameter declarations so the residual common declaration list keeps the skipped member parameter, matching the C++ move/swap behavior that preserves declarations still needing analysis.
+- Moved CJMP generic-bound compatibility checking into `MapCJMPGenericTypeArgs`, matching the C++ path that validates common/specific generic constraints whenever the generic mapping is requested.
+- Aligned C FFI wrong-argument-count diagnostics for `@C`, `@FastNative`, and `@Frozen` with the C++ checker by reporting `sema_annotation_error_arg_num` on the first annotation argument via the legacy diagnostic path.
+- Aligned C function signature checking with C++ by skipping C return-type diagnostics when the return type is not yet a correct/resolved type.
+- Verified with `cjpm build`; `grep -rn "TODO(selfhost:Sema)" packages/sema/src` still reports the four existing out-of-scope root Sema markers.
+
 ## 2026-06-17 mock accessor parity pass
 
 - Switched mock-support property marking to the real `GetUsableGetterForProperty` and `GetUsableSetterForProperty` helpers, matching the C++ behavior for inherited/usable accessors instead of assuming index-zero accessors.
@@ -71,4 +79,4 @@ Whole-package selfhost TODO grep: 4 existing markers remain outside the allowed 
 - NativeFFI utilities now cover more reference, generic, type-node, Java-array, and naming helpers, but larger AST synthesis/desugaring helpers, mangler-driven method naming, import-manager core declaration helpers, abort-on-invalid array classification, and full Java/ObjC interop manager behavior remain incomplete.
 - LSP base-name, scope-name, and relative-position helpers are present, but the C++ type synthesizer half remains outside the current self-host surface.
 
-Honest real-behavior coverage for this scoped pass is estimated at 57% versus the corresponding C++ reference surface.
+Honest real-behavior coverage for this scoped pass is estimated at 58% versus the corresponding C++ reference surface.

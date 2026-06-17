@@ -159,6 +159,7 @@ extend MPTypeCheckerImpl {
                 }
             }
         }
+        CheckCommonSpecificGenericMatch(specificDecl, commonDecl)
         if (commonDecl.GetGenericsCount() != specificDecl.GetGenericsCount()) {
             return
         }

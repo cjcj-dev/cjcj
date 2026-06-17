@@ -221,6 +221,7 @@ private func MergeCommonIntoSpecific(checker: MPTypeCheckerImpl, commonDecl: Dec
                         DiagNotMatchedCommonDecl(checker, varDecl)
                     }
                 } else if (varDecl.isMemberParam && memberParamIds.contains(id)) {
+                    remainingCommon.add(specificMember)
                     consumed = true
                 }
             }

@@ -130,7 +130,11 @@ public func IsZeroSizedTy(ty: Ty): Bool {
 
 public func CheckAnnoC(decl: Decl, annotation: Annotation, diag: BasicDiagnosticEngine): Unit {
     if (!annotation.args.isEmpty()) {
-        EmitRefactor(diag, BasicDiagKindRefactor.sema_annotation_error_arg_num, annotation, args: ["@C", "no"])
+        EmitLegacy(
+            diag,
+            BasicDiagKind.sema_annotation_error_arg_num,
+            annotation.args[0],
+            args: [BasicDiagArgument("@C"), BasicDiagArgument("no")])
     }
     if (decl.astKind == ASTKind.FUNC_DECL) {
         if (let Some(generic) <- decl.GetGeneric()) {
@@ -184,7 +188,11 @@ public func CheckAnnoCallingConv(decl: Decl, annotation: Annotation, diag: Basic
 
 public func CheckAnnoFastNative(decl: Decl, annotation: Annotation, diag: BasicDiagnosticEngine): Unit {
     if (!annotation.args.isEmpty()) {
-        EmitRefactor(diag, BasicDiagKindRefactor.sema_annotation_error_arg_num, annotation, args: ["@FastNative", "no"])
+        EmitLegacy(
+            diag,
+            BasicDiagKind.sema_annotation_error_arg_num,
+            annotation.args[0],
+            args: [BasicDiagArgument("@FastNative"), BasicDiagArgument("no")])
     }
     if (decl.astKind != ASTKind.FUNC_DECL || !decl.TestAttr(Attribute.FOREIGN)) {
         let prefix = if (decl.astKind == ASTKind.FUNC_DECL) { "non-foreign " } else { "" }
@@ -202,7 +210,11 @@ public func CheckAnnoFastNative(decl: Decl, annotation: Annotation, diag: BasicD
 
 public func CheckAnnoFrozen(decl: Decl, annotation: Annotation, diag: BasicDiagnosticEngine): Unit {
     if (!annotation.args.isEmpty()) {
-        EmitRefactor(diag, BasicDiagKindRefactor.sema_annotation_error_arg_num, annotation, args: ["@Frozen", "no"])
+        EmitLegacy(
+            diag,
+            BasicDiagKind.sema_annotation_error_arg_num,
+            annotation.args[0],
+            args: [BasicDiagArgument("@Frozen"), BasicDiagArgument("no")])
     }
     if (decl.astKind != ASTKind.FUNC_DECL && decl.astKind != ASTKind.PROP_DECL) {
         EmitLegacy(
@@ -306,6 +318,9 @@ public func CheckCFuncSignature(body: FuncBody, diag: BasicDiagnosticEngine): Un
             }
         }
         if (let Some(retType) <- body.retType) {
+            if (!Ty.IsTyCorrect(retType.GetTy())) {
+                return
+            }
             if (let Some(retTy) <- retType.GetTy()) {
                 if (!Ty.IsMetCType(retTy)) {
                     let builder = diag.DiagnoseRefactor(
