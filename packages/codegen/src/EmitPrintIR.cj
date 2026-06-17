@@ -119,6 +119,41 @@ public func EmitRuntimeIntPrint(cgMod: CGModule, builderRaw: LLVMBuilderRef, val
     return false
 }
 
+// Emit a runtime-value Bool print: select between the literal C-strings "true" and "false" on the
+// i1 `value`, then printf("%s"/"%s\n", selected). Lands at the LLVM `builder`'s current insert point
+// (right where the i1 was computed in body flow). `globalName` must be unique within the module.
+// Returns false if the module handle / builder is unusable.
+public func EmitRuntimeBoolPrint(cgMod: CGModule, builderRaw: LLVMBuilderRef, value: LLVMValueRef,
+    newline: Bool, globalName: String): Bool {
+    if (value.isNull() || builderRaw.isNull()) {
+        return false
+    }
+    if (let Some(moduleHandle) <- cgMod.GetLLVMModule()) {
+        let ctx = cgMod.GetLLVMContext().raw
+        let i8Type = unsafe { LLVMInt8TypeInContext(ctx) }
+        let i8PtrType = unsafe { LLVMPointerType(i8Type, 0u32) }
+        let i32Type = unsafe { LLVMInt32TypeInContext(ctx) }
+        let printfType = BuildPrintfFunctionType(i32Type, i8PtrType)
+        let printfFn = GetOrInsertRuntimePrintFunction(moduleHandle, "printf", printfType)
+        let truePtr = EmitStringGlobalPtr(moduleHandle, builderRaw, ctx, "true", i32Type, globalName + ".t")
+        let falsePtr = EmitStringGlobalPtr(moduleHandle, builderRaw, ctx, "false", i32Type, globalName + ".f")
+        let fmt = if (newline) { "%s\n" } else { "%s" }
+        let fmtPtr = EmitStringGlobalPtr(moduleHandle, builderRaw, ctx, fmt, i32Type, globalName + ".fmt")
+        try (selName = unsafe { LibC.mallocCString("") }.asResource(),
+            emptyName = unsafe { LibC.mallocCString("") }.asResource(),
+            argPtr = LibC.malloc<LLVMValueRef>(count: 2).asResource()) {
+            unsafe {
+                let selected = LLVMBuildSelect(builderRaw, value, truePtr, falsePtr, selName.value)
+                (argPtr.value + 0).write(fmtPtr)
+                (argPtr.value + 1).write(selected)
+                let _ = LLVMBuildCall2(builderRaw, printfType, printfFn, argPtr.value, 2u32, emptyName.value)
+            }
+        }
+        return true
+    }
+    return false
+}
+
 // Emit a literal-string print at the LLVM `builder`'s current insert point (so it lands at the
 // anchor in body flow). For println (newline == true) we call libc `puts` (writes the string + a
 // newline); for print (newline == false) we call `fputs(str, stdout)` (no trailing newline). This

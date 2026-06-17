@@ -11,6 +11,7 @@ import cangjie_compiler::parse.FuncDecl as ParseFuncDecl
 import cangjie_compiler::parse.VarDecl as ParseVarDecl
 import cangjie_compiler::parse.Expr as ParseExpr
 import cangjie_compiler::parse.BinaryExpr as ParseBinaryExpr
+import cangjie_compiler::parse.UnaryExpr as ParseUnaryExpr
 import cangjie_compiler::parse.AssignExpr as ParseAssignExpr
 import cangjie_compiler::parse.RefExpr as ParseRefExpr
 import cangjie_compiler::parse.CallExpr as ParseCallExpr
@@ -109,6 +110,10 @@ private func findParsedFunc(parsedFile: ParseFile, name: String, line: Int64): O
 private class AdaptScope {
     let locals = HashSet<String>()
     let params = HashSet<String>()
+    // Names of locals/params known to hold a Bool value (a `let`/`var` bound to a bool literal or a
+    // bool-producing expression, or a Bool parameter). Used so a bare `println(boolLocal)` promotes
+    // and lowers as a runtime Bool print rather than falling back to the int-only summary path.
+    let boolNames = HashSet<String>()
     let funcNames: HashSet<String>
     var needsRuntime: Bool = false
 
@@ -137,6 +142,14 @@ private func adaptParsedFunc(funcDecl: FuncDecl, parsedFunc: ParseFuncDecl, func
             if (!pname.isEmpty()) {
                 scope.locals.add(pname)
                 scope.params.add(pname)
+                // A Bool parameter is tracked so references to it lower as i1 (and a bare print of it
+                // promotes as a runtime Bool print).
+                if (let Some(typeNode) <- funcParam.typeNode) {
+                    let tn = typeNode.ToString()
+                    if (tn == "Bool" || tn == "bool") {
+                        scope.boolNames.add(pname)
+                    }
+                }
             }
         }
     }
@@ -231,6 +244,10 @@ private func adaptVarDecl(varDecl: ParseVarDecl, scope: AdaptScope): Option<Chir
         scope.needsRuntime = true
     }
     scope.locals.add(name)
+    // Track Bool-typed locals so a later bare `println(name)` lowers as a runtime Bool print.
+    if (exprIsBool(initExpr, scope)) {
+        scope.boolNames.add(name)
+    }
     return Some(ChirStmtSpec.Let(name, valueSpec, isVar: varDecl.isVar))
 }
 
@@ -344,8 +361,27 @@ private func adaptExpr(expr: ParseExpr, scope: AdaptScope): Option<ChirExprSpec>
     if (let Some(litValue) <- intLiteralValue(expr)) {
         return Some(ChirExprSpec.Literal(litValue))
     }
+    if (let Some(boolValue) <- boolLiteralValue(expr)) {
+        return Some(ChirExprSpec.BoolLit(boolValue))
+    }
     if (let Some(refName) <- localRefName(expr, scope)) {
         return Some(ChirExprSpec.Ref(refName))
+    }
+    if (let Some(unary) <- (expr as ParseUnaryExpr)) {
+        let op = match (toChirUnaryOp(unary.op.kind)) {
+            case Some(o) => o
+            case None => return None
+        }
+        let operandExpr = match (unary.expr) {
+            case Some(e) => e
+            case None => return None
+        }
+        let operandSpec = match (adaptExpr(operandExpr, scope)) {
+            case Some(e) => e
+            case None => return None
+        }
+        scope.needsRuntime = true
+        return Some(ChirExprSpec.Unary(op, operandSpec))
     }
     if (let Some(paren) <- (expr as ParseParenExpr)) {
         let inner = match (paren.expr) {
@@ -506,8 +542,75 @@ private func toChirBinaryOp(kind: TokenKind): Option<ChirExprKind> {
         case TokenKind.GE => Some(ChirExprKind.GE)
         case TokenKind.EQUAL => Some(ChirExprKind.EQUAL)
         case TokenKind.NOTEQ => Some(ChirExprKind.NOTEQUAL)
+        case TokenKind.AND => Some(ChirExprKind.AND)
+        case TokenKind.OR => Some(ChirExprKind.OR)
         case _ => None
     }
+}
+
+// Map a parse unary-op token to a CHIR ExprKind. `!` -> NOT (Bool), `-` -> NEG (Int64); anything
+// else fails the match (fallback).
+private func toChirUnaryOp(kind: TokenKind): Option<ChirExprKind> {
+    return match (kind) {
+        case TokenKind.NOT => Some(ChirExprKind.NOT)
+        case TokenKind.SUB => Some(ChirExprKind.NEG)
+        case _ => None
+    }
+}
+
+// Decide (syntactically) whether `expr` produces a Bool value: a bool literal, a reference to a
+// known Bool local/param, a parenthesized bool expression, a `!` unary, or a relational/logical
+// binary op (`<`, `>`, `<=`, `>=`, `==`, `!=`, `&&`, `||`). Used only to classify a value for the
+// Bool-print promotion; unknown shapes return false (fall back conservatively).
+private func exprIsBool(expr: ParseExpr, scope: AdaptScope): Bool {
+    if (boolLiteralValue(expr).isSome()) {
+        return true
+    }
+    if (let Some(refExpr) <- (expr as ParseRefExpr)) {
+        return scope.boolNames.contains(refExpr.identifier.Val())
+    }
+    if (let Some(paren) <- (expr as ParseParenExpr)) {
+        if (let Some(inner) <- paren.expr) {
+            return exprIsBool(inner, scope)
+        }
+        return false
+    }
+    if (let Some(unary) <- (expr as ParseUnaryExpr)) {
+        return unary.op.kind == TokenKind.NOT
+    }
+    // AssignExpr is also a BinaryExpr; never treat it as a bool-producing value here.
+    if (let Some(_) <- (expr as ParseAssignExpr)) {
+        return false
+    }
+    if (let Some(binary) <- (expr as ParseBinaryExpr)) {
+        return match (binary.op.kind) {
+            case TokenKind.LT => true
+            case TokenKind.GT => true
+            case TokenKind.LE => true
+            case TokenKind.GE => true
+            case TokenKind.EQUAL => true
+            case TokenKind.NOTEQ => true
+            case TokenKind.AND => true
+            case TokenKind.OR => true
+            case _ => false
+        }
+    }
+    return false
+}
+
+// Extract a Bool literal value from a `true`/`false` BOOL literal expression; None otherwise.
+private func boolLiteralValue(expr: ParseExpr): Option<Bool> {
+    if (let Some(lit) <- (expr as ParseLitConstExpr)) {
+        if (lit.kind == ParseLitConstKind.BOOL) {
+            if (lit.stringValue == "true") {
+                return Some(true)
+            }
+            if (lit.stringValue == "false") {
+                return Some(false)
+            }
+        }
+    }
+    return None
 }
 
 private func localRefName(expr: ParseExpr, scope: AdaptScope): Option<String> {

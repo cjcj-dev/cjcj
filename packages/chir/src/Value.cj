@@ -749,6 +749,10 @@ public class Function <: GlobalValue {
     // directive the entry is (false, "").
     public let runtimePrintIsStr: ArrayList<Bool> = ArrayList<Bool>()
     public let runtimePrintStrings: ArrayList<String> = ArrayList<String>()
+    // Parallel to runtimePrintValueIds: when runtimePrintIsBool[i] is true the matched value is an i1
+    // Bool; codegen prints the literal text "true"/"false" selected on that i1 instead of "%ld". For a
+    // non-bool directive the entry is false.
+    public let runtimePrintIsBool: ArrayList<Bool> = ArrayList<Bool>()
 
     public init(funcType: FuncType, identifier: String, srcCodeIdentifier: String, rawMangledName: String,
         packageName: String) {

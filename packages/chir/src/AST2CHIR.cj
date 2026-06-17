@@ -59,36 +59,46 @@ public class AST2CHIRGlobalSpec {
     }
 }
 
-// Recursive statement/expression model for the real-expression body-lowering path. Int64-only
-// (conditions evaluate to Bool via relational ops). This keeps `packages/chir` decoupled from
-// `parse`/`frontend`: the frontend adapter builds these spec trees directly and hands them to
-// CreateRealBody, which emits genuine runtime CHIR (Allocate/Constant/Store/Load/BinaryExpression/
-// Branch/GoTo/Exit) -- no constant folding.
+// Recursive statement/expression model for the real-expression body-lowering path. Models Int64 and
+// Bool values: arithmetic/relational/logical ops, Int64 and Bool literals, `!`/`-` unary ops. This
+// keeps `packages/chir` decoupled from `parse`/`frontend`: the frontend adapter builds these spec
+// trees directly and hands them to CreateRealBody, which emits genuine runtime CHIR (Allocate/
+// Constant/Store/Load/BinaryExpression/UnaryExpression/Branch/GoTo/Exit) -- no constant folding. The
+// translator infers each value's CHIR type (Int64 vs Bool) from the materialized CHIR Value, so slot
+// allocation, loads, and prints stay correctly typed.
 //
-// Expression spec: a tree of Int64-valued (or Bool-valued, for relational results) expressions.
-//   - LITERAL: an Int64 constant.
-//   - REF: a reference to a local slot by name.
-//   - BINARY: an arithmetic (ADD/SUB/MUL/...) or relational (LT/LE/GT/GE/EQUAL/NOTEQUAL) op over
-//             two sub-expression specs.
+// Expression spec: a tree of Int64-valued or Bool-valued expressions.
+//   - LITERAL: an Int64 constant.  BOOL_LITERAL: a Bool constant.
+//   - REF: a reference to a local slot by name (loaded with the slot's element type).
+//   - BINARY: an arithmetic (ADD/SUB/MUL/...) op (Int64 result), a relational (LT/LE/GT/GE/EQUAL/
+//             NOTEQUAL) op, or a logical AND/OR (Bool result) over two sub-expression specs.
+//   - UNARY: `!` (NOT, Bool result) or `-` (NEG, Int64 result) over one sub-expression spec.
 let AST2CHIR_EXPR_LITERAL: Int64 = 0
 let AST2CHIR_EXPR_REF: Int64 = 1
 let AST2CHIR_EXPR_BINARY: Int64 = 2
 let AST2CHIR_EXPR_CALL: Int64 = 3
+// BOOL_LITERAL: a Bool constant (`true`/`false`). UNARY: a unary op (`!` -> ExprKind.NOT,
+// `-` -> ExprKind.NEG) over a single sub-expression carried in `lhs`. These extend the Int64-only
+// model with first-class Bool values; the relational/AND/OR binary ops already produce Bool results.
+let AST2CHIR_EXPR_BOOL_LITERAL: Int64 = 4
+let AST2CHIR_EXPR_UNARY: Int64 = 5
 
 public class AST2CHIRExprSpec {
     public let kind: Int64
     public let literalValue: Int64       // LITERAL
+    public let boolValue: Bool           // BOOL_LITERAL
     public let name: String              // REF / CALL (callee source identifier)
-    public let op: ExprKind              // BINARY
-    public let lhs: Option<AST2CHIRExprSpec> // BINARY
-    public let rhs: Option<AST2CHIRExprSpec> // BINARY
+    public let op: ExprKind              // BINARY / UNARY
+    public let lhs: Option<AST2CHIRExprSpec> // BINARY (left) / UNARY (operand)
+    public let rhs: Option<AST2CHIRExprSpec> // BINARY (right)
     public let args: ArrayList<AST2CHIRExprSpec> // CALL argument expressions, in order
 
-    private init(kind: Int64, literalValue: Int64, name: String, op: ExprKind,
+    private init(kind: Int64, literalValue: Int64, boolValue: Bool, name: String, op: ExprKind,
         lhs: Option<AST2CHIRExprSpec>, rhs: Option<AST2CHIRExprSpec>,
         args: ArrayList<AST2CHIRExprSpec>) {
         this.kind = kind
         this.literalValue = literalValue
+        this.boolValue = boolValue
         this.name = name
         this.op = op
         this.lhs = lhs
@@ -97,22 +107,36 @@ public class AST2CHIRExprSpec {
     }
 
     public func IsLiteral(): Bool { return kind == AST2CHIR_EXPR_LITERAL }
+    public func IsBoolLiteral(): Bool { return kind == AST2CHIR_EXPR_BOOL_LITERAL }
     public func IsRef(): Bool { return kind == AST2CHIR_EXPR_REF }
     public func IsBinary(): Bool { return kind == AST2CHIR_EXPR_BINARY }
+    public func IsUnary(): Bool { return kind == AST2CHIR_EXPR_UNARY }
     public func IsCall(): Bool { return kind == AST2CHIR_EXPR_CALL }
 
     public static func Literal(value: Int64): AST2CHIRExprSpec {
-        return AST2CHIRExprSpec(AST2CHIR_EXPR_LITERAL, value, "", ExprKind.ADD, None, None,
+        return AST2CHIRExprSpec(AST2CHIR_EXPR_LITERAL, value, false, "", ExprKind.ADD, None, None,
+            ArrayList<AST2CHIRExprSpec>())
+    }
+
+    public static func BoolLit(value: Bool): AST2CHIRExprSpec {
+        return AST2CHIRExprSpec(AST2CHIR_EXPR_BOOL_LITERAL, 0, value, "", ExprKind.ADD, None, None,
             ArrayList<AST2CHIRExprSpec>())
     }
 
     public static func Ref(name: String): AST2CHIRExprSpec {
-        return AST2CHIRExprSpec(AST2CHIR_EXPR_REF, 0, name, ExprKind.ADD, None, None,
+        return AST2CHIRExprSpec(AST2CHIR_EXPR_REF, 0, false, name, ExprKind.ADD, None, None,
             ArrayList<AST2CHIRExprSpec>())
     }
 
     public static func Binary(op: ExprKind, lhs: AST2CHIRExprSpec, rhs: AST2CHIRExprSpec): AST2CHIRExprSpec {
-        return AST2CHIRExprSpec(AST2CHIR_EXPR_BINARY, 0, "", op, Some(lhs), Some(rhs),
+        return AST2CHIRExprSpec(AST2CHIR_EXPR_BINARY, 0, false, "", op, Some(lhs), Some(rhs),
+            ArrayList<AST2CHIRExprSpec>())
+    }
+
+    // UNARY: a unary op (`!` -> ExprKind.NOT, `-` -> ExprKind.NEG) over `operand`. The result type
+    // mirrors the operand's type (Bool for `!`, Int64 for `-`).
+    public static func Unary(op: ExprKind, operand: AST2CHIRExprSpec): AST2CHIRExprSpec {
+        return AST2CHIRExprSpec(AST2CHIR_EXPR_UNARY, 0, false, "", op, Some(operand), None,
             ArrayList<AST2CHIRExprSpec>())
     }
 
@@ -124,7 +148,7 @@ public class AST2CHIRExprSpec {
         for (arg in args) {
             copied.add(arg)
         }
-        return AST2CHIRExprSpec(AST2CHIR_EXPR_CALL, 0, calleeName, ExprKind.ADD, None, None, copied)
+        return AST2CHIRExprSpec(AST2CHIR_EXPR_CALL, 0, false, calleeName, ExprKind.ADD, None, None, copied)
     }
 }
 

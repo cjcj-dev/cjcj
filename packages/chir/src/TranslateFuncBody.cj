@@ -10,6 +10,9 @@ class RealBodyState {
     var current: Block
     var terminated: Bool = false
     let locals = HashMap<String, Value>()
+    // Parallel to `locals`: the CHIR element type stored in each slot (Int64 or Bool). A REF loads
+    // the slot using this type so Bool locals round-trip as i1 rather than being widened to i64.
+    let localTypes = HashMap<String, Type>()
     let body: BlockGroup
 
     init(entry: Block, body: BlockGroup) {
@@ -44,20 +47,24 @@ extend AST2CHIRDeclTranslator {
         }
     }
 
-    // Copy each Int64 parameter value into a fresh local slot keyed by the parameter's source name,
-    // so REF expressions (and reassignment of a parameter) lower uniformly through `state.locals`.
-    // Only Int64 parameters are bound; the real-body path is Int64-only.
+    // Copy each parameter value into a fresh local slot keyed by the parameter's source name, so REF
+    // expressions (and reassignment of a parameter) lower uniformly through `state.locals`. The slot
+    // element type matches the parameter's declared CHIR type (Int64 or Bool), so a Bool parameter
+    // round-trips as i1.
     private func BindParameterSlots(fn: Function, spec: AST2CHIRFunctionSpec, state: RealBodyState): Unit {
-        let int64Ty = builder.context.GetInt64Ty()
-        let refInt64Ty = builder.context.GetRefTy(int64Ty)
         var idx: Int64 = 0
         while (idx < fn.GetNumOfParams() && idx < spec.paramNames.size) {
             let param = fn.GetParam(idx)
             let paramName = spec.paramNames[idx]
             if (!paramName.isEmpty()) {
-                let slot = AllocateInt64Slot(refInt64Ty, int64Ty, state.current)
+                let elemTy = match (param.GetType()) {
+                    case Some(t) => t
+                    case None => builder.context.GetInt64Ty()
+                }
+                let slot = AllocateSlot(elemTy, state.current)
                 builder.CreateStore(param, slot, state.current)
                 state.locals[paramName] = slot
+                state.localTypes[paramName] = elemTy
             }
             idx++
         }
@@ -74,13 +81,13 @@ extend AST2CHIRDeclTranslator {
     }
 
     private func LowerStatement(fn: Function, stmt: AST2CHIRStmtSpec, state: RealBodyState): Unit {
-        let int64Ty = builder.context.GetInt64Ty()
-        let refInt64Ty = builder.context.GetRefTy(int64Ty)
         if (stmt.IsLet()) {
             if (let Some(value) <- EvalExpr(stmt.expr, state)) {
-                let slot = AllocateInt64Slot(refInt64Ty, int64Ty, state.current)
+                let elemTy = ValueElemType(value)
+                let slot = AllocateSlot(elemTy, state.current)
                 builder.CreateStore(value, slot, state.current)
                 state.locals[stmt.name] = slot
+                state.localTypes[stmt.name] = elemTy
             }
             return
         }
@@ -129,10 +136,15 @@ extend AST2CHIRDeclTranslator {
         if (let Some(value) <- EvalExpr(stmt.expr, state)) {
             let valueId = value.GetIdentifierWithoutPrefix()
             if (!valueId.isEmpty()) {
+                let isBool = match (value.GetType()) {
+                    case Some(t) => t.IsBoolean()
+                    case None => false
+                }
                 fn.runtimePrintValueIds.add(valueId)
                 fn.runtimePrintNewlines.add(stmt.isVar)
                 fn.runtimePrintIsStr.add(false)
                 fn.runtimePrintStrings.add("")
+                fn.runtimePrintIsBool.add(isBool)
             }
         }
     }
@@ -153,6 +165,7 @@ extend AST2CHIRDeclTranslator {
                 fn.runtimePrintNewlines.add(stmt.isVar)
                 fn.runtimePrintIsStr.add(true)
                 fn.runtimePrintStrings.add(stmt.name)
+                fn.runtimePrintIsBool.add(false)
             }
         }
     }
@@ -238,10 +251,34 @@ extend AST2CHIRDeclTranslator {
             let constant = builder.CreateConstant(int64Ty, IntLiteral(expr.literalValue), state.current)
             return AsValue(constant.GetResult())
         }
+        if (expr.IsBoolLiteral()) {
+            let boolTy = builder.context.GetBoolTy()
+            let constant = builder.CreateConstant(boolTy, BoolLiteral(expr.boolValue), state.current)
+            return AsValue(constant.GetResult())
+        }
         if (expr.IsRef()) {
             if (let Some(slot) <- state.locals.get(expr.name)) {
-                let load = builder.CreateLoad(int64Ty, slot, state.current)
+                // Load using the slot's recorded element type so Bool locals stay i1.
+                let elemTy = match (state.localTypes.get(expr.name)) {
+                    case Some(t) => t
+                    case None => int64Ty
+                }
+                let load = builder.CreateLoad(elemTy, slot, state.current)
                 return AsValue(load.GetResult())
+            }
+            return None
+        }
+        if (expr.IsUnary()) {
+            let operandValue = EvalExpr(expr.lhs, state)
+            if (let Some(ov) <- operandValue) {
+                // `!` yields Bool; `-` mirrors the operand's (Int64) type.
+                let resultTy = if (expr.op == ExprKind.NOT) {
+                    builder.context.GetBoolTy()
+                } else {
+                    ValueElemType(ov)
+                }
+                let unary = builder.CreateUnaryExpression(expr.op, resultTy, ov, state.current)
+                return AsValue(unary.GetResult())
             }
             return None
         }
@@ -249,7 +286,9 @@ extend AST2CHIRDeclTranslator {
             let lhsValue = EvalExpr(expr.lhs, state)
             let rhsValue = EvalExpr(expr.rhs, state)
             if (let (Some(lv), Some(rv)) <- (lhsValue, rhsValue)) {
-                let resultTy = if (IsRelationalOp(expr.op)) {
+                // Relational ops and the logical AND/OR over i1 operands produce a Bool result;
+                // arithmetic ops keep the Int64 operand type.
+                let resultTy = if (IsRelationalOp(expr.op) || IsLogicalOp(expr.op)) {
                     builder.context.GetBoolTy()
                 } else {
                     int64Ty
@@ -314,8 +353,29 @@ extend AST2CHIRDeclTranslator {
         }
     }
 
-    private func AllocateInt64Slot(refInt64Ty: Type, int64Ty: Type, parent: Block): Value {
-        let allocate = builder.CreateAllocate(refInt64Ty, int64Ty, parent)
+    private func IsLogicalOp(op: ExprKind): Bool {
+        return match (op) {
+            case ExprKind.AND => true
+            case ExprKind.OR => true
+            case _ => false
+        }
+    }
+
+    // The element type a value occupies in a slot: Bool stays Bool, everything else is treated as
+    // Int64 (the real-body path models only Int64 and Bool values).
+    private func ValueElemType(value: Value): Type {
+        if (let Some(t) <- value.GetType()) {
+            if (t.IsBoolean()) {
+                return builder.context.GetBoolTy()
+            }
+        }
+        return builder.context.GetInt64Ty()
+    }
+
+    // Allocate a fresh `Ref<elemTy>` local slot.
+    private func AllocateSlot(elemTy: Type, parent: Block): Value {
+        let refTy = builder.context.GetRefTy(elemTy)
+        let allocate = builder.CreateAllocate(refTy, elemTy, parent)
         return allocate.GetResult().getOrThrow()
     }
 }

@@ -74,6 +74,7 @@ private func MaybeEmitRuntimePrint(cgMod: CGModule, irBuilder: IRBuilder2, chirE
                 true
             }
             let isStr = idx < topLevelFunc.runtimePrintIsStr.size && topLevelFunc.runtimePrintIsStr[idx]
+            let isBool = idx < topLevelFunc.runtimePrintIsBool.size && topLevelFunc.runtimePrintIsBool[idx]
             if (isStr) {
                 let text = if (idx < topLevelFunc.runtimePrintStrings.size) {
                     topLevelFunc.runtimePrintStrings[idx]
@@ -82,6 +83,10 @@ private func MaybeEmitRuntimePrint(cgMod: CGModule, irBuilder: IRBuilder2, chirE
                 }
                 let strName = topLevelFunc.GetIdentifier() + ".cjsh.rtstr." + idx.toString()
                 let _ = EmitRuntimeStringPrint(cgMod, irBuilder.GetBuilder().raw, text, newline, strName)
+            } else if (isBool) {
+                // The matched value is an i1; print "true"/"false" selected on it.
+                let boolName = topLevelFunc.GetIdentifier() + ".cjsh.rtbool." + idx.toString()
+                let _ = EmitRuntimeBoolPrint(cgMod, irBuilder.GetBuilder().raw, rawRet, newline, boolName)
             } else {
                 let fmtName = topLevelFunc.GetIdentifier() + ".cjsh.rtfmt." + idx.toString()
                 let _ = EmitRuntimeIntPrint(cgMod, irBuilder.GetBuilder().raw, rawRet, newline, fmtName)
