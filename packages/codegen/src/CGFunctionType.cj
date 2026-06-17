@@ -94,11 +94,17 @@ public class CGFunctionType <: CGType {
                     }
                 }
             }
-            return unsafe { LLVMPointerType(GetLLVMFunctionType(), 0u32) }
+            if (let Some(rawFunctionType) <- llvmFunctionType) {
+                return unsafe { LLVMPointerType(rawFunctionType, 0u32) }
+            }
+            return LLVMNullType()
         }
         let voidTy = unsafe { LLVMVoidTypeInContext(cgCtx.GetLLVMContext().raw) }
         llvmFunctionType = unsafe { LLVMFunctionType(voidTy, CPointer<LLVMTypeRef>(), 0u32, 0) }
-        return unsafe { LLVMPointerType(GetLLVMFunctionType(), 0u32) }
+        if (let Some(rawFallbackType) <- llvmFunctionType) {
+            return unsafe { LLVMPointerType(rawFallbackType, 0u32) }
+        }
+        return LLVMNullType()
     }
 
     protected override func GenContainedCGTypes(): Unit {

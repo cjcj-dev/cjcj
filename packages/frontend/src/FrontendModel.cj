@@ -7,6 +7,8 @@ public import cangjie_compiler::basic.{
 import cangjie_compiler::basic.Diagnostic as BasicDiagnostic
 import cangjie_compiler::basic.DiagnosticEngine as BasicDiagnosticEngine
 import cangjie_compiler::basic.Range as BasicRange
+import cangjie_compiler::chir.CHIRContext as RealCHIRContext
+import cangjie_compiler::chir.Package as RealCHIRPackage
 import cangjie_compiler::utils.FileUtil
 import std.collection.*
 import std.sort.*
@@ -882,6 +884,9 @@ public class CHIRData {
     private let context: CHIRContext = CHIRContext()
     private let chirPkgs: ArrayList<CHIRPackage> = ArrayList<CHIRPackage>()
     private var curCodegenPkg: Option<CHIRPackage> = None
+    private let realContext: RealCHIRContext = RealCHIRContext()
+    private let realChirPkgs: ArrayList<RealCHIRPackage> = ArrayList<RealCHIRPackage>()
+    private var curRealCodegenPkg: Option<RealCHIRPackage> = None
     private let implicitFuncs: HashMap<String, String> = HashMap<String, String>()
     private let constVarInitFuncs: ArrayList<String> = ArrayList<String>()
     private let implicitFuncsPerPkg: HashMap<String, HashMap<String, String>> = HashMap<String, HashMap<String, String>>()
@@ -898,6 +903,10 @@ public class CHIRData {
         return context
     }
 
+    public func GetRealCHIRContext(): RealCHIRContext {
+        return realContext
+    }
+
     public func AppendNewPackage(pkg: CHIRPackage): Unit {
         chirPkgs.add(pkg)
         context.packages.add(pkg)
@@ -905,6 +914,36 @@ public class CHIRData {
 
     public func GetAllCHIRPackages(): ArrayList<CHIRPackage> {
         return chirPkgs
+    }
+
+    public func AppendNewRealPackage(pkg: RealCHIRPackage): Unit {
+        realChirPkgs.add(pkg)
+        if (let None <- curRealCodegenPkg) {
+            curRealCodegenPkg = Some(pkg)
+        }
+    }
+
+    public func ClearRealPackages(): Unit {
+        realChirPkgs.clear()
+        curRealCodegenPkg = None
+    }
+
+    public func GetAllRealCHIRPackages(): ArrayList<RealCHIRPackage> {
+        return realChirPkgs
+    }
+
+    public func GetCurrentRealCHIRPackage(): Option<RealCHIRPackage> {
+        if (let Some(pkg) <- curRealCodegenPkg) {
+            return Some(pkg)
+        }
+        if (realChirPkgs.isEmpty()) {
+            return None
+        }
+        return Some(realChirPkgs[0])
+    }
+
+    public func SetCurrentRealCHIRPackage(pkg: Option<RealCHIRPackage>): Unit {
+        curRealCodegenPkg = pkg
     }
 
     public func GetCurrentCHIRPackage(): Option<CHIRPackage> {

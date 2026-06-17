@@ -296,85 +296,13 @@ public func UInt64ToHex(value: UInt64): String {
 }
 
 public func StableHashString(value: String): String {
-    var state = SipHashState()
-    let data = value.toArray()
-    var idx: Int64 = 0
-    while (idx + 8 <= data.size) {
-        let message = LoadLittleEndian64(data, idx)
-        state.v3 = state.v3 ^ message
-        state.Round()
-        state.Round()
-        state.v0 = state.v0 ^ message
-        idx += 8
+    let modulus = 4294967291u64
+    var hash = 2166136261u64
+    for (byte in value.toArray()) {
+        hash = (hash * 16777619u64 + UInt64(byte)) % modulus
     }
-
-    if (idx < data.size) {
-        let left = LoadRemainingLittleEndian(data, idx)
-        state.v3 = state.v3 ^ left
-        state.Round()
-        state.Round()
-        state.v0 = state.v0 ^ left
-    }
-
-    state.v2 = state.v2 ^ 0xffu64
-    state.Round()
-    state.Round()
-    state.Round()
-    state.Round()
-    return UInt64ToHex(state.v0 ^ state.v1 ^ state.v2 ^ state.v3)
-}
-
-private let SIP_HASH_K0: UInt64 = 0xdeadbeefu64
-private let SIP_HASH_K1: UInt64 = 0x12345678u64
-
-private class SipHashState {
-    public var v0: UInt64 = SIP_HASH_K0 ^ 0x736f6d6570736575u64
-    public var v1: UInt64 = SIP_HASH_K1 ^ 0x646f72616e646f6du64
-    public var v2: UInt64 = SIP_HASH_K0 ^ 0x6c7967656e657261u64
-    public var v3: UInt64 = SIP_HASH_K1 ^ 0x7465646279746573u64
-
-    public init() {}
-
-    public func Round(): Unit {
-        v0 += v1
-        v1 = RotateLeft64(v1, 13)
-        v1 = v1 ^ v0
-        v0 = RotateLeft64(v0, 32)
-        v2 += v3
-        v3 = RotateLeft64(v3, 16)
-        v3 = v3 ^ v2
-        v0 += v3
-        v3 = RotateLeft64(v3, 21)
-        v3 = v3 ^ v0
-        v2 += v1
-        v1 = RotateLeft64(v1, 17)
-        v1 = v1 ^ v2
-        v2 = RotateLeft64(v2, 32)
-    }
-}
-
-private func RotateLeft64(value: UInt64, bits: Int64): UInt64 {
-    return (value << bits) | (value >> (64 - bits))
-}
-
-private func LoadLittleEndian64(data: Array<UInt8>, start: Int64): UInt64 {
-    var result: UInt64 = 0u64
-    var offset: Int64 = 0
-    while (offset < 8) {
-        result = result | (UInt64(data[start + offset]) << (offset * 8))
-        offset++
-    }
-    return result
-}
-
-private func LoadRemainingLittleEndian(data: Array<UInt8>, start: Int64): UInt64 {
-    var result: UInt64 = 0u64
-    var offset: Int64 = 0
-    while (start + offset < data.size) {
-        result = result | (UInt64(data[start + offset]) << (offset * 8))
-        offset++
-    }
-    return result
+    hash = (hash * 16777619u64 + UInt64(value.size)) % modulus
+    return UInt64ToHex(hash)
 }
 
 public func Errorln(value: String): Unit {

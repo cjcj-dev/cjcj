@@ -263,7 +263,7 @@ public class SourceManager {
         }
         var fileID = UInt64(sources.size)
         if (isCjmpFile) {
-            fileID = UInt64(normalizedPath.hashCode())
+            fileID = GetHash(normalizedPath)
         }
         putSource(fileID, Source(fileID, normalizedPath, buffer, fileHash: fileHash, packageName: packageName))
         putPath(normalizedPath, fileID)

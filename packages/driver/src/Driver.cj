@@ -8,7 +8,7 @@ public class Driver {
     public let args: Array<String>
     public let driverOptions: DriverOptions = DriverOptions()
     public let executableName: String
-    public let cangjieHome: String
+    public var cangjieHome: String
 
     public init(args: Array<String>, executableName!: String = "cjc") {
         this.args = args
@@ -21,6 +21,11 @@ public class Driver {
     public func ParseArgs(): Bool {
         if (!driverOptions.ParseFromArgs(args)) {
             return false
+        }
+        if (!driverOptions.cangjieHome.isEmpty()) {
+            cangjieHome = driverOptions.cangjieHome
+        } else {
+            driverOptions.cangjieHome = cangjieHome
         }
         driverOptions.SetCompilationCachedPath()
         return ExtractBCPackageNames()
@@ -40,7 +45,8 @@ public class Driver {
 
     public func EnvironmentSetup(environmentVars: HashMap<String, String>): Unit {
         driverOptions.ReadPathsFromEnvironmentVars(environmentVars)
-        driverOptions.cangjieHome = driverOptions.environment.cangjieHome ?? cangjieHome
+        cangjieHome = driverOptions.environment.cangjieHome ?? cangjieHome
+        driverOptions.cangjieHome = cangjieHome
     }
 
     public func ExecuteCompilation(): Bool {

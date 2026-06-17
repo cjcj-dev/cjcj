@@ -17,7 +17,11 @@ public func repeatString(unit: String, count: Int64): String {
 }
 
 public func GetHash(content: String): UInt64 {
-    return UInt64(content.hashCode())
+    var hash = 0u64
+    for (byte in content.toArray()) {
+        hash = (hash * 131u64 + UInt64(byte)) % 4294967291u64
+    }
+    return hash
 }
 
 public func SplitLines(str: String): Array<String> {

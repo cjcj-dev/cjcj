@@ -59,11 +59,8 @@ private func ReconcileFrontendOutputs(opts: DriverOptions): Bool {
 private func VerifyFrontendOutputs(opts: DriverOptions): Bool {
     for (output in opts.frontendOutputFiles) {
         if (!FileUtil.FileExist(output.filePath) || FileUtil.IsDir(output.filePath)) {
-            // Frontend/codegen can currently report success before native bitcode is materialized.
-            eprintln("warning: self-host frontend completed, but native bitcode output is not implemented yet; stopping before backend.")
-            opts.frontendOutputFiles.clear()
-            opts.frontendOnlyAction = true
-            return true
+            eprintln("error: self-host frontend did not produce native bitcode output: " + output.filePath)
+            return false
         }
     }
     return true

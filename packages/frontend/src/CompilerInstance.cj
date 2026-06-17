@@ -362,6 +362,11 @@ public class CompilerInstance {
         if (pkg.files.isEmpty()) {
             return true
         }
+        if (let Some(realPkg) <- BuildRealCHIRForFrontendPackage(this, pkg)) {
+            chirData.AppendNewRealPackage(realPkg)
+        } else {
+            return false
+        }
         let chirPkg = CHIRPackage(pkg.fullPackageName)
         chirPkg.fileCount = pkg.files.size
         for (file in pkg.files) {
@@ -378,6 +383,7 @@ public class CompilerInstance {
 
     public func PerformCHIRCompilation(): Bool {
         typeManager.ReleasePostSemaCaches()
+        chirData.ClearRealPackages()
         var ret = true
         let sourcePackagesCHIR = GetSourcePackages()
         let pkgsOrderedCHIR = packageManager.GetBuildOrders(sourcePackagesCHIR)
@@ -454,7 +460,7 @@ public class CompilerInstance {
         if (let Some(pkg) <- chirData.GetCurrentCHIRPackage()) {
             chirData.ActivateCodegenFuncsForPackage(pkg)
         }
-        return true
+        return EmitRealCodeGenForCompilerInstance(this)
     }
 
     public func PerformCjoSaving(): Bool {
