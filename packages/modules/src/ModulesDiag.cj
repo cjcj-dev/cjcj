@@ -121,6 +121,7 @@ private func ModuleDiagKindToBasic(kind: String): Option<BasicDiagKindRefactor> 
         case "package_import_itself_illegal" => BasicDiagKindRefactor.package_import_itself_illegal
         case "package_accessibility" => BasicDiagKindRefactor.package_accessibility
         case "package_cannot_export_macro_package" => BasicDiagKindRefactor.package_cannot_export_macro_package
+        case "package_re_export_package_name" => BasicDiagKindRefactor.package_re_export_package_name
         case "package_decl_not_find_in_package" => BasicDiagKindRefactor.package_decl_not_find_in_package
         case "package_import_conflict" => BasicDiagKindRefactor.package_conflict_import
         case "package_useless_import" => BasicDiagKindRefactor.package_shadowed_import

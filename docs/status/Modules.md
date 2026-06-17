@@ -20,6 +20,8 @@ This pass de-isolated CJO filename/path utilities to the real `cangjie_compiler:
 
 This pass tightened two state-management details against the C++ reference: changing `ImportManager.SetSourceCodeImportStatus` now also updates the CJO manager state used by future AST loaders, matching the C++ shared `importSrcCode` reference, and dependency CJO/CJD path recording now preserves the first recorded path and derives `.cj.d` sidecar paths with the same substring rule as `SaveDepPkgCjoPath`.
 
+This pass de-isolated standard-library package recognition and shared package constants to `cangjie_compiler::utils`, added the C++ package-name re-export import diagnostic path, made local text serialization deterministic for expression attributes and incremental removed mangles, and expanded reference indexing to include package declarations plus exported-internal declarations.
+
 ## Implemented
 
 - Replaced `ModulesScaffold.cj` with per-component source files under `packages/modules/src`.
@@ -39,18 +41,21 @@ This pass tightened two state-management details against the C++ reference: chan
 - Added the C++ already-parsed package collision behavior for source packages that shadow indirect dependencies, plus the corresponding Basic diagnostic forwarding.
 - Added `ImportManager.SetImportedPackageFromASTNode` to register tool-provided package AST nodes through the CJO manager.
 - Added a real dependency on `cangjie_compiler::utils` for Modules CJO filename conversion and serialization-file discovery, replacing local ad hoc lookup with `FileUtil.FindSerializationFile`.
+- Replaced the module-local standard-library name list and duplicated core/sync/ast/default package constants with the real `cangjie_compiler::utils` standard-library map and exported package constants.
 - Matched `ImportManager` source-code import status propagation into `CjoManagerImpl` so newly created AST loaders observe LSP/source-import toggles.
 - Matched C++ dependency path bookkeeping for first-write CJO path storage and unconditional `.cj.d` sidecar derivation.
+- Matched the C++ package-name re-export import check by reporting `package_re_export_package_name` for re-exported package imports and forwarding that diagnostic to Basic.
 - Implemented `DependencyGraph` direct/transitive dependency collection with macro re-export handling and cache invalidation.
 - Implemented `PackageManager` Tarjan SCC ordering and source package reordering behavior.
 - Added a compiling local AST writer/loader wire format so exported package/import/member data can round-trip inside this package while the real flatbuffer/AST dependencies are unavailable.
 - Improved that local AST writer/loader bridge to preserve `exportedInternalDecls` records, reload them into `File.exportedInternalDecls`, and suppress `doNotExport` declarations during serialization in line with the C++ writer's export filtering.
-- Continued the local serialization layer with type interning, cached declaration diffing, resolved dependency-name extraction, import reference loading, expression table serialization/deserialization, reference resolution maps, incremental removed-mangle parsing, node source-range/attribute preservation, and package file ownership normalization.
+- Continued the local serialization layer with type interning, cached declaration diffing, resolved dependency-name extraction, import reference loading, deterministic expression table serialization/deserialization, reference resolution maps, deterministic incremental removed-mangle serialization/parsing, node source-range/attribute preservation, and package file ownership normalization.
+- Extended reference indexing to register package declarations and `exportedInternalDecls`, matching the declarations the writer can now preserve.
 - Added local-format CJMP common-part validation matching the C++ loader control flow for package-name mismatch, common/specific feature-set subset diagnostics, serialized debug/optimization option checks, and option-mismatch aborts before later compilation stages.
 
 ## Important Blockers
 
-- Real C++ parity still requires dependencies on AST, full Basic diagnostic builder/source-manager call-site conversion, Sema/TypeManager, and flatbuffers/native CJO format support. Option, Basic source location types, and a first diagnostic forwarding bridge are now wired to the real packages.
+- Real C++ parity still requires dependencies on AST, full Basic diagnostic builder/source-manager call-site conversion, Sema/TypeManager, and flatbuffers/native CJO format support. Option, Basic source location types, Utils package constants/stdlib lookup, and a first diagnostic forwarding bridge are now wired to the real packages.
 - The local serialization format is not the production `.cjo` flatbuffer format. It is a compiling, behavior-bearing bridge for the isolated package, not a faithful replacement for C++ AST serialization.
 - Type/reference/expression/incremental deserialization has package-local working logic, but it still cannot consume the production C++ flatbuffer schema until real AST/Sema dependencies are available.
 

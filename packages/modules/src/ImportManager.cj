@@ -866,6 +866,12 @@ public class ImportManager {
                 } else if (importSpec.IsReExport() && !pkg.isMacroPackage && packageValue.isMacroPackage) {
                     diag.ReportError("package_cannot_export_macro_package",
                         "non-macro package cannot re-export a macro package", range: packageRange)
+                } else if (cjoManager.IsImportPackage(importSpec)) {
+                    if (importSpec.IsReExport()) {
+                        diag.ReportError("package_re_export_package_name",
+                            "package '${fullPackageName}' cannot be re-exported by a ${GetAccessLevelStr(importSpec)} package-name import",
+                            range: packageRange)
+                    }
                 } else if (!importSpec.IsImportAll() && !cjoManager.IsImportPackage(importSpec)) {
                     let decls = cjoManager.GetPackageMembersByName(packageValue.fullPackageName, importSpec.content.identifier)
                     let visibleDecls = GetVisibleDeclToMap(decls, GetAccessLevel(importSpec), relation)

@@ -50,6 +50,7 @@ public class ExprWriter {
                 attrPairs.add(EncodeField(key) + "=" + EncodeField(value))
             }
         }
+        sortExprWriterStringsInPlace(attrPairs)
         let index = lines.size + 1
         let fields = ArrayList<String>()
         fields.add("expr")
@@ -66,5 +67,19 @@ public class ExprWriter {
         fields.add(JoinStringList(attrPairs))
         lines.add(JoinFields(fields))
         return index
+    }
+}
+
+private func sortExprWriterStringsInPlace(values: ArrayList<String>): Unit {
+    var i: Int64 = 1
+    while (i < values.size) {
+        let key = values[i]
+        var j = i - 1
+        while (j >= 0 && values[j] > key) {
+            values[j + 1] = values[j]
+            j--
+        }
+        values[j + 1] = key
+        i++
     }
 }
