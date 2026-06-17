@@ -164,3 +164,11 @@ Built-in inheritance and base lookup continuation:
   discovery logic.
 
 Verification: `cjpm build` passes for the whole workspace after this built-in inheritance and base lookup continuation.
+
+Generic upper-bound cycle continuation:
+
+- Generic upper-bound conflict checking now mirrors the C++ guard that skips a constrained generic type when its generic
+  parameter declaration is marked `IN_REFERENCE_CYCLE`. The self-hosted path uses the real `GenericsTy.decl` from
+  `cangjie_compiler::ast` before merging interface/class upper-bound members.
+
+Verification: `cjpm build` passes for the whole workspace after this generic upper-bound cycle continuation.

@@ -2123,6 +2123,11 @@ public class StructInheritanceChecker {
             if (let Some(typeNode) <- gc.refType) {
                 if (let Some(gTy) <- typeNode.GetTy()) {
                 if (let Some(genericTy) <- (gTy as GenericsTy)) {
+                    if (let Some(genericDecl) <- genericTy.decl) {
+                        if (genericDecl.TestAttr(Attribute.IN_REFERENCE_CYCLE)) {
+                            continue
+                        }
+                    }
                     if (genericTy.upperBounds.isEmpty()) {
                         continue
                     }
