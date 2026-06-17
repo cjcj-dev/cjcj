@@ -1,8 +1,23 @@
 package cangjie_compiler::basic
 
+import std.collection.*
+
 public let NORMAL_CODEPOINT_LEN: Int64 = 4
 public let HORIZONTAL_TAB_LEN: Int64 = 4
 public let ASCII_BASE: UInt32 = 127u32
+
+private func buildEscapePrintMap(): HashMap<UInt8, String> {
+    let table = HashMap<UInt8, String>()
+    table.add(b'\b', "\\b")
+    table.add(b'\t', "\\t")
+    table.add(b'\n', "\\n")
+    table.add(b'\v', "\\v")
+    table.add(b'\f', "\\f")
+    table.add(b'\r', "\\r")
+    return table
+}
+
+public let escapePrintMap: HashMap<UInt8, String> = buildEscapePrintMap()
 
 private let UNICODE_OUTPUT_WIDTH: Int64 = 8
 private let HEX_DIGITS: String = "0123456789ABCDEF"
@@ -166,11 +181,15 @@ public func ToHexString(value: Int64, len!: Int64 = 4): String {
     return ToHexString(UInt64(value), len: len)
 }
 
-public func ToHexString(value: UInt32, len!: Int64 = 4): String {
+public func ToHexString(value: UInt32, len!: Int64 = 2): String {
     return ToHexString(UInt64(value), len: len)
 }
 
-public func ToHexString(value: UInt8, len!: Int64 = 2): String {
+public func ToHexString(value: UInt16, len!: Int64 = 1): String {
+    return ToHexString(UInt64(value), len: len)
+}
+
+public func ToHexString(value: UInt8, len!: Int64 = 0): String {
     return ToHexString(UInt64(value), len: len)
 }
 

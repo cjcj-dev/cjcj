@@ -67,7 +67,7 @@ public class DiagArgument {
     public let positionValue: Position
 
     public init() {
-        kind = DiagArgumentKind.STRING
+        kind = DiagArgumentKind.INT
         intValue = 0
         stringValue = ""
         positionValue = DEFAULT_POSITION
@@ -983,7 +983,7 @@ private func severityColor(severity: DiagSeverity): DiagColor {
         case DiagSeverity.DS_ERROR => DiagColor.RED
         case DiagSeverity.DS_WARNING => DiagColor.YELLOW
         case DiagSeverity.DS_NOTE => DiagColor.RED
-        case DiagSeverity.DS_HINT => DiagColor.GREEN
+        case DiagSeverity.DS_HINT => DiagColor.RED
     }
 }
 
