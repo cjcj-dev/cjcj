@@ -57,6 +57,14 @@ public func PerformDesugarAfterTypeCheck(typeManager: TypeManager, pkg: Package,
                 if (let Some(tryExpr) <- (node as TryExpr)) {
                     DesugarTryWithResourcesExpr(typeManager, pkg, tryExpr)
                 }
+            case ASTKind.PERFORM_EXPR =>
+                if (let Some(performExpr) <- (node as PerformExpr)) {
+                    DesugarPerformExpr(typeManager, pkg, performExpr)
+                }
+            case ASTKind.RESUME_EXPR =>
+                if (let Some(resumeExpr) <- (node as ResumeExpr)) {
+                    DesugarResumeExpr(typeManager, pkg, resumeExpr)
+                }
             case ASTKind.LIT_CONST_EXPR =>
                 if (let Some(litConstExpr) <- (node as LitConstExpr)) {
                     DesugarStrInterpolationExpr(typeManager, pkg, litConstExpr)
