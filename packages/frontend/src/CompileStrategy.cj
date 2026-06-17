@@ -630,7 +630,7 @@ private func finishParsedDecl(tokens: ArrayList<FrontendToken>, keyword: String,
             idx = parseParameterListInto(tokens, idx, funcDecl.funcBody)
         }
         idx = skipTrivia(tokens, idx)
-        if (idx < tokens.size && tokens[idx].value == "->") {
+        if (idx < tokens.size && (tokens[idx].value == ":" || tokens[idx].value == "->")) {
             let typeInfo = parseTypeAt(tokens, idx + 1)
             funcDecl.funcBody.retType = typeInfo[0]
             idx = typeInfo[1]
