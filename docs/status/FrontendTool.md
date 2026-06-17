@@ -43,6 +43,12 @@ Current status:
   CJD/common-part-CHIR exclusions.
 - The local `ExecuteFrontendByDriver` handoff preserves the frontend option state currently exposed by the self-host
   frontend package, including object inputs, package/import/plugin paths, CJMP inputs, output paths, and cache fields.
+- The FrontendTool driver-handoff compatibility object now uses real `option.TempFileInfo` and `option.OrderedInput`
+  payloads for frontend output files and ordered library inputs, and has a richer `option.GlobalOptions` copy overload
+  that carries frontend outputs, ordered libraries, builtin dependency sets, cache paths, and localized-symbol metadata.
+- A richer `option.GlobalOptions` object-only frontend helper now mirrors the C++ `inputLibraryOrder` transform: it
+  removes standard `cangjie-*` library entries, converts them to indirect builtin `.cjo` dependencies, and preserves
+  non-standard library order entries.
 - The implementation is intentionally conservative where the current package graph does not yet expose the C++ surfaces
   used by FrontendTool: native `TempFileManager`, the production driver option object, shared CHIR/CodeGen models, and
   the full C++ incremental AST-diff/pollution data structures.
