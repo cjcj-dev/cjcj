@@ -2,6 +2,7 @@ package cangjie_compiler::sema.LegalityOfUsage
 
 import std.collection.*
 import cangjie_compiler::ast.*
+import cangjie_compiler::sema.*
 
 private class BoolBox {
     public var value: Bool
@@ -16,8 +17,36 @@ public class LegalityOfUsageResult {
         ArrayList<GlobalVarInitializationIssue>()
     public let accessLevelViolations: ArrayList<AccessLevelViolation> = ArrayList<AccessLevelViolation>()
     public let subscriptLegalityIssues: ArrayList<SubscriptLegalityIssue> = ArrayList<SubscriptLegalityIssue>()
+    public let staticMemberGenericIssues: ArrayList<StaticMemberGenericIssue> =
+        ArrayList<StaticMemberGenericIssue>()
 
     public init() {}
+}
+
+public enum StaticMemberGenericIssueKind {
+    | USES_OUTER_GENERIC_TYPE
+    | CALLS_GENERIC_STATIC_MEMBER
+}
+
+public class StaticMemberGenericIssue {
+    public var kind: StaticMemberGenericIssueKind
+    public var member: Decl
+    public var node: Node
+    public var target: Option<Decl>
+    public let genericTys: ArrayList<Ty> = ArrayList<Ty>()
+    public var message: String
+
+    public init(kind: StaticMemberGenericIssueKind, member: Decl, node: Node, target!: Option<Decl> = None,
+        genericTys!: ArrayList<Ty> = ArrayList<Ty>(), message!: String = "") {
+        this.kind = kind
+        this.member = member
+        this.node = node
+        this.target = target
+        for (genericTy in genericTys) {
+            this.genericTys.add(genericTy)
+        }
+        this.message = message
+    }
 }
 
 public enum SubscriptLegalityIssueKind {
@@ -57,6 +86,59 @@ private func ContainsCapturedRef(values: ArrayList<NameReferenceExpr>, refExpr: 
         if (value.astKind == refExpr.astKind && value.begin == refExpr.begin && value.end == refExpr.end) {
             return true
         }
+    }
+    return false
+}
+
+private func AddUniqueTy(values: ArrayList<Ty>, ty: Ty): Unit {
+    for (value in values) {
+        if (SameTy(value, ty)) {
+            return
+        }
+    }
+    values.add(ty)
+}
+
+private func FirstOuterGenericTy(ty: Ty, outerGenericTys: ArrayList<Ty>): ArrayList<Ty> {
+    let matched = ArrayList<Ty>()
+    for (usedTy in ty.GetGenericTyArgs()) {
+        for (outerTy in outerGenericTys) {
+            if (SameTy(usedTy, outerTy)) {
+                matched.add(usedTy)
+                return matched
+            }
+        }
+    }
+    return matched
+}
+
+private func CollectOuterGenericTys(decl: Decl): ArrayList<Ty> {
+    let out = ArrayList<Ty>()
+    if (let Some(generic) <- decl.GetGeneric()) {
+        for (param in generic.typeParameters) {
+            if (let Some(paramTy) <- param.GetTy()) {
+                if (Ty.IsTyCorrect(paramTy)) {
+                    AddUniqueTy(out, paramTy)
+                }
+            }
+        }
+    }
+    return out
+}
+
+private func StaticGenericIssueMessage(genericTys: ArrayList<Ty>): String {
+    if (genericTys.isEmpty()) {
+        return "static member cannot depend on generic parameter"
+    }
+    return "static member cannot depend on generic parameter '" + genericTys[0].String() + "'"
+}
+
+private func IsRefExprOrRefType(node: Node): Bool {
+    if (let Some(_) <- (node as RefExpr)) {
+        return true
+    }
+    if (let Some(_) <- (node as RefType)) {
+        return true
     }
     return false
 }
@@ -179,11 +261,99 @@ private func AppendAccessIssues(dst: ArrayList<AccessLevelViolation>, src: Array
     }
 }
 
+private func AppendStaticMemberGenericIssues(dst: ArrayList<StaticMemberGenericIssue>,
+    src: ArrayList<StaticMemberGenericIssue>): Unit {
+    for (issue in src) {
+        dst.add(issue)
+    }
+}
+
 private func AppendSubscriptIssues(dst: ArrayList<SubscriptLegalityIssue>,
     src: ArrayList<SubscriptLegalityIssue>): Unit {
     for (issue in src) {
         dst.add(issue)
     }
+}
+
+private func MaybeAddStaticMemberGenericIssue(member: Decl, node: Node, outerGenericTys: ArrayList<Ty>,
+    out: ArrayList<StaticMemberGenericIssue>): Bool {
+    if (!IsRefExprOrRefType(node)) {
+        return false
+    }
+    if (let Some(nodeTy) <- node.GetTy()) {
+        if (nodeTy.HasGeneric() && !node.begin.IsZero()) {
+            let matched = FirstOuterGenericTy(nodeTy, outerGenericTys)
+            out.add(StaticMemberGenericIssue(
+                StaticMemberGenericIssueKind.USES_OUTER_GENERIC_TYPE,
+                member,
+                node,
+                genericTys: matched,
+                message: StaticGenericIssueMessage(matched)
+            ))
+            return true
+        }
+    }
+    if (let Some(target) <- node.GetTarget()) {
+        if (target.IsFuncOrProp() && target.TestAttr(Attribute.STATIC)) {
+            if (let Some(outerDecl) <- target.outerDecl) {
+                if (let Some(outerTy) <- outerDecl.GetTy()) {
+                    if (outerTy.HasGeneric()) {
+                        let targetGenericTys = outerTy.GetGenericTyArgs()
+                        out.add(StaticMemberGenericIssue(
+                            StaticMemberGenericIssueKind.CALLS_GENERIC_STATIC_MEMBER,
+                            member,
+                            node,
+                            target: target,
+                            genericTys: targetGenericTys,
+                            message: StaticGenericIssueMessage(targetGenericTys)
+                        ))
+                        return true
+                    }
+                }
+            }
+        }
+    }
+    return false
+}
+
+private func CheckStaticMemberWithGeneric(member: Decl, outerGenericTys: ArrayList<Ty>,
+    out: ArrayList<StaticMemberGenericIssue>): Unit {
+    if (!member.TestAttr(Attribute.STATIC) || outerGenericTys.isEmpty()) {
+        return
+    }
+    if (member.astKind != ASTKind.VAR_DECL && member.astKind != ASTKind.PROP_DECL && !IsStaticInitializer(member)) {
+        return
+    }
+    let walker = Walker(member, visitPre: { node: Node =>
+        if (MaybeAddStaticMemberGenericIssue(member, node, outerGenericTys, out)) {
+            return VisitAction.SKIP_CHILDREN
+        }
+        VisitAction.WALK_CHILDREN
+    })
+    walker.Walk()
+}
+
+private func CheckStaticMembersInGenericDecl(decl: Decl, out: ArrayList<StaticMemberGenericIssue>): Unit {
+    let outerGenericTys = CollectOuterGenericTys(decl)
+    if (outerGenericTys.isEmpty()) {
+        return
+    }
+    for (member in decl.GetMemberDecls()) {
+        CheckStaticMemberWithGeneric(member, outerGenericTys, out)
+    }
+}
+
+public func CheckStaticMembersWithGeneric(pkg: Package): ArrayList<StaticMemberGenericIssue> {
+    let out = ArrayList<StaticMemberGenericIssue>()
+    for (file in pkg.files) {
+        for (decl in file.decls) {
+            CheckStaticMembersInGenericDecl(decl, out)
+        }
+        for (exportedDecl in file.exportedInternalDecls) {
+            CheckStaticMembersInGenericDecl(exportedDecl, out)
+        }
+    }
+    return out
 }
 
 private func CheckVArraySubscript(se: SubscriptExpr, out: ArrayList<SubscriptLegalityIssue>): Unit {
@@ -246,6 +416,7 @@ public func CheckSubscriptLegality(root: Node): ArrayList<SubscriptLegalityIssue
 public func CheckLegalityOfUsage(pkg: Package): LegalityOfUsageResult {
     SetAllFuncBodyCaptureKinds(pkg)
     let result = LegalityOfUsageResult()
+    AppendStaticMemberGenericIssues(result.staticMemberGenericIssues, CheckStaticMembersWithGeneric(pkg))
     AppendInitializationIssues(result.initializationIssues, CheckInitialization(pkg))
     AppendGlobalIssues(result.globalVarInitializationIssues, CheckGlobalVarInitialization(pkg))
     AppendAccessIssues(result.accessLevelViolations, CheckAccessLevelValidity(pkg))

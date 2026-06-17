@@ -43,11 +43,13 @@ This pass covers the self-hosted Cangjie port under:
 - Aligned global-variable def-use graph iteration with the C++ source-position ordered map, and matched static-initializer collection of uninitialized member `VarDecl`s before checking assignments in `static init`.
 - Matched C++ const-evaluation short-circuiting for calls and subscript expressions so argument/index checks are skipped after a non-const callee or base has already failed.
 - Ported C++ `CheckSubscriptLegality` coverage for constant `VArray` index bounds, including overflow suppression, negative-index wording, past-end details, and `ShouldDiagnose(true)` gating.
+- Ported C++ `CheckStaticMembersWithGeneric` coverage for static vars, properties, and static initializers in generic declarations, including source top-level/exported-internal iteration, `RefExpr`/`RefType` generic-type detection, static generic member references, and skip-child behavior after a reported use.
 
 ## Remaining Fidelity Gaps
 
 - The new analyzers currently return structured issue records, but they are not yet fully wired into the original diagnostic engine with exact C++ diagnostic ids, ranges, notes, hints, and recovery behavior.
 - `VArray` subscript legality now records the same high-level failures as C++, but final diagnostic emission still needs the exact C++ diagnostic id and hint/range plumbing.
+- Static-member generic checks now find the same high-level illegal references as C++, but still emit structured issue records rather than `sema_static_variable_use_generic_parameter` diagnostics with exact type-set formatting.
 - Some initialization edge cases still depend on sibling components that are only partially represented in the self-hosted port, especially exact scope-manager cache behavior, constructor delegation state, reachability/termination analysis, and AST context profile hooks.
 - The new termination and illegal-member tracking is local and uses available scope names/function-body stacks; it does not yet reproduce every C++ `ScopeManager` symbol-cache query, top-level symbol lookup, or exact `IsNode1ScopeVisibleForNode2` case.
 - Const-evaluation coverage follows the C++ legality shape but does not yet reproduce every target-specific profile check and diagnostic specialization from the C++ implementation.
@@ -55,4 +57,4 @@ This pass covers the self-hosted Cangjie port under:
 
 ## Estimate
 
-Honest behavior coverage for this legality/const-evaluation scope is about 72% versus the C++ reference. The port now has real traversal and issue production in the scoped files, several targeted C++ edge cases, the main conditional-initialization merge path, termination-aware initialization state, constructor early-return field tracking, string interpolation block traversal, dependency-aware member initialization order, immutable struct-base assignment checks, illegal member-use checks before full initialization, source-ordered global def-use traversal, const-eval call/subscript short-circuiting, and constant `VArray` subscript bounds checking, but production completeness still requires diagnostic integration and the remaining exact semantic edge cases above.
+Honest behavior coverage for this legality/const-evaluation scope is about 73% versus the C++ reference. The port now has real traversal and issue production in the scoped files, several targeted C++ edge cases, the main conditional-initialization merge path, termination-aware initialization state, constructor early-return field tracking, string interpolation block traversal, dependency-aware member initialization order, immutable struct-base assignment checks, illegal member-use checks before full initialization, source-ordered global def-use traversal, const-eval call/subscript short-circuiting, constant `VArray` subscript bounds checking, and static-member generic dependency checks, but production completeness still requires diagnostic integration and the remaining exact semantic edge cases above.
