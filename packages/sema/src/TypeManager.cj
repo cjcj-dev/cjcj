@@ -1633,19 +1633,66 @@ public class TypeManager {
 
     public func ConstrainByCtor(tv: GenericsTy, tyCtor: Ty): Option<Ty> {
         let bounds = constraints.GetOrCreate(tv)
-        bounds.ubs.Add(tyCtor)
-        return tyCtor
+        for (upper in bounds.ubs.values) {
+            if (OfSameCtor(upper, tyCtor)) {
+                return upper
+            }
+        }
+        let mapping = TypeSubst()
+        for (tyArg in tyCtor.typeArgs) {
+            if (let Some(ctorArg) <- (tyArg as GenericsTy)) {
+                mapping.Put(ctorArg, AllocTyVar(srcId: "T-Fly", needSolving: true, derivedFrom: tv))
+            } else {
+                return None
+            }
+        }
+        let placeholderTy = GetInstantiatedTy(tyCtor, mapping)
+        if (IsSubtype(tv, placeholderTy, implicitBoxed: true, allowOptionBox: false)) {
+            return placeholderTy
+        }
+        return None
     }
 
     public func AddSumByCtor(tv: GenericsTy, tyCtor: Ty, tyArgs: ArrayList<GenericsTy>): Option<Ty> {
-        let _ = tyArgs
+        var idx: Int64 = tyArgs.size
+        while (idx < tyCtor.typeArgs.size) {
+            tyArgs.add(AllocTyVar(srcId: "T-Fly", needSolving: true, derivedFrom: tv))
+            idx++
+        }
+        let mapping = TypeSubst()
+        idx = 0
+        while (idx < tyCtor.typeArgs.size) {
+            if (let Some(ctorArg) <- (tyCtor.typeArgs[idx] as GenericsTy)) {
+                mapping.Put(ctorArg, tyArgs[idx])
+            } else {
+                return None
+            }
+            idx++
+        }
+        let placeholderTy = GetInstantiatedTy(tyCtor, mapping)
         let bounds = constraints.GetOrCreate(tv)
-        bounds.sum.Add(tyCtor)
-        return tyCtor
+        bounds.sum.Add(placeholderTy)
+        return placeholderTy
     }
 
     public func OfSameCtor(ty: Ty, tyCtor: Ty): Bool {
-        return ty.kind == tyCtor.kind && ty.name == tyCtor.name && ty.typeArgs.size == tyCtor.typeArgs.size
+        if (!Ty.IsTyCorrect(ty) || !Ty.IsTyCorrect(tyCtor)) {
+            return false
+        }
+        if (ty.typeArgs.size != tyCtor.typeArgs.size) {
+            return false
+        }
+        let mapping = TypeSubst()
+        var idx: Int64 = 0
+        while (idx < tyCtor.typeArgs.size) {
+            if (let Some(ctorArg) <- (tyCtor.typeArgs[idx] as GenericsTy)) {
+                mapping.Put(ctorArg, ty.typeArgs[idx])
+            } else {
+                return false
+            }
+            idx++
+        }
+        return SameTy(GetInstantiatedTy(tyCtor, mapping), ty)
     }
 
     public func GetDummyBuiltInDecl(ty: Ty): Decl {

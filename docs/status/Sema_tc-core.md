@@ -229,3 +229,26 @@ Verification:
 - `cjpm build` passes after the code changes in this pass.
 - `grep -rn "TODO(selfhost:Sema)" packages/sema/src` reports 4 remaining package-level markers, all outside the tc-core-owned files.
 - Remaining `TODO(selfhost:Sema)` markers in the tc-core-owned files listed by the task: 0.
+
+## 2026-06-17 Continue Pass 7
+
+Files deepened:
+
+- `packages/sema/src/TypeManager.cj`
+
+Implemented behavior:
+
+- Ported the C++ constructor-shaped placeholder constraint helpers. `AddSumByCtor` now pads missing constructor type arguments with fresh solving placeholders derived from the constrained type variable, builds the constructor generic substitution, records the instantiated placeholder type in the sum bound, and returns that instantiated type.
+- Replaced `ConstrainByCtor`'s previous direct upper-bound insertion with the C++ flow: reuse an existing upper bound with the same constructor shape, otherwise instantiate the constructor with fresh placeholders and accept it only when the constrained placeholder is a subtype under `allowOptionBox: false`.
+- Replaced the kind/name-only `OfSameCtor` check with C++-style constructor substitution equality over valid types and matching type-argument arity.
+
+Remaining gaps:
+
+- The helpers conservatively return `None`/`false` when a constructor type argument is not represented by a `GenericsTy`; the C++ reference asserts that shape through `StaticCast`.
+- Full override/property matching and import-manager dependent lookup remain outside this focused pass.
+
+Verification:
+
+- `cjpm build` passes after this pass.
+- `grep -rn "TODO(selfhost:Sema)" packages/sema/src` reports 4 package-level markers, all outside the tc-core-owned files.
+- Remaining `TODO(selfhost:Sema)` markers in the tc-core-owned files listed by the task: 0.
