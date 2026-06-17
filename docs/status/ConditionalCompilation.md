@@ -46,6 +46,9 @@ encoding them as scattered branch logic.
   `backend`, `arch`, `debug`, `cjc_version`, `test`); `env` remains a target
   condition for expression evaluation but is not rejected by cfg.toml parsing,
   matching the C++ split.
+- CJC version parsing now uses Basic's real `SplitString` helper, matching the
+  C++ pass's shared `Utils::SplitString` dependency and removing the last
+  module-local dot-splitting helper.
 - Malformed `@When` annotations without a condition emit the reference
   diagnostic and remove only the annotation; the annotated node is left in place
   as in `ConditionalCompilationImpl::EvalNodeCondition`.

@@ -3,6 +3,7 @@ package cangjie_compiler::conditional_compilation
 import cangjie_compiler::ast.*
 import cangjie_compiler::ast.AnnotationKind as AstAnnotationKind
 import cangjie_compiler::basic.DiagKindRefactor as BasicDiagKindRefactor
+import cangjie_compiler::basic.SplitString
 import cangjie_compiler::option.BackendToString
 import cangjie_compiler::option.BackendType
 import cangjie_compiler::option.OSType
@@ -526,7 +527,7 @@ func EraseConditionalIf<T>(container: ArrayList<T>, pred: (T) -> Bool): Unit {
 }
 
 private func IsCJCVersionLiteral(value: String): Bool {
-    let parts = SplitByDot(value)
+    let parts = SplitString(value, ".")
     if (parts.size != 3) {
         return false
     }
@@ -548,7 +549,7 @@ private func IsCJCVersionLiteral(value: String): Bool {
 private func GetVersionUInt(version: String): UInt64 {
     var res = ""
     let digitSize: Int64 = 2
-    for (part in SplitByDot(version)) {
+    for (part in SplitString(version, ".")) {
         if (part.size == digitSize) {
             res += part
         } else if (part.size == 1) {
@@ -568,21 +569,4 @@ private func RefreshVersionStr(version: String): String {
         out = "0" + out
     }
     return out
-}
-
-private func SplitByDot(value: String): Array<String> {
-    let parts = ArrayList<String>()
-    var pos: Int64 = 0
-    var foundPos = value.indexOf(".")
-    while (let Some(found) <- foundPos) {
-        parts.add(value[pos..found])
-        pos = found + 1
-        foundPos = value.indexOf(".", pos)
-    }
-    if (pos < value.size) {
-        parts.add(value[pos..])
-    } else if (pos == value.size) {
-        parts.add("")
-    }
-    return parts.toArray()
 }
