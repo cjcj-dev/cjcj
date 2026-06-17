@@ -334,7 +334,7 @@ public class File <: Node {
         if (let Some(featureDirective) <- feature) {
             if (let Some(set) <- featureDirective.featuresSet) {
                 for (featureId in set.content) {
-                    out.add(featureId.ToString())
+                    insertFeatureName(out, featureId.ToString())
                 }
             }
         }
@@ -357,6 +357,21 @@ public class File <: Node {
         }
         return builder.toString()
     }
+}
+
+private func insertFeatureName(values: ArrayList<String>, value: String): Unit {
+    var idx: Int64 = 0
+    while (idx < values.size) {
+        if (values[idx] == value) {
+            return
+        }
+        if (value < values[idx]) {
+            values.add(value, at: idx)
+            return
+        }
+        idx++
+    }
+    values.add(value)
 }
 
 public enum AccessLevel {
