@@ -121,6 +121,13 @@ Implemented:
   prepared package context exists, then appending the member/local index payload according to the discovered scope.
 - Added the C++ `VAR_WITH_PATTERN_DECL` branch to descriptor `MangleDeclName` so direct helper calls preserve the
   reference `MangleDecl` behavior in addition to the common `Mangle` entry point.
+- Aligned AST adapter member conversion with the real AST `Decl.GetMemberDeclPtrs()` API used by C++ export-id
+  recursion, so enum constructors are preserved in descriptor member trees instead of only enum body members.
+- Aligned descriptor `GetGeneric()` with real AST enum-member behavior: `VarDecl` members of generic enums now inherit
+  the enum generic parameter list just as `Decl.GetGeneric()` does in the sibling AST package.
+- Aligned parser-AST file-private suffix mangling with the C++ null-check and short-filename behavior: missing
+  `curFile` now fails instead of fabricating `"$"`, and filenames shorter than `.cj` use the full filename rather
+  than a hash.
 
 Known fidelity caveats:
 
@@ -132,6 +139,9 @@ Known fidelity caveats:
   needed metadata. Some C++ CHIR details are still not represented in the self-hosted CHIR package, notably
   `CustomType.IsAutoEnvGenericBase`/`IsAutoEnvInstBase` and `LinkTypeInfo`-style internal linkage queries
   for custom type defs, so those assertion-guarded branches use the currently available CHIR fields.
+- CHIR custom-type and function identifiers in the self-hosted CHIR builder can still be source-style or `_C`-prefixed
+  where the C++ CHIR API usually presents `@`-prefixed identifiers before `GetIdentifierWithoutPrefix()`. Mangle keeps
+  compatibility normalization for those current sibling-CHIR shapes until CHIR enforces the C++ identifier contract.
 - The AST adapter maps the currently available self-hosted AST package into the Mangle descriptor model
   and prepares package context from `curFile.curPackage` when available. Byte-for-byte validation against
   full parser/sema output still depends on downstream packages producing complete annotation arrays,

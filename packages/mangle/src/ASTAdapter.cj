@@ -230,7 +230,7 @@ public class MangleAstAdapter {
             target.semaTy = ConvertTy(sourceTy)
         }
         FillDeclSubclassFields(source, target)
-        for (memberSource in source.GetMemberDecls()) {
+        for (memberSource in source.GetMemberDeclPtrs()) {
             target.members.add(ConvertDecl(memberSource))
         }
         return target

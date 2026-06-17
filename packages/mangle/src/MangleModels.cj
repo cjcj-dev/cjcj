@@ -234,6 +234,13 @@ public class MangleDecl {
                 }
             }
         }
+        if (astKind == ASTKind.VAR_DECL) {
+            if (let Some(outer) <- outerDecl) {
+                if (outer.astKind == ASTKind.ENUM_DECL) {
+                    return outer.generic
+                }
+            }
+        }
         return generic
     }
 
