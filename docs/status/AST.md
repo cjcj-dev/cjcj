@@ -10,6 +10,7 @@ The AST package is a multi-file Cangjie package mirroring the C++ AST component 
 
 ## Implemented In This Pass
 
+- Aligned `CreateMemberAccess(expr, fieldName)` with the C++ class receiver lookup: generated member accesses now search superclass declarations until the first matching member is found, while preserving direct nominal lookup for structs, interfaces, and enums.
 - Expanded AST `ScopeKind` and `ExprKind` from one-value macro compatibility placeholders to the full C++/Parse value sets, added equality helpers with reference-order indexes, and switched AST `MacroInvocation` defaults to `UNKNOWN_SCOPE` / `UNKNOWN_EXPR` while preserving the old `UNKNOWN` spelling as an equality-compatible downstream alias.
 - Deepened `ASTTypeValidator` to follow the C++ pre/post visitor shape: pre-visit now records valid diagnostic ranges and check status, walks desugared expressions with the same walker ID and post visitor, and post-visit performs semantic type/target validation after children.
 - Added `ValidateUsedNodes(DiagnosticEngine, Package)` parity that emits the real `sema_invalid_node_after_check` diagnostic with the C++ note text while preserving the existing boolean validation helper for current self-hosted callers.
