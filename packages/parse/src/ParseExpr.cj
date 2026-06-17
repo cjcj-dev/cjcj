@@ -13,7 +13,7 @@ extend ParserImpl {
         }
         let left = ParseUnaryExpr(ek)
         let ret = ParseExprRhs(0, left, ek)
-        if (ExprKindEquals(ek, ExprKind.VAR_INIT) && ret.astKind == ASTKind.ASSIGN_EXPR) {
+        if (ExprKindEquals(ek, ExprKind.VAR_INIT) && IsAssignmentExpressionRoot(ret)) {
             diag.DiagnoseRefactor(
                 DiagKindRefactor.PARSE_ERROR,
                 ret.begin,
@@ -197,6 +197,9 @@ extend ParserImpl {
                 prec < Precedence(TokenKind.RANGEOP) && op.kind != TokenKind.AND && op.kind != TokenKind.OR) {
                 return lhs
             }
+            if (IsAssignment(op.kind)) {
+                CheckLeftExpression(lhs, op)
+            }
             if (combinedOperator) {
                 SkipAmbiguousToken()
             } else {
@@ -248,6 +251,17 @@ extend ParserImpl {
         expr.rightExpr = right
         expr.begin = left.begin
         expr.end = right.end
+        if (IsAssignment(op.kind)) {
+            expr.hasQuestSuffix = left.hasQuestSuffix
+            if (expr.hasQuestSuffix) {
+                let chain = OptionalChainExpr()
+                chain.expr = expr
+                chain.begin = expr.begin
+                chain.end = expr.end
+                chain.hasQuestSuffix = true
+                return chain
+            }
+        }
         return expr
     }
 
@@ -262,6 +276,108 @@ extend ParserImpl {
             kind == TokenKind.MOD_ASSIGN || kind == TokenKind.AND_ASSIGN || kind == TokenKind.OR_ASSIGN ||
             kind == TokenKind.BITAND_ASSIGN || kind == TokenKind.BITOR_ASSIGN || kind == TokenKind.BITXOR_ASSIGN ||
             kind == TokenKind.LSHIFT_ASSIGN || kind == TokenKind.RSHIFT_ASSIGN
+    }
+
+    private func CheckLeftExpression(base: Expr, tok: Token): Unit {
+        if (!IsLeftValueExpression(base, tok) && !base.isBroken) {
+            DiagInvalidLeftHandExpr(base, tok)
+            base.isBroken = true
+        }
+        if (base.astKind == ASTKind.TUPLE_LIT && tok.kind != TokenKind.ASSIGN) {
+            diag.DiagnoseRefactor(
+                DiagKindRefactor.PARSE_ERROR,
+                tok.Begin(),
+                "tuple literal cannot be used with operator '${tok.Value()}'")
+        }
+    }
+
+    private func IsAssignmentExpressionRoot(expr: Expr): Bool {
+        if (expr.astKind == ASTKind.ASSIGN_EXPR) {
+            return true
+        }
+        if (expr.astKind == ASTKind.OPTIONAL_CHAIN_EXPR) {
+            if (let Some(chain) <- (expr as OptionalChainExpr)) {
+                if (let Some(child) <- chain.expr) {
+                    return IsAssignmentExpressionRoot(child)
+                }
+            }
+        }
+        return false
+    }
+
+    private func DiagInvalidLeftHandExpr(expr: Expr, tok: Token): Unit {
+        diag.DiagnoseRefactor(
+            DiagKindRefactor.PARSE_ERROR,
+            expr.begin,
+            "invalid left-hand side of assignment before '${tok.Value()}'")
+    }
+
+    private func IsLeftValueExpression(expr: Expr, tok: Token): Bool {
+        if (expr.astKind == ASTKind.REF_EXPR || expr.astKind == ASTKind.WILDCARD_EXPR ||
+            expr.astKind == ASTKind.OPTIONAL_CHAIN_EXPR) {
+            return true
+        }
+        if (expr.astKind == ASTKind.TUPLE_LIT) {
+            if (let Some(tuple) <- (expr as TupleLit)) {
+                for (child in tuple.children) {
+                    if (!IsLeftValueExpression(child, tok) && !child.isBroken) {
+                        DiagInvalidLeftHandExpr(child, tok)
+                    }
+                }
+            }
+            return true
+        }
+        if (expr.astKind == ASTKind.MEMBER_ACCESS) {
+            if (let Some(member) <- (expr as MemberAccess)) {
+                return IsLeftAuxExpressionOption(member.baseExpr, tok)
+            }
+            return false
+        }
+        if (expr.astKind == ASTKind.SUBSCRIPT_EXPR) {
+            if (let Some(subscript) <- (expr as SubscriptExpr)) {
+                return IsLeftAuxExpressionOption(subscript.baseExpr, tok)
+            }
+            return false
+        }
+        return false
+    }
+
+    private func IsLeftAuxExpressionOption(expr: Option<Expr>, tok: Token): Bool {
+        if (let Some(base) <- expr) {
+            return IsLeftAuxExpression(base, tok)
+        }
+        return false
+    }
+
+    private func IsLeftAuxExpression(expr: Expr, tok: Token): Bool {
+        if (expr.astKind == ASTKind.REF_EXPR || expr.astKind == ASTKind.PRIMITIVE_TYPE_EXPR) {
+            return true
+        }
+        if (expr.astKind == ASTKind.OPTIONAL_EXPR) {
+            if (let Some(optional) <- (expr as OptionalExpr)) {
+                return IsLeftAuxExpressionOption(optional.baseExpr, tok)
+            }
+            return false
+        }
+        if (expr.astKind == ASTKind.MEMBER_ACCESS) {
+            if (let Some(member) <- (expr as MemberAccess)) {
+                return IsLeftAuxExpressionOption(member.baseExpr, tok)
+            }
+            return false
+        }
+        if (expr.astKind == ASTKind.CALL_EXPR) {
+            if (let Some(call) <- (expr as CallExpr)) {
+                return IsLeftAuxExpressionOption(call.baseFunc, tok)
+            }
+            return false
+        }
+        if (expr.astKind == ASTKind.SUBSCRIPT_EXPR) {
+            if (let Some(subscript) <- (expr as SubscriptExpr)) {
+                return IsLeftAuxExpressionOption(subscript.baseExpr, tok)
+            }
+            return false
+        }
+        return false
     }
 
     public func ParseLetPattern(ek: ExprKind): LetPatternDestructor {

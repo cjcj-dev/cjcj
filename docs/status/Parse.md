@@ -237,6 +237,12 @@ Parse shim.
   lower than range precedence, variable initializers reject assignment-shaped
   root expressions, postfix `++`/`--` no longer crosses newlines, and unary
   minus folds integer/float literals into a single negative literal node.
+- Continued expression parity with C++ assignment parsing: assignment and
+  compound-assignment left sides now run C++-shaped left-value validation for
+  references, wildcard expressions, tuple elements, member/subscript suffixes,
+  optional/call auxiliary bases, and optional-chain expressions; tuple compound
+  assignments are diagnosed, assignment nodes inherit question-suffix state, and
+  optional-chain assignments are wrapped in an outer `OptionalChainExpr`.
 
 ## Remaining Work
 
@@ -256,9 +262,10 @@ Parse shim.
 - Macro expansion parsing still lacks the full C++ parameter-macro and
   expression-scope no-parentheses reparsing behavior, exact macro diagnostic IDs,
   and interpolation string origin-position remapping.
-- Expression parsing still lacks the full C++ left-value validation,
-  wildcard-expression traversal diagnostics, exact fake-operator recovery, and
-  optional-chain wrapping checks for assignment/compound assignment paths.
+- Expression parsing still lacks full wildcard-expression traversal
+  diagnostics, exact fake-operator recovery, non-associative operator
+  diagnostics, and the complete C++ macro-expression rule checks around
+  assignment operands.
 - Type parsing still uses local message diagnostics and simplified recovery in
   several malformed generic/empty-parenthesis cases instead of the exact C++
   diagnostic IDs and parser cleanup paths.
