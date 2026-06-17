@@ -39,6 +39,7 @@ private func loadUInt64LittleEndian(bytes: Array<UInt8>, start: Int64): UInt64 {
 }
 
 @When[os != "Windows"]
+@OverflowWrapping
 private func libStdCxxHashBytes(bytes: Array<UInt8>): UInt64 {
     var remaining = bytes.size
     var cursor = 0
@@ -71,6 +72,7 @@ private func libStdCxxHashBytes(bytes: Array<UInt8>): UInt64 {
 }
 
 @When[os == "Windows"]
+@OverflowWrapping
 private func msvcStringHash(bytes: Array<UInt8>): UInt64 {
     var hash = MSVC_HASH_OFFSET
     for (byte in bytes) {

@@ -4,6 +4,7 @@ private func rotl64(value: UInt64, shift: UInt64): UInt64 {
     return (value << shift) | (value >> (64u64 - shift))
 }
 
+@OverflowWrapping
 private func sipRound(v0: Box<UInt64>, v1: Box<UInt64>, v2: Box<UInt64>, v3: Box<UInt64>): Unit {
     v0.value += v1.value
     v1.value = rotl64(v1.value, 13u64)
