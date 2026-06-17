@@ -69,6 +69,11 @@ Deepening pass updates:
   and only degrade to `DIAG_RANGE_ERROR` when `EnableCheckRangeErrorCodeRatherICE()` is active.
 - Tightened the Basic-local `WarningOptionMgr` compatibility shim to match the C++ warning manager's vector
   replacement API and invalid-index assertions while retaining the selfhost bulk boolean helper used by `option`.
+- Matched the C++ CJMP source-file ID path in `SourceManager`: the stored `fileHash` remains the full
+  `Utils::GetHash()` value, while CJMP file IDs now use the low 32 bits just like the reference
+  `static_cast<unsigned int>(hashValue)` path.
+- Matched C++ diagnostic argument integer narrowing for `int64_t` and `size_t` inputs by storing the same
+  two's-complement 32-bit value that the reference `std::variant<int, ...>` receives before `%d` formatting.
 
 Implemented:
 
@@ -93,6 +98,10 @@ Implemented:
   libast callers while restoring fatal behavior in the normal diagnostic path.
 - Extended the Basic-local warning suppression manager with the C++ whole-vector `UpdateFlags` shape and C++-style
   range checks for single-flag updates/lookups.
+- Preserved C++ hash-width behavior for CJMP file IDs without changing the full source-file hash stored on each
+  `Source`.
+- Matched C++ `DiagArgument` integer storage for wide signed and unsigned inputs, including wraparound values that
+  differ from their original 64-bit representation.
 - Kept LLVM/native backend out of scope as required; Basic does not bind LLVM directly.
 
 Known fidelity caveats:

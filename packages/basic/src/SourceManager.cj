@@ -91,6 +91,10 @@ func BasicFileExist(path: String): Bool {
     }
 }
 
+func BasicUnsignedFileIDFromHash(hash: UInt64): UInt64 {
+    return UInt64(UInt32(hash & 0xffffffffu64))
+}
+
 public class Token {
     private var beginPos: Position
     private var endPos: Position
@@ -263,7 +267,7 @@ public class SourceManager {
         }
         var fileID = UInt64(sources.size)
         if (isCjmpFile) {
-            fileID = GetHash(normalizedPath)
+            fileID = BasicUnsignedFileIDFromHash(GetHash(normalizedPath))
         }
         putSource(fileID, Source(fileID, normalizedPath, buffer, fileHash: fileHash, packageName: packageName))
         putPath(normalizedPath, fileID)
