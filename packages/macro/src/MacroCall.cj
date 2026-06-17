@@ -201,6 +201,12 @@ public enum ExprFieldKind {
     | PERFORM_EXPR_VALUE
     | SPAWN_TASK
     | TRAILING_CLOSURE_EXPR
+    | IS_LEFT_EXPR
+    | AS_LEFT_EXPR
+    | RANGE_START_EXPR
+    | RANGE_STOP_EXPR
+    | RANGE_STEP_EXPR
+    | VAR_WITH_PATTERN_INITIALIZER
 }
 
 private func ExprFieldKindIndex(kind: ExprFieldKind): Int64 {
@@ -234,6 +240,12 @@ private func ExprFieldKindIndex(kind: ExprFieldKind): Int64 {
         case ExprFieldKind.PERFORM_EXPR_VALUE => 26
         case ExprFieldKind.SPAWN_TASK => 27
         case ExprFieldKind.TRAILING_CLOSURE_EXPR => 28
+        case ExprFieldKind.IS_LEFT_EXPR => 29
+        case ExprFieldKind.AS_LEFT_EXPR => 30
+        case ExprFieldKind.RANGE_START_EXPR => 31
+        case ExprFieldKind.RANGE_STOP_EXPR => 32
+        case ExprFieldKind.RANGE_STEP_EXPR => 33
+        case ExprFieldKind.VAR_WITH_PATTERN_INITIALIZER => 34
     }
 }
 

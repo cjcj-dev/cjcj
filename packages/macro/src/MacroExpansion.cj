@@ -6,6 +6,7 @@ import cangjie_compiler::ast.AnnotationKind as RealAnnotationKind
 import cangjie_compiler::parse.Annotation as ParsedAnnotation
 import cangjie_compiler::parse.ArrayExpr as ParsedArrayExpr
 import cangjie_compiler::parse.ArrayLit as ParsedArrayLit
+import cangjie_compiler::parse.AsExpr as ParsedAsExpr
 import cangjie_compiler::parse.BinaryExpr as ParsedBinaryExpr
 import cangjie_compiler::parse.Block as ParsedBlock
 import cangjie_compiler::parse.CallExpr as ParsedCallExpr
@@ -26,6 +27,7 @@ import cangjie_compiler::parse.FuncParam as ParsedFuncParam
 import cangjie_compiler::parse.FuncParamList as ParsedFuncParamList
 import cangjie_compiler::parse.IfExpr as ParsedIfExpr
 import cangjie_compiler::parse.InterpolationExpr as ParsedInterpolationExpr
+import cangjie_compiler::parse.IsExpr as ParsedIsExpr
 import cangjie_compiler::parse.LambdaExpr as ParsedLambdaExpr
 import cangjie_compiler::parse.LetPatternDestructor as ParsedLetPatternDestructor
 import cangjie_compiler::parse.InterfaceDecl as ParsedInterfaceDecl
@@ -48,6 +50,7 @@ import cangjie_compiler::parse.Pattern as ParsedPattern
 import cangjie_compiler::parse.PerformExpr as ParsedPerformExpr
 import cangjie_compiler::parse.PrimitiveType as ParsedPrimitiveType
 import cangjie_compiler::parse.QuoteExpr as ParsedQuoteExpr
+import cangjie_compiler::parse.RangeExpr as ParsedRangeExpr
 import cangjie_compiler::parse.RefExpr as ParsedRefExpr
 import cangjie_compiler::parse.RefType as ParsedRefType
 import cangjie_compiler::parse.ResumeExpr as ParsedResumeExpr
@@ -67,6 +70,7 @@ import cangjie_compiler::parse.Type as ParsedType
 import cangjie_compiler::parse.TypeConvExpr as ParsedTypeConvExpr
 import cangjie_compiler::parse.UnaryExpr as ParsedUnaryExpr
 import cangjie_compiler::parse.VarDecl as ParsedVarDecl
+import cangjie_compiler::parse.VarWithPatternDecl as ParsedVarWithPatternDecl
 import cangjie_compiler::parse.WhileExpr as ParsedWhileExpr
 
 private func hasNoMacros(mc: MacroCollector): Bool {
@@ -475,6 +479,22 @@ private func convertParsedDecl(parsedDecl: ParsedDecl, fallbackFile: Option<File
     }
     if (let Some(parsedFunctionDecl) <- (parsedDecl as ParsedFuncDecl)) {
         return convertParsedFuncDecl(parsedFunctionDecl, fallbackFile)
+    }
+    if (let Some(parsedPatternVariableDecl) <- (parsedDecl as ParsedVarWithPatternDecl)) {
+        let targetPatternVariableDecl = VarWithPatternDecl()
+        copyParsedDeclBase(parsedPatternVariableDecl, targetPatternVariableDecl, fallbackFile)
+        targetPatternVariableDecl.isVar = parsedPatternVariableDecl.isVar
+        if (let Some(parsedPatternTypeNode) <- parsedPatternVariableDecl.typeNode) {
+            targetPatternVariableDecl.declType = Some(convertParsedType(parsedPatternTypeNode, fallbackFile))
+        }
+        if (let Some(parsedPatternInitializer) <- parsedPatternVariableDecl.initializer) {
+            targetPatternVariableDecl.initializer = Some(convertParsedExpr(parsedPatternInitializer, fallbackFile))
+        }
+        if (let Some(parsedIrrefutablePattern) <- parsedPatternVariableDecl.irrefutablePattern) {
+            targetPatternVariableDecl.irrefutablePattern = Some(convertParsedPattern(parsedIrrefutablePattern,
+                fallbackFile))
+        }
+        return targetPatternVariableDecl
     }
     if (let Some(parsedVariableDecl) <- (parsedDecl as ParsedVarDecl)) {
         let targetVariableDecl = VarDecl()
@@ -961,6 +981,40 @@ private func convertParsedExpr(parsedExpr: ParsedExpr, fallbackFile: Option<File
             targetStringInterpolationExpr.strPartExprs.add(convertParsedExpr(parsedPartExpr, fallbackFile))
         }
         return targetStringInterpolationExpr
+    }
+    if (let Some(parsedIsExpr) <- (parsedExpr as ParsedIsExpr)) {
+        let targetIsExpr = IsExpr()
+        copyParsedNodeBase(parsedIsExpr, targetIsExpr, fallbackFile)
+        if (let Some(parsedIsLeftExpr) <- parsedIsExpr.leftExpr) {
+            targetIsExpr.leftExpr = Some(convertParsedExpr(parsedIsLeftExpr, fallbackFile))
+        }
+        if (let Some(parsedIsTypeNode) <- parsedIsExpr.typeNode) {
+            targetIsExpr.isType = Some(convertParsedType(parsedIsTypeNode, fallbackFile))
+        }
+        return targetIsExpr
+    }
+    if (let Some(parsedAsExpr) <- (parsedExpr as ParsedAsExpr)) {
+        let targetAsExpr = AsExpr()
+        copyParsedNodeBase(parsedAsExpr, targetAsExpr, fallbackFile)
+        if (let Some(parsedAsLeftExpr) <- parsedAsExpr.leftExpr) {
+            targetAsExpr.leftExpr = Some(convertParsedExpr(parsedAsLeftExpr, fallbackFile))
+        }
+        if (let Some(parsedAsTypeNode) <- parsedAsExpr.typeNode) {
+            targetAsExpr.asType = Some(convertParsedType(parsedAsTypeNode, fallbackFile))
+        }
+        return targetAsExpr
+    }
+    if (let Some(parsedRangeExpr) <- (parsedExpr as ParsedRangeExpr)) {
+        let targetRangeExpr = RangeExpr()
+        copyParsedNodeBase(parsedRangeExpr, targetRangeExpr, fallbackFile)
+        targetRangeExpr.isClosed = parsedRangeExpr.op.kind == TokenKind.CLOSEDRANGEOP
+        if (let Some(parsedRangeStartExpr) <- parsedRangeExpr.leftExpr) {
+            targetRangeExpr.startExpr = Some(convertParsedExpr(parsedRangeStartExpr, fallbackFile))
+        }
+        if (let Some(parsedRangeStopExpr) <- parsedRangeExpr.rightExpr) {
+            targetRangeExpr.stopExpr = Some(convertParsedExpr(parsedRangeStopExpr, fallbackFile))
+        }
+        return targetRangeExpr
     }
     if (let Some(parsedBinaryExpr) <- (parsedExpr as ParsedBinaryExpr)) {
         let targetBinaryExpr = BinaryExpr(parsedBinaryExpr.astKind)

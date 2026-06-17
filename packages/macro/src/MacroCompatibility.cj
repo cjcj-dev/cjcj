@@ -424,6 +424,31 @@ public class VarDecl <: Decl {
     }
 }
 
+public class VarWithPatternDecl <: Decl {
+    public var declType: Option<Type> = None
+    public var initializer: Option<Expr> = None
+    public var irrefutablePattern: Option<Pattern> = None
+    public var isVar: Bool = false
+
+    public init() {
+        super(ASTKind.VAR_WITH_PATTERN_DECL)
+    }
+
+    public override func Children(): ArrayList<Node> {
+        let out = ArrayList<Node>()
+        if (let Some(pattern) <- irrefutablePattern) {
+            out.add(pattern)
+        }
+        if (let Some(declTypeNode) <- declType) {
+            out.add(declTypeNode)
+        }
+        if (let Some(initExpr) <- initializer) {
+            out.add(initExpr)
+        }
+        return out
+    }
+}
+
 public open class FuncDecl <: Decl {
     public var funcBody: FuncBody = FuncBody()
 
@@ -634,6 +659,71 @@ public class BinaryExpr <: Expr {
         }
         if (let Some(right) <- rightExpr) {
             out.add(right)
+        }
+        return out
+    }
+}
+
+public class IsExpr <: Expr {
+    public var leftExpr: Option<Expr> = None
+    public var isType: Option<Type> = None
+
+    public init() {
+        super(ASTKind.IS_EXPR)
+    }
+
+    public override func Children(): ArrayList<Node> {
+        let out = ArrayList<Node>()
+        if (let Some(left) <- leftExpr) {
+            out.add(left)
+        }
+        if (let Some(ty) <- isType) {
+            out.add(ty)
+        }
+        return out
+    }
+}
+
+public class AsExpr <: Expr {
+    public var leftExpr: Option<Expr> = None
+    public var asType: Option<Type> = None
+
+    public init() {
+        super(ASTKind.AS_EXPR)
+    }
+
+    public override func Children(): ArrayList<Node> {
+        let out = ArrayList<Node>()
+        if (let Some(left) <- leftExpr) {
+            out.add(left)
+        }
+        if (let Some(ty) <- asType) {
+            out.add(ty)
+        }
+        return out
+    }
+}
+
+public class RangeExpr <: Expr {
+    public var startExpr: Option<Expr> = None
+    public var stopExpr: Option<Expr> = None
+    public var stepExpr: Option<Expr> = None
+    public var isClosed: Bool = true
+
+    public init() {
+        super(ASTKind.RANGE_EXPR)
+    }
+
+    public override func Children(): ArrayList<Node> {
+        let out = ArrayList<Node>()
+        if (let Some(start) <- startExpr) {
+            out.add(start)
+        }
+        if (let Some(stop) <- stopExpr) {
+            out.add(stop)
+        }
+        if (let Some(step) <- stepExpr) {
+            out.add(step)
         }
         return out
     }

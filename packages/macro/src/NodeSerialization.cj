@@ -146,6 +146,9 @@ public class NodeWriter {
         if (let Some(funcDecl) <- (decl as FuncDecl)) {
             return "func(" + EscapeNodeText(funcDecl.identifier) + "," + SerializeFuncBody(funcDecl.funcBody) + ")"
         }
+        if (let Some(patternVarDecl) <- (decl as VarWithPatternDecl)) {
+            return SerializeVarWithPatternDecl(patternVarDecl)
+        }
         if (let Some(varDecl) <- (decl as VarDecl)) {
             return SerializeVarDecl(varDecl)
         }
@@ -231,6 +234,29 @@ public class NodeWriter {
             builder.append("]")
         }
         if (let Some(initializer) <- varDecl.initializer) {
+            builder.append(";init=" + SerializeExprForNodeWriter(this, initializer))
+        } else {
+            builder.append(";init=none")
+        }
+        builder.append(")")
+        return builder.toString()
+    }
+
+    private func SerializeVarWithPatternDecl(patternVarDecl: VarWithPatternDecl): String {
+        let builder = StringBuilder()
+        builder.append("varPattern(" + EscapeNodeText(patternVarDecl.identifier))
+        builder.append(";isVar=" + patternVarDecl.isVar.toString())
+        if (let Some(pattern) <- patternVarDecl.irrefutablePattern) {
+            builder.append(";pattern=" + SerializePattern(pattern))
+        } else {
+            builder.append(";pattern=none")
+        }
+        if (let Some(declType) <- patternVarDecl.declType) {
+            builder.append(";type=" + SerializeType(declType))
+        } else {
+            builder.append(";type=none")
+        }
+        if (let Some(initializer) <- patternVarDecl.initializer) {
             builder.append(";init=" + SerializeExprForNodeWriter(this, initializer))
         } else {
             builder.append(";init=none")

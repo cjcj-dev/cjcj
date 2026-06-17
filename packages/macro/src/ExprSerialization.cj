@@ -119,6 +119,20 @@ public func SerializeExprForNodeWriter(writer: NodeWriter, expr: Expr): String {
     if (let Some(strInterpolationExpr) <- (expr as StrInterpolationExpr)) {
         return SerializeExprVectorForNodeWriter(writer, "strInterpolation", strInterpolationExpr.strPartExprs)
     }
+    if (let Some(isExpr) <- (expr as IsExpr)) {
+        return "is(left=" + SerializeExprOptionForNodeWriter(writer, isExpr.leftExpr) + ";type=" +
+            SerializeTypeOptionForNodeWriter(writer, isExpr.isType) + ")"
+    }
+    if (let Some(asExpr) <- (expr as AsExpr)) {
+        return "as(left=" + SerializeExprOptionForNodeWriter(writer, asExpr.leftExpr) + ";type=" +
+            SerializeTypeOptionForNodeWriter(writer, asExpr.asType) + ")"
+    }
+    if (let Some(rangeExpr) <- (expr as RangeExpr)) {
+        return "range(start=" + SerializeExprOptionForNodeWriter(writer, rangeExpr.startExpr) + ";stop=" +
+            SerializeExprOptionForNodeWriter(writer, rangeExpr.stopExpr) + ";step=" +
+            SerializeExprOptionForNodeWriter(writer, rangeExpr.stepExpr) + ";closed=" +
+            rangeExpr.isClosed.toString() + ")"
+    }
     if (let Some(binary) <- (expr as BinaryExpr)) {
         return SerializeBinaryExprForNodeWriter(writer, binary)
     }

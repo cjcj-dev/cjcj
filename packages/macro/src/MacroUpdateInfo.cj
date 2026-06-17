@@ -141,6 +141,11 @@ public func AssignExprReplacement(target: ReplaceTarget, expr: Expr): Bool {
                 parentVarDecl.initializer = Some(expr)
                 return true
             }
+        } else if (target.exprField == ExprFieldKind.VAR_WITH_PATTERN_INITIALIZER) {
+            if (let Some(parentPatternVarDecl) <- (parentNode as VarWithPatternDecl)) {
+                parentPatternVarDecl.initializer = Some(expr)
+                return true
+            }
         } else if (target.exprField == ExprFieldKind.PAREN_EXPR_VALUE) {
             if (let Some(parentParenExpr) <- (parentNode as ParenExpr)) {
                 parentParenExpr.expr = Some(expr)
@@ -236,6 +241,31 @@ public func AssignExprReplacement(target: ReplaceTarget, expr: Expr): Bool {
                 parentTrailingClosureExpr.expr = Some(expr)
                 return true
             }
+        } else if (target.exprField == ExprFieldKind.IS_LEFT_EXPR) {
+            if (let Some(parentIsExpr) <- (parentNode as IsExpr)) {
+                parentIsExpr.leftExpr = Some(expr)
+                return true
+            }
+        } else if (target.exprField == ExprFieldKind.AS_LEFT_EXPR) {
+            if (let Some(parentAsExpr) <- (parentNode as AsExpr)) {
+                parentAsExpr.leftExpr = Some(expr)
+                return true
+            }
+        } else if (target.exprField == ExprFieldKind.RANGE_START_EXPR) {
+            if (let Some(parentRangeExpr) <- (parentNode as RangeExpr)) {
+                parentRangeExpr.startExpr = Some(expr)
+                return true
+            }
+        } else if (target.exprField == ExprFieldKind.RANGE_STOP_EXPR) {
+            if (let Some(parentRangeStopExpr) <- (parentNode as RangeExpr)) {
+                parentRangeStopExpr.stopExpr = Some(expr)
+                return true
+            }
+        } else if (target.exprField == ExprFieldKind.RANGE_STEP_EXPR) {
+            if (let Some(parentRangeStepExpr) <- (parentNode as RangeExpr)) {
+                parentRangeStepExpr.stepExpr = Some(expr)
+                return true
+            }
         }
     }
     if (let Some(box) <- target.exprBox) {
@@ -311,6 +341,16 @@ public func UpdateMacroInfo(node: Node, collector: MacroCollector): Unit {
         updateExprField(spawnExpr.task, spawnExpr, ExprFieldKind.SPAWN_TASK, collector)
     } else if (let Some(trailingClosureExpr) <- (node as TrailingClosureExpr)) {
         updateExprField(trailingClosureExpr.expr, trailingClosureExpr, ExprFieldKind.TRAILING_CLOSURE_EXPR, collector)
+    } else if (let Some(isExpr) <- (node as IsExpr)) {
+        updateExprField(isExpr.leftExpr, isExpr, ExprFieldKind.IS_LEFT_EXPR, collector)
+    } else if (let Some(asExpr) <- (node as AsExpr)) {
+        updateExprField(asExpr.leftExpr, asExpr, ExprFieldKind.AS_LEFT_EXPR, collector)
+    } else if (let Some(rangeExpr) <- (node as RangeExpr)) {
+        updateExprField(rangeExpr.startExpr, rangeExpr, ExprFieldKind.RANGE_START_EXPR, collector)
+        updateExprField(rangeExpr.stopExpr, rangeExpr, ExprFieldKind.RANGE_STOP_EXPR, collector)
+        updateExprField(rangeExpr.stepExpr, rangeExpr, ExprFieldKind.RANGE_STEP_EXPR, collector)
+    } else if (let Some(patternVarDecl) <- (node as VarWithPatternDecl)) {
+        updateExprField(patternVarDecl.initializer, patternVarDecl, ExprFieldKind.VAR_WITH_PATTERN_INITIALIZER, collector)
     } else if (let Some(varDecl) <- (node as VarDecl)) {
         updateExprField(varDecl.initializer, varDecl, ExprFieldKind.VAR_DECL_INITIALIZER, collector)
     } else if (let Some(classDecl) <- (node as ClassDecl)) {
