@@ -39,6 +39,8 @@ Implemented:
 - Restored the C++ signal utility split with `SignalUtil.cj`, and brought Unix alternate signal stack setup closer to `SignalUnix.cpp` by querying/preserving the old stack and reusing an existing active or sufficiently large alternate stack.
 - Updated the Utils-local standard library map used by `ConvertPackageNameToLibCangjieBaseFormat` to include the same standard, deriving, and macro package entries as the real Driver table that C++ Utils consults.
 - Deepened `SipHash` API fidelity by adding typed byte-representation hashing overloads for booleans, signed and unsigned fixed-width integers, and `Float32`/`Float64`, matching the C++ template entrypoint for arithmetic values instead of requiring callers to widen everything to `UInt64`.
+- Matched `FloatFormat.IsUnderFlowFloat` to the C++ stream-extraction behavior by parsing directly through native `strtod` and intentionally ignoring `ERANGE`, so representational underflow such as `1e-400` is classified as underflow instead of being rejected by `StdUtils.Stod`.
+- Aligned `StringifyEnvironmentPointer` duplicate handling with C++ `unordered_map::emplace`: the first normalized environment-variable key now wins instead of relying on `HashMap.add` duplicate semantics.
 
 Known fidelity caveats:
 

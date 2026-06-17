@@ -21,10 +21,14 @@ public class FloatFormat {
     }
 
     public static func IsUnderFlowFloat(literal: String): Bool {
-        if (let Some(parsed) <- Stod(literal)) {
-            return abs(parsed) < 1.0
+        var parsed = 0.0
+        try (cInput = unsafe { LibC.mallocCString(literal) }.asResource()) {
+            if (!cInput.value.isNull()) {
+                parsed = unsafe { strtod(cInput.value, CPointer<CString>()) }
+            }
+        } catch (e: Exception) {
+            parsed = 0.0
         }
-        return false
+        return abs(parsed) < 1.0
     }
 }
-
