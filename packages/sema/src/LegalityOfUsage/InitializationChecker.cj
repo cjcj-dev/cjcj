@@ -2,6 +2,7 @@ package cangjie_compiler::sema.LegalityOfUsage
 
 import std.collection.*
 import cangjie_compiler::ast.*
+import cangjie_compiler::sema.*
 
 public enum InitializationIssueKind {
     | USED_BEFORE_INITIALIZATION
@@ -1311,7 +1312,7 @@ public class InitializationChecker {
     }
 
     private func CheckInitInRefExpr(refExpr: RefExpr): Bool {
-        if (let Some(target) <- refExpr.GetTarget()) {
+        if (let Some(target) <- GetRealTarget(refExpr.GetTarget())) {
             if (target.astKind == ASTKind.GENERIC_PARAM_DECL) {
                 return true
             }

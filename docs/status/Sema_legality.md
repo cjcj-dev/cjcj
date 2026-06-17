@@ -1,6 +1,6 @@
 # Sema Legality Status
 
-Date: 2026-06-17
+Date: 2026-06-18
 Build: `cjpm build` passes for the workspace.
 
 ## Scope
@@ -44,6 +44,7 @@ This pass covers the self-hosted Cangjie port under:
 - Matched C++ const-evaluation short-circuiting for calls and subscript expressions so argument/index checks are skipped after a non-const callee or base has already failed.
 - Ported C++ `CheckSubscriptLegality` coverage for constant `VArray` index bounds, including overflow suppression, negative-index wording, past-end details, and `ShouldDiagnose(true)` gating.
 - Ported C++ `CheckStaticMembersWithGeneric` coverage for static vars, properties, and static initializers in generic declarations, including source top-level/exported-internal iteration, `RefExpr`/`RefType` generic-type detection, static generic member references, and skip-child behavior after a reported use.
+- Aligned initialization reference checking with the C++ `TypeCheckUtil::GetRealTarget` path, so aliases are resolved before generic-parameter, order, illegal-member, capture, and use-before-initialization checks run.
 
 ## Remaining Fidelity Gaps
 
@@ -57,4 +58,4 @@ This pass covers the self-hosted Cangjie port under:
 
 ## Estimate
 
-Honest behavior coverage for this legality/const-evaluation scope is about 73% versus the C++ reference. The port now has real traversal and issue production in the scoped files, several targeted C++ edge cases, the main conditional-initialization merge path, termination-aware initialization state, constructor early-return field tracking, string interpolation block traversal, dependency-aware member initialization order, immutable struct-base assignment checks, illegal member-use checks before full initialization, source-ordered global def-use traversal, const-eval call/subscript short-circuiting, constant `VArray` subscript bounds checking, and static-member generic dependency checks, but production completeness still requires diagnostic integration and the remaining exact semantic edge cases above.
+Honest behavior coverage for this legality/const-evaluation scope is about 74% versus the C++ reference. The port now has real traversal and issue production in the scoped files, several targeted C++ edge cases, the main conditional-initialization merge path, termination-aware initialization state, constructor early-return field tracking, string interpolation block traversal, dependency-aware member initialization order, immutable struct-base assignment checks, illegal member-use checks before full initialization, real-target alias resolution for reference initialization checks, source-ordered global def-use traversal, const-eval call/subscript short-circuiting, constant `VArray` subscript bounds checking, and static-member generic dependency checks, but production completeness still requires diagnostic integration and the remaining exact semantic edge cases above.
