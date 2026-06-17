@@ -11,7 +11,7 @@ import cangjie_compiler::utils.FailureReason as UtilsFailureReason
 import cangjie_compiler::utils.FileMode as UtilsFileMode
 import cangjie_compiler::utils.FileUtil
 import cangjie_compiler::utils.SipHash
-import std.collection.*
+import cangjie_compiler::utils.SplitString as UtilsSplitString
 
 public let DEFAULT_ANDROID_API: String = "31"
 public let MIN_ANDROID_API: String = "26"
@@ -73,22 +73,7 @@ public class TextFileReadResult {
 }
 
 public func SplitString(str: String, delimiter: String): Array<String> {
-    if (str.isEmpty()) { return Array<String>() }
-    if (delimiter.isEmpty()) { return [str] }
-    let res = ArrayList<String>()
-    var pos: Int64 = 0
-    var foundPos = str.indexOf(delimiter)
-    while (let Some(found) <- foundPos) {
-        res.add(str[pos..found])
-        pos = found + delimiter.size
-        foundPos = str.indexOf(delimiter, pos)
-    }
-    if (pos < str.size) {
-        res.add(str[pos..])
-    } else if (pos == str.size) {
-        res.add("")
-    }
-    return res.toArray()
+    return UtilsSplitString(str, delimiter)
 }
 
 public func SplitLines(str: String): Array<String> {

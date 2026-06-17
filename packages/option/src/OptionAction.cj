@@ -74,7 +74,10 @@ public func ParsePreAction(opts: GlobalOptions, arg: OptionArgInstance): ActionR
 public func ParseAction(opts: GlobalOptions, arg: OptionArgInstance): ActionResult {
     let id = arg.info.GetID()
     if (id == ID.OUTPUT_FILE) {
-        if (arg.value.isEmpty()) { return handled(success: false) }
+        if (arg.value.isEmpty()) {
+            Errorln("'" + arg.name + "' requires a non-empty value.")
+            return handled(success: false)
+        }
         opts.output = arg.value
         return handled()
     }
@@ -97,7 +100,10 @@ public func ParseAction(opts: GlobalOptions, arg: OptionArgInstance): ActionResu
     }
     if (id == ID.PLUGIN_PATH) {
         let pluginPath = opts.CheckInputFilePath(arg.value)
-        if (!pluginPath.hasValue) { return handled(success: false) }
+        if (!pluginPath.hasValue) {
+            Errorln("'" + arg.name + "' only accepts an existing dynamic library path.")
+            return handled(success: false)
+        }
         let suffix = GetSharedLibraryExtension(opts.host.os)
         if ("." + GetFileExtension(pluginPath.value) != suffix) {
             Errorln("'" + arg.name + "' requires a dynamic library path with '" + suffix + "' suffix.")
@@ -697,15 +703,16 @@ private func parseJobsValue(optionName: String, value: String): MaybeUInt64 {
         Errorln("'" + optionName + "' gets an invalid number input.")
         return MaybeUInt64()
     }
-    let parsed = TryParseUInt64(value)
-    if (!parsed.hasValue) { return MaybeUInt64() }
-    if (parsed.value < 1u64) {
+    let parsed = UtilsTryParseInt(value)
+    if (let None <- parsed) { return MaybeUInt64() }
+    let parsedValue = UInt64(parsed.getOrThrow())
+    if (parsedValue < 1u64) {
         Warningln("'" + optionName + "' value must be greater than 0, the compiler will use 1 as the value.")
         return MaybeUInt64(1u64)
     }
     let threadNum = GetHardwareConcurrency()
-    if (parsed.value > threadNum) { return MaybeUInt64(threadNum) }
-    return parsed
+    if (parsedValue > threadNum) { return MaybeUInt64(threadNum) }
+    return MaybeUInt64(parsedValue)
 }
 
 private func parseJobs(opts: GlobalOptions, arg: OptionArgInstance, aggressive: Bool): ActionResult {

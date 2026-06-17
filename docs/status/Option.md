@@ -253,3 +253,21 @@ some compatibility helper entry points remain to keep current sibling packages
 building; host target defaults are still statically modeled for this port; and
 obfuscation-specific option handling still lives in the driver subclass layer
 rather than the base Option action surface.
+
+This pass continues the same de-isolation and action-parity work. The
+Option-level `SplitString` compatibility wrapper now delegates to the shared
+utils splitter, and jobs/APC numeric parsing uses the same shared
+`TryParseInt` path as the other C++ `Utils::TryParseInt`-backed options while
+preserving the C++ digit-only and nine-character prechecks. The `--output`
+action now emits the reference non-empty-value error, missing `--plugin` inputs
+now emit the plugin-specific "existing dynamic library path" error after the
+shared path warning, and `CompileTargetToSerializedString` now aborts on
+`DEFAULT` instead of serializing an invented sentinel, matching the C++
+internal-error behavior.
+
+Remaining gaps: the option table/enums are still hand-maintained mirrors of
+`Options.inc`; public `Maybe*` and numeric compatibility wrappers remain where
+other current packages import them; several print-style diagnostics still use
+local `Errorln` text rather than a formatted-print wrapper; and host target
+defaults/driver obfuscation option handling remain outside the base Option
+module's fully faithful surface.

@@ -1309,12 +1309,11 @@ public open class GlobalOptions <: Option {
     }
 
     public func CompileTargetToSerializedString(): String {
-        return match (compileTarget) {
-            case CompileTarget.EXECUTABLE => "E"
-            case CompileTarget.STATIC_LIB => "C"
-            case CompileTarget.SHARED_LIB => "S"
-            case CompileTarget.DEFAULT => "K"
-        }
+        if (compileTarget == CompileTarget.EXECUTABLE) { return "E" }
+        if (compileTarget == CompileTarget.STATIC_LIB) { return "C" }
+        if (compileTarget == CompileTarget.SHARED_LIB) { return "S" }
+        CJC_ABORT()
+        return ""
     }
 
     public func StackTraceFormatToSerializedString(): String {
