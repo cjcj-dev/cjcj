@@ -38,6 +38,13 @@ Scope: `packages/sema/src` generics files covering generic instantiation, multi-
   `TypePattern.matchBeforeRuntime` and `needRuntimeTypeCheck` for tuple patterns, enum-constructor patterns, and
   patterns with context expressions after generic substitution, reusing the real after-type-check
   `IsNeedRuntimeCheck` helper instead of a local compatibility rule.
+- 2026-06-17: Tightened local type argument synthesis against the C++ solver rules by copying instantiated
+  generic upper bounds from `TypeManager` before solving, treating substitutions that still contain their own
+  type variable as unsolved, and updating ideal-int/ideal-float bounds to the concrete primitive type seen during
+  primitive unification.
+- 2026-06-17: Aligned two generic-instantiation rearrangement edges with C++ behavior: `ArrayExpr` initializer
+  instantiation now ignores non-`TYPE_ARRAY` array expressions, and rearranged dynamic `This`-typed member calls
+  keep the receiver type as the call result.
 - Replaced status-only placeholders in the scoped generics files with compiling Cangjie implementations.
 - Ported the `MultiTypeSubstUtils` utility surface against the real `ast.Ty`, `GenericsTy`, `TypeSubst`, `MultiTypeSubst`, `SubstPack`, and `TypeManager` types.
 - Added the `Promotion` class with C++-matching promote/downgrade mapping operations and kept the previous top-level `Promote` helper.

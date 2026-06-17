@@ -634,6 +634,9 @@ public class GenericInstantiationManagerImpl {
     private func GenericArrayExprInstantiate(arrayExpr: ArrayExpr, pkg: Package): Unit {
         if (let Some(initFunc) <- arrayExpr.initFunc) {
             if (let Some(arrayTy) <- arrayExpr.GetTy()) {
+                if (!arrayTy.IsArray()) {
+                    return
+                }
                 InstantiateGenericDeclWithInstTys(initFunc, copyTypeArgs(Some(arrayTy)), pkg)
             }
         }
@@ -776,7 +779,24 @@ public class GenericInstantiationManagerImpl {
                             if (let Some(funcTy) <- (targetTy as FuncTy)) {
                                 if (!funcTy.retTy.HasGeneric()) {
                                     callExpr.SetTy(funcTy.retTy)
+                                    UpdateDynamicThisCallTy(callExpr)
                                 }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private func UpdateDynamicThisCallTy(callExpr: CallExpr): Unit {
+        if (let Some(callTy) <- callExpr.GetTy()) {
+            if (let Some(_) <- (callTy as ClassThisTy)) {
+                if (let Some(baseFunc) <- callExpr.baseFunc) {
+                    if (let Some(memberAccess) <- (baseFunc as MemberAccess)) {
+                        if (let Some(baseExpr) <- memberAccess.baseExpr) {
+                            if (let Some(baseTy) <- baseExpr.GetTy()) {
+                                callExpr.SetTy(baseTy)
                             }
                         }
                     }

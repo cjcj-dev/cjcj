@@ -24,6 +24,24 @@ private func containsTyVar(values: ArrayList<GenericsTy>, tyVar: GenericsTy): Bo
     return false
 }
 
+private func containsTy(values: ArrayList<Ty>, ty: Ty): Bool {
+    for (value in values) {
+        if (SameTy(value, ty)) {
+            return true
+        }
+    }
+    return false
+}
+
+private func substContainsTyVar(subst: TypeSubst, tyVar: GenericsTy): Bool {
+    for (entry in subst.entries) {
+        if (entry.ty.Contains(tyVar)) {
+            return true
+        }
+    }
+    return false
+}
+
 private func typeArgsCanUnify(synthesis: LocalTypeArgumentSynthesis, argTy: Ty, paramTy: Ty): Bool {
     if (argTy.typeArgs.size != paramTy.typeArgs.size) {
         return false
@@ -89,6 +107,7 @@ public class LocalTypeArgumentSynthesis {
     private var needDiagMsg: Bool
     private var constraints: Constraint = Constraint()
     private var errInfo: SolvingErrInfo = SolvingErrInfo()
+    private var curTyVar: Option<GenericsTy> = None
 
     public init(typeManager: TypeManager, argPack: LocTyArgSynArgPack, needDiagMsg!: Bool = false) {
         tyMgr = typeManager
@@ -101,6 +120,7 @@ public class LocalTypeArgumentSynthesis {
             errInfo.style = SolvingErrStyle.ARG_MISMATCH
             return None
         }
+        CopyUpperbound()
         constraints = InitConstraints(argPack.tyVarsToSolve)
         let orderedIndexes = getOrderedCheckingIndexes(argPack.argTys)
         for (idx in orderedIndexes) {
@@ -132,6 +152,8 @@ public class LocalTypeArgumentSynthesis {
         var count: Int64 = 0
         for (tyVar in argPack.tyVarsToSolve) {
             if (let None <- subst.Get(tyVar)) {
+                count++
+            } else if (substContainsTyVar(subst, tyVar)) {
                 count++
             }
         }
@@ -187,6 +209,23 @@ public class LocalTypeArgumentSynthesis {
         return out
     }
 
+    private func CopyUpperbound(): Unit {
+        let instMapping = tyMgr.GetInstMapping()
+        for (entry in instMapping.u2i.entries) {
+            if (let Some(instTyVar) <- (entry.ty as GenericsTy)) {
+                if (!containsTyVar(argPack.tyVarsToSolve, instTyVar)) {
+                    continue
+                }
+                for (upper in entry.tyVar.upperBounds) {
+                    let instUpper = tyMgr.InstOf(upper)
+                    if (!containsTy(instTyVar.upperBounds, instUpper)) {
+                        instTyVar.upperBounds.add(instUpper)
+                    }
+                }
+            }
+        }
+    }
+
     public func UnifyOne(argTy: Ty, paramTy: Ty): Bool {
         if (SameTy(argTy, paramTy) || argTy.IsQuest() || paramTy.IsQuest()) {
             return true
@@ -205,12 +244,14 @@ public class LocalTypeArgumentSynthesis {
         }
         if (let Some(paramVar) <- (paramTy as GenericsTy)) {
             if (paramVar.isPlaceholder && containsTyVar(argPack.tyVarsToSolve, paramVar)) {
+                curTyVar = Some(paramVar)
                 constraints.GetOrCreate(paramVar).lbs.Add(normalizeInferredTy(argTy))
                 return true
             }
         }
         if (let Some(argVar) <- (argTy as GenericsTy)) {
             if (argVar.isPlaceholder && containsTyVar(argPack.tyVarsToSolve, argVar)) {
+                curTyVar = Some(argVar)
                 constraints.GetOrCreate(argVar).ubs.Add(normalizeInferredTy(paramTy))
                 return true
             }
@@ -250,9 +291,36 @@ public class LocalTypeArgumentSynthesis {
             return UnifyNominal(argTy, paramTy)
         }
         if (argTy.IsPrimitive() && paramTy.IsPrimitive()) {
-            return tyMgr.IsSubtype(argTy, paramTy)
+            if (!tyMgr.IsSubtype(argTy, paramTy)) {
+                return false
+            }
+            if (argTy.IsIdeal() && !paramTy.IsIdeal()) {
+                UpdateIdealTysInCurrentConstraint(paramTy)
+            } else if (paramTy.IsIdeal() && !argTy.IsIdeal()) {
+                UpdateIdealTysInCurrentConstraint(argTy)
+            }
+            return true
         }
         return tyMgr.IsSubtype(argTy, paramTy)
+    }
+
+    private func UpdateIdealTysInCurrentConstraint(targetTy: Ty): Unit {
+        if (let Some(tyVar) <- curTyVar) {
+            let bounds = constraints.GetOrCreate(tyVar)
+            ReplaceIdealTyInSet(bounds.lbs, targetTy)
+            ReplaceIdealTyInSet(bounds.ubs, targetTy)
+        }
+    }
+
+    private func ReplaceIdealTyInSet(tys: TySet, targetTy: Ty): Unit {
+        var idx: Int64 = 0
+        while (idx < tys.values.size) {
+            if ((tys.values[idx].kind == TypeKind.TYPE_IDEAL_INT && targetTy.IsInteger()) ||
+                (tys.values[idx].kind == TypeKind.TYPE_IDEAL_FLOAT && targetTy.IsFloating())) {
+                tys.values[idx] = targetTy
+            }
+            idx++
+        }
     }
 
     private func UnifyParamIntersectionTy(argTy: Ty, paramTy: IntersectionTy): Bool {
