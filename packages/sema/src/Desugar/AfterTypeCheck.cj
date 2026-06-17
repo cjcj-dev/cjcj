@@ -15,7 +15,7 @@ public func PerformDesugarAfterTypeCheck(typeManager: TypeManager, pkg: Package,
         match (node.astKind) {
             case ASTKind.FOR_IN_EXPR =>
                 if (let Some(forInExpr) <- (node as ForInExpr)) {
-                    DesugarForInRangeExpr(forInExpr)
+                    DesugarForInExpr(typeManager, forInExpr)
                 }
             case ASTKind.FUNC_PARAM =>
                 if (let Some(param) <- (node as FuncParam)) {

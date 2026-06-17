@@ -3,10 +3,14 @@ package cangjie_compiler::sema.Desugar.AfterTypeCheck
 import std.collection.*
 import cangjie_compiler::ast.*
 import cangjie_compiler::sema.*
+import cangjie_compiler::sema.TypeCheckExpr.*
 
 private let INDEX_COMPILER: String = "$index-compiler"
 private let IS_FIRST_COMPILER: String = "$isFirst-compiler"
 private let STOP_COMPILER: String = "$stop-compiler"
+private let ITER_COMPILER: String = "iter-compiler"
+private let STRING_SIZE_NAME: String = "size"
+private let SUBSCRIPT_OPERATOR_NAME: String = "[]"
 
 private func CloneExpr(expr: Expr): Option<Expr> {
     return ASTCloner.Clone(expr) as Expr
@@ -65,6 +69,174 @@ private func CreateStopVar(rangeExpr: RangeExpr): Option<VarDecl> {
         }
     }
     return None
+}
+
+private func CreateStringIndexVar(forInExpr: ForInExpr): VarDecl {
+    let litZero = CreateLitConstExpr(LitConstKind.INTEGER, "0", TypeManager.GetPrimitiveTy(TypeKind.TYPE_INT64))
+    let index = CreateVarDecl(ITER_COMPILER, litZero, None)
+    index.EnableAttr(Attribute.IMPLICIT_ADD)
+    index.isVar = true
+    index.assignPos = index.begin
+    index.curFile = forInExpr.curFile
+    index.SetTy(litZero.GetTy() ?? TypeManager.GetPrimitiveTy(TypeKind.TYPE_INT64))
+    CopyBasicInfo(forInExpr, index)
+    if (let Some(pattern) <- forInExpr.pattern) {
+        index.begin = pattern.begin
+        index.end = pattern.end
+    }
+    return index
+}
+
+private func CreateStringTmpVar(forInExpr: ForInExpr): Option<VarDecl> {
+    if (let Some(inExpr) <- forInExpr.inExpression) {
+        let tmp = CreateTmpVarDecl()
+        tmp.initializer = inExpr
+        tmp.isVar = false
+        tmp.curFile = forInExpr.curFile
+        CopyBasicInfo(inExpr, tmp)
+        if (let Some(ty) <- inExpr.GetTy()) {
+            tmp.SetTy(ty)
+        }
+        return tmp
+    }
+    return None
+}
+
+private func FirstGetterDecl(decl: Decl): Option<FuncDecl> {
+    if (let Some(funcDecl) <- (decl as FuncDecl)) {
+        return funcDecl
+    }
+    let used = GetUsedMemberDecl(decl, true)
+    if (let Some(funcDecl) <- (used as FuncDecl)) {
+        return funcDecl
+    }
+    return None
+}
+
+private func CreateSizeCall(typeManager: TypeManager, forInExpr: ForInExpr, tmp: VarDecl): Option<CallExpr> {
+    let tmpTy = tmp.GetTy()
+    let sizeDecls = FieldLookup(typeManager, Ty.GetDeclPtrOfTy(tmpTy), STRING_SIZE_NAME,
+        info: LookupInfo(baseTy: tmpTy, file: forInExpr.curFile, lookupExtend: false))
+    if (sizeDecls.isEmpty()) {
+        return None
+    }
+    if (let Some(getter) <- FirstGetterDecl(sizeDecls[0])) {
+        let base = CreateMemberAccess(CreateVarRef(tmp, forInExpr), getter)
+        base.curFile = forInExpr.curFile
+        let args = ArrayList<FuncArg>()
+        let callTy = sizeDecls[0].GetTy()
+        let call = CreateCallExpr(base, args, Some(getter), callTy, CallKind.CALL_DECLARED_FUNCTION)
+        CopyBasicInfo(forInExpr, call)
+        AddCurFile(call, file: forInExpr.curFile)
+        let synthesizedTy = SynExprShallow(typeManager, call)
+        if (Ty.IsTyCorrect(synthesizedTy)) {
+            call.SetTy(synthesizedTy)
+        } else if (let Some(ty) <- callTy) {
+            call.SetTy(ty)
+        } else {
+            call.SetTy(TypeManager.GetPrimitiveTy(TypeKind.TYPE_INT64))
+        }
+        return call
+    }
+    return None
+}
+
+private func CreateStringEndVar(typeManager: TypeManager, forInExpr: ForInExpr, tmp: VarDecl): Option<VarDecl> {
+    if (let Some(sizeCall) <- CreateSizeCall(typeManager, forInExpr, tmp)) {
+        let end = CreateTmpVarDecl()
+        end.initializer = sizeCall
+        end.isVar = false
+        end.curFile = forInExpr.curFile
+        CopyBasicInfo(forInExpr, end)
+        end.begin = tmp.begin
+        end.end = tmp.end
+        if (let Some(ty) <- sizeCall.GetTy()) {
+            end.SetTy(ty)
+        }
+        return end
+    }
+    return None
+}
+
+private func CreateStringElementCall(typeManager: TypeManager, forInExpr: ForInExpr, tmp: VarDecl,
+    index: VarDecl): Option<CallExpr> {
+    let base = CreateMemberAccess(CreateVarRef(tmp, forInExpr), SUBSCRIPT_OPERATOR_NAME)
+    base.SetTy(Ty.GetInitialTy())
+    base.curFile = forInExpr.curFile
+    CopyBasicInfo(forInExpr, base)
+    let tmpTy = tmp.GetTy()
+    let subscriptTargets = FieldLookup(typeManager, Ty.GetDeclPtrOfTy(tmpTy), SUBSCRIPT_OPERATOR_NAME,
+        info: LookupInfo(baseTy: tmpTy, file: forInExpr.curFile))
+    for (target in subscriptTargets) {
+        base.targets.add(target)
+    }
+    if (!subscriptTargets.isEmpty()) {
+        let firstTarget = subscriptTargets[0]
+        base.target = firstTarget
+        if (let Some(targetTy) <- firstTarget.GetTy()) {
+            base.SetTy(targetTy)
+        }
+    }
+    let args = ArrayList<FuncArg>()
+    let indexRef = CreateVarRef(index, forInExpr)
+    CopyBasicInfo(forInExpr, indexRef)
+    args.add(CreateFuncArg(indexRef))
+    let call = CreateCallExpr(base, args)
+    CopyBasicInfo(forInExpr, call)
+    AddCurFile(call, file: forInExpr.curFile)
+    let callTy = SynExprShallow(typeManager, call)
+    if (Ty.IsTyCorrect(callTy)) {
+        call.SetTy(callTy)
+        return call
+    }
+    return None
+}
+
+private func CreateStringLetIter(typeManager: TypeManager, forInExpr: ForInExpr, tmp: VarDecl,
+    index: VarDecl): Option<VarDecl> {
+    if (let Some(pattern) <- forInExpr.pattern) {
+        if (let Some(varPattern) <- (pattern as VarPattern)) {
+            if (let Some(varDecl) <- varPattern.varDecl) {
+                if (let Some(elemCall) <- CreateStringElementCall(typeManager, forInExpr, tmp, index)) {
+                    varDecl.parentPattern = None
+                    varDecl.initializer = elemCall
+                    varDecl.curFile = forInExpr.curFile
+                    if (let Some(ty) <- elemCall.GetTy()) {
+                        varDecl.SetTy(ty)
+                    }
+                    forInExpr.patternInDesugarExpr = pattern
+                    forInExpr.pattern = None
+                    return varDecl
+                }
+            }
+        }
+    }
+    return None
+}
+
+private func CreateStringUpdate(forInExpr: ForInExpr, index: VarDecl): AssignExpr {
+    let update = AssignExpr()
+    update.curFile = forInExpr.curFile
+    update.leftValue = CreateVarRef(index, forInExpr)
+    update.rightExpr = CreateLitConstExpr(LitConstKind.INTEGER, "1", TypeManager.GetPrimitiveTy(TypeKind.TYPE_INT64))
+    update.op = TokenKind.ADD_ASSIGN
+    update.isCompound = true
+    update.begin = forInExpr.begin
+    update.end = forInExpr.end
+    update.SetTy(UnitTy())
+    update.EnableAttr(Attribute.COMPILER_ADD)
+    return update
+}
+
+private func CreateStringCond(forInExpr: ForInExpr, index: VarDecl, end: VarDecl): BinaryExpr {
+    let cond = CreateBinaryExpr(CreateVarRef(index, forInExpr), CreateVarRef(end, forInExpr), TokenKind.LT)
+    cond.curFile = forInExpr.curFile
+    cond.SetTy(BoolTy())
+    if (let Some(inExpr) <- forInExpr.inExpression) {
+        cond.begin = inExpr.begin
+        cond.end = inExpr.end
+    }
+    return cond
 }
 
 private func CreateFirstFlag(rangeExpr: RangeExpr): VarDecl {
@@ -239,6 +411,23 @@ private func FinishRangeDesugar(forInExpr: ForInExpr, index: VarDecl, stop: VarD
     forInExpr.inExpression = None
 }
 
+private func FinishStringDesugar(forInExpr: ForInExpr, index: VarDecl, tmp: VarDecl, end: VarDecl,
+    whileExpr: WhileExpr): Unit {
+    let nodes = ArrayList<Node>()
+    nodes.add(index)
+    nodes.add(tmp)
+    nodes.add(end)
+    nodes.add(whileExpr)
+    let block = CreateBlock(nodes, UnitTy())
+    CopyBasicInfo(forInExpr, block)
+    AddCurFile(block, file: forInExpr.curFile)
+    if (let Some(whileBody) <- whileExpr.body) {
+        RearrangeRefLoop(forInExpr, whileExpr, whileBody)
+    }
+    forInExpr.desugarExpr = block
+    forInExpr.inExpression = None
+}
+
 private func DesugarClosedRange(forInExpr: ForInExpr, rangeExpr: RangeExpr): Unit {
     if (let Some(index) <- CreateIndexVar(forInExpr, rangeExpr)) {
         if (let Some(stop) <- CreateStopVar(rangeExpr)) {
@@ -300,6 +489,36 @@ private func DesugarNonClosedRange(forInExpr: ForInExpr, rangeExpr: RangeExpr): 
     }
 }
 
+private func DesugarForInStringExpr(typeManager: TypeManager, forInExpr: ForInExpr): Unit {
+    let index = CreateStringIndexVar(forInExpr)
+    if (let Some(tmp) <- CreateStringTmpVar(forInExpr)) {
+        if (let Some(end) <- CreateStringEndVar(typeManager, forInExpr, tmp)) {
+            let condition = CreateStringCond(forInExpr, index, end)
+            let guardExpr = CreateGuard(forInExpr, condition, false)
+            let whileExpr = WhileExpr()
+            whileExpr.sugarKind = SugarKind.FOR_IN_EXPR
+            CopyBasicInfo(forInExpr, whileExpr)
+            whileExpr.condExpr = condition
+            let bodyNodes = ArrayList<Node>()
+            if (let Some(letValue) <- CreateStringLetIter(typeManager, forInExpr, tmp, index)) {
+                bodyNodes.add(letValue)
+            }
+            let update = CreateStringUpdate(forInExpr, index)
+            let updateTy = SynExprShallow(typeManager, update)
+            if (Ty.IsTyCorrect(updateTy)) {
+                update.SetTy(updateTy)
+            }
+            bodyNodes.add(update)
+            bodyNodes.add(guardExpr)
+            let whileBody = CreateBlock(bodyNodes, UnitTy())
+            CopyBasicInfo(forInExpr, whileBody)
+            whileExpr.body = whileBody
+            whileExpr.SetTy(UnitTy())
+            FinishStringDesugar(forInExpr, index, tmp, end, whileExpr)
+        }
+    }
+}
+
 public func DesugarForInRangeExpr(forInExpr: ForInExpr): Unit {
     if (let Some(_) <- forInExpr.desugarExpr) {
         return
@@ -310,6 +529,26 @@ public func DesugarForInRangeExpr(forInExpr: ForInExpr): Unit {
                 DesugarClosedRange(forInExpr, rangeExpr)
             } else {
                 DesugarNonClosedRange(forInExpr, rangeExpr)
+            }
+        }
+    }
+}
+
+public func DesugarForInExpr(typeManager: TypeManager, forInExpr: ForInExpr): Unit {
+    if (!Ty.IsTyCorrect(forInExpr.GetTy())) {
+        return
+    }
+    if (let Some(_) <- forInExpr.desugarExpr) {
+        return
+    }
+    if (let Some(inExpr) <- forInExpr.inExpression) {
+        if (let Some(_) <- (inExpr as RangeExpr)) {
+            DesugarForInRangeExpr(forInExpr)
+            return
+        }
+        if (let Some(inTy) <- inExpr.GetTy()) {
+            if (inTy.IsString()) {
+                DesugarForInStringExpr(typeManager, forInExpr)
             }
         }
     }
