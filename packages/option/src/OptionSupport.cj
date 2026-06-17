@@ -9,6 +9,7 @@ import cangjie_compiler::utils.FILE_PATH_MAX_LENGTH as UTILS_FILE_PATH_MAX_LENGT
 import cangjie_compiler::utils.FailureReason as UtilsFailureReason
 import cangjie_compiler::utils.FileMode as UtilsFileMode
 import cangjie_compiler::utils.FileUtil
+import cangjie_compiler::utils.SipHash
 import std.collection.*
 
 public let DEFAULT_ANDROID_API: String = "31"
@@ -296,13 +297,7 @@ public func UInt64ToHex(value: UInt64): String {
 }
 
 public func StableHashString(value: String): String {
-    let modulus = 4294967291u64
-    var hash = 2166136261u64
-    for (byte in value.toArray()) {
-        hash = (hash * 16777619u64 + UInt64(byte)) % modulus
-    }
-    hash = (hash * 16777619u64 + UInt64(value.size)) % modulus
-    return UInt64ToHex(hash)
+    return UInt64ToHex(SipHash.GetHashValue(value))
 }
 
 public func Errorln(value: String): Unit {

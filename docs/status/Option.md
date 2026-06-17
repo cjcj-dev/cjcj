@@ -201,3 +201,38 @@ output/input reprocessing as in `Option.cpp`, output-mode validation runs before
 obfuscation and CJMP checks, and CJMP common-part validation now accumulates all
 bad extension warnings plus the count mismatch before failing, matching the C++
 `ok &= VerifyFileExtension(...)` behavior.
+
+This pass deepens the remaining high-traffic parser/action paths. Cache path
+hashing now delegates to the real sibling `utils.SipHash` implementation instead
+of an Option-local fallback hash. `OptionTable.ParseOptionArg` now rejects
+frontend-only options when the table is in driver mode after the normal
+backend/group lookup, matching the explicit C++ guard. Deprecated options and
+`--module-name` now use the shared Basic diagnostic IDs
+`driver_deprecated_option` and `driver_useless_option`.
+
+Input classification has been split into C++-shaped handlers for
+object/archive inputs, `.cj`, `.cj.d`, `.bc`, `.cjo`, directories, and unknown
+files. These handlers now preserve the C++ source-vs-binary diagnostic kinds,
+rewrite object/bitcode ordered inputs to absolute paths, verify resolved file
+extensions before adding inputs, report duplicate `.cjo` scan-dependency inputs
+with `driver_require_one_package_directory_scan_dependency`, warn on unused
+non-directory files with `driver_warning_argument_unused`, and report missing
+package paths with `driver_require_package_directory`. Output path length
+warnings/errors now also use the C++ diagnostic IDs rather than local warning
+text.
+
+Action-level parity also moved forward: plugin suffix failures now report the
+reference error text, common-part CJO/CHIR actions use
+`ValidateInputFilePath` like `OptionAction.cpp`, cfg keys are NFC-normalized
+through the real utils Unicode normalization path, `--error-count-limit`
+diagnostics name the actual option spelling, and explicit/default APC enablement
+updates the shared utils semaphore count with the C++ two-slot allowance.
+
+Remaining gaps: the generated-looking `Options.cj`/`OptionEnums.cj` are still
+hand-maintained Cangjie mirrors rather than being produced directly from
+`Options.inc`; a few diagnostics still use local `Errorln` strings where the C++
+reference also uses formatted print helpers rather than `DiagnosticEngine`; host
+triple defaults are static to the current build assumptions instead of being
+fully preprocessor-derived for every target; and external users still see local
+`Maybe*` compatibility wrappers until the wider port standardizes on native
+`Option<T>` across package boundaries.

@@ -8,9 +8,17 @@ import cangjie_compiler::utils.CJC_ABORT
 import cangjie_compiler::utils.FileMode as UtilsFileMode
 import cangjie_compiler::utils.Out64
 import cangjie_compiler::utils.OverflowStrategy
+import cangjie_compiler::utils.Semaphore as UtilsSemaphore
 import std.collection.*
 
 private let ARGUMENT_IGNORED_SUFFIX: String = " The argument is ignored."
+private let CJO_EXTENSION: String = "cjo"
+private let BC_EXTENSION: String = "bc"
+private let CJ_EXTENSION: String = "cj"
+private let CHIR_EXTENSION: String = "chir"
+private let ARCHIVE_EXTENSION: String = "a"
+private let OBJECT_EXTENSION: String = "o"
+private let COFF_OBJECT_EXTENSION: String = "obj"
 
 private func emitOptionDiag(kind: BasicDiagKindRefactor): Unit {
     let diag = BasicDiagnosticEngine()
@@ -436,11 +444,11 @@ public open class GlobalOptions <: Option {
         if (skipParsing) { return true }
         for (opt in delayed) {
             if (!experimentalMode && !opt.info.BelongsGroup(Group.STABLE)) {
-                Errorln(opt.str + " is an experimental feature. \"--experimental\" option is required.")
+                Errorln(opt.str + " is an experimental feature. \"--experimental\" option is required to enable experimental features.")
                 return false
             }
             if (!experimentalMode && OptionValueRequiresExperimental(opt)) {
-                Errorln(opt.str + " is an experimental feature. \"--experimental\" option is required.")
+                Errorln(opt.str + " is an experimental feature. \"--experimental\" option is required to enable experimental features.")
                 return false
             }
             DeprecatedOptionCheck(opt)
@@ -470,7 +478,7 @@ public open class GlobalOptions <: Option {
     private func DeprecatedOptionCheck(arg: OptionArgInstance): Unit {
         let id = arg.info.GetID()
         if (id == ID.STATIC_LIBS || id == ID.DY_LIBS || id == ID.COMPILE_AS_EXE) {
-            Warningln("option '" + arg.str + "' is deprecated and will be removed in the future")
+            emitOptionDiag(BasicDiagKindRefactor.driver_deprecated_option, arg.str, "")
         }
     }
 
@@ -823,52 +831,123 @@ public open class GlobalOptions <: Option {
         }
     }
 
+    private func VerifyFileExtension(file: String, fullPath: String, extension: String): Bool {
+        if (GetFileExtension(fullPath) != extension) {
+            emitOptionDiag(
+                BasicDiagKindRefactor.driver_warning_unexpected_file_extension,
+                extension,
+                file,
+                fullPath,
+                ARGUMENT_IGNORED_SUFFIX
+            )
+            return false
+        }
+        return true
+    }
+
+    private func HandleArchiveExtension(value: String): Bool {
+        let maybePath = ValidateInputFilePath(value, BasicDiagKindRefactor.driver_invalid_binary_file)
+        if (!maybePath.hasValue) { return false }
+        let fullPath = maybePath.value
+        let extension = GetFileExtension(value)
+        if (!VerifyFileExtension(value, fullPath, extension)) { return true }
+        inputObjs.add(fullPath)
+        ReplaceInputFileName(value, fullPath)
+        return true
+    }
+
+    private func HandleCJOExtension(value: String): Bool {
+        let maybePath = ValidateInputFilePath(value, BasicDiagKindRefactor.driver_invalid_binary_file)
+        if (!maybePath.hasValue) { return false }
+        if (!VerifyFileExtension(value, maybePath.value, CJO_EXTENSION)) { return true }
+        if (!inputCjoFile.isEmpty()) {
+            emitOptionDiag(BasicDiagKindRefactor.driver_require_one_package_directory_scan_dependency, "--scan-dependency")
+            return false
+        }
+        inputCjoFile = value
+        return true
+    }
+
+    private func HandleCJExtension(value: String): Bool {
+        if (compilePackage) {
+            emitOptionDiag(BasicDiagKindRefactor.driver_unsupport_compile_package_with_source_file, value)
+            return false
+        }
+        let maybePath = ValidateInputFilePath(value, BasicDiagKindRefactor.driver_invalid_source_file)
+        if (!maybePath.hasValue) { return false }
+        if (!VerifyFileExtension(value, maybePath.value, CJ_EXTENSION)) { return true }
+        srcFiles.add(value)
+        return true
+    }
+
+    private func HandleCJDExtension(value: String): Bool {
+        if (compilePackage) {
+            emitOptionDiag(BasicDiagKindRefactor.driver_unsupport_compile_package_with_source_file, value)
+            return false
+        }
+        if (!ValidateInputFilePath(value, BasicDiagKindRefactor.driver_invalid_source_file).hasValue) {
+            return false
+        }
+        srcFiles.add(value)
+        return true
+    }
+
+    private func HandleBCExtension(value: String): Bool {
+        let maybePath = ValidateInputFilePath(value, BasicDiagKindRefactor.driver_invalid_source_file)
+        if (!maybePath.hasValue) { return false }
+        let fullPath = maybePath.value
+        if (!VerifyFileExtension(value, fullPath, BC_EXTENSION)) { return true }
+        bcInputFiles.add(fullPath)
+        ReplaceInputFileName(value, fullPath)
+        return true
+    }
+
+    private func HandleNoExtension(value: String): Bool {
+        if (IsPathAboveLengthLimit(value)) {
+            emitOptionDiag(
+                BasicDiagKindRefactor.driver_path_exceeds_length_limit,
+                value,
+                FILE_PATH_MAX_LENGTH.toString()
+            )
+            return false
+        }
+        if (!FileExist(value)) {
+            emitOptionDiag(BasicDiagKindRefactor.driver_invalid_file_or_directory, value)
+            return false
+        }
+        if (IsDir(value)) {
+            if (!compilePackage) {
+                emitOptionDiag(BasicDiagKindRefactor.driver_unsupport_compile_source_file_with_path, value)
+            }
+            if (!ValidateDirectoryPath(value, mode: UtilsFileMode.FM_EXIST).hasValue) { return false }
+            packagePaths.add(value)
+        } else {
+            emitOptionDiag(BasicDiagKindRefactor.driver_warning_argument_unused, value)
+        }
+        return true
+    }
+
     private func ProcessInputs(inputs: Array<String>): Bool {
         for (input in inputs) {
             let ext = GetFileExtension(input)
-            if (ext == "cj" && !compileCjd) {
-                if (compilePackage) { return false }
-                if (!ValidateInputFilePath(input, BasicDiagKindRefactor.driver_invalid_source_file).hasValue) {
-                    return false
-                }
-                srcFiles.add(input)
-            } else if (ext == "o" || ext == "a" || ext == "obj") {
-                let objPath = ValidateInputFilePath(input, BasicDiagKindRefactor.driver_invalid_binary_file)
-                if (!objPath.hasValue) { return false }
-                inputObjs.add(objPath.value)
-                ReplaceInputFileName(input, objPath.value)
-            } else if (ext == "bc") {
-                let bcPath = ValidateInputFilePath(input, BasicDiagKindRefactor.driver_invalid_source_file)
-                if (!bcPath.hasValue) { return false }
-                bcInputFiles.add(bcPath.value)
-                ReplaceInputFileName(input, bcPath.value)
-            } else if (ext == "cjo") {
-                if (!inputCjoFile.isEmpty()) { return false }
-                let cjoPath = ValidateInputFilePath(input, BasicDiagKindRefactor.driver_invalid_binary_file)
-                if (!cjoPath.hasValue) { return false }
-                inputCjoFile = input
+            if (ext == OBJECT_EXTENSION || ext == ARCHIVE_EXTENSION || ext == COFF_OBJECT_EXTENSION) {
+                if (!HandleArchiveExtension(input)) { return false }
+            } else if (ext == CJ_EXTENSION && !compileCjd) {
+                if (!HandleCJExtension(input)) { return false }
+            } else if (ext == BC_EXTENSION) {
+                if (!HandleBCExtension(input)) { return false }
+            } else if (ext == CJO_EXTENSION) {
+                if (!HandleCJOExtension(input)) { return false }
             } else if (HasCJDExtension(input) && compileCjd) {
-                if (compilePackage ||
-                    !ValidateInputFilePath(input, BasicDiagKindRefactor.driver_invalid_source_file).hasValue) {
-                    return false
-                }
-                srcFiles.add(input)
-            } else {
-                if (IsPathAboveLengthLimit(input)) { return false }
-                if (!FileExist(input)) { return false }
-                if (IsDir(input)) {
-                    if (!compilePackage) {
-                        Warningln("source path is only supported with '-p' or '--package': " + input)
-                    }
-                    let packagePath = CheckDirectoryPath(input)
-                    if (!packagePath.hasValue) { return false }
-                    packagePaths.add(input)
-                } else {
-                    Warningln("argument unused: " + input)
-                }
+                if (!HandleCJDExtension(input)) { return false }
+            } else if (!HandleNoExtension(input)) {
+                return false
             }
         }
-        if (compilePackage && packagePaths.isEmpty()) { return false }
+        if (compilePackage && packagePaths.isEmpty()) {
+            emitOptionDiag(BasicDiagKindRefactor.driver_require_package_directory)
+            return false
+        }
         if (compilePackage && packagePaths.size > 1 && !ValidateUniquePackagePaths()) { return false }
         return true
     }
@@ -890,9 +969,20 @@ public open class GlobalOptions <: Option {
     private func CheckOutputPathLength(): Bool {
         let defaultOutputNameLen: Int64 = 4
         let fullLength = if (IsDir(output)) { output.size + defaultOutputNameLen } else { output.size }
-        if (fullLength > FILE_PATH_MAX_LENGTH) { return false }
+        if (fullLength > FILE_PATH_MAX_LENGTH) {
+            emitOptionDiag(
+                BasicDiagKindRefactor.driver_path_exceeds_length_limit,
+                "the output file",
+                FILE_PATH_MAX_LENGTH.toString()
+            )
+            return false
+        }
         if (fullLength > FILE_PATH_MAX_LENGTH - 15) {
-            Warningln("the output file path is close to the length limit " + FILE_PATH_MAX_LENGTH.toString())
+            emitOptionDiag(
+                BasicDiagKindRefactor.driver_warning_path_close_to_length_limit,
+                "the output file",
+                FILE_PATH_MAX_LENGTH.toString()
+            )
         }
         return true
     }
@@ -1109,10 +1199,10 @@ public open class GlobalOptions <: Option {
         if (!ReprocessObfuseOption()) { return false }
         var cjmpOk = true
         for (commonCjo in commonPartCjos) {
-            if (GetFileExtension(commonCjo) != "cjo") {
+            if (GetFileExtension(commonCjo) != CJO_EXTENSION) {
                 emitOptionDiag(
                     BasicDiagKindRefactor.driver_warning_unexpected_file_extension,
-                    "cjo",
+                    CJO_EXTENSION,
                     commonCjo,
                     commonCjo,
                     ARGUMENT_IGNORED_SUFFIX
@@ -1121,10 +1211,10 @@ public open class GlobalOptions <: Option {
             }
         }
         for (commonChir in commonPartChirs) {
-            if (GetFileExtension(commonChir) != "chir") {
+            if (GetFileExtension(commonChir) != CHIR_EXTENSION) {
                 emitOptionDiag(
                     BasicDiagKindRefactor.driver_warning_unexpected_file_extension,
-                    "chir",
+                    CHIR_EXTENSION,
                     commonChir,
                     commonChir,
                     ARGUMENT_IGNORED_SUFFIX
@@ -1148,6 +1238,7 @@ public open class GlobalOptions <: Option {
         } else if (!aggressiveParallelCompile.hasValue && (optimizationLevel == OptimizationLevel.O0 ||
             aggressiveParallelCompileWithoutArg)) {
             aggressiveParallelCompile = jobs
+            UtilsSemaphore.Get().SetCount(Int64(jobs.value + 2u64))
         } else if (!aggressiveParallelCompile.hasValue) {
             aggressiveParallelCompile = MaybeUInt64(1u64)
         }

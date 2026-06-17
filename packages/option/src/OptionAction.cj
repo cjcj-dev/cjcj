@@ -6,6 +6,8 @@ import cangjie_compiler::basic.DiagKindRefactor as BasicDiagKindRefactor
 import cangjie_compiler::basic.WarnGroup as BasicWarnGroup
 import cangjie_compiler::basic.WarnGroupIndex as BasicWarnGroupIndex
 import cangjie_compiler::utils.FileUtil
+import cangjie_compiler::utils.NFC as UtilsNFC
+import cangjie_compiler::utils.Semaphore as UtilsSemaphore
 import cangjie_compiler::utils.StringToOverflowStrategy
 import cangjie_compiler::utils.ValidOverflowStrategy
 import std.collection.*
@@ -84,10 +86,7 @@ public func ParseAction(opts: GlobalOptions, arg: OptionArgInstance): ActionResu
     }
     if (id == ID.OUTPUT_JAVA_GEN_DIR) { opts.outputJavaGenDir = MaybeString(arg.value); return handled() }
     if (id == ID.OUTPUT_OBJC_GEN_DIR) { opts.outputObjCGenDir = arg.value; return handled() }
-    if (id == ID.MODULE_NAME) {
-        Warningln("option '" + arg.name + "' is deprecated and will be removed in the future")
-        return handled()
-    }
+    if (id == ID.MODULE_NAME) { emitDiag(BasicDiagKindRefactor.driver_useless_option, arg.name); return handled() }
     if (id == ID.PACKAGE_COMPILE) { opts.compilePackage = true; return handled() }
     if (id == ID.IMPORT_PATH) {
         let path = opts.CheckDirectoryPath(arg.value)
@@ -98,18 +97,29 @@ public func ParseAction(opts: GlobalOptions, arg: OptionArgInstance): ActionResu
         let pluginPath = opts.CheckInputFilePath(arg.value)
         if (!pluginPath.hasValue) { return handled(success: false) }
         let suffix = GetSharedLibraryExtension(opts.host.os)
-        if ("." + GetFileExtension(pluginPath.value) != suffix) { return handled(success: false) }
+        if ("." + GetFileExtension(pluginPath.value) != suffix) {
+            Errorln("'" + arg.name + "' requires a dynamic library path with '" + suffix + "' suffix.")
+            return handled(success: false)
+        }
         opts.pluginPaths.add(pluginPath.value)
         return handled()
     }
     if (id == ID.COMMON_PART_CJO) {
-        let commonCjo = opts.CheckInputFilePath(arg.value)
-        if (commonCjo.hasValue) { opts.commonPartCjos.add(commonCjo.value) }
+        let commonCjo = GlobalOptions.ValidateInputFilePath(arg.value, BasicDiagKindRefactor.driver_invalid_binary_file)
+        if (commonCjo.hasValue) {
+            opts.commonPartCjos.add(commonCjo.value)
+        } else {
+            emitDiag(BasicDiagKindRefactor.no_such_file_or_directory, arg.value)
+        }
         return handled()
     }
     if (id == ID.COMMON_PART_CHIR) {
-        let commonChir = opts.CheckInputFilePath(arg.value)
-        if (commonChir.hasValue) { opts.commonPartChirs.add(commonChir.value) }
+        let commonChir = GlobalOptions.ValidateInputFilePath(arg.value, BasicDiagKindRefactor.no_such_file_or_directory)
+        if (commonChir.hasValue) {
+            opts.commonPartChirs.add(commonChir.value)
+        } else {
+            emitDiag(BasicDiagKindRefactor.no_such_file_or_directory, arg.value)
+        }
         return handled()
     }
     if (id == ID.INCRE_COMPILE) { opts.enIncrementalCompilation = true; return handled() }
@@ -150,7 +160,7 @@ public func ParseAction(opts: GlobalOptions, arg: OptionArgInstance): ActionResu
     if (id == ID.OPTIMIZATION_CUSTOM) { return parseCustomOptimization(opts, arg.value) }
     if (id == ID.WARN_OFF) { return handled(success: parseWarn(arg.value, true)) }
     if (id == ID.WARN_ON) { return handled(success: parseWarn(arg.value, false)) }
-    if (id == ID.ERROR_COUNT_LIMIT) { return parseErrorLimit(opts, arg.value) }
+    if (id == ID.ERROR_COUNT_LIMIT) { return parseErrorLimit(opts, arg) }
     if (id == ID.DIAG_FORMAT) { return parseDiagFormat(opts, arg.value) }
     if (id == ID.CONDITIONAL_COMPILATION_CONFIG) { return parsePassedWhen(opts, arg.value) }
     if (id == ID.COMPILE_CJD) { opts.compileCjd = true; return handled() }
@@ -412,14 +422,14 @@ private func parseWarn(value: String, suppress: Bool): Bool {
     return true
 }
 
-private func parseErrorLimit(opts: GlobalOptions, value: String): ActionResult {
-    if (value == "all") {
+private func parseErrorLimit(opts: GlobalOptions, arg: OptionArgInstance): ActionResult {
+    if (arg.value == "all") {
         opts.errorCountLimit = MaybeUInt64()
         return handled()
     }
-    let parsed = TryParseUInt64(value)
+    let parsed = TryParseUInt64(arg.value)
     if (!parsed.hasValue) {
-        Errorln("The value of --error-count-limit is invalid.")
+        Errorln("The value of " + arg.name + " is invalid.")
         return handled(success: false)
     }
     opts.errorCountLimit = parsed
@@ -496,6 +506,7 @@ private func parseCfgKey(rawKey: String, map: HashMap<String, String>): MaybeStr
     if (key.size > 2 && key[0] == b'`') {
         key = key[1..key.size - 1]
     }
+    key = UtilsNFC(key)
     if (isBuiltinCondition(key)) {
         emitDiag(BasicDiagKindRefactor.dirver_cfg_same_with_builtin)
         return MaybeString()
@@ -703,6 +714,7 @@ private func parseJobs(opts: GlobalOptions, arg: OptionArgInstance, aggressive: 
     if (!parsed.hasValue) { return handled(success: false) }
     if (aggressive) {
         opts.aggressiveParallelCompile = parsed
+        UtilsSemaphore.Get().SetCount(Int64(parsed.value + 2u64))
     } else {
         opts.jobs = parsed
     }
