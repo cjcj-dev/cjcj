@@ -6,8 +6,12 @@ private func EncodedField(value: String): String {
     return value.size.toString() + ":" + value + ";"
 }
 
+private func EncodedEnumField(value: Int64): String {
+    return value.toString() + ";"
+}
+
 func MakeJudgeConditionCacheKey(condition: String, op: TokenKind, right: String): String {
-    return EncodedField(condition) + TokenKindIndex(op).toString() + ";" + EncodedField(right)
+    return EncodedField(condition) + EncodedEnumField(TokenKindIndex(op)) + EncodedField(right)
 }
 
 private func LitConstKindCacheIndex(kind: LitConstKind): Int64 {
@@ -33,14 +37,14 @@ func MakeConditionExprCacheKey(condition: Expr): Option<String> {
 }
 
 private func AppendConditionExprCacheKey(condition: Expr): Option<String> {
-    var key = ASTKindIndex(condition.astKind).toString() + ";"
+    var key = EncodedEnumField(ASTKindIndex(condition.astKind))
     if (condition.astKind == ASTKind.BINARY_EXPR) {
         if (let Some(be) <- (condition as BinaryExpr)) {
             if (let Some(left) <- be.leftExpr) {
                 if (let Some(right) <- be.rightExpr) {
                     if (let Some(leftKey) <- AppendConditionExprCacheKey(left)) {
                         if (let Some(rightKey) <- AppendConditionExprCacheKey(right)) {
-                            key += TokenKindIndex(be.op).toString() + ";" + leftKey + rightKey
+                            key += EncodedEnumField(TokenKindIndex(be.op)) + leftKey + rightKey
                             return key
                         }
                     }
@@ -53,7 +57,7 @@ private func AppendConditionExprCacheKey(condition: Expr): Option<String> {
         if (let Some(ue) <- (condition as UnaryExpr)) {
             if (let Some(expr) <- ue.expr) {
                 if (let Some(exprKey) <- AppendConditionExprCacheKey(expr)) {
-                    key += TokenKindIndex(ue.op).toString() + ";" + exprKey
+                    key += EncodedEnumField(TokenKindIndex(ue.op)) + exprKey
                     return key
                 }
             }
@@ -81,7 +85,7 @@ private func AppendConditionExprCacheKey(condition: Expr): Option<String> {
     if (condition.astKind == ASTKind.LIT_CONST_EXPR) {
         if (let Some(lit) <- (condition as LitConstExpr)) {
             let hasSIExpr = if (let Some(_) <- lit.siExpr) { "1" } else { "0" }
-            key += LitConstKindCacheIndex(lit.kind).toString() + ";" + hasSIExpr + ";" +
+            key += EncodedEnumField(LitConstKindCacheIndex(lit.kind)) + hasSIExpr + ";" +
                 EncodedField(lit.stringValue)
             return key
         }

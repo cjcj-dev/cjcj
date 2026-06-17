@@ -1,6 +1,6 @@
 # ConditionalCompilation Port Status
 
-Date: 2026-06-17
+Date: 2026-06-18
 
 ## Summary
 
@@ -26,6 +26,14 @@ encoding them as scattered branch logic.
   Undefined non-builtin conditions now match the reference pass: they are
   treated as absent and evaluate false without emitting
   `conditional_compilation_not_support_this_condition`.
+- Operator-class detection now enumerates the exact C++-accepted conditional
+  operators (`&&`/`||`, `==`/`!=`, and `<`/`>`/`<=`/`>=`) instead of relying on
+  lexer enum ordinal ranges. This preserves the reference behavior while
+  avoiding accidental acceptance if the token table is reordered or extended.
+- Judge-condition and expression cache keys now share the same explicit enum
+  field helper, matching the reference helper split between enum fields and
+  string fields while retaining length-prefixed string fields to avoid
+  collisions in Cangjie strings.
 - Default diagnostics now use Basic's `DEFAULT_POSITION`, and LSP cfg.toml
   loading now mirrors the C++ constructor path: file read failures, malformed
   TOML entries, invalid identifiers, built-in keys, and duplicate keys emit the
@@ -38,9 +46,14 @@ encoding them as scattered branch logic.
   `backend`, `arch`, `debug`, `cjc_version`, `test`); `env` remains a target
   condition for expression evaluation but is not rejected by cfg.toml parsing,
   matching the C++ split.
+- CJC version parsing now uses Basic's real `SplitString` helper, matching the
+  C++ pass's shared `Utils::SplitString` dependency and removing the last
+  module-local dot-splitting helper.
 - Malformed `@When` annotations without a condition emit the reference
   diagnostic and remove only the annotation; the annotated node is left in place
-  as in `ConditionalCompilationImpl::EvalNodeCondition`.
+  as in `ConditionalCompilationImpl::EvalNodeCondition`. Annotation removal now
+  goes through Utils' real `EraseIf`, matching the C++ pass's `Utils::EraseIf`
+  path instead of a package-local removal loop.
 - Removed the unused `DefaultTargetTriple` shim from this module; target triples
   are owned by the real Option package just as in the C++ compiler.
 - Removed the package-local `ConditionalCompilationCompilerInstance`
