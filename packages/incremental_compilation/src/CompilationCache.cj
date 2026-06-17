@@ -5,6 +5,7 @@ import cangjie_compiler::ast.ASTKind as RealASTKind
 import cangjie_compiler::ast.ASTKindIndex as RealASTKindIndex
 import cangjie_compiler::ast.Attribute as RealAttribute
 import cangjie_compiler::ast.AttributeIndex as RealAttributeIndex
+import cangjie_compiler::basic.Position as BasicPosition
 
 public type RawMangledName = String
 public type RawMangled2DeclMap = HashMap<String, IncrDecl>
@@ -15,6 +16,7 @@ public type SrcImportedDepMap = HashMap<IncrDecl, HashSet<IncrDecl>>
 public type FileMap = HashMap<String, ArrayList<IncrDecl>>
 public type CachedFileMap = HashMap<String, ArrayList<String>>
 public type ASTCache = HashMap<String, TopLevelDeclCache>
+public type IncrPosition = BasicPosition
 
 public let CACHED_AST_EXTENSION: String = ".cachedast"
 public let SERIALIZED_FILE_EXTENSION: String = ".cjo"
@@ -233,26 +235,6 @@ extend IncrAttribute <: Equatable<IncrAttribute> {
 extend IncrAttribute <: Hashable {
     public func hashCode(): Int64 {
         return IncrAttributeIndex(this)
-    }
-}
-
-public class IncrPosition {
-    public var line: Int64 = 0
-    public var column: Int64 = 0
-
-    public init() {}
-
-    public init(line: Int64, column: Int64) {
-        this.line = line
-        this.column = column
-    }
-
-    public func IsZero(): Bool {
-        return line == 0 && column == 0
-    }
-
-    public func ToString(): String {
-        return "${line},${column}"
     }
 }
 
