@@ -64,6 +64,15 @@ the C++ compiler. `--int-overflow` parsing now accepts the shared utility
 strategy set, and `CompilerInvocation.GetRuntimeLibPath` chooses the runtime
 library suffix by host OS as in the C++ reference.
 
+This continuation also de-isolated Frontend's file/path helpers to
+`utils.FileUtil`. Source reading and writing now use the shared utility behavior
+for absolute-path validation, BOM stripping, file-size/path checks, and
+directory creation; module CJD discovery and import dependency CJD hints now use
+`FileUtil.FindSerializationFile`; package-name derivation from module-relative
+paths now uses `FileUtil.GetRelativePath` and `FileUtil.GetPkgNameFromRelativePath`.
+AST dump directory creation now matches the C++ Frontend's
+`CreateDirs(dumpDir + DIR_SEPARATOR)` call shape.
+
 ## Important Blocker
 
 `packages/frontend/cjpm.toml` now imports the real `basic`, `lex`, and `utils`
@@ -71,8 +80,8 @@ packages. A faithful production Frontend port must still import and wire the rea
 `ast`, `parse`, `conditional_compilation`, `modules`, `macro`, `sema`, `mangle`,
 `chir`, and incremental-compilation packages. This pass keeps local compatibility
 models for those still-unwired layers so the workspace can compile while Basic
-source/diagnostic primitives, Lex tokenization, and shared utility constants are
-no longer duplicated.
+source/diagnostic primitives, Lex tokenization, and shared utility file/path,
+serialization, cache, and option primitives are no longer duplicated.
 
 Remaining Frontend self-host markers: 0.
 

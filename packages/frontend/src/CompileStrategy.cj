@@ -1,5 +1,6 @@
 package cangjie_compiler::frontend
 
+import cangjie_compiler::utils.FileUtil
 import std.collection.*
 import std.sort.*
 
@@ -176,7 +177,7 @@ private func ReadCjdSource(pkgName: String, configuredPath: String, searchPaths:
     if (configuredRead[0]) {
         return (true, configuredPath, configuredRead[1])
     }
-    let discoveredPath = FindSerializationFile(pkgName, CJ_D_FILE_EXTENSION, searchPaths)
+    let discoveredPath = FileUtil.FindSerializationFile(pkgName, CJ_D_FILE_EXTENSION, searchPaths.toArray())
     if (discoveredPath.isEmpty()) {
         return (false, "", "")
     }
@@ -186,64 +187,6 @@ private func ReadCjdSource(pkgName: String, configuredPath: String, searchPaths:
     }
     let sourcePath = if (configuredPath.isEmpty()) { discoveredPath } else { configuredPath }
     return (true, sourcePath, discoveredRead[1])
-}
-
-private func FindSerializationFile(fullPackageName: String, suffix: String, searchPaths: ArrayList<String>): String {
-    let names = SplitQualifiedNameForSerialization(fullPackageName)
-    let packageFileName = ToCjoFileNameForSerialization(fullPackageName)
-    if (!names.isEmpty()) {
-        let nestedName = ToCjoFileNameForSerialization(names[0]) + "/" + packageFileName + suffix
-        let nestedPath = FindFileByNameInSearchPaths(nestedName, searchPaths)
-        if (!nestedPath.isEmpty()) {
-            return nestedPath
-        }
-    }
-    return FindFileByNameInSearchPaths(packageFileName + suffix, searchPaths)
-}
-
-private func FindFileByNameInSearchPaths(fileName: String, searchPaths: ArrayList<String>): String {
-    if (fileName.isEmpty()) {
-        return ""
-    }
-    for (path in searchPaths) {
-        if (path.isEmpty()) {
-            continue
-        }
-        let candidate = JoinPath(path, fileName)
-        if (FileExist(candidate)) {
-            return candidate
-        }
-    }
-    return ""
-}
-
-private func SplitQualifiedNameForSerialization(qualifiedName: String): ArrayList<String> {
-    let names = ArrayList<String>()
-    var idx: Int64 = 0
-    if (let Some(dcPos) <- qualifiedName.indexOf("::")) {
-        idx = dcPos + 2
-    }
-    while (idx < qualifiedName.size) {
-        if (qualifiedName[idx] == b'.') {
-            idx++
-        } else if (qualifiedName[idx] == b'`') {
-            let nextTick = qualifiedName.indexOf("`", idx + 1) ?? qualifiedName.size
-            names.add(qualifiedName[idx + 1..nextTick])
-            idx = if (nextTick == qualifiedName.size) { nextTick } else { nextTick + 1 }
-        } else {
-            let nextDot = qualifiedName.indexOf(".", idx + 1) ?? qualifiedName.size
-            names.add(qualifiedName[idx..nextDot])
-            idx = nextDot
-        }
-    }
-    return names
-}
-
-private func ToCjoFileNameForSerialization(fullPackageName: String): String {
-    if (let Some(dcPos) <- fullPackageName.indexOf("::")) {
-        return fullPackageName[dcPos + 2..] + "@" + fullPackageName[0..dcPos]
-    }
-    return fullPackageName
 }
 
 public class FullCompileStrategy <: CompileStrategy {
@@ -300,7 +243,7 @@ private class FullCompileStrategyImpl {
             var currentPkg = DEFAULT_PACKAGE_NAME
             if (!moduleSrcPath.isEmpty()) {
                 let basePath = if (IsDir(moduleSrcPath)) { JoinPath(moduleSrcPath, "") } else { moduleSrcPath }
-                currentPkg = GetPkgNameFromRelativePath(GetRelativePath(basePath, srcDir))
+                currentPkg = FileUtil.GetPkgNameFromRelativePath(FileUtil.GetRelativePath(basePath, srcDir) ?? "")
             }
             let parseTest = s.ci.invocation.globalOptions.parseTest
             let compileTestsOnly = s.ci.invocation.globalOptions.compileTestsOnly
@@ -1233,27 +1176,6 @@ private func splitByDot(value: String): ArrayList<String> {
         out.add(value[start..])
     }
     return out
-}
-
-private func GetRelativePath(base: String, path: String): String {
-    let normalizedBase = NormalizePath(base)
-    let normalizedPath = NormalizePath(path)
-    if (normalizedPath.startsWith(normalizedBase)) {
-        var rest = normalizedPath[normalizedBase.size..]
-        if (!rest.isEmpty() && rest[0] == b'/') {
-            rest = rest[1..]
-        }
-        return rest
-    }
-    return normalizedPath
-}
-
-private func GetPkgNameFromRelativePath(path: String): String {
-    let normalized = NormalizePath(path)
-    if (normalized.isEmpty() || normalized == ".") {
-        return DEFAULT_PACKAGE_NAME
-    }
-    return normalized.replace("/", ".")
 }
 
 private func expandMacrosInPackage(pkg: Package): Unit {

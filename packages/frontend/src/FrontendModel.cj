@@ -7,6 +7,7 @@ public import cangjie_compiler::basic.{
 import cangjie_compiler::basic.Diagnostic as BasicDiagnostic
 import cangjie_compiler::basic.DiagnosticEngine as BasicDiagnosticEngine
 import cangjie_compiler::basic.Range as BasicRange
+import cangjie_compiler::utils.FileUtil
 import std.collection.*
 import std.sort.*
 
@@ -1100,7 +1101,7 @@ public class ImportManager {
                 }
                 filteredDeps.add(dep)
                 if (!sourcePackages.contains(dep) && !depPkgCjdPaths.contains(dep)) {
-                    let cjdPath = FindSerializationFileForImport(dep, ".cj.d", searchPath)
+                    let cjdPath = FileUtil.FindSerializationFile(dep, ".cj.d", searchPath.toArray())
                     if (!cjdPath.isEmpty()) {
                         depPkgCjdPaths.add(dep, cjdPath)
                     }
@@ -1197,64 +1198,6 @@ private func JoinStringList(values: ArrayList<String>, delimiter: String): Strin
         idx++
     }
     return builder.toString()
-}
-
-private func FindSerializationFileForImport(fullPackageName: String, suffix: String, searchPaths: ArrayList<String>): String {
-    let names = SplitQualifiedNameForImport(fullPackageName)
-    let packageFileName = ToCjoFileNameForImport(fullPackageName)
-    if (!names.isEmpty()) {
-        let nestedName = ToCjoFileNameForImport(names[0]) + "/" + packageFileName + suffix
-        let nestedPath = FindFileByNameForImport(nestedName, searchPaths)
-        if (!nestedPath.isEmpty()) {
-            return nestedPath
-        }
-    }
-    return FindFileByNameForImport(packageFileName + suffix, searchPaths)
-}
-
-private func FindFileByNameForImport(fileName: String, searchPaths: ArrayList<String>): String {
-    if (fileName.isEmpty()) {
-        return ""
-    }
-    for (path in searchPaths) {
-        if (path.isEmpty()) {
-            continue
-        }
-        let candidate = JoinPath(path, fileName)
-        if (FileExist(candidate)) {
-            return candidate
-        }
-    }
-    return ""
-}
-
-private func SplitQualifiedNameForImport(qualifiedName: String): ArrayList<String> {
-    let names = ArrayList<String>()
-    var idx: Int64 = 0
-    if (let Some(dcPos) <- qualifiedName.indexOf("::")) {
-        idx = dcPos + 2
-    }
-    while (idx < qualifiedName.size) {
-        if (qualifiedName[idx] == b'.') {
-            idx++
-        } else if (qualifiedName[idx] == b'`') {
-            let nextTick = qualifiedName.indexOf("`", idx + 1) ?? qualifiedName.size
-            names.add(qualifiedName[idx + 1..nextTick])
-            idx = if (nextTick == qualifiedName.size) { nextTick } else { nextTick + 1 }
-        } else {
-            let nextDot = qualifiedName.indexOf(".", idx + 1) ?? qualifiedName.size
-            names.add(qualifiedName[idx..nextDot])
-            idx = nextDot
-        }
-    }
-    return names
-}
-
-private func ToCjoFileNameForImport(fullPackageName: String): String {
-    if (let Some(dcPos) <- fullPackageName.indexOf("::")) {
-        return fullPackageName[dcPos + 2..] + "@" + fullPackageName[0..dcPos]
-    }
-    return fullPackageName
 }
 
 public class PackageManager {

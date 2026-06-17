@@ -1101,7 +1101,7 @@ private func DumpAST(srcPkgs: ArrayList<Package>, outputOfProduct: String, prefi
         if (FileExist(astDumpDir)) {
             let _ = RemoveDirectoryRecursively(astDumpDir)
         }
-        if (!CreateDirs(astDumpDir)) {
+        if (!CreateDirs(astDumpDir + DIR_SEPARATOR)) {
             return
         }
         astDumpDirInitialized = true

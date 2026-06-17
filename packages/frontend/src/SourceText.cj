@@ -6,14 +6,9 @@ import cangjie_compiler::lex.Token as CangjieToken
 import cangjie_compiler::lex.TokenKind as CangjieTokenKind
 import cangjie_compiler::lex.TokenKindLiteral
 import cangjie_compiler::lex.TokenKindValue
+import cangjie_compiler::utils.FileUtil
+import cangjie_compiler::utils.FailureReason
 import std.collection.*
-import std.sort.*
-import std.fs.File as FSFile
-import std.fs.FileInfo
-import std.fs.Directory as FSDirectory
-import std.fs.canonicalize
-import std.fs.exists
-import std.fs.remove
 
 public func StableSourcePathHash(path: String): UInt64 {
     var hash = 0u64
@@ -91,166 +86,70 @@ private func LexTokenCategory(kind: CangjieTokenKind, value: String): FrontendTo
 }
 
 public func ReadFileContent(path: String): (Bool, String, String) {
-    if (!exists(path)) {
-        return (false, "", "file not exist")
+    let failedReason = FailureReason()
+    let content = FileUtil.ReadFileContent(path, failedReason)
+    if (let Some(text) <- content) {
+        return (true, text, "")
     }
-    let absPath = GetAbsPath(path)
-    if (let None <- absPath) {
-        return (false, "", "file path illegal")
-    }
-    try {
-        var bytes = FSFile.readFrom(absPath.getOrThrow())
-        if (bytes.size >= 3 && bytes[0] == 0xefu8 && bytes[1] == 0xbbu8 && bytes[2] == 0xbfu8) {
-            bytes = bytes[3..]
-        }
-        return (true, String.fromUtf8(bytes), "")
-    } catch (e: Exception) {
-        return (false, "", "open file failed")
-    }
+    return (false, "", failedReason.value)
 }
 
 public func WriteFileContent(path: String, content: String): Bool {
-    try {
-        FSFile.writeTo(path, content.toArray())
-        return true
-    } catch (e: Exception) {
-        return false
-    }
+    return FileUtil.WriteToFile(path, content)
 }
 
 public func FileExist(path: String): Bool {
-    return exists(path)
+    return FileUtil.FileExist(path)
 }
 
 public func IsDir(path: String): Bool {
-    try {
-        return FileInfo(path).isDirectory()
-    } catch (e: Exception) {
-        return false
-    }
+    return FileUtil.IsDir(path)
 }
 
 public func RemoveDirectoryRecursively(path: String): Bool {
-    try {
-        remove(path, recursive: true)
-        return true
-    } catch (e: Exception) {
-        return false
-    }
+    return FileUtil.RemoveDirectoryRecursively(path)
 }
 
 public func CreateDirs(path: String): Bool {
-    if (path.isEmpty()) {
-        return false
-    }
-    try {
-        FSDirectory.create(path, recursive: true)
-        return true
-    } catch (e: Exception) {
-        return IsDir(path)
-    }
+    return FileUtil.CreateDirs(path) == 0
 }
 
 public func GetAllFilesUnderCurrentPath(path: String, extension: String, shouldSkipTestFiles!: Bool = true,
     shouldSkipRegularFiles!: Bool = false): ArrayList<String> {
     let out = ArrayList<String>()
-    try {
-        for (info in FSDirectory.readFrom(path)) {
-            let name = info.name
-            if (!info.isRegular() || name.isEmpty() || name[0] == b'.' || GetFileExtension(name) != extension) {
-                continue
-            }
-            let isTest = name.endsWith("_test.cj")
-            if (shouldSkipTestFiles && isTest) {
-                continue
-            }
-            if (shouldSkipRegularFiles && !isTest) {
-                continue
-            }
-            out.add(name)
-        }
-    } catch (e: Exception) {
-        ()
+    for (fileName in FileUtil.GetAllFilesUnderCurrentPath(path, extension, shouldSkipTestFiles: shouldSkipTestFiles,
+        shouldSkipRegularFiles: shouldSkipRegularFiles)) {
+        out.add(fileName)
     }
-    sort(out, by: { left: String, right: String =>
-        if (left < right) {
-            Ordering.LT
-        } else if (left > right) {
-            Ordering.GT
-        } else {
-            Ordering.EQ
-        }
-    })
     return out
 }
 
 public func GetAbsPath(path: String): Option<String> {
-    try {
-        return Some(canonicalize(path).toString())
-    } catch (e: Exception) {
-        return None
-    }
+    return FileUtil.GetAbsPath(path)
 }
 
 public func NormalizePath(input: String): String {
-    let builder = StringBuilder()
-    var previousIsSlash = false
-    for (byte in input.toArray()) {
-        let slash = byte == b'/' || byte == b'\\'
-        if (slash) {
-            if (!previousIsSlash) {
-                builder.append("/")
-            }
-            previousIsSlash = true
-        } else {
-            builder.append(String.fromUtf8([byte]))
-            previousIsSlash = false
-        }
-    }
-    return builder.toString()
+    return FileUtil.Normalize(input, toUnix: true)
 }
 
 public func JoinPath(base: String, append: String): String {
-    if (base.isEmpty()) {
-        return NormalizePath(append)
-    }
-    if (base[base.size - 1] == b'/') {
-        return NormalizePath(base + append)
-    }
-    return NormalizePath(base + "/" + append)
+    return FileUtil.JoinPath(base, append)
 }
 
 public func GetDirPath(path: String): String {
-    let normalized = NormalizePath(path)
-    if (let Some(pos) <- normalized.lastIndexOf("/")) {
-        if (pos == 0) {
-            return "/"
-        }
-        return normalized[0..pos]
-    }
-    return "."
+    return FileUtil.GetDirPath(path)
 }
 
 public func GetFileName(path: String): String {
-    let normalized = NormalizePath(path)
-    if (let Some(pos) <- normalized.lastIndexOf("/")) {
-        return normalized[pos + 1..]
-    }
-    return normalized
+    return FileUtil.GetFileName(path)
 }
 
 public func GetFileBase(path: String): String {
-    let dotPos = path.lastIndexOf(".") ?? path.size
-    return path[0..dotPos]
+    return FileUtil.GetFileBase(path)
 }
 
 public func GetFileExtension(path: String): String {
-    if (let Some(dotPos) <- path.lastIndexOf(".")) {
-        if (dotPos + 1 < path.size) {
-            return path[dotPos + 1..]
-        }
-    }
-    return ""
+    return FileUtil.GetFileExtension(path)
 }
 
 public func SplitLines(text: String): ArrayList<String> {
