@@ -17,6 +17,23 @@ public class MetaTransformPluginManager<MetaKindT> {
 
     public init() {}
 
+    public init(moveFrom: MetaTransformPluginManager<MetaKindT>) {
+        MoveAssignFrom(moveFrom)
+    }
+
+    public func MoveAssignFrom(rhs: MetaTransformPluginManager<MetaKindT>): MetaTransformPluginManager<MetaKindT> {
+        let moved = ArrayList<MetaTransformConcept>()
+        for (mtc in rhs.mtConcepts) {
+            moved.add(mtc)
+        }
+        rhs.mtConcepts.clear()
+        mtConcepts.clear()
+        for (mtc in moved) {
+            mtConcepts.add(mtc)
+        }
+        return this
+    }
+
     public func AddMetaTransform<MT>(mt: MT): Unit where MT <: MetaTransformConcept {
         mtConcepts.add(mt)
     }

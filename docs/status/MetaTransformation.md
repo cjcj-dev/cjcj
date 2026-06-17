@@ -73,6 +73,10 @@ Implemented:
   `Package` types, assigning `FOR_CHIR_FUNC`, `FOR_CHIR_PACKAGE`, or `UNKNOWN` like the C++ `if constexpr`
   chain. Direct subclasses of `MetaTransform<CHIRFunction>` and `MetaTransform<CHIRPackage>` no longer
   need to use the convenience wrapper classes to get the correct kind.
+- Matched the C++ `MetaTransformPluginManager` move-only ownership surface more closely: the Cangjie
+  manager now has a move-style constructor and `MoveAssignFrom` operation that transfer the transform
+  sequence in order and clear the source manager, corresponding to the C++ move constructor and move
+  assignment over `std::vector<std::unique_ptr<MetaTransformConcept>>`.
 
 Known fidelity caveats:
 
@@ -84,6 +88,8 @@ Known fidelity caveats:
   the registration behavior but not the C++ macro spelling.
 - Cangjie does not expose C++-style nested tag declarations in the style used by `MetaKind::CHIR`, so the
   CHIR tag is represented as `MetaKindCHIR` alongside the public `MetaKind` marker.
+- Cangjie does not have C++ `unique_ptr`, so manager transfers move references between managers and clear
+  the source rather than enforcing single ownership at the type-system level.
 - Cross-module dynamic plugin loading is still not wired through the self-hosted frontend pipeline, and
   CHIR has not yet been updated to call `RunCHIRMetaTransforms`; this status file tracks only the scoped
   `packages/meta_transformation/src` port.
