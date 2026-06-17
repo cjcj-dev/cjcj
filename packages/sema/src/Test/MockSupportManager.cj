@@ -2,6 +2,8 @@ package cangjie_compiler::sema.Test
 
 import std.collection.*
 import cangjie_compiler::ast.*
+import cangjie_compiler::sema.GetUsableGetterForProperty
+import cangjie_compiler::sema.GetUsableSetterForProperty
 
 public class DeclsToPrepare {
     public let functions: ArrayList<FuncDecl> = ArrayList<FuncDecl>()
@@ -225,11 +227,13 @@ public class MockSupportManager {
                 decl.EnableAttr(Attribute.MOCK_SUPPORTED)
                 MakeOpenToMockIfNeeded(decl)
                 if (let Some(propMember) <- (decl as PropDecl)) {
-                    if (!propMember.getters.isEmpty()) {
-                        MakeOpenToMockIfNeeded(propMember.getters[0])
+                    if (let Some(getter) <- GetUsableGetterForProperty(propMember)) {
+                        MakeOpenToMockIfNeeded(getter)
                     }
-                    if (propMember.isVar && !propMember.setters.isEmpty()) {
-                        MakeOpenToMockIfNeeded(propMember.setters[0])
+                    if (propMember.isVar) {
+                        if (let Some(setter) <- GetUsableSetterForProperty(propMember)) {
+                            MakeOpenToMockIfNeeded(setter)
+                        }
                     }
                 }
                 return
@@ -238,6 +242,19 @@ public class MockSupportManager {
                 MarkFuncMockSupportedIfNeeded(funcDecl)
             }
         }
+    }
+
+    public static func MarkMockAccessorWithAttributes(decl: Decl, accessLevel: AccessLevel): Unit {
+        decl.DisableAttr(Attribute.GENERIC_INSTANTIATED)
+        decl.EnableAttr(Attribute.OPEN)
+        decl.DisableAttr(Attribute.PRIVATE)
+        decl.DisableAttr(Attribute.PROTECTED)
+        decl.DisableAttr(Attribute.PUBLIC)
+        decl.DisableAttr(Attribute.INTERNAL)
+        decl.EnableAttr(GetAttrByAccessLevel(accessLevel))
+        decl.EnableAttr(Attribute.GENERATED_TO_MOCK)
+        decl.EnableAttr(Attribute.COMPILER_ADD)
+        decl.EnableAttr(Attribute.IN_CLASSLIKE)
     }
 
     public func CollectDeclsToPrepare(decl: Decl, decls: DeclsToPrepare): Unit {

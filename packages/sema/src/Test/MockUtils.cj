@@ -176,6 +176,32 @@ public class MockUtils {
         return ContainsInternalType(ty, ArrayList<Ty>())
     }
 
+    public static func CreateType(ty: Ty): Type {
+        let typeNode = Type()
+        typeNode.SetTy(ty)
+        return typeNode
+    }
+
+    public static func CreateTypeCast(selector: Expr, castTy: Ty, createMatchedBranch: (VarDecl) -> Expr,
+        otherwiseBranch: Expr, ty: Ty): Expr {
+        let varPattern = CreateVarPattern("v-compiler", Some(castTy))
+        let matchedBranch = createMatchedBranch(varPattern.varDecl.getOrThrow())
+        let matchCases = ArrayList<MatchCase>()
+        let typePattern = CreateTypePattern(varPattern, MockUtils.CreateType(castTy), selector)
+        typePattern.matchBeforeRuntime = false
+        matchCases.add(CreateMatchCase(typePattern, matchedBranch))
+        matchCases.add(CreateMatchCase(WildcardPattern(), otherwiseBranch))
+        return CreateMatchExpr(selector, matchCases, ty)
+    }
+
+    public static func EraseFuncTypes(funcTy: FuncTy, typeManager: TypeManager): FuncTy {
+        let paramTys = ArrayList<Ty>()
+        for (_ in funcTy.paramTys) {
+            paramTys.add(typeManager.GetAnyTy())
+        }
+        return typeManager.GetFunctionTy(paramTys.toArray(), typeManager.GetAnyTy())
+    }
+
     public static func IsMockAccessorRequired(decl: Decl): Bool {
         if (decl.astKind == ASTKind.VAR_DECL) {
             if (let Some(_) <- decl.outerDecl) {

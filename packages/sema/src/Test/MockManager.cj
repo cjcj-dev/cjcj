@@ -7,6 +7,39 @@ private let CREATE_SPY_FUNC_NAME: String = "createSpy"
 private let MOCKED_DECL_SUFFIX: String = "$Mocked"
 private let UNITTEST_MOCK_INTERNAL_PACKAGE_NAME: String = "std.unittest.mock.internal"
 
+public func IsDeclAccessibleForMock(currentPackage: Package, decl: Decl): Bool {
+    if (decl.TestAttr(Attribute.PUBLIC)) {
+        return true
+    }
+    if (decl.TestAttr(Attribute.PRIVATE)) {
+        return false
+    }
+    return decl.fullPackageName == currentPackage.fullPackageName
+}
+
+public func GetMockLibraryAccessorKind(kind: AccessorKind): String {
+    return match (kind) {
+        case AccessorKind.METHOD => "Method"
+        case AccessorKind.PROP => "PropertyGetter"
+        case AccessorKind.PROP_GETTER => "PropertyGetter"
+        case AccessorKind.PROP_SETTER => "PropertySetter"
+        case AccessorKind.FIELD_GETTER => "FieldGetter"
+        case AccessorKind.FIELD_SETTER => "FieldSetter"
+        case AccessorKind.TOP_LEVEL_FUNCTION => "TopLevelFunction"
+        case AccessorKind.STATIC_METHOD => "StaticMethod"
+        case AccessorKind.STATIC_PROP_GETTER => "StaticPropertyGetter"
+        case AccessorKind.STATIC_PROP_SETTER => "StaticPropertySetter"
+        case AccessorKind.STATIC_FIELD_GETTER => "StaticFieldGetter"
+        case AccessorKind.STATIC_FIELD_SETTER => "StaticFieldSetter"
+        case AccessorKind.TOP_LEVEL_VARIABLE_GETTER => "TopLevelVariableGetter"
+        case AccessorKind.TOP_LEVEL_VARIABLE_SETTER => "TopLevelVariableSetter"
+    }
+}
+
+public func MockLibraryDeclKindNeedsSetterPresence(kind: AccessorKind): Bool {
+    return kind == AccessorKind.FIELD_GETTER || kind == AccessorKind.PROP_GETTER
+}
+
 public enum MockKind {
     | PLAIN_MOCK
     | SPY
