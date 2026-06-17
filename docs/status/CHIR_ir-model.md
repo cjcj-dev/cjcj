@@ -36,6 +36,13 @@ Implemented in this pass:
   `RawArrayAllocateWithException`, and `SpawnWithException`.
 - Modeled C++ nullable operands such as spawn arguments and VArrayBuilder item/init function with `Option<Value>`
   while keeping present operands in the normal CHIR use-def list.
+- Added boxing/unboxing and generic/concrete transform expressions (`Box`, `UnBox`, `TransformToGeneric`,
+  `TransformToConcrete`, `UnBoxToRef`) plus builders.
+- Added high-level `ForIn` IR nodes (`ForInRange`, `ForInIter`, `ForInClosedRange`), body/latch/cond block-group
+  initialization, and C++ execution-order accessors.
+- Deepened `Lambda` with function type, identifiers, source identifier, generic params, local/compile-time flags,
+  parameter-default host links, body initialization, return-value tracking, lambda-owned parameter creation, and
+  C++-style captured-variable discovery that skips nested lambda bodies.
 
 De-isolation:
 
@@ -44,9 +51,8 @@ De-isolation:
 
 Known remaining gaps:
 
-- The complete C++ expression taxonomy is still not ported: intrinsics, for-in forms, boxing/unboxing,
-  transform-to-generic/concrete, unbox-to-ref, full lambda metadata/body cloning, and complete clone behavior for all
-  expression subclasses remain incomplete.
+- The complete C++ expression taxonomy is still not ported: intrinsics, intrinsic-with-exception, full lambda body
+  cloning/identifier regeneration, and complete clone behavior for all expression subclasses remain incomplete.
 - Full C++ generic constraint solving, vtable search/update, inheritance traversal through extends, and precise
   `CanBeInherited`/finalizer semantics are still missing; dynamic dispatch currently records method context and optional
   vtable offsets but does not compute vtable search results.
@@ -56,4 +62,4 @@ Known remaining gaps:
 
 Remaining `TODO(selfhost:CHIR)` markers in `packages/chir/src`: 0.
 
-Estimated real behavior coverage for this IR-model scope: 48%.
+Estimated real behavior coverage for this IR-model scope: 54%.

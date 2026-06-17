@@ -105,6 +105,27 @@ public open class Expression <: Base {
         return out
     }
 
+    public func GetBlockGroup(idx: Int64): BlockGroup {
+        return blockGroups[idx]
+    }
+
+    public func GetNumOfBlockGroups(): Int64 {
+        return blockGroups.size
+    }
+
+    public func AppendBlockGroup(group: BlockGroup): Unit {
+        blockGroups.add(group)
+        group.AddUserOnly(this)
+        group.SetOwnerExpression(this)
+    }
+
+    public func ClearBlockGroups(): Unit {
+        for (group in blockGroups) {
+            group.RemoveUserOnly(this)
+        }
+        blockGroups.clear()
+    }
+
     public func GetResult(): Option<LocalVar> {
         return result
     }
@@ -851,6 +872,111 @@ public class InstanceOf <: Expression {
     }
 }
 
+public class Box <: Expression {
+    public init(source: Value, parent: Option<Block>) {
+        super(ExprKind.BOX, MakeUnaryOperands(source), parent)
+    }
+
+    public func GetSourceValue(): Value {
+        return GetOperand(0)
+    }
+
+    public func GetSourceTy(): Option<Type> {
+        return GetSourceValue().GetType()
+    }
+
+    public func GetTargetTy(): Option<Type> {
+        if (let Some(res) <- GetResult()) {
+            return res.GetType()
+        }
+        return None
+    }
+}
+
+public class UnBox <: Expression {
+    public init(source: Value, parent: Option<Block>) {
+        super(ExprKind.UNBOX, MakeUnaryOperands(source), parent)
+    }
+
+    public func GetSourceValue(): Value {
+        return GetOperand(0)
+    }
+
+    public func GetSourceTy(): Option<Type> {
+        return GetSourceValue().GetType()
+    }
+
+    public func GetTargetTy(): Option<Type> {
+        if (let Some(res) <- GetResult()) {
+            return res.GetType()
+        }
+        return None
+    }
+}
+
+public class TransformToGeneric <: Expression {
+    public init(source: Value, parent: Option<Block>) {
+        super(ExprKind.TRANSFORM_TO_GENERIC, MakeUnaryOperands(source), parent)
+    }
+
+    public func GetSourceValue(): Value {
+        return GetOperand(0)
+    }
+
+    public func GetSourceTy(): Option<Type> {
+        return GetSourceValue().GetType()
+    }
+
+    public func GetTargetTy(): Option<Type> {
+        if (let Some(res) <- GetResult()) {
+            return res.GetType()
+        }
+        return None
+    }
+}
+
+public class TransformToConcrete <: Expression {
+    public init(source: Value, parent: Option<Block>) {
+        super(ExprKind.TRANSFORM_TO_CONCRETE, MakeUnaryOperands(source), parent)
+    }
+
+    public func GetSourceValue(): Value {
+        return GetOperand(0)
+    }
+
+    public func GetSourceTy(): Option<Type> {
+        return GetSourceValue().GetType()
+    }
+
+    public func GetTargetTy(): Option<Type> {
+        if (let Some(res) <- GetResult()) {
+            return res.GetType()
+        }
+        return None
+    }
+}
+
+public class UnBoxToRef <: Expression {
+    public init(source: Value, parent: Option<Block>) {
+        super(ExprKind.UNBOX_TO_REF, MakeUnaryOperands(source), parent)
+    }
+
+    public func GetSourceValue(): Value {
+        return GetOperand(0)
+    }
+
+    public func GetSourceTy(): Option<Type> {
+        return GetSourceValue().GetType()
+    }
+
+    public func GetTargetTy(): Option<Type> {
+        if (let Some(res) <- GetResult()) {
+            return res.GetType()
+        }
+        return None
+    }
+}
+
 public class Tuple <: Expression {
     public init(values: ArrayList<Value>, parent: Option<Block>) {
         super(ExprKind.TUPLE, values, parent)
@@ -1136,19 +1262,170 @@ public class GetInstantiateValue <: Expression {
     }
 }
 
+public open class ForIn <: Expression {
+    public init(kind: ExprKind, inductionVar: Value, loopCondVar: Value, parent: Option<Block>) {
+        super(kind, MakeBinaryOperands(inductionVar, loopCondVar), parent)
+    }
+
+    public func GetInductionVar(): Value {
+        return GetOperand(0)
+    }
+
+    public func GetLoopCondVar(): Value {
+        return GetOperand(1)
+    }
+
+    public func GetBody(): BlockGroup {
+        return GetBlockGroup(0)
+    }
+
+    public func GetLatch(): BlockGroup {
+        return GetBlockGroup(1)
+    }
+
+    public func GetCond(): BlockGroup {
+        return GetBlockGroup(2)
+    }
+
+    public func InitBlockGroups(body: BlockGroup, latch: BlockGroup, cond: BlockGroup): Unit {
+        if (GetNumOfBlockGroups() != 0) {
+            throw IllegalArgumentException("ForIn block groups already initialized")
+        }
+        AppendBlockGroup(body)
+        AppendBlockGroup(latch)
+        AppendBlockGroup(cond)
+    }
+
+    public open func GetExecutionOrder(): ArrayList<BlockGroup> {
+        return ArrayList<BlockGroup>()
+    }
+}
+
+public class ForInRange <: ForIn {
+    public init(inductionVar: Value, loopCondVar: Value, parent: Option<Block>) {
+        super(ExprKind.FORIN_RANGE, inductionVar, loopCondVar, parent)
+    }
+
+    public override func GetExecutionOrder(): ArrayList<BlockGroup> {
+        return MakeForInExecutionOrder(GetCond(), GetBody(), GetLatch())
+    }
+}
+
+public class ForInIter <: ForIn {
+    public init(inductionVar: Value, loopCondVar: Value, parent: Option<Block>) {
+        super(ExprKind.FORIN_ITER, inductionVar, loopCondVar, parent)
+    }
+
+    public override func GetExecutionOrder(): ArrayList<BlockGroup> {
+        return MakeForInExecutionOrder(GetLatch(), GetCond(), GetBody())
+    }
+}
+
+public class ForInClosedRange <: ForIn {
+    public init(inductionVar: Value, loopCondVar: Value, parent: Option<Block>) {
+        super(ExprKind.FORIN_CLOSED_RANGE, inductionVar, loopCondVar, parent)
+    }
+
+    public override func GetExecutionOrder(): ArrayList<BlockGroup> {
+        return MakeForInExecutionOrder(GetBody(), GetCond(), GetLatch())
+    }
+}
+
 public class Lambda <: Expression {
     private var body: Option<BlockGroup> = None
     private let params: ArrayList<Parameter> = ArrayList<Parameter>()
+    private let genericTypeParams: ArrayList<GenericType> = ArrayList<GenericType>()
+    private var retValue: Option<LocalVar> = None
+    private var funcTy: Option<FuncType> = None
+    private var identifier: String = ""
+    private var srcCodeIdentifier: String = ""
+    private var isLocalFunc: Bool = false
+    private var paramDftValHostFunc: Option<Lambda> = None
+    private var isCompileTimeValue: Bool = false
 
     public init(operands: ArrayList<Value>, body: BlockGroup, parent: Option<Block>) {
         super(ExprKind.LAMBDA, operands, MakeLambdaGroups(body), parent)
         this.body = body
     }
 
+    public init(funcTy: FuncType, parent: Option<Block>, isLocalFunc!: Bool = false, identifier!: String = "",
+        srcCodeIdentifier!: String = "", genericTypeParams!: ArrayList<GenericType> = ArrayList<GenericType>()) {
+        super(ExprKind.LAMBDA, ArrayList<Value>(), ArrayList<BlockGroup>(), parent)
+        this.funcTy = funcTy
+        this.isLocalFunc = isLocalFunc
+        this.identifier = identifier
+        this.srcCodeIdentifier = srcCodeIdentifier
+        for (param in genericTypeParams) {
+            this.genericTypeParams.add(param)
+        }
+    }
+
+    public func IsCompileTimeValue(): Bool {
+        return isCompileTimeValue
+    }
+
+    public func SetCompileTimeValue(): Unit {
+        isCompileTimeValue = true
+    }
+
+    public func IsLocalFunc(): Bool {
+        return isLocalFunc
+    }
+
+    public func GetFuncType(): Option<FuncType> {
+        return funcTy
+    }
+
+    public func GetIdentifier(): String {
+        return identifier
+    }
+
+    public func GetIdentifierWithoutPrefix(): String {
+        return identifier
+    }
+
+    public func GetSrcCodeIdentifier(): String {
+        return srcCodeIdentifier
+    }
+
+    public func SetParamDftValHostFunc(hostFunc: Lambda): Unit {
+        paramDftValHostFunc = hostFunc
+    }
+
+    public func GetParamDftValHostFunc(): Option<Lambda> {
+        return paramDftValHostFunc
+    }
+
     public func GetBody(): Option<BlockGroup> { return body }
 
+    public func InitBody(newBody: BlockGroup): Unit {
+        if (body.isSome() || GetNumOfBlockGroups() != 0) {
+            throw IllegalArgumentException("Lambda body already initialized")
+        }
+        body = newBody
+        AppendBlockGroup(newBody)
+    }
+
+    public func GetEntryBlock(): Option<Block> {
+        if (let Some(lambdaBody) <- body) {
+            return lambdaBody.GetEntryBlock()
+        }
+        return None
+    }
+
     public func AddParam(param: Parameter): Unit {
-        params.add(param)
+        if (!ContainsParameter(params, param)) {
+            params.add(param)
+        }
+        param.SetOwnerLambda(this)
+    }
+
+    public func GetNumOfParams(): Int64 {
+        return params.size
+    }
+
+    public func GetParam(index: Int64): Parameter {
+        return params[index]
     }
 
     public func GetParams(): ArrayList<Parameter> {
@@ -1157,6 +1434,74 @@ public class Lambda <: Expression {
             out.add(param)
         }
         return out
+    }
+
+    public func GetGenericTypeParams(): ArrayList<GenericType> {
+        let out = ArrayList<GenericType>()
+        for (param in genericTypeParams) {
+            out.add(param)
+        }
+        return out
+    }
+
+    public func SetReturnValue(ret: LocalVar): Unit {
+        ret.SetRetValue(true)
+        retValue = ret
+    }
+
+    public func GetReturnValue(): Option<LocalVar> {
+        return retValue
+    }
+
+    public func GetReturnType(): Option<Type> {
+        if (let Some(lambdaFuncTy) <- funcTy) {
+            return lambdaFuncTy.GetReturnType()
+        }
+        return None
+    }
+
+    public override func RemoveSelfFromBlock(): Unit {
+        if (let Some(lambdaBody) <- body) {
+            lambdaBody.ClearBlockGroup()
+        }
+        body = None
+        ClearBlockGroups()
+        super.RemoveSelfFromBlock()
+    }
+
+    public func GetCapturedVariables(): ArrayList<Value> {
+        let captured = ArrayList<Value>()
+        if (let Some(lambdaBody) <- body) {
+            CollectCapturedFromBlockGroup(lambdaBody, this, lambdaBody, captured)
+        }
+        return captured
+    }
+
+    public func LambdaOperandsToString(indent: Int64): String {
+        let parts = ArrayList<String>()
+        for (param in params) {
+            parts.add("\n" + param.ToString(indent + 1))
+        }
+        let retText = if (let Some(retTy) <- GetReturnType()) { retTy.ToString() } else { "<none>" }
+        return "[" + identifier + "]" + GenericTypeParamsToString(genericTypeParams) + "(" +
+            JoinStrings(parts, "") + "): " + retText
+    }
+
+    public override func AddExtraComment(): String {
+        let parts = ArrayList<String>()
+        if (isCompileTimeValue) {
+            parts.add("compileTimeVal")
+        }
+        if (isLocalFunc) {
+            parts.add("localFunc")
+        }
+        if (!srcCodeIdentifier.isEmpty()) {
+            parts.add("srcCodeIdentifier: " + srcCodeIdentifier)
+        }
+        if (let Some(hostFunc) <- paramDftValHostFunc) {
+            parts.add("paramDftValHostFunc: " + hostFunc.GetIdentifier())
+        }
+        return JoinStrings(parts, ", ")
     }
 }
 
@@ -1206,6 +1551,66 @@ private func MakeLambdaGroups(body: BlockGroup): ArrayList<BlockGroup> {
     let groups = ArrayList<BlockGroup>()
     groups.add(body)
     return groups
+}
+
+private func MakeForInExecutionOrder(first: BlockGroup, second: BlockGroup, third: BlockGroup): ArrayList<BlockGroup> {
+    let groups = ArrayList<BlockGroup>()
+    groups.add(first)
+    groups.add(second)
+    groups.add(third)
+    return groups
+}
+
+private func ContainsParameter(values: ArrayList<Parameter>, param: Parameter): Bool {
+    for (value in values) {
+        if (value.nodeId == param.nodeId) {
+            return true
+        }
+    }
+    return false
+}
+
+private func CollectCapturedFromBlockGroup(group: BlockGroup, lambdaExpr: Lambda, rootBody: BlockGroup,
+    captured: ArrayList<Value>): Unit {
+    for (block in group.GetBlocks()) {
+        for (expr in block.GetExpressions()) {
+            CollectCapturedFromExpressionOperands(expr, lambdaExpr, rootBody, captured)
+            if (!expr.IsLambda()) {
+                for (subGroup in expr.GetBlockGroups()) {
+                    CollectCapturedFromBlockGroup(subGroup, lambdaExpr, rootBody, captured)
+                }
+            }
+        }
+    }
+}
+
+private func CollectCapturedFromExpressionOperands(expr: Expression, lambdaExpr: Lambda, rootBody: BlockGroup,
+    captured: ArrayList<Value>): Unit {
+    for (operand in expr.GetOperands()) {
+        var shouldCapture = false
+        if (let Some(localVar) <- operand.AsLocalVar()) {
+            var isLambdaResult = false
+            if (let Some(lambdaResult) <- lambdaExpr.GetResult()) {
+                isLambdaResult = lambdaResult.nodeId == localVar.nodeId
+            }
+            if (!isLambdaResult) {
+                if (let Some(ownerGroup) <- localVar.GetOwnerBlockGroup()) {
+                    shouldCapture = ownerGroup.nodeId != rootBody.nodeId
+                } else {
+                    shouldCapture = true
+                }
+            }
+        } else if (let Some(param) <- operand.AsParameter()) {
+            if (let Some(ownerLambda) <- param.GetOwnerLambda()) {
+                shouldCapture = ownerLambda.nodeId != lambdaExpr.nodeId
+            } else {
+                shouldCapture = true
+            }
+        }
+        if (shouldCapture && !ContainsValue(captured, operand)) {
+            captured.add(operand)
+        }
+    }
 }
 
 private func ValueIdsToString(values: ArrayList<Value>): String {

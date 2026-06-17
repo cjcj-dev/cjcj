@@ -77,6 +77,12 @@ public class CHIRBuilder {
         return param
     }
 
+    public func CreateParameter(ty: Type, identifier: String, ownerLambda: Lambda): Parameter {
+        let param = Parameter(ty, identifier, ownerLambda)
+        context.RegisterValue(param)
+        return param
+    }
+
     public func CreateLocalVar(ty: Type, identifier: String, expr: Option<Expression>): LocalVar {
         let local = LocalVar(ty, identifier, expr)
         context.RegisterValue(local)
@@ -233,6 +239,46 @@ public class CHIRBuilder {
         return expr
     }
 
+    public func CreateBox(resultTy: Type, source: Value, parent: Block): Box {
+        let expr = Box(source, parent)
+        parent.AppendExpression(expr)
+        context.RegisterExpression(expr)
+        CreateLocalVar(resultTy, "%${context.GetAllNodesNum()}", expr)
+        return expr
+    }
+
+    public func CreateUnBox(resultTy: Type, source: Value, parent: Block): UnBox {
+        let expr = UnBox(source, parent)
+        parent.AppendExpression(expr)
+        context.RegisterExpression(expr)
+        CreateLocalVar(resultTy, "%${context.GetAllNodesNum()}", expr)
+        return expr
+    }
+
+    public func CreateTransformToGeneric(resultTy: Type, source: Value, parent: Block): TransformToGeneric {
+        let expr = TransformToGeneric(source, parent)
+        parent.AppendExpression(expr)
+        context.RegisterExpression(expr)
+        CreateLocalVar(resultTy, "%${context.GetAllNodesNum()}", expr)
+        return expr
+    }
+
+    public func CreateTransformToConcrete(resultTy: Type, source: Value, parent: Block): TransformToConcrete {
+        let expr = TransformToConcrete(source, parent)
+        parent.AppendExpression(expr)
+        context.RegisterExpression(expr)
+        CreateLocalVar(resultTy, "%${context.GetAllNodesNum()}", expr)
+        return expr
+    }
+
+    public func CreateUnBoxToRef(resultTy: Type, source: Value, parent: Block): UnBoxToRef {
+        let expr = UnBoxToRef(source, parent)
+        parent.AppendExpression(expr)
+        context.RegisterExpression(expr)
+        CreateLocalVar(resultTy, "%${context.GetAllNodesNum()}", expr)
+        return expr
+    }
+
     public func CreateTuple(resultTy: Type, values: ArrayList<Value>, parent: Block): Tuple {
         let expr = Tuple(values, parent)
         parent.AppendExpression(expr)
@@ -333,9 +379,53 @@ public class CHIRBuilder {
         return expr
     }
 
+    public func CreateForInRange(resultTy: Type, inductionVar: Value, loopCondVar: Value, parent: Block): ForInRange {
+        let expr = ForInRange(inductionVar, loopCondVar, parent)
+        parent.AppendExpression(expr)
+        context.RegisterExpression(expr)
+        CreateLocalVar(resultTy, "%${context.GetAllNodesNum()}", expr)
+        return expr
+    }
+
+    public func CreateForInIter(resultTy: Type, inductionVar: Value, loopCondVar: Value, parent: Block): ForInIter {
+        let expr = ForInIter(inductionVar, loopCondVar, parent)
+        parent.AppendExpression(expr)
+        context.RegisterExpression(expr)
+        CreateLocalVar(resultTy, "%${context.GetAllNodesNum()}", expr)
+        return expr
+    }
+
+    public func CreateForInClosedRange(resultTy: Type, inductionVar: Value, loopCondVar: Value,
+        parent: Block): ForInClosedRange {
+        let expr = ForInClosedRange(inductionVar, loopCondVar, parent)
+        parent.AppendExpression(expr)
+        context.RegisterExpression(expr)
+        CreateLocalVar(resultTy, "%${context.GetAllNodesNum()}", expr)
+        return expr
+    }
+
     public func CreateGetInstantiateValue(resultTy: Type, value: Value, instantiatedTypes: ArrayList<Type>,
         parent: Block): GetInstantiateValue {
         let expr = GetInstantiateValue(value, instantiatedTypes, parent)
+        parent.AppendExpression(expr)
+        context.RegisterExpression(expr)
+        CreateLocalVar(resultTy, "%${context.GetAllNodesNum()}", expr)
+        return expr
+    }
+
+    public func CreateLambda(resultTy: Type, funcTy: FuncType, parent: Block, isLocalFunc!: Bool = false,
+        identifier!: String = "", srcCodeIdentifier!: String = "",
+        genericTypeParams!: ArrayList<GenericType> = ArrayList<GenericType>()): Lambda {
+        let expr = Lambda(funcTy, parent, isLocalFunc: isLocalFunc, identifier: identifier,
+            srcCodeIdentifier: srcCodeIdentifier, genericTypeParams: genericTypeParams)
+        parent.AppendExpression(expr)
+        context.RegisterExpression(expr)
+        CreateLocalVar(resultTy, "%${context.GetAllNodesNum()}", expr)
+        return expr
+    }
+
+    public func CreateLambda(resultTy: Type, operands: ArrayList<Value>, body: BlockGroup, parent: Block): Lambda {
+        let expr = Lambda(operands, body, parent)
         parent.AppendExpression(expr)
         context.RegisterExpression(expr)
         CreateLocalVar(resultTy, "%${context.GetAllNodesNum()}", expr)
