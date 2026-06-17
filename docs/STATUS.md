@@ -25,10 +25,11 @@ returns lower through `CreateLiteralReturnBody`).
 The following programs compile with the self-host `cjc`
 (`./target/release/bin/cangjie_compiler::cjc`) and run with the verified behavior
 shown. Each was re-verified by real compile-and-run on 2026-06-17 after merging
-`opus2/int-arith-return` and `opus2/println-int` into `main`:
+`opus2/int-arith-return`, `opus2/println-int`, and `opus3/real-expr` into `main`:
 
 | Source | Verified behavior |
 | --- | --- |
+| `main(): Int64 { let a = 2; let b = 3; return a + b }` | exits with code 5, computed at **runtime** by a real CHIR `Add` (not folded) |
 | `main() { println("hello selfhost") }` | prints `hello selfhost` + newline |
 | `main() { print("a"); print("b"); println("c") }` | prints `abc` + newline |
 | `main(): Int64 { return 7 }` | exits with code 7 |
@@ -50,10 +51,38 @@ Capability detail:
   division-by-zero falls back to the single-literal/let-fold path).
 - println/print of an integer literal (optionally signed) or a let-bound integer
   literal, emitted as decimal text.
+- **First non-facade body lowering (real-expression milestone):**
+  `main(): Int64 { let a = 2; let b = 3; return a + b }` now compiles through the
+  real recursive-descent parser (`packages/parse`) rather than the token-summary
+  scanner. A new additive adapter (`packages/frontend/src/RealParseBridge.cj`)
+  runs `parse.Parser(...).ParseTopLevel()`, recognizes a `let`/`let`/`return a+b`
+  body, and lowers it to a real CHIR statement list
+  (`AST2CHIRStmtSpec` / `CreateRealBody` in `packages/chir`). The body emits
+  Allocate/Constant/Store per `let`, Load/Load/`Add`/Store/Exit for the return, so
+  the exit code `5` is produced at **runtime** by a genuine CHIR `Add` over two
+  `Load`s (`--dump-chir` shows `%N = Add(%a, %b)`), not by frontend constant
+  folding. The path is gated behind a `hasRealBody` flag that defaults `false`:
+  bodies the summary path already folds to a single literal (e.g. `return 2+3*4`,
+  `let x=<lit>; return x`) stay byte-for-byte on their existing path, so none of
+  the already-verified slices regress. This is the seam (per
+  `docs/DEISOLATION_PLAN.md` section 4) where the token-summary frontend is
+  replaced by the real parser one slice at a time.
 
 These are the only source constructs the integrated pipeline lowers end to end
 today; anything else still flows through the compatibility models described
 below.
+
+### Remaining de-isolation follow-ups
+
+- Extend the real-body adapter to more statement kinds (additional operators,
+  multi-statement arithmetic, control flow, more types beyond `Int64`).
+- Retire the frontend token-summary parser
+  (`packages/frontend/src/CompileStrategy.cj` `parseLiteralReturn` /
+  `resolveLetLiteral` / `captureFunctionBodyPrints`) once the real parser drives
+  every supported construct.
+- Converge `frontend.*` / `parse.*` / `ast.*` (make the bridge consume `ast.*`
+  produced from `parse.*`, or have `parse` emit `ast.*` directly) and delete the
+  frontend minimal AST (`FrontendModel.cj`).
 
 ### De-isolation roadmap pointer
 
