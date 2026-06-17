@@ -3,6 +3,7 @@ package cangjie_compiler::sema.InheritanceChecker
 import std.collection.*
 import cangjie_compiler::ast.*
 import cangjie_compiler::basic.{DiagArgument, DiagKind, DiagKindRefactor, MakeRange}
+import cangjie_compiler::basic.Range as BasicRange
 import cangjie_compiler::sema.*
 
 public class InstantiationTriggerInfo {
@@ -63,6 +64,13 @@ func InstantiationKey(decl: Decl, instTys: ArrayList<Ty>): String {
         parts.add(ty.String())
     }
     return "${decl.fullPackageName}:${decl.identifier.Val()}:${decl.begin.ToString()}:${JoinStrings(parts, ",")}"
+}
+
+private func InstantiatedDeclNoteRange(decl: Decl): BasicRange {
+    if (!decl.identifier.Empty() && !decl.identifier.ZeroPos()) {
+        return MakeRange(decl.identifier.Begin(), decl.identifier.End())
+    }
+    return MakeRange(decl.begin, decl.end)
 }
 
 private func GetReferenceTyAndTarget(node: Node): (Option<Ty>, Option<Decl>) {
@@ -558,8 +566,12 @@ func DiagnoseForInstantiatedMemberImpl(
                             MakeRange(trigger.node.begin, trigger.node.end),
                             arguments: [triggeredDeclType, childDecl.identifier.Val()]
                         )
-                        builder.AddNote(MakeRange(parentDecl.begin, parentDecl.end), "found candidate")
-                        builder.AddNote(MakeRange(childDecl.begin, childDecl.end), "found candidate")
+                        let candidates = ArrayList<Decl>()
+                        AddInheritanceDeclUniqueByPosition(candidates, parentDecl)
+                        AddInheritanceDeclUniqueByPosition(candidates, childDecl)
+                        for (candidate in candidates) {
+                            builder.AddNote(InstantiatedDeclNoteRange(candidate), "found candidate")
+                        }
                     }
                 }
             }

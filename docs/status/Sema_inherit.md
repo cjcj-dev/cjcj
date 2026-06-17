@@ -114,3 +114,15 @@ Diagnostic fidelity continuation:
   is also wired through the available self-hosted `DiagnosticEngine.AddMacroCallNote` surface.
 
 Verification: `cjpm build` passes for the whole workspace after this diagnostic fidelity continuation.
+
+Ordered-diagnostic continuation:
+
+- Conflict-inheritance diagnostics now build declaration notes through a source-position ordered declaration set, matching
+  the C++ `OrderedDeclSet` behavior instead of preserving member-map insertion order.
+- Unimplemented abstract/interface member notes are now emitted in the C++ stable order: declaration position first, then
+  type-name ordering for duplicate declarations.
+- Instantiated generic ambiguity diagnostics now order candidate notes through the same inheritance declaration ordering
+  helper and report candidate notes on declaration identifiers when available, matching the C++ candidate-note shape more
+  closely.
+
+Verification: `cjpm build` passes for the whole workspace after this ordered-diagnostic continuation.

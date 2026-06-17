@@ -48,8 +48,7 @@ private func AddExtendUniqueByPosition(values: ArrayList<ExtendDecl>, decl: Exte
     }
     var idx: Int64 = 0
     while (idx < values.size) {
-        if (decl.begin < values[idx].begin ||
-            (decl.begin == values[idx].begin && ASTKindIndex(decl.astKind) < ASTKindIndex(values[idx].astKind))) {
+        if (InheritanceDeclLessByPosition(decl, values[idx])) {
             values.add(decl, at: idx)
             return
         }
@@ -66,8 +65,7 @@ private func AddInheritableUniqueByPosition(values: ArrayList<InheritableDecl>, 
     }
     var idx: Int64 = 0
     while (idx < values.size) {
-        if (decl.begin < values[idx].begin ||
-            (decl.begin == values[idx].begin && ASTKindIndex(decl.astKind) < ASTKindIndex(values[idx].astKind))) {
+        if (InheritanceDeclLessByPosition(decl, values[idx])) {
             values.add(decl, at: idx)
             return
         }
@@ -1469,7 +1467,11 @@ public class StructInheritanceChecker {
                 DiagKindRefactor.sema_need_member_implementation
             }
             let builder = diag.DiagnoseRefactor(kind, DeclRange(structDecl), arguments: [structName])
+            let orderedUnimplementedMembers = ArrayList<MemberSignature>()
             for (member in unimplementedMembers) {
+                AddInheritanceMemberSignatureByDeclAndTy(orderedUnimplementedMembers, member)
+            }
+            for (member in orderedUnimplementedMembers) {
                 if (let Some(memberDecl) <- member.decl) {
                     let abstractType = if (if (let Some(outer) <- memberDecl.outerDecl) {
                         outer.astKind == ASTKind.CLASS_DECL
@@ -1504,10 +1506,14 @@ public class StructInheritanceChecker {
                     DeclIdentifierRange(decl),
                     arguments: [name]
                 )
+                let sortedDecls = ArrayList<Decl>()
                 for (member in found) {
                     if (let Some(memberDecl) <- member.decl) {
-                        builder.AddNote(DeclIdentifierRange(memberDecl), DeclKindText(memberDecl) + " member")
+                        AddInheritanceDeclUniqueByPosition(sortedDecls, memberDecl)
                     }
+                }
+                for (memberDecl in sortedDecls) {
+                    builder.AddNote(DeclIdentifierRange(memberDecl), DeclKindText(memberDecl) + " member")
                 }
             } else {
                 for (member in found) {
