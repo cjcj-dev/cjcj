@@ -10,6 +10,7 @@ import cangjie_compiler::chir.AST2CHIRMemberVarSpec as ChirMemberVarSpec
 import cangjie_compiler::chir.AST2CHIRNominalKind as ChirNominalKind
 import cangjie_compiler::chir.AST2CHIRNominalSpec as ChirNominalSpec
 import cangjie_compiler::chir.AST2CHIRPackageSpec as ChirPackageSpec
+import cangjie_compiler::chir.AST2CHIRStmtSpec as ChirStmtSpec
 import cangjie_compiler::chir.Attribute as ChirAttribute
 import cangjie_compiler::chir.CHIRBuilder as ChirBuilder
 import cangjie_compiler::chir.CHIRPrinter as ChirCHIRPrinter
@@ -190,9 +191,20 @@ private func buildFunctionSpec(pkg: Package, decl: Decl, context: ChirContext, s
     }
     let fnName = stableMangledName(pkg, decl)
     // When a real body is present the return type comes straight from the parsed retType
-    // (Int64 here) via lowerValueType, bypassing the literal-return special casing.
+    // (Int64 here) via lowerValueType, bypassing the literal-return special casing. The frontend
+    // summary parser does not reliably populate retType, so when it is absent we infer Unit vs
+    // Int64 from the body itself: a body with a value-returning `return <expr>` is Int64; one with
+    // no value-returning return (e.g. `main() { ...; println(s) }`) is Unit. This matches the body's
+    // emitted terminator (Exit(Some) -> ret i64 vs Exit(None) -> ret void).
     let returnTy = if (hasSourceRealBody) {
-        lowerValueType(context, sourceReturnType)
+        match (sourceReturnType) {
+            case Some(_) => lowerValueType(context, sourceReturnType)
+            case None => if (realBodyReturnsValue(decl)) {
+                context.GetInt64Ty()
+            } else {
+                context.GetUnitTy()
+            }
+        }
     } else {
         lowerFunctionReturnType(context, sourceReturnType, hasSourceLiteralReturn, sourceLiteralReturnKind,
             sourceLiteralReturnValue)
@@ -426,6 +438,29 @@ private func literalReturnCanLower(literalReturnKind: Int64, literalReturnValue:
 // Hand the frontend FuncBody's real-body statement spec tree (built directly by the real-parser
 // adapter in RealParseBridge.cj) to the CHIR function spec and enable the real body. The tree is
 // already in CHIR's recursive AST2CHIRStmtSpec form, so no per-statement translation is needed.
+// Does the real body of `decl` contain a value-returning `return <expr>` (possibly nested in an
+// `if`/`while`)? Used to infer Unit vs Int64 when the frontend summary did not record a return type.
+private func realBodyReturnsValue(decl: Decl): Bool {
+    if (let Some(funcDecl) <- (decl as FuncDecl)) {
+        return stmtsReturnValue(funcDecl.funcBody.realStatements)
+    }
+    return false
+}
+
+private func stmtsReturnValue(stmts: ArrayList<ChirStmtSpec>): Bool {
+    for (stmt in stmts) {
+        if (stmt.IsReturn() && stmt.expr.isSome()) {
+            return true
+        }
+        if (stmt.IsIf() || stmt.IsWhile()) {
+            if (stmtsReturnValue(stmt.thenBody) || stmtsReturnValue(stmt.elseBody)) {
+                return true
+            }
+        }
+    }
+    return false
+}
+
 private func applyRealBody(fnSpec: ChirFunctionSpec, funcBody: FuncBody): Unit {
     fnSpec.EnableRealBody()
     for (stmt in funcBody.realStatements) {

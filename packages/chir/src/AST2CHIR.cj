@@ -139,6 +139,7 @@ let AST2CHIR_STMT_ASSIGN: Int64 = 1
 let AST2CHIR_STMT_RETURN: Int64 = 2
 let AST2CHIR_STMT_IF: Int64 = 3
 let AST2CHIR_STMT_WHILE: Int64 = 4
+let AST2CHIR_STMT_PRINT: Int64 = 5
 
 public class AST2CHIRStmtSpec {
     public let kind: Int64
@@ -166,6 +167,7 @@ public class AST2CHIRStmtSpec {
     public func IsReturn(): Bool { return kind == AST2CHIR_STMT_RETURN }
     public func IsIf(): Bool { return kind == AST2CHIR_STMT_IF }
     public func IsWhile(): Bool { return kind == AST2CHIR_STMT_WHILE }
+    public func IsPrint(): Bool { return kind == AST2CHIR_STMT_PRINT }
 
     public static func Let(name: String, expr: AST2CHIRExprSpec, isVar!: Bool = false): AST2CHIRStmtSpec {
         return AST2CHIRStmtSpec(AST2CHIR_STMT_LET, name, isVar, Some(expr), None,
@@ -195,6 +197,14 @@ public class AST2CHIRStmtSpec {
     public static func While(cond: AST2CHIRExprSpec, body: ArrayList<AST2CHIRStmtSpec>): AST2CHIRStmtSpec {
         return AST2CHIRStmtSpec(AST2CHIR_STMT_WHILE, "", false, None, Some(cond), body,
             ArrayList<AST2CHIRStmtSpec>())
+    }
+
+    // PRINT: evaluate `expr` to a runtime Int64 Value and print it. `newline` (carried in the isVar
+    // slot) distinguishes println (true, trailing newline) from print (false). Lowered to a real
+    // printf at the value's materialization point in body flow -- not the entry-block side-channel.
+    public static func Print(expr: AST2CHIRExprSpec, newline!: Bool = true): AST2CHIRStmtSpec {
+        return AST2CHIRStmtSpec(AST2CHIR_STMT_PRINT, "", newline, Some(expr), None,
+            ArrayList<AST2CHIRStmtSpec>(), ArrayList<AST2CHIRStmtSpec>())
     }
 }
 

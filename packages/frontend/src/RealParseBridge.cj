@@ -191,6 +191,16 @@ private func adaptStatements(block: ParseBlock, scope: AdaptScope): Option<Array
             }
             continue
         }
+        if (let Some(callExpr) <- (node as ParseCallExpr)) {
+            // A bare `println(<expr>)` / `print(<expr>)` statement: lower to a runtime PRINT when its
+            // argument is a supported Int64 expression. (Calls to user functions are expressions, not
+            // statements, so only print built-ins reach here as statement-level calls.)
+            match (adaptPrint(callExpr, scope)) {
+                case Some(stmt) => out.add(stmt)
+                case None => return None
+            }
+            continue
+        }
         // Any other statement kind: unsupported -> fall back.
         return None
     }
@@ -372,6 +382,59 @@ private func adaptExpr(expr: ParseExpr, scope: AdaptScope): Option<ChirExprSpec>
         return Some(ChirExprSpec.Binary(op, lhsSpec, rhsSpec))
     }
     return None
+}
+
+// Adapt a statement-level `println(<expr>)` / `print(<expr>)` into a runtime PRINT stmt spec.
+// Only the print built-ins with exactly one positional argument are recognized; the argument must be
+// a supported runtime Int64 expression. A bare integer or string literal argument is deliberately
+// rejected (returns None) so it stays on the already-verified summary print path for byte-for-byte
+// parity; this path handles only genuine runtime values (var refs, user calls, arithmetic).
+private func adaptPrint(call: ParseCallExpr, scope: AdaptScope): Option<ChirStmtSpec> {
+    let base = match (call.baseFunc) {
+        case Some(b) => b
+        case None => return None
+    }
+    let calleeRef = match (base as ParseRefExpr) {
+        case Some(r) => r
+        case None => return None
+    }
+    if (!calleeRef.typeArguments.isEmpty()) {
+        return None
+    }
+    let calleeName = calleeRef.identifier.Val()
+    if (calleeName != "println" && calleeName != "print") {
+        return None
+    }
+    // A local/param named `print`/`println` shadows the built-in: do not treat as a print.
+    if (scope.locals.contains(calleeName)) {
+        return None
+    }
+    let newline = calleeName == "println"
+    if (call.args.size != 1) {
+        return None
+    }
+    let funcArg = call.args[0]
+    if (!funcArg.name.Empty() || funcArg.withInout) {
+        return None
+    }
+    let argExpr = match (funcArg.expr) {
+        case Some(e) => e
+        case None => return None
+    }
+    // Leave a pure literal argument (int or string) to the summary path.
+    if (intLiteralValue(argExpr).isSome()) {
+        return None
+    }
+    let argSpec = match (adaptExpr(argExpr, scope)) {
+        case Some(e) => e
+        case None => return None
+    }
+    // Require genuine runtime computation for the printed value (a bare let-bound literal ref does
+    // not set needsRuntime via adaptExpr, so it would not promote -- which is fine: such a case
+    // stays on the summary int path). adaptExpr already sets needsRuntime for var/param refs,
+    // binary ops, and calls; reflect that the body needs the real path.
+    scope.needsRuntime = true
+    return Some(ChirStmtSpec.Print(argSpec, newline: newline))
 }
 
 // Adapt a call `f(arg0, arg1, ...)` over a simple top-level function name into a CHIR CALL expr

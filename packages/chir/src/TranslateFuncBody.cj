@@ -111,6 +111,24 @@ extend AST2CHIRDeclTranslator {
             LowerWhile(fn, stmt, state)
             return
         }
+        if (stmt.IsPrint()) {
+            LowerPrint(fn, stmt, state)
+            return
+        }
+    }
+
+    // Lower `println(<expr>)` / `print(<expr>)` of a runtime Int64 value. The expression is evaluated
+    // into a genuine CHIR Value in the current block; we then record (value identifier, newline) on
+    // the Function so codegen can emit a printf("%ld"/"%ld\n", <value>) right after that value is
+    // materialized -- printing the real runtime result, not a folded literal.
+    private func LowerPrint(fn: Function, stmt: AST2CHIRStmtSpec, state: RealBodyState): Unit {
+        if (let Some(value) <- EvalExpr(stmt.expr, state)) {
+            let valueId = value.GetIdentifierWithoutPrefix()
+            if (!valueId.isEmpty()) {
+                fn.runtimePrintValueIds.add(valueId)
+                fn.runtimePrintNewlines.add(stmt.isVar)
+            }
+        }
     }
 
     private func LowerIf(fn: Function, stmt: AST2CHIRStmtSpec, state: RealBodyState): Unit {

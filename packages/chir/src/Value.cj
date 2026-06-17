@@ -736,6 +736,13 @@ public class Function <: GlobalValue {
     public let printStrings: ArrayList<String> = ArrayList<String>()
     public let printNewlines: ArrayList<Bool> = ArrayList<Bool>()
     public let printIsInt: ArrayList<Bool> = ArrayList<Bool>()
+    // Runtime-value print directives for the real-body path. Each entry names the
+    // GetIdentifierWithoutPrefix() of a CHIR result Value computed in the body; codegen emits a
+    // printf("%ld"/"%ld\n", <that value>) immediately after the value is materialized, so the
+    // value printed is the genuine runtime result (a loop accumulator, a call result, etc.).
+    // runtimePrintNewlines is a parallel list: true => println (trailing newline), false => print.
+    public let runtimePrintValueIds: ArrayList<String> = ArrayList<String>()
+    public let runtimePrintNewlines: ArrayList<Bool> = ArrayList<Bool>()
 
     public init(funcType: FuncType, identifier: String, srcCodeIdentifier: String, rawMangledName: String,
         packageName: String) {

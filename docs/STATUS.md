@@ -27,14 +27,17 @@ The following programs compile with the self-host `cjc`
 shown. Each was re-verified by real compile-and-run on 2026-06-17 after merging
 `opus2/int-arith-return`, `opus2/println-int`, `opus3/real-expr`,
 `opus4/control-flow` (var/assign, relational ops, `if`/`while` via real CHIR
-blocks), and `opus5/func-calls` (user-defined function calls + recursion via
-real CHIR `Apply`) into `main`:
+blocks), `opus5/func-calls` (user-defined function calls + recursion via
+real CHIR `Apply`), and `opus6/print-runtime` (`println`/`print` of a
+runtime-computed value) into `main`:
 
 | Source | Verified behavior |
 | --- | --- |
 | `func add(a: Int64, b: Int64): Int64 { return a + b }` ⏎ `main(): Int64 { return add(2, 3) }` | exits with code 5, computed at **runtime** by a real CHIR `Apply` to the user function `add` |
 | `func fact(n: Int64): Int64 { if (n<=1){return 1} else {return n*fact(n-1)} }` ⏎ `main(): Int64 { return fact(5) }` | exits with code 120 via **recursion** (CHIR dump shows recursive `Apply(_Cdefault_fact, ...)` self-calls) |
 | `main(): Int64 { var sum=0; var i=1; while (i<=5){ sum=sum+i; i=i+1 }; return sum }` | exits with code 15, computed at **runtime** by a genuine CHIR `while` loop (no folding; sum 1..10 separately verified -> 55) |
+| `main() { var s=0; var i=1; while (i<=10){ s=s+i; i=i+1 }; println(s) }` | prints `55` -- the **runtime** loop accumulator, lowered through a real-body PRINT (`printf("%ld\n", <CHIR value>)`), not a folded literal |
+| `func fact(n: Int64): Int64 { ... }` ⏎ `main() { println(fact(10)) }` | prints `3628800` -- the **runtime** result of a recursive CHIR `Apply` (value exceeds the 0..255 exit-code clamp, so the printed text is the real evidence) |
 | `main(): Int64 { var x = 2; x = x + 3; return x }` | exits with code 5 (`var` slot + reassignment Store) |
 | `main(): Int64 { let a = 7; if (a > 3) { return 1 } else { return 0 } }` | exits with code 1 (real `if`/`else` CHIR blocks + relational branch condition) |
 | `main(): Int64 { let a = 2; let b = 3; return a + b }` | exits with code 5, computed at **runtime** by a real CHIR `Add` (not folded) |
@@ -58,7 +61,11 @@ Capability detail:
   an `Int64` at compile time (conservative: any unsupported token or
   division-by-zero falls back to the single-literal/let-fold path).
 - println/print of an integer literal (optionally signed) or a let-bound integer
-  literal, emitted as decimal text.
+  literal, emitted as decimal text (summary path).
+- println/print of a **runtime-computed `Int64` value** (loop accumulator,
+  function-call result, arithmetic over locals/params), emitted via a real
+  `printf("%ld"/"%ld\n", <CHIR value>)` at the value's computation point (real-body
+  PRINT path; see the runtime-print milestone below).
 - **First non-facade body lowering (real-expression milestone):**
   `main(): Int64 { let a = 2; let b = 3; return a + b }` now compiles through the
   real recursive-descent parser (`packages/parse`) rather than the token-summary
@@ -122,6 +129,32 @@ Capability detail:
   even a body like `return x` is promoted to the real typed path. Verified at runtime
   (no folding): `add(2,3)` -> 5; `sq(7)` -> 49; `fact(5)` -> 120 (recursion);
   `fib(10)` -> 55; `add(2, mul(3,4))` -> 14; callee declared after `main` -> 10.
+- **Runtime-print milestone (`opus6/print-runtime`):** `println(<expr>)` /
+  `print(<expr>)` now print a genuinely runtime-computed `Int64` value (a loop
+  accumulator, a function-call result, an arithmetic expression over locals/params),
+  not just a string literal or a foldable integer. It is additive and gated like the
+  prior milestones: a pure string / bare-int-literal print argument still flows through
+  the already-verified summary print side-channel (byte-for-byte unchanged), and only a
+  print of a value that needs real computation promotes the body to the real path. The
+  spec model (`packages/chir/src/AST2CHIR.cj`) gains a `PRINT` `AST2CHIRStmtSpec` kind
+  carrying the argument expr and a newline flag. `TranslateFuncBody.cj` `LowerPrint`
+  evaluates that expr to a real CHIR `Value` in body flow and records its result
+  identifier plus the newline flag on the `Function` (`runtimePrintValueIds` /
+  `runtimePrintNewlines` in `Value.cj`). Codegen does not invent a new CHIR expression:
+  in `EmitExpressionIR.cj` `MaybeEmitRuntimePrint`, right after each CHIR result Value is
+  materialized to an LLVM value, a matching directive triggers a real
+  `printf("%ld"/"%ld\n", <that value>)` (`EmitRuntimeIntPrint` in `EmitPrintIR.cj`,
+  reusing the proven format-string-global + libc-`printf` machinery), inserted at the
+  value's computation point so ordering relative to the surrounding loop/branch is
+  correct. A directive is consumed once to avoid double-printing on a repeated value id.
+  This milestone also fixed a latent real-body return-type bug: a `main() { ... }` with no
+  declared return type previously defaulted to `Int64` on the real path (mismatching its
+  `Exit(None)` -> `ret void` terminator, a broken LLVM module). `CodeGenBridge.cj` now
+  infers Unit vs `Int64` from the body itself (`realBodyReturnsValue`: does any nested
+  `return` carry an expression?) when the frontend summary did not record a return type.
+  Verified at runtime (no folding): while-loop sum 1..10 -> prints `55`;
+  `println(fact(10))` -> prints `3628800`; `println(sq(7))` -> `49`;
+  `print(s); println(s)` after a loop -> `1515` (15 with no newline, then 15 + newline).
 
 These are the only source constructs the integrated pipeline lowers end to end
 today; anything else still flows through the compatibility models described
@@ -129,11 +162,15 @@ below.
 
 ### Remaining de-isolation follow-ups
 
-- **`println` of runtime values.** `println`/`print` still only emit string
-  literals or *literal*/let-bound integers through the summary path; printing a
-  runtime-computed value (e.g. a loop accumulator or function result) is not yet
-  wired through the real body path. Lower `println(<expr>)` to a real call against
-  the computed CHIR value.
+- **Non-`Int64` print values and `Bool`/`String` runtime values.** The runtime print
+  path lowers an `Int64` value to `printf("%ld")`; printing a runtime `Bool`,
+  `String`, or other-width integer/float value is not yet wired. Extend
+  `EmitRuntimeIntPrint` / the PRINT lowering (format selection + a real `Bool`/string
+  runtime representation) once those value types flow through the real body.
+- **More operators and statement kinds on the real path.** `for-in`, `match`, early
+  `break`/`continue`, logical `&&`/`||`, and compound assignment are still
+  unsupported (the body falls back to the summary path). Extend `RealParseBridge` ->
+  `AST2CHIRStmtSpec`/`AST2CHIRExprSpec` -> `CreateRealBody`.
 - **Retire the summary parser.** Once the real parser drives every supported
   construct, remove the frontend token-summary scanner
   (`packages/frontend/src/CompileStrategy.cj` `parseLiteralReturn` /
@@ -167,7 +204,7 @@ return a + b` slice that exits 5 via a runtime CHIR `Add`) is in
 | C++ reference components with no same-named `.cj` component | 172 |
 | Required build command | `cjpm build` |
 | Build result | pass |
-| Build notes | 25 warnings: Lex 1, Parse 22, Sema 1, CodeGen 1 |
+| Build notes | clean `cjpm build` (0 warnings on a full rebuild) |
 
 Only source markers are counted as remaining work markers. Historical mentions
 inside `docs/status/*.md` are documentation references, not live source TODOs.

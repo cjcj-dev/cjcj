@@ -76,6 +76,49 @@ func EmitFunctionPrintDirectives(cgMod: CGModule, cgFunc: CGFunction, chirFunc: 
     }
 }
 
+// Emit a runtime-value integer print: printf("%ld"/"%ld\n", <value>) using the LLVM `builder` at its
+// current insert point (so the call lands right where the value was computed in body flow). `value`
+// is an already-materialized i64 LLVM value (a loop accumulator, a call result, etc.). Returns false
+// if the module handle / builder is unusable. `fmtName` must be unique within the module.
+public func EmitRuntimeIntPrint(cgMod: CGModule, builderRaw: LLVMBuilderRef, value: LLVMValueRef,
+    newline: Bool, fmtName: String): Bool {
+    if (value.isNull() || builderRaw.isNull()) {
+        return false
+    }
+    if (let Some(moduleHandle) <- cgMod.GetLLVMModule()) {
+        let ctx = cgMod.GetLLVMContext().raw
+        let i8Type = unsafe { LLVMInt8TypeInContext(ctx) }
+        let i8PtrType = unsafe { LLVMPointerType(i8Type, 0u32) }
+        let i32Type = unsafe { LLVMInt32TypeInContext(ctx) }
+        let i64Type = unsafe { LLVMInt64TypeInContext(ctx) }
+        let printfType = BuildPrintfFunctionType(i32Type, i8PtrType)
+        let printfFn = GetOrInsertRuntimePrintFunction(moduleHandle, "printf", printfType)
+        let fmt = if (newline) { "%ld\n" } else { "%ld" }
+        let fmtPtr = EmitStringGlobalPtr(moduleHandle, builderRaw, ctx, fmt, i32Type, fmtName)
+        // The value may be a narrower integer (e.g. i1/i32); widen to i64 for the %ld format.
+        var argValue = value
+        let valueType = unsafe { LLVMTypeOf(value) }
+        if (unsafe { LLVMGetTypeKind(valueType) } == 8) {
+            let width = unsafe { LLVMGetIntTypeWidth(valueType) }
+            if (width < 64u32) {
+                try (extName = unsafe { LibC.mallocCString("") }.asResource()) {
+                    argValue = unsafe { LLVMBuildSExt(builderRaw, value, i64Type, extName.value) }
+                }
+            }
+        }
+        try (emptyName = unsafe { LibC.mallocCString("") }.asResource(),
+            argPtr = LibC.malloc<LLVMValueRef>(count: 2).asResource()) {
+            unsafe {
+                (argPtr.value + 0).write(fmtPtr)
+                (argPtr.value + 1).write(argValue)
+                let _ = LLVMBuildCall2(builderRaw, printfType, printfFn, argPtr.value, 2u32, emptyName.value)
+            }
+        }
+        return true
+    }
+    return false
+}
+
 private func BuildPutsFunctionType(i32Type: LLVMTypeRef, i8PtrType: LLVMTypeRef): LLVMTypeRef {
     var result = LLVMNullType()
     try (paramPtr = LibC.malloc<LLVMTypeRef>(count: 1).asResource()) {
