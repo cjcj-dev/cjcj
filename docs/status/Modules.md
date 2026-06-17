@@ -26,6 +26,8 @@ This continuation tightened import-indexing and LSP/macros behavior against the 
 
 This pass aligned additional CJO manager details with the C++ implementation: tool-added packages registered through `AddImportedPackageFromASTNode` are no longer marked as normal imported CJO packages, CJO read failures now use the `module_read_file_to_buffer_failed` diagnostic kind and Basic forwarding, and standard-library dependency recording now requires an existing CJO path like the reference `HandleStdPackage` path.
 
+This pass aligned dependency graph and package-order dependency collection with the C++ assumption that imports are already resolved before these phases run: unresolved imports are now skipped instead of re-running CJO lookup during graph construction or Tarjan dependency collection, and `GetAllDependencyPackageNames` uses the same full-package-name cache key shape as the C++ implementation.
+
 ## Implemented
 
 - Replaced `ModulesScaffold.cj` with per-component source files under `packages/modules/src`.
@@ -55,7 +57,10 @@ This pass aligned additional CJO manager details with the C++ implementation: to
 - Matched the C++ `LoadPackageFromCjo` LSP path by recursively loading dependent package headers before loading declarations and references on demand.
 - Matched the C++ macro-debug file replacement path by cloning compiler-added implicit import nodes into the replacement file rather than reusing mutable import nodes from the old file.
 - Implemented `DependencyGraph` direct/transitive dependency collection with macro re-export handling and cache invalidation.
+- Matched C++ dependency graph traversal by using the resolved `GetPackageNameByImport` mapping directly during graph construction and skipping unresolved imports instead of invoking CJO lookup again.
+- Matched the C++ dependency-name cache keying for `DependencyGraph.GetAllDependencyPackageNames`.
 - Implemented `PackageManager` Tarjan SCC ordering and source package reordering behavior.
+- Matched C++ package-manager dependency collection by using resolved package names only, preventing package-order analysis from mutating import resolution state.
 - Added a compiling local AST writer/loader wire format so exported package/import/member data can round-trip inside this package while the real flatbuffer/AST dependencies are unavailable.
 - Improved that local AST writer/loader bridge to preserve `exportedInternalDecls` records, reload them into `File.exportedInternalDecls`, and suppress `doNotExport` declarations during serialization in line with the C++ writer's export filtering.
 - Continued the local serialization layer with type interning, cached declaration diffing, resolved dependency-name extraction, import reference loading, deterministic expression table serialization/deserialization, reference resolution maps, deterministic incremental removed-mangle serialization/parsing, C++-style JSON control-byte escaping, node source-range/attribute preservation, and package file ownership normalization.

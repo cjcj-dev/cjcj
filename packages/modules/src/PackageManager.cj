@@ -99,10 +99,6 @@ public class PackageManager {
     private func CollectDepsInFile(file: File, pkgInfo: PackageInfo, pkg: Package): Unit {
         for (importSpec in file.imports) {
             var fullPkgName = importManager.GetCjoManager().GetPackageNameByImport(importSpec)
-            if (fullPkgName.isEmpty()) {
-                let pair = importManager.GetCjoManager().GetPackageCjo(importSpec)
-                fullPkgName = pair[0]
-            }
             let pdOpt = importManager.GetCjoManager().GetPackageDecl(fullPkgName)
             if (let None <- pdOpt) {
                 continue
