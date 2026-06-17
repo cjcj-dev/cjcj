@@ -37,6 +37,10 @@ Implemented:
   macro's version source, while the explicit-version overload remains useful for tests. The helper is
   generic over the concrete transform subclass, so callers do not need to pre-widen plugin factories to
   `MetaTransformConcept` before registration.
+- Exposed the C++ macro's getter-level contract in Cangjie: `META_TRANSFORM_PLUGIN_INFO_SYMBOL` records
+  the exact `getMetaTransformPluginInfo` symbol spelling used by the C++ loader, and
+  `MetaTransformPluginInfoGetter` plus CHIR getter helpers model the zero-argument function that returns
+  plugin info.
 - Added typed CHIR transform factory aliases and function/package-specific plugin-info helpers. These
   preserve the C++ macro's type-specific construction path more closely for Cangjie plugins that derive
   from `CHIRFunctionMetaTransform` or `CHIRPackageMetaTransform`; the helpers are generic over the
