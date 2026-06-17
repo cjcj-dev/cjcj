@@ -6,6 +6,13 @@ Build: `cjpm build` passes.
 
 Deepening pass updates:
 
+- Replaced the Basic-local placeholder polynomial `Utils::GetHash` with the C++ reference's platform string-hash
+  behavior for this selfhost target: the non-Windows path now implements libstdc++ `_Hash_bytes`/`std::hash<string>`
+  mixing, with a Windows FNV path matching MSVC-style string hashing. This makes source file hashes and CJMP hash IDs
+  align with the C++ `Utils::GetHash` contract instead of using a port-only hash.
+- Added explicit mutating `Position.AddAssign` and `Position.SubAssign` methods for the C++ `operator+=` and
+  `operator-=` behavior. Cangjie cannot return `this` from a mutable struct method, so the methods mutate in place and
+  return `Unit` while preserving the C++ field-update semantics.
 - Aligned diagnostic text rendering for missing backing source files with the C++ emitter: location lines are skipped
   when `SourceManager::IsSourceFileExist` is false, and source excerpts omit numbered prefixes in that case while
   keeping the gutter/source body.
