@@ -48,6 +48,12 @@ Implemented in this pass:
 - Added `IRBuilder2.CreateCallOrInvoke(CGFunctionType, ...)` and `CreateCallOrInvoke(CGFunction, ...)` wrappers that
   mirror the C++ overload shape: they synthesize a leading struct-return slot, attach typed `sret` plus `noalias` on the
   call, return the sret storage for struct-return calls, and normalize Unit-return calls to `GenerateUnitTypeValue()`.
+- Added LLVM exception-handling builder bindings and `IRBuilder2` wrappers for native landing-pad token type,
+  landing-pad clauses/cleanup flag, resume, catch/cleanup pads, catch switches/handlers, and catch/cleanup returns.
+  This mirrors the C++ wrapper surface used by landing-pad block emission while keeping LLVM itself external.
+- Added C++-style basic-block insertion helpers: create-before-first-entry for true entry insertion and
+  create-and-insert-after-current variants that preserve the C++ block ordering used by overflow/type-info helper
+  generation.
 
 Known remaining gaps for this scope:
 
@@ -55,13 +61,15 @@ Known remaining gaps for this scope:
   emitters: full target initialization policy, package-level object/assembly emission orchestration, complete
   pass-pipeline selection, target-dependent ABI/CFFI attributes, and precise debug-info attachment for
   functions/types/locals.
-- `IRBuilder2` restores insertion to the current block after entry alloca creation; the C API wrapper does not yet
+- `IRBuilder2` restores insertion to the current block after entry alloca creation; the C API wrapper still does not
   preserve an arbitrary instruction iterator the way C++ `IRBuilder` does.
 - The new `CGFunctionType` call wrapper covers known-size struct-return setup and call attributes, but the full C++
   unknown-size generic sret path still depends on later generic-allocation/type-info intrinsic lowering.
+- Landing-pad construction now has the LLVM wrapper surface, but higher-level CHIR landing-pad block emission and
+  personality-function assignment are still incomplete in the partial self-host port.
 - The target-machine and pass-builder wrappers are ready for callers, but the package-level emission path does not yet
   drive them end to end.
 
 Remaining `TODO(selfhost:CodeGen)` markers in this llvm-ffi slice: 0.
 
-Estimated behavior coverage for this llvm-ffi/module/context/IRBuilder slice: 56%.
+Estimated behavior coverage for this llvm-ffi/module/context/IRBuilder slice: 59%.

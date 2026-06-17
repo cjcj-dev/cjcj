@@ -126,6 +126,7 @@ foreign {
     func LLVMHalfTypeInContext(context: LLVMContextRef): LLVMTypeRef
     func LLVMFloatTypeInContext(context: LLVMContextRef): LLVMTypeRef
     func LLVMDoubleTypeInContext(context: LLVMContextRef): LLVMTypeRef
+    func LLVMTokenTypeInContext(context: LLVMContextRef): LLVMTypeRef
     func LLVMPointerType(elementType: LLVMTypeRef, addressSpace: UInt32): LLVMTypeRef
     func LLVMArrayType(elementType: LLVMTypeRef, elementCount: UInt32): LLVMTypeRef
     func LLVMGetTypeByName2(context: LLVMContextRef, name: CString): LLVMTypeRef
@@ -262,6 +263,23 @@ foreign {
     func LLVMBuildInvoke2(builder: LLVMBuilderRef, functionType: LLVMTypeRef, fn: LLVMValueRef,
         args: CPointer<LLVMValueRef>, numArgs: UInt32, thenBlock: LLVMBasicBlockRef, catchBlock: LLVMBasicBlockRef,
         name: CString): LLVMValueRef
+    func LLVMBuildResume(builder: LLVMBuilderRef, exception: LLVMValueRef): LLVMValueRef
+    func LLVMBuildLandingPad(builder: LLVMBuilderRef, valueType: LLVMTypeRef, personality: LLVMValueRef,
+        numClauses: UInt32, name: CString): LLVMValueRef
+    func LLVMBuildCleanupRet(builder: LLVMBuilderRef, catchPad: LLVMValueRef, block: LLVMBasicBlockRef): LLVMValueRef
+    func LLVMBuildCatchRet(builder: LLVMBuilderRef, catchPad: LLVMValueRef, block: LLVMBasicBlockRef): LLVMValueRef
+    func LLVMBuildCatchPad(builder: LLVMBuilderRef, parentPad: LLVMValueRef, args: CPointer<LLVMValueRef>,
+        numArgs: UInt32, name: CString): LLVMValueRef
+    func LLVMBuildCleanupPad(builder: LLVMBuilderRef, parentPad: LLVMValueRef, args: CPointer<LLVMValueRef>,
+        numArgs: UInt32, name: CString): LLVMValueRef
+    func LLVMBuildCatchSwitch(builder: LLVMBuilderRef, parentPad: LLVMValueRef, unwindBlock: LLVMBasicBlockRef,
+        numHandlers: UInt32, name: CString): LLVMValueRef
+    func LLVMGetNumClauses(landingPad: LLVMValueRef): UInt32
+    func LLVMGetClause(landingPad: LLVMValueRef, index: UInt32): LLVMValueRef
+    func LLVMAddClause(landingPad: LLVMValueRef, clauseVal: LLVMValueRef): Unit
+    func LLVMIsCleanup(landingPad: LLVMValueRef): Int32
+    func LLVMSetCleanup(landingPad: LLVMValueRef, value: Int32): Unit
+    func LLVMAddHandler(catchSwitch: LLVMValueRef, dest: LLVMBasicBlockRef): Unit
     func LLVMBuildGEP2(builder: LLVMBuilderRef, elementType: LLVMTypeRef, pointer: LLVMValueRef, indices: CPointer<LLVMValueRef>, numIndices: UInt32, name: CString): LLVMValueRef
     func LLVMBuildInBoundsGEP2(builder: LLVMBuilderRef, elementType: LLVMTypeRef, pointer: LLVMValueRef,
         indices: CPointer<LLVMValueRef>, numIndices: UInt32, name: CString): LLVMValueRef

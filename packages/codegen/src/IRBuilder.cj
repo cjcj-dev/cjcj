@@ -181,6 +181,53 @@ public class IRBuilder2 {
         return result
     }
 
+    public func CreateEntryBasicBlockBeforeFirst(parent: LLVMValueRef, name: String): LLVMBasicBlockRef {
+        var result = LLVMNullBasicBlock()
+        try (nameCString = unsafe { LibC.mallocCString(name) }.asResource()) {
+            let oldEntry = unsafe { LLVMGetFirstBasicBlock(parent) }
+            if (oldEntry.isNull()) {
+                result = unsafe { LLVMAppendBasicBlockInContext(GetLLVMContext().raw, parent, nameCString.value) }
+            } else {
+                result = unsafe { LLVMInsertBasicBlockInContext(GetLLVMContext().raw, oldEntry, nameCString.value) }
+            }
+        }
+        return result
+    }
+
+    public func CreateAndInsertBasicBlock(name: String): LLVMBasicBlockRef {
+        let currentBlock = GetInsertBlock()
+        if (currentBlock.isNull()) {
+            return LLVMNullBasicBlock()
+        }
+        let currentFunction = unsafe { LLVMGetBasicBlockParent(currentBlock) }
+        if (currentFunction.isNull()) {
+            return LLVMNullBasicBlock()
+        }
+        let inserted = CreateEntryBasicBlock(currentFunction, name)
+        unsafe { LLVMMoveBasicBlockAfter(inserted, currentBlock) }
+        return inserted
+    }
+
+    public func CreateAndInsertBasicBlocks(names: ArrayList<String>): ArrayList<LLVMBasicBlockRef> {
+        let result = ArrayList<LLVMBasicBlockRef>()
+        let currentBlock = GetInsertBlock()
+        if (currentBlock.isNull()) {
+            return result
+        }
+        let currentFunction = unsafe { LLVMGetBasicBlockParent(currentBlock) }
+        if (currentFunction.isNull()) {
+            return result
+        }
+        var insertAfter = currentBlock
+        for (name in names) {
+            let created = CreateEntryBasicBlock(currentFunction, name)
+            unsafe { LLVMMoveBasicBlockAfter(created, insertAfter) }
+            result.add(created)
+            insertAfter = created
+        }
+        return result
+    }
+
     public func SetInsertPoint(block: LLVMBasicBlockRef): Unit {
         if (block.isNull()) {
             ClearInsertionPoint()
@@ -749,6 +796,127 @@ public class IRBuilder2 {
 
     public func CreateUnreachable(): LLVMValueRef {
         return unsafe { LLVMBuildUnreachable(builder.raw) }
+    }
+
+    public func GetLandingPadType(): LLVMTypeRef {
+        return unsafe { LLVMTokenTypeInContext(GetLLVMContext().raw) }
+    }
+
+    public func CreateLandingPad(landingPadType: LLVMTypeRef, numClauses: UInt32,
+        name!: String = "landingpad"): LLVMValueRef {
+        var result = LLVMNullValue()
+        try (nameCString = unsafe { LibC.mallocCString(name) }.asResource()) {
+            result = unsafe {
+                LLVMBuildLandingPad(builder.raw, landingPadType, LLVMNullValue(), numClauses, nameCString.value)
+            }
+        }
+        return result
+    }
+
+    public func CreateLandingPad(numClauses: UInt32, name!: String = "landingpad"): LLVMValueRef {
+        return CreateLandingPad(GetLandingPadType(), numClauses, name: name)
+    }
+
+    public func AddLandingPadClause(landingPad: LLVMValueRef, clause: LLVMValueRef): Unit {
+        if (!landingPad.isNull() && !clause.isNull()) {
+            unsafe { LLVMAddClause(landingPad, clause) }
+        }
+    }
+
+    public func AddLandingPadCatchAllClause(landingPad: LLVMValueRef): Unit {
+        let catchAll = unsafe {
+            LLVMConstNull(LLVMPointerType(LLVMInt8TypeInContext(GetLLVMContext().raw), 0u32))
+        }
+        AddLandingPadClause(landingPad, catchAll)
+    }
+
+    public func GetLandingPadClauseCount(landingPad: LLVMValueRef): UInt32 {
+        if (landingPad.isNull()) {
+            return 0u32
+        }
+        return unsafe { LLVMGetNumClauses(landingPad) }
+    }
+
+    public func GetLandingPadClause(landingPad: LLVMValueRef, index: UInt32): LLVMValueRef {
+        if (landingPad.isNull() || index >= GetLandingPadClauseCount(landingPad)) {
+            return LLVMNullValue()
+        }
+        return unsafe { LLVMGetClause(landingPad, index) }
+    }
+
+    public func SetLandingPadCleanup(landingPad: LLVMValueRef, cleanup: Bool): Unit {
+        if (!landingPad.isNull()) {
+            unsafe { LLVMSetCleanup(landingPad, if (cleanup) { 1 } else { 0 }) }
+        }
+    }
+
+    public func IsLandingPadCleanup(landingPad: LLVMValueRef): Bool {
+        return !landingPad.isNull() && unsafe { LLVMIsCleanup(landingPad) } != 0
+    }
+
+    public func CreateResume(exceptionValue: LLVMValueRef): LLVMValueRef {
+        return unsafe { LLVMBuildResume(builder.raw, exceptionValue) }
+    }
+
+    public func CreateCleanupRet(catchPad: LLVMValueRef, block: LLVMBasicBlockRef): LLVMValueRef {
+        return unsafe { LLVMBuildCleanupRet(builder.raw, catchPad, block) }
+    }
+
+    public func CreateCatchRet(catchPad: LLVMValueRef, block: LLVMBasicBlockRef): LLVMValueRef {
+        return unsafe { LLVMBuildCatchRet(builder.raw, catchPad, block) }
+    }
+
+    public func CreateCatchPad(parentPad: LLVMValueRef, args: ArrayList<LLVMValueRef>,
+        name!: String = "catchpad"): LLVMValueRef {
+        return CreateFuncletPad(parentPad, args, true, name: name)
+    }
+
+    public func CreateCleanupPad(parentPad: LLVMValueRef, args: ArrayList<LLVMValueRef>,
+        name!: String = "cleanuppad"): LLVMValueRef {
+        return CreateFuncletPad(parentPad, args, false, name: name)
+    }
+
+    private func CreateFuncletPad(parentPad: LLVMValueRef, args: ArrayList<LLVMValueRef>, isCatch: Bool,
+        name!: String): LLVMValueRef {
+        var result = LLVMNullValue()
+        try (nameCString = unsafe { LibC.mallocCString(name) }.asResource()) {
+            if (args.isEmpty()) {
+                result = if (isCatch) {
+                    unsafe { LLVMBuildCatchPad(builder.raw, parentPad, CPointer<LLVMValueRef>(), 0u32, nameCString.value) }
+                } else {
+                    unsafe { LLVMBuildCleanupPad(builder.raw, parentPad, CPointer<LLVMValueRef>(), 0u32, nameCString.value) }
+                }
+            } else {
+                try (argPtr = LibC.malloc<LLVMValueRef>(count: args.size).asResource()) {
+                    var idx: Int64 = 0
+                    while (idx < args.size) {
+                        unsafe { (argPtr.value + idx).write(args[idx]) }
+                        idx++
+                    }
+                    result = if (isCatch) {
+                        unsafe { LLVMBuildCatchPad(builder.raw, parentPad, argPtr.value, UInt32(args.size), nameCString.value) }
+                    } else {
+                        unsafe { LLVMBuildCleanupPad(builder.raw, parentPad, argPtr.value, UInt32(args.size), nameCString.value) }
+                    }
+                }
+            }
+        }
+        return result
+    }
+
+    public func CreateCatchSwitch(parentPad: LLVMValueRef, unwindBlock: LLVMBasicBlockRef, handlerCountHint: UInt32,
+        name!: String = "catchswitch"): LLVMValueRef {
+        var result = LLVMNullValue()
+        try (nameCString = unsafe { LibC.mallocCString(name) }.asResource()) {
+            result = unsafe { LLVMBuildCatchSwitch(builder.raw, parentPad, unwindBlock, handlerCountHint, nameCString.value) }
+        }
+        return result
+    }
+
+    public func AddCatchSwitchHandler(catchSwitch: LLVMValueRef, dest: LLVMBasicBlockRef): Unit {
+        if (!catchSwitch.isNull() && !dest.isNull()) {
+            unsafe { LLVMAddHandler(catchSwitch, dest) }
+        }
     }
 
     public func CreateAggregateValue(aggregateType: LLVMTypeRef, elements: ArrayList<LLVMValueRef>,
