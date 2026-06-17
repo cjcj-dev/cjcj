@@ -924,7 +924,6 @@ public func TypeCheckReferenceKindOfDeprecatedDeclaration(
     usage: Node,
     target: Decl
 ): Option<String> {
-    let _ = usage
     if (target.astKind == ASTKind.CLASS_DECL) {
         return Some("class")
     }
@@ -955,6 +954,13 @@ public func TypeCheckReferenceKindOfDeprecatedDeclaration(
     if (target.astKind == ASTKind.FUNC_DECL) {
         if (target.TestAttr(Attribute.MACRO_FUNC)) {
             return None
+        }
+        if (target.TestAttr(Attribute.ENUM_CONSTRUCTOR)) {
+            if (let Some(memberAccess) <- (usage as MemberAccess)) {
+                if (memberAccess.isPattern) {
+                    return None
+                }
+            }
         }
         if (let Some(funcDecl) <- (target as FuncDecl)) {
             if (funcDecl.isSetter) {
@@ -1007,6 +1013,28 @@ private func TypeCheckReferenceExtractDeprecatedArguments(annotation: Annotation
     return (message, since, strict)
 }
 
+private func TypeCheckReferenceIsSamePackageAsContext(target: Decl, context: Option<Node>): Bool {
+    if (let Some(contextNode) <- context) {
+        return target.IsSamePackage(contextNode)
+    }
+    return false
+}
+
+private func TypeCheckReferenceShouldSkipDeprecationDiagnostic(
+    target: Decl,
+    strict: Bool,
+    deprecatedContext: Option<Node>,
+    strictDeprecatedContext: Option<Node>
+): Bool {
+    if (TypeCheckReferenceIsSamePackageAsContext(target, strictDeprecatedContext)) {
+        return true
+    }
+    if (!strict && TypeCheckReferenceIsSamePackageAsContext(target, deprecatedContext)) {
+        return true
+    }
+    return false
+}
+
 public func TypeCheckReferenceShouldDiagnoseDeprecatedUsage(usage: Node, target: Decl): Bool {
     if (!target.HasAnno(AstAnnotationKind.DEPRECATED)) {
         return false
@@ -1024,7 +1052,9 @@ public func TypeCheckReferenceDiagnoseDeprecatedUsage(
     diag: BasicDiagnosticEngine,
     usage: Node,
     target: Decl,
-    nameOfDiagnose!: String = ""
+    nameOfDiagnose!: String = "",
+    deprecatedContext!: Option<Node> = None,
+    strictDeprecatedContext!: Option<Node> = None
 ): Bool {
     if (!TypeCheckReferenceShouldDiagnoseDeprecatedUsage(usage, target)) {
         return false
@@ -1048,9 +1078,97 @@ public func TypeCheckReferenceDiagnoseDeprecatedUsage(
     } else {
         BasicDiagKindRefactor.sema_deprecated_warning
     }
+    if (TypeCheckReferenceShouldSkipDeprecationDiagnostic(
+        target, strict, deprecatedContext, strictDeprecatedContext)) {
+        return false
+    }
     let builder = diag.DiagnoseRefactor(diagKind, range, arguments: [kind, name, since, message])
     builder.Emit()
     return true
+}
+
+private func TypeCheckReferenceDeprecatedParentOfConstructor(usage: Node, target: Decl): Option<Decl> {
+    if (let Some(funcDecl) <- (target as FuncDecl)) {
+        if (let Some(body) <- funcDecl.funcBody) {
+            if (let Some(parentClassLike) <- body.parentClassLike) {
+                if (parentClassLike.HasAnno(AstAnnotationKind.DEPRECATED)) {
+                    return Some(parentClassLike)
+                }
+            } else if (let Some(parentStruct) <- body.parentStruct) {
+                if (parentStruct.HasAnno(AstAnnotationKind.DEPRECATED)) {
+                    return Some(parentStruct)
+                }
+            } else if (let Some(parentEnum) <- body.parentEnum) {
+                if (parentEnum.HasAnno(AstAnnotationKind.DEPRECATED)) {
+                    return Some(parentEnum)
+                }
+            }
+        }
+        if (let Some(refExpr) <- (usage as RefExpr)) {
+            if (let Some(aliasTarget) <- refExpr.aliasTarget) {
+                if (aliasTarget.HasAnno(AstAnnotationKind.DEPRECATED)) {
+                    return Some(aliasTarget)
+                }
+            }
+        }
+    }
+    if (target.TestAttr(Attribute.ENUM_CONSTRUCTOR)) {
+        if (let Some(varDecl) <- (target as VarDecl)) {
+            if (let Some(outer) <- varDecl.outerDecl) {
+                if (outer.HasAnno(AstAnnotationKind.DEPRECATED)) {
+                    return Some(outer)
+                }
+            }
+        }
+    }
+    return None
+}
+
+public func TypeCheckReferenceDiagnoseDeprecatedUsageWithTarget(
+    diag: BasicDiagnosticEngine,
+    usage: Node,
+    target: Decl,
+    deprecatedContext!: Option<Node> = None,
+    strictDeprecatedContext!: Option<Node> = None
+): Bool {
+    if (target.HasAnno(AstAnnotationKind.DEPRECATED)) {
+        return TypeCheckReferenceDiagnoseDeprecatedUsage(
+            diag,
+            usage,
+            target,
+            deprecatedContext: deprecatedContext,
+            strictDeprecatedContext: strictDeprecatedContext)
+    }
+    if (IsClassOrEnumConstructor(target)) {
+        if (let Some(_) <- (usage as MemberAccess)) {
+            return false
+        }
+        if (!usage.TestAttr(Attribute.COMPILER_ADD)) {
+            if (let Some(parentTarget) <- TypeCheckReferenceDeprecatedParentOfConstructor(usage, target)) {
+                return TypeCheckReferenceDiagnoseDeprecatedUsage(
+                    diag,
+                    usage,
+                    parentTarget,
+                    deprecatedContext: deprecatedContext,
+                    strictDeprecatedContext: strictDeprecatedContext)
+            }
+        }
+    }
+    if (let Some(aliasDecl) <- (target as TypeAliasDecl)) {
+        if (let Some(typeNode) <- aliasDecl.typeNode) {
+            if (let Some(aliasedDecl) <- Ty.GetDeclOfTy(typeNode.GetTy())) {
+                if (aliasedDecl.HasAnno(AstAnnotationKind.DEPRECATED)) {
+                    return TypeCheckReferenceDiagnoseDeprecatedUsage(
+                        diag,
+                        usage,
+                        aliasedDecl,
+                        deprecatedContext: deprecatedContext,
+                        strictDeprecatedContext: strictDeprecatedContext)
+                }
+            }
+        }
+    }
+    return false
 }
 
 public func SelfhostPortStatus_TypeCheckReference(): Bool {

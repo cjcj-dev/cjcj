@@ -1,6 +1,6 @@
 # Sema tc-decl Deepening Status
 
-Date: 2026-06-17
+Date: 2026-06-18
 
 ## Scope
 
@@ -73,6 +73,12 @@ Reference sources inspected from `/root/cj_build/cangjie_compiler/src/Sema`:
   deprecated usage diagnostics now extract `message`, `since`, and `strict`
   from the real `@Deprecated` annotation payload to choose warning vs error and
   preserve diagnostic suffix text.
+- This pass tightened deprecated-reference parity further: direct diagnostics
+  now honor the C++ same-package deprecated/strict-deprecated context
+  suppression, enum constructor member-access patterns are skipped like the C++
+  `GetDiagnoseKindOfFuncDecl` path, and a target-level helper now reports
+  constructor/type-alias mediated deprecations through real AST parent and alias
+  links.
 - Continued class-like parity in `TypeCheckClassLike.cj`: sealed inheritance
   from `specific` declarations now mirrors the C++ package scan for a matching
   common declaration before reporting the specific-sealed diagnostic, and
