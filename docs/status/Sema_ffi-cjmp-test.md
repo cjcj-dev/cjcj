@@ -5,6 +5,13 @@ Build: `cjpm build` passes.
 Scoped selfhost TODO comments: 0 remaining in the requested files.
 Whole-package selfhost TODO grep: 4 existing markers remain outside the allowed ffi-cjmp-test edit area.
 
+## 2026-06-18 CJMP default-argument invariant pass
+
+- Aligned CJMP default-argument propagation with the C++ preconditions: a specific parameter receiving a propagated default must not already have a desugared default declaration or assignment expression.
+- Matched the C++ requirement that a common parameter marked with a default argument must carry a desugared default declaration before propagation.
+- Added abort-on-invariant-failure handling for default declaration clone failure, assignment clone failure, and mismatched already-matched parameter list sizes, using a private C FFI `abort` path to preserve the C++ `CJC_ASSERT` behavior without adding package dependencies.
+- Verified with `cjpm build`; `grep -rn "TODO(selfhost:Sema)" packages/sema/src` still reports the four existing out-of-scope root Sema markers and none in the scoped files.
+
 ## 2026-06-18 mock accessor classification pass
 
 - Switched `MockUtils.ComputeAccessorKind` to the real `GetUsableGetterForProperty` and `GetUsableSetterForProperty` helpers, matching the C++ behavior for inherited/usable property accessors instead of assuming the first getter/setter slot.
@@ -100,4 +107,4 @@ Whole-package selfhost TODO grep: 4 existing markers remain outside the allowed 
 - NativeFFI utilities now cover more reference, generic, type-node, Java-array, and naming helpers, but larger AST synthesis/desugaring helpers, mangler-driven method naming, import-manager core declaration helpers, and full Java/ObjC interop manager behavior remain incomplete.
 - LSP base-name, scope-name, and relative-position helpers are present, but the C++ type synthesizer half remains outside the current self-host surface.
 
-Honest real-behavior coverage for this scoped pass is estimated at 61% versus the corresponding C++ reference surface.
+Honest real-behavior coverage for this scoped pass is estimated at 62% versus the corresponding C++ reference surface.
