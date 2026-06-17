@@ -559,6 +559,132 @@ public func TypeCheckExtendCheckDupDefImplByDiffTypArgs(
     return valid
 }
 
+private func TypeCheckExtendMergeTypeSubstNoConflict(target: TypeSubst, source: TypeSubst): Bool {
+    for (entry in source.entries) {
+        if (let Some(existing) <- target.Get(entry.tyVar)) {
+            if (!SameTy(existing, entry.ty)) {
+                return false
+            }
+        } else {
+            target.Put(entry.tyVar, entry.ty)
+        }
+    }
+    return true
+}
+
+private func TypeCheckExtendCheckSpecializationExtendDupInstantiation(
+    diag: BasicDiagnosticEngine,
+    tm: TypeManager,
+    extendedDeclTy: Ty,
+    compareExtend: ExtendDecl,
+    beComparedDecl: InheritableDecl,
+    instantMapping: TypeSubst,
+    checkParent: Bool
+): Bool {
+    var valid = true
+    for (compareSuperInterface in compareExtend.inheritedTypes) {
+        if (let None <- compareSuperInterface.GetTy()) {
+            continue
+        }
+        let compareTy = compareSuperInterface.GetTy().getOrThrow()
+        if (compareTy.HasGeneric() || compareTy.typeArgs.isEmpty()) {
+            continue
+        }
+        let allSuperTys = TySet()
+        for (inheritedType in beComparedDecl.inheritedTypes) {
+            if (let Some(inheritedTy) <- inheritedType.GetTy()) {
+                if (checkParent) {
+                    allSuperTys.AddAll(tm.GetAllSuperTys(inheritedTy))
+                } else {
+                    allSuperTys.Add(inheritedTy)
+                }
+            }
+        }
+        for (beComparedSuperInterfaceTy in allSuperTys.values) {
+            if (beComparedSuperInterfaceTy.kind != TypeKind.TYPE_INTERFACE ||
+                !beComparedSuperInterfaceTy.HasGeneric()) {
+                continue
+            }
+            let instantTy = tm.GetInstantiatedTy(beComparedSuperInterfaceTy, instantMapping)
+            if (!SameTy(instantTy, compareTy)) {
+                continue
+            }
+            let builder = diag.DiagnoseRefactor(
+                BasicDiagKindRefactor.sema_extend_duplicate_interface,
+                TypeCheckExtendRange(compareSuperInterface),
+                arguments: [compareTy.String(), extendedDeclTy.String()])
+            builder.AddNote(MakeRange(beComparedDecl.begin, beComparedDecl.end),
+                "it may be an instantiated version of the following declaration")
+            builder.Emit()
+            valid = false
+        }
+    }
+    return valid
+}
+
+public func TypeCheckExtendCheckSpecializationExtend(
+    diag: BasicDiagnosticEngine,
+    tm: TypeManager,
+    extendedDecl: InheritableDecl,
+    extendDecl: ExtendDecl,
+    otherExtendDecls: ArrayList<ExtendDecl>
+): Bool {
+    if (let None <- extendedDecl.GetTy()) {
+        return true
+    }
+    let extendedDeclTy = extendedDecl.GetTy().getOrThrow()
+    if (!extendedDeclTy.HasGeneric()) {
+        return true
+    }
+    if (let None <- extendDecl.extendedType) {
+        return true
+    }
+    let extendedType = extendDecl.extendedType.getOrThrow()
+    if (!Ty.IsTyCorrect(extendedType.GetTy())) {
+        return true
+    }
+    let orig2specMapping = GenerateTypeMapping(extendedDecl, extendedType.GetTy().getOrThrow().typeArgs)
+    var valid = TypeCheckExtendCheckSpecializationExtendDupInstantiation(
+        diag, tm, extendedDeclTy, extendDecl, extendedDecl, orig2specMapping, true)
+    for (otherExtend in otherExtendDecls) {
+        if (SameDecl(otherExtend, extendDecl)) {
+            continue
+        }
+        if (let None <- otherExtend.GetTy()) {
+            continue
+        }
+        if (!otherExtend.GetTy().getOrThrow().HasGeneric()) {
+            continue
+        }
+        if (let None <- otherExtend.extendedType) {
+            continue
+        }
+        let otherExtendedType = otherExtend.extendedType.getOrThrow()
+        if (!Ty.IsTyCorrect(otherExtendedType.GetTy())) {
+            continue
+        }
+        let orig2genericMapping = GenerateTypeMapping(extendedDecl, otherExtendedType.GetTy().getOrThrow().typeArgs)
+        let instantMapping = TypeSubst()
+        var needCheck = true
+        for (typeArg in extendedDeclTy.typeArgs) {
+            if (let Some(tyArgGen) <- (typeArg as GenericsTy)) {
+                let mapping = GenerateTypeMappingByTy(orig2genericMapping.Get(tyArgGen), orig2specMapping.Get(tyArgGen))
+                if (!TypeCheckExtendMergeTypeSubstNoConflict(instantMapping, mapping)) {
+                    needCheck = false
+                    break
+                }
+            }
+        }
+        if (needCheck) {
+            if (!TypeCheckExtendCheckSpecializationExtendDupInstantiation(
+                diag, tm, extendedDeclTy, extendDecl, otherExtend, instantMapping, false)) {
+                valid = false
+            }
+        }
+    }
+    return valid
+}
+
 public func TypeCheckExtendBuildMap(
     diag: BasicDiagnosticEngine,
     tm: TypeManager,
@@ -776,6 +902,9 @@ public func TypeCheckExtendCheckDecl(
         if (let Some(inheritableDecl) <- (decl as InheritableDecl)) {
             let extends = tm.GetDeclExtends(inheritableDecl)
             if (!TypeCheckExtendCheckDupDefImplByDiffTypArgs(diag, extends, extendDecl)) {
+                valid = false
+            }
+            if (!TypeCheckExtendCheckSpecializationExtend(diag, tm, inheritableDecl, extendDecl, extends)) {
                 valid = false
             }
         }

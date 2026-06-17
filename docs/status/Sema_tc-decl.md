@@ -98,6 +98,11 @@ Reference sources inspected from `/root/cj_build/cangjie_compiler/src/Sema`:
   generic interface with different type arguments is now wired into extend
   declaration checking, reporting default interface members that do not depend
   on the interface's outside generic parameters.
+- This pass deepened extend specialization checks further: generic class-like
+  extended targets now run the C++ instantiated-interface duplicate check,
+  substituting the original declaration's generic parameters into inherited
+  interfaces and other generic extends while preserving the C++ conflict rule
+  for incompatible repeated generic mappings.
 - Deepened annotation checking toward `TypeCheckAnnotation.cpp` by preserving
   the C++ `NO_REFLECT_INFO` marker on custom annotation call expressions that
   are not compile-time visible.
@@ -124,13 +129,13 @@ are from pre-existing files outside this pass scope.
   pass, so these helpers are not yet wired into a full C++-faithful
   declaration/type/reference traversal pipeline.
 - Full C++ parity still requires complete overload resolution, lookup/import
-  recommendation, exact access-control context, the remaining instantiated
-  interface specialization duplicate checks, custom annotation expression
-  synthesis/type checking, annotation target-array type checking, pipeline
-  wiring for type-alias and class-like declaration checks, reference-legality
-  walker wiring, full deprecated-usage traversal/override checks, and all
-  TypeChecker-owned state once those sibling surfaces are available in the
-  allowed owner files.
+  recommendation, exact access-control context, the remaining primitive-pointer
+  specialization duplicate precheck and exact promoted duplicate-interface
+  ordering, custom annotation expression synthesis/type checking, annotation
+  target-array type checking, pipeline wiring for type-alias and class-like
+  declaration checks, reference-legality walker wiring, full deprecated-usage
+  traversal/override checks, and all TypeChecker-owned state once those sibling
+  surfaces are available in the allowed owner files.
 - Diagnostics are mapped to the available self-hosted diagnostic tables; a few
   C++ diagnostic helpers are represented by the closest currently available
   refactored/legacy diagnostic kind.
