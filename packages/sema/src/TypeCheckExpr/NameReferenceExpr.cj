@@ -156,10 +156,183 @@ func TcPatternCheck(typeManager: TypeManager, target: Ty, pattern: Pattern): Boo
     return Ty.IsTyCorrect(pattern.GetTy())
 }
 
-func TcCheckCondition(typeManager: TypeManager, expr: Expr): Bool {
+private func PropagatePatternCtxExpr(pattern: Pattern, initializer: Expr): Unit {
+    if (let Some(varPattern) <- (pattern as VarPattern)) {
+        varPattern.ctxExpr = initializer
+        return
+    }
+    if (let Some(tuplePattern) <- (pattern as TuplePattern)) {
+        for (subPattern in tuplePattern.patterns) {
+            PropagatePatternCtxExpr(subPattern, initializer)
+        }
+        return
+    }
+    if (let Some(typePattern) <- (pattern as TypePattern)) {
+        if (let Some(innerPattern) <- typePattern.pattern) {
+            PropagatePatternCtxExpr(innerPattern, initializer)
+        }
+        return
+    }
+    if (let Some(enumPattern) <- (pattern as EnumPattern)) {
+        for (subPattern2 in enumPattern.patterns) {
+            PropagatePatternCtxExpr(subPattern2, initializer)
+        }
+        return
+    }
+    if (let Some(varOrEnumPattern) <- (pattern as VarOrEnumPattern)) {
+        if (let Some(innerPattern2) <- varOrEnumPattern.pattern) {
+            PropagatePatternCtxExpr(innerPattern2, initializer)
+        }
+        return
+    }
+    if (let Some(exceptPattern) <- (pattern as ExceptTypePattern)) {
+        if (let Some(innerPattern3) <- exceptPattern.pattern) {
+            PropagatePatternCtxExpr(innerPattern3, initializer)
+        }
+        return
+    }
+    if (let Some(commandPattern) <- (pattern as CommandTypePattern)) {
+        if (let Some(innerPattern4) <- commandPattern.pattern) {
+            PropagatePatternCtxExpr(innerPattern4, initializer)
+        }
+    }
+}
+
+private func PatternContainsExplicitVarBinding(pattern: Pattern): Bool {
+    if (let Some(_) <- (pattern as VarPattern)) {
+        return true
+    }
+    if (let Some(tuplePattern) <- (pattern as TuplePattern)) {
+        for (subPattern in tuplePattern.patterns) {
+            if (PatternContainsExplicitVarBinding(subPattern)) {
+                return true
+            }
+        }
+        return false
+    }
+    if (let Some(typePattern) <- (pattern as TypePattern)) {
+        if (let Some(innerPattern) <- typePattern.pattern) {
+            return PatternContainsExplicitVarBinding(innerPattern)
+        }
+        return false
+    }
+    if (let Some(enumPattern) <- (pattern as EnumPattern)) {
+        for (subPattern2 in enumPattern.patterns) {
+            if (PatternContainsExplicitVarBinding(subPattern2)) {
+                return true
+            }
+        }
+        return false
+    }
+    if (let Some(varOrEnumPattern) <- (pattern as VarOrEnumPattern)) {
+        if (let Some(innerPattern2) <- varOrEnumPattern.pattern) {
+            return PatternContainsExplicitVarBinding(innerPattern2)
+        }
+        return false
+    }
+    if (let Some(exceptPattern) <- (pattern as ExceptTypePattern)) {
+        if (let Some(innerPattern3) <- exceptPattern.pattern) {
+            return PatternContainsExplicitVarBinding(innerPattern3)
+        }
+        return false
+    }
+    if (let Some(commandPattern) <- (pattern as CommandTypePattern)) {
+        if (let Some(innerPattern4) <- commandPattern.pattern) {
+            return PatternContainsExplicitVarBinding(innerPattern4)
+        }
+    }
+    return false
+}
+
+private func LetPatternHasExplicitVarBinding(letDestructor: LetPatternDestructor): Bool {
+    for (pattern in letDestructor.patterns) {
+        if (PatternContainsExplicitVarBinding(pattern)) {
+            return true
+        }
+    }
+    return false
+}
+
+private func ExprHasExplicitVarBindingInCondition(expr: Expr): Bool {
+    if (let Some(letDestructor) <- (expr as LetPatternDestructor)) {
+        return LetPatternHasExplicitVarBinding(letDestructor)
+    }
     if (let Some(parenExpr) <- (expr as ParenExpr)) {
         if (let Some(innerExpr) <- parenExpr.expr) {
-            let ok = TcCheckCondition(typeManager, innerExpr)
+            return ExprHasExplicitVarBindingInCondition(innerExpr)
+        }
+        return false
+    }
+    if (let Some(binaryExpr) <- (expr as BinaryExpr)) {
+        if (let Some(leftExpr) <- binaryExpr.leftExpr) {
+            if (ExprHasExplicitVarBindingInCondition(leftExpr)) {
+                return true
+            }
+        }
+        if (let Some(rightExpr) <- binaryExpr.rightExpr) {
+            if (ExprHasExplicitVarBindingInCondition(rightExpr)) {
+                return true
+            }
+        }
+    }
+    return false
+}
+
+private func PatternsHaveCompatibleKinds(patterns: ArrayList<Pattern>): Bool {
+    if (patterns.size <= 1) {
+        return true
+    }
+    var allEnumLike = true
+    for (pattern in patterns) {
+        if (pattern.astKind != ASTKind.VAR_OR_ENUM_PATTERN && pattern.astKind != ASTKind.ENUM_PATTERN) {
+            allEnumLike = false
+            break
+        }
+    }
+    if (allEnumLike) {
+        return true
+    }
+    let firstKind = patterns[0].astKind
+    for (idx in 1..patterns.size) {
+        if (patterns[idx].astKind != firstKind) {
+            return false
+        }
+    }
+    return true
+}
+
+private func SynLetPatternDestructorCondition(typeManager: TypeManager, letDestructor: LetPatternDestructor,
+    suppressIntroducingVariableError: Bool): Bool {
+    if (let Some(initializer) <- letDestructor.initializer) {
+        let selectorTy = SynExprShallow(typeManager, initializer)
+        var ok = Ty.IsTyCorrect(selectorTy)
+        let concreteSelectorTy = if (ok) { TcReplaceIdeal(typeManager, initializer) } else { selectorTy }
+        if (!PatternsHaveCompatibleKinds(letDestructor.patterns)) {
+            ok = false
+        }
+        if (!suppressIntroducingVariableError && letDestructor.patterns.size > 1 &&
+            LetPatternHasExplicitVarBinding(letDestructor)) {
+            ok = false
+        }
+        for (pattern in letDestructor.patterns) {
+            pattern.ctxExpr = initializer
+            PropagatePatternCtxExpr(pattern, initializer)
+            ok = TcPatternCheck(typeManager, concreteSelectorTy, pattern) && ok
+        }
+        if (ok) {
+            letDestructor.SetTy(TcBoolTy())
+            return true
+        }
+    }
+    let _ = TcInvalid(letDestructor)
+    return false
+}
+
+private func TcCheckConditionInternal(typeManager: TypeManager, expr: Expr,
+    suppressIntroducingVariableError: Bool): Bool {
+    if (let Some(parenExpr) <- (expr as ParenExpr)) {
+        if (let Some(innerExpr) <- parenExpr.expr) {
+            let ok = TcCheckConditionInternal(typeManager, innerExpr, suppressIntroducingVariableError)
             parenExpr.SetTy(TcTyOrInvalid(innerExpr))
             return ok
         }
@@ -167,35 +340,27 @@ func TcCheckCondition(typeManager: TypeManager, expr: Expr): Bool {
         return false
     }
     if (let Some(letDestructor) <- (expr as LetPatternDestructor)) {
-        if (let Some(initializer) <- letDestructor.initializer) {
-            let selectorTy = SynExprShallow(typeManager, initializer)
-            var ok = Ty.IsTyCorrect(selectorTy)
-            for (pattern in letDestructor.patterns) {
-                pattern.ctxExpr = initializer
-                ok = TcPatternCheck(typeManager, selectorTy, pattern) && ok
-            }
-            if (ok) {
-                letDestructor.SetTy(TcBoolTy())
-                return true
-            }
-        }
-        let _ = TcInvalid(letDestructor)
-        return false
+        return SynLetPatternDestructorCondition(typeManager, letDestructor, suppressIntroducingVariableError)
     }
     if (let Some(binaryExpr) <- (expr as BinaryExpr)) {
         if (binaryExpr.op == TokenKind.AND || binaryExpr.op == TokenKind.OR) {
+            var suppressChildren = suppressIntroducingVariableError
+            if (!suppressChildren && binaryExpr.op == TokenKind.OR &&
+                ExprHasExplicitVarBindingInCondition(binaryExpr)) {
+                suppressChildren = true
+            }
             var ok = true
             if (let Some(leftExpr) <- binaryExpr.leftExpr) {
-                ok = TcCheckCondition(typeManager, leftExpr) && ok
+                ok = TcCheckConditionInternal(typeManager, leftExpr, suppressChildren) && ok
             } else {
                 ok = false
             }
             if (let Some(rightExpr) <- binaryExpr.rightExpr) {
-                ok = TcCheckCondition(typeManager, rightExpr) && ok
+                ok = TcCheckConditionInternal(typeManager, rightExpr, suppressChildren) && ok
             } else {
                 ok = false
             }
-            if (ok) {
+            if (ok && !suppressChildren) {
                 binaryExpr.SetTy(TcBoolTy())
                 return true
             }
@@ -204,6 +369,10 @@ func TcCheckCondition(typeManager: TypeManager, expr: Expr): Bool {
         }
     }
     return ChkExprShallow(typeManager, TcBoolTy(), expr)
+}
+
+func TcCheckCondition(typeManager: TypeManager, expr: Expr): Bool {
+    return TcCheckConditionInternal(typeManager, expr, false)
 }
 
 private func SynCallArg(typeManager: TypeManager, arg: FuncArg): Bool {
