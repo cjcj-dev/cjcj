@@ -10,6 +10,8 @@ The AST package is a multi-file Cangjie package mirroring the C++ AST component 
 
 ## Implemented In This Pass
 
+- Replaced the generic `PrintNode` walker dump with a C++-style recursive AST printer dispatcher: package/file, declaration, expression, type, pattern, macro, feature/import/package, annotation, and modifier nodes now print labeled sections and children in the reference order where the self-hosted node model has equivalent fields.
+- Added `PrintNode` parity for desugared-expression forwarding, macro invocation attribute/argument token rendering, target/mangled-name printing, declaration modifier/annotation/generic sections, inherited-type/member sections, operator/overflow details, type-argument lists, and literal string recovery through the real `basic.StringConvertor`.
 - Added C++ `Searcher` file-hash filtering parity: `Query` now carries file-hash filters, string searches can receive hash filters, normalized cache keys include file hashes and sort direction, cached/fresh results are filtered through `Symbol.hashID.hash64`, and `SetCache`/`GetCache` are exposed for warmup-cache parity.
 - Aligned the AST-local `FileHashQuery` leaf to use the symbol file hash instead of mutable node file state, and normalized its pretty-printed key spelling.
 - Deepened `Clone` visitor parity with C++: `SetIsClonedSourceCode` now unconditionally marks cloned targets, `CloneGeneric` accepts a visitor callback, and `ASTCloner.Clone` has a visitor overload that applies callbacks across the cloned tree for source-to-target clone hooks.
@@ -72,4 +74,5 @@ The AST package is a multi-file Cangjie package mirroring the C++ AST component 
 - Continue auditing macro diagnostic map lifetimes through Parse/Macro/Sema; AST now avoids clone-time `MacroCallDiagInfo` aliasing, but full private Basic map reconstruction is still owned by the macro pipeline.
 - Continue auditing clone pointer rearrangement under ambiguous generated-node cases. The current Cangjie pass remaps unique structural source/target pairs and preserves external pointers; C++ still has stricter pointer-identity fidelity through `source2cloned`.
 - Continue auditing context, walker, clone, printer, recover-desugar, search/query, type, utility, and validation behavior against the complete C++ implementation under downstream Parse/Sema workloads.
+- Continue tightening `PrintNode` byte-for-byte formatting against C++ where C++ exposes raw pointer values or fields not represented in the current Cangjie AST model.
 - Replace any remaining compatibility API spellings only after downstream packages no longer depend on them.
