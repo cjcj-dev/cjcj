@@ -4,9 +4,13 @@ import std.collection.*
 import cangjie_compiler::basic.PrintVersion
 import cangjie_compiler::basic.WriteError
 import cangjie_compiler::frontend.*
+import cangjie_compiler::incremental_compilation.IncreKind
+import cangjie_compiler::incremental_compilation.IncrementalCompilationLogger
 import cangjie_compiler::option.GlobalOptions as OptionGlobalOptions
 import cangjie_compiler::option.MockMode
+import cangjie_compiler::option.OrderedInput as OptionOrderedInput
 import cangjie_compiler::option.OutputMode
+import cangjie_compiler::option.TempFileInfo as OptionTempFileInfo
 import cangjie_compiler::utils.FileUtil
 
 public class DriverOptions {
@@ -18,8 +22,13 @@ public class DriverOptions {
     public let commonPartCjos: ArrayList<String> = ArrayList<String>()
     public let commonPartChirs: ArrayList<String> = ArrayList<String>()
     public let bcPackageNames: ArrayList<String> = ArrayList<String>()
+    public let frontendOutputFiles: ArrayList<OptionTempFileInfo> = ArrayList<OptionTempFileInfo>()
+    public let inputLibraryOrder: ArrayList<OptionOrderedInput> = ArrayList<OptionOrderedInput>()
     public let directBuiltinDependencies: HashSet<String> = HashSet<String>()
     public let indirectBuiltinDependencies: HashSet<String> = HashSet<String>()
+    public let symbolsNeedLocalized: ArrayList<String> = ArrayList<String>()
+    public let symbolsNeedLocalizedPerPkg: HashMap<String, ArrayList<String>> =
+        HashMap<String, ArrayList<String>>()
     public var output: String = ""
     public var executablePath: String = ""
     public var cangjieHome: String = ""
@@ -41,8 +50,38 @@ public class DriverOptions {
         CopyStringList(commonPartCjos, opts.commonPartCjos)
         CopyStringList(commonPartChirs, opts.commonPartChirs)
         CopyStringList(bcPackageNames, opts.bcPackageNames)
+        frontendOutputFiles.clear()
+        inputLibraryOrder.clear()
         CopyStringSet(directBuiltinDependencies, opts.directBuiltinDependencies)
         CopyStringSet(indirectBuiltinDependencies, opts.indirectBuiltinDependencies)
+        symbolsNeedLocalized.clear()
+        symbolsNeedLocalizedPerPkg.clear()
+        output = opts.output
+        executablePath = opts.executablePath
+        cangjieHome = opts.cangjieHome
+        moduleSrcPath = opts.moduleSrcPath
+        inputCjoFile = opts.inputCjoFile
+        compilationCachedPath = opts.compilationCachedPath
+        compilationCachedDir = opts.compilationCachedDir
+        compilationCachedFileName = opts.compilationCachedFileName
+        incrementalCompileNoChange = incrementalNoChange
+    }
+
+    public func CopyFromOptions(opts: OptionGlobalOptions, incrementalNoChange: Bool): Unit {
+        CopyStringList(sourceFiles, opts.srcFiles)
+        CopyStringList(inputObjs, opts.inputObjs)
+        CopyStringList(packagePaths, opts.packagePaths)
+        CopyStringList(importPaths, opts.importPaths)
+        CopyStringList(pluginPaths, opts.pluginPaths)
+        CopyStringList(commonPartCjos, opts.commonPartCjos)
+        CopyStringList(commonPartChirs, opts.commonPartChirs)
+        CopyStringList(bcPackageNames, opts.bcPackageNames)
+        CopyOptionTempFileList(frontendOutputFiles, opts.frontendOutputFiles)
+        CopyOptionOrderedInputList(inputLibraryOrder, opts.inputLibraryOrder)
+        CopyStringSet(directBuiltinDependencies, opts.directBuiltinDependencies)
+        CopyStringSet(indirectBuiltinDependencies, opts.indirectBuiltinDependencies)
+        CopyStringList(symbolsNeedLocalized, opts.symbolsNeedLocalized)
+        CopyStringArrayMap(symbolsNeedLocalizedPerPkg, opts.symbolsNeedLocalizedPerPkg)
         output = opts.output
         executablePath = opts.executablePath
         cangjieHome = opts.cangjieHome
@@ -128,6 +167,19 @@ public func NeedCreateIncrementalCompilerInstance(opts: GlobalOptions): Bool {
 }
 
 public func NeedCreateIncrementalCompilerInstance(opts: OptionGlobalOptions): Bool {
+    let logger = IncrementalCompilationLogger.GetInstance()
+    logger.SetDebugPrint(opts.printIncrementalInfo)
+    if (opts.enIncrementalCompilation) {
+        if (opts.mock == MockMode.ON) {
+            logger.LogLn("enable mock, roll back to full compilation")
+        } else if (opts.enableCoverage) {
+            logger.LogLn("enable coverage, roll back to full compilation")
+        } else if (opts.outputMode == OutputMode.CHIR) {
+            logger.LogLn("enable compile common part mode, roll back to full compilation")
+        } else if (!opts.commonPartCjos.isEmpty()) {
+            logger.LogLn("enable compile platform part mode, roll back to full compilation")
+        }
+    }
     return opts.enIncrementalCompilation && opts.mock != MockMode.ON && !opts.enableCoverage &&
         opts.outputMode != OutputMode.CHIR && opts.commonPartCjos.isEmpty()
 }
@@ -253,27 +305,48 @@ private func ReadPathsFromEnvironmentVars(opts: FrontendOptions, environmentVars
 private func ProcessObjectOnlyFrontendInputs(opts: GlobalOptions): Bool {
     for (inputObj in opts.inputObjs) {
         let rawName = LibraryBaseName(inputObj)
-        if (rawName.isEmpty()) {
-            continue
-        }
-        let normalizedName = if (rawName.startsWith("libcangjie-")) {
-            rawName[3..]
-        } else {
-            rawName
-        }
-        if (!normalizedName.startsWith("cangjie-")) {
-            continue
-        }
-        let potentialPkgName = normalizedName["cangjie-".size..].replace("-", ".")
-        if (potentialPkgName.isEmpty()) {
-            continue
-        }
-        let converted = FileUtil.ConvertPackageNameToLibCangjieBaseFormat(potentialPkgName)
-        if (!converted.isEmpty() && converted == normalizedName) {
-            opts.indirectBuiltinDependencies.add(potentialPkgName + ".cjo")
+        if (let Some(cjoName) <- ConvertBuiltinLibraryBaseToCjo(rawName, true)) {
+            opts.indirectBuiltinDependencies.add(cjoName)
         }
     }
     return true
+}
+
+public func ProcessObjectOnlyFrontendInputs(opts: OptionGlobalOptions): Bool {
+    var idx: Int64 = 0
+    while (idx < opts.inputLibraryOrder.size) {
+        let rawName = opts.inputLibraryOrder[idx].value
+        if (let Some(cjoName) <- ConvertBuiltinLibraryBaseToCjo(rawName, false)) {
+            opts.indirectBuiltinDependencies.add(cjoName)
+            opts.inputLibraryOrder.remove(at: idx)
+            continue
+        }
+        idx++
+    }
+    return true
+}
+
+private func ConvertBuiltinLibraryBaseToCjo(rawName: String, trimNativeLibPrefix: Bool): Option<String> {
+    if (rawName.isEmpty()) {
+        return None
+    }
+    let normalizedName = if (trimNativeLibPrefix && rawName.startsWith("libcangjie-")) {
+        rawName[3..]
+    } else {
+        rawName
+    }
+    if (!normalizedName.startsWith("cangjie-")) {
+        return None
+    }
+    let potentialPkgName = normalizedName["cangjie-".size..].replace("-", ".")
+    if (potentialPkgName.isEmpty()) {
+        return None
+    }
+    let converted = FileUtil.ConvertPackageNameToLibCangjieBaseFormat(potentialPkgName)
+    if (!converted.isEmpty() && converted == normalizedName) {
+        return Some(potentialPkgName + ".cjo")
+    }
+    return None
 }
 
 private func LibraryBaseName(path: String): String {
@@ -309,5 +382,44 @@ private func CopyStringSet(target: HashSet<String>, source: HashSet<String>): Un
     target.clear()
     for (value in source) {
         target.add(value)
+    }
+}
+
+private func CopyOptionTempFileList(
+    target: ArrayList<OptionTempFileInfo>,
+    source: ArrayList<OptionTempFileInfo>
+): Unit {
+    target.clear()
+    for (value in source) {
+        target.add(OptionTempFileInfo(
+            fileName: value.fileName,
+            filePath: value.filePath,
+            rawPath: value.rawPath,
+            isFrontendOutput: value.isFrontendOutput,
+            isForeignInput: value.isForeignInput))
+    }
+}
+
+private func CopyOptionOrderedInputList(
+    target: ArrayList<OptionOrderedInput>,
+    source: ArrayList<OptionOrderedInput>
+): Unit {
+    target.clear()
+    for (value in source) {
+        target.add(OptionOrderedInput(value.value, value.index))
+    }
+}
+
+private func CopyStringArrayMap(
+    target: HashMap<String, ArrayList<String>>,
+    source: HashMap<String, ArrayList<String>>
+): Unit {
+    target.clear()
+    for ((key, values) in source) {
+        let copiedValues = ArrayList<String>()
+        for (value in values) {
+            copiedValues.add(value)
+        }
+        target.add(key, copiedValues)
     }
 }

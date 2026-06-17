@@ -2,6 +2,7 @@ package cangjie_compiler::frontend_tool
 
 import std.collection.*
 import cangjie_compiler::frontend.*
+import cangjie_compiler::utils.FileUtil
 import cangjie_compiler::utils.ProfileRecorder
 
 public open class DefaultCompilerInstance {
@@ -155,7 +156,7 @@ public open class DefaultCompilerInstance {
             return true
         }
         let cjoPath = invocation.globalOptions.GenerateCachedPathName(pkg.fullPackageName, SERIALIZED_FILE_EXTENSION)
-        if (!WriteFileContent(cjoPath, RenderPackageCjo(pkg))) {
+        if (!FileUtil.WriteToFile(cjoPath, RenderPackageCjo(pkg))) {
             diag.Warn(DiagCategory.IMPORT_PACKAGE, DEFAULT_POSITION, "failed to write CJO summary: " + cjoPath)
             return false
         }
@@ -337,7 +338,7 @@ private func AppendDeclTree(builder: StringBuilder, decl: Decl, indent: Int64): 
 
 private func RecordIncrementalCodegenPackage(pkg: Package, markerPath: String): Unit {
     if (!markerPath.isEmpty()) {
-        let _ = WriteFileContent(markerPath, RenderPackageCjo(pkg))
+        let _ = FileUtil.WriteToFile(markerPath, RenderPackageCjo(pkg))
     }
 }
 
@@ -355,6 +356,16 @@ private func RenderPackageCjo(pkg: Package): String {
         fileIdx++
     }
     builder.append("],\n")
+    builder.append("  \"fileSummaries\": [\n")
+    var summaryIdx: Int64 = 0
+    while (summaryIdx < pkg.files.size) {
+        if (summaryIdx > 0) {
+            builder.append(",\n")
+        }
+        AppendFileCjoSummary(builder, pkg.files[summaryIdx])
+        summaryIdx++
+    }
+    builder.append("\n  ],\n")
     builder.append("  \"declCount\": " + CountPackageDecls(pkg).toString() + ",\n")
     builder.append("  \"decls\": [")
     var declIdx: Int64 = 0
@@ -367,15 +378,78 @@ private func RenderPackageCjo(pkg: Package): String {
             declIdx++
         }
     }
+    builder.append("],\n")
+    builder.append("  \"genericInstantiatedDeclCount\": " + CountDeclList(pkg.genericInstantiatedDecls).toString() + ",\n")
+    builder.append("  \"genericInstantiatedDecls\": [")
+    var genIdx: Int64 = 0
+    while (genIdx < pkg.genericInstantiatedDecls.size) {
+        if (genIdx > 0) {
+            builder.append(", ")
+        }
+        AppendDeclCjo(builder, pkg.genericInstantiatedDecls[genIdx])
+        genIdx++
+    }
     builder.append("]\n")
     builder.append("}\n")
     return builder.toString()
 }
 
+private func AppendFileCjoSummary(builder: StringBuilder, file: File): Unit {
+    builder.append("    {")
+    builder.append("\"path\":\"" + EscapeJson(file.filePath) + "\",")
+    builder.append("\"hash\":\"" + file.fileHash.toString() + "\",")
+    if (let Some(packageSpec) <- file.packageSpec) {
+        builder.append("\"packageSpec\":\"" + EscapeJson(packageSpec.GetPackageName()) + "\",")
+    } else {
+        builder.append("\"packageSpec\":\"\",")
+    }
+    builder.append("\"imports\":")
+    let imports = ArrayList<String>()
+    for (importSpec in file.imports) {
+        imports.add(GetImportedItemFullName(importSpec.content))
+    }
+    AppendStringArrayJson(builder, imports)
+    builder.append(",\"decls\":[")
+    var declIdx: Int64 = 0
+    while (declIdx < file.decls.size) {
+        if (declIdx > 0) {
+            builder.append(", ")
+        }
+        AppendDeclCjo(builder, file.decls[declIdx])
+        declIdx++
+    }
+    builder.append("],\"exportedInternalDecls\":[")
+    var exportedIdx: Int64 = 0
+    while (exportedIdx < file.exportedInternalDecls.size) {
+        if (exportedIdx > 0) {
+            builder.append(", ")
+        }
+        AppendDeclCjo(builder, file.exportedInternalDecls[exportedIdx])
+        exportedIdx++
+    }
+    builder.append("]}")
+}
+
 private func AppendDeclCjo(builder: StringBuilder, decl: Decl): Unit {
     builder.append("{\"kind\":\"" + EscapeJson(ASTKindName(decl.astKind)) + "\",")
     builder.append("\"name\":\"" + EscapeJson(decl.identifier.Val()) + "\",")
-    builder.append("\"mangled\":\"" + EscapeJson(decl.mangledName) + "\"")
+    builder.append("\"rawName\":\"" + EscapeJson(decl.identifier.GetRawText()) + "\",")
+    builder.append("\"package\":\"" + EscapeJson(decl.fullPackageName) + "\",")
+    builder.append("\"mangled\":\"" + EscapeJson(decl.mangledName) + "\",")
+    builder.append("\"exported\":" + decl.IsExportedDecl().toString() + ",")
+    builder.append("\"range\":")
+    AppendRangeJson(builder, decl.begin, decl.end)
+    builder.append(",\"annotations\":")
+    AppendAnnotationListJson(builder, decl.annotations)
+    if (let Some(generic) <- decl.generic) {
+        builder.append(",\"genericParams\":")
+        AppendStringArrayJson(builder, generic.typeParameters)
+        builder.append(",\"genericConstraints\":")
+        AppendStringArrayJson(builder, generic.genericConstraints)
+    } else {
+        builder.append(",\"genericParams\":[]")
+        builder.append(",\"genericConstraints\":[]")
+    }
     if (!decl.members.isEmpty()) {
         builder.append(",\"members\":[")
         var memberIdx: Int64 = 0
@@ -391,12 +465,56 @@ private func AppendDeclCjo(builder: StringBuilder, decl: Decl): Unit {
     builder.append("}")
 }
 
+private func AppendRangeJson(builder: StringBuilder, begin: Position, end: Position): Unit {
+    builder.append("{\"begin\":{\"line\":" + begin.line.toString() + ",\"column\":" +
+        begin.column.toString() + "},")
+    builder.append("\"end\":{\"line\":" + end.line.toString() + ",\"column\":" +
+        end.column.toString() + "}}")
+}
+
+private func AppendAnnotationListJson(builder: StringBuilder, annotations: ArrayList<Annotation>): Unit {
+    builder.append("[")
+    var annoIdx: Int64 = 0
+    while (annoIdx < annotations.size) {
+        if (annoIdx > 0) {
+            builder.append(", ")
+        }
+        builder.append("{\"name\":\"" + EscapeJson(annotations[annoIdx].identifier.Val()) + "\",")
+        builder.append("\"args\":")
+        AppendStringArrayJson(builder, annotations[annoIdx].args)
+        builder.append("}")
+        annoIdx++
+    }
+    builder.append("]")
+}
+
+private func AppendStringArrayJson(builder: StringBuilder, values: ArrayList<String>): Unit {
+    builder.append("[")
+    var idx: Int64 = 0
+    while (idx < values.size) {
+        if (idx > 0) {
+            builder.append(", ")
+        }
+        builder.append("\"" + EscapeJson(values[idx]) + "\"")
+        idx++
+    }
+    builder.append("]")
+}
+
 private func CountPackageDecls(pkg: Package): Int64 {
     var count: Int64 = 0
     for (file in pkg.files) {
         for (decl in file.decls) {
             count += CountDeclTree(decl)
         }
+    }
+    return count
+}
+
+private func CountDeclList(decls: ArrayList<Decl>): Int64 {
+    var count: Int64 = 0
+    for (decl in decls) {
+        count += CountDeclTree(decl)
     }
     return count
 }
