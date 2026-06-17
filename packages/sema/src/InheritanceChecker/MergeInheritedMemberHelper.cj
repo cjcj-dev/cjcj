@@ -22,6 +22,86 @@ func UpdateUpperBoundsSetForInheritance(
     }
 }
 
+func InheritanceDeclLessByPosition(left: Decl, right: Decl): Bool {
+    if (left.begin.fileID < right.begin.fileID) {
+        return true
+    }
+    if (left.begin.fileID > right.begin.fileID) {
+        return false
+    }
+    if (left.begin < right.begin) {
+        return true
+    }
+    if (right.begin < left.begin) {
+        return false
+    }
+    if (left.end.fileID < right.end.fileID) {
+        return true
+    }
+    if (left.end.fileID > right.end.fileID) {
+        return false
+    }
+    if (left.end < right.end) {
+        return true
+    }
+    if (right.end < left.end) {
+        return false
+    }
+    if (left.identifier.Val() < right.identifier.Val()) {
+        return true
+    }
+    if (left.identifier.Val() > right.identifier.Val()) {
+        return false
+    }
+    return ASTKindIndex(left.astKind) < ASTKindIndex(right.astKind)
+}
+
+func AddInheritanceDeclUniqueByPosition(values: ArrayList<Decl>, decl: Decl): Unit {
+    for (value in values) {
+        if (SameDecl(value, decl)) {
+            return
+        }
+    }
+    var idx: Int64 = 0
+    while (idx < values.size) {
+        if (InheritanceDeclLessByPosition(decl, values[idx])) {
+            values.add(decl, at: idx)
+            return
+        }
+        idx++
+    }
+    values.add(decl)
+}
+
+private func InheritanceMemberSignatureLessByDeclAndTy(left: MemberSignature, right: MemberSignature): Bool {
+    if (let Some(leftDecl) <- left.decl) {
+        if (let Some(rightDecl) <- right.decl) {
+            if (!SameDecl(leftDecl, rightDecl)) {
+                return InheritanceDeclLessByPosition(leftDecl, rightDecl)
+            }
+        } else {
+            return false
+        }
+    } else {
+        if (let Some(_) <- right.decl) {
+            return true
+        }
+    }
+    return CompTyByNames(left.ty, right.ty)
+}
+
+func AddInheritanceMemberSignatureByDeclAndTy(values: ArrayList<MemberSignature>, member: MemberSignature): Unit {
+    var idx: Int64 = 0
+    while (idx < values.size) {
+        if (InheritanceMemberSignatureLessByDeclAndTy(member, values[idx])) {
+            values.add(member, at: idx)
+            return
+        }
+        idx++
+    }
+    values.add(member)
+}
+
 func MergeUpperBoundsForInheritance(
     typeManager: TypeManager,
     src: MemberSignature,

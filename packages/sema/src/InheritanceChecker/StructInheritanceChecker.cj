@@ -2,7 +2,7 @@ package cangjie_compiler::sema.InheritanceChecker
 
 import std.collection.*
 import cangjie_compiler::ast.*
-import cangjie_compiler::basic.{DiagnosticEngine, DiagArgument, DiagKind, DiagKindRefactor, MakeRange}
+import cangjie_compiler::basic.{DiagnosticEngine, DiagArgument, DiagKind, DiagKindRefactor, MakeRange, SubDiagnostic}
 import cangjie_compiler::basic.Range as BasicRange
 import cangjie_compiler::modules.{GetPackageRelation, PackageRelation}
 import cangjie_compiler::sema.*
@@ -48,8 +48,24 @@ private func AddExtendUniqueByPosition(values: ArrayList<ExtendDecl>, decl: Exte
     }
     var idx: Int64 = 0
     while (idx < values.size) {
-        if (decl.begin < values[idx].begin ||
-            (decl.begin == values[idx].begin && ASTKindIndex(decl.astKind) < ASTKindIndex(values[idx].astKind))) {
+        if (InheritanceDeclLessByPosition(decl, values[idx])) {
+            values.add(decl, at: idx)
+            return
+        }
+        idx++
+    }
+    values.add(decl)
+}
+
+private func AddInheritableUniqueByPosition(values: ArrayList<InheritableDecl>, decl: InheritableDecl): Unit {
+    for (value in values) {
+        if (SameDecl(value, decl)) {
+            return
+        }
+    }
+    var idx: Int64 = 0
+    while (idx < values.size) {
+        if (InheritanceDeclLessByPosition(decl, values[idx])) {
             values.add(decl, at: idx)
             return
         }
@@ -90,7 +106,7 @@ private func StringifyInconsistentTypes(inconsistentTypes: TySet, childTy!: Opti
     return "'" + Ty.GetTypesToStableStr(sortedTys, "', '") + "'"
 }
 
-private func IsExtendVisibleForPackage(currentPkg: String, extendDecl: ExtendDecl): Bool {
+func IsExtendVisibleForPackage(currentPkg: String, extendDecl: ExtendDecl): Bool {
     let relation = GetPackageRelation(currentPkg, extendDecl.fullPackageName)
     return IsAstVisibleInRelation(extendDecl, relation)
 }
@@ -160,12 +176,103 @@ private func AreFuncParameterNameIdentical(parent: FuncDecl, child: FuncDecl): B
     return true
 }
 
+private func ParamIdentifierRange(param: FuncParam): BasicRange {
+    return MakeRange(param.GetIdentifierPos(), param.identifier.Val())
+}
+
 private func DiagnoseParameterName(diag: DiagnosticEngine, parent: FuncDecl, child: FuncDecl): Unit {
     let builder = diag.DiagnoseRefactor(
         DiagKindRefactor.sema_param_named_mismatched,
-        DeclRange(child)
+        DeclIdentifierRange(child)
     )
-    builder.AddNote(DeclRange(parent), "the corresponding function of the supertype is")
+    if (let Some(parentBody) <- parent.funcBody) {
+        if (let Some(childBody) <- child.funcBody) {
+            if (!parentBody.paramLists.isEmpty() && !childBody.paramLists.isEmpty()) {
+                let parentParams = parentBody.paramLists[0].params
+                let childParams = childBody.paramLists[0].params
+                if (parentParams.size == childParams.size) {
+                    for (idx in 0..parentParams.size) {
+                        let parentParam = parentParams[idx]
+                        let childParam = childParams[idx]
+                        if (!parentParam.isNamedParam && childParam.isNamedParam) {
+                            builder.AddHint(
+                                ParamIdentifierRange(childParam),
+                                arguments: [
+                                    "this named parameter conflicts with the corresponding positional parameter in the supertype"
+                                ]
+                            )
+                        } else if (parentParam.isNamedParam && !childParam.isNamedParam) {
+                            builder.AddHint(
+                                ParamIdentifierRange(childParam),
+                                arguments: [
+                                    "this positional parameter conflicts with the corresponding named parameter in the supertype"
+                                ]
+                            )
+                        } else if (parentParam.isNamedParam && childParam.isNamedParam &&
+                            parentParam.identifier != childParam.identifier) {
+                            builder.AddHint(
+                                ParamIdentifierRange(childParam),
+                                arguments: [
+                                    "the corresponding parameter in the supertype is named '" +
+                                        parentParam.identifier.Val() + "'"
+                                ]
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+    builder.AddNote(DeclIdentifierRange(parent), "the corresponding function of the supertype is")
+}
+
+private func VisibilityToString(decl: Decl): String {
+    if (decl.TestAttr(Attribute.PUBLIC)) {
+        return "public"
+    }
+    if (decl.TestAttr(Attribute.PROTECTED)) {
+        return "protected"
+    }
+    if (decl.TestAttr(Attribute.PRIVATE)) {
+        return "private"
+    }
+    return "internal"
+}
+
+private func DiagnoseWeakVisibility(
+    diag: DiagnosticEngine,
+    parent: Decl,
+    child: Decl,
+    diagNode: Decl
+): Unit {
+    let parentRange = DeclIdentifierRange(parent)
+    let childRange = DeclIdentifierRange(child)
+    let range = DeclIdentifierRange(diagNode)
+    let childHint = "the visibility of the deriving '" + child.identifier.Val() + "' is '" + VisibilityToString(child) + "'"
+    let builder = diag.DiagnoseRefactor(DiagKindRefactor.sema_weak_visibility, range)
+    if (let Some(macroCall) <- diagNode.curMacroCall) {
+        if (let Some(invocation) <- macroCall.GetConstInvocation()) {
+            diag.AddMacroCallNote(builder.diagnostic, invocation.macroCallDiagInfo, range.begin)
+        }
+    }
+    if (SameDecl(child, diagNode)) {
+        builder.AddMainHintArguments([childHint])
+    } else {
+        builder.AddMainHintArguments(["'" + child.identifier.Val() + "' is inherited"])
+        let childNote = SubDiagnostic(childRange, "the deriving '" + child.identifier.Val() + "' is defined here")
+        childNote.AddMainHint(childRange, childHint)
+        builder.AddNote(childNote)
+    }
+    let parentNote = SubDiagnostic(
+        parentRange,
+        "the visibility of the base '" + parent.identifier.Val() + "' is '" + VisibilityToString(parent) + "'"
+    )
+    if (let Some(parentOuter) <- parent.outerDecl) {
+        if (parentOuter.astKind == ASTKind.INTERFACE_DECL) {
+            parentNote.AddMainHint(parentRange, "the base '" + parent.identifier.Val() + "' is in 'interface'")
+        }
+    }
+    builder.AddNote(parentNote)
 }
 
 private func HasCommonDecl(decls: ArrayList<ClassLikeDecl>): Bool {
@@ -227,6 +334,13 @@ private func InheritedDisplayName(decl: Decl): String {
     return decl.identifier.Val()
 }
 
+private func InheritedTypeString(decl: Decl): String {
+    if (let Some(ty) <- decl.GetTy()) {
+        return ty.String()
+    }
+    return InheritedDisplayName(decl)
+}
+
 private func CountByDecl(members: ArrayList<MemberSignature>, decl: Decl): Int64 {
     var count: Int64 = 0
     for (member in members) {
@@ -286,7 +400,9 @@ public class StructInheritanceChecker {
             }
             if (let Some(inheritable) <- (node as InheritableDecl)) {
                 if (let Some(extendDecl) <- (node as ExtendDecl)) {
-                    extendDecls.add(extendDecl)
+                    if (IsExtendVisibleForPackage(pkg.fullPackageName, extendDecl)) {
+                        extendDecls.add(extendDecl)
+                    }
                 } else {
                     nominalDecls.add(inheritable)
                 }
@@ -296,6 +412,12 @@ public class StructInheritanceChecker {
         walker.Walk()
         for (decl in nominalDecls) {
             CheckMembersWithInheritedDecls(decl)
+        }
+        for (decl in GetAllNeedCheckExtended()) {
+            if (!HasExtend(extendDecls, decl) && !decl.TestAttr(Attribute.IS_BROKEN) &&
+                Ty.IsTyCorrect(decl.GetTy()) && IsExtendVisibleForPackage(pkg.fullPackageName, decl)) {
+                extendDecls.add(decl)
+            }
         }
         for (decl in extendDecls) {
             CheckMembersWithInheritedDecls(decl)
@@ -622,6 +744,59 @@ public class StructInheritanceChecker {
         return out
     }
 
+    private func AllExtendsImportedFromSamePackage(extends: ArrayList<ExtendDecl>): Bool {
+        if (extends.isEmpty()) {
+            return true
+        }
+        var packageName: Option<String> = None
+        for (extendDecl in extends) {
+            if (!extendDecl.TestAttr(Attribute.IMPORTED)) {
+                return false
+            }
+            if (let Some(existing) <- packageName) {
+                if (existing != extendDecl.fullPackageName) {
+                    return false
+                }
+            } else {
+                packageName = extendDecl.fullPackageName
+            }
+        }
+        return true
+    }
+
+    private func CollectPublicNeedCheckExtends(extends: ArrayList<ExtendDecl>, out: ArrayList<ExtendDecl>): Unit {
+        if (AllExtendsImportedFromSamePackage(extends)) {
+            return
+        }
+        for (extendDecl in extends) {
+            if (extendDecl.TestAttr(Attribute.PUBLIC)) {
+                AddExtendUniqueByPosition(out, extendDecl)
+            }
+        }
+    }
+
+    private func GetAllNeedCheckExtended(): ArrayList<ExtendDecl> {
+        let out = ArrayList<ExtendDecl>()
+        let extendedDecls = ArrayList<InheritableDecl>()
+        for (decl in typeManager.GetAllExtendedDecls()) {
+            AddInheritableUniqueByPosition(extendedDecls, decl)
+        }
+        for (decl in extendedDecls) {
+            if (decl.TestAttr(Attribute.IMPORTED) && decl.TestAttr(Attribute.PUBLIC)) {
+                CollectPublicNeedCheckExtends(typeManager.GetDeclExtends(decl), out)
+            }
+        }
+
+        let extendedBuiltInTys = ArrayList<Ty>()
+        for (ty in typeManager.GetAllExtendedBuiltIn().values) {
+            AddTyUniqueByName(extendedBuiltInTys, ty)
+        }
+        for (ty in extendedBuiltInTys) {
+            CollectPublicNeedCheckExtends(typeManager.GetBuiltinTyExtends(ty), out)
+        }
+        return out
+    }
+
     private func CollectExtendByInterfaceInherit(
         otherExtends: ArrayList<ExtendDecl>,
         curDecl: ExtendDecl
@@ -632,9 +807,17 @@ public class StructInheritanceChecker {
             if (SameDecl(otherExtend, curDecl)) {
                 continue
             }
-            if (otherExtend.fullPackageName != curDecl.fullPackageName &&
-                !IsExtendVisibleForPackage(curDecl.fullPackageName, otherExtend)) {
-                continue
+            if (otherExtend.fullPackageName != curDecl.fullPackageName) {
+                let bothVisibleFromCheckingPackage = otherExtend.fullPackageName != pkg.fullPackageName &&
+                    curDecl.fullPackageName != pkg.fullPackageName &&
+                    IsExtendVisibleForPackage(pkg.fullPackageName, otherExtend)
+                if (!bothVisibleFromCheckingPackage) {
+                    if (IsExtendVisibleForPackage(curDecl.fullPackageName, otherExtend) ||
+                        IsExtendVisibleForPackage(pkg.fullPackageName, otherExtend)) {
+                        AddExtendUniqueByPosition(ordered, otherExtend)
+                    }
+                    continue
+                }
             }
             let skipExtend = DeterminingSkipExtendByInheritanceRelationship(curDecl, otherExtend, extendedDecl)
             if ((let None <- skipExtend) || !skipExtend.getOrThrow()) {
@@ -750,8 +933,8 @@ public class StructInheritanceChecker {
                     )
                     let inherChain = subTy.String() + " <: " + curDeclSuperTy.String() + " <: " + superTy.String()
                     builder.AddNote(
-                        DeclRange(otherExtend),
-                        "conflict with this extension, because of '" + inherChain + "'"
+                        DeclIdentifierRange(otherExtend),
+                        "conflict with this extension, beacase of '" + inherChain + "'"
                     )
                     return None
                 }
@@ -786,8 +969,8 @@ public class StructInheritanceChecker {
                         ""
                     }
                     builder.AddNote(
-                        DeclRange(otherExtend),
-                        "conflict with this extension, because of '" + lastInherit + "' and '" + currentInherit + "'"
+                        DeclIdentifierRange(otherExtend),
+                        "conflict with this extension, beacase of '" + lastInherit + "' and '" + currentInherit + "'"
                     )
                     return None
                 }
@@ -1207,6 +1390,7 @@ public class StructInheritanceChecker {
                         CheckPropertyInheritance(interfaceSig, childDecl)
                     } else if (interfaceDecl.IsFunc()) {
                         if (CheckImplementationRelation(interfaceSig, child)) {
+                            CheckIncompleteOverrideOrImplOfExtend(interfaceSig, child)
                             CheckInheritanceForInterface(interfaceSig, child)
                             CheckMutModifierCompatible(interfaceSig, childDecl)
                         }
@@ -1216,6 +1400,128 @@ public class StructInheritanceChecker {
             if (interfaceDecl.TestAttr(Attribute.DEFAULT)) {
                 interfaceDecl.EnableAttr(Attribute.INTERFACE_IMPL)
             }
+        }
+    }
+
+    private func CheckIncompleteOverrideOrImplOfExtend(interfaceSig: MemberSignature, child: MemberSignature): Unit {
+        if (checkingDecls.isEmpty()) {
+            return
+        }
+        if (let None <- interfaceSig.decl) {
+            return
+        }
+        if (let None <- child.decl) {
+            return
+        }
+        let interfaceDecl = interfaceSig.decl.getOrThrow()
+        let childDecl = child.decl.getOrThrow()
+        if (let None <- childDecl.outerDecl) {
+            return
+        }
+        let childOuter = childDecl.outerDecl.getOrThrow()
+        if (let None <- (childOuter as ExtendDecl)) {
+            return
+        }
+        let childOuterExtend = (childOuter as ExtendDecl).getOrThrow()
+        if (let None <- childOuterExtend.extendedType) {
+            return
+        }
+        let extendedType = childOuterExtend.extendedType.getOrThrow()
+        if (let None <- extendedType.GetTarget()) {
+            return
+        }
+        let childOuterDecl = extendedType.GetTarget().getOrThrow()
+        if (IsExtendImplementationInCurrentCheck(childOuterDecl)) {
+            return
+        }
+        if (let None <- childOuterDecl.GetTy()) {
+            return
+        }
+        let childOuterTy = childOuterDecl.GetTy().getOrThrow()
+        if (!childOuterTy.HasGeneric()) {
+            return
+        }
+        if (childOuterDecl.astKind != ASTKind.CLASS_DECL) {
+            return
+        }
+        let checkingDecl = checkingDecls[0]
+        if (let None <- checkingDecl.GetTy()) {
+            return
+        }
+        if (let None <- (checkingDecl.GetTy().getOrThrow() as ClassTy)) {
+            return
+        }
+        let currentClassTy = (checkingDecl.GetTy().getOrThrow() as ClassTy).getOrThrow()
+        let mapping = MultiTypeSubst()
+        typeManager.GenerateGenericMapping(mapping, currentClassTy)
+        let instantiatedSupers = typeManager.GetInstantiatedTys(childOuterTy, mapping)
+        for (instTy in instantiatedSupers.values) {
+            if (!typeManager.CheckGenericDeclInstantiation(Some(childOuterExtend), instTy.typeArgs)) {
+                DiagnoseIncompleteOverrideOrImpl(interfaceDecl, childDecl, childOuterDecl)
+                return
+            }
+        }
+    }
+
+    private func IsExtendImplementationInCurrentCheck(childOuterDecl: Decl): Bool {
+        if (checkingDecls.isEmpty()) {
+            return false
+        }
+        let checkingDecl = checkingDecls[0]
+        if (SameDecl(checkingDecl, childOuterDecl)) {
+            return true
+        }
+        if (let Some(childOuterTy) <- childOuterDecl.GetTy()) {
+            for (extendDecl in typeManager.GetAllExtendsByTy(childOuterTy)) {
+                if (SameDecl(extendDecl, checkingDecl)) {
+                    return true
+                }
+            }
+        }
+        return false
+    }
+
+    private func DiagnoseIncompleteOverrideOrImpl(interfaceDecl: Decl, childDecl: Decl, childOuterDecl: Decl): Unit {
+        if (checkingDecls.isEmpty()) {
+            return
+        }
+        let checkingDecl = checkingDecls[0]
+        let funcOrProp = if (childDecl.astKind == ASTKind.FUNC_DECL) { "function" } else { "prop" }
+        let memberStr = funcOrProp + " '" + childDecl.identifier.Val() + "' in '" +
+            childOuterDecl.identifier.Val() + "''s extension"
+        let interfaceName = if (let Some(interfaceOuter) <- interfaceDecl.outerDecl) {
+            interfaceOuter.identifier.Val()
+        } else {
+            ""
+        }
+        let interfaceBeOverridden = "interface '" + interfaceName + "'"
+        if (interfaceDecl.TestAttr(Attribute.DEFAULT)) {
+            let builder = diag.DiagnoseRefactor(
+                DiagKindRefactor.sema_cannot_override,
+                DeclRange(checkingDecl),
+                arguments: [funcOrProp, childDecl.identifier.Val()]
+            )
+            builder.AddNote(
+                DeclIdentifierRange(childDecl),
+                "member " + memberStr + " conflict with that in " + interfaceBeOverridden
+            )
+        } else {
+            let prefix = if (checkingDecl.astKind == ASTKind.EXTEND_DECL) { "extend " } else { "" }
+            let classNameOverride = prefix + InheritedDisplayName(checkingDecl)
+            let builder = diag.Diagnose(
+                checkingDecl.begin,
+                checkingDecl.end,
+                DiagKind.sema_interface_member_must_be_implemented_in_struct,
+                args: [
+                    DiagArgument(funcOrProp),
+                    DiagArgument(childDecl.identifier.Val()),
+                    DiagArgument(classNameOverride)
+                ]
+            )
+            builder.AddNote(
+                DeclIdentifierRange(childDecl),
+                "member " + memberStr + " may not be visible to '" + classNameOverride + "'"
+            )
         }
     }
 
@@ -1291,7 +1597,11 @@ public class StructInheritanceChecker {
                 DiagKindRefactor.sema_need_member_implementation
             }
             let builder = diag.DiagnoseRefactor(kind, DeclRange(structDecl), arguments: [structName])
+            let orderedUnimplementedMembers = ArrayList<MemberSignature>()
             for (member in unimplementedMembers) {
+                AddInheritanceMemberSignatureByDeclAndTy(orderedUnimplementedMembers, member)
+            }
+            for (member in orderedUnimplementedMembers) {
                 if (let Some(memberDecl) <- member.decl) {
                     let abstractType = if (if (let Some(outer) <- memberDecl.outerDecl) {
                         outer.astKind == ASTKind.CLASS_DECL
@@ -1326,10 +1636,14 @@ public class StructInheritanceChecker {
                     DeclIdentifierRange(decl),
                     arguments: [name]
                 )
+                let sortedDecls = ArrayList<Decl>()
                 for (member in found) {
                     if (let Some(memberDecl) <- member.decl) {
-                        builder.AddNote(DeclIdentifierRange(memberDecl), DeclKindText(memberDecl) + " member")
+                        AddInheritanceDeclUniqueByPosition(sortedDecls, memberDecl)
                     }
+                }
+                for (memberDecl in sortedDecls) {
+                    builder.AddNote(DeclIdentifierRange(memberDecl), DeclKindText(memberDecl) + " member")
                 }
             } else {
                 for (member in found) {
@@ -1544,7 +1858,7 @@ public class StructInheritanceChecker {
                                     DiagKindRefactor.sema_inherit_not_return_this,
                                     DeclRange(childFunc)
                                 )
-                                builder.AddNote(DeclRange(parentFunc), "the overridden function")
+                                builder.AddNote(DeclIdentifierRange(parentFunc), "the overriden function")
                             } else if (AreReturnTypesCompatible(parentFuncTy, childFuncTy, inconsistentTypes: parent.inconsistentTypes)) {
                                 var diagNode: Decl = childFunc
                                 if (!checkingDecls.isEmpty()) {
@@ -1666,9 +1980,7 @@ public class StructInheritanceChecker {
             (parent.TestAttr(Attribute.PROTECTED) && !child.TestAnyAttr(Attribute.PUBLIC, Attribute.PROTECTED)) ||
             (!parent.TestAnyAttr(Attribute.PUBLIC, Attribute.PROTECTED, Attribute.PRIVATE) && child.TestAttr(Attribute.PRIVATE))
         if (weakVisibility) {
-            let builder = diag.DiagnoseRefactor(DiagKindRefactor.sema_weak_visibility, DeclRange(diagNode))
-            builder.AddNote(DeclRange(parent), "base visibility is stronger")
-            builder.AddNote(DeclRange(child), "deriving visibility is weaker")
+            DiagnoseWeakVisibility(diag, parent, child, diagNode)
         }
     }
 
@@ -1710,27 +2022,46 @@ public class StructInheritanceChecker {
                 }
                 diag.DiagnoseRefactor(
                     DiagKindRefactor.sema_extend_member_cannot_shadow,
-                    DeclRange(child),
+                    DeclIdentifierRange(child),
                     arguments: [child.identifier.Val(), typeName]
                 )
-            } else if (IsExtendedDefaultImpl(parent, child) || (if (let Some(outer) <- parentDecl.outerDecl) {
-                outer.astKind == ASTKind.EXTEND_DECL
-            } else { false })) {
-                let builder = diag.DiagnoseRefactor(
-                    DiagKindRefactor.sema_extend_function_cannot_overridden,
-                    DeclRange(child),
-                    arguments: [DeclKindText(parentDecl), child.identifier.Val()]
-                )
-                builder.AddNote(DeclRange(parentDecl), "overridden definition of '" + child.identifier.Val() + "' is here")
-            } else if (if (let Some(outer) <- child.outerDecl) { outer.astKind == ASTKind.EXTEND_DECL } else { false }) {
-                let builder = diag.DiagnoseRefactor(
-                    DiagKindRefactor.sema_extend_member_cannot_shadow,
-                    DeclRange(child),
-                    arguments: [child.identifier.Val(), InheritedDisplayName(child.outerDecl.getOrThrow())]
-                )
-                builder.AddNote(DeclRange(parentDecl), "shadowed definition of '" + child.identifier.Val() + "' is here")
             } else {
-                return true
+                let isExtendedDefault = IsExtendedDefaultImpl(parent, child)
+                let parentOuterIsExtend = if (let Some(outer) <- parentDecl.outerDecl) {
+                    outer.astKind == ASTKind.EXTEND_DECL
+                } else {
+                    false
+                }
+                if (isExtendedDefault || parentOuterIsExtend) {
+                    let builder = diag.DiagnoseRefactor(
+                        DiagKindRefactor.sema_extend_function_cannot_overridden,
+                        DeclIdentifierRange(child),
+                        arguments: [DeclKindText(parentDecl), child.identifier.Val()]
+                    )
+                    if (!isExtendedDefault) {
+                        builder.AddNote(
+                            DeclIdentifierRange(parentDecl),
+                            "overridden definition of '" + child.identifier.Val() + "' is here"
+                        )
+                    }
+                } else if (if (let Some(outer) <- child.outerDecl) { outer.astKind == ASTKind.EXTEND_DECL } else { false }) {
+                    let typeName = if (let Some(outer) <- child.outerDecl) {
+                        InheritedTypeString(outer)
+                    } else {
+                        ""
+                    }
+                    let builder = diag.DiagnoseRefactor(
+                        DiagKindRefactor.sema_extend_member_cannot_shadow,
+                        DeclIdentifierRange(child),
+                        arguments: [child.identifier.Val(), typeName]
+                    )
+                    builder.AddNote(
+                        DeclIdentifierRange(parentDecl),
+                        "shadowed definition of '" + child.identifier.Val() + "' is here"
+                    )
+                } else {
+                    return true
+                }
             }
             return false
         }

@@ -3,6 +3,7 @@ package cangjie_compiler::sema.InheritanceChecker
 import std.collection.*
 import cangjie_compiler::ast.*
 import cangjie_compiler::basic.{DiagArgument, DiagKind, DiagKindRefactor, MakeRange}
+import cangjie_compiler::basic.Range as BasicRange
 import cangjie_compiler::sema.*
 
 public class InstantiationTriggerInfo {
@@ -65,6 +66,13 @@ func InstantiationKey(decl: Decl, instTys: ArrayList<Ty>): String {
     return "${decl.fullPackageName}:${decl.identifier.Val()}:${decl.begin.ToString()}:${JoinStrings(parts, ",")}"
 }
 
+private func InstantiatedDeclNoteRange(decl: Decl): BasicRange {
+    if (!decl.identifier.Empty() && !decl.identifier.ZeroPos()) {
+        return MakeRange(decl.identifier.Begin(), decl.identifier.End())
+    }
+    return MakeRange(decl.begin, decl.end)
+}
+
 private func GetReferenceTyAndTarget(node: Node): (Option<Ty>, Option<Decl>) {
     var target = GetRealTarget(node.GetTarget())
     var baseTy = node.GetTy()
@@ -92,13 +100,10 @@ private func HasExtendForInstantiation(values: ArrayList<ExtendDecl>, extendDecl
 
 private func IsVisibleGenericExtendForInstantiation(
     checker: StructInheritanceChecker,
-    contextDecl: Decl,
     extendDecl: ExtendDecl,
     instTys: ArrayList<Ty>
 ): Bool {
-    let samePkg = extendDecl.fullPackageName == checker.pkg.fullPackageName ||
-        extendDecl.fullPackageName == contextDecl.fullPackageName
-    if (!samePkg && !extendDecl.TestAttr(Attribute.PUBLIC)) {
+    if (!IsExtendVisibleForPackage(checker.pkg.fullPackageName, extendDecl)) {
         return false
     }
     return extendDecl.TestAttr(Attribute.GENERIC) && checker.typeManager.CheckGenericDeclInstantiation(extendDecl, instTys)
@@ -107,14 +112,13 @@ private func IsVisibleGenericExtendForInstantiation(
 private func AddVisibleExtendForInstantiation(
     checker: StructInheritanceChecker,
     out: ArrayList<ExtendDecl>,
-    contextDecl: Decl,
     extendDecl: ExtendDecl,
     instTys: ArrayList<Ty>
 ): Unit {
     if (HasExtendForInstantiation(out, extendDecl)) {
         return
     }
-    if (IsVisibleGenericExtendForInstantiation(checker, contextDecl, extendDecl, instTys)) {
+    if (IsVisibleGenericExtendForInstantiation(checker, extendDecl, instTys)) {
         out.add(extendDecl)
     }
 }
@@ -130,12 +134,12 @@ private func GetVisibleExtendsForInstantiation(
     }
     if (let Some(declTy) <- decl.GetTy()) {
         for (extendDecl in checker.typeManager.GetAllExtendsByTy(declTy)) {
-            AddVisibleExtendForInstantiation(checker, out, decl, extendDecl, instTys)
+            AddVisibleExtendForInstantiation(checker, out, extendDecl, instTys)
         }
     }
     if (let Some(inheritable) <- (decl as InheritableDecl)) {
         for (extendDecl in checker.typeManager.GetDeclExtends(inheritable)) {
-            AddVisibleExtendForInstantiation(checker, out, decl, extendDecl, instTys)
+            AddVisibleExtendForInstantiation(checker, out, extendDecl, instTys)
         }
     }
     return out
@@ -562,8 +566,12 @@ func DiagnoseForInstantiatedMemberImpl(
                             MakeRange(trigger.node.begin, trigger.node.end),
                             arguments: [triggeredDeclType, childDecl.identifier.Val()]
                         )
-                        builder.AddNote(MakeRange(parentDecl.begin, parentDecl.end), "found candidate")
-                        builder.AddNote(MakeRange(childDecl.begin, childDecl.end), "found candidate")
+                        let candidates = ArrayList<Decl>()
+                        AddInheritanceDeclUniqueByPosition(candidates, parentDecl)
+                        AddInheritanceDeclUniqueByPosition(candidates, childDecl)
+                        for (candidate in candidates) {
+                            builder.AddNote(InstantiatedDeclNoteRange(candidate), "found candidate")
+                        }
                     }
                 }
             }
