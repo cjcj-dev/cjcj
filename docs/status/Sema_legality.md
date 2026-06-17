@@ -38,15 +38,17 @@ This pass covers the self-hosted Cangjie port under:
 - Preserved first scope termination kind after per-scope context cleanup, matching C++ behavior used to skip constructor/static-init field checks after direct throwing termination.
 - Routed string interpolation initialization checking through `InterpolationExpr.block`, matching the C++ traversal of interpolation blocks instead of treating interpolation wrapper expressions as leaf nodes.
 - Switched member-field collection in type initialization checking to `GetVarsInitializationOrderWithPositions`, preserving the C++ common/specific field dependency order.
+- Ported the missing `CheckLetFlagInMemberAccess` immutable-assignment cases for struct values returned by calls/subscripts and struct-valued property bases, using real AST type information and desugared base expressions.
+- Added C++-style illegal member-access checks before full initialization: member functions/properties in member initializers, captured `this` through nested function/lambda bodies, `this.member`, `super.memberFunc`, and the distinct `super` member-variable issue before a valid member function context exists.
 
 ## Remaining Fidelity Gaps
 
 - The new analyzers currently return structured issue records, but they are not yet fully wired into the original diagnostic engine with exact C++ diagnostic ids, ranges, notes, hints, and recovery behavior.
 - Some initialization edge cases still depend on sibling components that are only partially represented in the self-hosted port, especially exact scope-manager cache behavior, constructor delegation state, reachability/termination analysis, and AST context profile hooks.
-- The new termination-state tracking is local and uses available scope names/function-body stacks; it does not yet reproduce every C++ `ScopeManager` symbol-cache query or exact `IsNode1ScopeVisibleForNode2` case.
+- The new termination and illegal-member tracking is local and uses available scope names/function-body stacks; it does not yet reproduce every C++ `ScopeManager` symbol-cache query, top-level symbol lookup, or exact `IsNode1ScopeVisibleForNode2` case.
 - Const-evaluation coverage follows the C++ legality shape but does not yet reproduce every target-specific profile check and diagnostic specialization from the C++ implementation.
 - Global-variable initialization checking models C++ def/use and cycle behavior, but final integration with compilation-unit import ordering, diagnostic formatting, and type-checker phase scheduling remains incomplete.
 
 ## Estimate
 
-Honest behavior coverage for this legality/const-evaluation scope is about 67% versus the C++ reference. The port now has real traversal and issue production in the scoped files, several targeted C++ edge cases, the main conditional-initialization merge path, termination-aware initialization state, constructor early-return field tracking, string interpolation block traversal, and dependency-aware member initialization order, but production completeness still requires diagnostic integration and the remaining exact semantic edge cases above.
+Honest behavior coverage for this legality/const-evaluation scope is about 70% versus the C++ reference. The port now has real traversal and issue production in the scoped files, several targeted C++ edge cases, the main conditional-initialization merge path, termination-aware initialization state, constructor early-return field tracking, string interpolation block traversal, dependency-aware member initialization order, immutable struct-base assignment checks, and illegal member-use checks before full initialization, but production completeness still requires diagnostic integration and the remaining exact semantic edge cases above.

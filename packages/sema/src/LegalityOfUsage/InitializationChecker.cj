@@ -8,6 +8,7 @@ public enum InitializationIssueKind {
     | ASSIGN_IMMUTABLE
     | CAPTURE_BEFORE_INITIALIZATION
     | ILLEGAL_MEMBER_USE
+    | ILLEGAL_SUPER_MEMBER_USE
     | UNINITIALIZED_FIELD
 }
 
@@ -17,7 +18,8 @@ private func InitializationIssueKindIndex(kind: InitializationIssueKind): Int64 
         case InitializationIssueKind.ASSIGN_IMMUTABLE => 1
         case InitializationIssueKind.CAPTURE_BEFORE_INITIALIZATION => 2
         case InitializationIssueKind.ILLEGAL_MEMBER_USE => 3
-        case InitializationIssueKind.UNINITIALIZED_FIELD => 4
+        case InitializationIssueKind.ILLEGAL_SUPER_MEMBER_USE => 4
+        case InitializationIssueKind.UNINITIALIZED_FIELD => 5
     }
 }
 
@@ -915,32 +917,61 @@ public class InitializationChecker {
         }
     }
 
+    private func GetRealExpr(expr: Expr): Expr {
+        if (let Some(desugar) <- expr.desugarExpr) {
+            return desugar
+        }
+        return expr
+    }
+
+    private func IsStructBaseExpr(expr: Expr): Bool {
+        if (let Some(baseTy) <- expr.GetTy()) {
+            return baseTy.IsStruct()
+        }
+        return false
+    }
+
     private func CheckLetFlagInMemberAccess(assignExpr: Expr, member: MemberAccess, inInitFunction: Bool): Unit {
+        if (let None <- member.baseExpr) {
+            return
+        }
+        let memberBase = member.baseExpr.getOrThrow()
         if (let Some(target) <- member.target) {
             if (let Some(varDecl) <- (target as VarDecl)) {
                 if (NotAssignableVariable(varDecl, inInitFunction)) {
                     AddIssue(InitializationIssueKind.ASSIGN_IMMUTABLE, assignExpr, target: varDecl)
                 }
-            }
-        }
-        if (let Some(base) <- member.baseExpr) {
-            if (let Some(refExpr) <- (base as RefExpr)) {
-                if (let Some(target) <- refExpr.GetTarget()) {
-                    if (let Some(varDecl) <- (target as VarDecl)) {
-                        if (!varDecl.isVar && MayBeStructTy(varDecl)) {
-                            AddIssue(InitializationIssueKind.ASSIGN_IMMUTABLE, assignExpr, target: varDecl)
+                let realBase = GetRealExpr(memberBase)
+                let isStructBase = IsStructBaseExpr(realBase)
+                if ((realBase.astKind == ASTKind.CALL_EXPR || realBase.astKind == ASTKind.SUBSCRIPT_EXPR) &&
+                    isStructBase) {
+                    AddIssue(InitializationIssueKind.ASSIGN_IMMUTABLE, assignExpr, target: realBase.GetTarget())
+                }
+                if (let Some(nameRef) <- (memberBase as NameReferenceExpr)) {
+                    if (let Some(baseTarget) <- nameRef.GetTarget()) {
+                        if (baseTarget.astKind == ASTKind.PROP_DECL && isStructBase) {
+                            AddIssue(InitializationIssueKind.ASSIGN_IMMUTABLE, assignExpr, target: baseTarget)
                         }
                     }
                 }
-            } else if (let Some(baseMember) <- (base as MemberAccess)) {
-                if (let Some(target) <- baseMember.target) {
-                    if (let Some(varDecl) <- (target as VarDecl)) {
-                        if (MayBeStructTy(varDecl)) {
-                            if (!varDecl.isVar) {
-                                AddIssue(InitializationIssueKind.ASSIGN_IMMUTABLE, assignExpr, target: varDecl)
-                            } else {
-                                CheckLetFlag(assignExpr, base)
-                            }
+            }
+        }
+        if (let Some(refExpr) <- (memberBase as RefExpr)) {
+            if (let Some(target) <- refExpr.GetTarget()) {
+                if (let Some(varDecl) <- (target as VarDecl)) {
+                    if (!varDecl.isVar && MayBeStructTy(varDecl)) {
+                        AddIssue(InitializationIssueKind.ASSIGN_IMMUTABLE, assignExpr, target: varDecl)
+                    }
+                }
+            }
+        } else if (let Some(baseMember) <- (memberBase as MemberAccess)) {
+            if (let Some(target) <- baseMember.target) {
+                if (let Some(varDecl) <- (target as VarDecl)) {
+                    if (MayBeStructTy(varDecl)) {
+                        if (!varDecl.isVar) {
+                            AddIssue(InitializationIssueKind.ASSIGN_IMMUTABLE, assignExpr, target: varDecl)
+                        } else {
+                            CheckLetFlag(assignExpr, memberBase)
                         }
                     }
                 }
@@ -974,6 +1005,53 @@ public class InitializationChecker {
             return None
         }
         return currentFuncBodies[currentFuncBodies.size - 1]
+    }
+
+    private func CurrentOutermostNamedFuncDecl(): Option<FuncDecl> {
+        var idx: Int64 = 0
+        while (idx < currentFuncBodies.size) {
+            if (let Some(funcDecl) <- currentFuncBodies[idx].funcDecl) {
+                return funcDecl
+            }
+            idx++
+        }
+        return None
+    }
+
+    private func CurrentFuncBodySameAs(funcDecl: FuncDecl): Bool {
+        if (let Some(currentBody) <- CurrentFuncBody()) {
+            if (let Some(currentDecl) <- currentBody.funcDecl) {
+                return SameDecl(currentDecl, funcDecl)
+            }
+        }
+        return false
+    }
+
+    private func CurrentNominalDeclForUsage(target: Decl): Option<Decl> {
+        if (let Some(outerFunc) <- CurrentOutermostNamedFuncDecl()) {
+            if (let Some(owner) <- outerFunc.outerDecl) {
+                if (owner.IsNominalDecl()) {
+                    return owner
+                }
+            }
+        }
+        if (let Some(currentBody) <- CurrentFuncBody()) {
+            if (let Some(parentClassLike) <- currentBody.parentClassLike) {
+                return parentClassLike
+            }
+            if (let Some(parentStruct) <- currentBody.parentStruct) {
+                return parentStruct
+            }
+            if (let Some(parentEnum) <- currentBody.parentEnum) {
+                return parentEnum
+            }
+        }
+        if (let Some(targetOuter) <- target.outerDecl) {
+            if (targetOuter.IsNominalDecl()) {
+                return targetOuter
+            }
+        }
+        return None
     }
 
     private func GetOwningFuncBodyForScope(scopeName: String): Option<FuncBody> {
@@ -1156,6 +1234,82 @@ public class InitializationChecker {
         return !(targetNode.scopeLevel == 0 || isClassLikeOrStruct)
     }
 
+    private func AddIllegalMemberUse(expr: Expr, target: Decl): Unit {
+        AddIssue(InitializationIssueKind.ILLEGAL_MEMBER_USE, expr, target: target, message: target.identifier.Val())
+    }
+
+    private func CheckIllegalMemberAccess(expr: Expr, target: Decl, targetStruct: Node): Bool {
+        if (let None <- CurrentFuncBody()) {
+            if (target.IsFuncOrProp()) {
+                AddIllegalMemberUse(expr, target)
+                return false
+            }
+            return true
+        }
+        if (let None <- CurrentOutermostNamedFuncDecl()) {
+            AddIllegalMemberUse(expr, target)
+            return false
+        }
+        let outerMostFunc = CurrentOutermostNamedFuncDecl().getOrThrow()
+        if (let Some(owner) <- outerMostFunc.outerDecl) {
+            if (!owner.IsNominalDecl()) {
+                AddIllegalMemberUse(expr, target)
+                return false
+            }
+        } else {
+            AddIllegalMemberUse(expr, target)
+            return false
+        }
+        let leftVariable = expr.TestAttr(Attribute.LEFT_VALUE) && target.astKind == ASTKind.VAR_DECL
+        if (IsAllMembersInitialized(targetStruct) || leftVariable) {
+            return true
+        }
+        if (!IsInstanceConstructor(outerMostFunc)) {
+            return true
+        }
+        if (target.IsFuncOrProp() || !CurrentFuncBodySameAs(outerMostFunc)) {
+            AddIllegalMemberUse(expr, target)
+            return false
+        }
+        return true
+    }
+
+    private func CheckIllegalRefExprAccess(refExpr: RefExpr, target: Decl): Bool {
+        if (target.TestAttr(Attribute.STATIC) || target.TestAttr(Attribute.CONSTRUCTOR)) {
+            return true
+        }
+        if (let None <- target.outerDecl) {
+            return true
+        }
+        let targetOuter = target.outerDecl.getOrThrow()
+        if (!targetOuter.IsNominalDecl()) {
+            return true
+        }
+        if (let None <- CurrentNominalDeclForUsage(target)) {
+            return true
+        }
+        let currentNominal = CurrentNominalDeclForUsage(target).getOrThrow()
+        if (SameDecl(currentNominal, targetOuter)) {
+            return CheckIllegalMemberAccess(refExpr, target, currentNominal)
+        }
+        if (target.astKind == ASTKind.VAR_DECL) {
+            if (let Some(outerFunc) <- CurrentOutermostNamedFuncDecl()) {
+                if (let Some(owner) <- outerFunc.outerDecl) {
+                    if (owner.IsNominalDecl()) {
+                        return true
+                    }
+                }
+            }
+            AddIssue(InitializationIssueKind.ILLEGAL_SUPER_MEMBER_USE, refExpr, target: target,
+                message: refExpr.ref.identifier.Val())
+            return false
+        }
+        if (target.IsFuncOrProp()) {
+            return CheckIllegalMemberAccess(refExpr, target, currentNominal)
+        }
+        return true
+    }
+
     private func CheckInitInRefExpr(refExpr: RefExpr): Bool {
         if (let Some(target) <- refExpr.GetTarget()) {
             if (target.astKind == ASTKind.GENERIC_PARAM_DECL) {
@@ -1170,6 +1324,9 @@ public class InitializationChecker {
             RecordInstanceVariableUsage(target)
             if (CanSkipInitCheck(target) || !IsOrderRelated(refExpr, target, target.IsNominalDecl())) {
                 return true
+            }
+            if (!CheckIllegalRefExprAccess(refExpr, target)) {
+                return false
             }
             if (let Some(_) <- (target as FuncParam)) {
                 return true
@@ -1201,6 +1358,32 @@ public class InitializationChecker {
         var result = CheckExprOption(member.baseExpr)
         if (let Some(target) <- member.target) {
             RecordInstanceVariableUsage(target)
+            if (!target.TestAttr(Attribute.STATIC)) {
+                if (let Some(targetOuter) <- target.outerDecl) {
+                    if (targetOuter.IsNominalDecl()) {
+                        if (let Some(base) <- member.baseExpr) {
+                            if (let Some(refExpr) <- (base as RefExpr)) {
+                                if (refExpr.isThis) {
+                                    if (let Some(baseTarget) <- refExpr.GetTarget()) {
+                                        if (baseTarget.IsStructOrClassDecl()) {
+                                            if (!CheckIllegalMemberAccess(member, target, baseTarget)) {
+                                                return false
+                                            }
+                                        }
+                                    }
+                                }
+                                if (refExpr.isSuper && target.IsFuncOrProp()) {
+                                    if (let Some(currentNominal) <- CurrentNominalDeclForUsage(target)) {
+                                        if (!CheckIllegalMemberAccess(member, target, currentNominal)) {
+                                            return false
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
             if (target.IsFuncOrProp() || IsMemberUseOutsideCtor(target)) {
                 return result
             }
