@@ -4,6 +4,11 @@ Last updated: 2026-06-17
 
 ## Current pass
 
+- Deepened `packages/sema/src/Desugar/DesugarMacro.cj` against the C++ `DesugarMacro.cpp` reference:
+  - replaced the status-only body with real quote desugaring for empty `quote()`, token parts, nested quotes, `${expr}.toTokens()` conversion, `transformTokens`, `concat`, token-position refresh for `Token(...)`, and `curFile` propagation;
+  - added byte serialization for quote token parts using the real AST/lex token structures and `basic.StringConvertor` normalization for multiline raw strings;
+  - added macro-declaration desugaring from `MacroDecl` to a generated `FuncDecl`, preserving source positions, attributes, modifiers, raw mangle name, deprecated annotations, package name, compilation flag, and function-body ownership.
+- Connected before-type-check dispatch for `FILE` and `QUOTE_EXPR` nodes so macro declarations and quote expressions are now processed by the package-local desugar traversal.
 - Deepened `packages/sema/src/Desugar/DesugarInTypeCheck.cj` against the C++ `DesugarInTypeCheck.cpp` reference:
   - added real helper lowerings for binary/unary operator overload calls, subscript overload calls, subscript assignment overload calls, compound assignment overload calls, `operator()` call lowering, variadic-call packing, pointer constructor calls, and array/VArray constructor calls;
   - added the primary-constructor lowering helper that synthesizes the generated `init` declaration, clones source-visible parameters/body nodes, preserves leading `super()` calls, creates member variables and `this.field = param` initialization for member parameters, copies source spans without aliasing identifiers, and moves constructor annotations onto the generated function as in the C++ reference;
@@ -38,7 +43,8 @@ Last updated: 2026-06-17
 ## Remaining gaps
 
 - The public root `sema.PerformDesugarBeforeTypeCheck` facade is still a no-op. The real helper currently lives in package `cangjie_compiler::sema.Desugar`; importing it into root `sema` creates a cycle through `sema.Desugar.AfterTypeCheck -> sema`. Fixing this needs a package ownership split outside this pass's allowed edit surface.
-- The `desugarMacrocall` switch is not faithfully represented: the generic self-hosted walker already visits `File.originalMacroCallNodes`, so the C++ file-dispatch loop cannot be copied directly without double-walking macro-call nodes. Macro declaration and quote desugar remain substantially incomplete.
+- The `desugarMacrocall` switch is not faithfully represented: the generic self-hosted walker already visits `File.originalMacroCallNodes`, so the C++ file-dispatch loop cannot be copied directly without double-walking macro-call nodes.
+- Macro declaration and quote desugar now have real partial lowering, but C++-faithful exported native wrapper synthesis (`macroCall_a_*/macroCall_c_*`), callback/thread-local handling, catch/finally wrapper bodies, and direct reuse of the macro package token serializer remain pending. The macro package is not currently a sema dependency and the allowed edit surface did not include `packages/sema/cjpm.toml`.
 - The new after-type-check traversal is implemented in `sema.Desugar`, but the root type-checker facade is outside this pass's edit surface, so full pipeline wiring remains pending.
 - `ForInExpr` currently has real range lowering only. String and iterator lowering still need faithful lookup/import-manager behavior from the C++ implementation.
 - In-type-check desugar now has real flow, operator-overload, subscript-overload, `operator()` call, variadic-call, pointer-call, array-call, and primary-constructor helpers. Root typechecker call-site wiring, primary-constructor diagnostics before merge, pointer excess-argument diagnostics, and cache invalidation through `ASTContext` remain pending.
@@ -47,4 +53,4 @@ Last updated: 2026-06-17
 
 ## Coverage estimate
 
-Real behavior coverage for this scoped desugar area is about 40% versus the C++ reference. The implemented pieces now perform meaningful AST transformations, including in-typecheck operator/variadic/builtin-call and primary-constructor helper lowering, after-type-check option boxing, token-call position refresh, the API-level `@IfAvailable` path, and more faithful discarded-context branch handling, but substantial C++ behavior remains either not wired into the root pipeline or represented by compiling compatibility bodies.
+Real behavior coverage for this scoped desugar area is about 43% versus the C++ reference. The implemented pieces now perform meaningful AST transformations, including in-typecheck operator/variadic/builtin-call and primary-constructor helper lowering, after-type-check option boxing, token-call position refresh, quote/macro-declaration lowering, the API-level `@IfAvailable` path, and more faithful discarded-context branch handling, but substantial C++ behavior remains either not wired into the root pipeline or represented by compiling compatibility bodies.

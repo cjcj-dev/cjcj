@@ -593,6 +593,14 @@ private func DispatchBeforeTypeCheck(node: Node, compatibleSDKVersion: String): 
             if (let Some(mainDecl) <- (node as MainDecl)) {
                 DesugarMainDecl(mainDecl)
             }
+        case ASTKind.FILE =>
+            if (let Some(file) <- (node as File)) {
+                DesugarMacroDecl(file)
+            }
+        case ASTKind.QUOTE_EXPR =>
+            if (let Some(quoteExpr) <- (node as QuoteExpr)) {
+                DesugarQuoteExpr(quoteExpr)
+            }
         case ASTKind.OPTION_TYPE =>
             if (let Some(optionType) <- (node as OptionType)) {
                 DesugarOptionType(optionType)
