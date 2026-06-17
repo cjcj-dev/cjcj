@@ -3,10 +3,29 @@ package cangjie_compiler::sema
 import std.collection.*
 import cangjie_compiler::ast.*
 import cangjie_compiler::basic.DiagnosticEngine as BasicDiagnosticEngine
+import cangjie_compiler::basic.DiagKind as BasicDiagKind
 import cangjie_compiler::basic.DiagKindRefactor as BasicDiagKindRefactor
+import cangjie_compiler::basic.Position as BasicPosition
+import cangjie_compiler::basic.Range as BasicRange
 
 private func BoolTy(): Ty {
     return TypeManager.GetPrimitiveTy(TypeKind.TYPE_BOOLEAN)
+}
+
+private func ToBasicPosition(pos: Position): BasicPosition {
+    return BasicPosition(pos.fileID, pos.line, pos.column)
+}
+
+private func DiagOld(diag: BasicDiagnosticEngine, node: Node, kind: BasicDiagKind): Unit {
+    let _ = diag.Diagnose(ToBasicPosition(node.begin), ToBasicPosition(node.end), kind)
+}
+
+private func NodeRange(node: Node): BasicRange {
+    var fixedEnd = node.end
+    if (node.begin.fileID != node.end.fileID) {
+        fixedEnd = node.begin + 1
+    }
+    return BasicRange(ToBasicPosition(node.begin), ToBasicPosition(fixedEnd))
 }
 
 private func SugarKindIndex(kind: SugarKind): Int64 {
@@ -76,48 +95,79 @@ private func PatternKindForOr(ctx: ASTContext, pattern: Pattern): ASTKind {
     return pattern.astKind
 }
 
-private func PatternHasBinding(ctx: ASTContext, pattern: Pattern): Bool {
+private func PatternKindForDiag(ctx: ASTContext, pattern: Pattern): String {
+    let kind = PatternKindForOr(ctx, pattern)
+    let text = match (kind) {
+        case ASTKind.CONST_PATTERN => "constant"
+        case ASTKind.WILDCARD_PATTERN => "wildcard"
+        case ASTKind.VAR_PATTERN => "binding"
+        case ASTKind.TUPLE_PATTERN => "tuple"
+        case ASTKind.TYPE_PATTERN => "type"
+        case ASTKind.ENUM_PATTERN => "enum"
+        case _ => "invalid"
+    }
+    return text + " pattern"
+}
+
+private func FindBindingPattern(ctx: ASTContext, pattern: Pattern): Option<Pattern> {
     if (pattern.astKind == ASTKind.VAR_PATTERN) {
-        return true
+        return Some(pattern)
     }
     if (let Some(varOrEnum) <- (pattern as VarOrEnumPattern)) {
-        return !ctx.IsEnumConstructor(varOrEnum.identifier.Val())
+        if (!ctx.IsEnumConstructor(varOrEnum.identifier.Val())) {
+            return Some(pattern)
+        }
     }
     if (let Some(tuplePattern) <- (pattern as TuplePattern)) {
         for (subPattern in tuplePattern.patterns) {
-            if (PatternHasBinding(ctx, subPattern)) {
-                return true
+            if (let Some(found) <- FindBindingPattern(ctx, subPattern)) {
+                return Some(found)
             }
         }
     }
     if (let Some(enumPattern) <- (pattern as EnumPattern)) {
         for (subPattern in enumPattern.patterns) {
-            if (PatternHasBinding(ctx, subPattern)) {
-                return true
+            if (let Some(found) <- FindBindingPattern(ctx, subPattern)) {
+                return Some(found)
             }
         }
     }
     if (let Some(typePattern) <- (pattern as TypePattern)) {
         if (let Some(inner) <- typePattern.pattern) {
-            return PatternHasBinding(ctx, inner)
+            return FindBindingPattern(ctx, inner)
+        }
+    }
+    return None
+}
+
+public func ChkNoVarPatternInOrPattern(ctx: ASTContext, patterns: ArrayList<Pattern>,
+    diag!: Option<BasicDiagnosticEngine> = None): Bool {
+    if (patterns.size <= 1) {
+        return true
+    }
+    let varPatterns = ArrayList<Pattern>()
+    for (pattern in patterns) {
+        if (let Some(varPattern) <- FindBindingPattern(ctx, pattern)) {
+            varPatterns.add(varPattern)
+        }
+    }
+    if (varPatterns.isEmpty()) {
+        return true
+    }
+    if (let Some(diagValue) <- diag) {
+        let builder = diagValue.DiagnoseRefactor(BasicDiagKindRefactor.sema_var_in_or_pattern,
+            NodeRange(varPatterns[0]))
+        var idx: Int64 = 1
+        while (idx < varPatterns.size) {
+            builder.AddHint(NodeRange(varPatterns[idx]))
+            idx++
         }
     }
     return false
 }
 
-public func ChkNoVarPatternInOrPattern(ctx: ASTContext, patterns: ArrayList<Pattern>): Bool {
-    if (patterns.size <= 1) {
-        return true
-    }
-    for (pattern in patterns) {
-        if (PatternHasBinding(ctx, pattern)) {
-            return false
-        }
-    }
-    return true
-}
-
-public func ChkPatternsSameASTKind(ctx: ASTContext, patterns: ArrayList<Pattern>): Bool {
+public func ChkPatternsSameASTKind(ctx: ASTContext, patterns: ArrayList<Pattern>,
+    diag!: Option<BasicDiagnosticEngine> = None): Bool {
     if (patterns.size <= 1) {
         return true
     }
@@ -131,10 +181,16 @@ public func ChkPatternsSameASTKind(ctx: ASTContext, patterns: ArrayList<Pattern>
     if (allEnumLike) {
         return true
     }
-    let frontKind = PatternKindForOr(ctx, patterns[0])
+    let frontKind = patterns[0].astKind
     var idx: Int64 = 1
     while (idx < patterns.size) {
-        if (PatternKindForOr(ctx, patterns[idx]) != frontKind) {
+        if (patterns[idx].astKind != frontKind) {
+            if (let Some(diagValue) <- diag) {
+                let builder = diagValue.DiagnoseRefactor(BasicDiagKindRefactor.sema_different_or_pattern,
+                    NodeRange(patterns[0]))
+                builder.AddMainHintArguments([PatternKindForDiag(ctx, patterns[0])])
+                builder.AddHint(NodeRange(patterns[idx]), arguments: [PatternKindForDiag(ctx, patterns[idx])])
+            }
             return false
         }
         idx++
@@ -142,8 +198,10 @@ public func ChkPatternsSameASTKind(ctx: ASTContext, patterns: ArrayList<Pattern>
     return true
 }
 
-public func ChkMatchCasePatterns(typeManager: TypeManager, ctx: ASTContext, target: Ty, mc: MatchCase): Bool {
-    if (!ChkNoVarPatternInOrPattern(ctx, mc.patterns) || !ChkPatternsSameASTKind(ctx, mc.patterns)) {
+public func ChkMatchCasePatterns(typeManager: TypeManager, ctx: ASTContext, target: Ty, mc: MatchCase,
+    diag!: Option<BasicDiagnosticEngine> = None): Bool {
+    if (!ChkNoVarPatternInOrPattern(ctx, mc.patterns, diag: diag) ||
+        !ChkPatternsSameASTKind(ctx, mc.patterns, diag: diag)) {
         for (pattern in mc.patterns) {
             pattern.SetTy(TypeManager.GetInvalidTy())
         }
@@ -235,10 +293,11 @@ public func ChkMatchCaseNoSelector(typeManager: TypeManager, ctx: ASTContext, ta
     return false
 }
 
-public func CheckMatchExprNoSelectorExhaustiveness(me: MatchExpr, hasDefault!: Bool = false): Bool {
+public func CheckMatchExprNoSelectorExhaustiveness(me: MatchExpr, hasDefault!: Bool = false,
+    diag!: Option<BasicDiagnosticEngine> = None): Bool {
     var ok = true
     var foundDefault = hasDefault
-    var defaultCase: Int64 = -1
+    var defaultCase: Int64 = 0
     var idx: Int64 = 0
     while (idx < me.matchCaseOthers.size) {
         let matchCaseOther = me.matchCaseOthers[idx]
@@ -252,18 +311,22 @@ public func CheckMatchExprNoSelectorExhaustiveness(me: MatchExpr, hasDefault!: B
         }
         if (Ty.IsInitialTy(matchCaseOther.GetTy())) {
             ok = false
+            if (let Some(diagValue) <- diag) {
+                DiagOld(diagValue, matchCaseOther, BasicDiagKind.sema_match_case_has_no_type)
+            }
         }
         idx++
     }
     if (!foundDefault) {
         ok = false
-    }
-    if (defaultCase >= 0) {
-        var unreachableIdx = defaultCase + 1
-        while (unreachableIdx < me.matchCaseOthers.size) {
-            me.matchCaseOthers[unreachableIdx].EnableAttr(Attribute.UNREACHABLE)
-            unreachableIdx++
+        if (let Some(diagValue) <- diag) {
+            DiagOld(diagValue, me, BasicDiagKind.sema_match_case_must_have_default)
         }
+    }
+    var unreachableIdx = defaultCase + 1
+    while (unreachableIdx < me.matchCaseOthers.size) {
+        me.matchCaseOthers[unreachableIdx].EnableAttr(Attribute.UNREACHABLE)
+        unreachableIdx++
     }
     return ok
 }
@@ -282,7 +345,7 @@ public func SynNormalMatchCaseBody(typeManager: TypeManager, ctx: ASTContext,
     var ok = !me.matchCases.isEmpty()
     for (mc in me.matchCases) {
         mc.SetCtxExprForPatterns(selector)
-        let patternOk = ChkMatchCasePatterns(typeManager, ctx, selectorTy, mc)
+        let patternOk = ChkMatchCasePatterns(typeManager, ctx, selectorTy, mc, diag: diag)
         let guardOk = ChkMatchCasePatGuard(typeManager, ctx, mc)
         let actionOk = ChkMatchCaseActions(typeManager, None, mc)
         if (patternOk && guardOk && actionOk) {
@@ -346,7 +409,8 @@ public func SynMatchExprHasSelector(typeManager: TypeManager, ctx: ASTContext,
     return SynNormalMatchCaseBody(typeManager, ctx, diag, me)
 }
 
-public func SynMatchExprNoSelector(typeManager: TypeManager, ctx: ASTContext, me: MatchExpr): Ty {
+public func SynMatchExprNoSelector(typeManager: TypeManager, ctx: ASTContext, me: MatchExpr,
+    diag!: Option<BasicDiagnosticEngine> = None): Ty {
     let caseTys = ArrayList<Ty>()
     var hasInvalidCase = false
     for (mco in me.matchCaseOthers) {
@@ -357,7 +421,7 @@ public func SynMatchExprNoSelector(typeManager: TypeManager, ctx: ASTContext, me
             caseTys.add(caseTy)
         }
     }
-    if (hasInvalidCase || !CheckMatchExprNoSelectorExhaustiveness(me)) {
+    if (hasInvalidCase || !CheckMatchExprNoSelectorExhaustiveness(me, diag: diag)) {
         return InvalidMatchTy(me)
     }
     let joinedTy = JoinCaseTys(typeManager, caseTys)
@@ -370,7 +434,7 @@ public func SynMatchExpr(typeManager: TypeManager, ctx: ASTContext, me: MatchExp
     if (let Some(_) <- me.selector) {
         return SynMatchExprHasSelector(typeManager, ctx, diag, me)
     }
-    return SynMatchExprNoSelector(typeManager, ctx, me)
+    return SynMatchExprNoSelector(typeManager, ctx, me, diag: diag)
 }
 
 public func ChkMatchExprHasSelector(typeManager: TypeManager, ctx: ASTContext,
@@ -389,7 +453,7 @@ public func ChkMatchExprHasSelector(typeManager: TypeManager, ctx: ASTContext,
     var ok = true
     for (mc in me.matchCases) {
         mc.SetCtxExprForPatterns(selector)
-        let patternOk = ChkMatchCasePatterns(typeManager, ctx, selectorTy, mc)
+        let patternOk = ChkMatchCasePatterns(typeManager, ctx, selectorTy, mc, diag: diag)
         let guardOk = ChkMatchCasePatGuard(typeManager, ctx, mc)
         let actionOk = ChkMatchCaseActions(typeManager, target, mc)
         if (patternOk && guardOk && actionOk) {
@@ -418,7 +482,8 @@ public func ChkMatchExprHasSelector(typeManager: TypeManager, ctx: ASTContext,
     return ok
 }
 
-public func ChkMatchExprNoSelector(typeManager: TypeManager, ctx: ASTContext, target: Ty, me: MatchExpr): Bool {
+public func ChkMatchExprNoSelector(typeManager: TypeManager, ctx: ASTContext, target: Ty, me: MatchExpr,
+    diag!: Option<BasicDiagnosticEngine> = None): Bool {
     let caseTys = ArrayList<Ty>()
     var ok = true
     for (mco in me.matchCaseOthers) {
@@ -436,7 +501,7 @@ public func ChkMatchExprNoSelector(typeManager: TypeManager, ctx: ASTContext, ta
         } else {
             me.SetTy(JoinCaseTys(typeManager, caseTys))
         }
-        ok = CheckMatchExprNoSelectorExhaustiveness(me)
+        ok = CheckMatchExprNoSelectorExhaustiveness(me, diag: diag)
     }
     if (!ok) {
         let _ = InvalidMatchTy(me)
@@ -449,7 +514,7 @@ public func ChkMatchExpr(typeManager: TypeManager, ctx: ASTContext, target: Ty, 
     if (let Some(_) <- me.selector) {
         return ChkMatchExprHasSelector(typeManager, ctx, diag, target, me)
     }
-    return ChkMatchExprNoSelector(typeManager, ctx, target, me)
+    return ChkMatchExprNoSelector(typeManager, ctx, target, me, diag: diag)
 }
 
 private func caseTysContains(typeManager: TypeManager, tys: ArrayList<Ty>, target: Ty): Bool {

@@ -19,6 +19,8 @@ Continuation updates:
 - `TypeCheckBuiltinExpr.cj`: added C++-shaped target-driven pointer constructor inference so `CPointer` calls with invalid/generic pointee types can take a valid pointer target type, and tightened `CFunc` construction to require a direct reference callee like the C++ `RefExpr` guard.
 - `TypeCheckPattern.cj`: tightened enum-pattern target discovery so member-access and placeholder ref fallbacks only keep declarations owned by an `EnumDecl`, matching the C++ guards that reject stale or non-enum call/member candidates before arity matching.
 - `TypeCheckPattern.cj` / `PatternUsefulness.cj`: aligned type-pattern subtype checks with the C++ `implicitBoxed: true, allowOptionBox: false` form for runtime-match classification, unreachable type-pattern checks, wildcard equivalence, and type-constructor coverage.
+- `TypeCheckMatchExpr.cj`: threaded the real basic diagnostic engine through selector/no-selector match helpers so OR-pattern binding errors, mixed OR-pattern kinds, no-selector cases without a type, and no-selector matches without a default now emit the same diagnostic families as the C++ implementation.
+- `TypeCheckMatchExpr.cj`: aligned OR-pattern same-kind checking with the C++ raw-`ASTKind` comparison after the enum-like exemption, while keeping resolved var-or-enum names only for diagnostic text.
 
 Build status:
 
@@ -33,4 +35,4 @@ Known fidelity gaps:
 - Pattern usefulness/checking is functional but still conservative around complete sealed hierarchy discovery, full intersection/union/Option refinements, and diagnostics that depend on richer C++ Sema context.
 - Builtin and match checking use real AST and type data but still lack the full TypeCheckerImpl cache/synthesis integration present in C++.
 
-Honest coverage estimate for this scoped pass: about 64% of C++ behavior, materially higher than the prior compiling stubs but not module-complete.
+Honest coverage estimate for this scoped pass: about 65% of C++ behavior, materially higher than the prior compiling stubs but not module-complete.
