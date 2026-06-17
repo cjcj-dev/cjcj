@@ -5,6 +5,9 @@ import cangjie_compiler::ast.*
 import cangjie_compiler::modules.GetPackageRelation as ModulesGetPackageRelation
 import cangjie_compiler::modules.PackageRelation as ModulesPackageRelation
 
+private let LOOKUP_CORE_PACKAGE_NAME: String = "std.core"
+private let LOOKUP_AST_PACKAGE_NAME: String = "std.ast"
+
 public class LookupInfo {
     public var baseTy: Option<Ty> = None
     public var file: Option<File> = None
@@ -443,6 +446,65 @@ private func fieldLookupPackage(pd: PackageDecl, fieldName: String): ArrayList<D
     return results
 }
 
+private func lookupPackageMember(pkg: Package, name: String): Option<Decl> {
+    for (file in pkg.files) {
+        for (decl in file.decls) {
+            if (decl.identifier == name) {
+                return Some(decl)
+            }
+        }
+    }
+    for (decl in pkg.genericInstantiatedDecls) {
+        if (decl.identifier == name) {
+            return Some(decl)
+        }
+    }
+    for (decl in pkg.srcImportedNonGenericDecls) {
+        if (decl.identifier == name) {
+            return Some(decl)
+        }
+    }
+    for (decl in pkg.inlineFuncDecls) {
+        if (decl.identifier == name) {
+            return Some(decl)
+        }
+    }
+    return None
+}
+
+private func lookupKnownPackage(ctx: ASTContext, fullPackageName: String): Option<Package> {
+    if (let Some(pkg) <- ctx.curPackage) {
+        if (pkg.fullPackageName == fullPackageName) {
+            return Some(pkg)
+        }
+    }
+    for (packageDecl in ctx.packageDecls) {
+        if (packageDecl.fullPackageName == fullPackageName ||
+            packageDecl.srcPackage.fullPackageName == fullPackageName) {
+            return Some(packageDecl.srcPackage)
+        }
+    }
+    return None
+}
+
+private func stdLibFieldLookup(ctx: ASTContext, node: Node, fieldName: String): ArrayList<Decl> {
+    let results = ArrayList<Decl>()
+    var packageName: Option<String> = None
+    if (node.TestAttr(Attribute.IN_CORE)) {
+        packageName = Some(LOOKUP_CORE_PACKAGE_NAME)
+    } else if (node.TestAttr(Attribute.IN_MACRO)) {
+        packageName = Some(LOOKUP_AST_PACKAGE_NAME)
+    }
+    if (let Some(fullPackageName) <- packageName) {
+        if (let Some(pkg) <- lookupKnownPackage(ctx, fullPackageName)) {
+            if (let Some(target) <- lookupPackageMember(pkg, fieldName)) {
+                results.add(target)
+            }
+        }
+    }
+    return results
+}
+
 public func FieldLookup(typeManager: TypeManager, decl: Option<Decl>, fieldName: String,
     info!: LookupInfo = LookupInfo()): ArrayList<Decl> {
     let results = ArrayList<Decl>()
@@ -609,7 +671,10 @@ public func LookupTopLevel(typeManager: TypeManager, ctx: ASTContext, name: Stri
 private func lookupCommon(typeManager: TypeManager, ctx: ASTContext, name: String, scopeName: String, node: Node,
     onlyLookUpTopLevel: Bool, isSetter: Bool): ArrayList<Decl> {
     let results = ArrayList<Decl>()
-    if (name == INVALID_IDENTIFIER || scopeName.isEmpty()) {
+    for (decl in stdLibFieldLookup(ctx, node, name)) {
+        results.add(decl)
+    }
+    if (!results.isEmpty() || name == INVALID_IDENTIFIER || scopeName.isEmpty()) {
         return results
     }
     let _ = lookupImpl(typeManager, ctx, name, scopeName, node, onlyLookUpTopLevel, isSetter, results)

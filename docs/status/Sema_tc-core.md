@@ -180,6 +180,29 @@ Verification:
 - `grep -rn "TODO(selfhost:Sema)" packages/sema/src` reports 2 package-level markers, both outside the tc-core-owned files in `TestManager.cj`.
 - Remaining `TODO(selfhost:Sema)` markers in the tc-core-owned files listed by the task: 0.
 
+## 2026-06-18 Continue Pass 3
+
+Files deepened:
+
+- `packages/sema/src/LookUpImpl.cj`
+
+Implemented behavior:
+
+- Ported the C++ `StdLibFieldLookup` fast path into self-host lookup. References in nodes marked `IN_CORE` now search `std.core`, and nodes marked `IN_MACRO` now search `std.ast`, before ordinary lexical lookup.
+- The lookup uses real AST package state by checking the current package first and then imported `PackageDecl` entries, returning the first matching package member like C++ `ImportManager::GetCoreDecl`/`GetAstDecl`.
+- Package member scanning includes source file declarations plus the self-host package-level imported, instantiated, and inline declaration lists that can hold real members after desugar or instantiation passes.
+
+Remaining gaps:
+
+- C++ also consults `CjoManager` implicit package members when no explicit member is found. That implicit-member table is still behind the real `ImportManager`, which the current self-host tc-core facade does not carry.
+- General imported-name lookup remains partial until the real `ImportManager` is threaded through Sema lookup.
+
+Verification:
+
+- `cjpm build` passes after this pass.
+- `grep -rn "TODO(selfhost:Sema)" packages/sema/src` reports 2 package-level markers, both outside the tc-core-owned files in `TestManager.cj`.
+- Remaining `TODO(selfhost:Sema)` markers in the tc-core-owned files listed by the task: 0.
+
 ## 2026-06-18 Continue Pass
 
 Files deepened:
