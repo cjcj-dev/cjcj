@@ -139,3 +139,14 @@ Incomplete extension implementation continuation:
   not receive global options and the replacement helper lives outside the permitted edit area.
 
 Verification: `cjpm build` passes for the whole workspace after this incomplete extension implementation continuation.
+
+Extend diagnostic parity continuation:
+
+- Extension ordering conflict notes now use the C++ identifier note range for the conflicting extension and preserve the
+  C++ note text exactly.
+- Extend-member shadow diagnostics now use identifier-focused ranges, use the extended type's `Ty.String()` in the branch
+  where C++ reports the child extension type, and no longer attach the parent note when the conflict comes from an
+  extended default interface implementation, matching `CheckExtendMemberValid`.
+- The `This`-return mismatch note now points at the parent function identifier and uses the C++ note wording.
+
+Verification: `cjpm build` passes for the whole workspace after this extend diagnostic parity continuation.

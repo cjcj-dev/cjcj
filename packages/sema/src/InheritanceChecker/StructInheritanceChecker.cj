@@ -334,6 +334,13 @@ private func InheritedDisplayName(decl: Decl): String {
     return decl.identifier.Val()
 }
 
+private func InheritedTypeString(decl: Decl): String {
+    if (let Some(ty) <- decl.GetTy()) {
+        return ty.String()
+    }
+    return InheritedDisplayName(decl)
+}
+
 private func CountByDecl(members: ArrayList<MemberSignature>, decl: Decl): Int64 {
     var count: Int64 = 0
     for (member in members) {
@@ -926,8 +933,8 @@ public class StructInheritanceChecker {
                     )
                     let inherChain = subTy.String() + " <: " + curDeclSuperTy.String() + " <: " + superTy.String()
                     builder.AddNote(
-                        DeclRange(otherExtend),
-                        "conflict with this extension, because of '" + inherChain + "'"
+                        DeclIdentifierRange(otherExtend),
+                        "conflict with this extension, beacase of '" + inherChain + "'"
                     )
                     return None
                 }
@@ -962,8 +969,8 @@ public class StructInheritanceChecker {
                         ""
                     }
                     builder.AddNote(
-                        DeclRange(otherExtend),
-                        "conflict with this extension, because of '" + lastInherit + "' and '" + currentInherit + "'"
+                        DeclIdentifierRange(otherExtend),
+                        "conflict with this extension, beacase of '" + lastInherit + "' and '" + currentInherit + "'"
                     )
                     return None
                 }
@@ -1851,7 +1858,7 @@ public class StructInheritanceChecker {
                                     DiagKindRefactor.sema_inherit_not_return_this,
                                     DeclRange(childFunc)
                                 )
-                                builder.AddNote(DeclRange(parentFunc), "the overridden function")
+                                builder.AddNote(DeclIdentifierRange(parentFunc), "the overriden function")
                             } else if (AreReturnTypesCompatible(parentFuncTy, childFuncTy, inconsistentTypes: parent.inconsistentTypes)) {
                                 var diagNode: Decl = childFunc
                                 if (!checkingDecls.isEmpty()) {
@@ -2015,27 +2022,46 @@ public class StructInheritanceChecker {
                 }
                 diag.DiagnoseRefactor(
                     DiagKindRefactor.sema_extend_member_cannot_shadow,
-                    DeclRange(child),
+                    DeclIdentifierRange(child),
                     arguments: [child.identifier.Val(), typeName]
                 )
-            } else if (IsExtendedDefaultImpl(parent, child) || (if (let Some(outer) <- parentDecl.outerDecl) {
-                outer.astKind == ASTKind.EXTEND_DECL
-            } else { false })) {
-                let builder = diag.DiagnoseRefactor(
-                    DiagKindRefactor.sema_extend_function_cannot_overridden,
-                    DeclRange(child),
-                    arguments: [DeclKindText(parentDecl), child.identifier.Val()]
-                )
-                builder.AddNote(DeclRange(parentDecl), "overridden definition of '" + child.identifier.Val() + "' is here")
-            } else if (if (let Some(outer) <- child.outerDecl) { outer.astKind == ASTKind.EXTEND_DECL } else { false }) {
-                let builder = diag.DiagnoseRefactor(
-                    DiagKindRefactor.sema_extend_member_cannot_shadow,
-                    DeclRange(child),
-                    arguments: [child.identifier.Val(), InheritedDisplayName(child.outerDecl.getOrThrow())]
-                )
-                builder.AddNote(DeclRange(parentDecl), "shadowed definition of '" + child.identifier.Val() + "' is here")
             } else {
-                return true
+                let isExtendedDefault = IsExtendedDefaultImpl(parent, child)
+                let parentOuterIsExtend = if (let Some(outer) <- parentDecl.outerDecl) {
+                    outer.astKind == ASTKind.EXTEND_DECL
+                } else {
+                    false
+                }
+                if (isExtendedDefault || parentOuterIsExtend) {
+                    let builder = diag.DiagnoseRefactor(
+                        DiagKindRefactor.sema_extend_function_cannot_overridden,
+                        DeclIdentifierRange(child),
+                        arguments: [DeclKindText(parentDecl), child.identifier.Val()]
+                    )
+                    if (!isExtendedDefault) {
+                        builder.AddNote(
+                            DeclIdentifierRange(parentDecl),
+                            "overridden definition of '" + child.identifier.Val() + "' is here"
+                        )
+                    }
+                } else if (if (let Some(outer) <- child.outerDecl) { outer.astKind == ASTKind.EXTEND_DECL } else { false }) {
+                    let typeName = if (let Some(outer) <- child.outerDecl) {
+                        InheritedTypeString(outer)
+                    } else {
+                        ""
+                    }
+                    let builder = diag.DiagnoseRefactor(
+                        DiagKindRefactor.sema_extend_member_cannot_shadow,
+                        DeclIdentifierRange(child),
+                        arguments: [child.identifier.Val(), typeName]
+                    )
+                    builder.AddNote(
+                        DeclIdentifierRange(parentDecl),
+                        "shadowed definition of '" + child.identifier.Val() + "' is here"
+                    )
+                } else {
+                    return true
+                }
             }
             return false
         }
