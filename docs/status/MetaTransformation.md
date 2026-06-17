@@ -45,9 +45,13 @@ Implemented:
   and the C++ frontend validity check rejects that state, so the Cangjie port now stores it as
   `Option<MetaTransformRegisterCallback>`. Valid factory helpers still use the direct callback
   constructor, while invalid/no-callback plugin info can be represented explicitly.
+- Tightened the plugin version side of the same ABI model: the C++ field is a raw `const char*`, so the
+  self-hosted representation now stores `cjcVersion` as `Option<String>`. Valid plugin-info helpers still
+  accept a plain `String`; malformed/no-version plugin info can be represented as `None` instead of an
+  impossible empty-string sentinel.
 - Added plugin-info validation and registration helpers (`HasRegisterCallback`, `IsValidForVersion`,
-  `IsValid`, and `RegisterTo`) so the version/callback checks used by the C++ plugin loader are
-  available in the self-hosted API without using null.
+  `HasVersion`, `VersionMatches`, `IsValid`, and `RegisterTo`) so the version/callback checks used by
+  the C++ plugin loader are available in the self-hosted API without using null.
 
 Known fidelity caveats:
 

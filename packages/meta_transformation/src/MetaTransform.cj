@@ -110,30 +110,46 @@ public abstract class CHIRPackageMetaTransform <: MetaTransform<CHIRPackage> {
 }
 
 public struct MetaTransformPluginInfo {
-    public let cjcVersion: String
+    public let cjcVersion: Option<String>
     public let registerTo: Option<MetaTransformRegisterCallback>
 
     public init(cjcVersion: String, registerTo: MetaTransformRegisterCallback) {
-        this.cjcVersion = cjcVersion
+        this.cjcVersion = Some(cjcVersion)
         this.registerTo = Some(registerTo)
     }
 
     public init(cjcVersion: String) {
-        this.cjcVersion = cjcVersion
+        this.cjcVersion = Some(cjcVersion)
         this.registerTo = None
     }
 
     public init(cjcVersion: String, registerTo: Option<MetaTransformRegisterCallback>) {
+        this.cjcVersion = Some(cjcVersion)
+        this.registerTo = registerTo
+    }
+
+    public init(cjcVersion: Option<String>, registerTo: Option<MetaTransformRegisterCallback>) {
         this.cjcVersion = cjcVersion
         this.registerTo = registerTo
+    }
+
+    public func HasVersion(): Bool {
+        return cjcVersion.isSome()
     }
 
     public func HasRegisterCallback(): Bool {
         return registerTo.isSome()
     }
 
+    public func VersionMatches(version: String): Bool {
+        if (let Some(pluginVersion) <- cjcVersion) {
+            return pluginVersion == version
+        }
+        return false
+    }
+
     public func IsValidForVersion(version: String): Bool {
-        return cjcVersion == version && HasRegisterCallback()
+        return VersionMatches(version) && HasRegisterCallback()
     }
 
     public func IsValid(): Bool {
