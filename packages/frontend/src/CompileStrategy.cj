@@ -2,6 +2,7 @@ package cangjie_compiler::frontend
 
 import cangjie_compiler::utils.FileUtil
 import std.collection.*
+import std.convert.*
 import std.sort.*
 
 public enum StrategyType {
@@ -1069,6 +1070,17 @@ private func parseLiteralReturnValue(tokens: ArrayList<FrontendToken>, idx: Int6
     if (idx >= end || idx >= tokens.size) {
         return (false, FRONTEND_LITERAL_UNKNOWN, "", INVALID_POSITION, INVALID_POSITION)
     }
+    // `return <intexpr>`: compile-time fold an integer-arithmetic expression built from integer
+    // literals, let-bound integer literals (via the existing let-folding), and the operators
+    // + - * / % with parentheses. The Int64 result is fed through the existing literal-return
+    // path. This runs before the single-literal cases so e.g. `return 2 + 3 * 4` is not cut
+    // short at the leading `2`. Conservative: any unsupported token, non-integer operand, or
+    // division by zero falls back to the single-literal/let-fold handling below.
+    let exprEnd = findReturnExprEnd(tokens, idx, end)
+    let folded = foldIntArithReturn(tokens, idx, exprEnd, bodyStart, returnIdx)
+    if (folded[0]) {
+        return (true, FRONTEND_LITERAL_INT, folded[1].toString(), tokens[idx].Begin(), tokens[exprEnd - 1].End())
+    }
     let tok = tokens[idx]
     if (tok.kind == FrontendTokenKind.BOOL_LITERAL) {
         return (true, FRONTEND_LITERAL_BOOL, tok.value, tok.Begin(), tok.End())
@@ -1101,6 +1113,216 @@ private func parseLiteralReturnValue(tokens: ArrayList<FrontendToken>, idx: Int6
         return resolveLetLiteral(tokens, bodyStart, returnIdx, tok.value)
     }
     return (false, FRONTEND_LITERAL_UNKNOWN, "", INVALID_POSITION, INVALID_POSITION)
+}
+
+// Find the exclusive end index of the return expression: the first brace-depth-0 statement
+// terminator (NL / `;` / `}`) at or after `start`, clamped to `end`.
+private func findReturnExprEnd(tokens: ArrayList<FrontendToken>, start: Int64, end: Int64): Int64 {
+    var idx = start
+    var depth: Int64 = 0
+    while (idx < end && idx < tokens.size) {
+        let tok = tokens[idx]
+        if (tok.value == "(" || tok.value == "[" || tok.value == "{") {
+            depth++
+        } else if (tok.value == ")" || tok.value == "]" || tok.value == "}") {
+            if (depth == 0) {
+                return idx
+            }
+            depth--
+        } else if (depth == 0 && (tok.kind == FrontendTokenKind.NL ||
+            tok.kind == FrontendTokenKind.COMMENT || tok.value == ";")) {
+            return idx
+        }
+        idx++
+    }
+    return idx
+}
+
+// Attempt to evaluate tokens[start..exprEnd) as an Int64 arithmetic expression. Returns
+// (true, value) on success, (false, 0) on any unsupported construct.
+private func foldIntArithReturn(tokens: ArrayList<FrontendToken>, start: Int64, exprEnd: Int64,
+    bodyStart: Int64, returnIdx: Int64): (Bool, Int64) {
+    // Reject an expression that is itself a single bare literal/identifier: those are already
+    // handled by the dedicated literal/let-fold paths above. Only fold when an operator appears.
+    if (!containsArithOperator(tokens, start, exprEnd)) {
+        return (false, 0)
+    }
+    let parser = IntArithEvaluator(tokens, exprEnd, bodyStart, returnIdx)
+    let result = parser.evalAddSub(skipArithTrivia(tokens, start, exprEnd))
+    if (!result.ok) {
+        return (false, 0)
+    }
+    let finalIdx = skipArithTrivia(tokens, result.next, exprEnd)
+    if (finalIdx != exprEnd) {
+        return (false, 0)
+    }
+    return (true, result.value)
+}
+
+private func containsArithOperator(tokens: ArrayList<FrontendToken>, start: Int64, exprEnd: Int64): Bool {
+    var idx = start
+    while (idx < exprEnd && idx < tokens.size) {
+        let v = tokens[idx].value
+        if (v == "+" || v == "-" || v == "*" || v == "/" || v == "%") {
+            return true
+        }
+        idx++
+    }
+    return false
+}
+
+private func skipArithTrivia(tokens: ArrayList<FrontendToken>, start: Int64, exprEnd: Int64): Int64 {
+    var idx = start
+    while (idx < exprEnd && idx < tokens.size && (tokens[idx].kind == FrontendTokenKind.NL ||
+        tokens[idx].kind == FrontendTokenKind.COMMENT)) {
+        idx++
+    }
+    return idx
+}
+
+private struct ArithResult {
+    let ok: Bool
+    let value: Int64
+    let next: Int64
+    init(ok: Bool, value: Int64, next: Int64) {
+        this.ok = ok
+        this.value = value
+        this.next = next
+    }
+}
+
+private let ARITH_FAIL = ArithResult(false, 0, 0)
+
+// Recursive-descent evaluator over a frontend token slice for integer arithmetic.
+// Grammar (standard precedence):
+//   addSub  := mulDiv (("+" | "-") mulDiv)*
+//   mulDiv  := unary (("*" | "/" | "%") unary)*
+//   unary   := ("-" | "+")* primary
+//   primary := INT_LITERAL | IDENTIFIER(let-folded int) | "(" addSub ")"
+private class IntArithEvaluator {
+    private let tokens: ArrayList<FrontendToken>
+    private let exprEnd: Int64
+    private let bodyStart: Int64
+    private let returnIdx: Int64
+
+    init(tokens: ArrayList<FrontendToken>, exprEnd: Int64, bodyStart: Int64, returnIdx: Int64) {
+        this.tokens = tokens
+        this.exprEnd = exprEnd
+        this.bodyStart = bodyStart
+        this.returnIdx = returnIdx
+    }
+
+    func evalAddSub(start: Int64): ArithResult {
+        var left = evalMulDiv(start)
+        if (!left.ok) {
+            return ARITH_FAIL
+        }
+        var idx = skipArithTrivia(tokens, left.next, exprEnd)
+        while (idx < exprEnd && idx < tokens.size && (tokens[idx].value == "+" || tokens[idx].value == "-")) {
+            let op = tokens[idx].value
+            let rhs = evalMulDiv(skipArithTrivia(tokens, idx + 1, exprEnd))
+            if (!rhs.ok) {
+                return ARITH_FAIL
+            }
+            let combined = if (op == "+") { left.value + rhs.value } else { left.value - rhs.value }
+            left = ArithResult(true, combined, rhs.next)
+            idx = skipArithTrivia(tokens, rhs.next, exprEnd)
+        }
+        return left
+    }
+
+    func evalMulDiv(start: Int64): ArithResult {
+        var left = evalUnary(start)
+        if (!left.ok) {
+            return ARITH_FAIL
+        }
+        var idx = skipArithTrivia(tokens, left.next, exprEnd)
+        while (idx < exprEnd && idx < tokens.size &&
+            (tokens[idx].value == "*" || tokens[idx].value == "/" || tokens[idx].value == "%")) {
+            let op = tokens[idx].value
+            let rhs = evalUnary(skipArithTrivia(tokens, idx + 1, exprEnd))
+            if (!rhs.ok) {
+                return ARITH_FAIL
+            }
+            if ((op == "/" || op == "%") && rhs.value == 0) {
+                return ARITH_FAIL
+            }
+            let combined = if (op == "*") {
+                left.value * rhs.value
+            } else if (op == "/") {
+                left.value / rhs.value
+            } else {
+                left.value % rhs.value
+            }
+            left = ArithResult(true, combined, rhs.next)
+            idx = skipArithTrivia(tokens, rhs.next, exprEnd)
+        }
+        return left
+    }
+
+    func evalUnary(start: Int64): ArithResult {
+        let idx = skipArithTrivia(tokens, start, exprEnd)
+        if (idx >= exprEnd || idx >= tokens.size) {
+            return ARITH_FAIL
+        }
+        let v = tokens[idx].value
+        if (v == "-") {
+            let inner = evalUnary(idx + 1)
+            if (!inner.ok) {
+                return ARITH_FAIL
+            }
+            return ArithResult(true, -inner.value, inner.next)
+        }
+        if (v == "+") {
+            return evalUnary(idx + 1)
+        }
+        return evalPrimary(idx)
+    }
+
+    func evalPrimary(start: Int64): ArithResult {
+        let idx = skipArithTrivia(tokens, start, exprEnd)
+        if (idx >= exprEnd || idx >= tokens.size) {
+            return ARITH_FAIL
+        }
+        let tok = tokens[idx]
+        if (tok.value == "(") {
+            let inner = evalAddSub(idx + 1)
+            if (!inner.ok) {
+                return ARITH_FAIL
+            }
+            let closeIdx = skipArithTrivia(tokens, inner.next, exprEnd)
+            if (closeIdx >= exprEnd || closeIdx >= tokens.size || tokens[closeIdx].value != ")") {
+                return ARITH_FAIL
+            }
+            return ArithResult(true, inner.value, closeIdx + 1)
+        }
+        if (tok.kind == FrontendTokenKind.INTEGER_LITERAL) {
+            if (let Some(parsed) <- parseArithIntLiteral(tok.value)) {
+                return ArithResult(true, parsed, idx + 1)
+            }
+            return ARITH_FAIL
+        }
+        if (tok.kind == FrontendTokenKind.IDENTIFIER) {
+            // Reuse the existing let-folding to resolve a let-bound integer literal.
+            let resolved = resolveLetLiteral(tokens, bodyStart, returnIdx, tok.value)
+            if (resolved[0] && resolved[1] == FRONTEND_LITERAL_INT) {
+                if (let Some(parsed) <- parseArithIntLiteral(resolved[2])) {
+                    return ArithResult(true, parsed, idx + 1)
+                }
+            }
+            return ARITH_FAIL
+        }
+        return ARITH_FAIL
+    }
+}
+
+private func parseArithIntLiteral(value: String): Option<Int64> {
+    let normalized = value.replace("_", "")
+    try {
+        return Some(Int64.parse(normalized))
+    } catch (e: Exception) {
+        return None
+    }
 }
 
 // True if the only thing following the returned identifier (within the body) is trivia or the
