@@ -1163,6 +1163,55 @@ public class GetException <: Expression {
     }
 }
 
+public class IntrisicCallContext {
+    public var kind: IntrinsicKind
+    public let args: ArrayList<Value> = ArrayList<Value>()
+    public let instTypeArgs: ArrayList<Type> = ArrayList<Type>()
+
+    public init(kind!: IntrinsicKind = IntrinsicKind.NOT_INTRINSIC,
+        args!: ArrayList<Value> = ArrayList<Value>(), instTypeArgs!: ArrayList<Type> = ArrayList<Type>()) {
+        this.kind = kind
+        for (arg in args) {
+            this.args.add(arg)
+        }
+        for (ty in instTypeArgs) {
+            this.instTypeArgs.add(ty)
+        }
+    }
+}
+
+public class Intrinsic <: Expression {
+    private let intrinsicKind: IntrinsicKind
+    private let instantiatedTypeArgs: ArrayList<Type> = ArrayList<Type>()
+
+    public init(callContext: IntrisicCallContext, parent: Option<Block>) {
+        super(ExprKind.INTRINSIC, callContext.args, parent)
+        intrinsicKind = callContext.kind
+        for (ty in callContext.instTypeArgs) {
+            instantiatedTypeArgs.add(ty)
+        }
+    }
+
+    public func GetIntrinsicKind(): IntrinsicKind {
+        return intrinsicKind
+    }
+
+    public func GetInstantiatedTypeArgs(): ArrayList<Type> {
+        return CopyTypeList(instantiatedTypeArgs)
+    }
+
+    public func GetArgs(): ArrayList<Value> {
+        return GetOperands()
+    }
+
+    public override func OperandsToString(): String {
+        let parts = ArrayList<String>()
+        parts.add(IntrinsicKindToString(intrinsicKind) + TypeArgsToString(instantiatedTypeArgs))
+        parts.add(ValueIdsToString(GetArgs()))
+        return JoinStrings(parts, ", ")
+    }
+}
+
 public class Debug <: Expression {
     private let srcCodeIdentifier: String
 

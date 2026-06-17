@@ -455,6 +455,38 @@ public class TypeCastWithException <: ExpressionWithException {
     }
 }
 
+public class IntrinsicWithException <: ExpressionWithException {
+    private let intrinsicKind: IntrinsicKind
+    private let instantiatedTypeArgs: ArrayList<Type> = ArrayList<Type>()
+
+    public init(callContext: IntrisicCallContext, successBlock: Block, errorBlock: Block, parent: Option<Block>) {
+        super(ExprKind.INTRINSIC_WITH_EXCEPTION, callContext.args, successBlock, errorBlock, parent)
+        intrinsicKind = callContext.kind
+        for (ty in callContext.instTypeArgs) {
+            instantiatedTypeArgs.add(ty)
+        }
+    }
+
+    public func GetIntrinsicKind(): IntrinsicKind {
+        return intrinsicKind
+    }
+
+    public func GetInstantiatedTypeArgs(): ArrayList<Type> {
+        return CopyTypeList(instantiatedTypeArgs)
+    }
+
+    public func GetArgs(): ArrayList<Value> {
+        return GetOperands()
+    }
+
+    public override func OperandsToString(): String {
+        let parts = ArrayList<String>()
+        parts.add(IntrinsicKindToString(intrinsicKind) + TypeArgsToString(instantiatedTypeArgs))
+        parts.add(TerminatorValueIdsToString(GetArgs()))
+        return JoinStrings(parts, ", ")
+    }
+}
+
 public class AllocateWithException <: ExpressionWithException {
     private let allocatedType: Type
 

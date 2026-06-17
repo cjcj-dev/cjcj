@@ -10,8 +10,10 @@ Reference inspected:
 - `/root/cj_build/cangjie_compiler/include/cangjie/CHIR/IR/Type/CustomTypeDef.h`
 - `/root/cj_build/cangjie_compiler/include/cangjie/CHIR/IR/Type/{StructDef,ClassDef,EnumDef,ExtendDef}.h`
 - `/root/cj_build/cangjie_compiler/include/cangjie/CHIR/IR/Expression/{Expression,Terminator}.h`
+- `/root/cj_build/cangjie_compiler/include/cangjie/CHIR/IR/IntrinsicKind.h`
 - `/root/cj_build/cangjie_compiler/include/cangjie/CHIR/IR/{CHIRContext,CHIRBuilder}.h`
-- Corresponding C++ sources under `/root/cj_build/cangjie_compiler/src/CHIR/IR`.
+- Corresponding C++ sources under `/root/cj_build/cangjie_compiler/src/CHIR/IR` and
+  `/root/cj_build/cangjie_compiler/src/CHIR/Utils/ToStringUtils.cpp`.
 
 Implemented in this pass:
 
@@ -34,6 +36,10 @@ Implemented in this pass:
 - Added concrete exceptional terminator expressions and builders for `ApplyWithException`, `InvokeWithException`,
   `InvokeStaticWithException`, `IntOpWithException`, `TypeCastWithException`, `AllocateWithException`,
   `RawArrayAllocateWithException`, and `SpawnWithException`.
+- Added `IntrinsicKind.cj` mirroring the C++ intrinsic enum, including reflection and native-only intrinsic ranges,
+  plus stable enum labels and C++-style `IntrinsicKindToString` names for mapped intrinsic kinds.
+- Added `IntrisicCallContext`, concrete `Intrinsic`, concrete `IntrinsicWithException`, argument/type-argument
+  accessors, C++-style operand rendering, and builder factory methods for normal and exceptional intrinsic calls.
 - Modeled C++ nullable operands such as spawn arguments and VArrayBuilder item/init function with `Option<Value>`
   while keeping present operands in the normal CHIR use-def list.
 - Added boxing/unboxing and generic/concrete transform expressions (`Box`, `UnBox`, `TransformToGeneric`,
@@ -51,8 +57,11 @@ De-isolation:
 
 Known remaining gaps:
 
-- The complete C++ expression taxonomy is still not ported: intrinsics, intrinsic-with-exception, full lambda body
-  cloning/identifier regeneration, and complete clone behavior for all expression subclasses remain incomplete.
+- Full lambda body cloning/identifier regeneration and complete clone behavior for all expression subclasses remain
+  incomplete.
+- Reverse intrinsic classification maps from C++ `IntrinsicKind.h` (`coreIntrinsicMap`, overflow/runtime/sync/math
+  maps, and FFI/name lookup integration) are not yet fully represented in Cangjie; the IR node surface and print names
+  now exist.
 - Full C++ generic constraint solving, vtable search/update, inheritance traversal through extends, and precise
   `CanBeInherited`/finalizer semantics are still missing; dynamic dispatch currently records method context and optional
   vtable offsets but does not compute vtable search results.
@@ -62,4 +71,4 @@ Known remaining gaps:
 
 Remaining `TODO(selfhost:CHIR)` markers in `packages/chir/src`: 0.
 
-Estimated real behavior coverage for this IR-model scope: 54%.
+Estimated real behavior coverage for this IR-model scope: 58%.

@@ -355,6 +355,14 @@ public class CHIRBuilder {
         return expr
     }
 
+    public func CreateIntrinsic(resultTy: Type, callContext: IntrisicCallContext, parent: Block): Intrinsic {
+        let expr = Intrinsic(callContext, parent)
+        parent.AppendExpression(expr)
+        context.RegisterExpression(expr)
+        CreateLocalVar(resultTy, "%${context.GetAllNodesNum()}", expr)
+        return expr
+    }
+
     public func CreateDebug(resultTy: Type, value: Value, srcCodeIdentifier: String, parent: Block): Debug {
         let expr = Debug(value, srcCodeIdentifier, parent)
         parent.AppendExpression(expr)
@@ -523,6 +531,15 @@ public class CHIRBuilder {
     public func CreateTypeCastWithException(resultTy: Type, source: Value, successBlock: Block, errorBlock: Block,
         parent: Block): TypeCastWithException {
         let term = TypeCastWithException(source, successBlock, errorBlock, parent)
+        parent.AppendExpression(term)
+        context.RegisterExpression(term)
+        CreateLocalVar(resultTy, "%${context.GetAllNodesNum()}", term)
+        return term
+    }
+
+    public func CreateIntrinsicWithException(resultTy: Type, callContext: IntrisicCallContext, successBlock: Block,
+        errorBlock: Block, parent: Block): IntrinsicWithException {
+        let term = IntrinsicWithException(callContext, successBlock, errorBlock, parent)
         parent.AppendExpression(term)
         context.RegisterExpression(term)
         CreateLocalVar(resultTy, "%${context.GetAllNodesNum()}", term)
