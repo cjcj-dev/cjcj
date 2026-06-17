@@ -2,6 +2,8 @@ package cangjie_compiler::sema.Test
 
 import std.collection.*
 import cangjie_compiler::ast.*
+import cangjie_compiler::sema.GetUsableGetterForProperty
+import cangjie_compiler::sema.GetUsableSetterForProperty
 
 public class DeclsToPrepare {
     public let functions: ArrayList<FuncDecl> = ArrayList<FuncDecl>()
@@ -81,7 +83,62 @@ private func GetExtendedClassDecl(extendDecl: ExtendDecl): Option<ClassLikeDecl>
     return None
 }
 
+public func CreateThisRefForMockSupport(targetClass: ClassLikeDecl): RefExpr {
+    let thisRef = CreateRefExpr(SrcIdentifier("this"), targetClass.GetTy(), INVALID_POSITION, ArrayList<Type>())
+    thisRef.ref.target = targetClass
+    return thisRef
+}
+
+public func IsFieldOrVariable(kind: AccessorKind): Bool {
+    return kind == AccessorKind.FIELD_GETTER || kind == AccessorKind.FIELD_SETTER ||
+        kind == AccessorKind.STATIC_FIELD_GETTER || kind == AccessorKind.STATIC_FIELD_SETTER ||
+        kind == AccessorKind.TOP_LEVEL_VARIABLE_GETTER || kind == AccessorKind.TOP_LEVEL_VARIABLE_SETTER
+}
+
+public func IsStaticField(kind: AccessorKind): Bool {
+    return kind == AccessorKind.STATIC_FIELD_GETTER || kind == AccessorKind.STATIC_FIELD_SETTER
+}
+
+public func IsTopLevelField(kind: AccessorKind): Bool {
+    return kind == AccessorKind.TOP_LEVEL_VARIABLE_GETTER || kind == AccessorKind.TOP_LEVEL_VARIABLE_SETTER
+}
+
+public func ExtractLastDesugaredExpr(expr: Expr): Expr {
+    var lastDesugaredExpr = expr
+    while (let Some(desugared) <- lastDesugaredExpr.desugarExpr) {
+        lastDesugaredExpr = desugared
+    }
+    return lastDesugaredExpr
+}
+
+public func IsStaticClassMember(decl: Option<Decl>): Bool {
+    if (let Some(value) <- decl) {
+        if (!value.TestAttr(Attribute.STATIC)) {
+            return false
+        }
+        if (let Some(outer) <- value.outerDecl) {
+            return outer.astKind == ASTKind.CLASS_DECL
+        }
+    }
+    return false
+}
+
+public func IsClassLikeOrGeneric(ty: Ty): Bool {
+    return ty.IsClassLike() || ty.IsGeneric()
+}
+
+private func ContainsDecl(decls: ArrayList<Decl>, target: Decl): Bool {
+    for (decl in decls) {
+        if (SameDecl(decl, target)) {
+            return true
+        }
+    }
+    return false
+}
+
 public class MockSupportManager {
+    private let usedInternalDecls: ArrayList<Decl> = ArrayList<Decl>()
+
     public init() {}
 
     public static func IsDeclOpenToMock(decl: Decl): Bool {
@@ -106,6 +163,36 @@ public class MockSupportManager {
             }
         }
         return true
+    }
+
+    public static func NeedEraseAccessorTypes(decl: Decl): Bool {
+        if (let Some(outer) <- decl.outerDecl) {
+            if (outer.linkage == Linkage.INTERNAL) {
+                return false
+            }
+            if (decl.TestAttr(Attribute.HAS_INITIAL)) {
+                return false
+            }
+        }
+        return MockUtils.MayContainInternalTypes(decl.GetTy())
+    }
+
+    public func WriteUsedInternalDecl(decl: Decl): Unit {
+        if (!ContainsDecl(usedInternalDecls, decl)) {
+            usedInternalDecls.add(decl)
+        }
+    }
+
+    public func IsUsedInternalDecl(decl: Decl): Bool {
+        return ContainsDecl(usedInternalDecls, decl)
+    }
+
+    public func UsedInternalDecls(): ArrayList<Decl> {
+        let out = ArrayList<Decl>()
+        for (decl in usedInternalDecls) {
+            out.add(decl)
+        }
+        return out
     }
 
     public static func NeedToSearchCallsToReplaceWithAccessors(node: Node): Bool {
@@ -140,11 +227,13 @@ public class MockSupportManager {
                 decl.EnableAttr(Attribute.MOCK_SUPPORTED)
                 MakeOpenToMockIfNeeded(decl)
                 if (let Some(propMember) <- (decl as PropDecl)) {
-                    if (!propMember.getters.isEmpty()) {
-                        MakeOpenToMockIfNeeded(propMember.getters[0])
+                    if (let Some(getter) <- GetUsableGetterForProperty(propMember)) {
+                        MakeOpenToMockIfNeeded(getter)
                     }
-                    if (propMember.isVar && !propMember.setters.isEmpty()) {
-                        MakeOpenToMockIfNeeded(propMember.setters[0])
+                    if (propMember.isVar) {
+                        if (let Some(setter) <- GetUsableSetterForProperty(propMember)) {
+                            MakeOpenToMockIfNeeded(setter)
+                        }
                     }
                 }
                 return
@@ -153,6 +242,19 @@ public class MockSupportManager {
                 MarkFuncMockSupportedIfNeeded(funcDecl)
             }
         }
+    }
+
+    public static func MarkMockAccessorWithAttributes(decl: Decl, accessLevel: AccessLevel): Unit {
+        decl.DisableAttr(Attribute.GENERIC_INSTANTIATED)
+        decl.EnableAttr(Attribute.OPEN)
+        decl.DisableAttr(Attribute.PRIVATE)
+        decl.DisableAttr(Attribute.PROTECTED)
+        decl.DisableAttr(Attribute.PUBLIC)
+        decl.DisableAttr(Attribute.INTERNAL)
+        decl.EnableAttr(GetAttrByAccessLevel(accessLevel))
+        decl.EnableAttr(Attribute.GENERATED_TO_MOCK)
+        decl.EnableAttr(Attribute.COMPILER_ADD)
+        decl.EnableAttr(Attribute.IN_CLASSLIKE)
     }
 
     public func CollectDeclsToPrepare(decl: Decl, decls: DeclsToPrepare): Unit {

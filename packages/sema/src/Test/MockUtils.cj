@@ -2,6 +2,7 @@ package cangjie_compiler::sema.Test
 
 import std.collection.*
 import cangjie_compiler::ast.*
+import cangjie_compiler::sema.SameTy
 import cangjie_compiler::sema.TypeManager
 
 private let MOCKED_ACCESSOR_SUFFIX: String = "$ToMock"
@@ -94,6 +95,111 @@ public class MockUtils {
             result.add(member)
         }
         return result
+    }
+
+    public static func GetOuterDecl(decl: Decl): Option<Decl> {
+        if (let Some(outer) <- decl.outerDecl) {
+            if (let Some(extendDecl) <- (outer as ExtendDecl)) {
+                if (let Some(extendedType) <- extendDecl.extendedType) {
+                    return Ty.GetDeclOfTy(extendedType.GetTy())
+                }
+                return None
+            }
+            return outer
+        }
+        return None
+    }
+
+    public static func GetExtendedTypeDecl(decl: FuncDecl): Option<Decl> {
+        if (!decl.TestAttr(Attribute.IN_EXTEND)) {
+            return None
+        }
+        if (let Some(outer) <- decl.outerDecl) {
+            if (let Some(extendDecl) <- (outer as ExtendDecl)) {
+                if (let Some(extendedType) <- extendDecl.extendedType) {
+                    return Ty.GetDeclOfTy(extendedType.GetTy())
+                }
+            }
+        }
+        return None
+    }
+
+    private static func HasVisitedTy(visited: ArrayList<Ty>, ty: Ty): Bool {
+        for (value in visited) {
+            if (SameTy(value, ty)) {
+                return true
+            }
+        }
+        return false
+    }
+
+    private static func ContainsInternalType(ty: Ty, visitedGenerics: ArrayList<Ty>): Bool {
+        if (HasVisitedTy(visitedGenerics, ty)) {
+            return false
+        }
+        if (let Some(decl) <- Ty.GetDeclOfTy(Some(ty))) {
+            if (decl.linkage == Linkage.INTERNAL) {
+                return true
+            }
+            if (let Some(outer) <- decl.outerDecl) {
+                if (let Some(outerTy) <- outer.GetTy()) {
+                    if (ContainsInternalType(outerTy, visitedGenerics)) {
+                        return true
+                    }
+                }
+            }
+        }
+        for (paramTy in ty.typeArgs) {
+            if (ContainsInternalType(paramTy, visitedGenerics)) {
+                return true
+            }
+        }
+        if (let Some(genericTy) <- (ty as GenericsTy)) {
+            visitedGenerics.add(ty)
+            for (upperBound in genericTy.upperBounds) {
+                if (ContainsInternalType(upperBound, visitedGenerics)) {
+                    return true
+                }
+            }
+        }
+        return false
+    }
+
+    public static func MayContainInternalTypes(ty: Option<Ty>): Bool {
+        if (let Some(value) <- ty) {
+            return ContainsInternalType(value, ArrayList<Ty>())
+        }
+        return false
+    }
+
+    public static func MayContainInternalTypes(ty: Ty): Bool {
+        return ContainsInternalType(ty, ArrayList<Ty>())
+    }
+
+    public static func CreateType(ty: Ty): Type {
+        let typeNode = Type()
+        typeNode.SetTy(ty)
+        return typeNode
+    }
+
+    public static func CreateTypeCast(selector: Expr, castTy: Ty, createMatchedBranch: (VarDecl) -> Expr,
+        otherwiseBranch: Expr, ty: Ty): Expr {
+        let varPattern = CreateVarPattern("v-compiler", Some(castTy))
+        let matchedBranch = createMatchedBranch(varPattern.varDecl.getOrThrow())
+        let matchCases = ArrayList<MatchCase>()
+        let typePattern = CreateTypePattern(varPattern, MockUtils.CreateType(castTy), selector)
+        typePattern.matchBeforeRuntime = false
+        matchCases.add(CreateMatchCase(typePattern, matchedBranch))
+        matchCases.add(CreateMatchCase(WildcardPattern(), otherwiseBranch))
+        return CreateMatchExpr(selector, matchCases, ty)
+    }
+
+    public static func EraseFuncTypes(funcTy: FuncTy, typeManager: TypeManager): FuncTy {
+        let paramTys = ArrayList<Ty>()
+        for (_ in funcTy.paramTys) {
+            paramTys.add(typeManager.GetAnyTy())
+        }
+        return typeManager.GetFunctionTy(paramTys.toArray(), typeManager.GetAnyTy())
     }
 
     public static func IsMockAccessorRequired(decl: Decl): Bool {
@@ -272,6 +378,84 @@ public class MockUtils {
         return None
     }
 
+    public static func FindAccessor(outerClass: ClassDecl, member: Decl, kind: AccessorKind): Option<Decl> {
+        if (member.TestAttr(Attribute.IN_EXTEND)) {
+            return None
+        }
+        var accessorIdentifier = BuildMockAccessorIdentifier(member, kind)
+        if (let Some(_) <- (member as FuncDecl)) {
+            accessorIdentifier += BuildArgumentList(member)
+        }
+        for (superDecl in outerClass.GetAllSuperDecls()) {
+            if (superDecl.astKind != ASTKind.CLASS_DECL) {
+                continue
+            }
+            if (let Some(accessorDecl) <- FindMemberDeclByIdentifier(superDecl, accessorIdentifier)) {
+                return accessorDecl
+            }
+        }
+        return None
+    }
+
+    public static func FindAccessorForMemberAccess(ty: Option<Ty>, resolvedMember: Option<Decl>,
+        kind: AccessorKind): Option<Decl> {
+        if (let None <- resolvedMember) {
+            return None
+        }
+        let member = resolvedMember.getOrThrow()
+        if (!IsMockAccessorRequired(member)) {
+            return None
+        }
+        if (let Some(baseDecl) <- Ty.GetDeclOfTy(ty)) {
+            if (let Some(baseClass) <- (baseDecl as ClassDecl)) {
+                if (!baseClass.TestAttr(Attribute.MOCK_SUPPORTED)) {
+                    return None
+                }
+                var outerClass = baseClass
+                if (!baseClass.TestAttr(Attribute.GENERIC)) {
+                    if (let Some(genericDecl) <- baseClass.genericDecl) {
+                        if (let Some(genericClass) <- (genericDecl as ClassDecl)) {
+                            outerClass = genericClass
+                        }
+                    }
+                }
+                return FindAccessor(outerClass, member, kind)
+            }
+        }
+        return None
+    }
+
+    public static func FindTopLevelAccessor(member: Decl, kind: AccessorKind): Option<FuncDecl> {
+        if (let Some(file) <- member.curFile) {
+            let accessorIdentifier = BuildMockAccessorIdentifier(member, kind)
+            if (let Some(decl) <- FindGlobalDeclByIdentifier(file, accessorIdentifier)) {
+                return decl as FuncDecl
+            }
+        }
+        return None
+    }
+
+    public static func FindAccessor(memberAccess: Option<MemberAccess>, target: Option<Decl>,
+        kind: AccessorKind): Option<FuncDecl> {
+        if (kind == AccessorKind.FIELD_GETTER || kind == AccessorKind.FIELD_SETTER ||
+            kind == AccessorKind.STATIC_FIELD_GETTER || kind == AccessorKind.STATIC_FIELD_SETTER) {
+            if (let Some(ma) <- memberAccess) {
+                if (let Some(baseExpr) <- ma.baseExpr) {
+                    if (let Some(accessorDecl) <- FindAccessorForMemberAccess(baseExpr.GetTy(), target, kind)) {
+                        return accessorDecl as FuncDecl
+                    }
+                }
+            }
+            return None
+        }
+        if (kind == AccessorKind.TOP_LEVEL_VARIABLE_GETTER || kind == AccessorKind.TOP_LEVEL_VARIABLE_SETTER) {
+            if (let Some(member) <- target) {
+                return FindTopLevelAccessor(member, kind)
+            }
+        }
+        return None
+    }
+
     public static func IsGetterForMutField(accessorDecl: FuncDecl): Bool {
         let accessorKind = ComputeAccessorKind(accessorDecl)
         if (accessorKind != AccessorKind.FIELD_GETTER &&
@@ -304,6 +488,24 @@ public class MockUtils {
     public static func GetForeignAccessorName(decl: FuncDecl): String {
         return decl.fullPackageName + "$" + decl.identifier.Val()
     }
+}
+
+private func GetVarDeclAccessorKinds(varDecl: Decl): (AccessorKind, AccessorKind) {
+    if (varDecl.TestAttr(Attribute.STATIC)) {
+        return (AccessorKind.STATIC_FIELD_GETTER, AccessorKind.STATIC_FIELD_SETTER)
+    }
+    if (varDecl.TestAttr(Attribute.GLOBAL)) {
+        return (AccessorKind.TOP_LEVEL_VARIABLE_GETTER, AccessorKind.TOP_LEVEL_VARIABLE_SETTER)
+    }
+    return (AccessorKind.FIELD_GETTER, AccessorKind.FIELD_SETTER)
+}
+
+public func GetVarDeclSetterAccessorKind(varDecl: Decl): AccessorKind {
+    return GetVarDeclAccessorKinds(varDecl)[1]
+}
+
+public func GetVarDeclGetterAccessorKind(varDecl: Decl): AccessorKind {
+    return GetVarDeclAccessorKinds(varDecl)[0]
 }
 
 public func SelfhostPortStatus_Test_MockUtils(): Bool {

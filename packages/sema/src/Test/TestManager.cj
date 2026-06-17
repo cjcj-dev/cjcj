@@ -99,6 +99,56 @@ private class MockUsageFoundBox {
     public init() {}
 }
 
+private class GenericMockMarkState {
+    public var changed: Bool = false
+    public var enclosingGenericFunc: Option<FuncDecl> = None
+    public init() {}
+}
+
+private func IsGenericFuncDecl(funcDecl: FuncDecl): Bool {
+    if (let Some(body) <- funcDecl.funcBody) {
+        if (let Some(_) <- body.generic) {
+            return true
+        }
+    }
+    return false
+}
+
+public func MarkMockCreationContainingGenericFuncsInPackage(pkg: Package): Unit {
+    var hasDeclsToCheckUsages = true
+    while (hasDeclsToCheckUsages) {
+        let state = GenericMockMarkState()
+        let walker = Walker(pkg, visitPre: { node: Node =>
+            if (let Some(funcDecl) <- (node as FuncDecl)) {
+                if (IsGenericFuncDecl(funcDecl)) {
+                    if (funcDecl.TestAttr(Attribute.CONTAINS_MOCK_CREATION_CALL)) {
+                        return VisitAction.SKIP_CHILDREN
+                    }
+                    state.enclosingGenericFunc = Some(funcDecl)
+                }
+            }
+            if (let Some(callExpr) <- (node as CallExpr)) {
+                if (let Some(enclosingFunc) <- state.enclosingGenericFunc) {
+                    if (ShouldBeMarkedAsContainingMockCreationCall(callExpr, enclosingFunc)) {
+                        enclosingFunc.EnableAttr(Attribute.CONTAINS_MOCK_CREATION_CALL)
+                        state.changed = true
+                    }
+                }
+            }
+            return VisitAction.WALK_CHILDREN
+        }, visitPost: { node: Node =>
+            if (let Some(funcDecl) <- (node as FuncDecl)) {
+                if (IsGenericFuncDecl(funcDecl)) {
+                    state.enclosingGenericFunc = None
+                }
+            }
+            return VisitAction.KEEP_DECISION
+        })
+        let _ = walker.Walk()
+        hasDeclsToCheckUsages = state.changed
+    }
+}
+
 public func IsThereMockUsageInPackage(pkg: Package): Bool {
     let mockUsageFound = MockUsageFoundBox()
     let walker = Walker(pkg, visitPre: { node: Node =>
@@ -140,6 +190,10 @@ public class TestManager {
 
     public static func IsMockAccessor(decl: Decl): Bool {
         return MockUtils.IsMockAccessor(decl)
+    }
+
+    public static func MarkMockCreationContainingGenericFuncs(pkg: Package): Unit {
+        MarkMockCreationContainingGenericFuncsInPackage(pkg)
     }
 
     public static func MockOnCompilationOption(): String {

@@ -7,6 +7,7 @@ import cangjie_compiler::basic.DiagKindRefactor as BasicDiagKindRefactor
 import cangjie_compiler::basic.DiagnosticEngine as BasicDiagnosticEngine
 import cangjie_compiler::basic.Position as BasicPosition
 import cangjie_compiler::basic.Range as BasicRange
+import cangjie_compiler::sema.TypeManager
 
 private let PKG_NAME_OHOS_LABELS: String = "ohos.labels"
 private let APILEVEL_ANNO_NAME: String = "APILevel"
@@ -281,6 +282,7 @@ private class PluginAnnoCacheEntry {
 
 public class PluginCustomAnnoChecker {
     private var diag: BasicDiagnosticEngine
+    private var typeManager: Option<TypeManager> = None
     private var curModuleName: String = ""
     private let levelCache: ArrayList<PluginAnnoCacheEntry> = ArrayList<PluginAnnoCacheEntry>()
     private var globalLevel: APILevelVersion = APILevelVersion()
@@ -295,6 +297,15 @@ public class PluginCustomAnnoChecker {
 
     public init(diag: BasicDiagnosticEngine) {
         this.diag = diag
+    }
+
+    public init(diag: BasicDiagnosticEngine, typeManager: TypeManager) {
+        this.diag = diag
+        this.typeManager = typeManager
+    }
+
+    public func SetTypeManager(typeManager: TypeManager): Unit {
+        this.typeManager = typeManager
     }
 
     private func IsTargetCustomAnnotation(annotation: Annotation, expectedName: String): Bool {
@@ -385,12 +396,10 @@ public class PluginCustomAnnoChecker {
     }
 
     public static func MergeCachedAnnoInfo(cached: PluginCustomAnnoInfo, annoInfo: PluginCustomAnnoInfo): Unit {
-        if (!cached.since.IsZero() && (annoInfo.since.IsZero() || cached.since < annoInfo.since)) {
+        if (annoInfo.since.IsZero() || cached.since < annoInfo.since) {
             annoInfo.since = cached.since
         }
-        if (!cached.syscap.isEmpty()) {
-            annoInfo.syscap = cached.syscap
-        }
+        annoInfo.syscap = cached.syscap
         if (let Some(value) <- cached.hasHideAnno) {
             annoInfo.hasHideAnno = Some(value)
         }
@@ -836,6 +845,67 @@ public class PluginCustomAnnoChecker {
         }
     }
 
+    public func CheckHideOfOverrideFunction(decl: Decl, annoInfo: PluginCustomAnnoInfo): Unit {
+        if (decl.astKind != ASTKind.FUNC_DECL) {
+            return
+        }
+        if (let None <- decl.outerDecl) {
+            return
+        }
+        if (let None <- typeManager) {
+            return
+        }
+        let fd = (decl as FuncDecl).getOrThrow()
+        var functionWithHide = annoInfo.hasHideAnno
+        if (let None <- functionWithHide) {
+            let outerInfo = PluginCustomAnnoInfo(since: APILevelVersion(), syscap: "", hasHideAnno: None)
+            Parse(decl.outerDecl.getOrThrow(), outerInfo)
+            if (let Some(outerHide) <- outerInfo.hasHideAnno) {
+                functionWithHide = Some(outerHide)
+            }
+        }
+
+        let manager = typeManager.getOrThrow()
+        let overriddenFdOpt = manager.GetTopOverriddenFuncDecl(Some(fd))
+        if (let None <- overriddenFdOpt) {
+            return
+        }
+        let overriddenFd = overriddenFdOpt.getOrThrow()
+        let overriddenInfo = PluginCustomAnnoInfo(since: APILevelVersion(), syscap: "", hasHideAnno: None)
+        Parse(overriddenFd, overriddenInfo)
+        var overriddenFdWithHide = overriddenInfo.hasHideAnno
+        if (let None <- overriddenFdWithHide) {
+            if (let Some(overriddenOuter) <- overriddenFd.outerDecl) {
+                let outerInfo = PluginCustomAnnoInfo(since: APILevelVersion(), syscap: "", hasHideAnno: None)
+                Parse(overriddenOuter, outerInfo)
+                if (let Some(outerHide) <- outerInfo.hasHideAnno) {
+                    overriddenFdWithHide = Some(outerHide)
+                }
+            }
+        }
+
+        if (let Some(currentHide) <- functionWithHide) {
+            if (let None <- overriddenFdWithHide) {
+                let builder = diag.DiagnoseRefactor(
+                    BasicDiagKindRefactor.sema_hide_missing_hide,
+                    NodeRange(overriddenFd))
+                builder.AddNote(NodeRange(fd), "the override function is marked with '@!Hide'")
+                builder.Emit()
+            } else {
+                let overriddenHide = overriddenFdWithHide.getOrThrow()
+                if (currentHide != overriddenHide) {
+                    let value = if (currentHide) { "true" } else { "false" }
+                    let builder = diag.DiagnoseRefactor(
+                        BasicDiagKindRefactor.sema_hide_diff_param,
+                        NodeRange(decl),
+                        arguments: [value])
+                    builder.AddNote(NodeRange(overriddenFd), "should be same with")
+                    builder.Emit()
+                }
+            }
+        }
+    }
+
     public func ProcessOneAnnotation(decl: Decl, annotation: Annotation, hideSeen: BoolBox,
         annoInfo: PluginCustomAnnoInfo): Unit {
         if (IsAnnoAPILevel(annotation, decl)) {
@@ -872,6 +942,7 @@ public class PluginCustomAnnoChecker {
         }
         levelCache.add(PluginAnnoCacheEntry(decl, CopyAnnoInfo(annoInfo)))
         CheckHideOfExtendDecl(decl, annoInfo)
+        CheckHideOfOverrideFunction(decl, annoInfo)
     }
 
     public func Check(pkg: Package): Unit {

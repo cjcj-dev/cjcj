@@ -159,6 +159,93 @@ public func CreateFuncType(ty: FuncTy): FuncType {
     return typeNode
 }
 
+public func CreateBoolMatch(selector: Expr, trueBranch: Expr, falseBranch: Expr, ty: Ty): Expr {
+    let boolTy = TypeManager.GetPrimitiveTy(TypeKind.TYPE_BOOLEAN)
+    let truePattern = ConstPattern()
+    truePattern.literal = CreateLitConstExpr(LitConstKind.BOOL, "true", boolTy)
+    truePattern.SetTy(boolTy)
+
+    let falsePattern = ConstPattern()
+    falsePattern.literal = CreateLitConstExpr(LitConstKind.BOOL, "false", boolTy)
+    falsePattern.SetTy(boolTy)
+
+    let matchCases = ArrayList<MatchCase>()
+    matchCases.add(CreateMatchCase(truePattern, trueBranch))
+    matchCases.add(CreateMatchCase(falsePattern, falseBranch))
+    let matchExpr = CreateMatchExpr(selector, matchCases, ty)
+    AddCurFile(matchExpr, file: selector.curFile)
+    return matchExpr
+}
+
+private func LambdaParamTys(params: ArrayList<FuncParam>): ArrayList<Ty> {
+    let paramTys = ArrayList<Ty>()
+    for (param in params) {
+        paramTys.add(param.GetTy() ?? TypeManager.GetInvalidTy())
+    }
+    return paramTys
+}
+
+private func BuildReturningLambdaBody(nodes: ArrayList<Node>, retTy: Ty): (ArrayList<Node>, Expr) {
+    let bodyNodes = ArrayList<Node>()
+    for (idx in 0..nodes.size - 1) {
+        bodyNodes.add(nodes[idx])
+    }
+    if (let Some(lastExpr) <- (nodes[nodes.size - 1] as Expr)) {
+        var retValue = lastExpr
+        if (let Some(cloned) <- (ASTCloner.Clone(lastExpr) as Expr)) {
+            retValue = cloned
+        }
+        let unsafeNodes = ArrayList<Node>()
+        unsafeNodes.add(retValue)
+        let unsafeBlock = CreateBlock(unsafeNodes, retTy)
+        unsafeBlock.EnableAttr(Attribute.UNSAFE)
+        return (bodyNodes, unsafeBlock)
+    }
+    return (bodyNodes, CreateUnitExpr(TypeManager.GetPrimitiveTy(TypeKind.TYPE_UNIT)))
+}
+
+public func WrapReturningLambdaCall(typeManager: TypeManager, nodes: ArrayList<Node>): CallExpr {
+    let retTy = if (nodes.isEmpty()) {
+        TypeManager.GetPrimitiveTy(TypeKind.TYPE_UNIT)
+    } else {
+        nodes[nodes.size - 1].GetTy() ?? TypeManager.GetInvalidTy()
+    }
+    let lambda = WrapReturningLambdaExpr(typeManager, nodes)
+    return CreateCallExpr(lambda, ArrayList<FuncArg>(), None, retTy, CallKind.CALL_INVALID)
+}
+
+public func WrapReturningLambdaExpr(typeManager: TypeManager, nodes: ArrayList<Node>,
+    lambdaParams!: ArrayList<FuncParam> = ArrayList<FuncParam>()): LambdaExpr {
+    let retTy = if (nodes.isEmpty()) {
+        TypeManager.GetPrimitiveTy(TypeKind.TYPE_UNIT)
+    } else {
+        nodes[nodes.size - 1].GetTy() ?? TypeManager.GetInvalidTy()
+    }
+    let paramTys = LambdaParamTys(lambdaParams)
+    let paramLists = ArrayList<FuncParamList>()
+    paramLists.add(CreateFuncParamList(lambdaParams))
+    let lambdaTy = typeManager.GetFunctionTy(paramTys.toArray(), retTy)
+    let curFile: Option<File> = if (nodes.isEmpty()) { None } else { nodes[0].curFile }
+
+    let bodyParts = if (nodes.isEmpty()) {
+        (ArrayList<Node>(), CreateUnitExpr(TypeManager.GetPrimitiveTy(TypeKind.TYPE_UNIT)))
+    } else {
+        BuildReturningLambdaBody(nodes, retTy)
+    }
+    let body = CreateBlock(bodyParts[0], retTy)
+    let funcBody = CreateFuncBody(paramLists, None, body, lambdaTy)
+    let retExpr = CreateReturnExpr(bodyParts[1], funcBody)
+    retExpr.SetTy(TypeManager.GetNothingTy())
+    if (let Some(value) <- funcBody.body) {
+        value.body.add(retExpr)
+    }
+    let lambda = CreateLambdaExpr(funcBody)
+    lambda.curFile = curFile
+    lambda.SetTy(lambdaTy)
+    AddCurFile(lambda, file: curFile)
+    return lambda
+}
+
 public func IsJArray(decl: Decl): Bool {
     if ((decl as ClassLikeDecl).isNone()) {
         return false
