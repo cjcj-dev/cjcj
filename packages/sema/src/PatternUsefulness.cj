@@ -13,7 +13,11 @@ private func ToBasicPosition(pos: Position): BasicPosition {
 }
 
 private func MakeBasicRange(begin: Position, end: Position): BasicRange {
-    return BasicRange(ToBasicPosition(begin), ToBasicPosition(end))
+    var fixedEnd = end
+    if (begin.fileID != end.fileID) {
+        fixedEnd = begin + 1
+    }
+    return BasicRange(ToBasicPosition(begin), ToBasicPosition(fixedEnd))
 }
 
 private func MatchCasePatternRange(mc: MatchCase): BasicRange {
@@ -944,8 +948,9 @@ public func CheckMatchExprHasSelectorExhaustivenessAndReachability(
     if (witnesses.isEmpty()) {
         return true
     }
-    let builder = diag.DiagnoseRefactor(BasicDiagKindRefactor.sema_nonexhuastive_patterns, selector.begin,
-        arguments: [selectorTy.String()])
+    let builder = diag.DiagnoseRefactor(BasicDiagKindRefactor.sema_nonexhuastive_patterns,
+        MakeBasicRange(selector.begin, selector.end))
+    builder.AddMainHintArguments([selectorTy.String()])
     for (witness in witnesses) {
         if (witness.Size() == 1) {
             builder.AddNote(witness.Head().ToString() + " is not covered")
