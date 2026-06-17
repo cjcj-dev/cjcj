@@ -25,7 +25,7 @@ returns lower through `CreateLiteralReturnBody`).
 The following programs compile with the self-host `cjc`
 (`./target/release/bin/cangjie_compiler::cjc`) and run with the verified behavior
 shown. Each was re-verified by real compile-and-run on 2026-06-18 (latest: the
-`Float64` milestone, `opus21/float`) after merging
+`class` milestone, `opus22/classes`, CUT 1+2+3 + static override) after merging
 `opus2/int-arith-return`, `opus2/println-int`, `opus3/real-expr`,
 `opus4/control-flow` (var/assign, relational ops, `if`/`while` via real CHIR
 blocks), `opus5/func-calls` (user-defined function calls + recursion via
@@ -56,7 +56,11 @@ instance methods, and structs as function parameters/returns; a struct value is 
 of its field slots whose address travels through the `Int64` ABI), and
 `opus21/float` (`Float64` on the real path -- floating literals, `+ - * /` arithmetic,
 relational comparisons, `Float64` locals/params/returns, and `println`/`print` of a
-runtime `Float64`, all matching the reference cjc's `%f`-style text output)
+runtime `Float64`, all matching the reference cjc's `%f`-style text output), and
+`opus22/classes` (`class` reference types -- construction, field read/write, instance
+methods, REFERENCE ALIASING via the shared heap buffer, and single inheritance with
+`super()` + inherited fields/methods + static method override; CUT 1+2+3, true dynamic
+dispatch through a base-typed reference is not yet implemented)
 into `main`:
 
 | Source | Verified behavior |
@@ -109,6 +113,10 @@ into `main`:
 | `main(): Int64 { let x = 3.5; if (x > 2.0) { return 1 } else { return 0 } }` | exits with code `1` -- a `Float64` relational comparison used as a branch condition (Float64) |
 | `func half(x: Float64): Float64 { return x / 2.0 }` ⏎ `main() { println(half(9.0)) }` | prints `4.500000` -- a `Float64` parameter + `Float64` return across a real CHIR `Apply`, equal to the reference cjc (Float64) |
 | `main() { var s=0.0; var i=0; while (i<4) { s=s+1.5; i=i+1 }; println(s) }` | prints `6.000000` -- a `Float64` loop accumulator (`var` reassignment + runtime `Add`), equal to the reference cjc (Float64) |
+| `class Counter{var n:Int64; init(n){this.n=n}; func get(){return this.n}; func inc(){this.n=this.n+1}}` ⏎ `main(): Int64 { let c=Counter(0); c.inc(); c.inc(); return c.get() }` | exits with code `2` -- a `class` constructed via its `init`, a mutating method called for side effects (a discarded `EXPR` statement), and a getter (class CUT 1) |
+| `... main(): Int64 { let a=Counter(5); let b=a; b.inc(); return a.get() }` | exits with code `6` -- REFERENCE ALIASING: `let b=a` shares the one heap object, so `b.inc()` is observed through `a` (class CUT 2) |
+| `open class Animal{var legs:Int64; init(){this.legs=4}}` ⏎ `class Dog<:Animal{init(){super()}}` ⏎ `main(): Int64 { let d=Dog(); return d.legs }` | exits with code `4` -- single inheritance: the subclass init runs `super()` and inherits the parent field (class CUT 3) |
+| `open class Base{func greet(){return 1}}` ⏎ `class Sub<:Base{init(){}}` ⏎ `main(): Int64 { let s=Sub(); return s.greet() }` | exits with code `1` -- an inherited instance method called on a subclass instance (class CUT 3 + static override) |
 | `main() { let ok = 5 > 3; println("ok=${ok}") }` | prints `ok=true` -- a `Bool` interpolated expression stringified to `true`/`false` |
 | `main() { println("hello selfhost") }` | prints `hello selfhost` + newline |
 | `main() { print("a"); print("b"); println("c") }` | prints `abc` + newline |
@@ -543,6 +551,49 @@ Capability detail:
   find-max -> `8`, interp `x=42`, FizzBuzz, fib loop -> `55`, repeat -> `ababab`, `fact(5)` ->
   `120`, mixed-print -> `123`, struct read `7` / method `25`) -- no regression.
 
+- **`class` milestone (`opus22/classes`, CUT 1+2+3 + static override):** the real body-lowering
+  path now compiles `class` (reference) types. A class value reuses the struct heap-buffer
+  representation -- a buffer of `Int64` field slots whose address (as an `Int64`, via `ptrtoint`)
+  IS the value -- which is exactly correct for a reference type: copying the value copies the
+  address, so two bindings share one object and a mutation through one is observed through the
+  other (aliasing for free, the defining class-vs-struct distinction). Cuts landed and verified by
+  real compile+run: **CUT 1** -- a `class` with `Int64` fields + an `init` + instance methods
+  (registered into the same `StructInfo` machinery as structs, tagged in `classNames`); a bare
+  mutating method-call statement (`c.inc()`) lowers as a new `AST2CHIR_STMT_EXPR` statement that
+  evaluates the `CALL` for its side effects and discards the result, and a `Unit`-returning method
+  is emitted as an `Int64`-returning synthetic function that falls through to `return 0` (avoiding
+  a `Unit`-typed `Apply` whose unused result emitted invalid IR) (`Counter(0); c.inc(); c.inc();
+  c.get()` -> exit `2`); **CUT 2** -- REFERENCE ALIASING: `let b = a` over a class local propagates
+  the class type to `b` (`structTypeOfExpr` matches a bare ref to a class local), so `b.inc()`
+  mutates the shared object and `a.get()` observes it -- done only for classes; struct locals keep
+  value semantics (`let a = Counter(5); let b = a; b.inc(); a.get()` -> exit `6`); **CUT 3** --
+  SINGLE INHERITANCE: a subclass's `StructInfo` is flattened (parent fields precede the subclass's
+  own and keep their slot index), the init's stored values combine the parent init's assignments
+  (via a leading `super()`) with the subclass's own, a field-less method-only base is allowed, and
+  inherited methods are emitted as subclass-named synthetic functions adapting the nearest
+  declaring ancestor's body (`open class Animal { init(){this.legs=4} }; class Dog <: Animal {
+  init(){super()} }; Dog().legs` -> exit `4`; `open class Base { func greet():Int64{return 1} };
+  class Sub <: Base { init(){} }; Sub().greet()` -> exit `1`). Static method override resolves to
+  the nearest declaring class (`Sub` overrides `Base`) -> exit `2`. CHIR adds the
+  `AST2CHIR_STMT_EXPR` spec (`ExprStmt` factory + `IsExprStmt` + lowering in `TranslateFuncBody.cj`)
+  and `EnsureReturnSlot` now skips a `Unit`/`Nothing` return (`IsVoidLikeReturn`) so a
+  `Unit`-returning real body `Exit`s with `None` instead of allocating a dangling return slot
+  (`AST2CHIRDeclTranslator.cj`); parse accepts `<:` (the subtype operator, lexed as `UPPERBOUND`)
+  in addition to `:` for the supertype clause (`ParseDecl.cj` `ParseInheritableHeader`); the rest is
+  in the frontend adapter (`packages/frontend/src/RealParseBridge.cj`). It is additive and gated
+  like the prior milestones: a class shape outside the supported grammar is skipped whole (the body
+  falls back), so no regression. **NOT** implemented: true dynamic dispatch through a base-typed
+  reference (CUT 4) -- the heap buffer carries no class-id/vtable, so a base-typed local resolves
+  methods by its tracked concrete construction type (static resolution), not a real vtable. Verified
+  at runtime (no folding): CUT 1 -> exit `2`; CUT 2 aliasing -> exit `6`; CUT 3a inherited field ->
+  exit `4`; CUT 3b inherited method -> exit `1`; static override -> exit `1`/`2`. All previously
+  verified slices still pass (struct dist2 -> `25`, Float `3.5+2.0` -> `5.500000` == reference,
+  array find-max -> `8`, interp `x=42`, FizzBuzz, fib loop -> `55`, repeat -> `ababab`, `fact(5)` ->
+  `120`, mixed -> `123`) -- no regression. (The recursive-enum slices cons-list -> `6` /
+  AST-eval -> `23` fail identically on clean pre-merge `main` here due to a pre-existing
+  LLVM20-vs-LLVM15 `opt` bitcode mismatch in this environment -- "Never resolved value found in
+  function" -- so they are not a regression from this change and are not an applicable check here.)
+
 These are the only source constructs the integrated pipeline lowers end to end
 today; anything else still flows through the compatibility models described
 below.
@@ -573,10 +624,17 @@ and silently fall back:
   codegen error). Multi-payload (`Pair(Int64, Int64)`), multi-field, and other-typed payload
   constructors are unsupported and skip the whole enum (it never registers, so it never
   mis-lowers).
-- **`class`** declarations, fields, methods, inheritance, and member access (a `struct` with
-  `Int64` fields -- construction, field read/write, instance methods, and struct
-  params/returns -- is now supported on the real path, `opus20/structs`; a struct with a
-  non-`Int64` field type and any `class` still fall back to the summary path).
+- **True dynamic dispatch through a base-typed reference (class CUT 4), interfaces, and generics.**
+  `class` (reference) types with `Int64` fields -- construction, field read/write, instance
+  methods, REFERENCE ALIASING (`let b = a` shares the object), and single inheritance with `super()`
+  + inherited fields/methods + static method override -- are now supported on the real path
+  (`opus22/classes`, CUT 1+2+3). What is NOT yet supported and falls back: a virtual call through a
+  base-typed reference resolved by the runtime object's class (the heap buffer carries no
+  class-id/vtable, so dispatch is static resolution by the tracked concrete construction type, not a
+  real vtable); `interface` declarations and `<: I` interface implementation; abstract/`open`/
+  `override` semantics beyond the verified slices; non-`Int64` (or `String`/`Float64`) class fields;
+  and generic classes/structs/functions. A `struct` with a non-`Int64` field type also still falls
+  back.
 - **Other non-`Int64`/`Float64` numeric widths** (`Int32`, `UInt64`, `Float32`, etc.) --
   literals, arithmetic, and printing. (`Float64` is now supported on the real path --
   `opus21/float`: literals, `+ - * /`, relational comparisons, locals/params/returns, and
@@ -622,11 +680,14 @@ slice must be confirmed by a real compile-and-run with a known expected output.
   lowering / `EmitRuntime*Print` (format selection) once those value types flow through the
   real body.
 - **More operators and statement kinds on the real path.** Compound
-  assignment (`+=` etc.), `class` (and inheritance), and lambdas/closures are
+  assignment (`+=` etc.) and lambdas/closures are
   still unsupported (the body falls back to the summary path); `Float64` (literals, arithmetic,
   relational, locals/params/returns, print) is now supported (`opus21/float`); an `Int64`-field `struct`
   with construction, field read/write, instance methods, and struct params/returns is now
-  supported (`opus20/structs`). `match` on an `Int64` selector
+  supported (`opus20/structs`); an `Int64`-field `class` (reference type) with construction, field
+  read/write, instance methods, reference aliasing, and single inheritance (`super()`, inherited
+  fields/methods, static override) is now supported (`opus22/classes`, CUT 1+2+3) -- true dynamic
+  dispatch through a base-typed reference, interfaces, and generics remain follow-ups. `match` on an `Int64` selector
   (literal / wildcard / single-variable-binding patterns, statement and value forms) is now
   supported (`opus14/match`); match over a payload-less `enum` is now supported
   (`opus15/enums`, CUT 1); single-`Int64`-payload enum variants -- construct `Some(42)` and
@@ -666,7 +727,7 @@ return a + b` slice that exits 5 via a runtime CHIR `Add`) is in
 
 | Metric | Value |
 | --- | ---: |
-| Overall behavior-faithful self-host estimate | 51% |
+| Overall behavior-faithful self-host estimate | 52% |
 | Remaining source `TODO(selfhost:*)` markers | 4 |
 | Modules with remaining source markers | Sema |
 | Cangjie `.cj` files under `packages/*/src` | 526 |
@@ -676,7 +737,7 @@ return a + b` slice that exits 5 via a runtime CHIR `Add`) is in
 | C++ reference components with no same-named `.cj` component | 172 |
 | Required build command | `cjpm build` |
 | Build result | pass |
-| Build notes | `cjpm build` succeeds (a few unused-variable/unused-import warnings on the real-body + match/enum/struct/float adapter sources) |
+| Build notes | `cjpm build` succeeds (a few unused-variable/unused-import warnings on the real-body + match/enum/struct/float/class adapter sources) |
 
 Only source markers are counted as remaining work markers. Historical mentions
 inside `docs/status/*.md` are documentation references, not live source TODOs.
