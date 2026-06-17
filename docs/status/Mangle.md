@@ -138,6 +138,12 @@ Implemented:
   missed a declaration.
 - Aligned descriptor lambda index lookup with the C++ context-index contract by requiring an outer container,
   non-empty package context, and registered lambda index instead of falling back to lambda index `0`.
+- Aligned parser-AST mangling failure behavior with the C++ dereference/assertion paths by requiring function-like
+  declarations to carry function bodies, property accessors to have property type annotations when no return type is
+  present, extend declarations to have extended types, and generic constraints to have constrained type annotations.
+- Aligned parser-AST var-with-pattern mangling with the C++ flattening assumptions by requiring an irrefutable pattern,
+  requiring each encountered `VarPattern` to carry its `VarDecl`, and requiring current-file metadata before emitting
+  all-wildcard discriminator names.
 
 Known fidelity caveats:
 
