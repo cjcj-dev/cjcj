@@ -50,6 +50,11 @@ Reference sources inspected from `/root/cj_build/cangjie_compiler/src/Sema`:
   emits `sema_invalid_access_control` like the C++ path, invalidating illegal
   `RefType` targets; `RefType` also mirrors the C++ Java generic type-argument
   short-circuit before normal generic-instantiation checks.
+- This pass deepened `TypeCheckType.cj` further: `VArray` reference-type
+  detection now instantiates generic struct member types through the real
+  `Promotion`/`TypeManager` path before recursing, and `RefType` generic
+  constraint checking now resolves type aliases to the substituted real target
+  type arguments instead of checking only the alias declaration surface.
 - Deepened reference filtering toward `TypeCheckReference.cpp`: name references
   now filter macro-function targets, collapse shadowed all-function candidates,
   report ambiguous imported non-function sets, detect generic base type
@@ -62,16 +67,51 @@ Reference sources inspected from `/root/cj_build/cangjie_compiler/src/Sema`:
   visibility with the real module package-relation utility, reject abstract
   interface calls through type access, reject enum constructor type arguments on
   member access, and reject direct `super` access to abstract members.
+- This pass deepened `TypeCheckReference.cj` further: extend member candidate
+  filtering now mirrors the C++ promotion path, including inherited-interface
+  extend lookup and promoted extended-type generic constraint checks, and
+  deprecated usage diagnostics now extract `message`, `since`, and `strict`
+  from the real `@Deprecated` annotation payload to choose warning vs error and
+  preserve diagnostic suffix text.
 - Continued class-like parity in `TypeCheckClassLike.cj`: sealed inheritance
   from `specific` declarations now mirrors the C++ package scan for a matching
   common declaration before reporting the specific-sealed diagnostic, and
   superclass validation now rejects `OPEN_TO_MOCK` classes like the C++
   `TestManager::IsDeclOpenToMock` path.
+- This pass tightened class-like parity further: the `ThreadContext` inheritance
+  whitelist now checks the declaration's owning file package like the C++ path,
+  with `fullPackageName` retained only as a fallback for partially constructed
+  AST nodes.
 - Deepened extend checking toward `TypeCheckExtend.cpp`: extend-map construction
   now checks duplicate direct interface implementations, duplicate inherited
   interface implementations, and non-extendable `std.core.Any`/`std.core.CType`
   interfaces, and immutable type extensions now reject assignment index
   operators as well as mutable properties.
+- This pass deepened `TypeCheckExtend.cj` further: extend declaration checking
+  now mirrors the C++ orphan-rule validation for imported/primitive extended
+  types, collecting related extends from inherited class chains and inherited
+  interface supers before reporting external-interface violations; immutable
+  extension diagnostics now point at the function identifier or `mut` modifier
+  like the C++ diagnostics.
+- Continued extend parity in `TypeCheckExtend.cj`: the C++ duplicate default
+  implementation check for multiple `extend` declarations implementing the same
+  generic interface with different type arguments is now wired into extend
+  declaration checking, reporting default interface members that do not depend
+  on the interface's outside generic parameters.
+- This pass deepened extend specialization checks further: generic class-like
+  extended targets now run the C++ instantiated-interface duplicate check,
+  substituting the original declaration's generic parameters into inherited
+  interfaces and other generic extends while preserving the C++ conflict rule
+  for incompatible repeated generic mappings.
+- Continued extend specialization parity: builtin `CPointer` extend-map entries
+  now mirror the C++ primitive precheck by finding the `std.core` generic
+  pointer extend and checking user pointer extends against that core
+  declaration for instantiated duplicate interface implementations.
+- Continued duplicate-interface parity: extend interface prechecking now groups
+  builtin and declaration extend-map entries by the actual extended type,
+  instantiates implemented interfaces through the real `Promotion` type mapping,
+  and diagnoses the last source implementation when a promoted interface
+  duplicates a base inherited interface or another extend implementation.
 - Deepened annotation checking toward `TypeCheckAnnotation.cpp` by preserving
   the C++ `NO_REFLECT_INFO` marker on custom annotation call expressions that
   are not compile-time visible.
@@ -98,11 +138,10 @@ are from pre-existing files outside this pass scope.
   pass, so these helpers are not yet wired into a full C++-faithful
   declaration/type/reference traversal pipeline.
 - Full C++ parity still requires complete overload resolution, lookup/import
-  recommendation, exact access-control context, alias substitution, promotion-based
-  extend constraint filtering, exact generic specialization duplicate checks,
-  orphan-rule diagnostics, custom annotation expression synthesis/type checking,
-  annotation target-array type checking, pipeline wiring for type-alias and
-  class-like declaration checks, reference-legality walker wiring, and all
+  recommendation, exact access-control context, custom annotation expression
+  synthesis/type checking, annotation target-array type checking, pipeline
+  wiring for type-alias and class-like declaration checks, reference-legality
+  walker wiring, full deprecated-usage traversal/override checks, and all
   TypeChecker-owned state once those sibling surfaces are available in the
   allowed owner files.
 - Diagnostics are mapped to the available self-hosted diagnostic tables; a few

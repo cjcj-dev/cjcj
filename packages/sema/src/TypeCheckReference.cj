@@ -218,6 +218,15 @@ private func TypeCheckReferenceDisplayTyName(ty: Ty): String {
     return ty.String()
 }
 
+private func TypeCheckReferenceNeedPoint(str: String): Bool {
+    let bytes = str.toArray()
+    if (bytes.isEmpty()) {
+        return false
+    }
+    let last = bytes[bytes.size - 1]
+    return (last >= b'a' && last <= b'z') || (last >= b'A' && last <= b'Z') || (last >= b'0' && last <= b'9')
+}
+
 private func TypeCheckReferenceDiagMemberAccessNotFound(
     diag: BasicDiagnosticEngine,
     ma: MemberAccess
@@ -409,8 +418,34 @@ public func TypeCheckReferenceRemoveTargetNotMeetExtendConstraint(
         let target = targets[idx]
         var removeTarget = false
         if (let Some(outer) <- target.outerDecl) {
-            if (let Some(extendDecl) <- (outer as ExtendDecl)) {
-                removeTarget = !tm.CheckExtendWithConstraint(realBaseTy, Some(extendDecl))
+            let isInheritableOuter = if (let Some(_) <- (outer as InheritableDecl)) { true } else { false }
+            if (isInheritableOuter && Ty.IsTyCorrect(outer.GetTy())) {
+                let outerTy = outer.GetTy().getOrThrow()
+                let promotedOuterTys = Promotion(tm).Promote(realBaseTy, outerTy)
+                if (promotedOuterTys.values.isEmpty()) {
+                    removeTarget = true
+                } else {
+                    var extendDecl: Option<ExtendDecl> = tm.GetExtendDeclByInterface(realBaseTy, outerTy)
+                    if (let None <- extendDecl) {
+                        extendDecl = outer as ExtendDecl
+                    }
+                    if (let Some(extendValue) <- extendDecl) {
+                        if (let Some(extendedType) <- extendValue.extendedType) {
+                            if (let Some(extendedTy) <- extendedType.GetTy()) {
+                                let promotedExtendedTys = Promotion(tm).Promote(realBaseTy, extendedTy)
+                                let promotedTy = if (!promotedExtendedTys.values.isEmpty()) {
+                                    promotedExtendedTys.values[0]
+                                } else {
+                                    TypeManager.GetInvalidTy()
+                                }
+                                if (Ty.IsTyCorrect(promotedTy)) {
+                                    let declOpt: Option<Decl> = extendValue as Decl
+                                    removeTarget = !tm.CheckGenericDeclInstantiation(declOpt, promotedTy.typeArgs)
+                                }
+                            }
+                        }
+                    }
+                }
             }
         }
         if (removeTarget) {
@@ -946,6 +981,32 @@ public func TypeCheckReferenceFindDeprecatedAnnotation(target: Decl): Option<Ann
     return None
 }
 
+private func TypeCheckReferenceExtractDeprecatedArguments(annotation: Annotation): (String, String, Bool) {
+    var message = ""
+    var since = "."
+    var strict = false
+    for (arg in annotation.args) {
+        if (let Some(expr) <- arg.expr) {
+            if (let Some(lit) <- (expr as LitConstExpr)) {
+                if (arg.name.Empty() || arg.name.Val() == "message") {
+                    message = " " + lit.stringValue
+                } else if (arg.name.Val() == "since") {
+                    since = " since " + lit.stringValue
+                } else if (arg.name.Val() == "strict") {
+                    strict = lit.ToString() == "true"
+                }
+            }
+        }
+    }
+    if (TypeCheckReferenceNeedPoint(message)) {
+        message += "."
+    }
+    if (TypeCheckReferenceNeedPoint(since)) {
+        since += "."
+    }
+    return (message, since, strict)
+}
+
 public func TypeCheckReferenceShouldDiagnoseDeprecatedUsage(usage: Node, target: Decl): Bool {
     if (!target.HasAnno(AstAnnotationKind.DEPRECATED)) {
         return false
@@ -971,6 +1032,7 @@ public func TypeCheckReferenceDiagnoseDeprecatedUsage(
     if (let None <- TypeCheckReferenceFindDeprecatedAnnotation(target)) {
         return false
     }
+    let annotation = TypeCheckReferenceFindDeprecatedAnnotation(target).getOrThrow()
     if (let None <- TypeCheckReferenceKindOfDeprecatedDeclaration(usage, target)) {
         return false
     }
@@ -980,8 +1042,13 @@ public func TypeCheckReferenceDiagnoseDeprecatedUsage(
     if (let Some(ma) <- (usage as MemberAccess)) {
         range = TypeCheckReferenceFieldRange(ma)
     }
-    let builder = diag.DiagnoseRefactor(BasicDiagKindRefactor.sema_deprecated_warning, range,
-        arguments: [kind, name, ".", ""])
+    let (message, since, strict) = TypeCheckReferenceExtractDeprecatedArguments(annotation)
+    let diagKind = if (strict) {
+        BasicDiagKindRefactor.sema_deprecated_error
+    } else {
+        BasicDiagKindRefactor.sema_deprecated_warning
+    }
+    let builder = diag.DiagnoseRefactor(diagKind, range, arguments: [kind, name, since, message])
     builder.Emit()
     return true
 }
