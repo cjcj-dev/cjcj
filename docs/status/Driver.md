@@ -55,6 +55,12 @@ Current status:
   and store absolute paths, obfuscation mapping/config inputs are validated as
   readable files, and joined separated aliases such as `-Bpath`, `-opath`, and
   `-j4` are accepted.
+- Driver input and linker argument ordering now tracks raw argv positions more
+  closely: source/object/archive/bitcode inputs are validated during Driver
+  parsing, object/archive/bitcode/shared-library inputs are normalized to
+  absolute paths, `.a` inputs follow the C++ object/archive path, and `-l`,
+  `--link-option`, and split `--link-options` values are emitted through the
+  sorted input tuple stream instead of delayed synthetic positions.
 - Host triple defaults now use compile-time `@When` OS/architecture selection
   instead of hardcoded Linux/x86_64 values.
 - GNU/Linux native linking now mirrors the C++ driver more closely: target-
@@ -99,6 +105,9 @@ Residual fidelity risks:
   the frontend/codegen package boundary exposing the C++ in-process
   `GlobalOptions` state to Driver, and some platform-specific runtime library
   edge cases remain below the C++ driver.
+- Package-directory input handling is still below the C++ `ProcessInputs`
+  model because the Driver package has not yet grown the full package path and
+  duplicate-canonicalization state owned by the shared option layer.
 - The Windows-specific `main-frontend.cpp` process wrapper is represented by a
   direct Cangjie frontend shim rather than a separate `CreateProcess`-style
   executable launcher.

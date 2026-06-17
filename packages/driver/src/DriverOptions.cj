@@ -131,6 +131,7 @@ public class DriverOptions {
     public let orderedInputObjs: ArrayList<OrderedInput> = ArrayList<OrderedInput>()
     public let orderedLibraries: ArrayList<OrderedInput> = ArrayList<OrderedInput>()
     public let orderedLinkOptions: ArrayList<OrderedInput> = ArrayList<OrderedInput>()
+    public let orderedLinkOptionGroups: ArrayList<OrderedInput> = ArrayList<OrderedInput>()
     public let frontendForwardArgs: ArrayList<String> = ArrayList<String>()
     public let directBuiltinDependencies: HashSet<String> = HashSet<String>()
     public let indirectBuiltinDependencies: HashSet<String> = HashSet<String>()

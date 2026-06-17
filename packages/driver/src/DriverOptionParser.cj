@@ -15,6 +15,8 @@ private class ParseCursor {
 
     func current(): String { return args[index] }
 
+    func orderIndex(): UInt64 { return UInt64(index - 1) }
+
     func advance(): Unit { index++ }
 
     func takeValue(optionName: String): Option<String> {
@@ -29,18 +31,17 @@ private class ParseCursor {
 
 public func ParseDriverArgs(opts: DriverOptions, arguments: Array<String>): Bool {
     let cursor = ParseCursor(arguments)
-    var inputIndex: UInt64 = 0u64
     var ok = true
     while (cursor.hasNext()) {
         let arg = cursor.current()
         if (arg == "--") {
             cursor.advance()
             while (cursor.hasNext()) {
-                ClassifyInput(opts, cursor.current(), inputIndex)
+                let classified = ClassifyInput(opts, cursor.current(), cursor.orderIndex())
+                ok = ok && classified
                 if (IsFrontendInput(cursor.current())) {
                     opts.frontendForwardArgs.add(cursor.current())
                 }
-                inputIndex++
                 cursor.advance()
             }
             break
@@ -51,11 +52,11 @@ public func ParseDriverArgs(opts: DriverOptions, arguments: Array<String>): Bool
             cursor.advance()
             continue
         }
-        ClassifyInput(opts, arg, inputIndex)
+        let classified = ClassifyInput(opts, arg, cursor.orderIndex())
+        ok = ok && classified
         if (IsFrontendInput(arg)) {
             opts.frontendForwardArgs.add(arg)
         }
-        inputIndex++
         cursor.advance()
     }
     return ok
@@ -264,6 +265,7 @@ private func ParseObfuscationFlag(opts: DriverOptions, cursor: ParseCursor, arg:
 }
 
 private func ParseOptionWithValue(opts: DriverOptions, cursor: ParseCursor, arg: String): Bool {
+    let optionIndex = cursor.orderIndex()
     if (arg.startsWith("-o") && arg.size > 2) {
         opts.output = arg[2..]
         return true
@@ -327,16 +329,33 @@ private func ParseOptionWithValue(opts: DriverOptions, cursor: ParseCursor, arg:
         return true
     }
     if (arg == "-l" || arg == "--library" || arg.startsWith("--library=")) {
-        if (let Some(value) <- readOptionValue(cursor, arg, "--library")) { opts.libraries.add(value); return true }
+        if (let Some(value) <- readOptionValue(cursor, arg, "--library")) {
+            opts.libraries.add(value)
+            opts.orderedLibraries.add(OrderedInput("-l" + value, optionIndex))
+            return true
+        }
         return false
     }
-    if (arg.startsWith("-l") && arg.size > 2) { opts.libraries.add(arg[2..]); return true }
+    if (arg.startsWith("-l") && arg.size > 2) {
+        let value = arg[2..]
+        opts.libraries.add(value)
+        opts.orderedLibraries.add(OrderedInput("-l" + value, optionIndex))
+        return true
+    }
     if (arg == "--link-option" || arg.startsWith("--link-option=")) {
-        if (let Some(value) <- readOptionValue(cursor, arg, "--link-option")) { opts.linkOption.add(value); return true }
+        if (let Some(value) <- readOptionValue(cursor, arg, "--link-option")) {
+            opts.linkOption.add(value)
+            opts.orderedLinkOptions.add(OrderedInput(value, optionIndex))
+            return true
+        }
         return false
     }
     if (arg == "--link-options" || arg.startsWith("--link-options=")) {
-        if (let Some(value) <- readOptionValue(cursor, arg, "--link-options")) { opts.linkOptions.add(value); return true }
+        if (let Some(value) <- readOptionValue(cursor, arg, "--link-options")) {
+            opts.linkOptions.add(value)
+            opts.orderedLinkOptionGroups.add(OrderedInput(value, optionIndex))
+            return true
+        }
         return false
     }
     if (arg == "--target" || arg.startsWith("--target=")) {
@@ -683,21 +702,39 @@ public func IsFrontendInput(input: String): Bool {
         extension == "so" || extension == "dylib" || extension == "dll")
 }
 
-public func ClassifyInput(opts: DriverOptions, input: String, index: UInt64): Unit {
+public func ClassifyInput(opts: DriverOptions, input: String, index: UInt64): Bool {
     let extension = FileUtil.GetFileExtension(input)
     if (extension == "cj") {
+        if (let None <- opts.ValidateInputFilePath(input)) {
+            return false
+        }
         opts.srcFiles.add(input)
-    } else if (extension == "o" || extension == "obj") {
-        opts.inputObjs.add(input)
-        opts.orderedInputObjs.add(OrderedInput(input, index))
+        return true
+    } else if (extension == "o" || extension == "obj" || extension == "a") {
+        if (let Some(path) <- opts.ValidateInputFilePath(input)) {
+            opts.inputObjs.add(path)
+            opts.orderedInputObjs.add(OrderedInput(path, index))
+            return true
+        }
+        return false
     } else if (extension == "bc") {
-        opts.bcInputFiles.add(input)
-    } else if (extension == "a" || extension == "so" || extension == "dylib" || extension == "dll") {
-        opts.inputLibraries.add(input)
-        opts.orderedLibraries.add(OrderedInput(input, index))
-    } else {
+        if (let Some(path) <- opts.ValidateInputFilePath(input)) {
+            opts.bcInputFiles.add(path)
+            return true
+        }
+        return false
+    } else if (extension == "so" || extension == "dylib" || extension == "dll") {
+        if (let Some(path) <- opts.ValidateInputFilePath(input)) {
+            opts.inputLibraries.add(path)
+            opts.orderedLibraries.add(OrderedInput(path, index))
+            return true
+        }
+        return false
+    } else if (let Some(_) <- opts.ValidateInputFilePath(input)) {
         opts.srcFiles.add(input)
+        return true
     }
+    return false
 }
 
 public func TryParseTriple(value: String): Option<TripleInfo> {
