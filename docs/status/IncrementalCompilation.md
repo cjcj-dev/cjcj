@@ -1,6 +1,6 @@
 # IncrementalCompilation Port Status
 
-Date: 2026-06-16
+Date: 2026-06-17
 
 Build: `cjpm build` passes.
 
@@ -75,10 +75,16 @@ Implemented:
 - Added explicit adapter support for var-with-pattern bound variables and routed cache calculation, member traversal,
   signature pollution, and CHIR optimization pollution through the same flattened pattern-variable view used by the
   C++ `FlattenVarWithPatternDecl` paths.
+- Added the first real sibling-package dependency for this module: `cangjie_compiler::ast` is now imported by the
+  incremental package so cache declaration-kind tags use real `ASTKindIndex` values and adapter attributes that
+  correspond to AST attributes use real `AttributeIndex` values. The adapter-only `const` flag stays separate because
+  C++ and self-host AST both model constness as `Decl::IsConst()`/`Decl.isConst`, not as an attribute.
+- Bumped the deterministic cache wire version to `CJ-INCR-CACHE-2` so caches written with the previous package-local
+  kind/attribute ordinals are rejected instead of being decoded with the real AST ordinal layout.
 
 Known gaps:
 
-- The package manifest still has no dependencies and this task forbids manifest edits, so the implementation uses
+- The package now depends on real `ast` for cache tag ordinals, but most public entry points still use
   `IncrDecl`/`IncrPackage` adapters instead of the real AST/Sema/Modules/Mangle/Parse public types.
 - The cache wire format is a deterministic self-host text format, not the C++ FlatBuffers `CachedASTFormat`.
 - Hashing and fallback mangling are behavior-shaped but not byte-identical to C++ `ASTHasher`/`ASTMangler` until

@@ -4,7 +4,7 @@ import std.collection.*
 import std.fs.File
 import std.sort.*
 
-private let CACHE_WIRE_VERSION: String = "CJ-INCR-CACHE-1"
+private let CACHE_WIRE_VERSION: String = "CJ-INCR-CACHE-2"
 
 public class HashedASTWriter {
     private let bitcodeFilesName: ArrayList<String> = ArrayList<String>()
