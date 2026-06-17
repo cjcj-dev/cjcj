@@ -46,6 +46,7 @@ Implemented:
 - Tightened `FileUtil.Remove` and `CanWrite` against the C++ platform logic: removal now rejects paths that are not regular files, directories, or symbolic links before delegating to `remove`, and Windows writeability is based on file attributes rather than `_access`.
 - Matched `InternalError` release-style fatal behavior more closely by deleting registered temp files and exiting with the C++ ICE code instead of throwing a recoverable exception, while preserving the C++ LSP/unit-test early return.
 - Restored the C++ response-file command-line helper: `ExpandResponseFiles` now expands `@file` arguments into non-empty file lines, strips trailing CR from CRLF input, leaves unreadable response-file arguments untouched, and `StringifyArgumentVector` routes through that expansion.
+- Deepened `PartiallyPersistent` header parity: `PSet` now has a copy constructor preserving checkpoint/stash history with independent log containers, and `PData.CommitScope` exposes the C++ commit/reset-soft scope guard as an idempotent Cangjie `Resource`.
 
 Known fidelity caveats:
 

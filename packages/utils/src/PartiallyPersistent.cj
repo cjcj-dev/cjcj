@@ -23,6 +23,28 @@ private func cloneLogList<T>(logs: ArrayList<PSetLog<T>>): ArrayList<PSetLog<T>>
     return cloned
 }
 
+private func cloneLogStack<T>(logs: ArrayList<ArrayList<PSetLog<T>>>): ArrayList<ArrayList<PSetLog<T>>>
+    where T <: Comparable<T> {
+    let cloned = ArrayList<ArrayList<PSetLog<T>>>()
+    for (entry in logs) {
+        cloned.add(cloneLogList(entry))
+    }
+    return cloned
+}
+
+private func cloneStashStack<T>(stashStack: ArrayList<ArrayList<ArrayList<PSetLog<T>>>>):
+    ArrayList<ArrayList<ArrayList<PSetLog<T>>>> where T <: Comparable<T> {
+    let cloned = ArrayList<ArrayList<ArrayList<PSetLog<T>>>>()
+    for (stashGroup in stashStack) {
+        let clonedGroup = ArrayList<ArrayList<PSetLog<T>>>()
+        for (stash in stashGroup) {
+            clonedGroup.add(cloneLogList(stash))
+        }
+        cloned.add(clonedGroup)
+    }
+    return cloned
+}
+
 public class PSet<T> where T <: Comparable<T> {
     private var data: TreeSet<T> = TreeSet<T>()
     private let log: ArrayList<ArrayList<PSetLog<T>>> = ArrayList<ArrayList<PSetLog<T>>>()
@@ -30,6 +52,16 @@ public class PSet<T> where T <: Comparable<T> {
 
     public init() {
         commit()
+    }
+
+    public init(other: PSet<T>) {
+        data = other.data.clone()
+        for (entry in cloneLogStack(other.log)) {
+            log.add(entry)
+        }
+        for (stashGroup in cloneStashStack(other.stashes)) {
+            stashes.add(stashGroup)
+        }
     }
 
     public init(values: Array<T>) {
@@ -217,6 +249,10 @@ public class PData {
         data.commit()
     }
 
+    public static func CommitScope<T>(data: PSet<T>): PDataCommitScope<T> where T <: Comparable<T> {
+        return PDataCommitScope<T>(data)
+    }
+
     public static func Reset<T>(data: PSet<T>): Unit where T <: Comparable<T> {
         data.reset()
     }
@@ -231,5 +267,27 @@ public class PData {
 
     public static func ResetSoft<T>(data: PSet<T>): Unit where T <: Comparable<T> {
         data.resetSoft()
+    }
+}
+
+public class PDataCommitScope<T> <: Resource where T <: Comparable<T> {
+    private let data: PSet<T>
+    private var closed: Bool = false
+
+    public init(data: PSet<T>) {
+        this.data = data
+        PData.Commit(data)
+    }
+
+    public func close(): Unit {
+        if (closed) {
+            return
+        }
+        PData.ResetSoft(data)
+        closed = true
+    }
+
+    public func isClosed(): Bool {
+        return closed
     }
 }
