@@ -587,7 +587,8 @@ private func DesugarTrailingClosureExpr(expr: TrailingClosureExpr): Unit {
     }
 }
 
-private func DispatchBeforeTypeCheck(node: Node, compatibleSDKVersion: String): Unit {
+private func DispatchBeforeTypeCheck(node: Node, desugarMacrocall: Bool, compatibleSDKVersion: String,
+    discardedHelper: DiscardedHelper): Unit {
     match (node.astKind) {
         case ASTKind.MAIN_DECL =>
             if (let Some(mainDecl) <- (node as MainDecl)) {
@@ -595,6 +596,11 @@ private func DispatchBeforeTypeCheck(node: Node, compatibleSDKVersion: String): 
             }
         case ASTKind.FILE =>
             if (let Some(file) <- (node as File)) {
+                if (desugarMacrocall) {
+                    for (macroCallNode in file.originalMacroCallNodes) {
+                        WalkBeforeTypeCheck(macroCallNode, desugarMacrocall, compatibleSDKVersion, discardedHelper)
+                    }
+                }
                 DesugarMacroDecl(file)
             }
         case ASTKind.QUOTE_EXPR =>
@@ -741,16 +747,14 @@ private func IsDiscarded(node: Node, parent: Node, isParentDiscarded: Bool): Boo
     return flagTransitive || flagConst || flagBlock
 }
 
-public func DesugarBeforeTypeCheck(root: Node, desugarMacrocall!: Bool = false,
-    compatibleSDKVersion!: String = ""): Unit {
-    let _ = desugarMacrocall
-    let discardedHelper = DiscardedHelper()
+private func WalkBeforeTypeCheck(root: Node, desugarMacrocall: Bool, compatibleSDKVersion: String,
+    discardedHelper: DiscardedHelper): Unit {
     let walker = Walker(root, visitPre: { node: Node =>
         if (node.TestAttr(Attribute.IS_BROKEN)) {
             discardedHelper.PushCtxt(false, node)
             return VisitAction.SKIP_CHILDREN
         }
-        DispatchBeforeTypeCheck(node, compatibleSDKVersion)
+        DispatchBeforeTypeCheck(node, desugarMacrocall, compatibleSDKVersion, discardedHelper)
         if (discardedHelper.IsNodeDiscarded(node)) {
             discardedHelper.PushCtxt(true, node)
             UnitifyBranchExpr(node)
@@ -763,6 +767,12 @@ public func DesugarBeforeTypeCheck(root: Node, desugarMacrocall!: Bool = false,
         VisitAction.KEEP_DECISION
     })
     let _ = walker.Walk()
+}
+
+public func DesugarBeforeTypeCheck(root: Node, desugarMacrocall!: Bool = false,
+    compatibleSDKVersion!: String = ""): Unit {
+    let discardedHelper = DiscardedHelper()
+    WalkBeforeTypeCheck(root, desugarMacrocall, compatibleSDKVersion, discardedHelper)
 }
 
 public func SelfhostPortStatus_Desugar_DesugarBeforeTypeCheck(): Bool {
