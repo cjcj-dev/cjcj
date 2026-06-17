@@ -660,7 +660,10 @@ public open class BaseMangler {
             return decl.mangledName
         }
         var newMangled = MANGLE_CANGJIE_PREFIX + MANGLE_NESTED_PREFIX
-        if (decl.astKind == ASTKind.EXTEND_DECL) {
+        if (decl.astKind == ASTKind.VAR_WITH_PATTERN_DECL) {
+            newMangled += ManglePackage(decl)
+            newMangled += MangleVarWithPatternDecl(decl, prefix)
+        } else if (decl.astKind == ASTKind.EXTEND_DECL) {
             newMangled += ManglePrefix(decl, prefix, genericsTypeStack, declare)
             newMangled += MangleExtendEntity(decl, genericsTypeStack, declare)
             newMangled += MangleGenericArguments(decl, genericsTypeStack, declare)
@@ -1101,12 +1104,13 @@ public open class BaseMangler {
         mangleStr += MangleName(decl.identifier)
         if (IsLocalVariable(decl)) {
             if (let Some(ctx) <- manglerCtxTable.get(ManglerContext.ReduceUnitTestPackageName(decl.fullPackageName))) {
+                mangleStr += MANGLE_COUNT_PREFIX
                 if (let Some(outerNode) <- findOuterNodeOfLocal(prefix)) {
                     if (outerNode.astKind == ASTKind.CLASS_DECL || outerNode.astKind == ASTKind.INTERFACE_DECL ||
                         outerNode.astKind == ASTKind.STRUCT_DECL) {
-                        mangleStr += MANGLE_COUNT_PREFIX + DecimalToManglingNumber("0")
+                        mangleStr += DecimalToManglingNumber("0")
                     } else if (let Some(index) <- ctx.GetIndexOfVar(outerNode, decl)) {
-                        mangleStr += MANGLE_COUNT_PREFIX + DecimalToManglingNumber("${index}")
+                        mangleStr += DecimalToManglingNumber("${index}")
                     }
                 }
             }

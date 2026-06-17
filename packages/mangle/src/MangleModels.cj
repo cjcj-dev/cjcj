@@ -229,7 +229,7 @@ public class MangleDecl {
                 return value
             }
             if (let Some(parentEnum) <- body.parentEnum) {
-                if (TestAttr(Attribute.CONSTRUCTOR)) {
+                if (TestAttr(Attribute.ENUM_CONSTRUCTOR) || TestAttr(Attribute.CONSTRUCTOR)) {
                     return parentEnum.generic
                 }
             }

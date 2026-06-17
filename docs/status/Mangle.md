@@ -1,6 +1,6 @@
 # Mangle Port Status
 
-Date: 2026-06-17
+Date: 2026-06-18
 
 Build: `cjpm build` passes.
 
@@ -115,6 +115,12 @@ Implemented:
 - Aligned parser-AST malformed type-annotation handling with C++ assertion/null-check behavior for missing
   parenthesized, option, function-return, VArray element/constant, qualified-base, and constant-literal
   payloads, and for unsupported AST type-annotation kinds.
+- Aligned descriptor enum-constructor generic ownership with the real AST `Decl.GetGeneric()` behavior by carrying
+  the real `Attribute.ENUM_CONSTRUCTOR` through the adapter and using it when a function body has a parent enum.
+- Aligned local variable mangling with C++ `BaseMangler::MangleVarDecl` by emitting the `K` count prefix whenever a
+  prepared package context exists, then appending the member/local index payload according to the discovered scope.
+- Added the C++ `VAR_WITH_PATTERN_DECL` branch to descriptor `MangleDeclName` so direct helper calls preserve the
+  reference `MangleDecl` behavior in addition to the common `Mangle` entry point.
 
 Known fidelity caveats:
 
