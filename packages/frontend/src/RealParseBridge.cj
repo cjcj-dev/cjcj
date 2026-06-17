@@ -174,6 +174,19 @@ private class EnumRegistry {
 private func collectEnumRegistry(parsedFile: ParseFile): EnumRegistry {
     let registry = EnumRegistry()
     let collided = HashSet<String>()
+    // First pass: collect the names of every top-level enum type declared in this file. A payload
+    // field whose declared type names one of these enums is a supported field (the child enum value is
+    // already encoded as an Int64, so it lives in an Int64 slot just like an `Int64` field). This is
+    // what makes RECURSIVE enums (`Add(Expr, Expr)`, `Cons(Int64, List)`) expressible.
+    let enumTypeNames = HashSet<String>()
+    for (decl in parsedFile.decls) {
+        if (let Some(enumDecl) <- (decl as ParseEnumDecl)) {
+            let nm = enumDecl.identifier.Val()
+            if (!nm.isEmpty()) {
+                enumTypeNames.add(nm)
+            }
+        }
+    }
     for (decl in parsedFile.decls) {
         if (let Some(enumDecl) <- (decl as ParseEnumDecl)) {
             // Classify each constructor's payload; reject the whole enum on any unsupported shape so a
@@ -183,7 +196,7 @@ private func collectEnumRegistry(parsedFile: ParseFile): EnumRegistry {
             var enumOk = true
             var enumHeap = false
             for (ctor in enumDecl.constructors) {
-                match (classifyEnumCtorPayload(ctor)) {
+                match (classifyEnumCtorPayload(ctor, enumTypeNames)) {
                     case Some((k, n)) =>
                         payloads.add(k)
                         fieldCounts.add(n)
@@ -246,10 +259,18 @@ private func collectEnumRegistry(parsedFile: ParseFile): EnumRegistry {
 //   (NONE,   0) for a payload-less constructor (`| Red`);
 //   (INT,    1) for a single `Int64`/`Int` payload;
 //   (STRING, 1) for a single `String` payload;
-//   (MULTI,  N) for two or more all-`Int64` payload fields (`| Add(Int64, Int64)`).
-// Returns None (reject the enum) for any unsupported shape: a multi-field constructor with a non-Int64
-// field, or a single payload of an unsupported type.
-private func classifyEnumCtorPayload(ctor: ParseDecl): Option<(Int64, Int64)> {
+//   (MULTI,  N) for one or more payload fields where each field is `Int64`/`Int` OR an enum type, and
+//               at least one field is an enum type, OR two-or-more all-`Int64` fields (`Add(Int64,
+//               Int64)`). A single `Int64` field stays INT (its packed encoding is unchanged).
+// An enum-typed field (`Add(Expr, Expr)`, `Cons(Int64, List)`) is supported because an enum value is
+// ALREADY encoded as an Int64, so it lives in an Int64 buffer slot identically to an `Int64` field --
+// this is exactly what lets enums be RECURSIVE. `enumTypeNames` is the set of top-level enum type names
+// declared in the file (an enum-typed field must name one of them). Any constructor that carries at
+// least one enum-typed field is forced onto the heap (separate-slot) representation -- including a
+// single enum field (`Box(Expr)`) -- so a child enum value rides in its own slot uniformly.
+// Returns None (reject the enum) for any unsupported shape: a field that is neither Int64 nor a known
+// enum type, or a single payload of an unsupported scalar type.
+private func classifyEnumCtorPayload(ctor: ParseDecl, enumTypeNames: HashSet<String>): Option<(Int64, Int64)> {
     let varDecl = match (ctor as ParseVarDecl) {
         case Some(v) => v
         case None => return None
@@ -266,13 +287,19 @@ private func classifyEnumCtorPayload(ctor: ParseDecl): Option<(Int64, Int64)> {
         if (typeName == "String") {
             return Some((ENUM_PAYLOAD_STRING, 1))
         }
+        // A single enum-typed field (`Box(Expr)`): supported, but forced onto the heap representation
+        // (MULTI with one field) so the child enum value rides in its own Int64 slot.
+        if (enumTypeNames.contains(typeName)) {
+            return Some((ENUM_PAYLOAD_MULTI, 1))
+        }
         return None
     }
-    // Two or more fields: only an all-Int64 field list is supported. Each field is stored in its own
-    // slot of the heap buffer (no bit-packing), so any field width / value is preserved.
+    // Two or more fields: each field must be `Int64`/`Int` or a known enum type (an enum-typed field is
+    // stored as the child's encoded Int64 in its own slot). Each field is stored in its own slot of the
+    // heap buffer (no bit-packing), so any field width / value -- and any nested enum -- round-trips.
     for (t in types) {
         let typeName = t.ToString().trimAscii()
-        if (typeName != "Int64" && typeName != "Int") {
+        if (typeName != "Int64" && typeName != "Int" && !enumTypeNames.contains(typeName)) {
             return None
         }
     }
