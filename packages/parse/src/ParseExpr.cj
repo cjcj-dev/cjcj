@@ -20,6 +20,11 @@ extend ParserImpl {
                 "assignment expression cannot be used as a variable initializer")
             ret.isBroken = true
         }
+        if (!SeeingExprOperator() && !ExprKindEquals(ek, ExprKind.EXPR_IN_TUPLE) &&
+            !ExprKindEquals(ek, ExprKind.EXPR_IN_IF_COND_TUPLE) &&
+            !ExprKindEquals(ek, ExprKind.EXPR_IN_WHILE_COND_TUPLE)) {
+            CheckWildcardInExpr(ret)
+        }
         return ret
     }
 
@@ -225,13 +230,16 @@ extend ParserImpl {
                 continue
             }
             var rhs = ParseUnaryExpr(ek)
-            var nextKind = Peek().kind
+            var nextOp = Peek()
             if (let Some(nextCombined) <- LookupSeenCombinator()) {
-                nextKind = nextCombined.kind
+                nextOp = nextCombined
             }
-            let nextPrec = Precedence(nextKind)
+            let nextPrec = Precedence(nextOp.kind)
             if (prec < nextPrec) {
                 rhs = ParseExprRhs(prec + 1, rhs, ek)
+            } else if (prec == nextPrec && IsNoneAssociative(nextOp.kind) && !rhs.isBroken) {
+                DiagNoneAssociativeOp(op, nextOp)
+                rhs.isBroken = true
             }
             let node = MakeBinaryExpr(lhs, op, rhs)
             lhs = node
@@ -252,6 +260,10 @@ extend ParserImpl {
         expr.begin = left.begin
         expr.end = right.end
         if (IsAssignment(op.kind)) {
+            if (op.kind == TokenKind.ASSIGN) {
+                CheckWildcardInExpr(right)
+            }
+            expr.isBroken = left.isBroken || right.isBroken
             expr.hasQuestSuffix = left.hasQuestSuffix
             if (expr.hasQuestSuffix) {
                 let chain = OptionalChainExpr()
@@ -261,6 +273,8 @@ extend ParserImpl {
                 chain.hasQuestSuffix = true
                 return chain
             }
+        } else {
+            expr.isBroken = left.isBroken || right.isBroken
         }
         return expr
     }
@@ -270,12 +284,56 @@ extend ParserImpl {
         return TokenPrecedence(kind)
     }
 
+    public func SeeingExprOperator(): Bool {
+        let token = Peek()
+        if (newlineSkipped && (token.kind == TokenKind.SUB || token.kind == TokenKind.QUEST)) {
+            return false
+        }
+        if (let Some(_) <- LookupSeenCombinator()) {
+            return true
+        }
+        return Precedence(token.kind) != INVALID_PRECEDENCE
+    }
+
     public func IsAssignment(kind: TokenKind): Bool {
         return kind == TokenKind.ASSIGN || kind == TokenKind.ADD_ASSIGN || kind == TokenKind.SUB_ASSIGN ||
             kind == TokenKind.MUL_ASSIGN || kind == TokenKind.EXP_ASSIGN || kind == TokenKind.DIV_ASSIGN ||
             kind == TokenKind.MOD_ASSIGN || kind == TokenKind.AND_ASSIGN || kind == TokenKind.OR_ASSIGN ||
             kind == TokenKind.BITAND_ASSIGN || kind == TokenKind.BITOR_ASSIGN || kind == TokenKind.BITXOR_ASSIGN ||
             kind == TokenKind.LSHIFT_ASSIGN || kind == TokenKind.RSHIFT_ASSIGN
+    }
+
+    private func IsNoneAssociative(kind: TokenKind): Bool {
+        if (let Some(_) <- NoneAssociativeName(kind)) {
+            return true
+        }
+        return false
+    }
+
+    private func NoneAssociativeName(kind: TokenKind): Option<String> {
+        if (IsAssignment(kind)) {
+            return "assignment"
+        }
+        let prec = Precedence(kind)
+        if (prec == Precedence(TokenKind.RANGEOP)) {
+            return "range"
+        }
+        if (prec == Precedence(TokenKind.EQUAL)) {
+            return "equality"
+        }
+        if (prec == Precedence(TokenKind.LT)) {
+            return "comparison"
+        }
+        return None
+    }
+
+    private func DiagNoneAssociativeOp(preT: Token, tok: Token): Unit {
+        if (let Some(name) <- NoneAssociativeName(tok.kind)) {
+            diag.DiagnoseRefactor(
+                DiagKindRefactor.PARSE_ERROR,
+                tok.Begin(),
+                "chained ${name} operators are not associative after '${preT.Value()}'")
+        }
     }
 
     private func CheckLeftExpression(base: Expr, tok: Token): Unit {
@@ -288,6 +346,32 @@ extend ParserImpl {
                 DiagKindRefactor.PARSE_ERROR,
                 tok.Begin(),
                 "tuple literal cannot be used with operator '${tok.Value()}'")
+        }
+    }
+
+    private func CheckWildcardInExpr(root: Expr): Unit {
+        CheckWildcardInExprNode(root)
+    }
+
+    private func CheckWildcardInExprNode(node: Node): Unit {
+        if (node.astKind == ASTKind.MATCH_CASE_OTHER) {
+            return
+        }
+        if (let Some(assign) <- (node as AssignExpr)) {
+            if (assign.op.kind == TokenKind.ASSIGN) {
+                return
+            }
+        }
+        if (node.astKind == ASTKind.WILDCARD_EXPR) {
+            diag.DiagnoseRefactor(
+                DiagKindRefactor.PARSE_ERROR,
+                node.begin,
+                "expected expression, found wildcard")
+            node.isBroken = true
+            return
+        }
+        for (child in node.Children()) {
+            CheckWildcardInExprNode(child)
         }
     }
 

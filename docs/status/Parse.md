@@ -243,6 +243,12 @@ Parse shim.
   optional/call auxiliary bases, and optional-chain expressions; tuple compound
   assignments are diagnosed, assignment nodes inherit question-suffix state, and
   optional-chain assignments are wrapped in an outer `OptionalChainExpr`.
+- Continued expression diagnostics toward `ParseExpr.cpp`/`ParserDiag.cpp`:
+  standalone expression results and plain-assignment right operands now traverse
+  for illegal wildcard expressions while skipping selectorless match wildcard
+  cases and nested plain assignments, and same-precedence chains in the C++
+  non-associative operator classes (`assignment`, `range`, `equality`, and
+  `comparison`) are diagnosed and marked broken.
 
 ## Remaining Work
 
@@ -262,10 +268,9 @@ Parse shim.
 - Macro expansion parsing still lacks the full C++ parameter-macro and
   expression-scope no-parentheses reparsing behavior, exact macro diagnostic IDs,
   and interpolation string origin-position remapping.
-- Expression parsing still lacks full wildcard-expression traversal
-  diagnostics, exact fake-operator recovery, non-associative operator
-  diagnostics, and the complete C++ macro-expression rule checks around
-  assignment operands.
+- Expression parsing still lacks exact fake-operator recovery, the C++
+  newline-based wildcard recovery consumption, and the complete C++
+  macro-expression rule checks around assignment operands.
 - Type parsing still uses local message diagnostics and simplified recovery in
   several malformed generic/empty-parenthesis cases instead of the exact C++
   diagnostic IDs and parser cleanup paths.
