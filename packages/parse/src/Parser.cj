@@ -25,7 +25,7 @@ public class Parser {
         return decl
     }
     public func ParseExpr(): Expr { return impl.ParseExpr() }
-    public func ParseExprLibast(): Expr { return impl.ParseExpr() }
+    public func ParseExprLibast(): Expr { return impl.ParseExpr(ExprKind.UNKNOWN_EXPR) }
     public func ParseType(): Type { return impl.ParseType() }
     public func ParsePattern(): Pattern { return impl.ParsePattern() }
     public func ParseAnnotationArguments(anno: Annotation): Unit { impl.ParseAnnotationArguments(anno) }

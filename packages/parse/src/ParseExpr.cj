@@ -8,8 +8,19 @@ extend ParserImpl {
     }
 
     public func ParseExpr(ek: ExprKind): Expr {
+        if (ExprKindEquals(ek, ExprKind.UNKNOWN_EXPR) && Seeing(TokenKind.LET)) {
+            return ParseLetPattern(ek)
+        }
         let left = ParseUnaryExpr(ek)
-        return ParseExprRhs(0, left, ek)
+        let ret = ParseExprRhs(0, left, ek)
+        if (ExprKindEquals(ek, ExprKind.VAR_INIT) && ret.astKind == ASTKind.ASSIGN_EXPR) {
+            diag.DiagnoseRefactor(
+                DiagKindRefactor.PARSE_ERROR,
+                ret.begin,
+                "assignment expression cannot be used as a variable initializer")
+            ret.isBroken = true
+        }
+        return ret
     }
 
     public func ParseUnaryExpr(): Expr {
@@ -17,15 +28,42 @@ extend ParserImpl {
     }
 
     public func ParseUnaryExpr(ek: ExprKind): Expr {
+        if (Seeing([TokenKind.SUB, TokenKind.NL], skipNewline: false) ||
+            Seeing([TokenKind.NOT, TokenKind.NL], skipNewline: false)) {
+            diag.DiagnoseRefactor(DiagKindRefactor.EXPECTED_TOKEN, Peek().Begin(), "expected expression without newline after unary operator")
+            return InvalidExpr(Peek().Begin())
+        }
         if (Seeing(TokenKind.NOT) || Seeing(TokenKind.ADD) || Seeing(TokenKind.SUB) || Seeing(TokenKind.BITNOT)) {
             let op = Peek()
             Next()
             let unary = UnaryExpr(op)
-            unary.expr = ParseUnaryExpr(ek)
+            let child = ParseUnaryExpr(RemoveParsingIfCondExpr(ek))
+            if (op.kind == TokenKind.SUB) {
+                if (let Some(lit) <- (child as LitConstExpr)) {
+                    if ((lit.kind == LitConstKind.INTEGER || lit.kind == LitConstKind.FLOAT) &&
+                        !lit.stringValue.isEmpty() && lit.stringValue[0] != b'-') {
+                        lit.stringValue = "-" + lit.stringValue
+                        lit.rawString = lit.stringValue
+                        lit.begin = op.Begin()
+                        return lit
+                    }
+                }
+            }
+            unary.expr = child
             if (let Some(child) <- unary.expr) { unary.end = child.end }
             return unary
         }
         return ParseBaseExpr(ParseAtom(ek), ek)
+    }
+
+    public func RemoveParsingIfCondExpr(ek: ExprKind): ExprKind {
+        if (ExprKindEquals(ek, ExprKind.EXPR_IN_IF_COND_TUPLE) ||
+            ExprKindEquals(ek, ExprKind.EXPR_IN_WHILE_COND_TUPLE) ||
+            ExprKindEquals(ek, ExprKind.IF_COND_EXPR) ||
+            ExprKindEquals(ek, ExprKind.WHILE_COND_EXPR)) {
+            return ExprKind.ALL
+        }
+        return ek
     }
 
     public func ParseBaseExpr(expr: Expr): Expr {
@@ -88,7 +126,7 @@ extend ParserImpl {
                 base = sub
                 continue
             }
-            if (Seeing(TokenKind.INCR) || Seeing(TokenKind.DECR)) {
+            if ((Seeing(TokenKind.INCR) || Seeing(TokenKind.DECR)) && !newlineSkipped) {
                 let op = Peek()
                 Next()
                 let incOrDec = IncOrDecExpr()
@@ -150,6 +188,13 @@ extend ParserImpl {
             }
             let prec = Precedence(op.kind)
             if (prec < minPrec || prec == INVALID_PRECEDENCE) {
+                return lhs
+            }
+            if (ExprKindEquals(ek, ExprKind.LET_PATTERN) && prec < Precedence(TokenKind.RANGEOP)) {
+                return lhs
+            }
+            if (IsConditionExprKind(ek) && lhs.astKind == ASTKind.LET_PATTERN_DESTRUCTOR &&
+                prec < Precedence(TokenKind.RANGEOP) && op.kind != TokenKind.AND && op.kind != TokenKind.OR) {
                 return lhs
             }
             if (combinedOperator) {

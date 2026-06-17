@@ -18,7 +18,9 @@ extend ParserImpl {
             return ParseLeftParenExprInKind(ek)
         }
         if (SeeingLiteral()) { return ParseLitConst() }
-        if (Seeing(TokenKind.LET)) { return ParseLetPattern(ek) }
+        if ((IsConditionExprKind(ek) || ExprKindEquals(ek, ExprKind.UNKNOWN_EXPR)) && Seeing(TokenKind.LET)) {
+            return ParseLetPattern(ek)
+        }
         if (Seeing([TokenKind.UNSAFE, TokenKind.LCURL])) { return ParseUnsafeBlock() }
         if (Seeing(TokenKind.VARRAY)) { return ParseVArrayExpr() }
         if (SeeingPrimitiveTypeAndLParen()) { return ParseTypeConvExpr() }

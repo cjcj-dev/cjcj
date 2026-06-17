@@ -231,6 +231,12 @@ Parse shim.
   breaks downstream exhaustive matches through Parse's public API, so Parse
   keeps its local subset for now and uses explicit comparison helpers internally
   to prepare for a future API-aligned swap.
+- Deepened expression parsing toward `ParseExpr.cpp`: `ParseExprLibast` now
+  enters the `UNKNOWN_EXPR` context, `let pattern <- expr` atoms are restricted
+  to condition/libast contexts, let-pattern initializers stop before operators
+  lower than range precedence, variable initializers reject assignment-shaped
+  root expressions, postfix `++`/`--` no longer crosses newlines, and unary
+  minus folds integer/float literals into a single negative literal node.
 
 ## Remaining Work
 
@@ -250,6 +256,9 @@ Parse shim.
 - Macro expansion parsing still lacks the full C++ parameter-macro and
   expression-scope no-parentheses reparsing behavior, exact macro diagnostic IDs,
   and interpolation string origin-position remapping.
+- Expression parsing still lacks the full C++ left-value validation,
+  wildcard-expression traversal diagnostics, exact fake-operator recovery, and
+  optional-chain wrapping checks for assignment/compound assignment paths.
 - Type parsing still uses local message diagnostics and simplified recovery in
   several malformed generic/empty-parenthesis cases instead of the exact C++
   diagnostic IDs and parser cleanup paths.
