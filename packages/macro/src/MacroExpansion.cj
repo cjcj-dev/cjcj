@@ -4,6 +4,8 @@ import std.collection.*
 import std.sort.*
 import cangjie_compiler::ast.AnnotationKind as RealAnnotationKind
 import cangjie_compiler::parse.Annotation as ParsedAnnotation
+import cangjie_compiler::parse.ArrayExpr as ParsedArrayExpr
+import cangjie_compiler::parse.ArrayLit as ParsedArrayLit
 import cangjie_compiler::parse.BinaryExpr as ParsedBinaryExpr
 import cangjie_compiler::parse.Block as ParsedBlock
 import cangjie_compiler::parse.CallExpr as ParsedCallExpr
@@ -15,32 +17,57 @@ import cangjie_compiler::parse.Expr as ParsedExpr
 import cangjie_compiler::parse.ExprKind as ParsedExprKind
 import cangjie_compiler::parse.EnumDecl as ParsedEnumDecl
 import cangjie_compiler::parse.ExtendDecl as ParsedExtendDecl
+import cangjie_compiler::parse.DoWhileExpr as ParsedDoWhileExpr
+import cangjie_compiler::parse.ForInExpr as ParsedForInExpr
 import cangjie_compiler::parse.FuncArg as ParsedFuncArg
 import cangjie_compiler::parse.FuncBody as ParsedFuncBody
 import cangjie_compiler::parse.FuncDecl as ParsedFuncDecl
 import cangjie_compiler::parse.FuncParam as ParsedFuncParam
 import cangjie_compiler::parse.FuncParamList as ParsedFuncParamList
 import cangjie_compiler::parse.IfExpr as ParsedIfExpr
+import cangjie_compiler::parse.InterpolationExpr as ParsedInterpolationExpr
+import cangjie_compiler::parse.LambdaExpr as ParsedLambdaExpr
+import cangjie_compiler::parse.LetPatternDestructor as ParsedLetPatternDestructor
 import cangjie_compiler::parse.InterfaceDecl as ParsedInterfaceDecl
 import cangjie_compiler::parse.LitConstExpr as ParsedLitConstExpr
 import cangjie_compiler::parse.MacroDecl as ParsedMacroDecl
 import cangjie_compiler::parse.MacroExpandDecl as ParsedMacroExpandDecl
 import cangjie_compiler::parse.MacroExpandExpr as ParsedMacroExpandExpr
 import cangjie_compiler::parse.MacroInvocation as ParsedMacroInvocation
+import cangjie_compiler::parse.MatchCase as ParsedMatchCase
+import cangjie_compiler::parse.MatchCaseOther as ParsedMatchCaseOther
+import cangjie_compiler::parse.MatchExpr as ParsedMatchExpr
 import cangjie_compiler::parse.MemberAccess as ParsedMemberAccess
 import cangjie_compiler::parse.Modifier as ParsedModifier
 import cangjie_compiler::parse.Node as ParsedNode
+import cangjie_compiler::parse.OptionalChainExpr as ParsedOptionalChainExpr
+import cangjie_compiler::parse.OptionalExpr as ParsedOptionalExpr
+import cangjie_compiler::parse.ParenExpr as ParsedParenExpr
 import cangjie_compiler::parse.Parser as GeneratedParser
 import cangjie_compiler::parse.Pattern as ParsedPattern
+import cangjie_compiler::parse.PerformExpr as ParsedPerformExpr
 import cangjie_compiler::parse.PrimitiveType as ParsedPrimitiveType
+import cangjie_compiler::parse.QuoteExpr as ParsedQuoteExpr
 import cangjie_compiler::parse.RefExpr as ParsedRefExpr
 import cangjie_compiler::parse.RefType as ParsedRefType
+import cangjie_compiler::parse.ResumeExpr as ParsedResumeExpr
 import cangjie_compiler::parse.ReturnExpr as ParsedReturnExpr
 import cangjie_compiler::parse.ScopeKind as ParsedScopeKind
+import cangjie_compiler::parse.SpawnExpr as ParsedSpawnExpr
+import cangjie_compiler::parse.StrInterpolationExpr as ParsedStrInterpolationExpr
 import cangjie_compiler::parse.StructDecl as ParsedStructDecl
+import cangjie_compiler::parse.SubscriptExpr as ParsedSubscriptExpr
+import cangjie_compiler::parse.SynchronizedExpr as ParsedSynchronizedExpr
+import cangjie_compiler::parse.ThrowExpr as ParsedThrowExpr
 import cangjie_compiler::parse.TokenPart as ParsedTokenPart
+import cangjie_compiler::parse.TrailingClosureExpr as ParsedTrailingClosureExpr
+import cangjie_compiler::parse.TryExpr as ParsedTryExpr
+import cangjie_compiler::parse.TupleLit as ParsedTupleLit
 import cangjie_compiler::parse.Type as ParsedType
+import cangjie_compiler::parse.TypeConvExpr as ParsedTypeConvExpr
+import cangjie_compiler::parse.UnaryExpr as ParsedUnaryExpr
 import cangjie_compiler::parse.VarDecl as ParsedVarDecl
+import cangjie_compiler::parse.WhileExpr as ParsedWhileExpr
 
 private func hasNoMacros(mc: MacroCollector): Bool {
     return mc.macroDefFuncs.isEmpty() && mc.macCalls.isEmpty()
@@ -458,6 +485,9 @@ private func convertParsedDecl(parsedDecl: ParsedDecl, fallbackFile: Option<File
         if (let Some(parsedInitializer) <- parsedVariableDecl.initializer) {
             targetVariableDecl.initializer = Some(convertParsedExpr(parsedInitializer, fallbackFile))
         }
+        for (constructorType in parsedVariableDecl.constructorTypes) {
+            targetVariableDecl.constructorTypes.add(convertParsedType(constructorType, fallbackFile))
+        }
         return targetVariableDecl
     }
     if (let Some(parsedClassDecl) <- (parsedDecl as ParsedClassDecl)) {
@@ -493,9 +523,20 @@ private func convertParsedDecl(parsedDecl: ParsedDecl, fallbackFile: Option<File
     if (let Some(parsedEnumDecl) <- (parsedDecl as ParsedEnumDecl)) {
         let targetEnumDecl = EnumDecl()
         copyParsedDeclBase(parsedEnumDecl, targetEnumDecl, fallbackFile)
+        targetEnumDecl.hasArguments = false
         for (parsedEnumConstructorDecl in parsedEnumDecl.constructors) {
             let convertedEnumConstructorDecl = convertParsedDecl(parsedEnumConstructorDecl, fallbackFile)
             convertedEnumConstructorDecl.outerDecl = Some(targetEnumDecl)
+            if (let Some(convertedEnumVarDecl) <- (convertedEnumConstructorDecl as VarDecl)) {
+                if (!convertedEnumVarDecl.constructorTypes.isEmpty()) {
+                    targetEnumDecl.hasArguments = true
+                }
+            }
+            if (let Some(convertedEnumFuncDecl) <- (convertedEnumConstructorDecl as FuncDecl)) {
+                if (convertedEnumFuncDecl.TestAttr(Attribute.ENUM_CONSTRUCTOR)) {
+                    targetEnumDecl.hasArguments = true
+                }
+            }
             targetEnumDecl.constructors.add(convertedEnumConstructorDecl)
         }
         for (parsedEnumMemberDecl in parsedEnumDecl.bodyDecls) {
@@ -530,6 +571,40 @@ private func convertParsedFuncArg(parsedArg: ParsedFuncArg, fallbackFile: Option
     return targetArg
 }
 
+private func convertParsedMatchCase(parsedCase: ParsedMatchCase, fallbackFile: Option<File>): MatchCase {
+    let targetCase = MatchCase()
+    copyParsedNodeBase(parsedCase, targetCase, fallbackFile)
+    for (parsedPatternNode in parsedCase.patterns) {
+        targetCase.patterns.add(convertParsedPattern(parsedPatternNode, fallbackFile))
+    }
+    if (let Some(parsedGuardExpr) <- parsedCase.patternGuard) {
+        targetCase.patternGuard = Some(convertParsedExpr(parsedGuardExpr, fallbackFile))
+    }
+    if (let Some(parsedCaseBody) <- parsedCase.exprOrDecls) {
+        if (let Some(convertedCaseBody) <- (convertParsedExpr(parsedCaseBody, fallbackFile) as Block)) {
+            targetCase.exprOrDecls = Some(convertedCaseBody)
+        }
+    }
+    return targetCase
+}
+
+private func convertParsedMatchCaseOther(
+    parsedCaseOther: ParsedMatchCaseOther,
+    fallbackFile: Option<File>
+): MatchCaseOther {
+    let targetCaseOther = MatchCaseOther()
+    copyParsedNodeBase(parsedCaseOther, targetCaseOther, fallbackFile)
+    if (let Some(parsedOtherExpr) <- parsedCaseOther.matchExpr) {
+        targetCaseOther.matchExpr = Some(convertParsedExpr(parsedOtherExpr, fallbackFile))
+    }
+    if (let Some(parsedOtherBody) <- parsedCaseOther.exprOrDecls) {
+        if (let Some(convertedOtherBody) <- (convertParsedExpr(parsedOtherBody, fallbackFile) as Block)) {
+            targetCaseOther.exprOrDecls = Some(convertedOtherBody)
+        }
+    }
+    return targetCaseOther
+}
+
 private func convertParsedExpr(parsedExpr: ParsedExpr, fallbackFile: Option<File>): Expr {
     if (let Some(parsedMacroExpr) <- (parsedExpr as ParsedMacroExpandExpr)) {
         let targetMacroExpr = MacroExpandExpr()
@@ -551,6 +626,33 @@ private func convertParsedExpr(parsedExpr: ParsedExpr, fallbackFile: Option<File
         let targetTokenPart = TokenPart(parsedTokenPartExpr.tokens)
         copyParsedNodeBase(parsedTokenPartExpr, targetTokenPart, fallbackFile)
         return targetTokenPart
+    }
+    if (let Some(parsedTupleExpr) <- (parsedExpr as ParsedTupleLit)) {
+        let targetTupleExpr = TupleLit()
+        copyParsedNodeBase(parsedTupleExpr, targetTupleExpr, fallbackFile)
+        for (parsedChildExpr in parsedTupleExpr.children) {
+            targetTupleExpr.children.add(convertParsedExpr(parsedChildExpr, fallbackFile))
+        }
+        return targetTupleExpr
+    }
+    if (let Some(parsedArrayLitExpr) <- (parsedExpr as ParsedArrayLit)) {
+        let targetArrayLitExpr = ArrayLit()
+        copyParsedNodeBase(parsedArrayLitExpr, targetArrayLitExpr, fallbackFile)
+        for (parsedArrayChildExpr in parsedArrayLitExpr.children) {
+            targetArrayLitExpr.children.add(convertParsedExpr(parsedArrayChildExpr, fallbackFile))
+        }
+        return targetArrayLitExpr
+    }
+    if (let Some(parsedQuoteExpr) <- (parsedExpr as ParsedQuoteExpr)) {
+        let targetQuoteExpr = QuoteExpr()
+        copyParsedNodeBase(parsedQuoteExpr, targetQuoteExpr, fallbackFile)
+        for (parsedQuoteToken in parsedQuoteExpr.tokens) {
+            targetQuoteExpr.tokens.add(parsedQuoteToken)
+        }
+        for (parsedQuotedExpr in parsedQuoteExpr.exprs) {
+            targetQuoteExpr.exprs.add(convertParsedExpr(parsedQuotedExpr, fallbackFile))
+        }
+        return targetQuoteExpr
     }
     if (let Some(parsedRefExpr) <- (parsedExpr as ParsedRefExpr)) {
         let targetRefExpr = RefExpr(parsedRefExpr.identifier.GetRawText())
@@ -584,6 +686,83 @@ private func convertParsedExpr(parsedExpr: ParsedExpr, fallbackFile: Option<File
         }
         return targetCallExpr
     }
+    if (let Some(parsedArrayExpr) <- (parsedExpr as ParsedArrayExpr)) {
+        let targetArrayExpr = ArrayExpr()
+        copyParsedNodeBase(parsedArrayExpr, targetArrayExpr, fallbackFile)
+        if (let Some(parsedArrayTypeNode) <- parsedArrayExpr.typeNode) {
+            targetArrayExpr.typeNode = Some(convertParsedType(parsedArrayTypeNode, fallbackFile))
+        }
+        for (parsedArrayArg in parsedArrayExpr.args) {
+            targetArrayExpr.args.add(convertParsedFuncArg(parsedArrayArg, fallbackFile))
+        }
+        return targetArrayExpr
+    }
+    if (let Some(parsedSubscriptExpr) <- (parsedExpr as ParsedSubscriptExpr)) {
+        let targetSubscriptExpr = SubscriptExpr()
+        copyParsedNodeBase(parsedSubscriptExpr, targetSubscriptExpr, fallbackFile)
+        if (let Some(parsedSubscriptBase) <- parsedSubscriptExpr.baseExpr) {
+            targetSubscriptExpr.baseExpr = Some(convertParsedExpr(parsedSubscriptBase, fallbackFile))
+        }
+        for (parsedIndexExpr in parsedSubscriptExpr.indexExprs) {
+            targetSubscriptExpr.indexExprs.add(convertParsedExpr(parsedIndexExpr, fallbackFile))
+        }
+        return targetSubscriptExpr
+    }
+    if (let Some(parsedOptionalExpr) <- (parsedExpr as ParsedOptionalExpr)) {
+        let targetOptionalExpr = OptionalExpr()
+        copyParsedNodeBase(parsedOptionalExpr, targetOptionalExpr, fallbackFile)
+        if (let Some(parsedOptionalBaseExpr) <- parsedOptionalExpr.baseExpr) {
+            targetOptionalExpr.baseExpr = Some(convertParsedExpr(parsedOptionalBaseExpr, fallbackFile))
+        }
+        return targetOptionalExpr
+    }
+    if (let Some(parsedOptionalChainExpr) <- (parsedExpr as ParsedOptionalChainExpr)) {
+        let targetOptionalChainExpr = OptionalChainExpr()
+        copyParsedNodeBase(parsedOptionalChainExpr, targetOptionalChainExpr, fallbackFile)
+        if (let Some(parsedOptionalChainInner) <- parsedOptionalChainExpr.expr) {
+            targetOptionalChainExpr.expr = Some(convertParsedExpr(parsedOptionalChainInner, fallbackFile))
+        }
+        return targetOptionalChainExpr
+    }
+    if (let Some(parsedParenExpr) <- (parsedExpr as ParsedParenExpr)) {
+        let targetParenExpr = ParenExpr()
+        copyParsedNodeBase(parsedParenExpr, targetParenExpr, fallbackFile)
+        if (let Some(parsedInnerExpr) <- parsedParenExpr.expr) {
+            targetParenExpr.expr = Some(convertParsedExpr(parsedInnerExpr, fallbackFile))
+        }
+        return targetParenExpr
+    }
+    if (let Some(parsedUnaryExpr) <- (parsedExpr as ParsedUnaryExpr)) {
+        let targetUnaryExpr = UnaryExpr(parsedUnaryExpr.astKind)
+        copyParsedNodeBase(parsedUnaryExpr, targetUnaryExpr, fallbackFile)
+        targetUnaryExpr.op = parsedUnaryExpr.op.kind
+        if (let Some(parsedUnaryInnerExpr) <- parsedUnaryExpr.expr) {
+            targetUnaryExpr.expr = Some(convertParsedExpr(parsedUnaryInnerExpr, fallbackFile))
+        }
+        return targetUnaryExpr
+    }
+    if (let Some(parsedTypeConvExpr) <- (parsedExpr as ParsedTypeConvExpr)) {
+        let targetTypeConvExpr = TypeConvExpr()
+        copyParsedNodeBase(parsedTypeConvExpr, targetTypeConvExpr, fallbackFile)
+        if (let Some(parsedConvTypeNode) <- parsedTypeConvExpr.typeNode) {
+            targetTypeConvExpr.typeNode = Some(convertParsedType(parsedConvTypeNode, fallbackFile))
+        }
+        if (let Some(parsedConvExpr) <- parsedTypeConvExpr.expr) {
+            targetTypeConvExpr.expr = Some(convertParsedExpr(parsedConvExpr, fallbackFile))
+        }
+        return targetTypeConvExpr
+    }
+    if (let Some(parsedLetPatternExpr) <- (parsedExpr as ParsedLetPatternDestructor)) {
+        let targetLetPatternExpr = LetPatternDestructor()
+        copyParsedNodeBase(parsedLetPatternExpr, targetLetPatternExpr, fallbackFile)
+        for (parsedLetPattern in parsedLetPatternExpr.patterns) {
+            targetLetPatternExpr.patterns.add(convertParsedPattern(parsedLetPattern, fallbackFile))
+        }
+        if (let Some(parsedLetInitializer) <- parsedLetPatternExpr.initializer) {
+            targetLetPatternExpr.initializer = Some(convertParsedExpr(parsedLetInitializer, fallbackFile))
+        }
+        return targetLetPatternExpr
+    }
     if (let Some(parsedReturnExpr) <- (parsedExpr as ParsedReturnExpr)) {
         let targetReturnExpr = ReturnExpr()
         copyParsedNodeBase(parsedReturnExpr, targetReturnExpr, fallbackFile)
@@ -606,8 +785,185 @@ private func convertParsedExpr(parsedExpr: ParsedExpr, fallbackFile: Option<File
         }
         return targetIfExpr
     }
+    if (let Some(parsedMatchExpr) <- (parsedExpr as ParsedMatchExpr)) {
+        let targetMatchExpr = MatchExpr()
+        copyParsedNodeBase(parsedMatchExpr, targetMatchExpr, fallbackFile)
+        if (let Some(parsedSelectorExpr) <- parsedMatchExpr.selector) {
+            targetMatchExpr.selector = Some(convertParsedExpr(parsedSelectorExpr, fallbackFile))
+        }
+        for (parsedCaseNode in parsedMatchExpr.matchCases) {
+            targetMatchExpr.matchCases.add(convertParsedMatchCase(parsedCaseNode, fallbackFile))
+        }
+        for (parsedOtherNode in parsedMatchExpr.matchCaseOthers) {
+            targetMatchExpr.matchCaseOthers.add(convertParsedMatchCaseOther(parsedOtherNode, fallbackFile))
+        }
+        return targetMatchExpr
+    }
+    if (let Some(parsedTryExpr) <- (parsedExpr as ParsedTryExpr)) {
+        let targetTryExpr = TryExpr()
+        copyParsedNodeBase(parsedTryExpr, targetTryExpr, fallbackFile)
+        for (parsedResourceDecl in parsedTryExpr.resourceSpec) {
+            if (let Some(convertedResourceDecl) <- (convertParsedDecl(parsedResourceDecl, fallbackFile) as VarDecl)) {
+                targetTryExpr.resourceSpec.add(convertedResourceDecl)
+            }
+        }
+        if (let Some(parsedTryBlock) <- parsedTryExpr.tryBlock) {
+            if (let Some(convertedTryBlock) <- (convertParsedExpr(parsedTryBlock, fallbackFile) as Block)) {
+                targetTryExpr.tryBlock = Some(convertedTryBlock)
+            }
+        }
+        for (parsedCatchBlock in parsedTryExpr.catchBlocks) {
+            if (let Some(convertedCatchBlock) <- (convertParsedExpr(parsedCatchBlock, fallbackFile) as Block)) {
+                targetTryExpr.catchBlocks.add(convertedCatchBlock)
+            }
+        }
+        if (let Some(parsedFinallyBlock) <- parsedTryExpr.finallyBlock) {
+            if (let Some(convertedFinallyBlock) <- (convertParsedExpr(parsedFinallyBlock, fallbackFile) as Block)) {
+                targetTryExpr.finallyBlock = Some(convertedFinallyBlock)
+            }
+        }
+        return targetTryExpr
+    }
+    if (let Some(parsedWhileExpr) <- (parsedExpr as ParsedWhileExpr)) {
+        let targetWhileExpr = WhileExpr()
+        copyParsedNodeBase(parsedWhileExpr, targetWhileExpr, fallbackFile)
+        if (let Some(parsedWhileCond) <- parsedWhileExpr.condExpr) {
+            targetWhileExpr.condExpr = Some(convertParsedExpr(parsedWhileCond, fallbackFile))
+        }
+        if (let Some(parsedWhileBody) <- parsedWhileExpr.body) {
+            if (let Some(convertedWhileBody) <- (convertParsedExpr(parsedWhileBody, fallbackFile) as Block)) {
+                targetWhileExpr.body = Some(convertedWhileBody)
+            }
+        }
+        return targetWhileExpr
+    }
+    if (let Some(parsedDoWhileExpr) <- (parsedExpr as ParsedDoWhileExpr)) {
+        let targetDoWhileExpr = DoWhileExpr()
+        copyParsedNodeBase(parsedDoWhileExpr, targetDoWhileExpr, fallbackFile)
+        if (let Some(parsedDoBody) <- parsedDoWhileExpr.body) {
+            if (let Some(convertedDoBody) <- (convertParsedExpr(parsedDoBody, fallbackFile) as Block)) {
+                targetDoWhileExpr.body = Some(convertedDoBody)
+            }
+        }
+        if (let Some(parsedDoCond) <- parsedDoWhileExpr.condExpr) {
+            targetDoWhileExpr.condExpr = Some(convertParsedExpr(parsedDoCond, fallbackFile))
+        }
+        return targetDoWhileExpr
+    }
+    if (let Some(parsedForInExpr) <- (parsedExpr as ParsedForInExpr)) {
+        let targetForInExpr = ForInExpr()
+        copyParsedNodeBase(parsedForInExpr, targetForInExpr, fallbackFile)
+        if (let Some(parsedForPattern) <- parsedForInExpr.pattern) {
+            targetForInExpr.pattern = Some(convertParsedPattern(parsedForPattern, fallbackFile))
+        }
+        if (let Some(parsedForInSource) <- parsedForInExpr.inExpr) {
+            targetForInExpr.inExpr = Some(convertParsedExpr(parsedForInSource, fallbackFile))
+        }
+        if (let Some(parsedForGuard) <- parsedForInExpr.patternGuard) {
+            targetForInExpr.patternGuard = Some(convertParsedExpr(parsedForGuard, fallbackFile))
+        }
+        if (let Some(parsedForBody) <- parsedForInExpr.body) {
+            if (let Some(convertedForBody) <- (convertParsedExpr(parsedForBody, fallbackFile) as Block)) {
+                targetForInExpr.body = Some(convertedForBody)
+            }
+        }
+        return targetForInExpr
+    }
+    if (let Some(parsedLambdaExpr) <- (parsedExpr as ParsedLambdaExpr)) {
+        let targetLambdaExpr = LambdaExpr()
+        copyParsedNodeBase(parsedLambdaExpr, targetLambdaExpr, fallbackFile)
+        for (parsedLambdaAnno in parsedLambdaExpr.annotations) {
+            targetLambdaExpr.annotations.add(convertParsedAnnotation(parsedLambdaAnno, fallbackFile))
+        }
+        if (let Some(parsedLambdaBody) <- parsedLambdaExpr.funcBody) {
+            targetLambdaExpr.funcBody = Some(convertParsedFuncBody(parsedLambdaBody, fallbackFile))
+        }
+        return targetLambdaExpr
+    }
+    if (let Some(parsedThrowExpr) <- (parsedExpr as ParsedThrowExpr)) {
+        let targetThrowExpr = ThrowExpr(parsedThrowExpr.astKind)
+        copyParsedNodeBase(parsedThrowExpr, targetThrowExpr, fallbackFile)
+        if (let Some(parsedThrownExpr) <- parsedThrowExpr.expr) {
+            targetThrowExpr.expr = Some(convertParsedExpr(parsedThrownExpr, fallbackFile))
+        }
+        return targetThrowExpr
+    }
+    if (let Some(parsedPerformExpr) <- (parsedExpr as ParsedPerformExpr)) {
+        let targetPerformExpr = PerformExpr()
+        copyParsedNodeBase(parsedPerformExpr, targetPerformExpr, fallbackFile)
+        if (let Some(parsedPerformedExpr) <- parsedPerformExpr.expr) {
+            targetPerformExpr.expr = Some(convertParsedExpr(parsedPerformedExpr, fallbackFile))
+        }
+        return targetPerformExpr
+    }
+    if (let Some(parsedResumeExpr) <- (parsedExpr as ParsedResumeExpr)) {
+        let targetResumeExpr = ResumeExpr()
+        copyParsedNodeBase(parsedResumeExpr, targetResumeExpr, fallbackFile)
+        if (let Some(parsedResumeWithExpr) <- parsedResumeExpr.withExpr) {
+            targetResumeExpr.withExpr = Some(convertParsedExpr(parsedResumeWithExpr, fallbackFile))
+        }
+        if (let Some(parsedResumeThrowExpr) <- parsedResumeExpr.throwingExpr) {
+            targetResumeExpr.throwingExpr = Some(convertParsedExpr(parsedResumeThrowExpr, fallbackFile))
+        }
+        return targetResumeExpr
+    }
+    if (let Some(parsedSpawnExpr) <- (parsedExpr as ParsedSpawnExpr)) {
+        let targetSpawnExpr = SpawnExpr()
+        copyParsedNodeBase(parsedSpawnExpr, targetSpawnExpr, fallbackFile)
+        if (let Some(parsedSpawnArgExpr) <- parsedSpawnExpr.arg) {
+            targetSpawnExpr.arg = Some(convertParsedExpr(parsedSpawnArgExpr, fallbackFile))
+        }
+        if (let Some(parsedSpawnTaskExpr) <- parsedSpawnExpr.task) {
+            targetSpawnExpr.task = Some(convertParsedExpr(parsedSpawnTaskExpr, fallbackFile))
+        }
+        return targetSpawnExpr
+    }
+    if (let Some(parsedSynchronizedExpr) <- (parsedExpr as ParsedSynchronizedExpr)) {
+        let targetSynchronizedExpr = SynchronizedExpr()
+        copyParsedNodeBase(parsedSynchronizedExpr, targetSynchronizedExpr, fallbackFile)
+        if (let Some(parsedMutexExpr) <- parsedSynchronizedExpr.mutex) {
+            targetSynchronizedExpr.mutex = Some(convertParsedExpr(parsedMutexExpr, fallbackFile))
+        }
+        if (let Some(parsedSyncBody) <- parsedSynchronizedExpr.body) {
+            if (let Some(convertedSyncBody) <- (convertParsedExpr(parsedSyncBody, fallbackFile) as Block)) {
+                targetSynchronizedExpr.body = Some(convertedSyncBody)
+            }
+        }
+        return targetSynchronizedExpr
+    }
+    if (let Some(parsedTrailingClosureExpr) <- (parsedExpr as ParsedTrailingClosureExpr)) {
+        let targetTrailingClosureExpr = TrailingClosureExpr()
+        copyParsedNodeBase(parsedTrailingClosureExpr, targetTrailingClosureExpr, fallbackFile)
+        if (let Some(parsedTrailingBaseExpr) <- parsedTrailingClosureExpr.expr) {
+            targetTrailingClosureExpr.expr = Some(convertParsedExpr(parsedTrailingBaseExpr, fallbackFile))
+        }
+        if (let Some(parsedTrailingLambda) <- parsedTrailingClosureExpr.lambda) {
+            if (let Some(convertedTrailingLambda) <- (convertParsedExpr(parsedTrailingLambda, fallbackFile) as LambdaExpr)) {
+                targetTrailingClosureExpr.lambda = Some(convertedTrailingLambda)
+            }
+        }
+        return targetTrailingClosureExpr
+    }
+    if (let Some(parsedInterpolationExpr) <- (parsedExpr as ParsedInterpolationExpr)) {
+        let targetInterpolationExpr = InterpolationExpr()
+        copyParsedNodeBase(parsedInterpolationExpr, targetInterpolationExpr, fallbackFile)
+        if (let Some(parsedInterpolationBlock) <- parsedInterpolationExpr.block) {
+            if (let Some(convertedInterpolationBlock) <- (convertParsedExpr(parsedInterpolationBlock, fallbackFile) as Block)) {
+                targetInterpolationExpr.block = Some(convertedInterpolationBlock)
+            }
+        }
+        return targetInterpolationExpr
+    }
+    if (let Some(parsedStringInterpolationExpr) <- (parsedExpr as ParsedStrInterpolationExpr)) {
+        let targetStringInterpolationExpr = StrInterpolationExpr()
+        copyParsedNodeBase(parsedStringInterpolationExpr, targetStringInterpolationExpr, fallbackFile)
+        for (parsedPartExpr in parsedStringInterpolationExpr.strPartExprs) {
+            targetStringInterpolationExpr.strPartExprs.add(convertParsedExpr(parsedPartExpr, fallbackFile))
+        }
+        return targetStringInterpolationExpr
+    }
     if (let Some(parsedBinaryExpr) <- (parsedExpr as ParsedBinaryExpr)) {
-        let targetBinaryExpr = BinaryExpr()
+        let targetBinaryExpr = BinaryExpr(parsedBinaryExpr.astKind)
         copyParsedNodeBase(parsedBinaryExpr, targetBinaryExpr, fallbackFile)
         targetBinaryExpr.op = parsedBinaryExpr.op.kind
         if (let Some(parsedLeftExpr) <- parsedBinaryExpr.leftExpr) {
@@ -766,6 +1122,47 @@ private func replaceNodeVector(container: ArrayList<Node>, loc: Int64, newNodes:
     }
 }
 
+private func replaceExprVectorWith(container: ArrayList<Expr>, loc: Int64, expr: Expr): Unit {
+    let rebuilt = ArrayList<Expr>()
+    var idx: Int64 = 0
+    while (idx < container.size) {
+        if (idx == loc) {
+            rebuilt.add(expr)
+        } else {
+            rebuilt.add(container[idx])
+        }
+        idx++
+    }
+    container.clear()
+    for (item in rebuilt) {
+        container.add(item)
+    }
+}
+
+private func replaceExprVector(
+    container: ArrayList<Expr>,
+    loc: Int64,
+    newNodes: ArrayList<Node>,
+    macroNode: MacroCall,
+    diag: DiagnosticEngine
+): Unit {
+    if (loc < 0 || loc >= container.size) {
+        return
+    }
+    if (newNodes.isEmpty()) {
+        emitMacroDiag(diag, macroNode.GetBeginPos(), DiagKind.macro_unexpect_no_expr)
+        return
+    }
+    if (newNodes.size == 1) {
+        if (let Some(replacementExpr) <- (newNodes[0] as Expr)) {
+            preserveOriginalMacroNode(macroNode, container[loc].curFile)
+            replaceExprVectorWith(container, loc, replacementExpr)
+            return
+        }
+    }
+    emitMacroDiag(diag, newNodes[newNodes.size - 1].begin, DiagKind.macro_expect_one_expr)
+}
+
 private func checkReplacedEnumCaseMember(macroNode: MacroCall, newDecls: ArrayList<Decl>, diag: DiagnosticEngine): Unit {
     let invocation = macroNode.RequireInvocation()
     if (let Some(parent) <- invocation.parent) {
@@ -778,6 +1175,16 @@ private func checkReplacedEnumCaseMember(macroNode: MacroCall, newDecls: ArrayLi
             }
             if (newDecls.size > 1) {
                 emitMacroDiag(diag, newDecls[1].begin, DiagKind.macro_expect_one_enum_constructor)
+            }
+            if (let Some(enumDecl) <- (parent as EnumDecl)) {
+                if (ASTKindEquals(newDecls[0].astKind, ASTKind.FUNC_DECL)) {
+                    enumDecl.hasArguments = true
+                }
+                if (let Some(newVarDecl) <- (newDecls[0] as VarDecl)) {
+                    if (!newVarDecl.constructorTypes.isEmpty()) {
+                        enumDecl.hasArguments = true
+                    }
+                }
             }
         } else {
             for (decl in newDecls) {
@@ -1104,6 +1511,10 @@ public class MacroExpansion {
             if (let Some(nodes) <- target.nodes) {
                 preserveOriginalMacroNode(macroNode, macroNode.RequireNode().curFile)
                 replaceNodeVector(nodes, target.loc, newNodes)
+            }
+        } else if (target.kind == ReplaceTargetKind.EXPR_VECTOR) {
+            if (let Some(exprs) <- target.exprs) {
+                replaceExprVector(exprs, target.loc, newNodes, macroNode, ci.diag)
             }
         } else if (target.kind == ReplaceTargetKind.DECL_VECTOR) {
             if (let Some(decls) <- target.decls) {

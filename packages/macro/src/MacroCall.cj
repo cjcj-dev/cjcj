@@ -182,6 +182,25 @@ public enum ExprFieldKind {
     | BINARY_LEFT_EXPR
     | BINARY_RIGHT_EXPR
     | VAR_DECL_INITIALIZER
+    | PAREN_EXPR_VALUE
+    | UNARY_EXPR_VALUE
+    | TYPE_CONV_EXPR_VALUE
+    | SUBSCRIPT_BASE_EXPR
+    | OPTIONAL_BASE_EXPR
+    | OPTIONAL_CHAIN_EXPR_VALUE
+    | LET_PATTERN_INITIALIZER
+    | ASSIGN_RIGHT_EXPR
+    | MATCH_SELECTOR
+    | MATCH_CASE_GUARD
+    | MATCH_CASE_OTHER_EXPR
+    | WHILE_COND_EXPR
+    | DO_WHILE_COND_EXPR
+    | FOR_IN_EXPR_VALUE
+    | FOR_IN_PATTERN_GUARD
+    | THROW_EXPR_VALUE
+    | PERFORM_EXPR_VALUE
+    | SPAWN_TASK
+    | TRAILING_CLOSURE_EXPR
 }
 
 private func ExprFieldKindIndex(kind: ExprFieldKind): Int64 {
@@ -196,6 +215,25 @@ private func ExprFieldKindIndex(kind: ExprFieldKind): Int64 {
         case ExprFieldKind.BINARY_LEFT_EXPR => 7
         case ExprFieldKind.BINARY_RIGHT_EXPR => 8
         case ExprFieldKind.VAR_DECL_INITIALIZER => 9
+        case ExprFieldKind.PAREN_EXPR_VALUE => 10
+        case ExprFieldKind.UNARY_EXPR_VALUE => 11
+        case ExprFieldKind.TYPE_CONV_EXPR_VALUE => 12
+        case ExprFieldKind.SUBSCRIPT_BASE_EXPR => 13
+        case ExprFieldKind.OPTIONAL_BASE_EXPR => 14
+        case ExprFieldKind.OPTIONAL_CHAIN_EXPR_VALUE => 15
+        case ExprFieldKind.LET_PATTERN_INITIALIZER => 16
+        case ExprFieldKind.ASSIGN_RIGHT_EXPR => 17
+        case ExprFieldKind.MATCH_SELECTOR => 18
+        case ExprFieldKind.MATCH_CASE_GUARD => 19
+        case ExprFieldKind.MATCH_CASE_OTHER_EXPR => 20
+        case ExprFieldKind.WHILE_COND_EXPR => 21
+        case ExprFieldKind.DO_WHILE_COND_EXPR => 22
+        case ExprFieldKind.FOR_IN_EXPR_VALUE => 23
+        case ExprFieldKind.FOR_IN_PATTERN_GUARD => 24
+        case ExprFieldKind.THROW_EXPR_VALUE => 25
+        case ExprFieldKind.PERFORM_EXPR_VALUE => 26
+        case ExprFieldKind.SPAWN_TASK => 27
+        case ExprFieldKind.TRAILING_CLOSURE_EXPR => 28
     }
 }
 

@@ -172,7 +172,8 @@ public class NodeWriter {
 
     private func SerializeEnumDecl(enumDecl: EnumDecl): String {
         let builder = StringBuilder()
-        builder.append("enum(" + EscapeNodeText(enumDecl.identifier) + ";constructors=[")
+        builder.append("enum(" + EscapeNodeText(enumDecl.identifier) + ";hasArguments=" +
+            enumDecl.hasArguments.toString() + ";constructors=[")
         var ctorIdx: Int64 = 0
         while (ctorIdx < enumDecl.constructors.size) {
             if (ctorIdx > 0) {
@@ -216,6 +217,18 @@ public class NodeWriter {
             builder.append(";type=" + SerializeType(declType))
         } else {
             builder.append(";type=none")
+        }
+        if (!varDecl.constructorTypes.isEmpty()) {
+            builder.append(";constructorTypes=[")
+            var typeIdx: Int64 = 0
+            while (typeIdx < varDecl.constructorTypes.size) {
+                if (typeIdx > 0) {
+                    builder.append(",")
+                }
+                builder.append(SerializeType(varDecl.constructorTypes[typeIdx]))
+                typeIdx++
+            }
+            builder.append("]")
         }
         if (let Some(initializer) <- varDecl.initializer) {
             builder.append(";init=" + SerializeExprForNodeWriter(this, initializer))

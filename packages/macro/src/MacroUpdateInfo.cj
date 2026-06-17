@@ -26,6 +26,23 @@ private func updateExprField(exprValue: Option<Expr>, parent: Node, field: ExprF
     }
 }
 
+private func updateExprContainer(container: ArrayList<Expr>, parent: Node, collector: MacroCollector): Unit {
+    var idx: Int64 = 0
+    while (idx < container.size) {
+        if (container[idx].IsMacroCallNode()) {
+            let macroNode = container[idx]
+            let call = MacroCall(macroNode)
+            call.replaceLoc.kind = ReplaceTargetKind.EXPR_VECTOR
+            call.replaceLoc.loc = idx
+            call.replaceLoc.exprs = Some(container)
+            call.isOuterMost = true
+            collector.macCalls.add(call)
+            markInvocationParent(macroNode, parent)
+        }
+        idx++
+    }
+}
+
 private func updateDeclContainer(container: ArrayList<Decl>, parent: Node, collector: MacroCollector): Unit {
     var idx: Int64 = 0
     while (idx < container.size) {
@@ -124,6 +141,101 @@ public func AssignExprReplacement(target: ReplaceTarget, expr: Expr): Bool {
                 parentVarDecl.initializer = Some(expr)
                 return true
             }
+        } else if (target.exprField == ExprFieldKind.PAREN_EXPR_VALUE) {
+            if (let Some(parentParenExpr) <- (parentNode as ParenExpr)) {
+                parentParenExpr.expr = Some(expr)
+                return true
+            }
+        } else if (target.exprField == ExprFieldKind.UNARY_EXPR_VALUE) {
+            if (let Some(parentUnaryExpr) <- (parentNode as UnaryExpr)) {
+                parentUnaryExpr.expr = Some(expr)
+                return true
+            }
+        } else if (target.exprField == ExprFieldKind.TYPE_CONV_EXPR_VALUE) {
+            if (let Some(parentTypeConvExpr) <- (parentNode as TypeConvExpr)) {
+                parentTypeConvExpr.expr = Some(expr)
+                return true
+            }
+        } else if (target.exprField == ExprFieldKind.SUBSCRIPT_BASE_EXPR) {
+            if (let Some(parentSubscriptExpr) <- (parentNode as SubscriptExpr)) {
+                parentSubscriptExpr.baseExpr = Some(expr)
+                return true
+            }
+        } else if (target.exprField == ExprFieldKind.OPTIONAL_BASE_EXPR) {
+            if (let Some(parentOptionalExpr) <- (parentNode as OptionalExpr)) {
+                parentOptionalExpr.baseExpr = Some(expr)
+                return true
+            }
+        } else if (target.exprField == ExprFieldKind.OPTIONAL_CHAIN_EXPR_VALUE) {
+            if (let Some(parentOptionalChainExpr) <- (parentNode as OptionalChainExpr)) {
+                parentOptionalChainExpr.expr = Some(expr)
+                return true
+            }
+        } else if (target.exprField == ExprFieldKind.LET_PATTERN_INITIALIZER) {
+            if (let Some(parentLetPatternExpr) <- (parentNode as LetPatternDestructor)) {
+                parentLetPatternExpr.initializer = Some(expr)
+                return true
+            }
+        } else if (target.exprField == ExprFieldKind.ASSIGN_RIGHT_EXPR) {
+            if (let Some(parentAssignExpr) <- (parentNode as BinaryExpr)) {
+                parentAssignExpr.rightExpr = Some(expr)
+                return true
+            }
+        } else if (target.exprField == ExprFieldKind.MATCH_SELECTOR) {
+            if (let Some(parentMatchExpr) <- (parentNode as MatchExpr)) {
+                parentMatchExpr.selector = Some(expr)
+                return true
+            }
+        } else if (target.exprField == ExprFieldKind.MATCH_CASE_GUARD) {
+            if (let Some(parentMatchCase) <- (parentNode as MatchCase)) {
+                parentMatchCase.patternGuard = Some(expr)
+                return true
+            }
+        } else if (target.exprField == ExprFieldKind.MATCH_CASE_OTHER_EXPR) {
+            if (let Some(parentCaseOther) <- (parentNode as MatchCaseOther)) {
+                parentCaseOther.matchExpr = Some(expr)
+                return true
+            }
+        } else if (target.exprField == ExprFieldKind.WHILE_COND_EXPR) {
+            if (let Some(parentWhileExpr) <- (parentNode as WhileExpr)) {
+                parentWhileExpr.condExpr = Some(expr)
+                return true
+            }
+        } else if (target.exprField == ExprFieldKind.DO_WHILE_COND_EXPR) {
+            if (let Some(parentDoWhileExpr) <- (parentNode as DoWhileExpr)) {
+                parentDoWhileExpr.condExpr = Some(expr)
+                return true
+            }
+        } else if (target.exprField == ExprFieldKind.FOR_IN_EXPR_VALUE) {
+            if (let Some(parentForInExpr) <- (parentNode as ForInExpr)) {
+                parentForInExpr.inExpr = Some(expr)
+                return true
+            }
+        } else if (target.exprField == ExprFieldKind.FOR_IN_PATTERN_GUARD) {
+            if (let Some(parentForGuardExpr) <- (parentNode as ForInExpr)) {
+                parentForGuardExpr.patternGuard = Some(expr)
+                return true
+            }
+        } else if (target.exprField == ExprFieldKind.THROW_EXPR_VALUE) {
+            if (let Some(parentThrowExpr) <- (parentNode as ThrowExpr)) {
+                parentThrowExpr.expr = Some(expr)
+                return true
+            }
+        } else if (target.exprField == ExprFieldKind.PERFORM_EXPR_VALUE) {
+            if (let Some(parentPerformExpr) <- (parentNode as PerformExpr)) {
+                parentPerformExpr.expr = Some(expr)
+                return true
+            }
+        } else if (target.exprField == ExprFieldKind.SPAWN_TASK) {
+            if (let Some(parentSpawnExpr) <- (parentNode as SpawnExpr)) {
+                parentSpawnExpr.task = Some(expr)
+                return true
+            }
+        } else if (target.exprField == ExprFieldKind.TRAILING_CLOSURE_EXPR) {
+            if (let Some(parentTrailingClosureExpr) <- (parentNode as TrailingClosureExpr)) {
+                parentTrailingClosureExpr.expr = Some(expr)
+                return true
+            }
         }
     }
     if (let Some(box) <- target.exprBox) {
@@ -152,9 +264,53 @@ public func UpdateMacroInfo(node: Node, collector: MacroCollector): Unit {
         updateExprField(ret.expr, ret, ExprFieldKind.RETURN_EXPR_VALUE, collector)
     } else if (let Some(ifExpr) <- (node as IfExpr)) {
         updateExprField(ifExpr.condExpr, ifExpr, ExprFieldKind.IF_COND_EXPR, collector)
+    } else if (let Some(parenExpr) <- (node as ParenExpr)) {
+        updateExprField(parenExpr.expr, parenExpr, ExprFieldKind.PAREN_EXPR_VALUE, collector)
+    } else if (let Some(unaryExpr) <- (node as UnaryExpr)) {
+        updateExprField(unaryExpr.expr, unaryExpr, ExprFieldKind.UNARY_EXPR_VALUE, collector)
+    } else if (let Some(typeConvExpr) <- (node as TypeConvExpr)) {
+        updateExprField(typeConvExpr.expr, typeConvExpr, ExprFieldKind.TYPE_CONV_EXPR_VALUE, collector)
+    } else if (let Some(subscriptExpr) <- (node as SubscriptExpr)) {
+        updateExprField(subscriptExpr.baseExpr, subscriptExpr, ExprFieldKind.SUBSCRIPT_BASE_EXPR, collector)
+        updateExprContainer(subscriptExpr.indexExprs, subscriptExpr, collector)
+    } else if (let Some(optionalExpr) <- (node as OptionalExpr)) {
+        updateExprField(optionalExpr.baseExpr, optionalExpr, ExprFieldKind.OPTIONAL_BASE_EXPR, collector)
+    } else if (let Some(optionalChainExpr) <- (node as OptionalChainExpr)) {
+        updateExprField(optionalChainExpr.expr, optionalChainExpr, ExprFieldKind.OPTIONAL_CHAIN_EXPR_VALUE, collector)
+    } else if (let Some(letPatternExpr) <- (node as LetPatternDestructor)) {
+        updateExprField(letPatternExpr.initializer, letPatternExpr, ExprFieldKind.LET_PATTERN_INITIALIZER, collector)
     } else if (let Some(binary) <- (node as BinaryExpr)) {
-        updateExprField(binary.leftExpr, binary, ExprFieldKind.BINARY_LEFT_EXPR, collector)
-        updateExprField(binary.rightExpr, binary, ExprFieldKind.BINARY_RIGHT_EXPR, collector)
+        if (ASTKindEquals(binary.astKind, ASTKind.ASSIGN_EXPR)) {
+            updateExprField(binary.rightExpr, binary, ExprFieldKind.ASSIGN_RIGHT_EXPR, collector)
+        } else {
+            updateExprField(binary.leftExpr, binary, ExprFieldKind.BINARY_LEFT_EXPR, collector)
+            updateExprField(binary.rightExpr, binary, ExprFieldKind.BINARY_RIGHT_EXPR, collector)
+        }
+    } else if (let Some(exprList) <- (node as ExprListExpr)) {
+        updateExprContainer(exprList.children, exprList, collector)
+    } else if (let Some(quoteExpr) <- (node as QuoteExpr)) {
+        updateExprContainer(quoteExpr.exprs, quoteExpr, collector)
+    } else if (let Some(matchExpr) <- (node as MatchExpr)) {
+        updateExprField(matchExpr.selector, matchExpr, ExprFieldKind.MATCH_SELECTOR, collector)
+    } else if (let Some(matchCase) <- (node as MatchCase)) {
+        updateExprField(matchCase.patternGuard, matchCase, ExprFieldKind.MATCH_CASE_GUARD, collector)
+    } else if (let Some(caseOther) <- (node as MatchCaseOther)) {
+        updateExprField(caseOther.matchExpr, caseOther, ExprFieldKind.MATCH_CASE_OTHER_EXPR, collector)
+    } else if (let Some(whileExpr) <- (node as WhileExpr)) {
+        updateExprField(whileExpr.condExpr, whileExpr, ExprFieldKind.WHILE_COND_EXPR, collector)
+    } else if (let Some(doWhileExpr) <- (node as DoWhileExpr)) {
+        updateExprField(doWhileExpr.condExpr, doWhileExpr, ExprFieldKind.DO_WHILE_COND_EXPR, collector)
+    } else if (let Some(forInExpr) <- (node as ForInExpr)) {
+        updateExprField(forInExpr.inExpr, forInExpr, ExprFieldKind.FOR_IN_EXPR_VALUE, collector)
+        updateExprField(forInExpr.patternGuard, forInExpr, ExprFieldKind.FOR_IN_PATTERN_GUARD, collector)
+    } else if (let Some(throwExpr) <- (node as ThrowExpr)) {
+        updateExprField(throwExpr.expr, throwExpr, ExprFieldKind.THROW_EXPR_VALUE, collector)
+    } else if (let Some(performExpr) <- (node as PerformExpr)) {
+        updateExprField(performExpr.expr, performExpr, ExprFieldKind.PERFORM_EXPR_VALUE, collector)
+    } else if (let Some(spawnExpr) <- (node as SpawnExpr)) {
+        updateExprField(spawnExpr.task, spawnExpr, ExprFieldKind.SPAWN_TASK, collector)
+    } else if (let Some(trailingClosureExpr) <- (node as TrailingClosureExpr)) {
+        updateExprField(trailingClosureExpr.expr, trailingClosureExpr, ExprFieldKind.TRAILING_CLOSURE_EXPR, collector)
     } else if (let Some(varDecl) <- (node as VarDecl)) {
         updateExprField(varDecl.initializer, varDecl, ExprFieldKind.VAR_DECL_INITIALIZER, collector)
     } else if (let Some(classDecl) <- (node as ClassDecl)) {
