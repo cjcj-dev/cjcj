@@ -2,6 +2,7 @@ package cangjie_compiler::incremental_compilation
 
 import std.collection.*
 import std.sort.*
+import cangjie_compiler::option.GlobalOptions
 
 public let DELIMITER_NUM: Int64 = 60
 
@@ -195,11 +196,11 @@ public class ASTDiffArgs {
     public var rawMangleName2DeclMap: RawMangled2DeclMap
     public var astCacheInfo: ASTCache
     public var curFileMap: FileMap
-    public var op: IncrGlobalOptions
+    public var op: GlobalOptions
 
     public init(prevCache: CompilationCache, curImports: ASTCache, importedMangled2Decl: RawMangled2DeclMap,
         rawMangleName2DeclMap: RawMangled2DeclMap, astCacheInfo: ASTCache, curFileMap: FileMap,
-        op: IncrGlobalOptions) {
+        op: GlobalOptions) {
         this.prevCache = prevCache
         this.curImports = curImports
         this.importedMangled2Decl = importedMangled2Decl

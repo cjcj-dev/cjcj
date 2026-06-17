@@ -1,6 +1,11 @@
 package cangjie_compiler::incremental_compilation
 
 import std.collection.*
+import cangjie_compiler::ast.ASTKind as RealASTKind
+import cangjie_compiler::ast.ASTKindIndex as RealASTKindIndex
+import cangjie_compiler::ast.Attribute as RealAttribute
+import cangjie_compiler::ast.AttributeIndex as RealAttributeIndex
+import cangjie_compiler::basic.Position as BasicPosition
 
 public type RawMangledName = String
 public type RawMangled2DeclMap = HashMap<String, IncrDecl>
@@ -11,6 +16,7 @@ public type SrcImportedDepMap = HashMap<IncrDecl, HashSet<IncrDecl>>
 public type FileMap = HashMap<String, ArrayList<IncrDecl>>
 public type CachedFileMap = HashMap<String, ArrayList<String>>
 public type ASTCache = HashMap<String, TopLevelDeclCache>
+public type IncrPosition = BasicPosition
 
 public let CACHED_AST_EXTENSION: String = ".cachedast"
 public let SERIALIZED_FILE_EXTENSION: String = ".cjo"
@@ -36,22 +42,22 @@ public enum IncrDeclKind {
 
 public func IncrDeclKindIndex(kind: IncrDeclKind): Int64 {
     return match (kind) {
-        case IncrDeclKind.INVALID_DECL => 0
-        case IncrDeclKind.PACKAGE_DECL => 1
-        case IncrDeclKind.FUNC_DECL => 2
-        case IncrDeclKind.MACRO_DECL => 3
-        case IncrDeclKind.MAIN_DECL => 4
-        case IncrDeclKind.VAR_DECL => 5
-        case IncrDeclKind.VAR_WITH_PATTERN_DECL => 6
-        case IncrDeclKind.FUNC_PARAM => 7
-        case IncrDeclKind.PROP_DECL => 8
-        case IncrDeclKind.TYPE_ALIAS_DECL => 9
-        case IncrDeclKind.ENUM_DECL => 10
-        case IncrDeclKind.STRUCT_DECL => 11
-        case IncrDeclKind.CLASS_DECL => 12
-        case IncrDeclKind.INTERFACE_DECL => 13
-        case IncrDeclKind.EXTEND_DECL => 14
-        case IncrDeclKind.PRIMARY_CTOR_DECL => 15
+        case IncrDeclKind.INVALID_DECL => RealASTKindIndex(RealASTKind.INVALID_DECL)
+        case IncrDeclKind.PACKAGE_DECL => RealASTKindIndex(RealASTKind.PACKAGE_DECL)
+        case IncrDeclKind.FUNC_DECL => RealASTKindIndex(RealASTKind.FUNC_DECL)
+        case IncrDeclKind.MACRO_DECL => RealASTKindIndex(RealASTKind.MACRO_DECL)
+        case IncrDeclKind.MAIN_DECL => RealASTKindIndex(RealASTKind.MAIN_DECL)
+        case IncrDeclKind.VAR_DECL => RealASTKindIndex(RealASTKind.VAR_DECL)
+        case IncrDeclKind.VAR_WITH_PATTERN_DECL => RealASTKindIndex(RealASTKind.VAR_WITH_PATTERN_DECL)
+        case IncrDeclKind.FUNC_PARAM => RealASTKindIndex(RealASTKind.FUNC_PARAM)
+        case IncrDeclKind.PROP_DECL => RealASTKindIndex(RealASTKind.PROP_DECL)
+        case IncrDeclKind.TYPE_ALIAS_DECL => RealASTKindIndex(RealASTKind.TYPE_ALIAS_DECL)
+        case IncrDeclKind.ENUM_DECL => RealASTKindIndex(RealASTKind.ENUM_DECL)
+        case IncrDeclKind.STRUCT_DECL => RealASTKindIndex(RealASTKind.STRUCT_DECL)
+        case IncrDeclKind.CLASS_DECL => RealASTKindIndex(RealASTKind.CLASS_DECL)
+        case IncrDeclKind.INTERFACE_DECL => RealASTKindIndex(RealASTKind.INTERFACE_DECL)
+        case IncrDeclKind.EXTEND_DECL => RealASTKindIndex(RealASTKind.EXTEND_DECL)
+        case IncrDeclKind.PRIMARY_CTOR_DECL => RealASTKindIndex(RealASTKind.PRIMARY_CTOR_DECL)
     }
 }
 
@@ -77,24 +83,52 @@ public func IncrDeclKindName(kind: IncrDeclKind): String {
 }
 
 public func IncrDeclKindFromIndex(value: Int64): IncrDeclKind {
-    return match (value) {
-        case 1 => IncrDeclKind.PACKAGE_DECL
-        case 2 => IncrDeclKind.FUNC_DECL
-        case 3 => IncrDeclKind.MACRO_DECL
-        case 4 => IncrDeclKind.MAIN_DECL
-        case 5 => IncrDeclKind.VAR_DECL
-        case 6 => IncrDeclKind.VAR_WITH_PATTERN_DECL
-        case 7 => IncrDeclKind.FUNC_PARAM
-        case 8 => IncrDeclKind.PROP_DECL
-        case 9 => IncrDeclKind.TYPE_ALIAS_DECL
-        case 10 => IncrDeclKind.ENUM_DECL
-        case 11 => IncrDeclKind.STRUCT_DECL
-        case 12 => IncrDeclKind.CLASS_DECL
-        case 13 => IncrDeclKind.INTERFACE_DECL
-        case 14 => IncrDeclKind.EXTEND_DECL
-        case 15 => IncrDeclKind.PRIMARY_CTOR_DECL
-        case _ => IncrDeclKind.INVALID_DECL
+    if (value == RealASTKindIndex(RealASTKind.PACKAGE_DECL)) {
+        return IncrDeclKind.PACKAGE_DECL
     }
+    if (value == RealASTKindIndex(RealASTKind.FUNC_DECL)) {
+        return IncrDeclKind.FUNC_DECL
+    }
+    if (value == RealASTKindIndex(RealASTKind.MACRO_DECL)) {
+        return IncrDeclKind.MACRO_DECL
+    }
+    if (value == RealASTKindIndex(RealASTKind.MAIN_DECL)) {
+        return IncrDeclKind.MAIN_DECL
+    }
+    if (value == RealASTKindIndex(RealASTKind.VAR_DECL)) {
+        return IncrDeclKind.VAR_DECL
+    }
+    if (value == RealASTKindIndex(RealASTKind.VAR_WITH_PATTERN_DECL)) {
+        return IncrDeclKind.VAR_WITH_PATTERN_DECL
+    }
+    if (value == RealASTKindIndex(RealASTKind.FUNC_PARAM)) {
+        return IncrDeclKind.FUNC_PARAM
+    }
+    if (value == RealASTKindIndex(RealASTKind.PROP_DECL)) {
+        return IncrDeclKind.PROP_DECL
+    }
+    if (value == RealASTKindIndex(RealASTKind.TYPE_ALIAS_DECL)) {
+        return IncrDeclKind.TYPE_ALIAS_DECL
+    }
+    if (value == RealASTKindIndex(RealASTKind.ENUM_DECL)) {
+        return IncrDeclKind.ENUM_DECL
+    }
+    if (value == RealASTKindIndex(RealASTKind.STRUCT_DECL)) {
+        return IncrDeclKind.STRUCT_DECL
+    }
+    if (value == RealASTKindIndex(RealASTKind.CLASS_DECL)) {
+        return IncrDeclKind.CLASS_DECL
+    }
+    if (value == RealASTKindIndex(RealASTKind.INTERFACE_DECL)) {
+        return IncrDeclKind.INTERFACE_DECL
+    }
+    if (value == RealASTKindIndex(RealASTKind.EXTEND_DECL)) {
+        return IncrDeclKind.EXTEND_DECL
+    }
+    if (value == RealASTKindIndex(RealASTKind.PRIMARY_CTOR_DECL)) {
+        return IncrDeclKind.PRIMARY_CTOR_DECL
+    }
+    return IncrDeclKind.INVALID_DECL
 }
 
 extend IncrDeclKind <: Equatable<IncrDeclKind> {
@@ -116,7 +150,6 @@ extend IncrDeclKind <: Hashable {
 public enum IncrAttribute {
     | ABSTRACT
     | CONSTRUCTOR
-    | CONST
     | ENUM_CONSTRUCTOR
     | FROM_COMMON_PART
     | GENERIC
@@ -132,20 +165,19 @@ public enum IncrAttribute {
 
 public func IncrAttributeIndex(attr: IncrAttribute): Int64 {
     return match (attr) {
-        case IncrAttribute.ABSTRACT => 0
-        case IncrAttribute.CONSTRUCTOR => 1
-        case IncrAttribute.CONST => 2
-        case IncrAttribute.ENUM_CONSTRUCTOR => 3
-        case IncrAttribute.FROM_COMMON_PART => 4
-        case IncrAttribute.GENERIC => 5
-        case IncrAttribute.GLOBAL => 6
-        case IncrAttribute.IMPORTED => 7
-        case IncrAttribute.MACRO_FUNC => 8
-        case IncrAttribute.OPEN => 9
-        case IncrAttribute.PRIVATE => 10
-        case IncrAttribute.PROTECTED => 11
-        case IncrAttribute.PUBLIC => 12
-        case IncrAttribute.STATIC => 13
+        case IncrAttribute.ABSTRACT => RealAttributeIndex(RealAttribute.ABSTRACT)
+        case IncrAttribute.CONSTRUCTOR => RealAttributeIndex(RealAttribute.CONSTRUCTOR)
+        case IncrAttribute.ENUM_CONSTRUCTOR => RealAttributeIndex(RealAttribute.ENUM_CONSTRUCTOR)
+        case IncrAttribute.FROM_COMMON_PART => RealAttributeIndex(RealAttribute.FROM_COMMON_PART)
+        case IncrAttribute.GENERIC => RealAttributeIndex(RealAttribute.GENERIC)
+        case IncrAttribute.GLOBAL => RealAttributeIndex(RealAttribute.GLOBAL)
+        case IncrAttribute.IMPORTED => RealAttributeIndex(RealAttribute.IMPORTED)
+        case IncrAttribute.MACRO_FUNC => RealAttributeIndex(RealAttribute.MACRO_FUNC)
+        case IncrAttribute.OPEN => RealAttributeIndex(RealAttribute.OPEN)
+        case IncrAttribute.PRIVATE => RealAttributeIndex(RealAttribute.PRIVATE)
+        case IncrAttribute.PROTECTED => RealAttributeIndex(RealAttribute.PROTECTED)
+        case IncrAttribute.PUBLIC => RealAttributeIndex(RealAttribute.PUBLIC)
+        case IncrAttribute.STATIC => RealAttributeIndex(RealAttribute.STATIC)
     }
 }
 
@@ -153,7 +185,6 @@ public func IncrAttributeName(attr: IncrAttribute): String {
     return match (attr) {
         case IncrAttribute.ABSTRACT => "ABSTRACT"
         case IncrAttribute.CONSTRUCTOR => "CONSTRUCTOR"
-        case IncrAttribute.CONST => "CONST"
         case IncrAttribute.ENUM_CONSTRUCTOR => "ENUM_CONSTRUCTOR"
         case IncrAttribute.FROM_COMMON_PART => "FROM_COMMON_PART"
         case IncrAttribute.GENERIC => "GENERIC"
@@ -172,7 +203,6 @@ public func IncrAttributeFromName(name: String): Option<IncrAttribute> {
     return match (name) {
         case "ABSTRACT" => Some(IncrAttribute.ABSTRACT)
         case "CONSTRUCTOR" => Some(IncrAttribute.CONSTRUCTOR)
-        case "CONST" => Some(IncrAttribute.CONST)
         case "ENUM_CONSTRUCTOR" => Some(IncrAttribute.ENUM_CONSTRUCTOR)
         case "FROM_COMMON_PART" => Some(IncrAttribute.FROM_COMMON_PART)
         case "GENERIC" => Some(IncrAttribute.GENERIC)
@@ -201,26 +231,6 @@ extend IncrAttribute <: Equatable<IncrAttribute> {
 extend IncrAttribute <: Hashable {
     public func hashCode(): Int64 {
         return IncrAttributeIndex(this)
-    }
-}
-
-public class IncrPosition {
-    public var line: Int64 = 0
-    public var column: Int64 = 0
-
-    public init() {}
-
-    public init(line: Int64, column: Int64) {
-        this.line = line
-        this.column = column
-    }
-
-    public func IsZero(): Bool {
-        return line == 0 && column == 0
-    }
-
-    public func ToString(): String {
-        return "${line},${column}"
     }
 }
 
@@ -440,7 +450,7 @@ public class IncrDecl <: Hashable & Equatable<IncrDecl> {
     }
 
     public func IsConst(): Bool {
-        return isConstValue || TestAttr(IncrAttribute.CONST)
+        return isConstValue
     }
 
     public func IsStaticVar(): Bool {
@@ -647,30 +657,6 @@ public class IncrImportManager {
 
     public func GetPackageDecl(packageName: String): Option<IncrDecl> {
         return packageDecls.get(packageName)
-    }
-}
-
-public class IncrGlobalOptions {
-    public var enableCompileDebug: Bool = false
-    public var displayLineInfo: Bool = false
-    public var cachedAstPath: String = ""
-    public var serializedFilePath: String = ""
-    public let compileArgs: ArrayList<String> = ArrayList<String>()
-
-    public init() {}
-
-    public func ToSerialized(): ArrayList<String> {
-        return CloneStringList(compileArgs)
-    }
-
-    public func GenerateCachedPathName(packageName: String, extension: String): String {
-        if (extension == CACHED_AST_EXTENSION && !cachedAstPath.isEmpty()) {
-            return cachedAstPath
-        }
-        if (extension == SERIALIZED_FILE_EXTENSION && !serializedFilePath.isEmpty()) {
-            return serializedFilePath
-        }
-        return packageName.replace(".", "_") + extension
     }
 }
 

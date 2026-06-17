@@ -3,6 +3,7 @@ package cangjie_compiler::incremental_compilation
 import std.collection.*
 import std.fs.File
 import std.fs.exists
+import cangjie_compiler::option.GlobalOptions
 
 public class IncreResult {
     public var kind: IncreKind = IncreKind.INVALID
@@ -53,7 +54,7 @@ public class IncrementalScopeAnalysisArgs {
     public var rawMangleName2DeclMap: RawMangled2DeclMap = RawMangled2DeclMap()
     public var astCacheInfo: ASTCache = ASTCache()
     public var srcPackage: IncrPackage = IncrPackage()
-    public var op: IncrGlobalOptions = IncrGlobalOptions()
+    public var op: GlobalOptions = GlobalOptions()
     public var importer: IncrImportManager = IncrImportManager()
     public var cachedInfo: Option<CompilationCache> = None
     public var fileMap: FileMap = FileMap()
@@ -177,8 +178,12 @@ public func IncrementalScopeAnalysis(args: IncrementalScopeAnalysisArgs): IncreR
             "type alias changed, roll back to full compilation")
     }
 
-    let srcPkgDecl = args.importer.GetPackageDecl(args.srcPackage.fullPackageName) ??
-        IncrDecl(args.srcPackage.fullPackageName, args.srcPackage.fullPackageName, IncrDeclKind.PACKAGE_DECL)
+    let srcPkgDeclOpt = args.importer.GetPackageDecl(args.srcPackage.fullPackageName)
+    if (srcPkgDeclOpt.isNone()) {
+        throw IllegalStateException("source package decl not registered for incremental analysis: " +
+            args.srcPackage.fullPackageName)
+    }
+    let srcPkgDecl = srcPkgDeclOpt.getOrThrow()
     let pollutionArgs = PollutionAnalyseArgs(diffResult.changedDecls, srcPkgDecl, imported.sourcePopulations,
         previousCache.semaInfo, previousCache.chirOptInfo, previousCache.fileMap, args.importer,
         diffResult.mangled2Decl, args.directExtends, imported.importRelations)
@@ -473,7 +478,11 @@ private func GetCgManglesForDelete(cachedInfo: CompilationCache, deleted: ArrayL
         BuildMangleMapForCachedInfo(rawMangle, cache, mangleMap)
     }
     for (name in deleted) {
-        deletedMangleNames.add(mangleMap.get(name) ?? name)
+        let cgMangleOpt = mangleMap.get(name)
+        if (cgMangleOpt.isNone()) {
+            throw IllegalStateException("missing cached codegen mangle for deleted declaration: " + name)
+        }
+        deletedMangleNames.add(cgMangleOpt.getOrThrow())
     }
     return deletedMangleNames
 }

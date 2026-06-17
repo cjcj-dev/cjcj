@@ -255,6 +255,20 @@ public func ListsEqual(left: ArrayList<String>, right: ArrayList<String>): Bool 
     return true
 }
 
+public func ListsEqual(left: Array<String>, right: ArrayList<String>): Bool {
+    if (left.size != right.size) {
+        return false
+    }
+    var idx: Int64 = 0
+    while (idx < left.size) {
+        if (left[idx] != right[idx]) {
+            return false
+        }
+        idx++
+    }
+    return true
+}
+
 public func IsInDeclWithAttribute(decl: IncrDecl, attr: IncrAttribute): Bool {
     if (decl.TestAttr(attr)) {
         return true
@@ -312,7 +326,7 @@ public func ComputeDeclSrcUseHash(decl: IncrDecl): UInt64 {
     hash = CombineHash(hash, StableHashBool(decl.TestAttr(IncrAttribute.PRIVATE)))
     hash = CombineHash(hash, StableHashBool(decl.TestAttr(IncrAttribute.IMPORTED)))
     hash = CombineHash(hash, StableHashBool(decl.TestAttr(IncrAttribute.STATIC)))
-    hash = CombineHash(hash, StableHashBool(decl.TestAttr(IncrAttribute.CONST)))
+    hash = CombineHash(hash, StableHashBool(decl.IsConst()))
     hash = CombineHash(hash, StableHash(decl.fullPackageName))
     return hash
 }

@@ -1,6 +1,6 @@
 # IncrementalCompilation Port Status
 
-Date: 2026-06-16
+Date: 2026-06-17
 
 Build: `cjpm build` passes.
 
@@ -75,11 +75,33 @@ Implemented:
 - Added explicit adapter support for var-with-pattern bound variables and routed cache calculation, member traversal,
   signature pollution, and CHIR optimization pollution through the same flattened pattern-variable view used by the
   C++ `FlattenVarWithPatternDecl` paths.
+- Added the first real sibling-package dependency for this module: `cangjie_compiler::ast` is now imported by the
+  incremental package so cache declaration-kind tags use real `ASTKindIndex` values and adapter attributes that
+  correspond to AST attributes use real `AttributeIndex` values.
+- Removed the adapter-only `IncrAttribute.CONST` pseudo-attribute. Constness now flows through
+  `IncrDecl.isConstValue`/`IncrDecl.IsConst()`, and fallback source-use hashing reads that path, matching the C++
+  `Decl::IsConst()` model and the self-host AST `isConst` fields instead of inventing an AST attribute.
+- Bumped the deterministic cache wire version to `CJ-INCR-CACHE-3` so caches containing the previous fallback
+  const-attribute hash semantics are rejected rather than mixed with the real constness path.
+- Bumped the deterministic cache wire version to `CJ-INCR-CACHE-2` so caches written with the previous package-local
+  kind/attribute ordinals are rejected instead of being decoded with the real AST ordinal layout.
+- Removed the local `IncrGlobalOptions` compatibility class and changed `ASTDiffArgs`/`IncrementalScopeAnalysisArgs`
+  to carry the real `cangjie_compiler::option.GlobalOptions`. Incremental analysis now uses the same cache path
+  generation and full compile-option serialization as the C++ entry point, with an `Array<String>`/`ArrayList<String>`
+  comparison helper only at the cache boundary.
+- Removed the local stripped-down incremental position class. Adapter declarations now store
+  `cangjie_compiler::basic.Position` through an `IncrPosition` alias, so file/line/column state and zero-position
+  checks use the same Basic source-position type as the real AST nodes.
+- Removed two remaining silent fallback paths from incremental scope analysis. Missing source package declarations
+  and missing cached CodeGen mangles for deleted declarations now fail the same invariant class as the C++
+  `CJC_NULLPTR_CHECK`/`CJC_ABORT` sites instead of synthesizing package declarations or reusing raw mangles.
 
 Known gaps:
 
-- The package manifest still has no dependencies and this task forbids manifest edits, so the implementation uses
-  `IncrDecl`/`IncrPackage` adapters instead of the real AST/Sema/Modules/Mangle/Parse public types.
+- The package now depends on real `ast` for cache tag ordinals, real `basic.Position` for source locations, and real
+  `option.GlobalOptions` for entry options, but most declaration/package/import entry points still use
+  `IncrDecl`/`IncrPackage`/`IncrImportManager` adapters instead of the real AST/Sema/Modules/Mangle/Parse public
+  types.
 - The cache wire format is a deterministic self-host text format, not the C++ FlatBuffers `CachedASTFormat`.
 - Hashing and fallback mangling are behavior-shaped but not byte-identical to C++ `ASTHasher`/`ASTMangler` until
   those packages can be wired directly.
