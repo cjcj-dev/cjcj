@@ -110,6 +110,7 @@ public class LocalTypeArgumentSynthesis {
     private var curTyVar: Option<GenericsTy> = None
     private var hasNothingTy: Bool = false
     private var hasAnyTy: Bool = false
+    private let activeBoundChecks: ArrayList<(Ty, Ty)> = ArrayList<(Ty, Ty)>()
 
     public init(typeManager: TypeManager, argPack: LocTyArgSynArgPack, needDiagMsg!: Bool = false) {
         tyMgr = typeManager
@@ -246,20 +247,14 @@ public class LocalTypeArgumentSynthesis {
         }
         if (let Some(paramVar) <- (paramTy as GenericsTy)) {
             if (paramVar.isPlaceholder && containsTyVar(argPack.tyVarsToSolve, paramVar)) {
-                curTyVar = Some(paramVar)
                 let lowerBound = normalizeInferredTy(argTy)
-                NoteSpecialBound(lowerBound)
-                constraints.GetOrCreate(paramVar).lbs.Add(lowerBound)
-                return true
+                return AddLowerBound(paramVar, lowerBound)
             }
         }
         if (let Some(argVar) <- (argTy as GenericsTy)) {
             if (argVar.isPlaceholder && containsTyVar(argPack.tyVarsToSolve, argVar)) {
-                curTyVar = Some(argVar)
                 let upperBound = normalizeInferredTy(paramTy)
-                NoteSpecialBound(upperBound)
-                constraints.GetOrCreate(argVar).ubs.Add(upperBound)
-                return true
+                return AddUpperBound(argVar, upperBound)
             }
             if (!argVar.isPlaceholder) {
                 if (argVar.upperBounds.isEmpty()) {
@@ -296,6 +291,9 @@ public class LocalTypeArgumentSynthesis {
         if (argTy.IsNominal() && paramTy.IsNominal()) {
             return UnifyNominal(argTy, paramTy)
         }
+        if (argTy.IsBuiltin() && paramTy.IsInterface()) {
+            return UnifyNominal(argTy, paramTy)
+        }
         if (argTy.IsPrimitive() && paramTy.IsPrimitive()) {
             if (!tyMgr.IsSubtype(argTy, paramTy)) {
                 return false
@@ -308,6 +306,57 @@ public class LocalTypeArgumentSynthesis {
             return true
         }
         return tyMgr.IsSubtype(argTy, paramTy)
+    }
+
+    private func AddLowerBound(tyVar: GenericsTy, lowerBound: Ty): Bool {
+        curTyVar = Some(tyVar)
+        NoteSpecialBound(lowerBound)
+        let bounds = constraints.GetOrCreate(tyVar)
+        if (!bounds.lbs.Add(lowerBound)) {
+            return true
+        }
+        let upperBounds = bounds.ubs.Clone()
+        for (upperBound in upperBounds.values) {
+            if (Ty.IsTyCorrect(upperBound) && !UnifyBoundPair(lowerBound, upperBound)) {
+                return false
+            }
+        }
+        return true
+    }
+
+    private func AddUpperBound(tyVar: GenericsTy, upperBound: Ty): Bool {
+        curTyVar = Some(tyVar)
+        NoteSpecialBound(upperBound)
+        let bounds = constraints.GetOrCreate(tyVar)
+        if (!bounds.ubs.Add(upperBound)) {
+            return true
+        }
+        let lowerBounds = bounds.lbs.Clone()
+        for (lowerBound in lowerBounds.values) {
+            if (Ty.IsTyCorrect(lowerBound) && !UnifyBoundPair(lowerBound, upperBound)) {
+                return false
+            }
+        }
+        return true
+    }
+
+    private func HasActiveBoundCheck(argTy: Ty, paramTy: Ty): Bool {
+        for (entry in activeBoundChecks) {
+            if (SameTy(entry[0], argTy) && SameTy(entry[1], paramTy)) {
+                return true
+            }
+        }
+        return false
+    }
+
+    private func UnifyBoundPair(argTy: Ty, paramTy: Ty): Bool {
+        if (HasActiveBoundCheck(argTy, paramTy)) {
+            return true
+        }
+        activeBoundChecks.add((argTy, paramTy))
+        let ok = UnifyOne(argTy, paramTy)
+        activeBoundChecks.remove(at: activeBoundChecks.size - 1)
+        return ok
     }
 
     private func NoteSpecialBound(ty: Ty): Unit {
