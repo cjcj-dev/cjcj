@@ -82,6 +82,27 @@ Verification:
 - `grep -rn "TODO(selfhost:Sema)" packages/sema/src` reports 4 remaining package-level markers, all outside the tc-core-owned files.
 - Remaining `TODO(selfhost:Sema)` markers in the tc-core-owned files listed by the task: 0.
 
+## 2026-06-18 Continue Pass
+
+Files deepened:
+
+- `packages/sema/src/TypeCheck.cj`
+
+Implemented behavior:
+
+- Ported the C++ `MarkInvalidInheritanceForNonClassLike` guard into the self-hosted precheck path. After inherited types are resolved for struct and enum declarations, any inherited target that is not classlike now marks the struct/enum with `IN_REFERENCE_CYCLE`, preventing later invalid type substitution paths from treating that inheritance edge as usable.
+- Tightened qualified type package-base resolution. The imported package lookup now carries an explicit conflict bit and returns invalid on multiple package-declaration matches, matching the C++ `GetImportedPackageDecl` control flow instead of falling back to ordinary type lookup after an ambiguity.
+
+Remaining gaps:
+
+- Exact diagnostics for package-name conflicts and invalid non-classlike inheritance are still not emitted by this helper layer because the current standalone `TypeCheck.cj` functions do not carry the C++ diagnostic engine through their signatures.
+- Full import-manager package alias resolution remains blocked by the surrounding self-hosted modules/import surface; this pass only uses `ASTContext.packageDecls`.
+
+Verification:
+
+- `cjpm build` passes after this pass.
+- Remaining `TODO(selfhost:Sema)` markers in the tc-core-owned files listed by the task: 0.
+
 ## 2026-06-17 Continue Pass 5
 
 Files deepened:

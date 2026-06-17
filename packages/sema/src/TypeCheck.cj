@@ -63,22 +63,30 @@ private func collectPackageTypeDecls(pkg: Package, name: String): ArrayList<Decl
     return out
 }
 
-private func findImportedPackageDecl(ctx: ASTContext, packageName: String): Option<PackageDecl> {
+private class ImportedPackageLookup {
+    public var decl: Option<PackageDecl> = None
+    public var conflicted: Bool = false
+
+    public init() {}
+}
+
+private func findImportedPackageDecl(ctx: ASTContext, packageName: String): ImportedPackageLookup {
+    let result = ImportedPackageLookup()
     if (packageName.isEmpty()) {
-        return None
+        return result
     }
-    var found: Option<PackageDecl> = None
     for (packageDecl in ctx.packageDecls) {
         let matches = packageDecl.fullPackageName == packageName || packageDecl.identifier.Val() == packageName
         if (!matches) {
             continue
         }
-        if (let Some(_) <- found) {
-            return None
+        if (let Some(_) <- result.decl) {
+            result.conflicted = true
+            return result
         }
-        found = Some(packageDecl)
+        result.decl = Some(packageDecl)
     }
-    return found
+    return result
 }
 
 private func markPackageBaseType(typeNode: Type): Unit {
@@ -241,6 +249,19 @@ private func markDirectSubtype(superTy: Ty, subtype: Ty): Unit {
             }
         }
         classLikeTy.directSubtypes.add(subtype)
+    }
+}
+
+private func markInvalidInheritanceForNonClassLike(decl: InheritableDecl): Unit {
+    if (decl.astKind != ASTKind.STRUCT_DECL && decl.astKind != ASTKind.ENUM_DECL) {
+        return
+    }
+    for (inheritedType in decl.inheritedTypes) {
+        if (let Some(inheritedDecl) <- Ty.GetDeclPtrOfTy(inheritedType.GetTy())) {
+            if (!inheritedDecl.IsClassLikeDecl()) {
+                decl.EnableAttr(Attribute.IN_REFERENCE_CYCLE)
+            }
+        }
     }
 }
 
@@ -533,7 +554,11 @@ public func GetTyFromASTQualifiedType(typeManager: TypeManager, ctx: ASTContext,
         if (baseType.astKind == ASTKind.INVALID_TYPE) {
             return TypeManager.GetInvalidTy()
         }
-        if (let Some(packageDecl) <- findImportedPackageDecl(ctx, ASTContext.GetPackageName(baseType))) {
+        let packageLookup = findImportedPackageDecl(ctx, ASTContext.GetPackageName(baseType))
+        if (packageLookup.conflicted) {
+            return TypeManager.GetInvalidTy()
+        }
+        if (let Some(packageDecl) <- packageLookup.decl) {
             bindImportedPackageBase(baseType, packageDecl)
         } else {
             let _ = GetTyFromASTType(typeManager, ctx, baseType)
@@ -649,6 +674,7 @@ public func ResolveOneDecl(typeManager: TypeManager, ctx: ASTContext, decl: Decl
                 }
             }
         }
+        markInvalidInheritanceForNonClassLike(inheritable)
         return
     }
     if (let Some(typeAliasDecl) <- (decl as TypeAliasDecl)) {
