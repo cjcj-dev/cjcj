@@ -18,6 +18,7 @@ public class AST2CHIRGlobalSpec {
     public let ty: Type
     public let initialValue: Option<LiteralValue>
     public let attributes: ArrayList<Attribute> = ArrayList<Attribute>()
+    public let features: ArrayList<String> = ArrayList<String>()
     public var useRefStorage: Bool = false
     public var debugLocation: Option<DebugLocation> = None
 
@@ -33,6 +34,11 @@ public class AST2CHIRGlobalSpec {
 
     public func AddAttribute(attr: Attribute): AST2CHIRGlobalSpec {
         AddAttributeUnique(attributes, attr)
+        return this
+    }
+
+    public func AddFeature(name: String): AST2CHIRGlobalSpec {
+        AddStringUnique(features, name)
         return this
     }
 
@@ -58,6 +64,7 @@ public class AST2CHIRFunctionSpec {
     public let emitBody: Bool
     public let paramNames: ArrayList<String> = ArrayList<String>()
     public let attributes: ArrayList<Attribute> = ArrayList<Attribute>()
+    public let features: ArrayList<String> = ArrayList<String>()
     public let genericTypeParams: ArrayList<GenericType> = ArrayList<GenericType>()
     public let defaultParamFunctions: ArrayList<AST2CHIRFunctionSpec> = ArrayList<AST2CHIRFunctionSpec>()
     public let genericInstantiations: ArrayList<AST2CHIRFunctionSpec> = ArrayList<AST2CHIRFunctionSpec>()
@@ -68,6 +75,8 @@ public class AST2CHIRFunctionSpec {
     public var isCommonMatchedWithSpecific: Bool = false
     public var debugLocation: Option<DebugLocation> = None
     public var propertyLocation: Option<DebugLocation> = None
+    public var hasVariableLenArg: Bool = false
+    public var isCFunc: Bool = false
 
     public init(name: String, paramTypes: ArrayList<Type>, returnType: Type, srcCodeIdentifier!: String = "",
         rawMangledName!: String = "", packageName!: String = "", funcKind!: FuncKind = FuncKind.DEFAULT,
@@ -91,6 +100,11 @@ public class AST2CHIRFunctionSpec {
 
     public func AddAttribute(attr: Attribute): AST2CHIRFunctionSpec {
         AddAttributeUnique(attributes, attr)
+        return this
+    }
+
+    public func AddFeature(name: String): AST2CHIRFunctionSpec {
+        AddStringUnique(features, name)
         return this
     }
 
@@ -137,6 +151,19 @@ public class AST2CHIRFunctionSpec {
 
     public func SetPropertyLocation(loc: DebugLocation): AST2CHIRFunctionSpec {
         propertyLocation = Some(loc)
+        return this
+    }
+
+    public func SetHasVariableLenArg(value: Bool): AST2CHIRFunctionSpec {
+        hasVariableLenArg = value
+        if (value) {
+            isCFunc = true
+        }
+        return this
+    }
+
+    public func SetCFunc(value: Bool): AST2CHIRFunctionSpec {
+        isCFunc = value
         return this
     }
 }

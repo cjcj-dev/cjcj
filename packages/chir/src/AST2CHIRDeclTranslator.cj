@@ -134,6 +134,12 @@ public class AST2CHIRDeclTranslator {
         target.AppendAttributeInfo(BuildAttributeInfo(attrs))
     }
 
+    public func ApplyFeatures(target: GlobalValue, features: ArrayList<String>): Unit {
+        for (featureName in features) {
+            target.AddFeature(featureName)
+        }
+    }
+
     public func CreateEmptyBody(fn: Function): Unit {
         let body = builder.CreateBlockGroup(fn.GetIdentifier() + ".body")
         fn.InitBody(body)
@@ -160,6 +166,9 @@ public class AST2CHIRDeclTranslator {
             return false
         }
         if (spec.attributes.contains(Attribute.ABSTRACT) || spec.attributes.contains(Attribute.FOREIGN)) {
+            return false
+        }
+        if (spec.attributes.contains(Attribute.IMPORTED) && !spec.attributes.contains(Attribute.SRC_CODE_IMPORTED)) {
             return false
         }
         return true

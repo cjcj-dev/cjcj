@@ -28,6 +28,7 @@ extend AST2CHIRDeclTranslator {
     }
 
     private func ApplyGlobalSourceInfo(globalVar: GlobalVar, spec: AST2CHIRGlobalSpec): Unit {
+        ApplyFeatures(globalVar, spec.features)
         if (let Some(loc) <- spec.debugLocation) {
             globalVar.SetDebugLocation(loc)
         }
@@ -57,6 +58,7 @@ extend AST2CHIRDeclTranslator {
         if (let Some(loc) <- spec.debugLocation) {
             initFn.SetDebugLocation(loc)
         }
+        ApplyFeatures(initFn, spec.features)
         let body = builder.CreateBlockGroup(initFn.GetIdentifier() + ".body")
         initFn.InitBody(body)
         let entry = builder.CreateBlock("entry", body)

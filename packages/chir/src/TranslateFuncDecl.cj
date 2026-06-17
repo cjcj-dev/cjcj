@@ -43,6 +43,7 @@ extend AST2CHIRDeclTranslator {
     }
 
     private func ApplyFunctionSourceInfo(fn: Function, spec: AST2CHIRFunctionSpec): Unit {
+        ApplyFeatures(fn, spec.features)
         if (let Some(loc) <- spec.debugLocation) {
             fn.SetDebugLocation(loc)
         }
@@ -64,7 +65,8 @@ extend AST2CHIRDeclTranslator {
             adjustedParams.add(paramTy)
         }
         let adjustedReturn = if (spec.IsConstructorLike()) { builder.context.GetUnitTy() } else { spec.returnType }
-        return builder.context.GetFuncTy(adjustedParams, adjustedReturn)
+        return builder.context.GetFuncTy(adjustedParams, adjustedReturn, hasVarLenParam: spec.hasVariableLenArg,
+            isCFunc: spec.isCFunc || spec.hasVariableLenArg)
     }
 
     private func CreateFunctionParameters(fn: Function, spec: AST2CHIRFunctionSpec): Unit {

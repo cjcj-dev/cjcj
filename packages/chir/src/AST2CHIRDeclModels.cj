@@ -287,6 +287,12 @@ public func AddAttributeUnique(attrs: ArrayList<Attribute>, attr: Attribute): Un
     }
 }
 
+public func AddStringUnique(items: ArrayList<String>, value: String): Unit {
+    if (!value.isEmpty() && !items.contains(value)) {
+        items.add(value)
+    }
+}
+
 public func BuildAttributeInfo(attrs: ArrayList<Attribute>): AttributeInfo {
     let info = AttributeInfo()
     for (attr in attrs) {
