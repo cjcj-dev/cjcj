@@ -731,8 +731,11 @@ public class Function <: GlobalValue {
     private var propLocation: DebugLocation = DebugLocation()
     // Literal strings this function prints when executed, in source order. printNewlines is a
     // parallel list: true => println (puts, trailing newline), false => print (fputs, no newline).
+    // printIsInt is a parallel list: true => integer print (printStrings holds the decimal text,
+    // lowered via printf("%ld[\n]")); false => string print.
     public let printStrings: ArrayList<String> = ArrayList<String>()
     public let printNewlines: ArrayList<Bool> = ArrayList<Bool>()
+    public let printIsInt: ArrayList<Bool> = ArrayList<Bool>()
 
     public init(funcType: FuncType, identifier: String, srcCodeIdentifier: String, rawMangledName: String,
         packageName: String) {

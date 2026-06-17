@@ -205,7 +205,12 @@ private func buildFunctionSpec(pkg: Package, decl: Decl, context: ChirContext, s
             } else {
                 true
             }
-            fnSpec.AddPrintString(printString, newline: newline)
+            let isInt = if (printIdx < namedFuncDecl.funcBody.printIsInt.size) {
+                namedFuncDecl.funcBody.printIsInt[printIdx]
+            } else {
+                false
+            }
+            fnSpec.AddPrintString(printString, newline: newline, isInt: isInt)
             printIdx++
         }
     }

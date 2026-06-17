@@ -1028,6 +1028,20 @@ private func captureFunctionBodyPrints(tokens: ArrayList<FrontendToken>, start: 
                     if (closeParen < end && closeParen < tokens.size && tokens[closeParen].value == ")") {
                         body.printStrings.add(StripLiteralQuotes(tokens[argIdx].value))
                         body.printNewlines.add(newline)
+                        body.printIsInt.add(false)
+                        idx = closeParen + 1
+                        continue
+                    }
+                }
+                // `println(<int>)` / `print(<int>)` where the arg is an integer literal (optionally
+                // signed) or a let-bound integer literal. Capture the decimal text as an int entry.
+                let intArg = resolvePrintIntArg(tokens, argIdx, end, start, idx)
+                if (intArg[0]) {
+                    let closeParen = skipTrivia(tokens, intArg[2])
+                    if (closeParen < end && closeParen < tokens.size && tokens[closeParen].value == ")") {
+                        body.printStrings.add(intArg[1])
+                        body.printNewlines.add(newline)
+                        body.printIsInt.add(true)
                         idx = closeParen + 1
                         continue
                     }
@@ -1036,6 +1050,33 @@ private func captureFunctionBodyPrints(tokens: ArrayList<FrontendToken>, start: 
         }
         idx++
     }
+}
+
+// Resolve the integer argument of a `println`/`print` call beginning at `argIdx`. Accepts an
+// integer literal (optionally a leading `-`) or a bare identifier bound earlier in the same body
+// by `let <name> = <int literal>` (reusing the let-int folding rules). Returns (ok, decimalText,
+// indexAfterArg) where indexAfterArg is the token index immediately after the consumed argument
+// (caller must still verify a `)` follows). On failure returns (false, "", argIdx).
+private func resolvePrintIntArg(tokens: ArrayList<FrontendToken>, argIdx: Int64, end: Int64,
+    bodyStart: Int64, callIdx: Int64): (Bool, String, Int64) {
+    if (argIdx >= end || argIdx >= tokens.size) {
+        return (false, "", argIdx)
+    }
+    let tok = tokens[argIdx]
+    if (tok.kind == FrontendTokenKind.INTEGER_LITERAL) {
+        return (true, tok.value, argIdx + 1)
+    }
+    if (tok.value == "-" && argIdx + 1 < end && argIdx + 1 < tokens.size &&
+        tokens[argIdx + 1].kind == FrontendTokenKind.INTEGER_LITERAL) {
+        return (true, "-" + tokens[argIdx + 1].value, argIdx + 2)
+    }
+    if (tok.kind == FrontendTokenKind.IDENTIFIER) {
+        let resolved = resolveLetLiteral(tokens, bodyStart, callIdx, tok.value)
+        if (resolved[0] && resolved[1] == FRONTEND_LITERAL_INT) {
+            return (true, resolved[2], argIdx + 1)
+        }
+    }
+    return (false, "", argIdx)
 }
 
 private func parseLiteralReturn(tokens: ArrayList<FrontendToken>, start: Int64, end: Int64):

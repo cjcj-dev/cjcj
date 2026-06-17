@@ -32,6 +32,7 @@ func EmitFunctionPrintDirectives(cgMod: CGModule, cgFunc: CGFunction, chirFunc: 
         let i8Type = unsafe { LLVMInt8TypeInContext(ctx) }
         let i8PtrType = unsafe { LLVMPointerType(i8Type, 0u32) }
         let i32Type = unsafe { LLVMInt32TypeInContext(ctx) }
+        let i64Type = unsafe { LLVMInt64TypeInContext(ctx) }
         // int puts(const char *)
         let putsType = BuildPutsFunctionType(i32Type, i8PtrType)
         let putsFn = GetOrInsertRuntimePrintFunction(moduleHandle, "puts", putsType)
@@ -40,6 +41,9 @@ func EmitFunctionPrintDirectives(cgMod: CGModule, cgFunc: CGFunction, chirFunc: 
         let fputsFn = GetOrInsertRuntimePrintFunction(moduleHandle, "fputs", fputsType)
         // extern FILE *stdout -- modeled as a global i8* we load before each fputs call
         let stdoutGlobal = GetOrInsertStdoutGlobal(moduleHandle, i8PtrType)
+        // int printf(const char *, ...) -- variadic, used for integer prints
+        let printfType = BuildPrintfFunctionType(i32Type, i8PtrType)
+        let printfFn = GetOrInsertRuntimePrintFunction(moduleHandle, "printf", printfType)
 
         var index = 0
         for (text in chirFunc.printStrings) {
@@ -48,8 +52,19 @@ func EmitFunctionPrintDirectives(cgMod: CGModule, cgFunc: CGFunction, chirFunc: 
             } else {
                 true
             }
+            let isInt = if (index < chirFunc.printIsInt.size) {
+                chirFunc.printIsInt[index]
+            } else {
+                false
+            }
             let globalName = chirFunc.GetIdentifier() + ".cjsh.str." + index.toString()
-            if (newline) {
+            if (isInt) {
+                // println(int) -> printf("%ld\n", v); print(int) -> printf("%ld", v)
+                let fmt = if (newline) { "%ld\n" } else { "%ld" }
+                let fmtName = chirFunc.GetIdentifier() + ".cjsh.fmt." + index.toString()
+                EmitOnePrintfIntCall(moduleHandle, builder, ctx, fmt, ParseDecimalI64(text), i32Type,
+                    i64Type, printfType, printfFn, fmtName)
+            } else if (newline) {
                 EmitOnePutsCall(moduleHandle, builder, ctx, text, i32Type, putsType, putsFn, globalName)
             } else {
                 EmitOneFputsCall(moduleHandle, builder, ctx, text, i32Type, i8PtrType, fputsType, fputsFn,
@@ -80,6 +95,57 @@ private func BuildFputsFunctionType(i32Type: LLVMTypeRef, i8PtrType: LLVMTypeRef
             (paramPtr.value + 1).write(i8PtrType)
             result = LLVMFunctionType(i32Type, paramPtr.value, 2u32, 0)
         }
+    }
+    return result
+}
+
+// Reinterpret an Int64 as its raw 64-bit pattern as a UInt64 (avoids overflow on negatives, which
+// would trap in a direct UInt64(value) conversion).
+private func SignedInt64ToBits(value: Int64): UInt64 {
+    if (value >= 0) {
+        return UInt64(value)
+    }
+    return 0x8000000000000000u64 + UInt64(value - Int64.Min)
+}
+
+// int printf(const char *, ...) -- variadic format-string function.
+private func BuildPrintfFunctionType(i32Type: LLVMTypeRef, i8PtrType: LLVMTypeRef): LLVMTypeRef {
+    var result = LLVMNullType()
+    try (paramPtr = LibC.malloc<LLVMTypeRef>(count: 1).asResource()) {
+        unsafe {
+            (paramPtr.value + 0).write(i8PtrType)
+            // isVarArg = 1 so additional arguments (the i64 value) are accepted.
+            result = LLVMFunctionType(i32Type, paramPtr.value, 1u32, 1)
+        }
+    }
+    return result
+}
+
+// Parse a decimal integer literal (optionally a leading `-`, with optional `_` separators) into an
+// Int64. Falls back to 0 on malformed input; the frontend only forwards real integer literals here.
+private func ParseDecimalI64(text: String): Int64 {
+    var result: Int64 = 0
+    var negative = false
+    var idx = 0
+    let bytes = text
+    if (bytes.size > 0 && bytes[0] == b'-') {
+        negative = true
+        idx = 1
+    }
+    while (idx < bytes.size) {
+        let c = bytes[idx]
+        if (c == b'_') {
+            idx++
+            continue
+        }
+        if (c < b'0' || c > b'9') {
+            break
+        }
+        result = result * 10 + Int64(c - b'0')
+        idx++
+    }
+    if (negative) {
+        return -result
     }
     return result
 }
@@ -160,6 +226,24 @@ private func EmitOneFputsCall(moduleHandle: LLVMModuleHandle, builder: LLVMBuild
             (argPtr.value + 0).write(gepPtr)
             (argPtr.value + 1).write(streamVal)
             let _ = LLVMBuildCall2(builder, fputsType, fputsFn, argPtr.value, 2u32, emptyName.value)
+        }
+    }
+}
+
+// Emit `printf(<fmt>, <i64 value>)` for an integer print. The format string ("%ld\n" / "%ld") is a
+// private constant global; the value is an i64 LLVM constant.
+private func EmitOnePrintfIntCall(moduleHandle: LLVMModuleHandle, builder: LLVMBuilderRef, ctx: LLVMContextRef,
+    fmt: String, value: Int64, i32Type: LLVMTypeRef, i64Type: LLVMTypeRef, printfType: LLVMTypeRef,
+    printfFn: LLVMValueRef, fmtName: String): Unit {
+    let fmtPtr = EmitStringGlobalPtr(moduleHandle, builder, ctx, fmt, i32Type, fmtName)
+    try (emptyName = unsafe { LibC.mallocCString("") }.asResource(),
+        argPtr = LibC.malloc<LLVMValueRef>(count: 2).asResource()) {
+        unsafe {
+            // SignExtend = 1 so negative Int64 values reinterpret correctly as i64 constants.
+            let intConst = LLVMConstInt(i64Type, SignedInt64ToBits(value), 1)
+            (argPtr.value + 0).write(fmtPtr)
+            (argPtr.value + 1).write(intConst)
+            let _ = LLVMBuildCall2(builder, printfType, printfFn, argPtr.value, 2u32, emptyName.value)
         }
     }
 }
