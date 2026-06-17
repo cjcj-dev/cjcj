@@ -28,6 +28,7 @@ Implemented in this pass:
 - Ported C++ block-group and block invariants over the current IR: owner links, entry block presence, nonempty block rule, block-id uniqueness, top-level function consistency, terminator position, terminator jump target block-group checks, and predecessor/successor symmetry.
 - Added expression-level validation for parent/result back-links, operand use-lists, nested block-group owner links, terminator arity/successors, branch condition types, C++-shaped unary/binary arithmetic rules, memory load/store type rules, call-like argument/result checks, constant literal/result checks, and `GetInstantiateValue` stage rejection.
 - Refined unary/binary expression checking to match C++ behavior for `Nothing` operands, `%` integer-only operands, exponentiation (`Int64 ** UInt64 -> Int64` and `Float64 ** Int64/Float64 -> Float64`), bit-expression operand typing, comparison result typing, and logic expression result typing.
+- Refined aggregate expression checking for the current IR: `Tuple` results now dispatch by result kind and validate normal tuple element arity/types, struct member arity/types, enum selector type/constant source, enum constructor payload arity/types, and `VArray` element types.
 - Added local result identifier uniqueness and a reachable-operand/generic-type walk shaped after the C++ `CheckUnreachableOpAndGenericTyInFuncBody`, limited to the generic/value/type APIs currently present in the self-hosted IR.
 - Added `OverflowChecking.cj`, mirroring the C++ checker component split. It ports signed/unsigned integer overflow checks for add, neg, sub, mul, div, mod, int exponentiation overflow, wrapping and saturating result behavior, and integer typecast overflow helpers across signedness combinations.
 - Added `VarInitCheck.cj`, mirroring the C++ checker component split. It selects functions with the C++ skip rules available in the current IR, builds constructor member state, runs the real self-hosted `MaybeUninitAnalysis` and `MaybeInitAnalysis`, and checks use-before-init, uninitialized constructor exits, illegal member calls before full initialization, and reassignments to initialized `let` locals/members.
@@ -43,9 +44,10 @@ De-isolation:
 Remaining gaps:
 
 - The C++ checker has many checks on specialized CHIR expression classes (`Apply`, `Invoke`, `Tuple`, `Field`, `RawArrayAllocate`, RTTI, intrinsic, exception, virtual dispatch, vtables, generic instantiation maps, and more). The self-hosted IR currently represents most of these as generic `Expression` values, so this pass ports only the invariants expressible without inventing fake local fields.
+- Tuple checks use the current self-host `StructDef`/`EnumDef` member payload types directly. They do not yet reproduce the C++ builder-backed generic substitution used by `GetInstantiatedMemberTys` and `EnumType::GetConstructorInfos`.
 - C++ diagnostics use `DiagnosticEngine` and source ranges; the self-hosted checker still reports through `CHIRCheckResult` strings.
 - `VarInitCheck.cj` is limited by the current generic `Expression` representation: C++ `Load`, `StoreElementRef`, `ApplyWithException`, path vectors, `SkipCheck`, and precise diagnostics are approximated through the existing operand conventions and `CHIRCheckResult` strings.
 - `AnnotationChecker.cj` is limited by the current self-hosted annotation metadata. C++ `ClassDef::GetAnnotationTargets`, `CustomTypeDef::GetAnnoInfo`, `MemberVarInfo::annoInfo`, `EnumCtorInfo::annoInfo`, and `AnnoInfo::GetCustomAnnoInstances` with debug locations are not yet represented directly, so type/member/enum diagnostics are checked only through available metadata strings and `AnnoInfo.GetAnnotations()`.
 - `ComputeAnnotations` is still not ported. It depends on AST declaration and const-eval plumbing not yet represented in this CHIR package.
 
-Estimated checker behavior coverage vs C++ in this scope: 46%.
+Estimated checker behavior coverage vs C++ in this scope: 47%.

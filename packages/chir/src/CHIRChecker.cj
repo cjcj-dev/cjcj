@@ -1003,9 +1003,8 @@ public class CHIRChecker {
             case ExprKind.DEBUGEXPR =>
                 CheckOperandNumEqual(1, expr, topLevelFunc, result)
                 CheckUnitResult(expr, topLevelFunc, result)
-            case ExprKind.TUPLE | ExprKind.VARRAY =>
-                CheckOperandNumAtLeast(1, expr, topLevelFunc, result)
-                CheckHaveResult(expr, topLevelFunc, result)
+            case ExprKind.TUPLE => CheckTuple(expr, topLevelFunc, result)
+            case ExprKind.VARRAY => CheckVArray(expr, topLevelFunc, result)
             case ExprKind.FIELD | ExprKind.FIELD_BY_NAME | ExprKind.GET_EXCEPTION =>
                 CheckHaveResult(expr, topLevelFunc, result)
             case ExprKind.APPLY | ExprKind.INVOKE | ExprKind.INVOKESTATIC => CheckCallLike(expr, topLevelFunc, result)
@@ -1051,6 +1050,161 @@ public class CHIRChecker {
                 } else if (literal.IsUnitLit() && !resultTy.IsUnit()) {
                     TypeCheckResultError(expr, "Unit", topLevelFunc, result)
                 }
+            }
+        }
+    }
+
+    private func CheckTuple(expr: Expression, topLevelFunc: Function, result: CHIRCheckResult): Unit {
+        if (!CheckOperandNumAtLeast(1, expr, topLevelFunc, result) || !CheckHaveResult(expr, topLevelFunc, result)) {
+            return
+        }
+        if (let Some(resultTy) <- expr.GetResultType()) {
+            if (resultTy.IsEnum()) {
+                CheckEnumTuple(expr, resultTy, topLevelFunc, result)
+            } else if (resultTy.IsTuple()) {
+                CheckNormalTuple(expr, resultTy, topLevelFunc, result)
+            } else if (resultTy.IsStruct()) {
+                CheckStructTuple(expr, resultTy, topLevelFunc, result)
+            } else {
+                TypeCheckResultError(expr, "Enum, Tuple or Struct", topLevelFunc, result)
+            }
+        }
+    }
+
+    private func CheckEnumTuple(expr: Expression, resultTy: Type, topLevelFunc: Function,
+        result: CHIRCheckResult): Unit {
+        let operandsNum = expr.GetNumOfOperands()
+        if (operandsNum == 0) {
+            result.AddError("in function ${topLevelFunc.GetIdentifier()}, must have one operand in `" +
+                CHIRCheckerExpressionString(expr) + "` at least, and the 1st operand's type is UInt32 or Bool.")
+            return
+        }
+        let selector = expr.GetOperand(0)
+        if (let Some(selectorTy) <- selector.GetType()) {
+            if (!CHIRCheckerIsEnumSelectorType(selectorTy)) {
+                TypeCheckError(expr, selector, "UInt32 or Bool", topLevelFunc, result)
+                return
+            }
+        }
+        let maybeCtorIndex = CHIRCheckerConstEnumSelectorIndex(selector)
+        if (maybeCtorIndex.isNone()) {
+            result.AddError("in function ${topLevelFunc.GetIdentifier()}, the 1st operand in `" +
+                CHIRCheckerExpressionString(expr) + "` must be from Constant UInt32 or Constant Bool.")
+            return
+        }
+        if (operandsNum == 1) {
+            return
+        }
+        if (let Some(enumTy) <- (resultTy as EnumType)) {
+            if (let Some(enumDef) <- (enumTy.GetCustomTypeDef() as EnumDef)) {
+                if (let Some(ctorIndex) <- maybeCtorIndex) {
+                    let ctors = enumDef.GetCtors()
+                    if (ctorIndex < 0 || ctorIndex >= ctors.size) {
+                        result.AddError("in function ${topLevelFunc.GetIdentifier()}, index out of range, in `" +
+                            CHIRCheckerExpressionString(expr) + "` its enum constructor's number is ${ctors.size} " +
+                            "but the index is ${ctorIndex}.")
+                        return
+                    }
+                    let payloadTypes = ctors[ctorIndex].payloadTypes
+                    if (operandsNum - 1 != payloadTypes.size) {
+                        result.AddError("in function ${topLevelFunc.GetIdentifier()}, size mismatched, there are " +
+                            "${payloadTypes.size} parameter(s) in the ${ctorIndex}-th constructor, but " +
+                            "${operandsNum - 1} arguments are provided in `" + CHIRCheckerExpressionString(expr) + "`.")
+                        return
+                    }
+                    var idx: Int64 = 1
+                    while (idx < operandsNum) {
+                        let operand = expr.GetOperand(idx)
+                        if (let Some(operandTy) <- operand.GetType()) {
+                            let expectedTy = payloadTypes[idx - 1]
+                            if (!CHIRCheckerTypeIsExpected(operandTy, expectedTy)) {
+                                result.AddError("in function ${topLevelFunc.GetIdentifier()}, type mismatched, the " +
+                                    "${idx - 1}-th parameter type is ${expectedTy.ToString()}, but " +
+                                    "${operand.GetIdentifier()}'s type is ${operandTy.ToString()} in `" +
+                                    CHIRCheckerExpressionString(expr) + "`.")
+                            }
+                        }
+                        idx++
+                    }
+                }
+            }
+        }
+    }
+
+    private func CheckNormalTuple(expr: Expression, resultTy: Type, topLevelFunc: Function,
+        result: CHIRCheckResult): Unit {
+        if (let Some(tupleTy) <- (resultTy as TupleType)) {
+            let elementTypes = tupleTy.GetTypeArgsRef()
+            let operandsNum = expr.GetNumOfOperands()
+            if (operandsNum != elementTypes.size) {
+                result.AddError("in function ${topLevelFunc.GetIdentifier()}, size mismatched, there are " +
+                    "${elementTypes.size} element(s) in the tuple type `${resultTy.ToString()}`, but ${operandsNum} " +
+                    "operand(s) are provided in `" + CHIRCheckerExpressionString(expr) + "`.")
+                return
+            }
+            var idx: Int64 = 0
+            while (idx < elementTypes.size) {
+                let operand = expr.GetOperand(idx)
+                if (let Some(operandTy) <- operand.GetType()) {
+                    let expectedTy = elementTypes[idx]
+                    if (!CHIRCheckerTypeIsExpected(operandTy, expectedTy)) {
+                        result.AddError("in function ${topLevelFunc.GetIdentifier()}, type mismatched, the ${idx}-th " +
+                            "element type in tuple type `${resultTy.ToString()}` is ${expectedTy.ToString()}, but " +
+                            "${operand.GetIdentifier()}'s type is ${operandTy.ToString()} in `" +
+                            CHIRCheckerExpressionString(expr) + "`.")
+                    }
+                }
+                idx++
+            }
+        }
+    }
+
+    private func CheckStructTuple(expr: Expression, resultTy: Type, topLevelFunc: Function,
+        result: CHIRCheckResult): Unit {
+        if (let Some(structTy) <- (resultTy as StructType)) {
+            if (let Some(structDef) <- (structTy.GetCustomTypeDef() as StructDef)) {
+                let memberVars = structDef.GetInstanceVars()
+                let operandsNum = expr.GetNumOfOperands()
+                if (operandsNum != memberVars.size) {
+                    result.AddError("in function ${topLevelFunc.GetIdentifier()}, size mismatched, there are " +
+                        "${memberVars.size} instance member var(s) in the struct ${structDef.GetIdentifier()}, but " +
+                        "${operandsNum} operand(s) are provided in `" + CHIRCheckerExpressionString(expr) + "`.")
+                    return
+                }
+                var idx: Int64 = 0
+                while (idx < memberVars.size) {
+                    let operand = expr.GetOperand(idx)
+                    if (let Some(operandTy) <- operand.GetType()) {
+                        let memberTy = memberVars[idx].ty
+                        if (!CHIRCheckerTypeIsExpected(operandTy, memberTy)) {
+                            result.AddError("in function ${topLevelFunc.GetIdentifier()}, type mismatched, the " +
+                                "${idx}-th member var type in struct ${structDef.GetIdentifier()} is " +
+                                "${memberTy.ToString()}, but ${operand.GetIdentifier()}'s type is " +
+                                "${operandTy.ToString()} in `" + CHIRCheckerExpressionString(expr) + "`.")
+                        }
+                    }
+                    idx++
+                }
+            }
+        }
+    }
+
+    private func CheckVArray(expr: Expression, topLevelFunc: Function, result: CHIRCheckResult): Unit {
+        if (!CheckHaveResult(expr, topLevelFunc, result)) {
+            return
+        }
+        if (let Some(resultTy) <- expr.GetResultType()) {
+            if (let Some(varrayTy) <- (resultTy as VArrayType)) {
+                let elementTy = varrayTy.GetElementType()
+                for (operand in expr.GetOperands()) {
+                    if (let Some(operandTy) <- operand.GetType()) {
+                        if (!CHIRCheckerTypeIsExpected(operandTy, elementTy)) {
+                            TypeCheckError(expr, operand, elementTy.ToString(), topLevelFunc, result)
+                        }
+                    }
+                }
+            } else {
+                TypeCheckResultError(expr, "VArray", topLevelFunc, result)
             }
         }
     }
@@ -1543,6 +1697,26 @@ private func CHIRCheckerTypeIsExpected(srcType: Type, dstType: Type): Bool {
         return false
     }
     return srcType.ToString() == dstType.ToString()
+}
+
+private func CHIRCheckerIsEnumSelectorType(ty: Type): Bool {
+    return ty.IsBoolean() || ty.GetTypeKind() == TypeKind.TYPE_UINT32
+}
+
+private func CHIRCheckerConstEnumSelectorIndex(value: Value): Option<Int64> {
+    if (let Some(localVar) <- value.AsLocalVar()) {
+        if (let Some(ownerExpr) <- localVar.GetExpr()) {
+            if (let Some(constantExpr) <- (ownerExpr as Constant)) {
+                if (let Some(boolLiteral) <- (constantExpr.literal as BoolLiteral)) {
+                    return if (boolLiteral.value) { 1 } else { 0 }
+                }
+                if (let Some(intLiteral) <- (constantExpr.literal as IntLiteral)) {
+                    return intLiteral.value
+                }
+            }
+        }
+    }
+    return None
 }
 
 private func CHIRCheckerTypeMustBeRef(ty: Type): Bool {
