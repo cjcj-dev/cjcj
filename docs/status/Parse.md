@@ -30,6 +30,9 @@ the real Utils `OverflowStrategy` type rather than a Parse-local copy.
 `ParserTypes.cj` no longer owns local copies of `GlobalOptions`, `OutputMode`,
 `InteropLanguage`, `BackendType`, or `Triple`; those names are public aliases of
 the real Option package types.
+`MacroInvocation` now reuses the real Basic `MacroCallDiagInfo` for macro
+origin/identifier diagnostic mapping while the surrounding macro node classes
+remain Parse-local until the full AST node hierarchy can be replaced.
 `Lexer.cj` has been removed from Parse. The parser now imports and constructs the
 real `cangjie_compiler::lex.Lexer`, with a real Basic diagnostic engine reserved
 for lexing while the remaining parser-facing diagnostics still use the local
@@ -187,6 +190,18 @@ Parse shim.
   `TokenPart` expression nodes for literal token runs, parses `$identifier` as a
   quote-dollar reference expression, parses `$(expr)` by temporarily restoring
   normal lexer mode, and removed the non-C++ brace quote form.
+- Deepened macro parsing toward `ParseMacro.cpp`: macro invocations now carry
+  C++-shaped name, delimiter, attr/arg, parent/decl, and diagnostic fields; parse
+  dotted macro names and `@!`; preserve macro attributes separately from input
+  args; record origin positions with the real Basic `MacroCallDiagInfo`; handle
+  escaped macro-call tokens; and capture no-parentheses declaration input by
+  reparsing the following declaration into `invocation.decl` while mirroring its
+  consumed tokens in `args`/legacy `tokens`.
+- Reworked macro declarations away from the ordinary function path: `macro`
+  declarations now enable `MACRO_FUNC`, reject builtin macro/annotation names,
+  require `public`, require a macro package when a current file is available,
+  validate one or two `Tokens` parameters, synthesize a default `Tokens` return
+  type, and parse bodies in `MACRO_BODY` scope.
 
 ## Remaining Work
 
@@ -200,6 +215,9 @@ Parse shim.
   `ParserImpl`, while parser diagnostics are still message-based through the
   local Parse diagnostic shim. Converting parser diagnostics to real Basic
   diagnostic IDs remains the next major de-isolation step.
+- Macro expansion parsing still lacks the full C++ parameter-macro and
+  expression-scope no-parentheses reparsing behavior, exact macro diagnostic IDs,
+  and interpolation string origin-position remapping.
 - Audit grammar and diagnostic parity against the full C++ Parse test corpus;
   the current parser is substantial and compiling, but not a complete faithful
   replacement for all 17k+ lines of C++ parser behavior.

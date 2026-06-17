@@ -701,6 +701,7 @@ public class TokenPart <: Expr {
 
 public class MacroExpandExpr <: Expr {
     public var invocation: MacroInvocation = MacroInvocation()
+    public var identifier: SrcIdentifier = SrcIdentifier()
     public init() { super(ASTKind.MACRO_EXPAND_EXPR) }
 }
 

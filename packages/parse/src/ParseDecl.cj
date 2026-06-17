@@ -238,8 +238,151 @@ extend ParserImpl {
 
     public func ParseMacroDecl(scopeKind: ScopeKind, modifiers: ArrayList<Modifier>, annos: ArrayList<Annotation>): MacroDecl {
         let ret = MacroDecl()
-        ParseFuncLikeHeader(ret, TokenKind.MACRO, scopeKind, modifiers, annos)
+        ApplyModifiersAndAnnotations(ret, modifiers, annos)
+        let _ = CheckDeclModifiers(modifiers, scopeKind, DefKind.MACRO)
+        let keywordToken = Expect(TokenKind.MACRO, "expected 'macro'")
+        ret.keywordPos = keywordToken.Begin()
+        if (ret.begin.IsZero()) {
+            ret.begin = keywordToken.Begin()
+        }
+        ret.EnableAttr(Attribute.MACRO_FUNC)
+        ret.identifier = ExpectIdentifierWithPos(ret)
+        if (IsBuiltinAnnotation(moduleName, ret.identifier.Val()) || IsBuiltinMacroDeclName(ret.identifier.Val())) {
+            let builtinKind = if (IsBuiltinMacroDeclName(ret.identifier.Val())) { "macro" } else { "annotation" }
+            diag.DiagnoseRefactor(
+                DiagKindRefactor.PARSE_ERROR,
+                ret.identifier.Begin(),
+                "macro declaration '${ret.identifier.Val()}' conflicts with builtin ${builtinKind}")
+            ret.EnableAttr(Attribute.IS_BROKEN)
+        }
+        let body = ParseMacroBody(ret)
+        ret.funcBody = body
+        ret.end = body.end
+        if (!ret.TestAttr(Attribute.PUBLIC) && !ret.TestAttr(Attribute.IS_BROKEN)) {
+            diag.DiagnoseRefactor(
+                DiagKindRefactor.INVALID_MODIFIER,
+                ret.begin,
+                "macro declaration must be public")
+            ret.EnableAttr(Attribute.IS_BROKEN)
+        }
+        CheckMacroDeclPackage(ret)
         return ret
+    }
+
+    private func ParseMacroBody(macroDecl: MacroDecl): FuncBody {
+        let body = FuncBody()
+        body.begin = Peek().Begin()
+        body.paramLists.add(ParseMacroParameterList(macroDecl))
+        if (Skip(TokenKind.COLON)) {
+            body.colonPos = lastToken.Begin()
+            body.retType = ParseType()
+            if (let Some(retType) <- body.retType) {
+                CheckMacroParamType(macroDecl, retType, true)
+                body.end = retType.end
+            }
+        }
+        if (body.retType.isNone()) {
+            let retPos = if (lastToken.Begin() == INVALID_POSITION) { Peek().Begin() } else { lastToken.Begin() }
+            body.retType = MakeTokensRefType(retPos)
+        }
+        if (Seeing(TokenKind.LCURL)) {
+            body.body = ParseBlock(ScopeKind.MACRO_BODY)
+            if (let Some(block) <- body.body) {
+                body.end = block.end
+            }
+        } else {
+            let invalidBlock = Block()
+            invalidBlock.begin = lastToken.End()
+            invalidBlock.end = lastToken.End()
+            invalidBlock.isBroken = true
+            body.body = invalidBlock
+            body.end = invalidBlock.end
+            diag.DiagnoseRefactor(
+                DiagKindRefactor.EXPECTED_TOKEN,
+                Peek().Begin(),
+                "expected macro body for '${macroDecl.identifier.Val()}'")
+            macroDecl.EnableAttr(Attribute.IS_BROKEN)
+        }
+        return body
+    }
+
+    private func ParseMacroParameterList(macroDecl: MacroDecl): FuncParamList {
+        let paramList = ParseParameterList(ScopeKind.MACRO_BODY)
+        if (paramList.params.isEmpty() || paramList.params.size > 2) {
+            let pos = if (paramList.params.isEmpty()) { paramList.begin } else { paramList.params[0].begin }
+            diag.DiagnoseRefactor(
+                DiagKindRefactor.PARSE_ERROR,
+                pos,
+                "macro declaration expects one or two Tokens parameters")
+            macroDecl.EnableAttr(Attribute.IS_BROKEN)
+        } else {
+            for (param in paramList.params) {
+                if (let Some(paramType) <- param.typeNode) {
+                    CheckMacroParamType(macroDecl, paramType, false)
+                } else {
+                    diag.DiagnoseRefactor(
+                        DiagKindRefactor.PARSE_ERROR,
+                        param.begin,
+                        "macro parameter type must be Tokens")
+                    macroDecl.EnableAttr(Attribute.IS_BROKEN)
+                }
+                if (param.isNamedParam) {
+                    diag.DiagnoseRefactor(
+                        DiagKindRefactor.PARSE_ERROR,
+                        param.begin,
+                        "macro parameters cannot be named parameters")
+                    macroDecl.EnableAttr(Attribute.IS_BROKEN)
+                }
+            }
+        }
+        return paramList
+    }
+
+    private func CheckMacroParamType(macroDecl: MacroDecl, typeNode: Type, isReturnTy: Bool): Unit {
+        if (IsTokensRefType(typeNode)) {
+            return
+        }
+        let subject = if (isReturnTy) { "return type" } else { "parameter type" }
+        diag.DiagnoseRefactor(
+            DiagKindRefactor.PARSE_ERROR,
+            typeNode.begin,
+            "macro ${subject} must be Tokens")
+        macroDecl.EnableAttr(Attribute.IS_BROKEN)
+    }
+
+    private func IsTokensRefType(typeNode: Type): Bool {
+        if (let Some(refType) <- (typeNode as RefType)) {
+            return refType.identifier.Val() == "Tokens" && refType.typeArguments.isEmpty()
+        }
+        return false
+    }
+
+    private func MakeTokensRefType(pos: Position): RefType {
+        let typeNode = RefType()
+        typeNode.begin = pos
+        typeNode.end = pos
+        typeNode.identifier = SrcIdentifier("Tokens", "Tokens", pos, pos, false)
+        return typeNode
+    }
+
+    private func CheckMacroDeclPackage(macroDecl: MacroDecl): Unit {
+        if (let Some(file) <- currentFile) {
+            var inMacroPackage = false
+            if (let Some(pkg) <- file.packageSpec) {
+                inMacroPackage = pkg.hasMacro
+            }
+            if (!inMacroPackage) {
+                diag.DiagnoseRefactor(
+                    DiagKindRefactor.PARSE_ERROR,
+                    macroDecl.identifier.Begin(),
+                    "macro declaration must be defined in a macro package")
+                macroDecl.EnableAttr(Attribute.IS_BROKEN)
+            }
+        }
+    }
+
+    private func IsBuiltinMacroDeclName(identifier: String): Bool {
+        return identifier == "sourcePackage" || identifier == "sourceFile" || identifier == "sourceLine"
     }
 
     public func ParseMainDecl(scopeKind: ScopeKind, modifiers: ArrayList<Modifier>, annos: ArrayList<Annotation>): MainDecl {
