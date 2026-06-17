@@ -44,6 +44,12 @@ Current status:
   `chir`/`obj`/`hotreload` output-type parsing, PGO flags, section flags, jobs,
   warning forwarding, and target-triple validation are represented in Driver
   options.
+- Driver post-action validation now carries more of the C++ `GlobalOptions`
+  behavior needed by Driver: `--compile-as-exe` is tracked separately from
+  `--compile-target`, LTO mode rejects unsupported targets/options, PGO gen/use
+  conflicts and profile files are checked, compile-target is normalized for
+  non-object output, and aggressive parallel compile defaults/disable rules are
+  derived from jobs, target OS, LTO, coverage, and obfuscation.
 - Driver option parsing now matches additional C++ `OptionTable` behaviors for
   path-bearing driver options: `-L`, `-B`, and `--sysroot` validate directories
   and store absolute paths, obfuscation mapping/config inputs are validated as

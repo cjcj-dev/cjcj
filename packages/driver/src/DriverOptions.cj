@@ -3,6 +3,7 @@ package cangjie_compiler::driver
 import std.collection.*
 import cangjie_compiler::option.Backend as OptionBackend
 import cangjie_compiler::option.BackendToString as OptionBackendToString
+import cangjie_compiler::option.GetHardwareConcurrency
 import cangjie_compiler::utils.FileMode
 
 public let OBFUCATION_LEVEL_MIN: Int64 = 1
@@ -92,6 +93,7 @@ public class DriverOptions {
     public var linkStaticStd: Option<Bool> = None
     public var linkStaticLibs: Option<Bool> = None
     public var ltoMod: LTOMode = LTOMode.NO_LTO
+    public var enableCompileAsExe: Bool = false
     public var ltoHideAllPkgs: Bool = false
     public let ltoVisiblePkgs: ArrayList<String> = ArrayList<String>()
     public var outputMode: OutputMode = OutputMode.EXECUTABLE
@@ -197,7 +199,8 @@ public class DriverOptions {
     public func IsFullLTOEnabled(): Bool { return ltoMod == LTOMode.FULL_LTO }
     public func IsEmitCHIREnable(): Bool { return outputMode == OutputMode.CHIR || !emitCHIRPhase.isEmpty() }
     public func GetLtoVisiblePkgs(): Array<String> { return ltoVisiblePkgs.toArray() }
-    public func IsCompileAsExeEnabled(): Bool { return outputMode == OutputMode.EXECUTABLE || compileTarget == CompileTarget.EXECUTABLE }
+    public func IsCompileAsExeEnabled(): Bool { return enableCompileAsExe }
+    public func IsLTOPkgVisibilityEnabled(): Bool { return ltoHideAllPkgs || !ltoVisiblePkgs.isEmpty() }
     public func EnableAsan(): Bool { return sanitizerType == SanitizerType.ADDRESS }
     public func EnableTsan(): Bool { return sanitizerType == SanitizerType.THREAD }
     public func EnableHwAsan(): Bool { return sanitizerType == SanitizerType.HWADDRESS }
@@ -347,6 +350,12 @@ public class DriverOptions {
     }
 
     private func PerformPostActions(): Bool {
+        if (showUsage || printVersionOnly) {
+            return true
+        }
+        if (outputMode == OutputMode.OBJ && compileTarget == CompileTarget.DEFAULT) {
+            compileTarget = CompileTarget.EXECUTABLE
+        }
         if (!ReprocessObfuseOption()) {
             return false
         }
@@ -354,6 +363,11 @@ public class DriverOptions {
         success = success && CheckTargetCPUOption()
         success = success && CheckObfuscationOptions()
         success = success && SetupSysroot()
+        success = success && CheckSanitizerOptions()
+        success = success && CheckLTOOptions()
+        success = success && CheckPGOOptions()
+        success = success && CheckCompileTargetOption()
+        ReprocessAggressiveParallelCompile()
         success = success && CheckRuntimeRPath()
         success = success && CheckSanitizerRPath()
         success = success && CheckStaticOption()
@@ -431,6 +445,154 @@ public class DriverOptions {
             eprintln("warning: '--sanitize-set-rpath' option has no effect on cross-compiled targets.")
         }
         return true
+    }
+
+    private func CheckSanitizerOptions(): Bool {
+        if (!EnableSanitizer()) {
+            return true
+        }
+        let runtimeDirPath = FileUtil.JoinPath(cangjieHome, "runtime")
+        let libraryDirPath = FileUtil.JoinPath(FileUtil.JoinPath(runtimeDirPath, "lib"), GetCangjieLibTargetPathName())
+        let sanitizerPath = FileUtil.JoinPath(libraryDirPath, SanitizerTypeToShortString())
+        let runtimePath = FileUtil.JoinPath(sanitizerPath, "libcangjie-runtime" + DylibSuffix(target.os))
+        if (!FileUtil.FileExist(runtimePath)) {
+            eprintln("error: ${SanitizerTypeToShortString()} sanitizer feature is not supported.")
+            return false
+        }
+        if (IsLTOEnabled()) {
+            eprintln("error: option '--sanitize' and '--lto' cannot be enabled together.")
+            return false
+        }
+        if (discardEhFrame) {
+            eprintln("error: option '--sanitize' and '--discard-eh-frame' cannot be enabled together.")
+            return false
+        }
+        if (compileMacro) {
+            eprintln("error: option '--sanitize' and '--compile-macro' cannot be enabled together.")
+            return false
+        }
+        if (EnableAsan() && target.GetOSFamily() != OSType.LINUX) {
+            eprintln("error: Address Sanitizer is only supported on Linux.")
+            return false
+        }
+        if (EnableHwAsan() && target.GetOSFamily() != OSType.LINUX) {
+            eprintln("error: Hardware-Assisted Address Sanitizer is only supported on Linux.")
+            return false
+        }
+        if (EnableHwAsan() && target.arch != ArchType.X86_64 && target.arch != ArchType.AARCH64) {
+            eprintln("error: Hardware-Assisted Address Sanitizer is only supported on X86_64 or aarch64.")
+            return false
+        }
+        if (EnableTsan() && target.GetOSFamily() != OSType.LINUX && target.GetOSFamily() != OSType.WINDOWS) {
+            eprintln("error: Thread Sanitizer is only supported on Linux/Windows.")
+            return false
+        }
+        return true
+    }
+
+    private func CheckLTOOptions(): Bool {
+        if (IsLTOEnabled()) {
+            if (target.GetOSFamily() == OSType.DARWIN || target.GetOSFamily() == OSType.IOS ||
+                target.GetOSFamily() == OSType.WINDOWS) {
+                eprintln("error: LTO mode is not supported on target '${target.OSToString()}'.")
+                return false
+            }
+            if (outputMode == OutputMode.OBJ) {
+                eprintln("error: --output-type=obj is not allowed in LTO mode.")
+                return false
+            }
+            if (outputMode == OutputMode.STATIC_LIB && !bcInputFiles.isEmpty()) {
+                eprintln("error: input bitcode files cannot be used when generating a static library in LTO mode.")
+                return false
+            }
+            if (optimizationLevel == OptimizationLevel.Os || optimizationLevel == OptimizationLevel.Oz) {
+                eprintln("error: -Os and -Oz optimize options are not supported in LTO mode.")
+                return false
+            }
+        }
+        if (IsCompileAsExeEnabled()) {
+            if (!IsLTOEnabled()) {
+                eprintln("error: option '--compile-as-exe' can only be enabled in LTO mode.")
+                return false
+            }
+            if (target.GetOSFamily() == OSType.WINDOWS || target.GetOSFamily() == OSType.DARWIN ||
+                target.GetOSFamily() == OSType.IOS) {
+                eprintln("error: option '--compile-as-exe' is not supported on this target platform.")
+                return false
+            }
+        }
+        if (IsLTOPkgVisibilityEnabled()) {
+            if (!IsLTOEnabled()) {
+                eprintln("error: option '--lto-keep-pkg-visibility' can only be enabled in LTO mode.")
+                return false
+            }
+            if (!ltoVisiblePkgs.isEmpty() && IsCompileAsExeEnabled()) {
+                eprintln("error: option '--lto-keep-pkg-visibility' conflicts with '--compile-as-exe'.")
+                return false
+            }
+            if (outputMode != OutputMode.SHARED_LIB) {
+                eprintln("warning: option '--lto-keep-pkg-visibility' has effect only when emitting a dynamic library.")
+            }
+        }
+        return true
+    }
+
+    private func CheckPGOOptions(): Bool {
+        if (enablePgoInstrGen && enablePgoInstrUse) {
+            eprintln("error: options '--pgo-instr-gen' and '--pgo-instr-use' cannot be enabled together.")
+            return false
+        }
+        if (enablePgoInstrGen && target.env == EnvironmentType.OHOS && pgoProfileFile.isEmpty()) {
+            eprintln("error: option '--pgo-instr-gen' requires a profile file on OHOS targets.")
+            return false
+        }
+        if (enablePgoInstrUse) {
+            if (!FileUtil.FileExist(pgoProfileFile)) {
+                eprintln("error: no such file or directory '${pgoProfileFile}'")
+                return false
+            }
+            if (FileUtil.GetFileExtension(pgoProfileFile) != "profdata") {
+                eprintln("error: PGO profile '${pgoProfileFile}' must have .profdata extension.")
+                return false
+            }
+        }
+        return true
+    }
+
+    private func CheckCompileTargetOption(): Bool {
+        if (outputMode != OutputMode.OBJ && compileTarget != CompileTarget.DEFAULT) {
+            compileTarget = CompileTarget.DEFAULT
+            eprintln("warning: '--compile-target' is valid only with '--output-type=obj'; argument ignored.")
+        }
+        if (srcFiles.isEmpty() && (outputMode == OutputMode.OBJ || outputMode == OutputMode.CHIR) && !compilePackage) {
+            eprintln("error: no source file is provided.")
+            return false
+        }
+        if (!compilePackage && srcFiles.isEmpty() && !inputObjs.isEmpty() && !experimentalMode) {
+            eprintln("error: object-file-only compilation requires '--experimental'.")
+            return false
+        }
+        return true
+    }
+
+    private func ReprocessAggressiveParallelCompile(): Unit {
+        if (let None <- jobs) {
+            jobs = GetHardwareConcurrency()
+        }
+        let jobsValue = jobs ?? 1u64
+        let targetDisablesAPC = target.os == OSType.WINDOWS || target.os == OSType.DARWIN || target.os == OSType.IOS
+        if (targetDisablesAPC || IsObfuscationEnabled() || IsLTOEnabled() || enableCoverage) {
+            if (targetDisablesAPC && (aggressiveParallelCompileWithoutArg || (if (let Some(_) <- aggressiveParallelCompile) { true } else { false }))) {
+                eprintln("warning: '--apc' is not supported when targeting ${target.OSToString()}.")
+            }
+            aggressiveParallelCompile = 1
+        } else if (let None <- aggressiveParallelCompile) {
+            if (optimizationLevel == OptimizationLevel.O0 || aggressiveParallelCompileWithoutArg) {
+                aggressiveParallelCompile = Int64(jobsValue)
+            } else {
+                aggressiveParallelCompile = 1
+            }
+        }
     }
 
     private func CheckStaticOption(): Bool {

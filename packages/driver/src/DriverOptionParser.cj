@@ -188,7 +188,7 @@ private func ParseOption(opts: DriverOptions, cursor: ParseCursor, arg: String):
     if (arg == "--gc-sections") { opts.enableGcSections = true; return true }
     if (arg == "--no-gc-sections") { opts.enableGcSections = false; return true }
     if (arg == "--discard-eh-frame") { opts.discardEhFrame = true; return true }
-    if (arg == "--compile-as-exe") { opts.compileTarget = CompileTarget.EXECUTABLE; return true }
+    if (arg == "--compile-as-exe") { opts.enableCompileAsExe = true; return true }
     if (ParseOptimization(opts, arg)) { return true }
     if (ParseWarningFlag(opts, cursor, arg)) { return true }
     if (ParseObfuscationFlag(opts, cursor, arg)) { return true }
