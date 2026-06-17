@@ -25,15 +25,17 @@ returns lower through `CreateLiteralReturnBody`).
 The following programs compile with the self-host `cjc`
 (`./target/release/bin/cangjie_compiler::cjc`) and run with the verified behavior
 shown. Each was re-verified by real compile-and-run on 2026-06-18 (latest: the
-richer-loops milestone) after merging
+String milestone) after merging
 `opus2/int-arith-return`, `opus2/println-int`, `opus3/real-expr`,
 `opus4/control-flow` (var/assign, relational ops, `if`/`while` via real CHIR
 blocks), `opus5/func-calls` (user-defined function calls + recursion via
 real CHIR `Apply`), `opus6/print-runtime` (`println`/`print` of a
 runtime-computed value), `opus8/bool` (first-class `Bool` values: literals,
 `Bool` locals/params/returns, `&&`/`||`/`!`, relational results as values,
-`println(<Bool>)`), and `opus9/loops` (`for-in` over `..`/`..=` integer ranges,
-`break`, `continue`) into `main`:
+`println(<Bool>)`), `opus9/loops` (`for-in` over `..`/`..=` integer ranges,
+`break`, `continue`), and `opus11/string` (first-class `String` values:
+literals, locals/params/returns, `+` concatenation, `println`/`print` of a
+runtime `String`) into `main`:
 
 | Source | Verified behavior |
 | --- | --- |
@@ -54,6 +56,9 @@ runtime-computed value), `opus8/bool` (first-class `Bool` values: literals,
 | `main(): Int64 { var x = 2; x = x + 3; return x }` | exits with code 5 (`var` slot + reassignment Store) |
 | `main(): Int64 { let a = 7; if (a > 3) { return 1 } else { return 0 } }` | exits with code 1 (real `if`/`else` CHIR blocks + relational branch condition) |
 | `main(): Int64 { let a = 2; let b = 3; return a + b }` | exits with code 5, computed at **runtime** by a real CHIR `Add` (not folded) |
+| `main() { let s = "hello"; println(s) }` | prints `hello` -- a `String` local bound from a literal, then printed at runtime (CUT 1) |
+| `main() { let a = "foo"; let b = "bar"; println(a + b) }` | prints `foobar` -- runtime `String` concatenation via `+` (CUT 2) |
+| `func greet(name: String): String { return "hi " + name }` ⏎ `main() { println(greet("cj")) }` | prints `hi cj` -- a `String` parameter + `String` return + concat across a real CHIR `Apply` (CUT 3) |
 | `main() { println("hello selfhost") }` | prints `hello selfhost` + newline |
 | `main() { print("a"); print("b"); println("c") }` | prints `abc` + newline |
 | `main(): Int64 { return 7 }` | exits with code 7 |
@@ -248,6 +253,35 @@ Capability detail:
   {if(i==3){continue}; s=s+i}` -> exit 12; `for (i in 0..3){println(i)}` -> `0`/`1`/`2`;
   `while(true){if(i==4){break};...}` -> exit 6; nested `for (i in 0..3){for (j in 0..3)
   {s=s+1}}` -> exit 9.
+- **String milestone (`opus11/string`):** the real body-lowering path now models `String`
+  as a first-class value, represented end to end as a CString (`i8*`). Three cuts landed,
+  all verified by real compile+run: **CUT 1** -- a `String` literal bound to a `let`/`var`
+  local and `println`/`print` of that `String` value (`let s = "hello"; println(s)` ->
+  `hello`); **CUT 2** -- runtime `String` concatenation with `+`
+  (`let a="foo"; let b="bar"; println(a + b)` -> `foobar`, and a `var` reassigned to a
+  concat -> `abc`); **CUT 3** -- `String` function parameters and a `String` return type
+  across a real CHIR `Apply` (`func greet(name: String): String { return "hi " + name }`
+  -> `hi cj`). It is additive and gated like the prior milestones: a body using any
+  unsupported construct leaves `hasRealBody == false` and falls back to the summary path,
+  so the already-verified Int64/Bool/loop/func/print slices stay byte-for-byte. The spec
+  model (`packages/chir/src/AST2CHIR.cj`) gains a `STR_LITERAL` `AST2CHIRExprSpec` kind
+  (text -> CString `Constant`); a binary `ADD` whose operands are CString lowers to a
+  CString-result concat, and CString values round-trip through CString-typed local slots.
+  `TranslateFuncBody.cj` infers the CString element type for `String` slots and records a
+  runtime String-value print directive (`runtimePrintIsStr`/value-id machinery extended in
+  `Value.cj`). Codegen (`packages/codegen/src/EmitStringIR.cj`, new) materializes a CString
+  `StringLiteral` as an `i8*` pointer into a private constant global
+  (`EmitCStringLiteralPointer`), lowers a CString-result `ADD` to a runtime concat via libc
+  `strlen`/`malloc`/`strcpy`/`strcat` (`EmitCStringConcat`), and prints a runtime `i8*`
+  String value via `puts`/`fputs` (`EmitRuntimeStringValuePrint`); `EmitExpressionIR.cj`
+  routes a runtime String print to that emitter and `IRBuilder.cj` gains the supporting
+  global/cstring helpers. The real parser adapter (`RealParseBridge.cj`) recognizes
+  `String` literals, `String`-typed locals/params, `String`-returning calls, and `+`
+  concat, mapping the `String` source type to CString so real-body String signatures stay
+  consistent; a `String`-valued return promotes the body to the real path. Verified at
+  runtime (no folding): `let s="hello"; println(s)` -> `hello`; `let a="foo"; let b="bar";
+  println(a + b)` -> `foobar`; `var`-reassigned concat -> `abc`; `greet("cj")` -> `hi cj`;
+  bare `String`-literal return -> `hello` (previously crashed in LLVM verify).
 
 These are the only source constructs the integrated pipeline lowers end to end
 today; anything else still flows through the compatibility models described
@@ -255,13 +289,20 @@ below.
 
 ### Remaining de-isolation follow-ups
 
-- **Runtime `String` values and other-width numeric print values.** The runtime print
-  path now lowers an `Int64` value to `printf("%ld")` and a `Bool` value to
-  `printf("%s")` over `"true"`/`"false"`; printing (or otherwise computing with) a
-  runtime `String` value, or an other-width integer/`Float` value, is not yet wired.
-  Extend the PRINT lowering / `EmitRuntime*Print` (format selection + a real `String`
-  runtime representation) once those value types flow through the real body. A `String`
-  *local/var* and string concatenation on the real path are the next concrete step.
+- **Real Cangjie `String` representation and other-width numeric print values.** The
+  runtime print path now lowers an `Int64` value to `printf("%ld")`, a `Bool` value to
+  `printf("%s")` over `"true"`/`"false"`, and a `String` value to `puts`/`fputs`
+  (`opus11/string`). `String` on the real path is currently modelled as a raw CString
+  (`i8*`): literals, locals/params/returns, `+` concat (libc
+  `strlen`/`malloc`/`strcpy`/`strcat`), and print all work, but this is **not** the
+  production Cangjie `String` struct/array representation the reference cjc emits, the
+  concat `malloc` is never freed (leaks), and only the `+` operator / println-print are
+  wired (no `.size`, indexing, interpolation, comparison, `String`-keyed collections, or
+  other `String` methods). Replace the CString model with the real runtime `String`
+  representation and route concat/print/compare through the runtime's `String`
+  construct/concat/print symbols. Printing (or otherwise computing with) an other-width
+  integer or `Float` value is also still not wired -- extend the PRINT lowering /
+  `EmitRuntime*Print` (format selection) once those value types flow through the real body.
 - **More operators and statement kinds on the real path.** `match` and compound
   assignment (`+=` etc.) are still unsupported (the body falls back to the summary path).
   `for-in` over integer ranges plus `break`/`continue` are now supported (`opus9/loops`);
@@ -276,9 +317,10 @@ below.
   `resolveLetLiteral` / `captureFunctionBodyPrints`) and the compile-time
   arithmetic fold, so all bodies flow through `RealParseBridge` ->
   `AST2CHIRStmtSpec` -> `CreateRealBody`.
-- Extend the real-body adapter to more statement kinds and types beyond `Int64`
-  and `Bool` (`String`, other integer/`Float` widths, `for-in` over non-range
-  iterables, `match`).
+- Extend the real-body adapter to more statement kinds and types beyond `Int64`,
+  `Bool`, and `String` (other integer/`Float` widths, `for-in` over non-range
+  iterables, `match`); deepen `String` beyond literal/concat/print to the real
+  runtime `String` representation with methods, indexing, and comparison.
 - Converge `frontend.*` / `parse.*` / `ast.*` (make the bridge consume `ast.*`
   produced from `parse.*`, or have `parse` emit `ast.*` directly) and delete the
   frontend minimal AST (`FrontendModel.cj`).
@@ -294,7 +336,7 @@ return a + b` slice that exits 5 via a runtime CHIR `Add`) is in
 
 | Metric | Value |
 | --- | ---: |
-| Overall behavior-faithful self-host estimate | 50% |
+| Overall behavior-faithful self-host estimate | 51% |
 | Remaining source `TODO(selfhost:*)` markers | 4 |
 | Modules with remaining source markers | Sema |
 | Cangjie `.cj` files under `packages/*/src` | 526 |
