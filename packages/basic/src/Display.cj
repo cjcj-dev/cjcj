@@ -166,11 +166,15 @@ public func ToHexString(value: Int64, len!: Int64 = 4): String {
     return ToHexString(UInt64(value), len: len)
 }
 
-public func ToHexString(value: UInt32, len!: Int64 = 4): String {
+public func ToHexString(value: UInt32, len!: Int64 = 2): String {
     return ToHexString(UInt64(value), len: len)
 }
 
-public func ToHexString(value: UInt8, len!: Int64 = 2): String {
+public func ToHexString(value: UInt16, len!: Int64 = 1): String {
+    return ToHexString(UInt64(value), len: len)
+}
+
+public func ToHexString(value: UInt8, len!: Int64 = 0): String {
     return ToHexString(UInt64(value), len: len)
 }
 

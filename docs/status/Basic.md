@@ -1,11 +1,14 @@
 # Basic Port Status
 
-Date: 2026-06-17
+Date: 2026-06-18
 
 Build: `cjpm build` passes.
 
 Deepening pass updates:
 
+- Matched two remaining Basic helper edge cases with the C++ reference: unsigned `Display.ToHexString` default
+  widths now follow the template `sizeof(T) >> 1` rule for `UInt32`, `UInt16`, and `UInt8`, and stored diagnostic
+  main-hint color selection for `DS_HINT` now follows the C++ severity color map fallback to red.
 - Replaced the Basic-local placeholder polynomial `Utils::GetHash` with the C++ reference's platform string-hash
   behavior for this selfhost target: the non-Windows path now implements libstdc++ `_Hash_bytes`/`std::hash<string>`
   mixing, with a Windows FNV path matching MSVC-style string hashing. This makes source file hashes and CJMP hash IDs

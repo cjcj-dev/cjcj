@@ -983,7 +983,7 @@ private func severityColor(severity: DiagSeverity): DiagColor {
         case DiagSeverity.DS_ERROR => DiagColor.RED
         case DiagSeverity.DS_WARNING => DiagColor.YELLOW
         case DiagSeverity.DS_NOTE => DiagColor.RED
-        case DiagSeverity.DS_HINT => DiagColor.GREEN
+        case DiagSeverity.DS_HINT => DiagColor.RED
     }
 }
 
