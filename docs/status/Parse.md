@@ -249,6 +249,13 @@ Parse shim.
   cases and nested plain assignments, and same-precedence chains in the C++
   non-associative operator classes (`assignment`, `range`, `equality`, and
   `comparison`) are diagnosed and marked broken.
+- Continued expression recovery and macro-expression parity: `ConsumeUntilAny`
+  now exposes newline tokens during recovery like the C++ parser, wildcard
+  expression recovery can stop at newline/comma/right-delimiter boundaries,
+  colon fake-operator recovery diagnoses `expected operator or end of
+  expression` and consumes through newline, and Pratt expression parsing now
+  applies the C++ `CheckMacroExprRules` shape to macro expansions on both
+  operator-left and operator-right paths.
 
 ## Remaining Work
 
@@ -268,9 +275,9 @@ Parse shim.
 - Macro expansion parsing still lacks the full C++ parameter-macro and
   expression-scope no-parentheses reparsing behavior, exact macro diagnostic IDs,
   and interpolation string origin-position remapping.
-- Expression parsing still lacks exact fake-operator recovery, the C++
-  newline-based wildcard recovery consumption, and the complete C++
-  macro-expression rule checks around assignment operands.
+- Expression parsing still lacks exact C++ diagnostic IDs/hints for
+  fake-operator, wildcard, and macro-expression recovery, plus the full
+  macro-expansion no-parentheses reparsing behavior.
 - Type parsing still uses local message diagnostics and simplified recovery in
   several malformed generic/empty-parenthesis cases instead of the exact C++
   diagnostic IDs and parser cleanup paths.

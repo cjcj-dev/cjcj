@@ -25,6 +25,10 @@ extend ParserImpl {
             !ExprKindEquals(ek, ExprKind.EXPR_IN_WHILE_COND_TUPLE)) {
             CheckWildcardInExpr(ret)
         }
+        if (SeeingFakeOperator()) {
+            DiagExpectedOperatorOrEnd()
+            ConsumeUntilAny([TokenKind.NL])
+        }
         return ret
     }
 
@@ -183,6 +187,10 @@ extend ParserImpl {
     }
 
     public func ParseExprRhs(minPrec: UInt8, left: Expr, ek: ExprKind): Expr {
+        return ParseExprRhsWithPre(minPrec, left, ek, Token(TokenKind.SENTINEL))
+    }
+
+    private func ParseExprRhsWithPre(minPrec: UInt8, left: Expr, ek: ExprKind, preOp: Token): Expr {
         var lhs = left
         while (true) {
             var op = Peek()
@@ -204,6 +212,9 @@ extend ParserImpl {
             }
             if (IsAssignment(op.kind)) {
                 CheckLeftExpression(lhs, op)
+            }
+            if (!CheckMacroExprRules(preOp, op, lhs)) {
+                lhs.isBroken = true
             }
             if (combinedOperator) {
                 SkipAmbiguousToken()
@@ -236,9 +247,12 @@ extend ParserImpl {
             }
             let nextPrec = Precedence(nextOp.kind)
             if (prec < nextPrec) {
-                rhs = ParseExprRhs(prec + 1, rhs, ek)
+                rhs = ParseExprRhsWithPre(prec + 1, rhs, ek, op)
             } else if (prec == nextPrec && IsNoneAssociative(nextOp.kind) && !rhs.isBroken) {
                 DiagNoneAssociativeOp(op, nextOp)
+                rhs.isBroken = true
+            }
+            if (!CheckMacroExprRules(op, Token(TokenKind.DOT), rhs)) {
                 rhs.isBroken = true
             }
             let node = MakeBinaryExpr(lhs, op, rhs)
@@ -293,6 +307,50 @@ extend ParserImpl {
             return true
         }
         return Precedence(token.kind) != INVALID_PRECEDENCE
+    }
+
+    private func SeeingFakeOperator(): Bool {
+        return Seeing(TokenKind.COLON)
+    }
+
+    private func DiagExpectedOperatorOrEnd(): Unit {
+        diag.DiagnoseRefactor(
+            DiagKindRefactor.PARSE_ERROR,
+            Peek().Begin(),
+            "expected operator or end of expression, found '${Peek().Value()}'")
+    }
+
+    private func CheckMacroExprRules(preT: Token, tok: Token, expr: Expr): Bool {
+        if (let Some(macroExpr) <- (expr as MacroExpandExpr)) {
+            if (!MacroInvocationHasExpandedDecl(macroExpr.invocation)) {
+                return true
+            }
+            if (!preT.Begin().IsZero() && !expr.isBroken) {
+                diag.DiagnoseRefactor(
+                    DiagKindRefactor.PARSE_ERROR,
+                    expr.begin,
+                    "macro expansion after '${preT.Value()}' must produce an expression")
+                return false
+            }
+            if (!expr.isBroken) {
+                diag.DiagnoseRefactor(
+                    DiagKindRefactor.PARSE_ERROR,
+                    tok.Begin(),
+                    "unrecognized token '${tok.Value()}' after macro expansion")
+            }
+            return false
+        }
+        return true
+    }
+
+    private func MacroInvocationHasExpandedDecl(invocation: MacroInvocation): Bool {
+        if (let Some(decl) <- invocation.decl) {
+            if (let Some(macroDecl) <- (decl as MacroExpandDecl)) {
+                return MacroInvocationHasExpandedDecl(macroDecl.invocation)
+            }
+            return true
+        }
+        return false
     }
 
     public func IsAssignment(kind: TokenKind): Bool {
@@ -363,6 +421,12 @@ extend ParserImpl {
             }
         }
         if (node.astKind == ASTKind.WILDCARD_EXPR) {
+            if (node.begin.line == Peek().Begin().line && Peek().Begin().line == lastToken.Begin().line &&
+                Peek().kind != TokenKind.SENTINEL) {
+                ConsumeUntilAny(
+                    [TokenKind.NL, TokenKind.RPAREN, TokenKind.COMMA, TokenKind.RCURL],
+                    targetTokenConsumed: false)
+            }
             diag.DiagnoseRefactor(
                 DiagKindRefactor.PARSE_ERROR,
                 node.begin,

@@ -243,6 +243,8 @@ public class ParserImpl {
     }
 
     public func ConsumeUntilAny(kinds: Array<TokenKind>, targetTokenConsumed!: Bool = true): Unit {
+        skipNL = false
+        var consumedNewline = false
         while (!Seeing(TokenKind.END)) {
             var matched = false
             for (kind in kinds) {
@@ -252,13 +254,21 @@ public class ParserImpl {
                 }
             }
             if (matched) {
-                if (targetTokenConsumed) {
+                if (Seeing(TokenKind.NL)) {
+                    consumedNewline = true
+                    Next()
+                } else if (targetTokenConsumed) {
                     Next()
                 }
+                if (consumedNewline) {
+                    newlineSkipped = true
+                }
+                skipNL = true
                 return
             }
             Next()
         }
+        skipNL = true
     }
 
     public func ParseDiagnoseRefactor(kind: DiagKindRefactor, pos: Position, message: String): DiagnosticBuilder {
