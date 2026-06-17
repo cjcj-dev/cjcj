@@ -60,7 +60,8 @@ public func SetOptLevel(opts: OptionGlobalOptions): Unit {
 }
 
 private func IsCPointerFrozenMember(decl: Decl): Bool {
-    if (decl.astKind != ASTKind.FUNC_DECL || !decl.HasAnno(AstAnnotationKind.FROZEN)) {
+    if (decl.fullPackageName != "std.core" || decl.astKind != ASTKind.FUNC_DECL ||
+        !decl.HasAnno(AstAnnotationKind.FROZEN)) {
         return false
     }
     if (let Some(outer) <- decl.outerDecl) {

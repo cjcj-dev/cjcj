@@ -121,18 +121,79 @@ private func applyPackageAttrs(decl: Decl, pkg: Package): Unit {
     decl.DisableAttr(Attribute.IMPORTED)
 }
 
+private func buildDefaultParamGenericsTyMap(funcDecl: FuncDecl): TypeSubst {
+    let out = TypeSubst()
+    if ((let None <- funcDecl.GetGeneric()) || (let None <- funcDecl.funcBody)) {
+        return out
+    }
+    let body = funcDecl.funcBody.getOrThrow()
+    if (body.paramLists.isEmpty()) {
+        return out
+    }
+    let ownerGeneric = funcDecl.GetGeneric().getOrThrow()
+    let ownerTypeParams = ownerGeneric.typeParameters
+    for (param in body.paramLists[0].params) {
+        if (let Some(desugarDecl) <- param.desugarDecl) {
+            if (let Some(desugarGeneric) <- desugarDecl.GetGeneric()) {
+                if (desugarGeneric.typeParameters.size == ownerTypeParams.size) {
+                    var idx: Int64 = 0
+                    while (idx < ownerTypeParams.size) {
+                        if (let Some(desugarParamTy) <- desugarGeneric.typeParameters[idx].GetTy()) {
+                            if (let Some(desugarGenTy) <- (desugarParamTy as GenericsTy)) {
+                                if (let Some(ownerParamTy) <- ownerTypeParams[idx].GetTy()) {
+                                    out.Put(desugarGenTy, ownerParamTy)
+                                }
+                            }
+                        }
+                        idx++
+                    }
+                }
+            }
+        }
+    }
+    return out
+}
+
+private func buildCloneGenericToGenericMap(decl: Decl): TypeSubst {
+    if (let Some(funcDecl) <- (decl as FuncDecl)) {
+        return buildDefaultParamGenericsTyMap(funcDecl)
+    }
+    return TypeSubst()
+}
+
+private func instantiateCloneTy(ty: Ty, typeManager: TypeManager, typeMapping: TypeSubst, g2gTyMap: TypeSubst): Ty {
+    if (!g2gTyMap.IsEmpty()) {
+        return typeManager.GetInstantiatedTy(typeManager.GetInstantiatedTy(ty, g2gTyMap), typeMapping)
+    }
+    return typeManager.GetInstantiatedTy(ty, typeMapping)
+}
+
+private func disableDefaultParamDesugarGenericAttr(decl: Decl): Unit {
+    if (let Some(funcDecl) <- (decl as FuncDecl)) {
+        if (let Some(body) <- funcDecl.funcBody) {
+            if (!body.paramLists.isEmpty()) {
+                for (param in body.paramLists[0].params) {
+                    if (let Some(desugarDecl) <- param.desugarDecl) {
+                        desugarDecl.DisableAttr(Attribute.GENERIC)
+                    }
+                }
+            }
+        }
+    }
+}
+
 private func updateClonedNode(genericNode: Node, clonedNode: Node, typeManager: TypeManager, typeMapping: TypeSubst,
-    pkg: Package): Unit {
+    g2gTyMap: TypeSubst, pkg: Package): Unit {
     if (let Some(sourceTy) <- genericNode.GetTy()) {
-        clonedNode.SetTy(typeManager.GetInstantiatedTy(sourceTy, typeMapping))
+        clonedNode.SetTy(instantiateCloneTy(sourceTy, typeManager, typeMapping, g2gTyMap))
     }
     if (let Some(refExpr) <- (clonedNode as NameReferenceExpr)) {
         if (let Some(parentTy) <- refExpr.matchedParentTy) {
-            refExpr.matchedParentTy = typeManager.GetInstantiatedTy(parentTy, typeMapping)
+            refExpr.matchedParentTy = instantiateCloneTy(parentTy, typeManager, typeMapping, g2gTyMap)
         }
         var idx: Int64 = 0
         while (idx < refExpr.instTys.size) {
-            refExpr.instTys[idx] = typeManager.GetInstantiatedTy(refExpr.instTys[idx], typeMapping)
+            refExpr.instTys[idx] = instantiateCloneTy(refExpr.instTys[idx], typeManager, typeMapping, g2gTyMap)
             idx++
         }
     }
@@ -202,11 +263,19 @@ private func addTyUnique(values: ArrayList<Ty>, ty: Ty): Bool {
     return true
 }
 
+private func HasJavaTargetAttr(target: Decl): Bool {
+    if (let Some(_) <- HasJavaAttr(target)) {
+        return true
+    }
+    return false
+}
+
 public class GenericInstantiationManagerImpl {
     private var ci: CompilerInstance
     private var context: GenericInstantiationContext
     private let instantiations: ArrayList<GenericInstantiationRecord> = ArrayList<GenericInstantiationRecord>()
     private let structContext: ArrayList<Decl> = ArrayList<Decl>()
+    private let usedSrcImportedDecls: ArrayList<Decl> = ArrayList<Decl>()
 
     public init(ci: CompilerInstance) {
         this.ci = ci
@@ -270,6 +339,7 @@ public class GenericInstantiationManagerImpl {
     public func ResetGenericInstantiationStage(): Unit {
         instantiations.clear()
         structContext.clear()
+        usedSrcImportedDecls.clear()
         context.Clear()
         PartialInstantiation.ResetGlobalMap()
     }
@@ -331,8 +401,9 @@ public class GenericInstantiationManagerImpl {
             collectIdentityInstantiation(decl)
             return decl
         }
+        let g2gTyMap = buildCloneGenericToGenericMap(decl)
         let cloned = PartialInstantiation.Instantiate(decl, { source: Node, target: Node =>
-            updateClonedNode(source, target, ci.typeManager, typeMapping, pkg)
+            updateClonedNode(source, target, ci.typeManager, typeMapping, g2gTyMap, pkg)
         })
         if (let Some(clonedDecl) <- (cloned as Decl)) {
             clonedDecl.EnableAttr(Attribute.GENERIC_INSTANTIATED)
@@ -341,6 +412,7 @@ public class GenericInstantiationManagerImpl {
             clonedDecl.DisableAttr(Attribute.IMPORTED)
             clonedDecl.genericDecl = decl
             markNoReflectInfo(clonedDecl)
+            disableDefaultParamDesugarGenericAttr(clonedDecl)
             PartialInstantiation.RegisterInstantiation(decl, clonedDecl)
             return clonedDecl
         }
@@ -378,9 +450,6 @@ public class GenericInstantiationManagerImpl {
     private func InstantiateReferencedGenerics(pkg: Package): Unit {
         for (file in pkg.files) {
             InstantiateReferencedGenericsInNode(file, pkg)
-        }
-        for (decl in pkg.srcImportedNonGenericDecls) {
-            InstantiateReferencedGenericsInNode(decl, pkg)
         }
     }
 
@@ -634,6 +703,9 @@ public class GenericInstantiationManagerImpl {
     private func GenericArrayExprInstantiate(arrayExpr: ArrayExpr, pkg: Package): Unit {
         if (let Some(initFunc) <- arrayExpr.initFunc) {
             if (let Some(arrayTy) <- arrayExpr.GetTy()) {
+                if (!arrayTy.IsArray()) {
+                    return
+                }
                 InstantiateGenericDeclWithInstTys(initFunc, copyTypeArgs(Some(arrayTy)), pkg)
             }
         }
@@ -654,9 +726,43 @@ public class GenericInstantiationManagerImpl {
         }
     }
 
+    private func MarkAndInstantiateSrcImportedDecl(keyDecl: Decl, rootDecl: Decl, pkg: Package): Unit {
+        if (containsDecl(usedSrcImportedDecls, keyDecl)) {
+            return
+        }
+        usedSrcImportedDecls.add(keyDecl)
+        InstantiateReferencedGenericsInNode(rootDecl, pkg)
+    }
+
+    private func InstantiateSrcImportedDefaultParamDecls(decl: Decl, pkg: Package): Unit {
+        if (let Some(funcDecl) <- (decl as FuncDecl)) {
+            if (let Some(body) <- funcDecl.funcBody) {
+                if (!body.paramLists.isEmpty()) {
+                    for (param in body.paramLists[0].params) {
+                        if (let Some(desugarDecl) <- param.desugarDecl) {
+                            if (desugarDecl.TestAttr(Attribute.SRC_IMPORTED)) {
+                                MarkAndInstantiateSrcImportedDecl(desugarDecl, desugarDecl, pkg)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     private func InstantiateGenericDeclWithInstTys(decl: Decl, instTys: ArrayList<Ty>, pkg: Package): Unit {
         let generalDecl = PartialInstantiation.GetGeneralDecl(decl)
-        if (ignoredInstantiationKind(generalDecl) || !RequireInstantiation(generalDecl)) {
+        if (ignoredInstantiationKind(generalDecl)) {
+            return
+        }
+        if ((let None <- generalDecl.GetGeneric()) || !RequireInstantiation(generalDecl)) {
+            if (!decl.TestAnyAttr(Attribute.IMPORTED, Attribute.GENERATED_TO_MOCK)) {
+                return
+            }
+            InstantiateSrcImportedDefaultParamDecls(generalDecl, pkg)
+            if (generalDecl.TestAttr(Attribute.SRC_IMPORTED)) {
+                MarkAndInstantiateSrcImportedDecl(generalDecl, decl, pkg)
+            }
             return
         }
         if ((let None <- generalDecl.GetGeneric()) || instTys.isEmpty() || Ty.ExistGeneric(instTys)) {
@@ -676,7 +782,9 @@ public class GenericInstantiationManagerImpl {
             RearrangeReferencesInNode(file, pkg)
         }
         for (decl in pkg.srcImportedNonGenericDecls) {
-            RearrangeReferencesInNode(decl, pkg)
+            if (decl.IsConst() || containsDecl(usedSrcImportedDecls, decl)) {
+                RearrangeReferencesInNode(decl, pkg)
+            }
         }
     }
 
@@ -741,7 +849,7 @@ public class GenericInstantiationManagerImpl {
             if (let Some(target) <- memberAccess.GetTarget()) {
                 if (TargetNoLongerGeneric(target)) {
                     memberAccess.instTys.clear()
-                    if (target.astKind != ASTKind.TYPE_ALIAS_DECL) {
+                    if (target.astKind != ASTKind.TYPE_ALIAS_DECL && !HasJavaTargetAttr(target)) {
                         if (let Some(targetTy) <- target.GetTy()) {
                             memberAccess.SetTy(targetTy)
                         }
@@ -749,6 +857,18 @@ public class GenericInstantiationManagerImpl {
                 }
             }
         } else if (let Some(callExpr) <- (node as CallExpr)) {
+            if (let Some(desugarExpr) <- callExpr.desugarExpr) {
+                if (let Some(desugarTy) <- desugarExpr.GetTy()) {
+                    if (!desugarTy.HasGeneric()) {
+                        if (let Some(callBaseFunc) <- callExpr.baseFunc) {
+                            if (let Some(nameRefExpr) <- (callBaseFunc as NameReferenceExpr)) {
+                                nameRefExpr.instTys.clear()
+                                return
+                            }
+                        }
+                    }
+                }
+            }
             if (let Some(baseFunc) <- callExpr.baseFunc) {
                 ClearInstTysIfNeeded(baseFunc)
             }
@@ -772,11 +892,30 @@ public class GenericInstantiationManagerImpl {
                 if (let Some(target) <- baseFunc.GetTarget()) {
                     if (let Some(funcDecl) <- (target as FuncDecl)) {
                         callExpr.resolvedFunction = funcDecl
-                        if (let Some(targetTy) <- target.GetTy()) {
-                            if (let Some(funcTy) <- (targetTy as FuncTy)) {
-                                if (!funcTy.retTy.HasGeneric()) {
-                                    callExpr.SetTy(funcTy.retTy)
+                        if (!HasJavaTargetAttr(target)) {
+                            if (let Some(targetTy) <- target.GetTy()) {
+                                if (let Some(funcTy) <- (targetTy as FuncTy)) {
+                                    if (!funcTy.retTy.HasGeneric()) {
+                                        callExpr.SetTy(funcTy.retTy)
+                                        UpdateDynamicThisCallTy(callExpr)
+                                    }
                                 }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private func UpdateDynamicThisCallTy(callExpr: CallExpr): Unit {
+        if (let Some(callTy) <- callExpr.GetTy()) {
+            if (let Some(_) <- (callTy as ClassThisTy)) {
+                if (let Some(baseFunc) <- callExpr.baseFunc) {
+                    if (let Some(memberAccess) <- (baseFunc as MemberAccess)) {
+                        if (let Some(baseExpr) <- memberAccess.baseExpr) {
+                            if (let Some(baseTy) <- baseExpr.GetTy()) {
+                                callExpr.SetTy(baseTy)
                             }
                         }
                     }
