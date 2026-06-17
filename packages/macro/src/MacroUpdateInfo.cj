@@ -161,5 +161,12 @@ public func UpdateMacroInfo(node: Node, collector: MacroCollector): Unit {
         updateDeclContainer(classDecl.members, classDecl, collector)
     } else if (let Some(structDecl) <- (node as StructDecl)) {
         updateDeclContainer(structDecl.members, structDecl, collector)
+    } else if (let Some(interfaceDecl) <- (node as InterfaceDecl)) {
+        updateDeclContainer(interfaceDecl.members, interfaceDecl, collector)
+    } else if (let Some(enumDecl) <- (node as EnumDecl)) {
+        updateDeclContainer(enumDecl.members, enumDecl, collector)
+        updateDeclContainer(enumDecl.constructors, enumDecl, collector)
+    } else if (let Some(extendDecl) <- (node as ExtendDecl)) {
+        updateDeclContainer(extendDecl.members, extendDecl, collector)
     }
 }

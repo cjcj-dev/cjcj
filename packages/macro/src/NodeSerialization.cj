@@ -158,7 +158,40 @@ public class NodeWriter {
         if (let Some(structDecl) <- (decl as StructDecl)) {
             return SerializeMemberContainer("struct", structDecl.identifier, structDecl.members)
         }
+        if (let Some(interfaceDecl) <- (decl as InterfaceDecl)) {
+            return SerializeMemberContainer("interface", interfaceDecl.identifier, interfaceDecl.members)
+        }
+        if (let Some(enumDecl) <- (decl as EnumDecl)) {
+            return SerializeEnumDecl(enumDecl)
+        }
+        if (let Some(extendDecl) <- (decl as ExtendDecl)) {
+            return SerializeMemberContainer("extend", extendDecl.identifier, extendDecl.members)
+        }
         return "decl(" + ASTKindIndex(decl.astKind).toString() + "," + EscapeNodeText(decl.identifier) + ")"
+    }
+
+    private func SerializeEnumDecl(enumDecl: EnumDecl): String {
+        let builder = StringBuilder()
+        builder.append("enum(" + EscapeNodeText(enumDecl.identifier) + ";constructors=[")
+        var ctorIdx: Int64 = 0
+        while (ctorIdx < enumDecl.constructors.size) {
+            if (ctorIdx > 0) {
+                builder.append(",")
+            }
+            builder.append(SerializeDecl(enumDecl.constructors[ctorIdx]))
+            ctorIdx++
+        }
+        builder.append("];members=[")
+        var memberIdx: Int64 = 0
+        while (memberIdx < enumDecl.members.size) {
+            if (memberIdx > 0) {
+                builder.append(",")
+            }
+            builder.append(SerializeDecl(enumDecl.members[memberIdx]))
+            memberIdx++
+        }
+        builder.append("])")
+        return builder.toString()
     }
 
     private func SerializeMemberContainer(kindName: String, identifier: String, members: ArrayList<Decl>): String {

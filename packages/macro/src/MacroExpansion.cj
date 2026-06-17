@@ -13,12 +13,15 @@ import cangjie_compiler::parse.DiagSeverity as ParsedDiagSeverity
 import cangjie_compiler::parse.DiagnosticEngine as ParsedDiagnosticEngine
 import cangjie_compiler::parse.Expr as ParsedExpr
 import cangjie_compiler::parse.ExprKind as ParsedExprKind
+import cangjie_compiler::parse.EnumDecl as ParsedEnumDecl
+import cangjie_compiler::parse.ExtendDecl as ParsedExtendDecl
 import cangjie_compiler::parse.FuncArg as ParsedFuncArg
 import cangjie_compiler::parse.FuncBody as ParsedFuncBody
 import cangjie_compiler::parse.FuncDecl as ParsedFuncDecl
 import cangjie_compiler::parse.FuncParam as ParsedFuncParam
 import cangjie_compiler::parse.FuncParamList as ParsedFuncParamList
 import cangjie_compiler::parse.IfExpr as ParsedIfExpr
+import cangjie_compiler::parse.InterfaceDecl as ParsedInterfaceDecl
 import cangjie_compiler::parse.LitConstExpr as ParsedLitConstExpr
 import cangjie_compiler::parse.MacroDecl as ParsedMacroDecl
 import cangjie_compiler::parse.MacroExpandDecl as ParsedMacroExpandDecl
@@ -476,6 +479,41 @@ private func convertParsedDecl(parsedDecl: ParsedDecl, fallbackFile: Option<File
             targetStructDecl.members.add(convertedStructMemberDecl)
         }
         return targetStructDecl
+    }
+    if (let Some(parsedInterfaceDecl) <- (parsedDecl as ParsedInterfaceDecl)) {
+        let targetInterfaceDecl = InterfaceDecl()
+        copyParsedDeclBase(parsedInterfaceDecl, targetInterfaceDecl, fallbackFile)
+        for (parsedInterfaceMemberDecl in parsedInterfaceDecl.bodyDecls) {
+            let convertedInterfaceMemberDecl = convertParsedDecl(parsedInterfaceMemberDecl, fallbackFile)
+            convertedInterfaceMemberDecl.outerDecl = Some(targetInterfaceDecl)
+            targetInterfaceDecl.members.add(convertedInterfaceMemberDecl)
+        }
+        return targetInterfaceDecl
+    }
+    if (let Some(parsedEnumDecl) <- (parsedDecl as ParsedEnumDecl)) {
+        let targetEnumDecl = EnumDecl()
+        copyParsedDeclBase(parsedEnumDecl, targetEnumDecl, fallbackFile)
+        for (parsedEnumConstructorDecl in parsedEnumDecl.constructors) {
+            let convertedEnumConstructorDecl = convertParsedDecl(parsedEnumConstructorDecl, fallbackFile)
+            convertedEnumConstructorDecl.outerDecl = Some(targetEnumDecl)
+            targetEnumDecl.constructors.add(convertedEnumConstructorDecl)
+        }
+        for (parsedEnumMemberDecl in parsedEnumDecl.bodyDecls) {
+            let convertedEnumMemberDecl = convertParsedDecl(parsedEnumMemberDecl, fallbackFile)
+            convertedEnumMemberDecl.outerDecl = Some(targetEnumDecl)
+            targetEnumDecl.members.add(convertedEnumMemberDecl)
+        }
+        return targetEnumDecl
+    }
+    if (let Some(parsedExtendDecl) <- (parsedDecl as ParsedExtendDecl)) {
+        let targetExtendDecl = ExtendDecl()
+        copyParsedDeclBase(parsedExtendDecl, targetExtendDecl, fallbackFile)
+        for (parsedExtendMemberDecl in parsedExtendDecl.bodyDecls) {
+            let convertedExtendMemberDecl = convertParsedDecl(parsedExtendMemberDecl, fallbackFile)
+            convertedExtendMemberDecl.outerDecl = Some(targetExtendDecl)
+            targetExtendDecl.members.add(convertedExtendMemberDecl)
+        }
+        return targetExtendDecl
     }
     let targetDecl = Decl(parsedDecl.astKind)
     copyParsedDeclBase(parsedDecl, targetDecl, fallbackFile)
