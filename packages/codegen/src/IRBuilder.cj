@@ -23,6 +23,13 @@ private let MALLOC_ARRAY_INTRINSIC_NAME: String = "llvm.cj.malloc.array"
 private let MALLOC_ARRAY_GENERIC_INTRINSIC_NAME: String = "llvm.cj.malloc.array.generic"
 private let LLVM_FAST_MATH_ALL: UInt32 = 127u32
 
+private func SignedInt64Bits(value: Int64): UInt64 {
+    if (value >= 0) {
+        return UInt64(value)
+    }
+    return 0x8000000000000000u64 + UInt64(value - Int64.Min)
+}
+
 public class IRBuilder2 {
     private let cgMod: CGModule
     private let builder: LLVMBuilderHandle
@@ -66,7 +73,7 @@ public class IRBuilder2 {
     }
 
     public func GetInt64(value: Int64): LLVMValueRef {
-        return unsafe { LLVMConstInt(LLVMInt64TypeInContext(GetLLVMContext().raw), UInt64(value), 1) }
+        return unsafe { LLVMConstInt(LLVMInt64TypeInContext(GetLLVMContext().raw), SignedInt64Bits(value), 1) }
     }
 
     public func CreateEntryAlloca(valueType: LLVMTypeRef, name!: String = ""): LLVMValueRef {
@@ -336,7 +343,7 @@ public class IRBuilder2 {
         }
         if (let Some(intLiteral) <- (literal as IntLiteral)) {
             let intTy = CGType.GetOrCreate(cgMod, resultType).GetLLVMType()
-            return unsafe { LLVMConstInt(intTy, UInt64(intLiteral.value), 1) }
+            return unsafe { LLVMConstInt(intTy, SignedInt64Bits(intLiteral.value), 1) }
         }
         if (let Some(floatLiteral) <- (literal as FloatLiteral)) {
             let floatTy = CGType.GetOrCreate(cgMod, resultType).GetLLVMType()
@@ -365,7 +372,7 @@ public class IRBuilder2 {
             return if (boolLiteral.value) { GetTrue() } else { GetFalse() }
         }
         if (let Some(intLiteral) <- (literal as IntLiteral)) {
-            return unsafe { LLVMConstInt(LLVMInt64TypeInContext(GetLLVMContext().raw), UInt64(intLiteral.value), 1) }
+            return unsafe { LLVMConstInt(LLVMInt64TypeInContext(GetLLVMContext().raw), SignedInt64Bits(intLiteral.value), 1) }
         }
         if (let Some(floatLiteral) <- (literal as FloatLiteral)) {
             return unsafe { LLVMConstReal(LLVMDoubleTypeInContext(GetLLVMContext().raw), floatLiteral.value) }

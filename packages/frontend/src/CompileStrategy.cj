@@ -1037,6 +1037,15 @@ private func parseLiteralReturnValue(tokens: ArrayList<FrontendToken>, idx: Int6
     if (tok.kind == FrontendTokenKind.FLOAT_LITERAL) {
         return (true, FRONTEND_LITERAL_FLOAT, tok.value, tok.Begin(), tok.End())
     }
+    if (tok.value == "-" && idx + 1 < end && idx + 1 < tokens.size) {
+        let signedTok = tokens[idx + 1]
+        if (signedTok.kind == FrontendTokenKind.INTEGER_LITERAL) {
+            return (true, FRONTEND_LITERAL_INT, "-" + signedTok.value, tok.Begin(), signedTok.End())
+        }
+        if (signedTok.kind == FrontendTokenKind.FLOAT_LITERAL) {
+            return (true, FRONTEND_LITERAL_FLOAT, "-" + signedTok.value, tok.Begin(), signedTok.End())
+        }
+    }
     if (tok.kind == FrontendTokenKind.STRING_LITERAL) {
         return (true, FRONTEND_LITERAL_STRING, StripLiteralQuotes(tok.value), tok.Begin(), tok.End())
     }
