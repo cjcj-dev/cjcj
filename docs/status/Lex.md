@@ -46,6 +46,7 @@ Implemented:
 - Matched C++ lexer context-stack preconditions by asserting quote/normal mode exits and quote-context reads instead of silently ignoring mismatched state, and restored the string-dispatch quote assertion.
 - Reworked Lex `ProcessQuotaMarks` to preserve raw UTF-8 bytes while applying the C++ quote/interpolation transform, and restored the C++ assertion for nested interpolation string scanning.
 - Matched the remaining C++ number-scanner helper boundaries for hexadecimal digit handling, decimal fractional scanning, exponent scanning, and unknown-token diagnostics so the Cangjie implementation follows the same recovery and diagnostic flow as `LexerImpl`.
+- Tightened UTF-8 lookahead parity with the C++ `ConvertUTF8toUTF32` paths by rejecting standalone continuation bytes during identifier/suffix probing, and matched the C++ backquoted-identifier EOF recovery path that observes the terminating NUL before issuing the missing-backquote diagnostic.
 
 Known validation caveats:
 

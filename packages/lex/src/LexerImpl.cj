@@ -859,8 +859,11 @@ public class LexerImpl {
             return (-1, index, false)
         }
         let first = bytes[index]
-        if (first < BYTE_2_FLAG) {
+        if (first < BYTE_X_FLAG) {
             return (Int64(first), index + 1, true)
+        }
+        if (first < BYTE_2_FLAG) {
+            return (Int64(first), index, false)
         }
         if (index + 1 >= bytes.size) {
             return (Int64(first), index, false)
@@ -955,7 +958,7 @@ public class LexerImpl {
             return
         }
         pCurrent = pNext
-        currentChar = -1
+        currentChar = 0
     }
 
     private func GetPos(current: Int64): Position {
