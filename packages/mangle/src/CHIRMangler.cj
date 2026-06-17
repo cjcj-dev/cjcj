@@ -1,5 +1,7 @@
 package cangjie_compiler::mangle
 
+import cangjie_compiler::ast.FuncTy
+
 public class CHIRMangler <: BaseMangler {
     private var enableCompileTest: Bool
 
@@ -27,6 +29,14 @@ public class CHIRMangler <: BaseMangler {
         var mangled = if (let Some(ret) <- cFuncTy.retTy) { MangleSemaType(ret) } else { MANGLE_VOID_TY_SUFFIX }
         for (paramTy in cFuncTy.paramTys) {
             mangled += MangleSemaType(paramTy)
+        }
+        return mangled
+    }
+
+    public func MangleCFuncSignature(cFuncTy: FuncTy): String {
+        var mangled = MangleAstSemanticType(cFuncTy.retTy)
+        for (paramTy in cFuncTy.paramTys) {
+            mangled += MangleAstSemanticType(paramTy)
         }
         return mangled
     }

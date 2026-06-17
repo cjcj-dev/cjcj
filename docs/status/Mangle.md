@@ -108,6 +108,8 @@ Implemented:
 - Aligned lambda prefix package selection with the C++ `ManglePrefix` rule by deriving lambda package
   mangling from the nearest declaration in the prefix instead of relying on lambda descriptor package
   metadata.
+- De-isolated `CHIRMangler.MangleCFuncSignature` to accept the real `cangjie_compiler::ast.FuncTy`
+  alongside the descriptor overload, matching the C++ `AST::FuncTy` API shape.
 - Aligned AST-facing package export-id generation with the C++ package walker by visiting real AST nodes,
   requiring `Ty.IsTyCorrect`, and then copying export IDs back through the adapter.
 - Aligned parser-AST malformed type-annotation handling with C++ assertion/null-check behavior for missing
