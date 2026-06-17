@@ -798,8 +798,23 @@ public open class BaseMangler {
                 mangled = MANGLE_FILE_ID_PREFIX + fileIdFor(file) + mangled
             }
         }
-        mangled = ManglePackage(node) + mangled
+        mangled = ManglePackageForPrefixNode(node, prefix) + mangled
         return mangled
+    }
+
+    private func ManglePackageForPrefixNode(node: MangleDecl, prefix: ArrayList<MangleDecl>): String {
+        if (node.astKind == ASTKind.LAMBDA_EXPR) {
+            var idx = prefix.size - 1
+            while (idx >= 0) {
+                let prefixDecl = prefix[idx]
+                if (prefixDecl.astKind != ASTKind.LAMBDA_EXPR && prefixDecl.astKind != ASTKind.NODE &&
+                    !prefixDecl.fullPackageName.isEmpty()) {
+                    return ManglePackage(prefixDecl)
+                }
+                idx--
+            }
+        }
+        return ManglePackage(node)
     }
 
     public func ManglePackage(decl: MangleDecl): String {
