@@ -29,6 +29,9 @@ extend AST2CHIRDeclTranslator {
                 CreateEmptyBody(fn)
             }
         }
+        for (printString in spec.printStrings) {
+            fn.printStrings.add(printString)
+        }
         RegisterFunctionSpec(defaultPackage, spec, fn)
         WireGenericDecl(fn, spec)
         if (let Some(pkg) <- currentPackage) {

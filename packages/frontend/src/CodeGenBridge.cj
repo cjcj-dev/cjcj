@@ -198,6 +198,9 @@ private func buildFunctionSpec(pkg: Package, decl: Decl, context: ChirContext, s
             let paramName = if (paramDecl.identifier.Empty()) { "%arg" } else { paramDecl.identifier.Val() }
             fnSpec.AddParamName(paramName)
         }
+        for (printString in namedFuncDecl.funcBody.printStrings) {
+            fnSpec.AddPrintString(printString)
+        }
     }
     return fnSpec
 }

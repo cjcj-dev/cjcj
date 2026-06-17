@@ -993,6 +993,45 @@ private func captureFunctionBodySummary(tokens: ArrayList<FrontendToken>, openId
         funcDecl.funcBody.literalReturnValue = literalInfo[2]
         funcDecl.funcBody.literalReturnBegin = literalInfo[3]
         funcDecl.funcBody.literalReturnEnd = literalInfo[4]
+        captureFunctionBodyPrints(tokens, openIdx + 1, closeIdx, funcDecl.funcBody)
+    }
+}
+
+// Recognize top-level `println("literal")` statements in a function body and record the
+// (quote-stripped) string so CodeGen can emit a real runtime print. Scans only at brace
+// depth 0 so calls nested inside other constructs are ignored.
+private func captureFunctionBodyPrints(tokens: ArrayList<FrontendToken>, start: Int64, end: Int64,
+    body: FuncBody): Unit {
+    var idx = start
+    var depth: Int64 = 0
+    while (idx < end && idx < tokens.size) {
+        let value = tokens[idx].value
+        if (value == "{" || value == "[") {
+            depth++
+            idx++
+            continue
+        }
+        if (value == "}" || value == "]") {
+            if (depth > 0) { depth-- }
+            idx++
+            continue
+        }
+        if (depth == 0 && tokens[idx].kind == FrontendTokenKind.IDENTIFIER && value == "println") {
+            let openParen = skipTrivia(tokens, idx + 1)
+            if (openParen < end && openParen < tokens.size && tokens[openParen].value == "(") {
+                let argIdx = skipTrivia(tokens, openParen + 1)
+                if (argIdx < end && argIdx < tokens.size &&
+                    tokens[argIdx].kind == FrontendTokenKind.STRING_LITERAL) {
+                    let closeParen = skipTrivia(tokens, argIdx + 1)
+                    if (closeParen < end && closeParen < tokens.size && tokens[closeParen].value == ")") {
+                        body.printStrings.add(StripLiteralQuotes(tokens[argIdx].value))
+                        idx = closeParen + 1
+                        continue
+                    }
+                }
+            }
+        }
+        idx++
     }
 }
 

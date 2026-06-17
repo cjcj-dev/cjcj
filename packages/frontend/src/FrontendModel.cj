@@ -435,6 +435,9 @@ public class FuncBody <: Node {
     public var literalReturnValue: String = ""
     public var literalReturnBegin: Position = INVALID_POSITION
     public var literalReturnEnd: Position = INVALID_POSITION
+    // Top-level `println("literal")` calls captured from the body, in source order.
+    // Threaded through to CodeGen so they lower to real runtime output.
+    public var printStrings: ArrayList<String> = ArrayList<String>()
 
     public init() {
         super(ASTKind.FUNC_BODY)

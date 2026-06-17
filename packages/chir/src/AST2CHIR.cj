@@ -88,6 +88,8 @@ public class AST2CHIRFunctionSpec {
     public var literalReturnBoolValue: Bool = false
     public var literalReturnIntValue: Int64 = 0
     public var literalReturnFloatValue: Float64 = 0.0
+    // Literal strings to print (via runtime puts) when the function body runs, in source order.
+    public let printStrings: ArrayList<String> = ArrayList<String>()
 
     public init(name: String, paramTypes: ArrayList<Type>, returnType: Type, srcCodeIdentifier!: String = "",
         rawMangledName!: String = "", packageName!: String = "", funcKind!: FuncKind = FuncKind.DEFAULT,
@@ -102,6 +104,11 @@ public class AST2CHIRFunctionSpec {
         this.returnType = returnType
         this.funcKind = funcKind
         this.emitBody = emitBody
+    }
+
+    public func AddPrintString(value: String): AST2CHIRFunctionSpec {
+        printStrings.add(value)
+        return this
     }
 
     public func AddParamName(name: String): AST2CHIRFunctionSpec {

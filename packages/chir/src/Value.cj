@@ -729,6 +729,8 @@ public class Function <: GlobalValue {
     private var blockGroupId: UInt64 = 0u64
     private var localId: UInt64 = 0u64
     private var propLocation: DebugLocation = DebugLocation()
+    // Literal strings this function prints (via runtime puts) when executed, in source order.
+    public let printStrings: ArrayList<String> = ArrayList<String>()
 
     public init(funcType: FuncType, identifier: String, srcCodeIdentifier: String, rawMangledName: String,
         packageName: String) {
