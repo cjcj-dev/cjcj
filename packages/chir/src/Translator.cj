@@ -3,6 +3,7 @@ package cangjie_compiler::chir
 import std.collection.*
 
 import cangjie_compiler::ast.ASTKind
+import cangjie_compiler::ast.ASTKindIndex
 import cangjie_compiler::ast.ASTKindName
 import cangjie_compiler::ast.AssignExpr as AstAssignExpr
 import cangjie_compiler::ast.Attribute as AstAttribute
@@ -11,9 +12,11 @@ import cangjie_compiler::ast.Block as AstBlock
 import cangjie_compiler::ast.CallExpr as AstCallExpr
 import cangjie_compiler::ast.ClassDecl as AstClassDecl
 import cangjie_compiler::ast.ClassLikeDecl as AstClassLikeDecl
+import cangjie_compiler::ast.ConstPattern as AstConstPattern
 import cangjie_compiler::ast.Decl as AstDecl
 import cangjie_compiler::ast.DoWhileExpr as AstDoWhileExpr
 import cangjie_compiler::ast.EnumDecl as AstEnumDecl
+import cangjie_compiler::ast.EnumPattern as AstEnumPattern
 import cangjie_compiler::ast.Expr as AstExpr
 import cangjie_compiler::ast.ForInExpr as AstForInExpr
 import cangjie_compiler::ast.FuncDecl as AstFuncDecl
@@ -23,8 +26,10 @@ import cangjie_compiler::ast.InterfaceDecl as AstInterfaceDecl
 import cangjie_compiler::ast.JumpExpr as AstJumpExpr
 import cangjie_compiler::ast.LitConstExpr as AstLitConstExpr
 import cangjie_compiler::ast.LitConstKind as AstLitConstKind
+import cangjie_compiler::ast.MatchExpr as AstMatchExpr
 import cangjie_compiler::ast.MemberAccess as AstMemberAccess
 import cangjie_compiler::ast.Node as AstNode
+import cangjie_compiler::ast.Pattern as AstPattern
 import cangjie_compiler::ast.RefExpr as AstRefExpr
 import cangjie_compiler::ast.ReturnExpr as AstReturnExpr
 import cangjie_compiler::ast.StructDecl as AstStructDecl
@@ -34,6 +39,9 @@ import cangjie_compiler::ast.TokenKindValue as AstTokenKindValue
 import cangjie_compiler::ast.Ty as AstTy
 import cangjie_compiler::ast.UnaryExpr as AstUnaryExpr
 import cangjie_compiler::ast.VarDecl as AstVarDecl
+import cangjie_compiler::ast.VarOrEnumPattern as AstVarOrEnumPattern
+import cangjie_compiler::ast.VarPattern as AstVarPattern
+import cangjie_compiler::ast.WildcardPattern as AstWildcardPattern
 import cangjie_compiler::ast.WhileExpr as AstWhileExpr
 
 private class FaithfulLeftValueInfo {
@@ -97,6 +105,7 @@ public class Translator {
             case ASTKind.DO_WHILE_EXPR => trans.Visit(RequireNodeAsDoWhileExpr(nodePtr))
             case ASTKind.FOR_IN_EXPR => trans.Visit(RequireNodeAsForInExpr(nodePtr))
             case ASTKind.JUMP_EXPR => trans.Visit(RequireNodeAsJumpExpr(nodePtr))
+            case ASTKind.MATCH_EXPR => trans.Visit(RequireNodeAsMatchExpr(nodePtr))
             case _ => throw IllegalArgumentException(
                 "not yet ported in faithful AST2CHIR: ${ASTKindName(nodePtr.astKind)}")
         }
@@ -436,6 +445,24 @@ public class Translator {
         return None
     }
 
+    public func Visit(expr: AstMatchExpr): Option<Value> {
+        let matchTy = chirTy.TranslateType(RequireAstTy(expr))
+        let resultLoc: Option<Value> = if (matchTy.IsUnit() || matchTy.IsNothing()) {
+            None
+        } else {
+            RequireResult(builder.CreateAllocate(builder.context.GetRefTy(matchTy), matchTy, CurrentBlock()))
+        }
+        if (expr.matchMode) {
+            TranslateMatchWithSelector(expr, resultLoc)
+        } else {
+            TranslateConditionMatches(expr, resultLoc)
+        }
+        if (let Some(loc) <- resultLoc) {
+            return RequireResult(builder.CreateLoad(matchTy, loc, CurrentBlock()))
+        }
+        return None
+    }
+
     private func TranslateClassLikeDecl(def: ClassDef, decl: AstClassLikeDecl): Unit {
         if (let Some(astTy) <- decl.GetTy()) {
             let classTy = UnwrapClassType(chirTy.TranslateType(astTy))
@@ -517,6 +544,193 @@ public class Translator {
                 builder.CreateStore(result, loc, CurrentBlock())
             }
         }
+    }
+
+    private func TranslateMatchWithSelector(expr: AstMatchExpr, resultLoc: Option<Value>): Unit {
+        let selector = Translator.TranslateASTNode(RequireExpr(expr.selector, "match selector"), this) ??
+            throw IllegalStateException("faithful AST2CHIR match selector produced no value")
+        let group = RequireParentBlockGroup(CurrentBlock(), "match")
+        let endBlock = builder.CreateBlock(group)
+        var caseIndex: Int64 = 0
+        while (caseIndex < expr.matchCases.size) {
+            let matchCase = expr.matchCases[caseIndex]
+            if (matchCase.patternGuard.isSome()) {
+                throw IllegalArgumentException("not yet ported in faithful AST2CHIR: match pattern guard")
+            }
+            if (matchCase.patterns.size != 1) {
+                throw IllegalArgumentException("not yet ported in faithful AST2CHIR: match or-pattern")
+            }
+            let bodyBlock = builder.CreateBlock(group)
+            let nextBlock = builder.CreateBlock(group)
+            TranslateSinglePatternBranch(matchCase.patterns[0], selector, bodyBlock, nextBlock)
+
+            currentBlock = bodyBlock
+            BindPatternValues(matchCase.patterns[0], selector)
+            let bodyValue = Translator.TranslateASTNode(RequireBlock(matchCase.exprOrDecls, "match case body"), this)
+            StoreIfResult(resultLoc, bodyValue)
+            if (CurrentBlock().GetTerminator().isNone()) {
+                builder.CreateGoTo(endBlock, CurrentBlock())
+            }
+
+            currentBlock = nextBlock
+            caseIndex++
+        }
+        if (CurrentBlock().GetTerminator().isNone()) {
+            builder.CreateGoTo(endBlock, CurrentBlock())
+        }
+        currentBlock = endBlock
+    }
+
+    private func TranslateConditionMatches(expr: AstMatchExpr, resultLoc: Option<Value>): Unit {
+        let group = RequireParentBlockGroup(CurrentBlock(), "condition match")
+        let endBlock = builder.CreateBlock(group)
+        var caseIndex: Int64 = 0
+        while (caseIndex < expr.matchCaseOthers.size) {
+            let matchCase = expr.matchCaseOthers[caseIndex]
+            let bodyBlock = builder.CreateBlock(group)
+            let nextBlock = builder.CreateBlock(group)
+            if (let Some(condExpr) <- matchCase.matchExpr) {
+                if (condExpr.astKind == ASTKind.WILDCARD_EXPR) {
+                    builder.CreateGoTo(bodyBlock, CurrentBlock())
+                } else {
+                    let condValue = Translator.TranslateASTNode(condExpr, this) ??
+                        throw IllegalStateException("faithful AST2CHIR condition match case produced no value")
+                    builder.CreateBranch(condValue, bodyBlock, nextBlock, CurrentBlock())
+                }
+            } else {
+                builder.CreateGoTo(bodyBlock, CurrentBlock())
+            }
+
+            currentBlock = bodyBlock
+            let bodyValue = Translator.TranslateASTNode(RequireBlock(matchCase.exprOrDecls, "condition match body"),
+                this)
+            StoreIfResult(resultLoc, bodyValue)
+            if (CurrentBlock().GetTerminator().isNone()) {
+                builder.CreateGoTo(endBlock, CurrentBlock())
+            }
+            currentBlock = nextBlock
+            caseIndex++
+        }
+        if (CurrentBlock().GetTerminator().isNone()) {
+            builder.CreateGoTo(endBlock, CurrentBlock())
+        }
+        currentBlock = endBlock
+    }
+
+    private func TranslateSinglePatternBranch(pattern: AstPattern, selector: Value, trueBlock: Block,
+        falseBlock: Block): Unit {
+        if (let Some(_) <- (pattern as AstWildcardPattern)) {
+            builder.CreateGoTo(trueBlock, CurrentBlock())
+            return
+        }
+        if (let Some(_) <- (pattern as AstVarPattern)) {
+            builder.CreateGoTo(trueBlock, CurrentBlock())
+            return
+        }
+        if (let Some(varOrEnum) <- (pattern as AstVarOrEnumPattern)) {
+            if (let Some(realPattern) <- varOrEnum.pattern) {
+                TranslateSinglePatternBranch(realPattern, selector, trueBlock, falseBlock)
+                return
+            }
+            builder.CreateGoTo(trueBlock, CurrentBlock())
+            return
+        }
+        if (let Some(constPattern) <- (pattern as AstConstPattern)) {
+            let litValue = Translator.TranslateASTNode(RequireExpr(constPattern.literal, "const pattern literal"),
+                this) ?? throw IllegalStateException("faithful AST2CHIR const pattern literal produced no value")
+            let cond = RequireResult(builder.CreateBinaryExpression(ExprKind.EQUAL, builder.context.GetBoolTy(),
+                selector, litValue, CurrentBlock()))
+            builder.CreateBranch(cond, trueBlock, falseBlock, CurrentBlock())
+            return
+        }
+        if (let Some(enumPattern) <- (pattern as AstEnumPattern)) {
+            let cond = TranslateEnumPatternCondition(enumPattern, selector)
+            builder.CreateBranch(cond, trueBlock, falseBlock, CurrentBlock())
+            return
+        }
+        throw IllegalArgumentException("not yet ported in faithful AST2CHIR match pattern: ${ASTKindName(pattern.astKind)}")
+    }
+
+    private func BindPatternValues(pattern: AstPattern, selector: Value): Unit {
+        if (let Some(varPattern) <- (pattern as AstVarPattern)) {
+            if (let Some(varDecl) <- varPattern.varDecl) {
+                localValSymbolTable.Set(varDecl, selector)
+            }
+            return
+        }
+        if (let Some(varOrEnum) <- (pattern as AstVarOrEnumPattern)) {
+            if (let Some(realPattern) <- varOrEnum.pattern) {
+                BindPatternValues(realPattern, selector)
+            }
+            return
+        }
+        if (let Some(enumPattern) <- (pattern as AstEnumPattern)) {
+            if (!enumPattern.patterns.isEmpty()) {
+                throw IllegalArgumentException("not yet ported in faithful AST2CHIR: enum payload pattern binding")
+            }
+        }
+    }
+
+    private func TranslateEnumPatternCondition(pattern: AstEnumPattern, selector: Value): Value {
+        if (!pattern.patterns.isEmpty()) {
+            throw IllegalArgumentException("not yet ported in faithful AST2CHIR: enum payload pattern")
+        }
+        let tagValue = GetEnumTagValue(pattern, selector)
+        let tagConst = RequireResult(builder.CreateConstant(builder.context.GetUInt64Ty(),
+            IntLiteral(GetEnumPatternId(pattern)), CurrentBlock()))
+        return RequireResult(builder.CreateBinaryExpression(ExprKind.EQUAL, builder.context.GetBoolTy(), tagValue,
+            tagConst, CurrentBlock()))
+    }
+
+    private func GetEnumTagValue(pattern: AstEnumPattern, selector: Value): Value {
+        let constructor = RequireEnumPatternConstructor(pattern)
+        if (let Some(outerDecl) <- constructor.outerDecl) {
+            if (let Some(enumDecl) <- (outerDecl as AstEnumDecl)) {
+                if (!enumDecl.hasArguments) {
+                    return RequireResult(builder.CreateTypeCast(builder.context.GetUInt64Ty(),
+                        GetDerefedValue(selector), CurrentBlock()))
+                }
+            }
+        }
+        let path = ArrayList<UInt64>()
+        path.add(0u64)
+        return RequireResult(builder.CreateField(builder.context.GetUInt64Ty(), GetDerefedValue(selector), path,
+            CurrentBlock()))
+    }
+
+    private func GetEnumPatternId(pattern: AstEnumPattern): Int64 {
+        let constructor = RequireEnumPatternConstructor(pattern)
+        let outer = constructor.outerDecl ??
+            throw IllegalStateException("faithful AST2CHIR enum pattern constructor has no outer enum")
+        let enumDecl = (outer as AstEnumDecl) ??
+            throw IllegalStateException("faithful AST2CHIR enum pattern constructor outer is not enum")
+        var idx: Int64 = 0
+        for (ctor in enumDecl.constructors) {
+            if (SameTranslatorAstDecl(ctor, constructor)) {
+                return idx
+            }
+            idx++
+        }
+        throw IllegalStateException("faithful AST2CHIR enum pattern constructor not found: ${constructor.identifier.Val()}")
+    }
+
+    private func RequireEnumPatternConstructor(pattern: AstEnumPattern): AstDecl {
+        let constructorExpr = RequireExpr(pattern.constructor, "enum pattern constructor")
+        if (let Some(refExpr) <- (constructorExpr as AstRefExpr)) {
+            return refExpr.ref.target ??
+                throw IllegalStateException("faithful AST2CHIR enum pattern RefExpr has no target")
+        }
+        if (let Some(member) <- (constructorExpr as AstMemberAccess)) {
+            return member.target ??
+                throw IllegalStateException("faithful AST2CHIR enum pattern MemberAccess has no target")
+        }
+        throw IllegalArgumentException("not yet ported in faithful AST2CHIR: enum pattern constructor expression")
+    }
+
+    private func SameTranslatorAstDecl(left: AstDecl, right: AstDecl): Bool {
+        return ASTKindIndex(left.astKind) == ASTKindIndex(right.astKind) &&
+            left.identifier.Val() == right.identifier.Val() && left.fullPackageName == right.fullPackageName &&
+            left.begin.hashCode() == right.begin.hashCode() && left.end.hashCode() == right.end.hashCode()
     }
 
     private func TranslateTrivialAssign(expr: AstAssignExpr, leftExpr: AstExpr, rightExpr: AstExpr): Option<Value> {
@@ -945,5 +1159,9 @@ public class Translator {
 
     private static func RequireNodeAsJumpExpr(node: AstNode): AstJumpExpr {
         return (node as AstJumpExpr) ?? throw IllegalArgumentException("ASTKind cast failed: JUMP_EXPR")
+    }
+
+    private static func RequireNodeAsMatchExpr(node: AstNode): AstMatchExpr {
+        return (node as AstMatchExpr) ?? throw IllegalArgumentException("ASTKind cast failed: MATCH_EXPR")
     }
 }
