@@ -66,7 +66,17 @@ public class UnreachableBranchCheck {
     }
 
     private func VisitTerminator(fn: Function, term: Terminator, warnings: ArrayList<UnreachableBranchWarning>): Unit {
-        if (term.GetExprKind() != ExprKind.BRANCH || term.GetNumOfOperands() == 0) {
+        if (term.GetExprKind() == ExprKind.BRANCH) {
+            VisitBranch(fn, term, warnings)
+            return
+        }
+        if (term.GetExprKind() == ExprKind.MULTIBRANCH) {
+            VisitMultiBranch(fn, term, warnings)
+        }
+    }
+
+    private func VisitBranch(fn: Function, term: Terminator, warnings: ArrayList<UnreachableBranchWarning>): Unit {
+        if (term.GetNumOfOperands() == 0) {
             return
         }
         if (let Some(condition) <- EvaluateBoolValue(term.GetOperand(0))) {
@@ -75,13 +85,41 @@ public class UnreachableBranchCheck {
                 return
             }
             let target = if (condition) { successors[0] } else { successors[1] }
-            let processed = ArrayList<Int64>()
-            for (successor in successors) {
-                if (successor.nodeId != target.nodeId) {
-                    PrintWarning(fn, term, successor, processed, warnings, isRecursive: false)
-                }
+            WarnUnreachableSuccessors(fn, term, target, warnings)
+        }
+    }
+
+    private func VisitMultiBranch(fn: Function, term: Terminator, warnings: ArrayList<UnreachableBranchWarning>): Unit {
+        if (term.GetNumOfOperands() == 0) {
+            return
+        }
+        if (let Some(multiBranch) <- (term as MultiBranch)) {
+            if (let Some(selector) <- EvaluateUIntValue(multiBranch.GetCondition())) {
+                let target = ResolveMultiBranchTarget(multiBranch, selector)
+                WarnUnreachableSuccessors(fn, term, target, warnings)
             }
         }
+    }
+
+    private func WarnUnreachableSuccessors(fn: Function, term: Terminator, target: Block,
+        warnings: ArrayList<UnreachableBranchWarning>): Unit {
+        let processed = ArrayList<Int64>()
+        for (successor in term.GetSuccessors()) {
+            if (successor.nodeId != target.nodeId) {
+                PrintWarning(fn, term, successor, processed, warnings, isRecursive: false)
+            }
+        }
+    }
+
+    private func ResolveMultiBranchTarget(multiBranch: MultiBranch, selector: UInt64): Block {
+        var idx: Int64 = 0
+        while (idx < multiBranch.GetCaseVals().size) {
+            if (multiBranch.GetCaseValByIndex(idx) == selector) {
+                return multiBranch.GetCaseBlockByIndex(idx)
+            }
+            idx++
+        }
+        return multiBranch.GetDefaultBlock()
     }
 
     private func PrintWarning(fn: Function, node: Terminator, block: Block, processed: ArrayList<Int64>,
@@ -92,8 +130,14 @@ public class UnreachableBranchCheck {
         processed.add(block.nodeId)
         if (let Some(nestedTerm) <- block.GetTerminator()) {
             if (nestedTerm.GetExprKind() == ExprKind.BRANCH || nestedTerm.GetExprKind() == ExprKind.MULTIBRANCH) {
-                for (successor in nestedTerm.GetSuccessors()) {
-                    PrintWarning(fn, nestedTerm, successor, processed, warnings, isRecursive: true)
+                var shouldRecurse = true
+                if (let Some(branchTerm) <- (nestedTerm as Branch)) {
+                    shouldRecurse = branchTerm.GetSourceExpr() != SourceExpr.FOR_IN_EXPR
+                }
+                if (shouldRecurse) {
+                    for (successor in nestedTerm.GetSuccessors()) {
+                        PrintWarning(fn, nestedTerm, successor, processed, warnings, isRecursive: true)
+                    }
                 }
             }
         }
@@ -114,6 +158,26 @@ public class UnreachableBranchCheck {
         if (let Some(globalVar) <- value.AsGlobalVar()) {
             if (let Some(initValue) <- globalVar.GetInitializerValue()) {
                 return EvaluateBoolValue(initValue)
+            }
+        }
+        return None
+    }
+
+    private func EvaluateUIntValue(value: Value): Option<UInt64> {
+        if (let Some(local) <- value.AsLocalVar()) {
+            if (let Some(expr) <- local.GetExpr()) {
+                if (let Some(literal) <- constEval.EvaluateToLiteral(expr)) {
+                    if (let Some(intLiteral) <- (literal as IntLiteral)) {
+                        if (intLiteral.value >= 0) {
+                            return UInt64(intLiteral.value)
+                        }
+                    }
+                }
+            }
+        }
+        if (let Some(globalVar) <- value.AsGlobalVar()) {
+            if (let Some(initValue) <- globalVar.GetInitializerValue()) {
+                return EvaluateUIntValue(initValue)
             }
         }
         return None
