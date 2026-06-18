@@ -67,6 +67,12 @@ Current status:
   mode, requires either a package directory or scanned `.cjo` depending on
   `--scan-dependency` mode, and invokes the frontend for `.cjo` dependency
   scans even when there are no source files.
+- CJMP common-part inputs now have Driver-owned state matching the shared
+  option model: `--common-part-cjo` and `--common-part-chir` validate readable
+  files, store normalized paths, forward those paths to the frontend, enforce
+  `.cjo`/`.chir` extension checks, require matching CJO/CHIR counts, and make a
+  common `.chir` input trigger the frontend path even without normal source
+  files.
 - OHOS target post-processing now mirrors `DisableStaticStdForOhos` by warning
   on `--static-std` and forcing dynamic standard-library selection before
   static-link validation.
@@ -137,8 +143,9 @@ Residual fidelity risks:
   the frontend/codegen package boundary exposing the C++ in-process
   `GlobalOptions` state to Driver, and some platform-specific runtime library
   edge cases remain below the C++ driver.
-- Package-directory and `.cjo` scan-dependency input handling now have
-  Driver-owned state and validation parity for direct Driver invocations.
+- Package-directory, `.cjo` scan-dependency, and CJMP common-part input handling
+  now have Driver-owned state and validation parity for direct Driver
+  invocations.
 - The Windows-specific `main-frontend.cpp` process wrapper is represented by a
   direct Cangjie frontend shim rather than a separate `CreateProcess`-style
   executable launcher.

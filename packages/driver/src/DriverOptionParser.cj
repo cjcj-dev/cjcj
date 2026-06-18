@@ -568,15 +568,21 @@ private func ParseOptionWithValue(opts: DriverOptions, cursor: ParseCursor, arg:
     }
     if (arg == "--common-part-cjo" || arg.startsWith("--common-part-cjo=")) {
         if (let Some(value) <- readOptionValue(cursor, arg, "--common-part-cjo")) {
-            addFrontendSeparated(opts, "--common-part-cjo", value)
-            return true
+            if (let Some(path) <- opts.ValidateInputFilePath(value)) {
+                opts.commonPartCjos.add(path)
+                addFrontendSeparated(opts, "--common-part-cjo", path)
+                return true
+            }
         }
         return false
     }
     if (arg == "--common-part-chir" || arg.startsWith("--common-part-chir=")) {
         if (let Some(value) <- readOptionValue(cursor, arg, "--common-part-chir")) {
-            addFrontendSeparated(opts, "--common-part-chir", value)
-            return true
+            if (let Some(path) <- opts.ValidateInputFilePath(value)) {
+                opts.commonPartChirs.add(path)
+                addFrontendSeparated(opts, "--common-part-chir", path)
+                return true
+            }
         }
         return false
     }

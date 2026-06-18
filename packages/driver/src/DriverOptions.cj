@@ -9,6 +9,8 @@ import cangjie_compiler::utils.{AccessResultType, FILE_PATH_MAX_LENGTH, FileMode
 
 public let OBFUCATION_LEVEL_MIN: Int64 = 1
 public let OBFUCATION_LEVEL_MAX: Int64 = 9
+private let CJO_EXTENSION: String = "cjo"
+private let CHIR_EXTENSION: String = "chir"
 
 private func HasStringValue(value: Option<String>): Bool {
     return if (let Some(_) <- value) { true } else { false }
@@ -144,6 +146,8 @@ public class DriverOptions {
     public let inputLinkOptions: ArrayList<String> = ArrayList<String>()
     public let bcInputFiles: ArrayList<String> = ArrayList<String>()
     public let bcPackageNames: ArrayList<String> = ArrayList<String>()
+    public let commonPartCjos: ArrayList<String> = ArrayList<String>()
+    public let commonPartChirs: ArrayList<String> = ArrayList<String>()
     public let frontendOutputFiles: ArrayList<TempFileInfo> = ArrayList<TempFileInfo>()
     public let symbolsNeedLocalized: ArrayList<String> = ArrayList<String>()
     public let symbolsNeedLocalizedPerPkg: HashMap<String, ArrayList<String>> = HashMap<String, ArrayList<String>>()
@@ -227,6 +231,8 @@ public class DriverOptions {
     public func IsLTOEnabled(): Bool { return ltoMod != LTOMode.NO_LTO }
     public func IsFullLTOEnabled(): Bool { return ltoMod == LTOMode.FULL_LTO }
     public func IsEmitCHIREnable(): Bool { return outputMode == OutputMode.CHIR || !emitCHIRPhase.isEmpty() }
+    public func IsCompilingCJMPSpecific(): Bool { return !commonPartChirs.isEmpty() }
+    public func IsCompilingCJMP(): Bool { return IsCompilingCJMPSpecific() || outputMode == OutputMode.CHIR }
     public func GetLtoVisiblePkgs(): Array<String> { return ltoVisiblePkgs.toArray() }
     public func IsCompileAsExeEnabled(): Bool { return enableCompileAsExe }
     public func IsLTOPkgVisibilityEnabled(): Bool { return ltoHideAllPkgs || !ltoVisiblePkgs.isEmpty() }
@@ -241,7 +247,8 @@ public class DriverOptions {
 
     public func HasInputs(): Bool {
         return compilePackage || !srcFiles.isEmpty() || !inputObjs.isEmpty() || !inputLibraries.isEmpty() ||
-            !bcInputFiles.isEmpty() || !inputCjoFile.isEmpty()
+            !bcInputFiles.isEmpty() || !inputCjoFile.isEmpty() || !commonPartCjos.isEmpty() ||
+            !commonPartChirs.isEmpty()
     }
 
     public func CheckDirectoryPath(path: String): Option<String> {
@@ -357,6 +364,14 @@ public class DriverOptions {
             if (!inputCjoFile.isEmpty()) {
                 out.add(inputCjoFile)
             }
+            for (commonCjo in commonPartCjos) {
+                out.add("--common-part-cjo")
+                out.add(commonCjo)
+            }
+            for (commonChir in commonPartChirs) {
+                out.add("--common-part-chir")
+                out.add(commonChir)
+            }
             if (noSubPkg) { out.add("--no-sub-pkg") }
             if (scanDepPkg) { out.add("--scan-dependency") }
             if (enableCompileDebug) { out.add("-g") }
@@ -438,6 +453,7 @@ public class DriverOptions {
         success = success && CheckLTOOptions()
         success = success && CheckPGOOptions()
         success = success && CheckCompileTargetOption()
+        success = success && CheckCJMPOptions()
         ReprocessAggressiveParallelCompile()
         success = success && CheckRuntimeRPath()
         success = success && CheckSanitizerRPath()
@@ -825,6 +841,29 @@ public class DriverOptions {
             return false
         }
         return true
+    }
+
+    private func CheckCJMPOptions(): Bool {
+        var success = true
+        for (commonCjo in commonPartCjos) {
+            if (FileUtil.GetFileExtension(commonCjo) != CJO_EXTENSION) {
+                eprintln("warning: Not a .${CJO_EXTENSION} file: '${commonCjo}' ('${commonCjo}'). The argument is ignored.")
+                success = false
+            }
+        }
+        for (commonChir in commonPartChirs) {
+            if (FileUtil.GetFileExtension(commonChir) != CHIR_EXTENSION) {
+                eprintln(
+                    "warning: Not a .${CHIR_EXTENSION} file: '${commonChir}' ('${commonChir}'). The argument is ignored."
+                )
+                success = false
+            }
+        }
+        if (commonPartCjos.size != commonPartChirs.size) {
+            eprintln("error: common .chir files count should be equal to common .cjo files count")
+            success = false
+        }
+        return success
     }
 
     private func ReprocessAggressiveParallelCompile(): Unit {
