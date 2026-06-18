@@ -1,9 +1,53 @@
 # Sema ffi-cjmp-test deepening status
 
-Date: 2026-06-17
+Date: 2026-06-18
 Build: `cjpm build` passes.
 Scoped selfhost TODO comments: 0 remaining in the requested files.
 Whole-package selfhost TODO grep: 4 existing markers remain outside the allowed ffi-cjmp-test edit area.
+
+## 2026-06-18 CJMP default-argument invariant pass
+
+- Aligned CJMP default-argument propagation with the C++ preconditions: a specific parameter receiving a propagated default must not already have a desugared default declaration or assignment expression.
+- Matched the C++ requirement that a common parameter marked with a default argument must carry a desugared default declaration before propagation.
+- Added abort-on-invariant-failure handling for default declaration clone failure, assignment clone failure, and mismatched already-matched parameter list sizes, using a private C FFI `abort` path to preserve the C++ `CJC_ASSERT` behavior without adding package dependencies.
+- Verified with `cjpm build`; `grep -rn "TODO(selfhost:Sema)" packages/sema/src` still reports the four existing out-of-scope root Sema markers and none in the scoped files.
+
+## 2026-06-18 mock accessor classification pass
+
+- Switched `MockUtils.ComputeAccessorKind` to the real `GetUsableGetterForProperty` and `GetUsableSetterForProperty` helpers, matching the C++ behavior for inherited/usable property accessors instead of assuming the first getter/setter slot.
+- Matched the C++ invalid property-accessor path by aborting when a `FuncDecl` has a property owner but is neither the usable getter nor usable setter.
+- Matched the C++ `FindAccessor` invalid-kind and missing-member-access precondition behavior with a private C FFI `abort` path, avoiding a new package dependency while preserving `CJC_ABORT` semantics.
+- Verified with `cjpm build`; `grep -rn "TODO(selfhost:Sema)" packages/sema/src` still reports the four existing out-of-scope root Sema markers and none in the scoped files.
+
+## 2026-06-18 NativeFFI helper parity pass
+
+- Aligned `SplitAndTrim` with the C++ helper: the single-token case is preserved verbatim, and trimming is only applied when the configuration string is comma-separated.
+- Matched the C++ `GetArrayOperationKind` precondition and invalid-shape behavior: declarations must belong to `JArray`, invalid operation declarations abort, and the post-abort fallback returns `GET`.
+- Kept the abort path external through a private C FFI declaration for `abort`, avoiding a new package dependency while preserving the C++ `CJC_ABORT` behavior.
+- Verified with `cjpm build`; `grep -rn "TODO(selfhost:Sema)" packages/sema/src` still reports the four existing out-of-scope root Sema markers and none in the scoped files.
+
+## 2026-06-18 FFI diagnostic range pass
+
+- Mirrored the C++ `GetFuncBodyRange` helper for C function return-type diagnostics: use the return type source range when present, otherwise fall back to the function identifier range.
+- Routed both invalid C function return-type diagnostics and VArray return diagnostics through that C++-faithful range helper, preserving the existing refactor diagnostic payload and note text.
+- Added the C++ initial-type guard to C struct member validation so unresolved/initial member types are skipped instead of producing premature C struct field diagnostics.
+- Verified with `cjpm build`; `grep -rn "TODO(selfhost:Sema)" packages/sema/src` still reports the four existing out-of-scope root Sema markers and none in the scoped files.
+
+## 2026-06-18 CJMP nominal merge pass
+
+- Added the C++ pre-typecheck path for platform compilation that merges common nominal declarations into their specific counterparts, excluding extensions as in the C++ split.
+- Ported the common/specific member merge behavior for instance variables: common members are reparented to the specific declaration, specific member variables replace matched common variables, member-parameter duplicates are skipped, unmatched specific variables are diagnosed, and common variables without defaults still require a specific implementation.
+- Ported dependency retargeting from common declarations to their specific implementations after merge, and marked the common nominal declaration as `doNotExport` with `specificImplementation` set.
+- Kept the out-of-scope extension merge/symbol-table rebuild path unimplemented because the C++ implementation depends on `CompilerInstance`, `ScopeManager`, `Collector`, and declaration-map updates outside the allowed file set.
+- Verified with `cjpm build`; scoped files still have no `TODO(selfhost:Sema)` markers.
+
+## 2026-06-18 continuation pass
+
+- Tightened CJMP nominal merge preservation for duplicate member-parameter declarations so the residual common declaration list keeps the skipped member parameter, matching the C++ move/swap behavior that preserves declarations still needing analysis.
+- Moved CJMP generic-bound compatibility checking into `MapCJMPGenericTypeArgs`, matching the C++ path that validates common/specific generic constraints whenever the generic mapping is requested.
+- Aligned C FFI wrong-argument-count diagnostics for `@C`, `@FastNative`, and `@Frozen` with the C++ checker by reporting `sema_annotation_error_arg_num` on the first annotation argument via the legacy diagnostic path.
+- Aligned C function signature checking with C++ by skipping C return-type diagnostics when the return type is not yet a correct/resolved type.
+- Verified with `cjpm build`; `grep -rn "TODO(selfhost:Sema)" packages/sema/src` still reports the four existing out-of-scope root Sema markers.
 
 ## 2026-06-17 mock accessor parity pass
 
@@ -57,10 +101,10 @@ Whole-package selfhost TODO grep: 4 existing markers remain outside the allowed 
 ## Remaining fidelity gaps
 
 - C FFI still lacks backend-option-sensitive unsafe-call gating and the full platform ABI diagnostic matrix from the C++ checker.
-- CJMP common member symbol-table rewriting, some extension declaration-map updates, and several merged-member ownership details remain partial.
+- CJMP nominal common-to-specific member merging is now present for non-extension declarations, but extension declaration-map updates and symbol-table rebuilding remain partial because their C++ dependencies sit outside this scoped edit area.
 - Plugin checking now has the core reference-check helpers, external-weak marking hooks, scoped traversal, macro-order checks, IfAvailable branch walking, and override-hide comparison when a `TypeManager` is supplied, but still lacks full option/import-manager parsing, dependency annotation clearing, and call-site wiring from the complete C++ checker.
 - Mock/test support now has stronger semantic classification, naming, lookup, accessor metadata, package usage detection, and preparation plumbing, but generated wrapper/body synthesis and full injection behavior are still incomplete.
-- NativeFFI utilities now cover more reference, generic, type-node, Java-array, and naming helpers, but larger AST synthesis/desugaring helpers, mangler-driven method naming, import-manager core declaration helpers, abort-on-invalid array classification, and full Java/ObjC interop manager behavior remain incomplete.
+- NativeFFI utilities now cover more reference, generic, type-node, Java-array, and naming helpers, but larger AST synthesis/desugaring helpers, mangler-driven method naming, import-manager core declaration helpers, and full Java/ObjC interop manager behavior remain incomplete.
 - LSP base-name, scope-name, and relative-position helpers are present, but the C++ type synthesizer half remains outside the current self-host surface.
 
-Honest real-behavior coverage for this scoped pass is estimated at 55% versus the corresponding C++ reference surface.
+Honest real-behavior coverage for this scoped pass is estimated at 62% versus the corresponding C++ reference surface.

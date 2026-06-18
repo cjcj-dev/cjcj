@@ -8,6 +8,10 @@ import cangjie_compiler::option.GetFileName as OptionGetFileName
 import cangjie_compiler::option.IsDir as OptionIsDir
 import cangjie_compiler::sema.TypeManager
 
+foreign {
+    func abort(): Unit
+}
+
 public let NSSTRING_CLASS_IDENT: String = "NSString"
 public let NSOBJECT_CLASS_IDENT: String = "NSObject"
 public let TOSTRING_METHOD_IDENT: String = "toString"
@@ -43,6 +47,18 @@ extend ArrayOperationKind <: Equatable<ArrayOperationKind> {
 
     public operator func !=(right: ArrayOperationKind): Bool {
         return !(this == right)
+    }
+}
+
+private func AbortForInvalidArrayOperation(): Unit {
+    unsafe {
+        abort()
+    }
+}
+
+private func AssertArrayOperationPrecondition(condition: Bool): Unit {
+    if (!condition) {
+        AbortForInvalidArrayOperation()
     }
 }
 
@@ -303,10 +319,16 @@ public func TryGetArrayOperationKind(decl: Decl): Option<ArrayOperationKind> {
 }
 
 public func GetArrayOperationKind(decl: Decl): ArrayOperationKind {
+    if (let Some(outer) <- decl.outerDecl) {
+        AssertArrayOperationPrecondition(IsJArray(outer))
+    } else {
+        AssertArrayOperationPrecondition(false)
+    }
     if (let Some(kind) <- TryGetArrayOperationKind(decl)) {
         return kind
     }
-    return ArrayOperationKind.CREATE
+    AbortForInvalidArrayOperation()
+    return ArrayOperationKind.GET
 }
 
 public func GetCangjieLibName(outputLibPath: String, fullPackageName: String, trimmed!: Bool = true): String {
@@ -454,6 +476,10 @@ public func IsCJMappingGeneric(decl: Decl): Bool {
 
 public func SplitAndTrim(value: String): ArrayList<String> {
     let out = ArrayList<String>()
+    if (value.indexOf(",").isNone()) {
+        out.add(value)
+        return out
+    }
     for (part in value.split(",")) {
         out.add(part.trimAscii())
     }

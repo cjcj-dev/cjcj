@@ -8,6 +8,16 @@ import cangjie_compiler::basic.DiagKindRefactor as BasicDiagKindRefactor
 import cangjie_compiler::basic.Position as BasicPosition
 import cangjie_compiler::basic.Range as BasicRange
 
+foreign {
+    func abort(): Unit
+}
+
+private func AbortCJMPDefaultArgumentPropagation(): Unit {
+    unsafe {
+        abort()
+    }
+}
+
 private func ToBasicPosition(pos: Position): BasicPosition {
     return BasicPosition(pos.fileID, pos.line, pos.column)
 }
@@ -33,17 +43,30 @@ private func HasDefaultArgument(param: FuncParam): Bool {
 }
 
 private func CloneDefaultArgument(from: FuncParam, to: FuncParam, toFunc: FuncDecl): Unit {
-    if (let Some(defaultDecl) <- from.desugarDecl) {
-        if (let Some(clonedDecl) <- (ASTCloner.Clone(defaultDecl) as FuncDecl)) {
-            clonedDecl.begin = defaultDecl.begin
-            clonedDecl.end = defaultDecl.end
-            clonedDecl.outerDecl = toFunc.outerDecl
-            to.desugarDecl = clonedDecl
-        }
+    if (to.desugarDecl.isSome() || to.assignment.isSome()) {
+        AbortCJMPDefaultArgumentPropagation()
+        return
+    }
+    if (let None <- from.desugarDecl) {
+        AbortCJMPDefaultArgumentPropagation()
+        return
+    }
+    let defaultDecl = from.desugarDecl.getOrThrow()
+    if (let Some(clonedDecl) <- (ASTCloner.Clone(defaultDecl) as FuncDecl)) {
+        clonedDecl.begin = defaultDecl.begin
+        clonedDecl.end = defaultDecl.end
+        clonedDecl.outerDecl = toFunc.outerDecl
+        to.desugarDecl = clonedDecl
+    } else {
+        AbortCJMPDefaultArgumentPropagation()
+        return
     }
     if (let Some(assignment) <- from.assignment) {
         if (let Some(clonedAssignment) <- (ASTCloner.Clone(assignment) as Expr)) {
             to.assignment = clonedAssignment
+        } else {
+            AbortCJMPDefaultArgumentPropagation()
+            return
         }
     }
     to.EnableAttr(Attribute.HAS_INITIAL)
@@ -159,6 +182,7 @@ extend MPTypeCheckerImpl {
                 }
             }
         }
+        CheckCommonSpecificGenericMatch(specificDecl, commonDecl)
         if (commonDecl.GetGenericsCount() != specificDecl.GetGenericsCount()) {
             return
         }
@@ -173,6 +197,7 @@ extend MPTypeCheckerImpl {
     public func PropagateDefaultArguments(commonParams: FuncParamList, specificParams: FuncParamList,
         specificFunc: FuncDecl): Unit {
         if (commonParams.params.size != specificParams.params.size) {
+            AbortCJMPDefaultArgumentPropagation()
             return
         }
         for (idx in 0..commonParams.params.size) {

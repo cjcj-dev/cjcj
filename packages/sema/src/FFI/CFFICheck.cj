@@ -29,6 +29,20 @@ private func NodeRange(node: Node): BasicRange {
     return ToBasicRange(node.begin, node.end)
 }
 
+private func IdentifierRange(identifier: SrcIdentifier): BasicRange {
+    return ToBasicRange(identifier.GetRawPos(), identifier.GetRawEndPos())
+}
+
+private func FuncBodyTypeRange(body: FuncBody, typeNode: Type): BasicRange {
+    if (!typeNode.begin.IsZero()) {
+        return NodeRange(typeNode)
+    }
+    if (let Some(funcDecl) <- body.funcDecl) {
+        return IdentifierRange(funcDecl.identifier)
+    }
+    return NodeRange(typeNode)
+}
+
 private func EmitRefactor(diag: BasicDiagnosticEngine, kind: BasicDiagKindRefactor, node: Node,
     args!: Array<String> = Array<String>()): Unit {
     let builder = diag.DiagnoseRefactor(kind, NodeRange(node), arguments: args)
@@ -130,7 +144,11 @@ public func IsZeroSizedTy(ty: Ty): Bool {
 
 public func CheckAnnoC(decl: Decl, annotation: Annotation, diag: BasicDiagnosticEngine): Unit {
     if (!annotation.args.isEmpty()) {
-        EmitRefactor(diag, BasicDiagKindRefactor.sema_annotation_error_arg_num, annotation, args: ["@C", "no"])
+        EmitLegacy(
+            diag,
+            BasicDiagKind.sema_annotation_error_arg_num,
+            annotation.args[0],
+            args: [BasicDiagArgument("@C"), BasicDiagArgument("no")])
     }
     if (decl.astKind == ASTKind.FUNC_DECL) {
         if (let Some(generic) <- decl.GetGeneric()) {
@@ -184,7 +202,11 @@ public func CheckAnnoCallingConv(decl: Decl, annotation: Annotation, diag: Basic
 
 public func CheckAnnoFastNative(decl: Decl, annotation: Annotation, diag: BasicDiagnosticEngine): Unit {
     if (!annotation.args.isEmpty()) {
-        EmitRefactor(diag, BasicDiagKindRefactor.sema_annotation_error_arg_num, annotation, args: ["@FastNative", "no"])
+        EmitLegacy(
+            diag,
+            BasicDiagKind.sema_annotation_error_arg_num,
+            annotation.args[0],
+            args: [BasicDiagArgument("@FastNative"), BasicDiagArgument("no")])
     }
     if (decl.astKind != ASTKind.FUNC_DECL || !decl.TestAttr(Attribute.FOREIGN)) {
         let prefix = if (decl.astKind == ASTKind.FUNC_DECL) { "non-foreign " } else { "" }
@@ -202,7 +224,11 @@ public func CheckAnnoFastNative(decl: Decl, annotation: Annotation, diag: BasicD
 
 public func CheckAnnoFrozen(decl: Decl, annotation: Annotation, diag: BasicDiagnosticEngine): Unit {
     if (!annotation.args.isEmpty()) {
-        EmitRefactor(diag, BasicDiagKindRefactor.sema_annotation_error_arg_num, annotation, args: ["@Frozen", "no"])
+        EmitLegacy(
+            diag,
+            BasicDiagKind.sema_annotation_error_arg_num,
+            annotation.args[0],
+            args: [BasicDiagArgument("@Frozen"), BasicDiagArgument("no")])
     }
     if (decl.astKind != ASTKind.FUNC_DECL && decl.astKind != ASTKind.PROP_DECL) {
         EmitLegacy(
@@ -306,15 +332,21 @@ public func CheckCFuncSignature(body: FuncBody, diag: BasicDiagnosticEngine): Un
             }
         }
         if (let Some(retType) <- body.retType) {
+            if (!Ty.IsTyCorrect(retType.GetTy())) {
+                return
+            }
             if (let Some(retTy) <- retType.GetTy()) {
                 if (!Ty.IsMetCType(retTy)) {
                     let builder = diag.DiagnoseRefactor(
                         BasicDiagKindRefactor.sema_invalid_cfunc_return_type,
-                        NodeRange(retType))
+                        FuncBodyTypeRange(body, retType))
                     builder.AddNote("return type is " + retTy.String())
                     builder.Emit()
                 } else if (let Some(_) <- (retTy as VArrayTy)) {
-                    EmitRefactor(diag, BasicDiagKindRefactor.sema_varray_in_cfunc, retType)
+                    let builder = diag.DiagnoseRefactor(
+                        BasicDiagKindRefactor.sema_varray_in_cfunc,
+                        FuncBodyTypeRange(body, retType))
+                    builder.Emit()
                 }
             }
         }
@@ -352,6 +384,9 @@ public func CheckInvalidThisOrSuperInCFunc(refExpr: RefExpr, diag: BasicDiagnost
 
 public func CheckCTypeMember(decl: Decl, diag: BasicDiagnosticEngine): Unit {
     if (decl.astKind != ASTKind.VAR_DECL) {
+        return
+    }
+    if (Ty.IsInitialTy(decl.GetTy())) {
         return
     }
     if (let None <- decl.outerDecl) {
