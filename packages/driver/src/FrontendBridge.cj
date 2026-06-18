@@ -57,7 +57,7 @@ private func ReconcileFrontendOutputs(opts: DriverOptions): Bool {
 }
 
 private func HasFrontendSourceInput(opts: DriverOptions): Bool {
-    return !opts.srcFiles.isEmpty() || opts.compilePackage
+    return !opts.srcFiles.isEmpty() || opts.compilePackage || opts.scanDepPkg || opts.IsCompilingCJMPSpecific()
 }
 
 private func VerifyFrontendOutputs(opts: DriverOptions): Bool {

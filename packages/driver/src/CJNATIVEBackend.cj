@@ -50,8 +50,9 @@ public class CJNATIVEBackend <: Backend {
 
     protected override func PrepareDependencyPath(): Bool {
         let cjnativeBinSearchPaths = ArrayList<String>()
-        if (let Some(home) <- driverOptions.environment.cangjieHome) {
-            cjnativeBinSearchPaths.add(FileUtil.JoinPath(home, "third_party/llvm/bin"))
+        if (driverOptions.environment.cangjieHome.hasValue) {
+            cjnativeBinSearchPaths.add(FileUtil.JoinPath(driverOptions.environment.cangjieHome.value,
+                "third_party/llvm/bin"))
         }
         cjnativeBinSearchPaths.add(FileUtil.JoinPath(driver.cangjieHome, "third_party/llvm/bin"))
         for (path in driverOptions.toolChainPaths) {

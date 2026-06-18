@@ -568,15 +568,21 @@ private func ParseOptionWithValue(opts: DriverOptions, cursor: ParseCursor, arg:
     }
     if (arg == "--common-part-cjo" || arg.startsWith("--common-part-cjo=")) {
         if (let Some(value) <- readOptionValue(cursor, arg, "--common-part-cjo")) {
-            addFrontendSeparated(opts, "--common-part-cjo", value)
-            return true
+            if (let Some(path) <- opts.ValidateInputFilePath(value)) {
+                opts.commonPartCjos.add(path)
+                addFrontendSeparated(opts, "--common-part-cjo", path)
+                return true
+            }
         }
         return false
     }
     if (arg == "--common-part-chir" || arg.startsWith("--common-part-chir=")) {
         if (let Some(value) <- readOptionValue(cursor, arg, "--common-part-chir")) {
-            addFrontendSeparated(opts, "--common-part-chir", value)
-            return true
+            if (let Some(path) <- opts.ValidateInputFilePath(value)) {
+                opts.commonPartChirs.add(path)
+                addFrontendSeparated(opts, "--common-part-chir", path)
+                return true
+            }
         }
         return false
     }
@@ -731,6 +737,10 @@ public func IsFrontendInput(input: String): Bool {
 public func ClassifyInput(opts: DriverOptions, input: String, index: UInt64): Bool {
     let extension = FileUtil.GetFileExtension(input)
     if (extension == "cj") {
+        if (opts.compilePackage) {
+            eprintln("error: source file '${input}' cannot be used with '-p' or '--package'.")
+            return false
+        }
         if (let None <- opts.ValidateInputFilePath(input)) {
             return false
         }
@@ -749,6 +759,16 @@ public func ClassifyInput(opts: DriverOptions, input: String, index: UInt64): Bo
             return true
         }
         return false
+    } else if (extension == "cjo") {
+        if (let Some(path) <- opts.ValidateInputFilePath(input)) {
+            if (!opts.inputCjoFile.isEmpty()) {
+                eprintln("error: only one cjo input is accepted with '--scan-dependency'.")
+                return false
+            }
+            opts.inputCjoFile = path
+            return true
+        }
+        return false
     } else if (extension == "so" || extension == "dylib" || extension == "dll") {
         if (let Some(path) <- opts.ValidateInputFilePath(input)) {
             opts.inputLibraries.add(path)
@@ -756,7 +776,21 @@ public func ClassifyInput(opts: DriverOptions, input: String, index: UInt64): Bo
             return true
         }
         return false
+    } else if (FileUtil.FileExist(input) && FileUtil.IsDir(input)) {
+        if (!opts.compilePackage) {
+            eprintln("error: source file path '${input}' requires '-p' or '--package'.")
+            return false
+        }
+        if (let Some(path) <- opts.ValidateDirectoryPath(input)) {
+            opts.packagePaths.add(path)
+            return true
+        }
+        return false
     } else if (let Some(_) <- opts.ValidateInputFilePath(input)) {
+        if (opts.compilePackage) {
+            eprintln("error: source file '${input}' cannot be used with '-p' or '--package'.")
+            return false
+        }
         opts.srcFiles.add(input)
         return true
     }

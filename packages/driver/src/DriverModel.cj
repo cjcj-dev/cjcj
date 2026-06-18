@@ -1,10 +1,12 @@
 package cangjie_compiler::driver
 
-import std.collection.*
 public import cangjie_compiler::option.{
     ArchType, BackendType, CompileTarget, EnvironmentType, LTOMode, OSType, OptimizationLevel, OutputMode,
     SanitizerType, TripleInfo, Vendor
 }
+public import cangjie_compiler::option.EnvironmentOptions as OptionEnvironmentOptions
+public import cangjie_compiler::option.MaybeString as OptionMaybeString
+public import cangjie_compiler::option.OrderedInput as OptionOrderedInput
 import cangjie_compiler::option.enumIndex as OptionOptimizationLevelIndex
 
 public enum ToolType {
@@ -92,15 +94,7 @@ public func OptimizationLevelIndex(value: OptimizationLevel): Int64 {
     return OptionOptimizationLevelIndex(value)
 }
 
-public class OrderedInput {
-    public let value: String
-    public let index: UInt64
-
-    public init(value: String, index: UInt64) {
-        this.value = value
-        this.index = index
-    }
-}
+public type OrderedInput = OptionOrderedInput
 
 public class TempFileInfo {
     public var fileName: String
@@ -124,16 +118,8 @@ public class TempFileInfo {
     }
 }
 
-public class EnvironmentOptions {
-    public let allVariables: HashMap<String, String> = HashMap<String, String>()
-    public var cangjieHome: Option<String> = None
-    public let cangjiePaths: ArrayList<String> = ArrayList<String>()
-    public let libraryPaths: ArrayList<String> = ArrayList<String>()
-    public let paths: ArrayList<String> = ArrayList<String>()
-    public var macOSSDKRoot: Option<String> = None
-
-    public init() {}
-}
+public type EnvironmentOptions = OptionEnvironmentOptions
+public type MaybeString = OptionMaybeString
 
 extend TripleInfo {
     public func OSTypeToString(): String {

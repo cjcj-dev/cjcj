@@ -45,7 +45,9 @@ public class Driver {
 
     public func EnvironmentSetup(environmentVars: HashMap<String, String>): Unit {
         driverOptions.ReadPathsFromEnvironmentVars(environmentVars)
-        cangjieHome = driverOptions.environment.cangjieHome ?? cangjieHome
+        if (driverOptions.environment.cangjieHome.hasValue) {
+            cangjieHome = driverOptions.environment.cangjieHome.value
+        }
         driverOptions.cangjieHome = cangjieHome
     }
 
@@ -69,7 +71,8 @@ public class Driver {
         if (!TempFileManager.Instance().Init(driverOptions, false)) {
             return false
         }
-        if (!driverOptions.srcFiles.isEmpty() || driverOptions.compilePackage) {
+        if (!driverOptions.srcFiles.isEmpty() || driverOptions.compilePackage || driverOptions.scanDepPkg ||
+            driverOptions.IsCompilingCJMPSpecific()) {
             if (!ExecuteFrontendPhase(this)) {
                 return false
             }

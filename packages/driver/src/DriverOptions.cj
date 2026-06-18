@@ -3,11 +3,14 @@ package cangjie_compiler::driver
 import std.collection.*
 import cangjie_compiler::option.Backend as OptionBackend
 import cangjie_compiler::option.BackendToString as OptionBackendToString
+import cangjie_compiler::option.GetDefaultOutputNameLength
 import cangjie_compiler::option.GetHardwareConcurrency
-import cangjie_compiler::utils.FileMode
+import cangjie_compiler::utils.{AccessResultType, FILE_PATH_MAX_LENGTH, FileMode}
 
 public let OBFUCATION_LEVEL_MIN: Int64 = 1
 public let OBFUCATION_LEVEL_MAX: Int64 = 9
+private let CJO_EXTENSION: String = "cjo"
+private let CHIR_EXTENSION: String = "chir"
 
 private func HasStringValue(value: Option<String>): Bool {
     return if (let Some(_) <- value) { true } else { false }
@@ -15,6 +18,22 @@ private func HasStringValue(value: Option<String>): Bool {
 
 private func HasBoolValue(value: Option<Bool>): Bool {
     return if (let Some(_) <- value) { true } else { false }
+}
+
+private func IsAccessOK(result: AccessResultType): Bool {
+    return match (result) {
+        case AccessResultType.OK => true
+        case AccessResultType.NOT_EXIST => false
+        case AccessResultType.NO_PERMISSION => false
+        case AccessResultType.FAILED_WITH_UNKNOWN_REASON => false
+    }
+}
+
+private func EmitDirectoryAccessFailure(path: String, result: AccessResultType): Unit {
+    match (result) {
+        case AccessResultType.NO_PERMISSION => eprintln("error: permission denied '${path}'")
+        case _ => eprintln("error: no such directory '${path}'")
+    }
 }
 
 public class DriverOptions {
@@ -61,6 +80,7 @@ public class DriverOptions {
     public var outputDir: Option<String> = None
     public var moduleName: String = "main"
     public var moduleSrcPath: String = ""
+    public let packagePaths: ArrayList<String> = ArrayList<String>()
     public var showUsage: Bool = false
     public var printVersionOnly: Bool = false
     public var enableVerbose: Bool = false
@@ -121,10 +141,13 @@ public class DriverOptions {
     public var compilationCachedFileName: String = ""
     public let srcFiles: ArrayList<String> = ArrayList<String>()
     public let inputObjs: ArrayList<String> = ArrayList<String>()
+    public var inputCjoFile: String = ""
     public let inputLibraries: ArrayList<String> = ArrayList<String>()
     public let inputLinkOptions: ArrayList<String> = ArrayList<String>()
     public let bcInputFiles: ArrayList<String> = ArrayList<String>()
     public let bcPackageNames: ArrayList<String> = ArrayList<String>()
+    public let commonPartCjos: ArrayList<String> = ArrayList<String>()
+    public let commonPartChirs: ArrayList<String> = ArrayList<String>()
     public let frontendOutputFiles: ArrayList<TempFileInfo> = ArrayList<TempFileInfo>()
     public let symbolsNeedLocalized: ArrayList<String> = ArrayList<String>()
     public let symbolsNeedLocalizedPerPkg: HashMap<String, ArrayList<String>> = HashMap<String, ArrayList<String>>()
@@ -149,25 +172,34 @@ public class DriverOptions {
             environment.allVariables.add(key, value)
         }
         if (let Some(home) <- environmentVars.get("CANGJIE_HOME")) {
-            environment.cangjieHome = home
+            environment.cangjieHome = MaybeString()
+            if (let Some(absHome) <- FileUtil.GetAbsPath(home)) {
+                environment.cangjieHome = MaybeString(absHome)
+            }
         }
         if (let Some(pathsValue) <- environmentVars.get("CANGJIE_PATH")) {
+            environment.cangjiePaths.clear()
             for (item in FileUtil.SplitEnvironmentPaths(pathsValue)) {
                 environment.cangjiePaths.add(item)
             }
         }
         if (let Some(libraryValue) <- environmentVars.get("LIBRARY_PATH")) {
+            environment.libraryPaths.clear()
             for (item in FileUtil.SplitEnvironmentPaths(libraryValue)) {
                 environment.libraryPaths.add(item)
             }
         }
         if (let Some(pathValue) <- environmentVars.get("PATH")) {
+            environment.paths.clear()
             for (item in FileUtil.SplitEnvironmentPaths(pathValue)) {
                 environment.paths.add(item)
             }
         }
         if (let Some(sdkRoot) <- environmentVars.get("SDKROOT")) {
-            environment.macOSSDKRoot = sdkRoot
+            environment.macOSSDKRoot = MaybeString()
+            if (let Some(absSdkRoot) <- FileUtil.GetAbsPath(sdkRoot)) {
+                environment.macOSSDKRoot = MaybeString(absSdkRoot)
+            }
         }
         if (let Some(macosSdkRoot) <- environmentVars.get("MACOSX_DEPLOYMENT_TARGET")) {
             let _ = macosSdkRoot
@@ -199,6 +231,8 @@ public class DriverOptions {
     public func IsLTOEnabled(): Bool { return ltoMod != LTOMode.NO_LTO }
     public func IsFullLTOEnabled(): Bool { return ltoMod == LTOMode.FULL_LTO }
     public func IsEmitCHIREnable(): Bool { return outputMode == OutputMode.CHIR || !emitCHIRPhase.isEmpty() }
+    public func IsCompilingCJMPSpecific(): Bool { return !commonPartChirs.isEmpty() }
+    public func IsCompilingCJMP(): Bool { return IsCompilingCJMPSpecific() || outputMode == OutputMode.CHIR }
     public func GetLtoVisiblePkgs(): Array<String> { return ltoVisiblePkgs.toArray() }
     public func IsCompileAsExeEnabled(): Bool { return enableCompileAsExe }
     public func IsLTOPkgVisibilityEnabled(): Bool { return ltoHideAllPkgs || !ltoVisiblePkgs.isEmpty() }
@@ -213,7 +247,8 @@ public class DriverOptions {
 
     public func HasInputs(): Bool {
         return compilePackage || !srcFiles.isEmpty() || !inputObjs.isEmpty() || !inputLibraries.isEmpty() ||
-            !bcInputFiles.isEmpty()
+            !bcInputFiles.isEmpty() || !inputCjoFile.isEmpty() || !commonPartCjos.isEmpty() ||
+            !commonPartChirs.isEmpty()
     }
 
     public func CheckDirectoryPath(path: String): Option<String> {
@@ -229,6 +264,30 @@ public class DriverOptions {
             return absPath
         }
         eprintln("warning: invalid path '${path}', argument ignored.")
+        return None
+    }
+
+    public func ValidateDirectoryPath(path: String, mode!: FileMode = FileMode.FM_EXIST): Option<String> {
+        let accessResult = FileUtil.AccessWithResult(path, mode)
+        if (!IsAccessOK(accessResult)) {
+            EmitDirectoryAccessFailure(path, accessResult)
+            return None
+        }
+        if (!FileUtil.IsDir(path)) {
+            eprintln("error: not a directory '${path}'")
+            return None
+        }
+        if (mode == FileMode.FM_WRITE) {
+            let execResult = FileUtil.AccessWithResult(path, FileMode.FM_EXE)
+            if (!IsAccessOK(execResult)) {
+                EmitDirectoryAccessFailure(path, execResult)
+                return None
+            }
+        }
+        if (let Some(absPath) <- FileUtil.GetAbsPath(path)) {
+            return absPath
+        }
+        eprintln("error: invalid path '${path}'")
         return None
     }
 
@@ -284,10 +343,6 @@ public class DriverOptions {
 
     public func SetOptimizationLevel(level: OptimizationLevel): Bool {
         optimizationLevel = level
-        if (OptimizationLevelIndex(level) >= OptimizationLevelIndex(OptimizationLevel.O2)) {
-            enableFuncSections = true
-            enableDataSections = true
-        }
         return true
     }
 
@@ -302,6 +357,20 @@ public class DriverOptions {
             if (!moduleSrcPath.isEmpty()) {
                 out.add("--module-src-path")
                 out.add(moduleSrcPath)
+            }
+            for (packagePath in packagePaths) {
+                out.add(packagePath)
+            }
+            if (!inputCjoFile.isEmpty()) {
+                out.add(inputCjoFile)
+            }
+            for (commonCjo in commonPartCjos) {
+                out.add("--common-part-cjo")
+                out.add(commonCjo)
+            }
+            for (commonChir in commonPartChirs) {
+                out.add("--common-part-chir")
+                out.add(commonChir)
             }
             if (noSubPkg) { out.add("--no-sub-pkg") }
             if (scanDepPkg) { out.add("--scan-dependency") }
@@ -361,6 +430,15 @@ public class DriverOptions {
         if (outputMode == OutputMode.OBJ && compileTarget == CompileTarget.DEFAULT) {
             compileTarget = CompileTarget.EXECUTABLE
         }
+        if (!ReprocessOutputs()) {
+            return false
+        }
+        if (!ValidatePackageInputs()) {
+            return false
+        }
+        if (!ReprocessInputs()) {
+            return false
+        }
         if (!ReprocessObfuseOption()) {
             return false
         }
@@ -368,26 +446,169 @@ public class DriverOptions {
         success = success && CheckTargetCPUOption()
         success = success && CheckObfuscationOptions()
         success = success && SetupSysroot()
+        success = success && CheckCompileMacro()
+        success = success && CheckScanDependencyOptions()
+        success = success && ReprocessCoverageOptions()
         success = success && CheckSanitizerOptions()
         success = success && CheckLTOOptions()
         success = success && CheckPGOOptions()
         success = success && CheckCompileTargetOption()
+        success = success && CheckCJMPOptions()
         ReprocessAggressiveParallelCompile()
         success = success && CheckRuntimeRPath()
         success = success && CheckSanitizerRPath()
+        DisableStaticStdForOhos()
         success = success && CheckStaticOption()
         return success
+    }
+
+    private func CheckOutputPathLength(): Bool {
+        let fullLength = if (FileUtil.IsDir(output)) {
+            output.size + GetDefaultOutputNameLength()
+        } else {
+            output.size
+        }
+        if (fullLength > FILE_PATH_MAX_LENGTH) {
+            eprintln("error: the output file path exceeds maximum path length ${FILE_PATH_MAX_LENGTH}.")
+            return false
+        }
+        if (fullLength > FILE_PATH_MAX_LENGTH - 15) {
+            eprintln("warning: the output file path is close to maximum path length ${FILE_PATH_MAX_LENGTH}.")
+        }
+        return true
+    }
+
+    private func ReprocessOutputs(): Bool {
+        if (let Some(dir) <- outputDir) {
+            if (FileUtil.IsAbsolutePath(output)) {
+                eprintln("error: '-o' does not accept absolute path when '--output-dir' is specified.")
+                return false
+            }
+            output = FileUtil.JoinPath(dir, output)
+            if (let Some(absDir) <- ValidateDirectoryPath(dir, mode: FileMode.FM_WRITE)) {
+                outputDir = absDir
+            } else {
+                return false
+            }
+        }
+
+        let outputIsDir = FileUtil.IsDir(output)
+        let dirPath = FileUtil.GetDirPath(output)
+        let saveDir = if (outputIsDir) { output } else if (dirPath.isEmpty()) { "/" } else { dirPath }
+        if (let Some(absSaveDir) <- ValidateDirectoryPath(saveDir, mode: FileMode.FM_WRITE)) {
+            output = if (outputIsDir) { absSaveDir } else { FileUtil.JoinPath(absSaveDir, FileUtil.GetFileName(output)) }
+        } else {
+            return false
+        }
+        if (!CheckOutputPathLength()) {
+            return false
+        }
+        if (!compileMacro && FileUtil.GetFileName(output).startsWith("lib-macro_")) {
+            eprintln("error: Cannot support specify file prefix 'lib-macro_' without '--compile-macro' option.")
+            return false
+        }
+        return true
+    }
+
+    private func AddInputForOverwriteCheck(inputs: ArrayList<String>, value: String): Unit {
+        if (!value.isEmpty()) {
+            inputs.add(value)
+        }
+    }
+
+    private func ReprocessInputs(): Bool {
+        if (FileUtil.IsDir(output)) {
+            return true
+        }
+        let inputs = ArrayList<String>()
+        for (input in srcFiles) { AddInputForOverwriteCheck(inputs, input) }
+        for (input in inputObjs) { AddInputForOverwriteCheck(inputs, input) }
+        for (input in inputLibraries) { AddInputForOverwriteCheck(inputs, input) }
+        for (input in bcInputFiles) { AddInputForOverwriteCheck(inputs, input) }
+        if (compilePackage && !moduleSrcPath.isEmpty() && FileUtil.IsDir(moduleSrcPath)) {
+            for (fileName in FileUtil.GetAllFilesUnderCurrentPath(moduleSrcPath, "cj")) {
+                AddInputForOverwriteCheck(inputs, FileUtil.JoinPath(moduleSrcPath, fileName))
+            }
+        }
+        if (compilePackage) {
+            for (packagePath in packagePaths) {
+                for (fileName in FileUtil.GetAllFilesUnderCurrentPath(packagePath, "cj")) {
+                    AddInputForOverwriteCheck(inputs, FileUtil.JoinPath(packagePath, fileName))
+                }
+            }
+        }
+        for (inputFile in inputs) {
+            if (let Some(absInput) <- FileUtil.GetAbsPath(inputFile)) {
+                if (absInput == output) {
+                    eprintln("error: input file '${inputFile}' would be overwritten by generated output.")
+                    return false
+                }
+            } else {
+                eprintln("error: no such file or directory '${inputFile}'")
+                return false
+            }
+        }
+        return true
+    }
+
+    private func ValidatePackageInputs(): Bool {
+        if (!compilePackage) {
+            return true
+        }
+        if (packagePaths.isEmpty() && moduleSrcPath.isEmpty()) {
+            eprintln("error: package directory is required when '-p' or '--package' is specified.")
+            return false
+        }
+        let seen = ArrayList<String>()
+        if (!moduleSrcPath.isEmpty()) {
+            if (let Some(absPath) <- FileUtil.GetAbsPath(moduleSrcPath)) {
+                seen.add(absPath)
+            }
+        }
+        for (packagePath in packagePaths) {
+            let canonical = FileUtil.GetAbsPath(packagePath) ?? FileUtil.NormalizePath(packagePath)
+            if (seen.contains(canonical)) {
+                eprintln("error: duplicate package path '${packagePath}' specified with '-p'")
+                return false
+            }
+            seen.add(canonical)
+        }
+        return true
     }
 
     private func CheckObfuscationOptions(): Bool {
         if (enableCompileDebug && IsObfuscationEnabled()) {
             eprintln("warning: Obfuscation options should be used without '-g' or debugging may not work properly.")
         }
-        if (!(enableLayoutObfuscation ?? false) && (HasStringValue(layoutObfInputSymMappingFiles) ||
-            HasStringValue(layoutObfOutputSymMappingFile) || HasStringValue(layoutObfUserMappingFile) ||
-            HasBoolValue(enableObfExportSyms) || HasBoolValue(enableObfLineNumber) ||
-            HasBoolValue(enableObfSourcePath) || HasStringValue(layoutObfSymPrefix))) {
-            eprintln("error: layout obfuscation sub-options require layout obfuscation to be enabled.")
+        if (enableLayoutObfuscation ?? false) {
+            return true
+        }
+        if (HasStringValue(layoutObfInputSymMappingFiles)) {
+            eprintln("error: Input symbol mapping files can be specified only when layout obfuscation is enabled.")
+            return false
+        }
+        if (HasStringValue(layoutObfOutputSymMappingFile)) {
+            eprintln("error: Output symbol mapping file can be specified only when layout obfuscation is enabled.")
+            return false
+        }
+        if (HasStringValue(layoutObfUserMappingFile)) {
+            eprintln("error: User-defined symbol mapping file can be specified only when layout obfuscation is enabled.")
+            return false
+        }
+        if (HasBoolValue(enableObfExportSyms)) {
+            eprintln("error: You can set whether to obfuscate export symbols only when layout obfuscation is enabled.")
+            return false
+        }
+        if (HasBoolValue(enableObfLineNumber)) {
+            eprintln("error: You can set whether to obfuscate line number only when layout obfuscation is enabled.")
+            return false
+        }
+        if (HasBoolValue(enableObfSourcePath)) {
+            eprintln("error: You can set whether to obfuscate source path only when layout obfuscation is enabled.")
+            return false
+        }
+        if (HasStringValue(layoutObfSymPrefix)) {
+            eprintln("error: Symbol prefix can be specified only when layout obfuscation is enabled.")
             return false
         }
         return true
@@ -415,8 +636,8 @@ public class DriverOptions {
 
     private func SetupSysroot(): Bool {
         if (!customizedSysroot && target.IsMacOS()) {
-            if (let Some(sdkRoot) <- environment.macOSSDKRoot) {
-                sysroot = sdkRoot
+            if (environment.macOSSDKRoot.hasValue) {
+                sysroot = environment.macOSSDKRoot.value
             }
         }
         return true
@@ -448,6 +669,48 @@ public class DriverOptions {
         }
         if (IsCrossCompiling()) {
             eprintln("warning: '--sanitize-set-rpath' option has no effect on cross-compiled targets.")
+        }
+        return true
+    }
+
+    private func ReprocessCoverageOptions(): Bool {
+        if (enableCoverage && optimizationLevel != OptimizationLevel.O0) {
+            eprintln("warning: '--coverage' should be used without optimizations.")
+            return SetOptimizationLevel(OptimizationLevel.O0)
+        }
+        return true
+    }
+
+    private func CheckScanDependencyOptions(): Bool {
+        if (!scanDepPkg) {
+            return true
+        }
+        if (compilePackage) {
+            if (!inputCjoFile.isEmpty()) {
+                eprintln("error: cjo inputs are not accepted when '-p' or '--package' is specified.")
+                return false
+            }
+            if (packagePaths.isEmpty() && moduleSrcPath.isEmpty()) {
+                eprintln("error: package directory is required when '--scan-dependency' is used with '-p' or '--package'.")
+                return false
+            }
+            return true
+        }
+        if (inputCjoFile.isEmpty()) {
+            eprintln("error: cjo input is required when '--scan-dependency' is used without '-p' or '--package'.")
+            return false
+        }
+        return true
+    }
+
+    private func CheckCompileMacro(): Bool {
+        if (compileMacro && enableOutputType) {
+            eprintln("error: using both '--compile-macro' and '--output-type' is not allowed.")
+            return false
+        }
+        if (compileMacro && !output.isEmpty() && !FileUtil.IsDir(output)) {
+            eprintln("error: Cannot support specify output file name with '--compile-macro' option.")
+            return false
         }
         return true
     }
@@ -580,6 +843,29 @@ public class DriverOptions {
         return true
     }
 
+    private func CheckCJMPOptions(): Bool {
+        var success = true
+        for (commonCjo in commonPartCjos) {
+            if (FileUtil.GetFileExtension(commonCjo) != CJO_EXTENSION) {
+                eprintln("warning: Not a .${CJO_EXTENSION} file: '${commonCjo}' ('${commonCjo}'). The argument is ignored.")
+                success = false
+            }
+        }
+        for (commonChir in commonPartChirs) {
+            if (FileUtil.GetFileExtension(commonChir) != CHIR_EXTENSION) {
+                eprintln(
+                    "warning: Not a .${CHIR_EXTENSION} file: '${commonChir}' ('${commonChir}'). The argument is ignored."
+                )
+                success = false
+            }
+        }
+        if (commonPartCjos.size != commonPartChirs.size) {
+            eprintln("error: common .chir files count should be equal to common .cjo files count")
+            success = false
+        }
+        return success
+    }
+
     private func ReprocessAggressiveParallelCompile(): Unit {
         if (let None <- jobs) {
             jobs = GetHardwareConcurrency()
@@ -598,6 +884,16 @@ public class DriverOptions {
                 aggressiveParallelCompile = 1
             }
         }
+    }
+
+    private func DisableStaticStdForOhos(): Unit {
+        if (target.env != EnvironmentType.OHOS) {
+            return
+        }
+        if (linkStaticStd ?? false) {
+            eprintln("warning: '--static-std' is not supported when targeting OHOS.")
+        }
+        linkStaticStd = false
     }
 
     private func CheckStaticOption(): Bool {

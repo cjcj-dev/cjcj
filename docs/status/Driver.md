@@ -22,8 +22,12 @@ Current status:
   packages instead of carrying local compatibility copies for compiler version
   printing, target/optimization/output/sanitizer enums, `TripleInfo`, and
   `FileUtil`. Driver-owned model types remain only for Driver concepts such as
-  tool IDs, tool futures, ordered inputs, environment options, and temp-file
-  records.
+  tool IDs, tool futures, and temp-file records.
+- Driver no longer carries local compatibility copies of option-owned
+  `OrderedInput` or `EnvironmentOptions`; those aliases now resolve to the real
+  `option` package types. Environment path ingestion uses the shared
+  `MaybeString` representation and mirrors the C++ absolute-path normalization
+  for `CANGJIE_HOME` and `SDKROOT`.
 - Driver help output now delegates to the shared `option.OptionTable.Usage`
   path with the real global/driver option groups and experimental-mode
   filtering, replacing the local abbreviated compatibility usage text. Version
@@ -44,6 +48,37 @@ Current status:
   `chir`/`obj`/`hotreload` output-type parsing, PGO flags, section flags, jobs,
   warning forwarding, and target-triple validation are represented in Driver
   options.
+- Coverage post-action reprocessing now matches the C++ `GlobalOptions`
+  behavior by warning and forcing optimization back to `O0`; optimization
+  levels no longer implicitly enable function/data sections, which are now
+  controlled only by their explicit section flags as in the C++ option actions.
+- Driver output post-actions now normalize `-o`/`--output-dir` through the same
+  writable-directory checks used by the C++ `GlobalOptions::ReprocessOutputs`,
+  reject output paths that would overwrite normalized inputs, enforce the
+  `lib-macro_` output-name guard, and validate `--compile-macro` conflicts with
+  explicit output-type or output-file choices.
+- Package-directory input handling now follows the C++ `ProcessInputs` model
+  more closely: directory inputs are accepted only in `-p`/`--package` mode,
+  multiple package directories are retained in parse order, duplicate canonical
+  package paths are rejected, and package source trees participate in output
+  overwrite checks.
+- Dependency-scan input validation now mirrors the C++ `.cjo` path: Driver
+  records a single scanned `.cjo` input, rejects `.cjo` inputs in package scan
+  mode, requires either a package directory or scanned `.cjo` depending on
+  `--scan-dependency` mode, and invokes the frontend for `.cjo` dependency
+  scans even when there are no source files.
+- CJMP common-part inputs now have Driver-owned state matching the shared
+  option model: `--common-part-cjo` and `--common-part-chir` validate readable
+  files, store normalized paths, forward those paths to the frontend, enforce
+  `.cjo`/`.chir` extension checks, require matching CJO/CHIR counts, and make a
+  common `.chir` input trigger the frontend path even without normal source
+  files.
+- OHOS target post-processing now mirrors `DisableStaticStdForOhos` by warning
+  on `--static-std` and forcing dynamic standard-library selection before
+  static-link validation.
+- Obfuscation post-action validation now follows the C++ `DriverOptions`
+  failure order and emits the specific error for each layout-only sub-option
+  instead of a single grouped compatibility diagnostic.
 - Driver post-action validation now carries more of the C++ `GlobalOptions`
   behavior needed by Driver: `--compile-as-exe` is tracked separately from
   `--compile-target`, LTO mode rejects unsupported targets/options, PGO gen/use
@@ -68,6 +103,9 @@ Current status:
   script placement, sanitizer runtime lookup/fallbacks, PGO runtime placement,
   LTO linker options, target runtime rpath, standard-library static/dynamic
   grouping, and multi-module package partial linking are implemented.
+- Thin-LTO linker option generation now resolves the cache directory to an
+  absolute path and escapes backticks before emitting `--thinlto-cache-dir`,
+  matching the C++ `ToolOptions::LLD::SetLTOOptions` behavior.
 - Mach-O native linking now mirrors the C++ Darwin/iOS command builders more
   closely: SDK version probing, `ld64.lld` `-platform_version` arguments,
   target-qualified runtime/library search paths, `section.o`/`cjstart.o`
@@ -105,9 +143,9 @@ Residual fidelity risks:
   the frontend/codegen package boundary exposing the C++ in-process
   `GlobalOptions` state to Driver, and some platform-specific runtime library
   edge cases remain below the C++ driver.
-- Package-directory input handling is still below the C++ `ProcessInputs`
-  model because the Driver package has not yet grown the full package path and
-  duplicate-canonicalization state owned by the shared option layer.
+- Package-directory, `.cjo` scan-dependency, and CJMP common-part input handling
+  now have Driver-owned state and validation parity for direct Driver
+  invocations.
 - The Windows-specific `main-frontend.cpp` process wrapper is represented by a
   direct Cangjie frontend shim rather than a separate `CreateProcess`-style
   executable launcher.

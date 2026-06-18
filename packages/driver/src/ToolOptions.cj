@@ -196,7 +196,10 @@ public func LLDSetLTOOptions(setOptionHandler: (String) -> Unit, driverOptions: 
         setOptionHandler("--mllvm")
         setOptionHandler("--cangjie-full-lto")
     } else if (driverOptions.IsLTOEnabled()) {
-        setOptionHandler("--thinlto-cache-dir=" + FileUtil.NormalizePath(driverOptions.compilationCachedPath))
+        let normalizedPath = FileUtil.NormalizePath(driverOptions.compilationCachedPath)
+        if (let Some(absolutePath) <- FileUtil.GetAbsPath(normalizedPath)) {
+            setOptionHandler("--thinlto-cache-dir=" + FileUtil.TransferEscapeBacktick(absolutePath))
+        }
     }
     if (effectiveOptimizationLevel(driverOptions) == OptimizationLevel.O2) {
         setOptionHandler("--mllvm")
