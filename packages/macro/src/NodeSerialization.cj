@@ -100,7 +100,81 @@ public class NodeWriter {
     }
 
     public func SerializePattern(pattern: Pattern): String {
+        if (let Some(_) <- (pattern as WildcardPattern)) {
+            return "wildcardPattern()"
+        }
+        if (let Some(constPattern) <- (pattern as ConstPattern)) {
+            return "constPattern(lit=" + SerializeExprOptionForNodeWriter(this, constPattern.literal) + ")"
+        }
+        if (let Some(varPattern) <- (pattern as VarPattern)) {
+            return "varPattern(" + EscapeNodeText(varPattern.identifier) + ";isVar=" +
+                varPattern.isVar.toString() + ")"
+        }
+        if (let Some(tuplePattern) <- (pattern as TuplePattern)) {
+            return "tuplePattern(" + SerializePatternVector(tuplePattern.patterns) + ")"
+        }
+        if (let Some(enumPattern) <- (pattern as EnumPattern)) {
+            return "enumPattern(" + EscapeNodeText(enumPattern.constructor) + ";types=" +
+                SerializeTypeVector(enumPattern.typeArguments) + ";patterns=" +
+                SerializePatternVector(enumPattern.patterns) + ")"
+        }
+        if (let Some(varOrEnumPattern) <- (pattern as VarOrEnumPattern)) {
+            return "varOrEnumPattern(" + EscapeNodeText(varOrEnumPattern.identifier) + ";pattern=" +
+                SerializePatternOption(varOrEnumPattern.pattern) + ")"
+        }
+        if (let Some(typePattern) <- (pattern as TypePattern)) {
+            return "typePattern(pattern=" + SerializePatternOption(typePattern.pattern) + ";type=" +
+                SerializeTypeOptionForNodeWriter(this, typePattern.typeNode) + ")"
+        }
+        if (let Some(exceptTypePattern) <- (pattern as ExceptTypePattern)) {
+            return SerializeTypeListPattern("exceptTypePattern", exceptTypePattern)
+        }
+        if (let Some(commandTypePattern) <- (pattern as CommandTypePattern)) {
+            return SerializeTypeListPattern("commandTypePattern", commandTypePattern)
+        }
         return "pattern(" + ASTKindIndex(pattern.astKind).toString() + ")"
+    }
+
+    private func SerializePatternOption(pattern: Option<Pattern>): String {
+        if (let Some(value) <- pattern) {
+            return SerializePattern(value)
+        }
+        return "none"
+    }
+
+    private func SerializePatternVector(patterns: ArrayList<Pattern>): String {
+        let builder = StringBuilder()
+        builder.append("[")
+        var patternIdx: Int64 = 0
+        while (patternIdx < patterns.size) {
+            if (patternIdx > 0) {
+                builder.append(",")
+            }
+            builder.append(SerializePattern(patterns[patternIdx]))
+            patternIdx++
+        }
+        builder.append("]")
+        return builder.toString()
+    }
+
+    private func SerializeTypeVector(types: ArrayList<Type>): String {
+        let builder = StringBuilder()
+        builder.append("[")
+        var typeIdx: Int64 = 0
+        while (typeIdx < types.size) {
+            if (typeIdx > 0) {
+                builder.append(",")
+            }
+            builder.append(SerializeType(types[typeIdx]))
+            typeIdx++
+        }
+        builder.append("]")
+        return builder.toString()
+    }
+
+    private func SerializeTypeListPattern(kindName: String, pattern: TypeListPattern): String {
+        return kindName + "(pattern=" + SerializePatternOption(pattern.pattern) + ";types=" +
+            SerializeTypeVector(pattern.types) + ")"
     }
 
     public func SerializeType(ty: Type): String {
@@ -109,7 +183,37 @@ public class NodeWriter {
             return "primitiveType(" + kindName + ")"
         }
         if (let Some(refType) <- (ty as RefType)) {
-            return "refType(" + EscapeNodeText(refType.name) + ")"
+            return "refType(" + EscapeNodeText(refType.name) + ";args=" + SerializeTypeVector(refType.typeArguments) +
+                ")"
+        }
+        if (let Some(qualifiedType) <- (ty as QualifiedType)) {
+            return "qualifiedType(base=" + SerializeTypeOptionForNodeWriter(this, qualifiedType.baseType) +
+                ";field=" + EscapeNodeText(qualifiedType.field) + ";args=" +
+                SerializeTypeVector(qualifiedType.typeArguments) + ")"
+        }
+        if (let Some(optionType) <- (ty as OptionType)) {
+            return "optionType(component=" + SerializeTypeOptionForNodeWriter(this, optionType.componentType) +
+                ";questNum=" + optionType.questNum.toString() + ")"
+        }
+        if (let Some(constantType) <- (ty as ConstantType)) {
+            return "constantType(expr=" + SerializeExprOptionForNodeWriter(this, constantType.constantExpr) + ")"
+        }
+        if (let Some(vArrayType) <- (ty as VArrayType)) {
+            return "vArrayType(arg=" + SerializeTypeOptionForNodeWriter(this, vArrayType.typeArgument) + ";size=" +
+                SerializeTypeOptionForNodeWriter(this, vArrayType.constantType) + ")"
+        }
+        if (let Some(parenType) <- (ty as ParenType)) {
+            return "parenType(" + SerializeTypeOptionForNodeWriter(this, parenType.innerType) + ")"
+        }
+        if (let Some(tupleType) <- (ty as TupleType)) {
+            return "tupleType(" + SerializeTypeVector(tupleType.fieldTypes) + ")"
+        }
+        if (let Some(funcType) <- (ty as FuncType)) {
+            return "funcType(params=" + SerializeTypeVector(funcType.paramTypes) + ";ret=" +
+                SerializeTypeOptionForNodeWriter(this, funcType.retType) + ";isC=" + funcType.isC.toString() + ")"
+        }
+        if (let Some(_) <- (ty as ThisType)) {
+            return "thisType()"
         }
         return "type(" + ASTKindIndex(ty.astKind).toString() + "," + EscapeNodeText(ty.name) + ")"
     }
@@ -146,6 +250,9 @@ public class NodeWriter {
         if (let Some(funcDecl) <- (decl as FuncDecl)) {
             return "func(" + EscapeNodeText(funcDecl.identifier) + "," + SerializeFuncBody(funcDecl.funcBody) + ")"
         }
+        if (let Some(patternVarDecl) <- (decl as VarWithPatternDecl)) {
+            return SerializeVarWithPatternDecl(patternVarDecl)
+        }
         if (let Some(varDecl) <- (decl as VarDecl)) {
             return SerializeVarDecl(varDecl)
         }
@@ -172,7 +279,8 @@ public class NodeWriter {
 
     private func SerializeEnumDecl(enumDecl: EnumDecl): String {
         let builder = StringBuilder()
-        builder.append("enum(" + EscapeNodeText(enumDecl.identifier) + ";constructors=[")
+        builder.append("enum(" + EscapeNodeText(enumDecl.identifier) + ";hasArguments=" +
+            enumDecl.hasArguments.toString() + ";constructors=[")
         var ctorIdx: Int64 = 0
         while (ctorIdx < enumDecl.constructors.size) {
             if (ctorIdx > 0) {
@@ -217,7 +325,42 @@ public class NodeWriter {
         } else {
             builder.append(";type=none")
         }
+        if (!varDecl.constructorTypes.isEmpty()) {
+            builder.append(";constructorTypes=[")
+            var typeIdx: Int64 = 0
+            while (typeIdx < varDecl.constructorTypes.size) {
+                if (typeIdx > 0) {
+                    builder.append(",")
+                }
+                builder.append(SerializeType(varDecl.constructorTypes[typeIdx]))
+                typeIdx++
+            }
+            builder.append("]")
+        }
         if (let Some(initializer) <- varDecl.initializer) {
+            builder.append(";init=" + SerializeExprForNodeWriter(this, initializer))
+        } else {
+            builder.append(";init=none")
+        }
+        builder.append(")")
+        return builder.toString()
+    }
+
+    private func SerializeVarWithPatternDecl(patternVarDecl: VarWithPatternDecl): String {
+        let builder = StringBuilder()
+        builder.append("varPattern(" + EscapeNodeText(patternVarDecl.identifier))
+        builder.append(";isVar=" + patternVarDecl.isVar.toString())
+        if (let Some(pattern) <- patternVarDecl.irrefutablePattern) {
+            builder.append(";pattern=" + SerializePattern(pattern))
+        } else {
+            builder.append(";pattern=none")
+        }
+        if (let Some(declType) <- patternVarDecl.declType) {
+            builder.append(";type=" + SerializeType(declType))
+        } else {
+            builder.append(";type=none")
+        }
+        if (let Some(initializer) <- patternVarDecl.initializer) {
             builder.append(";init=" + SerializeExprForNodeWriter(this, initializer))
         } else {
             builder.append(";init=none")

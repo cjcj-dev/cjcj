@@ -1,6 +1,11 @@
 package cangjie_compiler::macro_pkg
 
+import std.collection.*
+
 public func SerializeExprForNodeWriter(writer: NodeWriter, expr: Expr): String {
+    if (let Some(_) <- (expr as WildcardExpr)) {
+        return "wildcard()"
+    }
     if (let Some(tokenPart) <- (expr as TokenPart)) {
         return "tokenPart(" + writer.SerializeTokenVector(tokenPart.tokens) + ")"
     }
@@ -16,14 +21,130 @@ public func SerializeExprForNodeWriter(writer: NodeWriter, expr: Expr): String {
     if (let Some(lit) <- (expr as LitConstExpr)) {
         return "lit(" + TokenKindIndex(lit.kind).toString() + ":" + writer.EscapeText(lit.rawString) + ")"
     }
+    if (let Some(primitiveTypeExpr) <- (expr as PrimitiveTypeExpr)) {
+        return "primitiveTypeExpr(" + TypeKindName(primitiveTypeExpr.typeKind) + ")"
+    }
+    if (let Some(exprList) <- (expr as ExprListExpr)) {
+        return SerializeExprVectorForNodeWriter(writer, "exprList:" + ASTKindIndex(exprList.astKind).toString(),
+            exprList.children)
+    }
+    if (let Some(quoteExpr) <- (expr as QuoteExpr)) {
+        return "quote(tokens=" + writer.SerializeTokenVector(quoteExpr.tokens) + ";exprs=" +
+            SerializeExprVectorForNodeWriter(writer, "items", quoteExpr.exprs) + ")"
+    }
+    if (let Some(parenExpr) <- (expr as ParenExpr)) {
+        return SerializeUnaryLikeExprForNodeWriter(writer, "paren", parenExpr.expr)
+    }
+    if (let Some(unaryExpr) <- (expr as UnaryExpr)) {
+        return "unary(op=" + TokenKindIndex(unaryExpr.op).toString() + ";expr=" +
+            SerializeExprOptionForNodeWriter(writer, unaryExpr.expr) + ")"
+    }
+    if (let Some(incOrDecExpr) <- (expr as IncOrDecExpr)) {
+        return "incOrDec(op=" + TokenKindIndex(incOrDecExpr.op).toString() + ";expr=" +
+            SerializeExprOptionForNodeWriter(writer, incOrDecExpr.expr) + ")"
+    }
+    if (let Some(typeConvExpr) <- (expr as TypeConvExpr)) {
+        return "typeConv(type=" + SerializeTypeOptionForNodeWriter(writer, typeConvExpr.typeNode) + ";expr=" +
+            SerializeExprOptionForNodeWriter(writer, typeConvExpr.expr) + ")"
+    }
+    if (let Some(arrayExpr) <- (expr as ArrayExpr)) {
+        return SerializeArrayExprForNodeWriter(writer, arrayExpr)
+    }
+    if (let Some(subscriptExpr) <- (expr as SubscriptExpr)) {
+        return "subscript(base=" + SerializeExprOptionForNodeWriter(writer, subscriptExpr.baseExpr) + ";indices=" +
+            SerializeExprVectorForNodeWriter(writer, "items", subscriptExpr.indexExprs) + ")"
+    }
+    if (let Some(optionalExpr) <- (expr as OptionalExpr)) {
+        return SerializeUnaryLikeExprForNodeWriter(writer, "optional", optionalExpr.baseExpr)
+    }
+    if (let Some(optionalChainExpr) <- (expr as OptionalChainExpr)) {
+        return SerializeUnaryLikeExprForNodeWriter(writer, "optionalChain", optionalChainExpr.expr)
+    }
+    if (let Some(letPatternExpr) <- (expr as LetPatternDestructor)) {
+        return "letPattern(init=" + SerializeExprOptionForNodeWriter(writer, letPatternExpr.initializer) + ")"
+    }
     if (let Some(ret) <- (expr as ReturnExpr)) {
         if (let Some(inner) <- ret.expr) {
             return "return(" + SerializeExprForNodeWriter(writer, inner) + ")"
         }
         return "return()"
     }
+    if (let Some(jumpExpr) <- (expr as JumpExpr)) {
+        return "jump(isBreak=" + jumpExpr.isBreak.toString() + ")"
+    }
     if (let Some(ifExpr) <- (expr as IfExpr)) {
         return SerializeIfExprForNodeWriter(writer, ifExpr)
+    }
+    if (let Some(matchExpr) <- (expr as MatchExpr)) {
+        return SerializeMatchExprForNodeWriter(writer, matchExpr)
+    }
+    if (let Some(tryExpr) <- (expr as TryExpr)) {
+        return SerializeTryExprForNodeWriter(writer, tryExpr)
+    }
+    if (let Some(whileExpr) <- (expr as WhileExpr)) {
+        return SerializeCondBodyExprForNodeWriter(writer, "while", whileExpr.condExpr, whileExpr.body)
+    }
+    if (let Some(doWhileExpr) <- (expr as DoWhileExpr)) {
+        return SerializeCondBodyExprForNodeWriter(writer, "doWhile", doWhileExpr.condExpr, doWhileExpr.body)
+    }
+    if (let Some(forInExpr) <- (expr as ForInExpr)) {
+        return SerializeForInExprForNodeWriter(writer, forInExpr)
+    }
+    if (let Some(lambdaExpr) <- (expr as LambdaExpr)) {
+        if (let Some(lambdaBody) <- lambdaExpr.funcBody) {
+            return "lambda(" + writer.SerializeFuncBody(lambdaBody) + ")"
+        }
+        return "lambda(none)"
+    }
+    if (let Some(throwExpr) <- (expr as ThrowExpr)) {
+        return SerializeUnaryLikeExprForNodeWriter(writer, "throw", throwExpr.expr)
+    }
+    if (let Some(performExpr) <- (expr as PerformExpr)) {
+        return SerializeUnaryLikeExprForNodeWriter(writer, "perform", performExpr.expr)
+    }
+    if (let Some(resumeExpr) <- (expr as ResumeExpr)) {
+        return "resume(with=" + SerializeExprOptionForNodeWriter(writer, resumeExpr.withExpr) + ";throwing=" +
+            SerializeExprOptionForNodeWriter(writer, resumeExpr.throwingExpr) + ")"
+    }
+    if (let Some(spawnExpr) <- (expr as SpawnExpr)) {
+        return "spawn(arg=" + SerializeExprOptionForNodeWriter(writer, spawnExpr.arg) + ";task=" +
+            SerializeExprOptionForNodeWriter(writer, spawnExpr.task) + ")"
+    }
+    if (let Some(syncExpr) <- (expr as SynchronizedExpr)) {
+        return "synchronized(mutex=" + SerializeExprOptionForNodeWriter(writer, syncExpr.mutex) + ";body=" +
+            SerializeBlockOptionForNodeWriter(writer, syncExpr.body) + ")"
+    }
+    if (let Some(trailingExpr) <- (expr as TrailingClosureExpr)) {
+        let trailingBuilder = StringBuilder()
+        trailingBuilder.append("trailing(base=" + SerializeExprOptionForNodeWriter(writer, trailingExpr.expr) +
+            ";lambda=")
+        if (let Some(lambdaExpr) <- trailingExpr.lambda) {
+            trailingBuilder.append(SerializeExprForNodeWriter(writer, lambdaExpr))
+        } else {
+            trailingBuilder.append("none")
+        }
+        trailingBuilder.append(")")
+        return trailingBuilder.toString()
+    }
+    if (let Some(interpolationExpr) <- (expr as InterpolationExpr)) {
+        return "interpolation(" + SerializeBlockOptionForNodeWriter(writer, interpolationExpr.block) + ")"
+    }
+    if (let Some(strInterpolationExpr) <- (expr as StrInterpolationExpr)) {
+        return SerializeExprVectorForNodeWriter(writer, "strInterpolation", strInterpolationExpr.strPartExprs)
+    }
+    if (let Some(isExpr) <- (expr as IsExpr)) {
+        return "is(left=" + SerializeExprOptionForNodeWriter(writer, isExpr.leftExpr) + ";type=" +
+            SerializeTypeOptionForNodeWriter(writer, isExpr.isType) + ")"
+    }
+    if (let Some(asExpr) <- (expr as AsExpr)) {
+        return "as(left=" + SerializeExprOptionForNodeWriter(writer, asExpr.leftExpr) + ";type=" +
+            SerializeTypeOptionForNodeWriter(writer, asExpr.asType) + ")"
+    }
+    if (let Some(rangeExpr) <- (expr as RangeExpr)) {
+        return "range(start=" + SerializeExprOptionForNodeWriter(writer, rangeExpr.startExpr) + ";stop=" +
+            SerializeExprOptionForNodeWriter(writer, rangeExpr.stopExpr) + ";step=" +
+            SerializeExprOptionForNodeWriter(writer, rangeExpr.stepExpr) + ";closed=" +
+            rangeExpr.isClosed.toString() + ")"
     }
     if (let Some(binary) <- (expr as BinaryExpr)) {
         return SerializeBinaryExprForNodeWriter(writer, binary)
@@ -35,6 +156,61 @@ public func SerializeExprForNodeWriter(writer: NodeWriter, expr: Expr): String {
         return writer.SerializeBlock(block)
     }
     return "expr(" + ASTKindIndex(expr.astKind).toString() + ")"
+}
+
+public func SerializeExprOptionForNodeWriter(writer: NodeWriter, expr: Option<Expr>): String {
+    if (let Some(value) <- expr) {
+        return SerializeExprForNodeWriter(writer, value)
+    }
+    return "none"
+}
+
+public func SerializeTypeOptionForNodeWriter(writer: NodeWriter, ty: Option<Type>): String {
+    if (let Some(value) <- ty) {
+        return writer.SerializeType(value)
+    }
+    return "none"
+}
+
+public func SerializeBlockOptionForNodeWriter(writer: NodeWriter, block: Option<Block>): String {
+    if (let Some(value) <- block) {
+        return writer.SerializeBlock(value)
+    }
+    return "none"
+}
+
+public func SerializeUnaryLikeExprForNodeWriter(writer: NodeWriter, name: String, expr: Option<Expr>): String {
+    return name + "(" + SerializeExprOptionForNodeWriter(writer, expr) + ")"
+}
+
+public func SerializeExprVectorForNodeWriter(writer: NodeWriter, name: String, exprs: ArrayList<Expr>): String {
+    let builder = StringBuilder()
+    builder.append(name + "=[")
+    var idx: Int64 = 0
+    while (idx < exprs.size) {
+        if (idx > 0) {
+            builder.append(",")
+        }
+        builder.append(SerializeExprForNodeWriter(writer, exprs[idx]))
+        idx++
+    }
+    builder.append("]")
+    return builder.toString()
+}
+
+public func SerializeArrayExprForNodeWriter(writer: NodeWriter, arrayExpr: ArrayExpr): String {
+    let builder = StringBuilder()
+    builder.append("arrayExpr(type=" + SerializeTypeOptionForNodeWriter(writer, arrayExpr.typeNode) + ";args=[")
+    var idx: Int64 = 0
+    while (idx < arrayExpr.args.size) {
+        if (idx > 0) {
+            builder.append(",")
+        }
+        builder.append(SerializeFuncArgForNodeWriter(writer, arrayExpr.args[idx]))
+        idx++
+    }
+    builder.append("])")
+    return builder.toString()
 }
 
 public func SerializeCallExprForNodeWriter(writer: NodeWriter, call: CallExpr): String {
@@ -96,8 +272,113 @@ public func SerializeIfExprForNodeWriter(writer: NodeWriter, ifExpr: IfExpr): St
     } else {
         builder.append("none")
     }
-    builder.append(";hasElse=" + ifExpr.hasElse.toString() + ")")
+    builder.append(";hasElse=" + ifExpr.hasElse.toString() + ";else=")
+    if (let Some(elseBody) <- ifExpr.elseBody) {
+        builder.append(SerializeExprForNodeWriter(writer, elseBody))
+    } else {
+        builder.append("none")
+    }
+    builder.append(")")
     return builder.toString()
+}
+
+public func SerializeMatchExprForNodeWriter(writer: NodeWriter, matchExpr: MatchExpr): String {
+    let builder = StringBuilder()
+    builder.append("match(selector=" + SerializeExprOptionForNodeWriter(writer, matchExpr.selector) + ";cases=[")
+    var caseIdx: Int64 = 0
+    while (caseIdx < matchExpr.matchCases.size) {
+        if (caseIdx > 0) {
+            builder.append(",")
+        }
+        builder.append(SerializeMatchCaseForNodeWriter(writer, matchExpr.matchCases[caseIdx]))
+        caseIdx++
+    }
+    builder.append("];others=[")
+    var otherIdx: Int64 = 0
+    while (otherIdx < matchExpr.matchCaseOthers.size) {
+        if (otherIdx > 0) {
+            builder.append(",")
+        }
+        builder.append(SerializeMatchCaseOtherForNodeWriter(writer, matchExpr.matchCaseOthers[otherIdx]))
+        otherIdx++
+    }
+    builder.append("])")
+    return builder.toString()
+}
+
+public func SerializeMatchCaseForNodeWriter(writer: NodeWriter, matchCase: MatchCase): String {
+    return "case(guard=" + SerializeExprOptionForNodeWriter(writer, matchCase.patternGuard) + ";body=" +
+        SerializeBlockOptionForNodeWriter(writer, matchCase.exprOrDecls) + ")"
+}
+
+public func SerializeMatchCaseOtherForNodeWriter(writer: NodeWriter, caseOther: MatchCaseOther): String {
+    return "caseOther(expr=" + SerializeExprOptionForNodeWriter(writer, caseOther.matchExpr) + ";body=" +
+        SerializeBlockOptionForNodeWriter(writer, caseOther.exprOrDecls) + ")"
+}
+
+public func SerializeTryExprForNodeWriter(writer: NodeWriter, tryExpr: TryExpr): String {
+    let builder = StringBuilder()
+    builder.append("try(resources=[")
+    var resourceIdx: Int64 = 0
+    while (resourceIdx < tryExpr.resourceSpec.size) {
+        if (resourceIdx > 0) {
+            builder.append(",")
+        }
+        builder.append(writer.SerializeDecl(tryExpr.resourceSpec[resourceIdx]))
+        resourceIdx++
+    }
+    builder.append("];tryBlock=" + SerializeBlockOptionForNodeWriter(writer, tryExpr.tryBlock) + ";catchPatterns=[")
+    var catchPatternIdx: Int64 = 0
+    while (catchPatternIdx < tryExpr.catchPatterns.size) {
+        if (catchPatternIdx > 0) {
+            builder.append(",")
+        }
+        builder.append(writer.SerializePattern(tryExpr.catchPatterns[catchPatternIdx]))
+        catchPatternIdx++
+    }
+    builder.append("];catchBlocks=[")
+    var catchIdx: Int64 = 0
+    while (catchIdx < tryExpr.catchBlocks.size) {
+        if (catchIdx > 0) {
+            builder.append(",")
+        }
+        builder.append(writer.SerializeBlock(tryExpr.catchBlocks[catchIdx]))
+        catchIdx++
+    }
+    builder.append("];handlers=[")
+    var handlerIdx: Int64 = 0
+    while (handlerIdx < tryExpr.handlers.size) {
+        if (handlerIdx > 0) {
+            builder.append(",")
+        }
+        let handler = tryExpr.handlers[handlerIdx]
+        builder.append("handler(pattern=")
+        if (let Some(pattern) <- handler.commandPattern) {
+            builder.append(writer.SerializePattern(pattern))
+        } else {
+            builder.append("none")
+        }
+        builder.append(";block=" + SerializeBlockOptionForNodeWriter(writer, handler.block) + ")")
+        handlerIdx++
+    }
+    builder.append("];finally=" + SerializeBlockOptionForNodeWriter(writer, tryExpr.finallyBlock) + ")")
+    return builder.toString()
+}
+
+public func SerializeCondBodyExprForNodeWriter(
+    writer: NodeWriter,
+    name: String,
+    condExpr: Option<Expr>,
+    body: Option<Block>
+): String {
+    return name + "(cond=" + SerializeExprOptionForNodeWriter(writer, condExpr) + ";body=" +
+        SerializeBlockOptionForNodeWriter(writer, body) + ")"
+}
+
+public func SerializeForInExprForNodeWriter(writer: NodeWriter, forInExpr: ForInExpr): String {
+    return "forIn(source=" + SerializeExprOptionForNodeWriter(writer, forInExpr.inExpr) + ";guard=" +
+        SerializeExprOptionForNodeWriter(writer, forInExpr.patternGuard) + ";body=" +
+        SerializeBlockOptionForNodeWriter(writer, forInExpr.body) + ")"
 }
 
 public func SerializeBinaryExprForNodeWriter(writer: NodeWriter, binary: BinaryExpr): String {

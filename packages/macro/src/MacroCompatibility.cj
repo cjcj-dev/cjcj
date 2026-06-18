@@ -198,36 +198,324 @@ public open class Type <: Node {
     public init() {
         super(ASTKind.TYPE)
     }
+
+    public init(kind: ASTKind) {
+        super(kind)
+    }
 }
 
 public class PrimitiveType <: Type {
     public var kind: TypeKind = TypeKind.TYPE_INVALID
 
     public init() {
-        super()
+        super(ASTKind.PRIMITIVE_TYPE)
     }
 
     public init(kind: TypeKind) {
-        super()
+        super(ASTKind.PRIMITIVE_TYPE)
         this.kind = kind
         name = TypeKindName(kind)
     }
 }
 
 public class RefType <: Type {
+    public let typeArguments: ArrayList<Type> = ArrayList<Type>()
+
     public init() {
-        super()
+        super(ASTKind.REF_TYPE)
     }
 
     public init(name: String) {
-        super()
+        super(ASTKind.REF_TYPE)
         this.name = name
+    }
+
+    public override func Children(): ArrayList<Node> {
+        let out = ArrayList<Node>()
+        for (ty in typeArguments) {
+            out.add(ty)
+        }
+        return out
+    }
+}
+
+public class QualifiedType <: Type {
+    public var baseType: Option<Type> = None
+    public var field: String = ""
+    public let typeArguments: ArrayList<Type> = ArrayList<Type>()
+
+    public init() {
+        super(ASTKind.QUALIFIED_TYPE)
+    }
+
+    public override func Children(): ArrayList<Node> {
+        let out = ArrayList<Node>()
+        if (let Some(base) <- baseType) {
+            out.add(base)
+        }
+        for (ty in typeArguments) {
+            out.add(ty)
+        }
+        return out
+    }
+}
+
+public class OptionType <: Type {
+    public var componentType: Option<Type> = None
+    public var questNum: UInt64 = 0u64
+
+    public init() {
+        super(ASTKind.OPTION_TYPE)
+    }
+
+    public override func Children(): ArrayList<Node> {
+        let out = ArrayList<Node>()
+        if (let Some(component) <- componentType) {
+            out.add(component)
+        }
+        return out
+    }
+}
+
+public class ConstantType <: Type {
+    public var constantExpr: Option<Expr> = None
+
+    public init() {
+        super(ASTKind.CONSTANT_TYPE)
+    }
+
+    public override func Children(): ArrayList<Node> {
+        let out = ArrayList<Node>()
+        if (let Some(expr) <- constantExpr) {
+            out.add(expr)
+        }
+        return out
+    }
+}
+
+public class VArrayType <: Type {
+    public var typeArgument: Option<Type> = None
+    public var constantType: Option<Type> = None
+
+    public init() {
+        super(ASTKind.VARRAY_TYPE)
+    }
+
+    public override func Children(): ArrayList<Node> {
+        let out = ArrayList<Node>()
+        if (let Some(argument) <- typeArgument) {
+            out.add(argument)
+        }
+        if (let Some(sizeType) <- constantType) {
+            out.add(sizeType)
+        }
+        return out
+    }
+}
+
+public class ParenType <: Type {
+    public var innerType: Option<Type> = None
+
+    public init() {
+        super(ASTKind.PAREN_TYPE)
+    }
+
+    public override func Children(): ArrayList<Node> {
+        let out = ArrayList<Node>()
+        if (let Some(inner) <- innerType) {
+            out.add(inner)
+        }
+        return out
+    }
+}
+
+public class TupleType <: Type {
+    public let fieldTypes: ArrayList<Type> = ArrayList<Type>()
+
+    public init() {
+        super(ASTKind.TUPLE_TYPE)
+    }
+
+    public override func Children(): ArrayList<Node> {
+        let out = ArrayList<Node>()
+        for (ty in fieldTypes) {
+            out.add(ty)
+        }
+        return out
+    }
+}
+
+public class FuncType <: Type {
+    public let paramTypes: ArrayList<Type> = ArrayList<Type>()
+    public var retType: Option<Type> = None
+    public var isC: Bool = false
+
+    public init() {
+        super(ASTKind.FUNC_TYPE)
+    }
+
+    public override func Children(): ArrayList<Node> {
+        let out = ArrayList<Node>()
+        for (ty in paramTypes) {
+            out.add(ty)
+        }
+        if (let Some(ret) <- retType) {
+            out.add(ret)
+        }
+        return out
+    }
+}
+
+public class ThisType <: Type {
+    public init() {
+        super(ASTKind.THIS_TYPE)
     }
 }
 
 public open class Pattern <: Node {
     public init() {
         super(ASTKind.PATTERN)
+    }
+
+    public init(kind: ASTKind) {
+        super(kind)
+    }
+}
+
+public class WildcardPattern <: Pattern {
+    public init() {
+        super(ASTKind.WILDCARD_PATTERN)
+    }
+}
+
+public class ConstPattern <: Pattern {
+    public var literal: Option<Expr> = None
+
+    public init() {
+        super(ASTKind.CONST_PATTERN)
+    }
+
+    public override func Children(): ArrayList<Node> {
+        let out = ArrayList<Node>()
+        if (let Some(expr) <- literal) {
+            out.add(expr)
+        }
+        return out
+    }
+}
+
+public class VarPattern <: Pattern {
+    public var identifier: String = ""
+    public var isVar: Bool = false
+
+    public init() {
+        super(ASTKind.VAR_PATTERN)
+    }
+}
+
+public class TuplePattern <: Pattern {
+    public let patterns: ArrayList<Pattern> = ArrayList<Pattern>()
+
+    public init() {
+        super(ASTKind.TUPLE_PATTERN)
+    }
+
+    public override func Children(): ArrayList<Node> {
+        let out = ArrayList<Node>()
+        for (pattern in patterns) {
+            out.add(pattern)
+        }
+        return out
+    }
+}
+
+public class EnumPattern <: Pattern {
+    public var constructor: String = ""
+    public let typeArguments: ArrayList<Type> = ArrayList<Type>()
+    public let patterns: ArrayList<Pattern> = ArrayList<Pattern>()
+
+    public init() {
+        super(ASTKind.ENUM_PATTERN)
+    }
+
+    public override func Children(): ArrayList<Node> {
+        let out = ArrayList<Node>()
+        for (ty in typeArguments) {
+            out.add(ty)
+        }
+        for (pattern in patterns) {
+            out.add(pattern)
+        }
+        return out
+    }
+}
+
+public class VarOrEnumPattern <: Pattern {
+    public var identifier: String = ""
+    public var pattern: Option<Pattern> = None
+
+    public init() {
+        super(ASTKind.VAR_OR_ENUM_PATTERN)
+    }
+
+    public override func Children(): ArrayList<Node> {
+        let out = ArrayList<Node>()
+        if (let Some(innerPattern) <- pattern) {
+            out.add(innerPattern)
+        }
+        return out
+    }
+}
+
+public class TypePattern <: Pattern {
+    public var pattern: Option<Pattern> = None
+    public var typeNode: Option<Type> = None
+
+    public init() {
+        super(ASTKind.TYPE_PATTERN)
+    }
+
+    public override func Children(): ArrayList<Node> {
+        let out = ArrayList<Node>()
+        if (let Some(innerPattern) <- pattern) {
+            out.add(innerPattern)
+        }
+        if (let Some(ty) <- typeNode) {
+            out.add(ty)
+        }
+        return out
+    }
+}
+
+public open class TypeListPattern <: Pattern {
+    public var pattern: Option<Pattern> = None
+    public let types: ArrayList<Type> = ArrayList<Type>()
+
+    public init(kind: ASTKind) {
+        super(kind)
+    }
+
+    public override func Children(): ArrayList<Node> {
+        let out = ArrayList<Node>()
+        if (let Some(innerPattern) <- pattern) {
+            out.add(innerPattern)
+        }
+        for (ty in types) {
+            out.add(ty)
+        }
+        return out
+    }
+}
+
+public class ExceptTypePattern <: TypeListPattern {
+    public init() {
+        super(ASTKind.EXCEPT_TYPE_PATTERN)
+    }
+}
+
+public class CommandTypePattern <: TypeListPattern {
+    public init() {
+        super(ASTKind.COMMAND_TYPE_PATTERN)
     }
 }
 
@@ -284,6 +572,12 @@ public class TokenPart <: Expr {
         for (token in tokens) {
             this.tokens.add(token)
         }
+    }
+}
+
+public class WildcardExpr <: Expr {
+    public init() {
+        super(ASTKind.WILDCARD_EXPR)
     }
 }
 
@@ -352,6 +646,20 @@ public class FuncBody <: Node {
     public init() {
         super(ASTKind.FUNC_BODY)
     }
+
+    public override func Children(): ArrayList<Node> {
+        let out = ArrayList<Node>()
+        for (paramList in paramLists) {
+            out.add(paramList)
+        }
+        if (let Some(returnType) <- retType) {
+            out.add(returnType)
+        }
+        if (let Some(block) <- body) {
+            out.add(block)
+        }
+        return out
+    }
 }
 
 public class FuncParamList <: Node {
@@ -395,6 +703,7 @@ public open class FuncParam <: Decl {
 public class VarDecl <: Decl {
     public var declType: Option<Type> = None
     public var initializer: Option<Expr> = None
+    public let constructorTypes: ArrayList<Type> = ArrayList<Type>()
 
     public init() {
         super(ASTKind.VAR_DECL)
@@ -402,6 +711,31 @@ public class VarDecl <: Decl {
 
     public override func Children(): ArrayList<Node> {
         let out = ArrayList<Node>()
+        if (let Some(initExpr) <- initializer) {
+            out.add(initExpr)
+        }
+        return out
+    }
+}
+
+public class VarWithPatternDecl <: Decl {
+    public var declType: Option<Type> = None
+    public var initializer: Option<Expr> = None
+    public var irrefutablePattern: Option<Pattern> = None
+    public var isVar: Bool = false
+
+    public init() {
+        super(ASTKind.VAR_WITH_PATTERN_DECL)
+    }
+
+    public override func Children(): ArrayList<Node> {
+        let out = ArrayList<Node>()
+        if (let Some(pattern) <- irrefutablePattern) {
+            out.add(pattern)
+        }
+        if (let Some(declTypeNode) <- declType) {
+            out.add(declTypeNode)
+        }
         if (let Some(initExpr) <- initializer) {
             out.add(initExpr)
         }
@@ -463,6 +797,7 @@ public class InterfaceDecl <: Decl {
 public class EnumDecl <: Decl {
     public let constructors: ArrayList<Decl> = ArrayList<Decl>()
     public let members: ArrayList<Decl> = ArrayList<Decl>()
+    public var hasArguments: Bool = false
 
     public init() {
         super(ASTKind.ENUM_DECL)
@@ -522,6 +857,19 @@ public class LitConstExpr <: Expr {
     }
 }
 
+public class PrimitiveTypeExpr <: Expr {
+    public var typeKind: TypeKind = TypeKind.TYPE_INVALID
+
+    public init() {
+        super(ASTKind.PRIMITIVE_TYPE_EXPR)
+    }
+
+    public init(typeKind: TypeKind) {
+        super(ASTKind.PRIMITIVE_TYPE_EXPR)
+        this.typeKind = typeKind
+    }
+}
+
 public class MemberAccess <: Expr {
     public var baseExpr: Option<Expr> = None
     public var field: String = ""
@@ -577,9 +925,18 @@ public class ReturnExpr <: Expr {
     }
 }
 
+public class JumpExpr <: Expr {
+    public var isBreak: Bool = false
+
+    public init() {
+        super(ASTKind.JUMP_EXPR)
+    }
+}
+
 public class IfExpr <: Expr {
     public var condExpr: Option<Expr> = None
     public var thenBody: Option<Block> = None
+    public var elseBody: Option<Expr> = None
     public var hasElse: Bool = false
 
     public init() {
@@ -594,6 +951,9 @@ public class IfExpr <: Expr {
         if (let Some(body) <- thenBody) {
             out.add(body)
         }
+        if (let Some(elseExpr) <- elseBody) {
+            out.add(elseExpr)
+        }
         return out
     }
 }
@@ -607,6 +967,10 @@ public class BinaryExpr <: Expr {
         super(ASTKind.BINARY_EXPR)
     }
 
+    public init(kind: ASTKind) {
+        super(kind)
+    }
+
     public override func Children(): ArrayList<Node> {
         let out = ArrayList<Node>()
         if (let Some(left) <- leftExpr) {
@@ -614,6 +978,634 @@ public class BinaryExpr <: Expr {
         }
         if (let Some(right) <- rightExpr) {
             out.add(right)
+        }
+        return out
+    }
+}
+
+public class IsExpr <: Expr {
+    public var leftExpr: Option<Expr> = None
+    public var isType: Option<Type> = None
+
+    public init() {
+        super(ASTKind.IS_EXPR)
+    }
+
+    public override func Children(): ArrayList<Node> {
+        let out = ArrayList<Node>()
+        if (let Some(left) <- leftExpr) {
+            out.add(left)
+        }
+        if (let Some(ty) <- isType) {
+            out.add(ty)
+        }
+        return out
+    }
+}
+
+public class AsExpr <: Expr {
+    public var leftExpr: Option<Expr> = None
+    public var asType: Option<Type> = None
+
+    public init() {
+        super(ASTKind.AS_EXPR)
+    }
+
+    public override func Children(): ArrayList<Node> {
+        let out = ArrayList<Node>()
+        if (let Some(left) <- leftExpr) {
+            out.add(left)
+        }
+        if (let Some(ty) <- asType) {
+            out.add(ty)
+        }
+        return out
+    }
+}
+
+public class RangeExpr <: Expr {
+    public var startExpr: Option<Expr> = None
+    public var stopExpr: Option<Expr> = None
+    public var stepExpr: Option<Expr> = None
+    public var isClosed: Bool = true
+
+    public init() {
+        super(ASTKind.RANGE_EXPR)
+    }
+
+    public override func Children(): ArrayList<Node> {
+        let out = ArrayList<Node>()
+        if (let Some(start) <- startExpr) {
+            out.add(start)
+        }
+        if (let Some(stop) <- stopExpr) {
+            out.add(stop)
+        }
+        if (let Some(step) <- stepExpr) {
+            out.add(step)
+        }
+        return out
+    }
+}
+
+public open class ExprListExpr <: Expr {
+    public let children: ArrayList<Expr> = ArrayList<Expr>()
+
+    public init(kind: ASTKind) {
+        super(kind)
+    }
+
+    public override func Children(): ArrayList<Node> {
+        let out = ArrayList<Node>()
+        for (child in children) {
+            out.add(child)
+        }
+        return out
+    }
+}
+
+public class TupleLit <: ExprListExpr {
+    public init() {
+        super(ASTKind.TUPLE_LIT)
+    }
+}
+
+public class ArrayLit <: ExprListExpr {
+    public init() {
+        super(ASTKind.ARRAY_LIT)
+    }
+}
+
+public class QuoteExpr <: Expr {
+    public let tokens: ArrayList<Token> = ArrayList<Token>()
+    public let exprs: ArrayList<Expr> = ArrayList<Expr>()
+
+    public init() {
+        super(ASTKind.QUOTE_EXPR)
+    }
+
+    public override func Children(): ArrayList<Node> {
+        let out = ArrayList<Node>()
+        for (expr in exprs) {
+            out.add(expr)
+        }
+        return out
+    }
+}
+
+public class ParenExpr <: Expr {
+    public var expr: Option<Expr> = None
+
+    public init() {
+        super(ASTKind.PAREN_EXPR)
+    }
+
+    public override func Children(): ArrayList<Node> {
+        let out = ArrayList<Node>()
+        if (let Some(child) <- expr) {
+            out.add(child)
+        }
+        return out
+    }
+}
+
+public class UnaryExpr <: Expr {
+    public var expr: Option<Expr> = None
+    public var op: TokenKind = TokenKind.ILLEGAL
+
+    public init() {
+        super(ASTKind.UNARY_EXPR)
+    }
+
+    public init(kind: ASTKind) {
+        super(kind)
+    }
+
+    public override func Children(): ArrayList<Node> {
+        let out = ArrayList<Node>()
+        if (let Some(child) <- expr) {
+            out.add(child)
+        }
+        return out
+    }
+}
+
+public class IncOrDecExpr <: Expr {
+    public var expr: Option<Expr> = None
+    public var op: TokenKind = TokenKind.ILLEGAL
+
+    public init() {
+        super(ASTKind.INC_OR_DEC_EXPR)
+    }
+
+    public override func Children(): ArrayList<Node> {
+        let out = ArrayList<Node>()
+        if (let Some(child) <- expr) {
+            out.add(child)
+        }
+        return out
+    }
+}
+
+public class TypeConvExpr <: Expr {
+    public var typeNode: Option<Type> = None
+    public var expr: Option<Expr> = None
+
+    public init() {
+        super(ASTKind.TYPE_CONV_EXPR)
+    }
+
+    public override func Children(): ArrayList<Node> {
+        let out = ArrayList<Node>()
+        if (let Some(ty) <- typeNode) {
+            out.add(ty)
+        }
+        if (let Some(child) <- expr) {
+            out.add(child)
+        }
+        return out
+    }
+}
+
+public class ArrayExpr <: Expr {
+    public var typeNode: Option<Type> = None
+    public let args: ArrayList<FuncArg> = ArrayList<FuncArg>()
+
+    public init() {
+        super(ASTKind.ARRAY_EXPR)
+    }
+
+    public override func Children(): ArrayList<Node> {
+        let out = ArrayList<Node>()
+        if (let Some(ty) <- typeNode) {
+            out.add(ty)
+        }
+        for (arg in args) {
+            out.add(arg)
+        }
+        return out
+    }
+}
+
+public class SubscriptExpr <: Expr {
+    public var baseExpr: Option<Expr> = None
+    public let indexExprs: ArrayList<Expr> = ArrayList<Expr>()
+
+    public init() {
+        super(ASTKind.SUBSCRIPT_EXPR)
+    }
+
+    public override func Children(): ArrayList<Node> {
+        let out = ArrayList<Node>()
+        if (let Some(base) <- baseExpr) {
+            out.add(base)
+        }
+        for (expr in indexExprs) {
+            out.add(expr)
+        }
+        return out
+    }
+}
+
+public class OptionalExpr <: Expr {
+    public var baseExpr: Option<Expr> = None
+
+    public init() {
+        super(ASTKind.OPTIONAL_EXPR)
+    }
+
+    public override func Children(): ArrayList<Node> {
+        let out = ArrayList<Node>()
+        if (let Some(base) <- baseExpr) {
+            out.add(base)
+        }
+        return out
+    }
+}
+
+public class OptionalChainExpr <: Expr {
+    public var expr: Option<Expr> = None
+
+    public init() {
+        super(ASTKind.OPTIONAL_CHAIN_EXPR)
+    }
+
+    public override func Children(): ArrayList<Node> {
+        let out = ArrayList<Node>()
+        if (let Some(child) <- expr) {
+            out.add(child)
+        }
+        return out
+    }
+}
+
+public class LetPatternDestructor <: Expr {
+    public let patterns: ArrayList<Pattern> = ArrayList<Pattern>()
+    public var initializer: Option<Expr> = None
+
+    public init() {
+        super(ASTKind.LET_PATTERN_DESTRUCTOR)
+    }
+
+    public override func Children(): ArrayList<Node> {
+        let out = ArrayList<Node>()
+        for (pattern in patterns) {
+            out.add(pattern)
+        }
+        if (let Some(initExpr) <- initializer) {
+            out.add(initExpr)
+        }
+        return out
+    }
+}
+
+public class MatchCase <: Node {
+    public let patterns: ArrayList<Pattern> = ArrayList<Pattern>()
+    public var patternGuard: Option<Expr> = None
+    public var exprOrDecls: Option<Block> = None
+
+    public init() {
+        super(ASTKind.MATCH_CASE)
+    }
+
+    public override func Children(): ArrayList<Node> {
+        let out = ArrayList<Node>()
+        for (pattern in patterns) {
+            out.add(pattern)
+        }
+        if (let Some(guardExpr) <- patternGuard) {
+            out.add(guardExpr)
+        }
+        if (let Some(block) <- exprOrDecls) {
+            out.add(block)
+        }
+        return out
+    }
+}
+
+public class MatchCaseOther <: Node {
+    public var matchExpr: Option<Expr> = None
+    public var exprOrDecls: Option<Block> = None
+
+    public init() {
+        super(ASTKind.MATCH_CASE_OTHER)
+    }
+
+    public override func Children(): ArrayList<Node> {
+        let out = ArrayList<Node>()
+        if (let Some(expr) <- matchExpr) {
+            out.add(expr)
+        }
+        if (let Some(block) <- exprOrDecls) {
+            out.add(block)
+        }
+        return out
+    }
+}
+
+public class MatchExpr <: Expr {
+    public var selector: Option<Expr> = None
+    public let matchCases: ArrayList<MatchCase> = ArrayList<MatchCase>()
+    public let matchCaseOthers: ArrayList<MatchCaseOther> = ArrayList<MatchCaseOther>()
+
+    public init() {
+        super(ASTKind.MATCH_EXPR)
+    }
+
+    public override func Children(): ArrayList<Node> {
+        let out = ArrayList<Node>()
+        if (let Some(selectExpr) <- selector) {
+            out.add(selectExpr)
+        }
+        for (matchCase in matchCases) {
+            out.add(matchCase)
+        }
+        for (caseOther in matchCaseOthers) {
+            out.add(caseOther)
+        }
+        return out
+    }
+}
+
+public class Handler {
+    public var commandPattern: Option<Pattern> = None
+    public var block: Option<Block> = None
+
+    public init() {}
+}
+
+public class TryExpr <: Expr {
+    public let resourceSpec: ArrayList<VarDecl> = ArrayList<VarDecl>()
+    public var tryBlock: Option<Block> = None
+    public let catchPatterns: ArrayList<Pattern> = ArrayList<Pattern>()
+    public let catchBlocks: ArrayList<Block> = ArrayList<Block>()
+    public var finallyBlock: Option<Block> = None
+    public let handlers: ArrayList<Handler> = ArrayList<Handler>()
+
+    public init() {
+        super(ASTKind.TRY_EXPR)
+    }
+
+    public override func Children(): ArrayList<Node> {
+        let out = ArrayList<Node>()
+        for (decl in resourceSpec) {
+            out.add(decl)
+        }
+        if (let Some(block) <- tryBlock) {
+            out.add(block)
+        }
+        for (pattern in catchPatterns) {
+            out.add(pattern)
+        }
+        for (block in catchBlocks) {
+            out.add(block)
+        }
+        if (let Some(block) <- finallyBlock) {
+            out.add(block)
+        }
+        for (handler in handlers) {
+            if (let Some(pattern) <- handler.commandPattern) {
+                out.add(pattern)
+            }
+            if (let Some(block) <- handler.block) {
+                out.add(block)
+            }
+        }
+        return out
+    }
+}
+
+public class WhileExpr <: Expr {
+    public var condExpr: Option<Expr> = None
+    public var body: Option<Block> = None
+
+    public init() {
+        super(ASTKind.WHILE_EXPR)
+    }
+
+    public override func Children(): ArrayList<Node> {
+        let out = ArrayList<Node>()
+        if (let Some(cond) <- condExpr) {
+            out.add(cond)
+        }
+        if (let Some(block) <- body) {
+            out.add(block)
+        }
+        return out
+    }
+}
+
+public class DoWhileExpr <: Expr {
+    public var body: Option<Block> = None
+    public var condExpr: Option<Expr> = None
+
+    public init() {
+        super(ASTKind.DO_WHILE_EXPR)
+    }
+
+    public override func Children(): ArrayList<Node> {
+        let out = ArrayList<Node>()
+        if (let Some(block) <- body) {
+            out.add(block)
+        }
+        if (let Some(cond) <- condExpr) {
+            out.add(cond)
+        }
+        return out
+    }
+}
+
+public class ForInExpr <: Expr {
+    public var pattern: Option<Pattern> = None
+    public var inExpr: Option<Expr> = None
+    public var patternGuard: Option<Expr> = None
+    public var body: Option<Block> = None
+
+    public init() {
+        super(ASTKind.FOR_IN_EXPR)
+    }
+
+    public override func Children(): ArrayList<Node> {
+        let out = ArrayList<Node>()
+        if (let Some(patternNode) <- pattern) {
+            out.add(patternNode)
+        }
+        if (let Some(sourceExpr) <- inExpr) {
+            out.add(sourceExpr)
+        }
+        if (let Some(guardExpr) <- patternGuard) {
+            out.add(guardExpr)
+        }
+        if (let Some(block) <- body) {
+            out.add(block)
+        }
+        return out
+    }
+}
+
+public class LambdaExpr <: Expr {
+    public let annotations: ArrayList<Annotation> = ArrayList<Annotation>()
+    public var funcBody: Option<FuncBody> = None
+
+    public init() {
+        super(ASTKind.LAMBDA_EXPR)
+    }
+
+    public override func Children(): ArrayList<Node> {
+        let out = ArrayList<Node>()
+        for (anno in annotations) {
+            out.add(anno)
+        }
+        if (let Some(body) <- funcBody) {
+            out.add(body)
+        }
+        return out
+    }
+}
+
+public class ThrowExpr <: Expr {
+    public var expr: Option<Expr> = None
+
+    public init() {
+        super(ASTKind.THROW_EXPR)
+    }
+
+    public init(kind: ASTKind) {
+        super(kind)
+    }
+
+    public override func Children(): ArrayList<Node> {
+        let out = ArrayList<Node>()
+        if (let Some(child) <- expr) {
+            out.add(child)
+        }
+        return out
+    }
+}
+
+public class PerformExpr <: Expr {
+    public var expr: Option<Expr> = None
+
+    public init() {
+        super(ASTKind.PERFORM_EXPR)
+    }
+
+    public override func Children(): ArrayList<Node> {
+        let out = ArrayList<Node>()
+        if (let Some(child) <- expr) {
+            out.add(child)
+        }
+        return out
+    }
+}
+
+public class ResumeExpr <: Expr {
+    public var withExpr: Option<Expr> = None
+    public var throwingExpr: Option<Expr> = None
+
+    public init() {
+        super(ASTKind.RESUME_EXPR)
+    }
+
+    public override func Children(): ArrayList<Node> {
+        let out = ArrayList<Node>()
+        if (let Some(expr) <- withExpr) {
+            out.add(expr)
+        }
+        if (let Some(expr) <- throwingExpr) {
+            out.add(expr)
+        }
+        return out
+    }
+}
+
+public class SpawnExpr <: Expr {
+    public var arg: Option<Expr> = None
+    public var task: Option<Expr> = None
+
+    public init() {
+        super(ASTKind.SPAWN_EXPR)
+    }
+
+    public override func Children(): ArrayList<Node> {
+        let out = ArrayList<Node>()
+        if (let Some(expr) <- arg) {
+            out.add(expr)
+        }
+        if (let Some(expr) <- task) {
+            out.add(expr)
+        }
+        return out
+    }
+}
+
+public class SynchronizedExpr <: Expr {
+    public var mutex: Option<Expr> = None
+    public var body: Option<Block> = None
+
+    public init() {
+        super(ASTKind.SYNCHRONIZED_EXPR)
+    }
+
+    public override func Children(): ArrayList<Node> {
+        let out = ArrayList<Node>()
+        if (let Some(expr) <- mutex) {
+            out.add(expr)
+        }
+        if (let Some(block) <- body) {
+            out.add(block)
+        }
+        return out
+    }
+}
+
+public class TrailingClosureExpr <: Expr {
+    public var expr: Option<Expr> = None
+    public var lambda: Option<LambdaExpr> = None
+
+    public init() {
+        super(ASTKind.TRAIL_CLOSURE_EXPR)
+    }
+
+    public override func Children(): ArrayList<Node> {
+        let out = ArrayList<Node>()
+        if (let Some(baseExpr) <- expr) {
+            out.add(baseExpr)
+        }
+        if (let Some(lambdaExpr) <- lambda) {
+            out.add(lambdaExpr)
+        }
+        return out
+    }
+}
+
+public class InterpolationExpr <: Expr {
+    public var block: Option<Block> = None
+
+    public init() {
+        super(ASTKind.INTERPOLATION_EXPR)
+    }
+
+    public override func Children(): ArrayList<Node> {
+        let out = ArrayList<Node>()
+        if (let Some(value) <- block) {
+            out.add(value)
+        }
+        return out
+    }
+}
+
+public class StrInterpolationExpr <: Expr {
+    public let strPartExprs: ArrayList<Expr> = ArrayList<Expr>()
+
+    public init() {
+        super(ASTKind.STR_INTERPOLATION_EXPR)
+    }
+
+    public override func Children(): ArrayList<Node> {
+        let out = ArrayList<Node>()
+        for (expr in strPartExprs) {
+            out.add(expr)
         }
         return out
     }
