@@ -13,6 +13,32 @@ not yet a self-compiling production compiler: the remaining critical path is
 mostly package integration, root Sema/Frontend orchestration, production
 serialization, full AST-to-CHIR lowering, and complete CHIR-to-LLVM emission.
 
+## parse -> ast de-isolation
+
+The `parse` package historically carried its own private copies of AST node
+types to stay buildable in isolation. These copies are being collapsed onto the
+real `cangjie_compiler::ast` types so there is one source of truth.
+
+- **CUT 1 (SrcIdentifier unified) -- DONE** (merged `deisolate/srcid`): the
+  parse-local `class SrcIdentifier` in `packages/parse/src/ASTCore.cj` is
+  deleted; parse now `public import`s `cangjie_compiler::ast.{Identifier,
+  SrcIdentifier}` and constructs the real type. `ast.SrcIdentifier`
+  (`packages/ast/src/Identifier.cj`) gained a 5-arg convenience ctor
+  `init(value, rawValue, begin, end, isRaw)` so all ~10 parse call sites and
+  macro's `EvalParsedSrcIdentifier` stayed unchanged. The `rawValue` param is
+  intentionally ignored (it was redundant: `ast` derives `GetRawText()` from the
+  stripped `Val()` plus the raw flag, which is equivalent to parse's prior
+  behavior -- raw `` `foo` `` -> `` `foo` ``, non-raw `main` -> `main`). The only
+  other churn was field-access -> method-surface migration (`.isRaw` ->
+  `IsRaw()` in ParseImports/ParseFeatures/ParseType, and `CloneIdentifier` in
+  ParseImports rewritten to `Val()/Begin()/End()/IsRaw()`). Whole-workspace
+  `cjpm build` stays green; facade compile+run re-verified with no regression
+  (see below).
+- Next cuts (planned): `isBroken` -> `IS_BROKEN`; then migrate the Type /
+  Pattern / Expr / Decl node families onto `ast`; then delete the 5 parse
+  `*Nodes.cj` shadow files (`TypeNodes.cj`, `PatternNodes.cj`, `ExprNodes.cj`,
+  `DeclNodes.cj`, `ImportPackageNodes.cj`).
+
 ## Verified integrated capabilities
 
 The integrated pipeline is currently a literal-spec bridge: the frontend scanner
