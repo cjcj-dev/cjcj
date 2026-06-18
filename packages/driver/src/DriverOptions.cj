@@ -3,8 +3,9 @@ package cangjie_compiler::driver
 import std.collection.*
 import cangjie_compiler::option.Backend as OptionBackend
 import cangjie_compiler::option.BackendToString as OptionBackendToString
+import cangjie_compiler::option.GetDefaultOutputNameLength
 import cangjie_compiler::option.GetHardwareConcurrency
-import cangjie_compiler::utils.FileMode
+import cangjie_compiler::utils.{AccessResultType, FILE_PATH_MAX_LENGTH, FileMode}
 
 public let OBFUCATION_LEVEL_MIN: Int64 = 1
 public let OBFUCATION_LEVEL_MAX: Int64 = 9
@@ -15,6 +16,22 @@ private func HasStringValue(value: Option<String>): Bool {
 
 private func HasBoolValue(value: Option<Bool>): Bool {
     return if (let Some(_) <- value) { true } else { false }
+}
+
+private func IsAccessOK(result: AccessResultType): Bool {
+    return match (result) {
+        case AccessResultType.OK => true
+        case AccessResultType.NOT_EXIST => false
+        case AccessResultType.NO_PERMISSION => false
+        case AccessResultType.FAILED_WITH_UNKNOWN_REASON => false
+    }
+}
+
+private func EmitDirectoryAccessFailure(path: String, result: AccessResultType): Unit {
+    match (result) {
+        case AccessResultType.NO_PERMISSION => eprintln("error: permission denied '${path}'")
+        case _ => eprintln("error: no such directory '${path}'")
+    }
 }
 
 public class DriverOptions {
@@ -241,6 +258,30 @@ public class DriverOptions {
         return None
     }
 
+    public func ValidateDirectoryPath(path: String, mode!: FileMode = FileMode.FM_EXIST): Option<String> {
+        let accessResult = FileUtil.AccessWithResult(path, mode)
+        if (!IsAccessOK(accessResult)) {
+            EmitDirectoryAccessFailure(path, accessResult)
+            return None
+        }
+        if (!FileUtil.IsDir(path)) {
+            eprintln("error: not a directory '${path}'")
+            return None
+        }
+        if (mode == FileMode.FM_WRITE) {
+            let execResult = FileUtil.AccessWithResult(path, FileMode.FM_EXE)
+            if (!IsAccessOK(execResult)) {
+                EmitDirectoryAccessFailure(path, execResult)
+                return None
+            }
+        }
+        if (let Some(absPath) <- FileUtil.GetAbsPath(path)) {
+            return absPath
+        }
+        eprintln("error: invalid path '${path}'")
+        return None
+    }
+
     public func ValidateInputFilePath(path: String): Option<String> {
         if (!FileUtil.FileExist(path)) {
             eprintln("error: no such file or directory '${path}'")
@@ -366,6 +407,12 @@ public class DriverOptions {
         if (outputMode == OutputMode.OBJ && compileTarget == CompileTarget.DEFAULT) {
             compileTarget = CompileTarget.EXECUTABLE
         }
+        if (!ReprocessOutputs()) {
+            return false
+        }
+        if (!ReprocessInputs()) {
+            return false
+        }
         if (!ReprocessObfuseOption()) {
             return false
         }
@@ -373,6 +420,7 @@ public class DriverOptions {
         success = success && CheckTargetCPUOption()
         success = success && CheckObfuscationOptions()
         success = success && SetupSysroot()
+        success = success && CheckCompileMacro()
         success = success && ReprocessCoverageOptions()
         success = success && CheckSanitizerOptions()
         success = success && CheckLTOOptions()
@@ -381,8 +429,91 @@ public class DriverOptions {
         ReprocessAggressiveParallelCompile()
         success = success && CheckRuntimeRPath()
         success = success && CheckSanitizerRPath()
+        DisableStaticStdForOhos()
         success = success && CheckStaticOption()
         return success
+    }
+
+    private func CheckOutputPathLength(): Bool {
+        let fullLength = if (FileUtil.IsDir(output)) {
+            output.size + GetDefaultOutputNameLength()
+        } else {
+            output.size
+        }
+        if (fullLength > FILE_PATH_MAX_LENGTH) {
+            eprintln("error: the output file path exceeds maximum path length ${FILE_PATH_MAX_LENGTH}.")
+            return false
+        }
+        if (fullLength > FILE_PATH_MAX_LENGTH - 15) {
+            eprintln("warning: the output file path is close to maximum path length ${FILE_PATH_MAX_LENGTH}.")
+        }
+        return true
+    }
+
+    private func ReprocessOutputs(): Bool {
+        if (let Some(dir) <- outputDir) {
+            if (FileUtil.IsAbsolutePath(output)) {
+                eprintln("error: '-o' does not accept absolute path when '--output-dir' is specified.")
+                return false
+            }
+            output = FileUtil.JoinPath(dir, output)
+            if (let Some(absDir) <- ValidateDirectoryPath(dir, mode: FileMode.FM_WRITE)) {
+                outputDir = absDir
+            } else {
+                return false
+            }
+        }
+
+        let outputIsDir = FileUtil.IsDir(output)
+        let dirPath = FileUtil.GetDirPath(output)
+        let saveDir = if (outputIsDir) { output } else if (dirPath.isEmpty()) { "/" } else { dirPath }
+        if (let Some(absSaveDir) <- ValidateDirectoryPath(saveDir, mode: FileMode.FM_WRITE)) {
+            output = if (outputIsDir) { absSaveDir } else { FileUtil.JoinPath(absSaveDir, FileUtil.GetFileName(output)) }
+        } else {
+            return false
+        }
+        if (!CheckOutputPathLength()) {
+            return false
+        }
+        if (!compileMacro && FileUtil.GetFileName(output).startsWith("lib-macro_")) {
+            eprintln("error: Cannot support specify file prefix 'lib-macro_' without '--compile-macro' option.")
+            return false
+        }
+        return true
+    }
+
+    private func AddInputForOverwriteCheck(inputs: ArrayList<String>, value: String): Unit {
+        if (!value.isEmpty()) {
+            inputs.add(value)
+        }
+    }
+
+    private func ReprocessInputs(): Bool {
+        if (FileUtil.IsDir(output)) {
+            return true
+        }
+        let inputs = ArrayList<String>()
+        for (input in srcFiles) { AddInputForOverwriteCheck(inputs, input) }
+        for (input in inputObjs) { AddInputForOverwriteCheck(inputs, input) }
+        for (input in inputLibraries) { AddInputForOverwriteCheck(inputs, input) }
+        for (input in bcInputFiles) { AddInputForOverwriteCheck(inputs, input) }
+        if (compilePackage && !moduleSrcPath.isEmpty() && FileUtil.IsDir(moduleSrcPath)) {
+            for (fileName in FileUtil.GetAllFilesUnderCurrentPath(moduleSrcPath, "cj")) {
+                AddInputForOverwriteCheck(inputs, FileUtil.JoinPath(moduleSrcPath, fileName))
+            }
+        }
+        for (inputFile in inputs) {
+            if (let Some(absInput) <- FileUtil.GetAbsPath(inputFile)) {
+                if (absInput == output) {
+                    eprintln("error: input file '${inputFile}' would be overwritten by generated output.")
+                    return false
+                }
+            } else {
+                eprintln("error: no such file or directory '${inputFile}'")
+                return false
+            }
+        }
+        return true
     }
 
     private func CheckObfuscationOptions(): Bool {
@@ -486,6 +617,18 @@ public class DriverOptions {
         if (enableCoverage && optimizationLevel != OptimizationLevel.O0) {
             eprintln("warning: '--coverage' should be used without optimizations.")
             return SetOptimizationLevel(OptimizationLevel.O0)
+        }
+        return true
+    }
+
+    private func CheckCompileMacro(): Bool {
+        if (compileMacro && enableOutputType) {
+            eprintln("error: using both '--compile-macro' and '--output-type' is not allowed.")
+            return false
+        }
+        if (compileMacro && !output.isEmpty() && !FileUtil.IsDir(output)) {
+            eprintln("error: Cannot support specify output file name with '--compile-macro' option.")
+            return false
         }
         return true
     }
@@ -636,6 +779,16 @@ public class DriverOptions {
                 aggressiveParallelCompile = 1
             }
         }
+    }
+
+    private func DisableStaticStdForOhos(): Unit {
+        if (target.env != EnvironmentType.OHOS) {
+            return
+        }
+        if (linkStaticStd ?? false) {
+            eprintln("warning: '--static-std' is not supported when targeting OHOS.")
+        }
+        linkStaticStd = false
     }
 
     private func CheckStaticOption(): Bool {

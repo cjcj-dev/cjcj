@@ -52,6 +52,14 @@ Current status:
   behavior by warning and forcing optimization back to `O0`; optimization
   levels no longer implicitly enable function/data sections, which are now
   controlled only by their explicit section flags as in the C++ option actions.
+- Driver output post-actions now normalize `-o`/`--output-dir` through the same
+  writable-directory checks used by the C++ `GlobalOptions::ReprocessOutputs`,
+  reject output paths that would overwrite normalized inputs, enforce the
+  `lib-macro_` output-name guard, and validate `--compile-macro` conflicts with
+  explicit output-type or output-file choices.
+- OHOS target post-processing now mirrors `DisableStaticStdForOhos` by warning
+  on `--static-std` and forcing dynamic standard-library selection before
+  static-link validation.
 - Obfuscation post-action validation now follows the C++ `DriverOptions`
   failure order and emits the specific error for each layout-only sub-option
   instead of a single grouped compatibility diagnostic.
