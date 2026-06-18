@@ -12,12 +12,15 @@ import cangjie_compiler::ast.CallExpr as AstCallExpr
 import cangjie_compiler::ast.ClassDecl as AstClassDecl
 import cangjie_compiler::ast.ClassLikeDecl as AstClassLikeDecl
 import cangjie_compiler::ast.Decl as AstDecl
+import cangjie_compiler::ast.DoWhileExpr as AstDoWhileExpr
 import cangjie_compiler::ast.EnumDecl as AstEnumDecl
 import cangjie_compiler::ast.Expr as AstExpr
+import cangjie_compiler::ast.ForInExpr as AstForInExpr
 import cangjie_compiler::ast.FuncDecl as AstFuncDecl
 import cangjie_compiler::ast.FuncTy as AstFuncTy
 import cangjie_compiler::ast.IfExpr as AstIfExpr
 import cangjie_compiler::ast.InterfaceDecl as AstInterfaceDecl
+import cangjie_compiler::ast.JumpExpr as AstJumpExpr
 import cangjie_compiler::ast.LitConstExpr as AstLitConstExpr
 import cangjie_compiler::ast.LitConstKind as AstLitConstKind
 import cangjie_compiler::ast.MemberAccess as AstMemberAccess
@@ -31,6 +34,7 @@ import cangjie_compiler::ast.TokenKindValue as AstTokenKindValue
 import cangjie_compiler::ast.Ty as AstTy
 import cangjie_compiler::ast.UnaryExpr as AstUnaryExpr
 import cangjie_compiler::ast.VarDecl as AstVarDecl
+import cangjie_compiler::ast.WhileExpr as AstWhileExpr
 
 private class FaithfulLeftValueInfo {
     public let base: Value
@@ -44,6 +48,16 @@ private class FaithfulLeftValueInfo {
     }
 }
 
+private class FaithfulLoopTarget {
+    public let continueBlock: Block
+    public let breakBlock: Block
+
+    public init(continueBlock: Block, breakBlock: Block) {
+        this.continueBlock = continueBlock
+        this.breakBlock = breakBlock
+    }
+}
+
 public class Translator {
     private let builder: CHIRBuilder
     private let chirTy: CHIRType
@@ -52,6 +66,7 @@ public class Translator {
     private var currentBlock: Option<Block> = None
     private var currentFunc: Option<Function> = None
     private let blockGroupStack: ArrayList<BlockGroup> = ArrayList<BlockGroup>()
+    private let loopTargetStack: ArrayList<FaithfulLoopTarget> = ArrayList<FaithfulLoopTarget>()
 
     public init(builder: CHIRBuilder, chirTy: CHIRType, globalSymbolTable: FaithfulAST2CHIRNodeMap) {
         this.builder = builder
@@ -78,6 +93,10 @@ public class Translator {
             case ASTKind.IF_EXPR => trans.Visit(RequireNodeAsIfExpr(nodePtr))
             case ASTKind.ASSIGN_EXPR => trans.Visit(RequireNodeAsAssignExpr(nodePtr))
             case ASTKind.MEMBER_ACCESS => trans.Visit(RequireNodeAsMemberAccess(nodePtr))
+            case ASTKind.WHILE_EXPR => trans.Visit(RequireNodeAsWhileExpr(nodePtr))
+            case ASTKind.DO_WHILE_EXPR => trans.Visit(RequireNodeAsDoWhileExpr(nodePtr))
+            case ASTKind.FOR_IN_EXPR => trans.Visit(RequireNodeAsForInExpr(nodePtr))
+            case ASTKind.JUMP_EXPR => trans.Visit(RequireNodeAsJumpExpr(nodePtr))
             case _ => throw IllegalArgumentException(
                 "not yet ported in faithful AST2CHIR: ${ASTKindName(nodePtr.astKind)}")
         }
@@ -346,6 +365,75 @@ public class Translator {
             }
         }
         throw IllegalArgumentException("not yet ported in faithful AST2CHIR: unsupported member access")
+    }
+
+    public func Visit(expr: AstWhileExpr): Option<Value> {
+        let parentBlock = CurrentBlock()
+        let group = RequireParentBlockGroup(parentBlock, "while")
+        let conditionBlock = builder.CreateBlock(group)
+        let bodyBlock = builder.CreateBlock(group)
+        let endBlock = builder.CreateBlock(group)
+        builder.CreateGoTo(conditionBlock, parentBlock)
+
+        loopTargetStack.add(FaithfulLoopTarget(conditionBlock, endBlock))
+        currentBlock = conditionBlock
+        let condValue = Translator.TranslateASTNode(RequireExpr(expr.condExpr, "while condition"), this) ??
+            throw IllegalStateException("faithful AST2CHIR while condition produced no value")
+        if (CurrentBlock().GetTerminator().isNone()) {
+            builder.CreateBranch(condValue, bodyBlock, endBlock, CurrentBlock())
+        }
+
+        currentBlock = bodyBlock
+        let _ = Translator.TranslateASTNode(RequireBlock(expr.body, "while body"), this)
+        if (CurrentBlock().GetTerminator().isNone()) {
+            builder.CreateGoTo(conditionBlock, CurrentBlock())
+        }
+        loopTargetStack.remove(at: loopTargetStack.size - 1)
+        currentBlock = endBlock
+        return None
+    }
+
+    public func Visit(expr: AstDoWhileExpr): Option<Value> {
+        let parentBlock = CurrentBlock()
+        let group = RequireParentBlockGroup(parentBlock, "do-while")
+        let bodyBlock = builder.CreateBlock(group)
+        let conditionBlock = builder.CreateBlock(group)
+        let endBlock = builder.CreateBlock(group)
+        builder.CreateGoTo(bodyBlock, parentBlock)
+
+        loopTargetStack.add(FaithfulLoopTarget(conditionBlock, endBlock))
+        currentBlock = bodyBlock
+        let _ = Translator.TranslateASTNode(RequireBlock(expr.body, "do-while body"), this)
+        if (CurrentBlock().GetTerminator().isNone()) {
+            builder.CreateGoTo(conditionBlock, CurrentBlock())
+        }
+
+        currentBlock = conditionBlock
+        let condValue = Translator.TranslateASTNode(RequireExpr(expr.condExpr, "do-while condition"), this) ??
+            throw IllegalStateException("faithful AST2CHIR do-while condition produced no value")
+        if (CurrentBlock().GetTerminator().isNone()) {
+            builder.CreateBranch(condValue, bodyBlock, endBlock, CurrentBlock())
+        }
+        loopTargetStack.remove(at: loopTargetStack.size - 1)
+        currentBlock = endBlock
+        return None
+    }
+
+    public func Visit(expr: AstForInExpr): Option<Value> {
+        let _ = expr
+        throw IllegalArgumentException("not yet ported in faithful AST2CHIR: ForInExpr delay-exit block groups")
+    }
+
+    public func Visit(expr: AstJumpExpr): Option<Value> {
+        if (loopTargetStack.isEmpty()) {
+            throw IllegalStateException("faithful AST2CHIR JumpExpr outside loop")
+        }
+        let target = loopTargetStack[loopTargetStack.size - 1]
+        let destination = if (expr.isBreak) { target.breakBlock } else { target.continueBlock }
+        builder.CreateGoTo(destination, CurrentBlock())
+        let group = RequireParentBlockGroup(CurrentBlock(), "jump continuation")
+        currentBlock = builder.CreateBlock(group)
+        return None
     }
 
     private func TranslateClassLikeDecl(def: ClassDef, decl: AstClassLikeDecl): Unit {
@@ -621,6 +709,11 @@ public class Translator {
         return currentBlock ?? throw IllegalStateException("faithful AST2CHIR has no current block")
     }
 
+    private func RequireParentBlockGroup(block: Block, context: String): BlockGroup {
+        return block.GetParentBlockGroup() ??
+            throw IllegalStateException("faithful AST2CHIR ${context} requires parent block group")
+    }
+
     private func TranslateLitConstant(expr: AstLitConstExpr): LiteralValue {
         return match (expr.kind) {
             case AstLitConstKind.BOOL => BoolLiteral(expr.constNumValue.asBoolean)
@@ -836,5 +929,21 @@ public class Translator {
 
     private static func RequireNodeAsMemberAccess(node: AstNode): AstMemberAccess {
         return (node as AstMemberAccess) ?? throw IllegalArgumentException("ASTKind cast failed: MEMBER_ACCESS")
+    }
+
+    private static func RequireNodeAsWhileExpr(node: AstNode): AstWhileExpr {
+        return (node as AstWhileExpr) ?? throw IllegalArgumentException("ASTKind cast failed: WHILE_EXPR")
+    }
+
+    private static func RequireNodeAsDoWhileExpr(node: AstNode): AstDoWhileExpr {
+        return (node as AstDoWhileExpr) ?? throw IllegalArgumentException("ASTKind cast failed: DO_WHILE_EXPR")
+    }
+
+    private static func RequireNodeAsForInExpr(node: AstNode): AstForInExpr {
+        return (node as AstForInExpr) ?? throw IllegalArgumentException("ASTKind cast failed: FOR_IN_EXPR")
+    }
+
+    private static func RequireNodeAsJumpExpr(node: AstNode): AstJumpExpr {
+        return (node as AstJumpExpr) ?? throw IllegalArgumentException("ASTKind cast failed: JUMP_EXPR")
     }
 }
