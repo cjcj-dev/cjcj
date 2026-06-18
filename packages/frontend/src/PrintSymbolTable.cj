@@ -50,24 +50,6 @@ private func AddSymbolToInfo(packages: ArrayList<Symbol>, file2nodesMap: HashMap
     }
     if (let Some(fileNode) <- currentFileOpt) {
         addNodeForFile(file2nodesMap, fileNode, node)
-        HandleFileNode(file2nodesMap, symbol, node)
-    }
-}
-
-private func HandleFileNode(file2nodesMap: HashMap<String, (File, ArrayList<Node>)>, symbol: Symbol, node: Node): Unit {
-    let _ = symbol
-    if (node.astKind != ASTKind.FILE) {
-        return
-    }
-    if (let Some(file) <- (node as File)) {
-        if (let Some(packageSpec) <- file.packageSpec) {
-            addNodeForFile(file2nodesMap, file, packageSpec)
-        }
-        for (importSpec in file.imports) {
-            if (!importSpec.importPos.IsZero()) {
-                addNodeForFile(file2nodesMap, file, importSpec)
-            }
-        }
     }
 }
 
@@ -190,23 +172,14 @@ private func appendNode(builder: StringBuilder, node: Node): Unit {
 
 private func appendPackageSpecPart(builder: StringBuilder, packageSpec: PackageSpec): Unit {
     builder.append("          \"packageName\": \"" + EscapeJson(packageSpec.packageName.Val()) + "\",\n")
-    if (let Some(modifier) <- packageSpec.modifier) {
-        builder.append("          \"modifier\": \"" + EscapeJson(modifier.name) + "\",\n")
-        appendPosition(builder, modifier.begin, "modifierPos", true)
-    }
     appendPosition(builder, packageSpec.macroPos, "macroPos", true)
     appendPosition(builder, packageSpec.packagePos, "packagePos", true)
     appendPosition(builder, packageSpec.packageName.Begin(), "packageNamePos", true)
 }
 
 private func appendImportSpecPart(builder: StringBuilder, importSpec: ImportSpec): Unit {
-    if (let Some(modifier) <- importSpec.modifier) {
-        builder.append("          \"modifier\": \"" + EscapeJson(modifier.name) + "\",\n")
-        appendPosition(builder, modifier.begin, "modifierPos", true)
-    }
     appendPosition(builder, importSpec.importPos, "importPos", true)
     builder.append("          \"packageName\": \"" + EscapeJson(GetImportedItemFullName(importSpec.content)) + "\",\n")
-    builder.append("          \"isImportAll\": " + importSpec.content.isImportAll.toString() + ",\n")
     appendPosition(builder, importSpec.content.begin, "packageNamePos", true)
     if (importSpec.IsImportAlias()) {
         appendPosition(builder, importSpec.content.asPos, "asPos", true)

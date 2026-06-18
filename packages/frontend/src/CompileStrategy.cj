@@ -1,5 +1,6 @@
 package cangjie_compiler::frontend
 
+import cangjie_compiler::basic.InteropCJPackageConfigReader
 import cangjie_compiler::utils.FileUtil
 import std.collection.*
 import std.convert.*
@@ -113,9 +114,11 @@ public open class CompileStrategy {
 
     protected func InteropConfigTomlCheck(): Unit {
         let opts = ci.invocation.globalOptions
-        if (opts.enableInteropCJMapping && opts.interopCJPackageConfigPath != "./" && !FileExist(opts.interopCJPackageConfigPath)) {
-            ci.diag.Diagnose(DiagCategory.SEMA, DEFAULT_POSITION,
-                "interop Cangjie package config not found: " + opts.interopCJPackageConfigPath)
+        let packagesFullConfig = InteropCJPackageConfigReader()
+        if (opts.enableInteropCJMapping && opts.interopCJPackageConfigPath != "./" &&
+            !packagesFullConfig.Parse(opts.interopCJPackageConfigPath)) {
+            ci.diag.DiagnoseRefactor(DiagKindRefactor.sema_cj_mapping_generic_method_not_get_instance_config,
+                DEFAULT_POSITION, arguments: [opts.interopCJPackageConfigPath])
         }
     }
 
@@ -134,10 +137,11 @@ public open class CompileStrategy {
             }
             let sourcePath = cjdSource[1]
             let sourceCode = cjdSource[2]
+            let isCjmpFile = option.IsCompilingCJMP() || !option.commonPartCjos.isEmpty()
             let fileID = ci.GetSourceManager().AddSource(sourcePath, sourceCode, packageName: Some(pkgName),
-                isCjmpFile: option.IsCompilingCJMP())
+                isCjmpFile: isCjmpFile)
             let parsedFile = ParseSourceFile(fileID, sourcePath, sourceCode, ci.diag, ci.GetSourceManager(),
-                option.enableAddCommentToAst, option.compileCjd)
+                false, true)
             let sourcePkg = Package(pkgName)
             sourcePkg.AddFile(parsedFile)
             if (let Some(targetPkg) <- ci.importManager.GetPackage(pkgName)) {
@@ -207,8 +211,7 @@ public class FullCompileStrategy <: CompileStrategy {
             if (incrParse) {
                 strategyImpl.ParseOnePackageInPlace(ci.srcPkgs[0])
             } else {
-                let sourceSetPackageName = ci.invocation.globalOptions.GetDefaultPackageName()
-                let parsed = strategyImpl.ParseOnePackage(ci.srcFilePaths, sourceSetPackageName)
+                let parsed = strategyImpl.ParseOnePackage(ci.srcFilePaths, DEFAULT_PACKAGE_NAME)
                 ci.srcPkgs.add(parsed[0])
                 ret = parsed[1]
             }

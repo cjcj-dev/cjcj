@@ -6,7 +6,6 @@ import cangjie_compiler::basic.WriteError
 import cangjie_compiler::frontend.*
 import cangjie_compiler::incremental_compilation.IncreKind
 import cangjie_compiler::incremental_compilation.IncrementalCompilationLogger
-import cangjie_compiler::option.GlobalOptions as OptionGlobalOptions
 import cangjie_compiler::option.MockMode
 import cangjie_compiler::option.OrderedInput as OptionOrderedInput
 import cangjie_compiler::option.OutputMode
@@ -42,32 +41,6 @@ public class DriverOptions {
     public init() {}
 
     public func CopyFromOptions(opts: GlobalOptions, incrementalNoChange: Bool): Unit {
-        CopyStringList(sourceFiles, opts.srcFiles)
-        CopyStringList(inputObjs, opts.inputObjs)
-        CopyStringList(packagePaths, opts.packagePaths)
-        CopyStringList(importPaths, opts.importPaths)
-        CopyStringList(pluginPaths, opts.pluginPaths)
-        CopyStringList(commonPartCjos, opts.commonPartCjos)
-        CopyStringList(commonPartChirs, opts.commonPartChirs)
-        CopyStringList(bcPackageNames, opts.bcPackageNames)
-        frontendOutputFiles.clear()
-        inputLibraryOrder.clear()
-        CopyStringSet(directBuiltinDependencies, opts.directBuiltinDependencies)
-        CopyStringSet(indirectBuiltinDependencies, opts.indirectBuiltinDependencies)
-        symbolsNeedLocalized.clear()
-        symbolsNeedLocalizedPerPkg.clear()
-        output = opts.output
-        executablePath = opts.executablePath
-        cangjieHome = opts.cangjieHome
-        moduleSrcPath = opts.moduleSrcPath
-        inputCjoFile = opts.inputCjoFile
-        compilationCachedPath = opts.compilationCachedPath
-        compilationCachedDir = opts.compilationCachedDir
-        compilationCachedFileName = opts.compilationCachedFileName
-        incrementalCompileNoChange = incrementalNoChange
-    }
-
-    public func CopyFromOptions(opts: OptionGlobalOptions, incrementalNoChange: Bool): Unit {
         CopyStringList(sourceFiles, opts.srcFiles)
         CopyStringList(inputObjs, opts.inputObjs)
         CopyStringList(packagePaths, opts.packagePaths)
@@ -157,16 +130,6 @@ public func ExecuteFrontendByDriver(instance: DefaultCompilerInstance, driver: D
 }
 
 public func NeedCreateIncrementalCompilerInstance(opts: GlobalOptions): Bool {
-    if (!opts.enIncrementalCompilation) {
-        return false
-    }
-    if (!opts.commonPartCjos.isEmpty()) {
-        return false
-    }
-    return true
-}
-
-public func NeedCreateIncrementalCompilerInstance(opts: OptionGlobalOptions): Bool {
     let logger = IncrementalCompilationLogger.GetInstance()
     logger.SetDebugPrint(opts.printIncrementalInfo)
     if (opts.enIncrementalCompilation) {
@@ -278,9 +241,9 @@ private func ConfigureInvocationPaths(
     let absExePath = GetAbsPath(exePath) ?? exePath
     let cangjieHome = GetDirPath(GetDirPath(absExePath))
     invocation.frontendOptions.executablePath = exePath
-    ReadPathsFromEnvironmentVars(invocation.frontendOptions, environmentVars)
-    invocation.frontendOptions.cangjieHome = if (let Some(home) <- invocation.frontendOptions.environment.cangjieHome) {
-        home
+    invocation.frontendOptions.ReadPathsFromEnvironmentVars(environmentVars)
+    invocation.frontendOptions.cangjieHome = if (invocation.frontendOptions.environment.cangjieHome.hasValue) {
+        invocation.frontendOptions.environment.cangjieHome.value
     } else {
         cangjieHome
     }
@@ -289,30 +252,7 @@ private func ConfigureInvocationPaths(
     invocation.globalOptions.cangjieHome = invocation.frontendOptions.cangjieHome
 }
 
-private func ReadPathsFromEnvironmentVars(opts: FrontendOptions, environmentVars: HashMap<String, String>): Unit {
-    opts.environment.allVariables.clear()
-    for ((key, value) in environmentVars) {
-        opts.environment.allVariables.add(key, value)
-    }
-    if (let Some(home) <- environmentVars.get("CANGJIE_HOME")) {
-        opts.environment.cangjieHome = GetAbsPath(home)
-        if (let Some(absHome) <- opts.environment.cangjieHome) {
-            opts.cangjieHome = absHome
-        }
-    }
-}
-
 private func ProcessObjectOnlyFrontendInputs(opts: GlobalOptions): Bool {
-    for (inputObj in opts.inputObjs) {
-        let rawName = LibraryBaseName(inputObj)
-        if (let Some(cjoName) <- ConvertBuiltinLibraryBaseToCjo(rawName, true)) {
-            opts.indirectBuiltinDependencies.add(cjoName)
-        }
-    }
-    return true
-}
-
-public func ProcessObjectOnlyFrontendInputs(opts: OptionGlobalOptions): Bool {
     var idx: Int64 = 0
     while (idx < opts.inputLibraryOrder.size) {
         let rawName = opts.inputLibraryOrder[idx].value
@@ -347,14 +287,6 @@ private func ConvertBuiltinLibraryBaseToCjo(rawName: String, trimNativeLibPrefix
         return Some(potentialPkgName + ".cjo")
     }
     return None
-}
-
-private func LibraryBaseName(path: String): String {
-    var name = GetFileName(path)
-    if (let Some(dotPos) <- name.lastIndexOf(".")) {
-        name = name[0..dotPos]
-    }
-    return name
 }
 
 private func PrintFrontendUsage(): Unit {
