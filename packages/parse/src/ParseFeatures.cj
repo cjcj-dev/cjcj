@@ -105,7 +105,7 @@ extend ParserImpl {
             if (token.kind == TokenKind.IDENTIFIER) {
                 let identifier = ParseIdentifierFromToken(token)
                 content.identifiers.add(identifier)
-                if (identifier.isRaw) {
+                if (identifier.IsRaw()) {
                     diag.DiagnoseRefactor(
                         DiagKindRefactor.INVALID_ANNOTATION,
                         token.Begin(),

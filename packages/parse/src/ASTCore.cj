@@ -3,6 +3,7 @@ package cangjie_compiler::parse
 import std.collection.*
 import cangjie_compiler::ast.AnnotationKind as AstAnnotationKind
 public import cangjie_compiler::ast.{ASTKind, ASTKindIndex, Attribute, AttributeIndex}
+public import cangjie_compiler::ast.{Identifier, SrcIdentifier}
 public import cangjie_compiler::utils.OverflowStrategy
 
 public type AnnotationKind = AstAnnotationKind
@@ -29,44 +30,6 @@ public open class Node {
 
     public open func ToString(): String {
         return ""
-    }
-}
-
-public class SrcIdentifier {
-    public var value: String = ""
-    public var rawValue: String = ""
-    public var begin: Position = INVALID_POSITION
-    public var end: Position = INVALID_POSITION
-    public var isRaw: Bool = false
-
-    public init() {}
-
-    public init(value: String, rawValue: String, begin: Position, end: Position, isRaw: Bool) {
-        this.value = value
-        this.rawValue = rawValue
-        this.begin = begin
-        this.end = end
-        this.isRaw = isRaw
-    }
-
-    public func Empty(): Bool {
-        return value.isEmpty()
-    }
-
-    public func Begin(): Position {
-        return begin
-    }
-
-    public func End(): Position {
-        return end
-    }
-
-    public func Val(): String {
-        return value
-    }
-
-    public func GetRawText(): String {
-        return if (rawValue.isEmpty()) { value } else { rawValue }
     }
 }
 

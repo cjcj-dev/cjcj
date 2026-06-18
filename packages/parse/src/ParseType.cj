@@ -213,7 +213,7 @@ extend ParserImpl {
         }
         let parsedType = ParseType()
         parsedType.typeParameterName = parameterName.Val()
-        parsedType.typeParameterNameIsRawId = parameterName.isRaw
+        parsedType.typeParameterNameIsRawId = parameterName.IsRaw()
         parsedType.colonPos = parameterColonPos
         parsedType.typePos = parsedType.begin
         if (!parameterName.Empty()) {

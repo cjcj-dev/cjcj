@@ -119,6 +119,19 @@ public class SrcIdentifier <: Identifier {
         raw = isRaw
     }
 
+    /*
+     * Convenience constructor matching the historical parse-local SrcIdentifier
+     * shape (value, rawValue, begin, end, isRaw). The separate rawValue is the
+     * full source text (with backticks for raw identifiers); ast derives the
+     * raw text from the stripped value plus the isRaw flag, so rawValue is
+     * redundant and intentionally ignored here.
+     */
+    public init(value: String, rawValue: String, begin: Position, end: Position, isRaw: Bool) {
+        super(value, begin, end)
+        raw = isRaw
+        let _ = rawValue
+    }
+
     public func IsRaw(): Bool {
         return raw
     }

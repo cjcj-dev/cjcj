@@ -45,7 +45,7 @@ extend ParserImpl {
                 ConsumeUntilAny([TokenKind.NL, TokenKind.SEMI], targetTokenConsumed: false)
                 break
             }
-            if (curIdent.isRaw) {
+            if (curIdent.IsRaw()) {
                 pkg.isBroken = true
                 diag.DiagnoseRefactor(
                     DiagKindRefactor.PARSE_ERROR,
@@ -269,7 +269,7 @@ extend ParserImpl {
             if (content.prefixPaths.isEmpty() && !inMultiImport && Skip(TokenKind.DOUBLE_COLON)) {
                 content.hasDoubleColon = true
                 skipDoubleColon = true
-                if (curIdent.isRaw && !content.isBroken) {
+                if (curIdent.IsRaw() && !content.isBroken) {
                     diag.DiagnoseRefactor(
                         DiagKindRefactor.PARSE_ERROR,
                         curIdent.Begin(),
@@ -375,7 +375,7 @@ extend ParserImpl {
 }
 
 private func CloneIdentifier(identifier: SrcIdentifier): SrcIdentifier {
-    return SrcIdentifier(identifier.value, identifier.rawValue, identifier.begin, identifier.end, identifier.isRaw)
+    return SrcIdentifier(identifier.Val(), identifier.Begin(), identifier.End(), identifier.IsRaw())
 }
 
 private func CloneModifier(modifier: Modifier): Option<Modifier> {
