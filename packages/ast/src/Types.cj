@@ -66,6 +66,7 @@ private func stableTypeArgsString(values: ArrayList<Ty>, delimiter: String): Str
     return typeArgsString(sorted, delimiter)
 }
 
+@OverflowWrapping
 private func hashCombine(seed: Int64, value: Int64): Int64 {
     return seed * 1315423911 + value + 0x9e3779b9
 }

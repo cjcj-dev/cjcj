@@ -100,6 +100,7 @@ public class MemSig <: Hashable & Equatable<MemSig> {
         return !(this == right)
     }
 
+    @OverflowWrapping
     public func hashCode(): Int64 {
         var out = id.hashCode()
         out = (out * 131) + Int64(arity)
