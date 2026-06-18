@@ -145,6 +145,12 @@ public class TypeChecker {
     private let realPipelineUnsupportedFunctions: HashSet<String> = HashSet<String>()
     private let realPipelineFunctionDecls: HashMap<String, FuncDecl> = HashMap<String, FuncDecl>()
     private let realPipelineFunctionTypes: HashMap<String, FuncTy> = HashMap<String, FuncTy>()
+    private let realPipelinePackageFunctionDecls: HashMap<String, HashMap<String, FuncDecl>> =
+        HashMap<String, HashMap<String, FuncDecl>>()
+    private let realPipelinePackageFunctionTypes: HashMap<String, HashMap<String, FuncTy>> =
+        HashMap<String, HashMap<String, FuncTy>>()
+    private let realPipelinePackageUnsupportedFunctions: HashMap<String, HashSet<String>> =
+        HashMap<String, HashSet<String>>()
     private let realPipelineStructs: HashMap<String, RealPipelineStructInfo> = HashMap<String, RealPipelineStructInfo>()
     private var realPipelineUnsupported: Bool = false
 
@@ -159,11 +165,23 @@ public class TypeChecker {
         realPipelineDiagnostics.clear()
         realPipelineTypedFunctions.clear()
         realPipelineStructs.clear()
+        realPipelinePackageFunctionDecls.clear()
+        realPipelinePackageFunctionTypes.clear()
+        realPipelinePackageUnsupportedFunctions.clear()
         realPipelineUnsupported = false
         for (pkg in pkgs) {
             preparePackageTypes(pkg)
+        }
+        for (pkg in pkgs) {
             prepareRealPipelineStructTable(pkg)
+        }
+        for (pkg in pkgs) {
             prepareRealPipelineFunctionTable(pkg)
+            recordRealPipelinePackageFunctionTable(pkg)
+        }
+        for (pkg in pkgs) {
+            prepareRealPipelineFunctionTable(pkg)
+            addRealPipelineImportedFunctions(pkg)
             checkRealPipelinePackage(pkg)
         }
     }
@@ -452,6 +470,83 @@ public class TypeChecker {
                 }
             }
         }
+    }
+
+    private func recordRealPipelinePackageFunctionTable(pkg: Package): Unit {
+        let decls = HashMap<String, FuncDecl>()
+        let types = HashMap<String, FuncTy>()
+        let unsupported = HashSet<String>()
+        for ((name, decl) in realPipelineFunctionDecls) {
+            decls[name] = decl
+        }
+        for ((name, funcTy) in realPipelineFunctionTypes) {
+            types[name] = funcTy
+        }
+        for (name in realPipelineUnsupportedFunctions) {
+            unsupported.add(name)
+        }
+        realPipelinePackageFunctionDecls[pkg.fullPackageName] = decls
+        realPipelinePackageFunctionTypes[pkg.fullPackageName] = types
+        realPipelinePackageUnsupportedFunctions[pkg.fullPackageName] = unsupported
+    }
+
+    private func addRealPipelineImportedFunctions(pkg: Package): Unit {
+        for (file in pkg.files) {
+            for (importSpec in file.imports) {
+                if (!addRealPipelineSimpleImportedFunction(pkg, importSpec)) {
+                    markRealPipelineUnsupported()
+                }
+            }
+        }
+    }
+
+    private func addRealPipelineSimpleImportedFunction(pkg: Package, importSpec: ImportSpec): Bool {
+        if (importSpec.modifier.isSome() || importSpec.IsImportAlias() || importSpec.IsImportAll() ||
+            importSpec.IsImportMulti()) {
+            return false
+        }
+        let content = importSpec.content
+        if (content.kind != ImportKind.IMPORT_SINGLE || content.isBroken || content.hasBroken ||
+            content.prefixPaths.isEmpty()) {
+            return false
+        }
+        let importedName = content.identifier.Val()
+        let importedPackageName = content.GetPrefixPath()
+        if (importedName.isEmpty() || importedPackageName.isEmpty() || importedPackageName == pkg.fullPackageName) {
+            return false
+        }
+        let depDecls = match (realPipelinePackageFunctionDecls.get(importedPackageName)) {
+            case Some(value) => value
+            case None => return false
+        }
+        let depTypes = match (realPipelinePackageFunctionTypes.get(importedPackageName)) {
+            case Some(value) => value
+            case None => return false
+        }
+        if ((realPipelinePackageUnsupportedFunctions.get(importedPackageName) ?? HashSet<String>()).contains(importedName)) {
+            return false
+        }
+        let depDecl = match (depDecls.get(importedName)) {
+            case Some(value) => value
+            case None => return false
+        }
+        if (!depDecl.IsExportedDecl()) {
+            return false
+        }
+        let depTy = match (depTypes.get(importedName)) {
+            case Some(value) => value
+            case None => return false
+        }
+        if (let Some(existingDecl) <- realPipelineFunctionDecls.get(importedName)) {
+            return SameDecl(existingDecl, depDecl)
+        }
+        if (realPipelineDeclaredFunctions.contains(importedName)) {
+            return false
+        }
+        realPipelineDeclaredFunctions.add(importedName)
+        realPipelineFunctionDecls[importedName] = depDecl
+        realPipelineFunctionTypes[importedName] = depTy
+        return true
     }
 
     private func synthesizeDeclType(decl: Decl): Unit {
