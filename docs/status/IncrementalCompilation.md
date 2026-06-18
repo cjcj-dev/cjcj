@@ -124,6 +124,9 @@ Implemented:
   declarations now record `mangledName` exactly instead of falling back to raw mangles.
 - Matched the C++ cache writer's `std::set` dependency behavior for CHIR var/function dependencies by deduplicating
   serialized dependency target raw mangles before writing them.
+- Tightened AST diff invariants to match the C++ `.at()`/assert behavior: current top-level/member/order entries
+  that are missing from the raw-mangle declaration map now fail fast instead of silently dropping additions or
+  changes from the incremental recompilation set.
 
 Known gaps:
 
