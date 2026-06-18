@@ -105,7 +105,19 @@ Sixth continuation pass:
   metadata, and marks synthesized element refs `READONLY`, matching the C++
   pass's function-body traversal.
 
+Seventh continuation pass:
+
+- `RedundantFutureRemoval.cj`: added the missing C++ optimization pass that
+  removes redundant `Future` object materialization for eligible `Spawn`
+  expressions. The pass walks function and nested block groups, recognizes the
+  C++ user pattern after ignoring the spawn and optional debug user, removes the
+  `Future.init` apply and future allocation, replaces the spawn operand with
+  the captured closure, and annotates the spawn with `std.core.Future`'s
+  `executeClosure` method. The self-host IR does not expose C++ `GetDebugExpr`,
+  so the equivalent debug filtering is implemented by inspecting `DEBUGEXPR`
+  users directly.
+
 Estimated behavior coverage for the touched transform/optimization surface is
-about 34% versus the C++ reference. The changes above remove several unsafe
+about 36% versus the C++ reference. The changes above remove several unsafe
 behavior differences but the overall CHIR transform/optimization module remains
 far from complete.
