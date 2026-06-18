@@ -23,10 +23,16 @@ private let GET_ACTIVE_FRAME_NAME: String = "getActiveFrame"
 private let SET_IMMEDIATE_HANDLER_NAME: String = "setImmediateHandler"
 private let SET_FINALLY_NAME: String = "setFinally"
 private let START_METHOD_NAME: String = "start"
+private let GET_OR_THROW_NAME: String = "getOrThrow"
 private let V_COMPILER_NAME: String = "v-compiler"
 private let FRAME_VAR_NAME: String = "frame"
 private let FRAME_LAMBDA_VAR_NAME: String = "$frameLambda"
 private let HANDLER_LAMBDA_VAR_NAME: String = "$handlerLambda"
+private let FRAME_FIELD_NAME: String = "frame"
+private let PARENT_FIELD_NAME: String = "parent"
+private let EXCEPTION_FIELD_NAME: String = "exception"
+private let ERROR_FIELD_NAME: String = "error"
+private let RESULT_FIELD_NAME: String = "result"
 
 private class GeneratedCatchClause {
     public let pattern: ExceptTypePattern
@@ -143,6 +149,21 @@ private func FindConstructor(classDecl: ClassDecl): Option<FuncDecl> {
     return None
 }
 
+private func FindDefaultConstructor(classDecl: ClassDecl): Option<FuncDecl> {
+    for (member in classDecl.GetMemberDeclPtrs()) {
+        if (let Some(funcDecl) <- (member as FuncDecl)) {
+            if (funcDecl.TestAttr(Attribute.CONSTRUCTOR)) {
+                if (let Some(funcBody) <- funcDecl.funcBody) {
+                    if (funcBody.paramLists.size == 1 && funcBody.paramLists[0].params.isEmpty()) {
+                        return funcDecl
+                    }
+                }
+            }
+        }
+    }
+    return None
+}
+
 private func CreateClassConstructorCall(typeManager: TypeManager, source: Node, className: String,
     classDecl: ClassDecl, typeArgs: ArrayList<Ty>, args: ArrayList<FuncArg>): Option<CallExpr> {
     if (let Some(initDecl) <- FindConstructor(classDecl)) {
@@ -166,6 +187,32 @@ private func CreateClassConstructorCall(typeManager: TypeManager, source: Node, 
         callExpr.SetTy(classTy)
         AddCurFile(callExpr, file: source.curFile)
         return callExpr
+    }
+    return None
+}
+
+private func CreateDefaultExceptionCall(typeManager: TypeManager, pkg: Package, source: Node): Option<CallExpr> {
+    if (let Some(exceptionDecl) <- FindCoreClassDecl(pkg, CLASS_EXCEPTION_NAME)) {
+        if (let Some(initDecl) <- FindDefaultConstructor(exceptionDecl)) {
+            let exceptionTy = typeManager.GetClassTy(exceptionDecl, Array<Ty>())
+            let ctorRef = CreateRefExpr(CLASS_EXCEPTION_NAME)
+            ctorRef.isAlone = false
+            ctorRef.ref.target = initDecl
+            ctorRef.ref.targets.add(initDecl)
+            if (let Some(initTy) <- initDecl.GetTy()) {
+                ctorRef.SetTy(initTy)
+            }
+            CopyGeneratedPosition(source, ctorRef)
+            let callExpr = CreateCallExpr(ctorRef, ArrayList<FuncArg>(), Some(initDecl), Some(exceptionTy),
+                CallKind.CALL_OBJECT_CREATION)
+            if (!ChkCallExpr(typeManager, None, Some(exceptionTy), callExpr)) {
+                return None
+            }
+            callExpr.callKind = CallKind.CALL_OBJECT_CREATION
+            callExpr.SetTy(exceptionTy)
+            AddCurFile(callExpr, file: source.curFile)
+            return callExpr
+        }
     }
     return None
 }
@@ -367,11 +414,230 @@ private func CreateExceptPattern(source: Node, catchDecl: ClassDecl, catchTy: Ty
 }
 
 private func CreateThrowExprFromCall(source: Node, callExpr: CallExpr): ThrowExpr {
+    return CreateThrowExprFromExpr(source, callExpr)
+}
+
+private func CreateThrowExprFromExpr(source: Node, expr: Expr): ThrowExpr {
     let throwExpr = ThrowExpr()
-    throwExpr.expr = callExpr
+    throwExpr.expr = expr
     throwExpr.SetTy(TypeManager.GetNothingTy())
     CopyGeneratedPosition(source, throwExpr)
     return throwExpr
+}
+
+private func CreateGeneratedBlock(source: Node, expr: Expr, ty: Ty): Block {
+    let nodes = ArrayList<Node>()
+    nodes.add(expr)
+    let block = CreateBlock(nodes, Some(ty))
+    CopyGeneratedPosition(source, block)
+    AddCurFile(block, file: source.curFile)
+    return block
+}
+
+private func CreateGeneratedFieldAccess(source: Node, base: Expr, fieldName: String): MemberAccess {
+    let access = CreateMemberAccess(base, fieldName)
+    CopyGeneratedPosition(source, access)
+    AddCurFile(access, file: source.curFile)
+    return access
+}
+
+private func CreateGeneratedMemberCall(typeManager: TypeManager, source: Node, base: Expr, methodName: String,
+    fallbackTy: Ty): CallExpr {
+    let access = CreateGeneratedFieldAccess(source, base, methodName)
+    AddTargetIfFunc(access)
+    let callExpr = CreateCallExpr(access, ArrayList<FuncArg>())
+    if (let Some(retTy) <- FuncRetTy(access.target)) {
+        if (FinishEffectCall(typeManager, retTy, callExpr)) {
+            AddCurFile(callExpr, file: source.curFile)
+            return callExpr
+        }
+    }
+    callExpr.SetTy(fallbackTy)
+    AddCurFile(callExpr, file: source.curFile)
+    return callExpr
+}
+
+private func CreateActiveFrameParentAccess(typeManager: TypeManager, pkg: Package, source: Node,
+    frameTy: Ty): Option<MemberAccess> {
+    if (let Some(activeFrame) <- CreateHandlerFrameCall(typeManager, pkg, source,
+        GET_ACTIVE_FRAME_NAME, ArrayList<Ty>())) {
+        let activeFrameValue = CreateGeneratedMemberCall(typeManager, source, activeFrame,
+            GET_OR_THROW_NAME, frameTy)
+        let parentAccess = CreateGeneratedFieldAccess(source, activeFrameValue, PARENT_FIELD_NAME)
+        parentAccess.SetTy(frameTy)
+        return parentAccess
+    }
+    return None
+}
+
+private func CreateFrameGuardCondition(typeManager: TypeManager, pkg: Package, source: Node, wrapperVar: VarDecl,
+    frameTy: Ty): Option<BinaryExpr> {
+    if (let Some(parentAccess) <- CreateActiveFrameParentAccess(typeManager, pkg, source, frameTy)) {
+        let wrapperFrame = CreateGeneratedFieldAccess(source, CreateRefExpr(wrapperVar, source), FRAME_FIELD_NAME)
+        wrapperFrame.SetTy(frameTy)
+        let condition = CreateBinaryExpr(parentAccess, wrapperFrame, TokenKind.EQUAL)
+        condition.SetTy(TypeManager.GetPrimitiveTy(TypeKind.TYPE_BOOLEAN))
+        CopyGeneratedPosition(source, condition)
+        return condition
+    }
+    return None
+}
+
+private func CreateWrapperGuardCatch(typeManager: TypeManager, pkg: Package, source: Node, wrapperDecl: ClassDecl,
+    payloadFieldName: String, frameTy: Ty): Option<GeneratedCatchClause> {
+    let wrapperTy = typeManager.GetClassTy(wrapperDecl, Array<Ty>())
+    let wrapperPattern = CreateVarPattern(V_COMPILER_NAME, wrapperTy)
+    CopyGeneratedPosition(source, wrapperPattern)
+    if (let Some(wrapperVar) <- wrapperPattern.varDecl) {
+        CopyGeneratedPosition(source, wrapperVar)
+        if (let Some(condition) <- CreateFrameGuardCondition(typeManager, pkg, source, wrapperVar, frameTy)) {
+            let payload = CreateGeneratedFieldAccess(source, CreateRefExpr(wrapperVar, source), payloadFieldName)
+            let thenBlock = CreateGeneratedBlock(source, CreateThrowExprFromExpr(source, payload),
+                TypeManager.GetNothingTy())
+            let rethrow = CreateThrowExprFromExpr(source, CreateRefExpr(wrapperVar, source))
+            let elseBlock = CreateGeneratedBlock(source, rethrow, TypeManager.GetNothingTy())
+            let ifExpr = CreateIfExpr(condition, thenBlock, elseBlock, TypeManager.GetNothingTy())
+            CopyGeneratedPosition(source, ifExpr)
+            let catchBlock = CreateGeneratedBlock(source, ifExpr, TypeManager.GetNothingTy())
+            let exceptPattern = CreateExceptPattern(source, wrapperDecl, wrapperTy, wrapperPattern)
+            return GeneratedCatchClause(exceptPattern, catchBlock)
+        }
+    }
+    return None
+}
+
+private func CreateEarlyReturnMatch(typeManager: TypeManager, pkg: Package, source: Node, funcBody: FuncBody,
+    earlyReturnVar: VarDecl, tryReturnTy: Ty): Option<MatchExpr> {
+    let resultAccess = CreateGeneratedFieldAccess(source, CreateRefExpr(earlyReturnVar, source), RESULT_FIELD_NAME)
+    let resultPattern = CreateVarPattern(V_COMPILER_NAME, tryReturnTy)
+    CopyGeneratedPosition(source, resultPattern)
+    if (let Some(resultVar) <- resultPattern.varDecl) {
+        CopyGeneratedPosition(source, resultVar)
+        let resultRef = CreateRefExpr(resultVar, source)
+        resultRef.SetTy(tryReturnTy)
+        let returnResult = CreateReturnExpr(resultRef, funcBody)
+        returnResult.SetTy(TypeManager.GetNothingTy())
+        CopyGeneratedPosition(source, returnResult)
+
+        let resultType = CreateRefType(V_COMPILER_NAME)
+        resultType.SetTy(tryReturnTy)
+        CopyGeneratedPosition(source, resultType)
+        let typePattern = CreateRuntimePreparedTypePattern(typeManager, resultPattern, resultType, resultAccess)
+        let matchCases = ArrayList<MatchCase>()
+        matchCases.add(CreateMatchCase(typePattern, returnResult))
+
+        if (let Some(exceptionCall) <- CreateDefaultExceptionCall(typeManager, pkg, source)) {
+            let wildcard = WildcardPattern()
+            if (let Some(resultAccessTy) <- resultAccess.GetTy()) {
+                wildcard.SetTy(resultAccessTy)
+            }
+            CopyGeneratedPosition(source, wildcard)
+            matchCases.add(CreateMatchCase(wildcard, CreateThrowExprFromCall(source, exceptionCall)))
+            let matchExpr = CreateMatchExpr(resultAccess, matchCases, TypeManager.GetNothingTy(), SugarKind.AS)
+            CopyGeneratedPosition(source, matchExpr)
+            AddCurFile(matchExpr, file: source.curFile)
+            return matchExpr
+        }
+    }
+    return None
+}
+
+private func CreateEarlyReturnGuardCatch(typeManager: TypeManager, pkg: Package, source: Node, funcBody: FuncBody,
+    earlyReturnDecl: ClassDecl, frameTy: Ty, tryReturnTy: Ty): Option<GeneratedCatchClause> {
+    let earlyReturnTy = typeManager.GetClassTy(earlyReturnDecl, Array<Ty>())
+    let earlyReturnPattern = CreateVarPattern(V_COMPILER_NAME, earlyReturnTy)
+    CopyGeneratedPosition(source, earlyReturnPattern)
+    if (let Some(earlyReturnVar) <- earlyReturnPattern.varDecl) {
+        CopyGeneratedPosition(source, earlyReturnVar)
+        if (let Some(condition) <- CreateFrameGuardCondition(typeManager, pkg, source, earlyReturnVar, frameTy)) {
+            if (let Some(matchExpr) <- CreateEarlyReturnMatch(typeManager, pkg, source, funcBody,
+                earlyReturnVar, tryReturnTy)) {
+                let thenBlock = CreateGeneratedBlock(source, matchExpr, TypeManager.GetNothingTy())
+                let rethrow = CreateThrowExprFromExpr(source, CreateRefExpr(earlyReturnVar, source))
+                let elseBlock = CreateGeneratedBlock(source, rethrow, TypeManager.GetNothingTy())
+                let ifExpr = CreateIfExpr(condition, thenBlock, elseBlock, TypeManager.GetNothingTy())
+                CopyGeneratedPosition(source, ifExpr)
+                let catchBlock = CreateGeneratedBlock(source, ifExpr, TypeManager.GetNothingTy())
+                let exceptPattern = CreateExceptPattern(source, earlyReturnDecl, earlyReturnTy, earlyReturnPattern)
+                return GeneratedCatchClause(exceptPattern, catchBlock)
+            }
+        }
+    }
+    return None
+}
+
+private func EncloseTryLambdaForImmediateWrappers(typeManager: TypeManager, pkg: Package,
+    tryLambda: LambdaExpr, tryReturnTy: Ty): Bool {
+    if (let None <- tryLambda.funcBody) {
+        return false
+    }
+    let funcBody = tryLambda.funcBody.getOrThrow()
+    if (let None <- funcBody.body) {
+        return false
+    }
+    if (let None <- FindEffectClassDecl(pkg, CLASS_IMMEDIATE_FRAME)) {
+        return false
+    }
+    if (let None <- FindEffectClassDecl(pkg, CLASS_FRAME_EXCEPTION_WRAPPER)) {
+        return false
+    }
+    if (let None <- FindEffectClassDecl(pkg, CLASS_FRAME_ERROR_WRAPPER)) {
+        return false
+    }
+    if (let None <- FindEffectClassDecl(pkg, CLASS_EARLY_RETURN)) {
+        return false
+    }
+    if (let None <- FindCoreClassDecl(pkg, CLASS_EXCEPTION_NAME)) {
+        return false
+    }
+    let sourceBlock = funcBody.body.getOrThrow()
+    let frameDecl = FindEffectClassDecl(pkg, CLASS_IMMEDIATE_FRAME).getOrThrow()
+    let frameTypeArgs = ArrayList<Ty>()
+    frameTypeArgs.add(tryReturnTy)
+    let frameTy = typeManager.GetClassTy(frameDecl, frameTypeArgs.toArray())
+
+    let wrappedTry = TryExpr()
+    CopyBasicInfo(sourceBlock, wrappedTry)
+    wrappedTry.tryBlock = sourceBlock
+    wrappedTry.SetTy(tryReturnTy)
+
+    let exceptionWrapper = FindEffectClassDecl(pkg, CLASS_FRAME_EXCEPTION_WRAPPER).getOrThrow()
+    if (let Some(exceptionCatch) <- CreateWrapperGuardCatch(typeManager, pkg, sourceBlock, exceptionWrapper,
+        EXCEPTION_FIELD_NAME, frameTy)) {
+        wrappedTry.catchPatterns.add(exceptionCatch.pattern)
+        wrappedTry.catchBlocks.add(exceptionCatch.block)
+    } else {
+        return false
+    }
+
+    let errorWrapper = FindEffectClassDecl(pkg, CLASS_FRAME_ERROR_WRAPPER).getOrThrow()
+    if (let Some(errorCatch) <- CreateWrapperGuardCatch(typeManager, pkg, sourceBlock, errorWrapper,
+        ERROR_FIELD_NAME, frameTy)) {
+        wrappedTry.catchPatterns.add(errorCatch.pattern)
+        wrappedTry.catchBlocks.add(errorCatch.block)
+    } else {
+        return false
+    }
+
+    let earlyReturnDecl = FindEffectClassDecl(pkg, CLASS_EARLY_RETURN).getOrThrow()
+    if (let Some(earlyReturnCatch) <- CreateEarlyReturnGuardCatch(typeManager, pkg, sourceBlock, funcBody,
+        earlyReturnDecl, frameTy, tryReturnTy)) {
+        wrappedTry.catchPatterns.add(earlyReturnCatch.pattern)
+        wrappedTry.catchBlocks.add(earlyReturnCatch.block)
+    } else {
+        return false
+    }
+
+    let returnExpr = CreateReturnExpr(wrappedTry, funcBody)
+    returnExpr.SetTy(TypeManager.GetNothingTy())
+    CopyGeneratedPosition(sourceBlock, returnExpr)
+    let resultNodes = ArrayList<Node>()
+    resultNodes.add(returnExpr)
+    let resultBlock = CreateBlock(resultNodes, Some(TypeManager.GetNothingTy()))
+    CopyGeneratedPosition(sourceBlock, resultBlock)
+    AddCurFile(resultBlock, file: sourceBlock.curFile)
+    funcBody.body = resultBlock
+    return true
 }
 
 private func CreateWrapperCatchClause(typeManager: TypeManager, pkg: Package, source: Node, catchDecl: ClassDecl,
@@ -562,6 +828,10 @@ private func CreateFrame(typeManager: TypeManager, pkg: Package, tryExpr: TryExp
     let frameTypeArgs = ArrayList<Ty>()
     frameTypeArgs.add(tryReturnTy)
     let frameTy = typeManager.GetClassTy(frameDecl, frameTypeArgs.toArray())
+
+    if (!EncloseTryLambdaForImmediateWrappers(typeManager, pkg, tryLambda, tryReturnTy)) {
+        return None
+    }
 
     let lambdaVar = CreateVarDecl(FRAME_LAMBDA_VAR_NAME, tryLambda, None)
     CopyGeneratedPosition(tryLambda, lambdaVar)
