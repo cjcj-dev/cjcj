@@ -1084,8 +1084,8 @@ public class CHIRChecker {
         if (!CheckOperandNumEqual(2, expr, topLevelFunc, result)) {
             return
         }
-        let location = expr.GetOperand(0)
-        let value = expr.GetOperand(1)
+        let value = expr.GetOperand(0)
+        let location = expr.GetOperand(1)
         if (let Some(locationTy) <- location.GetType()) {
             if (let Some(valueTy) <- value.GetType()) {
                 if (let Some(refTy) <- (locationTy as RefType)) {
@@ -1127,7 +1127,18 @@ public class CHIRChecker {
             case ExprKind.VARRAY => CheckVArray(expr, topLevelFunc, result)
             case ExprKind.FIELD | ExprKind.FIELD_BY_NAME | ExprKind.GET_EXCEPTION =>
                 CheckHaveResult(expr, topLevelFunc, result)
-            case ExprKind.APPLY | ExprKind.INVOKE | ExprKind.INVOKESTATIC => CheckCallLike(expr, topLevelFunc, result)
+            case ExprKind.APPLY =>
+                if (let Some(applyExpr) <- (expr as Apply)) {
+                    CheckApply(applyExpr, topLevelFunc, result)
+                }
+            case ExprKind.INVOKE =>
+                if (let Some(invokeExpr) <- (expr as Invoke)) {
+                    CheckInvoke(invokeExpr, topLevelFunc, result)
+                }
+            case ExprKind.INVOKESTATIC =>
+                if (let Some(invokeStaticExpr) <- (expr as InvokeStatic)) {
+                    CheckInvokeStatic(invokeStaticExpr, topLevelFunc, result)
+                }
             case ExprKind.INSTANCEOF =>
                 CheckOperandNumEqual(1, expr, topLevelFunc, result)
                 CheckBoolResult(expr, topLevelFunc, result)
@@ -1136,8 +1147,12 @@ public class CHIRChecker {
                 CheckOperandNumEqual(1, expr, topLevelFunc, result)
                 CheckHaveResult(expr, topLevelFunc, result)
             case ExprKind.RAW_ARRAY_ALLOCATE | ExprKind.RAW_ARRAY_INIT_BY_VALUE | ExprKind.VARRAY_BUILDER |
-                ExprKind.INTRINSIC | ExprKind.SPAWN | ExprKind.GET_RTTI | ExprKind.GET_RTTI_STATIC =>
+                ExprKind.SPAWN | ExprKind.GET_RTTI | ExprKind.GET_RTTI_STATIC =>
                 CheckHaveResult(expr, topLevelFunc, result)
+            case ExprKind.INTRINSIC =>
+                if (let Some(intrinsicExpr) <- (expr as Intrinsic)) {
+                    CheckIntrinsic(intrinsicExpr, topLevelFunc, result)
+                }
             case ExprKind.RAW_ARRAY_LITERAL_INIT =>
                 CheckOperandNumAtLeast(1, expr, topLevelFunc, result)
                 CheckHaveResult(expr, topLevelFunc, result)
@@ -1329,44 +1344,301 @@ public class CHIRChecker {
         }
     }
 
-    private func CheckCallLike(expr: Expression, topLevelFunc: Function, result: CHIRCheckResult): Unit {
+    private func CheckApply(expr: Apply, topLevelFunc: Function, result: CHIRCheckResult): Unit {
         if (!CheckOperandNumAtLeast(1, expr, topLevelFunc, result) || !CheckHaveResult(expr, topLevelFunc, result)) {
             return
         }
-        let callee = expr.GetOperand(0)
+        let callee = expr.GetCallee()
+        if (!CheckCallee(callee, expr, topLevelFunc, result)) {
+            return
+        }
+        if (!CheckApplyInstantiatedTypeArgs(expr, callee, topLevelFunc, result)) {
+            return
+        }
+        CheckApplyThisType(expr, callee, topLevelFunc, result)
         if (let Some(calleeTy) <- callee.GetType()) {
             if (let Some(funcTy) <- (calleeTy as FuncType)) {
-                let argCount = expr.GetNumOfOperands() - 1
-                if (!funcTy.HasVarArg() && argCount != funcTy.GetNumOfParams()) {
-                    result.AddError("in function ${topLevelFunc.GetIdentifier()}, size mismatched, there are " +
-                        "${argCount} arg(s) in function call `${CHIRCheckerExpressionString(expr)}`, but there are " +
-                        "${funcTy.GetNumOfParams()} parameter(s) in function declare.")
-                    return
-                }
-                var idx: Int64 = 0
-                while (idx < argCount && idx < funcTy.GetNumOfParams()) {
-                    let arg = expr.GetOperand(idx + 1)
-                    if (let Some(argTy) <- arg.GetType()) {
-                        let paramTy = funcTy.GetParamType(idx)
-                        if (!CHIRCheckerTypeIsExpected(argTy, paramTy)) {
-                            TypeCheckError(expr, arg, paramTy.ToString(), topLevelFunc, result)
-                        }
-                    }
-                    idx++
-                }
-                if (let Some(resultTy) <- expr.GetResultType()) {
-                    if (!CHIRCheckerTypeIsExpected(funcTy.GetReturnType(), resultTy)) {
-                        TypeCheckResultError(expr, funcTy.GetReturnType().ToString(), topLevelFunc, result)
-                    }
-                }
-            } else {
+                CheckApplyFuncArgs(expr.GetArgs(), funcTy, expr, topLevelFunc, result)
+                CheckCallReturnType(funcTy.GetReturnType(), expr, topLevelFunc, result)
+            }
+        }
+    }
+
+    private func CheckInvoke(expr: Invoke, topLevelFunc: Function, result: CHIRCheckResult): Unit {
+        if (!CheckOperandNumAtLeast(1, expr, topLevelFunc, result) || !CheckHaveResult(expr, topLevelFunc, result)) {
+            return
+        }
+        if (!CheckInstantiatedTypeArgs(expr.GetInstantiatedTypeArgs(), expr.GetGenericTypeParams(), expr,
+            topLevelFunc, result)) {
+            return
+        }
+        if (let Some(objectTy) <- expr.GetObject().GetType()) {
+            CheckInvokeThisType(objectTy, expr.GetThisType(), expr, topLevelFunc, result)
+        }
+        CheckInvokeFuncArgs(expr.GetArgs(), expr.GetMethodType(), expr, 1, topLevelFunc, result)
+        CheckCallReturnType(expr.GetMethodType().GetReturnType(), expr, topLevelFunc, result)
+    }
+
+    private func CheckInvokeStatic(expr: InvokeStatic, topLevelFunc: Function, result: CHIRCheckResult): Unit {
+        if (!CheckOperandNumAtLeast(1, expr, topLevelFunc, result) || !CheckHaveResult(expr, topLevelFunc, result)) {
+            return
+        }
+        if (!CheckInstantiatedTypeArgs(expr.GetInstantiatedTypeArgs(), expr.GetGenericTypeParams(), expr,
+            topLevelFunc, result)) {
+            return
+        }
+        if (let Some(objectTy) <- ResolveRTTIObjectType(expr.GetRTTIValue())) {
+            CheckInvokeThisType(objectTy, expr.GetThisType(), expr, topLevelFunc, result)
+        } else {
+            result.AddError("in function ${topLevelFunc.GetIdentifier()}, in `" +
+                "${CHIRCheckerExpressionString(expr)}`, its first operand must be from `GetRTTI` or `GetRTTIStatic`.")
+        }
+        CheckInvokeFuncArgs(expr.GetArgs(), expr.GetMethodType(), expr, 0, topLevelFunc, result)
+        CheckCallReturnType(expr.GetMethodType().GetReturnType(), expr, topLevelFunc, result)
+    }
+
+    private func CheckCallee(callee: Value, expr: Expression, topLevelFunc: Function,
+        result: CHIRCheckResult): Bool {
+        if (let Some(calleeTy) <- callee.GetType()) {
+            if (!calleeTy.IsFunc()) {
                 result.AddError("in function ${topLevelFunc.GetIdentifier()}, callee of `" +
                     "${CHIRCheckerExpressionString(expr)}` should have func type, not ${calleeTy.ToString()}.")
+                return false
             }
         }
         if (callee.TestAttr(Attribute.ABSTRACT)) {
             result.AddError("in function ${topLevelFunc.GetIdentifier()}, callee of `" +
                 "${CHIRCheckerExpressionString(expr)}` can't be abstract.")
+            return false
+        }
+        return true
+    }
+
+    private func CheckApplyInstantiatedTypeArgs(expr: Apply, callee: Value, topLevelFunc: Function,
+        result: CHIRCheckResult): Bool {
+        if (callee.AsFunction().isSome()) {
+            return true
+        }
+        let genericTypeParams = ArrayList<GenericType>()
+        if (let Some(localVar) <- callee.AsLocalVar()) {
+            if (let Some(calleeExpr) <- localVar.GetExpr()) {
+                if (let Some(lambdaExpr) <- (calleeExpr as Lambda)) {
+                    for (genericTy in lambdaExpr.GetGenericTypeParams()) {
+                        genericTypeParams.add(genericTy)
+                    }
+                }
+            }
+        }
+        return CheckInstantiatedTypeArgs(expr.GetInstantiatedTypeArgs(), genericTypeParams, expr, topLevelFunc,
+            result)
+    }
+
+    private func CheckInstantiatedTypeArgs(instantiatedTypeArgs: ArrayList<Type>,
+        genericTypeParams: ArrayList<GenericType>, expr: Expression, topLevelFunc: Function,
+        result: CHIRCheckResult): Bool {
+        if (instantiatedTypeArgs.size != genericTypeParams.size) {
+            result.AddError("in function ${topLevelFunc.GetIdentifier()}, size mismatched, there are " +
+                "${instantiatedTypeArgs.size} instantiated type args in function call `" +
+                "${CHIRCheckerExpressionString(expr)}`, but there are ${genericTypeParams.size} generic type args " +
+                "in function declare.")
+            return false
+        }
+        return true
+    }
+
+    private func CheckApplyThisType(expr: Apply, callee: Value, topLevelFunc: Function,
+        result: CHIRCheckResult): Unit {
+        if (let Some(thisTy) <- expr.GetThisType()) {
+            let derefTy = thisTy.StripAllRefs()
+            if (!derefTy.IsBuiltinType() && !derefTy.IsCustomType() && !derefTy.IsGeneric()) {
+                result.AddError("in function ${topLevelFunc.GetIdentifier()}, in `" +
+                    "${CHIRCheckerExpressionString(expr)}`, ThisType must be builtin type, custom type or generic " +
+                    "type, can't be ${thisTy.ToString()}.")
+            }
+            if (callee.AsFunction().isNone()) {
+                result.AddError("in function ${topLevelFunc.GetIdentifier()}, in `" +
+                    "${CHIRCheckerExpressionString(expr)}`, callee isn't member method, but there is ThisType: " +
+                    "${thisTy.ToString()}.")
+            }
+        }
+        if (let Some(fn) <- callee.AsFunction()) {
+            if (fn.IsMemberFunc() && expr.GetThisType().isNone()) {
+                result.AddError("in function ${topLevelFunc.GetIdentifier()}, in `" +
+                    "${CHIRCheckerExpressionString(expr)}`, callee is member method, but there is no ThisType.")
+            } else if (!fn.IsMemberFunc() && expr.GetThisType().isSome()) {
+                if (let Some(thisTy2) <- expr.GetThisType()) {
+                    result.AddError("in function ${topLevelFunc.GetIdentifier()}, in `" +
+                        "${CHIRCheckerExpressionString(expr)}`, callee isn't member method, but there is ThisType: " +
+                        "${thisTy2.ToString()}.")
+                }
+            }
+        }
+    }
+
+    private func CheckInvokeThisType(objectTy: Type, maybeThisType: Option<Type>, expr: Expression,
+        topLevelFunc: Function, result: CHIRCheckResult): Bool {
+        let _ = objectTy
+        if (maybeThisType.isNone()) {
+            result.AddError("in function ${topLevelFunc.GetIdentifier()}, in `" +
+                "${CHIRCheckerExpressionString(expr)}`, we must have `ThisType`, can't be None.")
+            return false
+        }
+        if (let Some(thisTy) <- maybeThisType) {
+            let thisDerefTy = thisTy.StripAllRefs()
+            if (!thisDerefTy.IsBuiltinType() && !thisDerefTy.IsCustomType() && !thisDerefTy.IsThis() &&
+                !thisDerefTy.IsGeneric()) {
+                result.AddError("in function ${topLevelFunc.GetIdentifier()}, in `" +
+                    "${CHIRCheckerExpressionString(expr)}`, ThisType must be builtin type, custom type, `This` type " +
+                    "or generic type, can't be ${thisTy.ToString()}.")
+                return false
+            }
+            if (let Some(genericTy) <- (thisDerefTy as GenericType)) {
+                if (genericTy.GetUpperBounds().isEmpty()) {
+                    result.AddError("in function ${topLevelFunc.GetIdentifier()}, in `" +
+                        "${CHIRCheckerExpressionString(expr)}`, ThisType is ${thisTy.ToString()}, a generic type, " +
+                        "but it doesn't have upper bounds.")
+                    return false
+                }
+            }
+        }
+        return true
+    }
+
+    private func ResolveRTTIObjectType(value: Value): Option<Type> {
+        if (let Some(localVar) <- value.AsLocalVar()) {
+            if (let Some(ownerExpr) <- localVar.GetExpr()) {
+                if (let Some(getRttiExpr) <- (ownerExpr as GetRTTI)) {
+                    return getRttiExpr.GetOperand().GetType()
+                }
+                if (let Some(getRttiStaticExpr) <- (ownerExpr as GetRTTIStatic)) {
+                    return getRttiStaticExpr.GetRTTIType()
+                }
+            }
+        }
+        return None
+    }
+
+    private func CheckApplyFuncArgs(args: ArrayList<Value>, funcTy: FuncType, expr: Expression,
+        topLevelFunc: Function, result: CHIRCheckResult): Unit {
+        if (!funcTy.HasVarArg() && args.size != funcTy.GetNumOfParams()) {
+            result.AddError("in function ${topLevelFunc.GetIdentifier()}, size mismatched, there are " +
+                "${args.size} arg(s) in function call `${CHIRCheckerExpressionString(expr)}`, but there are " +
+                "${funcTy.GetNumOfParams()} parameter(s) in function declare.")
+            return
+        }
+        var idx: Int64 = 0
+        while (idx < args.size && idx < funcTy.GetNumOfParams()) {
+            let arg = args[idx]
+            if (let Some(argTy) <- arg.GetType()) {
+                let paramTy = funcTy.GetParamType(idx)
+                if (!CHIRCheckerTypeIsExpected(argTy, paramTy)) {
+                    TypeCheckError(expr, arg, paramTy.ToString(), topLevelFunc, result)
+                }
+            }
+            idx++
+        }
+    }
+
+    private func CheckInvokeFuncArgs(args: ArrayList<Value>, funcTy: FuncType, expr: Expression, skipArgs: Int64,
+        topLevelFunc: Function, result: CHIRCheckResult): Unit {
+        if (args.size != funcTy.GetNumOfParams()) {
+            result.AddError("in function ${topLevelFunc.GetIdentifier()}, size mismatched, there are " +
+                "${args.size} arg(s) in function call `${CHIRCheckerExpressionString(expr)}`, but there are " +
+                "${funcTy.GetNumOfParams()} parameter(s) in function declare.")
+            return
+        }
+        var idx: Int64 = skipArgs
+        while (idx < args.size && idx < funcTy.GetNumOfParams()) {
+            let arg = args[idx]
+            if (let Some(argTy) <- arg.GetType()) {
+                let paramTy = funcTy.GetParamType(idx)
+                if (!CHIRCheckerTypeIsExpected(argTy, paramTy)) {
+                    TypeCheckError(expr, arg, paramTy.ToString(), topLevelFunc, result)
+                }
+            }
+            idx++
+        }
+    }
+
+    private func CheckCallReturnType(expectedRetTy: Type, expr: Expression, topLevelFunc: Function,
+        result: CHIRCheckResult): Unit {
+        if (let Some(resultTy) <- expr.GetResultType()) {
+            if (!CHIRCheckerTypeIsExpected(expectedRetTy, resultTy) &&
+                !CHIRCheckerTypeIsExpected(resultTy, expectedRetTy)) {
+                TypeCheckResultError(expr, expectedRetTy.ToString(), topLevelFunc, result)
+            }
+        }
+    }
+
+    private func CheckIntrinsic(expr: Intrinsic, topLevelFunc: Function, result: CHIRCheckResult): Unit {
+        if (!CheckHaveResult(expr, topLevelFunc, result)) {
+            return
+        }
+        if (expr.GetIntrinsicKind() == IntrinsicKind.NOT_INTRINSIC ||
+            expr.GetIntrinsicKind() == IntrinsicKind.NOT_IMPLEMENTED) {
+            result.AddError("in function ${topLevelFunc.GetIdentifier()}, in `" +
+                "${CHIRCheckerExpressionString(expr)}`, intrinsic kind must be valid.")
+        }
+        CheckInout(expr, topLevelFunc, result)
+    }
+
+    private func CheckInout(expr: Intrinsic, topLevelFunc: Function, result: CHIRCheckResult): Unit {
+        if (expr.GetIntrinsicKind() != IntrinsicKind.INOUT_PARAM) {
+            return
+        }
+        if (!expr.GetInstantiatedTypeArgs().isEmpty()) {
+            result.AddError("in function ${topLevelFunc.GetIdentifier()}, in `" +
+                "${CHIRCheckerExpressionString(expr)}`, `inout` intrinsic can't have type args.")
+        }
+        if (!CheckOperandNumEqual(1, expr, topLevelFunc, result)) {
+            return
+        }
+        let operand = expr.GetOperand(0)
+        if (let Some(opTy) <- operand.GetType()) {
+            if (let Some(refTy) <- (opTy as RefType)) {
+                let baseTy = refTy.GetBaseType()
+                if (baseTy.IsRef()) {
+                    result.AddError("in function ${topLevelFunc.GetIdentifier()}, in `" +
+                        "${CHIRCheckerExpressionString(expr)}`, `inout` operand's type is `${opTy.ToString()}`, " +
+                        "but type&& is NOT allowed.")
+                    return
+                }
+                CheckInoutOpSrc(operand, expr, topLevelFunc, result)
+            } else {
+                result.AddError("in function ${topLevelFunc.GetIdentifier()}, in `" +
+                    "${CHIRCheckerExpressionString(expr)}`, `inout` operand's type is `${opTy.ToString()}`, but ref " +
+                    "type is expected.")
+                return
+            }
+        }
+        if (let Some(resultTy) <- expr.GetResultType()) {
+            if (!resultTy.IsCPointer()) {
+                TypeCheckResultError(expr, "CPointer", topLevelFunc, result)
+                return
+            }
+            if (!CHIRCheckerIsCTypeInInout(resultTy)) {
+                result.AddError("in function ${topLevelFunc.GetIdentifier()}, in `" +
+                    "${CHIRCheckerExpressionString(expr)}`, the pointed type of result CPointer is not CType " +
+                    "(exclude CString).")
+            }
+        }
+    }
+
+    private func CheckInoutOpSrc(op: Value, expr: Intrinsic, topLevelFunc: Function,
+        result: CHIRCheckResult): Unit {
+        if (op.IsBlock() || op.IsBlockGroup() || op.IsFunc() || op.IsLiteral()) {
+            result.AddError("in function ${topLevelFunc.GetIdentifier()}, in `" +
+                "${CHIRCheckerExpressionString(expr)}`, `inout` operand can't be Block, BlockGroup, Literal or " +
+                "Function.")
+            return
+        }
+        if (let Some(opTy) <- op.GetType()) {
+            let strippedTy = opTy.StripAllRefs()
+            if (!CHIRCheckerIsCTypeInInout(strippedTy)) {
+                result.AddError("in function ${topLevelFunc.GetIdentifier()}, in `" +
+                    "${CHIRCheckerExpressionString(expr)}`, `inout` operand's type is `${strippedTy.ToString()}`, " +
+                    "but C-type (exclude CString) is expected.")
+            }
         }
     }
 
@@ -1565,6 +1837,9 @@ public class CHIRChecker {
         let typeSize = reachableGenericTypes.size
         if (let Some(ownerExpr) <- blockGroup.GetOwnerExpression()) {
             if (let Some(lambdaExpr) <- (ownerExpr as Lambda)) {
+                for (genericTy in lambdaExpr.GetGenericTypeParams()) {
+                    reachableGenericTypes.add(genericTy)
+                }
                 for (param in lambdaExpr.GetParams()) {
                     reachableValues.add(param)
                     if (let Some(paramTy) <- param.GetType()) {
@@ -1610,6 +1885,12 @@ public class CHIRChecker {
         visitedBlocks.add(block.nodeId)
         let valueSize = reachableValues.size
         for (expr in block.GetExpressionsRef()) {
+            let typeSize = reachableGenericTypes.size
+            if (let Some(lambdaExpr) <- (expr as Lambda)) {
+                for (genericTy in lambdaExpr.GetGenericTypeParams()) {
+                    reachableGenericTypes.add(genericTy)
+                }
+            }
             CheckUnreachableOpAndGenericTyInExpr(expr, topLevelFunc, reachableValues, reachableGenericTypes, result)
             if (let Some(resultValue) <- expr.GetResult()) {
                 reachableValues.add(resultValue)
@@ -1618,6 +1899,7 @@ public class CHIRChecker {
                 CheckUnreachableOpAndGenericTyInBG(nestedGroup, topLevelFunc, reachableValues, reachableGenericTypes,
                     result)
             }
+            CHIRCheckerTrimGenericTypes(reachableGenericTypes, typeSize)
             if (let Some(term) <- expr.AsTerminator()) {
                 for (successor in term.GetSuccessors()) {
                     CheckUnreachableOpAndGenericTyInBlock(successor, topLevelFunc, reachableValues,
@@ -1648,6 +1930,46 @@ public class CHIRChecker {
                         "${expr.ToString(0)}.")
                 }
             }
+        }
+        if (let Some(allocateExpr) <- (expr as Allocate)) {
+            CheckReachableGenericType(allocateExpr.GetType(), "allocated type", expr, topLevelFunc,
+                reachableGenericTypes, result)
+        } else if (let Some(funcCallExpr) <- (expr as FuncCall)) {
+            var instIdx: Int64 = 0
+            let instantiatedTypeArgs = funcCallExpr.GetInstantiatedTypeArgs()
+            while (instIdx < instantiatedTypeArgs.size) {
+                CheckReachableGenericType(instantiatedTypeArgs[instIdx],
+                    "${instIdx}-th instantiated type args", expr, topLevelFunc, reachableGenericTypes, result)
+                instIdx++
+            }
+            if (let Some(thisTy) <- funcCallExpr.GetThisType()) {
+                CheckReachableGenericType(thisTy, "ThisType", expr, topLevelFunc, reachableGenericTypes, result)
+            }
+        } else if (let Some(rttiStaticExpr) <- (expr as GetRTTIStatic)) {
+            CheckReachableGenericType(rttiStaticExpr.GetRTTIType(), "rtti type", expr, topLevelFunc,
+                reachableGenericTypes, result)
+        } else if (let Some(instanceOfExpr) <- (expr as InstanceOf)) {
+            CheckReachableGenericType(instanceOfExpr.GetType(), "instanceOf type", expr, topLevelFunc,
+                reachableGenericTypes, result)
+        } else if (let Some(rawArrayExpr) <- (expr as RawArrayAllocate)) {
+            CheckReachableGenericType(rawArrayExpr.GetElementType(), "element type", expr, topLevelFunc,
+                reachableGenericTypes, result)
+        } else if (let Some(intrinsicExpr) <- (expr as Intrinsic)) {
+            var intrinsicIdx: Int64 = 0
+            let intrinsicTypeArgs = intrinsicExpr.GetInstantiatedTypeArgs()
+            while (intrinsicIdx < intrinsicTypeArgs.size) {
+                CheckReachableGenericType(intrinsicTypeArgs[intrinsicIdx],
+                    "${intrinsicIdx}-th instantiated type args", expr, topLevelFunc, reachableGenericTypes, result)
+                intrinsicIdx++
+            }
+        }
+    }
+
+    private func CheckReachableGenericType(ty: Type, label: String, expr: Expression, topLevelFunc: Function,
+        reachableGenericTypes: ArrayList<GenericType>, result: CHIRCheckResult): Unit {
+        if (!CHIRCheckerGenericTypeIsInContainer(ty, reachableGenericTypes)) {
+            result.AddError("in function ${topLevelFunc.GetIdentifier()}, generic type ${ty.ToString()} is " +
+                "unreachable, the type is ${label} in expression ${expr.ToString(0)}.")
         }
     }
 }
@@ -1907,6 +2229,13 @@ private func CHIRCheckerIsOptionalCType(ty: Type, includeNormalStruct: Bool): Bo
         return includeNormalStruct || structTy.GetCustomTypeDef().TestAttr(Attribute.C)
     }
     return false
+}
+
+private func CHIRCheckerIsCTypeInInout(ty: Type): Bool {
+    if (ty.IsCString()) {
+        return false
+    }
+    return CHIRCheckerIsOptionalCType(ty, true)
 }
 
 private func CHIRCheckerGenericTypeIsInContainer(ty: Type, container: ArrayList<GenericType>): Bool {

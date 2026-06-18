@@ -46,6 +46,14 @@ Deepening pass on 2026-06-18:
 - `AnnotationChecker.cj` now registers annotation targets by source-code identifier, checks custom type annotations from real `CustomTypeDef.GetAnnoInfo()`, preserves the metadata fallback, and checks direct member variable `AnnoInfo` against the member-variable target.
 - `VarInitCheck.cj` now builds constructor member context like C++: all instance members in order, direct instance var count as local count, and inherited count as the difference. This fixes class constructor member-index drift caused by duplicating inherited members.
 
+Continuation deepening pass on 2026-06-18:
+
+- Fixed `Store` checking to follow the real CHIR `Store(value, location)` operand order, so the destination ref type and stored value type are validated against the same operands as the C++ checker.
+- Split call validation into `Apply`, `Invoke`, and `InvokeStatic` paths. The checker now validates Apply callees, abstract callees, represented lambda instantiated type-argument counts, Apply `thisType` legality, Invoke/InvokeStatic generic argument counts, required Invoke `thisType`, generic upper-bound presence for Invoke `thisType`, InvokeStatic RTTI source shape, method argument arity/types, and call result types.
+- Added intrinsic validation for invalid intrinsic kinds and ported the core C++ `INOUT_PARAM` checks expressible in the current IR: no type arguments, exactly one ref operand, no `&&` operand, C-type excluding `CString`, CPointer result, and invalid source value categories.
+- Extended the unreachable generic-type walk to track lambda generic parameters in the same places as C++ and to check expression-owned type fields for `Allocate`, `FuncCall` instantiated type args/`ThisType`, `GetRTTIStatic`, `InstanceOf`, `RawArrayAllocate`, and `Intrinsic`.
+- Kept the Apply generic-argument check conservative for global functions because the current self-host `Function` model still does not expose the C++ `Function::GetGenericTypeParams()` surface; lambda call metadata is checked where represented.
+
 De-isolation:
 
 - No module-local compatibility copies of Basic/Lex/AST/Parse/Option/diagnostic types were present in the checker files. The implementation continues to use real CHIR package types from the existing package.
@@ -55,11 +63,12 @@ De-isolation:
 
 Remaining gaps:
 
-- The C++ checker has many checks on specialized CHIR expression classes (`Apply`, `Invoke`, `Tuple`, `Field`, `RawArrayAllocate`, RTTI, intrinsic, exception, virtual dispatch, vtables, generic instantiation maps, and more). The self-hosted IR currently represents most of these as generic `Expression` values, so this pass ports only the invariants expressible without inventing fake local fields.
+- The C++ checker still has deeper checks for field/path expressions, raw-array initialization, RTTI result types, exception-call variants, virtual method/vtable resolution, generic instantiation maps, generic constraint satisfaction, and builder-backed type substitution. This pass ports only the parts expressible through the current self-host CHIR APIs without inventing checker-local compatibility state.
 - Tuple checks use the current self-host `StructDef`/`EnumDef` member payload types directly. They do not yet reproduce the C++ builder-backed generic substitution used by `GetInstantiatedMemberTys` and `EnumType::GetConstructorInfos`.
+- Apply calls to generic global functions cannot yet validate instantiated type-argument count faithfully because `Function::GetGenericTypeParams()` is not represented in `packages/chir/src/Value.cj`; the checker avoids false positives until that shared CHIR model surface exists.
 - C++ diagnostics use `DiagnosticEngine` and source ranges; the self-hosted checker still reports through `CHIRCheckResult` strings.
 - `VarInitCheck.cj` is limited by the current generic `Expression` representation: C++ `Load`, `StoreElementRef`, `ApplyWithException`, path vectors, `SkipCheck`, and precise diagnostics are approximated through the existing operand conventions and `CHIRCheckResult` strings.
 - `AnnotationChecker.cj` is still limited by the current self-hosted annotation metadata. C++ `ClassDef::GetAnnotationTargets`, `EnumCtorInfo::annoInfo`, and `AnnoInfo::GetCustomAnnoInstances` with debug locations are not yet represented directly, so enum-constructor diagnostics and source-range diagnostics remain incomplete.
 - `ComputeAnnotations` is still not ported. It depends on AST declaration and const-eval plumbing not yet represented in this CHIR package.
 
-Estimated checker behavior coverage vs C++ in this scope: 51%.
+Estimated checker behavior coverage vs C++ in this scope: 56%.
