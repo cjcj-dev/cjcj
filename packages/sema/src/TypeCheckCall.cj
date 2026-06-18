@@ -155,11 +155,35 @@ private func AddUniqueFunc(out: ArrayList<FuncDecl>, candidate: FuncDecl): Unit 
     }
 }
 
+private func GetSpecificOrRealTarget(target: Option<Decl>): Option<Decl> {
+    if (let Some(realTarget) <- GetRealTarget(target)) {
+        if (realTarget.TestAttr(Attribute.COMMON)) {
+            if (let Some(specific) <- realTarget.specificImplementation) {
+                return Some(specific)
+            }
+        }
+        return Some(realTarget)
+    }
+    return None
+}
+
+private func AddSpecificOrOriginalFunc(out: ArrayList<FuncDecl>, candidate: FuncDecl): Unit {
+    if (candidate.TestAttr(Attribute.COMMON)) {
+        if (let Some(specific) <- candidate.specificImplementation) {
+            if (let Some(specificFunc) <- (specific as FuncDecl)) {
+                AddUniqueFunc(out, specificFunc)
+                return
+            }
+        }
+    }
+    AddUniqueFunc(out, candidate)
+}
+
 private func CollectMemberConstructors(decl: Decl): ArrayList<FuncDecl> {
     let out = ArrayList<FuncDecl>()
     for (member in decl.GetMemberDeclPtrs()) {
         if (let Some(funcDecl) <- (member as FuncDecl)) {
-            if (funcDecl.TestAttr(Attribute.CONSTRUCTOR) && funcDecl.identifier.Val() == "init") {
+            if (IsInstanceConstructor(funcDecl) && funcDecl.identifier.Val() == "init") {
                 AddUniqueFunc(out, funcDecl)
             }
         }
@@ -173,9 +197,9 @@ private func CollectCallBaseFuncCandidates(ce: CallExpr): ArrayList<FuncDecl> {
         return out
     }
     let base = ce.baseFunc.getOrThrow()
-    if (let Some(target) <- GetRealTarget(base.GetTarget())) {
+    if (let Some(target) <- GetSpecificOrRealTarget(base.GetTarget())) {
         if (let Some(funcDecl) <- (target as FuncDecl)) {
-            AddUniqueFunc(out, funcDecl)
+            AddSpecificOrOriginalFunc(out, funcDecl)
         } else if (target.IsStructOrClassDecl()) {
             for (ctor in CollectMemberConstructors(target)) {
                 AddUniqueFunc(out, ctor)
@@ -187,15 +211,15 @@ private func CollectCallBaseFuncCandidates(ce: CallExpr): ArrayList<FuncDecl> {
         }
     }
     for (candidate in GetFuncTargets(base)) {
-        AddUniqueFunc(out, candidate)
+        AddSpecificOrOriginalFunc(out, candidate)
     }
     if (let Some(member) <- (base as MemberAccess)) {
         for (target in member.targets) {
             if (let Some(funcDecl) <- (target as FuncDecl)) {
-                AddUniqueFunc(out, funcDecl)
+                AddSpecificOrOriginalFunc(out, funcDecl)
             } else if (let Some(propDecl) <- (target as PropDecl)) {
                 if (let Some(getter) <- GetUsableGetterForProperty(propDecl)) {
-                    AddUniqueFunc(out, getter)
+                    AddSpecificOrOriginalFunc(out, getter)
                 }
             }
         }
@@ -547,7 +571,113 @@ private func FilterShadowedFunc(candidates: ArrayList<FuncDecl>): ArrayList<Func
     return out
 }
 
-private func FilterCandidates(diag: Option<BasicDiagnosticEngine>, ce: CallExpr,
+private func CheckAndObtainTypeMappingBetweenInterfaceAndExtend(typeManager: TypeManager,
+    extendDecl: ExtendDecl, interfaceDecl: InterfaceDecl): Option<TypeSubst> {
+    for (inheritedType in extendDecl.inheritedTypes) {
+        if (let Some(inheritedTy) <- inheritedType.GetTy()) {
+            if (let Some(interfaceTy) <- (inheritedTy as InterfaceTy)) {
+                if (let Some(declPtr) <- interfaceTy.declPtr) {
+                    if (DeclIdentity(declPtr) != DeclIdentity(interfaceDecl)) {
+                        continue
+                    }
+                    let maps = SubstPack()
+                    GenerateTypeMapping(typeManager, maps, interfaceDecl, interfaceTy.typeArgs)
+                    if (!maps.u2i.IsEmpty()) {
+                        return Some(maps.u2i)
+                    }
+                }
+            }
+        }
+    }
+    return None
+}
+
+private func ContainsDeclIdentity(values: ArrayList<FuncDecl>, candidate: FuncDecl): Bool {
+    let candidateKey = DeclIdentity(candidate)
+    for (value in values) {
+        if (DeclIdentity(value) == candidateKey) {
+            return true
+        }
+    }
+    return false
+}
+
+private func IsInterfaceAbstractImplementedByExtend(typeManager: TypeManager,
+    interfaceFunc: FuncDecl, extendFunc: FuncDecl): Bool {
+    if (!interfaceFunc.TestAttr(Attribute.ABSTRACT) || !Ty.IsTyCorrect(interfaceFunc.GetTy())) {
+        return false
+    }
+    if (!Ty.IsTyCorrect(extendFunc.GetTy())) {
+        return false
+    }
+    if (let None <- interfaceFunc.outerDecl) {
+        return false
+    }
+    if (let None <- extendFunc.outerDecl) {
+        return false
+    }
+    if (let None <- (interfaceFunc.outerDecl.getOrThrow() as InterfaceDecl)) {
+        return false
+    }
+    if (let None <- (extendFunc.outerDecl.getOrThrow() as ExtendDecl)) {
+        return false
+    }
+    let interfaceDecl = (interfaceFunc.outerDecl.getOrThrow() as InterfaceDecl).getOrThrow()
+    let extendDecl = (extendFunc.outerDecl.getOrThrow() as ExtendDecl).getOrThrow()
+    let mappingOpt = CheckAndObtainTypeMappingBetweenInterfaceAndExtend(typeManager, extendDecl, interfaceDecl)
+    if (let None <- mappingOpt) {
+        return false
+    }
+    let typeMapping = mappingOpt.getOrThrow()
+    let instantiatedInterfaceTy = typeManager.GetInstantiatedTy(interfaceFunc.GetTy().getOrThrow(), typeMapping)
+    if (let None <- (instantiatedInterfaceTy as FuncTy)) {
+        return false
+    }
+    if (let None <- (extendFunc.GetTy().getOrThrow() as FuncTy)) {
+        return false
+    }
+    let interfaceTy = (instantiatedInterfaceTy as FuncTy).getOrThrow()
+    let extendTy = (extendFunc.GetTy().getOrThrow() as FuncTy).getOrThrow()
+    return typeManager.IsFuncParameterTypesIdentical(interfaceTy.paramTys, extendTy.paramTys) &&
+        typeManager.IsSubtype(extendTy.retTy, interfaceTy.retTy)
+}
+
+private func FilterExtendImplAbstractFunc(typeManager: TypeManager, candidates: ArrayList<FuncDecl>):
+    ArrayList<FuncDecl> {
+    let implemented = ArrayList<FuncDecl>()
+    for (fd1 in candidates) {
+        if (let None <- fd1.outerDecl) {
+            continue
+        }
+        if (fd1.outerDecl.getOrThrow().astKind != ASTKind.INTERFACE_DECL) {
+            continue
+        }
+        for (fd2 in candidates) {
+            if (let None <- fd2.outerDecl) {
+                continue
+            }
+            if (fd2.outerDecl.getOrThrow().astKind != ASTKind.EXTEND_DECL) {
+                continue
+            }
+            if (IsInterfaceAbstractImplementedByExtend(typeManager, fd1, fd2) &&
+                !ContainsDeclIdentity(implemented, fd1)) {
+                implemented.add(fd1)
+            }
+        }
+    }
+    if (implemented.isEmpty()) {
+        return candidates
+    }
+    let out = ArrayList<FuncDecl>()
+    for (fd in candidates) {
+        if (!ContainsDeclIdentity(implemented, fd)) {
+            out.add(fd)
+        }
+    }
+    return out
+}
+
+private func FilterCandidates(typeManager: TypeManager, diag: Option<BasicDiagnosticEngine>, ce: CallExpr,
     inCandidates: ArrayList<FuncDecl>): ArrayList<FuncDecl> {
     let validShape = ArrayList<FuncDecl>()
     for (fd in inCandidates) {
@@ -564,7 +694,7 @@ private func FilterCandidates(diag: Option<BasicDiagnosticEngine>, ce: CallExpr,
             typeFiltered.add(fd)
         }
     }
-    return FilterShadowedFunc(typeFiltered)
+    return FilterExtendImplAbstractFunc(typeManager, FilterShadowedFunc(typeFiltered))
 }
 
 private func CompareNumericTys(left: Ty, right: Ty): Int64 {
@@ -654,11 +784,121 @@ private func CompareFuncCandidates(typeManager: TypeManager, left: FunctionMatch
     return CompareParamTys(typeManager, left.tysInArgOrder, right.tysInArgOrder)
 }
 
+private func AppliedDeclTy(typeManager: TypeManager, decl: Decl, typeMapping: SubstPack): Option<Ty> {
+    if (let Some(ty) <- decl.GetTy()) {
+        return Some(typeManager.ApplySubstPack(ty, typeMapping))
+    }
+    return None
+}
+
+private func FuncGenericParamSize(fd: FuncDecl): Int64 {
+    if (let Some(body) <- fd.funcBody) {
+        if (let Some(generic) <- body.generic) {
+            return generic.typeParameters.size
+        }
+    }
+    return 0
+}
+
+private func HasFuncGeneric(fd: FuncDecl): Bool {
+    if (let Some(body) <- fd.funcBody) {
+        if (let Some(_) <- body.generic) {
+            return true
+        }
+    }
+    return false
+}
+
+private func SameGenericShape(left: FuncDecl, right: FuncDecl): Bool {
+    if (HasFuncGeneric(left) != HasFuncGeneric(right)) {
+        return false
+    }
+    return FuncGenericParamSize(left) == FuncGenericParamSize(right)
+}
+
+private func GenerateTypeMappingBetweenFuncs(typeManager: TypeManager, src: FuncDecl, target: FuncDecl):
+    MultiTypeSubst {
+    let out = MultiTypeSubst()
+    if (let Some(outer) <- src.outerDecl) {
+        if (Ty.IsTyCorrect(outer.GetTy())) {
+            MergeMultiTypeSubsts(out, typeManager.GenerateStructDeclTypeMapping(outer))
+        }
+    }
+    if (target.TestAttr(Attribute.GENERIC) && src.TestAttr(Attribute.GENERIC)) {
+        MergeTypeSubstToMultiTypeSubst(out, typeManager.GenerateGenericMappingFromGeneric(target, src))
+    }
+    return out
+}
+
+private func SameInstantiatedOverrideSignature(typeManager: TypeManager, left: FunctionMatchingUnit,
+    right: FunctionMatchingUnit): Bool {
+    if (!SameGenericShape(left.fd, right.fd)) {
+        return false
+    }
+    if (let Some(leftTy) <- left.fd.GetTy()) {
+        if (let Some(rightTy) <- right.fd.GetTy()) {
+            let instLeftTy = typeManager.ApplySubstPack(leftTy, left.typeMapping)
+            let instRightTy = typeManager.ApplySubstPack(rightTy, right.typeMapping)
+            if (SameTy(instLeftTy, instRightTy)) {
+                return true
+            }
+            if (FuncGenericParamSize(left.fd) > 0) {
+                let mapping = GenerateTypeMappingBetweenFuncs(typeManager, left.fd, right.fd)
+                for (subFunc in typeManager.GetInstantiatedTys(leftTy, mapping).values) {
+                    if (SameTy(rightTy, subFunc) || SameTy(instRightTy, subFunc)) {
+                        return true
+                    }
+                }
+            }
+        }
+    }
+    return false
+}
+
+private func FilterOverriden(typeManager: TypeManager, candidates: ArrayList<FunctionMatchingUnit>,
+    targetMark: ArrayList<Bool>): Unit {
+    var idx: Int64 = 0
+    while (idx < candidates.size) {
+        if (let None <- candidates[idx].fd.outerDecl) {
+            return
+        }
+        let outerDecl = candidates[idx].fd.outerDecl.getOrThrow()
+        let instOuterOpt = AppliedDeclTy(typeManager, outerDecl, candidates[idx].typeMapping)
+        if (let None <- instOuterOpt) {
+            return
+        }
+        let instOuter = instOuterOpt.getOrThrow()
+        if (!Ty.IsTyCorrect(instOuter)) {
+            return
+        }
+        var otherIdx: Int64 = 0
+        while (otherIdx < candidates.size) {
+            if (idx == otherIdx || (let None <- candidates[otherIdx].fd.outerDecl)) {
+                otherIdx++
+                continue
+            }
+            let otherOuterDecl = candidates[otherIdx].fd.outerDecl.getOrThrow()
+            let otherOuterOpt = AppliedDeclTy(typeManager, otherOuterDecl, candidates[otherIdx].typeMapping)
+            if (let Some(otherOuter) <- otherOuterOpt) {
+                if (Ty.IsTyCorrect(otherOuter) && !SameTy(instOuter, otherOuter) &&
+                    typeManager.IsSubtype(instOuter, otherOuter) &&
+                    SameInstantiatedOverrideSignature(typeManager, candidates[idx], candidates[otherIdx])) {
+                    targetMark[otherIdx] = false
+                    break
+                }
+            }
+            otherIdx++
+        }
+        idx++
+    }
+}
+
 private func ResolveOverload(typeManager: TypeManager, candidates: ArrayList<FunctionMatchingUnit>): ArrayList<Int64> {
     let targetMark = ArrayList<Bool>()
     for (_ in candidates) {
         targetMark.add(true)
     }
+    FilterOverriden(typeManager, candidates, targetMark)
     var idx: Int64 = 0
     while (idx < candidates.size) {
         if (!targetMark[idx]) {
@@ -737,6 +977,64 @@ private func SortCallArgumentByParamOrder(fd: FuncDecl, ce: CallExpr): ArrayList
         }
     }
     return out
+}
+
+private func IsEmptyFuncArg(arg: FuncArg): Bool {
+    if (!arg.name.Empty() || arg.withInout) {
+        return false
+    }
+    if (let Some(_) <- arg.expr) {
+        return false
+    }
+    return true
+}
+
+private func SpreadInstantiationTy(typeManager: TypeManager, node: Node, typeMapping: SubstPack): Unit {
+    if (typeMapping.u2i.IsEmpty() || !Ty.IsTyCorrect(node.GetTy())) {
+        return
+    }
+    let walker = Walker(node, visitPre: { current: Node =>
+        if (Ty.IsTyCorrect(current.GetTy())) {
+            current.SetTy(typeManager.ApplySubstPack(current.GetTy().getOrThrow(), typeMapping))
+        }
+        VisitAction.WALK_CHILDREN
+    })
+    let _ = walker.Walk()
+}
+
+private func BuildEffectiveCallArgs(typeManager: TypeManager, fd: FuncDecl, ce: CallExpr,
+    typeMapping: SubstPack): ArrayList<FuncArg> {
+    let orderedArgs = SortCallArgumentByParamOrder(fd, ce)
+    ce.defaultArgs.clear()
+    if (let None <- BodyParamList(fd)) {
+        return orderedArgs
+    }
+    let params = BodyParamList(fd).getOrThrow().params
+    let effectiveArgs = ArrayList<FuncArg>()
+    var idx: Int64 = 0
+    while (idx < orderedArgs.size) {
+        let orderedArg = orderedArgs[idx]
+        if (idx < params.size && IsEmptyFuncArg(orderedArg) && params[idx].TestAttr(Attribute.HAS_INITIAL)) {
+            let defaultArg = CreateFuncArgForOptional(params[idx])
+            if (!fd.TestAttr(Attribute.TOOL_ADD)) {
+                defaultArg.EnableAttr(Attribute.HAS_INITIAL)
+            }
+            SpreadInstantiationTy(typeManager, defaultArg, typeMapping)
+            ce.defaultArgs.add(defaultArg)
+            effectiveArgs.add(defaultArg)
+        } else {
+            effectiveArgs.add(orderedArg)
+        }
+        idx++
+    }
+    return effectiveArgs
+}
+
+private func ReplaceCallArgsWith(ce: CallExpr, args: ArrayList<FuncArg>): Unit {
+    ce.args.clear()
+    for (arg in args) {
+        ce.args.add(arg)
+    }
 }
 
 private func CheckCallCompatible(typeManager: TypeManager, diag: Option<BasicDiagnosticEngine>, ce: CallExpr, fd: FuncDecl,
@@ -1043,11 +1341,8 @@ private func MatchFunctionForCall(typeManager: TypeManager, diag: Option<BasicDi
         }
     }
     if (let Some(unit) <- selected) {
-        let orderedArgs = SortCallArgumentByParamOrder(unit.fd, ce)
-        ce.defaultArgs.clear()
-        if (!orderedArgs.isEmpty()) {
-            ce.defaultArgs.clear()
-        }
+        let effectiveArgs = BuildEffectiveCallArgs(typeManager, unit.fd, ce, unit.typeMapping)
+        ReplaceCallArgsWith(ce, effectiveArgs)
         if (let Some(fdTy) <- unit.fd.GetTy()) {
             ce.baseFunc.getOrThrow().SetTy(typeManager.ApplySubstPack(fdTy, unit.typeMapping))
         }
@@ -1225,7 +1520,7 @@ private func DiagnoseForCall(diag: Option<BasicDiagnosticEngine>, candidatesBefo
 
 private func ResolveDeclForCallBase(ce: CallExpr, candidates: ArrayList<FuncDecl>): Option<Decl> {
     if (let Some(base) <- ce.baseFunc) {
-        if (let Some(target) <- GetRealTarget(base.GetTarget())) {
+        if (let Some(target) <- GetSpecificOrRealTarget(base.GetTarget())) {
             if (let Some(funcDecl) <- (target as FuncDecl)) {
                 if (let Some(outer) <- funcDecl.outerDecl) {
                     if (funcDecl.TestAttr(Attribute.CONSTRUCTOR)) {
@@ -1280,7 +1575,7 @@ public func ChkCallExpr(typeManager: TypeManager, diag: Option<BasicDiagnosticEn
         }
     }
     let candidatesBefore = CollectCallBaseFuncCandidates(ce)
-    let candidates = FilterCandidates(diag, ce, candidatesBefore)
+    let candidates = FilterCandidates(typeManager, diag, ce, candidatesBefore)
     if (let None <- ResolveDeclForCallBase(ce, candidatesBefore)) {
         return CheckNonNormalCall(typeManager, diag, target, ce)
     }

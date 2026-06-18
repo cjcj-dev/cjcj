@@ -25,6 +25,14 @@ Continuation updates:
 - `TypeCheckCall.cj`: mirrored the C++ `IsInterfaceFuncWithSameSignature` overload tie-breaker so duplicate abstract interface functions with the same instantiated signature are suppressed instead of producing a false ambiguity after normal candidate comparison.
 - `TypeCheckCall.cj` / `TypeCheckBuiltinExpr.cj`: reused the real AST `IsValidCFuncConstructorCall` helper so function-pointer calls skip rechecking already validated `CFunc<...>(CPointer(...))` constructors like C++, and threaded CFunc constructor diagnostics for wrong arity, named arguments, and non-pointer operands through the existing basic diagnostic engine.
 - `TypeCheckBuiltinExpr.cj`: threaded the basic diagnostic engine through pointer expression/call checking, including C++-shaped reports for too many `CPointer` arguments, unknown pointer generic inference, named pointer constructor arguments, non-pointer/non-CFunc operands, and target-type mismatches.
+- `TypeCheckCall.cj`: replaced the discarded post-selection ordered-argument computation with effective argument construction that mirrors C++ `ReorderCallArgument` as closely as the current self-host AST allows: selected calls are put in parameter order, missing default parameters synthesize real `FuncArg`s via `CreateFuncArgForOptional`, inserted defaults are retained on `CallExpr.defaultArgs`, and default expression types are instantiated through the selected substitution pack.
+- `PatternUsefulness.cj`: matched the C++ deterministic witness ordering for sealed class-like wildcard splitting by sorting direct subtypes by stable type name/hash before recursive constructor expansion.
+- `TypeCheckCall.cj`: aligned call-base target normalization with the C++ `COMMON`/`specificImplementation` path so common declarations are replaced by their specific implementations before candidate collection and call-kind classification, and constructor collection now excludes static initializers by using the real `IsInstanceConstructor` helper.
+- `TypeCheckCall.cj`: ported the C++ `FilterExtendImplAbstractFunc` behavior for overload candidate filtering, removing abstract interface methods when an extension candidate implements the same instantiated parameter signature with a subtype-compatible return type.
+- `PatternUsefulness.cj`: aligned selector-match unreachable-case diagnostics with the C++ pattern span, reporting the range from the first pattern to the last pattern in the unreachable case instead of the whole match-case node.
+- `PatternUsefulness.cj`: aligned selector-match non-exhaustive diagnostics with the C++ builder flow by diagnosing the selector range, applying the selector type through main-hint arguments, and using the same file-boundary range clamp as `MakeRange`.
+- `TypeCheckCall.cj`: ported the C++ `FilterOverriden` overload-resolution pre-pass for already-instantiated candidates, pruning overridden parent candidates when the selected candidate outer type is a subtype, function signatures match after substitution, and generic function parameter shapes agree.
+- `TypeCheckBuiltinExpr.cj`: aligned single-argument `Array` constructor checking with the C++ `Collection<T>` path, inferring omitted element types from a real `Collection` supertype, rejecting non-collection operands, reporting `sema_array_single_element_type_error`, and updating the desugared array type after successful inference.
 
 Build status:
 
@@ -39,4 +47,4 @@ Known fidelity gaps:
 - Pattern usefulness/checking is functional but still conservative around complete sealed hierarchy discovery, full intersection/union/Option refinements, and diagnostics that depend on richer C++ Sema context.
 - Builtin and match checking use real AST and type data but still lack the full TypeCheckerImpl cache/synthesis integration present in C++.
 
-Honest coverage estimate for this scoped pass: about 69% of C++ behavior, materially higher than the prior compiling stubs but not module-complete.
+Honest coverage estimate for this scoped pass: about 75% of C++ behavior, materially higher than the prior compiling stubs but not module-complete.

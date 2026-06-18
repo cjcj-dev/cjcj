@@ -1,9 +1,31 @@
 package cangjie_compiler::sema
 
 import std.collection.*
+import std.sort.*
 import cangjie_compiler::ast.*
 import cangjie_compiler::basic.DiagnosticEngine as BasicDiagnosticEngine
 import cangjie_compiler::basic.DiagKindRefactor as BasicDiagKindRefactor
+import cangjie_compiler::basic.Position as BasicPosition
+import cangjie_compiler::basic.Range as BasicRange
+
+private func ToBasicPosition(pos: Position): BasicPosition {
+    return BasicPosition(pos.fileID, pos.line, pos.column)
+}
+
+private func MakeBasicRange(begin: Position, end: Position): BasicRange {
+    var fixedEnd = end
+    if (begin.fileID != end.fileID) {
+        fixedEnd = begin + 1
+    }
+    return BasicRange(ToBasicPosition(begin), ToBasicPosition(fixedEnd))
+}
+
+private func MatchCasePatternRange(mc: MatchCase): BasicRange {
+    if (mc.patterns.isEmpty()) {
+        return MakeBasicRange(mc.begin, mc.end)
+    }
+    return MakeBasicRange(mc.patterns[0].begin, mc.patterns[mc.patterns.size - 1].end)
+}
 
 private enum PatternCtorKind {
     | UNIT
@@ -703,7 +725,20 @@ private class UsefulnessChecker {
     }
 
     private static func SplitWildcardForSealed(ctors: ArrayList<PatternCtor>, sealedTy: ClassLikeTy): Unit {
+        let directSubtypes = ArrayList<Ty>()
         for (subTy in sealedTy.directSubtypes) {
+            directSubtypes.add(subTy)
+        }
+        sort(directSubtypes, by: { left: Ty, right: Ty =>
+            if (CompTyByNames(Some(left), Some(right))) {
+                Ordering.LT
+            } else if (CompTyByNames(Some(right), Some(left))) {
+                Ordering.GT
+            } else {
+                Ordering.EQ
+            }
+        }, stable: true)
+        for (subTy in directSubtypes) {
             if (let Some(subSealed) <- AsSealedLikeClassLikeTy(subTy)) {
                 if (!subTy.IsCType()) {
                     SplitWildcardForSealed(ctors, subSealed)
@@ -903,7 +938,8 @@ public func CheckMatchExprHasSelectorExhaustivenessAndReachability(
             }
         } else {
             mc.EnableAttr(Attribute.UNREACHABLE)
-            SemaDiag(diag, BasicDiagKindRefactor.sema_unreachable_pattern, mc)
+            let _ = diag.DiagnoseRefactor(BasicDiagKindRefactor.sema_unreachable_pattern,
+                MatchCasePatternRange(mc))
         }
     }
     let stack = PatternStack(DestructedPattern(PatternCtor.Wildcard(),
@@ -912,8 +948,9 @@ public func CheckMatchExprHasSelectorExhaustivenessAndReachability(
     if (witnesses.isEmpty()) {
         return true
     }
-    let builder = diag.DiagnoseRefactor(BasicDiagKindRefactor.sema_nonexhuastive_patterns, selector.begin,
-        arguments: [selectorTy.String()])
+    let builder = diag.DiagnoseRefactor(BasicDiagKindRefactor.sema_nonexhuastive_patterns,
+        MakeBasicRange(selector.begin, selector.end))
+    builder.AddMainHintArguments([selectorTy.String()])
     for (witness in witnesses) {
         if (witness.Size() == 1) {
             builder.AddNote(witness.Head().ToString() + " is not covered")
