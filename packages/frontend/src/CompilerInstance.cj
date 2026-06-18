@@ -121,7 +121,7 @@ public class CompilerInstance {
         importManager = ImportManager(diag)
         packageManager = PackageManager(importManager)
         compileStrategy = Some(FullCompileStrategy(this))
-        chirData.InitData(fileNameMap, invocation.globalOptions.GetJobs())
+        chirData.InitData(fileNameMap, Int64(invocation.globalOptions.GetJobs()))
         if (invocation.globalOptions.compilePackage) {
             for (pkgPath in invocation.globalOptions.packagePaths) {
                 srcDirs.add(pkgPath)
@@ -668,8 +668,8 @@ public class CompilerInstance {
     }
 
     private func DetectCangjieHome(): Bool {
-        if (let Some(home) <- invocation.globalOptions.environment.cangjieHome) {
-            cangjieHome = home
+        if (invocation.globalOptions.environment.cangjieHome.hasValue) {
+            cangjieHome = invocation.globalOptions.environment.cangjieHome.value
             return true
         }
         if (!invocation.globalOptions.cangjieHome.isEmpty()) {
@@ -717,7 +717,7 @@ public class CompilerInstance {
     }
 
     private func CacheCompileArgs(): Unit {
-        cachedInfo.compileArgs = invocation.globalOptions.ToSerialized()
+        cachedInfo.compileArgs = JoinSerializedOptionFields(invocation.globalOptions.ToSerialized())
     }
 
     private func UpdateCachedInfo(): Unit {
@@ -1046,6 +1046,19 @@ private func appendStringList(builder: StringBuilder, values: ArrayList<String>)
         builder.append(values[idx])
         idx++
     }
+}
+
+private func JoinSerializedOptionFields(values: Array<String>): String {
+    let builder = StringBuilder()
+    var idx: Int64 = 0
+    while (idx < values.size) {
+        if (idx > 0) {
+            builder.append(",")
+        }
+        builder.append(values[idx])
+        idx++
+    }
+    return builder.toString()
 }
 
 private func IsNeedSaveIncrCompilationLogFile(globalOpts: GlobalOptions, frontOpts: FrontendOptions): Bool {

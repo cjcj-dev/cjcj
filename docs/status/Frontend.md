@@ -1,6 +1,6 @@
 # Frontend Port Status
 
-Date: 2026-06-17
+Date: 2026-06-18
 
 Build: `cjpm build` passes.
 
@@ -83,6 +83,20 @@ loading to `option.SetupConditionalCompilationCfgFromFile`, validates inline
 object names with the same algorithm shape as the C++ `Option::GlobalOptions`
 implementation.
 
+This deepening pass removed the remaining Frontend-local compatibility copies of
+`OptionID`, `OptionKind`, `OptionInfo`, `OptionArgInstance`, `ArgList`,
+`OptionTable`, `MaybeString`, `EnvironmentOptions`, and the hand-written
+`GlobalOptions` implementation. `FrontendOptions` now subclasses the real
+`option.GlobalOptions` through a thin Frontend wrapper that only keeps
+Frontend-owned behavior (`DumpAction` and the default-package helper), and
+`CompilerInvocation` now uses the real `CreateOptionTable(frontendMode: true)`
+and real `GlobalOptions.ParseFromArgs` path. The Frontend tool bridge was
+adjusted to the real option environment model (`MaybeString`) and object-only
+input ordering now uses the real option `inputLibraryOrder` data instead of a
+local object list approximation. Codegen now receives the real option object
+directly instead of a partial field-copy shim, reducing drift from the C++
+`globalOptions = frontendOptions` behavior.
+
 ## Important Blocker
 
 `packages/frontend/cjpm.toml` now imports the real `basic`, `lex`, `option`, and
@@ -97,9 +111,8 @@ Remaining Frontend self-host markers: 0.
 
 ## Remaining Work
 
-- Replace local compatibility AST/option/front-pipeline models with the real
-  sibling package APIs and remove the remaining adapters once downstream APIs
-  are wired.
+- Replace local compatibility AST/front-pipeline models with the real sibling
+  package APIs and remove the remaining adapters once downstream APIs are wired.
 - Wire the local conditional compilation, macro expansion, Sema desugar/typecheck,
   incremental AST cache/diff, generic instantiation, CHIR lowering, plugin FFI,
   and result serialization compatibility paths to the real implementations.

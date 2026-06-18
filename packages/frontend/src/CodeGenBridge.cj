@@ -23,9 +23,6 @@ import cangjie_compiler::codegen.ClearPackageModules
 import cangjie_compiler::codegen.GenPackageModules
 import cangjie_compiler::codegen.LLVMModuleHandle as LLVMModuleHandle
 import cangjie_compiler::codegen.SavePackageModule
-import cangjie_compiler::option.GlobalOptions as OptionGlobalOptions
-import cangjie_compiler::option.MaybeString as OptionMaybeString
-import cangjie_compiler::option.MaybeUInt64 as OptionMaybeUInt64
 
 public func BuildRealCHIRForFrontendPackage(instance: CompilerInstance, pkg: Package): Option<RealCHIRPackage> {
     let builder = ChirBuilder(instance.chirData.GetRealCHIRContext())
@@ -61,59 +58,8 @@ public func EmitRealCodeGenForCompilerInstance(instance: CompilerInstance): Bool
     return emittedAll
 }
 
-public func ConvertFrontendOptionsToCodegenOptions(options: GlobalOptions): OptionGlobalOptions {
-    let converted = OptionGlobalOptions()
-    converted.frontendMode = options.frontendMode
-    converted.cangjieHome = options.cangjieHome
-    converted.output = options.output
-    if (let Some(outDir) <- options.outputDir.value) {
-        converted.outputDir = OptionMaybeString(outDir)
-    }
-    converted.executablePath = options.executablePath
-    converted.moduleSrcPath = options.moduleSrcPath
-    converted.inputCjoFile = options.inputCjoFile
-    converted.compilePackage = options.compilePackage
-    converted.parseTest = options.parseTest
-    converted.compileTestsOnly = options.compileTestsOnly
-    converted.enableAddCommentToAst = options.enableAddCommentToAst
-    converted.compileCjd = options.compileCjd
-    converted.noSubPkg = options.noSubPkg
-    converted.scanDepPkg = options.scanDepPkg
-    converted.enableInteropCJMapping = options.enableInteropCJMapping
-    converted.interopCJPackageConfigPath = options.interopCJPackageConfigPath
-    converted.chirDeserialize = options.chirDeserialize
-    converted.chirDeserializePath = options.chirDeserializePath
-    converted.dumpCHIR = options.dumpCHIR
-    converted.dumpAST = options.dumpAST
-    converted.dumpToScreen = options.dumpToScreen
-    converted.dumpAll = options.dumpAll
-    converted.enableVerbose = options.enableVerbose
-    converted.enableMacroInLSP = options.enableMacroInLSP
-    converted.enIncrementalCompilation = options.enIncrementalCompilation
-    converted.cjdbMode = options.cjdbMode
-    converted.printVersionOnly = options.printVersionOnly
-    converted.showUsage = options.showUsage
-    converted.enableCompileDebug = options.enableCompileDebug
-    converted.displayLineInfo = options.displayLineInfo
-    converted.interpreter = options.interpreter
-    converted.overflowStrategy = options.overflowStrategy
-    converted.compilationCachedPath = options.compilationCachedPath
-    converted.compilationCachedDir = options.compilationCachedDir
-    converted.compilationCachedFileName = options.compilationCachedFileName
-    converted.jobs = OptionMaybeUInt64(UInt64(options.GetJobs()))
-    copyStrings(options.packagePaths, converted.packagePaths)
-    copyStrings(options.srcFiles, converted.srcFiles)
-    copyStrings(options.inputObjs, converted.inputObjs)
-    copyStrings(options.importPaths, converted.importPaths)
-    copyStrings(options.pluginPaths, converted.pluginPaths)
-    copyStrings(options.commonPartCjos, converted.commonPartCjos)
-    copyStrings(options.commonPartChirs, converted.commonPartChirs)
-    copyStrings(options.bcPackageNames, converted.bcPackageNames)
-    copyStringSet(options.directBuiltinDependencies, converted.directBuiltinDependencies)
-    copyStringSet(options.indirectBuiltinDependencies, converted.indirectBuiltinDependencies)
-    copyStringMap(options.passedWhenKeyValue, converted.passedWhenKeyValue)
-    copyStrings(options.passedWhenCfgPaths, converted.passedWhenCfgPaths)
-    return converted
+public func ConvertFrontendOptionsToCodegenOptions(options: GlobalOptions): GlobalOptions {
+    return options
 }
 
 private func buildRealPackageSpec(pkg: Package, context: ChirContext): ChirPackageSpec {
@@ -637,22 +583,4 @@ private func addCommonAttributes(decl: Decl, spec: ChirNominalSpec): Unit {
 private func addCommonAttributes(decl: Decl, spec: ChirMemberVarSpec): Unit {
     if (decl.TestAttr("STATIC")) { spec.AddAttribute(ChirAttribute.STATIC) }
     if (decl.TestAttr("CONST")) { spec.AddAttribute(ChirAttribute.CONST) }
-}
-
-private func copyStrings(source: ArrayList<String>, target: ArrayList<String>): Unit {
-    for (value in source) {
-        target.add(value)
-    }
-}
-
-private func copyStringSet(source: HashSet<String>, target: HashSet<String>): Unit {
-    for (value in source) {
-        target.add(value)
-    }
-}
-
-private func copyStringMap(source: HashMap<String, String>, target: HashMap<String, String>): Unit {
-    for ((key, value) in source) {
-        target.add(key, value)
-    }
 }
