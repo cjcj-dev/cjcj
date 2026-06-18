@@ -66,10 +66,25 @@ public class AST2CHIRDeclTranslator {
         RegisterTypeDef(spec.name, def)
         RegisterTypeDefAlias(spec.rawMangledName, def)
         RegisterTypeDefAlias(ScopedDeclName(ResolvePackageName(defaultPackage, spec.packageName), spec.name), def)
+        if (!spec.srcCodeIdentifier.isEmpty()) {
+            RegisterTypeDefAlias(spec.srcCodeIdentifier, def)
+        }
     }
 
     public func TryGetTypeDef(name: String): Option<CustomTypeDef> {
         return typeDefs.get(name)
+    }
+
+    public func TryGetTypeDef(defaultPackage: String, name: String): Option<CustomTypeDef> {
+        if (let Some(foundByExact) <- typeDefs.get(name)) {
+            return foundByExact
+        }
+        if (!defaultPackage.isEmpty()) {
+            if (let Some(foundByScoped) <- typeDefs.get(ScopedDeclName(defaultPackage, name))) {
+                return foundByScoped
+            }
+        }
+        return None
     }
 
     public func TryGetFunction(name: String): Option<Function> {
@@ -244,6 +259,24 @@ public class AST2CHIRDeclTranslator {
             }
         }
         return builder.context.GetInvalidTy()
+    }
+
+    public func EnsureNominalType(def: CustomTypeDef): Unit {
+        let _ = GetNominalType(def)
+    }
+
+    public func AddImplementedInterfaceByName(defaultPackage: String, ownerDef: CustomTypeDef,
+        interfaceName: String): Unit {
+        if (let Some(interfaceDef) <- TryGetTypeDef(defaultPackage, interfaceName)) {
+            if (let Some(interfaceClass) <- (interfaceDef as ClassDef)) {
+                if (let Some(classDef) <- (ownerDef as ClassDef)) {
+                    classDef.AddImplementedInterfaceDef(interfaceClass)
+                    return
+                }
+                let emptyArgs = ArrayList<Type>()
+                ownerDef.AddImplementedInterfaceTy(builder.context.GetClassTy(interfaceClass, emptyArgs))
+            }
+        }
     }
 
     public func GetInstanceThisType(def: CustomTypeDef, fnSpec: AST2CHIRFunctionSpec): Type {

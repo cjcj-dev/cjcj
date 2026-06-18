@@ -12,6 +12,10 @@ extend AST2CHIRDeclTranslator {
             }
         }
         LowerMemberVarsAndMethods(spec, def)
+        let defaultPackage = ActivePackageName(spec.packageName)
+        for (interfaceName in spec.implementedInterfaces) {
+            AddImplementedInterfaceByName(defaultPackage, def, interfaceName)
+        }
     }
 
     private func HasEnumCtor(enumDef: EnumDef, ctorSpec: AST2CHIREnumCtorSpec): Bool {

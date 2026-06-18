@@ -62,7 +62,9 @@ public class AST2CHIRMemberVarSpec {
     public var isReadOnly: Bool
     public var sourceFileKey: String = ""
     public var initializerFunc: Option<AST2CHIRFunctionSpec> = None
+    public var staticGlobalSpec: Option<AST2CHIRGlobalSpec> = None
     public var isSpecificDecl: Bool = false
+    public var debugLocation: Option<DebugLocation> = None
     public let attributes: ArrayList<Attribute> = ArrayList<Attribute>()
 
     public init(name: String, ty: Type, rawMangledName!: String = "", isStatic!: Bool = false,
@@ -89,8 +91,19 @@ public class AST2CHIRMemberVarSpec {
         return this
     }
 
+    public func SetStaticGlobalSpec(spec: AST2CHIRGlobalSpec): AST2CHIRMemberVarSpec {
+        isStatic = true
+        staticGlobalSpec = Some(spec)
+        return this
+    }
+
     public func SetSpecificDecl(value: Bool): AST2CHIRMemberVarSpec {
         isSpecificDecl = value
+        return this
+    }
+
+    public func SetDebugLocation(loc: DebugLocation): AST2CHIRMemberVarSpec {
+        debugLocation = Some(loc)
         return this
     }
 }
