@@ -188,6 +188,9 @@ public class CHIR2BCHIR {
     }
 
     public func TranslateExpression(context: CHIR2BCHIRContext, expr: Expression): Unit {
+        if (expr.GetExprKind() == ExprKind.INVOKE || expr.GetExprKind() == ExprKind.INVOKE_WITH_EXCEPTION) {
+            context.definition.PushOp(OpCode.NULLPTR)
+        }
         for (operand in expr.GetOperands()) {
             CHIR2BCHIRTranslateValue(this, context, operand)
         }

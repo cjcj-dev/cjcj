@@ -1,8 +1,28 @@
 ## CHIR BCHIR Interpreter Deepening Status
 
-Date: 2026-06-17
+Date: 2026-06-18
 
-Scope: `packages/chir/src` BCHIR bytecode, BCHIR interpreter, interpreter value model, and CHIR-to-BCHIR memory-expression emission.
+Scope: `packages/chir/src` BCHIR bytecode, BCHIR interpreter, interpreter value model, CHIR-to-BCHIR emission, and BCHIR debug printing.
+
+Completed in the 2026-06-18 pass:
+
+- Split the combined Cangjie CHIR-to-BCHIR helpers into C++-mirrored component files:
+  `TranslateUnaryExpression.cj`, `TranslateBinaryExpression.cj`, `TranslateMemoryExpression.cj`,
+  `TranslateOthersExpression.cj`, `TranslateIntrinsic.cj`, and `TranslateTerminatorExpression.cj`.
+- Matched the C++ invoke stack convention by pushing the dummy callee cell before translating
+  `INVOKE`/`INVOKE_WITH_EXCEPTION` operands, so method bodies keep the same prologue shape as ordinary functions.
+- Ported static element-reference emission for `GET_ELEMENT_REF` and `STORE_ELEMENT_REF`, class/struct-aware
+  allocation emission, field/path emission, primitive typecast emission, box/unbox/instanceof emission, raw-array
+  allocation emission, intrinsic/VArray-get emission, and sorted-table `MULTIBRANCH` switch emission.
+- Added bytecode layouts for `APPLY_WITH_EXCEPTION`, `INVOKE_WITH_EXCEPTION`, `INT_OP_WITH_EXCEPTION`,
+  `ALLOCATE_WITH_EXCEPTION`, and `RAW_ARRAY_ALLOCATE_WITH_EXCEPTION`, reusing the linker/interpreter exception-target
+  cell convention already present in this port.
+- Deepened `BCHIRPrinter.cj` to mirror the C++ printer shape: linked-vs-prelink sections, default function slots,
+  class-table details, annotation printing with file names, type/overflow/intrinsic labels, and variable-sized
+  instruction decoding for `SWITCH`, `FIELD_TPL`, `GETREF`, `STOREINREF`, `SYSCALL`, and `CAPPLY`.
+- Added real `IntrinsicKind`-based helpers in `BCHIRIntrinsic.cj` for the interpreter-supported intrinsic subset,
+  replacing call-site hard-coded checks in new translation logic with the real sibling `IntrinsicKind` enum.
+- Kept `cjpm build` green after the translator split and printer expansion.
 
 Completed in this pass:
 
@@ -33,5 +53,13 @@ Remaining C++ fidelity gaps:
 - `VARRAY_GET` now covers ordinary reads, but bad-index exception construction/propagation is still simplified to interpreter trap behavior.
 - Interpreter intrinsics now cover reference equality and unchecked raw-array get, but syscalls, SIMD/platform intrinsics, the broader intrinsic set, and const-eval diagnostics remain incomplete relative to the C++ `BCHIRInterpreter.cpp` and `BCHIRIntrinsic.cpp`.
 - The linker now covers more bytecode layouts, but it still lacks the C++ const-eval-only manual global initializer map and generated calls to const-init functions.
-- The local CHIR IR model in this worktree exposes `GET_ELEMENT_REF` and `STORE_ELEMENT_REF` kinds but not yet the C++ path-carrying expression classes/accessors; translation for those remains blocked on that real IR surface rather than adding a duplicate compatibility type.
+- Dynamic/runtime-index element references are still intentionally not lowered to BCHIR because the C++ BCHIR path
+  opcodes encode static aggregate paths; those runtime-index paths need a separate real lowering strategy rather
+  than a compatibility duplicate.
+- CHIR-to-BCHIR method-name emission for dynamic dispatch still uses the currently exposed source method name, not
+  the full C++ `MangleMethodName` signature key, so overloaded virtual dispatch remains less faithful than C++.
+- Intrinsic bytecode ID conversion is implemented for the interpreter-supported subset; unsupported intrinsics still
+  lower to intrinsic opcodes but do not yet preserve every C++ numeric intrinsic ID.
+- BCHIR debug printing now tracks C++ layout and variable instruction sizes, but float bit patterns are still printed
+  as raw bits rather than fully reinterpreted decimal `float`/`double` values.
 - String runtime representation is still simplified versus the C++ core-compatible tuple/raw-array layout.
