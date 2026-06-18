@@ -49,6 +49,10 @@ public class TypeChecker {
     private var tm: TypeManager = TypeManager()
     private let realPipelineDiagnostics: ArrayList<RealSemaDiagnostic> = ArrayList<RealSemaDiagnostic>()
     private let realPipelineTypedFunctions: ArrayList<String> = ArrayList<String>()
+    private let realPipelineDeclaredFunctions: HashSet<String> = HashSet<String>()
+    private let realPipelineUnsupportedFunctions: HashSet<String> = HashSet<String>()
+    private let realPipelineFunctionDecls: HashMap<String, FuncDecl> = HashMap<String, FuncDecl>()
+    private let realPipelineFunctionTypes: HashMap<String, FuncTy> = HashMap<String, FuncTy>()
     private var realPipelineUnsupported: Bool = false
 
     public init(ci: Option<CompilerInstance>) {
@@ -64,6 +68,7 @@ public class TypeChecker {
         realPipelineUnsupported = false
         for (pkg in pkgs) {
             preparePackageTypes(pkg)
+            prepareRealPipelineFunctionTable(pkg)
             checkRealPipelinePackage(pkg)
         }
     }
@@ -176,6 +181,59 @@ public class TypeChecker {
         }
     }
 
+    private func prepareRealPipelineFunctionTable(pkg: Package): Unit {
+        realPipelineDeclaredFunctions.clear()
+        realPipelineUnsupportedFunctions.clear()
+        realPipelineFunctionDecls.clear()
+        realPipelineFunctionTypes.clear()
+        for (file in pkg.files) {
+            for (decl in file.decls) {
+                if (let Some(funcDecl) <- (decl as FuncDecl)) {
+                    let name = funcDecl.identifier.Val()
+                    if (name.isEmpty()) {
+                        markRealPipelineUnsupported()
+                        continue
+                    }
+                    if (realPipelineDeclaredFunctions.contains(name)) {
+                        realPipelineUnsupportedFunctions.add(name)
+                        realPipelineFunctionDecls.remove(name)
+                        realPipelineFunctionTypes.remove(name)
+                        markRealPipelineUnsupported()
+                    } else {
+                        realPipelineDeclaredFunctions.add(name)
+                    }
+                }
+            }
+        }
+        for (file in pkg.files) {
+            for (decl in file.decls) {
+                if (let Some(funcDecl) <- (decl as FuncDecl)) {
+                    let name = funcDecl.identifier.Val()
+                    if (name.isEmpty() || realPipelineUnsupportedFunctions.contains(name)) {
+                        continue
+                    }
+                    let body = match (funcDecl.funcBody) {
+                        case Some(value) => value
+                        case None =>
+                            realPipelineUnsupportedFunctions.add(name)
+                            markRealPipelineUnsupported()
+                            continue
+                    }
+                    body.funcDecl = Some(funcDecl)
+                    let funcTy = match (prepareRealPipelineFuncSignature(decl, body)) {
+                        case Some(value) => value
+                        case None =>
+                            realPipelineUnsupportedFunctions.add(name)
+                            markRealPipelineUnsupported()
+                            continue
+                    }
+                    realPipelineFunctionDecls[name] = funcDecl
+                    realPipelineFunctionTypes[name] = funcTy
+                }
+            }
+        }
+    }
+
     private func synthesizeDeclType(decl: Decl): Unit {
         if (!Ty.IsTyCorrect(decl.GetTy())) {
             if (let Some(varDecl) <- (decl as VarDeclAbstract)) {
@@ -244,9 +302,21 @@ public class TypeChecker {
     }
 
     private func checkRealPipelineFuncLike(decl: Decl, body: FuncBody, displayName: String): Unit {
+        let funcTy = match (prepareRealPipelineFuncSignature(decl, body)) {
+            case Some(value) => value
+            case None => return
+        }
+        let retTy = funcTy.retTy
+        let supportedBody = checkRealPipelineBody(body, retTy)
+        if (supportedBody) {
+            realPipelineTypedFunctions.add(displayName + ": " + funcTy.String())
+        }
+    }
+
+    private func prepareRealPipelineFuncSignature(decl: Decl, body: FuncBody): Option<FuncTy> {
         if (body.generic.isSome() || body.paramLists.size != 1) {
             markRealPipelineUnsupported()
-            return
+            return None
         }
         let params = ArrayList<Ty>()
         for (param in body.paramLists[0].params) {
@@ -256,7 +326,7 @@ public class TypeChecker {
                         param.SetTy(TypeManager.GetInvalidTy())
                         params.add(TypeManager.GetInvalidTy())
                         markRealPipelineUnsupported()
-                        return
+                        return None
                     }
                     param.SetTy(paramTy)
                     params.add(paramTy)
@@ -264,24 +334,21 @@ public class TypeChecker {
                     param.SetTy(TypeManager.GetInvalidTy())
                     params.add(TypeManager.GetInvalidTy())
                     markRealPipelineUnsupported()
-                    return
+                    return None
                 }
             } else {
                 markRealPipelineUnsupported()
-                return
+                return None
             }
         }
         let retTy = match (resolveRealPipelineReturnTy(body)) {
             case Some(value) => value
-            case None => return
+            case None => return None
         }
         let funcTy = tm.GetFunctionTy(params.toArray(), retTy)
         body.SetTy(funcTy)
         decl.SetTy(funcTy)
-        let supportedBody = checkRealPipelineBody(body, retTy)
-        if (supportedBody) {
-            realPipelineTypedFunctions.add(displayName + ": " + funcTy.String())
-        }
+        return Some(funcTy)
     }
 
     private func resolveRealPipelineReturnTy(body: FuncBody): Option<Ty> {
@@ -406,6 +473,9 @@ public class TypeChecker {
             ret.refFuncBody = Some(body)
             return [checkRealPipelineReturn(ret, retTy, scope), true]
         }
+        if (let Some(callExpr) <- (node as CallExpr)) {
+            return [checkRealPipelinePrintStmt(callExpr, scope), false]
+        }
         return [false, false]
     }
 
@@ -424,9 +494,9 @@ public class TypeChecker {
         }
         let declaredTy: Option<Ty> = match (varDecl.typeNode) {
             case Some(typeNode) =>
-                match (resolveRealPipelinePrimitiveType(typeNode)) {
+                match (resolveRealPipelineLocalType(typeNode)) {
                     case Some(ty) =>
-                        if (!isRealPipelineValueTy(ty)) {
+                        if (!isRealPipelineLocalTy(ty)) {
                             return false
                         }
                         Some(ty)
@@ -458,6 +528,54 @@ public class TypeChecker {
             }
         }
         let _ = scope.Add(name, localTy, varDecl.isVar)
+        return true
+    }
+
+    private func checkRealPipelinePrintStmt(callExpr: CallExpr, scope: RealPipelineScope): Bool {
+        let base = match (callExpr.baseFunc) {
+            case Some(value) => value
+            case None => return false
+        }
+        let calleeRef = match (base as RefExpr) {
+            case Some(value) => value
+            case None => return false
+        }
+        if (!calleeRef.typeArguments.isEmpty()) {
+            return false
+        }
+        let calleeName = calleeRef.ref.identifier.Val()
+        if (calleeName != "println" && calleeName != "print") {
+            return false
+        }
+        if (scope.Contains(calleeName)) {
+            return false
+        }
+        if (callExpr.args.size != 1) {
+            emitRealPipelineTypeError(callExpr.begin, calleeName + " expects exactly one argument")
+            callExpr.SetTy(TypeManager.GetInvalidTy())
+            return true
+        }
+        let arg = callExpr.args[0]
+        if (!arg.name.Empty() || arg.withInout) {
+            return false
+        }
+        let argExpr = match (arg.expr) {
+            case Some(value) => value
+            case None => return false
+        }
+        let argTy = match (typeRealPipelineExpr(argExpr, scope, None)) {
+            case Some(value) => value
+            case None => return false
+        }
+        if (!isRealPipelinePrintableTy(argTy)) {
+            emitRealPipelineTypeError(argExpr.begin,
+                calleeName + " argument must be Int64, Bool, or String, got " + argTy.String())
+            callExpr.SetTy(TypeManager.GetInvalidTy())
+            return true
+        }
+        let unitTy = TypeManager.GetPrimitiveTy(TypeKind.TYPE_UNIT)
+        calleeRef.SetTy(unitTy)
+        callExpr.SetTy(unitTy)
         return true
     }
 
@@ -562,6 +680,9 @@ public class TypeChecker {
         if (let Some(binaryExpr) <- (expr as BinaryExpr)) {
             return typeRealPipelineBinaryExpr(binaryExpr, scope)
         }
+        if (let Some(callExpr) <- (expr as CallExpr)) {
+            return typeRealPipelineCallExpr(callExpr, scope)
+        }
         return None
     }
 
@@ -577,6 +698,11 @@ public class TypeChecker {
             litTy = TypeManager.GetPrimitiveTy(TypeKind.TYPE_BOOLEAN)
         } else if (lit.kind == LitConstKind.UNIT) {
             litTy = TypeManager.GetPrimitiveTy(TypeKind.TYPE_UNIT)
+        } else if (lit.kind == LitConstKind.STRING) {
+            if (!isRealPipelinePlainStringLiteral(lit)) {
+                return None
+            }
+            litTy = TypeManager.GetCStringTy()
         } else {
             return None
         }
@@ -621,6 +747,9 @@ public class TypeChecker {
     }
 
     private func typeRealPipelineBinaryExpr(binaryExpr: BinaryExpr, scope: RealPipelineScope): Option<Ty> {
+        if (realPipelineBinaryWouldUseString(binaryExpr, scope)) {
+            return None
+        }
         if (isRealPipelineArithmeticOp(binaryExpr.op)) {
             return typeRealPipelineIntBinaryExpr(binaryExpr, scope, resultIsBool: false)
         }
@@ -634,6 +763,81 @@ public class TypeChecker {
             return typeRealPipelineBoolBinaryExpr(binaryExpr, scope)
         }
         return None
+    }
+
+    private func typeRealPipelineCallExpr(callExpr: CallExpr, scope: RealPipelineScope): Option<Ty> {
+        let base = match (callExpr.baseFunc) {
+            case Some(value) => value
+            case None => return None
+        }
+        let calleeRef = match (base as RefExpr) {
+            case Some(value) => value
+            case None => return None
+        }
+        if (!calleeRef.typeArguments.isEmpty()) {
+            return None
+        }
+        let calleeName = calleeRef.ref.identifier.Val()
+        if (calleeName == "println" || calleeName == "print") {
+            return None
+        }
+        if (calleeName.isEmpty() || scope.Contains(calleeName)) {
+            return None
+        }
+        if (!realPipelineDeclaredFunctions.contains(calleeName)) {
+            emitRealPipelineTypeError(callExpr.begin, "unknown top-level function '" + calleeName + "'")
+            callExpr.SetTy(TypeManager.GetInvalidTy())
+            return Some(TypeManager.GetInvalidTy())
+        }
+        if (realPipelineUnsupportedFunctions.contains(calleeName)) {
+            return None
+        }
+        let funcTy = match (realPipelineFunctionTypes.get(calleeName)) {
+            case Some(value) => value
+            case None => return None
+        }
+        if (callExpr.args.size != funcTy.paramTys.size) {
+            emitRealPipelineTypeError(callExpr.begin,
+                "function '" + calleeName + "' expects " + funcTy.paramTys.size.toString() +
+                " argument(s), got " + callExpr.args.size.toString())
+            callExpr.SetTy(TypeManager.GetInvalidTy())
+            return Some(TypeManager.GetInvalidTy())
+        }
+        var idx: Int64 = 0
+        while (idx < callExpr.args.size) {
+            let arg = callExpr.args[idx]
+            if (!arg.name.Empty() || arg.withInout) {
+                return None
+            }
+            let argExpr = match (arg.expr) {
+                case Some(value) => value
+                case None => return None
+            }
+            let paramTy = funcTy.paramTys[idx]
+            if (!isRealPipelineValueTy(paramTy)) {
+                return None
+            }
+            let argTy = match (typeRealPipelineExpr(argExpr, scope, Some(paramTy))) {
+                case Some(value) => value
+                case None => return None
+            }
+            if (!isRealPipelineAssignable(paramTy, argTy)) {
+                emitRealPipelineTypeError(argExpr.begin,
+                    argTy.String() + " argument is not assignable to " + paramTy.String() +
+                    " parameter " + idx.toString() + " of function '" + calleeName + "'")
+                callExpr.SetTy(TypeManager.GetInvalidTy())
+                return Some(TypeManager.GetInvalidTy())
+            }
+            idx++
+        }
+        if (let Some(funcDecl) <- realPipelineFunctionDecls.get(calleeName)) {
+            calleeRef.ref.target = Some(funcDecl)
+            callExpr.resolvedFunction = Some(funcDecl)
+            callExpr.callKind = CallKind.CALL_DECLARED_FUNCTION
+        }
+        calleeRef.SetTy(funcTy)
+        callExpr.SetTy(funcTy.retTy)
+        return Some(funcTy.retTy)
     }
 
     private func typeRealPipelineIntBinaryExpr(
@@ -741,6 +945,14 @@ public class TypeChecker {
         return isRealPipelineInt64Ty(ty) || isRealPipelineBoolTy(ty)
     }
 
+    private func isRealPipelineLocalTy(ty: Ty): Bool {
+        return isRealPipelineValueTy(ty) || isRealPipelineStringTy(ty)
+    }
+
+    private func isRealPipelinePrintableTy(ty: Ty): Bool {
+        return isRealPipelineLocalTy(ty)
+    }
+
     private func isRealPipelineReturnTy(ty: Ty): Bool {
         return isRealPipelineValueTy(ty) || ty.kind == TypeKind.TYPE_UNIT
     }
@@ -751,6 +963,10 @@ public class TypeChecker {
 
     private func isRealPipelineBoolTy(ty: Ty): Bool {
         return !ty.HasInvalidTy() && ty.kind == TypeKind.TYPE_BOOLEAN
+    }
+
+    private func isRealPipelineStringTy(ty: Ty): Bool {
+        return !ty.HasInvalidTy() && ty.kind == TypeKind.TYPE_CSTRING
     }
 
     private func isRealPipelineAssignable(targetTy: Ty, exprTy: Ty): Bool {
@@ -769,6 +985,70 @@ public class TypeChecker {
                 if (let Some(ret) <- (node as ReturnExpr)) {
                     return ret.expr.isSome()
                 }
+            }
+        }
+        return false
+    }
+
+    private func resolveRealPipelineLocalType(typeNode: Type): Option<Ty> {
+        if (let Some(ty) <- resolveRealPipelinePrimitiveType(typeNode)) {
+            return Some(ty)
+        }
+        let text = typeNode.ToString().trimAscii()
+        if (text == "String" || text == "CString") {
+            let ty = TypeManager.GetCStringTy()
+            typeNode.SetTy(ty)
+            return Some(ty)
+        }
+        return None
+    }
+
+    private func isRealPipelinePlainStringLiteral(lit: LitConstExpr): Bool {
+        if (lit.kind != LitConstKind.STRING || lit.siExpr.isSome()) {
+            return false
+        }
+        let text = lit.stringValue
+        var idx: Int64 = 0
+        while (idx < text.size) {
+            if (text[idx] == b'\\') {
+                return false
+            }
+            idx++
+        }
+        return true
+    }
+
+    private func realPipelineBinaryWouldUseString(binaryExpr: BinaryExpr, scope: RealPipelineScope): Bool {
+        let left = match (binaryExpr.leftExpr) {
+            case Some(value) => value
+            case None => return false
+        }
+        let right = match (binaryExpr.rightExpr) {
+            case Some(value) => value
+            case None => return false
+        }
+        return realPipelineExprCouldBeString(left, scope) || realPipelineExprCouldBeString(right, scope)
+    }
+
+    private func realPipelineExprCouldBeString(expr: Expr, scope: RealPipelineScope): Bool {
+        if (let Some(parenExpr) <- (expr as ParenExpr)) {
+            if (let Some(inner) <- parenExpr.expr) {
+                return realPipelineExprCouldBeString(inner, scope)
+            }
+            return false
+        }
+        if (let Some(lit) <- (expr as LitConstExpr)) {
+            return lit.kind == LitConstKind.STRING
+        }
+        if (let Some(refExpr) <- (expr as RefExpr)) {
+            if (let Some(local) <- scope.Get(refExpr.ref.identifier.Val())) {
+                return isRealPipelineStringTy(local.ty)
+            }
+            return false
+        }
+        if (let Some(binaryExpr) <- (expr as BinaryExpr)) {
+            if (binaryExpr.op == TokenKind.ADD) {
+                return realPipelineBinaryWouldUseString(binaryExpr, scope)
             }
         }
         return false
