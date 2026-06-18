@@ -238,7 +238,7 @@ extend ParserImpl {
     public func ParseMacroDecl(scopeKind: ScopeKind, modifiers: ArrayList<Modifier>, annos: ArrayList<Annotation>): MacroDecl {
         let ret = MacroDecl()
         ApplyModifiersAndAnnotations(ret, modifiers, annos)
-        let _ = CheckDeclModifiers(modifiers, scopeKind, DefKind.MACRO)
+        EnableModifierAttrs(ret, CheckDeclModifiers(modifiers, scopeKind, DefKind.MACRO))
         let keywordToken = Expect(TokenKind.MACRO, "expected 'macro'")
         ret.keywordPos = keywordToken.Begin()
         if (ret.begin.IsZero()) {
@@ -387,6 +387,7 @@ extend ParserImpl {
     public func ParseMainDecl(scopeKind: ScopeKind, modifiers: ArrayList<Modifier>, annos: ArrayList<Annotation>): MainDecl {
         let ret = MainDecl()
         ApplyModifiersAndAnnotations(ret, modifiers, annos)
+        EnableModifierAttrs(ret, CheckDeclModifiers(modifiers, scopeKind, DefKind.MAIN))
         let keywordToken = Expect(TokenKind.MAIN, "expected function keyword")
         ret.keywordPos = keywordToken.Begin()
         if (ret.begin.IsZero()) { ret.begin = keywordToken.Begin() }
@@ -399,6 +400,7 @@ extend ParserImpl {
 
     public func ParseFuncLikeHeader(ret: FuncDecl, keyword: TokenKind, scopeKind: ScopeKind, modifiers: ArrayList<Modifier>, annos: ArrayList<Annotation>): Unit {
         ApplyModifiersAndAnnotations(ret, modifiers, annos)
+        EnableModifierAttrs(ret, CheckDeclModifiers(modifiers, scopeKind, DefKind.FUNC))
         if (HasModifierToken(modifiers, TokenKind.CONST)) {
             ret.isConst = true
         }
@@ -675,7 +677,7 @@ extend ParserImpl {
         scopeKind: ScopeKind,
         key: Token
     ): Unit {
-        let _ = CheckDeclModifiers(modifiers, scopeKind, DefKind.VARIABLE)
+        EnableModifierAttrs(decl, CheckDeclModifiers(modifiers, scopeKind, DefKind.VARIABLE))
         if (!decl.isConst && HasModifierToken(modifiers, TokenKind.CONST)) {
             diag.DiagnoseRefactor(
                 DiagKindRefactor.INVALID_MODIFIER,
@@ -716,34 +718,38 @@ extend ParserImpl {
         return false
     }
 
-    public func ParseClassDecl(_: ScopeKind, modifiers: ArrayList<Modifier>, annos: ArrayList<Annotation>): ClassDecl {
+    public func ParseClassDecl(scopeKind: ScopeKind, modifiers: ArrayList<Modifier>, annos: ArrayList<Annotation>): ClassDecl {
         let ret = ClassDecl()
         ParseInheritableHeader(ret, TokenKind.CLASS, modifiers, annos)
+        EnableModifierAttrs(ret, CheckDeclModifiers(modifiers, scopeKind, DefKind.CLASS))
         SetPrimaryDecl(ret.identifier.Val())
         ParseClassLikeBody(ret, ScopeKind.CLASS_BODY)
         RevertPrimaryDecl()
         return ret
     }
 
-    public func ParseInterfaceDecl(_: ScopeKind, modifiers: ArrayList<Modifier>, annos: ArrayList<Annotation>): InterfaceDecl {
+    public func ParseInterfaceDecl(scopeKind: ScopeKind, modifiers: ArrayList<Modifier>, annos: ArrayList<Annotation>): InterfaceDecl {
         let ret = InterfaceDecl()
         ParseInheritableHeader(ret, TokenKind.INTERFACE, modifiers, annos)
+        EnableModifierAttrs(ret, CheckDeclModifiers(modifiers, scopeKind, DefKind.INTERFACE))
         ParseClassLikeBody(ret, ScopeKind.INTERFACE_BODY)
         return ret
     }
 
-    public func ParseStructDecl(_: ScopeKind, modifiers: ArrayList<Modifier>, annos: ArrayList<Annotation>): StructDecl {
+    public func ParseStructDecl(scopeKind: ScopeKind, modifiers: ArrayList<Modifier>, annos: ArrayList<Annotation>): StructDecl {
         let ret = StructDecl()
         ParseInheritableHeader(ret, TokenKind.STRUCT, modifiers, annos)
+        EnableModifierAttrs(ret, CheckDeclModifiers(modifiers, scopeKind, DefKind.STRUCT))
         SetPrimaryDecl(ret.identifier.Val())
         ParseClassLikeBody(ret, ScopeKind.STRUCT_BODY)
         RevertPrimaryDecl()
         return ret
     }
 
-    public func ParseEnumDecl(_: ScopeKind, modifiers: ArrayList<Modifier>, annos: ArrayList<Annotation>): EnumDecl {
+    public func ParseEnumDecl(scopeKind: ScopeKind, modifiers: ArrayList<Modifier>, annos: ArrayList<Annotation>): EnumDecl {
         let ret = EnumDecl()
         ParseInheritableHeader(ret, TokenKind.ENUM, modifiers, annos)
+        EnableModifierAttrs(ret, CheckDeclModifiers(modifiers, scopeKind, DefKind.ENUM))
         if (Skip(TokenKind.LCURL)) {
             ret.leftCurlPos = lastToken.Begin()
             ret.bodyScope = DummyBody()
@@ -936,9 +942,10 @@ extend ParserImpl {
         }
     }
 
-    public func ParseExtendDecl(_: ScopeKind, modifiers: ArrayList<Modifier>, annos: ArrayList<Annotation>): ExtendDecl {
+    public func ParseExtendDecl(scopeKind: ScopeKind, modifiers: ArrayList<Modifier>, annos: ArrayList<Annotation>): ExtendDecl {
         let ret = ExtendDecl()
         ApplyModifiersAndAnnotations(ret, modifiers, annos)
+        EnableModifierAttrs(ret, CheckDeclModifiers(modifiers, scopeKind, DefKind.EXTEND))
         let key = Expect(TokenKind.EXTEND, "expected 'extend'")
         ret.keywordPos = key.Begin()
         ret.begin = if (ret.begin.IsZero()) { key.Begin() } else { ret.begin }
@@ -947,9 +954,10 @@ extend ParserImpl {
         return ret
     }
 
-    public func ParseTypeAlias(_: ScopeKind, modifiers: ArrayList<Modifier>, annos: ArrayList<Annotation>): TypeAliasDecl {
+    public func ParseTypeAlias(scopeKind: ScopeKind, modifiers: ArrayList<Modifier>, annos: ArrayList<Annotation>): TypeAliasDecl {
         let ret = TypeAliasDecl()
         ApplyModifiersAndAnnotations(ret, modifiers, annos)
+        EnableModifierAttrs(ret, CheckDeclModifiers(modifiers, scopeKind, DefKind.TYPE))
         let key = Expect(TokenKind.TYPE, "expected 'type'")
         ret.keywordPos = key.Begin()
         ret.begin = if (ret.begin.IsZero()) { key.Begin() } else { ret.begin }
@@ -961,9 +969,10 @@ extend ParserImpl {
         return ret
     }
 
-    public func ParsePropDecl(_: ScopeKind, modifiers: ArrayList<Modifier>, annos: ArrayList<Annotation>): PropDecl {
+    public func ParsePropDecl(scopeKind: ScopeKind, modifiers: ArrayList<Modifier>, annos: ArrayList<Annotation>): PropDecl {
         let ret = PropDecl()
         ApplyModifiersAndAnnotations(ret, modifiers, annos)
+        EnableModifierAttrs(ret, CheckDeclModifiers(modifiers, scopeKind, DefKind.PROPERTY))
         let key = Expect(TokenKind.PROP, "expected 'prop'")
         ret.keywordPos = key.Begin()
         ret.begin = if (ret.begin.IsZero()) { key.Begin() } else { ret.begin }
@@ -1015,6 +1024,7 @@ extend ParserImpl {
     public func ParseConstructor(scopeKind: ScopeKind, modifiers: ArrayList<Modifier>, annos: ArrayList<Annotation>): FuncDecl {
         let ret = FuncDecl()
         ApplyModifiersAndAnnotations(ret, modifiers, annos)
+        EnableModifierAttrs(ret, CheckDeclModifiers(modifiers, scopeKind, DefKind.CONSTRUCTOR))
         let key = Expect(TokenKind.INIT, "expected 'init'")
         ret.keywordPos = key.Begin()
         ret.identifier = SrcIdentifier("init", "init", key.Begin(), key.End(), false)
@@ -1031,6 +1041,7 @@ extend ParserImpl {
     public func ParseFinalizer(scopeKind: ScopeKind, modifiers: ArrayList<Modifier>, annos: ArrayList<Annotation>): FuncDecl {
         let ret = FuncDecl()
         ApplyModifiersAndAnnotations(ret, modifiers, annos)
+        EnableModifierAttrs(ret, CheckDeclModifiers(modifiers, scopeKind, DefKind.FINALIZER))
         let tilde = Expect(TokenKind.BITNOT, "expected '~' before finalizer")
         let initTok = Expect(TokenKind.INIT, "expected 'init' after '~'")
         ret.keywordPos = initTok.Begin()
@@ -1061,6 +1072,7 @@ extend ParserImpl {
     public func ParsePrimaryConstructor(scopeKind: ScopeKind, modifiers: ArrayList<Modifier>, annos: ArrayList<Annotation>): PrimaryCtorDecl {
         let ret = PrimaryCtorDecl()
         ApplyModifiersAndAnnotations(ret, modifiers, annos)
+        EnableModifierAttrs(ret, CheckDeclModifiers(modifiers, scopeKind, DefKind.PRIMARY_CONSTRUCTOR))
         let id = ExpectIdentifierWithPos(ret)
         ret.identifier = id
         ret.keywordPos = id.Begin()
@@ -1099,5 +1111,11 @@ extend ParserImpl {
             ret.end = body.end
         }
         return ret
+    }
+
+    private func EnableModifierAttrs(decl: Decl, attrs: ArrayList<Attribute>): Unit {
+        for (attr in attrs) {
+            decl.EnableAttr(attr)
+        }
     }
 }

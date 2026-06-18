@@ -85,6 +85,7 @@ extend ParserImpl {
         if (!pkg.prefixPaths.isEmpty()) {
             moduleName = pkg.prefixPaths[0]
         }
+        let _ = CheckDeclModifiers(modifiers, ScopeKind.TOPLEVEL, DefKind.PACKAGE)
         SkipNLOrSemi()
         return pkg
     }
@@ -372,7 +373,7 @@ extend ParserImpl {
 
     public func ExpectPackageIdentifierWithPos(node: Node): SrcIdentifier {
         let token = Peek()
-        if (IsIdentifierOrContextualKeyword(token.kind)) {
+        if (IsPackageIdentifierOrContextualKeyword(token.kind)) {
             Next()
             return ParseIdentifierFromToken(token)
         }
