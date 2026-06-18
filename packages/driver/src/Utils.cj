@@ -55,8 +55,14 @@ public func GetSingleQuoted(value: String): String {
     return builder.toString()
 }
 
+@When[os != "Windows"]
 public func GetCommandLineArgumentQuoted(value: String): String {
     return GetSingleQuoted(value)
+}
+
+@When[os == "Windows"]
+public func GetCommandLineArgumentQuoted(value: String): String {
+    return FileUtil.GetQuoted(value)
 }
 
 public func PrependToPaths(prefix: String, paths: Array<String>, quoted!: Bool = false): Array<String> {
