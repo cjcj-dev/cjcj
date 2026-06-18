@@ -158,6 +158,10 @@ extend AST2CHIRDeclTranslator {
             }
             return
         }
+        if (stmt.IsCompoundAssign()) {
+            LowerCompoundAssign(stmt, state)
+            return
+        }
         if (stmt.IsReturn()) {
             match (stmt.expr) {
                 case Some(_) =>
