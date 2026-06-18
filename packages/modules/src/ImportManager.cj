@@ -730,6 +730,7 @@ public class ImportManager {
                 }
             }
         }
+        cjoManager.LoadPackageDeclsOnDemand(packages)
         for (pkg in packages) {
             cjoManager.AddPackageDeclMap(pkg.fullPackageName)
         }
