@@ -77,8 +77,17 @@ public class CHIRChecker {
         for (fn in pkg.GetGlobalFuncsWithoutBody(includePureAbstract: true)) {
             CheckFuncBase(fn, result)
         }
-        for (def in pkg.GetAllCustomTypeDef()) {
-            CheckCustomTypeDef(def, result)
+        for (def in pkg.GetAllStructDef()) {
+            CheckStructDef(def, result)
+        }
+        for (def in pkg.GetAllClassDef()) {
+            CheckClassDef(def, result)
+        }
+        for (def in pkg.GetAllEnumDef()) {
+            CheckEnumDef(def, result)
+        }
+        for (def in pkg.GetAllExtendDef()) {
+            CheckExtendDef(def, result)
         }
         for (id in duplicatedGlobalIds) {
             result.AddError("duplicated identifier `${id}` found.")
@@ -452,18 +461,54 @@ public class CHIRChecker {
         if (!CheckCustomTypeDefIdentifier(def, result)) {
             return
         }
+        CheckCustomType(def, result)
         CheckInstanceMemberVar(def, result)
+        CheckStaticMemberVar(def, result)
         for (method in def.GetMethods()) {
             CheckParentCustomTypeDef(method, def, true, result)
         }
-        if (let Some(extendDef) <- (def as ExtendDef)) {
-            CheckExtendDef(extendDef, result)
+        CheckImplementedInterfaceTypes(def, result)
+    }
+
+    private func CheckStructDef(def: StructDef, result: CHIRCheckResult): Unit {
+        CheckCustomTypeDef(def, result)
+        CheckCStruct(def, result)
+    }
+
+    private func CheckClassDef(def: ClassDef, result: CHIRCheckResult): Unit {
+        CheckCustomTypeDef(def, result)
+    }
+
+    private func CheckEnumDef(def: EnumDef, result: CHIRCheckResult): Unit {
+        CheckCustomTypeDef(def, result)
+    }
+
+    private func CheckCustomType(def: CustomTypeDef, result: CHIRCheckResult): Unit {
+        if ((def as ExtendDef).isSome()) {
+            return
+        }
+        if (def.GetType().isNone()) {
+            result.AddError(def.GetIdentifier() + " should set type.")
+            return
+        }
+        if (let Some(defTy) <- def.GetType()) {
+            let kind = def.GetCustomKind()
+            if (kind == CustomDefKind.TYPE_STRUCT && !defTy.IsStruct()) {
+                result.AddError(def.GetIdentifier() + " is struct definition, but its type is " +
+                    defTy.ToString() + ".")
+            } else if (kind == CustomDefKind.TYPE_CLASS && !defTy.IsClass()) {
+                result.AddError(def.GetIdentifier() + " is class definition, but its type is " +
+                    defTy.ToString() + ".")
+            } else if (kind == CustomDefKind.TYPE_ENUM && !defTy.IsEnum()) {
+                result.AddError(def.GetIdentifier() + " is enum definition, but its type is " +
+                    defTy.ToString() + ".")
+            }
         }
     }
 
     private func CheckInstanceMemberVar(def: CustomTypeDef, result: CHIRCheckResult): Unit {
         let memberVarNames = ArrayList<String>()
-        for (memberVar in def.GetInstanceVars()) {
+        for (memberVar in def.GetDirectInstanceVars()) {
             if (memberVar.name.isEmpty()) {
                 result.AddError("member var in ${def.GetIdentifier()} doesn't have name.")
                 continue
@@ -471,13 +516,76 @@ public class CHIRChecker {
             if (!CHIRCheckerAddIdentifier(memberVarNames, memberVar.name)) {
                 result.AddError("duplicated member var name `${memberVar.name}` in ${def.GetIdentifier()}.")
             }
+            if (memberVar.outerDef.isNone()) {
+                result.AddError("member var ${memberVar.name} in ${def.GetIdentifier()} doesn't set outer " +
+                    "CustomTypeDef.")
+            } else if (let Some(outerDef) <- memberVar.outerDef) {
+                if (outerDef.nodeId != def.nodeId) {
+                    result.AddError("outer CustomTypeDef of member var ${memberVar.name} is " +
+                        "${outerDef.GetIdentifier()}, but it should be ${def.GetIdentifier()}.")
+                }
+            }
             if (memberVar.ty.IsInvalid()) {
                 result.AddError("member var ${memberVar.name} in ${def.GetIdentifier()} doesn't set type.")
+            }
+        }
+        for (memberVar in def.GetAllInstanceVars()) {
+            if (memberVar.outerDef.isNone()) {
+                continue
+            }
+            if (let Some(outerDef) <- memberVar.outerDef) {
+                if (outerDef.nodeId == def.nodeId) {
+                    continue
+                }
+                if ((memberVar.TestAttr(Attribute.PUBLIC) || memberVar.TestAttr(Attribute.PROTECTED)) &&
+                    CHIRCheckerContainsString(memberVarNames, memberVar.name)) {
+                    result.AddError("duplicated member var name `${memberVar.name}` in ${def.GetIdentifier()}, " +
+                        "it has same name with parent class ${outerDef.GetIdentifier()} member var.")
+                }
+            }
+        }
+    }
+
+    private func CheckStaticMemberVar(def: CustomTypeDef, result: CHIRCheckResult): Unit {
+        for (memberVar in def.GetStaticMemberVars()) {
+            if (!memberVar.TestAttr(Attribute.STATIC)) {
+                result.AddError("static member var ${memberVar.GetIdentifier()} of ${def.GetIdentifier()} " +
+                    "doesn't have Attribute `STATIC`.")
+            }
+            if (memberVar.GetParentCustomTypeDef().isNone()) {
+                result.AddError("static member var ${memberVar.GetIdentifier()} doesn't set parent CustomTypeDef.")
+            } else if (let Some(parentDef) <- memberVar.GetParentCustomTypeDef()) {
+                if (parentDef.nodeId != def.nodeId) {
+                    result.AddError("parent CustomTypeDef of static member var ${memberVar.GetIdentifier()} is " +
+                        "${parentDef.GetIdentifier()}, but it should be ${def.GetIdentifier()}.")
+                }
+            }
+        }
+    }
+
+    private func CheckImplementedInterfaceTypes(def: CustomTypeDef, result: CHIRCheckResult): Unit {
+        for (parentType in def.GetImplementedInterfaceTys()) {
+            if (!parentType.GetClassDef().IsInterface()) {
+                result.AddError("there is non-interface type ${parentType.ToString()} in implemented interface " +
+                    "list of ${def.GetIdentifier()}.")
+            }
+        }
+    }
+
+    private func CheckCStruct(def: StructDef, result: CHIRCheckResult): Unit {
+        if (!def.IsCStruct()) {
+            return
+        }
+        for (memberVar in def.GetDirectInstanceVars()) {
+            if (!CHIRCheckerIsCType(memberVar.ty)) {
+                result.AddError("in C-struct ${def.GetIdentifier()}, member var ${memberVar.name} has type " +
+                    "${memberVar.ty.ToString()}, but it should be CType.")
             }
         }
     }
 
     private func CheckExtendDef(def: ExtendDef, result: CHIRCheckResult): Unit {
+        CheckCustomTypeDef(def, result)
         if (def.extendedType.isNone()) {
             result.AddError("extend definition ${def.GetIdentifier()} doesn't set extended type.")
             return
@@ -741,7 +849,7 @@ public class CHIRChecker {
 
     private func CheckMultiBranch(term: Terminator, topLevelFunc: Function, result: CHIRCheckResult): Unit {
         ShouldNotHaveResult(term, topLevelFunc, result)
-        if (!CheckOperandNumAtLeast(1, term, topLevelFunc, result)) {
+        if (!CheckOperandNumEqual(1, term, topLevelFunc, result)) {
             return
         }
         if (!CheckSuccessorNumAtLeast(2, term, topLevelFunc, result)) {
@@ -750,6 +858,18 @@ public class CHIRChecker {
         if (let Some(condTy) <- term.GetOperand(0).GetType()) {
             if (!condTy.IsInteger()) {
                 TypeCheckError(term, term.GetOperand(0), "Int", topLevelFunc, result)
+            }
+        }
+        if (let Some(multiBranch) <- (term as MultiBranch)) {
+            if (multiBranch.GetNormalBlocks().size != multiBranch.GetCaseVals().size) {
+                result.AddError("in function ${topLevelFunc.GetIdentifier()}, in `" +
+                    "${CHIRCheckerExpressionString(term)}`, value's size and normal block's size must be equal, " +
+                    "but now there are ${multiBranch.GetCaseVals().size} value(s) and " +
+                    "${multiBranch.GetNormalBlocks().size} normal block(s).")
+            }
+            if (multiBranch.GetDefaultBlock().GetIdentifier().isEmpty()) {
+                result.AddError("in function ${topLevelFunc.GetIdentifier()}, in `" +
+                    "${CHIRCheckerExpressionString(term)}`, default block shouldn't be empty.")
             }
         }
     }

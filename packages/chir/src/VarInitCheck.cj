@@ -467,16 +467,15 @@ private func BuildConstructorContext(fn: Function): VarInitConstructorContext {
         if (let Some(classDef) <- (customDef as ClassDef)) {
             if (let Some(superDef) <- classDef.GetSuperClassDef()) {
                 ctorInfo.superClassDef = superDef
-                CollectSuperMembers(superDef, members)
-                ctorInfo.superMemberNums = members.size
             }
-            let localMembers = classDef.GetInstanceVars()
-            for (member in localMembers) {
+            let allMembers = classDef.GetAllInstanceVars()
+            for (member in allMembers) {
                 members.add(member)
             }
-            ctorInfo.localMemberNums = localMembers.size
+            ctorInfo.localMemberNums = classDef.GetDirectInstanceVarNum()
+            ctorInfo.superMemberNums = allMembers.size - ctorInfo.localMemberNums
         } else {
-            let localMembers = customDef.GetInstanceVars()
+            let localMembers = customDef.GetAllInstanceVars()
             for (member in localMembers) {
                 members.add(member)
             }

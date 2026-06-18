@@ -63,6 +63,7 @@ public class AnnotationChecker {
                 continue
             }
             let targets = GetAnnotationTargetSet(def)
+            RegisterAnnotationTarget(def.GetSrcCodeIdentifier(), targets)
             RegisterAnnotationTarget(def.GetIdentifier(), targets)
             RegisterAnnotationTarget(def.GetFullName(), targets)
         }
@@ -107,7 +108,10 @@ public class AnnotationChecker {
     }
 
     private func CheckTargetsOnDef(def: CustomTypeDef, defTarget: String, result: CHIRCheckResult): Unit {
-        CheckTargets(GetCustomAnnotations(def), defTarget, result)
+        CheckTargets(GetDefCustomAnnotations(def), defTarget, result)
+        for (memberVar in def.GetDirectInstanceVars()) {
+            CheckTargets(memberVar.annoInfo.GetAnnotations(), MEMBER_VARIABLE_TARGET, result)
+        }
     }
 
     private func CheckTargetsOnGlobalVar(globalVar: GlobalVar, result: CHIRCheckResult): Unit {
@@ -168,13 +172,30 @@ public class AnnotationChecker {
     }
 }
 
-private func GetCustomAnnotations(def: CustomTypeDef): ArrayList<String> {
+private func GetDefCustomAnnotations(def: CustomTypeDef): ArrayList<String> {
+    let out = def.GetAnnoInfo().GetAnnotations()
+    for (annotation in GetMetadataCustomAnnotations(def)) {
+        AddAnnotationIfMissing(out, annotation)
+    }
+    return out
+}
+
+private func GetMetadataCustomAnnotations(def: CustomTypeDef): ArrayList<String> {
     for (key in CUSTOM_ANNO_METADATA_KEYS) {
         if (let Some(rawAnnotations) <- def.GetAnnotation(key)) {
             return ParseStringList(rawAnnotations)
         }
     }
     return ArrayList<String>()
+}
+
+private func AddAnnotationIfMissing(values: ArrayList<String>, annotation: String): Unit {
+    for (value in values) {
+        if (value == annotation) {
+            return
+        }
+    }
+    values.add(annotation)
 }
 
 private func ParseTargetSet(rawTargets: String): HashSet<String> {
