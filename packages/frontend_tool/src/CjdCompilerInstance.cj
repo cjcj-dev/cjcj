@@ -1,6 +1,7 @@
 package cangjie_compiler::frontend_tool
 
 import cangjie_compiler::frontend.*
+import cangjie_compiler::option.OutputMode
 import cangjie_compiler::utils.ProfileRecorder
 
 public class CjdCompilerInstance <: DefaultCompilerInstance {
@@ -30,7 +31,7 @@ public class CjdCompilerInstance <: DefaultCompilerInstance {
     }
 
     public override func PerformResultsSaving(): Bool {
-        if (!invocation.globalOptions.IsCompilingCJMP() && !invocation.globalOptions.IsEmitCHIREnable()) {
+        if (invocation.globalOptions.outputMode != OutputMode.CHIR) {
             return true
         }
         let recorder = ProfileRecorder("Main Stage", "Save results")

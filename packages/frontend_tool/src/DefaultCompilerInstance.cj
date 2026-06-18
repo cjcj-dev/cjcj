@@ -2,6 +2,7 @@ package cangjie_compiler::frontend_tool
 
 import std.collection.*
 import cangjie_compiler::frontend.*
+import cangjie_compiler::option.OutputMode
 import cangjie_compiler::utils.FileUtil
 import cangjie_compiler::utils.ProfileRecorder
 
@@ -101,7 +102,7 @@ public open class DefaultCompilerInstance {
 
     public open func PerformCjoSaving(): Bool {
         return ProfiledBool("Main Stage", "Save cjo", { =>
-            if (invocation.globalOptions.IsCompilingCJMP()) {
+            if (invocation.globalOptions.outputMode == OutputMode.CHIR) {
                 return true
             }
             return SaveCjos(core.GetSourcePackages())
@@ -110,10 +111,13 @@ public open class DefaultCompilerInstance {
 
     public open func PerformResultsSaving(): Bool {
         return ProfiledBool("Main Stage", "Save results", { =>
-            if (invocation.globalOptions.IsCompilingCJMP() || invocation.frontendOptions.chirDeserialize) {
+            if (invocation.globalOptions.outputMode != OutputMode.CHIR) {
+                return true
+            }
+            if (invocation.globalOptions.outputMode == OutputMode.CHIR || invocation.frontendOptions.chirDeserialize) {
                 return SaveCjos(core.GetSourcePackages())
             }
-            return core.PerformResultsSaving()
+            return true
         })
     }
 
@@ -169,6 +173,9 @@ public open class DefaultCompilerInstance {
     }
 
     public func CodegenOnePackage(enableIncrement: Bool): Bool {
+        if (invocation.globalOptions.disableCodeGen) {
+            return true
+        }
         if (enableIncrement) {
             for (pkg in core.GetSourcePackages()) {
                 RecordIncrementalCodegenPackage(pkg, invocation.globalOptions.GenerateCachedPathName(

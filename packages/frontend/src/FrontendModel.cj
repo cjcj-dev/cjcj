@@ -5,6 +5,7 @@ public import cangjie_compiler::basic.{
     IntegratedString, MakeRange, Position, PositionStatus, Range, Source, SourceManager
 }
 import cangjie_compiler::basic.Diagnostic as BasicDiagnostic
+import cangjie_compiler::basic.DiagFormat as BasicDiagFormat
 import cangjie_compiler::basic.DiagnosticEngine as BasicDiagnosticEngine
 import cangjie_compiler::basic.Range as BasicRange
 import cangjie_compiler::chir.CHIRContext as RealCHIRContext
@@ -25,6 +26,14 @@ public class DiagnosticEngine {
 
     public func GetSourceManager(): SourceManager {
         return impl.GetSourceManager()
+    }
+
+    public func RegisterHandler(format: BasicDiagFormat): Unit {
+        impl.RegisterHandler(format)
+    }
+
+    public func SetErrorCountLimit(errorCountLimit: Option<UInt64>): Unit {
+        impl.SetErrorCountLimit(errorCountLimit)
     }
 
     func AsBasicDiagnosticEngine(): BasicDiagnosticEngine {
@@ -894,6 +903,7 @@ public class Candidate {
 public class CompilationCache {
     public var compileArgs: String = ""
     public var lambdaCounter: Int64 = 0
+    public let bitcodeFilesName: ArrayList<String> = ArrayList<String>()
     public let fileSummaries: ArrayList<String> = ArrayList<String>()
     public let declSummaries: ArrayList<String> = ArrayList<String>()
     public init() {}

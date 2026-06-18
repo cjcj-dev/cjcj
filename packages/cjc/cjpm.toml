@@ -15,3 +15,5 @@
 
 [dependencies]
   "cangjie_compiler::driver" = { path = "../driver" }
+  "cangjie_compiler::frontend" = { path = "../frontend" }
+  "cangjie_compiler::basic" = { path = "../basic" }

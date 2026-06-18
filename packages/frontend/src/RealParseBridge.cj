@@ -24,6 +24,7 @@ import cangjie_compiler::parse.ReturnExpr as ParseReturnExpr
 import cangjie_compiler::parse.ParenExpr as ParseParenExpr
 import cangjie_compiler::parse.IfExpr as ParseIfExpr
 import cangjie_compiler::parse.WhileExpr as ParseWhileExpr
+import cangjie_compiler::parse.DoWhileExpr as ParseDoWhileExpr
 import cangjie_compiler::parse.ForInExpr as ParseForInExpr
 import cangjie_compiler::parse.RangeExpr as ParseRangeExpr
 import cangjie_compiler::parse.JumpExpr as ParseJumpExpr
@@ -106,12 +107,12 @@ private func parsedFunctionBody(decl: ParseDecl): Option<ParseFuncBody> {
 // Real-expression body-lowering adapter. Runs the real recursive-descent parser over the same
 // source the frontend already summarized, and for any function whose body matches the supported
 // grammar (Int64 locals: `let`/`var` decls, reassignment, arithmetic + relational binary ops,
-// `if`/`else`, `while`, and `return`) builds a recursive CHIR statement spec tree directly and
+// `if`/`else`, `while`/`do-while`, and `return`) builds a recursive CHIR statement spec tree directly and
 // sets hasRealBody.
 //
 // Promotion is gated: a body is promoted only when it genuinely needs runtime computation -- it
 // must contain at least one non-trivial construct (a binary op, a `var`, an assignment, an `if`,
-// or a `while`). This leaves the already-verified summary slices (literal returns, let-folded
+// a `while`, or a `do-while`). This leaves the already-verified summary slices (literal returns, let-folded
 // returns, pure-literal arithmetic folds, println/print) on their existing path with no
 // regression. Anything outside the grammar simply leaves hasRealBody == false (silent fallback).
 public func AdaptRealBodies(file: File, fileID: UInt64, sourceCode: String, sm: SourceManager): Unit {
@@ -1215,7 +1216,7 @@ private class AdaptScope {
     // A call to one is a struct-valued expression (so `let q = mk(...)` tracks q as that struct).
     let structReturningFuncs = HashMap<String, String>()
     var needsRuntime: Bool = false
-    // Depth of enclosing `for`/`while` loops currently being adapted. A `break`/`continue` is only
+    // Depth of enclosing `for`/`while`/`do-while` loops currently being adapted. A `break`/`continue` is only
     // accepted (promotable) when loopDepth > 0; otherwise the body falls back to the summary path.
     var loopDepth: Int64 = 0
     // Monotonic counter for synthesizing fresh, collision-free local names for match desugaring
@@ -1393,6 +1394,13 @@ private func adaptStatements(block: ParseBlock, scope: AdaptScope): Option<Array
         }
         if (let Some(whileExpr) <- (node as ParseWhileExpr)) {
             match (adaptWhile(whileExpr, scope)) {
+                case Some(stmt) => out.add(stmt)
+                case None => return None
+            }
+            continue
+        }
+        if (let Some(doWhileExpr) <- (node as ParseDoWhileExpr)) {
+            match (adaptDoWhile(doWhileExpr, scope)) {
                 case Some(stmt) => out.add(stmt)
                 case None => return None
             }
@@ -1669,6 +1677,32 @@ private func adaptWhile(whileExpr: ParseWhileExpr, scope: AdaptScope): Option<Ch
     }
     scope.needsRuntime = true
     return Some(ChirStmtSpec.While(condSpec, bodyStmts))
+}
+
+private func adaptDoWhile(doWhileExpr: ParseDoWhileExpr, scope: AdaptScope): Option<ChirStmtSpec> {
+    let bodyBlock = match (doWhileExpr.body) {
+        case Some(b) => b
+        case None => return None
+    }
+    scope.loopDepth++
+    let bodyStmts = match (adaptStatements(bodyBlock, scope)) {
+        case Some(s) =>
+            scope.loopDepth--
+            s
+        case None =>
+            scope.loopDepth--
+            return None
+    }
+    let condExpr = match (doWhileExpr.condExpr) {
+        case Some(e) => e
+        case None => return None
+    }
+    let condSpec = match (adaptExpr(condExpr, scope)) {
+        case Some(e) => e
+        case None => return None
+    }
+    scope.needsRuntime = true
+    return Some(ChirStmtSpec.DoWhile(condSpec, bodyStmts))
 }
 
 // A single normalized match arm: the list of Int64 literal values it matches (empty => catch-all,

@@ -1,6 +1,7 @@
 package cangjie_compiler::frontend_tool
 
 import std.collection.*
+import cangjie_compiler::basic.DiagKindRefactor
 import cangjie_compiler::basic.PrintVersion
 import cangjie_compiler::basic.WriteError
 import cangjie_compiler::frontend.*
@@ -11,6 +12,8 @@ import cangjie_compiler::option.OrderedInput as OptionOrderedInput
 import cangjie_compiler::option.OutputMode
 import cangjie_compiler::option.TempFileInfo as OptionTempFileInfo
 import cangjie_compiler::utils.FileUtil
+import cangjie_compiler::utils.ProfileRecorder
+import cangjie_compiler::utils.ProfileRecorderType
 
 public class DriverOptions {
     public let sourceFiles: ArrayList<String> = ArrayList<String>()
@@ -98,6 +101,8 @@ public func ExecuteFrontend(
             return 0
         }
     }
+    ConfigureFrontendProfiling(globalOptions)
+    ConfigureFrontendDiagnostics(diag, globalOptions)
 
     let instance = CreateCompilerInstance(invocation, diag)
     if (ExecuteCompile(instance)) {
@@ -185,8 +190,10 @@ private func ExecuteCompile(instance: DefaultCompilerInstance): Bool {
         return false
     }
     var res = true
-    if (!isEmitCHIR) {
+    if (!isEmitCHIR && globalOptions.outputMode != OutputMode.CHIR) {
         res = instance.PerformCodeGen() && res
+    }
+    if (!isEmitCHIR) {
         res = instance.PerformResultsSaving() && res
     }
     return res
@@ -223,14 +230,30 @@ private func HandleEmptyInputFileSituation(instance: DefaultCompilerInstance): B
     let globalOptions = instance.invocation.globalOptions
     if (!globalOptions.scanDepPkg && globalOptions.srcFiles.isEmpty() && globalOptions.commonPartChirs.isEmpty() &&
         globalOptions.inputObjs.isEmpty()) {
-        instance.diag.Diagnose(DiagCategory.OTHER, DEFAULT_POSITION, "source file is empty")
+        instance.diag.DiagnoseRefactor(DiagKindRefactor.driver_source_file_empty, DEFAULT_POSITION)
         return false
     }
     if (globalOptions.scanDepPkg && globalOptions.inputCjoFile.isEmpty()) {
-        instance.diag.Diagnose(DiagCategory.OTHER, DEFAULT_POSITION, "source cjo file is empty")
+        instance.diag.DiagnoseRefactor(DiagKindRefactor.driver_source_cjo_empty, DEFAULT_POSITION)
         return false
     }
     return true
+}
+
+private func ConfigureFrontendProfiling(globalOptions: GlobalOptions): Unit {
+    if (globalOptions.enableTimer) {
+        ProfileRecorder.Enable(true, `type`: ProfileRecorderType.TIMER)
+    }
+    if (globalOptions.enableMemoryCollect) {
+        ProfileRecorder.Enable(true, `type`: ProfileRecorderType.MEMORY)
+    }
+}
+
+private func ConfigureFrontendDiagnostics(diag: DiagnosticEngine, globalOptions: GlobalOptions): Unit {
+    let _ = diag
+    let _ = globalOptions
+    // TODO(selfhost:frontend_tool): C++ calls SetErrorCountLimit and RegisterHandler here, but
+    // frontend.DiagnosticEngine does not expose those basic DiagnosticEngine hooks in the stable DAG.
 }
 
 private func ConfigureInvocationPaths(

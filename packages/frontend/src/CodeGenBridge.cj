@@ -54,6 +54,9 @@ public func EmitRealCodeGenForCompilerInstance(instance: CompilerInstance): Bool
     if (ShouldEmitSingleExplicitBitcodeOutput(codegenOptions)) {
         codegenOptions.aggressiveParallelCompile = MaybeUInt64(1u64)
     }
+    if (instance.invocation.globalOptions.enIncrementalCompilation) {
+        instance.cachedInfo.bitcodeFilesName.clear()
+    }
     var emittedAll = true
     var packageIndex: Int64 = 0
     while (packageIndex < realPackages.size) {
@@ -276,6 +279,7 @@ private func emitPackageModules(
     while (moduleIndex < modules.size) {
         let path = outputPathForModule(instance.invocation.globalOptions, pkg, modules[moduleIndex],
             packageIndex, moduleIndex, modules.size)
+        var saved = false
         if (!ensureOutputDirectory(path)) {
             instance.diag.Diagnose(DiagCategory.OTHER, DEFAULT_POSITION,
                 "failed to create output directory for bitcode file '" + path + "'")
@@ -284,6 +288,11 @@ private func emitPackageModules(
             instance.diag.Diagnose(DiagCategory.OTHER, DEFAULT_POSITION,
                 "failed to write LLVM bitcode file '" + path + "'")
             ok = false
+        } else {
+            saved = true
+        }
+        if (saved && instance.invocation.globalOptions.enIncrementalCompilation) {
+            instance.cachedInfo.bitcodeFilesName.add(outputCacheNameForModule(pkg, modules[moduleIndex], moduleIndex))
         }
         moduleIndex++
     }
@@ -301,12 +310,21 @@ private func outputPathForModule(
     if (packageIndex == 0 && moduleCount == 1 && !options.output.isEmpty() && !IsDir(options.output)) {
         return options.output
     }
+    let moduleName = outputCacheNameForModule(pkg, module, moduleIndex)
+    return options.GenerateCachedPathNameForCodeGen(moduleName, ".bc")
+}
+
+private func outputCacheNameForModule(
+    pkg: RealCHIRPackage,
+    module: LLVMModuleHandle,
+    moduleIndex: Int64
+): String {
     let moduleName = if (module.name.isEmpty()) {
         pkg.GetName() + "." + moduleIndex.toString()
     } else {
         module.name
     }
-    return options.GenerateCachedPathNameForCodeGen(moduleName, ".bc")
+    return moduleName
 }
 
 private func ensureOutputDirectory(path: String): Bool {

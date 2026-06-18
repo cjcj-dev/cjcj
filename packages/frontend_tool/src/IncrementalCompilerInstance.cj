@@ -5,6 +5,7 @@ import cangjie_compiler::frontend.*
 import cangjie_compiler::incremental_compilation.CachedMangleMap
 import cangjie_compiler::incremental_compilation.IncreKind
 import cangjie_compiler::incremental_compilation.IncrementalCompilationLogger
+import cangjie_compiler::option.OutputMode
 import cangjie_compiler::utils.FileUtil
 import cangjie_compiler::utils.ProfileRecorder
 
@@ -103,7 +104,14 @@ public class IncrementalCompilerInstance <: DefaultCompilerInstance {
     }
 
     public override func PerformCodeGen(): Bool {
-        if (kind == IncreKind.NO_CHANGE || kind == IncreKind.EMPTY_PKG) {
+        if (kind == IncreKind.NO_CHANGE) {
+            for (srcPkg in core.GetSourcePackages()) {
+                LoadCachedCodegenResult()
+                invocation.globalOptions.UpdateCachedDirName(srcPkg.fullPackageName)
+            }
+            return true
+        }
+        if (kind == IncreKind.EMPTY_PKG) {
             return true
         }
         if (kind == IncreKind.INCR) {
@@ -164,12 +172,17 @@ public class IncrementalCompilerInstance <: DefaultCompilerInstance {
             "no change, skip cjo saving"
         } else if (kind == IncreKind.EMPTY_PKG) {
             "empty pkg, skip cjo saving"
-        } else if (invocation.globalOptions.IsCompilingCJMP() || invocation.frontendOptions.chirDeserialize) {
+        } else if (invocation.globalOptions.outputMode == OutputMode.CHIR) {
             " chir output mode, skip cjo saving"
         } else {
             "incremental cjo saving"
         }
         logger.LogLn(message)
+    }
+
+    private func LoadCachedCodegenResult(): Unit {
+        // TODO(selfhost:frontend_tool): C++ replays cachedInfo.bitcodeFilesName into frontendOutputFiles.
+        // frontend.CompilationCache in the stable DAG does not expose bitcode file names yet.
     }
 
     private func LogIncrementalAnalysisResult(): Unit {
