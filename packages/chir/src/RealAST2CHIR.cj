@@ -20,6 +20,10 @@ import cangjie_compiler::ast.UnaryExpr as AstUnaryExpr
 import cangjie_compiler::ast.ParenExpr as AstParenExpr
 import cangjie_compiler::ast.CallExpr as AstCallExpr
 import cangjie_compiler::ast.Expr as AstExpr
+import cangjie_compiler::ast.Block as AstBlock
+import cangjie_compiler::ast.IfExpr as AstIfExpr
+import cangjie_compiler::ast.WhileExpr as AstWhileExpr
+import cangjie_compiler::ast.JumpExpr as AstJumpExpr
 import cangjie_compiler::ast.TokenKind as AstTokenKind
 
 private let REAL_AST_RETURN_NONE: Int64 = 0
@@ -80,9 +84,26 @@ private class RealASTStmtLowering {
     }
 }
 
+private class RealASTScopeSnapshot {
+    let locals = HashMap<String, Bool>()
+    let localKinds = HashMap<String, Int64>()
+    let loopDepth: Int64
+
+    init(scope: RealASTLoweringScope) {
+        for ((name, mutable) in scope.locals) {
+            locals[name] = mutable
+        }
+        for ((name, kind) in scope.localKinds) {
+            localKinds[name] = kind
+        }
+        loopDepth = scope.loopDepth
+    }
+}
+
 private class RealASTLoweringScope {
     let locals = HashMap<String, Bool>()
     let localKinds = HashMap<String, Int64>()
+    var loopDepth: Int64 = 0
 
     init(body: AstFuncBody) {
         if (!body.paramLists.isEmpty()) {
@@ -119,6 +140,36 @@ private class RealASTLoweringScope {
 
     func Kind(name: String): Option<Int64> {
         return localKinds.get(name)
+    }
+
+    func Save(): RealASTScopeSnapshot {
+        return RealASTScopeSnapshot(this)
+    }
+
+    func Restore(snapshot: RealASTScopeSnapshot): Unit {
+        locals.clear()
+        localKinds.clear()
+        for ((name, mutable) in snapshot.locals) {
+            locals[name] = mutable
+        }
+        for ((name, kind) in snapshot.localKinds) {
+            localKinds[name] = kind
+        }
+        loopDepth = snapshot.loopDepth
+    }
+
+    func EnterLoop(): Unit {
+        loopDepth++
+    }
+
+    func ExitLoop(): Unit {
+        if (loopDepth > 0) {
+            loopDepth--
+        }
+    }
+
+    func InLoop(): Bool {
+        return loopDepth > 0
     }
 }
 
@@ -248,10 +299,42 @@ private func RealASTFunctionReturnKind(body: AstFuncBody): Option<Int64> {
 
 private func RealASTBodyHasValueReturn(body: AstFuncBody): Bool {
     if (let Some(block) <- body.body) {
-        for (node in block.body) {
-            if (let Some(ret) <- (node as AstReturnExpr)) {
-                return ret.expr.isSome()
+        return RealASTBlockHasValueReturn(block)
+    }
+    return false
+}
+
+private func RealASTBlockHasValueReturn(block: AstBlock): Bool {
+    for (node in block.body) {
+        if (RealASTNodeHasValueReturn(node)) {
+            return true
+        }
+    }
+    return false
+}
+
+private func RealASTNodeHasValueReturn(node: AstNode): Bool {
+    if (let Some(ret) <- (node as AstReturnExpr)) {
+        return ret.expr.isSome()
+    }
+    if (let Some(ifExpr) <- (node as AstIfExpr)) {
+        if (let Some(thenBlock) <- ifExpr.thenBody) {
+            if (RealASTBlockHasValueReturn(thenBlock)) {
+                return true
             }
+        }
+        if (let Some(elseExpr) <- ifExpr.elseBody) {
+            if (let Some(elseBlock) <- (elseExpr as AstBlock)) {
+                return RealASTBlockHasValueReturn(elseBlock)
+            }
+            if (RealASTNodeHasValueReturn(elseExpr)) {
+                return true
+            }
+        }
+    }
+    if (let Some(whileExpr) <- (node as AstWhileExpr)) {
+        if (let Some(bodyBlock) <- whileExpr.body) {
+            return RealASTBlockHasValueReturn(bodyBlock)
         }
     }
     return false
@@ -369,18 +452,40 @@ private func LowerRealASTBody(body: AstFuncBody, packageScope: RealASTPackageLow
         return RealASTBodyLowering(true, stmts, REAL_AST_RETURN_NONE)
     }
     let scope = RealASTLoweringScope(body)
+    let lowered = match (LowerRealASTBlock(block, scope, packageScope, scoped: false)) {
+        case Some(value) => value
+        case None => return RealASTBodyLowering(false, empty, REAL_AST_RETURN_NONE)
+    }
+    return lowered
+}
+
+private func LowerRealASTBlock(
+    block: AstBlock,
+    scope: RealASTLoweringScope,
+    packageScope: RealASTPackageLoweringScope,
+    scoped!: Bool = true
+): Option<RealASTBodyLowering> {
+    let snapshot: Option<RealASTScopeSnapshot> = if (scoped) { Some(scope.Save()) } else { None }
+    let stmts = ArrayList<AST2CHIRStmtSpec>()
     var returnKind = REAL_AST_RETURN_NONE
     for (node in block.body) {
         let lowered = match (LowerRealASTBodyNode(node, scope, packageScope)) {
             case Some(value) => value
-            case None => return RealASTBodyLowering(false, empty, REAL_AST_RETURN_NONE)
+            case None =>
+                if (let Some(value) <- snapshot) {
+                    scope.Restore(value)
+                }
+                return None
         }
         stmts.add(lowered.stmt)
         if (lowered.returnKind != REAL_AST_RETURN_NONE) {
             returnKind = lowered.returnKind
         }
     }
-    return RealASTBodyLowering(true, stmts, returnKind)
+    if (let Some(value) <- snapshot) {
+        scope.Restore(value)
+    }
+    return Some(RealASTBodyLowering(true, stmts, returnKind))
 }
 
 private func LowerRealASTBodyNode(
@@ -396,6 +501,15 @@ private func LowerRealASTBodyNode(
     }
     if (let Some(ret) <- (node as AstReturnExpr)) {
         return LowerRealASTReturn(ret, scope, packageScope)
+    }
+    if (let Some(ifExpr) <- (node as AstIfExpr)) {
+        return LowerRealASTIf(ifExpr, scope, packageScope)
+    }
+    if (let Some(whileExpr) <- (node as AstWhileExpr)) {
+        return LowerRealASTWhile(whileExpr, scope, packageScope)
+    }
+    if (let Some(jumpExpr) <- (node as AstJumpExpr)) {
+        return LowerRealASTJump(jumpExpr, scope)
     }
     if (let Some(call) <- (node as AstCallExpr)) {
         return LowerRealASTPrint(call, scope, packageScope)
@@ -523,6 +637,113 @@ private func LowerRealASTReturn(
         return Some(RealASTStmtAndKind(AST2CHIRStmtSpec.Return(exprSpec), exprKind))
     }
     return Some(RealASTStmtAndKind(AST2CHIRStmtSpec.ReturnNone(), REAL_AST_RETURN_UNIT))
+}
+
+private func LowerRealASTIf(
+    ifExpr: AstIfExpr,
+    scope: RealASTLoweringScope,
+    packageScope: RealASTPackageLoweringScope
+): Option<RealASTStmtLowering> {
+    let condExpr = match (ifExpr.condExpr) {
+        case Some(value) => value
+        case None => return None
+    }
+    let condKind = match (RealASTExprValueKind(condExpr, scope, packageScope)) {
+        case Some(value) => value
+        case None => return None
+    }
+    if (condKind != REAL_AST_RETURN_BOOL) {
+        return None
+    }
+    let condSpec = match (LowerRealASTExpr(condExpr, scope, packageScope)) {
+        case Some(value) => value
+        case None => return None
+    }
+    let thenBlock = match (ifExpr.thenBody) {
+        case Some(value) => value
+        case None => return None
+    }
+    let thenLowering = match (LowerRealASTBlock(thenBlock, scope, packageScope)) {
+        case Some(value) => value
+        case None => return None
+    }
+    let elseStmts = ArrayList<AST2CHIRStmtSpec>()
+    var elseKind = REAL_AST_RETURN_NONE
+    if (let Some(elseExpr) <- ifExpr.elseBody) {
+        if (let Some(elseBlock) <- (elseExpr as AstBlock)) {
+            let elseLowering = match (LowerRealASTBlock(elseBlock, scope, packageScope)) {
+                case Some(value) => value
+                case None => return None
+            }
+            for (stmt in elseLowering.stmts) {
+                elseStmts.add(stmt)
+            }
+            elseKind = elseLowering.returnKind
+        } else if (let Some(elseIf) <- (elseExpr as AstIfExpr)) {
+            let elseIfLowering = match (LowerRealASTIf(elseIf, scope, packageScope)) {
+                case Some(value) => value
+                case None => return None
+            }
+            elseStmts.add(elseIfLowering.stmt)
+            elseKind = elseIfLowering.returnKind
+        } else {
+            return None
+        }
+    }
+    let returnKind = if (elseKind != REAL_AST_RETURN_NONE) {
+        elseKind
+    } else {
+        thenLowering.returnKind
+    }
+    return Some(RealASTStmtAndKind(AST2CHIRStmtSpec.If(condSpec, thenLowering.stmts, elseStmts), returnKind))
+}
+
+private func LowerRealASTWhile(
+    whileExpr: AstWhileExpr,
+    scope: RealASTLoweringScope,
+    packageScope: RealASTPackageLoweringScope
+): Option<RealASTStmtLowering> {
+    let condExpr = match (whileExpr.condExpr) {
+        case Some(value) => value
+        case None => return None
+    }
+    let condKind = match (RealASTExprValueKind(condExpr, scope, packageScope)) {
+        case Some(value) => value
+        case None => return None
+    }
+    if (condKind != REAL_AST_RETURN_BOOL) {
+        return None
+    }
+    let condSpec = match (LowerRealASTExpr(condExpr, scope, packageScope)) {
+        case Some(value) => value
+        case None => return None
+    }
+    let bodyBlock = match (whileExpr.body) {
+        case Some(value) => value
+        case None => return None
+    }
+    scope.EnterLoop()
+    let bodyLowering = match (LowerRealASTBlock(bodyBlock, scope, packageScope)) {
+        case Some(value) => value
+        case None =>
+            scope.ExitLoop()
+            return None
+    }
+    scope.ExitLoop()
+    return Some(RealASTStmtAndKind(AST2CHIRStmtSpec.While(condSpec, bodyLowering.stmts),
+        bodyLowering.returnKind))
+}
+
+private func LowerRealASTJump(jumpExpr: AstJumpExpr, scope: RealASTLoweringScope): Option<RealASTStmtLowering> {
+    if (!scope.InLoop()) {
+        return None
+    }
+    let stmt = if (jumpExpr.isBreak) {
+        AST2CHIRStmtSpec.Break()
+    } else {
+        AST2CHIRStmtSpec.Continue()
+    }
+    return Some(RealASTStmtAndKind(stmt, REAL_AST_RETURN_NONE))
 }
 
 private func LowerRealASTPrint(

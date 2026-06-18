@@ -24,8 +24,21 @@ private class RealPipelineLocalInfo {
     }
 }
 
+private class RealPipelineScopeSnapshot {
+    let locals: HashMap<String, RealPipelineLocalInfo> = HashMap<String, RealPipelineLocalInfo>()
+    let loopDepth: Int64
+
+    init(scope: RealPipelineScope) {
+        for ((name, local) in scope.locals) {
+            locals[name] = local
+        }
+        loopDepth = scope.loopDepth
+    }
+}
+
 private class RealPipelineScope {
-    private let locals: HashMap<String, RealPipelineLocalInfo> = HashMap<String, RealPipelineLocalInfo>()
+    let locals: HashMap<String, RealPipelineLocalInfo> = HashMap<String, RealPipelineLocalInfo>()
+    var loopDepth: Int64 = 0
 
     func Add(name: String, ty: Ty, mutable: Bool): Bool {
         if (locals.contains(name)) {
@@ -41,6 +54,32 @@ private class RealPipelineScope {
 
     func Contains(name: String): Bool {
         return locals.contains(name)
+    }
+
+    func Save(): RealPipelineScopeSnapshot {
+        return RealPipelineScopeSnapshot(this)
+    }
+
+    func Restore(snapshot: RealPipelineScopeSnapshot): Unit {
+        locals.clear()
+        for ((name, local) in snapshot.locals) {
+            locals[name] = local
+        }
+        loopDepth = snapshot.loopDepth
+    }
+
+    func EnterLoop(): Unit {
+        loopDepth++
+    }
+
+    func ExitLoop(): Unit {
+        if (loopDepth > 0) {
+            loopDepth--
+        }
+    }
+
+    func InLoop(): Bool {
+        return loopDepth > 0
     }
 }
 
@@ -433,28 +472,51 @@ public class TypeChecker {
                 }
             }
         }
-        var sawReturn = false
-        for (node in block.body) {
-            let stmtStatus = checkRealPipelineStmt(node, body, retTy, scope)
-            if (!stmtStatus[0]) {
-                markRealPipelineUnsupported()
-                return false
-            }
-            if (stmtStatus[1]) {
-                sawReturn = true
-            }
+        let bodyStatus = checkRealPipelineBlock(block, body, retTy, scope, scoped: false)
+        if (!bodyStatus[0]) {
+            markRealPipelineUnsupported()
+            return false
         }
-        if (!sawReturn && retTy.kind != TypeKind.TYPE_UNIT) {
+        let mustReturn = bodyStatus[1]
+        if (!mustReturn && retTy.kind != TypeKind.TYPE_UNIT) {
             emitRealPipelineTypeError(block.begin, "missing return value for declared return type " + retTy.String())
             block.SetTy(TypeManager.GetInvalidTy())
             return true
         }
-        if (sawReturn) {
+        if (mustReturn) {
             block.SetTy(TypeManager.GetNothingTy())
         } else {
             block.SetTy(retTy)
         }
         return true
+    }
+
+    private func checkRealPipelineBlock(
+        block: Block,
+        body: FuncBody,
+        retTy: Ty,
+        scope: RealPipelineScope,
+        scoped!: Bool = true
+    ): Array<Bool> {
+        let snapshot: Option<RealPipelineScopeSnapshot> = if (scoped) { Some(scope.Save()) } else { None }
+        var mustReturn = false
+        for (node in block.body) {
+            let stmtStatus = checkRealPipelineStmt(node, body, retTy, scope)
+            if (!stmtStatus[0]) {
+                if (let Some(value) <- snapshot) {
+                    scope.Restore(value)
+                }
+                return [false, false]
+            }
+            if (stmtStatus[1]) {
+                mustReturn = true
+            }
+        }
+        if (let Some(value) <- snapshot) {
+            scope.Restore(value)
+        }
+        block.SetTy(if (mustReturn) { TypeManager.GetNothingTy() } else { retTy })
+        return [true, mustReturn]
     }
 
     private func checkRealPipelineStmt(
@@ -473,10 +535,121 @@ public class TypeChecker {
             ret.refFuncBody = Some(body)
             return [checkRealPipelineReturn(ret, retTy, scope), true]
         }
+        if (let Some(ifExpr) <- (node as IfExpr)) {
+            return checkRealPipelineIf(ifExpr, body, retTy, scope)
+        }
+        if (let Some(whileExpr) <- (node as WhileExpr)) {
+            return checkRealPipelineWhile(whileExpr, body, retTy, scope)
+        }
+        if (let Some(jumpExpr) <- (node as JumpExpr)) {
+            return [checkRealPipelineJump(jumpExpr, scope), false]
+        }
         if (let Some(callExpr) <- (node as CallExpr)) {
             return [checkRealPipelinePrintStmt(callExpr, scope), false]
         }
         return [false, false]
+    }
+
+    private func checkRealPipelineIf(
+        ifExpr: IfExpr,
+        body: FuncBody,
+        retTy: Ty,
+        scope: RealPipelineScope
+    ): Array<Bool> {
+        let cond = match (ifExpr.condExpr) {
+            case Some(value) => value
+            case None => return [false, false]
+        }
+        let condStatus = checkRealPipelineBoolCondition(cond, scope, "if")
+        if (!condStatus[0]) {
+            return [false, false]
+        }
+        if (!condStatus[1]) {
+            return [true, false]
+        }
+        let thenBlock = match (ifExpr.thenBody) {
+            case Some(value) => value
+            case None => return [false, false]
+        }
+        let thenStatus = checkRealPipelineBlock(thenBlock, body, retTy, scope)
+        if (!thenStatus[0]) {
+            return [false, false]
+        }
+        var elseMustReturn = false
+        if (let Some(elseExpr) <- ifExpr.elseBody) {
+            if (let Some(elseBlock) <- (elseExpr as Block)) {
+                let elseStatus = checkRealPipelineBlock(elseBlock, body, retTy, scope)
+                if (!elseStatus[0]) {
+                    return [false, false]
+                }
+                elseMustReturn = elseStatus[1]
+            } else if (let Some(elseIf) <- (elseExpr as IfExpr)) {
+                let elseStatus = checkRealPipelineIf(elseIf, body, retTy, scope)
+                if (!elseStatus[0]) {
+                    return [false, false]
+                }
+                elseMustReturn = elseStatus[1]
+            } else {
+                return [false, false]
+            }
+        }
+        let unitTy = TypeManager.GetPrimitiveTy(TypeKind.TYPE_UNIT)
+        ifExpr.SetTy(if (thenStatus[1] && elseMustReturn) { TypeManager.GetNothingTy() } else { unitTy })
+        return [true, thenStatus[1] && elseMustReturn]
+    }
+
+    private func checkRealPipelineWhile(
+        whileExpr: WhileExpr,
+        body: FuncBody,
+        retTy: Ty,
+        scope: RealPipelineScope
+    ): Array<Bool> {
+        let cond = match (whileExpr.condExpr) {
+            case Some(value) => value
+            case None => return [false, false]
+        }
+        let condStatus = checkRealPipelineBoolCondition(cond, scope, "while")
+        if (!condStatus[0]) {
+            return [false, false]
+        }
+        if (!condStatus[1]) {
+            return [true, false]
+        }
+        let whileBody = match (whileExpr.body) {
+            case Some(value) => value
+            case None => return [false, false]
+        }
+        scope.EnterLoop()
+        let bodyStatus = checkRealPipelineBlock(whileBody, body, retTy, scope)
+        scope.ExitLoop()
+        if (!bodyStatus[0]) {
+            return [false, false]
+        }
+        whileExpr.SetTy(TypeManager.GetPrimitiveTy(TypeKind.TYPE_UNIT))
+        return [true, false]
+    }
+
+    private func checkRealPipelineJump(jumpExpr: JumpExpr, scope: RealPipelineScope): Bool {
+        if (!scope.InLoop()) {
+            return false
+        }
+        jumpExpr.SetTy(TypeManager.GetNothingTy())
+        return true
+    }
+
+    private func checkRealPipelineBoolCondition(expr: Expr, scope: RealPipelineScope, context: String): Array<Bool> {
+        let boolTy = TypeManager.GetPrimitiveTy(TypeKind.TYPE_BOOLEAN)
+        let condTy = match (typeRealPipelineExpr(expr, scope, Some(boolTy))) {
+            case Some(value) => value
+            case None => return [false, false]
+        }
+        if (!isRealPipelineBoolTy(condTy)) {
+            emitRealPipelineTypeError(expr.begin,
+                context + " condition must be Bool, got " + condTy.String())
+            expr.SetTy(TypeManager.GetInvalidTy())
+            return [true, false]
+        }
+        return [true, true]
     }
 
     private func checkRealPipelineVarDecl(varDecl: VarDecl, scope: RealPipelineScope): Bool {
@@ -981,10 +1154,42 @@ public class TypeChecker {
 
     private func realPipelineBodyHasValueReturn(body: FuncBody): Bool {
         if (let Some(block) <- body.body) {
-            for (node in block.body) {
-                if (let Some(ret) <- (node as ReturnExpr)) {
-                    return ret.expr.isSome()
+            return realPipelineBlockHasValueReturn(block)
+        }
+        return false
+    }
+
+    private func realPipelineBlockHasValueReturn(block: Block): Bool {
+        for (node in block.body) {
+            if (realPipelineNodeHasValueReturn(node)) {
+                return true
+            }
+        }
+        return false
+    }
+
+    private func realPipelineNodeHasValueReturn(node: Node): Bool {
+        if (let Some(ret) <- (node as ReturnExpr)) {
+            return ret.expr.isSome()
+        }
+        if (let Some(ifExpr) <- (node as IfExpr)) {
+            if (let Some(thenBlock) <- ifExpr.thenBody) {
+                if (realPipelineBlockHasValueReturn(thenBlock)) {
+                    return true
                 }
+            }
+            if (let Some(elseExpr) <- ifExpr.elseBody) {
+                if (let Some(elseBlock) <- (elseExpr as Block)) {
+                    return realPipelineBlockHasValueReturn(elseBlock)
+                }
+                if (realPipelineNodeHasValueReturn(elseExpr)) {
+                    return true
+                }
+            }
+        }
+        if (let Some(whileExpr) <- (node as WhileExpr)) {
+            if (let Some(bodyBlock) <- whileExpr.body) {
+                return realPipelineBlockHasValueReturn(bodyBlock)
             }
         }
         return false
