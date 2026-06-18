@@ -279,7 +279,7 @@ private func getValidFuncDecl(macCall: MacroCall, decls: ArrayList<Decl>): Bool 
         }
         return false
     }
-    if (fds.size == 1) {
+    if (fds.size == 1 && !fds[0].funcBody.paramLists.isEmpty()) {
         let argsSize = firstParamCount(fds[0])
         if (macCall.HasAttribute()) {
             if (argsSize != MACRO_ATTR_ARGS) {
@@ -299,7 +299,8 @@ private func getValidFuncDecl(macCall: MacroCall, decls: ArrayList<Decl>): Bool 
         macCall.BindDefinition(fds[0])
         return true
     }
-    if (fds.size == MACRO_DEF_NUM) {
+    if (fds.size == MACRO_DEF_NUM && !fds[0].funcBody.paramLists.isEmpty() &&
+        !fds[1].funcBody.paramLists.isEmpty()) {
         let argsSize1 = firstParamCount(fds[0])
         let argsSize2 = firstParamCount(fds[1])
         if (argsSize1 == argsSize2) {
@@ -315,10 +316,7 @@ private func getValidFuncDecl(macCall: MacroCall, decls: ArrayList<Decl>): Bool 
         }
         return true
     }
-    if (let Some(instance) <- macCall.ci) {
-        instance.diag.Diagnose(macCall.GetBeginPos(), "ambiguous match for macro call " + macCall.GetIdentifier())
-    }
-    return false
+    return true
 }
 
 private func bindDefinitionByName(macCall: MacroCall, macroName: String): Bool {
@@ -332,7 +330,13 @@ private func bindDefinitionByName(macCall: MacroCall, macroName: String): Bool {
     if (!getValidFuncDecl(macCall, decls)) {
         return false
     }
-    return macCall.GetDefinition().isSome()
+    if (macCall.GetDefinition().isSome()) {
+        return true
+    }
+    if (let Some(instance) <- macCall.ci) {
+        instance.diag.Diagnose(macCall.GetBeginPos(), "ambiguous match for macro call " + macCall.GetIdentifier())
+    }
+    return false
 }
 
 private func findStdMacroLibPath(packageName: String, instance: CompilerInstance): String {
