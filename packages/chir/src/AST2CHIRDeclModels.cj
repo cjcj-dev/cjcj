@@ -214,6 +214,8 @@ public class AST2CHIRNominalSpec {
     public let implementedInterfaces: ArrayList<String> = ArrayList<String>()
     public var superClassName: Option<String> = None
     public var extendedType: Option<Type> = None
+    public var genericDeclName: Option<String> = None
+    public var varInitializationFunction: Option<AST2CHIRFunctionSpec> = None
     public var sourceFileKey: String = ""
     public var isSpecificDecl: Bool = false
     public var debugLocation: Option<DebugLocation> = None
@@ -234,6 +236,16 @@ public class AST2CHIRNominalSpec {
 
     public func AddGenericTypeParam(param: GenericType): AST2CHIRNominalSpec {
         genericTypeParams.add(param)
+        return this
+    }
+
+    public func SetGenericDeclName(name: String): AST2CHIRNominalSpec {
+        genericDeclName = Some(name)
+        return this
+    }
+
+    public func SetVarInitializationFunction(spec: AST2CHIRFunctionSpec): AST2CHIRNominalSpec {
+        varInitializationFunction = Some(spec)
         return this
     }
 

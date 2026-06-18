@@ -7,5 +7,6 @@ extend AST2CHIRDeclTranslator {
         for (interfaceName in spec.implementedInterfaces) {
             AddImplementedInterfaceByName(defaultPackage, def, interfaceName)
         }
+        LowerNominalVarInitializationFunction(spec, def)
     }
 }

@@ -7,6 +7,7 @@ extend AST2CHIRDeclTranslator {
         if (let Some(existing) <- TryGetNominalSpec(defaultPackage, spec)) {
             ApplyAttributes(existing, spec.attributes)
             ApplyNominalSourceInfo(existing, spec)
+            ApplyNominalGenericParams(existing, spec)
             return existing
         }
         let packageName = ResolvePackageName(defaultPackage, spec.packageName)
@@ -22,9 +23,7 @@ extend AST2CHIRDeclTranslator {
         if (spec.kind == AST2CHIRNominalKind.INTERFACE) {
             def.EnableAttr(Attribute.ABSTRACT)
         }
-        for (genericParam in spec.genericTypeParams) {
-            def.AddGenericTypeParam(genericParam)
-        }
+        ApplyNominalGenericParams(def, spec)
         EnsureNominalType(def)
         RegisterNominalSpec(defaultPackage, spec, def)
         if (let Some(pkg) <- currentPackage) {
@@ -42,14 +41,46 @@ extend AST2CHIRDeclTranslator {
         }
     }
 
+    private func ApplyNominalGenericParams(def: CustomTypeDef, spec: AST2CHIRNominalSpec): Unit {
+        for (genericParam in spec.genericTypeParams) {
+            if (!HasGenericParam(def, genericParam)) {
+                def.AddGenericTypeParam(genericParam)
+            }
+        }
+    }
+
+    private func HasGenericParam(def: CustomTypeDef, genericParam: GenericType): Bool {
+        for (existing in def.GetGenericTypeParams()) {
+            if (existing.IsEqual(genericParam)) {
+                return true
+            }
+        }
+        return false
+    }
+
     public func LowerNominalDecl(defaultPackage: String, spec: AST2CHIRNominalSpec): Unit {
         let def = CreateNominalDef(defaultPackage, spec)
+        WireNominalGenericDecl(defaultPackage, spec, def)
         match (spec.kind) {
             case AST2CHIRNominalKind.CLASS => LowerClassDecl(spec, def)
             case AST2CHIRNominalKind.INTERFACE => LowerInterfaceDecl(spec, def)
             case AST2CHIRNominalKind.STRUCT => LowerStructDecl(spec, def)
             case AST2CHIRNominalKind.ENUM => LowerEnumDecl(spec, def)
             case AST2CHIRNominalKind.EXTEND => LowerExtendDecl(spec, def)
+        }
+    }
+
+    private func WireNominalGenericDecl(defaultPackage: String, spec: AST2CHIRNominalSpec,
+        def: CustomTypeDef): Unit {
+        if (spec.kind == AST2CHIRNominalKind.EXTEND) {
+            return
+        }
+        if (let Some(declName) <- spec.genericDeclName) {
+            if (let Some(genericDef) <- TryGetTypeDef(defaultPackage, declName)) {
+                if (genericDef.nodeId != def.nodeId) {
+                    def.SetGenericDecl(genericDef)
+                }
+            }
         }
     }
 
@@ -74,6 +105,7 @@ extend AST2CHIRDeclTranslator {
             }
         }
         LowerMemberVarsAndMethods(spec, def)
+        LowerNominalVarInitializationFunction(spec, def)
     }
 
     private func ShouldSetupNominalInheritance(spec: AST2CHIRNominalSpec): Bool {
@@ -265,6 +297,20 @@ extend AST2CHIRDeclTranslator {
             staticVar.SetDebugLocation(loc)
         }
         def.AddStaticMemberVar(staticVar)
+    }
+
+    public func LowerNominalVarInitializationFunction(spec: AST2CHIRNominalSpec, def: CustomTypeDef): Unit {
+        if (spec.kind != AST2CHIRNominalKind.CLASS && spec.kind != AST2CHIRNominalKind.STRUCT) {
+            return
+        }
+        if (let Some(initSpec) <- spec.varInitializationFunction) {
+            initSpec.SetOwnerType(spec.name, isInstanceMember: true)
+            initSpec.AddAttribute(Attribute.MUT)
+            initSpec.AddAttribute(Attribute.PRIVATE)
+            let initFn = LowerFunction(ActivePackageName(spec.packageName), initSpec)
+            initFn.SetFuncKind(FuncKind.INSTANCEVAR_INIT)
+            def.SetVarInitializationFunc(initFn)
+        }
     }
 
     private func ShouldTranslateFunctionMember(owner: AST2CHIRNominalSpec, methodSpec: AST2CHIRFunctionSpec): Bool {
