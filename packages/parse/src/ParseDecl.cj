@@ -577,32 +577,94 @@ extend ParserImpl {
         return generic
     }
 
-    public func ParseParameterList(_: ScopeKind): FuncParamList {
+    public func ParseParameterList(scopeKind: ScopeKind): FuncParamList {
         let list = FuncParamList()
         list.leftParenPos = Expect(TokenKind.LPAREN, "expected '(' for parameter list").Begin()
         list.begin = list.leftParenPos
+        var namedParameter: Option<FuncParam> = None
+        var memberParameter: Option<FuncParam> = None
         while (!Seeing(TokenKind.END) && !Seeing(TokenKind.RPAREN)) {
-            let param = ParseFuncParam()
+            let param = ParseFuncParam(scopeKind)
+            if (let Some(firstNamed) <- namedParameter) {
+                if (!param.isNamedParam) {
+                    diag.DiagnoseRefactor(
+                        DiagKindRefactor.PARSE_ERROR,
+                        param.begin,
+                        "unnamed parameter cannot appear after named parameter '${firstNamed.identifier.Val()}'")
+                    param.EnableAttr(Attribute.IS_BROKEN)
+                }
+            }
+            if (let Some(firstMember) <- memberParameter) {
+                if (!param.isMemberParam) {
+                    diag.DiagnoseRefactor(
+                        DiagKindRefactor.PARSE_ERROR,
+                        param.begin,
+                        "regular parameter cannot appear after member parameter '${firstMember.identifier.Val()}'")
+                    param.EnableAttr(Attribute.IS_BROKEN)
+                }
+            }
+            if (param.isNamedParam && namedParameter.isNone()) {
+                namedParameter = param
+            }
+            if (param.isMemberParam && memberParameter.isNone()) {
+                memberParameter = param
+            }
             if (param.identifier.Val() == "...") {
                 list.hasVariableLenArg = true
                 list.variadicArgIndex = UInt64(list.params.size)
             }
             list.params.add(param)
-            if (!Skip(TokenKind.COMMA)) { break }
+            if (Skip(TokenKind.COMMA)) {
+                param.commaPos = lastToken.Begin()
+            } else {
+                break
+            }
         }
         list.rightParenPos = Expect(TokenKind.RPAREN, "expected ')' after parameters").Begin()
         list.end = list.rightParenPos + 1
+        if (ScopeKindEquals(scopeKind, ScopeKind.PROP_MEMBER_SETTER_BODY)) {
+            if (list.params.isEmpty()) {
+                diag.DiagnoseRefactor(
+                    DiagKindRefactor.PARSE_ERROR,
+                    list.begin,
+                    "setter must contain one parameter")
+            } else if (list.params.size > 1) {
+                diag.DiagnoseRefactor(
+                    DiagKindRefactor.PARSE_ERROR,
+                    list.params[1].begin,
+                    "setter can only accept one parameter")
+            }
+        }
         return list
     }
 
     public func ParseFuncParam(): FuncParam {
+        return ParseFuncParam(ScopeKind.UNKNOWN_SCOPE)
+    }
+
+    public func ParseFuncParam(scopeKind: ScopeKind): FuncParam {
         let param = FuncParam()
+        ParseAnnotations(param.annotations)
         let mods = ArrayList<Modifier>()
         ParseModifiers(mods)
         for (modifier in mods) { param.modifiers.add(modifier) }
+        let isPrimaryConstructor = ScopeKindEquals(scopeKind, ScopeKind.PRIMARY_CONSTRUCTOR_BODY_FOR_CLASS) ||
+            ScopeKindEquals(scopeKind, ScopeKind.PRIMARY_CONSTRUCTOR_BODY_FOR_STRUCT)
+        var memberStart = INVALID_POSITION
         if (Skip(TokenKind.LET) || Skip(TokenKind.VAR)) {
-            param.isMemberParam = true
             param.hasLetOrVar = true
+            param.keywordPos = lastToken.Begin()
+            if (isPrimaryConstructor) {
+                param.isMemberParam = true
+                param.isVar = lastToken.kind == TokenKind.VAR
+                memberStart = lastToken.Begin()
+            } else {
+                diag.DiagnoseRefactor(
+                    DiagKindRefactor.PARSE_ERROR,
+                    lastToken.Begin(),
+                    "'${lastToken.Value()}' is only allowed in primary constructor parameter lists")
+                param.EnableAttr(Attribute.IS_BROKEN)
+            }
         }
         if (Skip(TokenKind.ELLIPSIS)) {
             param.identifier = SrcIdentifier("...", "...", lastToken.Begin(), lastToken.End(), false)
@@ -610,13 +672,62 @@ extend ParserImpl {
             param.end = param.identifier.End()
             return param
         }
-        param.identifier = ExpectIdentifierWithPos(param)
+        if (Skip(TokenKind.WILDCARD)) {
+            if (param.hasLetOrVar) {
+                diag.DiagnoseRefactor(
+                    DiagKindRefactor.PARSE_ERROR,
+                    lastToken.Begin(),
+                    "wildcard cannot be used as member parameter name")
+                param.EnableAttr(Attribute.IS_BROKEN)
+            }
+            param.identifier = SrcIdentifier("_", "_", lastToken.Begin(), lastToken.End(), false)
+        } else {
+            param.identifier = ExpectIdentifierWithPos(param)
+        }
         param.begin = if (!param.modifiers.isEmpty()) { param.modifiers[0].begin } else { param.identifier.Begin() }
-        if (Skip(TokenKind.COLON)) {
+        if (param.isMemberParam) {
+            param.begin = memberStart
+        }
+        if (!ScopeKindEquals(scopeKind, ScopeKind.PROP_MEMBER_SETTER_BODY) &&
+            !ScopeKindEquals(scopeKind, ScopeKind.PROP_MEMBER_GETTER_BODY) && Skip(TokenKind.NOT)) {
+            if (param.identifier.Val() == "_") {
+                diag.DiagnoseRefactor(
+                    DiagKindRefactor.EXPECTED_TOKEN,
+                    lastToken.Begin(),
+                    "expected ':' after wildcard parameter")
+                param.EnableAttr(Attribute.IS_BROKEN)
+            }
+            param.notMarkPos = lastToken.Begin()
+            param.isNamedParam = true
+        }
+        if (ScopeKindEquals(scopeKind, ScopeKind.PROP_MEMBER_SETTER_BODY) ||
+            ScopeKindEquals(scopeKind, ScopeKind.PROP_MEMBER_GETTER_BODY)) {
+            param.end = param.identifier.End()
+            return param
+        }
+        if (!Skip(TokenKind.COLON)) {
+            diag.DiagnoseRefactor(
+                DiagKindRefactor.EXPECTED_TOKEN,
+                Peek().Begin(),
+                "expected ':' in parameter declaration")
+            let invalidType = InvalidType(Peek().Begin())
+            invalidType.isBroken = true
+            param.typeNode = invalidType
+            param.end = invalidType.end
+            param.EnableAttr(Attribute.IS_BROKEN)
+            return param
+        } else {
             param.colonPos = lastToken.Begin()
             param.typeNode = ParseType()
         }
         if (Skip(TokenKind.ASSIGN)) {
+            if (!param.isNamedParam) {
+                diag.DiagnoseRefactor(
+                    DiagKindRefactor.EXPECTED_TOKEN,
+                    lastToken.Begin(),
+                    "default parameter value requires a named parameter marker '!'")
+                param.EnableAttr(Attribute.IS_BROKEN)
+            }
             param.assignPos = lastToken.Begin()
             param.assignment = ParseExpr()
         }
