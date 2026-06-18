@@ -42,7 +42,7 @@ private class ParseCursor {
 }
 
 public func ParseDriverArgs(opts: DriverOptions, arguments: Array<String>): Bool {
-    let cursor = ParseCursor(arguments)
+    let cursor = ParseCursor(ReorderWarningArgs(arguments))
     var ok = true
     while (cursor.hasNext()) {
         let arg = cursor.current()
@@ -72,6 +72,55 @@ public func ParseDriverArgs(opts: DriverOptions, arguments: Array<String>): Bool
         cursor.advance()
     }
     return ok
+}
+
+private func IsWarningArg(arg: String): Bool {
+    return arg.startsWith("-Woff") || arg.startsWith("--warn-off") || arg.startsWith("-Won") ||
+        arg.startsWith("--warn-on")
+}
+
+private func WarningArgTakesSeparatedValue(arg: String): Bool {
+    return arg == "-Woff" || arg == "--warn-off" || arg == "-Won" || arg == "--warn-on"
+}
+
+private func ReorderWarningArgs(arguments: Array<String>): Array<String> {
+    if (arguments.size <= 2) {
+        return arguments
+    }
+    let warningArgs = ArrayList<String>()
+    let otherArgs = ArrayList<String>()
+    var idx: Int64 = 1
+    while (idx < arguments.size) {
+        let arg = arguments[idx]
+        if (arg == "--") {
+            while (idx < arguments.size) {
+                otherArgs.add(arguments[idx])
+                idx++
+            }
+            break
+        }
+        if (IsWarningArg(arg)) {
+            warningArgs.add(arg)
+            if (WarningArgTakesSeparatedValue(arg) && idx + 1 < arguments.size) {
+                idx++
+                warningArgs.add(arguments[idx])
+            }
+        } else {
+            otherArgs.add(arg)
+        }
+        idx++
+    }
+    let reordered = ArrayList<String>()
+    if (!arguments.isEmpty()) {
+        reordered.add(arguments[0])
+    }
+    for (arg in warningArgs) {
+        reordered.add(arg)
+    }
+    for (arg in otherArgs) {
+        reordered.add(arg)
+    }
+    return reordered.toArray()
 }
 
 private func optionValueInline(arg: String, optionName: String): Option<String> {
