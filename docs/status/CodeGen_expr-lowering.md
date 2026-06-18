@@ -1,6 +1,6 @@
 # CodeGen Expr Lowering Status
 
-Last updated: 2026-06-18 13:34 CST
+Last updated: 2026-06-18 13:00 CST
 
 This pass deepened the CHIR-to-LLVM expression/statement/terminator lowering core under
 `packages/codegen/src`.
@@ -37,6 +37,18 @@ Continuation update:
   class subtype checks, tuple `llvm.cj.is.tupletype.of`, and static subtype fallback through `llvm.cj.is.subtype`.
 - Extended builtin intrinsic lowering for `GET_TYPE_FOR_TYPE_PARAMETER` and `IS_SUBTYPE_TYPES`, matching the C++
   `GenerateBuiltinCall` paths through TypeInfo metadata and the `llvm.cj.is.subtype` intrinsic.
+- Routed `STORE_ELEMENT_REF` and `STORE_ELEMENT_BY_NAME` through the memory dispatcher instead of falling through to a
+  typed null value.
+- Added core `StoreElementRef` lowering for CHIR value/location/path nodes: materialize the value and aggregate
+  location, build the static GEP index list from the real CHIR path, and emit the LLVM store. Empty static paths now
+  return no value instead of silently storing through the base pointer, matching the C++ checker contract.
+- Added conservative `StoreElementByName` and `GetElementByName` support by resolving member names through the real
+  `chir.CustomType` metadata (`GetAllInstanceVars`, including raw mangled names) before lowering as path-based element
+  access. C++ normally expects these nodes to have been rewritten by `UpdateMemberVarPath`; this keeps self-hosted
+  lowering robust when serialized or partial CHIR still contains name-based forms.
+- Ported the C++ no-op store guards that can be represented by the current self-hosted backend surface: class null
+  constants and stores of unit values into return slots now do not emit an LLVM store for `Store` or element-store
+  lowering.
 
 Remaining gaps:
 
@@ -46,6 +58,10 @@ Remaining gaps:
   enum/boxed/generic type transformations are still partial outside the subset above.
 - The new `InstanceOf` lowering relies on static `CGType` TypeInfo creation for generic-related target types; full
   dynamic generic TypeInfo construction still belongs with broader IRBuilder type-info parity.
+- Full C++ aggregate element addressing still needs a self-hosted equivalent of `IRBuilder2::CreateGEP(CGValue, path)`,
+  including class payload extraction, raw-array element addressing, base-pointer propagation, auto-env offsets, and
+  generic field-offset intrinsic handling. The current pass improves dispatcher coverage but does not claim parity for
+  those layout-sensitive paths.
 - Some unsupported intrinsic and spawn paths still return typed null/unit fallbacks because the corresponding sibling
   runtime/codegen surfaces are not yet modeled in this self-hosted package.
 
@@ -55,4 +71,6 @@ Verification:
 - `cjpm build` passed after the implementation, with only the pre-existing unrelated frontend unused-import warning.
 - Continuation `cjpm build` passed after RTTI, type-info intrinsic, and InstanceOf lowering changes, with the same
   unrelated frontend warning.
+- Continuation `cjpm build` passed after memory element-store/name-path lowering changes, with the same unrelated
+  frontend warning.
 - Remaining `TODO(selfhost:CodeGen)` markers in `packages/codegen/src`: 0.
