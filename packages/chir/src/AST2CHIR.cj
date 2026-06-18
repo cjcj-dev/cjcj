@@ -291,6 +291,10 @@ let AST2CHIR_STMT_STRUCT_SET_FIELD: Int64 = 13
 // method-call statement (e.g. `c.inc()`) where the method mutates through `this` and may return Unit;
 // the CALL is emitted in the current block and its result (if any) is simply not bound to a slot.
 let AST2CHIR_STMT_EXPR: Int64 = 14
+// DO_WHILE: run `thenBody` once, then continue while `cond` is true. This mirrors the C++ control-flow
+// shape for `do { ... } while (cond)`: body block -> condition block -> body/exit, with `continue`
+// targeting the condition block and `break` targeting the exit block.
+let AST2CHIR_STMT_DO_WHILE: Int64 = 15
 
 public class AST2CHIRStmtSpec {
     public let kind: Int64
@@ -333,6 +337,7 @@ public class AST2CHIRStmtSpec {
     public func IsArrayFor(): Bool { return kind == AST2CHIR_STMT_ARRAY_FOR }
     public func IsStructSetField(): Bool { return kind == AST2CHIR_STMT_STRUCT_SET_FIELD }
     public func IsExprStmt(): Bool { return kind == AST2CHIR_STMT_EXPR }
+    public func IsDoWhile(): Bool { return kind == AST2CHIR_STMT_DO_WHILE }
 
     public static func ExprStmt(expr: AST2CHIRExprSpec): AST2CHIRStmtSpec {
         return AST2CHIRStmtSpec(AST2CHIR_STMT_EXPR, "", false, Some(expr), None,
@@ -366,6 +371,11 @@ public class AST2CHIRStmtSpec {
 
     public static func While(cond: AST2CHIRExprSpec, body: ArrayList<AST2CHIRStmtSpec>): AST2CHIRStmtSpec {
         return AST2CHIRStmtSpec(AST2CHIR_STMT_WHILE, "", false, None, Some(cond), body,
+            ArrayList<AST2CHIRStmtSpec>())
+    }
+
+    public static func DoWhile(cond: AST2CHIRExprSpec, body: ArrayList<AST2CHIRStmtSpec>): AST2CHIRStmtSpec {
+        return AST2CHIRStmtSpec(AST2CHIR_STMT_DO_WHILE, "", false, None, Some(cond), body,
             ArrayList<AST2CHIRStmtSpec>())
     }
 
