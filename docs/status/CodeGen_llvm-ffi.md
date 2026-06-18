@@ -1,6 +1,6 @@
 # CodeGen llvm-ffi Deepening Status
 
-Date: 2026-06-17
+Date: 2026-06-18
 
 Build: `cjpm build` passes.
 
@@ -21,7 +21,7 @@ Reference inspected:
 Implemented in this pass:
 
 - Expanded the LLVM C API surface into CodeGen-owned component files:
-  `LLVMAnalysis.cj`, `LLVMBitcode.cj`, `LLVMPassBuilder.cj`, and `LLVMTargetMachine.cj`.
+  `LLVMAnalysis.cj`, `LLVMBitcode.cj`, `LLVMMetadata.cj`, `LLVMPassBuilder.cj`, and `LLVMTargetMachine.cj`.
 - Added bindings for verifier/function analysis helpers, memory-buffer bitcode and IR reading, bitcode memory/FD
   writing, target/target-machine/data-layout APIs, target-machine emission APIs, and the new pass-manager
   `LLVMRunPasses` API. These are external LLVM bindings only; LLVM is not reimplemented.
@@ -30,6 +30,11 @@ Implemented in this pass:
 - Extended the core LLVM binding with source-file-name access, module printing, metadata strings, builder
   insertion-before support, basic-block insertion before another block, fast-math flag application, and safe
   LLVM-message-to-Cangjie-string conversion.
+- Added a dedicated LLVM metadata wrapper surface for C++ `MDString`/`MDTuple` and named-metadata usage:
+  metadata-kind lookup, MD node construction/readback, named metadata lookup/insertion/enumeration/operand addition,
+  and instruction/global metadata set/erase helpers. This unblocks the C++ patterns used by package-init metadata,
+  CHIR splitting metadata, incremental metadata, invariant-load markers, type metadata, and reflection/AggType tags
+  while keeping all native behavior in LLVM.
 - Matched more C++ `CGModule` behavior by adding the `CJBC`, `Cangjie_OPT`, and macOS `Cangjie_PACKAGE_ID` module
   flags, making function/global creation get-or-insert instead of blindly adding duplicate LLVM symbols, printing
   verifier diagnostics, and generating the C++-style `UNIT_VAL_STR` global for unit values.
@@ -38,6 +43,10 @@ Implemented in this pass:
   when enabled, and lowering rune literals to their numeric code point rather than a string hash.
 - Added context-safe LLVM attribute helpers that scan an existing attribute list, avoid duplicate attributes, and
   support typed attributes through `LLVMCreateTypeAttribute`/`LLVMGetTypeAttributeValue`.
+- Added the LLVM C API string-attribute surface used by C++ `addFnAttr("...")` and global/function marker attributes:
+  create/get-kind/get-value/get-at-index/remove-at-index bindings, plus wrapper helpers for string attributes with or
+  without values. Unknown LLVM enum attribute names now fall back to string attributes, matching the C++ marker-attribute
+  behavior for wrapper/native-interface/sanitizer/generic metadata tags without reimplementing LLVM.
 - Matched the direct-function C++ `CreateCallOrInvoke(llvm::Function*)` attribute behavior more closely: struct-return
   declarations now get typed `sret` plus `noalias`, and call/invoke instructions propagate direct callee `sret`/`noalias`
   attributes when the callee is an actual LLVM function.
@@ -66,13 +75,48 @@ Implemented in this pass:
   struct element offset lookup. `LLVMTargetMachineHandle` now exposes target/cpu/feature/triple queries, target-data
   creation, and target-machine tuning switches; `CGModule` exposes borrowed module data-layout helpers matching the
   C++ `GetTypeSize`/alignment/offset query shape.
+- Added explicit resource ownership to core LLVM handles: contexts, modules, and builders now implement `Resource`,
+  module handles retain their creating context when available, released package modules can dispose LLVM modules before
+  their paired contexts, and `IRBuilder2` now exposes the same resource-compatible close path for its underlying C
+  builder.
+- Added `CGModule.Clear()` to mirror the C++ destructor/cleanup ordering for self-host objects that are not released to
+  the driver: finalize debug info, dispose the LLVM module first, clear CodeGen caches, then dispose the owned LLVM
+  context.
+- Corrected `IRBuilder2.CreateEntryBasicBlock` to match the C++ helper contract by inserting before the existing first
+  block. Ordinary CHIR block materialization now uses a separate append-at-end helper so `EmitBasicBlockIR` keeps the
+  C++ DFS block creation order while true entry/helper blocks get the intended insertion semantics.
+- Deepened the LLVM memory-buffer, IRReader, BitReader, and BitWriter wrappers used by the C++ cached-IR/bitcode paths:
+  file-buffer creation now has a checked result that preserves LLVM open errors, memory buffers expose size/string
+  accessors and range-copy creation, parsed modules retain the context handle supplied by the caller, and file helpers
+  mirror the C++ `parseIRFile`/bitcode-file read shape.
+- Matched LLVM C API ownership more precisely for memory buffers: ordinary bitcode parse borrows its buffer, lazy
+  bitcode module loading transfers the buffer on successful module creation, and `LLVMParseIRInContext` is treated as a
+  consuming call because the LLVM implementation wraps the incoming buffer in a `unique_ptr`.
+- Added checked bitcode output helpers for file paths, file descriptors, and memory-buffer output so callers can avoid
+  the old status-only/nullable patterns when porting C++ `WriteBitcodeToFile` and cached module emission.
+- Exposed LLVM target registration through real exported per-target C entry points rather than binding the static-inline
+  `LLVMInitializeAll*` helpers. The wrapper now covers the C++ reference build's configured native target set
+  (ARM/AArch64/X86), including target info, target, target MC, asm printer/parser, disassembler, and host-triple
+  selection.
+- Target-machine creation now initializes the configured backend for the requested normalized triple before target lookup,
+  and host target-machine creation explicitly initializes the host target before querying host CPU/features. This keeps
+  LLVM external while matching the C++ expectation that native targets are registered before `GetTargetFromTriple`.
+- Completed the public pass-builder options wrapper surface for the new pass manager: verify-each, debug logging,
+  loop interleaving/vectorization/unrolling, SLP vectorization, SCEV/Licm tuning caps, call-graph profile,
+  merge-functions, inliner threshold, module passes, and function passes. The AA pipeline setter now keeps its
+  `CString` alive for the options handle lifetime to match LLVM's borrowed-string contract.
+- Hardened the new pass-manager wrapper against LLVM's native null-options contract: module/function pass runners now
+  synthesize default `LLVMPassBuilderOptions` when callers omit them and reject null modules/functions before entering
+  `LLVMRunPasses`.
+- Moved the `LLVMVerifyModule` binding into the Analysis component next to `LLVMVerifyFunction`, added a checked module
+  verifier result that preserves LLVM's diagnostic text, and routed `CGModule.Verify()` through that wrapper instead of
+  open-coding raw message ownership.
 
 Known remaining gaps for this scope:
 
 - The C++ LLVM integration still has broader native-backend behavior not reachable through the current partial CHIR
-  emitters: full target initialization policy, package-level object/assembly emission orchestration, complete
-  pass-pipeline selection, target-dependent ABI/CFFI attributes, and precise debug-info attachment for
-  functions/types/locals.
+  emitters: package-level object/assembly emission orchestration, complete pass-pipeline selection, target-dependent
+  ABI/CFFI attributes, and precise debug-info attachment for functions/types/locals.
 - `IRBuilder2` restores insertion to the current block after entry alloca creation; the C API wrapper still does not
   preserve an arbitrary instruction iterator the way C++ `IRBuilder` does.
 - The new `CGFunctionType` call wrapper covers known-size struct-return setup and call attributes, but the full C++
@@ -82,7 +126,12 @@ Known remaining gaps for this scope:
   call sites are still incomplete in the partial self-host port.
 - The target-machine, target-data, and pass-builder wrappers are ready for callers, but the package-level emission path
   does not yet drive target creation, pass execution, and object/assembly output end to end.
+- The C API `LLVMParseBitcodeInContext2` and `LLVMGetBitcodeModuleInContext2` do not expose diagnostic strings; the
+  wrapper reports faithful success/failure and ownership but cannot preserve the richer C++ `SMDiagnostic` text for
+  those bitcode-only paths without adding a native shim.
+- Metadata creation/attachment/readback now has a faithful LLVM C API wrapper surface, but higher-level generation of
+  package/type/reflection/incremental metadata is still only partially driven by the current self-host emitters.
 
 Remaining `TODO(selfhost:CodeGen)` markers in this llvm-ffi slice: 0.
 
-Estimated behavior coverage for this llvm-ffi/module/context/IRBuilder slice: 63%.
+Estimated behavior coverage for this llvm-ffi/module/context/IRBuilder slice: 74%.

@@ -30,11 +30,12 @@ private func SignedInt64Bits(value: Int64): UInt64 {
     return 0x8000000000000000u64 + UInt64(value - Int64.Min)
 }
 
-public class IRBuilder2 {
+public class IRBuilder2 <: Resource {
     private let cgMod: CGModule
     private let builder: LLVMBuilderHandle
     private var chirExpr: Option<CHIRExprWrapper> = None
     private var cgFunction: Option<CGFunction> = None
+    private var closed: Bool = false
 
     public init(cgMod: CGModule) {
         this.cgMod = cgMod
@@ -63,6 +64,18 @@ public class IRBuilder2 {
     public func GetCGContext(): CGContext { return cgMod.GetCGContext() }
     public func GetLLVMContext(): LLVMContextHandle { return cgMod.GetLLVMContext() }
     public func GetBuilder(): LLVMBuilderHandle { return builder }
+
+    public func close(): Unit {
+        if (closed) {
+            return
+        }
+        builder.close()
+        closed = true
+    }
+
+    public func isClosed(): Bool {
+        return closed
+    }
 
     public func GetTrue(): LLVMValueRef {
         return unsafe { LLVMConstInt(LLVMInt1TypeInContext(GetLLVMContext().raw), 1u64, 0) }
@@ -181,6 +194,10 @@ public class IRBuilder2 {
     }
 
     public func CreateEntryBasicBlock(parent: LLVMValueRef, name: String): LLVMBasicBlockRef {
+        return CreateEntryBasicBlockBeforeFirst(parent, name)
+    }
+
+    public func CreateBasicBlockAtEnd(parent: LLVMValueRef, name: String): LLVMBasicBlockRef {
         var result = LLVMNullBasicBlock()
         try (nameCString = unsafe { LibC.mallocCString(name) }.asResource()) {
             result = unsafe { LLVMAppendBasicBlockInContext(GetLLVMContext().raw, parent, nameCString.value) }

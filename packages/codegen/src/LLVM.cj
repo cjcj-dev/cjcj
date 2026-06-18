@@ -10,6 +10,7 @@ public type LLVMBasicBlockRef = CPointer<Unit>
 public type LLVMBuilderRef = CPointer<Unit>
 public type LLVMMemoryBufferRef = CPointer<Unit>
 public type LLVMMetadataRef = CPointer<Unit>
+public type LLVMNamedMDNodeRef = CPointer<Unit>
 public type LLVMAttributeRef = CPointer<Unit>
 public type LLVMUseRef = CPointer<Unit>
 public type LLVMDIBuilderRef = CPointer<Unit>
@@ -112,7 +113,16 @@ foreign {
     func LLVMGetSourceFileName(module: LLVMModuleRef, len: CPointer<UIntNative>): CString
     func LLVMAddModuleFlag(module: LLVMModuleRef, behavior: Int32, key: CString, keyLen: UIntNative,
         value: LLVMMetadataRef): Unit
-    func LLVMVerifyModule(module: LLVMModuleRef, action: Int32, outMessage: CPointer<CString>): Int32
+    func LLVMGetFirstNamedMetadata(module: LLVMModuleRef): LLVMNamedMDNodeRef
+    func LLVMGetLastNamedMetadata(module: LLVMModuleRef): LLVMNamedMDNodeRef
+    func LLVMGetNextNamedMetadata(namedMDNode: LLVMNamedMDNodeRef): LLVMNamedMDNodeRef
+    func LLVMGetPreviousNamedMetadata(namedMDNode: LLVMNamedMDNodeRef): LLVMNamedMDNodeRef
+    func LLVMGetNamedMetadata(module: LLVMModuleRef, name: CString, nameLen: UIntNative): LLVMNamedMDNodeRef
+    func LLVMGetOrInsertNamedMetadata(module: LLVMModuleRef, name: CString, nameLen: UIntNative): LLVMNamedMDNodeRef
+    func LLVMGetNamedMetadataName(namedMDNode: LLVMNamedMDNodeRef, nameLen: CPointer<UIntNative>): CString
+    func LLVMGetNamedMetadataNumOperands(module: LLVMModuleRef, name: CString): UInt32
+    func LLVMGetNamedMetadataOperands(module: LLVMModuleRef, name: CString, dest: CPointer<LLVMValueRef>): Unit
+    func LLVMAddNamedMetadataOperand(module: LLVMModuleRef, name: CString, value: LLVMValueRef): Unit
     func LLVMWriteBitcodeToFile(module: LLVMModuleRef, path: CString): Int32
     func LLVMPrintModuleToString(module: LLVMModuleRef): CString
     func LLVMDisposeMessage(message: CString): Unit
@@ -161,6 +171,11 @@ foreign {
     func LLVMIsDeclaration(global: LLVMValueRef): Int32
     func LLVMSetGlobalConstant(global: LLVMValueRef, isConstant: Int32): Unit
     func LLVMSetInitializer(global: LLVMValueRef, constantVal: LLVMValueRef): Unit
+    func LLVMGetAlignment(value: LLVMValueRef): UInt32
+    func LLVMSetAlignment(value: LLVMValueRef, bytes: UInt32): Unit
+    func LLVMGlobalSetMetadata(global: LLVMValueRef, kind: UInt32, metadata: LLVMMetadataRef): Unit
+    func LLVMGlobalEraseMetadata(global: LLVMValueRef, kind: UInt32): Unit
+    func LLVMGlobalClearMetadata(global: LLVMValueRef): Unit
     func LLVMCountParams(fn: LLVMValueRef): UInt32
     func LLVMGetParam(fn: LLVMValueRef, index: UInt32): LLVMValueRef
     func LLVMHasPersonalityFn(fn: LLVMValueRef): Int32
@@ -187,9 +202,20 @@ foreign {
     func LLVMConstInt(intType: LLVMTypeRef, value: UInt64, signExtend: Int32): LLVMValueRef
     func LLVMConstReal(realType: LLVMTypeRef, value: Float64): LLVMValueRef
     func LLVMConstStringInContext(context: LLVMContextRef, str: CString, length: UInt32, dontNullTerminate: Int32): LLVMValueRef
+    func LLVMGetMDKindIDInContext(context: LLVMContextRef, name: CString, nameLen: UInt32): UInt32
+    func LLVMGetMDKindID(name: CString, nameLen: UInt32): UInt32
     func LLVMMDStringInContext2(context: LLVMContextRef, str: CString, length: UIntNative): LLVMMetadataRef
+    func LLVMMDNodeInContext2(context: LLVMContextRef, metadata: CPointer<LLVMMetadataRef>,
+        count: UIntNative): LLVMMetadataRef
     func LLVMMetadataAsValue(context: LLVMContextRef, metadata: LLVMMetadataRef): LLVMValueRef
     func LLVMValueAsMetadata(value: LLVMValueRef): LLVMMetadataRef
+    func LLVMGetMDString(value: LLVMValueRef, len: CPointer<UInt32>): CString
+    func LLVMGetMDNodeNumOperands(value: LLVMValueRef): UInt32
+    func LLVMGetMDNodeOperands(value: LLVMValueRef, dest: CPointer<LLVMValueRef>): Unit
+    func LLVMReplaceMDNodeOperandWith(value: LLVMValueRef, index: UInt32, replacement: LLVMMetadataRef): Unit
+    func LLVMHasMetadata(value: LLVMValueRef): Int32
+    func LLVMGetMetadata(value: LLVMValueRef, kindID: UInt32): LLVMValueRef
+    func LLVMSetMetadata(value: LLVMValueRef, kindID: UInt32, node: LLVMValueRef): Unit
     func LLVMTypeOf(value: LLVMValueRef): LLVMTypeRef
     func LLVMGetTypeContext(ty: LLVMTypeRef): LLVMContextRef
     func LLVMGetValueContext(value: LLVMValueRef): LLVMContextRef
@@ -300,12 +326,24 @@ foreign {
     func LLVMGetEnumAttributeKindForName(name: CString, len: UIntNative): UInt32
     func LLVMCreateEnumAttribute(context: LLVMContextRef, kindID: UInt32, value: UInt64): LLVMAttributeRef
     func LLVMCreateTypeAttribute(context: LLVMContextRef, kindID: UInt32, attrType: LLVMTypeRef): LLVMAttributeRef
+    func LLVMCreateStringAttribute(context: LLVMContextRef, key: CString, keyLen: UInt32, attrValue: CString,
+        attrValueLen: UInt32): LLVMAttributeRef
     func LLVMGetEnumAttributeKind(attr: LLVMAttributeRef): UInt32
+    func LLVMGetEnumAttributeValue(attr: LLVMAttributeRef): UInt64
     func LLVMGetTypeAttributeValue(attr: LLVMAttributeRef): LLVMTypeRef
+    func LLVMGetStringAttributeKind(attr: LLVMAttributeRef, len: CPointer<UInt32>): CString
+    func LLVMGetStringAttributeValue(attr: LLVMAttributeRef, len: CPointer<UInt32>): CString
+    func LLVMIsEnumAttribute(attr: LLVMAttributeRef): Int32
+    func LLVMIsStringAttribute(attr: LLVMAttributeRef): Int32
     func LLVMIsTypeAttribute(attr: LLVMAttributeRef): Int32
     func LLVMAddAttributeAtIndex(fn: LLVMValueRef, index: UInt32, attr: LLVMAttributeRef): Unit
     func LLVMGetAttributeCountAtIndex(fn: LLVMValueRef, index: UInt32): UInt32
     func LLVMGetAttributesAtIndex(fn: LLVMValueRef, index: UInt32, attrs: CPointer<LLVMAttributeRef>): Unit
+    func LLVMGetEnumAttributeAtIndex(fn: LLVMValueRef, index: UInt32, kindID: UInt32): LLVMAttributeRef
+    func LLVMGetStringAttributeAtIndex(fn: LLVMValueRef, index: UInt32, key: CString,
+        keyLen: UInt32): LLVMAttributeRef
+    func LLVMRemoveEnumAttributeAtIndex(fn: LLVMValueRef, index: UInt32, kindID: UInt32): Unit
+    func LLVMRemoveStringAttributeAtIndex(fn: LLVMValueRef, index: UInt32, key: CString, keyLen: UInt32): Unit
     func strcmp(lhs: CString, rhs: CString): Int32
     func strlen(str: CString): UIntNative
     func memcpy(dest: CPointer<UInt8>, src: CString, count: UIntNative): CPointer<UInt8>
@@ -377,25 +415,48 @@ public func LLVMConsumeMessage(message: CString): String {
     return converted
 }
 
-public class LLVMContextHandle {
+public class LLVMContextHandle <: Resource {
     public let raw: LLVMContextRef
+    private let owned: Bool
+    private var closed: Bool = false
 
-    public init(raw: LLVMContextRef) {
+    public init(raw: LLVMContextRef, owned!: Bool = true) {
         this.raw = raw
+        this.owned = owned
     }
 
     public static func Create(): LLVMContextHandle {
         return LLVMContextHandle(unsafe { LLVMContextCreate() })
     }
+
+    public func close(): Unit {
+        if (closed) {
+            return
+        }
+        if (owned && !raw.isNull()) {
+            unsafe { LLVMContextDispose(raw) }
+        }
+        closed = true
+    }
+
+    public func isClosed(): Bool {
+        return closed
+    }
 }
 
-public class LLVMModuleHandle {
+public class LLVMModuleHandle <: Resource {
     public let raw: LLVMModuleRef
     public let name: String
+    public let context: Option<LLVMContextHandle>
+    private var disposeContextOnClose: Bool
+    private var closed: Bool = false
 
-    public init(raw: LLVMModuleRef, name: String) {
+    public init(raw: LLVMModuleRef, name: String, context!: Option<LLVMContextHandle> = None,
+        disposeContextOnClose!: Bool = false) {
         this.raw = raw
         this.name = name
+        this.context = context
+        this.disposeContextOnClose = disposeContextOnClose
     }
 
     public static func Create(name: String, context: LLVMContextHandle): LLVMModuleHandle {
@@ -404,7 +465,7 @@ public class LLVMModuleHandle {
             moduleRaw = unsafe { LLVMModuleCreateWithNameInContext(moduleName.value, context.raw) }
             unsafe { LLVMSetSourceFileName(moduleRaw, moduleName.value, UIntNative(name.size)) }
         }
-        return LLVMModuleHandle(moduleRaw, name)
+        return LLVMModuleHandle(moduleRaw, name, context: Some(context))
     }
 
     public func SetDataLayout(layout: String): Unit {
@@ -432,10 +493,49 @@ public class LLVMModuleHandle {
     public func PrintToString(): String {
         return LLVMConsumeMessage(unsafe { LLVMPrintModuleToString(raw) })
     }
+
+    public func EnableContextDisposalOnClose(): Unit {
+        disposeContextOnClose = true
+    }
+
+    public func DisposeModuleOnly(): Unit {
+        if (closed) {
+            return
+        }
+        if (!raw.isNull()) {
+            unsafe { LLVMDisposeModule(raw) }
+        }
+        closed = true
+    }
+
+    public func DisposeWithContext(): Unit {
+        disposeContextOnClose = true
+        close()
+    }
+
+    public func close(): Unit {
+        if (closed) {
+            return
+        }
+        if (!raw.isNull()) {
+            unsafe { LLVMDisposeModule(raw) }
+        }
+        closed = true
+        if (disposeContextOnClose) {
+            if (let Some(contextHandle) <- context) {
+                contextHandle.close()
+            }
+        }
+    }
+
+    public func isClosed(): Bool {
+        return closed
+    }
 }
 
-public class LLVMBuilderHandle {
+public class LLVMBuilderHandle <: Resource {
     public let raw: LLVMBuilderRef
+    private var closed: Bool = false
 
     public init(raw: LLVMBuilderRef) {
         this.raw = raw
@@ -443,5 +543,19 @@ public class LLVMBuilderHandle {
 
     public static func Create(context: LLVMContextHandle): LLVMBuilderHandle {
         return LLVMBuilderHandle(unsafe { LLVMCreateBuilderInContext(context.raw) })
+    }
+
+    public func close(): Unit {
+        if (closed) {
+            return
+        }
+        if (!raw.isNull()) {
+            unsafe { LLVMDisposeBuilder(raw) }
+        }
+        closed = true
+    }
+
+    public func isClosed(): Bool {
+        return closed
     }
 }

@@ -81,7 +81,7 @@ public class CGPkgContext {
 
     public func Clear(): Unit {
         for (cgMod in cgMods) {
-            cgMod.GetCGContext().Clear()
+            cgMod.Clear()
         }
         correctedCachedMangleMap.Clear()
         quickCHIRValues.clear()
