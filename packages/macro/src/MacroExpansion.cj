@@ -12,6 +12,7 @@ import cangjie_compiler::parse.Block as ParsedBlock
 import cangjie_compiler::parse.CallExpr as ParsedCallExpr
 import cangjie_compiler::parse.ClassDecl as ParsedClassDecl
 import cangjie_compiler::parse.CommandTypePattern as ParsedCommandTypePattern
+import cangjie_compiler::parse.ConstantType as ParsedConstantType
 import cangjie_compiler::parse.ConstPattern as ParsedConstPattern
 import cangjie_compiler::parse.Decl as ParsedDecl
 import cangjie_compiler::parse.DiagSeverity as ParsedDiagSeverity
@@ -29,6 +30,7 @@ import cangjie_compiler::parse.FuncBody as ParsedFuncBody
 import cangjie_compiler::parse.FuncDecl as ParsedFuncDecl
 import cangjie_compiler::parse.FuncParam as ParsedFuncParam
 import cangjie_compiler::parse.FuncParamList as ParsedFuncParamList
+import cangjie_compiler::parse.FuncType as ParsedFuncType
 import cangjie_compiler::parse.IfExpr as ParsedIfExpr
 import cangjie_compiler::parse.IncOrDecExpr as ParsedIncOrDecExpr
 import cangjie_compiler::parse.InterpolationExpr as ParsedInterpolationExpr
@@ -50,12 +52,15 @@ import cangjie_compiler::parse.Modifier as ParsedModifier
 import cangjie_compiler::parse.Node as ParsedNode
 import cangjie_compiler::parse.OptionalChainExpr as ParsedOptionalChainExpr
 import cangjie_compiler::parse.OptionalExpr as ParsedOptionalExpr
+import cangjie_compiler::parse.OptionType as ParsedOptionType
 import cangjie_compiler::parse.ParenExpr as ParsedParenExpr
+import cangjie_compiler::parse.ParenType as ParsedParenType
 import cangjie_compiler::parse.Parser as GeneratedParser
 import cangjie_compiler::parse.Pattern as ParsedPattern
 import cangjie_compiler::parse.PerformExpr as ParsedPerformExpr
 import cangjie_compiler::parse.PrimitiveType as ParsedPrimitiveType
 import cangjie_compiler::parse.PrimitiveTypeExpr as ParsedPrimitiveTypeExpr
+import cangjie_compiler::parse.QualifiedType as ParsedQualifiedType
 import cangjie_compiler::parse.QuoteExpr as ParsedQuoteExpr
 import cangjie_compiler::parse.RangeExpr as ParsedRangeExpr
 import cangjie_compiler::parse.RefExpr as ParsedRefExpr
@@ -75,6 +80,7 @@ import cangjie_compiler::parse.TryExpr as ParsedTryExpr
 import cangjie_compiler::parse.TupleLit as ParsedTupleLit
 import cangjie_compiler::parse.Type as ParsedType
 import cangjie_compiler::parse.TypeConvExpr as ParsedTypeConvExpr
+import cangjie_compiler::parse.TupleType as ParsedTupleType
 import cangjie_compiler::parse.TuplePattern as ParsedTuplePattern
 import cangjie_compiler::parse.TypePattern as ParsedTypePattern
 import cangjie_compiler::parse.UnaryExpr as ParsedUnaryExpr
@@ -82,9 +88,11 @@ import cangjie_compiler::parse.VarDecl as ParsedVarDecl
 import cangjie_compiler::parse.VarOrEnumPattern as ParsedVarOrEnumPattern
 import cangjie_compiler::parse.VarPattern as ParsedVarPattern
 import cangjie_compiler::parse.VarWithPatternDecl as ParsedVarWithPatternDecl
+import cangjie_compiler::parse.VArrayType as ParsedVArrayType
 import cangjie_compiler::parse.WildcardExpr as ParsedWildcardExpr
 import cangjie_compiler::parse.WildcardPattern as ParsedWildcardPattern
 import cangjie_compiler::parse.WhileExpr as ParsedWhileExpr
+import cangjie_compiler::parse.ThisType as ParsedThisType
 
 private func hasNoMacros(mc: MacroCollector): Bool {
     return mc.macroDefFuncs.isEmpty() && mc.macCalls.isEmpty()
@@ -1125,7 +1133,83 @@ private func convertParsedType(parsedType: ParsedType, fallbackFile: Option<File
     if (let Some(parsedReference) <- (parsedType as ParsedRefType)) {
         let targetReference = RefType(parsedReference.identifier.GetRawText())
         copyParsedNodeBase(parsedReference, targetReference, fallbackFile)
+        for (typeArgument in parsedReference.typeArguments) {
+            targetReference.typeArguments.add(convertParsedType(typeArgument, fallbackFile))
+        }
         return targetReference
+    }
+    if (let Some(parsedQualifiedType) <- (parsedType as ParsedQualifiedType)) {
+        let targetQualifiedType = QualifiedType()
+        copyParsedNodeBase(parsedQualifiedType, targetQualifiedType, fallbackFile)
+        targetQualifiedType.field = parsedQualifiedType.field.GetRawText()
+        if (let Some(parsedBaseType) <- parsedQualifiedType.baseType) {
+            targetQualifiedType.baseType = Some(convertParsedType(parsedBaseType, fallbackFile))
+        }
+        for (qualifiedTypeArgument in parsedQualifiedType.typeArguments) {
+            targetQualifiedType.typeArguments.add(convertParsedType(qualifiedTypeArgument, fallbackFile))
+        }
+        return targetQualifiedType
+    }
+    if (let Some(parsedOptionType) <- (parsedType as ParsedOptionType)) {
+        let targetOptionType = OptionType()
+        copyParsedNodeBase(parsedOptionType, targetOptionType, fallbackFile)
+        targetOptionType.questNum = parsedOptionType.questNum
+        if (let Some(parsedComponentType) <- parsedOptionType.componentType) {
+            targetOptionType.componentType = Some(convertParsedType(parsedComponentType, fallbackFile))
+        }
+        return targetOptionType
+    }
+    if (let Some(parsedConstantType) <- (parsedType as ParsedConstantType)) {
+        let targetConstantType = ConstantType()
+        copyParsedNodeBase(parsedConstantType, targetConstantType, fallbackFile)
+        if (let Some(parsedConstantExpr) <- parsedConstantType.constantExpr) {
+            targetConstantType.constantExpr = Some(convertParsedExpr(parsedConstantExpr, fallbackFile))
+        }
+        return targetConstantType
+    }
+    if (let Some(parsedVArrayType) <- (parsedType as ParsedVArrayType)) {
+        let targetVArrayType = VArrayType()
+        copyParsedNodeBase(parsedVArrayType, targetVArrayType, fallbackFile)
+        if (let Some(parsedTypeArgument) <- parsedVArrayType.typeArgument) {
+            targetVArrayType.typeArgument = Some(convertParsedType(parsedTypeArgument, fallbackFile))
+        }
+        if (let Some(parsedConstantType) <- parsedVArrayType.constantType) {
+            targetVArrayType.constantType = Some(convertParsedType(parsedConstantType, fallbackFile))
+        }
+        return targetVArrayType
+    }
+    if (let Some(parsedParenType) <- (parsedType as ParsedParenType)) {
+        let targetParenType = ParenType()
+        copyParsedNodeBase(parsedParenType, targetParenType, fallbackFile)
+        if (let Some(parsedInnerType) <- parsedParenType.innerType) {
+            targetParenType.innerType = Some(convertParsedType(parsedInnerType, fallbackFile))
+        }
+        return targetParenType
+    }
+    if (let Some(parsedTupleType) <- (parsedType as ParsedTupleType)) {
+        let targetTupleType = TupleType()
+        copyParsedNodeBase(parsedTupleType, targetTupleType, fallbackFile)
+        for (fieldType in parsedTupleType.fieldTypes) {
+            targetTupleType.fieldTypes.add(convertParsedType(fieldType, fallbackFile))
+        }
+        return targetTupleType
+    }
+    if (let Some(parsedFuncType) <- (parsedType as ParsedFuncType)) {
+        let targetFuncType = FuncType()
+        copyParsedNodeBase(parsedFuncType, targetFuncType, fallbackFile)
+        targetFuncType.isC = parsedFuncType.isC
+        for (paramType in parsedFuncType.paramTypes) {
+            targetFuncType.paramTypes.add(convertParsedType(paramType, fallbackFile))
+        }
+        if (let Some(parsedRetType) <- parsedFuncType.retType) {
+            targetFuncType.retType = Some(convertParsedType(parsedRetType, fallbackFile))
+        }
+        return targetFuncType
+    }
+    if (let Some(parsedThisType) <- (parsedType as ParsedThisType)) {
+        let targetThisType = ThisType()
+        copyParsedNodeBase(parsedThisType, targetThisType, fallbackFile)
+        return targetThisType
     }
     let targetType = Type()
     copyParsedNodeBase(parsedType, targetType, fallbackFile)

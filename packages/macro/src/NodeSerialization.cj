@@ -183,7 +183,37 @@ public class NodeWriter {
             return "primitiveType(" + kindName + ")"
         }
         if (let Some(refType) <- (ty as RefType)) {
-            return "refType(" + EscapeNodeText(refType.name) + ")"
+            return "refType(" + EscapeNodeText(refType.name) + ";args=" + SerializeTypeVector(refType.typeArguments) +
+                ")"
+        }
+        if (let Some(qualifiedType) <- (ty as QualifiedType)) {
+            return "qualifiedType(base=" + SerializeTypeOptionForNodeWriter(this, qualifiedType.baseType) +
+                ";field=" + EscapeNodeText(qualifiedType.field) + ";args=" +
+                SerializeTypeVector(qualifiedType.typeArguments) + ")"
+        }
+        if (let Some(optionType) <- (ty as OptionType)) {
+            return "optionType(component=" + SerializeTypeOptionForNodeWriter(this, optionType.componentType) +
+                ";questNum=" + optionType.questNum.toString() + ")"
+        }
+        if (let Some(constantType) <- (ty as ConstantType)) {
+            return "constantType(expr=" + SerializeExprOptionForNodeWriter(this, constantType.constantExpr) + ")"
+        }
+        if (let Some(vArrayType) <- (ty as VArrayType)) {
+            return "vArrayType(arg=" + SerializeTypeOptionForNodeWriter(this, vArrayType.typeArgument) + ";size=" +
+                SerializeTypeOptionForNodeWriter(this, vArrayType.constantType) + ")"
+        }
+        if (let Some(parenType) <- (ty as ParenType)) {
+            return "parenType(" + SerializeTypeOptionForNodeWriter(this, parenType.innerType) + ")"
+        }
+        if (let Some(tupleType) <- (ty as TupleType)) {
+            return "tupleType(" + SerializeTypeVector(tupleType.fieldTypes) + ")"
+        }
+        if (let Some(funcType) <- (ty as FuncType)) {
+            return "funcType(params=" + SerializeTypeVector(funcType.paramTypes) + ";ret=" +
+                SerializeTypeOptionForNodeWriter(this, funcType.retType) + ";isC=" + funcType.isC.toString() + ")"
+        }
+        if (let Some(_) <- (ty as ThisType)) {
+            return "thisType()"
         }
         return "type(" + ASTKindIndex(ty.astKind).toString() + "," + EscapeNodeText(ty.name) + ")"
     }

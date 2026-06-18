@@ -198,30 +198,177 @@ public open class Type <: Node {
     public init() {
         super(ASTKind.TYPE)
     }
+
+    public init(kind: ASTKind) {
+        super(kind)
+    }
 }
 
 public class PrimitiveType <: Type {
     public var kind: TypeKind = TypeKind.TYPE_INVALID
 
     public init() {
-        super()
+        super(ASTKind.PRIMITIVE_TYPE)
     }
 
     public init(kind: TypeKind) {
-        super()
+        super(ASTKind.PRIMITIVE_TYPE)
         this.kind = kind
         name = TypeKindName(kind)
     }
 }
 
 public class RefType <: Type {
+    public let typeArguments: ArrayList<Type> = ArrayList<Type>()
+
     public init() {
-        super()
+        super(ASTKind.REF_TYPE)
     }
 
     public init(name: String) {
-        super()
+        super(ASTKind.REF_TYPE)
         this.name = name
+    }
+
+    public override func Children(): ArrayList<Node> {
+        let out = ArrayList<Node>()
+        for (ty in typeArguments) {
+            out.add(ty)
+        }
+        return out
+    }
+}
+
+public class QualifiedType <: Type {
+    public var baseType: Option<Type> = None
+    public var field: String = ""
+    public let typeArguments: ArrayList<Type> = ArrayList<Type>()
+
+    public init() {
+        super(ASTKind.QUALIFIED_TYPE)
+    }
+
+    public override func Children(): ArrayList<Node> {
+        let out = ArrayList<Node>()
+        if (let Some(base) <- baseType) {
+            out.add(base)
+        }
+        for (ty in typeArguments) {
+            out.add(ty)
+        }
+        return out
+    }
+}
+
+public class OptionType <: Type {
+    public var componentType: Option<Type> = None
+    public var questNum: UInt64 = 0u64
+
+    public init() {
+        super(ASTKind.OPTION_TYPE)
+    }
+
+    public override func Children(): ArrayList<Node> {
+        let out = ArrayList<Node>()
+        if (let Some(component) <- componentType) {
+            out.add(component)
+        }
+        return out
+    }
+}
+
+public class ConstantType <: Type {
+    public var constantExpr: Option<Expr> = None
+
+    public init() {
+        super(ASTKind.CONSTANT_TYPE)
+    }
+
+    public override func Children(): ArrayList<Node> {
+        let out = ArrayList<Node>()
+        if (let Some(expr) <- constantExpr) {
+            out.add(expr)
+        }
+        return out
+    }
+}
+
+public class VArrayType <: Type {
+    public var typeArgument: Option<Type> = None
+    public var constantType: Option<Type> = None
+
+    public init() {
+        super(ASTKind.VARRAY_TYPE)
+    }
+
+    public override func Children(): ArrayList<Node> {
+        let out = ArrayList<Node>()
+        if (let Some(argument) <- typeArgument) {
+            out.add(argument)
+        }
+        if (let Some(sizeType) <- constantType) {
+            out.add(sizeType)
+        }
+        return out
+    }
+}
+
+public class ParenType <: Type {
+    public var innerType: Option<Type> = None
+
+    public init() {
+        super(ASTKind.PAREN_TYPE)
+    }
+
+    public override func Children(): ArrayList<Node> {
+        let out = ArrayList<Node>()
+        if (let Some(inner) <- innerType) {
+            out.add(inner)
+        }
+        return out
+    }
+}
+
+public class TupleType <: Type {
+    public let fieldTypes: ArrayList<Type> = ArrayList<Type>()
+
+    public init() {
+        super(ASTKind.TUPLE_TYPE)
+    }
+
+    public override func Children(): ArrayList<Node> {
+        let out = ArrayList<Node>()
+        for (ty in fieldTypes) {
+            out.add(ty)
+        }
+        return out
+    }
+}
+
+public class FuncType <: Type {
+    public let paramTypes: ArrayList<Type> = ArrayList<Type>()
+    public var retType: Option<Type> = None
+    public var isC: Bool = false
+
+    public init() {
+        super(ASTKind.FUNC_TYPE)
+    }
+
+    public override func Children(): ArrayList<Node> {
+        let out = ArrayList<Node>()
+        for (ty in paramTypes) {
+            out.add(ty)
+        }
+        if (let Some(ret) <- retType) {
+            out.add(ret)
+        }
+        return out
+    }
+}
+
+public class ThisType <: Type {
+    public init() {
+        super(ASTKind.THIS_TYPE)
     }
 }
 
