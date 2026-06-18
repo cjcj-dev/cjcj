@@ -92,6 +92,28 @@ public class Translator {
         this.globalSymbolTable = globalSymbolTable
     }
 
+    public func TranslateGlobalVarInitializer(fn: Function, decl: AstVarDecl, globalVar: GlobalVar): Unit {
+        let body = fn.GetBody() ??
+            throw IllegalStateException("faithful AST2CHIR global initializer function has no body")
+        let entry = body.GetEntryBlock() ??
+            throw IllegalStateException("faithful AST2CHIR global initializer function has no entry block")
+        let savedFunc = currentFunc
+        let savedBlock = currentBlock
+        currentFunc = fn
+        currentBlock = entry
+        blockGroupStack.add(body)
+        let initExpr = RequireExpr(decl.initializer, "global variable initializer")
+        let initValue = Translator.TranslateASTNode(initExpr, this) ??
+            throw IllegalStateException("faithful AST2CHIR global variable initializer produced no value")
+        builder.CreateStore(initValue, globalVar, CurrentBlock())
+        if (CurrentBlock().GetTerminator().isNone()) {
+            builder.CreateExit(None, CurrentBlock())
+        }
+        blockGroupStack.remove(at: blockGroupStack.size - 1)
+        currentFunc = savedFunc
+        currentBlock = savedBlock
+    }
+
     public static func TranslateASTNode(node: AstNode, trans: Translator): Option<Value> {
         let nodePtr = GetDesugaredExpr(node)
         return match (nodePtr.astKind) {
