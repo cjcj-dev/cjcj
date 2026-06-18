@@ -96,14 +96,14 @@ public class ExpressionFlatSet {
 
     public func ToString(): String {
         if (kind == ExpressionFlatSetKind.TOP) {
-            return "T"
+            return "top"
         }
         if (kind == ExpressionFlatSetKind.BOTTOM) {
-            return "_"
+            return "bottom"
         }
         if (let Some(value) <- elem) {
-            return value.GetExprKindName() + "#" + value.nodeId.toString()
+            return value.ToString(0)
         }
-        return "_"
+        return "bottom"
     }
 }

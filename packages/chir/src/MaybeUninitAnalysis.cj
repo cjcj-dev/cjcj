@@ -383,41 +383,85 @@ public func SaveAllocateMap(body: BlockGroup, allocateIdx: Int64, allocateIdxMap
 
 public func IsInitialisingMemberVar(functionValue: Function, store: Expression,
     ctorInitInfo: ConstructorInitInfo): Option<Int64> {
-    if (!functionValue.IsConstructor() || store.GetNumOfOperands() == 0) {
-        return None
+    let parentFunction = GetParentFunctionForStore(functionValue, store)
+    if (let Some(storeRef) <- (store as StoreElementRef)) {
+        return IsInitialisingMemberVar(parentFunction, storeRef)
     }
-    if (store.GetNumOfOperands() > 1) {
-        let maybeIndex = ResolveMemberIndexFromValue(store.GetOperand(1), ctorInitInfo)
-        if (maybeIndex.isSome()) {
-            return maybeIndex
-        }
-    }
-    return ResolveMemberIndexFromValue(store.GetOperand(0), ctorInitInfo)
-}
-
-private func ResolveMemberIndexFromValue(value: Value, ctorInitInfo: ConstructorInitInfo): Option<Int64> {
-    let srcName = value.GetSrcCodeIdentifier()
-    let idName = value.GetIdentifierWithoutPrefix()
-    var offset = ctorInitInfo.superMemberNums
-    if (let Some(def) <- ctorInitInfo.thisCustomDef) {
-        var idx: Int64 = 0
-        for (member in def.GetInstanceVars()) {
-            if ((!srcName.isEmpty() && member.name == srcName) || (!idName.isEmpty() && member.name == idName)) {
-                return offset + idx
-            }
-            idx++
-        }
-    }
-    if (let Some(superDef) <- ctorInitInfo.superClassDef) {
-        var idx: Int64 = 0
-        for (member in superDef.GetInstanceVars()) {
-            if ((!srcName.isEmpty() && member.name == srcName) || (!idName.isEmpty() && member.name == idName)) {
-                return idx
-            }
-            idx++
-        }
+    if (let Some(storeByName) <- (store as StoreElementByName)) {
+        return IsInitialisingMemberVarByName(parentFunction, storeByName, ctorInitInfo)
     }
     return None
+}
+
+public func IsInitialisingMemberVar(functionValue: Function, store: StoreElementRef): Option<Int64> {
+    if (!IsConstructorOrInstanceVarInit(functionValue) || functionValue.GetNumOfParams() == 0) {
+        return None
+    }
+    let location = store.GetLocation()
+    if (!location.IsParameter() || location.nodeId != functionValue.GetParam(0).nodeId) {
+        return None
+    }
+    let path = store.GetPath()
+    if (path.size != 1 || path[0] > 9223372036854775807u64) {
+        return None
+    }
+    return Int64(path[0])
+}
+
+private func IsInitialisingMemberVarByName(functionValue: Function, store: StoreElementByName,
+    ctorInitInfo: ConstructorInitInfo): Option<Int64> {
+    if (!IsConstructorOrInstanceVarInit(functionValue) || functionValue.GetNumOfParams() == 0) {
+        return None
+    }
+    let location = store.GetLocation()
+    if (!location.IsParameter() || location.nodeId != functionValue.GetParam(0).nodeId) {
+        return None
+    }
+    let names = store.GetNames()
+    if (names.size != 1) {
+        return None
+    }
+    return ResolveMemberIndexFromName(names[0], ctorInitInfo)
+}
+
+private func GetParentFunctionForStore(functionValue: Function, store: Expression): Function {
+    if (let Some(parentFunc) <- store.GetTopLevelFunc()) {
+        return parentFunc
+    }
+    return functionValue
+}
+
+private func IsConstructorOrInstanceVarInit(functionValue: Function): Bool {
+    return functionValue.IsConstructor() || functionValue.IsInstanceVarInit()
+}
+
+private func ResolveMemberIndexFromName(name: String, ctorInitInfo: ConstructorInitInfo): Option<Int64> {
+    if (let Some(def) <- ctorInitInfo.thisCustomDef) {
+        return ResolveMemberIndexFromDef(name, def)
+    }
+    if (let Some(superDef) <- ctorInitInfo.superClassDef) {
+        return ResolveMemberIndexFromDef(name, superDef)
+    }
+    return None
+}
+
+private func ResolveMemberIndexFromDef(name: String, def: CustomTypeDef): Option<Int64> {
+    let members = def.GetAllInstanceVars()
+    if (members.isEmpty()) {
+        return None
+    }
+    var idx = members.size - 1
+    while (idx >= 0) {
+        if (MemberNameMatches(members[idx], name)) {
+            return idx
+        }
+        idx--
+    }
+    return None
+}
+
+private func MemberNameMatches(member: MemberVarInfo, name: String): Bool {
+    return member.name == name || (!member.rawMangledName.isEmpty() && member.rawMangledName == name)
 }
 
 private func AddLineIfMissing(lines: ArrayList<Int64>, line: Int64): Unit {
