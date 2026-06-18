@@ -97,6 +97,14 @@ local object list approximation. Codegen now receives the real option object
 directly instead of a partial field-copy shim, reducing drift from the C++
 `globalOptions = frontendOptions` behavior.
 
+This continuation tightened the remaining Frontend compatibility model used by
+`.cj.d` custom annotation merging. `PropDecl` now carries `ASTKind.PROP_DECL`
+instead of inheriting `VAR_DECL` from the variable compatibility node, matching
+the real AST split. The `.cj.d` declaration matcher now includes normalized
+generic constraints and macro expansion call identity in its merge key, closer
+to the C++ `IsSameGeneric` and `MACRO_EXPAND_DECL` checks while the full real
+AST/type identity path is still being wired.
+
 ## Important Blocker
 
 `packages/frontend/cjpm.toml` now imports the real `basic`, `lex`, `option`, and

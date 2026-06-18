@@ -532,6 +532,10 @@ public open class VarDecl <: Decl {
     public init() {
         super(ASTKind.VAR_DECL)
     }
+
+    public init(kind: ASTKind) {
+        super(kind)
+    }
 }
 
 public class VarWithPatternDecl <: Decl {
@@ -590,7 +594,7 @@ public class TypeAliasDecl <: Decl {
 
 public class PropDecl <: VarDecl {
     public init() {
-        super()
+        super(ASTKind.PROP_DECL)
     }
 }
 

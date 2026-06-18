@@ -162,6 +162,11 @@ private func declMatchKey(decl: Decl): String {
             builder.append(param)
             builder.append(";")
         }
+        builder.append("|gc:")
+        for (constraint in generic.genericConstraints) {
+            builder.append(normalizeGenericConstraint(constraint))
+            builder.append(";")
+        }
     }
     if (let Some(funcDecl) <- (decl as FuncDecl)) {
         builder.append("|params:")
@@ -191,8 +196,17 @@ private func declMatchKey(decl: Decl): String {
             builder.append("|inherit:")
             builder.append(typeKey(typeNode))
         }
+    } else if (let Some(macroDecl) <- (decl as MacroExpandDecl)) {
+        builder.append("|macro:")
+        builder.append(macroDecl.invocation.fullName)
+        builder.append("|")
+        builder.append(macroDecl.invocation.identifier)
     }
     return builder.toString()
+}
+
+private func normalizeGenericConstraint(constraint: String): String {
+    return constraint.replace(" ", "")
 }
 
 private func typeKey(typeNode: Type): String {
