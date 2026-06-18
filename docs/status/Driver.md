@@ -22,8 +22,12 @@ Current status:
   packages instead of carrying local compatibility copies for compiler version
   printing, target/optimization/output/sanitizer enums, `TripleInfo`, and
   `FileUtil`. Driver-owned model types remain only for Driver concepts such as
-  tool IDs, tool futures, ordered inputs, environment options, and temp-file
-  records.
+  tool IDs, tool futures, and temp-file records.
+- Driver no longer carries local compatibility copies of option-owned
+  `OrderedInput` or `EnvironmentOptions`; those aliases now resolve to the real
+  `option` package types. Environment path ingestion uses the shared
+  `MaybeString` representation and mirrors the C++ absolute-path normalization
+  for `CANGJIE_HOME` and `SDKROOT`.
 - Driver help output now delegates to the shared `option.OptionTable.Usage`
   path with the real global/driver option groups and experimental-mode
   filtering, replacing the local abbreviated compatibility usage text. Version
@@ -44,6 +48,13 @@ Current status:
   `chir`/`obj`/`hotreload` output-type parsing, PGO flags, section flags, jobs,
   warning forwarding, and target-triple validation are represented in Driver
   options.
+- Coverage post-action reprocessing now matches the C++ `GlobalOptions`
+  behavior by warning and forcing optimization back to `O0`; optimization
+  levels no longer implicitly enable function/data sections, which are now
+  controlled only by their explicit section flags as in the C++ option actions.
+- Obfuscation post-action validation now follows the C++ `DriverOptions`
+  failure order and emits the specific error for each layout-only sub-option
+  instead of a single grouped compatibility diagnostic.
 - Driver post-action validation now carries more of the C++ `GlobalOptions`
   behavior needed by Driver: `--compile-as-exe` is tracked separately from
   `--compile-target`, LTO mode rejects unsupported targets/options, PGO gen/use
@@ -68,6 +79,9 @@ Current status:
   script placement, sanitizer runtime lookup/fallbacks, PGO runtime placement,
   LTO linker options, target runtime rpath, standard-library static/dynamic
   grouping, and multi-module package partial linking are implemented.
+- Thin-LTO linker option generation now resolves the cache directory to an
+  absolute path and escapes backticks before emitting `--thinlto-cache-dir`,
+  matching the C++ `ToolOptions::LLD::SetLTOOptions` behavior.
 - Mach-O native linking now mirrors the C++ Darwin/iOS command builders more
   closely: SDK version probing, `ld64.lld` `-platform_version` arguments,
   target-qualified runtime/library search paths, `section.o`/`cjstart.o`

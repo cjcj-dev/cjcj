@@ -149,25 +149,34 @@ public class DriverOptions {
             environment.allVariables.add(key, value)
         }
         if (let Some(home) <- environmentVars.get("CANGJIE_HOME")) {
-            environment.cangjieHome = home
+            environment.cangjieHome = MaybeString()
+            if (let Some(absHome) <- FileUtil.GetAbsPath(home)) {
+                environment.cangjieHome = MaybeString(absHome)
+            }
         }
         if (let Some(pathsValue) <- environmentVars.get("CANGJIE_PATH")) {
+            environment.cangjiePaths.clear()
             for (item in FileUtil.SplitEnvironmentPaths(pathsValue)) {
                 environment.cangjiePaths.add(item)
             }
         }
         if (let Some(libraryValue) <- environmentVars.get("LIBRARY_PATH")) {
+            environment.libraryPaths.clear()
             for (item in FileUtil.SplitEnvironmentPaths(libraryValue)) {
                 environment.libraryPaths.add(item)
             }
         }
         if (let Some(pathValue) <- environmentVars.get("PATH")) {
+            environment.paths.clear()
             for (item in FileUtil.SplitEnvironmentPaths(pathValue)) {
                 environment.paths.add(item)
             }
         }
         if (let Some(sdkRoot) <- environmentVars.get("SDKROOT")) {
-            environment.macOSSDKRoot = sdkRoot
+            environment.macOSSDKRoot = MaybeString()
+            if (let Some(absSdkRoot) <- FileUtil.GetAbsPath(sdkRoot)) {
+                environment.macOSSDKRoot = MaybeString(absSdkRoot)
+            }
         }
         if (let Some(macosSdkRoot) <- environmentVars.get("MACOSX_DEPLOYMENT_TARGET")) {
             let _ = macosSdkRoot
@@ -284,10 +293,6 @@ public class DriverOptions {
 
     public func SetOptimizationLevel(level: OptimizationLevel): Bool {
         optimizationLevel = level
-        if (OptimizationLevelIndex(level) >= OptimizationLevelIndex(OptimizationLevel.O2)) {
-            enableFuncSections = true
-            enableDataSections = true
-        }
         return true
     }
 
@@ -368,6 +373,7 @@ public class DriverOptions {
         success = success && CheckTargetCPUOption()
         success = success && CheckObfuscationOptions()
         success = success && SetupSysroot()
+        success = success && ReprocessCoverageOptions()
         success = success && CheckSanitizerOptions()
         success = success && CheckLTOOptions()
         success = success && CheckPGOOptions()
@@ -383,11 +389,35 @@ public class DriverOptions {
         if (enableCompileDebug && IsObfuscationEnabled()) {
             eprintln("warning: Obfuscation options should be used without '-g' or debugging may not work properly.")
         }
-        if (!(enableLayoutObfuscation ?? false) && (HasStringValue(layoutObfInputSymMappingFiles) ||
-            HasStringValue(layoutObfOutputSymMappingFile) || HasStringValue(layoutObfUserMappingFile) ||
-            HasBoolValue(enableObfExportSyms) || HasBoolValue(enableObfLineNumber) ||
-            HasBoolValue(enableObfSourcePath) || HasStringValue(layoutObfSymPrefix))) {
-            eprintln("error: layout obfuscation sub-options require layout obfuscation to be enabled.")
+        if (enableLayoutObfuscation ?? false) {
+            return true
+        }
+        if (HasStringValue(layoutObfInputSymMappingFiles)) {
+            eprintln("error: Input symbol mapping files can be specified only when layout obfuscation is enabled.")
+            return false
+        }
+        if (HasStringValue(layoutObfOutputSymMappingFile)) {
+            eprintln("error: Output symbol mapping file can be specified only when layout obfuscation is enabled.")
+            return false
+        }
+        if (HasStringValue(layoutObfUserMappingFile)) {
+            eprintln("error: User-defined symbol mapping file can be specified only when layout obfuscation is enabled.")
+            return false
+        }
+        if (HasBoolValue(enableObfExportSyms)) {
+            eprintln("error: You can set whether to obfuscate export symbols only when layout obfuscation is enabled.")
+            return false
+        }
+        if (HasBoolValue(enableObfLineNumber)) {
+            eprintln("error: You can set whether to obfuscate line number only when layout obfuscation is enabled.")
+            return false
+        }
+        if (HasBoolValue(enableObfSourcePath)) {
+            eprintln("error: You can set whether to obfuscate source path only when layout obfuscation is enabled.")
+            return false
+        }
+        if (HasStringValue(layoutObfSymPrefix)) {
+            eprintln("error: Symbol prefix can be specified only when layout obfuscation is enabled.")
             return false
         }
         return true
@@ -415,8 +445,8 @@ public class DriverOptions {
 
     private func SetupSysroot(): Bool {
         if (!customizedSysroot && target.IsMacOS()) {
-            if (let Some(sdkRoot) <- environment.macOSSDKRoot) {
-                sysroot = sdkRoot
+            if (environment.macOSSDKRoot.hasValue) {
+                sysroot = environment.macOSSDKRoot.value
             }
         }
         return true
@@ -448,6 +478,14 @@ public class DriverOptions {
         }
         if (IsCrossCompiling()) {
             eprintln("warning: '--sanitize-set-rpath' option has no effect on cross-compiled targets.")
+        }
+        return true
+    }
+
+    private func ReprocessCoverageOptions(): Bool {
+        if (enableCoverage && optimizationLevel != OptimizationLevel.O0) {
+            eprintln("warning: '--coverage' should be used without optimizations.")
+            return SetOptimizationLevel(OptimizationLevel.O0)
         }
         return true
     }
