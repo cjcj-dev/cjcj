@@ -3,52 +3,10 @@ package cangjie_compiler::parse
 import std.collection.*
 import cangjie_compiler::ast.AnnotationKind as AstAnnotationKind
 public import cangjie_compiler::ast.{ASTKind, ASTKindIndex, Attribute, AttributeIndex, AttributePack}
-public import cangjie_compiler::ast.{Identifier, SrcIdentifier}
+public import cangjie_compiler::ast.{Identifier, Node, SrcIdentifier}
 public import cangjie_compiler::utils.OverflowStrategy
 
 public type AnnotationKind = AstAnnotationKind
-
-public open class Node {
-    public var begin: Position = INVALID_POSITION
-    public var end: Position = INVALID_POSITION
-    public var curMacroCall: Option<Node> = None
-    public var curFile: Option<File> = None
-    public let astKind: ASTKind
-    private let attributes: AttributePack = AttributePack()
-
-    public init() {
-        astKind = ASTKind.NODE
-    }
-
-    public init(kind: ASTKind) {
-        astKind = kind
-    }
-
-    public open func EnableAttr(attr: Attribute): Unit {
-        attributes.SetAttr(attr, true)
-    }
-
-    public open func DisableAttr(attr: Attribute): Unit {
-        attributes.SetAttr(attr, false)
-    }
-
-    public open func TestAttr(attr: Attribute): Bool {
-        return attributes.TestAttr(attr)
-    }
-
-    public mut prop isBroken: Bool {
-        get() { return TestAttr(Attribute.IS_BROKEN) }
-        set(value) { if (value) { EnableAttr(Attribute.IS_BROKEN) } else { DisableAttr(Attribute.IS_BROKEN) } }
-    }
-
-    public open func Children(): ArrayList<Node> {
-        return ArrayList<Node>()
-    }
-
-    public open func ToString(): String {
-        return ""
-    }
-}
 
 public enum ModifierKind {
     | PUBLIC | PROTECTED | INTERNAL | PRIVATE | STATIC | ABSTRACT | OPEN | SEALED | OVERRIDE

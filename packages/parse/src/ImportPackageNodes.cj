@@ -34,11 +34,6 @@ public class ImportContent <: Node {
     public var rightCurlPos: Position = INVALID_POSITION
     public var isDecl: Bool = false
 
-    public mut prop hasBroken: Bool {
-        get() { return TestAttr(Attribute.HAS_BROKEN) }
-        set(value) { if (value) { EnableAttr(Attribute.HAS_BROKEN) } else { DisableAttr(Attribute.HAS_BROKEN) } }
-    }
-
     public init() { super(ASTKind.IMPORT_CONTENT) }
 
     public func MarkBroken(): Unit {

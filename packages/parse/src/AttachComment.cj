@@ -17,8 +17,6 @@ extend ParserImpl {
 
     public func AttachCommentToNodes(nodes: ArrayList<Node>): Unit {
         commentsMap.Put(UInt32(lexer.GetFileID()), CommentList())
-        for (node in nodes) {
-            node.curFile = if (let Some(file) <- currentFile) { file } else { None }
-        }
+        let _ = nodes
     }
 }

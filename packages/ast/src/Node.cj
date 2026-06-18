@@ -85,6 +85,10 @@ public open class Node {
         return attributes.Clone()
     }
 
+    public func GetAttrsVector(): ArrayList<Attribute> {
+        return attributes.GetAllAttrs()
+    }
+
     public func CopyAttrs(attrs: AttributePack): Unit {
         attributes = attrs.Clone()
     }
@@ -115,6 +119,16 @@ public open class Node {
 
     public func TestAnyAttr(first: Attribute, second: Attribute, third: Attribute): Bool {
         return TestAttr(first) || TestAttr(second) || TestAttr(third)
+    }
+
+    public mut prop isBroken: Bool {
+        get() { return TestAttr(Attribute.IS_BROKEN) }
+        set(value) { if (value) { EnableAttr(Attribute.IS_BROKEN) } else { DisableAttr(Attribute.IS_BROKEN) } }
+    }
+
+    public mut prop hasBroken: Bool {
+        get() { return TestAttr(Attribute.HAS_BROKEN) }
+        set(value) { if (value) { EnableAttr(Attribute.HAS_BROKEN) } else { DisableAttr(Attribute.HAS_BROKEN) } }
     }
 
     public open func Clear(): Unit {
@@ -202,6 +216,10 @@ public open class Node {
 
     public open func IsOpen(): Bool {
         return false
+    }
+
+    public open func Children(): ArrayList<Node> {
+        return ArrayList<Node>()
     }
 
     public func ShouldDiagnose(allowCompilerAdd!: Bool = false): Bool {

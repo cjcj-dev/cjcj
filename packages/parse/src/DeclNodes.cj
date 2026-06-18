@@ -5,7 +5,6 @@ import std.collection.*
 public open class Decl <: Node {
     public let modifiers: ArrayList<Modifier> = ArrayList<Modifier>()
     public let annotations: ArrayList<Annotation> = ArrayList<Annotation>()
-    private let attributes: ArrayList<Attribute> = ArrayList<Attribute>()
     public var identifier: SrcIdentifier = SrcIdentifier()
     public var keywordPos: Position = INVALID_POSITION
     public var generic: Option<Generic> = None
@@ -23,49 +22,6 @@ public open class Decl <: Node {
             }
         }
         for (anno in annos) { annotations.add(anno) }
-    }
-
-    public override func EnableAttr(attr: Attribute): Unit {
-        if (!TestAttr(attr)) {
-            attributes.add(attr)
-        }
-        if (attr == Attribute.HAS_BROKEN && !TestAttr(Attribute.IS_BROKEN)) {
-            attributes.add(Attribute.IS_BROKEN)
-        }
-    }
-
-    public override func DisableAttr(attr: Attribute): Unit {
-        var idx: Int64 = 0
-        while (idx < attributes.size) {
-            if (attributes[idx] == attr) {
-                attributes.remove(at: idx)
-                return
-            }
-            idx++
-        }
-    }
-
-    public override func TestAttr(attr: Attribute): Bool {
-        for (item in attributes) {
-            if (item == attr) {
-                return true
-            }
-        }
-        return false
-    }
-
-    public func TestAnyAttr(first: Attribute, second: Attribute): Bool {
-        return TestAttr(first) || TestAttr(second)
-    }
-
-    public func TestAnyAttr(first: Attribute, second: Attribute, third: Attribute): Bool {
-        return TestAttr(first) || TestAttr(second) || TestAttr(third)
-    }
-
-    public func GetAttrs(): ArrayList<Attribute> {
-        let out = ArrayList<Attribute>()
-        for (attr in attributes) { out.add(attr) }
-        return out
     }
 
     public func HasAnno(kind: AnnotationKind): Bool {

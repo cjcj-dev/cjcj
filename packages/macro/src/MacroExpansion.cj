@@ -436,7 +436,7 @@ private func copyParsedDeclBase(parsedDecl: ParsedDecl, targetDecl: Decl, fallba
     for (parsedAnnotation in parsedDecl.annotations) {
         targetDecl.annotations.add(convertParsedAnnotation(parsedAnnotation, fallbackFile))
     }
-    for (parsedAttr in parsedDecl.GetAttrs()) {
+    for (parsedAttr in parsedDecl.GetAttrsVector()) {
         targetDecl.EnableAttr(parsedAttr)
     }
 }

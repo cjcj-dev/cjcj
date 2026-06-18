@@ -363,6 +363,19 @@ public class AttributePack {
         return out
     }
 
+    public func GetAllAttrs(): ArrayList<Attribute> {
+        let out = ArrayList<Attribute>()
+        for (idx in 0..(AttributeIndex(Attribute.AST_ATTR_END) + 1)) {
+            for (attr in enabled) {
+                if (AttributeIndex(attr) == idx) {
+                    out.add(attr)
+                    break
+                }
+            }
+        }
+        return out
+    }
+
     public func Clone(): AttributePack {
         return AttributePack(this)
     }
