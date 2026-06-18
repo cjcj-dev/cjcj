@@ -1,6 +1,6 @@
 # CodeGen Expr Lowering Status
 
-Last updated: 2026-06-18 13:16 CST
+Last updated: 2026-06-18 13:28 CST
 
 This pass deepened the CHIR-to-LLVM expression/statement/terminator lowering core under
 `packages/codegen/src`.
@@ -54,6 +54,10 @@ Continuation update:
   raw-array allocation return the mapped allocation directly, ordinary return slots are loaded before returning, and
   sret functions copy the result into LLVM argument 0 before `ret void`. The old direct `Exit(Some(value))` path is
   preserved for simplified self-hosted CHIR, but now respects void-like and sret function ABIs.
+- De-isolated core terminator dispatch for `GoTo`, `Branch`, and `MultiBranch` onto the real CHIR terminator classes.
+  `MultiBranch` lowering now uses `chir.MultiBranch.GetCaseVals()` and case successor accessors, matching the C++
+  dispatcher's switch construction from stored case constants instead of incorrectly treating runtime operands as case
+  labels.
 
 Remaining gaps:
 
@@ -83,4 +87,6 @@ Verification:
   frontend warning.
 - Continuation `cjpm build` passed after return-slot `EXIT` terminator lowering changes, with the same unrelated
   frontend warning.
+- Continuation `cjpm build` passed after real `GoTo`/`Branch`/`MultiBranch` terminator dispatch changes, with the same
+  unrelated frontend warning.
 - Remaining `TODO(selfhost:CodeGen)` markers in `packages/codegen/src`: 0.

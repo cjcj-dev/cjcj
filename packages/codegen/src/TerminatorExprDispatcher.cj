@@ -3,15 +3,21 @@ package cangjie_compiler::codegen
 import std.collection.*
 import cangjie_compiler::chir.Expression
 import cangjie_compiler::chir.Block
+import cangjie_compiler::chir.Branch
 import cangjie_compiler::chir.ExprKind
 import cangjie_compiler::chir.Function
+import cangjie_compiler::chir.GoTo
 import cangjie_compiler::chir.IntOpWithException
 import cangjie_compiler::chir.LocalVar
+import cangjie_compiler::chir.MultiBranch
 import cangjie_compiler::chir.Type
 
 public func HandleTerminatorExpression(irBuilder: IRBuilder2, chirExpr: Expression): LLVMValueRef {
     let kind = chirExpr.GetExprKind()
     if (kind == ExprKind.GOTO) {
+        if (let Some(goTo) <- (chirExpr as GoTo)) {
+            return irBuilder.CreateBr(GetOrCreateTerminatorDest(irBuilder, goTo.GetDestination()))
+        }
         let successors = GetTerminatorSuccessors(chirExpr)
         if (!successors.isEmpty()) {
             return irBuilder.CreateBr(GetOrCreateTerminatorDest(irBuilder, successors[0]))
@@ -19,6 +25,11 @@ public func HandleTerminatorExpression(irBuilder: IRBuilder2, chirExpr: Expressi
         return irBuilder.CreateRetVoid()
     }
     if (kind == ExprKind.BRANCH) {
+        if (let Some(branch) <- (chirExpr as Branch)) {
+            let branchCond = irBuilder.GetCGModule().MaterializeValue(irBuilder, branch.GetCondition())
+            return irBuilder.CreateCondBr(branchCond.GetRawValue(), GetOrCreateTerminatorDest(irBuilder,
+                branch.GetTrueBlock()), GetOrCreateTerminatorDest(irBuilder, branch.GetFalseBlock()))
+        }
         let successors = GetTerminatorSuccessors(chirExpr)
         if (chirExpr.GetNumOfOperands() > 0 && successors.size >= 2) {
             let condValue = irBuilder.GetCGModule().MaterializeValue(irBuilder, chirExpr.GetOperand(0))
@@ -28,7 +39,10 @@ public func HandleTerminatorExpression(irBuilder: IRBuilder2, chirExpr: Expressi
         return LLVMNullValue()
     }
     if (kind == ExprKind.MULTIBRANCH) {
-        return HandleMultiBranchTerminator(irBuilder, chirExpr)
+        if (let Some(multiBranch) <- (chirExpr as MultiBranch)) {
+            return HandleMultiBranchTerminator(irBuilder, multiBranch)
+        }
+        return LLVMNullValue()
     }
     if (kind == ExprKind.EXIT) {
         return HandleExitExpression(irBuilder, chirExpr)
@@ -153,19 +167,21 @@ private func IsVoidLikeReturn(retTy: Type): Bool {
     return retTy.IsUnit() || retTy.IsNothing() || retTy.IsVoid()
 }
 
-private func HandleMultiBranchTerminator(irBuilder: IRBuilder2, chirExpr: Expression): LLVMValueRef {
-    let successors = GetTerminatorSuccessors(chirExpr)
-    if (chirExpr.GetNumOfOperands() == 0 || successors.isEmpty()) {
+private func HandleMultiBranchTerminator(irBuilder: IRBuilder2, multiBranch: MultiBranch): LLVMValueRef {
+    if (multiBranch.GetNumOfSuccessor() == 0) {
         return LLVMNullValue()
     }
-    let condValue = irBuilder.GetCGModule().MaterializeValue(irBuilder, chirExpr.GetOperand(0)).GetRawValue()
-    let defaultDest = GetOrCreateTerminatorDest(irBuilder, successors[0])
-    let caseCountHint = if (successors.size > 1) { UInt32(successors.size - 1) } else { 0u32 }
+    let condValue = irBuilder.GetCGModule().MaterializeValue(irBuilder, multiBranch.GetCondition()).GetRawValue()
+    let defaultDest = GetOrCreateTerminatorDest(irBuilder, multiBranch.GetDefaultBlock())
+    let caseValues = multiBranch.GetCaseVals()
+    let caseCountHint = UInt32(caseValues.size)
     let switchValue = irBuilder.CreateSwitch(condValue, defaultDest, caseCountHint)
-    var caseIdx: Int64 = 1
-    while (caseIdx < successors.size && caseIdx < chirExpr.GetNumOfOperands()) {
-        let caseValue = irBuilder.GetCGModule().MaterializeValue(irBuilder, chirExpr.GetOperand(caseIdx)).GetRawValue()
-        irBuilder.AddSwitchCase(switchValue, caseValue, GetOrCreateTerminatorDest(irBuilder, successors[caseIdx]))
+    let condType = unsafe { LLVMTypeOf(condValue) }
+    var caseIdx: Int64 = 0
+    while (caseIdx < caseValues.size && caseIdx + 1 < multiBranch.GetNumOfSuccessor()) {
+        let caseValue = unsafe { LLVMConstInt(condType, caseValues[caseIdx], 0) }
+        irBuilder.AddSwitchCase(switchValue, caseValue, GetOrCreateTerminatorDest(irBuilder,
+            multiBranch.GetCaseBlockByIndex(caseIdx)))
         caseIdx++
     }
     return switchValue
