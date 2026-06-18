@@ -113,6 +113,13 @@ matches the reference JSON surface more closely by dropping non-reference
 modifier/import-all fields and by relying on symbol-table entries instead of
 duplicating package/import nodes from file handling.
 
+This continuation tightened `CompileStrategy` against the C++ reference. The
+single-package parse path now uses `DEFAULT_PACKAGE_NAME`, matching
+`FullCompileStrategy::Parse`, instead of deriving a module name from options.
+The `.cj.d` merge path now adds sources with the C++ CJMP/common-part condition
+and parses declaration files with comment attachment disabled and `compileCjd`
+enabled unconditionally.
+
 ## Important Blocker
 
 `packages/frontend/cjpm.toml` now imports the real `basic`, `lex`, `option`, and
