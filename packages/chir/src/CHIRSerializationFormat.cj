@@ -120,6 +120,13 @@ func CHIRSafeU64(value: String): UInt64 {
     return UInt64.parse(value)
 }
 
+func CHIRSafeU64(value: String, defaultValue: UInt64): UInt64 {
+    if (value.isEmpty()) {
+        return defaultValue
+    }
+    return UInt64.parse(value)
+}
+
 func CHIRSafeU32(value: String): UInt32 {
     if (value.isEmpty()) {
         return 0u32
@@ -179,6 +186,26 @@ func CHIRApplyBaseInfo(base: Base, locText: String, attrText: String, annotation
             continue
         }
         base.EnableAttr(CHIRAttributeFromIndex(CHIRSafeI64(attrIndex)))
+    }
+}
+
+func CHIRSerializeAttributeInfo(info: AttributeInfo): String {
+    let parts = ArrayList<String>()
+    for (attr in CHIRKnownAttributes()) {
+        if (info.Test(attr)) {
+            parts.add(AttributeIndex(attr).toString())
+        }
+    }
+    return CHIRWireJoinList(parts)
+}
+
+func CHIRApplyAttributeInfo(info: AttributeInfo, value: String): Unit {
+    info.Clear()
+    for (attrIndex in CHIRWireSplitList(value)) {
+        if (attrIndex.isEmpty()) {
+            continue
+        }
+        info.Enable(CHIRAttributeFromIndex(CHIRSafeI64(attrIndex)))
     }
 }
 
@@ -379,6 +406,20 @@ func CHIRExprKindFromIndex(index: Int64): ExprKind {
     }
 }
 
+func CHIRSourceExprFromIndex(index: Int64): SourceExpr {
+    return match (index) {
+        case 0 => SourceExpr.IF_EXPR
+        case 1 => SourceExpr.WHILE_EXPR
+        case 2 => SourceExpr.DO_WHILE_EXPR
+        case 3 => SourceExpr.MATCH_EXPR
+        case 4 => SourceExpr.IF_LET_OR_WHILE_LET
+        case 5 => SourceExpr.QUEST
+        case 6 => SourceExpr.BINARY
+        case 7 => SourceExpr.FOR_IN_EXPR
+        case _ => SourceExpr.OTHER
+    }
+}
+
 func CHIRSerializeAnnoInfo(info: AnnoInfo): String {
     return CHIRWireJoinList(info.GetAnnotations())
 }
@@ -424,6 +465,7 @@ func CHIRSerializeType(ty: Type): String {
         let fields = ArrayList<String>()
         fields.add("rawarray")
         fields.add(CHIRSerializeType(rawArrayTy.GetElementType()))
+        fields.add(rawArrayTy.GetDims().toString())
         return CHIRWireJoinFields(fields)
     }
     if (let Some(varrayTy) <- (ty as VArrayType)) {
@@ -431,6 +473,12 @@ func CHIRSerializeType(ty: Type): String {
         fields.add("varray")
         fields.add(CHIRSerializeType(varrayTy.GetElementType()))
         fields.add(varrayTy.size.toString())
+        return CHIRWireJoinFields(fields)
+    }
+    if (let Some(pointerTy) <- (ty as CPointerType)) {
+        let fields = ArrayList<String>()
+        fields.add("cpointer")
+        fields.add(CHIRSerializeType(pointerTy.GetElementType()))
         return CHIRWireJoinFields(fields)
     }
     if (let Some(refTy) <- (ty as RefType)) {
@@ -493,9 +541,11 @@ func CHIRParseType(value: String, builder: CHIRBuilder, customDefs: HashMap<Stri
         case "builtin" => CHIRBuiltinTypeFromIndex(CHIRSafeI64(CHIRFieldAt(fields, 1)), builder)
         case "tuple" => builder.context.GetTupleTy(CHIRParseTypeList(CHIRFieldAt(fields, 1), builder, customDefs))
         case "func" => CHIRParseFuncType(fields, builder, customDefs)
-        case "rawarray" => builder.context.GetRawArrayTy(CHIRParseType(CHIRFieldAt(fields, 1), builder, customDefs))
+        case "rawarray" => builder.context.GetRawArrayTy(CHIRParseType(CHIRFieldAt(fields, 1), builder, customDefs),
+            dims: CHIRSafeU64(CHIRFieldAt(fields, 2), 1u64))
         case "varray" => builder.context.GetVArrayTy(CHIRParseType(CHIRFieldAt(fields, 1), builder, customDefs),
             CHIRSafeU64(CHIRFieldAt(fields, 2)))
+        case "cpointer" => builder.context.GetCPointerTy(CHIRParseType(CHIRFieldAt(fields, 1), builder, customDefs))
         case "ref" => builder.context.GetRefTy(CHIRParseType(CHIRFieldAt(fields, 1), builder, customDefs))
         case "box" => builder.context.GetBoxTy(CHIRParseType(CHIRFieldAt(fields, 1), builder, customDefs))
         case "generic" => CHIRParseGenericType(fields, builder, customDefs)
@@ -559,6 +609,51 @@ func CHIRParseTypeList(value: String, builder: CHIRBuilder, customDefs: HashMap<
     for (item in CHIRWireSplitList(value)) {
         if (!item.isEmpty()) {
             out.add(CHIRParseType(item, builder, customDefs))
+        }
+    }
+    return out
+}
+
+func CHIRSerializeTypeList(values: ArrayList<Type>): String {
+    let out = ArrayList<String>()
+    for (value in values) {
+        out.add(CHIRSerializeType(value))
+    }
+    return CHIRWireJoinList(out)
+}
+
+func CHIRSerializeGenericTypeList(values: ArrayList<GenericType>): String {
+    let out = ArrayList<String>()
+    for (value in values) {
+        out.add(CHIRSerializeType(value))
+    }
+    return CHIRWireJoinList(out)
+}
+
+func CHIRParseGenericTypeList(value: String, builder: CHIRBuilder,
+    customDefs: HashMap<String, CustomTypeDef>): ArrayList<GenericType> {
+    let out = ArrayList<GenericType>()
+    for (ty in CHIRParseTypeList(value, builder, customDefs)) {
+        if (let Some(genericTy) <- (ty as GenericType)) {
+            out.add(genericTy)
+        }
+    }
+    return out
+}
+
+func CHIRSerializeUInt64List(values: ArrayList<UInt64>): String {
+    let out = ArrayList<String>()
+    for (value in values) {
+        out.add(value.toString())
+    }
+    return CHIRWireJoinList(out)
+}
+
+func CHIRParseUInt64List(value: String): ArrayList<UInt64> {
+    let out = ArrayList<UInt64>()
+    for (item in CHIRWireSplitList(value)) {
+        if (!item.isEmpty()) {
+            out.add(UInt64.parse(item))
         }
     }
     return out
@@ -645,6 +740,375 @@ func CHIRCreateDetachedCustomDef(kind: String, packageName: String, identifier: 
     }
     customDefs[CHIRCustomDefKey(kind, packageName, identifier)] = def
     return def
+}
+
+
+func CHIRIntrinsicKindFromName(name: String): IntrinsicKind {
+    return match (name) {
+        case "NOT_INTRINSIC" => IntrinsicKind.NOT_INTRINSIC
+        case "NOT_IMPLEMENTED" => IntrinsicKind.NOT_IMPLEMENTED
+        case "ARRAY_INIT" => IntrinsicKind.ARRAY_INIT
+        case "SIZE_OF" => IntrinsicKind.SIZE_OF
+        case "ALIGN_OF" => IntrinsicKind.ALIGN_OF
+        case "ARRAY_ACQUIRE_RAW_DATA" => IntrinsicKind.ARRAY_ACQUIRE_RAW_DATA
+        case "ARRAY_RELEASE_RAW_DATA" => IntrinsicKind.ARRAY_RELEASE_RAW_DATA
+        case "ARRAY_BUILT_IN_COPY_TO" => IntrinsicKind.ARRAY_BUILT_IN_COPY_TO
+        case "ARRAY_GET" => IntrinsicKind.ARRAY_GET
+        case "ARRAY_SET" => IntrinsicKind.ARRAY_SET
+        case "ARRAY_GET_UNCHECKED" => IntrinsicKind.ARRAY_GET_UNCHECKED
+        case "ARRAY_GET_REF_UNCHECKED" => IntrinsicKind.ARRAY_GET_REF_UNCHECKED
+        case "ARRAY_SET_UNCHECKED" => IntrinsicKind.ARRAY_SET_UNCHECKED
+        case "ARRAY_SIZE" => IntrinsicKind.ARRAY_SIZE
+        case "ARRAY_CLONE" => IntrinsicKind.ARRAY_CLONE
+        case "ARRAY_SLICE_INIT" => IntrinsicKind.ARRAY_SLICE_INIT
+        case "ARRAY_SLICE" => IntrinsicKind.ARRAY_SLICE
+        case "ARRAY_SLICE_RAWARRAY" => IntrinsicKind.ARRAY_SLICE_RAWARRAY
+        case "ARRAY_SLICE_START" => IntrinsicKind.ARRAY_SLICE_START
+        case "ARRAY_SLICE_SIZE" => IntrinsicKind.ARRAY_SLICE_SIZE
+        case "ARRAY_SLICE_GET_ELEMENT" => IntrinsicKind.ARRAY_SLICE_GET_ELEMENT
+        case "ARRAY_SLICE_GET_ELEMENT_UNCHECKED" => IntrinsicKind.ARRAY_SLICE_GET_ELEMENT_UNCHECKED
+        case "ARRAY_SLICE_SET_ELEMENT" => IntrinsicKind.ARRAY_SLICE_SET_ELEMENT
+        case "ARRAY_SLICE_SET_ELEMENT_UNCHECKED" => IntrinsicKind.ARRAY_SLICE_SET_ELEMENT_UNCHECKED
+        case "FILL_IN_STACK_TRACE" => IntrinsicKind.FILL_IN_STACK_TRACE
+        case "DECODE_STACK_TRACE" => IntrinsicKind.DECODE_STACK_TRACE
+        case "DUMP_CURRENT_THREAD_INFO" => IntrinsicKind.DUMP_CURRENT_THREAD_INFO
+        case "DUMP_ALL_THREADS_INFO" => IntrinsicKind.DUMP_ALL_THREADS_INFO
+        case "CHR" => IntrinsicKind.CHR
+        case "ORD" => IntrinsicKind.ORD
+        case "CPOINTER_GET_POINTER_ADDRESS" => IntrinsicKind.CPOINTER_GET_POINTER_ADDRESS
+        case "CPOINTER_INIT0" => IntrinsicKind.CPOINTER_INIT0
+        case "CPOINTER_INIT1" => IntrinsicKind.CPOINTER_INIT1
+        case "CPOINTER_READ" => IntrinsicKind.CPOINTER_READ
+        case "CPOINTER_WRITE" => IntrinsicKind.CPOINTER_WRITE
+        case "CPOINTER_ADD" => IntrinsicKind.CPOINTER_ADD
+        case "CSTRING_INIT" => IntrinsicKind.CSTRING_INIT
+        case "CSTRING_CONVERT_CSTR_TO_PTR" => IntrinsicKind.CSTRING_CONVERT_CSTR_TO_PTR
+        case "INOUT_PARAM" => IntrinsicKind.INOUT_PARAM
+        case "REGISTER_WATCHED_OBJECT" => IntrinsicKind.REGISTER_WATCHED_OBJECT
+        case "OBJECT_REFEQ" => IntrinsicKind.OBJECT_REFEQ
+        case "RAW_ARRAY_REFEQ" => IntrinsicKind.RAW_ARRAY_REFEQ
+        case "FUNC_REFEQ" => IntrinsicKind.FUNC_REFEQ
+        case "OBJECT_ZERO_VALUE" => IntrinsicKind.OBJECT_ZERO_VALUE
+        case "INVOKE_GC" => IntrinsicKind.INVOKE_GC
+        case "SET_GC_THRESHOLD" => IntrinsicKind.SET_GC_THRESHOLD
+        case "DUMP_CJ_HEAP_DATA" => IntrinsicKind.DUMP_CJ_HEAP_DATA
+        case "GET_GC_COUNT" => IntrinsicKind.GET_GC_COUNT
+        case "GET_GC_TIME_US" => IntrinsicKind.GET_GC_TIME_US
+        case "GET_GC_FREED_SIZE" => IntrinsicKind.GET_GC_FREED_SIZE
+        case "START_CJ_CPU_PROFILING" => IntrinsicKind.START_CJ_CPU_PROFILING
+        case "STOP_CJ_CPU_PROFILING" => IntrinsicKind.STOP_CJ_CPU_PROFILING
+        case "BLACK_BOX" => IntrinsicKind.BLACK_BOX
+        case "GET_MAX_HEAP_SIZE" => IntrinsicKind.GET_MAX_HEAP_SIZE
+        case "GET_ALLOCATE_HEAP_SIZE" => IntrinsicKind.GET_ALLOCATE_HEAP_SIZE
+        case "GET_REAL_HEAP_SIZE" => IntrinsicKind.GET_REAL_HEAP_SIZE
+        case "GET_THREAD_NUMBER" => IntrinsicKind.GET_THREAD_NUMBER
+        case "GET_BLOCKING_THREAD_NUMBER" => IntrinsicKind.GET_BLOCKING_THREAD_NUMBER
+        case "GET_NATIVE_THREAD_NUMBER" => IntrinsicKind.GET_NATIVE_THREAD_NUMBER
+        case "VARRAY_SET" => IntrinsicKind.VARRAY_SET
+        case "VARRAY_GET" => IntrinsicKind.VARRAY_GET
+        case "FUTURE_INIT" => IntrinsicKind.FUTURE_INIT
+        case "FUTURE_IS_COMPLETE" => IntrinsicKind.FUTURE_IS_COMPLETE
+        case "FUTURE_WAIT" => IntrinsicKind.FUTURE_WAIT
+        case "FUTURE_NOTIFYALL" => IntrinsicKind.FUTURE_NOTIFYALL
+        case "IS_THREAD_OBJECT_INITED" => IntrinsicKind.IS_THREAD_OBJECT_INITED
+        case "GET_THREAD_OBJECT" => IntrinsicKind.GET_THREAD_OBJECT
+        case "SET_THREAD_OBJECT" => IntrinsicKind.SET_THREAD_OBJECT
+        case "OVERFLOW_CHECKED_ADD" => IntrinsicKind.OVERFLOW_CHECKED_ADD
+        case "OVERFLOW_CHECKED_SUB" => IntrinsicKind.OVERFLOW_CHECKED_SUB
+        case "OVERFLOW_CHECKED_MUL" => IntrinsicKind.OVERFLOW_CHECKED_MUL
+        case "OVERFLOW_CHECKED_DIV" => IntrinsicKind.OVERFLOW_CHECKED_DIV
+        case "OVERFLOW_CHECKED_MOD" => IntrinsicKind.OVERFLOW_CHECKED_MOD
+        case "OVERFLOW_CHECKED_POW" => IntrinsicKind.OVERFLOW_CHECKED_POW
+        case "OVERFLOW_CHECKED_INC" => IntrinsicKind.OVERFLOW_CHECKED_INC
+        case "OVERFLOW_CHECKED_DEC" => IntrinsicKind.OVERFLOW_CHECKED_DEC
+        case "OVERFLOW_CHECKED_NEG" => IntrinsicKind.OVERFLOW_CHECKED_NEG
+        case "OVERFLOW_THROWING_ADD" => IntrinsicKind.OVERFLOW_THROWING_ADD
+        case "OVERFLOW_THROWING_SUB" => IntrinsicKind.OVERFLOW_THROWING_SUB
+        case "OVERFLOW_THROWING_MUL" => IntrinsicKind.OVERFLOW_THROWING_MUL
+        case "OVERFLOW_THROWING_DIV" => IntrinsicKind.OVERFLOW_THROWING_DIV
+        case "OVERFLOW_THROWING_MOD" => IntrinsicKind.OVERFLOW_THROWING_MOD
+        case "OVERFLOW_THROWING_POW" => IntrinsicKind.OVERFLOW_THROWING_POW
+        case "OVERFLOW_THROWING_INC" => IntrinsicKind.OVERFLOW_THROWING_INC
+        case "OVERFLOW_THROWING_DEC" => IntrinsicKind.OVERFLOW_THROWING_DEC
+        case "OVERFLOW_THROWING_NEG" => IntrinsicKind.OVERFLOW_THROWING_NEG
+        case "OVERFLOW_SATURATING_ADD" => IntrinsicKind.OVERFLOW_SATURATING_ADD
+        case "OVERFLOW_SATURATING_SUB" => IntrinsicKind.OVERFLOW_SATURATING_SUB
+        case "OVERFLOW_SATURATING_MUL" => IntrinsicKind.OVERFLOW_SATURATING_MUL
+        case "OVERFLOW_SATURATING_DIV" => IntrinsicKind.OVERFLOW_SATURATING_DIV
+        case "OVERFLOW_SATURATING_MOD" => IntrinsicKind.OVERFLOW_SATURATING_MOD
+        case "OVERFLOW_SATURATING_POW" => IntrinsicKind.OVERFLOW_SATURATING_POW
+        case "OVERFLOW_SATURATING_INC" => IntrinsicKind.OVERFLOW_SATURATING_INC
+        case "OVERFLOW_SATURATING_DEC" => IntrinsicKind.OVERFLOW_SATURATING_DEC
+        case "OVERFLOW_SATURATING_NEG" => IntrinsicKind.OVERFLOW_SATURATING_NEG
+        case "OVERFLOW_WRAPPING_ADD" => IntrinsicKind.OVERFLOW_WRAPPING_ADD
+        case "OVERFLOW_WRAPPING_SUB" => IntrinsicKind.OVERFLOW_WRAPPING_SUB
+        case "OVERFLOW_WRAPPING_MUL" => IntrinsicKind.OVERFLOW_WRAPPING_MUL
+        case "OVERFLOW_WRAPPING_DIV" => IntrinsicKind.OVERFLOW_WRAPPING_DIV
+        case "OVERFLOW_WRAPPING_MOD" => IntrinsicKind.OVERFLOW_WRAPPING_MOD
+        case "OVERFLOW_WRAPPING_POW" => IntrinsicKind.OVERFLOW_WRAPPING_POW
+        case "OVERFLOW_WRAPPING_INC" => IntrinsicKind.OVERFLOW_WRAPPING_INC
+        case "OVERFLOW_WRAPPING_DEC" => IntrinsicKind.OVERFLOW_WRAPPING_DEC
+        case "OVERFLOW_WRAPPING_NEG" => IntrinsicKind.OVERFLOW_WRAPPING_NEG
+        case "VECTOR_COMPARE_32" => IntrinsicKind.VECTOR_COMPARE_32
+        case "VECTOR_INDEX_BYTE_32" => IntrinsicKind.VECTOR_INDEX_BYTE_32
+        case "CJ_CORE_CAN_USE_SIMD" => IntrinsicKind.CJ_CORE_CAN_USE_SIMD
+        case "CJ_TLS_DYN_SET_SESSION_CALLBACK" => IntrinsicKind.CJ_TLS_DYN_SET_SESSION_CALLBACK
+        case "CJ_TLS_DYN_SSL_INIT" => IntrinsicKind.CJ_TLS_DYN_SSL_INIT
+        case "REFLECTION_INTRINSIC_START_FLAG" => IntrinsicKind.REFLECTION_INTRINSIC_START_FLAG
+        case "IS_INTERFACE" => IntrinsicKind.IS_INTERFACE
+        case "IS_CLASS" => IntrinsicKind.IS_CLASS
+        case "IS_PRIMITIVE" => IntrinsicKind.IS_PRIMITIVE
+        case "IS_STRUCT" => IntrinsicKind.IS_STRUCT
+        case "IS_GENERIC" => IntrinsicKind.IS_GENERIC
+        case "IS_TUPLE" => IntrinsicKind.IS_TUPLE
+        case "IS_FUNCTION" => IntrinsicKind.IS_FUNCTION
+        case "IS_ENUM" => IntrinsicKind.IS_ENUM
+        case "IS_BOX" => IntrinsicKind.IS_BOX
+        case "GET_OR_CREATE_TYPEINFO_FOR_REFLECT" => IntrinsicKind.GET_OR_CREATE_TYPEINFO_FOR_REFLECT
+        case "GET_TYPETEMPLATE" => IntrinsicKind.GET_TYPETEMPLATE
+        case "CHECK_METHOD_ACTUAL_ARGS" => IntrinsicKind.CHECK_METHOD_ACTUAL_ARGS
+        case "METHOD_ENTRYPOINT_IS_NULL" => IntrinsicKind.METHOD_ENTRYPOINT_IS_NULL
+        case "IS_RELECT_UNSUPPORTED_TYPE" => IntrinsicKind.IS_RELECT_UNSUPPORTED_TYPE
+        case "GET_TYPE_FOR_ANY" => IntrinsicKind.GET_TYPE_FOR_ANY
+        case "GET_TYPE_BY_MANGLED_NAME" => IntrinsicKind.GET_TYPE_BY_MANGLED_NAME
+        case "GET_TYPE_NAME" => IntrinsicKind.GET_TYPE_NAME
+        case "GET_TYPE_BY_QUALIFIED_NAME" => IntrinsicKind.GET_TYPE_BY_QUALIFIED_NAME
+        case "GET_TYPE_QUALIFIED_NAME_LENGTH" => IntrinsicKind.GET_TYPE_QUALIFIED_NAME_LENGTH
+        case "GET_TYPE_QUALIFIED_NAME" => IntrinsicKind.GET_TYPE_QUALIFIED_NAME
+        case "GET_NUM_OF_INTERFACE" => IntrinsicKind.GET_NUM_OF_INTERFACE
+        case "GET_INTERFACE" => IntrinsicKind.GET_INTERFACE
+        case "IS_SUBTYPE" => IntrinsicKind.IS_SUBTYPE
+        case "GET_TYPE_INFO_MODIFIER" => IntrinsicKind.GET_TYPE_INFO_MODIFIER
+        case "GET_TYPE_INFO_ANNOTATIONS" => IntrinsicKind.GET_TYPE_INFO_ANNOTATIONS
+        case "GET_OBJ_CLASS" => IntrinsicKind.GET_OBJ_CLASS
+        case "GET_SUPER_TYPE_INFO" => IntrinsicKind.GET_SUPER_TYPE_INFO
+        case "GET_TYPE_ARGS" => IntrinsicKind.GET_TYPE_ARGS
+        case "GET_NUM_OF_INSTANCE_METHOD_INFOS" => IntrinsicKind.GET_NUM_OF_INSTANCE_METHOD_INFOS
+        case "GET_INSTANCE_METHOD_INFO" => IntrinsicKind.GET_INSTANCE_METHOD_INFO
+        case "GET_NUM_OF_STATIC_METHOD_INFOS" => IntrinsicKind.GET_NUM_OF_STATIC_METHOD_INFOS
+        case "GET_STATIC_METHOD_INFO" => IntrinsicKind.GET_STATIC_METHOD_INFO
+        case "GET_METHOD_NAME" => IntrinsicKind.GET_METHOD_NAME
+        case "GET_METHOD_RETURN_TYPE" => IntrinsicKind.GET_METHOD_RETURN_TYPE
+        case "GET_METHOD_MODIFIER" => IntrinsicKind.GET_METHOD_MODIFIER
+        case "GET_METHOD_ANNOTATIONS" => IntrinsicKind.GET_METHOD_ANNOTATIONS
+        case "APPLY_CJ_METHOD" => IntrinsicKind.APPLY_CJ_METHOD
+        case "APPLY_CJ_STATIC_METHOD" => IntrinsicKind.APPLY_CJ_STATIC_METHOD
+        case "APPLY_CJ_GENERIC_METHOD" => IntrinsicKind.APPLY_CJ_GENERIC_METHOD
+        case "APPLY_CJ_GENERIC_STATIC_METHOD" => IntrinsicKind.APPLY_CJ_GENERIC_STATIC_METHOD
+        case "GET_NUM_OF_ACTUAL_PARAMETERS" => IntrinsicKind.GET_NUM_OF_ACTUAL_PARAMETERS
+        case "GET_NUM_OF_GENERIC_PARAMETERS" => IntrinsicKind.GET_NUM_OF_GENERIC_PARAMETERS
+        case "GET_ACTUAL_PARAMETER_INFO" => IntrinsicKind.GET_ACTUAL_PARAMETER_INFO
+        case "GET_GENERIC_PARAMETER_INFO" => IntrinsicKind.GET_GENERIC_PARAMETER_INFO
+        case "GET_NUM_OF_INSTANCE_FIELD_INFOS" => IntrinsicKind.GET_NUM_OF_INSTANCE_FIELD_INFOS
+        case "GET_INSTANCE_FIELD_INFO" => IntrinsicKind.GET_INSTANCE_FIELD_INFO
+        case "GET_NUM_OF_STATIC_FIELD_INFOS" => IntrinsicKind.GET_NUM_OF_STATIC_FIELD_INFOS
+        case "GET_STATIC_FIELD_INFO" => IntrinsicKind.GET_STATIC_FIELD_INFO
+        case "GET_STATIC_FIELD_NAME" => IntrinsicKind.GET_STATIC_FIELD_NAME
+        case "GET_STATIC_FIELD_TYPE" => IntrinsicKind.GET_STATIC_FIELD_TYPE
+        case "GET_STATIC_FIELD_ANNOTATIONS" => IntrinsicKind.GET_STATIC_FIELD_ANNOTATIONS
+        case "GET_INSTANCE_FIELD_NAME" => IntrinsicKind.GET_INSTANCE_FIELD_NAME
+        case "GET_INSTANCE_FIELD_TYPE" => IntrinsicKind.GET_INSTANCE_FIELD_TYPE
+        case "GET_INSTANCE_FIELD_ANNOTATIONS" => IntrinsicKind.GET_INSTANCE_FIELD_ANNOTATIONS
+        case "GET_INSTANCE_FIELD_MODIFIER" => IntrinsicKind.GET_INSTANCE_FIELD_MODIFIER
+        case "GET_STATIC_FIELD_MODIFIER" => IntrinsicKind.GET_STATIC_FIELD_MODIFIER
+        case "GET_FIELD_VALUE" => IntrinsicKind.GET_FIELD_VALUE
+        case "SET_FIELD_VALUE" => IntrinsicKind.SET_FIELD_VALUE
+        case "GET_STATIC_FIELD_VALUE" => IntrinsicKind.GET_STATIC_FIELD_VALUE
+        case "SET_STATIC_FIELD_VALUE" => IntrinsicKind.SET_STATIC_FIELD_VALUE
+        case "GET_FIELD_DECLARING_TYPE" => IntrinsicKind.GET_FIELD_DECLARING_TYPE
+        case "GET_PARAMETER_INDEX" => IntrinsicKind.GET_PARAMETER_INDEX
+        case "GET_PARAMETER_NAME" => IntrinsicKind.GET_PARAMETER_NAME
+        case "GET_PARAMETER_TYPE" => IntrinsicKind.GET_PARAMETER_TYPE
+        case "GET_PARAMETER_ANNOTATIONS" => IntrinsicKind.GET_PARAMETER_ANNOTATIONS
+        case "GET_RELATED_PACKAGE_INF" => IntrinsicKind.GET_RELATED_PACKAGE_INF
+        case "GET_PACKAGE_NAME" => IntrinsicKind.GET_PACKAGE_NAME
+        case "GET_PACKAGE_NUM_OF_TYPE_INFOS" => IntrinsicKind.GET_PACKAGE_NUM_OF_TYPE_INFOS
+        case "GET_PACKAGE_TYPE_INFO" => IntrinsicKind.GET_PACKAGE_TYPE_INFO
+        case "GET_PACKAGE_NUM_OF_GLOBAL_METHODS" => IntrinsicKind.GET_PACKAGE_NUM_OF_GLOBAL_METHODS
+        case "GET_PACKAGE_GLOBAL_METHOD_INFO" => IntrinsicKind.GET_PACKAGE_GLOBAL_METHOD_INFO
+        case "GET_PACKAGE_NUM_OF_GLOBAL_FIELD_INFOS" => IntrinsicKind.GET_PACKAGE_NUM_OF_GLOBAL_FIELD_INFOS
+        case "GET_PACKAGE_GLOBAL_FIELD_INFO" => IntrinsicKind.GET_PACKAGE_GLOBAL_FIELD_INFO
+        case "LOAD_PACKAGE" => IntrinsicKind.LOAD_PACKAGE
+        case "GET_PACKAGE_BY_QUALIFIEDNAME" => IntrinsicKind.GET_PACKAGE_BY_QUALIFIEDNAME
+        case "GET_PACKAGE_VERSION" => IntrinsicKind.GET_PACKAGE_VERSION
+        case "GET_SUB_PACKAGES" => IntrinsicKind.GET_SUB_PACKAGES
+        case "GET_NUM_OF_FIELD_TYPES" => IntrinsicKind.GET_NUM_OF_FIELD_TYPES
+        case "GET_FIELD_TYPES" => IntrinsicKind.GET_FIELD_TYPES
+        case "NEW_AND_INIT_OBJECT" => IntrinsicKind.NEW_AND_INIT_OBJECT
+        case "GET_ASSOCIATED_VALUES" => IntrinsicKind.GET_ASSOCIATED_VALUES
+        case "GET_NUM_OF_FUNCTION_SIGNATURETYPES" => IntrinsicKind.GET_NUM_OF_FUNCTION_SIGNATURETYPES
+        case "GET_FUNCTION_SIGNATURE_TYPES" => IntrinsicKind.GET_FUNCTION_SIGNATURE_TYPES
+        case "GET_NUM_OF_ENUM_CONSTRUCTOR_INFOS" => IntrinsicKind.GET_NUM_OF_ENUM_CONSTRUCTOR_INFOS
+        case "GET_ENUM_CONSTRUCTOR_INFO" => IntrinsicKind.GET_ENUM_CONSTRUCTOR_INFO
+        case "GET_ENUM_CONSTRUCTOR_NAME" => IntrinsicKind.GET_ENUM_CONSTRUCTOR_NAME
+        case "GET_ENUM_CONSTRUCTOR_INFO_FROM_ANY" => IntrinsicKind.GET_ENUM_CONSTRUCTOR_INFO_FROM_ANY
+        case "REFLECTION_INTRINSIC_END_FLAG" => IntrinsicKind.REFLECTION_INTRINSIC_END_FLAG
+        case "SLEEP" => IntrinsicKind.SLEEP
+        case "SOURCE_FILE" => IntrinsicKind.SOURCE_FILE
+        case "SOURCE_LINE" => IntrinsicKind.SOURCE_LINE
+        case "IDENTITY_HASHCODE" => IntrinsicKind.IDENTITY_HASHCODE
+        case "IDENTITY_HASHCODE_FOR_ARRAY" => IntrinsicKind.IDENTITY_HASHCODE_FOR_ARRAY
+        case "ATOMIC_LOAD" => IntrinsicKind.ATOMIC_LOAD
+        case "ATOMIC_STORE" => IntrinsicKind.ATOMIC_STORE
+        case "ATOMIC_SWAP" => IntrinsicKind.ATOMIC_SWAP
+        case "ATOMIC_COMPARE_AND_SWAP" => IntrinsicKind.ATOMIC_COMPARE_AND_SWAP
+        case "ATOMIC_FETCH_ADD" => IntrinsicKind.ATOMIC_FETCH_ADD
+        case "ATOMIC_FETCH_SUB" => IntrinsicKind.ATOMIC_FETCH_SUB
+        case "ATOMIC_FETCH_AND" => IntrinsicKind.ATOMIC_FETCH_AND
+        case "ATOMIC_FETCH_OR" => IntrinsicKind.ATOMIC_FETCH_OR
+        case "ATOMIC_FETCH_XOR" => IntrinsicKind.ATOMIC_FETCH_XOR
+        case "MUTEX_INIT" => IntrinsicKind.MUTEX_INIT
+        case "CJ_MUTEX_LOCK" => IntrinsicKind.CJ_MUTEX_LOCK
+        case "MUTEX_TRY_LOCK" => IntrinsicKind.MUTEX_TRY_LOCK
+        case "MUTEX_CHECK_STATUS" => IntrinsicKind.MUTEX_CHECK_STATUS
+        case "MUTEX_UNLOCK" => IntrinsicKind.MUTEX_UNLOCK
+        case "WAITQUEUE_INIT" => IntrinsicKind.WAITQUEUE_INIT
+        case "MONITOR_INIT" => IntrinsicKind.MONITOR_INIT
+        case "MOITIOR_WAIT" => IntrinsicKind.MOITIOR_WAIT
+        case "MOITIOR_NOTIFY" => IntrinsicKind.MOITIOR_NOTIFY
+        case "MOITIOR_NOTIFY_ALL" => IntrinsicKind.MOITIOR_NOTIFY_ALL
+        case "MULTICONDITION_WAIT" => IntrinsicKind.MULTICONDITION_WAIT
+        case "MULTICONDITION_NOTIFY" => IntrinsicKind.MULTICONDITION_NOTIFY
+        case "MULTICONDITION_NOTIFY_ALL" => IntrinsicKind.MULTICONDITION_NOTIFY_ALL
+        case "CROSS_ACCESS_BARRIER" => IntrinsicKind.CROSS_ACCESS_BARRIER
+        case "CREATE_EXPORT_HANDLE" => IntrinsicKind.CREATE_EXPORT_HANDLE
+        case "GET_EXPORTED_REF" => IntrinsicKind.GET_EXPORTED_REF
+        case "REMOVE_EXPORTED_REF" => IntrinsicKind.REMOVE_EXPORTED_REF
+        case "GET_JSLAMBDA_ADDR" => IntrinsicKind.GET_JSLAMBDA_ADDR
+        case "FFI_CJ_AST_LEX" => IntrinsicKind.FFI_CJ_AST_LEX
+        case "FFI_CJ_AST_PARSEEXPR" => IntrinsicKind.FFI_CJ_AST_PARSEEXPR
+        case "FFI_CJ_AST_PARSEDECL" => IntrinsicKind.FFI_CJ_AST_PARSEDECL
+        case "FFI_CJ_AST_PARSE_PROPMEMBERDECL" => IntrinsicKind.FFI_CJ_AST_PARSE_PROPMEMBERDECL
+        case "FFI_CJ_AST_PARSE_PRICONSTRUCTOR" => IntrinsicKind.FFI_CJ_AST_PARSE_PRICONSTRUCTOR
+        case "FFI_CJ_AST_PARSE_PATTERN" => IntrinsicKind.FFI_CJ_AST_PARSE_PATTERN
+        case "FFI_CJ_AST_PARSE_TYPE" => IntrinsicKind.FFI_CJ_AST_PARSE_TYPE
+        case "FFI_CJ_AST_PARSETOPLEVEL" => IntrinsicKind.FFI_CJ_AST_PARSETOPLEVEL
+        case "FFI_CJ_AST_DIAGREPORT" => IntrinsicKind.FFI_CJ_AST_DIAGREPORT
+        case "FFI_CJ_PARENT_CONTEXT" => IntrinsicKind.FFI_CJ_PARENT_CONTEXT
+        case "FFI_CJ_MACRO_ITEM_INFO" => IntrinsicKind.FFI_CJ_MACRO_ITEM_INFO
+        case "FFI_CJ_GET_CHILD_MESSAGES" => IntrinsicKind.FFI_CJ_GET_CHILD_MESSAGES
+        case "FFI_CJ_CHECK_ADD_SPACE" => IntrinsicKind.FFI_CJ_CHECK_ADD_SPACE
+        case "CG_UNSAFE_BEGIN" => IntrinsicKind.CG_UNSAFE_BEGIN
+        case "CG_UNSAFE_END" => IntrinsicKind.CG_UNSAFE_END
+        case "STRLEN" => IntrinsicKind.STRLEN
+        case "MEMCPY_S" => IntrinsicKind.MEMCPY_S
+        case "MEMSET_S" => IntrinsicKind.MEMSET_S
+        case "FREE" => IntrinsicKind.FREE
+        case "MALLOC" => IntrinsicKind.MALLOC
+        case "STRCMP" => IntrinsicKind.STRCMP
+        case "MEMCMP" => IntrinsicKind.MEMCMP
+        case "STRNCMP" => IntrinsicKind.STRNCMP
+        case "STRCASECMP" => IntrinsicKind.STRCASECMP
+        case "ATOMIC_INT8_LOAD" => IntrinsicKind.ATOMIC_INT8_LOAD
+        case "ATOMIC_INT8_STORE" => IntrinsicKind.ATOMIC_INT8_STORE
+        case "ATOMIC_INT8_SWAP" => IntrinsicKind.ATOMIC_INT8_SWAP
+        case "ATOMIC_INT8_CAS" => IntrinsicKind.ATOMIC_INT8_CAS
+        case "ATOMIC_INT8_FETCH_ADD" => IntrinsicKind.ATOMIC_INT8_FETCH_ADD
+        case "ATOMIC_INT8_FETCH_SUB" => IntrinsicKind.ATOMIC_INT8_FETCH_SUB
+        case "ATOMIC_INT8_FETCH_AND" => IntrinsicKind.ATOMIC_INT8_FETCH_AND
+        case "ATOMIC_INT8_FETCH_OR" => IntrinsicKind.ATOMIC_INT8_FETCH_OR
+        case "ATOMIC_INT8_FETCH_XOR" => IntrinsicKind.ATOMIC_INT8_FETCH_XOR
+        case "ATOMIC_INT16_LOAD" => IntrinsicKind.ATOMIC_INT16_LOAD
+        case "ATOMIC_INT16_STORE" => IntrinsicKind.ATOMIC_INT16_STORE
+        case "ATOMIC_INT16_SWAP" => IntrinsicKind.ATOMIC_INT16_SWAP
+        case "ATOMIC_INT16_CAS" => IntrinsicKind.ATOMIC_INT16_CAS
+        case "ATOMIC_INT16_FETCH_ADD" => IntrinsicKind.ATOMIC_INT16_FETCH_ADD
+        case "ATOMIC_INT16_FETCH_SUB" => IntrinsicKind.ATOMIC_INT16_FETCH_SUB
+        case "ATOMIC_INT16_FETCH_AND" => IntrinsicKind.ATOMIC_INT16_FETCH_AND
+        case "ATOMIC_INT16_FETCH_OR" => IntrinsicKind.ATOMIC_INT16_FETCH_OR
+        case "ATOMIC_INT16_FETCH_XOR" => IntrinsicKind.ATOMIC_INT16_FETCH_XOR
+        case "ATOMIC_INT32_LOAD" => IntrinsicKind.ATOMIC_INT32_LOAD
+        case "ATOMIC_INT32_STORE" => IntrinsicKind.ATOMIC_INT32_STORE
+        case "ATOMIC_INT32_SWAP" => IntrinsicKind.ATOMIC_INT32_SWAP
+        case "ATOMIC_INT32_CAS" => IntrinsicKind.ATOMIC_INT32_CAS
+        case "ATOMIC_INT32_FETCH_ADD" => IntrinsicKind.ATOMIC_INT32_FETCH_ADD
+        case "ATOMIC_INT32_FETCH_SUB" => IntrinsicKind.ATOMIC_INT32_FETCH_SUB
+        case "ATOMIC_INT32_FETCH_AND" => IntrinsicKind.ATOMIC_INT32_FETCH_AND
+        case "ATOMIC_INT32_FETCH_OR" => IntrinsicKind.ATOMIC_INT32_FETCH_OR
+        case "ATOMIC_INT32_FETCH_XOR" => IntrinsicKind.ATOMIC_INT32_FETCH_XOR
+        case "ATOMIC_INT64_LOAD" => IntrinsicKind.ATOMIC_INT64_LOAD
+        case "ATOMIC_INT64_STORE" => IntrinsicKind.ATOMIC_INT64_STORE
+        case "ATOMIC_INT64_SWAP" => IntrinsicKind.ATOMIC_INT64_SWAP
+        case "ATOMIC_INT64_CAS" => IntrinsicKind.ATOMIC_INT64_CAS
+        case "ATOMIC_INT64_FETCH_ADD" => IntrinsicKind.ATOMIC_INT64_FETCH_ADD
+        case "ATOMIC_INT64_FETCH_SUB" => IntrinsicKind.ATOMIC_INT64_FETCH_SUB
+        case "ATOMIC_INT64_FETCH_AND" => IntrinsicKind.ATOMIC_INT64_FETCH_AND
+        case "ATOMIC_INT64_FETCH_OR" => IntrinsicKind.ATOMIC_INT64_FETCH_OR
+        case "ATOMIC_INT64_FETCH_XOR" => IntrinsicKind.ATOMIC_INT64_FETCH_XOR
+        case "ATOMIC_UINT8_LOAD" => IntrinsicKind.ATOMIC_UINT8_LOAD
+        case "ATOMIC_UINT8_STORE" => IntrinsicKind.ATOMIC_UINT8_STORE
+        case "ATOMIC_UINT8_SWAP" => IntrinsicKind.ATOMIC_UINT8_SWAP
+        case "ATOMIC_UINT8_CAS" => IntrinsicKind.ATOMIC_UINT8_CAS
+        case "ATOMIC_UINT8_FETCH_ADD" => IntrinsicKind.ATOMIC_UINT8_FETCH_ADD
+        case "ATOMIC_UINT8_FETCH_SUB" => IntrinsicKind.ATOMIC_UINT8_FETCH_SUB
+        case "ATOMIC_UINT8_FETCH_AND" => IntrinsicKind.ATOMIC_UINT8_FETCH_AND
+        case "ATOMIC_UINT8_FETCH_OR" => IntrinsicKind.ATOMIC_UINT8_FETCH_OR
+        case "ATOMIC_UINT8_FETCH_XOR" => IntrinsicKind.ATOMIC_UINT8_FETCH_XOR
+        case "ATOMIC_UINT16_LOAD" => IntrinsicKind.ATOMIC_UINT16_LOAD
+        case "ATOMIC_UINT16_STORE" => IntrinsicKind.ATOMIC_UINT16_STORE
+        case "ATOMIC_UINT16_SWAP" => IntrinsicKind.ATOMIC_UINT16_SWAP
+        case "ATOMIC_UINT16_CAS" => IntrinsicKind.ATOMIC_UINT16_CAS
+        case "ATOMIC_UINT16_FETCH_ADD" => IntrinsicKind.ATOMIC_UINT16_FETCH_ADD
+        case "ATOMIC_UINT16_FETCH_SUB" => IntrinsicKind.ATOMIC_UINT16_FETCH_SUB
+        case "ATOMIC_UINT16_FETCH_AND" => IntrinsicKind.ATOMIC_UINT16_FETCH_AND
+        case "ATOMIC_UINT16_FETCH_OR" => IntrinsicKind.ATOMIC_UINT16_FETCH_OR
+        case "ATOMIC_UINT16_FETCH_XOR" => IntrinsicKind.ATOMIC_UINT16_FETCH_XOR
+        case "ATOMIC_UINT32_LOAD" => IntrinsicKind.ATOMIC_UINT32_LOAD
+        case "ATOMIC_UINT32_STORE" => IntrinsicKind.ATOMIC_UINT32_STORE
+        case "ATOMIC_UINT32_SWAP" => IntrinsicKind.ATOMIC_UINT32_SWAP
+        case "ATOMIC_UINT32_CAS" => IntrinsicKind.ATOMIC_UINT32_CAS
+        case "ATOMIC_UINT32_FETCH_ADD" => IntrinsicKind.ATOMIC_UINT32_FETCH_ADD
+        case "ATOMIC_UINT32_FETCH_SUB" => IntrinsicKind.ATOMIC_UINT32_FETCH_SUB
+        case "ATOMIC_UINT32_FETCH_AND" => IntrinsicKind.ATOMIC_UINT32_FETCH_AND
+        case "ATOMIC_UINT32_FETCH_OR" => IntrinsicKind.ATOMIC_UINT32_FETCH_OR
+        case "ATOMIC_UINT32_FETCH_XOR" => IntrinsicKind.ATOMIC_UINT32_FETCH_XOR
+        case "ATOMIC_UINT64_LOAD" => IntrinsicKind.ATOMIC_UINT64_LOAD
+        case "ATOMIC_UINT64_STORE" => IntrinsicKind.ATOMIC_UINT64_STORE
+        case "ATOMIC_UINT64_SWAP" => IntrinsicKind.ATOMIC_UINT64_SWAP
+        case "ATOMIC_UINT64_CAS" => IntrinsicKind.ATOMIC_UINT64_CAS
+        case "ATOMIC_UINT64_FETCH_ADD" => IntrinsicKind.ATOMIC_UINT64_FETCH_ADD
+        case "ATOMIC_UINT64_FETCH_SUB" => IntrinsicKind.ATOMIC_UINT64_FETCH_SUB
+        case "ATOMIC_UINT64_FETCH_AND" => IntrinsicKind.ATOMIC_UINT64_FETCH_AND
+        case "ATOMIC_UINT64_FETCH_OR" => IntrinsicKind.ATOMIC_UINT64_FETCH_OR
+        case "ATOMIC_UINT64_FETCH_XOR" => IntrinsicKind.ATOMIC_UINT64_FETCH_XOR
+        case "ATOMIC_BOOL_LOAD" => IntrinsicKind.ATOMIC_BOOL_LOAD
+        case "ATOMIC_BOOL_STORE" => IntrinsicKind.ATOMIC_BOOL_STORE
+        case "ATOMIC_BOOL_SWAP" => IntrinsicKind.ATOMIC_BOOL_SWAP
+        case "ATOMIC_BOOL_CAS" => IntrinsicKind.ATOMIC_BOOL_CAS
+        case "ATOMIC_REFERENCEBASE_LOAD" => IntrinsicKind.ATOMIC_REFERENCEBASE_LOAD
+        case "ATOMIC_REFERENCEBASE_STORE" => IntrinsicKind.ATOMIC_REFERENCEBASE_STORE
+        case "ATOMIC_REFERENCEBASE_SWAP" => IntrinsicKind.ATOMIC_REFERENCEBASE_SWAP
+        case "ATOMIC_REFERENCEBASE_CAS" => IntrinsicKind.ATOMIC_REFERENCEBASE_CAS
+        case "ATOMIC_OPTIONREFERENCE_LOAD" => IntrinsicKind.ATOMIC_OPTIONREFERENCE_LOAD
+        case "ATOMIC_OPTIONREFERENCE_STORE" => IntrinsicKind.ATOMIC_OPTIONREFERENCE_STORE
+        case "ATOMIC_OPTIONREFERENCE_SWAP" => IntrinsicKind.ATOMIC_OPTIONREFERENCE_SWAP
+        case "ATOMIC_OPTIONREFERENCE_CAS" => IntrinsicKind.ATOMIC_OPTIONREFERENCE_CAS
+        case "BEGIN_CATCH" => IntrinsicKind.BEGIN_CATCH
+        case "ABS" => IntrinsicKind.ABS
+        case "FABS" => IntrinsicKind.FABS
+        case "FLOOR" => IntrinsicKind.FLOOR
+        case "CEIL" => IntrinsicKind.CEIL
+        case "TRUNC" => IntrinsicKind.TRUNC
+        case "SIN" => IntrinsicKind.SIN
+        case "COS" => IntrinsicKind.COS
+        case "EXP" => IntrinsicKind.EXP
+        case "EXP2" => IntrinsicKind.EXP2
+        case "LOG" => IntrinsicKind.LOG
+        case "LOG2" => IntrinsicKind.LOG2
+        case "LOG10" => IntrinsicKind.LOG10
+        case "SQRT" => IntrinsicKind.SQRT
+        case "ROUND" => IntrinsicKind.ROUND
+        case "POW" => IntrinsicKind.POW
+        case "POWI" => IntrinsicKind.POWI
+        case "BIT_CAST" => IntrinsicKind.BIT_CAST
+        case "PREINITIALIZE" => IntrinsicKind.PREINITIALIZE
+        case "OBJECT_AS" => IntrinsicKind.OBJECT_AS
+        case "IS_NULL" => IntrinsicKind.IS_NULL
+        case "GET_TYPE_FOR_TYPE_PARAMETER" => IntrinsicKind.GET_TYPE_FOR_TYPE_PARAMETER
+        case "IS_SUBTYPE_TYPES" => IntrinsicKind.IS_SUBTYPE_TYPES
+        case "EXCLUSIVE_SCOPE" => IntrinsicKind.EXCLUSIVE_SCOPE
+        case _ => IntrinsicKind.NOT_INTRINSIC
+    }
 }
 
 func CHIRFieldAt(fields: ArrayList<String>, index: Int64): String {

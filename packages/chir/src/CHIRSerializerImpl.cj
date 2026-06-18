@@ -105,7 +105,7 @@ class CHIRSerializerImpl {
         fields.add(def.GetPackageName())
         fields.add(def.GetIdentifier())
         fields.add(serializeGenericParams(def.genericTypeParams))
-        fields.add(serializeMemberVars(def.GetInstanceVars()))
+        fields.add(serializeMemberVars(def.GetDirectInstanceVars()))
         fields.add(serializeFunctionRefs(def.GetMethods()))
         fields.add(serializeEnumCtors(def))
         fields.add(serializeSuperClass(def))
@@ -115,6 +115,14 @@ class CHIRSerializerImpl {
         fields.add(CHIRSerializeDebugLocation(def.GetDebugLocation()))
         fields.add(CHIRSerializeAttributes(def))
         fields.add(CHIRSerializeBaseAnnotations(def))
+        fields.add(def.GetSrcCodeIdentifier())
+        fields.add(CHIRSerializeAnnoInfo(def.GetAnnoInfo()))
+        fields.add(serializeGlobalVarRefs(def.GetStaticMemberVars()))
+        fields.add(if (let Some(initFn) <- def.GetVarInitializationFunc()) { CHIRValueId(initFn) } else { "" })
+        fields.add(if (let Some(genericDecl) <- def.GetGenericDecl()) { CHIRBaseId(genericDecl) } else { "" })
+        fields.add(serializeInterfaceTypes(def))
+        fields.add(serializeSuperClassType(def))
+        fields.add(if (let Some(structDef) <- (def as StructDef)) { CHIRBoolToWire(structDef.IsCStruct()) } else { "" })
         lines.add(CHIRWireJoinFields(fields))
     }
 
@@ -225,6 +233,7 @@ class CHIRSerializerImpl {
         fields.add(serializeResultAttributes(expr))
         fields.add(serializeResultBaseAnnotations(expr))
         fields.add(serializeLambdaParams(expr))
+        fields.add(serializeExpressionPayload(expr))
         lines.add(CHIRWireJoinFields(fields))
         for (group in expr.GetBlockGroups()) {
             appendBlockGroup(lines, group)
@@ -247,12 +256,26 @@ class CHIRSerializerImpl {
             fields.add(CHIRSerializeType(memberVar.ty))
             fields.add(CHIRBoolToWire(memberVar.isStatic))
             fields.add(CHIRBoolToWire(memberVar.isReadOnly))
+            fields.add(memberVar.rawMangledName)
+            fields.add(CHIRSerializeAttributeInfo(memberVar.attributeInfo))
+            fields.add(CHIRSerializeDebugLocation(memberVar.loc))
+            fields.add(CHIRSerializeAnnoInfo(memberVar.annoInfo))
+            fields.add(if (let Some(initFn) <- memberVar.initializerFunc) { CHIRValueId(initFn) } else { "" })
+            fields.add(if (let Some(outerDef) <- memberVar.outerDef) { CHIRBaseId(outerDef) } else { "" })
             out.add(CHIRWireJoinFields(fields))
         }
         return CHIRWireJoinList(out)
     }
 
     private func serializeFunctionRefs(values: ArrayList<Function>): String {
+        let out = ArrayList<String>()
+        for (value in values) {
+            out.add(CHIRValueId(value))
+        }
+        return CHIRWireJoinList(out)
+    }
+
+    private func serializeGlobalVarRefs(values: ArrayList<GlobalVar>): String {
         let out = ArrayList<String>()
         for (value in values) {
             out.add(CHIRValueId(value))
@@ -370,6 +393,23 @@ class CHIRSerializerImpl {
         return CHIRWireJoinList(out)
     }
 
+    private func serializeInterfaceTypes(def: CustomTypeDef): String {
+        let out = ArrayList<String>()
+        for (interfaceTy in def.GetImplementedInterfaceTys()) {
+            out.add(CHIRSerializeType(interfaceTy))
+        }
+        return CHIRWireJoinList(out)
+    }
+
+    private func serializeSuperClassType(def: CustomTypeDef): String {
+        if (let Some(classDef) <- (def as ClassDef)) {
+            if (let Some(superTy) <- classDef.GetSuperClassTy()) {
+                return CHIRSerializeType(superTy)
+            }
+        }
+        return ""
+    }
+
     private func serializeExtends(extends: ArrayList<ExtendDef>): String {
         let out = ArrayList<String>()
         for (extendDef in extends) {
@@ -433,5 +473,169 @@ class CHIRSerializerImpl {
             return CHIRWireJoinFields(fields)
         }
         return ""
+    }
+
+    private func serializeExpressionPayload(expr: Expression): String {
+        if (let Some(branch) <- (expr as Branch)) {
+            return expressionPayload("branch", [SourceExprIndex(branch.GetSourceExpr()).toString()])
+        }
+        if (let Some(multiBranch) <- (expr as MultiBranch)) {
+            return expressionPayload("multiBranch", [CHIRSerializeUInt64List(multiBranch.GetCaseVals())])
+        }
+        if (let Some(intOp) <- (expr as IntOpWithException)) {
+            return expressionPayload("intOpWithException", [ExprKindIndex(intOp.GetOpKind()).toString()])
+        }
+        if (let Some(allocateWithException) <- (expr as AllocateWithException)) {
+            return expressionPayload("allocate", [CHIRSerializeType(allocateWithException.GetType())])
+        }
+        if (let Some(allocate) <- (expr as Allocate)) {
+            return expressionPayload("allocate", [CHIRSerializeType(allocate.GetType())])
+        }
+        if (let Some(getElementRef) <- (expr as GetElementRef)) {
+            return expressionPayload("indexPath", [CHIRSerializeUInt64List(getElementRef.GetPath())])
+        }
+        if (let Some(getElementByName) <- (expr as GetElementByName)) {
+            return expressionPayload("namePath", [CHIRWireJoinList(getElementByName.GetNames())])
+        }
+        if (let Some(storeElementRef) <- (expr as StoreElementRef)) {
+            return expressionPayload("indexPath", [CHIRSerializeUInt64List(storeElementRef.GetPath())])
+        }
+        if (let Some(storeElementByName) <- (expr as StoreElementByName)) {
+            return expressionPayload("namePath", [CHIRWireJoinList(storeElementByName.GetNames())])
+        }
+        if (let Some(applyWithException) <- (expr as ApplyWithException)) {
+            return serializeFuncCallPayload("apply", applyWithException.GetInstantiatedTypeArgs(),
+                applyWithException.GetThisType(), false)
+        }
+        if (let Some(apply) <- (expr as Apply)) {
+            return serializeFuncCallPayload("apply", apply.GetInstantiatedTypeArgs(), apply.GetThisType(),
+                apply.IsSuperCall())
+        }
+        if (let Some(invokeStaticWithException) <- (expr as InvokeStaticWithException)) {
+            return serializeInvokePayload(invokeStaticWithException.GetInstantiatedTypeArgs(),
+                invokeStaticWithException.GetThisType(), invokeStaticWithException.GetMethodName(),
+                invokeStaticWithException.GetMethodType(), invokeStaticWithException.GetGenericTypeParams(),
+                invokeStaticWithException.GetVirtualMethodOffset())
+        }
+        if (let Some(invokeWithException) <- (expr as InvokeWithException)) {
+            return serializeInvokePayload(invokeWithException.GetInstantiatedTypeArgs(),
+                invokeWithException.GetThisType(), invokeWithException.GetMethodName(),
+                invokeWithException.GetMethodType(), invokeWithException.GetGenericTypeParams(),
+                invokeWithException.GetVirtualMethodOffset())
+        }
+        if (let Some(invokeStatic) <- (expr as InvokeStatic)) {
+            return serializeInvokePayload(invokeStatic.GetInstantiatedTypeArgs(), invokeStatic.GetThisType(),
+                invokeStatic.GetMethodName(), invokeStatic.GetMethodType(), invokeStatic.GetGenericTypeParams(),
+                invokeStatic.GetVirtualMethodOffset())
+        }
+        if (let Some(invoke) <- (expr as Invoke)) {
+            return serializeInvokePayload(invoke.GetInstantiatedTypeArgs(), invoke.GetThisType(),
+                invoke.GetMethodName(), invoke.GetMethodType(), invoke.GetGenericTypeParams(),
+                invoke.GetVirtualMethodOffset())
+        }
+        if (let Some(instanceOf) <- (expr as InstanceOf)) {
+            return expressionPayload("instanceOf", [CHIRSerializeType(instanceOf.GetType())])
+        }
+        if (let Some(getInstantiateValue) <- (expr as GetInstantiateValue)) {
+            return expressionPayload("instantiate", [CHIRSerializeTypeList(getInstantiateValue.GetInstantiateTypes())])
+        }
+        if (let Some(getRTTIStatic) <- (expr as GetRTTIStatic)) {
+            return expressionPayload("rttiStatic", [CHIRSerializeType(getRTTIStatic.GetRTTIType())])
+        }
+        if (let Some(field) <- (expr as Field)) {
+            return expressionPayload("indexPath", [CHIRSerializeUInt64List(field.GetPath())])
+        }
+        if (let Some(fieldByName) <- (expr as FieldByName)) {
+            return expressionPayload("namePath", [CHIRWireJoinList(fieldByName.GetNames())])
+        }
+        if (let Some(rawArrayAllocateWithException) <- (expr as RawArrayAllocateWithException)) {
+            return expressionPayload("rawArrayAllocate", [CHIRSerializeType(rawArrayAllocateWithException.GetElementType())])
+        }
+        if (let Some(rawArrayAllocate) <- (expr as RawArrayAllocate)) {
+            return expressionPayload("rawArrayAllocate", [CHIRSerializeType(rawArrayAllocate.GetElementType())])
+        }
+        if (let Some(intrinsicWithException) <- (expr as IntrinsicWithException)) {
+            return expressionPayload("intrinsic", [IntrinsicKindName(intrinsicWithException.GetIntrinsicKind()),
+                CHIRSerializeTypeList(intrinsicWithException.GetInstantiatedTypeArgs())])
+        }
+        if (let Some(intrinsic) <- (expr as Intrinsic)) {
+            return expressionPayload("intrinsic", [IntrinsicKindName(intrinsic.GetIntrinsicKind()),
+                CHIRSerializeTypeList(intrinsic.GetInstantiatedTypeArgs())])
+        }
+        if (let Some(debugExpr) <- (expr as Debug)) {
+            return expressionPayload("debug", [debugExpr.GetSrcCodeIdentifier()])
+        }
+        if (let Some(spawnWithException) <- (expr as SpawnWithException)) {
+            return expressionPayload("spawn", [if (let Some(fn) <- spawnWithException.GetExecuteClosure()) {
+                CHIRValueId(fn)
+            } else {
+                ""
+            }])
+        }
+        if (let Some(spawnExpr) <- (expr as Spawn)) {
+            return expressionPayload("spawn", [if (let Some(fn) <- spawnExpr.GetExecuteClosure()) {
+                CHIRValueId(fn)
+            } else {
+                ""
+            }])
+        }
+        if (let Some(lambdaExpr) <- (expr as Lambda)) {
+            return serializeLambdaPayload(lambdaExpr)
+        }
+        return ""
+    }
+
+    private func serializeFuncCallPayload(tag: String, instTypeArgs: ArrayList<Type>, thisType: Option<Type>,
+        isSuperCall: Bool): String {
+        let fields = ArrayList<String>()
+        fields.add(CHIRSerializeTypeList(instTypeArgs))
+        fields.add(if (let Some(ty) <- thisType) { CHIRSerializeType(ty) } else { "" })
+        fields.add(CHIRBoolToWire(isSuperCall))
+        return expressionPayload(tag, fields)
+    }
+
+    private func serializeInvokePayload(instTypeArgs: ArrayList<Type>, thisType: Option<Type>, methodName: String,
+        methodType: FuncType, genericTypeParams: ArrayList<GenericType>, virtualMethodOffset: Option<UInt64>): String {
+        let fields = ArrayList<String>()
+        fields.add(CHIRSerializeTypeList(instTypeArgs))
+        fields.add(if (let Some(ty) <- thisType) { CHIRSerializeType(ty) } else { "" })
+        fields.add(methodName)
+        fields.add(CHIRSerializeType(methodType))
+        fields.add(CHIRSerializeGenericTypeList(genericTypeParams))
+        fields.add(if (let Some(offset) <- virtualMethodOffset) { offset.toString() } else { "" })
+        return expressionPayload("invoke", fields)
+    }
+
+    private func serializeLambdaPayload(lambdaExpr: Lambda): String {
+        let fields = ArrayList<String>()
+        fields.add(if (let Some(funcTy) <- lambdaExpr.GetFuncType()) { CHIRSerializeType(funcTy) } else { "" })
+        fields.add(CHIRBoolToWire(lambdaExpr.IsLocalFunc()))
+        fields.add(lambdaExpr.GetIdentifier())
+        fields.add(lambdaExpr.GetSrcCodeIdentifier())
+        fields.add(CHIRSerializeGenericTypeList(lambdaExpr.GetGenericTypeParams()))
+        fields.add(if (let Some(retValue) <- lambdaExpr.GetReturnValue()) { CHIRValueId(retValue) } else { "" })
+        fields.add(CHIRBoolToWire(lambdaExpr.IsCompileTimeValue()))
+        fields.add(if (let Some(hostFunc) <- lambdaExpr.GetParamDftValHostFunc()) {
+            CHIRBaseId(hostFunc)
+        } else {
+            ""
+        })
+        return expressionPayload("lambda", fields)
+    }
+
+    private func expressionPayload(tag: String, values: ArrayList<String>): String {
+        let fields = CHIRLineFields(tag)
+        for (value in values) {
+            fields.add(value)
+        }
+        return CHIRWireJoinFields(fields)
+    }
+
+    private func expressionPayload(tag: String, values: Array<String>): String {
+        let fields = CHIRLineFields(tag)
+        for (value in values) {
+            fields.add(value)
+        }
+        return CHIRWireJoinFields(fields)
     }
 }

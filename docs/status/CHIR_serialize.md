@@ -1,6 +1,6 @@
 # CHIR Serializer/Deserializer Port Status
 
-Date: 2026-06-17
+Date: 2026-06-18
 
 Build: `cjpm build` passes.
 
@@ -14,6 +14,30 @@ Reference inspected:
 - `/root/cj_build/cangjie_compiler/include/cangjie/CHIR/Serializer/CHIRDeserializer.h`
 
 Implemented in this pass:
+
+- Deepened the existing `CHIR-TEXT\t2` format without breaking older records by appending expression/custom
+  metadata fields instead of renumbering existing fields.
+- Added C++-faithful type payload coverage for `CPointerType` and raw array dimensions; raw arrays no longer
+  deserialize all shapes as one-dimensional arrays, and C pointer element types are now preserved.
+- Extended custom type definition records toward the C++ `CustomTypeDef` flatbuffer shape: source-code
+  identifier, public `AnnoInfo`, static member variables, instance-var init function, generic declaration,
+  implemented interface types, superclass type, and C-struct flag now round-trip when exposed by the Cangjie IR.
+- Changed custom type member serialization to use direct instance variables, matching the C++ serializer's
+  class-member behavior instead of duplicating inherited fields through `GetInstanceVars()`.
+- Extended `MemberVarInfo` round-tripping beyond name/type/static/readonly: raw mangled name, attribute info,
+  debug location, annotation info, initializer function, and outer definition are now serialized and restored.
+- Added an appended expression payload field and concrete deserialization paths for the exposed CHIR expression
+  classes: branch source expression, multibranch case values, integer-operation exception kind, allocation target
+  type, static and dynamic element refs, named element refs, apply/invoke call metadata, virtual method offsets,
+  instance-of target type, generic instantiation types, RTTI static type, field paths/names, raw-array allocation
+  element type, intrinsic kind and instantiation types, debug source identifier, spawn execute closure, for-in
+  block groups, and lambda signature metadata.
+- Added deferred expression payload repair for lambda return values and parameter-default host lambdas after all
+  expression result locals have been registered.
+- Added a local generated reverse map for every `IntrinsicKindName` case so intrinsic payloads deserialize back to
+  the real `IntrinsicKind` enum without changing the shared intrinsic enum source.
+
+Previous implemented work retained:
 
 - Replaced the single compatibility `Serializer.cj` with C++-named serializer/deserializer entry and
   implementation files: `CHIRSerializer`, `CHIRDeserializer`, `CHIRSerializerImpl`,
@@ -67,7 +91,8 @@ Known gaps:
 - Callers that still use `SerializePackage(pkg)` without a `CHIRContext` cannot emit source file path tables because
   `Package` does not expose the owning context; the new `SerializePackage(pkg, context)` overload covers callers
   that have the builder/context available.
-- `TYPE_CPOINTER` exists in the enum but has no concrete Cangjie type/context constructor in this package, so
-  deserialization falls back to `Invalid` for that kind.
+- Overflow-strategy fields, typed C++ annotation unions, vtable payloads, original lambda info on `Function`,
+  enum exhaustiveness, and annotation-class target lists are still limited by missing or not-yet-wired Cangjie IR
+  APIs in this package.
 
-Honest coverage estimate for CHIR serializer/deserializer scope: 44%.
+Honest coverage estimate for CHIR serializer/deserializer scope: 55%.
