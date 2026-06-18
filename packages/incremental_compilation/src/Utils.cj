@@ -138,13 +138,29 @@ public func GetEnumConstructors(decl: IncrDecl): ArrayList<IncrDecl> {
 
 public func GetAllMembers(decl: IncrDecl): ArrayList<IncrDecl> {
     let out = ArrayList<IncrDecl>()
-    for (member in GetMembers(decl)) {
+    for (member in GetRawMemberDecls(decl)) {
         for (nested in GetAllMembers(member)) {
             out.add(nested)
         }
         out.add(member)
     }
     return out
+}
+
+private func GetRawMemberDecls(decl: IncrDecl): ArrayList<IncrDecl> {
+    let out = ArrayList<IncrDecl>()
+    if (decl.astKind == IncrDeclKind.ENUM_DECL) {
+        for (constructor in GetEnumConstructors(decl)) {
+            out.add(constructor)
+        }
+        for (member in decl.members) {
+            if (!member.TestAttr(IncrAttribute.ENUM_CONSTRUCTOR)) {
+                out.add(member)
+            }
+        }
+        return out
+    }
+    return GetMembers(decl)
 }
 
 public func IsOOEAffectedDecl(decl: IncrDecl): Bool {

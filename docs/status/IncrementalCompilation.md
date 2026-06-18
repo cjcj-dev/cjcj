@@ -112,6 +112,11 @@ Implemented:
 - Refined cached file-map reconstruction for loaded member children so child entries pass through the same
   OOEAffected/static-member filters as C++ loader member entries instead of unconditionally participating in
   order-change invalidation.
+- Restored the C++ distinction between public incremental `GetMembers(EnumDecl)` and the pollution analyzer's
+  private raw-member traversal: generic/added/source-use pollution now sees enum constructors through the
+  all-member path, while cache/member APIs still exclude constructors where C++ `GetMembers` does.
+- Fixed direct-extend member previsit fallback mangling to establish each member raw mangle before recursing into
+  nested members, matching the parent-first fallback behavior used for normal member cache traversal.
 
 Known gaps:
 

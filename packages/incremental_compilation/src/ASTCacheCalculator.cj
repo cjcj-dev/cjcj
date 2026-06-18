@@ -117,10 +117,10 @@ public class ASTCacheCalculator {
     }
 
     private func PrevisitDirectExtendMember(decl: IncrDecl): Unit {
+        decl.rawMangleName = MangleDecl(decl)
         for (member in GetMembers(decl)) {
             PrevisitDirectExtendMember(member)
         }
-        decl.rawMangleName = MangleDecl(decl)
         CollectDecl(decl)
         decl.cacheHash.srcUse = ComputeDeclSrcUseHash(decl)
         decl.cacheHash.bodyHash = ComputeDeclBodyHash(decl, srcInfo)
