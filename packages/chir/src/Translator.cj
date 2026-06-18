@@ -30,6 +30,7 @@ import cangjie_compiler::ast.InterfaceDecl as AstInterfaceDecl
 import cangjie_compiler::ast.JumpExpr as AstJumpExpr
 import cangjie_compiler::ast.LitConstExpr as AstLitConstExpr
 import cangjie_compiler::ast.LitConstKind as AstLitConstKind
+import cangjie_compiler::ast.MainDecl as AstMainDecl
 import cangjie_compiler::ast.MatchExpr as AstMatchExpr
 import cangjie_compiler::ast.MemberAccess as AstMemberAccess
 import cangjie_compiler::ast.Node as AstNode
@@ -117,6 +118,7 @@ public class Translator {
     public static func TranslateASTNode(node: AstNode, trans: Translator): Option<Value> {
         let nodePtr = GetDesugaredExpr(node)
         return match (nodePtr.astKind) {
+            case ASTKind.MAIN_DECL => trans.Visit(RequireNodeAsMainDecl(nodePtr))
             case ASTKind.FUNC_DECL => trans.Visit(RequireNodeAsFuncDecl(nodePtr))
             case ASTKind.STRUCT_DECL => trans.Visit(RequireNodeAsStructDecl(nodePtr))
             case ASTKind.CLASS_DECL => trans.Visit(RequireNodeAsClassDecl(nodePtr))
@@ -192,6 +194,43 @@ public class Translator {
             } else if (CurrentBlock().GetTerminator().isNone()) {
                 builder.CreateExit(None, CurrentBlock())
             }
+        }
+        currentBlock = savedBlock
+        currentFunc = None
+        blockGroupStack.remove(at: blockGroupStack.size - 1)
+        return fn
+    }
+
+    public func Visit(mainDecl: AstMainDecl): Option<Value> {
+        let value = globalSymbolTable.Get(mainDecl)
+        let fn = (value as Function) ??
+            throw IllegalStateException("faithful AST2CHIR main cache is not a Function")
+        let funcBody = match (mainDecl.funcBody) {
+            case Some(value) => value
+            case None =>
+                if (let Some(desugared) <- mainDecl.GetDesugarDecl()) {
+                    match (desugared.funcBody) {
+                        case Some(value) => value
+                        case None => return fn
+                    }
+                } else {
+                    return fn
+                }
+        }
+        let body = EnsureFuncBody(fn)
+        blockGroupStack.add(body)
+        currentFunc = fn
+        let savedBlock = currentBlock
+        let entry = body.GetEntryBlock() ?? builder.CreateBlock(body)
+        body.SetEntryBlock(entry)
+        currentBlock = entry
+        if (let Some(astBody) <- funcBody.body) {
+            let result = Translator.TranslateASTNode(astBody, this)
+            if (CurrentBlock().GetTerminator().isNone()) {
+                EmitImplicitFunctionExit(fn, result)
+            }
+        } else if (CurrentBlock().GetTerminator().isNone()) {
+            builder.CreateExit(None, CurrentBlock())
         }
         currentBlock = savedBlock
         currentFunc = None
@@ -2183,6 +2222,10 @@ public class Translator {
 
     private static func RequireNodeAsFuncDecl(node: AstNode): AstFuncDecl {
         return (node as AstFuncDecl) ?? throw IllegalArgumentException("ASTKind cast failed: FUNC_DECL")
+    }
+
+    private static func RequireNodeAsMainDecl(node: AstNode): AstMainDecl {
+        return (node as AstMainDecl) ?? throw IllegalArgumentException("ASTKind cast failed: MAIN_DECL")
     }
 
     private static func RequireNodeAsStructDecl(node: AstNode): AstStructDecl {

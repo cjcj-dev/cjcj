@@ -14,9 +14,11 @@ import cangjie_compiler::ast.Decl as AstDecl
 import cangjie_compiler::ast.EnumDecl as AstEnumDecl
 import cangjie_compiler::ast.Expr as AstExpr
 import cangjie_compiler::ast.File as AstFile
+import cangjie_compiler::ast.FuncBody as AstFuncBody
 import cangjie_compiler::ast.FuncDecl as AstFuncDecl
 import cangjie_compiler::ast.LitConstExpr as AstLitConstExpr
 import cangjie_compiler::ast.LitConstKind as AstLitConstKind
+import cangjie_compiler::ast.MainDecl as AstMainDecl
 import cangjie_compiler::ast.MemberAccess as AstMemberAccess
 import cangjie_compiler::ast.Node as AstNode
 import cangjie_compiler::ast.Package as AstPackage
@@ -36,6 +38,8 @@ private class FaithfulInitFileVars {
         this.file = file
     }
 }
+
+private let FAITHFUL_USER_MAIN_NAME: String = "user.main"
 
 public class FaithfulAST2CHIRBuilder {
     private var builder: Option<CHIRBuilder> = None
@@ -65,6 +69,7 @@ public class FaithfulAST2CHIR {
     private let chirType: CHIRType
     private var outputPackage: Option<Package> = None
     private var failure: Bool = false
+    private var failureReason: String = ""
 
     private let globalCache: FaithfulAST2CHIRNodeMap = FaithfulAST2CHIRNodeMap()
     private let allTopLevelNodes: ArrayList<AstDecl> = ArrayList<AstDecl>()
@@ -100,6 +105,10 @@ public class FaithfulAST2CHIR {
 
     public func HasFailed(): Bool {
         return failure
+    }
+
+    public func GetFailureReason(): String {
+        return failureReason
     }
 
     public func GetPackage(): Option<Package> {
@@ -198,6 +207,8 @@ public class FaithfulAST2CHIR {
                 })
             case ASTKind.FUNC_DECL =>
                 CollectFuncDecl(RequireFuncDecl(decl))
+            case ASTKind.MAIN_DECL =>
+                CollectMainDecl(RequireMainDecl(decl))
             case ASTKind.VAR_DECL =>
                 CollectVarandVarwithpatternDecl(decl)
             case ASTKind.VAR_WITH_PATTERN_DECL =>
@@ -254,6 +265,10 @@ public class FaithfulAST2CHIR {
         CollectDesugaredDefaultParams(funcDecl, globalAndMemberFuncs)
     }
 
+    private func CollectMainDecl(mainDecl: AstMainDecl): Unit {
+        CollectDeclToList(mainDecl, globalAndMemberFuncs)
+    }
+
     private func CollectDesugaredDefaultParams(funcDecl: AstFuncDecl, list: ArrayList<AstDecl>): Unit {
         if (let Some(body) <- funcDecl.funcBody) {
             if (!body.paramLists.isEmpty()) {
@@ -283,7 +298,14 @@ public class FaithfulAST2CHIR {
         CacheCustomTypeDefToGlobalSymbolTable()
         TranslateAllCustomTypeTy()
         for (decl in globalAndMemberFuncs) {
-            CreateFuncSignatureAndSetGlobalCache(RequireFuncDecl(decl))
+            if (let Some(funcDecl) <- (decl as AstFuncDecl)) {
+                CreateFuncSignatureAndSetGlobalCache(funcDecl)
+            } else if (let Some(mainDecl) <- (decl as AstMainDecl)) {
+                CreateMainSignatureAndSetGlobalCache(mainDecl)
+            } else {
+                throw IllegalArgumentException(
+                    "faithful AST2CHIR expected function-like decl, got ${ASTKindName(decl.astKind)}")
+            }
         }
         CreateGlobalVarSignature(globalAndStaticVars)
     }
@@ -383,6 +405,7 @@ public class FaithfulAST2CHIR {
         let result = CHIRChecker().CheckPackage(CurrentPackage())
         if (!result.ok) {
             failure = true
+            failureReason = result.ToString()
         }
     }
 
@@ -740,7 +763,7 @@ public class FaithfulAST2CHIR {
 
     private func CreateEmptyGVInitFunc(identifier: String, srcCodeIdentifier: String, rawMangledName: String,
         packageName: String): Function {
-        let funcTy = builder.context.GetFuncTy(ArrayList<Type>(), builder.context.GetUnitTy())
+        let funcTy = builder.context.GetFuncTy(ArrayList<Type>(), builder.context.GetVoidTy())
         let fn = builder.CreateFunction(funcTy, identifier, srcCodeIdentifier: srcCodeIdentifier,
             rawMangledName: rawMangledName, packageName: packageName)
         fn.SetFuncKind(FuncKind.GLOBALVAR_INIT)
@@ -753,7 +776,7 @@ public class FaithfulAST2CHIR {
     }
 
     private func CreateInitFuncApply(initFn: Function, block: Block): Unit {
-        builder.CreateApply(builder.context.GetUnitTy(), initFn, FuncCallContext(), block)
+        builder.CreateApply(builder.context.GetVoidTy(), initFn, FuncCallContext(), block)
     }
 
     private func ImportedPackageNames(): ArrayList<String> {
@@ -792,21 +815,83 @@ public class FaithfulAST2CHIR {
             throw IllegalStateException("faithful AST2CHIR initializer function has no entry block")
     }
 
+    private func EnsureReturnSlot(fn: Function, entry: Block): Unit {
+        if (let Some(returnTy) <- fn.GetReturnType()) {
+            if (returnTy.IsVoid() || returnTy.IsUnit() || returnTy.IsNothing()) {
+                return
+            }
+            if (let Some(retValue) <- builder.CreateAllocate(builder.context.GetRefTy(returnTy), returnTy,
+                entry).GetResult()) {
+                fn.SetReturnValue(retValue)
+            }
+        }
+    }
+
     private func CreateFuncSignatureAndSetGlobalCache(funcDecl: AstFuncDecl): Unit {
         let funcTy = RequireFuncType(chirType.TranslateType(RequireAstTy(funcDecl)))
-        let fn = builder.CreateFunction(funcTy, EffectiveMangledName(funcDecl),
-            srcCodeIdentifier: funcDecl.identifier.Val(), rawMangledName: EffectiveRawMangledName(funcDecl),
+        let fn = builder.CreateFunction(funcTy, EffectiveFunctionIdentifier(funcDecl),
+            srcCodeIdentifier: EffectiveFunctionSrcIdentifier(funcDecl), rawMangledName: EffectiveFunctionRawName(funcDecl),
             packageName: EffectivePackageName(funcDecl))
         ApplyDeclAttrs(fn, funcDecl)
+        if (funcDecl.TestAttr(AstAttribute.MAIN_ENTRY)) {
+            fn.SetFuncKind(FuncKind.MAIN_ENTRY)
+        }
         if (!funcDecl.TestAttr(AstAttribute.ABSTRACT)) {
             let body = builder.CreateBlockGroup(fn)
             fn.InitBody(body)
             let entry = builder.CreateBlock(body)
             body.SetEntryBlock(entry)
+            EnsureReturnSlot(fn, entry)
         }
         TranslateFuncParams(funcDecl, fn)
         globalCache.Set(funcDecl, fn)
         AddFunctionToPackage(fn)
+    }
+
+    private func CreateMainSignatureAndSetGlobalCache(mainDecl: AstMainDecl): Unit {
+        let funcTy = MainFuncType(mainDecl)
+        let fn = builder.CreateFunction(funcTy, FAITHFUL_USER_MAIN_NAME, srcCodeIdentifier: "main",
+            rawMangledName: FAITHFUL_USER_MAIN_NAME, packageName: EffectivePackageName(mainDecl))
+        ApplyDeclAttrs(fn, mainDecl)
+        fn.SetFuncKind(FuncKind.MAIN_ENTRY)
+        let body = builder.CreateBlockGroup(fn)
+        fn.InitBody(body)
+        let entry = builder.CreateBlock(body)
+        body.SetEntryBlock(entry)
+        EnsureReturnSlot(fn, entry)
+        globalCache.Set(mainDecl, fn)
+        AddFunctionToPackage(fn)
+    }
+
+    private func MainFuncType(mainDecl: AstMainDecl): FuncType {
+        let funcBody = ResolveMainFuncBody(mainDecl) ??
+            throw IllegalStateException("faithful AST2CHIR MainDecl has no FuncBody")
+        if (let Some(bodyTy) <- funcBody.GetTy()) {
+            if (!AstTy.IsInitialTy(Some(bodyTy))) {
+                return RequireFuncType(chirType.TranslateType(bodyTy))
+            }
+        }
+        let returnTy = if (let Some(retType) <- funcBody.retType) {
+            if (AstTy.IsInitialTy(retType.GetTy())) {
+                builder.context.GetUnitTy()
+            } else {
+                chirType.TranslateType(retType.GetTy() ??
+                    throw IllegalStateException("faithful AST2CHIR MainDecl retType has no Ty"))
+            }
+        } else {
+            builder.context.GetUnitTy()
+        }
+        return builder.context.GetFuncTy(ArrayList<Type>(), returnTy)
+    }
+
+    private func ResolveMainFuncBody(mainDecl: AstMainDecl): Option<AstFuncBody> {
+        if (let Some(funcBody) <- mainDecl.funcBody) {
+            return funcBody
+        }
+        if (let Some(desugared) <- mainDecl.GetDesugarDecl()) {
+            return desugared.funcBody
+        }
+        return None
     }
 
     private func CreateImportedFuncSignatureAndSetGlobalCache(funcDecl: AstFuncDecl): Unit {
@@ -918,6 +1003,23 @@ public class FaithfulAST2CHIR {
         return EffectiveMangledName(decl)
     }
 
+    private func EffectiveFunctionIdentifier(funcDecl: AstFuncDecl): String {
+        return if (funcDecl.TestAttr(AstAttribute.MAIN_ENTRY)) { FAITHFUL_USER_MAIN_NAME } else {
+            EffectiveMangledName(funcDecl)
+        }
+    }
+
+    private func EffectiveFunctionRawName(funcDecl: AstFuncDecl): String {
+        return if (funcDecl.TestAttr(AstAttribute.MAIN_ENTRY)) { FAITHFUL_USER_MAIN_NAME } else {
+            EffectiveRawMangledName(funcDecl)
+        }
+    }
+
+    private func EffectiveFunctionSrcIdentifier(funcDecl: AstFuncDecl): String {
+        let identifier = funcDecl.identifier.Val()
+        return if (identifier.isEmpty() && funcDecl.TestAttr(AstAttribute.MAIN_ENTRY)) { "main" } else { identifier }
+    }
+
     private func EffectivePackageName(decl: AstDecl): String {
         if (!decl.fullPackageName.isEmpty()) {
             return decl.fullPackageName
@@ -951,6 +1053,11 @@ public class FaithfulAST2CHIR {
     private func RequireFuncDecl(decl: AstDecl): AstFuncDecl {
         return (decl as AstFuncDecl) ??
             throw IllegalArgumentException("faithful AST2CHIR expected func_decl, got ${ASTKindName(decl.astKind)}")
+    }
+
+    private func RequireMainDecl(decl: AstDecl): AstMainDecl {
+        return (decl as AstMainDecl) ??
+            throw IllegalArgumentException("faithful AST2CHIR expected main_decl, got ${ASTKindName(decl.astKind)}")
     }
 
     private func RequireVarDecl(decl: AstDecl): AstVarDecl {
