@@ -11,6 +11,15 @@ private func LoopInvalid(expr: Expr): Ty {
     return TcInvalid(expr)
 }
 
+private func SynLoopBody(typeManager: TypeManager, body: Block): Bool {
+    let bodyTy = SynBlock(typeManager, body)
+    if (Ty.IsTyCorrect(bodyTy)) {
+        body.SetTy(TcUnitTy())
+        return true
+    }
+    return false
+}
+
 private func IterablePayload(ty: Ty): Option<Ty> {
     if (ty.name == "Iterable" && ty.typeArgs.size == 1) {
         return Some(ty.typeArgs[0])
@@ -21,6 +30,13 @@ private func IterablePayload(ty: Ty): Option<Ty> {
 private func PromotedIterableElementTy(typeManager: TypeManager, inTy: Ty): Option<Ty> {
     if (let Some(payload) <- IterablePayload(inTy)) {
         return Some(payload)
+    }
+    if (let Some(genericTy) <- (inTy as GenericsTy)) {
+        for (upperTy in genericTy.upperBounds) {
+            if (let Some(payloadFromUpper) <- PromotedIterableElementTy(typeManager, upperTy)) {
+                return Some(payloadFromUpper)
+            }
+        }
     }
     for (superTy in typeManager.GetAllSuperTys(inTy).values) {
         if (let Some(payload) <- IterablePayload(superTy)) {
@@ -54,9 +70,6 @@ private func IterableElementTy(typeManager: TypeManager, inTy: Ty): Ty {
     if (inTy.IsString()) {
         return TypeManager.GetPrimitiveTy(TypeKind.TYPE_RUNE)
     }
-    if (inTy.IsAny() || inTy.IsGeneric()) {
-        return typeManager.GetAnyTy()
-    }
     return TypeManager.GetInvalidTy()
 }
 
@@ -68,7 +81,7 @@ public func SynWhileExpr(typeManager: TypeManager, we: WhileExpr): Ty {
         ok = false
     }
     if (let Some(body) <- we.body) {
-        ok = Ty.IsTyCorrect(SynBlock(typeManager, body)) && ok
+        ok = SynLoopBody(typeManager, body) && ok
     } else {
         ok = false
     }
@@ -93,7 +106,7 @@ public func ChkWhileExpr(typeManager: TypeManager, target: Ty, we: WhileExpr): B
 public func SynDoWhileExpr(typeManager: TypeManager, dwe: DoWhileExpr): Ty {
     var ok = true
     if (let Some(body) <- dwe.body) {
-        ok = Ty.IsTyCorrect(SynBlock(typeManager, body)) && ok
+        ok = SynLoopBody(typeManager, body) && ok
     } else {
         ok = false
     }
@@ -143,7 +156,7 @@ public func SynForInExpr(typeManager: TypeManager, fie: ForInExpr): Ty {
         ok = TcCheckCondition(typeManager, patternGuard) && ok
     }
     if (let Some(body) <- fie.body) {
-        ok = Ty.IsTyCorrect(SynBlock(typeManager, body)) && ok
+        ok = SynLoopBody(typeManager, body) && ok
     } else {
         ok = false
     }

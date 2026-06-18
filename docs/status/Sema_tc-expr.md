@@ -1,6 +1,6 @@
 # Sema tc-expr status
 
-Date: 2026-06-17
+Date: 2026-06-18
 
 Scope: `packages/sema/src/TypeCheckExpr.cj` and expression checker components for assign, binary, if, if-available, lambda, loops, name references, subscript, and try expressions.
 
@@ -55,12 +55,32 @@ What changed:
 - Condition-checking continuation:
   - `let` pattern conditions now replace ideal initializer types before checking patterns, propagate the destructed expression context into nested variable patterns, reject mixed OR-pattern shapes, and reject explicit variable bindings introduced by OR-pattern alternatives.
   - Recursive `&&`/`||` condition checking now rejects explicit variable bindings under `||` while still type-checking both sides, matching the C++ control-flow rule for condition-local bindings.
-- Verification: `cjpm build` passes after the condition-checking continuation. `grep -rn "TODO(selfhost:Sema)" packages/sema/src` reports only out-of-scope Sema placeholders; the scoped `TypeCheckExpr.cj` and `TypeCheckExpr/*` files have zero matching markers.
+- Binary/if continuation:
+  - Built-in arithmetic and relational synthesis now follows the C++ `SynLiteralInBinaryExpr` shape more closely: synthesize from the right operand, check the left against that exact primitive candidate, clear and retry from the left when needed, and use the C++ candidate sets instead of rank-based numeric widening.
+  - `if` branch joining now replaces ideal types and normalizes `This` types on both branches before computing the joined type, matching the C++ pre-join normalization step.
+- Tuple-equality continuation:
+  - Tuple `==`/`!=` now builds the C++-shaped desugared boolean chain (`true && ...` or `false || ...`) using real AST clone/create APIs, tuple-access nodes for non-literal tuple operands, shared `mapExpr` for side-effecting operands, and recursive synthesis of each generated element comparison.
+- Binary check-mode continuation:
+  - Checked binary expressions now try C++-shaped built-in target checking before synthesis fallback. Arithmetic operators unbox contextual `Option<T>` targets, filter concrete primitive candidates by subtype compatibility with the target, and check both operands against each candidate so contextual literal typing is preserved.
+  - Exponentiation check mode now follows the C++ `Int64 ** UInt64` and `Float64 ** (Int64 | Float64)` target split, including rejection of ambiguous `Float64` exponent candidates.
+  - Logical and relational check mode now requires a `Bool`-compatible target before checking operands, while shift check mode checks the left operand against the target and synthesizes/replaces the right operand before validating the integer candidate set.
+  - Failed non-tuple built-in check attempts clear expression state before falling back to overload/synthesis, preserving the C++ reset shape without re-enabling direct overloads for both-tuple `==`/`!=`.
+- Branch-join continuation:
+  - `if` branch synthesis now uses the real sibling `Join` helper instead of the older compatibility/common-super-only approximation, preserving union results for disjoint branch types like the C++ `JoinAndMeet` path.
+  - Try expression result joining and catch exception type-pattern joining now use the same shared `Join` helper, so try/catch/handle synthesis can carry union branch types instead of collapsing to invalid when there is no single common supertype.
+- For-in iterable continuation:
+  - `for-in` element inference now recursively promotes generic upper bounds to `Iterable<T>` before reading the element type, covering bounded generic iterables whose bound implements `Iterable<T>`.
+  - Removed the previous unconstrained `Any`/generic fallback for `for-in` operands. Values must now be a recognized iterable shape or promote to a declared `Iterable<T>` view, matching the C++ `GetIterableTy` failure behavior more closely.
+- Loop-body context continuation:
+  - `while`, `do-while`, and `for-in` body blocks now normalize to `Unit` after successful synthesis, matching the C++ use of `SynPos::UNUSED` for loop bodies instead of leaving the block typed as its final expression.
+- Verification: `cjpm build` passes after the loop-body context continuation. `grep -rn "TODO(selfhost:Sema)" packages/sema/src` reports only out-of-scope Sema placeholders; the scoped `TypeCheckExpr.cj` and `TypeCheckExpr/*` files have zero matching markers.
 
 Remaining fidelity gaps:
 - Full overload/desugar diagnostic parity still depends on broader call/lookup/desugar infrastructure: binary, flow, subscript, and compound assignment now use the real fallback shapes, but not the C++ diagnostic suppression, negative-cache constraint rollback, return-type-inference diagnostics, or exact recovery diagnostics.
+- Binary target-driven built-in checking now mirrors the core C++ control flow, but exact diagnostic replay and constraint-transaction behavior remain approximate until the self-hosted checker has the C++ negative-cache/commit-scope machinery.
+- Branch joining now preserves union results through the shared self-hosted `Join` helper, but exact C++ `JoinAndMeet::SetJoinedType` diagnostics and visible-type notes are still not emitted in this shallow layer.
 - Lambda syntax-driven inference from member access/calls still needs the C++ `ASTContext` candidate maps and cache invalidation path to be threaded into this self-hosted expression layer.
-- Tuple equality still validates built-in element comparability only; full C++ parity needs generated/desugared element comparison expressions and operator overload checks.
+- Tuple equality now generates the element comparison tree and checks each element comparison, but exact tuple comparison diagnostics still need the C++ diagnostic text and note plumbing.
 - Coalescing placeholder-`Option` constraints still need the import-manager/core-decl path used by C++ for unconstrained type variables.
 - Name lookup, accessibility filtering, capture diagnostics, generic constraint solving, and full C++ diagnostic parity remain limited by sibling sema systems that are still partial.
 - Condition binding checks now reject explicit `VarPattern` bindings in OR contexts, but exact C++ parity still needs ASTContext enum-constructor classification for ambiguous `VarOrEnumPattern` nodes and the precise refactor diagnostics.
@@ -68,6 +88,6 @@ Remaining fidelity gaps:
 - Try-handle command pattern promotion now follows direct/generic-upper/supertype `Command<T>` shapes, but full parity still needs the import-manager target lookup and exact diagnostics used by C++ `ChkCommandTypePattern`.
 - Catch pattern validation cannot yet prove subtype-of-core-`Exception`/`Error` without an import-manager/core-decl path in this helper; it conservatively validates catchable classlike/generic shapes.
 - `@IfAvailable` still lacks the C++ import-manager checks for `ohos.device_info` and `ohos.base` package availability.
-- `for-in` refutable-pattern rejection now has the C++ behavior but not the exact `sema_forin_pattern_must_be_irrefutable` diagnostic emission in this shallow helper.
+- `for-in` refutable-pattern rejection, iterable failure, and unused body typing now have the core C++ behavior, but exact diagnostics and unconstrained placeholder `Iterable<T>` construction still need the import-manager/core-decl path used by C++.
 
-Completeness estimate: 67% of C++ behavior for this scoped expression type-checking area, weighted by behavior rather than line count.
+Completeness estimate: 73% of C++ behavior for this scoped expression type-checking area, weighted by behavior rather than line count.

@@ -18,26 +18,16 @@ private func TryInvalid(te: TryExpr): Ty {
 }
 
 private func JoinTryTy(typeManager: TypeManager, currentTy: Ty, branchTy: Ty): Ty {
+    if (!Ty.IsTyCorrect(currentTy) || !Ty.IsTyCorrect(branchTy)) {
+        return TypeManager.GetInvalidTy()
+    }
     if (currentTy.IsNothing()) {
         return branchTy
     }
     if (branchTy.IsNothing()) {
         return currentTy
     }
-    if (typeManager.CheckTypeCompatibility(currentTy, branchTy) != TypeCompatibility.INCOMPATIBLE) {
-        return currentTy
-    }
-    if (typeManager.CheckTypeCompatibility(branchTy, currentTy) != TypeCompatibility.INCOMPATIBLE) {
-        return branchTy
-    }
-    let tySet = TySet()
-    tySet.Add(currentTy)
-    tySet.Add(branchTy)
-    let common = typeManager.GetAllCommonSuperTys(tySet)
-    if (!common.values.isEmpty()) {
-        return common.values[0]
-    }
-    return TypeManager.GetInvalidTy()
+    return Join(typeManager, currentTy, branchTy)
 }
 
 private func IsCommandTy(ty: Ty): Bool {

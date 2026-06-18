@@ -24,26 +24,16 @@ private func IsIfExprWithoutElse(ie: IfExpr): Bool {
 }
 
 private func JoinIfBranchTys(typeManager: TypeManager, thenTy: Ty, elseTy: Ty): Ty {
+    if (!Ty.IsTyCorrect(thenTy) || !Ty.IsTyCorrect(elseTy)) {
+        return TypeManager.GetInvalidTy()
+    }
     if (thenTy.IsNothing()) {
         return elseTy
     }
     if (elseTy.IsNothing()) {
         return thenTy
     }
-    if (typeManager.CheckTypeCompatibility(thenTy, elseTy) != TypeCompatibility.INCOMPATIBLE) {
-        return thenTy
-    }
-    if (typeManager.CheckTypeCompatibility(elseTy, thenTy) != TypeCompatibility.INCOMPATIBLE) {
-        return elseTy
-    }
-    let tySet = TySet()
-    tySet.Add(thenTy)
-    tySet.Add(elseTy)
-    let supers = typeManager.GetAllCommonSuperTys(tySet)
-    if (!supers.values.isEmpty()) {
-        return supers.values[0]
-    }
-    return TypeManager.GetInvalidTy()
+    return Join(typeManager, thenTy, elseTy)
 }
 
 private func SynIfBranches(typeManager: TypeManager, ie: IfExpr): Bool {
@@ -77,8 +67,10 @@ public func SynIfExpr(typeManager: TypeManager, ie: IfExpr): Ty {
     }
     if (let Some(thenBody) <- ie.thenBody) {
         if (let Some(elseExpr) <- ie.elseBody) {
-            let thenTy = TcReplaceIdeal(typeManager, thenBody)
-            let elseTy = TcReplaceIdeal(typeManager, elseExpr)
+            let thenTy = typeManager.GetThisRealTy(TcReplaceIdeal(typeManager, thenBody))
+            let elseTy = typeManager.GetThisRealTy(TcReplaceIdeal(typeManager, elseExpr))
+            thenBody.SetTy(thenTy)
+            elseExpr.SetTy(elseTy)
             let joinedTy = JoinIfBranchTys(typeManager, thenTy, elseTy)
             if (Ty.IsTyCorrect(joinedTy)) {
                 ie.SetTy(joinedTy)
