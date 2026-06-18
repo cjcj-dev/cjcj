@@ -5,6 +5,8 @@ import std.collection.*
 import cangjie_compiler::ast.Ty as AstTy
 import cangjie_compiler::ast.TypeKind as AstTypeKind
 import cangjie_compiler::ast.ASTKindIndex as AstKindIndex
+import cangjie_compiler::ast.SrcIdentifier as AstSrcIdentifier
+import cangjie_compiler::ast.PrimitiveTy as AstPrimitiveTy
 import cangjie_compiler::ast.TupleTy as AstTupleTy
 import cangjie_compiler::ast.FuncTy as AstFuncTy
 import cangjie_compiler::ast.ArrayTy as AstArrayTy
@@ -418,4 +420,48 @@ public class CHIRType {
         }
         throw IllegalStateException("nominal cache entry is not an EnumDef")
     }
+}
+
+public func CHIRTypeTranslateTypeSelfCheck(): Bool {
+    let context = CHIRContext()
+    let builder = CHIRBuilder(context)
+    let cache = CHIRTypeCache()
+    let translator = CHIRType(builder, cache)
+
+    let int64AstTy = AstPrimitiveTy(AstTypeKind.TYPE_INT64)
+    let boolAstTy = AstPrimitiveTy(AstTypeKind.TYPE_BOOLEAN)
+    if (!translator.TranslateType(int64AstTy).IsSameTypeKind(context.GetInt64Ty())) {
+        return false
+    }
+
+    let tupleAstTy = AstTupleTy([int64AstTy, boolAstTy])
+    let tupleChirTy = translator.TranslateType(tupleAstTy)
+    if (!tupleChirTy.IsTuple() || tupleChirTy.GetTypeArgs().size != 2) {
+        return false
+    }
+
+    let funcAstTy = AstFuncTy([int64AstTy], boolAstTy)
+    let funcChirTy = translator.TranslateType(funcAstTy)
+    if (!funcChirTy.IsFunc()) {
+        return false
+    }
+
+    let rawArrayAstTy = AstArrayTy(int64AstTy, 1u64)
+    let rawArrayChirTy = translator.TranslateType(rawArrayAstTy)
+    if (let Some(rawArrayRefTy) <- (rawArrayChirTy as RefType)) {
+        if (!rawArrayRefTy.GetBaseType().IsRawArray()) {
+            return false
+        }
+    } else {
+        return false
+    }
+
+    let structDecl = AstStructDecl()
+    structDecl.identifier = AstSrcIdentifier("SelfCheckStruct")
+    structDecl.fullPackageName = "selfcheck"
+    let structDef = builder.CreateStructDef("selfcheck", "SelfCheckStruct")
+    translator.SetGlobalNominalCache(structDecl, structDef)
+    let structAstTy = AstStructTy("SelfCheckStruct", structDecl, Array<AstTy>())
+    let structChirTy = translator.TranslateType(structAstTy)
+    return structChirTy.IsStruct()
 }
