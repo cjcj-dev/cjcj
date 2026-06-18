@@ -9,22 +9,97 @@ public class SemanticInfo {
     public init() {}
 }
 
+private func IsInstanceMemberVar(decl: Decl): Bool {
+    if (let None <- decl.outerDecl) {
+        return false
+    }
+    return decl.astKind == ASTKind.VAR_DECL && !decl.TestAnyAttr(Attribute.STATIC, Attribute.ENUM_CONSTRUCTOR)
+}
+
+private func IsStaticMemberVar(decl: Decl): Bool {
+    if (let None <- decl.outerDecl) {
+        return false
+    }
+    return decl.astKind == ASTKind.VAR_DECL && decl.TestAttr(Attribute.STATIC)
+}
+
+private func DeclKey(decl: Decl): String {
+    if (!decl.rawMangleName.isEmpty()) {
+        return decl.rawMangleName
+    }
+    return ASTKindName(decl.astKind) + "|" + decl.identifier.Val() + "|" + decl.begin.line.toString() + ":" +
+        decl.begin.column.toString()
+}
+
+private func AddDeclOnce(values: ArrayList<Decl>, keys: HashSet<String>, decl: Decl): Unit {
+    let key = DeclKey(decl)
+    if (keys.contains(key)) {
+        return
+    }
+    for (value in values) {
+        if (DeclKey(value) == key) {
+            return
+        }
+    }
+    keys.add(key)
+    values.add(decl)
+}
+
 public func MarkIncrementalCheckForCtor(declsToBeReCompiled: ArrayList<Decl>): Unit {
+    let typeOfModifiedCtors = ArrayList<Decl>()
+    let typeOfModifiedStaticInits = ArrayList<Decl>()
+    let typeOfModifiedCtorKeys = HashSet<String>()
+    let typeOfModifiedStaticInitKeys = HashSet<String>()
     for (decl in declsToBeReCompiled) {
-        if (decl.TestAttr(Attribute.CONSTRUCTOR)) {
-            decl.toBeCompiled = true
+        if (IsInstanceConstructor(decl) || IsInstanceMemberVar(decl)) {
+            if (let Some(parent) <- decl.outerDecl) {
+                AddDeclOnce(typeOfModifiedCtors, typeOfModifiedCtorKeys, parent)
+            }
+        } else if (IsStaticInitializer(decl) || IsStaticMemberVar(decl)) {
+            if (let Some(parent) <- decl.outerDecl) {
+                AddDeclOnce(typeOfModifiedStaticInits, typeOfModifiedStaticInitKeys, parent)
+            }
+        } else if (decl.astKind == ASTKind.CLASS_DECL) {
+            AddDeclOnce(typeOfModifiedCtors, typeOfModifiedCtorKeys, decl)
+        }
+    }
+    for (decl in typeOfModifiedCtors) {
+        for (member in decl.GetMemberDecls()) {
+            if (IsInstanceConstructor(member) || IsInstanceMemberVar(member)) {
+                member.toBeCompiled = true
+            }
+        }
+    }
+    for (decl in typeOfModifiedStaticInits) {
+        for (member in decl.GetMemberDecls()) {
+            if (IsStaticInitializer(member) || IsStaticMemberVar(member)) {
+                member.toBeCompiled = true
+            }
         }
     }
 }
 
 public func CollectChangedStructTypes(pkg: Package, declsToBeReCompiled: ArrayList<Decl>): ArrayList<StructTy> {
-    let _ = pkg
     let out = ArrayList<StructTy>()
     for (decl in declsToBeReCompiled) {
+        if (decl.astKind != ASTKind.STRUCT_DECL || decl.TestAttr(Attribute.GENERIC)) {
+            continue
+        }
         if (let Some(structDecl) <- (decl as StructDecl)) {
             if (let Some(rawTy) <- structDecl.GetTy()) {
                 if (let Some(ty) <- (rawTy as StructTy)) {
                     out.add(ty)
+                }
+            }
+        }
+    }
+    for (decl in pkg.genericInstantiatedDecls) {
+        if (decl.toBeCompiled && decl.astKind == ASTKind.STRUCT_DECL) {
+            if (let Some(structDecl) <- (decl as StructDecl)) {
+                if (let Some(rawTy) <- structDecl.GetTy()) {
+                    if (let Some(ty) <- (rawTy as StructTy)) {
+                        out.add(ty)
+                    }
                 }
             }
         }
