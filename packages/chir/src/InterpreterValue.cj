@@ -118,11 +118,13 @@ public class InterpreterValue {
     }
 
     public static func MakeInt(kind: InterpreterValueKind, value: Int64): InterpreterValue {
-        return InterpreterValue(kind, intContent: value, literalContent: IntLiteral(value))
+        let normalized = NormalizeIntegerForKind(kind, value)
+        return InterpreterValue(kind, intContent: normalized, literalContent: IntLiteral(normalized))
     }
 
     public static func MakeUInt(kind: InterpreterValueKind, value: Int64): InterpreterValue {
-        return InterpreterValue(kind, intContent: value, literalContent: IntLiteral(value))
+        let normalized = NormalizeIntegerForKind(kind, value)
+        return InterpreterValue(kind, intContent: normalized, literalContent: IntLiteral(normalized))
     }
 
     public static func MakeFloat(kind: InterpreterValueKind, value: Float64): InterpreterValue {
@@ -231,4 +233,27 @@ public class InterpreterValue {
             pointerRootKind: pointerRootKind, pointerIndex: pointerIndex, pointerPath: pointerPath,
             functionIndex: functionIndex, elements: elements)
     }
+}
+
+private func NormalizeIntegerForKind(kind: InterpreterValueKind, value: Int64): Int64 {
+    return match (kind) {
+        case InterpreterValueKind.IINT8 => NormalizeSignedInteger(value, 8)
+        case InterpreterValueKind.IINT16 => NormalizeSignedInteger(value, 16)
+        case InterpreterValueKind.IINT32 => NormalizeSignedInteger(value, 32)
+        case InterpreterValueKind.IUINT8 => NormalizeUnsignedInteger(value, 8)
+        case InterpreterValueKind.IUINT16 => NormalizeUnsignedInteger(value, 16)
+        case InterpreterValueKind.IUINT32 => NormalizeUnsignedInteger(value, 32)
+        case _ => value
+    }
+}
+
+private func NormalizeSignedInteger(value: Int64, width: Int64): Int64 {
+    let range = 1 << width
+    let signBit = 1 << (width - 1)
+    let truncated = value & (range - 1)
+    return if (truncated >= signBit) { truncated - range } else { truncated }
+}
+
+private func NormalizeUnsignedInteger(value: Int64, width: Int64): Int64 {
+    return value & ((1 << width) - 1)
 }
