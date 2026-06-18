@@ -5,6 +5,25 @@ public enum PositionStatus {
     | IGNORE
 }
 
+private let POSITION_UINT32_MODULUS: Int64 = 4294967296
+private let POSITION_UINT32_MASK: UInt64 = 0xffffffffu64
+private let POSITION_INT64_SIGN_BIT: UInt64 = 0x8000000000000000u64
+
+private func positionSignedInt64Bits(value: Int64): UInt64 {
+    if (value >= 0) {
+        return UInt64(value)
+    }
+    return POSITION_INT64_SIGN_BIT + UInt64(value - Int64.Min)
+}
+
+private func positionSignedInt32Bits(value: Int64): UInt32 {
+    var remainder = value % POSITION_UINT32_MODULUS
+    if (remainder < 0) {
+        remainder += POSITION_UINT32_MODULUS
+    }
+    return UInt32(UInt64(remainder) & POSITION_UINT32_MASK)
+}
+
 public struct Position <: Hashable & Equatable<Position> {
     public var fileID: UInt64 = 0
     public var line: Int64 = 0
@@ -119,17 +138,11 @@ public struct Position <: Hashable & Equatable<Position> {
     }
 
     public func Hash64(): UInt64 {
-        if (line < 0 || column < 0) {
-            return fileID << 32
-        }
-        return (fileID << 32) ^ (UInt64(line) << 16) ^ UInt64(column)
+        return (fileID << 32) ^ (positionSignedInt64Bits(line) << 16) ^ positionSignedInt64Bits(column)
     }
 
     public func Hash32(): UInt32 {
-        if (line < 0 || column < 0) {
-            return 0u32
-        }
-        return UInt32((UInt64(line) << 16) ^ UInt64(column))
+        return (positionSignedInt32Bits(line) << 16) ^ positionSignedInt32Bits(column)
     }
 
     public static func RestorePosFromHash(hash: UInt32): (Int64, Int64) {
