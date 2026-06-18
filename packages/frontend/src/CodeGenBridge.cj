@@ -4,11 +4,12 @@ import std.collection.*
 import cangjie_compiler::chir.Attribute as ChirAttribute
 import cangjie_compiler::chir.CHIRBuilder as ChirBuilder
 import cangjie_compiler::chir.CHIRPrinter as ChirCHIRPrinter
+import cangjie_compiler::chir.CHIRType
+import cangjie_compiler::chir.CHIRTypeCache
+import cangjie_compiler::chir.FaithfulAST2CHIR
 import cangjie_compiler::chir.FuncKind as ChirFuncKind
 import cangjie_compiler::chir.Function as ChirFunction
 import cangjie_compiler::chir.Package as RealCHIRPackage
-import cangjie_compiler::chir.DescribeRealASTFunctionLowering
-import cangjie_compiler::chir.TryLowerRealASTPackage
 import cangjie_compiler::ast.Package as RealASTPackage
 import cangjie_compiler::codegen.CHIRData as CodegenCHIRData
 import cangjie_compiler::codegen.ClearPackageModules
@@ -20,18 +21,14 @@ import cangjie_compiler::option.MaybeUInt64
 
 public func BuildRealCHIRForASTPackage(instance: CompilerInstance, pkg: RealASTPackage): Option<RealCHIRPackage> {
     let builder = ChirBuilder(instance.chirData.GetRealCHIRContext())
-    let sourcePackages = ArrayList<RealASTPackage>()
-    for ((_, realPkg) in instance.realASTPkgs) {
-        sourcePackages.add(realPkg)
+    let chirType = CHIRType(builder, CHIRTypeCache())
+    let ast2chir = FaithfulAST2CHIR(builder, chirType)
+    if (!ast2chir.ToCHIRPackage(pkg)) {
+        return None
     }
-    let lowered = match (TryLowerRealASTPackage(pkg, builder, sourcePackages)) {
+    let lowered = match (ast2chir.GetPackage()) {
         case Some(value) => value
         case None => return None
-    }
-    if (instance.IsRealPipelineVerbose()) {
-        for (name in DescribeRealASTFunctionLowering(pkg)) {
-            eprintln("[real-pipeline] lowered function " + name + " via real AST2CHIR")
-        }
     }
     let pluginResult = TryRunCHIRMetaTransforms(instance.metaTransformPluginBuilder, builder, lowered)
     if (!pluginResult.succeed) {
