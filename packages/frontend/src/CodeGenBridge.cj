@@ -18,6 +18,7 @@ import cangjie_compiler::chir.CHIRContext as ChirContext
 import cangjie_compiler::chir.FuncKind as ChirFuncKind
 import cangjie_compiler::chir.Package as RealCHIRPackage
 import cangjie_compiler::chir.Type as ChirType
+import cangjie_compiler::chir.DescribeRealASTFunctionLowering
 import cangjie_compiler::chir.TryLowerRealASTPackage
 import cangjie_compiler::ast.Package as RealASTPackage
 import cangjie_compiler::codegen.CHIRData as CodegenCHIRData
@@ -48,6 +49,11 @@ public func BuildRealCHIRForASTPackage(instance: CompilerInstance, pkg: RealASTP
     let lowered = match (TryLowerRealASTPackage(pkg, builder)) {
         case Some(value) => value
         case None => return None
+    }
+    if (instance.IsRealPipelineVerbose()) {
+        for (name in DescribeRealASTFunctionLowering(pkg)) {
+            eprintln("[real-pipeline] lowered function " + name + " via real AST2CHIR")
+        }
     }
     let pluginResult = TryRunCHIRMetaTransforms(instance.metaTransformPluginBuilder, builder, lowered)
     if (!pluginResult.succeed) {

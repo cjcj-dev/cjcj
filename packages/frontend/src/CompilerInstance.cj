@@ -489,7 +489,7 @@ public class CompilerInstance {
                     chirData.AppendNewRealPackage(realPkg)
                     usedRealASTPath = true
                     if (IsRealPipelineVerbose()) {
-                        eprintln("[real-pipeline] lowered main via real AST2CHIR")
+                        eprintln("[real-pipeline] lowered package '" + pkg.fullPackageName + "' via real AST2CHIR")
                     }
                 } else {
                     if (diag.GetErrorCount() != 0) {

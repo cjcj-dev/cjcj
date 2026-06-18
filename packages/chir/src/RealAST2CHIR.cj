@@ -13,16 +13,38 @@ import cangjie_compiler::ast.LitConstKind as AstLitConstKind
 import cangjie_compiler::ast.Node as AstNode
 import cangjie_compiler::ast.ReturnExpr as AstReturnExpr
 
+private let REAL_AST_RETURN_NONE: Int64 = 0
+private let REAL_AST_RETURN_INT: Int64 = 1
+private let REAL_AST_RETURN_BOOL: Int64 = 2
+private let REAL_AST_RETURN_UNIT: Int64 = 3
+
 private class RealASTBodyLowering {
     let ok: Bool
     let stmt: Option<AST2CHIRStmtSpec>
-    let returnsValue: Bool
+    let returnKind: Int64
 
-    init(ok: Bool, stmt: Option<AST2CHIRStmtSpec>, returnsValue: Bool) {
+    init(ok: Bool, stmt: Option<AST2CHIRStmtSpec>, returnKind: Int64) {
         this.ok = ok
         this.stmt = stmt
-        this.returnsValue = returnsValue
+        this.returnKind = returnKind
     }
+}
+
+private class RealASTParamLowering {
+    let types: ArrayList<Type> = ArrayList<Type>()
+    let names: ArrayList<String> = ArrayList<String>()
+}
+
+public func DescribeRealASTFunctionLowering(pkg: AstPackage): ArrayList<String> {
+    let out = ArrayList<String>()
+    for (file in pkg.files) {
+        for (decl in file.decls) {
+            if ((decl as AstMainDecl).isSome() || (decl as AstFuncDecl).isSome()) {
+                out.add(RealASTDisplayName(decl))
+            }
+        }
+    }
+    return out
 }
 
 public func TryLowerRealASTPackage(pkg: AstPackage, builder: CHIRBuilder): Option<Package> {
@@ -74,8 +96,9 @@ private func BuildRealASTFunctionSpec(
         case Some(value) => value
         case None => return None
     }
-    if (!HasNoParams(body)) {
-        return None
+    let params = match (BuildRealASTParamLowering(context, body, allowParams: !isMain)) {
+        case Some(value) => value
+        case None => return None
     }
     let lowered = LowerRealASTBody(body)
     if (!lowered.ok) {
@@ -91,11 +114,13 @@ private func BuildRealASTFunctionSpec(
     } else {
         decl.identifier.Val()
     }
-    let paramTypes = ArrayList<Type>()
     let kind = if (isMain) { FuncKind.MAIN_ENTRY } else { FuncKind.DEFAULT }
-    let fnSpec = AST2CHIRFunctionSpec(fnName, paramTypes, returnTy, srcCodeIdentifier: srcName,
+    let fnSpec = AST2CHIRFunctionSpec(fnName, params.types, returnTy, srcCodeIdentifier: srcName,
         rawMangledName: fnName, packageName: packageName, funcKind: kind, emitBody: true)
     fnSpec.EnableRealBody()
+    for (name in params.names) {
+        fnSpec.AddParamName(name)
+    }
     if (let Some(stmt) <- lowered.stmt) {
         fnSpec.AddBodyStatement(stmt)
     }
@@ -120,26 +145,53 @@ private func GetRealASTFuncBody(decl: AstDecl): Option<AstFuncBody> {
     return None
 }
 
-private func HasNoParams(body: AstFuncBody): Bool {
+private func BuildRealASTParamLowering(
+    context: CHIRContext,
+    body: AstFuncBody,
+    allowParams!: Bool = true
+): Option<RealASTParamLowering> {
     if (body.generic.isSome()) {
-        return false
+        return None
     }
     if (body.paramLists.size != 1) {
-        return false
+        return None
     }
-    return body.paramLists[0].params.isEmpty()
+    let paramList = body.paramLists[0]
+    if (paramList.hasVariableLenArg) {
+        return None
+    }
+    if (!allowParams && !paramList.params.isEmpty()) {
+        return None
+    }
+    let out = RealASTParamLowering()
+    for (param in paramList.params) {
+        if (param.assignment.isSome()) {
+            return None
+        }
+        let paramTy = match (param.typeNode) {
+            case Some(typeNode) =>
+                match (RealASTParamType(context, typeNode)) {
+                    case Some(value) => value
+                    case None => return None
+                }
+            case None => return None
+        }
+        out.types.add(paramTy)
+        out.names.add(param.identifier.Val())
+    }
+    return Some(out)
 }
 
 private func LowerRealASTBody(body: AstFuncBody): RealASTBodyLowering {
     let block = match (body.body) {
         case Some(value) => value
-        case None => return RealASTBodyLowering(false, None, false)
+        case None => return RealASTBodyLowering(false, None, REAL_AST_RETURN_NONE)
     }
     if (block.body.isEmpty()) {
-        return RealASTBodyLowering(true, None, false)
+        return RealASTBodyLowering(true, None, REAL_AST_RETURN_NONE)
     }
     if (block.body.size != 1) {
-        return RealASTBodyLowering(false, None, false)
+        return RealASTBodyLowering(false, None, REAL_AST_RETURN_NONE)
     }
     return LowerRealASTSingleBodyNode(block.body[0])
 }
@@ -147,17 +199,25 @@ private func LowerRealASTBody(body: AstFuncBody): RealASTBodyLowering {
 private func LowerRealASTSingleBodyNode(node: AstNode): RealASTBodyLowering {
     let ret = match (node as AstReturnExpr) {
         case Some(value) => value
-        case None => return RealASTBodyLowering(false, None, false)
+        case None => return RealASTBodyLowering(false, None, REAL_AST_RETURN_NONE)
     }
     if (let Some(expr) <- ret.expr) {
         if (let Some(lit) <- (expr as AstLitConstExpr)) {
             if (let Some(value) <- ParseRealASTIntLiteral(lit)) {
-                return RealASTBodyLowering(true, Some(AST2CHIRStmtSpec.Return(AST2CHIRExprSpec.Literal(value))), true)
+                return RealASTBodyLowering(true, Some(AST2CHIRStmtSpec.Return(AST2CHIRExprSpec.Literal(value))),
+                    REAL_AST_RETURN_INT)
+            }
+            if (let Some(value) <- ParseRealASTBoolLiteral(lit)) {
+                return RealASTBodyLowering(true, Some(AST2CHIRStmtSpec.Return(AST2CHIRExprSpec.BoolLit(value))),
+                    REAL_AST_RETURN_BOOL)
+            }
+            if (lit.kind == AstLitConstKind.UNIT) {
+                return RealASTBodyLowering(true, Some(AST2CHIRStmtSpec.ReturnNone()), REAL_AST_RETURN_UNIT)
             }
         }
-        return RealASTBodyLowering(false, None, false)
+        return RealASTBodyLowering(false, None, REAL_AST_RETURN_NONE)
     }
-    return RealASTBodyLowering(true, Some(AST2CHIRStmtSpec.ReturnNone()), false)
+    return RealASTBodyLowering(true, Some(AST2CHIRStmtSpec.ReturnNone()), REAL_AST_RETURN_UNIT)
 }
 
 private func RealASTReturnType(
@@ -165,10 +225,18 @@ private func RealASTReturnType(
     body: AstFuncBody,
     lowered: RealASTBodyLowering
 ): Option<Type> {
-    if (lowered.returnsValue) {
+    if (lowered.returnKind == REAL_AST_RETURN_INT) {
         if (let Some(retType) <- body.retType) {
             if (IsRealASTInt64Type(retType)) {
                 return Some(context.GetInt64Ty())
+            }
+        }
+        return None
+    }
+    if (lowered.returnKind == REAL_AST_RETURN_BOOL) {
+        if (let Some(retType) <- body.retType) {
+            if (IsRealASTBoolType(retType)) {
+                return Some(context.GetBoolTy())
             }
         }
         return None
@@ -182,9 +250,24 @@ private func RealASTReturnType(
     return Some(context.GetUnitTy())
 }
 
+private func RealASTParamType(context: CHIRContext, ty: AstType): Option<Type> {
+    if (IsRealASTInt64Type(ty)) {
+        return Some(context.GetInt64Ty())
+    }
+    if (IsRealASTBoolType(ty)) {
+        return Some(context.GetBoolTy())
+    }
+    return None
+}
+
 private func IsRealASTInt64Type(ty: AstType): Bool {
     let name = ty.ToString().trimAscii()
     return name == "Int64" || name == "Int"
+}
+
+private func IsRealASTBoolType(ty: AstType): Bool {
+    let name = ty.ToString().trimAscii()
+    return name == "Bool"
 }
 
 private func IsRealASTUnitType(ty: AstType): Bool {
@@ -204,6 +287,20 @@ private func ParseRealASTIntLiteral(lit: AstLitConstExpr): Option<Int64> {
     }
 }
 
+private func ParseRealASTBoolLiteral(lit: AstLitConstExpr): Option<Bool> {
+    if (lit.kind != AstLitConstKind.BOOL) {
+        return None
+    }
+    let text = lit.stringValue.trimAscii()
+    if (text == "true") {
+        return Some(true)
+    }
+    if (text == "false") {
+        return Some(false)
+    }
+    return None
+}
+
 private func StripIntegerSuffix(value: String): String {
     if (value.endsWith("i64") || value.endsWith("u64") ||
         value.endsWith("i32") || value.endsWith("u32") ||
@@ -214,6 +311,16 @@ private func StripIntegerSuffix(value: String): String {
         return value[0..value.size - 2]
     }
     return value
+}
+
+private func RealASTDisplayName(decl: AstDecl): String {
+    if ((decl as AstMainDecl).isSome()) {
+        return "main"
+    }
+    if (!decl.identifier.Empty()) {
+        return decl.identifier.Val()
+    }
+    return RealASTStableMangledName("", decl)
 }
 
 private func RealASTStableMangledName(packageName: String, decl: AstDecl): String {
