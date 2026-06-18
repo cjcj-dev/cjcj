@@ -7,6 +7,10 @@ public import cangjie_compiler::ast.{
     ConstantType, FuncType, Generic, GenericConstraint, GenericParamDecl, Identifier, InvalidType, Node, OptionType,
     ParenType, PrimitiveType, QualifiedType, RefType, SrcIdentifier, ThisType, TupleType, Type, VArrayType
 }
+public import cangjie_compiler::ast.{
+    CommandTypePattern, ConstPattern, EnumPattern, ExceptTypePattern, InvalidPattern, Pattern, TuplePattern,
+    TypeListPattern, TypePattern, VarOrEnumPattern, VarPattern, WildcardPattern
+}
 public import cangjie_compiler::utils.OverflowStrategy
 
 public type AnnotationKind = AstAnnotationKind

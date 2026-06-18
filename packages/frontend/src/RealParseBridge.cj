@@ -38,6 +38,9 @@ import cangjie_compiler::parse.InterpolationExpr as ParseInterpolationExpr
 import cangjie_compiler::parse.ArrayLit as ParseArrayLit
 import cangjie_compiler::parse.SubscriptExpr as ParseSubscriptExpr
 import cangjie_compiler::parse.MemberAccess as ParseMemberAccess
+import cangjie_compiler::ast.MemberAccess as AstMemberAccess
+import cangjie_compiler::ast.RefExpr as AstRefExpr
+import cangjie_compiler::ast.Expr as AstExpr
 import cangjie_compiler::parse.EnumDecl as ParseEnumDecl
 import cangjie_compiler::parse.StructDecl as ParseStructDecl
 import cangjie_compiler::parse.ClassDecl as ParseClassDecl
@@ -1639,6 +1642,39 @@ private func matchUsesTagMask(matchExpr: ParseMatchExpr): Bool {
     return false
 }
 
+private func parseVarPatternName(varPat: ParseVarPattern): String {
+    if (let Some(decl) <- varPat.varDecl) {
+        return decl.identifier.Val()
+    }
+    return ""
+}
+
+private func enumConstructorNameFromExpr(expr: AstExpr): String {
+    if (let Some(refExpr) <- (expr as AstRefExpr)) {
+        return refExpr.ref.identifier.Val()
+    }
+    if (let Some(member) <- (expr as AstMemberAccess)) {
+        return member.field.Val()
+    }
+    return ""
+}
+
+private func parseEnumPatternConstructorName(enumPat: ParseEnumPattern): String {
+    if (let Some(constructor) <- enumPat.constructor) {
+        return enumConstructorNameFromExpr(constructor)
+    }
+    return ""
+}
+
+private func parseEnumPatternIsQualified(enumPat: ParseEnumPattern): Bool {
+    if (let Some(constructor) <- enumPat.constructor) {
+        if (let Some(member) <- (constructor as AstMemberAccess)) {
+            return member.baseExpr.isSome()
+        }
+    }
+    return false
+}
+
 // Whether the match is over a HEAP-represented enum (its selector value is a {tag, f0, ...} buffer
 // address). Detected from the patterns: a destructuring constructor pattern naming a heap variant, or
 // a bare variant VarPattern naming a heap variant. A heap match tests the tag via the buffer's slot-0
@@ -1649,12 +1685,12 @@ private func matchUsesHeap(matchExpr: ParseMatchExpr, scope: AdaptScope): Bool {
     for (matchCase in matchExpr.matchCases) {
         for (pattern in matchCase.patterns) {
             if (let Some(enumPat) <- (pattern as ParseEnumPattern)) {
-                if (scope.enums.isHeap(enumPat.constructor.Val())) {
+                if (scope.enums.isHeap(parseEnumPatternConstructorName(enumPat))) {
                     return true
                 }
             }
             if (let Some(varPat) <- (pattern as ParseVarPattern)) {
-                let n = varPat.identifier.Val()
+                let n = parseVarPatternName(varPat)
                 if (scope.isEnumVariant(n) && scope.enums.isHeap(n)) {
                     return true
                 }
@@ -1676,10 +1712,10 @@ private func enumPatternMatch(pattern: ParsePattern, scope: AdaptScope): Option<
     }
     // A qualified constructor (`Color.Red(...)`) records more than one constructor part; only a
     // simple unqualified constructor is supported. Type arguments (`Some<Int64>(...)`) are rejected.
-    if (!enumPat.typeArguments.isEmpty() || enumPat.constructorParts.size > 1) {
+    if (!enumPat.typeArguments.isEmpty() || parseEnumPatternIsQualified(enumPat)) {
         return None
     }
-    let ctorName = enumPat.constructor.Val()
+    let ctorName = parseEnumPatternConstructorName(enumPat)
     if (!scope.isEnumVariant(ctorName)) {
         return None
     }
@@ -1700,7 +1736,7 @@ private func enumPatternMatch(pattern: ParsePattern, scope: AdaptScope): Option<
     }
     let sub = enumPat.patterns[0]
     if (let Some(varPat) <- (sub as ParseVarPattern)) {
-        let n = varPat.identifier.Val()
+        let n = parseVarPatternName(varPat)
         if (n.isEmpty()) {
             return None
         }
@@ -1725,10 +1761,10 @@ private func heapEnumPatternMatch(pattern: ParsePattern,
         case Some(p) => p
         case None => return None
     }
-    if (!enumPat.typeArguments.isEmpty() || enumPat.constructorParts.size > 1) {
+    if (!enumPat.typeArguments.isEmpty() || parseEnumPatternIsQualified(enumPat)) {
         return None
     }
-    let ctorName = enumPat.constructor.Val()
+    let ctorName = parseEnumPatternConstructorName(enumPat)
     if (!scope.isEnumVariant(ctorName) || !scope.enums.isHeap(ctorName)) {
         return None
     }
@@ -1746,7 +1782,7 @@ private func heapEnumPatternMatch(pattern: ParsePattern,
     let bindings = ArrayList<Option<String>>()
     for (sub in enumPat.patterns) {
         if (let Some(varPat) <- (sub as ParseVarPattern)) {
-            let n = varPat.identifier.Val()
+            let n = parseVarPatternName(varPat)
             if (n.isEmpty()) {
                 return None
             }
@@ -1792,7 +1828,7 @@ private func matchIsExhaustiveEnum(matchExpr: ParseMatchExpr, arms: ArrayList<Ma
                 return true
             }
             if (let Some(varPat) <- (pattern as ParseVarPattern)) {
-                if (scope.isEnumVariant(varPat.identifier.Val())) {
+                if (scope.isEnumVariant(parseVarPatternName(varPat))) {
                     return true
                 }
             }
@@ -1836,7 +1872,10 @@ private func normalizeMatchArms(matchExpr: ParseMatchExpr, scope: AdaptScope): O
         for (pattern in matchCase.patterns) {
             if (let Some(constPat) <- (pattern as ParseConstPattern)) {
                 let lit = match (constPat.literal) {
-                    case Some(e) => e
+                    case Some(e) => match (e as ParseExpr) {
+                        case Some(parsedExpr) => parsedExpr
+                        case None => return None
+                    }
                     case None => return None
                 }
                 match (intLiteralValue(lit)) {
@@ -1864,7 +1903,7 @@ private func normalizeMatchArms(matchExpr: ParseMatchExpr, scope: AdaptScope): O
                 }
                 payloadBindingName = payloadName
             } else if (let Some(varPat) <- (pattern as ParseVarPattern)) {
-                let n = varPat.identifier.Val()
+                let n = parseVarPatternName(varPat)
                 if (n.isEmpty()) {
                     return None
                 }
@@ -2110,7 +2149,10 @@ private func adaptMatchValue(matchExpr: ParseMatchExpr, scope: AdaptScope): Opti
         for (pattern in matchCase.patterns) {
             if (let Some(constPat) <- (pattern as ParseConstPattern)) {
                 let lit = match (constPat.literal) {
-                    case Some(e) => e
+                    case Some(e) => match (e as ParseExpr) {
+                        case Some(parsedExpr) => parsedExpr
+                        case None => return None
+                    }
                     case None => return None
                 }
                 match (intLiteralValue(lit)) {
@@ -2138,7 +2180,7 @@ private func adaptMatchValue(matchExpr: ParseMatchExpr, scope: AdaptScope): Opti
                 }
                 payloadBindingName = payloadName
             } else if (let Some(varPat) <- (pattern as ParseVarPattern)) {
-                let n = varPat.identifier.Val()
+                let n = parseVarPatternName(varPat)
                 if (n.isEmpty()) {
                     return None
                 }
@@ -2224,7 +2266,7 @@ private func adaptForIn(forInExpr: ParseForInExpr, scope: AdaptScope): Option<Ch
         case Some(vp) => vp
         case None => return None
     }
-    let varName = varPattern.identifier.Val()
+    let varName = parseVarPatternName(varPattern)
     if (varName.isEmpty()) {
         return None
     }
@@ -2991,7 +3033,7 @@ private func boolLiteralValue(expr: ParseExpr): Option<Bool> {
 // If `varPat`'s identifier names a payload-less enum variant in scope, return its Int64 tag; else
 // None (then the VarPattern is a normal catch-all binding).
 private func enumVariantPatternTag(varPat: ParseVarPattern, scope: AdaptScope): Option<Int64> {
-    let name = varPat.identifier.Val()
+    let name = parseVarPatternName(varPat)
     if (scope.isEnumVariant(name)) {
         return scope.enums.tagOf(name)
     }

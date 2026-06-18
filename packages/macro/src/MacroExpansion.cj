@@ -1221,19 +1221,10 @@ private func convertParsedType(parsedType: ParsedType, fallbackFile: Option<File
 }
 
 private func parsedEnumPatternConstructorName(parsedEnumPattern: ParsedEnumPattern): String {
-    if (parsedEnumPattern.constructorParts.isEmpty()) {
-        return parsedEnumPattern.constructor.GetRawText()
+    if (let Some(constructor) <- parsedEnumPattern.constructor) {
+        return constructor.ToString()
     }
-    let builder = StringBuilder()
-    var partIdx: Int64 = 0
-    while (partIdx < parsedEnumPattern.constructorParts.size) {
-        if (partIdx > 0) {
-            builder.append(".")
-        }
-        builder.append(parsedEnumPattern.constructorParts[partIdx].GetRawText())
-        partIdx++
-    }
-    return builder.toString()
+    return ""
 }
 
 private func fillTypeListPattern(
@@ -1268,15 +1259,19 @@ private func convertParsedPattern(parsedPattern: ParsedPattern, fallbackFile: Op
         let targetConstPattern = ConstPattern()
         copyParsedNodeBase(parsedConstPattern, targetConstPattern, fallbackFile)
         if (let Some(parsedLiteral) <- parsedConstPattern.literal) {
-            targetConstPattern.literal = Some(convertParsedExpr(parsedLiteral, fallbackFile))
+            if (let Some(parsedExpr) <- (parsedLiteral as ParsedExpr)) {
+                targetConstPattern.literal = Some(convertParsedExpr(parsedExpr, fallbackFile))
+            }
         }
         return targetConstPattern
     }
     if (let Some(parsedVarPattern) <- (parsedPattern as ParsedVarPattern)) {
         let targetVarPattern = VarPattern()
         copyParsedNodeBase(parsedVarPattern, targetVarPattern, fallbackFile)
-        targetVarPattern.identifier = parsedVarPattern.identifier.GetRawText()
-        targetVarPattern.isVar = parsedVarPattern.isVar
+        if (let Some(parsedVarDecl) <- parsedVarPattern.varDecl) {
+            targetVarPattern.identifier = parsedVarDecl.identifier.GetRawText()
+            targetVarPattern.isVar = parsedVarDecl.isVar
+        }
         return targetVarPattern
     }
     if (let Some(parsedTuplePattern) <- (parsedPattern as ParsedTuplePattern)) {

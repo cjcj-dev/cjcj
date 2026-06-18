@@ -1,6 +1,9 @@
 package cangjie_compiler::parse
 
 import std.collection.*
+import cangjie_compiler::ast.Expr as AstExpr
+import cangjie_compiler::ast.MemberAccess as AstMemberAccess
+import cangjie_compiler::ast.RefExpr as AstRefExpr
 
 extend ParserImpl {
     public func ParsePattern(): Pattern {
@@ -105,19 +108,29 @@ extend ParserImpl {
     public func ParseEnumPattern(attributes: ArrayList<Attribute>, isVar: Bool, inDecl: Bool): EnumPattern {
         let enumPat = EnumPattern()
         let first = ExpectIdentifierWithPos(enumPat)
-        enumPat.constructor = first
-        enumPat.constructorParts.add(first)
+        let refExpr = AstRefExpr()
+        refExpr.ref.identifier = first
+        refExpr.begin = first.Begin()
+        refExpr.end = first.End()
+        var constructor: AstExpr = refExpr
         enumPat.begin = first.Begin()
         enumPat.end = first.End()
-        ParseEnumPatternTypeArguments(enumPat)
+        ParseEnumPatternTypeArguments(constructor, enumPat)
         while (Skip(TokenKind.DOT)) {
-            enumPat.dotPosVector.add(lastToken.Begin())
+            let dotPos = lastToken.Begin()
             let field = ExpectIdentifierWithPos(enumPat)
-            enumPat.constructor = field
-            enumPat.constructorParts.add(field)
+            let member = AstMemberAccess()
+            member.baseExpr = Some(constructor)
+            member.dotPos = dotPos
+            member.field = field
+            member.begin = constructor.begin
+            member.end = field.End()
+            member.isPattern = true
+            constructor = member
             enumPat.end = field.End()
-            ParseEnumPatternTypeArguments(enumPat)
+            ParseEnumPatternTypeArguments(constructor, enumPat)
         }
+        enumPat.constructor = Some(constructor)
         if (Seeing(TokenKind.LPAREN)) {
             let tuplePattern = ParseTuplePattern(true, attributes, isVar, inDecl)
             enumPat.leftParenPos = tuplePattern.leftParenPos
@@ -133,13 +146,20 @@ extend ParserImpl {
         return enumPat
     }
 
-    private func ParseEnumPatternTypeArguments(enumPat: EnumPattern): Unit {
+    private func ParseEnumPatternTypeArguments(constructor: AstExpr, enumPat: EnumPattern): Unit {
         if (!Skip(TokenKind.LT)) {
             return
         }
-        enumPat.leftAnglePos = lastToken.Begin()
+        let leftAnglePos = lastToken.Begin()
+        enumPat.leftAnglePos = leftAnglePos
         while (!Seeing(TokenKind.END) && !Seeing(TokenKind.GT)) {
-            enumPat.typeArguments.add(ParseType())
+            let typeArg = ParseType()
+            enumPat.typeArguments.add(typeArg)
+            if (let Some(refExpr) <- (constructor as AstRefExpr)) {
+                refExpr.typeArguments.add(typeArg)
+            } else if (let Some(member) <- (constructor as AstMemberAccess)) {
+                member.typeArguments.add(typeArg)
+            }
             if (!Skip(TokenKind.COMMA)) {
                 break
             }

@@ -84,6 +84,13 @@ public class VarPattern <: Pattern {
         super(ASTKind.VAR_PATTERN)
     }
 
+    public init(ident: SrcIdentifier, isVar: Bool) {
+        this(ident, nodePos: ident.Begin())
+        if (let Some(decl) <- varDecl) {
+            decl.isVar = isVar
+        }
+    }
+
     public init(ident: SrcIdentifier, nodePos!: Position = INVALID_POSITION) {
         super(ASTKind.VAR_PATTERN)
         let decl = VarDecl()
@@ -97,6 +104,20 @@ public class VarPattern <: Pattern {
         end = decl.end
     }
 
+    public func Identifier(): SrcIdentifier {
+        if (let Some(decl) <- varDecl) {
+            return decl.identifier
+        }
+        return SrcIdentifier()
+    }
+
+    public func IsVar(): Bool {
+        if (let Some(decl) <- varDecl) {
+            return decl.isVar
+        }
+        return false
+    }
+
     public override func ToString(): String {
         if (let Some(decl) <- varDecl) {
             return decl.identifier.Val()
@@ -107,8 +128,10 @@ public class VarPattern <: Pattern {
 
 public class TuplePattern <: Pattern {
     public var leftBracePos: Position = INVALID_POSITION
+    public var leftParenPos: Position = INVALID_POSITION
     public let patterns: ArrayList<Pattern> = ArrayList<Pattern>()
     public let commaPosVector: ArrayList<Position> = ArrayList<Position>()
+    public var rightParenPos: Position = INVALID_POSITION
     public var rightBracePos: Position = INVALID_POSITION
 
     public init() {
@@ -147,6 +170,9 @@ public class TypePattern <: Pattern {
 
 public class EnumPattern <: Pattern {
     public var constructor: Option<Expr> = None
+    public var leftAnglePos: Position = INVALID_POSITION
+    public let typeArguments: ArrayList<Type> = ArrayList<Type>()
+    public var rightAnglePos: Position = INVALID_POSITION
     public let patterns: ArrayList<Pattern> = ArrayList<Pattern>()
     public var leftParenPos: Position = INVALID_POSITION
     public let commaPosVector: ArrayList<Position> = ArrayList<Position>()
@@ -194,16 +220,14 @@ public class VarOrEnumPattern <: Pattern {
     }
 }
 
-public class ExceptTypePattern <: Pattern {
+public open class TypeListPattern <: Pattern {
     public var pattern: Option<Pattern> = None
     public var patternPos: Position = INVALID_POSITION
     public var colonPos: Position = INVALID_POSITION
     public let types: ArrayList<Type> = ArrayList<Type>()
     public let bitOrPosVector: ArrayList<Position> = ArrayList<Position>()
 
-    public init() {
-        super(ASTKind.EXCEPT_TYPE_PATTERN)
-    }
+    public init(kind: ASTKind) { super(kind) }
 
     public override func ToString(): String {
         var out = if (let Some(value) <- pattern) { value.ToString() } else { "" }
@@ -217,25 +241,14 @@ public class ExceptTypePattern <: Pattern {
     }
 }
 
-public class CommandTypePattern <: Pattern {
-    public var pattern: Option<Pattern> = None
-    public var patternPos: Position = INVALID_POSITION
-    public var colonPos: Position = INVALID_POSITION
-    public let types: ArrayList<Type> = ArrayList<Type>()
-    public let bitOrPosVector: ArrayList<Position> = ArrayList<Position>()
+public class ExceptTypePattern <: TypeListPattern {
+    public init() {
+        super(ASTKind.EXCEPT_TYPE_PATTERN)
+    }
+}
 
+public class CommandTypePattern <: TypeListPattern {
     public init() {
         super(ASTKind.COMMAND_TYPE_PATTERN)
-    }
-
-    public override func ToString(): String {
-        var out = if (let Some(value) <- pattern) { value.ToString() } else { "" }
-        if (!types.isEmpty()) {
-            if (!out.isEmpty()) {
-                out += ": "
-            }
-            out += joinPatternTypeStrings(types, " | ")
-        }
-        return out
     }
 }
