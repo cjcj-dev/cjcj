@@ -4,6 +4,8 @@ import std.collection.*
 import cangjie_compiler::ast.*
 import cangjie_compiler::option.GlobalOptions as OptionGlobalOptions
 import cangjie_compiler::sema.*
+import cangjie_compiler::sema.Desugar.*
+import cangjie_compiler::sema.FFI.*
 
 private func contextPackage(ctx: ASTContext): Option<Package> {
     return ctx.curPackage
@@ -63,11 +65,7 @@ public class TypeChecker {
     }
 
     public func CheckAllDeclAttributes(pkg: Package): ArrayList<DeclAttributeIssue> {
-        var options = OptionGlobalOptions()
-        if (let Some(instance) <- ci) {
-            options = instance.globalOptions
-        }
-        return CheckDeclAttributesForPackage(pkg, opts: options)
+        return CheckDeclAttributesForPackage(pkg, opts: GlobalOptions())
     }
 
     private func PreTypeCheck(pkgs: ArrayList<Package>): ArrayList<ASTContext> {
@@ -97,6 +95,7 @@ public class TypeChecker {
     private func PreCheck(activeContexts: ArrayList<ASTContext>): Unit {
         for (ctx in activeContexts) {
             if (let Some(pkg) <- contextPackage(ctx)) {
+                PreCheckAnnoForFFI(pkg)
                 let _ = PreCheckPackage(ctx, pkg, typeManager: impl.typeManager)
             }
         }
@@ -123,10 +122,19 @@ public class TypeChecker {
     private func PostTypeCheck(activeContexts: ArrayList<ASTContext>): Unit {
         for (ctx in activeContexts) {
             if (let Some(pkg) <- contextPackage(ctx)) {
+                SetOverflowStrategyForPkg(pkg)
                 let _ = CollectUnusedImports(pkg)
                 let _ = CheckConstEvaluation(pkg)
+                PerformDesugarAfterTypeCheck(impl.typeManager, pkg, options: GlobalOptions())
             }
         }
+    }
+
+    private func GlobalOptions(): OptionGlobalOptions {
+        if (let Some(instance) <- ci) {
+            return instance.globalOptions
+        }
+        return OptionGlobalOptions()
     }
 
     private func TypeCheckTopLevelDecl(ctx: ASTContext, decl: Decl): Unit {
