@@ -14,5 +14,9 @@ extend AST2CHIRDeclTranslator {
             }
         }
         LowerMemberVarsAndMethods(spec, def)
+        let defaultPackage = ActivePackageName(spec.packageName)
+        for (interfaceName in spec.implementedInterfaces) {
+            AddImplementedInterfaceByName(defaultPackage, def, interfaceName)
+        }
     }
 }
