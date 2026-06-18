@@ -1,5 +1,6 @@
 package cangjie_compiler::meta_transformation
 
+import cangjie_compiler::chir.CHIRBuilder
 import cangjie_compiler::chir.Function as CHIRFunction
 import cangjie_compiler::chir.Package as CHIRPackage
 import std.collection.*
@@ -59,6 +60,32 @@ public struct CHIRMetaTransformRunResult {
     }
 }
 
+public struct CHIRMetaTransformExecutionResult {
+    public let succeed: Bool
+    public let hasPluginForCHIR: Bool
+    public let functionTransformRuns: Int64
+    public let packageTransformRuns: Int64
+
+    public init(
+        succeed: Bool,
+        hasPluginForCHIR: Bool,
+        functionTransformRuns: Int64,
+        packageTransformRuns: Int64
+    ) {
+        this.succeed = succeed
+        this.hasPluginForCHIR = hasPluginForCHIR
+        this.functionTransformRuns = functionTransformRuns
+        this.packageTransformRuns = packageTransformRuns
+    }
+
+    public init(succeed: Bool, runResult: CHIRMetaTransformRunResult) {
+        this.succeed = succeed
+        hasPluginForCHIR = runResult.hasPluginForCHIR
+        functionTransformRuns = runResult.functionTransformRuns
+        packageTransformRuns = runResult.packageTransformRuns
+    }
+}
+
 private class CHIRMetaTransformRunAccumulator {
     public var hasPluginForCHIR: Bool = false
     public var functionTransformRuns: Int64 = 0
@@ -94,4 +121,36 @@ public func RunCHIRMetaTransforms(manager: CHIRPluginManager, chirPackage: CHIRP
         }
     })
     return CHIRMetaTransformRunResult(result.hasPluginForCHIR, result.functionTransformRuns, result.packageTransformRuns)
+}
+
+public func RunCHIRMetaTransforms(
+    pluginBuilder: MetaTransformPluginBuilder,
+    chirBuilder: CHIRBuilder,
+    chirPackage: CHIRPackage
+): CHIRMetaTransformRunResult {
+    let chirPluginManager = pluginBuilder.BuildCHIRPluginManager(chirBuilder)
+    return RunCHIRMetaTransforms(chirPluginManager, chirPackage)
+}
+
+public func TryRunCHIRMetaTransforms(
+    manager: CHIRPluginManager,
+    chirPackage: CHIRPackage
+): CHIRMetaTransformExecutionResult {
+    try {
+        return CHIRMetaTransformExecutionResult(true, RunCHIRMetaTransforms(manager, chirPackage))
+    } catch (e: Exception) {
+        return CHIRMetaTransformExecutionResult(false, false, 0, 0)
+    }
+}
+
+public func TryRunCHIRMetaTransforms(
+    pluginBuilder: MetaTransformPluginBuilder,
+    chirBuilder: CHIRBuilder,
+    chirPackage: CHIRPackage
+): CHIRMetaTransformExecutionResult {
+    try {
+        return CHIRMetaTransformExecutionResult(true, RunCHIRMetaTransforms(pluginBuilder, chirBuilder, chirPackage))
+    } catch (e: Exception) {
+        return CHIRMetaTransformExecutionResult(false, false, 0, 0)
+    }
 }
