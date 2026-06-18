@@ -1,6 +1,7 @@
 package cangjie_compiler::frontend
 
 import cangjie_compiler::meta_transformation.MetaTransformPluginBuilder
+import cangjie_compiler::meta_transformation.NativeMetaTransformPlugin
 import std.collection.*
 
 public enum CompileStage {
@@ -116,6 +117,8 @@ public class CompilerInstance {
     private var hasTypeCheckerFlag: Bool = false
     private let fileNameMap: HashMap<UInt64, String> = HashMap<UInt64, String>()
     private let loadedPluginPaths: ArrayList<String> = ArrayList<String>()
+    private let loadedNativeMetaTransformPlugins: ArrayList<NativeMetaTransformPlugin> =
+        ArrayList<NativeMetaTransformPlugin>()
 
     public init(invocation: CompilerInvocation, diag: DiagnosticEngine) {
         this.invocation = invocation
@@ -201,14 +204,33 @@ public class CompilerInstance {
 
     public func PerformPluginLoad(): Bool {
         loadedPluginPaths.clear()
+        CloseLoadedNativeMetaTransformPlugins()
         for (pluginPath in invocation.globalOptions.pluginPaths) {
-            if (!FileExist(pluginPath)) {
-                diag.Diagnose(DiagCategory.OTHER, DEFAULT_POSITION, "not a valid plugin: " + pluginPath)
+            try {
+                let metaTransformPlugin = NativeMetaTransformPlugin.Get(pluginPath)
+                if (!metaTransformPlugin.IsValid()) {
+                    DiagnoseInvalidPlugin(pluginPath)
+                }
+                loadedPluginPaths.add(pluginPath)
+                loadedNativeMetaTransformPlugins.add(metaTransformPlugin)
+                // Native C++ callbacks require a C++ MetaTransformPluginBuilder ABI adapter.
+            } catch (e: Exception) {
+                DiagnoseInvalidPlugin(pluginPath)
                 return false
             }
-            loadedPluginPaths.add(pluginPath)
         }
         return true
+    }
+
+    private func DiagnoseInvalidPlugin(pluginPath: String): Unit {
+        diag.DiagnoseRefactor(DiagKindRefactor.not_a_valid_plugin, DEFAULT_POSITION, arguments: [pluginPath])
+    }
+
+    private func CloseLoadedNativeMetaTransformPlugins(): Unit {
+        for (plugin in loadedNativeMetaTransformPlugins) {
+            let _ = plugin.Close()
+        }
+        loadedNativeMetaTransformPlugins.clear()
     }
 
     public func PerformParse(): Bool {
