@@ -34,10 +34,29 @@ real `cangjie_compiler::ast` types so there is one source of truth.
   ParseImports rewritten to `Val()/Begin()/End()/IsRaw()`). Whole-workspace
   `cjpm build` stays green; facade compile+run re-verified with no regression
   (see below).
-- Next cuts (planned): `isBroken` -> `IS_BROKEN`; then migrate the Type /
-  Pattern / Expr / Decl node families onto `ast`; then delete the 5 parse
-  `*Nodes.cj` shadow files (`TypeNodes.cj`, `PatternNodes.cj`, `ExprNodes.cj`,
-  `DeclNodes.cj`, `ImportPackageNodes.cj`).
+- **CUT 2 (broken-flags on ast AttributePack) -- DONE** (merged
+  `deisolate/isbroken`): the parse-local plain `var isBroken: Bool` storage field
+  on base `parse.Node` (`packages/parse/src/ASTCore.cj`) is gone. `Node` now holds
+  a private `attributes: AttributePack` (the real `cangjie_compiler::ast` class,
+  added to the `public import` from `ast`) and exposes open
+  `EnableAttr`/`DisableAttr`/`TestAttr` delegating to it; `isBroken` is now a
+  `public mut prop` whose getter reads `TestAttr(Attribute.IS_BROKEN)` and whose
+  setter toggles via `Enable/DisableAttr`. `ImportContent`'s plain
+  `var hasBroken: Bool` (`packages/parse/src/ImportPackageNodes.cj`) likewise
+  became a `public mut prop` backed by `Attribute.HAS_BROKEN`. `Decl`
+  (`packages/parse/src/DeclNodes.cj`) keeps its own `ArrayList<Attribute>` store
+  but now `override`s the three attr methods (and folds `HAS_BROKEN` into
+  `IS_BROKEN`) so the base-class `isBroken` prop dispatches correctly. No plain
+  `Bool` brokenness storage remains; whole-workspace `cjpm build` stays green and
+  the facade compile+run was re-verified with no regression (return 42, hi,
+  `6*7`->42, FizzBuzz 1..15, fact(5)->120). Note: broken-program error surfacing
+  to the CLI is still a pre-existing facade gap (identical before and after this
+  merge -- the parse `isBroken`/`HAS_BROKEN` flags are not yet consumed by the
+  frontend pipeline).
+- Next cuts (planned): migrate the Type node family onto `ast`; then
+  Pattern / Expr / Decl node families; then delete the 5 parse `*Nodes.cj` shadow
+  files (`TypeNodes.cj`, `PatternNodes.cj`, `ExprNodes.cj`, `DeclNodes.cj`,
+  `ImportPackageNodes.cj`).
 
 ## Verified integrated capabilities
 
