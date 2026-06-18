@@ -5,6 +5,8 @@ import std.collection.*
 import cangjie_compiler::ast.ASTKind
 import cangjie_compiler::ast.ASTKindIndex
 import cangjie_compiler::ast.ASTKindName
+import cangjie_compiler::ast.ArrayExpr as AstArrayExpr
+import cangjie_compiler::ast.ArrayLit as AstArrayLit
 import cangjie_compiler::ast.AssignExpr as AstAssignExpr
 import cangjie_compiler::ast.Attribute as AstAttribute
 import cangjie_compiler::ast.BinaryExpr as AstBinaryExpr
@@ -19,6 +21,7 @@ import cangjie_compiler::ast.EnumDecl as AstEnumDecl
 import cangjie_compiler::ast.EnumPattern as AstEnumPattern
 import cangjie_compiler::ast.Expr as AstExpr
 import cangjie_compiler::ast.ForInExpr as AstForInExpr
+import cangjie_compiler::ast.FuncArg as AstFuncArg
 import cangjie_compiler::ast.FuncDecl as AstFuncDecl
 import cangjie_compiler::ast.FuncTy as AstFuncTy
 import cangjie_compiler::ast.IfExpr as AstIfExpr
@@ -37,6 +40,7 @@ import cangjie_compiler::ast.SubscriptExpr as AstSubscriptExpr
 import cangjie_compiler::ast.TokenKind as AstTokenKind
 import cangjie_compiler::ast.TokenKindValue as AstTokenKindValue
 import cangjie_compiler::ast.Ty as AstTy
+import cangjie_compiler::ast.TupleLit as AstTupleLit
 import cangjie_compiler::ast.UnaryExpr as AstUnaryExpr
 import cangjie_compiler::ast.VarDecl as AstVarDecl
 import cangjie_compiler::ast.VarOrEnumPattern as AstVarOrEnumPattern
@@ -106,6 +110,10 @@ public class Translator {
             case ASTKind.FOR_IN_EXPR => trans.Visit(RequireNodeAsForInExpr(nodePtr))
             case ASTKind.JUMP_EXPR => trans.Visit(RequireNodeAsJumpExpr(nodePtr))
             case ASTKind.MATCH_EXPR => trans.Visit(RequireNodeAsMatchExpr(nodePtr))
+            case ASTKind.ARRAY_LIT => trans.Visit(RequireNodeAsArrayLit(nodePtr))
+            case ASTKind.ARRAY_EXPR => trans.Visit(RequireNodeAsArrayExpr(nodePtr))
+            case ASTKind.TUPLE_LIT => trans.Visit(RequireNodeAsTupleLit(nodePtr))
+            case ASTKind.SUBSCRIPT_EXPR => trans.Visit(RequireNodeAsSubscriptExpr(nodePtr))
             case _ => throw IllegalArgumentException(
                 "not yet ported in faithful AST2CHIR: ${ASTKindName(nodePtr.astKind)}")
         }
@@ -463,6 +471,75 @@ public class Translator {
         return None
     }
 
+    public func Visit(expr: AstArrayLit): Option<Value> {
+        let arrayTy = chirTy.TranslateType(RequireAstTy(expr))
+        if (arrayTy.IsVArray()) {
+            let elements = ArrayList<Value>()
+            for (child in expr.children) {
+                let element = Translator.TranslateASTNode(child, this) ??
+                    throw IllegalStateException("faithful AST2CHIR ArrayLit element produced no value")
+                elements.add(element)
+            }
+            return RequireResult(builder.CreateVArray(arrayTy, elements, CurrentBlock()))
+        }
+        if (arrayTy.IsStructArray()) {
+            throw IllegalArgumentException("not yet ported in faithful AST2CHIR: std.core.Array literal initFunc path")
+        }
+        throw IllegalArgumentException("not yet ported in faithful AST2CHIR: unsupported ArrayLit type")
+    }
+
+    public func Visit(expr: AstArrayExpr): Option<Value> {
+        let arrayTy = chirTy.TranslateType(RequireAstTy(expr))
+        if (expr.isValueArray || arrayTy.IsVArray()) {
+            return TranslateVArrayExpr(expr, RequireVArrayType(arrayTy))
+        }
+        let rawArrayTy = RequireRawArrayType(arrayTy.StripAllRefs())
+        if (expr.args.isEmpty()) {
+            let sizeValue = RequireResult(builder.CreateConstant(builder.context.GetInt64Ty(), IntLiteral(0),
+                CurrentBlock()))
+            let rawArrayRef = RequireResult(builder.CreateRawArrayAllocate(arrayTy, rawArrayTy.GetElementType(),
+                sizeValue, CurrentBlock()))
+            builder.CreateRawArrayLiteralInit(builder.context.GetUnitTy(), rawArrayRef, ArrayList<Value>(),
+                CurrentBlock())
+            return rawArrayRef
+        }
+        if (expr.args.size == 2 && expr.initFunc.isNone()) {
+            let sizeValue = Translator.TranslateASTNode(RequireFuncArgExpr(expr.args[0], "RawArray size"), this) ??
+                throw IllegalStateException("faithful AST2CHIR RawArray size produced no value")
+            let initValue = Translator.TranslateASTNode(RequireFuncArgExpr(expr.args[1], "RawArray init value"), this) ??
+                throw IllegalStateException("faithful AST2CHIR RawArray init value produced no value")
+            let rawArrayRef = RequireResult(builder.CreateRawArrayAllocate(arrayTy, rawArrayTy.GetElementType(),
+                sizeValue, CurrentBlock()))
+            builder.CreateRawArrayInitByValue(builder.context.GetUnitTy(), rawArrayRef, sizeValue, initValue,
+                CurrentBlock())
+            return rawArrayRef
+        }
+        throw IllegalArgumentException("not yet ported in faithful AST2CHIR: RawArray initFunc/collection ArrayExpr")
+    }
+
+    public func Visit(expr: AstTupleLit): Option<Value> {
+        let values = ArrayList<Value>()
+        for (child in expr.children) {
+            let value = Translator.TranslateASTNode(child, this) ??
+                throw IllegalStateException("faithful AST2CHIR TupleLit element produced no value")
+            values.add(value)
+        }
+        return RequireResult(builder.CreateTuple(chirTy.TranslateType(RequireAstTy(expr)), values, CurrentBlock()))
+    }
+
+    public func Visit(expr: AstSubscriptExpr): Option<Value> {
+        if (expr.indexExprs.size != 1) {
+            throw IllegalArgumentException("faithful AST2CHIR SubscriptExpr expects exactly one index")
+        }
+        if (expr.isTupleAccess) {
+            return TranslateTupleAccess(expr)
+        }
+        if (expr.IsVArrayAccess()) {
+            return TranslateVArrayAccess(expr)
+        }
+        throw IllegalArgumentException("not yet ported in faithful AST2CHIR: non-tuple/non-VArray subscript")
+    }
+
     private func TranslateClassLikeDecl(def: ClassDef, decl: AstClassLikeDecl): Unit {
         if (let Some(astTy) <- decl.GetTy()) {
             let classTy = UnwrapClassType(chirTy.TranslateType(astTy))
@@ -731,6 +808,78 @@ public class Translator {
         return ASTKindIndex(left.astKind) == ASTKindIndex(right.astKind) &&
             left.identifier.Val() == right.identifier.Val() && left.fullPackageName == right.fullPackageName &&
             left.begin.hashCode() == right.begin.hashCode() && left.end.hashCode() == right.end.hashCode()
+    }
+
+    private func TranslateVArrayExpr(expr: AstArrayExpr, arrayTy: VArrayType): Value {
+        if (expr.args.size != 1) {
+            throw IllegalArgumentException("faithful AST2CHIR VArray expression expects one argument")
+        }
+        let sizeValue = RequireResult(builder.CreateConstant(builder.context.GetInt64Ty(), IntLiteral(Int64(arrayTy.size)),
+            CurrentBlock()))
+        let argValue = Translator.TranslateASTNode(RequireFuncArgExpr(expr.args[0], "VArray init argument"), this) ??
+            throw IllegalStateException("faithful AST2CHIR VArray init argument produced no value")
+        let argTy = argValue.GetType() ??
+            throw IllegalStateException("faithful AST2CHIR VArray init argument has no type")
+        if (argTy.IsFunc()) {
+            let nullItem = RequireResult(builder.CreateConstant(arrayTy.GetElementType(), NullLiteral(), CurrentBlock()))
+            return RequireResult(builder.CreateVArrayBuilder(arrayTy, sizeValue, nullItem, argValue, CurrentBlock()))
+        }
+        let fnParamTys = ArrayList<Type>()
+        fnParamTys.add(builder.context.GetInt64Ty())
+        let nullFnTy = builder.context.GetFuncTy(fnParamTys, arrayTy.GetElementType())
+        let nullFn = RequireResult(builder.CreateConstant(nullFnTy, NullLiteral(), CurrentBlock()))
+        return RequireResult(builder.CreateVArrayBuilder(arrayTy, sizeValue, argValue, nullFn, CurrentBlock()))
+    }
+
+    private func TranslateTupleAccess(expr: AstSubscriptExpr): Value {
+        let path = ArrayList<UInt64>()
+        var baseExpr: Option<AstExpr> = None
+        var current: Option<AstSubscriptExpr> = expr
+        while (let Some(subscript) <- current) {
+            if (!subscript.isTupleAccess) {
+                break
+            }
+            if (subscript.indexExprs.size != 1) {
+                throw IllegalArgumentException("faithful AST2CHIR tuple access expects one index")
+            }
+            path.add(subscript.indexExprs[0].constNumValue.asInt.Uint64(), at: 0)
+            baseExpr = subscript.baseExpr
+            current = if (let Some(base) <- subscript.baseExpr) { base as AstSubscriptExpr } else { None }
+        }
+        let base = Translator.TranslateASTNode(RequireExpr(baseExpr, "tuple access base"), this) ??
+            throw IllegalStateException("faithful AST2CHIR tuple base produced no value")
+        let baseValue = GetDerefedValue(base)
+        return RequireResult(builder.CreateField(chirTy.TranslateType(RequireAstTy(expr)), baseValue, path,
+            CurrentBlock()))
+    }
+
+    private func TranslateVArrayAccess(expr: AstSubscriptExpr): Value {
+        let indexExprs = ArrayList<AstExpr>()
+        var baseExpr: Option<AstExpr> = None
+        var current: Option<AstSubscriptExpr> = expr
+        while (let Some(subscript) <- current) {
+            if (!subscript.IsVArrayAccess()) {
+                break
+            }
+            if (subscript.indexExprs.size != 1) {
+                throw IllegalArgumentException("faithful AST2CHIR VArray access expects one index")
+            }
+            indexExprs.add(subscript.indexExprs[0], at: 0)
+            baseExpr = subscript.baseExpr
+            current = if (let Some(base) <- subscript.baseExpr) { base as AstSubscriptExpr } else { None }
+        }
+        let args = ArrayList<Value>()
+        let base = Translator.TranslateASTNode(RequireExpr(baseExpr, "VArray access base"), this) ??
+            throw IllegalStateException("faithful AST2CHIR VArray base produced no value")
+        args.add(base)
+        for (indexExpr in indexExprs) {
+            let indexValue = Translator.TranslateASTNode(indexExpr, this) ??
+                throw IllegalStateException("faithful AST2CHIR VArray index produced no value")
+            args.add(GetDerefedValue(indexValue))
+        }
+        let callContext = IntrisicCallContext(kind: IntrinsicKind.VARRAY_GET, args: args)
+        return RequireResult(builder.CreateIntrinsic(chirTy.TranslateType(RequireAstTy(expr)), callContext,
+            CurrentBlock()))
     }
 
     private func TranslateTrivialAssign(expr: AstAssignExpr, leftExpr: AstExpr, rightExpr: AstExpr): Option<Value> {
@@ -1060,6 +1209,10 @@ public class Translator {
         return value ?? throw IllegalStateException("faithful AST2CHIR missing ${name}")
     }
 
+    private func RequireFuncArgExpr(value: AstFuncArg, name: String): AstExpr {
+        return value.expr ?? throw IllegalStateException("faithful AST2CHIR missing ${name}")
+    }
+
     private func RequireStructDef(def: CustomTypeDef): StructDef {
         return (def as StructDef) ?? throw IllegalStateException("faithful AST2CHIR expected StructDef")
     }
@@ -1078,6 +1231,14 @@ public class Translator {
 
     private func RequireEnumType(ty: Type): EnumType {
         return (ty as EnumType) ?? throw IllegalStateException("faithful AST2CHIR expected EnumType")
+    }
+
+    private func RequireVArrayType(ty: Type): VArrayType {
+        return (ty as VArrayType) ?? throw IllegalStateException("faithful AST2CHIR expected VArrayType")
+    }
+
+    private func RequireRawArrayType(ty: Type): RawArrayType {
+        return (ty as RawArrayType) ?? throw IllegalStateException("faithful AST2CHIR expected RawArrayType")
     }
 
     private static func RequireNodeAsFuncDecl(node: AstNode): AstFuncDecl {
@@ -1163,5 +1324,21 @@ public class Translator {
 
     private static func RequireNodeAsMatchExpr(node: AstNode): AstMatchExpr {
         return (node as AstMatchExpr) ?? throw IllegalArgumentException("ASTKind cast failed: MATCH_EXPR")
+    }
+
+    private static func RequireNodeAsArrayLit(node: AstNode): AstArrayLit {
+        return (node as AstArrayLit) ?? throw IllegalArgumentException("ASTKind cast failed: ARRAY_LIT")
+    }
+
+    private static func RequireNodeAsArrayExpr(node: AstNode): AstArrayExpr {
+        return (node as AstArrayExpr) ?? throw IllegalArgumentException("ASTKind cast failed: ARRAY_EXPR")
+    }
+
+    private static func RequireNodeAsTupleLit(node: AstNode): AstTupleLit {
+        return (node as AstTupleLit) ?? throw IllegalArgumentException("ASTKind cast failed: TUPLE_LIT")
+    }
+
+    private static func RequireNodeAsSubscriptExpr(node: AstNode): AstSubscriptExpr {
+        return (node as AstSubscriptExpr) ?? throw IllegalArgumentException("ASTKind cast failed: SUBSCRIPT_EXPR")
     }
 }
