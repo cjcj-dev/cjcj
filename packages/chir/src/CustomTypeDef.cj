@@ -338,7 +338,7 @@ public open class CustomTypeDef <: Base {
     }
 
     public func CanBeInherited(): Bool {
-        return IsClassLike()
+        return IsInterface() || TestAttr(Attribute.VIRTUAL) || TestAttr(Attribute.ABSTRACT)
     }
 
     public func GetAnnoInfo(): AnnoInfo {

@@ -793,6 +793,7 @@ public class Function <: GlobalValue {
     private var funcKind: FuncKind = FuncKind.DEFAULT
     private var body: Option<BlockGroup> = None
     private let params: ArrayList<Parameter> = ArrayList<Parameter>()
+    private let genericTypeParams: ArrayList<GenericType> = ArrayList<GenericType>()
     private var returnValue: Option<LocalVar> = None
     private var genericDecl: Option<Function> = None
     private var paramDftValHostFunc: Option<Function> = None
@@ -835,8 +836,11 @@ public class Function <: GlobalValue {
     public let runtimePrintIsFloat: ArrayList<Bool> = ArrayList<Bool>()
 
     public init(funcType: FuncType, identifier: String, srcCodeIdentifier: String, rawMangledName: String,
-        packageName: String) {
+        packageName: String, genericTypeParams!: ArrayList<GenericType> = ArrayList<GenericType>()) {
         super(ValueKind.KIND_FUNC, funcType, identifier, srcCodeIdentifier, rawMangledName, packageName)
+        for (param in genericTypeParams) {
+            this.genericTypeParams.add(param)
+        }
     }
 
     public override func AsFunction(): Option<Function> { return this }
@@ -863,6 +867,18 @@ public class Function <: GlobalValue {
 
     public func GetGenericDecl(): Option<Function> { return genericDecl }
     public func SetGenericDecl(decl: Function): Unit { genericDecl = decl }
+
+    public func AddGenericTypeParam(param: GenericType): Unit {
+        genericTypeParams.add(param)
+    }
+
+    public func GetGenericTypeParams(): ArrayList<GenericType> {
+        let out = ArrayList<GenericType>()
+        for (param in genericTypeParams) {
+            out.add(param)
+        }
+        return out
+    }
 
     public func IsFastNative(): Bool { return TestAttr(Attribute.FAST_NATIVE) }
     public func SetFastNative(fastNative: Bool): Unit {

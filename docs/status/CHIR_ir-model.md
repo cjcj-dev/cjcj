@@ -17,6 +17,15 @@ Reference inspected:
 
 Implemented in this pass:
 
+- Added the missing CHIR `VIRTUAL` attribute to the self-hosted attribute table, display order, and CHIR wire
+  attribute parsing/serialization without shifting existing serialized attribute indices.
+- Added C++ `Function`-style generic type parameter storage and builder plumbing for function containers.
+- Ported the C++ `GetOutDefDeclaredTypes`/visible-generic collection behavior needed by `GetInstantiateValue.Clone`,
+  including function/class/lambda/block ownership traversal and extend-definition type-argument reordering.
+- Updated `GetInstantiateValue.Clone` to adjust instantiated type arguments for inlined parent functions when the
+  generic result is a local lambda value, matching the C++ inlining-aware clone path.
+- Tightened `CustomTypeDef.CanBeInherited()` to the C++ predicate: interface, virtual, or abstract, rather than all
+  class-like definitions.
 - Added C++ `DebugLocation.h`-style `Position`, invalid location/name constants, absolute-path/file-name storage,
   begin/end position accessors, macro/normal invalid-position checks, scope-info copy accessors, C++-style
   `ToString()`/`Dump()`, and equality semantics while preserving the existing serialized `fileId/line/column/length`
@@ -74,20 +83,20 @@ De-isolation:
 
 Known remaining gaps:
 
-- `GetInstantiateValue.Clone` currently preserves instantiated types; it does not yet implement the C++ inlining-aware
-  outer-definition type substitution path.
-- The new structured clone path mirrors C++ block/group ownership and successor retargeting, but still shares operand
+- The structured clone path mirrors C++ block/group ownership and successor retargeting, but still shares operand
   values exactly as the existing expression clone layer does; full local-value remapping would need a broader inliner
   and substitution pass audit.
+- Function generic type parameters are now represented in the IR model, but CHIR serializer/deserializer records still
+  need a format extension before generic function parameters round-trip through `.chir`.
 - Interpreter/codegen-specific intrinsic tables outside `IntrinsicKind.h`, such as AST FFI and concrete-width atomic
   lowering maps, still need downstream porting outside this IR node/type model slice.
 - Full C++ generic constraint solving, vtable search/update, inheritance traversal through extends, and precise
-  `CanBeInherited`/finalizer semantics are still missing; dynamic dispatch currently records method context and optional
-  vtable offsets but does not compute vtable search results.
+  finalizer semantics are still missing; dynamic dispatch currently records method context and optional vtable offsets
+  but does not compute vtable search results.
 - CHIR package metadata and type-lowering APIs still cannot expose exact AST/Sema/Basic signatures without package
   dependency work outside this IR-model scope.
 - Serializer/BCHIR/codegen consumers still cover only the subset represented by the current Cangjie IR model.
 
 Remaining `TODO(selfhost:CHIR)` markers in `packages/chir/src`: 0.
 
-Estimated real behavior coverage for this IR-model scope: 69%.
+Estimated real behavior coverage for this IR-model scope: 72%.

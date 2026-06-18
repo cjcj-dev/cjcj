@@ -40,8 +40,10 @@ public class CHIRBuilder {
     }
 
     public func CreateFunction(funcType: FuncType, identifier: String, srcCodeIdentifier!: String = "",
-        rawMangledName!: String = "", packageName!: String = ""): Function {
-        let fn = Function(funcType, identifier, srcCodeIdentifier, rawMangledName, packageName)
+        rawMangledName!: String = "", packageName!: String = "",
+        genericTypeParams!: ArrayList<GenericType> = ArrayList<GenericType>()): Function {
+        let fn = Function(funcType, identifier, srcCodeIdentifier, rawMangledName, packageName,
+            genericTypeParams: genericTypeParams)
         context.RegisterValue(fn)
         return fn
     }
