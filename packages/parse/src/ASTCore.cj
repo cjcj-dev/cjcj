@@ -1,54 +1,38 @@
 package cangjie_compiler::parse
 
-import std.collection.*
 import cangjie_compiler::ast.AnnotationKind as AstAnnotationKind
 public import cangjie_compiler::ast.{ASTKind, ASTKindIndex, Attribute, AttributeIndex, AttributePack}
-public import cangjie_compiler::ast.{Identifier, SrcIdentifier}
+public import cangjie_compiler::ast.{
+    ConstantType, FuncType, Generic, GenericConstraint, GenericParamDecl, Identifier, InvalidType, Node, OptionType,
+    ParenType, PrimitiveType, QualifiedType, RefType, SrcIdentifier, ThisType, TupleType, Type, VArrayType
+}
+public import cangjie_compiler::ast.{
+    CommandTypePattern, ConstPattern, EnumPattern, ExceptTypePattern, InvalidPattern, Pattern, TuplePattern,
+    TypeListPattern, TypePattern, VarOrEnumPattern, VarPattern, WildcardPattern
+}
+public import cangjie_compiler::ast.{
+    ArrayExpr, ArrayLit, AssignExpr, AsExpr, BinaryExpr, Block, CallExpr, FuncArg, Expr, Handler, IfAvailableExpr,
+    IfExpr, IncOrDecExpr, InterpolationExpr, InvalidExpr, IsExpr, JumpExpr, LambdaExpr, LetPatternDestructor,
+    LitConstExpr, LitConstKind, MacroExpandExpr, MatchCase, MatchCaseOther, MatchExpr, MemberAccess, OptionalChainExpr,
+    OptionalExpr, ParenExpr, PerformExpr, PrimitiveTypeExpr, QuoteExpr, RangeExpr, RefExpr, ResumeExpr,
+    ReturnExpr, SpawnExpr, StrInterpolationExpr, SubscriptExpr, SynchronizedExpr, ThrowExpr, TokenPart,
+    TrailingClosureExpr, TryExpr, TupleLit, TypeConvExpr, UnaryExpr, WildcardExpr, WhileExpr, DoWhileExpr,
+    ForInExpr, StringKind, SugarKind, CallKind
+}
+public import cangjie_compiler::ast.{
+    Annotation, ClassBody, ClassDecl, ClassLikeDecl, Decl, DummyBody, EnumDecl, ExtendDecl, FuncBody, FuncDecl,
+    FuncParam, FuncParamList, InterfaceBody, InterfaceDecl, InvalidDecl, InheritableDecl, MacroDecl, MacroExpandDecl,
+    MacroExpandParam, MacroInvocation, MainDecl, Modifier, PrimaryCtorDecl, PropDecl, StructBody, StructDecl,
+    TypeAliasDecl, VarDecl, VarDeclAbstract, VarWithPatternDecl
+}
+public import cangjie_compiler::ast.{
+    AccessLevel, FeatureId, FeaturesDirective, FeaturesSet, File, ImportContent, ImportKind, ImportSpec, Package,
+    PackageDecl, PackageSpec
+}
+public import cangjie_compiler::ast.{TypeKind, TypeKindFromName}
 public import cangjie_compiler::utils.OverflowStrategy
 
 public type AnnotationKind = AstAnnotationKind
-
-public open class Node {
-    public var begin: Position = INVALID_POSITION
-    public var end: Position = INVALID_POSITION
-    public var curMacroCall: Option<Node> = None
-    public var curFile: Option<File> = None
-    public let astKind: ASTKind
-    private let attributes: AttributePack = AttributePack()
-
-    public init() {
-        astKind = ASTKind.NODE
-    }
-
-    public init(kind: ASTKind) {
-        astKind = kind
-    }
-
-    public open func EnableAttr(attr: Attribute): Unit {
-        attributes.SetAttr(attr, true)
-    }
-
-    public open func DisableAttr(attr: Attribute): Unit {
-        attributes.SetAttr(attr, false)
-    }
-
-    public open func TestAttr(attr: Attribute): Bool {
-        return attributes.TestAttr(attr)
-    }
-
-    public mut prop isBroken: Bool {
-        get() { return TestAttr(Attribute.IS_BROKEN) }
-        set(value) { if (value) { EnableAttr(Attribute.IS_BROKEN) } else { DisableAttr(Attribute.IS_BROKEN) } }
-    }
-
-    public open func Children(): ArrayList<Node> {
-        return ArrayList<Node>()
-    }
-
-    public open func ToString(): String {
-        return ""
-    }
-}
 
 public enum ModifierKind {
     | PUBLIC | PROTECTED | INTERNAL | PRIVATE | STATIC | ABSTRACT | OPEN | SEALED | OVERRIDE
@@ -81,47 +65,4 @@ private func ModifierKindIndex(kind: ModifierKind): Int64 {
 extend ModifierKind <: Equatable<ModifierKind> {
     public operator func ==(right: ModifierKind): Bool { return ModifierKindIndex(this) == ModifierKindIndex(right) }
     public operator func !=(right: ModifierKind): Bool { return !(this == right) }
-}
-
-public class Modifier <: Node {
-    public var kind: ModifierKind
-    public var tokenKind: TokenKind
-
-    public init(kind: ModifierKind, tokenKind: TokenKind, begin: Position, end: Position) {
-        super(ASTKind.MODIFIER)
-        this.kind = kind
-        this.tokenKind = tokenKind
-        this.begin = begin
-        this.end = end
-    }
-}
-
-public class Annotation <: Node {
-    public var isCompileTimeVisible: Bool = false
-    public var kind: AnnotationKind = AnnotationKind.CUSTOM
-    public var identifier: SrcIdentifier = SrcIdentifier()
-    public var lsquarePos: Position = INVALID_POSITION
-    public let args: ArrayList<FuncArg> = ArrayList<FuncArg>()
-    public var rsquarePos: Position = INVALID_POSITION
-    public var overflowStrategy: OverflowStrategy = OverflowStrategy.NA
-    public let attrs: ArrayList<Token> = ArrayList<Token>()
-    public let attrCommas: ArrayList<Position> = ArrayList<Position>()
-    public var definedPackage: String = ""
-    public var condExpr: Option<Expr> = None
-    public var target: UInt16 = 0u16
-    public var runtimeVisible: Bool = false
-    public var baseExpr: Option<Expr> = None
-    public var atPos: Position = INVALID_POSITION
-
-    public init() {
-        super(ASTKind.ANNOTATION)
-    }
-
-    public override func Children(): ArrayList<Node> {
-        let out = ArrayList<Node>()
-        for (arg in args) { out.add(arg) }
-        if (let Some(cond) <- condExpr) { out.add(cond) }
-        if (let Some(base) <- baseExpr) { out.add(base) }
-        return out
-    }
 }

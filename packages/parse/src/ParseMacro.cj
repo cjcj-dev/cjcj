@@ -1,6 +1,8 @@
 package cangjie_compiler::parse
 
 import std.collection.*
+import cangjie_compiler::ast.Identifier as AstIdentifier
+import cangjie_compiler::ast.ScopeKind as AstScopeKind
 
 extend ParserImpl {
     private func IsMacroIdentifierStart(kind: TokenKind): Bool {
@@ -50,7 +52,6 @@ extend ParserImpl {
         let annos = ArrayList<Annotation>()
         ParseAnnotations(annos)
         let expr = if (isTailClosure) { ParseLambdaExprWithTrailingClosure() } else { ParseLambdaExpr() }
-        for (anno in annos) { expr.annotations.add(anno) }
         if (!annos.isEmpty()) {
             expr.begin = annos[0].begin
         }
@@ -76,9 +77,33 @@ extend ParserImpl {
         let expr = MacroExpandExpr()
         expr.begin = Peek().Begin()
         ParseMacroInvocation(ScopeKind.FUNC_BODY, ArrayList<Modifier>(), expr.invocation)
-        expr.identifier = expr.invocation.identifier
+        expr.identifier = AstIdentifier(
+            expr.invocation.macroCallDiagInfo.identifier,
+            expr.invocation.macroNamePos,
+            expr.invocation.macroNamePos + expr.invocation.macroCallDiagInfo.identifier.size)
         expr.end = lastToken.End()
         return expr
+    }
+
+    private func ToAstScopeKind(kind: ScopeKind): AstScopeKind {
+        return match (kind) {
+            case ScopeKind.TOPLEVEL => AstScopeKind.TOPLEVEL
+            case ScopeKind.CLASS_BODY => AstScopeKind.CLASS_BODY
+            case ScopeKind.INTERFACE_BODY => AstScopeKind.INTERFACE_BODY
+            case ScopeKind.STRUCT_BODY => AstScopeKind.STRUCT_BODY
+            case ScopeKind.EXTEND_BODY => AstScopeKind.EXTEND_BODY
+            case ScopeKind.FUNC_BODY => AstScopeKind.FUNC_BODY
+            case ScopeKind.MACRO_BODY => AstScopeKind.MACRO_BODY
+            case ScopeKind.PRIMARY_CONSTRUCTOR_BODY_FOR_CLASS => AstScopeKind.PRIMARY_CONSTRUCTOR_BODY_FOR_CLASS
+            case ScopeKind.PRIMARY_CONSTRUCTOR_BODY_FOR_STRUCT => AstScopeKind.PRIMARY_CONSTRUCTOR_BODY_FOR_STRUCT
+            case ScopeKind.PROP_MEMBER_SETTER_BODY => AstScopeKind.PROP_MEMBER_SETTER_BODY
+            case ScopeKind.PROP_MEMBER_GETTER_BODY => AstScopeKind.PROP_MEMBER_GETTER_BODY
+            case ScopeKind.ENUM_BODY => AstScopeKind.ENUM_BODY
+            case ScopeKind.ENUM_CONSTRUCTOR => AstScopeKind.ENUM_CONSTRUCTOR
+            case ScopeKind.PRIMARY_CONSTRUCTOR_FUNC_PARAM => AstScopeKind.PRIMARY_CONSTRUCTOR_FUNC_PARAM
+            case ScopeKind.MAIN_BODY => AstScopeKind.MAIN_BODY
+            case ScopeKind.UNKNOWN_SCOPE => AstScopeKind.UNKNOWN_SCOPE
+        }
     }
 
     public func ParseMacroCallDeclInput(scopeKind: ScopeKind, modifiers: ArrayList<Modifier>, annos: ArrayList<Annotation>): Decl {
@@ -90,7 +115,12 @@ extend ParserImpl {
             (SeeingDeclInScope(scopeKind) || SeeingMacroCallDecl())) {
             ParseMacroCallArgsWithoutParen(scopeKind, modifiers, decl.invocation)
         }
-        decl.identifier = decl.invocation.identifier
+        decl.identifier = SrcIdentifier(
+            decl.invocation.macroCallDiagInfo.identifier,
+            decl.invocation.macroCallDiagInfo.identifier,
+            decl.invocation.macroNamePos,
+            decl.invocation.macroNamePos + decl.invocation.macroCallDiagInfo.identifier.size,
+            false)
         decl.end = if (let Some(inputDecl) <- decl.invocation.decl) { inputDecl.end } else { lastToken.End() }
         return decl
     }
@@ -112,7 +142,7 @@ extend ParserImpl {
             ParseMacroCallAttr(invocation)
         }
 
-        invocation.scopeKind = scopeKind
+        invocation.scopeKind = ToAstScopeKind(scopeKind)
         if (Skip(TokenKind.LPAREN)) {
             ParseMacroCallArgsWithParen(invocation)
         } else if (Seeing(TokenKind.LCURL)) {
@@ -248,7 +278,6 @@ extend ParserImpl {
             invocation.macroCallDiagInfo.fullName += "." + nextPart.Val()
             currentPart = nextPart
         }
-        invocation.identifier = currentPart
         invocation.macroNamePos = currentPart.Begin()
         invocation.macroCallDiagInfo.identifier = currentPart.Val()
         invocation.macroCallDiagInfo.identifierPos = currentPart.Begin()
@@ -311,10 +340,7 @@ extend ParserImpl {
     }
 
     private func SyncMacroArgTokens(invocation: MacroInvocation): Unit {
-        invocation.tokens.clear()
-        for (argToken in invocation.args) {
-            invocation.tokens.add(argToken)
-        }
+        let _ = invocation
     }
 
     private func PopulateMacroOriginPositions(invocation: MacroInvocation): Unit {

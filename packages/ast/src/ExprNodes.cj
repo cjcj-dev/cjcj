@@ -123,6 +123,10 @@ public class Block <: Expr {
         super(ASTKind.BLOCK)
     }
 
+    public override func Children(): ArrayList<Node> {
+        return body
+    }
+
     public func GetLastExprOrDecl(): Option<Node> {
         if (body.isEmpty()) {
             return None
@@ -159,6 +163,14 @@ public class IfExpr <: Expr {
         super(ASTKind.IF_EXPR)
     }
 
+    public override func Children(): ArrayList<Node> {
+        let out = ArrayList<Node>()
+        if (let Some(cond) <- condExpr) { out.add(cond) }
+        if (let Some(thenBlock) <- thenBody) { out.add(thenBlock) }
+        if (let Some(elseExpr) <- elseBody) { out.add(elseExpr) }
+        return out
+    }
+
     public override func ToString(): String {
         var out = "if (" + exprOptionString(condExpr) + ") "
         if (let Some(value) <- thenBody) {
@@ -179,6 +191,13 @@ public class LetPatternDestructor <: Expr {
 
     public init() {
         super(ASTKind.LET_PATTERN_DESTRUCTOR)
+    }
+
+    public override func Children(): ArrayList<Node> {
+        let out = ArrayList<Node>()
+        for (pattern in patterns) { out.add(pattern) }
+        if (let Some(expr) <- initializer) { out.add(expr) }
+        return out
     }
 
     public override func ToString(): String {
@@ -208,6 +227,17 @@ public class TokenPart <: Expr {
         }
     }
 
+    public init(inputTokens: ArrayList<Token>) {
+        super(ASTKind.TOKEN_PART)
+        for (token in inputTokens) {
+            tokens.add(token)
+        }
+        if (!tokens.isEmpty()) {
+            begin = tokens[0].Begin()
+            end = tokens[tokens.size - 1].End()
+        }
+    }
+
     public override func ToString(): String {
         var out = ""
         for (token in tokens) {
@@ -227,6 +257,12 @@ public class QuoteExpr <: Expr {
         super(ASTKind.QUOTE_EXPR)
     }
 
+    public override func Children(): ArrayList<Node> {
+        let out = ArrayList<Node>()
+        for (expr in exprs) { out.add(expr) }
+        return out
+    }
+
     public override func ToString(): String {
         return "quote(" + exprJoinExprs(exprs, ", ") + ")"
     }
@@ -242,6 +278,14 @@ public class MatchCase <: Node {
 
     public init() {
         super(ASTKind.MATCH_CASE)
+    }
+
+    public override func Children(): ArrayList<Node> {
+        let out = ArrayList<Node>()
+        for (pattern in patterns) { out.add(pattern) }
+        if (let Some(guard) <- patternGuard) { out.add(guard) }
+        if (let Some(block) <- exprOrDecls) { out.add(block) }
+        return out
     }
 
     public func SetCtxExprForPatterns(ctxExpr: Expr): Unit {
@@ -272,6 +316,13 @@ public class MatchCaseOther <: Node {
         super(ASTKind.MATCH_CASE_OTHER)
     }
 
+    public override func Children(): ArrayList<Node> {
+        let out = ArrayList<Node>()
+        if (let Some(expr) <- matchExpr) { out.add(expr) }
+        if (let Some(block) <- exprOrDecls) { out.add(block) }
+        return out
+    }
+
     public override func ToString(): String {
         var out = "case " + exprOptionString(matchExpr) + " => "
         if (let Some(block) <- exprOrDecls) {
@@ -294,6 +345,14 @@ public class MatchExpr <: Expr {
 
     public init() {
         super(ASTKind.MATCH_EXPR)
+    }
+
+    public override func Children(): ArrayList<Node> {
+        let out = ArrayList<Node>()
+        if (let Some(sel) <- selector) { out.add(sel) }
+        for (matchCase in matchCases) { out.add(matchCase) }
+        for (matchCaseOther in matchCaseOthers) { out.add(matchCaseOther) }
+        return out
     }
 
     public override func ToString(): String {
@@ -346,6 +405,20 @@ public class TryExpr <: Expr {
         super(ASTKind.TRY_EXPR)
     }
 
+    public override func Children(): ArrayList<Node> {
+        let out = ArrayList<Node>()
+        for (decl in resourceSpec) { out.add(decl) }
+        if (let Some(block) <- tryBlock) { out.add(block) }
+        for (pattern in catchPatterns) { out.add(pattern) }
+        for (block in catchBlocks) { out.add(block) }
+        if (let Some(block) <- finallyBlock) { out.add(block) }
+        for (handler in handlers) {
+            if (let Some(pattern) <- handler.commandPattern) { out.add(pattern) }
+            if (let Some(block) <- handler.block) { out.add(block) }
+        }
+        return out
+    }
+
     public override func ToString(): String {
         var out = "try "
         if (!resourceSpec.isEmpty()) {
@@ -385,6 +458,12 @@ public class ThrowExpr <: Expr {
     public var expr: Option<Expr> = None
     public init() { super(ASTKind.THROW_EXPR) }
 
+    public override func Children(): ArrayList<Node> {
+        let out = ArrayList<Node>()
+        if (let Some(child) <- expr) { out.add(child) }
+        return out
+    }
+
     public override func ToString(): String {
         return "throw " + exprOptionString(expr)
     }
@@ -394,6 +473,12 @@ public class PerformExpr <: Expr {
     public var performPos: Position = INVALID_POSITION
     public var expr: Option<Expr> = None
     public init() { super(ASTKind.PERFORM_EXPR) }
+
+    public override func Children(): ArrayList<Node> {
+        let out = ArrayList<Node>()
+        if (let Some(child) <- expr) { out.add(child) }
+        return out
+    }
 
     public override func ToString(): String {
         return "perform " + exprOptionString(expr)
@@ -408,6 +493,13 @@ public class ResumeExpr <: Expr {
     public var throwingExpr: Option<Expr> = None
     public var enclosing: Option<Handler> = None
     public init() { super(ASTKind.RESUME_EXPR) }
+
+    public override func Children(): ArrayList<Node> {
+        let out = ArrayList<Node>()
+        if (let Some(expr) <- withExpr) { out.add(expr) }
+        if (let Some(expr) <- throwingExpr) { out.add(expr) }
+        return out
+    }
 
     public override func ToString(): String {
         var out = "resume"
@@ -427,6 +519,12 @@ public class ReturnExpr <: Expr {
     public var refFuncBody: Option<FuncBody> = None
     public init() { super(ASTKind.RETURN_EXPR) }
 
+    public override func Children(): ArrayList<Node> {
+        let out = ArrayList<Node>()
+        if (let Some(child) <- expr) { out.add(child) }
+        return out
+    }
+
     public override func ToString(): String {
         if (let Some(value) <- expr) {
             return "return " + value.ToString()
@@ -439,6 +537,13 @@ public class JumpExpr <: Expr {
     public var refLoop: Option<Expr> = None
     public var isBreak: Bool = false
     public init() { super(ASTKind.JUMP_EXPR) }
+
+    public init(token: Token) {
+        super(ASTKind.JUMP_EXPR)
+        isBreak = token.kind == TokenKind.BREAK
+        begin = token.Begin()
+        end = token.End()
+    }
 
     public override func ToString(): String {
         return if (isBreak) { "break" } else { "continue" }
@@ -457,6 +562,15 @@ public class ForInExpr <: Expr {
     public var body: Option<Block> = None
     public var forInKind: ForInKind = ForInKind.FORIN_INVALID
     public init() { super(ASTKind.FOR_IN_EXPR) }
+
+    public override func Children(): ArrayList<Node> {
+        let out = ArrayList<Node>()
+        if (let Some(pat) <- pattern) { out.add(pat) }
+        if (let Some(expr) <- inExpression) { out.add(expr) }
+        if (let Some(guard) <- patternGuard) { out.add(guard) }
+        if (let Some(block) <- body) { out.add(block) }
+        return out
+    }
 
     public override func ToString(): String {
         var out = "for ("
@@ -484,6 +598,13 @@ public class WhileExpr <: Expr {
     public var sugarKind: SugarKind = SugarKind.NO_SUGAR
     public init() { super(ASTKind.WHILE_EXPR) }
 
+    public override func Children(): ArrayList<Node> {
+        let out = ArrayList<Node>()
+        if (let Some(cond) <- condExpr) { out.add(cond) }
+        if (let Some(block) <- body) { out.add(block) }
+        return out
+    }
+
     public override func ToString(): String {
         return "while (" + exprOptionString(condExpr) + ") " + (if (let Some(value) <- body) {
             value.ToString()
@@ -501,6 +622,13 @@ public class DoWhileExpr <: Expr {
     public var condExpr: Option<Expr> = None
     public var rightParenPos: Position = INVALID_POSITION
     public init() { super(ASTKind.DO_WHILE_EXPR) }
+
+    public override func Children(): ArrayList<Node> {
+        let out = ArrayList<Node>()
+        if (let Some(block) <- body) { out.add(block) }
+        if (let Some(cond) <- condExpr) { out.add(cond) }
+        return out
+    }
 
     public override func ToString(): String {
         let bodyText = if (let Some(value) <- body) { value.ToString() } else { "" }
@@ -520,6 +648,13 @@ public class AssignExpr <: OverloadableExpr {
     public var isCompound: Bool = false
     public init() { super(ASTKind.ASSIGN_EXPR) }
 
+    public override func Children(): ArrayList<Node> {
+        let out = ArrayList<Node>()
+        if (let Some(left) <- leftValue) { out.add(left) }
+        if (let Some(right) <- rightExpr) { out.add(right) }
+        return out
+    }
+
     public override func Clear(): Unit {
         RecoverToAssignExpr(this)
         super.Clear()
@@ -530,12 +665,24 @@ public class IncOrDecExpr <: OverloadableExpr {
     public var operatorPos: Position = INVALID_POSITION
     public var expr: Option<Expr> = None
     public init() { super(ASTKind.INC_OR_DEC_EXPR) }
+
+    public override func Children(): ArrayList<Node> {
+        let out = ArrayList<Node>()
+        if (let Some(child) <- expr) { out.add(child) }
+        return out
+    }
 }
 
 public class UnaryExpr <: OverloadableExpr {
     public var expr: Option<Expr> = None
     public var operatorPos: Position = INVALID_POSITION
     public init() { super(ASTKind.UNARY_EXPR) }
+
+    public override func Children(): ArrayList<Node> {
+        let out = ArrayList<Node>()
+        if (let Some(child) <- expr) { out.add(child) }
+        return out
+    }
 
     public override func Clear(): Unit {
         RecoverToUnaryExpr(this)
@@ -551,6 +698,13 @@ public class BinaryExpr <: OverloadableExpr {
     public var rightExpr: Option<Expr> = None
     public var operatorPos: Position = INVALID_POSITION
     public init() { super(ASTKind.BINARY_EXPR) }
+
+    public override func Children(): ArrayList<Node> {
+        let out = ArrayList<Node>()
+        if (let Some(left) <- leftExpr) { out.add(left) }
+        if (let Some(right) <- rightExpr) { out.add(right) }
+        return out
+    }
 
     public override func Clear(): Unit {
         RecoverToBinaryExpr(this)
@@ -570,6 +724,13 @@ public class IsExpr <: Expr {
     public var isPos: Position = INVALID_POSITION
     public init() { super(ASTKind.IS_EXPR) }
 
+    public override func Children(): ArrayList<Node> {
+        let out = ArrayList<Node>()
+        if (let Some(left) <- leftExpr) { out.add(left) }
+        if (let Some(ty) <- isType) { out.add(ty) }
+        return out
+    }
+
     public override func ToString(): String {
         let typeText = if (let Some(value) <- isType) { value.ToString() } else { "" }
         return exprOptionString(leftExpr) + " is " + typeText
@@ -581,6 +742,13 @@ public class AsExpr <: Expr {
     public var asType: Option<Type> = None
     public var asPos: Position = INVALID_POSITION
     public init() { super(ASTKind.AS_EXPR) }
+
+    public override func Children(): ArrayList<Node> {
+        let out = ArrayList<Node>()
+        if (let Some(left) <- leftExpr) { out.add(left) }
+        if (let Some(ty) <- asType) { out.add(ty) }
+        return out
+    }
 
     public override func ToString(): String {
         let typeText = if (let Some(value) <- asType) { value.ToString() } else { "" }
@@ -597,6 +765,14 @@ public class RangeExpr <: Expr {
     public var decl: Option<StructDecl> = None
     public var isClosed: Bool = true
     public init() { super(ASTKind.RANGE_EXPR) }
+
+    public override func Children(): ArrayList<Node> {
+        let out = ArrayList<Node>()
+        if (let Some(start) <- startExpr) { out.add(start) }
+        if (let Some(stop) <- stopExpr) { out.add(stop) }
+        if (let Some(step) <- stepExpr) { out.add(step) }
+        return out
+    }
 }
 
 public class SubscriptExpr <: OverloadableExpr {
@@ -609,6 +785,13 @@ public class SubscriptExpr <: OverloadableExpr {
 
     public init() {
         super(ASTKind.SUBSCRIPT_EXPR)
+    }
+
+    public override func Children(): ArrayList<Node> {
+        let out = ArrayList<Node>()
+        if (let Some(base) <- baseExpr) { out.add(base) }
+        for (expr in indexExprs) { out.add(expr) }
+        return out
     }
 
     public func IsVArrayAccess(): Bool {
@@ -637,6 +820,12 @@ public class InterpolationExpr <: Expr {
     public var block: Option<Block> = None
     public init() { super(ASTKind.INTERPOLATION_EXPR) }
 
+    public override func Children(): ArrayList<Node> {
+        let out = ArrayList<Node>()
+        if (let Some(value) <- block) { out.add(value) }
+        return out
+    }
+
     public override func ToString(): String {
         return rawString
     }
@@ -647,6 +836,12 @@ public class StrInterpolationExpr <: Expr {
     public let strParts: ArrayList<StringPart> = ArrayList<StringPart>()
     public let strPartExprs: ArrayList<Expr> = ArrayList<Expr>()
     public init() { super(ASTKind.STR_INTERPOLATION_EXPR) }
+
+    public override func Children(): ArrayList<Node> {
+        let out = ArrayList<Node>()
+        for (expr in strPartExprs) { out.add(expr) }
+        return out
+    }
 
     public override func ToString(): String {
         return rawString
@@ -710,6 +905,21 @@ public class LitConstExpr <: Expr {
         stringValue = str
     }
 
+    public init(kind: LitConstKind, token: Token) {
+        super(ASTKind.LIT_CONST_EXPR)
+        this.kind = kind
+        stringValue = token.Value()
+        rawString = token.Value()
+        begin = token.Begin()
+        end = token.End()
+    }
+
+    public override func Children(): ArrayList<Node> {
+        let out = ArrayList<Node>()
+        if (let Some(expr) <- siExpr) { out.add(expr) }
+        return out
+    }
+
     public func LitKindToString(): String {
         return match (kind) {
             case LitConstKind.INTEGER => "Integer"
@@ -763,6 +973,12 @@ public class FuncArg <: Node {
 
     public init() {
         super(ASTKind.FUNC_ARG)
+    }
+
+    public override func Children(): ArrayList<Node> {
+        let out = ArrayList<Node>()
+        if (let Some(child) <- expr) { out.add(child) }
+        return out
     }
 
     public override func Clear(): Unit {
@@ -842,6 +1058,13 @@ public class CallExpr <: Expr {
         super(ASTKind.CALL_EXPR)
     }
 
+    public override func Children(): ArrayList<Node> {
+        let out = ArrayList<Node>()
+        if (let Some(base) <- baseFunc) { out.add(base) }
+        for (arg in args) { out.add(arg) }
+        return out
+    }
+
     public override func Clear(): Unit {
         RecoverToCallExpr(this)
         super.Clear()
@@ -877,6 +1100,12 @@ public open class NameReferenceExpr <: Expr {
         super(kind)
     }
 
+    public open override func Children(): ArrayList<Node> {
+        let out = ArrayList<Node>()
+        for (ty in typeArguments) { out.add(ty) }
+        return out
+    }
+
     public override func GetTypeArgs(): ArrayList<Type> {
         return typeArguments
     }
@@ -906,6 +1135,13 @@ public class MemberAccess <: NameReferenceExpr {
 
     public init() {
         super(ASTKind.MEMBER_ACCESS)
+    }
+
+    public override func Children(): ArrayList<Node> {
+        let out = ArrayList<Node>()
+        if (let Some(base) <- baseExpr) { out.add(base) }
+        for (ty in typeArguments) { out.add(ty) }
+        return out
     }
 
     public override func Clear(): Unit {
@@ -938,6 +1174,12 @@ public class ParenExpr <: Expr {
     public var rightParenPos: Position = INVALID_POSITION
     public init() { super(ASTKind.PAREN_EXPR) }
 
+    public override func Children(): ArrayList<Node> {
+        let out = ArrayList<Node>()
+        if (let Some(child) <- expr) { out.add(child) }
+        return out
+    }
+
     public override func ToString(): String {
         return "(" + exprOptionString(expr) + ")"
     }
@@ -956,6 +1198,12 @@ public class LambdaExpr <: Expr {
         funcBody = body
     }
 
+    public override func Children(): ArrayList<Node> {
+        let out = ArrayList<Node>()
+        if (let Some(body) <- funcBody) { out.add(body) }
+        return out
+    }
+
     public override func ToString(): String {
         if (let Some(value) <- funcBody) {
             return "{ " + value.ToString() + " }"
@@ -971,6 +1219,13 @@ public class TrailingClosureExpr <: Expr {
     public var rightLambda: Position = INVALID_POSITION
     public init() { super(ASTKind.TRAIL_CLOSURE_EXPR) }
 
+    public override func Children(): ArrayList<Node> {
+        let out = ArrayList<Node>()
+        if (let Some(base) <- expr) { out.add(base) }
+        if (let Some(value) <- lambda) { out.add(value) }
+        return out
+    }
+
     public override func ToString(): String {
         var out = exprOptionString(expr)
         if (let Some(value) <- lambda) {
@@ -985,6 +1240,12 @@ public class OptionalExpr <: Expr {
     public var questPos: Position = INVALID_POSITION
     public init() { super(ASTKind.OPTIONAL_EXPR) }
 
+    public override func Children(): ArrayList<Node> {
+        let out = ArrayList<Node>()
+        if (let Some(base) <- baseExpr) { out.add(base) }
+        return out
+    }
+
     public override func ToString(): String {
         return exprOptionString(baseExpr) + "?"
     }
@@ -993,6 +1254,12 @@ public class OptionalExpr <: Expr {
 public class OptionalChainExpr <: Expr {
     public var expr: Option<Expr> = None
     public init() { super(ASTKind.OPTIONAL_CHAIN_EXPR) }
+
+    public override func Children(): ArrayList<Node> {
+        let out = ArrayList<Node>()
+        if (let Some(child) <- expr) { out.add(child) }
+        return out
+    }
 
     public override func ToString(): String {
         return exprOptionString(expr)
@@ -1006,6 +1273,12 @@ public class ArrayLit <: Expr {
     public var rightSquarePos: Position = INVALID_POSITION
     public var initFunc: Option<FuncDecl> = None
     public init() { super(ASTKind.ARRAY_LIT) }
+
+    public override func Children(): ArrayList<Node> {
+        let out = ArrayList<Node>()
+        for (child in children) { out.add(child) }
+        return out
+    }
 
     public override func ToString(): String {
         return "[" + exprJoinExprs(children, ", ") + "]"
@@ -1022,6 +1295,13 @@ public class ArrayExpr <: Expr {
     public var isValueArray: Bool = false
     public init() { super(ASTKind.ARRAY_EXPR) }
 
+    public override func Children(): ArrayList<Node> {
+        let out = ArrayList<Node>()
+        if (let Some(ty) <- typeNode) { out.add(ty) }
+        for (arg in args) { out.add(arg) }
+        return out
+    }
+
     public override func ToString(): String {
         let typeText = if (let Some(value) <- typeNode) { value.ToString() } else { "" }
         return typeText + "(" + exprJoinFuncArgs(args, ", ") + ")"
@@ -1032,6 +1312,13 @@ public class PointerExpr <: Expr {
     public var typeNode: Option<Type> = None
     public var arg: Option<FuncArg> = None
     public init() { super(ASTKind.POINTER_EXPR) }
+
+    public override func Children(): ArrayList<Node> {
+        let out = ArrayList<Node>()
+        if (let Some(ty) <- typeNode) { out.add(ty) }
+        if (let Some(value) <- arg) { out.add(value) }
+        return out
+    }
 
     public override func ToString(): String {
         var pointee = ""
@@ -1056,6 +1343,12 @@ public class TupleLit <: Expr {
     public let commaPosVector: ArrayList<Position> = ArrayList<Position>()
     public var rightParenPos: Position = INVALID_POSITION
     public init() { super(ASTKind.TUPLE_LIT) }
+
+    public override func Children(): ArrayList<Node> {
+        let out = ArrayList<Node>()
+        for (child in children) { out.add(child) }
+        return out
+    }
 }
 
 public class TypeConvExpr <: Expr {
@@ -1064,6 +1357,13 @@ public class TypeConvExpr <: Expr {
     public var expr: Option<Expr> = None
     public var rightParenPos: Position = INVALID_POSITION
     public init() { super(ASTKind.TYPE_CONV_EXPR) }
+
+    public override func Children(): ArrayList<Node> {
+        let out = ArrayList<Node>()
+        if (let Some(ty) <- typeNode) { out.add(ty) }
+        if (let Some(child) <- expr) { out.add(child) }
+        return out
+    }
 
     public override func ToString(): String {
         let typeText = if (let Some(value) <- typeNode) { value.ToString() } else { "" }
@@ -1079,6 +1379,13 @@ public class RefExpr <: NameReferenceExpr {
 
     public init() {
         super(ASTKind.REF_EXPR)
+    }
+
+    public init(identifier: SrcIdentifier) {
+        super(ASTKind.REF_EXPR)
+        ref.identifier = identifier
+        begin = identifier.Begin()
+        end = identifier.End()
     }
 
     public override func Clear(): Unit {
@@ -1140,6 +1447,13 @@ public class SpawnExpr <: Expr {
     public var rightParenPos: Position = INVALID_POSITION
     public init() { super(ASTKind.SPAWN_EXPR) }
 
+    public override func Children(): ArrayList<Node> {
+        let out = ArrayList<Node>()
+        if (let Some(expr) <- arg) { out.add(expr) }
+        if (let Some(expr) <- task) { out.add(expr) }
+        return out
+    }
+
     public override func ToString(): String {
         var out = "spawn"
         if (let Some(value) <- arg) {
@@ -1159,6 +1473,13 @@ public class SynchronizedExpr <: Expr {
     public var rightParenPos: Position = INVALID_POSITION
     public var body: Option<Block> = None
     public init() { super(ASTKind.SYNCHRONIZED_EXPR) }
+
+    public override func Children(): ArrayList<Node> {
+        let out = ArrayList<Node>()
+        if (let Some(expr) <- mutex) { out.add(expr) }
+        if (let Some(block) <- body) { out.add(block) }
+        return out
+    }
 
     public override func ToString(): String {
         let bodyText = if (let Some(value) <- body) { value.ToString() } else { "" }

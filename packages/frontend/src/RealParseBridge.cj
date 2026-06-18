@@ -10,6 +10,8 @@ import cangjie_compiler::parse.Parser as RealParser
 import cangjie_compiler::parse.DiagnosticEngine as ParseDiagnosticEngine
 import cangjie_compiler::parse.File as ParseFile
 import cangjie_compiler::parse.FuncDecl as ParseFuncDecl
+import cangjie_compiler::parse.FuncBody as ParseFuncBody
+import cangjie_compiler::parse.MainDecl as ParseMainDecl
 import cangjie_compiler::parse.VarDecl as ParseVarDecl
 import cangjie_compiler::parse.Expr as ParseExpr
 import cangjie_compiler::parse.BinaryExpr as ParseBinaryExpr
@@ -26,18 +28,22 @@ import cangjie_compiler::parse.ForInExpr as ParseForInExpr
 import cangjie_compiler::parse.RangeExpr as ParseRangeExpr
 import cangjie_compiler::parse.JumpExpr as ParseJumpExpr
 import cangjie_compiler::parse.VarPattern as ParseVarPattern
+import cangjie_compiler::parse.VarOrEnumPattern as ParseVarOrEnumPattern
 import cangjie_compiler::parse.WildcardPattern as ParseWildcardPattern
 import cangjie_compiler::parse.ConstPattern as ParseConstPattern
 import cangjie_compiler::parse.Pattern as ParsePattern
 import cangjie_compiler::parse.EnumPattern as ParseEnumPattern
 import cangjie_compiler::parse.MatchExpr as ParseMatchExpr
-import cangjie_compiler::parse.MatchCase as ParseMatchCase
 import cangjie_compiler::parse.Block as ParseBlock
 import cangjie_compiler::parse.LitConstKind as ParseLitConstKind
 import cangjie_compiler::parse.InterpolationExpr as ParseInterpolationExpr
 import cangjie_compiler::parse.ArrayLit as ParseArrayLit
 import cangjie_compiler::parse.SubscriptExpr as ParseSubscriptExpr
 import cangjie_compiler::parse.MemberAccess as ParseMemberAccess
+import cangjie_compiler::ast.MemberAccess as AstMemberAccess
+import cangjie_compiler::ast.RefExpr as AstRefExpr
+import cangjie_compiler::ast.Expr as AstExpr
+import cangjie_compiler::ast.Attribute
 import cangjie_compiler::parse.EnumDecl as ParseEnumDecl
 import cangjie_compiler::parse.StructDecl as ParseStructDecl
 import cangjie_compiler::parse.ClassDecl as ParseClassDecl
@@ -45,6 +51,57 @@ import cangjie_compiler::lex.StringPartKind
 import cangjie_compiler::chir.AST2CHIRStmtSpec as ChirStmtSpec
 import cangjie_compiler::chir.AST2CHIRExprSpec as ChirExprSpec
 import cangjie_compiler::chir.ExprKind as ChirExprKind
+
+private func parsedStructMembers(structDecl: ParseStructDecl): ArrayList<ParseDecl> {
+    if (let Some(body) <- structDecl.body) {
+        return body.decls
+    }
+    return ArrayList<ParseDecl>()
+}
+
+private func parsedClassMembers(classDecl: ParseClassDecl): ArrayList<ParseDecl> {
+    if (let Some(body) <- classDecl.body) {
+        return body.decls
+    }
+    return ArrayList<ParseDecl>()
+}
+
+private func parsedEnumCtorPayloadTypeNames(ctor: ParseDecl): Option<ArrayList<String>> {
+    let out = ArrayList<String>()
+    if (let Some(funcDecl) <- (ctor as ParseFuncDecl)) {
+        if (!funcDecl.TestAttr(Attribute.ENUM_CONSTRUCTOR)) {
+            return None
+        }
+        if (let Some(body) <- funcDecl.funcBody) {
+            if (!body.paramLists.isEmpty()) {
+                for (param in body.paramLists[0].params) {
+                    if (let Some(ty) <- param.typeNode) {
+                        out.add(ty.ToString().trimAscii())
+                    } else {
+                        return None
+                    }
+                }
+            }
+        }
+        return Some(out)
+    }
+    if (let Some(varDecl) <- (ctor as ParseVarDecl)) {
+        if (varDecl.TestAttr(Attribute.ENUM_CONSTRUCTOR)) {
+            return Some(out)
+        }
+    }
+    return None
+}
+
+private func parsedFunctionBody(decl: ParseDecl): Option<ParseFuncBody> {
+    if (let Some(funcDecl) <- (decl as ParseFuncDecl)) {
+        return funcDecl.funcBody
+    }
+    if (let Some(mainDecl) <- (decl as ParseMainDecl)) {
+        return mainDecl.funcBody
+    }
+    return None
+}
 
 // Real-expression body-lowering adapter. Runs the real recursive-descent parser over the same
 // source the frontend already summarized, and for any function whose body matches the supported
@@ -97,6 +154,12 @@ public func AdaptRealBodies(file: File, fileID: UInt64, sourceCode: String, sm: 
                 }
             }
         }
+        if (let Some(mainDecl) <- (decl as ParseMainDecl)) {
+            let n = mainDecl.identifier.Val()
+            if (!n.isEmpty()) {
+                funcNames.add(n)
+            }
+        }
     }
     // Register the desugared top-level method functions of every supported struct so a `p.m()` call
     // site can recognize the method and a struct return type can be detected on the method itself.
@@ -106,7 +169,7 @@ public func AdaptRealBodies(file: File, fileID: UInt64, sourceCode: String, sm: 
             if (!scopeHasStruct(structs, structType)) {
                 continue
             }
-            for (member in structDecl.bodyDecls) {
+            for (member in parsedStructMembers(structDecl)) {
                 if (let Some(funcDecl) <- (member as ParseFuncDecl)) {
                     let mname = funcDecl.identifier.Val()
                     if (mname.isEmpty() || mname == "init") {
@@ -197,7 +260,7 @@ private func findClassMethodDecl(className: String, mname: String,
     var cur: Option<String> = Some(className)
     while (let Some(c) <- cur) {
         if (let Some(classDecl) <- classDeclsByName.get(c)) {
-            for (member in classDecl.bodyDecls) {
+            for (member in parsedClassMembers(classDecl)) {
                 if (let Some(funcDecl) <- (member as ParseFuncDecl)) {
                     if (funcDecl.identifier.Val() == mname) {
                         return Some(funcDecl)
@@ -393,8 +456,9 @@ private func collectEnumRegistry(parsedFile: ParseFile): EnumRegistry {
     return registry
 }
 
-// Classify an enum constructor's payload from its parsed payload-type list (recorded by the parser on
-// the constructor VarDecl). Returns (kind, fieldCount):
+// Classify an enum constructor's payload from its AST constructor form. Payload-less constructors are
+// VarDecls; payload constructors are FuncDecls with synthetic typed parameters. Returns (kind,
+// fieldCount):
 //   (NONE,   0) for a payload-less constructor (`| Red`);
 //   (INT,    1) for a single `Int64`/`Int` payload;
 //   (STRING, 1) for a single `String` payload;
@@ -410,16 +474,15 @@ private func collectEnumRegistry(parsedFile: ParseFile): EnumRegistry {
 // Returns None (reject the enum) for any unsupported shape: a field that is neither Int64 nor a known
 // enum type, or a single payload of an unsupported scalar type.
 private func classifyEnumCtorPayload(ctor: ParseDecl, enumTypeNames: HashSet<String>): Option<(Int64, Int64)> {
-    let varDecl = match (ctor as ParseVarDecl) {
-        case Some(v) => v
+    let types = match (parsedEnumCtorPayloadTypeNames(ctor)) {
+        case Some(value) => value
         case None => return None
     }
-    let types = varDecl.constructorTypes
     if (types.isEmpty()) {
         return Some((ENUM_PAYLOAD_NONE, 0))
     }
     if (types.size == 1) {
-        let typeName = types[0].ToString().trimAscii()
+        let typeName = types[0]
         if (typeName == "Int64" || typeName == "Int") {
             return Some((ENUM_PAYLOAD_INT, 1))
         }
@@ -436,8 +499,7 @@ private func classifyEnumCtorPayload(ctor: ParseDecl, enumTypeNames: HashSet<Str
     // Two or more fields: each field must be `Int64`/`Int` or a known enum type (an enum-typed field is
     // stored as the child's encoded Int64 in its own slot). Each field is stored in its own slot of the
     // heap buffer (no bit-packing), so any field width / value -- and any nested enum -- round-trips.
-    for (t in types) {
-        let typeName = t.ToString().trimAscii()
+    for (typeName in types) {
         if (typeName != "Int64" && typeName != "Int" && !enumTypeNames.contains(typeName)) {
             return None
         }
@@ -479,6 +541,16 @@ private class StructInfo {
 
     func indexOf(field: String): Option<Int64> {
         return fieldIndex.get(field)
+    }
+}
+
+private class StructReceiverValue {
+    let structType: String
+    let value: ChirExprSpec
+
+    init(structType: String, value: ChirExprSpec) {
+        this.structType = structType
+        this.value = value
     }
 }
 
@@ -585,7 +657,7 @@ private func collectClassRegistry(parsedFile: ParseFile, registry: StructRegistr
                         registry.classParent[name] = p
                     }
                     let own = HashSet<String>()
-                    for (member in classDecl.bodyDecls) {
+                    for (member in parsedClassMembers(classDecl)) {
                         if (let Some(funcDecl) <- (member as ParseFuncDecl)) {
                             let mname = funcDecl.identifier.Val()
                             if (!mname.isEmpty() && mname != "init") {
@@ -636,7 +708,7 @@ private func analyzeClass(classDecl: ParseClassDecl, parent: Option<String>,
         case None => ()
     }
     var initDecl: Option<ParseFuncDecl> = None
-    for (member in classDecl.bodyDecls) {
+    for (member in parsedClassMembers(classDecl)) {
         if (let Some(varDecl) <- (member as ParseVarDecl)) {
             let fieldName = varDecl.identifier.Val()
             if (fieldName.isEmpty()) {
@@ -727,10 +799,10 @@ private func collectClassInitInfo(initDecl: ParseFuncDecl, info: StructInfo, has
             case Some(a) => a
             case None => return false
         }
-        if (assign.op.kind != TokenKind.ASSIGN) {
+        if (assign.op != TokenKind.ASSIGN) {
             return false
         }
-        let fieldName = match (thisFieldName(assign.leftExpr)) {
+        let fieldName = match (thisFieldName(assign.leftValue)) {
             case Some(f) => f
             case None => return false
         }
@@ -785,7 +857,7 @@ private func isSuperCall(node: ParseNode): Bool {
         case Some(r) => r
         case None => return false
     }
-    return baseRef.identifier.Val() == "super"
+    return baseRef.ref.identifier.Val() == "super"
 }
 
 // Analyze a struct decl into a StructInfo, or None if it is outside the supported shape. Collects the
@@ -795,7 +867,7 @@ private func isSuperCall(node: ParseNode): Bool {
 private func analyzeStruct(structDecl: ParseStructDecl): Option<StructInfo> {
     let info = StructInfo()
     var initDecl: Option<ParseFuncDecl> = None
-    for (member in structDecl.bodyDecls) {
+    for (member in parsedStructMembers(structDecl)) {
         if (let Some(varDecl) <- (member as ParseVarDecl)) {
             // A stored field. Only Int64/Int fields are supported.
             let fieldName = varDecl.identifier.Val()
@@ -875,11 +947,11 @@ private func collectInitInfo(initDecl: ParseFuncDecl, info: StructInfo): Bool {
             case Some(a) => a
             case None => return false
         }
-        if (assign.op.kind != TokenKind.ASSIGN) {
+        if (assign.op != TokenKind.ASSIGN) {
             return false
         }
         // The left side must be `this.field`.
-        let fieldName = match (thisFieldName(assign.leftExpr)) {
+        let fieldName = match (thisFieldName(assign.leftValue)) {
             case Some(f) => f
             case None => return false
         }
@@ -910,7 +982,7 @@ private func thisFieldName(maybeExpr: Option<ParseExpr>): Option<String> {
         case Some(r) => r
         case None => return None
     }
-    if (baseRef.identifier.Val() != "this") {
+    if (baseRef.ref.identifier.Val() != "this") {
         return None
     }
     return Some(member.field.GetRawText())
@@ -950,7 +1022,7 @@ private func adaptStructMethods(structDecl: ParseStructDecl, file: File, funcNam
     if (!structs.isStruct(structType)) {
         return
     }
-    for (member in structDecl.bodyDecls) {
+    for (member in parsedStructMembers(structDecl)) {
         let funcDecl = match (member as ParseFuncDecl) {
             case Some(f) => f
             case None => continue
@@ -1073,19 +1145,19 @@ private func tryAdaptFunction(funcDecl: FuncDecl, parsedFile: ParseFile, funcNam
 // Match the parsed function to the frontend decl. The frontend's ad-hoc parser does not always
 // recover a usable identifier (e.g. `main` surfaces as "("), so we match primarily by the
 // declaration's begin line, then disambiguate by name when several functions share a line.
-private func findParsedFunc(parsedFile: ParseFile, name: String, line: Int64): Option<ParseFuncDecl> {
-    var nameMatch: Option<ParseFuncDecl> = None
-    var lineMatch: Option<ParseFuncDecl> = None
+private func findParsedFunc(parsedFile: ParseFile, name: String, line: Int64): Option<ParseDecl> {
+    var nameMatch: Option<ParseDecl> = None
+    var lineMatch: Option<ParseDecl> = None
     var lineMatchCount = 0
     for (decl in parsedFile.decls) {
-        if (let Some(funcDecl) <- (decl as ParseFuncDecl)) {
-            if (funcDecl.begin.line == line) {
+        if (parsedFunctionBody(decl).isSome()) {
+            if (decl.begin.line == line) {
                 lineMatchCount++
                 if (lineMatch.isNone()) {
-                    lineMatch = Some(funcDecl)
+                    lineMatch = Some(decl)
                 }
-                if (funcDecl.identifier.Val() == name) {
-                    nameMatch = Some(funcDecl)
+                if (decl.identifier.Val() == name) {
+                    nameMatch = Some(decl)
                 }
             }
         }
@@ -1178,10 +1250,10 @@ private class AdaptScope {
     }
 }
 
-private func adaptParsedFunc(funcDecl: FuncDecl, parsedFunc: ParseFuncDecl, funcNames: HashSet<String>,
+private func adaptParsedFunc(funcDecl: FuncDecl, parsedFunc: ParseDecl, funcNames: HashSet<String>,
     strReturningFuncs: HashSet<String>, enums: EnumRegistry, structs: StructRegistry,
     structReturningFuncs: HashMap<String, String>, floatReturningFuncs: HashSet<String>): Unit {
-    let body = match (parsedFunc.funcBody) {
+    let body = match (parsedFunctionBody(parsedFunc)) {
         case Some(fb) => fb
         case None => return
     }
@@ -1453,10 +1525,10 @@ private func adaptVarDecl(varDecl: ParseVarDecl, scope: AdaptScope): Option<Chir
 
 private func adaptAssign(assignExpr: ParseAssignExpr, scope: AdaptScope): Option<ChirStmtSpec> {
     // Only plain `name = expr` over a known local is supported (no compound assignment).
-    if (assignExpr.op.kind != TokenKind.ASSIGN) {
+    if (assignExpr.op != TokenKind.ASSIGN) {
         return None
     }
-    let target = match (assignExpr.leftExpr) {
+    let target = match (assignExpr.leftValue) {
         case Some(e) => e
         case None => return None
     }
@@ -1491,6 +1563,9 @@ private func adaptAssign(assignExpr: ParseAssignExpr, scope: AdaptScope): Option
         }
         scope.needsRuntime = true
         return Some(ChirStmtSpec.ArrayAssign(arrayName, indexSpec, valueSpec))
+    }
+    if (let Some(stmt) <- adaptImplicitThisFieldAssign(target, assignExpr, scope)) {
+        return Some(stmt)
     }
     let name = match (localRefName(target, scope)) {
         case Some(n) => n
@@ -1639,6 +1714,49 @@ private func matchUsesTagMask(matchExpr: ParseMatchExpr): Bool {
     return false
 }
 
+private func parseVarPatternName(varPat: ParseVarPattern): String {
+    if (let Some(decl) <- varPat.varDecl) {
+        return decl.identifier.Val()
+    }
+    return ""
+}
+
+private func parseBarePatternName(pattern: ParsePattern): String {
+    if (let Some(varPat) <- (pattern as ParseVarPattern)) {
+        return parseVarPatternName(varPat)
+    }
+    if (let Some(varOrEnum) <- (pattern as ParseVarOrEnumPattern)) {
+        return varOrEnum.identifier.Val()
+    }
+    return ""
+}
+
+private func enumConstructorNameFromExpr(expr: AstExpr): String {
+    if (let Some(refExpr) <- (expr as AstRefExpr)) {
+        return refExpr.ref.identifier.Val()
+    }
+    if (let Some(member) <- (expr as AstMemberAccess)) {
+        return member.field.Val()
+    }
+    return ""
+}
+
+private func parseEnumPatternConstructorName(enumPat: ParseEnumPattern): String {
+    if (let Some(constructor) <- enumPat.constructor) {
+        return enumConstructorNameFromExpr(constructor)
+    }
+    return ""
+}
+
+private func parseEnumPatternIsQualified(enumPat: ParseEnumPattern): Bool {
+    if (let Some(constructor) <- enumPat.constructor) {
+        if (let Some(member) <- (constructor as AstMemberAccess)) {
+            return member.baseExpr.isSome()
+        }
+    }
+    return false
+}
+
 // Whether the match is over a HEAP-represented enum (its selector value is a {tag, f0, ...} buffer
 // address). Detected from the patterns: a destructuring constructor pattern naming a heap variant, or
 // a bare variant VarPattern naming a heap variant. A heap match tests the tag via the buffer's slot-0
@@ -1649,12 +1767,12 @@ private func matchUsesHeap(matchExpr: ParseMatchExpr, scope: AdaptScope): Bool {
     for (matchCase in matchExpr.matchCases) {
         for (pattern in matchCase.patterns) {
             if (let Some(enumPat) <- (pattern as ParseEnumPattern)) {
-                if (scope.enums.isHeap(enumPat.constructor.Val())) {
+                if (scope.enums.isHeap(parseEnumPatternConstructorName(enumPat))) {
                     return true
                 }
             }
-            if (let Some(varPat) <- (pattern as ParseVarPattern)) {
-                let n = varPat.identifier.Val()
+            let n = parseBarePatternName(pattern)
+            if (!n.isEmpty()) {
                 if (scope.isEnumVariant(n) && scope.enums.isHeap(n)) {
                     return true
                 }
@@ -1676,10 +1794,10 @@ private func enumPatternMatch(pattern: ParsePattern, scope: AdaptScope): Option<
     }
     // A qualified constructor (`Color.Red(...)`) records more than one constructor part; only a
     // simple unqualified constructor is supported. Type arguments (`Some<Int64>(...)`) are rejected.
-    if (!enumPat.typeArguments.isEmpty() || enumPat.constructorParts.size > 1) {
+    if (!enumPat.typeArguments.isEmpty() || parseEnumPatternIsQualified(enumPat)) {
         return None
     }
-    let ctorName = enumPat.constructor.Val()
+    let ctorName = parseEnumPatternConstructorName(enumPat)
     if (!scope.isEnumVariant(ctorName)) {
         return None
     }
@@ -1699,11 +1817,8 @@ private func enumPatternMatch(pattern: ParsePattern, scope: AdaptScope): Option<
         return None
     }
     let sub = enumPat.patterns[0]
-    if (let Some(varPat) <- (sub as ParseVarPattern)) {
-        let n = varPat.identifier.Val()
-        if (n.isEmpty()) {
-            return None
-        }
+    let n = parseBarePatternName(sub)
+    if (!n.isEmpty()) {
         return Some((tag, Some(n)))
     }
     if (let Some(_) <- (sub as ParseWildcardPattern)) {
@@ -1725,10 +1840,10 @@ private func heapEnumPatternMatch(pattern: ParsePattern,
         case Some(p) => p
         case None => return None
     }
-    if (!enumPat.typeArguments.isEmpty() || enumPat.constructorParts.size > 1) {
+    if (!enumPat.typeArguments.isEmpty() || parseEnumPatternIsQualified(enumPat)) {
         return None
     }
-    let ctorName = enumPat.constructor.Val()
+    let ctorName = parseEnumPatternConstructorName(enumPat)
     if (!scope.isEnumVariant(ctorName) || !scope.enums.isHeap(ctorName)) {
         return None
     }
@@ -1745,11 +1860,8 @@ private func heapEnumPatternMatch(pattern: ParsePattern,
     }
     let bindings = ArrayList<Option<String>>()
     for (sub in enumPat.patterns) {
-        if (let Some(varPat) <- (sub as ParseVarPattern)) {
-            let n = varPat.identifier.Val()
-            if (n.isEmpty()) {
-                return None
-            }
+        let n = parseBarePatternName(sub)
+        if (!n.isEmpty()) {
             bindings.add(Some(n))
         } else if (let Some(_) <- (sub as ParseWildcardPattern)) {
             bindings.add(None)
@@ -1791,8 +1903,9 @@ private func matchIsExhaustiveEnum(matchExpr: ParseMatchExpr, arms: ArrayList<Ma
             if (let Some(_) <- (pattern as ParseEnumPattern)) {
                 return true
             }
-            if (let Some(varPat) <- (pattern as ParseVarPattern)) {
-                if (scope.isEnumVariant(varPat.identifier.Val())) {
+            let n = parseBarePatternName(pattern)
+            if (!n.isEmpty()) {
+                if (scope.isEnumVariant(n)) {
                     return true
                 }
             }
@@ -1836,7 +1949,10 @@ private func normalizeMatchArms(matchExpr: ParseMatchExpr, scope: AdaptScope): O
         for (pattern in matchCase.patterns) {
             if (let Some(constPat) <- (pattern as ParseConstPattern)) {
                 let lit = match (constPat.literal) {
-                    case Some(e) => e
+                    case Some(e) => match (e as ParseExpr) {
+                        case Some(parsedExpr) => parsedExpr
+                        case None => return None
+                    }
                     case None => return None
                 }
                 match (intLiteralValue(lit)) {
@@ -1863,23 +1979,20 @@ private func normalizeMatchArms(matchExpr: ParseMatchExpr, scope: AdaptScope): O
                     return None // a destructuring pattern cannot be OR-combined (`case A(n) | B =>`)
                 }
                 payloadBindingName = payloadName
-            } else if (let Some(varPat) <- (pattern as ParseVarPattern)) {
-                let n = varPat.identifier.Val()
+            } else {
+                let n = parseBarePatternName(pattern)
                 if (n.isEmpty()) {
                     return None
                 }
                 // A bare payload-less enum-variant pattern (`case Green =>`) parses as a VarPattern
                 // (the parser cannot tell a constructor from a binding). Match it as a literal-tag
                 // pattern over the variant's tag rather than a catch-all binding.
-                if (let Some(tag) <- enumVariantPatternTag(varPat, scope)) {
+                if (let Some(tag) <- enumVariantPatternTag(pattern, scope)) {
                     literals.add(tag)
                 } else {
                     isCatchAll = true
                     bindingName = Some(n)
                 }
-            } else {
-                // Tuple/type/etc. patterns are out of grammar.
-                return None
             }
         }
         // A catch-all combined with literals (`case 1 | _ =>`) or with a binding is not supported.
@@ -2110,7 +2223,10 @@ private func adaptMatchValue(matchExpr: ParseMatchExpr, scope: AdaptScope): Opti
         for (pattern in matchCase.patterns) {
             if (let Some(constPat) <- (pattern as ParseConstPattern)) {
                 let lit = match (constPat.literal) {
-                    case Some(e) => e
+                    case Some(e) => match (e as ParseExpr) {
+                        case Some(parsedExpr) => parsedExpr
+                        case None => return None
+                    }
                     case None => return None
                 }
                 match (intLiteralValue(lit)) {
@@ -2137,21 +2253,19 @@ private func adaptMatchValue(matchExpr: ParseMatchExpr, scope: AdaptScope): Opti
                     return None
                 }
                 payloadBindingName = payloadName
-            } else if (let Some(varPat) <- (pattern as ParseVarPattern)) {
-                let n = varPat.identifier.Val()
+            } else {
+                let n = parseBarePatternName(pattern)
                 if (n.isEmpty()) {
                     return None
                 }
                 // A bare payload-less enum-variant pattern matches the variant's tag (see the
                 // statement-form normalizer); otherwise it is a catch-all binding.
-                if (let Some(tag) <- enumVariantPatternTag(varPat, scope)) {
+                if (let Some(tag) <- enumVariantPatternTag(pattern, scope)) {
                     literals.add(tag)
                 } else {
                     isCatchAll = true
                     bindingName = Some(n)
                 }
-            } else {
-                return None
             }
         }
         if (isCatchAll && (!literals.isEmpty() || matchCase.patterns.size != 1)) {
@@ -2220,15 +2334,11 @@ private func adaptForIn(forInExpr: ParseForInExpr, scope: AdaptScope): Option<Ch
         case Some(p) => p
         case None => return None
     }
-    let varPattern = match (pattern as ParseVarPattern) {
-        case Some(vp) => vp
-        case None => return None
-    }
-    let varName = varPattern.identifier.Val()
+    let varName = parseBarePatternName(pattern)
     if (varName.isEmpty()) {
         return None
     }
-    let inExpr = match (forInExpr.inExpr) {
+    let inExpr = match (forInExpr.inExpression) {
         case Some(e) => e
         case None => return None
     }
@@ -2255,16 +2365,12 @@ private func adaptForIn(forInExpr: ParseForInExpr, scope: AdaptScope): Option<Ch
         case Some(r) => r
         case None => return None
     }
-    let inclusive = match (rangeExpr.op.kind) {
-        case TokenKind.RANGEOP => false
-        case TokenKind.CLOSEDRANGEOP => true
-        case _ => return None
-    }
-    let startExpr = match (rangeExpr.leftExpr) {
+    let inclusive = rangeExpr.isClosed
+    let startExpr = match (rangeExpr.startExpr) {
         case Some(e) => e
         case None => return None
     }
-    let endExpr = match (rangeExpr.rightExpr) {
+    let endExpr = match (rangeExpr.stopExpr) {
         case Some(e) => e
         case None => return None
     }
@@ -2301,14 +2407,11 @@ private func adaptJump(jumpExpr: ParseJumpExpr, scope: AdaptScope): Option<ChirS
     if (scope.loopDepth <= 0) {
         return None
     }
-    return match (jumpExpr.token.kind) {
-        case TokenKind.BREAK =>
-            scope.needsRuntime = true
-            Some(ChirStmtSpec.Break())
-        case TokenKind.CONTINUE =>
-            scope.needsRuntime = true
-            Some(ChirStmtSpec.Continue())
-        case _ => None
+    scope.needsRuntime = true
+    return if (jumpExpr.isBreak) {
+        Some(ChirStmtSpec.Break())
+    } else {
+        Some(ChirStmtSpec.Continue())
     }
 }
 
@@ -2368,6 +2471,9 @@ private func adaptExpr(expr: ParseExpr, scope: AdaptScope): Option<ChirExprSpec>
     if (let Some(refName) <- localRefName(expr, scope)) {
         return Some(ChirExprSpec.Ref(refName))
     }
+    if (let Some(spec) <- adaptImplicitThisFieldRead(expr, scope)) {
+        return Some(spec)
+    }
     // a[i]: a subscript over an Int64 array local with a single Int64 index expression.
     if (let Some(subscript) <- (expr as ParseSubscriptExpr)) {
         return adaptSubscript(subscript, scope)
@@ -2382,7 +2488,7 @@ private func adaptExpr(expr: ParseExpr, scope: AdaptScope): Option<ChirExprSpec>
         return adaptArraySize(member, scope)
     }
     if (let Some(unary) <- (expr as ParseUnaryExpr)) {
-        let op = match (toChirUnaryOp(unary.op.kind)) {
+        let op = match (toChirUnaryOp(unary.op)) {
             case Some(o) => o
             case None => return None
         }
@@ -2412,7 +2518,7 @@ private func adaptExpr(expr: ParseExpr, scope: AdaptScope): Option<ChirExprSpec>
         return None
     }
     if (let Some(binary) <- (expr as ParseBinaryExpr)) {
-        let op = match (toChirBinaryOp(binary.op.kind)) {
+        let op = match (toChirBinaryOp(binary.op)) {
             case Some(o) => o
             case None => return None
         }
@@ -2554,7 +2660,7 @@ private func adaptPrint(call: ParseCallExpr, scope: AdaptScope): Option<ChirStmt
     if (!calleeRef.typeArguments.isEmpty()) {
         return None
     }
-    let calleeName = calleeRef.identifier.Val()
+    let calleeName = calleeRef.ref.identifier.Val()
     if (calleeName != "println" && calleeName != "print") {
         return None
     }
@@ -2623,7 +2729,7 @@ private func adaptCall(call: ParseCallExpr, scope: AdaptScope): Option<ChirExprS
     if (!calleeRef.typeArguments.isEmpty()) {
         return None
     }
-    let calleeName = calleeRef.identifier.Val()
+    let calleeName = calleeRef.ref.identifier.Val()
     // Must name a known top-level function, and must not be shadowed by a local.
     if (calleeName.isEmpty() || scope.locals.contains(calleeName) || !scope.funcNames.contains(calleeName)) {
         return None
@@ -2666,7 +2772,7 @@ private func adaptArrayCtor(initExpr: ParseExpr, scope: AdaptScope, name: String
         case Some(r) => r
         case None => return None
     }
-    if (calleeRef.identifier.Val() != "Array" || scope.locals.contains("Array")) {
+    if (calleeRef.ref.identifier.Val() != "Array" || scope.locals.contains("Array")) {
         return None
     }
     // Require exactly one type argument and that it be the Int64 element type.
@@ -2778,7 +2884,7 @@ private func adaptArraySize(member: ParseMemberAccess, scope: AdaptScope): Optio
 // If `expr` is a bare RefExpr naming a known array local, return that name; otherwise None.
 private func arrayRefName(expr: ParseExpr, scope: AdaptScope): Option<String> {
     if (let Some(refExpr) <- (expr as ParseRefExpr)) {
-        let name = refExpr.identifier.Val()
+        let name = refExpr.ref.identifier.Val()
         if (scope.arrayNames.contains(name)) {
             return Some(name)
         }
@@ -2826,7 +2932,7 @@ private func exprIsBool(expr: ParseExpr, scope: AdaptScope): Bool {
         return true
     }
     if (let Some(refExpr) <- (expr as ParseRefExpr)) {
-        return scope.boolNames.contains(refExpr.identifier.Val())
+        return scope.boolNames.contains(refExpr.ref.identifier.Val())
     }
     if (let Some(paren) <- (expr as ParseParenExpr)) {
         if (let Some(inner) <- paren.expr) {
@@ -2835,14 +2941,14 @@ private func exprIsBool(expr: ParseExpr, scope: AdaptScope): Bool {
         return false
     }
     if (let Some(unary) <- (expr as ParseUnaryExpr)) {
-        return unary.op.kind == TokenKind.NOT
+        return unary.op == TokenKind.NOT
     }
     // AssignExpr is also a BinaryExpr; never treat it as a bool-producing value here.
     if (let Some(_) <- (expr as ParseAssignExpr)) {
         return false
     }
     if (let Some(binary) <- (expr as ParseBinaryExpr)) {
-        return match (binary.op.kind) {
+        return match (binary.op) {
             case TokenKind.LT => true
             case TokenKind.GT => true
             case TokenKind.LE => true
@@ -2872,7 +2978,7 @@ private func exprIsString(expr: ParseExpr, scope: AdaptScope): Bool {
         }
     }
     if (let Some(refExpr) <- (expr as ParseRefExpr)) {
-        return scope.strNames.contains(refExpr.identifier.Val())
+        return scope.strNames.contains(refExpr.ref.identifier.Val())
     }
     if (let Some(paren) <- (expr as ParseParenExpr)) {
         if (let Some(inner) <- paren.expr) {
@@ -2884,7 +2990,7 @@ private func exprIsString(expr: ParseExpr, scope: AdaptScope): Bool {
     if (let Some(call) <- (expr as ParseCallExpr)) {
         if (let Some(base) <- call.baseFunc) {
             if (let Some(calleeRef) <- (base as ParseRefExpr)) {
-                let cn = calleeRef.identifier.Val()
+                let cn = calleeRef.ref.identifier.Val()
                 if (!scope.locals.contains(cn) && scope.strReturningFuncs.contains(cn)) {
                     return true
                 }
@@ -2898,7 +3004,7 @@ private func exprIsString(expr: ParseExpr, scope: AdaptScope): Bool {
     }
     // `a + b` is a String concat when either operand is a String.
     if (let Some(binary) <- (expr as ParseBinaryExpr)) {
-        if (binary.op.kind != TokenKind.ADD) {
+        if (binary.op != TokenKind.ADD) {
             return false
         }
         let leftIsStr = match (binary.leftExpr) {
@@ -2924,7 +3030,7 @@ private func exprIsFloat(expr: ParseExpr, scope: AdaptScope): Bool {
         return true
     }
     if (let Some(refExpr) <- (expr as ParseRefExpr)) {
-        return scope.floatNames.contains(refExpr.identifier.Val())
+        return scope.floatNames.contains(refExpr.ref.identifier.Val())
     }
     if (let Some(paren) <- (expr as ParseParenExpr)) {
         if (let Some(inner) <- paren.expr) {
@@ -2936,7 +3042,7 @@ private func exprIsFloat(expr: ParseExpr, scope: AdaptScope): Bool {
     if (let Some(call) <- (expr as ParseCallExpr)) {
         if (let Some(base) <- call.baseFunc) {
             if (let Some(calleeRef) <- (base as ParseRefExpr)) {
-                let cn = calleeRef.identifier.Val()
+                let cn = calleeRef.ref.identifier.Val()
                 if (!scope.locals.contains(cn) && scope.floatReturningFuncs.contains(cn)) {
                     return true
                 }
@@ -2950,7 +3056,7 @@ private func exprIsFloat(expr: ParseExpr, scope: AdaptScope): Bool {
     }
     // An arithmetic `a + b` / `-` / `*` / `/` is Float64 when either operand is a Float64.
     if (let Some(binary) <- (expr as ParseBinaryExpr)) {
-        let arithmetic = match (binary.op.kind) {
+        let arithmetic = match (binary.op) {
             case TokenKind.ADD => true
             case TokenKind.SUB => true
             case TokenKind.MUL => true
@@ -2988,10 +3094,10 @@ private func boolLiteralValue(expr: ParseExpr): Option<Bool> {
     return None
 }
 
-// If `varPat`'s identifier names a payload-less enum variant in scope, return its Int64 tag; else
-// None (then the VarPattern is a normal catch-all binding).
-private func enumVariantPatternTag(varPat: ParseVarPattern, scope: AdaptScope): Option<Int64> {
-    let name = varPat.identifier.Val()
+// If a bare pattern's identifier names a payload-less enum variant in scope, return its Int64 tag;
+// else None (then the bare pattern is a normal catch-all binding).
+private func enumVariantPatternTag(pattern: ParsePattern, scope: AdaptScope): Option<Int64> {
+    let name = parseBarePatternName(pattern)
     if (scope.isEnumVariant(name)) {
         return scope.enums.tagOf(name)
     }
@@ -3009,7 +3115,7 @@ private func enumVariantTag(expr: ParseExpr, scope: AdaptScope): Option<Int64> {
         if (!refExpr.typeArguments.isEmpty()) {
             return None
         }
-        let name = refExpr.identifier.Val()
+        let name = refExpr.ref.identifier.Val()
         if (scope.isEnumVariant(name) && !scope.enums.hasPayload(name)) {
             return scope.enums.tagOf(name)
         }
@@ -3025,7 +3131,7 @@ private func adaptHeapBareVariant(expr: ParseExpr, scope: AdaptScope): Option<Ch
         if (!refExpr.typeArguments.isEmpty()) {
             return None
         }
-        let name = refExpr.identifier.Val()
+        let name = refExpr.ref.identifier.Val()
         if (scope.isEnumVariant(name) && scope.enums.isHeap(name) && !scope.enums.hasPayload(name)) {
             if (let Some(tag) <- scope.enums.tagOf(name)) {
                 scope.needsRuntime = true
@@ -3058,7 +3164,7 @@ private func adaptEnumConstruction(expr: ParseExpr, scope: AdaptScope): Option<C
     if (!calleeRef.typeArguments.isEmpty()) {
         return None
     }
-    let name = calleeRef.identifier.Val()
+    let name = calleeRef.ref.identifier.Val()
     if (!scope.isEnumVariant(name)) {
         return None
     }
@@ -3174,7 +3280,7 @@ private func adaptStructConstruction(expr: ParseExpr, scope: AdaptScope): Option
     if (!calleeRef.typeArguments.isEmpty()) {
         return None
     }
-    let name = calleeRef.identifier.Val()
+    let name = calleeRef.ref.identifier.Val()
     if (scope.locals.contains(name) || !scope.structs.isStruct(name)) {
         return None
     }
@@ -3239,7 +3345,7 @@ private func structTypeOfExpr(expr: ParseExpr, scope: AdaptScope): Option<String
     // mutation through `b` is visible through `a`. This is done only for classes -- struct locals keep
     // value semantics (a bare struct ref is not propagated as a struct local).
     if (let Some(refExpr) <- (expr as ParseRefExpr)) {
-        let rn = refExpr.identifier.Val()
+        let rn = refExpr.ref.identifier.Val()
         if (let Some(t) <- scope.structTypeOf(rn)) {
             if (scope.structs.isClass(t)) {
                 return Some(t)
@@ -3259,7 +3365,7 @@ private func structTypeOfExpr(expr: ParseExpr, scope: AdaptScope): Option<String
         case Some(r) => r
         case None => return None
     }
-    let name = calleeRef.identifier.Val()
+    let name = calleeRef.ref.identifier.Val()
     if (scope.locals.contains(name)) {
         return None
     }
@@ -3279,7 +3385,7 @@ private func adaptInitRhs(expr: ParseExpr, argMap: HashMap<String, ChirExprSpec>
         return Some(ChirExprSpec.Literal(litValue))
     }
     if (let Some(refExpr) <- (expr as ParseRefExpr)) {
-        let n = refExpr.identifier.Val()
+        let n = refExpr.ref.identifier.Val()
         match (argMap.get(n)) {
             case Some(spec) => return Some(spec)
             case None => return None
@@ -3293,7 +3399,7 @@ private func adaptInitRhs(expr: ParseExpr, argMap: HashMap<String, ChirExprSpec>
         return adaptInitRhs(inner, argMap, scope)
     }
     if (let Some(unary) <- (expr as ParseUnaryExpr)) {
-        let op = match (toChirUnaryOp(unary.op.kind)) {
+        let op = match (toChirUnaryOp(unary.op)) {
             case Some(o) => o
             case None => return None
         }
@@ -3311,7 +3417,7 @@ private func adaptInitRhs(expr: ParseExpr, argMap: HashMap<String, ChirExprSpec>
         return None
     }
     if (let Some(binary) <- (expr as ParseBinaryExpr)) {
-        let op = match (toChirBinaryOp(binary.op.kind)) {
+        let op = match (toChirBinaryOp(binary.op)) {
             case Some(o) => o
             case None => return None
         }
@@ -3352,7 +3458,7 @@ private func adaptStructFieldAssign(member: ParseMemberAccess, assignExpr: Parse
         case Some(r) => r
         case None => return None
     }
-    let localName = baseRef.identifier.Val()
+    let localName = baseRef.ref.identifier.Val()
     let structType = match (scope.structTypeOf(localName)) {
         case Some(t) => t
         case None => return None
@@ -3401,7 +3507,7 @@ private func adaptStructFieldRead(expr: ParseExpr, scope: AdaptScope): Option<Ch
         case Some(r) => r
         case None => return None
     }
-    let localName = baseRef.identifier.Val()
+    let localName = baseRef.ref.identifier.Val()
     let structType = match (scope.structTypeOf(localName)) {
         case Some(t) => t
         case None => return None
@@ -3418,6 +3524,67 @@ private func adaptStructFieldRead(expr: ParseExpr, scope: AdaptScope): Option<Ch
     scope.needsRuntime = true
     // Field i lives at buffer slot i+1 (slot 0 is the reserved dummy tag slot).
     return Some(ChirExprSpec.EnumField(ChirExprSpec.Ref(localName), idx + 1))
+}
+
+private func implicitThisFieldIndex(fieldName: String, scope: AdaptScope): Option<Int64> {
+    if (scope.locals.contains(fieldName)) {
+        return None
+    }
+    let structType = match (scope.structTypeOf("this")) {
+        case Some(t) => t
+        case None => return None
+    }
+    let info = match (scope.structs.infoOf(structType)) {
+        case Some(i) => i
+        case None => return None
+    }
+    return info.indexOf(fieldName)
+}
+
+private func adaptImplicitThisFieldRead(expr: ParseExpr, scope: AdaptScope): Option<ChirExprSpec> {
+    let refExpr = match (expr as ParseRefExpr) {
+        case Some(r) => r
+        case None => return None
+    }
+    if (!refExpr.typeArguments.isEmpty()) {
+        return None
+    }
+    let fieldName = refExpr.ref.identifier.Val()
+    let idx = match (implicitThisFieldIndex(fieldName, scope)) {
+        case Some(n) => n
+        case None => return None
+    }
+    scope.needsRuntime = true
+    return Some(ChirExprSpec.EnumField(ChirExprSpec.Ref("this"), idx + 1))
+}
+
+private func adaptImplicitThisFieldAssign(target: ParseExpr, assignExpr: ParseAssignExpr,
+    scope: AdaptScope): Option<ChirStmtSpec> {
+    let refExpr = match (target as ParseRefExpr) {
+        case Some(r) => r
+        case None => return None
+    }
+    if (!refExpr.typeArguments.isEmpty()) {
+        return None
+    }
+    let fieldName = refExpr.ref.identifier.Val()
+    let idx = match (implicitThisFieldIndex(fieldName, scope)) {
+        case Some(n) => n
+        case None => return None
+    }
+    let rhs = match (assignExpr.rightExpr) {
+        case Some(e) => e
+        case None => return None
+    }
+    if (exprIsString(rhs, scope) || exprIsBool(rhs, scope)) {
+        return None
+    }
+    let valueSpec = match (adaptExpr(rhs, scope)) {
+        case Some(e) => e
+        case None => return None
+    }
+    scope.needsRuntime = true
+    return Some(ChirStmtSpec.StructSetField("this", idx + 1, valueSpec))
 }
 
 // Call an instance method `p.m(args)` on a struct local. The method is desugared to a top-level
@@ -3445,23 +3612,18 @@ private func adaptStructMethodCall(expr: ParseExpr, scope: AdaptScope): Option<C
         case Some(b) => b
         case None => return None
     }
-    let recvRef = match (recvBase as ParseRefExpr) {
+    let receiver = match (adaptStructReceiver(recvBase, scope)) {
         case Some(r) => r
         case None => return None
     }
-    let localName = recvRef.identifier.Val()
-    let structType = match (scope.structTypeOf(localName)) {
-        case Some(t) => t
-        case None => return None
-    }
     let methodName = member.field.GetRawText()
-    let desugaredName = desugarStructMethodName(structType, methodName)
+    let desugaredName = desugarStructMethodName(receiver.structType, methodName)
     if (!scope.funcNames.contains(desugaredName)) {
         return None
     }
     // The receiver (the struct value as an Int64) is the leading `this` argument.
     let argSpecs = ArrayList<ChirExprSpec>()
-    argSpecs.add(ChirExprSpec.Ref(localName))
+    argSpecs.add(receiver.value)
     for (arg in call.args) {
         if (!arg.name.Empty() || arg.withInout) {
             return None
@@ -3481,6 +3643,27 @@ private func adaptStructMethodCall(expr: ParseExpr, scope: AdaptScope): Option<C
     }
     scope.needsRuntime = true
     return Some(ChirExprSpec.Call(desugaredName, argSpecs))
+}
+
+private func adaptStructReceiver(expr: ParseExpr, scope: AdaptScope): Option<StructReceiverValue> {
+    if (let Some(refExpr) <- (expr as ParseRefExpr)) {
+        if (!refExpr.typeArguments.isEmpty()) {
+            return None
+        }
+        let localName = refExpr.ref.identifier.Val()
+        if (let Some(structType) <- scope.structTypeOf(localName)) {
+            return Some(StructReceiverValue(structType, ChirExprSpec.Ref(localName)))
+        }
+    }
+    let structType = match (structTypeOfExpr(expr, scope)) {
+        case Some(t) => t
+        case None => return None
+    }
+    let valueSpec = match (adaptExpr(expr, scope)) {
+        case Some(e) => e
+        case None => return None
+    }
+    return Some(StructReceiverValue(structType, valueSpec))
 }
 
 // The synthesized top-level function name for a struct instance method `StructType.method`. Uses a `$`
@@ -3505,7 +3688,7 @@ private func enumTagDecode(enumRef: ChirExprSpec): ChirExprSpec {
 
 private func localRefName(expr: ParseExpr, scope: AdaptScope): Option<String> {
     if (let Some(refExpr) <- (expr as ParseRefExpr)) {
-        let name = refExpr.identifier.Val()
+        let name = refExpr.ref.identifier.Val()
         if (scope.locals.contains(name)) {
             // A parameter reference is genuine runtime computation (cannot be folded); promote.
             if (scope.params.contains(name)) {

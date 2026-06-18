@@ -303,7 +303,15 @@ extend ParserImpl {
     }
 
     public func ApplyModifiersAndAnnotations(decl: Decl, modifiers: ArrayList<Modifier>, annos: ArrayList<Annotation>): Unit {
-        decl.AddCommon(modifiers, annos)
+        for (modifier in modifiers) {
+            decl.modifiers.add(modifier)
+            if (let Some(attr) <- GetAttributeByModifier(modifier.modifier)) {
+                decl.EnableAttr(attr)
+            }
+        }
+        for (anno in annos) {
+            decl.annotations.add(anno)
+        }
         if (!modifiers.isEmpty()) {
             decl.begin = modifiers[0].begin
         }

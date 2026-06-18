@@ -184,7 +184,6 @@ private func toEvaluationParsedScopeKind(scope: ScopeKind): EvalParsedScopeKind 
 
 private func makeEvaluationParsedFile(macroFile: File): EvalParsedFile {
     let parsedFile = EvalParsedFile()
-    parsedFile.fileID = macroFile.begin.fileID
     parsedFile.begin = macroFile.begin
     parsedFile.end = macroFile.end
     let parsedPackage = EvalParsedPackageSpec()
@@ -200,8 +199,12 @@ private func makeEvaluationParsedFile(macroFile: File): EvalParsedFile {
             let part = names[nameIdx]
             let identEnd = cursor + part.size
             let parsedIdent = EvalParsedSrcIdentifier(part, part, cursor, identEnd, false)
-            parsedPackage.identifiers.add(parsedIdent)
-            parsedPackage.packageName = parsedIdent
+            if (nameIdx + 1 == names.size) {
+                parsedPackage.packageName = parsedIdent
+            } else {
+                parsedPackage.prefixPaths.add(part)
+                parsedPackage.prefixPoses.add(cursor)
+            }
             cursor = identEnd + 1
             nameIdx++
         }

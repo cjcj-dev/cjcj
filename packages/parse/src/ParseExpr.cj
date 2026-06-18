@@ -1,6 +1,12 @@
 package cangjie_compiler::parse
 
 import std.collection.*
+import cangjie_compiler::ast.MacroExpandDecl as AstMacroExpandDecl
+import cangjie_compiler::ast.FuncBody as AstFuncBody
+import cangjie_compiler::ast.FuncParam as AstFuncParam
+import cangjie_compiler::ast.FuncParamList as AstFuncParamList
+import cangjie_compiler::ast.MacroInvocation as AstMacroInvocation
+import cangjie_compiler::ast.VarDecl as AstVarDecl
 
 extend ParserImpl {
     public func ParseExpr(): Expr {
@@ -45,7 +51,10 @@ extend ParserImpl {
         if (Seeing(TokenKind.NOT) || Seeing(TokenKind.ADD) || Seeing(TokenKind.SUB) || Seeing(TokenKind.BITNOT)) {
             let op = Peek()
             Next()
-            let unary = UnaryExpr(op)
+            let unary = UnaryExpr()
+            unary.op = op.kind
+            unary.operatorPos = op.Begin()
+            unary.begin = op.Begin()
             let child = ParseUnaryExpr(RemoveParsingIfCondExpr(ek))
             if (op.kind == TokenKind.SUB) {
                 if (let Some(lit) <- (child as LitConstExpr)) {
@@ -122,16 +131,16 @@ extend ParserImpl {
                 continue
             }
             if (Skip(TokenKind.LSQUARE)) {
-                let sub = SubscriptExpr()
-                sub.baseExpr = base
-                sub.leftSquarePos = lastToken.Begin()
-                sub.begin = base.begin
-                while (!Seeing(TokenKind.END) && !Seeing(TokenKind.RSQUARE)) {
-                    sub.indexExprs.add(ParseExpr(ExprKind.INDEX_EXPR))
+            let sub = SubscriptExpr()
+            sub.baseExpr = base
+            sub.leftParenPos = lastToken.Begin()
+            sub.begin = base.begin
+            while (!Seeing(TokenKind.END) && !Seeing(TokenKind.RSQUARE)) {
+                sub.indexExprs.add(ParseExpr(ExprKind.INDEX_EXPR))
                     if (!Skip(TokenKind.COMMA)) { break }
                 }
-                sub.rightSquarePos = Expect(TokenKind.RSQUARE, "expected ']' after subscript").Begin()
-                sub.end = sub.rightSquarePos + 1
+                sub.rightParenPos = Expect(TokenKind.RSQUARE, "expected ']' after subscript").Begin()
+                sub.end = sub.rightParenPos + 1
                 base = sub
                 continue
             }
@@ -224,16 +233,18 @@ extend ParserImpl {
             if (op.kind == TokenKind.IS || op.kind == TokenKind.AS) {
                 let typeNode = ParseType()
                 if (op.kind == TokenKind.IS) {
-                    let expr = IsExpr(op)
+                    let expr = IsExpr()
                     expr.leftExpr = lhs
-                    expr.typeNode = typeNode
+                    expr.isType = typeNode
+                    expr.isPos = op.Begin()
                     expr.begin = lhs.begin
                     expr.end = typeNode.end
                     lhs = expr
                 } else {
-                    let expr = AsExpr(op)
+                    let expr = AsExpr()
                     expr.leftExpr = lhs
-                    expr.typeNode = typeNode
+                    expr.asType = typeNode
+                    expr.asPos = op.Begin()
                     expr.begin = lhs.begin
                     expr.end = typeNode.end
                     lhs = expr
@@ -262,18 +273,15 @@ extend ParserImpl {
     }
 
     public func MakeBinaryExpr(left: Expr, op: Token, right: Expr): Expr {
-        let expr: BinaryExpr = if (IsAssignment(op.kind)) {
-            AssignExpr(op)
-        } else if (op.kind == TokenKind.RANGEOP || op.kind == TokenKind.CLOSEDRANGEOP) {
-            RangeExpr(op)
-        } else {
-            BinaryExpr(ASTKind.BINARY_EXPR, op)
-        }
-        expr.leftExpr = left
-        expr.rightExpr = right
-        expr.begin = left.begin
-        expr.end = right.end
         if (IsAssignment(op.kind)) {
+            let expr = AssignExpr()
+            expr.leftValue = left
+            expr.rightExpr = right
+            expr.op = op.kind
+            expr.assignPos = op.Begin()
+            expr.isCompound = op.kind != TokenKind.ASSIGN
+            expr.begin = left.begin
+            expr.end = right.end
             if (op.kind == TokenKind.ASSIGN) {
                 CheckWildcardInExpr(right)
             }
@@ -287,9 +295,27 @@ extend ParserImpl {
                 chain.hasQuestSuffix = true
                 return chain
             }
-        } else {
-            expr.isBroken = left.isBroken || right.isBroken
+            return expr
         }
+        if (op.kind == TokenKind.RANGEOP || op.kind == TokenKind.CLOSEDRANGEOP) {
+            let expr = RangeExpr()
+            expr.startExpr = left
+            expr.stopExpr = right
+            expr.rangePos = op.Begin()
+            expr.isClosed = op.kind == TokenKind.CLOSEDRANGEOP
+            expr.begin = left.begin
+            expr.end = right.end
+            expr.isBroken = left.isBroken || right.isBroken
+            return expr
+        }
+        let expr = BinaryExpr()
+        expr.leftExpr = left
+        expr.rightExpr = right
+        expr.op = op.kind
+        expr.operatorPos = op.Begin()
+        expr.begin = left.begin
+        expr.end = right.end
+        expr.isBroken = left.isBroken || right.isBroken
         return expr
     }
 
@@ -343,9 +369,9 @@ extend ParserImpl {
         return true
     }
 
-    private func MacroInvocationHasExpandedDecl(invocation: MacroInvocation): Bool {
+    private func MacroInvocationHasExpandedDecl(invocation: AstMacroInvocation): Bool {
         if (let Some(decl) <- invocation.decl) {
-            if (let Some(macroDecl) <- (decl as MacroExpandDecl)) {
+            if (let Some(macroDecl) <- (decl as AstMacroExpandDecl)) {
                 return MacroInvocationHasExpandedDecl(macroDecl.invocation)
             }
             return true
@@ -416,7 +442,7 @@ extend ParserImpl {
             return
         }
         if (let Some(assign) <- (node as AssignExpr)) {
-            if (assign.op.kind == TokenKind.ASSIGN) {
+            if (assign.op == TokenKind.ASSIGN) {
                 return
             }
         }
@@ -786,7 +812,7 @@ extend ParserImpl {
         ret.lParen = Expect(TokenKind.LPAREN, "expected '(' after try").Begin()
         let resourceNames = ArrayList<String>()
         while (!Seeing(TokenKind.END) && !Seeing(TokenKind.RPAREN)) {
-            let decl = VarDecl()
+            let decl = AstVarDecl()
             decl.isVar = false
             decl.isResourceVar = true
             decl.identifier = ExpectIdentifierWithPos(decl)
@@ -982,12 +1008,11 @@ extend ParserImpl {
     public func ParseForInExpr(): ForInExpr {
         let ret = ForInExpr()
         let token = Expect(TokenKind.FOR, "expected 'for'")
-        ret.forPos = token.Begin()
         ret.begin = token.Begin()
         ret.leftParenPos = Expect(TokenKind.LPAREN, "expected '(' after for").Begin()
         ret.pattern = ParsePattern()
         ret.inPos = Expect(TokenKind.IN, "expected 'in' in for expression").Begin()
-        ret.inExpr = ParseExpr()
+        ret.inExpression = ParseExpr()
         if (Skip(TokenKind.WHERE)) {
             ret.wherePos = lastToken.Begin()
             ret.patternGuard = ParseExpr()
@@ -1103,12 +1128,12 @@ extend ParserImpl {
     public func ParseLambdaExpr(isTailClosure: Bool): LambdaExpr {
         let lambda = LambdaExpr()
         lambda.begin = Peek().Begin()
-        let body = FuncBody()
+        let body = AstFuncBody()
         if (Skip(TokenKind.LCURL)) {
-            let paramList = FuncParamList()
+            let paramList = AstFuncParamList()
             if (!SeeingDoubleArrow() && !SeeingInvalidParamListInLambdaExpr()) {
                 while (!Seeing(TokenKind.END) && !SeeingDoubleArrow() && !Seeing(TokenKind.RCURL)) {
-                    paramList.params.add(ParseFuncParam())
+                    paramList.params.add(ConvertLambdaFuncParamToAst(ParseFuncParam()))
                     if (!Skip(TokenKind.COMMA)) { break }
                 }
             }
@@ -1127,12 +1152,28 @@ extend ParserImpl {
             }
             block.rightCurlPos = Expect(TokenKind.RCURL, "expected '}' after lambda").Begin()
             block.end = block.rightCurlPos + 1
-            body.body = block
+            body.body = Some(block)
             body.end = block.end
-            lambda.funcBody = body
+            lambda.funcBody = Some(body)
             lambda.end = block.end
         }
         return lambda
+    }
+
+    private func ConvertLambdaFuncParamToAst(param: FuncParam): AstFuncParam {
+        let out = AstFuncParam()
+        out.begin = param.begin
+        out.end = param.end
+        out.isBroken = param.isBroken
+        out.identifier = param.identifier
+        out.typeNode = param.typeNode
+        out.colonPos = param.colonPos
+        out.assignment = param.assignment
+        out.assignPos = param.assignPos
+        out.isMemberParam = param.isMemberParam
+        out.isNamedParam = param.isNamedParam
+        out.hasLetOrVar = param.isMemberParam
+        return out
     }
 
     public func CheckCondition(expr: Expr): Bool {
@@ -1153,10 +1194,10 @@ extend ParserImpl {
             if (let Some(right) <- binary.rightExpr) {
                 hasSubCondition = CheckCondition(right) || hasSubCondition
             }
-            if (hasSubCondition && binary.op.kind != TokenKind.AND && binary.op.kind != TokenKind.OR) {
+            if (hasSubCondition && binary.op != TokenKind.AND && binary.op != TokenKind.OR) {
                 diag.DiagnoseRefactor(
                     DiagKindRefactor.PARSE_ERROR,
-                    binary.op.Begin(),
+                    binary.operatorPos,
                     "let-pattern conditions can only be combined with '&&' or '||'")
                 binary.isBroken = true
             }

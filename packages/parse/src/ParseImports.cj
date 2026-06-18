@@ -13,9 +13,13 @@ extend ParserImpl {
 
     public func ParsePackageHeader(modifiers: ArrayList<Modifier>): PackageSpec {
         let pkg = PackageSpec()
-        for (modifier in modifiers) { pkg.modifiers.add(modifier) }
         if (!modifiers.isEmpty()) {
             pkg.modifier = CloneModifier(modifiers[0])
+            if (modifiers[0].modifier == TokenKind.COMMON) {
+                pkg.hasCommon = true
+            } else if (modifiers[0].modifier == TokenKind.SPECIFIC) {
+                pkg.hasSpecific = true
+            }
         }
         if (Skip(TokenKind.MACRO)) {
             pkg.macroPos = lastToken.Begin()
@@ -23,8 +27,8 @@ extend ParserImpl {
         }
         let token = Expect(TokenKind.PACKAGE, "expected 'package'")
         pkg.packagePos = token.Begin()
-        if (!pkg.modifiers.isEmpty()) {
-            pkg.begin = pkg.modifiers[0].begin
+        if (let Some(modifier) <- pkg.modifier) {
+            pkg.begin = modifier.begin
         } else if (pkg.hasMacro) {
             pkg.begin = pkg.macroPos
         } else {
@@ -36,7 +40,8 @@ extend ParserImpl {
         while (true) {
             skipDoubleColon = false
             if (!curIdent.Empty()) {
-                pkg.identifiers.add(curIdent)
+                pkg.prefixPaths.add(curIdent.Val())
+                pkg.prefixPoses.add(curIdent.Begin())
                 pkg.prefixDotPoses.add(lastToken.Begin())
             }
             curIdent = ExpectPackageIdentifierWithPos(pkg)
@@ -54,7 +59,7 @@ extend ParserImpl {
                 ConsumeUntilAny([TokenKind.NL, TokenKind.SEMI], targetTokenConsumed: false)
                 break
             }
-            if (pkg.identifiers.isEmpty() && Skip(TokenKind.DOUBLE_COLON)) {
+            if (pkg.prefixPaths.isEmpty() && Skip(TokenKind.DOUBLE_COLON)) {
                 pkg.hasDoubleColon = true
                 skipDoubleColon = true
             }
@@ -64,22 +69,21 @@ extend ParserImpl {
         }
         if (!curIdent.Empty()) {
             pkg.packageName = curIdent
-            pkg.identifiers.add(curIdent)
             pkg.end = curIdent.End()
         } else {
             pkg.end = token.End()
         }
-        let fullPackageName = pkg.FullName()
+        let fullPackageName = pkg.GetPackageName()
         if (!pkg.isBroken && fullPackageName.size > PACKAGE_NAME_LEN_LIMIT) {
-            let start = if (!pkg.identifiers.isEmpty()) { pkg.identifiers[0].Begin() } else { pkg.packagePos }
+            let start = if (!pkg.prefixPoses.isEmpty()) { pkg.prefixPoses[0] } else { pkg.packagePos }
             diag.DiagnoseRefactor(
                 DiagKindRefactor.PARSE_ERROR,
                 start,
                 "package name length ${fullPackageName.size} exceeds limit ${PACKAGE_NAME_LEN_LIMIT}")
             pkg.isBroken = true
         }
-        if (pkg.identifiers.size > 1) {
-            moduleName = pkg.identifiers[0].Val()
+        if (!pkg.prefixPaths.isEmpty()) {
+            moduleName = pkg.prefixPaths[0]
         }
         SkipNLOrSemi()
         return pkg
@@ -123,7 +127,7 @@ extend ParserImpl {
         if (let Some(kind) <- maybeModifier) {
             let tok = Peek()
             if (kind == ModifierKind.PUBLIC || kind == ModifierKind.PROTECTED || kind == ModifierKind.INTERNAL || kind == ModifierKind.PRIVATE) {
-                spec.modifier = Modifier(kind, tok.kind, tok.Begin(), tok.End())
+                spec.modifier = Modifier(tok.kind, tok.Begin())
                 Next()
             }
         }
@@ -141,7 +145,7 @@ extend ParserImpl {
                 diag.DiagnoseRefactor(
                     DiagKindRefactor.INVALID_ANNOTATION,
                     anno.begin,
-                    "unexpected annotation '${anno.identifier.GetRawText()}' on import")
+                    "unexpected annotation '${anno.identifier.Val()}' on import")
                 anno.isBroken = true
             }
         }
@@ -167,7 +171,7 @@ extend ParserImpl {
                         DiagKindRefactor.PARSE_ERROR,
                         start,
                         "import package name length ${fullPackageName.size} exceeds limit ${PACKAGE_NAME_LEN_LIMIT}")
-                    content.MarkBroken()
+                    MarkImportContentBroken(content)
                 }
                 continue
             }
@@ -177,7 +181,7 @@ extend ParserImpl {
                 let fullPackageName = if (commonPrefix.isEmpty()) { suffix } else { commonPrefix + "." + suffix }
                 if (!item.isBroken && fullPackageName.size > PACKAGE_NAME_LEN_LIMIT) {
                     let start = if (!content.prefixPaths.isEmpty()) {
-                        content.prefixPaths[0].Begin()
+                        content.prefixPoses[0]
                     } else {
                         ImportContentBeginPosition(item)
                     }
@@ -185,7 +189,7 @@ extend ParserImpl {
                         DiagKindRefactor.PARSE_ERROR,
                         start,
                         "import package name length ${fullPackageName.size} exceeds limit ${PACKAGE_NAME_LEN_LIMIT}")
-                    item.MarkBroken()
+                    MarkImportContentBroken(item)
                 }
             }
         }
@@ -206,7 +210,10 @@ extend ParserImpl {
             desugared.content.kind = item.kind
             desugared.content.end = item.end
             for (prefix in item.prefixPaths) {
-                desugared.content.prefixPaths.add(CloneIdentifier(prefix))
+                desugared.content.prefixPaths.add(prefix)
+            }
+            for (prefixPos in item.prefixPoses) {
+                desugared.content.prefixPoses.add(prefixPos)
             }
             for (dotPos in item.prefixDotPoses) {
                 desugared.content.prefixDotPoses.add(dotPos)
@@ -235,7 +242,8 @@ extend ParserImpl {
         while (true) {
             skipDoubleColon = false
             if (!curIdent.Empty()) {
-                content.prefixPaths.add(curIdent)
+                content.prefixPaths.add(curIdent.Val())
+                content.prefixPoses.add(curIdent.Begin())
                 content.prefixDotPoses.add(lastToken.Begin())
             }
             if (!inMultiImport && Skip(TokenKind.LCURL)) {
@@ -259,7 +267,7 @@ extend ParserImpl {
                 } else {
                     ConsumeUntilAny([TokenKind.NL, TokenKind.COMMA])
                 }
-                content.MarkBroken()
+                MarkImportContentBroken(content)
                 break
             }
             if (firstIter) {
@@ -274,7 +282,7 @@ extend ParserImpl {
                         DiagKindRefactor.PARSE_ERROR,
                         curIdent.Begin(),
                         "raw identifier '${curIdent.GetRawText()}' is not allowed as an organization name")
-                    content.MarkBroken()
+                    MarkImportContentBroken(content)
                 }
             }
             if (!skipDoubleColon && !Skip(TokenKind.DOT)) {
@@ -306,7 +314,7 @@ extend ParserImpl {
                         DiagKindRefactor.EXPECTED_TOKEN,
                         lastToken.End(),
                         "expected ',' in import list")
-                    content.MarkBroken()
+                    MarkImportContentBroken(content)
                 }
             }
             firstIter = false
@@ -316,7 +324,7 @@ extend ParserImpl {
                 ParseImportAliasPart(item)
             }
             if (item.isBroken) {
-                content.MarkHasBroken()
+                MarkImportContentHasBroken(content)
             }
             content.items.add(item)
             if (!SeeingAny([TokenKind.COMMA, TokenKind.IDENTIFIER, TokenKind.PACKAGE_IDENTIFIER, TokenKind.AS])) {
@@ -328,7 +336,7 @@ extend ParserImpl {
                 DiagKindRefactor.UNTERMINATED_DELIMITER,
                 content.leftCurlPos,
                 "expected '}' after import list")
-            content.MarkBroken()
+            MarkImportContentBroken(content)
             content.end = lastToken.End()
         } else {
             content.rightCurlPos = lastToken.Begin()
@@ -346,7 +354,7 @@ extend ParserImpl {
         let curIdent = ExpectIdentifierWithPos(content)
         if (curIdent.Empty()) {
             ConsumeUntilAny([TokenKind.NL, TokenKind.COMMA])
-            content.MarkBroken()
+            MarkImportContentBroken(content)
         } else {
             content.aliasName = curIdent
             content.end = lastToken.End()
@@ -374,12 +382,12 @@ extend ParserImpl {
     }
 }
 
-private func CloneIdentifier(identifier: SrcIdentifier): SrcIdentifier {
-    return SrcIdentifier(identifier.Val(), identifier.Begin(), identifier.End(), identifier.IsRaw())
+private func CloneIdentifier(identifier: Identifier): Identifier {
+    return Identifier(identifier.Val(), identifier.Begin(), identifier.End())
 }
 
 private func CloneModifier(modifier: Modifier): Option<Modifier> {
-    return Modifier(modifier.kind, modifier.tokenKind, modifier.begin, modifier.end)
+    return Modifier(modifier.modifier, modifier.begin)
 }
 
 private func CloneImportContentPrefix(content: ImportContent): ImportContent {
@@ -388,7 +396,10 @@ private func CloneImportContentPrefix(content: ImportContent): ImportContent {
     clone.end = content.end
     clone.hasDoubleColon = content.hasDoubleColon
     for (prefix in content.prefixPaths) {
-        clone.prefixPaths.add(CloneIdentifier(prefix))
+        clone.prefixPaths.add(prefix)
+    }
+    for (prefixPos in content.prefixPoses) {
+        clone.prefixPoses.add(prefixPos)
     }
     for (dotPos in content.prefixDotPoses) {
         clone.prefixDotPoses.add(dotPos)
@@ -397,11 +408,20 @@ private func CloneImportContentPrefix(content: ImportContent): ImportContent {
 }
 
 private func ImportContentBeginPosition(content: ImportContent): Position {
-    if (!content.prefixPaths.isEmpty()) {
-        return content.prefixPaths[0].Begin()
+    if (!content.prefixPoses.isEmpty()) {
+        return content.prefixPoses[0]
     }
     if (!content.identifier.Empty()) {
         return content.identifier.Begin()
     }
     return content.begin
+}
+
+private func MarkImportContentBroken(content: ImportContent): Unit {
+    content.isBroken = true
+}
+
+private func MarkImportContentHasBroken(content: ImportContent): Unit {
+    content.hasBroken = true
+    content.isBroken = true
 }

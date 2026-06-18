@@ -29,7 +29,7 @@ public class MPParserImpl {
                 parser.diag.DiagnoseRefactor(
                     DiagKindRefactor.INVALID_MODIFIER,
                     modifier.begin,
-                    "unexpected CJMP modifier '${TokenKindName(modifier.tokenKind)}' outside common/platform compilation")
+                    "unexpected CJMP modifier '${TokenKindName(modifier.modifier)}' outside common/platform compilation")
                 ok = false
             }
         }
@@ -70,7 +70,7 @@ public class MPParserImpl {
         if (!CompileCommon() && !CompilePlatform()) {
             return false
         }
-        return modifier.kind == ModifierKind.COMMON || modifier.kind == ModifierKind.SPECIFIC
+        return modifier.modifier == TokenKind.COMMON || modifier.modifier == TokenKind.SPECIFIC
     }
 
     public func CheckCJMPCtorPresence(decl: Decl): Unit {
@@ -184,8 +184,8 @@ private func HasDefault(decl: Decl): Bool {
         }
     }
     if (let Some(propDecl) <- (decl as PropDecl)) {
-        if (let Some(_) <- propDecl.getter) { return true }
-        if (let Some(_) <- propDecl.setter) { return true }
+        if (!propDecl.getters.isEmpty()) { return true }
+        if (!propDecl.setters.isEmpty()) { return true }
     }
     if (let Some(varDecl) <- (decl as VarDeclAbstract)) {
         if (let Some(_) <- varDecl.initializer) {

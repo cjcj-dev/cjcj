@@ -27,7 +27,10 @@ extend ParserImpl {
         if (SeeingPrimitiveTypeAndDot()) {
             let token = Peek()
             Next()
-            return PrimitiveTypeExpr(token)
+            let ret = PrimitiveTypeExpr(TypeKindFromName(token.Value()))
+            ret.begin = token.Begin()
+            ret.end = token.End()
+            return ret
         }
         if (Seeing(TokenKind.IDENTIFIER) || Seeing(TokenKind.PACKAGE_IDENTIFIER) || Seeing(TokenKind.THIS) || Seeing(TokenKind.SUPER)) {
             return ParseRefExpr(ek)
@@ -81,18 +84,21 @@ extend ParserImpl {
             LitConstKind.UNIT
         } else if (token.kind == TokenKind.JSTRING_LITERAL) {
             LitConstKind.JSTRING
-        } else if (token.kind == TokenKind.MULTILINE_STRING) {
-            LitConstKind.MULTILINE_STRING
-        } else if (token.kind == TokenKind.MULTILINE_RAW_STRING) {
-            LitConstKind.MULTILINE_RAW_STRING
+        } else if (token.kind == TokenKind.MULTILINE_STRING || token.kind == TokenKind.MULTILINE_RAW_STRING) {
+            LitConstKind.STRING
         } else {
             LitConstKind.STRING
         }
         Next()
-        if (kind == LitConstKind.STRING || kind == LitConstKind.JSTRING || kind == LitConstKind.MULTILINE_STRING) {
+        if (token.kind == TokenKind.STRING_LITERAL || token.kind == TokenKind.JSTRING_LITERAL ||
+            token.kind == TokenKind.MULTILINE_STRING) {
             return ProcessStringInterpolation(token, kind)
         }
-        return LitConstExpr(kind, token)
+        let lit = LitConstExpr(kind, token)
+        if (token.kind == TokenKind.MULTILINE_RAW_STRING) {
+            lit.stringKind = StringKind.MULTILINE_RAW
+        }
+        return lit
     }
 
     public func ParseNegativeLiteral(): Expr {
@@ -119,6 +125,11 @@ extend ParserImpl {
     public func ProcessStringInterpolation(token: Token, kind: LitConstKind): Expr {
         let parts = lexer.GetStrParts(token)
         let lit = LitConstExpr(kind, token)
+        if (token.kind == TokenKind.MULTILINE_STRING) {
+            lit.stringKind = StringKind.MULTILINE
+        } else if (token.kind == TokenKind.JSTRING_LITERAL) {
+            lit.stringKind = StringKind.JSTRING
+        }
         var hasInterpolation = false
         for (part in parts) {
             if (part.strKind == StringPartKind.EXPR) {
@@ -137,6 +148,11 @@ extend ParserImpl {
             strExpr.strParts.add(part)
             if (part.strKind == StringPartKind.STR) {
                 let partLit = LitConstExpr(kind, Token(token.kind, part.value, part.begin, part.end))
+                if (token.kind == TokenKind.MULTILINE_STRING) {
+                    partLit.stringKind = StringKind.MULTILINE
+                } else if (token.kind == TokenKind.JSTRING_LITERAL) {
+                    partLit.stringKind = StringKind.JSTRING
+                }
                 strExpr.strPartExprs.add(partLit)
             } else {
                 strExpr.strPartExprs.add(ParseInterpolationExpr(part))
@@ -165,7 +181,7 @@ extend ParserImpl {
     public func ParseTypeConvExpr(): Expr {
         let token = Peek()
         let ret = TypeConvExpr()
-        let primitive = PrimitiveType(token.Value(), token.kind, token.Begin(), token.End())
+        let primitive = PrimitiveType(token.Value(), token.Begin(), token.End())
         ret.typeNode = primitive
         ret.begin = token.Begin()
         Next()
