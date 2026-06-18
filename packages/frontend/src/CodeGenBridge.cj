@@ -23,12 +23,18 @@ import cangjie_compiler::codegen.ClearPackageModules
 import cangjie_compiler::codegen.GenPackageModules
 import cangjie_compiler::codegen.LLVMModuleHandle as LLVMModuleHandle
 import cangjie_compiler::codegen.SavePackageModule
+import cangjie_compiler::meta_transformation.TryRunCHIRMetaTransforms
 import cangjie_compiler::option.MaybeUInt64
 
 public func BuildRealCHIRForFrontendPackage(instance: CompilerInstance, pkg: Package): Option<RealCHIRPackage> {
     let builder = ChirBuilder(instance.chirData.GetRealCHIRContext())
     let packageSpec = buildRealPackageSpec(pkg, builder.context)
     let lowered = ChirAST2CHIR(builder).LowerPackage(packageSpec).pkg
+    let pluginResult = TryRunCHIRMetaTransforms(instance.metaTransformPluginBuilder, builder, lowered)
+    if (!pluginResult.succeed) {
+        instance.diag.DiagnoseRefactor(DiagKindRefactor.plugin_throws_exception, DEFAULT_POSITION)
+        return None
+    }
     if (instance.invocation.globalOptions.NeedDumpCHIRToScreen()) {
         print(ChirCHIRPrinter().PrintPackage(lowered))
     }

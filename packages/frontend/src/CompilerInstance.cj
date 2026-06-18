@@ -1,5 +1,6 @@
 package cangjie_compiler::frontend
 
+import cangjie_compiler::meta_transformation.MetaTransformPluginBuilder
 import std.collection.*
 
 public enum CompileStage {
@@ -86,6 +87,7 @@ public class CompilerInstance {
     public let diag: DiagnosticEngine
     public let cachedInfo: CompilationCache = CompilationCache()
     public let chirInfo: CHIRInfo = CHIRInfo()
+    public let metaTransformPluginBuilder: MetaTransformPluginBuilder = MetaTransformPluginBuilder()
     public let sm: SourceManager = SourceManager()
     public let typeManager: TypeManager = TypeManager()
     public let importManager: ImportManager
