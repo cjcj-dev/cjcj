@@ -32,6 +32,60 @@ private func BinaryInvalid(be: BinaryExpr): Ty {
     return TcInvalid(be)
 }
 
+private class TargetSnapshot {
+    let node: Node
+    let target: Option<Decl>
+    let targets: ArrayList<Decl> = ArrayList<Decl>()
+
+    init(node: Node) {
+        this.node = node
+        this.target = node.GetTarget()
+        for (value in node.GetTargets()) {
+            targets.add(value)
+        }
+    }
+
+    func Restore(): Unit {
+        node.SetTarget(target)
+        if (let Some(refExpr) <- (node as RefExpr)) {
+            refExpr.ref.targets.clear()
+            for (value in targets) {
+                refExpr.ref.targets.add(value)
+            }
+        } else if (let Some(memberAccess) <- (node as MemberAccess)) {
+            memberAccess.targets.clear()
+            for (value2 in targets) {
+                memberAccess.targets.add(value2)
+            }
+        } else if (let Some(refType) <- (node as RefType)) {
+            refType.ref.targets.clear()
+            for (value3 in targets) {
+                refType.ref.targets.add(value3)
+            }
+        }
+    }
+}
+
+private func CollectTargetSnapshots(node: Node): ArrayList<TargetSnapshot> {
+    let snapshots = ArrayList<TargetSnapshot>()
+    let walker = Walker(node, visitPre: { current: Node =>
+        if ((let Some(_) <- current.GetTarget()) || !current.GetTargets().isEmpty()) {
+            snapshots.add(TargetSnapshot(current))
+        }
+        VisitAction.WALK_CHILDREN
+    })
+    let _ = walker.Walk()
+    return snapshots
+}
+
+private func ClearExprKeepTargets(expr: Expr): Unit {
+    let snapshots = CollectTargetSnapshots(expr)
+    expr.Clear()
+    for (snapshot in snapshots) {
+        snapshot.Restore()
+    }
+}
+
 private func PropagateBinaryDesugarTarget(be: BinaryExpr, desugar: Expr): Unit {
     if (let Some(callExpr) <- (desugar as CallExpr)) {
         if (let Some(resolved) <- callExpr.resolvedFunction) {
@@ -154,8 +208,8 @@ private func PrepareFlowOperands(typeManager: TypeManager, be: BinaryExpr): Bool
             let _ = BinaryInvalid(be)
             return false
         }
-        leftValue.Clear()
-        rightValue.Clear()
+        ClearExprKeepTargets(leftValue)
+        ClearExprKeepTargets(rightValue)
     }
     return FlowOperandsValid(be)
 }
@@ -345,7 +399,7 @@ private func SynBuiltinBinaryFromRight(typeManager: TypeManager, be: BinaryExpr,
         be.SetTy(TypeManager.GetInvalidTy())
         return Some(TypeManager.GetInvalidTy())
     }
-    leftExpr.Clear()
+    ClearExprKeepTargets(leftExpr)
     if (ChkExprShallow(typeManager, targetRight, leftExpr)) {
         let solvedRight = typeManager.TryGreedySubst(targetRight)
         rightExpr.SetTy(solvedRight)
@@ -374,7 +428,7 @@ private func SynBuiltinBinaryFromLeft(typeManager: TypeManager, be: BinaryExpr,
         let _ = SynExprShallow(typeManager, rightExpr)
         return BinaryInvalid(be)
     }
-    rightExpr.Clear()
+    ClearExprKeepTargets(rightExpr)
     if (ChkExprShallow(typeManager, targetLeft, rightExpr)) {
         let solvedLeft = typeManager.TryGreedySubst(targetLeft)
         leftExpr.SetTy(solvedLeft)
@@ -399,7 +453,7 @@ private func SynArithmeticOrRelationalExpr(typeManager: TypeManager, be: BinaryE
         }
         return BinaryInvalid(be)
     }
-    be.Clear()
+    ClearExprKeepTargets(be)
     return SynBuiltinBinaryFromLeft(typeManager, be, isArithmetic)
 }
 
@@ -451,7 +505,7 @@ private func SynRelationalExpr(typeManager: TypeManager, be: BinaryExpr): Ty {
             return BinaryInvalid(be)
         }
     }
-    be.Clear()
+    ClearExprKeepTargets(be)
     return SynArithmeticOrRelationalExpr(typeManager, be, isArithmetic: false)
 }
 
@@ -706,8 +760,8 @@ private func ChkConcreteBinaryOperandPair(typeManager: TypeManager, candidateTy:
     }
     let leftExpr = be.leftExpr.getOrThrow()
     let rightExpr = be.rightExpr.getOrThrow()
-    leftExpr.Clear()
-    rightExpr.Clear()
+    ClearExprKeepTargets(leftExpr)
+    ClearExprKeepTargets(rightExpr)
     let leftOk = ChkExprShallow(typeManager, candidateTy, leftExpr)
     let rightOk = ChkExprShallow(typeManager, candidateTy, rightExpr)
     if (leftOk && rightOk) {
@@ -728,8 +782,8 @@ private func ChkExpoExprWithTarget(typeManager: TypeManager, target: Ty, be: Bin
     let leftExpr = be.leftExpr.getOrThrow()
     let rightExpr = be.rightExpr.getOrThrow()
     if (typeManager.IsSubtype(i64Ty, target)) {
-        leftExpr.Clear()
-        rightExpr.Clear()
+        ClearExprKeepTargets(leftExpr)
+        ClearExprKeepTargets(rightExpr)
         let leftI64Ok = ChkExprShallow(typeManager, i64Ty, leftExpr)
         let rightU64Ok = ChkExprShallow(typeManager, u64Ty, rightExpr)
         if (leftI64Ok && rightU64Ok) {
@@ -738,22 +792,22 @@ private func ChkExpoExprWithTarget(typeManager: TypeManager, target: Ty, be: Bin
         }
     }
     if (typeManager.IsSubtype(f64Ty, target)) {
-        leftExpr.Clear()
-        rightExpr.Clear()
+        ClearExprKeepTargets(leftExpr)
+        ClearExprKeepTargets(rightExpr)
         let leftF64Ok = ChkExprShallow(typeManager, f64Ty, leftExpr)
-        rightExpr.Clear()
+        ClearExprKeepTargets(rightExpr)
         let rightI64Ok = ChkExprShallow(typeManager, i64Ty, rightExpr)
-        rightExpr.Clear()
+        ClearExprKeepTargets(rightExpr)
         let rightF64Ok = ChkExprShallow(typeManager, f64Ty, rightExpr)
         if (leftF64Ok && rightI64Ok && !rightF64Ok) {
-            rightExpr.Clear()
+            ClearExprKeepTargets(rightExpr)
             if (ChkExprShallow(typeManager, i64Ty, rightExpr)) {
                 be.SetTy(f64Ty)
                 return true
             }
         }
         if (leftF64Ok && rightF64Ok && !rightI64Ok) {
-            rightExpr.Clear()
+            ClearExprKeepTargets(rightExpr)
             if (ChkExprShallow(typeManager, f64Ty, rightExpr)) {
                 be.SetTy(f64Ty)
                 return true
@@ -817,8 +871,8 @@ private func ChkLogicalExprBuiltin(typeManager: TypeManager, target: Ty, be: Bin
     let boolTy = TcBoolTy()
     let leftExpr = be.leftExpr.getOrThrow()
     let rightExpr = be.rightExpr.getOrThrow()
-    leftExpr.Clear()
-    rightExpr.Clear()
+    ClearExprKeepTargets(leftExpr)
+    ClearExprKeepTargets(rightExpr)
     let leftOk = ChkExprShallow(typeManager, boolTy, leftExpr)
     let rightOk = ChkExprShallow(typeManager, boolTy, rightExpr)
     if (leftOk && rightOk) {
@@ -836,8 +890,8 @@ private func ChkShiftExprBuiltin(typeManager: TypeManager, target: Ty, be: Binar
     }
     let leftExpr = be.leftExpr.getOrThrow()
     let rightExpr = be.rightExpr.getOrThrow()
-    leftExpr.Clear()
-    rightExpr.Clear()
+    ClearExprKeepTargets(leftExpr)
+    ClearExprKeepTargets(rightExpr)
     let leftOk = ChkExprShallow(typeManager, target, leftExpr)
     let leftTy = leftExpr.GetTy() ?? TypeManager.GetInvalidTy()
     let rightTy = SynExprShallow(typeManager, rightExpr)
@@ -935,7 +989,7 @@ public func ChkBinaryExpr(typeManager: TypeManager, target: Ty, be: BinaryExpr):
         return true
     }
     if (!HasTupleEqualityOperands(be)) {
-        be.Clear()
+        ClearExprKeepTargets(be)
     }
     let actualTy = SynBinaryExpr(typeManager, be)
     if (!Ty.IsTyCorrect(actualTy)) {
