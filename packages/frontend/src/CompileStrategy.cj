@@ -601,6 +601,10 @@ private func createDeclFromKeyword(tokens: ArrayList<FrontendToken>, start: Int6
         tokens[nameIdx].kind == FrontendTokenKind.COMMENT)) {
         nameIdx++
     }
+    if (keyword == "main") {
+        decl.identifier = SrcIdentifier("main", begin: tokens[start].Begin(), end: tokens[start].End())
+        return finishParsedDecl(tokens, keyword, decl, nameIdx, tokens[start].End())
+    }
     if (keyword == "extend") {
         let parsed = parseQualifiedName(tokens, nameIdx)
         decl.identifier = SrcIdentifier(parsed[0], begin: tokens[start].Begin(), end: parsed[1])
