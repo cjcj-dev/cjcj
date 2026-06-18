@@ -27,6 +27,9 @@ import cangjie_compiler::ast.JumpExpr as AstJumpExpr
 import cangjie_compiler::ast.TokenKind as AstTokenKind
 import cangjie_compiler::ast.InterpolationExpr as AstInterpolationExpr
 import cangjie_compiler::ast.StringPartKind as AstStringPartKind
+import cangjie_compiler::ast.StructDecl as AstStructDecl
+import cangjie_compiler::ast.MemberAccess as AstMemberAccess
+import cangjie_compiler::ast.Attribute as AstAttribute
 
 private let REAL_AST_RETURN_NONE: Int64 = 0
 private let REAL_AST_RETURN_INT: Int64 = 1
@@ -34,17 +37,33 @@ private let REAL_AST_RETURN_BOOL: Int64 = 2
 private let REAL_AST_RETURN_UNIT: Int64 = 3
 private let REAL_AST_RETURN_STRING: Int64 = 4
 
+private let REAL_AST_TYPE_NONE: String = ""
+private let REAL_AST_TYPE_INT: String = "Int64"
+private let REAL_AST_TYPE_BOOL: String = "Bool"
+private let REAL_AST_TYPE_UNIT: String = "Unit"
+private let REAL_AST_TYPE_STRING: String = "String"
+private let REAL_AST_STRUCT_PREFIX: String = "struct:"
+
 private class RealASTFunctionInfo {
     let paramKinds: ArrayList<Int64> = ArrayList<Int64>()
+    let paramTypes: ArrayList<String> = ArrayList<String>()
     let returnKind: Int64
+    let returnType: String
 
     init(returnKind: Int64) {
         this.returnKind = returnKind
+        returnType = RealASTTypeKeyFromKind(returnKind)
+    }
+
+    init(returnType: String) {
+        this.returnType = returnType
+        returnKind = RealASTKindFromTypeKey(returnType)
     }
 }
 
 private class RealASTPackageLoweringScope {
     let functions = HashMap<String, RealASTFunctionInfo>()
+    let structs = HashMap<String, RealASTStructInfo>()
 
     func AddFunction(name: String, info: RealASTFunctionInfo): Bool {
         if (name.isEmpty() || functions.contains(name)) {
@@ -57,17 +76,119 @@ private class RealASTPackageLoweringScope {
     func GetFunction(name: String): Option<RealASTFunctionInfo> {
         return functions.get(name)
     }
+
+    func AddStruct(info: RealASTStructInfo): Bool {
+        if (info.name.isEmpty() || structs.contains(info.name)) {
+            return false
+        }
+        structs[info.name] = info
+        return true
+    }
+
+    func GetStruct(name: String): Option<RealASTStructInfo> {
+        return structs.get(name)
+    }
+
+    func IsStruct(name: String): Bool {
+        return structs.contains(name)
+    }
+}
+
+private class RealASTStructInitAssign {
+    let fieldName: String
+    let rhs: AstExpr
+
+    init(fieldName: String, rhs: AstExpr) {
+        this.fieldName = fieldName
+        this.rhs = rhs
+    }
+}
+
+private class RealASTMethodInfo {
+    let name: String
+    let loweredName: String
+    let funcDecl: AstFuncDecl
+    let funcInfo: RealASTFunctionInfo
+
+    init(name: String, loweredName: String, funcDecl: AstFuncDecl, funcInfo: RealASTFunctionInfo) {
+        this.name = name
+        this.loweredName = loweredName
+        this.funcDecl = funcDecl
+        this.funcInfo = funcInfo
+    }
+}
+
+private class RealASTStructInfo {
+    let name: String
+    let decl: AstStructDecl
+    let fieldNames = ArrayList<String>()
+    let fieldTypes = HashMap<String, String>()
+    let fieldMutable = HashMap<String, Bool>()
+    let fieldIndex = HashMap<String, Int64>()
+    let initParams = ArrayList<String>()
+    let initParamTypes = ArrayList<String>()
+    let initAssigns = ArrayList<RealASTStructInitAssign>()
+    let methods = HashMap<String, RealASTMethodInfo>()
+
+    init(name: String, decl: AstStructDecl) {
+        this.name = name
+        this.decl = decl
+    }
+
+    func AddField(name: String, ty: String, mutable: Bool): Bool {
+        if (name.isEmpty() || fieldTypes.contains(name)) {
+            return false
+        }
+        fieldIndex[name] = fieldNames.size
+        fieldNames.add(name)
+        fieldTypes[name] = ty
+        fieldMutable[name] = mutable
+        return true
+    }
+
+    func FieldType(name: String): Option<String> {
+        return fieldTypes.get(name)
+    }
+
+    func FieldIndex(name: String): Option<Int64> {
+        return fieldIndex.get(name)
+    }
+
+    func FieldCanWrite(name: String): Bool {
+        return fieldMutable.get(name) ?? false
+    }
+
+    func AddMethod(info: RealASTMethodInfo): Bool {
+        if (info.name.isEmpty() || methods.contains(info.name)) {
+            return false
+        }
+        methods[info.name] = info
+        return true
+    }
+
+    func GetMethod(name: String): Option<RealASTMethodInfo> {
+        return methods.get(name)
+    }
 }
 
 private class RealASTBodyLowering {
     let ok: Bool
     let stmts: ArrayList<AST2CHIRStmtSpec>
     let returnKind: Int64
+    let returnType: String
 
     init(ok: Bool, stmts: ArrayList<AST2CHIRStmtSpec>, returnKind: Int64) {
         this.ok = ok
         this.stmts = stmts
         this.returnKind = returnKind
+        returnType = RealASTTypeKeyFromKind(returnKind)
+    }
+
+    init(ok: Bool, stmts: ArrayList<AST2CHIRStmtSpec>, returnType: String) {
+        this.ok = ok
+        this.stmts = stmts
+        this.returnType = returnType
+        returnKind = RealASTKindFromTypeKey(returnType)
     }
 }
 
@@ -79,17 +200,27 @@ private class RealASTParamLowering {
 private class RealASTStmtLowering {
     let stmt: AST2CHIRStmtSpec
     let returnKind: Int64
+    let returnType: String
 
     init(stmt: AST2CHIRStmtSpec, returnKind: Int64) {
         this.stmt = stmt
         this.returnKind = returnKind
+        returnType = RealASTTypeKeyFromKind(returnKind)
+    }
+
+    init(stmt: AST2CHIRStmtSpec, returnType: String) {
+        this.stmt = stmt
+        this.returnType = returnType
+        returnKind = RealASTKindFromTypeKey(returnType)
     }
 }
 
 private class RealASTScopeSnapshot {
     let locals = HashMap<String, Bool>()
     let localKinds = HashMap<String, Int64>()
+    let localTypes = HashMap<String, String>()
     let loopDepth: Int64
+    let thisStructName: String
 
     init(scope: RealASTLoweringScope) {
         for ((name, mutable) in scope.locals) {
@@ -98,16 +229,29 @@ private class RealASTScopeSnapshot {
         for ((name, kind) in scope.localKinds) {
             localKinds[name] = kind
         }
+        for ((name, ty) in scope.localTypes) {
+            localTypes[name] = ty
+        }
         loopDepth = scope.loopDepth
+        thisStructName = scope.thisStructName
     }
 }
 
 private class RealASTLoweringScope {
     let locals = HashMap<String, Bool>()
     let localKinds = HashMap<String, Int64>()
+    let localTypes = HashMap<String, String>()
     var loopDepth: Int64 = 0
+    var thisStructName: String = ""
 
-    init(body: AstFuncBody) {
+    init(body: AstFuncBody, packageScope!: Option<RealASTPackageLoweringScope> = None,
+        thisStructName!: String = "") {
+        this.thisStructName = thisStructName
+        if (!thisStructName.isEmpty()) {
+            locals["this"] = false
+            localKinds["this"] = REAL_AST_RETURN_INT
+            localTypes["this"] = RealASTStructTypeKey(thisStructName)
+        }
         if (!body.paramLists.isEmpty()) {
             for (param in body.paramLists[0].params) {
                 let name = param.identifier.Val()
@@ -116,6 +260,10 @@ private class RealASTLoweringScope {
                     if (let Some(typeNode) <- param.typeNode) {
                         if (let Some(kind) <- RealASTValueTypeKind(typeNode)) {
                             localKinds[name] = kind
+                        }
+                        if (let Some(typeKey) <- RealASTValueTypeKey(typeNode,
+                            packageScope: packageScope)) {
+                            localTypes[name] = typeKey
                         }
                     }
                 }
@@ -127,12 +275,13 @@ private class RealASTLoweringScope {
         return locals.contains(name)
     }
 
-    func Add(name: String, mutable: Bool, kind: Int64): Bool {
+    func Add(name: String, mutable: Bool, typeKey: String): Bool {
         if (locals.contains(name)) {
             return false
         }
         locals[name] = mutable
-        localKinds[name] = kind
+        localKinds[name] = RealASTKindFromTypeKey(typeKey)
+        localTypes[name] = typeKey
         return true
     }
 
@@ -140,8 +289,8 @@ private class RealASTLoweringScope {
         return locals.get(name) ?? false
     }
 
-    func Kind(name: String): Option<Int64> {
-        return localKinds.get(name)
+    func TypeKey(name: String): Option<String> {
+        return localTypes.get(name)
     }
 
     func Save(): RealASTScopeSnapshot {
@@ -157,7 +306,12 @@ private class RealASTLoweringScope {
         for ((name, kind) in snapshot.localKinds) {
             localKinds[name] = kind
         }
+        localTypes.clear()
+        for ((name, ty) in snapshot.localTypes) {
+            localTypes[name] = ty
+        }
         loopDepth = snapshot.loopDepth
+        thisStructName = snapshot.thisStructName
     }
 
     func EnterLoop(): Unit {
@@ -181,6 +335,18 @@ public func DescribeRealASTFunctionLowering(pkg: AstPackage): ArrayList<String> 
         for (decl in file.decls) {
             if ((decl as AstMainDecl).isSome() || (decl as AstFuncDecl).isSome()) {
                 out.add(RealASTDisplayName(decl))
+            } else if (let Some(structDecl) <- (decl as AstStructDecl)) {
+                if (let Some(body) <- structDecl.body) {
+                    for (member in body.decls) {
+                        if (let Some(funcDecl) <- (member as AstFuncDecl)) {
+                            if (!funcDecl.TestAttr(AstAttribute.CONSTRUCTOR) &&
+                                funcDecl.identifier.Val() != "init") {
+                                out.add(RealASTStructMethodName(structDecl.identifier.Val(),
+                                    funcDecl.identifier.Val()))
+                            }
+                        }
+                    }
+                }
             }
         }
     }
@@ -212,7 +378,25 @@ private func BuildRealASTPackageSpec(pkg: AstPackage, context: CHIRContext): Opt
         let fileName = if (file.filePath.isEmpty()) { file.fileName } else { file.filePath }
         spec.RegisterSourceFile(UInt32(file.begin.fileID), fileName)
         for (decl in file.decls) {
-            if (let Some(fnSpec) <- BuildRealASTFunctionSpec(pkg.fullPackageName, decl, context, fileName,
+            if (let Some(structDecl) <- (decl as AstStructDecl)) {
+                let structSpec = match (BuildRealASTStructSpec(pkg.fullPackageName, structDecl, context, fileName,
+                    packageScope)) {
+                    case Some(value) => value
+                    case None => return None
+                }
+                spec.AddType(structSpec)
+                if (let Some(info) <- packageScope.GetStruct(structDecl.identifier.Val())) {
+                    for ((_, methodInfo) in info.methods) {
+                        let methodSpec = match (BuildRealASTStructMethodSpec(pkg.fullPackageName, info,
+                            methodInfo, context, fileName, packageScope)) {
+                            case Some(value) => value
+                            case None => return None
+                        }
+                        spec.AddFunction(methodSpec)
+                        funcCount++
+                    }
+                }
+            } else if (let Some(fnSpec) <- BuildRealASTFunctionSpec(pkg.fullPackageName, decl, context, fileName,
                 packageScope)) {
                 spec.AddFunction(fnSpec)
                 funcCount++
@@ -231,13 +415,36 @@ private func BuildRealASTPackageLoweringScope(pkg: AstPackage): Option<RealASTPa
     let scope = RealASTPackageLoweringScope()
     for (file in pkg.files) {
         for (decl in file.decls) {
+            if (let Some(structDecl) <- (decl as AstStructDecl)) {
+                let info = match (AnalyzeRealASTStruct(structDecl, scope)) {
+                    case Some(value) => value
+                    case None => return None
+                }
+                if (!scope.AddStruct(info)) {
+                    return None
+                }
+            }
+        }
+    }
+    for (file in pkg.files) {
+        for (decl in file.decls) {
+            if (let Some(structDecl) <- (decl as AstStructDecl)) {
+                if (let Some(info) <- scope.GetStruct(structDecl.identifier.Val())) {
+                    for ((_, methodInfo) in info.methods) {
+                        if (!scope.AddFunction(methodInfo.loweredName, methodInfo.funcInfo)) {
+                            return None
+                        }
+                    }
+                }
+                continue
+            }
             if (let Some(funcDecl) <- (decl as AstFuncDecl)) {
                 let name = funcDecl.identifier.Val()
                 let body = match (funcDecl.funcBody) {
                     case Some(value) => value
                     case None => return None
                 }
-                let info = match (BuildRealASTFunctionInfo(body)) {
+                let info = match (BuildRealASTFunctionInfo(body, scope)) {
                     case Some(value) => value
                     case None => return None
                 }
@@ -250,15 +457,16 @@ private func BuildRealASTPackageLoweringScope(pkg: AstPackage): Option<RealASTPa
     return Some(scope)
 }
 
-private func BuildRealASTFunctionInfo(body: AstFuncBody): Option<RealASTFunctionInfo> {
+private func BuildRealASTFunctionInfo(body: AstFuncBody,
+    packageScope: RealASTPackageLoweringScope): Option<RealASTFunctionInfo> {
     if (body.generic.isSome() || body.paramLists.size != 1) {
         return None
     }
-    let returnKind = match (RealASTFunctionReturnKind(body)) {
+    let returnType = match (RealASTFunctionReturnType(body, packageScope)) {
         case Some(value) => value
         case None => return None
     }
-    let info = RealASTFunctionInfo(returnKind)
+    let info = RealASTFunctionInfo(returnType)
     let paramList = body.paramLists[0]
     if (paramList.hasVariableLenArg) {
         return None
@@ -271,35 +479,30 @@ private func BuildRealASTFunctionInfo(body: AstFuncBody): Option<RealASTFunction
             case Some(value) => value
             case None => return None
         }
-        let paramKind = match (RealASTValueTypeKind(typeNode)) {
+        let paramType = match (RealASTValueTypeKey(typeNode, packageScope: Some(packageScope))) {
             case Some(value) => value
             case None => return None
         }
-        info.paramKinds.add(paramKind)
+        info.paramKinds.add(RealASTKindFromTypeKey(paramType))
+        info.paramTypes.add(paramType)
     }
     return Some(info)
 }
 
-private func RealASTFunctionReturnKind(body: AstFuncBody): Option<Int64> {
+private func BuildRealASTMethodFunctionInfo(body: AstFuncBody,
+    packageScope: RealASTPackageLoweringScope): Option<RealASTFunctionInfo> {
+    return BuildRealASTFunctionInfo(body, packageScope)
+}
+
+private func RealASTFunctionReturnType(body: AstFuncBody,
+    packageScope: RealASTPackageLoweringScope): Option<String> {
     if (let Some(retType) <- body.retType) {
-        if (IsRealASTInt64Type(retType)) {
-            return Some(REAL_AST_RETURN_INT)
-        }
-        if (IsRealASTBoolType(retType)) {
-            return Some(REAL_AST_RETURN_BOOL)
-        }
-        if (IsRealASTUnitType(retType)) {
-            return Some(REAL_AST_RETURN_UNIT)
-        }
-        if (IsRealASTStringType(retType)) {
-            return Some(REAL_AST_RETURN_STRING)
-        }
-        return None
+        return RealASTReturnTypeKey(retType, packageScope)
     }
     if (RealASTBodyHasValueReturn(body)) {
         return None
     }
-    return Some(REAL_AST_RETURN_UNIT)
+    return Some(REAL_AST_TYPE_UNIT)
 }
 
 private func RealASTBodyHasValueReturn(body: AstFuncBody): Bool {
@@ -345,6 +548,209 @@ private func RealASTNodeHasValueReturn(node: AstNode): Bool {
     return false
 }
 
+private func AnalyzeRealASTStruct(structDecl: AstStructDecl,
+    packageScope: RealASTPackageLoweringScope): Option<RealASTStructInfo> {
+    let name = structDecl.identifier.Val()
+    if (name.isEmpty() || structDecl.generic.isSome() || !structDecl.inheritedTypes.isEmpty()) {
+        return None
+    }
+    let body = match (structDecl.body) {
+        case Some(value) => value
+        case None => return None
+    }
+    let info = RealASTStructInfo(name, structDecl)
+    var initCount: Int64 = 0
+    let methodDecls = ArrayList<AstFuncDecl>()
+    for (member in body.decls) {
+        if (let Some(fieldDecl) <- (member as AstVarDecl)) {
+            if (fieldDecl.isConst || fieldDecl.initializer.isSome()) {
+                return None
+            }
+            let typeNode = match (fieldDecl.typeNode) {
+                case Some(value) => value
+                case None => return None
+            }
+            let fieldType = match (RealASTPrimitiveFieldTypeKey(typeNode)) {
+                case Some(value) => value
+                case None => return None
+            }
+            if (!info.AddField(fieldDecl.identifier.Val(), fieldType, fieldDecl.isVar)) {
+                return None
+            }
+            continue
+        }
+        if (let Some(funcDecl) <- (member as AstFuncDecl)) {
+            let body = match (funcDecl.funcBody) {
+                case Some(value) => value
+                case None => return None
+            }
+            if (funcDecl.TestAttr(AstAttribute.CONSTRUCTOR) || funcDecl.identifier.Val() == "init") {
+                initCount++
+                if (initCount != 1) {
+                    return None
+                }
+                if (!AnalyzeRealASTStructInit(info, body, packageScope)) {
+                    return None
+                }
+            } else {
+                methodDecls.add(funcDecl)
+            }
+            continue
+        }
+        return None
+    }
+    if (initCount != 1 || info.fieldNames.isEmpty()) {
+        return None
+    }
+    for (methodDecl in methodDecls) {
+        let methodBody = match (methodDecl.funcBody) {
+            case Some(value) => value
+            case None => return None
+        }
+        let methodInfo = match (BuildRealASTMethodFunctionInfo(methodBody, packageScope)) {
+            case Some(value) => value
+            case None => return None
+        }
+        let methodName = methodDecl.identifier.Val()
+        let loweredName = RealASTStructMethodName(info.name, methodName)
+        if (!info.AddMethod(RealASTMethodInfo(methodName, loweredName, methodDecl, methodInfo))) {
+            return None
+        }
+    }
+    return Some(info)
+}
+
+private func AnalyzeRealASTStructInit(info: RealASTStructInfo, body: AstFuncBody,
+    packageScope: RealASTPackageLoweringScope): Bool {
+    if (body.generic.isSome() || body.paramLists.size != 1 || body.retType.isSome()) {
+        return false
+    }
+    let paramList = body.paramLists[0]
+    if (paramList.hasVariableLenArg) {
+        return false
+    }
+    for (param in paramList.params) {
+        if (param.assignment.isSome()) {
+            return false
+        }
+        let typeNode = match (param.typeNode) {
+            case Some(value) => value
+            case None => return false
+        }
+        let paramType = match (RealASTValueTypeKey(typeNode, packageScope: Some(packageScope))) {
+            case Some(value) => value
+            case None => return false
+        }
+        info.initParams.add(param.identifier.Val())
+        info.initParamTypes.add(paramType)
+    }
+    let block = match (body.body) {
+        case Some(value) => value
+        case None => return false
+    }
+    let assigned = HashSet<String>()
+    for (node in block.body) {
+        let assign = match (node as AstAssignExpr) {
+            case Some(value) => value
+            case None => return false
+        }
+        if (assign.op != AstTokenKind.ASSIGN) {
+            return false
+        }
+        let left = match (assign.leftValue) {
+            case Some(value) => value
+            case None => return false
+        }
+        let fieldName = match (RealASTFieldNameFromThisTarget(left)) {
+            case Some(value) => value
+            case None => return false
+        }
+        if (assigned.contains(fieldName) || info.FieldType(fieldName).isNone()) {
+            return false
+        }
+        let rhs = match (assign.rightExpr) {
+            case Some(value) => value
+            case None => return false
+        }
+        info.initAssigns.add(RealASTStructInitAssign(fieldName, rhs))
+        assigned.add(fieldName)
+    }
+    return assigned.size == info.fieldNames.size
+}
+
+private func BuildRealASTStructSpec(packageName: String, structDecl: AstStructDecl, context: CHIRContext,
+    sourceFileKey: String, packageScope: RealASTPackageLoweringScope): Option<AST2CHIRNominalSpec> {
+    let info = match (packageScope.GetStruct(structDecl.identifier.Val())) {
+        case Some(value) => value
+        case None => return None
+    }
+    let spec = AST2CHIRNominalSpec(AST2CHIRNominalKind.STRUCT, info.name, packageName: packageName,
+        srcCodeIdentifier: info.name, rawMangledName: RealASTStableMangledName(packageName, structDecl))
+    spec.SetSourceFileKey(sourceFileKey)
+    if (structDecl.IsExportedDecl()) {
+        spec.AddAttribute(Attribute.PUBLIC)
+    } else {
+        spec.AddAttribute(Attribute.PRIVATE)
+    }
+    for (fieldName in info.fieldNames) {
+        let fieldTypeKey = match (info.FieldType(fieldName)) {
+            case Some(value) => value
+            case None => return None
+        }
+        let fieldTy = match (RealASTCHIRTypeForKey(context, fieldTypeKey)) {
+            case Some(value) => value
+            case None => return None
+        }
+        let memberSpec = AST2CHIRMemberVarSpec(fieldName, fieldTy, rawMangledName: fieldName,
+            isReadOnly: !(info.FieldCanWrite(fieldName)))
+        memberSpec.SetSourceFileKey(sourceFileKey)
+        spec.AddInstanceVar(memberSpec)
+    }
+    return Some(spec)
+}
+
+private func BuildRealASTStructMethodSpec(packageName: String, structInfo: RealASTStructInfo,
+    methodInfo: RealASTMethodInfo, context: CHIRContext, sourceFileKey: String,
+    packageScope: RealASTPackageLoweringScope): Option<AST2CHIRFunctionSpec> {
+    let body = match (methodInfo.funcDecl.funcBody) {
+        case Some(value) => value
+        case None => return None
+    }
+    let params = match (BuildRealASTParamLowering(context, body, packageScope, allowParams: true)) {
+        case Some(value) => value
+        case None => return None
+    }
+    params.types.add(context.GetInt64Ty(), at: 0)
+    params.names.add("this", at: 0)
+    let lowered = LowerRealASTBody(body, packageScope, thisStructName: structInfo.name)
+    if (!lowered.ok) {
+        return None
+    }
+    let returnTy = match (RealASTReturnType(context, body, lowered, packageScope)) {
+        case Some(value) => value
+        case None => return None
+    }
+    let fnSpec = AST2CHIRFunctionSpec(methodInfo.loweredName, params.types, returnTy,
+        srcCodeIdentifier: methodInfo.loweredName, rawMangledName: methodInfo.loweredName,
+        packageName: packageName, funcKind: FuncKind.DEFAULT, emitBody: true)
+    fnSpec.EnableRealBody()
+    for (name in params.names) {
+        fnSpec.AddParamName(name)
+    }
+    for (stmt in lowered.stmts) {
+        fnSpec.AddBodyStatement(stmt)
+    }
+    if (methodInfo.funcDecl.IsExportedDecl()) {
+        fnSpec.AddAttribute(Attribute.PUBLIC)
+    } else {
+        fnSpec.AddAttribute(Attribute.PRIVATE)
+    }
+    if (!sourceFileKey.isEmpty()) {
+        fnSpec.SetSourceFileKey(sourceFileKey)
+    }
+    return Some(fnSpec)
+}
+
 private func BuildRealASTFunctionSpec(
     packageName: String,
     decl: AstDecl,
@@ -360,7 +766,7 @@ private func BuildRealASTFunctionSpec(
         case Some(value) => value
         case None => return None
     }
-    let params = match (BuildRealASTParamLowering(context, body, allowParams: !isMain)) {
+    let params = match (BuildRealASTParamLowering(context, body, packageScope, allowParams: !isMain)) {
         case Some(value) => value
         case None => return None
     }
@@ -368,7 +774,7 @@ private func BuildRealASTFunctionSpec(
     if (!lowered.ok) {
         return None
     }
-    let returnTy = match (RealASTReturnType(context, body, lowered)) {
+    let returnTy = match (RealASTReturnType(context, body, lowered, packageScope)) {
         case Some(value) => value
         case None => return None
     }
@@ -412,6 +818,7 @@ private func GetRealASTFuncBody(decl: AstDecl): Option<AstFuncBody> {
 private func BuildRealASTParamLowering(
     context: CHIRContext,
     body: AstFuncBody,
+    packageScope: RealASTPackageLoweringScope,
     allowParams!: Bool = true
 ): Option<RealASTParamLowering> {
     if (body.generic.isSome()) {
@@ -434,7 +841,7 @@ private func BuildRealASTParamLowering(
         }
         let paramTy = match (param.typeNode) {
             case Some(typeNode) =>
-                match (RealASTParamType(context, typeNode)) {
+                match (RealASTParamType(context, typeNode, packageScope)) {
                     case Some(value) => value
                     case None => return None
                 }
@@ -446,7 +853,8 @@ private func BuildRealASTParamLowering(
     return Some(out)
 }
 
-private func LowerRealASTBody(body: AstFuncBody, packageScope: RealASTPackageLoweringScope): RealASTBodyLowering {
+private func LowerRealASTBody(body: AstFuncBody, packageScope: RealASTPackageLoweringScope,
+    thisStructName!: String = ""): RealASTBodyLowering {
     let empty = ArrayList<AST2CHIRStmtSpec>()
     let block = match (body.body) {
         case Some(value) => value
@@ -456,7 +864,7 @@ private func LowerRealASTBody(body: AstFuncBody, packageScope: RealASTPackageLow
     if (block.body.isEmpty()) {
         return RealASTBodyLowering(true, stmts, REAL_AST_RETURN_NONE)
     }
-    let scope = RealASTLoweringScope(body)
+    let scope = RealASTLoweringScope(body, packageScope: Some(packageScope), thisStructName: thisStructName)
     let lowered = match (LowerRealASTBlock(block, scope, packageScope, scoped: false)) {
         case Some(value) => value
         case None => return RealASTBodyLowering(false, empty, REAL_AST_RETURN_NONE)
@@ -472,7 +880,7 @@ private func LowerRealASTBlock(
 ): Option<RealASTBodyLowering> {
     let snapshot: Option<RealASTScopeSnapshot> = if (scoped) { Some(scope.Save()) } else { None }
     let stmts = ArrayList<AST2CHIRStmtSpec>()
-    var returnKind = REAL_AST_RETURN_NONE
+    var returnType = REAL_AST_TYPE_NONE
     for (node in block.body) {
         let lowered = match (LowerRealASTBodyNode(node, scope, packageScope)) {
             case Some(value) => value
@@ -483,14 +891,14 @@ private func LowerRealASTBlock(
                 return None
         }
         stmts.add(lowered.stmt)
-        if (lowered.returnKind != REAL_AST_RETURN_NONE) {
-            returnKind = lowered.returnKind
+        if (!lowered.returnType.isEmpty()) {
+            returnType = lowered.returnType
         }
     }
     if (let Some(value) <- snapshot) {
         scope.Restore(value)
     }
-    return Some(RealASTBodyLowering(true, stmts, returnKind))
+    return Some(RealASTBodyLowering(true, stmts, returnType))
 }
 
 private func LowerRealASTBodyNode(
@@ -517,13 +925,24 @@ private func LowerRealASTBodyNode(
         return LowerRealASTJump(jumpExpr, scope)
     }
     if (let Some(call) <- (node as AstCallExpr)) {
-        return LowerRealASTPrint(call, scope, packageScope)
+        if (let Some(printStmt) <- LowerRealASTPrint(call, scope, packageScope)) {
+            return Some(printStmt)
+        }
+        let callSpec = match (LowerRealASTCall(call, scope, packageScope)) {
+            case Some(value) => value
+            case None => return None
+        }
+        return Some(RealASTStmtAndKind(AST2CHIRStmtSpec.ExprStmt(callSpec), REAL_AST_RETURN_NONE))
     }
     return None
 }
 
 private func RealASTStmtAndKind(stmt: AST2CHIRStmtSpec, kind: Int64): RealASTStmtLowering {
     return RealASTStmtLowering(stmt, kind)
+}
+
+private func RealASTStmtAndType(stmt: AST2CHIRStmtSpec, typeKey: String): RealASTStmtLowering {
+    return RealASTStmtLowering(stmt, typeKey)
 }
 
 private func LowerRealASTVarDecl(
@@ -534,9 +953,9 @@ private func LowerRealASTVarDecl(
     if (varDecl.isConst) {
         return None
     }
-    var declaredKind: Option<Int64> = None
+    var declaredType: Option<String> = None
     if (let Some(typeNode) <- varDecl.typeNode) {
-        declaredKind = match (RealASTLocalTypeKind(typeNode)) {
+        declaredType = match (RealASTLocalTypeKey(typeNode, packageScope)) {
             case Some(kind) => Some(kind)
             case None => return None
         }
@@ -549,12 +968,12 @@ private func LowerRealASTVarDecl(
         case Some(value) => value
         case None => return None
     }
-    let initKind = match (RealASTExprValueKind(initExpr, scope, packageScope)) {
+    let initType = match (RealASTExprValueType(initExpr, scope, packageScope)) {
         case Some(kind) => kind
         case None => return None
     }
-    if (let Some(targetKind) <- declaredKind) {
-        if (targetKind != initKind) {
+    if (let Some(targetType) <- declaredType) {
+        if (targetType != initType) {
             return None
         }
     }
@@ -562,7 +981,7 @@ private func LowerRealASTVarDecl(
         case Some(value) => value
         case None => return None
     }
-    if (!scope.Add(name, varDecl.isVar, initKind)) {
+    if (!scope.Add(name, varDecl.isVar, initType)) {
         return None
     }
     return Some(RealASTStmtAndKind(AST2CHIRStmtSpec.Let(name, exprSpec, isVar: varDecl.isVar),
@@ -581,11 +1000,20 @@ private func LowerRealASTAssign(
         case Some(value) => value
         case None => return None
     }
+    if (let Some(member) <- (left as AstMemberAccess)) {
+        return LowerRealASTFieldAssign(member, assign, scope, packageScope)
+    }
     let ref = match (left as AstRefExpr) {
         case Some(value) => value
         case None => return None
     }
     let name = ref.ref.identifier.Val()
+    if (!scope.Contains(name)) {
+        if (let Some(stmt) <- LowerRealASTImplicitThisFieldAssign(name, assign, scope, packageScope)) {
+            return Some(stmt)
+        }
+        return None
+    }
     if (name.isEmpty() || !scope.Contains(name) || !scope.CanAssign(name)) {
         return None
     }
@@ -593,12 +1021,12 @@ private func LowerRealASTAssign(
         case Some(value) => value
         case None => return None
     }
-    let rightKind = match (RealASTExprValueKind(right, scope, packageScope)) {
+    let rightType = match (RealASTExprValueType(right, scope, packageScope)) {
         case Some(kind) => kind
         case None => return None
     }
-    if (let Some(localKind) <- scope.Kind(name)) {
-        if (localKind != rightKind) {
+    if (let Some(localType) <- scope.TypeKey(name)) {
+        if (localType != rightType) {
             return None
         }
     }
@@ -607,6 +1035,102 @@ private func LowerRealASTAssign(
         case None => return None
     }
     return Some(RealASTStmtAndKind(AST2CHIRStmtSpec.Assign(name, exprSpec), REAL_AST_RETURN_NONE))
+}
+
+private func LowerRealASTFieldAssign(member: AstMemberAccess, assign: AstAssignExpr,
+    scope: RealASTLoweringScope, packageScope: RealASTPackageLoweringScope): Option<RealASTStmtLowering> {
+    if (!member.typeArguments.isEmpty()) {
+        return None
+    }
+    let base = match (member.baseExpr) {
+        case Some(value) => value
+        case None => return None
+    }
+    let baseRef = match (base as AstRefExpr) {
+        case Some(value) => value
+        case None => return None
+    }
+    let localName = baseRef.ref.identifier.Val()
+    let baseType = match (scope.TypeKey(localName)) {
+        case Some(value) => value
+        case None => return None
+    }
+    let structName = match (RealASTStructNameFromTypeKey(baseType)) {
+        case Some(value) => value
+        case None => return None
+    }
+    let structInfo = match (packageScope.GetStruct(structName)) {
+        case Some(value) => value
+        case None => return None
+    }
+    let fieldName = member.field.GetRawText()
+    if (!structInfo.FieldCanWrite(fieldName)) {
+        return None
+    }
+    let fieldType = match (structInfo.FieldType(fieldName)) {
+        case Some(value) => value
+        case None => return None
+    }
+    let fieldIndex = match (structInfo.FieldIndex(fieldName)) {
+        case Some(value) => value
+        case None => return None
+    }
+    let right = match (assign.rightExpr) {
+        case Some(value) => value
+        case None => return None
+    }
+    let rightType = match (RealASTExprValueType(right, scope, packageScope)) {
+        case Some(value) => value
+        case None => return None
+    }
+    if (rightType != fieldType) {
+        return None
+    }
+    let exprSpec = match (LowerRealASTExpr(right, scope, packageScope)) {
+        case Some(value) => value
+        case None => return None
+    }
+    return Some(RealASTStmtAndKind(AST2CHIRStmtSpec.StructSetField(localName, fieldIndex + 1, exprSpec),
+        REAL_AST_RETURN_NONE))
+}
+
+private func LowerRealASTImplicitThisFieldAssign(fieldName: String, assign: AstAssignExpr,
+    scope: RealASTLoweringScope, packageScope: RealASTPackageLoweringScope): Option<RealASTStmtLowering> {
+    if (scope.thisStructName.isEmpty()) {
+        return None
+    }
+    let structInfo = match (packageScope.GetStruct(scope.thisStructName)) {
+        case Some(value) => value
+        case None => return None
+    }
+    if (!structInfo.FieldCanWrite(fieldName)) {
+        return None
+    }
+    let fieldType = match (structInfo.FieldType(fieldName)) {
+        case Some(value) => value
+        case None => return None
+    }
+    let fieldIndex = match (structInfo.FieldIndex(fieldName)) {
+        case Some(value) => value
+        case None => return None
+    }
+    let right = match (assign.rightExpr) {
+        case Some(value) => value
+        case None => return None
+    }
+    let rightType = match (RealASTExprValueType(right, scope, packageScope)) {
+        case Some(value) => value
+        case None => return None
+    }
+    if (rightType != fieldType) {
+        return None
+    }
+    let exprSpec = match (LowerRealASTExpr(right, scope, packageScope)) {
+        case Some(value) => value
+        case None => return None
+    }
+    return Some(RealASTStmtAndKind(AST2CHIRStmtSpec.StructSetField("this", fieldIndex + 1, exprSpec),
+        REAL_AST_RETURN_NONE))
 }
 
 private func LowerRealASTReturn(
@@ -628,7 +1152,7 @@ private func LowerRealASTReturn(
                 return Some(RealASTStmtAndKind(AST2CHIRStmtSpec.ReturnNone(), REAL_AST_RETURN_UNIT))
             }
         }
-        let exprKind = match (RealASTExprValueKind(expr, scope, packageScope)) {
+        let exprType = match (RealASTExprValueType(expr, scope, packageScope)) {
             case Some(kind) => kind
             case None => return None
         }
@@ -636,7 +1160,7 @@ private func LowerRealASTReturn(
             case Some(value) => value
             case None => return None
         }
-        return Some(RealASTStmtAndKind(AST2CHIRStmtSpec.Return(exprSpec), exprKind))
+        return Some(RealASTStmtAndType(AST2CHIRStmtSpec.Return(exprSpec), exprType))
     }
     return Some(RealASTStmtAndKind(AST2CHIRStmtSpec.ReturnNone(), REAL_AST_RETURN_UNIT))
 }
@@ -650,11 +1174,11 @@ private func LowerRealASTIf(
         case Some(value) => value
         case None => return None
     }
-    let condKind = match (RealASTExprValueKind(condExpr, scope, packageScope)) {
+    let condType = match (RealASTExprValueType(condExpr, scope, packageScope)) {
         case Some(value) => value
         case None => return None
     }
-    if (condKind != REAL_AST_RETURN_BOOL) {
+    if (condType != REAL_AST_TYPE_BOOL) {
         return None
     }
     let condSpec = match (LowerRealASTExpr(condExpr, scope, packageScope)) {
@@ -692,12 +1216,12 @@ private func LowerRealASTIf(
             return None
         }
     }
-    let returnKind = if (elseKind != REAL_AST_RETURN_NONE) {
-        elseKind
+    let returnType = if (elseKind != REAL_AST_RETURN_NONE) {
+        RealASTTypeKeyFromKind(elseKind)
     } else {
-        thenLowering.returnKind
+        thenLowering.returnType
     }
-    return Some(RealASTStmtAndKind(AST2CHIRStmtSpec.If(condSpec, thenLowering.stmts, elseStmts), returnKind))
+    return Some(RealASTStmtAndType(AST2CHIRStmtSpec.If(condSpec, thenLowering.stmts, elseStmts), returnType))
 }
 
 private func LowerRealASTWhile(
@@ -709,11 +1233,11 @@ private func LowerRealASTWhile(
         case Some(value) => value
         case None => return None
     }
-    let condKind = match (RealASTExprValueKind(condExpr, scope, packageScope)) {
+    let condType = match (RealASTExprValueType(condExpr, scope, packageScope)) {
         case Some(value) => value
         case None => return None
     }
-    if (condKind != REAL_AST_RETURN_BOOL) {
+    if (condType != REAL_AST_TYPE_BOOL) {
         return None
     }
     let condSpec = match (LowerRealASTExpr(condExpr, scope, packageScope)) {
@@ -784,11 +1308,11 @@ private func LowerRealASTPrint(
         return Some(RealASTStmtAndKind(AST2CHIRStmtSpec.PrintStr(text, newline: newline),
             REAL_AST_RETURN_NONE))
     }
-    let kind = match (RealASTExprValueKind(argExpr, scope, packageScope)) {
+    let typeKey = match (RealASTExprValueType(argExpr, scope, packageScope)) {
         case Some(value) => value
         case None => return None
     }
-    if (kind != REAL_AST_RETURN_INT && kind != REAL_AST_RETURN_BOOL && kind != REAL_AST_RETURN_STRING) {
+    if (typeKey != REAL_AST_TYPE_INT && typeKey != REAL_AST_TYPE_BOOL && typeKey != REAL_AST_TYPE_STRING) {
         return None
     }
     let exprSpec = match (LowerRealASTExpr(argExpr, scope, packageScope)) {
@@ -826,10 +1350,16 @@ private func LowerRealASTExpr(
     }
     if (let Some(refExpr) <- (expr as AstRefExpr)) {
         let name = refExpr.ref.identifier.Val()
-        if (name.isEmpty() || !scope.Contains(name)) {
-            return None
+        if (!name.isEmpty() && scope.Contains(name)) {
+            return Some(AST2CHIRExprSpec.Ref(name))
         }
-        return Some(AST2CHIRExprSpec.Ref(name))
+        if (let Some(spec) <- LowerRealASTImplicitThisFieldRead(name, scope, packageScope)) {
+            return Some(spec)
+        }
+        return None
+    }
+    if (let Some(member) <- (expr as AstMemberAccess)) {
+        return LowerRealASTFieldRead(member, scope, packageScope)
     }
     if (let Some(binary) <- (expr as AstBinaryExpr)) {
         if (RealASTExprValueKind(binary, scope, packageScope).isNone()) {
@@ -887,6 +1417,9 @@ private func LowerRealASTCall(
         case Some(value) => value
         case None => return None
     }
+    if (let Some(member) <- (base as AstMemberAccess)) {
+        return LowerRealASTMethodCall(call, member, scope, packageScope)
+    }
     let calleeRef = match (base as AstRefExpr) {
         case Some(value) => value
         case None => return None
@@ -898,15 +1431,17 @@ private func LowerRealASTCall(
     if (calleeName.isEmpty() || scope.Contains(calleeName)) {
         return None
     }
+    if (packageScope.IsStruct(calleeName)) {
+        return LowerRealASTStructConstruction(calleeName, call, scope, packageScope)
+    }
     let info = match (packageScope.GetFunction(calleeName)) {
         case Some(value) => value
         case None => return None
     }
-    if (info.returnKind != REAL_AST_RETURN_INT && info.returnKind != REAL_AST_RETURN_BOOL &&
-        info.returnKind != REAL_AST_RETURN_STRING) {
+    if (info.returnType == REAL_AST_TYPE_UNIT || info.returnType == REAL_AST_TYPE_NONE) {
         return None
     }
-    if (call.args.size != info.paramKinds.size) {
+    if (call.args.size != info.paramTypes.size) {
         return None
     }
     let argSpecs = ArrayList<AST2CHIRExprSpec>()
@@ -920,11 +1455,11 @@ private func LowerRealASTCall(
             case Some(value) => value
             case None => return None
         }
-        let argKind = match (RealASTExprValueKind(argExpr, scope, packageScope)) {
+        let argType = match (RealASTExprValueType(argExpr, scope, packageScope)) {
             case Some(value) => value
             case None => return None
         }
-        if (argKind != info.paramKinds[idx]) {
+        if (argType != info.paramTypes[idx]) {
             return None
         }
         let argSpec = match (LowerRealASTExpr(argExpr, scope, packageScope)) {
@@ -937,52 +1472,265 @@ private func LowerRealASTCall(
     return Some(AST2CHIRExprSpec.Call(calleeName, argSpecs))
 }
 
+private func LowerRealASTStructConstruction(structName: String, call: AstCallExpr,
+    scope: RealASTLoweringScope, packageScope: RealASTPackageLoweringScope): Option<AST2CHIRExprSpec> {
+    let info = match (packageScope.GetStruct(structName)) {
+        case Some(value) => value
+        case None => return None
+    }
+    if (call.args.size != info.initParams.size) {
+        return None
+    }
+    let argMap = HashMap<String, AST2CHIRExprSpec>()
+    var idx: Int64 = 0
+    while (idx < call.args.size) {
+        let arg = call.args[idx]
+        if (!arg.name.Empty() || arg.withInout) {
+            return None
+        }
+        let argExpr = match (arg.expr) {
+            case Some(value) => value
+            case None => return None
+        }
+        let argType = match (RealASTExprValueType(argExpr, scope, packageScope)) {
+            case Some(value) => value
+            case None => return None
+        }
+        if (argType != info.initParamTypes[idx]) {
+            return None
+        }
+        let argSpec = match (LowerRealASTExpr(argExpr, scope, packageScope)) {
+            case Some(value) => value
+            case None => return None
+        }
+        argMap[info.initParams[idx]] = argSpec
+        idx++
+    }
+    let initByField = HashMap<String, AstExpr>()
+    for (assign in info.initAssigns) {
+        initByField[assign.fieldName] = assign.rhs
+    }
+    let fields = ArrayList<AST2CHIRExprSpec>()
+    for (fieldName in info.fieldNames) {
+        let rhs = match (initByField.get(fieldName)) {
+            case Some(value) => value
+            case None => return None
+        }
+        let fieldSpec = match (LowerRealASTInitRhs(rhs, argMap, scope, packageScope)) {
+            case Some(value) => value
+            case None => return None
+        }
+        fields.add(fieldSpec)
+    }
+    return Some(AST2CHIRExprSpec.EnumMake(0, fields))
+}
+
+private func LowerRealASTMethodCall(call: AstCallExpr, member: AstMemberAccess,
+    scope: RealASTLoweringScope, packageScope: RealASTPackageLoweringScope): Option<AST2CHIRExprSpec> {
+    if (!member.typeArguments.isEmpty()) {
+        return None
+    }
+    let receiverExpr = match (member.baseExpr) {
+        case Some(value) => value
+        case None => return None
+    }
+    let receiverType = match (RealASTExprValueType(receiverExpr, scope, packageScope)) {
+        case Some(value) => value
+        case None => return None
+    }
+    let structName = match (RealASTStructNameFromTypeKey(receiverType)) {
+        case Some(value) => value
+        case None => return None
+    }
+    let structInfo = match (packageScope.GetStruct(structName)) {
+        case Some(value) => value
+        case None => return None
+    }
+    let method = match (structInfo.GetMethod(member.field.GetRawText())) {
+        case Some(value) => value
+        case None => return None
+    }
+    if (call.args.size != method.funcInfo.paramTypes.size) {
+        return None
+    }
+    let argSpecs = ArrayList<AST2CHIRExprSpec>()
+    let receiverSpec = match (LowerRealASTExpr(receiverExpr, scope, packageScope)) {
+        case Some(value) => value
+        case None => return None
+    }
+    argSpecs.add(receiverSpec)
+    var idx: Int64 = 0
+    while (idx < call.args.size) {
+        let arg = call.args[idx]
+        if (!arg.name.Empty() || arg.withInout) {
+            return None
+        }
+        let argExpr = match (arg.expr) {
+            case Some(value) => value
+            case None => return None
+        }
+        let argType = match (RealASTExprValueType(argExpr, scope, packageScope)) {
+            case Some(value) => value
+            case None => return None
+        }
+        if (argType != method.funcInfo.paramTypes[idx]) {
+            return None
+        }
+        let argSpec = match (LowerRealASTExpr(argExpr, scope, packageScope)) {
+            case Some(value) => value
+            case None => return None
+        }
+        argSpecs.add(argSpec)
+        idx++
+    }
+    return Some(AST2CHIRExprSpec.Call(method.loweredName, argSpecs))
+}
+
+private func LowerRealASTFieldRead(member: AstMemberAccess, scope: RealASTLoweringScope,
+    packageScope: RealASTPackageLoweringScope): Option<AST2CHIRExprSpec> {
+    if (!member.typeArguments.isEmpty()) {
+        return None
+    }
+    let base = match (member.baseExpr) {
+        case Some(value) => value
+        case None => return None
+    }
+    let baseType = match (RealASTExprValueType(base, scope, packageScope)) {
+        case Some(value) => value
+        case None => return None
+    }
+    let structName = match (RealASTStructNameFromTypeKey(baseType)) {
+        case Some(value) => value
+        case None => return None
+    }
+    let structInfo = match (packageScope.GetStruct(structName)) {
+        case Some(value) => value
+        case None => return None
+    }
+    let fieldName = member.field.GetRawText()
+    let fieldType = match (structInfo.FieldType(fieldName)) {
+        case Some(value) => value
+        case None => return None
+    }
+    let fieldIndex = match (structInfo.FieldIndex(fieldName)) {
+        case Some(value) => value
+        case None => return None
+    }
+    let baseSpec = match (LowerRealASTExpr(base, scope, packageScope)) {
+        case Some(value) => value
+        case None => return None
+    }
+    return Some(AST2CHIRExprSpec.StructField(baseSpec, fieldIndex + 1, fieldType))
+}
+
+private func LowerRealASTImplicitThisFieldRead(fieldName: String, scope: RealASTLoweringScope,
+    packageScope: RealASTPackageLoweringScope): Option<AST2CHIRExprSpec> {
+    if (scope.thisStructName.isEmpty()) {
+        return None
+    }
+    let structInfo = match (packageScope.GetStruct(scope.thisStructName)) {
+        case Some(value) => value
+        case None => return None
+    }
+    let fieldType = match (structInfo.FieldType(fieldName)) {
+        case Some(value) => value
+        case None => return None
+    }
+    let fieldIndex = match (structInfo.FieldIndex(fieldName)) {
+        case Some(value) => value
+        case None => return None
+    }
+    return Some(AST2CHIRExprSpec.StructField(AST2CHIRExprSpec.Ref("this"), fieldIndex + 1, fieldType))
+}
+
 private func RealASTExprValueKind(
     expr: AstExpr,
     scope: RealASTLoweringScope,
     packageScope: RealASTPackageLoweringScope
 ): Option<Int64> {
+    if (let Some(typeKey) <- RealASTExprValueType(expr, scope, packageScope)) {
+        return Some(RealASTKindFromTypeKey(typeKey))
+    }
+    return None
+}
+
+private func RealASTExprValueType(
+    expr: AstExpr,
+    scope: RealASTLoweringScope,
+    packageScope: RealASTPackageLoweringScope
+): Option<String> {
     if (let Some(parenExpr) <- (expr as AstParenExpr)) {
         if (let Some(inner) <- parenExpr.expr) {
-            return RealASTExprValueKind(inner, scope, packageScope)
+            return RealASTExprValueType(inner, scope, packageScope)
         }
         return None
     }
     if (let Some(lit) <- (expr as AstLitConstExpr)) {
         if (ParseRealASTIntLiteral(lit).isSome()) {
-            return Some(REAL_AST_RETURN_INT)
+            return Some(REAL_AST_TYPE_INT)
         }
         if (ParseRealASTBoolLiteral(lit).isSome()) {
-            return Some(REAL_AST_RETURN_BOOL)
+            return Some(REAL_AST_TYPE_BOOL)
         }
         if (PlainRealASTStringLiteralValue(expr).isSome()) {
-            return Some(REAL_AST_RETURN_STRING)
+            return Some(REAL_AST_TYPE_STRING)
         }
         if (let Some(kind) <- RealASTInterpolationValueKind(lit, scope, packageScope)) {
-            return Some(kind)
+            return Some(RealASTTypeKeyFromKind(kind))
         }
         if (lit.kind == AstLitConstKind.UNIT) {
-            return Some(REAL_AST_RETURN_UNIT)
+            return Some(REAL_AST_TYPE_UNIT)
         }
         return None
     }
     if (let Some(refExpr) <- (expr as AstRefExpr)) {
-        return scope.Kind(refExpr.ref.identifier.Val())
+        let name = refExpr.ref.identifier.Val()
+        if (let Some(typeKey) <- scope.TypeKey(name)) {
+            return Some(typeKey)
+        }
+        if (!scope.thisStructName.isEmpty()) {
+            if (let Some(structInfo) <- packageScope.GetStruct(scope.thisStructName)) {
+                return structInfo.FieldType(name)
+            }
+        }
+        return None
+    }
+    if (let Some(member) <- (expr as AstMemberAccess)) {
+        if (!member.typeArguments.isEmpty()) {
+            return None
+        }
+        let base = match (member.baseExpr) {
+            case Some(value) => value
+            case None => return None
+        }
+        let baseType = match (RealASTExprValueType(base, scope, packageScope)) {
+            case Some(value) => value
+            case None => return None
+        }
+        let structName = match (RealASTStructNameFromTypeKey(baseType)) {
+            case Some(value) => value
+            case None => return None
+        }
+        let structInfo = match (packageScope.GetStruct(structName)) {
+            case Some(value) => value
+            case None => return None
+        }
+        return structInfo.FieldType(member.field.GetRawText())
     }
     if (let Some(unary) <- (expr as AstUnaryExpr)) {
         let operand = match (unary.expr) {
             case Some(value) => value
             case None => return None
         }
-        let operandKind = match (RealASTExprValueKind(operand, scope, packageScope)) {
+        let operandType = match (RealASTExprValueType(operand, scope, packageScope)) {
             case Some(value) => value
             case None => return None
         }
-        if (unary.op == AstTokenKind.SUB && operandKind == REAL_AST_RETURN_INT) {
-            return Some(REAL_AST_RETURN_INT)
+        if (unary.op == AstTokenKind.SUB && operandType == REAL_AST_TYPE_INT) {
+            return Some(REAL_AST_TYPE_INT)
         }
-        if (unary.op == AstTokenKind.NOT && operandKind == REAL_AST_RETURN_BOOL) {
-            return Some(REAL_AST_RETURN_BOOL)
+        if (unary.op == AstTokenKind.NOT && operandType == REAL_AST_TYPE_BOOL) {
+            return Some(REAL_AST_TYPE_BOOL)
         }
         return None
     }
@@ -995,43 +1743,43 @@ private func RealASTExprValueKind(
             case Some(value) => value
             case None => return None
         }
-        let lhsKind = match (RealASTExprValueKind(lhs, scope, packageScope)) {
+        let lhsType = match (RealASTExprValueType(lhs, scope, packageScope)) {
             case Some(value) => value
             case None => return None
         }
-        let rhsKind = match (RealASTExprValueKind(rhs, scope, packageScope)) {
+        let rhsType = match (RealASTExprValueType(rhs, scope, packageScope)) {
             case Some(value) => value
             case None => return None
         }
-        if (lhsKind == REAL_AST_RETURN_STRING || rhsKind == REAL_AST_RETURN_STRING) {
-            if (binary.op == AstTokenKind.ADD && lhsKind == REAL_AST_RETURN_STRING &&
-                rhsKind == REAL_AST_RETURN_STRING) {
-                return Some(REAL_AST_RETURN_STRING)
+        if (lhsType == REAL_AST_TYPE_STRING || rhsType == REAL_AST_TYPE_STRING) {
+            if (binary.op == AstTokenKind.ADD && lhsType == REAL_AST_TYPE_STRING &&
+                rhsType == REAL_AST_TYPE_STRING) {
+                return Some(REAL_AST_TYPE_STRING)
             }
             return None
         }
         if (RealASTIsArithmeticOp(binary.op)) {
-            return if (lhsKind == REAL_AST_RETURN_INT && rhsKind == REAL_AST_RETURN_INT) {
-                Some(REAL_AST_RETURN_INT)
+            return if (lhsType == REAL_AST_TYPE_INT && rhsType == REAL_AST_TYPE_INT) {
+                Some(REAL_AST_TYPE_INT)
             } else {
                 None
             }
         }
         if (RealASTIsOrderingOp(binary.op)) {
-            return if (lhsKind == REAL_AST_RETURN_INT && rhsKind == REAL_AST_RETURN_INT) {
-                Some(REAL_AST_RETURN_BOOL)
+            return if (lhsType == REAL_AST_TYPE_INT && rhsType == REAL_AST_TYPE_INT) {
+                Some(REAL_AST_TYPE_BOOL)
             } else {
                 None
             }
         }
         if (binary.op == AstTokenKind.EQUAL || binary.op == AstTokenKind.NOTEQ) {
-            let comparable = (lhsKind == REAL_AST_RETURN_INT && rhsKind == REAL_AST_RETURN_INT) ||
-                (lhsKind == REAL_AST_RETURN_BOOL && rhsKind == REAL_AST_RETURN_BOOL)
-            return if (comparable) { Some(REAL_AST_RETURN_BOOL) } else { None }
+            let comparable = (lhsType == REAL_AST_TYPE_INT && rhsType == REAL_AST_TYPE_INT) ||
+                (lhsType == REAL_AST_TYPE_BOOL && rhsType == REAL_AST_TYPE_BOOL)
+            return if (comparable) { Some(REAL_AST_TYPE_BOOL) } else { None }
         }
         if (binary.op == AstTokenKind.AND || binary.op == AstTokenKind.OR) {
-            return if (lhsKind == REAL_AST_RETURN_BOOL && rhsKind == REAL_AST_RETURN_BOOL) {
-                Some(REAL_AST_RETURN_BOOL)
+            return if (lhsType == REAL_AST_TYPE_BOOL && rhsType == REAL_AST_TYPE_BOOL) {
+                Some(REAL_AST_TYPE_BOOL)
             } else {
                 None
             }
@@ -1042,6 +1790,54 @@ private func RealASTExprValueKind(
         let base = match (call.baseFunc) {
             case Some(value) => value
             case None => return None
+        }
+        if (let Some(member) <- (base as AstMemberAccess)) {
+            if (!member.typeArguments.isEmpty()) {
+                return None
+            }
+            let receiverExpr = match (member.baseExpr) {
+                case Some(value) => value
+                case None => return None
+            }
+            let receiverType = match (RealASTExprValueType(receiverExpr, scope, packageScope)) {
+                case Some(value) => value
+                case None => return None
+            }
+            let structName = match (RealASTStructNameFromTypeKey(receiverType)) {
+                case Some(value) => value
+                case None => return None
+            }
+            let structInfo = match (packageScope.GetStruct(structName)) {
+                case Some(value) => value
+                case None => return None
+            }
+            let method = match (structInfo.GetMethod(member.field.GetRawText())) {
+                case Some(value) => value
+                case None => return None
+            }
+            if (call.args.size != method.funcInfo.paramTypes.size) {
+                return None
+            }
+            var idx: Int64 = 0
+            while (idx < call.args.size) {
+                let arg = call.args[idx]
+                if (!arg.name.Empty() || arg.withInout) {
+                    return None
+                }
+                let argExpr = match (arg.expr) {
+                    case Some(value) => value
+                    case None => return None
+                }
+                let argType = match (RealASTExprValueType(argExpr, scope, packageScope)) {
+                    case Some(value) => value
+                    case None => return None
+                }
+                if (argType != method.funcInfo.paramTypes[idx]) {
+                    return None
+                }
+                idx++
+            }
+            return Some(method.funcInfo.returnType)
         }
         let calleeRef = match (base as AstRefExpr) {
             case Some(value) => value
@@ -1054,11 +1850,40 @@ private func RealASTExprValueKind(
         if (calleeName.isEmpty() || scope.Contains(calleeName)) {
             return None
         }
+        if (packageScope.IsStruct(calleeName)) {
+            let structInfo = match (packageScope.GetStruct(calleeName)) {
+                case Some(value) => value
+                case None => return None
+            }
+            if (call.args.size != structInfo.initParamTypes.size) {
+                return None
+            }
+            var idx: Int64 = 0
+            while (idx < call.args.size) {
+                let arg = call.args[idx]
+                if (!arg.name.Empty() || arg.withInout) {
+                    return None
+                }
+                let argExpr = match (arg.expr) {
+                    case Some(value) => value
+                    case None => return None
+                }
+                let argType = match (RealASTExprValueType(argExpr, scope, packageScope)) {
+                    case Some(value) => value
+                    case None => return None
+                }
+                if (argType != structInfo.initParamTypes[idx]) {
+                    return None
+                }
+                idx++
+            }
+            return Some(RealASTStructTypeKey(calleeName))
+        }
         let info = match (packageScope.GetFunction(calleeName)) {
             case Some(value) => value
             case None => return None
         }
-        if (call.args.size != info.paramKinds.size) {
+        if (call.args.size != info.paramTypes.size) {
             return None
         }
         var idx: Int64 = 0
@@ -1071,21 +1896,18 @@ private func RealASTExprValueKind(
                 case Some(value) => value
                 case None => return None
             }
-            let argKind = match (RealASTExprValueKind(argExpr, scope, packageScope)) {
+            let argType = match (RealASTExprValueType(argExpr, scope, packageScope)) {
                 case Some(value) => value
                 case None => return None
             }
-            if (argKind != info.paramKinds[idx]) {
+            if (argType != info.paramTypes[idx]) {
                 return None
             }
             idx++
         }
-        return if (info.returnKind == REAL_AST_RETURN_INT || info.returnKind == REAL_AST_RETURN_BOOL ||
-            info.returnKind == REAL_AST_RETURN_STRING) {
-            Some(info.returnKind)
-        } else {
+        return if (info.returnType == REAL_AST_TYPE_UNIT || info.returnType == REAL_AST_TYPE_NONE) {
             None
-        }
+        } else { Some(info.returnType) }
     }
     return None
 }
@@ -1129,63 +1951,237 @@ private func RealASTUnaryOp(op: AstTokenKind): Option<ExprKind> {
 private func RealASTReturnType(
     context: CHIRContext,
     body: AstFuncBody,
-    lowered: RealASTBodyLowering
+    lowered: RealASTBodyLowering,
+    packageScope: RealASTPackageLoweringScope
 ): Option<Type> {
     if (let Some(retType) <- body.retType) {
-        if (IsRealASTInt64Type(retType)) {
-            return Some(context.GetInt64Ty())
+        return match (RealASTReturnTypeKey(retType, packageScope)) {
+            case Some(typeKey) => RealASTCHIRTypeForKey(context, typeKey)
+            case None => None
         }
-        if (IsRealASTBoolType(retType)) {
-            return Some(context.GetBoolTy())
-        }
-        if (IsRealASTUnitType(retType)) {
-            return Some(context.GetUnitTy())
-        }
-        if (IsRealASTStringType(retType)) {
-            return Some(context.GetCStringTy())
-        }
-        return None
     }
-    if (lowered.returnKind == REAL_AST_RETURN_INT || lowered.returnKind == REAL_AST_RETURN_BOOL) {
+    if (lowered.returnType == REAL_AST_TYPE_INT || lowered.returnType == REAL_AST_TYPE_BOOL ||
+        lowered.returnType == REAL_AST_TYPE_STRING || RealASTIsStructTypeKey(lowered.returnType)) {
         return None
     }
     return Some(context.GetUnitTy())
 }
 
-private func RealASTParamType(context: CHIRContext, ty: AstType): Option<Type> {
+private func RealASTParamType(context: CHIRContext, ty: AstType,
+    packageScope: RealASTPackageLoweringScope): Option<Type> {
+    return match (RealASTValueTypeKey(ty, packageScope: Some(packageScope))) {
+        case Some(typeKey) => RealASTCHIRTypeForKey(context, typeKey)
+        case None => None
+    }
+}
+
+private func RealASTValueTypeKind(ty: AstType): Option<Int64> {
+    if (let Some(typeKey) <- RealASTValueTypeKey(ty, packageScope: None)) {
+        return Some(RealASTKindFromTypeKey(typeKey))
+    }
+    return None
+}
+
+private func RealASTLocalTypeKey(ty: AstType, packageScope: RealASTPackageLoweringScope): Option<String> {
+    return RealASTValueTypeKey(ty, packageScope: Some(packageScope))
+}
+
+private func RealASTReturnTypeKey(ty: AstType, packageScope: RealASTPackageLoweringScope): Option<String> {
+    if (IsRealASTUnitType(ty)) {
+        return Some(REAL_AST_TYPE_UNIT)
+    }
+    return RealASTValueTypeKey(ty, packageScope: Some(packageScope))
+}
+
+private func RealASTValueTypeKey(ty: AstType, packageScope!: Option<RealASTPackageLoweringScope> = None): Option<String> {
     if (IsRealASTInt64Type(ty)) {
-        return Some(context.GetInt64Ty())
+        return Some(REAL_AST_TYPE_INT)
     }
     if (IsRealASTBoolType(ty)) {
-        return Some(context.GetBoolTy())
+        return Some(REAL_AST_TYPE_BOOL)
     }
     if (IsRealASTStringType(ty)) {
+        return Some(REAL_AST_TYPE_STRING)
+    }
+    let name = ty.ToString().trimAscii()
+    if (let Some(scope) <- packageScope) {
+        if (scope.IsStruct(name)) {
+            return Some(RealASTStructTypeKey(name))
+        }
+    }
+    return None
+}
+
+private func RealASTPrimitiveFieldTypeKey(ty: AstType): Option<String> {
+    if (IsRealASTInt64Type(ty)) {
+        return Some(REAL_AST_TYPE_INT)
+    }
+    if (IsRealASTBoolType(ty)) {
+        return Some(REAL_AST_TYPE_BOOL)
+    }
+    if (IsRealASTStringType(ty)) {
+        return Some(REAL_AST_TYPE_STRING)
+    }
+    return None
+}
+
+private func RealASTCHIRTypeForKey(context: CHIRContext, typeKey: String): Option<Type> {
+    if (typeKey == REAL_AST_TYPE_INT || RealASTIsStructTypeKey(typeKey)) {
+        return Some(context.GetInt64Ty())
+    }
+    if (typeKey == REAL_AST_TYPE_BOOL) {
+        return Some(context.GetBoolTy())
+    }
+    if (typeKey == REAL_AST_TYPE_UNIT) {
+        return Some(context.GetUnitTy())
+    }
+    if (typeKey == REAL_AST_TYPE_STRING) {
         return Some(context.GetCStringTy())
     }
     return None
 }
 
-private func RealASTValueTypeKind(ty: AstType): Option<Int64> {
-    if (IsRealASTInt64Type(ty)) {
-        return Some(REAL_AST_RETURN_INT)
+private func RealASTTypeKeyFromKind(kind: Int64): String {
+    if (kind == REAL_AST_RETURN_INT) {
+        return REAL_AST_TYPE_INT
     }
-    if (IsRealASTBoolType(ty)) {
-        return Some(REAL_AST_RETURN_BOOL)
+    if (kind == REAL_AST_RETURN_BOOL) {
+        return REAL_AST_TYPE_BOOL
     }
-    if (IsRealASTStringType(ty)) {
-        return Some(REAL_AST_RETURN_STRING)
+    if (kind == REAL_AST_RETURN_UNIT) {
+        return REAL_AST_TYPE_UNIT
+    }
+    if (kind == REAL_AST_RETURN_STRING) {
+        return REAL_AST_TYPE_STRING
+    }
+    return REAL_AST_TYPE_NONE
+}
+
+private func RealASTKindFromTypeKey(typeKey: String): Int64 {
+    if (typeKey == REAL_AST_TYPE_INT || RealASTIsStructTypeKey(typeKey)) {
+        return REAL_AST_RETURN_INT
+    }
+    if (typeKey == REAL_AST_TYPE_BOOL) {
+        return REAL_AST_RETURN_BOOL
+    }
+    if (typeKey == REAL_AST_TYPE_UNIT) {
+        return REAL_AST_RETURN_UNIT
+    }
+    if (typeKey == REAL_AST_TYPE_STRING) {
+        return REAL_AST_RETURN_STRING
+    }
+    return REAL_AST_RETURN_NONE
+}
+
+private func RealASTStructTypeKey(name: String): String {
+    return REAL_AST_STRUCT_PREFIX + name
+}
+
+private func RealASTIsStructTypeKey(typeKey: String): Bool {
+    return typeKey.startsWith(REAL_AST_STRUCT_PREFIX)
+}
+
+private func RealASTStructNameFromTypeKey(typeKey: String): Option<String> {
+    if (!RealASTIsStructTypeKey(typeKey)) {
+        return None
+    }
+    return Some(typeKey[REAL_AST_STRUCT_PREFIX.size..typeKey.size])
+}
+
+private func RealASTFieldNameFromThisTarget(expr: AstExpr): Option<String> {
+    if (let Some(refExpr) <- (expr as AstRefExpr)) {
+        if (!refExpr.typeArguments.isEmpty()) {
+            return None
+        }
+        return Some(refExpr.ref.identifier.Val())
+    }
+    if (let Some(member) <- (expr as AstMemberAccess)) {
+        if (!member.typeArguments.isEmpty()) {
+            return None
+        }
+        let base = match (member.baseExpr) {
+            case Some(value) => value
+            case None => return None
+        }
+        let baseRef = match (base as AstRefExpr) {
+            case Some(value) => value
+            case None => return None
+        }
+        if (baseRef.ref.identifier.Val() != "this") {
+            return None
+        }
+        return Some(member.field.GetRawText())
     }
     return None
 }
 
-private func RealASTLocalTypeKind(ty: AstType): Option<Int64> {
-    if (let Some(kind) <- RealASTValueTypeKind(ty)) {
-        return Some(kind)
+private func LowerRealASTInitRhs(expr: AstExpr, argMap: HashMap<String, AST2CHIRExprSpec>,
+    scope: RealASTLoweringScope, packageScope: RealASTPackageLoweringScope): Option<AST2CHIRExprSpec> {
+    if (let Some(parenExpr) <- (expr as AstParenExpr)) {
+        if (let Some(inner) <- parenExpr.expr) {
+            return LowerRealASTInitRhs(inner, argMap, scope, packageScope)
+        }
+        return None
     }
-    if (IsRealASTStringType(ty)) {
-        return Some(REAL_AST_RETURN_STRING)
+    if (let Some(lit) <- (expr as AstLitConstExpr)) {
+        if (let Some(value) <- ParseRealASTIntLiteral(lit)) {
+            return Some(AST2CHIRExprSpec.Literal(value))
+        }
+        if (let Some(value) <- ParseRealASTBoolLiteral(lit)) {
+            return Some(AST2CHIRExprSpec.BoolLit(value))
+        }
+        if (let Some(text) <- PlainRealASTStringLiteralValue(lit)) {
+            return Some(AST2CHIRExprSpec.StrLit(text))
+        }
+        return None
+    }
+    if (let Some(refExpr) <- (expr as AstRefExpr)) {
+        let name = refExpr.ref.identifier.Val()
+        return argMap.get(name)
+    }
+    if (let Some(unary) <- (expr as AstUnaryExpr)) {
+        let op = match (RealASTUnaryOp(unary.op)) {
+            case Some(value) => value
+            case None => return None
+        }
+        let operandExpr = match (unary.expr) {
+            case Some(value) => value
+            case None => return None
+        }
+        let operandSpec = match (LowerRealASTInitRhs(operandExpr, argMap, scope, packageScope)) {
+            case Some(value) => value
+            case None => return None
+        }
+        return Some(AST2CHIRExprSpec.Unary(op, operandSpec))
+    }
+    if (let Some(binary) <- (expr as AstBinaryExpr)) {
+        let op = match (RealASTBinaryOp(binary.op)) {
+            case Some(value) => value
+            case None => return None
+        }
+        let lhs = match (binary.leftExpr) {
+            case Some(value) => value
+            case None => return None
+        }
+        let rhs = match (binary.rightExpr) {
+            case Some(value) => value
+            case None => return None
+        }
+        let lhsSpec = match (LowerRealASTInitRhs(lhs, argMap, scope, packageScope)) {
+            case Some(value) => value
+            case None => return None
+        }
+        let rhsSpec = match (LowerRealASTInitRhs(rhs, argMap, scope, packageScope)) {
+            case Some(value) => value
+            case None => return None
+        }
+        return Some(AST2CHIRExprSpec.Binary(op, lhsSpec, rhsSpec))
     }
     return None
+}
+
+private func RealASTStructMethodName(structType: String, methodName: String): String {
+    return "$struct$" + structType + "$" + methodName
 }
 
 private func IsRealASTInt64Type(ty: AstType): Bool {

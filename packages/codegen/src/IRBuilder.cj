@@ -510,8 +510,9 @@ public class IRBuilder2 <: Resource {
     public func CreateCallOrInvoke(calleeType: CGFunctionType, callee: LLVMValueRef, args: ArrayList<CGValue>,
         name!: String = ""): LLVMValueRef {
         let callArgs = TransformCGFunctionArgs(calleeType, args, name: name)
-        let callBase = CreateCallOrInvoke(callee, calleeType.GetLLVMFunctionType(), callArgs, name: name)
         if (let Some(funcType) <- (calleeType.GetOriginal() as FuncType)) {
+            let callName = if (funcType.GetReturnType().IsUnit()) { "" } else { name }
+            let callBase = CreateCallOrInvoke(callee, calleeType.GetLLVMFunctionType(), callArgs, name: callName)
             if (funcType.IsCFunc()) {
                 SetZExtAttrForCFunc(callBase, calleeType.GetLLVMFunctionType())
             }
@@ -524,8 +525,9 @@ public class IRBuilder2 <: Resource {
             if (funcType.GetReturnType().IsUnit()) {
                 return cgMod.GenerateUnitTypeValue()
             }
+            return callBase
         }
-        return callBase
+        return CreateCallOrInvoke(callee, calleeType.GetLLVMFunctionType(), callArgs, name: name)
     }
 
     public func CreateCallOrInvoke(callee: CGFunction, args!: ArrayList<CGValue> = ArrayList<CGValue>(),

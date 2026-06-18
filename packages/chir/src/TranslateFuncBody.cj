@@ -471,7 +471,8 @@ extend AST2CHIRDeclTranslator {
             case None => return
         }
         let elemPtr = ArrayElementPtrDynamic(slot, indexValue, state)
-        builder.CreateStore(value, elemPtr, state.current)
+        let storedValue = CastStructCarrierToInt64(value, state)
+        builder.CreateStore(storedValue, elemPtr, state.current)
     }
 
     // Lower `for (x in a) { ... }` over an Int64 array local `a`. Desugars to an index loop
@@ -739,6 +740,9 @@ extend AST2CHIRDeclTranslator {
         if (expr.IsEnumField()) {
             return EvalEnumField(expr, state)
         }
+        if (expr.IsStructField()) {
+            return EvalStructField(expr, state)
+        }
         if (expr.IsCall()) {
             return EvalCall(expr, state)
         }
@@ -770,7 +774,8 @@ extend AST2CHIRDeclTranslator {
                 case Some(v) => v
                 case None => return None
             }
-            builder.CreateStore(fieldValue, ArrayElementPtr(slot, idx + 1, state), state.current)
+            builder.CreateStore(CastStructCarrierToInt64(fieldValue, state), ArrayElementPtr(slot, idx + 1, state),
+                state.current)
             idx++
         }
         // Reinterpret the buffer address as an Int64 so the value crosses the Int64 enum ABI.
@@ -803,6 +808,14 @@ extend AST2CHIRDeclTranslator {
         return AsValue(load.GetResult())
     }
 
+    private func EvalStructField(expr: AST2CHIRExprSpec, state: RealBodyState): Option<Value> {
+        let loaded = match (EvalEnumField(expr, state)) {
+            case Some(v) => v
+            case None => return None
+        }
+        return Some(CastInt64CarrierToStructField(loaded, expr.name, state))
+    }
+
     // Lower a CALL spec into a genuine CHIR Apply targeting the resolved callee Function. The callee
     // is resolved by its source identifier among the lowered package functions (all top-level
     // functions are declared before any body is emitted, so order does not matter). Each argument is
@@ -830,6 +843,32 @@ extend AST2CHIRDeclTranslator {
 
     private func ResolveCallee(name: String): Option<Function> {
         return TryGetFunction(name)
+    }
+
+    private func CastStructCarrierToInt64(value: Value, state: RealBodyState): Value {
+        let int64Ty = builder.context.GetInt64Ty()
+        if (let Some(valueTy) <- value.GetType()) {
+            if (valueTy.IsEqual(int64Ty)) {
+                return value
+            }
+        }
+        return builder.CreateTypeCast(int64Ty, value, state.current).GetResult().getOrThrow()
+    }
+
+    private func CastInt64CarrierToStructField(value: Value, fieldKind: String, state: RealBodyState): Value {
+        let targetTy = if (fieldKind == "Bool") {
+            builder.context.GetBoolTy()
+        } else if (fieldKind == "String") {
+            builder.context.GetCStringTy()
+        } else {
+            builder.context.GetInt64Ty()
+        }
+        if (let Some(valueTy) <- value.GetType()) {
+            if (valueTy.IsEqual(targetTy)) {
+                return value
+            }
+        }
+        return builder.CreateTypeCast(targetTy, value, state.current).GetResult().getOrThrow()
     }
 
     // Upcast a node's Option<LocalVar> result to Option<Value> (LocalVar <: Value).

@@ -120,6 +120,11 @@ let AST2CHIR_EXPR_ENUM_FIELD: Int64 = 11
 // operands produces a Bool (codegen emits fcmp). The literal text is carried in `name` (parsed by the
 // translator with Float64.parse) so no precision is lost crossing the Int64-keyed spec fields.
 let AST2CHIR_EXPR_FLOAT_LITERAL: Int64 = 12
+// STRUCT_FIELD: load one field slot from a struct value represented by the heap-buffer carrier ABI.
+// `lhs` is the struct value expression (an Int64 buffer address), `literalValue` is the buffer slot
+// index (1..N; slot 0 is the unused enum-compatible dummy), and `name` carries the field value kind
+// ("Int64", "Bool", "String"). The loaded Int64 slot is cast back to the field value type.
+let AST2CHIR_EXPR_STRUCT_FIELD: Int64 = 13
 
 public class AST2CHIRExprSpec {
     public let kind: Int64
@@ -157,6 +162,7 @@ public class AST2CHIRExprSpec {
     public func IsArraySize(): Bool { return kind == AST2CHIR_EXPR_ARRAY_SIZE }
     public func IsEnumMake(): Bool { return kind == AST2CHIR_EXPR_ENUM_MAKE }
     public func IsEnumField(): Bool { return kind == AST2CHIR_EXPR_ENUM_FIELD }
+    public func IsStructField(): Bool { return kind == AST2CHIR_EXPR_STRUCT_FIELD }
 
     public static func Literal(value: Int64): AST2CHIRExprSpec {
         return AST2CHIRExprSpec(AST2CHIR_EXPR_LITERAL, value, false, "", ExprKind.ADD, None, None,
@@ -226,6 +232,14 @@ public class AST2CHIRExprSpec {
     public static func EnumField(enumValue: AST2CHIRExprSpec, index: Int64): AST2CHIRExprSpec {
         return AST2CHIRExprSpec(AST2CHIR_EXPR_ENUM_FIELD, index, false, "", ExprKind.ADD, Some(enumValue),
             None, ArrayList<AST2CHIRExprSpec>())
+    }
+
+    // STRUCT_FIELD: read slot `index` from `structValue` and cast the Int64 carrier slot to
+    // `fieldKind` ("Int64", "Bool", or "String").
+    public static func StructField(structValue: AST2CHIRExprSpec, index: Int64,
+        fieldKind: String): AST2CHIRExprSpec {
+        return AST2CHIRExprSpec(AST2CHIR_EXPR_STRUCT_FIELD, index, false, fieldKind, ExprKind.ADD,
+            Some(structValue), None, ArrayList<AST2CHIRExprSpec>())
     }
 
     public static func Binary(op: ExprKind, lhs: AST2CHIRExprSpec, rhs: AST2CHIRExprSpec): AST2CHIRExprSpec {

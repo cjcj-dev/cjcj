@@ -24,21 +24,73 @@ private class RealPipelineLocalInfo {
     }
 }
 
+private class RealPipelineStructInfo {
+    let name: String
+    let decl: StructDecl
+    let ty: Ty
+    let fieldTypes: HashMap<String, Ty> = HashMap<String, Ty>()
+    let fieldMutable: HashMap<String, Bool> = HashMap<String, Bool>()
+    let fieldIndex: HashMap<String, Int64> = HashMap<String, Int64>()
+    let fieldNames: ArrayList<String> = ArrayList<String>()
+    let initParamTypes: ArrayList<Ty> = ArrayList<Ty>()
+    let initParamNames: ArrayList<String> = ArrayList<String>()
+    let methods: HashMap<String, FuncTy> = HashMap<String, FuncTy>()
+    let methodDecls: HashMap<String, FuncDecl> = HashMap<String, FuncDecl>()
+    var initDecl: Option<FuncDecl> = None
+
+    init(name: String, decl: StructDecl, ty: Ty) {
+        this.name = name
+        this.decl = decl
+        this.ty = ty
+    }
+
+    func AddField(name: String, ty: Ty, mutable: Bool): Bool {
+        if (name.isEmpty() || fieldTypes.contains(name)) {
+            return false
+        }
+        fieldIndex[name] = fieldNames.size
+        fieldNames.add(name)
+        fieldTypes[name] = ty
+        fieldMutable[name] = mutable
+        return true
+    }
+
+    func FieldType(name: String): Option<Ty> {
+        return fieldTypes.get(name)
+    }
+
+    func FieldCanWrite(name: String): Bool {
+        return fieldMutable.get(name) ?? false
+    }
+
+    func AddMethod(name: String, decl: FuncDecl, ty: FuncTy): Bool {
+        if (name.isEmpty() || methods.contains(name)) {
+            return false
+        }
+        methods[name] = ty
+        methodDecls[name] = decl
+        return true
+    }
+}
+
 private class RealPipelineScopeSnapshot {
     let locals: HashMap<String, RealPipelineLocalInfo> = HashMap<String, RealPipelineLocalInfo>()
     let loopDepth: Int64
+    let thisStructName: String
 
     init(scope: RealPipelineScope) {
         for ((name, local) in scope.locals) {
             locals[name] = local
         }
         loopDepth = scope.loopDepth
+        thisStructName = scope.thisStructName
     }
 }
 
 private class RealPipelineScope {
     let locals: HashMap<String, RealPipelineLocalInfo> = HashMap<String, RealPipelineLocalInfo>()
     var loopDepth: Int64 = 0
+    var thisStructName: String = ""
 
     func Add(name: String, ty: Ty, mutable: Bool): Bool {
         if (locals.contains(name)) {
@@ -66,6 +118,7 @@ private class RealPipelineScope {
             locals[name] = local
         }
         loopDepth = snapshot.loopDepth
+        thisStructName = snapshot.thisStructName
     }
 
     func EnterLoop(): Unit {
@@ -92,6 +145,7 @@ public class TypeChecker {
     private let realPipelineUnsupportedFunctions: HashSet<String> = HashSet<String>()
     private let realPipelineFunctionDecls: HashMap<String, FuncDecl> = HashMap<String, FuncDecl>()
     private let realPipelineFunctionTypes: HashMap<String, FuncTy> = HashMap<String, FuncTy>()
+    private let realPipelineStructs: HashMap<String, RealPipelineStructInfo> = HashMap<String, RealPipelineStructInfo>()
     private var realPipelineUnsupported: Bool = false
 
     public init(ci: Option<CompilerInstance>) {
@@ -104,9 +158,11 @@ public class TypeChecker {
     public func TypeCheckForPackages(pkgs: ArrayList<Package>): Unit {
         realPipelineDiagnostics.clear()
         realPipelineTypedFunctions.clear()
+        realPipelineStructs.clear()
         realPipelineUnsupported = false
         for (pkg in pkgs) {
             preparePackageTypes(pkg)
+            prepareRealPipelineStructTable(pkg)
             prepareRealPipelineFunctionTable(pkg)
             checkRealPipelinePackage(pkg)
         }
@@ -218,6 +274,131 @@ public class TypeChecker {
                 synthesizeDeclType(decl)
             }
         }
+    }
+
+    private func prepareRealPipelineStructTable(pkg: Package): Unit {
+        for (file in pkg.files) {
+            for (decl in file.decls) {
+                if (let Some(structDecl) <- (decl as StructDecl)) {
+                    if (!prepareRealPipelineStruct(structDecl)) {
+                        markRealPipelineUnsupported()
+                    }
+                }
+            }
+        }
+    }
+
+    private func prepareRealPipelineStruct(structDecl: StructDecl): Bool {
+        let name = structDecl.identifier.Val()
+        if (name.isEmpty() || structDecl.generic.isSome() || !structDecl.inheritedTypes.isEmpty()) {
+            return false
+        }
+        let body = match (structDecl.body) {
+            case Some(value) => value
+            case None => return false
+        }
+        let structTy = tm.GetStructTy(structDecl, Array<Ty>())
+        structDecl.SetTy(structTy)
+        let info = RealPipelineStructInfo(name, structDecl, structTy)
+        var initCount: Int64 = 0
+        let methods = ArrayList<FuncDecl>()
+        for (member in body.decls) {
+            if (let Some(fieldDecl) <- (member as VarDecl)) {
+                if (fieldDecl.isConst || fieldDecl.initializer.isSome()) {
+                    return false
+                }
+                let typeNode = match (fieldDecl.typeNode) {
+                    case Some(value) => value
+                    case None => return false
+                }
+                let fieldTy = match (resolveRealPipelineStoredFieldType(typeNode)) {
+                    case Some(value) => value
+                    case None => return false
+                }
+                fieldDecl.SetTy(fieldTy)
+                typeNode.SetTy(fieldTy)
+                if (!info.AddField(fieldDecl.identifier.Val(), fieldTy, fieldDecl.isVar)) {
+                    return false
+                }
+                continue
+            }
+            if (let Some(funcDecl) <- (member as FuncDecl)) {
+                if (funcDecl.funcBody.isNone()) {
+                    return false
+                }
+                if (funcDecl.TestAttr(Attribute.CONSTRUCTOR) || funcDecl.identifier.Val() == "init") {
+                    initCount++
+                    if (initCount != 1) {
+                        return false
+                    }
+                    info.initDecl = Some(funcDecl)
+                    if (!prepareRealPipelineStructInitSignature(info, funcDecl)) {
+                        return false
+                    }
+                } else {
+                    methods.add(funcDecl)
+                }
+                continue
+            }
+            return false
+        }
+        if (initCount != 1 || info.fieldNames.isEmpty()) {
+            return false
+        }
+        realPipelineStructs[name] = info
+        for (method in methods) {
+            let body = match (method.funcBody) {
+                case Some(value) => value
+                case None => return false
+            }
+            body.funcDecl = Some(method)
+            let funcTy = match (prepareRealPipelineFuncSignature(method, body)) {
+                case Some(value) => value
+                case None => return false
+            }
+            if (!info.AddMethod(method.identifier.Val(), method, funcTy)) {
+                return false
+            }
+        }
+        return true
+    }
+
+    private func prepareRealPipelineStructInitSignature(info: RealPipelineStructInfo,
+        funcDecl: FuncDecl): Bool {
+        let body = match (funcDecl.funcBody) {
+            case Some(value) => value
+            case None => return false
+        }
+        if (body.generic.isSome() || body.paramLists.size != 1 || body.retType.isSome()) {
+            return false
+        }
+        let paramList = body.paramLists[0]
+        if (paramList.hasVariableLenArg) {
+            return false
+        }
+        for (param in paramList.params) {
+            if (param.assignment.isSome()) {
+                return false
+            }
+            let typeNode = match (param.typeNode) {
+                case Some(value) => value
+                case None => return false
+            }
+            let paramTy = match (resolveRealPipelineLocalType(typeNode)) {
+                case Some(value) => value
+                case None => return false
+            }
+            if (!isRealPipelineValueTy(paramTy)) {
+                return false
+            }
+            param.SetTy(paramTy)
+            typeNode.SetTy(paramTy)
+            info.initParamNames.add(param.identifier.Val())
+            info.initParamTypes.add(paramTy)
+        }
+        body.SetTy(tm.GetFunctionTy(info.initParamTypes.toArray(), TypeManager.GetPrimitiveTy(TypeKind.TYPE_UNIT)))
+        funcDecl.SetTy(body.GetTy().getOrThrow())
+        return true
     }
 
     private func prepareRealPipelineFunctionTable(pkg: Package): Unit {
@@ -334,19 +515,138 @@ public class TypeChecker {
             }
             return
         }
+        if (let Some(structDecl) <- (decl as StructDecl)) {
+            checkRealPipelineStructDecl(structDecl)
+            return
+        }
         markRealPipelineUnsupported()
         for (member in decl.GetMemberDecls()) {
             checkRealPipelineDecl(member)
         }
     }
 
-    private func checkRealPipelineFuncLike(decl: Decl, body: FuncBody, displayName: String): Unit {
+    private func checkRealPipelineStructDecl(structDecl: StructDecl): Unit {
+        let info = match (realPipelineStructs.get(structDecl.identifier.Val())) {
+            case Some(value) => value
+            case None =>
+                markRealPipelineUnsupported()
+                return
+        }
+        if (let Some(initDecl) <- info.initDecl) {
+            if (!checkRealPipelineStructInit(info, initDecl)) {
+                markRealPipelineUnsupported()
+                return
+            }
+        } else {
+            markRealPipelineUnsupported()
+            return
+        }
+        for ((methodName, methodTy) in info.methods) {
+            let methodDecl = match (info.methodDecls.get(methodName)) {
+                case Some(value) => value
+                case None =>
+                    markRealPipelineUnsupported()
+                    return
+            }
+            let body = match (methodDecl.funcBody) {
+                case Some(value) => value
+                case None =>
+                    markRealPipelineUnsupported()
+                    return
+            }
+            let supportedBody = checkRealPipelineBody(body, methodTy.retTy, receiverStructName: info.name)
+            if (supportedBody) {
+                realPipelineTypedFunctions.add(info.name + "." + methodName + ": " + methodTy.String())
+            }
+        }
+    }
+
+    private func checkRealPipelineStructInit(info: RealPipelineStructInfo, initDecl: FuncDecl): Bool {
+        let body = match (initDecl.funcBody) {
+            case Some(value) => value
+            case None => return false
+        }
+        let block = match (body.body) {
+            case Some(value) => value
+            case None => return false
+        }
+        let scope = RealPipelineScope()
+        scope.thisStructName = info.name
+        let _ = scope.Add("this", info.ty, false)
+        if (body.paramLists.size != 1) {
+            return false
+        }
+        for (param in body.paramLists[0].params) {
+            let paramTy = match (param.GetTy()) {
+                case Some(value) => value
+                case None => return false
+            }
+            if (!scope.Add(param.identifier.Val(), paramTy, false)) {
+                emitRealPipelineTypeError(param.begin, "duplicate local binding '" + param.identifier.Val() + "'")
+                return true
+            }
+        }
+        let assigned = HashSet<String>()
+        for (node in block.body) {
+            let assign = match (node as AssignExpr) {
+                case Some(value) => value
+                case None => return false
+            }
+            if (assign.op != TokenKind.ASSIGN) {
+                return false
+            }
+            let left = match (assign.leftValue) {
+                case Some(value) => value
+                case None => return false
+            }
+            let fieldName = match (realPipelineFieldNameFromThisTarget(left)) {
+                case Some(value) => value
+                case None => return false
+            }
+            let fieldTy = match (info.FieldType(fieldName)) {
+                case Some(value) => value
+                case None => return false
+            }
+            if (assigned.contains(fieldName)) {
+                emitRealPipelineTypeError(left.begin, "field '" + fieldName + "' initialized more than once")
+                assign.SetTy(TypeManager.GetInvalidTy())
+                return true
+            }
+            let right = match (assign.rightExpr) {
+                case Some(value) => value
+                case None => return false
+            }
+            let rightTy = match (typeRealPipelineExpr(right, scope, Some(fieldTy))) {
+                case Some(value) => value
+                case None => return false
+            }
+            if (!isRealPipelineAssignable(fieldTy, rightTy)) {
+                emitRealPipelineTypeError(right.begin,
+                    rightTy.String() + " initializer is not assignable to field '" + fieldName +
+                    "' of type " + fieldTy.String())
+                assign.SetTy(TypeManager.GetInvalidTy())
+                return true
+            }
+            assigned.add(fieldName)
+            assign.SetTy(TypeManager.GetPrimitiveTy(TypeKind.TYPE_UNIT))
+        }
+        if (assigned.size != info.fieldNames.size) {
+            emitRealPipelineTypeError(block.begin, "struct init must initialize every supported field")
+            block.SetTy(TypeManager.GetInvalidTy())
+            return true
+        }
+        block.SetTy(TypeManager.GetPrimitiveTy(TypeKind.TYPE_UNIT))
+        return true
+    }
+
+    private func checkRealPipelineFuncLike(decl: Decl, body: FuncBody, displayName: String,
+        receiverStructName!: String = ""): Unit {
         let funcTy = match (prepareRealPipelineFuncSignature(decl, body)) {
             case Some(value) => value
             case None => return
         }
         let retTy = funcTy.retTy
-        let supportedBody = checkRealPipelineBody(body, retTy)
+        let supportedBody = checkRealPipelineBody(body, retTy, receiverStructName: receiverStructName)
         if (supportedBody) {
             realPipelineTypedFunctions.add(displayName + ": " + funcTy.String())
         }
@@ -440,7 +740,7 @@ public class TypeChecker {
         return None
     }
 
-    private func checkRealPipelineBody(body: FuncBody, retTy: Ty): Bool {
+    private func checkRealPipelineBody(body: FuncBody, retTy: Ty, receiverStructName!: String = ""): Bool {
         let block = match (body.body) {
             case Some(value) => value
             case None =>
@@ -457,6 +757,16 @@ public class TypeChecker {
             return true
         }
         let scope = RealPipelineScope()
+        if (!receiverStructName.isEmpty()) {
+            let info = match (realPipelineStructs.get(receiverStructName)) {
+                case Some(value) => value
+                case None =>
+                    markRealPipelineUnsupported()
+                    return false
+            }
+            scope.thisStructName = receiverStructName
+            let _ = scope.Add("this", info.ty, false)
+        }
         if (!body.paramLists.isEmpty()) {
             for (param in body.paramLists[0].params) {
                 let paramTy = match (param.GetTy()) {
@@ -545,9 +855,16 @@ public class TypeChecker {
             return [checkRealPipelineJump(jumpExpr, scope), false]
         }
         if (let Some(callExpr) <- (node as CallExpr)) {
-            return [checkRealPipelinePrintStmt(callExpr, scope), false]
+            if (checkRealPipelinePrintStmt(callExpr, scope)) {
+                return [true, false]
+            }
+            return [checkRealPipelineExprStmt(callExpr, scope), false]
         }
         return [false, false]
+    }
+
+    private func checkRealPipelineExprStmt(expr: Expr, scope: RealPipelineScope): Bool {
+        return typeRealPipelineExpr(expr, scope, None).isSome()
     }
 
     private func checkRealPipelineIf(
@@ -760,6 +1077,9 @@ public class TypeChecker {
             case Some(value) => value
             case None => return false
         }
+        if (let Some(member) <- (left as MemberAccess)) {
+            return checkRealPipelineFieldAssign(assignExpr, member, scope)
+        }
         let refExpr = match (left as RefExpr) {
             case Some(value) => value
             case None => return false
@@ -768,6 +1088,9 @@ public class TypeChecker {
         let local = match (scope.Get(name)) {
             case Some(value) => value
             case None =>
+                if (let Some(result) <- checkRealPipelineImplicitFieldAssign(assignExpr, name, scope)) {
+                    return result
+                }
                 emitRealPipelineTypeError(refExpr.begin, "undeclared local '" + name + "'")
                 assignExpr.SetTy(TypeManager.GetInvalidTy())
                 return true
@@ -793,6 +1116,93 @@ public class TypeChecker {
         }
         assignExpr.SetTy(TypeManager.GetPrimitiveTy(TypeKind.TYPE_UNIT))
         return true
+    }
+
+    private func checkRealPipelineFieldAssign(assignExpr: AssignExpr, member: MemberAccess,
+        scope: RealPipelineScope): Bool {
+        if (!member.typeArguments.isEmpty()) {
+            return false
+        }
+        let base = match (member.baseExpr) {
+            case Some(value) => value
+            case None => return false
+        }
+        let baseTy = match (typeRealPipelineExpr(base, scope, None)) {
+            case Some(value) => value
+            case None => return false
+        }
+        let info = match (realPipelineStructInfoForTy(baseTy)) {
+            case Some(value) => value
+            case None => return false
+        }
+        let fieldName = member.field.GetRawText()
+        let fieldTy = match (info.FieldType(fieldName)) {
+            case Some(value) => value
+            case None =>
+                emitRealPipelineTypeError(member.GetFieldPos(),
+                    "unknown field '" + fieldName + "' on " + baseTy.String())
+                assignExpr.SetTy(TypeManager.GetInvalidTy())
+                return true
+        }
+        if (!info.FieldCanWrite(fieldName)) {
+            emitRealPipelineTypeError(member.GetFieldPos(), "cannot assign to immutable field '" + fieldName + "'")
+            assignExpr.SetTy(TypeManager.GetInvalidTy())
+            return true
+        }
+        let right = match (assignExpr.rightExpr) {
+            case Some(value) => value
+            case None => return false
+        }
+        let rightTy = match (typeRealPipelineExpr(right, scope, Some(fieldTy))) {
+            case Some(value) => value
+            case None => return false
+        }
+        if (!isRealPipelineAssignable(fieldTy, rightTy)) {
+            emitRealPipelineTypeError(right.begin,
+                rightTy.String() + " assignment is not assignable to field '" + fieldName +
+                "' of type " + fieldTy.String())
+            assignExpr.SetTy(TypeManager.GetInvalidTy())
+            return true
+        }
+        assignExpr.SetTy(TypeManager.GetPrimitiveTy(TypeKind.TYPE_UNIT))
+        return true
+    }
+
+    private func checkRealPipelineImplicitFieldAssign(assignExpr: AssignExpr, name: String,
+        scope: RealPipelineScope): Option<Bool> {
+        if (scope.thisStructName.isEmpty()) {
+            return None
+        }
+        let info = match (realPipelineStructs.get(scope.thisStructName)) {
+            case Some(value) => value
+            case None => return None
+        }
+        let fieldTy = match (info.FieldType(name)) {
+            case Some(value) => value
+            case None => return None
+        }
+        if (!info.FieldCanWrite(name)) {
+            emitRealPipelineTypeError(assignExpr.begin, "cannot assign to immutable field '" + name + "'")
+            assignExpr.SetTy(TypeManager.GetInvalidTy())
+            return Some(true)
+        }
+        let right = match (assignExpr.rightExpr) {
+            case Some(value) => value
+            case None => return Some(false)
+        }
+        let rightTy = match (typeRealPipelineExpr(right, scope, Some(fieldTy))) {
+            case Some(value) => value
+            case None => return Some(false)
+        }
+        if (!isRealPipelineAssignable(fieldTy, rightTy)) {
+            emitRealPipelineTypeError(right.begin,
+                rightTy.String() + " assignment is not assignable to field '" + name +
+                "' of type " + fieldTy.String())
+            assignExpr.SetTy(TypeManager.GetInvalidTy())
+            return Some(true)
+        }
+        assignExpr.SetTy(TypeManager.GetPrimitiveTy(TypeKind.TYPE_UNIT))
+        return Some(true)
     }
 
     private func checkRealPipelineReturn(ret: ReturnExpr, retTy: Ty, scope: RealPipelineScope): Bool {
@@ -840,12 +1250,19 @@ public class TypeChecker {
             let local = match (scope.Get(name)) {
                 case Some(value) => value
                 case None =>
+                    if (let Some(fieldTy) <- realPipelineImplicitFieldType(name, scope)) {
+                        refExpr.SetTy(fieldTy)
+                        return Some(fieldTy)
+                    }
                     emitRealPipelineTypeError(refExpr.begin, "undeclared local '" + name + "'")
                     refExpr.SetTy(TypeManager.GetInvalidTy())
                     return Some(TypeManager.GetInvalidTy())
             }
             refExpr.SetTy(local.ty)
             return Some(local.ty)
+        }
+        if (let Some(memberAccess) <- (expr as MemberAccess)) {
+            return typeRealPipelineMemberAccessExpr(memberAccess, scope)
         }
         if (let Some(unaryExpr) <- (expr as UnaryExpr)) {
             return typeRealPipelineUnaryExpr(unaryExpr, scope)
@@ -949,10 +1366,43 @@ public class TypeChecker {
         return None
     }
 
+    private func typeRealPipelineMemberAccessExpr(memberAccess: MemberAccess,
+        scope: RealPipelineScope): Option<Ty> {
+        if (!memberAccess.typeArguments.isEmpty()) {
+            return None
+        }
+        let base = match (memberAccess.baseExpr) {
+            case Some(value) => value
+            case None => return None
+        }
+        let baseTy = match (typeRealPipelineExpr(base, scope, None)) {
+            case Some(value) => value
+            case None => return None
+        }
+        let info = match (realPipelineStructInfoForTy(baseTy)) {
+            case Some(value) => value
+            case None => return None
+        }
+        let fieldName = memberAccess.field.GetRawText()
+        let fieldTy = match (info.FieldType(fieldName)) {
+            case Some(value) => value
+            case None =>
+                emitRealPipelineTypeError(memberAccess.GetFieldPos(),
+                    "unknown field '" + fieldName + "' on " + baseTy.String())
+                memberAccess.SetTy(TypeManager.GetInvalidTy())
+                return Some(TypeManager.GetInvalidTy())
+        }
+        memberAccess.SetTy(fieldTy)
+        return Some(fieldTy)
+    }
+
     private func typeRealPipelineCallExpr(callExpr: CallExpr, scope: RealPipelineScope): Option<Ty> {
         let base = match (callExpr.baseFunc) {
             case Some(value) => value
             case None => return None
+        }
+        if (let Some(memberAccess) <- (base as MemberAccess)) {
+            return typeRealPipelineMethodCallExpr(callExpr, memberAccess, scope)
         }
         let calleeRef = match (base as RefExpr) {
             case Some(value) => value
@@ -967,6 +1417,9 @@ public class TypeChecker {
         }
         if (calleeName.isEmpty() || scope.Contains(calleeName)) {
             return None
+        }
+        if (let Some(structInfo) <- realPipelineStructs.get(calleeName)) {
+            return typeRealPipelineStructConstruction(callExpr, calleeRef, structInfo, scope)
         }
         if (!realPipelineDeclaredFunctions.contains(calleeName)) {
             if (realPipelineUnsupported) {
@@ -1025,6 +1478,112 @@ public class TypeChecker {
         calleeRef.SetTy(funcTy)
         callExpr.SetTy(funcTy.retTy)
         return Some(funcTy.retTy)
+    }
+
+    private func typeRealPipelineStructConstruction(callExpr: CallExpr, calleeRef: RefExpr,
+        structInfo: RealPipelineStructInfo, scope: RealPipelineScope): Option<Ty> {
+        if (callExpr.args.size != structInfo.initParamTypes.size) {
+            emitRealPipelineTypeError(callExpr.begin,
+                "constructor '" + structInfo.name + "' expects " + structInfo.initParamTypes.size.toString() +
+                " argument(s), got " + callExpr.args.size.toString())
+            callExpr.SetTy(TypeManager.GetInvalidTy())
+            return Some(TypeManager.GetInvalidTy())
+        }
+        var idx: Int64 = 0
+        while (idx < callExpr.args.size) {
+            let arg = callExpr.args[idx]
+            if (!arg.name.Empty() || arg.withInout) {
+                return None
+            }
+            let argExpr = match (arg.expr) {
+                case Some(value) => value
+                case None => return None
+            }
+            let paramTy = structInfo.initParamTypes[idx]
+            let argTy = match (typeRealPipelineExpr(argExpr, scope, Some(paramTy))) {
+                case Some(value) => value
+                case None => return None
+            }
+            if (!isRealPipelineAssignable(paramTy, argTy)) {
+                emitRealPipelineTypeError(argExpr.begin,
+                    argTy.String() + " argument is not assignable to " + paramTy.String() +
+                    " constructor parameter " + idx.toString() + " of struct '" + structInfo.name + "'")
+                callExpr.SetTy(TypeManager.GetInvalidTy())
+                return Some(TypeManager.GetInvalidTy())
+            }
+            idx++
+        }
+        calleeRef.ref.target = Some(structInfo.decl)
+        calleeRef.SetTy(structInfo.ty)
+        callExpr.SetTy(structInfo.ty)
+        return Some(structInfo.ty)
+    }
+
+    private func typeRealPipelineMethodCallExpr(callExpr: CallExpr, memberAccess: MemberAccess,
+        scope: RealPipelineScope): Option<Ty> {
+        if (!memberAccess.typeArguments.isEmpty()) {
+            return None
+        }
+        let receiverExpr = match (memberAccess.baseExpr) {
+            case Some(value) => value
+            case None => return None
+        }
+        let receiverTy = match (typeRealPipelineExpr(receiverExpr, scope, None)) {
+            case Some(value) => value
+            case None => return None
+        }
+        let structInfo = match (realPipelineStructInfoForTy(receiverTy)) {
+            case Some(value) => value
+            case None => return None
+        }
+        let methodName = memberAccess.field.GetRawText()
+        let methodTy = match (structInfo.methods.get(methodName)) {
+            case Some(value) => value
+            case None =>
+                emitRealPipelineTypeError(memberAccess.GetFieldPos(),
+                    "unknown method '" + methodName + "' on " + receiverTy.String())
+                callExpr.SetTy(TypeManager.GetInvalidTy())
+                return Some(TypeManager.GetInvalidTy())
+        }
+        if (callExpr.args.size != methodTy.paramTys.size) {
+            emitRealPipelineTypeError(callExpr.begin,
+                "method '" + methodName + "' expects " + methodTy.paramTys.size.toString() +
+                " argument(s), got " + callExpr.args.size.toString())
+            callExpr.SetTy(TypeManager.GetInvalidTy())
+            return Some(TypeManager.GetInvalidTy())
+        }
+        var idx: Int64 = 0
+        while (idx < callExpr.args.size) {
+            let arg = callExpr.args[idx]
+            if (!arg.name.Empty() || arg.withInout) {
+                return None
+            }
+            let argExpr = match (arg.expr) {
+                case Some(value) => value
+                case None => return None
+            }
+            let paramTy = methodTy.paramTys[idx]
+            let argTy = match (typeRealPipelineExpr(argExpr, scope, Some(paramTy))) {
+                case Some(value) => value
+                case None => return None
+            }
+            if (!isRealPipelineAssignable(paramTy, argTy)) {
+                emitRealPipelineTypeError(argExpr.begin,
+                    argTy.String() + " argument is not assignable to " + paramTy.String() +
+                    " parameter " + idx.toString() + " of method '" + methodName + "'")
+                callExpr.SetTy(TypeManager.GetInvalidTy())
+                return Some(TypeManager.GetInvalidTy())
+            }
+            idx++
+        }
+        if (let Some(methodDecl) <- structInfo.methodDecls.get(methodName)) {
+            memberAccess.target = Some(methodDecl)
+            memberAccess.targets.add(methodDecl)
+            callExpr.resolvedFunction = Some(methodDecl)
+        }
+        memberAccess.SetTy(methodTy)
+        callExpr.SetTy(methodTy.retTy)
+        return Some(methodTy.retTy)
     }
 
     private func typeRealPipelineStringConcatExpr(binaryExpr: BinaryExpr, scope: RealPipelineScope): Option<Ty> {
@@ -1157,7 +1716,8 @@ public class TypeChecker {
     }
 
     private func isRealPipelineValueTy(ty: Ty): Bool {
-        return isRealPipelineInt64Ty(ty) || isRealPipelineBoolTy(ty) || isRealPipelineStringTy(ty)
+        return isRealPipelineInt64Ty(ty) || isRealPipelineBoolTy(ty) || isRealPipelineStringTy(ty) ||
+            isRealPipelineStructTy(ty)
     }
 
     private func isRealPipelineLocalTy(ty: Ty): Bool {
@@ -1184,9 +1744,17 @@ public class TypeChecker {
         return !ty.HasInvalidTy() && ty.kind == TypeKind.TYPE_CSTRING
     }
 
+    private func isRealPipelineStructTy(ty: Ty): Bool {
+        return !ty.HasInvalidTy() && ty.kind == TypeKind.TYPE_STRUCT
+    }
+
     private func isRealPipelineAssignable(targetTy: Ty, exprTy: Ty): Bool {
         if (exprTy.HasInvalidTy() || targetTy.HasInvalidTy()) {
             return false
+        }
+        if (isRealPipelineStructTy(targetTy) || isRealPipelineStructTy(exprTy)) {
+            return isRealPipelineStructTy(targetTy) && isRealPipelineStructTy(exprTy) &&
+                targetTy.String() == exprTy.String()
         }
         if (targetTy.kind == exprTy.kind) {
             return true
@@ -1246,6 +1814,76 @@ public class TypeChecker {
             let ty = TypeManager.GetCStringTy()
             typeNode.SetTy(ty)
             return Some(ty)
+        }
+        if (let Some(info) <- realPipelineStructs.get(text)) {
+            typeNode.SetTy(info.ty)
+            return Some(info.ty)
+        }
+        return None
+    }
+
+    private func resolveRealPipelineStoredFieldType(typeNode: Type): Option<Ty> {
+        if (let Some(ty) <- resolveRealPipelinePrimitiveType(typeNode)) {
+            if (isRealPipelineInt64Ty(ty) || isRealPipelineBoolTy(ty)) {
+                return Some(ty)
+            }
+            return None
+        }
+        let text = typeNode.ToString().trimAscii()
+        if (text == "String" || text == "CString") {
+            let ty = TypeManager.GetCStringTy()
+            typeNode.SetTy(ty)
+            return Some(ty)
+        }
+        return None
+    }
+
+    private func realPipelineStructInfoForTy(ty: Ty): Option<RealPipelineStructInfo> {
+        if (!isRealPipelineStructTy(ty)) {
+            return None
+        }
+        for ((_, info) in realPipelineStructs) {
+            if (info.ty.String() == ty.String()) {
+                return Some(info)
+            }
+        }
+        return None
+    }
+
+    private func realPipelineImplicitFieldType(name: String, scope: RealPipelineScope): Option<Ty> {
+        if (scope.thisStructName.isEmpty() || scope.Contains(name)) {
+            return None
+        }
+        let info = match (realPipelineStructs.get(scope.thisStructName)) {
+            case Some(value) => value
+            case None => return None
+        }
+        return info.FieldType(name)
+    }
+
+    private func realPipelineFieldNameFromThisTarget(expr: Expr): Option<String> {
+        if (let Some(refExpr) <- (expr as RefExpr)) {
+            if (!refExpr.typeArguments.isEmpty()) {
+                return None
+            }
+            return Some(refExpr.ref.identifier.Val())
+        }
+        if (let Some(member) <- (expr as MemberAccess)) {
+            if (!member.typeArguments.isEmpty()) {
+                return None
+            }
+            let base = match (member.baseExpr) {
+                case Some(value) => value
+                case None => return None
+            }
+            let baseRef = match (base as RefExpr) {
+                case Some(value) => value
+                case None => return None
+            }
+            if (baseRef.ref.identifier.Val() != "this") {
+                return None
+            }
+            return Some(member.field.GetRawText())
         }
         return None
     }
