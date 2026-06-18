@@ -538,6 +538,15 @@ private func stdLibFieldLookup(ctx: ASTContext, node: Node, fieldName: String): 
                 results.add(target)
             }
         }
+        if (results.isEmpty()) {
+            if (let Some(packageMap) <- ctx.resolvedPackageMemberDeclsMap.get(fullPackageName)) {
+                if (let Some(decls) <- packageMap.get(fieldName)) {
+                    for (decl in decls) {
+                        addDeclUnique(results, decl)
+                    }
+                }
+            }
+        }
     }
     return results
 }
@@ -633,6 +642,20 @@ private func collectImportedDeclsByName(ctx: ASTContext, node: Node, name: Strin
         for (importSpec in file.imports) {
             if (!importSpec.IsReExport()) {
                 collectImportedDeclsFromSpec(ctx, sourcePkgName, importSpec, name, results)
+            }
+        }
+    }
+    return results
+}
+
+private func collectResolvedImportedDeclsByName(ctx: ASTContext, node: Node, name: String): ArrayList<Decl> {
+    let results = ArrayList<Decl>()
+    if (let Some(file) <- node.curFile) {
+        if (let Some(fileMap) <- ctx.resolvedImportedDeclsMap.get(file.fileHash)) {
+            if (let Some(decls) <- fileMap.get(name)) {
+                for (decl in decls) {
+                    addDeclUnique(results, decl)
+                }
             }
         }
     }
@@ -815,6 +838,12 @@ private func lookupCommon(typeManager: TypeManager, ctx: ASTContext, name: Strin
         return results
     }
     if (!results.isEmpty() && !isAllFuncDecl(results)) {
+        return results
+    }
+    for (decl in collectResolvedImportedDeclsByName(ctx, node, name)) {
+        addDeclUnique(results, decl)
+    }
+    if (!results.isEmpty()) {
         return results
     }
     for (decl in collectImportedDeclsByName(ctx, node, name)) {

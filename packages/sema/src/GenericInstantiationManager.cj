@@ -8,7 +8,50 @@ public class CompilerInstance {
     public var typeManager: TypeManager = TypeManager()
     public var globalOptions: OptionGlobalOptions = OptionGlobalOptions()
     public let packageDecls: ArrayList<PackageDecl> = ArrayList<PackageDecl>()
+    public let resolvedImportedDeclsMap: HashMap<UInt64, HashMap<String, ArrayList<Decl>>> =
+        HashMap<UInt64, HashMap<String, ArrayList<Decl>>>()
+    public let resolvedPackageMemberDeclsMap: HashMap<String, HashMap<String, ArrayList<Decl>>> =
+        HashMap<String, HashMap<String, ArrayList<Decl>>>()
     public init() {}
+
+    public func AddResolvedImportedDecls(fileHash: UInt64, name: String, decls: ArrayList<Decl>): Unit {
+        if (!resolvedImportedDeclsMap.contains(fileHash)) {
+            resolvedImportedDeclsMap[fileHash] = HashMap<String, ArrayList<Decl>>()
+        }
+        if (let Some(fileMap) <- resolvedImportedDeclsMap.get(fileHash)) {
+            AddDeclsToNamedMap(fileMap, name, decls)
+        }
+    }
+
+    public func AddResolvedPackageMemberDecls(packageName: String, name: String, decls: ArrayList<Decl>): Unit {
+        if (!resolvedPackageMemberDeclsMap.contains(packageName)) {
+            resolvedPackageMemberDeclsMap[packageName] = HashMap<String, ArrayList<Decl>>()
+        }
+        if (let Some(packageMap) <- resolvedPackageMemberDeclsMap.get(packageName)) {
+            AddDeclsToNamedMap(packageMap, name, decls)
+        }
+    }
+
+    private func AddDeclsToNamedMap(map: HashMap<String, ArrayList<Decl>>, name: String,
+        decls: ArrayList<Decl>): Unit {
+        if (!map.contains(name)) {
+            map[name] = ArrayList<Decl>()
+        }
+        if (let Some(values) <- map.get(name)) {
+            for (decl in decls) {
+                AddDeclIfMissing(values, decl)
+            }
+        }
+    }
+
+    private func AddDeclIfMissing(values: ArrayList<Decl>, decl: Decl): Unit {
+        for (value in values) {
+            if (SameDecl(value, decl)) {
+                return
+            }
+        }
+        values.add(decl)
+    }
 }
 
 public class GenericInfo {

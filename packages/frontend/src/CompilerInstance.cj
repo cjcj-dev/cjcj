@@ -427,9 +427,30 @@ public class CompilerInstance {
         for (importedPackage in importManager.GetAllImportedPackages()) {
             semaInstance.packageDecls.add(RealASTPackageDecl(importedPackage))
         }
+        SeedFaithfulSemaResolvedImports(semaInstance)
         let checker = FaithfulSemaTypeChecker(Some(semaInstance))
         checker.TypeCheckForPackages(pkgs)
         return true
+    }
+
+    private func SeedFaithfulSemaResolvedImports(semaInstance: FaithfulSemaCompilerInstance): Unit {
+        for (pkg in srcPkgs) {
+            for (file in pkg.files) {
+                for (group in importManager.GetImportedDecls(file)) {
+                    semaInstance.AddResolvedImportedDecls(file.fileHash, group.name, group.decls)
+                }
+            }
+        }
+        for (srcPkg in srcPkgs) {
+            for (importedPackage in importManager.GetAllImportedPackages()) {
+                let members = importManager.GetPackageMembers(srcPkg.fullPackageName, importedPackage.fullPackageName)
+                for (name in members.keys()) {
+                    if (let Some(decls) <- members.get(name)) {
+                        semaInstance.AddResolvedPackageMemberDecls(importedPackage.fullPackageName, name, decls)
+                    }
+                }
+            }
+        }
     }
 
     public func GenerateCHIRForPkg(pkg: Package): Bool {

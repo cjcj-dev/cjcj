@@ -96,9 +96,41 @@ public class TypeChecker {
 
     private func SeedImportedPackageDecls(ctx: ASTContext): Unit {
         ctx.packageDecls.clear()
+        ctx.resolvedImportedDeclsMap.clear()
+        ctx.resolvedPackageMemberDeclsMap.clear()
         if (let Some(instance) <- ci) {
             for (packageDecl in instance.packageDecls) {
                 ctx.packageDecls.add(packageDecl)
+            }
+            for (fileHash in instance.resolvedImportedDeclsMap.keys()) {
+                if (let Some(fileMap) <- instance.resolvedImportedDeclsMap.get(fileHash)) {
+                    let ctxFileMap = HashMap<String, ArrayList<Decl>>()
+                    for (name in fileMap.keys()) {
+                        if (let Some(decls) <- fileMap.get(name)) {
+                            let copiedDecls = ArrayList<Decl>()
+                            for (decl in decls) {
+                                copiedDecls.add(decl)
+                            }
+                            ctxFileMap[name] = copiedDecls
+                        }
+                    }
+                    ctx.resolvedImportedDeclsMap[fileHash] = ctxFileMap
+                }
+            }
+            for (packageName in instance.resolvedPackageMemberDeclsMap.keys()) {
+                if (let Some(packageMap) <- instance.resolvedPackageMemberDeclsMap.get(packageName)) {
+                    let ctxPackageMap = HashMap<String, ArrayList<Decl>>()
+                    for (name in packageMap.keys()) {
+                        if (let Some(decls) <- packageMap.get(name)) {
+                            let copiedDecls = ArrayList<Decl>()
+                            for (decl in decls) {
+                                copiedDecls.add(decl)
+                            }
+                            ctxPackageMap[name] = copiedDecls
+                        }
+                    }
+                    ctx.resolvedPackageMemberDeclsMap[packageName] = ctxPackageMap
+                }
             }
         }
     }

@@ -190,6 +190,10 @@ public class ASTContext {
     public let typeCheckCache: HashMap<Int64, TypeCheckCache> = HashMap<Int64, TypeCheckCache>()
     public var searcher: Searcher = Searcher()
     public let packageDecls: ArrayList<PackageDecl> = ArrayList<PackageDecl>()
+    public let resolvedImportedDeclsMap: HashMap<UInt64, HashMap<String, ArrayList<Decl>>> =
+        HashMap<UInt64, HashMap<String, ArrayList<Decl>>>()
+    public let resolvedPackageMemberDeclsMap: HashMap<String, HashMap<String, ArrayList<Decl>>> =
+        HashMap<String, HashMap<String, ArrayList<Decl>>>()
     public let mem2Decls: HashMap<MemSig, ArrayList<Decl>> = HashMap<MemSig, ArrayList<Decl>>()
     public let subtypeDeclsMap: HashMap<Int64, ArrayList<Decl>> = HashMap<Int64, ArrayList<Decl>>()
     public let declMap: HashMap<Names, ArrayList<Decl>> = HashMap<Names, ArrayList<Decl>>()

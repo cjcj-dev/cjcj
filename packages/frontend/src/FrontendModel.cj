@@ -413,6 +413,20 @@ public class TypeManager {
     public func ReleasePostSemaCaches(): Unit {}
 }
 
+public class ImportedDeclGroup {
+    public var name: String = ""
+    public let decls: ArrayList<Decl> = ArrayList<Decl>()
+
+    public init() {}
+
+    public init(name: String, decls: ArrayList<Decl>) {
+        this.name = name
+        for (decl in decls) {
+            this.decls.add(decl)
+        }
+    }
+}
+
 public class ImportManager {
     private let diag: DiagnosticEngine
     private let searchPath: ArrayList<String> = ArrayList<String>()
@@ -477,6 +491,7 @@ public class ImportManager {
                 diag.Diagnose(DiagCategory.IMPORT_PACKAGE, DEFAULT_POSITION, "empty package name")
                 return false
             }
+            AddImplicitImports(pkg, opts)
             sourcePackages.add(pkg.fullPackageName)
         }
         for (pkg in pkgs) {
@@ -488,7 +503,7 @@ public class ImportManager {
                 }
                 filteredDeps.add(dep)
                 if (!sourcePackages.contains(dep) && !depPkgCjdPaths.contains(dep)) {
-                    let cjdPath = FileUtil.FindSerializationFile(dep, ".cj.d", searchPath.toArray())
+                    let cjdPath = FileUtil.FindSerializationFile(dep, ".cjo", searchPath.toArray())
                     if (!cjdPath.isEmpty()) {
                         depPkgCjdPaths.add(dep, cjdPath)
                     }
@@ -512,11 +527,193 @@ public class ImportManager {
     }
 
     public func AddImportedPackage(pkg: Package): Unit {
-        importedPackages.add(pkg)
+        AddImportedPackageIfMissing(pkg)
     }
 
     public func GetDepPkgCjdPaths(): HashMap<String, String> {
         return depPkgCjdPaths
+    }
+
+    public func GetImportedDecls(file: File): ArrayList<ImportedDeclGroup> {
+        let out = ArrayList<ImportedDeclGroup>()
+        if (let Some(pkg) <- file.curPackage) {
+            for (importSpec in file.imports) {
+                CollectDeclsFromImport(pkg.fullPackageName, importSpec, out)
+            }
+        }
+        return out
+    }
+
+    public func GetPackageMembers(srcFullPackageName: String, targetFullPackageName: String): HashMap<String, ArrayList<Decl>> {
+        let out = HashMap<String, ArrayList<Decl>>()
+        if (let Some(pkg) <- GetPackage(targetFullPackageName)) {
+            for (file in pkg.files) {
+                for (decl in file.decls) {
+                    if (IsDeclVisibleFrom(srcFullPackageName, decl)) {
+                        PutImportedDecl(out, decl.identifier.Val(), decl)
+                    }
+                }
+            }
+        }
+        return out
+    }
+
+    public func GetCoreDecl(name: String): Option<Decl> {
+        return GetImportedDecl("std.core", name)
+    }
+
+    public func GetAstDecl(name: String): Option<Decl> {
+        return GetImportedDecl("std.ast", name)
+    }
+
+    private func GetImportedDecl(packageName: String, name: String): Option<Decl> {
+        if (let Some(pkg) <- GetPackage(packageName)) {
+            for (file in pkg.files) {
+                for (decl in file.decls) {
+                    if (decl.identifier.Val() == name) {
+                        return Some(decl)
+                    }
+                }
+            }
+        }
+        return None
+    }
+
+    private func CollectDeclsFromImport(srcFullPackageName: String, importSpec: ImportSpec,
+        out: ArrayList<ImportedDeclGroup>): Unit {
+        if (importSpec.IsImportMulti()) {
+            return
+        }
+        let targetPackageName = if (importSpec.IsImportAll()) {
+            importSpec.content.GetPrefixPath()
+        } else {
+            importSpec.content.GetImportedPackageName()
+        }
+        if (targetPackageName.isEmpty()) {
+            return
+        }
+        if (let Some(pkg) <- GetPackage(targetPackageName)) {
+            if (importSpec.IsImportAll()) {
+                for (file in pkg.files) {
+                    for (decl in file.decls) {
+                        if (IsDeclVisibleFrom(srcFullPackageName, decl)) {
+                            AddImportedDeclGroupValue(out, decl.identifier.Val(), decl)
+                        }
+                    }
+                }
+            } else if (IsPackageImport(importSpec, targetPackageName)) {
+                let importedName = if (importSpec.IsImportAlias()) {
+                    importSpec.content.aliasName.Val()
+                } else {
+                    LastPackageName(targetPackageName)
+                }
+                AddImportedDeclGroupValue(out, importedName, PackageDecl(pkg))
+            } else {
+                let importedName = if (importSpec.IsImportAlias()) {
+                    importSpec.content.aliasName.Val()
+                } else {
+                    importSpec.content.identifier.Val()
+                }
+                for (file in pkg.files) {
+                    for (decl in file.decls) {
+                        if (decl.identifier.Val() == importSpec.content.identifier.Val() &&
+                            IsDeclVisibleFrom(srcFullPackageName, decl)) {
+                            AddImportedDeclGroupValue(out, importedName, decl)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private func IsPackageImport(importSpec: ImportSpec, targetPackageName: String): Bool {
+        if (importSpec.IsImportAll()) {
+            return false
+        }
+        for (pkg in importedPackages) {
+            if (pkg.fullPackageName == targetPackageName) {
+                return true
+            }
+        }
+        return false
+    }
+
+    private func IsDeclVisibleFrom(srcFullPackageName: String, decl: Decl): Bool {
+        if (decl.TestAttr(Attribute.PUBLIC)) {
+            return true
+        }
+        if (decl.fullPackageName == srcFullPackageName) {
+            return true
+        }
+        if (decl.TestAttr(Attribute.INTERNAL)) {
+            return RootPackageName(decl.fullPackageName) == RootPackageName(srcFullPackageName)
+        }
+        if (decl.TestAttr(Attribute.PROTECTED)) {
+            return RootPackageName(decl.fullPackageName) == RootPackageName(srcFullPackageName)
+        }
+        return false
+    }
+
+    private func PutImportedDecl(map: HashMap<String, ArrayList<Decl>>, name: String, decl: Decl): Unit {
+        if (!map.contains(name)) {
+            map[name] = ArrayList<Decl>()
+        }
+        if (let Some(values) <- map.get(name)) {
+            AddDeclIfMissing(values, decl)
+        }
+    }
+
+    private func AddImportedDeclGroupValue(groups: ArrayList<ImportedDeclGroup>, name: String, decl: Decl): Unit {
+        for (group in groups) {
+            if (group.name == name) {
+                AddDeclIfMissing(group.decls, decl)
+                return
+            }
+        }
+        let decls = ArrayList<Decl>()
+        decls.add(decl)
+        groups.add(ImportedDeclGroup(name, decls))
+    }
+
+    private func AddDeclIfMissing(values: ArrayList<Decl>, decl: Decl): Unit {
+        for (value in values) {
+            if (SameDecl(value, decl)) {
+                return
+            }
+        }
+        values.add(decl)
+    }
+
+    private func LastPackageName(fullPackageName: String): String {
+        let parts = SplitQualifiedName(fullPackageName)
+        if (parts.isEmpty()) {
+            return fullPackageName
+        }
+        return parts[parts.size - 1]
+    }
+
+    private func RootPackageName(fullPackageName: String): String {
+        let parts = SplitQualifiedName(fullPackageName)
+        if (parts.isEmpty()) {
+            return fullPackageName
+        }
+        return parts[0]
+    }
+
+    private func SplitQualifiedName(fullPackageName: String): ArrayList<String> {
+        let out = ArrayList<String>()
+        var start: Int64 = 0
+        var idx: Int64 = 0
+        while (idx <= fullPackageName.size) {
+            if (idx == fullPackageName.size || fullPackageName[idx] == UInt8(46)) {
+                if (idx > start) {
+                    out.add(fullPackageName[start..idx])
+                }
+                start = idx + 1
+            }
+            idx++
+        }
+        return out
     }
 
     public func GetPackage(name: String): Option<Package> {
@@ -526,6 +723,15 @@ public class ImportManager {
             }
         }
         return None
+    }
+
+    private func AddImportedPackageIfMissing(pkg: Package): Unit {
+        for (existing in importedPackages) {
+            if (existing.fullPackageName == pkg.fullPackageName) {
+                return
+            }
+        }
+        importedPackages.add(pkg)
     }
 
     private func CollectDirectDependencyNames(pkg: Package): HashSet<String> {
@@ -539,6 +745,28 @@ public class ImportManager {
             }
         }
         return deps
+    }
+
+    private func AddImplicitImports(pkg: Package, opts: GlobalOptions): Unit {
+        if (!opts.implicitPrelude) {
+            return
+        }
+        for (file in pkg.files) {
+            AddImplicitImportAll(file, "std.core")
+        }
+    }
+
+    private func AddImplicitImportAll(file: File, fullPackageName: String): Unit {
+        for (importSpec in file.imports) {
+            if (importSpec.TestAttr(Attribute.IMPLICIT_ADD) && importSpec.IsImportAll() &&
+                importSpec.content.GetPrefixPath() == fullPackageName) {
+                return
+            }
+        }
+        let importSpec = CreateImportSpec(fullPackageName, "*", "")
+        importSpec.curFile = Some(file)
+        importSpec.content.curFile = Some(file)
+        file.imports.add(importSpec)
     }
 
     private func NormalizeImportedPackageName(content: ImportContent): String {
