@@ -22,4 +22,5 @@
   "cangjie_compiler::meta_transformation" = { path = "../meta_transformation" }
   "cangjie_compiler::option" = { path = "../option" }
   "cangjie_compiler::parse" = { path = "../parse" }
+  "cangjie_compiler::sema" = { path = "../sema" }
   "cangjie_compiler::utils" = { path = "../utils" }

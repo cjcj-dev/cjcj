@@ -4,6 +4,7 @@ import cangjie_compiler::ast.AddCurFile
 import cangjie_compiler::ast.Package as RealASTPackage
 import cangjie_compiler::parse.DiagnosticEngine as ParseDiagnosticEngine
 import cangjie_compiler::parse.Parser as RealParser
+import cangjie_compiler::sema.TypeChecker as RealSemaTypeChecker
 import cangjie_compiler::meta_transformation.MetaTransformPluginBuilder
 import cangjie_compiler::meta_transformation.NativeMetaTransformPlugin
 import std.collection.*
@@ -344,10 +345,11 @@ public class CompilerInstance {
     public func PerformSema(): Bool {
         let ret = getCompileStrategy().Sema()
         hasTypeCheckerFlag = true
+        let realSemaOk = if (ret) { RunRealSemaIfEnabled() } else { false }
         if (!srcPkgs.isEmpty() && invocation.globalOptions.NeedDumpASTToFile()) {
             DumpAST(GetSourcePackages(), invocation.globalOptions.output, "sema")
         }
-        return ret
+        return ret && realSemaOk
     }
 
     public func PerformDesugarAfterSema(): Bool {
@@ -448,6 +450,32 @@ public class CompilerInstance {
         }
         AddCurFile(realPkg)
         return Some(realPkg)
+    }
+
+    private func RunRealSemaIfEnabled(): Bool {
+        if (!IsRealPipelineEnabled() || realASTPkgs.isEmpty()) {
+            return true
+        }
+        let pkgs = ArrayList<RealASTPackage>()
+        for (pkg in srcPkgs) {
+            if (let Some(realPkg) <- realASTPkgs.get(pkg.fullPackageName)) {
+                pkgs.add(realPkg)
+            }
+        }
+        if (pkgs.isEmpty()) {
+            return true
+        }
+        let checker = RealSemaTypeChecker(None)
+        checker.TypeCheckForPackages(pkgs)
+        for (diagInfo in checker.GetRealPipelineDiagnostics()) {
+            diag.Diagnose(DiagCategory.SEMA, diagInfo.position, "[real-pipeline] sema error: " + diagInfo.message)
+        }
+        if (IsRealPipelineVerbose()) {
+            for (summary in checker.GetRealPipelineTypedFunctions()) {
+                eprintln("[real-pipeline] sema typed " + summary)
+            }
+        }
+        return !checker.HasRealPipelineErrors()
     }
 
     public func GenerateCHIRForPkg(pkg: Package): Bool {

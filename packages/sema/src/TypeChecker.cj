@@ -4,9 +4,22 @@ import std.collection.*
 import cangjie_compiler::ast.*
 import cangjie_compiler::option.GlobalOptions as OptionGlobalOptions
 
+public class RealSemaDiagnostic {
+    public let position: Position
+    public let message: String
+
+    public init(position: Position, message: String) {
+        this.position = position
+        this.message = message
+    }
+}
+
 public class TypeChecker {
     private var ci: Option<CompilerInstance> = None
     private var tm: TypeManager = TypeManager()
+    private let realPipelineDiagnostics: ArrayList<RealSemaDiagnostic> = ArrayList<RealSemaDiagnostic>()
+    private let realPipelineTypedFunctions: ArrayList<String> = ArrayList<String>()
+    private var realPipelineUnsupported: Bool = false
 
     public init(ci: Option<CompilerInstance>) {
         this.ci = ci
@@ -16,9 +29,37 @@ public class TypeChecker {
     }
 
     public func TypeCheckForPackages(pkgs: ArrayList<Package>): Unit {
+        realPipelineDiagnostics.clear()
+        realPipelineTypedFunctions.clear()
+        realPipelineUnsupported = false
         for (pkg in pkgs) {
             preparePackageTypes(pkg)
+            checkRealPipelinePackage(pkg)
         }
+    }
+
+    public func GetRealPipelineDiagnostics(): ArrayList<RealSemaDiagnostic> {
+        let out = ArrayList<RealSemaDiagnostic>()
+        for (diag in realPipelineDiagnostics) {
+            out.add(diag)
+        }
+        return out
+    }
+
+    public func GetRealPipelineTypedFunctions(): ArrayList<String> {
+        let out = ArrayList<String>()
+        for (summary in realPipelineTypedFunctions) {
+            out.add(summary)
+        }
+        return out
+    }
+
+    public func HasRealPipelineErrors(): Bool {
+        return !realPipelineDiagnostics.isEmpty()
+    }
+
+    public func HasRealPipelineUnsupported(): Bool {
+        return realPipelineUnsupported
     }
 
     public func SetOverflowStrategy(pkgs: ArrayList<Package>): Unit {
@@ -138,5 +179,218 @@ public class TypeChecker {
         for (member in decl.GetMemberDecls()) {
             synthesizeDeclType(member)
         }
+    }
+
+    private func checkRealPipelinePackage(pkg: Package): Unit {
+        for (file in pkg.files) {
+            for (decl in file.decls) {
+                checkRealPipelineDecl(decl)
+            }
+        }
+    }
+
+    private func checkRealPipelineDecl(decl: Decl): Unit {
+        if (let Some(mainDecl) <- (decl as MainDecl)) {
+            if (let Some(body) <- mainDecl.funcBody) {
+                checkRealPipelineFuncLike(decl, body, "main")
+            } else {
+                markRealPipelineUnsupported()
+            }
+            return
+        }
+        if (let Some(funcDecl) <- (decl as FuncDecl)) {
+            if (let Some(body) <- funcDecl.funcBody) {
+                body.funcDecl = Some(funcDecl)
+                checkRealPipelineFuncLike(decl, body, funcDecl.identifier.Val())
+            } else {
+                markRealPipelineUnsupported()
+            }
+            return
+        }
+        markRealPipelineUnsupported()
+        for (member in decl.GetMemberDecls()) {
+            checkRealPipelineDecl(member)
+        }
+    }
+
+    private func checkRealPipelineFuncLike(decl: Decl, body: FuncBody, displayName: String): Unit {
+        if (body.generic.isSome() || body.paramLists.size != 1) {
+            markRealPipelineUnsupported()
+            return
+        }
+        let params = ArrayList<Ty>()
+        for (param in body.paramLists[0].params) {
+            if (let Some(paramType) <- param.typeNode) {
+                if (let Some(paramTy) <- resolveRealPipelinePrimitiveType(paramType)) {
+                    param.SetTy(paramTy)
+                    params.add(paramTy)
+                } else {
+                    param.SetTy(TypeManager.GetInvalidTy())
+                    params.add(TypeManager.GetInvalidTy())
+                    markRealPipelineUnsupported()
+                    return
+                }
+            } else {
+                markRealPipelineUnsupported()
+                return
+            }
+        }
+        let retTy = match (resolveRealPipelineReturnTy(body)) {
+            case Some(value) => value
+            case None => return
+        }
+        let funcTy = tm.GetFunctionTy(params.toArray(), retTy)
+        body.SetTy(funcTy)
+        decl.SetTy(funcTy)
+        let supportedBody = checkRealPipelineLiteralReturnBody(body, retTy)
+        if (supportedBody) {
+            realPipelineTypedFunctions.add(displayName + ": " + funcTy.String())
+        }
+    }
+
+    private func resolveRealPipelineReturnTy(body: FuncBody): Option<Ty> {
+        if (let Some(retType) <- body.retType) {
+            if (let Some(retTy) <- resolveRealPipelinePrimitiveType(retType)) {
+                return Some(retTy)
+            }
+            retType.SetTy(TypeManager.GetInvalidTy())
+            markRealPipelineUnsupported()
+            return None
+        }
+        if (realPipelineBodyHasValueReturn(body)) {
+            markRealPipelineUnsupported()
+            return None
+        }
+        return Some(TypeManager.GetPrimitiveTy(TypeKind.TYPE_UNIT))
+    }
+
+    private func resolveRealPipelinePrimitiveType(typeNode: Type): Option<Ty> {
+        if (let Some(existing) <- typeNode.GetTy()) {
+            if (!existing.HasInvalidTy() && existing.kind != TypeKind.TYPE_INITIAL) {
+                return Some(existing)
+            }
+        }
+        if (let Some(primitiveType) <- (typeNode as PrimitiveType)) {
+            if (primitiveType.kind == TypeKind.TYPE_INVALID) {
+                return None
+            }
+            let ty = TypeManager.GetPrimitiveTy(primitiveType.kind)
+            primitiveType.SetTy(ty)
+            return Some(ty)
+        }
+        if (let Some(parenType) <- (typeNode as ParenType)) {
+            if (let Some(innerType) <- parenType.innerType) {
+                if (let Some(ty) <- resolveRealPipelinePrimitiveType(innerType)) {
+                    parenType.SetTy(ty)
+                    return Some(ty)
+                }
+            }
+        }
+        return None
+    }
+
+    private func checkRealPipelineLiteralReturnBody(body: FuncBody, retTy: Ty): Bool {
+        let block = match (body.body) {
+            case Some(value) => value
+            case None =>
+                markRealPipelineUnsupported()
+                return false
+        }
+        if (block.body.isEmpty()) {
+            if (retTy.kind == TypeKind.TYPE_UNIT) {
+                block.SetTy(retTy)
+                return true
+            }
+            emitRealPipelineTypeError(block.begin, "missing return value for declared return type " + retTy.String())
+            block.SetTy(TypeManager.GetInvalidTy())
+            return true
+        }
+        if (block.body.size != 1) {
+            markRealPipelineUnsupported()
+            return false
+        }
+        let ret = match (block.body[0] as ReturnExpr) {
+            case Some(value) => value
+            case None =>
+                markRealPipelineUnsupported()
+                return false
+        }
+        ret.refFuncBody = Some(body)
+        if (let Some(expr) <- ret.expr) {
+            let exprTy = match (typeRealPipelineLiteralExpr(expr, retTy)) {
+                case Some(value) => value
+                case None =>
+                    markRealPipelineUnsupported()
+                    return false
+            }
+            if (!isRealPipelineAssignable(retTy, exprTy)) {
+                emitRealPipelineTypeError(expr.begin,
+                    exprTy.String() + " literal is not assignable to " + retTy.String() + " return type")
+                ret.SetTy(TypeManager.GetInvalidTy())
+                block.SetTy(TypeManager.GetInvalidTy())
+                return true
+            }
+            ret.SetTy(TypeManager.GetNothingTy())
+            block.SetTy(TypeManager.GetNothingTy())
+            return true
+        }
+        if (retTy.kind != TypeKind.TYPE_UNIT) {
+            emitRealPipelineTypeError(ret.begin, "return without value is not assignable to " + retTy.String())
+            ret.SetTy(TypeManager.GetInvalidTy())
+            block.SetTy(TypeManager.GetInvalidTy())
+            return true
+        }
+        ret.SetTy(TypeManager.GetNothingTy())
+        block.SetTy(TypeManager.GetNothingTy())
+        return true
+    }
+
+    private func typeRealPipelineLiteralExpr(expr: Expr, targetTy: Ty): Option<Ty> {
+        if (let Some(lit) <- (expr as LitConstExpr)) {
+            var litTy: Ty = TypeManager.GetInvalidTy()
+            if (lit.kind == LitConstKind.INTEGER) {
+                litTy = if (targetTy.IsInteger()) { targetTy } else { TypeManager.GetPrimitiveTy(TypeKind.TYPE_INT64) }
+            } else if (lit.kind == LitConstKind.FLOAT) {
+                litTy = if (targetTy.IsFloating()) { targetTy } else { TypeManager.GetPrimitiveTy(TypeKind.TYPE_FLOAT64) }
+            } else if (lit.kind == LitConstKind.BOOL) {
+                litTy = TypeManager.GetPrimitiveTy(TypeKind.TYPE_BOOLEAN)
+            } else if (lit.kind == LitConstKind.UNIT) {
+                litTy = TypeManager.GetPrimitiveTy(TypeKind.TYPE_UNIT)
+            } else {
+                return None
+            }
+            lit.SetTy(litTy)
+            return Some(litTy)
+        }
+        return None
+    }
+
+    private func isRealPipelineAssignable(targetTy: Ty, exprTy: Ty): Bool {
+        if (exprTy.HasInvalidTy() || targetTy.HasInvalidTy()) {
+            return false
+        }
+        if (targetTy.kind == exprTy.kind) {
+            return true
+        }
+        return tm.CheckTypeCompatibility(targetTy, exprTy) != TypeCompatibility.INCOMPATIBLE
+    }
+
+    private func realPipelineBodyHasValueReturn(body: FuncBody): Bool {
+        if (let Some(block) <- body.body) {
+            if (block.body.size == 1) {
+                if (let Some(ret) <- (block.body[0] as ReturnExpr)) {
+                    return ret.expr.isSome()
+                }
+            }
+        }
+        return false
+    }
+
+    private func markRealPipelineUnsupported(): Unit {
+        realPipelineUnsupported = true
+    }
+
+    private func emitRealPipelineTypeError(position: Position, message: String): Unit {
+        realPipelineDiagnostics.add(RealSemaDiagnostic(position, message))
     }
 }
