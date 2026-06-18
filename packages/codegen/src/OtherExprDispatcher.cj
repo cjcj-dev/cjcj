@@ -2,6 +2,8 @@ package cangjie_compiler::codegen
 
 import cangjie_compiler::chir.Expression
 import cangjie_compiler::chir.ExprKind
+import cangjie_compiler::chir.GetRTTI
+import cangjie_compiler::chir.GetRTTIStatic
 
 public func HandleStructedControlFlowExpression(irBuilder: IRBuilder2, chirExpr: Expression): LLVMValueRef {
     if (chirExpr.GetExprKind() == ExprKind.LAMBDA) {
@@ -52,11 +54,31 @@ public func HandleOthersExpression(irBuilder: IRBuilder2, chirExpr: Expression):
     if (kind == ExprKind.INTRINSIC) {
         return GenerateIntrinsic(irBuilder, chirExpr)
     }
-    if (kind == ExprKind.GET_RTTI || kind == ExprKind.GET_RTTI_STATIC || kind == ExprKind.INSTANCEOF ||
-        kind == ExprKind.SPAWN || kind == ExprKind.GET_INSTANTIATE_VALUE) {
+    if (kind == ExprKind.GET_RTTI || kind == ExprKind.GET_RTTI_STATIC) {
+        return GenerateRTTIExpression(irBuilder, chirExpr)
+    }
+    if (kind == ExprKind.INSTANCEOF) {
+        return GenerateInstanceOf(irBuilder, chirExpr)
+    }
+    if (kind == ExprKind.SPAWN || kind == ExprKind.GET_INSTANTIATE_VALUE) {
         if (let Some(resultTy) <- chirExpr.GetResultType()) {
             return unsafe { LLVMConstNull(CGType.GetOrCreate(irBuilder.GetCGModule(), resultTy).GetLLVMType()) }
         }
+    }
+    return LLVMNullValue()
+}
+
+private func GenerateRTTIExpression(irBuilder: IRBuilder2, chirExpr: Expression): LLVMValueRef {
+    let typeInfoPtrType = CGType.GetOrCreateTypeInfoPtrType(irBuilder.GetLLVMContext())
+    if (let Some(getRTTI) <- (chirExpr as GetRTTI)) {
+        let objectValue = irBuilder.GetCGModule().MaterializeValue(irBuilder, getRTTI.GetOperand()).GetRawValue()
+        let typeInfoSlotType = unsafe { LLVMPointerType(typeInfoPtrType, 1u32) }
+        let typeInfoSlot = irBuilder.CreateBitCast(objectValue, typeInfoSlotType, name: "obj.ti.slot")
+        return irBuilder.CreateLoad(typeInfoPtrType, typeInfoSlot, name: "ti")
+    }
+    if (let Some(getRTTIStatic) <- (chirExpr as GetRTTIStatic)) {
+        return irBuilder.CreateBitCast(CGType.GetOrCreate(irBuilder.GetCGModule(),
+            getRTTIStatic.GetRTTIType()).GetOrCreateTypeInfo(), typeInfoPtrType, name: "static.ti")
     }
     return LLVMNullValue()
 }

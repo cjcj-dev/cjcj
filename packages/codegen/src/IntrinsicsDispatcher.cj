@@ -10,6 +10,8 @@ import cangjie_compiler::chir.IntrinsicWithException
 import cangjie_compiler::chir.Type
 import cangjie_compiler::chir.Value
 
+private let IS_SUBTYPE_INTRINSIC_NAME: String = "llvm.cj.is.subtype"
+
 public func GenerateIntrinsic(irBuilder: IRBuilder2, chirExpr: Expression): LLVMValueRef {
     if (let Some(intrinsicExpr) <- (chirExpr as Intrinsic)) {
         return GenerateIntrinsic(irBuilder, intrinsicExpr.GetIntrinsicKind(), intrinsicExpr.GetArgs(),
@@ -56,6 +58,18 @@ private func GenerateIntrinsic(irBuilder: IRBuilder2, kind: IntrinsicKind, args:
     if (kind == IntrinsicKind.ALIGN_OF) {
         if (!typeArgs.isEmpty()) {
             return AlignOfType(irBuilder, typeArgs[0], resultType)
+        }
+        return LLVMNullValue()
+    }
+    if (kind == IntrinsicKind.GET_TYPE_FOR_TYPE_PARAMETER) {
+        if (!typeArgs.isEmpty()) {
+            return GenerateGetTypeForTypeParameter(irBuilder, typeArgs[0])
+        }
+        return LLVMNullValue()
+    }
+    if (kind == IntrinsicKind.IS_SUBTYPE_TYPES) {
+        if (typeArgs.size >= 2) {
+            return GenerateIsSubtypeTypes(irBuilder, typeArgs[0], typeArgs[1])
         }
         return LLVMNullValue()
     }
@@ -206,6 +220,30 @@ private func SizeOfType(irBuilder: IRBuilder2, ty: Type, resultType: Option<Type
 private func AlignOfType(irBuilder: IRBuilder2, ty: Type, resultType: Option<Type>): LLVMValueRef {
     let alignValue = if (let Some(align) <- CGType.GetOrCreate(irBuilder.GetCGModule(), ty).GetAlign()) { align } else { 1 }
     return IntegerConstantForResult(irBuilder, alignValue, resultType)
+}
+
+private func GenerateGetTypeForTypeParameter(irBuilder: IRBuilder2, ty: Type): LLVMValueRef {
+    let typeInfoValue = CreateStaticTypeInfo(irBuilder, ty)
+    let typeInfoType = CGType.GetOrCreateTypeInfoType(irBuilder.GetLLVMContext())
+    let namePtr = irBuilder.CreateStructGEP(typeInfoType, typeInfoValue, 0u32, name: "ti.name.ptr")
+    let i8PtrType = unsafe { LLVMPointerType(LLVMInt8TypeInContext(irBuilder.GetLLVMContext().raw), 0u32) }
+    return irBuilder.CreateLoad(i8PtrType, namePtr, name: "ti.name")
+}
+
+private func GenerateIsSubtypeTypes(irBuilder: IRBuilder2, leftTy: Type, rightTy: Type): LLVMValueRef {
+    let args = ArrayList<LLVMValueRef>()
+    args.add(CreateTypeInfoAsI8Ptr(irBuilder, leftTy))
+    args.add(CreateTypeInfoAsI8Ptr(irBuilder, rightTy))
+    return irBuilder.CreateIntrinsicCall(IS_SUBTYPE_INTRINSIC_NAME, ArrayList<LLVMTypeRef>(), args, name: "is.subtype")
+}
+
+private func CreateStaticTypeInfo(irBuilder: IRBuilder2, ty: Type): LLVMValueRef {
+    return CGType.GetOrCreate(irBuilder.GetCGModule(), ty.StripAllRefs()).GetOrCreateTypeInfo()
+}
+
+private func CreateTypeInfoAsI8Ptr(irBuilder: IRBuilder2, ty: Type): LLVMValueRef {
+    let i8PtrType = unsafe { LLVMPointerType(LLVMInt8TypeInContext(irBuilder.GetLLVMContext().raw), 0u32) }
+    return irBuilder.CreateBitCast(CreateStaticTypeInfo(irBuilder, ty), i8PtrType, name: "ti.i8")
 }
 
 private func IntegerConstantForResult(irBuilder: IRBuilder2, value: Int64, resultType: Option<Type>): LLVMValueRef {
