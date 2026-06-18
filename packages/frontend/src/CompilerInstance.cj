@@ -84,6 +84,13 @@ public class CHIRInfo {
     public init() {}
 }
 
+private func PackageDiagnosticPosition(pkg: Package): Position {
+    if (!pkg.files.isEmpty()) {
+        return pkg.files[0].begin
+    }
+    return DEFAULT_POSITION
+}
+
 public class CompilerInstance {
     public let invocation: CompilerInvocation
     public var cangjieHome: String = ""
@@ -241,7 +248,7 @@ public class CompilerInstance {
     }
 
     public func PerformParse(): Bool {
-        let ret = getCompileStrategy().Parse()
+        var ret = getCompileStrategy().Parse()
         if (!srcPkgs.isEmpty()) {
             let globalOpts = invocation.globalOptions
             srcPkgs[0].noSubPkg = globalOpts.noSubPkg
@@ -254,7 +261,7 @@ public class CompilerInstance {
             }
         }
         if (ret) {
-            CaptureRealASTPackagesIfEnabled()
+            ret = CaptureRealASTPackages()
         } else {
             realASTPkgs.clear()
         }
@@ -345,7 +352,7 @@ public class CompilerInstance {
     public func PerformSema(): Bool {
         let ret = getCompileStrategy().Sema()
         hasTypeCheckerFlag = true
-        let realSemaOk = if (ret) { RunRealSemaIfEnabled() } else { false }
+        let realSemaOk = if (ret) { RunRealSema() } else { false }
         if (!srcPkgs.isEmpty() && invocation.globalOptions.NeedDumpASTToFile()) {
             DumpAST(GetSourcePackages(), invocation.globalOptions.output, "sema")
         }
@@ -395,10 +402,6 @@ public class CompilerInstance {
         return true
     }
 
-    public func IsRealPipelineEnabled(): Bool {
-        return EnvFlagEnabled("CJ_REAL_PIPELINE")
-    }
-
     public func IsRealPipelineVerbose(): Bool {
         return EnvFlagEnabled("CJ_REAL_PIPELINE_VERBOSE")
     }
@@ -408,19 +411,20 @@ public class CompilerInstance {
         return value == "1" || value == "true" || value == "TRUE" || value == "on" || value == "yes"
     }
 
-    private func CaptureRealASTPackagesIfEnabled(): Unit {
+    private func CaptureRealASTPackages(): Bool {
         realASTPkgs.clear()
-        if (!IsRealPipelineEnabled()) {
-            return
-        }
+        var ok = true
         for (pkg in srcPkgs) {
             if (let Some(realPkg) <- ParseRealASTPackageForFacadePackage(pkg)) {
                 realASTPkgs[pkg.fullPackageName] = realPkg
-            } else if (IsRealPipelineVerbose()) {
-                eprintln("[real-pipeline] failed to build real AST package for '" +
-                    pkg.fullPackageName + "'; falling back")
+            } else {
+                diag.Diagnose(DiagCategory.PARSE, PackageDiagnosticPosition(pkg),
+                    "unsupported construct while parsing package '" + pkg.fullPackageName +
+                    "' for the real pipeline (not yet implemented)")
+                ok = false
             }
         }
+        return ok
     }
 
     private func ParseRealASTPackageForFacadePackage(pkg: Package): Option<RealASTPackage> {
@@ -452,8 +456,8 @@ public class CompilerInstance {
         return Some(realPkg)
     }
 
-    private func RunRealSemaIfEnabled(): Bool {
-        if (!IsRealPipelineEnabled() || realASTPkgs.isEmpty()) {
+    private func RunRealSema(): Bool {
+        if (realASTPkgs.isEmpty()) {
             return true
         }
         let pkgs = ArrayList<RealASTPackage>()
@@ -470,46 +474,42 @@ public class CompilerInstance {
         for (diagInfo in checker.GetRealPipelineDiagnostics()) {
             diag.Diagnose(DiagCategory.SEMA, diagInfo.position, "[real-pipeline] sema error: " + diagInfo.message)
         }
+        if (checker.HasRealPipelineUnsupported()) {
+            diag.Diagnose(DiagCategory.SEMA, DEFAULT_POSITION,
+                "unsupported construct in real pipeline sema (not yet implemented)")
+        }
         if (IsRealPipelineVerbose()) {
             for (summary in checker.GetRealPipelineTypedFunctions()) {
                 eprintln("[real-pipeline] sema typed " + summary)
             }
         }
-        return !checker.HasRealPipelineErrors()
+        return !checker.HasRealPipelineErrors() && !checker.HasRealPipelineUnsupported()
     }
 
     public func GenerateCHIRForPkg(pkg: Package): Bool {
         if (pkg.files.isEmpty()) {
             return true
         }
-        var usedRealASTPath = false
-        if (IsRealPipelineEnabled()) {
-            if (let Some(realASTPkg) <- realASTPkgs.get(pkg.fullPackageName)) {
-                if (let Some(realPkg) <- BuildRealCHIRForASTPackage(this, realASTPkg)) {
-                    chirData.AppendNewRealPackage(realPkg)
-                    usedRealASTPath = true
-                    if (IsRealPipelineVerbose()) {
-                        eprintln("[real-pipeline] lowered package '" + pkg.fullPackageName + "' via real AST2CHIR")
-                    }
-                } else {
-                    if (diag.GetErrorCount() != 0) {
-                        return false
-                    }
-                    if (IsRealPipelineVerbose()) {
-                        eprintln("[real-pipeline] unsupported real AST shape for package '" +
-                            pkg.fullPackageName + "'; falling back")
-                    }
-                }
-            } else if (IsRealPipelineVerbose()) {
-                eprintln("[real-pipeline] no stored real AST package for '" + pkg.fullPackageName + "'; falling back")
-            }
+        let realASTPkg = match (realASTPkgs.get(pkg.fullPackageName)) {
+            case Some(value) => value
+            case None =>
+                diag.Diagnose(DiagCategory.CHIR, PackageDiagnosticPosition(pkg),
+                    "missing real AST package for '" + pkg.fullPackageName + "'")
+                return false
         }
-        if (!usedRealASTPath) {
-            if (let Some(realPkg) <- BuildRealCHIRForFrontendPackage(this, pkg)) {
-                chirData.AppendNewRealPackage(realPkg)
-            } else {
+        if (let Some(realPkg) <- BuildRealCHIRForASTPackage(this, realASTPkg)) {
+            chirData.AppendNewRealPackage(realPkg)
+            if (IsRealPipelineVerbose()) {
+                eprintln("[real-pipeline] lowered package '" + pkg.fullPackageName + "' via real AST2CHIR")
+            }
+        } else {
+            if (diag.GetErrorCount() != 0) {
                 return false
             }
+            diag.Diagnose(DiagCategory.CHIR, PackageDiagnosticPosition(pkg),
+                "unsupported construct in package '" + pkg.fullPackageName +
+                "' (not yet implemented in real pipeline)")
+            return false
         }
         let chirPkg = CHIRPackage(pkg.fullPackageName)
         chirPkg.fileCount = pkg.files.size
