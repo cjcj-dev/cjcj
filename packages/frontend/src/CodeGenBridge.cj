@@ -23,6 +23,7 @@ import cangjie_compiler::codegen.ClearPackageModules
 import cangjie_compiler::codegen.GenPackageModules
 import cangjie_compiler::codegen.LLVMModuleHandle as LLVMModuleHandle
 import cangjie_compiler::codegen.SavePackageModule
+import cangjie_compiler::option.MaybeUInt64
 
 public func BuildRealCHIRForFrontendPackage(instance: CompilerInstance, pkg: Package): Option<RealCHIRPackage> {
     let builder = ChirBuilder(instance.chirData.GetRealCHIRContext())
@@ -43,6 +44,10 @@ public func EmitRealCodeGenForCompilerInstance(instance: CompilerInstance): Bool
         return true
     }
     let codegenOptions = ConvertFrontendOptionsToCodegenOptions(instance.invocation.globalOptions)
+    let savedAPC = codegenOptions.aggressiveParallelCompile
+    if (ShouldEmitSingleExplicitBitcodeOutput(codegenOptions)) {
+        codegenOptions.aggressiveParallelCompile = MaybeUInt64(1u64)
+    }
     var emittedAll = true
     var packageIndex: Int64 = 0
     while (packageIndex < realPackages.size) {
@@ -55,11 +60,16 @@ public func EmitRealCodeGenForCompilerInstance(instance: CompilerInstance): Bool
         ClearPackageModules(packageModules)
         packageIndex++
     }
+    codegenOptions.aggressiveParallelCompile = savedAPC
     return emittedAll
 }
 
 public func ConvertFrontendOptionsToCodegenOptions(options: GlobalOptions): GlobalOptions {
     return options
+}
+
+private func ShouldEmitSingleExplicitBitcodeOutput(options: GlobalOptions): Bool {
+    return !options.output.isEmpty() && !IsDir(options.output) && options.output.endsWith(".bc")
 }
 
 private func buildRealPackageSpec(pkg: Package, context: ChirContext): ChirPackageSpec {

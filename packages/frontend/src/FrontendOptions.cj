@@ -86,6 +86,10 @@ public class FrontendOptions <: GlobalOptions {
             compileCjd = true
             return Some(true)
         }
+        if (id == OptionID.MODULE_NAME) {
+            moduleName = arg.value
+            return Some(true)
+        }
         return super.ParseOption(arg)
     }
 

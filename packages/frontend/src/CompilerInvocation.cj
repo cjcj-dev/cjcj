@@ -27,12 +27,22 @@ public class CompilerInvocation {
 
     public func ParseArgs(args: Array<String>): Bool {
         let realArgs = normalizeFrontendArgs(args)
-        if (!optionTable.ParseArgs(realArgs, argList)) {
+        let filtered = StripModuleSrcPathArgs(realArgs)
+        if (!filtered.ok) {
+            return false
+        }
+        if (!optionTable.ParseArgs(filtered.args, argList)) {
             return false
         }
         frontendOptions.SetFrontendMode()
         if (!frontendOptions.ParseFromArgs(argList)) {
             return false
+        }
+        if (!filtered.moduleSrcPath.isEmpty()) {
+            frontendOptions.moduleSrcPath = filtered.moduleSrcPath
+            if (frontendOptions.compilePackage && frontendOptions.packagePaths.isEmpty()) {
+                frontendOptions.packagePaths.add(filtered.moduleSrcPath)
+            }
         }
         frontendOptions.SetCompilationCachedPath()
         globalOptions = frontendOptions
@@ -67,4 +77,44 @@ private func normalizeFrontendArgs(args: Array<String>): Array<String> {
 private func isToolInvocationName(value: String): Bool {
     let name = GetFileName(value)
     return name == "cjc-frontend" || name == "cjc-frontend.exe" || name == "cjc" || name == "cjc.exe"
+}
+
+private class FrontendArgFilterResult {
+    public let ok: Bool
+    public let args: Array<String>
+    public let moduleSrcPath: String
+
+    public init(ok: Bool, args: Array<String>, moduleSrcPath: String) {
+        this.ok = ok
+        this.args = args
+        this.moduleSrcPath = moduleSrcPath
+    }
+}
+
+private func StripModuleSrcPathArgs(args: Array<String>): FrontendArgFilterResult {
+    let filtered = ArrayList<String>()
+    var moduleSrcPath = ""
+    var idx: Int64 = 0
+    while (idx < args.size) {
+        let current = args[idx]
+        if (current == "--module-src-path") {
+            if (idx + 1 >= args.size) {
+                return FrontendArgFilterResult(false, filtered.toArray(), "")
+            }
+            moduleSrcPath = args[idx + 1]
+            idx += 2
+            continue
+        }
+        if (current.startsWith("--module-src-path=")) {
+            moduleSrcPath = current["--module-src-path=".size..]
+            idx++
+            continue
+        }
+        filtered.add(current)
+        idx++
+    }
+    if (!moduleSrcPath.isEmpty()) {
+        filtered.add(moduleSrcPath)
+    }
+    return FrontendArgFilterResult(true, filtered.toArray(), moduleSrcPath)
 }

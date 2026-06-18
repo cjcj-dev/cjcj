@@ -119,10 +119,16 @@ public struct Position <: Hashable & Equatable<Position> {
     }
 
     public func Hash64(): UInt64 {
+        if (line < 0 || column < 0) {
+            return fileID << 32
+        }
         return (fileID << 32) ^ (UInt64(line) << 16) ^ UInt64(column)
     }
 
     public func Hash32(): UInt32 {
+        if (line < 0 || column < 0) {
+            return 0u32
+        }
         return UInt32((UInt64(line) << 16) ^ UInt64(column))
     }
 
