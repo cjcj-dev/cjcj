@@ -85,13 +85,20 @@ Implemented in this pass:
   consuming call because the LLVM implementation wraps the incoming buffer in a `unique_ptr`.
 - Added checked bitcode output helpers for file paths, file descriptors, and memory-buffer output so callers can avoid
   the old status-only/nullable patterns when porting C++ `WriteBitcodeToFile` and cached module emission.
+- Exposed LLVM target registration through real exported per-target C entry points rather than binding the static-inline
+  `LLVMInitializeAll*` helpers. The wrapper now covers the C++ reference build's configured native target set
+  (ARM/AArch64/X86), including target info, target, target MC, asm printer/parser, disassembler, and host-triple
+  selection.
+- Completed the public pass-builder options wrapper surface for the new pass manager: verify-each, debug logging,
+  loop interleaving/vectorization/unrolling, SLP vectorization, SCEV/Licm tuning caps, call-graph profile,
+  merge-functions, inliner threshold, module passes, and function passes. The AA pipeline setter now keeps its
+  `CString` alive for the options handle lifetime to match LLVM's borrowed-string contract.
 
 Known remaining gaps for this scope:
 
 - The C++ LLVM integration still has broader native-backend behavior not reachable through the current partial CHIR
-  emitters: full target initialization policy, package-level object/assembly emission orchestration, complete
-  pass-pipeline selection, target-dependent ABI/CFFI attributes, and precise debug-info attachment for
-  functions/types/locals.
+  emitters: package-level object/assembly emission orchestration, complete pass-pipeline selection, target-dependent
+  ABI/CFFI attributes, and precise debug-info attachment for functions/types/locals.
 - `IRBuilder2` restores insertion to the current block after entry alloca creation; the C API wrapper still does not
   preserve an arbitrary instruction iterator the way C++ `IRBuilder` does.
 - The new `CGFunctionType` call wrapper covers known-size struct-return setup and call attributes, but the full C++
@@ -107,4 +114,4 @@ Known remaining gaps for this scope:
 
 Remaining `TODO(selfhost:CodeGen)` markers in this llvm-ffi slice: 0.
 
-Estimated behavior coverage for this llvm-ffi/module/context/IRBuilder slice: 68%.
+Estimated behavior coverage for this llvm-ffi/module/context/IRBuilder slice: 71%.
