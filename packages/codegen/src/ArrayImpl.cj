@@ -3,6 +3,7 @@ package cangjie_compiler::codegen
 import std.collection.*
 import cangjie_compiler::chir.Expression
 import cangjie_compiler::chir.ExprKind
+import cangjie_compiler::chir.GetElementRef
 import cangjie_compiler::chir.RawArrayType
 import cangjie_compiler::chir.Type
 
@@ -177,10 +178,18 @@ public func GenerateGetElementRef(irBuilder: IRBuilder2, chirExpr: Expression): 
     }
     let baseValue = irBuilder.GetCGModule().MaterializeValue(irBuilder, chirExpr.GetOperand(0))
     let indices = ArrayList<LLVMValueRef>()
-    var idx: Int64 = 1
-    while (idx < chirExpr.GetNumOfOperands()) {
-        indices.add(irBuilder.GetCGModule().MaterializeValue(irBuilder, chirExpr.GetOperand(idx)).GetRawValue())
-        idx++
+    if (let Some(staticElementRef) <- (chirExpr as GetElementRef)) {
+        let zero = unsafe { LLVMConstInt(LLVMInt32TypeInContext(irBuilder.GetLLVMContext().raw), 0u64, 0) }
+        indices.add(zero)
+        for (pathItem in staticElementRef.GetPath()) {
+            indices.add(unsafe { LLVMConstInt(LLVMInt32TypeInContext(irBuilder.GetLLVMContext().raw), pathItem, 0) })
+        }
+    } else {
+        var idx: Int64 = 1
+        while (idx < chirExpr.GetNumOfOperands()) {
+            indices.add(irBuilder.GetCGModule().MaterializeValue(irBuilder, chirExpr.GetOperand(idx)).GetRawValue())
+            idx++
+        }
     }
     if (let Some(baseType) <- baseValue.GetCGType()) {
         if (let Some(elementType) <- baseType.GetPointerElementType()) {

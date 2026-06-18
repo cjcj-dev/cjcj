@@ -4,6 +4,7 @@ import std.collection.*
 import cangjie_compiler::chir.Expression
 import cangjie_compiler::chir.Block
 import cangjie_compiler::chir.ExprKind
+import cangjie_compiler::chir.IntOpWithException
 
 public func HandleTerminatorExpression(irBuilder: IRBuilder2, chirExpr: Expression): LLVMValueRef {
     let kind = chirExpr.GetExprKind()
@@ -38,7 +39,31 @@ public func HandleTerminatorExpression(irBuilder: IRBuilder2, chirExpr: Expressi
     }
     if (IsCallLikeWithExceptionKind(kind)) {
         return HandleWithExceptionTerminator(irBuilder, chirExpr, { builder: IRBuilder2, expr: Expression =>
-            EmitCallLikeExpression(builder, expr)
+            if (expr.GetExprKind() == ExprKind.APPLY_WITH_EXCEPTION) {
+                return EmitCallLikeExpression(builder, expr)
+            }
+            return GenerateInvokeExpression(builder, expr)
+        })
+    }
+    if (kind == ExprKind.INT_OP_WITH_EXCEPTION) {
+        return HandleWithExceptionTerminator(irBuilder, chirExpr, { builder: IRBuilder2, expr: Expression =>
+            if (let Some(intOp) <- (expr as IntOpWithException)) {
+                return GenerateIntOpWithException(builder, intOp)
+            }
+            return LLVMNullValue()
+        })
+    }
+    if (kind == ExprKind.INTRINSIC_WITH_EXCEPTION) {
+        return HandleWithExceptionTerminator(irBuilder, chirExpr, { builder: IRBuilder2, expr: Expression =>
+            GenerateIntrinsic(builder, expr)
+        })
+    }
+    if (kind == ExprKind.SPAWN_WITH_EXCEPTION) {
+        return HandleWithExceptionTerminator(irBuilder, chirExpr, { builder: IRBuilder2, expr: Expression =>
+            if (let Some(resultTy) <- expr.GetResultType()) {
+                return unsafe { LLVMConstNull(CGType.GetOrCreate(builder.GetCGModule(), resultTy).GetLLVMType()) }
+            }
+            return LLVMNullValue()
         })
     }
     if (kind == ExprKind.TYPECAST_WITH_EXCEPTION) {

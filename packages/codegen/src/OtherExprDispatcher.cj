@@ -14,8 +14,11 @@ public func HandleStructedControlFlowExpression(irBuilder: IRBuilder2, chirExpr:
 
 public func HandleOthersExpression(irBuilder: IRBuilder2, chirExpr: Expression): LLVMValueRef {
     let kind = chirExpr.GetExprKind()
-    if (kind == ExprKind.APPLY || kind == ExprKind.INVOKE || kind == ExprKind.INVOKESTATIC) {
+    if (kind == ExprKind.APPLY) {
         return EmitCallLikeExpression(irBuilder, chirExpr)
+    }
+    if (kind == ExprKind.INVOKE || kind == ExprKind.INVOKESTATIC) {
+        return GenerateInvokeExpression(irBuilder, chirExpr)
     }
     if (kind == ExprKind.RAW_ARRAY_ALLOCATE) {
         return GenerateRawArrayAllocate(irBuilder, chirExpr)
@@ -32,6 +35,9 @@ public func HandleOthersExpression(irBuilder: IRBuilder2, chirExpr: Expression):
     if (kind == ExprKind.VARRAY) {
         return GenerateVArrayExpression(irBuilder, chirExpr)
     }
+    if (kind == ExprKind.FIELD || kind == ExprKind.FIELD_BY_NAME) {
+        return GenerateFieldExpression(irBuilder, chirExpr)
+    }
     if (kind == ExprKind.TYPECAST || kind == ExprKind.BOX || kind == ExprKind.UNBOX ||
         kind == ExprKind.TRANSFORM_TO_GENERIC || kind == ExprKind.TRANSFORM_TO_CONCRETE ||
         kind == ExprKind.UNBOX_TO_REF) {
@@ -43,8 +49,11 @@ public func HandleOthersExpression(irBuilder: IRBuilder2, chirExpr: Expression):
     if (kind == ExprKind.GET_EXCEPTION) {
         return irBuilder.CallExceptionIntrinsicGetExceptionValue()
     }
+    if (kind == ExprKind.INTRINSIC) {
+        return GenerateIntrinsic(irBuilder, chirExpr)
+    }
     if (kind == ExprKind.GET_RTTI || kind == ExprKind.GET_RTTI_STATIC || kind == ExprKind.INSTANCEOF ||
-        kind == ExprKind.INTRINSIC || kind == ExprKind.SPAWN || kind == ExprKind.GET_INSTANTIATE_VALUE) {
+        kind == ExprKind.SPAWN || kind == ExprKind.GET_INSTANTIATE_VALUE) {
         if (let Some(resultTy) <- chirExpr.GetResultType()) {
             return unsafe { LLVMConstNull(CGType.GetOrCreate(irBuilder.GetCGModule(), resultTy).GetLLVMType()) }
         }
