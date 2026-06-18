@@ -1,6 +1,6 @@
 # Sema tc-decl Deepening Status
 
-Date: 2026-06-17
+Date: 2026-06-18
 
 ## Scope
 
@@ -73,6 +73,42 @@ Reference sources inspected from `/root/cj_build/cangjie_compiler/src/Sema`:
   deprecated usage diagnostics now extract `message`, `since`, and `strict`
   from the real `@Deprecated` annotation payload to choose warning vs error and
   preserve diagnostic suffix text.
+- This pass tightened deprecated-reference parity further: direct diagnostics
+  now honor the C++ same-package deprecated/strict-deprecated context
+  suppression, enum constructor member-access patterns are skipped like the C++
+  `GetDiagnoseKindOfFuncDecl` path, and a target-level helper now reports
+  constructor/type-alias mediated deprecations through real AST parent and alias
+  links.
+- This pass added a real `TypeCheckReferenceCheckUsageOfDeprecated` walker
+  mirroring the C++ `CheckUsageOfDeprecated` flow: it tracks deprecated and
+  strict-deprecated declaration contexts, skips common-part declarations and
+  enum-pattern subtrees, diagnoses deprecated parameters and property setters,
+  checks constructor/type-alias mediated targets, and reports deprecated
+  override/redefinition and inheritor strictness issues through existing
+  `TypeManager`, property-accessor, and AST walker APIs.
+- This pass tightened reference parity further: deprecated parameter diagnostics
+  now match arguments back to function parameters using the shared `GetArgName`
+  rules and default/source argument lists instead of positional-only matching,
+  and `TypeCheckReferenceCheckThisOrSuperInInitializer` now mirrors the C++
+  initializer restriction diagnostics for `this`/`super` in static and
+  non-static member initializers.
+- This pass added the C++-style reference-legality traversal entry point in
+  `TypeCheckReference.cj`: it reconstructs current enclosing symbols from the
+  real `ASTContext` scope-gate index, skips the same primary-constructor,
+  annotation, common-part, and desugared-default-argument subtrees as C++,
+  walks desugared expressions with the same walker id, preserves the
+  `currentCheckingNodes` var-initializer stack, checks `this`/`super` usage
+  diagnostics (static context, interface/extend/non-class `super`, illegal
+  standalone `super`, struct constructor capture, inheritable constructor/finalizer
+  `this`, and CFunc lambda capture), reuses the real struct-mutation checker for
+  assignment/inc-dec/inout arguments, and performs member-access legality in
+  post-order after child reference checks.
+- This pass deepened that reference-legality traversal with the C++
+  constructor-member-use check: instance constructors now scan default parameter
+  expressions and `this(...)`/`super(...)` constructor-call arguments, reject
+  standalone `this` and direct `this`/`super` member accesses in those contexts,
+  and report same-declaration instance-member references through
+  `sema_assignment_of_member_variable_cannot_use_this_or_super`.
 - Continued class-like parity in `TypeCheckClassLike.cj`: sealed inheritance
   from `specific` declarations now mirrors the C++ package scan for a matching
   common declaration before reporting the specific-sealed diagnostic, and
@@ -140,10 +176,11 @@ are from pre-existing files outside this pass scope.
 - Full C++ parity still requires complete overload resolution, lookup/import
   recommendation, exact access-control context, custom annotation expression
   synthesis/type checking, annotation target-array type checking, pipeline
-  wiring for type-alias and class-like declaration checks, reference-legality
-  walker wiring, full deprecated-usage traversal/override checks, and all
-  TypeChecker-owned state once those sibling surfaces are available in the
-  allowed owner files.
+  wiring from the coarse `TypeCheckerImpl` package pass into the declaration,
+  type, reference-legality, and deprecated-usage helpers, full inherited-decl
+  subtype relation checks for constructor member-use diagnostics, instantiated
+  type completeness checks, and all remaining TypeChecker-owned state once those
+  sibling surfaces are available in the allowed owner files.
 - Diagnostics are mapped to the available self-hosted diagnostic tables; a few
   C++ diagnostic helpers are represented by the closest currently available
   refactored/legacy diagnostic kind.
