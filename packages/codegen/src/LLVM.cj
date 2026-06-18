@@ -376,25 +376,48 @@ public func LLVMConsumeMessage(message: CString): String {
     return converted
 }
 
-public class LLVMContextHandle {
+public class LLVMContextHandle <: Resource {
     public let raw: LLVMContextRef
+    private let owned: Bool
+    private var closed: Bool = false
 
-    public init(raw: LLVMContextRef) {
+    public init(raw: LLVMContextRef, owned!: Bool = true) {
         this.raw = raw
+        this.owned = owned
     }
 
     public static func Create(): LLVMContextHandle {
         return LLVMContextHandle(unsafe { LLVMContextCreate() })
     }
+
+    public func close(): Unit {
+        if (closed) {
+            return
+        }
+        if (owned && !raw.isNull()) {
+            unsafe { LLVMContextDispose(raw) }
+        }
+        closed = true
+    }
+
+    public func isClosed(): Bool {
+        return closed
+    }
 }
 
-public class LLVMModuleHandle {
+public class LLVMModuleHandle <: Resource {
     public let raw: LLVMModuleRef
     public let name: String
+    public let context: Option<LLVMContextHandle>
+    private var disposeContextOnClose: Bool
+    private var closed: Bool = false
 
-    public init(raw: LLVMModuleRef, name: String) {
+    public init(raw: LLVMModuleRef, name: String, context!: Option<LLVMContextHandle> = None,
+        disposeContextOnClose!: Bool = false) {
         this.raw = raw
         this.name = name
+        this.context = context
+        this.disposeContextOnClose = disposeContextOnClose
     }
 
     public static func Create(name: String, context: LLVMContextHandle): LLVMModuleHandle {
@@ -403,7 +426,7 @@ public class LLVMModuleHandle {
             moduleRaw = unsafe { LLVMModuleCreateWithNameInContext(moduleName.value, context.raw) }
             unsafe { LLVMSetSourceFileName(moduleRaw, moduleName.value, UIntNative(name.size)) }
         }
-        return LLVMModuleHandle(moduleRaw, name)
+        return LLVMModuleHandle(moduleRaw, name, context: Some(context))
     }
 
     public func SetDataLayout(layout: String): Unit {
@@ -431,10 +454,49 @@ public class LLVMModuleHandle {
     public func PrintToString(): String {
         return LLVMConsumeMessage(unsafe { LLVMPrintModuleToString(raw) })
     }
+
+    public func EnableContextDisposalOnClose(): Unit {
+        disposeContextOnClose = true
+    }
+
+    public func DisposeModuleOnly(): Unit {
+        if (closed) {
+            return
+        }
+        if (!raw.isNull()) {
+            unsafe { LLVMDisposeModule(raw) }
+        }
+        closed = true
+    }
+
+    public func DisposeWithContext(): Unit {
+        disposeContextOnClose = true
+        close()
+    }
+
+    public func close(): Unit {
+        if (closed) {
+            return
+        }
+        if (!raw.isNull()) {
+            unsafe { LLVMDisposeModule(raw) }
+        }
+        closed = true
+        if (disposeContextOnClose) {
+            if (let Some(contextHandle) <- context) {
+                contextHandle.close()
+            }
+        }
+    }
+
+    public func isClosed(): Bool {
+        return closed
+    }
 }
 
-public class LLVMBuilderHandle {
+public class LLVMBuilderHandle <: Resource {
     public let raw: LLVMBuilderRef
+    private var closed: Bool = false
 
     public init(raw: LLVMBuilderRef) {
         this.raw = raw
@@ -442,5 +504,19 @@ public class LLVMBuilderHandle {
 
     public static func Create(context: LLVMContextHandle): LLVMBuilderHandle {
         return LLVMBuilderHandle(unsafe { LLVMCreateBuilderInContext(context.raw) })
+    }
+
+    public func close(): Unit {
+        if (closed) {
+            return
+        }
+        if (!raw.isNull()) {
+            unsafe { LLVMDisposeBuilder(raw) }
+        }
+        closed = true
+    }
+
+    public func isClosed(): Bool {
+        return closed
     }
 }

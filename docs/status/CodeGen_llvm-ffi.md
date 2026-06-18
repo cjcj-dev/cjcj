@@ -1,6 +1,6 @@
 # CodeGen llvm-ffi Deepening Status
 
-Date: 2026-06-17
+Date: 2026-06-18
 
 Build: `cjpm build` passes.
 
@@ -66,6 +66,16 @@ Implemented in this pass:
   struct element offset lookup. `LLVMTargetMachineHandle` now exposes target/cpu/feature/triple queries, target-data
   creation, and target-machine tuning switches; `CGModule` exposes borrowed module data-layout helpers matching the
   C++ `GetTypeSize`/alignment/offset query shape.
+- Added explicit resource ownership to core LLVM handles: contexts, modules, and builders now implement `Resource`,
+  module handles retain their creating context when available, released package modules can dispose LLVM modules before
+  their paired contexts, and `IRBuilder2` now exposes the same resource-compatible close path for its underlying C
+  builder.
+- Added `CGModule.Clear()` to mirror the C++ destructor/cleanup ordering for self-host objects that are not released to
+  the driver: finalize debug info, dispose the LLVM module first, clear CodeGen caches, then dispose the owned LLVM
+  context.
+- Corrected `IRBuilder2.CreateEntryBasicBlock` to match the C++ helper contract by inserting before the existing first
+  block. Ordinary CHIR block materialization now uses a separate append-at-end helper so `EmitBasicBlockIR` keeps the
+  C++ DFS block creation order while true entry/helper blocks get the intended insertion semantics.
 
 Known remaining gaps for this scope:
 
@@ -85,4 +95,4 @@ Known remaining gaps for this scope:
 
 Remaining `TODO(selfhost:CodeGen)` markers in this llvm-ffi slice: 0.
 
-Estimated behavior coverage for this llvm-ffi/module/context/IRBuilder slice: 63%.
+Estimated behavior coverage for this llvm-ffi/module/context/IRBuilder slice: 66%.

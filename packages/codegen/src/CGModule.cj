@@ -78,11 +78,34 @@ public class CGModule {
         FinalizeDebugInfo()
         let released = module
         module = None
+        if (let Some(moduleHandle) <- released) {
+            moduleHandle.EnableContextDisposalOnClose()
+        }
         return released
     }
 
     public func ResetLLVMModule(newModule: LLVMModuleHandle): Unit {
+        if (let Some(oldModule) <- module) {
+            oldModule.close()
+        }
         module = newModule
+    }
+
+    public func Clear(): Unit {
+        FinalizeDebugInfo()
+        if (let Some(moduleHandle) <- module) {
+            moduleHandle.close()
+            module = None
+        }
+        functions.clear()
+        valueMapping.clear()
+        globalVariables.clear()
+        basicBlocks.clear()
+        linkNameUsedInMeta.clear()
+        externalExtensionDefs.clear()
+        nonExternalExtensionDefs.clear()
+        cgCtx.Clear()
+        cgCtx.GetLLVMContext().close()
     }
 
     public func GetOrInsertCGFunction(chirValue: Value, forWrapper!: Bool = false): CGFunction {
@@ -148,9 +171,12 @@ public class CGModule {
             }
             if (created && !result.isNull()) {
                 AddLinkageTypeMetadata(result, LLVMLinkage.Private, false)
-                let entryBlock = IRBuilder2(this).CreateEntryBasicBlock(result, "entry")
-                let personalityBuilder = IRBuilder2(this, entryBlock)
-                _ = personalityBuilder.CreateRet(unsafe { LLVMConstInt(returnType, 0u64, 0) })
+                try (entryBuilder = IRBuilder2(this)) {
+                    let entryBlock = entryBuilder.CreateEntryBasicBlock(result, "entry")
+                    try (personalityBuilder = IRBuilder2(this, entryBlock)) {
+                        _ = personalityBuilder.CreateRet(unsafe { LLVMConstInt(returnType, 0u64, 0) })
+                    }
+                }
             }
             return result
         }
@@ -303,7 +329,7 @@ public class CGModule {
             return mappedBlock
         }
         let blockName = PREFIX_FOR_BB_NAME + chirBlock.GetIdentifierWithoutPrefix()
-        let createdBlock = irBuilder.CreateEntryBasicBlock(functionValue, blockName)
+        let createdBlock = irBuilder.CreateBasicBlockAtEnd(functionValue, blockName)
         SetOrUpdateMappedBB(chirBlock, createdBlock)
         return createdBlock
     }
