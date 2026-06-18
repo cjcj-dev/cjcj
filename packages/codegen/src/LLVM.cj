@@ -298,12 +298,24 @@ foreign {
     func LLVMGetEnumAttributeKindForName(name: CString, len: UIntNative): UInt32
     func LLVMCreateEnumAttribute(context: LLVMContextRef, kindID: UInt32, value: UInt64): LLVMAttributeRef
     func LLVMCreateTypeAttribute(context: LLVMContextRef, kindID: UInt32, attrType: LLVMTypeRef): LLVMAttributeRef
+    func LLVMCreateStringAttribute(context: LLVMContextRef, key: CString, keyLen: UInt32, attrValue: CString,
+        attrValueLen: UInt32): LLVMAttributeRef
     func LLVMGetEnumAttributeKind(attr: LLVMAttributeRef): UInt32
+    func LLVMGetEnumAttributeValue(attr: LLVMAttributeRef): UInt64
     func LLVMGetTypeAttributeValue(attr: LLVMAttributeRef): LLVMTypeRef
+    func LLVMGetStringAttributeKind(attr: LLVMAttributeRef, len: CPointer<UInt32>): CString
+    func LLVMGetStringAttributeValue(attr: LLVMAttributeRef, len: CPointer<UInt32>): CString
+    func LLVMIsEnumAttribute(attr: LLVMAttributeRef): Int32
+    func LLVMIsStringAttribute(attr: LLVMAttributeRef): Int32
     func LLVMIsTypeAttribute(attr: LLVMAttributeRef): Int32
     func LLVMAddAttributeAtIndex(fn: LLVMValueRef, index: UInt32, attr: LLVMAttributeRef): Unit
     func LLVMGetAttributeCountAtIndex(fn: LLVMValueRef, index: UInt32): UInt32
     func LLVMGetAttributesAtIndex(fn: LLVMValueRef, index: UInt32, attrs: CPointer<LLVMAttributeRef>): Unit
+    func LLVMGetEnumAttributeAtIndex(fn: LLVMValueRef, index: UInt32, kindID: UInt32): LLVMAttributeRef
+    func LLVMGetStringAttributeAtIndex(fn: LLVMValueRef, index: UInt32, key: CString,
+        keyLen: UInt32): LLVMAttributeRef
+    func LLVMRemoveEnumAttributeAtIndex(fn: LLVMValueRef, index: UInt32, kindID: UInt32): Unit
+    func LLVMRemoveStringAttributeAtIndex(fn: LLVMValueRef, index: UInt32, key: CString, keyLen: UInt32): Unit
     func strcmp(lhs: CString, rhs: CString): Int32
     func strlen(str: CString): UIntNative
     func memcpy(dest: CPointer<UInt8>, src: CString, count: UIntNative): CPointer<UInt8>

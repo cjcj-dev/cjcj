@@ -688,6 +688,7 @@ public func LLVMCreateTargetMachineForTriple(triple: String, cpu!: String = "", 
     level!: LLVMCodeGenOptLevel = LLVMCodeGenOptLevel.CodeGenLevelDefault,
     reloc!: LLVMRelocMode = LLVMRelocMode.RelocDefault,
     codeModel!: LLVMCodeModel = LLVMCodeModel.CodeModelDefault): Option<LLVMTargetMachineHandle> {
+    let _ = LLVMInitializeNativeTargetForTriple(triple)
     let targetResult = LLVMGetTargetFromTripleChecked(triple)
     if (!targetResult.ok || targetResult.target.isNull()) {
         return None
@@ -711,6 +712,7 @@ public func LLVMCreateHostTargetMachine(level!: LLVMCodeGenOptLevel = LLVMCodeGe
     reloc!: LLVMRelocMode = LLVMRelocMode.RelocDefault,
     codeModel!: LLVMCodeModel = LLVMCodeModel.CodeModelDefault): Option<LLVMTargetMachineHandle> {
     let triple = LLVMGetDefaultTargetTripleString()
+    let _ = LLVMInitializeHostTarget()
     let cpu = LLVMConsumeMessage(unsafe { LLVMGetHostCPUName() })
     let features = LLVMConsumeMessage(unsafe { LLVMGetHostCPUFeatures() })
     return LLVMCreateTargetMachineForTriple(triple, cpu: cpu, features: features, level: level, reloc: reloc,

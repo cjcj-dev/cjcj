@@ -30,24 +30,72 @@ private func IsLLVMInt1Type(valueType: LLVMTypeRef): Bool {
         unsafe { LLVMGetIntTypeWidth(valueType) } == 1u32
 }
 
-public func GetAttributeAtIndex(value: LLVMValueRef, idx: UInt32, attrName: String): LLVMAttributeRef {
-    if (value.isNull()) {
+public func GetStringAttributeKindName(attr: LLVMAttributeRef): Option<String> {
+    if (attr.isNull() || unsafe { LLVMIsStringAttribute(attr) } == 0) {
+        return None
+    }
+    var result: Option<String> = None
+    try (lenPtr = LibC.malloc<UInt32>().asResource()) {
+        unsafe { lenPtr.value.write(0u32) }
+        let rawKind = unsafe { LLVMGetStringAttributeKind(attr, lenPtr.value) }
+        let kindLen = unsafe { lenPtr.value.read() }
+        result = LLVMCStringToString(rawKind, UIntNative(kindLen))
+    }
+    return result
+}
+
+public func GetStringAttributeValue(attr: LLVMAttributeRef): Option<String> {
+    if (attr.isNull() || unsafe { LLVMIsStringAttribute(attr) } == 0) {
+        return None
+    }
+    var result: Option<String> = None
+    try (lenPtr = LibC.malloc<UInt32>().asResource()) {
+        unsafe { lenPtr.value.write(0u32) }
+        let rawAttrValue = unsafe { LLVMGetStringAttributeValue(attr, lenPtr.value) }
+        let attrValueLen = unsafe { lenPtr.value.read() }
+        result = LLVMCStringToString(rawAttrValue, UIntNative(attrValueLen))
+    }
+    return result
+}
+
+public func GetStringAttributeAtIndex(llvmValue: LLVMValueRef, idx: UInt32, attrName: String): LLVMAttributeRef {
+    if (llvmValue.isNull() || attrName.isEmpty()) {
+        return LLVMNullAttribute()
+    }
+    var result = LLVMNullAttribute()
+    try (attrCString = unsafe { LibC.mallocCString(attrName) }.asResource()) {
+        result = unsafe { LLVMGetStringAttributeAtIndex(llvmValue, idx, attrCString.value, UInt32(attrName.size)) }
+    }
+    return result
+}
+
+public func HasStringAttributeAtIndex(llvmValue: LLVMValueRef, idx: UInt32, attrName: String): Bool {
+    return !GetStringAttributeAtIndex(llvmValue, idx, attrName).isNull()
+}
+
+public func GetStringAttributeValueAtIndex(llvmValue: LLVMValueRef, idx: UInt32, attrName: String): Option<String> {
+    return GetStringAttributeValue(GetStringAttributeAtIndex(llvmValue, idx, attrName))
+}
+
+public func GetAttributeAtIndex(llvmValue: LLVMValueRef, idx: UInt32, attrName: String): LLVMAttributeRef {
+    if (llvmValue.isNull() || attrName.isEmpty()) {
         return LLVMNullAttribute()
     }
     let attrKind = GetAttributeKind(attrName)
     if (attrKind == 0u32) {
-        return LLVMNullAttribute()
+        return GetStringAttributeAtIndex(llvmValue, idx, attrName)
     }
-    let attrCount = unsafe { LLVMGetAttributeCountAtIndex(value, idx) }
+    let attrCount = unsafe { LLVMGetAttributeCountAtIndex(llvmValue, idx) }
     if (attrCount == 0u32) {
         return LLVMNullAttribute()
     }
     try (attrs = LibC.malloc<LLVMAttributeRef>(count: Int64(attrCount)).asResource()) {
-        unsafe { LLVMGetAttributesAtIndex(value, idx, attrs.value) }
+        unsafe { LLVMGetAttributesAtIndex(llvmValue, idx, attrs.value) }
         var attrIdx: Int64 = 0
         while (attrIdx < Int64(attrCount)) {
             let attr = unsafe { (attrs.value + attrIdx).read() }
-            if (!attr.isNull() && unsafe { LLVMGetEnumAttributeKind(attr) } == attrKind) {
+            if (!attr.isNull() && unsafe { LLVMIsStringAttribute(attr) } == 0 &&
+                unsafe { LLVMGetEnumAttributeKind(attr) } == attrKind) {
                 return attr
             }
             attrIdx++
@@ -56,12 +104,12 @@ public func GetAttributeAtIndex(value: LLVMValueRef, idx: UInt32, attrName: Stri
     return LLVMNullAttribute()
 }
 
-public func HasAttributeAtIndex(value: LLVMValueRef, idx: UInt32, attrName: String): Bool {
-    return !GetAttributeAtIndex(value, idx, attrName).isNull()
+public func HasAttributeAtIndex(llvmValue: LLVMValueRef, idx: UInt32, attrName: String): Bool {
+    return !GetAttributeAtIndex(llvmValue, idx, attrName).isNull()
 }
 
-public func GetTypeAttributeValueAtIndex(value: LLVMValueRef, idx: UInt32, attrName: String): Option<LLVMTypeRef> {
-    let attr = GetAttributeAtIndex(value, idx, attrName)
+public func GetTypeAttributeValueAtIndex(llvmValue: LLVMValueRef, idx: UInt32, attrName: String): Option<LLVMTypeRef> {
+    let attr = GetAttributeAtIndex(llvmValue, idx, attrName)
     if (attr.isNull() || unsafe { LLVMIsTypeAttribute(attr) } == 0) {
         return None
     }
@@ -73,16 +121,41 @@ public func GetTypeAttributeValueAtIndex(value: LLVMValueRef, idx: UInt32, attrN
 }
 
 public func AddAttributeAtIndex(callBase: LLVMValueRef, idx: UInt32, attrName: String): Unit {
-    if (callBase.isNull() || HasAttributeAtIndex(callBase, idx, attrName)) {
+    if (callBase.isNull() || attrName.isEmpty() || HasAttributeAtIndex(callBase, idx, attrName)) {
         return
     }
     let attrKind = GetAttributeKind(attrName)
     let attrContext = GetLLVMValueContext(callBase)
-    if (attrKind == 0u32 || attrContext.isNull()) {
+    if (attrContext.isNull()) {
+        return
+    }
+    if (attrKind == 0u32) {
+        AddStringAttributeAtIndex(callBase, idx, attrName)
         return
     }
     let attr = unsafe { LLVMCreateEnumAttribute(attrContext, attrKind, 0u64) }
     unsafe { LLVMAddAttributeAtIndex(callBase, idx, attr) }
+}
+
+public func AddStringAttributeAtIndex(llvmValue: LLVMValueRef, idx: UInt32, attrName: String,
+    attrValue!: String = ""): Unit {
+    if (llvmValue.isNull() || attrName.isEmpty() || HasStringAttributeAtIndex(llvmValue, idx, attrName)) {
+        return
+    }
+    let attrContext = GetLLVMValueContext(llvmValue)
+    if (attrContext.isNull()) {
+        return
+    }
+    try (attrCString = unsafe { LibC.mallocCString(attrName) }.asResource(),
+        attrValueCString = unsafe { LibC.mallocCString(attrValue) }.asResource()) {
+        let attr = unsafe {
+            LLVMCreateStringAttribute(attrContext, attrCString.value, UInt32(attrName.size), attrValueCString.value,
+                UInt32(attrValue.size))
+        }
+        if (!attr.isNull()) {
+            unsafe { LLVMAddAttributeAtIndex(llvmValue, idx, attr) }
+        }
+    }
 }
 
 public func AddTypeAttributeAtIndex(callBase: LLVMValueRef, idx: UInt32, attrName: String,
@@ -99,6 +172,19 @@ public func AddTypeAttributeAtIndex(callBase: LLVMValueRef, idx: UInt32, attrNam
     unsafe { LLVMAddAttributeAtIndex(callBase, idx, attr) }
 }
 
+public func RemoveAttributeAtIndex(llvmValue: LLVMValueRef, idx: UInt32, attrName: String): Unit {
+    if (llvmValue.isNull() || attrName.isEmpty()) {
+        return
+    }
+    let attrKind = GetAttributeKind(attrName)
+    if (attrKind != 0u32) {
+        unsafe { LLVMRemoveEnumAttributeAtIndex(llvmValue, idx, attrKind) }
+    }
+    try (attrCString = unsafe { LibC.mallocCString(attrName) }.asResource()) {
+        unsafe { LLVMRemoveStringAttributeAtIndex(llvmValue, idx, attrCString.value, UInt32(attrName.size)) }
+    }
+}
+
 public func AddParamAttr(callBase: LLVMValueRef, paramIdx: UInt32, attrName: String): Unit {
     AddAttributeAtIndex(callBase, paramIdx + 1u32, attrName)
 }
@@ -107,8 +193,28 @@ public func AddRetAttr(callBase: LLVMValueRef, attrName: String): Unit {
     AddAttributeAtIndex(callBase, 0u32, attrName)
 }
 
-public func AddFnAttr(fn: LLVMValueRef, attrName: String): Unit {
-    AddAttributeAtIndex(fn, UInt32.Max, attrName)
+public func AddFnAttr(fn: LLVMValueRef, attrName: String, attrValue!: String = ""): Unit {
+    if (attrValue.isEmpty()) {
+        AddAttributeAtIndex(fn, UInt32.Max, attrName)
+        return
+    }
+    AddStringAttributeAtIndex(fn, UInt32.Max, attrName, attrValue: attrValue)
+}
+
+public func AddFnStringAttr(fn: LLVMValueRef, attrName: String, attrValue!: String = ""): Unit {
+    AddStringAttributeAtIndex(fn, UInt32.Max, attrName, attrValue: attrValue)
+}
+
+public func RemoveParamAttr(callBase: LLVMValueRef, paramIdx: UInt32, attrName: String): Unit {
+    RemoveAttributeAtIndex(callBase, paramIdx + 1u32, attrName)
+}
+
+public func RemoveRetAttr(callBase: LLVMValueRef, attrName: String): Unit {
+    RemoveAttributeAtIndex(callBase, 0u32, attrName)
+}
+
+public func RemoveFnAttr(fn: LLVMValueRef, attrName: String): Unit {
+    RemoveAttributeAtIndex(fn, UInt32.Max, attrName)
 }
 
 public func AddSRetAttribute(value: LLVMValueRef): Unit {

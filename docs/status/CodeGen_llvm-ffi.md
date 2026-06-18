@@ -38,6 +38,10 @@ Implemented in this pass:
   when enabled, and lowering rune literals to their numeric code point rather than a string hash.
 - Added context-safe LLVM attribute helpers that scan an existing attribute list, avoid duplicate attributes, and
   support typed attributes through `LLVMCreateTypeAttribute`/`LLVMGetTypeAttributeValue`.
+- Added the LLVM C API string-attribute surface used by C++ `addFnAttr("...")` and global/function marker attributes:
+  create/get-kind/get-value/get-at-index/remove-at-index bindings, plus wrapper helpers for string attributes with or
+  without values. Unknown LLVM enum attribute names now fall back to string attributes, matching the C++ marker-attribute
+  behavior for wrapper/native-interface/sanitizer/generic metadata tags without reimplementing LLVM.
 - Matched the direct-function C++ `CreateCallOrInvoke(llvm::Function*)` attribute behavior more closely: struct-return
   declarations now get typed `sret` plus `noalias`, and call/invoke instructions propagate direct callee `sret`/`noalias`
   attributes when the callee is an actual LLVM function.
@@ -89,6 +93,9 @@ Implemented in this pass:
   `LLVMInitializeAll*` helpers. The wrapper now covers the C++ reference build's configured native target set
   (ARM/AArch64/X86), including target info, target, target MC, asm printer/parser, disassembler, and host-triple
   selection.
+- Target-machine creation now initializes the configured backend for the requested normalized triple before target lookup,
+  and host target-machine creation explicitly initializes the host target before querying host CPU/features. This keeps
+  LLVM external while matching the C++ expectation that native targets are registered before `GetTargetFromTriple`.
 - Completed the public pass-builder options wrapper surface for the new pass manager: verify-each, debug logging,
   loop interleaving/vectorization/unrolling, SLP vectorization, SCEV/Licm tuning caps, call-graph profile,
   merge-functions, inliner threshold, module passes, and function passes. The AA pipeline setter now keeps its
@@ -120,4 +127,4 @@ Known remaining gaps for this scope:
 
 Remaining `TODO(selfhost:CodeGen)` markers in this llvm-ffi slice: 0.
 
-Estimated behavior coverage for this llvm-ffi/module/context/IRBuilder slice: 72%.
+Estimated behavior coverage for this llvm-ffi/module/context/IRBuilder slice: 73%.
