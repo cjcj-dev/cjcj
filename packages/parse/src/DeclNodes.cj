@@ -60,10 +60,6 @@ public class InvalidDecl <: Decl {
     }
 }
 
-public class GenericParamDecl <: Decl {
-    public init() { super(ASTKind.GENERIC_PARAM_DECL) }
-}
-
 public class FuncParam <: Decl {
     public var typeNode: Option<Type> = None
     public var colonPos: Position = INVALID_POSITION

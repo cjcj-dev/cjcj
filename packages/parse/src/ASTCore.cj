@@ -3,7 +3,10 @@ package cangjie_compiler::parse
 import std.collection.*
 import cangjie_compiler::ast.AnnotationKind as AstAnnotationKind
 public import cangjie_compiler::ast.{ASTKind, ASTKindIndex, Attribute, AttributeIndex, AttributePack}
-public import cangjie_compiler::ast.{Identifier, Node, SrcIdentifier}
+public import cangjie_compiler::ast.{
+    ConstantType, FuncType, Generic, GenericConstraint, GenericParamDecl, Identifier, InvalidType, Node, OptionType,
+    ParenType, PrimitiveType, QualifiedType, RefType, SrcIdentifier, ThisType, TupleType, Type, VArrayType
+}
 public import cangjie_compiler::utils.OverflowStrategy
 
 public type AnnotationKind = AstAnnotationKind

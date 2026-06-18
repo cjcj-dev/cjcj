@@ -1123,15 +1123,16 @@ private func primitiveTypeKindFromName(typeName: String): TypeKind {
 
 private func convertParsedType(parsedType: ParsedType, fallbackFile: Option<File>): Type {
     if (let Some(parsedPrimitive) <- (parsedType as ParsedPrimitiveType)) {
-        let targetPrimitive = PrimitiveType(primitiveTypeKindFromName(parsedPrimitive.name))
+        let parsedPrimitiveName = parsedPrimitive.ToString()
+        let targetPrimitive = PrimitiveType(primitiveTypeKindFromName(parsedPrimitiveName))
         copyParsedNodeBase(parsedPrimitive, targetPrimitive, fallbackFile)
         if (TypeKindEquals(targetPrimitive.kind, TypeKind.TYPE_INVALID)) {
-            targetPrimitive.name = parsedPrimitive.name
+            targetPrimitive.name = parsedPrimitiveName
         }
         return targetPrimitive
     }
     if (let Some(parsedReference) <- (parsedType as ParsedRefType)) {
-        let targetReference = RefType(parsedReference.identifier.GetRawText())
+        let targetReference = RefType(parsedReference.ref.identifier.GetRawText())
         copyParsedNodeBase(parsedReference, targetReference, fallbackFile)
         for (typeArgument in parsedReference.typeArguments) {
             targetReference.typeArguments.add(convertParsedType(typeArgument, fallbackFile))
@@ -1163,7 +1164,9 @@ private func convertParsedType(parsedType: ParsedType, fallbackFile: Option<File
         let targetConstantType = ConstantType()
         copyParsedNodeBase(parsedConstantType, targetConstantType, fallbackFile)
         if (let Some(parsedConstantExpr) <- parsedConstantType.constantExpr) {
-            targetConstantType.constantExpr = Some(convertParsedExpr(parsedConstantExpr, fallbackFile))
+            if (let Some(parsedExpr) <- (parsedConstantExpr as ParsedExpr)) {
+                targetConstantType.constantExpr = Some(convertParsedExpr(parsedExpr, fallbackFile))
+            }
         }
         return targetConstantType
     }

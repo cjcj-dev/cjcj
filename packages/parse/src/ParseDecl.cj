@@ -352,7 +352,7 @@ extend ParserImpl {
 
     private func IsTokensRefType(typeNode: Type): Bool {
         if (let Some(refType) <- (typeNode as RefType)) {
-            return refType.identifier.Val() == "Tokens" && refType.typeArguments.isEmpty()
+            return refType.ref.identifier.Val() == "Tokens" && refType.typeArguments.isEmpty()
         }
         return false
     }
@@ -361,7 +361,7 @@ extend ParserImpl {
         let typeNode = RefType()
         typeNode.begin = pos
         typeNode.end = pos
-        typeNode.identifier = SrcIdentifier("Tokens", "Tokens", pos, pos, false)
+        typeNode.ref.identifier = SrcIdentifier("Tokens", "Tokens", pos, pos, false)
         return typeNode
     }
 

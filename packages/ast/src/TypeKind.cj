@@ -134,6 +134,48 @@ public func TypeKindName(kind: TypeKind): String {
     }
 }
 
+public func TypeKindFromName(name: String): TypeKind {
+    return match (name) {
+        case "Unit" => TypeKind.TYPE_UNIT
+        case "Int8" => TypeKind.TYPE_INT8
+        case "Int16" => TypeKind.TYPE_INT16
+        case "Int32" => TypeKind.TYPE_INT32
+        case "Int64" => TypeKind.TYPE_INT64
+        case "IntNative" => TypeKind.TYPE_INT_NATIVE
+        case "Int" => TypeKind.TYPE_IDEAL_INT
+        case "UInt8" => TypeKind.TYPE_UINT8
+        case "UInt16" => TypeKind.TYPE_UINT16
+        case "UInt32" => TypeKind.TYPE_UINT32
+        case "UInt64" => TypeKind.TYPE_UINT64
+        case "UIntNative" => TypeKind.TYPE_UINT_NATIVE
+        case "Float16" => TypeKind.TYPE_FLOAT16
+        case "Float32" => TypeKind.TYPE_FLOAT32
+        case "Float64" => TypeKind.TYPE_FLOAT64
+        case "Float" => TypeKind.TYPE_IDEAL_FLOAT
+        case "Rune" => TypeKind.TYPE_RUNE
+        case "Nothing" => TypeKind.TYPE_NOTHING
+        case "Bool" => TypeKind.TYPE_BOOLEAN
+        case "Tuple" => TypeKind.TYPE_TUPLE
+        case "Enum" => TypeKind.TYPE_ENUM
+        case "Function" => TypeKind.TYPE_FUNC
+        case "Struct" => TypeKind.TYPE_STRUCT
+        case "RawArray" => TypeKind.TYPE_ARRAY
+        case "VArray" => TypeKind.TYPE_VARRAY
+        case "CPointer" => TypeKind.TYPE_POINTER
+        case "CString" => TypeKind.TYPE_CSTRING
+        case "Class" => TypeKind.TYPE_CLASS
+        case "Interface" => TypeKind.TYPE_INTERFACE
+        case "TypeAlias" => TypeKind.TYPE
+        case "Generic" => TypeKind.TYPE_GENERICS
+        case "Any" => TypeKind.TYPE_ANY
+        case "Intersection" => TypeKind.TYPE_INTERSECTION
+        case "Union" => TypeKind.TYPE_UNION
+        case "Quest" => TypeKind.TYPE_QUEST
+        case "Initial" => TypeKind.TYPE_INITIAL
+        case _ => TypeKind.TYPE_INVALID
+    }
+}
+
 public func TypeKindInRange(kind: TypeKind, low: TypeKind, high: TypeKind): Bool {
     let idx = TypeKindIndex(kind)
     return idx >= TypeKindIndex(low) && idx <= TypeKindIndex(high)

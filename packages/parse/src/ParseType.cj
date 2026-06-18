@@ -72,7 +72,7 @@ extend ParserImpl {
         let token = Peek()
         if (SeeingPrimitiveType()) {
             Next()
-            return PrimitiveType(token.Value(), token.kind, token.Begin(), token.End())
+            return PrimitiveType(token.Value(), token.Begin(), token.End())
         }
         if (Skip(TokenKind.THISTYPE)) {
             return ThisType(token.Begin())
@@ -98,8 +98,8 @@ extend ParserImpl {
 
     public func ParseRefType(onlyRef: Bool): RefType {
         let ref = RefType()
-        ref.identifier = ExpectIdentifierWithPos(ref)
-        ref.begin = ref.identifier.Begin()
+        ref.ref.identifier = ExpectIdentifierWithPos(ref)
+        ref.begin = ref.ref.identifier.Begin()
         if (!onlyRef && Skip(TokenKind.LT)) {
             ref.leftAnglePos = lastToken.Begin()
             while (!Seeing(TokenKind.END) && !Seeing(TokenKind.GT)) {
@@ -111,7 +111,7 @@ extend ParserImpl {
             ref.rightAnglePos = Expect(TokenKind.GT, "expected '>' after type arguments").Begin()
             ref.end = ref.rightAnglePos + 1
         } else {
-            ref.end = ref.identifier.End()
+            ref.end = ref.ref.identifier.End()
         }
         return ref
     }

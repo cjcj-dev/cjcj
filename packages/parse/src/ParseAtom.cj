@@ -165,7 +165,7 @@ extend ParserImpl {
     public func ParseTypeConvExpr(): Expr {
         let token = Peek()
         let ret = TypeConvExpr()
-        let primitive = PrimitiveType(token.Value(), token.kind, token.Begin(), token.End())
+        let primitive = PrimitiveType(token.Value(), token.Begin(), token.End())
         ret.typeNode = primitive
         ret.begin = token.Begin()
         Next()

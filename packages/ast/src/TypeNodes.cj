@@ -55,6 +55,18 @@ public class RefType <: Type {
         super(ASTKind.REF_TYPE)
     }
 
+    public init(id: SrcIdentifier) {
+        super(ASTKind.REF_TYPE)
+        ref = Reference(id)
+        begin = id.Begin()
+        end = id.End()
+    }
+
+    public init(name: String) {
+        super(ASTKind.REF_TYPE)
+        ref = Reference(name)
+    }
+
     public override func Clear(): Unit {
         super.Clear()
         ref.target = None
@@ -73,6 +85,12 @@ public class RefType <: Type {
             return true
         }
         return false
+    }
+
+    public override func Children(): ArrayList<Node> {
+        let out = ArrayList<Node>()
+        for (ty in typeArguments) { out.add(ty) }
+        return out
     }
 
     public override func ToString(): String {
@@ -107,6 +125,26 @@ public class PrimitiveType <: Type {
         super(ASTKind.PRIMITIVE_TYPE)
     }
 
+    public init(name: String) {
+        super(ASTKind.PRIMITIVE_TYPE)
+        str = name
+        kind = TypeKindFromName(name)
+    }
+
+    public init(kind: TypeKind) {
+        super(ASTKind.PRIMITIVE_TYPE)
+        this.kind = kind
+        str = TypeKindName(kind)
+    }
+
+    public init(name: String, begin: Position, end: Position) {
+        super(ASTKind.PRIMITIVE_TYPE)
+        str = name
+        kind = TypeKindFromName(name)
+        this.begin = begin
+        this.end = end
+    }
+
     public override func ToString(): String {
         return if (str.isEmpty()) { TypeKindName(kind) } else { str }
     }
@@ -119,6 +157,12 @@ public class ParenType <: Type {
 
     public init() {
         super(ASTKind.PAREN_TYPE)
+    }
+
+    public override func Children(): ArrayList<Node> {
+        let out = ArrayList<Node>()
+        if (let Some(child) <- innerType) { out.add(child) }
+        return out
     }
 
     public override func ToString(): String {
@@ -146,6 +190,13 @@ public class QualifiedType <: Type {
 
     public override func GetTypeArgs(): ArrayList<Type> {
         return typeArguments
+    }
+
+    public override func Children(): ArrayList<Node> {
+        let out = ArrayList<Node>()
+        if (let Some(base) <- baseType) { out.add(base) }
+        for (ty in typeArguments) { out.add(ty) }
+        return out
     }
 
     public func GetFieldPos(): Position {
@@ -176,6 +227,12 @@ public class OptionType <: Type {
         super(ASTKind.OPTION_TYPE)
     }
 
+    public override func Children(): ArrayList<Node> {
+        let out = ArrayList<Node>()
+        if (let Some(child) <- componentType) { out.add(child) }
+        return out
+    }
+
     public override func ToString(): String {
         var out = ""
         let count = if (questNum > 0u64) { questNum } else { UInt64(questVector.size) }
@@ -197,6 +254,12 @@ public class ConstantType <: Type {
         super(ASTKind.CONSTANT_TYPE)
     }
 
+    public override func Children(): ArrayList<Node> {
+        let out = ArrayList<Node>()
+        if (let Some(expr) <- constantExpr) { out.add(expr) }
+        return out
+    }
+
     public override func ToString(): String {
         return "$" + (if (let Some(value) <- constantExpr) { value.ToString() } else { "" })
     }
@@ -211,6 +274,13 @@ public class VArrayType <: Type {
 
     public init() {
         super(ASTKind.VARRAY_TYPE)
+    }
+
+    public override func Children(): ArrayList<Node> {
+        let out = ArrayList<Node>()
+        if (let Some(arg) <- typeArgument) { out.add(arg) }
+        if (let Some(size) <- constantType) { out.add(size) }
+        return out
     }
 
     public override func ToString(): String {
@@ -235,6 +305,13 @@ public class FuncType <: Type {
         super(ASTKind.FUNC_TYPE)
     }
 
+    public override func Children(): ArrayList<Node> {
+        let out = ArrayList<Node>()
+        for (ty in paramTypes) { out.add(ty) }
+        if (let Some(ret) <- retType) { out.add(ret) }
+        return out
+    }
+
     public override func ToString(): String {
         let parts = ArrayList<String>()
         for (param in paramTypes) {
@@ -256,6 +333,12 @@ public class TupleType <: Type {
 
     public init() {
         super(ASTKind.TUPLE_TYPE)
+    }
+
+    public override func Children(): ArrayList<Node> {
+        let out = ArrayList<Node>()
+        for (ty in fieldTypes) { out.add(ty) }
+        return out
     }
 
     public override func ToString(): String {
@@ -286,6 +369,13 @@ public class GenericConstraint <: Node {
         super(ASTKind.GENERIC_CONSTRAINT)
     }
 
+    public override func Children(): ArrayList<Node> {
+        let out = ArrayList<Node>()
+        if (let Some(refTy) <- refType) { out.add(refTy) }
+        for (bound in upperBounds) { out.add(bound) }
+        return out
+    }
+
     public override func ToString(): String {
         let bounds = ArrayList<String>()
         for (bound in upperBounds) {
@@ -307,6 +397,13 @@ public class Generic <: Node {
 
     public init() {
         super(ASTKind.GENERIC)
+    }
+
+    public override func Children(): ArrayList<Node> {
+        let out = ArrayList<Node>()
+        for (param in typeParameters) { out.add(param) }
+        for (constraint in genericConstraints) { out.add(constraint) }
+        return out
     }
 
     public override func ToString(): String {

@@ -1,11 +1,9 @@
 package cangjie_compiler::parse
 
 import std.collection.*
+import cangjie_compiler::ast.Expr as AstExpr
 
-public open class Expr <: Node {
-    public var semiPos: Position = INVALID_POSITION
-    public var hasSemi: Bool = false
-    public var hasQuestSuffix: Bool = false
+public open class Expr <: AstExpr {
     public init() { super(ASTKind.EXPR) }
     public init(kind: ASTKind) { super(kind) }
 }
