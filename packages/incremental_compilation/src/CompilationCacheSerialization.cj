@@ -610,7 +610,7 @@ public class HashedASTLoader {
                 continue
             }
             for (child in member.members) {
-                addFileMapEntry(child.gvid.file, child.rawMangle, child.gvid.id)
+                collectFileMapForMember(child)
             }
             collectFileMapForMember(member)
         }

@@ -1,6 +1,6 @@
 # IncrementalCompilation Port Status
 
-Date: 2026-06-17
+Date: 2026-06-18
 
 Build: `cjpm build` passes.
 
@@ -95,6 +95,23 @@ Implemented:
 - Removed two remaining silent fallback paths from incremental scope analysis. Missing source package declarations
   and missing cached CodeGen mangles for deleted declarations now fail the same invariant class as the C++
   `CJC_NULLPTR_CHECK`/`CJC_ABORT` sites instead of synthesizing package declarations or reusing raw mangles.
+- Added explicit bridge helpers between the package-local hashable adapter enums and the real
+  `cangjie_compiler::ast.ASTKind`/`Attribute` enums. A direct alias was tested but Cangjie currently rejects
+  adding `Hashable` to imported enum types, so the local wrappers remain only where this package needs hashed
+  sets/maps while adapter callers can convert to and from real AST enum values.
+- Tightened cache hash determinism by sorting adapter attributes by real `AttributeIndex` before combining them
+  into signature hashes. This removes nondeterminism from `HashSet` iteration while keeping the same real AST
+  ordinal semantics used by the C++ `ASTHasher`.
+- Matched C++ enum-constructor handling more closely: enum declarations now have a separate adapter
+  `enumConstructors` list and `GetMembers(EnumDecl)` excludes enum constructors, like C++ `GetMembers`. Enum
+  layout hashing and layout-change pollution use the constructor list, with the old raw-mangle list retained only
+  as a fallback for adapter inputs that cannot yet supply constructor decl nodes.
+- Fixed fallback member mangling order so a member's raw mangle is established before recursively visiting nested
+  members. This gives nested/accessor fallback mangles a stable parent prefix instead of depending on a parent
+  raw mangle that may still be empty.
+- Refined cached file-map reconstruction for loaded member children so child entries pass through the same
+  OOEAffected/static-member filters as C++ loader member entries instead of unconditionally participating in
+  order-change invalidation.
 
 Known gaps:
 

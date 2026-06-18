@@ -88,6 +88,14 @@ public func IsVirtual(decl: IncrDecl): Bool {
 
 public func GetMembers(decl: IncrDecl): ArrayList<IncrDecl> {
     let out = ArrayList<IncrDecl>()
+    if (decl.astKind == IncrDeclKind.ENUM_DECL) {
+        for (member in decl.members) {
+            if (!member.TestAttr(IncrAttribute.ENUM_CONSTRUCTOR)) {
+                out.add(member)
+            }
+        }
+        return out
+    }
     if (decl.astKind == IncrDeclKind.PROP_DECL) {
         for (getter in decl.getters) {
             out.add(getter)
@@ -105,6 +113,25 @@ public func GetMembers(decl: IncrDecl): ArrayList<IncrDecl> {
     }
     for (member in decl.members) {
         out.add(member)
+    }
+    return out
+}
+
+public func GetEnumConstructors(decl: IncrDecl): ArrayList<IncrDecl> {
+    let out = ArrayList<IncrDecl>()
+    if (decl.astKind != IncrDeclKind.ENUM_DECL) {
+        return out
+    }
+    for (constructor in decl.enumConstructors) {
+        out.add(constructor)
+    }
+    if (!out.isEmpty()) {
+        return out
+    }
+    for (member in decl.members) {
+        if (member.TestAttr(IncrAttribute.ENUM_CONSTRUCTOR)) {
+            out.add(member)
+        }
     }
     return out
 }
@@ -305,7 +332,7 @@ public func ComputeDeclSigHash(decl: IncrDecl): UInt64 {
     var hash = StableHash(decl.identifier)
     hash = CombineHash(hash, UInt64(IncrDeclKindIndex(decl.astKind)))
     hash = CombineHash(hash, StableHash(decl.rawMangleName))
-    for (attr in decl.attrs) {
+    for (attr in SortedAttributes(decl.attrs)) {
         hash = CombineHash(hash, UInt64(IncrAttributeIndex(attr)))
     }
     hash = CombineHash(hash, StableHashBool(decl.hasExplicitType))
@@ -329,6 +356,23 @@ public func ComputeDeclSrcUseHash(decl: IncrDecl): UInt64 {
     hash = CombineHash(hash, StableHashBool(decl.IsConst()))
     hash = CombineHash(hash, StableHash(decl.fullPackageName))
     return hash
+}
+
+private func SortedAttributes(values: HashSet<IncrAttribute>): ArrayList<IncrAttribute> {
+    let out = ArrayList<IncrAttribute>()
+    for (value in values) {
+        out.add(value)
+    }
+    sort(out, by: { left: IncrAttribute, right: IncrAttribute =>
+        if (IncrAttributeIndex(left) < IncrAttributeIndex(right)) {
+            Ordering.LT
+        } else if (IncrAttributeIndex(left) > IncrAttributeIndex(right)) {
+            Ordering.GT
+        } else {
+            Ordering.EQ
+        }
+    }, stable: true)
+    return out
 }
 
 public func ComputeDeclBodyHash(decl: IncrDecl, srcInfo: (Bool, Bool)): UInt64 {

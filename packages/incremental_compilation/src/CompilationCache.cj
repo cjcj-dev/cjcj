@@ -61,6 +61,31 @@ public func IncrDeclKindIndex(kind: IncrDeclKind): Int64 {
     }
 }
 
+public func IncrDeclKindToASTKind(kind: IncrDeclKind): RealASTKind {
+    return match (kind) {
+        case IncrDeclKind.INVALID_DECL => RealASTKind.INVALID_DECL
+        case IncrDeclKind.PACKAGE_DECL => RealASTKind.PACKAGE_DECL
+        case IncrDeclKind.FUNC_DECL => RealASTKind.FUNC_DECL
+        case IncrDeclKind.MACRO_DECL => RealASTKind.MACRO_DECL
+        case IncrDeclKind.MAIN_DECL => RealASTKind.MAIN_DECL
+        case IncrDeclKind.VAR_DECL => RealASTKind.VAR_DECL
+        case IncrDeclKind.VAR_WITH_PATTERN_DECL => RealASTKind.VAR_WITH_PATTERN_DECL
+        case IncrDeclKind.FUNC_PARAM => RealASTKind.FUNC_PARAM
+        case IncrDeclKind.PROP_DECL => RealASTKind.PROP_DECL
+        case IncrDeclKind.TYPE_ALIAS_DECL => RealASTKind.TYPE_ALIAS_DECL
+        case IncrDeclKind.ENUM_DECL => RealASTKind.ENUM_DECL
+        case IncrDeclKind.STRUCT_DECL => RealASTKind.STRUCT_DECL
+        case IncrDeclKind.CLASS_DECL => RealASTKind.CLASS_DECL
+        case IncrDeclKind.INTERFACE_DECL => RealASTKind.INTERFACE_DECL
+        case IncrDeclKind.EXTEND_DECL => RealASTKind.EXTEND_DECL
+        case IncrDeclKind.PRIMARY_CTOR_DECL => RealASTKind.PRIMARY_CTOR_DECL
+    }
+}
+
+public func IncrDeclKindFromASTKind(kind: RealASTKind): IncrDeclKind {
+    return IncrDeclKindFromIndex(RealASTKindIndex(kind))
+}
+
 public func IncrDeclKindName(kind: IncrDeclKind): String {
     return match (kind) {
         case IncrDeclKind.INVALID_DECL => "INVALID_DECL"
@@ -181,6 +206,43 @@ public func IncrAttributeIndex(attr: IncrAttribute): Int64 {
     }
 }
 
+public func IncrAttributeToASTAttribute(attr: IncrAttribute): RealAttribute {
+    return match (attr) {
+        case IncrAttribute.ABSTRACT => RealAttribute.ABSTRACT
+        case IncrAttribute.CONSTRUCTOR => RealAttribute.CONSTRUCTOR
+        case IncrAttribute.ENUM_CONSTRUCTOR => RealAttribute.ENUM_CONSTRUCTOR
+        case IncrAttribute.FROM_COMMON_PART => RealAttribute.FROM_COMMON_PART
+        case IncrAttribute.GENERIC => RealAttribute.GENERIC
+        case IncrAttribute.GLOBAL => RealAttribute.GLOBAL
+        case IncrAttribute.IMPORTED => RealAttribute.IMPORTED
+        case IncrAttribute.MACRO_FUNC => RealAttribute.MACRO_FUNC
+        case IncrAttribute.OPEN => RealAttribute.OPEN
+        case IncrAttribute.PRIVATE => RealAttribute.PRIVATE
+        case IncrAttribute.PROTECTED => RealAttribute.PROTECTED
+        case IncrAttribute.PUBLIC => RealAttribute.PUBLIC
+        case IncrAttribute.STATIC => RealAttribute.STATIC
+    }
+}
+
+public func IncrAttributeFromASTAttribute(attr: RealAttribute): Option<IncrAttribute> {
+    return match (attr) {
+        case RealAttribute.ABSTRACT => Some(IncrAttribute.ABSTRACT)
+        case RealAttribute.CONSTRUCTOR => Some(IncrAttribute.CONSTRUCTOR)
+        case RealAttribute.ENUM_CONSTRUCTOR => Some(IncrAttribute.ENUM_CONSTRUCTOR)
+        case RealAttribute.FROM_COMMON_PART => Some(IncrAttribute.FROM_COMMON_PART)
+        case RealAttribute.GENERIC => Some(IncrAttribute.GENERIC)
+        case RealAttribute.GLOBAL => Some(IncrAttribute.GLOBAL)
+        case RealAttribute.IMPORTED => Some(IncrAttribute.IMPORTED)
+        case RealAttribute.MACRO_FUNC => Some(IncrAttribute.MACRO_FUNC)
+        case RealAttribute.OPEN => Some(IncrAttribute.OPEN)
+        case RealAttribute.PRIVATE => Some(IncrAttribute.PRIVATE)
+        case RealAttribute.PROTECTED => Some(IncrAttribute.PROTECTED)
+        case RealAttribute.PUBLIC => Some(IncrAttribute.PUBLIC)
+        case RealAttribute.STATIC => Some(IncrAttribute.STATIC)
+        case _ => None
+    }
+}
+
 public func IncrAttributeName(attr: IncrAttribute): String {
     return match (attr) {
         case IncrAttribute.ABSTRACT => "ABSTRACT"
@@ -258,6 +320,7 @@ public class IncrDecl <: Hashable & Equatable<IncrDecl> {
     public let getters: ArrayList<IncrDecl> = ArrayList<IncrDecl>()
     public let setters: ArrayList<IncrDecl> = ArrayList<IncrDecl>()
     public let patternVariables: ArrayList<IncrDecl> = ArrayList<IncrDecl>()
+    public let enumConstructors: ArrayList<IncrDecl> = ArrayList<IncrDecl>()
     public let constructorMangles: ArrayList<String> = ArrayList<String>()
     public let enumConstructorMangles: ArrayList<String> = ArrayList<String>()
     public let sourceImportedTargets: HashSet<IncrDecl> = HashSet<IncrDecl>()
@@ -347,6 +410,21 @@ public class IncrDecl <: Hashable & Equatable<IncrDecl> {
             variable.filePath = filePath
         }
         patternVariables.add(variable)
+    }
+
+    public func AddEnumConstructor(constructor: IncrDecl): Unit {
+        constructor.outerDecl = Some(this)
+        constructor.AddAttr(IncrAttribute.ENUM_CONSTRUCTOR)
+        if (constructor.fullPackageName.isEmpty()) {
+            constructor.fullPackageName = fullPackageName
+        }
+        if (constructor.filePath.isEmpty()) {
+            constructor.filePath = filePath
+        }
+        enumConstructors.add(constructor)
+        if (!constructor.rawMangleName.isEmpty()) {
+            enumConstructorMangles.add(constructor.rawMangleName)
+        }
     }
 
     public func AddSourceImportedTarget(target: IncrDecl): Unit {

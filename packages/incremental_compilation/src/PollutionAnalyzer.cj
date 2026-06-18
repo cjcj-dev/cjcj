@@ -923,10 +923,8 @@ public class PollutionAnalyzer {
         }
         record.instVar = true
         if (decl.astKind == IncrDeclKind.ENUM_DECL) {
-            for (member in GetMembers(decl)) {
-                if (member.TestAttr(IncrAttribute.ENUM_CONSTRUCTOR)) {
-                    PolluteAPIOfDecl(member)
-                }
+            for (constructor in GetEnumConstructors(decl)) {
+                PolluteAPIOfDecl(constructor)
             }
             PolluteAPIOfDecl(decl)
         } else if (decl.astKind == IncrDeclKind.STRUCT_DECL || decl.astKind == IncrDeclKind.CLASS_DECL) {
