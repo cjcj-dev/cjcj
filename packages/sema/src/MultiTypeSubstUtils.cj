@@ -122,9 +122,7 @@ private func filterUnusedMapping(mapping: MultiTypeSubst, tys: TySet): MultiType
         if (let Some(instTys) <- mapping.Get(tv)) {
             for (instTy in instTys.values) {
                 for (used in instTy.GetGenericTyArgs(all)) {
-                    if (addGenericUnique(reachable, used)) {
-                        worklist.add(used)
-                    }
+                    let _ = addGenericUnique(reachable, used)
                 }
             }
         }
@@ -169,9 +167,7 @@ private func filterUnusedMapping(mapping: SubstPack, tys: TySet): SubstPack {
         if (let Some(instTys) <- mapping.inst.Get(instTyVar)) {
             for (instTy in instTys.values) {
                 for (used in instTy.GetGenericTyArgs(allInst)) {
-                    if (addGenericUnique(reachable, used)) {
-                        worklist.add(used)
-                    }
+                    let _ = addGenericUnique(reachable, used)
                 }
             }
         }

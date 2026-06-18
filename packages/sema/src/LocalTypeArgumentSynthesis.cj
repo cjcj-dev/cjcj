@@ -110,6 +110,8 @@ public class LocalTypeArgumentSynthesis {
     private var curTyVar: Option<GenericsTy> = None
     private var hasNothingTy: Bool = false
     private var hasAnyTy: Bool = false
+    private var deterministic: Bool = false
+    private let activeBoundChecks: ArrayList<(Ty, Ty)> = ArrayList<(Ty, Ty)>()
 
     public init(typeManager: TypeManager, argPack: LocTyArgSynArgPack, needDiagMsg!: Bool = false) {
         tyMgr = typeManager
@@ -194,7 +196,8 @@ public class LocalTypeArgumentSynthesis {
         }
         let synthesis = LocalTypeArgumentSynthesis(typeManager, pack)
         synthesis.constraints = cloneConstraint(cst)
-        return synthesis.SolveCurrentConstraints(allowPartial: false)
+        synthesis.deterministic = true
+        return synthesis.SolveCurrentConstraints(allowPartial: true)
     }
 
     public func InitConstraints(tyVarsToSolve: ArrayList<GenericsTy>): Constraint {
@@ -246,20 +249,14 @@ public class LocalTypeArgumentSynthesis {
         }
         if (let Some(paramVar) <- (paramTy as GenericsTy)) {
             if (paramVar.isPlaceholder && containsTyVar(argPack.tyVarsToSolve, paramVar)) {
-                curTyVar = Some(paramVar)
                 let lowerBound = normalizeInferredTy(argTy)
-                NoteSpecialBound(lowerBound)
-                constraints.GetOrCreate(paramVar).lbs.Add(lowerBound)
-                return true
+                return AddLowerBound(paramVar, lowerBound)
             }
         }
         if (let Some(argVar) <- (argTy as GenericsTy)) {
             if (argVar.isPlaceholder && containsTyVar(argPack.tyVarsToSolve, argVar)) {
-                curTyVar = Some(argVar)
                 let upperBound = normalizeInferredTy(paramTy)
-                NoteSpecialBound(upperBound)
-                constraints.GetOrCreate(argVar).ubs.Add(upperBound)
-                return true
+                return AddUpperBound(argVar, upperBound)
             }
             if (!argVar.isPlaceholder) {
                 if (argVar.upperBounds.isEmpty()) {
@@ -296,6 +293,9 @@ public class LocalTypeArgumentSynthesis {
         if (argTy.IsNominal() && paramTy.IsNominal()) {
             return UnifyNominal(argTy, paramTy)
         }
+        if (argTy.IsBuiltin() && paramTy.IsInterface()) {
+            return UnifyNominal(argTy, paramTy)
+        }
         if (argTy.IsPrimitive() && paramTy.IsPrimitive()) {
             if (!tyMgr.IsSubtype(argTy, paramTy)) {
                 return false
@@ -308,6 +308,141 @@ public class LocalTypeArgumentSynthesis {
             return true
         }
         return tyMgr.IsSubtype(argTy, paramTy)
+    }
+
+    private func AddLowerBound(tyVar: GenericsTy, lowerBound: Ty): Bool {
+        curTyVar = Some(tyVar)
+        NoteSpecialBound(lowerBound)
+        let bounds = constraints.GetOrCreate(tyVar)
+        let addedLower = bounds.lbs.Add(lowerBound)
+        var addedGreedyUpper = false
+        if (deterministic && IsGreedySolution(tyVar, lowerBound, false)) {
+            if (bounds.eq.IsEmpty()) {
+                bounds.eq.Add(lowerBound)
+            }
+            addedGreedyUpper = bounds.ubs.Add(lowerBound)
+        }
+        if (addedLower) {
+            let upperBounds = bounds.ubs.Clone()
+            for (upperBound in upperBounds.values) {
+                if (Ty.IsTyCorrect(upperBound) && !UnifyBoundPair(lowerBound, upperBound)) {
+                    return false
+                }
+            }
+            if (deterministic && !CheckKnownSumLowerBound(tyVar, bounds, lowerBound)) {
+                return false
+            }
+        }
+        if (addedGreedyUpper) {
+            let lowerBounds = bounds.lbs.Clone()
+            for (existingLower in lowerBounds.values) {
+                if (Ty.IsTyCorrect(existingLower) && !UnifyBoundPair(existingLower, lowerBound)) {
+                    return false
+                }
+            }
+        }
+        if (!CheckKnownSumEqBound(tyVar, bounds)) {
+            return false
+        }
+        return true
+    }
+
+    private func AddUpperBound(tyVar: GenericsTy, upperBound: Ty): Bool {
+        curTyVar = Some(tyVar)
+        NoteSpecialBound(upperBound)
+        let bounds = constraints.GetOrCreate(tyVar)
+        let addedUpper = bounds.ubs.Add(upperBound)
+        var addedGreedyLower = false
+        if (deterministic && IsGreedySolution(tyVar, upperBound, true)) {
+            if (bounds.eq.IsEmpty()) {
+                bounds.eq.Add(upperBound)
+            }
+            addedGreedyLower = bounds.lbs.Add(upperBound)
+        }
+        if (addedUpper) {
+            let lowerBounds = bounds.lbs.Clone()
+            for (lowerBound in lowerBounds.values) {
+                if (Ty.IsTyCorrect(lowerBound) && !UnifyBoundPair(lowerBound, upperBound)) {
+                    return false
+                }
+            }
+        }
+        if (addedGreedyLower) {
+            let upperBounds = bounds.ubs.Clone()
+            for (existingUpper in upperBounds.values) {
+                if (Ty.IsTyCorrect(existingUpper) && !UnifyBoundPair(upperBound, existingUpper)) {
+                    return false
+                }
+            }
+            if (deterministic && !CheckKnownSumLowerBound(tyVar, bounds, upperBound)) {
+                return false
+            }
+        }
+        if (!CheckKnownSumEqBound(tyVar, bounds)) {
+            return false
+        }
+        return true
+    }
+
+    private func CheckKnownSumLowerBound(tyVar: GenericsTy, bounds: TyVarBounds, lowerBound: Ty): Bool {
+        if (!deterministic || tyMgr.TyVarHasNoSum(tyVar)) {
+            return true
+        }
+        if (lowerBound.IsNothing()) {
+            return true
+        }
+        return bounds.sum.Contains(lowerBound)
+    }
+
+    private func CheckKnownSumEqBound(tyVar: GenericsTy, bounds: TyVarBounds): Bool {
+        if (!deterministic || tyMgr.TyVarHasNoSum(tyVar) || bounds.eq.IsEmpty()) {
+            return true
+        }
+        let eqTy = bounds.eq.values[0]
+        if (eqTy.IsNothing()) {
+            return true
+        }
+        return bounds.sum.Contains(eqTy)
+    }
+
+    private func IsGreedySolution(tyVar: GenericsTy, bound: Ty, isUpperbound: Bool): Bool {
+        let tyParam = bound.IsGeneric() && !bound.IsPlaceholder()
+        var outerTyVar = false
+        if (let Some(boundVar) <- (bound as GenericsTy)) {
+            outerTyVar = boundVar.isPlaceholder &&
+                tyMgr.ScopeDepthOfTyVar(boundVar) <= tyMgr.ScopeDepthOfTyVar(tyVar)
+        }
+        var finalClass = false
+        if (isUpperbound) {
+            if (let Some(classTy) <- (bound as ClassTy)) {
+                if (let Some(classDecl) <- classTy.declPtr) {
+                    finalClass = !IsInheritableClass(classDecl)
+                }
+            }
+        }
+        let finalType = finalClass ||
+            (!bound.IsGeneric() && !bound.IsClassLike() && !bound.IsAny() && !bound.IsNothing())
+        let anyOrNothing = (bound.IsAny() && !isUpperbound) || (bound.IsNothing() && isUpperbound)
+        return tyParam || outerTyVar || finalType || anyOrNothing
+    }
+
+    private func HasActiveBoundCheck(argTy: Ty, paramTy: Ty): Bool {
+        for (entry in activeBoundChecks) {
+            if (SameTy(entry[0], argTy) && SameTy(entry[1], paramTy)) {
+                return true
+            }
+        }
+        return false
+    }
+
+    private func UnifyBoundPair(argTy: Ty, paramTy: Ty): Bool {
+        if (HasActiveBoundCheck(argTy, paramTy)) {
+            return true
+        }
+        activeBoundChecks.add((argTy, paramTy))
+        let ok = UnifyOne(argTy, paramTy)
+        activeBoundChecks.remove(at: activeBoundChecks.size - 1)
+        return ok
     }
 
     private func NoteSpecialBound(ty: Ty): Unit {
@@ -440,20 +575,54 @@ public class LocalTypeArgumentSynthesis {
 
     private func SolveCurrentConstraints(allowPartial!: Bool = false): Option<TypeSubst> {
         let subst = TypeSubst()
-        for (tyVar in argPack.tyVarsToSolve) {
-            if (let Some(solution) <- FindSolution(tyVar)) {
-                subst.Put(tyVar, solution)
-            } else if (!allowPartial) {
-                errInfo.style = SolvingErrStyle.NO_CONSTRAINT
-                errInfo.tyVar = tyVar
-                return None
+        let graph = TyVarConstraintGraph(constraints, argPack.tyVarsToSolve, tyMgr)
+        while (true) {
+            let nextConstraints = graph.TopoOnce(constraints)
+            if (nextConstraints.entries.isEmpty()) {
+                break
+            }
+            let substitutedConstraints = ApplyTypeSubstForConstraint(subst, nextConstraints)
+            let solved = SolveConstraintGroup(substitutedConstraints)
+            if (!solved.entries.isEmpty()) {
+                MergeTypeSubst(subst, solved)
+                graph.ApplyTypeSubst(solved)
+            }
+        }
+        if (allowPartial || !HasUnsolvedTyVars(subst)) {
+            return subst
+        }
+        if (let Some(unsolved) <- FirstUnsolvedTyVar(subst)) {
+            errInfo.style = SolvingErrStyle.NO_CONSTRAINT
+            errInfo.tyVar = unsolved
+        }
+        return None
+    }
+
+    private func SolveConstraintGroup(group: Constraint): TypeSubst {
+        let subst = TypeSubst()
+        var remaining = cloneConstraint(group)
+        var newInfo = true
+        while (newInfo) {
+            newInfo = false
+            var idx: Int64 = 0
+            while (idx < remaining.entries.size) {
+                let entry = remaining.entries[idx]
+                if (let Some(solution) <- FindSolution(entry.tyVar, entry.bounds)) {
+                    subst.Put(entry.tyVar, solution)
+                    remaining.entries.remove(at: idx)
+                    newInfo = true
+                    continue
+                }
+                idx++
+            }
+            if (newInfo) {
+                remaining = ApplyTypeSubstForConstraint(subst, remaining)
             }
         }
         return subst
     }
 
-    private func FindSolution(tyVar: GenericsTy): Option<Ty> {
-        let bounds = constraints.GetOrCreate(tyVar)
+    private func FindSolution(tyVar: GenericsTy, bounds: TyVarBounds): Option<Ty> {
         for (eqTy in bounds.eq.values) {
             let normalizedEq = NormalizeSolution(eqTy)
             if (IsValidSolution(normalizedEq, bounds)) {
@@ -485,6 +654,48 @@ public class LocalTypeArgumentSynthesis {
             }
         }
         return None
+    }
+
+    private func MergeTypeSubst(target: TypeSubst, source: TypeSubst): Unit {
+        for (entry in source.entries) {
+            target.Put(entry.tyVar, entry.ty)
+        }
+    }
+
+    private func FirstUnsolvedTyVar(subst: TypeSubst): Option<GenericsTy> {
+        for (tyVar in argPack.tyVarsToSolve) {
+            if (let None <- subst.Get(tyVar)) {
+                return tyVar
+            }
+            if (substContainsTyVar(subst, tyVar)) {
+                return tyVar
+            }
+        }
+        return None
+    }
+
+    private func ApplyTypeSubstForConstraint(typeMapping: TypeSubst, input: Constraint): Constraint {
+        if (typeMapping.IsEmpty()) {
+            return cloneConstraint(input)
+        }
+        let out = Constraint()
+        for (entry in input.entries) {
+            let bounds = TyVarBounds()
+            for (lower in entry.bounds.lbs.values) {
+                bounds.lbs.Add(tyMgr.GetInstantiatedTy(lower, typeMapping))
+            }
+            for (upper in entry.bounds.ubs.values) {
+                bounds.ubs.Add(tyMgr.GetInstantiatedTy(upper, typeMapping))
+            }
+            for (sumTy in entry.bounds.sum.values) {
+                bounds.sum.Add(tyMgr.GetInstantiatedTy(sumTy, typeMapping))
+            }
+            for (eqTy in entry.bounds.eq.values) {
+                bounds.eq.Add(tyMgr.GetInstantiatedTy(eqTy, typeMapping))
+            }
+            out.entries.add(ConstraintEntry(entry.tyVar, bounds: bounds))
+        }
+        return out
     }
 
     private func JoinLowerBounds(lbs: TySet): Option<Ty> {

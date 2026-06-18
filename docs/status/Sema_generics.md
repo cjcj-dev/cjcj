@@ -62,6 +62,35 @@ Scope: `packages/sema/src` generics files covering generic instantiation, multi-
   no longer walks every source-imported non-generic decl up front; imported default-parameter helpers and
   source-imported targets are tracked and walked when referenced, and rearrangement is limited to used or const
   source-imported decls.
+- 2026-06-18: Added scoped `TypeCheckerImpl` generic helpers in `TypeCheckGeneric.cj` using the real `basic`
+  diagnostic engine and existing type-legality/type-alias utilities. The port now exposes C++-style generic
+  constraint checking, call arity validation, generic-expression type refresh, and diagnostic upper-bound
+  instantiation checks without local diagnostic compatibility copies.
+- 2026-06-18: Deepened generic declaration instantiation checks for member access. Constraint checking now builds
+  the C++-style base-expression type mapping for `A<T>.foo<U>` before merging the callee's own type arguments,
+  including exposed generic upper-bound member calls through `foundUpperBoundMap` and type-declaration member
+  promotion with filtering of unresolved base generics not explicitly written by the user.
+- 2026-06-18: Deepened local type argument synthesis by propagating newly added placeholder lower/upper bounds
+  through existing opposite bounds, guarded against recursive bound re-entry, and matched the C++ built-in
+  extension path by using promotion when a built-in argument is checked against a generic interface parameter.
+- 2026-06-18: Wired local type argument solving through the existing `TyVarConstraintGraph`, so dependent
+  placeholder constraints are solved in topological batches and each solved substitution is applied to later
+  constraint batches before choosing their solutions, matching the C++ solver's dependency-order flow more
+  closely while keeping the current single-candidate constraint representation.
+- 2026-06-18: Deepened the deterministic local type-argument constraint solver path. The static
+  `SolveConstraints` wrapper now matches the C++ `allowPartial` behavior, and deterministic bound collection
+  records greedy equality constraints for universal type parameters, outer placeholder variables, final classes,
+  final value types, and `Any`/`Nothing` sentinel bounds while rejecting finite-sum contradictions recorded in
+  `TyVarBounds.sum`.
+- 2026-06-18: Ported the C++ generic instantiation completeness check for static requirements in upper bounds.
+  `TypeCheckerImpl` now collects static function/property requirements from upper-bound interfaces/classes,
+  checks interface/abstract-class arguments through real `FieldLookup` and `TypeManager.PairIsOverrideOrImpl`,
+  rejects `Nothing` for static-member constraints, and reports `sema_cannot_instantiated_by_incomplete_type`
+  through the real `basic` diagnostic engine.
+- 2026-06-18: Aligned `MultiTypeSubstUtils` unused-mapping filtering with the C++ reference. The filter now seeds
+  the worklist from the initially useful type set and records generic variables found in one expansion of
+  instantiated mappings without recursively enqueueing newly discovered variables, matching the reference
+  `reachable.merge(...)` behavior used before expanding substitution packs.
 - Replaced status-only placeholders in the scoped generics files with compiling Cangjie implementations.
 - Ported the `MultiTypeSubstUtils` utility surface against the real `ast.Ty`, `GenericsTy`, `TypeSubst`, `MultiTypeSubst`, `SubstPack`, and `TypeManager` types.
 - Added the `Promotion` class with C++-matching promote/downgrade mapping operations and kept the previous top-level `Promote` helper.
@@ -73,6 +102,6 @@ Scope: `packages/sema/src` generics files covering generic instantiation, multi-
 
 ## Fidelity Notes
 
-This is a substantial deepening over the previous compatibility/status layer, but it is not a complete C++-behavior port of Sema generics. The most faithful areas in this pass are multi-type substitution, promotion shape, recursive type elimination, and the core local type-argument synthesis shape. Partial instantiation now uses real compiler options, whole-tree clone visiting, C++-style member filtering, reachable declaration registration, and the default-parameter desugar generic-to-generic remap needed before concrete substitution, but it still relies on the generic AST cloner instead of the C++ file's hand-written node constructors and full target-address rearrangement tables. The manager now creates package-owned instantiated declarations, walks package bodies and demand-walked source-imported non-generic declarations for concrete generic uses, keeps the C++-style generic-owner context needed by member instantiation/rearrangement, rewrites the common cached reference targets after instantiation, refreshes type-pattern runtime-match decisions after substitution, records desugared expression extend uses, clears stale source call type arguments after concrete desugar rearrangement, and participates in type-manager extend-use state, but it still lacks the C++ package import-manager rebuild path, backend-conditioned cleanup, full abstract function implementation maps, full desugar recovery for built-in operator calls, and actual source-imported inline-function pruning/removal. Local type argument synthesis now mirrors more of the C++ lattice behavior, but still lacks the C++ multi-candidate constraint set, full deterministic/diagnostic branch retention, complete blame tracking, import-manager/backend interactions, complete abstract member maps, and full AST pointer-rewrite semantics.
+This is a substantial deepening over the previous compatibility/status layer, but it is not a complete C++-behavior port of Sema generics. The most faithful areas in this pass are multi-type substitution, including C++-matching unused-mapping filtering, promotion shape, recursive type elimination, generic constraint utility checks, post-sema generic instantiation completeness checks, member-access generic constraint mapping, and the core local type-argument synthesis shape. Partial instantiation now uses real compiler options, whole-tree clone visiting, C++-style member filtering, reachable declaration registration, and the default-parameter desugar generic-to-generic remap needed before concrete substitution, but it still relies on the generic AST cloner instead of the C++ file's hand-written node constructors and full target-address rearrangement tables. The manager now creates package-owned instantiated declarations, walks package bodies and demand-walked source-imported non-generic declarations for concrete generic uses, keeps the C++-style generic-owner context needed by member instantiation/rearrangement, rewrites the common cached reference targets after instantiation, refreshes type-pattern runtime-match decisions after substitution, records desugared expression extend uses, clears stale source call type arguments after concrete desugar rearrangement, and participates in type-manager extend-use state, but it still lacks the C++ package import-manager rebuild path, backend-conditioned cleanup, full abstract function implementation maps, full desugar recovery for built-in operator calls, and actual source-imported inline-function pruning/removal. Local type argument synthesis now mirrors more of the C++ lattice behavior, including opposite-bound propagation, built-in extension promotion, dependency-ordered solving through the real ty-var constraint graph, and deterministic greedy equality/finite-sum checks for the static solver path, but still lacks the C++ multi-candidate constraint set, full diagnostic branch retention, complete blame tracking, import-manager/backend interactions, complete abstract member maps, and full AST pointer-rewrite semantics.
 
-Build verification: `cjpm build` passes for the workspace after the 2026-06-17 pass.
+Build verification: `cjpm build` passes for the workspace after the 2026-06-18 pass.
