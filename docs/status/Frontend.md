@@ -105,6 +105,14 @@ generic constraints and macro expansion call identity in its merge key, closer
 to the C++ `IsSameGeneric` and `MACRO_EXPAND_DECL` checks while the full real
 AST/type identity path is still being wired.
 
+This continuation aligned two compact C++ Frontend behaviors. `CompilerInvocation.ParseArgs`
+now calls `SetCompilationCachedPath()` before copying `frontendOptions` into
+`globalOptions`, matching the C++ invocation path and ensuring cache/object path
+helpers see the parsed output location immediately. `PrintSymbolTable` now
+matches the reference JSON surface more closely by dropping non-reference
+modifier/import-all fields and by relying on symbol-table entries instead of
+duplicating package/import nodes from file handling.
+
 ## Important Blocker
 
 `packages/frontend/cjpm.toml` now imports the real `basic`, `lex`, `option`, and

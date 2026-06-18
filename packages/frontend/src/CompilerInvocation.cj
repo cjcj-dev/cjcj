@@ -34,6 +34,7 @@ public class CompilerInvocation {
         if (!frontendOptions.ParseFromArgs(argList)) {
             return false
         }
+        frontendOptions.SetCompilationCachedPath()
         globalOptions = frontendOptions
         return true
     }
