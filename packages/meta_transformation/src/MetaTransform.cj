@@ -4,9 +4,17 @@ import cangjie_compiler::basic.CANGJIE_VERSION
 import cangjie_compiler::chir.CHIRBuilder
 import cangjie_compiler::chir.Function as CHIRFunction
 import cangjie_compiler::chir.Package as CHIRPackage
+import std.reflect.TypeInfo
+
+foreign {
+    func strcmp(lhs: CString, rhs: CString): Int32
+}
 
 public type MetaTransformRegisterCallback = (MetaTransformPluginBuilder) -> Unit
 public type MetaTransformPluginInfoGetter = () -> MetaTransformPluginInfo
+public type NativeMetaTransformPluginBuilderRef = CPointer<NativeMetaTransformPluginBuilder>
+public type NativeMetaTransformRegisterCallback = CFunc<(NativeMetaTransformPluginBuilderRef) -> Unit>
+public type NativeMetaTransformPluginInfoGetter = CFunc<() -> NativeMetaTransformPluginInfo>
 public type CHIRMetaTransformFactory = (CHIRBuilder) -> MetaTransformConcept
 public type CHIRFunctionMetaTransformFactory = (CHIRBuilder) -> CHIRFunctionMetaTransform
 public type CHIRPackageMetaTransformFactory = (CHIRBuilder) -> CHIRPackageMetaTransform
@@ -89,9 +97,21 @@ public interface MetaTransformRunner<DeclT> {
     func Run(decl: DeclT): Unit
 }
 
+private func InferMetaTransformKind<DeclT>(): MetaTransformKind {
+    let declType = TypeInfo.of<DeclT>()
+    if (declType == TypeInfo.of<CHIRFunction>()) {
+        return MetaTransformKind.FOR_CHIR_FUNC
+    }
+    if (declType == TypeInfo.of<CHIRPackage>()) {
+        return MetaTransformKind.FOR_CHIR_PACKAGE
+    }
+    return MetaTransformKind.UNKNOWN
+}
+
 public abstract class MetaTransform<DeclT> <: MetaTransformConcept & MetaTransformRunner<DeclT> {
     public init() {
         super()
+        kind = InferMetaTransformKind<DeclT>()
     }
 
     protected init(kind: MetaTransformKind) {
@@ -110,6 +130,88 @@ public abstract class CHIRPackageMetaTransform <: MetaTransform<CHIRPackage> {
     public init() {
         super(MetaTransformKind.FOR_CHIR_PACKAGE)
     }
+}
+
+@C
+public struct NativeMetaTransformPluginBuilder {
+    public init() {
+        throw Exception("NativeMetaTransformPluginBuilder is an opaque C++ MetaTransformPluginBuilder reference")
+    }
+}
+
+@C
+public struct NativeMetaTransformPluginInfo {
+    public let cjcVersion: CString
+    public let registerTo: NativeMetaTransformRegisterCallback
+
+    public init() {
+        cjcVersion = CString(CPointer<UInt8>())
+        registerTo = NativeMetaTransformRegisterCallback(CPointer<Unit>())
+    }
+
+    public init(cjcVersion: CString, registerTo: NativeMetaTransformRegisterCallback) {
+        this.cjcVersion = cjcVersion
+        this.registerTo = registerTo
+    }
+
+    public func HasVersion(): Bool {
+        return !cjcVersion.isNull()
+    }
+
+    public func HasRegisterCallback(): Bool {
+        return !CPointer<Unit>(registerTo).isNull()
+    }
+
+    public func IsStructurallyValid(): Bool {
+        return HasVersion() && HasRegisterCallback()
+    }
+
+    public func VersionMatches(version: String): Bool {
+        if (!HasVersion()) {
+            return false
+        }
+        var matched = false
+        try (expectedVersion = unsafe { LibC.mallocCString(version) }.asResource()) {
+            matched = unsafe { strcmp(cjcVersion, expectedVersion.value) } == 0
+        } catch (e: Exception) {
+            matched = false
+        }
+        return matched
+    }
+
+    public func IsValidForVersion(version: String): Bool {
+        return VersionMatches(version) && HasRegisterCallback()
+    }
+
+    public func IsValid(): Bool {
+        return IsValidForVersion(CANGJIE_VERSION)
+    }
+
+    public func TryRegisterTo(builder: NativeMetaTransformPluginBuilderRef): Bool {
+        if (!IsStructurallyValid() || builder.isNull()) {
+            return false
+        }
+        unsafe { registerTo(builder) }
+        return true
+    }
+
+    public func RegisterTo(builder: NativeMetaTransformPluginBuilderRef): Unit {
+        if (!HasRegisterCallback()) {
+            throw IllegalStateException("native MetaTransform plugin info has no registration callback")
+        }
+        if (builder.isNull()) {
+            throw IllegalArgumentException("native MetaTransform plugin builder reference is null")
+        }
+        unsafe { registerTo(builder) }
+    }
+}
+
+public func GetNativeMetaTransformPluginInfo(symbol: CPointer<Unit>): Option<NativeMetaTransformPluginInfo> {
+    if (symbol.isNull()) {
+        return None
+    }
+    let getter = NativeMetaTransformPluginInfoGetter(symbol)
+    return Some(unsafe { getter() })
 }
 
 public struct MetaTransformPluginInfo {

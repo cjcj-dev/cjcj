@@ -1,6 +1,6 @@
 # MetaTransformation Port Status
 
-Date: 2026-06-17
+Date: 2026-06-18
 
 Build: `cjpm build` passes.
 
@@ -41,6 +41,16 @@ Implemented:
   the exact `getMetaTransformPluginInfo` symbol spelling used by the C++ loader, and
   `MetaTransformPluginInfoGetter` plus CHIR getter helpers model the zero-argument function that returns
   plugin info.
+- Added the raw native plugin-info ABI surface used by dynamically loaded plugins:
+  `NativeMetaTransformPluginInfo` is an `@C` struct with the C++ fields (`const char*` version and
+  registration function pointer), `NativeMetaTransformPluginBuilder` is the opaque `@C` type used behind
+  the native builder reference, `NativeMetaTransformPluginInfoGetter` models the exported getter function
+  pointer, and `GetNativeMetaTransformPluginInfo` casts a non-null native symbol pointer and invokes it
+  under `unsafe`.
+- Mirrored the C++ native plugin validity/registration path more closely: raw plugin info can now compare
+  its `const char*` version against a requested compiler version with C `strcmp`, validate against
+  `basic.CANGJIE_VERSION`, and invoke the native `registerTo` callback only after checking both the
+  callback and native builder reference for null.
 - Added typed CHIR transform factory aliases and function/package-specific plugin-info helpers. These
   preserve the C++ macro's type-specific construction path more closely for Cangjie plugins that derive
   from `CHIRFunctionMetaTransform` or `CHIRPackageMetaTransform`; the helpers are generic over the
@@ -63,21 +73,38 @@ Implemented:
   and throws if plugin info has no callback, while `TryRegisterTo` preserves a checked boolean path for
   callers that validate malformed plugin info before invoking it. This better matches the C++ loader's
   non-optional callback invocation after plugin validation.
+- Added `RunCHIRMetaTransforms`, a self-hosted equivalent of the C++ CHIR plugin execution loop in
+  `ToCHIR::PerformPlugin`: it skips non-CHIR transform concepts, runs function transforms over every
+  `Package.GetGlobalFuncsWithBody()` result, runs package transforms once, and throws on impossible
+  kind/type mismatches instead of silently ignoring them. The result reports whether any CHIR plugin was
+  seen plus function/package run counts so callers can mirror the C++ `hasPluginForCHIR` branch.
+- Restored the C++ `MetaTransform<DeclT>` default-constructor behavior for CHIR transforms: the Cangjie
+  base constructor now compares `TypeInfo.of<DeclT>()` against the real sibling CHIR `Function` and
+  `Package` types, assigning `FOR_CHIR_FUNC`, `FOR_CHIR_PACKAGE`, or `UNKNOWN` like the C++ `if constexpr`
+  chain. Direct subclasses of `MetaTransform<CHIRFunction>` and `MetaTransform<CHIRPackage>` no longer
+  need to use the convenience wrapper classes to get the correct kind.
+- Matched the C++ `MetaTransformPluginManager` move-only ownership surface more closely: the Cangjie
+  manager now has a move-style constructor and `MoveAssignFrom` operation that transfer the transform
+  sequence in order and clear the source manager, corresponding to the C++ move constructor and move
+  assignment over `std::vector<std::unique_ptr<MetaTransformConcept>>`.
 
 Known fidelity caveats:
 
-- The C++ `MetaTransform<DeclT>` default constructor uses `if constexpr` to infer function/package
-  transform kind from the template argument. Cangjie does not currently have an equivalent specialization
-  mechanism in this port, so direct subclasses of `MetaTransform<DeclT>` must pass a kind explicitly.
-  Plugins should use `CHIRFunctionMetaTransform`/`CHIRPackageMetaTransform` and the typed plugin-info
-  helpers when they need the C++ macro's CHIR function/package behavior.
-- A constructor-time runtime type check was tested as a possible workaround for the generic kind
-  inference gap, but cjc rejects use of `this` as an expression inside abstract-class constructors.
+- The C++ implementation performs compile-time type selection with `std::is_same_v`; the Cangjie port uses
+  `std.reflect.TypeInfo` equality in the base constructor because Cangjie has no template-specialization
+  equivalent. This keeps behavior faithful on the supported self-hosting target where `std.reflect` is
+  available, but it is still not a source-level macro/template analogue.
 - Cangjie has no direct preprocessor macro equivalent for `CHIR_PLUGIN`; `MakeCHIRPluginInfo` preserves
   the registration behavior but not the C++ macro spelling.
 - Cangjie does not expose C++-style nested tag declarations in the style used by `MetaKind::CHIR`, so the
   CHIR tag is represented as `MetaKindCHIR` alongside the public `MetaKind` marker.
-- Cross-module plugin loading and execution are still not wired through the self-hosted frontend/CHIR
-  pipeline; this status file tracks only the scoped `packages/meta_transformation/src` port.
+- Cangjie does not have C++ `unique_ptr`, so manager transfers move references between managers and clear
+  the source rather than enforcing single ownership at the type-system level.
+- Cross-module dynamic plugin loading is still not wired through the self-hosted frontend pipeline. This
+  module now exposes and validates the raw `getMetaTransformPluginInfo` symbol type, but the caller-side
+  loader still needs to provide a native builder reference or adapter before native C++ plugins can
+  register directly.
+- CHIR has not yet been updated to call `RunCHIRMetaTransforms`; this status file tracks only the scoped
+  `packages/meta_transformation/src` port.
 
 Remaining MetaTransformation selfhost markers: 0.
