@@ -15,6 +15,11 @@ public type LLVMAttributeRef = CPointer<Unit>
 public type LLVMUseRef = CPointer<Unit>
 public type LLVMDIBuilderRef = CPointer<Unit>
 
+@When[os != "Windows"]
+foreign {
+    func dlsym(handle: CPointer<Unit>, symbol: CString): CPointer<Unit>
+}
+
 public enum LLVMLinkage {
     | External
     | AvailableExternally
@@ -63,6 +68,26 @@ public func LLVMVerifierFailureActionValue(action: LLVMVerifierFailureAction): I
         case LLVMVerifierFailureAction.PrintMessage => 1
         case LLVMVerifierFailureAction.ReturnStatus => 2
     }
+}
+
+@When[os != "Windows"]
+func LookupLLVMOptionalSymbol(name: String): CPointer<Unit> {
+    if (name.isEmpty()) {
+        return CPointer<Unit>()
+    }
+    var result = CPointer<Unit>()
+    try (symbol = unsafe { LibC.mallocCString(name) }.asResource()) {
+        result = unsafe { dlsym(CPointer<Unit>(), symbol.value) }
+    }
+    return result
+}
+
+@When[os == "Windows"]
+func LookupLLVMOptionalSymbol(name: String): CPointer<Unit> {
+    if (name.isEmpty()) {
+        return CPointer<Unit>()
+    }
+    return CPointer<Unit>()
 }
 
 public func LLVMIntPredicateValue(predicate: LLVMIntPredicate): Int32 {
@@ -212,7 +237,6 @@ foreign {
     func LLVMGetMDString(value: LLVMValueRef, len: CPointer<UInt32>): CString
     func LLVMGetMDNodeNumOperands(value: LLVMValueRef): UInt32
     func LLVMGetMDNodeOperands(value: LLVMValueRef, dest: CPointer<LLVMValueRef>): Unit
-    func LLVMReplaceMDNodeOperandWith(value: LLVMValueRef, index: UInt32, replacement: LLVMMetadataRef): Unit
     func LLVMHasMetadata(value: LLVMValueRef): Int32
     func LLVMGetMetadata(value: LLVMValueRef, kindID: UInt32): LLVMValueRef
     func LLVMSetMetadata(value: LLVMValueRef, kindID: UInt32, node: LLVMValueRef): Unit

@@ -2,17 +2,18 @@ package cangjie_compiler::codegen
 
 public type LLVMErrorRef = CPointer<Unit>
 public type LLVMPassBuilderOptionsRef = CPointer<Unit>
+private type LLVMRunPassesOnFunctionFunc = CFunc<(LLVMValueRef, CString, LLVMTargetMachineRef,
+    LLVMPassBuilderOptionsRef) -> LLVMErrorRef>
+private type LLVMPassBuilderOptionsSetAAPipelineFunc = CFunc<(LLVMPassBuilderOptionsRef, CString) -> Unit>
+private type LLVMPassBuilderOptionsSetInlinerThresholdFunc = CFunc<(LLVMPassBuilderOptionsRef, Int32) -> Unit>
 
 foreign {
     func LLVMRunPasses(module: LLVMModuleRef, passes: CString, targetMachine: LLVMTargetMachineRef,
-        options: LLVMPassBuilderOptionsRef): LLVMErrorRef
-    func LLVMRunPassesOnFunction(fn: LLVMValueRef, passes: CString, targetMachine: LLVMTargetMachineRef,
         options: LLVMPassBuilderOptionsRef): LLVMErrorRef
     func LLVMCreatePassBuilderOptions(): LLVMPassBuilderOptionsRef
     func LLVMDisposePassBuilderOptions(options: LLVMPassBuilderOptionsRef): Unit
     func LLVMPassBuilderOptionsSetVerifyEach(options: LLVMPassBuilderOptionsRef, verifyEach: Int32): Unit
     func LLVMPassBuilderOptionsSetDebugLogging(options: LLVMPassBuilderOptionsRef, debugLogging: Int32): Unit
-    func LLVMPassBuilderOptionsSetAAPipeline(options: LLVMPassBuilderOptionsRef, aaPipeline: CString): Unit
     func LLVMPassBuilderOptionsSetLoopInterleaving(options: LLVMPassBuilderOptionsRef, loopInterleaving: Int32): Unit
     func LLVMPassBuilderOptionsSetLoopVectorization(options: LLVMPassBuilderOptionsRef, loopVectorization: Int32): Unit
     func LLVMPassBuilderOptionsSetSLPVectorization(options: LLVMPassBuilderOptionsRef, slpVectorization: Int32): Unit
@@ -24,7 +25,6 @@ foreign {
         licmMssaNoAccForPromotionCap: UInt32): Unit
     func LLVMPassBuilderOptionsSetCallGraphProfile(options: LLVMPassBuilderOptionsRef, callGraphProfile: Int32): Unit
     func LLVMPassBuilderOptionsSetMergeFunctions(options: LLVMPassBuilderOptionsRef, mergeFunctions: Int32): Unit
-    func LLVMPassBuilderOptionsSetInlinerThreshold(options: LLVMPassBuilderOptionsRef, threshold: Int32): Unit
     func LLVMConsumeError(error: LLVMErrorRef): Unit
     func LLVMGetErrorMessage(error: LLVMErrorRef): CString
     func LLVMDisposeErrorMessage(message: CString): Unit
@@ -56,11 +56,16 @@ public class LLVMPassBuilderOptionsHandle <: Resource {
     }
 
     public func SetAAPipeline(aaPipeline: String): Unit {
-        if (raw.isNull()) {
+        if (raw.isNull() || aaPipeline.isEmpty()) {
             return
         }
+        let symbol = LookupLLVMOptionalSymbol("LLVMPassBuilderOptionsSetAAPipeline")
+        if (symbol.isNull()) {
+            return
+        }
+        let setAAPipeline = LLVMPassBuilderOptionsSetAAPipelineFunc(symbol)
         let pipelineCString = unsafe { LibC.mallocCString(aaPipeline) }.asResource()
-        unsafe { LLVMPassBuilderOptionsSetAAPipeline(raw, pipelineCString.value) }
+        unsafe { setAAPipeline(raw, pipelineCString.value) }
         ClearAAPipelineCString()
         aaPipelineCString = Some(pipelineCString)
     }
@@ -120,9 +125,15 @@ public class LLVMPassBuilderOptionsHandle <: Resource {
     }
 
     public func SetInlinerThreshold(threshold: Int32): Unit {
-        if (!raw.isNull()) {
-            unsafe { LLVMPassBuilderOptionsSetInlinerThreshold(raw, threshold) }
+        if (raw.isNull() || threshold < 0) {
+            return
         }
+        let symbol = LookupLLVMOptionalSymbol("LLVMPassBuilderOptionsSetInlinerThreshold")
+        if (symbol.isNull()) {
+            return
+        }
+        let setInlinerThreshold = LLVMPassBuilderOptionsSetInlinerThresholdFunc(symbol)
+        unsafe { setInlinerThreshold(raw, threshold) }
     }
 
     public func close(): Unit {
@@ -208,9 +219,15 @@ public func RunLLVMPassesOnFunction(fn: LLVMValueRef, passes: String,
             return RunLLVMPassesOnFunction(fn, passes, targetMachine: targetMachine, options: defaultOptions.raw)
         }
     }
+    let symbol = LookupLLVMOptionalSymbol("LLVMRunPassesOnFunction")
+    if (symbol.isNull()) {
+        return LLVMRunPassesResult(false,
+            message: "LLVMRunPassesOnFunction is not available in the bundled LLVM C API")
+    }
     var result = LLVMRunPassesResult(false, message: "failed to run LLVM function passes")
     try (passesCString = unsafe { LibC.mallocCString(passes) }.asResource()) {
-        let error = unsafe { LLVMRunPassesOnFunction(fn, passesCString.value, targetMachine, options) }
+        let runPassesOnFunction = LLVMRunPassesOnFunctionFunc(symbol)
+        let error = unsafe { runPassesOnFunction(fn, passesCString.value, targetMachine, options) }
         result = ConsumeLLVMError(error)
     }
     return result

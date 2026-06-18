@@ -2,6 +2,8 @@ package cangjie_compiler::codegen
 
 import std.collection.*
 
+private type LLVMReplaceMDNodeOperandWithFunc = CFunc<(LLVMValueRef, UInt32, LLVMMetadataRef) -> Unit>
+
 public func LLVMNullNamedMDNode(): LLVMNamedMDNodeRef { return CPointer<Unit>() }
 
 private func LLVMGetModuleContextHandle(module: LLVMModuleHandle): Option<LLVMContextHandle> {
@@ -127,10 +129,15 @@ public func LLVMGetMDNodeOperands(value: LLVMValueRef): ArrayList<LLVMValueRef> 
 }
 
 public func LLVMReplaceMDNodeOperand(value: LLVMValueRef, index: UInt32, replacement: LLVMMetadataRef): Unit {
-    if (value.isNull()) {
+    if (value.isNull() || replacement.isNull()) {
         return
     }
-    unsafe { LLVMReplaceMDNodeOperandWith(value, index, replacement) }
+    let symbol = LookupLLVMOptionalSymbol("LLVMReplaceMDNodeOperandWith")
+    if (symbol.isNull()) {
+        return
+    }
+    let replaceOperand = LLVMReplaceMDNodeOperandWithFunc(symbol)
+    unsafe { replaceOperand(value, index, replacement) }
 }
 
 public func LLVMGetNamedMetadata(module: LLVMModuleHandle, name: String): LLVMNamedMDNodeRef {
