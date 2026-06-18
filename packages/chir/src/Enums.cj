@@ -105,7 +105,7 @@ public enum Attribute {
     | ABSTRACT | ANNOTATION | BOXED | BUILTIN | C | CFFI_WRAPPER | COMPILE_TIME_VALUE
     | CONST | EXTERN | FAST_NATIVE | FOREIGN | GENERIC_INSTANTIATED | IMPLICIT_ADD
     | IMPORTED | INLINED | MUT | NO_SIDE_EFFECT | OPERATOR | PREVIOUSLY_DESERIALIZED
-    | PRIVATE | PROTECTED | PUBLIC | READONLY | STATIC | SRC_CODE_IMPORTED | THIN
+    | PRIVATE | PROTECTED | PUBLIC | READONLY | STATIC | SRC_CODE_IMPORTED | THIN | VIRTUAL
 }
 
 public func AttributeIndex(attr: Attribute): Int64 {
@@ -136,6 +136,7 @@ public func AttributeIndex(attr: Attribute): Int64 {
         case Attribute.STATIC => 23
         case Attribute.SRC_CODE_IMPORTED => 24
         case Attribute.THIN => 25
+        case Attribute.VIRTUAL => 26
     }
 }
 
@@ -167,6 +168,7 @@ public func AttributeName(attr: Attribute): String {
         case Attribute.STATIC => "static"
         case Attribute.SRC_CODE_IMPORTED => "srcCodeImported"
         case Attribute.THIN => "thin"
+        case Attribute.VIRTUAL => "virtual"
     }
 }
 

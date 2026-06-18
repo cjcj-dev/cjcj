@@ -40,8 +40,10 @@ public class CHIRBuilder {
     }
 
     public func CreateFunction(funcType: FuncType, identifier: String, srcCodeIdentifier!: String = "",
-        rawMangledName!: String = "", packageName!: String = ""): Function {
-        let fn = Function(funcType, identifier, srcCodeIdentifier, rawMangledName, packageName)
+        rawMangledName!: String = "", packageName!: String = "",
+        genericTypeParams!: ArrayList<GenericType> = ArrayList<GenericType>()): Function {
+        let fn = Function(funcType, identifier, srcCodeIdentifier, rawMangledName, packageName,
+            genericTypeParams: genericTypeParams)
         context.RegisterValue(fn)
         return fn
     }
@@ -57,6 +59,10 @@ public class CHIRBuilder {
         let group = BlockGroup(identifier)
         context.RegisterValue(group)
         return group
+    }
+
+    public func CreateBlockGroup(fn: Function): BlockGroup {
+        return CreateBlockGroup(fn.GenerateBlockGroupId().toString())
     }
 
     public func CreateBlock(identifier: String, parentGroup: Option<BlockGroup>): Block {

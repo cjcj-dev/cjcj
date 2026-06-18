@@ -52,6 +52,7 @@ public class AttributeInfo {
         AppendIfPresent(parts, Attribute.MUT)
         AppendIfPresent(parts, Attribute.CONST)
         AppendIfPresent(parts, Attribute.ABSTRACT)
+        AppendIfPresent(parts, Attribute.VIRTUAL)
         AppendIfPresent(parts, Attribute.IMPORTED)
         AppendIfPresent(parts, Attribute.SRC_CODE_IMPORTED)
         AppendIfPresent(parts, Attribute.FOREIGN)

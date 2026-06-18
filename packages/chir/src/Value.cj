@@ -471,6 +471,24 @@ public class Block <: Value {
         predecessors.clear()
     }
 
+    public func Clone(builder: CHIRBuilder, newGroup: BlockGroup): Block {
+        let newBlock = builder.CreateBlock(newGroup)
+        newBlock.CopyBaseInfoFrom(this)
+        if (let Some(blockExceptions) <- exceptions) {
+            newBlock.SetExceptions(blockExceptions)
+        }
+        for (expr in exprs) {
+            let newExpr = expr.Clone(builder, newBlock)
+            newExpr.CopyBaseInfoFrom(expr)
+            if (let Some(sourceResult) <- expr.GetResult()) {
+                if (let Some(clonedResult) <- newExpr.GetResult()) {
+                    clonedResult.CopyBaseInfoFrom(sourceResult)
+                }
+            }
+        }
+        return newBlock
+    }
+
     public override func ToString(indent: Int64): String {
         var out = IndentToString(indent) + GetIdentifier() + ":"
         for (expr in exprs) {
@@ -595,6 +613,59 @@ public class BlockGroup <: Value {
         }
         blocks.clear()
         entryBlock = None
+    }
+
+    public func Clone(builder: CHIRBuilder, newFunc: Function): BlockGroup {
+        let newGroup = builder.CreateBlockGroup(newFunc)
+        newGroup.SetOwnerFunc(newFunc)
+        newGroup.CopyBaseInfoFrom(this)
+        CloneBlocks(builder, newGroup)
+        return newGroup
+    }
+
+    public func Clone(builder: CHIRBuilder, newLambda: Lambda): BlockGroup {
+        let parentFunc = newLambda.GetTopLevelFunc()
+        if (parentFunc.isNone()) {
+            throw IllegalArgumentException("lambda block-group clone requires a top-level function")
+        }
+        let ownerFunc = parentFunc.getOrThrow()
+        let newGroup = builder.CreateBlockGroup(ownerFunc)
+        if (newLambda.GetBody().isNone()) {
+            newLambda.InitBody(newGroup)
+        } else {
+            newGroup.SetOwnerExpression(newLambda)
+        }
+        newGroup.CopyBaseInfoFrom(this)
+        CloneBlocks(builder, newGroup)
+        return newGroup
+    }
+
+    private func CloneBlocks(builder: CHIRBuilder, target: BlockGroup): Unit {
+        if (!target.GetBlocksRef().isEmpty() || target.GetEntryBlock().isSome()) {
+            throw IllegalArgumentException("target block group for clone must be empty")
+        }
+        let blockMap = HashMap<Int64, Block>()
+        for (sourceBlock in blocks) {
+            let clonedBlock = sourceBlock.Clone(builder, target)
+            if (let Some(entry) <- entryBlock) {
+                if (entry.nodeId == sourceBlock.nodeId) {
+                    target.SetEntryBlock(clonedBlock)
+                }
+            }
+            blockMap.add(sourceBlock.nodeId, clonedBlock)
+        }
+        for (clonedBlock in target.GetBlocks()) {
+            if (let Some(term) <- clonedBlock.GetTerminator()) {
+                let successors = term.GetSuccessors()
+                var idx: Int64 = 0
+                while (idx < successors.size) {
+                    if (let Some(mappedBlock) <- blockMap.get(successors[idx].nodeId)) {
+                        term.ReplaceSuccessor(idx, mappedBlock)
+                    }
+                    idx++
+                }
+            }
+        }
     }
 
     public override func ToString(indent: Int64): String {
@@ -722,6 +793,7 @@ public class Function <: GlobalValue {
     private var funcKind: FuncKind = FuncKind.DEFAULT
     private var body: Option<BlockGroup> = None
     private let params: ArrayList<Parameter> = ArrayList<Parameter>()
+    private let genericTypeParams: ArrayList<GenericType> = ArrayList<GenericType>()
     private var returnValue: Option<LocalVar> = None
     private var genericDecl: Option<Function> = None
     private var paramDftValHostFunc: Option<Function> = None
@@ -764,8 +836,11 @@ public class Function <: GlobalValue {
     public let runtimePrintIsFloat: ArrayList<Bool> = ArrayList<Bool>()
 
     public init(funcType: FuncType, identifier: String, srcCodeIdentifier: String, rawMangledName: String,
-        packageName: String) {
+        packageName: String, genericTypeParams!: ArrayList<GenericType> = ArrayList<GenericType>()) {
         super(ValueKind.KIND_FUNC, funcType, identifier, srcCodeIdentifier, rawMangledName, packageName)
+        for (param in genericTypeParams) {
+            this.genericTypeParams.add(param)
+        }
     }
 
     public override func AsFunction(): Option<Function> { return this }
@@ -792,6 +867,18 @@ public class Function <: GlobalValue {
 
     public func GetGenericDecl(): Option<Function> { return genericDecl }
     public func SetGenericDecl(decl: Function): Unit { genericDecl = decl }
+
+    public func AddGenericTypeParam(param: GenericType): Unit {
+        genericTypeParams.add(param)
+    }
+
+    public func GetGenericTypeParams(): ArrayList<GenericType> {
+        let out = ArrayList<GenericType>()
+        for (param in genericTypeParams) {
+            out.add(param)
+        }
+        return out
+    }
 
     public func IsFastNative(): Bool { return TestAttr(Attribute.FAST_NATIVE) }
     public func SetFastNative(fastNative: Bool): Unit {

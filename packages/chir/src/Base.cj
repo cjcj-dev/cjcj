@@ -77,11 +77,11 @@ public open class Base {
             return ""
         }
         if (annotationText.isEmpty()) {
-            return "loc=${locText}"
+            return locText
         }
         if (locText.isEmpty()) {
             return annotationText
         }
-        return annotationText + " loc=${locText}"
+        return locText + ", " + annotationText
     }
 }

@@ -234,6 +234,7 @@ func CHIRKnownAttributes(): ArrayList<Attribute> {
     attrs.add(Attribute.STATIC)
     attrs.add(Attribute.SRC_CODE_IMPORTED)
     attrs.add(Attribute.THIN)
+    attrs.add(Attribute.VIRTUAL)
     return attrs
 }
 
@@ -264,6 +265,8 @@ func CHIRAttributeFromIndex(index: Int64): Attribute {
         case 22 => Attribute.READONLY
         case 23 => Attribute.STATIC
         case 24 => Attribute.SRC_CODE_IMPORTED
+        case 25 => Attribute.THIN
+        case 26 => Attribute.VIRTUAL
         case _ => Attribute.THIN
     }
 }

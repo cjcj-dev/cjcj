@@ -2,6 +2,8 @@ package cangjie_compiler::chir
 
 import std.collection.*
 
+private var gLambdaClonedIdx: UInt64 = 0u64
+
 public open class Expression <: Base {
     private let kind: ExprKind
     private let operands: ArrayList<Value> = ArrayList<Value>()
@@ -1548,8 +1550,21 @@ public class GetInstantiateValue <: Expression {
     }
 
     public override func Clone(builder: CHIRBuilder, parent: Block): Expression {
-        let cloned = builder.CreateGetInstantiateValue(RequiredResultType(this), GetGenericResult(),
-            GetInstantiateTypes(), parent)
+        let clonedTypes = if (GetGenericResult().IsLocalVar()) {
+            let sourceResult = GetResult() ?? throw IllegalArgumentException("GetInstantiateValue clone requires result")
+            let oldOutDefTypes = GetOutDefDeclaredTypesForValue(sourceResult)
+            let oldAllTypes = GetInstantiateTypes()
+            let newAllTypes = GetOutDefDeclaredTypesForValue(parent)
+            var idx = oldOutDefTypes.size
+            while (idx < oldAllTypes.size) {
+                newAllTypes.add(oldAllTypes[idx])
+                idx++
+            }
+            newAllTypes
+        } else {
+            GetInstantiateTypes()
+        }
+        let cloned = builder.CreateGetInstantiateValue(RequiredResultType(this), GetGenericResult(), clonedTypes, parent)
         return FinishExpressionClone(this, cloned)
     }
 }
@@ -1601,6 +1616,13 @@ public class ForInRange <: ForIn {
     public override func GetExecutionOrder(): ArrayList<BlockGroup> {
         return MakeForInExecutionOrder(GetCond(), GetBody(), GetLatch())
     }
+
+    public override func Clone(builder: CHIRBuilder, parent: Block): Expression {
+        let clonedGroups = CloneForInGroups(this, builder, parent)
+        let cloned = builder.CreateForInRange(RequiredResultType(this), GetInductionVar(), GetLoopCondVar(), parent)
+        cloned.InitBlockGroups(clonedGroups.body, clonedGroups.latch, clonedGroups.cond)
+        return FinishExpressionClone(this, cloned)
+    }
 }
 
 public class ForInIter <: ForIn {
@@ -1611,6 +1633,13 @@ public class ForInIter <: ForIn {
     public override func GetExecutionOrder(): ArrayList<BlockGroup> {
         return MakeForInExecutionOrder(GetLatch(), GetCond(), GetBody())
     }
+
+    public override func Clone(builder: CHIRBuilder, parent: Block): Expression {
+        let clonedGroups = CloneForInGroups(this, builder, parent)
+        let cloned = builder.CreateForInIter(RequiredResultType(this), GetInductionVar(), GetLoopCondVar(), parent)
+        cloned.InitBlockGroups(clonedGroups.body, clonedGroups.latch, clonedGroups.cond)
+        return FinishExpressionClone(this, cloned)
+    }
 }
 
 public class ForInClosedRange <: ForIn {
@@ -1620,6 +1649,14 @@ public class ForInClosedRange <: ForIn {
 
     public override func GetExecutionOrder(): ArrayList<BlockGroup> {
         return MakeForInExecutionOrder(GetBody(), GetCond(), GetLatch())
+    }
+
+    public override func Clone(builder: CHIRBuilder, parent: Block): Expression {
+        let clonedGroups = CloneForInGroups(this, builder, parent)
+        let cloned = builder.CreateForInClosedRange(RequiredResultType(this), GetInductionVar(), GetLoopCondVar(),
+            parent)
+        cloned.InitBlockGroups(clonedGroups.body, clonedGroups.latch, clonedGroups.cond)
+        return FinishExpressionClone(this, cloned)
     }
 }
 
@@ -1795,6 +1832,49 @@ public class Lambda <: Expression {
         }
         return JoinStrings(parts, ", ")
     }
+
+    public override func Clone(builder: CHIRBuilder, parent: Block): Expression {
+        let lambdaFuncTy = funcTy ?? throw IllegalArgumentException("lambda clone requires a function type")
+        let newIdentifier = identifier + "." + gLambdaClonedIdx.toString()
+        gLambdaClonedIdx++
+        let cloned = builder.CreateLambda(RequiredResultType(this), lambdaFuncTy, parent, isLocalFunc: IsLocalFunc(),
+            identifier: newIdentifier, srcCodeIdentifier: GetSrcCodeIdentifier(),
+            genericTypeParams: GetGenericTypeParams())
+        if (IsCompileTimeValue()) {
+            cloned.SetCompileTimeValue()
+        }
+        if (let Some(hostFunc) <- GetParamDftValHostFunc()) {
+            cloned.SetParamDftValHostFunc(hostFunc)
+        }
+        if (let Some(lambdaBody) <- body) {
+            let clonedBody = lambdaBody.Clone(builder, cloned)
+            for (param in GetParams()) {
+                if (let Some(paramTy) <- param.GetType()) {
+                    let clonedParam = builder.CreateParameter(paramTy, param.GetIdentifier(), cloned)
+                    clonedParam.CopyBaseInfoFrom(param)
+                    clonedParam.SetSrcCodeIdentifier(param.GetSrcCodeIdentifier())
+                }
+            }
+            if (let Some(clonedRet) <- FindRetValueInBlockGroup(clonedBody)) {
+                cloned.SetReturnValue(clonedRet)
+            } else if (GetReturnValue().isSome()) {
+                throw IllegalArgumentException("lambda clone could not find cloned return value")
+            }
+        }
+        return FinishExpressionClone(this, cloned)
+    }
+}
+
+private struct ForInClonedGroups {
+    public let body: BlockGroup
+    public let latch: BlockGroup
+    public let cond: BlockGroup
+
+    public init(body: BlockGroup, latch: BlockGroup, cond: BlockGroup) {
+        this.body = body
+        this.latch = latch
+        this.cond = cond
+    }
 }
 
 private func MakeUnaryOperands(operand: Value): ArrayList<Value> {
@@ -1851,6 +1931,183 @@ private func MakeForInExecutionOrder(first: BlockGroup, second: BlockGroup, thir
     groups.add(second)
     groups.add(third)
     return groups
+}
+
+private func CloneForInGroups(source: ForIn, builder: CHIRBuilder, parent: Block): ForInClonedGroups {
+    return ForInClonedGroups(
+        CloneBlockGroupForStructuredExpr(source.GetBody(), builder, parent),
+        CloneBlockGroupForStructuredExpr(source.GetLatch(), builder, parent),
+        CloneBlockGroupForStructuredExpr(source.GetCond(), builder, parent)
+    )
+}
+
+private func CloneBlockGroupForStructuredExpr(source: BlockGroup, builder: CHIRBuilder, parent: Block): BlockGroup {
+    if (let Some(parentGroup) <- parent.GetParentBlockGroup()) {
+        if (let Some(ownerFunc) <- parentGroup.GetOwnerFunc()) {
+            return source.Clone(builder, ownerFunc)
+        }
+        if (let Some(ownerExpr) <- parentGroup.GetOwnerExpression()) {
+            if (let Some(ownerLambda) <- (ownerExpr as Lambda)) {
+                return source.Clone(builder, ownerLambda)
+            }
+        }
+        if (let Some(topLevelFunc) <- parentGroup.GetTopLevelFunc()) {
+            return source.Clone(builder, topLevelFunc)
+        }
+    }
+    throw IllegalArgumentException("structured expression clone requires a function or lambda owner")
+}
+
+private func FindRetValueInBlockGroup(group: BlockGroup): Option<LocalVar> {
+    for (block in group.GetBlocks()) {
+        for (expr in block.GetExpressions()) {
+            if (let Some(result) <- expr.GetResult()) {
+                if (result.IsRetValue()) {
+                    return result
+                }
+            }
+        }
+    }
+    return None
+}
+
+private func GetOutDefDeclaredTypesForValue(innerDef: Value): ArrayList<Type> {
+    let visibleGenericTypes = GetVisibleGenericTypesForValue(innerDef)
+    let instArgs = ArrayList<Type>()
+    for (genericTy in visibleGenericTypes) {
+        instArgs.add(genericTy)
+    }
+    if (let Some(parentFunc) <- GetTopLevelFunctionForOutDef(innerDef)) {
+        if (let Some(parentDef) <- parentFunc.GetParentCustomTypeDef()) {
+            if (let Some(extendDef) <- (parentDef as ExtendDef)) {
+                let exGenericTypes = extendDef.GetGenericTypeParams()
+                var removeCount: Int64 = 0
+                while (removeCount < exGenericTypes.size && !instArgs.isEmpty()) {
+                    instArgs.remove(at: 0)
+                    removeCount++
+                }
+                if (let Some(extendedTy) <- extendDef.GetExtendedType()) {
+                    let exTypeArgs = extendedTy.GetTypeArgs()
+                    var insertIdx: Int64 = 0
+                    for (argTy in exTypeArgs) {
+                        instArgs.add(argTy, at: insertIdx)
+                        insertIdx++
+                    }
+                }
+            }
+        }
+    }
+    return instArgs
+}
+
+private func GetVisibleGenericTypesForValue(value: Value): ArrayList<GenericType> {
+    let result = ArrayList<GenericType>()
+    if (let Some(fn) <- value.AsFunction()) {
+        CollectVisibleGenericTypesFromFunction(fn, result)
+    } else if (let Some(block) <- value.AsBlock()) {
+        CollectVisibleGenericTypesFromBlock(block, result)
+    } else if (let Some(group) <- value.AsBlockGroup()) {
+        CollectVisibleGenericTypesFromBlockGroup(group, result)
+    } else if (let Some(param) <- value.AsParameter()) {
+        CollectVisibleGenericTypesFromParameter(param, result)
+    } else if (let Some(localVar) <- value.AsLocalVar()) {
+        CollectVisibleGenericTypesFromLocalVar(localVar, result)
+    }
+    return result
+}
+
+private func CollectVisibleGenericTypesFromFunction(fn: Function, result: ArrayList<GenericType>): Unit {
+    PrependGenericTypeParams(result, fn.GetGenericTypeParams())
+    if (let Some(parentDef) <- fn.GetParentCustomTypeDef()) {
+        PrependGenericTypeParams(result, parentDef.GetGenericTypeParams())
+    }
+}
+
+private func CollectVisibleGenericTypesFromLocalVar(value: LocalVar, result: ArrayList<GenericType>): Unit {
+    if (let Some(ownerExpr) <- value.GetExpr()) {
+        if (let Some(lambdaExpr) <- (ownerExpr as Lambda)) {
+            PrependGenericTypeParams(result, lambdaExpr.GetGenericTypeParams())
+        }
+        if (let Some(startGroup) <- ownerExpr.GetParentBlockGroup()) {
+            var currentGroup = startGroup
+            while (currentGroup.GetOwnerFunc().isNone()) {
+                if (let Some(ownedExpr) <- currentGroup.GetOwnerExpression()) {
+                    if (let Some(lambdaOwner) <- (ownedExpr as Lambda)) {
+                        PrependGenericTypeParams(result, lambdaOwner.GetGenericTypeParams())
+                        if (let Some(nextGroup) <- lambdaOwner.GetParentBlockGroup()) {
+                            currentGroup = nextGroup
+                        } else {
+                            return
+                        }
+                    } else if (let Some(nextGroup) <- ownedExpr.GetParentBlockGroup()) {
+                        currentGroup = nextGroup
+                    } else {
+                        return
+                    }
+                } else {
+                    return
+                }
+            }
+            if (let Some(ownerFunc) <- currentGroup.GetOwnerFunc()) {
+                CollectVisibleGenericTypesFromFunction(ownerFunc, result)
+            }
+        }
+    }
+}
+
+private func CollectVisibleGenericTypesFromParameter(value: Parameter, result: ArrayList<GenericType>): Unit {
+    if (let Some(topLevelFunc) <- value.GetTopLevelFunc()) {
+        CollectVisibleGenericTypesFromFunction(topLevelFunc, result)
+    } else if (let Some(ownerLambda) <- value.GetOwnerLambda()) {
+        if (let Some(lambdaResult) <- ownerLambda.GetResult()) {
+            CollectVisibleGenericTypesFromLocalVar(lambdaResult, result)
+        }
+    }
+}
+
+private func CollectVisibleGenericTypesFromBlockGroup(value: BlockGroup, result: ArrayList<GenericType>): Unit {
+    if (let Some(ownerFunc) <- value.GetOwnerFunc()) {
+        CollectVisibleGenericTypesFromFunction(ownerFunc, result)
+    } else if (let Some(ownerExpr) <- value.GetOwnerExpression()) {
+        if (let Some(parentLambda) <- (ownerExpr as Lambda)) {
+            if (let Some(lambdaResult) <- parentLambda.GetResult()) {
+                CollectVisibleGenericTypesFromLocalVar(lambdaResult, result)
+            }
+        }
+    }
+}
+
+private func CollectVisibleGenericTypesFromBlock(value: Block, result: ArrayList<GenericType>): Unit {
+    if (let Some(parentGroup) <- value.GetParentBlockGroup()) {
+        CollectVisibleGenericTypesFromBlockGroup(parentGroup, result)
+    }
+}
+
+private func GetTopLevelFunctionForOutDef(value: Value): Option<Function> {
+    if (let Some(fn) <- value.AsFunction()) {
+        return fn
+    }
+    if (let Some(param) <- value.AsParameter()) {
+        return param.GetTopLevelFunc()
+    }
+    if (let Some(localVar) <- value.AsLocalVar()) {
+        return localVar.GetTopLevelFunc()
+    }
+    if (let Some(block) <- value.AsBlock()) {
+        return block.GetTopLevelFunc()
+    }
+    if (let Some(group) <- value.AsBlockGroup()) {
+        return group.GetTopLevelFunc()
+    }
+    return None
+}
+
+private func PrependGenericTypeParams(result: ArrayList<GenericType>, params: ArrayList<GenericType>): Unit {
+    var insertIdx: Int64 = 0
+    for (param in params) {
+        result.add(param, at: insertIdx)
+        insertIdx++
+    }
 }
 
 private func ContainsParameter(values: ArrayList<Parameter>, param: Parameter): Bool {
