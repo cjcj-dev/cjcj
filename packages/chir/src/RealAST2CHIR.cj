@@ -28,10 +28,17 @@ import cangjie_compiler::ast.TokenKind as AstTokenKind
 import cangjie_compiler::ast.InterpolationExpr as AstInterpolationExpr
 import cangjie_compiler::ast.StringPartKind as AstStringPartKind
 import cangjie_compiler::ast.StructDecl as AstStructDecl
+import cangjie_compiler::ast.EnumDecl as AstEnumDecl
 import cangjie_compiler::ast.MemberAccess as AstMemberAccess
 import cangjie_compiler::ast.Attribute as AstAttribute
 import cangjie_compiler::ast.ImportKind as AstImportKind
 import cangjie_compiler::ast.ImportSpec as AstImportSpec
+import cangjie_compiler::ast.MatchExpr as AstMatchExpr
+import cangjie_compiler::ast.Pattern as AstPattern
+import cangjie_compiler::ast.WildcardPattern as AstWildcardPattern
+import cangjie_compiler::ast.VarOrEnumPattern as AstVarOrEnumPattern
+import cangjie_compiler::ast.VarPattern as AstVarPattern
+import cangjie_compiler::ast.EnumPattern as AstEnumPattern
 
 private let REAL_AST_RETURN_NONE: Int64 = 0
 private let REAL_AST_RETURN_INT: Int64 = 1
@@ -45,6 +52,10 @@ private let REAL_AST_TYPE_BOOL: String = "Bool"
 private let REAL_AST_TYPE_UNIT: String = "Unit"
 private let REAL_AST_TYPE_STRING: String = "String"
 private let REAL_AST_STRUCT_PREFIX: String = "struct:"
+private let REAL_AST_ENUM_PREFIX: String = "enum:"
+private let REAL_AST_MATCH_BODY_STMT: Int64 = 0
+private let REAL_AST_MATCH_BODY_RETURN: Int64 = 1
+private let REAL_AST_MATCH_BODY_ASSIGN: Int64 = 2
 
 private class RealASTFunctionInfo {
     let paramKinds: ArrayList<Int64> = ArrayList<Int64>()
@@ -66,6 +77,8 @@ private class RealASTFunctionInfo {
 private class RealASTPackageLoweringScope {
     let functions = HashMap<String, RealASTFunctionInfo>()
     let structs = HashMap<String, RealASTStructInfo>()
+    let enums = HashMap<String, RealASTEnumInfo>()
+    let enumCtors = HashMap<String, RealASTEnumCtorInfo>()
     let importedFunctions = ArrayList<RealASTImportedFunctionInfo>()
 
     func AddFunction(name: String, info: RealASTFunctionInfo): Bool {
@@ -96,6 +109,34 @@ private class RealASTPackageLoweringScope {
         return structs.contains(name)
     }
 
+    func AddEnum(info: RealASTEnumInfo): Bool {
+        if (info.name.isEmpty() || enums.contains(info.name)) {
+            return false
+        }
+        enums[info.name] = info
+        return true
+    }
+
+    func GetEnum(name: String): Option<RealASTEnumInfo> {
+        return enums.get(name)
+    }
+
+    func IsEnum(name: String): Bool {
+        return enums.contains(name)
+    }
+
+    func AddEnumCtor(info: RealASTEnumCtorInfo): Bool {
+        if (info.name.isEmpty() || enumCtors.contains(info.name)) {
+            return false
+        }
+        enumCtors[info.name] = info
+        return true
+    }
+
+    func GetEnumCtor(name: String): Option<RealASTEnumCtorInfo> {
+        return enumCtors.get(name)
+    }
+
     func AddImportedFunction(info: RealASTImportedFunctionInfo): Bool {
         if (info.localName.isEmpty() || functions.contains(info.localName)) {
             return false
@@ -103,6 +144,80 @@ private class RealASTPackageLoweringScope {
         functions[info.localName] = info.funcInfo
         importedFunctions.add(info)
         return true
+    }
+}
+
+private class RealASTEnumCtorInfo {
+    let name: String
+    let decl: AstDecl
+    let ownerName: String
+    let tag: Int64
+    let payloadTypes = ArrayList<String>()
+
+    init(name: String, decl: AstDecl, ownerName: String, tag: Int64) {
+        this.name = name
+        this.decl = decl
+        this.ownerName = ownerName
+        this.tag = tag
+    }
+
+    func AddPayload(typeKey: String): Unit {
+        payloadTypes.add(typeKey)
+    }
+}
+
+private class RealASTEnumInfo {
+    let name: String
+    let decl: AstEnumDecl
+    let ctors = HashMap<String, RealASTEnumCtorInfo>()
+    let ctorNames = ArrayList<String>()
+
+    init(name: String, decl: AstEnumDecl) {
+        this.name = name
+        this.decl = decl
+    }
+
+    func AddCtor(info: RealASTEnumCtorInfo): Bool {
+        if (info.name.isEmpty() || ctors.contains(info.name)) {
+            return false
+        }
+        ctors[info.name] = info
+        ctorNames.add(info.name)
+        return true
+    }
+
+    func GetCtor(name: String): Option<RealASTEnumCtorInfo> {
+        return ctors.get(name)
+    }
+}
+
+private class RealASTMatchPatternInfo {
+    let isWildcard: Bool
+    let tag: Int64
+    let bindNames = ArrayList<String>()
+    let bindTypes = ArrayList<String>()
+
+    init(isWildcard: Bool, tag: Int64) {
+        this.isWildcard = isWildcard
+        this.tag = tag
+    }
+
+    func AddBinding(name: String, typeKey: String): Bool {
+        if (name.isEmpty() || HasBinding(name)) {
+            return false
+        }
+        bindNames.add(name)
+        bindTypes.add(typeKey)
+        return true
+    }
+
+    private func HasBinding(name: String): Bool {
+        for (existing in bindNames) {
+            if (existing == name) {
+                return true
+            }
+        }
+        return false
     }
 }
 
@@ -413,7 +528,14 @@ private func BuildRealASTPackageSpec(pkg: AstPackage, context: CHIRContext,
         let fileName = if (file.filePath.isEmpty()) { file.fileName } else { file.filePath }
         spec.RegisterSourceFile(UInt32(file.begin.fileID), fileName)
         for (decl in file.decls) {
-            if (let Some(structDecl) <- (decl as AstStructDecl)) {
+            if (let Some(enumDecl) <- (decl as AstEnumDecl)) {
+                let enumSpec = match (BuildRealASTEnumSpec(pkg.fullPackageName, enumDecl, context, fileName,
+                    packageScope)) {
+                    case Some(value) => value
+                    case None => return None
+                }
+                spec.AddType(enumSpec)
+            } else if (let Some(structDecl) <- (decl as AstStructDecl)) {
                 let structSpec = match (BuildRealASTStructSpec(pkg.fullPackageName, structDecl, context, fileName,
                     packageScope)) {
                     case Some(value) => value
@@ -460,6 +582,28 @@ private func BuildRealASTPackageLoweringScope(pkg: AstPackage,
 
 private func BuildRealASTPackageLocalLoweringScope(pkg: AstPackage): Option<RealASTPackageLoweringScope> {
     let scope = RealASTPackageLoweringScope()
+    for (file in pkg.files) {
+        for (decl in file.decls) {
+            if (let Some(enumDecl) <- (decl as AstEnumDecl)) {
+                let info = match (AnalyzeRealASTEnumHeader(enumDecl)) {
+                    case Some(value) => value
+                    case None => return None
+                }
+                if (!scope.AddEnum(info)) {
+                    return None
+                }
+            }
+        }
+    }
+    for (file in pkg.files) {
+        for (decl in file.decls) {
+            if (let Some(enumDecl) <- (decl as AstEnumDecl)) {
+                if (!AnalyzeRealASTEnumConstructors(enumDecl, scope)) {
+                    return None
+                }
+            }
+        }
+    }
     for (file in pkg.files) {
         for (decl in file.decls) {
             if (let Some(structDecl) <- (decl as AstStructDecl)) {
@@ -677,6 +821,68 @@ private func RealASTNodeHasValueReturn(node: AstNode): Bool {
     return false
 }
 
+private func AnalyzeRealASTEnumHeader(enumDecl: AstEnumDecl): Option<RealASTEnumInfo> {
+    let name = enumDecl.identifier.Val()
+    if (name.isEmpty() || enumDecl.generic.isSome() || !enumDecl.inheritedTypes.isEmpty() ||
+        enumDecl.hasEllipsis || !enumDecl.members.isEmpty()) {
+        return None
+    }
+    return Some(RealASTEnumInfo(name, enumDecl))
+}
+
+private func AnalyzeRealASTEnumConstructors(enumDecl: AstEnumDecl,
+    packageScope: RealASTPackageLoweringScope): Bool {
+    let enumName = enumDecl.identifier.Val()
+    let info = match (packageScope.GetEnum(enumName)) {
+        case Some(value) => value
+        case None => return false
+    }
+    var tag: Int64 = 0
+    for (ctorDecl in enumDecl.constructors) {
+        let ctorName = ctorDecl.identifier.Val()
+        if (ctorName.isEmpty()) {
+            return false
+        }
+        let ctorInfo = RealASTEnumCtorInfo(ctorName, ctorDecl, enumName, tag)
+        if ((ctorDecl as AstVarDecl).isSome()) {
+            // Payload-less constructor.
+        } else if (let Some(funcCtor) <- (ctorDecl as AstFuncDecl)) {
+            let body = match (funcCtor.funcBody) {
+                case Some(value) => value
+                case None => return false
+            }
+            if (body.generic.isSome() || body.paramLists.size != 1 || body.retType.isSome()) {
+                return false
+            }
+            let paramList = body.paramLists[0]
+            if (paramList.hasVariableLenArg) {
+                return false
+            }
+            for (param in paramList.params) {
+                if (param.assignment.isSome()) {
+                    return false
+                }
+                let typeNode = match (param.typeNode) {
+                    case Some(value) => value
+                    case None => return false
+                }
+                let payloadType = match (RealASTValueTypeKey(typeNode, packageScope: Some(packageScope))) {
+                    case Some(value) => value
+                    case None => return false
+                }
+                ctorInfo.AddPayload(payloadType)
+            }
+        } else {
+            return false
+        }
+        if (!info.AddCtor(ctorInfo) || !packageScope.AddEnumCtor(ctorInfo)) {
+            return false
+        }
+        tag++
+    }
+    return !info.ctorNames.isEmpty()
+}
+
 private func AnalyzeRealASTStruct(structDecl: AstStructDecl,
     packageScope: RealASTPackageLoweringScope): Option<RealASTStructInfo> {
     let name = structDecl.identifier.Val()
@@ -805,6 +1011,38 @@ private func AnalyzeRealASTStructInit(info: RealASTStructInfo, body: AstFuncBody
         assigned.add(fieldName)
     }
     return assigned.size == info.fieldNames.size
+}
+
+private func BuildRealASTEnumSpec(packageName: String, enumDecl: AstEnumDecl, context: CHIRContext,
+    sourceFileKey: String, packageScope: RealASTPackageLoweringScope): Option<AST2CHIRNominalSpec> {
+    let info = match (packageScope.GetEnum(enumDecl.identifier.Val())) {
+        case Some(value) => value
+        case None => return None
+    }
+    let spec = AST2CHIRNominalSpec(AST2CHIRNominalKind.ENUM, info.name, packageName: packageName,
+        srcCodeIdentifier: info.name, rawMangledName: RealASTStableMangledName(packageName, enumDecl))
+    spec.SetSourceFileKey(sourceFileKey)
+    if (enumDecl.IsExportedDecl()) {
+        spec.AddAttribute(Attribute.PUBLIC)
+    } else {
+        spec.AddAttribute(Attribute.PRIVATE)
+    }
+    for (ctorName in info.ctorNames) {
+        let ctorInfo = match (info.GetCtor(ctorName)) {
+            case Some(value) => value
+            case None => return None
+        }
+        let payloadTys = ArrayList<Type>()
+        for (payloadType in ctorInfo.payloadTypes) {
+            let chirTy = match (RealASTCHIRTypeForKey(context, payloadType)) {
+                case Some(value) => value
+                case None => return None
+            }
+            payloadTys.add(chirTy)
+        }
+        spec.AddEnumCtor(AST2CHIREnumCtorSpec(ctorName, payloadTypes: payloadTys))
+    }
+    return Some(spec)
 }
 
 private func BuildRealASTStructSpec(packageName: String, structDecl: AstStructDecl, context: CHIRContext,
@@ -1075,6 +1313,26 @@ private func LowerRealASTBodyNode(
     if (let Some(jumpExpr) <- (node as AstJumpExpr)) {
         return LowerRealASTJump(jumpExpr, scope)
     }
+    if (let Some(matchExpr) <- (node as AstMatchExpr)) {
+        let matchType = match (RealASTMatchExprValueType(matchExpr, scope, packageScope)) {
+            case Some(value) => value
+            case None => REAL_AST_TYPE_UNIT
+        }
+        let selectorSpec = match (LowerRealASTMatchSelector(matchExpr, scope, packageScope)) {
+            case Some(value) => value
+            case None => return None
+        }
+        let mode = if (matchType == REAL_AST_TYPE_UNIT) {
+            REAL_AST_MATCH_BODY_STMT
+        } else {
+            REAL_AST_MATCH_BODY_RETURN
+        }
+        let cases = match (LowerRealASTMatchCases(matchExpr, scope, packageScope, mode)) {
+            case Some(value) => value
+            case None => return None
+        }
+        return Some(RealASTStmtAndType(AST2CHIRStmtSpec.Match(selectorSpec, cases), matchType))
+    }
     if (let Some(call) <- (node as AstCallExpr)) {
         if (let Some(printStmt) <- LowerRealASTPrint(call, scope, packageScope)) {
             return Some(printStmt)
@@ -1127,6 +1385,22 @@ private func LowerRealASTVarDecl(
         if (targetType != initType) {
             return None
         }
+    }
+    if (let Some(matchInit) <- (initExpr as AstMatchExpr)) {
+        let selectorSpec = match (LowerRealASTMatchSelector(matchInit, scope, packageScope)) {
+            case Some(value) => value
+            case None => return None
+        }
+        let cases = match (LowerRealASTMatchCases(matchInit, scope, packageScope,
+            REAL_AST_MATCH_BODY_ASSIGN, resultName: name)) {
+            case Some(value) => value
+            case None => return None
+        }
+        if (!scope.Add(name, varDecl.isVar, initType)) {
+            return None
+        }
+        return Some(RealASTStmtAndKind(AST2CHIRStmtSpec.MatchLet(name, initType, selectorSpec, cases,
+            isVar: varDecl.isVar), REAL_AST_RETURN_NONE))
     }
     let exprSpec = match (LowerRealASTExpr(initExpr, scope, packageScope)) {
         case Some(value) => value
@@ -1290,6 +1564,22 @@ private func LowerRealASTReturn(
     packageScope: RealASTPackageLoweringScope
 ): Option<RealASTStmtLowering> {
     if (let Some(expr) <- ret.expr) {
+        if (let Some(matchExpr) <- (expr as AstMatchExpr)) {
+            let matchType = match (RealASTMatchExprValueType(matchExpr, scope, packageScope)) {
+                case Some(value) => value
+                case None => return None
+            }
+            let selectorSpec = match (LowerRealASTMatchSelector(matchExpr, scope, packageScope)) {
+                case Some(value) => value
+                case None => return None
+            }
+            let cases = match (LowerRealASTMatchCases(matchExpr, scope, packageScope,
+                REAL_AST_MATCH_BODY_RETURN)) {
+                case Some(value) => value
+                case None => return None
+            }
+            return Some(RealASTStmtAndType(AST2CHIRStmtSpec.Match(selectorSpec, cases), matchType))
+        }
         if (let Some(lit) <- (expr as AstLitConstExpr)) {
             if (let Some(value) <- ParseRealASTIntLiteral(lit)) {
                 return Some(RealASTStmtAndKind(AST2CHIRStmtSpec.Return(AST2CHIRExprSpec.Literal(value)),
@@ -1504,6 +1794,11 @@ private func LowerRealASTExpr(
         if (!name.isEmpty() && scope.Contains(name)) {
             return Some(AST2CHIRExprSpec.Ref(name))
         }
+        if (let Some(ctorInfo) <- packageScope.GetEnumCtor(name)) {
+            if (ctorInfo.payloadTypes.isEmpty()) {
+                return Some(AST2CHIRExprSpec.EnumMake(ctorInfo.tag, ArrayList<AST2CHIRExprSpec>()))
+            }
+        }
         if (let Some(spec) <- LowerRealASTImplicitThisFieldRead(name, scope, packageScope)) {
             return Some(spec)
         }
@@ -1585,6 +1880,9 @@ private func LowerRealASTCall(
     if (packageScope.IsStruct(calleeName)) {
         return LowerRealASTStructConstruction(calleeName, call, scope, packageScope)
     }
+    if (let Some(ctorInfo) <- packageScope.GetEnumCtor(calleeName)) {
+        return LowerRealASTEnumConstruction(ctorInfo, call, scope, packageScope)
+    }
     let info = match (packageScope.GetFunction(calleeName)) {
         case Some(value) => value
         case None => return None
@@ -1621,6 +1919,39 @@ private func LowerRealASTCall(
         idx++
     }
     return Some(AST2CHIRExprSpec.Call(calleeName, argSpecs))
+}
+
+private func LowerRealASTEnumConstruction(ctorInfo: RealASTEnumCtorInfo, call: AstCallExpr,
+    scope: RealASTLoweringScope, packageScope: RealASTPackageLoweringScope): Option<AST2CHIRExprSpec> {
+    if (call.args.size != ctorInfo.payloadTypes.size) {
+        return None
+    }
+    let fields = ArrayList<AST2CHIRExprSpec>()
+    var idx: Int64 = 0
+    while (idx < call.args.size) {
+        let arg = call.args[idx]
+        if (!arg.name.Empty() || arg.withInout) {
+            return None
+        }
+        let argExpr = match (arg.expr) {
+            case Some(value) => value
+            case None => return None
+        }
+        let argType = match (RealASTExprValueType(argExpr, scope, packageScope)) {
+            case Some(value) => value
+            case None => return None
+        }
+        if (argType != ctorInfo.payloadTypes[idx]) {
+            return None
+        }
+        let argSpec = match (LowerRealASTExpr(argExpr, scope, packageScope)) {
+            case Some(value) => value
+            case None => return None
+        }
+        fields.add(argSpec)
+        idx++
+    }
+    return Some(AST2CHIRExprSpec.EnumMake(ctorInfo.tag, fields))
 }
 
 private func LowerRealASTStructConstruction(structName: String, call: AstCallExpr,
@@ -1839,6 +2170,11 @@ private func RealASTExprValueType(
         if (let Some(typeKey) <- scope.TypeKey(name)) {
             return Some(typeKey)
         }
+        if (let Some(ctorInfo) <- packageScope.GetEnumCtor(name)) {
+            if (ctorInfo.payloadTypes.isEmpty()) {
+                return Some(RealASTEnumTypeKey(ctorInfo.ownerName))
+            }
+        }
         if (!scope.thisStructName.isEmpty()) {
             if (let Some(structInfo) <- packageScope.GetStruct(scope.thisStructName)) {
                 return structInfo.FieldType(name)
@@ -1937,6 +2273,9 @@ private func RealASTExprValueType(
         }
         return None
     }
+    if (let Some(matchExpr) <- (expr as AstMatchExpr)) {
+        return RealASTMatchExprValueType(matchExpr, scope, packageScope)
+    }
     if (let Some(call) <- (expr as AstCallExpr)) {
         let base = match (call.baseFunc) {
             case Some(value) => value
@@ -2001,6 +2340,31 @@ private func RealASTExprValueType(
         if (calleeName.isEmpty() || scope.Contains(calleeName)) {
             return None
         }
+        if (let Some(ctorInfo) <- packageScope.GetEnumCtor(calleeName)) {
+            if (call.args.size != ctorInfo.payloadTypes.size) {
+                return None
+            }
+            var enumArgIndex: Int64 = 0
+            while (enumArgIndex < call.args.size) {
+                let arg = call.args[enumArgIndex]
+                if (!arg.name.Empty() || arg.withInout) {
+                    return None
+                }
+                let argExpr = match (arg.expr) {
+                    case Some(value) => value
+                    case None => return None
+                }
+                let argType = match (RealASTExprValueType(argExpr, scope, packageScope)) {
+                    case Some(value) => value
+                    case None => return None
+                }
+                if (argType != ctorInfo.payloadTypes[enumArgIndex]) {
+                    return None
+                }
+                enumArgIndex++
+            }
+            return Some(RealASTEnumTypeKey(ctorInfo.ownerName))
+        }
         if (packageScope.IsStruct(calleeName)) {
             let structInfo = match (packageScope.GetStruct(calleeName)) {
                 case Some(value) => value
@@ -2063,6 +2427,246 @@ private func RealASTExprValueType(
     return None
 }
 
+private func RealASTMatchExprValueType(matchExpr: AstMatchExpr, scope: RealASTLoweringScope,
+    packageScope: RealASTPackageLoweringScope): Option<String> {
+    let enumInfo = match (RealASTMatchEnumInfo(matchExpr, scope, packageScope)) {
+        case Some(value) => value
+        case None => return None
+    }
+    var resultType: Option<String> = None
+    let seenTags = HashSet<Int64>()
+    var hasWildcard = false
+    for (matchCase in matchExpr.matchCases) {
+        if (matchCase.patternGuard.isSome() || matchCase.patterns.size != 1) {
+            return None
+        }
+        let patternInfo = match (RealASTMatchPatternInfoFor(matchCase.patterns[0], enumInfo)) {
+            case Some(value) => value
+            case None => return None
+        }
+        if (patternInfo.isWildcard) {
+            hasWildcard = true
+        } else {
+            seenTags.add(patternInfo.tag)
+        }
+        let caseBlock = match (matchCase.exprOrDecls) {
+            case Some(value) => value
+            case None => return None
+        }
+        let caseExpr = match (RealASTSingleCaseExpr(caseBlock)) {
+            case Some(value) => value
+            case None => return None
+        }
+        let snapshot = scope.Save()
+        if (!RealASTAddMatchBindings(patternInfo, scope)) {
+            scope.Restore(snapshot)
+            return None
+        }
+        let caseType = match (RealASTExprValueType(caseExpr, scope, packageScope)) {
+            case Some(value) => value
+            case None =>
+                scope.Restore(snapshot)
+                return None
+        }
+        scope.Restore(snapshot)
+        resultType = match (resultType) {
+            case Some(existing) =>
+                if (existing != caseType) {
+                    return None
+                }
+                Some(existing)
+            case None => Some(caseType)
+        }
+    }
+    if (!hasWildcard && seenTags.size != enumInfo.ctorNames.size) {
+        return None
+    }
+    return resultType
+}
+
+private func LowerRealASTMatchSelector(matchExpr: AstMatchExpr, scope: RealASTLoweringScope,
+    packageScope: RealASTPackageLoweringScope): Option<AST2CHIRExprSpec> {
+    let selector = match (matchExpr.selector) {
+        case Some(value) => value
+        case None => return None
+    }
+    if (RealASTMatchEnumInfo(matchExpr, scope, packageScope).isNone()) {
+        return None
+    }
+    return LowerRealASTExpr(selector, scope, packageScope)
+}
+
+private func LowerRealASTMatchCases(
+    matchExpr: AstMatchExpr,
+    scope: RealASTLoweringScope,
+    packageScope: RealASTPackageLoweringScope,
+    mode: Int64,
+    resultName!: String = ""
+): Option<ArrayList<AST2CHIRMatchCaseSpec>> {
+    let enumInfo = match (RealASTMatchEnumInfo(matchExpr, scope, packageScope)) {
+        case Some(value) => value
+        case None => return None
+    }
+    let out = ArrayList<AST2CHIRMatchCaseSpec>()
+    let seenTags = HashSet<Int64>()
+    var hasWildcard = false
+    for (matchCase in matchExpr.matchCases) {
+        if (matchCase.patternGuard.isSome() || matchCase.patterns.size != 1) {
+            return None
+        }
+        let patternInfo = match (RealASTMatchPatternInfoFor(matchCase.patterns[0], enumInfo)) {
+            case Some(value) => value
+            case None => return None
+        }
+        if (patternInfo.isWildcard) {
+            hasWildcard = true
+        } else {
+            seenTags.add(patternInfo.tag)
+        }
+        let caseSpec = AST2CHIRMatchCaseSpec(patternInfo.tag, isWildcard: patternInfo.isWildcard)
+        var bindIndex: Int64 = 0
+        while (bindIndex < patternInfo.bindNames.size && bindIndex < patternInfo.bindTypes.size) {
+            caseSpec.AddBinding(patternInfo.bindNames[bindIndex], patternInfo.bindTypes[bindIndex])
+            bindIndex++
+        }
+        let caseBlock = match (matchCase.exprOrDecls) {
+            case Some(value) => value
+            case None => return None
+        }
+        let snapshot = scope.Save()
+        if (!RealASTAddMatchBindings(patternInfo, scope)) {
+            scope.Restore(snapshot)
+            return None
+        }
+        if (mode == REAL_AST_MATCH_BODY_RETURN || mode == REAL_AST_MATCH_BODY_ASSIGN) {
+            let caseExpr = match (RealASTSingleCaseExpr(caseBlock)) {
+                case Some(value) => value
+                case None =>
+                    scope.Restore(snapshot)
+                    return None
+            }
+            let exprSpec = match (LowerRealASTExpr(caseExpr, scope, packageScope)) {
+                case Some(value) => value
+                case None =>
+                    scope.Restore(snapshot)
+                    return None
+            }
+            if (mode == REAL_AST_MATCH_BODY_RETURN) {
+                caseSpec.AddBodyStatement(AST2CHIRStmtSpec.Return(exprSpec))
+            } else {
+                caseSpec.AddBodyStatement(AST2CHIRStmtSpec.Assign(resultName, exprSpec))
+            }
+        } else {
+            let caseLowering = match (LowerRealASTBlock(caseBlock, scope, packageScope)) {
+                case Some(value) => value
+                case None =>
+                    scope.Restore(snapshot)
+                    return None
+            }
+            for (stmt in caseLowering.stmts) {
+                caseSpec.AddBodyStatement(stmt)
+            }
+        }
+        scope.Restore(snapshot)
+        out.add(caseSpec)
+    }
+    if (!hasWildcard && seenTags.size != enumInfo.ctorNames.size) {
+        return None
+    }
+    return Some(out)
+}
+
+private func RealASTMatchEnumInfo(matchExpr: AstMatchExpr, scope: RealASTLoweringScope,
+    packageScope: RealASTPackageLoweringScope): Option<RealASTEnumInfo> {
+    if (!matchExpr.matchMode || !matchExpr.matchCaseOthers.isEmpty()) {
+        return None
+    }
+    let selector = match (matchExpr.selector) {
+        case Some(value) => value
+        case None => return None
+    }
+    let selectorType = match (RealASTExprValueType(selector, scope, packageScope)) {
+        case Some(value) => value
+        case None => return None
+    }
+    let enumName = match (RealASTEnumNameFromTypeKey(selectorType)) {
+        case Some(value) => value
+        case None => return None
+    }
+    return packageScope.GetEnum(enumName)
+}
+
+private func RealASTMatchPatternInfoFor(pattern: AstPattern,
+    enumInfo: RealASTEnumInfo): Option<RealASTMatchPatternInfo> {
+    if ((pattern as AstWildcardPattern).isSome()) {
+        return Some(RealASTMatchPatternInfo(true, -1))
+    }
+    if (let Some(varOrEnum) <- (pattern as AstVarOrEnumPattern)) {
+        let ctorInfo = match (enumInfo.GetCtor(varOrEnum.identifier.Val())) {
+            case Some(value) => value
+            case None => return None
+        }
+        if (!ctorInfo.payloadTypes.isEmpty()) {
+            return None
+        }
+        return Some(RealASTMatchPatternInfo(false, ctorInfo.tag))
+    }
+    if (let Some(enumPattern) <- (pattern as AstEnumPattern)) {
+        let ctorInfo = match (enumInfo.GetCtor(enumPattern.GetIdentifier())) {
+            case Some(value) => value
+            case None => return None
+        }
+        if (enumPattern.patterns.size != ctorInfo.payloadTypes.size) {
+            return None
+        }
+        let out = RealASTMatchPatternInfo(false, ctorInfo.tag)
+        var idx: Int64 = 0
+        while (idx < enumPattern.patterns.size) {
+            if (!RealASTPayloadPatternInfo(enumPattern.patterns[idx], ctorInfo.payloadTypes[idx], out)) {
+                return None
+            }
+            idx++
+        }
+        return Some(out)
+    }
+    return None
+}
+
+private func RealASTPayloadPatternInfo(pattern: AstPattern, typeKey: String,
+    out: RealASTMatchPatternInfo): Bool {
+    if ((pattern as AstWildcardPattern).isSome()) {
+        return true
+    }
+    if (let Some(varOrEnum) <- (pattern as AstVarOrEnumPattern)) {
+        return out.AddBinding(varOrEnum.identifier.Val(), typeKey)
+    }
+    if (let Some(varPattern) <- (pattern as AstVarPattern)) {
+        if (let Some(decl) <- varPattern.varDecl) {
+            return out.AddBinding(decl.identifier.Val(), typeKey)
+        }
+    }
+    return false
+}
+
+private func RealASTAddMatchBindings(patternInfo: RealASTMatchPatternInfo,
+    scope: RealASTLoweringScope): Bool {
+    var idx: Int64 = 0
+    while (idx < patternInfo.bindNames.size && idx < patternInfo.bindTypes.size) {
+        if (!scope.Add(patternInfo.bindNames[idx], false, patternInfo.bindTypes[idx])) {
+            return false
+        }
+        idx++
+    }
+    return true
+}
+
+private func RealASTSingleCaseExpr(block: AstBlock): Option<AstExpr> {
+    if (block.body.size != 1) {
+        return None
+    }
+    return block.body[0] as AstExpr
+}
+
 private func RealASTIsArithmeticOp(op: AstTokenKind): Bool {
     return op == AstTokenKind.ADD || op == AstTokenKind.SUB || op == AstTokenKind.MUL ||
         op == AstTokenKind.DIV || op == AstTokenKind.MOD
@@ -2112,7 +2716,8 @@ private func RealASTReturnType(
         }
     }
     if (lowered.returnType == REAL_AST_TYPE_INT || lowered.returnType == REAL_AST_TYPE_BOOL ||
-        lowered.returnType == REAL_AST_TYPE_STRING || RealASTIsStructTypeKey(lowered.returnType)) {
+        lowered.returnType == REAL_AST_TYPE_STRING || RealASTIsStructTypeKey(lowered.returnType) ||
+        RealASTIsEnumTypeKey(lowered.returnType)) {
         return None
     }
     return Some(context.GetUnitTy())
@@ -2159,6 +2764,9 @@ private func RealASTValueTypeKey(ty: AstType, packageScope!: Option<RealASTPacka
         if (scope.IsStruct(name)) {
             return Some(RealASTStructTypeKey(name))
         }
+        if (scope.IsEnum(name)) {
+            return Some(RealASTEnumTypeKey(name))
+        }
     }
     return None
 }
@@ -2177,7 +2785,7 @@ private func RealASTPrimitiveFieldTypeKey(ty: AstType): Option<String> {
 }
 
 private func RealASTCHIRTypeForKey(context: CHIRContext, typeKey: String): Option<Type> {
-    if (typeKey == REAL_AST_TYPE_INT || RealASTIsStructTypeKey(typeKey)) {
+    if (typeKey == REAL_AST_TYPE_INT || RealASTIsStructTypeKey(typeKey) || RealASTIsEnumTypeKey(typeKey)) {
         return Some(context.GetInt64Ty())
     }
     if (typeKey == REAL_AST_TYPE_BOOL) {
@@ -2209,7 +2817,7 @@ private func RealASTTypeKeyFromKind(kind: Int64): String {
 }
 
 private func RealASTKindFromTypeKey(typeKey: String): Int64 {
-    if (typeKey == REAL_AST_TYPE_INT || RealASTIsStructTypeKey(typeKey)) {
+    if (typeKey == REAL_AST_TYPE_INT || RealASTIsStructTypeKey(typeKey) || RealASTIsEnumTypeKey(typeKey)) {
         return REAL_AST_RETURN_INT
     }
     if (typeKey == REAL_AST_TYPE_BOOL) {
@@ -2237,6 +2845,21 @@ private func RealASTStructNameFromTypeKey(typeKey: String): Option<String> {
         return None
     }
     return Some(typeKey[REAL_AST_STRUCT_PREFIX.size..typeKey.size])
+}
+
+private func RealASTEnumTypeKey(name: String): String {
+    return REAL_AST_ENUM_PREFIX + name
+}
+
+private func RealASTIsEnumTypeKey(typeKey: String): Bool {
+    return typeKey.startsWith(REAL_AST_ENUM_PREFIX)
+}
+
+private func RealASTEnumNameFromTypeKey(typeKey: String): Option<String> {
+    if (!RealASTIsEnumTypeKey(typeKey)) {
+        return None
+    }
+    return Some(typeKey[REAL_AST_ENUM_PREFIX.size..typeKey.size])
 }
 
 private func RealASTFieldNameFromThisTarget(expr: AstExpr): Option<String> {

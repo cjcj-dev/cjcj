@@ -73,6 +73,82 @@ private class RealPipelineStructInfo {
     }
 }
 
+private class RealPipelineEnumCtorInfo {
+    let name: String
+    let decl: Decl
+    let ownerName: String
+    let tag: Int64
+    let payloadTypes: ArrayList<Ty> = ArrayList<Ty>()
+
+    init(name: String, decl: Decl, ownerName: String, tag: Int64) {
+        this.name = name
+        this.decl = decl
+        this.ownerName = ownerName
+        this.tag = tag
+    }
+
+    func AddPayload(ty: Ty): Unit {
+        payloadTypes.add(ty)
+    }
+}
+
+private class RealPipelineEnumInfo {
+    let name: String
+    let decl: EnumDecl
+    let ty: Ty
+    let ctors: HashMap<String, RealPipelineEnumCtorInfo> = HashMap<String, RealPipelineEnumCtorInfo>()
+    let ctorNames: ArrayList<String> = ArrayList<String>()
+
+    init(name: String, decl: EnumDecl, ty: Ty) {
+        this.name = name
+        this.decl = decl
+        this.ty = ty
+    }
+
+    func AddCtor(ctor: RealPipelineEnumCtorInfo): Bool {
+        if (ctor.name.isEmpty() || ctors.contains(ctor.name)) {
+            return false
+        }
+        ctors[ctor.name] = ctor
+        ctorNames.add(ctor.name)
+        return true
+    }
+
+    func Ctor(name: String): Option<RealPipelineEnumCtorInfo> {
+        return ctors.get(name)
+    }
+}
+
+private class RealPipelineMatchPatternInfo {
+    let isWildcard: Bool
+    let tag: Int64
+    let bindNames: ArrayList<String> = ArrayList<String>()
+    let bindTypes: ArrayList<Ty> = ArrayList<Ty>()
+
+    init(isWildcard: Bool, tag: Int64) {
+        this.isWildcard = isWildcard
+        this.tag = tag
+    }
+
+    func AddBinding(name: String, ty: Ty): Bool {
+        if (name.isEmpty() || containsBinding(name)) {
+            return false
+        }
+        bindNames.add(name)
+        bindTypes.add(ty)
+        return true
+    }
+
+    private func containsBinding(name: String): Bool {
+        for (existing in bindNames) {
+            if (existing == name) {
+                return true
+            }
+        }
+        return false
+    }
+}
+
 private class RealPipelineScopeSnapshot {
     let locals: HashMap<String, RealPipelineLocalInfo> = HashMap<String, RealPipelineLocalInfo>()
     let loopDepth: Int64
@@ -152,6 +228,9 @@ public class TypeChecker {
     private let realPipelinePackageUnsupportedFunctions: HashMap<String, HashSet<String>> =
         HashMap<String, HashSet<String>>()
     private let realPipelineStructs: HashMap<String, RealPipelineStructInfo> = HashMap<String, RealPipelineStructInfo>()
+    private let realPipelineEnums: HashMap<String, RealPipelineEnumInfo> = HashMap<String, RealPipelineEnumInfo>()
+    private let realPipelineEnumCtors: HashMap<String, RealPipelineEnumCtorInfo> =
+        HashMap<String, RealPipelineEnumCtorInfo>()
     private var realPipelineUnsupported: Bool = false
 
     public init(ci: Option<CompilerInstance>) {
@@ -165,12 +244,17 @@ public class TypeChecker {
         realPipelineDiagnostics.clear()
         realPipelineTypedFunctions.clear()
         realPipelineStructs.clear()
+        realPipelineEnums.clear()
+        realPipelineEnumCtors.clear()
         realPipelinePackageFunctionDecls.clear()
         realPipelinePackageFunctionTypes.clear()
         realPipelinePackageUnsupportedFunctions.clear()
         realPipelineUnsupported = false
         for (pkg in pkgs) {
             preparePackageTypes(pkg)
+        }
+        for (pkg in pkgs) {
+            prepareRealPipelineEnumTable(pkg)
         }
         for (pkg in pkgs) {
             prepareRealPipelineStructTable(pkg)
@@ -292,6 +376,96 @@ public class TypeChecker {
                 synthesizeDeclType(decl)
             }
         }
+    }
+
+    private func prepareRealPipelineEnumTable(pkg: Package): Unit {
+        for (file in pkg.files) {
+            for (decl in file.decls) {
+                if (let Some(enumDecl) <- (decl as EnumDecl)) {
+                    let name = enumDecl.identifier.Val()
+                    if (name.isEmpty() || enumDecl.generic.isSome() || !enumDecl.inheritedTypes.isEmpty() ||
+                        enumDecl.hasEllipsis || !enumDecl.members.isEmpty() || realPipelineEnums.contains(name)) {
+                        markRealPipelineUnsupported()
+                        continue
+                    }
+                    let enumTy = tm.GetEnumTy(enumDecl, typeArgs: Array<Ty>())
+                    enumDecl.SetTy(enumTy)
+                    realPipelineEnums[name] = RealPipelineEnumInfo(name, enumDecl, enumTy)
+                }
+            }
+        }
+        for (file in pkg.files) {
+            for (decl in file.decls) {
+                if (let Some(enumDecl) <- (decl as EnumDecl)) {
+                    if (!prepareRealPipelineEnumConstructors(enumDecl)) {
+                        markRealPipelineUnsupported()
+                    }
+                }
+            }
+        }
+    }
+
+    private func prepareRealPipelineEnumConstructors(enumDecl: EnumDecl): Bool {
+        let enumName = enumDecl.identifier.Val()
+        let info = match (realPipelineEnums.get(enumName)) {
+            case Some(value) => value
+            case None => return false
+        }
+        var tag: Int64 = 0
+        for (ctorDecl in enumDecl.constructors) {
+            let ctorName = ctorDecl.identifier.Val()
+            if (ctorName.isEmpty() || realPipelineEnumCtors.contains(ctorName)) {
+                return false
+            }
+            let ctorInfo = RealPipelineEnumCtorInfo(ctorName, ctorDecl, enumName, tag)
+            if (let Some(varCtor) <- (ctorDecl as VarDecl)) {
+                varCtor.SetTy(info.ty)
+            } else if (let Some(funcCtor) <- (ctorDecl as FuncDecl)) {
+                let body = match (funcCtor.funcBody) {
+                    case Some(value) => value
+                    case None => return false
+                }
+                if (body.generic.isSome() || body.paramLists.size != 1 || body.retType.isSome()) {
+                    return false
+                }
+                let paramList = body.paramLists[0]
+                if (paramList.hasVariableLenArg) {
+                    return false
+                }
+                let paramTys = ArrayList<Ty>()
+                for (param in paramList.params) {
+                    if (param.assignment.isSome()) {
+                        return false
+                    }
+                    let typeNode = match (param.typeNode) {
+                        case Some(value) => value
+                        case None => return false
+                    }
+                    let payloadTy = match (resolveRealPipelineLocalType(typeNode)) {
+                        case Some(value) => value
+                        case None => return false
+                    }
+                    if (!isRealPipelineValueTy(payloadTy)) {
+                        return false
+                    }
+                    param.SetTy(payloadTy)
+                    typeNode.SetTy(payloadTy)
+                    paramTys.add(payloadTy)
+                    ctorInfo.AddPayload(payloadTy)
+                }
+                let ctorTy = tm.GetFunctionTy(paramTys.toArray(), info.ty)
+                body.SetTy(ctorTy)
+                funcCtor.SetTy(ctorTy)
+            } else {
+                return false
+            }
+            if (!info.AddCtor(ctorInfo)) {
+                return false
+            }
+            realPipelineEnumCtors[ctorName] = ctorInfo
+            tag++
+        }
+        return !info.ctorNames.isEmpty()
     }
 
     private func prepareRealPipelineStructTable(pkg: Package): Unit {
@@ -612,6 +786,13 @@ public class TypeChecker {
         }
         if (let Some(structDecl) <- (decl as StructDecl)) {
             checkRealPipelineStructDecl(structDecl)
+            return
+        }
+        if (let Some(enumDecl) <- (decl as EnumDecl)) {
+            if (realPipelineEnums.contains(enumDecl.identifier.Val())) {
+                return
+            }
+            markRealPipelineUnsupported()
             return
         }
         markRealPipelineUnsupported()
@@ -943,6 +1124,9 @@ public class TypeChecker {
         if (let Some(whileExpr) <- (node as WhileExpr)) {
             return checkRealPipelineWhile(whileExpr, body, retTy, scope)
         }
+        if (let Some(matchExpr) <- (node as MatchExpr)) {
+            return checkRealPipelineMatchStmt(matchExpr, body, retTy, scope)
+        }
         if (let Some(jumpExpr) <- (node as JumpExpr)) {
             return [checkRealPipelineJump(jumpExpr, scope), false]
         }
@@ -1036,6 +1220,88 @@ public class TypeChecker {
         }
         whileExpr.SetTy(TypeManager.GetPrimitiveTy(TypeKind.TYPE_UNIT))
         return [true, false]
+    }
+
+    private func checkRealPipelineMatchStmt(
+        matchExpr: MatchExpr,
+        body: FuncBody,
+        retTy: Ty,
+        scope: RealPipelineScope
+    ): Array<Bool> {
+        if (retTy.kind != TypeKind.TYPE_UNIT) {
+            let matchTy = match (typeRealPipelineMatchExpr(matchExpr, scope, Some(retTy))) {
+                case Some(value) => value
+                case None => return [false, false]
+            }
+            if (!isRealPipelineAssignable(retTy, matchTy)) {
+                emitRealPipelineTypeError(matchExpr.begin,
+                    matchTy.String() + " match expression is not assignable to " + retTy.String() +
+                    " return type")
+                matchExpr.SetTy(TypeManager.GetInvalidTy())
+                return [true, false]
+            }
+            return [true, true]
+        }
+        let selector = match (matchExpr.selector) {
+            case Some(value) => value
+            case None => return [false, false]
+        }
+        if (!matchExpr.matchMode || !matchExpr.matchCaseOthers.isEmpty()) {
+            return [false, false]
+        }
+        let selectorTy = match (typeRealPipelineExpr(selector, scope, None)) {
+            case Some(value) => value
+            case None => return [false, false]
+        }
+        let enumInfo = match (realPipelineEnumInfoForTy(selectorTy)) {
+            case Some(value) => value
+            case None =>
+                emitRealPipelineTypeError(selector.begin, "match selector must be an enum, got " + selectorTy.String())
+                matchExpr.SetTy(TypeManager.GetInvalidTy())
+                return [true, false]
+        }
+        var allCasesReturn = true
+        let seenTags = HashSet<Int64>()
+        var hasWildcard = false
+        for (matchCase in matchExpr.matchCases) {
+            if (matchCase.patternGuard.isSome() || matchCase.patterns.size != 1) {
+                return [false, false]
+            }
+            let patternInfo = match (typeRealPipelineEnumPattern(matchCase.patterns[0], enumInfo, selectorTy)) {
+                case Some(value) => value
+                case None => return [false, false]
+            }
+            if (patternInfo.isWildcard) {
+                hasWildcard = true
+            } else {
+                seenTags.add(patternInfo.tag)
+            }
+            let caseBlock = match (matchCase.exprOrDecls) {
+                case Some(value) => value
+                case None => return [false, false]
+            }
+            let snapshot = scope.Save()
+            if (!addRealPipelinePatternBindings(patternInfo, scope, matchCase.begin)) {
+                scope.Restore(snapshot)
+                return [true, false]
+            }
+            let caseStatus = checkRealPipelineBlock(caseBlock, body, retTy, scope)
+            scope.Restore(snapshot)
+            if (!caseStatus[0]) {
+                return [false, false]
+            }
+            allCasesReturn = allCasesReturn && caseStatus[1]
+        }
+        if (!hasWildcard && seenTags.size != enumInfo.ctorNames.size) {
+            emitRealPipelineTypeError(matchExpr.begin, "match on enum '" + enumInfo.name +
+                "' must cover all variants or include '_'")
+            matchExpr.SetTy(TypeManager.GetInvalidTy())
+            return [true, false]
+        }
+        matchExpr.SetTy(if (allCasesReturn) { TypeManager.GetNothingTy() } else {
+            TypeManager.GetPrimitiveTy(TypeKind.TYPE_UNIT)
+        })
+        return [true, allCasesReturn]
     }
 
     private func checkRealPipelineJump(jumpExpr: JumpExpr, scope: RealPipelineScope): Bool {
@@ -1346,6 +1612,11 @@ public class TypeChecker {
                         refExpr.SetTy(fieldTy)
                         return Some(fieldTy)
                     }
+                    if (let Some(ctorInfo) <- realPipelinePayloadlessEnumCtor(name)) {
+                        refExpr.ref.target = Some(ctorInfo.decl)
+                        refExpr.SetTy(realPipelineEnumTypeForCtor(ctorInfo))
+                        return Some(realPipelineEnumTypeForCtor(ctorInfo))
+                    }
                     emitRealPipelineTypeError(refExpr.begin, "undeclared local '" + name + "'")
                     refExpr.SetTy(TypeManager.GetInvalidTy())
                     return Some(TypeManager.GetInvalidTy())
@@ -1364,6 +1635,9 @@ public class TypeChecker {
         }
         if (let Some(callExpr) <- (expr as CallExpr)) {
             return typeRealPipelineCallExpr(callExpr, scope)
+        }
+        if (let Some(matchExpr) <- (expr as MatchExpr)) {
+            return typeRealPipelineMatchExpr(matchExpr, scope, targetTy)
         }
         return None
     }
@@ -1510,6 +1784,9 @@ public class TypeChecker {
         if (calleeName.isEmpty() || scope.Contains(calleeName)) {
             return None
         }
+        if (let Some(ctorInfo) <- realPipelineEnumCtors.get(calleeName)) {
+            return typeRealPipelineEnumConstruction(callExpr, calleeRef, ctorInfo, scope)
+        }
         if (let Some(structInfo) <- realPipelineStructs.get(calleeName)) {
             return typeRealPipelineStructConstruction(callExpr, calleeRef, structInfo, scope)
         }
@@ -1570,6 +1847,241 @@ public class TypeChecker {
         calleeRef.SetTy(funcTy)
         callExpr.SetTy(funcTy.retTy)
         return Some(funcTy.retTy)
+    }
+
+    private func typeRealPipelineMatchExpr(
+        matchExpr: MatchExpr,
+        scope: RealPipelineScope,
+        targetTy: Option<Ty>
+    ): Option<Ty> {
+        if (!matchExpr.matchMode || !matchExpr.matchCaseOthers.isEmpty()) {
+            return None
+        }
+        let selector = match (matchExpr.selector) {
+            case Some(value) => value
+            case None => return None
+        }
+        let selectorTy = match (typeRealPipelineExpr(selector, scope, None)) {
+            case Some(value) => value
+            case None => return None
+        }
+        let enumInfo = match (realPipelineEnumInfoForTy(selectorTy)) {
+            case Some(value) => value
+            case None =>
+                emitRealPipelineTypeError(selector.begin, "match selector must be an enum, got " + selectorTy.String())
+                matchExpr.SetTy(TypeManager.GetInvalidTy())
+                return Some(TypeManager.GetInvalidTy())
+        }
+        var resultTy: Option<Ty> = None
+        let seenTags = HashSet<Int64>()
+        var hasWildcard = false
+        for (matchCase in matchExpr.matchCases) {
+            if (matchCase.patternGuard.isSome() || matchCase.patterns.size != 1) {
+                return None
+            }
+            let patternInfo = match (typeRealPipelineEnumPattern(matchCase.patterns[0], enumInfo, selectorTy)) {
+                case Some(value) => value
+                case None => return None
+            }
+            if (patternInfo.isWildcard) {
+                hasWildcard = true
+            } else {
+                seenTags.add(patternInfo.tag)
+            }
+            let caseBlock = match (matchCase.exprOrDecls) {
+                case Some(value) => value
+                case None => return None
+            }
+            let caseExpr = match (realPipelineSingleCaseExpr(caseBlock)) {
+                case Some(value) => value
+                case None => return None
+            }
+            let snapshot = scope.Save()
+            if (!addRealPipelinePatternBindings(patternInfo, scope, matchCase.begin)) {
+                scope.Restore(snapshot)
+                matchExpr.SetTy(TypeManager.GetInvalidTy())
+                return Some(TypeManager.GetInvalidTy())
+            }
+            let expectedTy: Option<Ty> = match (resultTy) {
+                case Some(value) => Some(value)
+                case None => targetTy
+            }
+            let caseTy = match (typeRealPipelineExpr(caseExpr, scope, expectedTy)) {
+                case Some(value) => value
+                case None =>
+                    scope.Restore(snapshot)
+                    return None
+            }
+            scope.Restore(snapshot)
+            resultTy = match (resultTy) {
+                case Some(existing) =>
+                    if (!isRealPipelineAssignable(existing, caseTy) || !isRealPipelineAssignable(caseTy, existing)) {
+                        emitRealPipelineTypeError(caseExpr.begin,
+                            "match case type " + caseTy.String() + " does not match " + existing.String())
+                        matchExpr.SetTy(TypeManager.GetInvalidTy())
+                        return Some(TypeManager.GetInvalidTy())
+                    }
+                    Some(existing)
+                case None => Some(caseTy)
+            }
+        }
+        if (!hasWildcard && seenTags.size != enumInfo.ctorNames.size) {
+            emitRealPipelineTypeError(matchExpr.begin, "match on enum '" + enumInfo.name +
+                "' must cover all variants or include '_'")
+            matchExpr.SetTy(TypeManager.GetInvalidTy())
+            return Some(TypeManager.GetInvalidTy())
+        }
+        let finalTy = match (resultTy) {
+            case Some(value) => value
+            case None => TypeManager.GetPrimitiveTy(TypeKind.TYPE_UNIT)
+        }
+        matchExpr.SetTy(finalTy)
+        return Some(finalTy)
+    }
+
+    private func realPipelineSingleCaseExpr(block: Block): Option<Expr> {
+        if (block.body.size != 1) {
+            return None
+        }
+        return block.body[0] as Expr
+    }
+
+    private func typeRealPipelineEnumPattern(
+        pattern: Pattern,
+        enumInfo: RealPipelineEnumInfo,
+        selectorTy: Ty
+    ): Option<RealPipelineMatchPatternInfo> {
+        if (let Some(wildcard) <- (pattern as WildcardPattern)) {
+            wildcard.SetTy(selectorTy)
+            return Some(RealPipelineMatchPatternInfo(true, -1))
+        }
+        if (let Some(varOrEnum) <- (pattern as VarOrEnumPattern)) {
+            let ctorName = varOrEnum.identifier.Val()
+            let ctorInfo = match (enumInfo.Ctor(ctorName)) {
+                case Some(value) => value
+                case None => return None
+            }
+            if (!ctorInfo.payloadTypes.isEmpty()) {
+                return None
+            }
+            varOrEnum.SetTy(selectorTy)
+            return Some(RealPipelineMatchPatternInfo(false, ctorInfo.tag))
+        }
+        if (let Some(enumPattern) <- (pattern as EnumPattern)) {
+            let ctorName = enumPattern.GetIdentifier()
+            let ctorInfo = match (enumInfo.Ctor(ctorName)) {
+                case Some(value) => value
+                case None => return None
+            }
+            if (enumPattern.patterns.size != ctorInfo.payloadTypes.size) {
+                emitRealPipelineTypeError(enumPattern.begin,
+                    "enum pattern '" + ctorName + "' expects " + ctorInfo.payloadTypes.size.toString() +
+                    " payload binding(s), got " + enumPattern.patterns.size.toString())
+                enumPattern.SetTy(TypeManager.GetInvalidTy())
+                return Some(RealPipelineMatchPatternInfo(false, ctorInfo.tag))
+            }
+            if (let Some(constructor) <- enumPattern.constructor) {
+                constructor.SetTy(selectorTy)
+                if (let Some(refExpr) <- (constructor as RefExpr)) {
+                    refExpr.ref.target = Some(ctorInfo.decl)
+                } else if (let Some(member) <- (constructor as MemberAccess)) {
+                    member.target = Some(ctorInfo.decl)
+                    member.targets.add(ctorInfo.decl)
+                }
+            }
+            enumPattern.SetTy(selectorTy)
+            let out = RealPipelineMatchPatternInfo(false, ctorInfo.tag)
+            var idx: Int64 = 0
+            while (idx < enumPattern.patterns.size) {
+                if (!typeRealPipelinePayloadPattern(enumPattern.patterns[idx], ctorInfo.payloadTypes[idx], out)) {
+                    return None
+                }
+                idx++
+            }
+            return Some(out)
+        }
+        return None
+    }
+
+    private func typeRealPipelinePayloadPattern(
+        pattern: Pattern,
+        payloadTy: Ty,
+        out: RealPipelineMatchPatternInfo
+    ): Bool {
+        if (let Some(wildcard) <- (pattern as WildcardPattern)) {
+            wildcard.SetTy(payloadTy)
+            return true
+        }
+        if (let Some(varOrEnum) <- (pattern as VarOrEnumPattern)) {
+            varOrEnum.SetTy(payloadTy)
+            return out.AddBinding(varOrEnum.identifier.Val(), payloadTy)
+        }
+        if (let Some(varPattern) <- (pattern as VarPattern)) {
+            varPattern.SetTy(payloadTy)
+            if (let Some(decl) <- varPattern.varDecl) {
+                decl.SetTy(payloadTy)
+                return out.AddBinding(decl.identifier.Val(), payloadTy)
+            }
+        }
+        return false
+    }
+
+    private func addRealPipelinePatternBindings(
+        patternInfo: RealPipelineMatchPatternInfo,
+        scope: RealPipelineScope,
+        position: Position
+    ): Bool {
+        var idx: Int64 = 0
+        while (idx < patternInfo.bindNames.size && idx < patternInfo.bindTypes.size) {
+            let bindName = patternInfo.bindNames[idx]
+            let bindTy = patternInfo.bindTypes[idx]
+            if (!scope.Add(bindName, bindTy, false)) {
+                emitRealPipelineTypeError(position, "duplicate local binding '" + bindName + "'")
+                return false
+            }
+            idx++
+        }
+        return true
+    }
+
+    private func typeRealPipelineEnumConstruction(callExpr: CallExpr, calleeRef: RefExpr,
+        ctorInfo: RealPipelineEnumCtorInfo, scope: RealPipelineScope): Option<Ty> {
+        if (callExpr.args.size != ctorInfo.payloadTypes.size) {
+            emitRealPipelineTypeError(callExpr.begin,
+                "enum constructor '" + ctorInfo.name + "' expects " + ctorInfo.payloadTypes.size.toString() +
+                " argument(s), got " + callExpr.args.size.toString())
+            callExpr.SetTy(TypeManager.GetInvalidTy())
+            return Some(TypeManager.GetInvalidTy())
+        }
+        var idx: Int64 = 0
+        while (idx < callExpr.args.size) {
+            let arg = callExpr.args[idx]
+            if (!arg.name.Empty() || arg.withInout) {
+                return None
+            }
+            let argExpr = match (arg.expr) {
+                case Some(value) => value
+                case None => return None
+            }
+            let payloadTy = ctorInfo.payloadTypes[idx]
+            let argTy = match (typeRealPipelineExpr(argExpr, scope, Some(payloadTy))) {
+                case Some(value) => value
+                case None => return None
+            }
+            if (!isRealPipelineAssignable(payloadTy, argTy)) {
+                emitRealPipelineTypeError(argExpr.begin,
+                    argTy.String() + " argument is not assignable to " + payloadTy.String() +
+                    " payload " + idx.toString() + " of enum constructor '" + ctorInfo.name + "'")
+                callExpr.SetTy(TypeManager.GetInvalidTy())
+                return Some(TypeManager.GetInvalidTy())
+            }
+            idx++
+        }
+        let enumTy = realPipelineEnumTypeForCtor(ctorInfo)
+        calleeRef.ref.target = Some(ctorInfo.decl)
+        calleeRef.SetTy(enumTy)
+        callExpr.SetTy(enumTy)
+        return Some(enumTy)
     }
 
     private func typeRealPipelineStructConstruction(callExpr: CallExpr, calleeRef: RefExpr,
@@ -1809,7 +2321,7 @@ public class TypeChecker {
 
     private func isRealPipelineValueTy(ty: Ty): Bool {
         return isRealPipelineInt64Ty(ty) || isRealPipelineBoolTy(ty) || isRealPipelineStringTy(ty) ||
-            isRealPipelineStructTy(ty)
+            isRealPipelineStructTy(ty) || isRealPipelineEnumTy(ty)
     }
 
     private func isRealPipelineLocalTy(ty: Ty): Bool {
@@ -1840,9 +2352,17 @@ public class TypeChecker {
         return !ty.HasInvalidTy() && ty.kind == TypeKind.TYPE_STRUCT
     }
 
+    private func isRealPipelineEnumTy(ty: Ty): Bool {
+        return !ty.HasInvalidTy() && ty.kind == TypeKind.TYPE_ENUM
+    }
+
     private func isRealPipelineAssignable(targetTy: Ty, exprTy: Ty): Bool {
         if (exprTy.HasInvalidTy() || targetTy.HasInvalidTy()) {
             return false
+        }
+        if (isRealPipelineEnumTy(targetTy) || isRealPipelineEnumTy(exprTy)) {
+            return isRealPipelineEnumTy(targetTy) && isRealPipelineEnumTy(exprTy) &&
+                targetTy.String() == exprTy.String()
         }
         if (isRealPipelineStructTy(targetTy) || isRealPipelineStructTy(exprTy)) {
             return isRealPipelineStructTy(targetTy) && isRealPipelineStructTy(exprTy) &&
@@ -1911,6 +2431,10 @@ public class TypeChecker {
             typeNode.SetTy(info.ty)
             return Some(info.ty)
         }
+        if (let Some(info) <- realPipelineEnums.get(text)) {
+            typeNode.SetTy(info.ty)
+            return Some(info.ty)
+        }
         return None
     }
 
@@ -1940,6 +2464,34 @@ public class TypeChecker {
             }
         }
         return None
+    }
+
+    private func realPipelineEnumInfoForTy(ty: Ty): Option<RealPipelineEnumInfo> {
+        if (!isRealPipelineEnumTy(ty)) {
+            return None
+        }
+        for ((_, info) in realPipelineEnums) {
+            if (info.ty.String() == ty.String()) {
+                return Some(info)
+            }
+        }
+        return None
+    }
+
+    private func realPipelinePayloadlessEnumCtor(name: String): Option<RealPipelineEnumCtorInfo> {
+        if (let Some(ctorInfo) <- realPipelineEnumCtors.get(name)) {
+            if (ctorInfo.payloadTypes.isEmpty()) {
+                return Some(ctorInfo)
+            }
+        }
+        return None
+    }
+
+    private func realPipelineEnumTypeForCtor(ctorInfo: RealPipelineEnumCtorInfo): Ty {
+        if (let Some(info) <- realPipelineEnums.get(ctorInfo.ownerName)) {
+            return info.ty
+        }
+        return TypeManager.GetInvalidTy()
     }
 
     private func realPipelineImplicitFieldType(name: String, scope: RealPipelineScope): Option<Ty> {

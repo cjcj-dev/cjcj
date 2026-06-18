@@ -221,6 +221,10 @@ extend AST2CHIRDeclTranslator {
             LowerStructSetField(stmt, state)
             return
         }
+        if (stmt.IsMatch() || stmt.IsMatchLet()) {
+            LowerMatch(fn, stmt, state)
+            return
+        }
         if (stmt.IsExprStmt()) {
             // An expression statement: evaluate for side effects, discard the result. Used for a bare
             // method-call statement (e.g. `c.inc()`) that mutates through `this` and returns Unit.
@@ -575,6 +579,99 @@ extend AST2CHIRDeclTranslator {
         builder.CreateStore(CastStructCarrierToInt64(value, state), elemPtr, state.current)
     }
 
+    private func LowerMatch(fn: Function, stmt: AST2CHIRStmtSpec, state: RealBodyState): Unit {
+        if (stmt.matchCases.isEmpty()) {
+            return
+        }
+        let selectorValue = match (EvalExpr(stmt.expr, state)) {
+            case Some(v) => v
+            case None => return
+        }
+        if (stmt.IsMatchLet()) {
+            let resultTy = RealBodyTypeFromTypeKey(stmt.arrayVarName)
+            let resultSlot = AllocateSlot(resultTy, state.current)
+            state.locals[stmt.name] = resultSlot
+            state.localTypes[stmt.name] = resultTy
+        }
+        let tagValue = LoadEnumSlot(selectorValue, 0, state)
+        let caseBlocks = ArrayList<Block>()
+        var wildcardBlock: Option<Block> = None
+        var caseIndex: Int64 = 0
+        while (caseIndex < stmt.matchCases.size) {
+            let caseBlock = builder.CreateBlock("match.case", state.body)
+            caseBlocks.add(caseBlock)
+            if (stmt.matchCases[caseIndex].isWildcard && wildcardBlock.isNone()) {
+                wildcardBlock = Some(caseBlock)
+            }
+            caseIndex++
+        }
+        let defaultBlock = match (wildcardBlock) {
+            case Some(block) => block
+            case None => caseBlocks[0]
+        }
+        let caseVals = ArrayList<UInt64>()
+        let normalBlocks = ArrayList<Block>()
+        var switchIndex: Int64 = 0
+        while (switchIndex < stmt.matchCases.size) {
+            let caseSpec = stmt.matchCases[switchIndex]
+            if (!caseSpec.isWildcard) {
+                caseVals.add(UInt64(caseSpec.tag))
+                normalBlocks.add(caseBlocks[switchIndex])
+            }
+            switchIndex++
+        }
+        builder.CreateMultiBranch(tagValue, defaultBlock, caseVals, normalBlocks, state.current)
+
+        var joinBlock: Option<Block> = None
+        var allCasesTerminated = true
+        var lowerIndex: Int64 = 0
+        while (lowerIndex < stmt.matchCases.size) {
+            state.current = caseBlocks[lowerIndex]
+            state.terminated = false
+            let snapshot = SaveLocalScope(state)
+            BindMatchPayloads(selectorValue, stmt.matchCases[lowerIndex], state)
+            LowerStatements(fn, stmt.matchCases[lowerIndex].body, state)
+            RestoreLocalScope(state, snapshot)
+            if (!state.terminated) {
+                allCasesTerminated = false
+                let currentJoin = match (joinBlock) {
+                    case Some(block) => block
+                    case None =>
+                        let newJoin = builder.CreateBlock("match.join", state.body)
+                        joinBlock = Some(newJoin)
+                        newJoin
+                }
+                builder.CreateGoTo(currentJoin, state.current)
+            }
+            lowerIndex++
+        }
+        if (let Some(block) <- joinBlock) {
+            state.current = block
+            state.terminated = false
+        } else {
+            state.current = caseBlocks[0]
+            state.terminated = allCasesTerminated
+        }
+    }
+
+    private func BindMatchPayloads(selectorValue: Value, caseSpec: AST2CHIRMatchCaseSpec,
+        state: RealBodyState): Unit {
+        var bindIndex: Int64 = 0
+        while (bindIndex < caseSpec.bindNames.size && bindIndex < caseSpec.bindTypes.size) {
+            let bindName = caseSpec.bindNames[bindIndex]
+            if (!bindName.isEmpty()) {
+                let rawValue = LoadEnumSlot(selectorValue, bindIndex + 1, state)
+                let bindTy = RealBodyTypeFromTypeKey(caseSpec.bindTypes[bindIndex])
+                let bindValue = CastInt64CarrierToType(rawValue, bindTy, state)
+                let bindSlot = AllocateSlot(bindTy, state.current)
+                builder.CreateStore(bindValue, bindSlot, state.current)
+                state.locals[bindName] = bindSlot
+                state.localTypes[bindName] = bindTy
+            }
+            bindIndex++
+        }
+    }
+
     // Element-ref pointer (Ref<Int64>) into a VArray slot at a compile-time-constant index.
     private func ArrayElementPtr(slot: Value, idx: Int64, state: RealBodyState): Value {
         let int64Ty = builder.context.GetInt64Ty()
@@ -788,14 +885,18 @@ extend AST2CHIRDeclTranslator {
     // to: reinterpret the Int64 as a CPointer<Int64> (a TypeCast Int64 -> CPointer, codegen inttoptr),
     // GEP to the slot, Load the Int64.
     private func EvalEnumField(expr: AST2CHIRExprSpec, state: RealBodyState): Option<Value> {
-        let int64Ty = builder.context.GetInt64Ty()
         let enumValue = match (EvalExpr(expr.lhs, state)) {
             case Some(v) => v
             case None => return None
         }
+        return Some(LoadEnumSlot(enumValue, expr.literalValue, state))
+    }
+
+    private func LoadEnumSlot(enumValue: Value, index: Int64, state: RealBodyState): Value {
+        let int64Ty = builder.context.GetInt64Ty()
         let cptrTy = builder.context.GetCPointerTy(int64Ty)
         let basePtr = builder.CreateTypeCast(cptrTy, enumValue, state.current).GetResult().getOrThrow()
-        let idxValue = builder.CreateConstant(int64Ty, IntLiteral(expr.literalValue), state.current)
+        let idxValue = builder.CreateConstant(int64Ty, IntLiteral(index), state.current)
             .GetResult().getOrThrow()
         // A CPointer<Int64> base GEPs directly with a single index (element type Int64), so the slot
         // pointer is &base[index]. No leading aggregate-zero index (unlike a VArray-Ref base).
@@ -805,7 +906,7 @@ extend AST2CHIRDeclTranslator {
         let elemPtr = builder.CreateDynamicElementRef(refTy, basePtr, indices, state.current)
             .GetResult().getOrThrow()
         let load = builder.CreateLoad(int64Ty, elemPtr, state.current)
-        return AsValue(load.GetResult())
+        return load.GetResult().getOrThrow()
     }
 
     private func EvalStructField(expr: AST2CHIRExprSpec, state: RealBodyState): Option<Value> {
@@ -869,6 +970,28 @@ extend AST2CHIRDeclTranslator {
             }
         }
         return builder.CreateTypeCast(targetTy, value, state.current).GetResult().getOrThrow()
+    }
+
+    private func CastInt64CarrierToType(value: Value, targetTy: Type, state: RealBodyState): Value {
+        if (let Some(valueTy) <- value.GetType()) {
+            if (valueTy.IsEqual(targetTy)) {
+                return value
+            }
+        }
+        return builder.CreateTypeCast(targetTy, value, state.current).GetResult().getOrThrow()
+    }
+
+    private func RealBodyTypeFromTypeKey(typeKey: String): Type {
+        if (typeKey == "Bool") {
+            return builder.context.GetBoolTy()
+        }
+        if (typeKey == "String" || typeKey == "CString") {
+            return builder.context.GetCStringTy()
+        }
+        if (typeKey == "Unit") {
+            return builder.context.GetUnitTy()
+        }
+        return builder.context.GetInt64Ty()
     }
 
     // Upcast a node's Option<LocalVar> result to Option<Value> (LocalVar <: Value).

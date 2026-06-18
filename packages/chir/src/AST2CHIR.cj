@@ -312,6 +312,36 @@ let AST2CHIR_STMT_DO_WHILE: Int64 = 15
 // COMPOUND_ASSIGN: local `name <op>= expr`, where `op` stores the already-mapped CHIR binary op
 // (`ADD`, `SUB`, `AND`, `OR`, ...). Lowered as load-current, compute compound value, store back.
 let AST2CHIR_STMT_COMPOUND_ASSIGN: Int64 = 16
+// MATCH: tag-dispatch on an enum-buffer value. `expr` carries the selector expression; `matchCases`
+// carries constructor tags, payload binding slots, and lowered case bodies. MATCH_LET is the
+// value-producing form used for `let x = match (...) { ... }`: `name` is the result local and
+// `arrayVarName` carries its value type key.
+let AST2CHIR_STMT_MATCH: Int64 = 17
+let AST2CHIR_STMT_MATCH_LET: Int64 = 18
+
+public class AST2CHIRMatchCaseSpec {
+    public let tag: Int64
+    public let isWildcard: Bool
+    public let bindNames: ArrayList<String> = ArrayList<String>()
+    public let bindTypes: ArrayList<String> = ArrayList<String>()
+    public let body: ArrayList<AST2CHIRStmtSpec> = ArrayList<AST2CHIRStmtSpec>()
+
+    public init(tag: Int64, isWildcard!: Bool = false) {
+        this.tag = tag
+        this.isWildcard = isWildcard
+    }
+
+    public func AddBinding(name: String, typeKey: String): AST2CHIRMatchCaseSpec {
+        bindNames.add(name)
+        bindTypes.add(typeKey)
+        return this
+    }
+
+    public func AddBodyStatement(stmt: AST2CHIRStmtSpec): AST2CHIRMatchCaseSpec {
+        body.add(stmt)
+        return this
+    }
+}
 
 public class AST2CHIRStmtSpec {
     public let kind: Int64
@@ -327,6 +357,7 @@ public class AST2CHIRStmtSpec {
     public let arrayElems: ArrayList<AST2CHIRExprSpec> = ArrayList<AST2CHIRExprSpec>()
     public var arrayVarName: String = ""
     public var op: ExprKind = ExprKind.ADD
+    public let matchCases: ArrayList<AST2CHIRMatchCaseSpec> = ArrayList<AST2CHIRMatchCaseSpec>()
 
     private init(kind: Int64, name: String, isVar: Bool, expr: Option<AST2CHIRExprSpec>,
         cond: Option<AST2CHIRExprSpec>, thenBody: ArrayList<AST2CHIRStmtSpec>,
@@ -357,6 +388,8 @@ public class AST2CHIRStmtSpec {
     public func IsExprStmt(): Bool { return kind == AST2CHIR_STMT_EXPR }
     public func IsDoWhile(): Bool { return kind == AST2CHIR_STMT_DO_WHILE }
     public func IsCompoundAssign(): Bool { return kind == AST2CHIR_STMT_COMPOUND_ASSIGN }
+    public func IsMatch(): Bool { return kind == AST2CHIR_STMT_MATCH }
+    public func IsMatchLet(): Bool { return kind == AST2CHIR_STMT_MATCH_LET }
 
     public static func ExprStmt(expr: AST2CHIRExprSpec): AST2CHIRStmtSpec {
         return AST2CHIRStmtSpec(AST2CHIR_STMT_EXPR, "", false, Some(expr), None,
@@ -377,6 +410,27 @@ public class AST2CHIRStmtSpec {
         let stmt = AST2CHIRStmtSpec(AST2CHIR_STMT_COMPOUND_ASSIGN, name, false, Some(expr), None,
             ArrayList<AST2CHIRStmtSpec>(), ArrayList<AST2CHIRStmtSpec>())
         stmt.op = op
+        return stmt
+    }
+
+    public static func Match(selector: AST2CHIRExprSpec,
+        cases: ArrayList<AST2CHIRMatchCaseSpec>): AST2CHIRStmtSpec {
+        let stmt = AST2CHIRStmtSpec(AST2CHIR_STMT_MATCH, "", false, Some(selector), None,
+            ArrayList<AST2CHIRStmtSpec>(), ArrayList<AST2CHIRStmtSpec>())
+        for (caseSpec in cases) {
+            stmt.matchCases.add(caseSpec)
+        }
+        return stmt
+    }
+
+    public static func MatchLet(name: String, typeKey: String, selector: AST2CHIRExprSpec,
+        cases: ArrayList<AST2CHIRMatchCaseSpec>, isVar!: Bool = false): AST2CHIRStmtSpec {
+        let stmt = AST2CHIRStmtSpec(AST2CHIR_STMT_MATCH_LET, name, isVar, Some(selector), None,
+            ArrayList<AST2CHIRStmtSpec>(), ArrayList<AST2CHIRStmtSpec>())
+        stmt.arrayVarName = typeKey
+        for (caseSpec in cases) {
+            stmt.matchCases.add(caseSpec)
+        }
         return stmt
     }
 
