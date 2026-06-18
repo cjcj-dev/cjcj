@@ -2,6 +2,8 @@ package cangjie_compiler::chir
 
 import std.collection.*
 
+private var gLambdaClonedIdx: UInt64 = 0u64
+
 public open class Expression <: Base {
     private let kind: ExprKind
     private let operands: ArrayList<Value> = ArrayList<Value>()
@@ -1601,6 +1603,13 @@ public class ForInRange <: ForIn {
     public override func GetExecutionOrder(): ArrayList<BlockGroup> {
         return MakeForInExecutionOrder(GetCond(), GetBody(), GetLatch())
     }
+
+    public override func Clone(builder: CHIRBuilder, parent: Block): Expression {
+        let clonedGroups = CloneForInGroups(this, builder, parent)
+        let cloned = builder.CreateForInRange(RequiredResultType(this), GetInductionVar(), GetLoopCondVar(), parent)
+        cloned.InitBlockGroups(clonedGroups.body, clonedGroups.latch, clonedGroups.cond)
+        return FinishExpressionClone(this, cloned)
+    }
 }
 
 public class ForInIter <: ForIn {
@@ -1611,6 +1620,13 @@ public class ForInIter <: ForIn {
     public override func GetExecutionOrder(): ArrayList<BlockGroup> {
         return MakeForInExecutionOrder(GetLatch(), GetCond(), GetBody())
     }
+
+    public override func Clone(builder: CHIRBuilder, parent: Block): Expression {
+        let clonedGroups = CloneForInGroups(this, builder, parent)
+        let cloned = builder.CreateForInIter(RequiredResultType(this), GetInductionVar(), GetLoopCondVar(), parent)
+        cloned.InitBlockGroups(clonedGroups.body, clonedGroups.latch, clonedGroups.cond)
+        return FinishExpressionClone(this, cloned)
+    }
 }
 
 public class ForInClosedRange <: ForIn {
@@ -1620,6 +1636,14 @@ public class ForInClosedRange <: ForIn {
 
     public override func GetExecutionOrder(): ArrayList<BlockGroup> {
         return MakeForInExecutionOrder(GetBody(), GetCond(), GetLatch())
+    }
+
+    public override func Clone(builder: CHIRBuilder, parent: Block): Expression {
+        let clonedGroups = CloneForInGroups(this, builder, parent)
+        let cloned = builder.CreateForInClosedRange(RequiredResultType(this), GetInductionVar(), GetLoopCondVar(),
+            parent)
+        cloned.InitBlockGroups(clonedGroups.body, clonedGroups.latch, clonedGroups.cond)
+        return FinishExpressionClone(this, cloned)
     }
 }
 
@@ -1795,6 +1819,49 @@ public class Lambda <: Expression {
         }
         return JoinStrings(parts, ", ")
     }
+
+    public override func Clone(builder: CHIRBuilder, parent: Block): Expression {
+        let lambdaFuncTy = funcTy ?? throw IllegalArgumentException("lambda clone requires a function type")
+        let newIdentifier = identifier + "." + gLambdaClonedIdx.toString()
+        gLambdaClonedIdx++
+        let cloned = builder.CreateLambda(RequiredResultType(this), lambdaFuncTy, parent, isLocalFunc: IsLocalFunc(),
+            identifier: newIdentifier, srcCodeIdentifier: GetSrcCodeIdentifier(),
+            genericTypeParams: GetGenericTypeParams())
+        if (IsCompileTimeValue()) {
+            cloned.SetCompileTimeValue()
+        }
+        if (let Some(hostFunc) <- GetParamDftValHostFunc()) {
+            cloned.SetParamDftValHostFunc(hostFunc)
+        }
+        if (let Some(lambdaBody) <- body) {
+            let clonedBody = lambdaBody.Clone(builder, cloned)
+            for (param in GetParams()) {
+                if (let Some(paramTy) <- param.GetType()) {
+                    let clonedParam = builder.CreateParameter(paramTy, param.GetIdentifier(), cloned)
+                    clonedParam.CopyBaseInfoFrom(param)
+                    clonedParam.SetSrcCodeIdentifier(param.GetSrcCodeIdentifier())
+                }
+            }
+            if (let Some(clonedRet) <- FindRetValueInBlockGroup(clonedBody)) {
+                cloned.SetReturnValue(clonedRet)
+            } else if (GetReturnValue().isSome()) {
+                throw IllegalArgumentException("lambda clone could not find cloned return value")
+            }
+        }
+        return FinishExpressionClone(this, cloned)
+    }
+}
+
+private struct ForInClonedGroups {
+    public let body: BlockGroup
+    public let latch: BlockGroup
+    public let cond: BlockGroup
+
+    public init(body: BlockGroup, latch: BlockGroup, cond: BlockGroup) {
+        this.body = body
+        this.latch = latch
+        this.cond = cond
+    }
 }
 
 private func MakeUnaryOperands(operand: Value): ArrayList<Value> {
@@ -1851,6 +1918,44 @@ private func MakeForInExecutionOrder(first: BlockGroup, second: BlockGroup, thir
     groups.add(second)
     groups.add(third)
     return groups
+}
+
+private func CloneForInGroups(source: ForIn, builder: CHIRBuilder, parent: Block): ForInClonedGroups {
+    return ForInClonedGroups(
+        CloneBlockGroupForStructuredExpr(source.GetBody(), builder, parent),
+        CloneBlockGroupForStructuredExpr(source.GetLatch(), builder, parent),
+        CloneBlockGroupForStructuredExpr(source.GetCond(), builder, parent)
+    )
+}
+
+private func CloneBlockGroupForStructuredExpr(source: BlockGroup, builder: CHIRBuilder, parent: Block): BlockGroup {
+    if (let Some(parentGroup) <- parent.GetParentBlockGroup()) {
+        if (let Some(ownerFunc) <- parentGroup.GetOwnerFunc()) {
+            return source.Clone(builder, ownerFunc)
+        }
+        if (let Some(ownerExpr) <- parentGroup.GetOwnerExpression()) {
+            if (let Some(ownerLambda) <- (ownerExpr as Lambda)) {
+                return source.Clone(builder, ownerLambda)
+            }
+        }
+        if (let Some(topLevelFunc) <- parentGroup.GetTopLevelFunc()) {
+            return source.Clone(builder, topLevelFunc)
+        }
+    }
+    throw IllegalArgumentException("structured expression clone requires a function or lambda owner")
+}
+
+private func FindRetValueInBlockGroup(group: BlockGroup): Option<LocalVar> {
+    for (block in group.GetBlocks()) {
+        for (expr in block.GetExpressions()) {
+            if (let Some(result) <- expr.GetResult()) {
+                if (result.IsRetValue()) {
+                    return result
+                }
+            }
+        }
+    }
+    return None
 }
 
 private func ContainsParameter(values: ArrayList<Parameter>, param: Parameter): Bool {

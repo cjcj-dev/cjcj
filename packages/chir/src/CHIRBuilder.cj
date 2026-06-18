@@ -59,6 +59,10 @@ public class CHIRBuilder {
         return group
     }
 
+    public func CreateBlockGroup(fn: Function): BlockGroup {
+        return CreateBlockGroup(fn.GenerateBlockGroupId().toString())
+    }
+
     public func CreateBlock(identifier: String, parentGroup: Option<BlockGroup>): Block {
         let block = Block(identifier, parentGroup)
         context.RegisterValue(block)

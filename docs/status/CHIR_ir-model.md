@@ -1,6 +1,6 @@
 # CHIR IR-Model Deepening Status
 
-Date: 2026-06-17
+Date: 2026-06-18
 
 Build: `cjpm build` passes.
 
@@ -17,6 +17,16 @@ Reference inspected:
 
 Implemented in this pass:
 
+- Added C++ `DebugLocation.h`-style `Position`, invalid location/name constants, absolute-path/file-name storage,
+  begin/end position accessors, macro/normal invalid-position checks, scope-info copy accessors, C++-style
+  `ToString()`/`Dump()`, and equality semantics while preserving the existing serialized `fileId/line/column/length`
+  compatibility fields used by current CHIR serializers and analyses.
+- Aligned `BaseCommentToString()` with the C++ behavior now that debug locations render their own `loc:` prefix.
+- Added function-owned block-group creation, `Block.Clone`, `BlockGroup.Clone` for function and lambda owners, deep
+  block cloning with base/exception/result metadata preservation, and successor retargeting through a cloned block map.
+- Added C++-style structured clone overrides for `ForInRange`, `ForInIter`, `ForInClosedRange`, and `Lambda`, including
+  cloned body/latch/condition groups, lambda clone identifier suffixing, compile-time/local/default-host metadata
+  preservation, parameter recreation, and return-value rediscovery in the cloned body.
 - Split nominal definition subclasses into C++-named files: `StructDef.cj`, `ClassDef.cj`, `EnumDef.cj`,
   and `ExtendDef.cj`, leaving shared container logic in `CustomTypeDef.cj`.
 - Added `CustomDefKind`, `SourceExpr`, richer `MemberVarInfo`, static member vars, direct/all instance-var APIs,
@@ -64,9 +74,11 @@ De-isolation:
 
 Known remaining gaps:
 
-- Structured `Lambda` and `ForIn*` clone paths still need faithful deep block-group cloning with C++ owner handling and
-  lambda identifier regeneration. `GetInstantiateValue.Clone` currently preserves instantiated types; it does not yet
-  implement the C++ inlining-aware outer-definition type substitution path.
+- `GetInstantiateValue.Clone` currently preserves instantiated types; it does not yet implement the C++ inlining-aware
+  outer-definition type substitution path.
+- The new structured clone path mirrors C++ block/group ownership and successor retargeting, but still shares operand
+  values exactly as the existing expression clone layer does; full local-value remapping would need a broader inliner
+  and substitution pass audit.
 - Interpreter/codegen-specific intrinsic tables outside `IntrinsicKind.h`, such as AST FFI and concrete-width atomic
   lowering maps, still need downstream porting outside this IR node/type model slice.
 - Full C++ generic constraint solving, vtable search/update, inheritance traversal through extends, and precise
@@ -78,4 +90,4 @@ Known remaining gaps:
 
 Remaining `TODO(selfhost:CHIR)` markers in `packages/chir/src`: 0.
 
-Estimated real behavior coverage for this IR-model scope: 64%.
+Estimated real behavior coverage for this IR-model scope: 69%.
