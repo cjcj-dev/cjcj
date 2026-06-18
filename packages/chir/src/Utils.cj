@@ -295,3 +295,74 @@ public func ContainsValue(values: ArrayList<Value>, value: Value): Bool {
     }
     return false
 }
+
+public func IsApplyToLambda(expr: Expression): Option<Lambda> {
+    if (expr.GetExprKind() != ExprKind.APPLY && expr.GetExprKind() != ExprKind.APPLY_WITH_EXCEPTION) {
+        return None
+    }
+    if (expr.GetNumOfOperands() == 0) {
+        return None
+    }
+    if (let Some(callee) <- expr.GetOperand(0).AsLocalVar()) {
+        if (let Some(calleeExpr) <- callee.GetExpr()) {
+            return calleeExpr as Lambda
+        }
+    }
+    return None
+}
+
+public func GetLambdaCapturedVarsRecursively(lambda: Lambda): ArrayList<Value> {
+    let capturedVars = ArrayList<Value>()
+    let visitedLambdaIds = ArrayList<Int64>()
+    CollectLambdaCapturedVarsRecursively(lambda, capturedVars, visitedLambdaIds)
+    return capturedVars
+}
+
+private func CollectLambdaCapturedVarsRecursively(lambda: Lambda, capturedVars: ArrayList<Value>,
+    visitedLambdaIds: ArrayList<Int64>): Unit {
+    if (ContainsInt64(visitedLambdaIds, lambda.nodeId)) {
+        return
+    }
+    visitedLambdaIds.add(lambda.nodeId)
+    if (let Some(lambdaBody) <- lambda.GetBody()) {
+        VisitLambdaBodyForCapturedVars(lambdaBody, capturedVars, visitedLambdaIds)
+    }
+    for (captured in lambda.GetCapturedVariables()) {
+        if (IsRefValue(captured) && !ContainsValue(capturedVars, captured)) {
+            capturedVars.add(captured)
+        }
+    }
+}
+
+private func VisitLambdaBodyForCapturedVars(body: BlockGroup, capturedVars: ArrayList<Value>,
+    visitedLambdaIds: ArrayList<Int64>): Unit {
+    for (block in body.GetBlocksRef()) {
+        for (expr in block.GetExpressionsRef()) {
+            if (let Some(appliedLambda) <- IsApplyToLambda(expr)) {
+                CollectLambdaCapturedVarsRecursively(appliedLambda, capturedVars, visitedLambdaIds)
+            } else if (let Some(nestedLambda) <- (expr as Lambda)) {
+                CollectLambdaCapturedVarsRecursively(nestedLambda, capturedVars, visitedLambdaIds)
+            } else {
+                for (group in expr.GetBlockGroups()) {
+                    VisitLambdaBodyForCapturedVars(group, capturedVars, visitedLambdaIds)
+                }
+            }
+        }
+    }
+}
+
+private func IsRefValue(value: Value): Bool {
+    if (let Some(ty) <- value.GetType()) {
+        return ty.IsRef()
+    }
+    return false
+}
+
+private func ContainsInt64(values: ArrayList<Int64>, value: Int64): Bool {
+    for (item in values) {
+        if (item == value) {
+            return true
+        }
+    }
+    return false
+}

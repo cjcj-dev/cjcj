@@ -89,48 +89,69 @@ public class ConstMemberVarCollector {
 
     public func HandleStoreElementRef(storeExpr: Expression, firstParam: Value,
         index2Type: HashMap<Int64, ConstMemberVarInfo>, ownerDef: CustomTypeDef): Unit {
-        if (storeExpr.GetExprKind() != ExprKind.STORE_ELEMENT_REF &&
-            storeExpr.GetExprKind() != ExprKind.STORE_ELEMENT_BY_NAME) {
+        if (let Some(storeRef) <- (storeExpr as StoreElementRef)) {
+            HandleStoreElementRefByPath(storeRef, firstParam, index2Type)
             return
         }
-        let memberIndex = ResolveMemberIndexFromStore(storeExpr, ownerDef)
-        if (memberIndex.isNone()) {
+        if (let Some(storeByName) <- (storeExpr as StoreElementByName)) {
+            HandleStoreElementByName(storeByName, firstParam, index2Type, ownerDef)
+        }
+    }
+
+    private func HandleStoreElementRefByPath(storeRef: StoreElementRef, firstParam: Value,
+        index2Type: HashMap<Int64, ConstMemberVarInfo>): Unit {
+        let path = storeRef.GetPath()
+        if (path.size != 1) {
+            return
+        }
+        let rawIndex = path[0]
+        if (rawIndex > 9223372036854775807u64) {
+            return
+        }
+        let index = Int64(rawIndex)
+        if (!index2Type.contains(index)) {
+            return
+        }
+        if (storeRef.GetLocation().nodeId != firstParam.nodeId) {
+            return
+        }
+        UpdateCandidateFromSource(index2Type, index, storeRef.GetValue())
+    }
+
+    private func HandleStoreElementByName(storeByName: StoreElementByName, firstParam: Value,
+        index2Type: HashMap<Int64, ConstMemberVarInfo>, ownerDef: CustomTypeDef): Unit {
+        let memberIndex = ResolveMemberIndexFromStoreByName(storeByName, ownerDef)
+        if (memberIndex.isNone() || storeByName.GetLocation().nodeId != firstParam.nodeId) {
             return
         }
         if (let Some(index) <- memberIndex) {
             if (!index2Type.contains(index)) {
                 return
             }
-            let maybeLocation = GetStoreElementLocation(storeExpr, firstParam)
-            if (maybeLocation.isNone()) {
-                return
-            }
-            let maybeSource = GetStoreElementValue(storeExpr, firstParam, ownerDef)
-            if (maybeSource.isNone()) {
+            UpdateCandidateFromSource(index2Type, index, storeByName.GetValue())
+        }
+    }
+
+    private func UpdateCandidateFromSource(index2Type: HashMap<Int64, ConstMemberVarInfo>, index: Int64,
+        sourceValue: Value): Unit {
+        let sourceTarget = GetSourceTargetRecursively(sourceValue)
+        if (let Some(sourceTy) <- sourceTarget.GetType()) {
+            let stripped = sourceTy.StripAllRefs()
+            if (IsOpenClassLikeType(stripped)) {
                 InvalidateCandidate(index2Type, index)
                 return
             }
-            if (let Some(sourceValue) <- maybeSource) {
-                let sourceTarget = GetSourceTargetRecursively(sourceValue)
-                if (let Some(sourceTy) <- sourceTarget.GetType()) {
-                    let stripped = sourceTy.StripAllRefs()
-                    if (IsOpenClassLikeType(stripped)) {
+            if (let Some(info) <- index2Type.get(index)) {
+                if (let Some(oldTy) <- info.derivedType) {
+                    if (!oldTy.IsEqual(stripped)) {
                         InvalidateCandidate(index2Type, index)
-                        return
-                    }
-                    if (let Some(info) <- index2Type.get(index)) {
-                        if (let Some(oldTy) <- info.derivedType) {
-                            if (!oldTy.IsEqual(stripped)) {
-                                InvalidateCandidate(index2Type, index)
-                            }
-                        } else {
-                            info.derivedType = stripped
-                        }
                     }
                 } else {
-                    InvalidateCandidate(index2Type, index)
+                    info.derivedType = stripped
                 }
             }
+        } else {
+            InvalidateCandidate(index2Type, index)
         }
     }
 
@@ -154,16 +175,17 @@ public class ConstMemberVarCollector {
 
     private func BuildCandidateMap(def: CustomTypeDef): HashMap<Int64, ConstMemberVarInfo> {
         let out = HashMap<Int64, ConstMemberVarInfo>()
-        let members = def.GetInstanceVars()
+        let members = def.GetDirectInstanceVars()
+        let indexBase = def.GetAllInstanceVarNum() - def.GetDirectInstanceVarNum()
         var idx: Int64 = 0
         for (member in members) {
-            if (member.isStatic || !member.isReadOnly) {
+            if (member.isStatic || !member.IsImmutable()) {
                 idx++
                 continue
             }
             let memberTy = member.ty.StripAllRefs()
             if (IsOpenClassLikeType(memberTy)) {
-                out[idx] = ConstMemberVarInfo(memberTy)
+                out[indexBase + idx] = ConstMemberVarInfo(memberTy)
             }
             idx++
         }
@@ -191,77 +213,17 @@ public class ConstMemberVarCollector {
     }
 }
 
-private func ResolveMemberIndexFromStore(storeExpr: Expression, ownerDef: CustomTypeDef): Option<Int64> {
+private func ResolveMemberIndexFromStoreByName(storeExpr: StoreElementByName, ownerDef: CustomTypeDef): Option<Int64> {
+    let names = storeExpr.GetNames()
+    if (names.size != 1) {
+        return None
+    }
     var idx: Int64 = 0
     for (member in ownerDef.GetInstanceVars()) {
-        var operandIdx: Int64 = 0
-        while (operandIdx < storeExpr.GetNumOfOperands()) {
-            let operand = storeExpr.GetOperand(operandIdx)
-            if (operand.GetSrcCodeIdentifier() == member.name || operand.GetIdentifierWithoutPrefix() == member.name) {
-                return idx
-            }
-            operandIdx++
+        if (names[0] == member.name || names[0] == member.rawMangledName) {
+            return idx
         }
         idx++
-    }
-    if (storeExpr.GetNumOfOperands() >= 3) {
-        if (let Some(intLiteral) <- ExtractIntLiteral(storeExpr.GetOperand(2))) {
-            if (intLiteral >= 0 && intLiteral < ownerDef.GetInstanceVars().size) {
-                return intLiteral
-            }
-        }
-    }
-    return None
-}
-
-private func GetStoreElementLocation(storeExpr: Expression, firstParam: Value): Option<Value> {
-    var idx: Int64 = 0
-    while (idx < storeExpr.GetNumOfOperands()) {
-        let operand = storeExpr.GetOperand(idx)
-        if (operand.nodeId == firstParam.nodeId) {
-            return operand
-        }
-        idx++
-    }
-    return None
-}
-
-private func GetStoreElementValue(storeExpr: Expression, firstParam: Value, ownerDef: CustomTypeDef): Option<Value> {
-    var idx: Int64 = 0
-    while (idx < storeExpr.GetNumOfOperands()) {
-        let operand = storeExpr.GetOperand(idx)
-        if (operand.nodeId == firstParam.nodeId || IsMemberPathMarker(operand, ownerDef)) {
-            idx++
-            continue
-        }
-        return operand
-    }
-    return None
-}
-
-private func IsMemberPathMarker(value: Value, ownerDef: CustomTypeDef): Bool {
-    let srcName = value.GetSrcCodeIdentifier()
-    let identifier = value.GetIdentifierWithoutPrefix()
-    for (member in ownerDef.GetInstanceVars()) {
-        if ((!srcName.isEmpty() && srcName == member.name) || (!identifier.isEmpty() && identifier == member.name)) {
-            return true
-        }
-    }
-    if (ExtractIntLiteral(value).isSome()) {
-        return true
-    }
-    return false
-}
-
-private func ExtractIntLiteral(value: Value): Option<Int64> {
-    if (let Some(local) <- value.AsLocalVar()) {
-        if (let Some(expr) <- local.GetExpr()) {
-            if (let Some(constant) <- (expr as Constant)) {
-                if (let Some(intLiteral) <- (constant.literal as IntLiteral)) {
-                    return intLiteral.value
-                }
-            }
-        }
     }
     return None
 }
@@ -276,7 +238,8 @@ private func IsForwardingExpression(expr: Expression): Bool {
 
 private func IsOpenClassLikeType(ty: Type): Bool {
     if (let Some(customTy) <- (ty as CustomType)) {
-        return (customTy.GetCustomTypeDef() as ClassDef).isSome()
+        let def = customTy.GetCustomTypeDef()
+        return def.IsClassLike() && def.CanBeInherited()
     }
     return false
 }
@@ -285,6 +248,7 @@ private func InvalidateCandidate(index2Type: HashMap<Int64, ConstMemberVarInfo>,
     if (let Some(info) <- index2Type.get(index)) {
         info.invalidated = true
     }
+    index2Type.remove(index)
 }
 
 private func RemoveInvalidated(index2Type: HashMap<Int64, ConstMemberVarInfo>): Unit {

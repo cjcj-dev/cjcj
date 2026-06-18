@@ -119,3 +119,41 @@
 
 - `cjpm build` passed after implementation.
 - `TODO(selfhost:CHIR)` count in `packages/chir/src`: 0.
+
+## 2026-06-18 Devirtualization Analysis Tightening
+
+- Reference read: C++ `src/CHIR/Analysis/{CallGraphAnalysis,ConstMemberVarCollector,DevirtualizationInfo}.cpp` and matching headers.
+- Reworked `ConstMemberVarCollector` to follow the C++ const-member devirtualization algorithm more closely: candidates are now direct immutable instance members, indexed with the inherited-field base offset, and `StoreElementRef` handling uses the real static path/location/value APIs instead of operand-name guessing.
+- Kept a narrow `StoreElementByName` compatibility path for pre-`UpdateMemberVarPath` IR, but the faithful `StoreElementRef` path is now the primary behavior.
+- Tightened `DevirtualizationInfo` subtype collection to preserve existing custom type objects, record superclass/interface edges through actual `ClassType` values, avoid duplicate subtype records, and model the C++ package relation rule for default-internal types using the available CHIR access attributes.
+- Updated call-graph virtual invoke handling to extract the real receiver, method name, and parameter signature from `Invoke`/`InvokeWithException`, strip receiver refs, reject non-class receivers, and sort discovered virtual callees as the C++ path does. The callee lookup remains empty because the current C++ reference still returns an empty set.
+
+## Remaining After Devirtualization Analysis Tightening
+
+- The local CHIR `Attribute` enum still lacks C++ `INTERNAL` and `SKIP_ANALYSIS`, so exact skip-analysis filtering and explicit-internal tests cannot be imported within this scope.
+- `CallGraph::GetAllPossibleCalleeOfInvoke` remains limited by the C++ reference's empty implementation.
+- Full C++ `AnalysisWrapper`, `Engine`, `Results`, `ConstAnalysis`, `TypeAnalysis`, and template `ValueAnalysis` infrastructure remains absent.
+
+## Verification After Devirtualization Analysis Tightening
+
+- `cjpm build` passed after implementation.
+- `TODO(selfhost:CHIR)` count in `packages/chir/src`: 0.
+
+## 2026-06-18 Reaching Definition / Init Dataflow Tightening
+
+- Reference read: C++ `src/CHIR/Analysis/{Utils,ReachingDefinitionAnalysis,MaybeUninitAnalysis}.cpp`, matching headers, and `src/CHIR/Transformation/UpdateMemberVarPath.cpp`.
+- Moved recursive lambda-capture discovery into shared CHIR analysis utilities as `IsApplyToLambda` and `GetLambdaCapturedVarsRecursively`, replacing the private reaching-definition copy with the C++ component ownership.
+- Tightened reaching-definition behavior to invalidate captured reference values through the shared lambda walker, limit intrinsic invalidation to `INOUT_PARAM`, and skip allocation tracking for C structs as the C++ pass does.
+- Reworked constructor member-initialization detection around the real `StoreElementRef` location/path API and `INSTANCEVAR_INIT` functions, keeping only a narrow `StoreElementByName` compatibility path that resolves names using the same derived-to-base field order as the C++ path conversion.
+- Updated `ExpressionFlatSet.ToString` to use C++-style `top`, `bottom`, and element `ToString(0)` output.
+
+## Remaining After Reaching Definition / Init Dataflow Tightening
+
+- The generic C++ `AnalysisWrapper`, `Engine`, `Results`, template `ValueAnalysis`, `ConstAnalysis`, and `TypeAnalysis` infrastructure is still not fully ported.
+- Some compatibility paths remain for self-hosted IR surfaces that have not yet been canonicalized to the C++ `StoreElementRef` shape everywhere.
+- Exact analysis skipping still waits on CHIR `Attribute` parity for C++ `INTERNAL` and `SKIP_ANALYSIS`.
+
+## Verification After Reaching Definition / Init Dataflow Tightening
+
+- `cjpm build` passed after implementation.
+- `TODO(selfhost:CHIR)` count in `packages/chir/src`: 0.
