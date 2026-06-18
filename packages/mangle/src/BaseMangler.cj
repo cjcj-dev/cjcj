@@ -1524,15 +1524,19 @@ public open class BaseMangler {
     private func MangleExportIdForGenericParamDecl(decl: MangleDecl): Unit {
         if (let Some(generic) <- decl.GetGeneric()) {
             for (gpd in generic.typeParameters) {
-                if (let Some(outer) <- gpd.outerDecl) {
-                    let genericsTypeStack = ArrayList<String>()
-                    let gpdType = if (let Some(ty) <- gpd.semaTy) {
-                        MangleSemaType(ty, genericsTypeStack, declare: false, isCollectGTy: false)
-                    } else {
-                        ""
-                    }
-                    gpd.exportId = outer.exportId + MANGLE_WILDCARD_PREFIX + gpd.identifier + gpdType
+                let outer = if (let Some(value) <- gpd.outerDecl) {
+                    value
+                } else {
+                    throw IllegalArgumentException("Generic parameter has no outer declaration: " + gpd.identifier)
                 }
+                let ty = if (let Some(value) <- gpd.semaTy) {
+                    value
+                } else {
+                    throw IllegalArgumentException("Generic parameter has no semantic type: " + gpd.identifier)
+                }
+                let genericsTypeStack = ArrayList<String>()
+                gpd.exportId = outer.exportId + MANGLE_WILDCARD_PREFIX + gpd.identifier +
+                    MangleSemaType(ty, genericsTypeStack, declare: false, isCollectGTy: false)
             }
         }
     }
