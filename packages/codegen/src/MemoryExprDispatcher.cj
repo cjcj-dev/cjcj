@@ -17,5 +17,8 @@ public func HandleMemoryExpression(irBuilder: IRBuilder2, chirExpr: Expression):
     if (kind == ExprKind.GET_ELEMENT_REF || kind == ExprKind.GET_ELEMENT_BY_NAME) {
         return GenerateGetElementRef(irBuilder, chirExpr)
     }
+    if (kind == ExprKind.STORE_ELEMENT_REF || kind == ExprKind.STORE_ELEMENT_BY_NAME) {
+        return GenerateStoreElementRef(irBuilder, chirExpr)
+    }
     return LLVMNullValue()
 }

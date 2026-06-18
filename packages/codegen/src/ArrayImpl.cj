@@ -1,10 +1,17 @@
 package cangjie_compiler::codegen
 
 import std.collection.*
+import cangjie_compiler::chir.CustomType
 import cangjie_compiler::chir.Expression
 import cangjie_compiler::chir.ExprKind
+import cangjie_compiler::chir.GetElementByName
+import cangjie_compiler::chir.GetElementRef
+import cangjie_compiler::chir.LocalVar
 import cangjie_compiler::chir.RawArrayType
+import cangjie_compiler::chir.StoreElementByName
+import cangjie_compiler::chir.StoreElementRef
 import cangjie_compiler::chir.Type
+import cangjie_compiler::chir.Value
 
 public func GenerateLoad(irBuilder: IRBuilder2, chirExpr: Expression): LLVMValueRef {
     if (chirExpr.GetNumOfOperands() == 0) {
@@ -166,8 +173,13 @@ public func GenerateStore(irBuilder: IRBuilder2, chirExpr: Expression): LLVMValu
     }
     // CHIR Store operands are (value, location): operand 0 is the value being stored, operand 1
     // is the destination address (a Ref). See chir Store.GetValue()/GetLocation().
-    let value = irBuilder.GetCGModule().MaterializeValue(irBuilder, chirExpr.GetOperand(0))
-    let addr = irBuilder.GetCGModule().MaterializeValue(irBuilder, chirExpr.GetOperand(1))
+    let valueOperand = chirExpr.GetOperand(0)
+    let addrOperand = chirExpr.GetOperand(1)
+    if (ShouldSkipNoOpStore(valueOperand, addrOperand)) {
+        return LLVMNullValue()
+    }
+    let value = irBuilder.GetCGModule().MaterializeValue(irBuilder, valueOperand)
+    let addr = irBuilder.GetCGModule().MaterializeValue(irBuilder, addrOperand)
     return irBuilder.CreateStore(value.GetRawValue(), addr.GetRawValue())
 }
 
@@ -176,17 +188,157 @@ public func GenerateGetElementRef(irBuilder: IRBuilder2, chirExpr: Expression): 
         return LLVMNullValue()
     }
     let baseValue = irBuilder.GetCGModule().MaterializeValue(irBuilder, chirExpr.GetOperand(0))
-    let indices = ArrayList<LLVMValueRef>()
+    let indices = BuildElementIndices(irBuilder, chirExpr)
+    if (indices.isEmpty() &&
+        (chirExpr.GetExprKind() == ExprKind.GET_ELEMENT_REF || chirExpr.GetExprKind() == ExprKind.GET_ELEMENT_BY_NAME)) {
+        return LLVMNullValue()
+    }
+    return CreateElementAddress(irBuilder, baseValue, indices, "gep")
+}
+
+public func GenerateStoreElementRef(irBuilder: IRBuilder2, chirExpr: Expression): LLVMValueRef {
+    if (let Some(storeElementRef) <- (chirExpr as StoreElementRef)) {
+        let path = storeElementRef.GetPath()
+        if (path.isEmpty()) {
+            return LLVMNullValue()
+        }
+        if (ShouldSkipNoOpStore(storeElementRef.GetValue(), storeElementRef.GetLocation())) {
+            return LLVMNullValue()
+        }
+        let storeValue = irBuilder.GetCGModule().MaterializeValue(irBuilder, storeElementRef.GetValue())
+        let storePlace = irBuilder.GetCGModule().MaterializeValue(irBuilder, storeElementRef.GetLocation())
+        let storeIndices = BuildStaticElementIndices(irBuilder, path)
+        let storeAddr = CreateElementAddress(irBuilder, storePlace, storeIndices, "store.elem.addr")
+        if (storeAddr.isNull()) {
+            return LLVMNullValue()
+        }
+        return irBuilder.CreateStore(storeValue.GetRawValue(), storeAddr)
+    }
+    if (let Some(storeByName) <- (chirExpr as StoreElementByName)) {
+        if (let Some(locationTy) <- storeByName.GetLocation().GetType()) {
+            if (let Some(path) <- ResolveElementPathByNames(locationTy, storeByName.GetNames())) {
+                if (ShouldSkipNoOpStore(storeByName.GetValue(), storeByName.GetLocation())) {
+                    return LLVMNullValue()
+                }
+                let byNameValue = irBuilder.GetCGModule().MaterializeValue(irBuilder, storeByName.GetValue())
+                let byNamePlace = irBuilder.GetCGModule().MaterializeValue(irBuilder, storeByName.GetLocation())
+                let byNameIndices = BuildStaticElementIndices(irBuilder, path)
+                let byNameAddr = CreateElementAddress(irBuilder, byNamePlace, byNameIndices, "store.elem.addr")
+                if (byNameAddr.isNull()) {
+                    return LLVMNullValue()
+                }
+                return irBuilder.CreateStore(byNameValue.GetRawValue(), byNameAddr)
+            }
+        }
+    }
+    return LLVMNullValue()
+}
+
+private func ShouldSkipNoOpStore(value: Value, location: Value): Bool {
+    if (IsConstantNullClassValue(value)) {
+        return true
+    }
+    if (let Some(localLocation) <- (location as LocalVar)) {
+        if (localLocation.IsRetValue()) {
+            if (let Some(valueTy) <- value.GetType()) {
+                return valueTy.IsUnit()
+            }
+        }
+    }
+    return false
+}
+
+private func IsConstantNullClassValue(value: Value): Bool {
+    if (let Some(localValue) <- (value as LocalVar)) {
+        if (let Some(ownerExpr) <- localValue.GetExpr()) {
+            if (ownerExpr.IsConstantNull()) {
+                if (let Some(valueTy) <- value.GetType()) {
+                    return valueTy.IsClass()
+                }
+            }
+        }
+    }
+    return false
+}
+
+private func BuildElementIndices(irBuilder: IRBuilder2, chirExpr: Expression): ArrayList<LLVMValueRef> {
+    if (let Some(staticElementRef) <- (chirExpr as GetElementRef)) {
+        return BuildStaticElementIndices(irBuilder, staticElementRef.GetPath())
+    }
+    if (let Some(elementByName) <- (chirExpr as GetElementByName)) {
+        if (let Some(locationTy) <- elementByName.GetLocation().GetType()) {
+            if (let Some(path) <- ResolveElementPathByNames(locationTy, elementByName.GetNames())) {
+                return BuildStaticElementIndices(irBuilder, path)
+            }
+        }
+        return ArrayList<LLVMValueRef>()
+    }
+    let dynamicIndices = ArrayList<LLVMValueRef>()
     var idx: Int64 = 1
     while (idx < chirExpr.GetNumOfOperands()) {
-        indices.add(irBuilder.GetCGModule().MaterializeValue(irBuilder, chirExpr.GetOperand(idx)).GetRawValue())
+        dynamicIndices.add(irBuilder.GetCGModule().MaterializeValue(irBuilder, chirExpr.GetOperand(idx)).GetRawValue())
         idx++
+    }
+    return dynamicIndices
+}
+
+private func BuildStaticElementIndices(irBuilder: IRBuilder2, path: ArrayList<UInt64>): ArrayList<LLVMValueRef> {
+    let indices = ArrayList<LLVMValueRef>()
+    if (path.isEmpty()) {
+        return indices
+    }
+    indices.add(LLVMConstI32(irBuilder, 0u64))
+    for (pathItem in path) {
+        indices.add(LLVMConstI32(irBuilder, pathItem))
+    }
+    return indices
+}
+
+private func LLVMConstI32(irBuilder: IRBuilder2, value: UInt64): LLVMValueRef {
+    return unsafe { LLVMConstInt(LLVMInt32TypeInContext(irBuilder.GetLLVMContext().raw), value, 0) }
+}
+
+private func CreateElementAddress(irBuilder: IRBuilder2, baseValue: CGValue, indices: ArrayList<LLVMValueRef>,
+    name: String): LLVMValueRef {
+    if (indices.isEmpty()) {
+        return baseValue.GetRawValue()
     }
     if (let Some(baseType) <- baseValue.GetCGType()) {
         if (let Some(elementType) <- baseType.GetPointerElementType()) {
-            return irBuilder.CreateGEP(elementType.GetLLVMType(), baseValue.GetRawValue(), indices, name: "gep")
+            return irBuilder.CreateGEP(elementType.GetLLVMType(), baseValue.GetRawValue(), indices, name: name)
         }
-        return irBuilder.CreateGEP(baseType.GetLLVMType(), baseValue.GetRawValue(), indices, name: "gep")
+        return irBuilder.CreateGEP(baseType.GetLLVMType(), baseValue.GetRawValue(), indices, name: name)
     }
     return LLVMNullValue()
+}
+
+private func ResolveElementPathByNames(baseTy: Type, names: ArrayList<String>): Option<ArrayList<UInt64>> {
+    if (names.isEmpty()) {
+        return None
+    }
+    let path = ArrayList<UInt64>()
+    var currentTy = baseTy.StripAllRefs()
+    for (name in names) {
+        if (let Some(customTy) <- (currentTy as CustomType)) {
+            let fields = customTy.GetCustomTypeDef().GetAllInstanceVars()
+            var fieldIdx: Int64 = 0
+            var found = false
+            while (fieldIdx < fields.size) {
+                let fieldInfo = fields[fieldIdx]
+                if (fieldInfo.name == name || fieldInfo.rawMangledName == name) {
+                    path.add(UInt64(fieldIdx))
+                    currentTy = fieldInfo.ty.StripAllRefs()
+                    found = true
+                    break
+                }
+                fieldIdx++
+            }
+            if (!found) {
+                return None
+            }
+        } else {
+            return None
+        }
+    }
+    return Some(path)
 }
