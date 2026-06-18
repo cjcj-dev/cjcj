@@ -25,6 +25,8 @@ import cangjie_compiler::ast.IfExpr as AstIfExpr
 import cangjie_compiler::ast.WhileExpr as AstWhileExpr
 import cangjie_compiler::ast.JumpExpr as AstJumpExpr
 import cangjie_compiler::ast.TokenKind as AstTokenKind
+import cangjie_compiler::ast.InterpolationExpr as AstInterpolationExpr
+import cangjie_compiler::ast.StringPartKind as AstStringPartKind
 
 private let REAL_AST_RETURN_NONE: Int64 = 0
 private let REAL_AST_RETURN_INT: Int64 = 1
@@ -288,6 +290,9 @@ private func RealASTFunctionReturnKind(body: AstFuncBody): Option<Int64> {
         }
         if (IsRealASTUnitType(retType)) {
             return Some(REAL_AST_RETURN_UNIT)
+        }
+        if (IsRealASTStringType(retType)) {
+            return Some(REAL_AST_RETURN_STRING)
         }
         return None
     }
@@ -627,9 +632,6 @@ private func LowerRealASTReturn(
             case Some(kind) => kind
             case None => return None
         }
-        if (exprKind == REAL_AST_RETURN_STRING) {
-            return None
-        }
         let exprSpec = match (LowerRealASTExpr(expr, scope, packageScope)) {
             case Some(value) => value
             case None => return None
@@ -817,6 +819,9 @@ private func LowerRealASTExpr(
         if (let Some(text) <- PlainRealASTStringLiteralValue(lit)) {
             return Some(AST2CHIRExprSpec.StrLit(text))
         }
+        if (lit.kind == AstLitConstKind.STRING && lit.siExpr.isSome()) {
+            return LowerRealASTInterpolation(lit, scope, packageScope)
+        }
         return None
     }
     if (let Some(refExpr) <- (expr as AstRefExpr)) {
@@ -897,7 +902,8 @@ private func LowerRealASTCall(
         case Some(value) => value
         case None => return None
     }
-    if (info.returnKind != REAL_AST_RETURN_INT && info.returnKind != REAL_AST_RETURN_BOOL) {
+    if (info.returnKind != REAL_AST_RETURN_INT && info.returnKind != REAL_AST_RETURN_BOOL &&
+        info.returnKind != REAL_AST_RETURN_STRING) {
         return None
     }
     if (call.args.size != info.paramKinds.size) {
@@ -952,6 +958,9 @@ private func RealASTExprValueKind(
         if (PlainRealASTStringLiteralValue(expr).isSome()) {
             return Some(REAL_AST_RETURN_STRING)
         }
+        if (let Some(kind) <- RealASTInterpolationValueKind(lit, scope, packageScope)) {
+            return Some(kind)
+        }
         if (lit.kind == AstLitConstKind.UNIT) {
             return Some(REAL_AST_RETURN_UNIT)
         }
@@ -995,6 +1004,10 @@ private func RealASTExprValueKind(
             case None => return None
         }
         if (lhsKind == REAL_AST_RETURN_STRING || rhsKind == REAL_AST_RETURN_STRING) {
+            if (binary.op == AstTokenKind.ADD && lhsKind == REAL_AST_RETURN_STRING &&
+                rhsKind == REAL_AST_RETURN_STRING) {
+                return Some(REAL_AST_RETURN_STRING)
+            }
             return None
         }
         if (RealASTIsArithmeticOp(binary.op)) {
@@ -1067,7 +1080,8 @@ private func RealASTExprValueKind(
             }
             idx++
         }
-        return if (info.returnKind == REAL_AST_RETURN_INT || info.returnKind == REAL_AST_RETURN_BOOL) {
+        return if (info.returnKind == REAL_AST_RETURN_INT || info.returnKind == REAL_AST_RETURN_BOOL ||
+            info.returnKind == REAL_AST_RETURN_STRING) {
             Some(info.returnKind)
         } else {
             None
@@ -1127,6 +1141,9 @@ private func RealASTReturnType(
         if (IsRealASTUnitType(retType)) {
             return Some(context.GetUnitTy())
         }
+        if (IsRealASTStringType(retType)) {
+            return Some(context.GetCStringTy())
+        }
         return None
     }
     if (lowered.returnKind == REAL_AST_RETURN_INT || lowered.returnKind == REAL_AST_RETURN_BOOL) {
@@ -1142,6 +1159,9 @@ private func RealASTParamType(context: CHIRContext, ty: AstType): Option<Type> {
     if (IsRealASTBoolType(ty)) {
         return Some(context.GetBoolTy())
     }
+    if (IsRealASTStringType(ty)) {
+        return Some(context.GetCStringTy())
+    }
     return None
 }
 
@@ -1151,6 +1171,9 @@ private func RealASTValueTypeKind(ty: AstType): Option<Int64> {
     }
     if (IsRealASTBoolType(ty)) {
         return Some(REAL_AST_RETURN_BOOL)
+    }
+    if (IsRealASTStringType(ty)) {
+        return Some(REAL_AST_RETURN_STRING)
     }
     return None
 }
@@ -1227,6 +1250,126 @@ private func PlainRealASTStringLiteralValue(expr: AstExpr): Option<String> {
         return Some(text)
     }
     return None
+}
+
+private func LowerRealASTInterpolation(
+    lit: AstLitConstExpr,
+    scope: RealASTLoweringScope,
+    packageScope: RealASTPackageLoweringScope
+): Option<AST2CHIRExprSpec> {
+    let si = match (lit.siExpr) {
+        case Some(value) => value
+        case None => return None
+    }
+    if (si.strParts.size != si.strPartExprs.size || si.strParts.isEmpty()) {
+        return None
+    }
+    var acc: Option<AST2CHIRExprSpec> = None
+    var idx: Int64 = 0
+    while (idx < si.strParts.size) {
+        let part = si.strParts[idx]
+        let partExpr = si.strPartExprs[idx]
+        let pieceSpec = if (part.strKind == AstStringPartKind.STR) {
+            match (PlainRealASTInterpolationText(part.value)) {
+                case Some(text) => AST2CHIRExprSpec.StrLit(text)
+                case None => return None
+            }
+        } else {
+            let inner = match (RealASTInterpolationInnerExpr(partExpr)) {
+                case Some(value) => value
+                case None => return None
+            }
+            let innerKind = match (RealASTExprValueKind(inner, scope, packageScope)) {
+                case Some(value) => value
+                case None => return None
+            }
+            let innerSpec = match (LowerRealASTExpr(inner, scope, packageScope)) {
+                case Some(value) => value
+                case None => return None
+            }
+            if (innerKind == REAL_AST_RETURN_STRING) {
+                innerSpec
+            } else if (innerKind == REAL_AST_RETURN_INT || innerKind == REAL_AST_RETURN_BOOL) {
+                AST2CHIRExprSpec.ToStringConv(innerSpec)
+            } else {
+                return None
+            }
+        }
+        acc = match (acc) {
+            case Some(prev) => Some(AST2CHIRExprSpec.Binary(ExprKind.ADD, prev, pieceSpec))
+            case None => Some(pieceSpec)
+        }
+        idx++
+    }
+    return acc
+}
+
+private func RealASTInterpolationValueKind(
+    lit: AstLitConstExpr,
+    scope: RealASTLoweringScope,
+    packageScope: RealASTPackageLoweringScope
+): Option<Int64> {
+    if (lit.kind != AstLitConstKind.STRING) {
+        return None
+    }
+    let si = match (lit.siExpr) {
+        case Some(value) => value
+        case None => return None
+    }
+    if (si.strParts.size != si.strPartExprs.size || si.strParts.isEmpty()) {
+        return None
+    }
+    var idx: Int64 = 0
+    while (idx < si.strParts.size) {
+        let part = si.strParts[idx]
+        let partExpr = si.strPartExprs[idx]
+        if (part.strKind == AstStringPartKind.STR) {
+            if (PlainRealASTInterpolationText(part.value).isNone()) {
+                return None
+            }
+        } else {
+            let inner = match (RealASTInterpolationInnerExpr(partExpr)) {
+                case Some(value) => value
+                case None => return None
+            }
+            let innerKind = match (RealASTExprValueKind(inner, scope, packageScope)) {
+                case Some(value) => value
+                case None => return None
+            }
+            if (innerKind != REAL_AST_RETURN_INT && innerKind != REAL_AST_RETURN_BOOL &&
+                innerKind != REAL_AST_RETURN_STRING) {
+                return None
+            }
+        }
+        idx++
+    }
+    return Some(REAL_AST_RETURN_STRING)
+}
+
+private func RealASTInterpolationInnerExpr(partExpr: AstExpr): Option<AstExpr> {
+    let interp = match (partExpr as AstInterpolationExpr) {
+        case Some(value) => value
+        case None => return None
+    }
+    let block = match (interp.block) {
+        case Some(value) => value
+        case None => return None
+    }
+    if (block.body.size != 1) {
+        return None
+    }
+    return block.body[0] as AstExpr
+}
+
+private func PlainRealASTInterpolationText(text: String): Option<String> {
+    var idx: Int64 = 0
+    while (idx < text.size) {
+        if (text[idx] == b'\\') {
+            return None
+        }
+        idx++
+    }
+    return Some(text)
 }
 
 private func StripIntegerSuffix(value: String): String {

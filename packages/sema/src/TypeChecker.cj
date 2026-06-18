@@ -360,7 +360,7 @@ public class TypeChecker {
         let params = ArrayList<Ty>()
         for (param in body.paramLists[0].params) {
             if (let Some(paramType) <- param.typeNode) {
-                if (let Some(paramTy) <- resolveRealPipelinePrimitiveType(paramType)) {
+                if (let Some(paramTy) <- resolveRealPipelineLocalType(paramType)) {
                     if (!isRealPipelineValueTy(paramTy)) {
                         param.SetTy(TypeManager.GetInvalidTy())
                         params.add(TypeManager.GetInvalidTy())
@@ -392,7 +392,7 @@ public class TypeChecker {
 
     private func resolveRealPipelineReturnTy(body: FuncBody): Option<Ty> {
         if (let Some(retType) <- body.retType) {
-            if (let Some(retTy) <- resolveRealPipelinePrimitiveType(retType)) {
+            if (let Some(retTy) <- resolveRealPipelineLocalType(retType)) {
                 if (!isRealPipelineReturnTy(retTy)) {
                     markRealPipelineUnsupported()
                     return None
@@ -833,7 +833,7 @@ public class TypeChecker {
             return Some(innerTy)
         }
         if (let Some(lit) <- (expr as LitConstExpr)) {
-            return typeRealPipelineLiteralExpr(lit, targetTy)
+            return typeRealPipelineLiteralExpr(lit, scope, targetTy)
         }
         if (let Some(refExpr) <- (expr as RefExpr)) {
             let name = refExpr.ref.identifier.Val()
@@ -859,7 +859,11 @@ public class TypeChecker {
         return None
     }
 
-    private func typeRealPipelineLiteralExpr(lit: LitConstExpr, targetTy: Option<Ty>): Option<Ty> {
+    private func typeRealPipelineLiteralExpr(
+        lit: LitConstExpr,
+        scope: RealPipelineScope,
+        targetTy: Option<Ty>
+    ): Option<Ty> {
         var litTy: Ty = TypeManager.GetInvalidTy()
         if (lit.kind == LitConstKind.INTEGER) {
             litTy = match (targetTy) {
@@ -872,10 +876,14 @@ public class TypeChecker {
         } else if (lit.kind == LitConstKind.UNIT) {
             litTy = TypeManager.GetPrimitiveTy(TypeKind.TYPE_UNIT)
         } else if (lit.kind == LitConstKind.STRING) {
-            if (!isRealPipelinePlainStringLiteral(lit)) {
-                return None
+            if (lit.siExpr.isSome()) {
+                return typeRealPipelineInterpolationLiteralExpr(lit, scope)
+            } else {
+                if (!isRealPipelinePlainStringLiteral(lit)) {
+                    return None
+                }
+                litTy = TypeManager.GetCStringTy()
             }
-            litTy = TypeManager.GetCStringTy()
         } else {
             return None
         }
@@ -920,6 +928,9 @@ public class TypeChecker {
     }
 
     private func typeRealPipelineBinaryExpr(binaryExpr: BinaryExpr, scope: RealPipelineScope): Option<Ty> {
+        if (binaryExpr.op == TokenKind.ADD && realPipelineBinaryWouldUseString(binaryExpr, scope)) {
+            return typeRealPipelineStringConcatExpr(binaryExpr, scope)
+        }
         if (realPipelineBinaryWouldUseString(binaryExpr, scope)) {
             return None
         }
@@ -958,6 +969,9 @@ public class TypeChecker {
             return None
         }
         if (!realPipelineDeclaredFunctions.contains(calleeName)) {
+            if (realPipelineUnsupported) {
+                return None
+            }
             emitRealPipelineTypeError(callExpr.begin, "unknown top-level function '" + calleeName + "'")
             callExpr.SetTy(TypeManager.GetInvalidTy())
             return Some(TypeManager.GetInvalidTy())
@@ -1011,6 +1025,34 @@ public class TypeChecker {
         calleeRef.SetTy(funcTy)
         callExpr.SetTy(funcTy.retTy)
         return Some(funcTy.retTy)
+    }
+
+    private func typeRealPipelineStringConcatExpr(binaryExpr: BinaryExpr, scope: RealPipelineScope): Option<Ty> {
+        let stringTy = TypeManager.GetCStringTy()
+        let left = match (binaryExpr.leftExpr) {
+            case Some(value) => value
+            case None => return None
+        }
+        let right = match (binaryExpr.rightExpr) {
+            case Some(value) => value
+            case None => return None
+        }
+        let leftTy = match (typeRealPipelineExpr(left, scope, Some(stringTy))) {
+            case Some(value) => value
+            case None => return None
+        }
+        let rightTy = match (typeRealPipelineExpr(right, scope, Some(stringTy))) {
+            case Some(value) => value
+            case None => return None
+        }
+        if (!isRealPipelineStringTy(leftTy) || !isRealPipelineStringTy(rightTy)) {
+            emitRealPipelineTypeError(binaryExpr.begin,
+                "operator '+' requires String operands when concatenating String values")
+            binaryExpr.SetTy(TypeManager.GetInvalidTy())
+            return Some(TypeManager.GetInvalidTy())
+        }
+        binaryExpr.SetTy(stringTy)
+        return Some(stringTy)
     }
 
     private func typeRealPipelineIntBinaryExpr(
@@ -1115,7 +1157,7 @@ public class TypeChecker {
     }
 
     private func isRealPipelineValueTy(ty: Ty): Bool {
-        return isRealPipelineInt64Ty(ty) || isRealPipelineBoolTy(ty)
+        return isRealPipelineInt64Ty(ty) || isRealPipelineBoolTy(ty) || isRealPipelineStringTy(ty)
     }
 
     private func isRealPipelineLocalTy(ty: Ty): Bool {
@@ -1223,6 +1265,75 @@ public class TypeChecker {
         return true
     }
 
+    private func typeRealPipelineInterpolationLiteralExpr(lit: LitConstExpr, scope: RealPipelineScope): Option<Ty> {
+        let stringTy = TypeManager.GetCStringTy()
+        let si = match (lit.siExpr) {
+            case Some(value) => value
+            case None => return None
+        }
+        if (si.strParts.size != si.strPartExprs.size || si.strParts.isEmpty()) {
+            return None
+        }
+        var idx: Int64 = 0
+        while (idx < si.strParts.size) {
+            let part = si.strParts[idx]
+            let partExpr = si.strPartExprs[idx]
+            if (part.strKind == StringPartKind.STR) {
+                if (!isRealPipelinePlainInterpolationText(part.value)) {
+                    return None
+                }
+                partExpr.SetTy(stringTy)
+            } else {
+                let inner = match (realPipelineInterpolationInnerExpr(partExpr)) {
+                    case Some(value) => value
+                    case None => return None
+                }
+                let innerTy = match (typeRealPipelineExpr(inner, scope, None)) {
+                    case Some(value) => value
+                    case None => return None
+                }
+                if (!isRealPipelinePrintableTy(innerTy)) {
+                    emitRealPipelineTypeError(inner.begin,
+                        "string interpolation supports Int64, Bool, or String expressions, got " +
+                        innerTy.String())
+                    lit.SetTy(TypeManager.GetInvalidTy())
+                    return Some(TypeManager.GetInvalidTy())
+                }
+                partExpr.SetTy(stringTy)
+            }
+            idx++
+        }
+        si.SetTy(stringTy)
+        lit.SetTy(stringTy)
+        return Some(stringTy)
+    }
+
+    private func realPipelineInterpolationInnerExpr(partExpr: Expr): Option<Expr> {
+        let interp = match (partExpr as InterpolationExpr) {
+            case Some(value) => value
+            case None => return None
+        }
+        let block = match (interp.block) {
+            case Some(value) => value
+            case None => return None
+        }
+        if (block.body.size != 1) {
+            return None
+        }
+        return block.body[0] as Expr
+    }
+
+    private func isRealPipelinePlainInterpolationText(text: String): Bool {
+        var idx: Int64 = 0
+        while (idx < text.size) {
+            if (text[idx] == b'\\') {
+                return false
+            }
+            idx++
+        }
+        return true
+    }
+
     private func realPipelineBinaryWouldUseString(binaryExpr: BinaryExpr, scope: RealPipelineScope): Bool {
         let left = match (binaryExpr.leftExpr) {
             case Some(value) => value
@@ -1254,6 +1365,20 @@ public class TypeChecker {
         if (let Some(binaryExpr) <- (expr as BinaryExpr)) {
             if (binaryExpr.op == TokenKind.ADD) {
                 return realPipelineBinaryWouldUseString(binaryExpr, scope)
+            }
+        }
+        if (let Some(callExpr) <- (expr as CallExpr)) {
+            let base = match (callExpr.baseFunc) {
+                case Some(value) => value
+                case None => return false
+            }
+            let calleeRef = match (base as RefExpr) {
+                case Some(value) => value
+                case None => return false
+            }
+            let calleeName = calleeRef.ref.identifier.Val()
+            if (let Some(funcTy) <- realPipelineFunctionTypes.get(calleeName)) {
+                return isRealPipelineStringTy(funcTy.retTy)
             }
         }
         return false
