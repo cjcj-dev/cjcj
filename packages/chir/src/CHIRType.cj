@@ -90,7 +90,130 @@ public class CHIRTypeCache {
 }
 
 private func SameAstTy(left: AstTy, right: AstTy): Bool {
-    return left.kind == right.kind && left.Hash() == right.Hash()
+    if (left.kind != right.kind || left.name != right.name) {
+        return false
+    }
+    if (let Some(leftFunc) <- (left as AstFuncTy)) {
+        if (let Some(rightFunc) <- (right as AstFuncTy)) {
+            return leftFunc.isC == rightFunc.isC && leftFunc.isClosureTy == rightFunc.isClosureTy &&
+                leftFunc.hasVariableLenArg == rightFunc.hasVariableLenArg && leftFunc.noCast == rightFunc.noCast &&
+                SameAstTy(leftFunc.retTy, rightFunc.retTy) && SameAstTyList(leftFunc.paramTys, rightFunc.paramTys)
+        }
+        return false
+    }
+    if (let Some(leftTuple) <- (left as AstTupleTy)) {
+        if (let Some(rightTuple) <- (right as AstTupleTy)) {
+            return leftTuple.isClosureTy == rightTuple.isClosureTy && SameAstTyList(leftTuple.typeArgs,
+                rightTuple.typeArgs)
+        }
+        return false
+    }
+    if (let Some(leftArray) <- (left as AstArrayTy)) {
+        if (let Some(rightArray) <- (right as AstArrayTy)) {
+            return leftArray.dims == rightArray.dims && SameAstTyList(leftArray.typeArgs, rightArray.typeArgs)
+        }
+        return false
+    }
+    if (let Some(leftVArray) <- (left as AstVArrayTy)) {
+        if (let Some(rightVArray) <- (right as AstVArrayTy)) {
+            return leftVArray.size == rightVArray.size && SameAstTyList(leftVArray.typeArgs, rightVArray.typeArgs)
+        }
+        return false
+    }
+    if ((left as AstPointerTy).isSome() || (right as AstPointerTy).isSome()) {
+        return (left as AstPointerTy).isSome() && (right as AstPointerTy).isSome() &&
+            SameAstTyList(left.typeArgs, right.typeArgs)
+    }
+    if (let Some(leftStruct) <- (left as AstStructTy)) {
+        if (let Some(rightStruct) <- (right as AstStructTy)) {
+            return SameAstStructDeclOption(leftStruct.declPtr, rightStruct.declPtr) &&
+                SameAstTyList(leftStruct.typeArgs, rightStruct.typeArgs)
+        }
+        return false
+    }
+    if (let Some(leftClass) <- (left as AstClassTy)) {
+        if (let Some(rightClass) <- (right as AstClassTy)) {
+            return left.String() == right.String() && SameAstClassDeclOption(leftClass.declPtr, rightClass.declPtr) &&
+                SameAstTyList(leftClass.typeArgs, rightClass.typeArgs)
+        }
+        return false
+    }
+    if (let Some(leftInterface) <- (left as AstInterfaceTy)) {
+        if (let Some(rightInterface) <- (right as AstInterfaceTy)) {
+            return SameAstInterfaceDeclOption(leftInterface.declPtr, rightInterface.declPtr) &&
+                SameAstTyList(leftInterface.typeArgs, rightInterface.typeArgs)
+        }
+        return false
+    }
+    if (let Some(leftEnum) <- (left as AstEnumTy)) {
+        if (let Some(rightEnum) <- (right as AstEnumTy)) {
+            return left.String() == right.String() && SameAstEnumDeclOption(leftEnum.declPtr, rightEnum.declPtr) &&
+                SameAstTyList(leftEnum.typeArgs, rightEnum.typeArgs)
+        }
+        return false
+    }
+    if (let Some(leftGeneric) <- (left as AstGenericsTy)) {
+        if (let Some(rightGeneric) <- (right as AstGenericsTy)) {
+            return SameAstGenericDeclOption(leftGeneric.decl, rightGeneric.decl) &&
+                SameAstTyList(leftGeneric.upperBounds, rightGeneric.upperBounds)
+        }
+        return false
+    }
+    return SameAstTyList(left.typeArgs, right.typeArgs)
+}
+
+private func SameAstTyList(left: ArrayList<AstTy>, right: ArrayList<AstTy>): Bool {
+    if (left.size != right.size) {
+        return false
+    }
+    var idx: Int64 = 0
+    while (idx < left.size) {
+        if (!SameAstTy(left[idx], right[idx])) {
+            return false
+        }
+        idx++
+    }
+    return true
+}
+
+private func SameAstStructDeclOption(left: Option<AstStructDecl>, right: Option<AstStructDecl>): Bool {
+    if (let Some(leftDecl) <- left) {
+        if (let Some(rightDecl) <- right) { return SameAstDecl(leftDecl, rightDecl) }
+        return false
+    }
+    return right.isNone()
+}
+
+private func SameAstClassDeclOption(left: Option<AstClassDecl>, right: Option<AstClassDecl>): Bool {
+    if (let Some(leftDecl) <- left) {
+        if (let Some(rightDecl) <- right) { return SameAstDecl(leftDecl, rightDecl) }
+        return false
+    }
+    return right.isNone()
+}
+
+private func SameAstInterfaceDeclOption(left: Option<AstInterfaceDecl>, right: Option<AstInterfaceDecl>): Bool {
+    if (let Some(leftDecl) <- left) {
+        if (let Some(rightDecl) <- right) { return SameAstDecl(leftDecl, rightDecl) }
+        return false
+    }
+    return right.isNone()
+}
+
+private func SameAstEnumDeclOption(left: Option<AstEnumDecl>, right: Option<AstEnumDecl>): Bool {
+    if (let Some(leftDecl) <- left) {
+        if (let Some(rightDecl) <- right) { return SameAstDecl(leftDecl, rightDecl) }
+        return false
+    }
+    return right.isNone()
+}
+
+private func SameAstGenericDeclOption(left: Option<AstGenericParamDecl>, right: Option<AstGenericParamDecl>): Bool {
+    if (let Some(leftDecl) <- left) {
+        if (let Some(rightDecl) <- right) { return SameAstDecl(leftDecl, rightDecl) }
+        return false
+    }
+    return right.isNone()
 }
 
 private func SameAstDecl(left: AstDecl, right: AstDecl): Bool {
