@@ -87,7 +87,25 @@ Fifth continuation pass:
   into lambda block groups, which the reference implementation does not visit
   for this optimization.
 
+Sixth continuation pass:
+
+- `BlockGroupCopyHelper.cj`: added the missing C++ optimization helper as a
+  real multi-block clone implementation. It clones blocks into a target block
+  group, preserves landing-pad exception metadata and expression/result base
+  info, builds old-to-new maps for blocks, locals, lambda params, lambda bodies,
+  and other nested block groups, rewrites operands and terminator successors,
+  removes cloned debug expressions, and returns the cloned return value when the
+  source block group belongs to a function or lambda. Generic/`This` type
+  instantiation remains blocked on the private type-converter APIs that are not
+  present in the current self-host IR.
+- `GetRefToArrayElem.cj`: added the missing array-element reference
+  optimization. It rewrites `ARRAY_GET_UNCHECKED` intrinsics whose result is
+  only consumed by `Field` expressions into `ARRAY_GET_REF_UNCHECKED`, replaces
+  each field user with `GetElementRef` plus `Load`, preserves debug/base
+  metadata, and marks synthesized element refs `READONLY`, matching the C++
+  pass's function-body traversal.
+
 Estimated behavior coverage for the touched transform/optimization surface is
-about 31% versus the C++ reference. The changes above remove several unsafe
+about 34% versus the C++ reference. The changes above remove several unsafe
 behavior differences but the overall CHIR transform/optimization module remains
 far from complete.
