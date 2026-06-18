@@ -117,10 +117,10 @@ public class ASTCacheCalculator {
     }
 
     private func PrevisitDirectExtendMember(decl: IncrDecl): Unit {
+        decl.rawMangleName = MangleDecl(decl)
         for (member in GetMembers(decl)) {
             PrevisitDirectExtendMember(member)
         }
-        decl.rawMangleName = MangleDecl(decl)
         CollectDecl(decl)
         decl.cacheHash.srcUse = ComputeDeclSrcUseHash(decl)
         decl.cacheHash.bodyHash = ComputeDeclBodyHash(decl, srcInfo)
@@ -233,12 +233,13 @@ public class ASTCacheCalculator {
 
     private func VisitEnumConstructors(decl: IncrDecl): UInt64 {
         var hash = StableHashBool(decl.hasEllipsis)
-        for (mangle in decl.enumConstructorMangles) {
-            hash = CombineHash(hash, StableHash(mangle))
+        let constructors = GetEnumConstructors(decl)
+        for (constructor in constructors) {
+            hash = CombineDeclHash(hash, constructor)
         }
-        for (member in GetMembers(decl)) {
-            if (member.TestAttr(IncrAttribute.ENUM_CONSTRUCTOR)) {
-                hash = CombineDeclHash(hash, member)
+        if (constructors.isEmpty()) {
+            for (mangle in decl.enumConstructorMangles) {
+                hash = CombineHash(hash, StableHash(mangle))
             }
         }
         return hash
@@ -282,11 +283,11 @@ public class ASTCacheCalculator {
 
     private func VisitMember(decl: IncrDecl): MemberDeclCache {
         let result = MemberDeclCache()
+        decl.rawMangleName = MangleDecl(decl)
+        result.rawMangle = decl.rawMangleName
         for (member in GetMembers(decl)) {
             result.members.add(VisitMember(member))
         }
-        decl.rawMangleName = MangleDecl(decl)
-        result.rawMangle = decl.rawMangleName
         CollectDecl(decl)
         decl.cacheHash.srcUse = ComputeDeclSrcUseHash(decl)
         decl.cacheHash.bodyHash = ComputeDeclBodyHash(decl, srcInfo)

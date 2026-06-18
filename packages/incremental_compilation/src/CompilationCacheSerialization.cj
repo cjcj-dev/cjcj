@@ -202,7 +202,7 @@ public class HashedASTWriter {
         }
         for (depMangle in SortedStringList(depMangles)) {
             let dep = depsByMangle[depMangle]
-            let names = ArrayList<String>()
+            let names = HashSet<String>()
             for (value in dep.dependencies) {
                 let valueMangle = GetDependencyDeclRawMangleName(value)
                 if (!valueMangle.isEmpty()) {
@@ -212,7 +212,7 @@ public class HashedASTWriter {
             let fields = ArrayList<String>()
             fields.add("dep")
             fields.add(depMangle)
-            fields.add(JoinCacheStringList(SortedStringList(names)))
+            fields.add(StringSetToWire(names))
             lines.add(JoinCacheFields(fields))
         }
     }
@@ -610,7 +610,7 @@ public class HashedASTLoader {
                 continue
             }
             for (child in member.members) {
-                addFileMapEntry(child.gvid.file, child.rawMangle, child.gvid.id)
+                collectFileMapForMember(child)
             }
             collectFileMapForMember(member)
         }

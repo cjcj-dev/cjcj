@@ -1,6 +1,6 @@
 # IncrementalCompilation Port Status
 
-Date: 2026-06-17
+Date: 2026-06-18
 
 Build: `cjpm build` passes.
 
@@ -95,6 +95,38 @@ Implemented:
 - Removed two remaining silent fallback paths from incremental scope analysis. Missing source package declarations
   and missing cached CodeGen mangles for deleted declarations now fail the same invariant class as the C++
   `CJC_NULLPTR_CHECK`/`CJC_ABORT` sites instead of synthesizing package declarations or reusing raw mangles.
+- Added explicit bridge helpers between the package-local hashable adapter enums and the real
+  `cangjie_compiler::ast.ASTKind`/`Attribute` enums. A direct alias was tested but Cangjie currently rejects
+  adding `Hashable` to imported enum types, so the local wrappers remain only where this package needs hashed
+  sets/maps while adapter callers can convert to and from real AST enum values.
+- Tightened cache hash determinism by sorting adapter attributes by real `AttributeIndex` before combining them
+  into signature hashes. This removes nondeterminism from `HashSet` iteration while keeping the same real AST
+  ordinal semantics used by the C++ `ASTHasher`.
+- Matched C++ enum-constructor handling more closely: enum declarations now have a separate adapter
+  `enumConstructors` list and `GetMembers(EnumDecl)` excludes enum constructors, like C++ `GetMembers`. Enum
+  layout hashing and layout-change pollution use the constructor list, with the old raw-mangle list retained only
+  as a fallback for adapter inputs that cannot yet supply constructor decl nodes.
+- Fixed fallback member mangling order so a member's raw mangle is established before recursively visiting nested
+  members. This gives nested/accessor fallback mangles a stable parent prefix instead of depending on a parent
+  raw mangle that may still be empty.
+- Refined cached file-map reconstruction for loaded member children so child entries pass through the same
+  OOEAffected/static-member filters as C++ loader member entries instead of unconditionally participating in
+  order-change invalidation.
+- Restored the C++ distinction between public incremental `GetMembers(EnumDecl)` and the pollution analyzer's
+  private raw-member traversal: generic/added/source-use pollution now sees enum constructors through the
+  all-member path, while cache/member APIs still exclude constructors where C++ `GetMembers` does.
+- Fixed direct-extend member previsit fallback mangling to establish each member raw mangle before recursing into
+  nested members, matching the parent-first fallback behavior used for normal member cache traversal.
+- Tightened pollution invariant handling to match the C++ abort/default cases: signature changes for main/macro
+  declarations now fail as invalid states, `PolluteAPIOfDecl` stops after marking main declarations, and only the
+  same API-capable declaration kinds as the C++ switch run precise/name/extend API propagation.
+- Matched `CachedMangleMap::UpdateImportedInlineDeclsMangle` to the C++ CodeGen-facing path: imported inline
+  declarations now record `mangledName` exactly instead of falling back to raw mangles.
+- Matched the C++ cache writer's `std::set` dependency behavior for CHIR var/function dependencies by deduplicating
+  serialized dependency target raw mangles before writing them.
+- Tightened AST diff invariants to match the C++ `.at()`/assert behavior: current top-level/member/order entries
+  that are missing from the raw-mangle declaration map now fail fast instead of silently dropping additions or
+  changes from the incremental recompilation set.
 
 Known gaps:
 

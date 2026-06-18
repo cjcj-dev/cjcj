@@ -221,6 +221,13 @@ public class ASTDiffResult {
     }
 }
 
+private func RequireMangledDecl(mangled2Decl: RawMangled2DeclMap, rawMangle: String, context: String): IncrDecl {
+    if (let Some(decl) <- mangled2Decl.get(rawMangle)) {
+        return decl
+    }
+    throw IllegalStateException("missing declaration for " + context + ": " + rawMangle)
+}
+
 private class OrderDiffCompare {
     private let mangled2Decl: RawMangled2DeclMap
     private let exclude: HashSet<String>
@@ -304,10 +311,9 @@ private class OrderDiffCompare {
             if (let Some(currentId) <- gvidMap.get(mangle)) {
                 let maxid = if (currentId > last) { currentId } else { last }
                 maxids.add(maxid)
-                if (let Some(decl) <- mangled2Decl.get(mangle)) {
-                    if (IsOrderAffectingGlobal(decl)) {
-                        last = maxid
-                    }
+                let decl = RequireMangledDecl(mangled2Decl, mangle, "cached order entry")
+                if (IsOrderAffectingGlobal(decl)) {
+                    last = maxid
                 }
             }
         }
@@ -325,9 +331,7 @@ private class OrderDiffCompare {
             if (let Some(currentId) <- gvidMap.get(name)) {
                 rid++
                 if (rid < maxids.size && currentId < maxids[rid]) {
-                    if (let Some(decl) <- mangled2Decl.get(name)) {
-                        result.add(decl)
-                    }
+                    result.add(RequireMangledDecl(mangled2Decl, name, "order-changed declaration"))
                 }
             }
             idx++
@@ -390,9 +394,7 @@ private class ASTDiffImpl {
         }
         for ((mangled, _) in cur) {
             if (!cached.contains(mangled)) {
-                if (let Some(decl) <- mangled2Decl.get(mangled)) {
-                    ret.added.add(decl)
-                }
+                ret.added.add(RequireMangledDecl(mangled2Decl, mangled, "added top-level declaration"))
             }
         }
     }
@@ -409,12 +411,11 @@ private class ASTDiffImpl {
     }
 
     private func CompareMemberDecl(typeChange: TypeChange, cached: MemberDeclCache, cur: MemberDeclCache): Unit {
-        if (let Some(decl) <- mangled2Decl.get(cur.rawMangle)) {
-            let change = CommonChange(decl, cached.sigHash != cur.sigHash, cached.srcUse != cur.srcUse,
-                cached.bodyHash != cur.bodyHash)
-            if (change.HasChange()) {
-                typeChange.changed.add(change)
-            }
+        let decl = RequireMangledDecl(mangled2Decl, cur.rawMangle, "changed member declaration")
+        let change = CommonChange(decl, cached.sigHash != cur.sigHash, cached.srcUse != cur.srcUse,
+            cached.bodyHash != cur.bodyHash)
+        if (change.HasChange()) {
+            typeChange.changed.add(change)
         }
         CompareMembers(typeChange, cached.members, cur.members)
     }
@@ -443,9 +444,8 @@ private class ASTDiffImpl {
                 }
                 cachedIdx++
             } else if (cachedMember.rawMangle > curMember.rawMangle) {
-                if (let Some(decl) <- mangled2Decl.get(curMember.rawMangle)) {
-                    typeChange.added.add(decl)
-                }
+                typeChange.added.add(RequireMangledDecl(mangled2Decl, curMember.rawMangle,
+                    "added member declaration"))
                 curIdx++
             } else {
                 CompareMemberDecl(typeChange, cachedMember, curMember)
@@ -463,9 +463,8 @@ private class ASTDiffImpl {
         }
         while (curIdx < sortedCur.size) {
             let curMember = sortedCur[curIdx]
-            if (let Some(decl) <- mangled2Decl.get(curMember.rawMangle)) {
-                typeChange.added.add(decl)
-            }
+            typeChange.added.add(RequireMangledDecl(mangled2Decl, curMember.rawMangle,
+                "added member declaration"))
             curIdx++
         }
     }
@@ -488,24 +487,23 @@ private class ASTDiffImpl {
 
     private func CompareTopLevelDecl(cachedDecl: TopLevelDeclCache, curDecl: TopLevelDeclCache,
         mangled: String): Unit {
-        if (let Some(decl) <- mangled2Decl.get(mangled)) {
-            match (decl.astKind) {
-                case IncrDeclKind.TYPE_ALIAS_DECL =>
-                    if (cachedDecl.sigHash != curDecl.sigHash) {
-                        ret.aliases.add(decl)
-                    }
-                case IncrDeclKind.FUNC_DECL | IncrDeclKind.MACRO_DECL | IncrDeclKind.MAIN_DECL |
-                    IncrDeclKind.VAR_DECL | IncrDeclKind.VAR_WITH_PATTERN_DECL =>
-                    let change = CommonCompare(cachedDecl, curDecl, decl)
-                    if (change.HasChange()) {
-                        ret.commons[decl] = change
-                    }
-                case _ =>
-                    let typeChange = CompareTypeDecl(cachedDecl, curDecl)
-                    if (typeChange.HasChange()) {
-                        ret.types[decl] = typeChange
-                    }
-            }
+        let decl = RequireMangledDecl(mangled2Decl, mangled, "top-level declaration")
+        match (decl.astKind) {
+            case IncrDeclKind.TYPE_ALIAS_DECL =>
+                if (cachedDecl.sigHash != curDecl.sigHash) {
+                    ret.aliases.add(decl)
+                }
+            case IncrDeclKind.FUNC_DECL | IncrDeclKind.MACRO_DECL | IncrDeclKind.MAIN_DECL |
+                IncrDeclKind.VAR_DECL | IncrDeclKind.VAR_WITH_PATTERN_DECL =>
+                let change = CommonCompare(cachedDecl, curDecl, decl)
+                if (change.HasChange()) {
+                    ret.commons[decl] = change
+                }
+            case _ =>
+                let typeChange = CompareTypeDecl(cachedDecl, curDecl)
+                if (typeChange.HasChange()) {
+                    ret.types[decl] = typeChange
+                }
         }
     }
 }
