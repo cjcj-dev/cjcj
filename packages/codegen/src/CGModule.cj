@@ -360,25 +360,11 @@ public class CGModule {
 
     public func Verify(): Bool {
         if (let Some(moduleHandle) <- module) {
-            try (outMessage = LibC.malloc<CString>().asResource()) {
-                let nullMessage = CString(CPointer<UInt8>())
-                unsafe { outMessage.value.write(nullMessage) }
-                let status = unsafe {
-                    LLVMVerifyModule(moduleHandle.raw, LLVMVerifierFailureActionValue(LLVMVerifierFailureAction.ReturnStatus),
-                        outMessage.value)
-                }
-                let rawMessage = unsafe { outMessage.value.read() }
-                if (status == 0) {
-                    if (!rawMessage.isNull()) {
-                        unsafe { LLVMDisposeMessage(rawMessage) }
-                    }
-                    return true
-                }
-                let message = LLVMConsumeMessage(rawMessage)
-                if (!message.isEmpty()) {
-                    eprintln(message)
-                }
+            let verifyResult = VerifyModule(moduleHandle)
+            if (!verifyResult.message.isEmpty()) {
+                eprintln(verifyResult.message)
             }
+            return verifyResult.ok
         }
         return false
     }

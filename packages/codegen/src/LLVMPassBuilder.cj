@@ -165,6 +165,17 @@ private func LLVMBoolValue(value: Bool): Int32 {
 public func RunLLVMPasses(module: LLVMModuleHandle, passes: String,
     targetMachine!: LLVMTargetMachineRef = LLVMNullTargetMachine(),
     options!: LLVMPassBuilderOptionsRef = LLVMNullPassBuilderOptions()): LLVMRunPassesResult {
+    if (module.raw.isNull()) {
+        return LLVMRunPassesResult(false, message: "cannot run LLVM passes on null module")
+    }
+    if (options.isNull()) {
+        try (defaultOptions = LLVMPassBuilderOptionsHandle.Create()) {
+            if (defaultOptions.raw.isNull()) {
+                return LLVMRunPassesResult(false, message: "failed to create LLVM pass-builder options")
+            }
+            return RunLLVMPasses(module, passes, targetMachine: targetMachine, options: defaultOptions.raw)
+        }
+    }
     var result = LLVMRunPassesResult(false, message: "failed to run LLVM passes")
     try (passesCString = unsafe { LibC.mallocCString(passes) }.asResource()) {
         let error = unsafe { LLVMRunPasses(module.raw, passesCString.value, targetMachine, options) }
@@ -188,6 +199,14 @@ public func RunLLVMPassesOnFunction(fn: LLVMValueRef, passes: String,
     options!: LLVMPassBuilderOptionsRef = LLVMNullPassBuilderOptions()): LLVMRunPassesResult {
     if (fn.isNull()) {
         return LLVMRunPassesResult(false, message: "cannot run LLVM passes on null function")
+    }
+    if (options.isNull()) {
+        try (defaultOptions = LLVMPassBuilderOptionsHandle.Create()) {
+            if (defaultOptions.raw.isNull()) {
+                return LLVMRunPassesResult(false, message: "failed to create LLVM pass-builder options")
+            }
+            return RunLLVMPassesOnFunction(fn, passes, targetMachine: targetMachine, options: defaultOptions.raw)
+        }
     }
     var result = LLVMRunPassesResult(false, message: "failed to run LLVM function passes")
     try (passesCString = unsafe { LibC.mallocCString(passes) }.asResource()) {

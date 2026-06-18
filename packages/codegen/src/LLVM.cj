@@ -112,7 +112,6 @@ foreign {
     func LLVMGetSourceFileName(module: LLVMModuleRef, len: CPointer<UIntNative>): CString
     func LLVMAddModuleFlag(module: LLVMModuleRef, behavior: Int32, key: CString, keyLen: UIntNative,
         value: LLVMMetadataRef): Unit
-    func LLVMVerifyModule(module: LLVMModuleRef, action: Int32, outMessage: CPointer<CString>): Int32
     func LLVMWriteBitcodeToFile(module: LLVMModuleRef, path: CString): Int32
     func LLVMPrintModuleToString(module: LLVMModuleRef): CString
     func LLVMDisposeMessage(message: CString): Unit

@@ -93,6 +93,12 @@ Implemented in this pass:
   loop interleaving/vectorization/unrolling, SLP vectorization, SCEV/Licm tuning caps, call-graph profile,
   merge-functions, inliner threshold, module passes, and function passes. The AA pipeline setter now keeps its
   `CString` alive for the options handle lifetime to match LLVM's borrowed-string contract.
+- Hardened the new pass-manager wrapper against LLVM's native null-options contract: module/function pass runners now
+  synthesize default `LLVMPassBuilderOptions` when callers omit them and reject null modules/functions before entering
+  `LLVMRunPasses`.
+- Moved the `LLVMVerifyModule` binding into the Analysis component next to `LLVMVerifyFunction`, added a checked module
+  verifier result that preserves LLVM's diagnostic text, and routed `CGModule.Verify()` through that wrapper instead of
+  open-coding raw message ownership.
 
 Known remaining gaps for this scope:
 
@@ -114,4 +120,4 @@ Known remaining gaps for this scope:
 
 Remaining `TODO(selfhost:CodeGen)` markers in this llvm-ffi slice: 0.
 
-Estimated behavior coverage for this llvm-ffi/module/context/IRBuilder slice: 71%.
+Estimated behavior coverage for this llvm-ffi/module/context/IRBuilder slice: 72%.
