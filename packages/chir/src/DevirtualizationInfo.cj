@@ -33,6 +33,28 @@ public class InheritanceInfo {
     }
 }
 
+private enum PackageRelationForAnalysis {
+    | NONE | CHILD | SAME_PACKAGE
+}
+
+private func PackageRelationForAnalysisIndex(relation: PackageRelationForAnalysis): Int64 {
+    return match (relation) {
+        case PackageRelationForAnalysis.NONE => 0
+        case PackageRelationForAnalysis.CHILD => 1
+        case PackageRelationForAnalysis.SAME_PACKAGE => 2
+    }
+}
+
+extend PackageRelationForAnalysis <: Equatable<PackageRelationForAnalysis> {
+    public operator func ==(right: PackageRelationForAnalysis): Bool {
+        return PackageRelationForAnalysisIndex(this) == PackageRelationForAnalysisIndex(right)
+    }
+
+    public operator func !=(right: PackageRelationForAnalysis): Bool {
+        return !(this == right)
+    }
+}
+
 public class DevirtualizationInfo {
     private let chirPackage: Package
     private let noSubPkg: Bool
@@ -79,10 +101,14 @@ public class DevirtualizationInfo {
         if (def.TestAttr(Attribute.PRIVATE)) {
             return true
         }
-        if (noSubPkg && def.GetPackageName() == chirPackage.GetName()) {
+        let relation = GetPackageRelationForAnalysis(def.GetPackageName(), chirPackage.GetName())
+        if (relation != PackageRelationForAnalysis.CHILD && relation != PackageRelationForAnalysis.SAME_PACKAGE) {
             return true
         }
-        return def.GetPackageName().isEmpty() || def.GetPackageName() == chirPackage.GetName()
+        if (noSubPkg) {
+            return true
+        }
+        return false
     }
 
     public func CollectConstMemberVarType(): Unit {
@@ -178,23 +204,27 @@ public class DevirtualizationInfo {
 
     private func CollectInheritance(customDef: CustomTypeDef, thisType: Type): Unit {
         if (let Some(classDef) <- (customDef as ClassDef)) {
-            if (let Some(superDef) <- classDef.GetSuperClassDef()) {
-                AddSubtypeInfo(superDef, thisType)
+            if (let Some(superTy) <- classDef.GetSuperClassTy()) {
+                AddSubtypeInfo(superTy, thisType)
+            } else if (let Some(superDef) <- classDef.GetSuperClassDef()) {
+                AddSubtypeInfo(ClassType(superDef, ArrayList<Type>()), thisType)
             }
-            for (interfaceDef in classDef.GetImplementedInterfaceDefs()) {
-                AddSubtypeInfo(interfaceDef, thisType)
+            for (interfaceTy in classDef.GetImplementedInterfaceTys()) {
+                AddSubtypeInfo(interfaceTy, thisType)
             }
         }
     }
 
-    private func AddSubtypeInfo(parentDef: ClassDef, subType: Type): Unit {
+    private func AddSubtypeInfo(parentType: ClassType, subType: Type): Unit {
+        let parentDef = parentType.GetClassDef()
         if (IsCoreObject(parentDef) || !CheckCustomTypeInternal(parentDef)) {
             return
         }
-        let parentType = ClassType(parentDef, ArrayList<Type>())
         let info = InheritanceInfo(parentType, subType)
         if (let Some(values) <- subtypeMap.get(parentDef.nodeId)) {
-            values.add(info)
+            if (!ContainsInheritanceInfo(values, info)) {
+                values.add(info)
+            }
         } else {
             let values = ArrayList<InheritanceInfo>()
             values.add(info)
@@ -296,6 +326,9 @@ private func FindStoredReturnValue(body: BlockGroup): Option<Value> {
 }
 
 private func GetCanonicalTypeForDef(customDef: CustomTypeDef): Option<Type> {
+    if (let Some(ty) <- customDef.GetType()) {
+        return ty
+    }
     if (let Some(classDef) <- (customDef as ClassDef)) {
         return ClassType(classDef, ArrayList<Type>())
     }
@@ -341,4 +374,28 @@ private func IsCoreObject(classDef: ClassDef): Bool {
 
 private func TypeKey(ty: Type): String {
     return ty.ToString()
+}
+
+private func ContainsInheritanceInfo(values: ArrayList<InheritanceInfo>, target: InheritanceInfo): Bool {
+    for (value in values) {
+        if (value.parentType.GetClassDef().nodeId == target.parentType.GetClassDef().nodeId &&
+            value.parentType.IsEqual(target.parentType) && value.subType.IsEqual(target.subType)) {
+            return true
+        }
+    }
+    return false
+}
+
+private func GetPackageRelationForAnalysis(srcFullPkgName: String, targetFullPkgName: String):
+    PackageRelationForAnalysis {
+    if (srcFullPkgName == targetFullPkgName) {
+        return PackageRelationForAnalysis.SAME_PACKAGE
+    }
+    if (srcFullPkgName.isEmpty() || targetFullPkgName.isEmpty()) {
+        return PackageRelationForAnalysis.NONE
+    }
+    if (srcFullPkgName.startsWith(targetFullPkgName + ".")) {
+        return PackageRelationForAnalysis.CHILD
+    }
+    return PackageRelationForAnalysis.NONE
 }

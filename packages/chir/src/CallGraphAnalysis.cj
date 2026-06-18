@@ -1,6 +1,7 @@
 package cangjie_compiler::chir
 
 import std.collection.*
+import std.sort.*
 
 public enum CallGraphEdgeKind {
     | VIRTUAL | DIRECT
@@ -105,11 +106,26 @@ public class CallGraphNode {
     }
 }
 
+private class VirtualCallInfo {
+    public let object: Value
+    public let methodName: String
+    public let paramTypes: ArrayList<Type> = ArrayList<Type>()
+
+    public init(object: Value, methodName: String, paramTypes: ArrayList<Type>) {
+        this.object = object
+        this.methodName = methodName
+        for (paramTy in paramTypes) {
+            this.paramTypes.add(paramTy)
+        }
+    }
+}
+
 public class CallGraph {
     private let functionMap: HashMap<Int64, CallGraphNode> = HashMap<Int64, CallGraphNode>()
     private let functionNodes: ArrayList<CallGraphNode> = ArrayList<CallGraphNode>()
     private let entryNode: CallGraphNode = CallGraphNode(0, None)
     private let exitNode: CallGraphNode = CallGraphNode(1, None)
+    private var devirtFuncInfo: Option<DevirtualizationInfo> = None
     private var nextNodeId: Int64 = 2
 
     public init(chirPackage: Package) {
@@ -117,7 +133,7 @@ public class CallGraph {
     }
 
     public init(chirPackage: Package, devirtFuncInfo: DevirtualizationInfo) {
-        let _ = devirtFuncInfo
+        this.devirtFuncInfo = devirtFuncInfo
         Build(chirPackage)
     }
 
@@ -197,7 +213,34 @@ public class CallGraph {
     }
 
     private func AddVirtualEdgeToNode(node: CallGraphNode, expr: Expression): Unit {
-        let possibleCallees = GetAllPossibleCalleeOfInvoke(expr.GetExprKindName(), ArrayList<Type>())
+        let callInfo = ExtractVirtualCallInfo(expr)
+        if (callInfo.isNone()) {
+            return
+        }
+        if (let Some(info) <- callInfo) {
+            let receiverTy = if (let Some(objectTy) <- info.object.GetType()) {
+                objectTy.StripAllRefs()
+            } else {
+                return
+            }
+            if (!receiverTy.IsClass()) {
+                return
+            }
+            let possibleCallees = GetAllPossibleCalleeOfInvoke(info.methodName, info.paramTypes)
+            sort(possibleCallees, by: { left: Function, right: Function =>
+                if (left.GetIdentifier() < right.GetIdentifier()) {
+                    Ordering.LT
+                } else if (left.GetIdentifier() > right.GetIdentifier()) {
+                    Ordering.GT
+                } else {
+                    Ordering.EQ
+                }
+            }, stable: true)
+            AddVirtualCalleesToNode(node, possibleCallees)
+        }
+    }
+
+    private func AddVirtualCalleesToNode(node: CallGraphNode, possibleCallees: ArrayList<Function>): Unit {
         for (possibleCallee in possibleCallees) {
             if (possibleCallee.IsFuncWithBody()) {
                 let edge = CallGraphEdge(GetOrCreateNode(possibleCallee), CallGraphEdgeKind.VIRTUAL)
@@ -212,20 +255,53 @@ public class CallGraph {
     }
 
     private func AddDirectEdgeToNode(node: CallGraphNode, expr: Expression): Unit {
-        var calledFunc: Option<Function> = None
-        if (expr.GetNumOfOperands() > 0) {
-            if (let Some(callee) <- expr.GetOperand(0).AsFunction()) {
-                if (callee.IsFuncWithBody()) {
-                    calledFunc = callee
-                }
-            }
-        }
+        let calledFunc = ResolveDirectCallee(expr)
         if (let Some(functionValue) <- calledFunc) {
             node.AddCalledEdge(CallGraphEdge(GetOrCreateNode(functionValue), CallGraphEdgeKind.DIRECT))
         } else {
             node.AddCalledEdge(CallGraphEdge(exitNode, CallGraphEdgeKind.DIRECT))
         }
     }
+}
+
+private func ExtractVirtualCallInfo(expr: Expression): Option<VirtualCallInfo> {
+    if (let Some(invoke) <- (expr as Invoke)) {
+        return VirtualCallInfo(invoke.GetObject(), invoke.GetMethodName(),
+            VirtualCallParamTypes(invoke.GetMethodType()))
+    }
+    if (let Some(invokeWithException) <- (expr as InvokeWithException)) {
+        return VirtualCallInfo(invokeWithException.GetObject(), invokeWithException.GetMethodName(),
+            VirtualCallParamTypes(invokeWithException.GetMethodType()))
+    }
+    return None
+}
+
+private func VirtualCallParamTypes(methodType: FuncType): ArrayList<Type> {
+    let allParamTypes = methodType.GetParamTypes()
+    let out = ArrayList<Type>()
+    var idx: Int64 = 1
+    while (idx < allParamTypes.size) {
+        out.add(allParamTypes[idx])
+        idx++
+    }
+    return out
+}
+
+private func ResolveDirectCallee(expr: Expression): Option<Function> {
+    var calleeValue: Option<Value> = None
+    if (let Some(apply) <- (expr as Apply)) {
+        calleeValue = apply.GetCallee()
+    } else if (let Some(applyWithException) <- (expr as ApplyWithException)) {
+        calleeValue = applyWithException.GetCallee()
+    }
+    if (let Some(value) <- calleeValue) {
+        if (let Some(callee) <- value.AsFunction()) {
+            if (callee.IsFuncWithBody()) {
+                return callee
+            }
+        }
+    }
+    return None
 }
 
 public class CallGraphAnalysis {
