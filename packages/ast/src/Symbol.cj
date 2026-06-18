@@ -78,6 +78,7 @@ public class SymbolApi {
 
     public init() {}
 
+    @OverflowWrapping
     public static func NextHashID(fileHash: UInt64): HashID {
         ids++
         return HashID(fileHash, ids)
