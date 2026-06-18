@@ -18,6 +18,8 @@ import cangjie_compiler::chir.CHIRContext as ChirContext
 import cangjie_compiler::chir.FuncKind as ChirFuncKind
 import cangjie_compiler::chir.Package as RealCHIRPackage
 import cangjie_compiler::chir.Type as ChirType
+import cangjie_compiler::chir.TryLowerRealASTPackage
+import cangjie_compiler::ast.Package as RealASTPackage
 import cangjie_compiler::codegen.CHIRData as CodegenCHIRData
 import cangjie_compiler::codegen.ClearPackageModules
 import cangjie_compiler::codegen.GenPackageModules
@@ -30,6 +32,23 @@ public func BuildRealCHIRForFrontendPackage(instance: CompilerInstance, pkg: Pac
     let builder = ChirBuilder(instance.chirData.GetRealCHIRContext())
     let packageSpec = buildRealPackageSpec(pkg, builder.context)
     let lowered = ChirAST2CHIR(builder).LowerPackage(packageSpec).pkg
+    let pluginResult = TryRunCHIRMetaTransforms(instance.metaTransformPluginBuilder, builder, lowered)
+    if (!pluginResult.succeed) {
+        instance.diag.DiagnoseRefactor(DiagKindRefactor.plugin_throws_exception, DEFAULT_POSITION)
+        return None
+    }
+    if (instance.invocation.globalOptions.NeedDumpCHIRToScreen()) {
+        print(ChirCHIRPrinter().PrintPackage(lowered))
+    }
+    return Some(lowered)
+}
+
+public func BuildRealCHIRForASTPackage(instance: CompilerInstance, pkg: RealASTPackage): Option<RealCHIRPackage> {
+    let builder = ChirBuilder(instance.chirData.GetRealCHIRContext())
+    let lowered = match (TryLowerRealASTPackage(pkg, builder)) {
+        case Some(value) => value
+        case None => return None
+    }
     let pluginResult = TryRunCHIRMetaTransforms(instance.metaTransformPluginBuilder, builder, lowered)
     if (!pluginResult.succeed) {
         instance.diag.DiagnoseRefactor(DiagKindRefactor.plugin_throws_exception, DEFAULT_POSITION)

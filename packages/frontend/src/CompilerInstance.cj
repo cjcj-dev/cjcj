@@ -1,5 +1,9 @@
 package cangjie_compiler::frontend
 
+import cangjie_compiler::ast.AddCurFile
+import cangjie_compiler::ast.Package as RealASTPackage
+import cangjie_compiler::parse.DiagnosticEngine as ParseDiagnosticEngine
+import cangjie_compiler::parse.Parser as RealParser
 import cangjie_compiler::meta_transformation.MetaTransformPluginBuilder
 import cangjie_compiler::meta_transformation.NativeMetaTransformPlugin
 import std.collection.*
@@ -108,6 +112,7 @@ public class CompilerInstance {
     public var isCJLint: Bool = false
     public var buildTrie: Bool = true
     public let srcPkgs: ArrayList<Package> = ArrayList<Package>()
+    public let realASTPkgs: HashMap<String, RealASTPackage> = HashMap<String, RealASTPackage>()
     public let chirData: CHIRData = CHIRData()
     private let pkgs: ArrayList<Package> = ArrayList<Package>()
     private let pkgCtxMap: HashMap<String, ASTContext> = HashMap<String, ASTContext>()
@@ -147,6 +152,7 @@ public class CompilerInstance {
         }
         astResourcesDestroyed = true
         srcPkgs.clear()
+        realASTPkgs.clear()
         pkgs.clear()
         pkgCtxMap.clear()
         gim = None
@@ -245,6 +251,11 @@ public class CompilerInstance {
             if (globalOpts.NeedDumpASTToFile()) {
                 DumpAST(GetSourcePackages(), globalOpts.output, "parse")
             }
+        }
+        if (ret) {
+            CaptureRealASTPackagesIfEnabled()
+        } else {
+            realASTPkgs.clear()
         }
         return ret
     }
@@ -382,14 +393,95 @@ public class CompilerInstance {
         return true
     }
 
+    public func IsRealPipelineEnabled(): Bool {
+        return EnvFlagEnabled("CJ_REAL_PIPELINE")
+    }
+
+    public func IsRealPipelineVerbose(): Bool {
+        return EnvFlagEnabled("CJ_REAL_PIPELINE_VERBOSE")
+    }
+
+    private func EnvFlagEnabled(name: String): Bool {
+        let value = invocation.globalOptions.environment.allVariables.get(name) ?? ""
+        return value == "1" || value == "true" || value == "TRUE" || value == "on" || value == "yes"
+    }
+
+    private func CaptureRealASTPackagesIfEnabled(): Unit {
+        realASTPkgs.clear()
+        if (!IsRealPipelineEnabled()) {
+            return
+        }
+        for (pkg in srcPkgs) {
+            if (let Some(realPkg) <- ParseRealASTPackageForFacadePackage(pkg)) {
+                realASTPkgs[pkg.fullPackageName] = realPkg
+            } else if (IsRealPipelineVerbose()) {
+                eprintln("[real-pipeline] failed to build real AST package for '" +
+                    pkg.fullPackageName + "'; falling back")
+            }
+        }
+    }
+
+    private func ParseRealASTPackageForFacadePackage(pkg: Package): Option<RealASTPackage> {
+        let realPkg = RealASTPackage(pkg.fullPackageName)
+        realPkg.noSubPkg = pkg.noSubPkg
+        realPkg.needExported = pkg.needExported
+        for (file in pkg.files) {
+            let fileID = file.begin.fileID
+            let source = sm.GetSource(fileID)
+            if (source.buffer.isEmpty()) {
+                return None
+            }
+            let parseDiag = ParseDiagnosticEngine()
+            let parser = RealParser(fileID, source.buffer, parseDiag, sm)
+            let realFile = parser.ParseTopLevel()
+            if (parseDiag.HasError()) {
+                return None
+            }
+            realFile.filePath = file.filePath
+            realFile.fileName = file.fileName
+            realFile.fileHash = file.fileHash
+            realFile.begin = file.begin
+            realFile.end = file.end
+            realFile.curPackage = Some(realPkg)
+            realFile.indexOfPackage = UInt64(realPkg.files.size)
+            realPkg.files.add(realFile)
+        }
+        AddCurFile(realPkg)
+        return Some(realPkg)
+    }
+
     public func GenerateCHIRForPkg(pkg: Package): Bool {
         if (pkg.files.isEmpty()) {
             return true
         }
-        if (let Some(realPkg) <- BuildRealCHIRForFrontendPackage(this, pkg)) {
-            chirData.AppendNewRealPackage(realPkg)
-        } else {
-            return false
+        var usedRealASTPath = false
+        if (IsRealPipelineEnabled()) {
+            if (let Some(realASTPkg) <- realASTPkgs.get(pkg.fullPackageName)) {
+                if (let Some(realPkg) <- BuildRealCHIRForASTPackage(this, realASTPkg)) {
+                    chirData.AppendNewRealPackage(realPkg)
+                    usedRealASTPath = true
+                    if (IsRealPipelineVerbose()) {
+                        eprintln("[real-pipeline] lowered main via real AST2CHIR")
+                    }
+                } else {
+                    if (diag.GetErrorCount() != 0) {
+                        return false
+                    }
+                    if (IsRealPipelineVerbose()) {
+                        eprintln("[real-pipeline] unsupported real AST shape for package '" +
+                            pkg.fullPackageName + "'; falling back")
+                    }
+                }
+            } else if (IsRealPipelineVerbose()) {
+                eprintln("[real-pipeline] no stored real AST package for '" + pkg.fullPackageName + "'; falling back")
+            }
+        }
+        if (!usedRealASTPath) {
+            if (let Some(realPkg) <- BuildRealCHIRForFrontendPackage(this, pkg)) {
+                chirData.AppendNewRealPackage(realPkg)
+            } else {
+                return false
+            }
         }
         let chirPkg = CHIRPackage(pkg.fullPackageName)
         chirPkg.fileCount = pkg.files.size
