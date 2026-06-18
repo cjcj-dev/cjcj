@@ -21,6 +21,7 @@ private let DIAG_INT_MODULUS: Int64 = 4294967296
 private let DIAG_INT_SIGN_BIT: Int64 = 2147483648
 private let DIAG_UINT_MASK: UInt64 = 0xffffffffu64
 private let DIAG_UINT_SIGN_BIT: UInt64 = 0x80000000u64
+private let DIAG_INT64_SIGN_BIT: UInt64 = 0x8000000000000000u64
 
 private func NarrowDiagnosticInt(value: Int64): Int64 {
     var remainder = value % DIAG_INT_MODULUS
@@ -39,6 +40,13 @@ private func NarrowDiagnosticUInt(value: UInt64): Int64 {
         return Int64(lowBits) - DIAG_INT_MODULUS
     }
     return Int64(lowBits)
+}
+
+private func SignedDiagnosticInt64Bits(value: Int64): UInt64 {
+    if (value >= 0) {
+        return UInt64(value)
+    }
+    return DIAG_INT64_SIGN_BIT + UInt64(value - Int64.Min)
 }
 
 private func DiagArgumentKindIndex(kind: DiagArgumentKind): Int64 {
@@ -144,8 +152,9 @@ public struct Range <: Hashable & Equatable<Range> {
     }
 
     public func Hash(): UInt64 {
-        return begin.fileID ^ (UInt64(begin.line) << 8) ^ (UInt64(begin.column) << 16) ^
-            (begin.fileID << 24) ^ (UInt64(begin.line) << 32) ^ (UInt64(begin.column) << 40)
+        return begin.fileID ^ (SignedDiagnosticInt64Bits(begin.line) << 8) ^
+            (SignedDiagnosticInt64Bits(begin.column) << 16) ^ (begin.fileID << 24) ^
+            (SignedDiagnosticInt64Bits(begin.line) << 32) ^ (SignedDiagnosticInt64Bits(begin.column) << 40)
     }
 
     public func EqualForHash(right: Range): Bool {
