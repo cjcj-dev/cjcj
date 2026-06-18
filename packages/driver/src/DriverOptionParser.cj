@@ -731,6 +731,10 @@ public func IsFrontendInput(input: String): Bool {
 public func ClassifyInput(opts: DriverOptions, input: String, index: UInt64): Bool {
     let extension = FileUtil.GetFileExtension(input)
     if (extension == "cj") {
+        if (opts.compilePackage) {
+            eprintln("error: source file '${input}' cannot be used with '-p' or '--package'.")
+            return false
+        }
         if (let None <- opts.ValidateInputFilePath(input)) {
             return false
         }
@@ -756,7 +760,21 @@ public func ClassifyInput(opts: DriverOptions, input: String, index: UInt64): Bo
             return true
         }
         return false
+    } else if (FileUtil.FileExist(input) && FileUtil.IsDir(input)) {
+        if (!opts.compilePackage) {
+            eprintln("error: source file path '${input}' requires '-p' or '--package'.")
+            return false
+        }
+        if (let Some(path) <- opts.ValidateDirectoryPath(input)) {
+            opts.packagePaths.add(path)
+            return true
+        }
+        return false
     } else if (let Some(_) <- opts.ValidateInputFilePath(input)) {
+        if (opts.compilePackage) {
+            eprintln("error: source file '${input}' cannot be used with '-p' or '--package'.")
+            return false
+        }
         opts.srcFiles.add(input)
         return true
     }

@@ -78,6 +78,7 @@ public class DriverOptions {
     public var outputDir: Option<String> = None
     public var moduleName: String = "main"
     public var moduleSrcPath: String = ""
+    public let packagePaths: ArrayList<String> = ArrayList<String>()
     public var showUsage: Bool = false
     public var printVersionOnly: Bool = false
     public var enableVerbose: Bool = false
@@ -349,6 +350,9 @@ public class DriverOptions {
                 out.add("--module-src-path")
                 out.add(moduleSrcPath)
             }
+            for (packagePath in packagePaths) {
+                out.add(packagePath)
+            }
             if (noSubPkg) { out.add("--no-sub-pkg") }
             if (scanDepPkg) { out.add("--scan-dependency") }
             if (enableCompileDebug) { out.add("-g") }
@@ -408,6 +412,9 @@ public class DriverOptions {
             compileTarget = CompileTarget.EXECUTABLE
         }
         if (!ReprocessOutputs()) {
+            return false
+        }
+        if (!ValidatePackageInputs()) {
             return false
         }
         if (!ReprocessInputs()) {
@@ -502,6 +509,13 @@ public class DriverOptions {
                 AddInputForOverwriteCheck(inputs, FileUtil.JoinPath(moduleSrcPath, fileName))
             }
         }
+        if (compilePackage) {
+            for (packagePath in packagePaths) {
+                for (fileName in FileUtil.GetAllFilesUnderCurrentPath(packagePath, "cj")) {
+                    AddInputForOverwriteCheck(inputs, FileUtil.JoinPath(packagePath, fileName))
+                }
+            }
+        }
         for (inputFile in inputs) {
             if (let Some(absInput) <- FileUtil.GetAbsPath(inputFile)) {
                 if (absInput == output) {
@@ -512,6 +526,31 @@ public class DriverOptions {
                 eprintln("error: no such file or directory '${inputFile}'")
                 return false
             }
+        }
+        return true
+    }
+
+    private func ValidatePackageInputs(): Bool {
+        if (!compilePackage) {
+            return true
+        }
+        if (packagePaths.isEmpty() && moduleSrcPath.isEmpty()) {
+            eprintln("error: package directory is required when '-p' or '--package' is specified.")
+            return false
+        }
+        let seen = ArrayList<String>()
+        if (!moduleSrcPath.isEmpty()) {
+            if (let Some(absPath) <- FileUtil.GetAbsPath(moduleSrcPath)) {
+                seen.add(absPath)
+            }
+        }
+        for (packagePath in packagePaths) {
+            let canonical = FileUtil.GetAbsPath(packagePath) ?? FileUtil.NormalizePath(packagePath)
+            if (seen.contains(canonical)) {
+                eprintln("error: duplicate package path '${packagePath}' specified with '-p'")
+                return false
+            }
+            seen.add(canonical)
         }
         return true
     }

@@ -57,6 +57,11 @@ Current status:
   reject output paths that would overwrite normalized inputs, enforce the
   `lib-macro_` output-name guard, and validate `--compile-macro` conflicts with
   explicit output-type or output-file choices.
+- Package-directory input handling now follows the C++ `ProcessInputs` model
+  more closely: directory inputs are accepted only in `-p`/`--package` mode,
+  multiple package directories are retained in parse order, duplicate canonical
+  package paths are rejected, and package source trees participate in output
+  overwrite checks.
 - OHOS target post-processing now mirrors `DisableStaticStdForOhos` by warning
   on `--static-std` and forcing dynamic standard-library selection before
   static-link validation.
@@ -127,9 +132,10 @@ Residual fidelity risks:
   the frontend/codegen package boundary exposing the C++ in-process
   `GlobalOptions` state to Driver, and some platform-specific runtime library
   edge cases remain below the C++ driver.
-- Package-directory input handling is still below the C++ `ProcessInputs`
-  model because the Driver package has not yet grown the full package path and
-  duplicate-canonicalization state owned by the shared option layer.
+- Package-directory input handling now has Driver-owned package path state and
+  duplicate-canonicalization parity for direct directory inputs. Some scan-
+  dependency `.cjo` package-input diagnostics still depend on broader shared
+  option/front-end package state.
 - The Windows-specific `main-frontend.cpp` process wrapper is represented by a
   direct Cangjie frontend shim rather than a separate `CreateProcess`-style
   executable launcher.
