@@ -43,6 +43,7 @@ import cangjie_compiler::ast.TokenKindValue as AstTokenKindValue
 import cangjie_compiler::ast.Ty as AstTy
 import cangjie_compiler::ast.TupleLit as AstTupleLit
 import cangjie_compiler::ast.TuplePattern as AstTuplePattern
+import cangjie_compiler::ast.TypePattern as AstTypePattern
 import cangjie_compiler::ast.TypeConvExpr as AstTypeConvExpr
 import cangjie_compiler::ast.UnaryExpr as AstUnaryExpr
 import cangjie_compiler::ast.VarDecl as AstVarDecl
@@ -1024,18 +1025,34 @@ public class Translator {
         var caseIndex: Int64 = 0
         while (caseIndex < expr.matchCases.size) {
             let matchCase = expr.matchCases[caseIndex]
-            if (matchCase.patternGuard.isSome()) {
-                throw IllegalArgumentException("not yet ported in faithful AST2CHIR: match pattern guard")
-            }
-            if (matchCase.patterns.size != 1) {
-                throw IllegalArgumentException("not yet ported in faithful AST2CHIR: match or-pattern")
-            }
             let bodyBlock = builder.CreateBlock(group)
             let nextBlock = builder.CreateBlock(group)
-            TranslateSinglePatternBranch(matchCase.patterns[0], selector, bodyBlock, nextBlock)
+            let matchedBlock = if (matchCase.patternGuard.isSome()) { builder.CreateBlock(group) } else { bodyBlock }
+            if (matchCase.patterns.size == 1) {
+                TranslateSinglePatternBranch(matchCase.patterns[0], selector, matchedBlock, nextBlock)
+                currentBlock = matchedBlock
+                BindPatternValues(matchCase.patterns[0], selector)
+            } else {
+                var patternIndex: Int64 = 0
+                while (patternIndex < matchCase.patterns.size) {
+                    let afterPattern = if (patternIndex == matchCase.patterns.size - 1) {
+                        nextBlock
+                    } else {
+                        builder.CreateBlock(group)
+                    }
+                    TranslateSinglePatternBranch(matchCase.patterns[patternIndex], selector, matchedBlock, afterPattern)
+                    currentBlock = afterPattern
+                    patternIndex++
+                }
+                currentBlock = matchedBlock
+            }
+            if (let Some(guardExpr) <- matchCase.patternGuard) {
+                let guardValue = Translator.TranslateASTNode(guardExpr, this) ??
+                    throw IllegalStateException("faithful AST2CHIR match pattern guard produced no value")
+                builder.CreateBranch(guardValue, bodyBlock, nextBlock, CurrentBlock())
+            }
 
             currentBlock = bodyBlock
-            BindPatternValues(matchCase.patterns[0], selector)
             let bodyValue = Translator.TranslateASTNode(RequireBlock(matchCase.exprOrDecls, "match case body"), this)
             StoreIfResult(resultLoc, bodyValue)
             if (CurrentBlock().GetTerminator().isNone()) {
@@ -1114,8 +1131,15 @@ public class Translator {
             return
         }
         if (let Some(enumPattern) <- (pattern as AstEnumPattern)) {
-            let cond = TranslateEnumPatternCondition(enumPattern, selector)
-            builder.CreateBranch(cond, trueBlock, falseBlock, CurrentBlock())
+            TranslateEnumPatternBranch(enumPattern, selector, trueBlock, falseBlock)
+            return
+        }
+        if (let Some(tuplePattern) <- (pattern as AstTuplePattern)) {
+            TranslateTuplePatternBranch(tuplePattern, selector, trueBlock, falseBlock)
+            return
+        }
+        if (let Some(typePattern) <- (pattern as AstTypePattern)) {
+            TranslateTypePatternBranch(typePattern, selector, trueBlock, falseBlock)
             return
         }
         throw IllegalArgumentException("not yet ported in faithful AST2CHIR match pattern: ${ASTKindName(pattern.astKind)}")
@@ -1134,22 +1158,112 @@ public class Translator {
             }
             return
         }
-        if (let Some(enumPattern) <- (pattern as AstEnumPattern)) {
-            if (!enumPattern.patterns.isEmpty()) {
-                throw IllegalArgumentException("not yet ported in faithful AST2CHIR: enum payload pattern binding")
+        if (let Some(tuplePattern) <- (pattern as AstTuplePattern)) {
+            var idx: Int64 = 0
+            for (subPattern in tuplePattern.patterns) {
+                let fieldValue = ExtractPatternField(selector, idx, chirTy.TranslateType(RequireAstTy(subPattern)))
+                BindPatternValues(subPattern, fieldValue)
+                idx++
             }
+            return
+        }
+        if (let Some(enumPattern) <- (pattern as AstEnumPattern)) {
+            var idx: Int64 = 0
+            for (subPattern in enumPattern.patterns) {
+                let payloadValue = ExtractPatternField(selector, idx + 1,
+                    chirTy.TranslateType(RequireAstTy(subPattern)))
+                BindPatternValues(subPattern, payloadValue)
+                idx++
+            }
+            return
+        }
+        if (let Some(typePattern) <- (pattern as AstTypePattern)) {
+            if (let Some(inner) <- typePattern.pattern) {
+                BindPatternValues(inner, selector)
+            }
+            return
         }
     }
 
     private func TranslateEnumPatternCondition(pattern: AstEnumPattern, selector: Value): Value {
-        if (!pattern.patterns.isEmpty()) {
-            throw IllegalArgumentException("not yet ported in faithful AST2CHIR: enum payload pattern")
-        }
         let tagValue = GetEnumTagValue(pattern, selector)
         let tagConst = RequireResult(builder.CreateConstant(builder.context.GetUInt64Ty(),
             IntLiteral(GetEnumPatternId(pattern)), CurrentBlock()))
         return RequireResult(builder.CreateBinaryExpression(ExprKind.EQUAL, builder.context.GetBoolTy(), tagValue,
             tagConst, CurrentBlock()))
+    }
+
+    private func TranslateEnumPatternBranch(pattern: AstEnumPattern, selector: Value, trueBlock: Block,
+        falseBlock: Block): Unit {
+        let cond = TranslateEnumPatternCondition(pattern, selector)
+        if (pattern.patterns.isEmpty()) {
+            builder.CreateBranch(cond, trueBlock, falseBlock, CurrentBlock())
+            return
+        }
+        let payloadBlock = builder.CreateBlock(RequireParentBlockGroup(CurrentBlock(), "enum pattern payload"))
+        builder.CreateBranch(cond, payloadBlock, falseBlock, CurrentBlock())
+        currentBlock = payloadBlock
+        TranslatePatternSequence(pattern.patterns, selector, 1, trueBlock, falseBlock)
+    }
+
+    private func TranslateTuplePatternBranch(pattern: AstTuplePattern, selector: Value, trueBlock: Block,
+        falseBlock: Block): Unit {
+        TranslatePatternSequence(pattern.patterns, selector, 0, trueBlock, falseBlock)
+    }
+
+    private func TranslateTypePatternBranch(pattern: AstTypePattern, selector: Value, trueBlock: Block,
+        falseBlock: Block): Unit {
+        if (pattern.matchBeforeRuntime) {
+            if (let Some(inner) <- pattern.pattern) {
+                TranslateSinglePatternBranch(inner, selector, trueBlock, falseBlock)
+            } else {
+                builder.CreateGoTo(trueBlock, CurrentBlock())
+            }
+            return
+        }
+        if (pattern.needRuntimeTypeCheck) {
+            let typeCond = RequireResult(builder.CreateInstanceOf(builder.context.GetBoolTy(), selector,
+                chirTy.TranslateType(RequireAstTy(pattern)), CurrentBlock()))
+            if (let Some(inner) <- pattern.pattern) {
+                let innerBlock = builder.CreateBlock(RequireParentBlockGroup(CurrentBlock(), "type pattern"))
+                builder.CreateBranch(typeCond, innerBlock, falseBlock, CurrentBlock())
+                currentBlock = innerBlock
+                TranslateSinglePatternBranch(inner, selector, trueBlock, falseBlock)
+            } else {
+                builder.CreateBranch(typeCond, trueBlock, falseBlock, CurrentBlock())
+            }
+            return
+        }
+        let constantFalse = RequireResult(builder.CreateConstant(builder.context.GetBoolTy(), BoolLiteral(false),
+            CurrentBlock()))
+        builder.CreateBranch(constantFalse, trueBlock, falseBlock, CurrentBlock())
+    }
+
+    private func TranslatePatternSequence(patterns: ArrayList<AstPattern>, selector: Value, fieldOffset: Int64,
+        trueBlock: Block, falseBlock: Block): Unit {
+        if (patterns.isEmpty()) {
+            builder.CreateGoTo(trueBlock, CurrentBlock())
+            return
+        }
+        let group = RequireParentBlockGroup(CurrentBlock(), "nested pattern")
+        var idx: Int64 = 0
+        while (idx < patterns.size) {
+            let subPattern = patterns[idx]
+            let nextBlock = if (idx == patterns.size - 1) { trueBlock } else { builder.CreateBlock(group) }
+            let fieldValue = ExtractPatternField(selector, idx + fieldOffset,
+                chirTy.TranslateType(RequireAstTy(subPattern)))
+            TranslateSinglePatternBranch(subPattern, fieldValue, nextBlock, falseBlock)
+            if (idx != patterns.size - 1) {
+                currentBlock = nextBlock
+            }
+            idx++
+        }
+    }
+
+    private func ExtractPatternField(value: Value, index: Int64, fieldTy: Type): Value {
+        let path = ArrayList<UInt64>()
+        path.add(UInt64(index))
+        return RequireResult(builder.CreateField(fieldTy, GetDerefedValue(value), path, CurrentBlock()))
     }
 
     private func GetEnumTagValue(pattern: AstEnumPattern, selector: Value): Value {
