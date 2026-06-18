@@ -202,6 +202,16 @@ extend ParserImpl {
         let pos = lastToken.Begin()
         anno.lsquarePos = pos
         anno.condExpr = ParseExpr()
+        if (let Some(expr) <- anno.condExpr) {
+            if (expr.astKind != ASTKind.UNARY_EXPR && expr.astKind != ASTKind.BINARY_EXPR &&
+                expr.astKind != ASTKind.REF_EXPR && !expr.isBroken) {
+                diag.DiagnoseRefactor(
+                    DiagKindRefactor.INVALID_ANNOTATION,
+                    expr.begin,
+                    "unrecognized expression in @When condition")
+                anno.isBroken = true
+            }
+        }
         if (!Skip(TokenKind.RSQUARE)) {
             diag.DiagnoseRefactor(DiagKindRefactor.UNTERMINATED_DELIMITER, pos, "expected ']' after @When condition")
             ConsumeUntil(TokenKind.NL)
