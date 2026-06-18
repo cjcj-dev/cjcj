@@ -25,16 +25,27 @@ public open class Decl <: Node {
         for (anno in annos) { annotations.add(anno) }
     }
 
-    public func EnableAttr(attr: Attribute): Unit {
+    public override func EnableAttr(attr: Attribute): Unit {
         if (!TestAttr(attr)) {
             attributes.add(attr)
         }
-        if (attr == Attribute.IS_BROKEN || attr == Attribute.HAS_BROKEN) {
-            isBroken = true
+        if (attr == Attribute.HAS_BROKEN && !TestAttr(Attribute.IS_BROKEN)) {
+            attributes.add(Attribute.IS_BROKEN)
         }
     }
 
-    public func TestAttr(attr: Attribute): Bool {
+    public override func DisableAttr(attr: Attribute): Unit {
+        var idx: Int64 = 0
+        while (idx < attributes.size) {
+            if (attributes[idx] == attr) {
+                attributes.remove(at: idx)
+                return
+            }
+            idx++
+        }
+    }
+
+    public override func TestAttr(attr: Attribute): Bool {
         for (item in attributes) {
             if (item == attr) {
                 return true
