@@ -21,7 +21,7 @@ Reference inspected:
 Implemented in this pass:
 
 - Expanded the LLVM C API surface into CodeGen-owned component files:
-  `LLVMAnalysis.cj`, `LLVMBitcode.cj`, `LLVMPassBuilder.cj`, and `LLVMTargetMachine.cj`.
+  `LLVMAnalysis.cj`, `LLVMBitcode.cj`, `LLVMMetadata.cj`, `LLVMPassBuilder.cj`, and `LLVMTargetMachine.cj`.
 - Added bindings for verifier/function analysis helpers, memory-buffer bitcode and IR reading, bitcode memory/FD
   writing, target/target-machine/data-layout APIs, target-machine emission APIs, and the new pass-manager
   `LLVMRunPasses` API. These are external LLVM bindings only; LLVM is not reimplemented.
@@ -30,6 +30,11 @@ Implemented in this pass:
 - Extended the core LLVM binding with source-file-name access, module printing, metadata strings, builder
   insertion-before support, basic-block insertion before another block, fast-math flag application, and safe
   LLVM-message-to-Cangjie-string conversion.
+- Added a dedicated LLVM metadata wrapper surface for C++ `MDString`/`MDTuple` and named-metadata usage:
+  metadata-kind lookup, MD node construction/readback, named metadata lookup/insertion/enumeration/operand addition,
+  and instruction/global metadata set/erase helpers. This unblocks the C++ patterns used by package-init metadata,
+  CHIR splitting metadata, incremental metadata, invariant-load markers, type metadata, and reflection/AggType tags
+  while keeping all native behavior in LLVM.
 - Matched more C++ `CGModule` behavior by adding the `CJBC`, `Cangjie_OPT`, and macOS `Cangjie_PACKAGE_ID` module
   flags, making function/global creation get-or-insert instead of blindly adding duplicate LLVM symbols, printing
   verifier diagnostics, and generating the C++-style `UNIT_VAL_STR` global for unit values.
@@ -124,7 +129,9 @@ Known remaining gaps for this scope:
 - The C API `LLVMParseBitcodeInContext2` and `LLVMGetBitcodeModuleInContext2` do not expose diagnostic strings; the
   wrapper reports faithful success/failure and ownership but cannot preserve the richer C++ `SMDiagnostic` text for
   those bitcode-only paths without adding a native shim.
+- Metadata creation/attachment/readback now has a faithful LLVM C API wrapper surface, but higher-level generation of
+  package/type/reflection/incremental metadata is still only partially driven by the current self-host emitters.
 
 Remaining `TODO(selfhost:CodeGen)` markers in this llvm-ffi slice: 0.
 
-Estimated behavior coverage for this llvm-ffi/module/context/IRBuilder slice: 73%.
+Estimated behavior coverage for this llvm-ffi/module/context/IRBuilder slice: 74%.

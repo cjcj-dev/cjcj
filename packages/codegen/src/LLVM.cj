@@ -10,6 +10,7 @@ public type LLVMBasicBlockRef = CPointer<Unit>
 public type LLVMBuilderRef = CPointer<Unit>
 public type LLVMMemoryBufferRef = CPointer<Unit>
 public type LLVMMetadataRef = CPointer<Unit>
+public type LLVMNamedMDNodeRef = CPointer<Unit>
 public type LLVMAttributeRef = CPointer<Unit>
 public type LLVMUseRef = CPointer<Unit>
 public type LLVMDIBuilderRef = CPointer<Unit>
@@ -112,6 +113,16 @@ foreign {
     func LLVMGetSourceFileName(module: LLVMModuleRef, len: CPointer<UIntNative>): CString
     func LLVMAddModuleFlag(module: LLVMModuleRef, behavior: Int32, key: CString, keyLen: UIntNative,
         value: LLVMMetadataRef): Unit
+    func LLVMGetFirstNamedMetadata(module: LLVMModuleRef): LLVMNamedMDNodeRef
+    func LLVMGetLastNamedMetadata(module: LLVMModuleRef): LLVMNamedMDNodeRef
+    func LLVMGetNextNamedMetadata(namedMDNode: LLVMNamedMDNodeRef): LLVMNamedMDNodeRef
+    func LLVMGetPreviousNamedMetadata(namedMDNode: LLVMNamedMDNodeRef): LLVMNamedMDNodeRef
+    func LLVMGetNamedMetadata(module: LLVMModuleRef, name: CString, nameLen: UIntNative): LLVMNamedMDNodeRef
+    func LLVMGetOrInsertNamedMetadata(module: LLVMModuleRef, name: CString, nameLen: UIntNative): LLVMNamedMDNodeRef
+    func LLVMGetNamedMetadataName(namedMDNode: LLVMNamedMDNodeRef, nameLen: CPointer<UIntNative>): CString
+    func LLVMGetNamedMetadataNumOperands(module: LLVMModuleRef, name: CString): UInt32
+    func LLVMGetNamedMetadataOperands(module: LLVMModuleRef, name: CString, dest: CPointer<LLVMValueRef>): Unit
+    func LLVMAddNamedMetadataOperand(module: LLVMModuleRef, name: CString, value: LLVMValueRef): Unit
     func LLVMWriteBitcodeToFile(module: LLVMModuleRef, path: CString): Int32
     func LLVMPrintModuleToString(module: LLVMModuleRef): CString
     func LLVMDisposeMessage(message: CString): Unit
@@ -160,6 +171,11 @@ foreign {
     func LLVMIsDeclaration(global: LLVMValueRef): Int32
     func LLVMSetGlobalConstant(global: LLVMValueRef, isConstant: Int32): Unit
     func LLVMSetInitializer(global: LLVMValueRef, constantVal: LLVMValueRef): Unit
+    func LLVMGetAlignment(value: LLVMValueRef): UInt32
+    func LLVMSetAlignment(value: LLVMValueRef, bytes: UInt32): Unit
+    func LLVMGlobalSetMetadata(global: LLVMValueRef, kind: UInt32, metadata: LLVMMetadataRef): Unit
+    func LLVMGlobalEraseMetadata(global: LLVMValueRef, kind: UInt32): Unit
+    func LLVMGlobalClearMetadata(global: LLVMValueRef): Unit
     func LLVMCountParams(fn: LLVMValueRef): UInt32
     func LLVMGetParam(fn: LLVMValueRef, index: UInt32): LLVMValueRef
     func LLVMHasPersonalityFn(fn: LLVMValueRef): Int32
@@ -186,9 +202,20 @@ foreign {
     func LLVMConstInt(intType: LLVMTypeRef, value: UInt64, signExtend: Int32): LLVMValueRef
     func LLVMConstReal(realType: LLVMTypeRef, value: Float64): LLVMValueRef
     func LLVMConstStringInContext(context: LLVMContextRef, str: CString, length: UInt32, dontNullTerminate: Int32): LLVMValueRef
+    func LLVMGetMDKindIDInContext(context: LLVMContextRef, name: CString, nameLen: UInt32): UInt32
+    func LLVMGetMDKindID(name: CString, nameLen: UInt32): UInt32
     func LLVMMDStringInContext2(context: LLVMContextRef, str: CString, length: UIntNative): LLVMMetadataRef
+    func LLVMMDNodeInContext2(context: LLVMContextRef, metadata: CPointer<LLVMMetadataRef>,
+        count: UIntNative): LLVMMetadataRef
     func LLVMMetadataAsValue(context: LLVMContextRef, metadata: LLVMMetadataRef): LLVMValueRef
     func LLVMValueAsMetadata(value: LLVMValueRef): LLVMMetadataRef
+    func LLVMGetMDString(value: LLVMValueRef, len: CPointer<UInt32>): CString
+    func LLVMGetMDNodeNumOperands(value: LLVMValueRef): UInt32
+    func LLVMGetMDNodeOperands(value: LLVMValueRef, dest: CPointer<LLVMValueRef>): Unit
+    func LLVMReplaceMDNodeOperandWith(value: LLVMValueRef, index: UInt32, replacement: LLVMMetadataRef): Unit
+    func LLVMHasMetadata(value: LLVMValueRef): Int32
+    func LLVMGetMetadata(value: LLVMValueRef, kindID: UInt32): LLVMValueRef
+    func LLVMSetMetadata(value: LLVMValueRef, kindID: UInt32, node: LLVMValueRef): Unit
     func LLVMTypeOf(value: LLVMValueRef): LLVMTypeRef
     func LLVMGetValueContext(value: LLVMValueRef): LLVMContextRef
     func LLVMIsAFunction(value: LLVMValueRef): LLVMValueRef
