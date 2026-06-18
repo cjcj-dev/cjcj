@@ -206,6 +206,16 @@ extend ParserImpl {
     }
 
     public func ParseDecl(scopeKind: ScopeKind, modifiers: ArrayList<Modifier>, annos: ArrayList<Annotation>): Decl {
+        if (SeeingBuiltinAnnotation() && !modifiers.isEmpty() && annos.isEmpty()) {
+            diag.DiagnoseRefactor(
+                DiagKindRefactor.INVALID_MODIFIER,
+                modifiers[0].begin,
+                "modifier cannot appear before annotation")
+        }
+        ParseAnnotations(annos)
+        ParseModifiers(modifiers)
+        CheckOverflowAnnotation(annos, scopeKind)
+        CheckAnnotationAnnotation(annos, modifiers)
         if (Seeing(TokenKind.AT) || Seeing(TokenKind.AT_EXCL)) {
             return ParseMacroCallDeclInput(scopeKind, modifiers, annos)
         }
@@ -227,6 +237,55 @@ extend ParserImpl {
         diag.DiagnoseRefactor(DiagKindRefactor.EXPECTED_TOKEN, token.Begin(), "expected declaration")
         ConsumeUntilAny([TokenKind.NL, TokenKind.SEMI, TokenKind.RCURL], targetTokenConsumed: false)
         return InvalidDecl(token.Begin())
+    }
+
+    private func CheckOverflowAnnotation(annos: ArrayList<Annotation>, scopeKind: ScopeKind): Unit {
+        if (annos.isEmpty()) {
+            return
+        }
+        if (SeeingAny([TokenKind.FUNC, TokenKind.MAIN, TokenKind.INIT, TokenKind.AT_EXCL]) || SeeingMacroCall()) {
+            return
+        }
+        if (SeeingPrimaryConstructor(scopeKind)) {
+            return
+        }
+        for (anno in annos) {
+            if (anno.kind == AnnotationKind.NUMERIC_OVERFLOW) {
+                diag.DiagnoseRefactor(
+                    DiagKindRefactor.INVALID_ANNOTATION,
+                    anno.begin,
+                    "unexpected annotation '${anno.identifier.Val()}' on '${Peek().Value()}'")
+                anno.isBroken = true
+                break
+            }
+        }
+    }
+
+    private func CheckAnnotationAnnotation(annos: ArrayList<Annotation>, modifiers: ArrayList<Modifier>): Unit {
+        for (anno in annos) {
+            if (anno.kind != AnnotationKind.ANNOTATION) {
+                continue
+            }
+            if (!Seeing(TokenKind.CLASS) && !Seeing(TokenKind.AT)) {
+                diag.DiagnoseRefactor(
+                    DiagKindRefactor.INVALID_ANNOTATION,
+                    anno.begin,
+                    "@Annotation can only be applied to class declarations")
+                anno.isBroken = true
+                return
+            }
+            for (modifier in modifiers) {
+                if (modifier.modifier == TokenKind.ABSTRACT || modifier.modifier == TokenKind.OPEN ||
+                    modifier.modifier == TokenKind.SEALED) {
+                    diag.DiagnoseRefactor(
+                        DiagKindRefactor.INVALID_ANNOTATION,
+                        modifier.begin,
+                        "@Annotation cannot be combined with '${TokenKindName(modifier.modifier)}'")
+                    anno.isBroken = true
+                    return
+                }
+            }
+        }
     }
 
     public func ParseFuncDecl(scopeKind: ScopeKind, modifiers: ArrayList<Modifier>, annos: ArrayList<Annotation>): FuncDecl {

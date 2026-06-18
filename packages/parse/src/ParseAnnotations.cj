@@ -21,7 +21,18 @@ extend ParserImpl {
 
     public func ParseAnnotations(annos: ArrayList<Annotation>): Unit {
         while (SeeingBuiltinAnnotation() || (enableCustomAnno && SeeingMacroCallDecl())) {
-            annos.add(ParseAnnotation())
+            let annotation = ParseAnnotation()
+            for (anno in annos) {
+                if (anno.kind != AnnotationKind.CUSTOM && anno.identifier.Val() == annotation.identifier.Val()) {
+                    diag.DiagnoseRefactor(
+                        DiagKindRefactor.INVALID_ANNOTATION,
+                        annotation.begin,
+                        "duplicated annotation '${annotation.identifier.Val()}'")
+                    annotation.isBroken = true
+                    break
+                }
+            }
+            annos.add(annotation)
             SkipNLOrSemi()
         }
     }
