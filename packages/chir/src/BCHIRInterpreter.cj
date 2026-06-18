@@ -1,5 +1,6 @@
 package cangjie_compiler::chir
 
+import cangjie_compiler::utils.OverflowStrategy
 import std.collection.*
 
 public class BCHIRInterpreter {
@@ -278,12 +279,16 @@ public class BCHIRInterpreter {
             } else if (opCode == OpCode.TYPECAST || opCode == OpCode.TYPECAST_EXC) {
                 if (let Some(sourceKind) <- TypeKindFromCell(code.Get(pc + 1))) {
                     if (let Some(targetKind) <- TypeKindFromCell(code.Get(pc + 2))) {
-                        if (let Some(casted) <- CastValueToTypeKind(interpStack.ArgsPopIVal(), sourceKind,
-                            targetKind)) {
-                            interpStack.ArgsPush(casted)
-                            pc += 1 + GetOpCodeArgSize(opCode)
+                        if (let Some(strategy) <- OverflowStrategyFromCell(code.Get(pc + 3))) {
+                            if (let Some(casted) <- CastValueToTypeKind(interpStack.ArgsPopIVal(), sourceKind,
+                                targetKind, strategy)) {
+                                interpStack.ArgsPush(casted)
+                                pc += 1 + GetOpCodeArgSize(opCode)
+                            } else {
+                                return Finish(BCHIRResult(BCHIRResultKind.TRAP, message: "invalid TYPECAST operand"))
+                            }
                         } else {
-                            return Finish(BCHIRResult(BCHIRResultKind.TRAP, message: "invalid TYPECAST operand"))
+                            return Finish(BCHIRResult(BCHIRResultKind.TRAP, message: "invalid TYPECAST overflow strategy"))
                         }
                     } else {
                         return Finish(BCHIRResult(BCHIRResultKind.TRAP, message: "invalid TYPECAST target type"))
@@ -969,8 +974,19 @@ private func TypeKindFromCell(cell: Int64): Option<TypeKind> {
     }
 }
 
+private func OverflowStrategyFromCell(cell: Int64): Option<OverflowStrategy> {
+    return match (cell) {
+        case 0 => OverflowStrategy.NA
+        case 1 => OverflowStrategy.CHECKED
+        case 2 => OverflowStrategy.WRAPPING
+        case 3 => OverflowStrategy.THROWING
+        case 4 => OverflowStrategy.SATURATING
+        case _ => None
+    }
+}
+
 private func CastValueToTypeKind(value: InterpreterValue, sourceKind: TypeKind,
-    targetKind: TypeKind): Option<InterpreterValue> {
+    targetKind: TypeKind, strategy: OverflowStrategy): Option<InterpreterValue> {
     if (sourceKind == TypeKind.TYPE_RUNE) {
         if (value.kind != InterpreterValueKind.IRUNE) {
             return None
@@ -985,7 +1001,7 @@ private func CastValueToTypeKind(value: InterpreterValue, sourceKind: TypeKind,
     }
     if (IsIntegerTypeKind(sourceKind) || sourceKind == TypeKind.TYPE_BOOLEAN) {
         if (let Some(raw) <- ValueAsInt(value)) {
-            return CastIntegerToTypeKind(raw, targetKind)
+            return CastIntegerToTypeKind(raw, sourceKind, targetKind, strategy)
         }
         return None
     }
@@ -1008,17 +1024,65 @@ private func ValueAsInt(value: InterpreterValue): Option<Int64> {
     return None
 }
 
-private func CastIntegerToTypeKind(raw: Int64, targetKind: TypeKind): Option<InterpreterValue> {
+private func CastIntegerToTypeKind(raw: Int64, sourceKind: TypeKind, targetKind: TypeKind,
+    strategy: OverflowStrategy): Option<InterpreterValue> {
     if (targetKind == TypeKind.TYPE_RUNE) {
-        return InterpreterValue.MakeRune(Rune(TruncateUnsigned(raw, 32)))
+        if (let Some(converted) <- CastIntegerToUnsigned(raw, sourceKind, TypeKind.TYPE_UINT32, strategy)) {
+            return InterpreterValue.MakeRune(Rune(converted))
+        }
+        return None
     }
     if (IsIntegerTypeKind(targetKind)) {
-        return IntegerValueForTypeKind(targetKind, raw)
+        if (IsSignedIntegerTypeKind(targetKind)) {
+            if (let Some(converted) <- CastIntegerToSigned(raw, sourceKind, targetKind, strategy)) {
+                return IntegerValueForTypeKind(targetKind, converted)
+            }
+            return None
+        }
+        if (let Some(converted) <- CastIntegerToUnsigned(raw, sourceKind, targetKind, strategy)) {
+            return IntegerValueForTypeKind(targetKind, converted)
+        }
+        return None
     }
     if (IsFloatTypeKind(targetKind)) {
         return FloatValueForTypeKind(targetKind, Float64(raw))
     }
     return None
+}
+
+private func CastIntegerToSigned(raw: Int64, sourceKind: TypeKind, targetKind: TypeKind,
+    strategy: OverflowStrategy): Option<Int64> {
+    let result = if (IsUnsignedIntegerTypeKind(sourceKind)) {
+        if (raw < 0) {
+            return None
+        }
+        OverflowChecker.IsUnsignedToSignedTypecastOverflow(UInt64(raw), targetKind, strategy)
+    } else {
+        OverflowChecker.IsSignedToSignedTypecastOverflow(raw, targetKind, strategy)
+    }
+    if (result.isOverflow && strategy == OverflowStrategy.THROWING) {
+        return None
+    }
+    return result.value
+}
+
+private func CastIntegerToUnsigned(raw: Int64, sourceKind: TypeKind, targetKind: TypeKind,
+    strategy: OverflowStrategy): Option<Int64> {
+    let result = if (IsUnsignedIntegerTypeKind(sourceKind)) {
+        if (raw < 0) {
+            return None
+        }
+        OverflowChecker.IsUnsignedToUnsignedTypecastOverflow(UInt64(raw), targetKind, strategy)
+    } else {
+        OverflowChecker.IsSignedToUnsignedTypecastOverflow(raw, targetKind, strategy)
+    }
+    if (result.isOverflow && strategy == OverflowStrategy.THROWING) {
+        return None
+    }
+    if (result.value > UInt64(Int64.Max)) {
+        return None
+    }
+    return Int64(result.value)
 }
 
 private func CastFloatToTypeKind(raw: Float64, targetKind: TypeKind): Option<InterpreterValue> {
@@ -1059,6 +1123,16 @@ private func FloatValueForTypeKind(targetKind: TypeKind, raw: Float64): Option<I
 private func IsIntegerTypeKind(kind: TypeKind): Bool {
     let idx = TypeKindIndex(kind)
     return idx >= TypeKindIndex(TypeKind.TYPE_INT8) && idx <= TypeKindIndex(TypeKind.TYPE_UINT_NATIVE)
+}
+
+private func IsSignedIntegerTypeKind(kind: TypeKind): Bool {
+    let idx = TypeKindIndex(kind)
+    return idx >= TypeKindIndex(TypeKind.TYPE_INT8) && idx <= TypeKindIndex(TypeKind.TYPE_INT_NATIVE)
+}
+
+private func IsUnsignedIntegerTypeKind(kind: TypeKind): Bool {
+    let idx = TypeKindIndex(kind)
+    return idx >= TypeKindIndex(TypeKind.TYPE_UINT8) && idx <= TypeKindIndex(TypeKind.TYPE_UINT_NATIVE)
 }
 
 private func IsFloatTypeKind(kind: TypeKind): Bool {
