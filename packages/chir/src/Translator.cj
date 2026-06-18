@@ -303,8 +303,8 @@ public class Translator {
         if (IsStructOrClassCtorCall(expr, calleeDecl)) {
             return TranslateStructOrClassCtorCall(expr, calleeDecl)
         }
-        if (IsInstanceMember(calleeDecl) && !calleeDecl.TestAttr(AstAttribute.STATIC)) {
-            throw IllegalArgumentException("not yet ported in faithful AST2CHIR: member function call")
+        if (calleeDecl.IsMemberDecl() && !calleeDecl.TestAttr(AstAttribute.CONSTRUCTOR)) {
+            return TranslateMemberFuncCall(expr, calleeDecl)
         }
         let callee = globalSymbolTable.Get(calleeDecl)
         let argValues = ArrayList<Value>()
@@ -396,7 +396,8 @@ public class Translator {
                 return LoadLeftValue(leftValueInfo, chirTy.TranslateType(RequireAstTy(expr)))
             }
             if (let Some(_) <- (target as AstFuncDecl)) {
-                throw IllegalArgumentException("not yet ported in faithful AST2CHIR: member method reference")
+                throw IllegalArgumentException(
+                    "not yet ported in faithful AST2CHIR: member method reference lambda wrapper")
             }
         }
         throw IllegalArgumentException("not yet ported in faithful AST2CHIR: unsupported member access")
@@ -1289,6 +1290,118 @@ public class Translator {
         return RequireResult(builder.CreateTuple(chirTy.TranslateType(RequireAstTy(expr)), args, CurrentBlock()))
     }
 
+    private func TranslateMemberFuncCall(expr: AstCallExpr, calleeDecl: AstFuncDecl): Value {
+        let resultTy = chirTy.TranslateType(RequireAstTy(expr))
+        let argValues = ArrayList<Value>()
+        var thisType: Option<Type> = None
+        var thisObj: Option<Value> = None
+        if (!calleeDecl.TestAttr(AstAttribute.STATIC)) {
+            let obj = TranslateThisObjectForMemberFuncCall(expr, calleeDecl)
+            thisObj = obj
+            thisType = obj.GetType()
+        }
+        for (arg in expr.args) {
+            if (let Some(argExpr) <- arg.expr) {
+                let value = Translator.TranslateASTNode(argExpr, this) ??
+                    throw IllegalStateException("faithful AST2CHIR member call arg produced no value")
+                argValues.add(value)
+            }
+        }
+        if (ShouldUseVirtualMemberDispatch(calleeDecl)) {
+            if (calleeDecl.TestAttr(AstAttribute.STATIC)) {
+                let parentTy = TranslateMemberOwnerType(calleeDecl)
+                let rtti = RequireResult(builder.CreateGetRTTIStatic(builder.context.GetUnitTy(),
+                    parentTy.StripAllRefs(), CurrentBlock()))
+                let invokeCtx = InvokeCallContext(rtti, FuncCallContext(args: argValues, thisType: parentTy),
+                    FuncSigInfo(BuildMethodFuncType(calleeDecl, parentTy), funcName: calleeDecl.identifier.Val()))
+                return RequireResult(builder.CreateInvokeStatic(resultTy, invokeCtx, CurrentBlock()))
+            }
+            let obj = thisObj ?? throw IllegalStateException("faithful AST2CHIR virtual member call has no this object")
+            let objTy = thisType ?? throw IllegalStateException("faithful AST2CHIR virtual member call this has no type")
+            let invokeCtx = InvokeCallContext(obj, FuncCallContext(args: argValues, thisType: objTy),
+                FuncSigInfo(BuildMethodFuncType(calleeDecl, objTy), funcName: calleeDecl.identifier.Val()))
+            return RequireResult(builder.CreateInvoke(resultTy, invokeCtx, CurrentBlock()))
+        }
+        if (let Some(obj) <- thisObj) {
+            argValues.add(obj, at: 0)
+        }
+        let callee = globalSymbolTable.Get(calleeDecl)
+        return RequireResult(builder.CreateApply(resultTy, callee, FuncCallContext(args: argValues,
+            thisType: thisType), CurrentBlock()))
+    }
+
+    private func TranslateThisObjectForMemberFuncCall(expr: AstCallExpr, calleeDecl: AstFuncDecl): Value {
+        if (let Some(base) <- expr.baseFunc) {
+            if (let Some(member) <- (base as AstMemberAccess)) {
+                if (let Some(baseExpr) <- member.baseExpr) {
+                    if (IsThisOrSuperRef(baseExpr)) {
+                        return GetCurrentThisObjectForMember(calleeDecl)
+                    }
+                    if (calleeDecl.TestAttr(AstAttribute.MUT)) {
+                        let leftValue = TranslateExprAsLeftValue(baseExpr)
+                        if (leftValue.path.isEmpty()) {
+                            return leftValue.base
+                        }
+                        return LoadLeftValue(leftValue, chirTy.TranslateType(RequireAstTy(baseExpr))) ??
+                            throw IllegalStateException("faithful AST2CHIR mut member call base produced no value")
+                    }
+                    return Translator.TranslateASTNode(baseExpr, this) ??
+                        throw IllegalStateException("faithful AST2CHIR member call base produced no value")
+                }
+            }
+        }
+        return GetCurrentThisObjectForMember(calleeDecl)
+    }
+
+    private func GetCurrentThisObjectForMember(calleeDecl: AstFuncDecl): Value {
+        let _ = calleeDecl
+        let fn = CurrentFunction()
+        if (fn.GetNumOfParams() > 0) {
+            return fn.GetParam(0)
+        }
+        throw IllegalStateException("faithful AST2CHIR member call requires current this object")
+    }
+
+    private func ShouldUseVirtualMemberDispatch(funcDecl: AstFuncDecl): Bool {
+        if (funcDecl.TestAnyAttr(AstAttribute.GENERIC_INSTANTIATED, AstAttribute.PRIMARY_CONSTRUCTOR,
+            AstAttribute.CONSTRUCTOR)) {
+            return false
+        }
+        let outer = funcDecl.outerDecl
+        let funcHasOpenFlag = funcDecl.TestAnyAttr(AstAttribute.OPEN, AstAttribute.ABSTRACT) ||
+            if (let Some(parent) <- outer) { parent.astKind == ASTKind.INTERFACE_DECL } else { false }
+        if (funcDecl.TestAttr(AstAttribute.STATIC)) {
+            return if (let Some(parent) <- outer) {
+                parent.IsClassLikeDecl() && !funcDecl.TestAttr(AstAttribute.PRIVATE)
+            } else {
+                false
+            }
+        }
+        return funcHasOpenFlag && funcDecl.TestAnyAttr(AstAttribute.PUBLIC, AstAttribute.PROTECTED)
+    }
+
+    private func TranslateMemberOwnerType(funcDecl: AstFuncDecl): Type {
+        let outer = funcDecl.outerDecl ??
+            throw IllegalStateException("faithful AST2CHIR member function has no owner decl")
+        return chirTy.TranslateType(RequireAstTy(outer))
+    }
+
+    private func BuildMethodFuncType(funcDecl: AstFuncDecl, thisTy: Type): FuncType {
+        let baseFuncTy = RequireFuncType(chirTy.TranslateType(RequireAstTy(funcDecl)))
+        let params = baseFuncTy.GetParamTypes()
+        if (!funcDecl.TestAttr(AstAttribute.STATIC)) {
+            params.add(thisTy, at: 0)
+        }
+        return builder.context.GetFuncTy(params, baseFuncTy.GetReturnType())
+    }
+
+    private func IsThisOrSuperRef(expr: AstExpr): Bool {
+        if (let Some(refExpr) <- (expr as AstRefExpr)) {
+            return refExpr.isThis || refExpr.isSuper
+        }
+        return false
+    }
+
     private func TranslateStructOrClassCtorCall(expr: AstCallExpr, calleeDecl: AstFuncDecl): Value {
         if (IsSuperOrThisCtorCall(expr)) {
             throw IllegalArgumentException("not yet ported in faithful AST2CHIR: this/super constructor call")
@@ -1525,7 +1638,8 @@ public class Translator {
         }
         if (let Some(_) <- (target as AstFuncDecl)) {
             if (target.outerDecl.isSome()) {
-                throw IllegalArgumentException("not yet ported in faithful AST2CHIR: static member method reference")
+                throw IllegalArgumentException(
+                    "not yet ported in faithful AST2CHIR: static member method reference lambda wrapper")
             }
             return targetNode
         }
@@ -1694,6 +1808,13 @@ public class Translator {
                     }
                 }
             }
+            if (let Some(member) <- (base as AstMemberAccess)) {
+                if (let Some(target) <- member.target) {
+                    if (let Some(fn) <- (target as AstFuncDecl)) {
+                        return fn
+                    }
+                }
+            }
         }
         throw IllegalStateException("faithful AST2CHIR CallExpr has no resolvedFunction")
     }
@@ -1766,6 +1887,10 @@ public class Translator {
 
     private func RequireRawArrayType(ty: Type): RawArrayType {
         return (ty as RawArrayType) ?? throw IllegalStateException("faithful AST2CHIR expected RawArrayType")
+    }
+
+    private func RequireFuncType(ty: Type): FuncType {
+        return (ty as FuncType) ?? throw IllegalStateException("faithful AST2CHIR expected FuncType")
     }
 
     private static func RequireNodeAsFuncDecl(node: AstNode): AstFuncDecl {
