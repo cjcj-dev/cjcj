@@ -1,6 +1,6 @@
 # Sema Legality Status
 
-Date: 2026-06-17
+Date: 2026-06-18
 Build: `cjpm build` passes for the workspace.
 
 ## Scope
@@ -36,14 +36,21 @@ This pass covers the self-hosted Cangjie port under:
 - Added C++-style scope-gate bookkeeping for variables visible before `return`, `throw`, `break`, and `continue`, including optional-context suppression for short-circuit/coalescing RHS checks and try-block throw handling.
 - Ported constructor early-return field tracking so fields still definitely uninitialized at a constructor `return` are reported even if later unreachable assignments mark them initialized.
 - Preserved first scope termination kind after per-scope context cleanup, matching C++ behavior used to skip constructor/static-init field checks after direct throwing termination.
+- Added the C++ static-initializer early return for broken/no-body static init functions and direct throwing termination before reporting uninitialized static fields.
 - Routed string interpolation initialization checking through `InterpolationExpr.block`, matching the C++ traversal of interpolation blocks instead of treating interpolation wrapper expressions as leaf nodes.
 - Switched member-field collection in type initialization checking to `GetVarsInitializationOrderWithPositions`, preserving the C++ common/specific field dependency order.
 - Ported the missing `CheckLetFlagInMemberAccess` immutable-assignment cases for struct values returned by calls/subscripts and struct-valued property bases, using real AST type information and desugared base expressions.
 - Added C++-style illegal member-access checks before full initialization: member functions/properties in member initializers, captured `this` through nested function/lambda bodies, `this.member`, `super.memberFunc`, and the distinct `super` member-variable issue before a valid member function context exists.
+- Aligned member-access use-before-initialization reporting with the C++ same-nominal-declaration check and `IsInitialized(MemberAccess&)` traversal, avoiding reports when an initialized base/target is found in the access chain.
 - Aligned global-variable def-use graph iteration with the C++ source-position ordered map, and matched static-initializer collection of uninitialized member `VarDecl`s before checking assignments in `static init`.
 - Matched C++ const-evaluation short-circuiting for calls and subscript expressions so argument/index checks are skipped after a non-const callee or base has already failed.
 - Ported C++ `CheckSubscriptLegality` coverage for constant `VArray` index bounds, including overflow suppression, negative-index wording, past-end details, and `ShouldDiagnose(true)` gating.
 - Ported C++ `CheckStaticMembersWithGeneric` coverage for static vars, properties, and static initializers in generic declarations, including source top-level/exported-internal iteration, `RefExpr`/`RefType` generic-type detection, static generic member references, and skip-child behavior after a reported use.
+- Preserved the C++ lower-access-level hint path for compiler-added inferred function return types by marking structured `AccessLevelViolation`s as hints and anchoring them on the function declaration instead of the synthetic return type node.
+- Aligned access-level function parameter checking with the C++ first-parameter-list traversal and included `TypePattern.desugarVarPattern` variables in pattern accessibility checks.
+- Aligned initialization reference checking with the C++ `TypeCheckUtil::GetRealTarget` path, so aliases are resolved before generic-parameter, order, illegal-member, capture, and use-before-initialization checks run.
+- Added C++-style `ShouldDiagnose(true)` gating for reference initialization diagnostics, preserving the failed initialization result while avoiding reports on compiler-added/source-mapped nodes that the C++ checker suppresses.
+- Extended call-expression initialization traversal to include synthesized `defaultArgs`, the self-host AST's available counterpart to the C++ checker's effective `desugarArgs` argument list.
 
 ## Remaining Fidelity Gaps
 
@@ -51,10 +58,11 @@ This pass covers the self-hosted Cangjie port under:
 - `VArray` subscript legality now records the same high-level failures as C++, but final diagnostic emission still needs the exact C++ diagnostic id and hint/range plumbing.
 - Static-member generic checks now find the same high-level illegal references as C++, but still emit structured issue records rather than `sema_static_variable_use_generic_parameter` diagnostics with exact type-set formatting.
 - Some initialization edge cases still depend on sibling components that are only partially represented in the self-hosted port, especially exact scope-manager cache behavior, constructor delegation state, reachability/termination analysis, and AST context profile hooks.
+- The C++ Java mirror `$javaref` constructor exception still needs either a legal dependency on the real utils constant package from `sema`, or a shared AST helper that exposes the field without duplicating constants locally.
 - The new termination and illegal-member tracking is local and uses available scope names/function-body stacks; it does not yet reproduce every C++ `ScopeManager` symbol-cache query, top-level symbol lookup, or exact `IsNode1ScopeVisibleForNode2` case.
 - Const-evaluation coverage follows the C++ legality shape but does not yet reproduce every target-specific profile check and diagnostic specialization from the C++ implementation.
 - Global-variable initialization checking now preserves source-order graph traversal, but final integration with compilation-unit import ordering, diagnostic formatting, and type-checker phase scheduling remains incomplete.
 
 ## Estimate
 
-Honest behavior coverage for this legality/const-evaluation scope is about 73% versus the C++ reference. The port now has real traversal and issue production in the scoped files, several targeted C++ edge cases, the main conditional-initialization merge path, termination-aware initialization state, constructor early-return field tracking, string interpolation block traversal, dependency-aware member initialization order, immutable struct-base assignment checks, illegal member-use checks before full initialization, source-ordered global def-use traversal, const-eval call/subscript short-circuiting, constant `VArray` subscript bounds checking, and static-member generic dependency checks, but production completeness still requires diagnostic integration and the remaining exact semantic edge cases above.
+Honest behavior coverage for this legality/const-evaluation scope is about 79% versus the C++ reference. The port now has real traversal and issue production in the scoped files, several targeted C++ edge cases, the main conditional-initialization merge path, termination-aware initialization state, constructor/static-init throwing termination handling, constructor early-return field tracking, string interpolation block traversal, dependency-aware member initialization order, immutable struct-base assignment checks, illegal member-use checks before full initialization, same-nominal member-access initialization checks, real-target alias resolution for reference initialization checks, compiler-added reference diagnostic gating, inferred-return access hint records, C++-shaped parameter and pattern access checks, synthesized default-argument initialization checks, source-ordered global def-use traversal, const-eval call/subscript short-circuiting, constant `VArray` subscript bounds checking, and static-member generic dependency checks, but production completeness still requires diagnostic integration and the remaining exact semantic edge cases above.

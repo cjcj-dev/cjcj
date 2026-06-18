@@ -6,10 +6,12 @@ import cangjie_compiler::ast.*
 public class AccessLevelViolation {
     public var useSite: Node
     public var limitedDecl: Decl
+    public var isHint: Bool
 
-    public init(useSite: Node, limitedDecl: Decl) {
+    public init(useSite: Node, limitedDecl: Decl, isHint!: Bool = false) {
         this.useSite = useSite
         this.limitedDecl = limitedDecl
+        this.isHint = isHint
     }
 }
 
@@ -98,8 +100,9 @@ public func FindInaccessibleType(typeValue: Ty, srcLevel: AccessLevel): Option<D
     return None
 }
 
-private func AddViolation(out: ArrayList<AccessLevelViolation>, useSite: Node, limitedDecl: Decl): Unit {
-    out.add(AccessLevelViolation(useSite, limitedDecl))
+private func AddViolation(out: ArrayList<AccessLevelViolation>, useSite: Node, limitedDecl: Decl,
+    isHint!: Bool = false): Unit {
+    out.add(AccessLevelViolation(useSite, limitedDecl, isHint: isHint))
 }
 
 public func CollectGenericTyAccessibility(decl: Decl, out: ArrayList<AccessLevelViolation>): Unit {
@@ -131,6 +134,9 @@ private func CollectPatternVarDecls(pattern: Pattern, out: ArrayList<VarDecl>): 
     } else if (let Some(typePattern) <- (pattern as TypePattern)) {
         if (let Some(child) <- typePattern.pattern) {
             CollectPatternVarDecls(child, out)
+        }
+        if (let Some(desugared) <- typePattern.desugarVarPattern) {
+            CollectPatternVarDecls(desugared, out)
         }
     } else if (let Some(enumPattern) <- (pattern as EnumPattern)) {
         for (child in enumPattern.patterns) {
@@ -189,11 +195,15 @@ public func CheckFuncAccessLevelValidity(fd: FuncDecl): ArrayList<AccessLevelVio
     if (let Some(body) <- fd.funcBody) {
         if (let Some(retType) <- body.retType) {
             if (let Some(limitedDecl) <- FindInaccessibleType(retType.GetTy(), GetAccessLevel(fd))) {
-                AddViolation(out, retType, limitedDecl)
+                if (retType.TestAttr(Attribute.COMPILER_ADD)) {
+                    AddViolation(out, fd, limitedDecl, isHint: true)
+                } else {
+                    AddViolation(out, retType, limitedDecl)
+                }
             }
         }
-        for (params in body.paramLists) {
-            CheckFuncParamList(fd, params, out)
+        if (!body.paramLists.isEmpty()) {
+            CheckFuncParamList(fd, body.paramLists[0], out)
         }
     }
     CollectGenericTyAccessibility(fd, out)

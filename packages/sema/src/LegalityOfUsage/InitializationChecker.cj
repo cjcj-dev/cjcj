@@ -2,6 +2,7 @@ package cangjie_compiler::sema.LegalityOfUsage
 
 import std.collection.*
 import cangjie_compiler::ast.*
+import cangjie_compiler::sema.*
 
 public enum InitializationIssueKind {
     | USED_BEFORE_INITIALIZATION
@@ -567,6 +568,21 @@ private func MetControlTransferExpr(node: Node): Bool {
     return false
 }
 
+private func IsInitializedMemberAccess(member: MemberAccess): Bool {
+    let initialized = InitBoolBox(false)
+    let walker = Walker(member, visitPre: { node: Node =>
+        if (let Some(target) <- node.GetTarget()) {
+            if (target.TestAttr(Attribute.INITIALIZED)) {
+                initialized.value = true
+                return VisitAction.STOP_NOW
+            }
+        }
+        VisitAction.WALK_CHILDREN
+    })
+    walker.Walk()
+    return initialized.value
+}
+
 public class InitializationChecker {
     private let issues: ArrayList<InitializationIssue> = ArrayList<InitializationIssue>()
     private var currentInitializingVarDependencies: Option<ArrayList<Decl>> = None
@@ -769,6 +785,16 @@ public class InitializationChecker {
         }
         if (let Some(initFunc) <- staticInit) {
             CheckInitialization(initFunc)
+            if (let None <- initFunc.funcBody) {
+                return
+            }
+            let body = initFunc.funcBody.getOrThrow()
+            let bodyScopeGate = CurrentScopeGate(body.scopeName)
+            if (let Some(terminated) <- FindTerminatedScope(terminatedScopes, bodyScopeGate)) {
+                if (terminated.terminationKind == ASTKind.THROW_EXPR) {
+                    return
+                }
+            }
         }
         for (member in staticMembers) {
             if (!member.TestAnyAttr(Attribute.INITIALIZED, Attribute.TOOL_ADD, Attribute.COMMON)) {
@@ -1054,6 +1080,42 @@ public class InitializationChecker {
         return None
     }
 
+    private func CurrentNominalDeclForScope(): Option<Decl> {
+        if (let Some(outerFunc) <- CurrentOutermostNamedFuncDecl()) {
+            if (let Some(owner) <- outerFunc.outerDecl) {
+                if (owner.IsNominalDecl()) {
+                    return owner
+                }
+            }
+        }
+        if (let Some(currentBody) <- CurrentFuncBody()) {
+            if (let Some(parentClassLike) <- currentBody.parentClassLike) {
+                return parentClassLike
+            }
+            if (let Some(parentStruct) <- currentBody.parentStruct) {
+                return parentStruct
+            }
+            if (let Some(parentEnum) <- currentBody.parentEnum) {
+                return parentEnum
+            }
+        }
+        return None
+    }
+
+    private func IsMemberAccessInSameNominalDecl(member: MemberAccess, target: Decl): Bool {
+        if (let None <- target.outerDecl) {
+            return false
+        }
+        let targetOuter = target.outerDecl.getOrThrow()
+        if (!targetOuter.IsNominalDecl()) {
+            return false
+        }
+        if (let Some(currentNominal) <- CurrentNominalDeclForScope()) {
+            return SameDecl(currentNominal, targetOuter)
+        }
+        return ScopeContains(targetOuter.scopeName, member.scopeName)
+    }
+
     private func GetOwningFuncBodyForScope(scopeName: String): Option<FuncBody> {
         var idx = currentFuncBodies.size - 1
         while (idx >= 0) {
@@ -1311,7 +1373,7 @@ public class InitializationChecker {
     }
 
     private func CheckInitInRefExpr(refExpr: RefExpr): Bool {
-        if (let Some(target) <- refExpr.GetTarget()) {
+        if (let Some(target) <- GetRealTarget(refExpr.GetTarget())) {
             if (target.astKind == ASTKind.GENERIC_PARAM_DECL) {
                 return true
             }
@@ -1337,15 +1399,18 @@ public class InitializationChecker {
             if (!target.TestAttr(Attribute.INITIALIZED)) {
                 if (HasInitVarsAfterTerminator(refExpr.scopeName)) {
                     return true
-                } else if (IsInDifferentFunction(refExpr, target)) {
-                    AddIssue(InitializationIssueKind.CAPTURE_BEFORE_INITIALIZATION, refExpr, target: target,
-                        message: target.identifier.Val())
-                    return false
                 }
-                if (!refExpr.TestAttr(Attribute.LEFT_VALUE)) {
-                    AddIssue(InitializationIssueKind.USED_BEFORE_INITIALIZATION, refExpr, target: target,
-                        message: target.identifier.Val())
-                    return false
+                if (refExpr.ShouldDiagnose(allowCompilerAdd: true)) {
+                    if (IsInDifferentFunction(refExpr, target)) {
+                        AddIssue(InitializationIssueKind.CAPTURE_BEFORE_INITIALIZATION, refExpr, target: target,
+                            message: target.identifier.Val())
+                        return false
+                    }
+                    if (!refExpr.TestAttr(Attribute.LEFT_VALUE)) {
+                        AddIssue(InitializationIssueKind.USED_BEFORE_INITIALIZATION, refExpr, target: target,
+                            message: target.identifier.Val())
+                        return false
+                    }
                 }
                 return false
             }
@@ -1392,10 +1457,10 @@ public class InitializationChecker {
                     message: target.identifier.Val())
                 return false
             }
-            if (!target.TestAttr(Attribute.INITIALIZED) && !member.TestAttr(Attribute.LEFT_VALUE)) {
+            if (IsMemberAccessInSameNominalDecl(member, target) && !IsInitializedMemberAccess(member)) {
                 AddIssue(InitializationIssueKind.USED_BEFORE_INITIALIZATION, member, target: target,
                     message: target.identifier.Val())
-                result = false
+                return false
             }
         }
         return result
@@ -1498,6 +1563,9 @@ public class InitializationChecker {
                 if (let Some(call) <- (expr as CallExpr)) {
                     var result = CheckExprOption(call.baseFunc)
                     for (arg in call.args) {
+                        result = CheckExprOption(arg.expr) && result
+                    }
+                    for (arg in call.defaultArgs) {
                         result = CheckExprOption(arg.expr) && result
                     }
                     result
