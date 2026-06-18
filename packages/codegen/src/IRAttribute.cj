@@ -18,7 +18,7 @@ private func GetLLVMValueContext(value: LLVMValueRef): LLVMContextRef {
     if (value.isNull()) {
         return LLVMNullContext()
     }
-    return unsafe { LLVMGetValueContext(value) }
+    return unsafe { LLVMGetTypeContext(LLVMTypeOf(value)) }
 }
 
 private func IsLLVMFunction(value: LLVMValueRef): Bool {

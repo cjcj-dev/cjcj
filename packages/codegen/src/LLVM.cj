@@ -191,6 +191,7 @@ foreign {
     func LLVMMetadataAsValue(context: LLVMContextRef, metadata: LLVMMetadataRef): LLVMValueRef
     func LLVMValueAsMetadata(value: LLVMValueRef): LLVMMetadataRef
     func LLVMTypeOf(value: LLVMValueRef): LLVMTypeRef
+    func LLVMGetTypeContext(ty: LLVMTypeRef): LLVMContextRef
     func LLVMGetValueContext(value: LLVMValueRef): LLVMContextRef
     func LLVMIsAFunction(value: LLVMValueRef): LLVMValueRef
     func LLVMIsAInstruction(value: LLVMValueRef): LLVMValueRef

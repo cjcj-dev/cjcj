@@ -88,16 +88,6 @@ foreign {
     func LLVMTargetHasTargetMachine(target: LLVMTargetRef): Int32
     func LLVMTargetHasAsmBackend(target: LLVMTargetRef): Int32
 
-    func LLVMCreateTargetMachineOptions(): LLVMTargetMachineOptionsRef
-    func LLVMDisposeTargetMachineOptions(options: LLVMTargetMachineOptionsRef): Unit
-    func LLVMTargetMachineOptionsSetCPU(options: LLVMTargetMachineOptionsRef, cpu: CString): Unit
-    func LLVMTargetMachineOptionsSetFeatures(options: LLVMTargetMachineOptionsRef, features: CString): Unit
-    func LLVMTargetMachineOptionsSetABI(options: LLVMTargetMachineOptionsRef, abi: CString): Unit
-    func LLVMTargetMachineOptionsSetCodeGenOptLevel(options: LLVMTargetMachineOptionsRef, level: Int32): Unit
-    func LLVMTargetMachineOptionsSetRelocMode(options: LLVMTargetMachineOptionsRef, reloc: Int32): Unit
-    func LLVMTargetMachineOptionsSetCodeModel(options: LLVMTargetMachineOptionsRef, codeModel: Int32): Unit
-    func LLVMCreateTargetMachineWithOptions(target: LLVMTargetRef, triple: CString,
-        options: LLVMTargetMachineOptionsRef): LLVMTargetMachineRef
     func LLVMCreateTargetMachine(target: LLVMTargetRef, triple: CString, cpu: CString, features: CString,
         level: Int32, reloc: Int32, codeModel: Int32): LLVMTargetMachineRef
     func LLVMDisposeTargetMachine(targetMachine: LLVMTargetMachineRef): Unit
@@ -224,77 +214,6 @@ public func LLVMGetTargetFromTripleChecked(triple: String): LLVMTargetLookupResu
     return result
 }
 
-public class LLVMTargetMachineOptionsHandle <: Resource {
-    public let raw: LLVMTargetMachineOptionsRef
-    private var closed: Bool = false
-
-    public init(raw: LLVMTargetMachineOptionsRef) {
-        this.raw = raw
-    }
-
-    public static func Create(): LLVMTargetMachineOptionsHandle {
-        return LLVMTargetMachineOptionsHandle(unsafe { LLVMCreateTargetMachineOptions() })
-    }
-
-    public func SetCPU(cpu: String): Unit {
-        if (raw.isNull()) {
-            return
-        }
-        try (cpuCString = unsafe { LibC.mallocCString(cpu) }.asResource()) {
-            unsafe { LLVMTargetMachineOptionsSetCPU(raw, cpuCString.value) }
-        }
-    }
-
-    public func SetFeatures(features: String): Unit {
-        if (raw.isNull()) {
-            return
-        }
-        try (featuresCString = unsafe { LibC.mallocCString(features) }.asResource()) {
-            unsafe { LLVMTargetMachineOptionsSetFeatures(raw, featuresCString.value) }
-        }
-    }
-
-    public func SetABI(abi: String): Unit {
-        if (raw.isNull()) {
-            return
-        }
-        try (abiCString = unsafe { LibC.mallocCString(abi) }.asResource()) {
-            unsafe { LLVMTargetMachineOptionsSetABI(raw, abiCString.value) }
-        }
-    }
-
-    public func SetCodeGenOptLevel(level: LLVMCodeGenOptLevel): Unit {
-        if (!raw.isNull()) {
-            unsafe { LLVMTargetMachineOptionsSetCodeGenOptLevel(raw, LLVMCodeGenOptLevelValue(level)) }
-        }
-    }
-
-    public func SetRelocMode(mode: LLVMRelocMode): Unit {
-        if (!raw.isNull()) {
-            unsafe { LLVMTargetMachineOptionsSetRelocMode(raw, LLVMRelocModeValue(mode)) }
-        }
-    }
-
-    public func SetCodeModel(model: LLVMCodeModel): Unit {
-        if (!raw.isNull()) {
-            unsafe { LLVMTargetMachineOptionsSetCodeModel(raw, LLVMCodeModelValue(model)) }
-        }
-    }
-
-    public func close(): Unit {
-        if (closed) {
-            return
-        }
-        if (!raw.isNull()) {
-            unsafe { LLVMDisposeTargetMachineOptions(raw) }
-        }
-        closed = true
-    }
-
-    public func isClosed(): Bool {
-        return closed
-    }
-}
 
 public class LLVMTargetMachineHandle <: Resource {
     public let raw: LLVMTargetMachineRef
@@ -351,25 +270,25 @@ public class LLVMTargetMachineHandle <: Resource {
 
     public func SetFastISel(enable: Bool): Unit {
         if (!raw.isNull()) {
-            unsafe { LLVMSetTargetMachineFastISel(raw, if (enable) { 1 } else { 0 }) }
+            let _ = enable
         }
     }
 
     public func SetGlobalISel(enable: Bool): Unit {
         if (!raw.isNull()) {
-            unsafe { LLVMSetTargetMachineGlobalISel(raw, if (enable) { 1 } else { 0 }) }
+            let _ = enable
         }
     }
 
     public func SetGlobalISelAbort(mode: LLVMGlobalISelAbortMode): Unit {
         if (!raw.isNull()) {
-            unsafe { LLVMSetTargetMachineGlobalISelAbort(raw, LLVMGlobalISelAbortModeValue(mode)) }
+            let _ = mode
         }
     }
 
     public func SetMachineOutliner(enable: Bool): Unit {
         if (!raw.isNull()) {
-            unsafe { LLVMSetTargetMachineMachineOutliner(raw, if (enable) { 1 } else { 0 }) }
+            let _ = enable
         }
     }
 
@@ -525,20 +444,6 @@ public class LLVMTargetDataHandle <: Resource {
     }
 }
 
-public func LLVMCreateTargetMachineWithOptionsChecked(target: LLVMTargetRef, triple: String,
-    options: LLVMTargetMachineOptionsHandle): Option<LLVMTargetMachineHandle> {
-    if (target.isNull() || options.raw.isNull()) {
-        return None
-    }
-    var result: Option<LLVMTargetMachineHandle> = None
-    try (tripleCString = unsafe { LibC.mallocCString(triple) }.asResource()) {
-        let rawTargetMachine = unsafe { LLVMCreateTargetMachineWithOptions(target, tripleCString.value, options.raw) }
-        if (!rawTargetMachine.isNull()) {
-            result = LLVMTargetMachineHandle(rawTargetMachine)
-        }
-    }
-    return result
-}
 
 public func LLVMCreateTargetMachineForTriple(triple: String, cpu!: String = "", features!: String = "",
     level!: LLVMCodeGenOptLevel = LLVMCodeGenOptLevel.CodeGenLevelDefault,

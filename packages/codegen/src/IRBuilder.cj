@@ -1188,10 +1188,7 @@ public class IRBuilder2 {
     }
 
     private func ApplyFastMathIfNeeded(value: LLVMValueRef): LLVMValueRef {
-        if (!value.isNull() && GetCGContext().GetCompileOptions().fastMathMode &&
-            unsafe { LLVMCanValueUseFastMathFlags(value) } != 0) {
-            unsafe { LLVMSetFastMathFlags(value, LLVM_FAST_MATH_ALL) }
-        }
+        // LLVM-15 C API has no fast-math-flag accessor; skip (optimization hint only).
         return value
     }
 

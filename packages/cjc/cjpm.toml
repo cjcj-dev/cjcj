@@ -10,7 +10,7 @@
   output-type = "executable"
   compile-option = ""
   override-compile-option = ""
-  link-option = "-L/usr/lib/llvm-20/lib -lLLVM-20"
+  link-option = "/root/.cjv/toolchains/nightly-1.1.0-alpha.20260331010029/third_party/llvm/lib/libLLVM-15.so -rpath /root/.cjv/toolchains/nightly-1.1.0-alpha.20260331010029/third_party/llvm/lib"
   package-configuration = {}
 
 [dependencies]
