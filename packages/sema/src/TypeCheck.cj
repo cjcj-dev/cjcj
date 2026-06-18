@@ -63,6 +63,46 @@ private func collectPackageTypeDecls(pkg: Package, name: String): ArrayList<Decl
     return out
 }
 
+private class ImportedPackageLookup {
+    public var decl: Option<PackageDecl> = None
+    public var conflicted: Bool = false
+
+    public init() {}
+}
+
+private func findImportedPackageDecl(ctx: ASTContext, packageName: String): ImportedPackageLookup {
+    let result = ImportedPackageLookup()
+    if (packageName.isEmpty()) {
+        return result
+    }
+    for (packageDecl in ctx.packageDecls) {
+        let matches = packageDecl.fullPackageName == packageName || packageDecl.identifier.Val() == packageName
+        if (!matches) {
+            continue
+        }
+        if (let Some(_) <- result.decl) {
+            result.conflicted = true
+            return result
+        }
+        result.decl = Some(packageDecl)
+    }
+    return result
+}
+
+private func markPackageBaseType(typeNode: Type): Unit {
+    typeNode.SetTy(TypeManager.GetInvalidTy())
+    if (let Some(qualified) <- (typeNode as QualifiedType)) {
+        if (let Some(baseType) <- qualified.baseType) {
+            markPackageBaseType(baseType)
+        }
+    }
+}
+
+private func bindImportedPackageBase(baseType: Type, packageDecl: PackageDecl): Unit {
+    ReplaceTarget(baseType, Some(packageDecl))
+    markPackageBaseType(baseType)
+}
+
 private func getTypeArgTys(typeManager: TypeManager, ctx: ASTContext, typeArguments: ArrayList<Type>): ArrayList<Ty> {
     let out = ArrayList<Ty>()
     for (arg in typeArguments) {
@@ -209,6 +249,19 @@ private func markDirectSubtype(superTy: Ty, subtype: Ty): Unit {
             }
         }
         classLikeTy.directSubtypes.add(subtype)
+    }
+}
+
+private func markInvalidInheritanceForNonClassLike(decl: InheritableDecl): Unit {
+    if (decl.astKind != ASTKind.STRUCT_DECL && decl.astKind != ASTKind.ENUM_DECL) {
+        return
+    }
+    for (inheritedType in decl.inheritedTypes) {
+        if (let Some(inheritedDecl) <- Ty.GetDeclPtrOfTy(inheritedType.GetTy())) {
+            if (!inheritedDecl.IsClassLikeDecl()) {
+                decl.EnableAttr(Attribute.IN_REFERENCE_CYCLE)
+            }
+        }
     }
 }
 
@@ -501,7 +554,15 @@ public func GetTyFromASTQualifiedType(typeManager: TypeManager, ctx: ASTContext,
         if (baseType.astKind == ASTKind.INVALID_TYPE) {
             return TypeManager.GetInvalidTy()
         }
-        let _ = GetTyFromASTType(typeManager, ctx, baseType)
+        let packageLookup = findImportedPackageDecl(ctx, ASTContext.GetPackageName(baseType))
+        if (packageLookup.conflicted) {
+            return TypeManager.GetInvalidTy()
+        }
+        if (let Some(packageDecl) <- packageLookup.decl) {
+            bindImportedPackageBase(baseType, packageDecl)
+        } else {
+            let _ = GetTyFromASTType(typeManager, ctx, baseType)
+        }
         if (let Some(baseTarget) <- baseType.GetTarget()) {
             if (let Some(packageDecl) <- (baseTarget as PackageDecl)) {
                 let packageTargets = collectPackageTypeDecls(packageDecl.srcPackage, qt.field.Val())
@@ -613,6 +674,7 @@ public func ResolveOneDecl(typeManager: TypeManager, ctx: ASTContext, decl: Decl
                 }
             }
         }
+        markInvalidInheritanceForNonClassLike(inheritable)
         return
     }
     if (let Some(typeAliasDecl) <- (decl as TypeAliasDecl)) {
@@ -692,6 +754,30 @@ public func ResolveTypeAlias(typeManager: TypeManager, ctx: ASTContext): Unit {
     }
 }
 
+private func markAliasGenericParameter(decl: Decl): Unit {
+    if (let Some(tad) <- (decl as TypeAliasDecl)) {
+        if (tad.typeNode.isNone()) {
+            return
+        }
+        if (let Some(generic) <- tad.generic) {
+            for (typeParameter in generic.typeParameters) {
+                if (let Some(paramTy) <- typeParameter.GetTy()) {
+                    if (let Some(genericTy) <- (paramTy as GenericsTy)) {
+                        genericTy.isAliasParam = true
+                    }
+                }
+            }
+        }
+    }
+}
+
+public func MarkAliasGenericParameters(ctx: ASTContext): Unit {
+    let decls = if (let Some(pkg) <- ctx.curPackage) { collectDeclsFromPackage(pkg) } else { GetAllDecls(ctx) }
+    for (decl in decls) {
+        markAliasGenericParameter(decl)
+    }
+}
+
 public func ResolveNames(typeManager: TypeManager, ctx: ASTContext): Unit {
     let box = ResolveTypeWalkerBox(typeManager, ctx)
     let resolveSingleType = { node: Node =>
@@ -721,6 +807,7 @@ public func ResolveNames(typeManager: TypeManager, ctx: ASTContext): Unit {
 public func PreSetDeclType(typeManager: TypeManager, ctx: ASTContext): Unit {
     ResolveDecls(typeManager, ctx)
     ResolveTypeAlias(typeManager, ctx)
+    MarkAliasGenericParameters(ctx)
     ResolveNames(typeManager, ctx)
 }
 

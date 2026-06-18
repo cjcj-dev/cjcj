@@ -48,14 +48,19 @@ public class TypeChecker {
     }
 
     public func PerformDesugarAfterInstantiation(ctx: ASTContext, pkg: Package): Unit {
-        let _ = ctx
-        let _ = pkg
-        // TODO(selfhost:Sema): port enum recursive type elimination and autoboxing passes.
+        if (pkg.files.isEmpty()) {
+            return
+        }
+        PerformRecursiveTypesElimination(ctx.packageDecls, tm)
+        MarkExtendBox(tm, pkg)
     }
 
     public func PerformDesugarAfterSema(pkgs: ArrayList<Package>): Unit {
-        let _ = pkgs
-        // TODO(selfhost:Sema): port post-sema desugar passes that depend on full type-check annotations.
+        let tyVarScope = BeginTyVarScope(tm)
+        for (pkg in pkgs) {
+            MarkExtendBox(tm, pkg)
+        }
+        EndTyVarScope(tyVarScope)
     }
 
     public func SynReferenceSeparately(ctx: ASTContext, scopeName: String, expr: Expr, hasLocalDecl: Bool): Candidate {

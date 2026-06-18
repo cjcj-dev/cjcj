@@ -82,6 +82,27 @@ Verification:
 - `grep -rn "TODO(selfhost:Sema)" packages/sema/src` reports 4 remaining package-level markers, all outside the tc-core-owned files.
 - Remaining `TODO(selfhost:Sema)` markers in the tc-core-owned files listed by the task: 0.
 
+## 2026-06-18 Continue Pass
+
+Files deepened:
+
+- `packages/sema/src/TypeCheck.cj`
+
+Implemented behavior:
+
+- Ported the C++ `MarkInvalidInheritanceForNonClassLike` guard into the self-hosted precheck path. After inherited types are resolved for struct and enum declarations, any inherited target that is not classlike now marks the struct/enum with `IN_REFERENCE_CYCLE`, preventing later invalid type substitution paths from treating that inheritance edge as usable.
+- Tightened qualified type package-base resolution. The imported package lookup now carries an explicit conflict bit and returns invalid on multiple package-declaration matches, matching the C++ `GetImportedPackageDecl` control flow instead of falling back to ordinary type lookup after an ambiguity.
+
+Remaining gaps:
+
+- Exact diagnostics for package-name conflicts and invalid non-classlike inheritance are still not emitted by this helper layer because the current standalone `TypeCheck.cj` functions do not carry the C++ diagnostic engine through their signatures.
+- Full import-manager package alias resolution remains blocked by the surrounding self-hosted modules/import surface; this pass only uses `ASTContext.packageDecls`.
+
+Verification:
+
+- `cjpm build` passes after this pass.
+- Remaining `TODO(selfhost:Sema)` markers in the tc-core-owned files listed by the task: 0.
+
 ## 2026-06-17 Continue Pass 5
 
 Files deepened:
@@ -135,6 +156,120 @@ Verification:
 
 - `cjpm build` passes after this pass.
 - `grep -rn "TODO(selfhost:Sema)" packages/sema/src` reports 4 package-level markers, all outside the tc-core-owned files.
+- Remaining `TODO(selfhost:Sema)` markers in the tc-core-owned files listed by the task: 0.
+
+## 2026-06-18 Continue Pass 2
+
+Files deepened:
+
+- `packages/sema/src/LookUpImpl.cj`
+
+Implemented behavior:
+
+- Tightened extension member lookup to honor package-level visibility when the lookup site file is known. `FieldLookupExtend` now filters candidate `ExtendDecl`s before both direct member lookup and inherited-interface lookup.
+- The filter mirrors the visible relation used by the real modules package (`GetPackageRelation` plus public/protected/internal package rules), matching the first visibility gate in C++ `ImportManager::IsExtendAccessible` instead of accepting every extend returned by `TypeManager.GetAllExtendsByTy`.
+
+Remaining gaps:
+
+- Full C++ `ImportManager::IsExtendAccessible` also checks file-specific imports, upper-bound importability, test-only package imports, and inherited-interface importability. Those still require threading the real `ImportManager` through the self-host Sema facade.
+- Global imported-name lookup remains partial for the same reason.
+
+Verification:
+
+- `cjpm build` passes after this pass.
+- `grep -rn "TODO(selfhost:Sema)" packages/sema/src` reports 2 package-level markers, both outside the tc-core-owned files in `TestManager.cj`.
+- Remaining `TODO(selfhost:Sema)` markers in the tc-core-owned files listed by the task: 0.
+
+## 2026-06-18 Continue Pass 4
+
+Files deepened:
+
+- `packages/sema/src/LookUpImpl.cj`
+
+Implemented behavior:
+
+- Ported the C++ post-lexical imported-declaration fallback in `LookUpImpl::Lookup`. Self-host lookup now preserves lexical results when lookup succeeds, stops before imports when a local non-function result exists, and merges imported candidates only for empty lookups or function-overload lookups.
+- Added real-AST import resolution for ordinary file imports and package-wide re-export imports. The implementation handles import-all, package-name imports, single declaration imports, and alias imports through `File.imports`, `ASTContext.packageDecls`, and parsed `ImportContent` package/member names.
+- Imported member candidates now honor package relation visibility and import access level before entering lookup results, matching the core filtering shape used by the C++ `ImportManager` maps.
+
+Remaining gaps:
+
+- Multi-import expansion, type-alias import alias maps, implicit package members, and serialized CJO package members still require the real `ImportManager`/`CjoManager` state rather than the parsed AST package list alone.
+- Exact import diagnostics are still owned by the modules import pass, not this lookup fallback.
+
+Verification:
+
+- `cjpm build` passes after this pass.
+- `grep -rn "TODO(selfhost:Sema)" packages/sema/src` reports 2 package-level markers, both outside the tc-core-owned files in `TestManager.cj`.
+- Remaining `TODO(selfhost:Sema)` markers in the tc-core-owned files listed by the task: 0.
+
+## 2026-06-18 Continue Pass 3
+
+Files deepened:
+
+- `packages/sema/src/LookUpImpl.cj`
+
+Implemented behavior:
+
+- Ported the C++ `StdLibFieldLookup` fast path into self-host lookup. References in nodes marked `IN_CORE` now search `std.core`, and nodes marked `IN_MACRO` now search `std.ast`, before ordinary lexical lookup.
+- The lookup uses real AST package state by checking the current package first and then imported `PackageDecl` entries, returning the first matching package member like C++ `ImportManager::GetCoreDecl`/`GetAstDecl`.
+- Package member scanning includes source file declarations plus the self-host package-level imported, instantiated, and inline declaration lists that can hold real members after desugar or instantiation passes.
+
+Remaining gaps:
+
+- C++ also consults `CjoManager` implicit package members when no explicit member is found. That implicit-member table is still behind the real `ImportManager`, which the current self-host tc-core facade does not carry.
+- General imported-name lookup remains partial until the real `ImportManager` is threaded through Sema lookup.
+
+Verification:
+
+- `cjpm build` passes after this pass.
+- `grep -rn "TODO(selfhost:Sema)" packages/sema/src` reports 2 package-level markers, both outside the tc-core-owned files in `TestManager.cj`.
+- Remaining `TODO(selfhost:Sema)` markers in the tc-core-owned files listed by the task: 0.
+
+## 2026-06-18 Continue Pass
+
+Files deepened:
+
+- `packages/sema/src/TypeCheck.cj`
+
+Implemented behavior:
+
+- Ported the C++ `IgnoreAssumptionForTypeAliasDecls` effect into the self-host type preset flow. After type aliases are resolved, generic parameters owned by generic type aliases are now marked through `GenericsTy.isAliasParam`.
+- This connects the alias-generic path to the existing self-host `TypeManager.IsSubtype` behavior, which already mirrors the C++ shortcut that treats alias generic parameters as satisfying their bound comparison without recursively walking alias-expanded upper bounds.
+
+Remaining gaps:
+
+- The broader C++ `CollectAndCheckAssumption` pipeline still cannot be fully mirrored here because the current self-host AST does not expose C++'s `Generic::assumptionCollection` or `ASTContext::gcBlames` storage.
+- Exact assumption diagnostics and import-manager dependent lookup remain incomplete in the surrounding partial port.
+
+Verification:
+
+- `cjpm build` passes after this pass.
+- `grep -rn "TODO(selfhost:Sema)" packages/sema/src` reports 2 package-level markers, both outside the tc-core-owned files in `TestManager.cj`.
+- Remaining `TODO(selfhost:Sema)` markers in the tc-core-owned files listed by the task: 0.
+
+## 2026-06-18 Deepening Pass
+
+Files deepened:
+
+- `packages/sema/src/TypeChecker.cj`
+- `packages/sema/src/TypeCheck.cj`
+
+Implemented behavior:
+
+- Replaced the tc-core entrypoint no-op bodies for post-instantiation and post-sema handling. `PerformDesugarAfterInstantiation` now runs recursive enum type elimination over the imported package declarations carried by the current `ASTContext`, then marks extend-boxing points in the package AST. `PerformDesugarAfterSema` now opens an explicit type-variable scope and marks extend-boxing points for each package instead of silently discarding the request.
+- Improved qualified-type precheck resolution toward the C++ `GetTyFromASTType(QualifiedType&)` flow. The self-hosted resolver now consults real `ASTContext.packageDecls` before treating the base as an ordinary type, binds matching package bases as `PackageDecl` targets, invalidates the package qualifier type chain like the C++ path, and then resolves the qualified member inside the package.
+- Kept the parent `cangjie_compiler::sema` package free of subpackage imports. A direct call into `cangjie_compiler::sema.Desugar` was tested and rejected because the existing child package imports `sema`, producing a Cangjie package cycle.
+
+Remaining gaps:
+
+- Exact C++ post-sema desugar coverage is still incomplete from this parent-package entrypoint: `sema.Desugar.AfterTypeCheck` and option boxing live in a child package that cannot be imported from `sema` without refactoring package boundaries.
+- Imported package resolution through `ImportManager.GetImportedPackageDecl` still cannot be used directly in tc-core because the current self-hosted modules surface remains type-incompatible with real `ast` declarations in places noted by earlier passes.
+- The qualified-package conflict branch currently returns invalid resolution by declining ambiguous package matches; exact C++ package-conflict diagnostics remain thin.
+
+Verification:
+
+- `cjpm build` passes after this pass.
 - Remaining `TODO(selfhost:Sema)` markers in the tc-core-owned files listed by the task: 0.
 
 ## 2026-06-17 Continue Pass 9
