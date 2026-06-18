@@ -100,6 +100,33 @@ public func BCHIRTypeKindCell(ty: Option<Type>): Int64 {
     return TypeKindIndex(TypeKind.TYPE_INVALID)
 }
 
+public func BCHIRTypeKindCell(ty: Type): Int64 {
+    return TypeKindIndex(ty.GetTypeKind())
+}
+
+public func BCHIRClassMangledNameForType(ty: Type): String {
+    if (let Some(classTy) <- (ty as ClassType)) {
+        return BCHIRMangledName(classTy.GetClassDef())
+    }
+    if (let Some(structTy) <- (ty as StructType)) {
+        return BCHIRMangledName(structTy.GetStructDef())
+    }
+    if (let Some(enumTy) <- (ty as EnumType)) {
+        return BCHIRMangledName(enumTy.GetEnumDef())
+    }
+    if (let Some(customTy) <- (ty as CustomType)) {
+        return BCHIRMangledName(customTy.GetCustomTypeDef())
+    }
+    return ty.ToString()
+}
+
+public func BCHIRCellFromUInt64(value: UInt64): Int64 {
+    if (value <= UInt64(Int64.Max)) {
+        return Int64(value)
+    }
+    return -Int64(UInt64.Max - value) - 1
+}
+
 public func BCHIRIsWideIntegerOp(opCode: OpCode): Bool {
     return opCode == OpCode.INT64 || opCode == OpCode.INTNAT || opCode == OpCode.UINT64 ||
         opCode == OpCode.UINTNAT
