@@ -4,6 +4,7 @@ import std.collection.*
 
 import cangjie_compiler::ast.ASTKind
 import cangjie_compiler::ast.ASTKindName
+import cangjie_compiler::ast.AssignExpr as AstAssignExpr
 import cangjie_compiler::ast.Attribute as AstAttribute
 import cangjie_compiler::ast.BinaryExpr as AstBinaryExpr
 import cangjie_compiler::ast.Block as AstBlock
@@ -19,15 +20,29 @@ import cangjie_compiler::ast.IfExpr as AstIfExpr
 import cangjie_compiler::ast.InterfaceDecl as AstInterfaceDecl
 import cangjie_compiler::ast.LitConstExpr as AstLitConstExpr
 import cangjie_compiler::ast.LitConstKind as AstLitConstKind
+import cangjie_compiler::ast.MemberAccess as AstMemberAccess
 import cangjie_compiler::ast.Node as AstNode
 import cangjie_compiler::ast.RefExpr as AstRefExpr
 import cangjie_compiler::ast.ReturnExpr as AstReturnExpr
 import cangjie_compiler::ast.StructDecl as AstStructDecl
+import cangjie_compiler::ast.SubscriptExpr as AstSubscriptExpr
 import cangjie_compiler::ast.TokenKind as AstTokenKind
 import cangjie_compiler::ast.TokenKindValue as AstTokenKindValue
 import cangjie_compiler::ast.Ty as AstTy
 import cangjie_compiler::ast.UnaryExpr as AstUnaryExpr
 import cangjie_compiler::ast.VarDecl as AstVarDecl
+
+private class FaithfulLeftValueInfo {
+    public let base: Value
+    public let path: ArrayList<String> = ArrayList<String>()
+
+    public init(base: Value, path: ArrayList<String>) {
+        this.base = base
+        for (item in path) {
+            this.path.add(item)
+        }
+    }
+}
 
 public class Translator {
     private let builder: CHIRBuilder
@@ -61,6 +76,8 @@ public class Translator {
             case ASTKind.UNARY_EXPR => trans.Visit(RequireNodeAsUnaryExpr(nodePtr))
             case ASTKind.CALL_EXPR => trans.Visit(RequireNodeAsCallExpr(nodePtr))
             case ASTKind.IF_EXPR => trans.Visit(RequireNodeAsIfExpr(nodePtr))
+            case ASTKind.ASSIGN_EXPR => trans.Visit(RequireNodeAsAssignExpr(nodePtr))
+            case ASTKind.MEMBER_ACCESS => trans.Visit(RequireNodeAsMemberAccess(nodePtr))
             case _ => throw IllegalArgumentException(
                 "not yet ported in faithful AST2CHIR: ${ASTKindName(nodePtr.astKind)}")
         }
@@ -291,6 +308,46 @@ public class Translator {
         return None
     }
 
+    public func Visit(expr: AstAssignExpr): Option<Value> {
+        let leftExpr = RequireExpr(expr.leftValue, "assign left value")
+        let rightExpr = RequireExpr(expr.rightExpr, "assign right expression")
+        if (leftExpr.astKind == ASTKind.WILDCARD_EXPR) {
+            let _ = Translator.TranslateASTNode(rightExpr, this)
+            return None
+        }
+        if (let Some(subscriptExpr) <- (leftExpr as AstSubscriptExpr)) {
+            if (!subscriptExpr.isTupleAccess) {
+                TranslateVArrayAssign(expr, subscriptExpr, rightExpr)
+                return None
+            }
+        }
+        if (IsCompoundAssignOp(expr.op)) {
+            return TranslateCompoundAssign(expr, leftExpr, rightExpr)
+        }
+        return TranslateTrivialAssign(expr, leftExpr, rightExpr)
+    }
+
+    public func Visit(expr: AstMemberAccess): Option<Value> {
+        let target = expr.target ??
+            throw IllegalStateException("faithful AST2CHIR MemberAccess has no Sema target: ${expr.field.Val()}")
+        if (target.TestAttr(AstAttribute.STATIC) || IsPackageMemberAccess(expr)) {
+            return TranslateStaticTargetOrPackageMemberAccess(expr, target)
+        }
+        if (target.TestAttr(AstAttribute.ENUM_CONSTRUCTOR)) {
+            throw IllegalArgumentException("not yet ported in faithful AST2CHIR: enum member access")
+        }
+        if (IsInstanceMember(target)) {
+            if (let Some(_) <- (target as AstVarDecl)) {
+                let leftValueInfo = TranslateMemberAccessAsLeftValue(expr)
+                return LoadLeftValue(leftValueInfo, chirTy.TranslateType(RequireAstTy(expr)))
+            }
+            if (let Some(_) <- (target as AstFuncDecl)) {
+                throw IllegalArgumentException("not yet ported in faithful AST2CHIR: member method reference")
+            }
+        }
+        throw IllegalArgumentException("not yet ported in faithful AST2CHIR: unsupported member access")
+    }
+
     private func TranslateClassLikeDecl(def: ClassDef, decl: AstClassLikeDecl): Unit {
         if (let Some(astTy) <- decl.GetTy()) {
             let classTy = UnwrapClassType(chirTy.TranslateType(astTy))
@@ -374,6 +431,176 @@ public class Translator {
         }
     }
 
+    private func TranslateTrivialAssign(expr: AstAssignExpr, leftExpr: AstExpr, rightExpr: AstExpr): Option<Value> {
+        let _ = expr
+        var rhsValue: Value
+        var leftValueInfo: FaithfulLeftValueInfo
+        if (leftExpr.mapExpr.isSome()) {
+            leftValueInfo = TranslateExprAsLeftValue(leftExpr)
+            rhsValue = Translator.TranslateASTNode(rightExpr, this) ??
+                throw IllegalStateException("faithful AST2CHIR assign rhs produced no value")
+        } else {
+            rhsValue = Translator.TranslateASTNode(rightExpr, this) ??
+                throw IllegalStateException("faithful AST2CHIR assign rhs produced no value")
+            leftValueInfo = TranslateExprAsLeftValue(leftExpr)
+        }
+        StoreToLeftValue(leftValueInfo, rhsValue)
+        return None
+    }
+
+    private func TranslateCompoundAssign(expr: AstAssignExpr, leftExpr: AstExpr, rightExpr: AstExpr): Option<Value> {
+        if (expr.op == AstTokenKind.AND_ASSIGN || expr.op == AstTokenKind.OR_ASSIGN) {
+            throw IllegalArgumentException("not yet ported in faithful AST2CHIR: short-circuit compound assignment")
+        }
+        let leftValueInfo = TranslateExprAsLeftValue(leftExpr)
+        let lhsValue = LoadLeftValue(leftValueInfo, chirTy.TranslateType(RequireAstTy(leftExpr))) ??
+            throw IllegalStateException("faithful AST2CHIR compound lhs produced no value")
+        let rhsValue = Translator.TranslateASTNode(rightExpr, this) ??
+            throw IllegalStateException("faithful AST2CHIR compound rhs produced no value")
+        let opResult = builder.CreateBinaryExpression(ToCHIRCompoundAssignOp(expr.op),
+            lhsValue.GetType() ?? chirTy.TranslateType(RequireAstTy(leftExpr)), lhsValue, rhsValue, CurrentBlock())
+        let compoundValue = RequireResult(opResult)
+        StoreToLeftValue(leftValueInfo, compoundValue)
+        return None
+    }
+
+    private func TranslateVArrayAssign(assign: AstAssignExpr, subscriptExpr: AstSubscriptExpr, rightExpr: AstExpr): Unit {
+        if (IsCompoundAssignOp(assign.op)) {
+            throw IllegalArgumentException("not yet ported in faithful AST2CHIR: compound VArray assignment")
+        }
+        if (subscriptExpr.indexExprs.size != 1) {
+            throw IllegalArgumentException("faithful AST2CHIR VArray assignment expects exactly one index")
+        }
+        let baseExpr = RequireExpr(subscriptExpr.baseExpr, "VArray assign base")
+        let baseLeftValueInfo = TranslateExprAsLeftValue(baseExpr)
+        if (!baseLeftValueInfo.path.isEmpty()) {
+            throw IllegalArgumentException("not yet ported in faithful AST2CHIR: nested VArray assignment base path")
+        }
+        let indexValue = Translator.TranslateASTNode(subscriptExpr.indexExprs[0], this) ??
+            throw IllegalStateException("faithful AST2CHIR VArray assignment index produced no value")
+        let rhsValue = Translator.TranslateASTNode(rightExpr, this) ??
+            throw IllegalStateException("faithful AST2CHIR VArray assignment rhs produced no value")
+        let args = ArrayList<Value>()
+        args.add(baseLeftValueInfo.base)
+        args.add(rhsValue)
+        args.add(indexValue)
+        let callContext = IntrisicCallContext(kind: IntrinsicKind.VARRAY_SET, args: args)
+        builder.CreateIntrinsic(builder.context.GetUnitTy(), callContext, CurrentBlock())
+    }
+
+    private func TranslateExprAsLeftValue(expr: AstExpr): FaithfulLeftValueInfo {
+        let nodePtr = Translator.GetDesugaredExpr(expr)
+        if (let Some(refExpr) <- (nodePtr as AstRefExpr)) {
+            if (let Some(target) <- refExpr.ref.target) {
+                if (let Some(_) <- (target as AstVarDecl)) {
+                    return FaithfulLeftValueInfo(GetSymbolTable(target), ArrayList<String>())
+                }
+            }
+            throw IllegalArgumentException("not yet ported in faithful AST2CHIR: non-variable RefExpr left value")
+        }
+        if (let Some(member) <- (nodePtr as AstMemberAccess)) {
+            return TranslateMemberAccessAsLeftValue(member)
+        }
+        if (let Some(_) <- (nodePtr as AstSubscriptExpr)) {
+            throw IllegalArgumentException("not yet ported in faithful AST2CHIR: tuple/subscript left value")
+        }
+        throw IllegalArgumentException("not yet ported in faithful AST2CHIR left value: ${ASTKindName(nodePtr.astKind)}")
+    }
+
+    private func TranslateMemberAccessAsLeftValue(member: AstMemberAccess): FaithfulLeftValueInfo {
+        let target = member.target ??
+            throw IllegalStateException("faithful AST2CHIR MemberAccess left value has no Sema target")
+        if (target.TestAttr(AstAttribute.ENUM_CONSTRUCTOR)) {
+            let value = Visit(member) ??
+                throw IllegalStateException("faithful AST2CHIR enum member access produced no value")
+            return FaithfulLeftValueInfo(value, ArrayList<String>())
+        }
+        if (target.TestAttr(AstAttribute.STATIC) || IsPackageMemberAccess(member)) {
+            return FaithfulLeftValueInfo(GetSymbolTable(target), ArrayList<String>())
+        }
+        if (let Some(varDecl) <- (target as AstVarDecl)) {
+            if (let Some(baseExpr) <- member.baseExpr) {
+                let baseInfo = TranslateExprAsLeftValue(baseExpr)
+                let path = CopyStringList(baseInfo.path)
+                path.add(varDecl.identifier.Val())
+                return FaithfulLeftValueInfo(baseInfo.base, path)
+            }
+            throw IllegalStateException("faithful AST2CHIR instance member left value has no base")
+        }
+        throw IllegalArgumentException("not yet ported in faithful AST2CHIR: member function left value")
+    }
+
+    private func LoadLeftValue(info: FaithfulLeftValueInfo, expectedTy: Type): Option<Value> {
+        if (info.path.isEmpty()) {
+            return GetDerefedValue(info.base)
+        }
+        let refTy = builder.context.GetRefTy(expectedTy)
+        let memberRef = RequireResult(builder.CreateGetElementByName(refTy, info.base, info.path, CurrentBlock()))
+        return RequireResult(builder.CreateLoad(expectedTy, memberRef, CurrentBlock()))
+    }
+
+    private func StoreToLeftValue(info: FaithfulLeftValueInfo, value: Value): Unit {
+        if (info.path.isEmpty()) {
+            builder.CreateStore(CastValueIfNeeded(value, RequireRefBaseType(info.base)), info.base, CurrentBlock())
+            return
+        }
+        builder.CreateStoreElementByName(value, info.base, info.path, CurrentBlock())
+    }
+
+    private func TranslateStaticTargetOrPackageMemberAccess(expr: AstMemberAccess, target: AstDecl): Option<Value> {
+        let targetNode = GetSymbolTable(target)
+        if (let Some(_) <- (target as AstVarDecl)) {
+            let targetTy = chirTy.TranslateType(RequireAstTy(target))
+            let loaded = RequireResult(builder.CreateLoad(targetTy, targetNode, CurrentBlock()))
+            return CastValueIfNeeded(loaded, chirTy.TranslateType(RequireAstTy(expr)))
+        }
+        if (let Some(_) <- (target as AstFuncDecl)) {
+            if (target.outerDecl.isSome()) {
+                throw IllegalArgumentException("not yet ported in faithful AST2CHIR: static member method reference")
+            }
+            return targetNode
+        }
+        throw IllegalArgumentException("not yet ported in faithful AST2CHIR: static/package member target")
+    }
+
+    private func IsPackageMemberAccess(expr: AstMemberAccess): Bool {
+        let _ = expr
+        if (let Some(target) <- expr.target) {
+            return target.TestAttr(AstAttribute.GLOBAL)
+        }
+        return false
+    }
+
+    private func IsInstanceMember(decl: AstDecl): Bool {
+        return decl.outerDecl.isSome() && !decl.TestAttr(AstAttribute.STATIC) && !decl.TestAttr(AstAttribute.GLOBAL)
+    }
+
+    private func RequireRefBaseType(value: Value): Type {
+        let ty = value.GetType() ??
+            throw IllegalStateException("faithful AST2CHIR value has no type: ${value.GetIdentifier()}")
+        if (let Some(refTy) <- (ty as RefType)) {
+            return refTy.GetBaseType()
+        }
+        throw IllegalStateException("faithful AST2CHIR expected ref left value, got ${ty.ToString()}")
+    }
+
+    private func CastValueIfNeeded(value: Value, expectedTy: Type): Value {
+        let valueTy = value.GetType() ??
+            throw IllegalStateException("faithful AST2CHIR value has no type: ${value.GetIdentifier()}")
+        if (valueTy.IsEqual(expectedTy)) {
+            return value
+        }
+        return RequireResult(builder.CreateTypeCast(expectedTy, value, CurrentBlock()))
+    }
+
+    private func CopyStringList(values: ArrayList<String>): ArrayList<String> {
+        let out = ArrayList<String>()
+        for (value in values) {
+            out.add(value)
+        }
+        return out
+    }
+
     private func GetSymbolTable(decl: AstDecl): Value {
         if (let Some(value) <- localValSymbolTable.TryGet(decl)) {
             return value
@@ -444,6 +671,43 @@ public class Translator {
             case AstTokenKind.BITNOT => ExprKind.BITNOT
             case _ => throw IllegalArgumentException(
                 "not yet ported in faithful AST2CHIR unary op: ${AstTokenKindValue(op)}")
+        }
+    }
+
+    private func IsCompoundAssignOp(op: AstTokenKind): Bool {
+        return match (op) {
+            case AstTokenKind.ADD_ASSIGN => true
+            case AstTokenKind.SUB_ASSIGN => true
+            case AstTokenKind.MUL_ASSIGN => true
+            case AstTokenKind.EXP_ASSIGN => true
+            case AstTokenKind.DIV_ASSIGN => true
+            case AstTokenKind.MOD_ASSIGN => true
+            case AstTokenKind.AND_ASSIGN => true
+            case AstTokenKind.OR_ASSIGN => true
+            case AstTokenKind.BITAND_ASSIGN => true
+            case AstTokenKind.BITOR_ASSIGN => true
+            case AstTokenKind.BITXOR_ASSIGN => true
+            case AstTokenKind.LSHIFT_ASSIGN => true
+            case AstTokenKind.RSHIFT_ASSIGN => true
+            case _ => false
+        }
+    }
+
+    private func ToCHIRCompoundAssignOp(op: AstTokenKind): ExprKind {
+        return match (op) {
+            case AstTokenKind.ADD_ASSIGN => ExprKind.ADD
+            case AstTokenKind.SUB_ASSIGN => ExprKind.SUB
+            case AstTokenKind.MUL_ASSIGN => ExprKind.MUL
+            case AstTokenKind.EXP_ASSIGN => ExprKind.EXP
+            case AstTokenKind.DIV_ASSIGN => ExprKind.DIV
+            case AstTokenKind.MOD_ASSIGN => ExprKind.MOD
+            case AstTokenKind.BITAND_ASSIGN => ExprKind.BITAND
+            case AstTokenKind.BITOR_ASSIGN => ExprKind.BITOR
+            case AstTokenKind.BITXOR_ASSIGN => ExprKind.BITXOR
+            case AstTokenKind.LSHIFT_ASSIGN => ExprKind.LSHIFT
+            case AstTokenKind.RSHIFT_ASSIGN => ExprKind.RSHIFT
+            case _ => throw IllegalArgumentException(
+                "not yet ported in faithful AST2CHIR compound assign op: ${AstTokenKindValue(op)}")
         }
     }
 
@@ -564,5 +828,13 @@ public class Translator {
     private static func RequireNodeAsIfExpr(node: AstNode): AstIfExpr {
         return (node as AstIfExpr) ??
             throw IllegalArgumentException("ASTKind cast failed: IF_EXPR")
+    }
+
+    private static func RequireNodeAsAssignExpr(node: AstNode): AstAssignExpr {
+        return (node as AstAssignExpr) ?? throw IllegalArgumentException("ASTKind cast failed: ASSIGN_EXPR")
+    }
+
+    private static func RequireNodeAsMemberAccess(node: AstNode): AstMemberAccess {
+        return (node as AstMemberAccess) ?? throw IllegalArgumentException("ASTKind cast failed: MEMBER_ACCESS")
     }
 }
