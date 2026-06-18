@@ -12,6 +12,14 @@ import cangjie_compiler::ast.LitConstExpr as AstLitConstExpr
 import cangjie_compiler::ast.LitConstKind as AstLitConstKind
 import cangjie_compiler::ast.Node as AstNode
 import cangjie_compiler::ast.ReturnExpr as AstReturnExpr
+import cangjie_compiler::ast.VarDecl as AstVarDecl
+import cangjie_compiler::ast.AssignExpr as AstAssignExpr
+import cangjie_compiler::ast.RefExpr as AstRefExpr
+import cangjie_compiler::ast.BinaryExpr as AstBinaryExpr
+import cangjie_compiler::ast.UnaryExpr as AstUnaryExpr
+import cangjie_compiler::ast.ParenExpr as AstParenExpr
+import cangjie_compiler::ast.Expr as AstExpr
+import cangjie_compiler::ast.TokenKind as AstTokenKind
 
 private let REAL_AST_RETURN_NONE: Int64 = 0
 private let REAL_AST_RETURN_INT: Int64 = 1
@@ -20,12 +28,12 @@ private let REAL_AST_RETURN_UNIT: Int64 = 3
 
 private class RealASTBodyLowering {
     let ok: Bool
-    let stmt: Option<AST2CHIRStmtSpec>
+    let stmts: ArrayList<AST2CHIRStmtSpec>
     let returnKind: Int64
 
-    init(ok: Bool, stmt: Option<AST2CHIRStmtSpec>, returnKind: Int64) {
+    init(ok: Bool, stmts: ArrayList<AST2CHIRStmtSpec>, returnKind: Int64) {
         this.ok = ok
-        this.stmt = stmt
+        this.stmts = stmts
         this.returnKind = returnKind
     }
 }
@@ -33,6 +41,47 @@ private class RealASTBodyLowering {
 private class RealASTParamLowering {
     let types: ArrayList<Type> = ArrayList<Type>()
     let names: ArrayList<String> = ArrayList<String>()
+}
+
+private class RealASTStmtLowering {
+    let stmt: AST2CHIRStmtSpec
+    let returnKind: Int64
+
+    init(stmt: AST2CHIRStmtSpec, returnKind: Int64) {
+        this.stmt = stmt
+        this.returnKind = returnKind
+    }
+}
+
+private class RealASTLoweringScope {
+    let locals = HashMap<String, Bool>()
+
+    init(body: AstFuncBody) {
+        if (!body.paramLists.isEmpty()) {
+            for (param in body.paramLists[0].params) {
+                let name = param.identifier.Val()
+                if (!name.isEmpty()) {
+                    locals[name] = false
+                }
+            }
+        }
+    }
+
+    func Contains(name: String): Bool {
+        return locals.contains(name)
+    }
+
+    func Add(name: String, mutable: Bool): Bool {
+        if (locals.contains(name)) {
+            return false
+        }
+        locals[name] = mutable
+        return true
+    }
+
+    func CanAssign(name: String): Bool {
+        return locals.get(name) ?? false
+    }
 }
 
 public func DescribeRealASTFunctionLowering(pkg: AstPackage): ArrayList<String> {
@@ -121,7 +170,7 @@ private func BuildRealASTFunctionSpec(
     for (name in params.names) {
         fnSpec.AddParamName(name)
     }
-    if (let Some(stmt) <- lowered.stmt) {
+    for (stmt in lowered.stmts) {
         fnSpec.AddBodyStatement(stmt)
     }
     if (decl.IsExportedDecl()) {
@@ -183,41 +232,215 @@ private func BuildRealASTParamLowering(
 }
 
 private func LowerRealASTBody(body: AstFuncBody): RealASTBodyLowering {
+    let empty = ArrayList<AST2CHIRStmtSpec>()
     let block = match (body.body) {
         case Some(value) => value
-        case None => return RealASTBodyLowering(false, None, REAL_AST_RETURN_NONE)
+        case None => return RealASTBodyLowering(false, empty, REAL_AST_RETURN_NONE)
     }
+    let stmts = ArrayList<AST2CHIRStmtSpec>()
     if (block.body.isEmpty()) {
-        return RealASTBodyLowering(true, None, REAL_AST_RETURN_NONE)
+        return RealASTBodyLowering(true, stmts, REAL_AST_RETURN_NONE)
     }
-    if (block.body.size != 1) {
-        return RealASTBodyLowering(false, None, REAL_AST_RETURN_NONE)
+    let scope = RealASTLoweringScope(body)
+    var returnKind = REAL_AST_RETURN_NONE
+    for (node in block.body) {
+        let lowered = match (LowerRealASTBodyNode(node, scope)) {
+            case Some(value) => value
+            case None => return RealASTBodyLowering(false, empty, REAL_AST_RETURN_NONE)
+        }
+        stmts.add(lowered.stmt)
+        if (lowered.returnKind != REAL_AST_RETURN_NONE) {
+            returnKind = lowered.returnKind
+        }
     }
-    return LowerRealASTSingleBodyNode(block.body[0])
+    return RealASTBodyLowering(true, stmts, returnKind)
 }
 
-private func LowerRealASTSingleBodyNode(node: AstNode): RealASTBodyLowering {
-    let ret = match (node as AstReturnExpr) {
-        case Some(value) => value
-        case None => return RealASTBodyLowering(false, None, REAL_AST_RETURN_NONE)
+private func LowerRealASTBodyNode(node: AstNode, scope: RealASTLoweringScope): Option<RealASTStmtLowering> {
+    if (let Some(varDecl) <- (node as AstVarDecl)) {
+        return LowerRealASTVarDecl(varDecl, scope)
     }
+    if (let Some(assign) <- (node as AstAssignExpr)) {
+        return LowerRealASTAssign(assign, scope)
+    }
+    if (let Some(ret) <- (node as AstReturnExpr)) {
+        return LowerRealASTReturn(ret, scope)
+    }
+    return None
+}
+
+private func RealASTStmtAndKind(stmt: AST2CHIRStmtSpec, kind: Int64): RealASTStmtLowering {
+    return RealASTStmtLowering(stmt, kind)
+}
+
+private func LowerRealASTVarDecl(varDecl: AstVarDecl, scope: RealASTLoweringScope): Option<RealASTStmtLowering> {
+    if (varDecl.isConst) {
+        return None
+    }
+    if (let Some(typeNode) <- varDecl.typeNode) {
+        if (!IsRealASTInt64Type(typeNode) && !IsRealASTBoolType(typeNode)) {
+            return None
+        }
+    }
+    let name = varDecl.identifier.Val()
+    if (name.isEmpty() || scope.Contains(name)) {
+        return None
+    }
+    let initExpr = match (varDecl.initializer) {
+        case Some(value) => value
+        case None => return None
+    }
+    let exprSpec = match (LowerRealASTExpr(initExpr, scope)) {
+        case Some(value) => value
+        case None => return None
+    }
+    if (!scope.Add(name, varDecl.isVar)) {
+        return None
+    }
+    return Some(RealASTStmtAndKind(AST2CHIRStmtSpec.Let(name, exprSpec, isVar: varDecl.isVar),
+        REAL_AST_RETURN_NONE))
+}
+
+private func LowerRealASTAssign(assign: AstAssignExpr, scope: RealASTLoweringScope): Option<RealASTStmtLowering> {
+    if (assign.op != AstTokenKind.ASSIGN) {
+        return None
+    }
+    let left = match (assign.leftValue) {
+        case Some(value) => value
+        case None => return None
+    }
+    let ref = match (left as AstRefExpr) {
+        case Some(value) => value
+        case None => return None
+    }
+    let name = ref.ref.identifier.Val()
+    if (name.isEmpty() || !scope.Contains(name) || !scope.CanAssign(name)) {
+        return None
+    }
+    let right = match (assign.rightExpr) {
+        case Some(value) => value
+        case None => return None
+    }
+    let exprSpec = match (LowerRealASTExpr(right, scope)) {
+        case Some(value) => value
+        case None => return None
+    }
+    return Some(RealASTStmtAndKind(AST2CHIRStmtSpec.Assign(name, exprSpec), REAL_AST_RETURN_NONE))
+}
+
+private func LowerRealASTReturn(ret: AstReturnExpr, scope: RealASTLoweringScope): Option<RealASTStmtLowering> {
     if (let Some(expr) <- ret.expr) {
         if (let Some(lit) <- (expr as AstLitConstExpr)) {
             if (let Some(value) <- ParseRealASTIntLiteral(lit)) {
-                return RealASTBodyLowering(true, Some(AST2CHIRStmtSpec.Return(AST2CHIRExprSpec.Literal(value))),
-                    REAL_AST_RETURN_INT)
+                return Some(RealASTStmtAndKind(AST2CHIRStmtSpec.Return(AST2CHIRExprSpec.Literal(value)),
+                    REAL_AST_RETURN_INT))
             }
             if (let Some(value) <- ParseRealASTBoolLiteral(lit)) {
-                return RealASTBodyLowering(true, Some(AST2CHIRStmtSpec.Return(AST2CHIRExprSpec.BoolLit(value))),
-                    REAL_AST_RETURN_BOOL)
+                return Some(RealASTStmtAndKind(AST2CHIRStmtSpec.Return(AST2CHIRExprSpec.BoolLit(value)),
+                    REAL_AST_RETURN_BOOL))
             }
             if (lit.kind == AstLitConstKind.UNIT) {
-                return RealASTBodyLowering(true, Some(AST2CHIRStmtSpec.ReturnNone()), REAL_AST_RETURN_UNIT)
+                return Some(RealASTStmtAndKind(AST2CHIRStmtSpec.ReturnNone(), REAL_AST_RETURN_UNIT))
             }
         }
-        return RealASTBodyLowering(false, None, REAL_AST_RETURN_NONE)
+        let exprSpec = match (LowerRealASTExpr(expr, scope)) {
+            case Some(value) => value
+            case None => return None
+        }
+        return Some(RealASTStmtAndKind(AST2CHIRStmtSpec.Return(exprSpec), REAL_AST_RETURN_INT))
     }
-    return RealASTBodyLowering(true, Some(AST2CHIRStmtSpec.ReturnNone()), REAL_AST_RETURN_UNIT)
+    return Some(RealASTStmtAndKind(AST2CHIRStmtSpec.ReturnNone(), REAL_AST_RETURN_UNIT))
+}
+
+private func LowerRealASTExpr(expr: AstExpr, scope: RealASTLoweringScope): Option<AST2CHIRExprSpec> {
+    if (let Some(parenExpr) <- (expr as AstParenExpr)) {
+        if (let Some(inner) <- parenExpr.expr) {
+            return LowerRealASTExpr(inner, scope)
+        }
+        return None
+    }
+    if (let Some(lit) <- (expr as AstLitConstExpr)) {
+        if (let Some(value) <- ParseRealASTIntLiteral(lit)) {
+            return Some(AST2CHIRExprSpec.Literal(value))
+        }
+        if (let Some(value) <- ParseRealASTBoolLiteral(lit)) {
+            return Some(AST2CHIRExprSpec.BoolLit(value))
+        }
+        return None
+    }
+    if (let Some(refExpr) <- (expr as AstRefExpr)) {
+        let name = refExpr.ref.identifier.Val()
+        if (name.isEmpty() || !scope.Contains(name)) {
+            return None
+        }
+        return Some(AST2CHIRExprSpec.Ref(name))
+    }
+    if (let Some(binary) <- (expr as AstBinaryExpr)) {
+        let op = match (RealASTBinaryOp(binary.op)) {
+            case Some(value) => value
+            case None => return None
+        }
+        let lhs = match (binary.leftExpr) {
+            case Some(value) => value
+            case None => return None
+        }
+        let rhs = match (binary.rightExpr) {
+            case Some(value) => value
+            case None => return None
+        }
+        let lhsSpec = match (LowerRealASTExpr(lhs, scope)) {
+            case Some(value) => value
+            case None => return None
+        }
+        let rhsSpec = match (LowerRealASTExpr(rhs, scope)) {
+            case Some(value) => value
+            case None => return None
+        }
+        return Some(AST2CHIRExprSpec.Binary(op, lhsSpec, rhsSpec))
+    }
+    if (let Some(unary) <- (expr as AstUnaryExpr)) {
+        let op = match (RealASTUnaryOp(unary.op)) {
+            case Some(value) => value
+            case None => return None
+        }
+        let operand = match (unary.expr) {
+            case Some(value) => value
+            case None => return None
+        }
+        let operandSpec = match (LowerRealASTExpr(operand, scope)) {
+            case Some(value) => value
+            case None => return None
+        }
+        return Some(AST2CHIRExprSpec.Unary(op, operandSpec))
+    }
+    return None
+}
+
+private func RealASTBinaryOp(op: AstTokenKind): Option<ExprKind> {
+    return match (op) {
+        case AstTokenKind.ADD => Some(ExprKind.ADD)
+        case AstTokenKind.SUB => Some(ExprKind.SUB)
+        case AstTokenKind.MUL => Some(ExprKind.MUL)
+        case AstTokenKind.DIV => Some(ExprKind.DIV)
+        case AstTokenKind.MOD => Some(ExprKind.MOD)
+        case AstTokenKind.LT => Some(ExprKind.LT)
+        case AstTokenKind.LE => Some(ExprKind.LE)
+        case AstTokenKind.GT => Some(ExprKind.GT)
+        case AstTokenKind.GE => Some(ExprKind.GE)
+        case AstTokenKind.EQUAL => Some(ExprKind.EQUAL)
+        case AstTokenKind.NOTEQ => Some(ExprKind.NOTEQUAL)
+        case AstTokenKind.AND => Some(ExprKind.AND)
+        case AstTokenKind.OR => Some(ExprKind.OR)
+        case _ => None
+    }
+}
+
+private func RealASTUnaryOp(op: AstTokenKind): Option<ExprKind> {
+    return match (op) {
+        case AstTokenKind.SUB => Some(ExprKind.NEG)
+        case AstTokenKind.NOT => Some(ExprKind.NOT)
+        case _ => None
+    }
 }
 
 private func RealASTReturnType(
@@ -225,26 +448,19 @@ private func RealASTReturnType(
     body: AstFuncBody,
     lowered: RealASTBodyLowering
 ): Option<Type> {
-    if (lowered.returnKind == REAL_AST_RETURN_INT) {
-        if (let Some(retType) <- body.retType) {
-            if (IsRealASTInt64Type(retType)) {
-                return Some(context.GetInt64Ty())
-            }
-        }
-        return None
-    }
-    if (lowered.returnKind == REAL_AST_RETURN_BOOL) {
-        if (let Some(retType) <- body.retType) {
-            if (IsRealASTBoolType(retType)) {
-                return Some(context.GetBoolTy())
-            }
-        }
-        return None
-    }
     if (let Some(retType) <- body.retType) {
+        if (IsRealASTInt64Type(retType)) {
+            return Some(context.GetInt64Ty())
+        }
+        if (IsRealASTBoolType(retType)) {
+            return Some(context.GetBoolTy())
+        }
         if (IsRealASTUnitType(retType)) {
             return Some(context.GetUnitTy())
         }
+        return None
+    }
+    if (lowered.returnKind == REAL_AST_RETURN_INT || lowered.returnKind == REAL_AST_RETURN_BOOL) {
         return None
     }
     return Some(context.GetUnitTy())
