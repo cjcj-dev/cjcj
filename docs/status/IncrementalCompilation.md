@@ -120,6 +120,10 @@ Implemented:
 - Tightened pollution invariant handling to match the C++ abort/default cases: signature changes for main/macro
   declarations now fail as invalid states, `PolluteAPIOfDecl` stops after marking main declarations, and only the
   same API-capable declaration kinds as the C++ switch run precise/name/extend API propagation.
+- Matched `CachedMangleMap::UpdateImportedInlineDeclsMangle` to the C++ CodeGen-facing path: imported inline
+  declarations now record `mangledName` exactly instead of falling back to raw mangles.
+- Matched the C++ cache writer's `std::set` dependency behavior for CHIR var/function dependencies by deduplicating
+  serialized dependency target raw mangles before writing them.
 
 Known gaps:
 

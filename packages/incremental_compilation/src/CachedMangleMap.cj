@@ -24,11 +24,7 @@ public class CachedMangleMap {
     public func UpdateImportedInlineDeclsMangle(): Unit {
         importedInlineDecls.clear()
         for (decl in importedInlineDeclsPtr) {
-            if (!decl.mangledName.isEmpty()) {
-                importedInlineDecls.add(decl.mangledName)
-            } else if (!decl.rawMangleName.isEmpty()) {
-                importedInlineDecls.add(decl.rawMangleName)
-            }
+            importedInlineDecls.add(decl.mangledName)
         }
     }
 
