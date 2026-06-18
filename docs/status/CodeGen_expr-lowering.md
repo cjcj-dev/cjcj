@@ -1,6 +1,6 @@
 # CodeGen Expr Lowering Status
 
-Last updated: 2026-06-18 13:00 CST
+Last updated: 2026-06-18 13:16 CST
 
 This pass deepened the CHIR-to-LLVM expression/statement/terminator lowering core under
 `packages/codegen/src`.
@@ -49,6 +49,11 @@ Continuation update:
 - Ported the C++ no-op store guards that can be represented by the current self-hosted backend surface: class null
   constants and stores of unit values into return slots now do not emit an LLVM store for `Store` or element-store
   lowering.
+- Deepened `EXIT` terminator lowering toward the C++ return-slot path. Value-less exits now use the real owning
+  `chir.Function` return type and return-value slot: void-like functions emit `ret void`, raw-array return slots from
+  raw-array allocation return the mapped allocation directly, ordinary return slots are loaded before returning, and
+  sret functions copy the result into LLVM argument 0 before `ret void`. The old direct `Exit(Some(value))` path is
+  preserved for simplified self-hosted CHIR, but now respects void-like and sret function ABIs.
 
 Remaining gaps:
 
@@ -62,6 +67,9 @@ Remaining gaps:
   including class payload extraction, raw-array element addressing, base-pointer propagation, auto-env offsets, and
   generic field-offset intrinsic handling. The current pass improves dispatcher coverage but does not claim parity for
   those layout-sensitive paths.
+- Full C++ return lowering still has unsupported debug-exit metadata handling, C FFI return post-processing, override
+  source-function boxing optimizations, and allocation-time sret slot reuse. This pass ports the ordinary return-slot
+  and sret-copy behavior that fits the current self-hosted backend surface.
 - Some unsupported intrinsic and spawn paths still return typed null/unit fallbacks because the corresponding sibling
   runtime/codegen surfaces are not yet modeled in this self-hosted package.
 
@@ -72,5 +80,7 @@ Verification:
 - Continuation `cjpm build` passed after RTTI, type-info intrinsic, and InstanceOf lowering changes, with the same
   unrelated frontend warning.
 - Continuation `cjpm build` passed after memory element-store/name-path lowering changes, with the same unrelated
+  frontend warning.
+- Continuation `cjpm build` passed after return-slot `EXIT` terminator lowering changes, with the same unrelated
   frontend warning.
 - Remaining `TODO(selfhost:CodeGen)` markers in `packages/codegen/src`: 0.

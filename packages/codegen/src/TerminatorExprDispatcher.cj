@@ -4,7 +4,10 @@ import std.collection.*
 import cangjie_compiler::chir.Expression
 import cangjie_compiler::chir.Block
 import cangjie_compiler::chir.ExprKind
+import cangjie_compiler::chir.Function
 import cangjie_compiler::chir.IntOpWithException
+import cangjie_compiler::chir.LocalVar
+import cangjie_compiler::chir.Type
 
 public func HandleTerminatorExpression(irBuilder: IRBuilder2, chirExpr: Expression): LLVMValueRef {
     let kind = chirExpr.GetExprKind()
@@ -28,11 +31,7 @@ public func HandleTerminatorExpression(irBuilder: IRBuilder2, chirExpr: Expressi
         return HandleMultiBranchTerminator(irBuilder, chirExpr)
     }
     if (kind == ExprKind.EXIT) {
-        if (chirExpr.GetNumOfOperands() == 0) {
-            return irBuilder.CreateRetVoid()
-        }
-        let retValue = irBuilder.GetCGModule().MaterializeValue(irBuilder, chirExpr.GetOperand(0))
-        return irBuilder.CreateRet(retValue.GetRawValue())
+        return HandleExitExpression(irBuilder, chirExpr)
     }
     if (kind == ExprKind.RAISE_EXCEPTION) {
         return HandleRaiseException(irBuilder, chirExpr)
@@ -82,6 +81,76 @@ public func HandleTerminatorExpression(irBuilder: IRBuilder2, chirExpr: Expressi
         })
     }
     return LLVMNullValue()
+}
+
+private func HandleExitExpression(irBuilder: IRBuilder2, chirExpr: Expression): LLVMValueRef {
+    if (chirExpr.GetNumOfOperands() > 0) {
+        return CreateDirectRet(irBuilder, chirExpr)
+    }
+    if (let Some(topLevelFunc) <- chirExpr.GetTopLevelFunc()) {
+        return CreateRetFromFunctionReturnSlot(irBuilder, topLevelFunc)
+    }
+    return irBuilder.CreateRetVoid()
+}
+
+private func CreateDirectRet(irBuilder: IRBuilder2, chirExpr: Expression): LLVMValueRef {
+    if (let Some(topLevelFunc) <- chirExpr.GetTopLevelFunc()) {
+        if (let Some(retTy) <- topLevelFunc.GetReturnType()) {
+            if (IsVoidLikeReturn(retTy)) {
+                return irBuilder.CreateRetVoid()
+            }
+        }
+    }
+    let directRetValue = irBuilder.GetCGModule().MaterializeValue(irBuilder, chirExpr.GetOperand(0))
+    if (let Some(cgFunc) <- irBuilder.GetInsertCGFunction()) {
+        if (cgFunc.IsSRet()) {
+            let sretArg = unsafe { LLVMGetParam(cgFunc.GetRawFunction(), 0u32) }
+            irBuilder.CreateStore(directRetValue.GetRawValue(), sretArg)
+            return irBuilder.CreateRetVoid()
+        }
+    }
+    return irBuilder.CreateRet(directRetValue.GetRawValue())
+}
+
+private func CreateRetFromFunctionReturnSlot(irBuilder: IRBuilder2, parentFunc: Function): LLVMValueRef {
+    if (let Some(retTy) <- parentFunc.GetReturnType()) {
+        if (IsVoidLikeReturn(retTy)) {
+            return irBuilder.CreateRetVoid()
+        }
+        if (let Some(retValue) <- parentFunc.GetReturnValue()) {
+            let retAddr = irBuilder.GetCGModule().MaterializeValue(irBuilder, retValue)
+            if (retTy.IsRawArray() && IsRawArrayReturnValue(retValue)) {
+                return irBuilder.CreateRet(retAddr.GetRawValue())
+            }
+            if (let Some(slotType) <- retAddr.GetCGType()) {
+                if (let Some(elementType) <- slotType.GetPointerElementType()) {
+                    let loadedRet = irBuilder.CreateLoad(elementType.GetLLVMType(), retAddr.GetRawValue(), name: "ret")
+                    if (let Some(cgFunc) <- irBuilder.GetInsertCGFunction()) {
+                        if (cgFunc.IsSRet()) {
+                            let sretArg = unsafe { LLVMGetParam(cgFunc.GetRawFunction(), 0u32) }
+                            irBuilder.CreateStore(loadedRet, sretArg)
+                            return irBuilder.CreateRetVoid()
+                        }
+                    }
+                    return irBuilder.CreateRet(loadedRet)
+                }
+            }
+            return irBuilder.CreateRet(retAddr.GetRawValue())
+        }
+    }
+    return irBuilder.CreateRetVoid()
+}
+
+private func IsRawArrayReturnValue(retValue: LocalVar): Bool {
+    if (let Some(retExpr) <- retValue.GetExpr()) {
+        return retExpr.GetExprKind() == ExprKind.RAW_ARRAY_ALLOCATE ||
+            retExpr.GetExprKind() == ExprKind.RAW_ARRAY_ALLOCATE_WITH_EXCEPTION
+    }
+    return false
+}
+
+private func IsVoidLikeReturn(retTy: Type): Bool {
+    return retTy.IsUnit() || retTy.IsNothing() || retTy.IsVoid()
 }
 
 private func HandleMultiBranchTerminator(irBuilder: IRBuilder2, chirExpr: Expression): LLVMValueRef {
