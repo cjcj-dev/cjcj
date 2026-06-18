@@ -76,6 +76,15 @@ Implemented in this pass:
 - Corrected `IRBuilder2.CreateEntryBasicBlock` to match the C++ helper contract by inserting before the existing first
   block. Ordinary CHIR block materialization now uses a separate append-at-end helper so `EmitBasicBlockIR` keeps the
   C++ DFS block creation order while true entry/helper blocks get the intended insertion semantics.
+- Deepened the LLVM memory-buffer, IRReader, BitReader, and BitWriter wrappers used by the C++ cached-IR/bitcode paths:
+  file-buffer creation now has a checked result that preserves LLVM open errors, memory buffers expose size/string
+  accessors and range-copy creation, parsed modules retain the context handle supplied by the caller, and file helpers
+  mirror the C++ `parseIRFile`/bitcode-file read shape.
+- Matched LLVM C API ownership more precisely for memory buffers: ordinary bitcode parse borrows its buffer, lazy
+  bitcode module loading transfers the buffer on successful module creation, and `LLVMParseIRInContext` is treated as a
+  consuming call because the LLVM implementation wraps the incoming buffer in a `unique_ptr`.
+- Added checked bitcode output helpers for file paths, file descriptors, and memory-buffer output so callers can avoid
+  the old status-only/nullable patterns when porting C++ `WriteBitcodeToFile` and cached module emission.
 
 Known remaining gaps for this scope:
 
@@ -92,7 +101,10 @@ Known remaining gaps for this scope:
   call sites are still incomplete in the partial self-host port.
 - The target-machine, target-data, and pass-builder wrappers are ready for callers, but the package-level emission path
   does not yet drive target creation, pass execution, and object/assembly output end to end.
+- The C API `LLVMParseBitcodeInContext2` and `LLVMGetBitcodeModuleInContext2` do not expose diagnostic strings; the
+  wrapper reports faithful success/failure and ownership but cannot preserve the richer C++ `SMDiagnostic` text for
+  those bitcode-only paths without adding a native shim.
 
 Remaining `TODO(selfhost:CodeGen)` markers in this llvm-ffi slice: 0.
 
-Estimated behavior coverage for this llvm-ffi/module/context/IRBuilder slice: 66%.
+Estimated behavior coverage for this llvm-ffi/module/context/IRBuilder slice: 68%.
