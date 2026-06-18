@@ -31,6 +31,28 @@ class RealBodyState {
     }
 }
 
+class RealBodyScopeSnapshot {
+    let locals = HashMap<String, Value>()
+    let localTypes = HashMap<String, Type>()
+    let arraySlots = HashMap<String, Value>()
+    let arrayLengths = HashMap<String, Int64>()
+
+    init(state: RealBodyState) {
+        for ((name, value) in state.locals) {
+            locals[name] = value
+        }
+        for ((name, ty) in state.localTypes) {
+            localTypes[name] = ty
+        }
+        for ((name, value) in state.arraySlots) {
+            arraySlots[name] = value
+        }
+        for ((name, len) in state.arrayLengths) {
+            arrayLengths[name] = len
+        }
+    }
+}
+
 extend AST2CHIRDeclTranslator {
     // Emit a real CHIR body for `spec.bodyStatements` (Int64-only locals). Supports:
     //   - LET  name = <expr>  (let or var): slot = Allocate(Ref<Int64>); Store(eval(expr), slot)
@@ -80,13 +102,42 @@ extend AST2CHIRDeclTranslator {
         }
     }
 
-    private func LowerStatements(fn: Function, stmts: ArrayList<AST2CHIRStmtSpec>, state: RealBodyState): Unit {
+    func LowerStatements(fn: Function, stmts: ArrayList<AST2CHIRStmtSpec>, state: RealBodyState): Unit {
         for (stmt in stmts) {
             if (state.terminated) {
                 // Unreachable after a return: ignore the remainder of this list.
                 return
             }
             LowerStatement(fn, stmt, state)
+        }
+    }
+
+    func LowerScopedStatements(fn: Function, stmts: ArrayList<AST2CHIRStmtSpec>, state: RealBodyState): Unit {
+        let snapshot = SaveLocalScope(state)
+        LowerStatements(fn, stmts, state)
+        RestoreLocalScope(state, snapshot)
+    }
+
+    func SaveLocalScope(state: RealBodyState): RealBodyScopeSnapshot {
+        return RealBodyScopeSnapshot(state)
+    }
+
+    func RestoreLocalScope(state: RealBodyState, snapshot: RealBodyScopeSnapshot): Unit {
+        state.locals.clear()
+        state.localTypes.clear()
+        state.arraySlots.clear()
+        state.arrayLengths.clear()
+        for ((name, value) in snapshot.locals) {
+            state.locals[name] = value
+        }
+        for ((name, ty) in snapshot.localTypes) {
+            state.localTypes[name] = ty
+        }
+        for ((name, value) in snapshot.arraySlots) {
+            state.arraySlots[name] = value
+        }
+        for ((name, len) in snapshot.arrayLengths) {
+            state.arrayLengths[name] = len
         }
     }
 
@@ -105,6 +156,10 @@ extend AST2CHIRDeclTranslator {
             if (let (Some(value), Some(slot)) <- (EvalExpr(stmt.expr, state), state.locals.get(stmt.name))) {
                 builder.CreateStore(value, slot, state.current)
             }
+            return
+        }
+        if (stmt.IsCompoundAssign()) {
+            LowerCompoundAssign(stmt, state)
             return
         }
         if (stmt.IsReturn()) {
@@ -128,6 +183,10 @@ extend AST2CHIRDeclTranslator {
             LowerWhile(fn, stmt, state)
             return
         }
+        if (stmt.IsDoWhile()) {
+            LowerDoWhile(fn, stmt, state)
+            return
+        }
         if (stmt.IsFor()) {
             LowerFor(fn, stmt, state)
             return
@@ -147,11 +206,11 @@ extend AST2CHIRDeclTranslator {
             return
         }
         if (stmt.IsArrayLet()) {
-            LowerArrayLet(fn, stmt, state)
+            LowerArrayLet(stmt, state)
             return
         }
         if (stmt.IsArrayAssign()) {
-            LowerArrayAssign(fn, stmt, state)
+            LowerArrayAssign(stmt, state)
             return
         }
         if (stmt.IsArrayFor()) {
@@ -159,7 +218,7 @@ extend AST2CHIRDeclTranslator {
             return
         }
         if (stmt.IsStructSetField()) {
-            LowerStructSetField(fn, stmt, state)
+            LowerStructSetField(stmt, state)
             return
         }
         if (stmt.IsExprStmt()) {
@@ -243,7 +302,7 @@ extend AST2CHIRDeclTranslator {
         // Then arm.
         state.current = thenBlock
         state.terminated = false
-        LowerStatements(fn, stmt.thenBody, state)
+        LowerScopedStatements(fn, stmt.thenBody, state)
         if (!state.terminated) {
             builder.CreateGoTo(joinBlock, state.current)
         }
@@ -251,7 +310,7 @@ extend AST2CHIRDeclTranslator {
         // Else arm.
         state.current = elseBlock
         state.terminated = false
-        LowerStatements(fn, stmt.elseBody, state)
+        LowerScopedStatements(fn, stmt.elseBody, state)
         if (!state.terminated) {
             builder.CreateGoTo(joinBlock, state.current)
         }
@@ -289,7 +348,7 @@ extend AST2CHIRDeclTranslator {
         state.terminated = false
         state.loopBreakTargets.add(exitBlock)
         state.loopContinueTargets.add(condBlock)
-        LowerStatements(fn, stmt.thenBody, state)
+        LowerScopedStatements(fn, stmt.thenBody, state)
         state.loopBreakTargets.remove(at: state.loopBreakTargets.size - 1)
         state.loopContinueTargets.remove(at: state.loopContinueTargets.size - 1)
         if (!state.terminated) {
@@ -326,6 +385,7 @@ extend AST2CHIRDeclTranslator {
         builder.CreateStore(startValue, varSlot, state.current)
         let endSlot = AllocateSlot(int64Ty, state.current)
         builder.CreateStore(endValue, endSlot, state.current)
+        let loopScope = SaveLocalScope(state)
         state.locals[stmt.name] = varSlot
         state.localTypes[stmt.name] = int64Ty
 
@@ -352,7 +412,7 @@ extend AST2CHIRDeclTranslator {
         state.terminated = false
         state.loopBreakTargets.add(exitBlock)
         state.loopContinueTargets.add(incBlock)
-        LowerStatements(fn, stmt.thenBody, state)
+        LowerScopedStatements(fn, stmt.thenBody, state)
         state.loopBreakTargets.remove(at: state.loopBreakTargets.size - 1)
         state.loopContinueTargets.remove(at: state.loopContinueTargets.size - 1)
         if (!state.terminated) {
@@ -371,12 +431,13 @@ extend AST2CHIRDeclTranslator {
         // Continue after the loop at the exit block.
         state.current = exitBlock
         state.terminated = false
+        RestoreLocalScope(state, loopScope)
     }
 
     // Lower `let a = [e0, e1, ...]` (Int64 elements). Allocates a VArray<Int64, len> slot, then
     // stores each element into its slot via a runtime element-ref GEP. The slot and length are
     // recorded so a[i] / a.size / a[i]=v / for-in resolve against this local.
-    private func LowerArrayLet(fn: Function, stmt: AST2CHIRStmtSpec, state: RealBodyState): Unit {
+    private func LowerArrayLet(stmt: AST2CHIRStmtSpec, state: RealBodyState): Unit {
         let int64Ty = builder.context.GetInt64Ty()
         let len = stmt.arrayElems.size
         let varrayTy = builder.context.GetVArrayTy(int64Ty, UInt64(len))
@@ -396,7 +457,7 @@ extend AST2CHIRDeclTranslator {
     }
 
     // Lower `a[i] = expr`: evaluate the value and the index, GEP to the element slot, and Store.
-    private func LowerArrayAssign(fn: Function, stmt: AST2CHIRStmtSpec, state: RealBodyState): Unit {
+    private func LowerArrayAssign(stmt: AST2CHIRStmtSpec, state: RealBodyState): Unit {
         let slot = match (state.arraySlots.get(stmt.name)) {
             case Some(s) => s
             case None => return
@@ -430,6 +491,7 @@ extend AST2CHIRDeclTranslator {
         let zero = builder.CreateConstant(int64Ty, IntLiteral(0), state.current).GetResult().getOrThrow()
         builder.CreateStore(zero, idxSlot, state.current)
         let varSlot = AllocateSlot(int64Ty, state.current)
+        let loopScope = SaveLocalScope(state)
         state.locals[stmt.arrayVarName] = varSlot
         state.localTypes[stmt.arrayVarName] = int64Ty
 
@@ -457,7 +519,7 @@ extend AST2CHIRDeclTranslator {
         builder.CreateStore(elem, varSlot, state.current)
         state.loopBreakTargets.add(exitBlock)
         state.loopContinueTargets.add(incBlock)
-        LowerStatements(fn, stmt.thenBody, state)
+        LowerScopedStatements(fn, stmt.thenBody, state)
         state.loopBreakTargets.remove(at: state.loopBreakTargets.size - 1)
         state.loopContinueTargets.remove(at: state.loopContinueTargets.size - 1)
         if (!state.terminated) {
@@ -475,6 +537,7 @@ extend AST2CHIRDeclTranslator {
 
         state.current = exitBlock
         state.terminated = false
+        RestoreLocalScope(state, loopScope)
     }
 
     // Lower `p.field = value` for a struct local `p`. A struct value is a buffer of its Int64 field
@@ -482,7 +545,7 @@ extend AST2CHIRDeclTranslator {
     // reinterprets it as a CPointer<Int64>, GEPs to the field slot, and Stores the value -- the same
     // inttoptr + GEP + Store machinery as the enum heap buffer (EvalEnumField), but a write instead of
     // a read. The field slot index is carried as a LITERAL in `stmt.cond`.
-    private func LowerStructSetField(fn: Function, stmt: AST2CHIRStmtSpec, state: RealBodyState): Unit {
+    private func LowerStructSetField(stmt: AST2CHIRStmtSpec, state: RealBodyState): Unit {
         let int64Ty = builder.context.GetInt64Ty()
         let slot = match (state.locals.get(stmt.name)) {
             case Some(s) => s
@@ -533,7 +596,7 @@ extend AST2CHIRDeclTranslator {
     }
 
     // Evaluate an expression spec into a runtime CHIR Value in `state.current`.
-    private func EvalExpr(maybeExpr: Option<AST2CHIRExprSpec>, state: RealBodyState): Option<Value> {
+    func EvalExpr(maybeExpr: Option<AST2CHIRExprSpec>, state: RealBodyState): Option<Value> {
         let expr = match (maybeExpr) {
             case Some(e) => e
             case None => return None
@@ -541,7 +604,7 @@ extend AST2CHIRDeclTranslator {
         return EvalExpr(expr, state)
     }
 
-    private func EvalExpr(expr: AST2CHIRExprSpec, state: RealBodyState): Option<Value> {
+    func EvalExpr(expr: AST2CHIRExprSpec, state: RealBodyState): Option<Value> {
         let int64Ty = builder.context.GetInt64Ty()
         if (expr.IsLiteral()) {
             let constant = builder.CreateConstant(int64Ty, IntLiteral(expr.literalValue), state.current)
@@ -615,6 +678,9 @@ extend AST2CHIRDeclTranslator {
             return None
         }
         if (expr.IsBinary()) {
+            if (IsLogicalOp(expr.op)) {
+                return EvalShortCircuitBinaryExpr(expr, state)
+            }
             let lhsValue = EvalExpr(expr.lhs, state)
             let rhsValue = EvalExpr(expr.rhs, state)
             if (let (Some(lv), Some(rv)) <- (lhsValue, rhsValue)) {
@@ -767,7 +833,7 @@ extend AST2CHIRDeclTranslator {
     }
 
     // Upcast a node's Option<LocalVar> result to Option<Value> (LocalVar <: Value).
-    private func AsValue(result: Option<LocalVar>): Option<Value> {
+    func AsValue(result: Option<LocalVar>): Option<Value> {
         return match (result) {
             case Some(localVar) => Some(localVar)
             case None => None
@@ -786,7 +852,7 @@ extend AST2CHIRDeclTranslator {
         }
     }
 
-    private func IsLogicalOp(op: ExprKind): Bool {
+    func IsLogicalOp(op: ExprKind): Bool {
         return match (op) {
             case ExprKind.AND => true
             case ExprKind.OR => true
@@ -842,7 +908,7 @@ extend AST2CHIRDeclTranslator {
     }
 
     // Allocate a fresh `Ref<elemTy>` local slot.
-    private func AllocateSlot(elemTy: Type, parent: Block): Value {
+    func AllocateSlot(elemTy: Type, parent: Block): Value {
         let refTy = builder.context.GetRefTy(elemTy)
         let allocate = builder.CreateAllocate(refTy, elemTy, parent)
         return allocate.GetResult().getOrThrow()
