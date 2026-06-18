@@ -293,6 +293,18 @@ public func AnyOf(values: Array<Bool>): Bool {
     return false
 }
 
+public func AnyOf(first: Bool, second: Bool): Bool {
+    return first || second
+}
+
+public func AnyOf(first: Bool, second: Bool, third: Bool): Bool {
+    return first || second || third
+}
+
+public func AnyOf(first: Bool, second: Bool, third: Bool, fourth: Bool): Bool {
+    return first || second || third || fourth
+}
+
 public func AllOf(values: Array<Bool>): Bool {
     for (value in values) {
         if (!value) {
@@ -300,6 +312,18 @@ public func AllOf(values: Array<Bool>): Bool {
         }
     }
     return true
+}
+
+public func AllOf(first: Bool, second: Bool): Bool {
+    return first && second
+}
+
+public func AllOf(first: Bool, second: Bool, third: Bool): Bool {
+    return first && second && third
+}
+
+public func AllOf(first: Bool, second: Bool, third: Bool, fourth: Bool): Bool {
+    return first && second && third && fourth
 }
 
 public func RemoveFromVec<T>(values: ArrayList<T>, item: T): Unit where T <: Equatable<T> {
