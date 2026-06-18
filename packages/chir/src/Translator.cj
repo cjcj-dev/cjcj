@@ -21,6 +21,7 @@ import cangjie_compiler::ast.EnumDecl as AstEnumDecl
 import cangjie_compiler::ast.EnumPattern as AstEnumPattern
 import cangjie_compiler::ast.Expr as AstExpr
 import cangjie_compiler::ast.ForInExpr as AstForInExpr
+import cangjie_compiler::ast.ForInKind as AstForInKind
 import cangjie_compiler::ast.FuncArg as AstFuncArg
 import cangjie_compiler::ast.FuncDecl as AstFuncDecl
 import cangjie_compiler::ast.FuncTy as AstFuncTy
@@ -80,6 +81,7 @@ public class Translator {
     private let localValSymbolTable: FaithfulAST2CHIRNodeMap = FaithfulAST2CHIRNodeMap()
     private var currentBlock: Option<Block> = None
     private var currentFunc: Option<Function> = None
+    private var delayExitSignal: Option<Value> = None
     private let blockGroupStack: ArrayList<BlockGroup> = ArrayList<BlockGroup>()
     private let loopTargetStack: ArrayList<FaithfulLoopTarget> = ArrayList<FaithfulLoopTarget>()
 
@@ -266,9 +268,11 @@ public class Translator {
         if (let Some(retExpr) <- expr.expr) {
             let value = Translator.TranslateASTNode(retExpr, this) ??
                 throw IllegalStateException("faithful AST2CHIR return expression produced no value")
+            UpdateDelayExitSignalForReturnIfNeeded()
             builder.CreateExit(value, CurrentBlock())
             return value
         }
+        UpdateDelayExitSignalForReturnIfNeeded()
         builder.CreateExit(None, CurrentBlock())
         return None
     }
@@ -451,11 +455,30 @@ public class Translator {
     }
 
     public func Visit(expr: AstForInExpr): Option<Value> {
-        let _ = expr
-        throw IllegalArgumentException("not yet ported in faithful AST2CHIR: ForInExpr delay-exit block groups")
+        return match (expr.forInKind) {
+            case AstForInKind.FORIN_RANGE => TranslateForInRange(expr)
+            case AstForInKind.FORIN_ITER => TranslateForInIter(expr)
+            case AstForInKind.FORIN_STRING =>
+                throw IllegalArgumentException("not yet ported in faithful AST2CHIR: ForInExpr string desugar")
+            case AstForInKind.FORIN_INVALID =>
+                throw IllegalArgumentException("not yet ported in faithful AST2CHIR: ForInExpr invalid/closed-range-one")
+        }
     }
 
     public func Visit(expr: AstJumpExpr): Option<Value> {
+        if (let Some(refLoop) <- expr.refLoop) {
+            if (refLoop.astKind == ASTKind.FOR_IN_EXPR && delayExitSignal.isSome()) {
+                UpdateDelayExitSignal(if (expr.isBreak) {
+                    CalculateDelayExitLevelForBreak()
+                } else {
+                    CalculateDelayExitLevelForContinue()
+                })
+                builder.CreateExit(None, CurrentBlock())
+                let group = RequireParentBlockGroup(CurrentBlock(), "jump continuation")
+                currentBlock = builder.CreateBlock(group)
+                return None
+            }
+        }
         if (loopTargetStack.isEmpty()) {
             throw IllegalStateException("faithful AST2CHIR JumpExpr outside loop")
         }
@@ -634,6 +657,342 @@ public class Translator {
         let entry = builder.CreateBlock(body)
         body.SetEntryBlock(entry)
         return body
+    }
+
+    private func TranslateForInRange(expr: AstForInExpr): Option<Value> {
+        let inExpression = RequireBlockExpr(expr.inExpression, "for-in range inExpression")
+        if (inExpression.body.size < 4) {
+            throw IllegalStateException("faithful AST2CHIR range ForInExpr expects desugared block with 4 nodes")
+        }
+        let inductiveVar = Translator.TranslateASTNode(inExpression.body[0], this) ??
+            throw IllegalStateException("faithful AST2CHIR for-in range induction var produced no value")
+        let stopExprVar = Translator.TranslateASTNode(inExpression.body[1], this) ??
+            throw IllegalStateException("faithful AST2CHIR for-in range stop var produced no value")
+        let condition = Translator.TranslateASTNode(inExpression.body[3], this) ??
+            throw IllegalStateException("faithful AST2CHIR for-in range condition produced no value")
+        let recordBlock = CurrentBlock()
+        let parentGroup = RequireParentBlockGroup(recordBlock, "for-in range")
+        let forInEntryBlock = builder.CreateBlock(parentGroup)
+        currentBlock = forInEntryBlock
+        let condVar = InitializeForInCondVar()
+        InitializeDelayExitSignal()
+        let forIn = InitForInExprSkeleton(expr, inductiveVar, condVar, isIter: false)
+
+        TranslateForInRangeBody(expr, forIn)
+        TranslateForInRangeLatch(inExpression.body[2], forIn)
+        TranslateForInRangeCond(inExpression.body[3], inductiveVar, stopExprVar, condVar, forIn)
+
+        let endBlock = builder.CreateBlock(parentGroup)
+        builder.CreateGoTo(endBlock, forInEntryBlock)
+        currentBlock = endBlock
+        UpdateDelayExitSignalInForInEnd()
+        builder.CreateBranch(condition, forInEntryBlock, CurrentBlock(), recordBlock)
+        return None
+    }
+
+    private func TranslateForInIter(expr: AstForInExpr): Option<Value> {
+        let inExpression = RequireBlockExpr(expr.inExpression, "for-in iterator inExpression")
+        if (inExpression.body.size < 2) {
+            throw IllegalStateException("faithful AST2CHIR iterator ForInExpr expects desugared block with 2 nodes")
+        }
+        let inductiveVar = Translator.TranslateASTNode(inExpression.body[0], this) ??
+            throw IllegalStateException("faithful AST2CHIR for-in iterator induction var produced no value")
+        let matchExpr = (inExpression.body[1] as AstMatchExpr) ??
+            throw IllegalStateException("faithful AST2CHIR iterator ForInExpr expects MatchExpr as second node")
+        let matchTy = chirTy.TranslateType(RequireAstTy(matchExpr))
+        let iterNextLocation = RequireResult(builder.CreateAllocate(builder.context.GetRefTy(matchTy), matchTy,
+            CurrentBlock()))
+        builder.CreateStore(MakeForInIterNoneValue(matchTy), iterNextLocation, CurrentBlock())
+
+        let recordBlock = CurrentBlock()
+        let parentGroup = RequireParentBlockGroup(recordBlock, "for-in iterator")
+        let forInEntryBlock = builder.CreateBlock(parentGroup)
+        currentBlock = forInEntryBlock
+        let condVar = InitializeForInCondVar()
+        InitializeDelayExitSignal()
+        let forIn = InitForInExprSkeleton(expr, inductiveVar, condVar, isIter: true)
+
+        TranslateForInIterBody(expr, iterNextLocation, forIn)
+        TranslateForInIterLatch(matchExpr, iterNextLocation, forIn)
+        TranslateForInIterCond(matchExpr, iterNextLocation, condVar, forIn)
+
+        let endBlock = builder.CreateBlock(parentGroup)
+        builder.CreateGoTo(endBlock, forInEntryBlock)
+        currentBlock = endBlock
+        UpdateDelayExitSignalInForInEnd()
+        builder.CreateGoTo(forInEntryBlock, recordBlock)
+        return None
+    }
+
+    private func InitForInExprSkeleton(expr: AstForInExpr, inductiveVar: Value, condVar: Value,
+        isIter!: Bool): ForIn {
+        let parentFunc = CurrentFunction()
+        let bodyBlockGroup = builder.CreateBlockGroup(parentFunc)
+        let latchBlockGroup = builder.CreateBlockGroup(parentFunc)
+        let condBlockGroup = builder.CreateBlockGroup(parentFunc)
+        let resultTy = chirTy.TranslateType(RequireAstTy(expr))
+        let forIn = if (isIter) {
+            builder.CreateForInIter(resultTy, inductiveVar, condVar, CurrentBlock())
+        } else {
+            builder.CreateForInRange(resultTy, inductiveVar, condVar, CurrentBlock())
+        }
+        forIn.InitBlockGroups(bodyBlockGroup, latchBlockGroup, condBlockGroup)
+        bodyBlockGroup.SetEntryBlock(builder.CreateBlock(bodyBlockGroup))
+        latchBlockGroup.SetEntryBlock(builder.CreateBlock(latchBlockGroup))
+        condBlockGroup.SetEntryBlock(builder.CreateBlock(condBlockGroup))
+        return forIn
+    }
+
+    private func TranslateForInRangeBody(expr: AstForInExpr, forIn: ForIn): Unit {
+        blockGroupStack.add(forIn.GetBody())
+        currentBlock = forIn.GetBody().GetEntryBlock() ??
+            throw IllegalStateException("faithful AST2CHIR for-in body has no entry block")
+        if (let Some(pattern) <- expr.pattern) {
+            if (let Some(varPattern) <- (pattern as AstVarPattern)) {
+                if (let Some(varDecl) <- varPattern.varDecl) {
+                    let _ = Translator.TranslateASTNode(varDecl, this)
+                }
+            } else if (let None <- (pattern as AstWildcardPattern)) {
+                throw IllegalArgumentException(
+                    "not yet ported in faithful AST2CHIR: non-var range ForInExpr pattern")
+            }
+        }
+        TranslateForInBodyBlockGroup(expr)
+        blockGroupStack.remove(at: blockGroupStack.size - 1)
+    }
+
+    private func TranslateForInIterBody(expr: AstForInExpr, iterNextLocation: Value, forIn: ForIn): Unit {
+        blockGroupStack.add(forIn.GetBody())
+        currentBlock = forIn.GetBody().GetEntryBlock() ??
+            throw IllegalStateException("faithful AST2CHIR for-in iterator body has no entry block")
+        if (let Some(pattern) <- expr.pattern) {
+            let iterNextValue = GetDerefedValue(iterNextLocation)
+            BindPatternValues(pattern, iterNextValue)
+        }
+        TranslateForInBodyBlockGroup(expr)
+        blockGroupStack.remove(at: blockGroupStack.size - 1)
+    }
+
+    private func TranslateForInBodyBlockGroup(expr: AstForInExpr): Unit {
+        if (let Some(guardExpr) <- expr.patternGuard) {
+            let parentGroup = RequireParentBlockGroup(CurrentBlock(), "for-in guard")
+            let bodyBlock = builder.CreateBlock(parentGroup)
+            let continueBlock = builder.CreateBlock(parentGroup)
+            let guardValue = Translator.TranslateASTNode(guardExpr, this) ??
+                throw IllegalStateException("faithful AST2CHIR for-in guard produced no value")
+            builder.CreateBranch(guardValue, bodyBlock, continueBlock, CurrentBlock())
+            currentBlock = continueBlock
+            builder.CreateExit(None, CurrentBlock())
+            currentBlock = bodyBlock
+        }
+        if (let Some(body) <- expr.body) {
+            let _ = Translator.TranslateASTNode(body, this)
+        }
+        if (CurrentBlock().GetTerminator().isNone()) {
+            builder.CreateExit(None, CurrentBlock())
+        }
+    }
+
+    private func TranslateForInRangeLatch(updateNode: AstNode, forIn: ForIn): Unit {
+        blockGroupStack.add(forIn.GetLatch())
+        currentBlock = forIn.GetLatch().GetEntryBlock() ??
+            throw IllegalStateException("faithful AST2CHIR for-in latch has no entry block")
+        let trueBlock = builder.CreateBlock(forIn.GetLatch())
+        let falseBlock = builder.CreateBlock(forIn.GetLatch())
+        builder.CreateBranch(DelayExitSignalGreaterThanZero(), trueBlock, falseBlock, CurrentBlock())
+        currentBlock = trueBlock
+        builder.CreateExit(None, CurrentBlock())
+        currentBlock = falseBlock
+        let _ = Translator.TranslateASTNode(updateNode, this)
+        if (CurrentBlock().GetTerminator().isNone()) {
+            builder.CreateExit(None, CurrentBlock())
+        }
+        blockGroupStack.remove(at: blockGroupStack.size - 1)
+    }
+
+    private func TranslateForInIterLatch(matchExpr: AstMatchExpr, iterNextLocation: Value, forIn: ForIn): Unit {
+        blockGroupStack.add(forIn.GetLatch())
+        currentBlock = forIn.GetLatch().GetEntryBlock() ??
+            throw IllegalStateException("faithful AST2CHIR for-in iterator latch has no entry block")
+        let trueBlock = builder.CreateBlock(forIn.GetLatch())
+        let falseBlock = builder.CreateBlock(forIn.GetLatch())
+        builder.CreateBranch(DelayExitSignalGreaterThanZero(), trueBlock, falseBlock, CurrentBlock())
+        currentBlock = trueBlock
+        builder.CreateExit(None, CurrentBlock())
+        currentBlock = falseBlock
+        let selector = Translator.TranslateASTNode(RequireExpr(matchExpr.selector, "iterator next selector"), this) ??
+            throw IllegalStateException("faithful AST2CHIR iterator next selector produced no value")
+        builder.CreateStore(selector, iterNextLocation, CurrentBlock())
+        builder.CreateExit(None, CurrentBlock())
+        blockGroupStack.remove(at: blockGroupStack.size - 1)
+    }
+
+    private func TranslateForInRangeCond(conditionNode: AstNode, inductiveVar: Value, stopExprVar: Value,
+        condVar: Value, forIn: ForIn): Unit {
+        let _ = inductiveVar
+        let _ = stopExprVar
+        blockGroupStack.add(forIn.GetCond())
+        currentBlock = forIn.GetCond().GetEntryBlock() ??
+            throw IllegalStateException("faithful AST2CHIR for-in cond has no entry block")
+        TranslateForInCondControlFlow(condVar)
+        let condition = Translator.TranslateASTNode(conditionNode, this) ??
+            throw IllegalStateException("faithful AST2CHIR range condition in cond group produced no value")
+        builder.CreateStore(condition, condVar, CurrentBlock())
+        builder.CreateExit(None, CurrentBlock())
+        blockGroupStack.remove(at: blockGroupStack.size - 1)
+    }
+
+    private func TranslateForInIterCond(matchExpr: AstMatchExpr, iterNextLocation: Value, condVar: Value,
+        forIn: ForIn): Unit {
+        let _ = matchExpr
+        blockGroupStack.add(forIn.GetCond())
+        currentBlock = forIn.GetCond().GetEntryBlock() ??
+            throw IllegalStateException("faithful AST2CHIR for-in iterator cond has no entry block")
+        TranslateForInCondControlFlow(condVar)
+        let tag = GetEnumTagValueFromValue(GetDerefedValue(iterNextLocation))
+        let hasValue = RequireResult(builder.CreateUnaryExpression(ExprKind.NOT, builder.context.GetBoolTy(), tag,
+            CurrentBlock()))
+        builder.CreateStore(hasValue, condVar, CurrentBlock())
+        builder.CreateExit(None, CurrentBlock())
+        blockGroupStack.remove(at: blockGroupStack.size - 1)
+    }
+
+    private func TranslateForInCondControlFlow(condVar: Value): Unit {
+        let trueBlock = builder.CreateBlock(RequireParentBlockGroup(CurrentBlock(), "for-in cond control"))
+        let falseBlock = builder.CreateBlock(RequireParentBlockGroup(CurrentBlock(), "for-in cond control"))
+        builder.CreateBranch(DelayExitSignalGreaterThanZero(), trueBlock, falseBlock, CurrentBlock())
+        currentBlock = trueBlock
+        DecreaseDelayExitSignal()
+        let constantFalse = RequireResult(builder.CreateConstant(builder.context.GetBoolTy(), BoolLiteral(false),
+            CurrentBlock()))
+        builder.CreateStore(constantFalse, condVar, CurrentBlock())
+        builder.CreateExit(None, CurrentBlock())
+        currentBlock = falseBlock
+    }
+
+    private func UpdateDelayExitSignalInForInEnd(): Unit {
+        let parentGroup = RequireParentBlockGroup(CurrentBlock(), "for-in end")
+        let trueBlock = builder.CreateBlock(parentGroup)
+        let falseBlock = builder.CreateBlock(parentGroup)
+        builder.CreateBranch(DelayExitSignalGreaterThanZero(), trueBlock, falseBlock, CurrentBlock())
+        currentBlock = trueBlock
+        DecreaseDelayExitSignal()
+        builder.CreateExit(None, CurrentBlock())
+        currentBlock = falseBlock
+    }
+
+    private func InitializeForInCondVar(): Value {
+        let condVar = RequireResult(builder.CreateAllocate(builder.context.GetRefTy(builder.context.GetBoolTy()),
+            builder.context.GetBoolTy(), CurrentBlock()))
+        let constantTrue = RequireResult(builder.CreateConstant(builder.context.GetBoolTy(), BoolLiteral(true),
+            CurrentBlock()))
+        builder.CreateStore(constantTrue, condVar, CurrentBlock())
+        return condVar
+    }
+
+    private func InitializeDelayExitSignal(): Unit {
+        if (delayExitSignal.isSome()) {
+            return
+        }
+        let signal = RequireResult(builder.CreateAllocate(builder.context.GetRefTy(builder.context.GetInt64Ty()),
+            builder.context.GetInt64Ty(), CurrentBlock()))
+        delayExitSignal = signal
+        let zero = RequireResult(builder.CreateConstant(builder.context.GetInt64Ty(), IntLiteral(0), CurrentBlock()))
+        builder.CreateStore(zero, signal, CurrentBlock())
+    }
+
+    private func DelayExitSignalGreaterThanZero(): Value {
+        let signalValue = RequireResult(builder.CreateLoad(builder.context.GetInt64Ty(), RequireDelayExitSignal(),
+            CurrentBlock()))
+        let zero = RequireResult(builder.CreateConstant(builder.context.GetInt64Ty(), IntLiteral(0), CurrentBlock()))
+        return RequireResult(builder.CreateBinaryExpression(ExprKind.GT, builder.context.GetBoolTy(), signalValue,
+            zero, CurrentBlock()))
+    }
+
+    private func DecreaseDelayExitSignal(): Unit {
+        let signal = RequireDelayExitSignal()
+        let signalValue = RequireResult(builder.CreateLoad(builder.context.GetInt64Ty(), signal, CurrentBlock()))
+        let one = RequireResult(builder.CreateConstant(builder.context.GetInt64Ty(), IntLiteral(1), CurrentBlock()))
+        let decreased = RequireResult(builder.CreateBinaryExpression(ExprKind.SUB, builder.context.GetInt64Ty(),
+            signalValue, one, CurrentBlock()))
+        builder.CreateStore(decreased, signal, CurrentBlock())
+    }
+
+    private func UpdateDelayExitSignal(level: Int64): Unit {
+        let levelValue = RequireResult(builder.CreateConstant(builder.context.GetInt64Ty(), IntLiteral(level),
+            CurrentBlock()))
+        builder.CreateStore(levelValue, RequireDelayExitSignal(), CurrentBlock())
+    }
+
+    private func UpdateDelayExitSignalForReturnIfNeeded(): Unit {
+        let level = CalculateDelayExitLevelForReturn()
+        if (level > 0 && delayExitSignal.isSome()) {
+            UpdateDelayExitSignal(level)
+        }
+    }
+
+    private func CalculateDelayExitLevelForBreak(): Int64 {
+        var level: Int64 = 0
+        var idx = blockGroupStack.size - 1
+        while (idx >= 0) {
+            let group = blockGroupStack[idx]
+            if (let Some(owner) <- group.GetOwnerExpression()) {
+                if ((owner as ForIn).isSome()) {
+                    level++
+                    break
+                }
+            }
+            idx--
+        }
+        return level
+    }
+
+    private func CalculateDelayExitLevelForContinue(): Int64 {
+        return CalculateDelayExitLevelForBreak() - 1
+    }
+
+    private func CalculateDelayExitLevelForReturn(): Int64 {
+        var level: Int64 = 0
+        var idx = blockGroupStack.size - 1
+        while (idx >= 0) {
+            let group = blockGroupStack[idx]
+            if (let Some(fn) <- currentFunc) {
+                if (let Some(body) <- fn.GetBody()) {
+                    if (body.nodeId == group.nodeId) {
+                        break
+                    }
+                }
+            }
+            if (let Some(owner) <- group.GetOwnerExpression()) {
+                if ((owner as ForIn).isSome()) {
+                    level += 2
+                }
+            }
+            idx--
+        }
+        return level
+    }
+
+    private func RequireDelayExitSignal(): Value {
+        return delayExitSignal ?? throw IllegalStateException("faithful AST2CHIR ForIn delay-exit signal missing")
+    }
+
+    private func MakeForInIterNoneValue(optionTy: Type): Value {
+        let noneTag = RequireResult(builder.CreateConstant(builder.context.GetUInt64Ty(), IntLiteral(0),
+            CurrentBlock()))
+        let values = ArrayList<Value>()
+        values.add(noneTag)
+        return RequireResult(builder.CreateTuple(optionTy, values, CurrentBlock()))
+    }
+
+    private func GetEnumTagValueFromValue(value: Value): Value {
+        let path = ArrayList<UInt64>()
+        path.add(0u64)
+        return RequireResult(builder.CreateField(builder.context.GetUInt64Ty(), value, path, CurrentBlock()))
+    }
+
+    private func CurrentFunction(): Function {
+        return currentFunc ?? throw IllegalStateException("faithful AST2CHIR has no current function")
     }
 
     private func EmitImplicitFunctionExit(fn: Function, value: Option<Value>): Unit {
@@ -1366,6 +1725,11 @@ public class Translator {
 
     private func RequireBlock(value: Option<AstBlock>, name: String): AstBlock {
         return value ?? throw IllegalStateException("faithful AST2CHIR missing ${name}")
+    }
+
+    private func RequireBlockExpr(value: Option<AstExpr>, name: String): AstBlock {
+        let expr = value ?? throw IllegalStateException("faithful AST2CHIR missing ${name}")
+        return (expr as AstBlock) ?? throw IllegalStateException("faithful AST2CHIR ${name} is not a Block")
     }
 
     private func RequireFuncArgExpr(value: AstFuncArg, name: String): AstExpr {
