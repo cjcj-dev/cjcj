@@ -14,7 +14,7 @@ extend ParserImpl {
                 diag.DiagnoseRefactor(
                     DiagKindRefactor.INVALID_ANNOTATION,
                     anno.begin,
-                    "unexpected annotation '${anno.identifier.GetRawText()}' on features directive")
+                    "unexpected annotation '${anno.identifier.Val()}' on features directive")
                 directive.isBroken = true
             }
             directive.annotations.add(anno)

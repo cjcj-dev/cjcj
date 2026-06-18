@@ -6,7 +6,6 @@ extend ParserImpl {
     public func ParseTopLevel(): File {
         let file = File()
         currentFile = file
-        file.fileID = lexer.GetFileID()
         file.begin = Peek().Begin()
         SkipNLOrSemi()
         var pendingAnnos = ArrayList<Annotation>()
@@ -24,7 +23,7 @@ extend ParserImpl {
             ParseAnnotations(annos)
         }
         if (Seeing(TokenKind.FEATURES)) {
-            file.features.add(ParseTopLvlFeatures(annos))
+            file.feature = ParseTopLvlFeatures(annos)
             annos.clear()
         } else {
             CheckAndHandleUnexpectedTopLevelDeclAfterFeatures()
@@ -40,7 +39,7 @@ extend ParserImpl {
                 diag.DiagnoseRefactor(
                     DiagKindRefactor.INVALID_ANNOTATION,
                     annos[0].begin,
-                    "unexpected annotation '${annos[0].identifier.GetRawText()}' on package")
+                    "unexpected annotation '${annos[0].identifier.Val()}' on package")
                 annos.clear()
             }
             SkipBlank(TokenKind.SEMI)
@@ -95,7 +94,7 @@ extend ParserImpl {
                 DiagKindRefactor.UNEXPECTED_TOKEN,
                 Peek().Begin(),
                 "features directive is only allowed before the package header")
-            file.features.add(ParseTopLvlFeatures(annos))
+            file.feature = ParseTopLvlFeatures(annos)
             return
         }
         if (SeeingDecl() || Seeing(TokenKind.AT) || Seeing(TokenKind.AT_EXCL)) {
@@ -142,7 +141,7 @@ extend ParserImpl {
 
     private func CheckMacroPackageTopLevelDecl(file: File, decl: Decl): Unit {
         if (let Some(pkg) <- file.packageSpec) {
-            if (pkg.hasMacro && decl.HasModifier(ModifierKind.PUBLIC) && decl.astKind != ASTKind.MACRO_DECL) {
+            if (pkg.hasMacro && decl.TestAttr(Attribute.PUBLIC) && decl.astKind != ASTKind.MACRO_DECL) {
                 diag.DiagnoseRefactor(
                     DiagKindRefactor.INVALID_MODIFIER,
                     decl.begin,
@@ -387,23 +386,30 @@ extend ParserImpl {
 
     public func ParseMainDecl(scopeKind: ScopeKind, modifiers: ArrayList<Modifier>, annos: ArrayList<Annotation>): MainDecl {
         let ret = MainDecl()
-        ParseFuncLikeHeader(ret, TokenKind.MAIN, scopeKind, modifiers, annos)
+        ApplyModifiersAndAnnotations(ret, modifiers, annos)
+        let keywordToken = Expect(TokenKind.MAIN, "expected function keyword")
+        ret.keywordPos = keywordToken.Begin()
+        if (ret.begin.IsZero()) { ret.begin = keywordToken.Begin() }
+        let body = ParseFuncBody(scopeKind)
+        ret.funcBody = body
+        ret.end = body.end
         ret.identifier = SrcIdentifier("main", "main", ret.keywordPos, ret.keywordPos + 4, false)
         return ret
     }
 
     public func ParseFuncLikeHeader(ret: FuncDecl, keyword: TokenKind, scopeKind: ScopeKind, modifiers: ArrayList<Modifier>, annos: ArrayList<Annotation>): Unit {
         ApplyModifiersAndAnnotations(ret, modifiers, annos)
+        if (HasModifierToken(modifiers, TokenKind.CONST)) {
+            ret.isConst = true
+        }
         let keywordToken = Expect(keyword, "expected function keyword")
         ret.keywordPos = keywordToken.Begin()
         if (ret.begin.IsZero()) { ret.begin = keywordToken.Begin() }
         if (keyword != TokenKind.MAIN) {
             if (ret.TestAttr(Attribute.OPERATOR)) {
-                ret.isOperator = true
                 ret.identifier = ExpectOperatorIdentifier(ret)
             } else if (Skip(TokenKind.OPERATOR)) {
                 ret.EnableAttr(Attribute.OPERATOR)
-                ret.isOperator = true
                 ret.identifier = ExpectOperatorIdentifier(ret)
             } else {
                 ret.identifier = ExpectIdentifierWithPos(ret)
@@ -485,7 +491,7 @@ extend ParserImpl {
             body.retType = ParseType()
         }
         for (constraint in ParseGenericConstraints()) {
-            body.genericConstraints.add(constraint)
+            EnsureFuncBodyGeneric(body).genericConstraints.add(constraint)
         }
         if (Seeing(TokenKind.LCURL)) {
             body.body = ParseBlock(ScopeKind.FUNC_BODY)
@@ -501,12 +507,26 @@ extend ParserImpl {
         return body
     }
 
+    private func EnsureFuncBodyGeneric(body: FuncBody): Generic {
+        if (let Some(generic) <- body.generic) {
+            return generic
+        }
+        let generic = Generic()
+        body.generic = generic
+        return generic
+    }
+
     public func ParseParameterList(_: ScopeKind): FuncParamList {
         let list = FuncParamList()
         list.leftParenPos = Expect(TokenKind.LPAREN, "expected '(' for parameter list").Begin()
         list.begin = list.leftParenPos
         while (!Seeing(TokenKind.END) && !Seeing(TokenKind.RPAREN)) {
-            list.params.add(ParseFuncParam())
+            let param = ParseFuncParam()
+            if (param.identifier.Val() == "...") {
+                list.hasVariableLenArg = true
+                list.variadicArgIndex = UInt64(list.params.size)
+            }
+            list.params.add(param)
             if (!Skip(TokenKind.COMMA)) { break }
         }
         list.rightParenPos = Expect(TokenKind.RPAREN, "expected ')' after parameters").Begin()
@@ -521,6 +541,13 @@ extend ParserImpl {
         for (modifier in mods) { param.modifiers.add(modifier) }
         if (Skip(TokenKind.LET) || Skip(TokenKind.VAR)) {
             param.isMemberParam = true
+            param.hasLetOrVar = true
+        }
+        if (Skip(TokenKind.ELLIPSIS)) {
+            param.identifier = SrcIdentifier("...", "...", lastToken.Begin(), lastToken.End(), false)
+            param.begin = if (!param.modifiers.isEmpty()) { param.modifiers[0].begin } else { param.identifier.Begin() }
+            param.end = param.identifier.End()
+            return param
         }
         param.identifier = ExpectIdentifierWithPos(param)
         param.begin = if (!param.modifiers.isEmpty()) { param.modifiers[0].begin } else { param.identifier.Begin() }
@@ -533,7 +560,7 @@ extend ParserImpl {
             param.assignment = ParseExpr()
         }
         if (Skip(TokenKind.ELLIPSIS)) {
-            param.isVariadic = true
+            param.identifier = SrcIdentifier("...", "...", lastToken.Begin(), lastToken.End(), false)
         }
         param.end = if (let Some(expr) <- param.assignment) {
             expr.end
@@ -682,7 +709,7 @@ extend ParserImpl {
 
     private func HasModifierToken(modifiers: ArrayList<Modifier>, tokenKind: TokenKind): Bool {
         for (modifier in modifiers) {
-            if (modifier.tokenKind == tokenKind) {
+            if (modifier.modifier == tokenKind) {
                 return true
             }
         }
@@ -718,46 +745,80 @@ extend ParserImpl {
         let ret = EnumDecl()
         ParseInheritableHeader(ret, TokenKind.ENUM, modifiers, annos)
         if (Skip(TokenKind.LCURL)) {
+            ret.leftCurlPos = lastToken.Begin()
+            ret.bodyScope = DummyBody()
+            if (let Some(bodyScope) <- ret.bodyScope) {
+                bodyScope.begin = ret.leftCurlPos
+            }
             while (!Seeing(TokenKind.END) && !Seeing(TokenKind.RCURL)) {
+                if (Skip(TokenKind.BITOR)) {
+                    ret.bitOrPosVector.add(lastToken.Begin())
+                    continue
+                }
                 let localAnnos = ArrayList<Annotation>()
                 ParseAnnotations(localAnnos)
                 if (SeeingIdentifierLike()) {
                     let ctor = ParseEnumConstructor(ArrayList<Modifier>(), localAnnos)
                     ctor.outerDecl = ret
+                    if (ctor.astKind == ASTKind.FUNC_DECL) {
+                        ret.hasArguments = true
+                    }
                     ret.constructors.add(ctor)
                 } else if (SeeingDeclInScope(ScopeKind.ENUM_BODY)) {
                     let member = ParseDecl(ScopeKind.ENUM_BODY)
                     member.outerDecl = ret
-                    ret.bodyDecls.add(member)
+                    ret.members.add(member)
                 } else {
                     Next()
                 }
                 SkipNLOrSemi()
             }
-            ret.end = Expect(TokenKind.RCURL, "expected '}' after enum body").End()
+            ret.rightCurlPos = Expect(TokenKind.RCURL, "expected '}' after enum body").Begin()
+            ret.end = ret.rightCurlPos + 1
         }
         return ret
     }
 
     public func ParseEnumConstructor(modifiers: ArrayList<Modifier>, annos: ArrayList<Annotation>): Decl {
+        let identifier = ExpectIdentifierWithPos(Node())
+        if (Skip(TokenKind.LPAREN)) {
+            let decl = FuncDecl()
+            ApplyModifiersAndAnnotations(decl, modifiers, annos)
+            decl.EnableAttr(Attribute.ENUM_CONSTRUCTOR)
+            decl.identifier = identifier
+            decl.begin = if (decl.begin.IsZero()) { identifier.Begin() } else { decl.begin }
+            let paramList = FuncParamList()
+            paramList.leftParenPos = lastToken.Begin()
+            paramList.begin = paramList.leftParenPos
+            var index: Int64 = 1
+            while (!Seeing(TokenKind.END) && !Seeing(TokenKind.RPAREN)) {
+                let param = FuncParam()
+                let ty = ParseType()
+                param.identifier = SrcIdentifier("p${index}", "p${index}", ty.begin, ty.begin, false)
+                param.isIdentifierCompilerAdd = true
+                param.typeNode = ty
+                param.begin = ty.begin
+                param.end = ty.end
+                paramList.params.add(param)
+                index++
+                if (!Skip(TokenKind.COMMA)) { break }
+            }
+            paramList.rightParenPos = Expect(TokenKind.RPAREN, "expected ')' after enum constructor").Begin()
+            paramList.end = paramList.rightParenPos + 1
+            let body = FuncBody()
+            body.begin = paramList.begin
+            body.paramLists.add(paramList)
+            body.end = paramList.end
+            decl.funcBody = body
+            decl.end = body.end
+            return decl
+        }
         let decl = VarDecl()
         ApplyModifiersAndAnnotations(decl, modifiers, annos)
         decl.EnableAttr(Attribute.ENUM_CONSTRUCTOR)
-        decl.identifier = ExpectIdentifierWithPos(decl)
+        decl.identifier = identifier
         decl.begin = if (decl.begin.IsZero()) { decl.identifier.Begin() } else { decl.begin }
-        if (Skip(TokenKind.LPAREN)) {
-            // An enum constructor's payload is a comma-separated list of TYPES (`Some(Int64)`,
-            // `Pair(Int64, String)`), not named parameters. Parse each as a type so primitive type
-            // keywords (Int64, Bool, ...) are accepted; a named-parameter form would mis-expect an
-            // identifier before the type and reject the payload.
-            while (!Seeing(TokenKind.END) && !Seeing(TokenKind.RPAREN)) {
-                decl.constructorTypes.add(ParseType())
-                if (!Skip(TokenKind.COMMA)) { break }
-            }
-            decl.end = Expect(TokenKind.RPAREN, "expected ')' after enum constructor").End()
-        } else {
-            decl.end = decl.identifier.End()
-        }
+        decl.end = decl.identifier.End()
         return decl
     }
 
@@ -780,26 +841,99 @@ extend ParserImpl {
             }
         }
         for (constraint in ParseGenericConstraints()) {
-            ret.genericConstraints.add(constraint)
+            EnsureDeclGeneric(ret).genericConstraints.add(constraint)
         }
         ret.end = ret.identifier.End()
+    }
+
+    private func EnsureDeclGeneric(decl: Decl): Generic {
+        if (let Some(generic) <- decl.generic) {
+            return generic
+        }
+        let generic = Generic()
+        decl.generic = generic
+        return generic
     }
 
     public func ParseClassLikeBody(ret: InheritableDecl, scopeKind: ScopeKind): Unit {
         if (!Skip(TokenKind.LCURL)) {
             return
         }
+        let leftCurl = lastToken.Begin()
+        SetDeclBodyLeftCurl(ret, leftCurl)
         while (!Seeing(TokenKind.END) && !Seeing(TokenKind.RCURL)) {
             if (SeeingDeclInScope(scopeKind) || Seeing(TokenKind.AT) || Seeing(TokenKind.AT_EXCL)) {
                 let member = ParseDecl(scopeKind)
                 member.outerDecl = ret
-                ret.bodyDecls.add(member)
+                AddBodyMember(ret, member)
             } else {
                 Next()
             }
             SkipNLOrSemi()
         }
-        ret.end = Expect(TokenKind.RCURL, "expected '}' after declaration body").End()
+        let rightCurl = Expect(TokenKind.RCURL, "expected '}' after declaration body").Begin()
+        SetDeclBodyRightCurl(ret, rightCurl)
+        ret.end = rightCurl + 1
+    }
+
+    private func SetDeclBodyLeftCurl(ret: InheritableDecl, pos: Position): Unit {
+        if (let Some(classDecl) <- (ret as ClassDecl)) {
+            let body = ClassBody()
+            body.leftCurlPos = pos
+            body.begin = pos
+            classDecl.body = body
+        } else if (let Some(interfaceDecl) <- (ret as InterfaceDecl)) {
+            let body = InterfaceBody()
+            body.leftCurlPos = pos
+            body.begin = pos
+            interfaceDecl.body = body
+        } else if (let Some(structDecl) <- (ret as StructDecl)) {
+            let body = StructBody()
+            body.leftCurlPos = pos
+            body.begin = pos
+            structDecl.body = body
+        } else if (let Some(extendDecl) <- (ret as ExtendDecl)) {
+            extendDecl.leftCurlPos = pos
+        }
+    }
+
+    private func SetDeclBodyRightCurl(ret: InheritableDecl, pos: Position): Unit {
+        if (let Some(classDecl) <- (ret as ClassDecl)) {
+            if (let Some(body) <- classDecl.body) {
+                body.rightCurlPos = pos
+                body.end = pos + 1
+            }
+        } else if (let Some(interfaceDecl) <- (ret as InterfaceDecl)) {
+            if (let Some(body) <- interfaceDecl.body) {
+                body.rightCurlPos = pos
+                body.end = pos + 1
+            }
+        } else if (let Some(structDecl) <- (ret as StructDecl)) {
+            if (let Some(body) <- structDecl.body) {
+                body.rightCurlPos = pos
+                body.end = pos + 1
+            }
+        } else if (let Some(extendDecl) <- (ret as ExtendDecl)) {
+            extendDecl.rightCurlPos = pos
+        }
+    }
+
+    private func AddBodyMember(ret: InheritableDecl, member: Decl): Unit {
+        if (let Some(classDecl) <- (ret as ClassDecl)) {
+            if (let Some(body) <- classDecl.body) {
+                body.decls.add(member)
+            }
+        } else if (let Some(interfaceDecl) <- (ret as InterfaceDecl)) {
+            if (let Some(body) <- interfaceDecl.body) {
+                body.decls.add(member)
+            }
+        } else if (let Some(structDecl) <- (ret as StructDecl)) {
+            if (let Some(body) <- structDecl.body) {
+                body.decls.add(member)
+            }
+        } else if (let Some(extendDecl) <- (ret as ExtendDecl)) {
+            extendDecl.members.add(member)
+        }
     }
 
     public func ParseExtendDecl(_: ScopeKind, modifiers: ArrayList<Modifier>, annos: ArrayList<Annotation>): ExtendDecl {
@@ -835,12 +969,15 @@ extend ParserImpl {
         ret.begin = if (ret.begin.IsZero()) { key.Begin() } else { ret.begin }
         ret.identifier = ExpectIdentifierWithPos(ret)
         if (Skip(TokenKind.COLON)) {
+            ret.colonPos = lastToken.Begin()
             ret.typeNode = ParseType()
         }
         if (Skip(TokenKind.ASSIGN)) {
+            ret.assignPos = lastToken.Begin()
             ret.initializer = ParseExpr(ExprKind.VAR_INIT)
         }
         if (Skip(TokenKind.LCURL)) {
+            ret.leftCurlPos = lastToken.Begin()
             while (!Seeing(TokenKind.END) && !Seeing(TokenKind.RCURL)) {
                 if (Seeing(TokenKind.IDENTIFIER) && (Peek().Value() == "get" || Peek().Value() == "set")) {
                     let accessorName = Peek().Value()
@@ -848,13 +985,21 @@ extend ParserImpl {
                     accessor.identifier = ParseIdentifierFromToken(Peek())
                     Next()
                     accessor.funcBody = ParseFuncBody(if (accessorName == "get") { ScopeKind.PROP_MEMBER_GETTER_BODY } else { ScopeKind.PROP_MEMBER_SETTER_BODY })
-                    if (accessorName == "get") { ret.getter = accessor } else { ret.setter = accessor }
+                    accessor.propDecl = ret
+                    if (accessorName == "get") {
+                        accessor.isGetter = true
+                        ret.getters.add(accessor)
+                    } else {
+                        accessor.isSetter = true
+                        ret.setters.add(accessor)
+                    }
                 } else {
                     Next()
                 }
                 SkipNLOrSemi()
             }
-            ret.end = Expect(TokenKind.RCURL, "expected '}' after property body").End()
+            ret.rightCurlPos = Expect(TokenKind.RCURL, "expected '}' after property body").Begin()
+            ret.end = ret.rightCurlPos + 1
         } else {
             ret.end = if (let Some(expr) <- ret.initializer) {
                 expr.end
@@ -874,6 +1019,9 @@ extend ParserImpl {
         ret.keywordPos = key.Begin()
         ret.identifier = SrcIdentifier("init", "init", key.Begin(), key.End(), false)
         ret.EnableAttr(Attribute.CONSTRUCTOR)
+        if (HasModifierToken(modifiers, TokenKind.CONST)) {
+            ret.isConst = true
+        }
         ret.begin = if (ret.begin.IsZero()) { key.Begin() } else { ret.begin }
         ret.funcBody = ParseFuncBody(scopeKind)
         if (let Some(body) <- ret.funcBody) { ret.end = body.end }
@@ -937,7 +1085,7 @@ extend ParserImpl {
         } else {
             ret.EnableAttr(Attribute.IN_CLASSLIKE)
         }
-        if (ret.HasModifier(ModifierKind.CONST)) {
+        if (HasModifierToken(modifiers, TokenKind.CONST)) {
             ret.isConst = true
         }
         if (let Some(body) <- ret.funcBody) {

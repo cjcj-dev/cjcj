@@ -25,9 +25,6 @@ extend ParserImpl {
         }
         let part = TokenPart(tokens)
         qe.exprs.add(part)
-        for (token in tokens) {
-            qe.tokens.add(token)
-        }
         tokens.clear()
     }
 

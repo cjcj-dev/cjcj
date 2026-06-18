@@ -22,10 +22,10 @@ public class ASTHasher {
     public static func HashSpecs(file: File): UInt64 {
         var acc: UInt64 = 0
         if (let Some(pkg) <- file.packageSpec) {
-            acc = CombineHash(acc, UInt64(pkg.FullName().hashCode()))
+            acc = CombineHash(acc, UInt64(pkg.GetPackageName().hashCode()))
         }
         for (imp in file.imports) {
-            acc = CombineHash(acc, UInt64(imp.content.FullName().hashCode()))
+            acc = CombineHash(acc, UInt64(imp.content.ToString().hashCode()))
         }
         return acc
     }
@@ -48,7 +48,7 @@ public class ASTHasher {
         var acc = UInt64(ASTKindIndex(decl.astKind))
         acc = CombineHash(acc, UInt64(decl.identifier.GetRawText().hashCode()))
         for (modifier in decl.modifiers) {
-            acc = CombineHash(acc, UInt64(ModifierKindIndexForHash(modifier.kind)))
+            acc = CombineHash(acc, UInt64(ModifierKindIndexForHash(modifier.modifier)))
         }
         for (attr in decl.GetAttrsVector()) {
             acc = CombineHash(acc, UInt64(AttributeIndex(attr)))
@@ -70,6 +70,6 @@ public class ASTHasher {
     }
 }
 
-private func ModifierKindIndexForHash(kind: ModifierKind): Int64 {
-    return if (kind == ModifierKind.PUBLIC) { 0 } else if (kind == ModifierKind.PRIVATE) { 1 } else { 2 }
+private func ModifierKindIndexForHash(kind: TokenKind): Int64 {
+    return if (kind == TokenKind.PUBLIC) { 0 } else if (kind == TokenKind.PRIVATE) { 1 } else { 2 }
 }

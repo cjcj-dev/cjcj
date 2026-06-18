@@ -197,8 +197,7 @@ public func IsConflictedFFIAnnotation(kind: AnnotationKind): Bool {
 public func IsLitStringArg(arg: FuncArg): Bool {
     if (let Some(expr) <- arg.expr) {
         if (let Some(lit) <- (expr as LitConstExpr)) {
-            return lit.kind == LitConstKind.STRING || lit.kind == LitConstKind.JSTRING ||
-                lit.kind == LitConstKind.MULTILINE_STRING || lit.kind == LitConstKind.MULTILINE_RAW_STRING
+            return lit.kind == LitConstKind.STRING || lit.kind == LitConstKind.JSTRING
         }
     }
     return false

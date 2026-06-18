@@ -12,13 +12,14 @@ extend ParserImpl {
             let token = Peek()
             if (let Some(kind) <- ModifierKindFromToken(token.kind)) {
                 Next()
-                let modifier = Modifier(kind, token.kind, token.Begin(), token.End())
+                let modifier = Modifier(token.kind, token.Begin())
                 for (existing in modifiers) {
-                    if (existing.kind == kind) {
+                    if (existing.modifier == token.kind) {
                         diag.DiagnoseRefactor(DiagKindRefactor.DUPLICATED_MODIFIER, token.Begin(), "duplicated modifier '${token.Value()}'")
                     }
                 }
                 modifiers.add(modifier)
+                let _ = kind
                 continue
             }
             break

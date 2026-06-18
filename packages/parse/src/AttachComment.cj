@@ -12,7 +12,7 @@ extend ParserImpl {
     }
 
     public func AttachCommentToFile(file: File): Unit {
-        commentsMap.Put(UInt32(file.fileID), CommentList())
+        commentsMap.Put(UInt32(file.begin.fileID), CommentList())
     }
 
     public func AttachCommentToNodes(nodes: ArrayList<Node>): Unit {

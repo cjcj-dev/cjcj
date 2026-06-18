@@ -37,7 +37,6 @@ extend ParserImpl {
             anno.isBroken = true
             return anno
         }
-        anno.atPos = atToken.Begin()
         anno.begin = atToken.Begin()
         anno.identifier = ExpectIdentifierWithPos(anno)
         anno.kind = NameToAnnotationKind(anno.identifier.Val())
@@ -69,7 +68,6 @@ extend ParserImpl {
                 return anno
             }
         }
-        anno.atPos = atToken.Begin()
         anno.begin = atToken.Begin()
         var baseExpr: Expr = RefExpr(ExpectIdentifierWithPos(anno))
         while (Skip(TokenKind.DOT)) {
