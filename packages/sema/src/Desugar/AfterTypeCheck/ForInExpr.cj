@@ -10,6 +10,11 @@ private let STOP_COMPILER: String = "$stop-compiler"
 private let ITER_COMPILER: String = "iter-compiler"
 private let STRING_SIZE_NAME: String = "size"
 private let SUBSCRIPT_OPERATOR_NAME: String = "[]"
+private let ITERATOR_METHOD_NAME: String = "iterator"
+private let NEXT_METHOD_NAME: String = "next"
+private let OPTION_VALUE_CTOR: String = "Some"
+private let OPTION_NONE_CTOR: String = "None"
+private let V_COMPILER: String = "v-compiler"
 
 private func CloneExpr(expr: Expr): Option<Expr> {
     return ASTCloner.Clone(expr) as Expr
@@ -36,6 +41,10 @@ private func BoolTy(): Ty {
     return TypeManager.GetPrimitiveTy(TypeKind.TYPE_BOOLEAN)
 }
 
+private func NothingTy(): Ty {
+    return TypeManager.GetNothingTy()
+}
+
 private func CreateVarRef(decl: VarDecl, pos: Node): RefExpr {
     let refExpr = CreateRefExpr(decl, pos)
     if (let Some(ty) <- decl.GetTy()) {
@@ -43,6 +52,56 @@ private func CreateVarRef(decl: VarDecl, pos: Node): RefExpr {
     }
     refExpr.curFile = decl.curFile
     return refExpr
+}
+
+private func FirstZeroArgFunc(decls: ArrayList<Decl>): Option<FuncDecl> {
+    for (decl in decls) {
+        let used = GetUsedMemberDecl(decl, true)
+        if (let Some(funcDecl) <- (used as FuncDecl)) {
+            if (let Some(declTy) <- funcDecl.GetTy()) {
+                if (let Some(funcTy) <- (declTy as FuncTy)) {
+                    if (funcTy.paramTys.isEmpty()) {
+                        return funcDecl
+                    }
+                }
+            }
+        }
+    }
+    return None
+}
+
+private func LookupZeroArgMember(typeManager: TypeManager, source: Node, baseTy: Ty, name: String): Option<FuncDecl> {
+    var found = FieldLookup(typeManager, Ty.GetDeclPtrOfTy(Some(baseTy)), name,
+        info: LookupInfo(baseTy: baseTy, file: source.curFile))
+    if (found.isEmpty()) {
+        if (let Some(file) <- source.curFile) {
+            found = ExtendFieldLookup(typeManager, file, Some(baseTy), name)
+        }
+    }
+    return FirstZeroArgFunc(found)
+}
+
+private func CreateResolvedNoArgMemberCall(typeManager: TypeManager, source: Node, baseExpr: Expr,
+    name: String): Option<CallExpr> {
+    if (let Some(baseTy) <- baseExpr.GetTy()) {
+        if (let Some(funcDecl) <- LookupZeroArgMember(typeManager, source, baseTy, name)) {
+            let memberAccess = CreateMemberAccess(baseExpr, funcDecl)
+            memberAccess.target = funcDecl
+            memberAccess.targets.add(funcDecl)
+            CopyBasicInfo(source, memberAccess)
+            AddCurFile(memberAccess, file: source.curFile)
+            let retTy = FuncRetTyOf(funcDecl)
+            let callExpr = CreateCallExpr(memberAccess, ArrayList<FuncArg>(), Some(funcDecl), retTy,
+                CallKind.CALL_DECLARED_FUNCTION)
+            CopyBasicInfo(source, callExpr)
+            AddCurFile(callExpr, file: source.curFile)
+            if (let Some(valueTy) <- retTy) {
+                callExpr.SetTy(valueTy)
+            }
+            return callExpr
+        }
+    }
+    return None
 }
 
 private func CreateIndexVar(forInExpr: ForInExpr, rangeExpr: RangeExpr): Option<VarDecl> {
@@ -268,6 +327,39 @@ private func RangeIsIncreasing(rangeExpr: RangeExpr): Bool {
     return true
 }
 
+private func IsStepOne(rangeExpr: RangeExpr): Bool {
+    if (let Some(startExpr) <- rangeExpr.startExpr) {
+        if (let Some(startTy) <- startExpr.GetTy()) {
+            if (startTy.IsInvalid() || !startTy.IsInteger()) {
+                return false
+            }
+        } else {
+            return false
+        }
+    } else {
+        return false
+    }
+    if (let Some(stopExpr) <- rangeExpr.stopExpr) {
+        if (let Some(stopTy) <- stopExpr.GetTy()) {
+            if (stopTy.IsInvalid() || !stopTy.IsInteger()) {
+                return false
+            }
+        } else {
+            return false
+        }
+    } else {
+        return false
+    }
+    if (let Some(stepExpr) <- rangeExpr.stepExpr) {
+        if (!stepExpr.isConst) {
+            return false
+        }
+        let stepValue = stepExpr.constNumValue.asInt.`Int64`()
+        return stepValue == 1 || stepValue == -1
+    }
+    return true
+}
+
 private func CreateRangeCond(forInExpr: ForInExpr, index: VarDecl, stop: VarDecl, op: TokenKind): BinaryExpr {
     let left = CreateVarRef(index, stop)
     let right = CreateVarRef(stop, stop)
@@ -421,6 +513,9 @@ private func FinishRangeDesugar(forInExpr: ForInExpr, index: VarDecl, stop: VarD
     }
     forInExpr.desugarExpr = block
     forInExpr.inExpression = None
+    forInExpr.patternGuard = None
+    forInExpr.body = None
+    forInExpr.forInKind = ForInKind.FORIN_RANGE
 }
 
 private func FinishStringDesugar(forInExpr: ForInExpr, index: VarDecl, tmp: VarDecl, end: VarDecl,
@@ -438,6 +533,229 @@ private func FinishStringDesugar(forInExpr: ForInExpr, index: VarDecl, tmp: VarD
     }
     forInExpr.desugarExpr = block
     forInExpr.inExpression = None
+    forInExpr.patternGuard = None
+    forInExpr.body = None
+    forInExpr.forInKind = ForInKind.FORIN_STRING
+}
+
+private func CreateIteratorVar(typeManager: TypeManager, forInExpr: ForInExpr): Option<VarDecl> {
+    if (let Some(inExpr) <- forInExpr.inExpression) {
+        let inExprBegin = inExpr.begin
+        let inExprEnd = inExpr.end
+        if (let Some(iteratorCall) <- CreateResolvedNoArgMemberCall(typeManager, inExpr, inExpr,
+            ITERATOR_METHOD_NAME)) {
+            let iterator = CreateVarDecl(ITER_COMPILER, iteratorCall, None)
+            iterator.begin = if (let Some(pattern) <- forInExpr.pattern) { pattern.begin } else { inExprBegin }
+            iterator.end = if (let Some(patternEnd) <- forInExpr.pattern) { patternEnd.end } else { inExprEnd }
+            iterator.curFile = forInExpr.curFile
+            if (let Some(iteratorTy) <- iteratorCall.GetTy()) {
+                iterator.SetTy(iteratorTy)
+            }
+            return iterator
+        }
+    }
+    return None
+}
+
+private func CreateIteratorNextCall(typeManager: TypeManager, forInExpr: ForInExpr,
+    iterator: VarDecl): Option<CallExpr> {
+    let iteratorRef = CreateVarRef(iterator, forInExpr)
+    CopyBasicInfo(forInExpr, iteratorRef)
+    return CreateResolvedNoArgMemberCall(typeManager, forInExpr, iteratorRef, NEXT_METHOD_NAME)
+}
+
+private func CreateOptionCtorRef(enumTy: EnumTy, ctorName: String, ctorTy: Ty): Option<RefExpr> {
+    if (let Some(enumDecl) <- enumTy.declPtr) {
+        if (let Some(ctorDecl) <- LookupEnumMember(enumDecl, ctorName)) {
+            let refExpr = CreateRefExpr(ctorDecl)
+            refExpr.ref.targets.add(ctorDecl)
+            refExpr.SetTy(ctorTy)
+            for (typeArg in enumTy.typeArgs) {
+                refExpr.instTys.add(typeArg)
+            }
+            return refExpr
+        }
+    }
+    return None
+}
+
+private func CreateLoopJump(refLoop: Expr, isBreak: Bool): JumpExpr {
+    let jumpExpr = JumpExpr()
+    jumpExpr.isBreak = isBreak
+    jumpExpr.refLoop = refLoop
+    jumpExpr.SetTy(NothingTy())
+    return jumpExpr
+}
+
+private func CreateNoneCaseForIter(enumTy: EnumTy, refLoop: Expr): Option<MatchCase> {
+    if (let Some(noneRef) <- CreateOptionCtorRef(enumTy, OPTION_NONE_CTOR, enumTy)) {
+        let nonePattern = EnumPattern()
+        nonePattern.constructor = noneRef
+        nonePattern.SetTy(enumTy)
+        let breakExpr = CreateLoopJump(refLoop, true)
+        let breakNodes = ArrayList<Node>()
+        breakNodes.add(breakExpr)
+        let breakBlock = CreateBlock(breakNodes, NothingTy())
+        let caseNone = MatchCase()
+        caseNone.patterns.add(nonePattern)
+        caseNone.exprOrDecls = breakBlock
+        caseNone.SetTy(NothingTy())
+        return caseNone
+    }
+    return None
+}
+
+private func CreateWildcardContinueCase(patternTy: Ty, refLoop: Expr): MatchCase {
+    let wildcard = WildcardPattern()
+    wildcard.SetTy(patternTy)
+    let continueExpr = CreateLoopJump(refLoop, false)
+    let continueNodes = ArrayList<Node>()
+    continueNodes.add(continueExpr)
+    let continueBlock = CreateBlock(continueNodes, NothingTy())
+    let wildCase = MatchCase()
+    wildCase.patterns.add(wildcard)
+    wildCase.exprOrDecls = continueBlock
+    wildCase.SetTy(NothingTy())
+    return wildCase
+}
+
+private func CreatePatternBodyCase(forInExpr: ForInExpr, refLoop: Expr): Option<MatchCase> {
+    if (let Some(pattern) <- forInExpr.pattern) {
+        if (let Some(body) <- forInExpr.body) {
+            let casePat = MatchCase()
+            casePat.patterns.add(pattern)
+            forInExpr.patternInDesugarExpr = pattern
+            casePat.patternGuard = forInExpr.patternGuard
+            casePat.exprOrDecls = body
+            body.begin.Mark(PositionStatus.IGNORE)
+            body.end.Mark(PositionStatus.IGNORE)
+            RearrangeRefLoop(forInExpr, refLoop, body)
+            if (let Some(bodyTy) <- body.GetTy()) {
+                casePat.SetTy(bodyTy)
+            }
+            return casePat
+        }
+    }
+    return None
+}
+
+private func CreateSomeCaseForIter(typeManager: TypeManager, enumTy: EnumTy, forInExpr: ForInExpr,
+    refLoop: Expr): Option<MatchCase> {
+    if (enumTy.typeArgs.size != 1) {
+        return None
+    }
+    if (let None <- forInExpr.pattern) {
+        return None
+    }
+    let pattern = forInExpr.pattern.getOrThrow()
+    if (let None <- pattern.GetTy()) {
+        return None
+    }
+    let patternTy = pattern.GetTy().getOrThrow()
+    let someTy = typeManager.GetFunctionTy(enumTy.typeArgs.toArray(), enumTy)
+    if (let Some(someRef) <- CreateOptionCtorRef(enumTy, OPTION_VALUE_CTOR, someTy)) {
+        let somePattern = EnumPattern()
+        somePattern.constructor = someRef
+        somePattern.SetTy(enumTy)
+        let valuePattern = CreateVarPattern(V_COMPILER, patternTy)
+        CopyBasicInfo(pattern, valuePattern)
+        somePattern.patterns.add(valuePattern)
+        if (let Some(valueDecl) <- valuePattern.varDecl) {
+            let selector = CreateRefExpr(valueDecl, forInExpr)
+            selector.SetTy(patternTy)
+            let innerCases = ArrayList<MatchCase>()
+            if (let Some(casePat) <- CreatePatternBodyCase(forInExpr, refLoop)) {
+                casePat.SetCtxExprForPatterns(selector)
+                innerCases.add(casePat)
+                let wildcardCase = CreateWildcardContinueCase(patternTy, refLoop)
+                wildcardCase.SetCtxExprForPatterns(selector)
+                innerCases.add(wildcardCase)
+                let innerTy = if (let Some(body) <- forInExpr.body) {
+                    body.GetTy() ?? UnitTy()
+                } else {
+                    UnitTy()
+                }
+                let insideMatch = CreateMatchExpr(selector, innerCases, innerTy)
+                CopyBasicInfo(forInExpr, insideMatch)
+                AddCurFile(insideMatch, file: forInExpr.curFile)
+                let someNodes = ArrayList<Node>()
+                someNodes.add(insideMatch)
+                let someBlock = CreateBlock(someNodes, NothingTy())
+                let caseSome = MatchCase()
+                caseSome.patterns.add(somePattern)
+                caseSome.exprOrDecls = someBlock
+                caseSome.SetTy(NothingTy())
+                return caseSome
+            }
+        }
+    }
+    return None
+}
+
+private func FinishIterDesugar(forInExpr: ForInExpr, iterator: VarDecl, whileExpr: WhileExpr): Unit {
+    let nodes = ArrayList<Node>()
+    nodes.add(iterator)
+    nodes.add(whileExpr)
+    let block = CreateBlock(nodes, UnitTy())
+    CopyBasicInfo(forInExpr, block)
+    AddCurFile(block, file: forInExpr.curFile)
+    forInExpr.desugarExpr = block
+    forInExpr.inExpression = None
+    forInExpr.pattern = None
+    forInExpr.patternGuard = None
+    forInExpr.body = None
+    forInExpr.forInKind = ForInKind.FORIN_ITER
+}
+
+private func DesugarForInIterExpr(typeManager: TypeManager, forInExpr: ForInExpr): Unit {
+    if (let Some(iterator) <- CreateIteratorVar(typeManager, forInExpr)) {
+        if (let Some(nextCall) <- CreateIteratorNextCall(typeManager, forInExpr, iterator)) {
+            if (let Some(selectorTy) <- nextCall.GetTy()) {
+                if (let Some(enumTy) <- (selectorTy as EnumTy)) {
+                    let whileExpr = WhileExpr()
+                    whileExpr.sugarKind = SugarKind.FOR_IN_EXPR
+                    whileExpr.EnableAttr(Attribute.IMPLICIT_ADD)
+                    CopyBasicInfo(forInExpr, whileExpr)
+                    if (let Some(body) <- forInExpr.body) {
+                        whileExpr.begin = body.begin
+                        whileExpr.end = body.end
+                    }
+                    let cond = CreateLitConstExpr(LitConstKind.BOOL, "true", BoolTy())
+                    if (let Some(inExpr) <- forInExpr.inExpression) {
+                        cond.begin = inExpr.begin
+                        cond.end = inExpr.end
+                    }
+                    whileExpr.condExpr = cond
+
+                    let matchCases = ArrayList<MatchCase>()
+                    if (let Some(noneCase) <- CreateNoneCaseForIter(enumTy, whileExpr)) {
+                        if (let Some(someCase) <- CreateSomeCaseForIter(typeManager, enumTy, forInExpr,
+                            whileExpr)) {
+                            noneCase.SetCtxExprForPatterns(nextCall)
+                            someCase.SetCtxExprForPatterns(nextCall)
+                            matchCases.add(noneCase)
+                            matchCases.add(someCase)
+                            let matchTy = if (let Some(body) <- forInExpr.body) {
+                                body.GetTy() ?? UnitTy()
+                            } else {
+                                UnitTy()
+                            }
+                            let matchExpr = CreateMatchExpr(nextCall, matchCases, matchTy)
+                            CopyBasicInfo(forInExpr, matchExpr)
+                            AddCurFile(matchExpr, file: forInExpr.curFile)
+                            let whileNodes = ArrayList<Node>()
+                            whileNodes.add(matchExpr)
+                            let whileBody = CreateBlock(whileNodes, UnitTy())
+                            CopyBasicInfo(forInExpr, whileBody)
+                            whileExpr.body = whileBody
+                            whileExpr.SetTy(UnitTy())
+                            FinishIterDesugar(forInExpr, iterator, whileExpr)
+                        }
+                    }
+                }
+            }
+        }
+    }
 }
 
 private func DesugarClosedRange(forInExpr: ForInExpr, rangeExpr: RangeExpr): Unit {
@@ -534,6 +852,9 @@ public func DesugarForInRangeExpr(forInExpr: ForInExpr): Unit {
     }
     if (let Some(inExpr) <- forInExpr.inExpression) {
         if (let Some(rangeExpr) <- (inExpr as RangeExpr)) {
+            if (!IsStepOne(rangeExpr)) {
+                return
+            }
             if (rangeExpr.isClosed) {
                 DesugarClosedRange(forInExpr, rangeExpr)
             } else {
@@ -551,13 +872,19 @@ public func DesugarForInExpr(typeManager: TypeManager, forInExpr: ForInExpr): Un
         return
     }
     if (let Some(inExpr) <- forInExpr.inExpression) {
-        if (let Some(_) <- (inExpr as RangeExpr)) {
-            DesugarForInRangeExpr(forInExpr)
-            return
-        }
         if (let Some(inTy) <- inExpr.GetTy()) {
+            if (inTy.IsRange() && !inTy.typeArgs.isEmpty() && inTy.typeArgs[0].IsInteger()) {
+                if (let Some(_) <- (inExpr as RangeExpr)) {
+                    DesugarForInRangeExpr(forInExpr)
+                    if (let Some(_) <- forInExpr.desugarExpr) {
+                        return
+                    }
+                }
+            }
             if (inTy.IsString()) {
                 DesugarForInStringExpr(typeManager, forInExpr)
+            } else {
+                DesugarForInIterExpr(typeManager, forInExpr)
             }
         }
     }
