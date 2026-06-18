@@ -724,6 +724,9 @@ public class PollutionAnalyzer {
         match (decl.astKind) {
             case IncrDeclKind.FUNC_DECL | IncrDeclKind.PRIMARY_CTOR_DECL =>
                 PollutionForSigChangedFuncDecl(decl)
+            case IncrDeclKind.MAIN_DECL | IncrDeclKind.MACRO_DECL =>
+                throw IllegalStateException("unexpected signature change for " + IncrDeclKindName(decl.astKind) +
+                    ": " + decl.rawMangleName)
             case IncrDeclKind.VAR_DECL | IncrDeclKind.FUNC_PARAM =>
                 PollutionForSigChangedVarDecl(decl)
             case IncrDeclKind.VAR_WITH_PATTERN_DECL =>
@@ -1026,14 +1029,30 @@ public class PollutionAnalyzer {
             AdditionPollutionAPIOfExtendDecl(decl)
             return
         }
-        PollutePreciseUsages(decl)
-        PollutedUnqualifiedUses(decl)
-        PollutedGlobalChangeToPackageQualifiedUses(decl)
-        PolluteGlobalChangeToQualifiedUses(decl)
-        for (extendDecl in FindAllExtendDeclsOfType(decl.rawMangleName)) {
-            AddToPollutedDecls(extendDecl)
-            PollutedInstantiationChangeFromDecl(extendDecl)
+        if (decl.astKind == IncrDeclKind.MAIN_DECL) {
+            return
         }
+        if (IsAPIPropagationKind(decl.astKind)) {
+            PollutePreciseUsages(decl)
+            PollutedUnqualifiedUses(decl)
+            PollutedGlobalChangeToPackageQualifiedUses(decl)
+            PolluteGlobalChangeToQualifiedUses(decl)
+            for (extendDecl in FindAllExtendDeclsOfType(decl.rawMangleName)) {
+                AddToPollutedDecls(extendDecl)
+                PollutedInstantiationChangeFromDecl(extendDecl)
+            }
+            return
+        }
+        throw IllegalStateException("unexpected API pollution kind " + IncrDeclKindName(decl.astKind) +
+            ": " + decl.rawMangleName)
+    }
+
+    private func IsAPIPropagationKind(kind: IncrDeclKind): Bool {
+        return kind == IncrDeclKind.VAR_DECL || kind == IncrDeclKind.FUNC_PARAM ||
+            kind == IncrDeclKind.VAR_WITH_PATTERN_DECL || kind == IncrDeclKind.FUNC_DECL ||
+            kind == IncrDeclKind.PRIMARY_CTOR_DECL || kind == IncrDeclKind.ENUM_DECL ||
+            kind == IncrDeclKind.STRUCT_DECL || kind == IncrDeclKind.CLASS_DECL ||
+            kind == IncrDeclKind.INTERFACE_DECL
     }
 
     public func AdditionPollutionAPIOfDirectExtendDecls(mangle: String): Unit {

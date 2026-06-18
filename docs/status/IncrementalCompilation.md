@@ -117,6 +117,9 @@ Implemented:
   all-member path, while cache/member APIs still exclude constructors where C++ `GetMembers` does.
 - Fixed direct-extend member previsit fallback mangling to establish each member raw mangle before recursing into
   nested members, matching the parent-first fallback behavior used for normal member cache traversal.
+- Tightened pollution invariant handling to match the C++ abort/default cases: signature changes for main/macro
+  declarations now fail as invalid states, `PolluteAPIOfDecl` stops after marking main declarations, and only the
+  same API-capable declaration kinds as the C++ switch run precise/name/extend API propagation.
 
 Known gaps:
 
