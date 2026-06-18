@@ -48,9 +48,9 @@ public func GetAllGenericUpperBounds(typeManager: TypeManager, decl: Decl): Arra
     let allUpperBounds = ArrayList<TySet>()
     if (let Some(generic) <- decl.GetGeneric()) {
         for (typeParam in generic.typeParameters) {
-            let bounds = TySet()
             if (let Some(paramTy) <- typeParam.GetTy()) {
                 if (let Some(genericTy) <- (paramTy as GenericsTy)) {
+                    let bounds = TySet()
                     let collected = ArrayList<Ty>()
                     CollectGenericUpperBounds(genericTy, collected)
                     if (collected.size > 1) {
@@ -58,9 +58,9 @@ public func GetAllGenericUpperBounds(typeManager: TypeManager, decl: Decl): Arra
                     } else if (collected.size == 1) {
                         bounds.Add(collected[0])
                     }
+                    allUpperBounds.add(bounds)
                 }
             }
-            allUpperBounds.add(bounds)
         }
     }
     return allUpperBounds

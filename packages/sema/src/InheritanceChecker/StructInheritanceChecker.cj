@@ -176,6 +176,13 @@ private func AreFuncParameterNameIdentical(parent: FuncDecl, child: FuncDecl): B
     return true
 }
 
+private func HasParamListForParameterNameCheck(funcDecl: FuncDecl): Bool {
+    if (let Some(body) <- funcDecl.funcBody) {
+        return !body.paramLists.isEmpty()
+    }
+    return false
+}
+
 private func ParamIdentifierRange(param: FuncParam): BasicRange {
     return MakeRange(param.GetIdentifierPos(), param.identifier.Val())
 }
@@ -688,15 +695,12 @@ public class StructInheritanceChecker {
         if (!Ty.IsTyCorrect(decl.GetTy())) {
             return MemberMap()
         }
-        var baseDecl: Option<InheritableDecl> = None
-        var baseTy: Option<Ty> = None
         if (let Some(classDecl) <- (decl as ClassDecl)) {
-            for (typeNode in classDecl.inheritedTypes) {
-                if (let Some(ty) <- typeNode.GetTy()) {
-                    if (let Some(classTy) <- (ty as ClassTy)) {
-                        if (let Some(superDecl) <- classTy.declPtr) {
-                            baseDecl = superDecl
-                            baseTy = ty
+            if (let Some(superDecl) <- classDecl.GetSuperClassDecl()) {
+                if (let Some(declTy) <- classDecl.GetTy()) {
+                    if (let Some(classTy) <- (declTy as ClassTy)) {
+                        if (let Some(superTy) <- classTy.GetSuperClassTy()) {
+                            return GetInheritedMembersFromBase(decl, superDecl, superTy)
                         }
                     }
                 }
@@ -704,31 +708,37 @@ public class StructInheritanceChecker {
         } else if (let Some(extendDecl) <- (decl as ExtendDecl)) {
             if (let Some(extendedType) <- extendDecl.extendedType) {
                 if (let Some(extendedTy) <- extendedType.GetTy()) {
-                    baseDecl = Ty.GetInheritableDeclPtrOfTy(extendedTy)
-                    baseTy = extendedTy
+                    if (let Some(baseDecl) <- Ty.GetInheritableDeclPtrOfTy(extendedTy)) {
+                        return GetInheritedMembersFromBase(decl, baseDecl, extendedTy)
+                    }
                 }
             }
         }
-        if (let Some(realBaseDecl) <- baseDecl) {
-            if (let Some(realBaseTy) <- baseTy) {
-                var effectiveBaseDecl = realBaseDecl
-                if (let Some(specificDecl) <- realBaseDecl.specificImplementation) {
-                    if (let Some(specificInheritable) <- (specificDecl as InheritableDecl)) {
-                        effectiveBaseDecl = specificInheritable
-                    }
-                }
-                if (!effectiveBaseDecl.TestAttr(Attribute.IN_REFERENCE_CYCLE)) {
-                    CheckMembersWithInheritedDecls(effectiveBaseDecl)
-                    if (let Some(curFile) <- decl.curFile) {
-                        return GetInheritedSuperMembers(
-                            effectiveBaseDecl,
-                            realBaseTy,
-                            curFile,
-                            ignoreExtends: decl.astKind == ASTKind.EXTEND_DECL
-                        )
-                    }
-                }
+        return MemberMap()
+    }
+
+    private func GetInheritedMembersFromBase(
+        decl: InheritableDecl,
+        baseDecl: InheritableDecl,
+        baseTy: Ty
+    ): MemberMap {
+        var effectiveBaseDecl = baseDecl
+        if (let Some(specificDecl) <- baseDecl.specificImplementation) {
+            if (let Some(specificInheritable) <- (specificDecl as InheritableDecl)) {
+                effectiveBaseDecl = specificInheritable
             }
+        }
+        if (effectiveBaseDecl.TestAttr(Attribute.IN_REFERENCE_CYCLE)) {
+            return MemberMap()
+        }
+        CheckMembersWithInheritedDecls(effectiveBaseDecl)
+        if (let Some(curFile) <- decl.curFile) {
+            return GetInheritedSuperMembers(
+                effectiveBaseDecl,
+                baseTy,
+                curFile,
+                ignoreExtends: decl.astKind == ASTKind.EXTEND_DECL
+            )
         }
         return MemberMap()
     }
@@ -1851,12 +1861,14 @@ public class StructInheritanceChecker {
                         let sameSignature = typeManager.IsFuncParameterTypesIdentical(parentFuncTy, childFuncTy)
                         if (sameSignature) {
                             let inheritedByExtension = typeManager.HasExtensionRelation(childFuncTy.retTy, parentFuncTy.retTy)
-                            if (!AreFuncParameterNameIdentical(parentFunc, childFunc)) {
+                            let isParamListCorrect = HasParamListForParameterNameCheck(parentFunc) &&
+                                HasParamListForParameterNameCheck(childFunc)
+                            if (isParamListCorrect && !AreFuncParameterNameIdentical(parentFunc, childFunc)) {
                                 DiagnoseParameterName(diag, parentFunc, childFunc)
                             } else if (!CheckThisTypeCompatibility(parentFunc, childFunc)) {
                                 let builder = diag.DiagnoseRefactor(
                                     DiagKindRefactor.sema_inherit_not_return_this,
-                                    DeclRange(childFunc)
+                                    DeclIdentifierRange(childFunc)
                                 )
                                 builder.AddNote(DeclIdentifierRange(parentFunc), "the overriden function")
                             } else if (AreReturnTypesCompatible(parentFuncTy, childFuncTy, inconsistentTypes: parent.inconsistentTypes)) {
@@ -1906,10 +1918,10 @@ public class StructInheritanceChecker {
                                 }
                                 let builder = diag.DiagnoseRefactor(
                                     DiagKindRefactor.sema_inherit_member_kind_inconsistent,
-                                    DeclRange(childFunc),
+                                    DeclIdentifierRange(childFunc),
                                     arguments: ["non-constant function", childFunc.identifier.Val(), "'const' function", inheritance]
                                 )
-                                builder.AddNote(DeclRange(parentDecl), "found 'const' function here")
+                                builder.AddNote(DeclIdentifierRange(parentDecl), "found 'const' function here")
                             }
                         }
                         return sameSignature
@@ -2120,6 +2132,11 @@ public class StructInheritanceChecker {
             if (let Some(typeNode) <- gc.refType) {
                 if (let Some(gTy) <- typeNode.GetTy()) {
                 if (let Some(genericTy) <- (gTy as GenericsTy)) {
+                    if (let Some(genericDecl) <- genericTy.decl) {
+                        if (genericDecl.TestAttr(Attribute.IN_REFERENCE_CYCLE)) {
+                            continue
+                        }
+                    }
                     if (genericTy.upperBounds.isEmpty()) {
                         continue
                     }

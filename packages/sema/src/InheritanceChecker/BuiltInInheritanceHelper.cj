@@ -4,6 +4,87 @@ import cangjie_compiler::ast.*
 import cangjie_compiler::basic.{DiagnosticEngine, DiagKindRefactor}
 import cangjie_compiler::sema.*
 
+private func IsBuiltinGeneralArithmeticIntKind(kind: TypeKind): Bool {
+    return kind == TypeKind.TYPE_INT8 || kind == TypeKind.TYPE_INT16 || kind == TypeKind.TYPE_INT32 ||
+        kind == TypeKind.TYPE_INT64 || kind == TypeKind.TYPE_INT_NATIVE || kind == TypeKind.TYPE_UINT8 ||
+        kind == TypeKind.TYPE_UINT16 || kind == TypeKind.TYPE_UINT32 || kind == TypeKind.TYPE_UINT64 ||
+        kind == TypeKind.TYPE_UINT_NATIVE || kind == TypeKind.TYPE_IDEAL_INT
+}
+
+private func IsBuiltinGeneralArithmeticKind(kind: TypeKind): Bool {
+    return IsBuiltinGeneralArithmeticIntKind(kind) || kind == TypeKind.TYPE_FLOAT16 ||
+        kind == TypeKind.TYPE_FLOAT32 || kind == TypeKind.TYPE_FLOAT64 || kind == TypeKind.TYPE_IDEAL_FLOAT
+}
+
+private func IsBuiltinRelationNumericKind(kind: TypeKind): Bool {
+    return IsBuiltinGeneralArithmeticKind(kind) || kind == TypeKind.TYPE_RUNE
+}
+
+private func GetBuiltinUnaryReturnKindForInheritance(op: TokenKind, operandTy: Ty): TypeKind {
+    if (!Ty.IsTyCorrect(operandTy)) {
+        return TypeKind.TYPE_INVALID
+    }
+    let operandKind = operandTy.kind
+    if (op == TokenKind.SUB && IsBuiltinGeneralArithmeticKind(operandKind)) {
+        return operandKind
+    }
+    if (op == TokenKind.NOT &&
+        (IsBuiltinGeneralArithmeticIntKind(operandKind) || operandKind == TypeKind.TYPE_BOOLEAN)) {
+        return operandKind
+    }
+    if ((op == TokenKind.INCR || op == TokenKind.DECR) && IsBuiltinGeneralArithmeticIntKind(operandKind)) {
+        return operandKind
+    }
+    return TypeKind.TYPE_INVALID
+}
+
+private func GetBuiltinBinaryReturnKindForInheritance(op: TokenKind, leftTy: Ty, rightTy: Ty): TypeKind {
+    if (!Ty.IsTyCorrect(leftTy) || !Ty.IsTyCorrect(rightTy)) {
+        return TypeKind.TYPE_INVALID
+    }
+    let leftKind = leftTy.kind
+    let rightKind = rightTy.kind
+    if (op == TokenKind.EXP) {
+        if (leftKind == TypeKind.TYPE_INT64 && rightKind == TypeKind.TYPE_UINT64) {
+            return TypeKind.TYPE_INT64
+        }
+        if (leftKind == TypeKind.TYPE_FLOAT64 &&
+            (rightKind == TypeKind.TYPE_FLOAT64 || rightKind == TypeKind.TYPE_INT64)) {
+            return TypeKind.TYPE_FLOAT64
+        }
+        return TypeKind.TYPE_INVALID
+    }
+    if (op == TokenKind.LSHIFT || op == TokenKind.RSHIFT) {
+        if (IsBuiltinGeneralArithmeticIntKind(leftKind) && IsBuiltinGeneralArithmeticIntKind(rightKind)) {
+            return leftKind
+        }
+        return TypeKind.TYPE_INVALID
+    }
+    if (!SameTy(leftTy, rightTy)) {
+        return TypeKind.TYPE_INVALID
+    }
+    if (op == TokenKind.ADD || op == TokenKind.SUB || op == TokenKind.MUL || op == TokenKind.DIV) {
+        return if (IsBuiltinGeneralArithmeticKind(leftKind)) { leftKind } else { TypeKind.TYPE_INVALID }
+    }
+    if (op == TokenKind.MOD || op == TokenKind.BITAND || op == TokenKind.BITXOR || op == TokenKind.BITOR) {
+        return if (IsBuiltinGeneralArithmeticIntKind(leftKind)) { leftKind } else { TypeKind.TYPE_INVALID }
+    }
+    if (op == TokenKind.EQUAL || op == TokenKind.NOTEQ) {
+        if (IsBuiltinRelationNumericKind(leftKind) || leftKind == TypeKind.TYPE_BOOLEAN ||
+            leftKind == TypeKind.TYPE_UNIT) {
+            return TypeKind.TYPE_BOOLEAN
+        }
+        return TypeKind.TYPE_INVALID
+    }
+    if (op == TokenKind.LT || op == TokenKind.LE || op == TokenKind.GT || op == TokenKind.GE) {
+        return if (IsBuiltinRelationNumericKind(leftKind)) { TypeKind.TYPE_BOOLEAN } else { TypeKind.TYPE_INVALID }
+    }
+    if (op == TokenKind.AND || op == TokenKind.OR) {
+        return if (leftKind == TypeKind.TYPE_BOOLEAN) { TypeKind.TYPE_BOOLEAN } else { TypeKind.TYPE_INVALID }
+    }
+    return TypeKind.TYPE_INVALID
+}
+
 func IsBuiltInOperatorFuncInExtend(
     diag: DiagnosticEngine,
     typeManager: TypeManager,
@@ -26,31 +107,45 @@ func IsBuiltInOperatorFuncInExtend(
                 }
                 if (let Some(funcTy) <- actualTy) {
                     if (let Some(realFuncTy) <- (funcTy as FuncTy)) {
-                        if (let Some(extendedTy) <- ed.GetTy()) {
-                            if (realFuncTy.paramTys.size == 1 && IsBuiltinOperatorToken(fd.op)) {
-                                let expectedRetTy = BuiltinOperatorResultTy(typeManager, fd.op, extendedTy, realFuncTy.paramTys[0])
-                                if (SameTy(expectedRetTy, realFuncTy.retTy)) {
-                                    CreateBuiltInBinaryOperatorFunc(typeManager, fd.op, realFuncTy.paramTys[0], ed, expectedRetTy)
-                                } else {
-                                    diag.DiagnoseRefactor(
-                                        DiagKindRefactor.sema_return_type_incompatible,
-                                        fd.begin,
-                                        arguments: [fd.identifier.Val()]
+                        if (let Some(extendedType) <- ed.extendedType) {
+                            if (let Some(extendedTy) <- extendedType.GetTy()) {
+                                if (realFuncTy.paramTys.size == 1) {
+                                    let expectedRetKind = GetBuiltinBinaryReturnKindForInheritance(
+                                        fd.op,
+                                        extendedTy,
+                                        realFuncTy.paramTys[0]
                                     )
+                                    if (expectedRetKind == TypeKind.TYPE_INVALID) {
+                                        return false
+                                    }
+                                    let expectedRetTy = TypeManager.GetPrimitiveTy(expectedRetKind)
+                                    if (SameTy(expectedRetTy, realFuncTy.retTy)) {
+                                        CreateBuiltInBinaryOperatorFunc(typeManager, fd.op, realFuncTy.paramTys[0], ed, expectedRetTy)
+                                    } else {
+                                        diag.DiagnoseRefactor(
+                                            DiagKindRefactor.sema_return_type_incompatible,
+                                            fd.begin,
+                                            arguments: [fd.identifier.Val()]
+                                        )
+                                    }
+                                    return true
+                                } else if (realFuncTy.paramTys.isEmpty()) {
+                                    let expectedUnaryRetKind = GetBuiltinUnaryReturnKindForInheritance(fd.op, extendedTy)
+                                    if (expectedUnaryRetKind == TypeKind.TYPE_INVALID) {
+                                        return false
+                                    }
+                                    let expectedUnaryRetTy = TypeManager.GetPrimitiveTy(expectedUnaryRetKind)
+                                    if (SameTy(expectedUnaryRetTy, realFuncTy.retTy)) {
+                                        CreateBuiltInUnaryOperatorFunc(typeManager, fd.op, ed, expectedUnaryRetTy)
+                                    } else {
+                                        diag.DiagnoseRefactor(
+                                            DiagKindRefactor.sema_return_type_incompatible,
+                                            fd.begin,
+                                            arguments: [fd.identifier.Val()]
+                                        )
+                                    }
+                                    return true
                                 }
-                                return true
-                            } else if (realFuncTy.paramTys.isEmpty() && IsBuiltinOperatorToken(fd.op)) {
-                                let expectedUnaryRetTy = BuiltinOperatorResultTy(typeManager, fd.op, extendedTy, extendedTy)
-                                if (SameTy(expectedUnaryRetTy, realFuncTy.retTy)) {
-                                    CreateBuiltInUnaryOperatorFunc(typeManager, fd.op, ed, expectedUnaryRetTy)
-                                } else {
-                                    diag.DiagnoseRefactor(
-                                        DiagKindRefactor.sema_return_type_incompatible,
-                                        fd.begin,
-                                        arguments: [fd.identifier.Val()]
-                                    )
-                                }
-                                return true
                             }
                         }
                     }

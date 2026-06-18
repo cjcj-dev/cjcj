@@ -150,3 +150,58 @@ Extend diagnostic parity continuation:
 - The `This`-return mismatch note now points at the parent function identifier and uses the C++ note wording.
 
 Verification: `cjpm build` passes for the whole workspace after this extend diagnostic parity continuation.
+
+Built-in inheritance and base lookup continuation:
+
+- Built-in operator synthesis in `BuiltInInheritanceHelper.cj` now uses local table-driven return-kind checks mirroring
+  the C++ `BuiltInOperatorUtil` maps for unary arithmetic/logical operators, binary arithmetic, exponent, shift, bitwise,
+  relation, equality, and boolean operators. This avoids synthesizing implicit operators for broad token-only matches and
+  preserves C++ primitive return-type selection.
+- Generic upper-bound collection now follows the C++ invalid/non-generic parameter skip path: `GetAllGenericUpperBounds`
+  only appends an entry for type parameters whose type is a real `GenericsTy`.
+- Class inherited-member lookup now uses the real `ClassDecl.GetSuperClassDecl()` and `ClassTy.GetSuperClassTy()` APIs
+  before the shared specific-implementation/reference-cycle/member-merge path, reducing local duplicate superclass
+  discovery logic.
+
+Verification: `cjpm build` passes for the whole workspace after this built-in inheritance and base lookup continuation.
+
+Generic upper-bound cycle continuation:
+
+- Generic upper-bound conflict checking now mirrors the C++ guard that skips a constrained generic type when its generic
+  parameter declaration is marked `IN_REFERENCE_CYCLE`. The self-hosted path uses the real `GenericsTy.decl` from
+  `cangjie_compiler::ast` before merging interface/class upper-bound members.
+
+Verification: `cjpm build` passes for the whole workspace after this generic upper-bound cycle continuation.
+
+Instantiated signature flow continuation:
+
+- `CheckInstMemberSignatures` no longer returns early for empty instantiated type lists or empty type-substitution maps.
+  This matches the C++ flow, which still checks/replays the instantiated declaration key, re-adds constructors/private
+  members, and runs the generic-member collision path with the generated mapping even when it is empty.
+
+Verification: `cjpm build` passes for the whole workspace after this instantiated signature flow continuation.
+
+Instantiated empty-key walk continuation:
+
+- Empty type-argument declaration walks now use a direct `Walker` like the C++ implementation instead of routing through
+  `CheckInstantiatedDecl`. This preserves the C++ distinction between baseline declaration scans, which do not push an
+  instantiation map, and explicit instantiated declaration scans, which do.
+
+Verification: `cjpm build` passes for the whole workspace after this instantiated empty-key walk continuation.
+
+Built-in extend target type continuation:
+
+- Built-in operator implementation detection now takes the candidate receiver type from
+  `ExtendDecl.extendedType.GetTy()`, matching the C++ `ed->extendedType->GetTy()` path. Generated unary and binary
+  operator bodies still type `this` from the extend declaration itself, preserving the separate C++ body-generation path.
+
+Verification: `cjpm build` passes for the whole workspace after this built-in extend target type continuation.
+
+Implementation relation diagnostic continuation:
+
+- Function implementation checks now mirror the C++ call-site guard before comparing inherited parameter names: the
+  parameter-name mismatch diagnostic is only considered when both function bodies have a parameter list.
+- `This` return-type incompatibility and inherited `const`/non-`const` function conflicts now use identifier-focused
+  diagnostic ranges and parent notes, matching the C++ `MakeRange(identifier)` calls.
+
+Verification: `cjpm build` passes for the whole workspace after this implementation relation diagnostic continuation.
