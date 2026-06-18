@@ -1,5 +1,6 @@
 package cangjie_compiler::frontend
 
+import cangjie_compiler::basic.InteropCJPackageConfigReader
 import cangjie_compiler::utils.FileUtil
 import std.collection.*
 import std.convert.*
@@ -113,9 +114,11 @@ public open class CompileStrategy {
 
     protected func InteropConfigTomlCheck(): Unit {
         let opts = ci.invocation.globalOptions
-        if (opts.enableInteropCJMapping && opts.interopCJPackageConfigPath != "./" && !FileExist(opts.interopCJPackageConfigPath)) {
-            ci.diag.Diagnose(DiagCategory.SEMA, DEFAULT_POSITION,
-                "interop Cangjie package config not found: " + opts.interopCJPackageConfigPath)
+        let packagesFullConfig = InteropCJPackageConfigReader()
+        if (opts.enableInteropCJMapping && opts.interopCJPackageConfigPath != "./" &&
+            !packagesFullConfig.Parse(opts.interopCJPackageConfigPath)) {
+            ci.diag.DiagnoseRefactor(DiagKindRefactor.sema_cj_mapping_generic_method_not_get_instance_config,
+                DEFAULT_POSITION, arguments: [opts.interopCJPackageConfigPath])
         }
     }
 

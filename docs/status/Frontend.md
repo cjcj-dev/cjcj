@@ -120,6 +120,13 @@ The `.cj.d` merge path now adds sources with the C++ CJMP/common-part condition
 and parses declaration files with comment attachment disabled and `compileCjd`
 enabled unconditionally.
 
+This continuation de-isolated Frontend's interop config validation to the real
+Basic layer. `CompileStrategy.InteropConfigTomlCheck` now uses
+`basic.InteropCJPackageConfigReader.Parse` instead of a file-existence
+approximation and reports the C++ refactor diagnostic
+`sema_cj_mapping_generic_method_not_get_instance_config` through a thin
+Frontend diagnostic forwarding helper.
+
 ## Important Blocker
 
 `packages/frontend/cjpm.toml` now imports the real `basic`, `lex`, `option`, and

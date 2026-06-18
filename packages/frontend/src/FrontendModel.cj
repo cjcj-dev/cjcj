@@ -1,8 +1,8 @@
 package cangjie_compiler::frontend
 
 public import cangjie_compiler::basic.{
-    BEGIN_POSITION, DEFAULT_POSITION, INVALID_POSITION, DiagCategory, DiagColor, DiagSeverity, IntegratedString,
-    MakeRange, Position, PositionStatus, Range, Source, SourceManager
+    BEGIN_POSITION, DEFAULT_POSITION, INVALID_POSITION, DiagCategory, DiagColor, DiagKindRefactor, DiagSeverity,
+    IntegratedString, MakeRange, Position, PositionStatus, Range, Source, SourceManager
 }
 import cangjie_compiler::basic.Diagnostic as BasicDiagnostic
 import cangjie_compiler::basic.DiagnosticEngine as BasicDiagnosticEngine
@@ -33,6 +33,10 @@ public class DiagnosticEngine {
 
     public func Diagnose(category: DiagCategory, position: Position, message: String): Unit {
         emitFrontendDiagnostic(this, category, position, message, DiagSeverity.DS_ERROR)
+    }
+
+    public func DiagnoseRefactor(kind: DiagKindRefactor, position: Position, arguments!: Array<String> = Array<String>()): Unit {
+        impl.DiagnoseRefactor(kind, position, arguments: arguments).Emit()
     }
 
     public func Warn(category: DiagCategory, position: Position, message: String): Unit {
