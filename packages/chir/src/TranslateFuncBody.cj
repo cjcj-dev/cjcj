@@ -572,7 +572,7 @@ extend AST2CHIRDeclTranslator {
         let refTy = builder.context.GetRefTy(int64Ty)
         let elemPtr = builder.CreateDynamicElementRef(refTy, basePtr, indices, state.current)
             .GetResult().getOrThrow()
-        builder.CreateStore(value, elemPtr, state.current)
+        builder.CreateStore(CastStructCarrierToInt64(value, state), elemPtr, state.current)
     }
 
     // Element-ref pointer (Ref<Int64>) into a VArray slot at a compile-time-constant index.

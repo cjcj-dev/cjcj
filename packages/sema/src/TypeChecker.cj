@@ -520,9 +520,6 @@ public class TypeChecker {
             return
         }
         markRealPipelineUnsupported()
-        for (member in decl.GetMemberDecls()) {
-            checkRealPipelineDecl(member)
-        }
     }
 
     private func checkRealPipelineStructDecl(structDecl: StructDecl): Unit {
