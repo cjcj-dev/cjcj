@@ -16,6 +16,7 @@ import cangjie_compiler::chir.CHIRBuilder as ChirBuilder
 import cangjie_compiler::chir.CHIRPrinter as ChirCHIRPrinter
 import cangjie_compiler::chir.CHIRContext as ChirContext
 import cangjie_compiler::chir.FuncKind as ChirFuncKind
+import cangjie_compiler::chir.Function as ChirFunction
 import cangjie_compiler::chir.Package as RealCHIRPackage
 import cangjie_compiler::chir.Type as ChirType
 import cangjie_compiler::chir.DescribeRealASTFunctionLowering
@@ -46,7 +47,11 @@ public func BuildRealCHIRForFrontendPackage(instance: CompilerInstance, pkg: Pac
 
 public func BuildRealCHIRForASTPackage(instance: CompilerInstance, pkg: RealASTPackage): Option<RealCHIRPackage> {
     let builder = ChirBuilder(instance.chirData.GetRealCHIRContext())
-    let lowered = match (TryLowerRealASTPackage(pkg, builder)) {
+    let sourcePackages = ArrayList<RealASTPackage>()
+    for ((_, realPkg) in instance.realASTPkgs) {
+        sourcePackages.add(realPkg)
+    }
+    let lowered = match (TryLowerRealASTPackage(pkg, builder, sourcePackages)) {
         case Some(value) => value
         case None => return None
     }
@@ -74,6 +79,7 @@ public func EmitRealCodeGenForCompilerInstance(instance: CompilerInstance): Bool
     if (realPackages.isEmpty()) {
         return true
     }
+    let packagesToEmit = BuildRealCodeGenPackages(realPackages)
     let codegenOptions = ConvertFrontendOptionsToCodegenOptions(instance.invocation.globalOptions)
     let savedAPC = codegenOptions.aggressiveParallelCompile
     if (ShouldEmitSingleExplicitBitcodeOutput(codegenOptions)) {
@@ -84,8 +90,8 @@ public func EmitRealCodeGenForCompilerInstance(instance: CompilerInstance): Bool
     }
     var emittedAll = true
     var packageIndex: Int64 = 0
-    while (packageIndex < realPackages.size) {
-        let realPackage = realPackages[packageIndex]
+    while (packageIndex < packagesToEmit.size) {
+        let realPackage = packagesToEmit[packageIndex]
         instance.chirData.SetCurrentRealCHIRPackage(Some(realPackage))
         let codegenData = CodegenCHIRData(instance.chirData.GetRealCHIRContext(), realPackage)
         let packageModules = GenPackageModules(codegenData, codegenOptions,
@@ -96,6 +102,166 @@ public func EmitRealCodeGenForCompilerInstance(instance: CompilerInstance): Bool
     }
     codegenOptions.aggressiveParallelCompile = savedAPC
     return emittedAll
+}
+
+private func BuildRealCodeGenPackages(realPackages: ArrayList<RealCHIRPackage>): ArrayList<RealCHIRPackage> {
+    if (realPackages.size <= 1) {
+        return realPackages
+    }
+    let mainPackageIndex = FindUniqueRealMainPackageIndex(realPackages)
+    if (mainPackageIndex < 0) {
+        return realPackages
+    }
+    let out = ArrayList<RealCHIRPackage>()
+    out.add(MergeRealCHIRPackagesForSingleCodegenOutput(realPackages, mainPackageIndex))
+    return out
+}
+
+private func FindUniqueRealMainPackageIndex(realPackages: ArrayList<RealCHIRPackage>): Int64 {
+    var found: Int64 = -1
+    var index: Int64 = 0
+    while (index < realPackages.size) {
+        if (RealPackageHasMainEntry(realPackages[index])) {
+            if (found >= 0) {
+                return -1
+            }
+            found = index
+        }
+        index++
+    }
+    return found
+}
+
+private func RealPackageHasMainEntry(pkg: RealCHIRPackage): Bool {
+    for (fn in pkg.GetGlobalFunctions(includePureAbstract: true)) {
+        if (fn.GetFuncKind() == ChirFuncKind.MAIN_ENTRY) {
+            return true
+        }
+    }
+    return false
+}
+
+private func MergeRealCHIRPackagesForSingleCodegenOutput(realPackages: ArrayList<RealCHIRPackage>,
+    mainPackageIndex: Int64): RealCHIRPackage {
+    let mainPackage = realPackages[mainPackageIndex]
+    let merged = RealCHIRPackage(mainPackage.GetName())
+    merged.SetPackageAccessLevel(mainPackage.GetPackageAccessLevel())
+    let bodyFunctionNames = HashSet<String>()
+    let allFunctionNames = HashSet<String>()
+    for (pkg in realPackages) {
+        AddRealPackageTypes(merged, pkg)
+        AddRealPackageGlobals(merged, pkg)
+    }
+    AddRealPackageBodyFunctionsExceptMain(merged, realPackages, mainPackageIndex, bodyFunctionNames,
+        allFunctionNames)
+    AddRealPackageBodyFunctions(merged, mainPackage, bodyFunctionNames, allFunctionNames)
+    AddRealPackageImportedFunctionDeclarations(merged, realPackages, bodyFunctionNames, allFunctionNames)
+    return merged
+}
+
+private func AddRealPackageBodyFunctionsExceptMain(merged: RealCHIRPackage,
+    realPackages: ArrayList<RealCHIRPackage>, mainPackageIndex: Int64, bodyFunctionNames: HashSet<String>,
+    allFunctionNames: HashSet<String>): Unit {
+    var index: Int64 = 0
+    while (index < realPackages.size) {
+        if (index != mainPackageIndex) {
+            AddRealPackageBodyFunctions(merged, realPackages[index], bodyFunctionNames, allFunctionNames)
+        }
+        index++
+    }
+}
+
+private func AddRealPackageBodyFunctions(merged: RealCHIRPackage, pkg: RealCHIRPackage,
+    bodyFunctionNames: HashSet<String>, allFunctionNames: HashSet<String>): Unit {
+    for (fn in pkg.GetGlobalFunctions(includePureAbstract: true)) {
+        if (fn.GetBody().isSome() && !fn.TestAttr(ChirAttribute.IMPORTED)) {
+            AddRealPackageFunctionOnce(merged, fn, allFunctionNames)
+            bodyFunctionNames.add(fn.GetIdentifier())
+        }
+    }
+}
+
+private func AddRealPackageImportedFunctionDeclarations(merged: RealCHIRPackage,
+    realPackages: ArrayList<RealCHIRPackage>, bodyFunctionNames: HashSet<String>,
+    allFunctionNames: HashSet<String>): Unit {
+    for (pkg in realPackages) {
+        for (fn in pkg.GetGlobalFunctions(includePureAbstract: true)) {
+            if (fn.TestAttr(ChirAttribute.IMPORTED) && !bodyFunctionNames.contains(fn.GetIdentifier())) {
+                AddRealPackageFunctionOnce(merged, fn, allFunctionNames)
+            }
+        }
+    }
+}
+
+private func AddRealPackageFunctionOnce(merged: RealCHIRPackage, fn: ChirFunction,
+    allFunctionNames: HashSet<String>): Unit {
+    let name = fn.GetIdentifier()
+    if (allFunctionNames.contains(name)) {
+        return
+    }
+    allFunctionNames.add(name)
+    merged.AddGlobalFunc(fn)
+}
+
+private func AddRealPackageGlobals(merged: RealCHIRPackage, pkg: RealCHIRPackage): Unit {
+    for (globalVar in pkg.GetGlobalVars()) {
+        if (merged.TryGetGlobalVar(globalVar.GetIdentifier()).isNone()) {
+            merged.AddGlobalVar(globalVar)
+        }
+    }
+    if (merged.GetPackageInitFunc().isNone()) {
+        if (let Some(initFn) <- pkg.GetPackageInitFunc()) {
+            merged.SetPackageInitFunc(initFn)
+        }
+    }
+    if (merged.GetPackageLiteralInitFunc().isNone()) {
+        if (let Some(literalInitFn) <- pkg.GetPackageLiteralInitFunc()) {
+            merged.SetPackageLiteralInitFunc(literalInitFn)
+        }
+    }
+}
+
+private func AddRealPackageTypes(merged: RealCHIRPackage, pkg: RealCHIRPackage): Unit {
+    for (item in pkg.GetStructs()) {
+        if (merged.TryGetStructDef(item.GetIdentifier()).isNone()) {
+            merged.AddStruct(item)
+        }
+    }
+    for (item in pkg.GetImportedStructs()) {
+        if (merged.TryGetStructDef(item.GetIdentifier()).isNone()) {
+            merged.AddImportedStruct(item)
+        }
+    }
+    for (item in pkg.GetClasses()) {
+        if (merged.TryGetClassDef(item.GetIdentifier()).isNone()) {
+            merged.AddClass(item)
+        }
+    }
+    for (item in pkg.GetImportedClasses()) {
+        if (merged.TryGetClassDef(item.GetIdentifier()).isNone()) {
+            merged.AddImportedClass(item)
+        }
+    }
+    for (item in pkg.GetEnums()) {
+        if (merged.TryGetEnumDef(item.GetIdentifier()).isNone()) {
+            merged.AddEnum(item)
+        }
+    }
+    for (item in pkg.GetImportedEnums()) {
+        if (merged.TryGetEnumDef(item.GetIdentifier()).isNone()) {
+            merged.AddImportedEnum(item)
+        }
+    }
+    for (item in pkg.GetExtends()) {
+        if (merged.TryGetExtendDef(item.GetIdentifier()).isNone()) {
+            merged.AddExtend(item)
+        }
+    }
+    for (item in pkg.GetImportedExtends()) {
+        if (merged.TryGetExtendDef(item.GetIdentifier()).isNone()) {
+            merged.AddImportedExtend(item)
+        }
+    }
 }
 
 public func ConvertFrontendOptionsToCodegenOptions(options: GlobalOptions): GlobalOptions {

@@ -30,6 +30,8 @@ import cangjie_compiler::ast.StringPartKind as AstStringPartKind
 import cangjie_compiler::ast.StructDecl as AstStructDecl
 import cangjie_compiler::ast.MemberAccess as AstMemberAccess
 import cangjie_compiler::ast.Attribute as AstAttribute
+import cangjie_compiler::ast.ImportKind as AstImportKind
+import cangjie_compiler::ast.ImportSpec as AstImportSpec
 
 private let REAL_AST_RETURN_NONE: Int64 = 0
 private let REAL_AST_RETURN_INT: Int64 = 1
@@ -64,6 +66,7 @@ private class RealASTFunctionInfo {
 private class RealASTPackageLoweringScope {
     let functions = HashMap<String, RealASTFunctionInfo>()
     let structs = HashMap<String, RealASTStructInfo>()
+    let importedFunctions = ArrayList<RealASTImportedFunctionInfo>()
 
     func AddFunction(name: String, info: RealASTFunctionInfo): Bool {
         if (name.isEmpty() || functions.contains(name)) {
@@ -91,6 +94,32 @@ private class RealASTPackageLoweringScope {
 
     func IsStruct(name: String): Bool {
         return structs.contains(name)
+    }
+
+    func AddImportedFunction(info: RealASTImportedFunctionInfo): Bool {
+        if (info.localName.isEmpty() || functions.contains(info.localName)) {
+            return false
+        }
+        functions[info.localName] = info.funcInfo
+        importedFunctions.add(info)
+        return true
+    }
+}
+
+private class RealASTImportedFunctionInfo {
+    let localName: String
+    let packageName: String
+    let sourceName: String
+    let chirName: String
+    let funcInfo: RealASTFunctionInfo
+
+    init(localName: String, packageName: String, sourceName: String, chirName: String,
+        funcInfo: RealASTFunctionInfo) {
+        this.localName = localName
+        this.packageName = packageName
+        this.sourceName = sourceName
+        this.chirName = chirName
+        this.funcInfo = funcInfo
     }
 }
 
@@ -353,28 +382,34 @@ public func DescribeRealASTFunctionLowering(pkg: AstPackage): ArrayList<String> 
     return out
 }
 
-public func TryLowerRealASTPackage(pkg: AstPackage, builder: CHIRBuilder): Option<Package> {
+public func TryLowerRealASTPackage(pkg: AstPackage, builder: CHIRBuilder,
+    sourcePackages: ArrayList<AstPackage>): Option<Package> {
     if (pkg.files.isEmpty()) {
         return None
     }
-    if (let Some(spec) <- BuildRealASTPackageSpec(pkg, builder.context)) {
+    if (let Some(spec) <- BuildRealASTPackageSpec(pkg, builder.context, sourcePackages)) {
         return Some(AST2CHIR(builder).LowerPackage(spec).pkg)
     }
     return None
 }
 
-private func BuildRealASTPackageSpec(pkg: AstPackage, context: CHIRContext): Option<AST2CHIRPackageSpec> {
-    let packageScope = match (BuildRealASTPackageLoweringScope(pkg)) {
+private func BuildRealASTPackageSpec(pkg: AstPackage, context: CHIRContext,
+    sourcePackages: ArrayList<AstPackage>): Option<AST2CHIRPackageSpec> {
+    let packageScope = match (BuildRealASTPackageLoweringScope(pkg, sourcePackages)) {
         case Some(value) => value
         case None => return None
     }
     let spec = AST2CHIRPackageSpec(pkg.fullPackageName)
     spec.SetAccessLevel(AccessLevel.PUBLIC)
     var funcCount: Int64 = 0
-    for (file in pkg.files) {
-        if (!file.imports.isEmpty()) {
-            return None
+    for (importedFunction in packageScope.importedFunctions) {
+        let importedSpec = match (BuildRealASTImportedFunctionSpec(importedFunction, context)) {
+            case Some(value) => value
+            case None => return None
         }
+        spec.AddFunction(importedSpec)
+    }
+    for (file in pkg.files) {
         let fileName = if (file.filePath.isEmpty()) { file.fileName } else { file.filePath }
         spec.RegisterSourceFile(UInt32(file.begin.fileID), fileName)
         for (decl in file.decls) {
@@ -411,7 +446,19 @@ private func BuildRealASTPackageSpec(pkg: AstPackage, context: CHIRContext): Opt
     return Some(spec)
 }
 
-private func BuildRealASTPackageLoweringScope(pkg: AstPackage): Option<RealASTPackageLoweringScope> {
+private func BuildRealASTPackageLoweringScope(pkg: AstPackage,
+    sourcePackages: ArrayList<AstPackage>): Option<RealASTPackageLoweringScope> {
+    let scope = match (BuildRealASTPackageLocalLoweringScope(pkg)) {
+        case Some(value) => value
+        case None => return None
+    }
+    if (!ResolveRealASTSimpleImports(pkg, scope, sourcePackages)) {
+        return None
+    }
+    return Some(scope)
+}
+
+private func BuildRealASTPackageLocalLoweringScope(pkg: AstPackage): Option<RealASTPackageLoweringScope> {
     let scope = RealASTPackageLoweringScope()
     for (file in pkg.files) {
         for (decl in file.decls) {
@@ -455,6 +502,88 @@ private func BuildRealASTPackageLoweringScope(pkg: AstPackage): Option<RealASTPa
         }
     }
     return Some(scope)
+}
+
+private func ResolveRealASTSimpleImports(pkg: AstPackage, scope: RealASTPackageLoweringScope,
+    sourcePackages: ArrayList<AstPackage>): Bool {
+    for (file in pkg.files) {
+        for (importSpec in file.imports) {
+            if (!ResolveRealASTSimpleImport(pkg, scope, importSpec, sourcePackages)) {
+                return false
+            }
+        }
+    }
+    return true
+}
+
+private func ResolveRealASTSimpleImport(pkg: AstPackage, scope: RealASTPackageLoweringScope,
+    importSpec: AstImportSpec, sourcePackages: ArrayList<AstPackage>): Bool {
+    if (importSpec.modifier.isSome() || importSpec.IsImportAlias() || importSpec.IsImportAll() ||
+        importSpec.IsImportMulti()) {
+        return false
+    }
+    let content = importSpec.content
+    if (content.kind != AstImportKind.IMPORT_SINGLE || content.isBroken || content.hasBroken ||
+        content.prefixPaths.isEmpty()) {
+        return false
+    }
+    let localName = content.identifier.Val()
+    let importedPackageName = content.GetPrefixPath()
+    if (localName.isEmpty() || importedPackageName.isEmpty() || importedPackageName == pkg.fullPackageName) {
+        return false
+    }
+    let importedPackage = match (FindRealASTSourcePackage(importedPackageName, pkg, sourcePackages)) {
+        case Some(value) => value
+        case None => return false
+    }
+    let importedDecl = match (FindRealASTUniqueFunctionDecl(importedPackage, localName)) {
+        case Some(value) => value
+        case None => return false
+    }
+    if (!importedDecl.IsExportedDecl()) {
+        return false
+    }
+    let importedScope = match (BuildRealASTPackageLocalLoweringScope(importedPackage)) {
+        case Some(value) => value
+        case None => return false
+    }
+    let importedInfo = match (importedScope.GetFunction(localName)) {
+        case Some(value) => value
+        case None => return false
+    }
+    let chirName = RealASTStableMangledName(importedPackage.fullPackageName, importedDecl)
+    return scope.AddImportedFunction(RealASTImportedFunctionInfo(localName, importedPackage.fullPackageName,
+        localName, chirName, importedInfo))
+}
+
+private func FindRealASTSourcePackage(packageName: String, currentPkg: AstPackage,
+    sourcePackages: ArrayList<AstPackage>): Option<AstPackage> {
+    if (currentPkg.fullPackageName == packageName) {
+        return Some(currentPkg)
+    }
+    for (pkg in sourcePackages) {
+        if (pkg.fullPackageName == packageName) {
+            return Some(pkg)
+        }
+    }
+    return None
+}
+
+private func FindRealASTUniqueFunctionDecl(pkg: AstPackage, name: String): Option<AstFuncDecl> {
+    var found: Option<AstFuncDecl> = None
+    for (file in pkg.files) {
+        for (decl in file.decls) {
+            if (let Some(funcDecl) <- (decl as AstFuncDecl)) {
+                if (funcDecl.identifier.Val() == name) {
+                    if (found.isSome()) {
+                        return None
+                    }
+                    found = Some(funcDecl)
+                }
+            }
+        }
+    }
+    return found
 }
 
 private func BuildRealASTFunctionInfo(body: AstFuncBody,
@@ -748,6 +877,28 @@ private func BuildRealASTStructMethodSpec(packageName: String, structInfo: RealA
     if (!sourceFileKey.isEmpty()) {
         fnSpec.SetSourceFileKey(sourceFileKey)
     }
+    return Some(fnSpec)
+}
+
+private func BuildRealASTImportedFunctionSpec(imported: RealASTImportedFunctionInfo,
+    context: CHIRContext): Option<AST2CHIRFunctionSpec> {
+    let paramTypes = ArrayList<Type>()
+    for (paramType in imported.funcInfo.paramTypes) {
+        let chirTy = match (RealASTCHIRTypeForKey(context, paramType)) {
+            case Some(value) => value
+            case None => return None
+        }
+        paramTypes.add(chirTy)
+    }
+    let returnTy = match (RealASTCHIRTypeForKey(context, imported.funcInfo.returnType)) {
+        case Some(value) => value
+        case None => return None
+    }
+    let fnSpec = AST2CHIRFunctionSpec(imported.chirName, paramTypes, returnTy,
+        srcCodeIdentifier: imported.localName, rawMangledName: imported.chirName,
+        packageName: imported.packageName, funcKind: FuncKind.DEFAULT, emitBody: false)
+    fnSpec.AddAttribute(Attribute.IMPORTED)
+    fnSpec.AddAttribute(Attribute.PUBLIC)
     return Some(fnSpec)
 }
 
