@@ -753,6 +753,16 @@ public func ClassifyInput(opts: DriverOptions, input: String, index: UInt64): Bo
             return true
         }
         return false
+    } else if (extension == "cjo") {
+        if (let Some(path) <- opts.ValidateInputFilePath(input)) {
+            if (!opts.inputCjoFile.isEmpty()) {
+                eprintln("error: only one cjo input is accepted with '--scan-dependency'.")
+                return false
+            }
+            opts.inputCjoFile = path
+            return true
+        }
+        return false
     } else if (extension == "so" || extension == "dylib" || extension == "dll") {
         if (let Some(path) <- opts.ValidateInputFilePath(input)) {
             opts.inputLibraries.add(path)

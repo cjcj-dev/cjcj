@@ -139,6 +139,7 @@ public class DriverOptions {
     public var compilationCachedFileName: String = ""
     public let srcFiles: ArrayList<String> = ArrayList<String>()
     public let inputObjs: ArrayList<String> = ArrayList<String>()
+    public var inputCjoFile: String = ""
     public let inputLibraries: ArrayList<String> = ArrayList<String>()
     public let inputLinkOptions: ArrayList<String> = ArrayList<String>()
     public let bcInputFiles: ArrayList<String> = ArrayList<String>()
@@ -240,7 +241,7 @@ public class DriverOptions {
 
     public func HasInputs(): Bool {
         return compilePackage || !srcFiles.isEmpty() || !inputObjs.isEmpty() || !inputLibraries.isEmpty() ||
-            !bcInputFiles.isEmpty()
+            !bcInputFiles.isEmpty() || !inputCjoFile.isEmpty()
     }
 
     public func CheckDirectoryPath(path: String): Option<String> {
@@ -353,6 +354,9 @@ public class DriverOptions {
             for (packagePath in packagePaths) {
                 out.add(packagePath)
             }
+            if (!inputCjoFile.isEmpty()) {
+                out.add(inputCjoFile)
+            }
             if (noSubPkg) { out.add("--no-sub-pkg") }
             if (scanDepPkg) { out.add("--scan-dependency") }
             if (enableCompileDebug) { out.add("-g") }
@@ -428,6 +432,7 @@ public class DriverOptions {
         success = success && CheckObfuscationOptions()
         success = success && SetupSysroot()
         success = success && CheckCompileMacro()
+        success = success && CheckScanDependencyOptions()
         success = success && ReprocessCoverageOptions()
         success = success && CheckSanitizerOptions()
         success = success && CheckLTOOptions()
@@ -656,6 +661,28 @@ public class DriverOptions {
         if (enableCoverage && optimizationLevel != OptimizationLevel.O0) {
             eprintln("warning: '--coverage' should be used without optimizations.")
             return SetOptimizationLevel(OptimizationLevel.O0)
+        }
+        return true
+    }
+
+    private func CheckScanDependencyOptions(): Bool {
+        if (!scanDepPkg) {
+            return true
+        }
+        if (compilePackage) {
+            if (!inputCjoFile.isEmpty()) {
+                eprintln("error: cjo inputs are not accepted when '-p' or '--package' is specified.")
+                return false
+            }
+            if (packagePaths.isEmpty() && moduleSrcPath.isEmpty()) {
+                eprintln("error: package directory is required when '--scan-dependency' is used with '-p' or '--package'.")
+                return false
+            }
+            return true
+        }
+        if (inputCjoFile.isEmpty()) {
+            eprintln("error: cjo input is required when '--scan-dependency' is used without '-p' or '--package'.")
+            return false
         }
         return true
     }

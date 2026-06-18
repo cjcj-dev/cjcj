@@ -71,7 +71,7 @@ public class Driver {
         if (!TempFileManager.Instance().Init(driverOptions, false)) {
             return false
         }
-        if (!driverOptions.srcFiles.isEmpty() || driverOptions.compilePackage) {
+        if (!driverOptions.srcFiles.isEmpty() || driverOptions.compilePackage || driverOptions.scanDepPkg) {
             if (!ExecuteFrontendPhase(this)) {
                 return false
             }
