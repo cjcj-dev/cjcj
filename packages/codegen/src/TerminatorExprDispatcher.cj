@@ -73,10 +73,7 @@ public func HandleTerminatorExpression(irBuilder: IRBuilder2, chirExpr: Expressi
     }
     if (kind == ExprKind.SPAWN_WITH_EXCEPTION) {
         return HandleWithExceptionTerminator(irBuilder, chirExpr, { builder: IRBuilder2, expr: Expression =>
-            if (let Some(resultTy) <- expr.GetResultType()) {
-                return unsafe { LLVMConstNull(CGType.GetOrCreate(builder.GetCGModule(), resultTy).GetLLVMType()) }
-            }
-            return LLVMNullValue()
+            GenerateSpawn(builder, expr)
         })
     }
     if (kind == ExprKind.TYPECAST_WITH_EXCEPTION) {

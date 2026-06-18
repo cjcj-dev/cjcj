@@ -60,7 +60,10 @@ public func HandleOthersExpression(irBuilder: IRBuilder2, chirExpr: Expression):
     if (kind == ExprKind.INSTANCEOF) {
         return GenerateInstanceOf(irBuilder, chirExpr)
     }
-    if (kind == ExprKind.SPAWN || kind == ExprKind.GET_INSTANTIATE_VALUE) {
+    if (kind == ExprKind.SPAWN) {
+        return GenerateSpawn(irBuilder, chirExpr)
+    }
+    if (kind == ExprKind.GET_INSTANTIATE_VALUE) {
         if (let Some(resultTy) <- chirExpr.GetResultType()) {
             return unsafe { LLVMConstNull(CGType.GetOrCreate(irBuilder.GetCGModule(), resultTy).GetLLVMType()) }
         }

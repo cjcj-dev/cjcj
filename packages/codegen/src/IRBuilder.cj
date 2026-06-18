@@ -5,6 +5,7 @@ import cangjie_compiler::chir.BoolLiteral
 import cangjie_compiler::chir.ExprKind
 import cangjie_compiler::chir.FloatLiteral
 import cangjie_compiler::chir.FuncType
+import cangjie_compiler::chir.Function
 import cangjie_compiler::chir.IntLiteral
 import cangjie_compiler::chir.LiteralValue
 import cangjie_compiler::chir.RawArrayType
@@ -21,6 +22,9 @@ private let GET_EXCEPTION_WRAPPER_INTRINSIC_NAME: String = "llvm.cj.get.exceptio
 private let POST_THROW_EXCEPTION_INTRINSIC_NAME: String = "llvm.cj.post.throw.exception"
 private let MALLOC_ARRAY_INTRINSIC_NAME: String = "llvm.cj.malloc.array"
 private let MALLOC_ARRAY_GENERIC_INTRINSIC_NAME: String = "llvm.cj.malloc.array.generic"
+private let MALLOC_OBJECT_INTRINSIC_NAME: String = "llvm.cj.malloc.object"
+private let NEW_CJ_THREAD_FUNC_NAME: String = PREFIX_OF_BACKEND_SYMS + "NewCJThread"
+private let NEW_CJ_THREAD_NO_RETURN_FUNC_NAME: String = PREFIX_OF_BACKEND_SYMS + "NewCJThreadNoReturn"
 private let LLVM_FAST_MATH_ALL: UInt32 = 127u32
 
 private func SignedInt64Bits(value: Int64): UInt64 {
@@ -1046,6 +1050,52 @@ public class IRBuilder2 {
             args, name: "post.throw")
     }
 
+    public func CallSpawnIntrinsic(obj: CGValue, cgFunc: CGFunction, threadCtx: Option<CGValue>,
+        spawnWithFuture: Bool): LLVMValueRef {
+        return CallSpawnIntrinsic(obj, cgFunc, threadCtx, spawnWithFuture, None)
+    }
+
+    public func CallSpawnIntrinsic(obj: CGValue, cgFunc: CGFunction, threadCtx: Option<CGValue>,
+        spawnWithFuture: Bool, futureTI: Option<LLVMValueRef>): LLVMValueRef {
+        let i8PtrTy = unsafe { LLVMPointerType(LLVMInt8TypeInContext(GetLLVMContext().raw), 0u32) }
+        let args = ArrayList<LLVMValueRef>()
+        args.add(cgFunc.GetRawFunction())
+        args.add(obj.GetRawValue())
+        if (let Some(ctxValue) <- threadCtx) {
+            args.add(ctxValue.GetRawValue())
+        } else {
+            args.add(unsafe { LLVMConstNull(CGType.GetRefType(GetLLVMContext())) })
+        }
+        if (!spawnWithFuture) {
+            let futureTIValue = if (let Some(value) <- futureTI) {
+                value
+            } else {
+                return LLVMNullValue()
+            }
+            args.add(CreateBitCast(futureTIValue, i8PtrTy, name: "future.ti"))
+        }
+        let runtimeName = if (spawnWithFuture) { NEW_CJ_THREAD_FUNC_NAME } else { NEW_CJ_THREAD_NO_RETURN_FUNC_NAME }
+        let runtimeType = MakeFunctionTypeFromArgs(i8PtrTy, args)
+        return CreateCallOrInvoke(GetOrInsertRuntimeFunction(runtimeName, runtimeType), runtimeType, args,
+            name: "spawn.thread")
+    }
+
+    public func CreateSpawnException(): Unit {
+        CreateImplicitExceptionAndThrow("_CNat14SpawnException6<init>Hv")
+    }
+
+    public func CreateSetRuntimeCJThreadHandleCall(args: ArrayList<LLVMValueRef>): LLVMValueRef {
+        let helperName = "_CNat6Thread24setRuntimeCJThreadHandleHPu"
+        if (let Some(helperNode) <- GetCGContext().GetImplicitUsedFunc(helperName)) {
+            let helperFunc = cgMod.GetOrInsertCGFunction(helperNode)
+            if (let Some(helperFuncType) <- helperFunc.GetCGFunctionType()) {
+                return CreateCallOrInvoke(helperFunc.GetRawFunction(), helperFuncType.GetLLVMFunctionType(), args)
+            }
+        }
+        let helperType = MakeFunctionTypeFromArgs(unsafe { LLVMVoidTypeInContext(GetLLVMContext().raw) }, args)
+        return CreateCallOrInvoke(GetOrInsertRuntimeFunction(helperName, helperType), helperType, args)
+    }
+
     public func CreateNegativeArraySizeException(): Unit {
         let helperType = MakeFunctionType(unsafe { LLVMVoidTypeInContext(GetLLVMContext().raw) }, ArrayList<LLVMTypeRef>())
         let helper = if (let Some(helperNode) <- GetCGContext().GetImplicitUsedFunc(THROW_NEGATIVE_ARRAY_SIZE_EXCEPTION_FUNC_NAME)) {
@@ -1089,6 +1139,65 @@ public class IRBuilder2 {
         }
         let fallbackType = GetRuntimeExceptionHelperType()
         return (GetOrInsertRuntimeFunction(funcName, fallbackType), fallbackType)
+    }
+
+    private func CreateImplicitExceptionAndThrow(initFuncName: String): Unit {
+        if (let Some(initFuncNode) <- GetCGContext().GetImplicitUsedFunc(initFuncName)) {
+            if (let Some(exceptionTy) <- TryGetFirstParamClassType(initFuncNode)) {
+                let exceptionValue = CallClassIntrinsicAlloc(exceptionTy)
+                let initArgs = ArrayList<LLVMValueRef>()
+                initArgs.add(exceptionValue)
+                initArgs.add(CGType.GetOrCreate(cgMod, exceptionTy).GetOrCreateTypeInfo())
+                let initFunc = cgMod.GetOrInsertCGFunction(initFuncNode)
+                if (let Some(initFuncType) <- initFunc.GetCGFunctionType()) {
+                    let _ = CreateCallOrInvoke(initFunc.GetRawFunction(), initFuncType.GetLLVMFunctionType(), initArgs)
+                }
+                CallExceptionIntrinsicThrow(exceptionValue)
+                return
+            }
+        }
+        CreateUnreachable()
+    }
+
+    private func TryGetFirstParamClassType(fn: Function): Option<Type> {
+        if (let Some(funcTy) <- fn.GetFuncType()) {
+            let params = funcTy.GetParamTypes()
+            if (!params.isEmpty()) {
+                let strippedTy = params[0].StripAllRefs()
+                if (strippedTy.IsClass()) {
+                    return strippedTy
+                }
+            }
+        }
+        return None
+    }
+
+    private func CallClassIntrinsicAlloc(classTy: Type): LLVMValueRef {
+        let classCGType = CGType.GetOrCreate(cgMod, classTy)
+        let typeInfo = classCGType.GetOrCreateTypeInfo()
+        let typeInfoArg = CreateBitCast(typeInfo, unsafe { LLVMPointerType(LLVMInt8TypeInContext(GetLLVMContext().raw),
+            0u32) }, name: "class.ti")
+        let sizeArg = GetLayoutSize32(classTy, classCGType)
+        let args = ArrayList<LLVMValueRef>()
+        args.add(typeInfoArg)
+        args.add(sizeArg)
+        let objectValue = CreateIntrinsicCall(MALLOC_OBJECT_INTRINSIC_NAME, ArrayList<LLVMTypeRef>(), args,
+            name: "class.alloc")
+        if (!objectValue.isNull()) {
+            AddRetAttr(objectValue, "noalias")
+        }
+        return objectValue
+    }
+
+    private func GetLayoutSize32(chirTy: Type, cgType: CGType): LLVMValueRef {
+        let sizeValue = if (chirTy.StripAllRefs().IsClass()) {
+            cgMod.GetTypeSize(cgType.GetLayoutType())
+        } else if (let Some(staticSize) <- cgType.GetSize()) {
+            UInt64(staticSize)
+        } else {
+            0u64
+        }
+        return unsafe { LLVMConstInt(LLVMInt32TypeInContext(GetLLVMContext().raw), sizeValue, 0) }
     }
 
     private func GetRuntimeExceptionHelperType(): LLVMTypeRef {
@@ -1135,6 +1244,14 @@ public class IRBuilder2 {
             result = unsafe { LLVMFunctionType(returnType, paramPtr.value, UInt32(paramTypes.size), 0) }
         }
         return result
+    }
+
+    private func MakeFunctionTypeFromArgs(returnType: LLVMTypeRef, args: ArrayList<LLVMValueRef>): LLVMTypeRef {
+        let paramTypes = ArrayList<LLVMTypeRef>()
+        for (arg in args) {
+            paramTypes.add(unsafe { LLVMTypeOf(arg) })
+        }
+        return MakeFunctionType(returnType, paramTypes)
     }
 
     private func CastIntegerToInt64(value: LLVMValueRef): LLVMValueRef {

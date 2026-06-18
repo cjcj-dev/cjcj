@@ -1,6 +1,6 @@
 # CodeGen Expr Lowering Status
 
-Last updated: 2026-06-18 13:28 CST
+Last updated: 2026-06-18 13:47 CST
 
 This pass deepened the CHIR-to-LLVM expression/statement/terminator lowering core under
 `packages/codegen/src`.
@@ -58,13 +58,25 @@ Continuation update:
   `MultiBranch` lowering now uses `chir.MultiBranch.GetCaseVals()` and case successor accessors, matching the C++
   dispatcher's switch construction from stored case constants instead of incorrectly treating runtime operands as case
   labels.
+- Added `SpawnExprImpl.cj` to mirror the C++ component split and routed both `SPAWN` and `SPAWN_WITH_EXCEPTION` through
+  the real CHIR `Spawn`/`SpawnWithException` classes. Future-spawn now resolves `Future.execute`, materializes the
+  optional thread context, calls the external CJ thread runtime (`CJ_MCC_NewCJThread`), checks the null result path via
+  `SpawnException`, stores the runtime thread handle back into the Future thread object, and returns the Future object.
+- Added closure-spawn lowering for `executeClosure`, including result `TypeInfo` plumbing and the
+  `CJ_MCC_NewCJThreadNoReturn` runtime call. The result remains unused just like the C++ path.
+- Extended `IRBuilder2` with the spawn runtime-call helpers, `SpawnException` construction through implicit runtime
+  CHIR, class-object allocation through the LLVM `llvm.cj.malloc.object` intrinsic, and the
+  `_CNat6Thread24setRuntimeCJThreadHandleHPu` helper call used by Future spawn.
 
 Remaining gaps:
 
 - Full C++ virtual dispatch (`InvokeImpl.cpp`) still needs runtime type-info/vtable/mtable helper coverage in the
   self-hosted IRBuilder before it can be behavior-faithful.
-- `SpawnExprImpl.cpp`, broad runtime/reflect/array intrinsic families, checked-overflow Option construction, and full
-  enum/boxed/generic type transformations are still partial outside the subset above.
+- Spawn lowering now emits the real runtime thread creation path, but full parity still needs exact C++ object-payload
+  field addressing for `CreateGEP(CGValue, {0})`, fully dynamic generic `TypeInfo` creation, and assertion-equivalent
+  handling for verifier-invalid missing Future/closure metadata.
+- Broad runtime/reflect/array intrinsic families, checked-overflow Option construction, and full enum/boxed/generic type
+  transformations are still partial outside the subset above.
 - The new `InstanceOf` lowering relies on static `CGType` TypeInfo creation for generic-related target types; full
   dynamic generic TypeInfo construction still belongs with broader IRBuilder type-info parity.
 - Full C++ aggregate element addressing still needs a self-hosted equivalent of `IRBuilder2::CreateGEP(CGValue, path)`,
@@ -74,8 +86,8 @@ Remaining gaps:
 - Full C++ return lowering still has unsupported debug-exit metadata handling, C FFI return post-processing, override
   source-function boxing optimizations, and allocation-time sret slot reuse. This pass ports the ordinary return-slot
   and sret-copy behavior that fits the current self-hosted backend surface.
-- Some unsupported intrinsic and spawn paths still return typed null/unit fallbacks because the corresponding sibling
-  runtime/codegen surfaces are not yet modeled in this self-hosted package.
+- Some unsupported intrinsic and verifier-invalid compatibility paths still return typed null/unit fallbacks because the
+  corresponding sibling runtime/codegen surfaces are not yet modeled in this self-hosted package.
 
 Verification:
 
@@ -89,4 +101,5 @@ Verification:
   frontend warning.
 - Continuation `cjpm build` passed after real `GoTo`/`Branch`/`MultiBranch` terminator dispatch changes, with the same
   unrelated frontend warning.
+- Continuation `cjpm build` passed after spawn runtime-call lowering changes, with the same unrelated frontend warning.
 - Remaining `TODO(selfhost:CodeGen)` markers in `packages/codegen/src`: 0.
