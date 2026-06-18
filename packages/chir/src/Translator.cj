@@ -522,7 +522,7 @@ public class Translator {
             return RequireResult(builder.CreateVArray(arrayTy, elements, CurrentBlock()))
         }
         if (arrayTy.IsStructArray()) {
-            throw IllegalArgumentException("not yet ported in faithful AST2CHIR: std.core.Array literal initFunc path")
+            return TranslateStructArrayLit(expr, RequireStructType(arrayTy))
         }
         throw IllegalArgumentException("not yet ported in faithful AST2CHIR: unsupported ArrayLit type")
     }
@@ -542,6 +542,9 @@ public class Translator {
                 CurrentBlock())
             return rawArrayRef
         }
+        if (expr.args.size == 1) {
+            return TranslateRawArrayByCollection(expr, arrayTy, rawArrayTy)
+        }
         if (expr.args.size == 2 && expr.initFunc.isNone()) {
             let sizeValue = Translator.TranslateASTNode(RequireFuncArgExpr(expr.args[0], "RawArray size"), this) ??
                 throw IllegalStateException("faithful AST2CHIR RawArray size produced no value")
@@ -553,7 +556,10 @@ public class Translator {
                 CurrentBlock())
             return rawArrayRef
         }
-        throw IllegalArgumentException("not yet ported in faithful AST2CHIR: RawArray initFunc/collection ArrayExpr")
+        if (expr.args.size == 2) {
+            return TranslateRawArrayByLambda(expr, arrayTy, rawArrayTy)
+        }
+        throw IllegalArgumentException("not yet ported in faithful AST2CHIR: unsupported RawArray ArrayExpr arity")
     }
 
     public func Visit(expr: AstTupleLit): Option<Value> {
@@ -1336,6 +1342,152 @@ public class Translator {
         let nullFnTy = builder.context.GetFuncTy(fnParamTys, arrayTy.GetElementType())
         let nullFn = RequireResult(builder.CreateConstant(nullFnTy, NullLiteral(), CurrentBlock()))
         return RequireResult(builder.CreateVArrayBuilder(arrayTy, sizeValue, argValue, nullFn, CurrentBlock()))
+    }
+
+    private func TranslateStructArrayLit(expr: AstArrayLit, arrayTy: StructType): Value {
+        let genericArgs = arrayTy.GetGenericArgs()
+        if (genericArgs.isEmpty()) {
+            throw IllegalStateException("faithful AST2CHIR std.core.Array type has no element type")
+        }
+        let elementTy = genericArgs[0]
+        let elementSize = RequireResult(builder.CreateConstant(builder.context.GetInt64Ty(),
+            IntLiteral(Int64(expr.children.size)), CurrentBlock()))
+        let rawArrayTy = builder.context.GetRawArrayTy(elementTy)
+        let rawArrayRefTy = builder.context.GetRefTy(rawArrayTy)
+        let rawArrayRef = RequireResult(builder.CreateRawArrayAllocate(rawArrayRefTy, elementTy, elementSize,
+            CurrentBlock()))
+        if (IsArrayElementPrimitiveForLiteral(elementTy)) {
+            let elements = ArrayList<Value>()
+            for (child in expr.children) {
+                elements.add(Translator.TranslateASTNode(child, this) ??
+                    throw IllegalStateException("faithful AST2CHIR ArrayLit element produced no value"))
+            }
+            builder.CreateRawArrayLiteralInit(builder.context.GetUnitTy(), rawArrayRef, elements, CurrentBlock())
+        } else {
+            var idx: Int64 = 0
+            for (child in expr.children) {
+                let element = Translator.TranslateASTNode(child, this) ??
+                    throw IllegalStateException("faithful AST2CHIR ArrayLit element produced no value")
+                let path = ArrayList<UInt64>()
+                path.add(UInt64(idx))
+                builder.CreateStoreElementRef(element, rawArrayRef, path, CurrentBlock())
+                idx++
+            }
+        }
+        let initFunc = expr.initFunc ??
+            throw IllegalStateException("faithful AST2CHIR std.core.Array literal missing initFunc")
+        let resultRefTy = builder.context.GetRefTy(arrayTy)
+        let result = RequireResult(builder.CreateAllocate(resultRefTy, arrayTy, CurrentBlock()))
+        let startIndex = RequireResult(builder.CreateConstant(builder.context.GetInt64Ty(), IntLiteral(0),
+            CurrentBlock()))
+        let args = ArrayList<Value>()
+        args.add(result)
+        args.add(rawArrayRef)
+        args.add(startIndex)
+        args.add(elementSize)
+        let initFnTy = builder.context.GetFuncTy(TypesFromValues(args), builder.context.GetUnitTy())
+        let thisTy = result.GetType() ??
+            throw IllegalStateException("faithful AST2CHIR std.core.Array literal result has no type")
+        builder.CreateApply(initFnTy.GetReturnType(), GetSymbolTable(initFunc),
+            FuncCallContext(args: args, thisType: thisTy), CurrentBlock())
+        return RequireResult(builder.CreateLoad(arrayTy, result, CurrentBlock()))
+    }
+
+    private func TranslateRawArrayByCollection(expr: AstArrayExpr, arrayTy: Type, rawArrayTy: RawArrayType): Value {
+        let collection = Translator.TranslateASTNode(RequireFuncArgExpr(expr.args[0], "RawArray collection"), this) ??
+            throw IllegalStateException("faithful AST2CHIR RawArray collection produced no value")
+        let collectionTy = collection.GetType() ??
+            throw IllegalStateException("faithful AST2CHIR RawArray collection has no type")
+        let sizeTy = builder.context.GetInt64Ty()
+        let originalObjType = ExactCollectionSizeReceiverType(collectionTy)
+        let sizeFuncParamTys = ArrayList<Type>()
+        sizeFuncParamTys.add(originalObjType)
+        let sizeFuncTy = builder.context.GetFuncTy(sizeFuncParamTys, sizeTy)
+        let invokeCtx = InvokeCallContext(collection, FuncCallContext(thisType: collectionTy.StripAllRefs()),
+            FuncSigInfo(sizeFuncTy, funcName: "$sizeget"))
+        let sizeValue = RequireResult(builder.CreateInvoke(sizeTy, invokeCtx, CurrentBlock()))
+
+        let rawArrayRef = RequireResult(builder.CreateRawArrayAllocate(arrayTy, rawArrayTy.GetElementType(),
+            sizeValue, CurrentBlock()))
+        let initFunc = expr.initFunc ??
+            throw IllegalStateException("faithful AST2CHIR RawArray(collection) missing initFunc")
+        let args = ArrayList<Value>()
+        args.add(rawArrayRef)
+        args.add(collection)
+        let instTypeArgs = ArrayList<Type>()
+        if (initFunc.TestAttr(AstAttribute.GENERIC)) {
+            instTypeArgs.add(rawArrayTy.GetElementType())
+        }
+        let initFnTy = builder.context.GetFuncTy(TypesFromValues(args), arrayTy)
+        builder.CreateApply(initFnTy.GetReturnType(), GetSymbolTable(initFunc),
+            FuncCallContext(args: args, instTypeArgs: instTypeArgs), CurrentBlock())
+        return rawArrayRef
+    }
+
+    private func TranslateRawArrayByLambda(expr: AstArrayExpr, arrayTy: Type, rawArrayTy: RawArrayType): Value {
+        let sizeValue = Translator.TranslateASTNode(RequireFuncArgExpr(expr.args[0], "RawArray lambda size"), this) ??
+            throw IllegalStateException("faithful AST2CHIR RawArray lambda size produced no value")
+        let rawArrayRef = RequireResult(builder.CreateRawArrayAllocate(arrayTy, rawArrayTy.GetElementType(),
+            sizeValue, CurrentBlock()))
+        let userInitFn = Translator.TranslateASTNode(RequireFuncArgExpr(expr.args[1], "RawArray lambda init"), this) ??
+            throw IllegalStateException("faithful AST2CHIR RawArray lambda init produced no value")
+        let initFunc = expr.initFunc ??
+            throw IllegalStateException("faithful AST2CHIR RawArray(size, initFunc) missing initFunc")
+        let args = ArrayList<Value>()
+        args.add(rawArrayRef)
+        args.add(userInitFn)
+        let instTypeArgs = ArrayList<Type>()
+        if (initFunc.TestAttr(AstAttribute.GENERIC)) {
+            for (ty in rawArrayTy.GetTypeArgs()) {
+                instTypeArgs.add(ty)
+            }
+        }
+        let initFnTy = builder.context.GetFuncTy(TypesFromValues(args), arrayTy)
+        builder.CreateApply(initFnTy.GetReturnType(), GetSymbolTable(initFunc),
+            FuncCallContext(args: args, instTypeArgs: instTypeArgs), CurrentBlock())
+        return rawArrayRef
+    }
+
+    private func IsArrayElementPrimitiveForLiteral(ty: Type): Bool {
+        if (ty.IsPrimitive() || ty.IsVArray()) {
+            return true
+        }
+        if (ty.IsStructArray()) {
+            let args = RequireStructType(ty).GetGenericArgs()
+            return !args.isEmpty() && IsArrayElementPrimitiveForLiteral(args[0])
+        }
+        if (let Some(tupleTy) <- (ty as TupleType)) {
+            let elementTys = tupleTy.GetTypeArgs()
+            if (elementTys.isEmpty()) {
+                return false
+            }
+            for (elementTy in elementTys) {
+                if (!IsArrayElementPrimitiveForLiteral(elementTy)) {
+                    return false
+                }
+            }
+            return true
+        }
+        return false
+    }
+
+    private func ExactCollectionSizeReceiverType(collectionTy: Type): Type {
+        let strippedTy = collectionTy.StripAllRefs()
+        if (let Some(customTy) <- (strippedTy as CustomType)) {
+            if (let Some(defTy) <- customTy.GetCustomTypeDef().GetType()) {
+                return builder.context.GetRefTy(defTy)
+            }
+        }
+        return collectionTy
+    }
+
+    private func TypesFromValues(values: ArrayList<Value>): ArrayList<Type> {
+        let out = ArrayList<Type>()
+        for (value in values) {
+            out.add(value.GetType() ??
+                throw IllegalStateException("faithful AST2CHIR array init argument has no type"))
+        }
+        return out
     }
 
     private func TranslateTupleAccess(expr: AstSubscriptExpr): Value {
