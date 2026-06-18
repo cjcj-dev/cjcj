@@ -44,6 +44,7 @@ class CHIRDeserializerImpl {
         configureCustomDefs()
         configureGlobalsAndFunctions()
         createExpressions()
+        configureExpressionPayloadLinks()
         configureBlockPredecessors()
         configureBlockGroups()
         configurePackageFunctions(pkg)
@@ -238,6 +239,10 @@ class CHIRDeserializerImpl {
         for (fields in customRecords) {
             let def = customDefsById.get(CHIRFieldAt(fields, 1)) ?? continue
             CHIRApplyBaseInfo(def, CHIRFieldAt(fields, 14), CHIRFieldAt(fields, 15), annotationText: CHIRFieldAt(fields, 16))
+            if (!CHIRFieldAt(fields, 17).isEmpty()) {
+                def.SetSrcCodeIdentifier(CHIRFieldAt(fields, 17))
+            }
+            CHIRApplyAnnoInfo(def.GetAnnoInfo(), CHIRFieldAt(fields, 18))
             for (paramText in CHIRWireSplitList(CHIRFieldAt(fields, 6))) {
                 if (let Some(genericTy) <- (CHIRParseType(paramText, builder, customDefs) as GenericType)) {
                     def.AddGenericTypeParam(genericTy)
@@ -249,9 +254,24 @@ class CHIRDeserializerImpl {
                 }
                 let memberFields = CHIRWireSplitFields(memberText)
                 let memberTy = CHIRParseType(CHIRFieldAt(memberFields, 1), builder, customDefs)
-                def.AddInstanceVar(MemberVarInfo(CHIRFieldAt(memberFields, 0), memberTy,
+                let memberVar = MemberVarInfo(CHIRFieldAt(memberFields, 0), memberTy,
                     isStatic: CHIRWireToBool(CHIRFieldAt(memberFields, 2)),
-                    isReadOnly: CHIRWireToBool(CHIRFieldAt(memberFields, 3))))
+                    isReadOnly: CHIRWireToBool(CHIRFieldAt(memberFields, 3)),
+                    rawMangledName: CHIRFieldAt(memberFields, 4))
+                CHIRApplyAttributeInfo(memberVar.attributeInfo, CHIRFieldAt(memberFields, 5))
+                if (!CHIRFieldAt(memberFields, 6).isEmpty()) {
+                    memberVar.loc = CHIRParseDebugLocation(CHIRFieldAt(memberFields, 6))
+                }
+                CHIRApplyAnnoInfo(memberVar.annoInfo, CHIRFieldAt(memberFields, 7))
+                if (let Some(initValue) <- valuesById.get(CHIRFieldAt(memberFields, 8))) {
+                    if (let Some(initFn) <- (initValue as Function)) {
+                        memberVar.initializerFunc = initFn
+                    }
+                }
+                if (let Some(outerDef) <- customDefsById.get(CHIRFieldAt(memberFields, 9))) {
+                    memberVar.outerDef = outerDef
+                }
+                def.AddInstanceVar(memberVar)
             }
             if (let Some(classDef) <- (def as ClassDef)) {
                 if (let Some(superValue) <- customDefsById.get(CHIRFieldAt(fields, 10))) {
@@ -259,11 +279,19 @@ class CHIRDeserializerImpl {
                         classDef.SetSuperClassDef(superClass)
                     }
                 }
+                if (let Some(superTy) <- (CHIRParseType(CHIRFieldAt(fields, 23), builder, customDefs) as ClassType)) {
+                    classDef.SetSuperClassTy(superTy)
+                }
                 for (interfaceId in CHIRWireSplitList(CHIRFieldAt(fields, 11))) {
                     if (let Some(interfaceValue) <- customDefsById.get(interfaceId)) {
                         if (let Some(interfaceClass) <- (interfaceValue as ClassDef)) {
                             classDef.AddImplementedInterfaceDef(interfaceClass)
                         }
+                    }
+                }
+                for (interfaceTyText in CHIRWireSplitList(CHIRFieldAt(fields, 22))) {
+                    if (let Some(interfaceTy) <- (CHIRParseType(interfaceTyText, builder, customDefs) as ClassType)) {
+                        classDef.AddImplementedInterfaceTy(interfaceTy)
                     }
                 }
             }
@@ -283,12 +311,32 @@ class CHIRDeserializerImpl {
                     extendDef.extendedType = CHIRParseType(extendedTypeText, builder, customDefs)
                 }
             }
+            if (let Some(structDef) <- (def as StructDef)) {
+                if (!CHIRFieldAt(fields, 24).isEmpty()) {
+                    structDef.SetCStruct(CHIRWireToBool(CHIRFieldAt(fields, 24)))
+                }
+            }
             for (extendId in CHIRWireSplitList(CHIRFieldAt(fields, 12))) {
                 if (let Some(extendValue) <- customDefsById.get(extendId)) {
                     if (let Some(extendDef) <- (extendValue as ExtendDef)) {
                         def.AddExtend(extendDef)
                     }
                 }
+            }
+            for (staticVarId in CHIRWireSplitList(CHIRFieldAt(fields, 19))) {
+                if (let Some(staticVarValue) <- valuesById.get(staticVarId)) {
+                    if (let Some(staticVar) <- (staticVarValue as GlobalVar)) {
+                        def.AddStaticMemberVar(staticVar)
+                    }
+                }
+            }
+            if (let Some(initFuncValue) <- valuesById.get(CHIRFieldAt(fields, 20))) {
+                if (let Some(initFunc) <- (initFuncValue as Function)) {
+                    def.SetVarInitializationFunc(initFunc)
+                }
+            }
+            if (let Some(genericDecl) <- customDefsById.get(CHIRFieldAt(fields, 21))) {
+                def.SetGenericDecl(genericDecl)
             }
         }
     }
@@ -371,6 +419,29 @@ class CHIRDeserializerImpl {
             annotationText: CHIRFieldAt(fields, 19))
     }
 
+    private func configureExpressionPayloadLinks(): Unit {
+        for (fields in expressionRecords) {
+            let payload = CHIRWireSplitFields(CHIRFieldAt(fields, 21))
+            if (CHIRFieldAt(payload, 0) != "lambda") {
+                continue
+            }
+            if (let Some(expr) <- expressionsById.get(CHIRFieldAt(fields, 1))) {
+                if (let Some(lambdaExpr) <- (expr as Lambda)) {
+                    if (let Some(retValue) <- valuesById.get(CHIRFieldAt(payload, 6))) {
+                        if (let Some(retLocal) <- (retValue as LocalVar)) {
+                            lambdaExpr.SetReturnValue(retLocal)
+                        }
+                    }
+                    if (let Some(hostExpr) <- expressionsById.get(CHIRFieldAt(payload, 8))) {
+                        if (let Some(hostLambda) <- (hostExpr as Lambda)) {
+                            lambdaExpr.SetParamDftValHostFunc(hostLambda)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     private func configureLambdaParameters(expr: Expression, value: String): Unit {
         if (value.isEmpty()) {
             return
@@ -403,23 +474,41 @@ class CHIRDeserializerImpl {
         }
         let operands = resolveOperands(CHIRFieldAt(fields, 8))
         let blockGroups = resolveBlockGroups(CHIRFieldAt(fields, 13))
+        let successors = resolveBlocks(CHIRFieldAt(fields, 9))
+        let payload = CHIRWireSplitFields(CHIRFieldAt(fields, 21))
         if (kind == ExprKind.CONSTANT) {
             let constantTy = if (let Some(ty) <- resultTy) { ty } else { builder.context.GetInvalidTy() }
             return builder.CreateConstant(constantTy, parseLiteral(CHIRFieldAt(fields, 10)), block)
         }
+        if (let Some(concreteExpr) <- createPayloadExpression(kind, resultTy, operands, blockGroups, successors,
+            payload, block)) {
+            return concreteExpr
+        }
         if (kind == ExprKind.LAMBDA && !blockGroups.isEmpty()) {
             return createLambdaExpression(operands, blockGroups[0], block, resultTy)
         }
-        let successors = resolveBlocks(CHIRFieldAt(fields, 9))
         if (kind == ExprKind.GOTO && !successors.isEmpty()) {
             return builder.CreateGoTo(successors[0], block)
         }
         if (kind == ExprKind.BRANCH && operands.size >= 1 && successors.size >= 2) {
             return builder.CreateBranch(operands[0], successors[0], successors[1], block)
         }
+        if (kind == ExprKind.MULTIBRANCH && operands.size >= 1 && !successors.isEmpty()) {
+            let caseBlocks = blocksAfterFirst(successors)
+            let caseVals = CHIRParseUInt64List(CHIRFieldAt(payload, 1))
+            if (caseVals.size == caseBlocks.size) {
+                return builder.CreateMultiBranch(operands[0], successors[0], caseVals, caseBlocks, block)
+            }
+        }
         if (kind == ExprKind.EXIT) {
             let retValue: Option<Value> = if (operands.isEmpty()) { None } else { operands[0] }
             return builder.CreateExit(retValue, block)
+        }
+        if (kind == ExprKind.RAISE_EXCEPTION && !operands.isEmpty()) {
+            if (!successors.isEmpty()) {
+                return builder.CreateRaiseException(operands[0], successors[0], block)
+            }
+            return builder.CreateRaiseException(operands[0], block)
         }
         if (ExprKindMajor(kind) == ExprMajorKind.UNARY_EXPR && operands.size >= 1) {
             if (let Some(ty) <- resultTy) {
@@ -432,6 +521,316 @@ class CHIRDeserializerImpl {
             }
         }
         return createGenericExpression(kind, resultTy, operands, blockGroups, block)
+    }
+
+    private func createPayloadExpression(kind: ExprKind, resultTy: Option<Type>, operands: ArrayList<Value>,
+        blockGroups: ArrayList<BlockGroup>, successors: ArrayList<Block>, payload: ArrayList<String>,
+        block: Block): Option<Expression> {
+        if (payload.isEmpty()) {
+            return None
+        }
+        if (CHIRFieldAt(payload, 0).isEmpty()) {
+            return None
+        }
+        if (kind == ExprKind.BRANCH && operands.size >= 1 && successors.size >= 2 && CHIRFieldAt(payload, 0) == "branch") {
+            let branch = builder.CreateBranch(operands[0], successors[0], successors[1], block)
+            branch.SetSourceExpr(CHIRSourceExprFromIndex(CHIRSafeI64(CHIRFieldAt(payload, 1))))
+            return branch
+        }
+        if (kind == ExprKind.INT_OP_WITH_EXCEPTION && !operands.isEmpty() && successors.size >= 2) {
+            let opKind = CHIRExprKindFromIndex(CHIRSafeI64(CHIRFieldAt(payload, 1)))
+            let resultTyValue = resultTypeOrInvalid(resultTy)
+            if (operands.size >= 2) {
+                return builder.CreateBinaryIntOpWithException(resultTyValue, opKind, operands[0], operands[1],
+                    successors[0], successors[1], block)
+            }
+            return builder.CreateUnaryIntOpWithException(resultTyValue, opKind, operands[0], successors[0],
+                successors[1], block)
+        }
+        if ((kind == ExprKind.ALLOCATE || kind == ExprKind.ALLOCATE_WITH_EXCEPTION) &&
+            CHIRFieldAt(payload, 0) == "allocate") {
+            let allocatedTy = CHIRParseType(CHIRFieldAt(payload, 1), builder, customDefs)
+            if (kind == ExprKind.ALLOCATE_WITH_EXCEPTION && successors.size >= 2) {
+                return builder.CreateAllocateWithException(resultTypeOrInvalid(resultTy), allocatedTy, successors[0],
+                    successors[1], block)
+            }
+            if (kind == ExprKind.ALLOCATE) {
+                return builder.CreateAllocate(resultTypeOrInvalid(resultTy), allocatedTy, block)
+            }
+        }
+        if (kind == ExprKind.GET_ELEMENT_REF && !operands.isEmpty()) {
+            if (CHIRFieldAt(payload, 0) == "indexPath" && operands.size == 1) {
+                return builder.CreateGetElementRef(resultTypeOrInvalid(resultTy), operands[0],
+                    CHIRParseUInt64List(CHIRFieldAt(payload, 1)), block)
+            }
+            return builder.CreateDynamicElementRef(resultTypeOrInvalid(resultTy), operands[0],
+                valuesAfterFirst(operands), block)
+        }
+        if (kind == ExprKind.GET_ELEMENT_BY_NAME && !operands.isEmpty() && CHIRFieldAt(payload, 0) == "namePath") {
+            return builder.CreateGetElementByName(resultTypeOrInvalid(resultTy), operands[0],
+                CHIRWireSplitList(CHIRFieldAt(payload, 1)), block)
+        }
+        if (kind == ExprKind.STORE_ELEMENT_REF && operands.size >= 2 && CHIRFieldAt(payload, 0) == "indexPath") {
+            return builder.CreateStoreElementRef(operands[0], operands[1], CHIRParseUInt64List(CHIRFieldAt(payload, 1)),
+                block)
+        }
+        if (kind == ExprKind.STORE_ELEMENT_BY_NAME && operands.size >= 2 && CHIRFieldAt(payload, 0) == "namePath") {
+            return builder.CreateStoreElementByName(operands[0], operands[1], CHIRWireSplitList(CHIRFieldAt(payload, 1)),
+                block)
+        }
+        if ((kind == ExprKind.APPLY || kind == ExprKind.APPLY_WITH_EXCEPTION) && !operands.isEmpty() &&
+            CHIRFieldAt(payload, 0) == "apply") {
+            return createApplyExpression(kind, resultTy, operands, successors, payload, block)
+        }
+        if ((kind == ExprKind.INVOKE || kind == ExprKind.INVOKESTATIC || kind == ExprKind.INVOKE_WITH_EXCEPTION ||
+            kind == ExprKind.INVOKESTATIC_WITH_EXCEPTION) && !operands.isEmpty() && CHIRFieldAt(payload, 0) == "invoke") {
+            return createInvokeExpression(kind, resultTy, operands, successors, payload, block)
+        }
+        if (kind == ExprKind.INSTANCEOF && !operands.isEmpty() && CHIRFieldAt(payload, 0) == "instanceOf") {
+            return builder.CreateInstanceOf(resultTypeOrInvalid(resultTy), operands[0],
+                CHIRParseType(CHIRFieldAt(payload, 1), builder, customDefs), block)
+        }
+        if (kind == ExprKind.GET_INSTANTIATE_VALUE && !operands.isEmpty() && CHIRFieldAt(payload, 0) == "instantiate") {
+            return builder.CreateGetInstantiateValue(resultTypeOrInvalid(resultTy), operands[0],
+                CHIRParseTypeList(CHIRFieldAt(payload, 1), builder, customDefs), block)
+        }
+        if (kind == ExprKind.GET_RTTI_STATIC && CHIRFieldAt(payload, 0) == "rttiStatic") {
+            return builder.CreateGetRTTIStatic(resultTypeOrInvalid(resultTy),
+                CHIRParseType(CHIRFieldAt(payload, 1), builder, customDefs), block)
+        }
+        if (kind == ExprKind.FIELD && !operands.isEmpty() && CHIRFieldAt(payload, 0) == "indexPath") {
+            return builder.CreateField(resultTypeOrInvalid(resultTy), operands[0],
+                CHIRParseUInt64List(CHIRFieldAt(payload, 1)), block)
+        }
+        if (kind == ExprKind.FIELD_BY_NAME && !operands.isEmpty() && CHIRFieldAt(payload, 0) == "namePath") {
+            return builder.CreateFieldByName(resultTypeOrInvalid(resultTy), operands[0],
+                CHIRWireSplitList(CHIRFieldAt(payload, 1)), block)
+        }
+        if ((kind == ExprKind.RAW_ARRAY_ALLOCATE || kind == ExprKind.RAW_ARRAY_ALLOCATE_WITH_EXCEPTION) &&
+            !operands.isEmpty() && CHIRFieldAt(payload, 0) == "rawArrayAllocate") {
+            let elementTy = CHIRParseType(CHIRFieldAt(payload, 1), builder, customDefs)
+            if (kind == ExprKind.RAW_ARRAY_ALLOCATE_WITH_EXCEPTION && successors.size >= 2) {
+                return builder.CreateRawArrayAllocateWithException(resultTypeOrInvalid(resultTy), elementTy, operands[0],
+                    successors[0], successors[1], block)
+            }
+            if (kind == ExprKind.RAW_ARRAY_ALLOCATE) {
+                return builder.CreateRawArrayAllocate(resultTypeOrInvalid(resultTy), elementTy, operands[0], block)
+            }
+        }
+        if ((kind == ExprKind.INTRINSIC || kind == ExprKind.INTRINSIC_WITH_EXCEPTION) &&
+            CHIRFieldAt(payload, 0) == "intrinsic") {
+            return createIntrinsicExpression(kind, resultTy, operands, successors, payload, block)
+        }
+        if (kind == ExprKind.DEBUGEXPR && !operands.isEmpty() && CHIRFieldAt(payload, 0) == "debug") {
+            return builder.CreateDebug(resultTypeOrInvalid(resultTy), operands[0], CHIRFieldAt(payload, 1), block)
+        }
+        if ((kind == ExprKind.SPAWN || kind == ExprKind.SPAWN_WITH_EXCEPTION) && !operands.isEmpty() &&
+            CHIRFieldAt(payload, 0) == "spawn") {
+            return createSpawnExpression(kind, resultTy, operands, successors, payload, block)
+        }
+        if ((kind == ExprKind.FORIN_RANGE || kind == ExprKind.FORIN_ITER || kind == ExprKind.FORIN_CLOSED_RANGE) &&
+            operands.size >= 2 && blockGroups.size >= 3) {
+            return createForInExpression(kind, resultTy, operands, blockGroups, block)
+        }
+        if (kind == ExprKind.LAMBDA && !blockGroups.isEmpty()) {
+            return createLambdaExpressionFromPayload(operands, blockGroups[0], block, resultTy, payload)
+        }
+        return None
+    }
+
+    private func createApplyExpression(kind: ExprKind, resultTy: Option<Type>, operands: ArrayList<Value>,
+        successors: ArrayList<Block>, payload: ArrayList<String>, block: Block): Option<Expression> {
+        let callContext = FuncCallContext(args: valuesAfterFirst(operands),
+            instTypeArgs: CHIRParseTypeList(CHIRFieldAt(payload, 1), builder, customDefs),
+            thisType: parseOptionalType(CHIRFieldAt(payload, 2)))
+        if (kind == ExprKind.APPLY_WITH_EXCEPTION && successors.size >= 2) {
+            return builder.CreateApplyWithException(resultTypeOrInvalid(resultTy), operands[0], callContext,
+                successors[0], successors[1], block)
+        }
+        if (kind == ExprKind.APPLY) {
+            let applyExpr = builder.CreateApply(resultTypeOrInvalid(resultTy), operands[0], callContext, block)
+            if (CHIRWireToBool(CHIRFieldAt(payload, 3))) {
+                applyExpr.SetSuperCall()
+            }
+            return applyExpr
+        }
+        return None
+    }
+
+    private func createInvokeExpression(kind: ExprKind, resultTy: Option<Type>, operands: ArrayList<Value>,
+        successors: ArrayList<Block>, payload: ArrayList<String>, block: Block): Option<Expression> {
+        let funcContext = FuncCallContext(args: valuesAfterFirst(operands),
+            instTypeArgs: CHIRParseTypeList(CHIRFieldAt(payload, 1), builder, customDefs),
+            thisType: parseOptionalType(CHIRFieldAt(payload, 2)))
+        let methodContext = FuncSigInfo(parseFuncTypeOrDefault(CHIRFieldAt(payload, 4)), funcName: CHIRFieldAt(payload, 3),
+            genericTypeParams: CHIRParseGenericTypeList(CHIRFieldAt(payload, 5), builder, customDefs))
+        let invokeContext = InvokeCallContext(operands[0], funcContext, methodContext)
+        if (kind == ExprKind.INVOKESTATIC) {
+            let invokeExpr = builder.CreateInvokeStatic(resultTypeOrInvalid(resultTy), invokeContext, block)
+            applyVirtualMethodOffset(invokeExpr, CHIRFieldAt(payload, 6))
+            return invokeExpr
+        }
+        if (kind == ExprKind.INVOKE) {
+            let invokeExpr = builder.CreateInvoke(resultTypeOrInvalid(resultTy), invokeContext, block)
+            applyVirtualMethodOffset(invokeExpr, CHIRFieldAt(payload, 6))
+            return invokeExpr
+        }
+        if (kind == ExprKind.INVOKESTATIC_WITH_EXCEPTION && successors.size >= 2) {
+            let invokeExpr = builder.CreateInvokeStaticWithException(resultTypeOrInvalid(resultTy), invokeContext,
+                successors[0], successors[1], block)
+            applyVirtualMethodOffset(invokeExpr, CHIRFieldAt(payload, 6))
+            return invokeExpr
+        }
+        if (kind == ExprKind.INVOKE_WITH_EXCEPTION && successors.size >= 2) {
+            let invokeExpr = builder.CreateInvokeWithException(resultTypeOrInvalid(resultTy), invokeContext,
+                successors[0], successors[1], block)
+            applyVirtualMethodOffset(invokeExpr, CHIRFieldAt(payload, 6))
+            return invokeExpr
+        }
+        return None
+    }
+
+    private func createIntrinsicExpression(kind: ExprKind, resultTy: Option<Type>, operands: ArrayList<Value>,
+        successors: ArrayList<Block>, payload: ArrayList<String>, block: Block): Option<Expression> {
+        let callContext = IntrisicCallContext(kind: CHIRIntrinsicKindFromName(CHIRFieldAt(payload, 1)),
+            args: operands, instTypeArgs: CHIRParseTypeList(CHIRFieldAt(payload, 2), builder, customDefs))
+        if (kind == ExprKind.INTRINSIC_WITH_EXCEPTION && successors.size >= 2) {
+            return builder.CreateIntrinsicWithException(resultTypeOrInvalid(resultTy), callContext, successors[0],
+                successors[1], block)
+        }
+        if (kind == ExprKind.INTRINSIC) {
+            return builder.CreateIntrinsic(resultTypeOrInvalid(resultTy), callContext, block)
+        }
+        return None
+    }
+
+    private func createSpawnExpression(kind: ExprKind, resultTy: Option<Type>, operands: ArrayList<Value>,
+        successors: ArrayList<Block>, payload: ArrayList<String>, block: Block): Option<Expression> {
+        if (kind == ExprKind.SPAWN_WITH_EXCEPTION && successors.size >= 2) {
+            let spawnExpr = if (operands.size >= 2) {
+                builder.CreateSpawnWithException(resultTypeOrInvalid(resultTy), operands[0], operands[1],
+                    successors[0], successors[1], block)
+            } else {
+                builder.CreateSpawnWithException(resultTypeOrInvalid(resultTy), operands[0], successors[0],
+                    successors[1], block)
+            }
+            applySpawnExecuteClosure(spawnExpr, CHIRFieldAt(payload, 1))
+            return spawnExpr
+        }
+        if (kind == ExprKind.SPAWN) {
+            let spawnExpr = if (operands.size >= 2) {
+                builder.CreateSpawn(resultTypeOrInvalid(resultTy), operands[0], operands[1], block)
+            } else {
+                builder.CreateSpawn(resultTypeOrInvalid(resultTy), operands[0], block)
+            }
+            applySpawnExecuteClosure(spawnExpr, CHIRFieldAt(payload, 1))
+            return spawnExpr
+        }
+        return None
+    }
+
+    private func createForInExpression(kind: ExprKind, resultTy: Option<Type>, operands: ArrayList<Value>,
+        blockGroups: ArrayList<BlockGroup>, block: Block): Option<Expression> {
+        let forInExpr = if (kind == ExprKind.FORIN_RANGE) {
+            builder.CreateForInRange(resultTypeOrInvalid(resultTy), operands[0], operands[1], block)
+        } else if (kind == ExprKind.FORIN_ITER) {
+            builder.CreateForInIter(resultTypeOrInvalid(resultTy), operands[0], operands[1], block)
+        } else {
+            builder.CreateForInClosedRange(resultTypeOrInvalid(resultTy), operands[0], operands[1], block)
+        }
+        forInExpr.InitBlockGroups(blockGroups[0], blockGroups[1], blockGroups[2])
+        return forInExpr
+    }
+
+    private func createLambdaExpressionFromPayload(operands: ArrayList<Value>, body: BlockGroup, block: Block,
+        resultTy: Option<Type>, payload: ArrayList<String>): Option<Expression> {
+        if (CHIRFieldAt(payload, 0) != "lambda") {
+            return None
+        }
+        if (let Some(funcTy) <- (CHIRParseType(CHIRFieldAt(payload, 1), builder, customDefs) as FuncType)) {
+            let lambdaExpr = builder.CreateLambda(resultTypeOrInvalid(resultTy), funcTy, block,
+                isLocalFunc: CHIRWireToBool(CHIRFieldAt(payload, 2)), identifier: CHIRFieldAt(payload, 3),
+                srcCodeIdentifier: CHIRFieldAt(payload, 4),
+                genericTypeParams: CHIRParseGenericTypeList(CHIRFieldAt(payload, 5), builder, customDefs))
+            for (operand in operands) {
+                lambdaExpr.AppendOperand(operand)
+            }
+            lambdaExpr.InitBody(body)
+            if (CHIRWireToBool(CHIRFieldAt(payload, 7))) {
+                lambdaExpr.SetCompileTimeValue()
+            }
+            return lambdaExpr
+        }
+        return None
+    }
+
+    private func applyVirtualMethodOffset(expr: DynamicDispatch, value: String): Unit {
+        if (!value.isEmpty()) {
+            expr.SetVirtualMethodOffset(CHIRSafeU64(value))
+        }
+    }
+
+    private func applyVirtualMethodOffset(expr: DynamicDispatchWithException, value: String): Unit {
+        if (!value.isEmpty()) {
+            expr.SetVirtualMethodOffset(CHIRSafeU64(value))
+        }
+    }
+
+    private func applySpawnExecuteClosure(expr: Spawn, value: String): Unit {
+        if (let Some(fnValue) <- valuesById.get(value)) {
+            if (let Some(fn) <- (fnValue as Function)) {
+                expr.SetExecuteClosure(fn)
+            }
+        }
+    }
+
+    private func applySpawnExecuteClosure(expr: SpawnWithException, value: String): Unit {
+        if (let Some(fnValue) <- valuesById.get(value)) {
+            if (let Some(fn) <- (fnValue as Function)) {
+                expr.SetExecuteClosure(fn)
+            }
+        }
+    }
+
+    private func resultTypeOrInvalid(resultTy: Option<Type>): Type {
+        if (let Some(ty) <- resultTy) {
+            return ty
+        }
+        return builder.context.GetInvalidTy()
+    }
+
+    private func parseOptionalType(value: String): Option<Type> {
+        if (value.isEmpty()) {
+            return None
+        }
+        return CHIRParseType(value, builder, customDefs)
+    }
+
+    private func parseFuncTypeOrDefault(value: String): FuncType {
+        if (let Some(funcTy) <- (CHIRParseType(value, builder, customDefs) as FuncType)) {
+            return funcTy
+        }
+        return builder.context.GetFuncTy(ArrayList<Type>(), builder.context.GetInvalidTy())
+    }
+
+    private func valuesAfterFirst(values: ArrayList<Value>): ArrayList<Value> {
+        let out = ArrayList<Value>()
+        var idx: Int64 = 1
+        while (idx < values.size) {
+            out.add(values[idx])
+            idx++
+        }
+        return out
+    }
+
+    private func blocksAfterFirst(values: ArrayList<Block>): ArrayList<Block> {
+        let out = ArrayList<Block>()
+        var idx: Int64 = 1
+        while (idx < values.size) {
+            out.add(values[idx])
+            idx++
+        }
+        return out
     }
 
     private func resolveOperands(value: String): ArrayList<Value> {
