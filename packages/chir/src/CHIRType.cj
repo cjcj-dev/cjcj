@@ -106,6 +106,52 @@ public class CHIRType {
         this.chirTypeCache = typeCache
     }
 
+    public func FillGenericArgType(ty: AstGenericsTy): Unit {
+        let cachedType = chirTypeCache.TryGetType(ty) ??
+            throw IllegalStateException("generic AST type has not been translated: ${ty.String()}")
+        if (let Some(genericType) <- (cachedType as GenericType)) {
+            let chirUpperBounds = ArrayList<Type>()
+            for (argTy in ty.upperBounds) {
+                if (argTy.IsGeneric()) {
+                    throw IllegalStateException("generic upper bound should have been resolved before FillGenericArgType")
+                }
+                chirUpperBounds.add(TranslateType(argTy))
+            }
+            genericType.SetUpperBounds(chirUpperBounds)
+            return
+        }
+        throw IllegalStateException("translated generic AST type is not CHIR GenericType")
+    }
+
+    public func SetGlobalNominalCache(decl: AstDecl, def: CustomTypeDef): Unit {
+        chirTypeCache.SetNominal(decl, def)
+    }
+
+    public func GetGlobalNominalCache(decl: AstDecl): CustomTypeDef {
+        return chirTypeCache.TryGetNominal(decl) ??
+            throw IllegalStateException("nominal declaration is not registered in CHIRType cache: ${decl.identifier.Val()}")
+    }
+
+    public func TryGetGlobalNominalCache(decl: AstDecl): Option<CustomTypeDef> {
+        return chirTypeCache.TryGetNominal(decl)
+    }
+
+    public func Has(decl: AstDecl): Bool {
+        return chirTypeCache.TryGetNominal(decl).isSome()
+    }
+
+    public func GetAllTypeDef(): ArrayList<CHIRNominalCacheEntry> {
+        return chirTypeCache.globalNominalCache
+    }
+
+    public func GetTypeMap(): ArrayList<CHIRTypeCacheEntry> {
+        return chirTypeCache.typeMap
+    }
+
+    public func GetGlobalNominalCache(): ArrayList<CHIRNominalCacheEntry> {
+        return chirTypeCache.globalNominalCache
+    }
+
     public func TranslateType(ty: AstTy): Type {
         if (let Some(cached) <- chirTypeCache.TryGetType(ty)) {
             return cached
@@ -130,11 +176,16 @@ public class CHIRType {
             case AstTypeKind.TYPE_BOOLEAN => builder.context.GetBoolTy()
             case AstTypeKind.TYPE_TUPLE => TranslateTupleType(RequireTupleTy(ty))
             case AstTypeKind.TYPE_FUNC => TranslateFuncType(RequireFuncTy(ty))
+            case AstTypeKind.TYPE_ENUM => TranslateEnumType(RequireEnumTy(ty))
+            case AstTypeKind.TYPE_STRUCT => TranslateStructType(RequireStructTy(ty))
+            case AstTypeKind.TYPE_CLASS => TranslateClassType(RequireClassTy(ty))
+            case AstTypeKind.TYPE_INTERFACE => TranslateInterfaceType(RequireInterfaceTy(ty))
             case AstTypeKind.TYPE_ARRAY => TranslateArrayType(RequireArrayTy(ty))
             case AstTypeKind.TYPE_VARRAY => TranslateVArrayType(RequireVArrayTy(ty))
             case AstTypeKind.TYPE_POINTER => TranslateCPointerType(RequirePointerTy(ty))
             case AstTypeKind.TYPE_NOTHING => builder.context.GetNothingType()
             case AstTypeKind.TYPE_CSTRING => builder.context.GetCStringTy()
+            case AstTypeKind.TYPE_GENERICS => TranslateGenericType(RequireGenericsTy(ty))
             case _ => throw IllegalArgumentException("unsupported AST type kind for CHIRType.TranslateType: ${ty.String()}")
         }
 
@@ -167,6 +218,38 @@ public class CHIRType {
             isCFunc: fnTy.IsCFunc())
     }
 
+    private func TranslateStructType(structTy: AstStructTy): Type {
+        let typeArgs = TranslateTypeArgs(structTy.typeArgs)
+        let def = RequireStructDef(GetGlobalNominalCache(RequireStructDecl(structTy)))
+        let structType = builder.context.GetStructTy(def, typeArgs)
+        chirTypeCache.SetType(structTy, structType)
+        return structType
+    }
+
+    private func TranslateClassType(classTy: AstClassTy): Type {
+        let typeArgs = TranslateTypeArgs(classTy.typeArgs)
+        let def = RequireClassDef(GetGlobalNominalCache(RequireClassDecl(classTy)))
+        let classType = builder.context.GetClassTy(def, typeArgs)
+        chirTypeCache.SetType(classTy, classType)
+        return classType
+    }
+
+    private func TranslateInterfaceType(interfaceTy: AstInterfaceTy): Type {
+        let typeArgs = TranslateTypeArgs(interfaceTy.typeArgs)
+        let def = RequireClassDef(GetGlobalNominalCache(RequireInterfaceDecl(interfaceTy)))
+        let classType = builder.context.GetClassTy(def, typeArgs)
+        chirTypeCache.SetType(interfaceTy, classType)
+        return classType
+    }
+
+    private func TranslateEnumType(enumTy: AstEnumTy): Type {
+        let typeArgs = TranslateTypeArgs(enumTy.typeArgs)
+        let def = RequireEnumDef(GetGlobalNominalCache(RequireEnumDecl(enumTy)))
+        let enumType = builder.context.GetEnumTy(def, typeArgs)
+        chirTypeCache.SetType(enumTy, enumType)
+        return enumType
+    }
+
     private func TranslateArrayType(arrayTy: AstArrayTy): Type {
         if (arrayTy.typeArgs.isEmpty()) {
             throw IllegalArgumentException("RawArray AST type has no element type")
@@ -192,6 +275,22 @@ public class CHIRType {
         }
         let elementTy = TranslateType(pointerTy.typeArgs[0])
         return builder.context.GetCPointerTy(elementTy)
+    }
+
+    private func TranslateGenericType(genericTy: AstGenericsTy): Type {
+        let genericDecl = RequireGenericDecl(genericTy)
+        if (genericDecl.mangledName.isEmpty()) {
+            throw IllegalStateException("generic declaration has no mangledName: ${genericTy.name}")
+        }
+        return builder.context.GetGenericTy(genericDecl.mangledName, genericTy.name)
+    }
+
+    private func TranslateTypeArgs(astArgs: ArrayList<AstTy>): ArrayList<Type> {
+        let typeArgs = ArrayList<Type>()
+        for (arg in astArgs) {
+            typeArgs.add(TranslateType(arg))
+        }
+        return typeArgs
     }
 
     private func RequireTupleTy(ty: AstTy): AstTupleTy {
@@ -227,5 +326,96 @@ public class CHIRType {
             return pointerTy
         }
         throw IllegalArgumentException("expected PointerTy, got ${ty.String()}")
+    }
+
+    private func RequireClassTy(ty: AstTy): AstClassTy {
+        if (let Some(classTy) <- (ty as AstClassTy)) {
+            return classTy
+        }
+        throw IllegalArgumentException("expected ClassTy, got ${ty.String()}")
+    }
+
+    private func RequireStructTy(ty: AstTy): AstStructTy {
+        if (let Some(structTy) <- (ty as AstStructTy)) {
+            return structTy
+        }
+        throw IllegalArgumentException("expected StructTy, got ${ty.String()}")
+    }
+
+    private func RequireInterfaceTy(ty: AstTy): AstInterfaceTy {
+        if (let Some(interfaceTy) <- (ty as AstInterfaceTy)) {
+            return interfaceTy
+        }
+        throw IllegalArgumentException("expected InterfaceTy, got ${ty.String()}")
+    }
+
+    private func RequireEnumTy(ty: AstTy): AstEnumTy {
+        if (let Some(enumTy) <- (ty as AstEnumTy)) {
+            return enumTy
+        }
+        throw IllegalArgumentException("expected EnumTy, got ${ty.String()}")
+    }
+
+    private func RequireGenericsTy(ty: AstTy): AstGenericsTy {
+        if (let Some(genericTy) <- (ty as AstGenericsTy)) {
+            return genericTy
+        }
+        throw IllegalArgumentException("expected GenericsTy, got ${ty.String()}")
+    }
+
+    private func RequireClassDecl(ty: AstClassTy): AstClassDecl {
+        if (let Some(decl) <- ty.declPtr) {
+            return decl
+        }
+        throw IllegalStateException("ClassTy has no declPtr: ${ty.String()}")
+    }
+
+    private func RequireStructDecl(ty: AstStructTy): AstStructDecl {
+        if (let Some(decl) <- ty.declPtr) {
+            return decl
+        }
+        throw IllegalStateException("StructTy has no declPtr: ${ty.String()}")
+    }
+
+    private func RequireInterfaceDecl(ty: AstInterfaceTy): AstInterfaceDecl {
+        if (let Some(decl) <- ty.declPtr) {
+            return decl
+        }
+        throw IllegalStateException("InterfaceTy has no declPtr: ${ty.String()}")
+    }
+
+    private func RequireEnumDecl(ty: AstEnumTy): AstEnumDecl {
+        if (let Some(decl) <- ty.declPtr) {
+            return decl
+        }
+        throw IllegalStateException("EnumTy has no declPtr: ${ty.String()}")
+    }
+
+    private func RequireGenericDecl(ty: AstGenericsTy): AstGenericParamDecl {
+        if (let Some(decl) <- ty.decl) {
+            return decl
+        }
+        throw IllegalStateException("GenericsTy has no decl: ${ty.String()}")
+    }
+
+    private func RequireClassDef(def: CustomTypeDef): ClassDef {
+        if (let Some(classDef) <- (def as ClassDef)) {
+            return classDef
+        }
+        throw IllegalStateException("nominal cache entry is not a ClassDef")
+    }
+
+    private func RequireStructDef(def: CustomTypeDef): StructDef {
+        if (let Some(structDef) <- (def as StructDef)) {
+            return structDef
+        }
+        throw IllegalStateException("nominal cache entry is not a StructDef")
+    }
+
+    private func RequireEnumDef(def: CustomTypeDef): EnumDef {
+        if (let Some(enumDef) <- (def as EnumDef)) {
+            return enumDef
+        }
+        throw IllegalStateException("nominal cache entry is not an EnumDef")
     }
 }

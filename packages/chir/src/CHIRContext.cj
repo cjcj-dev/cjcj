@@ -222,13 +222,17 @@ public class CHIRContext {
     }
 
     public func GetGenericTy(name: String): GenericType {
+        return GetGenericTy(name, name)
+    }
+
+    public func GetGenericTy(name: String, srcCodeIdentifier: String): GenericType {
         let key = "generic:" + name
         if (let Some(cached) <- typeCache.get(key)) {
             if (let Some(found) <- (cached as GenericType)) {
                 return found
             }
         }
-        let ty = GenericType(name)
+        let ty = GenericType(name, srcCodeIdentifier)
         typeCache[key] = ty
         return ty
     }
