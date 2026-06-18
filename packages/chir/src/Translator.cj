@@ -41,8 +41,11 @@ import cangjie_compiler::ast.TokenKind as AstTokenKind
 import cangjie_compiler::ast.TokenKindValue as AstTokenKindValue
 import cangjie_compiler::ast.Ty as AstTy
 import cangjie_compiler::ast.TupleLit as AstTupleLit
+import cangjie_compiler::ast.TuplePattern as AstTuplePattern
+import cangjie_compiler::ast.TypeConvExpr as AstTypeConvExpr
 import cangjie_compiler::ast.UnaryExpr as AstUnaryExpr
 import cangjie_compiler::ast.VarDecl as AstVarDecl
+import cangjie_compiler::ast.VarWithPatternDecl as AstVarWithPatternDecl
 import cangjie_compiler::ast.VarOrEnumPattern as AstVarOrEnumPattern
 import cangjie_compiler::ast.VarPattern as AstVarPattern
 import cangjie_compiler::ast.WildcardPattern as AstWildcardPattern
@@ -114,6 +117,8 @@ public class Translator {
             case ASTKind.ARRAY_EXPR => trans.Visit(RequireNodeAsArrayExpr(nodePtr))
             case ASTKind.TUPLE_LIT => trans.Visit(RequireNodeAsTupleLit(nodePtr))
             case ASTKind.SUBSCRIPT_EXPR => trans.Visit(RequireNodeAsSubscriptExpr(nodePtr))
+            case ASTKind.TYPE_CONV_EXPR => trans.Visit(RequireNodeAsTypeConvExpr(nodePtr))
+            case ASTKind.VAR_WITH_PATTERN_DECL => trans.Visit(RequireNodeAsVarWithPatternDecl(nodePtr))
             case _ => throw IllegalArgumentException(
                 "not yet ported in faithful AST2CHIR: ${ASTKindName(nodePtr.astKind)}")
         }
@@ -288,6 +293,15 @@ public class Translator {
 
     public func Visit(expr: AstCallExpr): Option<Value> {
         let calleeDecl = expr.resolvedFunction ?? ResolveCalleeFromBase(expr)
+        if (calleeDecl.TestAttr(AstAttribute.ENUM_CONSTRUCTOR)) {
+            return TranslateEnumCtorCall(expr, calleeDecl)
+        }
+        if (IsStructOrClassCtorCall(expr, calleeDecl)) {
+            return TranslateStructOrClassCtorCall(expr, calleeDecl)
+        }
+        if (IsInstanceMember(calleeDecl) && !calleeDecl.TestAttr(AstAttribute.STATIC)) {
+            throw IllegalArgumentException("not yet ported in faithful AST2CHIR: member function call")
+        }
         let callee = globalSymbolTable.Get(calleeDecl)
         let argValues = ArrayList<Value>()
         for (arg in expr.args) {
@@ -538,6 +552,25 @@ public class Translator {
             return TranslateVArrayAccess(expr)
         }
         throw IllegalArgumentException("not yet ported in faithful AST2CHIR: non-tuple/non-VArray subscript")
+    }
+
+    public func Visit(expr: AstTypeConvExpr): Option<Value> {
+        let operand = Translator.TranslateASTNode(RequireExpr(expr.expr, "type conversion operand"), this) ??
+            throw IllegalStateException("faithful AST2CHIR type conversion operand produced no value")
+        return RequireResult(builder.CreateTypeCast(chirTy.TranslateType(RequireAstTy(expr)), operand, CurrentBlock()))
+    }
+
+    public func Visit(decl: AstVarWithPatternDecl): Option<Value> {
+        if (currentBlock.isNone()) {
+            return globalSymbolTable.TryGet(decl)
+        }
+        let initValue: Option<Value> = if (let Some(initializer) <- decl.initializer) {
+            Translator.TranslateASTNode(initializer, this)
+        } else {
+            None
+        }
+        FlattenVarWithPatternDecl(RequirePattern(decl.irrefutablePattern, "var-with-pattern pattern"), initValue)
+        return None
     }
 
     private func TranslateClassLikeDecl(def: ClassDef, decl: AstClassLikeDecl): Unit {
@@ -882,6 +915,132 @@ public class Translator {
             CurrentBlock()))
     }
 
+    private func TranslateEnumCtorCall(expr: AstCallExpr, calleeDecl: AstFuncDecl): Value {
+        let enumId = GetEnumCtorId(calleeDecl)
+        let args = ArrayList<Value>()
+        args.add(RequireResult(builder.CreateConstant(builder.context.GetUInt64Ty(), IntLiteral(enumId),
+            CurrentBlock())))
+        for (arg in expr.args) {
+            if (let Some(argExpr) <- arg.expr) {
+                let value = Translator.TranslateASTNode(argExpr, this) ??
+                    throw IllegalStateException("faithful AST2CHIR enum ctor arg produced no value")
+                args.add(value)
+            }
+        }
+        return RequireResult(builder.CreateTuple(chirTy.TranslateType(RequireAstTy(expr)), args, CurrentBlock()))
+    }
+
+    private func TranslateStructOrClassCtorCall(expr: AstCallExpr, calleeDecl: AstFuncDecl): Value {
+        if (IsSuperOrThisCtorCall(expr)) {
+            throw IllegalArgumentException("not yet ported in faithful AST2CHIR: this/super constructor call")
+        }
+        let thisTy = chirTy.TranslateType(RequireAstTy(expr)).StripAllRefs()
+        let thisRefTy = builder.context.GetRefTy(thisTy)
+        let thisObj = RequireResult(builder.CreateAllocate(thisRefTy, thisTy, CurrentBlock()))
+        let args = ArrayList<Value>()
+        args.add(thisObj)
+        for (arg in expr.args) {
+            if (let Some(argExpr) <- arg.expr) {
+                let value = Translator.TranslateASTNode(argExpr, this) ??
+                    throw IllegalStateException("faithful AST2CHIR constructor arg produced no value")
+                args.add(value)
+            }
+        }
+        let callee = globalSymbolTable.Get(calleeDecl)
+        builder.CreateApply(builder.context.GetUnitTy(), callee, FuncCallContext(args: args, thisType: thisRefTy),
+            CurrentBlock())
+        if (let Some(outerDecl) <- calleeDecl.outerDecl) {
+            if (outerDecl.astKind == ASTKind.STRUCT_DECL) {
+                return RequireResult(builder.CreateLoad(thisTy, thisObj, CurrentBlock()))
+            }
+        }
+        return thisObj
+    }
+
+    private func IsStructOrClassCtorCall(expr: AstCallExpr, calleeDecl: AstFuncDecl): Bool {
+        let _ = expr
+        if (!calleeDecl.TestAttr(AstAttribute.CONSTRUCTOR) || calleeDecl.TestAttr(AstAttribute.STATIC)) {
+            return false
+        }
+        if (let Some(outerDecl) <- calleeDecl.outerDecl) {
+            return outerDecl.astKind == ASTKind.STRUCT_DECL || outerDecl.astKind == ASTKind.CLASS_DECL
+        }
+        return false
+    }
+
+    private func IsSuperOrThisCtorCall(expr: AstCallExpr): Bool {
+        if (let Some(base) <- expr.baseFunc) {
+            if (let Some(refExpr) <- (base as AstRefExpr)) {
+                return refExpr.isThis || refExpr.isSuper
+            }
+        }
+        return false
+    }
+
+    private func GetEnumCtorId(constructor: AstDecl): Int64 {
+        let outer = constructor.outerDecl ??
+            throw IllegalStateException("faithful AST2CHIR enum constructor has no outer enum")
+        let enumDecl = (outer as AstEnumDecl) ??
+            throw IllegalStateException("faithful AST2CHIR enum constructor outer is not enum")
+        var idx: Int64 = 0
+        for (ctor in enumDecl.constructors) {
+            if (SameTranslatorAstDecl(ctor, constructor)) {
+                return idx
+            }
+            idx++
+        }
+        throw IllegalStateException("faithful AST2CHIR enum constructor not found: ${constructor.identifier.Val()}")
+    }
+
+    private func FlattenVarWithPatternDecl(pattern: AstPattern, initValue: Option<Value>): Unit {
+        if (let Some(varPattern) <- (pattern as AstVarPattern)) {
+            HandleVarPatternDecl(varPattern, initValue)
+            return
+        }
+        if (let Some(tuplePattern) <- (pattern as AstTuplePattern)) {
+            HandleTuplePatternDecl(tuplePattern, initValue)
+            return
+        }
+        if (let Some(enumPattern) <- (pattern as AstEnumPattern)) {
+            if (!enumPattern.patterns.isEmpty()) {
+                throw IllegalArgumentException("not yet ported in faithful AST2CHIR: enum var-with-pattern payload")
+            }
+            return
+        }
+        if (let Some(_) <- (pattern as AstWildcardPattern)) {
+            return
+        }
+        throw IllegalArgumentException(
+            "not yet ported in faithful AST2CHIR var-with-pattern: ${ASTKindName(pattern.astKind)}")
+    }
+
+    private func HandleVarPatternDecl(pattern: AstVarPattern, initValue: Option<Value>): Unit {
+        let varDecl = pattern.varDecl ??
+            throw IllegalStateException("faithful AST2CHIR var pattern has no VarDecl")
+        let valueTy = chirTy.TranslateType(RequireAstTy(varDecl))
+        let slot = RequireResult(builder.CreateAllocate(builder.context.GetRefTy(valueTy), valueTy, CurrentBlock()))
+        slot.SetSrcCodeIdentifier(varDecl.identifier.Val())
+        localValSymbolTable.Set(varDecl, slot)
+        if (let Some(value) <- initValue) {
+            builder.CreateStore(CastValueIfNeeded(value, valueTy), slot, CurrentBlock())
+        }
+    }
+
+    private func HandleTuplePatternDecl(pattern: AstTuplePattern, initValue: Option<Value>): Unit {
+        var idx: Int64 = 0
+        for (subPattern in pattern.patterns) {
+            var fieldValue: Option<Value> = None
+            if (let Some(value) <- initValue) {
+                let path = ArrayList<UInt64>()
+                path.add(UInt64(idx))
+                fieldValue = RequireResult(builder.CreateField(chirTy.TranslateType(RequireAstTy(subPattern)),
+                    GetDerefedValue(value), path, CurrentBlock()))
+            }
+            FlattenVarWithPatternDecl(subPattern, fieldValue)
+            idx++
+        }
+    }
+
     private func TranslateTrivialAssign(expr: AstAssignExpr, leftExpr: AstExpr, rightExpr: AstExpr): Option<Value> {
         let _ = expr
         var rhsValue: Value
@@ -1213,6 +1372,10 @@ public class Translator {
         return value.expr ?? throw IllegalStateException("faithful AST2CHIR missing ${name}")
     }
 
+    private func RequirePattern(value: Option<AstPattern>, name: String): AstPattern {
+        return value ?? throw IllegalStateException("faithful AST2CHIR missing ${name}")
+    }
+
     private func RequireStructDef(def: CustomTypeDef): StructDef {
         return (def as StructDef) ?? throw IllegalStateException("faithful AST2CHIR expected StructDef")
     }
@@ -1340,5 +1503,14 @@ public class Translator {
 
     private static func RequireNodeAsSubscriptExpr(node: AstNode): AstSubscriptExpr {
         return (node as AstSubscriptExpr) ?? throw IllegalArgumentException("ASTKind cast failed: SUBSCRIPT_EXPR")
+    }
+
+    private static func RequireNodeAsTypeConvExpr(node: AstNode): AstTypeConvExpr {
+        return (node as AstTypeConvExpr) ?? throw IllegalArgumentException("ASTKind cast failed: TYPE_CONV_EXPR")
+    }
+
+    private static func RequireNodeAsVarWithPatternDecl(node: AstNode): AstVarWithPatternDecl {
+        return (node as AstVarWithPatternDecl) ??
+            throw IllegalArgumentException("ASTKind cast failed: VAR_WITH_PATTERN_DECL")
     }
 }
