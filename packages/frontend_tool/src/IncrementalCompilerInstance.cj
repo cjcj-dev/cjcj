@@ -232,7 +232,7 @@ public class IncrementalCompilerInstance <: DefaultCompilerInstance {
             (kind != IncreKind.INCR || declsToBeReCompiled.contains(declSummary))) {
             changedTypes.add(decl.identifier.Val())
         }
-        for (member in decl.members) {
+        for (member in decl.GetMemberDecls()) {
             CollectStructNames(pkg, file, member)
         }
     }
@@ -256,7 +256,7 @@ public class IncrementalCompilerInstance <: DefaultCompilerInstance {
         builder.append(decl.end.column.toString())
         if (let Some(generic) <- decl.generic) {
             builder.append("|generic:")
-            AppendCacheStringList(builder, generic.typeParameters)
+            AppendCacheGenericParamList(builder, generic.typeParameters)
         }
         return builder.toString()
     }
@@ -402,13 +402,13 @@ private func EscapeCacheLine(text: String): String {
     return text.replace("\\", "\\\\").replace("\n", "\\n").replace("\r", "\\r")
 }
 
-private func AppendCacheStringList(builder: StringBuilder, values: ArrayList<String>): Unit {
+private func AppendCacheGenericParamList(builder: StringBuilder, values: ArrayList<GenericParamDecl>): Unit {
     var idx: Int64 = 0
     while (idx < values.size) {
         if (idx > 0) {
             builder.append(",")
         }
-        builder.append(values[idx])
+        builder.append(values[idx].identifier.Val())
         idx++
     }
 }

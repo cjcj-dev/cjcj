@@ -252,7 +252,7 @@ public open class DefaultCompilerInstance {
         if (decl.mangledName.isEmpty()) {
             decl.mangledName = mangler.Mangle(decl)
         }
-        for (member in decl.members) {
+        for (member in decl.GetMemberDecls()) {
             PreMangleDeclTree(mangler, pkgName, member, seen)
         }
     }
@@ -338,7 +338,7 @@ private func AppendDeclTree(builder: StringBuilder, decl: Decl, indent: Int64): 
         builder.append(" [" + decl.mangledName + "]")
     }
     builder.append("\n")
-    for (member in decl.members) {
+    for (member in decl.GetMemberDecls()) {
         AppendDeclTree(builder, member, indent + 1)
     }
 }
@@ -450,17 +450,18 @@ private func AppendDeclCjo(builder: StringBuilder, decl: Decl): Unit {
     AppendAnnotationListJson(builder, decl.annotations)
     if (let Some(generic) <- decl.generic) {
         builder.append(",\"genericParams\":")
-        AppendStringArrayJson(builder, generic.typeParameters)
+        AppendGenericParamArrayJson(builder, generic.typeParameters)
         builder.append(",\"genericConstraints\":")
-        AppendStringArrayJson(builder, generic.genericConstraints)
+        AppendGenericConstraintArrayJson(builder, generic.genericConstraints)
     } else {
         builder.append(",\"genericParams\":[]")
         builder.append(",\"genericConstraints\":[]")
     }
-    if (!decl.members.isEmpty()) {
+    let members = decl.GetMemberDecls()
+    if (!members.isEmpty()) {
         builder.append(",\"members\":[")
         var memberIdx: Int64 = 0
-        for (member in decl.members) {
+        for (member in members) {
             if (memberIdx > 0) {
                 builder.append(",")
             }
@@ -484,13 +485,52 @@ private func AppendAnnotationListJson(builder: StringBuilder, annotations: Array
     var annoIdx: Int64 = 0
     while (annoIdx < annotations.size) {
         if (annoIdx > 0) {
-            builder.append(", ")
+        builder.append(", ")
         }
         builder.append("{\"name\":\"" + EscapeJson(annotations[annoIdx].identifier.Val()) + "\",")
         builder.append("\"args\":")
-        AppendStringArrayJson(builder, annotations[annoIdx].args)
+        AppendAnnotationArgArrayJson(builder, annotations[annoIdx].args)
         builder.append("}")
         annoIdx++
+    }
+    builder.append("]")
+}
+
+private func AppendGenericParamArrayJson(builder: StringBuilder, values: ArrayList<GenericParamDecl>): Unit {
+    builder.append("[")
+    var idx: Int64 = 0
+    while (idx < values.size) {
+        if (idx > 0) {
+            builder.append(", ")
+        }
+        builder.append("\"" + EscapeJson(values[idx].identifier.Val()) + "\"")
+        idx++
+    }
+    builder.append("]")
+}
+
+private func AppendGenericConstraintArrayJson(builder: StringBuilder, values: ArrayList<GenericConstraint>): Unit {
+    builder.append("[")
+    var idx: Int64 = 0
+    while (idx < values.size) {
+        if (idx > 0) {
+            builder.append(", ")
+        }
+        builder.append("\"" + EscapeJson(values[idx].ToString()) + "\"")
+        idx++
+    }
+    builder.append("]")
+}
+
+private func AppendAnnotationArgArrayJson(builder: StringBuilder, values: ArrayList<FuncArg>): Unit {
+    builder.append("[")
+    var idx: Int64 = 0
+    while (idx < values.size) {
+        if (idx > 0) {
+            builder.append(", ")
+        }
+        builder.append("\"" + EscapeJson(values[idx].ToString()) + "\"")
+        idx++
     }
     builder.append("]")
 }
@@ -528,7 +568,7 @@ private func CountDeclList(decls: ArrayList<Decl>): Int64 {
 
 private func CountDeclTree(decl: Decl): Int64 {
     var count: Int64 = 1
-    for (member in decl.members) {
+    for (member in decl.GetMemberDecls()) {
         count += CountDeclTree(member)
     }
     return count

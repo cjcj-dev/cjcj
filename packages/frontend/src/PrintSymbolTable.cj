@@ -37,7 +37,7 @@ private func AddSymbolToInfo(packages: ArrayList<Symbol>, file2nodesMap: HashMap
         return
     }
     let node = symbol.node.getOrThrow()
-    if (node.TestAttr("COMPILER_ADD")) {
+    if (node.TestAttr(Attribute.COMPILER_ADD)) {
         return
     }
     if (node.astKind == ASTKind.PACKAGE) {
@@ -152,7 +152,7 @@ private func appendFile(builder: StringBuilder, file: File, nodes: ArrayList<Nod
 }
 
 private func appendNode(builder: StringBuilder, node: Node): Unit {
-    if (node.TestAttr("COMPILER_ADD")) {
+    if (node.TestAttr(Attribute.COMPILER_ADD)) {
         return
     }
     builder.append("        {\n")

@@ -1,9 +1,6 @@
 package cangjie_compiler::frontend
 
-import cangjie_compiler::ast.AddCurFile
 import cangjie_compiler::ast.Package as RealASTPackage
-import cangjie_compiler::parse.DiagnosticEngine as ParseDiagnosticEngine
-import cangjie_compiler::parse.Parser as RealParser
 import cangjie_compiler::sema.TypeChecker as RealSemaTypeChecker
 import cangjie_compiler::meta_transformation.MetaTransformPluginBuilder
 import cangjie_compiler::meta_transformation.NativeMetaTransformPlugin
@@ -304,15 +301,6 @@ public class CompilerInstance {
 
     public func ExpandDecl(decl: Decl): ArrayList<Decl> {
         let out = ArrayList<Decl>()
-        if (let Some(macroDecl) <- (decl as MacroExpandDecl)) {
-            if (let Some(expanded) <- macroDecl.invocation.decl) {
-                if (macroDecl.invocation.identifier == "APILevel") {
-                    ensureAPILevelAnnotationForDecl(expanded, macroDecl.invocation)
-                }
-                out.add(expanded)
-                return out
-            }
-        }
         out.add(decl)
         return out
     }
@@ -413,47 +401,10 @@ public class CompilerInstance {
 
     private func CaptureRealASTPackages(): Bool {
         realASTPkgs.clear()
-        var ok = true
         for (pkg in srcPkgs) {
-            if (let Some(realPkg) <- ParseRealASTPackageForFacadePackage(pkg)) {
-                realASTPkgs[pkg.fullPackageName] = realPkg
-            } else {
-                diag.Diagnose(DiagCategory.PARSE, PackageDiagnosticPosition(pkg),
-                    "unsupported construct while parsing package '" + pkg.fullPackageName +
-                    "' for the real pipeline (not yet implemented)")
-                ok = false
-            }
+            realASTPkgs[pkg.fullPackageName] = pkg
         }
-        return ok
-    }
-
-    private func ParseRealASTPackageForFacadePackage(pkg: Package): Option<RealASTPackage> {
-        let realPkg = RealASTPackage(pkg.fullPackageName)
-        realPkg.noSubPkg = pkg.noSubPkg
-        realPkg.needExported = pkg.needExported
-        for (file in pkg.files) {
-            let fileID = file.begin.fileID
-            let source = sm.GetSource(fileID)
-            if (source.buffer.isEmpty()) {
-                return None
-            }
-            let parseDiag = ParseDiagnosticEngine()
-            let parser = RealParser(fileID, source.buffer, parseDiag, sm)
-            let realFile = parser.ParseTopLevel()
-            if (parseDiag.HasError()) {
-                return None
-            }
-            realFile.filePath = file.filePath
-            realFile.fileName = file.fileName
-            realFile.fileHash = file.fileHash
-            realFile.begin = file.begin
-            realFile.end = file.end
-            realFile.curPackage = Some(realPkg)
-            realFile.indexOfPackage = UInt64(realPkg.files.size)
-            realPkg.files.add(realFile)
-        }
-        AddCurFile(realPkg)
-        return Some(realPkg)
+        return true
     }
 
     private func RunRealSema(): Bool {
@@ -694,7 +645,7 @@ public class CompilerInstance {
                 for (decl in file.decls) {
                     if (let Some(extendDecl) <- (decl as ExtendDecl)) {
                         if (let Some(extendedType) <- extendDecl.extendedType) {
-                            if (extendedType.name == typeName) {
+                            if (extendedType.ToString() == typeName) {
                                 out.add(extendDecl)
                             }
                         }
@@ -807,7 +758,7 @@ public class CompilerInstance {
             if (pkgCtxMap.contains(pkg.fullPackageName)) {
                 pkgCtxMap.remove(pkg.fullPackageName)
             }
-            pkgCtxMap.add(pkg.fullPackageName, ASTContext(diag, pkg))
+            pkgCtxMap.add(pkg.fullPackageName, ASTContext(pkg))
         }
     }
 
@@ -913,12 +864,12 @@ public class CompilerInstance {
         for (pkg in importManager.GetAllImportedPackages()) {
             for (file in pkg.files) {
                 for (decl in file.decls) {
-                    if (decl.isUsedImports || !decl.TestAttr("IMPORTED")) {
+                    if (decl.isUsedImports || !decl.TestAttr(Attribute.IMPORTED)) {
                         mangleDeclTree(baseMangler, pkg.fullPackageName, decl, seen)
                     }
                 }
                 for (decl in file.exportedInternalDecls) {
-                    if (decl.isUsedImports || !decl.TestAttr("IMPORTED")) {
+                    if (decl.isUsedImports || !decl.TestAttr(Attribute.IMPORTED)) {
                         mangleDeclTree(baseMangler, pkg.fullPackageName, decl, seen)
                     }
                 }
@@ -943,39 +894,14 @@ public class CompilerInstance {
             mangledName2DeclMap.remove(decl.mangledName)
         }
         mangledName2DeclMap.add(decl.mangledName, decl)
-        for (member in decl.members) {
+        for (member in decl.GetMemberDecls()) {
             mangleDeclTree(baseMangler, pkgName, member, seen)
         }
     }
 
-    private func ensureAPILevelAnnotationForDecl(decl: Decl, invocation: MacroInvocation): Unit {
-        for (anno in decl.annotations) {
-            if (anno.identifier.Val() == "APILevel") {
-                return
-            }
-        }
-        let anno = Annotation()
-        anno.identifier = SrcIdentifier("APILevel")
-        anno.kind = AnnotationKind.CUSTOM
-        var lastIdentifier = ""
-        for (attr in invocation.attrs) {
-            if (attr.kind == FrontendTokenKind.IDENTIFIER) {
-                lastIdentifier = attr.value
-            } else if (attr.kind == FrontendTokenKind.STRING_LITERAL || attr.kind == FrontendTokenKind.INTEGER_LITERAL ||
-                attr.kind == FrontendTokenKind.BOOL_LITERAL) {
-                if (lastIdentifier.isEmpty()) {
-                    anno.args.add(attr.value)
-                } else {
-                    anno.args.add(lastIdentifier + ":" + attr.value)
-                }
-            }
-        }
-        decl.annotations.add(anno)
-    }
-
     private func collectDeclCacheSummary(pkg: Package, file: File, decl: Decl): Unit {
         cachedInfo.declSummaries.add(makeDeclSummary(pkg, file, decl))
-        for (member in decl.members) {
+        for (member in decl.GetMemberDecls()) {
             collectDeclCacheSummary(pkg, file, member)
         }
     }
@@ -999,7 +925,7 @@ public class CompilerInstance {
         builder.append(decl.end.column.toString())
         if (let Some(generic) <- decl.generic) {
             builder.append("|generic:")
-            appendStringList(builder, generic.typeParameters)
+            appendGenericParamList(builder, generic.typeParameters)
         }
         return builder.toString()
     }
@@ -1024,7 +950,7 @@ public class CompilerInstance {
                 pkg.genericInstantiatedDecls.add(decl)
             }
         }
-        for (member in decl.members) {
+        for (member in decl.GetMemberDecls()) {
             collectGenericDecl(pkg, member, seen)
         }
     }
@@ -1036,8 +962,10 @@ public class CompilerInstance {
             }
         }
         if (let Some(funcDecl) <- (decl as FuncDecl)) {
-            if (let Some(generic) <- funcDecl.funcBody.generic) {
-                return !generic.typeParameters.isEmpty()
+            if (let Some(body) <- funcDecl.funcBody) {
+                if (let Some(generic) <- body.generic) {
+                    return !generic.typeParameters.isEmpty()
+                }
             }
         }
         return false
@@ -1062,7 +990,7 @@ public class CompilerInstance {
         } else if (decl.astKind == ASTKind.VAR_DECL || decl.astKind == ASTKind.PROP_DECL) {
             chirPkg.constVarInitFuncs.add(name + ".init")
         }
-        for (member in decl.members) {
+        for (member in decl.GetMemberDecls()) {
             collectCHIRDeclSummary(chirPkg, member)
         }
     }
@@ -1181,13 +1109,13 @@ private func appendStringArrayJson(builder: StringBuilder, values: ArrayList<Str
     builder.append("]")
 }
 
-private func appendStringList(builder: StringBuilder, values: ArrayList<String>): Unit {
+private func appendGenericParamList(builder: StringBuilder, values: ArrayList<GenericParamDecl>): Unit {
     var idx: Int64 = 0
     while (idx < values.size) {
         if (idx > 0) {
             builder.append(",")
         }
-        builder.append(values[idx])
+        builder.append(values[idx].identifier.Val())
         idx++
     }
 }
@@ -1311,7 +1239,7 @@ private func appendDecl(builder: StringBuilder, decl: Decl, indent: Int64): Unit
         builder.append(" [" + decl.mangledName + "]")
     }
     builder.append("\n")
-    for (member in decl.members) {
+    for (member in decl.GetMemberDecls()) {
         appendDecl(builder, member, indent + 1)
     }
 }
