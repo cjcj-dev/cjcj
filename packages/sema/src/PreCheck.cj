@@ -83,7 +83,7 @@ public func PreCheckPackage(pkg: Package): Bool {
     return PreCheckPackage(ctx, pkg)
 }
 
-public func PreCheckPackage(ctx: ASTContext, pkg: Package): Bool {
+public func PreCheckPackage(ctx: ASTContext, pkg: Package, typeManager!: TypeManager = TypeManager()): Bool {
     ctx.curPackage = pkg
     ctx.fullPackageName = pkg.fullPackageName
     ctx.declMap.clear()
@@ -95,6 +95,6 @@ public func PreCheckPackage(ctx: ASTContext, pkg: Package): Bool {
             valid = collectDecl(ctx, decl) && valid
         }
     }
-    PreSetDeclType(TypeManager(), ctx)
+    PreSetDeclType(typeManager, ctx)
     return valid
 }

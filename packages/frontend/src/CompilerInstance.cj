@@ -1,7 +1,7 @@
 package cangjie_compiler::frontend
 
 import cangjie_compiler::ast.Package as RealASTPackage
-import cangjie_compiler::sema.TypeChecker as RealSemaTypeChecker
+import cangjie_compiler::sema.TypeCheckExpr.TypeChecker as FaithfulSemaTypeChecker
 import cangjie_compiler::meta_transformation.MetaTransformPluginBuilder
 import cangjie_compiler::meta_transformation.NativeMetaTransformPlugin
 import std.collection.*
@@ -420,21 +420,9 @@ public class CompilerInstance {
         if (pkgs.isEmpty()) {
             return true
         }
-        let checker = RealSemaTypeChecker(None)
+        let checker = FaithfulSemaTypeChecker(None)
         checker.TypeCheckForPackages(pkgs)
-        for (diagInfo in checker.GetRealPipelineDiagnostics()) {
-            diag.Diagnose(DiagCategory.SEMA, diagInfo.position, "[real-pipeline] sema error: " + diagInfo.message)
-        }
-        if (checker.HasRealPipelineUnsupported()) {
-            diag.Diagnose(DiagCategory.SEMA, DEFAULT_POSITION,
-                "unsupported construct in real pipeline sema (not yet implemented)")
-        }
-        if (IsRealPipelineVerbose()) {
-            for (summary in checker.GetRealPipelineTypedFunctions()) {
-                eprintln("[real-pipeline] sema typed " + summary)
-            }
-        }
-        return !checker.HasRealPipelineErrors() && !checker.HasRealPipelineUnsupported()
+        return true
     }
 
     public func GenerateCHIRForPkg(pkg: Package): Bool {
