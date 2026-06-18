@@ -1,6 +1,8 @@
 package cangjie_compiler::frontend
 
 import cangjie_compiler::ast.Package as RealASTPackage
+import cangjie_compiler::ast.PackageDecl as RealASTPackageDecl
+import cangjie_compiler::sema.CompilerInstance as FaithfulSemaCompilerInstance
 import cangjie_compiler::sema.TypeCheckExpr.TypeChecker as FaithfulSemaTypeChecker
 import cangjie_compiler::meta_transformation.MetaTransformPluginBuilder
 import cangjie_compiler::meta_transformation.NativeMetaTransformPlugin
@@ -420,7 +422,12 @@ public class CompilerInstance {
         if (pkgs.isEmpty()) {
             return true
         }
-        let checker = FaithfulSemaTypeChecker(None)
+        let semaInstance = FaithfulSemaCompilerInstance()
+        semaInstance.globalOptions = invocation.globalOptions
+        for (importedPackage in importManager.GetAllImportedPackages()) {
+            semaInstance.packageDecls.add(RealASTPackageDecl(importedPackage))
+        }
+        let checker = FaithfulSemaTypeChecker(Some(semaInstance))
         checker.TypeCheckForPackages(pkgs)
         return true
     }

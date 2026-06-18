@@ -7,6 +7,7 @@ import cangjie_compiler::option.GlobalOptions as OptionGlobalOptions
 public class CompilerInstance {
     public var typeManager: TypeManager = TypeManager()
     public var globalOptions: OptionGlobalOptions = OptionGlobalOptions()
+    public let packageDecls: ArrayList<PackageDecl> = ArrayList<PackageDecl>()
     public init() {}
 }
 
