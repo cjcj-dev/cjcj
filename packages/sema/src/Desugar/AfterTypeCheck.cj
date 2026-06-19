@@ -6,7 +6,7 @@ import cangjie_compiler::sema.*
 import cangjie_compiler::sema.Desugar.AfterTypeCheck.*
 
 public func PerformDesugarAfterTypeCheck(typeManager: TypeManager, pkg: Package,
-    options!: GlobalOptions = GlobalOptions()): Unit {
+    context!: Option<ASTContext> = None, options!: GlobalOptions = GlobalOptions()): Unit {
     DesugarDeclsForPackage(pkg, options.enableCoverage)
     let walker = Walker(pkg, visitPre: { node: Node =>
         if (node.TestAnyAttr(Attribute.HAS_BROKEN, Attribute.IS_BROKEN)) {
@@ -68,7 +68,7 @@ public func PerformDesugarAfterTypeCheck(typeManager: TypeManager, pkg: Package,
                 }
             case ASTKind.LIT_CONST_EXPR =>
                 if (let Some(litConstExpr) <- (node as LitConstExpr)) {
-                    DesugarStrInterpolationExpr(typeManager, pkg, litConstExpr)
+                    DesugarStrInterpolationExpr(typeManager, pkg, litConstExpr, context: context)
                 }
             case _ => ()
         }

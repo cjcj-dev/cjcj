@@ -806,6 +806,9 @@ public class Translator {
     }
 
     private func AddMemberVarDecl(def: CustomTypeDef, decl: AstVarDecl): Unit {
+        if (decl.TestAttr(AstAttribute.SPECIFIC) && !def.TestAttr(Attribute.GENERIC_INSTANTIATED)) {
+            return
+        }
         if (decl.TestAttr(AstAttribute.STATIC)) {
             if (let Some(value) <- globalSymbolTable.TryGet(decl)) {
                 if (let Some(globalVar) <- (value as GlobalVar)) {
@@ -817,7 +820,21 @@ public class Translator {
         let memberTy = chirTy.TranslateType(RequireAstTy(decl))
         let memberInfo = MemberVarInfo(decl.identifier.Val(), memberTy, isStatic: false,
             isReadOnly: decl.IsConst(), rawMangledName: decl.rawMangleName)
+        ApplyMemberVarDeclAttrs(memberInfo, decl)
         def.AddInstanceVar(memberInfo)
+    }
+
+    private func ApplyMemberVarDeclAttrs(memberInfo: MemberVarInfo, decl: AstVarDecl): Unit {
+        if (decl.TestAttr(AstAttribute.PUBLIC)) { memberInfo.attributeInfo.Enable(Attribute.PUBLIC) }
+        if (decl.TestAttr(AstAttribute.PROTECTED)) { memberInfo.attributeInfo.Enable(Attribute.PROTECTED) }
+        if (decl.TestAttr(AstAttribute.PRIVATE)) { memberInfo.attributeInfo.Enable(Attribute.PRIVATE) }
+        if (decl.TestAttr(AstAttribute.STATIC)) { memberInfo.attributeInfo.Enable(Attribute.STATIC) }
+        if (decl.TestAttr(AstAttribute.MUT)) { memberInfo.attributeInfo.Enable(Attribute.MUT) }
+        if (decl.TestAttr(AstAttribute.FOREIGN)) { memberInfo.attributeInfo.Enable(Attribute.FOREIGN) }
+        if (decl.TestAttr(AstAttribute.IMPORTED)) { memberInfo.attributeInfo.Enable(Attribute.IMPORTED) }
+        if (decl.TestAttr(AstAttribute.SRC_IMPORTED)) { memberInfo.attributeInfo.Enable(Attribute.SRC_CODE_IMPORTED) }
+        if (decl.TestAttr(AstAttribute.C)) { memberInfo.attributeInfo.Enable(Attribute.C) }
+        if (decl.TestAttr(AstAttribute.IMPLICIT_ADD)) { memberInfo.attributeInfo.Enable(Attribute.IMPLICIT_ADD) }
     }
 
     private func BindFuncParams(funcDecl: AstFuncDecl, fn: Function): Unit {

@@ -212,6 +212,12 @@ private func InterpolationPartsAreWellTyped(typeManager: TypeManager, stringTy: 
                     interpolationExpr.SetTy(TypeManager.GetInvalidTy())
                     isWellTyped = false
                 }
+            } else if (let Some(partLit) <- (partExpr as LitConstExpr)) {
+                if (partLit.kind == LitConstKind.STRING || partLit.kind == LitConstKind.JSTRING) {
+                    partLit.SetTy(stringTy)
+                } else if (!ChkLitConstExprOfTypeString(typeManager, stringTy, partLit, stringTy: Some(stringTy))) {
+                    isWellTyped = false
+                }
             } else if (let Some(partTy) <- partExpr.GetTy()) {
                 if (typeManager.CheckTypeCompatibility(stringTy, partTy) == TypeCompatibility.INCOMPATIBLE) {
                     partExpr.SetTy(TypeManager.GetInvalidTy())

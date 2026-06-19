@@ -23,6 +23,7 @@ public func GenPackageModules(chirData: CHIRData, options: GlobalOptions, enable
         if (subPackage.mainModule) {
             EmitCJSDKVersion(cgMod)
             EmitMainFunctionIR(cgMod)
+            SpecifyPackageInitFunc(cgMod)
         }
         InitializeCjStringLiteral(cgMod)
         let keepTypesFunc = KeepSomeTypesManually(cgMod)
@@ -135,6 +136,7 @@ private func CreateCJEntryFunction(cgMod: CGModule, moduleHandle: LLVMModuleHand
         }
         // Default exit status is 0. A `main(): Int64` returns its value; a `main(): Unit` returns 0.
         var exitCode = zero
+        EmitPackageInitCall(cgMod, builder)
         if (let Some(mainEntry) <- FindMainEntryFunction(cgMod)) {
             let cgMain = cgMod.GetOrInsertCGFunction(mainEntry)
             if (let Some(mainFnType) <- cgMain.GetCGFunctionType()) {
@@ -188,6 +190,21 @@ private func CreateCJEntryFunction(cgMod: CGModule, moduleHandle: LLVMModuleHand
         }
     }
     return entryFunc
+}
+
+private func EmitPackageInitCall(cgMod: CGModule, builder: LLVMBuilderRef): Unit {
+    if (let Some(initFn) <- cgMod.GetCGContext().GetCHIRPackage().GetPackageInitFunc()) {
+        let cgInit = cgMod.GetOrInsertCGFunction(initFn)
+        if (let Some(initFnType) <- cgInit.GetCGFunctionType()) {
+            BuildVoidCall(builder, initFnType.GetLLVMFunctionType(), cgInit.GetRawFunction(), ArrayList<LLVMValueRef>())
+        }
+    }
+}
+
+private func SpecifyPackageInitFunc(cgMod: CGModule): Unit {
+    if (let Some(initFn) <- cgMod.GetCGContext().GetCHIRPackage().GetPackageInitFunc()) {
+        cgMod.GetCGContext().AddLLVMUsedVars(GetCodeGenGlobalName(initFn))
+    }
 }
 
 private func FindMainEntryFunction(cgMod: CGModule): Option<Function> {
