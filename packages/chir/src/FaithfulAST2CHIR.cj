@@ -856,11 +856,12 @@ public class FaithfulAST2CHIR {
     }
 
     private func CreateFuncSignatureAndSetGlobalCache(funcDecl: AstFuncDecl): Unit {
-        let funcTy = RequireFuncType(chirType.TranslateType(RequireAstTy(funcDecl)))
+        let funcTy = AdjustFuncType(funcDecl, RequireFuncType(chirType.TranslateType(RequireAstTy(funcDecl))))
         let fn = builder.CreateFunction(funcTy, EffectiveFunctionIdentifier(funcDecl),
             srcCodeIdentifier: EffectiveFunctionSrcIdentifier(funcDecl), rawMangledName: EffectiveFunctionRawName(funcDecl),
             packageName: EffectivePackageName(funcDecl))
         ApplyDeclAttrs(fn, funcDecl)
+        ApplyFuncKind(fn, funcDecl)
         if (funcDecl.TestAttr(AstAttribute.MAIN_ENTRY)) {
             fn.SetFuncKind(FuncKind.MAIN_ENTRY)
         }
@@ -923,12 +924,13 @@ public class FaithfulAST2CHIR {
     }
 
     private func CreateImportedFuncSignatureAndSetGlobalCache(funcDecl: AstFuncDecl): Unit {
-        let funcTy = RequireFuncType(chirType.TranslateType(RequireAstTy(funcDecl)))
+        let funcTy = AdjustFuncType(funcDecl, RequireFuncType(chirType.TranslateType(RequireAstTy(funcDecl))))
         let fn = builder.CreateFunction(funcTy, EffectiveMangledName(funcDecl),
             srcCodeIdentifier: funcDecl.identifier.Val(), rawMangledName: EffectiveRawMangledName(funcDecl),
             packageName: EffectivePackageName(funcDecl))
         fn.EnableAttr(Attribute.IMPORTED)
         ApplyDeclAttrs(fn, funcDecl)
+        ApplyFuncKind(fn, funcDecl)
         TranslateFuncParams(funcDecl, fn)
         globalCache.Set(funcDecl, fn)
         AddFunctionToPackage(fn)
@@ -971,19 +973,144 @@ public class FaithfulAST2CHIR {
     }
 
     private func TranslateFuncParams(funcDecl: AstFuncDecl, fn: Function): Unit {
+        let funcTy = fn.GetFuncType() ??
+            throw IllegalStateException("faithful AST2CHIR function has no FuncType: ${fn.GetIdentifier()}")
+        let paramTys = funcTy.GetParamTypes()
+        var paramIndex: Int64 = 0
+        while (paramIndex < paramTys.size) {
+            let parameter = builder.CreateParameter(paramTys[paramIndex], "%arg${paramIndex}", fn)
+            parameter.SetSrcCodeIdentifier(if (paramIndex == 0 && HasImplicitThisParam(funcDecl)) {
+                "this"
+            } else {
+                ""
+            })
+            paramIndex++
+        }
         if (let Some(body) <- funcDecl.funcBody) {
-            if (body.paramLists.isEmpty()) {
-                return
-            }
-            var paramIndex: Int64 = 0
-            for (param in body.paramLists[0].params) {
-                let paramTy = chirType.TranslateType(RequireAstTy(param))
-                let parameter = builder.CreateParameter(paramTy, "%arg${paramIndex}", fn)
-                parameter.SetSrcCodeIdentifier(param.identifier.Val())
-                globalCache.Set(param, parameter)
-                paramIndex++
+            if (!body.paramLists.isEmpty()) {
+                let explicitParams = body.paramLists[0].params
+                let offset: Int64 = if (explicitParams.size < paramTys.size) { 1 } else { 0 }
+                var explicitIndex: Int64 = 0
+                for (param in explicitParams) {
+                    let parameter = fn.GetParam(explicitIndex + offset)
+                    parameter.SetSrcCodeIdentifier(param.identifier.Val())
+                    globalCache.Set(param, parameter)
+                    explicitIndex++
+                }
             }
         }
+    }
+
+    private func AdjustFuncType(funcDecl: AstFuncDecl, funcTy: FuncType): FuncType {
+        if (!HasImplicitThisParam(funcDecl)) {
+            return funcTy
+        }
+        let outerDecl = funcDecl.outerDecl ??
+            throw IllegalStateException("faithful AST2CHIR instance member function has no owner decl")
+        let baseParams = funcTy.GetParamTypes()
+        let explicitParamCount = GetExplicitParamCount(funcDecl)
+        let astTypeAlreadyHasThis = baseParams.size > explicitParamCount
+        let params = ArrayList<Type>()
+        params.add(AddRefIfFuncIsMutOrClass(chirType.TranslateType(RequireAstTy(outerDecl)), funcDecl))
+        var paramIndex: Int64 = if (astTypeAlreadyHasThis) { 1 } else { 0 }
+        while (paramIndex < baseParams.size) {
+            params.add(baseParams[paramIndex])
+            paramIndex++
+        }
+        let retTy = if (funcDecl.TestAttr(AstAttribute.CONSTRUCTOR)) {
+            builder.context.GetUnitTy()
+        } else {
+            funcTy.GetReturnType()
+        }
+        return builder.context.GetFuncTy(params, retTy)
+    }
+
+    private func HasImplicitThisParam(funcDecl: AstFuncDecl): Bool {
+        return funcDecl.IsMemberDecl() && !funcDecl.TestAttr(AstAttribute.STATIC)
+    }
+
+    private func GetExplicitParamCount(funcDecl: AstFuncDecl): Int64 {
+        if (let Some(body) <- funcDecl.funcBody) {
+            if (!body.paramLists.isEmpty()) {
+                return body.paramLists[0].params.size
+            }
+        }
+        return 0
+    }
+
+    private func AddRefIfFuncIsMutOrClass(thisTy: Type, funcDecl: AstFuncDecl): Type {
+        if (thisTy.IsRef()) {
+            return thisTy
+        }
+        if (thisTy.IsClassOrArray() || funcDecl.TestAnyAttr(AstAttribute.MUT, AstAttribute.CONSTRUCTOR)) {
+            return builder.context.GetRefTy(thisTy)
+        }
+        return thisTy
+    }
+
+    private func ApplyFuncKind(fn: Function, funcDecl: AstFuncDecl): Unit {
+        if (funcDecl.isGetter) {
+            fn.SetFuncKind(FuncKind.GETTER)
+            return
+        }
+        if (funcDecl.isSetter) {
+            fn.SetFuncKind(FuncKind.SETTER)
+            return
+        }
+        if (funcDecl.IsFinalizer()) {
+            fn.SetFuncKind(FuncKind.FINALIZER)
+            return
+        }
+        if (funcDecl.TestAttr(AstAttribute.MAIN_ENTRY)) {
+            fn.SetFuncKind(FuncKind.MAIN_ENTRY)
+            return
+        }
+        if (funcDecl.TestAttr(AstAttribute.MACRO_FUNC)) {
+            fn.SetFuncKind(FuncKind.MACRO_FUNC)
+            return
+        }
+        if (funcDecl.TestAttr(AstAttribute.PRIMARY_CONSTRUCTOR)) {
+            if (IsStructMemberFunc(funcDecl)) {
+                fn.SetFuncKind(FuncKind.PRIMAL_STRUCT_CONSTRUCTOR)
+                return
+            }
+            if (IsClassLikeMemberFunc(funcDecl)) {
+                fn.SetFuncKind(FuncKind.PRIMAL_CLASS_CONSTRUCTOR)
+                return
+            }
+        } else if (funcDecl.TestAttr(AstAttribute.CONSTRUCTOR)) {
+            if (IsStructMemberFunc(funcDecl)) {
+                fn.SetFuncKind(FuncKind.STRUCT_CONSTRUCTOR)
+                return
+            }
+            if (IsClassLikeMemberFunc(funcDecl)) {
+                fn.SetFuncKind(FuncKind.CLASS_CONSTRUCTOR)
+                return
+            }
+        }
+        if (funcDecl.TestAttr(AstAttribute.HAS_INITIAL)) {
+            fn.SetFuncKind(FuncKind.DEFAULT_PARAMETER_FUNC)
+        }
+    }
+
+    private func IsStructMemberFunc(funcDecl: AstFuncDecl): Bool {
+        if (funcDecl.TestAttr(AstAttribute.IN_STRUCT)) {
+            return true
+        }
+        if (let Some(outerDecl) <- funcDecl.outerDecl) {
+            return outerDecl.astKind == ASTKind.STRUCT_DECL
+        }
+        return false
+    }
+
+    private func IsClassLikeMemberFunc(funcDecl: AstFuncDecl): Bool {
+        if (funcDecl.TestAttr(AstAttribute.IN_CLASSLIKE)) {
+            return true
+        }
+        if (let Some(outerDecl) <- funcDecl.outerDecl) {
+            return outerDecl.astKind == ASTKind.CLASS_DECL || outerDecl.astKind == ASTKind.INTERFACE_DECL
+        }
+        return false
     }
 
     private func AddFunctionToPackage(fn: Function): Unit {
@@ -1015,6 +1142,9 @@ public class FaithfulAST2CHIR {
     }
 
     private func EffectiveMangledName(decl: AstDecl): String {
+        if (decl.IsMemberDecl() && !decl.TestAttr(AstAttribute.IMPORTED)) {
+            return EffectiveMemberMangledName(decl)
+        }
         if (!decl.mangledName.isEmpty()) {
             return decl.mangledName
         }
@@ -1022,6 +1152,12 @@ public class FaithfulAST2CHIR {
             return decl.rawMangleName
         }
         return decl.identifier.Val()
+    }
+
+    private func EffectiveMemberMangledName(decl: AstDecl): String {
+        let outerDecl = decl.outerDecl ??
+            throw IllegalStateException("faithful AST2CHIR member declaration has no owner")
+        return EffectiveMangledName(outerDecl) + "." + decl.identifier.Val()
     }
 
     private func EffectiveRawMangledName(decl: AstDecl): String {

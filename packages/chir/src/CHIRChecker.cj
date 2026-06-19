@@ -304,6 +304,9 @@ public class CHIRChecker {
             if (!ReturnTypeShouldBeVoid(topLevelFunc)) {
                 return
             }
+            if (topLevelFunc.IsConstructor() && funcTy.GetReturnType().IsUnit()) {
+                return
+            }
             if (!funcTy.GetReturnType().IsVoid()) {
                 result.AddError("function ${topLevelFunc.GetIdentifier()} is global var init, its return type is " +
                     "${funcTy.GetReturnType().ToString()}, but `Void` is expected")

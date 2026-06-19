@@ -323,7 +323,16 @@ public class Translator {
     }
 
     public func Visit(expr: AstRefExpr): Option<Value> {
+        if (expr.isThis || expr.isSuper) {
+            return GetCurrentThisObject()
+        }
         if (let Some(target) <- expr.ref.target) {
+            if (let Some(varDecl) <- (target as AstVarDecl)) {
+                if (IsInstanceMember(varDecl)) {
+                    let leftValueInfo = TranslateInstanceFieldRefAsLeftValue(varDecl)
+                    return LoadLeftValue(leftValueInfo, chirTy.TranslateType(RequireAstTy(expr)))
+                }
+            }
             let value = GetSymbolTable(target)
             return GetDerefedValue(value)
         }
@@ -713,9 +722,11 @@ public class Translator {
                 return
             }
             var idx: Int64 = 0
-            for (param in body.paramLists[0].params) {
-                if (idx < fn.GetNumOfParams()) {
-                    localValSymbolTable.Set(param, fn.GetParam(idx))
+            let params = body.paramLists[0].params
+            let offset: Int64 = if (params.size < fn.GetNumOfParams()) { 1 } else { 0 }
+            for (param in params) {
+                if (idx + offset < fn.GetNumOfParams()) {
+                    localValSymbolTable.Set(param, fn.GetParam(idx + offset))
                 }
                 idx++
             }
@@ -1705,11 +1716,15 @@ public class Translator {
 
     private func GetCurrentThisObjectForMember(calleeDecl: AstFuncDecl): Value {
         let _ = calleeDecl
+        return GetCurrentThisObject()
+    }
+
+    private func GetCurrentThisObject(): Value {
         let fn = CurrentFunction()
         if (fn.GetNumOfParams() > 0) {
             return fn.GetParam(0)
         }
-        throw IllegalStateException("faithful AST2CHIR member call requires current this object")
+        throw IllegalStateException("faithful AST2CHIR member access requires current this object")
     }
 
     private func ShouldUseVirtualMemberDispatch(funcDecl: AstFuncDecl): Bool {
@@ -1923,8 +1938,14 @@ public class Translator {
     private func TranslateExprAsLeftValue(expr: AstExpr): FaithfulLeftValueInfo {
         let nodePtr = Translator.GetDesugaredExpr(expr)
         if (let Some(refExpr) <- (nodePtr as AstRefExpr)) {
+            if (refExpr.isThis || refExpr.isSuper) {
+                return FaithfulLeftValueInfo(GetCurrentThisObject(), ArrayList<String>())
+            }
             if (let Some(target) <- refExpr.ref.target) {
-                if (let Some(_) <- (target as AstVarDecl)) {
+                if (let Some(varDecl) <- (target as AstVarDecl)) {
+                    if (IsInstanceMember(varDecl)) {
+                        return TranslateInstanceFieldRefAsLeftValue(varDecl)
+                    }
                     return FaithfulLeftValueInfo(GetSymbolTable(target), ArrayList<String>())
                 }
             }
@@ -1957,18 +1978,32 @@ public class Translator {
                 path.add(varDecl.identifier.Val())
                 return FaithfulLeftValueInfo(baseInfo.base, path)
             }
-            throw IllegalStateException("faithful AST2CHIR instance member left value has no base")
+            return TranslateInstanceFieldRefAsLeftValue(varDecl)
         }
         throw IllegalArgumentException("not yet ported in faithful AST2CHIR: member function left value")
+    }
+
+    private func TranslateInstanceFieldRefAsLeftValue(varDecl: AstVarDecl): FaithfulLeftValueInfo {
+        let path = ArrayList<String>()
+        path.add(varDecl.identifier.Val())
+        return FaithfulLeftValueInfo(GetCurrentThisObject(), path)
     }
 
     private func LoadLeftValue(info: FaithfulLeftValueInfo, expectedTy: Type): Option<Value> {
         if (info.path.isEmpty()) {
             return GetDerefedValue(info.base)
         }
-        let refTy = builder.context.GetRefTy(expectedTy)
-        let memberRef = RequireResult(builder.CreateGetElementByName(refTy, info.base, info.path, CurrentBlock()))
-        return RequireResult(builder.CreateLoad(expectedTy, memberRef, CurrentBlock()))
+        let baseTy = info.base.GetType() ??
+            throw IllegalStateException("faithful AST2CHIR left value base has no type: ${info.base.GetIdentifier()}")
+        if (baseTy.IsReferenceTypeWithRefDims(1) || baseTy.IsValueOrGenericTypeWithRefDims(1)) {
+            let refTy = builder.context.GetRefTy(expectedTy)
+            let memberRef = RequireResult(builder.CreateGetElementByName(refTy, info.base, info.path, CurrentBlock()))
+            return RequireResult(builder.CreateLoad(expectedTy, memberRef, CurrentBlock()))
+        }
+        if (baseTy.IsValueOrGenericTypeWithRefDims(0)) {
+            return RequireResult(builder.CreateFieldByName(expectedTy, info.base, info.path, CurrentBlock()))
+        }
+        throw IllegalStateException("faithful AST2CHIR unsupported member left value base type: ${baseTy.ToString()}")
     }
 
     private func StoreToLeftValue(info: FaithfulLeftValueInfo, value: Value): Unit {
