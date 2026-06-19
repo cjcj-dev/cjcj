@@ -24,6 +24,115 @@ private func questTy(): Ty {
     return TypeManager.GetQuestTy()
 }
 
+private func typeCheckExprGetCurInheritableDecl(ctx: ASTContext, scopeName: String,
+    currentFuncBody: Option<FuncBody>): Option<InheritableDecl> {
+    var scopeGateName = GetScopeGateName(scopeName)
+    while (!scopeGateName.isEmpty()) {
+        if (let Some(symbol) <- GetScopeGate(ctx, scopeGateName)) {
+            if (let Some(node) <- symbol.node) {
+                if (let Some(decl) <- (node as InheritableDecl)) {
+                    return Some(decl)
+                }
+            }
+        }
+        scopeGateName = GetScopeGateName(scopeGateName)
+    }
+    if (let Some(funcBody) <- currentFuncBody) {
+        if (let Some(classLike) <- funcBody.parentClassLike) {
+            return Some(classLike)
+        }
+        if (let Some(structDecl) <- funcBody.parentStruct) {
+            return Some(structDecl)
+        }
+        if (let Some(enumDecl) <- funcBody.parentEnum) {
+            return Some(enumDecl)
+        }
+    }
+    return None
+}
+
+private func typeCheckExprReplaceWithGenericTyInInheritableDecl(typeManager: TypeManager, ty: Option<Ty>,
+    outerDecl: InheritableDecl, targetDecl: InheritableDecl): Ty {
+    let rawTy = ty ?? TypeManager.GetInvalidTy()
+    if (!Ty.IsTyCorrect(rawTy) || !rawTy.HasGeneric()) {
+        return rawTy
+    }
+    if (let Some(currentTy) <- outerDecl.GetTy()) {
+        if (let Some(targetTy) <- targetDecl.GetTy()) {
+            let mapping = Promotion(typeManager).GetPromoteTypeMapping(currentTy, targetTy)
+            if (!mapping.entries.isEmpty()) {
+                return typeManager.GetBestInstantiatedTy(rawTy, mapping)
+            }
+        }
+    }
+    return rawTy
+}
+
+private func typeCheckExprInferTypeOfThis(typeManager: TypeManager, re: RefExpr, outerDecl: InheritableDecl): Ty {
+    var targetDecl = outerDecl
+    if (let Some(extendDecl) <- (targetDecl as ExtendDecl)) {
+        if (let Some(extendedType) <- extendDecl.extendedType) {
+            if (let Some(extendedTy) <- extendedType.GetTy()) {
+                if (extendedTy.IsBuiltin()) {
+                    return extendedTy
+                }
+                if (let Some(realDecl) <- Ty.GetInheritableDeclPtrOfTy(Some(extendedTy))) {
+                    targetDecl = realDecl
+                } else {
+                    return TypeManager.GetInvalidTy()
+                }
+            }
+        }
+    }
+    ReplaceTarget(re, Some(targetDecl))
+    let inferredTy = typeCheckExprReplaceWithGenericTyInInheritableDecl(typeManager, targetDecl.GetTy(),
+        outerDecl, targetDecl)
+    if (let Some(classTy) <- (inferredTy as ClassTy)) {
+        if (let Some(classDecl) <- classTy.decl) {
+            return typeManager.GetClassThisTy(classDecl, classTy.typeArgs.toArray())
+        }
+    }
+    return inferredTy
+}
+
+private func typeCheckExprInferTypeOfSuper(typeManager: TypeManager, re: RefExpr, outerDecl: InheritableDecl): Ty {
+    if (let None <- (outerDecl as ClassDecl)) {
+        return TypeManager.GetInvalidTy()
+    }
+    let classDecl = (outerDecl as ClassDecl).getOrThrow()
+    if (let Some(rawTy) <- classDecl.GetTy()) {
+        if (let Some(classTy) <- (rawTy as ClassTy)) {
+            if (let Some(superClassTy) <- classTy.GetSuperClassTy()) {
+                if (let Some(superDecl) <- superClassTy.declPtr) {
+                    ReplaceTarget(re, Some(superDecl))
+                    return typeCheckExprReplaceWithGenericTyInInheritableDecl(typeManager, superDecl.GetTy(),
+                        outerDecl, superDecl)
+                }
+            }
+        }
+    }
+    return TypeManager.GetInvalidTy()
+}
+
+private func typeCheckExprCheckThisOrSuper(typeManager: TypeManager, ctx: ASTContext, re: RefExpr,
+    currentFuncBody: Option<FuncBody>): Unit {
+    if (!re.isThis && !re.isSuper) {
+        return
+    }
+    if ((let Some(_) <- re.ref.target) || !re.ref.targets.isEmpty()) {
+        return
+    }
+    re.SetTy(TypeManager.GetInvalidTy())
+    if (let Some(outerDecl) <- typeCheckExprGetCurInheritableDecl(ctx, scopeNameOf(re), currentFuncBody)) {
+        let inferredTy = if (re.isThis) {
+            typeCheckExprInferTypeOfThis(typeManager, re, outerDecl)
+        } else {
+            typeCheckExprInferTypeOfSuper(typeManager, re, outerDecl)
+        }
+        re.SetTy(inferredTy)
+    }
+}
+
 private func lookupResolvedPackageDecl(ctx: ASTContext, packageName: String, name: String): Option<Decl> {
     if (let Some(packageMap) <- ctx.resolvedPackageMemberDeclsMap.get(packageName)) {
         if (let Some(decls) <- packageMap.get(name)) {
@@ -680,6 +789,12 @@ public class TypeChecker {
         FinishRegisteringEnumConstructors(enumDecl)
     }
 
+    private func SynthesizeInheritedTypes(ctx: ASTContext, decl: InheritableDecl): Unit {
+        for (inheritedType in decl.inheritedTypes) {
+            SynthesizeTypeNode(ctx, Some(inheritedType))
+        }
+    }
+
     private func ConstructorReturnTy(fb: FuncBody): Option<Ty> {
         if (let Some(funcDecl) <- fb.funcDecl) {
             if (funcDecl.TestAttr(Attribute.CONSTRUCTOR)) {
@@ -776,18 +891,21 @@ public class TypeChecker {
             return
         }
         if (let Some(classDecl) <- (decl as ClassDecl)) {
+            SynthesizeInheritedTypes(ctx, classDecl)
             if (let Some(body5) <- classDecl.body) {
                 PrepareDeclListSignatures(ctx, body5.decls)
             }
             return
         }
         if (let Some(structDecl) <- (decl as StructDecl)) {
+            SynthesizeInheritedTypes(ctx, structDecl)
             if (let Some(body6) <- structDecl.body) {
                 PrepareDeclListSignatures(ctx, body6.decls)
             }
             return
         }
         if (let Some(interfaceDecl) <- (decl as InterfaceDecl)) {
+            SynthesizeInheritedTypes(ctx, interfaceDecl)
             if (let Some(body7) <- interfaceDecl.body) {
                 PrepareDeclListSignatures(ctx, body7.decls)
             }
@@ -872,18 +990,21 @@ public class TypeChecker {
             }
         }
         if (let Some(classDecl) <- (decl as ClassDecl)) {
+            SynthesizeInheritedTypes(ctx, classDecl)
             if (let Some(body) <- classDecl.body) {
                 SynthesizeDeclList(ctx, body.decls)
             }
             return tyOrInvalid(classDecl)
         }
         if (let Some(structDecl) <- (decl as StructDecl)) {
+            SynthesizeInheritedTypes(ctx, structDecl)
             if (let Some(body2) <- structDecl.body) {
                 SynthesizeDeclList(ctx, body2.decls)
             }
             return tyOrInvalid(structDecl)
         }
         if (let Some(interfaceDecl) <- (decl as InterfaceDecl)) {
+            SynthesizeInheritedTypes(ctx, interfaceDecl)
             if (let Some(body3) <- interfaceDecl.body) {
                 SynthesizeDeclList(ctx, body3.decls)
             }
@@ -1263,7 +1384,11 @@ public class TypeChecker {
                 let _ = Synthesize(ctx, baseExpr)
             }
         } else if (let Some(refExpr) <- (nameRef as RefExpr)) {
-            ResolveRefExpr(ctx, refExpr)
+            if (refExpr.isThis || refExpr.isSuper) {
+                typeCheckExprCheckThisOrSuper(impl.typeManager, ctx, refExpr, currentFuncBody)
+            } else {
+                ResolveRefExpr(ctx, refExpr)
+            }
         }
         let ty = SynNameReferenceExpr(impl.typeManager, nameRef)
         if (let Some(target) <- nameRef.GetTarget()) {
