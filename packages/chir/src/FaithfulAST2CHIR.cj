@@ -755,7 +755,7 @@ public class FaithfulAST2CHIR {
 
     private func TranslateLiteralValue(expr: AstLitConstExpr): LiteralValue {
         return match (expr.kind) {
-            case AstLitConstKind.BOOL => BoolLiteral(expr.constNumValue.asBoolean)
+            case AstLitConstKind.BOOL => BoolLiteral(expr.stringValue == "true")
             case AstLitConstKind.UNIT => UnitLiteral()
             case AstLitConstKind.INTEGER => IntLiteral(expr.constNumValue.asInt.`Int64`())
             case AstLitConstKind.RUNE_BYTE => IntLiteral(expr.constNumValue.asInt.`Int64`())

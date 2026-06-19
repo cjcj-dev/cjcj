@@ -370,6 +370,12 @@ public class Translator {
     public func Visit(expr: AstBinaryExpr): Option<Value> {
         let lhs = Translator.TranslateASTNode(RequireExpr(expr.leftExpr, "binary lhs"), this) ??
             throw IllegalStateException("faithful AST2CHIR binary lhs produced no value")
+        if (expr.op == AstTokenKind.AND) {
+            return TransShortCircuitAnd(lhs, RequireExpr(expr.rightExpr, "binary rhs"))
+        }
+        if (expr.op == AstTokenKind.OR) {
+            return TransShortCircuitOr(lhs, RequireExpr(expr.rightExpr, "binary rhs"))
+        }
         let rhs = Translator.TranslateASTNode(RequireExpr(expr.rightExpr, "binary rhs"), this) ??
             throw IllegalStateException("faithful AST2CHIR binary rhs produced no value")
         let resultTy = chirTy.TranslateType(RequireAstTy(expr))
@@ -761,6 +767,60 @@ public class Translator {
         let entry = builder.CreateBlock(body)
         body.SetEntryBlock(entry)
         return body
+    }
+
+    private func TransShortCircuitAnd(leftValue: Value, rightExpr: AstExpr): Option<Value> {
+        let boolTy = builder.context.GetBoolTy()
+        let resultLoc = RequireResult(builder.CreateAllocate(builder.context.GetRefTy(boolTy), boolTy,
+            CurrentBlock()))
+        let parentGroup = RequireParentBlockGroup(CurrentBlock(), "short-circuit and")
+        let thenBlock = builder.CreateBlock(parentGroup)
+        let elseBlock = builder.CreateBlock(parentGroup)
+        let endBlock = builder.CreateBlock(parentGroup)
+        builder.CreateBranch(leftValue, thenBlock, elseBlock, CurrentBlock())
+
+        currentBlock = thenBlock
+        let rhsValue = Translator.TranslateASTNode(rightExpr, this) ??
+            throw IllegalStateException("faithful AST2CHIR short-circuit and rhs produced no value")
+        builder.CreateStore(CastValueIfNeeded(rhsValue, boolTy), resultLoc, CurrentBlock())
+        if (CurrentBlock().GetTerminator().isNone()) {
+            builder.CreateGoTo(endBlock, CurrentBlock())
+        }
+
+        currentBlock = elseBlock
+        let constantFalse = RequireResult(builder.CreateConstant(boolTy, BoolLiteral(false), CurrentBlock()))
+        builder.CreateStore(constantFalse, resultLoc, CurrentBlock())
+        builder.CreateGoTo(endBlock, CurrentBlock())
+
+        currentBlock = endBlock
+        return RequireResult(builder.CreateLoad(boolTy, resultLoc, CurrentBlock()))
+    }
+
+    private func TransShortCircuitOr(leftValue: Value, rightExpr: AstExpr): Option<Value> {
+        let boolTy = builder.context.GetBoolTy()
+        let resultLoc = RequireResult(builder.CreateAllocate(builder.context.GetRefTy(boolTy), boolTy,
+            CurrentBlock()))
+        let parentGroup = RequireParentBlockGroup(CurrentBlock(), "short-circuit or")
+        let thenBlock = builder.CreateBlock(parentGroup)
+        let elseBlock = builder.CreateBlock(parentGroup)
+        let endBlock = builder.CreateBlock(parentGroup)
+        builder.CreateBranch(leftValue, thenBlock, elseBlock, CurrentBlock())
+
+        currentBlock = thenBlock
+        let constantTrue = RequireResult(builder.CreateConstant(boolTy, BoolLiteral(true), CurrentBlock()))
+        builder.CreateStore(constantTrue, resultLoc, CurrentBlock())
+        builder.CreateGoTo(endBlock, CurrentBlock())
+
+        currentBlock = elseBlock
+        let rhsValue = Translator.TranslateASTNode(rightExpr, this) ??
+            throw IllegalStateException("faithful AST2CHIR short-circuit or rhs produced no value")
+        builder.CreateStore(CastValueIfNeeded(rhsValue, boolTy), resultLoc, CurrentBlock())
+        if (CurrentBlock().GetTerminator().isNone()) {
+            builder.CreateGoTo(endBlock, CurrentBlock())
+        }
+
+        currentBlock = endBlock
+        return RequireResult(builder.CreateLoad(boolTy, resultLoc, CurrentBlock()))
     }
 
     private func TranslateForInRange(expr: AstForInExpr): Option<Value> {
@@ -2225,7 +2285,7 @@ public class Translator {
 
     private func TranslateLitConstant(expr: AstLitConstExpr): LiteralValue {
         return match (expr.kind) {
-            case AstLitConstKind.BOOL => BoolLiteral(expr.constNumValue.asBoolean)
+            case AstLitConstKind.BOOL => BoolLiteral(expr.stringValue == "true")
             case AstLitConstKind.UNIT => UnitLiteral()
             case AstLitConstKind.INTEGER => IntLiteral(expr.constNumValue.asInt.`Int64`())
             case AstLitConstKind.RUNE_BYTE => IntLiteral(expr.constNumValue.asInt.`Int64`())
