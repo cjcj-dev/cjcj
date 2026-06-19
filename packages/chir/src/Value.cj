@@ -1017,15 +1017,18 @@ public class Function <: GlobalValue {
 
     public func GetParentCustomTypeOrExtendedType(): Option<Type> {
         if (let Some(def) <- GetParentCustomTypeDef()) {
-            let emptyArgs = ArrayList<Type>()
+            let typeArgs = ArrayList<Type>()
+            for (genericParam in def.GetGenericTypeParams()) {
+                typeArgs.add(genericParam)
+            }
             if (let Some(classDef) <- (def as ClassDef)) {
-                return ClassType(classDef, emptyArgs)
+                return ClassType(classDef, typeArgs)
             }
             if (let Some(structDef) <- (def as StructDef)) {
-                return StructType(structDef, emptyArgs)
+                return StructType(structDef, typeArgs)
             }
             if (let Some(enumDef) <- (def as EnumDef)) {
-                return EnumType(enumDef, emptyArgs)
+                return EnumType(enumDef, typeArgs)
             }
             if (let Some(extendDef) <- (def as ExtendDef)) {
                 return extendDef.extendedType

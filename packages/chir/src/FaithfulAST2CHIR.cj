@@ -496,6 +496,30 @@ public class FaithfulAST2CHIR {
         def.AddGenericTypeParam(paramTy)
     }
 
+    private func AddGenericTypeParamIfMissing(fn: Function, paramTy: GenericType): Unit {
+        for (existing in fn.GetGenericTypeParams()) {
+            if (existing.IsEqual(paramTy)) {
+                return
+            }
+        }
+        fn.AddGenericTypeParam(paramTy)
+    }
+
+    private func AttachFunctionGenericParams(funcDecl: AstFuncDecl, fn: Function): Unit {
+        if (let Some(generic) <- funcDecl.GetGeneric()) {
+            for (param in generic.typeParameters) {
+                if (let Some(paramAstTy) <- param.GetTy()) {
+                    if (let Some(genericTy) <- (paramAstTy as AstGenericsTy)) {
+                        if (let Some(paramTy) <- (chirType.TranslateType(genericTy) as GenericType)) {
+                            AddGenericTypeParamIfMissing(fn, paramTy)
+                            chirType.FillGenericArgType(genericTy)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     private func TranslateCustomTypeTyIfReady(decl: AstDecl): Option<Type> {
         if (decl.astKind == ASTKind.STRUCT_DECL || decl.astKind == ASTKind.CLASS_DECL ||
             decl.astKind == ASTKind.INTERFACE_DECL || decl.astKind == ASTKind.ENUM_DECL ||
@@ -988,6 +1012,7 @@ public class FaithfulAST2CHIR {
         let fn = builder.CreateFunction(funcTy, EffectiveFunctionIdentifier(funcDecl),
             srcCodeIdentifier: EffectiveFunctionSrcIdentifier(funcDecl), rawMangledName: EffectiveFunctionRawName(funcDecl),
             packageName: EffectivePackageName(funcDecl))
+        AttachFunctionGenericParams(funcDecl, fn)
         ApplyDeclAttrs(fn, funcDecl)
         ApplyFuncKind(fn, funcDecl)
         if (funcDecl.TestAttr(AstAttribute.MAIN_ENTRY)) {
@@ -1056,6 +1081,7 @@ public class FaithfulAST2CHIR {
         let fn = builder.CreateFunction(funcTy, EffectiveMangledName(funcDecl),
             srcCodeIdentifier: funcDecl.identifier.Val(), rawMangledName: EffectiveRawMangledName(funcDecl),
             packageName: EffectivePackageName(funcDecl))
+        AttachFunctionGenericParams(funcDecl, fn)
         fn.EnableAttr(Attribute.IMPORTED)
         ApplyDeclAttrs(fn, funcDecl)
         ApplyFuncKind(fn, funcDecl)

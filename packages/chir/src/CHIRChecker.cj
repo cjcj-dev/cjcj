@@ -2089,6 +2089,9 @@ public class CHIRChecker {
                     reachableGenericTypes.add(genericTy)
                 }
             }
+            for (genericTy in fn.GetGenericTypeParams()) {
+                reachableGenericTypes.add(genericTy)
+            }
             for (param in fn.GetParams()) {
                 reachableValues.add(param)
                 if (let Some(paramTy) <- param.GetType()) {
