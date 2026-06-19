@@ -2,6 +2,7 @@ package cangjie_compiler::codegen
 
 import std.collection.*
 import cangjie_compiler::chir.BooleanType
+import cangjie_compiler::chir.Attribute
 import cangjie_compiler::chir.ClassType
 import cangjie_compiler::chir.CPointerType
 import cangjie_compiler::chir.CustomType
@@ -50,11 +51,10 @@ public func GetOrCreateTypeInfoGlobal(cgMod: CGModule, chirTy: Type, genericKind
         let layoutName = if (chirTy.IsVoid()) { UNIT_TYPE_STR } else { chirTy.ToString() + ".Type" }
         LLVMSetGlobalStringMetadata(cgMod.GetLLVMContext(), typeInfo, GC_TYPE_META_NAME, layoutName)
     }
-    DefineConcreteTypeInfoIfNeeded(cgMod, chirTy, typeInfo, typeInfoTy)
     return typeInfo
 }
 
-private func DefineConcreteTypeInfoIfNeeded(cgMod: CGModule, chirTy: Type, typeInfo: LLVMValueRef,
+public func DefineConcreteTypeInfoIfNeeded(cgMod: CGModule, chirTy: Type, typeInfo: LLVMValueRef,
     typeInfoTy: LLVMTypeRef): Unit {
     if (typeInfo.isNull() || unsafe { LLVMIsDeclaration(typeInfo) } == 0) {
         return
@@ -74,6 +74,11 @@ private func DefineConcreteTypeInfoIfNeeded(cgMod: CGModule, chirTy: Type, typeI
     }
     if (!(chirTy.IsClass() || chirTy.IsStruct() || chirTy.IsEnum())) {
         return
+    }
+    if (let Some(customTy) <- (chirTy as CustomType)) {
+        if (customTy.GetCustomTypeDef().TestAttr(Attribute.IMPORTED)) {
+            return
+        }
     }
     if (let Some(moduleHandle) <- cgMod.GetLLVMModule()) {
         let initializer = BuildConcreteTypeInfoInitializer(cgMod, moduleHandle, chirTy, typeInfoTy)

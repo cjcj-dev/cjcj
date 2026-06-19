@@ -211,6 +211,8 @@ public open class CGType {
         }
         let createdInfo = GetOrCreateTypeInfoGlobal(cgMod, chirType, cgGenericKind)
         typeInfo = createdInfo
+        DefineConcreteTypeInfoIfNeeded(cgMod, chirType, createdInfo,
+            CGType.GetOrCreateTypeInfoType(cgMod.GetLLVMContext()))
         return createdInfo
     }
 
@@ -341,7 +343,7 @@ public open class CGType {
         body.add(i8Ty)
         body.add(i8Ty)
         body.add(i16Ty)
-        body.add(i8Ty)
+        body.add(i16Ty)
         body.add(i8PtrTy)
         body.add(i8PtrTy)
         body.add(i8PtrTy)
