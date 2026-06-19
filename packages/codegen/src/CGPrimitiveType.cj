@@ -1,5 +1,6 @@
 package cangjie_compiler::codegen
 
+import std.collection.*
 import cangjie_compiler::chir.NumericType
 import cangjie_compiler::chir.Type
 import cangjie_compiler::chir.TypeKind
@@ -32,9 +33,16 @@ public class CGPrimitiveType <: CGType {
             case _ => LLVMNullType()
         }
         let layoutName = if (chirType.IsVoid()) { UNIT_TYPE_STR } else { chirType.ToString() + ".Type" }
-        try (nameCString = unsafe { LibC.mallocCString(layoutName) }.asResource()) {
-            layoutType = unsafe { LLVMStructCreateNamed(context, nameCString.value) }
+        let layout = GetOrCreateNamedStructType(cgCtx.GetLLVMContext(), layoutName)
+        if (!cgCtx.IsGeneratedStructType(layoutName)) {
+            let body = ArrayList<LLVMTypeRef>()
+            if (!chirType.IsVoid() && !chirType.IsUnit() && !chirType.IsNothing()) {
+                body.add(generated)
+            }
+            SetStructTypeBody(layout, body)
+            cgCtx.AddGeneratedStructType(layoutName)
         }
+        layoutType = layout
         return generated
     }
 

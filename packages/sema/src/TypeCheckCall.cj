@@ -1037,6 +1037,17 @@ private func ReplaceCallArgsWith(ce: CallExpr, args: ArrayList<FuncArg>): Unit {
     }
 }
 
+private func GenerateCallBaseTypeMapping(typeManager: TypeManager, ce: CallExpr): SubstPack {
+    let typeMapping = SubstPack()
+    if (let Some(base) <- ce.baseFunc) {
+        typeMapping.Merge(GenerateGenericTypeMapping(typeManager, base))
+        if (let Some(baseTy) <- base.GetTy()) {
+            typeManager.GenerateGenericMapping(typeMapping, baseTy)
+        }
+    }
+    return typeMapping
+}
+
 private func CheckCallCompatible(typeManager: TypeManager, diag: Option<BasicDiagnosticEngine>, ce: CallExpr, fd: FuncDecl,
     unit: FunctionMatchingUnit): Bool {
     let paramTys = GetParamTysInArgsOrder(typeManager, ce, fd)
@@ -1046,7 +1057,7 @@ private func CheckCallCompatible(typeManager: TypeManager, diag: Option<BasicDia
     var idx: Int64 = 0
     while (idx < paramTys.size) {
         let argTy = GetExprTy(ce.args[idx])
-        let paramTy = paramTys[idx]
+        let paramTy = typeManager.ApplySubstPack(paramTys[idx], unit.typeMapping)
         if (typeManager.CheckTypeCompatibility(paramTy, argTy) == TypeCompatibility.INCOMPATIBLE) {
             if (let Some(diagValue) <- diag) {
                 DiagOld(diagValue, ce.args[idx], BasicDiagKind.sema_parameters_and_arguments_mismatch)
@@ -1095,12 +1106,7 @@ private func CheckCandidate(typeManager: TypeManager, diag: Option<BasicDiagnost
     if (paramTyInArgOrder.size != ce.args.size) {
         return None
     }
-    let typeMapping = SubstPack()
-    if (let Some(base) <- ce.baseFunc) {
-        if (let Some(baseTy) <- base.GetTy()) {
-            typeManager.GenerateGenericMapping(typeMapping, baseTy)
-        }
-    }
+    let typeMapping = GenerateCallBaseTypeMapping(typeManager, ce)
     let unit = FunctionMatchingUnit(fd, paramTyInArgOrder, typeMapping)
     unit.argNameValid = argNamesValid
     if (!CheckCallCompatible(typeManager, diag, ce, fd, unit)) {
@@ -1404,12 +1410,7 @@ private func CheckFuncPtrCall(typeManager: TypeManager, diag: Option<BasicDiagno
         return false
     }
     let paramTys = CheckCallArgs(None, typeManager, ce, funcTy).getOrThrow()
-    let typeMapping = SubstPack()
-    if (let Some(base) <- ce.baseFunc) {
-        if (let Some(baseTy) <- base.GetTy()) {
-            typeManager.GenerateGenericMapping(typeMapping, baseTy)
-        }
-    }
+    let typeMapping = GenerateCallBaseTypeMapping(typeManager, ce)
     var idx: Int64 = 0
     while (idx < paramTys.size) {
         let param = typeManager.ApplySubstPack(paramTys[idx], typeMapping)

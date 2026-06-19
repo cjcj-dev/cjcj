@@ -470,6 +470,8 @@ private class CjoSignatureMaterializer {
     private let pkg: Package
     private let file: File
     private let nominalDecls: HashMap<String, Decl> = HashMap<String, Decl>()
+    private let extendDecls: HashMap<String, ExtendDecl> = HashMap<String, ExtendDecl>()
+    private let activeGenericParams: ArrayList<GenericParamDecl> = ArrayList<GenericParamDecl>()
 
     public init(packageName: String, pkg: Package, file: File) {
         this.packageName = packageName
@@ -510,19 +512,113 @@ private class CjoSignatureMaterializer {
         if (pos >= signature.size) {
             return
         }
+        if (parsedName.text == "Extend!") {
+            MaterializeExtendSignature(signature, pos, mangle)
+            return
+        }
         let marker = signature[pos]
         if (IsNominalKind(marker)) {
             let nominal = EnsureNominal(parsedName.text, marker, genericArity.arity)
+            let genericMark = PushGenericParams(nominal)
             MaterializeMemberSignature(signature, pos + 1, nominal, mangle)
+            RestoreGenericParams(genericMark)
             return
         }
         if (marker == b'F' && genericArity.arity == 0) {
             MaterializeFunction(parsedName.text, signature, pos, mangle, None)
+            return
+        }
+        if (marker == b'P') {
+            MaterializePropertyAccessorSignature(parsedName.text, signature, pos, mangle)
         }
     }
 
+    private func MaterializeExtendSignature(signature: String, extendStart: Int64, mangle: String): Unit {
+        let memberStart = FindExtendMemberStart(signature, extendStart)
+        if (memberStart <= extendStart || memberStart >= signature.size) {
+            return
+        }
+        let headerKey = signature[extendStart..memberStart]
+        let extendDecl = EnsureExtendDecl(signature, extendStart, memberStart, headerKey)
+        let genericMark = PushGenericParams(extendDecl)
+        MaterializeMemberSignature(signature, memberStart, extendDecl, mangle)
+        RestoreGenericParams(genericMark)
+    }
+
+    private func FindExtendMemberStart(signature: String, extendStart: Int64): Int64 {
+        let extended = ParseType(signature, extendStart)
+        if (!extended.ok) {
+            return -1
+        }
+        var pos = extended.next
+        if (pos + 1 < signature.size && signature[pos] == b'<' && signature[pos + 1] == b':') {
+            pos += 2
+            while (pos < signature.size && signature[pos] != b'X' && signature[pos] != b'W') {
+                if (signature[pos] == b'&') {
+                    pos++
+                    continue
+                }
+                let inherited = ParseType(signature, pos)
+                if (!inherited.ok || inherited.next <= pos) {
+                    break
+                }
+                pos = inherited.next
+            }
+        }
+        while (pos < signature.size && signature[pos] != b'X') {
+            pos++
+        }
+        if (pos >= signature.size || signature[pos] != b'X') {
+            return -1
+        }
+        return pos + 1
+    }
+
+    private func EnsureExtendDecl(signature: String, extendStart: Int64, memberStart: Int64,
+        headerKey: String): ExtendDecl {
+        if (let Some(existing) <- extendDecls.get(headerKey)) {
+            return existing
+        }
+        let extendDecl = ExtendDecl()
+        extendDecl.identifier = SrcIdentifier("Extend!")
+        extendDecl.fullPackageName = packageName
+        extendDecl.moduleName = RootPackageName(packageName)
+        extendDecl.toBeCompiled = false
+        extendDecl.rawMangleName = "Extend!" + headerKey
+        extendDecl.mangledName = extendDecl.rawMangleName
+        MarkImportedDecl(extendDecl)
+
+        AttachGenericNames(extendDecl, CollectGenericNames(signature, extendStart, memberStart))
+        let genericMark = PushGenericParams(extendDecl)
+        let extended = ParseType(signature, extendStart)
+        if (extended.ok) {
+            extendDecl.extendedType = Some(TypeNodeForTy(extended.ty))
+            extendDecl.SetTy(extended.ty)
+            var pos = extended.next
+            if (pos + 1 < memberStart && signature[pos] == b'<' && signature[pos + 1] == b':') {
+                pos += 2
+                while (pos < memberStart && signature[pos] != b'X' && signature[pos] != b'W') {
+                    if (signature[pos] == b'&') {
+                        pos++
+                        continue
+                    }
+                    let inherited = ParseType(signature, pos)
+                    if (!inherited.ok || inherited.next <= pos) {
+                        break
+                    }
+                    extendDecl.inheritedTypes.add(TypeNodeForTy(inherited.ty))
+                    pos = inherited.next
+                }
+            }
+        }
+        RestoreGenericParams(genericMark)
+        extendDecls[headerKey] = extendDecl
+        file.decls.add(extendDecl)
+        return extendDecl
+    }
+
     private func MaterializeMemberSignature(signature: String, memberStart: Int64, nominal: Decl, mangle: String): Unit {
-        if (memberStart >= signature.size || signature[memberStart] == b'P') {
+        if (memberStart >= signature.size) {
             return
         }
         let parsedMember = ParseLengthText(signature, memberStart)
@@ -543,16 +639,117 @@ private class CjoSignatureMaterializer {
         }
         if (signature[pos] == b'V') {
             MaterializeMemberVar(parsedMember.text, signature, pos, mangle, nominal)
+            return
         }
+        if (signature[pos] == b'P') {
+            let _ = EnsureProperty(parsedMember.text, nominal, None, mangle: mangle)
+        }
+    }
+
+    private func MaterializePropertyAccessorSignature(propName: String, signature: String, propStart: Int64,
+        mangle: String): Unit {
+        let ownerStart = propStart + 1
+        let memberStart = FindExtendMemberStart(signature, ownerStart)
+        if (memberStart <= ownerStart || memberStart >= signature.size) {
+            return
+        }
+        let headerKey = signature[ownerStart..memberStart]
+        let extendDecl = EnsureExtendDecl(signature, ownerStart, memberStart, headerKey)
+        let genericMark = PushGenericParams(extendDecl)
+        MaterializePropertyAccessor(propName, signature, memberStart, mangle, extendDecl)
+        RestoreGenericParams(genericMark)
+    }
+
+    private func MaterializePropertyAccessor(propName: String, signature: String, accessorStart: Int64,
+        mangle: String, outer: Decl): Unit {
+        let parsedAccessor = ParseLengthText(signature, accessorStart)
+        if (!parsedAccessor.ok || parsedAccessor.text != "get") {
+            return
+        }
+        var pos = parsedAccessor.next
+        let genericArity = ParseGenericArity(signature, pos)
+        if (genericArity.ok) {
+            pos = genericArity.next
+        }
+        if (pos >= signature.size || genericArity.arity != 0 || signature[pos] != b'F') {
+            return
+        }
+        let parsedFunc = ParseFunctionType(signature, pos)
+        if (!parsedFunc[0] || !parsedFunc[1].isEmpty()) {
+            return
+        }
+        let propDecl = EnsureProperty(propName, outer, Some(parsedFunc[2]))
+        let getter = CreatePropertyGetter(propDecl, parsedFunc[2], mangle)
+        if (propDecl.getters.isEmpty()) {
+            propDecl.getters.add(getter)
+        }
+    }
+
+    private func EnsureProperty(name: String, outer: Decl, ty: Option<Ty>, mangle!: String = ""): PropDecl {
+        for (member in outer.GetMemberDecls()) {
+            if (member.identifier.Val() == name) {
+                if (let Some(propDecl) <- (member as PropDecl)) {
+                    if (let Some(propTy) <- ty) {
+                        propDecl.SetTy(propTy)
+                        propDecl.typeNode = Some(TypeNodeForTy(propTy))
+                    }
+                    if (!mangle.isEmpty() && propDecl.rawMangleName.isEmpty()) {
+                        propDecl.rawMangleName = mangle
+                        propDecl.mangledName = mangle
+                    }
+                    return propDecl
+                }
+            }
+        }
+        let propDecl = PropDecl()
+        propDecl.identifier = SrcIdentifier(name)
+        propDecl.toBeCompiled = false
+        propDecl.fullPackageName = packageName
+        propDecl.moduleName = RootPackageName(packageName)
+        propDecl.rawMangleName = mangle
+        propDecl.mangledName = mangle
+        propDecl.outerDecl = Some(outer)
+        if (let Some(propTy2) <- ty) {
+            propDecl.SetTy(propTy2)
+            propDecl.typeNode = Some(TypeNodeForTy(propTy2))
+        }
+        MarkImportedDecl(propDecl)
+        AddMember(outer, propDecl)
+        return propDecl
+    }
+
+    private func CreatePropertyGetter(propDecl: PropDecl, retTy: Ty, mangle: String): FuncDecl {
+        let paramLists = ArrayList<FuncParamList>()
+        paramLists.add(CreateFuncParamList(ArrayList<FuncParam>(), None))
+        let funcTy = FuncTy(Array<Ty>(), retTy)
+        let body = CreateFuncBody(paramLists, Some(TypeNodeForTy(retTy)), None, Some(funcTy))
+        let getter = CreateFuncDecl("get", Some(body), Some(funcTy))
+        body.funcDecl = Some(getter)
+        getter.toBeCompiled = false
+        getter.fullPackageName = packageName
+        getter.moduleName = RootPackageName(packageName)
+        getter.rawMangleName = mangle
+        getter.mangledName = mangle
+        getter.outerDecl = propDecl.outerDecl
+        getter.propDecl = Some(propDecl)
+        getter.isGetter = true
+        MarkImportedDecl(getter)
+        return getter
     }
 
     private func MaterializeMemberVar(name: String, signature: String, vPos: Int64, mangle: String, outer: Decl): Unit {
         let parsed = ParseVariableType(signature, vPos)
-        if (!parsed.ok) {
+        let isEnumCtor = IsEnumConstructor(outer, name)
+        if (!parsed.ok && !isEnumCtor) {
             return
         }
-        let varDecl = CreateVarDecl(name, None, Some(TypeNodeForTy(parsed.ty)))
-        varDecl.SetTy(parsed.ty)
+        let varTy = if (parsed.ok) {
+            parsed.ty
+        } else {
+            outer.GetTy() ?? InvalidTy()
+        }
+        let varDecl = CreateVarDecl(name, None, Some(TypeNodeForTy(varTy)))
+        varDecl.SetTy(varTy)
         varDecl.toBeCompiled = false
         varDecl.fullPackageName = packageName
         varDecl.moduleName = RootPackageName(packageName)
@@ -560,7 +757,45 @@ private class CjoSignatureMaterializer {
         varDecl.mangledName = mangle
         varDecl.outerDecl = Some(outer)
         MarkImportedDecl(varDecl)
+        if (isEnumCtor) {
+            varDecl.EnableAttr(Attribute.ENUM_CONSTRUCTOR)
+            if (let Some(enumDecl) <- (outer as EnumDecl)) {
+                AddEnumConstructor(enumDecl, varDecl)
+            }
+            return
+        }
         AddMember(outer, varDecl, prepend: true)
+    }
+
+    private func IsEnumConstructor(outer: Decl, name: String): Bool {
+        if (let None <- (outer as EnumDecl)) {
+            return false
+        }
+        return !name.isEmpty() && name[0] >= b'A' && name[0] <= b'Z'
+    }
+
+    private func AddEnumConstructorIfNeeded(outer: Decl, originalName: String, decl: Decl): Bool {
+        if (!IsEnumConstructor(outer, originalName)) {
+            return false
+        }
+        decl.EnableAttr(Attribute.ENUM_CONSTRUCTOR)
+        if (let Some(enumDecl) <- (outer as EnumDecl)) {
+            AddEnumConstructor(enumDecl, decl)
+            return true
+        }
+        return false
+    }
+
+    private func AddEnumConstructor(enumDecl: EnumDecl, decl: Decl): Unit {
+        if (IsStdCoreOption(enumDecl) && decl.identifier.Val() == "Some") {
+            enumDecl.constructors.add(decl, at: 0)
+            return
+        }
+        enumDecl.constructors.add(decl)
+    }
+
+    private func IsStdCoreOption(enumDecl: EnumDecl): Bool {
+        return enumDecl.fullPackageName == "std.core" && enumDecl.identifier.Val() == "Option"
     }
 
     private func MaterializeFunction(name: String, signature: String, fPos: Int64, mangle: String,
@@ -585,8 +820,9 @@ private class CjoSignatureMaterializer {
         let paramLists = ArrayList<FuncParamList>()
         paramLists.add(paramList)
         let funcTy = FuncTy(paramTys.toArray(), retTy)
+        let astName = if (name == "<init>") { "init" } else { name }
         let body = CreateFuncBody(paramLists, Some(TypeNodeForTy(retTy)), None, Some(funcTy))
-        let funcDecl = CreateFuncDecl(name, Some(body), Some(funcTy))
+        let funcDecl = CreateFuncDecl(astName, Some(body), Some(funcTy))
         body.funcDecl = Some(funcDecl)
         funcDecl.toBeCompiled = false
         funcDecl.fullPackageName = packageName
@@ -596,7 +832,12 @@ private class CjoSignatureMaterializer {
         MarkImportedDecl(funcDecl)
         if (let Some(parent) <- outer) {
             funcDecl.outerDecl = Some(parent)
-            if (IsFieldOperator(name)) {
+            if (AddEnumConstructorIfNeeded(parent, name, funcDecl)) {
+                return
+            }
+            if (name == "<init>" || name == "init") {
+                funcDecl.EnableAttr(Attribute.CONSTRUCTOR)
+            } else if (IsFieldOperator(name)) {
                 funcDecl.EnableAttr(Attribute.OPERATOR)
                 funcDecl.op = OperatorTokenKind(name)
             }
@@ -709,7 +950,7 @@ private class CjoSignatureMaterializer {
     }
 
     private func TyForNamedType(name: String, typeArgs: ArrayList<Ty>): Ty {
-        if (name == "Array" || name == "RawArray") {
+        if (name == "RawArray") {
             let elemTy = if (typeArgs.isEmpty()) { AnyTy() } else { typeArgs[0] }
             return ArrayTy(elemTy, 1u64)
         }
@@ -718,6 +959,9 @@ private class CjoSignatureMaterializer {
             return PointerTy(elemTy2)
         }
         if (name.size == 1 && name[0] >= b'A' && name[0] <= b'Z') {
+            if (let Some(genericTy) <- LookupActiveGenericTy(name)) {
+                return genericTy
+            }
             return AnyTy()
         }
         let nominal = EnsureNominal(name, NominalKindForName(name), typeArgs.size)
@@ -734,6 +978,34 @@ private class CjoSignatureMaterializer {
             return InterfaceTy(name, interfaceDecl, typeArgs.toArray())
         }
         return InvalidTy()
+    }
+
+    private func LookupActiveGenericTy(name: String): Option<Ty> {
+        var idx = activeGenericParams.size - 1
+        while (idx >= 0) {
+            let param = activeGenericParams[idx]
+            if (param.identifier.Val() == name) {
+                return Some(param.GetTy() ?? GenericsTy(name, param))
+            }
+            idx--
+        }
+        return None
+    }
+
+    private func PushGenericParams(decl: Decl): Int64 {
+        let mark = activeGenericParams.size
+        if (let Some(generic) <- decl.generic) {
+            for (param in generic.typeParameters) {
+                activeGenericParams.add(param)
+            }
+        }
+        return mark
+    }
+
+    private func RestoreGenericParams(mark: Int64): Unit {
+        while (activeGenericParams.size > mark) {
+            activeGenericParams.remove(at: activeGenericParams.size - 1)
+        }
     }
 
     private func EnsureNominal(name: String, kind: UInt8, genericArity: Int64): Decl {
@@ -770,17 +1042,30 @@ private class CjoSignatureMaterializer {
     }
 
     private func AttachGeneric(decl: Decl, genericArity: Int64): Unit {
-        let generic = Generic()
+        let names = ArrayList<String>()
         var idx: Int64 = 0
         while (idx < genericArity) {
+            names.add(if (idx == 0) { "T" } else { "T${idx}" })
+            idx++
+        }
+        AttachGenericNames(decl, names)
+    }
+
+    private func AttachGenericNames(decl: Decl, names: ArrayList<String>): Unit {
+        if (names.isEmpty()) {
+            return
+        }
+        let generic = Generic()
+        decl.EnableAttr(Attribute.GENERIC)
+        for (idx in 0..names.size) {
             let param = GenericParamDecl()
-            param.identifier = SrcIdentifier(if (idx == 0) { "T" } else { "T${idx}" })
+            param.identifier = SrcIdentifier(names[idx])
             param.fullPackageName = packageName
             param.moduleName = RootPackageName(packageName)
+            param.outerDecl = Some(decl)
             MarkImportedDecl(param)
             param.SetTy(GenericsTy(param.identifier.Val(), param))
             generic.typeParameters.add(param)
-            idx++
         }
         decl.generic = Some(generic)
     }
@@ -814,6 +1099,8 @@ private class CjoSignatureMaterializer {
             if (let Some(body3) <- interfaceDecl.body) { AddDeclToMembers(body3.decls, member, prepend: prepend) }
         } else if (let Some(enumDecl) <- (parent as EnumDecl)) {
             enumDecl.members.add(member)
+        } else if (let Some(extendDecl) <- (parent as ExtendDecl)) {
+            extendDecl.members.add(member)
         }
     }
 
@@ -891,6 +1178,32 @@ private class CjoSignatureMaterializer {
         return ParsedGenericArity(true, value, pos + 1)
     }
 
+    private func CollectGenericNames(signature: String, start: Int64, end: Int64): ArrayList<String> {
+        let names = ArrayList<String>()
+        var pos = start
+        while (pos < end) {
+            let parsed = ParseLengthText(signature, pos)
+            if (parsed.ok) {
+                if (parsed.text.size == 1 && parsed.text[0] >= b'A' && parsed.text[0] <= b'Z') {
+                    var seen = false
+                    for (name in names) {
+                        if (name == parsed.text) {
+                            seen = true
+                            break
+                        }
+                    }
+                    if (!seen) {
+                        names.add(parsed.text)
+                    }
+                }
+                pos = parsed.next
+            } else {
+                pos++
+            }
+        }
+        return names
+    }
+
     private func ParseLengthText(signature: String, start: Int64): ParsedText {
         var pos = start
         var len: Int64 = 0
@@ -938,6 +1251,11 @@ private class CjoSignatureMaterializer {
     private func NominalKindForName(name: String): UInt8 {
         if (name == "Option" || name == "Ordering" || name.endsWith("State")) {
             return b'U'
+        }
+        if (name == "Collection" || name == "Iterable" || name == "Iterator" ||
+            name == "Equatable" || name == "Comparable" || name == "Hashable" ||
+            name == "Countable" || name == "ToString") {
+            return b'I'
         }
         if (name.endsWith("Exception") || name.endsWith("Error") || name == "Object") {
             return b'C'

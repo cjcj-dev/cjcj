@@ -31,6 +31,12 @@ public class CGFunction <: CGValue {
     public func SetWrapperFunction(wrapper: LLVMValueRef): Unit { wrapperF = wrapper }
 
     public func GetArgByIndexFromCHIR(index: Int64): LLVMValueRef {
+        if (let Some(functionType) <- cgFunctionType) {
+            let realArgIndices = functionType.GetRealArgIndices()
+            if (index >= 0 && index < realArgIndices.size) {
+                return unsafe { LLVMGetParam(GetRawFunction(), UInt32(realArgIndices[index])) }
+            }
+        }
         let offset = if (IsSRet()) { 1 } else { 0 }
         return unsafe { LLVMGetParam(GetRawFunction(), UInt32(index + offset)) }
     }

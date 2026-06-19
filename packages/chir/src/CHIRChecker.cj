@@ -1361,8 +1361,9 @@ public class CHIRChecker {
         CheckApplyThisType(expr, callee, topLevelFunc, result)
         if (let Some(calleeTy) <- callee.GetType()) {
             if (let Some(funcTy) <- (calleeTy as FuncType)) {
-                CheckApplyFuncArgs(expr.GetArgs(), funcTy, expr, topLevelFunc, result)
-                CheckCallReturnType(funcTy.GetReturnType(), expr, topLevelFunc, result)
+                let instFuncTy = InstantiateApplyFuncType(funcTy, expr, callee)
+                CheckApplyFuncArgs(expr.GetArgs(), instFuncTy, expr, topLevelFunc, result)
+                CheckCallReturnType(instFuncTy.GetReturnType(), expr, topLevelFunc, result)
             }
         }
     }
@@ -1519,6 +1520,235 @@ public class CHIRChecker {
             }
         }
         return None
+    }
+
+    private func InstantiateApplyFuncType(funcTy: FuncType, expr: Apply, callee: Value): FuncType {
+        let genericParams = ArrayList<GenericType>()
+        let replacements = ArrayList<Type>()
+        AddParentGenericReplacements(expr, callee, genericParams, replacements)
+        if (let Some(fn) <- callee.AsFunction()) {
+            let fnGenericParams = fn.GetGenericTypeParams()
+            let instArgs = expr.GetInstantiatedTypeArgs()
+            var idx: Int64 = 0
+            while (idx < fnGenericParams.size && idx < instArgs.size) {
+                genericParams.add(fnGenericParams[idx])
+                replacements.add(instArgs[idx])
+                idx++
+            }
+        }
+        if (genericParams.isEmpty()) {
+            return funcTy
+        }
+        let params = ArrayList<Type>()
+        for (paramTy in funcTy.GetParamTypes()) {
+            params.add(SubstituteGenericType(paramTy, genericParams, replacements))
+        }
+        let retTy = SubstituteGenericType(funcTy.GetReturnType(), genericParams, replacements)
+        return FuncType(params, retTy, hasVarLenParam: funcTy.HasVarArg(), isCFunc: funcTy.IsCFunc())
+    }
+
+    private func AddParentGenericReplacements(expr: Apply, callee: Value, genericParams: ArrayList<GenericType>,
+        replacements: ArrayList<Type>): Unit {
+        let fn = callee.AsFunction() ?? return
+        let parentDef = fn.GetParentCustomTypeDef() ?? return
+        let thisTy = match (expr.GetThisType()) {
+            case Some(value) => value
+            case None => return
+        }
+        if (let Some(extendDef) <- (parentDef as ExtendDef)) {
+            AddExtendGenericReplacements(extendDef, thisTy, genericParams, replacements)
+            return
+        }
+        let thisCustom = match (thisTy.StripAllRefs() as CustomType) {
+            case Some(value) => value
+            case None => return
+        }
+        if (!SameCustomDefForGenericInstantiation(thisCustom.GetCustomTypeDef(), parentDef)) {
+            return
+        }
+        let parentGenericParams = parentDef.GetGenericTypeParams()
+        let parentArgs = thisCustom.GetGenericArgs()
+        var idx: Int64 = 0
+        while (idx < parentGenericParams.size && idx < parentArgs.size) {
+            genericParams.add(parentGenericParams[idx])
+            replacements.add(parentArgs[idx])
+            idx++
+        }
+    }
+
+    private func AddExtendGenericReplacements(extendDef: ExtendDef, thisTy: Type,
+        genericParams: ArrayList<GenericType>, replacements: ArrayList<Type>): Unit {
+        if (let Some(extendedTy) <- extendDef.GetExtendedType()) {
+            CollectGenericReplacementsFromTypes(extendedTy.StripAllRefs(), thisTy.StripAllRefs(), genericParams,
+                replacements)
+        }
+    }
+
+    private func CollectGenericReplacementsFromTypes(pattern: Type, actual: Type,
+        genericParams: ArrayList<GenericType>, replacements: ArrayList<Type>): Unit {
+        if (let Some(genericTy) <- (pattern as GenericType)) {
+            AddGenericReplacementIfMissing(genericTy, actual, genericParams, replacements)
+            return
+        }
+        if (let Some(patternRef) <- (pattern as RefType)) {
+            if (let Some(actualRef) <- (actual as RefType)) {
+                CollectGenericReplacementsFromTypes(patternRef.GetBaseType(), actualRef.GetBaseType(),
+                    genericParams, replacements)
+            }
+            return
+        }
+        if (let Some(patternCustom) <- (pattern as CustomType)) {
+            if (let Some(actualCustom) <- (actual as CustomType)) {
+                if (SameCustomDefForGenericInstantiation(patternCustom.GetCustomTypeDef(),
+                    actualCustom.GetCustomTypeDef())) {
+                    CollectGenericReplacementsFromTypeArgs(patternCustom.GetGenericArgs(),
+                        actualCustom.GetGenericArgs(), genericParams, replacements)
+                }
+            }
+            return
+        }
+        if (let Some(patternRawArray) <- (pattern as RawArrayType)) {
+            if (let Some(actualRawArray) <- (actual as RawArrayType)) {
+                CollectGenericReplacementsFromTypes(patternRawArray.GetElementType(),
+                    actualRawArray.GetElementType(), genericParams, replacements)
+            }
+            return
+        }
+        if (let Some(patternVArray) <- (pattern as VArrayType)) {
+            if (let Some(actualVArray) <- (actual as VArrayType)) {
+                CollectGenericReplacementsFromTypes(patternVArray.GetElementType(), actualVArray.GetElementType(),
+                    genericParams, replacements)
+            }
+            return
+        }
+        if (let Some(patternPointer) <- (pattern as CPointerType)) {
+            if (let Some(actualPointer) <- (actual as CPointerType)) {
+                CollectGenericReplacementsFromTypes(patternPointer.GetElementType(), actualPointer.GetElementType(),
+                    genericParams, replacements)
+            }
+            return
+        }
+        if (let Some(patternBox) <- (pattern as BoxType)) {
+            if (let Some(actualBox) <- (actual as BoxType)) {
+                CollectGenericReplacementsFromTypes(patternBox.GetBaseType(), actualBox.GetBaseType(),
+                    genericParams, replacements)
+            }
+            return
+        }
+        if (let Some(patternTuple) <- (pattern as TupleType)) {
+            if (let Some(actualTuple) <- (actual as TupleType)) {
+                CollectGenericReplacementsFromTypeArgs(patternTuple.GetTypeArgs(), actualTuple.GetTypeArgs(),
+                    genericParams, replacements)
+            }
+            return
+        }
+        if (let Some(patternFunc) <- (pattern as FuncType)) {
+            if (let Some(actualFunc) <- (actual as FuncType)) {
+                CollectGenericReplacementsFromTypeArgs(patternFunc.GetParamTypes(), actualFunc.GetParamTypes(),
+                    genericParams, replacements)
+                CollectGenericReplacementsFromTypes(patternFunc.GetReturnType(), actualFunc.GetReturnType(),
+                    genericParams, replacements)
+            }
+        }
+    }
+
+    private func CollectGenericReplacementsFromTypeArgs(patterns: ArrayList<Type>, actuals: ArrayList<Type>,
+        genericParams: ArrayList<GenericType>, replacements: ArrayList<Type>): Unit {
+        var idx: Int64 = 0
+        while (idx < patterns.size && idx < actuals.size) {
+            CollectGenericReplacementsFromTypes(patterns[idx], actuals[idx], genericParams, replacements)
+            idx++
+        }
+    }
+
+    private func AddGenericReplacementIfMissing(genericTy: GenericType, replacement: Type,
+        genericParams: ArrayList<GenericType>, replacements: ArrayList<Type>): Unit {
+        var idx: Int64 = 0
+        while (idx < genericParams.size && idx < replacements.size) {
+            if (genericTy.IsEqual(genericParams[idx])) {
+                return
+            }
+            idx++
+        }
+        genericParams.add(genericTy)
+        replacements.add(replacement)
+    }
+
+    private func SubstituteGenericType(ty: Type, genericParams: ArrayList<GenericType>,
+        replacements: ArrayList<Type>): Type {
+        if (let Some(genericTy) <- (ty as GenericType)) {
+            if (let Some(replacement) <- FindGenericReplacement(genericTy, genericParams, replacements)) {
+                return replacement
+            }
+            return ty
+        }
+        if (let Some(refTy) <- (ty as RefType)) {
+            return RefType(SubstituteGenericType(refTy.GetBaseType(), genericParams, replacements))
+        }
+        if (let Some(rawArrayTy) <- (ty as RawArrayType)) {
+            return RawArrayType(SubstituteGenericType(rawArrayTy.GetElementType(), genericParams, replacements),
+                dims: rawArrayTy.GetDims())
+        }
+        if (let Some(varrayTy) <- (ty as VArrayType)) {
+            return VArrayType(SubstituteGenericType(varrayTy.GetElementType(), genericParams, replacements),
+                varrayTy.size)
+        }
+        if (let Some(pointerTy) <- (ty as CPointerType)) {
+            return CPointerType(SubstituteGenericType(pointerTy.GetElementType(), genericParams, replacements))
+        }
+        if (let Some(boxTy) <- (ty as BoxType)) {
+            return BoxType(SubstituteGenericType(boxTy.GetBaseType(), genericParams, replacements))
+        }
+        if (let Some(tupleTy) <- (ty as TupleType)) {
+            return TupleType(SubstituteGenericTypeArgs(tupleTy.GetTypeArgs(), genericParams, replacements))
+        }
+        if (let Some(funcTy) <- (ty as FuncType)) {
+            let params = SubstituteGenericTypeArgs(funcTy.GetParamTypes(), genericParams, replacements)
+            let retTy = SubstituteGenericType(funcTy.GetReturnType(), genericParams, replacements)
+            return FuncType(params, retTy, hasVarLenParam: funcTy.HasVarArg(), isCFunc: funcTy.IsCFunc())
+        }
+        if (let Some(structTy) <- (ty as StructType)) {
+            return StructType(structTy.GetStructDef(),
+                SubstituteGenericTypeArgs(structTy.GetGenericArgs(), genericParams, replacements))
+        }
+        if (let Some(classTy) <- (ty as ClassType)) {
+            return ClassType(classTy.GetClassDef(),
+                SubstituteGenericTypeArgs(classTy.GetGenericArgs(), genericParams, replacements))
+        }
+        if (let Some(enumTy) <- (ty as EnumType)) {
+            return EnumType(enumTy.GetEnumDef(),
+                SubstituteGenericTypeArgs(enumTy.GetGenericArgs(), genericParams, replacements))
+        }
+        return ty
+    }
+
+    private func SubstituteGenericTypeArgs(args: ArrayList<Type>, genericParams: ArrayList<GenericType>,
+        replacements: ArrayList<Type>): ArrayList<Type> {
+        let out = ArrayList<Type>()
+        for (arg in args) {
+            out.add(SubstituteGenericType(arg, genericParams, replacements))
+        }
+        return out
+    }
+
+    private func FindGenericReplacement(genericTy: GenericType, genericParams: ArrayList<GenericType>,
+        replacements: ArrayList<Type>): Option<Type> {
+        var idx: Int64 = 0
+        while (idx < genericParams.size && idx < replacements.size) {
+            if (genericTy.IsEqual(genericParams[idx])) {
+                return Some(replacements[idx])
+            }
+            idx++
+        }
+        return None
+    }
+
+    private func SameCustomDefForGenericInstantiation(left: CustomTypeDef, right: CustomTypeDef): Bool {
+        if (left.nodeId == right.nodeId) {
+            return true
+        }
+        return left.GetPackageName() == right.GetPackageName() &&
+            left.GetSrcCodeIdentifier() == right.GetSrcCodeIdentifier()
     }
 
     private func CheckApplyFuncArgs(args: ArrayList<Value>, funcTy: FuncType, expr: Expression,

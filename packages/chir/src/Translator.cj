@@ -21,6 +21,7 @@ import cangjie_compiler::ast.DoWhileExpr as AstDoWhileExpr
 import cangjie_compiler::ast.EnumDecl as AstEnumDecl
 import cangjie_compiler::ast.EnumPattern as AstEnumPattern
 import cangjie_compiler::ast.EnumTy as AstEnumTy
+import cangjie_compiler::ast.ExtendDecl as AstExtendDecl
 import cangjie_compiler::ast.Expr as AstExpr
 import cangjie_compiler::ast.ForInExpr as AstForInExpr
 import cangjie_compiler::ast.ForInKind as AstForInKind
@@ -38,6 +39,7 @@ import cangjie_compiler::ast.MatchExpr as AstMatchExpr
 import cangjie_compiler::ast.MemberAccess as AstMemberAccess
 import cangjie_compiler::ast.Node as AstNode
 import cangjie_compiler::ast.Pattern as AstPattern
+import cangjie_compiler::ast.PropDecl as AstPropDecl
 import cangjie_compiler::ast.RefExpr as AstRefExpr
 import cangjie_compiler::ast.ReturnExpr as AstReturnExpr
 import cangjie_compiler::ast.StructDecl as AstStructDecl
@@ -129,6 +131,7 @@ public class Translator {
             case ASTKind.CLASS_DECL => trans.Visit(RequireNodeAsClassDecl(nodePtr))
             case ASTKind.INTERFACE_DECL => trans.Visit(RequireNodeAsInterfaceDecl(nodePtr))
             case ASTKind.ENUM_DECL => trans.Visit(RequireNodeAsEnumDecl(nodePtr))
+            case ASTKind.EXTEND_DECL => trans.Visit(RequireNodeAsExtendDecl(nodePtr))
             case ASTKind.VAR_DECL => trans.Visit(RequireNodeAsVarDecl(nodePtr))
             case ASTKind.BLOCK => trans.Visit(RequireNodeAsBlock(nodePtr))
             case ASTKind.LIT_CONST_EXPR => trans.Visit(RequireNodeAsLitConstExpr(nodePtr))
@@ -297,6 +300,17 @@ public class Translator {
         return None
     }
 
+    public func Visit(extendDecl: AstExtendDecl): Option<Value> {
+        let def = RequireExtendDef(chirTy.GetGlobalNominalCache(extendDecl))
+        if (let Some(astTy) <- extendDecl.GetTy()) {
+            def.SetExtendedType(chirTy.TranslateType(astTy))
+        }
+        for (member in extendDecl.members) {
+            TranslateMemberDecl(def, member)
+        }
+        return None
+    }
+
     public func Visit(varDecl: AstVarDecl): Option<Value> {
         if (currentBlock.isNone()) {
             return globalSymbolTable.TryGet(varDecl)
@@ -370,6 +384,12 @@ public class Translator {
     public func Visit(expr: AstBinaryExpr): Option<Value> {
         let lhs = Translator.TranslateASTNode(RequireExpr(expr.leftExpr, "binary lhs"), this) ??
             throw IllegalStateException("faithful AST2CHIR binary lhs produced no value")
+        if (expr.op == AstTokenKind.AND) {
+            return TransShortCircuitAnd(lhs, RequireExpr(expr.rightExpr, "binary rhs"))
+        }
+        if (expr.op == AstTokenKind.OR) {
+            return TransShortCircuitOr(lhs, RequireExpr(expr.rightExpr, "binary rhs"))
+        }
         let rhs = Translator.TranslateASTNode(RequireExpr(expr.rightExpr, "binary rhs"), this) ??
             throw IllegalStateException("faithful AST2CHIR binary rhs produced no value")
         let resultTy = chirTy.TranslateType(RequireAstTy(expr))
@@ -398,7 +418,7 @@ public class Translator {
         }
         let callee = globalSymbolTable.Get(calleeDecl)
         let argValues = ArrayList<Value>()
-        let expectedParamTys = FuncParamTypes(calleeDecl)
+        let expectedParamTys = FuncParamTypes(expr, calleeDecl)
         var idx: Int64 = 0
         for (arg in expr.args) {
             if (let Some(argExpr) <- arg.expr) {
@@ -467,8 +487,13 @@ public class Translator {
         }
         if (let Some(subscriptExpr) <- (leftExpr as AstSubscriptExpr)) {
             if (!subscriptExpr.isTupleAccess) {
-                TranslateVArrayAssign(expr, subscriptExpr, rightExpr)
-                return None
+                if (subscriptExpr.IsVArrayAccess()) {
+                    TranslateVArrayAssign(expr, subscriptExpr, rightExpr)
+                    return None
+                }
+                if (TranslateSubscriptSetterAssign(expr, subscriptExpr, rightExpr)) {
+                    return None
+                }
             }
         }
         if (IsCompoundAssignOp(expr.op)) {
@@ -486,6 +511,9 @@ public class Translator {
             return TranslateStaticTargetOrPackageMemberAccess(expr, target)
         }
         if (IsInstanceMember(target)) {
+            if (let Some(propDecl) <- (target as AstPropDecl)) {
+                return TranslatePropertyGetter(expr, propDecl)
+            }
             if (let Some(_) <- (target as AstVarDecl)) {
                 let leftValueInfo = TranslateMemberAccessAsLeftValue(expr)
                 return LoadLeftValue(leftValueInfo, MemberAccessValueType(expr, target))
@@ -496,6 +524,44 @@ public class Translator {
             }
         }
         throw IllegalArgumentException("not yet ported in faithful AST2CHIR: unsupported member access")
+    }
+
+    private func TranslatePropertyGetter(expr: AstMemberAccess, propDecl: AstPropDecl): Value {
+        if (propDecl.getters.isEmpty()) {
+            throw IllegalStateException("faithful AST2CHIR property has no getter: ${propDecl.identifier.Val()}")
+        }
+        let getter = propDecl.getters[0]
+        let resultTy = chirTy.TranslateType(RequireAstTy(expr))
+        let callee = GetSymbolTable(getter)
+        let thisObj = TranslatePropertyGetterThisObject(expr, getter, callee)
+        let args = ArrayList<Value>()
+        args.add(thisObj)
+        return RequireResult(builder.CreateApply(resultTy, callee,
+            FuncCallContext(args: args, thisType: thisObj.GetType()), CurrentBlock()))
+    }
+
+    private func TranslatePropertyGetterThisObject(expr: AstMemberAccess, getter: AstFuncDecl, callee: Value): Value {
+        if (let Some(baseExpr) <- expr.baseExpr) {
+            let baseTy = chirTy.TranslateType(RequireAstTy(baseExpr))
+            if (PropertyGetterNeedsAddress(callee)) {
+                return AddressOfLeftValue(TranslateExprAsLeftValue(baseExpr), baseTy)
+            }
+            return Translator.TranslateASTNode(baseExpr, this) ??
+                throw IllegalStateException("faithful AST2CHIR property getter base produced no value")
+        }
+        if (let Some(_) <- getter.outerDecl) {
+            return GetCurrentThisObject()
+        }
+        throw IllegalStateException("faithful AST2CHIR property getter has no receiver")
+    }
+
+    private func PropertyGetterNeedsAddress(callee: Value): Bool {
+        if (let Some(calleeTy) <- callee.GetType()) {
+            if (let Some(funcTy) <- (calleeTy as FuncType)) {
+                return funcTy.GetNumOfParams() > 0 && funcTy.GetParamType(0).IsRef()
+            }
+        }
+        return false
     }
 
     public func Visit(expr: AstWhileExpr): Option<Value> {
@@ -709,12 +775,31 @@ public class Translator {
     }
 
     private func TranslateMemberDecl(def: CustomTypeDef, member: AstDecl): Unit {
-        if (let Some(varDecl) <- (member as AstVarDecl)) {
+        if (let Some(propDecl) <- (member as AstPropDecl)) {
+            AddPropertyAccessors(def, propDecl)
+        } else if (let Some(varDecl) <- (member as AstVarDecl)) {
             AddMemberVarDecl(def, varDecl)
         } else if (let Some(funcDecl) <- (member as AstFuncDecl)) {
             if (let Some(value) <- globalSymbolTable.TryGet(funcDecl)) {
                 if (let Some(fn) <- (value as Function)) {
                     def.AddMethod(fn)
+                }
+            }
+        }
+    }
+
+    private func AddPropertyAccessors(def: CustomTypeDef, propDecl: AstPropDecl): Unit {
+        for (getter in propDecl.getters) {
+            if (let Some(value) <- globalSymbolTable.TryGet(getter)) {
+                if (let Some(fn) <- (value as Function)) {
+                    def.AddMethod(fn)
+                }
+            }
+        }
+        for (setter in propDecl.setters) {
+            if (let Some(value2) <- globalSymbolTable.TryGet(setter)) {
+                if (let Some(fn2) <- (value2 as Function)) {
+                    def.AddMethod(fn2)
                 }
             }
         }
@@ -761,6 +846,60 @@ public class Translator {
         let entry = builder.CreateBlock(body)
         body.SetEntryBlock(entry)
         return body
+    }
+
+    private func TransShortCircuitAnd(leftValue: Value, rightExpr: AstExpr): Option<Value> {
+        let boolTy = builder.context.GetBoolTy()
+        let resultLoc = RequireResult(builder.CreateAllocate(builder.context.GetRefTy(boolTy), boolTy,
+            CurrentBlock()))
+        let parentGroup = RequireParentBlockGroup(CurrentBlock(), "short-circuit and")
+        let thenBlock = builder.CreateBlock(parentGroup)
+        let elseBlock = builder.CreateBlock(parentGroup)
+        let endBlock = builder.CreateBlock(parentGroup)
+        builder.CreateBranch(leftValue, thenBlock, elseBlock, CurrentBlock())
+
+        currentBlock = thenBlock
+        let rhsValue = Translator.TranslateASTNode(rightExpr, this) ??
+            throw IllegalStateException("faithful AST2CHIR short-circuit and rhs produced no value")
+        builder.CreateStore(CastValueIfNeeded(rhsValue, boolTy), resultLoc, CurrentBlock())
+        if (CurrentBlock().GetTerminator().isNone()) {
+            builder.CreateGoTo(endBlock, CurrentBlock())
+        }
+
+        currentBlock = elseBlock
+        let constantFalse = RequireResult(builder.CreateConstant(boolTy, BoolLiteral(false), CurrentBlock()))
+        builder.CreateStore(constantFalse, resultLoc, CurrentBlock())
+        builder.CreateGoTo(endBlock, CurrentBlock())
+
+        currentBlock = endBlock
+        return RequireResult(builder.CreateLoad(boolTy, resultLoc, CurrentBlock()))
+    }
+
+    private func TransShortCircuitOr(leftValue: Value, rightExpr: AstExpr): Option<Value> {
+        let boolTy = builder.context.GetBoolTy()
+        let resultLoc = RequireResult(builder.CreateAllocate(builder.context.GetRefTy(boolTy), boolTy,
+            CurrentBlock()))
+        let parentGroup = RequireParentBlockGroup(CurrentBlock(), "short-circuit or")
+        let thenBlock = builder.CreateBlock(parentGroup)
+        let elseBlock = builder.CreateBlock(parentGroup)
+        let endBlock = builder.CreateBlock(parentGroup)
+        builder.CreateBranch(leftValue, thenBlock, elseBlock, CurrentBlock())
+
+        currentBlock = thenBlock
+        let constantTrue = RequireResult(builder.CreateConstant(boolTy, BoolLiteral(true), CurrentBlock()))
+        builder.CreateStore(constantTrue, resultLoc, CurrentBlock())
+        builder.CreateGoTo(endBlock, CurrentBlock())
+
+        currentBlock = elseBlock
+        let rhsValue = Translator.TranslateASTNode(rightExpr, this) ??
+            throw IllegalStateException("faithful AST2CHIR short-circuit or rhs produced no value")
+        builder.CreateStore(CastValueIfNeeded(rhsValue, boolTy), resultLoc, CurrentBlock())
+        if (CurrentBlock().GetTerminator().isNone()) {
+            builder.CreateGoTo(endBlock, CurrentBlock())
+        }
+
+        currentBlock = endBlock
+        return RequireResult(builder.CreateLoad(boolTy, resultLoc, CurrentBlock()))
     }
 
     private func TranslateForInRange(expr: AstForInExpr): Option<Value> {
@@ -847,19 +986,33 @@ public class Translator {
         return forIn
     }
 
+    private func TranslateForInRangePatternDecl(pattern: AstPattern): Unit {
+        if (let Some(varPattern) <- (pattern as AstVarPattern)) {
+            if (let Some(varDecl) <- varPattern.varDecl) {
+                let _ = Translator.TranslateASTNode(varDecl, this)
+            }
+            return
+        }
+        if (let Some(varOrEnum) <- (pattern as AstVarOrEnumPattern)) {
+            if (let Some(realPattern) <- varOrEnum.pattern) {
+                TranslateForInRangePatternDecl(realPattern)
+                return
+            }
+            throw IllegalStateException("faithful AST2CHIR unresolved VarOrEnumPattern in range ForInExpr")
+        }
+        if (let Some(_) <- (pattern as AstWildcardPattern)) {
+            return
+        }
+        throw IllegalArgumentException(
+            "not yet ported in faithful AST2CHIR: non-var range ForInExpr pattern")
+    }
+
     private func TranslateForInRangeBody(expr: AstForInExpr, forIn: ForIn): Unit {
         blockGroupStack.add(forIn.GetBody())
         currentBlock = forIn.GetBody().GetEntryBlock() ??
             throw IllegalStateException("faithful AST2CHIR for-in body has no entry block")
         if (let Some(pattern) <- expr.pattern) {
-            if (let Some(varPattern) <- (pattern as AstVarPattern)) {
-                if (let Some(varDecl) <- varPattern.varDecl) {
-                    let _ = Translator.TranslateASTNode(varDecl, this)
-                }
-            } else if (let None <- (pattern as AstWildcardPattern)) {
-                throw IllegalArgumentException(
-                    "not yet ported in faithful AST2CHIR: non-var range ForInExpr pattern")
-            }
+            TranslateForInRangePatternDecl(pattern)
         }
         TranslateForInBodyBlockGroup(expr)
         blockGroupStack.remove(at: blockGroupStack.size - 1)
@@ -1082,8 +1235,7 @@ public class Translator {
     }
 
     private func MakeForInIterNoneValue(optionTy: Type): Value {
-        let noneTag = RequireResult(builder.CreateConstant(builder.context.GetUInt32Ty(), IntLiteral(0),
-            CurrentBlock()))
+        let noneTag = CreateEnumSelectorConstantForName(optionTy, "None")
         let values = ArrayList<Value>()
         values.add(noneTag)
         return RequireResult(builder.CreateTuple(optionTy, values, CurrentBlock()))
@@ -1092,7 +1244,12 @@ public class Translator {
     private func GetEnumTagValueFromValue(value: Value): Value {
         let path = ArrayList<UInt64>()
         path.add(0u64)
-        return RequireResult(builder.CreateField(builder.context.GetUInt32Ty(), value, path, CurrentBlock()))
+        let selectorTy = if (let Some(valueTy) <- value.GetType()) {
+            GetEnumSelectorType(valueTy)
+        } else {
+            builder.context.GetUInt32Ty()
+        }
+        return RequireResult(builder.CreateField(selectorTy, value, path, CurrentBlock()))
     }
 
     private func TranslateBlockNodeToDiscarded(node: AstNode): Unit {
@@ -1312,8 +1469,7 @@ public class Translator {
 
     private func TranslateEnumPatternCondition(pattern: AstEnumPattern, selector: Value): Value {
         let tagValue = GetEnumTagValue(pattern, selector)
-        let tagConst = RequireResult(builder.CreateConstant(builder.context.GetUInt32Ty(),
-            IntLiteral(GetEnumPatternId(pattern)), CurrentBlock()))
+        let tagConst = CreateEnumSelectorConstant(RequireEnumPatternConstructor(pattern))
         return RequireResult(builder.CreateBinaryExpression(ExprKind.EQUAL, builder.context.GetBoolTy(), tagValue,
             tagConst, CurrentBlock()))
     }
@@ -1397,6 +1553,16 @@ public class Translator {
 
     private func EnumPatternPayloadTypes(pattern: AstEnumPattern): ArrayList<Type> {
         let out = ArrayList<Type>()
+        if (let Some(constructorExpr) <- pattern.constructor) {
+            if (let Some(constructorTy) <- constructorExpr.GetTy()) {
+                if (let Some(funcTy) <- (constructorTy as AstFuncTy)) {
+                    for (paramTy in funcTy.paramTys) {
+                        out.add(chirTy.TranslateType(paramTy))
+                    }
+                    return out
+                }
+            }
+        }
         if (let Some(funcDecl) <- (RequireEnumPatternConstructor(pattern) as AstFuncDecl)) {
             if (let Some(ctorTy) <- funcDecl.GetTy()) {
                 if (let Some(funcTy) <- (ctorTy as AstFuncTy)) {
@@ -1416,27 +1582,11 @@ public class Translator {
     }
 
     private func GetEnumTagValue(pattern: AstEnumPattern, selector: Value): Value {
-        let _ = RequireEnumPatternConstructor(pattern)
+        let constructor = RequireEnumPatternConstructor(pattern)
         let path = ArrayList<UInt64>()
         path.add(0u64)
-        return RequireResult(builder.CreateField(builder.context.GetUInt32Ty(), GetDerefedValue(selector), path,
+        return RequireResult(builder.CreateField(GetEnumSelectorType(constructor), GetDerefedValue(selector), path,
             CurrentBlock()))
-    }
-
-    private func GetEnumPatternId(pattern: AstEnumPattern): Int64 {
-        let constructor = RequireEnumPatternConstructor(pattern)
-        let outer = constructor.outerDecl ??
-            throw IllegalStateException("faithful AST2CHIR enum pattern constructor has no outer enum")
-        let enumDecl = (outer as AstEnumDecl) ??
-            throw IllegalStateException("faithful AST2CHIR enum pattern constructor outer is not enum")
-        var idx: Int64 = 0
-        for (ctor in enumDecl.constructors) {
-            if (SameTranslatorAstDecl(ctor, constructor)) {
-                return idx
-            }
-            idx++
-        }
-        throw IllegalStateException("faithful AST2CHIR enum pattern constructor not found: ${constructor.identifier.Val()}")
     }
 
     private func RequireEnumPatternConstructor(pattern: AstEnumPattern): AstDecl {
@@ -1676,11 +1826,9 @@ public class Translator {
     }
 
     private func TranslateEnumCtorCall(expr: AstCallExpr, calleeDecl: AstFuncDecl): Value {
-        let enumId = GetEnumCtorId(calleeDecl)
         let args = ArrayList<Value>()
-        args.add(RequireResult(builder.CreateConstant(builder.context.GetUInt32Ty(), IntLiteral(enumId),
-            CurrentBlock())))
-        let expectedParamTys = FuncParamTypes(calleeDecl)
+        args.add(CreateEnumSelectorConstant(calleeDecl))
+        let expectedParamTys = FuncParamTypes(expr, calleeDecl)
         var idx: Int64 = 0
         for (arg in expr.args) {
             if (let Some(argExpr) <- arg.expr) {
@@ -1696,23 +1844,34 @@ public class Translator {
         return RequireResult(builder.CreateTuple(chirTy.TranslateType(RequireAstTy(expr)), args, CurrentBlock()))
     }
 
-    private func FuncParamTypes(calleeDecl: AstFuncDecl): ArrayList<Type> {
-        let out = ArrayList<Type>()
-        if (let Some(ctorTy) <- calleeDecl.GetTy()) {
-            if (let Some(funcTy) <- (ctorTy as AstFuncTy)) {
-                for (paramTy in funcTy.paramTys) {
-                    out.add(chirTy.TranslateType(paramTy))
+    private func CallBaseFuncTy(expr: AstCallExpr, calleeDecl: AstFuncDecl): AstFuncTy {
+        if (let Some(base) <- expr.baseFunc) {
+            if (let Some(baseTy) <- base.GetTy()) {
+                if (let Some(funcTy) <- (baseTy as AstFuncTy)) {
+                    return funcTy
                 }
             }
+        }
+        if (let Some(declTy) <- calleeDecl.GetTy()) {
+            if (let Some(funcTy) <- (declTy as AstFuncTy)) {
+                return funcTy
+            }
+        }
+        throw IllegalStateException("faithful AST2CHIR expected function type for call")
+    }
+
+    private func FuncParamTypes(expr: AstCallExpr, calleeDecl: AstFuncDecl): ArrayList<Type> {
+        let out = ArrayList<Type>()
+        let funcTy = CallBaseFuncTy(expr, calleeDecl)
+        for (paramTy in funcTy.paramTys) {
+            out.add(chirTy.TranslateType(paramTy))
         }
         return out
     }
 
     private func TranslateEnumCtorRef(constructor: AstDecl, astTy: AstTy): Value {
-        let enumId = GetEnumCtorId(constructor)
         let args = ArrayList<Value>()
-        args.add(RequireResult(builder.CreateConstant(builder.context.GetUInt32Ty(), IntLiteral(enumId),
-            CurrentBlock())))
+        args.add(CreateEnumSelectorConstant(constructor))
         return RequireResult(builder.CreateTuple(chirTy.TranslateType(astTy), args, CurrentBlock()))
     }
 
@@ -1726,7 +1885,7 @@ public class Translator {
             thisObj = obj
             thisType = obj.GetType()
         }
-        let expectedParamTys = FuncParamTypes(calleeDecl)
+        let expectedParamTys = FuncParamTypes(expr, calleeDecl)
         var idx: Int64 = 0
         for (arg in expr.args) {
             if (let Some(argExpr) <- arg.expr) {
@@ -1745,13 +1904,13 @@ public class Translator {
                 let rtti = RequireResult(builder.CreateGetRTTIStatic(builder.context.GetUnitTy(),
                     parentTy.StripAllRefs(), CurrentBlock()))
                 let invokeCtx = InvokeCallContext(rtti, FuncCallContext(args: argValues, thisType: parentTy),
-                    FuncSigInfo(BuildMethodFuncType(calleeDecl, parentTy), funcName: calleeDecl.identifier.Val()))
+                    FuncSigInfo(BuildMethodFuncType(expr, calleeDecl, parentTy), funcName: calleeDecl.identifier.Val()))
                 return RequireResult(builder.CreateInvokeStatic(resultTy, invokeCtx, CurrentBlock()))
             }
             let obj = thisObj ?? throw IllegalStateException("faithful AST2CHIR virtual member call has no this object")
             let objTy = thisType ?? throw IllegalStateException("faithful AST2CHIR virtual member call this has no type")
             let invokeCtx = InvokeCallContext(obj, FuncCallContext(args: argValues, thisType: objTy),
-                FuncSigInfo(BuildMethodFuncType(calleeDecl, objTy), funcName: calleeDecl.identifier.Val()))
+                FuncSigInfo(BuildMethodFuncType(expr, calleeDecl, objTy), funcName: calleeDecl.identifier.Val()))
             return RequireResult(builder.CreateInvoke(resultTy, invokeCtx, CurrentBlock()))
         }
         if (let Some(obj) <- thisObj) {
@@ -1822,8 +1981,8 @@ public class Translator {
         return chirTy.TranslateType(RequireAstTy(outer))
     }
 
-    private func BuildMethodFuncType(funcDecl: AstFuncDecl, thisTy: Type): FuncType {
-        let baseFuncTy = RequireFuncType(chirTy.TranslateType(RequireAstTy(funcDecl)))
+    private func BuildMethodFuncType(expr: AstCallExpr, funcDecl: AstFuncDecl, thisTy: Type): FuncType {
+        let baseFuncTy = RequireFuncType(chirTy.TranslateType(CallBaseFuncTy(expr, funcDecl)))
         let params = baseFuncTy.GetParamTypes()
         if (!funcDecl.TestAttr(AstAttribute.STATIC)) {
             params.add(thisTy, at: 0)
@@ -1883,6 +2042,79 @@ public class Translator {
             }
         }
         return false
+    }
+
+    private func CreateEnumSelectorConstant(constructor: AstDecl): Value {
+        return CreateEnumSelectorConstant(GetEnumSelectorType(constructor), GetEnumCtorId(constructor))
+    }
+
+    private func CreateEnumSelectorConstantForName(enumTy: Type, ctorName: String): Value {
+        return CreateEnumSelectorConstant(GetEnumSelectorType(enumTy), GetEnumCtorIdByName(enumTy, ctorName))
+    }
+
+    private func CreateEnumSelectorConstant(selectorTy: Type, enumId: Int64): Value {
+        if (selectorTy.IsBoolean()) {
+            return RequireResult(builder.CreateConstant(selectorTy, BoolLiteral(enumId != 0), CurrentBlock()))
+        }
+        return RequireResult(builder.CreateConstant(selectorTy, IntLiteral(enumId), CurrentBlock()))
+    }
+
+    private func GetEnumSelectorType(constructor: AstDecl): Type {
+        let outer = constructor.outerDecl ??
+            throw IllegalStateException("faithful AST2CHIR enum constructor has no outer enum")
+        let enumDecl = (outer as AstEnumDecl) ??
+            throw IllegalStateException("faithful AST2CHIR enum constructor outer is not enum")
+        return if (IsOptionLikeEnumDecl(enumDecl)) {
+            builder.context.GetBoolTy()
+        } else {
+            builder.context.GetUInt32Ty()
+        }
+    }
+
+    private func GetEnumSelectorType(ty: Type): Type {
+        if (let Some(enumTy) <- (ty.StripAllRefs() as EnumType)) {
+            return if (enumTy.GetEnumDef().IsOptionLike()) {
+                builder.context.GetBoolTy()
+            } else {
+                builder.context.GetUInt32Ty()
+            }
+        }
+        return builder.context.GetUInt32Ty()
+    }
+
+    private func IsOptionLikeEnumDecl(enumDecl: AstEnumDecl): Bool {
+        if (enumDecl.hasEllipsis || enumDecl.constructors.size != 2) {
+            return false
+        }
+        let firstPayloads = EnumCtorPayloadCount(enumDecl.constructors[0])
+        let secondPayloads = EnumCtorPayloadCount(enumDecl.constructors[1])
+        return (firstPayloads == 0 && secondPayloads == 1) ||
+            (firstPayloads == 1 && secondPayloads == 0)
+    }
+
+    private func EnumCtorPayloadCount(constructor: AstDecl): Int64 {
+        if (let Some(funcDecl) <- (constructor as AstFuncDecl)) {
+            if (let Some(ctorTy) <- funcDecl.GetTy()) {
+                if (let Some(funcTy) <- (ctorTy as AstFuncTy)) {
+                    return funcTy.paramTys.size
+                }
+            }
+        }
+        return 0
+    }
+
+    private func GetEnumCtorIdByName(enumTy: Type, ctorName: String): Int64 {
+        if (let Some(chirEnumTy) <- (enumTy.StripAllRefs() as EnumType)) {
+            let ctors = chirEnumTy.GetEnumDef().GetCtors()
+            var idx: Int64 = 0
+            for (ctor in ctors) {
+                if (ctor.name == ctorName) {
+                    return idx
+                }
+                idx++
+            }
+        }
+        return 0
     }
 
     private func GetEnumCtorId(constructor: AstDecl): Int64 {
@@ -1982,6 +2214,172 @@ public class Translator {
         return None
     }
 
+    private func TranslateSubscriptSetterAssign(assign: AstAssignExpr, subscriptExpr: AstSubscriptExpr,
+        rightExpr: AstExpr): Bool {
+        if (IsCompoundAssignOp(assign.op)) {
+            return false
+        }
+        if (let Some(setter) <- FindSubscriptSetter(subscriptExpr, rightExpr)) {
+            let baseExpr = RequireExpr(subscriptExpr.baseExpr, "subscript setter base")
+            let baseInfo = TranslateExprAsLeftValue(baseExpr)
+            let baseTy = chirTy.TranslateType(RequireAstTy(baseExpr))
+            let callee = GetSymbolTable(setter)
+            let thisObj = TranslateSubscriptSetterThisObject(callee, baseInfo, baseTy)
+            let thisTy = thisObj.GetType()
+            let indexExprs = GetSubscriptIndexExprs(subscriptExpr)
+            let args = ArrayList<Value>()
+            args.add(thisObj)
+            let expectedParamTys = FuncDeclParamTypes(setter)
+            var idx: Int64 = 0
+            for (indexExpr in indexExprs) {
+                var indexValue = Translator.TranslateASTNode(indexExpr, this) ??
+                    throw IllegalStateException("faithful AST2CHIR subscript setter index produced no value")
+                if (idx < expectedParamTys.size && !expectedParamTys[idx].IsGeneric()) {
+                    indexValue = CoerceValueForExpectedType(indexValue, expectedParamTys[idx])
+                }
+                args.add(indexValue)
+                idx++
+            }
+            var rhsValue = Translator.TranslateASTNode(rightExpr, this) ??
+                throw IllegalStateException("faithful AST2CHIR subscript setter rhs produced no value")
+            if (idx < expectedParamTys.size && !expectedParamTys[idx].IsGeneric()) {
+                rhsValue = CoerceValueForExpectedType(rhsValue, expectedParamTys[idx])
+            }
+            args.add(rhsValue)
+            builder.CreateApply(builder.context.GetUnitTy(), callee, FuncCallContext(args: args, thisType: thisTy),
+                CurrentBlock())
+            return true
+        }
+        return false
+    }
+
+    private func TranslateSubscriptSetterThisObject(callee: Value, baseInfo: FaithfulLeftValueInfo,
+        baseTy: Type): Value {
+        if (let Some(calleeTy) <- callee.GetType()) {
+            if (let Some(funcTy) <- (calleeTy as FuncType)) {
+                if (funcTy.GetNumOfParams() > 0 && !funcTy.GetParamType(0).IsRef()) {
+                    return LoadLeftValue(baseInfo, baseTy) ??
+                        throw IllegalStateException("faithful AST2CHIR subscript setter base produced no value")
+                }
+            }
+        }
+        return AddressOfLeftValue(baseInfo, baseTy)
+    }
+
+    private func GetSubscriptIndexExprs(subscriptExpr: AstSubscriptExpr): ArrayList<AstExpr> {
+        let out = ArrayList<AstExpr>()
+        for (indexExpr in subscriptExpr.indexExprs) {
+            out.add(indexExpr)
+        }
+        if (!out.isEmpty()) {
+            return out
+        }
+        if (let Some(desugar) <- subscriptExpr.desugarExpr) {
+            if (let Some(callExpr) <- (desugar as AstCallExpr)) {
+                for (arg in callExpr.args) {
+                    if (let Some(argExpr) <- arg.expr) {
+                        out.add(argExpr)
+                    }
+                }
+            }
+        }
+        return out
+    }
+
+    private func FindSubscriptSetter(subscriptExpr: AstSubscriptExpr, rightExpr: AstExpr): Option<AstFuncDecl> {
+        if (let Some(desugar) <- subscriptExpr.desugarExpr) {
+            if (let Some(callExpr) <- (desugar as AstCallExpr)) {
+                if (let Some(baseFunc) <- callExpr.baseFunc) {
+                    for (target in baseFunc.GetTargets()) {
+                        if (let Some(funcDecl) <- (target as AstFuncDecl)) {
+                            if (IsSubscriptSetterCandidate(funcDecl, subscriptExpr, rightExpr)) {
+                                return Some(funcDecl)
+                            }
+                        }
+                    }
+                    if (let Some(target) <- baseFunc.GetTarget()) {
+                        if (let Some(funcDecl2) <- (target as AstFuncDecl)) {
+                            if (IsSubscriptSetterCandidate(funcDecl2, subscriptExpr, rightExpr)) {
+                                return Some(funcDecl2)
+                            }
+                        }
+                        if (let Some(owner) <- target.outerDecl) {
+                            if (let Some(ownerCandidate) <- FindSubscriptSetterInDecl(owner, subscriptExpr,
+                                rightExpr)) {
+                                return Some(ownerCandidate)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        if (let Some(baseExpr) <- subscriptExpr.baseExpr) {
+            if (let Some(baseDecl) <- AstTy.GetDeclPtrOfTy(baseExpr.GetTy())) {
+                if (let Some(baseCandidate) <- FindSubscriptSetterInDecl(baseDecl, subscriptExpr, rightExpr)) {
+                    return Some(baseCandidate)
+                }
+            }
+        }
+        return None
+    }
+
+    private func FindSubscriptSetterInDecl(owner: AstDecl, subscriptExpr: AstSubscriptExpr,
+        rightExpr: AstExpr): Option<AstFuncDecl> {
+        for (member in owner.GetMemberDecls()) {
+            if (let Some(funcDecl) <- (member as AstFuncDecl)) {
+                if (IsSubscriptSetterCandidate(funcDecl, subscriptExpr, rightExpr)) {
+                    return Some(funcDecl)
+                }
+            }
+        }
+        return None
+    }
+
+    private func IsSubscriptSetterCandidate(funcDecl: AstFuncDecl, subscriptExpr: AstSubscriptExpr,
+        rightExpr: AstExpr): Bool {
+        if (funcDecl.identifier.Val() != "[]") {
+            return false
+        }
+        let funcTy = FuncDeclAstFuncTy(funcDecl) ?? return false
+        let indexExprs = GetSubscriptIndexExprs(subscriptExpr)
+        if (!funcTy.retTy.IsUnit() || funcTy.paramTys.size != indexExprs.size + 1) {
+            return false
+        }
+        var idx: Int64 = 0
+        for (indexExpr in indexExprs) {
+            let indexTy = indexExpr.GetTy() ?? return false
+            if (!AstParamAcceptsArg(funcTy.paramTys[idx], indexTy)) {
+                return false
+            }
+            idx++
+        }
+        let rhsTy = rightExpr.GetTy() ?? return false
+        return AstParamAcceptsArg(funcTy.paramTys[idx], rhsTy)
+    }
+
+    private func AstParamAcceptsArg(paramTy: AstTy, argTy: AstTy): Bool {
+        return paramTy.IsGeneric() || paramTy.String() == argTy.String()
+    }
+
+    private func FuncDeclParamTypes(funcDecl: AstFuncDecl): ArrayList<Type> {
+        let out = ArrayList<Type>()
+        if (let Some(funcTy) <- FuncDeclAstFuncTy(funcDecl)) {
+            for (paramTy in funcTy.paramTys) {
+                out.add(chirTy.TranslateType(paramTy))
+            }
+        }
+        return out
+    }
+
+    private func FuncDeclAstFuncTy(funcDecl: AstFuncDecl): Option<AstFuncTy> {
+        if (let Some(declTy) <- funcDecl.GetTy()) {
+            if (let Some(funcTy) <- (declTy as AstFuncTy)) {
+                return Some(funcTy)
+            }
+        }
+        return None
+    }
+
     private func TranslateVArrayAssign(assign: AstAssignExpr, subscriptExpr: AstSubscriptExpr, rightExpr: AstExpr): Unit {
         if (IsCompoundAssignOp(assign.op)) {
             throw IllegalArgumentException("not yet ported in faithful AST2CHIR: compound VArray assignment")
@@ -2076,6 +2474,14 @@ public class Translator {
             throw IllegalStateException("faithful AST2CHIR member base produced no value")
         path.clear()
         return FaithfulLeftValueInfo(loaded, path)
+    }
+
+    private func AddressOfLeftValue(info: FaithfulLeftValueInfo, expectedTy: Type): Value {
+        if (info.path.isEmpty()) {
+            return info.base
+        }
+        let refTy = builder.context.GetRefTy(expectedTy)
+        return RequireResult(builder.CreateGetElementByName(refTy, info.base, info.path, CurrentBlock()))
     }
 
     private func LoadLeftValue(info: FaithfulLeftValueInfo, expectedTy: Type): Option<Value> {
@@ -2225,7 +2631,7 @@ public class Translator {
 
     private func TranslateLitConstant(expr: AstLitConstExpr): LiteralValue {
         return match (expr.kind) {
-            case AstLitConstKind.BOOL => BoolLiteral(expr.constNumValue.asBoolean)
+            case AstLitConstKind.BOOL => BoolLiteral(expr.stringValue == "true")
             case AstLitConstKind.UNIT => UnitLiteral()
             case AstLitConstKind.INTEGER => IntLiteral(expr.constNumValue.asInt.`Int64`())
             case AstLitConstKind.RUNE_BYTE => IntLiteral(expr.constNumValue.asInt.`Int64`())
@@ -2518,6 +2924,10 @@ public class Translator {
         return (def as EnumDef) ?? throw IllegalStateException("faithful AST2CHIR expected EnumDef")
     }
 
+    private func RequireExtendDef(def: CustomTypeDef): ExtendDef {
+        return (def as ExtendDef) ?? throw IllegalStateException("faithful AST2CHIR expected ExtendDef")
+    }
+
     private func RequireStructType(ty: Type): StructType {
         return (ty as StructType) ?? throw IllegalStateException("faithful AST2CHIR expected StructType")
     }
@@ -2560,6 +2970,10 @@ public class Translator {
 
     private static func RequireNodeAsEnumDecl(node: AstNode): AstEnumDecl {
         return (node as AstEnumDecl) ?? throw IllegalArgumentException("ASTKind cast failed: ENUM_DECL")
+    }
+
+    private static func RequireNodeAsExtendDecl(node: AstNode): AstExtendDecl {
+        return (node as AstExtendDecl) ?? throw IllegalArgumentException("ASTKind cast failed: EXTEND_DECL")
     }
 
     private static func RequireNodeAsVarDecl(node: AstNode): AstVarDecl {

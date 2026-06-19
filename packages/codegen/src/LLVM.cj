@@ -202,6 +202,7 @@ foreign {
     func LLVMSetInitializer(global: LLVMValueRef, constantVal: LLVMValueRef): Unit
     func LLVMGetAlignment(value: LLVMValueRef): UInt32
     func LLVMSetAlignment(value: LLVMValueRef, bytes: UInt32): Unit
+    func LLVMSetSection(global: LLVMValueRef, section: CString): Unit
     func LLVMGlobalSetMetadata(global: LLVMValueRef, kind: UInt32, metadata: LLVMMetadataRef): Unit
     func LLVMGlobalEraseMetadata(global: LLVMValueRef, kind: UInt32): Unit
     func LLVMGlobalClearMetadata(global: LLVMValueRef): Unit
@@ -287,6 +288,7 @@ foreign {
         srcAlign: UInt32, size: LLVMValueRef): LLVMValueRef
     func LLVMBuildMemMove(builder: LLVMBuilderRef, dest: LLVMValueRef, destAlign: UInt32, src: LLVMValueRef,
         srcAlign: UInt32, size: LLVMValueRef): LLVMValueRef
+    func LLVMGetPointerAddressSpace(pointerType: LLVMTypeRef): UInt32
     func LLVMBuildAdd(builder: LLVMBuilderRef, left: LLVMValueRef, right: LLVMValueRef, name: CString): LLVMValueRef
     func LLVMBuildSub(builder: LLVMBuilderRef, left: LLVMValueRef, right: LLVMValueRef, name: CString): LLVMValueRef
     func LLVMBuildMul(builder: LLVMBuilderRef, left: LLVMValueRef, right: LLVMValueRef, name: CString): LLVMValueRef
@@ -378,6 +380,8 @@ foreign {
     func LLVMGetAttributeCountAtIndex(fn: LLVMValueRef, index: UInt32): UInt32
     func LLVMGetAttributesAtIndex(fn: LLVMValueRef, index: UInt32, attrs: CPointer<LLVMAttributeRef>): Unit
     func LLVMGetEnumAttributeAtIndex(fn: LLVMValueRef, index: UInt32, kindID: UInt32): LLVMAttributeRef
+    func LLVMSetOperand(user: LLVMValueRef, index: UInt32, value: LLVMValueRef): Unit
+    func LLVMGetNumOperands(value: LLVMValueRef): Int32
     func LLVMGetStringAttributeAtIndex(fn: LLVMValueRef, index: UInt32, key: CString,
         keyLen: UInt32): LLVMAttributeRef
     func LLVMRemoveEnumAttributeAtIndex(fn: LLVMValueRef, index: UInt32, kindID: UInt32): Unit

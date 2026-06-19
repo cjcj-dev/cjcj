@@ -1,6 +1,7 @@
 package cangjie_compiler::codegen
 
 import std.collection.*
+import cangjie_compiler::chir.CustomType
 import cangjie_compiler::chir.FuncType
 import cangjie_compiler::chir.Function
 import cangjie_compiler::chir.Type
@@ -58,6 +59,18 @@ extend CGGenericKind <: Equatable<CGGenericKind> {
     public operator func !=(right: CGGenericKind): Bool {
         return !(this == right)
     }
+}
+
+public func ContainsGenericType(ty: Type): Bool {
+    if (ty.IsGeneric()) {
+        return true
+    }
+    for (argTy in ty.GetTypeArgs()) {
+        if (ContainsGenericType(argTy)) {
+            return true
+        }
+    }
+    return false
 }
 
 public class TypeExtraInfo {
@@ -363,7 +376,33 @@ public open class CGType {
     }
 
     public static func GetNameOfTypeInfoGV(chirType: Type): String {
-        return chirType.ToString() + ".ti"
+        return CGType.GetRuntimeTypeName(chirType) + ".ti"
+    }
+
+    public static func GetRuntimeTypeName(chirType: Type): String {
+        if (let Some(customTy) <- (chirType as CustomType)) {
+            let def = customTy.GetCustomTypeDef()
+            var name = if (def.GetPackageName().isEmpty()) {
+                def.GetSrcCodeIdentifier()
+            } else {
+                def.GetPackageName() + ":" + def.GetSrcCodeIdentifier()
+            }
+            let typeArgs = chirType.GetTypeArgs()
+            if (!typeArgs.isEmpty()) {
+                var argsText = ""
+                var idx: Int64 = 0
+                for (argTy in typeArgs) {
+                    if (idx > 0) {
+                        argsText += ","
+                    }
+                    argsText += CGType.GetRuntimeTypeName(argTy)
+                    idx++
+                }
+                name += "<" + argsText + ">"
+            }
+            return name
+        }
+        return chirType.ToString()
     }
 
     public static func GetNameOfTypeTemplateGV(chirType: Type): String {

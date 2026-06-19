@@ -115,9 +115,10 @@ public open class Type {
     }
 
     public func IsStructArray(): Bool {
-        if (let Some(structTy) <- (this as StructType)) {
+        let ty = if (let Some(refTy) <- (this as RefType)) { refTy.GetBaseType() } else { this }
+        if (let Some(structTy) <- (ty as StructType)) {
             let def = structTy.GetCustomTypeDef()
-            return def.GetPackageName() == "std.core" && def.GetIdentifier() == "Array"
+            return def.GetPackageName() == "std.core" && def.GetSrcCodeIdentifier() == "Array"
         }
         return false
     }
@@ -149,8 +150,10 @@ public open class Type {
 
     public open func IsString(): Bool {
         if (let Some(structTy) <- (this as StructType)) {
-            return structTy.GetCustomTypeDef().packageName == "std.core" &&
-                structTy.GetCustomTypeDef().identifier == "String"
+            let def = structTy.GetCustomTypeDef()
+            return def.packageName == "std.core" &&
+                (def.identifier == "String" || def.GetSrcCodeIdentifier() == "String" ||
+                    def.identifier == "_Cstd_core_String")
         }
         return false
     }

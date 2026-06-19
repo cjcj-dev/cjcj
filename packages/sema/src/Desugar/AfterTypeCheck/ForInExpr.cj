@@ -5,7 +5,6 @@ import cangjie_compiler::ast.*
 import cangjie_compiler::sema.*
 
 private let INDEX_COMPILER: String = "$index-compiler"
-private let IS_FIRST_COMPILER: String = "$isFirst-compiler"
 private let STOP_COMPILER: String = "$stop-compiler"
 private let ITER_COMPILER: String = "iter-compiler"
 private let STRING_SIZE_NAME: String = "size"
@@ -31,6 +30,86 @@ private func FuncRetTyOf(decl: Decl): Option<Ty> {
         }
     }
     return None
+}
+
+private func GenericReceiverTyOf(decl: Decl): Option<Ty> {
+    if (let Some(outer) <- decl.outerDecl) {
+        if (let Some(extendDecl) <- (outer as ExtendDecl)) {
+            return extendDecl.GetTy()
+        }
+        return outer.GetTy()
+    }
+    return None
+}
+
+private func InstantiatedFuncRetTy(typeManager: TypeManager, decl: Decl, baseTy: Ty): Option<Ty> {
+    if (let Some(retTy) <- FuncRetTyOf(decl)) {
+        let typeMapping = GenerateTypeMappingByTy(GenericReceiverTyOf(decl), Some(baseTy))
+        if (!typeMapping.IsEmpty()) {
+            return Some(typeManager.GetInstantiatedTy(retTy, typeMapping))
+        }
+        return Some(retTy)
+    }
+    return None
+}
+
+private func InstantiatedFuncTy(typeManager: TypeManager, decl: Decl, baseTy: Ty): Option<Ty> {
+    if (let Some(declTy) <- decl.GetTy()) {
+        if (let Some(_) <- (declTy as FuncTy)) {
+            let typeMapping = GenerateTypeMappingByTy(GenericReceiverTyOf(decl), Some(baseTy))
+            if (!typeMapping.IsEmpty()) {
+                return Some(typeManager.GetInstantiatedTy(declTy, typeMapping))
+            }
+            return Some(declTy)
+        }
+    }
+    return None
+}
+
+private func SameImportedAwareDecl(left: Decl, right: Decl): Bool {
+    if (left.TestAttr(Attribute.IMPORTED) && right.TestAttr(Attribute.IMPORTED)) {
+        if (!left.rawMangleName.isEmpty() || !right.rawMangleName.isEmpty()) {
+            return left.rawMangleName == right.rawMangleName
+        }
+        if (!left.mangledName.isEmpty() || !right.mangledName.isEmpty()) {
+            return left.mangledName == right.mangledName
+        }
+    }
+    return SameDecl(left, right)
+}
+
+private func AddImportedDeclIfMissing(values: ArrayList<Decl>, decl: Decl): Unit {
+    for (value in values) {
+        if (SameImportedAwareDecl(value, decl)) {
+            return
+        }
+    }
+    values.add(decl)
+}
+
+private func MarkImportedDeclUsed(decl: Decl): Unit {
+    if (!decl.TestAttr(Attribute.IMPORTED)) {
+        return
+    }
+    if (decl.isUsedImports) {
+        return
+    }
+    decl.isUsedImports = true
+    if (let Some(outer) <- decl.outerDecl) {
+        MarkImportedDeclUsed(outer)
+    }
+}
+
+private func AddSyntheticImportedTarget(source: Node, decl: Decl): Unit {
+    if (!decl.TestAttr(Attribute.IMPORTED)) {
+        return
+    }
+    MarkImportedDeclUsed(decl)
+    if (let Some(file) <- source.curFile) {
+        if (let Some(pkg) <- file.curPackage) {
+            AddImportedDeclIfMissing(pkg.srcImportedNonGenericDecls, decl)
+        }
+    }
 }
 
 private func UnitTy(): Ty {
@@ -83,14 +162,18 @@ private func LookupZeroArgMember(typeManager: TypeManager, source: Node, baseTy:
 
 private func CreateResolvedNoArgMemberCall(typeManager: TypeManager, source: Node, baseExpr: Expr,
     name: String): Option<CallExpr> {
-    if (let Some(baseTy) <- baseExpr.GetTy()) {
+        if (let Some(baseTy) <- baseExpr.GetTy()) {
         if (let Some(funcDecl) <- LookupZeroArgMember(typeManager, source, baseTy, name)) {
+            AddSyntheticImportedTarget(source, funcDecl)
             let memberAccess = CreateMemberAccess(baseExpr, funcDecl)
             memberAccess.target = funcDecl
             memberAccess.targets.add(funcDecl)
             CopyBasicInfo(source, memberAccess)
             AddCurFile(memberAccess, file: source.curFile)
-            let retTy = FuncRetTyOf(funcDecl)
+            if (let Some(funcTy) <- InstantiatedFuncTy(typeManager, funcDecl, baseTy)) {
+                memberAccess.SetTy(funcTy)
+            }
+            let retTy = InstantiatedFuncRetTy(typeManager, funcDecl, baseTy)
             let callExpr = CreateCallExpr(memberAccess, ArrayList<FuncArg>(), Some(funcDecl), retTy,
                 CallKind.CALL_DECLARED_FUNCTION)
             CopyBasicInfo(source, callExpr)
@@ -109,10 +192,8 @@ private func CreateIndexVar(forInExpr: ForInExpr, rangeExpr: RangeExpr): Option<
         if (let Some(initializer) <- CloneExpr(startExpr)) {
             var indexName = INDEX_COMPILER
             if (let Some(pattern) <- forInExpr.pattern) {
-                if (let Some(varPattern) <- (pattern as VarPattern)) {
-                    if (let Some(varDecl) <- varPattern.varDecl) {
-                        indexName = "$iter-" + varDecl.identifier.Val()
-                    }
+                if (let Some(varDecl) <- GetRangePatternVarDecl(pattern)) {
+                    indexName = "$iter-" + varDecl.identifier.Val()
                 }
             }
             let index = CreateVarDecl(indexName, initializer, None)
@@ -310,16 +391,6 @@ private func CreateStringCond(forInExpr: ForInExpr, index: VarDecl, end: VarDecl
     return cond
 }
 
-private func CreateFirstFlag(rangeExpr: RangeExpr): VarDecl {
-    let flag = CreateVarDecl(IS_FIRST_COMPILER, CreateLitConstExpr(LitConstKind.BOOL, "true", BoolTy()), None)
-    flag.isVar = true
-    flag.begin = rangeExpr.begin
-    flag.end = rangeExpr.end
-    flag.curFile = rangeExpr.curFile
-    flag.SetTy(BoolTy())
-    return flag
-}
-
 private func RangeIsIncreasing(rangeExpr: RangeExpr): Bool {
     if (let Some(stepExpr) <- rangeExpr.stepExpr) {
         return !stepExpr.constNumValue.asInt.IsNegativeNum()
@@ -396,22 +467,6 @@ private func CreateUpdate(forInExpr: ForInExpr, rangeExpr: RangeExpr, index: Var
     return update
 }
 
-private func CreateLetIter(forInExpr: ForInExpr, index: VarDecl): Option<VarDecl> {
-    if (let Some(pattern) <- forInExpr.pattern) {
-        if (let Some(varPattern) <- (pattern as VarPattern)) {
-            if (let Some(varDecl) <- varPattern.varDecl) {
-                varDecl.parentPattern = None
-                varDecl.initializer = CreateVarRef(index, varDecl)
-                varDecl.curFile = forInExpr.curFile
-                forInExpr.patternInDesugarExpr = pattern
-                forInExpr.pattern = None
-                return varDecl
-            }
-        }
-    }
-    return None
-}
-
 private func CreateGuard(forInExpr: ForInExpr, rangeCond: BinaryExpr, includeRangeCond: Bool): IfExpr {
     let guardIf = IfExpr()
     guardIf.sugarKind = SugarKind.FOR_IN_EXPR
@@ -456,66 +511,71 @@ private func CreateGuard(forInExpr: ForInExpr, rangeCond: BinaryExpr, includeRan
     return guardIf
 }
 
-private func CreateFirstIf(forInExpr: ForInExpr, firstFlag: VarDecl, update: AssignExpr): IfExpr {
-    let firstRun = IfExpr()
-    firstRun.hasElse = true
-    firstRun.curFile = forInExpr.curFile
-    if (let Some(inExpr) <- forInExpr.inExpression) {
-        firstRun.condExpr = CreateVarRef(firstFlag, inExpr)
-    } else {
-        firstRun.condExpr = CreateVarRef(firstFlag, firstFlag)
-    }
-    firstRun.begin = forInExpr.inPos
-    firstRun.end = forInExpr.inPos + 2
-    let thenNodes = ArrayList<Node>()
-    let assignFalse = AssignExpr()
-    assignFalse.op = TokenKind.ASSIGN
-    assignFalse.curFile = forInExpr.curFile
-    assignFalse.leftValue = CreateVarRef(firstFlag, firstFlag)
-    assignFalse.rightExpr = CreateLitConstExpr(LitConstKind.BOOL, "false", BoolTy())
-    assignFalse.SetTy(UnitTy())
-    assignFalse.begin = firstRun.begin
-    assignFalse.end = firstRun.end
-    assignFalse.EnableAttr(Attribute.COMPILER_ADD)
-    thenNodes.add(assignFalse)
-    let thenBody = CreateBlock(thenNodes, UnitTy())
-    if (let Some(body) <- forInExpr.body) {
-        thenBody.begin = body.begin
-        thenBody.end = body.end
-    }
-    let elseNodes = ArrayList<Node>()
-    elseNodes.add(update)
-    let elseBody = CreateBlock(elseNodes, UnitTy())
-    if (let Some(loopBody) <- forInExpr.body) {
-        elseBody.begin = loopBody.begin
-        elseBody.end = loopBody.end
-    }
-    firstRun.thenBody = thenBody
-    firstRun.elseBody = elseBody
-    firstRun.SetTy(UnitTy())
-    return firstRun
-}
-
-private func FinishRangeDesugar(forInExpr: ForInExpr, index: VarDecl, stop: VarDecl, firstFlag: Option<VarDecl>,
-    whileExpr: WhileExpr): Unit {
+private func FinishRangeRearrange(forInExpr: ForInExpr, index: VarDecl, stop: VarDecl, update: AssignExpr,
+    rangeCond: BinaryExpr): Unit {
     let nodes = ArrayList<Node>()
     nodes.add(index)
     nodes.add(stop)
-    if (let Some(flag) <- firstFlag) {
-        nodes.add(flag)
-    }
-    nodes.add(whileExpr)
+    nodes.add(update)
+    nodes.add(rangeCond)
     let block = CreateBlock(nodes, UnitTy())
-    CopyBasicInfo(forInExpr, block)
-    AddCurFile(block, file: forInExpr.curFile)
-    if (let Some(whileBody) <- whileExpr.body) {
-        RearrangeRefLoop(forInExpr, whileExpr, whileBody)
+    if (let Some(inExpr) <- forInExpr.inExpression) {
+        CopyBasicInfo(inExpr, block)
+    } else {
+        CopyBasicInfo(forInExpr, block)
     }
-    forInExpr.desugarExpr = block
-    forInExpr.inExpression = None
-    forInExpr.patternGuard = None
-    forInExpr.body = None
+    AddCurFile(block, file: forInExpr.curFile)
+    forInExpr.inExpression = Some(block)
     forInExpr.forInKind = ForInKind.FORIN_RANGE
+    if (let Some(body) <- forInExpr.body) {
+        RearrangeRefLoop(forInExpr, forInExpr, body)
+    }
+}
+
+private func GetRangePatternVarDecl(pattern: Pattern): Option<VarDecl> {
+    if (let Some(varPattern) <- (pattern as VarPattern)) {
+        return varPattern.varDecl
+    }
+    if (let Some(varOrEnum) <- (pattern as VarOrEnumPattern)) {
+        if (let Some(realPattern) <- varOrEnum.pattern) {
+            return GetRangePatternVarDecl(realPattern)
+        }
+    }
+    return None
+}
+
+private func BindRangePatternVar(forInExpr: ForInExpr, index: VarDecl): Unit {
+    if (let Some(pattern) <- forInExpr.pattern) {
+        if (let Some(varDecl) <- GetRangePatternVarDecl(pattern)) {
+            varDecl.parentPattern = None
+            let initRef = CreateVarRef(index, index)
+            initRef.begin = index.begin
+            initRef.end = index.end
+            varDecl.initializer = initRef
+            varDecl.curFile = forInExpr.curFile
+            if (let Some(indexTy) <- index.GetTy()) {
+                varDecl.SetTy(indexTy)
+            }
+        }
+    }
+}
+
+private func ReArrangeForInRangeExpr(forInExpr: ForInExpr, rangeExpr: RangeExpr): Unit {
+    if (let Some(index) <- CreateIndexVar(forInExpr, rangeExpr)) {
+        if (let Some(stop) <- CreateStopVar(rangeExpr)) {
+            if (let Some(update) <- CreateUpdate(forInExpr, rangeExpr, index)) {
+                let increasing = RangeIsIncreasing(rangeExpr)
+                let op = if (rangeExpr.isClosed) {
+                    if (increasing) { TokenKind.LE } else { TokenKind.GE }
+                } else {
+                    if (increasing) { TokenKind.LT } else { TokenKind.GT }
+                }
+                let rangeCond = CreateRangeCond(forInExpr, index, stop, op)
+                BindRangePatternVar(forInExpr, index)
+                FinishRangeRearrange(forInExpr, index, stop, update, rangeCond)
+            }
+        }
+    }
 }
 
 private func FinishStringDesugar(forInExpr: ForInExpr, index: VarDecl, tmp: VarDecl, end: VarDecl,
@@ -561,6 +621,9 @@ private func CreateIteratorNextCall(typeManager: TypeManager, forInExpr: ForInEx
     iterator: VarDecl): Option<CallExpr> {
     let iteratorRef = CreateVarRef(iterator, forInExpr)
     CopyBasicInfo(forInExpr, iteratorRef)
+    if (let Some(iteratorTy) <- iterator.GetTy()) {
+        iteratorRef.SetTy(iteratorTy)
+    }
     return CreateResolvedNoArgMemberCall(typeManager, forInExpr, iteratorRef, NEXT_METHOD_NAME)
 }
 
@@ -758,67 +821,6 @@ private func DesugarForInIterExpr(typeManager: TypeManager, forInExpr: ForInExpr
     }
 }
 
-private func DesugarClosedRange(forInExpr: ForInExpr, rangeExpr: RangeExpr): Unit {
-    if (let Some(index) <- CreateIndexVar(forInExpr, rangeExpr)) {
-        if (let Some(stop) <- CreateStopVar(rangeExpr)) {
-            if (let Some(update) <- CreateUpdate(forInExpr, rangeExpr, index)) {
-                let firstFlag = CreateFirstFlag(rangeExpr)
-                let increasing = RangeIsIncreasing(rangeExpr)
-                let whileExpr = WhileExpr()
-                whileExpr.sugarKind = SugarKind.FOR_IN_EXPR
-                CopyBasicInfo(forInExpr, whileExpr)
-                let nonClosedOp = if (increasing) { TokenKind.LT } else { TokenKind.GT }
-                let rangeCondExpr = CreateRangeCond(forInExpr, index, stop, nonClosedOp)
-                let firstFlagRef = CreateVarRef(firstFlag, stop)
-                let whileCond = CreateBinaryExpr(rangeCondExpr, firstFlagRef, TokenKind.OR)
-                whileCond.SetTy(BoolTy())
-                CopyBasicInfo(forInExpr, whileCond)
-                whileExpr.condExpr = whileCond
-                let bodyNodes = ArrayList<Node>()
-                bodyNodes.add(CreateFirstIf(forInExpr, firstFlag, update))
-                if (let Some(letValue) <- CreateLetIter(forInExpr, index)) {
-                    bodyNodes.add(letValue)
-                }
-                let closedOp = if (increasing) { TokenKind.LE } else { TokenKind.GE }
-                bodyNodes.add(CreateGuard(forInExpr, CreateRangeCond(forInExpr, index, stop, closedOp), true))
-                let whileBody = CreateBlock(bodyNodes, UnitTy())
-                CopyBasicInfo(forInExpr, whileBody)
-                whileExpr.body = whileBody
-                whileExpr.SetTy(UnitTy())
-                FinishRangeDesugar(forInExpr, index, stop, firstFlag, whileExpr)
-            }
-        }
-    }
-}
-
-private func DesugarNonClosedRange(forInExpr: ForInExpr, rangeExpr: RangeExpr): Unit {
-    if (let Some(index) <- CreateIndexVar(forInExpr, rangeExpr)) {
-        if (let Some(stop) <- CreateStopVar(rangeExpr)) {
-            if (let Some(update) <- CreateUpdate(forInExpr, rangeExpr, index)) {
-                let increasing = RangeIsIncreasing(rangeExpr)
-                let op = if (increasing) { TokenKind.LT } else { TokenKind.GT }
-                let rangeCond = CreateRangeCond(forInExpr, index, stop, op)
-                let guardExpr = CreateGuard(forInExpr, rangeCond, false)
-                let whileExpr = WhileExpr()
-                whileExpr.sugarKind = SugarKind.FOR_IN_EXPR
-                CopyBasicInfo(forInExpr, whileExpr)
-                whileExpr.condExpr = rangeCond
-                let bodyNodes = ArrayList<Node>()
-                if (let Some(letValue) <- CreateLetIter(forInExpr, index)) {
-                    bodyNodes.add(letValue)
-                }
-                bodyNodes.add(update)
-                bodyNodes.add(guardExpr)
-                let whileBody = CreateBlock(bodyNodes, UnitTy())
-                CopyBasicInfo(forInExpr, whileBody)
-                whileExpr.body = whileBody
-                whileExpr.SetTy(UnitTy())
-                FinishRangeDesugar(forInExpr, index, stop, None, whileExpr)
-            }
-        }
-    }
-}
-
 private func DesugarForInStringExpr(typeManager: TypeManager, forInExpr: ForInExpr): Unit {
     let index = CreateStringIndexVar(forInExpr)
     if (let Some(tmp) <- CreateStringTmpVar(forInExpr)) {
@@ -855,11 +857,7 @@ public func DesugarForInRangeExpr(forInExpr: ForInExpr): Unit {
             if (!IsStepOne(rangeExpr)) {
                 return
             }
-            if (rangeExpr.isClosed) {
-                DesugarClosedRange(forInExpr, rangeExpr)
-            } else {
-                DesugarNonClosedRange(forInExpr, rangeExpr)
-            }
+            ReArrangeForInRangeExpr(forInExpr, rangeExpr)
         }
     }
 }
@@ -876,6 +874,10 @@ public func DesugarForInExpr(typeManager: TypeManager, forInExpr: ForInExpr): Un
             if (inTy.IsRange() && !inTy.typeArgs.isEmpty() && inTy.typeArgs[0].IsInteger()) {
                 if (let Some(_) <- (inExpr as RangeExpr)) {
                     DesugarForInRangeExpr(forInExpr)
+                    match (forInExpr.forInKind) {
+                        case ForInKind.FORIN_RANGE => return
+                        case _ => ()
+                    }
                     if (let Some(_) <- forInExpr.desugarExpr) {
                         return
                     }

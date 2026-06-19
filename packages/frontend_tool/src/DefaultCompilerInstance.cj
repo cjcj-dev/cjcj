@@ -240,7 +240,13 @@ public open class DefaultCompilerInstance {
         decl: Decl,
         seen: HashSet<String>
     ): Unit {
-        let key = pkgName + "|" + ASTKindName(decl.astKind) + "|" + decl.identifier.Val() + "|" +
+        let ownerKey = if (let Some(outer) <- decl.outerDecl) {
+            "|owner|" + outer.identifier.Val() + "|" + ASTKindName(outer.astKind) + "|" +
+                outer.begin.line.toString() + ":" + outer.begin.column.toString()
+        } else {
+            ""
+        }
+        let key = pkgName + ownerKey + "|" + ASTKindName(decl.astKind) + "|" + decl.identifier.Val() + "|" +
             decl.begin.line.toString() + ":" + decl.begin.column.toString()
         if (seen.contains(key)) {
             return
@@ -251,6 +257,22 @@ public open class DefaultCompilerInstance {
         }
         if (decl.mangledName.isEmpty()) {
             decl.mangledName = mangler.Mangle(decl)
+        }
+        if (let Some(generic) <- decl.generic) {
+            for (typeParam in generic.typeParameters) {
+                typeParam.outerDecl = Some(decl)
+                PreMangleDeclTree(mangler, pkgName, typeParam, seen)
+            }
+        }
+        if (let Some(funcDecl) <- (decl as FuncDecl)) {
+            if (let Some(body) <- funcDecl.funcBody) {
+                if (let Some(bodyGeneric) <- body.generic) {
+                    for (typeParam2 in bodyGeneric.typeParameters) {
+                        typeParam2.outerDecl = Some(decl)
+                        PreMangleDeclTree(mangler, pkgName, typeParam2, seen)
+                    }
+                }
+            }
         }
         for (member in decl.GetMemberDecls()) {
             PreMangleDeclTree(mangler, pkgName, member, seen)

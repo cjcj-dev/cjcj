@@ -46,7 +46,7 @@ private func PromotedIterableElementTy(typeManager: TypeManager, inTy: Ty): Opti
     return None
 }
 
-private func IterableElementTy(typeManager: TypeManager, inTy: Ty): Ty {
+public func ForInIterableElementTy(typeManager: TypeManager, inTy: Ty): Ty {
     if (inTy.IsNothing()) {
         return TypeManager.GetInvalidTy()
     }
@@ -139,7 +139,7 @@ public func SynForInExpr(typeManager: TypeManager, fie: ForInExpr): Ty {
     if (let Some(inExpression) <- fie.inExpression) {
         let inTy = SynExprShallow(typeManager, inExpression)
         if (Ty.IsTyCorrect(inTy)) {
-            elementTy = IterableElementTy(typeManager, TcReplaceIdeal(typeManager, inExpression))
+            elementTy = ForInIterableElementTy(typeManager, TcReplaceIdeal(typeManager, inExpression))
             ok = Ty.IsTyCorrect(elementTy) && ok
         } else {
             ok = false

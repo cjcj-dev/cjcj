@@ -58,6 +58,31 @@ public class EnumDef <: CustomTypeDef {
         return GetCtors()
     }
 
+    public func IsOptionLike(): Bool {
+        if (ctors.size != 2) {
+            return false
+        }
+        return (ctors[0].payloadTypes.isEmpty() && ctors[1].payloadTypes.size == 1) ||
+            (ctors[1].payloadTypes.isEmpty() && ctors[0].payloadTypes.size == 1)
+    }
+
+    public func IsAntiOptionLike(): Bool {
+        return IsOptionLike() && ctors[0].payloadTypes.isEmpty()
+    }
+
+    public func GetOptionLikeAssociatedValueType(): Option<Type> {
+        if (!IsOptionLike()) {
+            return None
+        }
+        if (!ctors[0].payloadTypes.isEmpty()) {
+            return Some(ctors[0].payloadTypes[0])
+        }
+        if (!ctors[1].payloadTypes.isEmpty()) {
+            return Some(ctors[1].payloadTypes[0])
+        }
+        return None
+    }
+
     public override func ToString(indent: Int64): String {
         return IndentToString(indent) + "enum " + GetFullName()
     }

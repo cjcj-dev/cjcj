@@ -200,7 +200,37 @@ public func ChkArrayArgs(typeManager: TypeManager, arrayExpr: ArrayExpr,
     return true
 }
 
+private func AddArrayLitConstructor(arrayLit: ArrayLit): Unit {
+    let decl = Ty.GetDeclPtrOfTy(arrayLit.GetTy())
+    if (let None <- decl) {
+        return
+    }
+    for (member in decl.getOrThrow().GetMemberDeclPtrs()) {
+        if (let Some(funcDecl) <- (member as FuncDecl)) {
+            if (!IsInstanceConstructor(funcDecl)) {
+                continue
+            }
+            if (let None <- funcDecl.funcBody) {
+                continue
+            }
+            let funcBody = funcDecl.funcBody.getOrThrow()
+            if (funcBody.paramLists.isEmpty() || funcBody.paramLists[0].params.size != 3) {
+                continue
+            }
+            let firstParamTy = funcBody.paramLists[0].params[0].GetTy() ?? TypeManager.GetInvalidTy()
+            if (Ty.IsTyCorrect(firstParamTy) && firstParamTy.IsArray()) {
+                arrayLit.initFunc = Some(funcDecl)
+                return
+            }
+        }
+    }
+}
+
 public func SynArrayLit(typeManager: TypeManager, arrayLit: ArrayLit): Ty {
+    return SynArrayLit(typeManager, arrayLit, None)
+}
+
+public func SynArrayLit(typeManager: TypeManager, arrayLit: ArrayLit, arrayStruct: Option<StructDecl>): Ty {
     if (arrayLit.children.isEmpty()) {
         return InvalidExprTy(arrayLit)
     }
@@ -216,8 +246,12 @@ public func SynArrayLit(typeManager: TypeManager, arrayLit: ArrayLit): Ty {
         }
     }
     let elemTy = JoinCaseTysForBuiltin(typeManager, elemTys)
-    let resultTy = typeManager.GetArrayTy(elemTy, 1u64)
+    if (let None <- arrayStruct) {
+        return InvalidExprTy(arrayLit)
+    }
+    let resultTy = typeManager.GetStructTy(arrayStruct.getOrThrow(), [elemTy])
     arrayLit.SetTy(resultTy)
+    AddArrayLitConstructor(arrayLit)
     return resultTy
 }
 

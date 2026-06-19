@@ -138,8 +138,12 @@ public func ModifyTargetOfRef(refExpr: RefExpr, target: Decl, targets: ArrayList
 }
 
 public func AddFuncTargetsForMemberAccess(memberAccess: MemberAccess, targets: ArrayList<Decl>): Unit {
-    memberAccess.targets.clear()
+    let copiedTargets = ArrayList<Decl>()
     for (decl in targets) {
+        copiedTargets.add(decl)
+    }
+    memberAccess.targets.clear()
+    for (decl in copiedTargets) {
         if (memberAccess.isPattern || decl.astKind == ASTKind.FUNC_DECL) {
             memberAccess.targets.add(decl)
         }

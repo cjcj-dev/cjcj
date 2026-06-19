@@ -752,6 +752,7 @@ public func IsIrrefutablePattern(pattern: Pattern): Bool {
         if (let Some(inner) <- varOrEnum.pattern) {
             return IsIrrefutablePattern(inner)
         }
+        return Ty.IsTyCorrect(pattern.GetTy())
     }
     return false
 }

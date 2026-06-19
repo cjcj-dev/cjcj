@@ -4,6 +4,7 @@ import std.collection.*
 import cangjie_compiler::chir.Apply
 import cangjie_compiler::chir.ApplyWithException
 import cangjie_compiler::chir.Expression
+import cangjie_compiler::chir.FuncType
 import cangjie_compiler::chir.Value
 
 public func EmitCallLikeExpression(irBuilder: IRBuilder2, chirExpr: Expression): LLVMValueRef {
@@ -26,10 +27,26 @@ public func EmitCallLikeExpression(irBuilder: IRBuilder2, chirExpr: Expression):
 }
 
 public func GenerateApply(irBuilder: IRBuilder2, callee: Value, args: ArrayList<Value>): LLVMValueRef {
+    return GenerateApply(irBuilder, callee, args, callType: None, isMethodType: false, isStaticMethodType: false)
+}
+
+public func GenerateApply(irBuilder: IRBuilder2, callee: Value, args: ArrayList<Value>, callType!: Option<FuncType>,
+    isMethodType!: Bool, isStaticMethodType!: Bool): LLVMValueRef {
     let calleeValue = irBuilder.GetCGModule().MaterializeValue(irBuilder, callee)
     let argValues = ArrayList<CGValue>()
     for (arg in args) {
         argValues.add(irBuilder.GetCGModule().MaterializeValue(irBuilder, arg))
+    }
+    if (let Some(instFuncTy) <- callType) {
+        let typeInfo = TypeExtraInfo()
+        typeInfo.isMethod = isMethodType
+        typeInfo.isStaticMethod = isStaticMethodType
+        if (let Some(instCGFuncTy) <- (CGType.GetOrCreate(irBuilder.GetCGModule(), instFuncTy,
+            extraInfo: typeInfo) as CGFunctionType)) {
+            let typedCallee = irBuilder.CreateBitCast(calleeValue.GetRawValue(), instCGFuncTy.GetLLVMType(),
+                name: "call.callee")
+            return irBuilder.CreateCallOrInvoke(instCGFuncTy, typedCallee, argValues, name: "call")
+        }
     }
     if (let Some(cgFunctionValue) <- (calleeValue as CGFunction)) {
         return irBuilder.CreateCallOrInvoke(cgFunctionValue, args: argValues, name: "call")

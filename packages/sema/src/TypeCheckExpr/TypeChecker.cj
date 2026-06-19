@@ -72,27 +72,64 @@ private func addImportedDeclToCurrentPackage(ctx: ASTContext, decl: Decl): Unit 
     if (!decl.TestAttr(Attribute.IMPORTED)) {
         return
     }
+    markImportedDeclUsed(decl)
     if (let Some(pkg) <- ctx.curPackage) {
         addDeclUniqueToPackage(pkg.srcImportedNonGenericDecls, decl)
+    }
+}
+
+private func markImportedDeclUsed(decl: Decl): Unit {
+    if (!decl.TestAttr(Attribute.IMPORTED)) {
+        return
+    }
+    decl.isUsedImports = true
+    if (let Some(propDecl) <- (decl as PropDecl)) {
+        for (getter in propDecl.getters) {
+            markImportedDeclUsed(getter)
+        }
+        for (setter in propDecl.setters) {
+            markImportedDeclUsed(setter)
+        }
+    }
+    if (let Some(outer) <- decl.outerDecl) {
+        if (outer.TestAttr(Attribute.IMPORTED)) {
+            outer.isUsedImports = true
+        }
     }
 }
 
 private func addImportedTyToCurrentPackage(ctx: ASTContext, ty: Ty): Unit {
     if (let Some(structTy) <- (ty as StructTy)) {
         if (let Some(decl) <- structTy.decl) {
+            let wasUsed = decl.isUsedImports
             addImportedDeclToCurrentPackage(ctx, decl)
+            if (!wasUsed && decl.TestAttr(Attribute.GENERIC)) {
+                addImportedNominalMemberDependencies(ctx, decl)
+            }
         }
     } else if (let Some(classTy) <- (ty as ClassTy)) {
         if (let Some(decl2) <- classTy.decl) {
+            let wasUsed2 = decl2.isUsedImports
             addImportedDeclToCurrentPackage(ctx, decl2)
+            if (!wasUsed2 && decl2.TestAttr(Attribute.GENERIC)) {
+                addImportedNominalMemberDependencies(ctx, decl2)
+            }
         }
     } else if (let Some(enumTy) <- (ty as EnumTy)) {
         if (let Some(decl3) <- enumTy.decl) {
+            let wasUsed3 = decl3.isUsedImports
             addImportedDeclToCurrentPackage(ctx, decl3)
+            if (!wasUsed3 && decl3.TestAttr(Attribute.GENERIC)) {
+                addImportedNominalMemberDependencies(ctx, decl3)
+            }
         }
     } else if (let Some(interfaceTy) <- (ty as InterfaceTy)) {
         if (let Some(decl4) <- interfaceTy.decl) {
+            let wasUsed4 = decl4.isUsedImports
             addImportedDeclToCurrentPackage(ctx, decl4)
+            if (!wasUsed4 && decl4.TestAttr(Attribute.GENERIC)) {
+                addImportedNominalMemberDependencies(ctx, decl4)
+            }
         }
     } else if (let Some(funcTy) <- (ty as FuncTy)) {
         for (paramTy in funcTy.paramTys) {
@@ -105,10 +142,54 @@ private func addImportedTyToCurrentPackage(ctx: ASTContext, ty: Ty): Unit {
     }
 }
 
+private func addImportedNominalMemberDependencies(ctx: ASTContext, decl: Decl): Unit {
+    if (!decl.IsNominalDecl()) {
+        return
+    }
+    for (member in decl.GetMemberDecls()) {
+        markImportedDeclUsed(member)
+        if (let Some(funcDecl) <- (member as FuncDecl)) {
+            if (let Some(funcTy) <- funcDecl.GetTy()) {
+                addImportedTyToCurrentPackage(ctx, funcTy)
+            }
+        } else if (let Some(propDecl) <- (member as PropDecl)) {
+            if (let Some(propTy) <- propDecl.GetTy()) {
+                addImportedTyToCurrentPackage(ctx, propTy)
+            }
+            for (getter in propDecl.getters) {
+                markImportedDeclUsed(getter)
+                if (let Some(getterTy) <- getter.GetTy()) {
+                    addImportedTyToCurrentPackage(ctx, getterTy)
+                }
+            }
+            for (setter in propDecl.setters) {
+                markImportedDeclUsed(setter)
+                if (let Some(setterTy) <- setter.GetTy()) {
+                    addImportedTyToCurrentPackage(ctx, setterTy)
+                }
+            }
+        } else if (let Some(varDecl) <- (member as VarDecl)) {
+            if (varDecl.TestAttr(Attribute.STATIC)) {
+                if (let Some(varTy) <- varDecl.GetTy()) {
+                    addImportedTyToCurrentPackage(ctx, varTy)
+                }
+            }
+        }
+    }
+}
+
 private func addImportedDeclAndDependencies(ctx: ASTContext, decl: Decl): Unit {
+    let wasUsed = decl.isUsedImports
     addImportedDeclToCurrentPackage(ctx, decl)
+    if (!wasUsed && decl.TestAttr(Attribute.GENERIC)) {
+        addImportedNominalMemberDependencies(ctx, decl)
+    }
     if (let Some(outer) <- decl.outerDecl) {
+        let outerWasUsed = outer.isUsedImports
         addImportedDeclToCurrentPackage(ctx, outer)
+        if (!outerWasUsed && outer.TestAttr(Attribute.GENERIC)) {
+            addImportedNominalMemberDependencies(ctx, outer)
+        }
     }
     if (let Some(ty) <- decl.GetTy()) {
         addImportedTyToCurrentPackage(ctx, ty)
@@ -180,6 +261,9 @@ public class TypeChecker {
             }
         }
         PreCheck(contexts)
+        for (ctx in contexts) {
+            SeedImportedExtendMaps(ctx)
+        }
         return contexts
     }
 
@@ -232,6 +316,20 @@ public class TypeChecker {
                 }
             }
         }
+    }
+
+    private func SeedImportedExtendMaps(ctx: ASTContext): Unit {
+        let extends = ArrayList<ExtendDecl>()
+        for (packageDecl in ctx.packageDecls) {
+            for (file in packageDecl.srcPackage.files) {
+                for (decl in file.decls) {
+                    if (let Some(extendDecl) <- (decl as ExtendDecl)) {
+                        extends.add(extendDecl)
+                    }
+                }
+            }
+        }
+        TypeCheckExtendUpdateExtendMap(impl.typeManager, extends)
     }
 
     private func PreCheck(activeContexts: ArrayList<ASTContext>): Unit {
@@ -900,8 +998,19 @@ public class TypeChecker {
 
     private func SynthesizeLoopChildren(ctx: ASTContext, loopExpr: Expr): Unit {
         if (let Some(forInExpr) <- (loopExpr as ForInExpr)) {
+            let boundDecls = ArrayList<Decl>()
+            var elementTy: Ty = TypeManager.GetInvalidTy()
             if (let Some(inExpression) <- forInExpr.inExpression) {
                 let _ = Synthesize(ctx, inExpression)
+                if (Ty.IsTyCorrect(inExpression.GetTy())) {
+                    elementTy = ForInIterableElementTy(impl.typeManager, TcReplaceIdeal(impl.typeManager, inExpression))
+                }
+            }
+            if (let Some(pattern) <- forInExpr.pattern) {
+                if (Ty.IsTyCorrect(elementTy)) {
+                    let _ = ChkPattern(impl.typeManager, ctx, elementTy, pattern, isPatternInMatch: false)
+                    CollectPatternBinding(pattern, boundDecls)
+                }
             }
             if (let Some(patternGuard) <- forInExpr.patternGuard) {
                 let _ = Synthesize(ctx, patternGuard)
@@ -909,6 +1018,7 @@ public class TypeChecker {
             if (let Some(body) <- forInExpr.body) {
                 let _ = SynthesizeBlock(ctx, body)
             }
+            RemovePatternBindings(ctx, boundDecls)
             return
         }
         if (let Some(whileExpr) <- (loopExpr as WhileExpr)) {
@@ -1085,8 +1195,25 @@ public class TypeChecker {
             }
         }
         SynthesizeNodeChildren(ctx, expr)
+        if (let Some(rangeExpr) <- (expr as RangeExpr)) {
+            var rangeStruct: Option<StructDecl> = None
+            if (let Some(rangeDecl) <- lookupResolvedPackageDecl(ctx, "std.core", "Range")) {
+                addImportedDeclAndDependencies(ctx, rangeDecl)
+                rangeStruct = rangeDecl as StructDecl
+            }
+            return FinishSynthesize(ctx, rangeExpr, SynRangeExpr(impl.typeManager, rangeExpr, rangeDecl: rangeStruct))
+        }
         if (let Some(arrayLit) <- (expr as ArrayLit)) {
-            return FinishSynthesize(ctx, arrayLit, SynArrayLit(impl.typeManager, arrayLit))
+            var arrayStruct: Option<StructDecl> = None
+            if (let Some(arrayDecl) <- lookupResolvedPackageDecl(ctx, "std.core", "Array")) {
+                addImportedDeclAndDependencies(ctx, arrayDecl)
+                arrayStruct = arrayDecl as StructDecl
+            }
+            let arrayTy = SynArrayLit(impl.typeManager, arrayLit, arrayStruct)
+            if (let Some(initFunc) <- arrayLit.initFunc) {
+                addImportedDeclAndDependencies(ctx, initFunc)
+            }
+            return FinishSynthesize(ctx, arrayLit, arrayTy)
         }
         return FinishSynthesize(ctx, expr, SynExprShallow(impl.typeManager, expr))
     }
