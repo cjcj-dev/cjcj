@@ -12,6 +12,7 @@ import cangjie_compiler::ast.Attribute as AstAttribute
 import cangjie_compiler::ast.BinaryExpr as AstBinaryExpr
 import cangjie_compiler::ast.Block as AstBlock
 import cangjie_compiler::ast.CallExpr as AstCallExpr
+import cangjie_compiler::ast.CallKind as AstCallKind
 import cangjie_compiler::ast.ClassDecl as AstClassDecl
 import cangjie_compiler::ast.ClassLikeDecl as AstClassLikeDecl
 import cangjie_compiler::ast.ClassTy as AstClassTy
@@ -2835,12 +2836,13 @@ public class Translator {
     }
 
     private func TranslateStructOrClassCtorCall(expr: AstCallExpr, calleeDecl: AstFuncDecl): Value {
-        if (IsSuperOrThisCtorCall(expr)) {
-            throw IllegalArgumentException("not yet ported in faithful AST2CHIR: this/super constructor call")
-        }
         let thisTy = chirTy.TranslateType(RequireAstTy(expr)).StripAllRefs()
         let thisRefTy = builder.context.GetRefTy(thisTy)
-        let thisObj = RequireResult(builder.CreateAllocate(thisRefTy, thisTy, CurrentBlock()))
+        let thisObj = if (IsSuperOrThisCtorCall(expr)) {
+            CastValueIfNeeded(GetCurrentConstructorThisObject(), thisRefTy)
+        } else {
+            RequireResult(builder.CreateAllocate(thisRefTy, thisTy, CurrentBlock()))
+        }
         let args = ArrayList<Value>()
         args.add(thisObj)
         for (arg in expr.args) {
@@ -2861,6 +2863,14 @@ public class Translator {
         return thisObj
     }
 
+    private func GetCurrentConstructorThisObject(): Value {
+        let fn = CurrentFunction()
+        if (fn.GetNumOfParams() > 0) {
+            return fn.GetParam(0)
+        }
+        throw IllegalStateException("faithful AST2CHIR constructor call requires current this object")
+    }
+
     private func IsStructOrClassCtorCall(expr: AstCallExpr, calleeDecl: AstFuncDecl): Bool {
         let _ = expr
         if (!calleeDecl.TestAttr(AstAttribute.CONSTRUCTOR) || calleeDecl.TestAttr(AstAttribute.STATIC)) {
@@ -2873,9 +2883,12 @@ public class Translator {
     }
 
     private func IsSuperOrThisCtorCall(expr: AstCallExpr): Bool {
+        if (expr.callKind == AstCallKind.CALL_SUPER_FUNCTION) {
+            return true
+        }
         if (let Some(base) <- expr.baseFunc) {
             if (let Some(refExpr) <- (base as AstRefExpr)) {
-                return refExpr.isThis || refExpr.isSuper
+                return refExpr.isThis
             }
         }
         return false
