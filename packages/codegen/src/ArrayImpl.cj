@@ -334,13 +334,18 @@ private func ResolveElementPathByNames(baseTy: Type, names: ArrayList<String>): 
     for (name in names) {
         if (let Some(customTy) <- (currentTy as CustomType)) {
             let fields = customTy.GetCustomTypeDef().GetAllInstanceVars()
+            let fieldTypes = customTy.GetInstantiatedMemberTys()
             var fieldIdx: Int64 = 0
             var found = false
             while (fieldIdx < fields.size) {
                 let fieldInfo = fields[fieldIdx]
                 if (fieldInfo.name == name || fieldInfo.rawMangledName == name) {
                     path.add(UInt64(fieldIdx))
-                    currentTy = fieldInfo.ty.StripAllRefs()
+                    currentTy = if (fieldIdx < fieldTypes.size) {
+                        fieldTypes[fieldIdx].StripAllRefs()
+                    } else {
+                        fieldInfo.ty.StripAllRefs()
+                    }
                     found = true
                     break
                 }

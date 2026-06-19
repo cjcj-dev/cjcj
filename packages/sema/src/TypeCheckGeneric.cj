@@ -403,11 +403,7 @@ public func GenerateGenericTypeMapping(typeManager: TypeManager, expr: Expr): Su
             }
         }
     } else if (let Some(refExpr) <- (expr as RefExpr)) {
-        if (let Some(target) <- refExpr.GetTarget()) {
-            if (let Some(targetTy) <- target.GetTy()) {
-                typeManager.GenerateGenericMapping(typeMapping, targetTy)
-            }
-        }
+        let _ = refExpr
     }
     return typeMapping
 }

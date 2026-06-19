@@ -41,10 +41,15 @@ func TcReplaceIdeal(typeManager: TypeManager, expr: Expr): Ty {
     return TypeManager.GetInvalidTy()
 }
 
-func TcSetTyFromTarget(node: Node, target: Decl): Ty {
+func TcSetTyFromTarget(typeManager: TypeManager, node: Node, target: Decl): Ty {
     if (let Some(targetTy) <- target.GetTy()) {
-        node.SetTy(targetTy)
-        return targetTy
+        let instTy = if (let Some(expr) <- (node as Expr)) {
+            typeManager.ApplySubstPack(targetTy, GenerateGenericTypeMapping(typeManager, expr), ignoreUnsolved: true)
+        } else {
+            targetTy
+        }
+        node.SetTy(instTy)
+        return instTy
     }
     return TcInvalid(node)
 }
@@ -561,7 +566,7 @@ private func SynRefExpr(typeManager: TypeManager, re: RefExpr): Ty {
     if (let Some(target) <- targetOpt) {
         ModifyTargetOfRef(re, target, re.ref.targets)
         if (!target.IsFunc() || re.isAlone || re.ref.targets.size <= 1) {
-            return TcSetTyFromTarget(re, target)
+            return TcSetTyFromTarget(typeManager, re, target)
         }
         re.SetTy(TypeManager.GetQuestTy())
         return TypeManager.GetQuestTy()
@@ -597,7 +602,7 @@ private func SynMemberAccess(typeManager: TypeManager, ma: MemberAccess): Ty {
         ReplaceTarget(ma, Some(target))
         AddFuncTargetsForMemberAccess(ma, ma.targets)
         if (!target.IsFunc() || ma.isAlone || ma.targets.size <= 1) {
-            return TcSetTyFromTarget(ma, target)
+            return TcSetTyFromTarget(typeManager, ma, target)
         }
         ma.SetTy(TypeManager.GetQuestTy())
         return TypeManager.GetQuestTy()
@@ -606,6 +611,24 @@ private func SynMemberAccess(typeManager: TypeManager, ma: MemberAccess): Ty {
         return TcTyOrInvalid(ma)
     }
     return TcInvalid(ma)
+}
+
+private func ApplyExplicitGenericArgs(typeManager: TypeManager, nre: NameReferenceExpr, fallback: Ty): Ty {
+    if (nre.GetTypeArgs().isEmpty()) {
+        return fallback
+    }
+    if (let Some(target) <- nre.GetTarget()) {
+        var genericTarget = GetRealTarget(target)
+        if (genericTarget.TestAttr(Attribute.CONSTRUCTOR)) {
+            if (let Some(outer) <- genericTarget.outerDecl) {
+                genericTarget = outer
+            }
+        }
+        let genericTy = GetGenericType(typeManager, genericTarget, nre.GetTypeArgs())
+        nre.SetTy(genericTy)
+        return genericTy
+    }
+    return fallback
 }
 
 public func SynNameReferenceExpr(typeManager: TypeManager, nre: NameReferenceExpr): Ty {
@@ -617,10 +640,10 @@ public func SynNameReferenceExpr(typeManager: TypeManager, nre: NameReferenceExp
         }
     }
     if (let Some(refExpr) <- (nre as RefExpr)) {
-        return SynRefExpr(typeManager, refExpr)
+        return ApplyExplicitGenericArgs(typeManager, nre, SynRefExpr(typeManager, refExpr))
     }
     if (let Some(memberAccess) <- (nre as MemberAccess)) {
-        return SynMemberAccess(typeManager, memberAccess)
+        return ApplyExplicitGenericArgs(typeManager, nre, SynMemberAccess(typeManager, memberAccess))
     }
     if (Ty.IsTyCorrect(nre.GetTy())) {
         return TcTyOrInvalid(nre)

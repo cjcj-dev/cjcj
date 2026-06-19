@@ -37,6 +37,7 @@ import cangjie_compiler::ast.LitConstKind as AstLitConstKind
 import cangjie_compiler::ast.MainDecl as AstMainDecl
 import cangjie_compiler::ast.MatchExpr as AstMatchExpr
 import cangjie_compiler::ast.MemberAccess as AstMemberAccess
+import cangjie_compiler::ast.NameReferenceExpr as AstNameReferenceExpr
 import cangjie_compiler::ast.Node as AstNode
 import cangjie_compiler::ast.Pattern as AstPattern
 import cangjie_compiler::ast.PropDecl as AstPropDecl
@@ -432,7 +433,8 @@ public class Translator {
             idx++
         }
         let resultTy = chirTy.TranslateType(RequireAstTy(expr))
-        let call = builder.CreateApply(resultTy, callee, FuncCallContext(args: argValues), CurrentBlock())
+        let call = builder.CreateApply(resultTy, callee, FuncCallContext(args: argValues,
+            instTypeArgs: TranslateFuncInstArgs(expr, calleeDecl)), CurrentBlock())
         return RequireResult(call)
     }
 
@@ -815,6 +817,11 @@ public class Translator {
             return
         }
         let memberTy = chirTy.TranslateType(RequireAstTy(decl))
+        for (existing in def.GetDirectInstanceVars()) {
+            if (existing.name == decl.identifier.Val()) {
+                return
+            }
+        }
         let memberInfo = MemberVarInfo(decl.identifier.Val(), memberTy, isStatic: false,
             isReadOnly: decl.IsConst(), rawMangledName: decl.rawMangleName)
         def.AddInstanceVar(memberInfo)
@@ -1863,8 +1870,10 @@ public class Translator {
     private func FuncParamTypes(expr: AstCallExpr, calleeDecl: AstFuncDecl): ArrayList<Type> {
         let out = ArrayList<Type>()
         let funcTy = CallBaseFuncTy(expr, calleeDecl)
+        let genericParams = TranslateFuncGenericParams(calleeDecl)
+        let replacements = TranslateFuncInstArgs(expr, calleeDecl)
         for (paramTy in funcTy.paramTys) {
-            out.add(chirTy.TranslateType(paramTy))
+            out.add(SubstituteGenericType(chirTy.TranslateType(paramTy), genericParams, replacements))
         }
         return out
     }
@@ -1903,13 +1912,15 @@ public class Translator {
                 let parentTy = TranslateMemberOwnerType(calleeDecl)
                 let rtti = RequireResult(builder.CreateGetRTTIStatic(builder.context.GetUnitTy(),
                     parentTy.StripAllRefs(), CurrentBlock()))
-                let invokeCtx = InvokeCallContext(rtti, FuncCallContext(args: argValues, thisType: parentTy),
+                let invokeCtx = InvokeCallContext(rtti, FuncCallContext(args: argValues,
+                    instTypeArgs: TranslateFuncInstArgs(expr, calleeDecl), thisType: parentTy),
                     FuncSigInfo(BuildMethodFuncType(expr, calleeDecl, parentTy), funcName: calleeDecl.identifier.Val()))
                 return RequireResult(builder.CreateInvokeStatic(resultTy, invokeCtx, CurrentBlock()))
             }
             let obj = thisObj ?? throw IllegalStateException("faithful AST2CHIR virtual member call has no this object")
             let objTy = thisType ?? throw IllegalStateException("faithful AST2CHIR virtual member call this has no type")
-            let invokeCtx = InvokeCallContext(obj, FuncCallContext(args: argValues, thisType: objTy),
+            let invokeCtx = InvokeCallContext(obj, FuncCallContext(args: argValues,
+                instTypeArgs: TranslateFuncInstArgs(expr, calleeDecl), thisType: objTy),
                 FuncSigInfo(BuildMethodFuncType(expr, calleeDecl, objTy), funcName: calleeDecl.identifier.Val()))
             return RequireResult(builder.CreateInvoke(resultTy, invokeCtx, CurrentBlock()))
         }
@@ -1918,7 +1929,108 @@ public class Translator {
         }
         let callee = globalSymbolTable.Get(calleeDecl)
         return RequireResult(builder.CreateApply(resultTy, callee, FuncCallContext(args: argValues,
-            thisType: thisType), CurrentBlock()))
+            instTypeArgs: TranslateFuncInstArgs(expr, calleeDecl), thisType: thisType), CurrentBlock()))
+    }
+
+    private func TranslateFuncInstArgs(expr: AstCallExpr, calleeDecl: AstFuncDecl): ArrayList<Type> {
+        let out = ArrayList<Type>()
+        if (calleeDecl.TestAttr(AstAttribute.CONSTRUCTOR)) {
+            return out
+        }
+        if (let Some(base) <- expr.baseFunc) {
+            if (let Some(nameRef) <- (base as AstNameReferenceExpr)) {
+                for (instTy in nameRef.instTys) {
+                    out.add(chirTy.TranslateType(instTy))
+                }
+            }
+        }
+        return out
+    }
+
+    private func TranslateFuncGenericParams(calleeDecl: AstFuncDecl): ArrayList<GenericType> {
+        let out = ArrayList<GenericType>()
+        if (let Some(generic) <- calleeDecl.GetGeneric()) {
+            for (param in generic.typeParameters) {
+                if (let Some(paramTy) <- param.GetTy()) {
+                    if (let Some(genericTy) <- (chirTy.TranslateType(paramTy) as GenericType)) {
+                        out.add(genericTy)
+                    }
+                }
+            }
+        }
+        return out
+    }
+
+    private func SubstituteGenericType(ty: Type, genericParams: ArrayList<GenericType>,
+        replacements: ArrayList<Type>): Type {
+        if (genericParams.isEmpty() || replacements.isEmpty()) {
+            return ty
+        }
+        if (let Some(genericTy) <- (ty as GenericType)) {
+            if (let Some(replacement) <- FindGenericReplacement(genericTy, genericParams, replacements)) {
+                return replacement
+            }
+            return ty
+        }
+        if (let Some(refTy) <- (ty as RefType)) {
+            return RefType(SubstituteGenericType(refTy.GetBaseType(), genericParams, replacements))
+        }
+        if (let Some(rawArrayTy) <- (ty as RawArrayType)) {
+            return RawArrayType(SubstituteGenericType(rawArrayTy.GetElementType(), genericParams, replacements),
+                dims: rawArrayTy.GetDims())
+        }
+        if (let Some(varrayTy) <- (ty as VArrayType)) {
+            return VArrayType(SubstituteGenericType(varrayTy.GetElementType(), genericParams, replacements),
+                varrayTy.size)
+        }
+        if (let Some(pointerTy) <- (ty as CPointerType)) {
+            return CPointerType(SubstituteGenericType(pointerTy.GetElementType(), genericParams, replacements))
+        }
+        if (let Some(boxTy) <- (ty as BoxType)) {
+            return BoxType(SubstituteGenericType(boxTy.GetBaseType(), genericParams, replacements))
+        }
+        if (let Some(tupleTy) <- (ty as TupleType)) {
+            return TupleType(SubstituteGenericTypeArgs(tupleTy.GetTypeArgs(), genericParams, replacements))
+        }
+        if (let Some(funcTy) <- (ty as FuncType)) {
+            let params = SubstituteGenericTypeArgs(funcTy.GetParamTypes(), genericParams, replacements)
+            let retTy = SubstituteGenericType(funcTy.GetReturnType(), genericParams, replacements)
+            return FuncType(params, retTy, hasVarLenParam: funcTy.HasVarArg(), isCFunc: funcTy.IsCFunc())
+        }
+        if (let Some(structTy) <- (ty as StructType)) {
+            return StructType(structTy.GetStructDef(),
+                SubstituteGenericTypeArgs(structTy.GetGenericArgs(), genericParams, replacements))
+        }
+        if (let Some(classTy) <- (ty as ClassType)) {
+            return ClassType(classTy.GetClassDef(),
+                SubstituteGenericTypeArgs(classTy.GetGenericArgs(), genericParams, replacements))
+        }
+        if (let Some(enumTy) <- (ty as EnumType)) {
+            return EnumType(enumTy.GetEnumDef(),
+                SubstituteGenericTypeArgs(enumTy.GetGenericArgs(), genericParams, replacements))
+        }
+        return ty
+    }
+
+    private func SubstituteGenericTypeArgs(args: ArrayList<Type>, genericParams: ArrayList<GenericType>,
+        replacements: ArrayList<Type>): ArrayList<Type> {
+        let out = ArrayList<Type>()
+        for (arg in args) {
+            out.add(SubstituteGenericType(arg, genericParams, replacements))
+        }
+        return out
+    }
+
+    private func FindGenericReplacement(genericTy: GenericType, genericParams: ArrayList<GenericType>,
+        replacements: ArrayList<Type>): Option<Type> {
+        var idx: Int64 = 0
+        while (idx < genericParams.size && idx < replacements.size) {
+            if (genericTy.IsEqual(genericParams[idx])) {
+                return Some(replacements[idx])
+            }
+            idx++
+        }
+        return None
     }
 
     private func TranslateThisObjectForMemberFuncCall(expr: AstCallExpr, calleeDecl: AstFuncDecl): Value {

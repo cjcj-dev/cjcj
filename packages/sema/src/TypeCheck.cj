@@ -297,6 +297,12 @@ private func collectDeclsFromPackage(pkg: Package): ArrayList<Decl> {
 
 private func collectDeclsFromDecl(decl: Decl, out: ArrayList<Decl>): Unit {
     addDeclUniqueForTypeCheck(out, decl)
+    if (let Some(generic) <- decl.GetGeneric()) {
+        for (param in generic.typeParameters) {
+            param.outerDecl = Some(decl)
+            collectDeclsFromDecl(param, out)
+        }
+    }
     if (let Some(enumDecl) <- (decl as EnumDecl)) {
         for (constructor in enumDecl.constructors) {
             collectDeclsFromDecl(constructor, out)

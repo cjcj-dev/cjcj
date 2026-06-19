@@ -21,10 +21,8 @@ public class CGClassType <: CGCustomType {
             cgCtx.AddGeneratedStructType(layoutName)
             let fieldTypes = ArrayList<LLVMTypeRef>()
             if (let Some(customTy) <- (chirType as CustomType)) {
-                for (member in customTy.GetCustomTypeDef().GetInstanceVars()) {
-                    if (!member.isStatic) {
-                        fieldTypes.add(CGType.GetOrCreate(cgMod, member.ty).GetLLVMType())
-                    }
+                for (fieldTy in customTy.GetInstantiatedMemberTys()) {
+                    fieldTypes.add(CGType.GetOrCreate(cgMod, fieldTy).GetLLVMType())
                 }
             }
             SetStructTypeBody(layout, fieldTypes)
@@ -34,10 +32,8 @@ public class CGClassType <: CGCustomType {
 
     protected override func GenContainedCGTypes(): Unit {
         if (let Some(customTy) <- (chirType as CustomType)) {
-            for (member in customTy.GetCustomTypeDef().GetInstanceVars()) {
-                if (!member.isStatic) {
-                    containedCGTypes.add(CGType.GetOrCreate(cgMod, member.ty))
-                }
+            for (fieldTy in customTy.GetInstantiatedMemberTys()) {
+                containedCGTypes.add(CGType.GetOrCreate(cgMod, fieldTy))
             }
         }
     }

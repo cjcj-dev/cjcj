@@ -695,6 +695,23 @@ public open class CustomType <: Type {
         return CopyTypeList(argTys)
     }
 
+    public func GetInstantiatedMemberTys(): ArrayList<Type> {
+        let out = ArrayList<Type>()
+        if (let Some(classTy) <- (this as ClassType)) {
+            if (let Some(superTy) <- classTy.GetSuperClassTy()) {
+                for (fieldTy in superTy.GetInstantiatedMemberTys()) {
+                    out.add(fieldTy)
+                }
+            }
+        }
+
+        let genericParams = def.GetGenericTypeParams()
+        for (member in def.GetDirectInstanceVars()) {
+            out.add(ReplaceRawGenericArgType(member.ty, genericParams, GetGenericArgs()))
+        }
+        return out
+    }
+
     public override func ToString(): String {
         let args = TypeListKey(argTys)
         if (args.isEmpty()) {
@@ -713,6 +730,70 @@ public open class CustomType <: Type {
         }
         return def.GetIdentifier() + "<" + JoinStrings(args, ",") + ">"
     }
+}
+
+private func ReplaceRawGenericArgType(ty: Type, genericParams: ArrayList<GenericType>,
+    genericArgs: ArrayList<Type>): Type {
+    if (genericParams.isEmpty() || genericArgs.isEmpty()) {
+        return ty
+    }
+    if (let Some(genericTy) <- (ty as GenericType)) {
+        var idx: Int64 = 0
+        while (idx < genericParams.size && idx < genericArgs.size) {
+            if (genericTy.IsEqual(genericParams[idx])) {
+                return genericArgs[idx]
+            }
+            idx++
+        }
+        return ty
+    }
+    if (let Some(refTy) <- (ty as RefType)) {
+        return RefType(ReplaceRawGenericArgType(refTy.GetBaseType(), genericParams, genericArgs))
+    }
+    if (let Some(rawArrayTy) <- (ty as RawArrayType)) {
+        return RawArrayType(ReplaceRawGenericArgType(rawArrayTy.GetElementType(), genericParams, genericArgs),
+            dims: rawArrayTy.GetDims())
+    }
+    if (let Some(varrayTy) <- (ty as VArrayType)) {
+        return VArrayType(ReplaceRawGenericArgType(varrayTy.GetElementType(), genericParams, genericArgs),
+            varrayTy.size)
+    }
+    if (let Some(pointerTy) <- (ty as CPointerType)) {
+        return CPointerType(ReplaceRawGenericArgType(pointerTy.GetElementType(), genericParams, genericArgs))
+    }
+    if (let Some(boxTy) <- (ty as BoxType)) {
+        return BoxType(ReplaceRawGenericArgType(boxTy.GetBaseType(), genericParams, genericArgs))
+    }
+    if (let Some(tupleTy) <- (ty as TupleType)) {
+        return TupleType(ReplaceRawGenericArgTypes(tupleTy.GetTypeArgs(), genericParams, genericArgs))
+    }
+    if (let Some(funcTy) <- (ty as FuncType)) {
+        let params = ReplaceRawGenericArgTypes(funcTy.GetParamTypes(), genericParams, genericArgs)
+        let retTy = ReplaceRawGenericArgType(funcTy.GetReturnType(), genericParams, genericArgs)
+        return FuncType(params, retTy, hasVarLenParam: funcTy.HasVarArg(), isCFunc: funcTy.IsCFunc())
+    }
+    if (let Some(structTy) <- (ty as StructType)) {
+        return StructType(structTy.GetStructDef(),
+            ReplaceRawGenericArgTypes(structTy.GetGenericArgs(), genericParams, genericArgs))
+    }
+    if (let Some(classTy) <- (ty as ClassType)) {
+        return ClassType(classTy.GetClassDef(),
+            ReplaceRawGenericArgTypes(classTy.GetGenericArgs(), genericParams, genericArgs))
+    }
+    if (let Some(enumTy) <- (ty as EnumType)) {
+        return EnumType(enumTy.GetEnumDef(),
+            ReplaceRawGenericArgTypes(enumTy.GetGenericArgs(), genericParams, genericArgs))
+    }
+    return ty
+}
+
+private func ReplaceRawGenericArgTypes(values: ArrayList<Type>, genericParams: ArrayList<GenericType>,
+    genericArgs: ArrayList<Type>): ArrayList<Type> {
+    let out = ArrayList<Type>()
+    for (value in values) {
+        out.add(ReplaceRawGenericArgType(value, genericParams, genericArgs))
+    }
+    return out
 }
 
 public class StructType <: CustomType {

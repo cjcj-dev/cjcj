@@ -404,7 +404,7 @@ public class Constant <: Expression {
 }
 
 public class Allocate <: Expression {
-    private let allocatedType: Type
+    private var allocatedType: Type
 
     public init(ty: Type, parent: Option<Block>) {
         super(ExprKind.ALLOCATE, ArrayList<Value>(), parent)
@@ -413,6 +413,10 @@ public class Allocate <: Expression {
 
     public func GetType(): Type {
         return allocatedType
+    }
+
+    public func SetType(ty: Type): Unit {
+        allocatedType = ty
     }
 
     public override func OperandsToString(): String {
@@ -943,7 +947,7 @@ public class GetRTTI <: Expression {
 }
 
 public class GetRTTIStatic <: Expression {
-    private let rttiType: Type
+    private var rttiType: Type
 
     public init(ty: Type, parent: Option<Block>) {
         super(ExprKind.GET_RTTI_STATIC, ArrayList<Value>(), parent)
@@ -952,6 +956,10 @@ public class GetRTTIStatic <: Expression {
 
     public func GetRTTIType(): Type {
         return rttiType
+    }
+
+    public func SetRTTIType(ty: Type): Unit {
+        rttiType = ty
     }
 
     public override func OperandsToString(): String {
@@ -991,7 +999,7 @@ public class TypeCast <: Expression {
 }
 
 public class InstanceOf <: Expression {
-    private let testedType: Type
+    private var testedType: Type
 
     public init(value: Value, ty: Type, parent: Option<Block>) {
         super(ExprKind.INSTANCEOF, MakeUnaryOperands(value), parent)
@@ -1004,6 +1012,10 @@ public class InstanceOf <: Expression {
 
     public func GetType(): Type {
         return testedType
+    }
+
+    public func SetTestedType(ty: Type): Unit {
+        testedType = ty
     }
 
     public override func OperandsToString(): String {
@@ -1246,7 +1258,7 @@ public class FieldByName <: Expression {
 }
 
 public class RawArrayAllocate <: Expression {
-    private let elementType: Type
+    private var elementType: Type
 
     public init(elementTy: Type, size: Value, parent: Option<Block>) {
         super(ExprKind.RAW_ARRAY_ALLOCATE, MakeUnaryOperands(size), parent)
@@ -1259,6 +1271,10 @@ public class RawArrayAllocate <: Expression {
 
     public func GetElementType(): Type {
         return elementType
+    }
+
+    public func SetElementType(ty: Type): Unit {
+        elementType = ty
     }
 
     public override func OperandsToString(): String {

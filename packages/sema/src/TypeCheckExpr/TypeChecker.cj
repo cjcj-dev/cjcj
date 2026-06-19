@@ -103,7 +103,7 @@ private func addImportedTyToCurrentPackage(ctx: ASTContext, ty: Ty): Unit {
         if (let Some(decl) <- structTy.decl) {
             let wasUsed = decl.isUsedImports
             addImportedDeclToCurrentPackage(ctx, decl)
-            if (!wasUsed && decl.TestAttr(Attribute.GENERIC)) {
+            if (decl.TestAttr(Attribute.IMPORTED) && !wasUsed && decl.TestAttr(Attribute.GENERIC)) {
                 addImportedNominalMemberDependencies(ctx, decl)
             }
         }
@@ -111,7 +111,7 @@ private func addImportedTyToCurrentPackage(ctx: ASTContext, ty: Ty): Unit {
         if (let Some(decl2) <- classTy.decl) {
             let wasUsed2 = decl2.isUsedImports
             addImportedDeclToCurrentPackage(ctx, decl2)
-            if (!wasUsed2 && decl2.TestAttr(Attribute.GENERIC)) {
+            if (decl2.TestAttr(Attribute.IMPORTED) && !wasUsed2 && decl2.TestAttr(Attribute.GENERIC)) {
                 addImportedNominalMemberDependencies(ctx, decl2)
             }
         }
@@ -119,7 +119,7 @@ private func addImportedTyToCurrentPackage(ctx: ASTContext, ty: Ty): Unit {
         if (let Some(decl3) <- enumTy.decl) {
             let wasUsed3 = decl3.isUsedImports
             addImportedDeclToCurrentPackage(ctx, decl3)
-            if (!wasUsed3 && decl3.TestAttr(Attribute.GENERIC)) {
+            if (decl3.TestAttr(Attribute.IMPORTED) && !wasUsed3 && decl3.TestAttr(Attribute.GENERIC)) {
                 addImportedNominalMemberDependencies(ctx, decl3)
             }
         }
@@ -127,7 +127,7 @@ private func addImportedTyToCurrentPackage(ctx: ASTContext, ty: Ty): Unit {
         if (let Some(decl4) <- interfaceTy.decl) {
             let wasUsed4 = decl4.isUsedImports
             addImportedDeclToCurrentPackage(ctx, decl4)
-            if (!wasUsed4 && decl4.TestAttr(Attribute.GENERIC)) {
+            if (decl4.TestAttr(Attribute.IMPORTED) && !wasUsed4 && decl4.TestAttr(Attribute.GENERIC)) {
                 addImportedNominalMemberDependencies(ctx, decl4)
             }
         }
@@ -187,7 +187,7 @@ private func addImportedDeclAndDependencies(ctx: ASTContext, decl: Decl): Unit {
     if (let Some(outer) <- decl.outerDecl) {
         let outerWasUsed = outer.isUsedImports
         addImportedDeclToCurrentPackage(ctx, outer)
-        if (!outerWasUsed && outer.TestAttr(Attribute.GENERIC)) {
+        if (outer.TestAttr(Attribute.IMPORTED) && !outerWasUsed && outer.TestAttr(Attribute.GENERIC)) {
             addImportedNominalMemberDependencies(ctx, outer)
         }
     }
