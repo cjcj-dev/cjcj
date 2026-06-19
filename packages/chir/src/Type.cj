@@ -150,8 +150,10 @@ public open class Type {
 
     public open func IsString(): Bool {
         if (let Some(structTy) <- (this as StructType)) {
-            return structTy.GetCustomTypeDef().packageName == "std.core" &&
-                structTy.GetCustomTypeDef().identifier == "String"
+            let def = structTy.GetCustomTypeDef()
+            return def.packageName == "std.core" &&
+                (def.identifier == "String" || def.GetSrcCodeIdentifier() == "String" ||
+                    def.identifier == "_Cstd_core_String")
         }
         return false
     }

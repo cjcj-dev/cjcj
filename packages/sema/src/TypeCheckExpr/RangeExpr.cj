@@ -60,6 +60,13 @@ private func CheckRangeStep(typeManager: TypeManager, re: RangeExpr): Bool {
     return true
 }
 
+private func BindRangeDecl(re: RangeExpr, rangeDecl: Option<StructDecl>): Bool {
+    if (let Some(decl) <- rangeDecl) {
+        re.decl = Some(decl)
+    }
+    return re.decl.isSome()
+}
+
 private func CheckRangeGenericInstantiation(typeManager: TypeManager, re: RangeExpr, elemTy: Ty): Bool {
     if (let Some(rangeDecl) <- re.decl) {
         let typeArgs = ArrayList<Ty>()
@@ -99,26 +106,31 @@ public func CheckRangeElements(typeManager: TypeManager, elemTy: Ty, re: RangeEx
     return isWellTyped
 }
 
-public func SynRangeExpr(typeManager: TypeManager, re: RangeExpr): Ty {
+public func SynRangeExpr(typeManager: TypeManager, re: RangeExpr, rangeDecl!: Option<StructDecl> = None): Ty {
     let invalidTy = TypeManager.GetInvalidTy()
     re.SetTy(invalidTy)
-    if (let Some(rangeDecl) <- re.decl) {
-        var elemTy = SynRangeExprInferElemTy(re)
-        if (Ty.IsTyCorrect(elemTy) && elemTy.IsIdeal() && elemTy.IsInteger()) {
-            elemTy = TypeManager.GetPrimitiveTy(TypeKind.TYPE_INT64)
-        }
-        if (!CheckRangeElements(typeManager, elemTy, re)) {
-            return invalidTy
-        }
-        let rangeTy = typeManager.GetStructTy(rangeDecl, [elemTy])
-        re.SetTy(rangeTy)
-        return rangeTy
+    if (!BindRangeDecl(re, rangeDecl)) {
+        return invalidTy
     }
-    return invalidTy
+    let resolvedRangeDecl = re.decl.getOrThrow()
+    var elemTy = SynRangeExprInferElemTy(re)
+    if (Ty.IsTyCorrect(elemTy) && elemTy.IsIdeal() && elemTy.IsInteger()) {
+        elemTy = TypeManager.GetPrimitiveTy(TypeKind.TYPE_INT64)
+    }
+    if (!CheckRangeElements(typeManager, elemTy, re)) {
+        return invalidTy
+    }
+    let rangeTy = typeManager.GetStructTy(resolvedRangeDecl, [elemTy])
+    re.SetTy(rangeTy)
+    return rangeTy
 }
 
-public func ChkRangeExpr(typeManager: TypeManager, target: Ty, re: RangeExpr): Bool {
+public func ChkRangeExpr(typeManager: TypeManager, target: Ty, re: RangeExpr,
+    rangeDecl!: Option<StructDecl> = None): Bool {
     re.SetTy(TypeManager.GetInvalidTy())
+    if (!BindRangeDecl(re, rangeDecl)) {
+        return false
+    }
     if (!Ty.IsTyCorrect(target)) {
         return false
     }

@@ -986,19 +986,33 @@ public class Translator {
         return forIn
     }
 
+    private func TranslateForInRangePatternDecl(pattern: AstPattern): Unit {
+        if (let Some(varPattern) <- (pattern as AstVarPattern)) {
+            if (let Some(varDecl) <- varPattern.varDecl) {
+                let _ = Translator.TranslateASTNode(varDecl, this)
+            }
+            return
+        }
+        if (let Some(varOrEnum) <- (pattern as AstVarOrEnumPattern)) {
+            if (let Some(realPattern) <- varOrEnum.pattern) {
+                TranslateForInRangePatternDecl(realPattern)
+                return
+            }
+            throw IllegalStateException("faithful AST2CHIR unresolved VarOrEnumPattern in range ForInExpr")
+        }
+        if (let Some(_) <- (pattern as AstWildcardPattern)) {
+            return
+        }
+        throw IllegalArgumentException(
+            "not yet ported in faithful AST2CHIR: non-var range ForInExpr pattern")
+    }
+
     private func TranslateForInRangeBody(expr: AstForInExpr, forIn: ForIn): Unit {
         blockGroupStack.add(forIn.GetBody())
         currentBlock = forIn.GetBody().GetEntryBlock() ??
             throw IllegalStateException("faithful AST2CHIR for-in body has no entry block")
         if (let Some(pattern) <- expr.pattern) {
-            if (let Some(varPattern) <- (pattern as AstVarPattern)) {
-                if (let Some(varDecl) <- varPattern.varDecl) {
-                    let _ = Translator.TranslateASTNode(varDecl, this)
-                }
-            } else if (let None <- (pattern as AstWildcardPattern)) {
-                throw IllegalArgumentException(
-                    "not yet ported in faithful AST2CHIR: non-var range ForInExpr pattern")
-            }
+            TranslateForInRangePatternDecl(pattern)
         }
         TranslateForInBodyBlockGroup(expr)
         blockGroupStack.remove(at: blockGroupStack.size - 1)

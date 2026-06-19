@@ -110,6 +110,7 @@ public class FaithfulAST2CHIR {
         TranslateNominalDecls(node)
         TranslateOtherTopLevelDecls(node)
         SetInitFuncForStaticVar()
+        FlatForInExpr(builder).RunOnPackage(CurrentPackage())
         AST2CHIRCheck()
         return !failure
     }

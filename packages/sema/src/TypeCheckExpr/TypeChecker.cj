@@ -1195,6 +1195,14 @@ public class TypeChecker {
             }
         }
         SynthesizeNodeChildren(ctx, expr)
+        if (let Some(rangeExpr) <- (expr as RangeExpr)) {
+            var rangeStruct: Option<StructDecl> = None
+            if (let Some(rangeDecl) <- lookupResolvedPackageDecl(ctx, "std.core", "Range")) {
+                addImportedDeclAndDependencies(ctx, rangeDecl)
+                rangeStruct = rangeDecl as StructDecl
+            }
+            return FinishSynthesize(ctx, rangeExpr, SynRangeExpr(impl.typeManager, rangeExpr, rangeDecl: rangeStruct))
+        }
         if (let Some(arrayLit) <- (expr as ArrayLit)) {
             var arrayStruct: Option<StructDecl> = None
             if (let Some(arrayDecl) <- lookupResolvedPackageDecl(ctx, "std.core", "Array")) {

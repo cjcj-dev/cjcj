@@ -80,7 +80,9 @@ public class CGFunctionType <: CGType {
                     paramLLVMTypes.add(unsafe { LLVMPointerType(retCGType.GetLLVMType(), sretAddrspace) })
                 }
             }
+            realParamIndices.clear()
             for (paramTy in funcTy.GetParamTypes()) {
+                realParamIndices.add(paramLLVMTypes.size)
                 let derefParamTy = paramTy.StripAllRefs()
                 if (paramTy.IsRef() && (derefParamTy.IsStruct() || derefParamTy.IsTuple())) {
                     let derefParamCGType = CGType.GetOrCreate(cgMod, derefParamTy)
@@ -137,11 +139,8 @@ public class CGFunctionType <: CGType {
     protected override func GenContainedCGTypes(): Unit {
         if (let Some(funcTy) <- (chirType as FuncType)) {
             containedCGTypes.add(CGType.GetOrCreate(cgMod, funcTy.GetReturnType()))
-            var idx: Int64 = 0
             for (paramTy in funcTy.GetParamTypes()) {
                 containedCGTypes.add(CGType.GetOrCreate(cgMod, paramTy))
-                realParamIndices.add(idx)
-                idx++
             }
         }
     }

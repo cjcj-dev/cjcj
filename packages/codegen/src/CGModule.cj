@@ -363,18 +363,13 @@ public class CGModule {
     }
 
     public func MapFunctionParameters(chirFunc: Function, cgFunc: CGFunction): Unit {
-        let usesBasePtr = if (let Some(funcTy) <- cgFunc.GetCGFunctionType()) { funcTy.HasBasePtr() } else { false }
         var idx: Int64 = 0
         while (idx < chirFunc.GetNumOfParams()) {
             let param = chirFunc.GetParam(idx)
             let rawArg = cgFunc.GetArgByIndexFromCHIR(idx)
-            let paramCGType = if (usesBasePtr) {
-                if (let Some(paramTy) <- param.GetType()) {
-                    if (paramTy.IsStruct() || paramTy.IsTuple()) {
-                        CGType.GetOrCreate(this, cgCtx.GetCGPkgContext().GetCHIRBuilder().context.GetRefTy(paramTy))
-                    } else {
-                        GetCGTypeForValue(param)
-                    }
+            let paramCGType = if (let Some(paramTy) <- param.GetType()) {
+                if (!paramTy.IsRef() && (paramTy.IsStruct() || paramTy.IsTuple())) {
+                    CGType.GetOrCreate(this, cgCtx.GetCGPkgContext().GetCHIRBuilder().context.GetRefTy(paramTy))
                 } else {
                     GetCGTypeForValue(param)
                 }
