@@ -23,6 +23,7 @@ import cangjie_compiler::ast.ClassTy as AstClassTy
 import cangjie_compiler::ast.StructTy as AstStructTy
 import cangjie_compiler::ast.InterfaceTy as AstInterfaceTy
 import cangjie_compiler::ast.EnumTy as AstEnumTy
+import cangjie_compiler::ast.RefEnumTy as AstRefEnumTy
 import cangjie_compiler::ast.GenericsTy as AstGenericsTy
 
 public class CHIRTypeCacheEntry {
@@ -382,8 +383,9 @@ public class CHIRType {
         let typeArgs = TranslateTypeArgs(enumTy.typeArgs)
         let def = RequireEnumDef(GetGlobalNominalCache(RequireEnumDecl(enumTy)))
         let enumType = builder.context.GetEnumTy(def, typeArgs)
-        chirTypeCache.SetType(enumTy, enumType)
-        return enumType
+        let translated = if ((enumTy as AstRefEnumTy).isSome()) { builder.context.GetRefTy(enumType) } else { enumType }
+        chirTypeCache.SetType(enumTy, translated)
+        return translated
     }
 
     private func TranslateArrayType(arrayTy: AstArrayTy): Type {
