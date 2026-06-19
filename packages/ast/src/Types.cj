@@ -1163,7 +1163,9 @@ public class InterfaceTy <: ClassLikeTy {
     public func GetGenericTy(): Option<InterfaceTy> {
         if (let Some(interfaceDecl) <- declPtr) {
             if (let Some(_) <- interfaceDecl.generic) {
-                return interfaceDecl.GetTy() as InterfaceTy
+                if (let Some(ty) <- interfaceDecl.GetTy()) {
+                    return ty as InterfaceTy
+                }
             }
         }
         return None
@@ -1209,7 +1211,9 @@ public open class ClassTy <: ClassLikeTy {
     public func GetGenericTy(): Option<ClassTy> {
         if (let Some(classDecl) <- declPtr) {
             if (let Some(_) <- classDecl.generic) {
-                return classDecl.GetTy() as ClassTy
+                if (let Some(ty) <- classDecl.GetTy()) {
+                    return ty as ClassTy
+                }
             }
         }
         return None
@@ -1329,7 +1333,9 @@ public open class EnumTy <: Ty {
     public func GetGenericTy(): Option<EnumTy> {
         if (let Some(enumDecl) <- declPtr) {
             if (let Some(_) <- enumDecl.generic) {
-                return enumDecl.GetTy() as EnumTy
+                if (let Some(ty) <- enumDecl.GetTy()) {
+                    return ty as EnumTy
+                }
             }
         }
         return None
@@ -1395,7 +1401,9 @@ public class StructTy <: Ty {
     public func GetGenericTy(): Option<StructTy> {
         if (let Some(structDecl) <- declPtr) {
             if (let Some(_) <- structDecl.generic) {
-                return structDecl.GetTy() as StructTy
+                if (let Some(ty) <- structDecl.GetTy()) {
+                    return ty as StructTy
+                }
             }
         }
         return None
