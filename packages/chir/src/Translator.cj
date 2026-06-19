@@ -1941,9 +1941,9 @@ public class Translator {
 
     private func EnumPatternPayloadTypes(pattern: AstEnumPattern): ArrayList<Type> {
         let out = ArrayList<Type>()
-        if (let Some(constructorExpr) <- pattern.constructor) {
-            if (let Some(constructorTy) <- constructorExpr.GetTy()) {
-                if (let Some(funcTy) <- (constructorTy as AstFuncTy)) {
+        if (let Some(funcDecl) <- (RequireEnumPatternConstructor(pattern) as AstFuncDecl)) {
+            if (let Some(ctorTy) <- funcDecl.GetTy()) {
+                if (let Some(funcTy) <- (ctorTy as AstFuncTy)) {
                     for (paramTy in funcTy.paramTys) {
                         out.add(TranslateEnumPatternPayloadType(pattern, paramTy))
                     }
@@ -1951,9 +1951,9 @@ public class Translator {
                 }
             }
         }
-        if (let Some(funcDecl) <- (RequireEnumPatternConstructor(pattern) as AstFuncDecl)) {
-            if (let Some(ctorTy) <- funcDecl.GetTy()) {
-                if (let Some(funcTy) <- (ctorTy as AstFuncTy)) {
+        if (let Some(constructorExpr) <- pattern.constructor) {
+            if (let Some(constructorTy) <- constructorExpr.GetTy()) {
+                if (let Some(funcTy) <- (constructorTy as AstFuncTy)) {
                     for (paramTy in funcTy.paramTys) {
                         out.add(TranslateEnumPatternPayloadType(pattern, paramTy))
                     }
@@ -2250,6 +2250,13 @@ public class Translator {
     }
 
     private func CallBaseFuncTy(expr: AstCallExpr, calleeDecl: AstFuncDecl): AstFuncTy {
+        if (calleeDecl.TestAttr(AstAttribute.ENUM_CONSTRUCTOR)) {
+            if (let Some(declTy) <- calleeDecl.GetTy()) {
+                if (let Some(funcTy) <- (declTy as AstFuncTy)) {
+                    return funcTy
+                }
+            }
+        }
         if (let Some(base) <- expr.baseFunc) {
             if (let Some(baseTy) <- base.GetTy()) {
                 if (let Some(funcTy) <- (baseTy as AstFuncTy)) {
