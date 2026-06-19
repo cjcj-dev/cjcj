@@ -1,0 +1,1 @@
+main(){ let t=(1,2,3); let (a,b,c)=t; println(a+b+c) }
