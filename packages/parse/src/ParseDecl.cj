@@ -543,27 +543,30 @@ extend ParserImpl {
 
     public func ParseFuncBody(scopeKind: ScopeKind): FuncBody {
         let body = FuncBody()
+        body.begin = Peek().Begin()
         if (let Some(generic) <- ParseOptionalGeneric()) {
             body.generic = generic
         }
         body.paramLists.add(ParseParameterList(scopeKind))
+        let paramsEnd = lastToken.End()
         if (Skip(TokenKind.COLON)) {
             body.colonPos = lastToken.Begin()
             body.retType = ParseType()
         }
+        var constraintsEnd = INVALID_POSITION
         for (constraint in ParseGenericConstraints()) {
             EnsureFuncBodyGeneric(body).genericConstraints.add(constraint)
+            constraintsEnd = constraint.end
         }
         if (Seeing(TokenKind.LCURL)) {
             body.body = ParseBlock(ScopeKind.FUNC_BODY)
             if (let Some(block) <- body.body) { body.end = block.end }
-        } else if (Skip(TokenKind.SEMI)) {
-            body.end = lastToken.End()
-        } else if (parseDeclFile) {
-            body.end = lastToken.End()
+        } else if (!constraintsEnd.IsZero()) {
+            body.end = constraintsEnd
+        } else if (let Some(retType) <- body.retType) {
+            body.end = retType.end
         } else {
-            diag.DiagnoseRefactor(DiagKindRefactor.EXPECTED_TOKEN, Peek().Begin(), "expected function body")
-            body.end = Peek().Begin()
+            body.end = paramsEnd
         }
         return body
     }
