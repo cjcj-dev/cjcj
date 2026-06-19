@@ -718,6 +718,16 @@ public class IRBuilder2 <: Resource {
         return result
     }
 
+    public func GetPayloadFromObject(objectValue: LLVMValueRef): LLVMValueRef {
+        let i8Type = unsafe { LLVMInt8TypeInContext(GetLLVMContext().raw) }
+        let i8PtrType = unsafe { LLVMPointerType(i8Type, 0u32) }
+        let objectSlotType = unsafe { LLVMPointerType(i8PtrType, 1u32) }
+        let objectSlot = CreateBitCast(objectValue, objectSlotType, name: "obj.payload.slot")
+        let indices = ArrayList<LLVMValueRef>()
+        indices.add(unsafe { LLVMConstInt(LLVMInt32TypeInContext(GetLLVMContext().raw), 1u64, 0) })
+        return CreateGEP(i8PtrType, objectSlot, indices, name: "obj.payload")
+    }
+
     public func CreateVArrayGEP(arrayType: LLVMTypeRef, pointer: LLVMValueRef, indices: ArrayList<LLVMValueRef>,
         name!: String = ""): LLVMValueRef {
         let gepIndices = ArrayList<LLVMValueRef>()
@@ -1221,7 +1231,7 @@ public class IRBuilder2 <: Resource {
         return None
     }
 
-    private func CallClassIntrinsicAlloc(classTy: Type): LLVMValueRef {
+    public func CallClassIntrinsicAlloc(classTy: Type): LLVMValueRef {
         let classCGType = CGType.GetOrCreate(cgMod, classTy)
         let typeInfo = classCGType.GetOrCreateTypeInfo()
         let typeInfoArg = CreateBitCast(typeInfo, unsafe { LLVMPointerType(LLVMInt8TypeInContext(GetLLVMContext().raw),
@@ -1234,6 +1244,9 @@ public class IRBuilder2 <: Resource {
             name: "class.alloc")
         if (!objectValue.isNull()) {
             AddRetAttr(objectValue, "noalias")
+            return CreatePointerCast(objectValue,
+                unsafe { LLVMPointerType(classCGType.GetLLVMType(), 1u32) },
+                name: "class.alloc.cast")
         }
         return objectValue
     }

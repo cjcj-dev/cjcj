@@ -146,7 +146,7 @@ public open class CGType {
     public func IsBooleanType(): Bool { return chirType.IsBoolean() }
 
     public func IsPointerType(addrSpace!: UInt32 = 0u32): Bool {
-        if (chirType.IsRef() || chirType.IsClassOrArray() || chirType.IsBox() || chirType.IsCPointer() ||
+        if (chirType.IsRef() || chirType.IsRawArray() || chirType.IsBox() || chirType.IsCPointer() ||
             chirType.IsCString()) {
             return addrspace == addrSpace || addrSpace == 0u32
         }

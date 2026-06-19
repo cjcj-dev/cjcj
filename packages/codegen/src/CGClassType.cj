@@ -17,7 +17,6 @@ public class CGClassType <: CGCustomType {
         let layoutName = GetClassObjLayoutName(chirType.ToString())
         let layout = GetOrCreateNamedStructType(cgCtx.GetLLVMContext(), layoutName)
         layoutType = layout
-        llvmType = unsafe { LLVMPointerType(layout, 1u32) }
         if (!cgCtx.IsGeneratedStructType(layoutName)) {
             cgCtx.AddGeneratedStructType(layoutName)
             let fieldTypes = ArrayList<LLVMTypeRef>()
@@ -30,7 +29,7 @@ public class CGClassType <: CGCustomType {
             }
             SetStructTypeBody(layout, fieldTypes)
         }
-        return unsafe { LLVMPointerType(layout, 1u32) }
+        return unsafe { LLVMInt8TypeInContext(cgCtx.GetLLVMContext().raw) }
     }
 
     protected override func GenContainedCGTypes(): Unit {
@@ -44,7 +43,12 @@ public class CGClassType <: CGCustomType {
     }
 
     protected override func CalculateSizeAndAlign(): Unit {
-        size = 8
-        align = 8
+        if (let Some(rawLayout) <- layoutType) {
+            size = Int64(cgMod.GetTypeSize(rawLayout))
+            align = Int64(cgMod.GetABITypeAlignment(rawLayout))
+            return
+        }
+        size = None
+        align = None
     }
 }

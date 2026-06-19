@@ -305,6 +305,13 @@ private func CreateElementAddress(irBuilder: IRBuilder2, baseValue: CGValue, ind
     }
     if (let Some(baseType) <- baseValue.GetCGType()) {
         if (let Some(elementType) <- baseType.GetPointerElementType()) {
+            if (baseType.GetOriginal().StripAllRefs().IsClass()) {
+                let layoutType = elementType.GetLayoutType()
+                let payload = irBuilder.GetPayloadFromObject(baseValue.GetRawValue())
+                let typedPayload = irBuilder.CreateBitCast(payload,
+                    unsafe { LLVMPointerType(layoutType, 1u32) }, name: name + ".payload")
+                return irBuilder.CreateGEP(layoutType, typedPayload, indices, name: name)
+            }
             return irBuilder.CreateGEP(elementType.GetLLVMType(), baseValue.GetRawValue(), indices, name: name)
         }
         return irBuilder.CreateGEP(baseType.GetLLVMType(), baseValue.GetRawValue(), indices, name: name)

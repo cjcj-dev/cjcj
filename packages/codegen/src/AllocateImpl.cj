@@ -1,8 +1,15 @@
 package cangjie_compiler::codegen
 
+import cangjie_compiler::chir.Allocate
 import cangjie_compiler::chir.Expression
 
 public func GenerateAllocate(irBuilder: IRBuilder2, chirExpr: Expression): LLVMValueRef {
+    if (let Some(allocateExpr) <- (chirExpr as Allocate)) {
+        let allocatedTy = allocateExpr.GetType()
+        if (allocatedTy.IsClass()) {
+            return irBuilder.CallClassIntrinsicAlloc(allocatedTy)
+        }
+    }
     if (let Some(resultTy) <- chirExpr.GetResultType()) {
         let cgType = CGType.GetOrCreate(irBuilder.GetCGModule(), resultTy)
         // Allocate yields a Ref<T> (a pointer to T). The stack slot must hold a T, so the alloca's

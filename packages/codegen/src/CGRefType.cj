@@ -10,12 +10,18 @@ public class CGRefType <: CGType {
     }
 
     protected override func GenLLVMType(): LLVMTypeRef {
-        let baseTy = if (let Some(refTy) <- (chirType as RefType)) {
-            CGType.GetOrCreate(cgMod, refTy.GetBaseType()).GetLLVMType()
+        if (let Some(refTy) <- (chirType as RefType)) {
+            let baseType = refTy.GetBaseType()
+            let baseCGType = CGType.GetOrCreate(cgMod, baseType)
+            if (baseType.IsClass()) {
+                return unsafe { LLVMPointerType(baseCGType.GetLLVMType(), 1u32) }
+            }
+            return unsafe { LLVMPointerType(baseCGType.GetLLVMType(), addrspace) }
         } else {
-            unsafe { LLVMInt8TypeInContext(cgCtx.GetLLVMContext().raw) }
+            return unsafe {
+                LLVMPointerType(LLVMInt8TypeInContext(cgCtx.GetLLVMContext().raw), addrspace)
+            }
         }
-        return unsafe { LLVMPointerType(baseTy, addrspace) }
     }
 
     protected override func GenContainedCGTypes(): Unit {

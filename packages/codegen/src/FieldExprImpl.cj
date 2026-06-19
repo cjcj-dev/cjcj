@@ -40,7 +40,19 @@ private func GenerateFieldByPath(irBuilder: IRBuilder2, base: Value,
                 for (item in path) {
                     indices.add(unsafe { LLVMConstInt(LLVMInt32TypeInContext(irBuilder.GetLLVMContext().raw), item, 0) })
                 }
-                let fieldAddr = irBuilder.CreateGEP(elementType.GetLLVMType(), baseValue.GetRawValue(), indices,
+                let basePointer = if (baseCGType.GetOriginal().StripAllRefs().IsClass()) {
+                    let layoutType = elementType.GetLayoutType()
+                    irBuilder.CreateBitCast(irBuilder.GetPayloadFromObject(baseValue.GetRawValue()),
+                        unsafe { LLVMPointerType(layoutType, 1u32) }, name: name + ".payload")
+                } else {
+                    baseValue.GetRawValue()
+                }
+                let gepElementType = if (baseCGType.GetOriginal().StripAllRefs().IsClass()) {
+                    elementType.GetLayoutType()
+                } else {
+                    elementType.GetLLVMType()
+                }
+                let fieldAddr = irBuilder.CreateGEP(gepElementType, basePointer, indices,
                     name: name + ".addr")
                 if (let Some(fieldType) <- GetFieldCGTypeAtPath(elementType, path)) {
                     let loaded = irBuilder.CreateLoad(fieldType.GetLLVMType(), fieldAddr, name: name)
