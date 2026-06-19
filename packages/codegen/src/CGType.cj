@@ -209,9 +209,10 @@ public open class CGType {
         if (let Some(existingInfo) <- typeInfo) {
             return existingInfo
         }
-        let createdInfo = GetOrCreateTypeInfoGlobal(cgMod, chirType, cgGenericKind)
-        typeInfo = createdInfo
-        return createdInfo
+        let declaredInfo = DeclareTypeInfoGlobal(cgMod, chirType, cgGenericKind)
+        typeInfo = declaredInfo
+        DefineTypeInfoGlobalIfNeeded(cgMod, chirType, declaredInfo)
+        return declaredInfo
     }
 
     public func GetOrCreateTypeTemplate(): LLVMValueRef {

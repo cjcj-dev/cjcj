@@ -1,6 +1,7 @@
 package cangjie_compiler::codegen
 
 import std.collection.*
+import cangjie_compiler::chir.Attribute
 import cangjie_compiler::chir.BooleanType
 import cangjie_compiler::chir.ClassType
 import cangjie_compiler::chir.CPointerType
@@ -32,6 +33,12 @@ public func GetOrInsertCodeGenGlobal(cgMod: CGModule, globalName: String, global
 }
 
 public func GetOrCreateTypeInfoGlobal(cgMod: CGModule, chirTy: Type, genericKind: CGGenericKind): LLVMValueRef {
+    let typeInfo = DeclareTypeInfoGlobal(cgMod, chirTy, genericKind)
+    DefineTypeInfoGlobalIfNeeded(cgMod, chirTy, typeInfo)
+    return typeInfo
+}
+
+public func DeclareTypeInfoGlobal(cgMod: CGModule, chirTy: Type, genericKind: CGGenericKind): LLVMValueRef {
     let typeInfoTy = CGType.GetOrCreateTypeInfoType(cgMod.GetLLVMContext())
     let typeInfoName = CGType.GetNameOfTypeInfoGV(chirTy)
     if (genericKind == CGGenericKind.STATIC_GI) {
@@ -50,13 +57,19 @@ public func GetOrCreateTypeInfoGlobal(cgMod: CGModule, chirTy: Type, genericKind
         let layoutName = if (chirTy.IsVoid()) { UNIT_TYPE_STR } else { chirTy.ToString() + ".Type" }
         LLVMSetGlobalStringMetadata(cgMod.GetLLVMContext(), typeInfo, GC_TYPE_META_NAME, layoutName)
     }
-    DefineConcreteTypeInfoIfNeeded(cgMod, chirTy, typeInfo, typeInfoTy)
     return typeInfo
+}
+
+public func DefineTypeInfoGlobalIfNeeded(cgMod: CGModule, chirTy: Type, typeInfo: LLVMValueRef): Unit {
+    DefineConcreteTypeInfoIfNeeded(cgMod, chirTy, typeInfo, CGType.GetOrCreateTypeInfoType(cgMod.GetLLVMContext()))
 }
 
 private func DefineConcreteTypeInfoIfNeeded(cgMod: CGModule, chirTy: Type, typeInfo: LLVMValueRef,
     typeInfoTy: LLVMTypeRef): Unit {
     if (typeInfo.isNull() || unsafe { LLVMIsDeclaration(typeInfo) } == 0) {
+        return
+    }
+    if (IsImportedCustomType(chirTy)) {
         return
     }
     if (chirTy.IsRawArray()) {
@@ -89,6 +102,13 @@ private func DefineConcreteTypeInfoIfNeeded(cgMod: CGModule, chirTy: Type, typeI
         }
         LLVMSetGlobalStringMetadata(cgMod.GetLLVMContext(), typeInfo, GC_TYPE_META_NAME, GetLayoutMetadataName(chirTy))
     }
+}
+
+private func IsImportedCustomType(chirTy: Type): Bool {
+    if (let Some(customTy) <- (chirTy as CustomType)) {
+        return customTy.GetCustomTypeDef().TestAttr(Attribute.IMPORTED)
+    }
+    return false
 }
 
 private func BuildRawArrayTypeInfoInitializer(cgMod: CGModule, moduleHandle: LLVMModuleHandle, chirTy: Type,

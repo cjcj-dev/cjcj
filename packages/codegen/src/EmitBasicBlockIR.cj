@@ -78,6 +78,24 @@ public func EmitBasicBlockIR(cgMod: CGModule, entryBlock: Block): Unit {
 
 public func EmitBasicBlockIR(cgMod: CGModule, builder: IRBuilder2, block: Block): Unit {
     try (scope = CodeGenBlockScope(builder, block)) {
+        CreateLandingPadIfNeeded(cgMod, builder, block)
         EmitExpressionIR(cgMod, builder, block.GetExpressions())
+    }
+}
+
+private func CreateLandingPadIfNeeded(cgMod: CGModule, builder: IRBuilder2, block: Block): Unit {
+    if (!block.IsLandingPadBlock()) {
+        return
+    }
+    let landingPad = builder.CreateLandingPad(0u32)
+    let exceptions = block.GetExceptions()
+    if (exceptions.isEmpty()) {
+        builder.AddLandingPadCatchAllClause(landingPad)
+        return
+    }
+    let i8PtrType = unsafe { LLVMPointerType(LLVMInt8TypeInContext(builder.GetLLVMContext().raw), 0u32) }
+    for (exceptClass in exceptions) {
+        let typeInfo = CGType.GetOrCreate(cgMod, exceptClass).GetOrCreateTypeInfo()
+        builder.AddLandingPadClause(landingPad, unsafe { LLVMConstBitCast(typeInfo, i8PtrType) })
     }
 }
