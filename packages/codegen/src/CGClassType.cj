@@ -17,7 +17,9 @@ public class CGClassType <: CGCustomType {
         let layoutName = GetClassObjLayoutName(chirType.ToString())
         let layout = GetOrCreateNamedStructType(cgCtx.GetLLVMContext(), layoutName)
         layoutType = layout
+        llvmType = unsafe { LLVMPointerType(layout, 1u32) }
         if (!cgCtx.IsGeneratedStructType(layoutName)) {
+            cgCtx.AddGeneratedStructType(layoutName)
             let fieldTypes = ArrayList<LLVMTypeRef>()
             if (let Some(customTy) <- (chirType as CustomType)) {
                 for (member in customTy.GetCustomTypeDef().GetInstanceVars()) {
@@ -27,7 +29,6 @@ public class CGClassType <: CGCustomType {
                 }
             }
             SetStructTypeBody(layout, fieldTypes)
-            cgCtx.AddGeneratedStructType(layoutName)
         }
         return unsafe { LLVMPointerType(layout, 1u32) }
     }

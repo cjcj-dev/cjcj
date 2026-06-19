@@ -10,10 +10,18 @@ public class CGStructType <: CGCustomType {
     }
 
     protected override func GenLLVMType(): LLVMTypeRef {
+        if (chirType.IsString()) {
+            let stringLayout = cgCtx.GetCjStringType()
+            layoutType = stringLayout
+            llvmType = stringLayout
+            return stringLayout
+        }
         let layoutName = STRUCT_TYPE_PREFIX + chirType.ToString()
         let structLayout = GetOrCreateNamedStructType(cgCtx.GetLLVMContext(), layoutName)
         layoutType = structLayout
+        llvmType = structLayout
         if (!cgCtx.IsGeneratedStructType(layoutName)) {
+            cgCtx.AddGeneratedStructType(layoutName)
             let fieldTypes = ArrayList<LLVMTypeRef>()
             if (let Some(customTy) <- (chirType as CustomType)) {
                 for (member in customTy.GetCustomTypeDef().GetInstanceVars()) {
@@ -23,12 +31,14 @@ public class CGStructType <: CGCustomType {
                 }
             }
             SetStructTypeBody(structLayout, fieldTypes)
-            cgCtx.AddGeneratedStructType(layoutName)
         }
         return structLayout
     }
 
     protected override func GenContainedCGTypes(): Unit {
+        if (chirType.IsString()) {
+            return
+        }
         if (let Some(customTy) <- (chirType as CustomType)) {
             for (member in customTy.GetCustomTypeDef().GetInstanceVars()) {
                 if (!member.isStatic) {
@@ -39,6 +49,13 @@ public class CGStructType <: CGCustomType {
     }
 
     protected override func CalculateSizeAndAlign(): Unit {
+        if (chirType.IsString()) {
+            if (let Some(rawLayout) <- layoutType) {
+                size = Int64(cgMod.GetTypeSize(rawLayout))
+                align = Int64(cgMod.GetABITypeAlignment(rawLayout))
+            }
+            return
+        }
         var total: Int64 = 0
         var maxAlign: Int64 = 1
         for (fieldCGType in GetContainedTypes()) {
