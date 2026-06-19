@@ -124,7 +124,7 @@ public class Translator {
         let initExpr = RequireExpr(decl.initializer, "global variable initializer")
         let initValue = Translator.TranslateASTNode(initExpr, this) ??
             throw IllegalStateException("faithful AST2CHIR global variable initializer produced no value")
-        builder.CreateStore(initValue, globalVar, CurrentBlock())
+        builder.CreateStore(CastValueIfNeeded(initValue, RequireRefBaseType(globalVar)), globalVar, CurrentBlock())
         if (CurrentBlock().GetTerminator().isNone()) {
             builder.CreateExit(None, CurrentBlock())
         }
@@ -198,6 +198,13 @@ public class Translator {
             throw IllegalStateException("faithful AST2CHIR function cache is not a Function: ${funcDecl.identifier.Val()}")
         if (let None <- funcDecl.funcBody) {
             return fn
+        }
+        if (funcDecl.TestAttr(AstAttribute.ABSTRACT)) {
+            if (let Some(funcBody) <- funcDecl.funcBody) {
+                if (let None <- funcBody.body) {
+                    return fn
+                }
+            }
         }
         let body = EnsureFuncBody(fn)
         blockGroupStack.add(body)
@@ -337,7 +344,7 @@ public class Translator {
         localValSymbolTable.Set(varDecl, slotValue)
         if (let Some(initializerExpr) <- varDecl.initializer) {
             if (let Some(initValue) <- Translator.TranslateASTNode(initializerExpr, this)) {
-                builder.CreateStore(initValue, slotValue, CurrentBlock())
+                builder.CreateStore(CastValueIfNeeded(initValue, valueTy), slotValue, CurrentBlock())
             }
         }
         return slotValue
@@ -898,8 +905,26 @@ public class Translator {
             let classTy = UnwrapClassType(chirTy.TranslateType(astTy))
             def.SetType(classTy)
         }
+        SetClassSuperClass(def, decl)
+        SetClassImplementedInterface(def, decl)
         for (member in decl.GetMemberDeclPtrs()) {
             TranslateMemberDecl(def, member)
+        }
+    }
+
+    private func SetClassSuperClass(def: ClassDef, decl: AstClassLikeDecl): Unit {
+        if (let Some(classDecl) <- (decl as AstClassDecl)) {
+            if (let Some(superDecl) <- classDecl.GetSuperClassDecl()) {
+                if (let Some(superAstTy) <- superDecl.GetTy()) {
+                    def.SetSuperClassTy(UnwrapClassType(chirTy.TranslateType(superAstTy)))
+                }
+            }
+        }
+    }
+
+    private func SetClassImplementedInterface(def: ClassDef, decl: AstClassLikeDecl): Unit {
+        for (superInterfaceTy in decl.GetStableSuperInterfaceTys()) {
+            def.AddImplementedInterfaceTy(UnwrapClassType(chirTy.TranslateType(superInterfaceTy)))
         }
     }
 

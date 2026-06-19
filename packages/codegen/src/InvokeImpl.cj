@@ -14,6 +14,7 @@ import cangjie_compiler::chir.Type
 import cangjie_compiler::chir.Value
 
 private let GET_VTABLE_FUNC_INTRINSIC_NAME: String = "llvm.cj.get.vtable.func"
+private let GET_MTABLE_FUNC_INTRINSIC_NAME: String = "llvm.cj.get.mtable.func"
 private let GET_METHOD_OUTERTYPE_INTRINSIC_NAME: String = "llvm.cj.get.method.outertype"
 
 public func GenerateInvokeExpression(irBuilder: IRBuilder2, chirExpr: Expression): LLVMValueRef {
@@ -73,13 +74,27 @@ private func BuildVirtualCallee(irBuilder: IRBuilder2, objectValue: CGValue, own
     let objectTypeInfoRaw = irBuilder.CreateBitCast(objectTypeInfo, i8PtrType, name: "invoke.ti.raw")
     let ownerTypeInfo = CGType.GetOrCreate(irBuilder.GetCGModule(), ownerTy.StripAllRefs()).GetOrCreateTypeInfo()
     let ownerTypeInfoRaw = irBuilder.CreateBitCast(ownerTypeInfo, i8PtrType, name: "invoke.owner.ti")
-    let intrinsicArgs = ArrayList<LLVMValueRef>()
-    intrinsicArgs.add(objectTypeInfoRaw)
-    intrinsicArgs.add(irBuilder.GetInt64(1))
-    intrinsicArgs.add(irBuilder.GetInt64(methodIndex))
-    intrinsicArgs.add(ownerTypeInfoRaw)
-    let rawCallee = irBuilder.CreateIntrinsicCall(GET_VTABLE_FUNC_INTRINSIC_NAME, ArrayList<LLVMTypeRef>(),
-        intrinsicArgs, name: "invoke.fn")
+    let isInterfaceCall = IsInterfaceOwnerType(ownerTy)
+    let rawCallee = if (isInterfaceCall) {
+        let intrinsicArgs = ArrayList<LLVMValueRef>()
+        intrinsicArgs.add(objectTypeInfoRaw)
+        intrinsicArgs.add(ownerTypeInfoRaw)
+        intrinsicArgs.add(irBuilder.GetInt64(methodIndex))
+        irBuilder.CreateIntrinsicCall(GET_MTABLE_FUNC_INTRINSIC_NAME, ArrayList<LLVMTypeRef>(), intrinsicArgs,
+            name: "invoke.fn")
+    } else {
+        let intrinsicArgs = ArrayList<LLVMValueRef>()
+        intrinsicArgs.add(objectTypeInfoRaw)
+        intrinsicArgs.add(irBuilder.GetInt64(1))
+        intrinsicArgs.add(irBuilder.GetInt64(methodIndex))
+        intrinsicArgs.add(ownerTypeInfoRaw)
+        irBuilder.CreateIntrinsicCall(GET_VTABLE_FUNC_INTRINSIC_NAME, ArrayList<LLVMTypeRef>(), intrinsicArgs,
+            name: "invoke.fn")
+    }
+    if (isInterfaceCall && ownerTy.StripAllRefs().GetTypeArgs().isEmpty()) {
+        return (irBuilder.CreateBitCast(rawCallee, cgFuncType.GetLLVMType(), name: "invoke.fn.cast"),
+            unsafe { LLVMConstNull(typeInfoPtrType) })
+    }
     let outerTypeInfoArgs = ArrayList<LLVMValueRef>()
     outerTypeInfoArgs.add(objectTypeInfoRaw)
     outerTypeInfoArgs.add(ownerTypeInfoRaw)
@@ -88,6 +103,13 @@ private func BuildVirtualCallee(irBuilder: IRBuilder2, objectValue: CGValue, own
         ArrayList<LLVMTypeRef>(), outerTypeInfoArgs, name: "invoke.outer.ti.raw")
     let outerTypeInfo = irBuilder.CreateBitCast(rawOuterTypeInfo, typeInfoPtrType, name: "invoke.outer.ti")
     return (irBuilder.CreateBitCast(rawCallee, cgFuncType.GetLLVMType(), name: "invoke.fn.cast"), outerTypeInfo)
+}
+
+private func IsInterfaceOwnerType(ownerTy: Type): Bool {
+    if (let Some(customTy) <- (ownerTy.StripAllRefs() as CustomType)) {
+        return customTy.GetCustomTypeDef().IsInterface()
+    }
+    return false
 }
 
 private func GenerateResolvedStaticInvoke(irBuilder: IRBuilder2, dispatch: DynamicDispatch,

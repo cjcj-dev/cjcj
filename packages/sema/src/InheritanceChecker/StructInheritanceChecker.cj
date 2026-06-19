@@ -657,9 +657,35 @@ public class StructInheritanceChecker {
         for (interfaceTy in interfaceTys) {
             if (let Some(interfaceDecl) <- Ty.GetInheritableDeclPtrOfTy(interfaceTy)) {
                 MergeInheritedMembers(members, GetStoredMembersForDecl(interfaceDecl), interfaceTy, inheritedInterfaces: true)
+                MergeInheritedMembers(members, GetDirectInterfaceMembers(interfaceDecl, interfaceTy), interfaceTy,
+                    inheritedInterfaces: true)
             }
         }
         DiagnoseForConflictInheritance(decl, members)
+        return members
+    }
+
+    private func GetDirectInterfaceMembers(interfaceDecl: InheritableDecl, interfaceTy: Ty): MemberMap {
+        let members = MemberMap()
+        for (member in interfaceDecl.GetMemberDecls()) {
+            if (!Ty.IsTyCorrect(member.GetTy()) || member.TestAttr(Attribute.CONSTRUCTOR)) {
+                continue
+            }
+            if (member.astKind != ASTKind.PROP_DECL && !member.IsFunc()) {
+                continue
+            }
+            let memberSig = MemberSignature(
+                decl: member,
+                ty: member.GetTy(),
+                structTy: Some(interfaceTy),
+                extendDecl: None
+            )
+            memberSig.isInheritedInterface = true
+            for (bounds in GetAllGenericUpperBounds(typeManager, member)) {
+                memberSig.upperBounds.add(bounds)
+            }
+            let _ = UpdateInheritedMemberIfNeeded(members, memberSig, inheritedInterfaces: true)
+        }
         return members
     }
 

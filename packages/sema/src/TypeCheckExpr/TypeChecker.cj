@@ -6,6 +6,7 @@ import cangjie_compiler::option.GlobalOptions as OptionGlobalOptions
 import cangjie_compiler::sema.*
 import cangjie_compiler::sema.Desugar.*
 import cangjie_compiler::sema.FFI.*
+import cangjie_compiler::sema.InheritanceChecker.*
 
 private func contextPackage(ctx: ASTContext): Option<Package> {
     return ctx.curPackage
@@ -240,7 +241,11 @@ public class TypeChecker {
     public init(ci: Option<CompilerInstance>) {
         this.ci = ci
         let tm = if (let Some(instance) <- ci) { instance.typeManager } else { TypeManager() }
-        impl = TypeCheckerImpl(typeManager: tm)
+        impl = if (let Some(instance) <- ci) {
+            TypeCheckerImpl(typeManager: tm, diag: instance.diag)
+        } else {
+            TypeCheckerImpl(typeManager: tm)
+        }
     }
 
     public func TypeCheckForPackages(pkgs: ArrayList<Package>): Unit {
@@ -365,6 +370,7 @@ public class TypeChecker {
             if (let Some(pkg) <- contextPackage(ctx)) {
                 PreCheckAnnoForFFI(pkg)
                 let _ = PreCheckPackage(ctx, pkg, typeManager: impl.typeManager)
+                let _ = CheckDeclAttributesForPackage(pkg, opts: GlobalOptions())
             }
         }
         impl.typeManager.ClearMapCache()
@@ -399,8 +405,16 @@ public class TypeChecker {
                 SetOverflowStrategyForPkg(pkg)
                 let _ = CollectUnusedImports(pkg)
                 let _ = CheckConstEvaluation(pkg)
+                RunInheritanceCheck(pkg)
                 PerformDesugarAfterTypeCheck(impl.typeManager, pkg, context: Some(ctx), options: GlobalOptions())
             }
+        }
+    }
+
+    private func RunInheritanceCheck(pkg: Package): Unit {
+        if (let Some(diagValue) <- impl.diag) {
+            StructInheritanceChecker(diagValue, impl.typeManager, pkg).Check()
+            CheckInterfaceConformanceForPackage(diagValue, impl.typeManager, pkg)
         }
     }
 

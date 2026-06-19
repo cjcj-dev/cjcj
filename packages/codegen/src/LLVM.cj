@@ -238,6 +238,7 @@ foreign {
     func LLVMConstStructInContext(context: LLVMContextRef, constantVals: CPointer<LLVMValueRef>,
         count: UInt32, packed: Int32): LLVMValueRef
     func LLVMConstBitCast(constantVal: LLVMValueRef, toType: LLVMTypeRef): LLVMValueRef
+    func LLVMConstIntToPtr(constantVal: LLVMValueRef, toType: LLVMTypeRef): LLVMValueRef
     func LLVMConstAddrSpaceCast(constantVal: LLVMValueRef, toType: LLVMTypeRef): LLVMValueRef
     func LLVMConstInBoundsGEP2(ty: LLVMTypeRef, constantVal: LLVMValueRef, constantIndices: CPointer<LLVMValueRef>,
         numIndices: UInt32): LLVMValueRef

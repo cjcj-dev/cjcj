@@ -445,6 +445,9 @@ public class TypeManager {
     }
 
     public func GetInstantiatedTy(ty: Ty, typeMapping: TypeSubst): Ty {
+        if (typeMapping.IsEmpty() || !Ty.IsTyCorrect(ty)) {
+            return ty
+        }
         if (let Some(gen) <- (ty as GenericsTy)) {
             return getInstantiatedGenericTy(gen, typeMapping)
         }
@@ -2913,6 +2916,7 @@ public class TypeManager {
 
     private func getInstantiatedGenericTy(ty: GenericsTy, typeMapping: TypeSubst): Ty {
         var current: Ty = ty
+        let mapping = typeMapping.Clone()
         let visited = ArrayList<GenericsTy>()
         var searching = true
         while (searching) {
@@ -2922,14 +2926,15 @@ public class TypeManager {
                     return current
                 }
                 visited.add(currentGen)
-                if (let Some(mapped) <- typeMapping.Get(currentGen)) {
+                if (let Some(mapped) <- mapping.Get(currentGen)) {
                     current = mapped
+                    removeTypeSubst(mapping, currentGen)
                     searching = true
                 }
             }
         }
-        if (!current.IsGeneric() && current.HasGeneric()) {
-            return GetInstantiatedTy(current, typeMapping)
+        if (!mapping.IsEmpty() && !current.IsGeneric() && current.HasGeneric()) {
+            return GetInstantiatedTy(current, mapping)
         }
         return current
     }
@@ -3000,6 +3005,17 @@ public class TypeManager {
             }
         }
         return false
+    }
+
+    private func removeTypeSubst(mapping: TypeSubst, tyVar: GenericsTy): Unit {
+        var idx: Int64 = 0
+        while (idx < mapping.entries.size) {
+            if (SameTy(mapping.entries[idx].tyVar, tyVar)) {
+                mapping.entries.remove(at: idx)
+                return
+            }
+            idx++
+        }
     }
 
     private func containsFuncDecl(values: ArrayList<FuncDecl>, decl: FuncDecl): Bool {

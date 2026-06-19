@@ -424,6 +424,7 @@ public class CompilerInstance {
         }
         let semaInstance = FaithfulSemaCompilerInstance()
         semaInstance.globalOptions = invocation.globalOptions
+        semaInstance.diag = Some(diag.AsBasicDiagnosticEngine())
         for (importedPackage in importManager.GetAllImportedPackages()) {
             semaInstance.packageDecls.add(RealASTPackageDecl(importedPackage))
         }
