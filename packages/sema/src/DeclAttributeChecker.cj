@@ -114,6 +114,13 @@ private class DeclAttributeCheckerImpl {
                 if (!member.TestAttr(Attribute.STATIC)) {
                     member.EnableAttr(Attribute.OPEN)
                 }
+                if (member.IsFuncOrProp()) {
+                    if (InterfaceMemberHasImplementation(member)) {
+                        member.EnableAttr(Attribute.DEFAULT)
+                    } else {
+                        member.EnableAttr(Attribute.ABSTRACT)
+                    }
+                }
                 if (let Some(propDecl) <- (member as PropDecl)) {
                     for (setter in propDecl.setters) {
                         if (!setter.TestAttr(Attribute.STATIC)) {
@@ -124,6 +131,24 @@ private class DeclAttributeCheckerImpl {
             }
         }
         SetCommonAttributes(interfaceDecl)
+    }
+
+    private func InterfaceMemberHasImplementation(member: Decl): Bool {
+        if (let Some(funcDecl) <- (member as FuncDecl)) {
+            if (let Some(funcBody) <- funcDecl.funcBody) {
+                if (let Some(_) <- funcBody.body) {
+                    return true
+                }
+            }
+            return false
+        }
+        if (let Some(propDecl) <- (member as PropDecl)) {
+            if (let Some(_) <- propDecl.initializer) {
+                return true
+            }
+            return !propDecl.getters.isEmpty() || !propDecl.setters.isEmpty()
+        }
+        return false
     }
 
     private func CheckEnumAttribute(enumDecl: EnumDecl): Unit {
