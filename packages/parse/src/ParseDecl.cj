@@ -1011,18 +1011,38 @@ extend ParserImpl {
             ret.generic = generic
             ret.EnableAttr(Attribute.GENERIC)
         }
-        // The supertype clause is introduced by `<:` (the subtype operator, lexed as UPPERBOUND), e.g.
-        // `class Sub <: Base & I`. (A bare `:` is accepted too for leniency.)
-        if (Skip(TokenKind.UPPERBOUND) || Skip(TokenKind.COLON)) {
-            ret.inheritedTypes.add(ParseType())
-            while (Skip(TokenKind.BITAND)) {
-                ret.inheritedTypes.add(ParseType())
-            }
+        if (Skip(TokenKind.UPPERBOUND)) {
+            ParseInheritedTypes(ret)
         }
         for (constraint in ParseGenericConstraints()) {
             EnsureDeclGeneric(ret).genericConstraints.add(constraint)
         }
         ret.end = ret.identifier.End()
+    }
+
+    public func ParseInheritedTypes(decl: InheritableDecl): Unit {
+        decl.upperBoundPos = lastToken.Begin()
+        while (true) {
+            let inheritedType = ParseType()
+            if (IsValidInheritedType(inheritedType)) {
+                decl.inheritedTypes.add(inheritedType)
+            } else if (!inheritedType.TestAttr(Attribute.IS_BROKEN)) {
+                diag.DiagnoseRefactor(
+                    DiagKindRefactor.EXPECTED_IDENTIFIER,
+                    inheritedType.begin,
+                    "expected inherited type name")
+            }
+            if (!Skip(TokenKind.BITAND)) {
+                break
+            }
+            if (!decl.inheritedTypes.isEmpty()) {
+                decl.inheritedTypes[decl.inheritedTypes.size - 1].bitAndPos = lastToken.Begin()
+            }
+        }
+    }
+
+    private func IsValidInheritedType(ty: Type): Bool {
+        return ty.astKind == ASTKind.REF_TYPE || ty.astKind == ASTKind.QUALIFIED_TYPE
     }
 
     private func EnsureDeclGeneric(decl: Decl): Generic {
