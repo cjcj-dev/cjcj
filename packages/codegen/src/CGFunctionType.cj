@@ -133,11 +133,11 @@ public class CGFunctionType <: CGType {
     }
 
     private func ShouldUseSRet(retTy: Type): Bool {
-        return retTy.IsStruct() || retTy.IsTuple() || retTy.IsVArray()
+        return retTy.IsUnit() || retTy.IsStruct() || retTy.IsTuple() || retTy.IsVArray()
     }
 
     private func IsVoidLikeReturn(retTy: Type): Bool {
-        return retTy.IsUnit() || retTy.IsNothing() || retTy.IsVoid()
+        return retTy.IsNothing() || retTy.IsVoid()
     }
 
     private func ShouldNeedBasePtr(paramTy: Type): Bool {

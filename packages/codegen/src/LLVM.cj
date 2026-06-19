@@ -129,6 +129,7 @@ public func LLVMRealPredicateValue(predicate: LLVMRealPredicate): Int32 {
 foreign {
     func LLVMContextCreate(): LLVMContextRef
     func LLVMContextDispose(context: LLVMContextRef): Unit
+    func LLVMContextSetOpaquePointers(context: LLVMContextRef, opaquePointers: Int32): Unit
     func LLVMModuleCreateWithNameInContext(moduleID: CString, context: LLVMContextRef): LLVMModuleRef
     func LLVMDisposeModule(module: LLVMModuleRef): Unit
     func LLVMSetDataLayout(module: LLVMModuleRef, dataLayout: CString): Unit
@@ -361,6 +362,7 @@ foreign {
     func LLVMIsStringAttribute(attr: LLVMAttributeRef): Int32
     func LLVMIsTypeAttribute(attr: LLVMAttributeRef): Int32
     func LLVMAddAttributeAtIndex(fn: LLVMValueRef, index: UInt32, attr: LLVMAttributeRef): Unit
+    func LLVMAddCallSiteAttribute(callSite: LLVMValueRef, index: UInt32, attr: LLVMAttributeRef): Unit
     func LLVMGetAttributeCountAtIndex(fn: LLVMValueRef, index: UInt32): UInt32
     func LLVMGetAttributesAtIndex(fn: LLVMValueRef, index: UInt32, attrs: CPointer<LLVMAttributeRef>): Unit
     func LLVMGetEnumAttributeAtIndex(fn: LLVMValueRef, index: UInt32, kindID: UInt32): LLVMAttributeRef
@@ -368,6 +370,8 @@ foreign {
         keyLen: UInt32): LLVMAttributeRef
     func LLVMRemoveEnumAttributeAtIndex(fn: LLVMValueRef, index: UInt32, kindID: UInt32): Unit
     func LLVMRemoveStringAttributeAtIndex(fn: LLVMValueRef, index: UInt32, key: CString, keyLen: UInt32): Unit
+    func LLVMRemoveCallSiteEnumAttribute(callSite: LLVMValueRef, index: UInt32, kindID: UInt32): Unit
+    func LLVMRemoveCallSiteStringAttribute(callSite: LLVMValueRef, index: UInt32, key: CString, keyLen: UInt32): Unit
     func strcmp(lhs: CString, rhs: CString): Int32
     func strlen(str: CString): UIntNative
     func memcpy(dest: CPointer<UInt8>, src: CString, count: UIntNative): CPointer<UInt8>
@@ -450,7 +454,9 @@ public class LLVMContextHandle <: Resource {
     }
 
     public static func Create(): LLVMContextHandle {
-        return LLVMContextHandle(unsafe { LLVMContextCreate() })
+        let context = unsafe { LLVMContextCreate() }
+        unsafe { LLVMContextSetOpaquePointers(context, 0) }
+        return LLVMContextHandle(context)
     }
 
     public func close(): Unit {

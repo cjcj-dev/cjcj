@@ -109,7 +109,7 @@ public class CGModule {
     }
 
     public func GetOrInsertCGFunction(chirValue: Value, forWrapper!: Bool = false): CGFunction {
-        let name = chirValue.GetIdentifierWithoutPrefix()
+        let name = GetCodeGenGlobalName(chirValue)
         if (functions.contains(name)) {
             return functions[name]
         }
@@ -205,7 +205,8 @@ public class CGModule {
     }
 
     private func MaybeAttachExceptionPersonality(rawFunction: LLVMValueRef, chirValue: Value): Unit {
-        if (rawFunction.isNull() || !chirValue.IsFuncWithBody() || chirValue.TestAttr(Attribute.FOREIGN)) {
+        if (rawFunction.isNull() || !chirValue.IsFuncWithBody() || chirValue.TestAttr(Attribute.FOREIGN) ||
+            chirValue.TestAttr(Attribute.IMPORTED)) {
             return
         }
         if (let Some(functionValue) <- (chirValue as Function)) {
@@ -245,7 +246,7 @@ public class CGModule {
     }
 
     public func GetOrInsertGlobalVariable(chirGV: GlobalVar): CGValue {
-        let name = chirGV.GetIdentifierWithoutPrefix()
+        let name = GetCodeGenGlobalName(chirGV)
         if (globalVariables.contains(name)) {
             return globalVariables[name]
         }
@@ -279,7 +280,7 @@ public class CGModule {
     }
 
     public func GetMappedValue(chirValue: Value): Option<CGValue> {
-        let name = chirValue.GetIdentifierWithoutPrefix()
+        let name = GetCodeGenValueKey(chirValue)
         if (valueMapping.contains(name)) {
             return valueMapping[name]
         }
@@ -287,7 +288,7 @@ public class CGModule {
     }
 
     public func SetOrUpdateMappedCGValue(chirValue: Value, value: CGValue): Unit {
-        valueMapping[chirValue.GetIdentifierWithoutPrefix()] = value
+        valueMapping[GetCodeGenValueKey(chirValue)] = value
     }
 
     public func MaterializeValue(irBuilder: IRBuilder2, chirValue: Value): CGValue {

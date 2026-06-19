@@ -23,6 +23,105 @@ private func questTy(): Ty {
     return TypeManager.GetQuestTy()
 }
 
+private func lookupResolvedPackageDecl(ctx: ASTContext, packageName: String, name: String): Option<Decl> {
+    if (let Some(packageMap) <- ctx.resolvedPackageMemberDeclsMap.get(packageName)) {
+        if (let Some(decls) <- packageMap.get(name)) {
+            for (decl in decls) {
+                if (decl.identifier.Val() == name) {
+                    return Some(decl)
+                }
+            }
+        }
+    }
+    for (packageDecl in ctx.packageDecls) {
+        if (packageDecl.fullPackageName == packageName || packageDecl.srcPackage.fullPackageName == packageName) {
+            for (file in packageDecl.srcPackage.files) {
+                for (decl2 in file.decls) {
+                    if (decl2.identifier.Val() == name) {
+                        return Some(decl2)
+                    }
+                }
+            }
+        }
+    }
+    return None
+}
+
+private func addDeclUniqueToPackage(values: ArrayList<Decl>, decl: Decl): Unit {
+    for (value in values) {
+        if (sameImportedAwareDecl(value, decl)) {
+            return
+        }
+    }
+    values.add(decl)
+}
+
+private func sameImportedAwareDecl(left: Decl, right: Decl): Bool {
+    if (left.TestAttr(Attribute.IMPORTED) && right.TestAttr(Attribute.IMPORTED)) {
+        if (!left.rawMangleName.isEmpty() || !right.rawMangleName.isEmpty()) {
+            return left.rawMangleName == right.rawMangleName
+        }
+        if (!left.mangledName.isEmpty() || !right.mangledName.isEmpty()) {
+            return left.mangledName == right.mangledName
+        }
+    }
+    return SameDecl(left, right)
+}
+
+private func addImportedDeclToCurrentPackage(ctx: ASTContext, decl: Decl): Unit {
+    if (!decl.TestAttr(Attribute.IMPORTED)) {
+        return
+    }
+    if (let Some(pkg) <- ctx.curPackage) {
+        addDeclUniqueToPackage(pkg.srcImportedNonGenericDecls, decl)
+    }
+}
+
+private func addImportedTyToCurrentPackage(ctx: ASTContext, ty: Ty): Unit {
+    if (let Some(structTy) <- (ty as StructTy)) {
+        if (let Some(decl) <- structTy.decl) {
+            addImportedDeclToCurrentPackage(ctx, decl)
+        }
+    } else if (let Some(classTy) <- (ty as ClassTy)) {
+        if (let Some(decl2) <- classTy.decl) {
+            addImportedDeclToCurrentPackage(ctx, decl2)
+        }
+    } else if (let Some(enumTy) <- (ty as EnumTy)) {
+        if (let Some(decl3) <- enumTy.decl) {
+            addImportedDeclToCurrentPackage(ctx, decl3)
+        }
+    } else if (let Some(interfaceTy) <- (ty as InterfaceTy)) {
+        if (let Some(decl4) <- interfaceTy.decl) {
+            addImportedDeclToCurrentPackage(ctx, decl4)
+        }
+    } else if (let Some(funcTy) <- (ty as FuncTy)) {
+        for (paramTy in funcTy.paramTys) {
+            addImportedTyToCurrentPackage(ctx, paramTy)
+        }
+        addImportedTyToCurrentPackage(ctx, funcTy.retTy)
+    }
+    for (arg in ty.typeArgs) {
+        addImportedTyToCurrentPackage(ctx, arg)
+    }
+}
+
+private func addImportedDeclAndDependencies(ctx: ASTContext, decl: Decl): Unit {
+    addImportedDeclToCurrentPackage(ctx, decl)
+    if (let Some(outer) <- decl.outerDecl) {
+        addImportedDeclToCurrentPackage(ctx, outer)
+    }
+    if (let Some(ty) <- decl.GetTy()) {
+        addImportedTyToCurrentPackage(ctx, ty)
+    }
+}
+
+private func isStringLiteral(expr: Expr): Bool {
+    if (let Some(lit) <- (expr as LitConstExpr)) {
+        return lit.kind == LitConstKind.STRING || lit.kind == LitConstKind.JSTRING
+    }
+    return false
+}
+
 public class TypeChecker {
     private var ci: Option<CompilerInstance> = None
     private var impl: TypeCheckerImpl = TypeCheckerImpl()
@@ -715,7 +814,14 @@ public class TypeChecker {
         } else if (let Some(refExpr) <- (nameRef as RefExpr)) {
             ResolveRefExpr(ctx, refExpr)
         }
-        return SynNameReferenceExpr(impl.typeManager, nameRef)
+        let ty = SynNameReferenceExpr(impl.typeManager, nameRef)
+        if (let Some(target) <- nameRef.GetTarget()) {
+            addImportedDeclAndDependencies(ctx, target)
+        }
+        for (target2 in nameRef.GetTargets()) {
+            addImportedDeclAndDependencies(ctx, target2)
+        }
+        return ty
     }
 
     private func SynthesizeDesugarIfNeeded(ctx: ASTContext, expr: Expr): Unit {
@@ -840,6 +946,16 @@ public class TypeChecker {
             }
             return FinishSynthesize(ctx, pointerExpr, SynPointerExpr(impl.typeManager, pointerExpr, diag: impl.diag))
         }
+        if (isStringLiteral(expr)) {
+            if (let Some(lit) <- (expr as LitConstExpr)) {
+                var stringTy: Option<Ty> = None
+                if (let Some(stringDecl) <- lookupResolvedPackageDecl(ctx, "std.core", "String")) {
+                    addImportedDeclAndDependencies(ctx, stringDecl)
+                    stringTy = stringDecl.GetTy()
+                }
+                return FinishSynthesize(ctx, lit, SynLitConstExpr(lit, stringTy: stringTy))
+            }
+        }
         SynthesizeNodeChildren(ctx, expr)
         if (let Some(arrayLit) <- (expr as ArrayLit)) {
             return FinishSynthesize(ctx, arrayLit, SynArrayLit(impl.typeManager, arrayLit))
@@ -889,6 +1005,7 @@ public class TypeChecker {
         let targets = impl.Lookup(ctx, refExpr.ref.identifier.Val(), scopeNameOf(refExpr), refExpr)
         for (target in targets) {
             refExpr.ref.targets.add(target)
+            addImportedDeclAndDependencies(ctx, target)
         }
         if (targets.size == 1) {
             ReplaceTarget(refExpr, Some(targets[0]), insertTarget: true)

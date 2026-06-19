@@ -46,11 +46,23 @@ public class CompilerInstance {
 
     private func AddDeclIfMissing(values: ArrayList<Decl>, decl: Decl): Unit {
         for (value in values) {
-            if (SameDecl(value, decl)) {
+            if (SameImportedAwareDecl(value, decl)) {
                 return
             }
         }
         values.add(decl)
+    }
+
+    private func SameImportedAwareDecl(left: Decl, right: Decl): Bool {
+        if (left.TestAttr(Attribute.IMPORTED) && right.TestAttr(Attribute.IMPORTED)) {
+            if (!left.rawMangleName.isEmpty() || !right.rawMangleName.isEmpty()) {
+                return left.rawMangleName == right.rawMangleName
+            }
+            if (!left.mangledName.isEmpty() || !right.mangledName.isEmpty()) {
+                return left.mangledName == right.mangledName
+            }
+        }
+        return SameDecl(left, right)
     }
 }
 

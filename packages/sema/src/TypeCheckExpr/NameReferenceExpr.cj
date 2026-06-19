@@ -392,7 +392,8 @@ private func SynCallChildren(typeManager: TypeManager, ce: CallExpr): Bool {
     var ok = true
     if (let Some(baseFunc) <- ce.baseFunc) {
         SetIsNotAlone(baseFunc)
-        ok = Ty.IsTyCorrect(SynExprShallow(typeManager, baseFunc)) && ok
+        let baseTy = SynExprShallow(typeManager, baseFunc)
+        ok = (Ty.IsTyCorrect(baseTy) || (baseTy.IsQuest() && !GetFuncTargets(baseFunc).isEmpty())) && ok
     }
     for (arg in ce.args) {
         ok = SynCallArg(typeManager, arg) && ok

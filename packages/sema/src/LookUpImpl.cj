@@ -41,11 +41,23 @@ private class LookupBoolBox {
 
 private func addDeclUnique(values: ArrayList<Decl>, decl: Decl): Unit {
     for (value in values) {
-        if (SameDecl(value, decl)) {
+        if (sameImportedAwareDecl(value, decl)) {
             return
         }
     }
     values.add(decl)
+}
+
+private func sameImportedAwareDecl(left: Decl, right: Decl): Bool {
+    if (left.TestAttr(Attribute.IMPORTED) && right.TestAttr(Attribute.IMPORTED)) {
+        if (!left.rawMangleName.isEmpty() || !right.rawMangleName.isEmpty()) {
+            return left.rawMangleName == right.rawMangleName
+        }
+        if (!left.mangledName.isEmpty() || !right.mangledName.isEmpty()) {
+            return left.mangledName == right.mangledName
+        }
+    }
+    return SameDecl(left, right)
 }
 
 private func insertDeclByPosition(values: ArrayList<Decl>, decl: Decl): Unit {

@@ -511,7 +511,8 @@ public class IRBuilder2 <: Resource {
         name!: String = ""): LLVMValueRef {
         let callArgs = TransformCGFunctionArgs(calleeType, args, name: name)
         if (let Some(funcType) <- (calleeType.GetOriginal() as FuncType)) {
-            let callName = if (funcType.GetReturnType().IsUnit()) { "" } else { name }
+            let retTy = funcType.GetReturnType()
+            let callName = if (retTy.IsUnit() || retTy.IsNothing() || retTy.IsVoid()) { "" } else { name }
             let callBase = CreateCallOrInvoke(callee, calleeType.GetLLVMFunctionType(), callArgs, name: callName)
             if (funcType.IsCFunc()) {
                 SetZExtAttrForCFunc(callBase, calleeType.GetLLVMFunctionType())
@@ -547,10 +548,40 @@ public class IRBuilder2 <: Resource {
                 callArgs.add(CreateSRetAlloca(retCGType, name: name))
             }
         }
+        if (let Some(funcType) <- (calleeType.GetOriginal() as FuncType)) {
+            let paramTys = funcType.GetParamTypes()
+            var idx: Int64 = 0
+            for (arg in args) {
+                let fixedArg = if (idx < paramTys.size) {
+                    FixFuncArg(arg, paramTys[idx], name: name)
+                } else {
+                    arg.GetRawValue()
+                }
+                callArgs.add(fixedArg)
+                idx++
+            }
+            return callArgs
+        }
         for (arg in args) {
             callArgs.add(arg.GetRawValue())
         }
         return callArgs
+    }
+
+    private func FixFuncArg(arg: CGValue, paramTy: Type, name!: String = ""): LLVMValueRef {
+        let raw = arg.GetRawValue()
+        if (!(paramTy.IsStruct() || paramTy.IsTuple())) {
+            return raw
+        }
+        let rawTy = unsafe { LLVMTypeOf(raw) }
+        if (!rawTy.isNull() && unsafe { LLVMGetTypeKind(rawTy) } == 12) {
+            return raw
+        }
+        let paramCGType = CGType.GetOrCreate(cgMod, paramTy)
+        let allocaName = if (name.isEmpty()) { "arg.addr" } else { name + ".arg.addr" }
+        let slot = CreateEntryAlloca(paramCGType, name: allocaName)
+        CreateStore(raw, slot)
+        return slot
     }
 
     private func CreateSRetAlloca(retCGType: CGType, name!: String = ""): LLVMValueRef {

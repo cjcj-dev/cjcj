@@ -13,6 +13,7 @@ import cangjie_compiler::ast.ArrayTy as AstArrayTy
 import cangjie_compiler::ast.VArrayTy as AstVArrayTy
 import cangjie_compiler::ast.PointerTy as AstPointerTy
 import cangjie_compiler::ast.Decl as AstDecl
+import cangjie_compiler::ast.Attribute as AstAttribute
 import cangjie_compiler::ast.ClassDecl as AstClassDecl
 import cangjie_compiler::ast.StructDecl as AstStructDecl
 import cangjie_compiler::ast.InterfaceDecl as AstInterfaceDecl
@@ -217,6 +218,14 @@ private func SameAstGenericDeclOption(left: Option<AstGenericParamDecl>, right: 
 }
 
 private func SameAstDecl(left: AstDecl, right: AstDecl): Bool {
+    if (left.TestAttr(AstAttribute.IMPORTED) && right.TestAttr(AstAttribute.IMPORTED)) {
+        if (!left.rawMangleName.isEmpty() || !right.rawMangleName.isEmpty()) {
+            return left.rawMangleName == right.rawMangleName
+        }
+        if (!left.mangledName.isEmpty() || !right.mangledName.isEmpty()) {
+            return left.mangledName == right.mangledName
+        }
+    }
     return AstKindIndex(left.astKind) == AstKindIndex(right.astKind) && left.identifier.Val() == right.identifier.Val() &&
         left.fullPackageName == right.fullPackageName && left.begin.hashCode() == right.begin.hashCode() &&
         left.end.hashCode() == right.end.hashCode()

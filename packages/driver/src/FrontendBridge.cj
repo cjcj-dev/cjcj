@@ -7,6 +7,9 @@ public func ExecuteFrontendPhase(driver: Driver): Bool {
     if (!PrepareFrontendOutputs(driver.driverOptions)) {
         return false
     }
+    if (HasFrontendSourceInput(driver.driverOptions)) {
+        driver.driverOptions.directBuiltinDependencies.add("std.core")
+    }
     let frontendArgs = driver.driverOptions.GenerateFrontendOptions()
     if (driver.driverOptions.enableVerbose) {
         PrintFrontendCommand(driver.cangjieHome, frontendArgs)

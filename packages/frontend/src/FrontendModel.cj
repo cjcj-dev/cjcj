@@ -427,6 +427,558 @@ public class ImportedDeclGroup {
     }
 }
 
+private class ParsedText {
+    public var ok: Bool = false
+    public var text: String = ""
+    public var next: Int64 = 0
+
+    public init() {}
+
+    public init(ok: Bool, text: String, next: Int64) {
+        this.ok = ok
+        this.text = text
+        this.next = next
+    }
+}
+
+private class ParsedGenericArity {
+    public var ok: Bool = false
+    public var arity: Int64 = 0
+    public var next: Int64 = 0
+
+    public init(ok: Bool, arity: Int64, next: Int64) {
+        this.ok = ok
+        this.arity = arity
+        this.next = next
+    }
+}
+
+private class ParsedType {
+    public var ok: Bool = false
+    public var ty: Ty = InvalidTy()
+    public var next: Int64 = 0
+
+    public init(ok: Bool, ty: Ty, next: Int64) {
+        this.ok = ok
+        this.ty = ty
+        this.next = next
+    }
+}
+
+private class CjoSignatureMaterializer {
+    private let packageName: String
+    private let pkg: Package
+    private let file: File
+    private let nominalDecls: HashMap<String, Decl> = HashMap<String, Decl>()
+
+    public init(packageName: String, pkg: Package, file: File) {
+        this.packageName = packageName
+        this.pkg = pkg
+        this.file = file
+    }
+
+    public func Materialize(strings: ArrayList<String>): Unit {
+        var idx: Int64 = 0
+        while (idx < strings.size) {
+            let signature = strings[idx]
+            if (LooksLikePackageSignature(signature)) {
+                MaterializeSignature(signature, FindFollowingMangle(strings, idx))
+            }
+            idx++
+        }
+    }
+
+    private func LooksLikePackageSignature(signature: String): Bool {
+        let parsedPackage = ParseLengthText(signature, 0)
+        return parsedPackage.ok && parsedPackage.text == packageName
+    }
+
+    private func MaterializeSignature(signature: String, mangle: String): Unit {
+        let parsedPackage = ParseLengthText(signature, 0)
+        if (!parsedPackage.ok || parsedPackage.text != packageName) {
+            return
+        }
+        let parsedName = ParseLengthText(signature, parsedPackage.next)
+        if (!parsedName.ok || parsedName.text.isEmpty()) {
+            return
+        }
+        var pos = parsedName.next
+        let genericArity = ParseGenericArity(signature, pos)
+        if (genericArity.ok) {
+            pos = genericArity.next
+        }
+        if (pos >= signature.size) {
+            return
+        }
+        let marker = signature[pos]
+        if (IsNominalKind(marker)) {
+            let nominal = EnsureNominal(parsedName.text, marker, genericArity.arity)
+            MaterializeMemberSignature(signature, pos + 1, nominal, mangle)
+            return
+        }
+        if (marker == b'F' && genericArity.arity == 0) {
+            MaterializeFunction(parsedName.text, signature, pos, mangle, None)
+        }
+    }
+
+    private func MaterializeMemberSignature(signature: String, memberStart: Int64, nominal: Decl, mangle: String): Unit {
+        if (memberStart >= signature.size || signature[memberStart] == b'P') {
+            return
+        }
+        let parsedMember = ParseLengthText(signature, memberStart)
+        if (!parsedMember.ok || parsedMember.text.isEmpty()) {
+            return
+        }
+        var pos = parsedMember.next
+        let genericArity = ParseGenericArity(signature, pos)
+        if (genericArity.ok) {
+            pos = genericArity.next
+        }
+        if (pos >= signature.size || genericArity.arity != 0) {
+            return
+        }
+        if (signature[pos] == b'F') {
+            MaterializeFunction(parsedMember.text, signature, pos, mangle, Some(nominal))
+            return
+        }
+        if (signature[pos] == b'V') {
+            MaterializeMemberVar(parsedMember.text, signature, pos, mangle, nominal)
+        }
+    }
+
+    private func MaterializeMemberVar(name: String, signature: String, vPos: Int64, mangle: String, outer: Decl): Unit {
+        let parsed = ParseVariableType(signature, vPos)
+        if (!parsed.ok) {
+            return
+        }
+        let varDecl = CreateVarDecl(name, None, Some(TypeNodeForTy(parsed.ty)))
+        varDecl.SetTy(parsed.ty)
+        varDecl.toBeCompiled = false
+        varDecl.fullPackageName = packageName
+        varDecl.moduleName = RootPackageName(packageName)
+        varDecl.rawMangleName = mangle
+        varDecl.mangledName = mangle
+        varDecl.outerDecl = Some(outer)
+        MarkImportedDecl(varDecl)
+        AddMember(outer, varDecl, prepend: true)
+    }
+
+    private func MaterializeFunction(name: String, signature: String, fPos: Int64, mangle: String,
+        outer: Option<Decl>): Unit {
+        let parsed = ParseFunctionType(signature, fPos)
+        if (!parsed[0]) {
+            return
+        }
+        let paramTys = parsed[1]
+        let retTy = parsed[2]
+        let params = ArrayList<FuncParam>()
+        var idx: Int64 = 0
+        while (idx < paramTys.size) {
+            let param = CreateFuncParam("p${idx}", Some(TypeNodeForTy(paramTys[idx])), None, Some(paramTys[idx]))
+            param.fullPackageName = packageName
+            param.moduleName = RootPackageName(packageName)
+            MarkImportedDecl(param)
+            params.add(param)
+            idx++
+        }
+        let paramList = CreateFuncParamList(params, None)
+        let paramLists = ArrayList<FuncParamList>()
+        paramLists.add(paramList)
+        let funcTy = FuncTy(paramTys.toArray(), retTy)
+        let body = CreateFuncBody(paramLists, Some(TypeNodeForTy(retTy)), None, Some(funcTy))
+        let funcDecl = CreateFuncDecl(name, Some(body), Some(funcTy))
+        body.funcDecl = Some(funcDecl)
+        funcDecl.toBeCompiled = false
+        funcDecl.fullPackageName = packageName
+        funcDecl.moduleName = RootPackageName(packageName)
+        funcDecl.rawMangleName = mangle
+        funcDecl.mangledName = mangle
+        MarkImportedDecl(funcDecl)
+        if (let Some(parent) <- outer) {
+            funcDecl.outerDecl = Some(parent)
+            if (IsFieldOperator(name)) {
+                funcDecl.EnableAttr(Attribute.OPERATOR)
+                funcDecl.op = OperatorTokenKind(name)
+            }
+            AddMember(parent, funcDecl)
+        } else {
+            funcDecl.EnableAttr(Attribute.GLOBAL)
+            file.decls.add(funcDecl)
+        }
+    }
+
+    private func ParseFunctionType(signature: String, fPos: Int64): (Bool, ArrayList<Ty>, Ty) {
+        let params = ArrayList<Ty>()
+        var pos = fPos + 1
+        while (pos < signature.size) {
+            if (pos + 1 < signature.size && signature[pos] == b'$' && signature[pos + 1] == b'$') {
+                pos += 2
+                let ret = if (pos >= signature.size) {
+                    ParsedType(true, PrimitiveTy(TypeKind.TYPE_UNIT), pos)
+                } else {
+                    ParseType(signature, pos)
+                }
+                return (ret.ok, params, ret.ty)
+            }
+            let parsed = ParseType(signature, pos)
+            if (!parsed.ok) {
+                return (false, params, InvalidTy())
+            }
+            params.add(parsed.ty)
+            pos = SkipParameterName(signature, parsed.next)
+        }
+        return (false, params, InvalidTy())
+    }
+
+    private func ParseVariableType(signature: String, vPos: Int64): ParsedType {
+        if (vPos >= signature.size || signature[vPos] != b'V') {
+            return ParsedType(false, InvalidTy(), vPos)
+        }
+        var pos = vPos + 1
+        if (pos + 1 >= signature.size || signature[pos] != b'$' || signature[pos + 1] != b'$') {
+            return ParsedType(false, InvalidTy(), vPos)
+        }
+        pos += 2
+        return ParseType(signature, pos)
+    }
+
+    private func ParseType(signature: String, start: Int64): ParsedType {
+        if (start >= signature.size) {
+            return ParsedType(false, InvalidTy(), start)
+        }
+        if (start + 1 < signature.size && signature[start] == b'D' && signature[start + 1] == b'h') {
+            return ParsedType(true, PrimitiveTy(TypeKind.TYPE_FLOAT16), start + 2)
+        }
+        let marker = signature[start]
+        if (marker >= b'0' && marker <= b'9') {
+            let parsedName = ParseLengthText(signature, start)
+            if (!parsedName.ok) {
+                return ParsedType(false, InvalidTy(), start)
+            }
+            var pos = parsedName.next
+            let typeArgs = ArrayList<Ty>()
+            if (pos < signature.size && signature[pos] == b'<') {
+                let parsedArgs = ParseTypeArguments(signature, pos)
+                if (!parsedArgs[0]) {
+                    return ParsedType(false, InvalidTy(), start)
+                }
+                for (arg in parsedArgs[1]) {
+                    typeArgs.add(arg)
+                }
+                pos = parsedArgs[2]
+            }
+            return ParsedType(true, TyForNamedType(parsedName.text, typeArgs), pos)
+        }
+        if (marker == b'u') { return ParsedType(true, PrimitiveTy(TypeKind.TYPE_UNIT), start + 1) }
+        if (marker == b'a') { return ParsedType(true, PrimitiveTy(TypeKind.TYPE_INT8), start + 1) }
+        if (marker == b's') { return ParsedType(true, PrimitiveTy(TypeKind.TYPE_INT16), start + 1) }
+        if (marker == b'i') { return ParsedType(true, PrimitiveTy(TypeKind.TYPE_INT32), start + 1) }
+        if (marker == b'l') { return ParsedType(true, PrimitiveTy(TypeKind.TYPE_INT64), start + 1) }
+        if (marker == b'q') { return ParsedType(true, PrimitiveTy(TypeKind.TYPE_INT_NATIVE), start + 1) }
+        if (marker == b'h') { return ParsedType(true, PrimitiveTy(TypeKind.TYPE_UINT8), start + 1) }
+        if (marker == b't') { return ParsedType(true, PrimitiveTy(TypeKind.TYPE_UINT16), start + 1) }
+        if (marker == b'j') { return ParsedType(true, PrimitiveTy(TypeKind.TYPE_UINT32), start + 1) }
+        if (marker == b'm') { return ParsedType(true, PrimitiveTy(TypeKind.TYPE_UINT64), start + 1) }
+        if (marker == b'r') { return ParsedType(true, PrimitiveTy(TypeKind.TYPE_UINT_NATIVE), start + 1) }
+        if (marker == b'b') { return ParsedType(true, PrimitiveTy(TypeKind.TYPE_BOOLEAN), start + 1) }
+        if (marker == b'c') { return ParsedType(true, PrimitiveTy(TypeKind.TYPE_RUNE), start + 1) }
+        if (marker == b'f') { return ParsedType(true, PrimitiveTy(TypeKind.TYPE_FLOAT32), start + 1) }
+        if (marker == b'd') { return ParsedType(true, PrimitiveTy(TypeKind.TYPE_FLOAT64), start + 1) }
+        if (marker == b'F') {
+            let parsedFunc = ParseFunctionType(signature, start)
+            return ParsedType(parsedFunc[0], FuncTy(parsedFunc[1].toArray(), parsedFunc[2]), signature.size)
+        }
+        return ParsedType(false, InvalidTy(), start)
+    }
+
+    private func ParseTypeArguments(signature: String, start: Int64): (Bool, ArrayList<Ty>, Int64) {
+        let args = ArrayList<Ty>()
+        var pos = start + 1
+        while (pos < signature.size && signature[pos] != b'>') {
+            let parsed = ParseType(signature, pos)
+            if (!parsed.ok) {
+                return (false, args, start)
+            }
+            args.add(parsed.ty)
+            pos = parsed.next
+        }
+        if (pos >= signature.size || signature[pos] != b'>') {
+            return (false, args, start)
+        }
+        return (true, args, pos + 1)
+    }
+
+    private func TyForNamedType(name: String, typeArgs: ArrayList<Ty>): Ty {
+        if (name == "Array" || name == "RawArray") {
+            let elemTy = if (typeArgs.isEmpty()) { AnyTy() } else { typeArgs[0] }
+            return ArrayTy(elemTy, 1u64)
+        }
+        if (name == "CPointer") {
+            let elemTy2 = if (typeArgs.isEmpty()) { AnyTy() } else { typeArgs[0] }
+            return PointerTy(elemTy2)
+        }
+        if (name.size == 1 && name[0] >= b'A' && name[0] <= b'Z') {
+            return AnyTy()
+        }
+        let nominal = EnsureNominal(name, NominalKindForName(name), typeArgs.size)
+        if (let Some(structDecl) <- (nominal as StructDecl)) {
+            return StructTy(name, structDecl, typeArgs.toArray())
+        }
+        if (let Some(classDecl) <- (nominal as ClassDecl)) {
+            return ClassTy(name, classDecl, typeArgs.toArray())
+        }
+        if (let Some(enumDecl) <- (nominal as EnumDecl)) {
+            return EnumTy(name, enumDecl, typeArgs.toArray())
+        }
+        if (let Some(interfaceDecl) <- (nominal as InterfaceDecl)) {
+            return InterfaceTy(name, interfaceDecl, typeArgs.toArray())
+        }
+        return InvalidTy()
+    }
+
+    private func EnsureNominal(name: String, kind: UInt8, genericArity: Int64): Decl {
+        if (let Some(existing) <- nominalDecls.get(name)) {
+            return existing
+        }
+        let decl: Decl = if (kind == b'C') {
+            let classDecl = ClassDecl()
+            classDecl.body = Some(ClassBody())
+            classDecl
+        } else if (kind == b'U') {
+            EnumDecl()
+        } else if (kind == b'I') {
+            let interfaceDecl = InterfaceDecl()
+            interfaceDecl.body = Some(InterfaceBody())
+            interfaceDecl
+        } else {
+            let structDecl = StructDecl()
+            structDecl.body = Some(StructBody())
+            structDecl
+        }
+        decl.identifier = SrcIdentifier(name)
+        decl.fullPackageName = packageName
+        decl.moduleName = RootPackageName(packageName)
+        decl.toBeCompiled = false
+        MarkImportedDecl(decl)
+        if (genericArity > 0) {
+            AttachGeneric(decl, genericArity)
+        }
+        SetNominalTy(decl, name)
+        nominalDecls[name] = decl
+        file.decls.add(decl)
+        return decl
+    }
+
+    private func AttachGeneric(decl: Decl, genericArity: Int64): Unit {
+        let generic = Generic()
+        var idx: Int64 = 0
+        while (idx < genericArity) {
+            let param = GenericParamDecl()
+            param.identifier = SrcIdentifier(if (idx == 0) { "T" } else { "T${idx}" })
+            param.fullPackageName = packageName
+            param.moduleName = RootPackageName(packageName)
+            MarkImportedDecl(param)
+            param.SetTy(GenericsTy(param.identifier.Val(), param))
+            generic.typeParameters.add(param)
+            idx++
+        }
+        decl.generic = Some(generic)
+    }
+
+    private func SetNominalTy(decl: Decl, name: String): Unit {
+        let typeArgs = ArrayList<Ty>()
+        if (let Some(generic) <- decl.generic) {
+            for (param in generic.typeParameters) {
+                if (let Some(paramTy) <- param.GetTy()) {
+                    typeArgs.add(paramTy)
+                }
+            }
+        }
+        if (let Some(structDecl) <- (decl as StructDecl)) {
+            structDecl.SetTy(StructTy(name, structDecl, typeArgs.toArray()))
+        } else if (let Some(classDecl) <- (decl as ClassDecl)) {
+            classDecl.SetTy(ClassTy(name, classDecl, typeArgs.toArray()))
+        } else if (let Some(enumDecl) <- (decl as EnumDecl)) {
+            enumDecl.SetTy(EnumTy(name, enumDecl, typeArgs.toArray()))
+        } else if (let Some(interfaceDecl) <- (decl as InterfaceDecl)) {
+            interfaceDecl.SetTy(InterfaceTy(name, interfaceDecl, typeArgs.toArray()))
+        }
+    }
+
+    private func AddMember(parent: Decl, member: Decl, prepend!: Bool = false): Unit {
+        if (let Some(structDecl) <- (parent as StructDecl)) {
+            if (let Some(body) <- structDecl.body) { AddDeclToMembers(body.decls, member, prepend: prepend) }
+        } else if (let Some(classDecl) <- (parent as ClassDecl)) {
+            if (let Some(body2) <- classDecl.body) { AddDeclToMembers(body2.decls, member, prepend: prepend) }
+        } else if (let Some(interfaceDecl) <- (parent as InterfaceDecl)) {
+            if (let Some(body3) <- interfaceDecl.body) { AddDeclToMembers(body3.decls, member, prepend: prepend) }
+        } else if (let Some(enumDecl) <- (parent as EnumDecl)) {
+            enumDecl.members.add(member)
+        }
+    }
+
+    private func AddDeclToMembers(members: ArrayList<Decl>, member: Decl, prepend!: Bool): Unit {
+        if (!prepend) {
+            members.add(member)
+            return
+        }
+        let existing = ArrayList<Decl>()
+        for (decl in members) {
+            existing.add(decl)
+        }
+        members.clear()
+        members.add(member)
+        for (decl in existing) {
+            members.add(decl)
+        }
+    }
+
+    private func MarkImportedDecl(decl: Decl): Unit {
+        decl.curFile = Some(file)
+        decl.EnableAttr(Attribute.PUBLIC)
+        decl.EnableAttr(Attribute.IMPORTED)
+        decl.EnableAttr(Attribute.SRC_IMPORTED)
+        if (packageName == "std.core") {
+            decl.EnableAttr(Attribute.IN_CORE)
+        } else if (packageName == "std.ast") {
+            decl.EnableAttr(Attribute.IN_MACRO)
+        }
+    }
+
+    private func TypeNodeForTy(ty: Ty): Type {
+        if (let Some(primitiveTy) <- (ty as PrimitiveTy)) {
+            let primitive = PrimitiveType(primitiveTy.kind)
+            primitive.SetTy(ty)
+            return primitive
+        }
+        let refType = RefType(ty.name)
+        refType.SetTy(ty)
+        if (let Some(decl) <- Ty.GetDeclPtrOfTy(Some(ty))) {
+            refType.ref.target = decl
+        }
+        return refType
+    }
+
+    private func SkipParameterName(signature: String, start: Int64): Int64 {
+        var pos = start
+        if (pos < signature.size && signature[pos] == b'!') {
+            let parsedName = ParseLengthText(signature, pos + 1)
+            if (parsedName.ok) {
+                pos = parsedName.next
+                if (pos < signature.size && signature[pos] == b'=') {
+                    pos++
+                }
+            }
+        }
+        return pos
+    }
+
+    private func ParseGenericArity(signature: String, start: Int64): ParsedGenericArity {
+        if (start >= signature.size || signature[start] != b'<') {
+            return ParsedGenericArity(false, 0, start)
+        }
+        var pos = start + 1
+        var value: Int64 = 0
+        var hasDigit = false
+        while (pos < signature.size && signature[pos] >= b'0' && signature[pos] <= b'9') {
+            value = value * 10 + Int64(signature[pos] - b'0')
+            hasDigit = true
+            pos++
+        }
+        if (!hasDigit || pos >= signature.size || signature[pos] != b'>') {
+            return ParsedGenericArity(false, 0, start)
+        }
+        return ParsedGenericArity(true, value, pos + 1)
+    }
+
+    private func ParseLengthText(signature: String, start: Int64): ParsedText {
+        var pos = start
+        var len: Int64 = 0
+        var hasDigit = false
+        while (pos < signature.size && signature[pos] >= b'0' && signature[pos] <= b'9') {
+            if (len > signature.size) {
+                return ParsedText(false, "", start)
+            }
+            len = len * 10 + Int64(signature[pos] - b'0')
+            if (len > signature.size) {
+                return ParsedText(false, "", start)
+            }
+            hasDigit = true
+            pos++
+        }
+        if (!hasDigit || len < 0 || pos + len > signature.size) {
+            return ParsedText(false, "", start)
+        }
+        return ParsedText(true, signature[pos..pos + len], pos + len)
+    }
+
+    private func FindFollowingMangle(strings: ArrayList<String>, index: Int64): String {
+        var idx = index + 1
+        let limit = if (index + 8 < strings.size) { index + 8 } else { strings.size }
+        while (idx < limit) {
+            if (strings[idx].startsWith("_CN")) {
+                return strings[idx]
+            }
+            idx++
+        }
+        idx = index + 1
+        while (idx < limit) {
+            if (strings[idx].startsWith("_C")) {
+                return strings[idx]
+            }
+            idx++
+        }
+        return ""
+    }
+
+    private func IsNominalKind(kind: UInt8): Bool {
+        return kind == b'C' || kind == b'S' || kind == b'U' || kind == b'I' || kind == b'T'
+    }
+
+    private func NominalKindForName(name: String): UInt8 {
+        if (name == "Option" || name == "Ordering" || name.endsWith("State")) {
+            return b'U'
+        }
+        if (name.endsWith("Exception") || name.endsWith("Error") || name == "Object") {
+            return b'C'
+        }
+        return b'S'
+    }
+
+    private func IsFieldOperator(field: String): Bool {
+        return field == "+" || field == "-" || field == "*" || field == "/" || field == "%" ||
+            field == "==" || field == "!=" || field == "<" || field == "<=" || field == ">" ||
+            field == ">=" || field == "[]" || field == "()" || field == "**"
+    }
+
+    private func OperatorTokenKind(field: String): TokenKind {
+        if (field == "+") { return TokenKind.ADD }
+        if (field == "-") { return TokenKind.SUB }
+        if (field == "*") { return TokenKind.MUL }
+        if (field == "/") { return TokenKind.DIV }
+        if (field == "%") { return TokenKind.MOD }
+        if (field == "==") { return TokenKind.EQUAL }
+        if (field == "!=") { return TokenKind.NOTEQ }
+        if (field == "<") { return TokenKind.LT }
+        if (field == "<=") { return TokenKind.LE }
+        if (field == ">") { return TokenKind.GT }
+        if (field == ">=") { return TokenKind.GE }
+        if (field == "**") { return TokenKind.EXP }
+        return TokenKind.ILLEGAL
+    }
+
+    private func RootPackageName(fullPackageName: String): String {
+        var idx: Int64 = 0
+        while (idx < fullPackageName.size) {
+            if (fullPackageName[idx] == UInt8(46)) {
+                return fullPackageName[0..idx]
+            }
+            idx++
+        }
+        return fullPackageName
+    }
+}
+
 public class ImportManager {
     private let diag: DiagnosticEngine
     private let searchPath: ArrayList<String> = ArrayList<String>()
@@ -483,6 +1035,7 @@ public class ImportManager {
         for (path in opts.importPaths) {
             AppendSearchPath(path)
         }
+        importedPackages.clear()
         depPkgCjdPaths.clear()
         directDependencies.clear()
         let sourcePackages = HashSet<String>()
@@ -511,7 +1064,7 @@ public class ImportManager {
             }
             directDependencies.add(pkg.fullPackageName, filteredDeps)
         }
-        return true
+        return LoadResolvedImportedPackages()
     }
 
     public func ReindexSourcePackagesAfterMacroExpand(pkgs: ArrayList<Package>): Unit {
@@ -677,11 +1230,23 @@ public class ImportManager {
 
     private func AddDeclIfMissing(values: ArrayList<Decl>, decl: Decl): Unit {
         for (value in values) {
-            if (SameDecl(value, decl)) {
+            if (SameImportedAwareDecl(value, decl)) {
                 return
             }
         }
         values.add(decl)
+    }
+
+    private func SameImportedAwareDecl(left: Decl, right: Decl): Bool {
+        if (left.TestAttr(Attribute.IMPORTED) && right.TestAttr(Attribute.IMPORTED)) {
+            if (!left.rawMangleName.isEmpty() || !right.rawMangleName.isEmpty()) {
+                return left.rawMangleName == right.rawMangleName
+            }
+            if (!left.mangledName.isEmpty() || !right.mangledName.isEmpty()) {
+                return left.mangledName == right.mangledName
+            }
+        }
+        return SameDecl(left, right)
     }
 
     private func LastPackageName(fullPackageName: String): String {
@@ -732,6 +1297,58 @@ public class ImportManager {
             }
         }
         importedPackages.add(pkg)
+    }
+
+    private func LoadResolvedImportedPackages(): Bool {
+        for (dep in depPkgCjdPaths.keys()) {
+            if (let Some(_) <- GetPackage(dep)) {
+                continue
+            }
+            if (let Some(path) <- depPkgCjdPaths.get(dep)) {
+                if (!LoadImportedPackageFromCjo(dep, path)) {
+                    return false
+                }
+            }
+        }
+        return true
+    }
+
+    private func LoadImportedPackageFromCjo(fullPackageName: String, cjoPath: String): Bool {
+        let (ok, data, reason) = FileUtil.ReadBinaryFileToBuffer(cjoPath)
+        if (!ok) {
+            diag.Diagnose(DiagCategory.IMPORT_PACKAGE, DEFAULT_POSITION,
+                "failed to load imported package '${fullPackageName}' from '${cjoPath}': ${reason}")
+            return false
+        }
+        let pkg = CreatePackage(fullPackageName)
+        pkg.EnableAttr(Attribute.IMPORTED)
+        pkg.hasSourceImportedDecl = true
+        let file = CreateFile(cjoPath)
+        file.curPackage = Some(pkg)
+        pkg.files.add(file)
+        let materializer = CjoSignatureMaterializer(fullPackageName, pkg, file)
+        materializer.Materialize(ExtractPrintableStrings(data))
+        AddImportedPackageIfMissing(pkg)
+        return true
+    }
+
+    private func ExtractPrintableStrings(data: Array<UInt8>): ArrayList<String> {
+        let out = ArrayList<String>()
+        var builder = StringBuilder()
+        for (byte in data) {
+            if (byte >= 0x20u8 && byte <= 0x7eu8) {
+                builder.append(String.fromUtf8([byte]))
+            } else {
+                if (builder.toString().size >= 4) {
+                    out.add(builder.toString())
+                }
+                builder = StringBuilder()
+            }
+        }
+        if (builder.toString().size >= 4) {
+            out.add(builder.toString())
+        }
+        return out
     }
 
     private func CollectDirectDependencyNames(pkg: Package): HashSet<String> {

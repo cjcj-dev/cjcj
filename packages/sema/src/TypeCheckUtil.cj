@@ -127,8 +127,12 @@ public func ReplaceTarget(node: Node, target: Option<Decl>, insertTarget!: Bool 
 
 public func ModifyTargetOfRef(refExpr: RefExpr, target: Decl, targets: ArrayList<Decl>): Unit {
     ReplaceTarget(refExpr, Some(target))
-    refExpr.ref.targets.clear()
+    let copiedTargets = ArrayList<Decl>()
     for (candidate in targets) {
+        copiedTargets.add(candidate)
+    }
+    refExpr.ref.targets.clear()
+    for (candidate in copiedTargets) {
         refExpr.ref.targets.add(candidate)
     }
 }

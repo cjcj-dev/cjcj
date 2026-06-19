@@ -40,6 +40,14 @@ private class FaithfulInitFileVars {
 }
 
 private let FAITHFUL_USER_MAIN_NAME: String = "user.main"
+private let FAITHFUL_MANGLE_CANGJIE_PREFIX: String = "_C"
+private let FAITHFUL_MANGLE_GLOBAL_PACKAGE_INIT_PREFIX: String = "GP"
+private let FAITHFUL_MANGLE_FUNC_PARAM_TYPE_PREFIX: String = "H"
+private let FAITHFUL_MANGLE_VOID_TY_SUFFIX: String = "v"
+private let FAITHFUL_SPECIAL_NAME_FOR_INIT_FUNCTION: String = "ii"
+private let FAITHFUL_SPECIAL_NAME_FOR_INIT_LITERAL_FUNCTION: String = "il"
+private let FAITHFUL_SPECIAL_NAME_FOR_IMPORTS_INIT_FUNCTION: String = "fi"
+private let FAITHFUL_SPECIAL_NAME_FOR_LITERAL_IMPORTS_INIT_FUNCTION: String = "fl"
 
 public class FaithfulAST2CHIRBuilder {
     private var builder: Option<CHIRBuilder> = None
@@ -166,9 +174,6 @@ public class FaithfulAST2CHIR {
         }
         if (decl.IsNominalDecl()) {
             CollectDeclToList(decl, importedNominalDecls)
-            for (member in decl.GetMemberDeclPtrs()) {
-                CollectImportedDeclUsedInCurPkg(member)
-            }
             return
         }
         if (let Some(funcDecl) <- (decl as AstFuncDecl)) {
@@ -286,6 +291,8 @@ public class FaithfulAST2CHIR {
     }
 
     private func CacheTopLevelDeclToGlobalSymbolTable(): Unit {
+        CacheCustomTypeDefToGlobalSymbolTable()
+        TranslateAllCustomTypeTy()
         for (decl in foreignFuncs) {
             CreateImportedFuncSignatureAndSetGlobalCache(RequireFuncDecl(decl))
         }
@@ -295,8 +302,6 @@ public class FaithfulAST2CHIR {
         for (decl in importedGlobalAndStaticVars) {
             CreateImportedValueSignatureAndSetGlobalCache(RequireVarDecl(decl))
         }
-        CacheCustomTypeDefToGlobalSymbolTable()
-        TranslateAllCustomTypeTy()
         for (decl in globalAndMemberFuncs) {
             if (let Some(funcDecl) <- (decl as AstFuncDecl)) {
                 CreateFuncSignatureAndSetGlobalCache(funcDecl)
@@ -606,6 +611,10 @@ public class FaithfulAST2CHIR {
                 "", pkgName)
             fn.EnableAttr(Attribute.IMPORTED)
             fn.EnableAttr(Attribute.PUBLIC)
+            let entry = RequireEntryBlock(fn)
+            if (entry.GetTerminator().isNone()) {
+                builder.CreateExit(None, entry)
+            }
             out.add(fn)
         }
         return out
@@ -764,8 +773,9 @@ public class FaithfulAST2CHIR {
     private func CreateEmptyGVInitFunc(identifier: String, srcCodeIdentifier: String, rawMangledName: String,
         packageName: String): Function {
         let funcTy = builder.context.GetFuncTy(ArrayList<Type>(), builder.context.GetVoidTy())
+        let effectiveRawName = if (rawMangledName.isEmpty()) { identifier } else { rawMangledName }
         let fn = builder.CreateFunction(funcTy, identifier, srcCodeIdentifier: srcCodeIdentifier,
-            rawMangledName: rawMangledName, packageName: packageName)
+            rawMangledName: effectiveRawName, packageName: packageName)
         fn.SetFuncKind(FuncKind.GLOBALVAR_INIT)
         let body = builder.CreateBlockGroup(fn)
         fn.InitBody(body)
@@ -798,7 +808,25 @@ public class FaithfulAST2CHIR {
     }
 
     private func PackageInitFuncName(pkgName: String, suffix: String): String {
-        return pkgName + "$" + if (suffix == "_literal") { "init$literal" } else { "init" }
+        let specialName = if (suffix == "_literal") {
+            FAITHFUL_SPECIAL_NAME_FOR_INIT_LITERAL_FUNCTION
+        } else if (suffix == "_importsInit") {
+            FAITHFUL_SPECIAL_NAME_FOR_IMPORTS_INIT_FUNCTION
+        } else if (suffix == "_literal_importsInit") {
+            FAITHFUL_SPECIAL_NAME_FOR_LITERAL_IMPORTS_INIT_FUNCTION
+        } else {
+            FAITHFUL_SPECIAL_NAME_FOR_INIT_FUNCTION
+        }
+        return FAITHFUL_MANGLE_CANGJIE_PREFIX + FAITHFUL_MANGLE_GLOBAL_PACKAGE_INIT_PREFIX +
+            FaithfulOptPackageName(pkgName) + specialName + FAITHFUL_MANGLE_FUNC_PARAM_TYPE_PREFIX +
+            FAITHFUL_MANGLE_VOID_TY_SUFFIX
+    }
+
+    private func FaithfulOptPackageName(pkgName: String): String {
+        if (pkgName == "std.core") {
+            return "at"
+        }
+        return "${pkgName.size}${pkgName}"
     }
 
     private func FileInitFuncName(file: AstFile, suffix: String): String {
@@ -1100,12 +1128,28 @@ public class FaithfulAST2CHIR {
     }
 
     private static func SameAstDecl(left: AstDecl, right: AstDecl): Bool {
+        if (left.TestAttr(AstAttribute.IMPORTED) && right.TestAttr(AstAttribute.IMPORTED)) {
+            if (!left.rawMangleName.isEmpty() || !right.rawMangleName.isEmpty()) {
+                return left.rawMangleName == right.rawMangleName
+            }
+            if (!left.mangledName.isEmpty() || !right.mangledName.isEmpty()) {
+                return left.mangledName == right.mangledName
+            }
+        }
         return ASTKindIndex(left.astKind) == ASTKindIndex(right.astKind) &&
             left.identifier.Val() == right.identifier.Val() && left.fullPackageName == right.fullPackageName &&
             left.begin.hashCode() == right.begin.hashCode() && left.end.hashCode() == right.end.hashCode()
     }
 
     private static func DeclIdentity(decl: AstDecl): Int64 {
+        if (decl.TestAttr(AstAttribute.IMPORTED)) {
+            if (!decl.rawMangleName.isEmpty()) {
+                return decl.rawMangleName.hashCode()
+            }
+            if (!decl.mangledName.isEmpty()) {
+                return decl.mangledName.hashCode()
+            }
+        }
         var out = ASTKindIndex(decl.astKind)
         out = out * 131 + decl.identifier.Val().hashCode()
         out = out * 131 + decl.fullPackageName.hashCode()

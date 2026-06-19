@@ -121,7 +121,10 @@ public func GetTypeAttributeValueAtIndex(llvmValue: LLVMValueRef, idx: UInt32, a
 }
 
 public func AddAttributeAtIndex(callBase: LLVMValueRef, idx: UInt32, attrName: String): Unit {
-    if (callBase.isNull() || attrName.isEmpty() || HasAttributeAtIndex(callBase, idx, attrName)) {
+    if (callBase.isNull() || attrName.isEmpty()) {
+        return
+    }
+    if (IsLLVMFunction(callBase) && HasAttributeAtIndex(callBase, idx, attrName)) {
         return
     }
     let attrKind = GetAttributeKind(attrName)
@@ -134,12 +137,19 @@ public func AddAttributeAtIndex(callBase: LLVMValueRef, idx: UInt32, attrName: S
         return
     }
     let attr = unsafe { LLVMCreateEnumAttribute(attrContext, attrKind, 0u64) }
-    unsafe { LLVMAddAttributeAtIndex(callBase, idx, attr) }
+    if (IsLLVMFunction(callBase)) {
+        unsafe { LLVMAddAttributeAtIndex(callBase, idx, attr) }
+    } else {
+        unsafe { LLVMAddCallSiteAttribute(callBase, idx, attr) }
+    }
 }
 
 public func AddStringAttributeAtIndex(llvmValue: LLVMValueRef, idx: UInt32, attrName: String,
     attrValue!: String = ""): Unit {
-    if (llvmValue.isNull() || attrName.isEmpty() || HasStringAttributeAtIndex(llvmValue, idx, attrName)) {
+    if (llvmValue.isNull() || attrName.isEmpty()) {
+        return
+    }
+    if (IsLLVMFunction(llvmValue) && HasStringAttributeAtIndex(llvmValue, idx, attrName)) {
         return
     }
     let attrContext = GetLLVMValueContext(llvmValue)
@@ -153,14 +163,21 @@ public func AddStringAttributeAtIndex(llvmValue: LLVMValueRef, idx: UInt32, attr
                 UInt32(attrValue.size))
         }
         if (!attr.isNull()) {
-            unsafe { LLVMAddAttributeAtIndex(llvmValue, idx, attr) }
+            if (IsLLVMFunction(llvmValue)) {
+                unsafe { LLVMAddAttributeAtIndex(llvmValue, idx, attr) }
+            } else {
+                unsafe { LLVMAddCallSiteAttribute(llvmValue, idx, attr) }
+            }
         }
     }
 }
 
 public func AddTypeAttributeAtIndex(callBase: LLVMValueRef, idx: UInt32, attrName: String,
     attrType: LLVMTypeRef): Unit {
-    if (callBase.isNull() || attrType.isNull() || HasAttributeAtIndex(callBase, idx, attrName)) {
+    if (callBase.isNull() || attrType.isNull()) {
+        return
+    }
+    if (IsLLVMFunction(callBase) && HasAttributeAtIndex(callBase, idx, attrName)) {
         return
     }
     let attrKind = GetAttributeKind(attrName)
@@ -169,7 +186,11 @@ public func AddTypeAttributeAtIndex(callBase: LLVMValueRef, idx: UInt32, attrNam
         return
     }
     let attr = unsafe { LLVMCreateTypeAttribute(attrContext, attrKind, attrType) }
-    unsafe { LLVMAddAttributeAtIndex(callBase, idx, attr) }
+    if (IsLLVMFunction(callBase)) {
+        unsafe { LLVMAddAttributeAtIndex(callBase, idx, attr) }
+    } else {
+        unsafe { LLVMAddCallSiteAttribute(callBase, idx, attr) }
+    }
 }
 
 public func RemoveAttributeAtIndex(llvmValue: LLVMValueRef, idx: UInt32, attrName: String): Unit {
@@ -178,10 +199,18 @@ public func RemoveAttributeAtIndex(llvmValue: LLVMValueRef, idx: UInt32, attrNam
     }
     let attrKind = GetAttributeKind(attrName)
     if (attrKind != 0u32) {
-        unsafe { LLVMRemoveEnumAttributeAtIndex(llvmValue, idx, attrKind) }
+        if (IsLLVMFunction(llvmValue)) {
+            unsafe { LLVMRemoveEnumAttributeAtIndex(llvmValue, idx, attrKind) }
+        } else {
+            unsafe { LLVMRemoveCallSiteEnumAttribute(llvmValue, idx, attrKind) }
+        }
     }
     try (attrCString = unsafe { LibC.mallocCString(attrName) }.asResource()) {
-        unsafe { LLVMRemoveStringAttributeAtIndex(llvmValue, idx, attrCString.value, UInt32(attrName.size)) }
+        if (IsLLVMFunction(llvmValue)) {
+            unsafe { LLVMRemoveStringAttributeAtIndex(llvmValue, idx, attrCString.value, UInt32(attrName.size)) }
+        } else {
+            unsafe { LLVMRemoveCallSiteStringAttribute(llvmValue, idx, attrCString.value, UInt32(attrName.size)) }
+        }
     }
 }
 
@@ -270,23 +299,7 @@ private func PropagateZExtAttributeFromCallee(callee: LLVMValueRef, callBase: LL
     }
 }
 
-private func PropagateSRetAttributeFromCallee(callee: LLVMValueRef, callBase: LLVMValueRef): Unit {
-    if (!IsLLVMFunction(callee) || callBase.isNull()) {
-        return
-    }
-    if (let Some(sretType) <- GetTypeAttributeValueAtIndex(callee, 1u32, "sret")) {
-        AddSRetAttribute(callBase, sretType)
-        AddNoAliasAttribute(callBase)
-        return
-    }
-    if (HasAttributeAtIndex(callee, 1u32, "sret")) {
-        AddSRetAttribute(callBase)
-        AddNoAliasAttribute(callBase)
-    }
-}
-
 public func PropagateCallABIAttributesFromCallee(callee: LLVMValueRef, callBase: LLVMValueRef): Unit {
-    PropagateSRetAttributeFromCallee(callee, callBase)
     PropagateZExtAttributeFromCallee(callee, callBase)
 }
 

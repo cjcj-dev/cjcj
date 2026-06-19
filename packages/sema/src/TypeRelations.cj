@@ -113,5 +113,13 @@ public func IsPrimitiveNumericWidening(leaf: Ty, root: Ty): Bool {
 }
 
 public func DeclIdentity(decl: Decl): String {
+    if (decl.TestAttr(Attribute.IMPORTED)) {
+        if (!decl.rawMangleName.isEmpty()) {
+            return "${ASTKindName(decl.astKind)}:${decl.fullPackageName}:${decl.rawMangleName}"
+        }
+        if (!decl.mangledName.isEmpty()) {
+            return "${ASTKindName(decl.astKind)}:${decl.fullPackageName}:${decl.mangledName}"
+        }
+    }
     return "${ASTKindName(decl.astKind)}:${decl.fullPackageName}:${decl.identifier.Val()}:${decl.begin.ToString()}"
 }

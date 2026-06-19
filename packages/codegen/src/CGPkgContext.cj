@@ -184,10 +184,10 @@ public class CGPkgContext {
             return
         }
         for (chirFunc in GetCHIRPackage().GetGlobalFunctions(includePureAbstract: true)) {
-            quickCHIRValues[chirFunc.GetIdentifierWithoutPrefix()] = chirFunc
+            quickCHIRValues[GetCodeGenGlobalName(chirFunc)] = chirFunc
         }
         for (chirGlobal in GetCHIRPackage().GetGlobalVars()) {
-            quickCHIRValues[chirGlobal.GetIdentifierWithoutPrefix()] = chirGlobal
+            quickCHIRValues[GetCodeGenGlobalName(chirGlobal)] = chirGlobal
         }
     }
 }
