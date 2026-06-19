@@ -1254,7 +1254,8 @@ public class CHIRChecker {
                     while (idx < operandsNum) {
                         let operand = expr.GetOperand(idx)
                         if (let Some(operandTy) <- operand.GetType()) {
-                            let expectedTy = payloadTypes[idx - 1]
+                            let expectedTy = SubstituteGenericType(payloadTypes[idx - 1],
+                                enumTy.GetEnumDef().GetGenericTypeParams(), enumTy.GetGenericArgs())
                             if (!CHIRCheckerTypeIsExpected(operandTy, expectedTy)) {
                                 result.AddError("in function ${topLevelFunc.GetIdentifier()}, type mismatched, the " +
                                     "${idx - 1}-th parameter type is ${expectedTy.ToString()}, but " +
