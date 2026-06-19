@@ -445,7 +445,19 @@ public class FaithfulAST2CHIR {
                     "faithful AST2CHIR CreateCustomTypeDef expected nominal decl, got ${ASTKindName(decl.astKind)}")
         }
         ApplyDeclAttrs(customTypeDef, decl)
+        MaybeSetCoreBuiltinClassTy(customTypeDef)
         chirType.SetGlobalNominalCache(decl, customTypeDef)
+    }
+
+    private func MaybeSetCoreBuiltinClassTy(def: CustomTypeDef): Unit {
+        if (let Some(classDef) <- (def as ClassDef)) {
+            let ty = builder.context.GetClassTy(classDef, ArrayList<Type>())
+            if (def.GetSrcCodeIdentifier() == "Object") {
+                builder.context.SetObjectTy(ty)
+            } else if (def.GetSrcCodeIdentifier() == "Any") {
+                builder.context.SetAnyTy(ty)
+            }
+        }
     }
 
     private func TranslateAllCustomTypeTy(): Unit {

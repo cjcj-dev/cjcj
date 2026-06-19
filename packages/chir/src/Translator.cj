@@ -23,11 +23,13 @@ import cangjie_compiler::ast.EnumPattern as AstEnumPattern
 import cangjie_compiler::ast.EnumTy as AstEnumTy
 import cangjie_compiler::ast.ExtendDecl as AstExtendDecl
 import cangjie_compiler::ast.Expr as AstExpr
+import cangjie_compiler::ast.ExceptTypePattern as AstExceptTypePattern
 import cangjie_compiler::ast.ForInExpr as AstForInExpr
 import cangjie_compiler::ast.ForInKind as AstForInKind
 import cangjie_compiler::ast.FuncArg as AstFuncArg
 import cangjie_compiler::ast.FuncDecl as AstFuncDecl
 import cangjie_compiler::ast.FuncTy as AstFuncTy
+import cangjie_compiler::ast.GenericsTy as AstGenericsTy
 import cangjie_compiler::ast.IfExpr as AstIfExpr
 import cangjie_compiler::ast.InterfaceTy as AstInterfaceTy
 import cangjie_compiler::ast.InterfaceDecl as AstInterfaceDecl
@@ -51,8 +53,10 @@ import cangjie_compiler::ast.TokenKindValue as AstTokenKindValue
 import cangjie_compiler::ast.Ty as AstTy
 import cangjie_compiler::ast.TupleLit as AstTupleLit
 import cangjie_compiler::ast.TuplePattern as AstTuplePattern
+import cangjie_compiler::ast.TryExpr as AstTryExpr
 import cangjie_compiler::ast.TypePattern as AstTypePattern
 import cangjie_compiler::ast.TypeConvExpr as AstTypeConvExpr
+import cangjie_compiler::ast.ThrowExpr as AstThrowExpr
 import cangjie_compiler::ast.UnaryExpr as AstUnaryExpr
 import cangjie_compiler::ast.VarDecl as AstVarDecl
 import cangjie_compiler::ast.VarWithPatternDecl as AstVarWithPatternDecl
@@ -94,6 +98,8 @@ public class Translator {
     private var delayExitSignal: Option<Value> = None
     private let blockGroupStack: ArrayList<BlockGroup> = ArrayList<BlockGroup>()
     private let loopTargetStack: ArrayList<FaithfulLoopTarget> = ArrayList<FaithfulLoopTarget>()
+    private let tryCatchContext: ArrayList<Block> = ArrayList<Block>()
+    private let tryBodyContext: ArrayList<AstTryExpr> = ArrayList<AstTryExpr>()
 
     public init(builder: CHIRBuilder, chirTy: CHIRType, globalSymbolTable: FaithfulAST2CHIRNodeMap) {
         this.builder = builder
@@ -149,6 +155,8 @@ public class Translator {
             case ASTKind.FOR_IN_EXPR => trans.Visit(RequireNodeAsForInExpr(nodePtr))
             case ASTKind.JUMP_EXPR => trans.Visit(RequireNodeAsJumpExpr(nodePtr))
             case ASTKind.MATCH_EXPR => trans.Visit(RequireNodeAsMatchExpr(nodePtr))
+            case ASTKind.TRY_EXPR => trans.Visit(RequireNodeAsTryExpr(nodePtr))
+            case ASTKind.THROW_EXPR => trans.Visit(RequireNodeAsThrowExpr(nodePtr))
             case ASTKind.ARRAY_LIT => trans.Visit(RequireNodeAsArrayLit(nodePtr))
             case ASTKind.ARRAY_EXPR => trans.Visit(RequireNodeAsArrayExpr(nodePtr))
             case ASTKind.TUPLE_LIT => trans.Visit(RequireNodeAsTupleLit(nodePtr))
@@ -433,9 +441,8 @@ public class Translator {
             idx++
         }
         let resultTy = chirTy.TranslateType(RequireAstTy(expr))
-        let call = builder.CreateApply(resultTy, callee, FuncCallContext(args: argValues,
-            instTypeArgs: TranslateFuncInstArgs(expr, calleeDecl)), CurrentBlock())
-        return RequireResult(call)
+        return CreateApplyMaybeWithException(resultTy, callee, FuncCallContext(args: argValues,
+            instTypeArgs: TranslateFuncInstArgs(expr, calleeDecl)))
     }
 
     public func Visit(expr: AstIfExpr): Option<Value> {
@@ -538,8 +545,7 @@ public class Translator {
         let thisObj = TranslatePropertyGetterThisObject(expr, getter, callee)
         let args = ArrayList<Value>()
         args.add(thisObj)
-        return RequireResult(builder.CreateApply(resultTy, callee,
-            FuncCallContext(args: args, thisType: thisObj.GetType()), CurrentBlock()))
+        return CreateApplyMaybeWithException(resultTy, callee, FuncCallContext(args: args, thisType: thisObj.GetType()))
     }
 
     private func TranslatePropertyGetterThisObject(expr: AstMemberAccess, getter: AstFuncDecl, callee: Value): Value {
@@ -669,6 +675,73 @@ public class Translator {
         if (let Some(loc) <- resultLoc) {
             return RequireResult(builder.CreateLoad(matchTy, loc, CurrentBlock()))
         }
+        return None
+    }
+
+    public func Visit(expr: AstTryExpr): Option<Value> {
+        if (!expr.resourceSpec.isEmpty() || !expr.handlers.isEmpty()) {
+            throw IllegalArgumentException("not yet ported in faithful AST2CHIR: try-with-resources/try-handle")
+        }
+        if (expr.catchBlocks.isEmpty() && expr.finallyBlock.isNone()) {
+            throw IllegalStateException("faithful AST2CHIR TryExpr has neither catch nor finally")
+        }
+        let group = RequireParentBlockGroup(CurrentBlock(), "try")
+        let tryTy = chirTy.TranslateType(RequireAstTy(expr))
+        let resultLoc: Option<Value> = if (tryTy.IsUnit() || tryTy.IsNothing()) {
+            None
+        } else {
+            RequireResult(builder.CreateAllocate(builder.context.GetRefTy(tryTy), tryTy, CurrentBlock()))
+        }
+        let hasFinally = expr.finallyBlock.isSome()
+        let finalEndBlock = builder.CreateBlock(group)
+        let normalEndBlock = if (hasFinally) { builder.CreateBlock(group) } else { finalEndBlock }
+        let exceptionBlock = builder.CreateBlock(group)
+
+        tryBodyContext.add(expr)
+        tryCatchContext.add(exceptionBlock)
+        let tryValue = Translator.TranslateASTNode(RequireBlock(expr.tryBlock, "try block"), this)
+        StoreTryResult(resultLoc, tryValue)
+        if (CurrentBlock().GetTerminator().isNone()) {
+            builder.CreateGoTo(normalEndBlock, CurrentBlock())
+        }
+        tryCatchContext.remove(at: tryCatchContext.size - 1)
+
+        var pendingExceptionBlock: Option<Block> = exceptionBlock
+        if (!expr.catchBlocks.isEmpty()) {
+            currentBlock = exceptionBlock
+            exceptionBlock.SetExceptions(GetExceptionsForTry(expr))
+            pendingExceptionBlock = TranslateCatchBlocks(expr, resultLoc, normalEndBlock)
+        } else {
+            exceptionBlock.SetExceptions(ArrayList<ClassType>())
+        }
+
+        if (hasFinally) {
+            let finallyBlock = expr.finallyBlock.getOrThrow()
+            TranslateFinally(finallyBlock, pendingExceptionBlock ?? exceptionBlock, normalEndBlock, finalEndBlock)
+        }
+
+        tryBodyContext.remove(at: tryBodyContext.size - 1)
+        currentBlock = finalEndBlock
+        if (HasTypeOfNothing(expr)) {
+            return None
+        }
+        if (let Some(loc) <- resultLoc) {
+            return RequireResult(builder.CreateLoad(tryTy, loc, CurrentBlock()))
+        }
+        return None
+    }
+
+    public func Visit(expr: AstThrowExpr): Option<Value> {
+        let thrownExpr = RequireExpr(expr.expr, "throw operand")
+        let thrownValue = Translator.TranslateASTNode(thrownExpr, this) ??
+            throw IllegalStateException("faithful AST2CHIR throw operand produced no value")
+        if (let Some(exceptionBlock) <- CurrentTryCatchBlock()) {
+            builder.CreateRaiseException(thrownValue, exceptionBlock, CurrentBlock())
+        } else {
+            builder.CreateRaiseException(thrownValue, CurrentBlock())
+        }
+        let group = RequireParentBlockGroup(CurrentBlock(), "throw continuation")
+        currentBlock = builder.CreateBlock(group)
         return None
     }
 
@@ -1301,6 +1374,272 @@ public class Translator {
         }
     }
 
+    private func StoreTryResult(location: Option<Value>, value: Option<Value>): Unit {
+        if (let Some(loc) <- location) {
+            if (let Some(result) <- value) {
+                builder.CreateStore(CastValueIfNeeded(result, RequireRefBaseType(loc)), loc, CurrentBlock())
+            }
+        }
+    }
+
+    private func HasTypeOfNothing(expr: AstTryExpr): Bool {
+        if (let Some(tryBlock) <- expr.tryBlock) {
+            if (let Some(tryTy) <- tryBlock.GetTy()) {
+                if (!tryTy.IsNothing()) {
+                    return false
+                }
+            } else {
+                return false
+            }
+        }
+        for (catchBlock in expr.catchBlocks) {
+            if (let Some(catchTy) <- catchBlock.GetTy()) {
+                if (!catchTy.IsNothing()) {
+                    return false
+                }
+            } else {
+                return false
+            }
+        }
+        return true
+    }
+
+    private func CurrentTryCatchBlock(): Option<Block> {
+        if (tryCatchContext.isEmpty()) {
+            return None
+        }
+        return tryCatchContext[tryCatchContext.size - 1]
+    }
+
+    private func ExceptionValueTypeForTry(expr: AstTryExpr): Type {
+        let _ = expr
+        return BaseExceptionObjectType()
+    }
+
+    private func BaseExceptionObjectType(): Type {
+        if (let Some(objectTy) <- builder.context.GetObjectTy()) {
+            return builder.context.GetRefTy(objectTy)
+        }
+        if (let Some(anyTy) <- builder.context.GetAnyTy()) {
+            return builder.context.GetRefTy(anyTy)
+        }
+        if (let Some(pkg) <- builder.context.GetCurPackage()) {
+            for (classDef in pkg.GetAllClassDef()) {
+                if (classDef.GetPackageName() == "std.core" && classDef.GetSrcCodeIdentifier() == "Object") {
+                    return builder.context.GetRefTy(builder.context.GetClassTy(classDef, ArrayList<Type>()))
+                }
+            }
+            for (classDef0 in pkg.GetAllClassDef()) {
+                if (classDef0.GetSrcCodeIdentifier() == "Object") {
+                    return builder.context.GetRefTy(builder.context.GetClassTy(classDef0, ArrayList<Type>()))
+                }
+            }
+        }
+        throw IllegalStateException("faithful AST2CHIR cannot determine base exception object type")
+    }
+
+    private func GetExceptionsForTry(expr: AstTryExpr): ArrayList<ClassType> {
+        let allTryExprs = ArrayList<AstTryExpr>()
+        for (tryExpr in tryBodyContext) {
+            allTryExprs.add(tryExpr)
+        }
+        allTryExprs.add(expr)
+        for (tryExpr in allTryExprs) {
+            if (tryExpr.finallyBlock.isSome()) {
+                return ArrayList<ClassType>()
+            }
+        }
+        let exceptions = ArrayList<ClassType>()
+        var tryIdx = allTryExprs.size - 1
+        while (tryIdx >= 0) {
+            let tryExpr2 = allTryExprs[tryIdx]
+            for (pattern in tryExpr2.catchPatterns) {
+                if (let Some(exceptPattern) <- (pattern as AstExceptTypePattern)) {
+                    for (typeNode in exceptPattern.types) {
+                        if (let Some(typeTy) <- typeNode.GetTy()) {
+                            AddExceptionClassType(exceptions, typeTy)
+                        }
+                    }
+                } else if (let Some(patternTy) <- pattern.GetTy()) {
+                    AddExceptionClassType(exceptions, patternTy)
+                }
+            }
+            tryIdx--
+        }
+        SortExceptionClassTypes(exceptions)
+        return exceptions
+    }
+
+    private func AddExceptionClassType(exceptions: ArrayList<ClassType>, astTy: AstTy): Unit {
+        if (let Some(genericTy) <- (astTy as AstGenericsTy)) {
+            for (upperTy in genericTy.upperBounds) {
+                if (upperTy.IsClass()) {
+                    AddExceptionClassType(exceptions, upperTy)
+                }
+            }
+            return
+        }
+        let translated = chirTy.TranslateType(astTy).StripAllRefs()
+        if (let Some(classTy) <- (translated as ClassType)) {
+            for (existing in exceptions) {
+                if (existing.IsEqual(classTy)) {
+                    return
+                }
+            }
+            exceptions.add(classTy)
+        }
+    }
+
+    private func SortExceptionClassTypes(exceptions: ArrayList<ClassType>): Unit {
+        var idx: Int64 = 1
+        while (idx < exceptions.size) {
+            let value = exceptions[idx]
+            var insertIdx = idx - 1
+            while (insertIdx >= 0 && exceptions[insertIdx].ToString() > value.ToString()) {
+                exceptions[insertIdx + 1] = exceptions[insertIdx]
+                insertIdx--
+            }
+            exceptions[insertIdx + 1] = value
+            idx++
+        }
+    }
+
+    private func TranslateCatchBlocks(expr: AstTryExpr, resultLoc: Option<Value>, endBlock: Block): Option<Block> {
+        let group = RequireParentBlockGroup(CurrentBlock(), "catch")
+        let hasFinally = expr.finallyBlock.isSome()
+        let rethrowBlock: Option<Block> = if (hasFinally) { builder.CreateBlock(group) } else { None }
+        if (let Some(block) <- rethrowBlock) {
+            tryCatchContext.add(block)
+        }
+        let exceptionValueTy = ExceptionValueTypeForTry(expr)
+        let exception = RequireResult(builder.CreateGetException(exceptionValueTy, CurrentBlock()))
+        let beginCatchArgs = ArrayList<Value>()
+        beginCatchArgs.add(exception)
+        let beginCatch = RequireResult(builder.CreateIntrinsic(exceptionValueTy,
+            IntrisicCallContext(kind: IntrinsicKind.BEGIN_CATCH, args: beginCatchArgs), CurrentBlock()))
+        var idx: Int64 = 0
+        while (idx < expr.catchPatterns.size && idx < expr.catchBlocks.size) {
+            let (falseBlock, trueBlock) = TranslateExceptionPattern(expr.catchPatterns[idx], beginCatch)
+            currentBlock = trueBlock
+            BindExceptionPatternValues(expr.catchPatterns[idx], beginCatch)
+            let catchValue = Translator.TranslateASTNode(expr.catchBlocks[idx], this)
+            StoreTryResult(resultLoc, catchValue)
+            if (CurrentBlock().GetTerminator().isNone()) {
+                builder.CreateGoTo(endBlock, CurrentBlock())
+            }
+            currentBlock = falseBlock
+            idx++
+        }
+        if (CurrentBlock().GetTerminator().isNone()) {
+            if (let Some(block2) <- rethrowBlock) {
+                builder.CreateRaiseException(beginCatch, block2, CurrentBlock())
+            } else if (let Some(outerBlock) <- CurrentTryCatchBlock()) {
+                builder.CreateRaiseException(beginCatch, outerBlock, CurrentBlock())
+            } else {
+                builder.CreateRaiseException(beginCatch, CurrentBlock())
+            }
+        }
+        if (rethrowBlock.isSome()) {
+            tryCatchContext.remove(at: tryCatchContext.size - 1)
+        }
+        return rethrowBlock
+    }
+
+    private func TranslateExceptionPattern(pattern: AstPattern, exceptionValue: Value): (Block, Block) {
+        let group = RequireParentBlockGroup(CurrentBlock(), "catch pattern")
+        let trueBlock = builder.CreateBlock(group)
+        if (let Some(_) <- (pattern as AstWildcardPattern)) {
+            let falseBlock = builder.CreateBlock(group)
+            let targetTy = if (let Some(patternTy) <- pattern.GetTy()) {
+                chirTy.TranslateType(patternTy)
+            } else {
+                ExceptionValueTypeFromValue(exceptionValue)
+            }
+            let cond = RequireResult(builder.CreateInstanceOf(builder.context.GetBoolTy(), exceptionValue, targetTy,
+                CurrentBlock()))
+            builder.CreateBranch(cond, trueBlock, falseBlock, CurrentBlock())
+            return (falseBlock, trueBlock)
+        }
+        if (let Some(exceptPattern) <- (pattern as AstExceptTypePattern)) {
+            for (typeNode in exceptPattern.types) {
+                let falseBlock = builder.CreateBlock(group)
+                let targetTy = chirTy.TranslateType(typeNode.GetTy() ??
+                    throw IllegalStateException("faithful AST2CHIR catch type has no Sema type"))
+                let cond = RequireResult(builder.CreateInstanceOf(builder.context.GetBoolTy(), exceptionValue, targetTy,
+                    CurrentBlock()))
+                builder.CreateBranch(cond, trueBlock, falseBlock, CurrentBlock())
+                currentBlock = falseBlock
+            }
+            return (CurrentBlock(), trueBlock)
+        }
+        throw IllegalArgumentException("not yet ported in faithful AST2CHIR catch pattern: ${ASTKindName(pattern.astKind)}")
+    }
+
+    private func BindExceptionPatternValues(pattern: AstPattern, exceptionValue: Value): Unit {
+        if (let Some(exceptPattern) <- (pattern as AstExceptTypePattern)) {
+            if (let Some(inner) <- exceptPattern.pattern) {
+                BindExceptionInnerPatternValues(inner, exceptionValue)
+            }
+            return
+        }
+        BindExceptionInnerPatternValues(pattern, exceptionValue)
+    }
+
+    private func BindExceptionInnerPatternValues(pattern: AstPattern, exceptionValue: Value): Unit {
+        if (let Some(varPattern) <- (pattern as AstVarPattern)) {
+            let varDecl = varPattern.varDecl ??
+                throw IllegalStateException("faithful AST2CHIR catch VarPattern has no VarDecl")
+            localValSymbolTable.Set(varDecl, CastValueIfNeeded(exceptionValue, chirTy.TranslateType(RequireAstTy(
+                varPattern))))
+            return
+        }
+        if (let Some(varOrEnum) <- (pattern as AstVarOrEnumPattern)) {
+            if (let Some(realPattern) <- varOrEnum.pattern) {
+                BindExceptionInnerPatternValues(realPattern, exceptionValue)
+            }
+            return
+        }
+        BindPatternValues(pattern, exceptionValue)
+    }
+
+    private func ExceptionValueTypeFromValue(value: Value): Type {
+        return value.GetType() ??
+            throw IllegalStateException("faithful AST2CHIR exception value has no type")
+    }
+
+    private func TranslateFinally(finallyBlock: AstBlock, exceptionBlock: Block, normalEntryBlock: Block,
+        finalEndBlock: Block): Unit {
+        TranslateFinallyRethrowFlow(finallyBlock, exceptionBlock)
+        currentBlock = normalEntryBlock
+        let _ = Translator.TranslateASTNode(finallyBlock, this)
+        if (CurrentBlock().GetTerminator().isNone()) {
+            builder.CreateGoTo(finalEndBlock, CurrentBlock())
+        }
+    }
+
+    private func TranslateFinallyRethrowFlow(finallyBlock: AstBlock, exceptionBlock: Block): Unit {
+        currentBlock = exceptionBlock
+        exceptionBlock.SetExceptions(ArrayList<ClassType>())
+        let exceptionTy = ExceptionValueTypeFromFinallyContext()
+        let exception = RequireResult(builder.CreateGetException(exceptionTy, CurrentBlock()))
+        let beginCatchArgs = ArrayList<Value>()
+        beginCatchArgs.add(exception)
+        let beginCatch = RequireResult(builder.CreateIntrinsic(exceptionTy,
+            IntrisicCallContext(kind: IntrinsicKind.BEGIN_CATCH, args: beginCatchArgs), CurrentBlock()))
+        let _ = Translator.TranslateASTNode(finallyBlock, this)
+        if (CurrentBlock().GetTerminator().isNone()) {
+            if (let Some(outerBlock) <- CurrentTryCatchBlock()) {
+                builder.CreateRaiseException(beginCatch, outerBlock, CurrentBlock())
+            } else {
+                builder.CreateRaiseException(beginCatch, CurrentBlock())
+            }
+        }
+    }
+
+    private func ExceptionValueTypeFromFinallyContext(): Type {
+        return BaseExceptionObjectType()
+    }
+
     private func TranslateMatchWithSelector(expr: AstMatchExpr, resultLoc: Option<Value>): Unit {
         let selector = Translator.TranslateASTNode(RequireExpr(expr.selector, "match selector"), this) ??
             throw IllegalStateException("faithful AST2CHIR match selector produced no value")
@@ -1679,8 +2018,8 @@ public class Translator {
         let initFnTy = builder.context.GetFuncTy(TypesFromValues(args), builder.context.GetUnitTy())
         let thisTy = result.GetType() ??
             throw IllegalStateException("faithful AST2CHIR std.core.Array literal result has no type")
-        builder.CreateApply(initFnTy.GetReturnType(), GetSymbolTable(initFunc),
-            FuncCallContext(args: args, thisType: thisTy), CurrentBlock())
+        let _ = CreateApplyMaybeWithException(initFnTy.GetReturnType(), GetSymbolTable(initFunc),
+            FuncCallContext(args: args, thisType: thisTy))
         return RequireResult(builder.CreateLoad(arrayTy, result, CurrentBlock()))
     }
 
@@ -1696,7 +2035,7 @@ public class Translator {
         let sizeFuncTy = builder.context.GetFuncTy(sizeFuncParamTys, sizeTy)
         let invokeCtx = InvokeCallContext(collection, FuncCallContext(thisType: collectionTy.StripAllRefs()),
             FuncSigInfo(sizeFuncTy, funcName: "$sizeget"))
-        let sizeValue = RequireResult(builder.CreateInvoke(sizeTy, invokeCtx, CurrentBlock()))
+        let sizeValue = CreateInvokeMaybeWithException(sizeTy, invokeCtx)
 
         let rawArrayRef = RequireResult(builder.CreateRawArrayAllocate(arrayTy, rawArrayTy.GetElementType(),
             sizeValue, CurrentBlock()))
@@ -1710,8 +2049,8 @@ public class Translator {
             instTypeArgs.add(rawArrayTy.GetElementType())
         }
         let initFnTy = builder.context.GetFuncTy(TypesFromValues(args), arrayTy)
-        builder.CreateApply(initFnTy.GetReturnType(), GetSymbolTable(initFunc),
-            FuncCallContext(args: args, instTypeArgs: instTypeArgs), CurrentBlock())
+        let _ = CreateApplyMaybeWithException(initFnTy.GetReturnType(), GetSymbolTable(initFunc),
+            FuncCallContext(args: args, instTypeArgs: instTypeArgs))
         return rawArrayRef
     }
 
@@ -1734,8 +2073,8 @@ public class Translator {
             }
         }
         let initFnTy = builder.context.GetFuncTy(TypesFromValues(args), arrayTy)
-        builder.CreateApply(initFnTy.GetReturnType(), GetSymbolTable(initFunc),
-            FuncCallContext(args: args, instTypeArgs: instTypeArgs), CurrentBlock())
+        let _ = CreateApplyMaybeWithException(initFnTy.GetReturnType(), GetSymbolTable(initFunc),
+            FuncCallContext(args: args, instTypeArgs: instTypeArgs))
         return rawArrayRef
     }
 
@@ -1867,6 +2206,42 @@ public class Translator {
         throw IllegalStateException("faithful AST2CHIR expected function type for call")
     }
 
+    private func CreateApplyMaybeWithException(resultTy: Type, callee: Value, callContext: FuncCallContext): Value {
+        if (let Some(errorBlock) <- CurrentTryCatchBlock()) {
+            let successBlock = builder.CreateBlock(RequireParentBlockGroup(CurrentBlock(), "apply-with-exception"))
+            let term = builder.CreateApplyWithException(resultTy, callee, callContext, successBlock, errorBlock,
+                CurrentBlock())
+            let result = RequireResult(term)
+            currentBlock = successBlock
+            return result
+        }
+        return RequireResult(builder.CreateApply(resultTy, callee, callContext, CurrentBlock()))
+    }
+
+    private func CreateInvokeMaybeWithException(resultTy: Type, callContext: InvokeCallContext): Value {
+        if (let Some(errorBlock) <- CurrentTryCatchBlock()) {
+            let successBlock = builder.CreateBlock(RequireParentBlockGroup(CurrentBlock(), "invoke-with-exception"))
+            let term = builder.CreateInvokeWithException(resultTy, callContext, successBlock, errorBlock, CurrentBlock())
+            let result = RequireResult(term)
+            currentBlock = successBlock
+            return result
+        }
+        return RequireResult(builder.CreateInvoke(resultTy, callContext, CurrentBlock()))
+    }
+
+    private func CreateInvokeStaticMaybeWithException(resultTy: Type, callContext: InvokeCallContext): Value {
+        if (let Some(errorBlock) <- CurrentTryCatchBlock()) {
+            let successBlock = builder.CreateBlock(RequireParentBlockGroup(CurrentBlock(),
+                "invoke-static-with-exception"))
+            let term = builder.CreateInvokeStaticWithException(resultTy, callContext, successBlock, errorBlock,
+                CurrentBlock())
+            let result = RequireResult(term)
+            currentBlock = successBlock
+            return result
+        }
+        return RequireResult(builder.CreateInvokeStatic(resultTy, callContext, CurrentBlock()))
+    }
+
     private func FuncParamTypes(expr: AstCallExpr, calleeDecl: AstFuncDecl): ArrayList<Type> {
         let out = ArrayList<Type>()
         let funcTy = CallBaseFuncTy(expr, calleeDecl)
@@ -1915,21 +2290,21 @@ public class Translator {
                 let invokeCtx = InvokeCallContext(rtti, FuncCallContext(args: argValues,
                     instTypeArgs: TranslateFuncInstArgs(expr, calleeDecl), thisType: parentTy),
                     FuncSigInfo(BuildMethodFuncType(expr, calleeDecl, parentTy), funcName: calleeDecl.identifier.Val()))
-                return RequireResult(builder.CreateInvokeStatic(resultTy, invokeCtx, CurrentBlock()))
+                return CreateInvokeStaticMaybeWithException(resultTy, invokeCtx)
             }
             let obj = thisObj ?? throw IllegalStateException("faithful AST2CHIR virtual member call has no this object")
             let objTy = thisType ?? throw IllegalStateException("faithful AST2CHIR virtual member call this has no type")
             let invokeCtx = InvokeCallContext(obj, FuncCallContext(args: argValues,
                 instTypeArgs: TranslateFuncInstArgs(expr, calleeDecl), thisType: objTy),
                 FuncSigInfo(BuildMethodFuncType(expr, calleeDecl, objTy), funcName: calleeDecl.identifier.Val()))
-            return RequireResult(builder.CreateInvoke(resultTy, invokeCtx, CurrentBlock()))
+            return CreateInvokeMaybeWithException(resultTy, invokeCtx)
         }
         if (let Some(obj) <- thisObj) {
             argValues.add(obj, at: 0)
         }
         let callee = globalSymbolTable.Get(calleeDecl)
-        return RequireResult(builder.CreateApply(resultTy, callee, FuncCallContext(args: argValues,
-            instTypeArgs: TranslateFuncInstArgs(expr, calleeDecl), thisType: thisType), CurrentBlock()))
+        return CreateApplyMaybeWithException(resultTy, callee, FuncCallContext(args: argValues,
+            instTypeArgs: TranslateFuncInstArgs(expr, calleeDecl), thisType: thisType))
     }
 
     private func TranslateFuncInstArgs(expr: AstCallExpr, calleeDecl: AstFuncDecl): ArrayList<Type> {
@@ -2126,8 +2501,8 @@ public class Translator {
             }
         }
         let callee = globalSymbolTable.Get(calleeDecl)
-        builder.CreateApply(builder.context.GetUnitTy(), callee, FuncCallContext(args: args, thisType: thisRefTy),
-            CurrentBlock())
+        let _ = CreateApplyMaybeWithException(builder.context.GetUnitTy(), callee,
+            FuncCallContext(args: args, thisType: thisRefTy))
         if (let Some(outerDecl) <- calleeDecl.outerDecl) {
             if (outerDecl.astKind == ASTKind.STRUCT_DECL) {
                 return RequireResult(builder.CreateLoad(thisTy, thisObj, CurrentBlock()))
@@ -2358,8 +2733,8 @@ public class Translator {
                 rhsValue = CoerceValueForExpectedType(rhsValue, expectedParamTys[idx])
             }
             args.add(rhsValue)
-            builder.CreateApply(builder.context.GetUnitTy(), callee, FuncCallContext(args: args, thisType: thisTy),
-                CurrentBlock())
+            let _ = CreateApplyMaybeWithException(builder.context.GetUnitTy(), callee,
+                FuncCallContext(args: args, thisType: thisTy))
             return true
         }
         return false
@@ -3151,6 +3526,14 @@ public class Translator {
 
     private static func RequireNodeAsMatchExpr(node: AstNode): AstMatchExpr {
         return (node as AstMatchExpr) ?? throw IllegalArgumentException("ASTKind cast failed: MATCH_EXPR")
+    }
+
+    private static func RequireNodeAsTryExpr(node: AstNode): AstTryExpr {
+        return (node as AstTryExpr) ?? throw IllegalArgumentException("ASTKind cast failed: TRY_EXPR")
+    }
+
+    private static func RequireNodeAsThrowExpr(node: AstNode): AstThrowExpr {
+        return (node as AstThrowExpr) ?? throw IllegalArgumentException("ASTKind cast failed: THROW_EXPR")
     }
 
     private static func RequireNodeAsArrayLit(node: AstNode): AstArrayLit {

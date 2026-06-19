@@ -98,101 +98,129 @@ private func markImportedDeclUsed(decl: Decl): Unit {
     }
 }
 
-private func addImportedTyToCurrentPackage(ctx: ASTContext, ty: Ty): Unit {
+private func importedDependencyKey(decl: Decl): String {
+    if (!decl.rawMangleName.isEmpty()) {
+        return decl.rawMangleName
+    }
+    if (!decl.mangledName.isEmpty()) {
+        return decl.mangledName
+    }
+    let ownerKey = if (let Some(outer) <- decl.outerDecl) {
+        "::owner::" + outer.identifier.Val() + "::" + ASTKindName(outer.astKind) + "::" +
+            outer.begin.line.toString() + ":" + outer.begin.column.toString()
+    } else {
+        ""
+    }
+    return decl.fullPackageName + ownerKey + "::" + decl.identifier.Val() + "::" + ASTKindName(decl.astKind) +
+        "::" + decl.begin.line.toString() + ":" + decl.begin.column.toString()
+}
+
+private func addImportedTyToCurrentPackage(ctx: ASTContext, ty: Ty, seenNominalDeps: HashSet<String>): Unit {
     if (let Some(structTy) <- (ty as StructTy)) {
         if (let Some(decl) <- structTy.decl) {
-            let wasUsed = decl.isUsedImports
             addImportedDeclToCurrentPackage(ctx, decl)
-            if (decl.TestAttr(Attribute.IMPORTED) && !wasUsed && decl.TestAttr(Attribute.GENERIC)) {
-                addImportedNominalMemberDependencies(ctx, decl)
+            if (decl.IsNominalDecl()) {
+                addImportedNominalMemberDependencies(ctx, decl, seenNominalDeps)
             }
         }
     } else if (let Some(classTy) <- (ty as ClassTy)) {
         if (let Some(decl2) <- classTy.decl) {
-            let wasUsed2 = decl2.isUsedImports
             addImportedDeclToCurrentPackage(ctx, decl2)
-            if (decl2.TestAttr(Attribute.IMPORTED) && !wasUsed2 && decl2.TestAttr(Attribute.GENERIC)) {
-                addImportedNominalMemberDependencies(ctx, decl2)
+            if (decl2.IsNominalDecl()) {
+                addImportedNominalMemberDependencies(ctx, decl2, seenNominalDeps)
             }
         }
     } else if (let Some(enumTy) <- (ty as EnumTy)) {
         if (let Some(decl3) <- enumTy.decl) {
-            let wasUsed3 = decl3.isUsedImports
             addImportedDeclToCurrentPackage(ctx, decl3)
-            if (decl3.TestAttr(Attribute.IMPORTED) && !wasUsed3 && decl3.TestAttr(Attribute.GENERIC)) {
-                addImportedNominalMemberDependencies(ctx, decl3)
+            if (decl3.IsNominalDecl()) {
+                addImportedNominalMemberDependencies(ctx, decl3, seenNominalDeps)
             }
         }
     } else if (let Some(interfaceTy) <- (ty as InterfaceTy)) {
         if (let Some(decl4) <- interfaceTy.decl) {
-            let wasUsed4 = decl4.isUsedImports
             addImportedDeclToCurrentPackage(ctx, decl4)
-            if (decl4.TestAttr(Attribute.IMPORTED) && !wasUsed4 && decl4.TestAttr(Attribute.GENERIC)) {
-                addImportedNominalMemberDependencies(ctx, decl4)
+            if (decl4.IsNominalDecl()) {
+                addImportedNominalMemberDependencies(ctx, decl4, seenNominalDeps)
             }
         }
     } else if (let Some(funcTy) <- (ty as FuncTy)) {
         for (paramTy in funcTy.paramTys) {
-            addImportedTyToCurrentPackage(ctx, paramTy)
+            addImportedTyToCurrentPackage(ctx, paramTy, seenNominalDeps)
         }
-        addImportedTyToCurrentPackage(ctx, funcTy.retTy)
+        addImportedTyToCurrentPackage(ctx, funcTy.retTy, seenNominalDeps)
     }
     for (arg in ty.typeArgs) {
-        addImportedTyToCurrentPackage(ctx, arg)
+        addImportedTyToCurrentPackage(ctx, arg, seenNominalDeps)
     }
 }
 
-private func addImportedNominalMemberDependencies(ctx: ASTContext, decl: Decl): Unit {
-    if (!decl.IsNominalDecl()) {
+private func addImportedNominalMemberDependencies(ctx: ASTContext, decl: Decl,
+    seenNominalDeps: HashSet<String>): Unit {
+    if (!decl.TestAttr(Attribute.IMPORTED) || !decl.IsNominalDecl()) {
         return
     }
+    let key = importedDependencyKey(decl)
+    if (seenNominalDeps.contains(key)) {
+        return
+    }
+    seenNominalDeps.add(key)
+    addImportedInheritedTypesToCurrentPackage(ctx, decl, seenNominalDeps)
     for (member in decl.GetMemberDecls()) {
         markImportedDeclUsed(member)
         if (let Some(funcDecl) <- (member as FuncDecl)) {
             if (let Some(funcTy) <- funcDecl.GetTy()) {
-                addImportedTyToCurrentPackage(ctx, funcTy)
+                addImportedTyToCurrentPackage(ctx, funcTy, seenNominalDeps)
             }
         } else if (let Some(propDecl) <- (member as PropDecl)) {
             if (let Some(propTy) <- propDecl.GetTy()) {
-                addImportedTyToCurrentPackage(ctx, propTy)
+                addImportedTyToCurrentPackage(ctx, propTy, seenNominalDeps)
             }
             for (getter in propDecl.getters) {
                 markImportedDeclUsed(getter)
                 if (let Some(getterTy) <- getter.GetTy()) {
-                    addImportedTyToCurrentPackage(ctx, getterTy)
+                    addImportedTyToCurrentPackage(ctx, getterTy, seenNominalDeps)
                 }
             }
             for (setter in propDecl.setters) {
                 markImportedDeclUsed(setter)
                 if (let Some(setterTy) <- setter.GetTy()) {
-                    addImportedTyToCurrentPackage(ctx, setterTy)
+                    addImportedTyToCurrentPackage(ctx, setterTy, seenNominalDeps)
                 }
             }
         } else if (let Some(varDecl) <- (member as VarDecl)) {
-            if (varDecl.TestAttr(Attribute.STATIC)) {
-                if (let Some(varTy) <- varDecl.GetTy()) {
-                    addImportedTyToCurrentPackage(ctx, varTy)
-                }
+            if (let Some(varTy) <- varDecl.GetTy()) {
+                addImportedTyToCurrentPackage(ctx, varTy, seenNominalDeps)
+            }
+        }
+    }
+}
+
+private func addImportedInheritedTypesToCurrentPackage(ctx: ASTContext, decl: Decl,
+    seenNominalDeps: HashSet<String>): Unit {
+    if (let Some(inheritable) <- (decl as InheritableDecl)) {
+        for (typeNode in inheritable.inheritedTypes) {
+            if (let Some(inheritedTy) <- typeNode.GetTy()) {
+                addImportedTyToCurrentPackage(ctx, inheritedTy, seenNominalDeps)
             }
         }
     }
 }
 
 private func addImportedDeclAndDependencies(ctx: ASTContext, decl: Decl): Unit {
-    let wasUsed = decl.isUsedImports
+    let seenNominalDeps = HashSet<String>()
     addImportedDeclToCurrentPackage(ctx, decl)
-    if (!wasUsed && decl.TestAttr(Attribute.GENERIC)) {
-        addImportedNominalMemberDependencies(ctx, decl)
+    if (decl.IsNominalDecl()) {
+        addImportedNominalMemberDependencies(ctx, decl, seenNominalDeps)
     }
     if (let Some(outer) <- decl.outerDecl) {
-        let outerWasUsed = outer.isUsedImports
         addImportedDeclToCurrentPackage(ctx, outer)
-        if (outer.TestAttr(Attribute.IMPORTED) && !outerWasUsed && outer.TestAttr(Attribute.GENERIC)) {
-            addImportedNominalMemberDependencies(ctx, outer)
+        if (outer.IsNominalDecl()) {
+            addImportedNominalMemberDependencies(ctx, outer, seenNominalDeps)
         }
     }
     if (let Some(ty) <- decl.GetTy()) {
-        addImportedTyToCurrentPackage(ctx, ty)
+        addImportedTyToCurrentPackage(ctx, ty, seenNominalDeps)
     }
 }
 
@@ -978,6 +1006,12 @@ public class TypeChecker {
             if (let Some(inner2) <- typePattern.pattern) {
                 CollectPatternBinding(inner2, out)
             }
+            return
+        }
+        if (let Some(exceptPattern) <- (pattern as ExceptTypePattern)) {
+            if (let Some(inner3) <- exceptPattern.pattern) {
+                CollectPatternBinding(inner3, out)
+            }
         }
     }
 
@@ -1116,6 +1150,105 @@ public class TypeChecker {
         return ok
     }
 
+    private func LookupCoreTy(ctx: ASTContext, name: String): Option<Ty> {
+        if (let Some(decl) <- lookupResolvedPackageDecl(ctx, "std.core", name)) {
+            addImportedDeclAndDependencies(ctx, decl)
+            return decl.GetTy()
+        }
+        return None
+    }
+
+    private func SynthesizeThrowExpr(ctx: ASTContext, throwExpr: ThrowExpr): Ty {
+        if (let Some(innerExpr) <- throwExpr.expr) {
+            let _ = Synthesize(ctx, innerExpr)
+        }
+        return FinishSynthesize(ctx, throwExpr, SynThrowExpr(impl.typeManager, throwExpr,
+            exceptionTy: LookupCoreTy(ctx, "Exception"), errorTy: LookupCoreTy(ctx, "Error")))
+    }
+
+    private func SynthesizeTryCatchPatternTypes(ctx: ASTContext, pattern: Pattern): Unit {
+        if (let Some(exceptPattern) <- (pattern as ExceptTypePattern)) {
+            for (typeNode in exceptPattern.types) {
+                SynthesizeTypeNode(ctx, Some(typeNode))
+            }
+            if (let Some(inner) <- exceptPattern.pattern) {
+                let target = CatchPatternBindingTargetTy(ctx, exceptPattern)
+                let _ = ChkPattern(impl.typeManager, ctx, target, inner, isPatternInMatch: false)
+            }
+            return
+        }
+        if (let Some(varOrEnum) <- (pattern as VarOrEnumPattern)) {
+            if (let Some(inner2) <- varOrEnum.pattern) {
+                SynthesizeTryCatchPatternTypes(ctx, inner2)
+                return
+            }
+        }
+        let catchTarget = LookupCoreTy(ctx, "Exception") ?? impl.typeManager.GetAnyTy()
+        let _ = ChkPattern(impl.typeManager, ctx, catchTarget, pattern, isPatternInMatch: false)
+    }
+
+    private func CatchPatternBindingTargetTy(ctx: ASTContext, pattern: ExceptTypePattern): Ty {
+        if (let Some(patternTy) <- pattern.GetTy()) {
+            if (Ty.IsTyCorrect(patternTy)) {
+                return patternTy
+            }
+        }
+        for (typeNode in pattern.types) {
+            if (let Some(typeTy) <- typeNode.GetTy()) {
+                if (Ty.IsTyCorrect(typeTy)) {
+                    return typeTy
+                }
+            }
+        }
+        return LookupCoreTy(ctx, "Exception") ?? impl.typeManager.GetAnyTy()
+    }
+
+    private func SynthesizeTryExprChildren(ctx: ASTContext, tryExpr: TryExpr): Unit {
+        let _ = LookupCoreTy(ctx, "Object")
+        let _ = LookupCoreTy(ctx, "Exception")
+        let _ = LookupCoreTy(ctx, "Error")
+        for (resource in tryExpr.resourceSpec) {
+            let _ = SynthesizeDecl(ctx, resource)
+        }
+        if (let Some(tryBlock) <- tryExpr.tryBlock) {
+            let _ = SynthesizeBlock(ctx, tryBlock)
+        }
+        var idx: Int64 = 0
+        while (idx < tryExpr.catchPatterns.size) {
+            let boundDecls = ArrayList<Decl>()
+            let pattern = tryExpr.catchPatterns[idx]
+            SynthesizeTryCatchPatternTypes(ctx, pattern)
+            CollectPatternBinding(pattern, boundDecls)
+            if (idx < tryExpr.catchBlocks.size) {
+                let _ = SynthesizeBlock(ctx, tryExpr.catchBlocks[idx])
+            }
+            RemovePatternBindings(ctx, boundDecls)
+            idx++
+        }
+        for (handler in tryExpr.handlers) {
+            if (let Some(commandPattern) <- handler.commandPattern) {
+                SynthesizeTryCatchPatternTypes(ctx, commandPattern)
+            }
+            if (let Some(block) <- handler.block) {
+                let _ = SynthesizeBlock(ctx, block)
+            }
+        }
+        if (let Some(finallyBlock) <- tryExpr.finallyBlock) {
+            let _ = SynthesizeBlock(ctx, finallyBlock)
+        }
+        if (let Some(tryLambda) <- tryExpr.tryLambda) {
+            let _ = Synthesize(ctx, tryLambda)
+        }
+        if (let Some(finallyLambda) <- tryExpr.finallyLambda) {
+            let _ = Synthesize(ctx, finallyLambda)
+        }
+    }
+
+    private func SynthesizeTryExpr(ctx: ASTContext, tryExpr: TryExpr): Ty {
+        SynthesizeTryExprChildren(ctx, tryExpr)
+        return FinishSynthesize(ctx, tryExpr, SynTryExpr(impl.typeManager, tryExpr))
+    }
+
     private func Synthesize(ctx: ASTContext, expr: Expr): Ty {
         if (let Some(desugar) <- expr.desugarExpr) {
             let _ = Synthesize(ctx, desugar)
@@ -1148,6 +1281,12 @@ public class TypeChecker {
         }
         if (let Some(nameRef) <- (expr as NameReferenceExpr)) {
             return FinishSynthesize(ctx, nameRef, SynthesizeNameReference(ctx, nameRef))
+        }
+        if (let Some(throwExpr) <- (expr as ThrowExpr)) {
+            return SynthesizeThrowExpr(ctx, throwExpr)
+        }
+        if (let Some(tryExpr) <- (expr as TryExpr)) {
+            return SynthesizeTryExpr(ctx, tryExpr)
         }
         if (let Some(typeConv) <- (expr as TypeConvExpr)) {
             SynthesizeTypeNode(ctx, typeConv.typeNode)
@@ -1248,6 +1387,15 @@ public class TypeChecker {
         if (let Some(nameRef) <- (expr as NameReferenceExpr)) {
             let _ = SynthesizeNameReference(ctx, nameRef)
             return FinishCheck(ctx, expr, ChkExprShallow(impl.typeManager, target, expr))
+        }
+        if (let Some(throwExpr) <- (expr as ThrowExpr)) {
+            let throwTy = SynthesizeThrowExpr(ctx, throwExpr)
+            return FinishCheck(ctx, throwExpr, Ty.IsTyCorrect(throwTy) &&
+                impl.typeManager.CheckTypeCompatibility(target, throwTy) != TypeCompatibility.INCOMPATIBLE)
+        }
+        if (let Some(tryExpr) <- (expr as TryExpr)) {
+            SynthesizeTryExprChildren(ctx, tryExpr)
+            return FinishCheck(ctx, tryExpr, ChkTryExpr(impl.typeManager, target, tryExpr))
         }
         let _ = Synthesize(ctx, expr)
         return FinishCheck(ctx, expr, ChkExprShallow(impl.typeManager, target, expr))
