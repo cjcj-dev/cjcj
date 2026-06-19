@@ -469,17 +469,25 @@ private class CjoSignatureMaterializer {
     private let packageName: String
     private let pkg: Package
     private let file: File
+    private let importedPackages: ArrayList<Package>
+    private let exportedSymbols: HashSet<String>
     private let nominalDecls: HashMap<String, Decl> = HashMap<String, Decl>()
     private let extendDecls: HashMap<String, ExtendDecl> = HashMap<String, ExtendDecl>()
+    private let inferredNominalKinds: HashMap<String, UInt8> = HashMap<String, UInt8>()
+    private let inferredGenericNames: HashMap<String, ArrayList<String>> = HashMap<String, ArrayList<String>>()
     private let activeGenericParams: ArrayList<GenericParamDecl> = ArrayList<GenericParamDecl>()
 
-    public init(packageName: String, pkg: Package, file: File) {
+    public init(packageName: String, pkg: Package, file: File, importedPackages: ArrayList<Package>,
+        exportedSymbols: HashSet<String>) {
         this.packageName = packageName
         this.pkg = pkg
         this.file = file
+        this.importedPackages = importedPackages
+        this.exportedSymbols = exportedSymbols
     }
 
     public func Materialize(strings: ArrayList<String>): Unit {
+        InferSignatureMetadata(strings)
         var idx: Int64 = 0
         while (idx < strings.size) {
             let signature = strings[idx]
@@ -488,6 +496,78 @@ private class CjoSignatureMaterializer {
             }
             idx++
         }
+    }
+
+    private func InferSignatureMetadata(strings: ArrayList<String>): Unit {
+        var idx: Int64 = 0
+        while (idx < strings.size) {
+            let signature = strings[idx]
+            if (LooksLikePackageSignature(signature)) {
+                InferSignatureMetadata(signature)
+            }
+            idx++
+        }
+    }
+
+    private func InferSignatureMetadata(signature: String): Unit {
+        let parsedPackage = ParseLengthText(signature, 0)
+        if (!parsedPackage.ok || parsedPackage.text != packageName) {
+            return
+        }
+        let parsedName = ParseLengthText(signature, parsedPackage.next)
+        if (!parsedName.ok || parsedName.text.isEmpty()) {
+            return
+        }
+        var pos = parsedName.next
+        let genericArity = ParseGenericArity(signature, pos)
+        if (genericArity.ok) {
+            pos = genericArity.next
+        }
+        if (pos >= signature.size || !IsNominalKind(signature[pos])) {
+            return
+        }
+        inferredNominalKinds[parsedName.text] = signature[pos]
+        if (genericArity.arity <= 0 || inferredGenericNames.contains(parsedName.text)) {
+            return
+        }
+        let names = CollectParentGenericNamesFromMember(signature, pos + 1, genericArity.arity)
+        if (names.size == genericArity.arity) {
+            inferredGenericNames[parsedName.text] = names
+        }
+    }
+
+    private func CollectParentGenericNamesFromMember(signature: String, memberStart: Int64,
+        genericArity: Int64): ArrayList<String> {
+        let empty = ArrayList<String>()
+        if (memberStart >= signature.size) {
+            return empty
+        }
+        let parsedMember = ParseLengthText(signature, memberStart)
+        if (!parsedMember.ok || parsedMember.text.isEmpty()) {
+            return empty
+        }
+        var pos = parsedMember.next
+        let memberGenericArity = ParseGenericArity(signature, pos)
+        if (memberGenericArity.ok) {
+            pos = memberGenericArity.next
+        }
+        if (pos < signature.size && signature[pos] == b'<') {
+            return empty
+        }
+        if (memberGenericArity.arity != 0) {
+            return empty
+        }
+        let names = CollectGenericNames(signature, pos, signature.size)
+        let out = ArrayList<String>()
+        for (name in names) {
+            if (!out.contains(name)) {
+                out.add(name)
+            }
+            if (out.size == genericArity) {
+                return out
+            }
+        }
+        return empty
     }
 
     private func LooksLikePackageSignature(signature: String): Bool {
@@ -519,6 +599,10 @@ private class CjoSignatureMaterializer {
         let marker = signature[pos]
         if (IsNominalKind(marker)) {
             let nominal = EnsureNominal(parsedName.text, marker, genericArity.arity)
+            if (pos + 1 >= signature.size) {
+                SetImportedMangle(nominal, mangle)
+                return
+            }
             let genericMark = PushGenericParams(nominal)
             MaterializeMemberSignature(signature, pos + 1, nominal, mangle)
             RestoreGenericParams(genericMark)
@@ -812,11 +896,29 @@ private class CjoSignatureMaterializer {
             return
         }
         let paramTys = parsed[1]
-        let retTy = parsed[2]
+        let paramNames = ParseFunctionParamNames(signature, fPos)
+        let astName = if (name == "<init>") { "init" } else { name }
+        let retTy = if (astName == "init") {
+            if (let Some(parentForRet) <- outer) {
+                parentForRet.GetTy() ?? parsed[2]
+            } else {
+                parsed[2]
+            }
+        } else {
+            parsed[2]
+        }
         let params = ArrayList<FuncParam>()
         var idx: Int64 = 0
         while (idx < paramTys.size) {
-            let param = CreateFuncParam("p${idx}", Some(TypeNodeForTy(paramTys[idx])), None, Some(paramTys[idx]))
+            let paramName = if (idx < paramNames.size && !paramNames[idx].isEmpty()) {
+                paramNames[idx]
+            } else {
+                "p${idx}"
+            }
+            let param = CreateFuncParam(paramName, Some(TypeNodeForTy(paramTys[idx])), None, Some(paramTys[idx]))
+            if (idx < paramNames.size && !paramNames[idx].isEmpty()) {
+                param.isNamedParam = true
+            }
             param.fullPackageName = packageName
             param.moduleName = RootPackageName(packageName)
             MarkImportedDecl(param)
@@ -827,7 +929,6 @@ private class CjoSignatureMaterializer {
         let paramLists = ArrayList<FuncParamList>()
         paramLists.add(paramList)
         let funcTy = FuncTy(paramTys.toArray(), retTy)
-        let astName = if (name == "<init>") { "init" } else { name }
         let body = CreateFuncBody(paramLists, Some(TypeNodeForTy(retTy)), None, Some(funcTy))
         let funcDecl = CreateFuncDecl(astName, Some(body), Some(funcTy))
         body.funcDecl = Some(funcDecl)
@@ -837,6 +938,9 @@ private class CjoSignatureMaterializer {
         funcDecl.rawMangleName = mangle
         funcDecl.mangledName = mangle
         MarkImportedDecl(funcDecl)
+        if (ShouldMarkImportedFunctionAbstract(astName, mangle, outer)) {
+            funcDecl.EnableAttr(Attribute.ABSTRACT)
+        }
         if (let Some(parent) <- outer) {
             funcDecl.outerDecl = Some(parent)
             if (AddEnumConstructorIfNeeded(parent, name, funcDecl)) {
@@ -853,6 +957,16 @@ private class CjoSignatureMaterializer {
             funcDecl.EnableAttr(Attribute.GLOBAL)
             file.decls.add(funcDecl)
         }
+    }
+
+    private func ShouldMarkImportedFunctionAbstract(astName: String, mangle: String, outer: Option<Decl>): Bool {
+        if (mangle.isEmpty() || exportedSymbols.isEmpty() || exportedSymbols.contains(mangle) || astName == "init") {
+            return false
+        }
+        if (let Some(parent) <- outer) {
+            return parent.astKind == ASTKind.CLASS_DECL || parent.astKind == ASTKind.INTERFACE_DECL
+        }
+        return false
     }
 
     private func ParseFunctionType(signature: String, fPos: Int64): (Bool, ArrayList<Ty>, Ty) {
@@ -876,6 +990,27 @@ private class CjoSignatureMaterializer {
             pos = SkipParameterName(signature, parsed.next)
         }
         return (false, params, InvalidTy())
+    }
+
+    private func ParseFunctionParamNames(signature: String, fPos: Int64): ArrayList<String> {
+        let names = ArrayList<String>()
+        var pos = fPos + 1
+        while (pos < signature.size) {
+            if (pos + 1 < signature.size && signature[pos] == b'$' && signature[pos + 1] == b'$') {
+                return names
+            }
+            let parsed = ParseType(signature, pos)
+            if (!parsed.ok) {
+                return names
+            }
+            let parsedName = ParseParameterName(signature, parsed.next)
+            if (!parsedName.ok) {
+                return names
+            }
+            names.add(parsedName.text)
+            pos = parsedName.next
+        }
+        return names
     }
 
     private func ParseVariableType(signature: String, vPos: Int64): ParsedType {
@@ -957,6 +1092,9 @@ private class CjoSignatureMaterializer {
     }
 
     private func TyForNamedType(name: String, typeArgs: ArrayList<Ty>): Ty {
+        if (name == "Byte") {
+            return PrimitiveTy(TypeKind.TYPE_UINT8)
+        }
         if (name == "RawArray") {
             let elemTy = if (typeArgs.isEmpty()) { AnyTy() } else { typeArgs[0] }
             return ArrayTy(elemTy, 1u64)
@@ -971,7 +1109,17 @@ private class CjoSignatureMaterializer {
             }
             return AnyTy()
         }
-        let nominal = EnsureNominal(name, NominalKindForName(name), typeArgs.size)
+        if (!inferredNominalKinds.contains(name)) {
+            if (let Some(importedNominal) <- FindImportedNominal(name, typeArgs.size)) {
+                return TyForNominalDecl(importedNominal, name, typeArgs)
+            }
+        }
+        let nominalKind = inferredNominalKinds.get(name) ?? NominalKindForName(name)
+        let nominal = EnsureNominal(name, nominalKind, typeArgs.size)
+        return TyForNominalDecl(nominal, name, typeArgs)
+    }
+
+    private func TyForNominalDecl(nominal: Decl, name: String, typeArgs: ArrayList<Ty>): Ty {
         if (let Some(structDecl) <- (nominal as StructDecl)) {
             return StructTy(name, structDecl, typeArgs.toArray())
         }
@@ -985,6 +1133,33 @@ private class CjoSignatureMaterializer {
             return InterfaceTy(name, interfaceDecl, typeArgs.toArray())
         }
         return InvalidTy()
+    }
+
+    private func FindImportedNominal(name: String, genericArity: Int64): Option<Decl> {
+        for (importedPackage in importedPackages) {
+            if (importedPackage.fullPackageName == packageName) {
+                continue
+            }
+            for (importedFile in importedPackage.files) {
+                for (decl in importedFile.decls) {
+                    if (decl.identifier.Val() == name && decl.IsNominalDecl() &&
+                        ImportedGenericArityMatches(decl, genericArity)) {
+                        return Some(decl)
+                    }
+                }
+            }
+        }
+        return None
+    }
+
+    private func ImportedGenericArityMatches(decl: Decl, genericArity: Int64): Bool {
+        if (genericArity <= 0) {
+            return true
+        }
+        if (let Some(generic) <- decl.generic) {
+            return generic.typeParameters.size == genericArity
+        }
+        return false
     }
 
     private func LookupActiveGenericTy(name: String): Option<Ty> {
@@ -1017,23 +1192,13 @@ private class CjoSignatureMaterializer {
 
     private func EnsureNominal(name: String, kind: UInt8, genericArity: Int64): Decl {
         if (let Some(existing) <- nominalDecls.get(name)) {
-            return existing
+            if (NominalKindOfDecl(existing) == kind) {
+                EnsureGenericShape(existing, genericArity)
+                return existing
+            }
+            RemoveTopLevelDecl(existing)
         }
-        let decl: Decl = if (kind == b'C') {
-            let classDecl = ClassDecl()
-            classDecl.body = Some(ClassBody())
-            classDecl
-        } else if (kind == b'U') {
-            EnumDecl()
-        } else if (kind == b'I') {
-            let interfaceDecl = InterfaceDecl()
-            interfaceDecl.body = Some(InterfaceBody())
-            interfaceDecl
-        } else {
-            let structDecl = StructDecl()
-            structDecl.body = Some(StructBody())
-            structDecl
-        }
+        let decl = CreateNominalDecl(kind)
         decl.identifier = SrcIdentifier(name)
         decl.fullPackageName = packageName
         decl.moduleName = RootPackageName(packageName)
@@ -1048,12 +1213,79 @@ private class CjoSignatureMaterializer {
         return decl
     }
 
+    private func SetImportedMangle(decl: Decl, mangle: String): Unit {
+        if (mangle.isEmpty()) {
+            return
+        }
+        decl.rawMangleName = mangle
+        decl.mangledName = mangle
+    }
+
+    private func EnsureGenericShape(decl: Decl, genericArity: Int64): Unit {
+        if (genericArity <= 0) {
+            return
+        }
+        if (let Some(generic) <- decl.generic) {
+            if (generic.typeParameters.size == genericArity) {
+                return
+            }
+        }
+        AttachGeneric(decl, genericArity)
+        SetNominalTy(decl, decl.identifier.Val())
+    }
+
+    private func CreateNominalDecl(kind: UInt8): Decl {
+        if (kind == b'C') {
+            let classDecl = ClassDecl()
+            classDecl.body = Some(ClassBody())
+            return classDecl
+        }
+        if (kind == b'U') {
+            return EnumDecl()
+        }
+        if (kind == b'I') {
+            let interfaceDecl = InterfaceDecl()
+            interfaceDecl.body = Some(InterfaceBody())
+            return interfaceDecl
+        }
+        let structDecl = StructDecl()
+        structDecl.body = Some(StructBody())
+        return structDecl
+    }
+
+    private func NominalKindOfDecl(decl: Decl): UInt8 {
+        if (let Some(_) <- (decl as ClassDecl)) { return b'C' }
+        if (let Some(_) <- (decl as EnumDecl)) { return b'U' }
+        if (let Some(_) <- (decl as InterfaceDecl)) { return b'I' }
+        return b'S'
+    }
+
+    private func RemoveTopLevelDecl(decl: Decl): Unit {
+        var idx: Int64 = 0
+        while (idx < file.decls.size) {
+            if (SameDecl(file.decls[idx], decl)) {
+                file.decls.remove(at: idx)
+                return
+            }
+            idx++
+        }
+    }
+
     private func AttachGeneric(decl: Decl, genericArity: Int64): Unit {
         let names = ArrayList<String>()
-        var idx: Int64 = 0
-        while (idx < genericArity) {
-            names.add(if (idx == 0) { "T" } else { "T${idx}" })
-            idx++
+        if (let Some(inferred) <- inferredGenericNames.get(decl.identifier.Val())) {
+            if (inferred.size == genericArity) {
+                for (name in inferred) {
+                    names.add(name)
+                }
+            }
+        }
+        if (names.isEmpty()) {
+            var idx: Int64 = 0
+            while (idx < genericArity) {
+                names.add(if (idx == 0) { "T" } else { "T${idx}" })
+                idx++
+            }
         }
         AttachGenericNames(decl, names)
     }
@@ -1063,6 +1295,7 @@ private class CjoSignatureMaterializer {
             return
         }
         let generic = Generic()
+        decl.generic = None
         decl.EnableAttr(Attribute.GENERIC)
         for (idx in 0..names.size) {
             let param = GenericParamDecl()
@@ -1154,17 +1387,23 @@ private class CjoSignatureMaterializer {
     }
 
     private func SkipParameterName(signature: String, start: Int64): Int64 {
-        var pos = start
-        if (pos < signature.size && signature[pos] == b'!') {
-            let parsedName = ParseLengthText(signature, pos + 1)
-            if (parsedName.ok) {
-                pos = parsedName.next
-                if (pos < signature.size && signature[pos] == b'=') {
-                    pos++
-                }
-            }
+        let parsedName = ParseParameterName(signature, start)
+        return if (parsedName.ok) { parsedName.next } else { start }
+    }
+
+    private func ParseParameterName(signature: String, start: Int64): ParsedText {
+        if (start >= signature.size || signature[start] != b'!') {
+            return ParsedText(true, "", start)
         }
-        return pos
+        let parsedName = ParseLengthText(signature, start + 1)
+        if (!parsedName.ok) {
+            return ParsedText(false, "", start)
+        }
+        var pos = parsedName.next
+        if (pos < signature.size && signature[pos] == b'=') {
+            pos++
+        }
+        return ParsedText(true, parsedName.text, pos)
     }
 
     private func ParseGenericArity(signature: String, start: Int64): ParsedGenericArity {
@@ -1625,8 +1864,13 @@ public class ImportManager {
     }
 
     private func LoadResolvedImportedPackages(): Bool {
+        if (let Some(corePath) <- depPkgCjdPaths.get("std.core")) {
+            if ((let None <- GetPackage("std.core")) && !LoadImportedPackageFromCjo("std.core", corePath)) {
+                return false
+            }
+        }
         for (dep in depPkgCjdPaths.keys()) {
-            if (let Some(_) <- GetPackage(dep)) {
+            if (dep == "std.core" || (let Some(_) <- GetPackage(dep))) {
                 continue
             }
             if (let Some(path) <- depPkgCjdPaths.get(dep)) {
@@ -1651,10 +1895,72 @@ public class ImportManager {
         let file = CreateFile(cjoPath)
         file.curPackage = Some(pkg)
         pkg.files.add(file)
-        let materializer = CjoSignatureMaterializer(fullPackageName, pkg, file)
+        let materializer = CjoSignatureMaterializer(fullPackageName, pkg, file, importedPackages,
+            LoadExportedSymbolsForCjo(fullPackageName, cjoPath))
         materializer.Materialize(ExtractPrintableStrings(data))
         AddImportedPackageIfMissing(pkg)
         return true
+    }
+
+    private func LoadExportedSymbolsForCjo(fullPackageName: String, cjoPath: String): HashSet<String> {
+        let out = HashSet<String>()
+        let archivePath = StaticArchivePathForCjo(fullPackageName, cjoPath)
+        if (archivePath.isEmpty()) {
+            return out
+        }
+        let (ok, data, _) = FileUtil.ReadBinaryFileToBuffer(archivePath)
+        if (!ok) {
+            return out
+        }
+        var builder = StringBuilder()
+        for (byte in data) {
+            if (byte >= 0x20u8 && byte <= 0x7eu8) {
+                builder.append(String.fromUtf8([byte]))
+            } else {
+                AddExportedSymbolString(out, builder.toString())
+                builder = StringBuilder()
+            }
+        }
+        AddExportedSymbolString(out, builder.toString())
+        return out
+    }
+
+    private func AddExportedSymbolString(out: HashSet<String>, value: String): Unit {
+        if (value.startsWith("_C")) {
+            out.add(value)
+        }
+    }
+
+    private func StaticArchivePathForCjo(fullPackageName: String, cjoPath: String): String {
+        let modulesMarker = "/modules/"
+        let markerPos = cjoPath.indexOf(modulesMarker) ?? return ""
+        let targetStart = markerPos + modulesMarker.size
+        let targetEnd = cjoPath.indexOf("/", targetStart) ?? return ""
+        let home = cjoPath[0..markerPos]
+        let targetName = cjoPath[targetStart..targetEnd]
+        let libName = "libcangjie-" + ArchivePackageName(fullPackageName) + ".a"
+        return FileUtil.JoinPath(FileUtil.JoinPath(FileUtil.JoinPath(home, "lib"), targetName), libName)
+    }
+
+    private func ArchivePackageName(fullPackageName: String): String {
+        let parts = fullPackageName.split(".")
+        if (parts.isEmpty()) {
+            return fullPackageName
+        }
+        let builder = StringBuilder()
+        builder.append(parts[0])
+        if (parts.size > 1) {
+            builder.append("-")
+            var idx: Int64 = 1
+            while (idx < parts.size) {
+                if (idx > 1) {
+                    builder.append(".")
+                }
+                builder.append(parts[idx])
+                idx++
+            }
+        }
+        return builder.toString()
     }
 
     private func ExtractPrintableStrings(data: Array<UInt8>): ArrayList<String> {

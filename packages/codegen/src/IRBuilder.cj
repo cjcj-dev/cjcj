@@ -1459,7 +1459,20 @@ public class IRBuilder2 <: Resource {
         let payload = GetPayloadFromObject(objectValue)
         let payloadType = unsafe { LLVMPointerType(valueCGType.GetLLVMType(), 1u32) }
         let typedPayload = CreateBitCast(payload, payloadType, name: "generic.payload")
-        CreateStore(sourceValue, typedPayload)
+        let storedValue = if (ShouldLoadGenericAggregateBoxSource(sourceValue, valueTy)) {
+            CreateLoad(valueCGType.GetLLVMType(), sourceValue, name: "generic.payload.value")
+        } else {
+            sourceValue
+        }
+        CreateStore(storedValue, typedPayload)
+    }
+
+    private func ShouldLoadGenericAggregateBoxSource(sourceValue: LLVMValueRef, valueTy: Type): Bool {
+        if (!(valueTy.IsStruct() || valueTy.IsTuple() || valueTy.IsEnum() || valueTy.IsVArray())) {
+            return false
+        }
+        let rawTy = unsafe { LLVMTypeOf(sourceValue) }
+        return !rawTy.isNull() && unsafe { LLVMGetTypeKind(rawTy) } == 12
     }
 
     private func GetLayoutSize32(chirTy: Type, cgType: CGType): LLVMValueRef {

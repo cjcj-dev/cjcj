@@ -73,6 +73,16 @@ private func InstantiatedDeclNoteRange(decl: Decl): BasicRange {
     return MakeRange(decl.begin, decl.end)
 }
 
+private func IsImportedInstantiationBoundary(decl: Decl): Bool {
+    if (decl.TestAnyAttr(Attribute.IMPORTED, Attribute.SRC_IMPORTED)) {
+        return true
+    }
+    if (let Some(genericDecl) <- decl.genericDecl) {
+        return genericDecl.TestAnyAttr(Attribute.IMPORTED, Attribute.SRC_IMPORTED)
+    }
+    return false
+}
+
 private func GetReferenceTyAndTarget(node: Node): (Option<Ty>, Option<Decl>) {
     var target = GetRealTarget(node.GetTarget())
     var baseTy = node.GetTy()
@@ -163,6 +173,9 @@ func CheckInstMemberSignatures(
     instTys: ArrayList<Ty>
 ): Unit {
     if (!checker.HasInstantiationTrigger()) {
+        return
+    }
+    if (IsImportedInstantiationBoundary(decl)) {
         return
     }
     let key = InstantiationKey(decl, instTys)
@@ -365,14 +378,14 @@ func CheckInstDupFuncsRecursively(checker: StructInheritanceChecker, node: Node)
         if (target.TestAttr(Attribute.IN_REFERENCE_CYCLE)) {
             return VisitAction.WALK_CHILDREN
         }
-        if (let Some(baseTy) <- refInfo[0]) {
-            if (target.IsNominalDecl() && target.TestAttr(Attribute.GENERIC)) {
-                let emptyInstTys = ArrayList<Ty>()
-                let emptyKey = InstantiationKey(target, emptyInstTys)
-                if (!checker.HasInstantiatedKey(emptyKey)) {
-                    checker.AddInstantiatedKey(emptyKey)
-                    WalkInstDupFuncsInDecl(checker, target)
-                }
+            if (let Some(baseTy) <- refInfo[0]) {
+                if (target.IsNominalDecl() && target.TestAttr(Attribute.GENERIC)) {
+                    let emptyInstTys = ArrayList<Ty>()
+                    let emptyKey = InstantiationKey(target, emptyInstTys)
+                    if (!checker.HasInstantiatedKey(emptyKey) && !IsImportedInstantiationBoundary(target)) {
+                        checker.AddInstantiatedKey(emptyKey)
+                        WalkInstDupFuncsInDecl(checker, target)
+                    }
             }
             checker.CheckInstWithCStructTypeArg(node)
             var instTys = checker.typeManager.GetTypeArgs(baseTy)
@@ -405,7 +418,9 @@ func CheckInstDupFuncsRecursively(checker: StructInheritanceChecker, node: Node)
             }
             if (!checker.HasInstantiatedKey(targetKey)) {
                 checker.AddInstantiatedKey(targetKey)
-                CheckInstantiatedDecl(checker, target, instTys)
+                if (!IsImportedInstantiationBoundary(target)) {
+                    CheckInstantiatedDecl(checker, target, instTys)
+                }
             }
             if (shouldUpdateTrigger) {
                 checker.PopInstantiationTrigger()
@@ -416,7 +431,7 @@ func CheckInstDupFuncsRecursively(checker: StructInheritanceChecker, node: Node)
 }
 
 func CheckInstantiatedDecl(checker: StructInheritanceChecker, decl: Decl, instTys: ArrayList<Ty>): Unit {
-    if (decl.IsBuiltIn()) {
+    if (decl.IsBuiltIn() || IsImportedInstantiationBoundary(decl)) {
         return
     }
     let typeMapping = BuildInstantiationTypeMap(decl, instTys)
@@ -431,6 +446,9 @@ func CheckInstantiatedDecl(checker: StructInheritanceChecker, decl: Decl, instTy
 func CheckInstDupFuncsInNominalDecls(checker: StructInheritanceChecker): Unit {
     for (file in checker.pkg.files) {
         for (decl in file.decls) {
+            if (IsImportedInstantiationBoundary(decl)) {
+                continue
+            }
             let empty = ArrayList<Ty>()
             let emptyKey = InstantiationKey(decl, empty)
             if (!checker.HasInstantiatedKey(emptyKey)) {

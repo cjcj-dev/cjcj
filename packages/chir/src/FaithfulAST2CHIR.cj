@@ -769,19 +769,8 @@ public class FaithfulAST2CHIR {
     }
 
     private func CreateImportedPackageInitFuncs(suffix: String): ArrayList<Function> {
-        let out = ArrayList<Function>()
-        for (pkgName in ImportedPackageNames()) {
-            let fn = CreateEmptyGVInitFunc(PackageInitFuncName(pkgName, suffix), PackageInitFuncName(pkgName, suffix),
-                "", pkgName)
-            fn.EnableAttr(Attribute.IMPORTED)
-            fn.EnableAttr(Attribute.PUBLIC)
-            let entry = RequireEntryBlock(fn)
-            if (entry.GetTerminator().isNone()) {
-                builder.CreateExit(None, entry)
-            }
-            out.add(fn)
-        }
-        return out
+        let _ = suffix
+        return ArrayList<Function>()
     }
 
     private func TranslateFileInitializer(fileVars: FaithfulInitFileVars): Option<Function> {
@@ -951,24 +940,6 @@ public class FaithfulAST2CHIR {
 
     private func CreateInitFuncApply(initFn: Function, block: Block): Unit {
         builder.CreateApply(builder.context.GetVoidTy(), initFn, FuncCallContext(), block)
-    }
-
-    private func ImportedPackageNames(): ArrayList<String> {
-        let names = ArrayList<String>()
-        CollectImportedPackageNames(importedGlobalAndStaticVars, names)
-        CollectImportedPackageNames(importedGlobalAndMemberFuncs, names)
-        CollectImportedPackageNames(importedNominalDecls, names)
-        CollectImportedPackageNames(importedGenericInstantiatedNominalDecls, names)
-        return names
-    }
-
-    private func CollectImportedPackageNames(decls: ArrayList<AstDecl>, names: ArrayList<String>): Unit {
-        for (decl in decls) {
-            let packageName = EffectivePackageName(decl)
-            if (!packageName.isEmpty() && packageName != CurrentPackage().GetName() && !ContainsString(names, packageName)) {
-                names.add(packageName)
-            }
-        }
     }
 
     private func PackageInitFuncName(pkgName: String, suffix: String): String {
@@ -1308,6 +1279,9 @@ public class FaithfulAST2CHIR {
     }
 
     private func EffectiveMangledName(decl: AstDecl): String {
+        if (decl.TestAttr(AstAttribute.IMPORTED) && !decl.rawMangleName.isEmpty()) {
+            return decl.rawMangleName
+        }
         if (decl.IsMemberDecl() && !decl.TestAttr(AstAttribute.IMPORTED)) {
             return EffectiveMemberMangledName(decl)
         }
@@ -1483,12 +1457,4 @@ public class FaithfulAST2CHIR {
         return false
     }
 
-    private static func ContainsString(values: ArrayList<String>, value: String): Bool {
-        for (item in values) {
-            if (item == value) {
-                return true
-            }
-        }
-        return false
-    }
 }
