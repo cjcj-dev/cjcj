@@ -525,6 +525,29 @@ public class TypeChecker {
         }
     }
 
+    private func SynthesizeSubscriptChildren(ctx: ASTContext, subscript: SubscriptExpr): Unit {
+        if (let Some(baseExpr) <- subscript.baseExpr) {
+            SetIsNotAlone(baseExpr)
+            let _ = Synthesize(ctx, baseExpr)
+        }
+        for (indexExpr in subscript.indexExprs) {
+            let _ = Synthesize(ctx, indexExpr)
+        }
+    }
+
+    private func SynthesizeAssignChildren(ctx: ASTContext, assign: AssignExpr): Unit {
+        if (let Some(leftExpr) <- assign.leftValue) {
+            if (let Some(subscript) <- (leftExpr as SubscriptExpr)) {
+                SynthesizeSubscriptChildren(ctx, subscript)
+                if (let Some(rightExpr) <- assign.rightExpr) {
+                    let _ = Synthesize(ctx, rightExpr)
+                }
+                return
+            }
+        }
+        SynthesizeNodeChildren(ctx, assign)
+    }
+
     private func SetCallOrPattern(expr: Expr, owner: Node): Unit {
         if (let Some(nameRef) <- (expr as NameReferenceExpr)) {
             nameRef.callOrPattern = Some(owner)
@@ -1132,7 +1155,8 @@ public class TypeChecker {
             if (let Some(inExpression) <- forInExpr.inExpression) {
                 let _ = Synthesize(ctx, inExpression)
                 if (Ty.IsTyCorrect(inExpression.GetTy())) {
-                    elementTy = ForInIterableElementTy(impl.typeManager, TcReplaceIdeal(impl.typeManager, inExpression))
+                    elementTy = ForInIterableElementTy(impl.typeManager, inExpression.curFile,
+                        TcReplaceIdeal(impl.typeManager, inExpression))
                 }
             }
             if (let Some(pattern) <- forInExpr.pattern) {
@@ -1376,6 +1400,14 @@ public class TypeChecker {
         }
         if (let Some(nameRef) <- (expr as NameReferenceExpr)) {
             return FinishSynthesize(ctx, nameRef, SynthesizeNameReference(ctx, nameRef))
+        }
+        if (let Some(subscript) <- (expr as SubscriptExpr)) {
+            SynthesizeSubscriptChildren(ctx, subscript)
+            return FinishSynthesize(ctx, subscript, SynSubscriptExpr(impl.typeManager, subscript))
+        }
+        if (let Some(assign) <- (expr as AssignExpr)) {
+            SynthesizeAssignChildren(ctx, assign)
+            return FinishSynthesize(ctx, assign, SynAssignExpr(impl.typeManager, assign))
         }
         if (let Some(throwExpr) <- (expr as ThrowExpr)) {
             return SynthesizeThrowExpr(ctx, throwExpr)

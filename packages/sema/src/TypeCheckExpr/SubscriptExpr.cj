@@ -109,6 +109,9 @@ private func ChkVArrayAccess(typeManager: TypeManager, target: Option<Ty>, se: S
 private func SynIndexExprs(typeManager: TypeManager, se: SubscriptExpr): Bool {
     var ok = true
     for (indexExpr in se.indexExprs) {
+        if (Ty.IsTyCorrect(indexExpr.GetTy())) {
+            continue
+        }
         ok = Ty.IsTyCorrect(SynExprShallow(typeManager, indexExpr)) && ok
     }
     return ok

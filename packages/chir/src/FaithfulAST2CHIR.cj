@@ -965,7 +965,8 @@ public class FaithfulAST2CHIR {
     private func CollectImportedPackageNames(decls: ArrayList<AstDecl>, names: ArrayList<String>): Unit {
         for (decl in decls) {
             let packageName = EffectivePackageName(decl)
-            if (!packageName.isEmpty() && packageName != CurrentPackage().GetName() && !ContainsString(names, packageName)) {
+            if (!packageName.isEmpty() && packageName != CurrentPackage().GetName() &&
+                !ContainsString(names, packageName)) {
                 names.add(packageName)
             }
         }
@@ -987,10 +988,82 @@ public class FaithfulAST2CHIR {
     }
 
     private func FaithfulOptPackageName(pkgName: String): String {
-        if (pkgName == "std.core") {
-            return "at"
+        if (let Some(shortName) <- FaithfulStdPackageMangle(pkgName)) {
+            return shortName
         }
         return "${pkgName.size}${pkgName}"
+    }
+
+    // CHIR cannot import the mangle package here because mangle already depends on CHIR.
+    private func FaithfulStdPackageMangle(pkgName: String): Option<String> {
+        return match (pkgName) {
+            case "std.ad" => "aa"
+            case "std.sync" => "ab"
+            case "std.collection" => "ac"
+            case "std.deriving" => "ad"
+            case "std.database" => "ae"
+            case "std.net" => "af"
+            case "std.chirad" => "ag"
+            case "std.io" => "ah"
+            case "std.convert" => "ai"
+            case "std.ffi" => "aj"
+            case "std.argopt" => "ak"
+            case "std.objectpool" => "al"
+            case "std.reflect" => "am"
+            case "std.fs" => "an"
+            case "std.runtime" => "ao"
+            case "std.overflow" => "ap"
+            case "std.unittest" => "aq"
+            case "std.binary" => "ar"
+            case "std.unicode" => "as"
+            case "std.core" => "at"
+            case "std.console" => "au"
+            case "std.random" => "av"
+            case "std.sort" => "aw"
+            case "std.ast" => "ax"
+            case "std.env" => "ay"
+            case "std.process" => "ba"
+            case "std.time" => "bb"
+            case "std.regex" => "bc"
+            case "std.posix" => "bd"
+            case "std.crypto" => "be"
+            case "std.ref" => "bf"
+            case "std.math" => "bg"
+            case "std.collection.concurrent" => "bh"
+            case "std.collection.concurrent.native" => "bi"
+            case "std.deriving.impl" => "bj"
+            case "std.deriving.builtins" => "bk"
+            case "std.deriving.api" => "bl"
+            case "std.deriving.resolve" => "bm"
+            case "std.database.sql" => "bn"
+            case "std.net.native" => "bo"
+            case "std.convert.native" => "bq"
+            case "std.objectpool.native" => "bs"
+            case "std.fs.native" => "bt"
+            case "std.runtime.native" => "bu"
+            case "std.unittest.mock" => "bv"
+            case "std.unittest.testmacro" => "bw"
+            case "std.unittest.prop_test" => "bx"
+            case "std.unittest.common" => "by"
+            case "std.unittest.native" => "ca"
+            case "std.unittest.diff" => "cb"
+            case "std.unittest.mock.mockmacro" => "cc"
+            case "std.unittest.mock.internal" => "cd"
+            case "std.core.native" => "ce"
+            case "std.random.native" => "cf"
+            case "std.ast.native" => "cg"
+            case "std.env.native" => "ch"
+            case "std.process.native" => "ci"
+            case "std.time.native" => "cj"
+            case "std.regex.native" => "ck"
+            case "std.posix.native" => "cl"
+            case "std.crypto.digest" => "cm"
+            case "std.crypto.cipher" => "cn"
+            case "std.math.numeric" => "co"
+            case "std.math.native" => "cp"
+            case "std.math.numeric.native" => "cq"
+            case _ => None
+        }
     }
 
     private func FileInitFuncName(file: AstFile, suffix: String): String {
@@ -1308,6 +1381,9 @@ public class FaithfulAST2CHIR {
     }
 
     private func EffectiveMangledName(decl: AstDecl): String {
+        if (decl.TestAttr(AstAttribute.IMPORTED) && !decl.rawMangleName.isEmpty()) {
+            return decl.rawMangleName
+        }
         if (decl.IsMemberDecl() && !decl.TestAttr(AstAttribute.IMPORTED)) {
             return EffectiveMemberMangledName(decl)
         }
@@ -1491,4 +1567,5 @@ public class FaithfulAST2CHIR {
         }
         return false
     }
+
 }

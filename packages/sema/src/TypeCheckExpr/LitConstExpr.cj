@@ -168,10 +168,20 @@ private func TyFromRef(ref: Option<RefType>): Option<Ty> {
     return None
 }
 
+private func SetStringLiteralRef(lce: LitConstExpr, ty: Ty): Unit {
+    let refType = RefType(ty.name)
+    refType.SetTy(ty)
+    if (let Some(decl) <- Ty.GetDeclPtrOfTy(Some(ty))) {
+        refType.ref.target = decl
+    }
+    lce.ref = Some(refType)
+}
+
 public func SynLitConstStringExpr(lce: LitConstExpr, stringTy!: Option<Ty> = None): Ty {
     if (let Some(ty) <- stringTy) {
         if (Ty.IsTyCorrect(ty)) {
             lce.SetTy(ty)
+            SetStringLiteralRef(lce, ty)
             if (let Some(siExpr) <- lce.siExpr) {
                 siExpr.SetTy(ty)
             }
@@ -187,6 +197,7 @@ public func SynLitConstStringExpr(lce: LitConstExpr, stringTy!: Option<Ty> = Non
     }
     if (let Some(currentTy) <- lce.GetTy()) {
         if (Ty.IsTyCorrect(currentTy) && currentTy.IsString()) {
+            SetStringLiteralRef(lce, currentTy)
             if (let Some(siExpr) <- lce.siExpr) {
                 siExpr.SetTy(currentTy)
             }

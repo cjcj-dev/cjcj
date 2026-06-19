@@ -912,7 +912,11 @@ public class CompilerInstance {
         }
         seen.add(key)
         decl.fullPackageName = pkgName
-        decl.mangledName = baseMangler.Mangle(decl)
+        decl.mangledName = if (decl.TestAttr(Attribute.IMPORTED) && !decl.rawMangleName.isEmpty()) {
+            decl.rawMangleName
+        } else {
+            baseMangler.Mangle(decl)
+        }
         if (mangledName2DeclMap.contains(decl.mangledName)) {
             mangledName2DeclMap.remove(decl.mangledName)
         }

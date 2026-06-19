@@ -337,6 +337,13 @@ public class Translator {
             return globalSymbolTable.TryGet(varDecl)
         }
         let valueTy = chirTy.TranslateType(RequireAstTy(varDecl))
+        if (!varDecl.isVar) {
+            if (let Some(initializerExpr) <- varDecl.initializer) {
+                if (let Some(initValue) <- TryBindImmutableClassCtorLocal(varDecl, valueTy, initializerExpr)) {
+                    return initValue
+                }
+            }
+        }
         let slotTy = builder.context.GetRefTy(valueTy)
         let slot = builder.CreateAllocate(slotTy, valueTy, CurrentBlock())
         let slotValue = RequireResult(slot)
@@ -348,6 +355,35 @@ public class Translator {
             }
         }
         return slotValue
+    }
+
+    private func TryBindImmutableClassCtorLocal(varDecl: AstVarDecl, valueTy: Type, initializerExpr: AstExpr): Option<Value> {
+        if (!valueTy.IsReferenceTypeWithRefDims(1)) {
+            return None
+        }
+        if (let Some(callExpr) <- (initializerExpr as AstCallExpr)) {
+            let calleeDecl = callExpr.resolvedFunction ?? ResolveCalleeFromBase(callExpr)
+            if (IsClassCtorDecl(calleeDecl)) {
+                let initValue = TranslateStructOrClassCtorCall(callExpr, calleeDecl)
+                let boundValue = CastValueIfNeeded(initValue, valueTy)
+                if (let Some(local) <- boundValue.AsLocalVar()) {
+                    local.SetSrcCodeIdentifier(varDecl.identifier.Val())
+                }
+                localValSymbolTable.Set(varDecl, boundValue)
+                return Some(boundValue)
+            }
+        }
+        return None
+    }
+
+    private func IsClassCtorDecl(calleeDecl: AstFuncDecl): Bool {
+        if (!calleeDecl.TestAttr(AstAttribute.CONSTRUCTOR) || calleeDecl.TestAttr(AstAttribute.STATIC)) {
+            return false
+        }
+        if (let Some(outerDecl) <- calleeDecl.outerDecl) {
+            return outerDecl.astKind == ASTKind.CLASS_DECL
+        }
+        return false
     }
 
     public func Visit(block: AstBlock): Option<Value> {
@@ -2477,15 +2513,55 @@ public class Translator {
         return RequireResult(builder.CreateInvokeStatic(resultTy, callContext, CurrentBlock()))
     }
 
-    private func FuncParamTypes(expr: AstCallExpr, calleeDecl: AstFuncDecl): ArrayList<Type> {
+    private func FuncParamTypes(expr: AstCallExpr, calleeDecl: AstFuncDecl,
+        thisType!: Option<Type> = None): ArrayList<Type> {
         let out = ArrayList<Type>()
         let funcTy = CallBaseFuncTy(expr, calleeDecl)
         let genericParams = TranslateFuncGenericParams(calleeDecl)
         let replacements = TranslateFuncInstArgs(expr, calleeDecl)
+        AddMemberOwnerGenericReplacements(calleeDecl, thisType, genericParams, replacements)
         for (paramTy in funcTy.paramTys) {
             out.add(SubstituteGenericType(chirTy.TranslateType(paramTy), genericParams, replacements))
         }
         return out
+    }
+
+    private func AddMemberOwnerGenericReplacements(calleeDecl: AstFuncDecl, thisType: Option<Type>,
+        genericParams: ArrayList<GenericType>, replacements: ArrayList<Type>): Unit {
+        let outer = match (calleeDecl.outerDecl) {
+            case Some(value) => value
+            case None => return
+        }
+        if (!outer.IsNominalDecl()) {
+            return
+        }
+        let generic = match (outer.GetGeneric()) {
+            case Some(value) => value
+            case None => return
+        }
+        let receiverTy = match (thisType) {
+            case Some(value2) => value2
+            case None => return
+        }
+        let receiverCustom = match (receiverTy.StripAllRefs() as CustomType) {
+            case Some(value3) => value3
+            case None => return
+        }
+        let receiverArgs = receiverCustom.GetGenericArgs()
+        var idx: Int64 = 0
+        while (idx < generic.typeParameters.size && idx < receiverArgs.size) {
+            match (generic.typeParameters[idx].GetTy()) {
+                case Some(paramTy) =>
+                    match (chirTy.TranslateType(paramTy) as GenericType) {
+                        case Some(genericTy) =>
+                            genericParams.add(genericTy)
+                            replacements.add(receiverArgs[idx])
+                        case None => ()
+                    }
+                case None => ()
+            }
+            idx++
+        }
     }
 
     private func TranslateEnumCtorRef(constructor: AstDecl, astTy: AstTy): Value {
@@ -2497,14 +2573,16 @@ public class Translator {
     private func TranslateMemberFuncCall(expr: AstCallExpr, calleeDecl: AstFuncDecl): Value {
         let resultTy = chirTy.TranslateType(RequireAstTy(expr))
         let argValues = ArrayList<Value>()
+        let callee = globalSymbolTable.Get(calleeDecl)
         var thisType: Option<Type> = None
         var thisObj: Option<Value> = None
         if (!calleeDecl.TestAttr(AstAttribute.STATIC)) {
-            let obj = TranslateThisObjectForMemberFuncCall(expr, calleeDecl)
+            let obj = CoerceThisObjectForCallee(calleeDecl, callee,
+                TranslateThisObjectForMemberFuncCall(expr, calleeDecl))
             thisObj = obj
             thisType = obj.GetType()
         }
-        let expectedParamTys = FuncParamTypes(expr, calleeDecl)
+        let expectedParamTys = FuncParamTypes(expr, calleeDecl, thisType: thisType)
         var idx: Int64 = 0
         for (arg in expr.args) {
             if (let Some(argExpr) <- arg.expr) {
@@ -2537,7 +2615,6 @@ public class Translator {
         if (let Some(obj) <- thisObj) {
             argValues.add(obj, at: 0)
         }
-        let callee = globalSymbolTable.Get(calleeDecl)
         return CreateApplyMaybeWithException(resultTy, callee, FuncCallContext(args: argValues,
             instTypeArgs: TranslateFuncInstArgs(expr, calleeDecl), thisType: thisType))
     }
@@ -2984,7 +3061,7 @@ public class Translator {
             let baseInfo = TranslateExprAsLeftValue(baseExpr)
             let baseTy = chirTy.TranslateType(RequireAstTy(baseExpr))
             let callee = GetSymbolTable(setter)
-            let thisObj = TranslateSubscriptSetterThisObject(callee, baseInfo, baseTy)
+            let thisObj = TranslateSubscriptSetterThisObject(setter, callee, baseInfo, baseTy)
             let thisTy = thisObj.GetType()
             let indexExprs = GetSubscriptIndexExprs(subscriptExpr)
             let args = ArrayList<Value>()
@@ -3013,8 +3090,12 @@ public class Translator {
         return false
     }
 
-    private func TranslateSubscriptSetterThisObject(callee: Value, baseInfo: FaithfulLeftValueInfo,
-        baseTy: Type): Value {
+    private func TranslateSubscriptSetterThisObject(funcDecl: AstFuncDecl, callee: Value,
+        baseInfo: FaithfulLeftValueInfo, baseTy: Type): Value {
+        let address = AddressOfLeftValue(baseInfo, baseTy)
+        if (let Some(expectedTy) <- ExpectedThisParamType(funcDecl, callee, address.GetType() ?? baseTy)) {
+            return CoerceValueForExpectedType(address, expectedTy)
+        }
         if (let Some(calleeTy) <- callee.GetType()) {
             if (let Some(funcTy) <- (calleeTy as FuncType)) {
                 if (funcTy.GetNumOfParams() > 0 && !funcTy.GetParamType(0).IsRef()) {
@@ -3023,7 +3104,28 @@ public class Translator {
                 }
             }
         }
-        return AddressOfLeftValue(baseInfo, baseTy)
+        return address
+    }
+
+    private func CoerceThisObjectForCallee(funcDecl: AstFuncDecl, callee: Value, thisObj: Value): Value {
+        if (let Some(thisTy) <- thisObj.GetType()) {
+            if (let Some(expectedTy) <- ExpectedThisParamType(funcDecl, callee, thisTy)) {
+                return CoerceValueForExpectedType(thisObj, expectedTy)
+            }
+        }
+        return thisObj
+    }
+
+    private func ExpectedThisParamType(funcDecl: AstFuncDecl, callee: Value, receiverTy: Type): Option<Type> {
+        let calleeTy = callee.GetType() ?? return None
+        let funcTy = (calleeTy as FuncType) ?? return None
+        if (funcTy.GetNumOfParams() == 0) {
+            return None
+        }
+        let genericParams = TranslateFuncGenericParams(funcDecl)
+        let replacements = ArrayList<Type>()
+        AddMemberOwnerGenericReplacements(funcDecl, Some(receiverTy), genericParams, replacements)
+        return Some(SubstituteGenericType(funcTy.GetParamType(0), genericParams, replacements))
     }
 
     private func GetSubscriptIndexExprs(subscriptExpr: AstSubscriptExpr): ArrayList<AstExpr> {

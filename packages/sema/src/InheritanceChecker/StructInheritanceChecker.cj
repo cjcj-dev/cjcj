@@ -316,6 +316,9 @@ private func NeedCheck(node: Node): Bool {
     if (!node.IsNominalDecl()) {
         return false
     }
+    if (node.TestAttr(Attribute.IMPORTED)) {
+        return false
+    }
     if (node.TestAttr(Attribute.GENERIC_INSTANTIATED)) {
         return false
     }

@@ -1037,6 +1037,23 @@ private func ReplaceCallArgsWith(ce: CallExpr, args: ArrayList<FuncArg>): Unit {
     }
 }
 
+private func ApplyInstantiatedArgumentTypes(typeManager: TypeManager, ce: CallExpr,
+    unit: FunctionMatchingUnit): Unit {
+    var idx: Int64 = 0
+    while (idx < ce.args.size && idx < unit.tysInArgOrder.size) {
+        let rawParamTy = unit.tysInArgOrder[idx]
+        let instParamTy = typeManager.ApplySubstPack(rawParamTy, unit.typeMapping)
+        if (Ty.IsTyCorrect(instParamTy) && rawParamTy.HasGeneric()) {
+            let arg = ce.args[idx]
+            arg.SetTy(instParamTy)
+            if (let Some(argExpr) <- arg.expr) {
+                argExpr.SetTy(instParamTy)
+            }
+        }
+        idx++
+    }
+}
+
 private func GenerateCallBaseTypeMapping(typeManager: TypeManager, ce: CallExpr): SubstPack {
     let typeMapping = SubstPack()
     if (let Some(base) <- ce.baseFunc) {
@@ -1444,6 +1461,7 @@ private func MatchFunctionForCall(typeManager: TypeManager, diag: Option<BasicDi
     if (let Some(unit) <- selected) {
         let effectiveArgs = BuildEffectiveCallArgs(typeManager, unit.fd, ce, unit.typeMapping)
         ReplaceCallArgsWith(ce, effectiveArgs)
+        ApplyInstantiatedArgumentTypes(typeManager, ce, unit)
         if (let Some(fdTy) <- unit.fd.GetTy()) {
             ce.baseFunc.getOrThrow().SetTy(typeManager.ApplySubstPack(fdTy, unit.typeMapping))
         }
