@@ -626,6 +626,14 @@ public class IRBuilder2 <: Resource {
             }
             return raw
         }
+        if (paramTy.IsFunc()) {
+            let rawTy = unsafe { LLVMTypeOf(raw) }
+            if (!rawTy.isNull() && unsafe { LLVMGetTypeKind(rawTy) } == 12) {
+                return CreateBitCast(raw, CGType.GetOrCreate(cgMod, paramTy).GetLLVMType(),
+                    name: if (name.isEmpty()) { "fn.arg.cast" } else { name + ".fn.arg.cast" })
+            }
+            return raw
+        }
         let derefParamTy = paramTy.StripAllRefs()
         if (!(derefParamTy.IsStruct() || derefParamTy.IsTuple())) {
             return raw

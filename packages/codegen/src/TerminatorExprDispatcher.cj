@@ -5,6 +5,7 @@ import cangjie_compiler::chir.Expression
 import cangjie_compiler::chir.Block
 import cangjie_compiler::chir.Branch
 import cangjie_compiler::chir.ExprKind
+import cangjie_compiler::chir.FuncType
 import cangjie_compiler::chir.Function
 import cangjie_compiler::chir.GoTo
 import cangjie_compiler::chir.IntOpWithException
@@ -105,11 +106,9 @@ private func HandleExitExpression(irBuilder: IRBuilder2, chirExpr: Expression): 
 }
 
 private func CreateDirectRet(irBuilder: IRBuilder2, chirExpr: Expression): LLVMValueRef {
-    if (let Some(topLevelFunc) <- chirExpr.GetTopLevelFunc()) {
-        if (let Some(retTy) <- topLevelFunc.GetReturnType()) {
-            if (IsVoidLikeReturn(retTy)) {
-                return irBuilder.CreateRetVoid()
-            }
+    if (let Some(retTy) <- CurrentFunctionReturnType(irBuilder, chirExpr)) {
+        if (IsVoidLikeReturn(retTy)) {
+            return irBuilder.CreateRetVoid()
         }
     }
     let directRetValue = irBuilder.GetCGModule().MaterializeValue(irBuilder, chirExpr.GetOperand(0))
@@ -121,6 +120,20 @@ private func CreateDirectRet(irBuilder: IRBuilder2, chirExpr: Expression): LLVMV
         }
     }
     return irBuilder.CreateRet(directRetValue.GetRawValue())
+}
+
+private func CurrentFunctionReturnType(irBuilder: IRBuilder2, chirExpr: Expression): Option<Type> {
+    if (let Some(cgFunc) <- irBuilder.GetInsertCGFunction()) {
+        if (let Some(rawTy) <- cgFunc.GetOriginal().GetType()) {
+            if (let Some(funcTy) <- (rawTy as FuncType)) {
+                return Some(funcTy.GetReturnType())
+            }
+        }
+    }
+    if (let Some(topLevelFunc) <- chirExpr.GetTopLevelFunc()) {
+        return topLevelFunc.GetReturnType()
+    }
+    return None
 }
 
 private func CreateRetFromFunctionReturnSlot(irBuilder: IRBuilder2, parentFunc: Function): LLVMValueRef {

@@ -320,6 +320,10 @@ public class CGModule {
         valueMapping[GetCodeGenValueKey(chirValue)] = value
     }
 
+    public func RemoveMappedCGValue(chirValue: Value): Unit {
+        valueMapping.remove(GetCodeGenValueKey(chirValue))
+    }
+
     public func MaterializeValue(irBuilder: IRBuilder2, chirValue: Value): CGValue {
         if (let Some(mappedValue) <- GetMappedValue(chirValue)) {
             return mappedValue
