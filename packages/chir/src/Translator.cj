@@ -194,6 +194,9 @@ public class Translator {
     }
 
     public func Visit(funcDecl: AstFuncDecl): Option<Value> {
+        if (currentBlock.isSome() && !IsGlobalOrMemberFunc(funcDecl)) {
+            return TranslateNestedFunc(funcDecl)
+        }
         let value = globalSymbolTable.Get(funcDecl)
         let fn = (value as Function) ??
             throw IllegalStateException("faithful AST2CHIR function cache is not a Function: ${funcDecl.identifier.Val()}")
@@ -485,7 +488,7 @@ public class Translator {
         if (calleeDecl.IsMemberDecl() && !calleeDecl.TestAttr(AstAttribute.CONSTRUCTOR)) {
             return TranslateMemberFuncCall(expr, calleeDecl)
         }
-        let callee = globalSymbolTable.Get(calleeDecl)
+        let callee = GetSymbolTable(calleeDecl)
         let argValues = ArrayList<Value>()
         let expectedParamTys = FuncParamTypes(expr, calleeDecl)
         var idx: Int64 = 0
@@ -937,6 +940,62 @@ public class Translator {
         return None
     }
 
+    private func IsGlobalOrMemberFunc(funcDecl: AstFuncDecl): Bool {
+        return funcDecl.TestAnyAttr(AstAttribute.GLOBAL, AstAttribute.IN_CLASSLIKE, AstAttribute.IN_ENUM) ||
+            funcDecl.TestAnyAttr(AstAttribute.IN_STRUCT, AstAttribute.IN_EXTEND)
+    }
+
+    private func TranslateNestedFunc(funcDecl: AstFuncDecl): Option<Value> {
+        if (funcDecl.TestAnyAttr(AstAttribute.INTRINSIC, AstAttribute.ABSTRACT, AstAttribute.FOREIGN)) {
+            return None
+        }
+        let funcBody = funcDecl.funcBody ??
+            throw IllegalStateException("faithful AST2CHIR nested FuncDecl has no FuncBody")
+        let astBody = funcBody.body ??
+            throw IllegalStateException("faithful AST2CHIR nested FuncDecl has no body")
+        let funcTy = RequireFuncType(chirTy.TranslateType(RequireAstTy(funcDecl)))
+        let body = builder.CreateBlockGroup(CurrentFunction())
+        let identifier = if (funcDecl.mangledName.isEmpty()) {
+            CurrentFunction().GetIdentifierWithoutPrefix() + "$local$" + funcDecl.identifier.Val()
+        } else {
+            funcDecl.mangledName
+        }
+        let lambda = builder.CreateLambda(funcTy, funcTy, CurrentBlock(), isLocalFunc: true,
+            identifier: identifier, srcCodeIdentifier: funcDecl.identifier.Val())
+        lambda.InitBody(body)
+        if (funcDecl.isConst) {
+            lambda.SetCompileTimeValue()
+        }
+        let lambdaValue = lambda.GetResult() ??
+            throw IllegalStateException("faithful AST2CHIR nested FuncDecl lambda has no result")
+        localValSymbolTable.Set(funcDecl, lambdaValue)
+        BindLambdaParams(funcBody, lambda, funcTy)
+
+        let savedBlock = currentBlock
+        let savedLambda = currentLambda
+        let savedAstFuncDecl = currentAstFuncDecl
+        blockGroupStack.add(body)
+        currentLambda = lambda
+        currentAstFuncDecl = funcDecl
+        let entry = builder.CreateBlock(body)
+        body.SetEntryBlock(entry)
+        currentBlock = entry
+        let retTy = funcTy.GetReturnType()
+        if (!retTy.IsUnit() && !retTy.IsNothing() && !retTy.IsVoid()) {
+            let retSlot = RequireResult(builder.CreateAllocate(builder.context.GetRefTy(retTy), retTy, entry))
+            lambda.SetReturnValue(retSlot)
+        }
+        let result = Translator.TranslateASTNode(astBody, this)
+        if (CurrentBlock().GetTerminator().isNone()) {
+            EmitImplicitLambdaExit(lambda, result)
+        }
+        currentBlock = savedBlock
+        currentLambda = savedLambda
+        currentAstFuncDecl = savedAstFuncDecl
+        blockGroupStack.remove(at: blockGroupStack.size - 1)
+        return Some(lambdaValue)
+    }
+
     private func TranslateClassLikeDecl(def: ClassDef, decl: AstClassLikeDecl): Unit {
         if (let Some(astTy) <- decl.GetTy()) {
             let classTy = UnwrapClassType(chirTy.TranslateType(astTy))
@@ -1059,7 +1118,7 @@ public class Translator {
         var idx: Int64 = 0
         for (param in params) {
             if (idx < paramTys.size) {
-                let chirParam = builder.CreateParameter(paramTys[idx], "%arg${idx}", lambda)
+                let chirParam = builder.CreateParameter(paramTys[idx], "%${builder.context.GetAllNodesNum()}", lambda)
                 chirParam.SetSrcCodeIdentifier(param.identifier.Val())
                 localValSymbolTable.Set(param, chirParam)
             }
