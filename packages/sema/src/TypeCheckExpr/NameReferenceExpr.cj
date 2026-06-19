@@ -651,11 +651,62 @@ public func SynNameReferenceExpr(typeManager: TypeManager, nre: NameReferenceExp
     return TcInvalid(nre)
 }
 
+private func EnumConstructorOuterDecl(nre: NameReferenceExpr): Option<EnumDecl> {
+    if (let Some(target) <- nre.GetTarget()) {
+        if (target.TestAttr(Attribute.ENUM_CONSTRUCTOR)) {
+            if (let Some(outer) <- target.outerDecl) {
+                return outer as EnumDecl
+            }
+        }
+    }
+    return None
+}
+
+private func SameEnumDeclAsTarget(enumDecl: EnumDecl, target: Ty): Bool {
+    if (let Some(enumTy) <- (target as EnumTy)) {
+        if (let Some(targetDecl) <- enumTy.declPtr) {
+            return SameDecl(enumDecl, targetDecl)
+        }
+    }
+    return false
+}
+
+private func InstantiateEnumConstructorRefFromTarget(
+    typeManager: TypeManager,
+    target: Ty,
+    nre: NameReferenceExpr,
+    actualTy: Ty
+): Ty {
+    if (!actualTy.HasGeneric()) {
+        return actualTy
+    }
+    if (let None <- EnumConstructorOuterDecl(nre)) {
+        return actualTy
+    }
+    let enumDecl = EnumConstructorOuterDecl(nre).getOrThrow()
+    if (!SameEnumDeclAsTarget(enumDecl, target)) {
+        return actualTy
+    }
+    let typeMapping = GenerateTypeMapping(enumDecl, target.typeArgs)
+    let instTy = typeManager.GetInstantiatedTy(actualTy, typeMapping)
+    if (Ty.IsTyCorrect(instTy)) {
+        for (argTy in target.typeArgs) {
+            if (!containsTy(nre.instTys, argTy)) {
+                nre.instTys.add(argTy)
+            }
+        }
+        nre.SetTy(instTy)
+        return instTy
+    }
+    return actualTy
+}
+
 public func ChkNameReferenceExpr(typeManager: TypeManager, target: Ty, nre: NameReferenceExpr): Bool {
-    let actualTy = SynNameReferenceExpr(typeManager, nre)
+    var actualTy = SynNameReferenceExpr(typeManager, nre)
     if (!Ty.IsTyCorrect(actualTy)) {
         return false
     }
+    actualTy = InstantiateEnumConstructorRefFromTarget(typeManager, target, nre, actualTy)
     if (actualTy.IsQuest()) {
         let funcs = GetFuncTargets(nre)
         for (funcDecl in funcs) {

@@ -422,7 +422,7 @@ public func TypeCheckDeclSetEnumElementTy(
     if (!constructor.TestAttr(Attribute.ENUM_CONSTRUCTOR)) {
         return constructor.GetTy() ?? TypeManager.GetInvalidTy()
     }
-    if (Ty.IsTyCorrect(constructor.GetTy())) {
+    if (Ty.IsTyCorrect(constructor.GetTy()) && EnumConstructorTyMatchesOuter(constructor)) {
         return constructor.GetTy().getOrThrow()
     }
     if (constructor.astKind == ASTKind.VAR_DECL) {
@@ -443,6 +443,22 @@ public func TypeCheckDeclSetEnumElementTy(
     }
     constructor.SetTy(TypeManager.GetInvalidTy())
     return TypeManager.GetInvalidTy()
+}
+
+private func EnumConstructorTyMatchesOuter(constructor: Decl): Bool {
+    let outerTy = if (let Some(outer) <- constructor.outerDecl) {
+        outer.GetTy() ?? return true
+    } else {
+        return true
+    }
+    if (let Some(funcDecl) <- (constructor as FuncDecl)) {
+        if (let Some(declTy) <- funcDecl.GetTy()) {
+            if (let Some(funcTy) <- (declTy as FuncTy)) {
+                return SameTy(funcTy.retTy, outerTy)
+            }
+        }
+    }
+    return true
 }
 
 private func TypeCheckDeclCheckEnumFuncDeclIsCStructParam(diag: BasicDiagnosticEngine, funcDecl: FuncDecl): Unit {
