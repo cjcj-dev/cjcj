@@ -286,10 +286,8 @@ public class TypeManager {
     }
 
     public static func GetNonNullTy(ty: Ty): Ty {
-        if (let Some(enumTy) <- (ty as EnumTy)) {
-            if (enumTy.IsCoreOptionType() && enumTy.typeArgs.size == 1) {
-                return enumTy.typeArgs[0]
-            }
+        if (Ty.IsInitialTy(Some(ty))) {
+            return GetInvalidTy()
         }
         return ty
     }
@@ -1109,7 +1107,7 @@ public class TypeManager {
     }
 
     private func isInheritableTypeForGenericMapping(ty: Ty): Bool {
-        if (!Ty.IsTyCorrect(ty) || !ty.IsClassLike()) {
+        if (!Ty.IsTyCorrect(ty) || !ty.IsNominal()) {
             return false
         }
         if (let Some(decl) <- Ty.GetInheritableDeclPtrOfTy(Some(ty))) {

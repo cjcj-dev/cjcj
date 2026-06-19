@@ -167,7 +167,7 @@ private func addImportedNominalMemberDependencies(ctx: ASTContext, decl: Decl,
     }
     seenNominalDeps.add(key)
     addImportedInheritedTypesToCurrentPackage(ctx, decl, seenNominalDeps)
-    for (member in decl.GetMemberDecls()) {
+    for (member in decl.GetMemberDeclPtrs()) {
         markImportedDeclUsed(member)
         if (let Some(funcDecl) <- (member as FuncDecl)) {
             if (let Some(funcTy) <- funcDecl.GetTy()) {
@@ -385,7 +385,11 @@ public class TypeChecker {
                 }
             }
         }
+        let importedDecls = ArrayList<Decl>()
         for (decl in pkg.srcImportedNonGenericDecls) {
+            importedDecls.add(decl)
+        }
+        for (decl in importedDecls) {
             SynthesizeTree(ctx, decl)
         }
         if (pkg.TestAttr(Attribute.IMPORTED)) {
@@ -491,6 +495,12 @@ public class TypeChecker {
     private func SynthesizeTypeNode(ctx: ASTContext, typeNode: Option<Type>): Unit {
         if (let Some(value) <- typeNode) {
             impl.SetTypeTy(ctx, value)
+            if (let Some(target) <- value.GetTarget()) {
+                addImportedDeclAndDependencies(ctx, target)
+                if (let Some(enumDecl) <- (target as EnumDecl)) {
+                    RegisterEnumConstructors(ctx, enumDecl)
+                }
+            }
         }
     }
 
@@ -611,6 +621,14 @@ public class TypeChecker {
             let _ = PrepareEnumConstructorSignature(ctx, enumDecl, constructor)
         }
         PrepareDeclListSignatures(ctx, enumDecl.members)
+    }
+
+    private func RegisterEnumConstructors(ctx: ASTContext, enumDecl: EnumDecl): Unit {
+        TypeCheckDeclInsertEnumConstructors(ctx, enumDecl)
+        for (constructor in enumDecl.constructors) {
+            let _ = PrepareEnumConstructorSignature(ctx, enumDecl, constructor)
+            addImportedDeclAndDependencies(ctx, constructor)
+        }
     }
 
     private func ConstructorReturnTy(fb: FuncBody): Option<Ty> {
@@ -898,7 +916,12 @@ public class TypeChecker {
     private func EnsureRetType(ctx: ASTContext, fb: FuncBody): Type {
         if (let Some(retType) <- fb.retType) {
             if (Ty.IsInitialTy(retType.GetTy())) {
-                retType.SetTy(impl.GetTyFromASTType(ctx, retType))
+                SynthesizeTypeNode(ctx, Some(retType))
+            } else if (let Some(target) <- retType.GetTarget()) {
+                addImportedDeclAndDependencies(ctx, target)
+                if (let Some(enumDecl) <- (target as EnumDecl)) {
+                    RegisterEnumConstructors(ctx, enumDecl)
+                }
             }
             return retType
         }
@@ -944,6 +967,38 @@ public class TypeChecker {
         for (arg in callExpr.args) {
             let _ = SynthesizeFuncArg(ctx, arg)
         }
+    }
+
+    private func ReturnExprTargetTy(returnExpr: ReturnExpr): Option<Ty> {
+        if (let None <- returnExpr.refFuncBody) {
+            return None
+        }
+        let fb = returnExpr.refFuncBody.getOrThrow()
+        if (let None <- fb.retType) {
+            return None
+        }
+        let retTy = fb.retType.getOrThrow().GetTy() ?? return None
+        if (retTy.HasInvalidTy() || retTy.IsQuest()) {
+            return None
+        }
+        if (let Some(funcDecl) <- fb.funcDecl) {
+            if (IsInstanceConstructor(funcDecl)) {
+                return Some(TypeManager.GetPrimitiveTy(TypeKind.TYPE_UNIT))
+            }
+        }
+        return Some(retTy)
+    }
+
+    private func SynthesizeReturnChildren(ctx: ASTContext, returnExpr: ReturnExpr): Unit {
+        if (let None <- returnExpr.expr) {
+            return
+        }
+        let innerExpr = returnExpr.expr.getOrThrow()
+        if (let Some(targetTy) <- ReturnExprTargetTy(returnExpr)) {
+            let _ = Check(ctx, targetTy, innerExpr)
+            return
+        }
+        let _ = Synthesize(ctx, innerExpr)
     }
 
     private func SynthesizeIfChildren(ctx: ASTContext, ifExpr: IfExpr): Unit {
@@ -1290,7 +1345,7 @@ public class TypeChecker {
             if (let Some(fb) <- currentFuncBody) {
                 returnExpr.refFuncBody = Some(fb)
             }
-            SynthesizeNodeChildren(ctx, returnExpr)
+            SynthesizeReturnChildren(ctx, returnExpr)
             return FinishSynthesize(ctx, returnExpr, SynExprShallow(impl.typeManager, returnExpr))
         }
         if (let Some(nameRef) <- (expr as NameReferenceExpr)) {
@@ -1395,7 +1450,7 @@ public class TypeChecker {
             if (let Some(fb) <- currentFuncBody) {
                 returnExpr.refFuncBody = Some(fb)
             }
-            SynthesizeNodeChildren(ctx, returnExpr)
+            SynthesizeReturnChildren(ctx, returnExpr)
             return FinishCheck(ctx, returnExpr, ChkExprShallow(impl.typeManager, target, returnExpr))
         }
         if (let Some(nameRef) <- (expr as NameReferenceExpr)) {
@@ -1420,6 +1475,17 @@ public class TypeChecker {
             return
         }
         let targets = impl.Lookup(ctx, refExpr.ref.identifier.Val(), scopeNameOf(refExpr), refExpr)
+        if (targets.isEmpty() && ctx.IsEnumConstructor(refExpr.ref.identifier.Val())) {
+            var arity: UInt64 = 0u64
+            if (let Some(owner) <- refExpr.callOrPattern) {
+                if (let Some(callExpr) <- (owner as CallExpr)) {
+                    arity = UInt64(callExpr.args.size)
+                }
+            }
+            for (constructor in ctx.FindEnumConstructor(refExpr.ref.identifier.Val(), arity)) {
+                targets.add(constructor)
+            }
+        }
         for (target in targets) {
             refExpr.ref.targets.add(target)
             addImportedDeclAndDependencies(ctx, target)

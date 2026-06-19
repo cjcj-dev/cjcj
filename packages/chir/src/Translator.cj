@@ -1945,7 +1945,7 @@ public class Translator {
             if (let Some(constructorTy) <- constructorExpr.GetTy()) {
                 if (let Some(funcTy) <- (constructorTy as AstFuncTy)) {
                     for (paramTy in funcTy.paramTys) {
-                        out.add(chirTy.TranslateType(paramTy))
+                        out.add(TranslateEnumPatternPayloadType(pattern, paramTy))
                     }
                     return out
                 }
@@ -1955,12 +1955,21 @@ public class Translator {
             if (let Some(ctorTy) <- funcDecl.GetTy()) {
                 if (let Some(funcTy) <- (ctorTy as AstFuncTy)) {
                     for (paramTy in funcTy.paramTys) {
-                        out.add(chirTy.TranslateType(paramTy))
+                        out.add(TranslateEnumPatternPayloadType(pattern, paramTy))
                     }
                 }
             }
         }
         return out
+    }
+
+    private func TranslateEnumPatternPayloadType(pattern: AstEnumPattern, paramTy: AstTy): Type {
+        let translated = chirTy.TranslateType(paramTy)
+        if (let Some(enumTy) <- (chirTy.TranslateType(RequireAstTy(pattern)) as EnumType)) {
+            return SubstituteGenericType(translated, enumTy.GetEnumDef().GetGenericTypeParams(),
+                enumTy.GetGenericArgs())
+        }
+        return translated
     }
 
     private func ExtractPatternField(value: Value, index: Int64, fieldTy: Type): Value {
@@ -1990,6 +1999,14 @@ public class Translator {
     }
 
     private func SameTranslatorAstDecl(left: AstDecl, right: AstDecl): Bool {
+        if (left.TestAttr(AstAttribute.IMPORTED) && right.TestAttr(AstAttribute.IMPORTED)) {
+            if (!left.rawMangleName.isEmpty() || !right.rawMangleName.isEmpty()) {
+                return left.rawMangleName == right.rawMangleName
+            }
+            if (!left.mangledName.isEmpty() || !right.mangledName.isEmpty()) {
+                return left.mangledName == right.mangledName
+            }
+        }
         return ASTKindIndex(left.astKind) == ASTKindIndex(right.astKind) &&
             left.identifier.Val() == right.identifier.Val() && left.fullPackageName == right.fullPackageName &&
             left.begin.hashCode() == right.begin.hashCode() && left.end.hashCode() == right.end.hashCode()
@@ -2354,11 +2371,34 @@ public class Translator {
         if (calleeDecl.TestAttr(AstAttribute.CONSTRUCTOR)) {
             return out
         }
+        if (calleeDecl.TestAttr(AstAttribute.ENUM_CONSTRUCTOR)) {
+            let resultArgs = TranslateEnumCtorInstArgsFromResult(expr, calleeDecl)
+            if (!resultArgs.isEmpty()) {
+                return resultArgs
+            }
+        }
         if (let Some(base) <- expr.baseFunc) {
             if (let Some(nameRef) <- (base as AstNameReferenceExpr)) {
                 for (instTy in nameRef.instTys) {
                     out.add(chirTy.TranslateType(instTy))
                 }
+            }
+        }
+        return out
+    }
+
+    private func TranslateEnumCtorInstArgsFromResult(expr: AstCallExpr, calleeDecl: AstFuncDecl): ArrayList<Type> {
+        let out = ArrayList<Type>()
+        let outer = calleeDecl.outerDecl ?? return out
+        let enumDecl = (outer as AstEnumDecl) ?? return out
+        if (let Some(astEnumTy) <- ((expr.GetTy() ?? AstTy.GetInitialTy()) as AstEnumTy)) {
+            if (let Some(tyDecl) <- astEnumTy.declPtr) {
+                if (!SameTranslatorAstDecl(tyDecl, enumDecl)) {
+                    return out
+                }
+            }
+            for (argTy in astEnumTy.typeArgs) {
+                out.add(chirTy.TranslateType(argTy))
             }
         }
         return out
@@ -2371,6 +2411,21 @@ public class Translator {
                 if (let Some(paramTy) <- param.GetTy()) {
                     if (let Some(genericTy) <- (chirTy.TranslateType(paramTy) as GenericType)) {
                         out.add(genericTy)
+                    }
+                }
+            }
+        }
+        if (out.isEmpty() && calleeDecl.TestAttr(AstAttribute.ENUM_CONSTRUCTOR)) {
+            if (let Some(outer) <- calleeDecl.outerDecl) {
+                if (let Some(enumDecl) <- (outer as AstEnumDecl)) {
+                    if (let Some(generic) <- enumDecl.generic) {
+                        for (param in generic.typeParameters) {
+                            if (let Some(paramTy) <- param.GetTy()) {
+                                if (let Some(genericTy) <- (chirTy.TranslateType(paramTy) as GenericType)) {
+                                    out.add(genericTy)
+                                }
+                            }
+                        }
                     }
                 }
             }
