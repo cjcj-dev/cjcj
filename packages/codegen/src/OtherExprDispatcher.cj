@@ -4,6 +4,7 @@ import cangjie_compiler::chir.Expression
 import cangjie_compiler::chir.ExprKind
 import cangjie_compiler::chir.GetRTTI
 import cangjie_compiler::chir.GetRTTIStatic
+import cangjie_compiler::chir.Lambda
 
 public func HandleStructedControlFlowExpression(irBuilder: IRBuilder2, chirExpr: Expression): LLVMValueRef {
     if (chirExpr.GetExprKind() == ExprKind.LAMBDA) {
@@ -16,6 +17,12 @@ public func HandleStructedControlFlowExpression(irBuilder: IRBuilder2, chirExpr:
 
 public func HandleOthersExpression(irBuilder: IRBuilder2, chirExpr: Expression): LLVMValueRef {
     let kind = chirExpr.GetExprKind()
+    if (kind == ExprKind.LAMBDA) {
+        if (let Some(lambdaExpr) <- (chirExpr as Lambda)) {
+            return GenerateLambdaExpression(irBuilder, lambdaExpr)
+        }
+        return LLVMNullValue()
+    }
     if (kind == ExprKind.APPLY) {
         return EmitCallLikeExpression(irBuilder, chirExpr)
     }

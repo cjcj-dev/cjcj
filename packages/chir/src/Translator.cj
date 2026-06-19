@@ -27,6 +27,7 @@ import cangjie_compiler::ast.ExceptTypePattern as AstExceptTypePattern
 import cangjie_compiler::ast.ForInExpr as AstForInExpr
 import cangjie_compiler::ast.ForInKind as AstForInKind
 import cangjie_compiler::ast.FuncArg as AstFuncArg
+import cangjie_compiler::ast.FuncBody as AstFuncBody
 import cangjie_compiler::ast.FuncDecl as AstFuncDecl
 import cangjie_compiler::ast.FuncTy as AstFuncTy
 import cangjie_compiler::ast.GenericsTy as AstGenericsTy
@@ -34,6 +35,7 @@ import cangjie_compiler::ast.IfExpr as AstIfExpr
 import cangjie_compiler::ast.InterfaceTy as AstInterfaceTy
 import cangjie_compiler::ast.InterfaceDecl as AstInterfaceDecl
 import cangjie_compiler::ast.JumpExpr as AstJumpExpr
+import cangjie_compiler::ast.LambdaExpr as AstLambdaExpr
 import cangjie_compiler::ast.LitConstExpr as AstLitConstExpr
 import cangjie_compiler::ast.LitConstKind as AstLitConstKind
 import cangjie_compiler::ast.MainDecl as AstMainDecl
@@ -94,7 +96,9 @@ public class Translator {
     private let localValSymbolTable: FaithfulAST2CHIRNodeMap = FaithfulAST2CHIRNodeMap()
     private var currentBlock: Option<Block> = None
     private var currentFunc: Option<Function> = None
+    private var currentLambda: Option<Lambda> = None
     private var currentAstFuncDecl: Option<AstFuncDecl> = None
+    private var lambdaCounter: UInt64 = 0u64
     private var delayExitSignal: Option<Value> = None
     private let blockGroupStack: ArrayList<BlockGroup> = ArrayList<BlockGroup>()
     private let loopTargetStack: ArrayList<FaithfulLoopTarget> = ArrayList<FaithfulLoopTarget>()
@@ -154,6 +158,7 @@ public class Translator {
             case ASTKind.DO_WHILE_EXPR => trans.Visit(RequireNodeAsDoWhileExpr(nodePtr))
             case ASTKind.FOR_IN_EXPR => trans.Visit(RequireNodeAsForInExpr(nodePtr))
             case ASTKind.JUMP_EXPR => trans.Visit(RequireNodeAsJumpExpr(nodePtr))
+            case ASTKind.LAMBDA_EXPR => trans.Visit(RequireNodeAsLambdaExpr(nodePtr))
             case ASTKind.MATCH_EXPR => trans.Visit(RequireNodeAsMatchExpr(nodePtr))
             case ASTKind.TRY_EXPR => trans.Visit(RequireNodeAsTryExpr(nodePtr))
             case ASTKind.THROW_EXPR => trans.Visit(RequireNodeAsThrowExpr(nodePtr))
@@ -423,9 +428,17 @@ public class Translator {
         if (let Some(retExpr) <- expr.expr) {
             let value = Translator.TranslateASTNode(retExpr, this) ??
                 throw IllegalStateException("faithful AST2CHIR return expression produced no value")
+            if (currentLambda.isSome()) {
+                EmitLambdaReturn(Some(value))
+                return None
+            }
             StoreReturnValueIfNeeded(CurrentFunction(), value)
             UpdateDelayExitSignalForReturnIfNeeded()
             builder.CreateExit(None, CurrentBlock())
+            return None
+        }
+        if (currentLambda.isSome()) {
+            EmitLambdaReturn(None)
             return None
         }
         UpdateDelayExitSignalForReturnIfNeeded()
@@ -458,6 +471,9 @@ public class Translator {
     }
 
     public func Visit(expr: AstCallExpr): Option<Value> {
+        if (IsFunctionValueCall(expr)) {
+            return Some(TranslateFunctionValueCall(expr))
+        }
         let calleeDecl = expr.resolvedFunction ?? ResolveCalleeFromBase(expr)
         if (calleeDecl.TestAttr(AstAttribute.ENUM_CONSTRUCTOR)) {
             return TranslateEnumCtorCall(expr, calleeDecl)
@@ -486,6 +502,44 @@ public class Translator {
         let resultTy = chirTy.TranslateType(RequireAstTy(expr))
         return CreateApplyMaybeWithException(resultTy, callee, FuncCallContext(args: argValues,
             instTypeArgs: TranslateFuncInstArgs(expr, calleeDecl)))
+    }
+
+    public func Visit(expr: AstLambdaExpr): Option<Value> {
+        let funcBody = expr.funcBody ??
+            throw IllegalStateException("faithful AST2CHIR LambdaExpr has no FuncBody")
+        let funcTy = RequireFuncType(chirTy.TranslateType(RequireAstTy(expr)))
+        let parentFunc = CurrentFunction()
+        let body = builder.CreateBlockGroup(parentFunc)
+        let lambda = builder.CreateLambda(funcTy, funcTy, CurrentBlock(), isLocalFunc: true,
+            identifier: LambdaIdentifier(expr), srcCodeIdentifier: "$lambda")
+        lambda.InitBody(body)
+        BindLambdaParams(funcBody, lambda, funcTy)
+
+        let savedBlock = currentBlock
+        let savedLambda = currentLambda
+        blockGroupStack.add(body)
+        currentLambda = lambda
+        let entry = builder.CreateBlock(body)
+        body.SetEntryBlock(entry)
+        currentBlock = entry
+        let retSlot = RequireResult(builder.CreateAllocate(builder.context.GetRefTy(funcTy.GetReturnType()),
+            funcTy.GetReturnType(), entry))
+        lambda.SetReturnValue(retSlot)
+        if (let Some(astBody) <- funcBody.body) {
+            let result = Translator.TranslateASTNode(astBody, this)
+            if (CurrentBlock().GetTerminator().isNone()) {
+                EmitImplicitLambdaExit(lambda, result)
+            }
+        } else if (CurrentBlock().GetTerminator().isNone()) {
+            EmitImplicitLambdaExit(lambda, None)
+        }
+        currentBlock = savedBlock
+        currentLambda = savedLambda
+        blockGroupStack.remove(at: blockGroupStack.size - 1)
+        if (let Some(result) <- lambda.GetResult()) {
+            return Some(result)
+        }
+        return None
     }
 
     public func Visit(expr: AstIfExpr): Option<Value> {
@@ -995,6 +1049,33 @@ public class Translator {
         }
     }
 
+    private func BindLambdaParams(funcBody: AstFuncBody, lambda: Lambda, funcTy: FuncType): Unit {
+        if (funcBody.paramLists.isEmpty()) {
+            return
+        }
+        let params = funcBody.paramLists[0].params
+        let paramTys = funcTy.GetParamTypes()
+        var idx: Int64 = 0
+        for (param in params) {
+            if (idx < paramTys.size) {
+                let chirParam = builder.CreateParameter(paramTys[idx], "%arg${idx}", lambda)
+                chirParam.SetSrcCodeIdentifier(param.identifier.Val())
+                localValSymbolTable.Set(param, chirParam)
+            }
+            idx++
+        }
+    }
+
+    private func LambdaIdentifier(expr: AstLambdaExpr): String {
+        if (!expr.mangledName.isEmpty()) {
+            return expr.mangledName
+        }
+        let owner = CurrentFunction().GetIdentifierWithoutPrefix()
+        let id = lambdaCounter
+        lambdaCounter++
+        return owner + "$lambda$" + id.toString()
+    }
+
     private func EnsureFuncBody(fn: Function): BlockGroup {
         if (let Some(body) <- fn.GetBody()) {
             return body
@@ -1435,6 +1516,45 @@ public class Translator {
             StoreReturnValueIfNeeded(fn, retValue)
         }
         builder.CreateExit(None, CurrentBlock())
+    }
+
+    private func EmitImplicitLambdaExit(lambda: Lambda, value: Option<Value>): Unit {
+        if (let Some(retTy) <- lambda.GetReturnType()) {
+            if (retTy.IsUnit() || retTy.IsNothing() || retTy.IsVoid()) {
+                builder.CreateExit(None, CurrentBlock())
+                return
+            }
+            if (let Some(retValue) <- value) {
+                StoreLambdaReturnValueIfNeeded(lambda, retValue)
+            }
+        }
+        builder.CreateExit(None, CurrentBlock())
+    }
+
+    private func EmitLambdaReturn(value: Option<Value>): Unit {
+        let lambda = currentLambda ??
+            throw IllegalStateException("faithful AST2CHIR lambda return has no current lambda")
+        if (let Some(retValue) <- value) {
+            if (let Some(retTy) <- lambda.GetReturnType()) {
+                if (retTy.IsUnit() || retTy.IsNothing() || retTy.IsVoid()) {
+                    builder.CreateExit(None, CurrentBlock())
+                } else {
+                    StoreLambdaReturnValueIfNeeded(lambda, retValue)
+                    builder.CreateExit(None, CurrentBlock())
+                }
+                return
+            }
+            builder.CreateExit(Some(retValue), CurrentBlock())
+            return
+        }
+        builder.CreateExit(None, CurrentBlock())
+    }
+
+    private func StoreLambdaReturnValueIfNeeded(lambda: Lambda, value: Value): Unit {
+        if (let Some(returnLocation) <- lambda.GetReturnValue()) {
+            builder.CreateStore(CastValueIfNeeded(value, RequireRefBaseType(returnLocation)), returnLocation,
+                CurrentBlock())
+        }
     }
 
     private func StoreReturnValueIfNeeded(fn: Function, value: Value): Unit {
@@ -1977,9 +2097,9 @@ public class Translator {
 
     private func EnumPatternPayloadTypes(pattern: AstEnumPattern): ArrayList<Type> {
         let out = ArrayList<Type>()
-        if (let Some(constructorExpr) <- pattern.constructor) {
-            if (let Some(constructorTy) <- constructorExpr.GetTy()) {
-                if (let Some(funcTy) <- (constructorTy as AstFuncTy)) {
+        if (let Some(funcDecl) <- (RequireEnumPatternConstructor(pattern) as AstFuncDecl)) {
+            if (let Some(ctorTy) <- funcDecl.GetTy()) {
+                if (let Some(funcTy) <- (ctorTy as AstFuncTy)) {
                     for (paramTy in funcTy.paramTys) {
                         out.add(TranslateEnumPatternPayloadType(pattern, paramTy))
                     }
@@ -1987,9 +2107,9 @@ public class Translator {
                 }
             }
         }
-        if (let Some(funcDecl) <- (RequireEnumPatternConstructor(pattern) as AstFuncDecl)) {
-            if (let Some(ctorTy) <- funcDecl.GetTy()) {
-                if (let Some(funcTy) <- (ctorTy as AstFuncTy)) {
+        if (let Some(constructorExpr) <- pattern.constructor) {
+            if (let Some(constructorTy) <- constructorExpr.GetTy()) {
+                if (let Some(funcTy) <- (constructorTy as AstFuncTy)) {
                     for (paramTy in funcTy.paramTys) {
                         out.add(TranslateEnumPatternPayloadType(pattern, paramTy))
                     }
@@ -2286,6 +2406,13 @@ public class Translator {
     }
 
     private func CallBaseFuncTy(expr: AstCallExpr, calleeDecl: AstFuncDecl): AstFuncTy {
+        if (calleeDecl.TestAttr(AstAttribute.ENUM_CONSTRUCTOR)) {
+            if (let Some(declTy) <- calleeDecl.GetTy()) {
+                if (let Some(funcTy) <- (declTy as AstFuncTy)) {
+                    return funcTy
+                }
+            }
+        }
         if (let Some(base) <- expr.baseFunc) {
             if (let Some(baseTy) <- base.GetTy()) {
                 if (let Some(funcTy) <- (baseTy as AstFuncTy)) {
@@ -2311,6 +2438,55 @@ public class Translator {
             return result
         }
         return RequireResult(builder.CreateApply(resultTy, callee, callContext, CurrentBlock()))
+    }
+
+    private func IsFunctionValueCall(expr: AstCallExpr): Bool {
+        if (expr.resolvedFunction.isSome()) {
+            return false
+        }
+        if (let Some(base) <- expr.baseFunc) {
+            if (let Some(baseTy) <- base.GetTy()) {
+                if ((baseTy as AstFuncTy).isSome()) {
+                    if (let Some(refExpr) <- (base as AstRefExpr)) {
+                        if (let Some(target) <- refExpr.ref.target) {
+                            return (target as AstFuncDecl).isNone()
+                        }
+                    }
+                    if (let Some(member) <- (base as AstMemberAccess)) {
+                        if (let Some(target) <- member.target) {
+                            return (target as AstFuncDecl).isNone()
+                        }
+                    }
+                    return true
+                }
+            }
+        }
+        return false
+    }
+
+    private func TranslateFunctionValueCall(expr: AstCallExpr): Value {
+        let base = RequireExpr(expr.baseFunc, "function-value call base")
+        let baseTy = base.GetTy() ??
+            throw IllegalStateException("faithful AST2CHIR function-value call base has no type")
+        let baseFuncTy = (baseTy as AstFuncTy) ??
+            throw IllegalStateException("faithful AST2CHIR function-value call base is not a function type")
+        let callee = Translator.TranslateASTNode(base, this) ??
+            throw IllegalStateException("faithful AST2CHIR function-value call base produced no value")
+        let argValues = ArrayList<Value>()
+        var idx: Int64 = 0
+        for (arg in expr.args) {
+            if (let Some(argExpr) <- arg.expr) {
+                var value = Translator.TranslateASTNode(argExpr, this) ??
+                    throw IllegalStateException("faithful AST2CHIR function-value call arg produced no value")
+                if (idx < baseFuncTy.paramTys.size) {
+                    value = CoerceValueForExpectedType(value, chirTy.TranslateType(baseFuncTy.paramTys[idx]))
+                }
+                argValues.add(value)
+            }
+            idx++
+        }
+        return CreateApplyMaybeWithException(chirTy.TranslateType(RequireAstTy(expr)), callee,
+            FuncCallContext(args: argValues))
     }
 
     private func CreateInvokeMaybeWithException(resultTy: Type, callContext: InvokeCallContext): Value {
@@ -3721,6 +3897,10 @@ public class Translator {
 
     private static func RequireNodeAsJumpExpr(node: AstNode): AstJumpExpr {
         return (node as AstJumpExpr) ?? throw IllegalArgumentException("ASTKind cast failed: JUMP_EXPR")
+    }
+
+    private static func RequireNodeAsLambdaExpr(node: AstNode): AstLambdaExpr {
+        return (node as AstLambdaExpr) ?? throw IllegalArgumentException("ASTKind cast failed: LAMBDA_EXPR")
     }
 
     private static func RequireNodeAsMatchExpr(node: AstNode): AstMatchExpr {

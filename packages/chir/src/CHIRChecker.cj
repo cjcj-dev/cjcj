@@ -824,7 +824,7 @@ public class CHIRChecker {
         CheckSuccessorNumEqual(0, term, topLevelFunc, result)
         ShouldNotHaveResult(term, topLevelFunc, result)
         if (term.GetNumOfOperands() == 1) {
-            if (let Some(retTy) <- topLevelFunc.GetReturnType()) {
+            if (let Some(retTy) <- ExpectedExitReturnType(term, topLevelFunc)) {
                 let value = term.GetOperand(0)
                 if (let Some(valueTy) <- value.GetType()) {
                     if (!CHIRCheckerTypeIsExpected(valueTy, retTy)) {
@@ -833,6 +833,25 @@ public class CHIRChecker {
                 }
             }
         }
+    }
+
+    private func ExpectedExitReturnType(term: Terminator, topLevelFunc: Function): Option<Type> {
+        if (let Some(group) <- term.GetParentBlockGroup()) {
+            var current = group
+            while (current.GetOwnerFunc().isNone()) {
+                if (let Some(ownerExpr) <- current.GetOwnerExpression()) {
+                    if (let Some(lambdaExpr) <- (ownerExpr as Lambda)) {
+                        return lambdaExpr.GetReturnType()
+                    }
+                    if (let Some(parentGroup) <- ownerExpr.GetParentBlockGroup()) {
+                        current = parentGroup
+                        continue
+                    }
+                }
+                break
+            }
+        }
+        return topLevelFunc.GetReturnType()
     }
 
     private func CheckBranch(term: Terminator, topLevelFunc: Function, result: CHIRCheckResult): Unit {

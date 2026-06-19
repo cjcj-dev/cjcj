@@ -236,8 +236,8 @@ public class TypeChecker {
     private var ci: Option<CompilerInstance> = None
     private var impl: TypeCheckerImpl = TypeCheckerImpl()
     private let contexts: ArrayList<ASTContext> = ArrayList<ASTContext>()
-    private let registeringEnumConstructors: ArrayList<EnumDecl> = ArrayList<EnumDecl>()
     private var currentFuncBody: Option<FuncBody> = None
+    private let activeEnumConstructorRegistrations: ArrayList<EnumDecl> = ArrayList<EnumDecl>()
 
     public init(ci: Option<CompilerInstance>) {
         this.ci = ci
@@ -648,25 +648,36 @@ public class TypeChecker {
     }
 
     private func IsRegisteringEnumConstructors(enumDecl: EnumDecl): Bool {
-        for (value in registeringEnumConstructors) {
-            if (SameDecl(value, enumDecl)) {
+        for (active in activeEnumConstructorRegistrations) {
+            if (SameDecl(active, enumDecl)) {
                 return true
             }
         }
         return false
     }
 
+    private func FinishRegisteringEnumConstructors(enumDecl: EnumDecl): Unit {
+        var idx: Int64 = activeEnumConstructorRegistrations.size - 1
+        while (idx >= 0) {
+            if (SameDecl(activeEnumConstructorRegistrations[idx], enumDecl)) {
+                activeEnumConstructorRegistrations.remove(at: idx)
+                return
+            }
+            idx--
+        }
+    }
+
     private func RegisterEnumConstructors(ctx: ASTContext, enumDecl: EnumDecl): Unit {
+        TypeCheckDeclInsertEnumConstructors(ctx, enumDecl)
         if (IsRegisteringEnumConstructors(enumDecl)) {
             return
         }
-        registeringEnumConstructors.add(enumDecl)
-        TypeCheckDeclInsertEnumConstructors(ctx, enumDecl)
+        activeEnumConstructorRegistrations.add(enumDecl)
         for (constructor in enumDecl.constructors) {
             let _ = PrepareEnumConstructorSignature(ctx, enumDecl, constructor)
             addImportedDeclAndDependencies(ctx, constructor)
         }
-        registeringEnumConstructors.remove(at: registeringEnumConstructors.size - 1)
+        FinishRegisteringEnumConstructors(enumDecl)
     }
 
     private func ConstructorReturnTy(fb: FuncBody): Option<Ty> {
