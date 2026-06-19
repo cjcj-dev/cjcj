@@ -3,7 +3,6 @@ package cangjie_compiler::codegen
 import std.collection.*
 import cangjie_compiler::chir.Attribute
 import cangjie_compiler::chir.BooleanType
-import cangjie_compiler::chir.Attribute
 import cangjie_compiler::chir.ClassType
 import cangjie_compiler::chir.CPointerType
 import cangjie_compiler::chir.CustomType
@@ -15,9 +14,11 @@ import cangjie_compiler::chir.Type
 import cangjie_compiler::chir.VArrayType
 
 private let UG_CLASS_KIND: UInt64 = 128u64
+private let UG_INTERFACE_KIND: UInt64 = 129u64
 private let UG_RAW_ARRAY_KIND: UInt64 = 130u64
 private let UG_STRUCT_KIND: UInt64 = 22u64
 private let UG_ENUM_KIND: UInt64 = 23u64
+private let TYPEINFO_MTABLE_FE_FLAG: UInt64 = 9223372036854775809u64
 
 public func GetOrInsertCodeGenGlobal(cgMod: CGModule, globalName: String, globalType: LLVMTypeRef): LLVMValueRef {
     if (let Some(moduleHandle) <- cgMod.GetLLVMModule()) {
@@ -65,6 +66,34 @@ public func DefineTypeInfoGlobalIfNeeded(cgMod: CGModule, chirTy: Type, typeInfo
     DefineConcreteTypeInfoIfNeeded(cgMod, chirTy, typeInfo, CGType.GetOrCreateTypeInfoType(cgMod.GetLLVMContext()))
 }
 
+public func RedefineTypeInfoGlobal(cgMod: CGModule, chirTy: Type): Unit {
+    if (!(chirTy.IsClass() || chirTy.IsStruct() || chirTy.IsEnum())) {
+        return
+    }
+    if (IsImportedCustomType(chirTy)) {
+        return
+    }
+    let typeInfoTy = CGType.GetOrCreateTypeInfoType(cgMod.GetLLVMContext())
+    let typeInfo = DeclareTypeInfoGlobal(cgMod, chirTy, CGType.GetCGGenericKind(chirTy))
+    if (typeInfo.isNull()) {
+        return
+    }
+    if (let Some(moduleHandle) <- cgMod.GetLLVMModule()) {
+        let initializer = BuildConcreteTypeInfoInitializer(cgMod, moduleHandle, chirTy, typeInfoTy)
+        unsafe {
+            LLVMSetInitializer(typeInfo, initializer)
+            if (chirTy.GetTypeArgs().isEmpty()) {
+                LLVMSetLinkage(typeInfo, LLVMLinkageValue(LLVMLinkage.Internal))
+                LLVMSetGlobalConstant(typeInfo, 0)
+            } else {
+                LLVMSetLinkage(typeInfo, LLVMLinkageValue(LLVMLinkage.LinkOnceODR))
+                LLVMSetGlobalConstant(typeInfo, 0)
+            }
+        }
+        LLVMSetGlobalStringMetadata(cgMod.GetLLVMContext(), typeInfo, GC_TYPE_META_NAME, GetLayoutMetadataName(chirTy))
+    }
+}
+
 private func DefineConcreteTypeInfoIfNeeded(cgMod: CGModule, chirTy: Type, typeInfo: LLVMValueRef,
     typeInfoTy: LLVMTypeRef): Unit {
     if (typeInfo.isNull() || unsafe { LLVMIsDeclaration(typeInfo) } == 0) {
@@ -101,7 +130,7 @@ private func DefineConcreteTypeInfoIfNeeded(cgMod: CGModule, chirTy: Type, typeI
             LLVMSetInitializer(typeInfo, initializer)
             if (chirTy.GetTypeArgs().isEmpty()) {
                 LLVMSetLinkage(typeInfo, LLVMLinkageValue(LLVMLinkage.Internal))
-                LLVMSetGlobalConstant(typeInfo, 1)
+                LLVMSetGlobalConstant(typeInfo, 0)
             } else {
                 LLVMSetLinkage(typeInfo, LLVMLinkageValue(LLVMLinkage.LinkOnceODR))
                 LLVMSetGlobalConstant(typeInfo, 0)
@@ -207,8 +236,8 @@ private func BuildConcreteTypeInfoInitializer(cgMod: CGModule, moduleHandle: LLV
     typeInfoValues.add(GenerateTypeArgsOfTypeInfo(cgMod, chirTy, typeInfoName, i8PtrType))
     typeInfoValues.add(GenerateFieldsOfTypeInfo(cgMod, chirTy, typeInfoName, i8PtrType))
     typeInfoValues.add(GenerateSuperOfTypeInfo(cgMod, chirTy, typeInfoPtrType))
-    typeInfoValues.add(unsafe { LLVMConstNull(extensionDefPtrPtrType) })
-    typeInfoValues.add(unsafe { LLVMConstNull(i8PtrType) })
+    typeInfoValues.add(GenerateExtensionDefPtrOfTypeInfo(cgMod, chirTy, extensionDefPtrPtrType))
+    typeInfoValues.add(GenerateMTableOfTypeInfo(cgMod, chirTy, i8PtrType))
     typeInfoValues.add(unsafe { LLVMConstNull(i8PtrType) })
     return TypeInfoConstStruct(typeInfoTy, typeInfoValues)
 }
@@ -434,7 +463,9 @@ private func ConstArray(elementType: LLVMTypeRef, values: ArrayList<LLVMValueRef
 }
 
 private func TypeInfoKind(chirTy: Type): UInt64 {
-    if (chirTy.IsClass()) { return UG_CLASS_KIND }
+    if (let Some(classTy) <- (chirTy as ClassType)) {
+        return if (classTy.GetClassDef().IsInterface()) { UG_INTERFACE_KIND } else { UG_CLASS_KIND }
+    }
     if (chirTy.IsStruct()) { return UG_STRUCT_KIND }
     if (chirTy.IsEnum()) { return UG_ENUM_KIND }
     return 0u64
@@ -442,11 +473,49 @@ private func TypeInfoKind(chirTy: Type): UInt64 {
 
 private func InheritedClassNumValue(chirTy: Type): UInt64 {
     if (let Some(classTy) <- (chirTy as ClassType)) {
-        if (classTy.GetClassDef().IsInterface()) {
-            return INHERITED_CLASS_NUM_FE_FLAG + 2u64
-        }
+        return INHERITED_CLASS_NUM_FE_FLAG + UInt64(ClassInheritanceDepth(classTy))
     }
     return INHERITED_CLASS_NUM_FE_FLAG
+}
+
+private func ClassInheritanceDepth(classTy: ClassType): Int64 {
+    if (classTy.GetClassDef().IsInterface()) {
+        return 0
+    }
+    var count: Int64 = if (IsCoreObjectClass(classTy)) { 1 } else { 2 }
+    var current = classTy.GetSuperClassTy()
+    while (let Some(superTy) <- current) {
+        if (!superTy.GetClassDef().IsInterface()) {
+            count++
+        }
+        current = superTy.GetSuperClassTy()
+    }
+    return count
+}
+
+private func GenerateExtensionDefPtrOfTypeInfo(cgMod: CGModule, chirTy: Type,
+    extensionDefPtrPtrType: LLVMTypeRef): LLVMValueRef {
+    if (let Some(startIdx) <- cgMod.GetExtensionDefStart(chirTy)) {
+        let defs = cgMod.GetNonExternalExtensionDefs()
+        if (!defs.isEmpty()) {
+            let extensionDefPtrType = CGType.GetOrCreateExtensionDefPtrType(cgMod.GetLLVMContext())
+            let arrayType = unsafe { LLVMArrayType(extensionDefPtrType, UInt32(defs.size + 1)) }
+            let table = GetOrInsertCodeGenGlobal(cgMod, "NonExternalExtensionDefs", arrayType)
+            let i32Type = unsafe { LLVMInt32TypeInContext(cgMod.GetLLVMContext().raw) }
+            let zero = unsafe { LLVMConstInt(i32Type, 0u64, 0) }
+            let index = unsafe { LLVMConstInt(i32Type, UInt64(startIdx), 0) }
+            return TypeInfoConstInBoundsGEP2(arrayType, table, zero, index)
+        }
+    }
+    return unsafe { LLVMConstNull(extensionDefPtrPtrType) }
+}
+
+private func GenerateMTableOfTypeInfo(cgMod: CGModule, chirTy: Type, i8PtrType: LLVMTypeRef): LLVMValueRef {
+    if (let Some(_) <- cgMod.GetExtensionDefStart(chirTy)) {
+        let i64Type = unsafe { LLVMInt64TypeInContext(cgMod.GetLLVMContext().raw) }
+        return unsafe { LLVMConstIntToPtr(LLVMConstInt(i64Type, TYPEINFO_MTABLE_FE_FLAG, 0), i8PtrType) }
+    }
+    return unsafe { LLVMConstNull(i8PtrType) }
 }
 
 private func GetLayoutMetadataName(chirTy: Type): String {
@@ -474,6 +543,9 @@ private func GetCoreObjectTypeInfo(cgMod: CGModule): LLVMValueRef {
 
 private func GenerateSuperOfTypeInfo(cgMod: CGModule, chirTy: Type, typeInfoPtrType: LLVMTypeRef): LLVMValueRef {
     if (let Some(classTy) <- (chirTy as ClassType)) {
+        if (classTy.GetClassDef().IsInterface()) {
+            return unsafe { LLVMConstNull(typeInfoPtrType) }
+        }
         if (let Some(superTy) <- classTy.GetSuperClassTy()) {
             return CGType.GetOrCreate(cgMod, superTy.StripAllRefs()).GetOrCreateTypeInfo()
         }

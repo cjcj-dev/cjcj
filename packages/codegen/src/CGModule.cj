@@ -63,6 +63,7 @@ public class CGModule {
     private let linkNameUsedInMeta: HashSet<String> = HashSet<String>()
     private let externalExtensionDefs: ArrayList<LLVMValueRef> = ArrayList<LLVMValueRef>()
     private let nonExternalExtensionDefs: ArrayList<LLVMValueRef> = ArrayList<LLVMValueRef>()
+    private let extensionDefStartIndices: HashMap<String, Int64> = HashMap<String, Int64>()
     private var diBuilder: Option<DIBuilder> = None
 
     public init(subCHIRPackage: SubCHIRPackage, cgPkgCtx: CGPkgContext) {
@@ -113,6 +114,7 @@ public class CGModule {
         linkNameUsedInMeta.clear()
         externalExtensionDefs.clear()
         nonExternalExtensionDefs.clear()
+        extensionDefStartIndices.clear()
         cgCtx.Clear()
         cgCtx.GetLLVMContext().close()
     }
@@ -543,6 +545,15 @@ public class CGModule {
     public func AddExternalExtensionDef(extensionDef: LLVMValueRef): Unit { externalExtensionDefs.add(extensionDef) }
     public func GetNonExternalExtensionDefs(): ArrayList<LLVMValueRef> { return nonExternalExtensionDefs }
     public func GetExternalExtensionDefs(): ArrayList<LLVMValueRef> { return externalExtensionDefs }
+    public func GetNonExternalExtensionDefsNum(): Int64 { return nonExternalExtensionDefs.size }
+
+    public func RegisterExtensionDefStart(chirTy: Type, startIdx: Int64): Unit {
+        extensionDefStartIndices[CGType.GetRuntimeTypeName(chirTy.StripAllRefs())] = startIdx
+    }
+
+    public func GetExtensionDefStart(chirTy: Type): Option<Int64> {
+        return extensionDefStartIndices.get(CGType.GetRuntimeTypeName(chirTy.StripAllRefs()))
+    }
 
     public static func GetDataLayoutString(target: TripleInfo): String {
         if (target.IsMacOS() && target.arch == ArchType.AARCH64) {
