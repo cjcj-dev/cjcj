@@ -395,7 +395,7 @@ public class TypeChecker {
                 SetOverflowStrategyForPkg(pkg)
                 let _ = CollectUnusedImports(pkg)
                 let _ = CheckConstEvaluation(pkg)
-                PerformDesugarAfterTypeCheck(impl.typeManager, pkg, options: GlobalOptions())
+                PerformDesugarAfterTypeCheck(impl.typeManager, pkg, context: Some(ctx), options: GlobalOptions())
             }
         }
     }

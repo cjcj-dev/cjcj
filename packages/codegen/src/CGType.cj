@@ -342,7 +342,7 @@ public open class CGType {
         body.add(i8Ty)
         body.add(i8Ty)
         body.add(i16Ty)
-        body.add(i8Ty)
+        body.add(i16Ty)
         body.add(i8PtrTy)
         body.add(i8PtrTy)
         body.add(i8PtrTy)

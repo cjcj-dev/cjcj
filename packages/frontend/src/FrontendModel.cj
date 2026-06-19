@@ -757,6 +757,9 @@ private class CjoSignatureMaterializer {
         varDecl.mangledName = mangle
         varDecl.outerDecl = Some(outer)
         MarkImportedDecl(varDecl)
+        if (IsStaticMemberVarMangle(mangle)) {
+            varDecl.EnableAttr(Attribute.STATIC)
+        }
         if (isEnumCtor) {
             varDecl.EnableAttr(Attribute.ENUM_CONSTRUCTOR)
             if (let Some(enumDecl) <- (outer as EnumDecl)) {
@@ -765,6 +768,10 @@ private class CjoSignatureMaterializer {
             return
         }
         AddMember(outer, varDecl, prepend: true)
+    }
+
+    private func IsStaticMemberVarMangle(mangle: String): Bool {
+        return !mangle.isEmpty() && !mangle.contains("K_")
     }
 
     private func IsEnumConstructor(outer: Decl, name: String): Bool {

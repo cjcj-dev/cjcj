@@ -3,6 +3,7 @@ package cangjie_compiler::codegen
 import std.collection.*
 import cangjie_compiler::chir.Attribute
 import cangjie_compiler::chir.BooleanType
+import cangjie_compiler::chir.Attribute
 import cangjie_compiler::chir.ClassType
 import cangjie_compiler::chir.CPointerType
 import cangjie_compiler::chir.CustomType
@@ -87,6 +88,12 @@ private func DefineConcreteTypeInfoIfNeeded(cgMod: CGModule, chirTy: Type, typeI
     }
     if (!(chirTy.IsClass() || chirTy.IsStruct() || chirTy.IsEnum())) {
         return
+    }
+    if (let Some(customTy) <- (chirTy as CustomType)) {
+        if (customTy.GetCustomTypeDef().TestAttr(Attribute.IMPORTED) &&
+            CGType.GetCGGenericKind(chirTy) == CGGenericKind.CONCRETE) {
+            return
+        }
     }
     if (let Some(moduleHandle) <- cgMod.GetLLVMModule()) {
         let initializer = BuildConcreteTypeInfoInitializer(cgMod, moduleHandle, chirTy, typeInfoTy)
