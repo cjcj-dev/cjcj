@@ -76,7 +76,8 @@ public func DefineConcreteTypeInfoIfNeeded(cgMod: CGModule, chirTy: Type, typeIn
         return
     }
     if (let Some(customTy) <- (chirTy as CustomType)) {
-        if (customTy.GetCustomTypeDef().TestAttr(Attribute.IMPORTED)) {
+        if (customTy.GetCustomTypeDef().TestAttr(Attribute.IMPORTED) &&
+            CGType.GetCGGenericKind(chirTy) == CGGenericKind.CONCRETE) {
             return
         }
     }
