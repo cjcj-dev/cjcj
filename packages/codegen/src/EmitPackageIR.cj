@@ -135,9 +135,33 @@ private func CreateCJEntryFunction(cgMod: CGModule, moduleHandle: LLVMModuleHand
             let cgMain = cgMod.GetOrInsertCGFunction(mainEntry)
             if (let Some(mainFnType) <- cgMain.GetCGFunctionType()) {
                 let llvmMainType = mainFnType.GetLLVMFunctionType()
-                let callResult = unsafe {
-                    LLVMBuildCall2(builder, llvmMainType, cgMain.GetRawFunction(), CPointer<LLVMValueRef>(),
-                        0u32, callName.value)
+                let callArgs = ArrayList<LLVMValueRef>()
+                if (cgMain.IsSRet()) {
+                    if (let Some(retTy) <- mainEntry.GetReturnType()) {
+                        let retCGType = CGType.GetOrCreate(cgMod, retTy)
+                        try (sretName = unsafe { LibC.mallocCString("main.sret") }.asResource()) {
+                            callArgs.add(unsafe { LLVMBuildAlloca(builder, retCGType.GetLLVMType(), sretName.value) })
+                        }
+                    }
+                }
+                var callResult = LLVMNullValue()
+                if (callArgs.isEmpty()) {
+                    callResult = unsafe {
+                        LLVMBuildCall2(builder, llvmMainType, cgMain.GetRawFunction(), CPointer<LLVMValueRef>(),
+                            0u32, callName.value)
+                    }
+                } else {
+                    try (argPtr = LibC.malloc<LLVMValueRef>(count: callArgs.size).asResource()) {
+                        var idx: Int64 = 0
+                        while (idx < callArgs.size) {
+                            unsafe { (argPtr.value + idx).write(callArgs[idx]) }
+                            idx++
+                        }
+                        callResult = unsafe {
+                            LLVMBuildCall2(builder, llvmMainType, cgMain.GetRawFunction(), argPtr.value,
+                                UInt32(callArgs.size), callName.value)
+                        }
+                    }
                 }
                 let mainRetType = unsafe { LLVMGetReturnType(llvmMainType) }
                 // LLVMIntegerTypeKind == 8: an integer-returning main (e.g. `main(): Int64`)

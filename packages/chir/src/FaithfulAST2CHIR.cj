@@ -845,7 +845,7 @@ public class FaithfulAST2CHIR {
 
     private func EnsureReturnSlot(fn: Function, entry: Block): Unit {
         if (let Some(returnTy) <- fn.GetReturnType()) {
-            if (returnTy.IsVoid() || returnTy.IsUnit() || returnTy.IsNothing()) {
+            if (returnTy.IsVoid()) {
                 return
             }
             if (let Some(retValue) <- builder.CreateAllocate(builder.context.GetRefTy(returnTy), returnTy,
