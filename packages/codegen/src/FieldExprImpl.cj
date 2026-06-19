@@ -10,7 +10,8 @@ import cangjie_compiler::chir.Value
 
 public func GenerateFieldExpression(irBuilder: IRBuilder2, chirExpr: Expression): LLVMValueRef {
     if (let Some(fieldExpr) <- (chirExpr as Field)) {
-        return GenerateFieldByPath(irBuilder, fieldExpr.GetBase(), fieldExpr.GetPath(), "field")
+        return GenerateFieldByPath(irBuilder, fieldExpr.GetBase(), fieldExpr.GetPath(), "field",
+            chirExpr.GetResultType())
     }
     if (let Some(fieldByNameExpr) <- (chirExpr as FieldByName)) {
         return GenerateFieldByName(irBuilder, fieldByNameExpr)
@@ -22,14 +23,14 @@ private func GenerateFieldByName(irBuilder: IRBuilder2, fieldExpr: FieldByName):
     let base = fieldExpr.GetBase()
     if (let Some(baseTy) <- base.GetType()) {
         if (let Some(path) <- BuildFieldPathByNames(baseTy, fieldExpr.GetNames())) {
-            return GenerateFieldByPath(irBuilder, base, path, "field")
+            return GenerateFieldByPath(irBuilder, base, path, "field", fieldExpr.GetResultType())
         }
     }
     return LLVMNullValue()
 }
 
 private func GenerateFieldByPath(irBuilder: IRBuilder2, base: Value,
-    path: ArrayList<UInt64>, name: String): LLVMValueRef {
+    path: ArrayList<UInt64>, name: String, expectedTy: Option<Type>): LLVMValueRef {
     let baseValue = irBuilder.GetCGModule().MaterializeValue(irBuilder, base)
     if (let Some(baseCGType) <- baseValue.GetCGType()) {
         if (baseCGType.IsPointerType()) {
@@ -42,7 +43,8 @@ private func GenerateFieldByPath(irBuilder: IRBuilder2, base: Value,
                 let fieldAddr = irBuilder.CreateGEP(elementType.GetLLVMType(), baseValue.GetRawValue(), indices,
                     name: name + ".addr")
                 if (let Some(fieldType) <- GetFieldCGTypeAtPath(elementType, path)) {
-                    return irBuilder.CreateLoad(fieldType.GetLLVMType(), fieldAddr, name: name)
+                    let loaded = irBuilder.CreateLoad(fieldType.GetLLVMType(), fieldAddr, name: name)
+                    return CastExtractedFieldIfNeeded(irBuilder, loaded, fieldType.GetOriginal(), expectedTy)
                 }
                 return fieldAddr
             }
@@ -52,10 +54,24 @@ private func GenerateFieldByPath(irBuilder: IRBuilder2, base: Value,
             for (item in path) {
                 extracted = irBuilder.CreateExtractValue(extracted, UInt32(item), name: name)
             }
+            if (let Some(fieldType) <- GetFieldCGTypeAtPath(baseCGType, path)) {
+                return CastExtractedFieldIfNeeded(irBuilder, extracted, fieldType.GetOriginal(), expectedTy)
+            }
             return extracted
         }
     }
     return LLVMNullValue()
+}
+
+private func CastExtractedFieldIfNeeded(irBuilder: IRBuilder2, rawValue: LLVMValueRef, sourceTy: Type,
+    expectedTy: Option<Type>): LLVMValueRef {
+    if (let Some(targetTy) <- expectedTy) {
+        if (!sourceTy.IsEqual(targetTy)) {
+            let targetLLVMType = CGType.GetOrCreate(irBuilder.GetCGModule(), targetTy).GetLLVMType()
+            return CastValueToType(irBuilder, rawValue, sourceTy, targetTy, targetLLVMType)
+        }
+    }
+    return rawValue
 }
 
 private func BuildFieldPathByNames(baseTy: Type, names: ArrayList<String>): Option<ArrayList<UInt64>> {

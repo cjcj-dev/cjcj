@@ -1,5 +1,7 @@
 package cangjie_compiler::codegen
 
+import std.collection.*
+import cangjie_compiler::chir.EnumType
 import cangjie_compiler::chir.Type
 
 public enum CGEnumTypeKind {
@@ -61,11 +63,94 @@ public class CGEnumType <: CGCustomType {
     public func GetCGEnumTypeKind(): CGEnumTypeKind { return cgEnumTypeKind }
 
     protected override func GenLLVMType(): LLVMTypeRef {
-        cgEnumTypeKind = if (chirType.GetTypeArgs().isEmpty()) {
-            CGEnumTypeKind.EXHAUSTIVE_UNASSOCIATED
-        } else {
-            CGEnumTypeKind.EXHAUSTIVE_OTHER
+        cgEnumTypeKind = ClassifyEnumType()
+        let layoutName = STRUCT_TYPE_PREFIX + chirType.ToString()
+        let enumLayout = GetOrCreateNamedStructType(cgCtx.GetLLVMContext(), layoutName)
+        layoutType = enumLayout
+        llvmType = enumLayout
+        if (!cgCtx.IsGeneratedStructType(layoutName)) {
+            cgCtx.AddGeneratedStructType(layoutName)
+            SetStructTypeBody(enumLayout, BuildEnumFieldTypes())
         }
-        return super.GenLLVMType()
+        return enumLayout
+    }
+
+    protected override func GenContainedCGTypes(): Unit {
+        containedCGTypes.add(CGType.GetOrCreate(cgMod, cgCtx.GetCHIRBuilder().context.GetUInt32Ty()))
+        for (fieldTy in BuildEnumPayloadFieldTypes()) {
+            containedCGTypes.add(CGType.GetOrCreate(cgMod, fieldTy))
+        }
+    }
+
+    protected override func CalculateSizeAndAlign(): Unit {
+        var total: Int64 = 0
+        var maxAlign: Int64 = 1
+        for (fieldCGType in GetContainedTypes()) {
+            let fieldAlign = if (let Some(value) <- fieldCGType.GetAlign()) { value } else { 1 }
+            let fieldSize = if (let Some(value) <- fieldCGType.GetSize()) { value } else { 0 }
+            if (total % fieldAlign != 0) {
+                total += fieldAlign - (total % fieldAlign)
+            }
+            total += fieldSize
+            if (fieldAlign > maxAlign) { maxAlign = fieldAlign }
+        }
+        if (total % maxAlign != 0) {
+            total += maxAlign - (total % maxAlign)
+        }
+        size = total
+        align = maxAlign
+    }
+
+    private func ClassifyEnumType(): CGEnumTypeKind {
+        if (let Some(enumTy) <- (chirType as EnumType)) {
+            for (ctor in enumTy.GetEnumDef().GetCtors()) {
+                if (!ctor.payloadTypes.isEmpty()) {
+                    return CGEnumTypeKind.EXHAUSTIVE_OTHER
+                }
+            }
+        }
+        return CGEnumTypeKind.EXHAUSTIVE_UNASSOCIATED
+    }
+
+    private func BuildEnumFieldTypes(): ArrayList<LLVMTypeRef> {
+        let out = ArrayList<LLVMTypeRef>()
+        out.add(CGType.GetOrCreate(cgMod, cgCtx.GetCHIRBuilder().context.GetUInt32Ty()).GetLLVMType())
+        for (fieldTy in BuildEnumPayloadFieldTypes()) {
+            out.add(CGType.GetOrCreate(cgMod, fieldTy).GetLLVMType())
+        }
+        return out
+    }
+
+    private func BuildEnumPayloadFieldTypes(): ArrayList<Type> {
+        let out = ArrayList<Type>()
+        if (let Some(enumTy) <- (chirType as EnumType)) {
+            for (ctor in enumTy.GetEnumDef().GetCtors()) {
+                var idx: Int64 = 0
+                for (payloadTy in ctor.payloadTypes) {
+                    if (idx >= out.size) {
+                        out.add(payloadTy)
+                    } else if (!out[idx].IsEqual(payloadTy)) {
+                        out[idx] = PickEnumPayloadStorageType(out[idx], payloadTy)
+                    }
+                    idx++
+                }
+            }
+        }
+        return out
+    }
+
+    private func PickEnumPayloadStorageType(left: Type, right: Type): Type {
+        if (left.IsEqual(right)) {
+            return left
+        }
+        if (left.IsRef() && right.IsRef()) {
+            return left
+        }
+        if (left.IsRef() || right.IsRef()) {
+            return cgCtx.GetCHIRBuilder().context.GetUInt64Ty()
+        }
+        let leftSize = CGType.GetOrCreate(cgMod, left).GetSize() ?? 0
+        let rightSize = CGType.GetOrCreate(cgMod, right).GetSize() ?? 0
+        return if (leftSize >= rightSize) { left } else { right }
     }
 }
