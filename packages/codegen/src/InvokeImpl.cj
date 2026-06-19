@@ -13,9 +13,13 @@ import cangjie_compiler::chir.InvokeWithException
 import cangjie_compiler::chir.Type
 import cangjie_compiler::chir.Value
 
+private let GET_VTABLE_FUNC_INTRINSIC_NAME: String = "llvm.cj.get.vtable.func"
+private let GET_METHOD_OUTERTYPE_INTRINSIC_NAME: String = "llvm.cj.get.method.outertype"
+
 public func GenerateInvokeExpression(irBuilder: IRBuilder2, chirExpr: Expression): LLVMValueRef {
     if (let Some(invokeExpr) <- (chirExpr as Invoke)) {
-        return GenerateResolvedInvoke(irBuilder, invokeExpr.GetObject(), invokeExpr.GetMethodName(), invokeExpr.GetArgs())
+        return GenerateResolvedInvoke(irBuilder, invokeExpr.GetObject(), invokeExpr.GetMethodName(),
+            invokeExpr.GetArgs())
     }
     if (let Some(invokeWithExceptionExpr) <- (chirExpr as InvokeWithException)) {
         return GenerateResolvedInvoke(irBuilder, invokeWithExceptionExpr.GetObject(),
@@ -35,17 +39,63 @@ private func GenerateResolvedInvoke(irBuilder: IRBuilder2, objectValue: Value, m
     args: ArrayList<Value>): LLVMValueRef {
     if (let Some(objectTy) <- objectValue.GetType()) {
         if (let Some(callee) <- FindMethodByName(objectTy, methodName)) {
-            return GenerateApply(irBuilder, callee, args)
+            return GenerateVirtualApply(irBuilder, objectTy, methodName, callee, args)
         }
     }
     return LLVMNullValue()
+}
+
+private func GenerateVirtualApply(irBuilder: IRBuilder2, ownerTy: Type, methodName: String, callee: Function,
+    args: ArrayList<Value>): LLVMValueRef {
+    let cgFunc = irBuilder.GetCGModule().GetOrInsertCGFunction(callee)
+    let cgFuncType = cgFunc.GetCGFunctionType() ?? return LLVMNullValue()
+    if (args.isEmpty()) {
+        return LLVMNullValue()
+    }
+    let argValues = ArrayList<CGValue>()
+    for (arg in args) {
+        argValues.add(irBuilder.GetCGModule().MaterializeValue(irBuilder, arg))
+    }
+    let methodIndex = FindMethodIndex(ownerTy, methodName)
+    let (calleePtr, methodTypeInfoArg) = BuildVirtualCallee(irBuilder, argValues[0], ownerTy, methodIndex, cgFuncType)
+    return irBuilder.CreateCallOrInvokeWithMethodTypeInfo(cgFuncType, calleePtr, argValues,
+        Some(methodTypeInfoArg), name: "call")
+}
+
+private func BuildVirtualCallee(irBuilder: IRBuilder2, objectValue: CGValue, ownerTy: Type, methodIndex: Int64,
+    cgFuncType: CGFunctionType): (LLVMValueRef, LLVMValueRef) {
+    let llvmContext = irBuilder.GetLLVMContext().raw
+    let i8PtrType = unsafe { LLVMPointerType(LLVMInt8TypeInContext(llvmContext), 0u32) }
+    let typeInfoPtrType = CGType.GetOrCreateTypeInfoPtrType(irBuilder.GetLLVMContext())
+    let typeInfoSlotType = unsafe { LLVMPointerType(typeInfoPtrType, 1u32) }
+    let objectTypeInfoSlot = irBuilder.CreateBitCast(objectValue.GetRawValue(), typeInfoSlotType, name: "invoke.ti.slot")
+    let objectTypeInfo = irBuilder.CreateLoad(typeInfoPtrType, objectTypeInfoSlot, name: "invoke.ti")
+    let objectTypeInfoRaw = irBuilder.CreateBitCast(objectTypeInfo, i8PtrType, name: "invoke.ti.raw")
+    let ownerTypeInfo = CGType.GetOrCreate(irBuilder.GetCGModule(), ownerTy.StripAllRefs()).GetOrCreateTypeInfo()
+    let ownerTypeInfoRaw = irBuilder.CreateBitCast(ownerTypeInfo, i8PtrType, name: "invoke.owner.ti")
+    let intrinsicArgs = ArrayList<LLVMValueRef>()
+    intrinsicArgs.add(objectTypeInfoRaw)
+    intrinsicArgs.add(irBuilder.GetInt64(1))
+    intrinsicArgs.add(irBuilder.GetInt64(methodIndex))
+    intrinsicArgs.add(ownerTypeInfoRaw)
+    let rawCallee = irBuilder.CreateIntrinsicCall(GET_VTABLE_FUNC_INTRINSIC_NAME, ArrayList<LLVMTypeRef>(),
+        intrinsicArgs, name: "invoke.fn")
+    let outerTypeInfoArgs = ArrayList<LLVMValueRef>()
+    outerTypeInfoArgs.add(objectTypeInfoRaw)
+    outerTypeInfoArgs.add(ownerTypeInfoRaw)
+    outerTypeInfoArgs.add(irBuilder.GetInt64(methodIndex))
+    let rawOuterTypeInfo = irBuilder.CreateIntrinsicCall(GET_METHOD_OUTERTYPE_INTRINSIC_NAME,
+        ArrayList<LLVMTypeRef>(), outerTypeInfoArgs, name: "invoke.outer.ti.raw")
+    let outerTypeInfo = irBuilder.CreateBitCast(rawOuterTypeInfo, typeInfoPtrType, name: "invoke.outer.ti")
+    return (irBuilder.CreateBitCast(rawCallee, cgFuncType.GetLLVMType(), name: "invoke.fn.cast"), outerTypeInfo)
 }
 
 private func GenerateResolvedStaticInvoke(irBuilder: IRBuilder2, dispatch: DynamicDispatch,
     args: ArrayList<Value>): LLVMValueRef {
     if (let Some(thisTy) <- dispatch.GetThisType()) {
         if (let Some(callee) <- FindMethodByName(thisTy, dispatch.GetMethodName())) {
-            return GenerateApply(irBuilder, callee, args)
+            return GenerateApply(irBuilder, callee, args, callType: Some(dispatch.GetMethodType()),
+                isMethodType: false, isStaticMethodType: true)
         }
     }
     return LLVMNullValue()
@@ -55,7 +105,8 @@ private func GenerateResolvedStaticInvoke(irBuilder: IRBuilder2, dispatch: Dynam
     args: ArrayList<Value>): LLVMValueRef {
     if (let Some(thisTy) <- dispatch.GetThisType()) {
         if (let Some(callee) <- FindMethodByName(thisTy, dispatch.GetMethodName())) {
-            return GenerateApply(irBuilder, callee, args)
+            return GenerateApply(irBuilder, callee, args, callType: Some(dispatch.GetMethodType()),
+                isMethodType: false, isStaticMethodType: true)
         }
     }
     return LLVMNullValue()
@@ -70,6 +121,19 @@ private func FindMethodByName(ownerTy: Type, methodName: String): Option<Functio
         }
     }
     return None
+}
+
+private func FindMethodIndex(ownerTy: Type, methodName: String): Int64 {
+    if (let Some(customTy) <- (ownerTy.StripAllRefs() as CustomType)) {
+        var idx: Int64 = 0
+        for (method in customTy.GetCustomTypeDef().GetMethods()) {
+            if (MethodNameMatches(method, methodName)) {
+                return idx
+            }
+            idx++
+        }
+    }
+    return 0
 }
 
 private func MethodNameMatches(method: Function, methodName: String): Bool {

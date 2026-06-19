@@ -48,11 +48,14 @@ public func GenerateRawArrayLiteralInit(irBuilder: IRBuilder2, chirExpr: Express
         return LLVMNullValue()
     }
     let rawArrayValue = irBuilder.GetCGModule().MaterializeValue(irBuilder, chirExpr.GetOperand(0))
-    if (let Some(elementCGType) <- GetRawArrayElementCGType(rawArrayValue)) {
+    if (let Some(rawArrayTy) <- GetRawArrayType(rawArrayValue)) {
         var elementIdx: Int64 = 1
         while (elementIdx < chirExpr.GetNumOfOperands()) {
             let elementValue = irBuilder.GetCGModule().MaterializeValue(irBuilder, chirExpr.GetOperand(elementIdx))
-            let elementPtr = CreateRawArrayElementPointer(irBuilder, rawArrayValue, elementCGType, elementIdx - 1)
+            let indexValue = unsafe {
+                LLVMConstInt(LLVMInt64TypeInContext(irBuilder.GetLLVMContext().raw), UInt64(elementIdx - 1), 0)
+            }
+            let elementPtr = CreateRawArrayElementPointer(irBuilder, rawArrayValue, rawArrayTy, indexValue)
             irBuilder.CreateStore(elementValue.GetRawValue(), elementPtr)
             elementIdx++
         }
@@ -66,10 +69,10 @@ public func GenerateRawArrayInitByValue(irBuilder: IRBuilder2, chirExpr: Express
         return LLVMNullValue()
     }
     let rawArrayValue = irBuilder.GetCGModule().MaterializeValue(irBuilder, chirExpr.GetOperand(0))
-    if (let Some(elementCGType) <- GetRawArrayElementCGType(rawArrayValue)) {
+    if (let Some(rawArrayTy) <- GetRawArrayType(rawArrayValue)) {
         let sizeValue = irBuilder.GetCGModule().MaterializeValue(irBuilder, chirExpr.GetOperand(1)).GetRawValue()
         let initValue = irBuilder.GetCGModule().MaterializeValue(irBuilder, chirExpr.GetOperand(2)).GetRawValue()
-        GenerateRawArrayFillLoop(irBuilder, rawArrayValue, elementCGType, sizeValue, initValue)
+        GenerateRawArrayFillLoop(irBuilder, rawArrayValue, rawArrayTy, sizeValue, initValue)
         return rawArrayValue.GetRawValue()
     }
     return LLVMNullValue()
@@ -112,21 +115,27 @@ private func FindRawArrayType(ty: Type): Option<RawArrayType> {
     return None
 }
 
-private func GetRawArrayElementCGType(rawArrayValue: CGValue): Option<CGType> {
+private func GetRawArrayType(rawArrayValue: CGValue): Option<RawArrayType> {
     if (let Some(rawArrayCGType) <- rawArrayValue.GetCGType()) {
-        return rawArrayCGType.GetPointerElementType()
+        return FindRawArrayType(rawArrayCGType.GetOriginal())
     }
     return None
 }
 
 private func CreateRawArrayElementPointer(irBuilder: IRBuilder2, rawArrayValue: CGValue,
-    elementCGType: CGType, elementIdx: Int64): LLVMValueRef {
+    rawArrayTy: RawArrayType, elementIdx: LLVMValueRef): LLVMValueRef {
+    let arrayLayoutType = CGArrayType.GenerateArrayLayoutType(irBuilder.GetCGModule(), rawArrayTy)
+    let payload = irBuilder.GetPayloadFromObject(rawArrayValue.GetRawValue())
+    let typedPayload = irBuilder.CreateBitCast(payload,
+        unsafe { LLVMPointerType(arrayLayoutType, 1u32) }, name: "rawarray.payload")
     let indices = ArrayList<LLVMValueRef>()
-    indices.add(unsafe { LLVMConstInt(LLVMInt64TypeInContext(irBuilder.GetLLVMContext().raw), UInt64(elementIdx), 0) })
-    return irBuilder.CreateGEP(elementCGType.GetLLVMType(), rawArrayValue.GetRawValue(), indices, name: "rawarray.elem")
+    indices.add(LLVMConstI32(irBuilder, 0u64))
+    indices.add(LLVMConstI32(irBuilder, 1u64))
+    indices.add(elementIdx)
+    return irBuilder.CreateGEP(arrayLayoutType, typedPayload, indices, name: "rawarray.elem")
 }
 
-private func GenerateRawArrayFillLoop(irBuilder: IRBuilder2, rawArrayValue: CGValue, elementCGType: CGType,
+private func GenerateRawArrayFillLoop(irBuilder: IRBuilder2, rawArrayValue: CGValue, rawArrayTy: RawArrayType,
     sizeValue: LLVMValueRef, initValue: LLVMValueRef): Unit {
     let currentBlock = irBuilder.GetInsertBlock()
     if (currentBlock.isNull()) {
@@ -155,10 +164,7 @@ private func GenerateRawArrayFillLoop(irBuilder: IRBuilder2, rawArrayValue: CGVa
     irBuilder.CreateCondBr(hasElement, loopBodyBlock, loopEndBlock)
 
     irBuilder.SetInsertPoint(loopBodyBlock)
-    let elementIndices = ArrayList<LLVMValueRef>()
-    elementIndices.add(currentIndex)
-    let elementPtr = irBuilder.CreateGEP(elementCGType.GetLLVMType(), rawArrayValue.GetRawValue(), elementIndices,
-        name: "rawarray.elem")
+    let elementPtr = CreateRawArrayElementPointer(irBuilder, rawArrayValue, rawArrayTy, currentIndex)
     irBuilder.CreateStore(initValue, elementPtr)
     let nextIndex = irBuilder.CreateBinary(ExprKind.ADD, currentIndex, oneValue, name: "iterator.next")
     irBuilder.CreateStore(nextIndex, indexSlot)

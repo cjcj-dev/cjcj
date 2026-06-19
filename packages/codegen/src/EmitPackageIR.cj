@@ -25,6 +25,8 @@ public func GenPackageModules(chirData: CHIRData, options: GlobalOptions, enable
             EmitMainFunctionIR(cgMod)
         }
         InitializeCjStringLiteral(cgMod)
+        let keepTypesFunc = KeepSomeTypesManually(cgMod)
+        EmitStaticGenericTIsAndLLVMUsed(cgMod, keepTypesFunc)
         cgMod.EraseUselessInstsAndDeclarations()
         cgMod.Opt()
     }
@@ -242,6 +244,125 @@ private func BuildVoidCall(builder: LLVMBuilderRef, functionType: LLVMTypeRef, c
                 callName.value) }
         }
     }
+}
+
+private func KeepSomeTypesManually(cgMod: CGModule): LLVMValueRef {
+    if (let Some(moduleHandle) <- cgMod.GetLLVMModule()) {
+        let llvmContext = cgMod.GetLLVMContext().raw
+        let functionType = unsafe {
+            LLVMFunctionType(LLVMVoidTypeInContext(llvmContext), CPointer<LLVMTypeRef>(), 0u32, 0)
+        }
+        let functionValue = GetOrInsertLLVMFunction(moduleHandle, FOR_KEEPING_SOME_TYPES_FUNC_NAME, functionType)
+        AddFnAttr(functionValue, "noinline")
+        AddFnAttr(functionValue, "optnone")
+        AddLinkageTypeMetadata(functionValue, LLVMLinkage.Private, false)
+        try (blockName = unsafe { LibC.mallocCString("entry.unreachable") }.asResource(),
+            allocaName = unsafe { LibC.mallocCString("") }.asResource()) {
+            let builder = unsafe { LLVMCreateBuilderInContext(llvmContext) }
+            let entryBlock = unsafe { LLVMAppendBasicBlockInContext(llvmContext, functionValue, blockName.value) }
+            unsafe { LLVMPositionBuilderAtEnd(builder, entryBlock) }
+            for (structTypeName in cgMod.GetCGContext().GetGeneratedStructType()) {
+                try (typeName = unsafe { LibC.mallocCString(structTypeName) }.asResource()) {
+                    let structType = unsafe { LLVMGetTypeByName2(llvmContext, typeName.value) }
+                    if (!structType.isNull()) {
+                        let _ = unsafe { LLVMBuildAlloca(builder, structType, allocaName.value) }
+                    }
+                }
+            }
+            unsafe {
+                LLVMBuildRetVoid(builder)
+                LLVMDisposeBuilder(builder)
+            }
+        }
+        return functionValue
+    }
+    return LLVMNullValue()
+}
+
+private func EmitStaticGenericTIsAndLLVMUsed(cgMod: CGModule, keepTypesFunc: LLVMValueRef): Unit {
+    if (let Some(moduleHandle) <- cgMod.GetLLVMModule()) {
+        let usedValues = ArrayList<LLVMValueRef>()
+        if (!keepTypesFunc.isNull()) {
+            usedValues.add(keepTypesFunc)
+        }
+        let staticGITable = EmitStaticGenericTITable(cgMod)
+        if (!staticGITable.isNull()) {
+            usedValues.add(staticGITable)
+        }
+        let llvmContext = cgMod.GetLLVMContext().raw
+        for (usedName in cgMod.GetCGContext().GetLLVMUsedVars()) {
+            var usedValue = LLVMNullValue()
+            try (nameCString = unsafe { LibC.mallocCString(usedName) }.asResource()) {
+                usedValue = unsafe { LLVMGetNamedGlobal(moduleHandle.raw, nameCString.value) }
+                if (usedValue.isNull()) {
+                    usedValue = unsafe { LLVMGetNamedFunction(moduleHandle.raw, nameCString.value) }
+                }
+            }
+            if (!usedValue.isNull()) {
+                usedValues.add(usedValue)
+            }
+        }
+        if (usedValues.isEmpty()) {
+            return
+        }
+        let i8PtrType = unsafe { LLVMPointerType(LLVMInt8TypeInContext(llvmContext), 0u32) }
+        let usedArrayType = unsafe { LLVMArrayType(i8PtrType, UInt32(usedValues.size)) }
+        var llvmUsed = LLVMNullValue()
+        try (nameCString = unsafe { LibC.mallocCString("llvm.used") }.asResource()) {
+            llvmUsed = unsafe { LLVMGetNamedGlobal(moduleHandle.raw, nameCString.value) }
+            if (llvmUsed.isNull()) {
+                llvmUsed = unsafe { LLVMAddGlobal(moduleHandle.raw, usedArrayType, nameCString.value) }
+            }
+        }
+        let initializerValues = ArrayList<LLVMValueRef>()
+        for (value in usedValues) {
+            initializerValues.add(unsafe { LLVMConstBitCast(value, i8PtrType) })
+        }
+        unsafe {
+            LLVMSetInitializer(llvmUsed, ConstLLVMArray(i8PtrType, initializerValues))
+            LLVMSetLinkage(llvmUsed, LLVMLinkageValue(LLVMLinkage.Appending))
+        }
+        try (sectionName = unsafe { LibC.mallocCString("llvm.metadata") }.asResource()) {
+            unsafe { LLVMSetSection(llvmUsed, sectionName.value) }
+        }
+    }
+}
+
+private func EmitStaticGenericTITable(cgMod: CGModule): LLVMValueRef {
+    let staticGINames = cgMod.GetCGContext().GetStaticGINames()
+    if (staticGINames.isEmpty()) {
+        return LLVMNullValue()
+    }
+    let typeInfoType = CGType.GetOrCreateTypeInfoType(cgMod.GetLLVMContext())
+    let typeInfoPtrType = CGType.GetOrCreateTypeInfoPtrType(cgMod.GetLLVMContext())
+    let values = ArrayList<LLVMValueRef>()
+    for (typeInfoName in staticGINames) {
+        values.add(GetOrInsertCodeGenGlobal(cgMod, typeInfoName, typeInfoType))
+    }
+    let arrayType = unsafe { LLVMArrayType(typeInfoPtrType, UInt32(values.size)) }
+    let table = GetOrInsertCodeGenGlobal(cgMod, "StaticGenericTIs", arrayType)
+    unsafe {
+        LLVMSetInitializer(table, ConstLLVMArray(typeInfoPtrType, values))
+        LLVMSetLinkage(table, LLVMLinkageValue(LLVMLinkage.Private))
+        LLVMSetGlobalConstant(table, 0)
+    }
+    return table
+}
+
+private func ConstLLVMArray(elementType: LLVMTypeRef, values: ArrayList<LLVMValueRef>): LLVMValueRef {
+    if (values.isEmpty()) {
+        return unsafe { LLVMConstArray(elementType, CPointer<LLVMValueRef>(), 0u32) }
+    }
+    var result = LLVMNullValue()
+    try (valuePtr = LibC.malloc<LLVMValueRef>(count: values.size).asResource()) {
+        var idx: Int64 = 0
+        while (idx < values.size) {
+            unsafe { (valuePtr.value + idx).write(values[idx]) }
+            idx++
+        }
+        result = unsafe { LLVMConstArray(elementType, valuePtr.value, UInt32(values.size)) }
+    }
+    return result
 }
 
 public func SavePackageModule(module: LLVMModuleHandle, bcFilePath: String): Bool {

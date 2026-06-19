@@ -12,16 +12,19 @@ import cangjie_compiler::ast.CallExpr as AstCallExpr
 import cangjie_compiler::ast.ClassLikeDecl as AstClassLikeDecl
 import cangjie_compiler::ast.Decl as AstDecl
 import cangjie_compiler::ast.EnumDecl as AstEnumDecl
+import cangjie_compiler::ast.ExtendDecl as AstExtendDecl
 import cangjie_compiler::ast.Expr as AstExpr
 import cangjie_compiler::ast.File as AstFile
 import cangjie_compiler::ast.FuncBody as AstFuncBody
 import cangjie_compiler::ast.FuncDecl as AstFuncDecl
+import cangjie_compiler::ast.GenericsTy as AstGenericsTy
 import cangjie_compiler::ast.LitConstExpr as AstLitConstExpr
 import cangjie_compiler::ast.LitConstKind as AstLitConstKind
 import cangjie_compiler::ast.MainDecl as AstMainDecl
 import cangjie_compiler::ast.MemberAccess as AstMemberAccess
 import cangjie_compiler::ast.Node as AstNode
 import cangjie_compiler::ast.Package as AstPackage
+import cangjie_compiler::ast.PropDecl as AstPropDecl
 import cangjie_compiler::ast.RefExpr as AstRefExpr
 import cangjie_compiler::ast.StructDecl as AstStructDecl
 import cangjie_compiler::ast.Ty as AstTy
@@ -172,20 +175,80 @@ public class FaithfulAST2CHIR {
         if (decl.TestAttr(AstAttribute.INTRINSIC)) {
             return
         }
+        if (decl.TestAttr(AstAttribute.IMPORTED) && !decl.isUsedImports) {
+            return
+        }
+        if (decl.TestAttr(AstAttribute.GENERIC) ||
+            (decl.outerDecl.isSome() && decl.outerDecl.getOrThrow().TestAttr(AstAttribute.GENERIC))) {
+            CollectImportedGenericDecl(decl)
+            return
+        }
         if (decl.IsNominalDecl()) {
             CollectDeclToList(decl, importedNominalDecls)
+            for (member in decl.GetMemberDecls()) {
+                CollectImportedDeclUsedInCurPkg(member)
+            }
             return
         }
         if (let Some(funcDecl) <- (decl as AstFuncDecl)) {
-            CollectDeclToList(funcDecl, importedGlobalAndMemberFuncs)
-            CollectDesugaredDefaultParams(funcDecl, importedGlobalAndMemberFuncs)
+            CollectImportedFuncDeclAndDesugarParams(funcDecl)
+            return
+        }
+        if (let Some(propDecl) <- (decl as AstPropDecl)) {
+            CollectImportedPropDecl(propDecl)
             return
         }
         if (let Some(varDecl) <- (decl as AstVarDecl)) {
             if (varDecl.TestAnyAttr(AstAttribute.GLOBAL, AstAttribute.STATIC)) {
-                CollectDeclToList(varDecl, importedGlobalAndStaticVars)
+                CollectImportedGlobalOrStaticVarDecl(varDecl)
             }
         }
+    }
+
+    private func CollectImportedGenericDecl(decl: AstDecl): Unit {
+        if (let Some(funcDecl) <- (decl as AstFuncDecl)) {
+            CollectImportedFuncDeclAndDesugarParams(funcDecl)
+            return
+        }
+        if (decl.IsNominalDecl()) {
+            CollectDeclToList(decl, importedNominalDecls)
+            for (member in decl.GetMemberDecls()) {
+                CollectImportedGenericDecl(member)
+            }
+            return
+        }
+        if (let Some(propDecl) <- (decl as AstPropDecl)) {
+            CollectImportedPropDecl(propDecl)
+            return
+        }
+        if (let Some(varDecl) <- (decl as AstVarDecl)) {
+            if (varDecl.TestAttr(AstAttribute.STATIC)) {
+                CollectImportedGlobalOrStaticVarDecl(varDecl)
+            }
+        }
+    }
+
+    private func CollectImportedFuncDeclAndDesugarParams(funcDecl: AstFuncDecl): Unit {
+        if (let Some(outer) <- funcDecl.outerDecl) {
+            if (outer.IsNominalDecl()) {
+                CollectDeclToList(outer, importedNominalDecls)
+            }
+        }
+        CollectDeclToList(funcDecl, importedGlobalAndMemberFuncs)
+        CollectDesugaredDefaultParams(funcDecl, importedGlobalAndMemberFuncs)
+    }
+
+    private func CollectImportedPropDecl(propDecl: AstPropDecl): Unit {
+        for (getter in propDecl.getters) {
+            CollectImportedFuncDeclAndDesugarParams(getter)
+        }
+        for (setter in propDecl.setters) {
+            CollectImportedFuncDeclAndDesugarParams(setter)
+        }
+    }
+
+    private func CollectImportedGlobalOrStaticVarDecl(varDecl: AstVarDecl): Unit {
+        CollectDeclToList(varDecl, importedGlobalAndStaticVars)
     }
 
     private func CollectDecls(decl: AstDecl, instantiated!: Bool): Unit {
@@ -207,6 +270,11 @@ public class FaithfulAST2CHIR {
                 })
             case ASTKind.ENUM_DECL =>
                 CollectDeclsFromEnumDecl(RequireEnumDecl(decl))
+                CollectDeclToList(decl, if (instantiated) { importedGenericInstantiatedNominalDecls } else {
+                    if (decl.TestAttr(AstAttribute.GENERIC)) { genericNominalDecls } else { nominalDecls }
+                })
+            case ASTKind.EXTEND_DECL =>
+                CollectDeclsFromExtendDecl(RequireExtendDecl(decl))
                 CollectDeclToList(decl, if (instantiated) { importedGenericInstantiatedNominalDecls } else {
                     if (decl.TestAttr(AstAttribute.GENERIC)) { genericNominalDecls } else { nominalDecls }
                 })
@@ -242,6 +310,12 @@ public class FaithfulAST2CHIR {
             if (member.astKind == ASTKind.VAR_DECL && !member.TestAttr(AstAttribute.STATIC)) {
                 continue
             }
+            CollectMemberDecl(member)
+        }
+    }
+
+    private func CollectDeclsFromExtendDecl(extendDecl: AstExtendDecl): Unit {
+        for (member in extendDecl.members) {
             CollectMemberDecl(member)
         }
     }
@@ -326,7 +400,7 @@ public class FaithfulAST2CHIR {
             CreateCustomTypeDef(decl, isImported: true)
         }
         for (decl in importedGenericInstantiatedNominalDecls) {
-            CreateCustomTypeDef(decl, isImported: true)
+            CreateCustomTypeDef(decl, isImported: false)
         }
     }
 
@@ -360,6 +434,11 @@ public class FaithfulAST2CHIR {
                 def.SetSrcCodeIdentifier(srcIdentifier)
                 customTypeDef = def
                 if (isImported) { CurrentPackage().AddImportedEnum(def) } else { CurrentPackage().AddEnum(def) }
+            case ASTKind.EXTEND_DECL =>
+                let def = builder.CreateExtendDef(packageName, identifier)
+                def.SetSrcCodeIdentifier(srcIdentifier)
+                customTypeDef = def
+                if (isImported) { CurrentPackage().AddImportedExtend(def) } else { CurrentPackage().AddExtend(def) }
             case _ =>
                 throw IllegalArgumentException(
                     "faithful AST2CHIR CreateCustomTypeDef expected nominal decl, got ${ASTKindName(decl.astKind)}")
@@ -369,19 +448,67 @@ public class FaithfulAST2CHIR {
     }
 
     private func TranslateAllCustomTypeTy(): Unit {
-        for (decl in importedNominalDecls) { TranslateCustomTypeTyIfReady(decl) }
-        for (decl in genericNominalDecls) { TranslateCustomTypeTyIfReady(decl) }
-        for (decl in nominalDecls) { TranslateCustomTypeTyIfReady(decl) }
+        let translatedGenericDecls = ArrayList<AstDecl>()
+        for (decl in importedNominalDecls) {
+            if (TranslateCustomTypeTyIfReady(decl).isSome() && decl.TestAttr(AstAttribute.GENERIC)) {
+                CollectDeclToList(decl, translatedGenericDecls)
+            }
+        }
+        for (decl in genericNominalDecls) {
+            if (TranslateCustomTypeTyIfReady(decl).isSome()) {
+                CollectDeclToList(decl, translatedGenericDecls)
+            }
+        }
+        for (decl in nominalDecls) { let _ = TranslateCustomTypeTyIfReady(decl) }
+        for (decl in translatedGenericDecls) {
+            AttachCustomTypeGenericParams(decl)
+            if (let Some(ty) <- decl.GetTy()) {
+                for (arg in ty.typeArgs) {
+                    if (let Some(genericTy) <- (arg as AstGenericsTy)) {
+                        chirType.FillGenericArgType(genericTy)
+                    }
+                }
+            }
+        }
         for (decl in importedGenericInstantiatedNominalDecls) { TranslateCustomTypeTyIfReady(decl) }
     }
 
-    private func TranslateCustomTypeTyIfReady(decl: AstDecl): Unit {
-        if (decl.astKind == ASTKind.STRUCT_DECL || decl.astKind == ASTKind.CLASS_DECL ||
-            decl.astKind == ASTKind.INTERFACE_DECL || decl.astKind == ASTKind.ENUM_DECL) {
-            if (let Some(ty) <- decl.GetTy()) {
-                let _ = chirType.TranslateType(ty)
+    private func AttachCustomTypeGenericParams(decl: AstDecl): Unit {
+        let def = chirType.GetGlobalNominalCache(decl)
+        if (let Some(ty) <- decl.GetTy()) {
+            for (arg in ty.typeArgs) {
+                if (let Some(genericTy) <- (arg as AstGenericsTy)) {
+                    if (let Some(paramTy) <- (chirType.TranslateType(genericTy) as GenericType)) {
+                        AddGenericTypeParamIfMissing(def, paramTy)
+                    }
+                }
             }
         }
+    }
+
+    private func AddGenericTypeParamIfMissing(def: CustomTypeDef, paramTy: GenericType): Unit {
+        for (existing in def.GetGenericTypeParams()) {
+            if (existing.IsEqual(paramTy)) {
+                return
+            }
+        }
+        def.AddGenericTypeParam(paramTy)
+    }
+
+    private func TranslateCustomTypeTyIfReady(decl: AstDecl): Option<Type> {
+        if (decl.astKind == ASTKind.STRUCT_DECL || decl.astKind == ASTKind.CLASS_DECL ||
+            decl.astKind == ASTKind.INTERFACE_DECL || decl.astKind == ASTKind.ENUM_DECL ||
+            decl.astKind == ASTKind.EXTEND_DECL) {
+            if (let Some(ty) <- decl.GetTy()) {
+                let translated = chirType.TranslateType(ty)
+                if (decl.astKind == ASTKind.EXTEND_DECL) {
+                    let def = RequireExtendDef(chirType.GetGlobalNominalCache(decl))
+                    def.SetExtendedType(translated)
+                }
+                return Some(translated)
+            }
+        }
+        return None
     }
 
     private func TranslateNominalDecls(node: AstPackage): Unit {
@@ -1242,6 +1369,15 @@ public class FaithfulAST2CHIR {
     private func RequireEnumDecl(decl: AstDecl): AstEnumDecl {
         return (decl as AstEnumDecl) ??
             throw IllegalArgumentException("faithful AST2CHIR expected enum_decl, got ${ASTKindName(decl.astKind)}")
+    }
+
+    private func RequireExtendDecl(decl: AstDecl): AstExtendDecl {
+        return (decl as AstExtendDecl) ??
+            throw IllegalArgumentException("faithful AST2CHIR expected extend_decl, got ${ASTKindName(decl.astKind)}")
+    }
+
+    private func RequireExtendDef(def: CustomTypeDef): ExtendDef {
+        return (def as ExtendDef) ?? throw IllegalStateException("faithful AST2CHIR expected ExtendDef")
     }
 
     private static func ContainsDecl(values: ArrayList<AstDecl>, decl: AstDecl): Bool {

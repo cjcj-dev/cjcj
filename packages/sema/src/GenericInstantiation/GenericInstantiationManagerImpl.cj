@@ -682,6 +682,9 @@ public class GenericInstantiationManagerImpl {
                 if (!promotedTys.IsEmpty()) {
                     InstantiateGenericDeclWithInstTys(outer, copyTypeArgs(Some(promotedTys.values[0])), pkg)
                 }
+            } else if ((let Some(_) <- (outer as ExtendDecl)) && outer.TestAttr(Attribute.GENERIC) &&
+                !baseTy.HasGeneric()) {
+                InstantiateGenericDeclWithInstTys(outer, copyTypeArgs(Some(baseTy)), pkg)
             }
         }
     }
@@ -1152,6 +1155,24 @@ public class GenericInstantiationManagerImpl {
                 }
                 let outerGeneral = PartialInstantiation.GetGeneralDecl(outerDecl)
                 if ((let Some(_) <- outerGeneral.GetGeneric()) && !targetBaseTy.HasGeneric()) {
+                    let outerInfo = ConstructGenericInfo(outerGeneral, copyTypeArgs(Some(targetBaseTy)))
+                    if (let Some(instantiatedOuter) <- FindInCache(outerInfo, pkg)) {
+                        if (let Some(member) <- FindMemberInInstantiatedDecl(instantiatedOuter, generalDecl)) {
+                            if ((let Some(_) <- member.GetGeneric()) && !instTys.isEmpty()) {
+                                return FindCachedGenericDecl(member, instTys, pkg) ?? member
+                            }
+                            return member
+                        }
+                    }
+                }
+            } else if ((let Some(_) <- (outerDecl as ExtendDecl)) && outerDecl.TestAttr(Attribute.GENERIC)) {
+                let targetBaseTy = if (let Some(value) <- upperTy) { value } else if (let Some(value) <- baseTy) {
+                    value
+                } else {
+                    return FindCachedGenericDecl(generalDecl, instTys, pkg) ?? target
+                }
+                let outerGeneral = PartialInstantiation.GetGeneralDecl(outerDecl)
+                if (!targetBaseTy.HasGeneric()) {
                     let outerInfo = ConstructGenericInfo(outerGeneral, copyTypeArgs(Some(targetBaseTy)))
                     if (let Some(instantiatedOuter) <- FindInCache(outerInfo, pkg)) {
                         if (let Some(member) <- FindMemberInInstantiatedDecl(instantiatedOuter, generalDecl)) {

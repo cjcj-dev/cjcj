@@ -13,8 +13,8 @@ public class CGRefType <: CGType {
         if (let Some(refTy) <- (chirType as RefType)) {
             let baseType = refTy.GetBaseType()
             let baseCGType = CGType.GetOrCreate(cgMod, baseType)
-            if (baseType.IsClass()) {
-                return unsafe { LLVMPointerType(baseCGType.GetLLVMType(), 1u32) }
+            if (baseType.IsClass() || baseType.IsRawArray() || baseType.IsBox()) {
+                return CGType.GetRefType(cgCtx.GetLLVMContext())
             }
             return unsafe { LLVMPointerType(baseCGType.GetLLVMType(), addrspace) }
         } else {

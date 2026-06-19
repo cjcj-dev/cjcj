@@ -33,6 +33,86 @@ private func FuncRetTyOf(decl: Decl): Option<Ty> {
     return None
 }
 
+private func GenericReceiverTyOf(decl: Decl): Option<Ty> {
+    if (let Some(outer) <- decl.outerDecl) {
+        if (let Some(extendDecl) <- (outer as ExtendDecl)) {
+            return extendDecl.GetTy()
+        }
+        return outer.GetTy()
+    }
+    return None
+}
+
+private func InstantiatedFuncRetTy(typeManager: TypeManager, decl: Decl, baseTy: Ty): Option<Ty> {
+    if (let Some(retTy) <- FuncRetTyOf(decl)) {
+        let typeMapping = GenerateTypeMappingByTy(GenericReceiverTyOf(decl), Some(baseTy))
+        if (!typeMapping.IsEmpty()) {
+            return Some(typeManager.GetInstantiatedTy(retTy, typeMapping))
+        }
+        return Some(retTy)
+    }
+    return None
+}
+
+private func InstantiatedFuncTy(typeManager: TypeManager, decl: Decl, baseTy: Ty): Option<Ty> {
+    if (let Some(declTy) <- decl.GetTy()) {
+        if (let Some(_) <- (declTy as FuncTy)) {
+            let typeMapping = GenerateTypeMappingByTy(GenericReceiverTyOf(decl), Some(baseTy))
+            if (!typeMapping.IsEmpty()) {
+                return Some(typeManager.GetInstantiatedTy(declTy, typeMapping))
+            }
+            return Some(declTy)
+        }
+    }
+    return None
+}
+
+private func SameImportedAwareDecl(left: Decl, right: Decl): Bool {
+    if (left.TestAttr(Attribute.IMPORTED) && right.TestAttr(Attribute.IMPORTED)) {
+        if (!left.rawMangleName.isEmpty() || !right.rawMangleName.isEmpty()) {
+            return left.rawMangleName == right.rawMangleName
+        }
+        if (!left.mangledName.isEmpty() || !right.mangledName.isEmpty()) {
+            return left.mangledName == right.mangledName
+        }
+    }
+    return SameDecl(left, right)
+}
+
+private func AddImportedDeclIfMissing(values: ArrayList<Decl>, decl: Decl): Unit {
+    for (value in values) {
+        if (SameImportedAwareDecl(value, decl)) {
+            return
+        }
+    }
+    values.add(decl)
+}
+
+private func MarkImportedDeclUsed(decl: Decl): Unit {
+    if (!decl.TestAttr(Attribute.IMPORTED)) {
+        return
+    }
+    if (decl.isUsedImports) {
+        return
+    }
+    decl.isUsedImports = true
+    if (let Some(outer) <- decl.outerDecl) {
+        MarkImportedDeclUsed(outer)
+    }
+}
+
+private func AddSyntheticImportedTarget(source: Node, decl: Decl): Unit {
+    if (!decl.TestAttr(Attribute.IMPORTED)) {
+        return
+    }
+    MarkImportedDeclUsed(decl)
+    if (let Some(file) <- source.curFile) {
+        if (let Some(pkg) <- file.curPackage) {
+            AddImportedDeclIfMissing(pkg.srcImportedNonGenericDecls, decl)
+        }
+    }
+}
+
 private func UnitTy(): Ty {
     return TypeManager.GetPrimitiveTy(TypeKind.TYPE_UNIT)
 }
@@ -83,14 +163,18 @@ private func LookupZeroArgMember(typeManager: TypeManager, source: Node, baseTy:
 
 private func CreateResolvedNoArgMemberCall(typeManager: TypeManager, source: Node, baseExpr: Expr,
     name: String): Option<CallExpr> {
-    if (let Some(baseTy) <- baseExpr.GetTy()) {
+        if (let Some(baseTy) <- baseExpr.GetTy()) {
         if (let Some(funcDecl) <- LookupZeroArgMember(typeManager, source, baseTy, name)) {
+            AddSyntheticImportedTarget(source, funcDecl)
             let memberAccess = CreateMemberAccess(baseExpr, funcDecl)
             memberAccess.target = funcDecl
             memberAccess.targets.add(funcDecl)
             CopyBasicInfo(source, memberAccess)
             AddCurFile(memberAccess, file: source.curFile)
-            let retTy = FuncRetTyOf(funcDecl)
+            if (let Some(funcTy) <- InstantiatedFuncTy(typeManager, funcDecl, baseTy)) {
+                memberAccess.SetTy(funcTy)
+            }
+            let retTy = InstantiatedFuncRetTy(typeManager, funcDecl, baseTy)
             let callExpr = CreateCallExpr(memberAccess, ArrayList<FuncArg>(), Some(funcDecl), retTy,
                 CallKind.CALL_DECLARED_FUNCTION)
             CopyBasicInfo(source, callExpr)
@@ -561,6 +645,9 @@ private func CreateIteratorNextCall(typeManager: TypeManager, forInExpr: ForInEx
     iterator: VarDecl): Option<CallExpr> {
     let iteratorRef = CreateVarRef(iterator, forInExpr)
     CopyBasicInfo(forInExpr, iteratorRef)
+    if (let Some(iteratorTy) <- iterator.GetTy()) {
+        iteratorRef.SetTy(iteratorTy)
+    }
     return CreateResolvedNoArgMemberCall(typeManager, forInExpr, iteratorRef, NEXT_METHOD_NAME)
 }
 

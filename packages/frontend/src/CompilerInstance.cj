@@ -899,7 +899,13 @@ public class CompilerInstance {
     }
 
     private func mangleDeclTree(baseMangler: BaseMangler, pkgName: String, decl: Decl, seen: HashSet<String>): Unit {
-        let key = pkgName + "::" + decl.identifier.Val() + "::" + ASTKindName(decl.astKind)
+        let ownerKey = if (let Some(outer) <- decl.outerDecl) {
+            "::owner::" + outer.identifier.Val() + "::" + ASTKindName(outer.astKind) + "::" +
+                outer.begin.line.toString() + ":" + outer.begin.column.toString()
+        } else {
+            ""
+        }
+        let key = pkgName + ownerKey + "::" + decl.identifier.Val() + "::" + ASTKindName(decl.astKind)
         if (seen.contains(key)) {
             return
         }
@@ -910,6 +916,22 @@ public class CompilerInstance {
             mangledName2DeclMap.remove(decl.mangledName)
         }
         mangledName2DeclMap.add(decl.mangledName, decl)
+        if (let Some(generic) <- decl.generic) {
+            for (typeParam in generic.typeParameters) {
+                typeParam.outerDecl = Some(decl)
+                mangleDeclTree(baseMangler, pkgName, typeParam, seen)
+            }
+        }
+        if (let Some(funcDecl) <- (decl as FuncDecl)) {
+            if (let Some(body) <- funcDecl.funcBody) {
+                if (let Some(bodyGeneric) <- body.generic) {
+                    for (typeParam2 in bodyGeneric.typeParameters) {
+                        typeParam2.outerDecl = Some(decl)
+                        mangleDeclTree(baseMangler, pkgName, typeParam2, seen)
+                    }
+                }
+            }
+        }
         for (member in decl.GetMemberDecls()) {
             mangleDeclTree(baseMangler, pkgName, member, seen)
         }

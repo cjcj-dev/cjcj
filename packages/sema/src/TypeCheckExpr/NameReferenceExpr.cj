@@ -426,11 +426,23 @@ private func ChkCallExprShallow(typeManager: TypeManager, target: Ty, ce: CallEx
 
 private func AddTargetIfMissing(targets: ArrayList<Decl>, candidate: Decl): Unit {
     for (target in targets) {
-        if (SameDecl(target, candidate)) {
+        if (sameImportedAwareDecl(target, candidate)) {
             return
         }
     }
     targets.add(candidate)
+}
+
+private func sameImportedAwareDecl(left: Decl, right: Decl): Bool {
+    if (left.TestAttr(Attribute.IMPORTED) && right.TestAttr(Attribute.IMPORTED)) {
+        if (!left.rawMangleName.isEmpty() || !right.rawMangleName.isEmpty()) {
+            return left.rawMangleName == right.rawMangleName
+        }
+        if (!left.mangledName.isEmpty() || !right.mangledName.isEmpty()) {
+            return left.mangledName == right.mangledName
+        }
+    }
+    return SameDecl(left, right)
 }
 
 private func PopulateMemberAccessTargets(typeManager: TypeManager, ma: MemberAccess, baseTy: Ty): Unit {
@@ -438,7 +450,8 @@ private func PopulateMemberAccessTargets(typeManager: TypeManager, ma: MemberAcc
         return
     }
     let info = LookupInfo(baseTy: Some(baseTy), file: ma.curFile)
-    for (decl in FieldLookup(typeManager, Ty.GetDeclPtrOfTy(Some(baseTy)), ma.field.Val(), info: info)) {
+    let foundFields = FieldLookup(typeManager, Ty.GetDeclPtrOfTy(Some(baseTy)), ma.field.Val(), info: info)
+    for (decl in foundFields) {
         AddTargetIfMissing(ma.targets, decl)
     }
     if (let Some(file) <- ma.curFile) {

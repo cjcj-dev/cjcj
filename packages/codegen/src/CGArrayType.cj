@@ -26,6 +26,12 @@ public class CGArrayType <: CGType {
         return result
     }
 
+    public static func GenerateArrayLayoutType(cgMod: CGModule, rawArrayTy: RawArrayType): LLVMTypeRef {
+        let elementCGType = CGType.GetOrCreate(cgMod, rawArrayTy.GetElementType())
+        let layoutName = ARRAY_LAYOUT_PREFIX + rawArrayTy.ToString()
+        return GenerateArrayLayoutTypeInfo(cgMod.GetCGContext(), layoutName, elementCGType.GetLLVMType())
+    }
+
     protected override func GenLLVMType(): LLVMTypeRef {
         let elementTy = if (let Some(rawArrayTy) <- (chirType as RawArrayType)) {
             CGType.GetOrCreate(cgMod, rawArrayTy.GetElementType()).GetLLVMType()
@@ -34,7 +40,7 @@ public class CGArrayType <: CGType {
         }
         let layoutName = ARRAY_LAYOUT_PREFIX + chirType.ToString()
         layoutType = CGArrayType.GenerateArrayLayoutTypeInfo(cgCtx, layoutName, elementTy)
-        return unsafe { LLVMPointerType(elementTy, 1u32) }
+        return unsafe { LLVMInt8TypeInContext(cgCtx.GetLLVMContext().raw) }
     }
 
     protected override func GenContainedCGTypes(): Unit {

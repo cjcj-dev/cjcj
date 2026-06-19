@@ -277,6 +277,9 @@ public class CHIRContext {
     }
 
     public func ToSelectorType(kind: TypeKind): Type {
+        if (kind == TypeKind.TYPE_BOOLEAN) {
+            return boolTy
+        }
         if (kind == TypeKind.TYPE_UINT8 || kind == TypeKind.TYPE_INT8) {
             return uint8Ty
         }

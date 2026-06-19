@@ -16,19 +16,16 @@ public class CGStructType <: CGCustomType {
             llvmType = stringLayout
             return stringLayout
         }
-        let layoutName = STRUCT_TYPE_PREFIX + chirType.ToString()
+        let layoutKeyTy = GetStructLayoutKeyType(cgMod, chirType)
+        let layoutName = STRUCT_TYPE_PREFIX + layoutKeyTy.ToString()
         let structLayout = GetOrCreateNamedStructType(cgCtx.GetLLVMContext(), layoutName)
         layoutType = structLayout
         llvmType = structLayout
         if (!cgCtx.IsGeneratedStructType(layoutName)) {
             cgCtx.AddGeneratedStructType(layoutName)
             let fieldTypes = ArrayList<LLVMTypeRef>()
-            if (let Some(customTy) <- (chirType as CustomType)) {
-                for (member in customTy.GetCustomTypeDef().GetInstanceVars()) {
-                    if (!member.isStatic) {
-                        fieldTypes.add(CGType.GetOrCreate(cgMod, member.ty).GetLLVMType())
-                    }
-                }
+            for (fieldTy in GetInstanceFieldTypes(chirType)) {
+                fieldTypes.add(CGType.GetOrCreate(cgMod, fieldTy).GetLLVMType())
             }
             SetStructTypeBody(structLayout, fieldTypes)
         }
@@ -39,12 +36,8 @@ public class CGStructType <: CGCustomType {
         if (chirType.IsString()) {
             return
         }
-        if (let Some(customTy) <- (chirType as CustomType)) {
-            for (member in customTy.GetCustomTypeDef().GetInstanceVars()) {
-                if (!member.isStatic) {
-                    containedCGTypes.add(CGType.GetOrCreate(cgMod, member.ty))
-                }
-            }
+        for (fieldTy in GetInstanceFieldTypes(chirType)) {
+            containedCGTypes.add(CGType.GetOrCreate(cgMod, fieldTy))
         }
     }
 
@@ -73,4 +66,17 @@ public class CGStructType <: CGCustomType {
         size = total
         align = maxAlign
     }
+}
+
+private func GetStructLayoutKeyType(cgMod: CGModule, chirTy: Type): Type {
+    if (let Some(customTy) <- (chirTy as CustomType)) {
+        if (let Some(defTy) <- customTy.GetCustomTypeDef().GetType()) {
+            if (!chirTy.IsEqual(defTy)) {
+                if (CGType.GetOrCreate(cgMod, defTy).GetSize().isSome()) {
+                    return defTy
+                }
+            }
+        }
+    }
+    return chirTy
 }

@@ -245,6 +245,10 @@ public class CGModule {
             return
         }
         if (let Some(functionCGType) <- (cgFuncType as CGFunctionType)) {
+            if (functionCGType.HasBasePtr()) {
+                AddFnStringAttr(rawFunction, STRUCT_MUT_FUNC_ATTR)
+                AddFnStringAttr(rawFunction, THIS_PARAM_HAS_BP)
+            }
             if (let Some(chirType) <- chirValue.GetType()) {
                 if (let Some(funcType) <- (chirType as FuncType)) {
                     if (funcType.IsCFunc()) {

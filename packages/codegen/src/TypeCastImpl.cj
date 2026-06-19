@@ -26,6 +26,15 @@ public func CastValueToType(irBuilder: IRBuilder2, sourceValue: LLVMValueRef, so
     if (sourceTy.IsEqual(targetTy)) {
         return sourceValue
     }
+    if (targetTy.IsGeneric()) {
+        let sourceCGType = CGType.GetOrCreate(irBuilder.GetCGModule(), sourceTy.StripAllRefs())
+        if (sourceCGType.IsReference()) {
+            return irBuilder.CreatePointerCast(sourceValue, targetLLVMType)
+        }
+        let objectValue = irBuilder.CallValueIntrinsicAlloc(sourceTy)
+        irBuilder.StoreValueToObjectPayload(objectValue, sourceValue, sourceTy)
+        return objectValue
+    }
     if (IsIntegerLikeType(sourceTy) && IsIntegerLikeType(targetTy)) {
         return EmitIntegerCast(irBuilder, sourceValue, sourceTy, targetTy, targetLLVMType)
     }

@@ -1,6 +1,7 @@
 package cangjie_compiler::codegen
 
 import std.collection.*
+import cangjie_compiler::chir.Attribute
 import cangjie_compiler::chir.FuncType
 import cangjie_compiler::chir.Function
 import cangjie_compiler::chir.Type
@@ -23,6 +24,7 @@ public class CGFunctionType <: CGType {
     private let methodType: Bool
     private let staticMethodType: Bool
     private let forWrapper: Bool
+    private let constructorType: Bool
 
     public init(cgMod: CGModule, cgCtx: CGContext, chirType: FuncType, extraInfo: TypeExtraInfo) {
         super(cgMod, cgCtx, chirType, cgTypeKind: CGTypeKind.CG_FUNCTION)
@@ -31,21 +33,24 @@ public class CGFunctionType <: CGType {
         methodType = extraInfo.isMethod
         staticMethodType = extraInfo.isStaticMethod
         forWrapper = extraInfo.forWrapper
+        constructorType = false
     }
 
     public init(cgMod: CGModule, cgCtx: CGContext, chirFunc: Function, extraInfo: TypeExtraInfo) {
         super(cgMod, cgCtx, ChirFunctionTypeOf(chirFunc), cgTypeKind: CGTypeKind.CG_FUNCTION)
         this.chirFunc = chirFunc
         allowBasePtr = extraInfo.allowBasePtr
-        methodType = extraInfo.isMethod
-        staticMethodType = extraInfo.isStaticMethod
+        methodType = chirFunc.GetParentCustomTypeDef().isSome()
+        staticMethodType = chirFunc.TestAttr(Attribute.STATIC)
         forWrapper = extraInfo.forWrapper
+        constructorType = chirFunc.IsConstructor()
     }
 
     public func HasSRet(): Bool { Complete(); return hasSRet }
     public func HasBasePtr(): Bool { Complete(); return hasBasePtr }
     public func IsMethodType(): Bool { return methodType }
     public func IsStaticMethodType(): Bool { return staticMethodType }
+    public func IsConstructorType(): Bool { return constructorType }
     public func GetRealArgIndices(): ArrayList<Int64> { return realParamIndices }
 
     public func GetLLVMFunctionType(): LLVMTypeRef {
@@ -60,7 +65,7 @@ public class CGFunctionType <: CGType {
         if (let Some(funcTy) <- (chirType as FuncType)) {
             let retCGType = CGType.GetOrCreate(cgMod, funcTy.GetReturnType())
             let retTy = funcTy.GetReturnType()
-            hasSRet = !IsVoidLikeReturn(retTy) && ShouldUseSRet(retTy)
+            hasSRet = !IsVoidLikeReturn(retTy) && ShouldUseSRet(retTy, retCGType)
             let retLLVMType = if (IsVoidLikeReturn(retTy) || hasSRet) {
                 unsafe { LLVMVoidTypeInContext(cgCtx.GetLLVMContext().raw) }
             } else {
@@ -68,15 +73,36 @@ public class CGFunctionType <: CGType {
             }
             let paramLLVMTypes = ArrayList<LLVMTypeRef>()
             if (hasSRet) {
-                paramLLVMTypes.add(unsafe { LLVMPointerType(retCGType.GetLLVMType(), 0u32) })
+                if (ContainsGenericType(retTy) && !retTy.IsGeneric()) {
+                    paramLLVMTypes.add(CGType.GetRefType(cgCtx.GetLLVMContext()))
+                } else {
+                    let sretAddrspace = if (retCGType.GetSize().isNone() && !retTy.IsGeneric()) { 1u32 } else { 0u32 }
+                    paramLLVMTypes.add(unsafe { LLVMPointerType(retCGType.GetLLVMType(), sretAddrspace) })
+                }
             }
             for (paramTy in funcTy.GetParamTypes()) {
-                let paramCGType = CGType.GetOrCreate(cgMod, paramTy)
-                if (ShouldNeedBasePtr(paramTy) && allowBasePtr) {
-                    paramLLVMTypes.add(unsafe { LLVMPointerType(paramCGType.GetLLVMType(), 0u32) })
+                let derefParamTy = paramTy.StripAllRefs()
+                if (paramTy.IsRef() && (derefParamTy.IsStruct() || derefParamTy.IsTuple())) {
+                    let derefParamCGType = CGType.GetOrCreate(cgMod, derefParamTy)
+                    paramLLVMTypes.add(unsafe { LLVMPointerType(derefParamCGType.GetLLVMType(), 1u32) })
+                    if (allowBasePtr) {
+                        paramLLVMTypes.add(CGType.GetRefType(cgCtx.GetLLVMContext()))
+                        hasBasePtr = true
+                    }
                 } else {
-                    paramLLVMTypes.add(paramCGType.GetLLVMType())
+                    let paramCGType = CGType.GetOrCreate(cgMod, paramTy)
+                    if (ShouldNeedBasePtr(paramTy) && allowBasePtr) {
+                        paramLLVMTypes.add(unsafe { LLVMPointerType(paramCGType.GetLLVMType(), 0u32) })
+                    } else {
+                        paramLLVMTypes.add(paramCGType.GetLLVMType())
+                    }
                 }
+            }
+            if (methodType) {
+                paramLLVMTypes.add(CGType.GetOrCreateTypeInfoPtrType(cgCtx.GetLLVMContext()))
+            }
+            if (staticMethodType) {
+                paramLLVMTypes.add(CGType.GetOrCreateTypeInfoPtrType(cgCtx.GetLLVMContext()))
             }
             if (paramLLVMTypes.isEmpty()) {
                 llvmFunctionType = unsafe {
@@ -123,20 +149,20 @@ public class CGFunctionType <: CGType {
     protected override func CalculateSizeAndAlign(): Unit {
         size = 8
         align = 8
-        if (let Some(funcTy) <- (chirType as FuncType)) {
-            for (paramTy in funcTy.GetParamTypes()) {
-                if (ShouldNeedBasePtr(paramTy)) {
-                    hasBasePtr = allowBasePtr
-                }
-            }
-        }
     }
 
-    private func ShouldUseSRet(retTy: Type): Bool {
-        return retTy.IsUnit() || retTy.IsStruct() || retTy.IsTuple() || retTy.IsVArray()
+    private func ShouldUseSRet(retTy: Type, retCGType: CGType): Bool {
+        if (retTy.IsReferenceType() || retTy.IsRef() || retCGType.IsReference()) {
+            return false
+        }
+        return retTy.IsUnit() || retTy.IsStruct() || retTy.IsTuple() || retTy.IsVArray() ||
+            (ContainsGenericType(retTy) && !retTy.IsReferenceType()) || retCGType.GetSize().isNone()
     }
 
     private func IsVoidLikeReturn(retTy: Type): Bool {
+        if (constructorType) {
+            return true
+        }
         return retTy.IsNothing() || retTy.IsVoid()
     }
 
