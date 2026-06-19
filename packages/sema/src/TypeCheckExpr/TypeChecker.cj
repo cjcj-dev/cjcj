@@ -814,6 +814,9 @@ public class TypeChecker {
         if (decl.TestAttr(Attribute.ENUM_CONSTRUCTOR)) {
             return TypeCheckDeclSetEnumElementTy(impl.typeManager, decl, diag: impl.diag)
         }
+        if (let Some(vpd) <- (decl as VarWithPatternDecl)) {
+            return SynthesizeVarWithPatternDecl(ctx, vpd)
+        }
         if (let Some(vd) <- (decl as VarDeclAbstract)) {
             SynthesizeTypeNode(ctx, vd.typeNode)
             if (let Some(initializer) <- vd.initializer) {
@@ -834,6 +837,10 @@ public class TypeChecker {
         if (let Some(funcDecl) <- (decl as FuncDecl)) {
             if (let Some(body) <- funcDecl.funcBody) {
                 SetFunctionBodyOwner(funcDecl, body)
+                if (!Ty.IsTyCorrect(funcDecl.GetTy())) {
+                    let _ = PrepareFuncBodySignature(ctx, body)
+                }
+                BindLocalDeclIfNeeded(ctx, funcDecl)
                 return SynthesizeFuncBody(ctx, body)
             }
         }
@@ -909,6 +916,37 @@ public class TypeChecker {
         return tyOrInvalid(decl)
     }
 
+    private func SynthesizeVarWithPatternDecl(ctx: ASTContext, vpd: VarWithPatternDecl): Ty {
+        SynthesizeTypeNode(ctx, vpd.typeNode)
+        if (let Some(initializer) <- vpd.initializer) {
+            if (let Some(typeNode) <- vpd.typeNode) {
+                if (let Some(targetTy) <- typeNode.GetTy()) {
+                    let _ = Check(ctx, targetTy, initializer)
+                } else {
+                    let _ = Synthesize(ctx, initializer)
+                }
+            } else {
+                let _ = Synthesize(ctx, initializer)
+            }
+        }
+        let declTy = TypeCheckDeclSynchronizeTypeAndInitializer(impl.typeManager, vpd)
+        BindLocalDeclIfNeeded(ctx, vpd)
+        if (let Some(initializer2) <- vpd.initializer) {
+            if (!Ty.IsTyCorrect(initializer2.GetTy())) {
+                return declTy
+            }
+        }
+        if (let Some(pattern) <- vpd.irrefutablePattern) {
+            if (Ty.IsTyCorrect(declTy)) {
+                let ok = ChkPattern(impl.typeManager, ctx, declTy, pattern, isPatternInMatch: false)
+                if (ok && IsIrrefutablePattern(pattern)) {
+                    BindPatternBindings(ctx, pattern)
+                }
+            }
+        }
+        return declTy
+    }
+
     private func SynthesizeFuncBody(ctx: ASTContext, fb: FuncBody): Ty {
         let retType = EnsureRetType(ctx, fb)
         SynthesizeFuncParams(ctx, fb)
@@ -960,6 +998,28 @@ public class TypeChecker {
             return
         }
         ctx.AddDeclName(Names(name, scopeNameOf(decl)), decl)
+    }
+
+    private func BindLocalDeclIfAbsent(ctx: ASTContext, decl: Decl): Unit {
+        let name = decl.identifier.Val()
+        if (name.isEmpty() || name == INVALID_IDENTIFIER) {
+            return
+        }
+        let names = Names(name, scopeNameOf(decl))
+        for (existing in ctx.GetDeclsByName(names)) {
+            if (SameDecl(existing, decl)) {
+                return
+            }
+        }
+        ctx.AddDeclName(names, decl)
+    }
+
+    private func BindPatternBindings(ctx: ASTContext, pattern: Pattern): Unit {
+        let boundDecls = ArrayList<Decl>()
+        CollectPatternBinding(pattern, boundDecls)
+        for (decl in boundDecls) {
+            BindLocalDeclIfAbsent(ctx, decl)
+        }
     }
 
     private func EnsureRetType(ctx: ASTContext, fb: FuncBody): Type {
