@@ -386,6 +386,11 @@ public class ASTContext {
             enumConstructors[argKey] = ArrayList<Decl>()
         }
         if (let Some(values) <- enumConstructors.get(argKey)) {
+            for (value in values) {
+                if (SameDecl(value, decl)) {
+                    return
+                }
+            }
             values.add(decl)
         }
     }

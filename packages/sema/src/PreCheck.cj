@@ -63,6 +63,11 @@ private func collectDecl(ctx: ASTContext, decl: Decl): Bool {
     if (decl.TestAttr(Attribute.ENUM_CONSTRUCTOR)) {
         ctx.InsertEnumConstructor(name, enumCtorArity(decl), decl)
     }
+    if (let Some(enumDecl) <- (decl as EnumDecl)) {
+        for (constructor in enumDecl.constructors) {
+            valid = collectDecl(ctx, constructor) && valid
+        }
+    }
     for (member in decl.GetMemberDecls()) {
         valid = collectDecl(ctx, member) && valid
     }

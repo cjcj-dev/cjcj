@@ -30,6 +30,11 @@ public class Collector {
 
     private func collectDecl(decl: Decl): Unit {
         decls.add(decl)
+        if (let Some(enumDecl) <- (decl as EnumDecl)) {
+            for (constructor in enumDecl.constructors) {
+                collectDecl(constructor)
+            }
+        }
         for (member in decl.GetMemberDecls()) {
             collectDecl(member)
         }

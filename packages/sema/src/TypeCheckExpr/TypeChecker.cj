@@ -405,6 +405,14 @@ public class TypeChecker {
         }
     }
 
+    private func EnsureEnumDeclTy(enumDecl: EnumDecl): Ty {
+        if (Ty.IsTyCorrect(enumDecl.GetTy())) {
+            return enumDecl.GetTy().getOrThrow()
+        }
+        impl.SetDeclTy(enumDecl)
+        return enumDecl.GetTy() ?? TypeManager.GetInvalidTy()
+    }
+
     private func PrepareParamSignature(ctx: ASTContext, param: FuncParam): Unit {
         SynthesizeTypeNode(ctx, param.typeNode)
         if (let Some(typeNode) <- param.typeNode) {
@@ -412,6 +420,33 @@ public class TypeChecker {
                 param.SetTy(paramTy)
             }
         }
+    }
+
+    private func PrepareEnumConstructorSignature(ctx: ASTContext, enumDecl: EnumDecl, constructor: Decl): Ty {
+        let _ = EnsureEnumDeclTy(enumDecl)
+        if (let Some(funcDecl) <- (constructor as FuncDecl)) {
+            if (let Some(body) <- funcDecl.funcBody) {
+                SetFunctionBodyOwner(funcDecl, body)
+                for (paramList in body.paramLists) {
+                    for (param in paramList.params) {
+                        PrepareParamSignature(ctx, param)
+                    }
+                }
+            }
+        }
+        return TypeCheckDeclSetEnumElementTy(impl.typeManager, constructor, diag: impl.diag)
+    }
+
+    private func PrepareEnumDeclSignature(ctx: ASTContext, enumDecl: EnumDecl): Unit {
+        let _ = EnsureEnumDeclTy(enumDecl)
+        TypeCheckDeclInsertEnumConstructors(ctx, enumDecl)
+        for (inheritedType in enumDecl.inheritedTypes) {
+            impl.SetTypeTy(ctx, inheritedType)
+        }
+        for (constructor in enumDecl.constructors) {
+            let _ = PrepareEnumConstructorSignature(ctx, enumDecl, constructor)
+        }
+        PrepareDeclListSignatures(ctx, enumDecl.members)
     }
 
     private func ConstructorReturnTy(fb: FuncBody): Option<Ty> {
@@ -458,6 +493,14 @@ public class TypeChecker {
     }
 
     private func PrepareDeclSignature(ctx: ASTContext, decl: Decl): Unit {
+        if (decl.TestAttr(Attribute.ENUM_CONSTRUCTOR)) {
+            if (let Some(outer) <- decl.outerDecl) {
+                if (let Some(enumDecl) <- (outer as EnumDecl)) {
+                    let _ = PrepareEnumConstructorSignature(ctx, enumDecl, decl)
+                    return
+                }
+            }
+        }
         if (let Some(vd) <- (decl as VarDeclAbstract)) {
             SynthesizeTypeNode(ctx, vd.typeNode)
             if (let Some(typeNode) <- vd.typeNode) {
@@ -520,8 +563,7 @@ public class TypeChecker {
             return
         }
         if (let Some(enumDecl) <- (decl as EnumDecl)) {
-            PrepareDeclListSignatures(ctx, enumDecl.constructors)
-            PrepareDeclListSignatures(ctx, enumDecl.members)
+            PrepareEnumDeclSignature(ctx, enumDecl)
             return
         }
         if (let Some(extendDecl) <- (decl as ExtendDecl)) {
@@ -538,6 +580,9 @@ public class TypeChecker {
     }
 
     private func SynthesizeDecl(ctx: ASTContext, decl: Decl): Ty {
+        if (decl.TestAttr(Attribute.ENUM_CONSTRUCTOR)) {
+            return TypeCheckDeclSetEnumElementTy(impl.typeManager, decl, diag: impl.diag)
+        }
         if (let Some(vd) <- (decl as VarDeclAbstract)) {
             SynthesizeTypeNode(ctx, vd.typeNode)
             if (let Some(initializer) <- vd.initializer) {
@@ -556,9 +601,6 @@ public class TypeChecker {
             return declTy
         }
         if (let Some(funcDecl) <- (decl as FuncDecl)) {
-            if (funcDecl.TestAttr(Attribute.ENUM_CONSTRUCTOR)) {
-                return TypeCheckDeclSetEnumElementTy(impl.typeManager, funcDecl)
-            }
             if (let Some(body) <- funcDecl.funcBody) {
                 SetFunctionBodyOwner(funcDecl, body)
                 return SynthesizeFuncBody(ctx, body)
@@ -591,9 +633,6 @@ public class TypeChecker {
                 return primaryTy
             }
         }
-        if (decl.TestAttr(Attribute.ENUM_CONSTRUCTOR)) {
-            return TypeCheckDeclSetEnumElementTy(impl.typeManager, decl)
-        }
         if (let Some(classDecl) <- (decl as ClassDecl)) {
             if (let Some(body) <- classDecl.body) {
                 SynthesizeDeclList(ctx, body.decls)
@@ -613,7 +652,14 @@ public class TypeChecker {
             return tyOrInvalid(interfaceDecl)
         }
         if (let Some(enumDecl) <- (decl as EnumDecl)) {
-            SynthesizeDeclList(ctx, enumDecl.constructors)
+            let _ = EnsureEnumDeclTy(enumDecl)
+            TypeCheckDeclInsertEnumConstructors(ctx, enumDecl)
+            for (inheritedType in enumDecl.inheritedTypes) {
+                impl.SetTypeTy(ctx, inheritedType)
+            }
+            for (constructor in enumDecl.constructors) {
+                let _ = PrepareEnumConstructorSignature(ctx, enumDecl, constructor)
+            }
             SynthesizeDeclList(ctx, enumDecl.members)
             return tyOrInvalid(enumDecl)
         }
