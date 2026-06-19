@@ -105,6 +105,9 @@ private func DefineConcreteTypeInfoIfNeeded(cgMod: CGModule, chirTy: Type, typeI
 }
 
 private func IsImportedCustomType(chirTy: Type): Bool {
+    if (!chirTy.GetTypeArgs().isEmpty()) {
+        return false
+    }
     if (let Some(customTy) <- (chirTy as CustomType)) {
         return customTy.GetCustomTypeDef().TestAttr(Attribute.IMPORTED)
     }
