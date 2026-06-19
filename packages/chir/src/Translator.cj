@@ -14,11 +14,13 @@ import cangjie_compiler::ast.Block as AstBlock
 import cangjie_compiler::ast.CallExpr as AstCallExpr
 import cangjie_compiler::ast.ClassDecl as AstClassDecl
 import cangjie_compiler::ast.ClassLikeDecl as AstClassLikeDecl
+import cangjie_compiler::ast.ClassTy as AstClassTy
 import cangjie_compiler::ast.ConstPattern as AstConstPattern
 import cangjie_compiler::ast.Decl as AstDecl
 import cangjie_compiler::ast.DoWhileExpr as AstDoWhileExpr
 import cangjie_compiler::ast.EnumDecl as AstEnumDecl
 import cangjie_compiler::ast.EnumPattern as AstEnumPattern
+import cangjie_compiler::ast.EnumTy as AstEnumTy
 import cangjie_compiler::ast.Expr as AstExpr
 import cangjie_compiler::ast.ForInExpr as AstForInExpr
 import cangjie_compiler::ast.ForInKind as AstForInKind
@@ -26,6 +28,7 @@ import cangjie_compiler::ast.FuncArg as AstFuncArg
 import cangjie_compiler::ast.FuncDecl as AstFuncDecl
 import cangjie_compiler::ast.FuncTy as AstFuncTy
 import cangjie_compiler::ast.IfExpr as AstIfExpr
+import cangjie_compiler::ast.InterfaceTy as AstInterfaceTy
 import cangjie_compiler::ast.InterfaceDecl as AstInterfaceDecl
 import cangjie_compiler::ast.JumpExpr as AstJumpExpr
 import cangjie_compiler::ast.LitConstExpr as AstLitConstExpr
@@ -38,6 +41,7 @@ import cangjie_compiler::ast.Pattern as AstPattern
 import cangjie_compiler::ast.RefExpr as AstRefExpr
 import cangjie_compiler::ast.ReturnExpr as AstReturnExpr
 import cangjie_compiler::ast.StructDecl as AstStructDecl
+import cangjie_compiler::ast.StructTy as AstStructTy
 import cangjie_compiler::ast.SubscriptExpr as AstSubscriptExpr
 import cangjie_compiler::ast.TokenKind as AstTokenKind
 import cangjie_compiler::ast.TokenKindValue as AstTokenKindValue
@@ -83,6 +87,7 @@ public class Translator {
     private let localValSymbolTable: FaithfulAST2CHIRNodeMap = FaithfulAST2CHIRNodeMap()
     private var currentBlock: Option<Block> = None
     private var currentFunc: Option<Function> = None
+    private var currentAstFuncDecl: Option<AstFuncDecl> = None
     private var delayExitSignal: Option<Value> = None
     private let blockGroupStack: ArrayList<BlockGroup> = ArrayList<BlockGroup>()
     private let loopTargetStack: ArrayList<FaithfulLoopTarget> = ArrayList<FaithfulLoopTarget>()
@@ -179,7 +184,9 @@ public class Translator {
         }
         let body = EnsureFuncBody(fn)
         blockGroupStack.add(body)
+        let savedAstFuncDecl = currentAstFuncDecl
         currentFunc = fn
+        currentAstFuncDecl = funcDecl
         let savedBlock = currentBlock
         let entry = body.GetEntryBlock() ?? builder.CreateBlock(body)
         body.SetEntryBlock(entry)
@@ -197,6 +204,7 @@ public class Translator {
         }
         currentBlock = savedBlock
         currentFunc = None
+        currentAstFuncDecl = savedAstFuncDecl
         blockGroupStack.remove(at: blockGroupStack.size - 1)
         return fn
     }
@@ -219,7 +227,9 @@ public class Translator {
         }
         let body = EnsureFuncBody(fn)
         blockGroupStack.add(body)
+        let savedAstFuncDecl = currentAstFuncDecl
         currentFunc = fn
+        currentAstFuncDecl = None
         let savedBlock = currentBlock
         let entry = body.GetEntryBlock() ?? builder.CreateBlock(body)
         body.SetEntryBlock(entry)
@@ -234,6 +244,7 @@ public class Translator {
         }
         currentBlock = savedBlock
         currentFunc = None
+        currentAstFuncDecl = savedAstFuncDecl
         blockGroupStack.remove(at: blockGroupStack.size - 1)
         return fn
     }
@@ -467,8 +478,7 @@ public class Translator {
     }
 
     public func Visit(expr: AstMemberAccess): Option<Value> {
-        let target = expr.target ??
-            throw IllegalStateException("faithful AST2CHIR MemberAccess has no Sema target: ${expr.field.Val()}")
+        let target = ResolveMemberAccessTarget(expr, "faithful AST2CHIR MemberAccess")
         if (target.TestAttr(AstAttribute.ENUM_CONSTRUCTOR)) {
             return TranslateEnumCtorRef(target, RequireAstTy(expr))
         }
@@ -478,7 +488,7 @@ public class Translator {
         if (IsInstanceMember(target)) {
             if (let Some(_) <- (target as AstVarDecl)) {
                 let leftValueInfo = TranslateMemberAccessAsLeftValue(expr)
-                return LoadLeftValue(leftValueInfo, chirTy.TranslateType(RequireAstTy(expr)))
+                return LoadLeftValue(leftValueInfo, MemberAccessValueType(expr, target))
             }
             if (let Some(_) <- (target as AstFuncDecl)) {
                 throw IllegalArgumentException(
@@ -1436,8 +1446,7 @@ public class Translator {
                 throw IllegalStateException("faithful AST2CHIR enum pattern RefExpr has no target")
         }
         if (let Some(member) <- (constructorExpr as AstMemberAccess)) {
-            return member.target ??
-                throw IllegalStateException("faithful AST2CHIR enum pattern MemberAccess has no target")
+            return ResolveMemberAccessTarget(member, "faithful AST2CHIR enum pattern MemberAccess")
         }
         throw IllegalArgumentException("not yet ported in faithful AST2CHIR: enum pattern constructor expression")
     }
@@ -2000,7 +2009,8 @@ public class Translator {
     private func TranslateExprAsLeftValue(expr: AstExpr): FaithfulLeftValueInfo {
         let nodePtr = Translator.GetDesugaredExpr(expr)
         if (let Some(refExpr) <- (nodePtr as AstRefExpr)) {
-            if (refExpr.isThis || refExpr.isSuper) {
+            let refName = refExpr.ref.identifier.Val()
+            if (refExpr.isThis || refExpr.isSuper || refName == "this" || refName == "super") {
                 return FaithfulLeftValueInfo(GetCurrentThisObject(), ArrayList<String>())
             }
             if (let Some(target) <- refExpr.ref.target) {
@@ -2023,8 +2033,7 @@ public class Translator {
     }
 
     private func TranslateMemberAccessAsLeftValue(member: AstMemberAccess): FaithfulLeftValueInfo {
-        let target = member.target ??
-            throw IllegalStateException("faithful AST2CHIR MemberAccess left value has no Sema target")
+        let target = ResolveMemberAccessTarget(member, "faithful AST2CHIR MemberAccess left value")
         if (target.TestAttr(AstAttribute.ENUM_CONSTRUCTOR)) {
             let value = Visit(member) ??
                 throw IllegalStateException("faithful AST2CHIR enum member access produced no value")
@@ -2035,7 +2044,7 @@ public class Translator {
         }
         if (let Some(varDecl) <- (target as AstVarDecl)) {
             if (let Some(baseExpr) <- member.baseExpr) {
-                let baseInfo = TranslateExprAsLeftValue(baseExpr)
+                let baseInfo = NormalizeMemberBaseLeftValue(TranslateExprAsLeftValue(baseExpr), baseExpr)
                 let path = CopyStringList(baseInfo.path)
                 path.add(varDecl.identifier.Val())
                 return FaithfulLeftValueInfo(baseInfo.base, path)
@@ -2049,6 +2058,24 @@ public class Translator {
         let path = ArrayList<String>()
         path.add(varDecl.identifier.Val())
         return FaithfulLeftValueInfo(GetCurrentThisObject(), path)
+    }
+
+    private func NormalizeMemberBaseLeftValue(info: FaithfulLeftValueInfo, baseExpr: AstExpr): FaithfulLeftValueInfo {
+        var base = info.base
+        var path = CopyStringList(info.path)
+        let baseTy = base.GetType() ??
+            throw IllegalStateException("faithful AST2CHIR member base has no type: ${base.GetIdentifier()}")
+        if (path.isEmpty()) {
+            if (baseTy.IsReferenceTypeWithRefDims(CLASS_REF_DIM)) {
+                let loadedTy = RequireRefBaseType(base)
+                base = RequireResult(builder.CreateLoad(loadedTy, base, CurrentBlock()))
+            }
+            return FaithfulLeftValueInfo(base, path)
+        }
+        let loaded = LoadLeftValue(info, chirTy.TranslateType(RequireAstTy(baseExpr))) ??
+            throw IllegalStateException("faithful AST2CHIR member base produced no value")
+        path.clear()
+        return FaithfulLeftValueInfo(loaded, path)
     }
 
     private func LoadLeftValue(info: FaithfulLeftValueInfo, expectedTy: Type): Option<Value> {
@@ -2177,6 +2204,9 @@ public class Translator {
 
     private func GetDerefedValue(value: Value): Value {
         if (let Some(ty) <- value.GetType()) {
+            if (ty.IsReferenceTypeWithRefDims(1)) {
+                return value
+            }
             if (let Some(refTy) <- (ty as RefType)) {
                 return RequireResult(builder.CreateLoad(refTy.GetBaseType(), value, CurrentBlock()))
             }
@@ -2293,14 +2323,145 @@ public class Translator {
                 }
             }
             if (let Some(member) <- (base as AstMemberAccess)) {
-                if (let Some(target) <- member.target) {
-                    if (let Some(fn) <- (target as AstFuncDecl)) {
-                        return fn
-                    }
+                let target = ResolveMemberAccessTarget(member, "faithful AST2CHIR CallExpr member callee")
+                if (let Some(fn) <- (target as AstFuncDecl)) {
+                    return fn
                 }
             }
         }
         throw IllegalStateException("faithful AST2CHIR CallExpr has no resolvedFunction")
+    }
+
+    private func ResolveMemberAccessTarget(member: AstMemberAccess, context: String): AstDecl {
+        if (let Some(target) <- member.target) {
+            return target
+        }
+        if (member.targets.size == 1) {
+            return member.targets[0]
+        }
+        if (let Some(target) <- ResolveMemberAccessTargetFromBase(member)) {
+            return target
+        }
+        if (let Some(target) <- ResolveMemberTargetFromCurrentThis(member.field.Val(), false)) {
+            return target
+        }
+        throw IllegalStateException(
+            "${context} has no single Sema target: ${member.field.Val()} (${member.targets.size} candidates)")
+    }
+
+    private func MemberAccessValueType(member: AstMemberAccess, target: AstDecl): Type {
+        if (let Some(memberTy) <- member.GetTy()) {
+            if (AstTy.IsTyCorrect(memberTy)) {
+                return chirTy.TranslateType(memberTy)
+            }
+        }
+        return chirTy.TranslateType(RequireAstTy(target))
+    }
+
+    private func ResolveMemberAccessTargetFromBase(member: AstMemberAccess): Option<AstDecl> {
+        if (let Some(baseExpr) <- member.baseExpr) {
+            let baseNode = Translator.GetDesugaredExpr(baseExpr)
+            if (let Some(refExpr) <- (baseNode as AstRefExpr)) {
+                if (refExpr.isThis || refExpr.isSuper) {
+                    return ResolveMemberTargetFromCurrentThis(member.field.Val(), refExpr.isSuper)
+                }
+            }
+            if (let Some(desugaredBase) <- (baseNode as AstExpr)) {
+                if (let Some(baseTy) <- desugaredBase.GetTy()) {
+                    return ResolveMemberTargetFromAstTy(baseTy, member.field.Val())
+                }
+            }
+        }
+        return None
+    }
+
+    private func ResolveMemberTargetFromCurrentThis(fieldName: String, isSuper: Bool): Option<AstDecl> {
+        if (let Some(funcDecl) <- currentAstFuncDecl) {
+            if (let Some(owner) <- funcDecl.outerDecl) {
+                if (isSuper) {
+                    if (let Some(classDecl) <- (owner as AstClassDecl)) {
+                        if (let Some(superDecl) <- classDecl.GetSuperClassDecl()) {
+                            return FindClassMemberDecl(superDecl, fieldName)
+                        }
+                    }
+                    return None
+                }
+                return FindMemberTargetInDecl(owner, fieldName)
+            }
+        }
+        return None
+    }
+
+    private func FindMemberTargetInDecl(owner: AstDecl, fieldName: String): Option<AstDecl> {
+        if (let Some(classDecl) <- (owner as AstClassDecl)) {
+            return FindClassMemberDecl(classDecl, fieldName)
+        }
+        if (let Some(structDecl) <- (owner as AstStructDecl)) {
+            return FindMemberDecl(structDecl.GetMemberDeclPtrs(), fieldName)
+        }
+        if (let Some(interfaceDecl) <- (owner as AstInterfaceDecl)) {
+            return FindMemberDecl(interfaceDecl.GetMemberDeclPtrs(), fieldName)
+        }
+        if (let Some(enumDecl) <- (owner as AstEnumDecl)) {
+            return FindMemberDecl(enumDecl.GetMemberDeclPtrs(), fieldName)
+        }
+        return None
+    }
+
+    private func ResolveMemberTargetFromAstTy(baseTy: AstTy, fieldName: String): Option<AstDecl> {
+        if (let Some(classTy) <- (baseTy as AstClassTy)) {
+            if (let Some(classDecl) <- classTy.decl) {
+                return FindClassMemberDecl(classDecl, fieldName)
+            }
+            if (let Some(classDecl) <- classTy.declPtr) {
+                return FindClassMemberDecl(classDecl, fieldName)
+            }
+        }
+        if (let Some(structTy) <- (baseTy as AstStructTy)) {
+            if (let Some(structDecl) <- structTy.decl) {
+                return FindMemberDecl(structDecl.GetMemberDeclPtrs(), fieldName)
+            }
+            if (let Some(structDecl) <- structTy.declPtr) {
+                return FindMemberDecl(structDecl.GetMemberDeclPtrs(), fieldName)
+            }
+        }
+        if (let Some(interfaceTy) <- (baseTy as AstInterfaceTy)) {
+            if (let Some(interfaceDecl) <- interfaceTy.decl) {
+                return FindMemberDecl(interfaceDecl.GetMemberDeclPtrs(), fieldName)
+            }
+            if (let Some(interfaceDecl) <- interfaceTy.declPtr) {
+                return FindMemberDecl(interfaceDecl.GetMemberDeclPtrs(), fieldName)
+            }
+        }
+        if (let Some(enumTy) <- (baseTy as AstEnumTy)) {
+            if (let Some(enumDecl) <- enumTy.decl) {
+                return FindMemberDecl(enumDecl.GetMemberDeclPtrs(), fieldName)
+            }
+            if (let Some(enumDecl) <- enumTy.declPtr) {
+                return FindMemberDecl(enumDecl.GetMemberDeclPtrs(), fieldName)
+            }
+        }
+        return None
+    }
+
+    private func FindClassMemberDecl(classDecl: AstClassDecl, fieldName: String): Option<AstDecl> {
+        var current: Option<AstClassDecl> = classDecl
+        while (let Some(currentDecl) <- current) {
+            if (let Some(found) <- FindMemberDecl(currentDecl.GetMemberDeclPtrs(), fieldName)) {
+                return found
+            }
+            current = currentDecl.GetSuperClassDecl()
+        }
+        return None
+    }
+
+    private func FindMemberDecl(members: ArrayList<AstDecl>, fieldName: String): Option<AstDecl> {
+        for (member in members) {
+            if (member.identifier.Val() == fieldName) {
+                return member
+            }
+        }
+        return None
     }
 
     private func UnwrapClassType(ty: Type): ClassType {
