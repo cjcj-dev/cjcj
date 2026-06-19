@@ -188,14 +188,7 @@ private func GenerateSourceGenericOfTypeInfo(cgMod: CGModule, chirTy: Type, i8Pt
         return unsafe { LLVMConstNull(i8PtrType) }
     }
     if (let Some(customTy) <- (chirTy as CustomType)) {
-        let typeTemplateTy = CGType.GetOrCreateTypeTemplateType(cgMod.GetLLVMContext())
-        let def = customTy.GetCustomTypeDef()
-        let typeTemplateName = if (def.GetPackageName().isEmpty()) {
-            def.GetSrcCodeIdentifier() + ".tt"
-        } else {
-            def.GetPackageName() + ":" + def.GetSrcCodeIdentifier() + ".tt"
-        }
-        let typeTemplate = GetOrInsertCodeGenGlobal(cgMod, typeTemplateName, typeTemplateTy)
+        let typeTemplate = EnsureSourceGenericTypeTemplate(cgMod, customTy)
         if (!typeTemplate.isNull()) {
             return unsafe { LLVMConstBitCast(typeTemplate, i8PtrType) }
         }
@@ -205,6 +198,56 @@ private func GenerateSourceGenericOfTypeInfo(cgMod: CGModule, chirTy: Type, i8Pt
         return unsafe { LLVMConstBitCast(typeTemplate, i8PtrType) }
     }
     return unsafe { LLVMConstNull(i8PtrType) }
+}
+
+private func EnsureSourceGenericTypeTemplate(cgMod: CGModule, customTy: CustomType): LLVMValueRef {
+    let typeTemplateTy = CGType.GetOrCreateTypeTemplateType(cgMod.GetLLVMContext())
+    let typeTemplateName = SourceGenericTypeTemplateName(customTy)
+    let typeTemplate = GetOrInsertCodeGenGlobal(cgMod, typeTemplateName, typeTemplateTy)
+    if (!typeTemplate.isNull() && unsafe { LLVMIsDeclaration(typeTemplate) } != 0) {
+        if (let Some(moduleHandle) <- cgMod.GetLLVMModule()) {
+            unsafe {
+                LLVMSetInitializer(typeTemplate,
+                    BuildSourceGenericTypeTemplateInitializer(cgMod, moduleHandle, customTy, typeTemplateTy,
+                        typeTemplateName))
+                LLVMSetLinkage(typeTemplate, LLVMLinkageValue(LLVMLinkage.LinkOnceODR))
+                LLVMSetGlobalConstant(typeTemplate, 1)
+            }
+        }
+    }
+    return typeTemplate
+}
+
+private func SourceGenericTypeTemplateName(customTy: CustomType): String {
+    let def = customTy.GetCustomTypeDef()
+    if (def.GetPackageName().isEmpty()) {
+        return def.GetSrcCodeIdentifier() + ".tt"
+    }
+    return def.GetPackageName() + ":" + def.GetSrcCodeIdentifier() + ".tt"
+}
+
+private func BuildSourceGenericTypeTemplateInitializer(cgMod: CGModule, moduleHandle: LLVMModuleHandle,
+    customTy: CustomType, typeTemplateTy: LLVMTypeRef, typeTemplateName: String): LLVMValueRef {
+    let context = cgMod.GetLLVMContext().raw
+    let i8Type = unsafe { LLVMInt8TypeInContext(context) }
+    let i16Type = unsafe { LLVMInt16TypeInContext(context) }
+    let i8PtrType = unsafe { LLVMPointerType(i8Type, 0u32) }
+    let extensionDefPtrPtrType = unsafe {
+        LLVMPointerType(CGType.GetOrCreateExtensionDefPtrType(cgMod.GetLLVMContext()), 0u32)
+    }
+    let values = ArrayList<LLVMValueRef>()
+    values.add(GenerateTypeInfoNameConstant(cgMod, moduleHandle, typeTemplateName))
+    values.add(unsafe { LLVMConstInt(i8Type, TypeInfoKind(customTy), 0) })
+    values.add(unsafe { LLVMConstInt(i8Type, 0u64, 0) })
+    values.add(unsafe { LLVMConstInt(i16Type, UInt64(customTy.GetCustomTypeDef().GetAllInstanceVarNum()), 0) })
+    values.add(unsafe { LLVMConstInt(i8Type, UInt64(customTy.GetCustomTypeDef().GetGenericTypeParams().size), 0) })
+    values.add(unsafe { LLVMConstNull(i8PtrType) })
+    values.add(unsafe { LLVMConstNull(i8PtrType) })
+    values.add(unsafe { LLVMConstNull(i8PtrType) })
+    values.add(unsafe { LLVMConstNull(i8PtrType) })
+    values.add(unsafe { LLVMConstNull(extensionDefPtrPtrType) })
+    values.add(unsafe { LLVMConstInt(i16Type, InheritedClassNumValue(customTy), 0) })
+    return TypeInfoConstStruct(typeTemplateTy, values)
 }
 
 private func GenerateTypeArgsOfTypeInfo(cgMod: CGModule, chirTy: Type, typeInfoName: String,
@@ -286,12 +329,8 @@ public func GetInstanceFieldTypes(chirTy: Type): ArrayList<Type> {
         return GetEnumTypeInfoFieldTypes(enumTy)
     }
     if (let Some(customTy) <- (chirTy as CustomType)) {
-        let genericParams = customTy.GetCustomTypeDef().GetGenericTypeParams()
-        let genericArgs = customTy.GetGenericArgs()
-        for (member in customTy.GetCustomTypeDef().GetAllInstanceVars()) {
-            if (!member.isStatic) {
-                result.add(SubstituteGenericFieldType(member.ty, genericParams, genericArgs))
-            }
+        for (fieldTy in customTy.GetInstantiatedMemberTys()) {
+            result.add(fieldTy)
         }
     }
     return result
