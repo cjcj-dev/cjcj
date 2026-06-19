@@ -654,8 +654,15 @@ public class Out64 {
     }
 }
 
+private func HashCodeAsUInt64(value: Int64): UInt64 {
+    if (value >= 0) {
+        return UInt64(value)
+    }
+    return 0x8000000000000000u64 + UInt64(value - Int64.Min)
+}
+
 public func HashString64(str: String): String {
-    return Out64(v: UInt64(str.hashCode()), start: false, finish: false).toString()
+    return Out64(v: HashCodeAsUInt64(Int64(str.hashCode())), start: false, finish: false).toString()
 }
 
 @When[os == "Linux"]

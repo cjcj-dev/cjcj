@@ -165,6 +165,8 @@ foreign {
     func LLVMTokenTypeInContext(context: LLVMContextRef): LLVMTypeRef
     func LLVMPointerType(elementType: LLVMTypeRef, addressSpace: UInt32): LLVMTypeRef
     func LLVMArrayType(elementType: LLVMTypeRef, elementCount: UInt32): LLVMTypeRef
+    func LLVMStructTypeInContext(context: LLVMContextRef, elementTypes: CPointer<LLVMTypeRef>,
+        elementCount: UInt32, packed: Int32): LLVMTypeRef
     func LLVMGetTypeByName2(context: LLVMContextRef, name: CString): LLVMTypeRef
     func LLVMStructCreateNamed(context: LLVMContextRef, name: CString): LLVMTypeRef
     func LLVMStructSetBody(structTy: LLVMTypeRef, elementTypes: CPointer<LLVMTypeRef>, elementCount: UInt32,
@@ -228,6 +230,14 @@ foreign {
     func LLVMConstInt(intType: LLVMTypeRef, value: UInt64, signExtend: Int32): LLVMValueRef
     func LLVMConstReal(realType: LLVMTypeRef, value: Float64): LLVMValueRef
     func LLVMConstStringInContext(context: LLVMContextRef, str: CString, length: UInt32, dontNullTerminate: Int32): LLVMValueRef
+    func LLVMConstNamedStruct(structTy: LLVMTypeRef, constantVals: CPointer<LLVMValueRef>,
+        count: UInt32): LLVMValueRef
+    func LLVMConstStructInContext(context: LLVMContextRef, constantVals: CPointer<LLVMValueRef>,
+        count: UInt32, packed: Int32): LLVMValueRef
+    func LLVMConstBitCast(constantVal: LLVMValueRef, toType: LLVMTypeRef): LLVMValueRef
+    func LLVMConstAddrSpaceCast(constantVal: LLVMValueRef, toType: LLVMTypeRef): LLVMValueRef
+    func LLVMConstInBoundsGEP2(ty: LLVMTypeRef, constantVal: LLVMValueRef, constantIndices: CPointer<LLVMValueRef>,
+        numIndices: UInt32): LLVMValueRef
     func LLVMGetMDKindIDInContext(context: LLVMContextRef, name: CString, nameLen: UInt32): UInt32
     func LLVMGetMDKindID(name: CString, nameLen: UInt32): UInt32
     func LLVMMDStringInContext2(context: LLVMContextRef, str: CString, length: UIntNative): LLVMMetadataRef

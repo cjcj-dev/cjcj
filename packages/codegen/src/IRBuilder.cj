@@ -404,6 +404,9 @@ public class IRBuilder2 <: Resource {
             return unsafe { LLVMConstInt(runeTy, UInt64(UInt32(runeLiteral.value)), 0) }
         }
         if (let Some(stringLiteral) <- (literal as StringLiteral)) {
+            if (resultType.IsString()) {
+                return CreateStringLiteral(stringLiteral.value)
+            }
             if (resultType.IsCString()) {
                 // A CString value is an i8* pointer to a NUL-terminated C-string. Materialize it as
                 // the first-byte pointer of a private constant global rather than an inline [N x i8]
@@ -430,13 +433,7 @@ public class IRBuilder2 <: Resource {
             }
         }
         if (let Some(stringLiteral) <- (literal as StringLiteral)) {
-            var result = LLVMNullValue()
-            try (valueCString = unsafe { LibC.mallocCString(stringLiteral.value) }.asResource()) {
-                result = unsafe {
-                    LLVMConstStringInContext(GetLLVMContext().raw, valueCString.value, UInt32(stringLiteral.value.size), 0)
-                }
-            }
-            return result
+            return CreateStringLiteral(stringLiteral.value)
         }
         return unsafe { LLVMConstNull(LLVMInt8TypeInContext(GetLLVMContext().raw)) }
     }
@@ -1047,6 +1044,8 @@ public class IRBuilder2 <: Resource {
             try (nameCString = unsafe { LibC.mallocCString(cjStringName) }.asResource()) {
                 result = unsafe { LLVMGetNamedGlobal(moduleHandle.raw, nameCString.value) }
                 if (result.isNull()) {
+                    let _ = CGArrayType.GenerateArrayLayoutTypeInfo(GetCGContext(), ARRAY_LAYOUT_PREFIX + "UInt8",
+                        unsafe { LLVMInt8TypeInContext(GetLLVMContext().raw) })
                     result = unsafe { LLVMAddGlobal(moduleHandle.raw, GetCGContext().GetCjStringType(), nameCString.value) }
                     unsafe {
                         LLVMSetGlobalConstant(result, 1)

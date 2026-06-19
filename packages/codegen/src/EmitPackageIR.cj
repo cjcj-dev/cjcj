@@ -24,6 +24,7 @@ public func GenPackageModules(chirData: CHIRData, options: GlobalOptions, enable
             EmitCJSDKVersion(cgMod)
             EmitMainFunctionIR(cgMod)
         }
+        InitializeCjStringLiteral(cgMod)
         cgMod.EraseUselessInstsAndDeclarations()
         cgMod.Opt()
     }
