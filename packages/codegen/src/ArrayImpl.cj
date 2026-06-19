@@ -186,7 +186,7 @@ public func GenerateStore(irBuilder: IRBuilder2, chirExpr: Expression): LLVMValu
     }
     let value = irBuilder.GetCGModule().MaterializeValue(irBuilder, valueOperand)
     let addr = irBuilder.GetCGModule().MaterializeValue(irBuilder, addrOperand)
-    return irBuilder.CreateStore(StoreValueForAddress(irBuilder, value), addr.GetRawValue())
+    return irBuilder.CreateStore(StoreValueForAddress(irBuilder, value, addr), addr.GetRawValue())
 }
 
 private func IsPointerLLVMValue(value: LLVMValueRef): Bool {
@@ -194,7 +194,11 @@ private func IsPointerLLVMValue(value: LLVMValueRef): Bool {
     return !rawTy.isNull() && unsafe { LLVMGetTypeKind(rawTy) } == 12
 }
 
-private func StoreValueForAddress(irBuilder: IRBuilder2, value: CGValue): LLVMValueRef {
+private func IsPointerLLVMType(ty: LLVMTypeRef): Bool {
+    return !ty.isNull() && unsafe { LLVMGetTypeKind(ty) } == 12
+}
+
+private func StoreValueForAddress(irBuilder: IRBuilder2, value: CGValue, addr: CGValue): LLVMValueRef {
     let raw = value.GetRawValue()
     if (!IsPointerLLVMValue(raw)) {
         return raw
@@ -202,6 +206,14 @@ private func StoreValueForAddress(irBuilder: IRBuilder2, value: CGValue): LLVMVa
     if (let Some(valueCGType) <- value.GetCGType()) {
         if (!valueCGType.IsReference() && valueCGType.GetOriginal().StripAllRefs().IsStruct()) {
             return irBuilder.CreateLoad(valueCGType.GetLLVMType(), raw, name: "store.value")
+        }
+    }
+    if (let Some(addrCGType) <- addr.GetCGType()) {
+        if (let Some(destCGType) <- addrCGType.GetPointerElementType()) {
+            let destTy = destCGType.GetLLVMType()
+            if (IsPointerLLVMType(destTy)) {
+                return irBuilder.CreateBitCast(raw, destTy, name: "store.ptr.cast")
+            }
         }
     }
     return raw
