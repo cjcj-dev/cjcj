@@ -305,11 +305,15 @@ public class Translator {
     }
 
     public func Visit(block: AstBlock): Option<Value> {
-        var lastValue: Option<Value> = None
-        for (node in block.body) {
-            lastValue = Translator.TranslateASTNode(node, this)
+        if (block.body.isEmpty()) {
+            return None
         }
-        return lastValue
+        var idx: Int64 = 0
+        while (idx + 1 < block.body.size) {
+            TranslateBlockNodeToDiscarded(block.body[idx])
+            idx++
+        }
+        return TranslateBlockNodeAsValue(block.body[idx])
     }
 
     public func Visit(expr: AstLitConstExpr): Option<Value> {
@@ -330,9 +334,10 @@ public class Translator {
         if (let Some(retExpr) <- expr.expr) {
             let value = Translator.TranslateASTNode(retExpr, this) ??
                 throw IllegalStateException("faithful AST2CHIR return expression produced no value")
+            StoreReturnValueIfNeeded(CurrentFunction(), value)
             UpdateDelayExitSignalForReturnIfNeeded()
-            builder.CreateExit(value, CurrentBlock())
-            return value
+            builder.CreateExit(None, CurrentBlock())
+            return None
         }
         UpdateDelayExitSignalForReturnIfNeeded()
         builder.CreateExit(None, CurrentBlock())
@@ -1060,20 +1065,38 @@ public class Translator {
         return RequireResult(builder.CreateField(builder.context.GetUInt64Ty(), value, path, CurrentBlock()))
     }
 
+    private func TranslateBlockNodeToDiscarded(node: AstNode): Unit {
+        let _ = Translator.TranslateASTNode(node, this)
+    }
+
+    private func TranslateBlockNodeAsValue(node: AstNode): Option<Value> {
+        let value = Translator.TranslateASTNode(node, this)
+        let nodePtr = Translator.GetDesugaredExpr(node)
+        return match (nodePtr.astKind) {
+            case ASTKind.VAR_DECL => None
+            case ASTKind.VAR_WITH_PATTERN_DECL => None
+            case ASTKind.ASSIGN_EXPR => None
+            case ASTKind.RETURN_EXPR => None
+            case _ => value
+        }
+    }
+
     private func CurrentFunction(): Function {
         return currentFunc ?? throw IllegalStateException("faithful AST2CHIR has no current function")
     }
 
     private func EmitImplicitFunctionExit(fn: Function, value: Option<Value>): Unit {
-        if (let Some(retTy) <- fn.GetReturnType()) {
-            if (!retTy.IsUnit() && !retTy.IsNothing()) {
-                if (let Some(retValue) <- value) {
-                    builder.CreateExit(retValue, CurrentBlock())
-                    return
-                }
-            }
+        if (let Some(retValue) <- value) {
+            StoreReturnValueIfNeeded(fn, retValue)
         }
         builder.CreateExit(None, CurrentBlock())
+    }
+
+    private func StoreReturnValueIfNeeded(fn: Function, value: Value): Unit {
+        if (let Some(returnLocation) <- fn.GetReturnValue()) {
+            builder.CreateStore(CastValueIfNeeded(value, RequireRefBaseType(returnLocation)), returnLocation,
+                CurrentBlock())
+        }
     }
 
     private func StoreIfResult(location: Option<Value>, value: Option<Value>): Unit {

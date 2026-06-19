@@ -152,6 +152,7 @@ public class CHIRBuilder {
         let expr = Store(value, location, parent)
         parent.AppendExpression(expr)
         context.RegisterExpression(expr)
+        CreateLocalVar(context.GetUnitTy(), "%${context.GetAllNodesNum()}", expr)
         return expr
     }
 
@@ -190,6 +191,7 @@ public class CHIRBuilder {
         let expr = StoreElementRef(value, location, path, parent)
         parent.AppendExpression(expr)
         context.RegisterExpression(expr)
+        CreateLocalVar(context.GetUnitTy(), "%${context.GetAllNodesNum()}", expr)
         return expr
     }
 
@@ -198,6 +200,7 @@ public class CHIRBuilder {
         let expr = StoreElementByName(value, location, names, parent)
         parent.AppendExpression(expr)
         context.RegisterExpression(expr)
+        CreateLocalVar(context.GetUnitTy(), "%${context.GetAllNodesNum()}", expr)
         return expr
     }
 
