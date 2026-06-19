@@ -1040,12 +1040,104 @@ private func ReplaceCallArgsWith(ce: CallExpr, args: ArrayList<FuncArg>): Unit {
 private func GenerateCallBaseTypeMapping(typeManager: TypeManager, ce: CallExpr): SubstPack {
     let typeMapping = SubstPack()
     if (let Some(base) <- ce.baseFunc) {
+        if (let Some(nameRef) <- (base as NameReferenceExpr)) {
+            if (!nameRef.instTys.isEmpty()) {
+                if (let Some(target) <- nameRef.GetTarget()) {
+                    GenerateTypeMapping(typeManager, typeMapping, GetRealTarget(target), nameRef.instTys)
+                }
+            }
+        }
         typeMapping.Merge(GenerateGenericTypeMapping(typeManager, base))
         if (let Some(baseTy) <- base.GetTy()) {
             typeManager.GenerateGenericMapping(typeMapping, baseTy)
         }
     }
     return typeMapping
+}
+
+private func HasRecordedCallTypeArgs(ce: CallExpr): Bool {
+    if (let Some(base) <- ce.baseFunc) {
+        if (!base.GetTypeArgs().isEmpty()) {
+            return true
+        }
+        if (let Some(nameRef) <- (base as NameReferenceExpr)) {
+            return !nameRef.instTys.isEmpty()
+        }
+    }
+    return false
+}
+
+private func AddCurrentGenericInstTyVars(typeManager: TypeManager, generic: Generic,
+    typeMapping: SubstPack, out: ArrayList<GenericsTy>): Unit {
+    for (param in generic.typeParameters) {
+        if (let Some(paramTy) <- param.GetTy()) {
+            if (let Some(genericTy) <- (paramTy as GenericsTy)) {
+                typeManager.MakeInstTyVar(typeMapping, genericTy)
+                if (let Some(instTy) <- typeMapping.u2i.Get(genericTy)) {
+                    if (let Some(instGenTy) <- (instTy as GenericsTy)) {
+                        out.add(instGenTy)
+                    }
+                }
+            }
+        }
+    }
+}
+
+private func InferGenericCallTypeMapping(typeManager: TypeManager, ce: CallExpr, fd: FuncDecl,
+    paramTys: ArrayList<Ty>, typeMapping: SubstPack): Bool {
+    if (HasRecordedCallTypeArgs(ce)) {
+        return true
+    }
+    let generic = GetCurrentGeneric(fd, ce) ?? return true
+    let tyVarsToSolve = ArrayList<GenericsTy>()
+    AddCurrentGenericInstTyVars(typeManager, generic, typeMapping, tyVarsToSolve)
+    if (tyVarsToSolve.isEmpty()) {
+        return true
+    }
+    let pack = LocTyArgSynArgPack()
+    for (tyVar in tyVarsToSolve) {
+        pack.tyVarsToSolve.add(tyVar)
+    }
+    var idx: Int64 = 0
+    while (idx < ce.args.size && idx < paramTys.size) {
+        let argTy = typeManager.ReplaceIdealTy(GetExprTy(ce.args[idx]))
+        let paramTy = typeManager.ApplySubstPack(paramTys[idx], typeMapping)
+        pack.argTys.add(argTy)
+        pack.paramTys.add(paramTy)
+        idx++
+    }
+    if (pack.argTys.size != paramTys.size || pack.argTys.size != ce.args.size) {
+        return false
+    }
+    if (let Some(subst) <- LocalTypeArgumentSynthesis(typeManager, pack).SynthesizeTypeArguments()) {
+        typeManager.PackMapping(typeMapping, subst)
+        return true
+    }
+    return false
+}
+
+private func FillTypeArgumentsTy(typeManager: TypeManager, fd: FuncDecl, ce: CallExpr,
+    typeMapping: SubstPack): Unit {
+    let generic = match (GetCurrentGeneric(fd, ce)) {
+        case Some(value) => value
+        case None => return
+    }
+    if (let Some(base) <- ce.baseFunc) {
+        if (let Some(ref) <- (base as NameReferenceExpr)) {
+            if (ref.GetTypeArgs().isEmpty()) {
+                ref.instTys.clear()
+            }
+            if (ref.instTys.isEmpty()) {
+                for (typeParam in generic.typeParameters) {
+                    if (let Some(paramTy) <- typeParam.GetTy()) {
+                        if (let Some(genericTy) <- (paramTy as GenericsTy)) {
+                            ref.instTys.add(typeManager.ApplySubstPack(genericTy, typeMapping))
+                        }
+                    }
+                }
+            }
+        }
+    }
 }
 
 private func CheckCallCompatible(typeManager: TypeManager, diag: Option<BasicDiagnosticEngine>, ce: CallExpr, fd: FuncDecl,
@@ -1107,6 +1199,9 @@ private func CheckCandidate(typeManager: TypeManager, diag: Option<BasicDiagnost
         return None
     }
     let typeMapping = GenerateCallBaseTypeMapping(typeManager, ce)
+    if (!InferGenericCallTypeMapping(typeManager, ce, fd, paramTyInArgOrder, typeMapping)) {
+        return None
+    }
     let unit = FunctionMatchingUnit(fd, paramTyInArgOrder, typeMapping)
     unit.argNameValid = argNamesValid
     if (!CheckCallCompatible(typeManager, diag, ce, fd, unit)) {
@@ -1355,6 +1450,7 @@ private func MatchFunctionForCall(typeManager: TypeManager, diag: Option<BasicDi
         ce.SetTy(GetCallTy(typeManager, ce, unit.fd, unit.typeMapping))
         ce.resolvedFunction = Some(unit.fd)
         UpdateCallTargets(ce, unit.fd)
+        FillTypeArgumentsTy(typeManager, unit.fd, ce, unit.typeMapping)
         if (PostCheckCallExpr(typeManager, diag, ce, unit)) {
             out.add(unit.fd)
         }
@@ -1452,7 +1548,16 @@ private func CheckFuncPtrCall(typeManager: TypeManager, diag: Option<BasicDiagno
             return false
         }
     }
-    ce.SetTy(typeManager.ApplySubstPack(funcTy.retTy, typeMapping))
+    if (let Some(base) <- ce.baseFunc) {
+        if (let Some(instFuncTy) <- (typeManager.ApplySubstPack(funcTy, typeMapping) as FuncTy)) {
+            base.SetTy(instFuncTy)
+            ce.SetTy(instFuncTy.retTy)
+        } else {
+            ce.SetTy(typeManager.ApplySubstPack(funcTy.retTy, typeMapping))
+        }
+    } else {
+        ce.SetTy(typeManager.ApplySubstPack(funcTy.retTy, typeMapping))
+    }
     if (let Some(targetTy) <- target) {
         if (!typeManager.IsSubtype(ce.GetTy() ?? TypeManager.GetInvalidTy(), targetTy)) {
             if (let Some(diagValue) <- diag) {
@@ -1566,14 +1671,6 @@ public func ChkCallExpr(typeManager: TypeManager, diag: Option<BasicDiagnosticEn
     if (ChkBuiltinCall(typeManager, target ?? TypeManager.GetInvalidTy(), ce)) {
         ce.callKind = CallKind.CALL_BUILTIN_FUNCTION
         return true
-    }
-    let base = ce.baseFunc.getOrThrow()
-    if (let Some(baseTy) <- base.GetTy()) {
-        if (baseTy.IsFunc()) {
-            if (let Some(funcTy) <- (baseTy as FuncTy)) {
-                return CheckFuncPtrCall(typeManager, diag, target, ce, funcTy)
-            }
-        }
     }
     let candidatesBefore = CollectCallBaseFuncCandidates(ce)
     let candidates = FilterCandidates(typeManager, diag, ce, candidatesBefore)
