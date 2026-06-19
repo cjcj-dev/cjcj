@@ -16,6 +16,15 @@ import cangjie_compiler::option.TripleInfo
 
 private let CJ_PERSONALITY_FUNC_NAME: String = "__cj_personality_v0$"
 
+public func SetCangjieGC(rawFunction: LLVMValueRef): Unit {
+    if (rawFunction.isNull()) {
+        return
+    }
+    try (gcName = unsafe { LibC.mallocCString("cangjie") }.asResource()) {
+        unsafe { LLVMSetGC(rawFunction, gcName.value) }
+    }
+}
+
 public open class CGValue {
     private var rawVal: LLVMValueRef
     private var cgType: Option<CGType>
@@ -134,6 +143,7 @@ public class CGModule {
         let cgFunc = CGFunction(rawFunction, cgFuncType, chirValue, this)
         ApplyFunctionABIAttributes(rawFunction, chirValue, cgFuncType)
         MaybeAttachExceptionPersonality(rawFunction, chirValue)
+        MaybeSetCangjieGC(rawFunction, chirValue)
         functions[name] = cgFunc
         valueMapping[name] = cgFunc
         return cgFunc
@@ -215,6 +225,19 @@ public class CGModule {
             }
         }
         SetExceptionIntrinsicPersonality(rawFunction)
+    }
+
+    private func MaybeSetCangjieGC(rawFunction: LLVMValueRef, chirValue: Value): Unit {
+        if (rawFunction.isNull()) {
+            return
+        }
+        if (let Some(chirTy) <- chirValue.GetType()) {
+            if (let Some(funcTy) <- (chirTy as FuncType)) {
+                if (!funcTy.IsCFunc()) {
+                    SetCangjieGC(rawFunction)
+                }
+            }
+        }
     }
 
     private func ApplyFunctionABIAttributes(rawFunction: LLVMValueRef, chirValue: Value, cgFuncType: CGType): Unit {

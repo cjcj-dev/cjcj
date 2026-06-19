@@ -122,6 +122,7 @@ private func CreateCJEntryFunction(cgMod: CGModule, moduleHandle: LLVMModuleHand
     i32Type: LLVMTypeRef): LLVMValueRef {
     let entryType = unsafe { LLVMFunctionType(i32Type, CPointer<LLVMTypeRef>(), 0u32, 0) }
     let entryFunc = GetOrInsertLLVMFunction(moduleHandle, CJ_ENTRY_FUNC_NAME, entryType)
+    SetCangjieGC(entryFunc)
     let zero = unsafe { LLVMConstInt(i32Type, 0u64, 0) }
     try (blockName = unsafe { LibC.mallocCString("entry") }.asResource(),
         callName = unsafe { LibC.mallocCString("") }.asResource()) {

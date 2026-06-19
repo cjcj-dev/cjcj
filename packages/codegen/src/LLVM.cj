@@ -187,6 +187,7 @@ foreign {
     func LLVMGetFirstFunction(module: LLVMModuleRef): LLVMValueRef
     func LLVMGetNextFunction(fn: LLVMValueRef): LLVMValueRef
     func LLVMDeleteFunction(fn: LLVMValueRef): Unit
+    func LLVMSetGC(fn: LLVMValueRef, name: CString): Unit
     func LLVMAddGlobal(module: LLVMModuleRef, globalType: LLVMTypeRef, name: CString): LLVMValueRef
     func LLVMGetNamedGlobal(module: LLVMModuleRef, name: CString): LLVMValueRef
     func LLVMGetFirstGlobal(module: LLVMModuleRef): LLVMValueRef
@@ -230,6 +231,7 @@ foreign {
     func LLVMConstInt(intType: LLVMTypeRef, value: UInt64, signExtend: Int32): LLVMValueRef
     func LLVMConstReal(realType: LLVMTypeRef, value: Float64): LLVMValueRef
     func LLVMConstStringInContext(context: LLVMContextRef, str: CString, length: UInt32, dontNullTerminate: Int32): LLVMValueRef
+    func LLVMConstArray(elementType: LLVMTypeRef, constantVals: CPointer<LLVMValueRef>, length: UInt32): LLVMValueRef
     func LLVMConstNamedStruct(structTy: LLVMTypeRef, constantVals: CPointer<LLVMValueRef>,
         count: UInt32): LLVMValueRef
     func LLVMConstStructInContext(context: LLVMContextRef, constantVals: CPointer<LLVMValueRef>,
