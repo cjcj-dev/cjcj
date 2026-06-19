@@ -26,6 +26,8 @@ public func GenPackageModules(chirData: CHIRData, options: GlobalOptions, enable
             SpecifyPackageInitFunc(cgMod)
         }
         InitializeCjStringLiteral(cgMod)
+        GenerateInterfaceExtensionDefs(cgMod)
+        RedefineTypeInfosForCustomDefs(cgMod)
         let keepTypesFunc = KeepSomeTypesManually(cgMod)
         EmitStaticGenericTIsAndLLVMUsed(cgMod, keepTypesFunc)
         cgMod.EraseUselessInstsAndDeclarations()
