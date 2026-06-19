@@ -53,6 +53,9 @@ public func GenerateApply(irBuilder: IRBuilder2, callee: Value, args: ArrayList<
     }
     if (let Some(calleeType) <- calleeValue.GetCGType()) {
         if (let Some(functionType) <- (calleeType as CGFunctionType)) {
+            if (let Some(funcTy) <- (functionType.GetOriginal() as FuncType)) {
+                return GenerateClosureApply(irBuilder, calleeValue, funcTy, argValues)
+            }
             return irBuilder.CreateCallOrInvoke(functionType, calleeValue.GetRawValue(), argValues, name: "call")
         }
     }
