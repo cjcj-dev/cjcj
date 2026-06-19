@@ -393,6 +393,27 @@ private func checkAndUpdateDeclTyWithNewTy(decl: Decl, specifiedTy: EnumTy, type
     }
 }
 
+private func recursiveElimFuncParamTys(body: FuncBody): ArrayList<Ty> {
+    let out = ArrayList<Ty>()
+    if (body.paramLists.isEmpty()) {
+        return out
+    }
+    for (param in body.paramLists[0].params) {
+        out.add(param.GetTy() ?? TypeManager.GetInvalidTy())
+    }
+    return out
+}
+
+private func refreshEnumCtorFuncTyAfterRecursiveElim(funcDecl: FuncDecl, typeManager: TypeManager): Unit {
+    let body = funcDecl.funcBody ?? return
+    let outer = funcDecl.outerDecl ?? return
+    let retTy = outer.GetTy() ?? TypeManager.GetInvalidTy()
+    let paramTys = recursiveElimFuncParamTys(body)
+    let ctorTy = typeManager.GetFunctionTy(paramTys.toArray(), retTy)
+    body.SetTy(ctorTy)
+    funcDecl.SetTy(ctorTy)
+}
+
 public func UpdateMemberVariableTy(decl: Decl, enumTy: EnumTy, typeManager: TypeManager): Unit {
     if (let Some(structDecl) <- (decl as StructDecl)) {
         if (let Some(body) <- structDecl.body) {
@@ -413,6 +434,7 @@ public func UpdateMemberVariableTy(decl: Decl, enumTy: EnumTy, typeManager: Type
                         }
                     }
                 }
+                refreshEnumCtorFuncTyAfterRecursiveElim(funcDecl, typeManager)
             }
         }
     }

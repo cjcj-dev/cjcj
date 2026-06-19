@@ -517,7 +517,8 @@ public func GetTyFromASTRefType(typeManager: TypeManager, ctx: ASTContext, rt: R
             return ty
         }
     }
-    let found = LookupTopLevel(typeManager, ctx, rt.ref.identifier.Val(), rt.scopeName, rt)
+    let lookupScope = if (rt.scopeName.isEmpty()) { TOPLEVEL_SCOPE_NAME } else { rt.scopeName }
+    let found = LookupTopLevel(typeManager, ctx, rt.ref.identifier.Val(), lookupScope, rt)
     let targets = rankTypeLookupTargets(found)
     if (targets.isEmpty()) {
         if (!ctx.packageDecls.isEmpty()) {

@@ -262,6 +262,8 @@ public class TypeChecker {
     }
 
     private func PostTypeCheck(activeContexts: ArrayList<ASTContext>): Unit {
+        let recursivePkgs = BuildRecursiveEliminationPackages(activeContexts)
+        PerformRecursiveTypesElimination(recursivePkgs, impl.typeManager)
         for (ctx in activeContexts) {
             if (let Some(pkg) <- contextPackage(ctx)) {
                 SetOverflowStrategyForPkg(pkg)
@@ -270,6 +272,28 @@ public class TypeChecker {
                 PerformDesugarAfterTypeCheck(impl.typeManager, pkg, options: GlobalOptions())
             }
         }
+    }
+
+    private func BuildRecursiveEliminationPackages(activeContexts: ArrayList<ASTContext>): ArrayList<PackageDecl> {
+        let out = ArrayList<PackageDecl>()
+        for (ctx in activeContexts) {
+            if (let Some(pkg) <- contextPackage(ctx)) {
+                AddRecursiveEliminationPackage(out, PackageDecl(pkg))
+            }
+            for (packageDecl in ctx.packageDecls) {
+                AddRecursiveEliminationPackage(out, packageDecl)
+            }
+        }
+        return out
+    }
+
+    private func AddRecursiveEliminationPackage(values: ArrayList<PackageDecl>, packageDecl: PackageDecl): Unit {
+        for (value in values) {
+            if (value.fullPackageName == packageDecl.fullPackageName) {
+                return
+            }
+        }
+        values.add(packageDecl)
     }
 
     private func GlobalOptions(): OptionGlobalOptions {
@@ -795,16 +819,27 @@ public class TypeChecker {
     }
 
     private func SynthesizeMatchChildren(ctx: ASTContext, matchExpr: MatchExpr): Unit {
+        var selectorTy: Option<Ty> = None
         if (let Some(selector) <- matchExpr.selector) {
             let _ = Synthesize(ctx, selector)
+            selectorTy = selector.GetTy()
         }
         for (matchCase in matchExpr.matchCases) {
+            let boundDecls = ArrayList<Decl>()
+            if (let Some(targetTy) <- selectorTy) {
+                if (Ty.IsTyCorrect(targetTy)) {
+                    matchCase.SetCtxExprForPatterns(matchExpr.selector.getOrThrow())
+                    let _ = ChkMatchCasePatterns(impl.typeManager, ctx, targetTy, matchCase, diag: impl.diag)
+                    CollectPatternBindings(matchCase.patterns, boundDecls)
+                }
+            }
             if (let Some(patternGuard) <- matchCase.patternGuard) {
                 let _ = Synthesize(ctx, patternGuard)
             }
             if (let Some(action) <- matchCase.exprOrDecls) {
                 let _ = SynthesizeBlock(ctx, action)
             }
+            RemovePatternBindings(ctx, boundDecls)
         }
         for (matchCaseOther in matchExpr.matchCaseOthers) {
             if (let Some(matchCaseExpr) <- matchCaseOther.matchExpr) {
@@ -812,6 +847,53 @@ public class TypeChecker {
             }
             if (let Some(otherAction) <- matchCaseOther.exprOrDecls) {
                 let _ = SynthesizeBlock(ctx, otherAction)
+            }
+        }
+    }
+
+    private func CollectPatternBinding(pattern: Pattern, out: ArrayList<Decl>): Unit {
+        if (let Some(varPattern) <- (pattern as VarPattern)) {
+            if (let Some(varDecl) <- varPattern.varDecl) {
+                out.add(varDecl)
+            }
+            return
+        }
+        if (let Some(varOrEnum) <- (pattern as VarOrEnumPattern)) {
+            if (let Some(inner) <- varOrEnum.pattern) {
+                CollectPatternBinding(inner, out)
+            }
+            return
+        }
+        if (let Some(enumPattern) <- (pattern as EnumPattern)) {
+            for (subPattern in enumPattern.patterns) {
+                CollectPatternBinding(subPattern, out)
+            }
+            return
+        }
+        if (let Some(tuplePattern) <- (pattern as TuplePattern)) {
+            for (subPattern2 in tuplePattern.patterns) {
+                CollectPatternBinding(subPattern2, out)
+            }
+            return
+        }
+        if (let Some(typePattern) <- (pattern as TypePattern)) {
+            if (let Some(inner2) <- typePattern.pattern) {
+                CollectPatternBinding(inner2, out)
+            }
+        }
+    }
+
+    private func CollectPatternBindings(patterns: ArrayList<Pattern>, out: ArrayList<Decl>): Unit {
+        for (pattern in patterns) {
+            CollectPatternBinding(pattern, out)
+        }
+    }
+
+    private func RemovePatternBindings(ctx: ASTContext, decls: ArrayList<Decl>): Unit {
+        for (decl in decls) {
+            let name = decl.identifier.Val()
+            if (!name.isEmpty() && name != INVALID_IDENTIFIER) {
+                ctx.RemoveDeclByName(Names(name, decl.scopeName), decl)
             }
         }
     }

@@ -7,6 +7,10 @@ import cangjie_compiler::basic.DiagKindRefactor as BasicDiagKindRefactor
 
 private let V_COMPILER: String = "v-compiler"
 
+private func BindingScopeName(scopeName: String): String {
+    return if (scopeName.isEmpty()) { TOPLEVEL_SCOPE_NAME } else { scopeName }
+}
+
 private func InvalidPatternTy(pattern: Pattern): Bool {
     pattern.SetTy(TypeManager.GetInvalidTy())
     return false
@@ -511,7 +515,7 @@ public func ChkVarPattern(ctx: ASTContext, target: Ty, pattern: VarPattern): Boo
     if (let Some(varDecl) <- pattern.varDecl) {
         let name = varDecl.identifier.Val()
         if (name != V_COMPILER) {
-            let decls = ctx.GetDeclsByName(Names(name, varDecl.scopeName))
+            let decls = ctx.GetDeclsByName(Names(name, BindingScopeName(varDecl.scopeName)))
             for (decl in decls) {
                 if (SameDecl(decl, varDecl)) {
                     continue
@@ -617,7 +621,7 @@ private func VarOrEnumPatternToVarPattern(pattern: VarOrEnumPattern): VarPattern
     varPattern.end = pattern.end
     if (let Some(varDecl) <- varPattern.varDecl) {
         CopyNodeWithFileID(varDecl, pattern)
-        varDecl.scopeName = pattern.scopeName
+        varDecl.scopeName = BindingScopeName(pattern.scopeName)
         varDecl.scopeLevel = pattern.scopeLevel
         varDecl.fullPackageName = pattern.GetFullPackageName()
     }
@@ -646,11 +650,11 @@ public func ChkVarOrEnumPattern(typeManager: TypeManager, ctx: ASTContext, targe
         let varPattern = VarOrEnumPatternToVarPattern(pattern)
         pattern.pattern = varPattern
         if (let Some(varDecl) <- varPattern.varDecl) {
-            ctx.AddDeclName(Names(pattern.identifier.Val(), pattern.scopeName), varDecl)
+            ctx.AddDeclName(Names(pattern.identifier.Val(), varDecl.scopeName), varDecl)
         }
         if (!ChkPattern(typeManager, ctx, target, varPattern)) {
             if (let Some(varDecl) <- varPattern.varDecl) {
-                ctx.RemoveDeclByName(Names(pattern.identifier.Val(), pattern.scopeName), varDecl)
+                ctx.RemoveDeclByName(Names(pattern.identifier.Val(), varDecl.scopeName), varDecl)
             }
             return InvalidPatternTy(pattern)
         }
