@@ -120,10 +120,13 @@ private func CreateFreshExceptionMatch(someTy: FuncTy, freshExc: VarDecl, noneBo
                     let somePattern = EnumPattern()
                     somePattern.constructor = someRef
                     somePattern.patterns.add(varPattern)
+                    somePattern.SetTy(enumTy)
                     let caseSome = CreateMatchCase(somePattern, CreateThrowExprFromPattern(varPattern))
 
                     let nonePattern = EnumPattern()
                     nonePattern.constructor = noneRef
+                    nonePattern.SetTy(enumTy)
+                    let matchTy = noneBody.GetTy() ?? TypeManager.GetInvalidTy()
                     let caseNone = CreateMatchCase(nonePattern, noneBody)
 
                     let matchCases = ArrayList<MatchCase>()
@@ -131,7 +134,7 @@ private func CreateFreshExceptionMatch(someTy: FuncTy, freshExc: VarDecl, noneBo
                     matchCases.add(caseNone)
                     let selector = CreateRefExpr(freshExc)
                     selector.SetTy(enumTy)
-                    let matchExpr = CreateMatchExpr(selector, matchCases, TypeManager.GetInvalidTy())
+                    let matchExpr = CreateMatchExpr(selector, matchCases, matchTy)
                     AddCurFile(matchExpr, file: freshExc.curFile)
                     return matchExpr
                 }
@@ -221,7 +224,7 @@ private func CreateTryInFinally(typeManager: TypeManager, exceptionDecl: ClassDe
                     let tryExpr = TryExpr()
                     tryExpr.tryBlock = CreateBlock(tryNodes, Some(TypeManager.GetPrimitiveTy(TypeKind.TYPE_UNIT)))
                     tryExpr.catchPatterns.add(CreateExceptionPattern(exceptionDecl, catchPattern))
-                    tryExpr.catchBlocks.add(CreateBlock(catchNodes, Some(TypeManager.GetInvalidTy())))
+                    tryExpr.catchBlocks.add(CreateBlock(catchNodes, Some(TypeManager.GetNothingTy())))
                     tryExpr.isDesugaredFromTryWithResources = true
                     CopyBasicInfo(resource, tryExpr)
                     tryExpr.SetTy(TypeManager.GetPrimitiveTy(TypeKind.TYPE_UNIT))

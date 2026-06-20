@@ -94,11 +94,98 @@ private class FaithfulLoopTarget {
     }
 }
 
+private func FaithfulLocalAstDeclStructuralKey(decl: AstDecl): String {
+    return "${ASTKindIndex(decl.astKind)}:" + decl.fullPackageName + ":" + decl.identifier.Val() + ":" +
+        decl.begin.hashCode().toString() + ":" + decl.end.hashCode().toString()
+}
+
+private func FaithfulLocalDefaultParamFunctionIdentity(decl: AstDecl): Option<String> {
+    if (!decl.TestAttr(AstAttribute.HAS_INITIAL)) {
+        return None
+    }
+    if (let Some(funcDecl) <- (decl as AstFuncDecl)) {
+        if (let Some(owner) <- funcDecl.ownerFunc) {
+            return Some(FaithfulLocalAstDeclStructuralKey(owner) + ":default-param:" + decl.identifier.Val())
+        }
+    }
+    return None
+}
+
+private func SameFaithfulLocalAstDecl(left: AstDecl, right: AstDecl): Bool {
+    if (let Some(leftKey) <- FaithfulLocalDefaultParamFunctionIdentity(left)) {
+        if (let Some(rightKey) <- FaithfulLocalDefaultParamFunctionIdentity(right)) {
+            return leftKey == rightKey
+        }
+        return false
+    }
+    if (FaithfulLocalDefaultParamFunctionIdentity(right).isSome()) {
+        return false
+    }
+    if (left.TestAttr(AstAttribute.IMPORTED) && right.TestAttr(AstAttribute.IMPORTED)) {
+        if (!left.rawMangleName.isEmpty() || !right.rawMangleName.isEmpty()) {
+            return left.rawMangleName == right.rawMangleName
+        }
+        if (!left.mangledName.isEmpty() || !right.mangledName.isEmpty()) {
+            return left.mangledName == right.mangledName
+        }
+    }
+    return ASTKindIndex(left.astKind) == ASTKindIndex(right.astKind) && left.identifier.Val() == right.identifier.Val() &&
+        left.fullPackageName == right.fullPackageName && left.begin.hashCode() == right.begin.hashCode() &&
+        left.end.hashCode() == right.end.hashCode()
+}
+
+private class FaithfulLocalValueEntry {
+    public let decl: AstDecl
+    public var value: Value
+
+    public init(decl: AstDecl, value: Value) {
+        this.decl = decl
+        this.value = value
+    }
+}
+
+private class FaithfulLocalValueMap {
+    private let values: ArrayList<FaithfulLocalValueEntry> = ArrayList<FaithfulLocalValueEntry>()
+
+    public init() {}
+
+    public func Set(decl: AstDecl, value: Value): Unit {
+        values.add(FaithfulLocalValueEntry(decl, value))
+    }
+
+    public func TryGet(decl: AstDecl): Option<Value> {
+        var idx = values.size - 1
+        while (idx >= 0) {
+            let entry = values[idx]
+            if (SameFaithfulLocalAstDecl(entry.decl, decl)) {
+                return entry.value
+            }
+            idx--
+        }
+        return None
+    }
+
+    public func Get(decl: AstDecl): Value {
+        return TryGet(decl) ??
+            throw IllegalStateException("faithful AST2CHIR localCache miss: ${decl.identifier.Val()}")
+    }
+
+    public func Mark(): Int64 {
+        return values.size
+    }
+
+    public func Restore(mark: Int64): Unit {
+        while (values.size > mark) {
+            values.remove(at: values.size - 1)
+        }
+    }
+}
+
 public class Translator {
     private let builder: CHIRBuilder
     private let chirTy: CHIRType
     private let globalSymbolTable: FaithfulAST2CHIRNodeMap
-    private let localValSymbolTable: FaithfulAST2CHIRNodeMap = FaithfulAST2CHIRNodeMap()
+    private let localValSymbolTable: FaithfulLocalValueMap = FaithfulLocalValueMap()
     private let exprValueTable: HashMap<String, Value> = HashMap<String, Value>()
     private var currentBlock: Option<Block> = None
     private var currentFunc: Option<Function> = None
@@ -895,8 +982,16 @@ public class Translator {
     }
 
     public func Visit(expr: AstTryExpr): Option<Value> {
-        if (!expr.resourceSpec.isEmpty() || !expr.handlers.isEmpty()) {
-            throw IllegalArgumentException("not yet ported in faithful AST2CHIR: try-with-resources/try-handle")
+        if (let Some(desugar) <- expr.desugarExpr) {
+            return Translator.TranslateASTNode(desugar, this)
+        }
+        if (!expr.resourceSpec.isEmpty()) {
+            throw IllegalArgumentException(
+                "faithful AST2CHIR try-with-resources reached CHIR without after-type-check desugar")
+        }
+        if (!expr.handlers.isEmpty()) {
+            throw IllegalArgumentException(
+                "faithful AST2CHIR try-handle reached CHIR without after-type-check desugar")
         }
         if (expr.catchBlocks.isEmpty() && expr.finallyBlock.isNone()) {
             throw IllegalStateException("faithful AST2CHIR TryExpr has neither catch nor finally")
@@ -2250,6 +2345,7 @@ public class Translator {
             IntrisicCallContext(kind: IntrinsicKind.BEGIN_CATCH, args: beginCatchArgs), CurrentBlock()))
         var idx: Int64 = 0
         while (idx < expr.catchPatterns.size && idx < expr.catchBlocks.size) {
+            let localScopeMark = localValSymbolTable.Mark()
             let (falseBlock, trueBlock) = TranslateExceptionPattern(expr.catchPatterns[idx], beginCatch)
             currentBlock = trueBlock
             BindExceptionPatternValues(expr.catchPatterns[idx], beginCatch)
@@ -2258,6 +2354,7 @@ public class Translator {
             if (CurrentBlock().GetTerminator().isNone()) {
                 builder.CreateGoTo(endBlock, CurrentBlock())
             }
+            localValSymbolTable.Restore(localScopeMark)
             currentBlock = falseBlock
             idx++
         }
@@ -2379,6 +2476,7 @@ public class Translator {
         var caseIndex: Int64 = 0
         while (caseIndex < expr.matchCases.size) {
             let matchCase = expr.matchCases[caseIndex]
+            let localScopeMark = localValSymbolTable.Mark()
             let bodyBlock = builder.CreateBlock(group)
             let nextBlock = builder.CreateBlock(group)
             let matchedBlock = if (matchCase.patternGuard.isSome()) { builder.CreateBlock(group) } else { bodyBlock }
@@ -2413,6 +2511,7 @@ public class Translator {
                 builder.CreateGoTo(endBlock, CurrentBlock())
             }
 
+            localValSymbolTable.Restore(localScopeMark)
             currentBlock = nextBlock
             caseIndex++
         }
