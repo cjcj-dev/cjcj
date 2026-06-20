@@ -17,6 +17,7 @@ import cangjie_compiler::ast.Expr as AstExpr
 import cangjie_compiler::ast.File as AstFile
 import cangjie_compiler::ast.FuncBody as AstFuncBody
 import cangjie_compiler::ast.FuncDecl as AstFuncDecl
+import cangjie_compiler::ast.FuncParam as AstFuncParam
 import cangjie_compiler::ast.GenericsTy as AstGenericsTy
 import cangjie_compiler::ast.LitConstExpr as AstLitConstExpr
 import cangjie_compiler::ast.LitConstKind as AstLitConstKind
@@ -44,13 +45,32 @@ private class FaithfulInitFileVars {
 
 private let FAITHFUL_USER_MAIN_NAME: String = "user.main"
 private let FAITHFUL_MANGLE_CANGJIE_PREFIX: String = "_C"
+private let FAITHFUL_MANGLE_SUFFIX: String = "E"
 private let FAITHFUL_MANGLE_GLOBAL_PACKAGE_INIT_PREFIX: String = "GP"
+private let FAITHFUL_MANGLE_FUNC_PARA_INIT_PREFIX: String = "PI"
 private let FAITHFUL_MANGLE_FUNC_PARAM_TYPE_PREFIX: String = "H"
 private let FAITHFUL_MANGLE_VOID_TY_SUFFIX: String = "v"
+private let FAITHFUL_MANGLE_TYPE_STRUCT_PREFIX: String = "R"
+private let FAITHFUL_MANGLE_TYPE_CLASS_PREFIX: String = "C"
+private let FAITHFUL_MANGLE_TYPE_ENUM_PREFIX: String = "N"
+private let FAITHFUL_MANGLE_TYPE_ARRAY_PREFIX: String = "A"
+private let FAITHFUL_MANGLE_POINTER_PREFIX: String = "P"
+private let FAITHFUL_MANGLE_VARRAY_PREFIX: String = "V"
+private let FAITHFUL_MANGLE_TUPLE_PREFIX: String = "T"
+private let FAITHFUL_MANGLE_GENERIC_TYPE_PREFIX: String = "G"
+private let FAITHFUL_MANGLE_GENERAL_FUNC_PREFIX: String = "F0"
+private let FAITHFUL_MANGLE_CFUNC_PREFIX: String = "FC"
+private let FAITHFUL_MANGLE_DOT_PREFIX: String = "."
+private let FAITHFUL_MANGLE_AT_PREFIX: String = "@"
+private let FAITHFUL_MANGLE_WILDCARD_PREFIX: String = "_"
 private let FAITHFUL_SPECIAL_NAME_FOR_INIT_FUNCTION: String = "ii"
 private let FAITHFUL_SPECIAL_NAME_FOR_INIT_LITERAL_FUNCTION: String = "il"
 private let FAITHFUL_SPECIAL_NAME_FOR_IMPORTS_INIT_FUNCTION: String = "fi"
 private let FAITHFUL_SPECIAL_NAME_FOR_LITERAL_IMPORTS_INIT_FUNCTION: String = "fl"
+
+private func FaithfulStartsWith(value: String, prefix: String): Bool {
+    return value.size >= prefix.size && value[0..prefix.size] == prefix
+}
 
 public class FaithfulAST2CHIRBuilder {
     private var builder: Option<CHIRBuilder> = None
@@ -1379,6 +1399,9 @@ public class FaithfulAST2CHIR {
     }
 
     private func EffectiveMangledName(decl: AstDecl): String {
+        if (let Some(name) <- EffectiveDefaultParamMangledName(decl)) {
+            return name
+        }
         if (decl.TestAttr(AstAttribute.IMPORTED) && !decl.rawMangleName.isEmpty()) {
             return decl.rawMangleName
         }
@@ -1401,10 +1424,240 @@ public class FaithfulAST2CHIR {
     }
 
     private func EffectiveRawMangledName(decl: AstDecl): String {
+        if (let Some(rawName) <- EffectiveDefaultParamRawName(decl)) {
+            return rawName
+        }
         if (!decl.rawMangleName.isEmpty()) {
             return decl.rawMangleName
         }
         return EffectiveMangledName(decl)
+    }
+
+    private func EffectiveDefaultParamMangledName(decl: AstDecl): Option<String> {
+        if (let Some(funcDecl) <- (decl as AstFuncDecl)) {
+            if (funcDecl.TestAttr(AstAttribute.HAS_INITIAL) && funcDecl.ownerFunc.isSome()) {
+                if (FaithfulStartsWith(funcDecl.mangledName,
+                    FAITHFUL_MANGLE_CANGJIE_PREFIX + FAITHFUL_MANGLE_FUNC_PARA_INIT_PREFIX)) {
+                    return Some(funcDecl.mangledName)
+                }
+                return Some(MangleDefaultParamFunction(funcDecl))
+            }
+        }
+        return None
+    }
+
+    private func EffectiveDefaultParamRawName(decl: AstDecl): Option<String> {
+        if (let Some(funcDecl) <- (decl as AstFuncDecl)) {
+            if (funcDecl.TestAttr(AstAttribute.HAS_INITIAL)) {
+                if (let Some(owner) <- funcDecl.ownerFunc) {
+                    if (!owner.rawMangleName.isEmpty()) {
+                        return Some(owner.rawMangleName)
+                    }
+                    if (!owner.mangledName.isEmpty()) {
+                        return Some(owner.mangledName)
+                    }
+                }
+                return EffectiveDefaultParamMangledName(decl)
+            }
+        }
+        return None
+    }
+
+    private func MangleDefaultParamFunction(funcDecl: AstFuncDecl): String {
+        let owner = funcDecl.ownerFunc ??
+            throw IllegalStateException("faithful AST2CHIR default parameter function has no owner")
+        return FAITHFUL_MANGLE_CANGJIE_PREFIX + FAITHFUL_MANGLE_FUNC_PARA_INIT_PREFIX +
+            MangleDefaultParamOwner(owner) + FAITHFUL_MANGLE_SUFFIX + MangleDefaultParamName(funcDecl.identifier.Val()) +
+            FAITHFUL_MANGLE_FUNC_PARAM_TYPE_PREFIX + MangleFuncDeclParamTypes(funcDecl)
+    }
+
+    private func MangleDefaultParamOwner(owner: AstFuncDecl): String {
+        let parts = ArrayList<AstDecl>()
+        var outerDecl = owner.outerDecl
+        while (let Some(outer) <- outerDecl) {
+            parts.add(outer)
+            outerDecl = outer.outerDecl
+        }
+        var idx = parts.size - 1
+        var out = FaithfulMangleName(EffectivePackageName(owner))
+        while (idx >= 0) {
+            out += FaithfulMangleName(parts[idx].identifier.Val())
+            idx--
+        }
+        out += FaithfulMangleName(owner.identifier.Val())
+        out += FAITHFUL_MANGLE_FUNC_PARAM_TYPE_PREFIX + MangleFuncDeclParamTypes(owner)
+        return out
+    }
+
+    private func MangleDefaultParamName(identifier: String): String {
+        var name = identifier
+        if (let Some(pos) <- identifier.indexOf(FAITHFUL_MANGLE_DOT_PREFIX)) {
+            name = identifier[0..pos]
+        }
+        return FaithfulMangleName(name)
+    }
+
+    private func MangleFuncDeclParamTypes(funcDecl: AstFuncDecl): String {
+        if (let Some(body) <- funcDecl.funcBody) {
+            if (!body.paramLists.isEmpty()) {
+                return MangleFuncParamList(body.paramLists[0].params)
+            }
+        }
+        return FAITHFUL_MANGLE_VOID_TY_SUFFIX
+    }
+
+    private func MangleFuncParamList(params: ArrayList<AstFuncParam>): String {
+        if (params.isEmpty()) {
+            return FAITHFUL_MANGLE_VOID_TY_SUFFIX
+        }
+        var out = ""
+        for (param in params) {
+            out += FaithfulMangleType(chirType.TranslateType(RequireAstTy(param)))
+        }
+        return out
+    }
+
+    private func FaithfulMangleName(value: String): String {
+        return value.size.toString() + value
+    }
+
+    private func FaithfulStripCangjiePrefix(value: String): String {
+        if (FaithfulStartsWith(value, FAITHFUL_MANGLE_CANGJIE_PREFIX)) {
+            return value[FAITHFUL_MANGLE_CANGJIE_PREFIX.size..]
+        }
+        return value
+    }
+
+    private func FaithfulCustomTypeIdentifier(def: CustomTypeDef): String {
+        let identifier = def.GetIdentifier()
+        if (FaithfulStartsWith(identifier, FAITHFUL_MANGLE_AT_PREFIX)) {
+            return identifier[FAITHFUL_MANGLE_AT_PREFIX.size..]
+        }
+        return FaithfulStripCangjiePrefix(identifier)
+    }
+
+    private func FaithfulDecimalToManglingNumber(decimal: String): String {
+        let base62Chars = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
+        var parsed: Int64 = 0
+        var decimalIdx: Int64 = 0
+        while (decimalIdx < decimal.size) {
+            let byte = decimal[decimalIdx]
+            if (byte < b'0' || byte > b'9') {
+                return ""
+            }
+            parsed = parsed * 10 + Int64(byte - b'0')
+            decimalIdx++
+        }
+        var num = parsed - 1
+        if (num < 0) {
+            return FAITHFUL_MANGLE_WILDCARD_PREFIX
+        }
+        var out = if (num > 0) { "" } else { "0" }
+        while (num > 0) {
+            let idx = num % base62Chars.size
+            out += base62Chars[idx..idx + 1]
+            num /= base62Chars.size
+        }
+        return out + FAITHFUL_MANGLE_WILDCARD_PREFIX
+    }
+
+    private func FaithfulPrimitiveTypeMangle(kind: TypeKind): String {
+        return match (kind) {
+            case TypeKind.TYPE_INT8 => "a"
+            case TypeKind.TYPE_INT16 => "s"
+            case TypeKind.TYPE_INT32 => "i"
+            case TypeKind.TYPE_INT64 => "l"
+            case TypeKind.TYPE_INT_NATIVE => "q"
+            case TypeKind.TYPE_UINT8 => "h"
+            case TypeKind.TYPE_UINT16 => "t"
+            case TypeKind.TYPE_UINT32 => "j"
+            case TypeKind.TYPE_UINT64 => "m"
+            case TypeKind.TYPE_UINT_NATIVE => "r"
+            case TypeKind.TYPE_FLOAT16 => "Dh"
+            case TypeKind.TYPE_FLOAT32 => "f"
+            case TypeKind.TYPE_FLOAT64 => "d"
+            case TypeKind.TYPE_RUNE => "c"
+            case TypeKind.TYPE_BOOLEAN => "b"
+            case TypeKind.TYPE_UNIT => "u"
+            case TypeKind.TYPE_NOTHING => "n"
+            case TypeKind.TYPE_CSTRING => "k"
+            case TypeKind.TYPE_VOID => "u"
+            case _ => ""
+        }
+    }
+
+    private func FaithfulMangleType(ty: Type): String {
+        let primitive = FaithfulPrimitiveTypeMangle(ty.GetTypeKind())
+        if (!primitive.isEmpty()) {
+            return primitive
+        }
+        if (let Some(tupleTy) <- (ty as TupleType)) {
+            let items = tupleTy.GetTypeArgs()
+            var out = FAITHFUL_MANGLE_TUPLE_PREFIX + FaithfulDecimalToManglingNumber(items.size.toString())
+            for (item in items) {
+                out += FaithfulMangleType(item)
+            }
+            return out + FAITHFUL_MANGLE_SUFFIX
+        }
+        if (let Some(structTy) <- (ty as StructType)) {
+            var out = FAITHFUL_MANGLE_TYPE_STRUCT_PREFIX + FaithfulCustomTypeIdentifier(structTy.GetCustomTypeDef())
+            for (arg in structTy.GetGenericArgs()) {
+                out += FaithfulMangleType(arg)
+            }
+            return out
+        }
+        if (let Some(enumTy) <- (ty as EnumType)) {
+            var out = FAITHFUL_MANGLE_TYPE_ENUM_PREFIX + FaithfulCustomTypeIdentifier(enumTy.GetCustomTypeDef())
+            for (arg in enumTy.GetGenericArgs()) {
+                out += FaithfulMangleType(arg)
+            }
+            return out
+        }
+        if (let Some(classTy) <- (ty as ClassType)) {
+            var out = FAITHFUL_MANGLE_TYPE_CLASS_PREFIX + FaithfulCustomTypeIdentifier(classTy.GetCustomTypeDef())
+            for (arg in classTy.GetGenericArgs()) {
+                out += FaithfulMangleType(arg)
+            }
+            return out
+        }
+        if (let Some(funcTy) <- (ty as FuncType)) {
+            var out = if (funcTy.IsCFunc()) { FAITHFUL_MANGLE_CFUNC_PREFIX } else {
+                FAITHFUL_MANGLE_GENERAL_FUNC_PREFIX
+            }
+            out += FaithfulMangleType(funcTy.GetReturnType())
+            let params = funcTy.GetParamTypes()
+            if (params.isEmpty()) {
+                return out + FAITHFUL_MANGLE_VOID_TY_SUFFIX + FAITHFUL_MANGLE_SUFFIX
+            }
+            for (param in params) {
+                out += FaithfulMangleType(param)
+            }
+            return out + FAITHFUL_MANGLE_SUFFIX
+        }
+        if (let Some(rawArrayTy) <- (ty as RawArrayType)) {
+            return FAITHFUL_MANGLE_TYPE_ARRAY_PREFIX + FaithfulDecimalToManglingNumber(rawArrayTy.GetDims().toString()) +
+                FaithfulMangleType(rawArrayTy.GetElementType())
+        }
+        if (let Some(refTy) <- (ty as RefType)) {
+            return FaithfulMangleType(refTy.GetBaseType())
+        }
+        if (let Some(varrayTy) <- (ty as VArrayType)) {
+            return FAITHFUL_MANGLE_VARRAY_PREFIX + FaithfulDecimalToManglingNumber(varrayTy.size.toString()) +
+                FaithfulMangleType(varrayTy.GetElementType())
+        }
+        if (let Some(pointerTy) <- (ty as CPointerType)) {
+            return FAITHFUL_MANGLE_POINTER_PREFIX + FaithfulMangleType(pointerTy.GetElementType())
+        }
+        if (let Some(genericTy) <- (ty as GenericType)) {
+            return FAITHFUL_MANGLE_GENERIC_TYPE_PREFIX + FaithfulMangleName(genericTy.GetSrcCodeIdentifier())
+        }
+        if (let Some(boxTy) <- (ty as BoxType)) {
+            return FAITHFUL_MANGLE_TYPE_CLASS_PREFIX + FaithfulMangleName("Box") + FaithfulMangleType(boxTy.GetBaseType())
+        }
+        if (let Some(thisTy) <- (ty as ThisType)) {
+            return FAITHFUL_MANGLE_TYPE_CLASS_PREFIX + FaithfulMangleName(thisTy.ToString())
+        }
+        return FaithfulMangleName(ty.ToString())
     }
 
     private func EffectiveFunctionIdentifier(funcDecl: AstFuncDecl): String {
@@ -1513,6 +1766,15 @@ public class FaithfulAST2CHIR {
     }
 
     private static func SameAstDecl(left: AstDecl, right: AstDecl): Bool {
+        if (let Some(leftKey) <- DefaultParamDeclIdentity(left)) {
+            if (let Some(rightKey) <- DefaultParamDeclIdentity(right)) {
+                return leftKey == rightKey
+            }
+            return false
+        }
+        if (DefaultParamDeclIdentity(right).isSome()) {
+            return false
+        }
         if (left.TestAttr(AstAttribute.IMPORTED) && right.TestAttr(AstAttribute.IMPORTED)) {
             if (!left.rawMangleName.isEmpty() || !right.rawMangleName.isEmpty()) {
                 return left.rawMangleName == right.rawMangleName
@@ -1524,6 +1786,20 @@ public class FaithfulAST2CHIR {
         return ASTKindIndex(left.astKind) == ASTKindIndex(right.astKind) &&
             left.identifier.Val() == right.identifier.Val() && left.fullPackageName == right.fullPackageName &&
             left.begin.hashCode() == right.begin.hashCode() && left.end.hashCode() == right.end.hashCode()
+    }
+
+    private static func DefaultParamDeclIdentity(decl: AstDecl): Option<String> {
+        if (!decl.TestAttr(AstAttribute.HAS_INITIAL)) {
+            return None
+        }
+        if (let Some(funcDecl) <- (decl as AstFuncDecl)) {
+            if (let Some(owner) <- funcDecl.ownerFunc) {
+                return Some(ASTKindIndex(owner.astKind).toString() + ":" + owner.fullPackageName + ":" +
+                    owner.identifier.Val() + ":" + owner.begin.hashCode().toString() + ":" +
+                    owner.end.hashCode().toString() + ":default-param:" + decl.identifier.Val())
+            }
+        }
+        return None
     }
 
     private static func SameAstFile(left: AstFile, right: AstFile): Bool {
