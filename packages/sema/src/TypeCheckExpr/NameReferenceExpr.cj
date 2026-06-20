@@ -61,10 +61,11 @@ func TcTargetReferenceTy(target: Decl): Option<Ty> {
 
 func TcSetTyFromTarget(typeManager: TypeManager, node: Node, target: Decl): Ty {
     if (let Some(targetTy) <- TcTargetReferenceTy(target)) {
+        let substitutedTy = typeManager.SubstituteTypeAliasInTy(targetTy)
         let instTy = if (let Some(expr) <- (node as Expr)) {
-            typeManager.ApplySubstPack(targetTy, GenerateGenericTypeMapping(typeManager, expr), ignoreUnsolved: true)
+            typeManager.ApplySubstPack(substitutedTy, GenerateGenericTypeMapping(typeManager, expr), ignoreUnsolved: true)
         } else {
-            targetTy
+            substitutedTy
         }
         node.SetTy(instTy)
         return instTy

@@ -42,7 +42,7 @@ public class CHIRBuilder {
     public func CreateFunction(funcType: FuncType, identifier: String, srcCodeIdentifier!: String = "",
         rawMangledName!: String = "", packageName!: String = "",
         genericTypeParams!: ArrayList<GenericType> = ArrayList<GenericType>()): Function {
-        let fn = Function(funcType, identifier, srcCodeIdentifier, rawMangledName, packageName,
+        let fn = Function(funcType, GLOBAL_VALUE_PREFIX + identifier, srcCodeIdentifier, rawMangledName, packageName,
             genericTypeParams: genericTypeParams)
         context.RegisterValue(fn)
         return fn
@@ -50,7 +50,7 @@ public class CHIRBuilder {
 
     public func CreateGlobalVar(ty: Type, identifier: String, srcCodeIdentifier!: String = "",
         rawMangledName!: String = "", packageName!: String = ""): GlobalVar {
-        let globalVar = GlobalVar(ty, identifier, srcCodeIdentifier, rawMangledName, packageName)
+        let globalVar = GlobalVar(ty, GLOBAL_VALUE_PREFIX + identifier, srcCodeIdentifier, rawMangledName, packageName)
         context.RegisterValue(globalVar)
         return globalVar
     }

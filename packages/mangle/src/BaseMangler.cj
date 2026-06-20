@@ -950,13 +950,16 @@ public open class BaseMangler {
     public func MangleGenericArgumentsHelper(decl: MangleDecl, genericsTypeStack: ArrayList<String>, declare: Bool,
         isCollectGTy!: Bool = true): String {
         let args = ArrayList<MangleType>()
+        var collectFuncGeneric = decl.astKind == ASTKind.FUNC_DECL
         if (let Some(ty) <- decl.semaTy) {
             if (!ty.IsFunc()) {
+                collectFuncGeneric = false
                 for (arg in ty.typeArgs) {
                     args.add(arg)
                 }
             }
-        } else if (decl.astKind == ASTKind.FUNC_DECL) {
+        }
+        if (collectFuncGeneric) {
             if (let Some(body) <- decl.funcBody) {
                 if (let Some(generic) <- body.generic) {
                     for (arg in generic.typeParameters) {

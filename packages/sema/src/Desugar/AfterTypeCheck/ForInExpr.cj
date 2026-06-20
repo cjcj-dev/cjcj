@@ -88,16 +88,7 @@ private func AddImportedDeclIfMissing(values: ArrayList<Decl>, decl: Decl): Unit
 }
 
 private func MarkImportedDeclUsed(decl: Decl): Unit {
-    if (!decl.TestAttr(Attribute.IMPORTED)) {
-        return
-    }
-    if (decl.isUsedImports) {
-        return
-    }
-    decl.isUsedImports = true
-    if (let Some(outer) <- decl.outerDecl) {
-        MarkImportedDeclUsed(outer)
-    }
+    let _ = decl
 }
 
 private func AddSyntheticImportedTarget(source: Node, decl: Decl): Unit {

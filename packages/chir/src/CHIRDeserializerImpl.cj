@@ -22,6 +22,13 @@ class CHIRDeserializerImpl {
         this.builder = builder
     }
 
+    private func GetMangleNameFromIdentifier(identifier: String): String {
+        if (identifier.startsWith(GLOBAL_VALUE_PREFIX)) {
+            return identifier[GLOBAL_VALUE_PREFIX.size..]
+        }
+        return identifier
+    }
+
     public func DeserializePackage(text: String): Package {
         let lines = text.split("\n")
         if (lines.isEmpty()) {
@@ -141,7 +148,7 @@ class CHIRDeserializerImpl {
         for (fields in globalRecords) {
             let globalTy = CHIRParseType(CHIRFieldAt(fields, 6), builder, customDefs)
             let ownerPackage = if (CHIRFieldAt(fields, 5).isEmpty()) { pkg.GetName() } else { CHIRFieldAt(fields, 5) }
-            let globalVar = builder.CreateGlobalVar(globalTy, CHIRFieldAt(fields, 2),
+            let globalVar = builder.CreateGlobalVar(globalTy, GetMangleNameFromIdentifier(CHIRFieldAt(fields, 2)),
                 srcCodeIdentifier: CHIRFieldAt(fields, 3), rawMangledName: CHIRFieldAt(fields, 4),
                 packageName: ownerPackage)
             CHIRApplyAnnoInfo(globalVar.GetAnnoInfo(), CHIRFieldAt(fields, 10))
@@ -165,8 +172,9 @@ class CHIRDeserializerImpl {
                 builder.context.GetFuncTy(ArrayList<Type>(), builder.context.GetInvalidTy())
             }
             let ownerPackage = if (CHIRFieldAt(fields, 5).isEmpty()) { pkg.GetName() } else { CHIRFieldAt(fields, 5) }
-            let fn = builder.CreateFunction(funcTy, CHIRFieldAt(fields, 2), srcCodeIdentifier: CHIRFieldAt(fields, 3),
-                rawMangledName: CHIRFieldAt(fields, 4), packageName: ownerPackage)
+            let fn = builder.CreateFunction(funcTy, GetMangleNameFromIdentifier(CHIRFieldAt(fields, 2)),
+                srcCodeIdentifier: CHIRFieldAt(fields, 3), rawMangledName: CHIRFieldAt(fields, 4),
+                packageName: ownerPackage)
             fn.SetFuncKind(CHIRFuncKindFromIndex(CHIRSafeI64(CHIRFieldAt(fields, 6))))
             CHIRApplyAnnoInfo(fn.GetAnnoInfo(), CHIRFieldAt(fields, 16))
             CHIRApplyBaseInfo(fn, CHIRFieldAt(fields, 17), CHIRFieldAt(fields, 18), annotationText: CHIRFieldAt(fields, 19))
@@ -985,15 +993,16 @@ class CHIRDeserializerImpl {
             } else if (parts[0] == "global" && parts.size >= 6) {
                 let ownerPackage = if (parts[4].isEmpty()) { pkg.GetName() } else { UnescapeV1Field(parts[4]) }
                 let globalVar = builder.CreateGlobalVar(CHIRParseType(UnescapeV1Field(parts[5]), builder, v1Defs),
-                    UnescapeV1Field(parts[1]), srcCodeIdentifier: UnescapeV1Field(parts[2]),
-                    rawMangledName: UnescapeV1Field(parts[3]), packageName: ownerPackage)
+                    GetMangleNameFromIdentifier(UnescapeV1Field(parts[1])),
+                    srcCodeIdentifier: UnescapeV1Field(parts[2]), rawMangledName: UnescapeV1Field(parts[3]),
+                    packageName: ownerPackage)
                 pkg.AddGlobalVar(globalVar)
             } else if (parts[0] == "function" && parts.size >= 8) {
                 let paramTypes = ParseV1TypeList(UnescapeV1Field(parts[7]), builder)
                 let returnTy = CHIRParseLegacyType(UnescapeV1Field(parts[6]), builder)
                 let ownerPackage = if (parts[4].isEmpty()) { pkg.GetName() } else { UnescapeV1Field(parts[4]) }
                 let funcTy = builder.context.GetFuncTy(paramTypes, returnTy)
-                let fn = builder.CreateFunction(funcTy, UnescapeV1Field(parts[1]),
+                let fn = builder.CreateFunction(funcTy, GetMangleNameFromIdentifier(UnescapeV1Field(parts[1])),
                     srcCodeIdentifier: UnescapeV1Field(parts[2]), rawMangledName: UnescapeV1Field(parts[3]),
                     packageName: ownerPackage)
                 fn.SetFuncKind(CHIRFuncKindFromIndex(Int64.parse(parts[5])))

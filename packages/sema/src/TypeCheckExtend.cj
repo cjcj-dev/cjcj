@@ -65,11 +65,26 @@ private func TypeCheckExtendAddUniqueTy(values: ArrayList<Ty>, candidate: Ty): U
 
 private func TypeCheckExtendHasSameDecl(values: ArrayList<Decl>, candidate: Decl): Bool {
     for (value in values) {
-        if (SameDecl(value, candidate)) {
+        if (TypeCheckExtendSameImportedAwareDecl(value, candidate)) {
             return true
         }
     }
     return false
+}
+
+private func TypeCheckExtendSameImportedAwareDecl(left: Decl, right: Decl): Bool {
+    if (left.TestAttr(Attribute.IMPORTED) && right.TestAttr(Attribute.IMPORTED)) {
+        if (!left.rawMangleName.isEmpty() || !right.rawMangleName.isEmpty()) {
+            return left.rawMangleName == right.rawMangleName
+        }
+        if (!left.mangledName.isEmpty() || !right.mangledName.isEmpty()) {
+            return left.mangledName == right.mangledName
+        }
+        if (!left.exportId.isEmpty() || !right.exportId.isEmpty()) {
+            return left.exportId == right.exportId
+        }
+    }
+    return SameDecl(left, right)
 }
 
 private func TypeCheckExtendAddUniqueDecl(values: ArrayList<Decl>, candidate: Decl): Unit {
@@ -89,7 +104,7 @@ private func TypeCheckExtendFindBuiltinEntry(tm: TypeManager, ty: Ty): Option<Ty
 
 private func TypeCheckExtendFindDeclEntry(tm: TypeManager, decl: InheritableDecl): Option<DeclExtendsEntry> {
     for (entry in tm.declToExtendMap) {
-        if (SameDecl(entry.decl, decl)) {
+        if (TypeCheckExtendSameImportedAwareDecl(entry.decl, decl)) {
             return Some(entry)
         }
     }
@@ -328,7 +343,7 @@ public func TypeCheckExtendUpdateExtendMap(tm: TypeManager, extends: ArrayList<E
 
 private func TypeCheckExtendContainsExtend(values: ArrayList<ExtendDecl>, candidate: ExtendDecl): Bool {
     for (value in values) {
-        if (SameDecl(value, candidate)) {
+        if (TypeCheckExtendSameImportedAwareDecl(value, candidate)) {
             return true
         }
     }

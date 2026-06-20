@@ -335,12 +335,22 @@ public class Translator {
 
     public func Visit(extendDecl: AstExtendDecl): Option<Value> {
         let def = RequireExtendDef(chirTy.GetGlobalNominalCache(extendDecl))
-        if (let Some(astTy) <- extendDecl.GetTy()) {
-            def.SetExtendedType(chirTy.TranslateType(astTy))
+        let extendedType = extendDecl.extendedType ??
+            throw IllegalStateException("faithful AST2CHIR ExtendDecl has no extendedType")
+        let translated = chirTy.TranslateType(RequireAstTy(extendedType))
+        let extendedTy = if (let Some(refTy) <- (translated as RefType)) {
+            refTy.GetBaseType()
+        } else {
+            translated
         }
+        def.SetExtendedType(extendedTy)
         for (member in extendDecl.members) {
+            if (member.IsCommonMatchedWithSpecific()) {
+                continue
+            }
             TranslateMemberDecl(def, member)
         }
+        SetImplementedInterfaces(def, extendDecl)
         return None
     }
 
@@ -504,8 +514,9 @@ public class Translator {
         let expectedParamTys = FuncParamTypes(expr, calleeDecl)
         AppendTranslatedCallArgs(expr, calleeDecl, argValues, expectedParamTys, ArrayList<Value>())
         let resultTy = chirTy.TranslateType(RequireAstTy(expr))
+        let instTypeArgs = TranslateFuncInstArgs(expr, calleeDecl)
         return CreateApplyMaybeWithException(resultTy, callee, FuncCallContext(args: argValues,
-            instTypeArgs: TranslateFuncInstArgs(expr, calleeDecl)))
+            instTypeArgs: instTypeArgs))
     }
 
     public func Visit(expr: AstLambdaExpr): Option<Value> {
@@ -3267,23 +3278,26 @@ public class Translator {
                 let parentTy = TranslateMemberOwnerType(calleeDecl)
                 let rtti = RequireResult(builder.CreateGetRTTIStatic(builder.context.GetUnitTy(),
                     parentTy.StripAllRefs(), CurrentBlock()))
+                let instTypeArgs = TranslateFuncInstArgs(expr, calleeDecl)
                 let invokeCtx = InvokeCallContext(rtti, FuncCallContext(args: argValues,
-                    instTypeArgs: TranslateFuncInstArgs(expr, calleeDecl), thisType: parentTy),
+                    instTypeArgs: instTypeArgs, thisType: parentTy),
                     FuncSigInfo(BuildMethodFuncType(expr, calleeDecl, parentTy), funcName: calleeDecl.identifier.Val()))
                 return CreateInvokeStaticMaybeWithException(resultTy, invokeCtx)
             }
             let obj = thisObj ?? throw IllegalStateException("faithful AST2CHIR virtual member call has no this object")
             let objTy = thisType ?? throw IllegalStateException("faithful AST2CHIR virtual member call this has no type")
+            let instTypeArgs = TranslateFuncInstArgs(expr, calleeDecl)
             let invokeCtx = InvokeCallContext(obj, FuncCallContext(args: argValues,
-                instTypeArgs: TranslateFuncInstArgs(expr, calleeDecl), thisType: objTy),
+                instTypeArgs: instTypeArgs, thisType: objTy),
                 FuncSigInfo(BuildMethodFuncType(expr, calleeDecl, objTy), funcName: calleeDecl.identifier.Val()))
             return CreateInvokeMaybeWithException(resultTy, invokeCtx)
         }
         if (let Some(obj) <- thisObj) {
             argValues.add(obj, at: 0)
         }
+        let instTypeArgs = TranslateFuncInstArgs(expr, calleeDecl)
         return CreateApplyMaybeWithException(resultTy, callee, FuncCallContext(args: argValues,
-            instTypeArgs: TranslateFuncInstArgs(expr, calleeDecl), thisType: thisType))
+            instTypeArgs: instTypeArgs, thisType: thisType))
     }
 
     private func TranslateFuncInstArgs(expr: AstCallExpr, calleeDecl: AstFuncDecl): ArrayList<Type> {
@@ -3291,34 +3305,11 @@ public class Translator {
         if (calleeDecl.TestAttr(AstAttribute.CONSTRUCTOR)) {
             return out
         }
-        if (calleeDecl.TestAttr(AstAttribute.ENUM_CONSTRUCTOR)) {
-            let resultArgs = TranslateEnumCtorInstArgsFromResult(expr, calleeDecl)
-            if (!resultArgs.isEmpty()) {
-                return resultArgs
-            }
-        }
         if (let Some(base) <- expr.baseFunc) {
             if (let Some(nameRef) <- (base as AstNameReferenceExpr)) {
                 for (instTy in nameRef.instTys) {
                     out.add(chirTy.TranslateType(instTy))
                 }
-            }
-        }
-        return out
-    }
-
-    private func TranslateEnumCtorInstArgsFromResult(expr: AstCallExpr, calleeDecl: AstFuncDecl): ArrayList<Type> {
-        let out = ArrayList<Type>()
-        let outer = calleeDecl.outerDecl ?? return out
-        let enumDecl = (outer as AstEnumDecl) ?? return out
-        if (let Some(astEnumTy) <- ((expr.GetTy() ?? AstTy.GetInitialTy()) as AstEnumTy)) {
-            if (let Some(tyDecl) <- astEnumTy.declPtr) {
-                if (!SameTranslatorAstDecl(tyDecl, enumDecl)) {
-                    return out
-                }
-            }
-            for (argTy in astEnumTy.typeArgs) {
-                out.add(chirTy.TranslateType(argTy))
             }
         }
         return out
@@ -4135,6 +4126,9 @@ public class Translator {
             throw IllegalStateException("faithful AST2CHIR value has no type: ${value.GetIdentifier()}")
         if (valueTy.IsEqual(expectedTy)) {
             return value
+        }
+        if (expectedTy.IsGenericRelated() && !valueTy.IsGenericRelated()) {
+            return RequireResult(builder.CreateTransformToGeneric(expectedTy, value, CurrentBlock()))
         }
         if (let Some(refTy) <- (valueTy as RefType)) {
             if (refTy.GetBaseType().IsEqual(expectedTy)) {

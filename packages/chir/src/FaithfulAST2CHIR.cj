@@ -15,13 +15,11 @@ import cangjie_compiler::ast.EnumDecl as AstEnumDecl
 import cangjie_compiler::ast.ExtendDecl as AstExtendDecl
 import cangjie_compiler::ast.Expr as AstExpr
 import cangjie_compiler::ast.File as AstFile
-import cangjie_compiler::ast.FuncBody as AstFuncBody
 import cangjie_compiler::ast.FuncDecl as AstFuncDecl
 import cangjie_compiler::ast.FuncParam as AstFuncParam
 import cangjie_compiler::ast.GenericsTy as AstGenericsTy
 import cangjie_compiler::ast.LitConstExpr as AstLitConstExpr
 import cangjie_compiler::ast.LitConstKind as AstLitConstKind
-import cangjie_compiler::ast.MainDecl as AstMainDecl
 import cangjie_compiler::ast.MemberAccess as AstMemberAccess
 import cangjie_compiler::ast.Node as AstNode
 import cangjie_compiler::ast.Package as AstPackage
@@ -98,6 +96,7 @@ public class FaithfulAST2CHIRBuilder {
 public class FaithfulAST2CHIR {
     private let builder: CHIRBuilder
     private let chirType: CHIRType
+    private let importedPackages: ArrayList<AstPackage>
     private var outputPackage: Option<Package> = None
     private var failure: Bool = false
     private var failureReason: String = ""
@@ -117,9 +116,11 @@ public class FaithfulAST2CHIR {
     private let genericNominalDecls: ArrayList<AstDecl> = ArrayList<AstDecl>()
     private let foreignFuncs: ArrayList<AstDecl> = ArrayList<AstDecl>()
 
-    public init(builder: CHIRBuilder, chirType: CHIRType) {
+    public init(builder: CHIRBuilder, chirType: CHIRType,
+        importedPkgs!: ArrayList<AstPackage> = ArrayList<AstPackage>()) {
         this.builder = builder
         this.chirType = chirType
+        this.importedPackages = importedPkgs
     }
 
     public func ToCHIRPackage(node: AstPackage): Bool {
@@ -156,20 +157,43 @@ public class FaithfulAST2CHIR {
     }
 
     private func CollectImportedDecls(node: AstPackage): Unit {
+        let mangledNameSet = HashSet<String>()
         for (decl in node.genericInstantiatedDecls) {
             if (let Some(genericDecl) <- decl.genericDecl) {
-                if (genericDecl.fullPackageName == node.fullPackageName) {
+                if (let Some(curFile) <- genericDecl.curFile) {
+                    if (let Some(curPackage) <- curFile.curPackage) {
+                        if (curPackage.fullPackageName == node.fullPackageName) {
+                            continue
+                        }
+                    }
+                }
+                if (let Some(genericFunc) <- (genericDecl as AstFuncDecl)) {
+                    if (let Some(outer) <- genericFunc.outerDecl) {
+                        if ((outer as AstFuncDecl).isSome()) {
+                            continue
+                        }
+                    }
+                }
+            }
+            if (decl.astKind != ASTKind.EXTEND_DECL) {
+                if (mangledNameSet.contains(decl.mangledName)) {
                     continue
                 }
+                mangledNameSet.add(decl.mangledName)
             }
             CollectDecls(decl, instantiated: true)
         }
-        for (decl in node.srcImportedNonGenericDecls) {
-            CollectImportedDeclUsedInCurPkg(decl)
-        }
-        for (decl in node.inlineFuncDecls) {
-            if (decl.fullPackageName != node.fullPackageName) {
-                CollectImportedDeclUsedInCurPkg(decl)
+        for (importedPackage in importedPackages) {
+            if (importedPackage.fullPackageName == node.fullPackageName) {
+                continue
+            }
+            for (file in importedPackage.files) {
+                for (decl in file.decls) {
+                    CollectImportedDeclUsedInCurPkg(decl)
+                }
+                for (decl in file.exportedInternalDecls) {
+                    CollectImportedDeclUsedInCurPkg(decl)
+                }
             }
         }
     }
@@ -302,7 +326,7 @@ public class FaithfulAST2CHIR {
             case ASTKind.FUNC_DECL =>
                 CollectFuncDecl(RequireFuncDecl(decl))
             case ASTKind.MAIN_DECL =>
-                CollectMainDecl(RequireMainDecl(decl))
+                CollectDesugarDecl(decl)
             case ASTKind.VAR_DECL =>
                 CollectVarandVarwithpatternDecl(decl)
             case ASTKind.VAR_WITH_PATTERN_DECL =>
@@ -365,8 +389,12 @@ public class FaithfulAST2CHIR {
         CollectDesugaredDefaultParams(funcDecl, globalAndMemberFuncs)
     }
 
-    private func CollectMainDecl(mainDecl: AstMainDecl): Unit {
-        CollectDeclToList(mainDecl, globalAndMemberFuncs)
+    private func CollectDesugarDecl(decl: AstDecl): Unit {
+        if (decl.astKind == ASTKind.MAIN_DECL) {
+            if (let Some(desugared) <- decl.GetDesugarDecl()) {
+                CollectFuncDecl(desugared)
+            }
+        }
     }
 
     private func CollectDesugaredDefaultParams(funcDecl: AstFuncDecl, list: ArrayList<AstDecl>): Unit {
@@ -400,8 +428,6 @@ public class FaithfulAST2CHIR {
         for (decl in globalAndMemberFuncs) {
             if (let Some(funcDecl) <- (decl as AstFuncDecl)) {
                 CreateFuncSignatureAndSetGlobalCache(funcDecl)
-            } else if (let Some(mainDecl) <- (decl as AstMainDecl)) {
-                CreateMainSignatureAndSetGlobalCache(mainDecl)
             } else {
                 throw IllegalArgumentException(
                     "faithful AST2CHIR expected function-like decl, got ${ASTKindName(decl.astKind)}")
@@ -554,14 +580,9 @@ public class FaithfulAST2CHIR {
 
     private func TranslateCustomTypeTyIfReady(decl: AstDecl): Option<Type> {
         if (decl.astKind == ASTKind.STRUCT_DECL || decl.astKind == ASTKind.CLASS_DECL ||
-            decl.astKind == ASTKind.INTERFACE_DECL || decl.astKind == ASTKind.ENUM_DECL ||
-            decl.astKind == ASTKind.EXTEND_DECL) {
+            decl.astKind == ASTKind.INTERFACE_DECL || decl.astKind == ASTKind.ENUM_DECL) {
             if (let Some(ty) <- decl.GetTy()) {
                 let translated = chirType.TranslateType(ty)
-                if (decl.astKind == ASTKind.EXTEND_DECL) {
-                    let def = RequireExtendDef(chirType.GetGlobalNominalCache(decl))
-                    def.SetExtendedType(translated)
-                }
                 return Some(translated)
             }
         }
@@ -1133,52 +1154,6 @@ public class FaithfulAST2CHIR {
         AddFunctionToPackage(fn)
     }
 
-    private func CreateMainSignatureAndSetGlobalCache(mainDecl: AstMainDecl): Unit {
-        let funcTy = MainFuncType(mainDecl)
-        let fn = builder.CreateFunction(funcTy, FAITHFUL_USER_MAIN_NAME, srcCodeIdentifier: "main",
-            rawMangledName: FAITHFUL_USER_MAIN_NAME, packageName: EffectivePackageName(mainDecl))
-        ApplyDeclAttrs(fn, mainDecl)
-        fn.SetFuncKind(FuncKind.MAIN_ENTRY)
-        let body = builder.CreateBlockGroup(fn)
-        fn.InitBody(body)
-        let entry = builder.CreateBlock(body)
-        body.SetEntryBlock(entry)
-        EnsureReturnSlot(fn, entry)
-        globalCache.Set(mainDecl, fn)
-        AddFunctionToPackage(fn)
-    }
-
-    private func MainFuncType(mainDecl: AstMainDecl): FuncType {
-        let funcBody = ResolveMainFuncBody(mainDecl) ??
-            throw IllegalStateException("faithful AST2CHIR MainDecl has no FuncBody")
-        if (let Some(bodyTy) <- funcBody.GetTy()) {
-            if (!AstTy.IsInitialTy(Some(bodyTy))) {
-                return RequireFuncType(chirType.TranslateType(bodyTy))
-            }
-        }
-        let returnTy = if (let Some(retType) <- funcBody.retType) {
-            if (AstTy.IsInitialTy(retType.GetTy())) {
-                builder.context.GetUnitTy()
-            } else {
-                chirType.TranslateType(retType.GetTy() ??
-                    throw IllegalStateException("faithful AST2CHIR MainDecl retType has no Ty"))
-            }
-        } else {
-            builder.context.GetUnitTy()
-        }
-        return builder.context.GetFuncTy(ArrayList<Type>(), returnTy)
-    }
-
-    private func ResolveMainFuncBody(mainDecl: AstMainDecl): Option<AstFuncBody> {
-        if (let Some(funcBody) <- mainDecl.funcBody) {
-            return funcBody
-        }
-        if (let Some(desugared) <- mainDecl.GetDesugarDecl()) {
-            return desugared.funcBody
-        }
-        return None
-    }
-
     private func CreateImportedFuncSignatureAndSetGlobalCache(funcDecl: AstFuncDecl): Unit {
         let funcTy = AdjustFuncType(funcDecl, RequireFuncType(chirType.TranslateType(RequireAstTy(funcDecl))))
         let fn = builder.CreateFunction(funcTy, EffectiveMangledName(funcDecl),
@@ -1401,9 +1376,6 @@ public class FaithfulAST2CHIR {
     private func EffectiveMangledName(decl: AstDecl): String {
         if (let Some(name) <- EffectiveDefaultParamMangledName(decl)) {
             return name
-        }
-        if (decl.TestAttr(AstAttribute.IMPORTED) && !decl.rawMangleName.isEmpty()) {
-            return decl.rawMangleName
         }
         if (decl.IsMemberDecl() && !decl.TestAttr(AstAttribute.IMPORTED)) {
             return EffectiveMemberMangledName(decl)
@@ -1712,11 +1684,6 @@ public class FaithfulAST2CHIR {
             throw IllegalArgumentException("faithful AST2CHIR expected func_decl, got ${ASTKindName(decl.astKind)}")
     }
 
-    private func RequireMainDecl(decl: AstDecl): AstMainDecl {
-        return (decl as AstMainDecl) ??
-            throw IllegalArgumentException("faithful AST2CHIR expected main_decl, got ${ASTKindName(decl.astKind)}")
-    }
-
     private func RequireVarDecl(decl: AstDecl): AstVarDecl {
         return (decl as AstVarDecl) ??
             throw IllegalArgumentException("faithful AST2CHIR expected var_decl, got ${ASTKindName(decl.astKind)}")
@@ -1740,10 +1707,6 @@ public class FaithfulAST2CHIR {
     private func RequireExtendDecl(decl: AstDecl): AstExtendDecl {
         return (decl as AstExtendDecl) ??
             throw IllegalArgumentException("faithful AST2CHIR expected extend_decl, got ${ASTKindName(decl.astKind)}")
-    }
-
-    private func RequireExtendDef(def: CustomTypeDef): ExtendDef {
-        return (def as ExtendDef) ?? throw IllegalStateException("faithful AST2CHIR expected ExtendDef")
     }
 
     private static func ContainsDecl(values: ArrayList<AstDecl>, decl: AstDecl): Bool {

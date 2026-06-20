@@ -156,8 +156,7 @@ private func SameAstTy(left: AstTy, right: AstTy): Bool {
     }
     if (let Some(leftGeneric) <- (left as AstGenericsTy)) {
         if (let Some(rightGeneric) <- (right as AstGenericsTy)) {
-            return SameAstGenericDeclOption(leftGeneric.decl, rightGeneric.decl) &&
-                SameAstTyList(leftGeneric.upperBounds, rightGeneric.upperBounds)
+            return leftGeneric.name == rightGeneric.name && SameAstGenericDeclOption(leftGeneric.decl, rightGeneric.decl)
         }
         return false
     }

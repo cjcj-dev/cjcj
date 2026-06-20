@@ -258,7 +258,7 @@ private class GenericInstantiationPass {
 
     private func InstantiatedFunctionIdentifier(source: Function, binding: GenericInstantiationBinding): String {
         let keyHash = PositiveHash(binding.Key(source))
-        return source.GetIdentifier() + "$gi$${keyHash}"
+        return source.GetIdentifierWithoutPrefix() + "$gi$${keyHash}"
     }
 
     private func PositiveHash(value: String): Int64 {

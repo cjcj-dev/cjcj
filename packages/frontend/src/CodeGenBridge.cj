@@ -23,12 +23,8 @@ import cangjie_compiler::option.MaybeUInt64
 public func BuildRealCHIRForASTPackage(instance: CompilerInstance, pkg: RealASTPackage): Option<RealCHIRPackage> {
     let builder = ChirBuilder(instance.chirData.GetRealCHIRContext())
     let chirType = CHIRType(builder, CHIRTypeCache())
-    let ast2chir = FaithfulAST2CHIR(builder, chirType)
+    let ast2chir = FaithfulAST2CHIR(builder, chirType, importedPkgs: instance.importManager.GetAllImportedPackages())
     if (!ast2chir.ToCHIRPackage(pkg)) {
-        if (instance.IsRealPipelineVerbose()) {
-            eprintln("[real-pipeline] faithful AST2CHIR failed for package '" + pkg.fullPackageName + "':")
-            eprintln(ast2chir.GetFailureReason())
-        }
         return None
     }
     let lowered = match (ast2chir.GetPackage()) {

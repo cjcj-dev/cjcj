@@ -19,6 +19,7 @@
   "cangjie_compiler::chir" = { path = "../chir" }
   "cangjie_compiler::codegen" = { path = "../codegen" }
   "cangjie_compiler::lex" = { path = "../lex" }
+  "cangjie_compiler::mangle" = { path = "../mangle" }
   "cangjie_compiler::meta_transformation" = { path = "../meta_transformation" }
   "cangjie_compiler::option" = { path = "../option" }
   "cangjie_compiler::parse" = { path = "../parse" }

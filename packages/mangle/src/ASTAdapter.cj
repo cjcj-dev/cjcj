@@ -100,6 +100,20 @@ private func CopyParamAttributes(source: FuncParam, target: MangleFuncParam): Un
     }
 }
 
+private func SameAdapterDecl(left: Decl, right: Decl): Bool {
+    if (left.astKind != right.astKind || left.begin != right.begin || left.end != right.end ||
+        left.identifier != right.identifier || left.fullPackageName != right.fullPackageName) {
+        return false
+    }
+    if (!left.rawMangleName.isEmpty() || !right.rawMangleName.isEmpty() ||
+        !left.mangledName.isEmpty() || !right.mangledName.isEmpty() ||
+        !left.exportId.isEmpty() || !right.exportId.isEmpty()) {
+        return left.rawMangleName == right.rawMangleName && left.mangledName == right.mangledName &&
+            left.exportId == right.exportId
+    }
+    return true
+}
+
 public class MangleAstAdapter {
     private let declPairs: ArrayList<AstDeclPair> = ArrayList<AstDeclPair>()
     private let lambdaPairs: ArrayList<AstLambdaPair> = ArrayList<AstLambdaPair>()
@@ -109,7 +123,7 @@ public class MangleAstAdapter {
 
     private func FindDecl(source: Decl): Option<MangleDecl> {
         for (pair in declPairs) {
-            if (SameDecl(pair.source, source)) {
+            if (SameAdapterDecl(pair.source, source)) {
                 return pair.target
             }
         }
@@ -150,7 +164,7 @@ public class MangleAstAdapter {
     private func SameNode(left: Node, right: Node): Bool {
         if (let Some(leftDecl) <- (left as Decl)) {
             if (let Some(rightDecl) <- (right as Decl)) {
-                return SameDecl(leftDecl, rightDecl)
+                return SameAdapterDecl(leftDecl, rightDecl)
             }
         }
         return left.astKind == right.astKind && left.begin == right.begin && left.end == right.end
