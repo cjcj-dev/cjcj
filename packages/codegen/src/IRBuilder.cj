@@ -627,6 +627,12 @@ public class IRBuilder2 <: Resource {
             return raw
         }
         if (paramTy.IsFunc()) {
+            if (let Some(funcTy) <- (paramTy as FuncType)) {
+                if (!funcTy.IsCFunc()) {
+                    return CreatePointerCast(raw, CGType.GetRefType(GetLLVMContext()),
+                        name: if (name.isEmpty()) { "fn.arg" } else { name + ".fn.arg" })
+                }
+            }
             let rawTy = unsafe { LLVMTypeOf(raw) }
             if (!rawTy.isNull() && unsafe { LLVMGetTypeKind(rawTy) } == 12) {
                 return CreateBitCast(raw, CGType.GetOrCreate(cgMod, paramTy).GetLLVMType(),
@@ -656,6 +662,16 @@ public class IRBuilder2 <: Resource {
             return CreateBitCast(raw, destPtrTy, name: if (name.isEmpty()) { "arg.cast" } else { name + ".arg.cast" })
         }
         let allocaName = if (name.isEmpty()) { "arg.addr" } else { name + ".arg.addr" }
+        if (let Some(argCGType) <- arg.GetCGType()) {
+            let argTy = argCGType.GetOriginal().StripAllRefs()
+            if ((argTy.IsStruct() || argTy.IsTuple()) && !argTy.IsEqual(derefParamTy)) {
+                let actualSlot = CreateEntryAlloca(argCGType, name: allocaName)
+                CreateStore(raw, actualSlot)
+                let destPtrTy = unsafe { LLVMPointerType(derefParamCGType.GetLLVMType(), 0u32) }
+                return CreatePointerCast(actualSlot, destPtrTy,
+                    name: if (name.isEmpty()) { "arg.addr.cast" } else { name + ".arg.addr.cast" })
+            }
+        }
         let slot = CreateEntryAlloca(derefParamCGType, name: allocaName)
         CreateStore(raw, slot)
         return slot
@@ -859,6 +875,76 @@ public class IRBuilder2 <: Resource {
             return LLVMNullValue()
         }
         return CreateCallOrInvoke(callee, calleeType, args, name: name)
+    }
+
+    public func CallGCWriteRef(value: LLVMValueRef, baseObject: LLVMValueRef, place: LLVMValueRef): LLVMValueRef {
+        let refTy = CGType.GetRefType(GetLLVMContext())
+        let refPlaceTy = unsafe { LLVMPointerType(refTy, 1u32) }
+        let args = ArrayList<LLVMValueRef>()
+        args.add(CreatePointerCast(value, refTy, name: "gcwrite.ref.value"))
+        args.add(CreatePointerCast(baseObject, refTy, name: "gcwrite.ref.base"))
+        args.add(CreatePointerCast(place, refPlaceTy, name: "gcwrite.ref.place"))
+        return CreateIntrinsicCall("llvm.cj.gcwrite.ref", ArrayList<LLVMTypeRef>(), args)
+    }
+
+    public func CallGCReadRef(baseObject: LLVMValueRef, place: LLVMValueRef): LLVMValueRef {
+        let refTy = CGType.GetRefType(GetLLVMContext())
+        let refPlaceTy = unsafe { LLVMPointerType(refTy, 1u32) }
+        let args = ArrayList<LLVMValueRef>()
+        args.add(CreatePointerCast(baseObject, refTy, name: "gcread.ref.base"))
+        args.add(CreatePointerCast(place, refPlaceTy, name: "gcread.ref.place"))
+        return CreateIntrinsicCall("llvm.cj.gcread.ref", ArrayList<LLVMTypeRef>(), args, name: "gcread.ref")
+    }
+
+    public func CallGCWriteStruct(baseObject: LLVMValueRef, dest: LLVMValueRef, source: LLVMValueRef,
+        size: LLVMValueRef, aggTypeName: String): LLVMValueRef {
+        let i8Type = unsafe { LLVMInt8TypeInContext(GetLLVMContext().raw) }
+        let destPtrTy = unsafe { LLVMPointerType(i8Type, 1u32) }
+        let sourceRawTy = unsafe { LLVMTypeOf(source) }
+        let sourceAddrSpace = if (!sourceRawTy.isNull() && unsafe { LLVMGetTypeKind(sourceRawTy) } == 12) {
+            unsafe { LLVMGetPointerAddressSpace(sourceRawTy) }
+        } else {
+            0u32
+        }
+        let sourcePtrTy = unsafe { LLVMPointerType(i8Type, sourceAddrSpace) }
+        let i64Type = unsafe { LLVMInt64TypeInContext(GetLLVMContext().raw) }
+        let overloadedTypes = ArrayList<LLVMTypeRef>()
+        overloadedTypes.add(sourcePtrTy)
+        overloadedTypes.add(i64Type)
+        let args = ArrayList<LLVMValueRef>()
+        args.add(CreatePointerCast(baseObject, CGType.GetRefType(GetLLVMContext()), name: "gcwrite.struct.base"))
+        args.add(CreatePointerCast(dest, destPtrTy, name: "gcwrite.struct.dest"))
+        args.add(CreatePointerCast(source, sourcePtrTy, name: "gcwrite.struct.source"))
+        args.add(size)
+        let call = CreateIntrinsicCall("llvm.cj.gcwrite.struct", overloadedTypes, args)
+        let metadata = LLVMCreateMDTupleFromString(GetLLVMContext(), aggTypeName)
+        LLVMSetInstructionMetadata(GetLLVMContext(), call, "AggType", metadata)
+        return call
+    }
+
+    public func CallGCReadStruct(dest: LLVMValueRef, baseObject: LLVMValueRef, source: LLVMValueRef,
+        size: LLVMValueRef, aggTypeName: String): LLVMValueRef {
+        let i8Type = unsafe { LLVMInt8TypeInContext(GetLLVMContext().raw) }
+        let destRawTy = unsafe { LLVMTypeOf(dest) }
+        let destAddrSpace = if (!destRawTy.isNull() && unsafe { LLVMGetTypeKind(destRawTy) } == 12) {
+            unsafe { LLVMGetPointerAddressSpace(destRawTy) }
+        } else {
+            0u32
+        }
+        let destPtrTy = unsafe { LLVMPointerType(i8Type, destAddrSpace) }
+        let sourcePtrTy = unsafe { LLVMPointerType(i8Type, 1u32) }
+        let i64Type = unsafe { LLVMInt64TypeInContext(GetLLVMContext().raw) }
+        let overloadedTypes = ArrayList<LLVMTypeRef>()
+        overloadedTypes.add(i64Type)
+        let args = ArrayList<LLVMValueRef>()
+        args.add(CreatePointerCast(dest, destPtrTy, name: "gcread.struct.dest"))
+        args.add(CreatePointerCast(baseObject, CGType.GetRefType(GetLLVMContext()), name: "gcread.struct.base"))
+        args.add(CreatePointerCast(source, sourcePtrTy, name: "gcread.struct.source"))
+        args.add(size)
+        let call = CreateIntrinsicCall("llvm.cj.gcread.struct", overloadedTypes, args)
+        let metadata = LLVMCreateMDTupleFromString(GetLLVMContext(), aggTypeName)
+        LLVMSetInstructionMetadata(GetLLVMContext(), call, "AggType", metadata)
+        return call
     }
 
     public func CreateGEP(elementType: LLVMTypeRef, pointer: LLVMValueRef, indices: ArrayList<LLVMValueRef>,

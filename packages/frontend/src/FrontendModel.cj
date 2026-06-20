@@ -1267,6 +1267,38 @@ private class CjoSignatureMaterializer {
         return ParseType(signature, pos)
     }
 
+    private func IsFunctionTypeAnnotationBoundary(signature: String, pos: Int64): Bool {
+        if (pos >= signature.size) {
+            return true
+        }
+        if (signature[pos] == b'!') {
+            return true
+        }
+        return pos + 1 < signature.size && signature[pos] == b'$' && signature[pos + 1] == b'$'
+    }
+
+    private func ParseFunctionTypeAnnotation(signature: String, start: Int64): ParsedType {
+        if (start >= signature.size || signature[start] != b'F') {
+            return ParsedType(false, InvalidTy(), start)
+        }
+        var pos = start + 1
+        let ret = ParseType(signature, pos)
+        if (!ret.ok) {
+            return ParsedType(false, InvalidTy(), start)
+        }
+        pos = ret.next
+        let params = ArrayList<Ty>()
+        while (pos < signature.size && !IsFunctionTypeAnnotationBoundary(signature, pos)) {
+            let parsed = ParseType(signature, pos)
+            if (!parsed.ok || parsed.next <= pos) {
+                return ParsedType(false, InvalidTy(), start)
+            }
+            params.add(parsed.ty)
+            pos = parsed.next
+        }
+        return ParsedType(true, FuncTy(params.toArray(), ret.ty), pos)
+    }
+
     private func ParseType(signature: String, start: Int64): ParsedType {
         if (start >= signature.size) {
             return ParsedType(false, InvalidTy(), start)
@@ -1310,8 +1342,7 @@ private class CjoSignatureMaterializer {
         if (marker == b'f') { return ParsedType(true, PrimitiveTy(TypeKind.TYPE_FLOAT32), start + 1) }
         if (marker == b'd') { return ParsedType(true, PrimitiveTy(TypeKind.TYPE_FLOAT64), start + 1) }
         if (marker == b'F') {
-            let parsedFunc = ParseFunctionType(signature, start)
-            return ParsedType(parsedFunc[0], FuncTy(parsedFunc[1].toArray(), parsedFunc[2]), signature.size)
+            return ParseFunctionTypeAnnotation(signature, start)
         }
         return ParsedType(false, InvalidTy(), start)
     }

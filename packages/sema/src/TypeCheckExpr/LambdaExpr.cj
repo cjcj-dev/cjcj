@@ -239,10 +239,6 @@ private func CheckLambdaParamsAgainstTarget(typeManager: TypeManager, le: Lambda
                 } else {
                     return false
                 }
-            } else if (let Some(existingTy) <- param.GetTy()) {
-                if (Ty.IsTyCorrect(existingTy) && !existingTy.IsAny()) {
-                    paramTy = existingTy
-                }
             }
             param.SetTy(paramTy)
             if (!typeManager.IsSubtype(targetParamTy, paramTy, implicitBoxed: false, allowOptionBox: false)) {

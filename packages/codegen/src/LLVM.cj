@@ -169,6 +169,7 @@ foreign {
         elementCount: UInt32, packed: Int32): LLVMTypeRef
     func LLVMGetTypeByName2(context: LLVMContextRef, name: CString): LLVMTypeRef
     func LLVMStructCreateNamed(context: LLVMContextRef, name: CString): LLVMTypeRef
+    func LLVMGetStructName(structTy: LLVMTypeRef): CString
     func LLVMStructSetBody(structTy: LLVMTypeRef, elementTypes: CPointer<LLVMTypeRef>, elementCount: UInt32,
         packed: Int32): Unit
     func LLVMFunctionType(returnType: LLVMTypeRef, paramTypes: CPointer<LLVMTypeRef>, paramCount: UInt32, isVarArg: Int32): LLVMTypeRef

@@ -5,8 +5,35 @@ import std.collection.*
 import cangjie_compiler::ast.ASTKindIndex
 import cangjie_compiler::ast.Attribute as AstAttribute
 import cangjie_compiler::ast.Decl as AstDecl
+import cangjie_compiler::ast.FuncDecl as AstFuncDecl
+
+private func FaithfulAstDeclStructuralKey(decl: AstDecl): String {
+    return "${ASTKindIndex(decl.astKind)}:" + decl.fullPackageName + ":" + decl.identifier.Val() + ":" +
+        decl.begin.hashCode().toString() + ":" + decl.end.hashCode().toString()
+}
+
+private func DefaultParamFunctionIdentity(decl: AstDecl): Option<String> {
+    if (!decl.TestAttr(AstAttribute.HAS_INITIAL)) {
+        return None
+    }
+    if (let Some(funcDecl) <- (decl as AstFuncDecl)) {
+        if (let Some(owner) <- funcDecl.ownerFunc) {
+            return Some(FaithfulAstDeclStructuralKey(owner) + ":default-param:" + decl.identifier.Val())
+        }
+    }
+    return None
+}
 
 private func SameFaithfulAstDecl(left: AstDecl, right: AstDecl): Bool {
+    if (let Some(leftKey) <- DefaultParamFunctionIdentity(left)) {
+        if (let Some(rightKey) <- DefaultParamFunctionIdentity(right)) {
+            return leftKey == rightKey
+        }
+        return false
+    }
+    if (DefaultParamFunctionIdentity(right).isSome()) {
+        return false
+    }
     if (left.TestAttr(AstAttribute.IMPORTED) && right.TestAttr(AstAttribute.IMPORTED)) {
         if (!left.rawMangleName.isEmpty() || !right.rawMangleName.isEmpty()) {
             return left.rawMangleName == right.rawMangleName

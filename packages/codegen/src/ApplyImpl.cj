@@ -58,7 +58,13 @@ private func GenerateApply(irBuilder: IRBuilder2, callee: Value, args: ArrayList
         typeInfo.isStaticMethod = isStaticMethodType
         if (let Some(instCGFuncTy) <- (CGType.GetOrCreate(irBuilder.GetCGModule(), instFuncTy,
             extraInfo: typeInfo) as CGFunctionType)) {
-            let typedCallee = irBuilder.CreateBitCast(calleeValue.GetRawValue(), instCGFuncTy.GetLLVMType(),
+            let rawCallee = if (let Some(cgFunctionValue) <- (calleeValue as CGFunction)) {
+                cgFunctionValue.GetRawFunction()
+            } else {
+                calleeValue.GetRawValue()
+            }
+            let typedCallee = irBuilder.CreateBitCast(rawCallee,
+                unsafe { LLVMPointerType(instCGFuncTy.GetLLVMFunctionType(), 0u32) },
                 name: "call.callee")
             return irBuilder.CreateCallOrInvokeWithMethodTypeInfo(instCGFuncTy, typedCallee, argValues,
                 methodTypeInfoArg, name: "call")
