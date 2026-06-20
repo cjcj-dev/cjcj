@@ -270,7 +270,7 @@ private func EnsureSourceGenericTypeTemplate(cgMod: CGModule, customTy: CustomTy
                     BuildSourceGenericTypeTemplateInitializer(cgMod, moduleHandle, customTy, typeTemplateTy,
                         typeTemplateName))
                 LLVMSetLinkage(typeTemplate, LLVMLinkageValue(LLVMLinkage.LinkOnceODR))
-                LLVMSetGlobalConstant(typeTemplate, 1)
+                LLVMSetGlobalConstant(typeTemplate, 0)
             }
         }
     }
@@ -299,7 +299,7 @@ private func BuildSourceGenericTypeTemplateInitializer(cgMod: CGModule, moduleHa
     values.add(unsafe { LLVMConstInt(i8Type, TypeInfoKind(customTy), 0) })
     values.add(unsafe { LLVMConstInt(i8Type, 0u64, 0) })
     values.add(unsafe { LLVMConstInt(i16Type, UInt64(customTy.GetCustomTypeDef().GetAllInstanceVarNum()), 0) })
-    values.add(unsafe { LLVMConstInt(i8Type, UInt64(customTy.GetCustomTypeDef().GetGenericTypeParams().size), 0) })
+    values.add(unsafe { LLVMConstInt(i16Type, UInt64(customTy.GetCustomTypeDef().GetGenericTypeParams().size), 0) })
     values.add(unsafe { LLVMConstNull(i8PtrType) })
     values.add(unsafe { LLVMConstNull(i8PtrType) })
     values.add(unsafe { LLVMConstNull(i8PtrType) })

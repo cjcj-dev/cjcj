@@ -10,6 +10,16 @@ import cangjie_compiler::chir.Type
 
 private let EXTENSION_DEFS_NAME: String = "NonExternalExtensionDefs"
 
+private class InterfaceFunctionEntry {
+    public let implementation: Option<Function>
+    public let expected: Option<Function>
+
+    public init(implementation: Option<Function>, expected: Option<Function>) {
+        this.implementation = implementation
+        this.expected = expected
+    }
+}
+
 public func GenerateInterfaceExtensionDefs(cgMod: CGModule): Unit {
     for (def in cgMod.GetCGContext().GetSubCHIRPackage().chirCustomDefs) {
         if (def.TestAttr(Attribute.IMPORTED)) {
@@ -31,6 +41,9 @@ public func RedefineTypeInfosForCustomDefs(cgMod: CGModule): Unit {
             continue
         }
         if (let Some(ty) <- def.GetType()) {
+            if (ty.IsGenericRelated()) {
+                continue
+            }
             RedefineTypeInfoGlobal(cgMod, ty)
         }
     }
@@ -53,7 +66,7 @@ private func GenerateExtensionDefsForClassLike(cgMod: CGModule, def: ClassDef): 
         if (GenerateExtensionDefForType(cgMod, def, RequireClassType(def), false)) {
             emitted = true
         }
-    } else if (!def.GetMethods().isEmpty()) {
+    } else if (!def.GetMethods().isEmpty() && !RequireClassType(def).IsGenericRelated()) {
         if (GenerateExtensionDefForType(cgMod, def, RequireClassType(def), false)) {
             emitted = true
         }
@@ -127,7 +140,7 @@ private func GenerateExtensionDefForType(cgMod: CGModule, targetDef: ClassDef, i
 }
 
 private func BuildExtensionDefContent(cgMod: CGModule, targetType: ClassType, inheritedType: ClassType,
-    funcs: ArrayList<Option<Function>>, direct: Bool): ArrayList<LLVMValueRef> {
+    funcs: ArrayList<InterfaceFunctionEntry>, direct: Bool): ArrayList<LLVMValueRef> {
     let context = cgMod.GetLLVMContext().raw
     let i8Type = unsafe { LLVMInt8TypeInContext(context) }
     let i16Type = unsafe { LLVMInt16TypeInContext(context) }
@@ -157,7 +170,7 @@ private func ExtensionDefFlag(targetType: ClassType, inheritedType: ClassType, d
 }
 
 private func GenerateFuncTableForType(cgMod: CGModule, targetType: ClassType, inheritedType: ClassType,
-    funcs: ArrayList<Option<Function>>, i8PtrType: LLVMTypeRef): LLVMValueRef {
+    funcs: ArrayList<InterfaceFunctionEntry>, i8PtrType: LLVMTypeRef): LLVMValueRef {
     if (funcs.isEmpty()) {
         return unsafe { LLVMConstNull(i8PtrType) }
     }
@@ -180,8 +193,8 @@ private func GenerateFuncTableForType(cgMod: CGModule, targetType: ClassType, in
     return unsafe { LLVMConstBitCast(table, i8PtrType) }
 }
 
-private func FunctionsForInheritedType(targetDef: ClassDef, inheritedType: ClassType): ArrayList<Option<Function>> {
-    let out = ArrayList<Option<Function>>()
+private func FunctionsForInheritedType(targetDef: ClassDef, inheritedType: ClassType): ArrayList<InterfaceFunctionEntry> {
+    let out = ArrayList<InterfaceFunctionEntry>()
     let inheritedDef = inheritedType.GetClassDef()
     if (inheritedDef.nodeId == targetDef.nodeId) {
         if (!targetDef.IsInterface()) {
@@ -189,7 +202,7 @@ private func FunctionsForInheritedType(targetDef: ClassDef, inheritedType: Class
         }
         for (method in targetDef.GetMethods()) {
             if (!method.IsConstructor()) {
-                out.add(None)
+                out.add(InterfaceFunctionEntry(DefaultMethodOrNone(method), Some(method)))
             }
         }
         return out
@@ -198,7 +211,7 @@ private func FunctionsForInheritedType(targetDef: ClassDef, inheritedType: Class
         if (interfaceMethod.IsConstructor()) {
             continue
         }
-        out.add(FindImplementation(targetDef, interfaceMethod))
+        out.add(InterfaceFunctionEntry(FindImplementation(targetDef, interfaceMethod), Some(interfaceMethod)))
     }
     return out
 }
@@ -216,6 +229,13 @@ private func FindImplementation(targetDef: ClassDef, interfaceMethod: Function):
     if (let Some(superDef) <- targetDef.GetSuperClassDef()) {
         return FindImplementation(superDef, interfaceMethod)
     }
+    return DefaultMethodOrNone(interfaceMethod)
+}
+
+private func DefaultMethodOrNone(method: Function): Option<Function> {
+    if (!method.TestAttr(Attribute.ABSTRACT) && method.GetBody().isSome()) {
+        return Some(method)
+    }
     return None
 }
 
@@ -224,19 +244,110 @@ private func MethodNameMatches(method: Function, name: String): Bool {
         method.GetRawMangledName() == name
 }
 
-private func FunctionAsI8Ptr(cgMod: CGModule, fn: Option<Function>, i8PtrType: LLVMTypeRef): LLVMValueRef {
-    if (let Some(method) <- fn) {
+private func FunctionAsI8Ptr(cgMod: CGModule, entry: InterfaceFunctionEntry, i8PtrType: LLVMTypeRef): LLVMValueRef {
+    if (let Some(method) <- entry.implementation) {
         if (method.TestAttr(Attribute.ABSTRACT)) {
             return unsafe { LLVMConstNull(i8PtrType) }
+        }
+        if (let Some(expected) <- entry.expected) {
+            if (NeedsExpectedSlotWrapper(method, expected)) {
+                return unsafe { LLVMConstBitCast(GetOrCreateExpectedSlotWrapper(cgMod, method, expected), i8PtrType) }
+            }
         }
         return unsafe { LLVMConstBitCast(cgMod.GetOrInsertCGFunction(method).GetRawFunction(), i8PtrType) }
     }
     return unsafe { LLVMConstNull(i8PtrType) }
 }
 
-private func OuterTypeInfoForFunction(cgMod: CGModule, targetType: ClassType, fn: Option<Function>,
+private func NeedsExpectedSlotWrapper(method: Function, expected: Function): Bool {
+    let methodTy = method.GetFuncType() ?? return false
+    let expectedTy = expected.GetFuncType() ?? return false
+    let expectedRetTy = expectedTy.GetReturnType()
+    if (!expectedRetTy.IsGeneric()) {
+        return false
+    }
+    return !methodTy.GetReturnType().IsEqual(expectedRetTy)
+}
+
+private func GetOrCreateExpectedSlotWrapper(cgMod: CGModule, method: Function, expected: Function): LLVMValueRef {
+    let expectedCGType = (CGType.GetOrCreateWithNode(cgMod, expected, allowBasePtr: true,
+        forWrapper: true) as CGFunctionType) ?? return cgMod.GetOrInsertCGFunction(method).GetRawFunction()
+    let wrapperName = GetCodeGenGlobalName(method) + "$ifwrap$" + GetCodeGenGlobalName(expected)
+    let wrapper = cgMod.GetOrInsertFunction(wrapperName, expectedCGType.GetLLVMFunctionType())
+    if (unsafe { LLVMIsDeclaration(wrapper) } == 0) {
+        return wrapper
+    }
+    unsafe { LLVMSetLinkage(wrapper, LLVMLinkageValue(LLVMLinkage.Private)) }
+    if (expectedCGType.HasSRet()) {
+        if (let Some(expectedTy) <- expected.GetFuncType()) {
+            let expectedRetCGType = CGType.GetOrCreate(cgMod, expectedTy.GetReturnType())
+            AddSRetAttribute(wrapper, expectedRetCGType.GetLLVMType())
+            AddNoAliasAttribute(wrapper)
+        } else {
+            AddSRetAttribute(wrapper)
+            AddNoAliasAttribute(wrapper)
+        }
+    }
+    SetCangjieGC(wrapper)
+    let entry = IRBuilder2(cgMod)
+    let block = entry.CreateEntryBasicBlock(wrapper, "entry")
+    entry.SetInsertPoint(block)
+    EmitExpectedSlotWrapperBody(entry, wrapper, method, expectedCGType)
+    entry.close()
+    return wrapper
+}
+
+private func EmitExpectedSlotWrapperBody(irBuilder: IRBuilder2, wrapper: LLVMValueRef, method: Function,
+    expectedCGType: CGFunctionType): Unit {
+    let methodTy = if (let Some(fnTy) <- method.GetFuncType()) {
+        fnTy
+    } else {
+        irBuilder.CreateRetVoid()
+        return
+    }
+    let methodCGFunc = irBuilder.GetCGModule().GetOrInsertCGFunction(method)
+    let methodCGType = if (let Some(fnTy) <- methodCGFunc.GetCGFunctionType()) {
+        fnTy
+    } else {
+        irBuilder.CreateRetVoid()
+        return
+    }
+    let expectedArgIndices = expectedCGType.GetRealArgIndices()
+    let methodParamTys = methodTy.GetParamTypes()
+    let callArgs = ArrayList<CGValue>()
+    var idx: Int64 = 0
+    while (idx < methodParamTys.size && idx < expectedArgIndices.size) {
+        let rawArg = unsafe { LLVMGetParam(wrapper, UInt32(expectedArgIndices[idx])) }
+        callArgs.add(CGValue(rawArg, CGType.GetOrCreate(irBuilder.GetCGModule(), methodParamTys[idx])))
+        idx++
+    }
+    let methodTypeInfoArg = unsafe {
+        let paramCount = LLVMCountParams(wrapper)
+        if (paramCount == 0u32) {
+            LLVMConstNull(CGType.GetOrCreateTypeInfoPtrType(irBuilder.GetLLVMContext()))
+        } else {
+            LLVMGetParam(wrapper, paramCount - 1u32)
+        }
+    }
+    let result = irBuilder.CreateCallOrInvokeWithMethodTypeInfo(methodCGType, methodCGFunc.GetRawFunction(),
+        callArgs, Some(methodTypeInfoArg), name: "ifwrap.call")
+    let returnSlot = unsafe { LLVMGetParam(wrapper, 0u32) }
+    let resultTy = methodTy.GetReturnType()
+    let resultCGType = CGType.GetOrCreate(irBuilder.GetCGModule(), resultTy)
+    let resultObject = if (resultTy.IsReferenceType() || resultTy.IsRef() || resultCGType.IsReference()) {
+        result
+    } else {
+        let objectValue = irBuilder.CallValueIntrinsicAlloc(resultTy)
+        irBuilder.StoreValueToObjectPayload(objectValue, result, resultTy)
+        objectValue
+    }
+    irBuilder.CreateStore(resultObject, returnSlot)
+    irBuilder.CreateRetVoid()
+}
+
+private func OuterTypeInfoForFunction(cgMod: CGModule, targetType: ClassType, entry: InterfaceFunctionEntry,
     i8PtrType: LLVMTypeRef): LLVMValueRef {
-    if (let Some(method) <- fn) {
+    if (let Some(method) <- entry.implementation) {
         if (let Some(parent) <- method.GetParentCustomTypeDef()) {
             if (let Some(parentType) <- parent.GetType()) {
                 return TypeInfoAsI8Ptr(cgMod, parentType, i8PtrType)
