@@ -49,6 +49,7 @@ import cangjie_compiler::ast.Node as AstNode
 import cangjie_compiler::ast.ParenExpr as AstParenExpr
 import cangjie_compiler::ast.Pattern as AstPattern
 import cangjie_compiler::ast.PropDecl as AstPropDecl
+import cangjie_compiler::ast.RangeExpr as AstRangeExpr
 import cangjie_compiler::ast.RefExpr as AstRefExpr
 import cangjie_compiler::ast.ReturnExpr as AstReturnExpr
 import cangjie_compiler::ast.StructDecl as AstStructDecl
@@ -830,10 +831,8 @@ public class Translator {
         return match (expr.forInKind) {
             case AstForInKind.FORIN_RANGE => TranslateForInRange(expr)
             case AstForInKind.FORIN_ITER => TranslateForInIter(expr)
-            case AstForInKind.FORIN_STRING =>
-                throw IllegalArgumentException("not yet ported in faithful AST2CHIR: ForInExpr string desugar")
-            case AstForInKind.FORIN_INVALID =>
-                throw IllegalArgumentException("not yet ported in faithful AST2CHIR: ForInExpr invalid/closed-range-one")
+            case AstForInKind.FORIN_STRING => TranslateForInString(expr)
+            case AstForInKind.FORIN_INVALID => TranslateForInInvalid(expr)
         }
     }
 
@@ -1333,6 +1332,45 @@ public class Translator {
         return None
     }
 
+    private func TranslateForInString(expr: AstForInExpr): Option<Value> {
+        let inExpression = RequireBlockExpr(expr.inExpression, "for-in string inExpression")
+        if (inExpression.body.size < 3) {
+            throw IllegalStateException("faithful AST2CHIR string ForInExpr expects desugared block with 3 nodes")
+        }
+        let _ = Translator.TranslateASTNode(inExpression, this)
+        let indexDecl = RequireBodyVarDecl(inExpression, 0, "for-in string induction var")
+        let endDecl = RequireBodyVarDecl(inExpression, 2, "for-in string end var")
+        let inductiveVar = GetSymbolTable(indexDecl)
+        let stringSize = GetDerefedValue(GetSymbolTable(endDecl))
+        let condition = RequireResult(builder.CreateBinaryExpression(ExprKind.LT, builder.context.GetBoolTy(),
+            GetDerefedValue(inductiveVar), stringSize, CurrentBlock()))
+        let recordBlock = CurrentBlock()
+        let parentGroup = RequireParentBlockGroup(recordBlock, "for-in string")
+        let forInEntryBlock = builder.CreateBlock(parentGroup)
+        currentBlock = forInEntryBlock
+        let condVar = InitializeForInCondVar()
+        InitializeDelayExitSignal()
+        let forIn = InitForInExprSkeleton(expr, inductiveVar, condVar, isIter: false)
+
+        TranslateForInStringBody(expr, forIn)
+        TranslateForInStringLatch(inductiveVar, forIn)
+        TranslateForInStringCond(inductiveVar, stringSize, condVar, forIn)
+
+        let endBlock = builder.CreateBlock(parentGroup)
+        builder.CreateGoTo(endBlock, forInEntryBlock)
+        currentBlock = endBlock
+        UpdateDelayExitSignalInForInEnd()
+        builder.CreateBranch(condition, forInEntryBlock, CurrentBlock(), recordBlock)
+        return None
+    }
+
+    private func TranslateForInInvalid(expr: AstForInExpr): Option<Value> {
+        if (IsClosedRangeOne(expr)) {
+            return TranslateForInClosedRangeOne(expr)
+        }
+        throw IllegalArgumentException("faithful AST2CHIR unsupported ForInExpr kind FORIN_INVALID")
+    }
+
     private func TranslateForInIter(expr: AstForInExpr): Option<Value> {
         let inExpression = RequireBlockExpr(expr.inExpression, "for-in iterator inExpression")
         if (inExpression.body.size < 2) {
@@ -1367,6 +1405,41 @@ public class Translator {
         return None
     }
 
+    private func TranslateForInClosedRangeOne(expr: AstForInExpr): Option<Value> {
+        let beginValue = TranslateClosedRangeBound(expr, 0)
+        let endValue = TranslateClosedRangeBound(expr, 1)
+        let isIncrement = IsClosedRangeIncrement(expr)
+        let preCondKind = if (isIncrement) { ExprKind.LE } else { ExprKind.GE }
+        let preCond = RequireResult(builder.CreateBinaryExpression(preCondKind, builder.context.GetBoolTy(),
+            beginValue, endValue, CurrentBlock()))
+        let parentGroup = RequireParentBlockGroup(CurrentBlock(), "for-in closed range")
+        let preCondTrueBlock = builder.CreateBlock(parentGroup)
+        let preCondFalseBlock = builder.CreateBlock(parentGroup)
+        builder.CreateBranch(preCond, preCondTrueBlock, preCondFalseBlock, CurrentBlock())
+
+        currentBlock = preCondTrueBlock
+        let iterVar = CreateClosedRangeIterVar(expr, beginValue)
+        let forInEntryBlock = builder.CreateBlock(parentGroup)
+        builder.CreateGoTo(forInEntryBlock, CurrentBlock())
+
+        currentBlock = forInEntryBlock
+        let condVar = InitializeForInCondVar()
+        InitializeDelayExitSignal()
+        let forIn = InitForInClosedRangeExprSkeleton(expr, iterVar, condVar)
+
+        let iterValue = TranslateForInClosedRangeBody(expr, iterVar, forIn)
+        TranslateForInClosedRangeCond(expr, iterValue, endValue, condVar, forIn)
+        TranslateForInClosedRangeLatch(iterVar, iterValue, isIncrement, condVar, forIn)
+
+        let endBlock = builder.CreateBlock(parentGroup)
+        builder.CreateGoTo(endBlock, forInEntryBlock)
+        currentBlock = endBlock
+        UpdateDelayExitSignalInForInEnd()
+        builder.CreateGoTo(preCondFalseBlock, CurrentBlock())
+        currentBlock = preCondFalseBlock
+        return None
+    }
+
     private func InitForInExprSkeleton(expr: AstForInExpr, inductiveVar: Value, condVar: Value,
         isIter!: Bool): ForIn {
         let parentFunc = CurrentFunction()
@@ -1379,6 +1452,21 @@ public class Translator {
         } else {
             builder.CreateForInRange(resultTy, inductiveVar, condVar, CurrentBlock())
         }
+        forIn.InitBlockGroups(bodyBlockGroup, latchBlockGroup, condBlockGroup)
+        bodyBlockGroup.SetEntryBlock(builder.CreateBlock(bodyBlockGroup))
+        latchBlockGroup.SetEntryBlock(builder.CreateBlock(latchBlockGroup))
+        condBlockGroup.SetEntryBlock(builder.CreateBlock(condBlockGroup))
+        return forIn
+    }
+
+    private func InitForInClosedRangeExprSkeleton(expr: AstForInExpr, inductiveVar: Value,
+        condVar: Value): ForInClosedRange {
+        let parentFunc = CurrentFunction()
+        let bodyBlockGroup = builder.CreateBlockGroup(parentFunc)
+        let latchBlockGroup = builder.CreateBlockGroup(parentFunc)
+        let condBlockGroup = builder.CreateBlockGroup(parentFunc)
+        let resultTy = chirTy.TranslateType(RequireAstTy(expr))
+        let forIn = builder.CreateForInClosedRange(resultTy, inductiveVar, condVar, CurrentBlock())
         forIn.InitBlockGroups(bodyBlockGroup, latchBlockGroup, condBlockGroup)
         bodyBlockGroup.SetEntryBlock(builder.CreateBlock(bodyBlockGroup))
         latchBlockGroup.SetEntryBlock(builder.CreateBlock(latchBlockGroup))
@@ -1407,6 +1495,18 @@ public class Translator {
             "not yet ported in faithful AST2CHIR: non-var range ForInExpr pattern")
     }
 
+    private func ForInPatternVarDecl(pattern: AstPattern): Option<AstVarDecl> {
+        if (let Some(varPattern) <- (pattern as AstVarPattern)) {
+            return varPattern.varDecl
+        }
+        if (let Some(varOrEnum) <- (pattern as AstVarOrEnumPattern)) {
+            if (let Some(realPattern) <- varOrEnum.pattern) {
+                return ForInPatternVarDecl(realPattern)
+            }
+        }
+        return None
+    }
+
     private func TranslateForInRangeBody(expr: AstForInExpr, forIn: ForIn): Unit {
         blockGroupStack.add(forIn.GetBody())
         currentBlock = forIn.GetBody().GetEntryBlock() ??
@@ -1428,6 +1528,32 @@ public class Translator {
         }
         TranslateForInBodyBlockGroup(expr)
         blockGroupStack.remove(at: blockGroupStack.size - 1)
+    }
+
+    private func TranslateForInStringBody(expr: AstForInExpr, forIn: ForIn): Unit {
+        blockGroupStack.add(forIn.GetBody())
+        currentBlock = forIn.GetBody().GetEntryBlock() ??
+            throw IllegalStateException("faithful AST2CHIR for-in string body has no entry block")
+        if (let Some(pattern) <- expr.pattern) {
+            TranslateForInRangePatternDecl(pattern)
+        }
+        TranslateForInBodyBlockGroup(expr)
+        blockGroupStack.remove(at: blockGroupStack.size - 1)
+    }
+
+    private func TranslateForInClosedRangeBody(expr: AstForInExpr, iterVar: Value, forIn: ForIn): Value {
+        blockGroupStack.add(forIn.GetBody())
+        currentBlock = forIn.GetBody().GetEntryBlock() ??
+            throw IllegalStateException("faithful AST2CHIR for-in closed range body has no entry block")
+        let iterValue = RequireResult(builder.CreateLoad(RequireRefBaseType(iterVar), iterVar, CurrentBlock()))
+        if (let Some(pattern) <- expr.pattern) {
+            if (let Some(varDecl) <- ForInPatternVarDecl(pattern)) {
+                localValSymbolTable.Set(varDecl, iterValue)
+            }
+        }
+        TranslateForInBodyBlockGroup(expr)
+        blockGroupStack.remove(at: blockGroupStack.size - 1)
+        return iterValue
     }
 
     private func TranslateForInBodyBlockGroup(expr: AstForInExpr): Unit {
@@ -1464,6 +1590,53 @@ public class Translator {
         if (CurrentBlock().GetTerminator().isNone()) {
             builder.CreateExit(None, CurrentBlock())
         }
+        blockGroupStack.remove(at: blockGroupStack.size - 1)
+    }
+
+    private func TranslateForInStringLatch(inductiveVar: Value, forIn: ForIn): Unit {
+        blockGroupStack.add(forIn.GetLatch())
+        currentBlock = forIn.GetLatch().GetEntryBlock() ??
+            throw IllegalStateException("faithful AST2CHIR for-in string latch has no entry block")
+        let trueBlock = builder.CreateBlock(forIn.GetLatch())
+        let falseBlock = builder.CreateBlock(forIn.GetLatch())
+        builder.CreateBranch(DelayExitSignalGreaterThanZero(), trueBlock, falseBlock, CurrentBlock())
+        currentBlock = trueBlock
+        builder.CreateExit(None, CurrentBlock())
+        currentBlock = falseBlock
+        let inductiveValue = GetDerefedValue(inductiveVar)
+        let inductiveTy = inductiveValue.GetType() ?? RequireRefBaseType(inductiveVar)
+        let one = RequireResult(builder.CreateConstant(inductiveTy, IntLiteral(1), CurrentBlock()))
+        let plusOne = RequireResult(builder.CreateBinaryExpression(ExprKind.ADD, inductiveTy, inductiveValue,
+            one, CurrentBlock()))
+        builder.CreateStore(plusOne, inductiveVar, CurrentBlock())
+        builder.CreateExit(None, CurrentBlock())
+        blockGroupStack.remove(at: blockGroupStack.size - 1)
+    }
+
+    private func TranslateForInClosedRangeLatch(iterVar: Value, iterValue: Value, isIncrement: Bool,
+        condVar: Value, forIn: ForIn): Unit {
+        blockGroupStack.add(forIn.GetLatch())
+        currentBlock = forIn.GetLatch().GetEntryBlock() ??
+            throw IllegalStateException("faithful AST2CHIR for-in closed range latch has no entry block")
+        let trueBlock = builder.CreateBlock(forIn.GetLatch())
+        let falseBlock = builder.CreateBlock(forIn.GetLatch())
+        builder.CreateBranch(DelayExitSignalGreaterThanZero(), trueBlock, falseBlock, CurrentBlock())
+        currentBlock = trueBlock
+        builder.CreateExit(None, CurrentBlock())
+        currentBlock = falseBlock
+        let updateBlock = builder.CreateBlock(forIn.GetLatch())
+        let exitBlock = builder.CreateBlock(forIn.GetLatch())
+        let condValue = RequireResult(builder.CreateLoad(builder.context.GetBoolTy(), condVar, CurrentBlock()))
+        builder.CreateBranch(condValue, updateBlock, exitBlock, CurrentBlock())
+        currentBlock = updateBlock
+        let iterTy = iterValue.GetType() ?? RequireRefBaseType(iterVar)
+        let one = RequireResult(builder.CreateConstant(iterTy, IntLiteral(1), CurrentBlock()))
+        let op = if (isIncrement) { ExprKind.ADD } else { ExprKind.SUB }
+        let newValue = RequireResult(builder.CreateBinaryExpression(op, iterTy, iterValue, one, CurrentBlock()))
+        builder.CreateStore(newValue, iterVar, CurrentBlock())
+        builder.CreateGoTo(exitBlock, CurrentBlock())
+        currentBlock = exitBlock
+        builder.CreateExit(None, CurrentBlock())
         blockGroupStack.remove(at: blockGroupStack.size - 1)
     }
 
@@ -1510,6 +1683,33 @@ public class Translator {
         let hasValue = RequireResult(builder.CreateUnaryExpression(ExprKind.NOT, builder.context.GetBoolTy(), tag,
             CurrentBlock()))
         builder.CreateStore(hasValue, condVar, CurrentBlock())
+        builder.CreateExit(None, CurrentBlock())
+        blockGroupStack.remove(at: blockGroupStack.size - 1)
+    }
+
+    private func TranslateForInStringCond(inductiveVar: Value, stringSize: Value, condVar: Value,
+        forIn: ForIn): Unit {
+        blockGroupStack.add(forIn.GetCond())
+        currentBlock = forIn.GetCond().GetEntryBlock() ??
+            throw IllegalStateException("faithful AST2CHIR for-in string cond has no entry block")
+        TranslateForInCondControlFlow(condVar)
+        let condition = RequireResult(builder.CreateBinaryExpression(ExprKind.LT, builder.context.GetBoolTy(),
+            GetDerefedValue(inductiveVar), stringSize, CurrentBlock()))
+        builder.CreateStore(condition, condVar, CurrentBlock())
+        builder.CreateExit(None, CurrentBlock())
+        blockGroupStack.remove(at: blockGroupStack.size - 1)
+    }
+
+    private func TranslateForInClosedRangeCond(expr: AstForInExpr, iterValue: Value, iterEnd: Value,
+        condVar: Value, forIn: ForIn): Unit {
+        let _ = expr
+        blockGroupStack.add(forIn.GetCond())
+        currentBlock = forIn.GetCond().GetEntryBlock() ??
+            throw IllegalStateException("faithful AST2CHIR for-in closed range cond has no entry block")
+        TranslateForInCondControlFlow(condVar)
+        let condition = RequireResult(builder.CreateBinaryExpression(ExprKind.NOTEQUAL, builder.context.GetBoolTy(),
+            iterValue, iterEnd, CurrentBlock()))
+        builder.CreateStore(condition, condVar, CurrentBlock())
         builder.CreateExit(None, CurrentBlock())
         blockGroupStack.remove(at: blockGroupStack.size - 1)
     }
@@ -1632,6 +1832,163 @@ public class Translator {
 
     private func RequireDelayExitSignal(): Value {
         return delayExitSignal ?? throw IllegalStateException("faithful AST2CHIR ForIn delay-exit signal missing")
+    }
+
+    private func RequireBodyVarDecl(block: AstBlock, index: Int64, context: String): AstVarDecl {
+        if (index < 0 || index >= block.body.size) {
+            throw IllegalStateException("faithful AST2CHIR ${context} missing from desugared block")
+        }
+        return (block.body[index] as AstVarDecl) ??
+            throw IllegalStateException("faithful AST2CHIR ${context} is not a VarDecl")
+    }
+
+    private func IsClosedRangeOne(expr: AstForInExpr): Bool {
+        let inExpr = expr.inExpression ?? return false
+        if (let Some(rangeCtor) <- ClosedRangeCallExpr(inExpr)) {
+            return IsCallRangeConstructor(rangeCtor)
+        }
+        if (let Some(rangeExpr) <- (inExpr as AstRangeExpr)) {
+            return rangeExpr.isClosed && IsRangeStepOne(rangeExpr)
+        }
+        return false
+    }
+
+    private func ClosedRangeCallExpr(expr: AstExpr): Option<AstCallExpr> {
+        if (let Some(callExpr) <- (expr as AstCallExpr)) {
+            return Some(callExpr)
+        }
+        if (let Some(rangeExpr) <- (expr as AstRangeExpr)) {
+            if (let Some(desugar) <- rangeExpr.desugarExpr) {
+                if (let Some(callExpr) <- (desugar as AstCallExpr)) {
+                    return Some(callExpr)
+                }
+            }
+        }
+        return None
+    }
+
+    private func IsCallRangeConstructor(callExpr: AstCallExpr): Bool {
+        let rangeConstructorParamSize: Int64 = 6
+        let rangeConstructorIntLength: Int64 = 3
+        if (callExpr.callKind != AstCallKind.CALL_OBJECT_CREATION) {
+            return false
+        }
+        let callee = (callExpr.baseFunc ?? return false) as AstRefExpr
+        let calledFunc = ((callee ?? return false).ref.target ?? return false) as AstFuncDecl
+        let funcBody = (calledFunc ?? return false).funcBody ?? return false
+        if (funcBody.paramLists.isEmpty() || funcBody.paramLists[0].params.size != rangeConstructorParamSize) {
+            return false
+        }
+        if (callExpr.args.size != rangeConstructorParamSize) {
+            return false
+        }
+        var idx: Int64 = 0
+        while (idx < rangeConstructorIntLength) {
+            let argTy = callExpr.args[idx].GetTy() ?? return false
+            if (!argTy.IsInteger()) {
+                return false
+            }
+            idx++
+        }
+        let stepExpr = callExpr.args[rangeConstructorIntLength - 1].expr ?? return false
+        let stepLit = (stepExpr as AstLitConstExpr) ?? return false
+        let stepValue = stepLit.constNumValue.asInt.`Int64`()
+        if (stepValue != 1 && stepValue != -1) {
+            return false
+        }
+        idx = rangeConstructorIntLength
+        while (idx < rangeConstructorParamSize) {
+            let argTy = callExpr.args[idx].GetTy() ?? return false
+            if (!argTy.IsBoolean()) {
+                return false
+            }
+            idx++
+        }
+        let isClosedExpr = callExpr.args[rangeConstructorParamSize - 1].expr ?? return false
+        let isClosedLit = (isClosedExpr as AstLitConstExpr) ?? return false
+        return isClosedLit.constNumValue.asBoolean
+    }
+
+    private func IsRangeStepOne(rangeExpr: AstRangeExpr): Bool {
+        if (let Some(startExpr) <- rangeExpr.startExpr) {
+            let startTy = startExpr.GetTy() ?? return false
+            if (startTy.IsInvalid() || !startTy.IsInteger()) {
+                return false
+            }
+        } else {
+            return false
+        }
+        if (let Some(stopExpr) <- rangeExpr.stopExpr) {
+            let stopTy = stopExpr.GetTy() ?? return false
+            if (stopTy.IsInvalid() || !stopTy.IsInteger()) {
+                return false
+            }
+        } else {
+            return false
+        }
+        if (let Some(stepExpr) <- rangeExpr.stepExpr) {
+            if (!stepExpr.isConst) {
+                return false
+            }
+            let stepValue = stepExpr.constNumValue.asInt.`Int64`()
+            return stepValue == 1 || stepValue == -1
+        }
+        return true
+    }
+
+    private func TranslateClosedRangeBound(expr: AstForInExpr, argIndex: Int64): Value {
+        let inExpr = RequireExpr(expr.inExpression, "for-in closed range inExpression")
+        let boundExpr = ClosedRangeBoundExpr(inExpr, argIndex)
+        let value = Translator.TranslateASTNode(boundExpr, this) ??
+            throw IllegalStateException("faithful AST2CHIR closed range bound produced no value")
+        return GetDerefedValue(value)
+    }
+
+    private func ClosedRangeBoundExpr(inExpr: AstExpr, argIndex: Int64): AstExpr {
+        if (let Some(callExpr) <- ClosedRangeCallExpr(inExpr)) {
+            if (argIndex < 0 || argIndex >= callExpr.args.size) {
+                throw IllegalStateException("faithful AST2CHIR closed range constructor bound missing")
+            }
+            return RequireFuncArgExpr(callExpr.args[argIndex], "closed range constructor bound")
+        }
+        let rangeExpr = (inExpr as AstRangeExpr) ??
+            throw IllegalStateException("faithful AST2CHIR closed range inExpression is not a RangeExpr")
+        if (argIndex == 0) {
+            return RequireExpr(rangeExpr.startExpr, "closed range start")
+        }
+        if (argIndex == 1) {
+            return RequireExpr(rangeExpr.stopExpr, "closed range stop")
+        }
+        throw IllegalStateException("faithful AST2CHIR closed range bound index out of range")
+    }
+
+    private func IsClosedRangeIncrement(expr: AstForInExpr): Bool {
+        return ClosedRangeStepValue(expr) == 1
+    }
+
+    private func ClosedRangeStepValue(expr: AstForInExpr): Int64 {
+        let inExpr = RequireExpr(expr.inExpression, "for-in closed range inExpression")
+        if (let Some(callExpr) <- ClosedRangeCallExpr(inExpr)) {
+            let stepExpr = RequireFuncArgExpr(callExpr.args[2], "closed range constructor step")
+            let stepLit = (stepExpr as AstLitConstExpr) ??
+                throw IllegalStateException("faithful AST2CHIR closed range constructor step is not a literal")
+            return stepLit.constNumValue.asInt.`Int64`()
+        }
+        let rangeExpr = (inExpr as AstRangeExpr) ??
+            throw IllegalStateException("faithful AST2CHIR closed range inExpression is not a RangeExpr")
+        if (let Some(stepExpr) <- rangeExpr.stepExpr) {
+            return stepExpr.constNumValue.asInt.`Int64`()
+        }
+        return 1
+    }
+
+    private func CreateClosedRangeIterVar(expr: AstForInExpr, beginValue: Value): Value {
+        let _ = expr
+        let iterTy = beginValue.GetType() ??
+            throw IllegalStateException("faithful AST2CHIR closed range begin value has no type")
+        let iterVar = RequireResult(builder.CreateAllocate(builder.context.GetRefTy(iterTy), iterTy, CurrentBlock()))
+        builder.CreateStore(beginValue, iterVar, CurrentBlock())
+        return iterVar
     }
 
     private func MakeForInIterNoneValue(optionTy: Type): Value {

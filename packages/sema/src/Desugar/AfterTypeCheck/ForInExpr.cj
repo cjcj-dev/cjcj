@@ -230,8 +230,8 @@ private func CreateStringIndexVar(forInExpr: ForInExpr): VarDecl {
     index.isVar = true
     index.assignPos = index.begin
     index.curFile = forInExpr.curFile
-    index.SetTy(litZero.GetTy() ?? TypeManager.GetPrimitiveTy(TypeKind.TYPE_INT64))
     CopyBasicInfo(forInExpr, index)
+    index.SetTy(litZero.GetTy() ?? TypeManager.GetPrimitiveTy(TypeKind.TYPE_INT64))
     if (let Some(pattern) <- forInExpr.pattern) {
         index.begin = pattern.begin
         index.end = pattern.end
@@ -261,6 +261,13 @@ private func FirstGetterDecl(decl: Decl): Option<FuncDecl> {
     let used = GetUsedMemberDecl(decl, true)
     if (let Some(funcDecl) <- (used as FuncDecl)) {
         return funcDecl
+    }
+    return None
+}
+
+private func AsFuncDecl(decl: Option<Decl>): Option<FuncDecl> {
+    if (let Some(value) <- decl) {
+        return value as FuncDecl
     }
     return None
 }
@@ -310,7 +317,7 @@ private func CreateStringEndVar(typeManager: TypeManager, forInExpr: ForInExpr, 
 }
 
 private func CreateStringElementCall(typeManager: TypeManager, forInExpr: ForInExpr, tmp: VarDecl,
-    index: VarDecl): Option<CallExpr> {
+    index: VarDecl, expectedElementTy: Option<Ty>): Option<CallExpr> {
     let base = CreateMemberAccess(CreateVarRef(tmp, forInExpr), SUBSCRIPT_OPERATOR_NAME)
     base.SetTy(Ty.GetInitialTy())
     base.curFile = forInExpr.curFile
@@ -321,8 +328,8 @@ private func CreateStringElementCall(typeManager: TypeManager, forInExpr: ForInE
     for (target in subscriptTargets) {
         base.targets.add(target)
     }
-    if (!subscriptTargets.isEmpty()) {
-        let firstTarget = subscriptTargets[0]
+    let selectedTarget = SelectStringSubscriptTarget(typeManager, subscriptTargets, index, expectedElementTy)
+    if (let Some(firstTarget) <- selectedTarget) {
         base.target = firstTarget
         if (let Some(targetTy) <- firstTarget.GetTy()) {
             base.SetTy(targetTy)
@@ -332,11 +339,13 @@ private func CreateStringElementCall(typeManager: TypeManager, forInExpr: ForInE
     let indexRef = CreateVarRef(index, forInExpr)
     CopyBasicInfo(forInExpr, indexRef)
     args.add(CreateFuncArg(indexRef))
-    let call = CreateCallExpr(base, args)
+    let call = CreateCallExpr(base, args, selectedTarget,
+        if (let Some(target) <- selectedTarget) { FuncRetTyOf(target) } else { None },
+        CallKind.CALL_DECLARED_FUNCTION)
     CopyBasicInfo(forInExpr, call)
     AddCurFile(call, file: forInExpr.curFile)
-    if (!subscriptTargets.isEmpty()) {
-        if (let Some(retTy) <- FuncRetTyOf(subscriptTargets[0])) {
+    if (let Some(target) <- selectedTarget) {
+        if (let Some(retTy) <- FuncRetTyOf(target)) {
             call.SetTy(retTy)
             return call
         }
@@ -344,22 +353,44 @@ private func CreateStringElementCall(typeManager: TypeManager, forInExpr: ForInE
     return None
 }
 
+private func SelectStringSubscriptTarget(typeManager: TypeManager, targets: ArrayList<Decl>,
+    index: VarDecl, expectedElementTy: Option<Ty>): Option<FuncDecl> {
+    let indexTy = index.GetTy() ?? return AsFuncDecl(if (!targets.isEmpty()) { Some(targets[0]) } else { None })
+    for (target in targets) {
+        if (let Some(funcDecl) <- AsFuncDecl(Some(target))) {
+            let paramTys = GetParamTys(funcDecl)
+            if (!paramTys.isEmpty() &&
+                typeManager.CheckTypeCompatibility(paramTys[paramTys.size - 1], indexTy) !=
+                    TypeCompatibility.INCOMPATIBLE) {
+                if (let Some(expectedTy) <- expectedElementTy) {
+                    if (let Some(retTy) <- FuncRetTyOf(funcDecl)) {
+                        if (typeManager.CheckTypeCompatibility(expectedTy, retTy) != TypeCompatibility.INCOMPATIBLE) {
+                            return funcDecl
+                        }
+                    }
+                } else {
+                    return funcDecl
+                }
+            }
+        }
+    }
+    return AsFuncDecl(if (!targets.isEmpty()) { Some(targets[0]) } else { None })
+}
+
 private func CreateStringLetIter(typeManager: TypeManager, forInExpr: ForInExpr, tmp: VarDecl,
     index: VarDecl): Option<VarDecl> {
     if (let Some(pattern) <- forInExpr.pattern) {
-        if (let Some(varPattern) <- (pattern as VarPattern)) {
-            if (let Some(varDecl) <- varPattern.varDecl) {
-                if (let Some(elemCall) <- CreateStringElementCall(typeManager, forInExpr, tmp, index)) {
-                    varDecl.parentPattern = None
-                    varDecl.initializer = elemCall
-                    varDecl.curFile = forInExpr.curFile
-                    if (let Some(ty) <- elemCall.GetTy()) {
-                        varDecl.SetTy(ty)
-                    }
-                    forInExpr.patternInDesugarExpr = pattern
-                    forInExpr.pattern = None
-                    return varDecl
+        if (let Some(varDecl) <- GetRangePatternVarDecl(pattern)) {
+            if (let Some(elemCall) <- CreateStringElementCall(typeManager, forInExpr, tmp, index, varDecl.GetTy())) {
+                varDecl.parentPattern = None
+                varDecl.initializer = elemCall
+                varDecl.curFile = forInExpr.curFile
+                if (let Some(ty) <- elemCall.GetTy()) {
+                    varDecl.SetTy(ty)
                 }
+                forInExpr.patternInDesugarExpr = pattern
+                forInExpr.pattern = None
+                return varDecl
             }
         }
     }
