@@ -128,21 +128,12 @@ private func CallCommonEnumObjectAlloc(irBuilder: IRBuilder2, storageTy: Type, l
     return objectValue
 }
 
-private func GenerateOptionLikeRefEnum(irBuilder: IRBuilder2, chirExpr: Expression, resultTy: Type): LLVMValueRef {
-    let resultLLVMType = CGType.GetOrCreate(irBuilder.GetCGModule(), resultTy).GetLLVMType()
+private func GenerateOptionLikeRefEnum(irBuilder: IRBuilder2, chirExpr: Expression, _: Type): LLVMValueRef {
     if (chirExpr.GetNumOfOperands() <= 1) {
-        return unsafe { LLVMConstNull(resultLLVMType) }
+        return unsafe { LLVMConstNull(CGType.GetRefType(irBuilder.GetLLVMContext())) }
     }
     let associatedOperand = chirExpr.GetOperand(1)
-    var associatedValue = irBuilder.GetCGModule().MaterializeValue(irBuilder, associatedOperand).GetRawValue()
-    if (let Some(sourceTy) <- associatedOperand.GetType()) {
-        if (sourceTy.IsRef()) {
-            let storageTy = sourceTy.StripAllRefs()
-            associatedValue = irBuilder.CreateLoad(CGType.GetOrCreate(irBuilder.GetCGModule(), storageTy).GetLLVMType(),
-                associatedValue, name: "enum.option.ref.load")
-        }
-    }
-    return irBuilder.CreatePointerCast(associatedValue, resultLLVMType, name: "enum.option.ref")
+    return irBuilder.GetCGModule().MaterializeValue(irBuilder, associatedOperand).GetRawValue()
 }
 
 private func CastAggregateElementIfNeeded(irBuilder: IRBuilder2, rawValue: LLVMValueRef, sourceTy: Type,
