@@ -67,45 +67,89 @@ private func TypeCheckReferenceRemoveAt(values: ArrayList<Decl>, idx: Int64): Un
     values.remove(at: idx)
 }
 
-private func TypeCheckReferenceSameParamTypes(leftDecl: FuncDecl, rightDecl: FuncDecl): Bool {
-    let left = GetParamTys(leftDecl)
-    let right = GetParamTys(rightDecl)
-    return left.size == right.size && SameTypeArgs(left, right)
+private func TypeCheckReferenceFuncScopeLevel(funcDecl: FuncDecl): Int64 {
+    if (funcDecl.TestAttr(Attribute.IMPORTED) && funcDecl.TestAttr(Attribute.GLOBAL)) {
+        return -1
+    }
+    if (funcDecl.TestAttr(Attribute.ENUM_CONSTRUCTOR)) {
+        return 0
+    }
+    return Int64(funcDecl.scopeLevel)
 }
 
-private func TypeCheckReferenceAddUniqueFunc(values: ArrayList<FuncDecl>, decl: FuncDecl): Unit {
+private func TypeCheckReferenceParamTys(funcDecl: FuncDecl): ArrayList<Ty> {
+    if (let Some(ty) <- funcDecl.GetTy()) {
+        if (let Some(funcTy) <- (ty as FuncTy)) {
+            let out = ArrayList<Ty>()
+            for (paramTy in funcTy.paramTys) {
+                out.add(paramTy)
+            }
+            return out
+        }
+    }
+    return GetParamTys(funcDecl)
+}
+
+private func TypeCheckReferenceSameFuncSignature(tm: TypeManager, leftDecl: FuncDecl, rightDecl: FuncDecl): Bool {
+    if (leftDecl.TestAttr(Attribute.GENERIC) != rightDecl.TestAttr(Attribute.GENERIC)) {
+        return false
+    }
+    return tm.IsFuncParameterTypesIdentical(
+        TypeCheckReferenceParamTys(leftDecl), TypeCheckReferenceParamTys(rightDecl))
+}
+
+private func TypeCheckReferenceSameFuncTarget(tm: TypeManager, left: FuncDecl, right: FuncDecl): Bool {
+    return SameDecl(left, right) && TypeCheckReferenceSameFuncSignature(tm, left, right)
+}
+
+private func TypeCheckReferenceSameTarget(tm: TypeManager, left: Decl, right: Decl): Bool {
+    if (let Some(leftFunc) <- (left as FuncDecl)) {
+        if (let Some(rightFunc) <- (right as FuncDecl)) {
+            return TypeCheckReferenceSameFuncTarget(tm, leftFunc, rightFunc)
+        }
+    }
+    return SameDecl(left, right)
+}
+
+private func TypeCheckReferenceAddUniqueFunc(tm: TypeManager, values: ArrayList<FuncDecl>, decl: FuncDecl): Unit {
     for (value in values) {
-        if (SameDecl(value, decl)) {
+        if (TypeCheckReferenceSameFuncTarget(tm, value, decl)) {
             return
         }
     }
     values.add(decl)
 }
 
-private func TypeCheckReferenceFilterShadowedFuncs(targets: ArrayList<Decl>): Unit {
+private func TypeCheckReferenceFilterShadowedFuncs(tm: TypeManager, targets: ArrayList<Decl>): Unit {
     if (!TypeCheckReferenceAllFuncDecl(targets)) {
         return
     }
-    let out = ArrayList<FuncDecl>()
+    let funcs = ArrayList<FuncDecl>()
     for (target in targets) {
         if (let Some(funcDecl) <- (target as FuncDecl)) {
-            var shadowed = false
-            for (existing in out) {
-                if (funcDecl.identifier.Val() == existing.identifier.Val() &&
-                    funcDecl.TestAttr(Attribute.GENERIC) == existing.TestAttr(Attribute.GENERIC) &&
-                    TypeCheckReferenceSameParamTypes(funcDecl, existing) &&
-                    funcDecl.scopeLevel <= existing.scopeLevel) {
-                    shadowed = true
-                    break
-                }
-            }
-            if (!shadowed) {
-                TypeCheckReferenceAddUniqueFunc(out, funcDecl)
+            TypeCheckReferenceAddUniqueFunc(tm, funcs, funcDecl)
+        }
+    }
+    let filtered = ArrayList<FuncDecl>()
+    for (funcDecl in funcs) {
+        filtered.add(funcDecl)
+    }
+    for (funcDecl in funcs) {
+        let currentLevel = TypeCheckReferenceFuncScopeLevel(funcDecl)
+        var idx: Int64 = 0
+        while (idx < filtered.size) {
+            let target = filtered[idx]
+            if (!SameDecl(funcDecl, target) &&
+                TypeCheckReferenceFuncScopeLevel(target) < currentLevel &&
+                TypeCheckReferenceSameFuncSignature(tm, funcDecl, target)) {
+                filtered.remove(at: idx)
+            } else {
+                idx++
             }
         }
     }
     targets.clear()
-    for (funcDecl in out) {
+    for (funcDecl in filtered) {
         targets.add(funcDecl)
     }
 }
@@ -124,9 +168,9 @@ private func TypeCheckReferenceFilterMacroFuncTargets(expr: Expr, targets: Array
     }
 }
 
-private func TypeCheckReferenceFilterCandidatesForRef(expr: Expr, targets: ArrayList<Decl>): Unit {
+private func TypeCheckReferenceFilterCandidatesForRef(tm: TypeManager, expr: Expr, targets: ArrayList<Decl>): Unit {
     TypeCheckReferenceFilterMacroFuncTargets(expr, targets)
-    TypeCheckReferenceFilterShadowedFuncs(targets)
+    TypeCheckReferenceFilterShadowedFuncs(tm, targets)
 }
 
 private func TypeCheckReferenceCheckForQuestFuncRetType(
@@ -493,13 +537,13 @@ public func TypeCheckReferenceCheckTargetTypeArgs(decl: Option<Decl>, numTypeArg
     return false
 }
 
-public func TypeCheckReferenceRemoveDuplicateTargets(targets: ArrayList<Decl>): Unit {
+public func TypeCheckReferenceRemoveDuplicateTargets(tm: TypeManager, targets: ArrayList<Decl>): Unit {
     var idx: Int64 = 0
     while (idx < targets.size) {
         var seen = false
         var prev: Int64 = 0
         while (prev < idx) {
-            if (SameDecl(targets[prev], targets[idx])) {
+            if (TypeCheckReferenceSameTarget(tm, targets[prev], targets[idx])) {
                 seen = true
                 break
             }
@@ -718,8 +762,8 @@ public func TypeCheckReferenceFilterAndCheckTargetsOfRef(
     re: RefExpr,
     targets: ArrayList<Decl>
 ): Bool {
-    TypeCheckReferenceRemoveDuplicateTargets(targets)
-    TypeCheckReferenceFilterCandidatesForRef(re, targets)
+    TypeCheckReferenceRemoveDuplicateTargets(tm, targets)
+    TypeCheckReferenceFilterCandidatesForRef(tm, re, targets)
     if (targets.isEmpty()) {
         let builder = diag.DiagnoseRefactor(BasicDiagKindRefactor.sema_undeclared_identifier,
             TypeCheckReferenceRange(re),
@@ -787,8 +831,8 @@ public func TypeCheckReferenceFilterAndCheckTargetsOfNameAccess(
         builder.Emit()
         return false
     }
-    TypeCheckReferenceRemoveDuplicateTargets(targets)
-    TypeCheckReferenceFilterCandidatesForRef(ma, targets)
+    TypeCheckReferenceRemoveDuplicateTargets(tm, targets)
+    TypeCheckReferenceFilterCandidatesForRef(tm, ma, targets)
     var baseTy: Option<Ty> = None
     if (let Some(baseExpr) <- ma.baseExpr) {
         baseTy = baseExpr.GetTy()

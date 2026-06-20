@@ -2146,8 +2146,12 @@ public class ImportManager {
 
     public func GeneratePkgDepInfo(pkgs: ArrayList<Package>): ArrayList<String> {
         let out = ArrayList<String>()
+        let sourcePackages = HashSet<String>()
         for (pkg in pkgs) {
-            let deps = CollectDirectDependencyNames(pkg)
+            sourcePackages.add(pkg.fullPackageName)
+        }
+        for (pkg in pkgs) {
+            let deps = CollectDirectDependencyNames(pkg, sourcePackages)
             out.add("{\"package\":\"" + EscapeJson(pkg.fullPackageName) + "\",\"deps\":" +
                 StringSetToJsonArray(deps) + "}")
         }
@@ -2178,7 +2182,7 @@ public class ImportManager {
             sourcePackages.add(pkg.fullPackageName)
         }
         for (pkg in pkgs) {
-            let deps = CollectDirectDependencyNames(pkg)
+            let deps = CollectDirectDependencyNames(pkg, sourcePackages)
             let filteredDeps = HashSet<String>()
             for (dep in deps) {
                 if (dep.isEmpty() || dep == pkg.fullPackageName) {
@@ -2267,11 +2271,7 @@ public class ImportManager {
         if (importSpec.IsImportMulti()) {
             return
         }
-        let targetPackageName = if (importSpec.IsImportAll()) {
-            importSpec.content.GetPrefixPath()
-        } else {
-            importSpec.content.GetImportedPackageName()
-        }
+        let targetPackageName = importSpec.content.GetImportedPackageNameWithIsDecl()
         if (targetPackageName.isEmpty()) {
             return
         }
@@ -2297,20 +2297,26 @@ public class ImportManager {
                 } else {
                     importSpec.content.identifier.Val()
                 }
+                var foundDecl = false
                 for (file in pkg.files) {
                     for (decl in file.decls) {
                         if (decl.identifier.Val() == importSpec.content.identifier.Val() &&
                             IsDeclVisibleFrom(srcFullPackageName, decl)) {
+                            foundDecl = true
                             AddImportedDeclGroupValue(out, importedName, decl)
                         }
                     }
+                }
+                if (!foundDecl && importSpec.content.isDecl) {
+                    diag.Diagnose(DiagCategory.IMPORT_PACKAGE, DEFAULT_POSITION,
+                        "undeclared identifier '${importSpec.content.identifier.Val()}'")
                 }
             }
         }
     }
 
     private func IsPackageImport(importSpec: ImportSpec, targetPackageName: String): Bool {
-        if (importSpec.IsImportAll()) {
+        if (importSpec.IsImportAll() || importSpec.content.isDecl) {
             return false
         }
         for (pkg in importedPackages) {
@@ -2467,11 +2473,11 @@ public class ImportManager {
         return true
     }
 
-    private func CollectDirectDependencyNames(pkg: Package): HashSet<String> {
+    private func CollectDirectDependencyNames(pkg: Package, sourcePackages: HashSet<String>): HashSet<String> {
         let deps = HashSet<String>()
         for (file in pkg.files) {
             for (importSpec in file.imports) {
-                let depName = NormalizeImportedPackageName(importSpec.content)
+                let depName = NormalizeImportedPackageName(importSpec.content, sourcePackages)
                 if (!depName.isEmpty() && depName != pkg.fullPackageName) {
                     deps.add(depName)
                 }
@@ -2502,9 +2508,19 @@ public class ImportManager {
         file.imports.add(importSpec)
     }
 
-    private func NormalizeImportedPackageName(content: ImportContent): String {
-        if (content.kind == ImportKind.IMPORT_ALL) {
+    private func NormalizeImportedPackageName(content: ImportContent, sourcePackages: HashSet<String>): String {
+        if (content.kind == ImportKind.IMPORT_ALL || content.isDecl) {
             return content.GetPrefixPath()
+        }
+        let importedPackageName = content.GetImportedPackageName()
+        for (possibleName in content.GetPossiblePackageNames()) {
+            if (sourcePackages.contains(possibleName) ||
+                !FileUtil.FindSerializationFile(possibleName, ".cjo", searchPath.toArray()).isEmpty()) {
+                if (possibleName != importedPackageName) {
+                    content.isDecl = true
+                }
+                return possibleName
+            }
         }
         return content.GetImportedPackageName()
     }
