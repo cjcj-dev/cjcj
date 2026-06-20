@@ -1,6 +1,7 @@
 package cangjie_compiler::codegen
 
 import std.collection.*
+import cangjie_compiler::chir.ClassType
 import cangjie_compiler::chir.CustomType
 import cangjie_compiler::chir.DynamicDispatch
 import cangjie_compiler::chir.DynamicDispatchWithException
@@ -83,9 +84,10 @@ private func BuildVirtualCallee(irBuilder: IRBuilder2, objectValue: CGValue, own
         irBuilder.CreateIntrinsicCall(GET_MTABLE_FUNC_INTRINSIC_NAME, ArrayList<LLVMTypeRef>(), intrinsicArgs,
             name: "invoke.fn")
     } else {
+        let introTypeIndex = VTableSizeOf(ownerTy) - 1
         let intrinsicArgs = ArrayList<LLVMValueRef>()
         intrinsicArgs.add(objectTypeInfoRaw)
-        intrinsicArgs.add(irBuilder.GetInt64(1))
+        intrinsicArgs.add(irBuilder.GetInt64(introTypeIndex))
         intrinsicArgs.add(irBuilder.GetInt64(methodIndex))
         intrinsicArgs.add(ownerTypeInfoRaw)
         irBuilder.CreateIntrinsicCall(GET_VTABLE_FUNC_INTRINSIC_NAME, ArrayList<LLVMTypeRef>(), intrinsicArgs,
@@ -105,6 +107,23 @@ private func BuildVirtualCallee(irBuilder: IRBuilder2, objectValue: CGValue, own
     let outerTypeInfo = irBuilder.CreateBitCast(rawOuterTypeInfo, typeInfoPtrType, name: "invoke.outer.ti")
     return (irBuilder.CreateBitCast(rawCallee,
         unsafe { LLVMPointerType(cgFuncType.GetLLVMFunctionType(), 0u32) }, name: "invoke.fn.cast"), outerTypeInfo)
+}
+
+private func VTableSizeOf(ownerTy: Type): Int64 {
+    if (let Some(classTy) <- (ownerTy.StripAllRefs() as ClassType)) {
+        let classDef = classTy.GetClassDef()
+        if (classDef.IsInterface()) {
+            return 0
+        }
+        var count: Int64 = 0
+        var current = Some(classDef)
+        while (let Some(def) <- current) {
+            count++
+            current = def.GetSuperClassDef()
+        }
+        return count
+    }
+    return 1
 }
 
 private func IsInterfaceOwnerType(ownerTy: Type): Bool {

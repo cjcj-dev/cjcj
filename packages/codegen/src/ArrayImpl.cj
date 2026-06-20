@@ -427,13 +427,37 @@ private func CreateElementAddress(irBuilder: IRBuilder2, baseValue: CGValue, ind
                 let payload = irBuilder.GetPayloadFromObject(baseValue.GetRawValue())
                 let typedPayload = irBuilder.CreateBitCast(payload,
                     unsafe { LLVMPointerType(layoutType, 1u32) }, name: name + ".payload")
-                return irBuilder.CreateGEP(layoutType, typedPayload, indices, name: name)
+                return irBuilder.CreateGEP(layoutType, typedPayload,
+                    AdjustAutoEnvClassFieldIndices(baseType.GetOriginal(), indices), name: name)
             }
             return irBuilder.CreateGEP(elementType.GetLLVMType(), baseValue.GetRawValue(), indices, name: name)
         }
         return irBuilder.CreateGEP(baseType.GetLLVMType(), baseValue.GetRawValue(), indices, name: name)
     }
     return LLVMNullValue()
+}
+
+private func AdjustAutoEnvClassFieldIndices(baseTy: Type, indices: ArrayList<LLVMValueRef>): ArrayList<LLVMValueRef> {
+    let prefix = AutoEnvCallableAbiFieldCount(baseTy)
+    if (prefix == 0u64 || indices.size < 2) {
+        return indices
+    }
+    let adjusted = ArrayList<LLVMValueRef>()
+    var idx: Int64 = 0
+    while (idx < indices.size) {
+        if (idx == 1) {
+            let rawIndex = unsafe { LLVMConstIntGetZExtValue(indices[idx]) }
+            adjusted.add(unsafe { LLVMConstInt(LLVMTypeOf(indices[idx]), rawIndex + prefix, 0) })
+        } else {
+            adjusted.add(indices[idx])
+        }
+        idx++
+    }
+    return adjusted
+}
+
+private func AutoEnvCallableAbiFieldCount(baseTy: Type): UInt64 {
+    return if (IsAutoEnvType(baseTy)) { 2u64 } else { 0u64 }
 }
 
 private func ResolveElementPathByNames(baseTy: Type, names: ArrayList<String>): Option<ArrayList<UInt64>> {

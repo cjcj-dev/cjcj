@@ -3471,48 +3471,21 @@ public class Translator {
             sizeValue, CurrentBlock()))
         let userInitFn = Translator.TranslateASTNode(RequireFuncArgExpr(expr.args[1], "RawArray lambda init"), this) ??
             throw IllegalStateException("faithful AST2CHIR RawArray lambda init produced no value")
-        FillRawArrayByLambda(rawArrayRef, sizeValue, userInitFn, rawArrayTy)
-        return rawArrayRef
-    }
-
-    private func FillRawArrayByLambda(rawArrayRef: Value, sizeValue: Value, userInitFn: Value,
-        rawArrayTy: RawArrayType): Unit {
-        let parentGroup = RequireParentBlockGroup(CurrentBlock(), "RawArray lambda init")
-        let indexTy = builder.context.GetInt64Ty()
-        let indexRefTy = builder.context.GetRefTy(indexTy)
-        let indexSlot = RequireResult(builder.CreateAllocate(indexRefTy, indexTy, CurrentBlock()))
-        let zero = RequireResult(builder.CreateConstant(indexTy, IntLiteral(0), CurrentBlock()))
-        builder.CreateStore(zero, indexSlot, CurrentBlock())
-
-        let conditionBlock = builder.CreateBlock(parentGroup)
-        let bodyBlock = builder.CreateBlock(parentGroup)
-        let endBlock = builder.CreateBlock(parentGroup)
-        builder.CreateGoTo(conditionBlock, CurrentBlock())
-
-        currentBlock = conditionBlock
-        let index = RequireResult(builder.CreateLoad(indexTy, indexSlot, CurrentBlock()))
-        let hasElement = RequireResult(builder.CreateBinaryExpression(ExprKind.LT, builder.context.GetBoolTy(),
-            index, sizeValue, CurrentBlock()))
-        builder.CreateBranch(hasElement, bodyBlock, endBlock, CurrentBlock())
-
-        currentBlock = bodyBlock
-        let callArgs = ArrayList<Value>()
-        callArgs.add(index)
-        let elementTy = rawArrayTy.GetElementType()
-        let element = CreateApplyMaybeWithException(elementTy, userInitFn, FuncCallContext(args: callArgs))
-        let dynamicIndices = ArrayList<Value>()
-        dynamicIndices.add(index)
-        let elementRef = RequireResult(builder.CreateDynamicElementRef(builder.context.GetRefTy(elementTy),
-            rawArrayRef, dynamicIndices, CurrentBlock()))
-        builder.CreateStore(CastValueIfNeeded(element, elementTy), elementRef, CurrentBlock())
-        let one = RequireResult(builder.CreateConstant(indexTy, IntLiteral(1), CurrentBlock()))
-        let next = RequireResult(builder.CreateBinaryExpression(ExprKind.ADD, indexTy, index, one, CurrentBlock()))
-        builder.CreateStore(next, indexSlot, CurrentBlock())
-        if (CurrentBlock().GetTerminator().isNone()) {
-            builder.CreateGoTo(conditionBlock, CurrentBlock())
+        let initFunc = expr.initFunc ??
+            throw IllegalStateException("faithful AST2CHIR RawArray(size, initFunc) missing initFunc")
+        let args = ArrayList<Value>()
+        args.add(rawArrayRef)
+        args.add(userInitFn)
+        let instTypeArgs = ArrayList<Type>()
+        if (initFunc.TestAttr(AstAttribute.GENERIC)) {
+            for (ty in rawArrayTy.GetTypeArgs()) {
+                instTypeArgs.add(ty)
+            }
         }
-
-        currentBlock = endBlock
+        let initFnTy = builder.context.GetFuncTy(TypesFromValues(args), arrayTy)
+        let _ = CreateApplyMaybeWithException(initFnTy.GetReturnType(), GetSymbolTable(initFunc),
+            FuncCallContext(args: args, instTypeArgs: instTypeArgs))
+        return rawArrayRef
     }
 
     private func IsArrayElementPrimitiveForLiteral(ty: Type): Bool {
@@ -4094,9 +4067,6 @@ public class Translator {
         } else {
             RequireResult(builder.CreateAllocate(thisRefTy, thisTy, CurrentBlock()))
         }
-        if (let Some(arrayValue) <- TryTranslateArrayLambdaCtor(expr, calleeDecl, thisTy, thisObj)) {
-            return arrayValue
-        }
         let args = ArrayList<Value>()
         args.add(thisObj)
         let expectedParamTys = FuncParamTypes(expr, calleeDecl, thisType: Some(thisRefTy))
@@ -4110,64 +4080,6 @@ public class Translator {
             }
         }
         return thisObj
-    }
-
-    private func TryTranslateArrayLambdaCtor(expr: AstCallExpr, calleeDecl: AstFuncDecl, thisTy: Type,
-        thisObj: Value): Option<Value> {
-        if (!IsStdArrayLambdaCtorShape(expr, calleeDecl, thisTy)) {
-            return None
-        }
-        let rawArrayTy = FindStdArrayRawArrayMemberTy(thisTy) ?? return None
-        let expectedParamTys = FuncParamTypes(expr, calleeDecl, thisType: Some(builder.context.GetRefTy(thisTy)))
-        let args = ActiveCallArgs(expr)
-        let previousDefaultArgs = ArrayList<Value>()
-        let sizeValue = TranslateOneCallArg(expr, calleeDecl, args[0], 0,
-            if (expectedParamTys.size > 0) { Some(expectedParamTys[0]) } else { None }, previousDefaultArgs)
-        previousDefaultArgs.add(sizeValue)
-        let userInitFn = TranslateOneCallArg(expr, calleeDecl, args[1], 1,
-            if (expectedParamTys.size > 1) { Some(expectedParamTys[1]) } else { None }, previousDefaultArgs)
-        let rawArrayRef = RequireResult(builder.CreateRawArrayAllocate(builder.context.GetRefTy(rawArrayTy),
-            rawArrayTy.GetElementType(), sizeValue, CurrentBlock()))
-        FillRawArrayByLambda(rawArrayRef, sizeValue, userInitFn, rawArrayTy)
-
-        let rawArrayPath = ArrayList<UInt64>()
-        rawArrayPath.add(0u64)
-        builder.CreateStoreElementRef(rawArrayRef, thisObj, rawArrayPath, CurrentBlock())
-        let zero = RequireResult(builder.CreateConstant(builder.context.GetInt64Ty(), IntLiteral(0), CurrentBlock()))
-        let startPath = ArrayList<UInt64>()
-        startPath.add(1u64)
-        builder.CreateStoreElementRef(zero, thisObj, startPath, CurrentBlock())
-        let sizePath = ArrayList<UInt64>()
-        sizePath.add(2u64)
-        builder.CreateStoreElementRef(sizeValue, thisObj, sizePath, CurrentBlock())
-
-        if (let Some(outerDecl) <- calleeDecl.outerDecl) {
-            if (outerDecl.astKind == ASTKind.STRUCT_DECL) {
-                return Some(RequireResult(builder.CreateLoad(thisTy, thisObj, CurrentBlock())))
-            }
-        }
-        return Some(thisObj)
-    }
-
-    private func IsStdArrayLambdaCtorShape(expr: AstCallExpr, calleeDecl: AstFuncDecl, thisTy: Type): Bool {
-        if (ActiveCallArgs(expr).size != 2) {
-            return false
-        }
-        if (FindStdArrayRawArrayMemberTy(thisTy).isNone()) {
-            return false
-        }
-        let expectedParamTys = FuncParamTypes(expr, calleeDecl, thisType: Some(builder.context.GetRefTy(thisTy)))
-        return expectedParamTys.size >= 2 && (expectedParamTys[1].StripAllRefs() as FuncType).isSome()
-    }
-
-    private func FindStdArrayRawArrayMemberTy(thisTy: Type): Option<RawArrayType> {
-        if (let Some(customTy) <- (thisTy.StripAllRefs() as CustomType)) {
-            let members = customTy.GetInstantiatedMemberTys()
-            if (members.size >= 3) {
-                return members[0].StripAllRefs() as RawArrayType
-            }
-        }
-        return None
     }
 
     private func GetCurrentConstructorThisObject(): Value {
