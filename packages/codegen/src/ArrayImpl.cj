@@ -20,6 +20,9 @@ public func GenerateLoad(irBuilder: IRBuilder2, chirExpr: Expression): LLVMValue
     let addr = irBuilder.GetCGModule().MaterializeValue(irBuilder, chirExpr.GetOperand(0))
     if (let Some(addrType) <- addr.GetCGType()) {
         if (let Some(pointerElementType) <- addrType.GetPointerElementType()) {
+            if (let Some(readBarrier) <- TryGenerateGCReadForLoad(irBuilder, chirExpr, pointerElementType, addr)) {
+                return readBarrier
+            }
             if (let Some(loaded) <- TryLoadClassFieldWithReadBarrier(irBuilder, chirExpr, addr, pointerElementType)) {
                 return loaded
             }
@@ -65,6 +68,34 @@ private func TryLoadClassFieldWithReadBarrier(irBuilder: IRBuilder2, loadExpr: E
 private func ShouldUseClassFieldReadBarrier(elementType: CGType): Bool {
     let stripped = elementType.GetOriginal().StripAllRefs()
     return stripped.IsGeneric() || stripped.IsReferenceType() || elementType.GetSize().isNone()
+}
+
+private func TryGenerateGCReadForLoad(irBuilder: IRBuilder2, chirExpr: Expression, elementType: CGType,
+    addr: CGValue): Option<LLVMValueRef> {
+    if (!elementType.IsReference()) {
+        return None
+    }
+    let addrOperand = chirExpr.GetOperand(0)
+    if (let Some(local) <- addrOperand.AsLocalVar()) {
+        if (let Some(ownerExpr) <- local.GetExpr()) {
+            if (let Some(getElementRef) <- (ownerExpr as GetElementRef)) {
+                let base = getElementRef.GetLocation()
+                if (let Some(baseTy) <- base.GetType()) {
+                    if (IsManagedObjectElementBase(baseTy) &&
+                        IsManagedReferenceField(irBuilder, ResolveElementTypeByPath(baseTy, getElementRef.GetPath()))) {
+                        let baseValue = irBuilder.GetCGModule().MaterializeValue(irBuilder, base)
+                        return Some(irBuilder.CallGCReadRef(baseValue.GetRawValue(), addr.GetRawValue()))
+                    }
+                }
+            }
+        }
+    }
+    return None
+}
+
+private func IsManagedObjectElementBase(ty: Type): Bool {
+    let strippedTy = ty.StripAllRefs()
+    return strippedTy.IsClass() || strippedTy.IsBox()
 }
 
 public func GenerateRawArrayAllocate(irBuilder: IRBuilder2, chirExpr: Expression): LLVMValueRef {
@@ -288,7 +319,12 @@ public func GenerateStoreElementRef(irBuilder: IRBuilder2, chirExpr: Expression)
         if (storeAddr.isNull()) {
             return LLVMNullValue()
         }
-        return StoreElementValue(irBuilder, storePlace, storeValue, storeAddr)
+        let fieldTy: Option<Type> = if (let Some(locationTy) <- storeElementRef.GetLocation().GetType()) {
+            ResolveElementTypeByPath(locationTy, path)
+        } else {
+            None
+        }
+        return StoreElementValue(irBuilder, storePlace, storeValue, storeAddr, fieldTy)
     }
     if (let Some(storeByName) <- (chirExpr as StoreElementByName)) {
         if (let Some(locationTy) <- storeByName.GetLocation().GetType()) {
@@ -303,7 +339,8 @@ public func GenerateStoreElementRef(irBuilder: IRBuilder2, chirExpr: Expression)
                 if (byNameAddr.isNull()) {
                     return LLVMNullValue()
                 }
-                return StoreElementValue(irBuilder, byNamePlace, byNameValue, byNameAddr)
+                return StoreElementValue(irBuilder, byNamePlace, byNameValue, byNameAddr,
+                    ResolveElementTypeByPath(locationTy, path))
             }
         }
     }
@@ -311,12 +348,17 @@ public func GenerateStoreElementRef(irBuilder: IRBuilder2, chirExpr: Expression)
 }
 
 private func StoreElementValue(irBuilder: IRBuilder2, baseValue: CGValue, elementValue: CGValue,
-    elementPtr: LLVMValueRef): LLVMValueRef {
+    elementPtr: LLVMValueRef, fieldTy: Option<Type>): LLVMValueRef {
     if (let Some(baseType) <- baseValue.GetCGType()) {
         if (let Some(rawArrayTy) <- FindRawArrayType(baseType.GetOriginal())) {
             let elementCGType = CGType.GetOrCreate(irBuilder.GetCGModule(), rawArrayTy.GetElementType())
             return StoreRawArrayElement(irBuilder, baseValue.GetRawValue(), elementCGType, elementValue.GetRawValue(),
                 elementPtr)
+        }
+        if (IsManagedObjectElementBase(baseType.GetOriginal())) {
+            if (IsManagedReferenceField(irBuilder, fieldTy)) {
+                return irBuilder.CallGCWrite(elementValue.GetRawValue(), baseValue.GetRawValue(), elementPtr)
+            }
         }
     }
     if (ShouldUseObjectFieldWriteBarrier(baseValue, elementValue, elementPtr)) {
@@ -447,13 +489,37 @@ private func CreateElementAddress(irBuilder: IRBuilder2, baseValue: CGValue, ind
                 let payload = irBuilder.GetPayloadFromObject(baseValue.GetRawValue())
                 let typedPayload = irBuilder.CreateBitCast(payload,
                     unsafe { LLVMPointerType(layoutType, 1u32) }, name: name + ".payload")
-                return irBuilder.CreateGEP(layoutType, typedPayload, indices, name: name)
+                return irBuilder.CreateGEP(layoutType, typedPayload,
+                    AdjustAutoEnvClassFieldIndices(baseType.GetOriginal(), indices), name: name)
             }
             return irBuilder.CreateGEP(elementType.GetLLVMType(), baseValue.GetRawValue(), indices, name: name)
         }
         return irBuilder.CreateGEP(baseType.GetLLVMType(), baseValue.GetRawValue(), indices, name: name)
     }
     return LLVMNullValue()
+}
+
+private func AdjustAutoEnvClassFieldIndices(baseTy: Type, indices: ArrayList<LLVMValueRef>): ArrayList<LLVMValueRef> {
+    let prefix = AutoEnvCallableAbiFieldCount(baseTy)
+    if (prefix == 0u64 || indices.size < 2) {
+        return indices
+    }
+    let adjusted = ArrayList<LLVMValueRef>()
+    var idx: Int64 = 0
+    while (idx < indices.size) {
+        if (idx == 1) {
+            let rawIndex = unsafe { LLVMConstIntGetZExtValue(indices[idx]) }
+            adjusted.add(unsafe { LLVMConstInt(LLVMTypeOf(indices[idx]), rawIndex + prefix, 0) })
+        } else {
+            adjusted.add(indices[idx])
+        }
+        idx++
+    }
+    return adjusted
+}
+
+private func AutoEnvCallableAbiFieldCount(baseTy: Type): UInt64 {
+    return if (IsAutoEnvType(baseTy)) { 2u64 } else { 0u64 }
 }
 
 private func ResolveElementPathByNames(baseTy: Type, names: ArrayList<String>): Option<ArrayList<UInt64>> {
@@ -490,4 +556,44 @@ private func ResolveElementPathByNames(baseTy: Type, names: ArrayList<String>): 
         }
     }
     return Some(path)
+}
+
+private func ResolveElementTypeByPath(baseTy: Type, path: ArrayList<UInt64>): Option<Type> {
+    if (path.isEmpty()) {
+        return None
+    }
+    var currentTy = baseTy.StripAllRefs()
+    for (pathItem in path) {
+        if (let Some(rawArrayTy) <- (currentTy as RawArrayType)) {
+            currentTy = rawArrayTy.GetElementType().StripAllRefs()
+            continue
+        }
+        if (currentTy.IsTuple()) {
+            let fields = currentTy.GetTypeArgs()
+            let fieldIdx = Int64(pathItem)
+            if (fieldIdx < 0 || fieldIdx >= fields.size) {
+                return None
+            }
+            currentTy = fields[fieldIdx].StripAllRefs()
+            continue
+        }
+        if (let Some(customTy) <- (currentTy as CustomType)) {
+            let fields = customTy.GetInstantiatedMemberTys()
+            let fieldIdx = Int64(pathItem)
+            if (fieldIdx < 0 || fieldIdx >= fields.size) {
+                return None
+            }
+            currentTy = fields[fieldIdx].StripAllRefs()
+            continue
+        }
+        return None
+    }
+    return Some(currentTy)
+}
+
+private func IsManagedReferenceField(irBuilder: IRBuilder2, fieldTy: Option<Type>): Bool {
+    if (let Some(ty) <- fieldTy) {
+        return CGType.GetOrCreate(irBuilder.GetCGModule(), ty).IsReference()
+    }
+    return false
 }

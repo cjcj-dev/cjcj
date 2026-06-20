@@ -1,6 +1,7 @@
 package cangjie_compiler::codegen
 
 import std.collection.*
+import cangjie_compiler::chir.CustomType
 import cangjie_compiler::chir.Type
 import cangjie_compiler::chir.Value
 import cangjie_compiler::mangle.MANGLE_NESTED_PREFIX
@@ -84,6 +85,27 @@ public func GetConstantArrayName(value: String): String {
 
 public func DeRef(chirTy: Type): Type {
     return chirTy.StripAllRefs()
+}
+
+public func IsAutoEnvType(chirTy: Type): Bool {
+    if (let Some(customTy) <- (chirTy.StripAllRefs() as CustomType)) {
+        return customTy.GetCustomTypeDef().GetAnnotation("IsAutoEnvClass").isSome()
+    }
+    return false
+}
+
+public func IsAutoEnvBaseType(chirTy: Type): Bool {
+    if (let Some(customTy) <- (chirTy.StripAllRefs() as CustomType)) {
+        return customTy.GetCustomTypeDef().GetAnnotation("IsAutoEnvBase").isSome()
+    }
+    return false
+}
+
+public func IsAutoEnvInstBaseType(chirTy: Type): Bool {
+    if (let Some(customTy) <- (chirTy.StripAllRefs() as CustomType)) {
+        return customTy.GetCustomTypeDef().GetAnnotation("IsAutoEnvInstBase").isSome()
+    }
+    return false
 }
 
 public func IsGenericRef(chirTy: Type): Bool {

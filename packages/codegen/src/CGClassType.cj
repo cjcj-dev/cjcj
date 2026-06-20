@@ -20,6 +20,12 @@ public class CGClassType <: CGCustomType {
         if (!cgCtx.IsGeneratedStructType(layoutName)) {
             cgCtx.AddGeneratedStructType(layoutName)
             let fieldTypes = ArrayList<LLVMTypeRef>()
+            if (IsAutoEnvType(chirType)) {
+                let i8Ty = unsafe { LLVMInt8TypeInContext(cgCtx.GetLLVMContext().raw) }
+                let i8PtrTy = unsafe { LLVMPointerType(i8Ty, 0u32) }
+                fieldTypes.add(i8PtrTy)
+                fieldTypes.add(i8PtrTy)
+            }
             if (let Some(customTy) <- (chirType as CustomType)) {
                 for (fieldTy in customTy.GetInstantiatedMemberTys()) {
                     fieldTypes.add(CGType.GetOrCreate(cgMod, fieldTy).GetLLVMType())
@@ -31,6 +37,12 @@ public class CGClassType <: CGCustomType {
     }
 
     protected override func GenContainedCGTypes(): Unit {
+        if (IsAutoEnvType(chirType)) {
+            let pointerTy = cgMod.GetCGContext().GetCHIRBuilder().context.GetCPointerTy(
+                cgMod.GetCGContext().GetCHIRBuilder().context.GetInt8Ty())
+            containedCGTypes.add(CGType.GetOrCreate(cgMod, pointerTy))
+            containedCGTypes.add(CGType.GetOrCreate(cgMod, pointerTy))
+        }
         if (let Some(customTy) <- (chirType as CustomType)) {
             for (fieldTy in customTy.GetInstantiatedMemberTys()) {
                 containedCGTypes.add(CGType.GetOrCreate(cgMod, fieldTy))

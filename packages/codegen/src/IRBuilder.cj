@@ -557,6 +557,9 @@ public class IRBuilder2 <: Resource {
             if (funcType.GetReturnType().IsUnit()) {
                 return cgMod.GenerateUnitTypeValue()
             }
+            if (retTy.IsGeneric()) {
+                return ConvertGenericReturnValue(callBase, retTy)
+            }
             return callBase
         }
         return CreateCallOrInvoke(callee, calleeType.GetLLVMFunctionType(), callArgs, name: name)
@@ -718,6 +721,27 @@ public class IRBuilder2 <: Resource {
             }
         }
         return None
+    }
+
+    private func ConvertGenericReturnValue(retValue: LLVMValueRef, returnTy: Type): LLVMValueRef {
+        let resultTy = CurrentExpressionResultType() ?? returnTy
+        if (resultTy.IsEqual(returnTy) || resultTy.IsGeneric()) {
+            return retValue
+        }
+        if (resultTy.IsUnit() || resultTy.IsVoid() || resultTy.IsNothing()) {
+            return cgMod.GenerateUnitTypeValue()
+        }
+        let resultCGType = CGType.GetOrCreate(cgMod, resultTy)
+        if (resultCGType.IsReference()) {
+            return CreatePointerCast(retValue, resultCGType.GetLLVMType(), name: "generic.ret.ref")
+        }
+        if (resultCGType.GetSize().isSome()) {
+            let payload = GetPayloadFromObject(retValue)
+            let payloadType = unsafe { LLVMPointerType(resultCGType.GetLLVMType(), 1u32) }
+            let typedPayload = CreateBitCast(payload, payloadType, name: "generic.ret.payload")
+            return CreateLoad(resultCGType.GetLLVMType(), typedPayload, name: "generic.ret.value")
+        }
+        return retValue
     }
 
     private func CreateSRetForUnknownSize(returnTy: Type, resultTy: Type, name!: String = "sret"): LLVMValueRef {
