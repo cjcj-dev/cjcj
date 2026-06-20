@@ -1384,6 +1384,10 @@ public class RefExpr <: NameReferenceExpr {
     public init(identifier: SrcIdentifier) {
         super(ASTKind.REF_EXPR)
         ref.identifier = identifier
+        if (!identifier.IsRaw()) {
+            isThis = identifier == "this"
+            isSuper = identifier == "super"
+        }
         begin = identifier.Begin()
         end = identifier.End()
     }

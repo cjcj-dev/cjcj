@@ -24,6 +24,122 @@ private func questTy(): Ty {
     return TypeManager.GetQuestTy()
 }
 
+private func typeCheckExprGetCurInheritableDecl(ctx: ASTContext, scopeName: String,
+    currentFuncBody: Option<FuncBody>): Option<InheritableDecl> {
+    var scopeGateName = GetScopeGateName(scopeName)
+    while (!scopeGateName.isEmpty()) {
+        if (let Some(symbol) <- GetScopeGate(ctx, scopeGateName)) {
+            if (let Some(node) <- symbol.node) {
+                if (let Some(decl) <- (node as InheritableDecl)) {
+                    return Some(decl)
+                }
+            }
+        }
+        scopeGateName = GetScopeGateName(scopeGateName)
+    }
+    if (let Some(funcBody) <- currentFuncBody) {
+        if (let Some(funcDecl) <- funcBody.funcDecl) {
+            if (let Some(outer) <- funcDecl.outerDecl) {
+                if (let Some(inheritable) <- (outer as InheritableDecl)) {
+                    return Some(inheritable)
+                }
+            }
+        }
+        if (let Some(classLike) <- funcBody.parentClassLike) {
+            return Some(classLike)
+        }
+        if (let Some(structDecl) <- funcBody.parentStruct) {
+            return Some(structDecl)
+        }
+        if (let Some(enumDecl) <- funcBody.parentEnum) {
+            return Some(enumDecl)
+        }
+    }
+    return None
+}
+
+private func typeCheckExprReplaceWithGenericTyInInheritableDecl(typeManager: TypeManager, ty: Option<Ty>,
+    outerDecl: InheritableDecl, targetDecl: InheritableDecl): Ty {
+    let rawTy = ty ?? TypeManager.GetInvalidTy()
+    if (!Ty.IsTyCorrect(rawTy) || !rawTy.HasGeneric()) {
+        return rawTy
+    }
+    if (let Some(currentTy) <- outerDecl.GetTy()) {
+        if (let Some(targetTy) <- targetDecl.GetTy()) {
+            let mapping = Promotion(typeManager).GetPromoteTypeMapping(currentTy, targetTy)
+            if (!mapping.entries.isEmpty()) {
+                return typeManager.GetBestInstantiatedTy(rawTy, mapping)
+            }
+        }
+    }
+    return rawTy
+}
+
+private func typeCheckExprInferTypeOfThis(typeManager: TypeManager, re: RefExpr, outerDecl: InheritableDecl): Ty {
+    var targetDecl = outerDecl
+    if (let Some(extendDecl) <- (targetDecl as ExtendDecl)) {
+        if (let Some(extendedType) <- extendDecl.extendedType) {
+            if (let Some(extendedTy) <- extendedType.GetTy()) {
+                if (extendedTy.IsBuiltin()) {
+                    return extendedTy
+                }
+                if (let Some(realDecl) <- Ty.GetInheritableDeclPtrOfTy(Some(extendedTy))) {
+                    targetDecl = realDecl
+                } else {
+                    return TypeManager.GetInvalidTy()
+                }
+            }
+        }
+    }
+    ReplaceTarget(re, Some(targetDecl))
+    let inferredTy = typeCheckExprReplaceWithGenericTyInInheritableDecl(typeManager, targetDecl.GetTy(),
+        outerDecl, targetDecl)
+    if (let Some(classTy) <- (inferredTy as ClassTy)) {
+        if (let Some(classDecl) <- classTy.decl) {
+            return typeManager.GetClassThisTy(classDecl, classTy.typeArgs.toArray())
+        }
+    }
+    return inferredTy
+}
+
+private func typeCheckExprInferTypeOfSuper(typeManager: TypeManager, re: RefExpr, outerDecl: InheritableDecl): Ty {
+    if (let None <- (outerDecl as ClassDecl)) {
+        return TypeManager.GetInvalidTy()
+    }
+    let classDecl = (outerDecl as ClassDecl).getOrThrow()
+    if (let Some(rawTy) <- classDecl.GetTy()) {
+        if (let Some(classTy) <- (rawTy as ClassTy)) {
+            if (let Some(superClassTy) <- classTy.GetSuperClassTy()) {
+                if (let Some(superDecl) <- superClassTy.declPtr) {
+                    ReplaceTarget(re, Some(superDecl))
+                    return typeCheckExprReplaceWithGenericTyInInheritableDecl(typeManager, superDecl.GetTy(),
+                        outerDecl, superDecl)
+                }
+            }
+        }
+    }
+    return TypeManager.GetInvalidTy()
+}
+
+private func typeCheckExprCheckThisOrSuper(typeManager: TypeManager, ctx: ASTContext, re: RefExpr,
+    currentFuncBody: Option<FuncBody>): Unit {
+    if (!re.isThis && !re.isSuper) {
+        return
+    }
+    if ((let Some(_) <- re.ref.target) || !re.ref.targets.isEmpty()) {
+        return
+    }
+    re.SetTy(TypeManager.GetInvalidTy())
+    if (let Some(outerDecl) <- typeCheckExprGetCurInheritableDecl(ctx, scopeNameOf(re), currentFuncBody)) {
+        let inferredTy = if (re.isThis) {
+            typeCheckExprInferTypeOfThis(typeManager, re, outerDecl)
+        } else {
+            typeCheckExprInferTypeOfSuper(typeManager, re, outerDecl)
+        }
+        re.SetTy(inferredTy)
+    }
+}
+
 private func lookupResolvedPackageDecl(ctx: ASTContext, packageName: String, name: String): Option<Decl> {
     if (let Some(packageMap) <- ctx.resolvedPackageMemberDeclsMap.get(packageName)) {
         if (let Some(decls) <- packageMap.get(name)) {
@@ -232,6 +348,42 @@ private func isStringLiteral(expr: Expr): Bool {
     return false
 }
 
+private func typeCheckExprIsArithmeticOperator(op: TokenKind): Bool {
+    return op == TokenKind.ADD || op == TokenKind.SUB || op == TokenKind.MUL ||
+        op == TokenKind.DIV || op == TokenKind.EXP || op == TokenKind.MOD ||
+        op == TokenKind.BITAND || op == TokenKind.BITOR || op == TokenKind.BITXOR
+}
+
+private func typeCheckExprAddConcreteIntegerKinds(kinds: ArrayList<TypeKind>): Unit {
+    kinds.add(TypeKind.TYPE_INT8)
+    kinds.add(TypeKind.TYPE_INT16)
+    kinds.add(TypeKind.TYPE_INT32)
+    kinds.add(TypeKind.TYPE_INT64)
+    kinds.add(TypeKind.TYPE_INT_NATIVE)
+    kinds.add(TypeKind.TYPE_UINT8)
+    kinds.add(TypeKind.TYPE_UINT16)
+    kinds.add(TypeKind.TYPE_UINT32)
+    kinds.add(TypeKind.TYPE_UINT64)
+    kinds.add(TypeKind.TYPE_UINT_NATIVE)
+}
+
+private func typeCheckExprConcreteBinaryCandidateKinds(op: TokenKind): ArrayList<TypeKind> {
+    let kinds = ArrayList<TypeKind>()
+    if (op == TokenKind.ADD || op == TokenKind.SUB || op == TokenKind.MUL || op == TokenKind.DIV) {
+        typeCheckExprAddConcreteIntegerKinds(kinds)
+        kinds.add(TypeKind.TYPE_FLOAT16)
+        kinds.add(TypeKind.TYPE_FLOAT32)
+        kinds.add(TypeKind.TYPE_FLOAT64)
+    } else if (op == TokenKind.MOD || op == TokenKind.BITAND || op == TokenKind.BITOR ||
+        op == TokenKind.BITXOR) {
+        typeCheckExprAddConcreteIntegerKinds(kinds)
+    } else if (op == TokenKind.EXP) {
+        kinds.add(TypeKind.TYPE_INT64)
+        kinds.add(TypeKind.TYPE_FLOAT64)
+    }
+    return kinds
+}
+
 public class TypeChecker {
     private var ci: Option<CompilerInstance> = None
     private var impl: TypeCheckerImpl = TypeCheckerImpl()
@@ -298,6 +450,9 @@ public class TypeChecker {
         for (ctx in contexts) {
             SeedImportedExtendMaps(ctx)
         }
+        for (ctx in contexts) {
+            BuildCurrentPackageExtendMap(ctx)
+        }
         return contexts
     }
 
@@ -307,8 +462,168 @@ public class TypeChecker {
         ctx.fullPackageName = pkg.fullPackageName
         SeedImportedPackageDecls(ctx)
         AddCurFile(pkg)
+        AddDefaultFunction(pkg)
         Collector().BuildSymbolTable(ctx, pkg)
         impl.WarmupCache(ctx)
+    }
+
+    private func AddDefaultFunction(pkg: Package): Unit {
+        if (pkg.TestAttr(Attribute.TOOL_ADD)) {
+            return
+        }
+        for (file in pkg.files) {
+            for (decl in file.decls) {
+                AddDefaultFunctionForDecl(decl)
+            }
+        }
+    }
+
+    private func AddDefaultFunctionForDecl(decl: Decl): Unit {
+        if (let Some(structDecl) <- (decl as StructDecl)) {
+            AddDefaultCtorIfNeeded(structDecl)
+            if (let Some(body) <- structDecl.body) {
+                for (member in body.decls) {
+                    AddDefaultFunctionForDecl(member)
+                }
+            }
+            return
+        }
+        if (let Some(classDecl) <- (decl as ClassDecl)) {
+            AddDefaultCtorIfNeeded(classDecl)
+            if (let Some(body) <- classDecl.body) {
+                for (member in body.decls) {
+                    AddDefaultFunctionForDecl(member)
+                }
+            }
+            return
+        }
+        if (let Some(interfaceDecl) <- (decl as InterfaceDecl)) {
+            if (let Some(body) <- interfaceDecl.body) {
+                for (member in body.decls) {
+                    AddDefaultFunctionForDecl(member)
+                }
+            }
+            return
+        }
+        if (let Some(enumDecl) <- (decl as EnumDecl)) {
+            for (member in enumDecl.members) {
+                AddDefaultFunctionForDecl(member)
+            }
+            return
+        }
+        if (let Some(extendDecl) <- (decl as ExtendDecl)) {
+            for (member in extendDecl.members) {
+                AddDefaultFunctionForDecl(member)
+            }
+        }
+    }
+
+    private func HasCtorForTypeDecl(decl: InheritableDecl): Bool {
+        for (member in decl.GetMemberDeclPtrs()) {
+            if (member.TestAttr(Attribute.CONSTRUCTOR) && !member.TestAttr(Attribute.STATIC)) {
+                return true
+            }
+        }
+        return false
+    }
+
+    private func AddDefaultCtorIfNeeded(decl: InheritableDecl): Unit {
+        if (HasCtorForTypeDecl(decl)) {
+            return
+        }
+        AddDefaultCtor(decl)
+    }
+
+    private func AddDefaultCtor(decl: InheritableDecl): Unit {
+        if (decl.astKind != ASTKind.STRUCT_DECL && decl.astKind != ASTKind.CLASS_DECL) {
+            return
+        }
+        if (decl.TestAnyAttr(Attribute.OBJ_C_MIRROR, Attribute.OBJ_C_MIRROR_SYNTHETIC_WRAPPER)) {
+            return
+        }
+        if (decl.astKind == ASTKind.STRUCT_DECL && decl.TestAttr(Attribute.COMMON)) {
+            return
+        }
+        if (decl.astKind == ASTKind.CLASS_DECL &&
+            decl.TestAnyAttr(Attribute.COMMON, Attribute.JAVA_MIRROR)) {
+            return
+        }
+        let ctor = CreateDefaultCtor(decl, isStatic: false)
+        if (let Some(structDecl) <- (decl as StructDecl)) {
+            if (let Some(body) <- structDecl.body) {
+                body.decls.add(ctor)
+            }
+        } else if (let Some(classDecl) <- (decl as ClassDecl)) {
+            if (let Some(body) <- classDecl.body) {
+                body.decls.add(ctor)
+            }
+        }
+    }
+
+    private func CreateDefaultCtor(decl: InheritableDecl, isStatic!: Bool = false): FuncDecl {
+        let funcBody = FuncBody()
+        CopyFileID(funcBody, decl)
+        let block = Block()
+        CopyFileID(block, decl)
+        funcBody.body = block
+        let paramList = FuncParamList()
+        CopyFileID(paramList, decl)
+        funcBody.paramLists.add(paramList)
+
+        let initFunc = FuncDecl()
+        CopyFileID(initFunc, decl)
+        initFunc.funcBody = funcBody
+        funcBody.funcDecl = initFunc
+        initFunc.identifier = SrcIdentifier("init")
+        initFunc.identifier.SetFileID(decl.begin.fileID)
+        initFunc.begin = decl.identifier.Begin()
+        initFunc.end = initFunc.begin + decl.identifier.Length()
+        initFunc.funcBody.getOrThrow().begin = initFunc.begin
+        initFunc.funcBody.getOrThrow().end = initFunc.end
+        initFunc.outerDecl = decl
+        initFunc.EnableAttr(Attribute.IMPLICIT_ADD)
+        initFunc.toBeCompiled = HasRecompilingMemberVar(decl, isStatic)
+        if (isStatic) {
+            initFunc.EnableAttr(Attribute.STATIC)
+            initFunc.EnableAttr(Attribute.PRIVATE)
+        } else {
+            initFunc.EnableAttr(Attribute.PUBLIC)
+        }
+        SetCtorFuncPosition(decl, initFunc)
+        initFunc.EnableAttr(Attribute.CONSTRUCTOR)
+        initFunc.EnableAttr(Attribute.COMPILER_ADD)
+        if (let Some(structDecl) <- (decl as StructDecl)) {
+            funcBody.parentStruct = structDecl
+        } else if (let Some(classDecl) <- (decl as ClassDecl)) {
+            funcBody.parentClassLike = classDecl
+        }
+        AddCurFile(initFunc, file: decl.curFile)
+        return initFunc
+    }
+
+    private func HasRecompilingMemberVar(decl: InheritableDecl, isStatic: Bool): Bool {
+        var found = false
+        for (member in decl.GetMemberDeclPtrs()) {
+            if (member.astKind == ASTKind.VAR_DECL && member.TestAttr(Attribute.STATIC) == isStatic) {
+                found = true
+                if (member.toBeCompiled) {
+                    return true
+                }
+            }
+        }
+        return !found
+    }
+
+    private func SetCtorFuncPosition(decl: InheritableDecl, initFunc: FuncDecl): Unit {
+        if (initFunc.TestAttr(Attribute.STATIC)) {
+            return
+        }
+        for (member in decl.GetMemberDeclPtrs()) {
+            if (member.astKind == ASTKind.VAR_DECL && !member.TestAttr(Attribute.STATIC)) {
+                initFunc.begin = member.begin
+            }
+        }
+        initFunc.begin.fileID = decl.begin.fileID
     }
 
     private func SeedImportedPackageDecls(ctx: ASTContext): Unit {
@@ -366,6 +681,44 @@ public class TypeChecker {
         TypeCheckExtendUpdateExtendMap(impl.typeManager, extends)
     }
 
+    private func BuildCurrentPackageExtendMap(ctx: ASTContext): Unit {
+        let extends = ArrayList<ExtendDecl>()
+        for (sym in impl.GetSymsByASTKind(ctx, ASTKind.EXTEND_DECL)) {
+            if (let Some(node) <- sym.node) {
+                if (let Some(extendDecl) <- (node as ExtendDecl)) {
+                    StampCurrentExtendPackage(ctx, extendDecl)
+                    extends.add(extendDecl)
+                }
+            }
+        }
+        if (extends.isEmpty()) {
+            return
+        }
+        if (let Some(diagValue) <- impl.diag) {
+            TypeCheckExtendBuildMap(diagValue, impl.typeManager, ctx, extends)
+            return
+        }
+        for (extendDecl in extends) {
+            if (let Some(extendedType) <- extendDecl.extendedType) {
+                if (let Some(extendedTy) <- extendedType.GetTy()) {
+                    extendDecl.SetTy(extendedTy)
+                }
+            }
+        }
+        TypeCheckExtendUpdateExtendMap(impl.typeManager, extends)
+    }
+
+    private func StampCurrentExtendPackage(ctx: ASTContext, extendDecl: ExtendDecl): Unit {
+        if (extendDecl.fullPackageName.isEmpty()) {
+            extendDecl.fullPackageName = ctx.fullPackageName
+        }
+        for (member in extendDecl.members) {
+            if (member.fullPackageName.isEmpty()) {
+                member.fullPackageName = extendDecl.fullPackageName
+            }
+        }
+    }
+
     private func PreCheck(activeContexts: ArrayList<ASTContext>): Unit {
         for (ctx in activeContexts) {
             if (let Some(pkg) <- contextPackage(ctx)) {
@@ -415,7 +768,6 @@ public class TypeChecker {
     private func RunInheritanceCheck(pkg: Package): Unit {
         if (let Some(diagValue) <- impl.diag) {
             StructInheritanceChecker(diagValue, impl.typeManager, pkg).Check()
-            CheckInterfaceConformanceForPackage(diagValue, impl.typeManager, pkg)
         }
     }
 
@@ -680,6 +1032,12 @@ public class TypeChecker {
         FinishRegisteringEnumConstructors(enumDecl)
     }
 
+    private func SynthesizeInheritedTypes(ctx: ASTContext, decl: InheritableDecl): Unit {
+        for (inheritedType in decl.inheritedTypes) {
+            SynthesizeTypeNode(ctx, Some(inheritedType))
+        }
+    }
+
     private func ConstructorReturnTy(fb: FuncBody): Option<Ty> {
         if (let Some(funcDecl) <- fb.funcDecl) {
             if (funcDecl.TestAttr(Attribute.CONSTRUCTOR)) {
@@ -776,18 +1134,21 @@ public class TypeChecker {
             return
         }
         if (let Some(classDecl) <- (decl as ClassDecl)) {
+            SynthesizeInheritedTypes(ctx, classDecl)
             if (let Some(body5) <- classDecl.body) {
                 PrepareDeclListSignatures(ctx, body5.decls)
             }
             return
         }
         if (let Some(structDecl) <- (decl as StructDecl)) {
+            SynthesizeInheritedTypes(ctx, structDecl)
             if (let Some(body6) <- structDecl.body) {
                 PrepareDeclListSignatures(ctx, body6.decls)
             }
             return
         }
         if (let Some(interfaceDecl) <- (decl as InterfaceDecl)) {
+            SynthesizeInheritedTypes(ctx, interfaceDecl)
             if (let Some(body7) <- interfaceDecl.body) {
                 PrepareDeclListSignatures(ctx, body7.decls)
             }
@@ -814,6 +1175,9 @@ public class TypeChecker {
         if (decl.TestAttr(Attribute.ENUM_CONSTRUCTOR)) {
             return TypeCheckDeclSetEnumElementTy(impl.typeManager, decl, diag: impl.diag)
         }
+        if (let Some(vpd) <- (decl as VarWithPatternDecl)) {
+            return SynthesizeVarWithPatternDecl(ctx, vpd)
+        }
         if (let Some(vd) <- (decl as VarDeclAbstract)) {
             SynthesizeTypeNode(ctx, vd.typeNode)
             if (let Some(initializer) <- vd.initializer) {
@@ -834,6 +1198,10 @@ public class TypeChecker {
         if (let Some(funcDecl) <- (decl as FuncDecl)) {
             if (let Some(body) <- funcDecl.funcBody) {
                 SetFunctionBodyOwner(funcDecl, body)
+                if (!Ty.IsTyCorrect(funcDecl.GetTy())) {
+                    let _ = PrepareFuncBodySignature(ctx, body)
+                }
+                BindLocalDeclIfNeeded(ctx, funcDecl)
                 return SynthesizeFuncBody(ctx, body)
             }
         }
@@ -865,18 +1233,21 @@ public class TypeChecker {
             }
         }
         if (let Some(classDecl) <- (decl as ClassDecl)) {
+            SynthesizeInheritedTypes(ctx, classDecl)
             if (let Some(body) <- classDecl.body) {
                 SynthesizeDeclList(ctx, body.decls)
             }
             return tyOrInvalid(classDecl)
         }
         if (let Some(structDecl) <- (decl as StructDecl)) {
+            SynthesizeInheritedTypes(ctx, structDecl)
             if (let Some(body2) <- structDecl.body) {
                 SynthesizeDeclList(ctx, body2.decls)
             }
             return tyOrInvalid(structDecl)
         }
         if (let Some(interfaceDecl) <- (decl as InterfaceDecl)) {
+            SynthesizeInheritedTypes(ctx, interfaceDecl)
             if (let Some(body3) <- interfaceDecl.body) {
                 SynthesizeDeclList(ctx, body3.decls)
             }
@@ -907,6 +1278,37 @@ public class TypeChecker {
             return tyOrInvalid(typeAlias)
         }
         return tyOrInvalid(decl)
+    }
+
+    private func SynthesizeVarWithPatternDecl(ctx: ASTContext, vpd: VarWithPatternDecl): Ty {
+        SynthesizeTypeNode(ctx, vpd.typeNode)
+        if (let Some(initializer) <- vpd.initializer) {
+            if (let Some(typeNode) <- vpd.typeNode) {
+                if (let Some(targetTy) <- typeNode.GetTy()) {
+                    let _ = Check(ctx, targetTy, initializer)
+                } else {
+                    let _ = Synthesize(ctx, initializer)
+                }
+            } else {
+                let _ = Synthesize(ctx, initializer)
+            }
+        }
+        let declTy = TypeCheckDeclSynchronizeTypeAndInitializer(impl.typeManager, vpd)
+        BindLocalDeclIfNeeded(ctx, vpd)
+        if (let Some(initializer2) <- vpd.initializer) {
+            if (!Ty.IsTyCorrect(initializer2.GetTy())) {
+                return declTy
+            }
+        }
+        if (let Some(pattern) <- vpd.irrefutablePattern) {
+            if (Ty.IsTyCorrect(declTy)) {
+                let ok = ChkPattern(impl.typeManager, ctx, declTy, pattern, isPatternInMatch: false)
+                if (ok && IsIrrefutablePattern(pattern)) {
+                    BindPatternBindings(ctx, pattern)
+                }
+            }
+        }
+        return declTy
     }
 
     private func SynthesizeFuncBody(ctx: ASTContext, fb: FuncBody): Ty {
@@ -960,6 +1362,28 @@ public class TypeChecker {
             return
         }
         ctx.AddDeclName(Names(name, scopeNameOf(decl)), decl)
+    }
+
+    private func BindLocalDeclIfAbsent(ctx: ASTContext, decl: Decl): Unit {
+        let name = decl.identifier.Val()
+        if (name.isEmpty() || name == INVALID_IDENTIFIER) {
+            return
+        }
+        let names = Names(name, scopeNameOf(decl))
+        for (existing in ctx.GetDeclsByName(names)) {
+            if (SameDecl(existing, decl)) {
+                return
+            }
+        }
+        ctx.AddDeclName(names, decl)
+    }
+
+    private func BindPatternBindings(ctx: ASTContext, pattern: Pattern): Unit {
+        let boundDecls = ArrayList<Decl>()
+        CollectPatternBinding(pattern, boundDecls)
+        for (decl in boundDecls) {
+            BindLocalDeclIfAbsent(ctx, decl)
+        }
     }
 
     private func EnsureRetType(ctx: ASTContext, fb: FuncBody): Type {
@@ -1050,13 +1474,217 @@ public class TypeChecker {
         let _ = Synthesize(ctx, innerExpr)
     }
 
+    private func AddUniqueBoundDecl(decls: ArrayList<Decl>, decl: Decl): Unit {
+        for (existing in decls) {
+            if (SameDecl(existing, decl)) {
+                return
+            }
+        }
+        decls.add(decl)
+    }
+
+    private func PropagateConditionCtxExpr(pattern: Pattern, initializer: Expr): Unit {
+        pattern.ctxExpr = initializer
+        if (let Some(varPattern) <- (pattern as VarPattern)) {
+            varPattern.ctxExpr = initializer
+            return
+        }
+        if (let Some(tuplePattern) <- (pattern as TuplePattern)) {
+            for (subPattern in tuplePattern.patterns) {
+                PropagateConditionCtxExpr(subPattern, initializer)
+            }
+            return
+        }
+        if (let Some(enumPattern) <- (pattern as EnumPattern)) {
+            for (subPattern2 in enumPattern.patterns) {
+                PropagateConditionCtxExpr(subPattern2, initializer)
+            }
+            return
+        }
+        if (let Some(varOrEnum) <- (pattern as VarOrEnumPattern)) {
+            if (let Some(inner) <- varOrEnum.pattern) {
+                PropagateConditionCtxExpr(inner, initializer)
+            }
+            return
+        }
+        if (let Some(typePattern) <- (pattern as TypePattern)) {
+            if (let Some(inner2) <- typePattern.pattern) {
+                PropagateConditionCtxExpr(inner2, initializer)
+            }
+            return
+        }
+        if (let Some(exceptPattern) <- (pattern as ExceptTypePattern)) {
+            if (let Some(inner3) <- exceptPattern.pattern) {
+                PropagateConditionCtxExpr(inner3, initializer)
+            }
+        }
+    }
+
+    private func PatternHasConditionBinding(ctx: ASTContext, pattern: Pattern): Bool {
+        if (let Some(_) <- (pattern as VarPattern)) {
+            return true
+        }
+        if (let Some(varOrEnum) <- (pattern as VarOrEnumPattern)) {
+            if (let Some(inner) <- varOrEnum.pattern) {
+                return PatternHasConditionBinding(ctx, inner)
+            }
+            return !ctx.IsEnumConstructor(varOrEnum.identifier.Val())
+        }
+        if (let Some(tuplePattern) <- (pattern as TuplePattern)) {
+            for (subPattern in tuplePattern.patterns) {
+                if (PatternHasConditionBinding(ctx, subPattern)) {
+                    return true
+                }
+            }
+            return false
+        }
+        if (let Some(enumPattern) <- (pattern as EnumPattern)) {
+            for (subPattern2 in enumPattern.patterns) {
+                if (PatternHasConditionBinding(ctx, subPattern2)) {
+                    return true
+                }
+            }
+            return false
+        }
+        if (let Some(typePattern) <- (pattern as TypePattern)) {
+            if (let Some(inner2) <- typePattern.pattern) {
+                return PatternHasConditionBinding(ctx, inner2)
+            }
+            return false
+        }
+        if (let Some(exceptPattern) <- (pattern as ExceptTypePattern)) {
+            if (let Some(inner3) <- exceptPattern.pattern) {
+                return PatternHasConditionBinding(ctx, inner3)
+            }
+        }
+        return false
+    }
+
+    private func ConditionHasBinding(ctx: ASTContext, expr: Expr): Bool {
+        if (let Some(letPattern) <- (expr as LetPatternDestructor)) {
+            for (pattern in letPattern.patterns) {
+                if (PatternHasConditionBinding(ctx, pattern)) {
+                    return true
+                }
+            }
+            return false
+        }
+        if (let Some(parenExpr) <- (expr as ParenExpr)) {
+            if (let Some(inner) <- parenExpr.expr) {
+                return ConditionHasBinding(ctx, inner)
+            }
+            return false
+        }
+        if (let Some(binaryExpr) <- (expr as BinaryExpr)) {
+            if (let Some(left) <- binaryExpr.leftExpr) {
+                if (ConditionHasBinding(ctx, left)) {
+                    return true
+                }
+            }
+            if (let Some(right) <- binaryExpr.rightExpr) {
+                return ConditionHasBinding(ctx, right)
+            }
+        }
+        return false
+    }
+
+    private func BindCollectedConditionDecls(ctx: ASTContext, patterns: ArrayList<Pattern>,
+        boundDecls: ArrayList<Decl>): Unit {
+        let collected = ArrayList<Decl>()
+        CollectPatternBindings(patterns, collected)
+        for (decl in collected) {
+            BindLocalDeclIfAbsent(ctx, decl)
+            AddUniqueBoundDecl(boundDecls, decl)
+        }
+    }
+
+    private func CheckLetPatternCondition(ctx: ASTContext, letPattern: LetPatternDestructor,
+        boundDecls: ArrayList<Decl>, suppressIntroducingVariableError: Bool): Bool {
+        if (let None <- letPattern.initializer) {
+            let _ = TcInvalid(letPattern)
+            return false
+        }
+        let initializer = letPattern.initializer.getOrThrow()
+        for (pattern in letPattern.patterns) {
+            PropagateConditionCtxExpr(pattern, initializer)
+        }
+        let _ = Synthesize(ctx, initializer)
+        let selectorTy = if (Ty.IsTyCorrect(initializer.GetTy())) {
+            TcReplaceIdeal(impl.typeManager, initializer)
+        } else {
+            initializer.GetTy() ?? TypeManager.GetInvalidTy()
+        }
+        if (!ChkPatternsSameASTKind(ctx, letPattern.patterns, diag: impl.diag)) {
+            let _ = TcInvalid(letPattern)
+            return false
+        }
+        var good = !suppressIntroducingVariableError &&
+            ChkNoVarPatternInOrPattern(ctx, letPattern.patterns, diag: impl.diag)
+        var subpatternsGood = true
+        for (pattern in letPattern.patterns) {
+            subpatternsGood = ChkPattern(impl.typeManager, ctx, selectorTy, pattern, isPatternInMatch: false) &&
+                subpatternsGood
+        }
+        if (Ty.IsTyCorrect(selectorTy) && subpatternsGood) {
+            letPattern.SetTy(TypeManager.GetPrimitiveTy(TypeKind.TYPE_BOOLEAN))
+            BindCollectedConditionDecls(ctx, letPattern.patterns, boundDecls)
+            return good
+        }
+        let _ = TcInvalid(letPattern)
+        return false
+    }
+
+    private func CheckConditionWithBindings(ctx: ASTContext, expr: Expr, boundDecls: ArrayList<Decl>,
+        suppressIntroducingVariableError: Bool): Bool {
+        if (let Some(letPattern) <- (expr as LetPatternDestructor)) {
+            return CheckLetPatternCondition(ctx, letPattern, boundDecls, suppressIntroducingVariableError)
+        }
+        if (let Some(parenExpr) <- (expr as ParenExpr)) {
+            if (let Some(inner) <- parenExpr.expr) {
+                let ok = CheckConditionWithBindings(ctx, inner, boundDecls, suppressIntroducingVariableError)
+                parenExpr.SetTy(inner.GetTy() ?? TypeManager.GetInvalidTy())
+                return ok
+            }
+            let _ = TcInvalid(parenExpr)
+            return false
+        }
+        if (let Some(binaryExpr) <- (expr as BinaryExpr)) {
+            if (binaryExpr.op == TokenKind.AND || binaryExpr.op == TokenKind.OR) {
+                var suppressChildren = suppressIntroducingVariableError
+                if (!suppressChildren && binaryExpr.op == TokenKind.OR && ConditionHasBinding(ctx, binaryExpr)) {
+                    suppressChildren = true
+                }
+                var ok = true
+                if (let Some(left) <- binaryExpr.leftExpr) {
+                    ok = CheckConditionWithBindings(ctx, left, boundDecls, suppressChildren) && ok
+                } else {
+                    ok = false
+                }
+                if (let Some(right) <- binaryExpr.rightExpr) {
+                    ok = CheckConditionWithBindings(ctx, right, boundDecls, suppressChildren) && ok
+                } else {
+                    ok = false
+                }
+                if (ok && !suppressChildren) {
+                    binaryExpr.SetTy(TypeManager.GetPrimitiveTy(TypeKind.TYPE_BOOLEAN))
+                    return true
+                }
+                let _ = TcInvalid(binaryExpr)
+                return false
+            }
+        }
+        return Check(ctx, TypeManager.GetPrimitiveTy(TypeKind.TYPE_BOOLEAN), expr)
+    }
+
     private func SynthesizeIfChildren(ctx: ASTContext, ifExpr: IfExpr): Unit {
+        let conditionBindings = ArrayList<Decl>()
         if (let Some(condExpr) <- ifExpr.condExpr) {
-            let _ = Synthesize(ctx, condExpr)
+            let _ = CheckConditionWithBindings(ctx, condExpr, conditionBindings, false)
         }
         if (let Some(thenBody) <- ifExpr.thenBody) {
             let _ = SynthesizeBlock(ctx, thenBody)
         }
+        RemovePatternBindings(ctx, conditionBindings)
         if (let Some(elseBody) <- ifExpr.elseBody) {
             let _ = Synthesize(ctx, elseBody)
         }
@@ -1074,7 +1702,7 @@ public class TypeChecker {
                 if (Ty.IsTyCorrect(targetTy)) {
                     matchCase.SetCtxExprForPatterns(matchExpr.selector.getOrThrow())
                     let _ = ChkMatchCasePatterns(impl.typeManager, ctx, targetTy, matchCase, diag: impl.diag)
-                    CollectPatternBindings(matchCase.patterns, boundDecls)
+                    BindCollectedConditionDecls(ctx, matchCase.patterns, boundDecls)
                 }
             }
             if (let Some(patternGuard) <- matchCase.patternGuard) {
@@ -1203,7 +1831,11 @@ public class TypeChecker {
                 let _ = Synthesize(ctx, baseExpr)
             }
         } else if (let Some(refExpr) <- (nameRef as RefExpr)) {
-            ResolveRefExpr(ctx, refExpr)
+            if (refExpr.isThis || refExpr.isSuper) {
+                typeCheckExprCheckThisOrSuper(impl.typeManager, ctx, refExpr, currentFuncBody)
+            } else {
+                ResolveRefExpr(ctx, refExpr)
+            }
         }
         let ty = SynNameReferenceExpr(impl.typeManager, nameRef)
         if (let Some(target) <- nameRef.GetTarget()) {
@@ -1484,6 +2116,48 @@ public class TypeChecker {
         return FinishSynthesize(ctx, expr, SynExprShallow(impl.typeManager, expr))
     }
 
+    private func CheckArithmeticBinaryExpr(ctx: ASTContext, target: Ty, be: BinaryExpr): Bool {
+        if ((let None <- be.leftExpr) || (let None <- be.rightExpr)) {
+            be.SetTy(TypeManager.GetInvalidTy())
+            return false
+        }
+        let targetTy = UnboxOptionType(target)
+        if (!Ty.IsTyCorrect(targetTy)) {
+            return false
+        }
+        let leftExpr = be.leftExpr.getOrThrow()
+        let rightExpr = be.rightExpr.getOrThrow()
+        for (kindValue in typeCheckExprConcreteBinaryCandidateKinds(be.op)) {
+            let candidateTy = TypeManager.GetPrimitiveTy(kindValue)
+            if (!impl.typeManager.IsSubtype(candidateTy, targetTy)) {
+                continue
+            }
+            leftExpr.Clear()
+            rightExpr.Clear()
+            let leftOk = Check(ctx, candidateTy, leftExpr)
+            let rightOk = Check(ctx, candidateTy, rightExpr)
+            if (leftOk && rightOk) {
+                be.SetTy(candidateTy)
+                return true
+            }
+        }
+        be.SetTy(TypeManager.GetInvalidTy())
+        return false
+    }
+
+    private func CheckBinaryExpr(ctx: ASTContext, target: Ty, be: BinaryExpr): Bool {
+        if (let Some(desugar) <- be.desugarExpr) {
+            if (let Some(desugarTy) <- desugar.GetTy()) {
+                return impl.typeManager.CheckTypeCompatibility(target, desugarTy) != TypeCompatibility.INCOMPATIBLE
+            }
+        }
+        if (typeCheckExprIsArithmeticOperator(be.op) && CheckArithmeticBinaryExpr(ctx, target, be)) {
+            return true
+        }
+        let _ = Synthesize(ctx, be)
+        return ChkExprShallow(impl.typeManager, target, be)
+    }
+
     private func Check(ctx: ASTContext, target: Ty, expr: Expr): Bool {
         if (let Some(block) <- (expr as Block)) {
             return CheckBlock(ctx, target, block)
@@ -1503,6 +2177,9 @@ public class TypeChecker {
         if (expr.IsLoopExpr()) {
             SynthesizeLoopChildren(ctx, expr)
             return FinishCheck(ctx, expr, ChkExprShallow(impl.typeManager, target, expr))
+        }
+        if (let Some(binaryExpr) <- (expr as BinaryExpr)) {
+            return FinishCheck(ctx, binaryExpr, CheckBinaryExpr(ctx, target, binaryExpr))
         }
         if (let Some(returnExpr) <- (expr as ReturnExpr)) {
             if (let Some(fb) <- currentFuncBody) {

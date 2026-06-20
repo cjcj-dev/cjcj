@@ -490,6 +490,7 @@ public func ChkTypePattern(typeManager: TypeManager, ctx: ASTContext, target: Ty
         return InvalidPatternTy(pattern)
     }
     let typeNode = pattern.typeNode.getOrThrow()
+    SetTypeTy(typeManager, ctx, typeNode)
     if (!Ty.IsTyCorrect(typeNode.GetTy())) {
         return InvalidPatternTy(pattern)
     }

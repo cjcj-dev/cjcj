@@ -154,8 +154,14 @@ public class CGFunctionType <: CGType {
         if (retTy.IsReferenceType() || retTy.IsRef() || retCGType.IsReference()) {
             return false
         }
-        return retTy.IsUnit() || retTy.IsStruct() || retTy.IsTuple() || retTy.IsVArray() ||
-            (ContainsGenericType(retTy) && !retTy.IsReferenceType()) || retCGType.GetSize().isNone()
+        let retLLVMType = retCGType.GetLLVMType()
+        if (!retLLVMType.isNull()) {
+            let kind = unsafe { LLVMGetTypeKind(retLLVMType) }
+            if (kind == 10 || kind == 11) {
+                return true
+            }
+        }
+        return retCGType.GetSize().isNone()
     }
 
     private func IsVoidLikeReturn(retTy: Type): Bool {
