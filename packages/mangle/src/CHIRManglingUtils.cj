@@ -107,7 +107,7 @@ public func GenerateInstantiateFuncMangleName(baseName: String, instTysInFunc: A
 }
 
 public func GenerateLambdaFuncMangleName(baseFunc: Function, counter: Int64): String {
-    return ReplaceManglePrefixWith(FunctionIdentifierForPrefix(baseFunc), MANGLE_CHIR_LAMBDA_PREFIX) +
+    return ReplaceManglePrefixWith(baseFunc.GetIdentifierWithoutPrefix(), MANGLE_CHIR_LAMBDA_PREFIX) +
         MANGLE_DOLLAR_PREFIX + "${counter}" + MANGLE_WILDCARD_PREFIX
 }
 

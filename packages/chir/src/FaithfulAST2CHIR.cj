@@ -41,7 +41,6 @@ private class FaithfulInitFileVars {
     }
 }
 
-private let FAITHFUL_USER_MAIN_NAME: String = "user.main"
 private let FAITHFUL_MANGLE_CANGJIE_PREFIX: String = "_C"
 private let FAITHFUL_MANGLE_SUFFIX: String = "E"
 private let FAITHFUL_MANGLE_GLOBAL_PACKAGE_INIT_PREFIX: String = "GP"
@@ -1633,15 +1632,11 @@ public class FaithfulAST2CHIR {
     }
 
     private func EffectiveFunctionIdentifier(funcDecl: AstFuncDecl): String {
-        return if (funcDecl.TestAttr(AstAttribute.MAIN_ENTRY)) { FAITHFUL_USER_MAIN_NAME } else {
-            EffectiveMangledName(funcDecl)
-        }
+        return EffectiveMangledName(funcDecl)
     }
 
     private func EffectiveFunctionRawName(funcDecl: AstFuncDecl): String {
-        return if (funcDecl.TestAttr(AstAttribute.MAIN_ENTRY)) { FAITHFUL_USER_MAIN_NAME } else {
-            EffectiveRawMangledName(funcDecl)
-        }
+        return EffectiveRawMangledName(funcDecl)
     }
 
     private func EffectiveFunctionSrcIdentifier(funcDecl: AstFuncDecl): String {

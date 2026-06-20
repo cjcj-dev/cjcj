@@ -946,6 +946,14 @@ public class CompilerInstance {
         seen.add(key)
         decl.fullPackageName = pkgName
         if (decl.astKind == ASTKind.MAIN_DECL) {
+            if (let Some(desugared) <- decl.GetDesugarDecl()) {
+                let localPrefix = ArrayList<RealMangleDecl>()
+                for (item in prefix) {
+                    localPrefix.add(item)
+                }
+                localPrefix.add(adapter.ConvertDecl(decl))
+                mangleDeclTreeWithPrefix(baseMangler, adapter, pkgName, desugared, seen, localPrefix)
+            }
             return
         }
         if (!Ty.IsTyCorrect(decl.GetTy())) {

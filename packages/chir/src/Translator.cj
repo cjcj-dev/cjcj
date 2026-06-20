@@ -126,18 +126,6 @@ private func FaithfulTranslatorStartsWith(value: String, prefix: String): Bool {
     return value.size >= prefix.size && value[0..prefix.size] == prefix
 }
 
-private func FaithfulTranslatorFunctionIdentifierForPrefix(function: Function): String {
-    let identifier = function.GetIdentifier()
-    if (FaithfulTranslatorStartsWith(identifier, FAITHFUL_TRANSLATOR_MANGLE_CANGJIE_PREFIX)) {
-        return identifier
-    }
-    let withoutPrefix = function.GetIdentifierWithoutPrefix()
-    if (FaithfulTranslatorStartsWith(withoutPrefix, FAITHFUL_TRANSLATOR_MANGLE_CANGJIE_PREFIX)) {
-        return withoutPrefix
-    }
-    return identifier
-}
-
 private func FaithfulTranslatorReplaceManglePrefixWith(mangledName: String, newPrefix: String): String {
     if (FaithfulTranslatorStartsWith(mangledName, FAITHFUL_TRANSLATOR_MANGLE_CANGJIE_PREFIX)) {
         return newPrefix + mangledName[FAITHFUL_TRANSLATOR_MANGLE_CANGJIE_PREFIX.size..]
@@ -146,13 +134,9 @@ private func FaithfulTranslatorReplaceManglePrefixWith(mangledName: String, newP
 }
 
 private func FaithfulTranslatorGenerateLambdaFuncMangleName(baseFunc: Function, counter: UInt64): String {
-    let baseName = FaithfulTranslatorFunctionIdentifierForPrefix(baseFunc)
-    if (FaithfulTranslatorStartsWith(baseName, FAITHFUL_TRANSLATOR_MANGLE_CANGJIE_PREFIX)) {
-        return FaithfulTranslatorReplaceManglePrefixWith(baseName, FAITHFUL_TRANSLATOR_MANGLE_CHIR_LAMBDA_PREFIX) +
-            FAITHFUL_TRANSLATOR_MANGLE_DOLLAR_PREFIX + counter.toString() +
-            FAITHFUL_TRANSLATOR_MANGLE_WILDCARD_PREFIX
-    }
-    return baseFunc.GetIdentifierWithoutPrefix() + "$lambda$" + counter.toString() +
+    return FaithfulTranslatorReplaceManglePrefixWith(baseFunc.GetIdentifierWithoutPrefix(),
+        FAITHFUL_TRANSLATOR_MANGLE_CHIR_LAMBDA_PREFIX) +
+        FAITHFUL_TRANSLATOR_MANGLE_DOLLAR_PREFIX + counter.toString() +
         FAITHFUL_TRANSLATOR_MANGLE_WILDCARD_PREFIX
 }
 
@@ -922,11 +906,6 @@ public class Translator {
 
     private func MemberAccessFuncType(member: AstMemberAccess): FuncType {
         let astTy = RequireAstTy(member)
-        if (let Some(genericTy) <- (astTy as AstGenericsTy)) {
-            if (genericTy.upperBounds.size == 1) {
-                return RequireFuncType(chirTy.TranslateType(genericTy.upperBounds[0]))
-            }
-        }
         return RequireFuncType(chirTy.TranslateType(astTy))
     }
 
@@ -1139,11 +1118,11 @@ public class Translator {
             return None
         }
         if (let Some(customTy) <- (thisType as CustomType)) {
-            return GetExpectedFuncFromCustomType(customTy, funcName, instFuncType, isStatic, funcInstTypeArgs)
+            return GetExpectedFuncFromCustomType(customTy, funcName, instFuncType, true, funcInstTypeArgs)
         }
         if (let Some(builtinTy) <- (thisType as BuiltinType)) {
             for (extendDef in builtinTy.GetExtends()) {
-                if (let Some(found) <- GetExpectedFuncFromDef(extendDef, funcName, instFuncType, isStatic,
+                if (let Some(found) <- GetExpectedFuncFromDef(extendDef, funcName, instFuncType, true,
                     ArrayList<GenericType>(), ArrayList<Type>(), funcInstTypeArgs)) {
                     return found
                 }
@@ -1225,8 +1204,11 @@ public class Translator {
             let localParams = CopyGenericTypeList(genericParams)
             let localReplacements = CopyTypeList(replacements)
             let methodGenericParams = method.GetGenericTypeParams()
+            if (methodGenericParams.size != funcInstTypeArgs.size) {
+                continue
+            }
             var genericIdx: Int64 = 0
-            while (genericIdx < methodGenericParams.size && genericIdx < funcInstTypeArgs.size) {
+            while (genericIdx < methodGenericParams.size) {
                 localParams.add(methodGenericParams[genericIdx])
                 localReplacements.add(funcInstTypeArgs[genericIdx])
                 genericIdx++
