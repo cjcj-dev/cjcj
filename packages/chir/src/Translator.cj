@@ -1715,7 +1715,7 @@ public class Translator {
     private func StoreIfResult(location: Option<Value>, value: Option<Value>): Unit {
         if (let Some(loc) <- location) {
             if (let Some(result) <- value) {
-                builder.CreateStore(result, loc, CurrentBlock())
+                builder.CreateStore(CastValueIfNeeded(result, RequireRefBaseType(loc)), loc, CurrentBlock())
             }
         }
     }

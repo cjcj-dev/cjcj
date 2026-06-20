@@ -25,6 +25,7 @@ private let MALLOC_ARRAY_GENERIC_INTRINSIC_NAME: String = "llvm.cj.malloc.array.
 private let ALLOCA_GENERIC_INTRINSIC_NAME: String = "llvm.cj.alloca.generic"
 private let MALLOC_OBJECT_INTRINSIC_NAME: String = "llvm.cj.malloc.object"
 private let CJ_MEMSET_INTRINSIC_NAME: String = "llvm.cj.memset"
+private let GCWRITE_REF_INTRINSIC_NAME: String = "llvm.cj.gcwrite.ref"
 private let NEW_CJ_THREAD_FUNC_NAME: String = PREFIX_OF_BACKEND_SYMS + "NewCJThread"
 private let NEW_CJ_THREAD_NO_RETURN_FUNC_NAME: String = PREFIX_OF_BACKEND_SYMS + "NewCJThreadNoReturn"
 
@@ -859,6 +860,16 @@ public class IRBuilder2 <: Resource {
             return LLVMNullValue()
         }
         return CreateCallOrInvoke(callee, calleeType, args, name: name)
+    }
+
+    public func CallGCWrite(value: LLVMValueRef, baseObj: LLVMValueRef, fieldPtr: LLVMValueRef): LLVMValueRef {
+        let gcRefType = CGType.GetRefType(GetLLVMContext())
+        let gcRefPtrType = unsafe { LLVMPointerType(gcRefType, 1u32) }
+        let args = ArrayList<LLVMValueRef>()
+        args.add(CreatePointerCast(value, gcRefType, name: "gcwrite.val"))
+        args.add(CreatePointerCast(baseObj, gcRefType, name: "gcwrite.base"))
+        args.add(CreatePointerCast(fieldPtr, gcRefPtrType, name: "gcwrite.field"))
+        return CreateIntrinsicCall(GCWRITE_REF_INTRINSIC_NAME, ArrayList<LLVMTypeRef>(), args)
     }
 
     public func CreateGEP(elementType: LLVMTypeRef, pointer: LLVMValueRef, indices: ArrayList<LLVMValueRef>,
