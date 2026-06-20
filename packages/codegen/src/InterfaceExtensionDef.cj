@@ -60,6 +60,7 @@ private func GenerateExtensionDefsForCustomDef(cgMod: CGModule, def: CustomTypeD
     }
     let startIdx = cgMod.GetNonExternalExtensionDefsNum()
     var emitted = false
+    let emittedInterfaces = ArrayList<MTableInterfaceInfo>()
     if (let Some(classDef) <- (def as ClassDef)) {
         if (!classDef.IsInterface()) {
             if (GenerateObjectExtensionDefForType(cgMod, classDef)) {
@@ -69,8 +70,10 @@ private func GenerateExtensionDefsForCustomDef(cgMod: CGModule, def: CustomTypeD
                 emitted = true
             }
         } else if (!def.GetMethods().isEmpty() && !RequireClassType(classDef).IsGenericRelated()) {
-            if (GenerateExtensionDefForType(cgMod, def, RequireClassType(classDef), false)) {
+            let selfInterfaceTy = RequireClassType(classDef)
+            if (GenerateExtensionDefForType(cgMod, def, selfInterfaceTy, false)) {
                 emitted = true
+                emittedInterfaces.add(MTableInterfaceInfo(selfInterfaceTy, None))
             }
         }
     }
@@ -78,11 +81,13 @@ private func GenerateExtensionDefsForCustomDef(cgMod: CGModule, def: CustomTypeD
     for (interfaceTy in interfaces) {
         if (GenerateExtensionDefForType(cgMod, def, interfaceTy, IsDirectInterface(def, interfaceTy))) {
             emitted = true
+            emittedInterfaces.add(MTableInterfaceInfo(interfaceTy, None))
         }
     }
     if (emitted) {
         if (let Some(ty) <- def.GetType()) {
             cgMod.RegisterExtensionDefStart(ty, startIdx)
+            cgMod.RegisterExtensionDefInterfaces(ty, emittedInterfaces)
         }
     }
 }

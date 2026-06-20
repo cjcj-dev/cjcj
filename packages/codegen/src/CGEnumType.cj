@@ -4,6 +4,7 @@ import std.collection.*
 import cangjie_compiler::chir.BoxType
 import cangjie_compiler::chir.CPointerType
 import cangjie_compiler::chir.ClassType
+import cangjie_compiler::chir.EnumCtorInfo
 import cangjie_compiler::chir.EnumType
 import cangjie_compiler::chir.FuncType
 import cangjie_compiler::chir.GenericType
@@ -13,6 +14,10 @@ import cangjie_compiler::chir.StructType
 import cangjie_compiler::chir.Type
 import cangjie_compiler::chir.TupleType
 import cangjie_compiler::chir.VArrayType
+import cangjie_compiler::option.{ArchType, EnvironmentType}
+
+private let LLVM_POINTER_TYPE_KIND: Int32 = 12
+private let LLVM_STRUCT_TYPE_KIND: Int32 = 10
 
 public enum CGEnumTypeKind {
     | UNKNOWN
@@ -56,44 +61,104 @@ public class CGEnumType <: CGCustomType {
     private var cgEnumTypeKind: CGEnumTypeKind = CGEnumTypeKind.UNKNOWN
     private var optionLikeAssociatedValueType: Option<Type> = None
     private var isAntiOptionLike: Bool = false
+    private var sizeOfConstructorUnion: Option<Int64> = None
 
     public init(cgMod: CGModule, cgCtx: CGContext, chirType: Type) {
         super(cgMod, cgCtx, chirType, cgTypeKind: CGTypeKind.CG_ENUM)
     }
 
+    private func EnsureClassified(): Unit {
+        if (cgEnumTypeKind == CGEnumTypeKind.UNKNOWN) {
+            if (let Some(enumTy) <- (chirType as EnumType)) {
+                let defId = enumTy.GetEnumDef().nodeId
+                if (!cgMod.EnterEnumClassification(defId)) {
+                    return
+                }
+                cgEnumTypeKind = ClassifyEnumType()
+                cgMod.ExitEnumClassification(defId)
+            } else {
+                cgEnumTypeKind = ClassifyEnumType()
+            }
+        }
+    }
+
     public func IsTrivial(): Bool {
+        EnsureClassified()
         return cgEnumTypeKind == CGEnumTypeKind.NON_EXHAUSTIVE_UNASSOCIATED ||
             cgEnumTypeKind == CGEnumTypeKind.EXHAUSTIVE_UNASSOCIATED
     }
 
+    public func IsCommonEnum(): Bool {
+        if (cgEnumTypeKind == CGEnumTypeKind.UNKNOWN) {
+            if (let Some(enumTy) <- (chirType as EnumType)) {
+                if (cgMod.IsEnumClassificationActive(enumTy.GetEnumDef().nodeId)) {
+                    return true
+                }
+            }
+        }
+        EnsureClassified()
+        return cgEnumTypeKind == CGEnumTypeKind.NON_EXHAUSTIVE_ASSOCIATED ||
+            cgEnumTypeKind == CGEnumTypeKind.EXHAUSTIVE_OTHER
+    }
+
     public func IsOptionLike(): Bool {
+        EnsureClassified()
         return cgEnumTypeKind == CGEnumTypeKind.EXHAUSTIVE_ASSOCIATED_OPTION_LIKE_T ||
             cgEnumTypeKind == CGEnumTypeKind.EXHAUSTIVE_ASSOCIATED_OPTION_LIKE_REF ||
             cgEnumTypeKind == CGEnumTypeKind.EXHAUSTIVE_ASSOCIATED_OPTION_LIKE_NONREF
     }
 
-    public func GetCGEnumTypeKind(): CGEnumTypeKind { return cgEnumTypeKind }
+    public func GetCGEnumTypeKind(): CGEnumTypeKind {
+        EnsureClassified()
+        return cgEnumTypeKind
+    }
 
     public func IsOptionLikeNonRef(): Bool {
+        EnsureClassified()
         return cgEnumTypeKind == CGEnumTypeKind.EXHAUSTIVE_ASSOCIATED_OPTION_LIKE_NONREF
     }
 
     public func IsOptionLikeRef(): Bool {
+        EnsureClassified()
         return cgEnumTypeKind == CGEnumTypeKind.EXHAUSTIVE_ASSOCIATED_OPTION_LIKE_REF
     }
 
     public func IsOptionLikeT(): Bool {
+        EnsureClassified()
         return cgEnumTypeKind == CGEnumTypeKind.EXHAUSTIVE_ASSOCIATED_OPTION_LIKE_T
     }
 
-    public func IsAntiOptionLike(): Bool { return isAntiOptionLike }
+    public func IsZeroSizeEnum(): Bool {
+        EnsureClassified()
+        return cgEnumTypeKind == CGEnumTypeKind.EXHAUSTIVE_ZERO_SIZE
+    }
+
+    public func IsAllAssociatedValuesAreNonRef(): Bool {
+        EnsureClassified()
+        return cgEnumTypeKind == CGEnumTypeKind.EXHAUSTIVE_ASSOCIATED_NONREF
+    }
+
+    public func PassByReference(): Bool {
+        return IsOptionLikeNonRef() || IsOptionLikeT() || IsZeroSizeEnum() || IsAllAssociatedValuesAreNonRef()
+    }
+
+    public func IsAntiOptionLike(): Bool {
+        EnsureClassified()
+        return isAntiOptionLike
+    }
 
     public func GetAssociatedValueTypeOfOptionLike(): Option<Type> {
+        EnsureClassified()
         return optionLikeAssociatedValueType
     }
 
+    public func GetSizeOfConstructorUnion(): Option<Int64> {
+        EnsureClassified()
+        return sizeOfConstructorUnion
+    }
+
     protected override func GenLLVMType(): LLVMTypeRef {
-        cgEnumTypeKind = ClassifyEnumType()
+        EnsureClassified()
         if (cgEnumTypeKind == CGEnumTypeKind.EXHAUSTIVE_ASSOCIATED_OPTION_LIKE_T) {
             let i8Ty = unsafe { LLVMInt8TypeInContext(cgCtx.GetLLVMContext().raw) }
             llvmType = i8Ty
@@ -166,27 +231,229 @@ public class CGEnumType <: CGCustomType {
 
     private func ClassifyEnumType(): CGEnumTypeKind {
         if (let Some(enumTy) <- (chirType as EnumType)) {
-            if (enumTy.GetEnumDef().IsOptionLike()) {
-                isAntiOptionLike = enumTy.GetEnumDef().IsAntiOptionLike()
-                if (let Some(associatedTy) <- enumTy.GetEnumDef().GetOptionLikeAssociatedValueType()) {
-                    let instantiatedAssociatedTy = InstantiateEnumPayloadType(enumTy, associatedTy)
-                    optionLikeAssociatedValueType = Some(instantiatedAssociatedTy)
-                    if (instantiatedAssociatedTy.IsGeneric()) {
-                        return CGEnumTypeKind.EXHAUSTIVE_ASSOCIATED_OPTION_LIKE_T
-                    }
-                    if (instantiatedAssociatedTy.StripAllRefs().IsReferenceType()) {
-                        return CGEnumTypeKind.EXHAUSTIVE_ASSOCIATED_OPTION_LIKE_REF
-                    }
-                    return CGEnumTypeKind.EXHAUSTIVE_ASSOCIATED_OPTION_LIKE_NONREF
+            let enumDef = enumTy.GetEnumDef()
+            if (!enumDef.IsExhaustive()) {
+                return if (enumDef.IsAllCtorsTrivial()) {
+                    CGEnumTypeKind.NON_EXHAUSTIVE_UNASSOCIATED
+                } else {
+                    CGEnumTypeKind.NON_EXHAUSTIVE_ASSOCIATED
                 }
             }
-            for (ctor in enumTy.GetEnumDef().GetCtors()) {
-                if (!ctor.payloadTypes.isEmpty()) {
-                    return CGEnumTypeKind.EXHAUSTIVE_OTHER
+            let (hasRefAssociatedValue, constructorUnionSize) = ObtainingAuxiliaryInformation(enumTy)
+            sizeOfConstructorUnion = constructorUnionSize
+            let ctors = enumDef.GetCtors()
+            if (ctors.size == 1 && enumTy.GetGenericArgs().isEmpty()) {
+                if (let Some(unionSize) <- constructorUnionSize) {
+                    if (unionSize == 0) {
+                        return CGEnumTypeKind.EXHAUSTIVE_ZERO_SIZE
+                    }
+                }
+            }
+            if (enumDef.IsAllCtorsTrivial()) {
+                return CGEnumTypeKind.EXHAUSTIVE_UNASSOCIATED
+            }
+            if (IsOptionLikeByConstructors(ctors)) {
+                return ClassifyOptionLikeEnum(enumTy, ctors)
+            }
+            if (!hasRefAssociatedValue && enumTy.GetGenericArgs().isEmpty()) {
+                return CGEnumTypeKind.EXHAUSTIVE_ASSOCIATED_NONREF
+            }
+            return CGEnumTypeKind.EXHAUSTIVE_OTHER
+        }
+        return CGEnumTypeKind.EXHAUSTIVE_UNASSOCIATED
+    }
+
+    private func ClassifyOptionLikeEnum(enumTy: EnumType, ctors: ArrayList<EnumCtorInfo>): CGEnumTypeKind {
+        isAntiOptionLike = ctors[0].payloadTypes.isEmpty()
+        let associatedTy = if (isAntiOptionLike) {
+            ctors[1].payloadTypes[0]
+        } else {
+            ctors[0].payloadTypes[0]
+        }
+        let instantiatedAssociatedTy = InstantiateEnumPayloadType(enumTy, associatedTy)
+        optionLikeAssociatedValueType = Some(instantiatedAssociatedTy)
+        if (instantiatedAssociatedTy.IsGeneric()) {
+            return CGEnumTypeKind.EXHAUSTIVE_ASSOCIATED_OPTION_LIKE_T
+        }
+        let baseType = instantiatedAssociatedTy.StripAllRefs()
+        if (let Some(baseEnumTy) <- (baseType as EnumType)) {
+            if (let Some(baseEnumCGType) <- (CGType.GetOrCreate(cgMod, baseEnumTy) as CGEnumType)) {
+                if (baseEnumCGType.IsCommonEnum()) {
+                    return CGEnumTypeKind.EXHAUSTIVE_ASSOCIATED_OPTION_LIKE_REF
                 }
             }
         }
-        return CGEnumTypeKind.EXHAUSTIVE_UNASSOCIATED
+        if (baseType.IsReferenceType()) {
+            return CGEnumTypeKind.EXHAUSTIVE_ASSOCIATED_OPTION_LIKE_REF
+        }
+        return CGEnumTypeKind.EXHAUSTIVE_ASSOCIATED_OPTION_LIKE_NONREF
+    }
+
+    private func IsOptionLikeByConstructors(ctors: ArrayList<EnumCtorInfo>): Bool {
+        if (ctors.size != 2) {
+            return false
+        }
+        return (ctors[0].payloadTypes.isEmpty() && ctors[1].payloadTypes.size == 1) ||
+            (ctors[0].payloadTypes.size == 1 && ctors[1].payloadTypes.isEmpty())
+    }
+
+    private func ObtainingAuxiliaryInformation(enumTy: EnumType): (Bool, Option<Int64>) {
+        var hasRefAssociatedValue = false
+        var maxUnionSize: Option<Int64> = Some(0)
+        for (ctor in GetInstantiatedCtorInfos(enumTy)) {
+            hasRefAssociatedValue = hasRefAssociatedValue || HasRefAssociatedValue(ctor.payloadTypes)
+            if (let Some(currentMax) <- maxUnionSize) {
+                if (let Some(candidateSize) <- TryComputeConstructorUnionSize(ctor.payloadTypes)) {
+                    maxUnionSize = Some(if (currentMax < candidateSize) { candidateSize } else { currentMax })
+                } else {
+                    maxUnionSize = None
+                }
+            }
+        }
+        return (hasRefAssociatedValue, maxUnionSize)
+    }
+
+    private func GetInstantiatedCtorInfos(enumTy: EnumType): ArrayList<EnumCtorInfo> {
+        let out = ArrayList<EnumCtorInfo>()
+        for (ctor in enumTy.GetEnumDef().GetCtors()) {
+            let payloadTypes = ArrayList<Type>()
+            for (payloadTy in ctor.payloadTypes) {
+                payloadTypes.add(InstantiateEnumPayloadType(enumTy, payloadTy))
+            }
+            out.add(EnumCtorInfo(ctor.name, payloadTypes))
+        }
+        return out
+    }
+
+    private func HasRefAssociatedValue(paramTypes: ArrayList<Type>): Bool {
+        for (paramTy in paramTypes) {
+            if (ContainsActiveEnumType(paramTy)) {
+                return true
+            }
+            if (ContainsRefType(CGType.GetOrCreate(cgMod, paramTy).GetLLVMType())) {
+                return true
+            }
+        }
+        return false
+    }
+
+    private func ContainsRefType(llvmTy: LLVMTypeRef): Bool {
+        if (llvmTy.isNull()) {
+            return false
+        }
+        let kind = unsafe { LLVMGetTypeKind(llvmTy) }
+        if (kind == LLVM_POINTER_TYPE_KIND) {
+            return unsafe { LLVMGetPointerAddressSpace(llvmTy) } == 1u32
+        }
+        if (kind == LLVM_STRUCT_TYPE_KIND) {
+            let elementCount = unsafe { LLVMCountStructElementTypes(llvmTy) }
+            if (elementCount == 0u32) {
+                return false
+            }
+            var result = false
+            try (elementPtr = LibC.malloc<LLVMTypeRef>(count: Int64(elementCount)).asResource()) {
+                unsafe { LLVMGetStructElementTypes(llvmTy, elementPtr.value) }
+                var idx: Int64 = 0
+                while (idx < Int64(elementCount)) {
+                    if (ContainsRefType(unsafe { (elementPtr.value + idx).read() })) {
+                        result = true
+                        break
+                    }
+                    idx++
+                }
+            }
+            return result
+        }
+        return false
+    }
+
+    private func TryComputeConstructorUnionSize(paramTypes: ArrayList<Type>): Option<Int64> {
+        return if (NeedAndroidArm32AlignedEnumLayout()) {
+            TryComputeAndroidArm32StructConstructorUnionSize(paramTypes)
+        } else {
+            TryComputeDefaultConstructorUnionSize(paramTypes)
+        }
+    }
+
+    private func TryComputeDefaultConstructorUnionSize(paramTypes: ArrayList<Type>): Option<Int64> {
+        var accumulatedSize: Int64 = 0
+        for (paramTy in paramTypes) {
+            if (ContainsActiveEnumType(paramTy)) {
+                return None
+            }
+            if (let Some(paramSize) <- CGType.GetOrCreate(cgMod, paramTy).GetSize()) {
+                accumulatedSize += paramSize
+            } else {
+                return None
+            }
+        }
+        return Some(accumulatedSize)
+    }
+
+    private func TryComputeAndroidArm32StructConstructorUnionSize(paramTypes: ArrayList<Type>): Option<Int64> {
+        let fullFieldTypes = ArrayList<Type>()
+        fullFieldTypes.add(cgCtx.GetCHIRBuilder().context.GetInt32Ty())
+        for (paramTy in paramTypes) {
+            if (ContainsActiveEnumType(paramTy)) {
+                return None
+            }
+            if (CGType.GetOrCreate(cgMod, paramTy).GetSize().isNone()) {
+                return None
+            }
+            fullFieldTypes.add(paramTy)
+        }
+        let fieldLLVMTypes = ArrayList<LLVMTypeRef>()
+        for (fieldTy in fullFieldTypes) {
+            fieldLLVMTypes.add(CGType.GetOrCreate(cgMod, fieldTy.StripAllRefs()).GetLLVMType())
+        }
+        let layoutType = CreateAnonymousStructType(fieldLLVMTypes)
+        return Some(Int64(cgMod.GetTypeSize(layoutType)) - 4)
+    }
+
+    private func CreateAnonymousStructType(fieldLLVMTypes: ArrayList<LLVMTypeRef>): LLVMTypeRef {
+        if (fieldLLVMTypes.isEmpty()) {
+            return unsafe { LLVMStructTypeInContext(cgCtx.GetLLVMContext().raw, CPointer<LLVMTypeRef>(), 0u32, 0) }
+        }
+        var result = LLVMNullType()
+        try (typePtr = LibC.malloc<LLVMTypeRef>(count: fieldLLVMTypes.size).asResource()) {
+            var idx: Int64 = 0
+            while (idx < fieldLLVMTypes.size) {
+                unsafe { (typePtr.value + idx).write(fieldLLVMTypes[idx]) }
+                idx++
+            }
+            result = unsafe {
+                LLVMStructTypeInContext(cgCtx.GetLLVMContext().raw, typePtr.value, UInt32(fieldLLVMTypes.size), 0)
+            }
+        }
+        return result
+    }
+
+    private func NeedAndroidArm32AlignedEnumLayout(): Bool {
+        let target = cgCtx.GetCompileOptions().target
+        return target.arch == ArchType.ARM32 && target.env == EnvironmentType.ANDROID
+    }
+
+    private func ContainsActiveEnumType(ty: Type): Bool {
+        let stripped = ty.StripAllRefs()
+        if (let Some(enumTy) <- (stripped as EnumType)) {
+            if (cgMod.IsEnumClassificationActive(enumTy.GetEnumDef().nodeId)) {
+                return true
+            }
+        }
+        for (argTy in stripped.GetTypeArgs()) {
+            if (ContainsActiveEnumType(argTy)) {
+                return true
+            }
+        }
+        if (let Some(funcTy) <- (stripped as FuncType)) {
+            for (paramTy in funcTy.GetParamTypes()) {
+                if (ContainsActiveEnumType(paramTy)) {
+                    return true
+                }
+            }
+            return ContainsActiveEnumType(funcTy.GetReturnType())
+        }
+        return false
     }
 
     private func BuildEnumFieldTypes(): ArrayList<LLVMTypeRef> {

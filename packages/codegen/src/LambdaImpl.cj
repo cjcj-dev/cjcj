@@ -688,7 +688,7 @@ private func MarkManagedReferencesForType(cgMod: CGModule, ty: Type, baseOffset:
         return
     }
     if (ty.IsStruct() || ty.IsEnum()) {
-        MarkManagedReferencesForFields(cgMod, GetInstanceFieldTypes(ty),
+        MarkManagedReferencesForFields(cgMod, GetInstanceFieldTypes(cgMod, ty),
             CGType.GetOrCreate(cgMod, ty).GetLayoutType(), baseOffset, bits)
     }
 }

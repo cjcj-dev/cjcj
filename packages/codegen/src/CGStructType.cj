@@ -24,7 +24,7 @@ public class CGStructType <: CGCustomType {
         if (!cgCtx.IsGeneratedStructType(layoutName)) {
             cgCtx.AddGeneratedStructType(layoutName)
             let fieldTypes = ArrayList<LLVMTypeRef>()
-            for (fieldTy in GetInstanceFieldTypes(chirType)) {
+            for (fieldTy in GetInstanceFieldTypes(cgMod, chirType)) {
                 fieldTypes.add(CGType.GetOrCreate(cgMod, fieldTy).GetLLVMType())
             }
             SetStructTypeBody(structLayout, fieldTypes)
@@ -36,7 +36,7 @@ public class CGStructType <: CGCustomType {
         if (chirType.IsString()) {
             return
         }
-        for (fieldTy in GetInstanceFieldTypes(chirType)) {
+        for (fieldTy in GetInstanceFieldTypes(cgMod, chirType)) {
             containedCGTypes.add(CGType.GetOrCreate(cgMod, fieldTy))
         }
     }

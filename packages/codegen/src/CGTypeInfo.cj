@@ -11,14 +11,20 @@ import cangjie_compiler::chir.GenericType
 import cangjie_compiler::chir.RawArrayType
 import cangjie_compiler::chir.RefType
 import cangjie_compiler::chir.Type
+import cangjie_compiler::chir.TypeKindIndex
 import cangjie_compiler::chir.VArrayType
+import cangjie_compiler::option.{ArchType, EnvironmentType}
+import cangjie_compiler::utils.{REF_PACKAGE_NAME, STD_LIB_WEAK_REF}
 
 private let UG_CLASS_KIND: UInt64 = 128u64
 private let UG_INTERFACE_KIND: UInt64 = 129u64
 private let UG_RAW_ARRAY_KIND: UInt64 = 130u64
+private let UG_COMMON_ENUM_KIND: UInt64 = 132u64
+private let UG_WEAKREF_KIND: UInt64 = 133u64
 private let UG_STRUCT_KIND: UInt64 = 22u64
 private let UG_ENUM_KIND: UInt64 = 23u64
-private let TYPEINFO_MTABLE_FE_FLAG: UInt64 = 9223372036854775809u64
+private let TYPEINFO_MTABLE_INLINE_FLAG: UInt64 = 9223372036854775808u64
+private let MTABLE_INLINE_BITS_LIMIT: Int64 = 63
 
 public func GetOrInsertCodeGenGlobal(cgMod: CGModule, globalName: String, globalType: LLVMTypeRef): LLVMValueRef {
     if (let Some(moduleHandle) <- cgMod.GetLLVMModule()) {
@@ -207,22 +213,15 @@ private func BuildConcreteTypeInfoInitializer(cgMod: CGModule, moduleHandle: LLV
     }
     let cgType = CGType.GetOrCreate(cgMod, chirTy)
     let typeInfoName = CGType.GetNameOfTypeInfoGV(chirTy)
-    let fieldCount = UInt64(GetInstanceFieldTypes(chirTy).size)
-    let sizeValue = if (chirTy.IsClass()) {
-        cgMod.GetTypeSize(cgType.GetLayoutType())
-    } else if (let Some(staticSize) <- cgType.GetSize()) {
-        UInt64(staticSize)
-    } else {
-        0u64
-    }
-    let alignValue = if (let Some(staticAlign) <- cgType.GetAlign()) {
-        UInt64(staticAlign)
-    } else {
-        0u64
-    }
+    let fieldCount = UInt64(GetInstanceFieldTypes(cgMod, chirTy).size)
+    var inheritedClassNum = InheritedClassNumBase(chirTy)
+    let (mtable, updatedInheritedClassNum) = GenerateMTableOfTypeInfo(cgMod, chirTy, i8PtrType, inheritedClassNum)
+    inheritedClassNum = updatedInheritedClassNum
+    let sizeValue = TypeInfoSizeValue(cgMod, chirTy, cgType)
+    let alignValue = TypeInfoAlignValue(cgMod, chirTy, cgType)
     let typeInfoValues = ArrayList<LLVMValueRef>()
     typeInfoValues.add(GenerateTypeInfoNameConstant(cgMod, moduleHandle, CGType.GetRuntimeTypeName(chirTy)))
-    typeInfoValues.add(unsafe { LLVMConstInt(i8Type, TypeInfoKind(chirTy), 0) })
+    typeInfoValues.add(unsafe { LLVMConstInt(i8Type, TypeInfoKind(cgMod, chirTy), 0) })
     typeInfoValues.add(unsafe { LLVMConstInt(i8Type, 0u64, 0) })
     typeInfoValues.add(unsafe { LLVMConstInt(i16Type, fieldCount, 0) })
     typeInfoValues.add(unsafe { LLVMConstInt(i32Type, sizeValue, 0) })
@@ -230,14 +229,14 @@ private func BuildConcreteTypeInfoInitializer(cgMod: CGModule, moduleHandle: LLV
     typeInfoValues.add(unsafe { LLVMConstInt(i32Type, 0u64, 0) })
     typeInfoValues.add(unsafe { LLVMConstInt(i8Type, alignValue, 0) })
     typeInfoValues.add(unsafe { LLVMConstInt(i8Type, UInt64(chirTy.GetTypeArgs().size), 0) })
-    typeInfoValues.add(unsafe { LLVMConstInt(i16Type, InheritedClassNumValue(chirTy), 0) })
+    typeInfoValues.add(unsafe { LLVMConstInt(i16Type, inheritedClassNum + INHERITED_CLASS_NUM_FE_FLAG, 0) })
     typeInfoValues.add(GenerateOffsetsOfTypeInfo(cgMod, chirTy, cgType, typeInfoName, i32PtrType))
     typeInfoValues.add(GenerateSourceGenericOfTypeInfo(cgMod, chirTy, i8PtrType))
     typeInfoValues.add(GenerateTypeArgsOfTypeInfo(cgMod, chirTy, typeInfoName, i8PtrType))
     typeInfoValues.add(GenerateFieldsOfTypeInfo(cgMod, chirTy, typeInfoName, i8PtrType))
     typeInfoValues.add(GenerateSuperOfTypeInfo(cgMod, chirTy, typeInfoPtrType))
     typeInfoValues.add(GenerateExtensionDefPtrOfTypeInfo(cgMod, chirTy, extensionDefPtrPtrType))
-    typeInfoValues.add(GenerateMTableOfTypeInfo(cgMod, chirTy, i8PtrType))
+    typeInfoValues.add(mtable)
     typeInfoValues.add(unsafe { LLVMConstNull(i8PtrType) })
     return TypeInfoConstStruct(typeInfoTy, typeInfoValues)
 }
@@ -296,7 +295,7 @@ private func BuildSourceGenericTypeTemplateInitializer(cgMod: CGModule, moduleHa
     }
     let values = ArrayList<LLVMValueRef>()
     values.add(GenerateTypeInfoNameConstant(cgMod, moduleHandle, typeTemplateName))
-    values.add(unsafe { LLVMConstInt(i8Type, TypeInfoKind(customTy), 0) })
+    values.add(unsafe { LLVMConstInt(i8Type, TypeInfoKind(cgMod, customTy), 0) })
     values.add(unsafe { LLVMConstInt(i8Type, 0u64, 0) })
     values.add(unsafe { LLVMConstInt(i16Type, UInt64(customTy.GetCustomTypeDef().GetAllInstanceVarNum()), 0) })
     values.add(unsafe { LLVMConstInt(i16Type, UInt64(customTy.GetCustomTypeDef().GetGenericTypeParams().size), 0) })
@@ -334,7 +333,7 @@ private func GenerateTypeArgsOfTypeInfo(cgMod: CGModule, chirTy: Type, typeInfoN
 
 private func GenerateFieldsOfTypeInfo(cgMod: CGModule, chirTy: Type, typeInfoName: String,
     i8PtrType: LLVMTypeRef): LLVMValueRef {
-    let fieldTypes = GetInstanceFieldTypes(chirTy)
+    let fieldTypes = GetInstanceFieldTypes(cgMod, chirTy)
     if (fieldTypes.isEmpty()) {
         return unsafe { LLVMConstNull(i8PtrType) }
     }
@@ -357,7 +356,7 @@ private func GenerateFieldsOfTypeInfo(cgMod: CGModule, chirTy: Type, typeInfoNam
 
 private func GenerateOffsetsOfTypeInfo(cgMod: CGModule, chirTy: Type, cgType: CGType,
     typeInfoName: String, i32PtrType: LLVMTypeRef): LLVMValueRef {
-    let fieldTypes = GetInstanceFieldTypes(chirTy)
+    let fieldTypes = GetInstanceFieldTypes(cgMod, chirTy)
     if (fieldTypes.isEmpty()) {
         return unsafe { LLVMConstNull(i32PtrType) }
     }
@@ -382,10 +381,10 @@ private func GenerateOffsetsOfTypeInfo(cgMod: CGModule, chirTy: Type, cgType: CG
     return unsafe { LLVMConstBitCast(offsetsGlobal, i32PtrType) }
 }
 
-public func GetInstanceFieldTypes(chirTy: Type): ArrayList<Type> {
+public func GetInstanceFieldTypes(cgMod: CGModule, chirTy: Type): ArrayList<Type> {
     let result = ArrayList<Type>()
     if (let Some(enumTy) <- (chirTy as EnumType)) {
-        return GetEnumTypeInfoFieldTypes(enumTy)
+        return GetEnumTypeInfoFieldTypes(cgMod, enumTy)
     }
     if (let Some(customTy) <- (chirTy as CustomType)) {
         for (fieldTy in customTy.GetInstantiatedMemberTys()) {
@@ -395,8 +394,38 @@ public func GetInstanceFieldTypes(chirTy: Type): ArrayList<Type> {
     return result
 }
 
-private func GetEnumTypeInfoFieldTypes(enumTy: EnumType): ArrayList<Type> {
+private func GetEnumTypeInfoFieldTypes(cgMod: CGModule, enumTy: EnumType): ArrayList<Type> {
     let result = ArrayList<Type>()
+    let builder = cgMod.GetCGContext().GetCHIRBuilder()
+    if (let Some(enumCGType) <- (CGType.GetOrCreate(cgMod, enumTy) as CGEnumType)) {
+        let enumKind = enumCGType.GetCGEnumTypeKind()
+        if (enumKind == CGEnumTypeKind.NON_EXHAUSTIVE_UNASSOCIATED ||
+            enumKind == CGEnumTypeKind.EXHAUSTIVE_UNASSOCIATED ||
+            enumKind == CGEnumTypeKind.NON_EXHAUSTIVE_ASSOCIATED ||
+            enumKind == CGEnumTypeKind.EXHAUSTIVE_OTHER) {
+            result.add(builder.context.GetInt32Ty())
+            return result
+        }
+        if (enumKind == CGEnumTypeKind.EXHAUSTIVE_ZERO_SIZE ||
+            enumKind == CGEnumTypeKind.EXHAUSTIVE_ASSOCIATED_NONREF) {
+            return result
+        }
+        if (enumKind == CGEnumTypeKind.EXHAUSTIVE_ASSOCIATED_OPTION_LIKE_REF) {
+            result.add(builder.context.GetUnitTy())
+            if (let Some(associatedTy) <- enumCGType.GetAssociatedValueTypeOfOptionLike()) {
+                result.add(associatedTy)
+            }
+            return result
+        }
+        if (enumKind == CGEnumTypeKind.EXHAUSTIVE_ASSOCIATED_OPTION_LIKE_NONREF ||
+            enumKind == CGEnumTypeKind.EXHAUSTIVE_ASSOCIATED_OPTION_LIKE_T) {
+            result.add(builder.context.GetBoolTy())
+            if (let Some(associatedTy) <- enumCGType.GetAssociatedValueTypeOfOptionLike()) {
+                result.add(associatedTy)
+            }
+            return result
+        }
+    }
     result.add(BooleanType())
     let genericParams = enumTy.GetEnumDef().GetGenericTypeParams()
     let genericArgs = enumTy.GetGenericArgs()
@@ -462,20 +491,142 @@ private func ConstArray(elementType: LLVMTypeRef, values: ArrayList<LLVMValueRef
     return result
 }
 
-private func TypeInfoKind(chirTy: Type): UInt64 {
-    if (let Some(classTy) <- (chirTy as ClassType)) {
-        return if (classTy.GetClassDef().IsInterface()) { UG_INTERFACE_KIND } else { UG_CLASS_KIND }
+private func TypeInfoSizeValue(cgMod: CGModule, chirTy: Type, cgType: CGType): UInt64 {
+    if (let Some(enumCGType) <- (cgType as CGEnumType)) {
+        let enumKind = enumCGType.GetCGEnumTypeKind()
+        let context = cgMod.GetLLVMContext().raw
+        if (enumKind == CGEnumTypeKind.NON_EXHAUSTIVE_UNASSOCIATED ||
+            enumKind == CGEnumTypeKind.EXHAUSTIVE_UNASSOCIATED) {
+            return cgMod.GetTypeSize(unsafe { LLVMInt32TypeInContext(context) })
+        }
+        if (enumKind == CGEnumTypeKind.NON_EXHAUSTIVE_ASSOCIATED ||
+            enumKind == CGEnumTypeKind.EXHAUSTIVE_OTHER ||
+            enumKind == CGEnumTypeKind.EXHAUSTIVE_ASSOCIATED_OPTION_LIKE_REF) {
+            return cgMod.GetTypeSize(CGType.GetRefType(cgMod.GetLLVMContext()))
+        }
+        if (enumKind == CGEnumTypeKind.EXHAUSTIVE_ZERO_SIZE) {
+            return 0u64
+        }
+        if (enumKind == CGEnumTypeKind.EXHAUSTIVE_ASSOCIATED_NONREF) {
+            if (let Some(unionSize) <- enumCGType.GetSizeOfConstructorUnion()) {
+                return 4u64 + UInt64(unionSize)
+            }
+        }
     }
-    if (chirTy.IsStruct()) { return UG_STRUCT_KIND }
-    if (chirTy.IsEnum()) { return UG_ENUM_KIND }
+    if (chirTy.IsClass()) {
+        return cgMod.GetTypeSize(cgType.GetLayoutType())
+    }
+    if (let Some(staticSize) <- cgType.GetSize()) {
+        return UInt64(staticSize)
+    }
     return 0u64
 }
 
-private func InheritedClassNumValue(chirTy: Type): UInt64 {
-    if (let Some(classTy) <- (chirTy as ClassType)) {
-        return INHERITED_CLASS_NUM_FE_FLAG + UInt64(ClassInheritanceDepth(classTy))
+private func TypeInfoAlignValue(cgMod: CGModule, _: Type, cgType: CGType): UInt64 {
+    if (let Some(enumCGType) <- (cgType as CGEnumType)) {
+        let enumKind = enumCGType.GetCGEnumTypeKind()
+        let context = cgMod.GetLLVMContext().raw
+        if (enumKind == CGEnumTypeKind.NON_EXHAUSTIVE_UNASSOCIATED ||
+            enumKind == CGEnumTypeKind.EXHAUSTIVE_UNASSOCIATED) {
+            return UInt64(cgMod.GetABITypeAlignment(unsafe { LLVMInt32TypeInContext(context) }))
+        }
+        if (enumKind == CGEnumTypeKind.NON_EXHAUSTIVE_ASSOCIATED ||
+            enumKind == CGEnumTypeKind.EXHAUSTIVE_OTHER ||
+            enumKind == CGEnumTypeKind.EXHAUSTIVE_ASSOCIATED_OPTION_LIKE_REF) {
+            return UInt64(cgMod.GetABITypeAlignment(CGType.GetRefType(cgMod.GetLLVMContext())))
+        }
+        if (enumKind == CGEnumTypeKind.EXHAUSTIVE_ZERO_SIZE) {
+            return 1u64
+        }
+        if (enumKind == CGEnumTypeKind.EXHAUSTIVE_ASSOCIATED_NONREF) {
+            return if (cgMod.GetCGContext().GetCompileOptions().target.arch == ArchType.ARM32 &&
+                cgMod.GetCGContext().GetCompileOptions().target.env == EnvironmentType.ANDROID) {
+                4u64
+            } else {
+                1u64
+            }
+        }
     }
-    return INHERITED_CLASS_NUM_FE_FLAG
+    if (let Some(staticAlign) <- cgType.GetAlign()) {
+        return UInt64(staticAlign)
+    }
+    return 0u64
+}
+
+private func TypeInfoKind(cgMod: CGModule, chirTy: Type): UInt64 {
+    if (let Some(classTy) <- (chirTy as ClassType)) {
+        if (IsWeakRefClass(classTy)) {
+            return UG_WEAKREF_KIND
+        }
+        return if (classTy.GetClassDef().IsInterface()) { UG_INTERFACE_KIND } else { UG_CLASS_KIND }
+    }
+    if (chirTy.IsStruct()) { return UG_STRUCT_KIND }
+    if (chirTy.IsEnum()) {
+        if (let Some(enumCGType) <- (CGType.GetOrCreate(cgMod, chirTy) as CGEnumType)) {
+            return if (enumCGType.IsCommonEnum()) { UG_COMMON_ENUM_KIND } else { UG_ENUM_KIND }
+        }
+        return UG_ENUM_KIND
+    }
+    return 0u64
+}
+
+private func IsWeakRefClass(classTy: ClassType): Bool {
+    let def = classTy.GetClassDef()
+    let packageName = if (let Some(genericDecl) <- def.GetGenericDecl()) {
+        genericDecl.GetPackageName()
+    } else {
+        def.GetPackageName()
+    }
+    return packageName == REF_PACKAGE_NAME && def.GetSrcCodeIdentifier() == STD_LIB_WEAK_REF
+}
+
+private func IsEqualOrInstantiatedTypeOf(actualTy: Type, genericRelatedTy: Type): Bool {
+    if (actualTy.IsEqual(genericRelatedTy)) {
+        return true
+    }
+    if (genericRelatedTy.IsGeneric()) {
+        return true
+    }
+    if (TypeKindIndex(actualTy.GetTypeKind()) != TypeKindIndex(genericRelatedTy.GetTypeKind())) {
+        return false
+    }
+    if (!SameCustomTypeDef(actualTy, genericRelatedTy)) {
+        return false
+    }
+    let actualArgs = actualTy.GetTypeArgs()
+    let genericArgs = genericRelatedTy.GetTypeArgs()
+    if (actualArgs.size != genericArgs.size) {
+        return false
+    }
+    var idx: Int64 = 0
+    while (idx < actualArgs.size) {
+        if (!IsEqualOrInstantiatedTypeOf(actualArgs[idx], genericArgs[idx])) {
+            return false
+        }
+        idx++
+    }
+    return true
+}
+
+private func SameCustomTypeDef(left: Type, right: Type): Bool {
+    if (let Some(leftCustom) <- (left as CustomType)) {
+        if (let Some(rightCustom) <- (right as CustomType)) {
+            return leftCustom.GetCustomTypeDef().nodeId == rightCustom.GetCustomTypeDef().nodeId
+        }
+        return false
+    }
+    return true
+}
+
+private func InheritedClassNumValue(chirTy: Type): UInt64 {
+    return INHERITED_CLASS_NUM_FE_FLAG + InheritedClassNumBase(chirTy)
+}
+
+private func InheritedClassNumBase(chirTy: Type): UInt64 {
+    if (let Some(classTy) <- (chirTy as ClassType)) {
+        return UInt64(ClassInheritanceDepth(classTy))
+    }
+    return 0u64
 }
 
 private func ClassInheritanceDepth(classTy: ClassType): Int64 {
@@ -510,12 +661,47 @@ private func GenerateExtensionDefPtrOfTypeInfo(cgMod: CGModule, chirTy: Type,
     return unsafe { LLVMConstNull(extensionDefPtrPtrType) }
 }
 
-private func GenerateMTableOfTypeInfo(cgMod: CGModule, chirTy: Type, i8PtrType: LLVMTypeRef): LLVMValueRef {
-    if (let Some(_) <- cgMod.GetExtensionDefStart(chirTy)) {
-        let i64Type = unsafe { LLVMInt64TypeInContext(cgMod.GetLLVMContext().raw) }
-        return unsafe { LLVMConstIntToPtr(LLVMConstInt(i64Type, TYPEINFO_MTABLE_FE_FLAG, 0), i8PtrType) }
+private func GenerateMTableOfTypeInfo(cgMod: CGModule, chirTy: Type, i8PtrType: LLVMTypeRef,
+    inheritedClassNum: UInt64): (LLVMValueRef, UInt64) {
+    if ((inheritedClassNum >> 14u64) != 0u64 || cgMod.GetExtensionDefStart(chirTy).isNone()) {
+        return (unsafe { LLVMConstNull(i8PtrType) }, inheritedClassNum)
     }
-    return unsafe { LLVMConstNull(i8PtrType) }
+    let extendInterfaces = cgMod.GetExtensionDefInterfaces(chirTy)
+    if (cgMod.GetCGContext().GetCompileOptions().target.arch == ArchType.ARM32 ||
+        extendInterfaces.size >= MTABLE_INLINE_BITS_LIMIT) {
+        return (unsafe { LLVMConstNull(i8PtrType) }, inheritedClassNum)
+    }
+    var bitValue = 0u64
+    var bitmapIdx: Int64 = 0
+    var updatedInheritedClassNum = inheritedClassNum
+    if (chirTy.GetTypeArgs().isEmpty()) {
+        while (bitmapIdx < extendInterfaces.size) {
+            bitValue |= 1u64 << UInt64(bitmapIdx)
+            bitmapIdx++
+        }
+    } else {
+        var foundFirstCandidate = false
+        for (interfaceInfo in extendInterfaces) {
+            let matches = if (let Some(candidateTy) <- interfaceInfo.candidateTy) {
+                IsEqualOrInstantiatedTypeOf(chirTy, candidateTy)
+            } else {
+                true
+            }
+            if (matches) {
+                bitValue |= 1u64 << UInt64(bitmapIdx)
+                foundFirstCandidate = true
+            }
+            if (foundFirstCandidate) {
+                bitmapIdx++
+            } else {
+                updatedInheritedClassNum++
+            }
+        }
+    }
+    let i64Type = unsafe { LLVMInt64TypeInContext(cgMod.GetLLVMContext().raw) }
+    let inlineBitmap = TYPEINFO_MTABLE_INLINE_FLAG | bitValue
+    return (unsafe { LLVMConstIntToPtr(LLVMConstInt(i64Type, inlineBitmap, 0), i8PtrType) },
+        updatedInheritedClassNum)
 }
 
 private func GetLayoutMetadataName(chirTy: Type): String {

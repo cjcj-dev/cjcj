@@ -307,6 +307,7 @@ public class Translator {
 
     public func Visit(enumDecl: AstEnumDecl): Option<Value> {
         let def = RequireEnumDef(chirTy.GetGlobalNominalCache(enumDecl))
+        def.SetNonExhaustive(enumDecl.hasEllipsis)
         if (let Some(astTy) <- enumDecl.GetTy()) {
             def.SetType(RequireEnumType(chirTy.TranslateType(astTy)))
         }
