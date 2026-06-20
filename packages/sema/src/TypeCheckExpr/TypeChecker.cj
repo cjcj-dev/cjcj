@@ -1616,29 +1616,15 @@ public class TypeChecker {
         return false
     }
 
-    private func LambdaFromArg(arg: FuncArg): Option<LambdaExpr> {
+    private func CheckCallArgFromContext(ctx: ASTContext, target: Ty, arg: FuncArg): Bool {
         if (let Some(expr) <- arg.expr) {
-            return expr as LambdaExpr
-        }
-        return None
-    }
-
-    private func CheckCallLambdaArgsFromContext(ctx: ASTContext, callExpr: CallExpr, target: Option<Ty>): Unit {
-        let expectedTys = GetContextualLambdaArgTysForCall(impl.typeManager, target, callExpr)
-        var idx: Int64 = 0
-        while (idx < callExpr.args.size && idx < expectedTys.size) {
-            if (let Some(lambda) <- LambdaFromArg(callExpr.args[idx])) {
-                let expectedTy = expectedTys[idx]
-                if (Ty.IsTyCorrect(expectedTy) && (UnboxOptionType(expectedTy) as FuncTy).isSome()) {
-                    if (CheckLambdaExprWithTarget(ctx, expectedTy, lambda)) {
-                        if (let Some(lambdaTy) <- lambda.GetTy()) {
-                            callExpr.args[idx].SetTy(lambdaTy)
-                        }
-                    }
-                }
+            let ok = Check(ctx, target, expr)
+            if (ok) {
+                arg.SetTy(expr.GetTy() ?? target)
             }
-            idx++
+            return ok
         }
+        return false
     }
 
     private func ReturnExprTargetTy(returnExpr: ReturnExpr): Option<Ty> {
@@ -2221,8 +2207,8 @@ public class TypeChecker {
         }
         if (let Some(callExpr) <- (expr as CallExpr)) {
             SynthesizeCallChildren(ctx, callExpr)
-            CheckCallLambdaArgsFromContext(ctx, callExpr, None)
-            return FinishSynthesize(ctx, callExpr, SynExprShallow(impl.typeManager, callExpr))
+            return FinishSynthesize(ctx, callExpr, SynCallExprWithArgChecker(impl.typeManager, callExpr,
+                Some({ target: Ty, arg: FuncArg => CheckCallArgFromContext(ctx, target, arg) })))
         }
         if (let Some(ifExpr) <- (expr as IfExpr)) {
             SynthesizeIfChildren(ctx, ifExpr)
@@ -2380,8 +2366,8 @@ public class TypeChecker {
         }
         if (let Some(callExpr) <- (expr as CallExpr)) {
             SynthesizeCallChildren(ctx, callExpr)
-            CheckCallLambdaArgsFromContext(ctx, callExpr, Some(target))
-            return FinishCheck(ctx, callExpr, ChkExprShallow(impl.typeManager, target, callExpr))
+            return FinishCheck(ctx, callExpr, ChkCallExprWithArgChecker(impl.typeManager, None, Some(target),
+                callExpr, Some({ paramTy: Ty, arg: FuncArg => CheckCallArgFromContext(ctx, paramTy, arg) })))
         }
         if (let Some(ifExpr) <- (expr as IfExpr)) {
             SynthesizeIfChildren(ctx, ifExpr)

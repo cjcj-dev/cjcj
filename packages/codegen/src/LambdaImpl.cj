@@ -9,6 +9,7 @@ import cangjie_compiler::chir.Lambda
 import cangjie_compiler::chir.Type
 import cangjie_compiler::chir.TypeKind
 import cangjie_compiler::chir.Value
+import cangjie_compiler::chir.VArrayType
 
 private class SavedValueMapping {
     public let value: Value
@@ -141,9 +142,6 @@ private func EmitLambdaInvokeWrapper(irBuilder: IRBuilder2, wrapperFunction: LLV
 
 private func GetOrEmitLambdaGenericWrapper(irBuilder: IRBuilder2, lambdaExpr: Lambda, funcTy: FuncType,
     entryFunction: LLVMValueRef): LLVMValueRef {
-    if (funcTy.GetParamTypes().size != 1) {
-        return GetOrEmitLambdaInvokeWrapper(irBuilder, lambdaExpr, funcTy, entryFunction)
-    }
     let wrapperTy = BuildClosureGenericFunctionType(irBuilder, funcTy)
     let wrapperName = LambdaEntryName(lambdaExpr) + "$g"
     let rawFunction = irBuilder.GetCGModule().GetOrInsertFunction(wrapperName, wrapperTy)
@@ -166,9 +164,7 @@ private func EmitLambdaGenericWrapper(irBuilder: IRBuilder2, wrapperFunction: LL
 
     let genericSRet = unsafe { LLVMGetParam(wrapperFunction, 0u32) }
     let closureObject = unsafe { LLVMGetParam(wrapperFunction, 1u32) }
-    let boxedArg = unsafe { LLVMGetParam(wrapperFunction, 2u32) }
     let envPtr = LoadClosureEnvironment(irBuilder, closureObject)
-    let argValue = LoadGenericClosureArg(irBuilder, boxedArg, funcTy.GetParamTypes()[0])
     let entryFnTy = BuildClosureEntryFunctionType(irBuilder, funcTy)
     let entryArgs = ArrayList<LLVMValueRef>()
     let usesSRet = LambdaUsesSRet(irBuilder, funcTy.GetReturnType())
@@ -179,7 +175,13 @@ private func EmitLambdaGenericWrapper(irBuilder: IRBuilder2, wrapperFunction: LL
         entryArgs.add(retStorage)
     }
     entryArgs.add(envPtr)
-    entryArgs.add(argValue)
+    let paramTys = funcTy.GetParamTypes()
+    var idx: Int64 = 0
+    while (idx < paramTys.size) {
+        let boxedArg = unsafe { LLVMGetParam(wrapperFunction, UInt32(idx) + 2u32) }
+        entryArgs.add(LoadGenericClosureArg(irBuilder, boxedArg, paramTys[idx]))
+        idx++
+    }
     let callName = if (usesSRet || IsVoidLike(funcTy.GetReturnType())) { "" } else { "closure.generic.call" }
     let call = irBuilder.CreateCallOrInvoke(entryFunction, entryFnTy, entryArgs, name: callName)
     if (usesSRet) {
@@ -390,8 +392,9 @@ private func MapLambdaCaptures(cgMod: CGModule, irBuilder: IRBuilder2, envParam:
     if (captures.isEmpty()) {
         return
     }
-    let typedEnv = irBuilder.CreateBitCast(envParam, unsafe { LLVMPointerType(envType, 0u32) },
-        name: "lambda.env.cast")
+    let payload = irBuilder.GetPayloadFromObject(envParam)
+    let typedEnv = irBuilder.CreateBitCast(payload, unsafe { LLVMPointerType(envType, 1u32) },
+        name: "lambda.env.payload")
     var idx: Int64 = 0
     while (idx < captures.size) {
         let capture = captures[idx]
@@ -400,38 +403,61 @@ private func MapLambdaCaptures(cgMod: CGModule, irBuilder: IRBuilder2, envParam:
         let captureTy = capture.GetType() ??
             throw IllegalStateException("lambda captured value has no type")
         let captureCGTy = CGType.GetOrCreate(cgMod, captureTy)
-        let loaded = irBuilder.CreateLoad(captureCGTy.GetLLVMType(), slot, name: "lambda.capture")
+        let loaded = LoadCaptureValue(irBuilder, envParam, slot, captureTy, captureCGTy)
         cgMod.SetOrUpdateMappedCGValue(capture, CGValue(loaded, captureCGTy))
         idx++
     }
 }
 
+private func LoadCaptureValue(irBuilder: IRBuilder2, envObject: LLVMValueRef, slot: LLVMValueRef,
+    captureTy: Type, captureCGTy: CGType): LLVMValueRef {
+    let cgMod = irBuilder.GetCGModule()
+    if (IsManagedReferenceSlot(cgMod, captureTy)) {
+        let raw = irBuilder.CallGCReadRef(envObject, slot)
+        return irBuilder.CreatePointerCast(raw, captureCGTy.GetLLVMType(), name: "lambda.capture.ref")
+    }
+    if (TypeContainsManagedReferences(cgMod, captureTy)) {
+        let temp = irBuilder.CreateEntryAlloca(captureCGTy, name: "lambda.capture.read.tmp")
+        let size = unsafe {
+            LLVMConstInt(I64Type(irBuilder), cgMod.GetTypeSize(captureCGTy.GetLLVMType()), 0)
+        }
+        irBuilder.CallGCReadStruct(temp, envObject, slot, size, AggregateLayoutName(cgMod, captureTy))
+        return irBuilder.CreateLoad(captureCGTy.GetLLVMType(), temp, name: "lambda.capture")
+    }
+    return irBuilder.CreateLoad(captureCGTy.GetLLVMType(), slot, name: "lambda.capture")
+}
+
 private func CreateLambdaEnvironment(irBuilder: IRBuilder2, lambdaExpr: Lambda,
     captures: ArrayList<Value>): LLVMValueRef {
-    let i8PtrTy = I8PtrType(irBuilder)
     if (captures.isEmpty()) {
-        return unsafe { LLVMConstNull(i8PtrTy) }
+        return unsafe { LLVMConstNull(CGType.GetRefType(irBuilder.GetLLVMContext())) }
     }
     let envType = EnvRecordType(irBuilder, lambdaExpr, captures)
-    let env = HeapAllocate(irBuilder, envType, "lambda.env")
+    let envObject = HeapAllocateClosureObject(irBuilder, envType,
+        EnvObjectTypeInfo(irBuilder, lambdaExpr, captures, envType), "lambda.env")
+    let payload = irBuilder.GetPayloadFromObject(envObject)
+    let envPayload = irBuilder.CreateBitCast(payload, unsafe { LLVMPointerType(envType, 1u32) },
+        name: "lambda.env.payload")
     var idx: Int64 = 0
     while (idx < captures.size) {
         let capture = captures[idx]
         let captureValue = irBuilder.GetCGModule().MaterializeValue(irBuilder, capture)
-        let slot = irBuilder.CreateGEP(envType, env, StaticIndices(irBuilder, [0u64, UInt64(idx)]),
+        let slot = irBuilder.CreateGEP(envType, envPayload, StaticIndices(irBuilder, [0u64, UInt64(idx)]),
             name: "lambda.env.store.slot")
-        irBuilder.CreateStore(captureValue.GetRawValue(), slot)
+        let captureTy = capture.GetType() ??
+            throw IllegalStateException("lambda captured value has no type")
+        StoreCaptureValue(irBuilder, envObject, slot, captureValue.GetRawValue(), captureTy)
         idx++
     }
-    return irBuilder.CreateBitCast(env, i8PtrTy, name: "lambda.env.raw")
+    return envObject
 }
 
 private func CreateLambdaClosure(irBuilder: IRBuilder2, lambdaExpr: Lambda, genericWrapper: LLVMValueRef,
     invokeWrapper: LLVMValueRef, envPtr: LLVMValueRef): LLVMValueRef {
     let closureType = ClosureObjectRecordType(irBuilder)
     let i8PtrTy = I8PtrType(irBuilder)
-    let closureObject = HeapAllocateClosureObject(irBuilder, closureType, ClosureObjectTypeInfo(irBuilder, lambdaExpr),
-        "lambda.closure")
+    let closureObject = HeapAllocateClosureObject(irBuilder, closureType,
+        ClosureObjectTypeInfo(irBuilder, lambdaExpr, closureType), "lambda.closure")
     let payload = irBuilder.GetPayloadFromObject(closureObject)
     let closurePayload = irBuilder.CreateBitCast(payload, unsafe { LLVMPointerType(closureType, 1u32) },
         name: "lambda.closure.payload")
@@ -443,8 +469,52 @@ private func CreateLambdaClosure(irBuilder: IRBuilder2, lambdaExpr: Lambda, gene
     irBuilder.CreateStore(irBuilder.CreateBitCast(invokeWrapper, i8PtrTy, name: "lambda.invoke.raw"), invokeSlot)
     let envSlot = irBuilder.CreateGEP(closureType, closurePayload, StaticIndices(irBuilder, [0u64, 2u64]),
         name: "lambda.closure.env.slot")
-    irBuilder.CreateStore(envPtr, envSlot)
+    irBuilder.CallGCWriteRef(envPtr, closureObject, envSlot)
     return closureObject
+}
+
+private func StoreCaptureValue(irBuilder: IRBuilder2, envObject: LLVMValueRef, slot: LLVMValueRef,
+    rawValue: LLVMValueRef, captureTy: Type): Unit {
+    let cgMod = irBuilder.GetCGModule()
+    if (IsManagedReferenceSlot(cgMod, captureTy)) {
+        irBuilder.CallGCWriteRef(rawValue, envObject, slot)
+        return
+    }
+    if (TypeContainsManagedReferences(cgMod, captureTy)) {
+        let captureCGType = CGType.GetOrCreate(cgMod, captureTy)
+        let sourcePtr = CaptureAggregateSourcePointer(irBuilder, rawValue, captureCGType)
+        let size = unsafe {
+            LLVMConstInt(I64Type(irBuilder), cgMod.GetTypeSize(captureCGType.GetLLVMType()), 0)
+        }
+        irBuilder.CallGCWriteStruct(envObject, slot, sourcePtr, size, AggregateLayoutName(cgMod, captureTy))
+        return
+    }
+    irBuilder.CreateStore(rawValue, slot)
+}
+
+private func CaptureAggregateSourcePointer(irBuilder: IRBuilder2, rawValue: LLVMValueRef,
+    captureCGType: CGType): LLVMValueRef {
+    let rawTy = unsafe { LLVMTypeOf(rawValue) }
+    if (!rawTy.isNull() && unsafe { LLVMGetTypeKind(rawTy) } == 12) {
+        return rawValue
+    }
+    let temp = irBuilder.CreateEntryAlloca(captureCGType, name: "lambda.capture.tmp")
+    irBuilder.CreateStore(rawValue, temp)
+    return temp
+}
+
+private func TypeContainsManagedReferences(cgMod: CGModule, ty: Type): Bool {
+    let cgType = CGType.GetOrCreate(cgMod, ty)
+    let bits = CreateBitmapSlots(cgMod.GetTypeSize(cgType.GetLLVMType()),
+        UInt64(cgMod.GetPointerSize(addressSpace: 1u32)))
+    MarkManagedReferencesForType(cgMod, ty, 0u64, bits)
+    return BitmapHasRefs(bits)
+}
+
+private func AggregateLayoutName(cgMod: CGModule, ty: Type): String {
+    let layoutType = CGType.GetOrCreate(cgMod, ty).GetLayoutType()
+    let name = unsafe { LLVMCStringToString(LLVMGetStructName(layoutType)) }
+    return name ?? ty.ToString()
 }
 
 private func EnvRecordType(irBuilder: IRBuilder2, lambdaExpr: Lambda, captures: ArrayList<Value>): LLVMTypeRef {
@@ -463,16 +533,33 @@ private func ClosureObjectRecordType(irBuilder: IRBuilder2): LLVMTypeRef {
     let i8PtrTy = I8PtrType(irBuilder)
     fields.add(i8PtrTy)
     fields.add(i8PtrTy)
-    fields.add(i8PtrTy)
+    fields.add(CGType.GetRefType(irBuilder.GetLLVMContext()))
     return StructTypeInContext(irBuilder.GetLLVMContext().raw, fields)
 }
 
-private func ClosureObjectTypeInfo(irBuilder: IRBuilder2, lambdaExpr: Lambda): LLVMValueRef {
+private let LAMBDA_CLASS_KIND: UInt64 = 128u64
+private let TYPEINFO_HAS_REF_FIELD: UInt64 = 0x1u64
+
+private func ClosureObjectTypeInfo(irBuilder: IRBuilder2, lambdaExpr: Lambda,
+    closureType: LLVMTypeRef): LLVMValueRef {
+    let bits = BuildClosureObjectBitmap(irBuilder, closureType)
+    return BuildSyntheticObjectTypeInfo(irBuilder, LambdaEntryName(lambdaExpr) + "$closure.ti",
+        closureType, 3u64, bits)
+}
+
+private func EnvObjectTypeInfo(irBuilder: IRBuilder2, lambdaExpr: Lambda, captures: ArrayList<Value>,
+    envType: LLVMTypeRef): LLVMValueRef {
+    let bits = BuildEnvObjectBitmap(irBuilder, captures, envType)
+    return BuildSyntheticObjectTypeInfo(irBuilder, LambdaEntryName(lambdaExpr) + "$env.ti",
+        envType, UInt64(captures.size), bits)
+}
+
+private func BuildSyntheticObjectTypeInfo(irBuilder: IRBuilder2, typeInfoName: String, layoutType: LLVMTypeRef,
+    fieldCount: UInt64, bitmapBits: ArrayList<Bool>): LLVMValueRef {
     let cgMod = irBuilder.GetCGModule()
     let contextHandle = irBuilder.GetLLVMContext()
     let context = contextHandle.raw
     let typeInfoTy = CGType.GetOrCreateTypeInfoType(contextHandle)
-    let typeInfoName = LambdaEntryName(lambdaExpr) + "$closure.ti"
     let typeInfo = GetOrInsertCodeGenGlobal(cgMod, typeInfoName, typeInfoTy)
     if (unsafe { LLVMIsDeclaration(typeInfo) } == 0) {
         return typeInfo
@@ -483,20 +570,23 @@ private func ClosureObjectTypeInfo(irBuilder: IRBuilder2, lambdaExpr: Lambda): L
         let i32Type = unsafe { LLVMInt32TypeInContext(context) }
         let i8PtrType = I8PtrType(irBuilder)
         let i32PtrType = unsafe { LLVMPointerType(i32Type, 0u32) }
-        let bitMapPtrType = unsafe { LLVMPointerType(CGType.GetBitMapType(contextHandle), 0u32) }
         let extensionDefPtrPtrType = unsafe {
             LLVMPointerType(CGType.GetOrCreateExtensionDefPtrType(contextHandle), 0u32)
         }
         let typeInfoPtrType = CGType.GetOrCreateTypeInfoPtrType(contextHandle)
+        let sizeValue = cgMod.GetTypeSize(layoutType)
+        let alignValue = UInt64(cgMod.GetABITypeAlignment(layoutType))
+        let hasRef = BitmapHasRefs(bitmapBits)
+        let flag = if (hasRef) { TYPEINFO_HAS_REF_FIELD } else { 0u64 }
         let values = ArrayList<LLVMValueRef>()
         values.add(ClosureTypeInfoNameConstant(cgMod, moduleHandle, typeInfoName))
-        values.add(unsafe { LLVMConstInt(i8Type, 128u64, 0) })
-        values.add(unsafe { LLVMConstInt(i8Type, 0u64, 0) })
-        values.add(unsafe { LLVMConstInt(i16Type, 0u64, 0) })
-        values.add(unsafe { LLVMConstInt(i32Type, 24u64, 0) })
-        values.add(unsafe { LLVMConstNull(bitMapPtrType) })
+        values.add(unsafe { LLVMConstInt(i8Type, LAMBDA_CLASS_KIND, 0) })
+        values.add(unsafe { LLVMConstInt(i8Type, flag, 0) })
+        values.add(unsafe { LLVMConstInt(i16Type, fieldCount, 0) })
+        values.add(unsafe { LLVMConstInt(i32Type, sizeValue, 0) })
+        values.add(BuildBitmapConstant(cgMod, contextHandle, typeInfoName, bitmapBits))
         values.add(unsafe { LLVMConstInt(i32Type, 0u64, 0) })
-        values.add(unsafe { LLVMConstInt(i8Type, 8u64, 0) })
+        values.add(unsafe { LLVMConstInt(i8Type, alignValue, 0) })
         values.add(unsafe { LLVMConstInt(i8Type, 0u64, 0) })
         values.add(unsafe { LLVMConstInt(i16Type, INHERITED_CLASS_NUM_FE_FLAG, 0) })
         values.add(unsafe { LLVMConstNull(i32PtrType) })
@@ -516,6 +606,204 @@ private func ClosureObjectTypeInfo(irBuilder: IRBuilder2, lambdaExpr: Lambda): L
     return typeInfo
 }
 
+private func BuildClosureObjectBitmap(irBuilder: IRBuilder2, closureType: LLVMTypeRef): ArrayList<Bool> {
+    let cgMod = irBuilder.GetCGModule()
+    let bits = CreateBitmapSlots(cgMod.GetTypeSize(closureType), UInt64(cgMod.GetPointerSize(addressSpace: 1u32)))
+    MarkReferenceSlot(bits, UInt64(cgMod.GetPointerSize(addressSpace: 1u32)),
+        cgMod.GetOffsetOfElement(closureType, 2u32))
+    return bits
+}
+
+private func BuildEnvObjectBitmap(irBuilder: IRBuilder2, captures: ArrayList<Value>,
+    envType: LLVMTypeRef): ArrayList<Bool> {
+    let cgMod = irBuilder.GetCGModule()
+    let pointerSize = UInt64(cgMod.GetPointerSize(addressSpace: 1u32))
+    let bits = CreateBitmapSlots(cgMod.GetTypeSize(envType), pointerSize)
+    var idx: Int64 = 0
+    while (idx < captures.size) {
+        let captureTy = captures[idx].GetType() ??
+            throw IllegalStateException("lambda captured value has no type")
+        let offset = cgMod.GetOffsetOfElement(envType, UInt32(idx))
+        MarkManagedReferencesForType(cgMod, captureTy, offset, bits)
+        idx++
+    }
+    return bits
+}
+
+private func CreateBitmapSlots(size: UInt64, pointerSize: UInt64): ArrayList<Bool> {
+    let bits = ArrayList<Bool>()
+    if (pointerSize == 0u64) {
+        return bits
+    }
+    let slotCount = (size + pointerSize - 1u64) / pointerSize
+    var idx: UInt64 = 0u64
+    while (idx < slotCount) {
+        bits.add(false)
+        idx++
+    }
+    return bits
+}
+
+private func MarkReferenceSlot(bits: ArrayList<Bool>, pointerSize: UInt64, offset: UInt64): Unit {
+    if (pointerSize == 0u64) {
+        return
+    }
+    let slot = Int64(offset / pointerSize)
+    while (bits.size <= slot) {
+        bits.add(false)
+    }
+    bits[slot] = true
+}
+
+private func MarkManagedReferencesForType(cgMod: CGModule, ty: Type, baseOffset: UInt64,
+    bits: ArrayList<Bool>): Unit {
+    if (IsManagedReferenceSlot(cgMod, ty)) {
+        MarkReferenceSlot(bits, UInt64(cgMod.GetPointerSize(addressSpace: 1u32)), baseOffset)
+        return
+    }
+    if (let Some(varrayTy) <- (ty as VArrayType)) {
+        let elementTy = varrayTy.GetElementType()
+        let elementCGType = CGType.GetOrCreate(cgMod, elementTy)
+        let elementSize = if (let Some(staticSize) <- elementCGType.GetSize()) {
+            UInt64(staticSize)
+        } else {
+            cgMod.GetTypeSize(elementCGType.GetLLVMType())
+        }
+        var idx: UInt64 = 0u64
+        while (idx < varrayTy.size) {
+            MarkManagedReferencesForType(cgMod, elementTy, baseOffset + idx * elementSize, bits)
+            idx++
+        }
+        return
+    }
+    if (ty.IsString()) {
+        let stringLayout = cgMod.GetCGContext().GetCjStringType()
+        MarkReferenceSlot(bits, UInt64(cgMod.GetPointerSize(addressSpace: 1u32)),
+            baseOffset + cgMod.GetOffsetOfElement(stringLayout, 0u32))
+        return
+    }
+    if (ty.IsTuple()) {
+        MarkManagedReferencesForFields(cgMod, ty.GetTypeArgs(), CGType.GetOrCreate(cgMod, ty).GetLayoutType(),
+            baseOffset, bits)
+        return
+    }
+    if (ty.IsStruct() || ty.IsEnum()) {
+        MarkManagedReferencesForFields(cgMod, GetInstanceFieldTypes(ty),
+            CGType.GetOrCreate(cgMod, ty).GetLayoutType(), baseOffset, bits)
+    }
+}
+
+private func MarkManagedReferencesForFields(cgMod: CGModule, fieldTys: ArrayList<Type>, layoutType: LLVMTypeRef,
+    baseOffset: UInt64, bits: ArrayList<Bool>): Unit {
+    var idx: Int64 = 0
+    while (idx < fieldTys.size) {
+        let offset = cgMod.GetOffsetOfElement(layoutType, UInt32(idx))
+        MarkManagedReferencesForType(cgMod, fieldTys[idx], baseOffset + offset, bits)
+        idx++
+    }
+}
+
+private func IsManagedReferenceSlot(cgMod: CGModule, ty: Type): Bool {
+    if (ty.IsReferenceType()) {
+        return true
+    }
+    let llvmTy = CGType.GetOrCreate(cgMod, ty).GetLLVMType()
+    return IsAddressSpaceOnePointer(llvmTy)
+}
+
+private func IsAddressSpaceOnePointer(llvmTy: LLVMTypeRef): Bool {
+    return !llvmTy.isNull() && unsafe { LLVMGetTypeKind(llvmTy) } == 12 &&
+        unsafe { LLVMGetPointerAddressSpace(llvmTy) } == 1u32
+}
+
+private func BitmapHasRefs(bits: ArrayList<Bool>): Bool {
+    for (bit in bits) {
+        if (bit) {
+            return true
+        }
+    }
+    return false
+}
+
+private func BuildBitmapConstant(cgMod: CGModule, contextHandle: LLVMContextHandle, name: String,
+    bits: ArrayList<Bool>): LLVMValueRef {
+    let bitMapPtrType = unsafe { LLVMPointerType(CGType.GetBitMapType(contextHandle), 0u32) }
+    if (!BitmapHasRefs(bits)) {
+        return unsafe { LLVMConstNull(bitMapPtrType) }
+    }
+    if (bits.size < 64) {
+        let i64Type = unsafe { LLVMInt64TypeInContext(contextHandle.raw) }
+        var value = 1u64 << 63
+        var idx: Int64 = 0
+        while (idx < bits.size) {
+            if (bits[idx]) {
+                value |= 1u64 << UInt64(idx)
+            }
+            idx++
+        }
+        return unsafe { LLVMConstIntToPtr(LLVMConstInt(i64Type, value, 0), bitMapPtrType) }
+    }
+    return BuildBitmapGlobal(cgMod, contextHandle, name, bits, bitMapPtrType)
+}
+
+private func BuildBitmapGlobal(cgMod: CGModule, contextHandle: LLVMContextHandle, name: String,
+    bits: ArrayList<Bool>, bitMapPtrType: LLVMTypeRef): LLVMValueRef {
+    let i8Type = unsafe { LLVMInt8TypeInContext(contextHandle.raw) }
+    let i32Type = unsafe { LLVMInt32TypeInContext(contextHandle.raw) }
+    let alignedBits = AlignBitmapBits(bits.size)
+    let bodySize = alignedBits / 8
+    let fields = ArrayList<LLVMTypeRef>()
+    fields.add(i32Type)
+    var fieldIdx: Int64 = 0
+    while (fieldIdx < bodySize) {
+        fields.add(i8Type)
+        fieldIdx++
+    }
+    let bitmapType = StructTypeInContext(contextHandle.raw, fields)
+    let bitmapName = name + ".bitmap"
+    let bitmapGlobal = GetOrInsertCodeGenGlobal(cgMod, bitmapName, bitmapType)
+    if (unsafe { LLVMIsDeclaration(bitmapGlobal) } != 0) {
+        let values = ArrayList<LLVMValueRef>()
+        values.add(unsafe { LLVMConstInt(i32Type, UInt64(bodySize), 0) })
+        let bytes = BuildBitmapBytes(bits, bodySize)
+        for (byte in bytes) {
+            values.add(unsafe { LLVMConstInt(i8Type, UInt64(byte), 0) })
+        }
+        unsafe {
+            LLVMSetInitializer(bitmapGlobal, ClosureTypeInfoConstStruct(bitmapType, values))
+            LLVMSetLinkage(bitmapGlobal, LLVMLinkageValue(LLVMLinkage.LinkOnceODR))
+            LLVMSetGlobalConstant(bitmapGlobal, 1)
+        }
+    }
+    return unsafe { LLVMConstBitCast(bitmapGlobal, bitMapPtrType) }
+}
+
+private func AlignBitmapBits(size: Int64): Int64 {
+    if (size % 8 == 0) {
+        return size
+    }
+    return size + (8 - size % 8)
+}
+
+private func BuildBitmapBytes(bits: ArrayList<Bool>, bodySize: Int64): ArrayList<UInt8> {
+    let bytes = ArrayList<UInt8>()
+    var byteIdx: Int64 = 0
+    while (byteIdx < bodySize) {
+        bytes.add(0u8)
+        byteIdx++
+    }
+    var bitIdx: Int64 = 0
+    while (bitIdx < bits.size) {
+        if (bits[bitIdx]) {
+            let idx = bitIdx / 8
+            let mask = 1u64 << UInt64(bitIdx % 8)
+            bytes[idx] = UInt8(UInt64(bytes[idx]) | mask)
+        }
+        bitIdx++
+    }
+    return bytes
+}
+
 private func BuildClosureEntryFunctionType(irBuilder: IRBuilder2, funcTy: FuncType): LLVMTypeRef {
     let retTy = funcTy.GetReturnType()
     let usesSRet = LambdaUsesSRet(irBuilder, retTy)
@@ -529,7 +817,7 @@ private func BuildClosureEntryFunctionType(irBuilder: IRBuilder2, funcTy: FuncTy
         let retCGType = CGType.GetOrCreate(irBuilder.GetCGModule(), retTy)
         params.add(LambdaSRetParamType(irBuilder, retTy, retCGType))
     }
-    params.add(I8PtrType(irBuilder))
+    params.add(CGType.GetRefType(irBuilder.GetLLVMContext()))
     for (paramTy in funcTy.GetParamTypes()) {
         params.add(CGType.GetOrCreate(irBuilder.GetCGModule(), paramTy).GetLLVMType())
     }
@@ -580,9 +868,12 @@ private func LoadClosureFunctionSlot(irBuilder: IRBuilder2, closureObject: LLVMV
 
 private func LoadClosureEnvironment(irBuilder: IRBuilder2, closureObject: LLVMValueRef): LLVMValueRef {
     let payload = irBuilder.GetPayloadFromObject(CastToClosureObjectRef(irBuilder, closureObject, "closure.env.obj"))
-    let envSlot = irBuilder.CreateGEP(I8PtrType(irBuilder), payload, StaticIndices(irBuilder, [2u64]),
+    let closureType = ClosureObjectRecordType(irBuilder)
+    let closurePayload = irBuilder.CreateBitCast(payload, unsafe { LLVMPointerType(closureType, 1u32) },
+        name: "closure.env.payload")
+    let envSlot = irBuilder.CreateGEP(closureType, closurePayload, StaticIndices(irBuilder, [0u64, 2u64]),
         name: "closure.env.slot")
-    return irBuilder.CreateLoad(I8PtrType(irBuilder), envSlot, name: "closure.env")
+    return irBuilder.CallGCReadRef(CastToClosureObjectRef(irBuilder, closureObject, "closure.env.base"), envSlot)
 }
 
 private func LoadGenericClosureArg(irBuilder: IRBuilder2, boxedArg: LLVMValueRef, paramTy: Type): LLVMValueRef {
@@ -678,18 +969,6 @@ private func GenericSRetParamType(irBuilder: IRBuilder2): LLVMTypeRef {
 
 private func GenericSRetAttributeType(irBuilder: IRBuilder2): LLVMTypeRef {
     return CGType.GetRefType(irBuilder.GetLLVMContext())
-}
-
-private func HeapAllocate(irBuilder: IRBuilder2, valueType: LLVMTypeRef, name: String): LLVMValueRef {
-    let size = irBuilder.GetCGModule().GetTypeSize(valueType)
-    let mallocParamTypes = ArrayList<LLVMTypeRef>()
-    mallocParamTypes.add(I64Type(irBuilder))
-    let mallocFnTy = FunctionTypeInContext(I8PtrType(irBuilder), mallocParamTypes, false)
-    let mallocFn = irBuilder.GetCGModule().GetOrInsertFunction("malloc", mallocFnTy)
-    let args = ArrayList<LLVMValueRef>()
-    args.add(unsafe { LLVMConstInt(I64Type(irBuilder), size, 0) })
-    let raw = irBuilder.CreateCallOrInvoke(mallocFn, mallocFnTy, args, name: name + ".raw")
-    return irBuilder.CreateBitCast(raw, unsafe { LLVMPointerType(valueType, 0u32) }, name: name)
 }
 
 private func HeapAllocateClosureObject(irBuilder: IRBuilder2, valueType: LLVMTypeRef, typeInfo: LLVMValueRef,
