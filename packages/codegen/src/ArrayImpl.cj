@@ -20,6 +20,9 @@ public func GenerateLoad(irBuilder: IRBuilder2, chirExpr: Expression): LLVMValue
     let addr = irBuilder.GetCGModule().MaterializeValue(irBuilder, chirExpr.GetOperand(0))
     if (let Some(addrType) <- addr.GetCGType()) {
         if (let Some(pointerElementType) <- addrType.GetPointerElementType()) {
+            if (let Some(loaded) <- TryLoadClassFieldWithReadBarrier(irBuilder, chirExpr, addr, pointerElementType)) {
+                return loaded
+            }
             return irBuilder.CreateLoad(pointerElementType.GetLLVMType(), addr.GetRawValue(), name: "load")
         }
     }
@@ -28,6 +31,40 @@ public func GenerateLoad(irBuilder: IRBuilder2, chirExpr: Expression): LLVMValue
             addr.GetRawValue(), name: "load")
     }
     return LLVMNullValue()
+}
+
+private func TryLoadClassFieldWithReadBarrier(irBuilder: IRBuilder2, loadExpr: Expression, addr: CGValue,
+    elementType: CGType): Option<LLVMValueRef> {
+    if (!ShouldUseClassFieldReadBarrier(elementType) || !IsAddressSpacePointer(addr.GetRawValue(), 1u32)) {
+        return None
+    }
+    let local = (loadExpr.GetOperand(0) as LocalVar) ?? return None
+    let ownerExpr = local.GetExpr() ?? return None
+    let base = if (let Some(elementRef) <- (ownerExpr as GetElementRef)) {
+        elementRef.GetLocation()
+    } else if (let Some(elementByName) <- (ownerExpr as GetElementByName)) {
+        elementByName.GetLocation()
+    } else {
+        return None
+    }
+    let baseValue = irBuilder.GetCGModule().MaterializeValue(irBuilder, base)
+    if (let Some(baseCGType) <- baseValue.GetCGType()) {
+        if (!baseCGType.GetOriginal().StripAllRefs().IsClass()) {
+            return None
+        }
+    } else {
+        return None
+    }
+    if (!IsAddressSpacePointer(baseValue.GetRawValue(), 1u32)) {
+        return None
+    }
+    let raw = irBuilder.CallGCReadRef(baseValue.GetRawValue(), addr.GetRawValue())
+    return Some(irBuilder.CreateBitCast(raw, elementType.GetLLVMType(), name: "load.gcread.cast"))
+}
+
+private func ShouldUseClassFieldReadBarrier(elementType: CGType): Bool {
+    let stripped = elementType.GetOriginal().StripAllRefs()
+    return stripped.IsGeneric() || stripped.IsReferenceType() || elementType.GetSize().isNone()
 }
 
 public func GenerateRawArrayAllocate(irBuilder: IRBuilder2, chirExpr: Expression): LLVMValueRef {
@@ -282,7 +319,32 @@ private func StoreElementValue(irBuilder: IRBuilder2, baseValue: CGValue, elemen
                 elementPtr)
         }
     }
+    if (ShouldUseObjectFieldWriteBarrier(baseValue, elementValue, elementPtr)) {
+        return irBuilder.CallGCWrite(elementValue.GetRawValue(), baseValue.GetRawValue(), elementPtr)
+    }
     return irBuilder.CreateStore(elementValue.GetRawValue(), elementPtr)
+}
+
+private func ShouldUseObjectFieldWriteBarrier(baseValue: CGValue, elementValue: CGValue,
+    elementPtr: LLVMValueRef): Bool {
+    if (!IsAddressSpacePointer(baseValue.GetRawValue(), 1u32) || !IsAddressSpacePointer(elementPtr, 1u32)) {
+        return false
+    }
+    if (let Some(elementCGType) <- elementValue.GetCGType()) {
+        if (elementCGType.IsReference()) {
+            return true
+        }
+        if (elementCGType.GetSize().isNone()) {
+            return true
+        }
+    }
+    return false
+}
+
+private func IsAddressSpacePointer(value: LLVMValueRef, addressSpace: UInt32): Bool {
+    let rawTy = unsafe { LLVMTypeOf(value) }
+    return !rawTy.isNull() && unsafe { LLVMGetTypeKind(rawTy) } == 12 &&
+        unsafe { LLVMGetPointerAddressSpace(rawTy) } == addressSpace
 }
 
 private func StoreRawArrayElement(irBuilder: IRBuilder2, rawArrayValue: LLVMValueRef, elementCGType: CGType,

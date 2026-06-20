@@ -1,7 +1,9 @@
 package cangjie_compiler::frontend
 
 import std.collection.*
+import cangjie_compiler::ast.AnnotationKind as AstAnnotationKind
 import cangjie_compiler::basic.CANGJIE_VERSION
+import cangjie_compiler::basic.Linkage
 import cangjie_compiler::mangle.BaseMangler as RealBaseMangler
 import cangjie_compiler::modules.{FlatBufferBuilder, FlatBufferOffset}
 import cangjie_compiler::option.OptimizationLevel
@@ -60,7 +62,6 @@ private class FrontendCjoFlatBufferWriter {
     public func Write(pkg: Package): Array<UInt8> {
         builder.Clear()
         currentPackageName = pkg.fullPackageName
-        mangler.MangleExportIds(pkg)
         SaveFiles(pkg)
         SaveTopLevelDecls(pkg)
 
@@ -206,7 +207,16 @@ private class FrontendCjoFlatBufferWriter {
         if ((decl as FuncParam).isSome()) {
             return false
         }
-        return (decl as VarDecl).isSome()
+        if ((decl as VarDecl).isSome()) {
+            return true
+        }
+        if ((decl as ClassDecl).isSome()) {
+            return true
+        }
+        if ((decl as InterfaceDecl).isSome()) {
+            return true
+        }
+        return (decl as EnumDecl).isSome()
     }
 
     private func SaveDeclIndex(decl: Decl, isTopLevel: Bool): UInt32 {
@@ -242,15 +252,15 @@ private class FrontendCjoFlatBufferWriter {
         if (completedDeclKeys.contains(key)) {
             return
         }
-        EnsureNoGenericDecl(decl)
         let fullPkgName = builder.CreateString(if (decl.fullPackageName.isEmpty()) { currentPackageName } else {
             decl.fullPackageName
         })
         let identifier = builder.CreateString(decl.identifier.Val())
-        let mangledName = builder.CreateString(EnsureMangledName(decl))
+        let mangledName = builder.CreateString(SerializedMangledName(decl))
         let exportId = builder.CreateString(EnsureExportId(decl))
         let rawMangle = builder.CreateString(decl.rawMangleName)
-        let genericDecl = if ((decl as FuncDecl).isSome()) { CreateInvalidFullId() } else { 0u32 }
+        let generic = SaveGeneric(decl)
+        let genericDecl = if (ShouldEmitGenericDecl(decl)) { SaveGenericDeclIndex(decl) } else { 0u32 }
         let attributes = builder.CreateVectorU64(PackedAttributes(decl))
         let annotations = builder.CreateVectorOffsets(ArrayList<FlatBufferOffset>())
         let typeIndex = SaveDeclType(decl)
@@ -276,6 +286,7 @@ private class FrontendCjoFlatBufferWriter {
         builder.AddOffset(7, identifier)
         builder.AddStruct(6, end, 4)
         builder.AddStruct(5, begin, 4)
+        builder.AddOffset(4, generic)
         builder.AddOffset(3, genericDecl)
         builder.AddOffset(2, fullPkgName)
         builder.AddBool(1, isTopLevel)
@@ -313,8 +324,23 @@ private class FrontendCjoFlatBufferWriter {
         if (let Some(funcDecl) <- (decl as FuncDecl)) {
             return SaveFuncInfo(funcDecl)
         }
+        if (let Some(propDecl) <- (decl as PropDecl)) {
+            return SavePropInfo(propDecl)
+        }
         if (let Some(varDecl) <- (decl as VarDecl)) {
             return SaveVarInfo(varDecl)
+        }
+        if (let Some(classDecl) <- (decl as ClassDecl)) {
+            return SaveClassInfo(classDecl)
+        }
+        if (let Some(interfaceDecl) <- (decl as InterfaceDecl)) {
+            return SaveInterfaceInfo(interfaceDecl)
+        }
+        if (let Some(enumDecl) <- (decl as EnumDecl)) {
+            return SaveEnumInfo(enumDecl)
+        }
+        if ((decl as GenericParamDecl).isSome()) {
+            return 0u32
         }
         throw IllegalArgumentException("not yet serialized in faithful .cjo writer: " + ASTKindName(decl.astKind))
     }
@@ -336,6 +362,12 @@ private class FrontendCjoFlatBufferWriter {
             throw IllegalArgumentException("not yet serialized in faithful .cjo writer: function without body signature")
         }
         let body = funcDecl.funcBody.getOrThrow()
+        if (funcDecl.TestAttr(Attribute.GENERIC_INSTANTIATED) && funcDecl.TestAttr(Attribute.GENERIC)) {
+            let emptyParamLists = builder.CreateVectorOffsets(ArrayList<FlatBufferOffset>())
+            builder.StartTable(5)
+            builder.AddOffset(0, emptyParamLists)
+            return builder.EndTable()
+        }
         let paramLists = ArrayList<FlatBufferOffset>()
         for (paramList in body.paramLists) {
             paramLists.add(SaveFuncParamList(funcDecl, paramList))
@@ -356,7 +388,7 @@ private class FrontendCjoFlatBufferWriter {
             if (param.fullPackageName.isEmpty()) {
                 param.fullPackageName = currentPackageName
             }
-            paramOwnerMangles[DeclKey(param)] = EnsureMangledName(funcDecl)
+            paramOwnerMangles[DeclKey(param)] = ExistingMangledName(funcDecl)
             params.add(SaveDeclIndex(param, false))
             if (let Some(desugar) <- param.desugarDecl) {
                 if (desugar.fullPackageName.isEmpty()) {
@@ -389,6 +421,25 @@ private class FrontendCjoFlatBufferWriter {
         return SaveType(PrimitiveTy(TypeKind.TYPE_UNIT))
     }
 
+    private func SavePropInfo(propDecl: PropDecl): FlatBufferOffset {
+        let setters = ArrayList<UInt32>()
+        for (setter in propDecl.setters) {
+            setters.add(SaveDeclIndex(setter, false))
+        }
+        let getters = ArrayList<UInt32>()
+        for (getter in propDecl.getters) {
+            getters.add(SaveDeclIndex(getter, false))
+        }
+        let setterVec = builder.CreateVectorU32(setters)
+        let getterVec = builder.CreateVectorU32(getters)
+        builder.StartTable(4)
+        builder.AddOffset(3, getterVec)
+        builder.AddOffset(2, setterVec)
+        builder.AddBool(1, propDecl.isVar)
+        builder.AddBool(0, propDecl.isConst)
+        return builder.EndTable()
+    }
+
     private func SaveVarInfo(varDecl: VarDecl): FlatBufferOffset {
         builder.StartTable(4)
         builder.AddBool(2, varDecl.isMemberParam)
@@ -402,6 +453,217 @@ private class FrontendCjoFlatBufferWriter {
         builder.AddBool(1, param.isMemberParam)
         builder.AddBool(0, param.isNamedParam)
         return builder.EndTable()
+    }
+
+    private func SaveClassInfo(classDecl: ClassDecl): FlatBufferOffset {
+        let inheritedTypes = SaveInheritedTypes(classDecl)
+        let body = SaveBody(classDecl)
+        // ModuleFormat.fbs ClassInfo fields: 0 inheritedTypes, 1 body, 3 isAnno,
+        // 4/6 annotation target bytes, 5 runtimeVisible.
+        builder.StartTable(7)
+        if (classDecl.TestAttr(Attribute.IS_ANNOTATION)) {
+            builder.AddBool(3, true)
+            for (annotation in classDecl.annotations) {
+                if (annotation.kind == AstAnnotationKind.ANNOTATION) {
+                    AddClassAnnotationTargets(annotation.target)
+                    builder.AddBool(5, annotation.runtimeVisible)
+                }
+            }
+        }
+        builder.AddOffset(1, body)
+        builder.AddOffset(0, inheritedTypes)
+        return builder.EndTable()
+    }
+
+    private func SaveInterfaceInfo(interfaceDecl: InterfaceDecl): FlatBufferOffset {
+        let inheritedTypes = SaveInheritedTypes(interfaceDecl)
+        let body = SaveBody(interfaceDecl)
+        // ModuleFormat.fbs InterfaceInfo fields: 0 inheritedTypes, 1 body.
+        builder.StartTable(2)
+        builder.AddOffset(1, body)
+        builder.AddOffset(0, inheritedTypes)
+        return builder.EndTable()
+    }
+
+    private func SaveEnumInfo(enumDecl: EnumDecl): FlatBufferOffset {
+        let inheritedTypes = SaveInheritedTypes(enumDecl)
+        let body = SaveBody(enumDecl)
+        let ellipsisPos = PositionBytes(enumDecl.ellipsisPos)
+        // ModuleFormat.fbs EnumInfo fields: 0 inheritedTypes, 1 body,
+        // 3 hasArguments, 4 nonExhaustive/hasEllipsis, 5 ellipsisPos.
+        builder.StartTable(6)
+        builder.AddStruct(5, ellipsisPos, 4)
+        builder.AddBool(4, enumDecl.hasEllipsis)
+        builder.AddBool(3, enumDecl.hasArguments)
+        builder.AddOffset(1, body)
+        builder.AddOffset(0, inheritedTypes)
+        return builder.EndTable()
+    }
+
+    private func SaveInheritedTypes(decl: InheritableDecl): FlatBufferOffset {
+        let types = ArrayList<UInt32>()
+        for (inheritedType in decl.inheritedTypes) {
+            if (let Some(ty) <- inheritedType.GetTy()) {
+                types.add(SaveType(ty))
+            } else {
+                throw IllegalArgumentException("not yet serialized in faithful .cjo writer: inherited type without semantic type")
+            }
+        }
+        return builder.CreateVectorU32(types)
+    }
+
+    private func SaveBody(decl: InheritableDecl): FlatBufferOffset {
+        let body = ArrayList<UInt32>()
+        let addedPlatformImpls = HashSet<String>()
+        if (decl.TestAttr(Attribute.PRIVATE)) {
+            return builder.CreateVectorU32(body)
+        }
+        for (member in decl.GetMemberDeclPtrs()) {
+            let memberKey = DeclKey(member)
+            if (member.TestAttr(Attribute.SPECIFIC) && addedPlatformImpls.contains(memberKey)) {
+                continue
+            }
+            if (let Some(specific) <- member.specificImplementation) {
+                addedPlatformImpls.add(DeclKey(specific))
+                if (ShouldExportMember(decl, specific)) {
+                    body.add(SaveDeclIndex(specific, false))
+                }
+            }
+            if (ShouldExportMember(decl, member)) {
+                body.add(SaveDeclIndex(member, false))
+            }
+        }
+        return builder.CreateVectorU32(body)
+    }
+
+    private func ShouldExportMember(parent: InheritableDecl, member: Decl): Bool {
+        let isInstMemberVar = member.astKind == ASTKind.VAR_DECL && !member.TestAttr(Attribute.STATIC)
+        if (member.doNotExport || member.astKind == ASTKind.VAR_WITH_PATTERN_DECL || !member.IsExportedDecl()) {
+            return false
+        }
+        if (!parent.TestAttr(Attribute.COMMON) && !isInstMemberVar && member.linkage == Linkage.INTERNAL) {
+            return false
+        }
+        return true
+    }
+
+    private func AddClassAnnotationTargets(targets: UInt16): Unit {
+        if (targets == 0xffffu16) {
+            builder.AddU8(4, 0xffu8)
+            return
+        }
+        let anno2 = targets & 0x0180u16
+        if (anno2 != 0u16) {
+            builder.AddU8(6, UInt8(anno2 >> 7))
+            builder.AddU8(4, UInt8(targets & 0x007fu16))
+            return
+        }
+        builder.AddU8(4, UInt8(targets))
+    }
+
+    private func SaveGeneric(decl: Decl): FlatBufferOffset {
+        if (ShouldIgnoreGeneric(decl)) {
+            return 0u32
+        }
+        if (let None <- decl.GetGeneric()) {
+            return 0u32
+        }
+        let generic = decl.GetGeneric().getOrThrow()
+        let typeParameters = ArrayList<UInt32>()
+        for (param in generic.typeParameters) {
+            if (param.fullPackageName.isEmpty()) {
+                param.fullPackageName = currentPackageName
+            }
+            var declToSave: Decl = param
+            if (let Some(paramTy) <- param.GetTy()) {
+                if (let Some(gty) <- (paramTy as GenericsTy)) {
+                    if (let Some(outer) <- param.outerDecl) {
+                        if (!IsGlobalOrMember(outer)) {
+                            if (let Some(gtyDecl) <- gty.decl) {
+                                declToSave = gtyDecl
+                            }
+                        }
+                    }
+                }
+            }
+            typeParameters.add(SaveDeclIndex(declToSave, false))
+        }
+        let constraints = ArrayList<FlatBufferOffset>()
+        for (constraint in generic.genericConstraints) {
+            constraints.add(SaveGenericConstraint(constraint))
+        }
+        let typeParamVec = builder.CreateVectorU32(typeParameters)
+        let constraintVec = builder.CreateVectorOffsets(constraints)
+        // ModuleFormat.fbs Generic fields: 0 typeParameters, 1 genericConstraints.
+        builder.StartTable(2)
+        builder.AddOffset(1, constraintVec)
+        builder.AddOffset(0, typeParamVec)
+        return builder.EndTable()
+    }
+
+    private func SaveGenericConstraint(constraint: GenericConstraint): FlatBufferOffset {
+        let uppers = ArrayList<UInt32>()
+        for (upper in constraint.upperBounds) {
+            if (let Some(upperTy) <- upper.GetTy()) {
+                uppers.add(SaveType(upperTy))
+            } else {
+                throw IllegalArgumentException("not yet serialized in faithful .cjo writer: generic constraint upper bound without semantic type")
+            }
+        }
+        let upperVec = builder.CreateVectorU32(uppers)
+        let typeIndex = if (let Some(refType) <- constraint.refType) {
+            if (let Some(typeTy) <- refType.GetTy()) {
+                SaveType(typeTy)
+            } else {
+                throw IllegalArgumentException("not yet serialized in faithful .cjo writer: generic constraint type without semantic type")
+            }
+        } else {
+            throw IllegalArgumentException("not yet serialized in faithful .cjo writer: generic constraint without reference type")
+        }
+        let begin = PositionBytes(constraint.begin)
+        let end = PositionBytes(constraint.end)
+        // ModuleFormat.fbs Constraint fields: 0 begin, 1 end, 2 type, 3 uppers, 4 implicit.
+        builder.StartTable(5)
+        builder.AddBool(4, constraint.isImplicitlyIntroduced)
+        builder.AddOffset(3, upperVec)
+        builder.AddU32(2, typeIndex)
+        builder.AddStruct(1, end, 4)
+        builder.AddStruct(0, begin, 4)
+        return builder.EndTable()
+    }
+
+    private func ShouldIgnoreGeneric(decl: Decl): Bool {
+        if (decl.TestAnyAttr(Attribute.ENUM_CONSTRUCTOR, Attribute.CONSTRUCTOR)) {
+            return true
+        }
+        return decl.TestAttr(Attribute.GENERIC_INSTANTIATED) && decl.TestAttr(Attribute.GENERIC)
+    }
+
+    private func ShouldEmitGenericDecl(decl: Decl): Bool {
+        return (decl as FuncDecl).isSome() || (decl as ClassDecl).isSome() || (decl as InterfaceDecl).isSome() ||
+            (decl as EnumDecl).isSome()
+    }
+
+    private func SaveGenericDeclIndex(decl: Decl): FlatBufferOffset {
+        if (IsFullInstantiatedDecl(decl)) {
+            if (let Some(genericDecl) <- decl.genericDecl) {
+                return CreateFullIdForDecl(genericDecl)
+            }
+        }
+        if (decl.IsMemberDecl()) {
+            if (let Some(outer) <- decl.outerDecl) {
+                if (IsFullInstantiatedDecl(outer)) {
+                    if (let Some(genericDecl2) <- decl.genericDecl) {
+                        return CreateFullIdForDecl(genericDecl2)
+                    }
+                }
+            }
+        }
+        return CreateInvalidFullId()
+    }
+
+    private func IsFullInstantiatedDecl(decl: Decl): Bool {
+        return decl.TestAttr(Attribute.GENERIC_INSTANTIATED) && !decl.TestAttr(Attribute.GENERIC)
     }
 
     private func SaveType(ty: Ty): UInt32 {
@@ -443,6 +705,9 @@ private class FrontendCjoFlatBufferWriter {
             }
             infoType = 4u8
             info = SaveArrayTyInfo(varrayTy.size)
+        } else if (let Some(genericTy) <- (ty as GenericsTy)) {
+            infoType = 3u8
+            info = SaveGenericTyInfo(genericTy)
         } else if (IsCompositeType(ty)) {
             for (arg3 in ty.typeArgs) {
                 typeArgs.add(SaveType(arg3))
@@ -475,6 +740,41 @@ private class FrontendCjoFlatBufferWriter {
         return builder.EndTable()
     }
 
+    private func SaveGenericTyInfo(genericTy: GenericsTy): FlatBufferOffset {
+        if (let None <- genericTy.decl) {
+            throw IllegalArgumentException("not yet serialized in faithful .cjo writer: generic type without declaration " +
+                genericTy.String())
+        }
+        let decl = CreateFullIdForDecl(genericTy.decl.getOrThrow())
+        let uppers = SaveSortedUpperBounds(genericTy)
+        let upperVec = builder.CreateVectorU32(uppers)
+        // ModuleFormat.fbs GenericTyInfo fields: 0 declPtr, 1 upperBounds.
+        builder.StartTable(2)
+        builder.AddOffset(1, upperVec)
+        builder.AddOffset(0, decl)
+        return builder.EndTable()
+    }
+
+    private func SaveSortedUpperBounds(genericTy: GenericsTy): ArrayList<UInt32> {
+        let sorted = ArrayList<Ty>()
+        for (upper in genericTy.upperBounds) {
+            InsertTypeByString(sorted, upper)
+        }
+        let out = ArrayList<UInt32>()
+        for (upper2 in sorted) {
+            out.add(SaveType(upper2))
+        }
+        return out
+    }
+
+    private func InsertTypeByString(values: ArrayList<Ty>, value: Ty): Unit {
+        var index: Int64 = 0
+        while (index < values.size && values[index].String() <= value.String()) {
+            index++
+        }
+        values.add(value, at: index)
+    }
+
     private func SaveCompositeTyInfo(ty: Ty): FlatBufferOffset {
         if (let None <- Ty.GetDeclPtrOfTy(Some(ty))) {
             throw IllegalArgumentException("not yet serialized in faithful .cjo writer: composite type without declaration " +
@@ -482,6 +782,7 @@ private class FrontendCjoFlatBufferWriter {
         }
         let decl = Ty.GetDeclPtrOfTy(Some(ty)).getOrThrow()
         let fullId = CreateFullIdForDecl(decl)
+        // ModuleFormat.fbs CompositeTyInfo fields: 0 declPtr, 1 isThisTy.
         builder.StartTable(2)
         builder.AddBool(1, (ty as ClassThisTy).isSome())
         builder.AddOffset(0, fullId)
@@ -560,19 +861,6 @@ private class FrontendCjoFlatBufferWriter {
         return words
     }
 
-    private func EnsureNoGenericDecl(decl: Decl): Unit {
-        if (decl.GetGenericsCount() > 0) {
-            throw IllegalArgumentException("not yet serialized in faithful .cjo writer: generic " +
-                ASTKindName(decl.astKind))
-        }
-        if (let Some(generic) <- decl.GetGeneric()) {
-            if (!generic.typeParameters.isEmpty() || !generic.genericConstraints.isEmpty()) {
-                throw IllegalArgumentException("not yet serialized in faithful .cjo writer: generic " +
-                    ASTKindName(decl.astKind))
-            }
-        }
-    }
-
     private func IsSupportedSerializedDecl(decl: Decl): Bool {
         if ((decl as FuncParam).isSome()) {
             return true
@@ -580,8 +868,52 @@ private class FrontendCjoFlatBufferWriter {
         if ((decl as FuncDecl).isSome()) {
             return true
         }
+        if ((decl as PropDecl).isSome()) {
+            return true
+        }
         if ((decl as VarDecl).isSome()) {
             return true
+        }
+        if ((decl as ClassDecl).isSome()) {
+            return true
+        }
+        if ((decl as InterfaceDecl).isSome()) {
+            return true
+        }
+        if ((decl as EnumDecl).isSome()) {
+            return true
+        }
+        return (decl as GenericParamDecl).isSome()
+    }
+
+    private func SerializedMangledName(decl: Decl): String {
+        if (ShouldOmitMangledName(decl)) {
+            return ""
+        }
+        return EnsureMangledName(decl)
+    }
+
+    private func ShouldOmitMangledName(decl: Decl): Bool {
+        if (IsInDeclWithAttribute(decl, Attribute.GENERIC)) {
+            return true
+        }
+        if ((decl as GenericParamDecl).isSome() || (decl as PropDecl).isSome() ||
+            (decl as TypeAliasDecl).isSome() || (decl as ExtendDecl).isSome()) {
+            return true
+        }
+        if ((decl as VarDecl).isSome() && !decl.TestAnyAttr(Attribute.STATIC, Attribute.GLOBAL)) {
+            return true
+        }
+        return false
+    }
+
+    private func IsInDeclWithAttribute(decl: Decl, attr: Attribute): Bool {
+        var current: Option<Decl> = Some(decl)
+        while (let Some(value) <- current) {
+            if (value.TestAttr(attr)) {
+                return true
+            }
+            current = value.outerDecl
         }
         return false
     }
@@ -596,6 +928,7 @@ private class FrontendCjoFlatBufferWriter {
                     return ownerMangle + "E" + param.identifier.Val().size.toString() + param.identifier.Val() + "E"
                 }
             }
+            return ""
         }
         if (!decl.rawMangleName.isEmpty()) {
             return decl.rawMangleName
@@ -603,6 +936,19 @@ private class FrontendCjoFlatBufferWriter {
         if (IsSupportedSerializedDecl(decl)) {
             decl.mangledName = mangler.Mangle(decl)
             return decl.mangledName
+        }
+        return ""
+    }
+
+    private func ExistingMangledName(decl: Decl): String {
+        if (!decl.mangledName.isEmpty()) {
+            return decl.mangledName
+        }
+        if (!decl.rawMangleName.isEmpty()) {
+            return decl.rawMangleName
+        }
+        if (!decl.exportId.isEmpty()) {
+            return decl.exportId
         }
         return ""
     }
@@ -615,7 +961,7 @@ private class FrontendCjoFlatBufferWriter {
             return decl.exportId
         }
         if (decl.TestAttr(Attribute.GLOBAL) || decl.IsNominalDecl()) {
-            decl.exportId = mangler.MangleExportId(decl)
+            decl.exportId = if ((decl as FuncDecl).isSome()) { mangler.MangleExportId(decl) } else { mangler.Mangle(decl) }
             return decl.exportId
         }
         if (!decl.mangledName.isEmpty()) {
@@ -688,13 +1034,22 @@ private func CjoVersionBytes(): ArrayList<UInt8> {
 }
 
 private func DeclKindToFlat(decl: Decl): UInt16 {
+    if ((decl as ClassDecl).isSome()) { return 1u16 }
+    if ((decl as InterfaceDecl).isSome()) { return 2u16 }
     if ((decl as FuncDecl).isSome()) { return 3u16 }
+    if ((decl as PropDecl).isSome()) { return 4u16 }
     if ((decl as FuncParam).isSome()) { return 7u16 }
+    if ((decl as GenericParamDecl).isSome()) { return 12u16 }
     if ((decl as VarDecl).isSome()) { return 5u16 }
+    if ((decl as EnumDecl).isSome()) { return 9u16 }
     return 0u16
 }
 
 private func DeclInfoTypeToFlat(decl: Decl): UInt8 {
+    if ((decl as ClassDecl).isSome()) { return 1u8 }
+    if ((decl as InterfaceDecl).isSome()) { return 2u8 }
+    if ((decl as EnumDecl).isSome()) { return 4u8 }
+    if ((decl as PropDecl).isSome()) { return 6u8 }
     if ((decl as FuncDecl).isSome()) { return 10u8 }
     if ((decl as FuncParam).isSome()) { return 9u8 }
     if ((decl as VarDecl).isSome()) { return 7u8 }

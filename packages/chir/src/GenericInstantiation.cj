@@ -362,10 +362,16 @@ private class GenericInstantiationPass {
         if (fn.GetBody().isNone() || fn.GetGenericDecl().isSome()) {
             return false
         }
+        if (fn.TestAttr(Attribute.PUBLIC) || fn.TestAttr(Attribute.PROTECTED)) {
+            return false
+        }
         if (!fn.GetGenericTypeParams().isEmpty()) {
             return true
         }
         if (let Some(parentDef) <- fn.GetParentCustomTypeDef()) {
+            if (parentDef.TestAttr(Attribute.PUBLIC) || parentDef.TestAttr(Attribute.PROTECTED)) {
+                return false
+            }
             return !parentDef.GetGenericTypeParams().isEmpty()
         }
         return false

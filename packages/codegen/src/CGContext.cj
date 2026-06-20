@@ -69,6 +69,7 @@ public class CGContext {
     private let globalsOfCompileUnit: HashSet<String> = HashSet<String>()
     private let staticGINames: HashSet<String> = HashSet<String>()
     private let reflectGeneratedStaticGINames: ArrayList<String> = ArrayList<String>()
+    private let genericTypeUpperBoundKeys: HashMap<String, ArrayList<String>> = HashMap<String, ArrayList<String>>()
     private let cjStrings: HashMap<String, String> = HashMap<String, String>()
     private let codegenAddedFuncsOrVars: HashMap<String, HashSet<String>> = HashMap<String, HashSet<String>>()
     private let llvmUsedGVs: HashSet<String> = HashSet<String>()
@@ -91,6 +92,7 @@ public class CGContext {
         globalsOfCompileUnit.clear()
         staticGINames.clear()
         reflectGeneratedStaticGINames.clear()
+        genericTypeUpperBoundKeys.clear()
         cjStrings.clear()
         codegenAddedFuncsOrVars.clear()
         llvmUsedGVs.clear()
@@ -216,6 +218,38 @@ public class CGContext {
 
     public func GetReflectGeneratedStaticGINames(): ArrayList<String> {
         return reflectGeneratedStaticGINames
+    }
+
+    public func GetGenericTypeUniqueName(genericTypeName: String, upperBounds: ArrayList<Type>): String {
+        let upperBoundsKey = GenericUpperBoundsKey(upperBounds)
+        if (let Some(keys) <- genericTypeUpperBoundKeys.get(genericTypeName)) {
+            var idx: Int64 = 0
+            while (idx < keys.size) {
+                if (keys[idx] == upperBoundsKey) {
+                    return genericTypeName + "." + idx.toString()
+                }
+                idx++
+            }
+            keys.add(upperBoundsKey)
+            return genericTypeName + "." + (keys.size - 1).toString()
+        }
+        let keys = ArrayList<String>()
+        keys.add(upperBoundsKey)
+        genericTypeUpperBoundKeys[genericTypeName] = keys
+        return genericTypeName + ".0"
+    }
+
+    private func GenericUpperBoundsKey(upperBounds: ArrayList<Type>): String {
+        var out = ""
+        var idx: Int64 = 0
+        for (upperBound in upperBounds) {
+            if (idx > 0) {
+                out += ";"
+            }
+            out += CGType.GetNameOfTypeInfoGV(upperBound.StripAllRefs())
+            idx++
+        }
+        return out
     }
 
     public func AddDependentPartialOrderOfTypes(smaller: LLVMValueRef, bigger: LLVMValueRef): Unit {

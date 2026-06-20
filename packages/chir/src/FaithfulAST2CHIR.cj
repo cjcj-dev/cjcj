@@ -1561,14 +1561,14 @@ public class FaithfulAST2CHIR {
         if (let Some(name) <- EffectiveDefaultParamMangledName(decl)) {
             return name
         }
-        if (decl.IsMemberDecl() && !decl.TestAttr(AstAttribute.IMPORTED)) {
-            return EffectiveMemberMangledName(decl)
-        }
         if (!decl.mangledName.isEmpty()) {
             return decl.mangledName
         }
         if (!decl.rawMangleName.isEmpty()) {
             return decl.rawMangleName
+        }
+        if (decl.IsMemberDecl() && !decl.TestAttr(AstAttribute.IMPORTED)) {
+            return EffectiveMemberMangledName(decl)
         }
         return decl.identifier.Val()
     }
