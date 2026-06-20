@@ -496,6 +496,7 @@ private class CjoSignatureMaterializer {
             }
             idx++
         }
+        MaterializeCoreThrowableInheritance()
     }
 
     private func InferSignatureMetadata(strings: ArrayList<String>): Unit {
@@ -1211,6 +1212,62 @@ private class CjoSignatureMaterializer {
         nominalDecls[name] = decl
         file.decls.add(decl)
         return decl
+    }
+
+    private func MaterializeCoreThrowableInheritance(): Unit {
+        if (packageName != "std.core") {
+            return
+        }
+        let exceptionDecl = FindMaterializedNominal("Exception")
+        let errorDecl = FindMaterializedNominal("Error")
+        for (decl in file.decls) {
+            if (let Some(classDecl) <- (decl as ClassDecl)) {
+                let name = classDecl.identifier.Val()
+                if (name != "Exception" && name.endsWith("Exception")) {
+                    if (let Some(base) <- exceptionDecl) {
+                        AddImportedSuperClass(classDecl, base)
+                    }
+                } else if (name != "Error" && name.endsWith("Error")) {
+                    if (let Some(base2) <- errorDecl) {
+                        AddImportedSuperClass(classDecl, base2)
+                    }
+                }
+            }
+        }
+    }
+
+    private func FindMaterializedNominal(name: String): Option<Decl> {
+        if (let Some(decl) <- nominalDecls.get(name)) {
+            return Some(decl)
+        }
+        for (decl in file.decls) {
+            if (decl.identifier.Val() == name && decl.IsNominalDecl()) {
+                return Some(decl)
+            }
+        }
+        return None
+    }
+
+    private func AddImportedSuperClass(classDecl: ClassDecl, baseDecl: Decl): Unit {
+        if (HasInheritedClass(classDecl, baseDecl)) {
+            return
+        }
+        if (let Some(baseTy) <- baseDecl.GetTy()) {
+            classDecl.inheritedTypes.add(TypeNodeForTy(baseTy))
+        }
+    }
+
+    private func HasInheritedClass(classDecl: ClassDecl, baseDecl: Decl): Bool {
+        for (typeNode in classDecl.inheritedTypes) {
+            if (let Some(inheritedTy) <- typeNode.GetTy()) {
+                if (let Some(inheritedDecl) <- Ty.GetDeclPtrOfTy(Some(inheritedTy))) {
+                    if (SameDecl(inheritedDecl, baseDecl)) {
+                        return true
+                    }
+                }
+            }
+        }
+        return false
     }
 
     private func SetImportedMangle(decl: Decl, mangle: String): Unit {
