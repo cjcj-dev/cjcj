@@ -2338,7 +2338,7 @@ public class TypeChecker {
         if (let Some(callExpr) <- (expr as CallExpr)) {
             SynthesizeCallChildren(ctx, callExpr)
             return FinishSynthesize(ctx, callExpr, SynCallExprWithArgChecker(impl.typeManager, callExpr,
-                Some({ target: Ty, arg: FuncArg => CheckCallArgFromContext(ctx, target, arg) })))
+                Some({ target: Ty, arg: FuncArg => CheckCallArgFromContext(ctx, target, arg) }), diag: impl.diag))
         }
         if (let Some(ifExpr) <- (expr as IfExpr)) {
             SynthesizeIfChildren(ctx, ifExpr)
@@ -2496,7 +2496,7 @@ public class TypeChecker {
         }
         if (let Some(callExpr) <- (expr as CallExpr)) {
             SynthesizeCallChildren(ctx, callExpr)
-            return FinishCheck(ctx, callExpr, ChkCallExprWithArgChecker(impl.typeManager, None, Some(target),
+            return FinishCheck(ctx, callExpr, ChkCallExprWithArgChecker(impl.typeManager, impl.diag, Some(target),
                 callExpr, Some({ paramTy: Ty, arg: FuncArg => CheckCallArgFromContext(ctx, paramTy, arg) })))
         }
         if (let Some(ifExpr) <- (expr as IfExpr)) {
