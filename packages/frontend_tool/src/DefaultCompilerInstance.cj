@@ -246,7 +246,28 @@ public open class DefaultCompilerInstance {
         } else {
             ""
         }
-        let key = pkgName + ownerKey + "|" + ASTKindName(decl.astKind) + "|" + decl.identifier.Val() + "|" +
+        let defaultOwnerKey = if (let Some(funcDecl) <- (decl as FuncDecl)) {
+            if (funcDecl.TestAttr(Attribute.HAS_INITIAL)) {
+                if (let Some(owner) <- funcDecl.ownerFunc) {
+                    let ownerIdentity = if (!owner.rawMangleName.isEmpty()) {
+                        owner.rawMangleName
+                    } else if (!owner.mangledName.isEmpty()) {
+                        owner.mangledName
+                    } else {
+                        owner.identifier.Val() + "|" + ASTKindName(owner.astKind) + "|" +
+                            owner.begin.line.toString() + ":" + owner.begin.column.toString()
+                    }
+                    "|default-owner|" + ownerIdentity
+                } else {
+                    ""
+                }
+            } else {
+                ""
+            }
+        } else {
+            ""
+        }
+        let key = pkgName + ownerKey + defaultOwnerKey + "|" + ASTKindName(decl.astKind) + "|" + decl.identifier.Val() + "|" +
             decl.begin.line.toString() + ":" + decl.begin.column.toString()
         if (seen.contains(key)) {
             return
@@ -270,6 +291,13 @@ public open class DefaultCompilerInstance {
                     for (typeParam2 in bodyGeneric.typeParameters) {
                         typeParam2.outerDecl = Some(decl)
                         PreMangleDeclTree(mangler, pkgName, typeParam2, seen)
+                    }
+                }
+                for (paramList in body.paramLists) {
+                    for (param in paramList.params) {
+                        if (let Some(desugarDecl) <- param.desugarDecl) {
+                            PreMangleDeclTree(mangler, pkgName, desugarDecl, seen)
+                        }
                     }
                 }
             }

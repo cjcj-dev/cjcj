@@ -517,6 +517,7 @@ public class TypeChecker {
         SeedImportedPackageDecls(ctx)
         AddCurFile(pkg)
         AddDefaultFunction(pkg)
+        AddDefaultParamFunctions(pkg)
         Collector().BuildSymbolTable(ctx, pkg)
         impl.WarmupCache(ctx)
     }
@@ -569,6 +570,102 @@ public class TypeChecker {
             for (member in extendDecl.members) {
                 AddDefaultFunctionForDecl(member)
             }
+        }
+    }
+
+    private func AddDefaultParamFunctions(pkg: Package): Unit {
+        for (file in pkg.files) {
+            for (decl in file.decls) {
+                let walker = Walker(decl, visitPre: { node: Node =>
+                    if (let Some(funcDecl) <- (node as FuncDecl)) {
+                        GetSingleParamFunc(funcDecl)
+                        return VisitAction.WALK_CHILDREN
+                    }
+                    if (node.astKind == ASTKind.FUNC_PARAM) {
+                        return VisitAction.SKIP_CHILDREN
+                    }
+                    VisitAction.WALK_CHILDREN
+                })
+                let _ = walker.Walk()
+            }
+        }
+    }
+
+    private func MakeDefaultParamFunction(fp: FuncParam, funcDecl: FuncDecl,
+        funcParams: ArrayList<FuncParam>): FuncDecl {
+        fp.EnableAttr(Attribute.HAS_INITIAL)
+        let ret = FuncDecl()
+        if (let Some(assignment) <- fp.assignment) {
+            CopyBasicInfo(assignment, ret)
+        } else {
+            CopyNodeScopeInfo(ret, funcDecl)
+        }
+        ret.isFrozen = funcDecl.isFrozen
+        CopyNodeScopeInfo(ret, funcDecl)
+        ret.identifier = SrcIdentifier(fp.identifier.Val() + "." + "${funcParams.size}")
+
+        let funcBody = FuncBody()
+        CopyNodeScopeInfo(funcBody, ret)
+        let block = Block()
+        CopyNodeScopeInfo(block, ret)
+        let paramList = FuncParamList()
+        CopyNodeScopeInfo(paramList, ret)
+        for (param in funcParams) {
+            paramList.params.add(CreateFuncParamForOptional(param))
+        }
+        funcBody.paramLists.add(paramList)
+        funcBody.body = block
+        funcBody.retType = if (let Some(typeNode) <- fp.typeNode) { ASTCloner.Clone(typeNode) as Type } else { None }
+
+        if (let Some(assignment) <- fp.assignment) {
+            if (let Some(returnExprValue) <- (ASTCloner.Clone(assignment) as Expr)) {
+                let returnExpr = CreateReturnExpr(returnExprValue, Some(funcBody))
+                returnExpr.begin = assignment.begin
+                returnExpr.end = assignment.end
+                block.body.add(returnExpr)
+            }
+            assignment.EnableAttr(Attribute.UNREACHABLE)
+        }
+
+        ret.funcBody = funcBody
+        funcBody.funcDecl = ret
+        ret.EnableAttr(Attribute.HAS_INITIAL)
+        ret.EnableAttr(Attribute.IMPLICIT_ADD)
+        ret.EnableAttr(Attribute.NO_REFLECT_INFO)
+        ret.toBeCompiled = funcDecl.toBeCompiled
+        ret.ownerFunc = Some(funcDecl)
+        ret.fullPackageName = funcDecl.fullPackageName
+        ret.outerDecl = funcDecl.outerDecl
+        if (funcDecl.TestAttr(Attribute.CONSTRUCTOR)) {
+            ret.EnableAttr(Attribute.STATIC)
+        }
+        if (funcDecl.TestAttr(Attribute.MUT)) {
+            ret.EnableAttr(Attribute.MUT)
+        }
+        if (funcDecl.TestAttr(Attribute.GLOBAL)) {
+            ret.EnableAttr(Attribute.GLOBAL)
+        }
+        AddCurFile(ret, file: funcDecl.curFile)
+        return ret
+    }
+
+    private func GetSingleParamFunc(funcDecl: FuncDecl): Unit {
+        if (let None <- funcDecl.funcBody) {
+            return
+        }
+        let funcBody = funcDecl.funcBody.getOrThrow()
+        if (funcBody.paramLists.isEmpty()) {
+            return
+        }
+        let funcParams = ArrayList<FuncParam>()
+        for (fp in funcBody.paramLists[0].params) {
+            if (fp.assignment.isSome() && !fp.TestAttr(Attribute.HAS_INITIAL)) {
+                fp.desugarDecl = Some(MakeDefaultParamFunction(fp, funcDecl, funcParams))
+                if (let Some(assignment) <- fp.assignment) {
+                    MarkParamWithInitialValue(assignment)
+                }
+            }
+            funcParams.add(fp)
         }
     }
 
@@ -1225,9 +1322,42 @@ public class TypeChecker {
         }
     }
 
+    private func SynthesizeFuncParam(ctx: ASTContext, fp: FuncParam): Ty {
+        if (let Some(typeNode) <- fp.typeNode) {
+            SynthesizeTypeNode(ctx, Some(typeNode))
+            if (!Ty.IsTyCorrect(typeNode.GetTy())) {
+                if (let Some(assignment) <- fp.assignment) {
+                    let _ = Synthesize(ctx, assignment)
+                }
+                fp.SetTy(TypeManager.GetInvalidTy())
+                return TypeManager.GetInvalidTy()
+            }
+            fp.SetTy(typeNode.GetTy() ?? TypeManager.GetInvalidTy())
+        } else if (!Ty.IsTyCorrect(fp.GetTy())) {
+            fp.SetTy(TypeManager.GetInvalidTy())
+            return TypeManager.GetInvalidTy()
+        }
+
+        if (let Some(assignment) <- fp.assignment) {
+            let targetTy = fp.GetTy() ?? TypeManager.GetInvalidTy()
+            if (!Check(ctx, targetTy, assignment)) {
+                fp.SetTy(TypeManager.GetInvalidTy())
+                return TypeManager.GetInvalidTy()
+            }
+        }
+        if (let Some(desugarDecl) <- fp.desugarDecl) {
+            let _ = SynthesizeDecl(ctx, desugarDecl)
+        }
+        BindLocalDeclIfNeeded(ctx, fp)
+        return fp.GetTy() ?? TypeManager.GetInvalidTy()
+    }
+
     private func SynthesizeDecl(ctx: ASTContext, decl: Decl): Ty {
         if (decl.TestAttr(Attribute.ENUM_CONSTRUCTOR)) {
             return TypeCheckDeclSetEnumElementTy(impl.typeManager, decl, diag: impl.diag)
+        }
+        if (let Some(funcParam) <- (decl as FuncParam)) {
+            return SynthesizeFuncParam(ctx, funcParam)
         }
         if (let Some(vpd) <- (decl as VarWithPatternDecl)) {
             return SynthesizeVarWithPatternDecl(ctx, vpd)
