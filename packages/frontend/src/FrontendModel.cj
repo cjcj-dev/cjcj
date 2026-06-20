@@ -674,7 +674,6 @@ private class CjoSignatureMaterializer {
     private let exportedSymbols: HashSet<String>
     private let nominalDecls: HashMap<String, Decl> = HashMap<String, Decl>()
     private let extendDecls: HashMap<String, ExtendDecl> = HashMap<String, ExtendDecl>()
-    private let inferredNominalKinds: HashMap<String, UInt8> = HashMap<String, UInt8>()
     private let inferredGenericNames: HashMap<String, ArrayList<String>> = HashMap<String, ArrayList<String>>()
     private let activeGenericParams: ArrayList<GenericParamDecl> = ArrayList<GenericParamDecl>()
     private var flat: Option<CjoFlatBuffer> = None
@@ -682,6 +681,7 @@ private class CjoSignatureMaterializer {
     private var flatAllTypes: Int64 = -1
     private var flatImports: Int64 = -1
     private let flatDecls: HashMap<UInt32, CjoFlatDecl> = HashMap<UInt32, CjoFlatDecl>()
+    private let flatNominalKinds: HashMap<String, UInt8> = HashMap<String, UInt8>()
     private let flatTypeCache: HashMap<UInt32, Ty> = HashMap<UInt32, Ty>()
     private let flatGenericParamDecls: HashMap<UInt32, GenericParamDecl> = HashMap<UInt32, GenericParamDecl>()
 
@@ -695,6 +695,7 @@ private class CjoSignatureMaterializer {
     }
 
     public func Materialize(strings: ArrayList<String>, data: Array<UInt8>): Unit {
+        LoadSerializedDeclRecords(data)
         InferSignatureMetadata(strings)
         var idx: Int64 = 0
         while (idx < strings.size) {
@@ -704,7 +705,7 @@ private class CjoSignatureMaterializer {
             }
             idx++
         }
-        MaterializeSerializedInheritedTypes(data)
+        MaterializeSerializedInheritedTypes()
     }
 
     private func InferSignatureMetadata(strings: ArrayList<String>): Unit {
@@ -735,7 +736,6 @@ private class CjoSignatureMaterializer {
         if (pos >= signature.size || !IsNominalKind(signature[pos])) {
             return
         }
-        inferredNominalKinds[parsedName.text] = signature[pos]
         if (genericArity.arity <= 0 || inferredGenericNames.contains(parsedName.text)) {
             return
         }
@@ -807,7 +807,11 @@ private class CjoSignatureMaterializer {
         }
         let marker = signature[pos]
         if (IsNominalKind(marker)) {
-            let nominal = EnsureNominal(parsedName.text, marker, genericArity.arity)
+            let nominalKindOpt = SerializedNominalKind(parsedName.text)
+            if (let None <- nominalKindOpt) {
+                return
+            }
+            let nominal = EnsureNominal(parsedName.text, nominalKindOpt.getOrThrow(), genericArity.arity)
             if (pos + 1 >= signature.size) {
                 SetImportedMangle(nominal, mangle)
                 return
@@ -971,7 +975,11 @@ private class CjoSignatureMaterializer {
         if (pos >= signature.size || !IsNominalKind(signature[pos])) {
             return false
         }
-        let owner = EnsureNominal(parsedOwner.text, signature[pos], genericArity.arity)
+        let ownerKindOpt = SerializedNominalKind(parsedOwner.text)
+        if (let None <- ownerKindOpt) {
+            return false
+        }
+        let owner = EnsureNominal(parsedOwner.text, ownerKindOpt.getOrThrow(), genericArity.arity)
         let genericMark = PushGenericParams(owner)
         MaterializePropertyAccessor(propName, signature, pos + 1, mangle, owner)
         RestoreGenericParams(genericMark)
@@ -1374,14 +1382,14 @@ private class CjoSignatureMaterializer {
             }
             return AnyTy()
         }
-        if (!inferredNominalKinds.contains(name)) {
-            if (let Some(importedNominal) <- FindImportedNominal(name, typeArgs.size)) {
-                return TyForNominalDecl(importedNominal, name, typeArgs)
-            }
+        if (let Some(nominalKind) <- SerializedNominalKind(name)) {
+            let nominal = EnsureNominal(name, nominalKind, typeArgs.size)
+            return TyForNominalDecl(nominal, name, typeArgs)
         }
-        let nominalKind = inferredNominalKinds.get(name) ?? NominalKindForName(name)
-        let nominal = EnsureNominal(name, nominalKind, typeArgs.size)
-        return TyForNominalDecl(nominal, name, typeArgs)
+        if (let Some(importedNominal) <- FindImportedNominal(name, typeArgs.size)) {
+            return TyForNominalDecl(importedNominal, name, typeArgs)
+        }
+        return InvalidTy()
     }
 
     private func TyForNominalDecl(nominal: Decl, name: String, typeArgs: ArrayList<Ty>): Ty {
@@ -1478,8 +1486,15 @@ private class CjoSignatureMaterializer {
         return decl
     }
 
-    private func MaterializeSerializedInheritedTypes(data: Array<UInt8>): Unit {
+    private func LoadSerializedDeclRecords(data: Array<UInt8>): Unit {
         flat = Some(CjoFlatBuffer(data))
+        flatAllDecls = -1
+        flatAllTypes = -1
+        flatImports = -1
+        flatDecls.clear()
+        flatNominalKinds.clear()
+        flatTypeCache.clear()
+        flatGenericParamDecls.clear()
         let reader = flat.getOrThrow()
         let root = reader.RootTable()
         if (root < 0 || reader.StringField(root, 8) != packageName) {
@@ -1491,9 +1506,6 @@ private class CjoSignatureMaterializer {
         if (flatAllTypes < 0 || flatAllDecls < 0) {
             return
         }
-        flatDecls.clear()
-        flatTypeCache.clear()
-        flatGenericParamDecls.clear()
         let declCount = reader.VectorLength(flatAllDecls)
         var idx: Int64 = 0
         while (idx < declCount) {
@@ -1501,10 +1513,21 @@ private class CjoSignatureMaterializer {
             if (declTable >= 0) {
                 let record = CreateFlatDeclRecord(reader, declTable, UInt32(idx + 1))
                 flatDecls[record.index] = record
+                if (let Some(nominalKind) <- FlatNominalKind(record.kind)) {
+                    flatNominalKinds[record.identifier] = nominalKind
+                }
             }
             idx++
         }
-        idx = 0
+    }
+
+    private func MaterializeSerializedInheritedTypes(): Unit {
+        if ((let None <- flat) || flatAllTypes < 0 || flatAllDecls < 0) {
+            return
+        }
+        let reader = flat.getOrThrow()
+        let declCount = reader.VectorLength(flatAllDecls)
+        var idx: Int64 = 0
         while (idx < declCount) {
             let formatIndex = UInt32(idx + 1)
             if (let Some(record) <- flatDecls.get(formatIndex)) {
@@ -1565,12 +1588,16 @@ private class CjoSignatureMaterializer {
         return kind == 1u16 || kind == 2u16 || kind == 8u16 || kind == 9u16 || kind == 10u16
     }
 
-    private func FlatNominalKind(kind: UInt16): UInt8 {
-        if (kind == 1u16) { return b'C' }
-        if (kind == 2u16) { return b'I' }
-        if (kind == 8u16) { return b'S' }
-        if (kind == 9u16) { return b'U' }
-        return b'S'
+    private func FlatNominalKind(kind: UInt16): Option<UInt8> {
+        if (kind == 1u16) { return Some(b'C') }
+        if (kind == 2u16) { return Some(b'I') }
+        if (kind == 8u16) { return Some(b'S') }
+        if (kind == 9u16) { return Some(b'U') }
+        return None
+    }
+
+    private func SerializedNominalKind(name: String): Option<UInt8> {
+        return flatNominalKinds.get(name)
     }
 
     private func EnsureFlatDecl(record: CjoFlatDecl): Option<Decl> {
@@ -1594,8 +1621,8 @@ private class CjoSignatureMaterializer {
             record.decl = Some(paramDecl)
             return Some(paramDecl)
         }
-        if (record.kind == 1u16 || record.kind == 2u16 || record.kind == 8u16 || record.kind == 9u16) {
-            let decl = EnsureNominal(record.identifier, FlatNominalKind(record.kind), record.genericArity)
+        if (let Some(nominalKind) <- FlatNominalKind(record.kind)) {
+            let decl = EnsureNominal(record.identifier, nominalKind, record.genericArity)
             if (!record.exportId.isEmpty()) {
                 decl.exportId = record.exportId
             }
@@ -2212,21 +2239,6 @@ private class CjoSignatureMaterializer {
 
     private func IsNominalKind(kind: UInt8): Bool {
         return kind == b'C' || kind == b'S' || kind == b'U' || kind == b'I' || kind == b'T'
-    }
-
-    private func NominalKindForName(name: String): UInt8 {
-        if (name == "Option" || name == "Ordering" || name.endsWith("State")) {
-            return b'U'
-        }
-        if (name == "Collection" || name == "Iterable" || name == "Iterator" ||
-            name == "Equatable" || name == "Comparable" || name == "Hashable" ||
-            name == "Countable" || name == "ToString") {
-            return b'I'
-        }
-        if (name == "Object") {
-            return b'C'
-        }
-        return b'S'
     }
 
     private func IsFieldOperator(field: String): Bool {
