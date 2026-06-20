@@ -940,15 +940,11 @@ private func ResolveOverload(typeManager: TypeManager, candidates: ArrayList<Fun
     return out
 }
 
-private func SortCallArgumentByParamOrder(fd: FuncDecl, ce: CallExpr): ArrayList<FuncArg> {
-    let out = ArrayList<FuncArg>()
+private func SortCallArgumentByParamOrderInto(fd: FuncDecl, ce: CallExpr, out: ArrayList<FuncArg>): Unit {
     if (let None <- BodyParamList(fd)) {
-        return out
+        return
     }
     let params = BodyParamList(fd).getOrThrow().params
-    for (_ in params) {
-        out.add(FuncArg())
-    }
     var namedArgFound = false
     var pos: Int64 = 0
     for (arg in ce.args) {
@@ -978,17 +974,6 @@ private func SortCallArgumentByParamOrder(fd: FuncDecl, ce: CallExpr): ArrayList
             paramIdx++
         }
     }
-    return out
-}
-
-private func IsEmptyFuncArg(arg: FuncArg): Bool {
-    if (!arg.name.Empty() || arg.withInout) {
-        return false
-    }
-    if (let Some(_) <- arg.expr) {
-        return false
-    }
-    return true
 }
 
 private func SpreadInstantiationTy(typeManager: TypeManager, node: Node, typeMapping: SubstPack): Unit {
@@ -1004,39 +989,30 @@ private func SpreadInstantiationTy(typeManager: TypeManager, node: Node, typeMap
     let _ = walker.Walk()
 }
 
-private func BuildEffectiveCallArgs(typeManager: TypeManager, fd: FuncDecl, ce: CallExpr,
-    typeMapping: SubstPack): ArrayList<FuncArg> {
-    let orderedArgs = SortCallArgumentByParamOrder(fd, ce)
+private func BuildDesugaredCallArgs(typeManager: TypeManager, fd: FuncDecl, ce: CallExpr,
+    typeMapping: SubstPack): Unit {
     ce.defaultArgs.clear()
+    ce.desugarArgs = None
     if (let None <- BodyParamList(fd)) {
-        return orderedArgs
+        return
     }
     let params = BodyParamList(fd).getOrThrow().params
-    let effectiveArgs = ArrayList<FuncArg>()
-    var idx: Int64 = 0
-    while (idx < orderedArgs.size) {
-        let orderedArg = orderedArgs[idx]
-        if (idx < params.size && IsEmptyFuncArg(orderedArg) && params[idx].TestAttr(Attribute.HAS_INITIAL)) {
-            let defaultArg = CreateFuncArgForOptional(params[idx])
+    let desugarArgs = ArrayList<FuncArg>()
+    for (param in params) {
+        if (param.TestAttr(Attribute.HAS_INITIAL)) {
+            let defaultArg = CreateFuncArgForOptional(param)
             if (!fd.TestAttr(Attribute.TOOL_ADD)) {
                 defaultArg.EnableAttr(Attribute.HAS_INITIAL)
             }
             SpreadInstantiationTy(typeManager, defaultArg, typeMapping)
             ce.defaultArgs.add(defaultArg)
-            effectiveArgs.add(defaultArg)
+            desugarArgs.add(defaultArg)
         } else {
-            effectiveArgs.add(orderedArg)
+            desugarArgs.add(FuncArg())
         }
-        idx++
     }
-    return effectiveArgs
-}
-
-private func ReplaceCallArgsWith(ce: CallExpr, args: ArrayList<FuncArg>): Unit {
-    ce.args.clear()
-    for (arg in args) {
-        ce.args.add(arg)
-    }
+    SortCallArgumentByParamOrderInto(fd, ce, desugarArgs)
+    ce.desugarArgs = Some(desugarArgs)
 }
 
 private func ApplyInstantiatedArgumentTypes(typeManager: TypeManager, ce: CallExpr,
@@ -1501,8 +1477,7 @@ private func MatchFunctionForCall(typeManager: TypeManager, diag: Option<BasicDi
                 idx++
             }
         }
-        let effectiveArgs = BuildEffectiveCallArgs(typeManager, unit.fd, ce, unit.typeMapping)
-        ReplaceCallArgsWith(ce, effectiveArgs)
+        BuildDesugaredCallArgs(typeManager, unit.fd, ce, unit.typeMapping)
         ApplyInstantiatedArgumentTypes(typeManager, ce, unit)
         if (let Some(fdTy) <- unit.fd.GetTy()) {
             ce.baseFunc.getOrThrow().SetTy(typeManager.ApplySubstPack(fdTy, unit.typeMapping))

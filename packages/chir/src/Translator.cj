@@ -496,18 +496,7 @@ public class Translator {
         let callee = GetSymbolTable(calleeDecl)
         let argValues = ArrayList<Value>()
         let expectedParamTys = FuncParamTypes(expr, calleeDecl)
-        var idx: Int64 = 0
-        for (arg in expr.args) {
-            if (let Some(argExpr) <- arg.expr) {
-                var value = Translator.TranslateASTNode(argExpr, this) ??
-                    throw IllegalStateException("faithful AST2CHIR call arg produced no value")
-                if (idx < expectedParamTys.size) {
-                    value = CoerceValueForExpectedType(value, expectedParamTys[idx])
-                }
-                argValues.add(value)
-            }
-            idx++
-        }
+        AppendTranslatedCallArgs(expr, calleeDecl, argValues, expectedParamTys, ArrayList<Value>())
         let resultTy = chirTy.TranslateType(RequireAstTy(expr))
         return CreateApplyMaybeWithException(resultTy, callee, FuncCallContext(args: argValues,
             instTypeArgs: TranslateFuncInstArgs(expr, calleeDecl)))
@@ -2562,18 +2551,7 @@ public class Translator {
         let args = ArrayList<Value>()
         args.add(CreateEnumSelectorConstant(calleeDecl))
         let expectedParamTys = FuncParamTypes(expr, calleeDecl)
-        var idx: Int64 = 0
-        for (arg in expr.args) {
-            if (let Some(argExpr) <- arg.expr) {
-                var value = Translator.TranslateASTNode(argExpr, this) ??
-                    throw IllegalStateException("faithful AST2CHIR enum ctor arg produced no value")
-                if (idx < expectedParamTys.size) {
-                    value = BoxOrCastValueIfNeeded(value, expectedParamTys[idx])
-                }
-                args.add(value)
-            }
-            idx++
-        }
+        AppendTranslatedCallArgs(expr, calleeDecl, args, expectedParamTys, ArrayList<Value>())
         return RequireResult(builder.CreateTuple(chirTy.TranslateType(RequireAstTy(expr)), args, CurrentBlock()))
     }
 
@@ -2610,6 +2588,74 @@ public class Translator {
             return result
         }
         return RequireResult(builder.CreateApply(resultTy, callee, callContext, CurrentBlock()))
+    }
+
+    private func ActiveCallArgs(expr: AstCallExpr): ArrayList<AstFuncArg> {
+        if (let Some(desugarArgs) <- expr.desugarArgs) {
+            return desugarArgs
+        }
+        return expr.args
+    }
+
+    private func CopyValueList(values: ArrayList<Value>): ArrayList<Value> {
+        let out = ArrayList<Value>()
+        for (value in values) {
+            out.add(value)
+        }
+        return out
+    }
+
+    private func DefaultValueFuncDecl(calleeDecl: AstFuncDecl, idx: Int64): AstFuncDecl {
+        if (let Some(body) <- calleeDecl.funcBody) {
+            if (!body.paramLists.isEmpty() && idx < body.paramLists[0].params.size) {
+                if (let Some(desugarDecl) <- body.paramLists[0].params[idx].desugarDecl) {
+                    return desugarDecl
+                }
+            }
+        }
+        throw IllegalStateException("faithful AST2CHIR default argument has no desugared function")
+    }
+
+    private func TranslateOneCallArg(expr: AstCallExpr, calleeDecl: AstFuncDecl, arg: AstFuncArg, idx: Int64,
+        expectedTy: Option<Type>, previousDefaultArgs: ArrayList<Value>): Value {
+        if (arg.TestAttr(AstAttribute.HAS_INITIAL)) {
+            let defaultFunc = GetSymbolTable(DefaultValueFuncDecl(calleeDecl, idx))
+            let retTy = chirTy.TranslateType(RequireAstTy(arg))
+            let instArgs = if (calleeDecl.TestAttr(AstAttribute.CONSTRUCTOR)) {
+                ArrayList<Type>()
+            } else {
+                TranslateFuncInstArgs(expr, calleeDecl)
+            }
+            var value = CreateApplyMaybeWithException(retTy, defaultFunc,
+                FuncCallContext(args: CopyValueList(previousDefaultArgs), instTypeArgs: instArgs))
+            if (let Some(targetTy) <- expectedTy) {
+                value = CoerceValueForExpectedType(value, targetTy)
+            }
+            return value
+        }
+        let argExpr = RequireFuncArgExpr(arg, "call argument")
+        var value = Translator.TranslateASTNode(argExpr, this) ??
+            throw IllegalStateException("faithful AST2CHIR call arg produced no value")
+        if (let Some(targetTy) <- expectedTy) {
+            value = CoerceValueForExpectedType(value, targetTy)
+        }
+        return value
+    }
+
+    private func AppendTranslatedCallArgs(expr: AstCallExpr, calleeDecl: AstFuncDecl, out: ArrayList<Value>,
+        expectedParamTys: ArrayList<Type>, previousDefaultArgs: ArrayList<Value>): Unit {
+        let args = ActiveCallArgs(expr)
+        var idx: Int64 = 0
+        for (arg in args) {
+            let value = if (idx < expectedParamTys.size) {
+                TranslateOneCallArg(expr, calleeDecl, arg, idx, Some(expectedParamTys[idx]), previousDefaultArgs)
+            } else {
+                TranslateOneCallArg(expr, calleeDecl, arg, idx, None, previousDefaultArgs)
+            }
+            out.add(value)
+            previousDefaultArgs.add(value)
+            idx++
+        }
     }
 
     private func IsFunctionValueCall(expr: AstCallExpr): Bool {
@@ -2755,18 +2801,11 @@ public class Translator {
             thisType = obj.GetType()
         }
         let expectedParamTys = FuncParamTypes(expr, calleeDecl, thisType: thisType)
-        var idx: Int64 = 0
-        for (arg in expr.args) {
-            if (let Some(argExpr) <- arg.expr) {
-                var value = Translator.TranslateASTNode(argExpr, this) ??
-                    throw IllegalStateException("faithful AST2CHIR member call arg produced no value")
-                if (idx < expectedParamTys.size) {
-                    value = CoerceValueForExpectedType(value, expectedParamTys[idx])
-                }
-                argValues.add(value)
-            }
-            idx++
+        let previousDefaultArgs = ArrayList<Value>()
+        if (let Some(obj) <- thisObj) {
+            previousDefaultArgs.add(obj)
         }
+        AppendTranslatedCallArgs(expr, calleeDecl, argValues, expectedParamTys, previousDefaultArgs)
         if (ShouldUseVirtualMemberDispatch(calleeDecl)) {
             if (calleeDecl.TestAttr(AstAttribute.STATIC)) {
                 let parentTy = TranslateMemberOwnerType(calleeDecl)
@@ -3016,13 +3055,8 @@ public class Translator {
         }
         let args = ArrayList<Value>()
         args.add(thisObj)
-        for (arg in expr.args) {
-            if (let Some(argExpr) <- arg.expr) {
-                let value = Translator.TranslateASTNode(argExpr, this) ??
-                    throw IllegalStateException("faithful AST2CHIR constructor arg produced no value")
-                args.add(value)
-            }
-        }
+        let expectedParamTys = FuncParamTypes(expr, calleeDecl, thisType: Some(thisRefTy))
+        AppendTranslatedCallArgs(expr, calleeDecl, args, expectedParamTys, ArrayList<Value>())
         let callee = globalSymbolTable.Get(calleeDecl)
         let _ = CreateApplyMaybeWithException(builder.context.GetUnitTy(), callee,
             FuncCallContext(args: args, thisType: thisRefTy))
@@ -3598,22 +3632,6 @@ public class Translator {
             throw IllegalStateException("faithful AST2CHIR value has no type: ${value.GetIdentifier()}")
         if (valueTy.IsEqual(expectedTy)) {
             return value
-        }
-        return RequireResult(builder.CreateTypeCast(expectedTy, value, CurrentBlock()))
-    }
-
-    private func BoxOrCastValueIfNeeded(value: Value, expectedTy: Type): Value {
-        let valueTy = value.GetType() ??
-            throw IllegalStateException("faithful AST2CHIR value has no type: ${value.GetIdentifier()}")
-        if (valueTy.IsEqual(expectedTy)) {
-            return value
-        }
-        if (let Some(refTy) <- (expectedTy as RefType)) {
-            if (valueTy.IsEqual(refTy.GetBaseType())) {
-                let slot = RequireResult(builder.CreateAllocate(expectedTy, valueTy, CurrentBlock()))
-                builder.CreateStore(value, slot, CurrentBlock())
-                return slot
-            }
         }
         return RequireResult(builder.CreateTypeCast(expectedTy, value, CurrentBlock()))
     }
