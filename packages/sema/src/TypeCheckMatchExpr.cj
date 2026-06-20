@@ -71,17 +71,15 @@ private func BlockTy(block: Block): Ty {
     return invalidTy
 }
 
-private func JoinCaseTys(typeManager: TypeManager, tys: ArrayList<Ty>): Ty {
+private func JoinCaseTys(typeManager: TypeManager, tys: ArrayList<Ty>, curFile: Option<File>): Ty {
     if (tys.isEmpty()) {
         return TypeManager.GetInvalidTy()
     }
-    var out = tys[0]
-    var idx: Int64 = 1
-    while (idx < tys.size) {
-        out = Join(typeManager, out, tys[idx])
-        idx++
+    let tySet = TySet()
+    for (ty in tys) {
+        tySet.Add(ty)
     }
-    return out
+    return JoinAsVisibleTy(typeManager, tySet, curFile: curFile)
 }
 
 private func PatternKindForOr(ctx: ASTContext, pattern: Pattern): ASTKind {
@@ -359,7 +357,7 @@ public func SynNormalMatchCaseBody(typeManager: TypeManager, ctx: ASTContext,
     if (!ok) {
         return InvalidMatchTy(me)
     }
-    let joinedTy = JoinCaseTys(typeManager, caseTys)
+    let joinedTy = JoinCaseTys(typeManager, caseTys, me.curFile)
     me.SetTy(joinedTy)
     if (SugarKindEq(me.sugarKind, SugarKind.NO_SUGAR)) {
         if (let Some(engine) <- diag) {
@@ -424,7 +422,7 @@ public func SynMatchExprNoSelector(typeManager: TypeManager, ctx: ASTContext, me
     if (hasInvalidCase || !CheckMatchExprNoSelectorExhaustiveness(me, diag: diag)) {
         return InvalidMatchTy(me)
     }
-    let joinedTy = JoinCaseTys(typeManager, caseTys)
+    let joinedTy = JoinCaseTys(typeManager, caseTys, me.curFile)
     me.SetTy(joinedTy)
     return joinedTy
 }
@@ -468,7 +466,7 @@ public func ChkMatchExprHasSelector(typeManager: TypeManager, ctx: ASTContext,
         if (caseTysContains(typeManager, caseTys, target)) {
             me.SetTy(target)
         } else {
-            me.SetTy(JoinCaseTys(typeManager, caseTys))
+            me.SetTy(JoinCaseTys(typeManager, caseTys, me.curFile))
         }
         if (SugarKindEq(me.sugarKind, SugarKind.NO_SUGAR)) {
             if (let Some(engine) <- diag) {
@@ -499,7 +497,7 @@ public func ChkMatchExprNoSelector(typeManager: TypeManager, ctx: ASTContext, ta
         if (caseTysContains(typeManager, caseTys, target)) {
             me.SetTy(target)
         } else {
-            me.SetTy(JoinCaseTys(typeManager, caseTys))
+            me.SetTy(JoinCaseTys(typeManager, caseTys, me.curFile))
         }
         ok = CheckMatchExprNoSelectorExhaustiveness(me, diag: diag)
     }

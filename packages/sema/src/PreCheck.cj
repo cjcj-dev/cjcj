@@ -89,6 +89,69 @@ private func collectDecl(ctx: ASTContext, decl: Decl): Bool {
     return valid
 }
 
+private func collectDeclForAssumption(decl: Decl, out: ArrayList<Decl>): Unit {
+    out.add(decl)
+    if (let Some(generic) <- decl.GetGeneric()) {
+        for (param in generic.typeParameters) {
+            collectDeclForAssumption(param, out)
+        }
+    }
+    if (let Some(enumDecl) <- (decl as EnumDecl)) {
+        for (constructor in enumDecl.constructors) {
+            collectDeclForAssumption(constructor, out)
+        }
+    }
+    for (member in decl.GetMemberDecls()) {
+        collectDeclForAssumption(member, out)
+    }
+    if (let Some(classDecl) <- (decl as ClassDecl)) {
+        for (subDecl in classDecl.subDecls) {
+            collectDeclForAssumption(subDecl, out)
+        }
+    } else if (let Some(interfaceDecl) <- (decl as InterfaceDecl)) {
+        for (subDecl in interfaceDecl.subDecls) {
+            collectDeclForAssumption(subDecl, out)
+        }
+    }
+}
+
+private func collectPackageDeclsForAssumption(pkg: Package): ArrayList<Decl> {
+    let out = ArrayList<Decl>()
+    for (file in pkg.files) {
+        for (decl in file.decls) {
+            collectDeclForAssumption(decl, out)
+        }
+    }
+    return out
+}
+
+private func shouldCollectAssumption(decl: Decl): Bool {
+    match (decl.astKind) {
+        case ASTKind.FUNC_DECL | ASTKind.BUILTIN_DECL | ASTKind.CLASS_DECL | ASTKind.INTERFACE_DECL |
+            ASTKind.STRUCT_DECL | ASTKind.ENUM_DECL | ASTKind.EXTEND_DECL => true
+        case _ => false
+    }
+}
+
+private func collectAssumption(typeManager: TypeManager, decl: Decl): Unit {
+    if (!shouldCollectAssumption(decl)) {
+        return
+    }
+    if (let Some(_) <- decl.GetGeneric()) {
+        let assumptions = AssumptionSet()
+        Assumption(typeManager, assumptions, decl)
+    }
+}
+
+private func collectAndCheckAssumption(typeManager: TypeManager, pkg: Package): Unit {
+    for (decl in collectPackageDeclsForAssumption(pkg)) {
+        collectAssumption(typeManager, decl)
+        if (let Some(generic) <- decl.GetGeneric()) {
+            let _ = CheckGenericConstraints(generic)
+        }
+    }
+}
+
 public func PreCheckPackage(pkg: Package): Bool {
     let ctx = ASTContext(pkg)
     return PreCheckPackage(ctx, pkg)
@@ -107,5 +170,6 @@ public func PreCheckPackage(ctx: ASTContext, pkg: Package, typeManager!: TypeMan
         }
     }
     PreSetDeclType(typeManager, ctx)
+    collectAndCheckAssumption(typeManager, pkg)
     return valid
 }
