@@ -595,29 +595,28 @@ public class FaithfulAST2CHIR {
 
     private func SortGlobalAndStaticVarsByDependency(): ArrayList<AstDecl> {
         let sorted = ArrayList<AstDecl>()
-        let visiting = ArrayList<Int64>()
-        let visited = ArrayList<Int64>()
+        let visiting = ArrayList<AstDecl>()
+        let visited = ArrayList<AstDecl>()
         for (decl in globalAndStaticVars) {
             VisitVarForInitOrder(decl, visiting, visited, sorted)
         }
         return sorted
     }
 
-    private func VisitVarForInitOrder(decl: AstDecl, visiting: ArrayList<Int64>, visited: ArrayList<Int64>,
+    private func VisitVarForInitOrder(decl: AstDecl, visiting: ArrayList<AstDecl>, visited: ArrayList<AstDecl>,
         sorted: ArrayList<AstDecl>): Unit {
-        let declKey = DeclIdentity(decl)
-        if (ContainsInt64(visited, declKey)) {
+        if (ContainsDecl(visited, decl)) {
             return
         }
-        if (ContainsInt64(visiting, declKey)) {
+        if (ContainsDecl(visiting, decl)) {
             return
         }
-        visiting.add(declKey)
+        visiting.add(decl)
         for (dep in CollectTransitiveVarDeps(decl)) {
             VisitVarForInitOrder(dep, visiting, visited, sorted)
         }
         visiting.remove(at: visiting.size - 1)
-        visited.add(declKey)
+        visited.add(decl)
         if (!ContainsDecl(sorted, decl)) {
             sorted.add(decl)
         }
@@ -625,17 +624,16 @@ public class FaithfulAST2CHIR {
 
     private func CollectTransitiveVarDeps(root: AstDecl): ArrayList<AstDecl> {
         let out = ArrayList<AstDecl>()
-        let seen = ArrayList<Int64>()
+        let seen = ArrayList<AstDecl>()
         CollectTransitiveVarDeps(root, seen, out)
         return out
     }
 
-    private func CollectTransitiveVarDeps(root: AstDecl, seen: ArrayList<Int64>, out: ArrayList<AstDecl>): Unit {
-        let rootKey = DeclIdentity(root)
-        if (ContainsInt64(seen, rootKey)) {
+    private func CollectTransitiveVarDeps(root: AstDecl, seen: ArrayList<AstDecl>, out: ArrayList<AstDecl>): Unit {
+        if (ContainsDecl(seen, root)) {
             return
         }
-        seen.add(rootKey)
+        seen.add(root)
         for (dep in CollectDirectDependencies(root)) {
             if (IsGlobalOrStaticVarDecl(dep)) {
                 if (!ContainsDecl(out, dep)) {
@@ -1528,35 +1526,9 @@ public class FaithfulAST2CHIR {
             left.begin.hashCode() == right.begin.hashCode() && left.end.hashCode() == right.end.hashCode()
     }
 
-    private static func DeclIdentity(decl: AstDecl): Int64 {
-        if (decl.TestAttr(AstAttribute.IMPORTED)) {
-            if (!decl.rawMangleName.isEmpty()) {
-                return decl.rawMangleName.hashCode()
-            }
-            if (!decl.mangledName.isEmpty()) {
-                return decl.mangledName.hashCode()
-            }
-        }
-        var out = ASTKindIndex(decl.astKind)
-        out = out * 131 + decl.identifier.Val().hashCode()
-        out = out * 131 + decl.fullPackageName.hashCode()
-        out = out * 131 + decl.begin.hashCode()
-        out = out * 131 + decl.end.hashCode()
-        return out
-    }
-
     private static func SameAstFile(left: AstFile, right: AstFile): Bool {
         return left.fileName == right.fileName && left.begin.hashCode() == right.begin.hashCode() &&
             left.end.hashCode() == right.end.hashCode()
-    }
-
-    private static func ContainsInt64(values: ArrayList<Int64>, value: Int64): Bool {
-        for (item in values) {
-            if (item == value) {
-                return true
-            }
-        }
-        return false
     }
 
     private static func ContainsString(values: ArrayList<String>, value: String): Bool {
