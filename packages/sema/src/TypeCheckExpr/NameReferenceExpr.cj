@@ -41,8 +41,26 @@ func TcReplaceIdeal(typeManager: TypeManager, expr: Expr): Ty {
     return TypeManager.GetInvalidTy()
 }
 
+func TcTargetReferenceTy(target: Decl): Option<Ty> {
+    if (Ty.IsTyCorrect(target.GetTy())) {
+        return target.GetTy()
+    }
+    if (let Some(propDecl) <- (target as PropDecl)) {
+        if (let Some(getter) <- GetUsableGetterForProperty(propDecl)) {
+            if (let Some(getterTy) <- getter.GetTy()) {
+                if (let Some(funcTy) <- (getterTy as FuncTy)) {
+                    if (Ty.IsTyCorrect(funcTy.retTy)) {
+                        return Some(funcTy.retTy)
+                    }
+                }
+            }
+        }
+    }
+    return None
+}
+
 func TcSetTyFromTarget(typeManager: TypeManager, node: Node, target: Decl): Ty {
-    if (let Some(targetTy) <- target.GetTy()) {
+    if (let Some(targetTy) <- TcTargetReferenceTy(target)) {
         let instTy = if (let Some(expr) <- (node as Expr)) {
             typeManager.ApplySubstPack(targetTy, GenerateGenericTypeMapping(typeManager, expr), ignoreUnsolved: true)
         } else {

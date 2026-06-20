@@ -35,6 +35,7 @@ import cangjie_compiler::ast.GenericsTy as AstGenericsTy
 import cangjie_compiler::ast.IfExpr as AstIfExpr
 import cangjie_compiler::ast.InterfaceTy as AstInterfaceTy
 import cangjie_compiler::ast.InterfaceDecl as AstInterfaceDecl
+import cangjie_compiler::ast.InheritableDecl as AstInheritableDecl
 import cangjie_compiler::ast.JumpExpr as AstJumpExpr
 import cangjie_compiler::ast.LambdaExpr as AstLambdaExpr
 import cangjie_compiler::ast.LetPatternDestructor as AstLetPatternDestructor
@@ -284,6 +285,7 @@ public class Translator {
         if (let Some(astTy) <- structDecl.GetTy()) {
             def.SetType(RequireStructType(chirTy.TranslateType(astTy)))
         }
+        SetImplementedInterfaces(def, structDecl)
         for (member in structDecl.GetMemberDeclPtrs()) {
             TranslateMemberDecl(def, member)
         }
@@ -308,6 +310,7 @@ public class Translator {
         if (let Some(astTy) <- enumDecl.GetTy()) {
             def.SetType(RequireEnumType(chirTy.TranslateType(astTy)))
         }
+        SetImplementedInterfaces(def, enumDecl)
         for (ctor in enumDecl.constructors) {
             let payloadTypes = ArrayList<Type>()
             if (let Some(funcCtor) <- (ctor as AstFuncDecl)) {
@@ -1110,7 +1113,7 @@ public class Translator {
             def.SetType(classTy)
         }
         SetClassSuperClass(def, decl)
-        SetClassImplementedInterface(def, decl)
+        SetImplementedInterfaces(def, decl)
         for (member in decl.GetMemberDeclPtrs()) {
             TranslateMemberDecl(def, member)
         }
@@ -1126,7 +1129,7 @@ public class Translator {
         }
     }
 
-    private func SetClassImplementedInterface(def: ClassDef, decl: AstClassLikeDecl): Unit {
+    private func SetImplementedInterfaces(def: CustomTypeDef, decl: AstInheritableDecl): Unit {
         for (superInterfaceTy in decl.GetStableSuperInterfaceTys()) {
             def.AddImplementedInterfaceTy(UnwrapClassType(chirTy.TranslateType(superInterfaceTy)))
         }
@@ -2173,7 +2176,8 @@ public class Translator {
         }
         if (let Some(typePattern) <- (pattern as AstTypePattern)) {
             if (let Some(inner) <- typePattern.pattern) {
-                BindPatternValues(inner, selector)
+                let castedSelector = CastValueIfNeeded(selector, chirTy.TranslateType(RequireAstTy(typePattern)))
+                BindPatternValues(inner, castedSelector)
             }
             return
         }
