@@ -4,9 +4,12 @@ import std.collection.*
 import cangjie_compiler::chir.Attribute
 import cangjie_compiler::chir.ClassDef
 import cangjie_compiler::chir.ClassType
+import cangjie_compiler::chir.CustomType
 import cangjie_compiler::chir.CustomTypeDef
+import cangjie_compiler::chir.FuncType
 import cangjie_compiler::chir.Function
 import cangjie_compiler::chir.Type
+import cangjie_compiler::chir.TypeKindIndex
 
 private let EXTENSION_DEFS_NAME: String = "NonExternalExtensionDefs"
 
@@ -28,9 +31,7 @@ public func GenerateInterfaceExtensionDefs(cgMod: CGModule): Unit {
         if (!IsCurrentPackageDef(cgMod, def)) {
             continue
         }
-        if (let Some(classDef) <- (def as ClassDef)) {
-            GenerateExtensionDefsForClassLike(cgMod, classDef)
-        }
+        GenerateExtensionDefsForCustomDef(cgMod, def)
     }
     EmitNonExternalExtensionDefsTable(cgMod)
 }
@@ -53,22 +54,24 @@ private func IsCurrentPackageDef(cgMod: CGModule, def: CustomTypeDef): Bool {
     return def.GetPackageName() == cgMod.GetCGContext().GetCurrentPkgName()
 }
 
-private func GenerateExtensionDefsForClassLike(cgMod: CGModule, def: ClassDef): Unit {
+private func GenerateExtensionDefsForCustomDef(cgMod: CGModule, def: CustomTypeDef): Unit {
     if (let None <- def.GetType()) {
         return
     }
     let startIdx = cgMod.GetNonExternalExtensionDefsNum()
     var emitted = false
-    if (!def.IsInterface()) {
-        if (GenerateObjectExtensionDefForType(cgMod, def)) {
-            emitted = true
-        }
-        if (GenerateExtensionDefForType(cgMod, def, RequireClassType(def), false)) {
-            emitted = true
-        }
-    } else if (!def.GetMethods().isEmpty() && !RequireClassType(def).IsGenericRelated()) {
-        if (GenerateExtensionDefForType(cgMod, def, RequireClassType(def), false)) {
-            emitted = true
+    if (let Some(classDef) <- (def as ClassDef)) {
+        if (!classDef.IsInterface()) {
+            if (GenerateObjectExtensionDefForType(cgMod, classDef)) {
+                emitted = true
+            }
+            if (GenerateExtensionDefForType(cgMod, def, RequireClassType(classDef), false)) {
+                emitted = true
+            }
+        } else if (!def.GetMethods().isEmpty() && !RequireClassType(classDef).IsGenericRelated()) {
+            if (GenerateExtensionDefForType(cgMod, def, RequireClassType(classDef), false)) {
+                emitted = true
+            }
         }
     }
     let interfaces = CollectImplementedInterfaces(def)
@@ -115,9 +118,9 @@ private func GenerateObjectExtensionDefForType(cgMod: CGModule, targetDef: Class
     return true
 }
 
-private func GenerateExtensionDefForType(cgMod: CGModule, targetDef: ClassDef, inheritedType: ClassType,
+private func GenerateExtensionDefForType(cgMod: CGModule, targetDef: CustomTypeDef, inheritedType: ClassType,
     direct: Bool): Bool {
-    let targetType = RequireClassType(targetDef)
+    let targetType = RequireCustomType(targetDef)
     let funcs = FunctionsForInheritedType(targetDef, inheritedType)
     if (funcs.isEmpty() && inheritedType.GetClassDef().IsInterface() &&
         inheritedType.GetClassDef().nodeId == targetDef.nodeId) {
@@ -139,7 +142,7 @@ private func GenerateExtensionDefForType(cgMod: CGModule, targetDef: ClassDef, i
     return true
 }
 
-private func BuildExtensionDefContent(cgMod: CGModule, targetType: ClassType, inheritedType: ClassType,
+private func BuildExtensionDefContent(cgMod: CGModule, targetType: Type, inheritedType: ClassType,
     funcs: ArrayList<InterfaceFunctionEntry>, direct: Bool): ArrayList<LLVMValueRef> {
     let context = cgMod.GetLLVMContext().raw
     let i8Type = unsafe { LLVMInt8TypeInContext(context) }
@@ -158,18 +161,18 @@ private func BuildExtensionDefContent(cgMod: CGModule, targetType: ClassType, in
     return values
 }
 
-private func ExtensionDefFlag(targetType: ClassType, inheritedType: ClassType, direct: Bool): UInt64 {
+private func ExtensionDefFlag(targetType: Type, inheritedType: ClassType, direct: Bool): UInt64 {
     var flag: UInt64 = 0b00000001u64
     if (direct) {
         flag |= 0b10000000u64
     }
-    if (SameRootPackage(targetType.GetClassDef().GetPackageName(), inheritedType.GetClassDef().GetPackageName())) {
+    if (SameRootPackage(TargetPackageName(targetType), inheritedType.GetClassDef().GetPackageName())) {
         flag |= 0b00000110u64
     }
     return flag
 }
 
-private func GenerateFuncTableForType(cgMod: CGModule, targetType: ClassType, inheritedType: ClassType,
+private func GenerateFuncTableForType(cgMod: CGModule, targetType: Type, inheritedType: ClassType,
     funcs: ArrayList<InterfaceFunctionEntry>, i8PtrType: LLVMTypeRef): LLVMValueRef {
     if (funcs.isEmpty()) {
         return unsafe { LLVMConstNull(i8PtrType) }
@@ -179,7 +182,7 @@ private func GenerateFuncTableForType(cgMod: CGModule, targetType: ClassType, in
     if (unsafe { LLVMIsDeclaration(table) } != 0) {
         let values = ArrayList<LLVMValueRef>()
         for (fn in funcs) {
-            values.add(FunctionAsI8Ptr(cgMod, fn, i8PtrType))
+            values.add(FunctionAsI8Ptr(cgMod, targetType, inheritedType, fn, i8PtrType))
         }
         for (fn2 in funcs) {
             values.add(OuterTypeInfoForFunction(cgMod, targetType, fn2, i8PtrType))
@@ -193,7 +196,7 @@ private func GenerateFuncTableForType(cgMod: CGModule, targetType: ClassType, in
     return unsafe { LLVMConstBitCast(table, i8PtrType) }
 }
 
-private func FunctionsForInheritedType(targetDef: ClassDef, inheritedType: ClassType): ArrayList<InterfaceFunctionEntry> {
+private func FunctionsForInheritedType(targetDef: CustomTypeDef, inheritedType: ClassType): ArrayList<InterfaceFunctionEntry> {
     let out = ArrayList<InterfaceFunctionEntry>()
     let inheritedDef = inheritedType.GetClassDef()
     if (inheritedDef.nodeId == targetDef.nodeId) {
@@ -216,7 +219,7 @@ private func FunctionsForInheritedType(targetDef: ClassDef, inheritedType: Class
     return out
 }
 
-private func FindImplementation(targetDef: ClassDef, interfaceMethod: Function): Option<Function> {
+private func FindImplementation(targetDef: CustomTypeDef, interfaceMethod: Function): Option<Function> {
     for (method in targetDef.GetMethods()) {
         if (method.IsConstructor()) {
             continue
@@ -226,8 +229,10 @@ private func FindImplementation(targetDef: ClassDef, interfaceMethod: Function):
             return Some(method)
         }
     }
-    if (let Some(superDef) <- targetDef.GetSuperClassDef()) {
-        return FindImplementation(superDef, interfaceMethod)
+    if (let Some(classDef) <- (targetDef as ClassDef)) {
+        if (let Some(superDef) <- classDef.GetSuperClassDef()) {
+            return FindImplementation(superDef, interfaceMethod)
+        }
     }
     return DefaultMethodOrNone(interfaceMethod)
 }
@@ -244,13 +249,14 @@ private func MethodNameMatches(method: Function, name: String): Bool {
         method.GetRawMangledName() == name
 }
 
-private func FunctionAsI8Ptr(cgMod: CGModule, entry: InterfaceFunctionEntry, i8PtrType: LLVMTypeRef): LLVMValueRef {
+private func FunctionAsI8Ptr(cgMod: CGModule, targetType: Type, inheritedType: ClassType,
+    entry: InterfaceFunctionEntry, i8PtrType: LLVMTypeRef): LLVMValueRef {
     if (let Some(method) <- entry.implementation) {
         if (method.TestAttr(Attribute.ABSTRACT)) {
             return unsafe { LLVMConstNull(i8PtrType) }
         }
         if (let Some(expected) <- entry.expected) {
-            if (NeedsExpectedSlotWrapper(method, expected)) {
+            if (NeedsExpectedSlotWrapper(method, expected, targetType, inheritedType)) {
                 return unsafe { LLVMConstBitCast(GetOrCreateExpectedSlotWrapper(cgMod, method, expected), i8PtrType) }
             }
         }
@@ -259,14 +265,102 @@ private func FunctionAsI8Ptr(cgMod: CGModule, entry: InterfaceFunctionEntry, i8P
     return unsafe { LLVMConstNull(i8PtrType) }
 }
 
-private func NeedsExpectedSlotWrapper(method: Function, expected: Function): Bool {
+private func NeedsExpectedSlotWrapper(method: Function, expected: Function, selfTy: Type,
+    instParentTy: ClassType): Bool {
+    if (!selfTy.IsClassOrArray() && !method.TestAttr(Attribute.STATIC)) {
+        return true
+    }
+    if (let Some(parentType) <- method.GetParentCustomTypeOrExtendedType()) {
+        if (!parentType.IsEqual(selfTy) && parentType.IsGenericRelated() &&
+            !IsEqualOrSubTypeOfWrapperParent(parentType, instParentTy)) {
+            return true
+        }
+    }
     let methodTy = method.GetFuncType() ?? return false
     let expectedTy = expected.GetFuncType() ?? return false
-    let expectedRetTy = expectedTy.GetReturnType()
-    if (!expectedRetTy.IsGeneric()) {
+    return !VirtualFuncTypeMatches(expectedTy, methodTy)
+}
+
+private func VirtualFuncTypeMatches(parentFuncType: Type, curFuncType: Type): Bool {
+    let parentTy = (parentFuncType as FuncType) ?? return parentFuncType.IsEqual(curFuncType)
+    let curTy = (curFuncType as FuncType) ?? return false
+    let parentParams = parentTy.GetParamTypes()
+    let curParams = curTy.GetParamTypes()
+    if (parentParams.size != curParams.size) {
         return false
     }
-    return !methodTy.GetReturnType().IsEqual(expectedRetTy)
+    var idx: Int64 = 0
+    while (idx < parentParams.size) {
+        if (!VirtualParamTypeMatches(parentParams[idx], curParams[idx])) {
+            return false
+        }
+        idx++
+    }
+    return VirtualReturnTypeMatches(parentTy.GetReturnType(), curTy.GetReturnType())
+}
+
+private func VirtualParamTypeMatches(left: Type, right: Type): Bool {
+    if ((left.IsGeneric() || left.IsRef() || left.IsCJFunc()) &&
+        (right.IsGeneric() || right.IsRef() || right.IsCJFunc())) {
+        return true
+    }
+    return VirtualStructuralTypeMatches(left, right)
+}
+
+private func VirtualReturnTypeMatches(left: Type, right: Type): Bool {
+    if (left.IsGeneric() && right.IsGeneric()) {
+        return true
+    }
+    if ((left.IsRef() || left.IsCJFunc()) && (right.IsRef() || right.IsCJFunc())) {
+        return true
+    }
+    return VirtualStructuralTypeMatches(left, right)
+}
+
+private func VirtualStructuralTypeMatches(left: Type, right: Type): Bool {
+    if (TypeKindIndex(left.GetTypeKind()) != TypeKindIndex(right.GetTypeKind())) {
+        return false
+    }
+    let leftArgs = left.GetTypeArgs()
+    let rightArgs = right.GetTypeArgs()
+    if (leftArgs.size != rightArgs.size) {
+        return false
+    }
+    var idx: Int64 = 0
+    while (idx < leftArgs.size) {
+        if (!VirtualStructuralTypeMatches(leftArgs[idx], rightArgs[idx])) {
+            return false
+        }
+        idx++
+    }
+    return true
+}
+
+private func IsEqualOrSubTypeOfWrapperParent(parentType: Type, instParentTy: ClassType): Bool {
+    if (parentType.IsEqual(instParentTy)) {
+        return true
+    }
+    let parentClassTy = (parentType.StripAllRefs() as ClassType) ?? return false
+    if (parentClassTy.GetClassDef().nodeId == instParentTy.GetClassDef().nodeId) {
+        return true
+    }
+    return ClassTypeHasInterface(parentClassTy, instParentTy)
+}
+
+private func ClassTypeHasInterface(sourceTy: ClassType, targetTy: ClassType): Bool {
+    let sourceDef = sourceTy.GetClassDef()
+    if (let Some(superTy) <- sourceTy.GetSuperClassTy()) {
+        if (superTy.GetClassDef().nodeId == targetTy.GetClassDef().nodeId || ClassTypeHasInterface(superTy, targetTy)) {
+            return true
+        }
+    }
+    for (interfaceTy in sourceDef.GetImplementedInterfaceTys()) {
+        if (interfaceTy.GetClassDef().nodeId == targetTy.GetClassDef().nodeId ||
+            ClassTypeHasInterface(interfaceTy, targetTy)) {
+            return true
+        }
+    }
+    return false
 }
 
 private func GetOrCreateExpectedSlotWrapper(cgMod: CGModule, method: Function, expected: Function): LLVMValueRef {
@@ -299,6 +393,12 @@ private func GetOrCreateExpectedSlotWrapper(cgMod: CGModule, method: Function, e
 
 private func EmitExpectedSlotWrapperBody(irBuilder: IRBuilder2, wrapper: LLVMValueRef, method: Function,
     expectedCGType: CGFunctionType): Unit {
+    let expectedTy = if (let Some(fnTy) <- (expectedCGType.GetOriginal() as FuncType)) {
+        fnTy
+    } else {
+        irBuilder.CreateRetVoid()
+        return
+    }
     let methodTy = if (let Some(fnTy) <- method.GetFuncType()) {
         fnTy
     } else {
@@ -313,39 +413,134 @@ private func EmitExpectedSlotWrapperBody(irBuilder: IRBuilder2, wrapper: LLVMVal
         return
     }
     let expectedArgIndices = expectedCGType.GetRealArgIndices()
+    let expectedParamTys = expectedTy.GetParamTypes()
     let methodParamTys = methodTy.GetParamTypes()
     let callArgs = ArrayList<CGValue>()
     var idx: Int64 = 0
-    while (idx < methodParamTys.size && idx < expectedArgIndices.size) {
+    while (idx < methodParamTys.size && idx < expectedArgIndices.size && idx < expectedParamTys.size) {
         let rawArg = unsafe { LLVMGetParam(wrapper, UInt32(expectedArgIndices[idx])) }
-        callArgs.add(CGValue(rawArg, CGType.GetOrCreate(irBuilder.GetCGModule(), methodParamTys[idx])))
+        let (convertedArg, convertedTy) = ConvertExpectedArgForMethod(irBuilder, rawArg, expectedParamTys[idx],
+            methodParamTys[idx], idx)
+        callArgs.add(CGValue(convertedArg, CGType.GetOrCreate(irBuilder.GetCGModule(), convertedTy)))
         idx++
     }
-    let methodTypeInfoArg = unsafe {
-        let paramCount = LLVMCountParams(wrapper)
-        if (paramCount == 0u32) {
-            LLVMConstNull(CGType.GetOrCreateTypeInfoPtrType(irBuilder.GetLLVMContext()))
-        } else {
-            LLVMGetParam(wrapper, paramCount - 1u32)
-        }
-    }
+    let methodTypeInfoArg = GetWrapperMethodTypeInfoArg(expectedCGType, wrapper)
     let result = irBuilder.CreateCallOrInvokeWithMethodTypeInfo(methodCGType, methodCGFunc.GetRawFunction(),
-        callArgs, Some(methodTypeInfoArg), name: "ifwrap.call")
-    let returnSlot = unsafe { LLVMGetParam(wrapper, 0u32) }
-    let resultTy = methodTy.GetReturnType()
-    let resultCGType = CGType.GetOrCreate(irBuilder.GetCGModule(), resultTy)
-    let resultObject = if (resultTy.IsReferenceType() || resultTy.IsRef() || resultCGType.IsReference()) {
-        result
-    } else {
-        let objectValue = irBuilder.CallValueIntrinsicAlloc(resultTy)
-        irBuilder.StoreValueToObjectPayload(objectValue, result, resultTy)
-        objectValue
-    }
-    irBuilder.CreateStore(resultObject, returnSlot)
-    irBuilder.CreateRetVoid()
+        callArgs, methodTypeInfoArg, name: "ifwrap.call")
+    EmitExpectedSlotWrapperReturn(irBuilder, wrapper, expectedCGType, expectedTy.GetReturnType(),
+        methodTy.GetReturnType(), result)
 }
 
-private func OuterTypeInfoForFunction(cgMod: CGModule, targetType: ClassType, entry: InterfaceFunctionEntry,
+private func GetWrapperMethodTypeInfoArg(expectedCGType: CGFunctionType, wrapper: LLVMValueRef): Option<LLVMValueRef> {
+    if (let Some(index) <- expectedCGType.GetMethodTypeInfoIndex()) {
+        return Some(unsafe { LLVMGetParam(wrapper, UInt32(index)) })
+    }
+    if (let Some(index2) <- expectedCGType.GetStaticMethodTypeInfoIndex()) {
+        return Some(unsafe { LLVMGetParam(wrapper, UInt32(index2)) })
+    }
+    return None
+}
+
+private func ConvertExpectedArgForMethod(irBuilder: IRBuilder2, rawArg: LLVMValueRef, expectedParamTy: Type,
+    methodParamTy: Type, idx: Int64): (LLVMValueRef, Type) {
+    if (methodParamTy.IsGeneric()) {
+        return (rawArg, expectedParamTy)
+    }
+    if (ShouldUnboxObjectForTarget(expectedParamTy, methodParamTy)) {
+        return (UnboxObjectValue(irBuilder, rawArg, methodParamTy, true, "ifwrap.arg.${idx}"), methodParamTy)
+    }
+    if (expectedParamTy.IsEqual(methodParamTy) || VirtualParamTypeMatches(expectedParamTy, methodParamTy)) {
+        return (rawArg, expectedParamTy)
+    }
+    let targetLLVMType = CGType.GetOrCreate(irBuilder.GetCGModule(), methodParamTy).GetLLVMType()
+    return (CastValueToType(irBuilder, rawArg, expectedParamTy, methodParamTy, targetLLVMType), methodParamTy)
+}
+
+private func EmitExpectedSlotWrapperReturn(irBuilder: IRBuilder2, wrapper: LLVMValueRef,
+    expectedCGType: CGFunctionType, expectedRetTy: Type, methodRetTy: Type, result: LLVMValueRef): Unit {
+    if (expectedCGType.HasSRet()) {
+        let returnSlot = unsafe { LLVMGetParam(wrapper, 0u32) }
+        irBuilder.CreateStore(ConvertReturnForExpectedSlot(irBuilder, result, methodRetTy, expectedRetTy), returnSlot)
+        irBuilder.CreateRetVoid()
+        return
+    }
+    if (expectedRetTy.IsNothing() || expectedRetTy.IsVoid()) {
+        irBuilder.CreateRetVoid()
+        return
+    }
+    irBuilder.CreateRet(ConvertReturnForDirectReturn(irBuilder, result, methodRetTy, expectedRetTy))
+}
+
+private func ConvertReturnForExpectedSlot(irBuilder: IRBuilder2, result: LLVMValueRef, methodRetTy: Type,
+    expectedRetTy: Type): LLVMValueRef {
+    if (expectedRetTy.IsGeneric()) {
+        return BoxValueForGenericSlot(irBuilder, result, methodRetTy)
+    }
+    if (ShouldUnboxObjectForTarget(methodRetTy, expectedRetTy)) {
+        return UnboxObjectValue(irBuilder, result, expectedRetTy, false, "ifwrap.ret")
+    }
+    if (methodRetTy.IsEqual(expectedRetTy) || VirtualReturnTypeMatches(expectedRetTy, methodRetTy)) {
+        return result
+    }
+    return CastValueToType(irBuilder, result, methodRetTy, expectedRetTy,
+        CGType.GetOrCreate(irBuilder.GetCGModule(), expectedRetTy).GetLLVMType())
+}
+
+private func ConvertReturnForDirectReturn(irBuilder: IRBuilder2, result: LLVMValueRef, methodRetTy: Type,
+    expectedRetTy: Type): LLVMValueRef {
+    if (expectedRetTy.IsGeneric()) {
+        return BoxValueForGenericSlot(irBuilder, result, methodRetTy)
+    }
+    if (ShouldUnboxObjectForTarget(methodRetTy, expectedRetTy)) {
+        return UnboxObjectValue(irBuilder, result, expectedRetTy, false, "ifwrap.ret")
+    }
+    if (methodRetTy.IsEqual(expectedRetTy) || VirtualReturnTypeMatches(expectedRetTy, methodRetTy)) {
+        return result
+    }
+    return CastValueToType(irBuilder, result, methodRetTy, expectedRetTy,
+        CGType.GetOrCreate(irBuilder.GetCGModule(), expectedRetTy).GetLLVMType())
+}
+
+private func BoxValueForGenericSlot(irBuilder: IRBuilder2, result: LLVMValueRef, resultTy: Type): LLVMValueRef {
+    let resultCGType = CGType.GetOrCreate(irBuilder.GetCGModule(), resultTy)
+    if (resultTy.IsReferenceType() || resultTy.IsRef() || resultCGType.IsReference()) {
+        return result
+    }
+    let objectValue = irBuilder.CallValueIntrinsicAlloc(resultTy)
+    irBuilder.StoreValueToObjectPayload(objectValue, result, resultTy)
+    return objectValue
+}
+
+private func ShouldUnboxObjectForTarget(sourceTy: Type, targetTy: Type): Bool {
+    if (!IsObjectReferenceType(sourceTy)) {
+        return false
+    }
+    let targetBase = targetTy.StripAllRefs()
+    return targetBase.IsValueType() || targetBase.IsGeneric()
+}
+
+private func IsObjectReferenceType(ty: Type): Bool {
+    if (ty.IsGeneric()) {
+        return true
+    }
+    let baseTy = ty.StripAllRefs()
+    return baseTy.IsClassOrArray() || baseTy.IsBox() || baseTy.IsThis()
+}
+
+private func UnboxObjectValue(irBuilder: IRBuilder2, objectValue: LLVMValueRef, targetTy: Type, forArgument: Bool,
+    name: String): LLVMValueRef {
+    let valueTy = targetTy.StripAllRefs()
+    let valueCGType = CGType.GetOrCreate(irBuilder.GetCGModule(), valueTy)
+    let payload = irBuilder.GetPayloadFromObject(objectValue)
+    let payloadType = unsafe { LLVMPointerType(valueCGType.GetLLVMType(), 1u32) }
+    let typedPayload = irBuilder.CreateBitCast(payload, payloadType, name: name + ".payload")
+    if (forArgument && targetTy.IsRef()) {
+        return typedPayload
+    }
+    return irBuilder.CreateLoad(valueCGType.GetLLVMType(), typedPayload, name: name + ".value")
+}
+
+private func OuterTypeInfoForFunction(cgMod: CGModule, targetType: Type, entry: InterfaceFunctionEntry,
     i8PtrType: LLVMTypeRef): LLVMValueRef {
     if (let Some(method) <- entry.implementation) {
         if (let Some(parent) <- method.GetParentCustomTypeDef()) {
@@ -369,7 +564,7 @@ private func CoreObjectTypeInfoAsI8Ptr(cgMod: CGModule, i8PtrType: LLVMTypeRef):
     return unsafe { LLVMConstBitCast(objectTypeInfo, i8PtrType) }
 }
 
-private func CollectImplementedInterfaces(def: ClassDef): ArrayList<ClassType> {
+private func CollectImplementedInterfaces(def: CustomTypeDef): ArrayList<ClassType> {
     let out = ArrayList<ClassType>()
     for (interfaceTy in def.GetImplementedInterfaceTys()) {
         AddInterfaceType(out, interfaceTy)
@@ -394,7 +589,7 @@ private func AddInterfaceType(out: ArrayList<ClassType>, interfaceTy: ClassType)
     out.add(interfaceTy)
 }
 
-private func IsDirectInterface(def: ClassDef, interfaceTy: ClassType): Bool {
+private func IsDirectInterface(def: CustomTypeDef, interfaceTy: ClassType): Bool {
     for (directTy in def.GetImplementedInterfaceTys()) {
         if (directTy.GetClassDef().nodeId == interfaceTy.GetClassDef().nodeId) {
             return true
@@ -412,8 +607,22 @@ private func RequireClassType(def: ClassDef): ClassType {
     throw IllegalStateException("class-like def has no class type: " + def.GetIdentifier())
 }
 
-private func ExtensionDefName(targetType: ClassType, inheritedType: ClassType): String {
+private func RequireCustomType(def: CustomTypeDef): Type {
+    if (let Some(ty) <- def.GetType()) {
+        return ty
+    }
+    throw IllegalStateException("custom def has no type: " + def.GetIdentifier())
+}
+
+private func ExtensionDefName(targetType: Type, inheritedType: ClassType): String {
     return CGType.GetRuntimeTypeName(targetType) + ".ed." + CGType.GetRuntimeTypeName(inheritedType)
+}
+
+private func TargetPackageName(targetType: Type): String {
+    if (let Some(customTy) <- (targetType.StripAllRefs() as CustomType)) {
+        return customTy.GetCustomTypeDef().GetPackageName()
+    }
+    return ""
 }
 
 private func SameRootPackage(left: String, right: String): Bool {
