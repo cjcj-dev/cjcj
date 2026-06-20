@@ -3612,17 +3612,23 @@ public class Translator {
     }
 
     private func TranslateCompoundAssign(expr: AstAssignExpr, leftExpr: AstExpr, rightExpr: AstExpr): Option<Value> {
-        if (expr.op == AstTokenKind.AND_ASSIGN || expr.op == AstTokenKind.OR_ASSIGN) {
-            throw IllegalArgumentException("not yet ported in faithful AST2CHIR: short-circuit compound assignment")
-        }
         let leftValueInfo = TranslateExprAsLeftValue(leftExpr)
         let lhsValue = LoadLeftValue(leftValueInfo, chirTy.TranslateType(RequireAstTy(leftExpr))) ??
             throw IllegalStateException("faithful AST2CHIR compound lhs produced no value")
-        let rhsValue = Translator.TranslateASTNode(rightExpr, this) ??
-            throw IllegalStateException("faithful AST2CHIR compound rhs produced no value")
-        let opResult = builder.CreateBinaryExpression(ToCHIRCompoundAssignOp(expr.op),
-            lhsValue.GetType() ?? chirTy.TranslateType(RequireAstTy(leftExpr)), lhsValue, rhsValue, CurrentBlock())
-        let compoundValue = RequireResult(opResult)
+        var compoundValue: Value
+        if (expr.op == AstTokenKind.AND_ASSIGN) {
+            compoundValue = TransShortCircuitAnd(lhsValue, rightExpr) ??
+                throw IllegalStateException("faithful AST2CHIR compound &&= produced no value")
+        } else if (expr.op == AstTokenKind.OR_ASSIGN) {
+            compoundValue = TransShortCircuitOr(lhsValue, rightExpr) ??
+                throw IllegalStateException("faithful AST2CHIR compound ||= produced no value")
+        } else {
+            let rhsValue = Translator.TranslateASTNode(rightExpr, this) ??
+                throw IllegalStateException("faithful AST2CHIR compound rhs produced no value")
+            let opResult = builder.CreateBinaryExpression(ToCHIRCompoundAssignOp(expr.op),
+                lhsValue.GetType() ?? chirTy.TranslateType(RequireAstTy(leftExpr)), lhsValue, rhsValue, CurrentBlock())
+            compoundValue = RequireResult(opResult)
+        }
         StoreToLeftValue(leftValueInfo, compoundValue)
         return None
     }
@@ -3819,25 +3825,57 @@ public class Translator {
     }
 
     private func TranslateVArrayAssign(assign: AstAssignExpr, subscriptExpr: AstSubscriptExpr, rightExpr: AstExpr): Unit {
-        if (IsCompoundAssignOp(assign.op)) {
-            throw IllegalArgumentException("not yet ported in faithful AST2CHIR: compound VArray assignment")
-        }
         if (subscriptExpr.indexExprs.size != 1) {
             throw IllegalArgumentException("faithful AST2CHIR VArray assignment expects exactly one index")
         }
+        let elementTy = chirTy.TranslateType(RequireAstTy(subscriptExpr))
         let baseExpr = RequireExpr(subscriptExpr.baseExpr, "VArray assign base")
-        let baseLeftValueInfo = TranslateExprAsLeftValue(baseExpr)
-        if (!baseLeftValueInfo.path.isEmpty()) {
-            throw IllegalArgumentException("not yet ported in faithful AST2CHIR: nested VArray assignment base path")
+        let baseTy = chirTy.TranslateType(RequireAstTy(baseExpr))
+        if (!IsCompoundAssignOp(assign.op)) {
+            let rhsValue = Translator.TranslateASTNode(rightExpr, this) ??
+                throw IllegalStateException("faithful AST2CHIR VArray assignment rhs produced no value")
+            let rhs = GetDerefedValue(rhsValue)
+            let baseLeftValueInfo = TranslateExprAsLeftValue(baseExpr)
+            let lhsBase = AddressOfLeftValue(baseLeftValueInfo, baseTy)
+            let indexValue = Translator.TranslateASTNode(subscriptExpr.indexExprs[0], this) ??
+                throw IllegalStateException("faithful AST2CHIR VArray assignment index produced no value")
+            CreateVArraySet(lhsBase, rhs, GetDerefedValue(indexValue), elementTy)
+            return
         }
+
+        let baseLeftValueInfo = TranslateExprAsLeftValue(baseExpr)
+        let lhsBase = AddressOfLeftValue(baseLeftValueInfo, baseTy)
+        let loadedBase = RequireResult(builder.CreateLoad(RequireRefBaseType(lhsBase), lhsBase, CurrentBlock()))
         let indexValue = Translator.TranslateASTNode(subscriptExpr.indexExprs[0], this) ??
             throw IllegalStateException("faithful AST2CHIR VArray assignment index produced no value")
-        let rhsValue = Translator.TranslateASTNode(rightExpr, this) ??
-            throw IllegalStateException("faithful AST2CHIR VArray assignment rhs produced no value")
+        let index = GetDerefedValue(indexValue)
         let args = ArrayList<Value>()
-        args.add(baseLeftValueInfo.base)
-        args.add(rhsValue)
-        args.add(indexValue)
+        args.add(loadedBase)
+        args.add(index)
+        let callContext = IntrisicCallContext(kind: IntrinsicKind.VARRAY_GET, args: args)
+        let lhsValue = RequireResult(builder.CreateIntrinsic(elementTy, callContext, CurrentBlock()))
+        var compoundValue: Value
+        if (assign.op == AstTokenKind.AND_ASSIGN) {
+            compoundValue = TransShortCircuitAnd(lhsValue, rightExpr) ??
+                throw IllegalStateException("faithful AST2CHIR VArray &&= produced no value")
+        } else if (assign.op == AstTokenKind.OR_ASSIGN) {
+            compoundValue = TransShortCircuitOr(lhsValue, rightExpr) ??
+                throw IllegalStateException("faithful AST2CHIR VArray ||= produced no value")
+        } else {
+            let rhsValue = Translator.TranslateASTNode(rightExpr, this) ??
+                throw IllegalStateException("faithful AST2CHIR VArray compound rhs produced no value")
+            let opResult = builder.CreateBinaryExpression(ToCHIRCompoundAssignOp(assign.op),
+                lhsValue.GetType() ?? elementTy, lhsValue, rhsValue, CurrentBlock())
+            compoundValue = RequireResult(opResult)
+        }
+        CreateVArraySet(lhsBase, compoundValue, index, elementTy)
+    }
+
+    private func CreateVArraySet(lhs: Value, rhs: Value, index: Value, elementTy: Type): Unit {
+        let args = ArrayList<Value>()
+        args.add(lhs)
+        args.add(CastValueIfNeeded(rhs, elementTy))
+        args.add(index)
         let callContext = IntrisicCallContext(kind: IntrinsicKind.VARRAY_SET, args: args)
         builder.CreateIntrinsic(builder.context.GetUnitTy(), callContext, CurrentBlock())
     }
