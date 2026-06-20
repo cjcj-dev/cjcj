@@ -400,6 +400,11 @@ func TcCheckCondition(typeManager: TypeManager, expr: Expr): Bool {
 
 private func SynCallArg(typeManager: TypeManager, arg: FuncArg): Bool {
     if (let Some(expr) <- arg.expr) {
+        if (Ty.IsTyCorrect(expr.GetTy())) {
+            let concreteExistingTy = TcReplaceIdeal(typeManager, expr)
+            arg.SetTy(concreteExistingTy)
+            return true
+        }
         let exprTy = SynExprShallow(typeManager, expr)
         if (Ty.IsTyCorrect(exprTy)) {
             let concreteTy = TcReplaceIdeal(typeManager, expr)
