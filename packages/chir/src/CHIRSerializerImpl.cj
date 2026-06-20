@@ -123,6 +123,7 @@ class CHIRSerializerImpl {
         fields.add(serializeInterfaceTypes(def))
         fields.add(serializeSuperClassType(def))
         fields.add(if (let Some(structDef) <- (def as StructDef)) { CHIRBoolToWire(structDef.IsCStruct()) } else { "" })
+        fields.add(if (let Some(enumDef) <- (def as EnumDef)) { CHIRBoolToWire(!enumDef.IsExhaustive()) } else { "" })
         lines.add(CHIRWireJoinFields(fields))
     }
 

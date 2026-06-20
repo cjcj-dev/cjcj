@@ -936,7 +936,11 @@ extend ParserImpl {
                 }
                 let localAnnos = ArrayList<Annotation>()
                 ParseAnnotations(localAnnos)
-                if (SeeingIdentifierLike()) {
+                if (Skip(TokenKind.ELLIPSIS)) {
+                    ret.hasEllipsis = true
+                    ret.ellipsisPos = lastToken.Begin()
+                    break
+                } else if (SeeingIdentifierLike()) {
                     let ctor = ParseEnumConstructor(ArrayList<Modifier>(), localAnnos)
                     ctor.outerDecl = ret
                     if (ctor.astKind == ASTKind.FUNC_DECL) {

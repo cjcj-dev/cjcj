@@ -174,6 +174,8 @@ foreign {
         packed: Int32): Unit
     func LLVMFunctionType(returnType: LLVMTypeRef, paramTypes: CPointer<LLVMTypeRef>, paramCount: UInt32, isVarArg: Int32): LLVMTypeRef
     func LLVMGetTypeKind(valueType: LLVMTypeRef): Int32
+    func LLVMCountStructElementTypes(structTy: LLVMTypeRef): UInt32
+    func LLVMGetStructElementTypes(structTy: LLVMTypeRef, dest: CPointer<LLVMTypeRef>): Unit
     func LLVMGetReturnType(functionType: LLVMTypeRef): LLVMTypeRef
     func LLVMCountParamTypes(functionType: LLVMTypeRef): UInt32
     func LLVMGetParamTypes(functionType: LLVMTypeRef, dest: CPointer<LLVMTypeRef>): Unit

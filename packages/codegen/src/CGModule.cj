@@ -53,6 +53,16 @@ public open class CGValue {
     public func IsSRetArg(): Bool { return sRetArg }
 }
 
+public class MTableInterfaceInfo {
+    public let interfaceTy: Type
+    public let candidateTy: Option<Type>
+
+    public init(interfaceTy: Type, candidateTy: Option<Type>) {
+        this.interfaceTy = interfaceTy
+        this.candidateTy = candidateTy
+    }
+}
+
 public class CGModule {
     private let cgCtx: CGContext
     private var module: Option<LLVMModuleHandle>
@@ -64,6 +74,9 @@ public class CGModule {
     private let externalExtensionDefs: ArrayList<LLVMValueRef> = ArrayList<LLVMValueRef>()
     private let nonExternalExtensionDefs: ArrayList<LLVMValueRef> = ArrayList<LLVMValueRef>()
     private let extensionDefStartIndices: HashMap<String, Int64> = HashMap<String, Int64>()
+    private let extensionDefInterfaces: HashMap<String, ArrayList<MTableInterfaceInfo>> =
+        HashMap<String, ArrayList<MTableInterfaceInfo>>()
+    private let enumClassificationStack: HashSet<Int64> = HashSet<Int64>()
     private var diBuilder: Option<DIBuilder> = None
 
     public init(subCHIRPackage: SubCHIRPackage, cgPkgCtx: CGPkgContext) {
@@ -115,6 +128,8 @@ public class CGModule {
         externalExtensionDefs.clear()
         nonExternalExtensionDefs.clear()
         extensionDefStartIndices.clear()
+        extensionDefInterfaces.clear()
+        enumClassificationStack.clear()
         cgCtx.Clear()
         cgCtx.GetLLVMContext().close()
     }
@@ -557,6 +572,40 @@ public class CGModule {
 
     public func GetExtensionDefStart(chirTy: Type): Option<Int64> {
         return extensionDefStartIndices.get(CGType.GetRuntimeTypeName(chirTy.StripAllRefs()))
+    }
+
+    public func RegisterExtensionDefInterfaces(chirTy: Type, interfaces: ArrayList<MTableInterfaceInfo>): Unit {
+        let copied = ArrayList<MTableInterfaceInfo>()
+        for (interfaceInfo in interfaces) {
+            copied.add(interfaceInfo)
+        }
+        extensionDefInterfaces[CGType.GetRuntimeTypeName(chirTy.StripAllRefs())] = copied
+    }
+
+    public func GetExtensionDefInterfaces(chirTy: Type): ArrayList<MTableInterfaceInfo> {
+        let out = ArrayList<MTableInterfaceInfo>()
+        if (let Some(interfaces) <- extensionDefInterfaces.get(CGType.GetRuntimeTypeName(chirTy.StripAllRefs()))) {
+            for (interfaceInfo in interfaces) {
+                out.add(interfaceInfo)
+            }
+        }
+        return out
+    }
+
+    public func EnterEnumClassification(defId: Int64): Bool {
+        if (enumClassificationStack.contains(defId)) {
+            return false
+        }
+        enumClassificationStack.add(defId)
+        return true
+    }
+
+    public func ExitEnumClassification(defId: Int64): Unit {
+        enumClassificationStack.remove(defId)
+    }
+
+    public func IsEnumClassificationActive(defId: Int64): Bool {
+        return enumClassificationStack.contains(defId)
     }
 
     public static func GetDataLayoutString(target: TripleInfo): String {

@@ -296,6 +296,7 @@ class CHIRDeserializerImpl {
                 }
             }
             if (let Some(enumDef) <- (def as EnumDef)) {
+                enumDef.SetNonExhaustive(CHIRWireToBool(CHIRFieldAt(fields, 25)))
                 for (ctorText in CHIRWireSplitList(CHIRFieldAt(fields, 9))) {
                     if (ctorText.isEmpty()) {
                         continue

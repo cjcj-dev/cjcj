@@ -17,6 +17,7 @@ public class EnumCtorInfo {
 public class EnumDef <: CustomTypeDef {
     private var enumType: Option<EnumType> = None
     private let ctors: ArrayList<EnumCtorInfo> = ArrayList<EnumCtorInfo>()
+    private var nonExhaustive: Bool = false
 
     public init(packageName: String, identifier: String) {
         super(packageName, identifier, identifier, CustomDefKind.TYPE_ENUM)
@@ -58,7 +59,27 @@ public class EnumDef <: CustomTypeDef {
         return GetCtors()
     }
 
+    public func SetNonExhaustive(value: Bool): Unit {
+        nonExhaustive = value
+    }
+
+    public func IsExhaustive(): Bool {
+        return !nonExhaustive
+    }
+
+    public func IsAllCtorsTrivial(): Bool {
+        for (ctor in ctors) {
+            if (!ctor.payloadTypes.isEmpty()) {
+                return false
+            }
+        }
+        return true
+    }
+
     public func IsOptionLike(): Bool {
+        if (!IsExhaustive()) {
+            return false
+        }
         if (ctors.size != 2) {
             return false
         }
