@@ -2,7 +2,12 @@ package cangjie_compiler::frontend
 
 import cangjie_compiler::ast.Package as RealASTPackage
 import cangjie_compiler::ast.PackageDecl as RealASTPackageDecl
+import cangjie_compiler::mangle.BaseMangler as RealBaseMangler
+import cangjie_compiler::mangle.MangleAstAdapter as RealMangleAstAdapter
+import cangjie_compiler::mangle.MangleDecl as RealMangleDecl
+import cangjie_compiler::mangle.ManglerContext as RealManglerContext
 import cangjie_compiler::sema.CompilerInstance as FaithfulSemaCompilerInstance
+import cangjie_compiler::sema.Desugar.DesugarBeforeTypeCheck as FaithfulDesugarBeforeTypeCheck
 import cangjie_compiler::sema.TypeCheckExpr.TypeChecker as FaithfulSemaTypeChecker
 import cangjie_compiler::meta_transformation.MetaTransformPluginBuilder
 import cangjie_compiler::meta_transformation.NativeMetaTransformPlugin
@@ -111,7 +116,7 @@ public class CompilerInstance {
     public let bufferCache: HashMap<String, SrcCodeCacheInfo> = HashMap<String, SrcCodeCacheInfo>()
     public let tokensEvalInMacro: ArrayList<String> = ArrayList<String>()
     public var currentPkg: Option<Package> = None
-    public let mangler: BaseMangler = BaseMangler()
+    public let mangler: RealBaseMangler = RealBaseMangler()
     public let mangledName2DeclMap: HashMap<String, Decl> = HashMap<String, Decl>()
     public var releaseCHIRMemory: Bool = true
     public var needToOptString: Bool = false
@@ -383,22 +388,15 @@ public class CompilerInstance {
     }
 
     public func PerformMangling(): Bool {
+        let adapter = RealMangleAstAdapter()
+        PrepareManglerContexts(mangler, adapter)
         mangler.lambdaCounter = cachedInfo.lambdaCounter
-        ManglingHelpFunction(mangler)
+        ManglingHelpFunction(mangler, adapter)
         cachedInfo.lambdaCounter = mangler.lambdaCounter
         if (!srcPkgs.isEmpty() && invocation.globalOptions.NeedDumpAST()) {
             DumpAST(GetSourcePackages(), invocation.globalOptions.output, "mangle", dumpToScreen: invocation.globalOptions.dumpToScreen)
         }
         return true
-    }
-
-    public func IsRealPipelineVerbose(): Bool {
-        return EnvFlagEnabled("CJ_REAL_PIPELINE_VERBOSE")
-    }
-
-    private func EnvFlagEnabled(name: String): Bool {
-        let value = invocation.globalOptions.environment.allVariables.get(name) ?? ""
-        return value == "1" || value == "true" || value == "TRUE" || value == "on" || value == "yes"
     }
 
     private func CaptureRealASTPackages(): Bool {
@@ -421,6 +419,9 @@ public class CompilerInstance {
         }
         if (pkgs.isEmpty()) {
             return true
+        }
+        for (pkg in pkgs) {
+            FaithfulDesugarBeforeTypeCheck(pkg)
         }
         let semaInstance = FaithfulSemaCompilerInstance()
         semaInstance.globalOptions = invocation.globalOptions
@@ -467,9 +468,6 @@ public class CompilerInstance {
         }
         if (let Some(realPkg) <- BuildRealCHIRForASTPackage(this, realASTPkg)) {
             chirData.AppendNewRealPackage(realPkg)
-            if (IsRealPipelineVerbose()) {
-                eprintln("[real-pipeline] lowered package '" + pkg.fullPackageName + "' via real AST2CHIR")
-            }
         } else {
             if (diag.GetErrorCount() != 0) {
                 return false
@@ -866,86 +864,113 @@ public class CompilerInstance {
         return true
     }
 
-    private func ManglingHelpFunction(baseMangler: BaseMangler): Unit {
+    private func PrepareManglerContexts(baseMangler: RealBaseMangler, adapter: RealMangleAstAdapter): Unit {
+        for (pkg in GetPackages()) {
+            let pkgName = RealManglerContext.ReduceUnitTestPackageName(pkg.fullPackageName)
+            let ctx = if (let Some(value) <- baseMangler.manglerCtxTable.get(pkgName)) {
+                value
+            } else {
+                baseMangler.PrepareContextForPackage(adapter.ConvertPackage(pkg))
+            }
+            adapter.CollectLocalDecls(ctx, pkg)
+        }
+        for (pkg in importManager.GetAllImportedPackages()) {
+            let pkgName = RealManglerContext.ReduceUnitTestPackageName(pkg.fullPackageName)
+            let ctx = if (let Some(value) <- baseMangler.manglerCtxTable.get(pkgName)) {
+                value
+            } else {
+                baseMangler.PrepareContextForPackage(adapter.ConvertPackage(pkg))
+            }
+            adapter.CollectLocalDecls(ctx, pkg)
+        }
+    }
+
+    private func ManglingHelpFunction(baseMangler: RealBaseMangler, adapter: RealMangleAstAdapter): Unit {
         let seen = HashSet<String>()
         for (pkg in GetPackages()) {
             for (file in pkg.files) {
                 for (decl in file.decls) {
-                    mangleDeclTree(baseMangler, pkg.fullPackageName, decl, seen)
+                    mangleDeclTree(baseMangler, adapter, pkg.fullPackageName, decl, seen)
                 }
             }
             for (decl in pkg.genericInstantiatedDecls) {
-                mangleDeclTree(baseMangler, pkg.fullPackageName, decl, seen)
+                mangleDeclTree(baseMangler, adapter, pkg.fullPackageName, decl, seen)
             }
         }
         for (pkg in importManager.GetAllImportedPackages()) {
             for (file in pkg.files) {
                 for (decl in file.decls) {
                     if (decl.isUsedImports || !decl.TestAttr(Attribute.IMPORTED)) {
-                        mangleDeclTree(baseMangler, pkg.fullPackageName, decl, seen)
+                        mangleDeclTree(baseMangler, adapter, pkg.fullPackageName, decl, seen)
                     }
                 }
                 for (decl in file.exportedInternalDecls) {
                     if (decl.isUsedImports || !decl.TestAttr(Attribute.IMPORTED)) {
-                        mangleDeclTree(baseMangler, pkg.fullPackageName, decl, seen)
+                        mangleDeclTree(baseMangler, adapter, pkg.fullPackageName, decl, seen)
                     }
                 }
             }
             for (decl in pkg.genericInstantiatedDecls) {
                 if (decl.IsNominalDecl()) {
-                    mangleDeclTree(baseMangler, pkg.fullPackageName, decl, seen)
+                    mangleDeclTree(baseMangler, adapter, pkg.fullPackageName, decl, seen)
                 }
             }
         }
     }
 
-    private func mangleDeclTree(baseMangler: BaseMangler, pkgName: String, decl: Decl, seen: HashSet<String>): Unit {
-        let ownerKey = if (let Some(outer) <- decl.outerDecl) {
-            "::owner::" + outer.identifier.Val() + "::" + ASTKindName(outer.astKind) + "::" +
-                outer.begin.line.toString() + ":" + outer.begin.column.toString()
-        } else {
-            ""
-        }
-        let defaultOwnerKey = if (let Some(funcDecl) <- (decl as FuncDecl)) {
-            if (funcDecl.TestAttr(Attribute.HAS_INITIAL)) {
-                if (let Some(owner) <- funcDecl.ownerFunc) {
-                    let ownerIdentity = if (!owner.rawMangleName.isEmpty()) {
-                        owner.rawMangleName
-                    } else if (!owner.mangledName.isEmpty()) {
-                        owner.mangledName
-                    } else {
-                        owner.identifier.Val() + "::" + ASTKindName(owner.astKind) + "::" +
-                            owner.begin.line.toString() + ":" + owner.begin.column.toString()
-                    }
-                    "::default-owner::" + ownerIdentity
-                } else {
-                    ""
-                }
-            } else {
-                ""
-            }
-        } else {
-            ""
-        }
-        let key = pkgName + ownerKey + defaultOwnerKey + "::" + decl.identifier.Val() + "::" + ASTKindName(decl.astKind)
+    private func mangleDeclTree(
+        baseMangler: RealBaseMangler,
+        adapter: RealMangleAstAdapter,
+        pkgName: String,
+        decl: Decl,
+        seen: HashSet<String>
+    ): Unit {
+        let prefix = ArrayList<RealMangleDecl>()
+        mangleDeclTreeWithPrefix(baseMangler, adapter, pkgName, decl, seen, prefix)
+    }
+
+    private func mangleDeclTreeWithPrefix(
+        baseMangler: RealBaseMangler,
+        adapter: RealMangleAstAdapter,
+        pkgName: String,
+        decl: Decl,
+        seen: HashSet<String>,
+        prefix: ArrayList<RealMangleDecl>
+    ): Unit {
+        let key = pkgName + "::" + ASTKindName(decl.astKind) + "::" + decl.identifier.Val() + "::" +
+            decl.rawMangleName + "::" + decl.mangledName + "::" + decl.exportId + "::" +
+            decl.begin.hashCode().toString() + ":" + decl.end.hashCode().toString()
         if (seen.contains(key)) {
             return
         }
         seen.add(key)
         decl.fullPackageName = pkgName
-        decl.mangledName = if (decl.TestAttr(Attribute.IMPORTED) && !decl.rawMangleName.isEmpty()) {
-            decl.rawMangleName
-        } else {
-            baseMangler.Mangle(decl)
+        if (decl.astKind == ASTKind.MAIN_DECL) {
+            return
         }
+        if (!Ty.IsTyCorrect(decl.GetTy())) {
+            return
+        }
+        let convertedDecl = adapter.ConvertDecl(decl)
+        decl.mangledName = baseMangler.Mangle(convertedDecl, prefix)
+        convertedDecl.mangledName = decl.mangledName
         if (mangledName2DeclMap.contains(decl.mangledName)) {
             mangledName2DeclMap.remove(decl.mangledName)
         }
         mangledName2DeclMap.add(decl.mangledName, decl)
+        if (let Some(propDecl) <- (decl as PropDecl)) {
+            for (getter in propDecl.getters) {
+                mangleDeclTreeWithPrefix(baseMangler, adapter, pkgName, getter, seen, prefix)
+            }
+            for (setter in propDecl.setters) {
+                mangleDeclTreeWithPrefix(baseMangler, adapter, pkgName, setter, seen, prefix)
+            }
+        }
+        prefix.add(convertedDecl)
         if (let Some(generic) <- decl.generic) {
             for (typeParam in generic.typeParameters) {
                 typeParam.outerDecl = Some(decl)
-                mangleDeclTree(baseMangler, pkgName, typeParam, seen)
+                mangleDeclTreeWithPrefix(baseMangler, adapter, pkgName, typeParam, seen, prefix)
             }
         }
         if (let Some(funcDecl) <- (decl as FuncDecl)) {
@@ -953,21 +978,22 @@ public class CompilerInstance {
                 if (let Some(bodyGeneric) <- body.generic) {
                     for (typeParam2 in bodyGeneric.typeParameters) {
                         typeParam2.outerDecl = Some(decl)
-                        mangleDeclTree(baseMangler, pkgName, typeParam2, seen)
+                        mangleDeclTreeWithPrefix(baseMangler, adapter, pkgName, typeParam2, seen, prefix)
                     }
                 }
                 for (paramList in body.paramLists) {
                     for (param in paramList.params) {
                         if (let Some(desugarDecl) <- param.desugarDecl) {
-                            mangleDeclTree(baseMangler, pkgName, desugarDecl, seen)
+                            mangleDeclTreeWithPrefix(baseMangler, adapter, pkgName, desugarDecl, seen, prefix)
                         }
                     }
                 }
             }
         }
         for (member in decl.GetMemberDecls()) {
-            mangleDeclTree(baseMangler, pkgName, member, seen)
+            mangleDeclTreeWithPrefix(baseMangler, adapter, pkgName, member, seen, prefix)
         }
+        prefix.remove(at: prefix.size - 1)
     }
 
     private func collectDeclCacheSummary(pkg: Package, file: File, decl: Decl): Unit {

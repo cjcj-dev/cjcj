@@ -1,9 +1,6 @@
 package cangjie_compiler::codegen
 
 import std.collection.*
-import cangjie_compiler::chir.FuncKind
-import cangjie_compiler::chir.Function
-import cangjie_compiler::chir.GlobalValue
 import cangjie_compiler::chir.Type
 import cangjie_compiler::chir.Value
 import cangjie_compiler::mangle.MANGLE_NESTED_PREFIX
@@ -11,17 +8,6 @@ import cangjie_compiler::mangle.MANGLE_SUFFIX
 import cangjie_compiler::utils.HashString64
 
 public func GetCodeGenGlobalName(value: Value): String {
-    if (let Some(fn) <- (value as Function)) {
-        if (fn.GetFuncKind() == FuncKind.DEFAULT_PARAMETER_FUNC) {
-            return fn.GetIdentifier()
-        }
-    }
-    if (let Some(globalValue) <- (value as GlobalValue)) {
-        let rawName = globalValue.GetRawMangledName()
-        if (!rawName.isEmpty()) {
-            return rawName
-        }
-    }
     return value.GetIdentifierWithoutPrefix()
 }
 

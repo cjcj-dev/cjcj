@@ -43,128 +43,6 @@ private func AddImportedDeclIfMissing(values: ArrayList<Decl>, decl: Decl): Unit
     values.add(decl)
 }
 
-private func MarkImportedDeclUsed(decl: Decl): Unit {
-    if (!decl.TestAttr(Attribute.IMPORTED)) {
-        return
-    }
-    if (decl.isUsedImports) {
-        return
-    }
-    decl.isUsedImports = true
-    if (let Some(propDecl) <- (decl as PropDecl)) {
-        for (getter in propDecl.getters) {
-            MarkImportedDeclUsed(getter)
-        }
-        for (setter in propDecl.setters) {
-            MarkImportedDeclUsed(setter)
-        }
-    }
-    if (let Some(outer) <- decl.outerDecl) {
-        MarkImportedDeclUsed(outer)
-    }
-}
-
-private func AddSyntheticImportedTarget(source: Node, decl: Decl): Unit {
-    if (!decl.TestAttr(Attribute.IMPORTED)) {
-        return
-    }
-    MarkImportedDeclUsed(decl)
-    if (let Some(file) <- source.curFile) {
-        if (let Some(pkg) <- file.curPackage) {
-            AddImportedDeclIfMissing(pkg.srcImportedNonGenericDecls, decl)
-        }
-    }
-}
-
-private func AddSyntheticImportedTy(source: Node, ty: Ty): Unit {
-    if (let Some(structTy) <- (ty as StructTy)) {
-        if (let Some(decl) <- structTy.decl) {
-            AddSyntheticImportedDeclAndDependencies(source, decl)
-        }
-    } else if (let Some(classTy) <- (ty as ClassTy)) {
-        if (let Some(decl) <- classTy.decl) {
-            AddSyntheticImportedDeclAndDependencies(source, decl)
-        }
-    } else if (let Some(enumTy) <- (ty as EnumTy)) {
-        if (let Some(decl) <- enumTy.decl) {
-            AddSyntheticImportedDeclAndDependencies(source, decl)
-        }
-    } else if (let Some(interfaceTy) <- (ty as InterfaceTy)) {
-        if (let Some(decl) <- interfaceTy.decl) {
-            AddSyntheticImportedDeclAndDependencies(source, decl)
-        }
-    } else if (let Some(funcTy) <- (ty as FuncTy)) {
-        for (paramTy in funcTy.paramTys) {
-            AddSyntheticImportedTy(source, paramTy)
-        }
-        AddSyntheticImportedTy(source, funcTy.retTy)
-    }
-    for (arg in ty.typeArgs) {
-        AddSyntheticImportedTy(source, arg)
-    }
-}
-
-private func AddSyntheticImportedNominalMemberDependencies(source: Node, decl: Decl): Unit {
-    if (!decl.IsNominalDecl()) {
-        return
-    }
-    if (let Some(inheritableDecl) <- (decl as InheritableDecl)) {
-        for (inheritedType in inheritableDecl.inheritedTypes) {
-            if (let Some(inheritedTy) <- inheritedType.GetTy()) {
-                AddSyntheticImportedTy(source, inheritedTy)
-            }
-            if (let Some(target) <- inheritedType.GetTarget()) {
-                AddSyntheticImportedDeclAndDependencies(source, target)
-            }
-        }
-    }
-    for (member in decl.GetMemberDecls()) {
-        if (let Some(funcDecl) <- (member as FuncDecl)) {
-            if (let Some(funcTy) <- funcDecl.GetTy()) {
-                AddSyntheticImportedTy(source, funcTy)
-            }
-        } else if (let Some(propDecl) <- (member as PropDecl)) {
-            if (let Some(propTy) <- propDecl.GetTy()) {
-                AddSyntheticImportedTy(source, propTy)
-            }
-            for (getter in propDecl.getters) {
-                if (let Some(getterTy) <- getter.GetTy()) {
-                    AddSyntheticImportedTy(source, getterTy)
-                }
-            }
-            for (setter in propDecl.setters) {
-                if (let Some(setterTy) <- setter.GetTy()) {
-                    AddSyntheticImportedTy(source, setterTy)
-                }
-            }
-        } else if (let Some(varDecl) <- (member as VarDecl)) {
-            if (let Some(varTy) <- varDecl.GetTy()) {
-                AddSyntheticImportedTy(source, varTy)
-            }
-        }
-    }
-}
-
-private func AddSyntheticImportedDeclAndDependencies(source: Node, decl: Decl): Unit {
-    let wasUsed = decl.isUsedImports
-    AddSyntheticImportedTarget(source, decl)
-    if (!wasUsed && decl.TestAttr(Attribute.GENERIC)) {
-        AddSyntheticImportedNominalMemberDependencies(source, decl)
-    }
-    if (let Some(outer) <- decl.outerDecl) {
-        let outerWasUsed = outer.isUsedImports
-        AddSyntheticImportedTarget(source, outer)
-        if (!outerWasUsed && outer.TestAttr(Attribute.GENERIC)) {
-            AddSyntheticImportedNominalMemberDependencies(source, outer)
-        }
-    }
-    if (!decl.IsNominalDecl()) {
-        if (let Some(ty) <- decl.GetTy()) {
-            AddSyntheticImportedTy(source, ty)
-        }
-    }
-}
-
 private func FindPackageDecl(pkg: Package, fullPackageName: String, name: String,
     context!: Option<ASTContext> = None): Option<Decl> {
     for (decl in pkg.srcImportedNonGenericDecls) {
@@ -340,7 +218,6 @@ private func CreateAppendCall(typeManager: TypeManager, pkg: Package, litConstEx
                         }
                         if (found.size == 1) {
                             let toStringDecl = found[0]
-                            AddSyntheticImportedDeclAndDependencies(partExpr, toStringDecl)
                             let toStringFunc = CreateMemberAccess(block, toStringDecl)
                             toStringFunc.target = toStringDecl
                             toStringFunc.targets.add(toStringDecl)
@@ -380,7 +257,6 @@ private func CreateAppendCall(typeManager: TypeManager, pkg: Package, litConstEx
         }
     }
     if (let Some(realAppendDecl) <- appendDecl) {
-        AddSyntheticImportedDeclAndDependencies(partExpr, realAppendDecl)
         let appendFunc = CreateMemberAccess(CreateRefExpr(sbItem, partExpr), realAppendDecl)
         appendFunc.target = realAppendDecl
         appendFunc.targets.add(realAppendDecl)
@@ -413,8 +289,6 @@ public func DesugarStrInterpolationExpr(typeManager: TypeManager, pkg: Package, 
     if (let None <- sbDecl.GetTy()) {
         return
     }
-    AddSyntheticImportedDeclAndDependencies(litConstExpr, sbDecl)
-    AddSyntheticImportedNominalMemberDependencies(litConstExpr, sbDecl)
 
     let block = Block()
     CopyBasicInfo(siExpr, block)
@@ -433,7 +307,6 @@ public func DesugarStrInterpolationExpr(typeManager: TypeManager, pkg: Package, 
         return
     }
     let sbCtorDecl = MatchConstructorBySingleParamTy(sbDecl, int64Ty).getOrThrow()
-    AddSyntheticImportedDeclAndDependencies(litConstExpr, sbCtorDecl)
     let sbCtorRef = CreateRefExpr(sbCtorDecl, siExpr)
     let sbCtorCall = CreateCallExpr(sbCtorRef, args, Some(sbCtorDecl), Some(sbTy), CallKind.CALL_OBJECT_CREATION)
     CopyBasicInfo(siExpr, sbCtorCall)
@@ -461,7 +334,6 @@ public func DesugarStrInterpolationExpr(typeManager: TypeManager, pkg: Package, 
     }
     if (toStringDecls.size == 1) {
         let toStringDecl = toStringDecls[0]
-        AddSyntheticImportedDeclAndDependencies(litConstExpr, toStringDecl)
         let toStringFunc = CreateMemberAccess(CreateRefExpr(sbItem, litConstExpr), toStringDecl)
         toStringFunc.target = toStringDecl
         toStringFunc.targets.add(toStringDecl)

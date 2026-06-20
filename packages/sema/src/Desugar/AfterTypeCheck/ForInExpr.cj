@@ -88,16 +88,7 @@ private func AddImportedDeclIfMissing(values: ArrayList<Decl>, decl: Decl): Unit
 }
 
 private func MarkImportedDeclUsed(decl: Decl): Unit {
-    if (!decl.TestAttr(Attribute.IMPORTED)) {
-        return
-    }
-    if (decl.isUsedImports) {
-        return
-    }
-    decl.isUsedImports = true
-    if (let Some(outer) <- decl.outerDecl) {
-        MarkImportedDeclUsed(outer)
-    }
+    let _ = decl
 }
 
 private func AddSyntheticImportedTarget(source: Node, decl: Decl): Unit {
@@ -530,7 +521,6 @@ private func FinishRangeRearrange(forInExpr: ForInExpr, index: VarDecl, stop: Va
     if (let Some(body) <- forInExpr.body) {
         RearrangeRefLoop(forInExpr, forInExpr, body)
     }
-    forInExpr.SetTy(UnitTy())
 }
 
 private func GetRangePatternVarDecl(pattern: Pattern): Option<VarDecl> {
@@ -597,7 +587,6 @@ private func FinishStringDesugar(forInExpr: ForInExpr, index: VarDecl, tmp: VarD
     forInExpr.patternGuard = None
     forInExpr.body = None
     forInExpr.forInKind = ForInKind.FORIN_STRING
-    forInExpr.SetTy(UnitTy())
 }
 
 private func CreateIteratorVar(typeManager: TypeManager, forInExpr: ForInExpr): Option<VarDecl> {
@@ -770,7 +759,6 @@ private func FinishIterDesugar(forInExpr: ForInExpr, iterator: VarDecl, whileExp
     forInExpr.patternGuard = None
     forInExpr.body = None
     forInExpr.forInKind = ForInKind.FORIN_ITER
-    forInExpr.SetTy(UnitTy())
 }
 
 private func DesugarForInIterExpr(typeManager: TypeManager, forInExpr: ForInExpr): Unit {

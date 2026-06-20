@@ -25,8 +25,6 @@ import cangjie_compiler::ast.InterfaceTy as AstInterfaceTy
 import cangjie_compiler::ast.EnumTy as AstEnumTy
 import cangjie_compiler::ast.RefEnumTy as AstRefEnumTy
 import cangjie_compiler::ast.GenericsTy as AstGenericsTy
-import cangjie_compiler::ast.TypeAliasTy as AstTypeAliasTy
-import cangjie_compiler::ast.TypeAliasDecl as AstTypeAliasDecl
 
 public class CHIRTypeCacheEntry {
     public let astTy: AstTy
@@ -162,13 +160,6 @@ private func SameAstTy(left: AstTy, right: AstTy): Bool {
         }
         return false
     }
-    if (let Some(leftAlias) <- (left as AstTypeAliasTy)) {
-        if (let Some(rightAlias) <- (right as AstTypeAliasTy)) {
-            return SameAstTypeAliasDeclOption(leftAlias.declPtr, rightAlias.declPtr) &&
-                SameAstTyList(leftAlias.typeArgs, rightAlias.typeArgs)
-        }
-        return false
-    }
     return SameAstTyList(left.typeArgs, right.typeArgs)
 }
 
@@ -219,14 +210,6 @@ private func SameAstEnumDeclOption(left: Option<AstEnumDecl>, right: Option<AstE
 }
 
 private func SameAstGenericDeclOption(left: Option<AstGenericParamDecl>, right: Option<AstGenericParamDecl>): Bool {
-    if (let Some(leftDecl) <- left) {
-        if (let Some(rightDecl) <- right) { return SameAstDecl(leftDecl, rightDecl) }
-        return false
-    }
-    return right.isNone()
-}
-
-private func SameAstTypeAliasDeclOption(left: Option<AstTypeAliasDecl>, right: Option<AstTypeAliasDecl>): Bool {
     if (let Some(leftDecl) <- left) {
         if (let Some(rightDecl) <- right) { return SameAstDecl(leftDecl, rightDecl) }
         return false
@@ -339,7 +322,6 @@ public class CHIRType {
             case AstTypeKind.TYPE_NOTHING => builder.context.GetNothingType()
             case AstTypeKind.TYPE_CSTRING => builder.context.GetCStringTy()
             case AstTypeKind.TYPE_GENERICS => TranslateGenericType(RequireGenericsTy(ty))
-            case AstTypeKind.TYPE => TranslateTypeAliasType(RequireTypeAliasTy(ty))
             case _ => throw IllegalArgumentException("unsupported AST type kind for CHIRType.TranslateType: ${ty.String()}")
         }
 
@@ -440,15 +422,6 @@ public class CHIRType {
         return builder.context.GetGenericTy(genericDecl.mangledName, genericTy.name)
     }
 
-    private func TranslateTypeAliasType(aliasTy: AstTypeAliasTy): Type {
-        let aliasDecl = RequireTypeAliasDecl(aliasTy)
-        let targetNode = aliasDecl.typeNode ??
-            throw IllegalStateException("type alias declaration has no target type: ${aliasDecl.identifier.Val()}")
-        let targetTy = targetNode.GetTy() ??
-            throw IllegalStateException("type alias target has no semantic type: ${aliasDecl.identifier.Val()}")
-        return TranslateType(targetTy)
-    }
-
     private func TranslateTypeArgs(astArgs: ArrayList<AstTy>): ArrayList<Type> {
         let typeArgs = ArrayList<Type>()
         for (arg in astArgs) {
@@ -527,13 +500,6 @@ public class CHIRType {
         throw IllegalArgumentException("expected GenericsTy, got ${ty.String()}")
     }
 
-    private func RequireTypeAliasTy(ty: AstTy): AstTypeAliasTy {
-        if (let Some(aliasTy) <- (ty as AstTypeAliasTy)) {
-            return aliasTy
-        }
-        throw IllegalArgumentException("expected TypeAliasTy, got ${ty.String()}")
-    }
-
     private func RequireClassDecl(ty: AstClassTy): AstClassDecl {
         if (let Some(decl) <- ty.declPtr) {
             return decl
@@ -567,13 +533,6 @@ public class CHIRType {
             return decl
         }
         throw IllegalStateException("GenericsTy has no decl: ${ty.String()}")
-    }
-
-    private func RequireTypeAliasDecl(ty: AstTypeAliasTy): AstTypeAliasDecl {
-        if (let Some(decl) <- ty.declPtr) {
-            return decl
-        }
-        throw IllegalStateException("TypeAliasTy has no declPtr: ${ty.String()}")
     }
 
     private func RequireClassDef(def: CustomTypeDef): ClassDef {

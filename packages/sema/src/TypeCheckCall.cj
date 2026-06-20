@@ -25,6 +25,13 @@ private class FunctionMatchingUnit {
     }
 }
 
+private class CallInferenceFailure {
+    public var failed: Bool = false
+    public var candidate: Option<FuncDecl> = None
+
+    public init() {}
+}
+
 private func ToBasicPosition(pos: Position): BasicPosition {
     return BasicPosition(pos.fileID, pos.line, pos.column)
 }
@@ -705,31 +712,6 @@ private func FilterCandidates(typeManager: TypeManager, diag: Option<BasicDiagno
     return FilterExtendImplAbstractFunc(typeManager, FilterShadowedFunc(typeFiltered))
 }
 
-private func CompareNumericTys(left: Ty, right: Ty): Int64 {
-    if (SameTy(left, right)) {
-        return 0
-    }
-    if (left.kind == TypeKind.TYPE_IDEAL_INT && right.IsInteger()) {
-        return -1
-    }
-    if (left.kind == TypeKind.TYPE_IDEAL_FLOAT && right.IsFloating()) {
-        return -1
-    }
-    if (right.kind == TypeKind.TYPE_IDEAL_INT && left.IsInteger()) {
-        return 1
-    }
-    if (right.kind == TypeKind.TYPE_IDEAL_FLOAT && left.IsFloating()) {
-        return 1
-    }
-    if (left.IsInteger() && right.IsFloating()) {
-        return -1
-    }
-    if (left.IsFloating() && right.IsInteger()) {
-        return 1
-    }
-    return 0
-}
-
 private func CompareParamTys(typeManager: TypeManager, leftTys: ArrayList<Ty>, rightTys: ArrayList<Ty>): Bool {
     if (leftTys.size != rightTys.size) {
         return false
@@ -739,7 +721,7 @@ private func CompareParamTys(typeManager: TypeManager, leftTys: ArrayList<Ty>, r
         let left = leftTys[idx]
         let right = rightTys[idx]
         if (left.IsNumeric() && right.IsNumeric()) {
-            if (CompareNumericTys(left, right) > 0) {
+            if (CompareIntAndFloat(left, right) == ComparisonRes.GT) {
                 return false
             }
         } else if (!typeManager.IsSubtype(left, right)) {
@@ -773,8 +755,62 @@ private func IsInterfaceFuncWithSameSignature(typeManager: TypeManager, left: Fu
     return false
 }
 
+private func TypeListHasGeneric(tys: ArrayList<Ty>): Bool {
+    for (ty in tys) {
+        if (ty.HasGeneric()) {
+            return true
+        }
+    }
+    return false
+}
+
+private func CompareGenericCandidate(typeManager: TypeManager, left: FunctionMatchingUnit,
+    right: FunctionMatchingUnit, ce: CallExpr): Option<Bool> {
+    if (let None <- GetCurrentGeneric(right.fd, ce)) {
+        return None
+    }
+    if (!TypeListHasGeneric(right.tysInArgOrder)) {
+        return None
+    }
+    if (left.tysInArgOrder.size != right.tysInArgOrder.size) {
+        return Some(false)
+    }
+    let generic = GetCurrentGeneric(right.fd, ce).getOrThrow()
+    let typeMapping = SubstPack()
+    let tyVarsToSolve = ArrayList<GenericsTy>()
+    AddCurrentGenericInstTyVars(typeManager, generic, typeMapping, tyVarsToSolve)
+    if (tyVarsToSolve.isEmpty()) {
+        return Some(false)
+    }
+    let pack = LocTyArgSynArgPack()
+    for (tyVar in tyVarsToSolve) {
+        pack.tyVarsToSolve.add(tyVar)
+    }
+    var idx: Int64 = 0
+    while (idx < left.tysInArgOrder.size) {
+        pack.argTys.add(left.tysInArgOrder[idx])
+        pack.paramTys.add(typeManager.ApplySubstPack(right.tysInArgOrder[idx], typeMapping))
+        idx++
+    }
+    if (let None <- LocalTypeArgumentSynthesis(typeManager, pack).SynthesizeTypeArguments()) {
+        return Some(false)
+    }
+    var pos: Int64 = 0
+    while (pos < left.tysInArgOrder.size) {
+        if (left.tysInArgOrder[pos].IsNumeric() && right.tysInArgOrder[pos].IsNumeric() &&
+            CompareIntAndFloat(left.tysInArgOrder[pos], right.tysInArgOrder[pos]) == ComparisonRes.GT) {
+            return Some(false)
+        }
+        pos++
+    }
+    return Some(true)
+}
+
 private func CompareFuncCandidates(typeManager: TypeManager, left: FunctionMatchingUnit,
-    right: FunctionMatchingUnit): Bool {
+    right: FunctionMatchingUnit, ce: CallExpr): Bool {
+    if (let Some(result) <- CompareGenericCandidate(typeManager, left, right, ce)) {
+        return result
+    }
     if (let Some(leftOuter) <- left.fd.outerDecl) {
         if (let Some(rightOuter) <- right.fd.outerDecl) {
             let sameParamTys = left.tysInArgOrder.size == right.tysInArgOrder.size &&
@@ -901,7 +937,8 @@ private func FilterOverriden(typeManager: TypeManager, candidates: ArrayList<Fun
     }
 }
 
-private func ResolveOverload(typeManager: TypeManager, candidates: ArrayList<FunctionMatchingUnit>): ArrayList<Int64> {
+private func ResolveOverload(typeManager: TypeManager, candidates: ArrayList<FunctionMatchingUnit>,
+    ce: CallExpr): ArrayList<Int64> {
     let targetMark = ArrayList<Bool>()
     for (_ in candidates) {
         targetMark.add(true)
@@ -919,8 +956,8 @@ private func ResolveOverload(typeManager: TypeManager, candidates: ArrayList<Fun
                 otherIdx++
                 continue
             }
-            let leftToRight = CompareFuncCandidates(typeManager, candidates[idx], candidates[otherIdx])
-            let rightToLeft = CompareFuncCandidates(typeManager, candidates[otherIdx], candidates[idx])
+            let leftToRight = CompareFuncCandidates(typeManager, candidates[idx], candidates[otherIdx], ce)
+            let rightToLeft = CompareFuncCandidates(typeManager, candidates[otherIdx], candidates[idx], ce)
             if (leftToRight && !rightToLeft) {
                 targetMark[otherIdx] = false
             } else if (!leftToRight && rightToLeft) {
@@ -1068,6 +1105,27 @@ private func HasRecordedCallTypeArgs(ce: CallExpr): Bool {
     return false
 }
 
+private func AllCallArgsHaveCorrectTy(ce: CallExpr): Bool {
+    for (arg in ce.args) {
+        if (!Ty.IsTyCorrect(arg.GetTy())) {
+            return false
+        }
+    }
+    return true
+}
+
+private func MarkCallInferenceFailure(failure: Option<CallInferenceFailure>, ce: CallExpr, fd: FuncDecl): Unit {
+    if (!AllCallArgsHaveCorrectTy(ce)) {
+        return
+    }
+    if (let Some(value) <- failure) {
+        value.failed = true
+        if (let None <- value.candidate) {
+            value.candidate = Some(fd)
+        }
+    }
+}
+
 private func TyListContains(values: ArrayList<Ty>, ty: Ty): Bool {
     for (value in values) {
         if (SameTy(value, ty)) {
@@ -1099,9 +1157,8 @@ private func AddCurrentGenericInstTyVars(typeManager: TypeManager, generic: Gene
     }
 }
 
-private func InferGenericCallTypeMapping(typeManager: TypeManager, diag: Option<BasicDiagnosticEngine>,
-    ce: CallExpr, fd: FuncDecl,
-    paramTys: ArrayList<Ty>, typeMapping: SubstPack): Bool {
+private func InferGenericCallTypeMapping(typeManager: TypeManager, ce: CallExpr, fd: FuncDecl,
+    paramTys: ArrayList<Ty>, typeMapping: SubstPack, inferenceFailure: Option<CallInferenceFailure>): Bool {
     if (HasRecordedCallTypeArgs(ce)) {
         return true
     }
@@ -1128,14 +1185,23 @@ private func InferGenericCallTypeMapping(typeManager: TypeManager, diag: Option<
         idx++
     }
     if (pack.argTys.size != pack.paramTys.size || pack.argTys.isEmpty()) {
+        MarkCallInferenceFailure(inferenceFailure, ce, fd)
         return false
     }
     if (let Some(subst) <- LocalTypeArgumentSynthesis(typeManager, pack).SynthesizeTypeArguments()) {
         typeManager.PackMapping(typeMapping, subst)
         return true
     }
-    let _ = diag
+    MarkCallInferenceFailure(inferenceFailure, ce, fd)
     return false
+}
+
+private func DiagnoseForCallInference(diag: Option<BasicDiagnosticEngine>, ce: CallExpr): Unit {
+    if (let Some(diagValue) <- diag) {
+        if (let Some(base) <- ce.baseFunc) {
+            DiagRef(diagValue, base, BasicDiagKindRefactor.sema_unable_to_infer_generic_func)
+        }
+    }
 }
 
 private func IsLambdaCallArg(arg: FuncArg): Bool {
@@ -1373,7 +1439,8 @@ private func CheckCandidateConstrains(typeManager: TypeManager, diag: Option<Bas
 }
 
 private func CheckCandidate(typeManager: TypeManager, diag: Option<BasicDiagnosticEngine>, ce: CallExpr,
-    fd: FuncDecl, target: Option<Ty>, argChecker!: Option<CallArgChecker> = None): Option<FunctionMatchingUnit> {
+    fd: FuncDecl, target: Option<Ty>, argChecker!: Option<CallArgChecker> = None,
+    inferenceFailure!: Option<CallInferenceFailure> = None): Option<FunctionMatchingUnit> {
     let wrongNormalArgSize = !fd.hasVariableLenArg &&
         !IsPossibleVariadicFunction(fd, ce) &&
         (if (let Some(params) <- BodyParamList(fd)) { params.params.size != ce.args.size } else { true }) &&
@@ -1390,7 +1457,7 @@ private func CheckCandidate(typeManager: TypeManager, diag: Option<BasicDiagnost
         return None
     }
     let typeMapping = GenerateCallBaseTypeMapping(typeManager, ce)
-    if (!InferGenericCallTypeMapping(typeManager, diag, ce, fd, paramTyInArgOrder, typeMapping)) {
+    if (!InferGenericCallTypeMapping(typeManager, ce, fd, paramTyInArgOrder, typeMapping, inferenceFailure)) {
         return None
     }
     let unit = FunctionMatchingUnit(fd, paramTyInArgOrder, typeMapping)
@@ -1601,10 +1668,12 @@ private func PostCheckCallExpr(typeManager: TypeManager, diag: Option<BasicDiagn
 
 private func MatchFunctionForCall(typeManager: TypeManager, diag: Option<BasicDiagnosticEngine>,
     candidates: ArrayList<FuncDecl>, ce: CallExpr, target: Option<Ty>,
-    argChecker!: Option<CallArgChecker> = None): ArrayList<FuncDecl> {
+    argChecker!: Option<CallArgChecker> = None,
+    inferenceFailure!: Option<CallInferenceFailure> = None): ArrayList<FuncDecl> {
     let legals = ArrayList<FunctionMatchingUnit>()
     for (fd in candidates) {
-        if (let Some(unit) <- CheckCandidate(typeManager, diag, ce, fd, target, argChecker: argChecker)) {
+        if (let Some(unit) <- CheckCandidate(typeManager, diag, ce, fd, target, argChecker: argChecker,
+            inferenceFailure: inferenceFailure)) {
             legals.add(unit)
         }
     }
@@ -1626,7 +1695,7 @@ private func MatchFunctionForCall(typeManager: TypeManager, diag: Option<BasicDi
         if (hasEnumCtor) {
             return out
         }
-        let resolved = ResolveOverload(typeManager, legals)
+        let resolved = ResolveOverload(typeManager, legals, ce)
         if (resolved.size == 1) {
             selected = Some(legals[resolved[0]])
         } else {
@@ -1895,13 +1964,19 @@ public func ChkCallExprWithArgChecker(typeManager: TypeManager, diag: Option<Bas
         DiagnoseForCall(diag, candidatesBefore, candidates, ce, decl)
         return false
     }
-    let result = MatchFunctionForCall(typeManager, diag, candidates, ce, target, argChecker: argChecker)
+    let inferenceFailure = CallInferenceFailure()
+    let result = MatchFunctionForCall(typeManager, diag, candidates, ce, target, argChecker: argChecker,
+        inferenceFailure: Some(inferenceFailure))
     ce.SetTy(TypeManager.GetNonNullTy(ce.GetTy() ?? TypeManager.GetInvalidTy()))
     if (result.size == 1) {
         return true
     }
     if (result.isEmpty() && !candidatesBefore.isEmpty()) {
-        DiagnoseForCall(diag, candidates, result, ce, decl)
+        if (inferenceFailure.failed) {
+            DiagnoseForCallInference(diag, ce)
+        } else {
+            DiagnoseForCall(diag, candidates, result, ce, decl)
+        }
     } else if (result.size > 1) {
         DiagnoseForCall(diag, candidates, result, ce, decl)
         if (let Some(baseFunc) <- ce.baseFunc) {

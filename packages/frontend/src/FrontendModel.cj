@@ -858,28 +858,14 @@ private class CjoSignatureMaterializer {
     private func ApplyFlatDeclBasicInfo(reader: CjoFlatBuffer, record: CjoFlatDecl, decl: Decl): Unit {
         decl.identifier = SrcIdentifier(record.identifier)
         decl.exportId = record.exportId
-        let codegenMangle = FlatCodegenMangle(record)
-        decl.mangledName = if (codegenMangle.isEmpty()) { record.mangledName } else { codegenMangle }
-        decl.rawMangleName = if (codegenMangle.isEmpty()) { record.mangledBeforeSema } else { codegenMangle }
+        decl.mangledName = record.mangledName
+        decl.rawMangleName = record.mangledBeforeSema
         decl.fullPackageName = if (record.fullPackageName.isEmpty()) { packageName } else { record.fullPackageName }
         decl.moduleName = RootPackageName(decl.fullPackageName)
         decl.toBeCompiled = false
         ApplyFlatAttributes(reader, record, decl)
         MarkFlatImportedDecl(decl)
         ApplyFlatDeclHash(reader, record, decl)
-    }
-
-    private func FlatCodegenMangle(record: CjoFlatDecl): String {
-        if (!record.mangledName.isEmpty()) {
-            return record.mangledName
-        }
-        if (record.exportId.startsWith("_C")) {
-            return record.exportId
-        }
-        if (record.mangledBeforeSema.startsWith("_C")) {
-            return record.mangledBeforeSema
-        }
-        return ""
     }
 
     private func ApplyFlatDeclHash(reader: CjoFlatBuffer, record: CjoFlatDecl, decl: Decl): Unit {
@@ -1023,11 +1009,6 @@ private class CjoSignatureMaterializer {
         decl.curFile = Some(file)
         decl.EnableAttr(Attribute.IMPORTED)
         decl.EnableAttr(Attribute.SRC_IMPORTED)
-        if (packageName == "std.core") {
-            decl.EnableAttr(Attribute.IN_CORE)
-        } else if (packageName == "std.ast") {
-            decl.EnableAttr(Attribute.IN_MACRO)
-        }
     }
 
     private func FlatBuiltInType(reader: CjoFlatBuffer, record: CjoFlatDecl): BuiltInType {
