@@ -69,6 +69,19 @@ private func GenerateExtensionDefsForCustomDef(cgMod: CGModule, def: CustomTypeD
             if (GenerateExtensionDefForType(cgMod, def, RequireClassType(classDef), false)) {
                 emitted = true
             }
+            if (IsClosureConversionAutoEnvImpl(classDef)) {
+                var directSuper = true
+                var currentSuper = classDef.GetSuperClassTy()
+                while (let Some(superTy) <- currentSuper) {
+                    if (!IsCoreObjectType(superTy) &&
+                        GenerateExtensionDefForType(cgMod, def, superTy, directSuper)) {
+                        emitted = true
+                        emittedInterfaces.add(MTableInterfaceInfo(superTy, None))
+                    }
+                    directSuper = false
+                    currentSuper = superTy.GetSuperClassTy()
+                }
+            }
         } else if (!def.GetMethods().isEmpty() && !RequireClassType(classDef).IsGenericRelated()) {
             let selfInterfaceTy = RequireClassType(classDef)
             if (GenerateExtensionDefForType(cgMod, def, selfInterfaceTy, false)) {
@@ -268,6 +281,11 @@ private func FunctionAsI8Ptr(cgMod: CGModule, targetType: Type, inheritedType: C
         return unsafe { LLVMConstBitCast(cgMod.GetOrInsertCGFunction(method).GetRawFunction(), i8PtrType) }
     }
     return unsafe { LLVMConstNull(i8PtrType) }
+}
+
+public func GetOrCreateExpectedVirtualSlotWrapper(cgMod: CGModule, method: Function,
+    expected: Function): LLVMValueRef {
+    return GetOrCreateExpectedSlotWrapper(cgMod, method, expected)
 }
 
 private func NeedsExpectedSlotWrapper(method: Function, expected: Function, selfTy: Type,
@@ -507,6 +525,10 @@ private func ConvertReturnForDirectReturn(irBuilder: IRBuilder2, result: LLVMVal
 }
 
 private func BoxValueForGenericSlot(irBuilder: IRBuilder2, result: LLVMValueRef, resultTy: Type): LLVMValueRef {
+    if (resultTy.IsUnit() || resultTy.IsVoid() || resultTy.IsNothing()) {
+        let i8Type = unsafe { LLVMInt8TypeInContext(irBuilder.GetLLVMContext().raw) }
+        return unsafe { LLVMConstNull(LLVMPointerType(i8Type, 1u32)) }
+    }
     let resultCGType = CGType.GetOrCreate(irBuilder.GetCGModule(), resultTy)
     if (resultTy.IsReferenceType() || resultTy.IsRef() || resultCGType.IsReference()) {
         return result
@@ -610,6 +632,16 @@ private func RequireClassType(def: ClassDef): ClassType {
         }
     }
     throw IllegalStateException("class-like def has no class type: " + def.GetIdentifier())
+}
+
+private func IsCoreObjectType(ty: ClassType): Bool {
+    let def = ty.GetClassDef()
+    return def.GetPackageName() == "std.core" && def.GetSrcCodeIdentifier() == "Object"
+}
+
+private func IsClosureConversionAutoEnvImpl(def: ClassDef): Bool {
+    let name = def.GetIdentifier()
+    return name.startsWith("$Cl") || name.startsWith("$Cf")
 }
 
 private func RequireCustomType(def: CustomTypeDef): Type {

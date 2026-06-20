@@ -1,9 +1,11 @@
 package cangjie_compiler::codegen
 
 import std.collection.*
+import cangjie_compiler::chir.ClassDef
 import cangjie_compiler::chir.CustomType
 import cangjie_compiler::chir.Expression
 import cangjie_compiler::chir.ExprKind
+import cangjie_compiler::chir.Function
 import cangjie_compiler::chir.GetElementByName
 import cangjie_compiler::chir.GetElementRef
 import cangjie_compiler::chir.LocalVar
@@ -20,6 +22,9 @@ public func GenerateLoad(irBuilder: IRBuilder2, chirExpr: Expression): LLVMValue
     let addr = irBuilder.GetCGModule().MaterializeValue(irBuilder, chirExpr.GetOperand(0))
     if (let Some(addrType) <- addr.GetCGType()) {
         if (let Some(pointerElementType) <- addrType.GetPointerElementType()) {
+            if (let Some(readBarrier) <- TryGenerateGCReadForLoad(irBuilder, chirExpr, pointerElementType, addr)) {
+                return readBarrier
+            }
             return irBuilder.CreateLoad(pointerElementType.GetLLVMType(), addr.GetRawValue(), name: "load")
         }
     }
@@ -28,6 +33,36 @@ public func GenerateLoad(irBuilder: IRBuilder2, chirExpr: Expression): LLVMValue
             addr.GetRawValue(), name: "load")
     }
     return LLVMNullValue()
+}
+
+private func TryGenerateGCReadForLoad(irBuilder: IRBuilder2, chirExpr: Expression, elementType: CGType,
+    addr: CGValue): Option<LLVMValueRef> {
+    if (!elementType.IsReference()) {
+        return None
+    }
+    let addrOperand = chirExpr.GetOperand(0)
+    if (let Some(local) <- addrOperand.AsLocalVar()) {
+        if (let Some(ownerExpr) <- local.GetExpr()) {
+            if (let Some(getElementRef) <- (ownerExpr as GetElementRef)) {
+                let base = getElementRef.GetLocation()
+                if (let Some(baseTy) <- base.GetType()) {
+                    if (IsClosureConversionManagedClass(baseTy)) {
+                        let baseValue = irBuilder.GetCGModule().MaterializeValue(irBuilder, base)
+                        return Some(irBuilder.CallGCReadRef(baseValue.GetRawValue(), addr.GetRawValue()))
+                    }
+                }
+            }
+        }
+    }
+    return None
+}
+
+private func IsClosureConversionManagedClass(ty: Type): Bool {
+    if (let Some(customTy) <- (ty.StripAllRefs() as CustomType)) {
+        let defName = customTy.GetCustomTypeDef().GetIdentifier()
+        return defName.startsWith("$Cl") || defName.startsWith("$Cf") || defName.startsWith("$Captured_")
+    }
+    return false
 }
 
 public func GenerateRawArrayAllocate(irBuilder: IRBuilder2, chirExpr: Expression): LLVMValueRef {
@@ -251,6 +286,10 @@ public func GenerateStoreElementRef(irBuilder: IRBuilder2, chirExpr: Expression)
         if (storeAddr.isNull()) {
             return LLVMNullValue()
         }
+        if (let Some(slotStore) <- TryStoreClosureConversionFuncSlot(irBuilder, storeElementRef, storePlace,
+            storeAddr)) {
+            return slotStore
+        }
         return StoreElementValue(irBuilder, storePlace, storeValue, storeAddr)
     }
     if (let Some(storeByName) <- (chirExpr as StoreElementByName)) {
@@ -266,6 +305,10 @@ public func GenerateStoreElementRef(irBuilder: IRBuilder2, chirExpr: Expression)
                 if (byNameAddr.isNull()) {
                     return LLVMNullValue()
                 }
+                if (let Some(slotStore) <- TryStoreClosureConversionFuncSlot(irBuilder, storeByName, byNamePlace,
+                    byNameAddr)) {
+                    return slotStore
+                }
                 return StoreElementValue(irBuilder, byNamePlace, byNameValue, byNameAddr)
             }
         }
@@ -273,13 +316,94 @@ public func GenerateStoreElementRef(irBuilder: IRBuilder2, chirExpr: Expression)
     return LLVMNullValue()
 }
 
+private func TryStoreClosureConversionFuncSlot(irBuilder: IRBuilder2, chirExpr: Expression, baseValue: CGValue,
+    elementPtr: LLVMValueRef): Option<LLVMValueRef> {
+    let slotFn = GetClosureConversionGenericSlotFunction(irBuilder.GetCGModule(), chirExpr, baseValue) ?? return None
+    let int64Type = unsafe { LLVMInt64TypeInContext(irBuilder.GetLLVMContext().raw) }
+    return Some(irBuilder.CreateStore(irBuilder.CreatePtrToInt(slotFn, int64Type, name: "func.slot.generic"),
+        elementPtr))
+}
+
+private func GetClosureConversionGenericSlotFunction(cgMod: CGModule, chirExpr: Expression,
+    baseValue: CGValue): Option<LLVMValueRef> {
+    if (!IsClosureConversionAutoEnvSlotStore(chirExpr, baseValue)) {
+        return None
+    }
+    let method = chirExpr.GetOperand(0).AsFunction() ?? return None
+    if (method.GetSrcCodeIdentifier() != "$GenericVirtualFunc") {
+        return None
+    }
+    let expected = FindGenericAutoEnvBaseMethod(method) ?? return None
+    return Some(GetOrCreateExpectedVirtualSlotWrapper(cgMod, method, expected))
+}
+
+private func IsClosureConversionAutoEnvSlotStore(chirExpr: Expression, baseValue: CGValue): Bool {
+    if (!IsFirstElementPath(chirExpr)) {
+        return false
+    }
+    if (let Some(baseType) <- baseValue.GetCGType()) {
+        if (let Some(customTy) <- (baseType.GetOriginal().StripAllRefs() as CustomType)) {
+            let defName = customTy.GetCustomTypeDef().GetIdentifier()
+            return defName.startsWith("$Cl") || defName.startsWith("$Cf")
+        }
+    }
+    return false
+}
+
+private func IsFirstElementPath(chirExpr: Expression): Bool {
+    if (let Some(storeElementRef) <- (chirExpr as StoreElementRef)) {
+        let path = storeElementRef.GetPath()
+        return path.size == 1 && path[0] == 0u64
+    }
+    if (let Some(storeByName) <- (chirExpr as StoreElementByName)) {
+        let names = storeByName.GetNames()
+        return names.size == 1 && names[0] == "$GenericVirtualFunc$slot"
+    }
+    return false
+}
+
+private func FindGenericAutoEnvBaseMethod(method: Function): Option<Function> {
+    let parentCustomDef = method.GetParentCustomTypeDef() ?? return None
+    let parentDef = (parentCustomDef as ClassDef) ?? return None
+    var currentSuper = parentDef.GetSuperClassTy()
+    while (let Some(superTy) <- currentSuper) {
+        let superDef = superTy.GetClassDef()
+        if (superDef.GetIdentifier().startsWith("$Cg")) {
+            return FindMethodBySrcName(superDef, "$GenericVirtualFunc")
+        }
+        currentSuper = superDef.GetSuperClassTy()
+    }
+    return None
+}
+
+private func FindMethodBySrcName(def: ClassDef, name: String): Option<Function> {
+    for (method in def.GetMethods()) {
+        if (method.GetSrcCodeIdentifier() == name || method.GetIdentifierWithoutPrefix() == name) {
+            return Some(method)
+        }
+    }
+    return None
+}
+
 private func StoreElementValue(irBuilder: IRBuilder2, baseValue: CGValue, elementValue: CGValue,
     elementPtr: LLVMValueRef): LLVMValueRef {
+    if ((elementValue as CGFunction).isSome()) {
+        let int64Type = unsafe { LLVMInt64TypeInContext(irBuilder.GetLLVMContext().raw) }
+        return irBuilder.CreateStore(irBuilder.CreatePtrToInt(elementValue.GetRawValue(), int64Type,
+            name: "func.slot"), elementPtr)
+    }
     if (let Some(baseType) <- baseValue.GetCGType()) {
         if (let Some(rawArrayTy) <- FindRawArrayType(baseType.GetOriginal())) {
             let elementCGType = CGType.GetOrCreate(irBuilder.GetCGModule(), rawArrayTy.GetElementType())
             return StoreRawArrayElement(irBuilder, baseValue.GetRawValue(), elementCGType, elementValue.GetRawValue(),
                 elementPtr)
+        }
+        if (IsClosureConversionManagedClass(baseType.GetOriginal())) {
+            if (let Some(elementCGType) <- elementValue.GetCGType()) {
+                if (elementCGType.IsReference()) {
+                    return irBuilder.CallGCWrite(elementValue.GetRawValue(), baseValue.GetRawValue(), elementPtr)
+                }
+            }
         }
     }
     return irBuilder.CreateStore(elementValue.GetRawValue(), elementPtr)

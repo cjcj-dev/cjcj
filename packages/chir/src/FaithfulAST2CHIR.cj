@@ -140,6 +140,9 @@ public class FaithfulAST2CHIR {
         SetInitFuncForStaticVar()
         FlatForInExpr(builder).RunOnPackage(CurrentPackage())
         AST2CHIRCheck()
+        if (!failure) {
+            ClosureConversion(builder).RunOnPackage(CurrentPackage())
+        }
         return !failure
     }
 

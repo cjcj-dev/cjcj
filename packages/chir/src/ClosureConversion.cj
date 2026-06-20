@@ -2,16 +2,42 @@ package cangjie_compiler::chir
 
 import std.collection.*
 
+private let GENERIC_VIRTUAL_FUNC: String = "$GenericVirtualFunc"
+private let INST_VIRTUAL_FUNC: String = "$InstVirtualFunc"
+private let CC_GENERIC_BASE_PREFIX: String = "$Cg"
+private let CC_INSTANTIATED_BASE_PREFIX: String = "$Ci"
+private let CC_FUNC_IMPL_PREFIX: String = "$Cf"
+private let CC_LAMBDA_IMPL_PREFIX: String = "$Cl"
+private let CC_CAPTURED_PREFIX: String = "$Captured_"
+private let CC_FUNC_PREFIX: String = "_CC"
+private let CC_GENERIC_FUNC_SLOT: String = "$GenericVirtualFunc$slot"
+private let CC_INST_FUNC_SLOT: String = "$InstVirtualFunc$slot"
+private let CC_FUNC_SLOT_COUNT: UInt64 = 2u64
+
 public class ClosureConversion {
+    private let builder: CHIRBuilder
+    private var pkg: Option<Package> = None
     private let convertedLambdaExpressions: ArrayList<Lambda> = ArrayList<Lambda>()
     private let capturedValues: ArrayList<Value> = ArrayList<Value>()
+    private let genericAutoEnvBaseDefs: HashMap<String, ClassDef> = HashMap<String, ClassDef>()
+    private let instAutoEnvBaseDefs: HashMap<String, ClassDef> = HashMap<String, ClassDef>()
+    private let autoEnvImplDefs: HashMap<String, ClassDef> = HashMap<String, ClassDef>()
+    private let boxClassMap: HashMap<String, ClassDef> = HashMap<String, ClassDef>()
+    private let convertedCache: HashMap<Int64, Function> = HashMap<Int64, Function>()
+    private let duplicateLambdaName: HashMap<String, Int64> = HashMap<String, Int64>()
+    private let typeConvertMap: HashMap<String, Type> = HashMap<String, Type>()
 
-    public init() {}
+    public init(builder: CHIRBuilder) {
+        this.builder = builder
+    }
 
     public func RunOnPackage(pkg: Package): Unit {
-        for (fn in pkg.GetGlobalFunctions(includePureAbstract: true)) {
-            RunOnFunction(fn)
-        }
+        this.pkg = pkg
+        let nestedFuncs = CollectNestedFunctions(pkg)
+        ConvertNestedFunctions(nestedFuncs)
+        ConvertGlobalFunctions(pkg)
+        LiftType(pkg)
+        ConvertExpressions(pkg)
     }
 
     public func GetConvertedLambdaExpressions(): ArrayList<Lambda> {
@@ -26,50 +52,1251 @@ public class ClosureConversion {
         return CopyValueList(capturedValues)
     }
 
-    private func RunOnFunction(fn: Function): Unit {
-        if (fn.IsLambda() && fn.GetNumOfParams() == 0) {
-            fn.EnableAttr(Attribute.THIN)
-        }
-        if (let Some(body) <- fn.GetBody()) {
-            RunOnBlockGroup(body)
-        }
+    private func CurrentPackage(): Package {
+        return pkg ?? throw IllegalStateException("ClosureConversion package is not initialized")
     }
 
-    private func RunOnBlockGroup(body: BlockGroup): Unit {
-        for (block in body.GetBlocksRef()) {
-            for (expr in block.GetExpressionsRef()) {
+    private func CollectNestedFunctions(pkg: Package): ArrayList<Lambda> {
+        let nestedFuncs = ArrayList<Lambda>()
+        for (fn in pkg.GetGlobalFuncsWithBody()) {
+            if (let Some(body) <- fn.GetBody()) {
+                CollectNestedFunctionsInBlockGroup(body, nestedFuncs)
+            }
+        }
+        return nestedFuncs
+    }
+
+    private func CollectNestedFunctionsInBlockGroup(group: BlockGroup, nestedFuncs: ArrayList<Lambda>): Unit {
+        for (block in group.GetBlocks()) {
+            for (expr in block.GetExpressions()) {
                 if (let Some(lambdaExpr) <- (expr as Lambda)) {
-                    ConvertLambdaExpression(lambdaExpr)
                     if (let Some(lambdaBody) <- lambdaExpr.GetBody()) {
-                        RunOnBlockGroup(lambdaBody)
+                        CollectNestedFunctionsInBlockGroup(lambdaBody, nestedFuncs)
                     }
+                    nestedFuncs.add(lambdaExpr)
                 } else {
-                    for (group in expr.GetBlockGroups()) {
-                        RunOnBlockGroup(group)
+                    for (subGroup in expr.GetBlockGroups()) {
+                        CollectNestedFunctionsInBlockGroup(subGroup, nestedFuncs)
                     }
                 }
             }
         }
     }
 
-    private func ConvertLambdaExpression(lambdaExpr: Lambda): Unit {
-        if (!ContainsLambda(convertedLambdaExpressions, lambdaExpr)) {
-            convertedLambdaExpressions.add(lambdaExpr)
+    private func ConvertNestedFunctions(funcs: ArrayList<Lambda>): Unit {
+        for (lambdaFunc in funcs) {
+            RecordDuplicateLambdaName(lambdaFunc)
+            if (!ContainsLambda(convertedLambdaExpressions, lambdaFunc)) {
+                convertedLambdaExpressions.add(lambdaFunc)
+            }
+            let funcTy = lambdaFunc.GetFuncType() ??
+                throw IllegalStateException("ClosureConversion lambda has no function type")
+            if (funcTy.IsCFunc()) {
+                LiftNestedFunctionWithCFuncType(lambdaFunc)
+                continue
+            }
+            let rawEnvs = lambdaFunc.GetCapturedVariables()
+            let boxedEnvs = BoxAllMutableVars(rawEnvs)
+            let autoEnvBaseDef = GetOrCreateAutoEnvBaseDef(funcTy)
+            let autoEnvImplDef = GetOrCreateAutoEnvImplDef(lambdaFunc, autoEnvBaseDef, boxedEnvs)
+            let result = lambdaFunc.GetResult() ??
+                throw IllegalStateException("ClosureConversion lambda has no result")
+            let users = result.GetUsers()
+            for (user in users) {
+                if (user.GetParentBlock().isSome()) {
+                    ReplaceUserPoint(lambdaFunc, user, boxedEnvs, autoEnvImplDef)
+                }
+            }
+            lambdaFunc.DetachLiftedBodyAndRemoveSelf()
         }
-        let operands = lambdaExpr.GetOperands()
-        if (operands.isEmpty()) {
-            lambdaExpr.EnableAttr(Attribute.THIN)
+    }
+
+    private func ConvertGlobalFunctions(pkg: Package): Unit {
+        let funcs = pkg.GetGlobalFunctions(includePureAbstract: true)
+        for (fn in funcs) {
+            if (IsClosureConversionGeneratedFunction(fn)) {
+                continue
+            }
+            if (fn.IsCFFIWrapper()) {
+                continue
+            }
+            let funcTy = fn.GetFuncType() ?? continue
+            if (funcTy.IsCFunc()) {
+                continue
+            }
+            let users = fn.GetUsers()
+            var converted = false
+            for (user in users) {
+                if (IsCalleeOfApply(user, fn)) {
+                    continue
+                }
+                if (user.GetParentBlock().isNone()) {
+                    continue
+                }
+                let autoEnvBaseDef = GetOrCreateAutoEnvBaseDef(funcTy)
+                let autoEnvImplDef = GetOrCreateAutoEnvImplDef(fn, autoEnvBaseDef)
+                ReplaceUserPoint(fn, user, autoEnvImplDef)
+                converted = true
+            }
+            if (converted) {
+                fn.EnableAttr(Attribute.BOXED)
+            }
+        }
+    }
+
+    private func LiftType(pkg: Package): Unit {
+        for (fn in pkg.GetGlobalFunctions(includePureAbstract: true)) {
+            ConvertFunctionSignature(fn)
+            if (let Some(body) <- fn.GetBody()) {
+                ConvertBlockGroupTypes(body)
+            }
+            for (param in fn.GetParams()) {
+                ConvertValueType(param)
+            }
+            if (let Some(retVal) <- fn.GetReturnValue()) {
+                ConvertValueType(retVal)
+            }
+        }
+        for (globalVar in pkg.GetGlobalVars()) {
+            ConvertValueType(globalVar)
+        }
+        for (def in pkg.GetAllCustomTypeDef()) {
+            ConvertCustomDefTypes(def)
+        }
+    }
+
+    private func ConvertExpressions(pkg: Package): Unit {
+        let funcs = pkg.GetGlobalFuncsWithBody()
+        for (fn in funcs) {
+            if (let Some(body) <- fn.GetBody()) {
+                ConvertExpressionsInBlockGroup(body)
+            }
+        }
+    }
+
+    private func ConvertExpressionsInBlockGroup(group: BlockGroup): Unit {
+        for (block in group.GetBlocks()) {
+            let exprs = block.GetExpressions()
+            for (expr in exprs) {
+                if (expr.GetParentBlock().isNone()) {
+                    continue
+                }
+                if (let Some(apply) <- (expr as Apply)) {
+                    if (ApplyNeedConvertToInvoke(apply)) {
+                        ConvertApplyToInvoke(apply)
+                        continue
+                    }
+                }
+                if (let Some(applyWithException) <- (expr as ApplyWithException)) {
+                    if (ApplyWithExceptionNeedConvertToInvokeWithException(applyWithException)) {
+                        ConvertApplyWithExceptionToInvokeWithException(applyWithException)
+                        continue
+                    }
+                }
+                for (subGroup in expr.GetBlockGroups()) {
+                    ConvertExpressionsInBlockGroup(subGroup)
+                }
+            }
+        }
+    }
+
+    private func ConvertBlockGroupTypes(group: BlockGroup): Unit {
+        for (block in group.GetBlocks()) {
+            for (expr in block.GetExpressions()) {
+                ConvertExpressionTypes(expr)
+                for (subGroup in expr.GetBlockGroups()) {
+                    ConvertBlockGroupTypes(subGroup)
+                }
+            }
+        }
+    }
+
+    private func ConvertExpressionTypes(expr: Expression): Unit {
+        if (let Some(result) <- expr.GetResult()) {
+            ConvertValueType(result)
+        }
+        if (let Some(allocate) <- (expr as Allocate)) {
+            allocate.SetType(ConvertTypeToClosureType(allocate.GetType()))
+        } else if (let Some(rawArrayAllocate) <- (expr as RawArrayAllocate)) {
+            rawArrayAllocate.SetElementType(ConvertTypeToClosureType(rawArrayAllocate.GetElementType()))
+        } else if (let Some(getRTTIStatic) <- (expr as GetRTTIStatic)) {
+            getRTTIStatic.SetRTTIType(ConvertTypeToClosureType(getRTTIStatic.GetRTTIType()))
+        } else if (let Some(instanceOfExpr) <- (expr as InstanceOf)) {
+            instanceOfExpr.SetTestedType(ConvertTypeToClosureType(instanceOfExpr.GetType()))
+        }
+        if (let Some(call) <- (expr as FuncCall)) {
+            if (let Some(thisTy) <- call.GetThisType()) {
+                call.SetThisType(ConvertTypeToClosureType(thisTy))
+            }
+        }
+        if (let Some(callWithException) <- (expr as FuncCallWithException)) {
+            if (let Some(thisTy2) <- callWithException.GetThisType()) {
+                callWithException.SetThisType(ConvertTypeToClosureType(thisTy2))
+            }
+        }
+    }
+
+    private func ConvertCustomDefTypes(def: CustomTypeDef): Unit {
+        let genericParams = def.GetGenericTypeParams()
+        for (genericParam in genericParams) {
+            let convertedBounds = ArrayList<Type>()
+            for (bound in genericParam.GetUpperBounds()) {
+                convertedBounds.add(ConvertTypeToClosureType(bound))
+            }
+            genericParam.SetUpperBounds(convertedBounds)
+        }
+        let vars = def.GetDirectInstanceVars()
+        for (member in vars) {
+            member.ty = ConvertTypeToClosureType(member.ty)
+        }
+        if (let Some(classDef) <- (def as ClassDef)) {
+            if (let Some(superTy) <- classDef.GetSuperClassTy()) {
+                if (let Some(convertedSuper) <- (ConvertTypeToClosureType(superTy) as ClassType)) {
+                    classDef.SetSuperClassTy(convertedSuper)
+                }
+            }
+        }
+        let interfaces = def.GetImplementedInterfaceTys()
+        if (!interfaces.isEmpty()) {
+            let retained = ArrayList<ClassType>()
+            for (interfaceTy in interfaces) {
+                if (let Some(convertedInterface) <- (ConvertTypeToClosureType(interfaceTy) as ClassType)) {
+                    retained.add(convertedInterface)
+                }
+            }
+            // Existing CHIR does not expose a replace API for interface types. The translated programs
+            // that use closures through interfaces get their function-typed members converted above.
+            let _ = retained
+        }
+    }
+
+    private func ConvertFunctionSignature(fn: Function): Unit {
+        if (let Some(funcTy) <- fn.GetFuncType()) {
+            fn.SetType(ConvertFuncArgsAndRetType(funcTy))
+        }
+    }
+
+    private func ConvertValueType(value: Value): Unit {
+        if (value.AsFunction().isSome()) {
             return
         }
-        lambdaExpr.EnableAttr(Attribute.BOXED)
-        for (operand in operands) {
-            if (!ContainsValue(capturedValues, operand)) {
-                capturedValues.add(operand)
+        if (let Some(valueTy) <- value.GetType()) {
+            value.SetType(ConvertTypeToClosureType(valueTy))
+        }
+    }
+
+    private func ConvertTypeToClosureType(ty: Type): Type {
+        if (ty.IsPrimitive() || ty.IsInvalid() || ty.IsAny() || ty.IsVoid() || ty.IsCFunc() ||
+            ty.IsCString() || ty.IsThis()) {
+            return ty
+        }
+        if (ty.IsGeneric()) {
+            return ty
+        }
+        let key = "cc:" + ty.ToString()
+        if (let Some(cached) <- typeConvertMap.get(key)) {
+            return cached
+        }
+        var converted: Type = ty
+        if (let Some(tupleTy) <- (ty as TupleType)) {
+            converted = builder.context.GetTupleTy(ConvertTypeArgs(tupleTy.GetTypeArgs()))
+        } else if (let Some(funcTy) <- (ty as FuncType)) {
+            converted = ConvertFuncType(funcTy)
+        } else if (let Some(structTy) <- (ty as StructType)) {
+            converted = builder.context.GetStructTy(structTy.GetStructDef(), ConvertTypeArgs(structTy.GetGenericArgs()))
+        } else if (let Some(classTy) <- (ty as ClassType)) {
+            converted = builder.context.GetClassTy(classTy.GetClassDef(), ConvertTypeArgs(classTy.GetGenericArgs()))
+        } else if (let Some(enumTy) <- (ty as EnumType)) {
+            converted = builder.context.GetEnumTy(enumTy.GetEnumDef(), ConvertTypeArgs(enumTy.GetGenericArgs()))
+        } else if (let Some(rawArrayTy) <- (ty as RawArrayType)) {
+            converted = builder.context.GetRawArrayTy(ConvertTypeToClosureType(rawArrayTy.GetElementType()),
+                dims: rawArrayTy.GetDims())
+        } else if (let Some(varrayTy) <- (ty as VArrayType)) {
+            converted = builder.context.GetVArrayTy(ConvertTypeToClosureType(varrayTy.GetElementType()),
+                varrayTy.size)
+        } else if (let Some(pointerTy) <- (ty as CPointerType)) {
+            converted = builder.context.GetCPointerTy(ConvertTypeToClosureType(pointerTy.GetElementType()))
+        } else if (let Some(refTy) <- (ty as RefType)) {
+            converted = builder.context.GetRefTy(ConvertTypeToClosureType(refTy.GetBaseType()))
+        } else if (let Some(boxTy) <- (ty as BoxType)) {
+            converted = builder.context.GetBoxTy(ConvertTypeToClosureType(boxTy.GetBaseType()))
+        }
+        typeConvertMap[key] = converted
+        return converted
+    }
+
+    private func ConvertTypeArgs(types: ArrayList<Type>): ArrayList<Type> {
+        let out = ArrayList<Type>()
+        for (ty in types) {
+            out.add(ConvertTypeToClosureType(ty))
+        }
+        return out
+    }
+
+    private func ConvertFuncType(funcTy: FuncType): Type {
+        if (funcTy.IsCFunc()) {
+            return funcTy
+        }
+        let autoEnvBaseDef = GetOrCreateAutoEnvBaseDef(funcTy)
+        let convertedFuncType = ConvertFuncArgsAndRetType(funcTy)
+        let autoEnvBaseTy = InstantiateAutoEnvBaseType(autoEnvBaseDef, convertedFuncType)
+        return builder.context.GetRefTy(autoEnvBaseTy)
+    }
+
+    private func ConvertFuncArgsAndRetType(funcTy: FuncType): FuncType {
+        let params = ArrayList<Type>()
+        for (paramTy in funcTy.GetParamTypes()) {
+            params.add(ConvertTypeToClosureType(paramTy))
+        }
+        return builder.context.GetFuncTy(params, ConvertTypeToClosureType(funcTy.GetReturnType()),
+            hasVarLenParam: funcTy.HasVarArg(), isCFunc: funcTy.IsCFunc())
+    }
+
+    private func GetOrCreateAutoEnvBaseDef(funcTy: FuncType): ClassDef {
+        let genericBase = GetOrCreateGenericAutoEnvBaseDef(funcTy.GetParamTypes().size)
+        if (funcTy.IsGenericRelated()) {
+            return genericBase
+        }
+        return GetOrCreateInstAutoEnvBaseDef(funcTy, genericBase)
+    }
+
+    private func GetOrCreateGenericAutoEnvBaseDef(paramNum: Int64): ClassDef {
+        let className = CC_GENERIC_BASE_PREFIX + paramNum.toString() + "_"
+        if (let Some(found) <- genericAutoEnvBaseDefs.get(className)) {
+            return found
+        }
+        let classDef = builder.CreateClassDef(CurrentPackage().GetName(), className)
+        SetObjectSuperClass(classDef)
+        let paramsAndRet = ArrayList<Type>()
+        var idx: Int64 = 0
+        while (idx < paramNum) {
+            let genericTy = builder.context.GetGenericTy("ccbase_p${paramNum}_${idx}", "ccbase_p${paramNum}_${idx}")
+            classDef.AddGenericTypeParam(genericTy)
+            paramsAndRet.add(genericTy)
+            idx++
+        }
+        let retTy = builder.context.GetGenericTy("ccbase_r${paramNum}", "ccbase_r${paramNum}")
+        classDef.AddGenericTypeParam(retTy)
+        paramsAndRet.add(retTy)
+        let classArgs = TypesFromGenerics(classDef.GetGenericTypeParams())
+        let classTy = builder.context.GetClassTy(classDef, classArgs)
+        classDef.SetType(classTy)
+        classDef.EnableAttr(Attribute.ABSTRACT)
+        classDef.EnableAttr(Attribute.PUBLIC)
+        AddClassToPackage(classDef)
+        CreateVirtualFuncInAutoEnvBaseDef(classDef, GENERIC_VIRTUAL_FUNC, paramsAndRet)
+        genericAutoEnvBaseDefs[className] = classDef
+        return classDef
+    }
+
+    private func GetOrCreateInstAutoEnvBaseDef(funcTy: FuncType, superClass: ClassDef): ClassDef {
+        let className = CC_INSTANTIATED_BASE_PREFIX + TypeKey(funcTy)
+        if (let Some(found) <- instAutoEnvBaseDefs.get(className)) {
+            return found
+        }
+        let classDef = builder.CreateClassDef(CurrentPackage().GetName(), className)
+        let classTy = builder.context.GetClassTy(classDef, ArrayList<Type>())
+        classDef.SetType(classTy)
+        classDef.SetSuperClassTy(builder.context.GetClassTy(superClass, funcTy.GetTypeArgs()))
+        classDef.EnableAttr(Attribute.ABSTRACT)
+        classDef.EnableAttr(Attribute.PUBLIC)
+        AddClassToPackage(classDef)
+        CreateVirtualFuncInAutoEnvBaseDef(classDef, INST_VIRTUAL_FUNC, funcTy.GetTypeArgs())
+        instAutoEnvBaseDefs[className] = classDef
+        return classDef
+    }
+
+    private func CreateVirtualFuncInAutoEnvBaseDef(classDef: ClassDef, funcName: String,
+        paramsAndRetType: ArrayList<Type>): Function {
+        if (paramsAndRetType.isEmpty()) {
+            throw IllegalStateException("ClosureConversion AutoEnv virtual method needs a return type")
+        }
+        let paramTypes = ArrayList<Type>()
+        paramTypes.add(builder.context.GetRefTy(RequireClassType(classDef)))
+        var idx: Int64 = 0
+        while (idx + 1 < paramsAndRetType.size) {
+            paramTypes.add(paramsAndRetType[idx])
+            idx++
+        }
+        let methodTy = builder.context.GetFuncTy(paramTypes, paramsAndRetType[paramsAndRetType.size - 1])
+        let suffix = if (funcName == GENERIC_VIRTUAL_FUNC) { "$vg" } else { "$vi" }
+        let method = CreateCCFunction(methodTy, CC_FUNC_PREFIX + classDef.GetIdentifier() + suffix, funcName,
+            genericTypeParams: ArrayList<GenericType>())
+        method.EnableAttr(Attribute.ABSTRACT)
+        method.EnableAttr(Attribute.PUBLIC)
+        method.EnableAttr(Attribute.VIRTUAL)
+        for (paramTy in paramTypes) {
+            builder.CreateParameter(paramTy, "%p${method.GetNumOfParams()}", Some(method))
+        }
+        classDef.AddMethod(method)
+        return method
+    }
+
+    private func GetOrCreateAutoEnvImplDef(fn: Function, superClassDef: ClassDef): ClassDef {
+        let className = CC_FUNC_IMPL_PREFIX + StripGlobalPrefix(fn.GetIdentifierWithoutPrefix())
+        if (let Some(found) <- autoEnvImplDefs.get(className)) {
+            return found
+        }
+        let genericMap = HashMap<String, Type>()
+        let genericTypes = CreateGenericTypeParamsForAutoEnvImplDef(fn)
+        let classDef = CreateAutoEnvImplDef(className, genericTypes, fn, superClassDef, genericMap)
+        CreateGenericOverrideMethodInAutoEnvImplDef(classDef, fn, genericMap)
+        CreateInstOverrideMethodInAutoEnvImplDef(classDef, fn, genericMap)
+        autoEnvImplDefs[className] = classDef
+        return classDef
+    }
+
+    private func GetOrCreateAutoEnvImplDef(lambda: Lambda, superClassDef: ClassDef,
+        boxedEnvs: ArrayList<Value>): ClassDef {
+        let count = duplicateLambdaName.get(lambda.GetIdentifier()) ?? 0
+        let className = CC_LAMBDA_IMPL_PREFIX + StripGlobalPrefix(lambda.GetIdentifier()) + "$" + count.toString()
+        if (let Some(found) <- autoEnvImplDefs.get(className)) {
+            return found
+        }
+        let result = lambda.GetResult() ??
+            throw IllegalStateException("ClosureConversion lambda has no result")
+        let genericMap = HashMap<String, Type>()
+        let genericTypes = CreateGenericTypeParamsForAutoEnvImplDef(result)
+        let classDef = CreateAutoEnvImplDef(className, genericTypes, result, superClassDef, genericMap)
+        CreateMemberVarInAutoEnvImplDef(classDef, boxedEnvs, genericMap)
+        let globalFunc = LiftLambdaToGlobalFunc(classDef, lambda, genericTypes, genericMap, boxedEnvs)
+        CreateGenericOverrideMethodInAutoEnvImplDef(classDef, globalFunc, genericMap)
+        CreateInstOverrideMethodInAutoEnvImplDef(classDef, globalFunc, genericMap)
+        autoEnvImplDefs[className] = classDef
+        return classDef
+    }
+
+    private func CreateAutoEnvImplDef(className: String, genericTypes: ArrayList<GenericType>, srcFunc: Value,
+        superClassDef: ClassDef, genericMap: HashMap<String, Type>): ClassDef {
+        let classDef = builder.CreateClassDef(CurrentPackage().GetName(), className)
+        let classTypeArgs = ArrayList<Type>()
+        var idx: Int64 = 0
+        while (idx < genericTypes.size) {
+            let oldGeneric = genericTypes[idx]
+            let newGeneric = builder.context.GetGenericTy(className + "_" + idx.toString(),
+                oldGeneric.GetSrcCodeIdentifier())
+            genericMap[GenericTypeKey(oldGeneric)] = newGeneric
+            classDef.AddGenericTypeParam(newGeneric)
+            classTypeArgs.add(newGeneric)
+            idx++
+        }
+        idx = 0
+        while (idx < genericTypes.size) {
+            let newGeneric = classDef.GetGenericTypeParams()[idx]
+            let newBounds = ArrayList<Type>()
+            for (bound in genericTypes[idx].GetUpperBounds()) {
+                newBounds.add(SubstituteGenericTypes(bound, genericMap))
             }
-            if (operand.TestAttr(Attribute.MUT)) {
-                operand.EnableAttr(Attribute.BOXED)
+            newGeneric.SetUpperBounds(newBounds)
+            idx++
+        }
+        let classTy = builder.context.GetClassTy(classDef, classTypeArgs)
+        classDef.SetType(classTy)
+        let superArgs = ArrayList<Type>()
+        if (!superClassDef.GetGenericTypeParams().isEmpty()) {
+            if (let Some(srcTy) <- srcFunc.GetType()) {
+                if (let Some(funcTy) <- (srcTy as FuncType)) {
+                    for (paramTy in funcTy.GetParamTypes()) {
+                        superArgs.add(SubstituteGenericTypes(paramTy, genericMap))
+                    }
+                    superArgs.add(SubstituteGenericTypes(funcTy.GetReturnType(), genericMap))
+                }
             }
         }
+        classDef.SetSuperClassTy(builder.context.GetClassTy(superClassDef, superArgs))
+        CreateVirtualFuncSlotMemberVars(classDef)
+        classDef.EnableAttr(Attribute.PUBLIC)
+        AddClassToPackage(classDef)
+        return classDef
+    }
+
+    private func CreateVirtualFuncSlotMemberVars(classDef: ClassDef): Unit {
+        let slotTy = builder.context.GetInt64Ty()
+        let genericSlot = MemberVarInfo(CC_GENERIC_FUNC_SLOT, slotTy, isStatic: false, isReadOnly: false,
+            rawMangledName: CC_GENERIC_FUNC_SLOT)
+        genericSlot.attributeInfo.Enable(Attribute.PUBLIC)
+        classDef.AddInstanceVar(genericSlot)
+        let instSlot = MemberVarInfo(CC_INST_FUNC_SLOT, slotTy, isStatic: false, isReadOnly: false,
+            rawMangledName: CC_INST_FUNC_SLOT)
+        instSlot.attributeInfo.Enable(Attribute.PUBLIC)
+        classDef.AddInstanceVar(instSlot)
+    }
+
+    private func CreateMemberVarInAutoEnvImplDef(classDef: ClassDef, boxedEnvs: ArrayList<Value>,
+        genericMap: HashMap<String, Type>): Unit {
+        for (env in boxedEnvs) {
+            let envTy = env.GetType() ??
+                throw IllegalStateException("ClosureConversion captured value has no type")
+            let memberTy = SubstituteGenericTypes(envTy, genericMap)
+            let memberName = GenerateCapturedMemberName(env)
+            let info = MemberVarInfo(memberName, memberTy, isStatic: false, isReadOnly: false,
+                rawMangledName: memberName)
+            info.attributeInfo.Enable(Attribute.PUBLIC)
+            classDef.AddInstanceVar(info)
+        }
+    }
+
+    private func CreateGenericOverrideMethodInAutoEnvImplDef(classDef: ClassDef, srcFunc: Function,
+        genericMap: HashMap<String, Type>): Function {
+        let srcFuncTy = srcFunc.GetFuncType() ??
+            throw IllegalStateException("ClosureConversion source function has no type")
+        let srcParams = srcFuncTy.GetParamTypes()
+        if (srcFunc.IsLambda() && !srcParams.isEmpty()) {
+            srcParams.remove(at: 0)
+        }
+        let params = ArrayList<Type>()
+        params.add(builder.context.GetRefTy(RequireClassType(classDef)))
+        for (paramTy in srcParams) {
+            params.add(SubstituteGenericTypes(paramTy, genericMap))
+        }
+        let retTy = SubstituteGenericTypes(srcFuncTy.GetReturnType(), genericMap)
+        let methodTy = builder.context.GetFuncTy(params, retTy)
+        let method = CreateCCFunction(methodTy, GenericOverrideFuncName(srcFunc), GENERIC_VIRTUAL_FUNC,
+            genericTypeParams: ArrayList<GenericType>())
+        SetMemberMethodAttr(method)
+        classDef.AddMethod(method)
+        CreateOverrideMethodBody(method, srcFunc, retTy, directParamsStart: if (srcFunc.IsLambda()) { 0 } else { 1 })
+        return method
+    }
+
+    private func CreateInstOverrideMethodInAutoEnvImplDef(classDef: ClassDef, srcFunc: Function,
+        genericMap: HashMap<String, Type>): Option<Function> {
+        if (FuncTypeHasGenericT(srcFunc)) {
+            return None
+        }
+        let srcFuncTy = srcFunc.GetFuncType() ??
+            throw IllegalStateException("ClosureConversion source function has no type")
+        let srcParams = srcFuncTy.GetParamTypes()
+        let params = ArrayList<Type>()
+        params.add(builder.context.GetRefTy(RequireClassType(classDef)))
+        let start = if (srcFunc.IsLambda()) { 1 } else { 0 }
+        var idx: Int64 = start
+        while (idx < srcParams.size) {
+            params.add(SubstituteGenericTypes(srcParams[idx], genericMap))
+            idx++
+        }
+        let retTy = SubstituteGenericTypes(srcFuncTy.GetReturnType(), genericMap)
+        let methodTy = builder.context.GetFuncTy(params, retTy)
+        let method = CreateCCFunction(methodTy, InstOverrideFuncName(srcFunc), INST_VIRTUAL_FUNC,
+            genericTypeParams: ArrayList<GenericType>())
+        SetMemberMethodAttr(method)
+        classDef.AddMethod(method)
+        CreateOverrideMethodBody(method, srcFunc, retTy, directParamsStart: 0)
+        return Some(method)
+    }
+
+    private func CreateOverrideMethodBody(method: Function, srcFunc: Function, retTy: Type,
+        directParamsStart!: Int64): Unit {
+        let body = builder.CreateBlockGroup(method)
+        method.InitBody(body)
+        let entry = builder.CreateBlock(body)
+        body.SetEntryBlock(entry)
+        let methodTy = method.GetFuncType() ??
+            throw IllegalStateException("ClosureConversion override method has no type")
+        for (paramTy in methodTy.GetParamTypes()) {
+            builder.CreateParameter(paramTy, "%p${method.GetNumOfParams()}", Some(method))
+        }
+        let retSlot = RequireResult(builder.CreateAllocate(builder.context.GetRefTy(retTy), retTy, entry))
+        method.SetReturnValue(retSlot)
+        let applyArgs = ArrayList<Value>()
+        if (srcFunc.IsLambda()) {
+            applyArgs.add(method.GetParam(0))
+        }
+        var idx: Int64 = directParamsStart + 1
+        while (idx < method.GetNumOfParams()) {
+            applyArgs.add(method.GetParam(idx))
+            idx++
+        }
+        let apply = builder.CreateApply(retTy, srcFunc, FuncCallContext(args: applyArgs), entry)
+        if (!retTy.IsUnit() && !retTy.IsVoid() && !retTy.IsNothing()) {
+            builder.CreateStore(RequireResult(apply), retSlot, entry)
+        }
+        builder.CreateExit(None, entry)
+    }
+
+    private func LiftLambdaToGlobalFunc(classDef: ClassDef, lambda: Lambda, genericTypeParams: ArrayList<GenericType>,
+        genericMap: HashMap<String, Type>, capturedValues: ArrayList<Value>): Function {
+        let lambdaTy = lambda.GetFuncType() ??
+            throw IllegalStateException("ClosureConversion lambda has no function type")
+        let params = ArrayList<Type>()
+        params.add(builder.context.GetRefTy(RequireClassType(classDef)))
+        for (paramTy in lambdaTy.GetParamTypes()) {
+            params.add(SubstituteGenericTypes(paramTy, genericMap))
+        }
+        let retTy = SubstituteGenericTypes(lambdaTy.GetReturnType(), genericMap)
+        let funcTy = builder.context.GetFuncTy(params, retTy)
+        let convertedGenericParams = ArrayList<GenericType>()
+        for (genericTy in genericTypeParams) {
+            if (let Some(mappedTy) <- genericMap.get(GenericTypeKey(genericTy))) {
+                if (let Some(newTy) <- (mappedTy as GenericType)) {
+                    convertedGenericParams.add(newTy)
+                }
+            }
+        }
+        let globalFunc = CreateCCFunction(funcTy, GenerateGlobalFuncIdentifier(lambda), lambda.GetSrcCodeIdentifier(),
+            genericTypeParams: convertedGenericParams)
+        globalFunc.SetFuncKind(FuncKind.LAMBDA)
+        if (lambda.IsCompileTimeValue()) {
+            globalFunc.EnableAttr(Attribute.CONST)
+        }
+        if (let Some(parentFunc) <- lambda.GetTopLevelFunc()) {
+            globalFunc.InheritIDFromFunc(parentFunc)
+        }
+        let thisParam = builder.CreateParameter(params[0], "$env", Some(globalFunc))
+        thisParam.SetSrcCodeIdentifier("$env")
+        for (param in lambda.GetParams()) {
+            param.SetOwnerFunc(globalFunc)
+            globalFunc.AddParam(param)
+            if (let Some(paramTy) <- param.GetType()) {
+                param.SetType(SubstituteGenericTypes(paramTy, genericMap))
+            }
+        }
+        let body = lambda.GetBody() ??
+            throw IllegalStateException("ClosureConversion lambda has no body")
+        globalFunc.InitBody(body)
+        if (let Some(retValue) <- lambda.GetReturnValue()) {
+            globalFunc.SetReturnValue(retValue)
+        }
+        ReplaceEnvVarWithMemberVar(capturedValues, globalFunc, thisParam)
+        convertedCache[lambda.nodeId] = globalFunc
+        return globalFunc
+    }
+
+    private func LiftNestedFunctionWithCFuncType(lambda: Lambda): Unit {
+        let result = lambda.GetResult() ??
+            throw IllegalStateException("ClosureConversion CFunc lambda has no result")
+        let resultTy = result.GetType() ??
+            throw IllegalStateException("ClosureConversion CFunc lambda result has no type")
+        let funcTy = (resultTy as FuncType) ??
+            throw IllegalStateException("ClosureConversion CFunc lambda result is not a function type")
+        let globalFunc = CreateCCFunction(funcTy, GenerateGlobalFuncIdentifier(lambda), lambda.GetSrcCodeIdentifier(),
+            genericTypeParams: lambda.GetGenericTypeParams())
+        globalFunc.SetFuncKind(FuncKind.LAMBDA)
+        if (let Some(parentFunc) <- lambda.GetTopLevelFunc()) {
+            globalFunc.InheritIDFromFunc(parentFunc)
+        }
+        for (param in lambda.GetParams()) {
+            param.SetOwnerFunc(globalFunc)
+            globalFunc.AddParam(param)
+        }
+        let body = lambda.GetBody() ??
+            throw IllegalStateException("ClosureConversion CFunc lambda has no body")
+        globalFunc.InitBody(body)
+        if (let Some(retValue) <- lambda.GetReturnValue()) {
+            globalFunc.SetReturnValue(retValue)
+        }
+        let users = result.GetUsers()
+        for (user in users) {
+            user.ReplaceOperand(result, globalFunc)
+        }
+        convertedCache[lambda.nodeId] = globalFunc
+        lambda.DetachLiftedBodyAndRemoveSelf()
+    }
+
+    private func ReplaceEnvVarWithMemberVar(capturedValues: ArrayList<Value>, globalFunc: Function,
+        thisParam: Value): Unit {
+        let entry = globalFunc.GetEntryBlock() ??
+            throw IllegalStateException("ClosureConversion lifted function has no entry block")
+        var lastExpr: Option<Expression> = None
+        var capturedIndex: UInt64 = CC_FUNC_SLOT_COUNT
+        for (captured in capturedValues) {
+            let capturedTy = captured.GetType() ??
+                throw IllegalStateException("ClosureConversion captured value has no type")
+            let fieldRefTy = builder.context.GetRefTy(capturedTy)
+            let path = ArrayList<UInt64>()
+            path.add(capturedIndex)
+            let fieldRef = builder.CreateGetElementRef(fieldRefTy, thisParam, path, entry)
+            if (let Some(prev) <- lastExpr) {
+                fieldRef.MoveAfter(prev)
+            } else {
+                entry.InsertExprIntoHead(fieldRef)
+            }
+            let loaded = builder.CreateLoad(capturedTy, RequireResult(fieldRef), entry)
+            loaded.MoveAfter(fieldRef)
+            lastExpr = Some(loaded)
+            let loadedValue = RequireResult(loaded)
+            let users = captured.GetUsers()
+            for (user in users) {
+                if (let Some(owner) <- user.GetTopLevelFunc()) {
+                    if (owner.nodeId == globalFunc.nodeId && user.nodeId != fieldRef.nodeId && user.nodeId != loaded.nodeId) {
+                        user.ReplaceOperand(captured, loadedValue)
+                    }
+                }
+            }
+            capturedIndex++
+        }
+    }
+
+    private func ReplaceUserPoint(fn: Function, user: Expression, autoEnvImplDef: ClassDef): Unit {
+        let parent = user.GetParentBlock() ??
+            throw IllegalStateException("ClosureConversion function user has no parent block")
+        let envs = ArrayList<Value>()
+        let obj = CreateAutoEnvImplObject(parent, RequireClassType(autoEnvImplDef), envs, user)
+        let baseObj = CastAutoEnvObjToSuper(obj, autoEnvImplDef, user)
+        user.ReplaceOperand(fn, baseObj)
+    }
+
+    private func ReplaceUserPoint(lambda: Lambda, user: Expression, envs: ArrayList<Value>,
+        autoEnvImplDef: ClassDef): Unit {
+        let parent = user.GetParentBlock() ??
+            throw IllegalStateException("ClosureConversion lambda user has no parent block")
+        let result = lambda.GetResult() ??
+            throw IllegalStateException("ClosureConversion lambda has no result")
+        let globalFunc = convertedCache.get(lambda.nodeId) ??
+            throw IllegalStateException("ClosureConversion lambda was not lifted")
+        var autoEnvObj: Value
+        if (let Some(owner) <- user.GetTopLevelFunc()) {
+            if (owner.nodeId == globalFunc.nodeId) {
+                autoEnvObj = globalFunc.GetParam(0)
+            } else {
+                autoEnvObj = CreateAutoEnvImplObject(parent, RequireClassType(autoEnvImplDef), envs, user)
+            }
+        } else {
+            autoEnvObj = CreateAutoEnvImplObject(parent, RequireClassType(autoEnvImplDef), envs, user)
+        }
+        if (let Some(apply) <- (user as Apply)) {
+            if (apply.GetCallee().nodeId == result.nodeId) {
+                let methods = autoEnvImplDef.GetMethods()
+                let method = methods[methods.size - 1]
+                let args = apply.GetArgs()
+                args.add(autoEnvObj, at: 0)
+                let retTy = apply.GetResultType() ??
+                    throw IllegalStateException("ClosureConversion apply has no result type")
+                let newApply = builder.CreateApply(retTy, method, FuncCallContext(args: args,
+                    thisType: autoEnvObj.GetType()), parent)
+                apply.ReplaceWith(newApply)
+                return
+            }
+        }
+        if (let Some(applyWithException) <- (user as ApplyWithException)) {
+            if (applyWithException.GetCallee().nodeId == result.nodeId) {
+                let methods = autoEnvImplDef.GetMethods()
+                let method = methods[methods.size - 1]
+                let args = applyWithException.GetArgs()
+                args.add(autoEnvObj, at: 0)
+                let retTy = applyWithException.GetResultType() ??
+                    throw IllegalStateException("ClosureConversion apply-with-exception has no result type")
+                let newApply = builder.CreateApplyWithException(retTy, method, FuncCallContext(args: args,
+                    thisType: autoEnvObj.GetType()), applyWithException.GetSuccessBlock(),
+                    applyWithException.GetErrorBlock(), parent)
+                applyWithException.ReplaceWith(newApply)
+                return
+            }
+        }
+        let baseObj = CastAutoEnvObjToSuper(autoEnvObj, autoEnvImplDef, user)
+        user.ReplaceOperand(result, baseObj)
+    }
+
+    private func CreateAutoEnvImplObject(parent: Block, autoEnvImplType: ClassType, envs: ArrayList<Value>,
+        user: Expression): LocalVar {
+        let refType = builder.context.GetRefTy(autoEnvImplType)
+        let allocate = builder.CreateAllocate(refType, autoEnvImplType, parent)
+        parent.InsertExprIntoHead(allocate)
+        let obj = RequireResult(allocate)
+        StoreAutoEnvVirtualFuncSlots(obj, autoEnvImplType.GetClassDef(), parent, user)
+        var idx: UInt64 = CC_FUNC_SLOT_COUNT
+        for (env in envs) {
+            let path = ArrayList<UInt64>()
+            path.add(idx)
+            let store = builder.CreateStoreElementRef(env, obj, path, parent)
+            store.MoveBefore(user)
+            idx++
+        }
+        return obj
+    }
+
+    private func StoreAutoEnvVirtualFuncSlots(obj: Value, autoEnvImplDef: ClassDef, parent: Block,
+        user: Expression): Unit {
+        if (let Some(genericMethod) <- FindMethodBySrcName(autoEnvImplDef, GENERIC_VIRTUAL_FUNC)) {
+            let genericPath = ArrayList<UInt64>()
+            genericPath.add(0u64)
+            let genericStore = builder.CreateStoreElementRef(genericMethod, obj, genericPath, parent)
+            genericStore.MoveBefore(user)
+        }
+        if (let Some(instMethod) <- FindMethodBySrcName(autoEnvImplDef, INST_VIRTUAL_FUNC)) {
+            let instPath = ArrayList<UInt64>()
+            instPath.add(1u64)
+            let instStore = builder.CreateStoreElementRef(instMethod, obj, instPath, parent)
+            instStore.MoveBefore(user)
+        }
+    }
+
+    private func CastAutoEnvObjToSuper(autoEnvObj: Value, autoEnvImplDef: ClassDef, user: Expression): Value {
+        if (let Some(superTy) <- autoEnvImplDef.GetSuperClassTy()) {
+            let parent = user.GetParentBlock() ??
+                throw IllegalStateException("ClosureConversion user has no parent block")
+            let superRefTy = builder.context.GetRefTy(superTy)
+            let castToBase = builder.CreateTypeCast(superRefTy, autoEnvObj, parent)
+            castToBase.MoveBefore(user)
+            return RequireResult(castToBase)
+        }
+        return autoEnvObj
+    }
+
+    private func BoxAllMutableVars(rawEnvs: ArrayList<Value>): ArrayList<Value> {
+        let boxedEnvs = ArrayList<Value>()
+        for (env in rawEnvs) {
+            if (!ContainsValue(capturedValues, env)) {
+                capturedValues.add(env)
+            }
+            if (IsMutableVarType(env)) {
+                if (let Some(local) <- env.AsLocalVar()) {
+                    boxedEnvs.add(BoxMutableVar(local))
+                } else {
+                    boxedEnvs.add(env)
+                }
+            } else {
+                boxedEnvs.add(env)
+            }
+        }
+        return boxedEnvs
+    }
+
+    private func BoxMutableVar(env: LocalVar): Value {
+        let rawEnvTy = env.GetType() ??
+            throw IllegalStateException("ClosureConversion mutable capture has no type")
+        let envTy = (rawEnvTy as RefType) ??
+            throw IllegalStateException("ClosureConversion mutable capture is not a ref")
+        let valueTy = envTy.GetBaseType()
+        let classDef = CreateBoxClassDef(valueTy)
+        let classTy = RequireClassType(classDef)
+        let envExpr = env.GetExpr() ??
+            throw IllegalStateException("ClosureConversion mutable capture has no defining expression")
+        let parent = envExpr.GetParentBlock() ??
+            throw IllegalStateException("ClosureConversion mutable capture has no parent block")
+        let boxObjExpr = builder.CreateAllocate(builder.context.GetRefTy(classTy), classTy, parent)
+        boxObjExpr.MoveBefore(envExpr)
+        let boxObj = RequireResult(boxObjExpr)
+        let users = env.GetUsers()
+        for (user in users) {
+            if (user.nodeId == boxObjExpr.nodeId || user.GetParentBlock().isNone()) {
+                continue
+            }
+            let userParent = user.GetParentBlock() ??
+                throw IllegalStateException("ClosureConversion mutable capture user has no parent block")
+            let path = ArrayList<UInt64>()
+            path.add(0u64)
+            if (let Some(store) <- (user as Store)) {
+                if (store.GetLocation().nodeId == env.nodeId) {
+                    let storeField = builder.CreateStoreElementRef(store.GetValue(), boxObj, path, userParent)
+                    storeField.MoveBefore(user)
+                    user.RemoveSelfFromBlock()
+                    continue
+                }
+            }
+            let fieldRef = builder.CreateGetElementRef(env.GetType() ??
+                throw IllegalStateException("ClosureConversion mutable capture has no type"), boxObj, path, userParent)
+            fieldRef.MoveBefore(user)
+            user.ReplaceOperand(env, RequireResult(fieldRef))
+        }
+        envExpr.RemoveSelfFromBlock()
+        env.EnableAttr(Attribute.BOXED)
+        return boxObj
+    }
+
+    private func CreateBoxClassDef(valueTy: Type): ClassDef {
+        let className = CC_CAPTURED_PREFIX + TypeKey(valueTy)
+        if (let Some(found) <- boxClassMap.get(className)) {
+            return found
+        }
+        let classDef = builder.CreateClassDef(CurrentPackage().GetName(), className)
+        SetObjectSuperClass(classDef)
+        let genericTypes = ArrayList<GenericType>()
+        CollectGenericTypes(valueTy, genericTypes)
+        let typeArgs = ArrayList<Type>()
+        for (genericTy in genericTypes) {
+            classDef.AddGenericTypeParam(genericTy)
+            typeArgs.add(genericTy)
+        }
+        let classTy = builder.context.GetClassTy(classDef, typeArgs)
+        classDef.SetType(classTy)
+        let memberInfo = MemberVarInfo("value", valueTy, isStatic: false, isReadOnly: false, rawMangledName: "value")
+        memberInfo.attributeInfo.Enable(Attribute.PUBLIC)
+        classDef.AddInstanceVar(memberInfo)
+        classDef.EnableAttr(Attribute.PUBLIC)
+        AddClassToPackage(classDef)
+        boxClassMap[className] = classDef
+        return classDef
+    }
+
+    private func ConvertApplyToInvoke(apply: Apply): Unit {
+        let callee = apply.GetCallee()
+        let instParentType = ResolveAutoEnvCallParentType(callee, apply)
+        let method = ResolveAutoEnvVirtualMethod(instParentType)
+        let funcContext = FuncCallContext(args: apply.GetArgs(), thisType: Some(instParentType))
+        let methodContext = FuncSigInfo(method.GetFuncType() ??
+            throw IllegalStateException("ClosureConversion AutoEnv method has no type"),
+            funcName: method.GetSrcCodeIdentifier(), genericTypeParams: method.GetGenericTypeParams())
+        let invokeContext = InvokeCallContext(callee, funcContext, methodContext)
+        let retTy = apply.GetResultType() ??
+            throw IllegalStateException("ClosureConversion apply has no result type")
+        let invoke = builder.CreateInvoke(retTy, invokeContext, apply.GetParentBlock() ??
+            throw IllegalStateException("ClosureConversion apply has no parent block"))
+        invoke.SetVirtualMethodOffset(0u64)
+        apply.ReplaceWith(invoke)
+    }
+
+    private func ConvertApplyWithExceptionToInvokeWithException(apply: ApplyWithException): Unit {
+        let callee = apply.GetCallee()
+        let instParentType = ResolveAutoEnvCallParentType(callee, apply)
+        let method = ResolveAutoEnvVirtualMethod(instParentType)
+        let funcContext = FuncCallContext(args: apply.GetArgs(), thisType: Some(instParentType))
+        let methodContext = FuncSigInfo(method.GetFuncType() ??
+            throw IllegalStateException("ClosureConversion AutoEnv method has no type"),
+            funcName: method.GetSrcCodeIdentifier(), genericTypeParams: method.GetGenericTypeParams())
+        let invokeContext = InvokeCallContext(callee, funcContext, methodContext)
+        let retTy = apply.GetResultType() ??
+            throw IllegalStateException("ClosureConversion apply-with-exception has no result type")
+        let invoke = builder.CreateInvokeWithException(retTy, invokeContext, apply.GetSuccessBlock(),
+            apply.GetErrorBlock(), apply.GetParentBlock() ??
+                throw IllegalStateException("ClosureConversion apply-with-exception has no parent block"))
+        invoke.SetVirtualMethodOffset(0u64)
+        apply.ReplaceWith(invoke)
+    }
+
+    private func ResolveAutoEnvCallParentType(callee: Value, call: Expression): ClassType {
+        if (let Some(calleeTy) <- callee.GetType()) {
+            if (let Some(funcTy) <- (calleeTy as FuncType)) {
+                let baseDef = GetOrCreateAutoEnvBaseDef(funcTy)
+                return InstantiateAutoEnvBaseType(baseDef, ConvertFuncArgsAndRetType(funcTy))
+            }
+            if (let Some(refTy) <- (calleeTy as RefType)) {
+                if (let Some(classTy) <- (refTy.GetBaseType() as ClassType)) {
+                    return classTy
+                }
+            }
+        }
+        let _ = call
+        throw IllegalStateException("not yet handled in ClosureConversion: applying non-AutoEnv callee")
+    }
+
+    private func ResolveAutoEnvVirtualMethod(classTy: ClassType): Function {
+        let def = classTy.GetClassDef()
+        let methodName = if (IsInstAutoEnvBaseDef(def)) { INST_VIRTUAL_FUNC } else { GENERIC_VIRTUAL_FUNC }
+        if (let Some(method) <- FindMethodBySrcName(def, methodName)) {
+            return method
+        }
+        if (let Some(superDef) <- def.GetSuperClassDef()) {
+            if (let Some(method2) <- FindMethodBySrcName(superDef, methodName)) {
+                return method2
+            }
+        }
+        throw IllegalStateException("ClosureConversion AutoEnv method not found: " + methodName)
+    }
+
+    private func ApplyNeedConvertToInvoke(apply: Apply): Bool {
+        return !apply.GetCallee().IsFunc() && IsAutoEnvRefType(apply.GetCallee().GetType())
+    }
+
+    private func ApplyWithExceptionNeedConvertToInvokeWithException(apply: ApplyWithException): Bool {
+        return !apply.GetCallee().IsFunc() && IsAutoEnvRefType(apply.GetCallee().GetType())
+    }
+
+    private func IsAutoEnvRefType(tyOpt: Option<Type>): Bool {
+        if (let Some(ty) <- tyOpt) {
+            if (let Some(refTy) <- (ty as RefType)) {
+                if (let Some(classTy) <- (refTy.GetBaseType() as ClassType)) {
+                    return IsAutoEnvDef(classTy.GetClassDef())
+                }
+            }
+        }
+        return false
+    }
+
+    private func InstantiateAutoEnvBaseType(autoEnvBaseDef: ClassDef, funcTy: FuncType): ClassType {
+        let args = if (autoEnvBaseDef.GetGenericTypeParams().isEmpty()) {
+            ArrayList<Type>()
+        } else {
+            funcTy.GetTypeArgs()
+        }
+        return builder.context.GetClassTy(autoEnvBaseDef, args)
+    }
+
+    private func CreateGenericTypeParamsForAutoEnvImplDef(value: Value): ArrayList<GenericType> {
+        let result = ArrayList<GenericType>()
+        if (let Some(fn) <- value.AsFunction()) {
+            AddGenericParamsNoDup(result, GenericParamsFromFunction(fn))
+            return result
+        }
+        if (let Some(local) <- value.AsLocalVar()) {
+            if (let Some(expr) <- local.GetExpr()) {
+                if (let Some(lambda) <- (expr as Lambda)) {
+                    AddGenericParamsNoDup(result, lambda.GetGenericTypeParams())
+                }
+            }
+            if (let Some(topLevelFunc) <- local.GetTopLevelFunc()) {
+                AddGenericParamsNoDup(result, GenericParamsFromFunction(topLevelFunc))
+            }
+            return result
+        }
+        if (let Some(param) <- value.AsParameter()) {
+            if (let Some(topLevelFunc2) <- param.GetTopLevelFunc()) {
+                AddGenericParamsNoDup(result, GenericParamsFromFunction(topLevelFunc2))
+            }
+        }
+        return result
+    }
+
+    private func GenericParamsFromFunction(fn: Function): ArrayList<GenericType> {
+        let out = ArrayList<GenericType>()
+        if (let Some(parentDef) <- fn.GetParentCustomTypeDef()) {
+            AddGenericParamsNoDup(out, parentDef.GetGenericTypeParams())
+        }
+        AddGenericParamsNoDup(out, fn.GetGenericTypeParams())
+        return out
+    }
+
+    private func AddGenericParamsNoDup(target: ArrayList<GenericType>, values: ArrayList<GenericType>): Unit {
+        for (value in values) {
+            var found = false
+            for (existing in target) {
+                if (GenericTypeKey(existing) == GenericTypeKey(value)) {
+                    found = true
+                    break
+                }
+            }
+            if (!found) {
+                target.add(value)
+            }
+        }
+    }
+
+    private func SubstituteGenericTypes(ty: Type, genericMap: HashMap<String, Type>): Type {
+        if (let Some(genericTy) <- (ty as GenericType)) {
+            return genericMap.get(GenericTypeKey(genericTy)) ?? ty
+        }
+        if (let Some(refTy) <- (ty as RefType)) {
+            return builder.context.GetRefTy(SubstituteGenericTypes(refTy.GetBaseType(), genericMap))
+        }
+        if (let Some(funcTy) <- (ty as FuncType)) {
+            let params = ArrayList<Type>()
+            for (paramTy in funcTy.GetParamTypes()) {
+                params.add(SubstituteGenericTypes(paramTy, genericMap))
+            }
+            return builder.context.GetFuncTy(params, SubstituteGenericTypes(funcTy.GetReturnType(), genericMap),
+                hasVarLenParam: funcTy.HasVarArg(), isCFunc: funcTy.IsCFunc())
+        }
+        if (let Some(tupleTy) <- (ty as TupleType)) {
+            return builder.context.GetTupleTy(SubstituteGenericTypeArgs(tupleTy.GetTypeArgs(), genericMap))
+        }
+        if (let Some(rawArrayTy) <- (ty as RawArrayType)) {
+            return builder.context.GetRawArrayTy(SubstituteGenericTypes(rawArrayTy.GetElementType(), genericMap),
+                dims: rawArrayTy.GetDims())
+        }
+        if (let Some(varrayTy) <- (ty as VArrayType)) {
+            return builder.context.GetVArrayTy(SubstituteGenericTypes(varrayTy.GetElementType(), genericMap),
+                varrayTy.size)
+        }
+        if (let Some(pointerTy) <- (ty as CPointerType)) {
+            return builder.context.GetCPointerTy(SubstituteGenericTypes(pointerTy.GetElementType(), genericMap))
+        }
+        if (let Some(boxTy) <- (ty as BoxType)) {
+            return builder.context.GetBoxTy(SubstituteGenericTypes(boxTy.GetBaseType(), genericMap))
+        }
+        if (let Some(structTy) <- (ty as StructType)) {
+            return builder.context.GetStructTy(structTy.GetStructDef(),
+                SubstituteGenericTypeArgs(structTy.GetGenericArgs(), genericMap))
+        }
+        if (let Some(classTy) <- (ty as ClassType)) {
+            return builder.context.GetClassTy(classTy.GetClassDef(),
+                SubstituteGenericTypeArgs(classTy.GetGenericArgs(), genericMap))
+        }
+        if (let Some(enumTy) <- (ty as EnumType)) {
+            return builder.context.GetEnumTy(enumTy.GetEnumDef(),
+                SubstituteGenericTypeArgs(enumTy.GetGenericArgs(), genericMap))
+        }
+        return ty
+    }
+
+    private func SubstituteGenericTypeArgs(args: ArrayList<Type>, genericMap: HashMap<String, Type>): ArrayList<Type> {
+        let out = ArrayList<Type>()
+        for (arg in args) {
+            out.add(SubstituteGenericTypes(arg, genericMap))
+        }
+        return out
+    }
+
+    private func CollectGenericTypes(ty: Type, out: ArrayList<GenericType>): Unit {
+        if (let Some(genericTy) <- (ty as GenericType)) {
+            AddGenericParamsNoDup(out, MakeGenericList(genericTy))
+            return
+        }
+        for (arg in ty.GetTypeArgs()) {
+            CollectGenericTypes(arg, out)
+        }
+    }
+
+    private func MakeGenericList(genericTy: GenericType): ArrayList<GenericType> {
+        let out = ArrayList<GenericType>()
+        out.add(genericTy)
+        return out
+    }
+
+    private func FuncTypeHasGenericT(fn: Function): Bool {
+        let funcTy = fn.GetFuncType() ??
+            throw IllegalStateException("ClosureConversion function has no type")
+        let params = funcTy.GetParamTypes()
+        if (fn.IsLambda() && !params.isEmpty()) {
+            params.remove(at: 0)
+        }
+        for (paramTy in params) {
+            if (paramTy.IsGenericRelated()) {
+                return true
+            }
+        }
+        return funcTy.GetReturnType().IsGenericRelated()
+    }
+
+    private func IsMutableVarType(value: Value): Bool {
+        if (value.IsParameter()) {
+            return false
+        }
+        if (let Some(valueTy) <- value.GetType()) {
+            if (let Some(refTy) <- (valueTy as RefType)) {
+                return !refTy.GetBaseType().IsClassOrArray()
+            }
+        }
+        return false
+    }
+
+    private func IsCalleeOfApply(user: Expression, op: Value): Bool {
+        if (let Some(apply) <- (user as Apply)) {
+            return apply.GetCallee().nodeId == op.nodeId
+        }
+        if (let Some(applyWithException) <- (user as ApplyWithException)) {
+            return applyWithException.GetCallee().nodeId == op.nodeId
+        }
+        if (let Some(invoke) <- (user as Invoke)) {
+            return invoke.GetObject().nodeId == op.nodeId
+        }
+        if (let Some(invokeWithException) <- (user as InvokeWithException)) {
+            return invokeWithException.GetObject().nodeId == op.nodeId
+        }
+        return false
+    }
+
+    private func RecordDuplicateLambdaName(lambdaFunc: Lambda): Unit {
+        let name = lambdaFunc.GetIdentifier()
+        if (duplicateLambdaName.contains(name)) {
+            duplicateLambdaName[name] = (duplicateLambdaName.get(name) ?? 0) + 1
+        } else {
+            duplicateLambdaName[name] = 0
+        }
+    }
+
+    private func GenerateGlobalFuncIdentifier(lambda: Lambda): String {
+        let count = duplicateLambdaName.get(lambda.GetIdentifier()) ?? 0
+        if (count == 0) {
+            return lambda.GetIdentifier()
+        }
+        return lambda.GetIdentifier() + "$" + count.toString()
+    }
+
+    private func CreateCCFunction(funcTy: FuncType, identifier: String, srcCodeIdentifier: String,
+        genericTypeParams!: ArrayList<GenericType> = ArrayList<GenericType>()): Function {
+        let fn = builder.CreateFunction(funcTy, identifier, srcCodeIdentifier: srcCodeIdentifier,
+            rawMangledName: identifier, packageName: CurrentPackage().GetName(),
+            genericTypeParams: genericTypeParams)
+        AddFunctionToPackage(fn)
+        return fn
+    }
+
+    private func SetMemberMethodAttr(fn: Function): Unit {
+        fn.EnableAttr(Attribute.PUBLIC)
+        fn.EnableAttr(Attribute.VIRTUAL)
+    }
+
+    private func SetObjectSuperClass(classDef: ClassDef): Unit {
+        if (let Some(objectTy) <- builder.context.GetObjectTy()) {
+            classDef.SetSuperClassTy(objectTy)
+        }
+    }
+
+    private func AddFunctionToPackage(fn: Function): Unit {
+        if (CurrentPackage().TryGetGlobalFunc(fn.GetIdentifier()).isNone()) {
+            CurrentPackage().AddGlobalFunc(fn)
+        }
+    }
+
+    private func AddClassToPackage(classDef: ClassDef): Unit {
+        if (CurrentPackage().TryGetClassDef(classDef.GetIdentifier()).isNone()) {
+            CurrentPackage().AddClass(classDef)
+        }
+    }
+
+    private func RequireResult(expr: Expression): LocalVar {
+        return expr.GetResult() ?? throw IllegalStateException("ClosureConversion expression has no result")
+    }
+
+    private func RequireClassType(classDef: ClassDef): ClassType {
+        let ty = classDef.GetType() ??
+            throw IllegalStateException("ClosureConversion class has no type: " + classDef.GetIdentifier())
+        return (ty as ClassType) ??
+            throw IllegalStateException("ClosureConversion class has no class type: " + classDef.GetIdentifier())
+    }
+
+    private func TypesFromGenerics(genericTypes: ArrayList<GenericType>): ArrayList<Type> {
+        let out = ArrayList<Type>()
+        for (genericTy in genericTypes) {
+            out.add(genericTy)
+        }
+        return out
+    }
+
+    private func FindMethodBySrcName(def: ClassDef, name: String): Option<Function> {
+        for (method in def.GetMethods()) {
+            if (method.GetSrcCodeIdentifier() == name || method.GetIdentifierWithoutPrefix() == name) {
+                return Some(method)
+            }
+        }
+        return None
+    }
+
+    private func IsAutoEnvDef(def: ClassDef): Bool {
+        let id = def.GetIdentifier()
+        return id.startsWith(CC_GENERIC_BASE_PREFIX) || id.startsWith(CC_INSTANTIATED_BASE_PREFIX) ||
+            id.startsWith(CC_FUNC_IMPL_PREFIX) || id.startsWith(CC_LAMBDA_IMPL_PREFIX)
+    }
+
+    private func IsInstAutoEnvBaseDef(def: ClassDef): Bool {
+        return def.GetIdentifier().startsWith(CC_INSTANTIATED_BASE_PREFIX)
+    }
+
+    private func GenericOverrideFuncName(srcFunc: Function): String {
+        return CC_FUNC_PREFIX + StripGlobalPrefix(srcFunc.GetIdentifierWithoutPrefix()) + "$g"
+    }
+
+    private func InstOverrideFuncName(srcFunc: Function): String {
+        return CC_FUNC_PREFIX + StripGlobalPrefix(srcFunc.GetIdentifierWithoutPrefix()) + "$i"
+    }
+
+    private func GenerateCapturedMemberName(value: Value): String {
+        let srcName = value.GetSrcCodeIdentifier()
+        if (!srcName.isEmpty()) {
+            return srcName
+        }
+        return value.GetIdentifier()
+    }
+
+    private func IsClosureConversionGeneratedFunction(fn: Function): Bool {
+        return StripGlobalPrefix(fn.GetIdentifierWithoutPrefix()).startsWith(CC_FUNC_PREFIX)
+    }
+
+    private func StripGlobalPrefix(identifier: String): String {
+        if (identifier.startsWith("@")) {
+            return identifier[1..]
+        }
+        return identifier
+    }
+
+    private func TypeKey(ty: Type): String {
+        return ty.ToString().replace(" ", "_").replace(",", "_").replace("(", "_").replace(")", "_").
+            replace("<", "_").replace(">", "_").replace("&", "R").replace("-", "_").replace(":", "_").
+            replace(".", "_")
+    }
+
+    private func GenericTypeKey(ty: GenericType): String {
+        return ty.GetIdentifier() + "#" + ty.GetSrcCodeIdentifier()
     }
 }
 

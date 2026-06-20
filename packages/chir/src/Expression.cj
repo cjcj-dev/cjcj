@@ -1814,6 +1814,12 @@ public class Lambda <: Expression {
         super.RemoveSelfFromBlock()
     }
 
+    public func DetachLiftedBodyAndRemoveSelf(): Unit {
+        body = None
+        ClearBlockGroups()
+        super.RemoveSelfFromBlock()
+    }
+
     public func GetCapturedVariables(): ArrayList<Value> {
         let captured = ArrayList<Value>()
         if (let Some(lambdaBody) <- body) {
