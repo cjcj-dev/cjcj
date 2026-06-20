@@ -627,6 +627,12 @@ public class IRBuilder2 <: Resource {
             return raw
         }
         if (paramTy.IsFunc()) {
+            if (let Some(funcTy) <- (paramTy as FuncType)) {
+                if (!funcTy.IsCFunc()) {
+                    return CreatePointerCast(raw, CGType.GetRefType(GetLLVMContext()),
+                        name: if (name.isEmpty()) { "fn.arg" } else { name + ".fn.arg" })
+                }
+            }
             let rawTy = unsafe { LLVMTypeOf(raw) }
             if (!rawTy.isNull() && unsafe { LLVMGetTypeKind(rawTy) } == 12) {
                 return CreateBitCast(raw, CGType.GetOrCreate(cgMod, paramTy).GetLLVMType(),
@@ -656,6 +662,16 @@ public class IRBuilder2 <: Resource {
             return CreateBitCast(raw, destPtrTy, name: if (name.isEmpty()) { "arg.cast" } else { name + ".arg.cast" })
         }
         let allocaName = if (name.isEmpty()) { "arg.addr" } else { name + ".arg.addr" }
+        if (let Some(argCGType) <- arg.GetCGType()) {
+            let argTy = argCGType.GetOriginal().StripAllRefs()
+            if ((argTy.IsStruct() || argTy.IsTuple()) && !argTy.IsEqual(derefParamTy)) {
+                let actualSlot = CreateEntryAlloca(argCGType, name: allocaName)
+                CreateStore(raw, actualSlot)
+                let destPtrTy = unsafe { LLVMPointerType(derefParamCGType.GetLLVMType(), 0u32) }
+                return CreatePointerCast(actualSlot, destPtrTy,
+                    name: if (name.isEmpty()) { "arg.addr.cast" } else { name + ".arg.addr.cast" })
+            }
+        }
         let slot = CreateEntryAlloca(derefParamCGType, name: allocaName)
         CreateStore(raw, slot)
         return slot

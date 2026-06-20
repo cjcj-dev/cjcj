@@ -124,6 +124,9 @@ public class CGFunctionType <: CGType {
                 }
             }
             if (let Some(rawFunctionType) <- llvmFunctionType) {
+                if (!funcTy.IsCFunc()) {
+                    return CGType.GetRefType(cgCtx.GetLLVMContext())
+                }
                 return unsafe { LLVMPointerType(rawFunctionType, 0u32) }
             }
             return LLVMNullType()
