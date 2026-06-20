@@ -69,7 +69,7 @@ private func GenerateExtensionDefsForCustomDef(cgMod: CGModule, def: CustomTypeD
             if (GenerateExtensionDefForType(cgMod, def, RequireClassType(classDef), false)) {
                 emitted = true
             }
-            if (IsClosureConversionAutoEnvImpl(classDef)) {
+            if (ShouldEmitInheritedClassExtensionDefs(classDef)) {
                 var directSuper = true
                 var currentSuper = classDef.GetSuperClassTy()
                 while (let Some(superTy) <- currentSuper) {
@@ -482,6 +482,10 @@ private func ConvertExpectedArgForMethod(irBuilder: IRBuilder2, rawArg: LLVMValu
 private func EmitExpectedSlotWrapperReturn(irBuilder: IRBuilder2, wrapper: LLVMValueRef,
     expectedCGType: CGFunctionType, expectedRetTy: Type, methodRetTy: Type, result: LLVMValueRef): Unit {
     if (expectedCGType.HasSRet()) {
+        if (expectedRetTy.IsUnit() || expectedRetTy.IsVoid() || expectedRetTy.IsNothing()) {
+            irBuilder.CreateRetVoid()
+            return
+        }
         let returnSlot = unsafe { LLVMGetParam(wrapper, 0u32) }
         irBuilder.CreateStore(ConvertReturnForExpectedSlot(irBuilder, result, methodRetTy, expectedRetTy), returnSlot)
         irBuilder.CreateRetVoid()
@@ -639,9 +643,8 @@ private func IsCoreObjectType(ty: ClassType): Bool {
     return def.GetPackageName() == "std.core" && def.GetSrcCodeIdentifier() == "Object"
 }
 
-private func IsClosureConversionAutoEnvImpl(def: ClassDef): Bool {
-    let name = def.GetIdentifier()
-    return name.startsWith("$Cl") || name.startsWith("$Cf")
+private func ShouldEmitInheritedClassExtensionDefs(def: ClassDef): Bool {
+    return def.GetAnnotation("IsAutoEnvImpl").isSome()
 }
 
 private func RequireCustomType(def: CustomTypeDef): Type {

@@ -57,10 +57,47 @@ private func GenerateVirtualApply(irBuilder: IRBuilder2, ownerTy: Type, methodNa
     for (arg in args) {
         argValues.add(irBuilder.GetCGModule().MaterializeValue(irBuilder, arg))
     }
+    if (IsAutoEnvType(ownerTy)) {
+        let calleePtr = BuildAutoEnvCallee(irBuilder, argValues[0], ownerTy, methodName, cgFuncType)
+        return irBuilder.CreateCallOrInvoke(cgFuncType, calleePtr, argValues, name: "call")
+    }
     let methodIndex = FindMethodIndex(ownerTy, methodName)
     let (calleePtr, methodTypeInfoArg) = BuildVirtualCallee(irBuilder, argValues[0], ownerTy, methodIndex, cgFuncType)
     return irBuilder.CreateCallOrInvokeWithMethodTypeInfo(cgFuncType, calleePtr, argValues,
         Some(methodTypeInfoArg), name: "call")
+}
+
+private func BuildAutoEnvCallee(irBuilder: IRBuilder2, objectValue: CGValue, ownerTy: Type, methodName: String,
+    cgFuncType: CGFunctionType): LLVMValueRef {
+    let llvmContext = irBuilder.GetLLVMContext().raw
+    let i8PtrType = unsafe { LLVMPointerType(LLVMInt8TypeInContext(llvmContext), 0u32) }
+    let i8PtrSlotType = unsafe { LLVMPointerType(i8PtrType, 1u32) }
+    let payload = irBuilder.GetPayloadFromObject(objectValue.GetRawValue())
+    let typedPayload = irBuilder.CreateBitCast(payload, i8PtrSlotType, name: "autoenv.payload")
+    let indices = ArrayList<LLVMValueRef>()
+    indices.add(unsafe {
+        LLVMConstInt(LLVMInt32TypeInContext(llvmContext), FindAutoEnvPayloadMethodIndex(ownerTy, methodName), 0)
+    })
+    let slot = irBuilder.CreateGEP(i8PtrType, typedPayload, indices, name: "autoenv.fn.addr")
+    let rawCallee = irBuilder.CreateLoad(i8PtrType, slot, name: "autoenv.fn")
+    return irBuilder.CreateBitCast(rawCallee,
+        unsafe { LLVMPointerType(cgFuncType.GetLLVMFunctionType(), 0u32) }, name: "autoenv.fn.cast")
+}
+
+private func FindAutoEnvPayloadMethodIndex(ownerTy: Type, methodName: String): UInt64 {
+    if (IsAutoEnvInstBaseType(ownerTy)) {
+        return 1u64
+    }
+    if (let Some(customTy) <- (ownerTy.StripAllRefs() as CustomType)) {
+        var idx: UInt64 = 0u64
+        for (method in customTy.GetCustomTypeDef().GetMethods()) {
+            if (MethodNameMatches(method, methodName)) {
+                return idx
+            }
+            idx++
+        }
+    }
+    return 0u64
 }
 
 private func BuildVirtualCallee(irBuilder: IRBuilder2, objectValue: CGValue, ownerTy: Type, methodIndex: Int64,

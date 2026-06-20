@@ -113,14 +113,8 @@ private func IsAutoEnvValue(value: Value): Bool {
         let strippedTy = valueTy.StripAllRefs()
         if (let Some(classTy) <- (strippedTy as ClassType)) {
             let classDef = classTy.GetClassDef()
-            if (classDef.GetAnnotation("IsAutoEnvClass").isSome()) {
-                return true
-            }
-            let className = classDef.GetIdentifier()
-            return className.contains("AutoEnv") || className.contains("ClosureEnv") || className.contains("$env")
+            return classDef.GetAnnotation("IsAutoEnvClass").isSome()
         }
-        let typeName = strippedTy.ToString()
-        return typeName.contains("AutoEnv") || typeName.contains("ClosureEnv") || typeName.contains("$env")
     }
     return false
 }

@@ -233,6 +233,7 @@ foreign {
     func LLVMConstNull(valueType: LLVMTypeRef): LLVMValueRef
     func LLVMGetUndef(valueType: LLVMTypeRef): LLVMValueRef
     func LLVMConstInt(intType: LLVMTypeRef, value: UInt64, signExtend: Int32): LLVMValueRef
+    func LLVMConstIntGetZExtValue(constantVal: LLVMValueRef): UInt64
     func LLVMConstReal(realType: LLVMTypeRef, value: Float64): LLVMValueRef
     func LLVMConstStringInContext(context: LLVMContextRef, str: CString, length: UInt32, dontNullTerminate: Int32): LLVMValueRef
     func LLVMConstArray(elementType: LLVMTypeRef, constantVals: CPointer<LLVMValueRef>, length: UInt32): LLVMValueRef

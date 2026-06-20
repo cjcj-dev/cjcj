@@ -1,11 +1,9 @@
 package cangjie_compiler::codegen
 
 import std.collection.*
-import cangjie_compiler::chir.ClassDef
 import cangjie_compiler::chir.CustomType
 import cangjie_compiler::chir.Expression
 import cangjie_compiler::chir.ExprKind
-import cangjie_compiler::chir.Function
 import cangjie_compiler::chir.GetElementByName
 import cangjie_compiler::chir.GetElementRef
 import cangjie_compiler::chir.LocalVar
@@ -46,7 +44,8 @@ private func TryGenerateGCReadForLoad(irBuilder: IRBuilder2, chirExpr: Expressio
             if (let Some(getElementRef) <- (ownerExpr as GetElementRef)) {
                 let base = getElementRef.GetLocation()
                 if (let Some(baseTy) <- base.GetType()) {
-                    if (IsClosureConversionManagedClass(baseTy)) {
+                    if (IsManagedObjectElementBase(baseTy) &&
+                        IsManagedReferenceField(irBuilder, ResolveElementTypeByPath(baseTy, getElementRef.GetPath()))) {
                         let baseValue = irBuilder.GetCGModule().MaterializeValue(irBuilder, base)
                         return Some(irBuilder.CallGCReadRef(baseValue.GetRawValue(), addr.GetRawValue()))
                     }
@@ -57,12 +56,9 @@ private func TryGenerateGCReadForLoad(irBuilder: IRBuilder2, chirExpr: Expressio
     return None
 }
 
-private func IsClosureConversionManagedClass(ty: Type): Bool {
-    if (let Some(customTy) <- (ty.StripAllRefs() as CustomType)) {
-        let defName = customTy.GetCustomTypeDef().GetIdentifier()
-        return defName.startsWith("$Cl") || defName.startsWith("$Cf") || defName.startsWith("$Captured_")
-    }
-    return false
+private func IsManagedObjectElementBase(ty: Type): Bool {
+    let strippedTy = ty.StripAllRefs()
+    return strippedTy.IsClass() || strippedTy.IsBox()
 }
 
 public func GenerateRawArrayAllocate(irBuilder: IRBuilder2, chirExpr: Expression): LLVMValueRef {
@@ -286,11 +282,12 @@ public func GenerateStoreElementRef(irBuilder: IRBuilder2, chirExpr: Expression)
         if (storeAddr.isNull()) {
             return LLVMNullValue()
         }
-        if (let Some(slotStore) <- TryStoreClosureConversionFuncSlot(irBuilder, storeElementRef, storePlace,
-            storeAddr)) {
-            return slotStore
+        let fieldTy: Option<Type> = if (let Some(locationTy) <- storeElementRef.GetLocation().GetType()) {
+            ResolveElementTypeByPath(locationTy, path)
+        } else {
+            None
         }
-        return StoreElementValue(irBuilder, storePlace, storeValue, storeAddr)
+        return StoreElementValue(irBuilder, storePlace, storeValue, storeAddr, fieldTy)
     }
     if (let Some(storeByName) <- (chirExpr as StoreElementByName)) {
         if (let Some(locationTy) <- storeByName.GetLocation().GetType()) {
@@ -305,104 +302,25 @@ public func GenerateStoreElementRef(irBuilder: IRBuilder2, chirExpr: Expression)
                 if (byNameAddr.isNull()) {
                     return LLVMNullValue()
                 }
-                if (let Some(slotStore) <- TryStoreClosureConversionFuncSlot(irBuilder, storeByName, byNamePlace,
-                    byNameAddr)) {
-                    return slotStore
-                }
-                return StoreElementValue(irBuilder, byNamePlace, byNameValue, byNameAddr)
+                return StoreElementValue(irBuilder, byNamePlace, byNameValue, byNameAddr,
+                    ResolveElementTypeByPath(locationTy, path))
             }
         }
     }
     return LLVMNullValue()
 }
 
-private func TryStoreClosureConversionFuncSlot(irBuilder: IRBuilder2, chirExpr: Expression, baseValue: CGValue,
-    elementPtr: LLVMValueRef): Option<LLVMValueRef> {
-    let slotFn = GetClosureConversionGenericSlotFunction(irBuilder.GetCGModule(), chirExpr, baseValue) ?? return None
-    let int64Type = unsafe { LLVMInt64TypeInContext(irBuilder.GetLLVMContext().raw) }
-    return Some(irBuilder.CreateStore(irBuilder.CreatePtrToInt(slotFn, int64Type, name: "func.slot.generic"),
-        elementPtr))
-}
-
-private func GetClosureConversionGenericSlotFunction(cgMod: CGModule, chirExpr: Expression,
-    baseValue: CGValue): Option<LLVMValueRef> {
-    if (!IsClosureConversionAutoEnvSlotStore(chirExpr, baseValue)) {
-        return None
-    }
-    let method = chirExpr.GetOperand(0).AsFunction() ?? return None
-    if (method.GetSrcCodeIdentifier() != "$GenericVirtualFunc") {
-        return None
-    }
-    let expected = FindGenericAutoEnvBaseMethod(method) ?? return None
-    return Some(GetOrCreateExpectedVirtualSlotWrapper(cgMod, method, expected))
-}
-
-private func IsClosureConversionAutoEnvSlotStore(chirExpr: Expression, baseValue: CGValue): Bool {
-    if (!IsFirstElementPath(chirExpr)) {
-        return false
-    }
-    if (let Some(baseType) <- baseValue.GetCGType()) {
-        if (let Some(customTy) <- (baseType.GetOriginal().StripAllRefs() as CustomType)) {
-            let defName = customTy.GetCustomTypeDef().GetIdentifier()
-            return defName.startsWith("$Cl") || defName.startsWith("$Cf")
-        }
-    }
-    return false
-}
-
-private func IsFirstElementPath(chirExpr: Expression): Bool {
-    if (let Some(storeElementRef) <- (chirExpr as StoreElementRef)) {
-        let path = storeElementRef.GetPath()
-        return path.size == 1 && path[0] == 0u64
-    }
-    if (let Some(storeByName) <- (chirExpr as StoreElementByName)) {
-        let names = storeByName.GetNames()
-        return names.size == 1 && names[0] == "$GenericVirtualFunc$slot"
-    }
-    return false
-}
-
-private func FindGenericAutoEnvBaseMethod(method: Function): Option<Function> {
-    let parentCustomDef = method.GetParentCustomTypeDef() ?? return None
-    let parentDef = (parentCustomDef as ClassDef) ?? return None
-    var currentSuper = parentDef.GetSuperClassTy()
-    while (let Some(superTy) <- currentSuper) {
-        let superDef = superTy.GetClassDef()
-        if (superDef.GetIdentifier().startsWith("$Cg")) {
-            return FindMethodBySrcName(superDef, "$GenericVirtualFunc")
-        }
-        currentSuper = superDef.GetSuperClassTy()
-    }
-    return None
-}
-
-private func FindMethodBySrcName(def: ClassDef, name: String): Option<Function> {
-    for (method in def.GetMethods()) {
-        if (method.GetSrcCodeIdentifier() == name || method.GetIdentifierWithoutPrefix() == name) {
-            return Some(method)
-        }
-    }
-    return None
-}
-
 private func StoreElementValue(irBuilder: IRBuilder2, baseValue: CGValue, elementValue: CGValue,
-    elementPtr: LLVMValueRef): LLVMValueRef {
-    if ((elementValue as CGFunction).isSome()) {
-        let int64Type = unsafe { LLVMInt64TypeInContext(irBuilder.GetLLVMContext().raw) }
-        return irBuilder.CreateStore(irBuilder.CreatePtrToInt(elementValue.GetRawValue(), int64Type,
-            name: "func.slot"), elementPtr)
-    }
+    elementPtr: LLVMValueRef, fieldTy: Option<Type>): LLVMValueRef {
     if (let Some(baseType) <- baseValue.GetCGType()) {
         if (let Some(rawArrayTy) <- FindRawArrayType(baseType.GetOriginal())) {
             let elementCGType = CGType.GetOrCreate(irBuilder.GetCGModule(), rawArrayTy.GetElementType())
             return StoreRawArrayElement(irBuilder, baseValue.GetRawValue(), elementCGType, elementValue.GetRawValue(),
                 elementPtr)
         }
-        if (IsClosureConversionManagedClass(baseType.GetOriginal())) {
-            if (let Some(elementCGType) <- elementValue.GetCGType()) {
-                if (elementCGType.IsReference()) {
-                    return irBuilder.CallGCWrite(elementValue.GetRawValue(), baseValue.GetRawValue(), elementPtr)
-                }
+        if (IsManagedObjectElementBase(baseType.GetOriginal())) {
+            if (IsManagedReferenceField(irBuilder, fieldTy)) {
+                return irBuilder.CallGCWrite(elementValue.GetRawValue(), baseValue.GetRawValue(), elementPtr)
             }
         }
     }
@@ -509,13 +427,30 @@ private func CreateElementAddress(irBuilder: IRBuilder2, baseValue: CGValue, ind
                 let payload = irBuilder.GetPayloadFromObject(baseValue.GetRawValue())
                 let typedPayload = irBuilder.CreateBitCast(payload,
                     unsafe { LLVMPointerType(layoutType, 1u32) }, name: name + ".payload")
-                return irBuilder.CreateGEP(layoutType, typedPayload, indices, name: name)
+                return irBuilder.CreateGEP(layoutType, typedPayload,
+                    AdjustClassElementIndices(baseType.GetOriginal(), indices), name: name)
             }
             return irBuilder.CreateGEP(elementType.GetLLVMType(), baseValue.GetRawValue(), indices, name: name)
         }
         return irBuilder.CreateGEP(baseType.GetLLVMType(), baseValue.GetRawValue(), indices, name: name)
     }
     return LLVMNullValue()
+}
+
+private func AdjustClassElementIndices(baseTy: Type, indices: ArrayList<LLVMValueRef>): ArrayList<LLVMValueRef> {
+    let out = ArrayList<LLVMValueRef>()
+    let prefix = AutoEnvPayloadPrefixFields(baseTy)
+    var idx: Int64 = 0
+    while (idx < indices.size) {
+        if (idx == 1 && prefix != 0u64) {
+            let rawIndex = unsafe { LLVMConstIntGetZExtValue(indices[idx]) }
+            out.add(unsafe { LLVMConstInt(LLVMTypeOf(indices[idx]), rawIndex + prefix, 0) })
+        } else {
+            out.add(indices[idx])
+        }
+        idx++
+    }
+    return out
 }
 
 private func ResolveElementPathByNames(baseTy: Type, names: ArrayList<String>): Option<ArrayList<UInt64>> {
@@ -552,4 +487,44 @@ private func ResolveElementPathByNames(baseTy: Type, names: ArrayList<String>): 
         }
     }
     return Some(path)
+}
+
+private func ResolveElementTypeByPath(baseTy: Type, path: ArrayList<UInt64>): Option<Type> {
+    if (path.isEmpty()) {
+        return None
+    }
+    var currentTy = baseTy.StripAllRefs()
+    for (pathItem in path) {
+        if (let Some(rawArrayTy) <- (currentTy as RawArrayType)) {
+            currentTy = rawArrayTy.GetElementType().StripAllRefs()
+            continue
+        }
+        if (currentTy.IsTuple()) {
+            let fields = currentTy.GetTypeArgs()
+            let fieldIdx = Int64(pathItem)
+            if (fieldIdx < 0 || fieldIdx >= fields.size) {
+                return None
+            }
+            currentTy = fields[fieldIdx].StripAllRefs()
+            continue
+        }
+        if (let Some(customTy) <- (currentTy as CustomType)) {
+            let fields = customTy.GetInstantiatedMemberTys()
+            let fieldIdx = Int64(pathItem)
+            if (fieldIdx < 0 || fieldIdx >= fields.size) {
+                return None
+            }
+            currentTy = fields[fieldIdx].StripAllRefs()
+            continue
+        }
+        return None
+    }
+    return Some(currentTy)
+}
+
+private func IsManagedReferenceField(irBuilder: IRBuilder2, fieldTy: Option<Type>): Bool {
+    if (let Some(ty) <- fieldTy) {
+        return CGType.GetOrCreate(irBuilder.GetCGModule(), ty).IsReference()
+    }
+    return false
 }

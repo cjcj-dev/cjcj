@@ -396,6 +396,11 @@ public func GetInstanceFieldTypes(cgMod: CGModule, chirTy: Type): ArrayList<Type
         }
         return result
     }
+    if (IsAutoEnvType(chirTy)) {
+        let intNativeTy = cgMod.GetCGContext().GetCHIRBuilder().context.GetIntNativeTy()
+        result.add(intNativeTy)
+        result.add(intNativeTy)
+    }
     if (let Some(customTy) <- (chirTy as CustomType)) {
         for (fieldTy in customTy.GetInstantiatedMemberTys()) {
             result.add(fieldTy)
