@@ -2585,10 +2585,18 @@ public class TypeChecker {
     }
 
     private func ResolveRefExpr(ctx: ASTContext, refExpr: RefExpr): Unit {
-        if ((let Some(_) <- refExpr.ref.target) || !refExpr.ref.targets.isEmpty()) {
+        if (let Some(_) <- refExpr.ref.target) {
             return
         }
-        let targets = impl.Lookup(ctx, refExpr.ref.identifier.Val(), scopeNameOf(refExpr), refExpr)
+        let targets = ArrayList<Decl>()
+        for (target in refExpr.ref.targets) {
+            targets.add(target)
+        }
+        if (targets.isEmpty()) {
+            for (target in impl.Lookup(ctx, refExpr.ref.identifier.Val(), scopeNameOf(refExpr), refExpr)) {
+                targets.add(target)
+            }
+        }
         if (let Some(param) <- CurrentFunctionParam(refExpr.ref.identifier.Val())) {
             if (targets.isEmpty()) {
                 targets.add(param)
@@ -2608,12 +2616,33 @@ public class TypeChecker {
                 targets.add(constructor)
             }
         }
-        for (target in targets) {
-            refExpr.ref.targets.add(target)
+        if (targets.isEmpty()) {
+            refExpr.SetTy(TypeManager.GetInvalidTy())
+            refExpr.ref.targets.clear()
+            return
+        }
+        if (let Some(diagValue) <- impl.diag) {
+            if (!TypeCheckReferenceFilterAndCheckTargetsOfRef(diagValue, impl.typeManager, ctx, refExpr, targets)) {
+                refExpr.SetTy(TypeManager.GetInvalidTy())
+                refExpr.ref.targets.clear()
+                return
+            }
+        }
+        if (targets.isEmpty()) {
+            refExpr.SetTy(TypeManager.GetInvalidTy())
+            refExpr.ref.targets.clear()
+            return
+        }
+        var decl = GetAccessibleDecl(refExpr, targets)
+        if (let None <- decl) {
+            decl = Some(targets[0])
+        }
+        ModifyTargetOfRef(refExpr, decl.getOrThrow(), targets)
+        for (target in refExpr.ref.targets) {
             addImportedDeclAndDependencies(ctx, target)
         }
-        if (targets.size == 1) {
-            ReplaceTarget(refExpr, Some(targets[0]), insertTarget: true)
+        if (let Some(target) <- refExpr.ref.target) {
+            addImportedDeclAndDependencies(ctx, target)
         }
     }
 }
