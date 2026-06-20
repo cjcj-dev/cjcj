@@ -1125,24 +1125,94 @@ extend ParserImpl {
         return ParseLambdaExpr(false)
     }
 
+    private func ParseLambdaFuncParam(): AstFuncParam {
+        let param = AstFuncParam()
+        if (Skip(TokenKind.WILDCARD)) {
+            param.identifier = SrcIdentifier("_", "_", lastToken.Begin(), lastToken.End(), false)
+        } else {
+            param.identifier = ExpectIdentifierWithPos(param)
+        }
+        if (param.identifier.Empty()) {
+            param.EnableAttr(Attribute.IS_BROKEN)
+            ConsumeUntilAny([TokenKind.DOUBLE_ARROW, TokenKind.COLON, TokenKind.COMMA, TokenKind.NL,
+                TokenKind.SEMI, TokenKind.RCURL], targetTokenConsumed: false)
+        }
+        param.isVar = false
+        param.begin = param.identifier.Begin()
+        if (Skip(TokenKind.COLON)) {
+            param.colonPos = lastToken.Begin()
+            param.typeNode = ParseType()
+            if (let Some(typeNode) <- param.typeNode) {
+                param.end = typeNode.end
+            }
+        } else {
+            param.end = param.identifier.End()
+        }
+        return param
+    }
+
+    private func ParseFuncParamListInLambdaExpr(): AstFuncParamList {
+        let paramList = AstFuncParamList()
+        if (SeeingInvalidParamListInLambdaExpr()) {
+            paramList.begin = Peek().Begin()
+            paramList.end = Peek().Begin()
+            return paramList
+        }
+        while (!Seeing(TokenKind.END) && !SeeingDoubleArrow()) {
+            let param = ParseLambdaFuncParam()
+            if (param.TestAttr(Attribute.IS_BROKEN)) {
+                paramList.EnableAttr(Attribute.IS_BROKEN)
+            }
+            paramList.params.add(param)
+            if (Skip(TokenKind.COMMA)) {
+                param.commaPos = lastToken.Begin()
+            } else {
+                break
+            }
+        }
+        if (!paramList.params.isEmpty()) {
+            paramList.begin = paramList.params[0].begin
+            paramList.end = paramList.params[paramList.params.size - 1].end
+        }
+        return paramList
+    }
+
     public func ParseLambdaExpr(isTailClosure: Bool): LambdaExpr {
         let lambda = LambdaExpr()
         lambda.begin = Peek().Begin()
         let body = AstFuncBody()
         if (Skip(TokenKind.LCURL)) {
-            let paramList = AstFuncParamList()
-            if (!SeeingDoubleArrow() && !SeeingInvalidParamListInLambdaExpr()) {
-                while (!Seeing(TokenKind.END) && !SeeingDoubleArrow() && !Seeing(TokenKind.RCURL)) {
-                    paramList.params.add(ConvertLambdaFuncParamToAst(ParseFuncParam()))
-                    if (!Skip(TokenKind.COMMA)) { break }
+            let paramList = ParseFuncParamListInLambdaExpr()
+            if (!paramList.params.isEmpty() && !SkipDoubleArrow()) {
+                if (!lambda.TestAttr(Attribute.HAS_BROKEN)) {
+                    diag.DiagnoseRefactor(DiagKindRefactor.EXPECTED_TOKEN, Peek().Begin(),
+                        "expected '=>' in lambda expression")
+                }
+                ConsumeUntilAny([TokenKind.NL, TokenKind.SEMI, TokenKind.DOUBLE_ARROW, TokenKind.RCURL],
+                    targetTokenConsumed: false)
+                if (!Skip(TokenKind.DOUBLE_ARROW)) {
+                    let _ = SkipCombinedDoubleArrow()
+                }
+                lambda.EnableAttr(Attribute.HAS_BROKEN)
+            } else {
+                if (paramList.params.isEmpty() && !isTailClosure) {
+                    let hasDoubleArrow = lastToken.kind == TokenKind.DOUBLE_ARROW || Skip(TokenKind.DOUBLE_ARROW) ||
+                        SkipCombinedDoubleArrow()
+                    let hasWildcard = Seeing([TokenKind.WILDCARD, TokenKind.DOUBLE_ARROW]) ||
+                        Seeing([TokenKind.WILDCARD, TokenKind.COMMA]) ||
+                        SeeingTokenAndCombinator(TokenKind.WILDCARD, [TokenKind.ASSIGN, TokenKind.GT])
+                    if (!hasDoubleArrow && !hasWildcard) {
+                        diag.DiagnoseRefactor(DiagKindRefactor.EXPECTED_TOKEN, Peek().Begin(),
+                            "expected '=>' in lambda expression")
+                    }
+                }
+                if (lastToken.kind == TokenKind.DOUBLE_ARROW || Skip(TokenKind.DOUBLE_ARROW) ||
+                    SkipCombinedDoubleArrow()) {
+                    body.doubleArrowPos = lastToken.Begin()
                 }
             }
-            if (SkipDoubleArrow()) {
-                body.paramLists.add(paramList)
-            } else if (!paramList.params.isEmpty() && !isTailClosure) {
-                diag.DiagnoseRefactor(DiagKindRefactor.EXPECTED_TOKEN, Peek().Begin(), "expected '=>' in lambda expression")
-                lambda.isBroken = true
-            }
+            body.begin = lastToken.Begin()
+            body.paramLists.add(paramList)
             let block = Block()
             block.leftCurlPos = lambda.begin
             block.begin = lambda.begin
@@ -1158,22 +1228,6 @@ extend ParserImpl {
             lambda.end = block.end
         }
         return lambda
-    }
-
-    private func ConvertLambdaFuncParamToAst(param: FuncParam): AstFuncParam {
-        let out = AstFuncParam()
-        out.begin = param.begin
-        out.end = param.end
-        out.isBroken = param.isBroken
-        out.identifier = param.identifier
-        out.typeNode = param.typeNode
-        out.colonPos = param.colonPos
-        out.assignment = param.assignment
-        out.assignPos = param.assignPos
-        out.isMemberParam = param.isMemberParam
-        out.isNamedParam = param.isNamedParam
-        out.hasLetOrVar = param.isMemberParam
-        return out
     }
 
     public func CheckCondition(expr: Expr): Bool {

@@ -1133,6 +1133,87 @@ private func InferGenericCallTypeMapping(typeManager: TypeManager, ce: CallExpr,
     return false
 }
 
+private func IsLambdaArg(arg: FuncArg): Bool {
+    if (let Some(expr) <- arg.expr) {
+        return (expr as LambdaExpr).isSome()
+    }
+    return false
+}
+
+private func RecordContextualLambdaArgTy(expectedTys: ArrayList<Ty>, seen: ArrayList<Bool>,
+    ambiguous: ArrayList<Bool>, idx: Int64, ty: Ty): Unit {
+    if (!seen[idx]) {
+        expectedTys[idx] = ty
+        seen[idx] = true
+        return
+    }
+    if (!SameTy(expectedTys[idx], ty)) {
+        ambiguous[idx] = true
+    }
+}
+
+public func GetContextualLambdaArgTysForCall(typeManager: TypeManager, target: Option<Ty>,
+    ce: CallExpr): ArrayList<Ty> {
+    let expectedTys = ArrayList<Ty>()
+    let seen = ArrayList<Bool>()
+    let ambiguous = ArrayList<Bool>()
+    for (_ in ce.args) {
+        expectedTys.add(TypeManager.GetInvalidTy())
+        seen.add(false)
+        ambiguous.add(false)
+    }
+    if (ce.args.isEmpty()) {
+        return expectedTys
+    }
+    var hasLambdaArg = false
+    for (arg in ce.args) {
+        if (IsLambdaArg(arg)) {
+            hasLambdaArg = true
+            break
+        }
+    }
+    if (!hasLambdaArg) {
+        return expectedTys
+    }
+    let candidatesBefore = CollectCallBaseFuncCandidates(ce)
+    let candidates = FilterCandidates(typeManager, None, ce, candidatesBefore)
+    for (fd in candidates) {
+        let paramTys = GetParamTysInArgsOrder(typeManager, ce, fd)
+        if (paramTys.size != ce.args.size) {
+            continue
+        }
+        let typeMapping = GenerateCallBaseTypeMapping(typeManager, ce)
+        let _ = InferGenericCallTypeMapping(typeManager, ce, fd, paramTys, typeMapping)
+        if (let Some(targetTy) <- target) {
+            if (let Some(fdTy) <- fd.GetTy()) {
+                if (let Some(funcTy) <- (typeManager.ApplySubstPack(fdTy, typeMapping) as FuncTy)) {
+                    if (!typeManager.IsSubtype(funcTy.retTy, targetTy)) {
+                        continue
+                    }
+                }
+            }
+        }
+        var idx: Int64 = 0
+        while (idx < ce.args.size && idx < paramTys.size) {
+            if (IsLambdaArg(ce.args[idx])) {
+                let paramTy = UnboxOptionType(typeManager.ApplySubstPack(paramTys[idx], typeMapping))
+                if ((paramTy as FuncTy).isSome()) {
+                    RecordContextualLambdaArgTy(expectedTys, seen, ambiguous, idx, paramTy)
+                }
+            }
+            idx++
+        }
+    }
+    var idx2: Int64 = 0
+    while (idx2 < expectedTys.size) {
+        if (ambiguous[idx2]) {
+            expectedTys[idx2] = TypeManager.GetInvalidTy()
+        }
+        idx2++
+    }
+    return expectedTys
+}
+
 private func FillTypeArgumentsTy(typeManager: TypeManager, fd: FuncDecl, ce: CallExpr,
     typeMapping: SubstPack): Unit {
     let generic = match (GetCurrentGeneric(fd, ce)) {
