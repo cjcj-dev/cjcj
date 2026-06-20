@@ -1459,7 +1459,7 @@ public class TypeChecker {
                 if (Ty.IsTyCorrect(targetTy)) {
                     matchCase.SetCtxExprForPatterns(matchExpr.selector.getOrThrow())
                     let _ = ChkMatchCasePatterns(impl.typeManager, ctx, targetTy, matchCase, diag: impl.diag)
-                    CollectPatternBindings(matchCase.patterns, boundDecls)
+                    BindCollectedConditionDecls(ctx, matchCase.patterns, boundDecls)
                 }
             }
             if (let Some(patternGuard) <- matchCase.patternGuard) {
