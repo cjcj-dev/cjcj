@@ -196,7 +196,7 @@ public class CHIRChecker {
             globalVar.TestAttr(Attribute.IMPORTED)) {
             shouldHaveInitializer = false
         }
-        if (shouldHaveInitializer && globalVar.GetInitializerValue().isNone()) {
+        if (shouldHaveInitializer && globalVar.GetInitializerValue().isNone() && globalVar.GetInitFunc().isNone()) {
             result.AddError("global var ${globalVar.GetIdentifier()} should be initialized by literal or function, " +
                 "it must have one of them.")
         }

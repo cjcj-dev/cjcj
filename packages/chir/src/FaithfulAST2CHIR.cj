@@ -12,6 +12,7 @@ import cangjie_compiler::ast.CallExpr as AstCallExpr
 import cangjie_compiler::ast.ClassLikeDecl as AstClassLikeDecl
 import cangjie_compiler::ast.Decl as AstDecl
 import cangjie_compiler::ast.EnumDecl as AstEnumDecl
+import cangjie_compiler::ast.EnumPattern as AstEnumPattern
 import cangjie_compiler::ast.ExtendDecl as AstExtendDecl
 import cangjie_compiler::ast.Expr as AstExpr
 import cangjie_compiler::ast.File as AstFile
@@ -23,14 +24,18 @@ import cangjie_compiler::ast.LitConstKind as AstLitConstKind
 import cangjie_compiler::ast.MemberAccess as AstMemberAccess
 import cangjie_compiler::ast.Node as AstNode
 import cangjie_compiler::ast.Package as AstPackage
+import cangjie_compiler::ast.Pattern as AstPattern
 import cangjie_compiler::ast.PropDecl as AstPropDecl
 import cangjie_compiler::ast.RefExpr as AstRefExpr
 import cangjie_compiler::ast.StructDecl as AstStructDecl
+import cangjie_compiler::ast.TuplePattern as AstTuplePattern
 import cangjie_compiler::ast.Ty as AstTy
 import cangjie_compiler::ast.VarDecl as AstVarDecl
+import cangjie_compiler::ast.VarPattern as AstVarPattern
 import cangjie_compiler::ast.VarWithPatternDecl as AstVarWithPatternDecl
 import cangjie_compiler::ast.VisitAction as AstVisitAction
 import cangjie_compiler::ast.Walker as AstWalker
+import cangjie_compiler::ast.WildcardPattern as AstWildcardPattern
 
 private class FaithfulInitFileVars {
     public let file: AstFile
@@ -44,7 +49,9 @@ private class FaithfulInitFileVars {
 private let FAITHFUL_USER_MAIN_NAME: String = "user.main"
 private let FAITHFUL_MANGLE_CANGJIE_PREFIX: String = "_C"
 private let FAITHFUL_MANGLE_SUFFIX: String = "E"
+private let FAITHFUL_MANGLE_NESTED_PREFIX: String = "N"
 private let FAITHFUL_MANGLE_GLOBAL_PACKAGE_INIT_PREFIX: String = "GP"
+private let FAITHFUL_MANGLE_GLOBAL_VARIABLE_INIT_PREFIX: String = "GV"
 private let FAITHFUL_MANGLE_FUNC_PARA_INIT_PREFIX: String = "PI"
 private let FAITHFUL_MANGLE_FUNC_PARAM_TYPE_PREFIX: String = "H"
 private let FAITHFUL_MANGLE_VOID_TY_SUFFIX: String = "v"
@@ -65,6 +72,7 @@ private let FAITHFUL_SPECIAL_NAME_FOR_INIT_FUNCTION: String = "ii"
 private let FAITHFUL_SPECIAL_NAME_FOR_INIT_LITERAL_FUNCTION: String = "il"
 private let FAITHFUL_SPECIAL_NAME_FOR_IMPORTS_INIT_FUNCTION: String = "fi"
 private let FAITHFUL_SPECIAL_NAME_FOR_LITERAL_IMPORTS_INIT_FUNCTION: String = "fl"
+private let FAITHFUL_GV_INIT_WILDCARD_PATTERN: String = "wildcard_pattern_"
 
 private func FaithfulStartsWith(value: String, prefix: String): Bool {
     return value.size >= prefix.size && value[0..prefix.size] == prefix
@@ -735,12 +743,57 @@ public class FaithfulAST2CHIR {
     }
 
     private func AddDependency(dep: AstDecl, dependencies: ArrayList<AstDecl>): Unit {
-        if (!IsFuncOrVarCandidate(dep)) {
+        let resolvedDep = ResolveVarWithPatternDependency(dep)
+        if (!IsFuncOrVarCandidate(resolvedDep)) {
             return
         }
-        if (!ContainsDecl(dependencies, dep)) {
-            dependencies.add(dep)
+        if (!ContainsDecl(dependencies, resolvedDep)) {
+            dependencies.add(resolvedDep)
         }
+    }
+
+    private func ResolveVarWithPatternDependency(dep: AstDecl): AstDecl {
+        if (ContainsDecl(globalAndStaticVars, dep)) {
+            return dep
+        }
+        if (let Some(varDecl) <- (dep as AstVarDecl)) {
+            for (candidate in globalAndStaticVars) {
+                if (let Some(varWithPattern) <- (candidate as AstVarWithPatternDecl)) {
+                    if (let Some(pattern) <- varWithPattern.irrefutablePattern) {
+                        if (PatternContainsVarDecl(pattern, varDecl)) {
+                            return varWithPattern
+                        }
+                    }
+                }
+            }
+        }
+        return dep
+    }
+
+    private func PatternContainsVarDecl(pattern: AstPattern, decl: AstVarDecl): Bool {
+        if (let Some(varPattern) <- (pattern as AstVarPattern)) {
+            if (let Some(varDecl) <- varPattern.varDecl) {
+                return SameAstDecl(varDecl, decl)
+            }
+            return false
+        }
+        if (let Some(tuplePattern) <- (pattern as AstTuplePattern)) {
+            for (subPattern in tuplePattern.patterns) {
+                if (PatternContainsVarDecl(subPattern, decl)) {
+                    return true
+                }
+            }
+            return false
+        }
+        if (let Some(enumPattern) <- (pattern as AstEnumPattern)) {
+            for (subPattern in enumPattern.patterns) {
+                if (PatternContainsVarDecl(subPattern, decl)) {
+                    return true
+                }
+            }
+            return false
+        }
+        return false
     }
 
     private func IsFuncOrVarCandidate(decl: AstDecl): Bool {
@@ -754,7 +807,8 @@ public class FaithfulAST2CHIR {
     }
 
     private func IsGlobalOrStaticVarDecl(decl: AstDecl): Bool {
-        return decl.astKind == ASTKind.VAR_DECL && decl.TestAnyAttr(AstAttribute.GLOBAL, AstAttribute.STATIC)
+        return (decl.astKind == ASTKind.VAR_DECL || decl.astKind == ASTKind.VAR_WITH_PATTERN_DECL) &&
+            decl.TestAnyAttr(AstAttribute.GLOBAL, AstAttribute.STATIC)
     }
 
     private func GroupInitOrderByFile(sortedVars: ArrayList<AstDecl>): ArrayList<FaithfulInitFileVars> {
@@ -830,8 +884,10 @@ public class FaithfulAST2CHIR {
                 if (let Some(initFunc) <- TranslateSingleInitializer(varDecl)) {
                     initFuncs.add(initFunc)
                 }
-            } else if ((decl as AstVarWithPatternDecl).isSome()) {
-                throw IllegalArgumentException("not yet ported in faithful AST2CHIR: global var_with_pattern initializer")
+            } else if (let Some(varWithPattern) <- (decl as AstVarWithPatternDecl)) {
+                if (let Some(initFunc) <- TranslateVarWithPatternInitializer(varWithPattern)) {
+                    initFuncs.add(initFunc)
+                }
             }
         }
         if (initFuncs.isEmpty()) {
@@ -884,6 +940,19 @@ public class FaithfulAST2CHIR {
         return CreateGlobalVarStoreInitFunc(varDecl, suffix: "")
     }
 
+    private func TranslateVarWithPatternInitializer(decl: AstVarWithPatternDecl): Option<Function> {
+        if (decl.initializer.isNone()) {
+            return None
+        }
+        let pattern = RequirePattern(decl.irrefutablePattern, "global var-with-pattern pattern")
+        if ((pattern as AstTuplePattern).isSome() || (pattern as AstEnumPattern).isSome() ||
+            (pattern as AstWildcardPattern).isSome()) {
+            return Some(CreateGlobalVarWithPatternInitFunc(decl))
+        }
+        throw IllegalArgumentException(
+            "faithful AST2CHIR unsupported global var-with-pattern: ${ASTKindName(pattern.astKind)}")
+    }
+
     private func CreateGlobalVarStoreInitFunc(varDecl: AstVarDecl, suffix!: String): Function {
         let initFn = CreateEmptyGVInitFunc(GlobalVarInitFuncName(varDecl, suffix),
             "gv$_" + varDecl.identifier.Val() + suffix, EffectiveRawMangledName(varDecl) + "$init" + suffix,
@@ -892,7 +961,24 @@ public class FaithfulAST2CHIR {
             initFn.EnableAttr(Attribute.CONST)
         }
         let globalVar = RequireGlobalVar(globalCache.Get(varDecl))
+        globalVar.SetInitFunc(initFn)
         CreateTranslator().TranslateGlobalVarInitializer(initFn, varDecl, globalVar)
+        return initFn
+    }
+
+    private func CreateGlobalVarWithPatternInitFunc(decl: AstVarWithPatternDecl): Function {
+        let initFn = CreateEmptyGVInitFunc(GlobalVarWithPatternInitFuncName(decl),
+            GlobalVarWithPatternInitSrcName(decl), EffectiveRawMangledName(decl), EffectivePackageName(decl))
+        if (decl.IsConst()) {
+            initFn.EnableAttr(Attribute.CONST)
+        }
+        let varDecls = ArrayList<AstVarDecl>()
+        FlattenGlobalVarWithPatternDecl(RequirePattern(decl.irrefutablePattern, "global var-with-pattern pattern"),
+            varDecls)
+        for (varDecl in varDecls) {
+            RequireGlobalVar(globalCache.Get(varDecl)).SetInitFunc(initFn)
+        }
+        CreateTranslator().TranslateGlobalVarWithPatternInitializer(initFn, decl)
         return initFn
     }
 
@@ -1114,6 +1200,65 @@ public class FaithfulAST2CHIR {
         return EffectiveMangledName(varDecl) + "$init" + suffix
     }
 
+    private func GlobalVarWithPatternInitFuncName(decl: AstVarWithPatternDecl): String {
+        let prefix = FAITHFUL_MANGLE_CANGJIE_PREFIX + FAITHFUL_MANGLE_NESTED_PREFIX
+        if (FaithfulStartsWith(decl.mangledName, prefix) && decl.mangledName.size > prefix.size +
+            FAITHFUL_MANGLE_SUFFIX.size) {
+            return FAITHFUL_MANGLE_CANGJIE_PREFIX + FAITHFUL_MANGLE_GLOBAL_VARIABLE_INIT_PREFIX +
+                decl.mangledName[prefix.size..decl.mangledName.size - FAITHFUL_MANGLE_SUFFIX.size] +
+                FAITHFUL_MANGLE_FUNC_PARAM_TYPE_PREFIX + FAITHFUL_MANGLE_VOID_TY_SUFFIX
+        }
+        return EffectiveMangledName(decl) + "$init"
+    }
+
+    private func GlobalVarWithPatternInitSrcName(decl: AstVarWithPatternDecl): String {
+        let pattern = RequirePattern(decl.irrefutablePattern, "global var-with-pattern pattern")
+        if ((pattern as AstTuplePattern).isSome()) {
+            return GVInitFuncNameForName("tuple_pattern", EffectivePackageName(decl)) + FlattenPatternName(pattern)
+        }
+        if ((pattern as AstEnumPattern).isSome()) {
+            return GVInitFuncNameForName("enum_pattern", EffectivePackageName(decl)) + FlattenPatternName(pattern)
+        }
+        if ((pattern as AstWildcardPattern).isSome()) {
+            return GVInitFuncNameForName(FAITHFUL_GV_INIT_WILDCARD_PATTERN + pattern.begin.line.toString() + "_" +
+                pattern.begin.column.toString(), EffectivePackageName(decl))
+        }
+        throw IllegalArgumentException(
+            "faithful AST2CHIR unsupported global var-with-pattern: ${ASTKindName(pattern.astKind)}")
+    }
+
+    private func GVInitFuncNameForName(gvName: String, pkgName: String): String {
+        return FAITHFUL_MANGLE_CANGJIE_PREFIX + FAITHFUL_MANGLE_GLOBAL_VARIABLE_INIT_PREFIX +
+            FaithfulOptPackageName(pkgName) + FaithfulMangleName(gvName) + FAITHFUL_MANGLE_FUNC_PARAM_TYPE_PREFIX +
+            FAITHFUL_MANGLE_VOID_TY_SUFFIX
+    }
+
+    private func FlattenPatternName(pattern: AstPattern): String {
+        if (let Some(varPattern) <- (pattern as AstVarPattern)) {
+            let varDecl = varPattern.varDecl ??
+                throw IllegalStateException("faithful AST2CHIR var pattern has no VarDecl")
+            return ":" + varDecl.identifier.Val()
+        }
+        if (let Some(tuplePattern) <- (pattern as AstTuplePattern)) {
+            var out = ""
+            for (subPattern in tuplePattern.patterns) {
+                out += FlattenPatternName(subPattern)
+            }
+            return out
+        }
+        if (let Some(enumPattern) <- (pattern as AstEnumPattern)) {
+            var out = ""
+            for (subPattern in enumPattern.patterns) {
+                out += FlattenPatternName(subPattern)
+            }
+            return out
+        }
+        if ((pattern as AstWildcardPattern).isSome()) {
+            return ":_"
+        }
+        return ""
+    }
+
     private func RequireEntryBlock(fn: Function): Block {
         return fn.GetEntryBlock() ??
             throw IllegalStateException("faithful AST2CHIR initializer function has no entry block")
@@ -1184,10 +1329,40 @@ public class FaithfulAST2CHIR {
             if (let Some(varDecl) <- (decl as AstVarDecl)) {
                 let _ = CreateAndCacheGlobalVar(varDecl)
             } else if (let Some(varWithPattern) <- (decl as AstVarWithPatternDecl)) {
-                let _ = varWithPattern
-                throw IllegalArgumentException("not yet ported in faithful AST2CHIR: var_with_pattern_decl")
+                let varDecls = ArrayList<AstVarDecl>()
+                FlattenGlobalVarWithPatternDecl(RequirePattern(varWithPattern.irrefutablePattern,
+                    "global var-with-pattern pattern"), varDecls)
+                for (varDecl in varDecls) {
+                    let _ = CreateAndCacheGlobalVar(varDecl)
+                }
             }
         }
+    }
+
+    private func FlattenGlobalVarWithPatternDecl(pattern: AstPattern, varDecls: ArrayList<AstVarDecl>): Unit {
+        if (let Some(varPattern) <- (pattern as AstVarPattern)) {
+            let varDecl = varPattern.varDecl ??
+                throw IllegalStateException("faithful AST2CHIR var pattern has no VarDecl")
+            varDecls.add(varDecl)
+            return
+        }
+        if (let Some(tuplePattern) <- (pattern as AstTuplePattern)) {
+            for (subPattern in tuplePattern.patterns) {
+                FlattenGlobalVarWithPatternDecl(subPattern, varDecls)
+            }
+            return
+        }
+        if (let Some(enumPattern) <- (pattern as AstEnumPattern)) {
+            for (subPattern in enumPattern.patterns) {
+                FlattenGlobalVarWithPatternDecl(subPattern, varDecls)
+            }
+            return
+        }
+        if ((pattern as AstWildcardPattern).isSome()) {
+            return
+        }
+        throw IllegalArgumentException(
+            "faithful AST2CHIR unsupported global var-with-pattern: ${ASTKindName(pattern.astKind)}")
     }
 
     private func CreateAndCacheGlobalVar(decl: AstVarDecl): GlobalVar {
@@ -1668,6 +1843,10 @@ public class FaithfulAST2CHIR {
 
     private func RequireExpr(expr: Option<AstExpr>, context: String): AstExpr {
         return expr ?? throw IllegalStateException("faithful AST2CHIR requires ${context}")
+    }
+
+    private func RequirePattern(pattern: Option<AstPattern>, context: String): AstPattern {
+        return pattern ?? throw IllegalStateException("faithful AST2CHIR requires ${context}")
     }
 
     private func RequireFuncType(ty: Type): FuncType {

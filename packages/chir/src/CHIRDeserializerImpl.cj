@@ -355,7 +355,11 @@ class CHIRDeserializerImpl {
             if (let Some(value) <- valuesById.get(CHIRFieldAt(fields, 1))) {
                 if (let Some(globalVar) <- (value as GlobalVar)) {
                     if (let Some(initValue) <- valuesById.get(CHIRFieldAt(fields, 7))) {
-                        globalVar.SetInitializerValue(initValue)
+                        if (let Some(initFunc) <- (initValue as Function)) {
+                            globalVar.SetInitFunc(initFunc)
+                        } else {
+                            globalVar.SetInitializerValue(initValue)
+                        }
                     }
                     if (let Some(parentDef) <- customDefsById.get(CHIRFieldAt(fields, 9))) {
                         globalVar.SetOuterDeclaredOrExtendedDef(parentDef)
