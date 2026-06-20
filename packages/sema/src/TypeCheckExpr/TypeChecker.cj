@@ -38,6 +38,13 @@ private func typeCheckExprGetCurInheritableDecl(ctx: ASTContext, scopeName: Stri
         scopeGateName = GetScopeGateName(scopeGateName)
     }
     if (let Some(funcBody) <- currentFuncBody) {
+        if (let Some(funcDecl) <- funcBody.funcDecl) {
+            if (let Some(outer) <- funcDecl.outerDecl) {
+                if (let Some(inheritable) <- (outer as InheritableDecl)) {
+                    return Some(inheritable)
+                }
+            }
+        }
         if (let Some(classLike) <- funcBody.parentClassLike) {
             return Some(classLike)
         }
@@ -341,6 +348,42 @@ private func isStringLiteral(expr: Expr): Bool {
     return false
 }
 
+private func typeCheckExprIsArithmeticOperator(op: TokenKind): Bool {
+    return op == TokenKind.ADD || op == TokenKind.SUB || op == TokenKind.MUL ||
+        op == TokenKind.DIV || op == TokenKind.EXP || op == TokenKind.MOD ||
+        op == TokenKind.BITAND || op == TokenKind.BITOR || op == TokenKind.BITXOR
+}
+
+private func typeCheckExprAddConcreteIntegerKinds(kinds: ArrayList<TypeKind>): Unit {
+    kinds.add(TypeKind.TYPE_INT8)
+    kinds.add(TypeKind.TYPE_INT16)
+    kinds.add(TypeKind.TYPE_INT32)
+    kinds.add(TypeKind.TYPE_INT64)
+    kinds.add(TypeKind.TYPE_INT_NATIVE)
+    kinds.add(TypeKind.TYPE_UINT8)
+    kinds.add(TypeKind.TYPE_UINT16)
+    kinds.add(TypeKind.TYPE_UINT32)
+    kinds.add(TypeKind.TYPE_UINT64)
+    kinds.add(TypeKind.TYPE_UINT_NATIVE)
+}
+
+private func typeCheckExprConcreteBinaryCandidateKinds(op: TokenKind): ArrayList<TypeKind> {
+    let kinds = ArrayList<TypeKind>()
+    if (op == TokenKind.ADD || op == TokenKind.SUB || op == TokenKind.MUL || op == TokenKind.DIV) {
+        typeCheckExprAddConcreteIntegerKinds(kinds)
+        kinds.add(TypeKind.TYPE_FLOAT16)
+        kinds.add(TypeKind.TYPE_FLOAT32)
+        kinds.add(TypeKind.TYPE_FLOAT64)
+    } else if (op == TokenKind.MOD || op == TokenKind.BITAND || op == TokenKind.BITOR ||
+        op == TokenKind.BITXOR) {
+        typeCheckExprAddConcreteIntegerKinds(kinds)
+    } else if (op == TokenKind.EXP) {
+        kinds.add(TypeKind.TYPE_INT64)
+        kinds.add(TypeKind.TYPE_FLOAT64)
+    }
+    return kinds
+}
+
 public class TypeChecker {
     private var ci: Option<CompilerInstance> = None
     private var impl: TypeCheckerImpl = TypeCheckerImpl()
@@ -406,6 +449,9 @@ public class TypeChecker {
         PreCheck(contexts)
         for (ctx in contexts) {
             SeedImportedExtendMaps(ctx)
+        }
+        for (ctx in contexts) {
+            BuildCurrentPackageExtendMap(ctx)
         }
         return contexts
     }
@@ -473,6 +519,44 @@ public class TypeChecker {
             }
         }
         TypeCheckExtendUpdateExtendMap(impl.typeManager, extends)
+    }
+
+    private func BuildCurrentPackageExtendMap(ctx: ASTContext): Unit {
+        let extends = ArrayList<ExtendDecl>()
+        for (sym in impl.GetSymsByASTKind(ctx, ASTKind.EXTEND_DECL)) {
+            if (let Some(node) <- sym.node) {
+                if (let Some(extendDecl) <- (node as ExtendDecl)) {
+                    StampCurrentExtendPackage(ctx, extendDecl)
+                    extends.add(extendDecl)
+                }
+            }
+        }
+        if (extends.isEmpty()) {
+            return
+        }
+        if (let Some(diagValue) <- impl.diag) {
+            TypeCheckExtendBuildMap(diagValue, impl.typeManager, ctx, extends)
+            return
+        }
+        for (extendDecl in extends) {
+            if (let Some(extendedType) <- extendDecl.extendedType) {
+                if (let Some(extendedTy) <- extendedType.GetTy()) {
+                    extendDecl.SetTy(extendedTy)
+                }
+            }
+        }
+        TypeCheckExtendUpdateExtendMap(impl.typeManager, extends)
+    }
+
+    private func StampCurrentExtendPackage(ctx: ASTContext, extendDecl: ExtendDecl): Unit {
+        if (extendDecl.fullPackageName.isEmpty()) {
+            extendDecl.fullPackageName = ctx.fullPackageName
+        }
+        for (member in extendDecl.members) {
+            if (member.fullPackageName.isEmpty()) {
+                member.fullPackageName = extendDecl.fullPackageName
+            }
+        }
     }
 
     private func PreCheck(activeContexts: ArrayList<ASTContext>): Unit {
@@ -1873,6 +1957,48 @@ public class TypeChecker {
         return FinishSynthesize(ctx, expr, SynExprShallow(impl.typeManager, expr))
     }
 
+    private func CheckArithmeticBinaryExpr(ctx: ASTContext, target: Ty, be: BinaryExpr): Bool {
+        if ((let None <- be.leftExpr) || (let None <- be.rightExpr)) {
+            be.SetTy(TypeManager.GetInvalidTy())
+            return false
+        }
+        let targetTy = UnboxOptionType(target)
+        if (!Ty.IsTyCorrect(targetTy)) {
+            return false
+        }
+        let leftExpr = be.leftExpr.getOrThrow()
+        let rightExpr = be.rightExpr.getOrThrow()
+        for (kindValue in typeCheckExprConcreteBinaryCandidateKinds(be.op)) {
+            let candidateTy = TypeManager.GetPrimitiveTy(kindValue)
+            if (!impl.typeManager.IsSubtype(candidateTy, targetTy)) {
+                continue
+            }
+            leftExpr.Clear()
+            rightExpr.Clear()
+            let leftOk = Check(ctx, candidateTy, leftExpr)
+            let rightOk = Check(ctx, candidateTy, rightExpr)
+            if (leftOk && rightOk) {
+                be.SetTy(candidateTy)
+                return true
+            }
+        }
+        be.SetTy(TypeManager.GetInvalidTy())
+        return false
+    }
+
+    private func CheckBinaryExpr(ctx: ASTContext, target: Ty, be: BinaryExpr): Bool {
+        if (let Some(desugar) <- be.desugarExpr) {
+            if (let Some(desugarTy) <- desugar.GetTy()) {
+                return impl.typeManager.CheckTypeCompatibility(target, desugarTy) != TypeCompatibility.INCOMPATIBLE
+            }
+        }
+        if (typeCheckExprIsArithmeticOperator(be.op) && CheckArithmeticBinaryExpr(ctx, target, be)) {
+            return true
+        }
+        let _ = Synthesize(ctx, be)
+        return ChkExprShallow(impl.typeManager, target, be)
+    }
+
     private func Check(ctx: ASTContext, target: Ty, expr: Expr): Bool {
         if (let Some(block) <- (expr as Block)) {
             return CheckBlock(ctx, target, block)
@@ -1892,6 +2018,9 @@ public class TypeChecker {
         if (expr.IsLoopExpr()) {
             SynthesizeLoopChildren(ctx, expr)
             return FinishCheck(ctx, expr, ChkExprShallow(impl.typeManager, target, expr))
+        }
+        if (let Some(binaryExpr) <- (expr as BinaryExpr)) {
+            return FinishCheck(ctx, binaryExpr, CheckBinaryExpr(ctx, target, binaryExpr))
         }
         if (let Some(returnExpr) <- (expr as ReturnExpr)) {
             if (let Some(fb) <- currentFuncBody) {
