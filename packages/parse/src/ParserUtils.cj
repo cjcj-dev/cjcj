@@ -217,6 +217,11 @@ extend ParserImpl {
             if (firstKind == TokenKind.COMMA || firstKind == TokenKind.COLON || firstKind == TokenKind.DOUBLE_ARROW) {
                 return false
             }
+            if (ahead.size == 2 && firstKind == TokenKind.ASSIGN && ahead[1].kind == TokenKind.GT &&
+                ahead[1].Begin().line == ahead[0].Begin().line &&
+                ahead[1].Begin().column == ahead[0].Begin().column + 1) {
+                return false
+            }
         }
         return true
     }

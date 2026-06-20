@@ -9,6 +9,8 @@ import cangjie_compiler::basic.DiagArgument as BasicDiagArgument
 import cangjie_compiler::basic.Position as BasicPosition
 import cangjie_compiler::basic.Range as BasicRange
 
+public type CallArgChecker = (Ty, FuncArg) -> Bool
+
 private class FunctionMatchingUnit {
     public var fd: FuncDecl
     public var tysInArgOrder: ArrayList<Ty>
@@ -938,15 +940,11 @@ private func ResolveOverload(typeManager: TypeManager, candidates: ArrayList<Fun
     return out
 }
 
-private func SortCallArgumentByParamOrder(fd: FuncDecl, ce: CallExpr): ArrayList<FuncArg> {
-    let out = ArrayList<FuncArg>()
+private func SortCallArgumentByParamOrderInto(fd: FuncDecl, ce: CallExpr, out: ArrayList<FuncArg>): Unit {
     if (let None <- BodyParamList(fd)) {
-        return out
+        return
     }
     let params = BodyParamList(fd).getOrThrow().params
-    for (_ in params) {
-        out.add(FuncArg())
-    }
     var namedArgFound = false
     var pos: Int64 = 0
     for (arg in ce.args) {
@@ -976,17 +974,6 @@ private func SortCallArgumentByParamOrder(fd: FuncDecl, ce: CallExpr): ArrayList
             paramIdx++
         }
     }
-    return out
-}
-
-private func IsEmptyFuncArg(arg: FuncArg): Bool {
-    if (!arg.name.Empty() || arg.withInout) {
-        return false
-    }
-    if (let Some(_) <- arg.expr) {
-        return false
-    }
-    return true
 }
 
 private func SpreadInstantiationTy(typeManager: TypeManager, node: Node, typeMapping: SubstPack): Unit {
@@ -1002,39 +989,30 @@ private func SpreadInstantiationTy(typeManager: TypeManager, node: Node, typeMap
     let _ = walker.Walk()
 }
 
-private func BuildEffectiveCallArgs(typeManager: TypeManager, fd: FuncDecl, ce: CallExpr,
-    typeMapping: SubstPack): ArrayList<FuncArg> {
-    let orderedArgs = SortCallArgumentByParamOrder(fd, ce)
+private func BuildDesugaredCallArgs(typeManager: TypeManager, fd: FuncDecl, ce: CallExpr,
+    typeMapping: SubstPack): Unit {
     ce.defaultArgs.clear()
+    ce.desugarArgs = None
     if (let None <- BodyParamList(fd)) {
-        return orderedArgs
+        return
     }
     let params = BodyParamList(fd).getOrThrow().params
-    let effectiveArgs = ArrayList<FuncArg>()
-    var idx: Int64 = 0
-    while (idx < orderedArgs.size) {
-        let orderedArg = orderedArgs[idx]
-        if (idx < params.size && IsEmptyFuncArg(orderedArg) && params[idx].TestAttr(Attribute.HAS_INITIAL)) {
-            let defaultArg = CreateFuncArgForOptional(params[idx])
+    let desugarArgs = ArrayList<FuncArg>()
+    for (param in params) {
+        if (param.TestAttr(Attribute.HAS_INITIAL)) {
+            let defaultArg = CreateFuncArgForOptional(param)
             if (!fd.TestAttr(Attribute.TOOL_ADD)) {
                 defaultArg.EnableAttr(Attribute.HAS_INITIAL)
             }
             SpreadInstantiationTy(typeManager, defaultArg, typeMapping)
             ce.defaultArgs.add(defaultArg)
-            effectiveArgs.add(defaultArg)
+            desugarArgs.add(defaultArg)
         } else {
-            effectiveArgs.add(orderedArg)
+            desugarArgs.add(FuncArg())
         }
-        idx++
     }
-    return effectiveArgs
-}
-
-private func ReplaceCallArgsWith(ce: CallExpr, args: ArrayList<FuncArg>): Unit {
-    ce.args.clear()
-    for (arg in args) {
-        ce.args.add(arg)
-    }
+    SortCallArgumentByParamOrderInto(fd, ce, desugarArgs)
+    ce.desugarArgs = Some(desugarArgs)
 }
 
 private func ApplyInstantiatedArgumentTypes(typeManager: TypeManager, ce: CallExpr,
@@ -1118,17 +1096,28 @@ private func InferGenericCallTypeMapping(typeManager: TypeManager, ce: CallExpr,
     var idx: Int64 = 0
     while (idx < ce.args.size && idx < paramTys.size) {
         let argTy = typeManager.ReplaceIdealTy(GetExprTy(ce.args[idx]))
+        if (!Ty.IsTyCorrect(argTy) && IsLambdaCallArg(ce.args[idx])) {
+            idx++
+            continue
+        }
         let paramTy = typeManager.ApplySubstPack(paramTys[idx], typeMapping)
         pack.argTys.add(argTy)
         pack.paramTys.add(paramTy)
         idx++
     }
-    if (pack.argTys.size != paramTys.size || pack.argTys.size != ce.args.size) {
+    if (pack.argTys.size != pack.paramTys.size || pack.argTys.isEmpty()) {
         return false
     }
     if (let Some(subst) <- LocalTypeArgumentSynthesis(typeManager, pack).SynthesizeTypeArguments()) {
         typeManager.PackMapping(typeMapping, subst)
         return true
+    }
+    return false
+}
+
+private func IsLambdaCallArg(arg: FuncArg): Bool {
+    if (let Some(expr) <- arg.expr) {
+        return (expr as LambdaExpr).isSome()
     }
     return false
 }
@@ -1157,22 +1146,40 @@ private func FillTypeArgumentsTy(typeManager: TypeManager, fd: FuncDecl, ce: Cal
     }
 }
 
-private func CheckCallCompatible(typeManager: TypeManager, diag: Option<BasicDiagnosticEngine>, ce: CallExpr, fd: FuncDecl,
-    unit: FunctionMatchingUnit): Bool {
+private func CheckCallArgCompatible(typeManager: TypeManager, diag: Option<BasicDiagnosticEngine>, ce: CallExpr,
+    idx: Int64, paramTy: Ty, argChecker: Option<CallArgChecker>): Bool {
+    if (let Some(checker) <- argChecker) {
+        if (checker(paramTy, ce.args[idx])) {
+            return true
+        }
+        if (let Some(diagValue) <- diag) {
+            DiagOld(diagValue, ce.args[idx], BasicDiagKind.sema_parameters_and_arguments_mismatch)
+        }
+        return false
+    }
+    let argTy = GetExprTy(ce.args[idx])
+    if (typeManager.CheckTypeCompatibility(paramTy, argTy) == TypeCompatibility.INCOMPATIBLE) {
+        if (let Some(diagValue) <- diag) {
+            DiagOld(diagValue, ce.args[idx], BasicDiagKind.sema_parameters_and_arguments_mismatch)
+        }
+        return false
+    }
+    return true
+}
+
+private func CheckCallCompatible(typeManager: TypeManager, diag: Option<BasicDiagnosticEngine>, ce: CallExpr,
+    fd: FuncDecl, unit: FunctionMatchingUnit, argChecker!: Option<CallArgChecker> = None): Bool {
     let paramTys = GetParamTysInArgsOrder(typeManager, ce, fd)
     if (paramTys.size != ce.args.size) {
         return false
     }
     var idx: Int64 = 0
     while (idx < paramTys.size) {
-        let argTy = GetExprTy(ce.args[idx])
         let paramTy = typeManager.ApplySubstPack(paramTys[idx], unit.typeMapping)
-        if (typeManager.CheckTypeCompatibility(paramTy, argTy) == TypeCompatibility.INCOMPATIBLE) {
-            if (let Some(diagValue) <- diag) {
-                DiagOld(diagValue, ce.args[idx], BasicDiagKind.sema_parameters_and_arguments_mismatch)
-            }
+        if (!CheckCallArgCompatible(typeManager, diag, ce, idx, paramTy, argChecker)) {
             return false
         }
+        let argTy = GetExprTy(ce.args[idx])
         if (fd.TestAttr(Attribute.C) && argTy.IsUnit()) {
             if (let Some(diagValue) <- diag) {
                 DiagOld(diagValue, ce.args[idx], BasicDiagKind.sema_unit_cannot_as_cfunc_arg)
@@ -1199,7 +1206,7 @@ private func CheckCallCompatible(typeManager: TypeManager, diag: Option<BasicDia
 }
 
 private func CheckCandidate(typeManager: TypeManager, diag: Option<BasicDiagnosticEngine>, ce: CallExpr,
-    fd: FuncDecl, target: Option<Ty>): Option<FunctionMatchingUnit> {
+    fd: FuncDecl, target: Option<Ty>, argChecker!: Option<CallArgChecker> = None): Option<FunctionMatchingUnit> {
     let wrongNormalArgSize = !fd.hasVariableLenArg &&
         !IsPossibleVariadicFunction(fd, ce) &&
         (if (let Some(params) <- BodyParamList(fd)) { params.params.size != ce.args.size } else { true }) &&
@@ -1221,7 +1228,7 @@ private func CheckCandidate(typeManager: TypeManager, diag: Option<BasicDiagnost
     }
     let unit = FunctionMatchingUnit(fd, paramTyInArgOrder, typeMapping)
     unit.argNameValid = argNamesValid
-    if (!CheckCallCompatible(typeManager, diag, ce, fd, unit)) {
+    if (!CheckCallCompatible(typeManager, diag, ce, fd, unit, argChecker: argChecker)) {
         return None
     }
     if (let Some(targetTy) <- target) {
@@ -1423,10 +1430,11 @@ private func PostCheckCallExpr(typeManager: TypeManager, diag: Option<BasicDiagn
 }
 
 private func MatchFunctionForCall(typeManager: TypeManager, diag: Option<BasicDiagnosticEngine>,
-    candidates: ArrayList<FuncDecl>, ce: CallExpr, target: Option<Ty>): ArrayList<FuncDecl> {
+    candidates: ArrayList<FuncDecl>, ce: CallExpr, target: Option<Ty>,
+    argChecker!: Option<CallArgChecker> = None): ArrayList<FuncDecl> {
     let legals = ArrayList<FunctionMatchingUnit>()
     for (fd in candidates) {
-        if (let Some(unit) <- CheckCandidate(typeManager, diag, ce, fd, target)) {
+        if (let Some(unit) <- CheckCandidate(typeManager, diag, ce, fd, target, argChecker: argChecker)) {
             legals.add(unit)
         }
     }
@@ -1459,8 +1467,17 @@ private func MatchFunctionForCall(typeManager: TypeManager, diag: Option<BasicDi
         }
     }
     if (let Some(unit) <- selected) {
-        let effectiveArgs = BuildEffectiveCallArgs(typeManager, unit.fd, ce, unit.typeMapping)
-        ReplaceCallArgsWith(ce, effectiveArgs)
+        if (let Some(checker) <- argChecker) {
+            var idx: Int64 = 0
+            while (idx < ce.args.size && idx < unit.tysInArgOrder.size) {
+                let paramTy = typeManager.ApplySubstPack(unit.tysInArgOrder[idx], unit.typeMapping)
+                if (!checker(paramTy, ce.args[idx])) {
+                    return out
+                }
+                idx++
+            }
+        }
+        BuildDesugaredCallArgs(typeManager, unit.fd, ce, unit.typeMapping)
         ApplyInstantiatedArgumentTypes(typeManager, ce, unit)
         if (let Some(fdTy) <- unit.fd.GetTy()) {
             ce.baseFunc.getOrThrow().SetTy(typeManager.ApplySubstPack(fdTy, unit.typeMapping))
@@ -1506,7 +1523,7 @@ private func CheckCallArgs(diag: Option<BasicDiagnosticEngine>, typeManager: Typ
 }
 
 private func CheckFuncPtrCall(typeManager: TypeManager, diag: Option<BasicDiagnosticEngine>, target: Option<Ty>,
-    ce: CallExpr, funcTy: FuncTy): Bool {
+    ce: CallExpr, funcTy: FuncTy, argChecker!: Option<CallArgChecker> = None): Bool {
     if (IsValidCFuncConstructorCall(ce)) {
         return true
     }
@@ -1528,13 +1545,10 @@ private func CheckFuncPtrCall(typeManager: TypeManager, diag: Option<BasicDiagno
     var idx: Int64 = 0
     while (idx < paramTys.size) {
         let param = typeManager.ApplySubstPack(paramTys[idx], typeMapping)
-        let argTy = GetExprTy(ce.args[idx])
-        if (typeManager.CheckTypeCompatibility(param, argTy) == TypeCompatibility.INCOMPATIBLE) {
-            if (let Some(diagValue) <- diag) {
-                DiagOld(diagValue, ce.args[idx], BasicDiagKind.sema_parameters_and_arguments_mismatch)
-            }
+        if (!CheckCallArgCompatible(typeManager, diag, ce, idx, param, argChecker)) {
             return false
         }
+        let argTy = GetExprTy(ce.args[idx])
         if (funcTy.isC && argTy.IsUnit()) {
             if (let Some(diagValue) <- diag) {
                 DiagOld(diagValue, ce.args[idx], BasicDiagKind.sema_unit_cannot_as_cfunc_arg)
@@ -1589,7 +1603,7 @@ private func CheckFuncPtrCall(typeManager: TypeManager, diag: Option<BasicDiagno
 }
 
 private func CheckNonNormalCall(typeManager: TypeManager, diag: Option<BasicDiagnosticEngine>,
-    target: Option<Ty>, ce: CallExpr): Bool {
+    target: Option<Ty>, ce: CallExpr, argChecker!: Option<CallArgChecker> = None): Bool {
     if (let Some(base) <- ce.baseFunc) {
         if (let Some(baseTy) <- base.GetTy()) {
             if (let Some(funcTy) <- (baseTy as FuncTy)) {
@@ -1597,7 +1611,7 @@ private func CheckNonNormalCall(typeManager: TypeManager, diag: Option<BasicDiag
                     ce.SetTy(TypeManager.GetInvalidTy())
                     return false
                 }
-                let ok = CheckFuncPtrCall(typeManager, diag, target, ce, funcTy)
+                let ok = CheckFuncPtrCall(typeManager, diag, target, ce, funcTy, argChecker: argChecker)
                 if (!ok) {
                     ce.SetTy(TypeManager.GetInvalidTy())
                 }
@@ -1673,6 +1687,11 @@ public func ChkCallExprWithDiag(typeManager: TypeManager, diag: BasicDiagnosticE
 
 public func ChkCallExpr(typeManager: TypeManager, diag: Option<BasicDiagnosticEngine>, target: Option<Ty>,
     ce: CallExpr): Bool {
+    return ChkCallExprWithArgChecker(typeManager, diag, target, ce, None)
+}
+
+public func ChkCallExprWithArgChecker(typeManager: TypeManager, diag: Option<BasicDiagnosticEngine>,
+    target: Option<Ty>, ce: CallExpr, argChecker: Option<CallArgChecker>): Bool {
     if (let Some(desugar) <- ce.desugarExpr) {
         if (Ty.IsTyCorrect(desugar.GetTy())) {
             ce.SetTy(desugar.GetTy().getOrThrow())
@@ -1693,11 +1712,11 @@ public func ChkCallExpr(typeManager: TypeManager, diag: Option<BasicDiagnosticEn
     let candidatesBefore = CollectCallBaseFuncCandidates(ce)
     let candidates = FilterCandidates(typeManager, diag, ce, candidatesBefore)
     if (let None <- ResolveDeclForCallBase(ce, candidatesBefore)) {
-        return CheckNonNormalCall(typeManager, diag, target, ce)
+        return CheckNonNormalCall(typeManager, diag, target, ce, argChecker: argChecker)
     }
     let decl = ResolveDeclForCallBase(ce, candidatesBefore).getOrThrow()
     if (!CheckCallKind(diag, ce, decl)) {
-        return CheckNonNormalCall(typeManager, diag, target, ce)
+        return CheckNonNormalCall(typeManager, diag, target, ce, argChecker: argChecker)
     }
     if (ce.callKind == CallKind.CALL_INVALID) {
         return false
@@ -1706,7 +1725,7 @@ public func ChkCallExpr(typeManager: TypeManager, diag: Option<BasicDiagnosticEn
         DiagnoseForCall(diag, candidatesBefore, candidates, ce, decl)
         return false
     }
-    let result = MatchFunctionForCall(typeManager, diag, candidates, ce, target)
+    let result = MatchFunctionForCall(typeManager, diag, candidates, ce, target, argChecker: argChecker)
     ce.SetTy(TypeManager.GetNonNullTy(ce.GetTy() ?? TypeManager.GetInvalidTy()))
     if (result.size == 1) {
         return true
@@ -1726,6 +1745,14 @@ public func ChkCallExpr(typeManager: TypeManager, diag: Option<BasicDiagnosticEn
 
 public func SynCallExpr(typeManager: TypeManager, ce: CallExpr): Ty {
     if (ChkCallExpr(typeManager, None, None, ce)) {
+        return ce.GetTy() ?? TypeManager.GetInvalidTy()
+    }
+    return TypeManager.GetInvalidTy()
+}
+
+public func SynCallExprWithArgChecker(typeManager: TypeManager, ce: CallExpr,
+    argChecker: Option<CallArgChecker>): Ty {
+    if (ChkCallExprWithArgChecker(typeManager, None, None, ce, argChecker)) {
         return ce.GetTy() ?? TypeManager.GetInvalidTy()
     }
     return TypeManager.GetInvalidTy()
