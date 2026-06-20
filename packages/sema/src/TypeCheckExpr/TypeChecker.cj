@@ -1315,13 +1315,217 @@ public class TypeChecker {
         let _ = Synthesize(ctx, innerExpr)
     }
 
+    private func AddUniqueBoundDecl(decls: ArrayList<Decl>, decl: Decl): Unit {
+        for (existing in decls) {
+            if (SameDecl(existing, decl)) {
+                return
+            }
+        }
+        decls.add(decl)
+    }
+
+    private func PropagateConditionCtxExpr(pattern: Pattern, initializer: Expr): Unit {
+        pattern.ctxExpr = initializer
+        if (let Some(varPattern) <- (pattern as VarPattern)) {
+            varPattern.ctxExpr = initializer
+            return
+        }
+        if (let Some(tuplePattern) <- (pattern as TuplePattern)) {
+            for (subPattern in tuplePattern.patterns) {
+                PropagateConditionCtxExpr(subPattern, initializer)
+            }
+            return
+        }
+        if (let Some(enumPattern) <- (pattern as EnumPattern)) {
+            for (subPattern2 in enumPattern.patterns) {
+                PropagateConditionCtxExpr(subPattern2, initializer)
+            }
+            return
+        }
+        if (let Some(varOrEnum) <- (pattern as VarOrEnumPattern)) {
+            if (let Some(inner) <- varOrEnum.pattern) {
+                PropagateConditionCtxExpr(inner, initializer)
+            }
+            return
+        }
+        if (let Some(typePattern) <- (pattern as TypePattern)) {
+            if (let Some(inner2) <- typePattern.pattern) {
+                PropagateConditionCtxExpr(inner2, initializer)
+            }
+            return
+        }
+        if (let Some(exceptPattern) <- (pattern as ExceptTypePattern)) {
+            if (let Some(inner3) <- exceptPattern.pattern) {
+                PropagateConditionCtxExpr(inner3, initializer)
+            }
+        }
+    }
+
+    private func PatternHasConditionBinding(ctx: ASTContext, pattern: Pattern): Bool {
+        if (let Some(_) <- (pattern as VarPattern)) {
+            return true
+        }
+        if (let Some(varOrEnum) <- (pattern as VarOrEnumPattern)) {
+            if (let Some(inner) <- varOrEnum.pattern) {
+                return PatternHasConditionBinding(ctx, inner)
+            }
+            return !ctx.IsEnumConstructor(varOrEnum.identifier.Val())
+        }
+        if (let Some(tuplePattern) <- (pattern as TuplePattern)) {
+            for (subPattern in tuplePattern.patterns) {
+                if (PatternHasConditionBinding(ctx, subPattern)) {
+                    return true
+                }
+            }
+            return false
+        }
+        if (let Some(enumPattern) <- (pattern as EnumPattern)) {
+            for (subPattern2 in enumPattern.patterns) {
+                if (PatternHasConditionBinding(ctx, subPattern2)) {
+                    return true
+                }
+            }
+            return false
+        }
+        if (let Some(typePattern) <- (pattern as TypePattern)) {
+            if (let Some(inner2) <- typePattern.pattern) {
+                return PatternHasConditionBinding(ctx, inner2)
+            }
+            return false
+        }
+        if (let Some(exceptPattern) <- (pattern as ExceptTypePattern)) {
+            if (let Some(inner3) <- exceptPattern.pattern) {
+                return PatternHasConditionBinding(ctx, inner3)
+            }
+        }
+        return false
+    }
+
+    private func ConditionHasBinding(ctx: ASTContext, expr: Expr): Bool {
+        if (let Some(letPattern) <- (expr as LetPatternDestructor)) {
+            for (pattern in letPattern.patterns) {
+                if (PatternHasConditionBinding(ctx, pattern)) {
+                    return true
+                }
+            }
+            return false
+        }
+        if (let Some(parenExpr) <- (expr as ParenExpr)) {
+            if (let Some(inner) <- parenExpr.expr) {
+                return ConditionHasBinding(ctx, inner)
+            }
+            return false
+        }
+        if (let Some(binaryExpr) <- (expr as BinaryExpr)) {
+            if (let Some(left) <- binaryExpr.leftExpr) {
+                if (ConditionHasBinding(ctx, left)) {
+                    return true
+                }
+            }
+            if (let Some(right) <- binaryExpr.rightExpr) {
+                return ConditionHasBinding(ctx, right)
+            }
+        }
+        return false
+    }
+
+    private func BindCollectedConditionDecls(ctx: ASTContext, patterns: ArrayList<Pattern>,
+        boundDecls: ArrayList<Decl>): Unit {
+        let collected = ArrayList<Decl>()
+        CollectPatternBindings(patterns, collected)
+        for (decl in collected) {
+            BindLocalDeclIfAbsent(ctx, decl)
+            AddUniqueBoundDecl(boundDecls, decl)
+        }
+    }
+
+    private func CheckLetPatternCondition(ctx: ASTContext, letPattern: LetPatternDestructor,
+        boundDecls: ArrayList<Decl>, suppressIntroducingVariableError: Bool): Bool {
+        if (let None <- letPattern.initializer) {
+            let _ = TcInvalid(letPattern)
+            return false
+        }
+        let initializer = letPattern.initializer.getOrThrow()
+        for (pattern in letPattern.patterns) {
+            PropagateConditionCtxExpr(pattern, initializer)
+        }
+        let _ = Synthesize(ctx, initializer)
+        let selectorTy = if (Ty.IsTyCorrect(initializer.GetTy())) {
+            TcReplaceIdeal(impl.typeManager, initializer)
+        } else {
+            initializer.GetTy() ?? TypeManager.GetInvalidTy()
+        }
+        if (!ChkPatternsSameASTKind(ctx, letPattern.patterns, diag: impl.diag)) {
+            let _ = TcInvalid(letPattern)
+            return false
+        }
+        var good = !suppressIntroducingVariableError &&
+            ChkNoVarPatternInOrPattern(ctx, letPattern.patterns, diag: impl.diag)
+        var subpatternsGood = true
+        for (pattern in letPattern.patterns) {
+            subpatternsGood = ChkPattern(impl.typeManager, ctx, selectorTy, pattern, isPatternInMatch: false) &&
+                subpatternsGood
+        }
+        if (Ty.IsTyCorrect(selectorTy) && subpatternsGood) {
+            letPattern.SetTy(TypeManager.GetPrimitiveTy(TypeKind.TYPE_BOOLEAN))
+            BindCollectedConditionDecls(ctx, letPattern.patterns, boundDecls)
+            return good
+        }
+        let _ = TcInvalid(letPattern)
+        return false
+    }
+
+    private func CheckConditionWithBindings(ctx: ASTContext, expr: Expr, boundDecls: ArrayList<Decl>,
+        suppressIntroducingVariableError: Bool): Bool {
+        if (let Some(letPattern) <- (expr as LetPatternDestructor)) {
+            return CheckLetPatternCondition(ctx, letPattern, boundDecls, suppressIntroducingVariableError)
+        }
+        if (let Some(parenExpr) <- (expr as ParenExpr)) {
+            if (let Some(inner) <- parenExpr.expr) {
+                let ok = CheckConditionWithBindings(ctx, inner, boundDecls, suppressIntroducingVariableError)
+                parenExpr.SetTy(inner.GetTy() ?? TypeManager.GetInvalidTy())
+                return ok
+            }
+            let _ = TcInvalid(parenExpr)
+            return false
+        }
+        if (let Some(binaryExpr) <- (expr as BinaryExpr)) {
+            if (binaryExpr.op == TokenKind.AND || binaryExpr.op == TokenKind.OR) {
+                var suppressChildren = suppressIntroducingVariableError
+                if (!suppressChildren && binaryExpr.op == TokenKind.OR && ConditionHasBinding(ctx, binaryExpr)) {
+                    suppressChildren = true
+                }
+                var ok = true
+                if (let Some(left) <- binaryExpr.leftExpr) {
+                    ok = CheckConditionWithBindings(ctx, left, boundDecls, suppressChildren) && ok
+                } else {
+                    ok = false
+                }
+                if (let Some(right) <- binaryExpr.rightExpr) {
+                    ok = CheckConditionWithBindings(ctx, right, boundDecls, suppressChildren) && ok
+                } else {
+                    ok = false
+                }
+                if (ok && !suppressChildren) {
+                    binaryExpr.SetTy(TypeManager.GetPrimitiveTy(TypeKind.TYPE_BOOLEAN))
+                    return true
+                }
+                let _ = TcInvalid(binaryExpr)
+                return false
+            }
+        }
+        return Check(ctx, TypeManager.GetPrimitiveTy(TypeKind.TYPE_BOOLEAN), expr)
+    }
+
     private func SynthesizeIfChildren(ctx: ASTContext, ifExpr: IfExpr): Unit {
+        let conditionBindings = ArrayList<Decl>()
         if (let Some(condExpr) <- ifExpr.condExpr) {
-            let _ = Synthesize(ctx, condExpr)
+            let _ = CheckConditionWithBindings(ctx, condExpr, conditionBindings, false)
         }
         if (let Some(thenBody) <- ifExpr.thenBody) {
             let _ = SynthesizeBlock(ctx, thenBody)
         }
+        RemovePatternBindings(ctx, conditionBindings)
         if (let Some(elseBody) <- ifExpr.elseBody) {
             let _ = Synthesize(ctx, elseBody)
         }
