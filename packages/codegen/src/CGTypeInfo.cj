@@ -21,6 +21,7 @@ private let UG_INTERFACE_KIND: UInt64 = 129u64
 private let UG_RAW_ARRAY_KIND: UInt64 = 130u64
 private let UG_COMMON_ENUM_KIND: UInt64 = 132u64
 private let UG_WEAKREF_KIND: UInt64 = 133u64
+private let UG_TUPLE_KIND: UInt64 = 21u64
 private let UG_STRUCT_KIND: UInt64 = 22u64
 private let UG_ENUM_KIND: UInt64 = 23u64
 private let TYPEINFO_MTABLE_INLINE_FLAG: UInt64 = 9223372036854775808u64
@@ -73,7 +74,7 @@ public func DefineTypeInfoGlobalIfNeeded(cgMod: CGModule, chirTy: Type, typeInfo
 }
 
 public func RedefineTypeInfoGlobal(cgMod: CGModule, chirTy: Type): Unit {
-    if (!(chirTy.IsClass() || chirTy.IsStruct() || chirTy.IsEnum())) {
+    if (!(chirTy.IsClass() || chirTy.IsStruct() || chirTy.IsEnum() || chirTy.IsTuple())) {
         return
     }
     if (IsImportedCustomType(chirTy)) {
@@ -121,7 +122,7 @@ private func DefineConcreteTypeInfoIfNeeded(cgMod: CGModule, chirTy: Type, typeI
         }
         return
     }
-    if (!(chirTy.IsClass() || chirTy.IsStruct() || chirTy.IsEnum())) {
+    if (!(chirTy.IsClass() || chirTy.IsStruct() || chirTy.IsEnum() || chirTy.IsTuple())) {
         return
     }
     if (let Some(customTy) <- (chirTy as CustomType)) {
@@ -242,6 +243,9 @@ private func BuildConcreteTypeInfoInitializer(cgMod: CGModule, moduleHandle: LLV
 }
 
 private func GenerateSourceGenericOfTypeInfo(cgMod: CGModule, chirTy: Type, i8PtrType: LLVMTypeRef): LLVMValueRef {
+    if (chirTy.IsTuple()) {
+        return unsafe { LLVMConstNull(i8PtrType) }
+    }
     if (chirTy.GetTypeArgs().isEmpty()) {
         return unsafe { LLVMConstNull(i8PtrType) }
     }
@@ -385,6 +389,12 @@ public func GetInstanceFieldTypes(cgMod: CGModule, chirTy: Type): ArrayList<Type
     let result = ArrayList<Type>()
     if (let Some(enumTy) <- (chirTy as EnumType)) {
         return GetEnumTypeInfoFieldTypes(cgMod, enumTy)
+    }
+    if (chirTy.IsTuple()) {
+        for (fieldTy in chirTy.GetTypeArgs()) {
+            result.add(fieldTy)
+        }
+        return result
     }
     if (let Some(customTy) <- (chirTy as CustomType)) {
         for (fieldTy in customTy.GetInstantiatedMemberTys()) {
@@ -560,6 +570,7 @@ private func TypeInfoKind(cgMod: CGModule, chirTy: Type): UInt64 {
         }
         return if (classTy.GetClassDef().IsInterface()) { UG_INTERFACE_KIND } else { UG_CLASS_KIND }
     }
+    if (chirTy.IsTuple()) { return UG_TUPLE_KIND }
     if (chirTy.IsStruct()) { return UG_STRUCT_KIND }
     if (chirTy.IsEnum()) {
         if (let Some(enumCGType) <- (CGType.GetOrCreate(cgMod, chirTy) as CGEnumType)) {

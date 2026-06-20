@@ -2,10 +2,13 @@ package cangjie_compiler::codegen
 
 import std.collection.*
 import cangjie_compiler::chir.CustomType
+import cangjie_compiler::chir.EnumType
 import cangjie_compiler::chir.Expression
 import cangjie_compiler::chir.Field
 import cangjie_compiler::chir.FieldByName
+import cangjie_compiler::chir.LocalVar
 import cangjie_compiler::chir.Type
+import cangjie_compiler::chir.TypeCast
 import cangjie_compiler::chir.Value
 
 public func GenerateFieldExpression(irBuilder: IRBuilder2, chirExpr: Expression): LLVMValueRef {
@@ -31,6 +34,9 @@ private func GenerateFieldByName(irBuilder: IRBuilder2, fieldExpr: FieldByName):
 
 private func GenerateFieldByPath(irBuilder: IRBuilder2, base: Value,
     path: ArrayList<UInt64>, name: String, expectedTy: Option<Type>): LLVMValueRef {
+    if (let Some(enumField) <- GenerateEnumFieldByPath(irBuilder, base, path, name, expectedTy)) {
+        return enumField
+    }
     let baseValue = irBuilder.GetCGModule().MaterializeValue(irBuilder, base)
     if (let Some(baseCGType) <- baseValue.GetCGType()) {
         if (baseCGType.IsPointerType()) {
@@ -73,6 +79,98 @@ private func GenerateFieldByPath(irBuilder: IRBuilder2, base: Value,
         }
     }
     return LLVMNullValue()
+}
+
+private func GenerateEnumFieldByPath(irBuilder: IRBuilder2, base: Value,
+    path: ArrayList<UInt64>, name: String, expectedTy: Option<Type>): Option<LLVMValueRef> {
+    if (path.isEmpty()) {
+        return None
+    }
+    if (let Some(enumTupleField) <- GenerateEnumTupleCastField(irBuilder, base, path, name, expectedTy)) {
+        return Some(enumTupleField)
+    }
+    if (let Some(enumField) <- GenerateDirectEnumField(irBuilder, base, path, name, expectedTy)) {
+        return Some(enumField)
+    }
+    return None
+}
+
+private func GenerateEnumTupleCastField(irBuilder: IRBuilder2, base: Value,
+    path: ArrayList<UInt64>, name: String, expectedTy: Option<Type>): Option<LLVMValueRef> {
+    let local = (base as LocalVar) ?? return None
+    let ownerExpr = local.GetExpr() ?? return None
+    let castExpr = (ownerExpr as TypeCast) ?? return None
+    let sourceTy = castExpr.GetSourceTy() ?? return None
+    let targetTy = castExpr.GetTargetTy() ?? return None
+    if (!sourceTy.StripAllRefs().IsEnum() || !targetTy.IsTuple()) {
+        return None
+    }
+    let baseValue = irBuilder.GetCGModule().MaterializeValue(irBuilder, base).GetRawValue()
+    return Some(LoadObjectPayloadField(irBuilder, baseValue, targetTy, path, name, expectedTy))
+}
+
+private func GenerateDirectEnumField(irBuilder: IRBuilder2, base: Value,
+    path: ArrayList<UInt64>, name: String, expectedTy: Option<Type>): Option<LLVMValueRef> {
+    let baseTy = base.GetType() ?? return None
+    let enumTy = (baseTy.StripAllRefs() as EnumType) ?? return None
+    let enumCGType = (CGType.GetOrCreate(irBuilder.GetCGModule(), enumTy) as CGEnumType) ?? return None
+    let baseValue = irBuilder.GetCGModule().MaterializeValue(irBuilder, base).GetRawValue()
+    if (enumCGType.IsOptionLikeRef()) {
+        if (path[0] == 0u64) {
+            let nullValue = unsafe { LLVMConstNull(unsafe { LLVMTypeOf(baseValue) }) }
+            let predicate = if (enumCGType.IsAntiOptionLike()) { LLVMIntPredicate.NE } else { LLVMIntPredicate.EQ }
+            return Some(irBuilder.CreateICmp(predicate, baseValue, nullValue, name: name + ".tag"))
+        }
+        if (path[0] == 1u64) {
+            if (let Some(fieldTy) <- expectedTy) {
+                return Some(irBuilder.CreatePointerCast(baseValue,
+                    CGType.GetOrCreate(irBuilder.GetCGModule(), fieldTy).GetLLVMType(), name: name + ".payload"))
+            }
+            return Some(baseValue)
+        }
+    }
+    if (enumCGType.IsCommonEnum() && path[0] == 0u64) {
+        let fieldTy = expectedTy ?? irBuilder.GetCGModule().GetCGContext().GetCHIRBuilder().context.GetUInt32Ty()
+        let fieldLLVMType = CGType.GetOrCreate(irBuilder.GetCGModule(), fieldTy).GetLLVMType()
+        let payload = irBuilder.GetPayloadFromObject(baseValue)
+        let typedPayload = irBuilder.CreateBitCast(payload, unsafe { LLVMPointerType(fieldLLVMType, 1u32) },
+            name: name + ".tag.addr")
+        return Some(irBuilder.CreateLoad(fieldLLVMType, typedPayload, name: name))
+    }
+    return None
+}
+
+private func LoadObjectPayloadField(irBuilder: IRBuilder2, objectValue: LLVMValueRef, storageTy: Type,
+    path: ArrayList<UInt64>, name: String, expectedTy: Option<Type>): LLVMValueRef {
+    if (path.size != 1) {
+        throw IllegalArgumentException("faithful codegen enum payload field path expects one component")
+    }
+    let storageCGType = CGType.GetOrCreate(irBuilder.GetCGModule(), storageTy)
+    let layoutType = storageCGType.GetLLVMType()
+    let payload = irBuilder.GetPayloadFromObject(objectValue)
+    let typedPayload = irBuilder.CreateBitCast(payload, unsafe { LLVMPointerType(layoutType, 1u32) },
+        name: name + ".payload")
+    let fieldPtr = irBuilder.CreateStructGEP(layoutType, typedPayload, UInt32(path[0]), name: name + ".addr")
+    if (let Some(fieldType) <- GetFieldCGTypeAtPath(storageCGType, path)) {
+        let loaded = if (IsGCRefField(irBuilder, fieldType.GetOriginal())) {
+            irBuilder.CallGCReadRef(objectValue, fieldPtr)
+        } else {
+            irBuilder.CreateLoad(fieldType.GetLLVMType(), fieldPtr, name: name)
+        }
+        return CastExtractedFieldIfNeeded(irBuilder, loaded, fieldType.GetOriginal(), expectedTy)
+    }
+    return LLVMNullValue()
+}
+
+private func IsGCRefField(irBuilder: IRBuilder2, fieldTy: Type): Bool {
+    let stripped = fieldTy.StripAllRefs()
+    if (stripped.IsReferenceType()) {
+        return true
+    }
+    if (let Some(enumCGType) <- (CGType.GetOrCreate(irBuilder.GetCGModule(), stripped) as CGEnumType)) {
+        return enumCGType.IsCommonEnum() || enumCGType.IsOptionLikeRef()
+    }
+    return false
 }
 
 private func CastExtractedFieldIfNeeded(irBuilder: IRBuilder2, rawValue: LLVMValueRef, sourceTy: Type,

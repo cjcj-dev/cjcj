@@ -1,11 +1,23 @@
 package cangjie_compiler::codegen
 
 import std.collection.*
+import cangjie_compiler::chir.EnumType
 import cangjie_compiler::chir.Expression
 import cangjie_compiler::chir.Type
+import cangjie_compiler::chir.TupleType
 
 public func GenerateTupleOrAggregateExpression(irBuilder: IRBuilder2, chirExpr: Expression): LLVMValueRef {
     if (let Some(resultTy) <- chirExpr.GetResultType()) {
+        if (let Some(_) <- (resultTy as EnumType)) {
+            if (let Some(enumCGType) <- (CGType.GetOrCreate(irBuilder.GetCGModule(), resultTy) as CGEnumType)) {
+                if (enumCGType.IsCommonEnum()) {
+                    return GenerateCommonEnum(irBuilder, chirExpr)
+                }
+                if (enumCGType.IsOptionLikeRef()) {
+                    return GenerateOptionLikeRefEnum(irBuilder, chirExpr, resultTy)
+                }
+            }
+        }
         let resultCGType = CGType.GetOrCreate(irBuilder.GetCGModule(), resultTy)
         let containedTypes = resultCGType.GetContainedTypes()
         let elements = ArrayList<LLVMValueRef>()
@@ -25,6 +37,112 @@ public func GenerateTupleOrAggregateExpression(irBuilder: IRBuilder2, chirExpr: 
         return irBuilder.CreateAggregateValue(resultCGType.GetLLVMType(), elements, name: chirExpr.GetExprKindName())
     }
     return LLVMNullValue()
+}
+
+private func GenerateCommonEnum(irBuilder: IRBuilder2, chirExpr: Expression): LLVMValueRef {
+    let fieldTys = ArrayList<Type>()
+    var idx: Int64 = 0
+    while (idx < chirExpr.GetNumOfOperands()) {
+        if (let Some(fieldTy) <- chirExpr.GetOperand(idx).GetType()) {
+            fieldTys.add(CommonEnumStorageFieldType(idx, fieldTy))
+        } else {
+            return LLVMNullValue()
+        }
+        idx++
+    }
+    let storageTy = TupleType(fieldTys)
+    let storageCGType = CGType.GetOrCreate(irBuilder.GetCGModule(), storageTy)
+    let layoutType = storageCGType.GetLLVMType()
+    let enumVal = CallCommonEnumObjectAlloc(irBuilder, storageTy, layoutType)
+    if (enumVal.isNull()) {
+        return enumVal
+    }
+    let payload = irBuilder.GetPayloadFromObject(enumVal)
+    let typedPayload = irBuilder.CreateBitCast(payload, unsafe { LLVMPointerType(layoutType, 1u32) },
+        name: "enum.payload")
+    let containedTypes = storageCGType.GetContainedTypes()
+    idx = 0
+    while (idx < chirExpr.GetNumOfOperands()) {
+        let operand = chirExpr.GetOperand(idx)
+        var rawValue = irBuilder.GetCGModule().MaterializeValue(irBuilder, operand).GetRawValue()
+        if (idx < containedTypes.size) {
+            let storageFieldTy = containedTypes[idx].GetOriginal()
+            if (let Some(sourceTy) <- operand.GetType()) {
+                rawValue = LoadRefAggregateElementIfNeeded(irBuilder, rawValue, sourceTy, storageFieldTy)
+            }
+        }
+        let fieldPtr = irBuilder.CreateStructGEP(layoutType, typedPayload, UInt32(idx), name: "enum.field")
+        if (IsGCRefPayloadField(irBuilder, containedTypes[idx].GetOriginal())) {
+            let _ = irBuilder.CallGCWriteRef(rawValue, enumVal, fieldPtr)
+        } else {
+            let _ = irBuilder.CreateStore(rawValue, fieldPtr)
+        }
+        idx++
+    }
+    return enumVal
+}
+
+private func CommonEnumStorageFieldType(index: Int64, operandTy: Type): Type {
+    if (index == 0) {
+        return operandTy
+    }
+    return operandTy.StripAllRefs()
+}
+
+private func LoadRefAggregateElementIfNeeded(irBuilder: IRBuilder2, rawValue: LLVMValueRef, sourceTy: Type,
+    storageTy: Type): LLVMValueRef {
+    if (!sourceTy.IsRef() || !sourceTy.StripAllRefs().IsEqual(storageTy)) {
+        return CastAggregateElementIfNeeded(irBuilder, rawValue, sourceTy, storageTy)
+    }
+    return irBuilder.CreateLoad(CGType.GetOrCreate(irBuilder.GetCGModule(), storageTy).GetLLVMType(), rawValue,
+        name: "enum.field.load")
+}
+
+private func IsGCRefPayloadField(irBuilder: IRBuilder2, fieldTy: Type): Bool {
+    let stripped = fieldTy.StripAllRefs()
+    if (stripped.IsReferenceType()) {
+        return true
+    }
+    if (let Some(enumCGType) <- (CGType.GetOrCreate(irBuilder.GetCGModule(), stripped) as CGEnumType)) {
+        return enumCGType.IsCommonEnum() || enumCGType.IsOptionLikeRef()
+    }
+    return false
+}
+
+private func CallCommonEnumObjectAlloc(irBuilder: IRBuilder2, storageTy: Type, layoutType: LLVMTypeRef): LLVMValueRef {
+    let typeInfo = CGType.GetOrCreate(irBuilder.GetCGModule(), storageTy).GetOrCreateTypeInfo()
+    let i8PtrType = unsafe { LLVMPointerType(LLVMInt8TypeInContext(irBuilder.GetLLVMContext().raw), 0u32) }
+    let typeInfoArg = irBuilder.CreateBitCast(typeInfo, i8PtrType, name: "enum.ti")
+    let sizeArg = unsafe {
+        LLVMConstInt(LLVMInt32TypeInContext(irBuilder.GetLLVMContext().raw),
+            irBuilder.GetCGModule().GetTypeSize(layoutType), 0)
+    }
+    let args = ArrayList<LLVMValueRef>()
+    args.add(typeInfoArg)
+    args.add(sizeArg)
+    let objectValue = irBuilder.CreateIntrinsicCall("llvm.cj.malloc.object", ArrayList<LLVMTypeRef>(), args,
+        name: "enum.alloc")
+    if (!objectValue.isNull()) {
+        AddRetAttr(objectValue, "noalias")
+    }
+    return objectValue
+}
+
+private func GenerateOptionLikeRefEnum(irBuilder: IRBuilder2, chirExpr: Expression, resultTy: Type): LLVMValueRef {
+    let resultLLVMType = CGType.GetOrCreate(irBuilder.GetCGModule(), resultTy).GetLLVMType()
+    if (chirExpr.GetNumOfOperands() <= 1) {
+        return unsafe { LLVMConstNull(resultLLVMType) }
+    }
+    let associatedOperand = chirExpr.GetOperand(1)
+    var associatedValue = irBuilder.GetCGModule().MaterializeValue(irBuilder, associatedOperand).GetRawValue()
+    if (let Some(sourceTy) <- associatedOperand.GetType()) {
+        if (sourceTy.IsRef()) {
+            let storageTy = sourceTy.StripAllRefs()
+            associatedValue = irBuilder.CreateLoad(CGType.GetOrCreate(irBuilder.GetCGModule(), storageTy).GetLLVMType(),
+                associatedValue, name: "enum.option.ref.load")
+        }
+    }
+    return irBuilder.CreatePointerCast(associatedValue, resultLLVMType, name: "enum.option.ref")
 }
 
 private func CastAggregateElementIfNeeded(irBuilder: IRBuilder2, rawValue: LLVMValueRef, sourceTy: Type,
