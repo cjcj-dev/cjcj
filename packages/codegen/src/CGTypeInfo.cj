@@ -21,6 +21,8 @@ private let UG_INTERFACE_KIND: UInt64 = 129u64
 private let UG_RAW_ARRAY_KIND: UInt64 = 130u64
 private let UG_COMMON_ENUM_KIND: UInt64 = 132u64
 private let UG_WEAKREF_KIND: UInt64 = 133u64
+private let UG_GENERIC_CUSTOM_KIND: UInt64 = 254u64
+private let UG_GENERIC_KIND: UInt64 = 255u64
 private let UG_TUPLE_KIND: UInt64 = 21u64
 private let UG_STRUCT_KIND: UInt64 = 22u64
 private let UG_ENUM_KIND: UInt64 = 23u64
@@ -73,6 +75,187 @@ public func DefineTypeInfoGlobalIfNeeded(cgMod: CGModule, chirTy: Type, typeInfo
     DefineConcreteTypeInfoIfNeeded(cgMod, chirTy, typeInfo, CGType.GetOrCreateTypeInfoType(cgMod.GetLLVMContext()))
 }
 
+public func GetOrCreateGenericTypeInfoGlobal(cgMod: CGModule, chirTy: Type): LLVMValueRef {
+    let genericTy = (chirTy as GenericType) ?? throw IllegalArgumentException("expected generic type info")
+    let typeInfoTy = GetOrCreateGenericTypeInfoType(cgMod.GetLLVMContext())
+    let typeInfoName = GenericTypeInfoName(cgMod, genericTy) + ".ti"
+    let typeInfo = GetOrInsertCodeGenGlobal(cgMod, typeInfoName, typeInfoTy)
+    if (typeInfo.isNull() || unsafe { LLVMIsDeclaration(typeInfo) } == 0) {
+        return typeInfo
+    }
+    if (let Some(moduleHandle) <- cgMod.GetLLVMModule()) {
+        let context = cgMod.GetLLVMContext().raw
+        let i8Type = unsafe { LLVMInt8TypeInContext(context) }
+        let i32Type = unsafe { LLVMInt32TypeInContext(context) }
+        let values = ArrayList<LLVMValueRef>()
+        values.add(GenerateTypeInfoNameConstant(cgMod, moduleHandle, genericTy.GetSrcCodeIdentifier()))
+        values.add(unsafe { LLVMConstInt(i8Type, UG_GENERIC_KIND, 0) })
+        values.add(unsafe { LLVMConstInt(i32Type, UInt64(genericTy.GetUpperBounds().size), 0) })
+        values.add(GenerateUpperBoundsOfGenericTypeInfo(cgMod, genericTy, typeInfoName))
+        unsafe {
+            LLVMSetInitializer(typeInfo, TypeInfoConstStruct(typeInfoTy, values))
+            LLVMSetLinkage(typeInfo, LLVMLinkageValue(LLVMLinkage.Private))
+            LLVMSetGlobalConstant(typeInfo, 0)
+        }
+    }
+    return typeInfo
+}
+
+public func GetOrCreateGenericCustomTypeInfoGlobal(cgMod: CGModule, chirTy: Type): LLVMValueRef {
+    let customTy = (chirTy as CustomType) ?? throw IllegalArgumentException("expected generic custom type info")
+    let typeInfoTy = GetOrCreateGenericCustomTypeInfoType(cgMod.GetLLVMContext())
+    let qualifiedName = GenericCustomTypeInfoName(cgMod, customTy)
+    let typeInfo = GetOrInsertCodeGenGlobal(cgMod, qualifiedName + ".ti", typeInfoTy)
+    if (typeInfo.isNull() || unsafe { LLVMIsDeclaration(typeInfo) } == 0) {
+        return typeInfo
+    }
+    if (let Some(moduleHandle) <- cgMod.GetLLVMModule()) {
+        let context = cgMod.GetLLVMContext().raw
+        let i8Type = unsafe { LLVMInt8TypeInContext(context) }
+        let i8PtrType = unsafe { LLVMPointerType(i8Type, 0u32) }
+        let values = ArrayList<LLVMValueRef>()
+        values.add(GenerateTypeInfoNameConstant(cgMod, moduleHandle, qualifiedName))
+        values.add(unsafe { LLVMConstInt(i8Type, UG_GENERIC_CUSTOM_KIND, 0) })
+        values.add(unsafe { LLVMConstInt(i8Type, UInt64(customTy.GetGenericArgs().size), 0) })
+        values.add(GenerateTypeArgsOfGenericCustomTypeInfo(cgMod, customTy, qualifiedName))
+        values.add(unsafe { LLVMConstBitCast(EnsureSourceGenericTypeTemplate(cgMod, customTy), i8PtrType) })
+        unsafe {
+            LLVMSetInitializer(typeInfo, TypeInfoConstStruct(typeInfoTy, values))
+            LLVMSetLinkage(typeInfo, LLVMLinkageValue(LLVMLinkage.Private))
+            LLVMSetGlobalConstant(typeInfo, 0)
+        }
+    }
+    return typeInfo
+}
+
+private func GetOrCreateGenericTypeInfoType(context: LLVMContextHandle): LLVMTypeRef {
+    let result = GetOrCreateNamedStructType(context, "GenericTypeInfo")
+    let i8Type = unsafe { LLVMInt8TypeInContext(context.raw) }
+    let i32Type = unsafe { LLVMInt32TypeInContext(context.raw) }
+    let i8PtrType = unsafe { LLVMPointerType(i8Type, 0u32) }
+    let body = ArrayList<LLVMTypeRef>()
+    body.add(i8PtrType)
+    body.add(i8Type)
+    body.add(i32Type)
+    body.add(i8PtrType)
+    SetStructTypeBody(result, body)
+    return result
+}
+
+private func GetOrCreateGenericCustomTypeInfoType(context: LLVMContextHandle): LLVMTypeRef {
+    let result = GetOrCreateNamedStructType(context, "GenericCustomTypeInfo")
+    let i8Type = unsafe { LLVMInt8TypeInContext(context.raw) }
+    let i8PtrType = unsafe { LLVMPointerType(i8Type, 0u32) }
+    let body = ArrayList<LLVMTypeRef>()
+    body.add(i8PtrType)
+    body.add(i8Type)
+    body.add(i8Type)
+    body.add(i8PtrType)
+    body.add(i8PtrType)
+    SetStructTypeBody(result, body)
+    return result
+}
+
+private func GenericTypeInfoName(cgMod: CGModule, genericTy: GenericType): String {
+    return cgMod.GetCGContext().GetGenericTypeUniqueName(genericTy.GetSrcCodeIdentifier(),
+        genericTy.GetUpperBounds())
+}
+
+private func GenerateUpperBoundsOfGenericTypeInfo(cgMod: CGModule, genericTy: GenericType,
+    typeInfoName: String): LLVMValueRef {
+    let i8Type = unsafe { LLVMInt8TypeInContext(cgMod.GetLLVMContext().raw) }
+    let i8PtrType = unsafe { LLVMPointerType(i8Type, 0u32) }
+    let upperBounds = genericTy.GetUpperBounds()
+    if (upperBounds.isEmpty()) {
+        return unsafe { LLVMConstNull(i8PtrType) }
+    }
+    let values = ArrayList<LLVMValueRef>()
+    for (upperBound in upperBounds) {
+        values.add(unsafe {
+            LLVMConstBitCast(CGType.GetOrCreate(cgMod, upperBound.StripAllRefs()).GetOrCreateTypeInfo(), i8PtrType)
+        })
+    }
+    let arrayType = unsafe { LLVMArrayType(i8PtrType, UInt32(values.size)) }
+    let upperBoundsGlobal = GetOrInsertCodeGenGlobal(cgMod, typeInfoName + ".upperBounds", arrayType)
+    if (unsafe { LLVMIsDeclaration(upperBoundsGlobal) } != 0) {
+        unsafe {
+            LLVMSetInitializer(upperBoundsGlobal, ConstArray(i8PtrType, values))
+            LLVMSetLinkage(upperBoundsGlobal, LLVMLinkageValue(LLVMLinkage.Private))
+            LLVMSetGlobalConstant(upperBoundsGlobal, 1)
+        }
+    }
+    return unsafe { LLVMConstBitCast(upperBoundsGlobal, i8PtrType) }
+}
+
+private func GenerateTypeArgsOfGenericCustomTypeInfo(cgMod: CGModule, customTy: CustomType,
+    qualifiedName: String): LLVMValueRef {
+    let i8Type = unsafe { LLVMInt8TypeInContext(cgMod.GetLLVMContext().raw) }
+    let i8PtrType = unsafe { LLVMPointerType(i8Type, 0u32) }
+    let typeArgs = customTy.GetGenericArgs()
+    if (typeArgs.isEmpty()) {
+        return unsafe { LLVMConstNull(i8PtrType) }
+    }
+    let values = ArrayList<LLVMValueRef>()
+    for (typeArg in typeArgs) {
+        values.add(unsafe {
+            LLVMConstBitCast(CGType.GetOrCreate(cgMod, typeArg.StripAllRefs()).GetOrCreateTypeInfo(), i8PtrType)
+        })
+    }
+    let arrayType = unsafe { LLVMArrayType(i8PtrType, UInt32(values.size)) }
+    let typeArgsGlobal = GetOrInsertCodeGenGlobal(cgMod, qualifiedName + ".typeArgs", arrayType)
+    if (unsafe { LLVMIsDeclaration(typeArgsGlobal) } != 0) {
+        unsafe {
+            LLVMSetInitializer(typeArgsGlobal, ConstArray(i8PtrType, values))
+            LLVMSetLinkage(typeArgsGlobal, LLVMLinkageValue(LLVMLinkage.Private))
+            LLVMSetGlobalConstant(typeArgsGlobal, 1)
+        }
+    }
+    return unsafe { LLVMConstBitCast(typeArgsGlobal, i8PtrType) }
+}
+
+private func GenericCustomTypeInfoName(cgMod: CGModule, customTy: CustomType): String {
+    let def = customTy.GetCustomTypeDef()
+    let packageName = if (let Some(genericDecl) <- def.GetGenericDecl()) {
+        genericDecl.GetPackageName()
+    } else {
+        def.GetPackageName()
+    }
+    var name = if (packageName.isEmpty()) {
+        def.GetSrcCodeIdentifier()
+    } else {
+        packageName + ":" + def.GetSrcCodeIdentifier()
+    }
+    let typeArgs = customTy.GetGenericArgs()
+    if (!typeArgs.isEmpty()) {
+        name += "<" + GenericTypeArgsQualifiedName(cgMod, typeArgs) + ">"
+    }
+    return name
+}
+
+private func GenericTypeArgsQualifiedName(cgMod: CGModule, typeArgs: ArrayList<Type>): String {
+    var out = ""
+    var idx: Int64 = 0
+    for (typeArg in typeArgs) {
+        if (idx > 0) {
+            out += ","
+        }
+        out += GenericTypeQualifiedName(cgMod, typeArg)
+        idx++
+    }
+    return out
+}
+
+private func GenericTypeQualifiedName(cgMod: CGModule, chirTy: Type): String {
+    let stripped = chirTy.StripAllRefs()
+    if (let Some(genericTy) <- (stripped as GenericType)) {
+        return GenericTypeInfoName(cgMod, genericTy)
+    }
+    if (let Some(customTy) <- (stripped as CustomType)) {
+        return GenericCustomTypeInfoName(cgMod, customTy)
+    }
+    return stripped.ToString()
+}
+
 public func RedefineTypeInfoGlobal(cgMod: CGModule, chirTy: Type): Unit {
     if (!(chirTy.IsClass() || chirTy.IsStruct() || chirTy.IsEnum() || chirTy.IsTuple())) {
         return
@@ -85,17 +268,14 @@ public func RedefineTypeInfoGlobal(cgMod: CGModule, chirTy: Type): Unit {
     if (typeInfo.isNull()) {
         return
     }
+    if (IsGenericRelatedCustomType(chirTy)) {
+        return
+    }
     if (let Some(moduleHandle) <- cgMod.GetLLVMModule()) {
         let initializer = BuildConcreteTypeInfoInitializer(cgMod, moduleHandle, chirTy, typeInfoTy)
         unsafe {
             LLVMSetInitializer(typeInfo, initializer)
-            if (chirTy.GetTypeArgs().isEmpty()) {
-                LLVMSetLinkage(typeInfo, LLVMLinkageValue(LLVMLinkage.Internal))
-                LLVMSetGlobalConstant(typeInfo, 0)
-            } else {
-                LLVMSetLinkage(typeInfo, LLVMLinkageValue(LLVMLinkage.LinkOnceODR))
-                LLVMSetGlobalConstant(typeInfo, 0)
-            }
+            SetConcreteTypeInfoLinkage(typeInfo, chirTy)
         }
         LLVMSetGlobalStringMetadata(cgMod.GetLLVMContext(), typeInfo, GC_TYPE_META_NAME, GetLayoutMetadataName(chirTy))
     }
@@ -131,20 +311,41 @@ private func DefineConcreteTypeInfoIfNeeded(cgMod: CGModule, chirTy: Type, typeI
             return
         }
     }
+    if (IsGenericRelatedCustomType(chirTy)) {
+        return
+    }
     if (let Some(moduleHandle) <- cgMod.GetLLVMModule()) {
         let initializer = BuildConcreteTypeInfoInitializer(cgMod, moduleHandle, chirTy, typeInfoTy)
         unsafe {
             LLVMSetInitializer(typeInfo, initializer)
-            if (chirTy.GetTypeArgs().isEmpty()) {
-                LLVMSetLinkage(typeInfo, LLVMLinkageValue(LLVMLinkage.Internal))
-                LLVMSetGlobalConstant(typeInfo, 0)
-            } else {
-                LLVMSetLinkage(typeInfo, LLVMLinkageValue(LLVMLinkage.LinkOnceODR))
-                LLVMSetGlobalConstant(typeInfo, 0)
-            }
+            SetConcreteTypeInfoLinkage(typeInfo, chirTy)
         }
         LLVMSetGlobalStringMetadata(cgMod.GetLLVMContext(), typeInfo, GC_TYPE_META_NAME, GetLayoutMetadataName(chirTy))
     }
+}
+
+private func IsGenericRelatedCustomType(chirTy: Type): Bool {
+    return (chirTy as CustomType).isSome() && chirTy.IsGenericRelated()
+}
+
+private func SetConcreteTypeInfoLinkage(typeInfo: LLVMValueRef, chirTy: Type): Unit {
+    let linkage = if (chirTy.GetTypeArgs().isEmpty()) {
+        if (ShouldExportTypeInfo(chirTy)) { LLVMLinkage.External } else { LLVMLinkage.Internal }
+    } else {
+        LLVMLinkage.LinkOnceODR
+    }
+    unsafe {
+        LLVMSetLinkage(typeInfo, LLVMLinkageValue(linkage))
+        LLVMSetGlobalConstant(typeInfo, 0)
+    }
+}
+
+private func ShouldExportTypeInfo(chirTy: Type): Bool {
+    if (let Some(customTy) <- (chirTy as CustomType)) {
+        let def = customTy.GetCustomTypeDef()
+        return def.TestAttr(Attribute.PUBLIC) || def.TestAttr(Attribute.PROTECTED)
+    }
+    return false
 }
 
 private func IsImportedCustomType(chirTy: Type): Bool {

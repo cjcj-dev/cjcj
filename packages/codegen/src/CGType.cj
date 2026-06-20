@@ -209,6 +209,16 @@ public open class CGType {
         if (let Some(existingInfo) <- typeInfo) {
             return existingInfo
         }
+        if (chirType.IsGeneric()) {
+            let genericInfo = GetOrCreateGenericTypeInfoGlobal(cgMod, chirType)
+            typeInfo = genericInfo
+            return genericInfo
+        }
+        if ((chirType as CustomType).isSome() && chirType.IsGenericRelated()) {
+            let genericCustomInfo = GetOrCreateGenericCustomTypeInfoGlobal(cgMod, chirType)
+            typeInfo = genericCustomInfo
+            return genericCustomInfo
+        }
         let declaredInfo = DeclareTypeInfoGlobal(cgMod, chirType, cgGenericKind)
         typeInfo = declaredInfo
         DefineTypeInfoGlobalIfNeeded(cgMod, chirType, declaredInfo)
