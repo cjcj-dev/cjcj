@@ -1134,13 +1134,7 @@ private func InferGenericCallTypeMapping(typeManager: TypeManager, diag: Option<
         typeManager.PackMapping(typeMapping, subst)
         return true
     }
-    if (let Some(diagValue) <- diag) {
-        if (let Some(base) <- ce.baseFunc) {
-            if (base.ShouldDiagnose()) {
-                DiagRefEmit(diagValue, base, BasicDiagKindRefactor.sema_unable_to_infer_generic_func)
-            }
-        }
-    }
+    let _ = diag
     return false
 }
 

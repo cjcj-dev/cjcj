@@ -126,6 +126,7 @@ public class FaithfulAST2CHIR {
         outputPackage = builder.CreatePackage(node.fullPackageName)
         CollectImportedDecls(node)
         CollectDeclsInCurPkg(node)
+        CollectNominalDependencyClosure()
         CacheTopLevelDeclToGlobalSymbolTable()
         TranslateNominalDecls(node)
         TranslateOtherTopLevelDecls(node)
@@ -190,6 +191,76 @@ public class FaithfulAST2CHIR {
         if (!ContainsDecl(astNodes, decl)) {
             astNodes.add(decl)
         }
+    }
+
+    private func CollectNominalDependencyClosure(): Unit {
+        var idx: Int64 = 0
+        while (idx < allTopLevelNodes.size) {
+            CollectNominalDependenciesFromDecl(allTopLevelNodes[idx])
+            idx++
+        }
+    }
+
+    private func CollectNominalDependenciesFromDecl(decl: AstDecl): Unit {
+        let visitedTypes = HashSet<Int64>()
+        CollectNominalDependenciesFromType(decl.GetTy(), visitedTypes)
+        if (let Some(generic) <- decl.GetGeneric()) {
+            for (param in generic.typeParameters) {
+                CollectNominalDependenciesFromDecl(param)
+            }
+            for (constraint in generic.genericConstraints) {
+                if (let Some(refType) <- constraint.refType) {
+                    CollectNominalDependenciesFromType(refType.GetTy(), visitedTypes)
+                    CollectNominalDependenciesFromType(refType.aliasTy, visitedTypes)
+                }
+                for (upperBound in constraint.upperBounds) {
+                    CollectNominalDependenciesFromType(upperBound.GetTy(), visitedTypes)
+                    CollectNominalDependenciesFromType(upperBound.aliasTy, visitedTypes)
+                }
+            }
+        }
+        for (member in decl.GetMemberDecls()) {
+            CollectNominalDependenciesFromDecl(member)
+        }
+    }
+
+    private func CollectNominalDependenciesFromType(ty: Option<AstTy>, visitedTypes: HashSet<Int64>): Unit {
+        if (let Some(value) <- ty) {
+            if (!AstTy.IsTyCorrect(value)) {
+                return
+            }
+            let key = value.Hash()
+            if (visitedTypes.contains(key)) {
+                return
+            }
+            visitedTypes.add(key)
+            if (let Some(decl) <- AstTy.GetDeclOfTy(Some(value))) {
+                CollectNominalDependency(decl)
+            }
+            for (arg in value.typeArgs) {
+                CollectNominalDependenciesFromType(Some(arg), visitedTypes)
+            }
+            if (let Some(genericTy) <- (value as AstGenericsTy)) {
+                for (upperBound in genericTy.upperBounds) {
+                    CollectNominalDependenciesFromType(Some(upperBound), visitedTypes)
+                }
+            }
+        }
+    }
+
+    private func CollectNominalDependency(decl: AstDecl): Unit {
+        if (!decl.IsNominalDecl()) {
+            return
+        }
+        if (decl.TestAttr(AstAttribute.IMPORTED)) {
+            CollectDeclToList(decl, importedNominalDecls)
+            return
+        }
+        if (decl.TestAttr(AstAttribute.GENERIC_INSTANTIATED)) {
+            CollectDeclToList(decl, importedGenericInstantiatedNominalDecls)
+            return
+        }
+        CollectDeclToList(decl, if (decl.TestAttr(AstAttribute.GENERIC)) { genericNominalDecls } else { nominalDecls })
     }
 
     private func CollectImportedDeclUsedInCurPkg(decl: AstDecl): Unit {
@@ -1152,12 +1223,12 @@ public class FaithfulAST2CHIR {
         let funcBody = ResolveMainFuncBody(mainDecl) ??
             throw IllegalStateException("faithful AST2CHIR MainDecl has no FuncBody")
         if (let Some(bodyTy) <- funcBody.GetTy()) {
-            if (!AstTy.IsInitialTy(Some(bodyTy))) {
+            if (AstTy.IsTyCorrect(bodyTy) && !AstTy.IsInitialTy(Some(bodyTy))) {
                 return RequireFuncType(chirType.TranslateType(bodyTy))
             }
         }
         let returnTy = if (let Some(retType) <- funcBody.retType) {
-            if (AstTy.IsInitialTy(retType.GetTy())) {
+            if (AstTy.IsInitialTy(retType.GetTy()) || !AstTy.IsTyCorrect(retType.GetTy())) {
                 builder.context.GetUnitTy()
             } else {
                 chirType.TranslateType(retType.GetTy() ??

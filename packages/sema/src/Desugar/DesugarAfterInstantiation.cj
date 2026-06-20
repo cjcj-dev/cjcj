@@ -90,6 +90,11 @@ private func IterateTyWithArgs(ty: Option<Ty>, fn: (Ty) -> Unit): Unit {
         for (typeArg in value.typeArgs) {
             IterateTyWithArgs(Some(typeArg), fn)
         }
+        if (let Some(genericTy) <- (value as GenericsTy)) {
+            for (upperBound in genericTy.upperBounds) {
+                IterateTyWithArgs(Some(upperBound), fn)
+            }
+        }
     }
 }
 
@@ -121,10 +126,9 @@ private class UsedImportMarker {
         if (!decl.TestAttr(Attribute.IMPORTED)) {
             return VisitAction.WALK_CHILDREN
         }
-        if (decl.isUsedImports) {
-            return VisitAction.SKIP_CHILDREN
+        if (!decl.isUsedImports) {
+            decl.isUsedImports = true
         }
-        decl.isUsedImports = true
         if (let Some(funcDecl) <- (decl as FuncDecl)) {
             if (let Some(propDecl) <- funcDecl.propDecl) {
                 propDecl.isUsedImports = true

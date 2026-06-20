@@ -827,6 +827,16 @@ public class TypeChecker {
                         extends.add(extendDecl)
                     }
                 }
+                for (decl in file.exportedInternalDecls) {
+                    if (let Some(extendDecl) <- (decl as ExtendDecl)) {
+                        extends.add(extendDecl)
+                    }
+                }
+            }
+            for (decl in packageDecl.srcPackage.genericInstantiatedDecls) {
+                if (let Some(extendDecl) <- (decl as ExtendDecl)) {
+                    extends.add(extendDecl)
+                }
             }
         }
         TypeCheckExtendUpdateExtendMap(impl.typeManager, extends)
