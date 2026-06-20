@@ -60,6 +60,12 @@ private func DiagRef(diag: BasicDiagnosticEngine, node: Node, kind: BasicDiagKin
     let _ = diag.DiagnoseRefactor(kind, NodeRange(node), arguments: args)
 }
 
+private func DiagRefEmit(diag: BasicDiagnosticEngine, node: Node, kind: BasicDiagKindRefactor,
+    args!: Array<String> = Array<String>()): Unit {
+    let builder = diag.DiagnoseRefactor(kind, NodeRange(node), arguments: args)
+    builder.Emit()
+}
+
 private func SetInvalid(ce: CallExpr): Ty {
     ce.SetTy(TypeManager.GetInvalidTy())
     ce.callKind = CallKind.CALL_INVALID
@@ -1062,6 +1068,15 @@ private func HasRecordedCallTypeArgs(ce: CallExpr): Bool {
     return false
 }
 
+private func TyListContains(values: ArrayList<Ty>, ty: Ty): Bool {
+    for (value in values) {
+        if (SameTy(value, ty)) {
+            return true
+        }
+    }
+    return false
+}
+
 private func AddCurrentGenericInstTyVars(typeManager: TypeManager, generic: Generic,
     typeMapping: SubstPack, out: ArrayList<GenericsTy>): Unit {
     for (param in generic.typeParameters) {
@@ -1070,6 +1085,12 @@ private func AddCurrentGenericInstTyVars(typeManager: TypeManager, generic: Gene
                 typeManager.MakeInstTyVar(typeMapping, genericTy)
                 if (let Some(instTy) <- typeMapping.u2i.Get(genericTy)) {
                     if (let Some(instGenTy) <- (instTy as GenericsTy)) {
+                        for (upperBound in genericTy.upperBounds) {
+                            let instUpperBound = typeManager.ApplySubstPack(upperBound, typeMapping)
+                            if (!TyListContains(instGenTy.upperBounds, instUpperBound)) {
+                                instGenTy.upperBounds.add(instUpperBound)
+                            }
+                        }
                         out.add(instGenTy)
                     }
                 }
@@ -1078,7 +1099,8 @@ private func AddCurrentGenericInstTyVars(typeManager: TypeManager, generic: Gene
     }
 }
 
-private func InferGenericCallTypeMapping(typeManager: TypeManager, ce: CallExpr, fd: FuncDecl,
+private func InferGenericCallTypeMapping(typeManager: TypeManager, diag: Option<BasicDiagnosticEngine>,
+    ce: CallExpr, fd: FuncDecl,
     paramTys: ArrayList<Ty>, typeMapping: SubstPack): Bool {
     if (HasRecordedCallTypeArgs(ce)) {
         return true
@@ -1111,6 +1133,13 @@ private func InferGenericCallTypeMapping(typeManager: TypeManager, ce: CallExpr,
     if (let Some(subst) <- LocalTypeArgumentSynthesis(typeManager, pack).SynthesizeTypeArguments()) {
         typeManager.PackMapping(typeMapping, subst)
         return true
+    }
+    if (let Some(diagValue) <- diag) {
+        if (let Some(base) <- ce.baseFunc) {
+            if (base.ShouldDiagnose()) {
+                DiagRefEmit(diagValue, base, BasicDiagKindRefactor.sema_unable_to_infer_generic_func)
+            }
+        }
     }
     return false
 }
@@ -1205,6 +1234,150 @@ private func CheckCallCompatible(typeManager: TypeManager, diag: Option<BasicDia
     return true
 }
 
+private func GenericDeclForCall(fd: FuncDecl): Option<Decl> {
+    if (let Some(body) <- fd.funcBody) {
+        if (let Some(_) <- body.generic) {
+            return Some(fd)
+        }
+    }
+    if (let Some(outer) <- fd.outerDecl) {
+        if (IsClassOrEnumConstructor(fd)) {
+            return Some(outer)
+        }
+    }
+    return None
+}
+
+private func EmitGenericInstantiationFailureForCall(typeManager: TypeManager, diag: Option<BasicDiagnosticEngine>,
+    decl: Decl, typeArgs: ArrayList<Ty>, checkNode: Node): Unit {
+    if (let None <- diag) {
+        return
+    }
+    let diagValue = diag.getOrThrow()
+    if (typeArgs.isEmpty()) {
+        DiagRefEmit(diagValue, checkNode, BasicDiagKindRefactor.sema_generic_argument_no_match)
+        return
+    }
+    let generic = decl.GetGeneric()
+    if (let None <- generic) {
+        DiagRefEmit(diagValue, checkNode, BasicDiagKindRefactor.sema_generic_argument_no_match)
+        return
+    }
+    let genericValue = generic.getOrThrow()
+    if (genericValue.typeParameters.size != typeArgs.size) {
+        DiagRefEmit(diagValue, checkNode, BasicDiagKindRefactor.sema_generic_argument_no_match)
+        return
+    }
+    let instantiateMap = GenerateTypeMapping(decl, typeArgs)
+    for (constraint in genericValue.genericConstraints) {
+        if (let None <- constraint.refType) {
+            return
+        }
+        let refType = constraint.refType.getOrThrow()
+        if (!Ty.IsTyCorrect(refType.GetTy())) {
+            return
+        }
+        let instTy = typeManager.GetInstantiatedTy(refType.GetTy().getOrThrow(), instantiateMap)
+        if (!Ty.IsTyCorrect(instTy)) {
+            return
+        }
+        if (let Some(genericTy) <- (instTy as GenericsTy)) {
+            if (!genericTy.isUpperBoundLegal) {
+                continue
+            }
+        }
+        for (upperBound in constraint.upperBounds) {
+            if (!Ty.IsTyCorrect(upperBound.GetTy())) {
+                return
+            }
+            let upperBoundTy = typeManager.GetInstantiatedTy(upperBound.GetTy().getOrThrow(), instantiateMap)
+            if (!Ty.IsTyCorrect(upperBoundTy)) {
+                return
+            }
+            let sameTyButCType = SameTy(instTy, upperBoundTy) && instTy.IsCType()
+            if (!typeManager.IsSubtype(instTy, upperBoundTy, implicitBoxed: true, allowOptionBox: false) ||
+                sameTyButCType) {
+                let declTy = decl.GetTy() ?? TypeManager.GetInvalidTy()
+                let builder = diagValue.Diagnose(ToBasicPosition(checkNode.begin), ToBasicPosition(checkNode.end),
+                    BasicDiagKind.sema_generic_type_argument_not_match_constraint,
+                    args: [BasicDiagArgument(declTy.String())])
+                builder.AddNote(ToBasicPosition(constraint.begin), BasicDiagKind.sema_which_constraint_not_match,
+                    args: [BasicDiagArgument(instTy.String()), BasicDiagArgument("'" + upperBoundTy.String() + "'")])
+                builder.Emit()
+                return
+            }
+        }
+    }
+    DiagRefEmit(diagValue, checkNode, BasicDiagKindRefactor.sema_generic_argument_no_match)
+}
+
+private func CheckGenericDeclInstantiationForCall(typeManager: TypeManager, diag: Option<BasicDiagnosticEngine>,
+    decl: Decl, typeArgs: ArrayList<Ty>, checkNode: Node): Bool {
+    if (CheckGenericDeclInstantiation(typeManager, decl, typeArgs)) {
+        return true
+    }
+    if (checkNode.ShouldDiagnose()) {
+        EmitGenericInstantiationFailureForCall(typeManager, diag, decl, typeArgs, checkNode)
+    }
+    return false
+}
+
+private func CheckGenericDeclInstantiationForCall(typeManager: TypeManager, diag: Option<BasicDiagnosticEngine>,
+    decl: Decl, typeNodes: ArrayList<Type>, checkNode: Node): Bool {
+    if (CheckGenericDeclInstantiation(typeManager, decl, typeNodes)) {
+        return true
+    }
+    let typeArgs = ArrayList<Ty>()
+    for (typeNode in typeNodes) {
+        if (let Some(ty) <- typeNode.GetTy()) {
+            typeArgs.add(ty)
+        } else {
+            if (checkNode.ShouldDiagnose()) {
+                EmitGenericInstantiationFailureForCall(typeManager, diag, decl, typeArgs, checkNode)
+            }
+            return false
+        }
+    }
+    if (checkNode.ShouldDiagnose()) {
+        EmitGenericInstantiationFailureForCall(typeManager, diag, decl, typeArgs, checkNode)
+    }
+    return false
+}
+
+private func CheckInstantiatedCandidateGenericDecl(typeManager: TypeManager, diag: Option<BasicDiagnosticEngine>,
+    ce: CallExpr, fd: FuncDecl, typeMapping: SubstPack): Bool {
+    let genericDecl = GenericDeclForCall(fd) ?? return true
+    let generic = genericDecl.GetGeneric() ?? return true
+    let instTys = ArrayList<Ty>()
+    for (param in generic.typeParameters) {
+        if (let Some(paramTy) <- param.GetTy()) {
+            if (let Some(genericTy) <- (paramTy as GenericsTy)) {
+                instTys.add(typeManager.ApplySubstPack(genericTy, typeMapping))
+            }
+        }
+    }
+    if (instTys.isEmpty() || Ty.ExistGeneric(instTys)) {
+        return true
+    }
+    let checkNode = match (ce.baseFunc) {
+        case Some(value) => value
+        case None => ce
+    }
+    return CheckGenericDeclInstantiationForCall(typeManager, diag, genericDecl, instTys, checkNode)
+}
+
+private func CheckCandidateConstrains(typeManager: TypeManager, diag: Option<BasicDiagnosticEngine>,
+    ce: CallExpr, fd: FuncDecl, typeMapping: SubstPack): Bool {
+    if (let Some(base) <- ce.baseFunc) {
+        let userDefinedTypeArgs = base.GetTypeArgs()
+        if (!NeedFurtherInstantiation(userDefinedTypeArgs) && fd.TestAttr(Attribute.GENERIC) &&
+            !CheckGenericDeclInstantiationForCall(typeManager, diag, fd, userDefinedTypeArgs, base)) {
+            return false
+        }
+    }
+    return CheckInstantiatedCandidateGenericDecl(typeManager, diag, ce, fd, typeMapping)
+}
+
 private func CheckCandidate(typeManager: TypeManager, diag: Option<BasicDiagnosticEngine>, ce: CallExpr,
     fd: FuncDecl, target: Option<Ty>, argChecker!: Option<CallArgChecker> = None): Option<FunctionMatchingUnit> {
     let wrongNormalArgSize = !fd.hasVariableLenArg &&
@@ -1223,7 +1396,7 @@ private func CheckCandidate(typeManager: TypeManager, diag: Option<BasicDiagnost
         return None
     }
     let typeMapping = GenerateCallBaseTypeMapping(typeManager, ce)
-    if (!InferGenericCallTypeMapping(typeManager, ce, fd, paramTyInArgOrder, typeMapping)) {
+    if (!InferGenericCallTypeMapping(typeManager, diag, ce, fd, paramTyInArgOrder, typeMapping)) {
         return None
     }
     let unit = FunctionMatchingUnit(fd, paramTyInArgOrder, typeMapping)
@@ -1239,6 +1412,9 @@ private func CheckCandidate(typeManager: TypeManager, diag: Option<BasicDiagnost
                 }
             }
         }
+    }
+    if (!CheckCandidateConstrains(typeManager, diag, ce, fd, typeMapping)) {
+        return None
     }
     return if (argNamesValid) { Some(unit) } else { None }
 }
@@ -1751,8 +1927,8 @@ public func SynCallExpr(typeManager: TypeManager, ce: CallExpr): Ty {
 }
 
 public func SynCallExprWithArgChecker(typeManager: TypeManager, ce: CallExpr,
-    argChecker: Option<CallArgChecker>): Ty {
-    if (ChkCallExprWithArgChecker(typeManager, None, None, ce, argChecker)) {
+    argChecker: Option<CallArgChecker>, diag!: Option<BasicDiagnosticEngine> = None): Ty {
+    if (ChkCallExprWithArgChecker(typeManager, diag, None, ce, argChecker)) {
         return ce.GetTy() ?? TypeManager.GetInvalidTy()
     }
     return TypeManager.GetInvalidTy()

@@ -477,6 +477,10 @@ private func PopulateMemberAccessTargets(typeManager: TypeManager, ma: MemberAcc
     if ((let Some(_) <- ma.target) || !ma.targets.isEmpty() || !Ty.IsTyCorrect(baseTy)) {
         return
     }
+    if (let Some(genericTy) <- (baseTy as GenericsTy)) {
+        PopulateMemberAccessTargetsFromUpperBounds(typeManager, ma, genericTy)
+        return
+    }
     let info = LookupInfo(baseTy: Some(baseTy), file: ma.curFile)
     let foundFields = FieldLookup(typeManager, Ty.GetDeclPtrOfTy(Some(baseTy)), ma.field.Val(), info: info)
     for (decl in foundFields) {
@@ -487,6 +491,59 @@ private func PopulateMemberAccessTargets(typeManager: TypeManager, ma: MemberAcc
             AddTargetIfMissing(ma.targets, decl)
         }
     }
+}
+
+private func PopulateMemberAccessTargetsFromUpperBounds(typeManager: TypeManager, ma: MemberAccess,
+    genericTy: GenericsTy): Unit {
+    ma.isExposedAccess = true
+    if (!genericTy.isUpperBoundLegal) {
+        return
+    }
+    for (upperBound in genericTy.upperBounds) {
+        if (!Ty.IsTyCorrect(upperBound)) {
+            continue
+        }
+        let targets = GetUpperBoundTargets(typeManager, ma, upperBound, false)
+        if (!targets.isEmpty() && ma.matchedParentTy.isNone()) {
+            ma.matchedParentTy = Some(upperBound)
+        }
+        for (decl in targets) {
+            AddTargetIfMissing(ma.targets, decl)
+            AddUpperBoundTargetMap(ma, decl, upperBound)
+        }
+    }
+}
+
+private func GetUpperBoundTargets(typeManager: TypeManager, ma: MemberAccess, upperBound: Ty,
+    isStaticAccess: Bool): ArrayList<Decl> {
+    let targets = ArrayList<Decl>()
+    if (upperBound.IsClassLike() || upperBound.IsStruct() || upperBound.IsEnum()) {
+        let info = LookupInfo(baseTy: Some(upperBound), file: ma.curFile)
+        for (decl in FieldLookup(typeManager, Ty.GetDeclPtrOfTy(Some(upperBound)), ma.field.Val(), info: info)) {
+            if (IsUpperBoundTargetValidForAccess(decl, isStaticAccess)) {
+                AddTargetIfMissing(targets, decl)
+            }
+        }
+        return targets
+    }
+    if (let Some(file) <- ma.curFile) {
+        for (decl in ExtendFieldLookup(typeManager, file, Some(upperBound), ma.field.Val())) {
+            if (IsUpperBoundTargetValidForAccess(decl, isStaticAccess)) {
+                AddTargetIfMissing(targets, decl)
+            }
+        }
+    }
+    return targets
+}
+
+private func IsUpperBoundTargetValidForAccess(decl: Decl, isStaticAccess: Bool): Bool {
+    return if (isStaticAccess) { decl.TestAttr(Attribute.STATIC) } else { !decl.TestAttr(Attribute.STATIC) }
+}
+
+private func AddUpperBoundTargetMap(ma: MemberAccess, target: Decl, upperBound: Ty): Unit {
+    let uppers = ArrayList<Ty>()
+    uppers.add(upperBound)
+    ma.foundUpperBoundMap.add((target, uppers))
 }
 
 public func SynExprShallow(typeManager: TypeManager, expr: Expr): Ty {

@@ -423,7 +423,12 @@ public func GetTyFromASTDecl(typeManager: TypeManager, decl: Decl, typeArgs: Arr
         return typeManager.GetTypeAliasTy(typeAliasDecl, typeArgs.toArray())
     }
     if (let Some(genericParamDecl) <- (decl as GenericParamDecl)) {
-        return typeManager.GetGenericsTy(genericParamDecl)
+        if (Ty.IsTyCorrect(genericParamDecl.GetTy())) {
+            return genericParamDecl.GetTy().getOrThrow()
+        }
+        let genericTy = typeManager.GetGenericsTy(genericParamDecl)
+        genericParamDecl.SetTy(genericTy)
+        return genericTy
     }
     if (let Some(builtinDecl) <- (decl as BuiltInDecl)) {
         return getTyFromBuiltinDecl(typeManager, builtinDecl, typeArgs)

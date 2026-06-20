@@ -101,6 +101,18 @@ private func generateTypeMappingForUpperBounds(typeManager: TypeManager, memberA
     }
 }
 
+private func generateTypeMappingForUpperBounds(typeManager: TypeManager, memberAccess: MemberAccess,
+    target: Decl, typeMapping: SubstPack): Unit {
+    for (entry in memberAccess.foundUpperBoundMap) {
+        if (SameDecl(entry[0], target)) {
+            for (upper in entry[1]) {
+                typeManager.GenerateGenericMapping(typeMapping, upper)
+            }
+            return
+        }
+    }
+}
+
 private func generateTypeMappingForBaseExpr(typeManager: TypeManager, memberAccess: MemberAccess,
     typeMapping: MultiTypeSubst): Unit {
     if (let None <- memberAccess.baseExpr) {
@@ -397,6 +409,12 @@ public func GetGenericType(typeManager: TypeManager, decl: Decl, typeArgs: Array
 public func GenerateGenericTypeMapping(typeManager: TypeManager, expr: Expr): SubstPack {
     let typeMapping = SubstPack()
     if (let Some(memberAccess) <- (expr as MemberAccess)) {
+        if (let Some(target) <- memberAccess.GetTarget()) {
+            if (memberAccess.isExposedAccess && isGenericUpperBoundCall(memberAccess, target)) {
+                generateTypeMappingForUpperBounds(typeManager, memberAccess, target, typeMapping)
+                return typeMapping
+            }
+        }
         if (let Some(baseExpr) <- memberAccess.baseExpr) {
             if (let Some(baseTy) <- baseExpr.GetTy()) {
                 typeManager.GenerateGenericMapping(typeMapping, baseTy)

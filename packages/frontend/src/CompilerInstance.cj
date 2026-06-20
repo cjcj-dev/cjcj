@@ -431,7 +431,7 @@ public class CompilerInstance {
         SeedFaithfulSemaResolvedImports(semaInstance)
         let checker = FaithfulSemaTypeChecker(Some(semaInstance))
         checker.TypeCheckForPackages(pkgs)
-        return true
+        return diag.GetErrorCount() == 0
     }
 
     private func SeedFaithfulSemaResolvedImports(semaInstance: FaithfulSemaCompilerInstance): Unit {
