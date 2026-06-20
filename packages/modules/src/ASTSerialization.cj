@@ -9,6 +9,7 @@ import cangjie_compiler::ast.FeaturesDirective as ASTFeaturesDirective
 import cangjie_compiler::ast.FeaturesSet as ASTFeaturesSet
 import cangjie_compiler::ast.Identifier as ASTIdentifier
 import cangjie_compiler::ast.Modifier as ASTModifier
+import cangjie_compiler::basic.CANGJIE_VERSION
 import cangjie_compiler::lex.TokenKind
 import cangjie_compiler::lex.TokenKindIndex
 import cangjie_compiler::option.GlobalOptions
@@ -58,9 +59,9 @@ public class ASTWriter {
     }
 
     public func AST2FB(data: ArrayList<UInt8>, pkgDecl: PackageDecl): Unit {
-        let serialized = SerializePackage(pkgDecl.srcPackage)
+        let serialized = SerializePackageFlatBuffer(pkgDecl.srcPackage)
         data.clear()
-        for (byte in serialized.toArray()) {
+        for (byte in serialized) {
             data.add(byte)
         }
     }
@@ -76,6 +77,66 @@ public class ASTWriter {
         savedTypes.add(pType)
         savedTypeMap[pType] = nextIndex
         return nextIndex
+    }
+
+    private func SerializePackageFlatBuffer(pkg: Package): Array<UInt8> {
+        let fb = FlatBufferBuilder()
+        let emptyOffsets = ArrayList<FlatBufferOffset>()
+        let emptyOffsetVector = fb.CreateVectorOffsets(emptyOffsets)
+        let files = ArrayList<FlatBufferOffset>()
+        for (file in pkg.files) {
+            files.add(fb.CreateString(file.filePath))
+        }
+        let filesVec = fb.CreateVectorOffsets(files)
+        let fileImports = ArrayList<FlatBufferOffset>()
+        for (_ in pkg.files) {
+            fb.StartTable(1)
+            fb.AddOffset(0, emptyOffsetVector)
+            fileImports.add(fb.EndTable())
+        }
+        let fileImportsVec = fb.CreateVectorOffsets(fileImports)
+        let fileInfos = ArrayList<FlatBufferOffset>()
+        for (_ in pkg.files) {
+            fb.StartTable(4)
+            fileInfos.add(fb.EndTable())
+        }
+        let fileInfosVec = fb.CreateVectorOffsets(fileInfos)
+        let options = CreateFlatOptions(fb)
+        let version = fb.CreateString(CANGJIE_VERSION)
+        let packageName = fb.CreateString(pkg.fullPackageName)
+        let depInfo = fb.CreateString(packageDepInfo)
+        let moduleName = fb.CreateString("")
+        let cjoVersion = ArrayList<UInt8>()
+        cjoVersion.add(0u8)
+        cjoVersion.add(1u8)
+        cjoVersion.add(0u8)
+
+        fb.StartTable(17)
+        fb.AddOffset(16, options)
+        fb.AddOffset(15, emptyOffsetVector)
+        fb.AddOffset(14, fileInfosVec)
+        fb.AddOffset(13, moduleName)
+        fb.AddU8(12, FlatPackageAccess(pkg.accessible))
+        fb.AddU8(11, if (pkg.isMacroPackage) { 1u8 } else { 0u8 })
+        fb.AddOffset(9, emptyOffsetVector)
+        fb.AddOffset(8, emptyOffsetVector)
+        fb.AddOffset(7, emptyOffsetVector)
+        fb.AddOffset(6, fileImportsVec)
+        fb.AddOffset(5, filesVec)
+        fb.AddOffset(4, emptyOffsetVector)
+        fb.AddOffset(3, depInfo)
+        fb.AddOffset(2, packageName)
+        fb.AddStruct(1, cjoVersion, 1)
+        fb.AddOffset(0, version)
+        let root = fb.EndTable()
+        return fb.Finish(root, "CJOF")
+    }
+
+    private func CreateFlatOptions(fb: FlatBufferBuilder): FlatBufferOffset {
+        fb.StartTable(2)
+        fb.AddBool(1, debugOption)
+        fb.AddU8(0, OptimizationLevelToFlat(optimizationLevel))
+        return fb.EndTable()
     }
 
     public func SetIsChirNow(isChirNow!: Bool = false): Unit {
@@ -572,6 +633,23 @@ public func GetDeclMangleKey(decl: Decl): String {
         return decl.fullPackageName + "." + decl.identifier
     }
     return decl.identifier
+}
+
+private func FlatPackageAccess(access: AccessLevel): UInt8 {
+    if (SameAccessLevel(access, AccessLevel.PROTECTED)) { return 1u8 }
+    if (SameAccessLevel(access, AccessLevel.INTERNAL) || SameAccessLevel(access, AccessLevel.PRIVATE)) { return 2u8 }
+    return 0u8
+}
+
+private func OptimizationLevelToFlat(level: OptimizationLevel): UInt8 {
+    return match (level) {
+        case OptimizationLevel.O0 => 0u8
+        case OptimizationLevel.O1 => 1u8
+        case OptimizationLevel.O2 => 2u8
+        case OptimizationLevel.O3 => 3u8
+        case OptimizationLevel.Os => 4u8
+        case OptimizationLevel.Oz => 5u8
+    }
 }
 
 private func SerializedFeatureNames(file: File): ArrayList<String> {

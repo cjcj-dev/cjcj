@@ -11,6 +11,8 @@ import cangjie_compiler::sema.Desugar.DesugarBeforeTypeCheck as FaithfulDesugarB
 import cangjie_compiler::sema.TypeCheckExpr.TypeChecker as FaithfulSemaTypeChecker
 import cangjie_compiler::meta_transformation.MetaTransformPluginBuilder
 import cangjie_compiler::meta_transformation.NativeMetaTransformPlugin
+import cangjie_compiler::option.OutputMode
+import cangjie_compiler::utils.FileUtil
 import std.collection.*
 
 public enum CompileStage {
@@ -574,13 +576,20 @@ public class CompilerInstance {
     }
 
     public func PerformCjoSaving(): Bool {
+        if (invocation.globalOptions.outputMode != OutputMode.STATIC_LIB &&
+            invocation.globalOptions.outputMode != OutputMode.SHARED_LIB) {
+            return true
+        }
         if (srcPkgs.isEmpty()) {
             return true
         }
         let pkg = srcPkgs[0]
         let path = invocation.globalOptions.GenerateCachedPathName(pkg.fullPackageName, SERIALIZED_FILE_EXTENSION)
-        if (!WriteFileContent(path, RenderPackageSummaryJson(pkg))) {
-            diag.Warn(DiagCategory.IMPORT_PACKAGE, DEFAULT_POSITION, "failed to write CJO summary: " + path)
+        let packageDepInfo = if (depPackageInfo.isEmpty()) { "" } else { depPackageInfo[0] }
+        let data = SerializePackageToCjoFlatBuffer(pkg, packageDepInfo, invocation.globalOptions.enableCompileDebug,
+            invocation.globalOptions.optimizationLevel)
+        if (!FileUtil.WriteBufferToASTFile(path, data)) {
+            diag.Warn(DiagCategory.IMPORT_PACKAGE, DEFAULT_POSITION, "failed to write CJO: " + path)
         }
         return true
     }
@@ -1101,34 +1110,6 @@ public class CompilerInstance {
     }
 }
 
-private func RenderPackageSummaryJson(pkg: Package): String {
-    let builder = StringBuilder()
-    builder.append("{\n")
-    builder.append("  \"package\": \"" + EscapeJson(pkg.fullPackageName) + "\",\n")
-    builder.append("  \"files\": [\n")
-    var fileIdx: Int64 = 0
-    while (fileIdx < pkg.files.size) {
-        if (fileIdx > 0) {
-            builder.append(",\n")
-        }
-        appendFileSummaryJson(builder, pkg.files[fileIdx])
-        fileIdx++
-    }
-    builder.append("\n  ],\n")
-    builder.append("  \"genericInstantiatedDecls\": [")
-    var genIdx: Int64 = 0
-    while (genIdx < pkg.genericInstantiatedDecls.size) {
-        if (genIdx > 0) {
-            builder.append(", ")
-        }
-        builder.append("\"" + EscapeJson(pkg.genericInstantiatedDecls[genIdx].identifier.Val()) + "\"")
-        genIdx++
-    }
-    builder.append("]\n")
-    builder.append("}\n")
-    return builder.toString()
-}
-
 private func RenderFrontendResultsJson(ci: CompilerInstance): String {
     let builder = StringBuilder()
     builder.append("{\n")
@@ -1169,36 +1150,6 @@ private func RenderFrontendResultsJson(ci: CompilerInstance): String {
     builder.append("]\n")
     builder.append("}\n")
     return builder.toString()
-}
-
-private func appendFileSummaryJson(builder: StringBuilder, file: File): Unit {
-    builder.append("    {\n")
-    builder.append("      \"path\": \"" + EscapeJson(file.filePath) + "\",\n")
-    builder.append("      \"hash\": \"" + file.fileHash.toString() + "\",\n")
-    if (let Some(packageSpec) <- file.packageSpec) {
-        builder.append("      \"packageSpec\": \"" + EscapeJson(packageSpec.GetPackageName()) + "\",\n")
-    } else {
-        builder.append("      \"packageSpec\": \"\",\n")
-    }
-    builder.append("      \"imports\": ")
-    let imports = ArrayList<String>()
-    for (importSpec in file.imports) {
-        imports.add(GetImportedItemFullName(importSpec.content))
-    }
-    appendStringArrayJson(builder, imports)
-    builder.append(",\n")
-    builder.append("      \"decls\": [")
-    var declIdx: Int64 = 0
-    while (declIdx < file.decls.size) {
-        if (declIdx > 0) {
-            builder.append(", ")
-        }
-        builder.append("\"" + EscapeJson(ASTKindName(file.decls[declIdx].astKind) + ":" +
-            file.decls[declIdx].identifier.Val()) + "\"")
-        declIdx++
-    }
-    builder.append("]\n")
-    builder.append("    }")
 }
 
 private func appendStringArrayJson(builder: StringBuilder, values: ArrayList<String>): Unit {

@@ -4,6 +4,7 @@ import std.collection.*
 import cangjie_compiler::chir.FuncKind
 import cangjie_compiler::chir.Function
 import cangjie_compiler::option.GlobalOptions
+import cangjie_compiler::option.OutputMode
 
 private let CANGJIE_SDK_VERSION: String = "1.1.0-alpha.20260331010029"
 
@@ -20,7 +21,7 @@ public func GenPackageModules(chirData: CHIRData, options: GlobalOptions, enable
         for (chirFunc in subPackage.chirFuncs) {
             EmitFunctionIR(cgMod, chirFunc)
         }
-        if (subPackage.mainModule) {
+        if (subPackage.mainModule && options.outputMode == OutputMode.EXECUTABLE) {
             EmitCJSDKVersion(cgMod)
             EmitMainFunctionIR(cgMod)
             SpecifyPackageInitFunc(cgMod)
