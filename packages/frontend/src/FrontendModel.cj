@@ -2198,7 +2198,11 @@ public class ImportManager {
             }
             directDependencies.add(pkg.fullPackageName, filteredDeps)
         }
-        return LoadResolvedImportedPackages()
+        if (!LoadResolvedImportedPackages()) {
+            return false
+        }
+        CheckImports(pkgs)
+        return diag.GetErrorCount() == 0
     }
 
     public func ReindexSourcePackagesAfterMacroExpand(pkgs: ArrayList<Package>): Unit {
@@ -2297,19 +2301,13 @@ public class ImportManager {
                 } else {
                     importSpec.content.identifier.Val()
                 }
-                var foundDecl = false
                 for (file in pkg.files) {
                     for (decl in file.decls) {
                         if (decl.identifier.Val() == importSpec.content.identifier.Val() &&
                             IsDeclVisibleFrom(srcFullPackageName, decl)) {
-                            foundDecl = true
                             AddImportedDeclGroupValue(out, importedName, decl)
                         }
                     }
-                }
-                if (!foundDecl && importSpec.content.isDecl) {
-                    diag.Diagnose(DiagCategory.IMPORT_PACKAGE, DEFAULT_POSITION,
-                        "undeclared identifier '${importSpec.content.identifier.Val()}'")
                 }
             }
         }
@@ -2424,6 +2422,83 @@ public class ImportManager {
             }
         }
         return None
+    }
+
+    private func GetPackageForImportCheck(name: String, sourcePackages: ArrayList<Package>): Option<Package> {
+        if (let Some(pkg) <- GetPackage(name)) {
+            return Some(pkg)
+        }
+        for (pkg in sourcePackages) {
+            if (pkg.fullPackageName == name) {
+                return Some(pkg)
+            }
+        }
+        return None
+    }
+
+    private func CheckImports(sourcePackages: ArrayList<Package>): Unit {
+        for (pkg in sourcePackages) {
+            for (file in pkg.files) {
+                for (importSpec in file.imports) {
+                    if (importSpec.IsImportMulti()) {
+                        continue
+                    }
+                    let fullPackageName = importSpec.content.GetImportedPackageNameWithIsDecl()
+                    if (fullPackageName.isEmpty()) {
+                        continue
+                    }
+                    let packageOpt = GetPackageForImportCheck(fullPackageName, sourcePackages)
+                    if (let None <- packageOpt) {
+                        continue
+                    }
+                    if (importSpec.TestAttr(Attribute.IMPLICIT_ADD) || importSpec.IsImportAll() ||
+                        IsPackageImportForCheck(importSpec, fullPackageName, sourcePackages)) {
+                        continue
+                    }
+                    let packageValue = packageOpt.getOrThrow()
+                    if (!HasVisibleImportedDecl(pkg.fullPackageName, packageValue, importSpec.content.identifier.Val())) {
+                        let im = importSpec.content
+                        let nameRange = MakeRange(im.prefixPoses[0], im.identifier.End())
+                        diag.AsBasicDiagnosticEngine().DiagnoseRefactor(
+                            DiagKindRefactor.package_decl_not_find_in_package,
+                            nameRange,
+                            arguments: [im.identifier.Val(), fullPackageName]).Emit()
+                    }
+                }
+            }
+        }
+    }
+
+    private func IsPackageImportForCheck(
+        importSpec: ImportSpec,
+        targetPackageName: String,
+        sourcePackages: ArrayList<Package>
+    ): Bool {
+        if (importSpec.IsImportAll() || importSpec.content.isDecl) {
+            return false
+        }
+        for (pkg in importedPackages) {
+            if (pkg.fullPackageName == targetPackageName) {
+                return true
+            }
+        }
+        for (pkg in sourcePackages) {
+            if (pkg.fullPackageName == targetPackageName) {
+                return true
+            }
+        }
+        return false
+    }
+
+    private func HasVisibleImportedDecl(srcFullPackageName: String, pkg: Package, name: String): Bool {
+        for (file in pkg.files) {
+            for (decl in file.decls) {
+                if (decl.identifier.Val() == name && IsDeclVisibleFrom(srcFullPackageName, decl)) {
+                    return true
+                }
+            }
+        }
+        return false
     }
 
     private func AddImportedPackageIfMissing(pkg: Package): Unit {

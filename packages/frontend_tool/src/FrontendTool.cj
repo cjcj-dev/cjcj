@@ -1,10 +1,12 @@
 package cangjie_compiler::frontend_tool
 
 import std.collection.*
+import cangjie_compiler::basic.DiagFormat as BasicDiagFormat
 import cangjie_compiler::basic.DiagKindRefactor
 import cangjie_compiler::basic.PrintVersion
 import cangjie_compiler::basic.WriteError
 import cangjie_compiler::frontend.*
+import cangjie_compiler::option.DiagFormat as OptionDiagFormat
 import cangjie_compiler::incremental_compilation.IncreKind
 import cangjie_compiler::incremental_compilation.IncrementalCompilationLogger
 import cangjie_compiler::option.MockMode
@@ -250,10 +252,17 @@ private func ConfigureFrontendProfiling(globalOptions: GlobalOptions): Unit {
 }
 
 private func ConfigureFrontendDiagnostics(diag: DiagnosticEngine, globalOptions: GlobalOptions): Unit {
-    let _ = diag
-    let _ = globalOptions
-    // TODO(selfhost:frontend_tool): C++ calls SetErrorCountLimit and RegisterHandler here, but
-    // frontend.DiagnosticEngine does not expose those basic DiagnosticEngine hooks in the stable DAG.
+    let errorCountLimit: Option<UInt64> = if (globalOptions.errorCountLimit.hasValue) {
+        Some(globalOptions.errorCountLimit.value)
+    } else {
+        None
+    }
+    diag.SetErrorCountLimit(errorCountLimit)
+    diag.RegisterHandler(match (globalOptions.diagFormat) {
+        case OptionDiagFormat.JSON => BasicDiagFormat.JSON
+        case OptionDiagFormat.NO_COLOR => BasicDiagFormat.NO_COLOR
+        case OptionDiagFormat.DEFAULT => BasicDiagFormat.DEFAULT
+    })
 }
 
 private func ConfigureInvocationPaths(

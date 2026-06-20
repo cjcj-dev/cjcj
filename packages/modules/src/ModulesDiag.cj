@@ -61,6 +61,16 @@ public class DiagnosticEngine {
         ForwardToBasic(kind, message, range)
     }
 
+    public func ReportErrorWithFormatArguments(
+        kind: String,
+        message: String,
+        range: Range,
+        arguments: Array<String>
+    ): Unit {
+        diagnostics.add(ModuleDiagnostic(kind, message, range, DiagnosticSeverity.ERROR))
+        ForwardToBasic(kind, message, range, arguments: arguments)
+    }
+
     public func ReportWarning(kind: String, message: String, range!: Range = Range()): Unit {
         diagnostics.add(ModuleDiagnostic(kind, message, range, DiagnosticSeverity.WARNING))
         ForwardToBasic(kind, message, range)
@@ -118,9 +128,15 @@ public class DiagnosticEngine {
         basicEngine.Reset()
     }
 
-    private func ForwardToBasic(kind: String, message: String, range: Range): Unit {
+    private func ForwardToBasic(
+        kind: String,
+        message: String,
+        range: Range,
+        arguments!: Array<String> = Array<String>()
+    ): Unit {
         if (let Some(basicKind) <- ModuleDiagKindToBasic(kind)) {
-            let builder = basicEngine.DiagnoseRefactor(basicKind, range, arguments: [message])
+            let formatArguments = if (arguments.isEmpty()) { [message] } else { arguments }
+            let builder = basicEngine.DiagnoseRefactor(basicKind, range, arguments: formatArguments)
             builder.Emit()
         }
     }

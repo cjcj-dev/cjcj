@@ -434,7 +434,11 @@ public class ImportContent <: Node {
     public var kind: ImportKind = ImportKind.IMPORT_SINGLE
     public var hasDoubleColon: Bool = false
     public let prefixPaths: ArrayList<String> = ArrayList<String>()
+    public let prefixPoses: ArrayList<Position> = ArrayList<Position>()
+    public let prefixDotPoses: ArrayList<Position> = ArrayList<Position>()
     public var identifier: String = ""
+    public var identifierBegin: Position = INVALID_POSITION
+    public var identifierEnd: Position = INVALID_POSITION
     public var aliasName: String = ""
     public let items: ArrayList<ImportContent> = ArrayList<ImportContent>()
     public var isDecl: Bool = false
