@@ -465,6 +465,207 @@ private class ParsedType {
     }
 }
 
+private class CjoFlatBuffer {
+    private let data: Array<UInt8>
+
+    public init(data: Array<UInt8>) {
+        this.data = data
+    }
+
+    public func RootTable(): Int64 {
+        if (data.size < 8 || data[4] != b'C' || data[5] != b'J' || data[6] != b'O' || data[7] != b'F') {
+            return -1
+        }
+        let root = Int64(ReadU32(0))
+        return if (IsInBounds(root, 4)) { root } else { -1 }
+    }
+
+    public func TableField(table: Int64, slot: Int64): Int64 {
+        if (!IsInBounds(table, 4)) {
+            return -1
+        }
+        let vtable = table - ReadI32(table)
+        if (!IsInBounds(vtable, 4)) {
+            return -1
+        }
+        let vtableSize = Int64(ReadU16(vtable))
+        if (slot < 0 || slot + 2 > vtableSize) {
+            return -1
+        }
+        let fieldOffset = Int64(ReadU16(vtable + slot))
+        if (fieldOffset == 0) {
+            return -1
+        }
+        let fieldPos = table + fieldOffset
+        return if (IsInBounds(fieldPos, 1)) { fieldPos } else { -1 }
+    }
+
+    public func OffsetField(table: Int64, slot: Int64): Int64 {
+        return Indirect(TableField(table, slot))
+    }
+
+    public func VectorField(table: Int64, slot: Int64): Int64 {
+        let target = OffsetField(table, slot)
+        return if (IsInBounds(target, 4)) { target } else { -1 }
+    }
+
+    public func StringField(table: Int64, slot: Int64): String {
+        return StringAt(OffsetField(table, slot))
+    }
+
+    public func U8Field(table: Int64, slot: Int64, defaultValue: UInt8): UInt8 {
+        let pos = TableField(table, slot)
+        return if (pos >= 0 && IsInBounds(pos, 1)) { data[pos] } else { defaultValue }
+    }
+
+    public func U16Field(table: Int64, slot: Int64, defaultValue: UInt16): UInt16 {
+        let pos = TableField(table, slot)
+        return if (pos >= 0) { ReadU16(pos) } else { defaultValue }
+    }
+
+    public func U32Field(table: Int64, slot: Int64, defaultValue: UInt32): UInt32 {
+        let pos = TableField(table, slot)
+        return if (pos >= 0) { ReadU32(pos) } else { defaultValue }
+    }
+
+    public func I32Field(table: Int64, slot: Int64, defaultValue: Int64): Int64 {
+        let pos = TableField(table, slot)
+        return if (pos >= 0) { ReadI32(pos) } else { defaultValue }
+    }
+
+    public func I64Field(table: Int64, slot: Int64, defaultValue: Int64): Int64 {
+        let pos = TableField(table, slot)
+        return if (pos >= 0) { ReadI64(pos) } else { defaultValue }
+    }
+
+    public func VectorLength(vector: Int64): Int64 {
+        if (!IsInBounds(vector, 4)) {
+            return 0
+        }
+        return Int64(ReadU32(vector))
+    }
+
+    public func VectorU32(vector: Int64, index: Int64): UInt32 {
+        let pos = vector + 4 + index * 4
+        return ReadU32(pos)
+    }
+
+    public func VectorOffsetElement(vector: Int64, index: Int64): Int64 {
+        let pos = vector + 4 + index * 4
+        return Indirect(pos)
+    }
+
+    public func StringAt(pos: Int64): String {
+        if (!IsInBounds(pos, 4)) {
+            return ""
+        }
+        let len = Int64(ReadU32(pos))
+        let start = pos + 4
+        if (len < 0 || !IsInBounds(start, len)) {
+            return ""
+        }
+        return String.fromUtf8(data[start..start + len])
+    }
+
+    public func Indirect(pos: Int64): Int64 {
+        if (!IsInBounds(pos, 4)) {
+            return -1
+        }
+        let target = pos + Int64(ReadU32(pos))
+        return if (IsInBounds(target, 1)) { target } else { -1 }
+    }
+
+    private func IsInBounds(pos: Int64, width: Int64): Bool {
+        return pos >= 0 && width >= 0 && pos + width <= data.size
+    }
+
+    @OverflowWrapping
+    private func ReadU16(pos: Int64): UInt16 {
+        if (!IsInBounds(pos, 2)) {
+            return 0u16
+        }
+        var out = UInt16(data[pos])
+        out = out | (UInt16(data[pos + 1]) << 8)
+        return out
+    }
+
+    @OverflowWrapping
+    private func ReadU32(pos: Int64): UInt32 {
+        if (!IsInBounds(pos, 4)) {
+            return 0u32
+        }
+        var out = UInt32(data[pos])
+        out = out | (UInt32(data[pos + 1]) << 8)
+        out = out | (UInt32(data[pos + 2]) << 16)
+        out = out | (UInt32(data[pos + 3]) << 24)
+        return out
+    }
+
+    @OverflowWrapping
+    private func ReadU64(pos: Int64): UInt64 {
+        if (!IsInBounds(pos, 8)) {
+            return 0u64
+        }
+        var out = UInt64(data[pos])
+        out = out | (UInt64(data[pos + 1]) << 8)
+        out = out | (UInt64(data[pos + 2]) << 16)
+        out = out | (UInt64(data[pos + 3]) << 24)
+        out = out | (UInt64(data[pos + 4]) << 32)
+        out = out | (UInt64(data[pos + 5]) << 40)
+        out = out | (UInt64(data[pos + 6]) << 48)
+        out = out | (UInt64(data[pos + 7]) << 56)
+        return out
+    }
+
+    @OverflowWrapping
+    private func ReadI32(pos: Int64): Int64 {
+        return Int64(Int32(ReadU32(pos)))
+    }
+
+    @OverflowWrapping
+    private func ReadI64(pos: Int64): Int64 {
+        return Int64(ReadU64(pos))
+    }
+}
+
+private class CjoFlatDecl {
+    public let index: UInt32
+    public let table: Int64
+    public let kind: UInt16
+    public let identifier: String
+    public let fullPackageName: String
+    public let exportId: String
+    public let mangledName: String
+    public let mangledBeforeSema: String
+    public let genericArity: Int64
+    public var decl: Option<Decl> = None
+
+    public init(index: UInt32, table: Int64, kind: UInt16, identifier: String, fullPackageName: String,
+        exportId: String, mangledName: String, mangledBeforeSema: String, genericArity: Int64) {
+        this.index = index
+        this.table = table
+        this.kind = kind
+        this.identifier = identifier
+        this.fullPackageName = fullPackageName
+        this.exportId = exportId
+        this.mangledName = mangledName
+        this.mangledBeforeSema = mangledBeforeSema
+        this.genericArity = genericArity
+    }
+}
+
+private class CjoFullId {
+    public let pkgId: Int64
+    public let decl: String
+    public let index: UInt32
+
+    public init(pkgId: Int64, decl: String, index: UInt32) {
+        this.pkgId = pkgId
+        this.decl = decl
+        this.index = index
+    }
+}
+
 private class CjoSignatureMaterializer {
     private let packageName: String
     private let pkg: Package
@@ -476,6 +677,13 @@ private class CjoSignatureMaterializer {
     private let inferredNominalKinds: HashMap<String, UInt8> = HashMap<String, UInt8>()
     private let inferredGenericNames: HashMap<String, ArrayList<String>> = HashMap<String, ArrayList<String>>()
     private let activeGenericParams: ArrayList<GenericParamDecl> = ArrayList<GenericParamDecl>()
+    private var flat: Option<CjoFlatBuffer> = None
+    private var flatAllDecls: Int64 = -1
+    private var flatAllTypes: Int64 = -1
+    private var flatImports: Int64 = -1
+    private let flatDecls: HashMap<UInt32, CjoFlatDecl> = HashMap<UInt32, CjoFlatDecl>()
+    private let flatTypeCache: HashMap<UInt32, Ty> = HashMap<UInt32, Ty>()
+    private let flatGenericParamDecls: HashMap<UInt32, GenericParamDecl> = HashMap<UInt32, GenericParamDecl>()
 
     public init(packageName: String, pkg: Package, file: File, importedPackages: ArrayList<Package>,
         exportedSymbols: HashSet<String>) {
@@ -486,7 +694,7 @@ private class CjoSignatureMaterializer {
         this.exportedSymbols = exportedSymbols
     }
 
-    public func Materialize(strings: ArrayList<String>): Unit {
+    public func Materialize(strings: ArrayList<String>, data: Array<UInt8>): Unit {
         InferSignatureMetadata(strings)
         var idx: Int64 = 0
         while (idx < strings.size) {
@@ -496,7 +704,7 @@ private class CjoSignatureMaterializer {
             }
             idx++
         }
-        MaterializeCoreThrowableInheritance()
+        MaterializeSerializedInheritedTypes(data)
     }
 
     private func InferSignatureMetadata(strings: ArrayList<String>): Unit {
@@ -1270,60 +1478,459 @@ private class CjoSignatureMaterializer {
         return decl
     }
 
-    private func MaterializeCoreThrowableInheritance(): Unit {
-        if (packageName != "std.core") {
+    private func MaterializeSerializedInheritedTypes(data: Array<UInt8>): Unit {
+        flat = Some(CjoFlatBuffer(data))
+        let reader = flat.getOrThrow()
+        let root = reader.RootTable()
+        if (root < 0 || reader.StringField(root, 8) != packageName) {
             return
         }
-        let exceptionDecl = FindMaterializedNominal("Exception")
-        let errorDecl = FindMaterializedNominal("Error")
-        for (decl in file.decls) {
-            if (let Some(classDecl) <- (decl as ClassDecl)) {
-                let name = classDecl.identifier.Val()
-                if (name != "Exception" && name.endsWith("Exception")) {
-                    if (let Some(base) <- exceptionDecl) {
-                        AddImportedSuperClass(classDecl, base)
-                    }
-                } else if (name != "Error" && name.endsWith("Error")) {
-                    if (let Some(base2) <- errorDecl) {
-                        AddImportedSuperClass(classDecl, base2)
-                    }
+        flatAllTypes = reader.VectorField(root, 18)
+        flatAllDecls = reader.VectorField(root, 20)
+        flatImports = reader.VectorField(root, 12)
+        if (flatAllTypes < 0 || flatAllDecls < 0) {
+            return
+        }
+        flatDecls.clear()
+        flatTypeCache.clear()
+        flatGenericParamDecls.clear()
+        let declCount = reader.VectorLength(flatAllDecls)
+        var idx: Int64 = 0
+        while (idx < declCount) {
+            let declTable = reader.VectorOffsetElement(flatAllDecls, idx)
+            if (declTable >= 0) {
+                let record = CreateFlatDeclRecord(reader, declTable, UInt32(idx + 1))
+                flatDecls[record.index] = record
+            }
+            idx++
+        }
+        idx = 0
+        while (idx < declCount) {
+            let formatIndex = UInt32(idx + 1)
+            if (let Some(record) <- flatDecls.get(formatIndex)) {
+                MaterializeFlatInheritedTypes(reader, record)
+            }
+            idx++
+        }
+    }
+
+    private func CreateFlatDeclRecord(reader: CjoFlatBuffer, declTable: Int64, index: UInt32): CjoFlatDecl {
+        let genericTable = reader.OffsetField(declTable, 12)
+        let genericArity = if (genericTable >= 0) { reader.VectorLength(reader.VectorField(genericTable, 4)) } else { 0 }
+        return CjoFlatDecl(
+            index,
+            declTable,
+            reader.U16Field(declTable, 4, 0u16),
+            reader.StringField(declTable, 18),
+            reader.StringField(declTable, 8),
+            reader.StringField(declTable, 30),
+            reader.StringField(declTable, 28),
+            reader.StringField(declTable, 32),
+            genericArity
+        )
+    }
+
+    private func MaterializeFlatInheritedTypes(reader: CjoFlatBuffer, record: CjoFlatDecl): Unit {
+        if (!IsFlatInheritableDeclKind(record.kind)) {
+            return
+        }
+        let declOpt = EnsureFlatDecl(record)
+        if (let None <- declOpt) {
+            return
+        }
+        let decl = declOpt.getOrThrow()
+        if (let Some(inheritable) <- (decl as InheritableDecl)) {
+            MapFlatGenericParameters(reader, record, decl)
+            let infoTable = reader.OffsetField(record.table, 38)
+            if (infoTable < 0) {
+                return
+            }
+            let inheritedTypes = reader.VectorField(infoTable, 4)
+            if (inheritedTypes < 0) {
+                return
+            }
+            var idx: Int64 = 0
+            let inheritedCount = reader.VectorLength(inheritedTypes)
+            while (idx < inheritedCount) {
+                let tyIndex = reader.VectorU32(inheritedTypes, idx)
+                if (let Some(inheritedTy) <- LoadFlatType(tyIndex)) {
+                    AddFlatInheritedType(inheritable, inheritedTy)
+                }
+                idx++
+            }
+        }
+    }
+
+    private func IsFlatInheritableDeclKind(kind: UInt16): Bool {
+        return kind == 1u16 || kind == 2u16 || kind == 8u16 || kind == 9u16 || kind == 10u16
+    }
+
+    private func FlatNominalKind(kind: UInt16): UInt8 {
+        if (kind == 1u16) { return b'C' }
+        if (kind == 2u16) { return b'I' }
+        if (kind == 8u16) { return b'S' }
+        if (kind == 9u16) { return b'U' }
+        return b'S'
+    }
+
+    private func EnsureFlatDecl(record: CjoFlatDecl): Option<Decl> {
+        if (let Some(existing) <- record.decl) {
+            return Some(existing)
+        }
+        if (record.kind == 12u16) {
+            if (let Some(param) <- flatGenericParamDecls.get(record.index)) {
+                record.decl = Some(param)
+                return Some(param)
+            }
+            let paramDecl = GenericParamDecl()
+            paramDecl.identifier = SrcIdentifier(record.identifier)
+            paramDecl.fullPackageName = if (record.fullPackageName.isEmpty()) { packageName } else { record.fullPackageName }
+            paramDecl.moduleName = RootPackageName(paramDecl.fullPackageName)
+            paramDecl.toBeCompiled = false
+            paramDecl.exportId = record.exportId
+            MarkImportedDecl(paramDecl)
+            paramDecl.SetTy(GenericsTy(record.identifier, paramDecl))
+            flatGenericParamDecls[record.index] = paramDecl
+            record.decl = Some(paramDecl)
+            return Some(paramDecl)
+        }
+        if (record.kind == 1u16 || record.kind == 2u16 || record.kind == 8u16 || record.kind == 9u16) {
+            let decl = EnsureNominal(record.identifier, FlatNominalKind(record.kind), record.genericArity)
+            if (!record.exportId.isEmpty()) {
+                decl.exportId = record.exportId
+            }
+            if (decl.rawMangleName.isEmpty() && !record.mangledName.isEmpty()) {
+                SetImportedMangle(decl, record.mangledName)
+            }
+            record.decl = Some(decl)
+            return Some(decl)
+        }
+        return None
+    }
+
+    private func MapFlatGenericParameters(reader: CjoFlatBuffer, record: CjoFlatDecl, decl: Decl): Unit {
+        let genericTable = reader.OffsetField(record.table, 12)
+        if (genericTable < 0) {
+            return
+        }
+        let typeParams = reader.VectorField(genericTable, 4)
+        if (typeParams < 0) {
+            return
+        }
+        if (let Some(generic) <- decl.generic) {
+            var idx: Int64 = 0
+            let limit = if (reader.VectorLength(typeParams) < generic.typeParameters.size) {
+                reader.VectorLength(typeParams)
+            } else {
+                generic.typeParameters.size
+            }
+            while (idx < limit) {
+                flatGenericParamDecls[reader.VectorU32(typeParams, idx)] = generic.typeParameters[idx]
+                idx++
+            }
+        }
+    }
+
+    private func AddFlatInheritedType(inheritable: InheritableDecl, inheritedTy: Ty): Unit {
+        if (HasFlatInheritedType(inheritable, inheritedTy)) {
+            return
+        }
+        inheritable.inheritedTypes.add(TypeNodeForTy(inheritedTy))
+        if (let Some(classLikeTy) <- (inheritedTy as ClassLikeTy)) {
+            if (let Some(selfTy) <- inheritable.GetTy()) {
+                if (!HasDirectSubtype(classLikeTy, selfTy)) {
+                    classLikeTy.directSubtypes.add(selfTy)
                 }
             }
         }
     }
 
-    private func FindMaterializedNominal(name: String): Option<Decl> {
-        if (let Some(decl) <- nominalDecls.get(name)) {
-            return Some(decl)
+    private func HasFlatInheritedType(inheritable: InheritableDecl, inheritedTy: Ty): Bool {
+        let inheritedDecl = Ty.GetDeclPtrOfTy(Some(inheritedTy))
+        for (typeNode in inheritable.inheritedTypes) {
+            if (let Some(existingTy) <- typeNode.GetTy()) {
+                if (let Some(existingDecl) <- Ty.GetDeclPtrOfTy(Some(existingTy))) {
+                    if (let Some(targetDecl) <- inheritedDecl) {
+                        if (SameDecl(existingDecl, targetDecl)) {
+                            return true
+                        }
+                    }
+                }
+                if (existingTy.String() == inheritedTy.String()) {
+                    return true
+                }
+            }
         }
-        for (decl in file.decls) {
-            if (decl.identifier.Val() == name && decl.IsNominalDecl()) {
-                return Some(decl)
+        return false
+    }
+
+    private func HasDirectSubtype(classLikeTy: ClassLikeTy, selfTy: Ty): Bool {
+        for (subtype in classLikeTy.directSubtypes) {
+            if (subtype.String() == selfTy.String()) {
+                return true
+            }
+        }
+        return false
+    }
+
+    private func LoadFlatType(index: UInt32): Option<Ty> {
+        if (index == 0u32) {
+            return None
+        }
+        if (let Some(cached) <- flatTypeCache.get(index)) {
+            return Some(cached)
+        }
+        if (let None <- flat) {
+            return None
+        }
+        let reader = flat.getOrThrow()
+        if (flatAllTypes < 0) {
+            return None
+        }
+        let typeIdx = Int64(index) - 1
+        if (typeIdx < 0 || typeIdx >= reader.VectorLength(flatAllTypes)) {
+            return None
+        }
+        let typeTable = reader.VectorOffsetElement(flatAllTypes, typeIdx)
+        if (typeTable < 0) {
+            return None
+        }
+        let loaded = CreateFlatType(reader, typeTable)
+        if (let Some(ty) <- loaded) {
+            flatTypeCache[index] = ty
+        }
+        return loaded
+    }
+
+    private func CreateFlatType(reader: CjoFlatBuffer, typeTable: Int64): Option<Ty> {
+        let kind = reader.U16Field(typeTable, 4, 1u16)
+        let typeArgs = LoadFlatTypeArgs(reader, typeTable)
+        if (let Some(primitiveKind) <- FlatPrimitiveTypeKind(kind)) {
+            return Some(PrimitiveTy(primitiveKind))
+        }
+        if (kind == 18u16) {
+            return Some(TupleTy(typeArgs.toArray()))
+        }
+        if (kind == 20u16) {
+            let infoTable = reader.OffsetField(typeTable, 10)
+            let retTy = if (infoTable >= 0) {
+                LoadFlatType(reader.U32Field(infoTable, 4, 0u32)) ?? PrimitiveTy(TypeKind.TYPE_UNIT)
+            } else {
+                PrimitiveTy(TypeKind.TYPE_UNIT)
+            }
+            let cfg = FuncTyConfig()
+            if (infoTable >= 0) {
+                cfg.isC = reader.U8Field(infoTable, 6, 0u8) != 0u8
+                cfg.hasVariableLenArg = reader.U8Field(infoTable, 8, 0u8) != 0u8
+            }
+            return Some(FuncTy(typeArgs.toArray(), retTy, cfg: cfg))
+        }
+        if (kind == 22u16) {
+            let elemTy = if (typeArgs.isEmpty()) { AnyTy() } else { typeArgs[0] }
+            let infoTable2 = reader.OffsetField(typeTable, 10)
+            let dims = if (infoTable2 >= 0) { UInt64(reader.I64Field(infoTable2, 4, 1)) } else { 1u64 }
+            return Some(ArrayTy(elemTy, dims))
+        }
+        if (kind == 23u16) {
+            let elemTy2 = if (typeArgs.isEmpty()) { AnyTy() } else { typeArgs[0] }
+            let infoTable3 = reader.OffsetField(typeTable, 10)
+            let size = if (infoTable3 >= 0) { reader.I64Field(infoTable3, 4, 0) } else { 0 }
+            return Some(VArrayTy(elemTy2, size))
+        }
+        if (kind == 24u16) {
+            let elemTy3 = if (typeArgs.isEmpty()) { AnyTy() } else { typeArgs[0] }
+            return Some(PointerTy(elemTy3))
+        }
+        if (kind == 25u16) {
+            return Some(CStringTy())
+        }
+        if (kind == 29u16) {
+            return LoadFlatGenericTy(reader, typeTable)
+        }
+        if (kind == 19u16 || kind == 21u16 || kind == 26u16 || kind == 27u16 || kind == 28u16) {
+            return LoadFlatCompositeTy(reader, typeTable, kind, typeArgs)
+        }
+        return Some(InvalidTy())
+    }
+
+    private func LoadFlatTypeArgs(reader: CjoFlatBuffer, typeTable: Int64): ArrayList<Ty> {
+        let args = ArrayList<Ty>()
+        let argVec = reader.VectorField(typeTable, 6)
+        if (argVec < 0) {
+            return args
+        }
+        var idx: Int64 = 0
+        let count = reader.VectorLength(argVec)
+        while (idx < count) {
+            if (let Some(argTy) <- LoadFlatType(reader.VectorU32(argVec, idx))) {
+                args.add(argTy)
+            }
+            idx++
+        }
+        return args
+    }
+
+    private func LoadFlatCompositeTy(reader: CjoFlatBuffer, typeTable: Int64, kind: UInt16,
+        typeArgs: ArrayList<Ty>): Option<Ty> {
+        let declOpt = LoadFlatTypeDecl(reader, typeTable)
+        if (let None <- declOpt) {
+            return Some(InvalidTy())
+        }
+        let decl = declOpt.getOrThrow()
+        if (kind == 19u16) {
+            if (let Some(enumDecl) <- (decl as EnumDecl)) {
+                return Some(EnumTy(enumDecl.identifier.Val(), enumDecl, typeArgs.toArray()))
+            }
+        } else if (kind == 21u16) {
+            if (let Some(structDecl) <- (decl as StructDecl)) {
+                return Some(StructTy(structDecl.identifier.Val(), structDecl, typeArgs.toArray()))
+            }
+        } else if (kind == 26u16) {
+            if (let Some(classDecl) <- (decl as ClassDecl)) {
+                return Some(ClassTy(classDecl.identifier.Val(), classDecl, typeArgs.toArray()))
+            }
+        } else if (kind == 27u16) {
+            if (let Some(interfaceDecl) <- (decl as InterfaceDecl)) {
+                return Some(InterfaceTy(interfaceDecl.identifier.Val(), interfaceDecl, typeArgs.toArray()))
+            }
+        } else if (kind == 28u16) {
+            if (let Some(aliasDecl) <- (decl as TypeAliasDecl)) {
+                return Some(TypeAliasTy(aliasDecl.identifier.Val(), aliasDecl, typeArgs.toArray()))
+            }
+        }
+        return Some(InvalidTy())
+    }
+
+    private func LoadFlatTypeDecl(reader: CjoFlatBuffer, typeTable: Int64): Option<Decl> {
+        let infoTable = reader.OffsetField(typeTable, 10)
+        if (infoTable < 0) {
+            return None
+        }
+        let fullIdTable = reader.OffsetField(infoTable, 4)
+        return ResolveFlatFullId(reader, fullIdTable)
+    }
+
+    private func LoadFlatGenericTy(reader: CjoFlatBuffer, typeTable: Int64): Option<Ty> {
+        let declOpt = LoadFlatTypeDecl(reader, typeTable)
+        if (let Some(decl) <- declOpt) {
+            if (let Some(paramDecl) <- (decl as GenericParamDecl)) {
+                return Some(paramDecl.GetTy() ?? GenericsTy(paramDecl.identifier.Val(), paramDecl))
+            }
+        }
+        return Some(InvalidTy())
+    }
+
+    private func ResolveFlatFullId(reader: CjoFlatBuffer, fullIdTable: Int64): Option<Decl> {
+        if (fullIdTable < 0) {
+            return None
+        }
+        let id = ReadFlatFullId(reader, fullIdTable)
+        if (id.pkgId == -1) {
+            return None
+        }
+        if (id.pkgId == -2) {
+            if (let Some(record) <- flatDecls.get(id.index)) {
+                return EnsureFlatDecl(record)
+            }
+            return None
+        }
+        if (id.pkgId == -3) {
+            return None
+        }
+        return ResolveImportedFullId(id)
+    }
+
+    private func ReadFlatFullId(reader: CjoFlatBuffer, fullIdTable: Int64): CjoFullId {
+        return CjoFullId(
+            reader.I32Field(fullIdTable, 4, 0),
+            reader.StringField(fullIdTable, 6),
+            reader.U32Field(fullIdTable, 8, 0u32)
+        )
+    }
+
+    private func ResolveImportedFullId(id: CjoFullId): Option<Decl> {
+        let importIdx = id.pkgId
+        if (flatImports < 0 || importIdx < 0 || (let None <- flat)) {
+            return None
+        }
+        let reader = flat.getOrThrow()
+        if (importIdx >= reader.VectorLength(flatImports)) {
+            return None
+        }
+        let packageName = reader.StringAt(reader.VectorOffsetElement(flatImports, importIdx))
+        if (packageName.isEmpty()) {
+            return None
+        }
+        if (!id.decl.isEmpty()) {
+            if (let Some(found) <- FindImportedDeclByExportId(packageName, id.decl)) {
+                return Some(found)
             }
         }
         return None
     }
 
-    private func AddImportedSuperClass(classDecl: ClassDecl, baseDecl: Decl): Unit {
-        if (HasInheritedClass(classDecl, baseDecl)) {
-            return
-        }
-        if (let Some(baseTy) <- baseDecl.GetTy()) {
-            classDecl.inheritedTypes.add(TypeNodeForTy(baseTy))
-        }
-    }
-
-    private func HasInheritedClass(classDecl: ClassDecl, baseDecl: Decl): Bool {
-        for (typeNode in classDecl.inheritedTypes) {
-            if (let Some(inheritedTy) <- typeNode.GetTy()) {
-                if (let Some(inheritedDecl) <- Ty.GetDeclPtrOfTy(Some(inheritedTy))) {
-                    if (SameDecl(inheritedDecl, baseDecl)) {
-                        return true
+    private func FindImportedDeclByExportId(fullPackageName: String, exportId: String): Option<Decl> {
+        for (importedPackage in importedPackages) {
+            if (importedPackage.fullPackageName != fullPackageName) {
+                continue
+            }
+            for (importedFile in importedPackage.files) {
+                for (decl in importedFile.decls) {
+                    if (decl.exportId == exportId || decl.rawMangleName == exportId || decl.mangledName == exportId) {
+                        return Some(decl)
                     }
                 }
             }
         }
-        return false
+        let parsedPackage = ParseLengthText(exportId, 0)
+        if (!parsedPackage.ok || parsedPackage.text != fullPackageName) {
+            return None
+        }
+        let parsedName = ParseLengthText(exportId, parsedPackage.next)
+        if (!parsedName.ok || parsedName.text.isEmpty()) {
+            return None
+        }
+        var pos = parsedName.next
+        let genericArity = ParseGenericArity(exportId, pos)
+        if (genericArity.ok) {
+            pos = genericArity.next
+        }
+        let arity = genericArity.arity
+        for (importedPackage in importedPackages) {
+            if (importedPackage.fullPackageName != fullPackageName) {
+                continue
+            }
+            for (importedFile in importedPackage.files) {
+                for (decl in importedFile.decls) {
+                    if (decl.identifier.Val() == parsedName.text && decl.IsNominalDecl() &&
+                        ImportedGenericArityMatches(decl, arity)) {
+                        return Some(decl)
+                    }
+                }
+            }
+        }
+        return None
+    }
+
+    private func FlatPrimitiveTypeKind(kind: UInt16): Option<TypeKind> {
+        if (kind == 1u16) { return Some(TypeKind.TYPE_UNIT) }
+        if (kind == 2u16) { return Some(TypeKind.TYPE_INT8) }
+        if (kind == 3u16) { return Some(TypeKind.TYPE_INT16) }
+        if (kind == 4u16) { return Some(TypeKind.TYPE_INT32) }
+        if (kind == 5u16) { return Some(TypeKind.TYPE_INT64) }
+        if (kind == 6u16) { return Some(TypeKind.TYPE_INT_NATIVE) }
+        if (kind == 7u16) { return Some(TypeKind.TYPE_UINT8) }
+        if (kind == 8u16) { return Some(TypeKind.TYPE_UINT16) }
+        if (kind == 9u16) { return Some(TypeKind.TYPE_UINT32) }
+        if (kind == 10u16) { return Some(TypeKind.TYPE_UINT64) }
+        if (kind == 11u16) { return Some(TypeKind.TYPE_UINT_NATIVE) }
+        if (kind == 12u16) { return Some(TypeKind.TYPE_FLOAT16) }
+        if (kind == 13u16) { return Some(TypeKind.TYPE_FLOAT32) }
+        if (kind == 14u16) { return Some(TypeKind.TYPE_FLOAT64) }
+        if (kind == 15u16) { return Some(TypeKind.TYPE_RUNE) }
+        if (kind == 16u16) { return Some(TypeKind.TYPE_NOTHING) }
+        if (kind == 17u16) { return Some(TypeKind.TYPE_BOOLEAN) }
+        return None
     }
 
     private func SetImportedMangle(decl: Decl, mangle: String): Unit {
@@ -1616,7 +2223,7 @@ private class CjoSignatureMaterializer {
             name == "Countable" || name == "ToString") {
             return b'I'
         }
-        if (name.endsWith("Exception") || name.endsWith("Error") || name == "Object") {
+        if (name == "Object") {
             return b'C'
         }
         return b'S'
@@ -2010,7 +2617,7 @@ public class ImportManager {
         pkg.files.add(file)
         let materializer = CjoSignatureMaterializer(fullPackageName, pkg, file, importedPackages,
             LoadExportedSymbolsForCjo(fullPackageName, cjoPath))
-        materializer.Materialize(ExtractPrintableStrings(data))
+        materializer.Materialize(ExtractPrintableStrings(data), data)
         AddImportedPackageIfMissing(pkg)
         return true
     }
