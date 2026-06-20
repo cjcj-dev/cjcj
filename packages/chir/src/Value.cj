@@ -49,7 +49,7 @@ public open class Value <: Base {
 
     public func IsGlobalVarWithInitializer(): Bool {
         if (let Some(globalVar) <- AsGlobalVar()) {
-            return globalVar.GetInitializerValue().isSome()
+            return globalVar.GetInitializerValue().isSome() || globalVar.GetInitFunc().isSome()
         }
         return false
     }
@@ -760,6 +760,7 @@ public open class GlobalValue <: Value {
 
 public class GlobalVar <: GlobalValue {
     private var initializerValue: Option<Value> = None
+    private var initFunc: Option<Function> = None
 
     public init(ty: Type, identifier: String, srcCodeIdentifier: String, rawMangledName: String, packageName: String) {
         super(ValueKind.KIND_GLOBALVAR, ty, identifier, srcCodeIdentifier, rawMangledName, packageName)
@@ -769,6 +770,7 @@ public class GlobalVar <: GlobalValue {
 
     public func SetInitializerValue(value: Value): Unit {
         initializerValue = value
+        initFunc = None
     }
 
     public func ClearInitializerValue(): Unit {
@@ -779,11 +781,26 @@ public class GlobalVar <: GlobalValue {
         return initializerValue
     }
 
+    public func SetInitFunc(value: Function): Unit {
+        initFunc = value
+        initializerValue = None
+    }
+
+    public func ClearInitFunc(): Unit {
+        initFunc = None
+    }
+
+    public func GetInitFunc(): Option<Function> {
+        return initFunc
+    }
+
     public override func ToString(indent: Int64): String {
         let typeText = if (let Some(valueTy) <- GetType()) { valueTy.ToString() } else { "<none>" }
         var out = IndentToString(indent) + GetAttributeInfo().ToString() + "global " + GetIdentifier() + ": " + typeText
         if (let Some(initValue) <- initializerValue) {
             out += " = " + initValue.GetIdentifier()
+        } else if (let Some(fn) <- initFunc) {
+            out += " = " + fn.GetIdentifier() + "()"
         }
         return out
     }

@@ -92,20 +92,26 @@ public class CHIR2BCHIR {
             if (forConstEval && !globalVar.IsCompileTimeValue()) {
                 continue
             }
-            let context = TranslateGlobalVar(globalVar)
+            let context = TranslateGlobalVar(globalVar, forConstEval: forConstEval)
             bchir.AddGlobalVar(BCHIRMangledName(globalVar), context.definition)
         }
         bchir.SetNumGlobalVars(chirPkg.GetGlobalVars().size)
     }
 
-    private func TranslateGlobalVar(globalVar: GlobalVar): CHIR2BCHIRContext {
+    private func TranslateGlobalVar(globalVar: GlobalVar, forConstEval!: Bool): CHIR2BCHIRContext {
         let context = CHIR2BCHIRContext()
         if (let Some(initValue) <- globalVar.GetInitializerValue()) {
             if (!TranslateInitializerValue(context, initValue)) {
                 context.definition.PushOp(OpCode.NULLPTR)
             }
         } else {
+            let placeholder = context.definition.NextIndex()
             context.definition.PushOp(OpCode.NULLPTR)
+            if (forConstEval) {
+                if (let Some(initFunc) <- globalVar.GetInitFunc()) {
+                    context.definition.AddMangledNameAnnotation(placeholder, BCHIRMangledName(initFunc))
+                }
+            }
         }
         return context
     }

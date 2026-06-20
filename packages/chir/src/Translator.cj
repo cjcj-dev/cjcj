@@ -1595,6 +1595,29 @@ public class Translator {
         return None
     }
 
+    public func TranslateGlobalVarWithPatternInitializer(fn: Function, decl: AstVarWithPatternDecl): Unit {
+        let body = fn.GetBody() ??
+            throw IllegalStateException("faithful AST2CHIR global pattern initializer function has no body")
+        let entry = body.GetEntryBlock() ??
+            throw IllegalStateException("faithful AST2CHIR global pattern initializer function has no entry block")
+        let savedFunc = currentFunc
+        let savedBlock = currentBlock
+        currentFunc = fn
+        currentBlock = entry
+        blockGroupStack.add(body)
+        let initExpr = RequireExpr(decl.initializer, "global var-with-pattern initializer")
+        let initValue = Translator.TranslateASTNode(initExpr, this) ??
+            throw IllegalStateException("faithful AST2CHIR global var-with-pattern initializer produced no value")
+        FlattenVarWithPatternDecl(RequirePattern(decl.irrefutablePattern, "global var-with-pattern pattern"),
+            Some(initValue), isLocalPattern: false)
+        if (CurrentBlock().GetTerminator().isNone()) {
+            builder.CreateExit(None, CurrentBlock())
+        }
+        blockGroupStack.remove(at: blockGroupStack.size - 1)
+        currentFunc = savedFunc
+        currentBlock = savedBlock
+    }
+
     private func IsGlobalOrMemberFunc(funcDecl: AstFuncDecl): Bool {
         return funcDecl.TestAnyAttr(AstAttribute.GLOBAL, AstAttribute.IN_CLASSLIKE, AstAttribute.IN_ENUM) ||
             funcDecl.TestAnyAttr(AstAttribute.IN_STRUCT, AstAttribute.IN_EXTEND)
@@ -4178,32 +4201,49 @@ public class Translator {
         throw IllegalStateException("faithful AST2CHIR enum constructor not found: ${constructor.identifier.Val()}")
     }
 
-    private func FlattenVarWithPatternDecl(pattern: AstPattern, initValue: Option<Value>): Unit {
+    private func FlattenVarWithPatternDecl(pattern: AstPattern, initValue: Option<Value>,
+        isLocalPattern!: Bool = true): Unit {
         if (let Some(varPattern) <- (pattern as AstVarPattern)) {
-            HandleVarPatternDecl(varPattern, initValue)
+            HandleVarPatternDecl(varPattern, initValue, isLocalPattern: isLocalPattern)
             return
         }
         if (let Some(tuplePattern) <- (pattern as AstTuplePattern)) {
-            HandleTuplePatternDecl(tuplePattern, initValue)
+            HandleTupleOrEnumPatternDecl(tuplePattern, tuplePattern.patterns, initValue,
+                isLocalPattern: isLocalPattern)
             return
         }
         if (let Some(enumPattern) <- (pattern as AstEnumPattern)) {
-            if (!enumPattern.patterns.isEmpty()) {
-                throw IllegalArgumentException("not yet ported in faithful AST2CHIR: enum var-with-pattern payload")
-            }
+            HandleTupleOrEnumPatternDecl(enumPattern, enumPattern.patterns, initValue, isLocalPattern: isLocalPattern)
             return
         }
         if (let Some(_) <- (pattern as AstWildcardPattern)) {
             return
         }
         throw IllegalArgumentException(
-            "not yet ported in faithful AST2CHIR var-with-pattern: ${ASTKindName(pattern.astKind)}")
+            "faithful AST2CHIR unsupported var-with-pattern: ${ASTKindName(pattern.astKind)}")
     }
 
-    private func HandleVarPatternDecl(pattern: AstVarPattern, initValue: Option<Value>): Unit {
+    private func HandleVarPatternDecl(pattern: AstVarPattern, initValue: Option<Value>,
+        isLocalPattern!: Bool = true): Unit {
         let varDecl = pattern.varDecl ??
             throw IllegalStateException("faithful AST2CHIR var pattern has no VarDecl")
         let valueTy = chirTy.TranslateType(RequireAstTy(varDecl))
+        if (!isLocalPattern) {
+            let leftValue = globalSymbolTable.Get(varDecl)
+            if (let Some(value) <- initValue) {
+                builder.CreateStore(CastValueIfNeeded(value, RequireRefBaseType(leftValue)), leftValue, CurrentBlock())
+            }
+            globalSymbolTable.Set(varDecl, leftValue)
+            return
+        }
+        if (!varDecl.isVar) {
+            if (let Some(value) <- initValue) {
+                let boundValue = CastValueIfNeeded(value, valueTy)
+                boundValue.EnableAttr(Attribute.READONLY)
+                localValSymbolTable.Set(varDecl, boundValue)
+                return
+            }
+        }
         let slot = RequireResult(builder.CreateAllocate(builder.context.GetRefTy(valueTy), valueTy, CurrentBlock()))
         slot.SetSrcCodeIdentifier(varDecl.identifier.Val())
         localValSymbolTable.Set(varDecl, slot)
@@ -4212,17 +4252,30 @@ public class Translator {
         }
     }
 
-    private func HandleTuplePatternDecl(pattern: AstTuplePattern, initValue: Option<Value>): Unit {
+    private func HandleTupleOrEnumPatternDecl(pattern: AstPattern, subPatterns: ArrayList<AstPattern>,
+        initValue: Option<Value>, isLocalPattern!: Bool = true): Unit {
+        let isEnumPattern = pattern.astKind == ASTKind.ENUM_PATTERN
+        var leftValue: Option<Value> = None
+        if (let Some(value) <- initValue) {
+            leftValue = Some(CastValueIfNeeded(GetDerefedValue(value), chirTy.TranslateType(RequireAstTy(pattern))))
+        }
         var idx: Int64 = 0
-        for (subPattern in pattern.patterns) {
+        for (subPattern in subPatterns) {
             var fieldValue: Option<Value> = None
-            if (let Some(value) <- initValue) {
+            if (let Some(value) <- leftValue) {
+                let baseValue = if (isEnumPattern) {
+                    let enumPattern = (pattern as AstEnumPattern) ??
+                        throw IllegalStateException("faithful AST2CHIR enum pattern has wrong AST kind")
+                    CastEnumValueToConstructorTupleType(value, enumPattern)
+                } else {
+                    value
+                }
                 let path = ArrayList<UInt64>()
-                path.add(UInt64(idx))
+                path.add(UInt64(if (isEnumPattern) { idx + 1 } else { idx }))
                 fieldValue = RequireResult(builder.CreateField(chirTy.TranslateType(RequireAstTy(subPattern)),
-                    GetDerefedValue(value), path, CurrentBlock()))
+                    GetDerefedValue(baseValue), path, CurrentBlock()))
             }
-            FlattenVarWithPatternDecl(subPattern, fieldValue)
+            FlattenVarWithPatternDecl(subPattern, fieldValue, isLocalPattern: isLocalPattern)
             idx++
         }
     }
