@@ -94,6 +94,68 @@ private class FaithfulLoopTarget {
     }
 }
 
+private class FaithfulInstCalleeInfo {
+    public let instParentCustomTy: Type
+    public let thisType: Type
+    public let instParamTys: ArrayList<Type> = ArrayList<Type>()
+    public let instRetTy: Type
+    public let instantiatedTypeArgs: ArrayList<Type> = ArrayList<Type>()
+    public let isVirtualFuncCall: Bool
+
+    public init(instParentCustomTy: Type, thisType: Type, instParamTys: ArrayList<Type>, instRetTy: Type,
+        instantiatedTypeArgs: ArrayList<Type>, isVirtualFuncCall: Bool) {
+        this.instParentCustomTy = instParentCustomTy
+        this.thisType = thisType
+        for (ty in instParamTys) {
+            this.instParamTys.add(ty)
+        }
+        this.instRetTy = instRetTy
+        for (ty in instantiatedTypeArgs) {
+            this.instantiatedTypeArgs.add(ty)
+        }
+        this.isVirtualFuncCall = isVirtualFuncCall
+    }
+}
+
+private let FAITHFUL_TRANSLATOR_MANGLE_CANGJIE_PREFIX: String = "_C"
+private let FAITHFUL_TRANSLATOR_MANGLE_CHIR_LAMBDA_PREFIX: String = "_CL"
+private let FAITHFUL_TRANSLATOR_MANGLE_DOLLAR_PREFIX: String = "$"
+private let FAITHFUL_TRANSLATOR_MANGLE_WILDCARD_PREFIX: String = "_"
+
+private func FaithfulTranslatorStartsWith(value: String, prefix: String): Bool {
+    return value.size >= prefix.size && value[0..prefix.size] == prefix
+}
+
+private func FaithfulTranslatorFunctionIdentifierForPrefix(function: Function): String {
+    let identifier = function.GetIdentifier()
+    if (FaithfulTranslatorStartsWith(identifier, FAITHFUL_TRANSLATOR_MANGLE_CANGJIE_PREFIX)) {
+        return identifier
+    }
+    let withoutPrefix = function.GetIdentifierWithoutPrefix()
+    if (FaithfulTranslatorStartsWith(withoutPrefix, FAITHFUL_TRANSLATOR_MANGLE_CANGJIE_PREFIX)) {
+        return withoutPrefix
+    }
+    return identifier
+}
+
+private func FaithfulTranslatorReplaceManglePrefixWith(mangledName: String, newPrefix: String): String {
+    if (FaithfulTranslatorStartsWith(mangledName, FAITHFUL_TRANSLATOR_MANGLE_CANGJIE_PREFIX)) {
+        return newPrefix + mangledName[FAITHFUL_TRANSLATOR_MANGLE_CANGJIE_PREFIX.size..]
+    }
+    throw IllegalArgumentException("Mangle name has no _C prefix to be replaced: " + mangledName)
+}
+
+private func FaithfulTranslatorGenerateLambdaFuncMangleName(baseFunc: Function, counter: UInt64): String {
+    let baseName = FaithfulTranslatorFunctionIdentifierForPrefix(baseFunc)
+    if (FaithfulTranslatorStartsWith(baseName, FAITHFUL_TRANSLATOR_MANGLE_CANGJIE_PREFIX)) {
+        return FaithfulTranslatorReplaceManglePrefixWith(baseName, FAITHFUL_TRANSLATOR_MANGLE_CHIR_LAMBDA_PREFIX) +
+            FAITHFUL_TRANSLATOR_MANGLE_DOLLAR_PREFIX + counter.toString() +
+            FAITHFUL_TRANSLATOR_MANGLE_WILDCARD_PREFIX
+    }
+    return baseFunc.GetIdentifierWithoutPrefix() + "$lambda$" + counter.toString() +
+        FAITHFUL_TRANSLATOR_MANGLE_WILDCARD_PREFIX
+}
+
 private func FaithfulLocalAstDeclStructuralKey(decl: AstDecl): String {
     return "${ASTKindIndex(decl.astKind)}:" + decl.fullPackageName + ":" + decl.identifier.Val() + ":" +
         decl.begin.hashCode().toString() + ":" + decl.end.hashCode().toString()
@@ -192,6 +254,7 @@ public class Translator {
     private var currentLambda: Option<Lambda> = None
     private var currentAstFuncDecl: Option<AstFuncDecl> = None
     private var lambdaCounter: UInt64 = 0u64
+    private var lambdaWrapperCounter: UInt64 = 0u64
     private var delayExitSignal: Option<Value> = None
     private let blockGroupStack: ArrayList<BlockGroup> = ArrayList<BlockGroup>()
     private let loopTargetStack: ArrayList<FaithfulLoopTarget> = ArrayList<FaithfulLoopTarget>()
@@ -812,9 +875,8 @@ public class Translator {
                 let leftValueInfo = TranslateMemberAccessAsLeftValue(expr)
                 return LoadLeftValue(leftValueInfo, MemberAccessValueType(expr, target))
             }
-            if (let Some(_) <- (target as AstFuncDecl)) {
-                throw IllegalArgumentException(
-                    "not yet ported in faithful AST2CHIR: member method reference lambda wrapper")
+            if (let Some(funcDecl) <- (target as AstFuncDecl)) {
+                return Some(TranslateFuncMemberAccess(expr, funcDecl))
             }
         }
         throw IllegalArgumentException("not yet ported in faithful AST2CHIR: unsupported member access")
@@ -833,6 +895,407 @@ public class Translator {
                 baseValue, path, CurrentBlock()))
         }
         return None
+    }
+
+    private func TranslateFuncMemberAccess(member: AstMemberAccess, funcDecl: AstFuncDecl): Value {
+        let instFuncType = GetInstCalleeInfoFromMemberAccess(member, funcDecl)
+        let thisVal = TranslateThisObjectForFuncMemberAccess(member, funcDecl)
+        return WrapMemberMethodByLambda(funcDecl, instFuncType, Some(thisVal))
+    }
+
+    private func GetInstCalleeInfoFromMemberAccess(member: AstMemberAccess,
+        funcDecl: AstFuncDecl): FaithfulInstCalleeInfo {
+        let baseExpr = RequireExpr(member.baseExpr, "member function reference base")
+        var thisType = chirTy.TranslateType(RequireAstTy(baseExpr))
+        thisType = AddRefIfFuncIsMutOrClass(thisType, funcDecl)
+
+        let memberFuncTy = MemberAccessFuncType(member)
+        let instParamTys = memberFuncTy.GetParamTypes()
+        if (!funcDecl.TestAttr(AstAttribute.STATIC)) {
+            instParamTys.add(thisType, at: 0)
+        }
+        let instRetTy = memberFuncTy.GetReturnType()
+        let instParentTy = InstantiateMemberOwnerType(funcDecl, thisType)
+        return FaithfulInstCalleeInfo(instParentTy, thisType, instParamTys, instRetTy,
+            TranslateMemberAccessInstArgs(member), ShouldUseVirtualMemberDispatchForMemberAccess(member, funcDecl))
+    }
+
+    private func MemberAccessFuncType(member: AstMemberAccess): FuncType {
+        let astTy = RequireAstTy(member)
+        if (let Some(genericTy) <- (astTy as AstGenericsTy)) {
+            if (genericTy.upperBounds.size == 1) {
+                return RequireFuncType(chirTy.TranslateType(genericTy.upperBounds[0]))
+            }
+        }
+        return RequireFuncType(chirTy.TranslateType(astTy))
+    }
+
+    private func TranslateMemberAccessInstArgs(member: AstMemberAccess): ArrayList<Type> {
+        let out = ArrayList<Type>()
+        for (instTy in member.instTys) {
+            out.add(chirTy.TranslateType(instTy))
+        }
+        return out
+    }
+
+    private func InstantiateMemberOwnerType(funcDecl: AstFuncDecl, thisType: Type): Type {
+        let ownerTy = TranslateMemberOwnerType(funcDecl)
+        let genericParams = TranslateFuncGenericParams(funcDecl)
+        let replacements = ArrayList<Type>()
+        AddMemberOwnerGenericReplacements(funcDecl, Some(thisType), genericParams, replacements)
+        return SubstituteGenericType(ownerTy, genericParams, replacements).StripAllRefs()
+    }
+
+    private func AddRefIfFuncIsMutOrClass(thisType: Type, funcDecl: AstFuncDecl): Type {
+        if (thisType.IsRef()) {
+            return thisType
+        }
+        if (thisType.IsClassOrArray() || funcDecl.TestAnyAttr(AstAttribute.MUT, AstAttribute.CONSTRUCTOR)) {
+            return builder.context.GetRefTy(thisType)
+        }
+        return thisType
+    }
+
+    private func ShouldUseVirtualMemberDispatchForMemberAccess(member: AstMemberAccess, funcDecl: AstFuncDecl): Bool {
+        if (let Some(baseExpr) <- member.baseExpr) {
+            if (let Some(refExpr) <- (baseExpr as AstRefExpr)) {
+                if (refExpr.isSuper) {
+                    return false
+                }
+            }
+        }
+        return ShouldUseVirtualMemberDispatch(funcDecl)
+    }
+
+    private func TranslateThisObjectForFuncMemberAccess(member: AstMemberAccess, funcDecl: AstFuncDecl): Value {
+        let baseExpr = RequireExpr(member.baseExpr, "member function reference receiver")
+        if (IsThisOrSuperRef(baseExpr)) {
+            return GetCurrentThisObjectForMember(funcDecl)
+        }
+        var thisObj = Translator.TranslateASTNode(baseExpr, this) ??
+            throw IllegalStateException("faithful AST2CHIR member function reference receiver produced no value")
+        let baseTy = RequireAstTy(baseExpr)
+        if (baseTy.IsClassLike()) {
+            if (let Some(objTy) <- thisObj.GetType()) {
+                if (let Some(refTy) <- (objTy as RefType)) {
+                    if (refTy.GetBaseType().IsRef()) {
+                        thisObj = RequireResult(builder.CreateLoad(refTy.GetBaseType(), thisObj, CurrentBlock()))
+                    }
+                }
+            }
+        } else if (!baseTy.IsStruct() || !funcDecl.TestAttr(AstAttribute.MUT)) {
+            if (let Some(objTy) <- thisObj.GetType()) {
+                if (let Some(refTy) <- (objTy as RefType)) {
+                    if (!refTy.GetBaseType().IsRef()) {
+                        thisObj = RequireResult(builder.CreateLoad(refTy.GetBaseType(), thisObj, CurrentBlock()))
+                    }
+                }
+            }
+        }
+        return thisObj
+    }
+
+    private func WrapMemberMethodByLambda(funcDecl: AstFuncDecl, instFuncType: FaithfulInstCalleeInfo,
+        thisObj: Option<Value>): Value {
+        let topLevelFunc = CurrentBlock().GetTopLevelFunc() ?? CurrentFunction()
+        let lambdaMangledName = FaithfulTranslatorGenerateLambdaFuncMangleName(topLevelFunc, lambdaWrapperCounter)
+        lambdaWrapperCounter++
+
+        let lambdaParamTypes = CopyTypeList(instFuncType.instParamTys)
+        if (!funcDecl.TestAttr(AstAttribute.STATIC)) {
+            if (lambdaParamTypes.isEmpty()) {
+                throw IllegalStateException("faithful AST2CHIR member wrapper expected receiver parameter")
+            }
+            lambdaParamTypes.remove(at: 0)
+        }
+        let lambdaType = builder.context.GetFuncTy(lambdaParamTypes, instFuncType.instRetTy)
+        let lambda = builder.CreateLambda(lambdaType, lambdaType, CurrentBlock(), isLocalFunc: false,
+            identifier: lambdaMangledName, srcCodeIdentifier: funcDecl.identifier.Val())
+
+        let lambdaBlockGroup = builder.CreateBlockGroup(topLevelFunc)
+        lambda.InitBody(lambdaBlockGroup)
+        let entry = builder.CreateBlock(lambdaBlockGroup)
+        lambdaBlockGroup.SetEntryBlock(entry)
+        for (paramTy in lambdaParamTypes) {
+            builder.CreateParameter(paramTy, "%${builder.context.GetAllNodesNum()}", lambda)
+        }
+        let retVal = RequireResult(builder.CreateAllocate(builder.context.GetRefTy(instFuncType.instRetTy),
+            instFuncType.instRetTy, entry))
+        lambda.SetReturnValue(retVal)
+
+        let currentBlockBackup = currentBlock
+        currentBlock = entry
+        let args = LambdaParamValues(lambda)
+        let ret = if (instFuncType.isVirtualFuncCall) {
+            CreateMemberWrapperInvoke(funcDecl, instFuncType, thisObj, args)
+        } else {
+            CreateMemberWrapperApply(funcDecl, instFuncType, thisObj, lambda, args)
+        }
+        builder.CreateStore(CastValueIfNeeded(ret, RequireRefBaseType(retVal)), retVal, CurrentBlock())
+        builder.CreateExit(None, CurrentBlock())
+        currentBlock = currentBlockBackup
+        return lambda.GetResult() ??
+            throw IllegalStateException("faithful AST2CHIR member wrapper lambda has no result")
+    }
+
+    private func LambdaParamValues(lambda: Lambda): ArrayList<Value> {
+        let out = ArrayList<Value>()
+        for (param in lambda.GetParams()) {
+            out.add(param)
+        }
+        return out
+    }
+
+    private func CreateMemberWrapperInvoke(funcDecl: AstFuncDecl, instFuncType: FaithfulInstCalleeInfo,
+        thisObj: Option<Value>, args: ArrayList<Value>): Value {
+        if (funcDecl.TestAttr(AstAttribute.STATIC)) {
+            if (thisObj.isSome()) {
+                throw IllegalStateException("faithful AST2CHIR static member wrapper unexpectedly captured receiver")
+            }
+            let rtti = RequireResult(builder.CreateGetRTTIStatic(builder.context.GetUnitTy(),
+                instFuncType.thisType.StripAllRefs(), CurrentBlock()))
+            let invokeInfo = GenerateInvokeCallContext(instFuncType, rtti, funcDecl, args)
+            return RequireResult(builder.CreateInvokeStatic(instFuncType.instRetTy, invokeInfo, CurrentBlock()))
+        }
+        let caller = thisObj ??
+            throw IllegalStateException("faithful AST2CHIR virtual member wrapper has no receiver")
+        let invokeInfo = GenerateInvokeCallContext(instFuncType, caller, funcDecl, args)
+        return RequireResult(builder.CreateInvoke(instFuncType.instRetTy, invokeInfo, CurrentBlock()))
+    }
+
+    private func CreateMemberWrapperApply(funcDecl: AstFuncDecl, instFuncType: FaithfulInstCalleeInfo,
+        thisObj: Option<Value>, lambda: Lambda, lambdaArgs: ArrayList<Value>): Value {
+        let args = CopyValueList(lambdaArgs)
+        if (let Some(rawThis) <- thisObj) {
+            var objExpectedType = instFuncType.instParentCustomTy
+            if (objExpectedType.IsReferenceType()) {
+                objExpectedType = builder.context.GetRefTy(objExpectedType)
+            }
+            args.add(TransformThisType(rawThis, objExpectedType, lambda), at: 0)
+        }
+        if (args.size != instFuncType.instParamTys.size) {
+            throw IllegalStateException("faithful AST2CHIR member wrapper argument count mismatch")
+        }
+        let instTypeArgs = CopyTypeList(instFuncType.instantiatedTypeArgs)
+        var callee = GetSymbolTable(funcDecl)
+        let funcType = builder.context.GetFuncTy(instFuncType.instParamTys, instFuncType.instRetTy)
+        if (let Some(wrapperFunc) <- GetWrapperFuncFromMemberAccess(instFuncType.instParentCustomTy.StripAllRefs(),
+            callee.GetSrcCodeIdentifier(), funcType, callee.TestAttr(Attribute.STATIC), instTypeArgs)) {
+            callee = wrapperFunc
+        }
+        return RequireResult(builder.CreateApply(instFuncType.instRetTy, callee, FuncCallContext(args: args,
+            instTypeArgs: instTypeArgs, thisType: Some(instFuncType.thisType)), CurrentBlock()))
+    }
+
+    private func GenerateInvokeCallContext(instFuncType: FaithfulInstCalleeInfo, caller: Value,
+        callee: AstFuncDecl, args: ArrayList<Value>): InvokeCallContext {
+        let methodType = BuildMethodFuncTypeForMemberAccess(callee)
+        let genericParams = TranslateFuncGenericParams(callee)
+        return InvokeCallContext(caller, FuncCallContext(args: args,
+            instTypeArgs: instFuncType.instantiatedTypeArgs, thisType: Some(instFuncType.thisType)),
+            FuncSigInfo(methodType, funcName: callee.identifier.Val(), genericTypeParams: genericParams))
+    }
+
+    private func BuildMethodFuncTypeForMemberAccess(funcDecl: AstFuncDecl): FuncType {
+        let funcTy = RequireFuncType(chirTy.TranslateType(RequireAstTy(funcDecl)))
+        let params = funcTy.GetParamTypes()
+        if (!funcDecl.TestAttr(AstAttribute.STATIC)) {
+            params.add(AddRefIfFuncIsMutOrClass(TranslateMemberOwnerType(funcDecl), funcDecl), at: 0)
+        }
+        return builder.context.GetFuncTy(params, funcTy.GetReturnType())
+    }
+
+    private func TransformThisType(rawThis: Value, expectedTy: Type, curLambda: Lambda): Value {
+        let rawThisTy = rawThis.GetType() ??
+            throw IllegalStateException("faithful AST2CHIR member wrapper receiver has no type")
+        if (rawThisTy.IsEqual(expectedTy)) {
+            return rawThis
+        }
+        let parentBlock = curLambda.GetParentBlock() ??
+            throw IllegalStateException("faithful AST2CHIR member wrapper lambda has no parent block")
+        var expr: Expression
+        if (let Some(refTy) <- (rawThisTy as RefType)) {
+            if (refTy.GetBaseType().IsStruct() && refTy.GetBaseType().IsEqual(expectedTy)) {
+                expr = builder.CreateLoad(expectedTy, rawThis, parentBlock)
+            } else {
+                expr = builder.CreateTypeCast(expectedTy, rawThis, parentBlock)
+            }
+        } else {
+            expr = builder.CreateTypeCast(expectedTy, rawThis, parentBlock)
+        }
+        expr.MoveBefore(curLambda)
+        return RequireResult(expr)
+    }
+
+    private func GetWrapperFuncFromMemberAccess(thisType: Type, funcName: String, instFuncType: FuncType,
+        isStatic: Bool, funcInstTypeArgs: ArrayList<Type>): Option<Value> {
+        if (let Some(genericType) <- (thisType as GenericType)) {
+            for (upperBound in genericType.GetUpperBounds()) {
+                if (let Some(found) <- GetWrapperFuncFromMemberAccess(upperBound.StripAllRefs(), funcName,
+                    instFuncType, isStatic, funcInstTypeArgs)) {
+                    return found
+                }
+            }
+            return None
+        }
+        if (let Some(customTy) <- (thisType as CustomType)) {
+            return GetExpectedFuncFromCustomType(customTy, funcName, instFuncType, isStatic, funcInstTypeArgs)
+        }
+        if (let Some(builtinTy) <- (thisType as BuiltinType)) {
+            for (extendDef in builtinTy.GetExtends()) {
+                if (let Some(found) <- GetExpectedFuncFromDef(extendDef, funcName, instFuncType, isStatic,
+                    ArrayList<GenericType>(), ArrayList<Type>(), funcInstTypeArgs)) {
+                    return found
+                }
+            }
+        }
+        return None
+    }
+
+    private func GetExpectedFuncFromCustomType(customTy: CustomType, funcName: String, instFuncType: FuncType,
+        isStatic: Bool, funcInstTypeArgs: ArrayList<Type>): Option<Value> {
+        let genericParams = customTy.GetCustomTypeDef().GetGenericTypeParams()
+        let replacements = customTy.GetGenericArgs()
+        if (let Some(found) <- GetExpectedFuncFromDef(customTy.GetCustomTypeDef(), funcName, instFuncType, isStatic,
+            genericParams, replacements, funcInstTypeArgs)) {
+            return found
+        }
+        for (extendDef in customTy.GetCustomTypeDef().GetExtends()) {
+            let localParams = CopyGenericTypeList(genericParams)
+            let localReplacements = CopyTypeList(replacements)
+            if (!CollectGenericReplacementsForMemberWrapper(extendDef.GetExtendedType(), customTy, localParams,
+                localReplacements)) {
+                continue
+            }
+            if (let Some(found) <- GetExpectedFuncFromDef(extendDef, funcName, instFuncType, isStatic,
+                localParams, localReplacements, funcInstTypeArgs)) {
+                return found
+            }
+        }
+        if (let Some(classTy) <- (customTy as ClassType)) {
+            if (let Some(superTy) <- classTy.GetSuperClassTy()) {
+                if (let Some(found) <- GetExpectedFuncFromCustomType(superTy, funcName, instFuncType, isStatic,
+                    funcInstTypeArgs)) {
+                    return found
+                }
+            }
+        }
+        for (interfaceTy in customTy.GetCustomTypeDef().GetImplementedInterfaceTys()) {
+            if (let Some(found) <- GetExpectedFuncFromCustomType(interfaceTy, funcName, instFuncType, isStatic,
+                funcInstTypeArgs)) {
+                return found
+            }
+        }
+        return None
+    }
+
+    private func GetExpectedFuncFromDef(def: CustomTypeDef, funcName: String, instFuncType: FuncType, isStatic: Bool,
+        genericParams: ArrayList<GenericType>, replacements: ArrayList<Type>,
+        funcInstTypeArgs: ArrayList<Type>): Option<Value> {
+        let instParamTys = instFuncType.GetParamTypes()
+        if (!isStatic) {
+            if (instParamTys.isEmpty()) {
+                return None
+            }
+            instParamTys.remove(at: 0)
+        }
+        for (method in def.GetMethods()) {
+            if (isStatic != method.TestAttr(Attribute.STATIC)) {
+                continue
+            }
+            var methodName = method.GetSrcCodeIdentifier()
+            if (methodName.isEmpty()) {
+                methodName = method.GetIdentifierWithoutPrefix()
+            }
+            if (methodName != funcName) {
+                continue
+            }
+            let methodTy = RequireFuncType(method.GetType() ??
+                throw IllegalStateException("faithful AST2CHIR member method has no CHIR type"))
+            let methodParamTys = methodTy.GetParamTypes()
+            if (!method.TestAttr(Attribute.STATIC)) {
+                if (methodParamTys.isEmpty()) {
+                    continue
+                }
+                methodParamTys.remove(at: 0)
+            }
+            if (methodParamTys.size != instParamTys.size) {
+                continue
+            }
+            let localParams = CopyGenericTypeList(genericParams)
+            let localReplacements = CopyTypeList(replacements)
+            let methodGenericParams = method.GetGenericTypeParams()
+            var genericIdx: Int64 = 0
+            while (genericIdx < methodGenericParams.size && genericIdx < funcInstTypeArgs.size) {
+                localParams.add(methodGenericParams[genericIdx])
+                localReplacements.add(funcInstTypeArgs[genericIdx])
+                genericIdx++
+            }
+            var matched = true
+            var idx: Int64 = 0
+            while (idx < methodParamTys.size && idx < instParamTys.size) {
+                let instTy = SubstituteGenericType(methodParamTys[idx], localParams, localReplacements)
+                if (!instParamTys[idx].IsGeneric() && !instTy.IsEqual(instParamTys[idx])) {
+                    matched = false
+                    break
+                }
+                idx++
+            }
+            if (matched) {
+                return method
+            }
+        }
+        return None
+    }
+
+    private func CollectGenericReplacementsForMemberWrapper(patternOpt: Option<Type>, actual: Type,
+        genericParams: ArrayList<GenericType>, replacements: ArrayList<Type>): Bool {
+        let pattern = patternOpt ?? return false
+        return CollectGenericReplacementsForMemberWrapper(pattern.StripAllRefs(), actual.StripAllRefs(), genericParams,
+            replacements)
+    }
+
+    private func CollectGenericReplacementsForMemberWrapper(pattern: Type, actual: Type,
+        genericParams: ArrayList<GenericType>, replacements: ArrayList<Type>): Bool {
+        if (let Some(genericTy) <- (pattern as GenericType)) {
+            genericParams.add(genericTy)
+            replacements.add(actual)
+            return true
+        }
+        if (let Some(patternCustom) <- (pattern as CustomType)) {
+            if (let Some(actualCustom) <- (actual as CustomType)) {
+                if (patternCustom.GetCustomTypeDef().nodeId != actualCustom.GetCustomTypeDef().nodeId) {
+                    return false
+                }
+                return CollectGenericReplacementListsForMemberWrapper(patternCustom.GetGenericArgs(),
+                    actualCustom.GetGenericArgs(), genericParams, replacements)
+            }
+            return false
+        }
+        return pattern.IsEqual(actual)
+    }
+
+    private func CollectGenericReplacementListsForMemberWrapper(patterns: ArrayList<Type>, actuals: ArrayList<Type>,
+        genericParams: ArrayList<GenericType>, replacements: ArrayList<Type>): Bool {
+        if (patterns.size != actuals.size) {
+            return false
+        }
+        var idx: Int64 = 0
+        while (idx < patterns.size) {
+            if (!CollectGenericReplacementsForMemberWrapper(patterns[idx], actuals[idx], genericParams, replacements)) {
+                return false
+            }
+            idx++
+        }
+        return true
+    }
+
+    private func CopyGenericTypeList(values: ArrayList<GenericType>): ArrayList<GenericType> {
+        let out = ArrayList<GenericType>()
+        for (value in values) {
+            out.add(value)
+        }
+        return out
     }
 
     private static func CanTranslateExprAsLeftValue(expr: AstExpr): Bool {
@@ -4180,10 +4643,9 @@ public class Translator {
             let loaded = RequireResult(builder.CreateLoad(targetTy, targetNode, CurrentBlock()))
             return CastValueIfNeeded(loaded, chirTy.TranslateType(RequireAstTy(expr)))
         }
-        if (let Some(_) <- (target as AstFuncDecl)) {
+        if (let Some(funcDecl) <- (target as AstFuncDecl)) {
             if (target.outerDecl.isSome()) {
-                throw IllegalArgumentException(
-                    "not yet ported in faithful AST2CHIR: static member method reference lambda wrapper")
+                return Some(WrapMemberMethodByLambda(funcDecl, GetInstCalleeInfoFromMemberAccess(expr, funcDecl), None))
             }
             return targetNode
         }
