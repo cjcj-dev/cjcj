@@ -12,6 +12,8 @@ private let EFFECT_PACKAGE_NAME: String = "stdx.effect"
 private let CORE_PACKAGE_NAME: String = "std.core"
 private let COMMAND_TYPE_NAME: String = "Command"
 private let RESOURCE_TYPE_NAME: String = "Resource"
+private let CLASS_EXCEPTION_NAME: String = "Exception"
+private let CLASS_ERROR_NAME: String = "Error"
 
 private func TryInvalid(te: TryExpr): Ty {
     return TcInvalid(te)
@@ -113,7 +115,7 @@ private func IsIncludedType(typeManager: TypeManager, included: ArrayList<Ty>, c
 
 private func AddIncludedType(typeManager: TypeManager, included: ArrayList<Ty>, candidate: Ty): Bool {
     if (IsIncludedType(typeManager, included, candidate)) {
-        return false
+        return true
     }
     included.add(candidate)
     return true
@@ -157,8 +159,26 @@ private func CheckWildcardCatchPattern(typeManager: TypeManager, pattern: Wildca
     return true
 }
 
-private func IsCatchableExceptionTy(ty: Ty): Bool {
-    return !ty.IsNothing() && (ty.IsClassLike() || ty.IsGeneric() || ty.IsAny())
+private func IsThrowableCatchTy(typeManager: TypeManager, ty: Ty): Bool {
+    if (!Ty.IsTyCorrect(ty) || ty.IsNothing()) {
+        return false
+    }
+    if (IsCoreNamedTy(ty, CLASS_EXCEPTION_NAME) || IsCoreNamedTy(ty, CLASS_ERROR_NAME)) {
+        return true
+    }
+    if (let Some(genericTy) <- (ty as GenericsTy)) {
+        for (upperTy in genericTy.upperBounds) {
+            if (IsThrowableCatchTy(typeManager, upperTy)) {
+                return true
+            }
+        }
+    }
+    for (superTy in typeManager.GetAllSuperTys(ty).values) {
+        if (IsCoreNamedTy(superTy, CLASS_EXCEPTION_NAME) || IsCoreNamedTy(superTy, CLASS_ERROR_NAME)) {
+            return true
+        }
+    }
+    return false
 }
 
 private func CheckExceptTypePattern(typeManager: TypeManager, exceptPattern: ExceptTypePattern,
@@ -167,7 +187,7 @@ private func CheckExceptTypePattern(typeManager: TypeManager, exceptPattern: Exc
     var joinedTy: Ty = TypeManager.GetNothingTy()
     for (typeNode in exceptPattern.types) {
         if (let Some(typeTy) <- typeNode.GetTy()) {
-            if (Ty.IsTyCorrect(typeTy) && IsCatchableExceptionTy(typeTy)) {
+            if (IsThrowableCatchTy(typeManager, typeTy)) {
                 if (AddIncludedType(typeManager, included, typeTy)) {
                     joinedTy = JoinTryTy(typeManager, joinedTy, typeTy)
                     ok = Ty.IsTyCorrect(joinedTy) && ok

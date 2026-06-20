@@ -12,6 +12,7 @@ import cangjie_compiler::ast.Attribute as AstAttribute
 import cangjie_compiler::ast.BinaryExpr as AstBinaryExpr
 import cangjie_compiler::ast.Block as AstBlock
 import cangjie_compiler::ast.CallExpr as AstCallExpr
+import cangjie_compiler::ast.CallKind as AstCallKind
 import cangjie_compiler::ast.ClassDecl as AstClassDecl
 import cangjie_compiler::ast.ClassLikeDecl as AstClassLikeDecl
 import cangjie_compiler::ast.ClassTy as AstClassTy
@@ -36,6 +37,7 @@ import cangjie_compiler::ast.InterfaceTy as AstInterfaceTy
 import cangjie_compiler::ast.InterfaceDecl as AstInterfaceDecl
 import cangjie_compiler::ast.JumpExpr as AstJumpExpr
 import cangjie_compiler::ast.LambdaExpr as AstLambdaExpr
+import cangjie_compiler::ast.LetPatternDestructor as AstLetPatternDestructor
 import cangjie_compiler::ast.LitConstExpr as AstLitConstExpr
 import cangjie_compiler::ast.LitConstKind as AstLitConstKind
 import cangjie_compiler::ast.MainDecl as AstMainDecl
@@ -43,6 +45,7 @@ import cangjie_compiler::ast.MatchExpr as AstMatchExpr
 import cangjie_compiler::ast.MemberAccess as AstMemberAccess
 import cangjie_compiler::ast.NameReferenceExpr as AstNameReferenceExpr
 import cangjie_compiler::ast.Node as AstNode
+import cangjie_compiler::ast.ParenExpr as AstParenExpr
 import cangjie_compiler::ast.Pattern as AstPattern
 import cangjie_compiler::ast.PropDecl as AstPropDecl
 import cangjie_compiler::ast.RefExpr as AstRefExpr
@@ -193,6 +196,9 @@ public class Translator {
     }
 
     public func Visit(funcDecl: AstFuncDecl): Option<Value> {
+        if (currentBlock.isSome() && !IsGlobalOrMemberFunc(funcDecl)) {
+            return TranslateNestedFunc(funcDecl)
+        }
         let value = globalSymbolTable.Get(funcDecl)
         let fn = (value as Function) ??
             throw IllegalStateException("faithful AST2CHIR function cache is not a Function: ${funcDecl.identifier.Val()}")
@@ -484,7 +490,7 @@ public class Translator {
         if (calleeDecl.IsMemberDecl() && !calleeDecl.TestAttr(AstAttribute.CONSTRUCTOR)) {
             return TranslateMemberFuncCall(expr, calleeDecl)
         }
-        let callee = globalSymbolTable.Get(calleeDecl)
+        let callee = GetSymbolTable(calleeDecl)
         let argValues = ArrayList<Value>()
         let expectedParamTys = FuncParamTypes(expr, calleeDecl)
         var idx: Int64 = 0
@@ -542,9 +548,92 @@ public class Translator {
         return None
     }
 
-    public func Visit(expr: AstIfExpr): Option<Value> {
-        let cond = Translator.TranslateASTNode(RequireExpr(expr.condExpr, "if condition"), this) ??
+    private func IfConditionHasLetPattern(expr: AstExpr): Bool {
+        if (let Some(_) <- (expr as AstLetPatternDestructor)) {
+            return true
+        }
+        if (let Some(parenExpr) <- (expr as AstParenExpr)) {
+            if (let Some(inner) <- parenExpr.expr) {
+                return IfConditionHasLetPattern(inner)
+            }
+            return false
+        }
+        if (let Some(binaryExpr) <- (expr as AstBinaryExpr)) {
+            if (binaryExpr.op == AstTokenKind.AND || binaryExpr.op == AstTokenKind.OR) {
+                if (let Some(left) <- binaryExpr.leftExpr) {
+                    if (IfConditionHasLetPattern(left)) {
+                        return true
+                    }
+                }
+                if (let Some(right) <- binaryExpr.rightExpr) {
+                    return IfConditionHasLetPattern(right)
+                }
+            }
+        }
+        return false
+    }
+
+    private func TranslateIfCondition(expr: AstExpr, trueBlock: Block, falseBlock: Block): Unit {
+        if (let Some(parenExpr) <- (expr as AstParenExpr)) {
+            TranslateIfCondition(RequireExpr(parenExpr.expr, "parenthesized if condition"), trueBlock, falseBlock)
+            return
+        }
+        if (let Some(letPattern) <- (expr as AstLetPatternDestructor)) {
+            TranslateLetPatternCondition(letPattern, trueBlock, falseBlock)
+            return
+        }
+        if (let Some(binaryExpr) <- (expr as AstBinaryExpr)) {
+            if ((binaryExpr.op == AstTokenKind.AND || binaryExpr.op == AstTokenKind.OR) &&
+                IfConditionHasLetPattern(binaryExpr)) {
+                let group = RequireParentBlockGroup(CurrentBlock(), "if condition")
+                let rightEntry = builder.CreateBlock(group)
+                if (binaryExpr.op == AstTokenKind.AND) {
+                    TranslateIfCondition(RequireExpr(binaryExpr.leftExpr, "if && lhs"), rightEntry, falseBlock)
+                    currentBlock = rightEntry
+                    TranslateIfCondition(RequireExpr(binaryExpr.rightExpr, "if && rhs"), trueBlock, falseBlock)
+                } else {
+                    TranslateIfCondition(RequireExpr(binaryExpr.leftExpr, "if || lhs"), trueBlock, rightEntry)
+                    currentBlock = rightEntry
+                    TranslateIfCondition(RequireExpr(binaryExpr.rightExpr, "if || rhs"), trueBlock, falseBlock)
+                }
+                return
+            }
+        }
+        let cond = Translator.TranslateASTNode(expr, this) ??
             throw IllegalStateException("faithful AST2CHIR if condition produced no value")
+        builder.CreateBranch(cond, trueBlock, falseBlock, CurrentBlock())
+    }
+
+    private func TranslateLetPatternCondition(letPattern: AstLetPatternDestructor, trueBlock: Block,
+        falseBlock: Block): Unit {
+        let selector = Translator.TranslateASTNode(RequireExpr(letPattern.initializer, "if-let initializer"), this) ??
+            throw IllegalStateException("faithful AST2CHIR if-let initializer produced no value")
+        let group = RequireParentBlockGroup(CurrentBlock(), "if-let condition")
+        let matchedBlock = builder.CreateBlock(group)
+        if (letPattern.patterns.size == 1) {
+            TranslateSinglePatternBranch(letPattern.patterns[0], selector, matchedBlock, falseBlock)
+            currentBlock = matchedBlock
+            BindPatternValues(letPattern.patterns[0], selector)
+            builder.CreateGoTo(trueBlock, CurrentBlock())
+            return
+        }
+        var patternIndex: Int64 = 0
+        while (patternIndex < letPattern.patterns.size) {
+            let nextBlock = if (patternIndex == letPattern.patterns.size - 1) {
+                falseBlock
+            } else {
+                builder.CreateBlock(group)
+            }
+            TranslateSinglePatternBranch(letPattern.patterns[patternIndex], selector, matchedBlock, nextBlock)
+            currentBlock = nextBlock
+            patternIndex++
+        }
+        currentBlock = matchedBlock
+        builder.CreateGoTo(trueBlock, CurrentBlock())
+    }
+
+    public func Visit(expr: AstIfExpr): Option<Value> {
+        let condExpr = RequireExpr(expr.condExpr, "if condition")
         let parentBlock = CurrentBlock()
         let group = parentBlock.GetParentBlockGroup() ??
             throw IllegalStateException("faithful AST2CHIR if requires parent block group")
@@ -557,7 +646,7 @@ public class Translator {
         } else {
             RequireResult(builder.CreateAllocate(builder.context.GetRefTy(resultTy), resultTy, parentBlock))
         }
-        builder.CreateBranch(cond, thenBlock, elseBlock, parentBlock)
+        TranslateIfCondition(condExpr, thenBlock, elseBlock)
 
         currentBlock = thenBlock
         let thenValue = Translator.TranslateASTNode(RequireBlock(expr.thenBody, "if then body"), this)
@@ -936,6 +1025,62 @@ public class Translator {
         return None
     }
 
+    private func IsGlobalOrMemberFunc(funcDecl: AstFuncDecl): Bool {
+        return funcDecl.TestAnyAttr(AstAttribute.GLOBAL, AstAttribute.IN_CLASSLIKE, AstAttribute.IN_ENUM) ||
+            funcDecl.TestAnyAttr(AstAttribute.IN_STRUCT, AstAttribute.IN_EXTEND)
+    }
+
+    private func TranslateNestedFunc(funcDecl: AstFuncDecl): Option<Value> {
+        if (funcDecl.TestAnyAttr(AstAttribute.INTRINSIC, AstAttribute.ABSTRACT, AstAttribute.FOREIGN)) {
+            return None
+        }
+        let funcBody = funcDecl.funcBody ??
+            throw IllegalStateException("faithful AST2CHIR nested FuncDecl has no FuncBody")
+        let astBody = funcBody.body ??
+            throw IllegalStateException("faithful AST2CHIR nested FuncDecl has no body")
+        let funcTy = RequireFuncType(chirTy.TranslateType(RequireAstTy(funcDecl)))
+        let body = builder.CreateBlockGroup(CurrentFunction())
+        let identifier = if (funcDecl.mangledName.isEmpty()) {
+            CurrentFunction().GetIdentifierWithoutPrefix() + "$local$" + funcDecl.identifier.Val()
+        } else {
+            funcDecl.mangledName
+        }
+        let lambda = builder.CreateLambda(funcTy, funcTy, CurrentBlock(), isLocalFunc: true,
+            identifier: identifier, srcCodeIdentifier: funcDecl.identifier.Val())
+        lambda.InitBody(body)
+        if (funcDecl.isConst) {
+            lambda.SetCompileTimeValue()
+        }
+        let lambdaValue = lambda.GetResult() ??
+            throw IllegalStateException("faithful AST2CHIR nested FuncDecl lambda has no result")
+        localValSymbolTable.Set(funcDecl, lambdaValue)
+        BindLambdaParams(funcBody, lambda, funcTy)
+
+        let savedBlock = currentBlock
+        let savedLambda = currentLambda
+        let savedAstFuncDecl = currentAstFuncDecl
+        blockGroupStack.add(body)
+        currentLambda = lambda
+        currentAstFuncDecl = funcDecl
+        let entry = builder.CreateBlock(body)
+        body.SetEntryBlock(entry)
+        currentBlock = entry
+        let retTy = funcTy.GetReturnType()
+        if (!retTy.IsUnit() && !retTy.IsNothing() && !retTy.IsVoid()) {
+            let retSlot = RequireResult(builder.CreateAllocate(builder.context.GetRefTy(retTy), retTy, entry))
+            lambda.SetReturnValue(retSlot)
+        }
+        let result = Translator.TranslateASTNode(astBody, this)
+        if (CurrentBlock().GetTerminator().isNone()) {
+            EmitImplicitLambdaExit(lambda, result)
+        }
+        currentBlock = savedBlock
+        currentLambda = savedLambda
+        currentAstFuncDecl = savedAstFuncDecl
+        blockGroupStack.remove(at: blockGroupStack.size - 1)
+        return Some(lambdaValue)
+    }
+
     private func TranslateClassLikeDecl(def: ClassDef, decl: AstClassLikeDecl): Unit {
         if (let Some(astTy) <- decl.GetTy()) {
             let classTy = UnwrapClassType(chirTy.TranslateType(astTy))
@@ -1058,7 +1203,7 @@ public class Translator {
         var idx: Int64 = 0
         for (param in params) {
             if (idx < paramTys.size) {
-                let chirParam = builder.CreateParameter(paramTys[idx], "%arg${idx}", lambda)
+                let chirParam = builder.CreateParameter(paramTys[idx], "%${builder.context.GetAllNodesNum()}", lambda)
                 chirParam.SetSrcCodeIdentifier(param.identifier.Val())
                 localValSymbolTable.Set(param, chirParam)
             }
@@ -2005,7 +2150,8 @@ public class Translator {
         }
         if (let Some(typePattern) <- (pattern as AstTypePattern)) {
             if (let Some(inner) <- typePattern.pattern) {
-                BindPatternValues(inner, selector)
+                let castedSelector = CastValueIfNeeded(selector, chirTy.TranslateType(RequireAstTy(typePattern)))
+                BindPatternValues(inner, castedSelector)
             }
             return
         }
@@ -2835,12 +2981,13 @@ public class Translator {
     }
 
     private func TranslateStructOrClassCtorCall(expr: AstCallExpr, calleeDecl: AstFuncDecl): Value {
-        if (IsSuperOrThisCtorCall(expr)) {
-            throw IllegalArgumentException("not yet ported in faithful AST2CHIR: this/super constructor call")
-        }
         let thisTy = chirTy.TranslateType(RequireAstTy(expr)).StripAllRefs()
         let thisRefTy = builder.context.GetRefTy(thisTy)
-        let thisObj = RequireResult(builder.CreateAllocate(thisRefTy, thisTy, CurrentBlock()))
+        let thisObj = if (IsSuperOrThisCtorCall(expr)) {
+            CastValueIfNeeded(GetCurrentConstructorThisObject(), thisRefTy)
+        } else {
+            RequireResult(builder.CreateAllocate(thisRefTy, thisTy, CurrentBlock()))
+        }
         let args = ArrayList<Value>()
         args.add(thisObj)
         for (arg in expr.args) {
@@ -2861,6 +3008,14 @@ public class Translator {
         return thisObj
     }
 
+    private func GetCurrentConstructorThisObject(): Value {
+        let fn = CurrentFunction()
+        if (fn.GetNumOfParams() > 0) {
+            return fn.GetParam(0)
+        }
+        throw IllegalStateException("faithful AST2CHIR constructor call requires current this object")
+    }
+
     private func IsStructOrClassCtorCall(expr: AstCallExpr, calleeDecl: AstFuncDecl): Bool {
         let _ = expr
         if (!calleeDecl.TestAttr(AstAttribute.CONSTRUCTOR) || calleeDecl.TestAttr(AstAttribute.STATIC)) {
@@ -2873,9 +3028,12 @@ public class Translator {
     }
 
     private func IsSuperOrThisCtorCall(expr: AstCallExpr): Bool {
+        if (expr.callKind == AstCallKind.CALL_SUPER_FUNCTION) {
+            return true
+        }
         if (let Some(base) <- expr.baseFunc) {
             if (let Some(refExpr) <- (base as AstRefExpr)) {
-                return refExpr.isThis || refExpr.isSuper
+                return refExpr.isThis
             }
         }
         return false
