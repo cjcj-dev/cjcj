@@ -52,7 +52,7 @@ public let MANGLE_SPECIAL_NAME_LEN: Int64 = 2
 public let MANGLE_PROP_LEN: Int64 = 3
 public let FILE_HASH_LEN: Int64 = 13
 
-public let MAIN_INVOKE: String = "main"
+public let MAIN_INVOKE: String = "$mainInvoke"
 public let TEST_ENTRY_NAME: String = "$test.entry"
 public let STATIC_INIT_FUNC: String = "<clinit>"
 public let CORE_PACKAGE_NAME: String = "std.core"
