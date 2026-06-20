@@ -307,8 +307,168 @@ public class TypeChecker {
         ctx.fullPackageName = pkg.fullPackageName
         SeedImportedPackageDecls(ctx)
         AddCurFile(pkg)
+        AddDefaultFunction(pkg)
         Collector().BuildSymbolTable(ctx, pkg)
         impl.WarmupCache(ctx)
+    }
+
+    private func AddDefaultFunction(pkg: Package): Unit {
+        if (pkg.TestAttr(Attribute.TOOL_ADD)) {
+            return
+        }
+        for (file in pkg.files) {
+            for (decl in file.decls) {
+                AddDefaultFunctionForDecl(decl)
+            }
+        }
+    }
+
+    private func AddDefaultFunctionForDecl(decl: Decl): Unit {
+        if (let Some(structDecl) <- (decl as StructDecl)) {
+            AddDefaultCtorIfNeeded(structDecl)
+            if (let Some(body) <- structDecl.body) {
+                for (member in body.decls) {
+                    AddDefaultFunctionForDecl(member)
+                }
+            }
+            return
+        }
+        if (let Some(classDecl) <- (decl as ClassDecl)) {
+            AddDefaultCtorIfNeeded(classDecl)
+            if (let Some(body) <- classDecl.body) {
+                for (member in body.decls) {
+                    AddDefaultFunctionForDecl(member)
+                }
+            }
+            return
+        }
+        if (let Some(interfaceDecl) <- (decl as InterfaceDecl)) {
+            if (let Some(body) <- interfaceDecl.body) {
+                for (member in body.decls) {
+                    AddDefaultFunctionForDecl(member)
+                }
+            }
+            return
+        }
+        if (let Some(enumDecl) <- (decl as EnumDecl)) {
+            for (member in enumDecl.members) {
+                AddDefaultFunctionForDecl(member)
+            }
+            return
+        }
+        if (let Some(extendDecl) <- (decl as ExtendDecl)) {
+            for (member in extendDecl.members) {
+                AddDefaultFunctionForDecl(member)
+            }
+        }
+    }
+
+    private func HasCtorForTypeDecl(decl: InheritableDecl): Bool {
+        for (member in decl.GetMemberDeclPtrs()) {
+            if (member.TestAttr(Attribute.CONSTRUCTOR) && !member.TestAttr(Attribute.STATIC)) {
+                return true
+            }
+        }
+        return false
+    }
+
+    private func AddDefaultCtorIfNeeded(decl: InheritableDecl): Unit {
+        if (HasCtorForTypeDecl(decl)) {
+            return
+        }
+        AddDefaultCtor(decl)
+    }
+
+    private func AddDefaultCtor(decl: InheritableDecl): Unit {
+        if (decl.astKind != ASTKind.STRUCT_DECL && decl.astKind != ASTKind.CLASS_DECL) {
+            return
+        }
+        if (decl.TestAnyAttr(Attribute.OBJ_C_MIRROR, Attribute.OBJ_C_MIRROR_SYNTHETIC_WRAPPER)) {
+            return
+        }
+        if (decl.astKind == ASTKind.STRUCT_DECL && decl.TestAttr(Attribute.COMMON)) {
+            return
+        }
+        if (decl.astKind == ASTKind.CLASS_DECL &&
+            decl.TestAnyAttr(Attribute.COMMON, Attribute.JAVA_MIRROR)) {
+            return
+        }
+        let ctor = CreateDefaultCtor(decl, isStatic: false)
+        if (let Some(structDecl) <- (decl as StructDecl)) {
+            if (let Some(body) <- structDecl.body) {
+                body.decls.add(ctor)
+            }
+        } else if (let Some(classDecl) <- (decl as ClassDecl)) {
+            if (let Some(body) <- classDecl.body) {
+                body.decls.add(ctor)
+            }
+        }
+    }
+
+    private func CreateDefaultCtor(decl: InheritableDecl, isStatic!: Bool = false): FuncDecl {
+        let funcBody = FuncBody()
+        CopyFileID(funcBody, decl)
+        let block = Block()
+        CopyFileID(block, decl)
+        funcBody.body = block
+        let paramList = FuncParamList()
+        CopyFileID(paramList, decl)
+        funcBody.paramLists.add(paramList)
+
+        let initFunc = FuncDecl()
+        CopyFileID(initFunc, decl)
+        initFunc.funcBody = funcBody
+        funcBody.funcDecl = initFunc
+        initFunc.identifier = SrcIdentifier("init")
+        initFunc.identifier.SetFileID(decl.begin.fileID)
+        initFunc.begin = decl.identifier.Begin()
+        initFunc.end = initFunc.begin + decl.identifier.Length()
+        initFunc.funcBody.getOrThrow().begin = initFunc.begin
+        initFunc.funcBody.getOrThrow().end = initFunc.end
+        initFunc.outerDecl = decl
+        initFunc.EnableAttr(Attribute.IMPLICIT_ADD)
+        initFunc.toBeCompiled = HasRecompilingMemberVar(decl, isStatic)
+        if (isStatic) {
+            initFunc.EnableAttr(Attribute.STATIC)
+            initFunc.EnableAttr(Attribute.PRIVATE)
+        } else {
+            initFunc.EnableAttr(Attribute.PUBLIC)
+        }
+        SetCtorFuncPosition(decl, initFunc)
+        initFunc.EnableAttr(Attribute.CONSTRUCTOR)
+        initFunc.EnableAttr(Attribute.COMPILER_ADD)
+        if (let Some(structDecl) <- (decl as StructDecl)) {
+            funcBody.parentStruct = structDecl
+        } else if (let Some(classDecl) <- (decl as ClassDecl)) {
+            funcBody.parentClassLike = classDecl
+        }
+        AddCurFile(initFunc, file: decl.curFile)
+        return initFunc
+    }
+
+    private func HasRecompilingMemberVar(decl: InheritableDecl, isStatic: Bool): Bool {
+        var found = false
+        for (member in decl.GetMemberDeclPtrs()) {
+            if (member.astKind == ASTKind.VAR_DECL && member.TestAttr(Attribute.STATIC) == isStatic) {
+                found = true
+                if (member.toBeCompiled) {
+                    return true
+                }
+            }
+        }
+        return !found
+    }
+
+    private func SetCtorFuncPosition(decl: InheritableDecl, initFunc: FuncDecl): Unit {
+        if (initFunc.TestAttr(Attribute.STATIC)) {
+            return
+        }
+        for (member in decl.GetMemberDeclPtrs()) {
+            if (member.astKind == ASTKind.VAR_DECL && !member.TestAttr(Attribute.STATIC)) {
+                initFunc.begin = member.begin
+            }
+        }
+        initFunc.begin.fileID = decl.begin.fileID
     }
 
     private func SeedImportedPackageDecls(ctx: ASTContext): Unit {
@@ -415,7 +575,6 @@ public class TypeChecker {
     private func RunInheritanceCheck(pkg: Package): Unit {
         if (let Some(diagValue) <- impl.diag) {
             StructInheritanceChecker(diagValue, impl.typeManager, pkg).Check()
-            CheckInterfaceConformanceForPackage(diagValue, impl.typeManager, pkg)
         }
     }
 
