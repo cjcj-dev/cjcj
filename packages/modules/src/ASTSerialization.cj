@@ -111,9 +111,9 @@ public class ASTWriter {
         cjoVersion.add(1u8)
         cjoVersion.add(0u8)
 
-        fb.StartTable(18)
-        fb.AddOffset(17, options)
-        fb.AddOffset(16, emptyOffsetVector)
+        fb.StartTable(17)
+        fb.AddOffset(16, options)
+        fb.AddOffset(15, emptyOffsetVector)
         fb.AddOffset(14, fileInfosVec)
         fb.AddOffset(13, moduleName)
         fb.AddU8(12, FlatPackageAccess(pkg.accessible))

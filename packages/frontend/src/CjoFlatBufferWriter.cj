@@ -79,9 +79,9 @@ private class FrontendCjoFlatBufferWriter {
         let moduleName = builder.CreateString("")
         let cjoVersion = CjoVersionBytes()
 
-        builder.StartTable(18)
-        builder.AddOffset(17, options)
-        builder.AddOffset(16, dependentStdPkgs)
+        builder.StartTable(17)
+        builder.AddOffset(16, options)
+        builder.AddOffset(15, dependentStdPkgs)
         builder.AddOffset(14, fileInfoVec)
         builder.AddOffset(13, moduleName)
         builder.AddU8(12, PackageAccess(pkg.accessible))
