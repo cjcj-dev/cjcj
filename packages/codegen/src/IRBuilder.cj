@@ -672,7 +672,7 @@ public class IRBuilder2 <: Resource {
     private func CreateOuterTypeInfoArg(thisArg: CGValue): Option<LLVMValueRef> {
         if (let Some(thisCGType) <- thisArg.GetCGType()) {
             let thisTy = thisCGType.GetOriginal().StripAllRefs()
-            if (thisTy.IsStruct() || thisTy.IsTuple() || thisTy.IsClass()) {
+            if (thisTy.IsStruct() || thisTy.IsTuple() || thisTy.IsClass() || thisTy.IsEnum()) {
                 return Some(CGType.GetOrCreate(cgMod, thisTy).GetOrCreateTypeInfo())
             }
         }
