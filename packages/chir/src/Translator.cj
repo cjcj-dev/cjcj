@@ -49,6 +49,7 @@ import cangjie_compiler::ast.Node as AstNode
 import cangjie_compiler::ast.ParenExpr as AstParenExpr
 import cangjie_compiler::ast.Pattern as AstPattern
 import cangjie_compiler::ast.PropDecl as AstPropDecl
+import cangjie_compiler::ast.RangeExpr as AstRangeExpr
 import cangjie_compiler::ast.RefExpr as AstRefExpr
 import cangjie_compiler::ast.ReturnExpr as AstReturnExpr
 import cangjie_compiler::ast.StructDecl as AstStructDecl
@@ -98,6 +99,7 @@ public class Translator {
     private let chirTy: CHIRType
     private let globalSymbolTable: FaithfulAST2CHIRNodeMap
     private let localValSymbolTable: FaithfulAST2CHIRNodeMap = FaithfulAST2CHIRNodeMap()
+    private let exprValueTable: HashMap<String, Value> = HashMap<String, Value>()
     private var currentBlock: Option<Block> = None
     private var currentFunc: Option<Function> = None
     private var currentLambda: Option<Lambda> = None
@@ -425,6 +427,9 @@ public class Translator {
     }
 
     public func Visit(expr: AstRefExpr): Option<Value> {
+        if (let Some(value) <- TryGetExprValue(expr)) {
+            return value
+        }
         if (expr.isThis || expr.isSuper) {
             return GetCurrentThisObject()
         }
@@ -841,10 +846,8 @@ public class Translator {
         return match (expr.forInKind) {
             case AstForInKind.FORIN_RANGE => TranslateForInRange(expr)
             case AstForInKind.FORIN_ITER => TranslateForInIter(expr)
-            case AstForInKind.FORIN_STRING =>
-                throw IllegalArgumentException("not yet ported in faithful AST2CHIR: ForInExpr string desugar")
-            case AstForInKind.FORIN_INVALID =>
-                throw IllegalArgumentException("not yet ported in faithful AST2CHIR: ForInExpr invalid/closed-range-one")
+            case AstForInKind.FORIN_STRING => TranslateForInString(expr)
+            case AstForInKind.FORIN_INVALID => TranslateForInInvalid(expr)
         }
     }
 
@@ -1344,6 +1347,45 @@ public class Translator {
         return None
     }
 
+    private func TranslateForInString(expr: AstForInExpr): Option<Value> {
+        let inExpression = RequireBlockExpr(expr.inExpression, "for-in string inExpression")
+        if (inExpression.body.size < 3) {
+            throw IllegalStateException("faithful AST2CHIR string ForInExpr expects desugared block with 3 nodes")
+        }
+        let _ = Translator.TranslateASTNode(inExpression, this)
+        let indexDecl = RequireBodyVarDecl(inExpression, 0, "for-in string induction var")
+        let endDecl = RequireBodyVarDecl(inExpression, 2, "for-in string end var")
+        let inductiveVar = GetSymbolTable(indexDecl)
+        let stringSize = GetDerefedValue(GetSymbolTable(endDecl))
+        let condition = RequireResult(builder.CreateBinaryExpression(ExprKind.LT, builder.context.GetBoolTy(),
+            GetDerefedValue(inductiveVar), stringSize, CurrentBlock()))
+        let recordBlock = CurrentBlock()
+        let parentGroup = RequireParentBlockGroup(recordBlock, "for-in string")
+        let forInEntryBlock = builder.CreateBlock(parentGroup)
+        currentBlock = forInEntryBlock
+        let condVar = InitializeForInCondVar()
+        InitializeDelayExitSignal()
+        let forIn = InitForInExprSkeleton(expr, inductiveVar, condVar, isIter: false)
+
+        TranslateForInStringBody(expr, forIn)
+        TranslateForInStringLatch(inductiveVar, forIn)
+        TranslateForInStringCond(inductiveVar, stringSize, condVar, forIn)
+
+        let endBlock = builder.CreateBlock(parentGroup)
+        builder.CreateGoTo(endBlock, forInEntryBlock)
+        currentBlock = endBlock
+        UpdateDelayExitSignalInForInEnd()
+        builder.CreateBranch(condition, forInEntryBlock, CurrentBlock(), recordBlock)
+        return None
+    }
+
+    private func TranslateForInInvalid(expr: AstForInExpr): Option<Value> {
+        if (IsClosedRangeOne(expr)) {
+            return TranslateForInClosedRangeOne(expr)
+        }
+        throw IllegalArgumentException("faithful AST2CHIR unsupported ForInExpr kind FORIN_INVALID")
+    }
+
     private func TranslateForInIter(expr: AstForInExpr): Option<Value> {
         let inExpression = RequireBlockExpr(expr.inExpression, "for-in iterator inExpression")
         if (inExpression.body.size < 2) {
@@ -1378,6 +1420,41 @@ public class Translator {
         return None
     }
 
+    private func TranslateForInClosedRangeOne(expr: AstForInExpr): Option<Value> {
+        let beginValue = TranslateClosedRangeBound(expr, 0)
+        let endValue = TranslateClosedRangeBound(expr, 1)
+        let isIncrement = IsClosedRangeIncrement(expr)
+        let preCondKind = if (isIncrement) { ExprKind.LE } else { ExprKind.GE }
+        let preCond = RequireResult(builder.CreateBinaryExpression(preCondKind, builder.context.GetBoolTy(),
+            beginValue, endValue, CurrentBlock()))
+        let parentGroup = RequireParentBlockGroup(CurrentBlock(), "for-in closed range")
+        let preCondTrueBlock = builder.CreateBlock(parentGroup)
+        let preCondFalseBlock = builder.CreateBlock(parentGroup)
+        builder.CreateBranch(preCond, preCondTrueBlock, preCondFalseBlock, CurrentBlock())
+
+        currentBlock = preCondTrueBlock
+        let iterVar = CreateClosedRangeIterVar(expr, beginValue)
+        let forInEntryBlock = builder.CreateBlock(parentGroup)
+        builder.CreateGoTo(forInEntryBlock, CurrentBlock())
+
+        currentBlock = forInEntryBlock
+        let condVar = InitializeForInCondVar()
+        InitializeDelayExitSignal()
+        let forIn = InitForInClosedRangeExprSkeleton(expr, iterVar, condVar)
+
+        let iterValue = TranslateForInClosedRangeBody(expr, iterVar, forIn)
+        TranslateForInClosedRangeCond(expr, iterValue, endValue, condVar, forIn)
+        TranslateForInClosedRangeLatch(iterVar, iterValue, isIncrement, condVar, forIn)
+
+        let endBlock = builder.CreateBlock(parentGroup)
+        builder.CreateGoTo(endBlock, forInEntryBlock)
+        currentBlock = endBlock
+        UpdateDelayExitSignalInForInEnd()
+        builder.CreateGoTo(preCondFalseBlock, CurrentBlock())
+        currentBlock = preCondFalseBlock
+        return None
+    }
+
     private func InitForInExprSkeleton(expr: AstForInExpr, inductiveVar: Value, condVar: Value,
         isIter!: Bool): ForIn {
         let parentFunc = CurrentFunction()
@@ -1390,6 +1467,21 @@ public class Translator {
         } else {
             builder.CreateForInRange(resultTy, inductiveVar, condVar, CurrentBlock())
         }
+        forIn.InitBlockGroups(bodyBlockGroup, latchBlockGroup, condBlockGroup)
+        bodyBlockGroup.SetEntryBlock(builder.CreateBlock(bodyBlockGroup))
+        latchBlockGroup.SetEntryBlock(builder.CreateBlock(latchBlockGroup))
+        condBlockGroup.SetEntryBlock(builder.CreateBlock(condBlockGroup))
+        return forIn
+    }
+
+    private func InitForInClosedRangeExprSkeleton(expr: AstForInExpr, inductiveVar: Value,
+        condVar: Value): ForInClosedRange {
+        let parentFunc = CurrentFunction()
+        let bodyBlockGroup = builder.CreateBlockGroup(parentFunc)
+        let latchBlockGroup = builder.CreateBlockGroup(parentFunc)
+        let condBlockGroup = builder.CreateBlockGroup(parentFunc)
+        let resultTy = chirTy.TranslateType(RequireAstTy(expr))
+        let forIn = builder.CreateForInClosedRange(resultTy, inductiveVar, condVar, CurrentBlock())
         forIn.InitBlockGroups(bodyBlockGroup, latchBlockGroup, condBlockGroup)
         bodyBlockGroup.SetEntryBlock(builder.CreateBlock(bodyBlockGroup))
         latchBlockGroup.SetEntryBlock(builder.CreateBlock(latchBlockGroup))
@@ -1418,6 +1510,18 @@ public class Translator {
             "not yet ported in faithful AST2CHIR: non-var range ForInExpr pattern")
     }
 
+    private func ForInPatternVarDecl(pattern: AstPattern): Option<AstVarDecl> {
+        if (let Some(varPattern) <- (pattern as AstVarPattern)) {
+            return varPattern.varDecl
+        }
+        if (let Some(varOrEnum) <- (pattern as AstVarOrEnumPattern)) {
+            if (let Some(realPattern) <- varOrEnum.pattern) {
+                return ForInPatternVarDecl(realPattern)
+            }
+        }
+        return None
+    }
+
     private func TranslateForInRangeBody(expr: AstForInExpr, forIn: ForIn): Unit {
         blockGroupStack.add(forIn.GetBody())
         currentBlock = forIn.GetBody().GetEntryBlock() ??
@@ -1439,6 +1543,32 @@ public class Translator {
         }
         TranslateForInBodyBlockGroup(expr)
         blockGroupStack.remove(at: blockGroupStack.size - 1)
+    }
+
+    private func TranslateForInStringBody(expr: AstForInExpr, forIn: ForIn): Unit {
+        blockGroupStack.add(forIn.GetBody())
+        currentBlock = forIn.GetBody().GetEntryBlock() ??
+            throw IllegalStateException("faithful AST2CHIR for-in string body has no entry block")
+        if (let Some(pattern) <- expr.pattern) {
+            TranslateForInRangePatternDecl(pattern)
+        }
+        TranslateForInBodyBlockGroup(expr)
+        blockGroupStack.remove(at: blockGroupStack.size - 1)
+    }
+
+    private func TranslateForInClosedRangeBody(expr: AstForInExpr, iterVar: Value, forIn: ForIn): Value {
+        blockGroupStack.add(forIn.GetBody())
+        currentBlock = forIn.GetBody().GetEntryBlock() ??
+            throw IllegalStateException("faithful AST2CHIR for-in closed range body has no entry block")
+        let iterValue = RequireResult(builder.CreateLoad(RequireRefBaseType(iterVar), iterVar, CurrentBlock()))
+        if (let Some(pattern) <- expr.pattern) {
+            if (let Some(varDecl) <- ForInPatternVarDecl(pattern)) {
+                localValSymbolTable.Set(varDecl, iterValue)
+            }
+        }
+        TranslateForInBodyBlockGroup(expr)
+        blockGroupStack.remove(at: blockGroupStack.size - 1)
+        return iterValue
     }
 
     private func TranslateForInBodyBlockGroup(expr: AstForInExpr): Unit {
@@ -1475,6 +1605,53 @@ public class Translator {
         if (CurrentBlock().GetTerminator().isNone()) {
             builder.CreateExit(None, CurrentBlock())
         }
+        blockGroupStack.remove(at: blockGroupStack.size - 1)
+    }
+
+    private func TranslateForInStringLatch(inductiveVar: Value, forIn: ForIn): Unit {
+        blockGroupStack.add(forIn.GetLatch())
+        currentBlock = forIn.GetLatch().GetEntryBlock() ??
+            throw IllegalStateException("faithful AST2CHIR for-in string latch has no entry block")
+        let trueBlock = builder.CreateBlock(forIn.GetLatch())
+        let falseBlock = builder.CreateBlock(forIn.GetLatch())
+        builder.CreateBranch(DelayExitSignalGreaterThanZero(), trueBlock, falseBlock, CurrentBlock())
+        currentBlock = trueBlock
+        builder.CreateExit(None, CurrentBlock())
+        currentBlock = falseBlock
+        let inductiveValue = GetDerefedValue(inductiveVar)
+        let inductiveTy = inductiveValue.GetType() ?? RequireRefBaseType(inductiveVar)
+        let one = RequireResult(builder.CreateConstant(inductiveTy, IntLiteral(1), CurrentBlock()))
+        let plusOne = RequireResult(builder.CreateBinaryExpression(ExprKind.ADD, inductiveTy, inductiveValue,
+            one, CurrentBlock()))
+        builder.CreateStore(plusOne, inductiveVar, CurrentBlock())
+        builder.CreateExit(None, CurrentBlock())
+        blockGroupStack.remove(at: blockGroupStack.size - 1)
+    }
+
+    private func TranslateForInClosedRangeLatch(iterVar: Value, iterValue: Value, isIncrement: Bool,
+        condVar: Value, forIn: ForIn): Unit {
+        blockGroupStack.add(forIn.GetLatch())
+        currentBlock = forIn.GetLatch().GetEntryBlock() ??
+            throw IllegalStateException("faithful AST2CHIR for-in closed range latch has no entry block")
+        let trueBlock = builder.CreateBlock(forIn.GetLatch())
+        let falseBlock = builder.CreateBlock(forIn.GetLatch())
+        builder.CreateBranch(DelayExitSignalGreaterThanZero(), trueBlock, falseBlock, CurrentBlock())
+        currentBlock = trueBlock
+        builder.CreateExit(None, CurrentBlock())
+        currentBlock = falseBlock
+        let updateBlock = builder.CreateBlock(forIn.GetLatch())
+        let exitBlock = builder.CreateBlock(forIn.GetLatch())
+        let condValue = RequireResult(builder.CreateLoad(builder.context.GetBoolTy(), condVar, CurrentBlock()))
+        builder.CreateBranch(condValue, updateBlock, exitBlock, CurrentBlock())
+        currentBlock = updateBlock
+        let iterTy = iterValue.GetType() ?? RequireRefBaseType(iterVar)
+        let one = RequireResult(builder.CreateConstant(iterTy, IntLiteral(1), CurrentBlock()))
+        let op = if (isIncrement) { ExprKind.ADD } else { ExprKind.SUB }
+        let newValue = RequireResult(builder.CreateBinaryExpression(op, iterTy, iterValue, one, CurrentBlock()))
+        builder.CreateStore(newValue, iterVar, CurrentBlock())
+        builder.CreateGoTo(exitBlock, CurrentBlock())
+        currentBlock = exitBlock
+        builder.CreateExit(None, CurrentBlock())
         blockGroupStack.remove(at: blockGroupStack.size - 1)
     }
 
@@ -1521,6 +1698,33 @@ public class Translator {
         let hasValue = RequireResult(builder.CreateUnaryExpression(ExprKind.NOT, builder.context.GetBoolTy(), tag,
             CurrentBlock()))
         builder.CreateStore(hasValue, condVar, CurrentBlock())
+        builder.CreateExit(None, CurrentBlock())
+        blockGroupStack.remove(at: blockGroupStack.size - 1)
+    }
+
+    private func TranslateForInStringCond(inductiveVar: Value, stringSize: Value, condVar: Value,
+        forIn: ForIn): Unit {
+        blockGroupStack.add(forIn.GetCond())
+        currentBlock = forIn.GetCond().GetEntryBlock() ??
+            throw IllegalStateException("faithful AST2CHIR for-in string cond has no entry block")
+        TranslateForInCondControlFlow(condVar)
+        let condition = RequireResult(builder.CreateBinaryExpression(ExprKind.LT, builder.context.GetBoolTy(),
+            GetDerefedValue(inductiveVar), stringSize, CurrentBlock()))
+        builder.CreateStore(condition, condVar, CurrentBlock())
+        builder.CreateExit(None, CurrentBlock())
+        blockGroupStack.remove(at: blockGroupStack.size - 1)
+    }
+
+    private func TranslateForInClosedRangeCond(expr: AstForInExpr, iterValue: Value, iterEnd: Value,
+        condVar: Value, forIn: ForIn): Unit {
+        let _ = expr
+        blockGroupStack.add(forIn.GetCond())
+        currentBlock = forIn.GetCond().GetEntryBlock() ??
+            throw IllegalStateException("faithful AST2CHIR for-in closed range cond has no entry block")
+        TranslateForInCondControlFlow(condVar)
+        let condition = RequireResult(builder.CreateBinaryExpression(ExprKind.NOTEQUAL, builder.context.GetBoolTy(),
+            iterValue, iterEnd, CurrentBlock()))
+        builder.CreateStore(condition, condVar, CurrentBlock())
         builder.CreateExit(None, CurrentBlock())
         blockGroupStack.remove(at: blockGroupStack.size - 1)
     }
@@ -1643,6 +1847,163 @@ public class Translator {
 
     private func RequireDelayExitSignal(): Value {
         return delayExitSignal ?? throw IllegalStateException("faithful AST2CHIR ForIn delay-exit signal missing")
+    }
+
+    private func RequireBodyVarDecl(block: AstBlock, index: Int64, context: String): AstVarDecl {
+        if (index < 0 || index >= block.body.size) {
+            throw IllegalStateException("faithful AST2CHIR ${context} missing from desugared block")
+        }
+        return (block.body[index] as AstVarDecl) ??
+            throw IllegalStateException("faithful AST2CHIR ${context} is not a VarDecl")
+    }
+
+    private func IsClosedRangeOne(expr: AstForInExpr): Bool {
+        let inExpr = expr.inExpression ?? return false
+        if (let Some(rangeCtor) <- ClosedRangeCallExpr(inExpr)) {
+            return IsCallRangeConstructor(rangeCtor)
+        }
+        if (let Some(rangeExpr) <- (inExpr as AstRangeExpr)) {
+            return rangeExpr.isClosed && IsRangeStepOne(rangeExpr)
+        }
+        return false
+    }
+
+    private func ClosedRangeCallExpr(expr: AstExpr): Option<AstCallExpr> {
+        if (let Some(callExpr) <- (expr as AstCallExpr)) {
+            return Some(callExpr)
+        }
+        if (let Some(rangeExpr) <- (expr as AstRangeExpr)) {
+            if (let Some(desugar) <- rangeExpr.desugarExpr) {
+                if (let Some(callExpr) <- (desugar as AstCallExpr)) {
+                    return Some(callExpr)
+                }
+            }
+        }
+        return None
+    }
+
+    private func IsCallRangeConstructor(callExpr: AstCallExpr): Bool {
+        let rangeConstructorParamSize: Int64 = 6
+        let rangeConstructorIntLength: Int64 = 3
+        if (callExpr.callKind != AstCallKind.CALL_OBJECT_CREATION) {
+            return false
+        }
+        let callee = (callExpr.baseFunc ?? return false) as AstRefExpr
+        let calledFunc = ((callee ?? return false).ref.target ?? return false) as AstFuncDecl
+        let funcBody = (calledFunc ?? return false).funcBody ?? return false
+        if (funcBody.paramLists.isEmpty() || funcBody.paramLists[0].params.size != rangeConstructorParamSize) {
+            return false
+        }
+        if (callExpr.args.size != rangeConstructorParamSize) {
+            return false
+        }
+        var idx: Int64 = 0
+        while (idx < rangeConstructorIntLength) {
+            let argTy = callExpr.args[idx].GetTy() ?? return false
+            if (!argTy.IsInteger()) {
+                return false
+            }
+            idx++
+        }
+        let stepExpr = callExpr.args[rangeConstructorIntLength - 1].expr ?? return false
+        let stepLit = (stepExpr as AstLitConstExpr) ?? return false
+        let stepValue = stepLit.constNumValue.asInt.`Int64`()
+        if (stepValue != 1 && stepValue != -1) {
+            return false
+        }
+        idx = rangeConstructorIntLength
+        while (idx < rangeConstructorParamSize) {
+            let argTy = callExpr.args[idx].GetTy() ?? return false
+            if (!argTy.IsBoolean()) {
+                return false
+            }
+            idx++
+        }
+        let isClosedExpr = callExpr.args[rangeConstructorParamSize - 1].expr ?? return false
+        let isClosedLit = (isClosedExpr as AstLitConstExpr) ?? return false
+        return isClosedLit.constNumValue.asBoolean
+    }
+
+    private func IsRangeStepOne(rangeExpr: AstRangeExpr): Bool {
+        if (let Some(startExpr) <- rangeExpr.startExpr) {
+            let startTy = startExpr.GetTy() ?? return false
+            if (startTy.IsInvalid() || !startTy.IsInteger()) {
+                return false
+            }
+        } else {
+            return false
+        }
+        if (let Some(stopExpr) <- rangeExpr.stopExpr) {
+            let stopTy = stopExpr.GetTy() ?? return false
+            if (stopTy.IsInvalid() || !stopTy.IsInteger()) {
+                return false
+            }
+        } else {
+            return false
+        }
+        if (let Some(stepExpr) <- rangeExpr.stepExpr) {
+            if (!stepExpr.isConst) {
+                return false
+            }
+            let stepValue = stepExpr.constNumValue.asInt.`Int64`()
+            return stepValue == 1 || stepValue == -1
+        }
+        return true
+    }
+
+    private func TranslateClosedRangeBound(expr: AstForInExpr, argIndex: Int64): Value {
+        let inExpr = RequireExpr(expr.inExpression, "for-in closed range inExpression")
+        let boundExpr = ClosedRangeBoundExpr(inExpr, argIndex)
+        let value = Translator.TranslateASTNode(boundExpr, this) ??
+            throw IllegalStateException("faithful AST2CHIR closed range bound produced no value")
+        return GetDerefedValue(value)
+    }
+
+    private func ClosedRangeBoundExpr(inExpr: AstExpr, argIndex: Int64): AstExpr {
+        if (let Some(callExpr) <- ClosedRangeCallExpr(inExpr)) {
+            if (argIndex < 0 || argIndex >= callExpr.args.size) {
+                throw IllegalStateException("faithful AST2CHIR closed range constructor bound missing")
+            }
+            return RequireFuncArgExpr(callExpr.args[argIndex], "closed range constructor bound")
+        }
+        let rangeExpr = (inExpr as AstRangeExpr) ??
+            throw IllegalStateException("faithful AST2CHIR closed range inExpression is not a RangeExpr")
+        if (argIndex == 0) {
+            return RequireExpr(rangeExpr.startExpr, "closed range start")
+        }
+        if (argIndex == 1) {
+            return RequireExpr(rangeExpr.stopExpr, "closed range stop")
+        }
+        throw IllegalStateException("faithful AST2CHIR closed range bound index out of range")
+    }
+
+    private func IsClosedRangeIncrement(expr: AstForInExpr): Bool {
+        return ClosedRangeStepValue(expr) == 1
+    }
+
+    private func ClosedRangeStepValue(expr: AstForInExpr): Int64 {
+        let inExpr = RequireExpr(expr.inExpression, "for-in closed range inExpression")
+        if (let Some(callExpr) <- ClosedRangeCallExpr(inExpr)) {
+            let stepExpr = RequireFuncArgExpr(callExpr.args[2], "closed range constructor step")
+            let stepLit = (stepExpr as AstLitConstExpr) ??
+                throw IllegalStateException("faithful AST2CHIR closed range constructor step is not a literal")
+            return stepLit.constNumValue.asInt.`Int64`()
+        }
+        let rangeExpr = (inExpr as AstRangeExpr) ??
+            throw IllegalStateException("faithful AST2CHIR closed range inExpression is not a RangeExpr")
+        if (let Some(stepExpr) <- rangeExpr.stepExpr) {
+            return stepExpr.constNumValue.asInt.`Int64`()
+        }
+        return 1
+    }
+
+    private func CreateClosedRangeIterVar(expr: AstForInExpr, beginValue: Value): Value {
+        let _ = expr
+        let iterTy = beginValue.GetType() ??
+            throw IllegalStateException("faithful AST2CHIR closed range begin value has no type")
+        let iterVar = RequireResult(builder.CreateAllocate(builder.context.GetRefTy(iterTy), iterTy, CurrentBlock()))
+        builder.CreateStore(beginValue, iterVar, CurrentBlock())
+        return iterVar
     }
 
     private func MakeForInIterNoneValue(optionTy: Type): Value {
@@ -2116,10 +2477,7 @@ public class Translator {
             return
         }
         if (let Some(constPattern) <- (pattern as AstConstPattern)) {
-            let litValue = Translator.TranslateASTNode(RequireExpr(constPattern.literal, "const pattern literal"),
-                this) ?? throw IllegalStateException("faithful AST2CHIR const pattern literal produced no value")
-            let cond = RequireResult(builder.CreateBinaryExpression(ExprKind.EQUAL, builder.context.GetBoolTy(),
-                selector, litValue, CurrentBlock()))
+            let cond = TranslateConstPatternCondition(constPattern, selector)
             builder.CreateBranch(cond, trueBlock, falseBlock, CurrentBlock())
             return
         }
@@ -2139,15 +2497,17 @@ public class Translator {
     }
 
     private func BindPatternValues(pattern: AstPattern, selector: Value): Unit {
+        BindPatternValues(pattern, selector, CurrentBlock())
+    }
+
+    private func BindPatternValues(pattern: AstPattern, selector: Value, block: Block): Unit {
         if (let Some(varPattern) <- (pattern as AstVarPattern)) {
-            if (let Some(varDecl) <- varPattern.varDecl) {
-                localValSymbolTable.Set(varDecl, selector)
-            }
+            BindVarPatternValue(varPattern, selector, block)
             return
         }
         if (let Some(varOrEnum) <- (pattern as AstVarOrEnumPattern)) {
             if (let Some(realPattern) <- varOrEnum.pattern) {
-                BindPatternValues(realPattern, selector)
+                BindPatternValues(realPattern, selector, block)
             }
             return
         }
@@ -2155,12 +2515,13 @@ public class Translator {
             var idx: Int64 = 0
             for (subPattern in tuplePattern.patterns) {
                 let fieldValue = ExtractPatternField(selector, idx, chirTy.TranslateType(RequireAstTy(subPattern)))
-                BindPatternValues(subPattern, fieldValue)
+                BindPatternValues(subPattern, fieldValue, block)
                 idx++
             }
             return
         }
         if (let Some(enumPattern) <- (pattern as AstEnumPattern)) {
+            let enumSelector = EnumPatternPayloadSelector(selector, enumPattern)
             let payloadTypes = EnumPatternPayloadTypes(enumPattern)
             var idx: Int64 = 0
             for (subPattern in enumPattern.patterns) {
@@ -2169,19 +2530,44 @@ public class Translator {
                 } else {
                     chirTy.TranslateType(RequireAstTy(subPattern))
                 }
-                let payloadValue = ExtractPatternField(selector, idx + 1, fieldTy)
-                BindPatternValues(subPattern, payloadValue)
+                let payloadValue = ExtractPatternField(enumSelector, idx + 1, fieldTy)
+                BindPatternValues(subPattern, payloadValue, block)
                 idx++
             }
             return
         }
         if (let Some(typePattern) <- (pattern as AstTypePattern)) {
             if (let Some(inner) <- typePattern.pattern) {
-                let castedSelector = CastValueIfNeeded(selector, chirTy.TranslateType(RequireAstTy(typePattern)))
-                BindPatternValues(inner, castedSelector)
+                BindPatternValues(inner, selector, block)
             }
             return
         }
+    }
+
+    private func BindVarPatternValue(pattern: AstVarPattern, value: Value, block: Block): Unit {
+        let varDecl = pattern.varDecl ??
+            throw IllegalStateException("faithful AST2CHIR match VarPattern has no VarDecl")
+        let backup = currentBlock
+        currentBlock = block
+        let boundValue = CastValueIfNeeded(value, VarPatternBindingType(pattern, value))
+        boundValue.EnableAttr(Attribute.READONLY)
+        currentBlock = backup
+        if (let Some(desugar) <- pattern.desugarExpr) {
+            if (let Some(desugarTarget) <- desugar.GetTarget()) {
+                localValSymbolTable.Set(desugarTarget, boundValue)
+            }
+        } else {
+            localValSymbolTable.Set(varDecl, boundValue)
+        }
+    }
+
+    private func VarPatternBindingType(pattern: AstVarPattern, value: Value): Type {
+        let astTy = RequireAstTy(pattern)
+        if (!astTy.IsAny()) {
+            return chirTy.TranslateType(astTy)
+        }
+        return value.GetType() ??
+            throw IllegalStateException("faithful AST2CHIR VarPattern value has no CHIR type")
     }
 
     private func TranslateEnumPatternCondition(pattern: AstEnumPattern, selector: Value): Value {
@@ -2201,7 +2587,8 @@ public class Translator {
         let payloadBlock = builder.CreateBlock(RequireParentBlockGroup(CurrentBlock(), "enum pattern payload"))
         builder.CreateBranch(cond, payloadBlock, falseBlock, CurrentBlock())
         currentBlock = payloadBlock
-        TranslatePatternSequenceWithTypes(pattern.patterns, EnumPatternPayloadTypes(pattern), selector, 1,
+        let payloadSelector = EnumPatternPayloadSelector(selector, pattern)
+        TranslatePatternSequenceWithTypes(pattern.patterns, EnumPatternPayloadTypes(pattern), payloadSelector, 1,
             trueBlock, falseBlock)
     }
 
@@ -2214,7 +2601,16 @@ public class Translator {
         falseBlock: Block): Unit {
         if (pattern.matchBeforeRuntime) {
             if (let Some(inner) <- pattern.pattern) {
-                TranslateSinglePatternBranch(inner, selector, trueBlock, falseBlock)
+                if (let Some(desugar) <- pattern.desugarExpr) {
+                    if (let Some(varPattern) <- pattern.desugarVarPattern) {
+                        BindVarPatternValue(varPattern, selector, CurrentBlock())
+                    }
+                    let newValue = Translator.TranslateASTNode(desugar, this) ??
+                        throw IllegalStateException("faithful AST2CHIR type pattern desugar produced no value")
+                    TranslateSinglePatternBranch(inner, newValue, trueBlock, falseBlock)
+                } else {
+                    TranslateSinglePatternBranch(inner, selector, trueBlock, falseBlock)
+                }
             } else {
                 builder.CreateGoTo(trueBlock, CurrentBlock())
             }
@@ -2268,6 +2664,37 @@ public class Translator {
         }
     }
 
+    private func TranslateConstPatternCondition(pattern: AstConstPattern, selector: Value): Value {
+        if (let Some(callExpr) <- pattern.operatorCallExpr) {
+            let base = ConstPatternOperatorBase(callExpr)
+            SetExprValue(base, selector)
+            return Translator.TranslateASTNode(callExpr, this) ??
+                throw IllegalStateException("faithful AST2CHIR const pattern operator call produced no value")
+        }
+        let litValue = Translator.TranslateASTNode(RequireExpr(pattern.literal, "const pattern literal"), this) ??
+            throw IllegalStateException("faithful AST2CHIR const pattern literal produced no value")
+        return RequireResult(builder.CreateBinaryExpression(ExprKind.EQUAL, builder.context.GetBoolTy(), selector,
+            litValue, CurrentBlock()))
+    }
+
+    private func ConstPatternOperatorBase(callExpr: AstCallExpr): AstExpr {
+        let member = (RequireExpr(callExpr.baseFunc, "const pattern operator callee") as AstMemberAccess) ??
+            throw IllegalStateException("faithful AST2CHIR const pattern operator callee is not MemberAccess")
+        return RequireExpr(member.baseExpr, "const pattern operator base")
+    }
+
+    private func SetExprValue(expr: AstExpr, value: Value): Unit {
+        exprValueTable[ExprValueKey(expr)] = value
+    }
+
+    private func TryGetExprValue(expr: AstExpr): Option<Value> {
+        return exprValueTable.get(ExprValueKey(expr))
+    }
+
+    private func ExprValueKey(expr: AstExpr): String {
+        return "${ASTKindIndex(expr.astKind)}:${expr.begin.hashCode()}:${expr.end.hashCode()}"
+    }
+
     private func EnumPatternPayloadTypes(pattern: AstEnumPattern): ArrayList<Type> {
         let out = ArrayList<Type>()
         if (let Some(funcDecl) <- (RequireEnumPatternConstructor(pattern) as AstFuncDecl)) {
@@ -2293,7 +2720,7 @@ public class Translator {
     }
 
     private func TranslateEnumPatternPayloadType(pattern: AstEnumPattern, paramTy: AstTy): Type {
-        let translated = chirTy.TranslateType(paramTy)
+        let translated = chirTy.TranslateType(paramTy).StripAllRefs()
         if (let Some(enumTy) <- (chirTy.TranslateType(RequireAstTy(pattern)) as EnumType)) {
             return SubstituteGenericType(translated, enumTy.GetEnumDef().GetGenericTypeParams(),
                 enumTy.GetGenericArgs())
@@ -2307,6 +2734,31 @@ public class Translator {
         return RequireResult(builder.CreateField(fieldTy, GetDerefedValue(value), path, CurrentBlock()))
     }
 
+    private func EnumPatternPayloadSelector(value: Value, pattern: AstEnumPattern): Value {
+        if (IsOptionLikeEnumConstructor(RequireEnumPatternConstructor(pattern))) {
+            return value
+        }
+        return CastEnumValueToConstructorTupleType(value, pattern)
+    }
+
+    private func IsOptionLikeEnumConstructor(constructor: AstDecl): Bool {
+        let outer = constructor.outerDecl ??
+            throw IllegalStateException("faithful AST2CHIR enum constructor has no outer enum")
+        let enumDecl = (outer as AstEnumDecl) ??
+            throw IllegalStateException("faithful AST2CHIR enum constructor outer is not enum")
+        return IsOptionLikeEnumDecl(enumDecl)
+    }
+
+    private func CastEnumValueToConstructorTupleType(value: Value, pattern: AstEnumPattern): Value {
+        let constructor = RequireEnumPatternConstructor(pattern)
+        let fieldTys = ArrayList<Type>()
+        fieldTys.add(GetEnumSelectorType(constructor))
+        for (payloadTy in EnumPatternPayloadTypes(pattern)) {
+            fieldTys.add(payloadTy)
+        }
+        return CastValueIfNeeded(value, builder.context.GetTupleTy(fieldTys))
+    }
+
     private func GetEnumTagValue(pattern: AstEnumPattern, selector: Value): Value {
         let constructor = RequireEnumPatternConstructor(pattern)
         let path = ArrayList<UInt64>()
@@ -2317,6 +2769,9 @@ public class Translator {
 
     private func RequireEnumPatternConstructor(pattern: AstEnumPattern): AstDecl {
         let constructorExpr = RequireExpr(pattern.constructor, "enum pattern constructor")
+        if (let Some(target) <- constructorExpr.GetTarget()) {
+            return target
+        }
         if (let Some(refExpr) <- (constructorExpr as AstRefExpr)) {
             return refExpr.ref.target ??
                 throw IllegalStateException("faithful AST2CHIR enum pattern RefExpr has no target")
@@ -3246,17 +3701,23 @@ public class Translator {
     }
 
     private func TranslateCompoundAssign(expr: AstAssignExpr, leftExpr: AstExpr, rightExpr: AstExpr): Option<Value> {
-        if (expr.op == AstTokenKind.AND_ASSIGN || expr.op == AstTokenKind.OR_ASSIGN) {
-            throw IllegalArgumentException("not yet ported in faithful AST2CHIR: short-circuit compound assignment")
-        }
         let leftValueInfo = TranslateExprAsLeftValue(leftExpr)
         let lhsValue = LoadLeftValue(leftValueInfo, chirTy.TranslateType(RequireAstTy(leftExpr))) ??
             throw IllegalStateException("faithful AST2CHIR compound lhs produced no value")
-        let rhsValue = Translator.TranslateASTNode(rightExpr, this) ??
-            throw IllegalStateException("faithful AST2CHIR compound rhs produced no value")
-        let opResult = builder.CreateBinaryExpression(ToCHIRCompoundAssignOp(expr.op),
-            lhsValue.GetType() ?? chirTy.TranslateType(RequireAstTy(leftExpr)), lhsValue, rhsValue, CurrentBlock())
-        let compoundValue = RequireResult(opResult)
+        var compoundValue: Value
+        if (expr.op == AstTokenKind.AND_ASSIGN) {
+            compoundValue = TransShortCircuitAnd(lhsValue, rightExpr) ??
+                throw IllegalStateException("faithful AST2CHIR compound &&= produced no value")
+        } else if (expr.op == AstTokenKind.OR_ASSIGN) {
+            compoundValue = TransShortCircuitOr(lhsValue, rightExpr) ??
+                throw IllegalStateException("faithful AST2CHIR compound ||= produced no value")
+        } else {
+            let rhsValue = Translator.TranslateASTNode(rightExpr, this) ??
+                throw IllegalStateException("faithful AST2CHIR compound rhs produced no value")
+            let opResult = builder.CreateBinaryExpression(ToCHIRCompoundAssignOp(expr.op),
+                lhsValue.GetType() ?? chirTy.TranslateType(RequireAstTy(leftExpr)), lhsValue, rhsValue, CurrentBlock())
+            compoundValue = RequireResult(opResult)
+        }
         StoreToLeftValue(leftValueInfo, compoundValue)
         return None
     }
@@ -3453,25 +3914,57 @@ public class Translator {
     }
 
     private func TranslateVArrayAssign(assign: AstAssignExpr, subscriptExpr: AstSubscriptExpr, rightExpr: AstExpr): Unit {
-        if (IsCompoundAssignOp(assign.op)) {
-            throw IllegalArgumentException("not yet ported in faithful AST2CHIR: compound VArray assignment")
-        }
         if (subscriptExpr.indexExprs.size != 1) {
             throw IllegalArgumentException("faithful AST2CHIR VArray assignment expects exactly one index")
         }
+        let elementTy = chirTy.TranslateType(RequireAstTy(subscriptExpr))
         let baseExpr = RequireExpr(subscriptExpr.baseExpr, "VArray assign base")
-        let baseLeftValueInfo = TranslateExprAsLeftValue(baseExpr)
-        if (!baseLeftValueInfo.path.isEmpty()) {
-            throw IllegalArgumentException("not yet ported in faithful AST2CHIR: nested VArray assignment base path")
+        let baseTy = chirTy.TranslateType(RequireAstTy(baseExpr))
+        if (!IsCompoundAssignOp(assign.op)) {
+            let rhsValue = Translator.TranslateASTNode(rightExpr, this) ??
+                throw IllegalStateException("faithful AST2CHIR VArray assignment rhs produced no value")
+            let rhs = GetDerefedValue(rhsValue)
+            let baseLeftValueInfo = TranslateExprAsLeftValue(baseExpr)
+            let lhsBase = AddressOfLeftValue(baseLeftValueInfo, baseTy)
+            let indexValue = Translator.TranslateASTNode(subscriptExpr.indexExprs[0], this) ??
+                throw IllegalStateException("faithful AST2CHIR VArray assignment index produced no value")
+            CreateVArraySet(lhsBase, rhs, GetDerefedValue(indexValue), elementTy)
+            return
         }
+
+        let baseLeftValueInfo = TranslateExprAsLeftValue(baseExpr)
+        let lhsBase = AddressOfLeftValue(baseLeftValueInfo, baseTy)
+        let loadedBase = RequireResult(builder.CreateLoad(RequireRefBaseType(lhsBase), lhsBase, CurrentBlock()))
         let indexValue = Translator.TranslateASTNode(subscriptExpr.indexExprs[0], this) ??
             throw IllegalStateException("faithful AST2CHIR VArray assignment index produced no value")
-        let rhsValue = Translator.TranslateASTNode(rightExpr, this) ??
-            throw IllegalStateException("faithful AST2CHIR VArray assignment rhs produced no value")
+        let index = GetDerefedValue(indexValue)
         let args = ArrayList<Value>()
-        args.add(baseLeftValueInfo.base)
-        args.add(rhsValue)
-        args.add(indexValue)
+        args.add(loadedBase)
+        args.add(index)
+        let callContext = IntrisicCallContext(kind: IntrinsicKind.VARRAY_GET, args: args)
+        let lhsValue = RequireResult(builder.CreateIntrinsic(elementTy, callContext, CurrentBlock()))
+        var compoundValue: Value
+        if (assign.op == AstTokenKind.AND_ASSIGN) {
+            compoundValue = TransShortCircuitAnd(lhsValue, rightExpr) ??
+                throw IllegalStateException("faithful AST2CHIR VArray &&= produced no value")
+        } else if (assign.op == AstTokenKind.OR_ASSIGN) {
+            compoundValue = TransShortCircuitOr(lhsValue, rightExpr) ??
+                throw IllegalStateException("faithful AST2CHIR VArray ||= produced no value")
+        } else {
+            let rhsValue = Translator.TranslateASTNode(rightExpr, this) ??
+                throw IllegalStateException("faithful AST2CHIR VArray compound rhs produced no value")
+            let opResult = builder.CreateBinaryExpression(ToCHIRCompoundAssignOp(assign.op),
+                lhsValue.GetType() ?? elementTy, lhsValue, rhsValue, CurrentBlock())
+            compoundValue = RequireResult(opResult)
+        }
+        CreateVArraySet(lhsBase, compoundValue, index, elementTy)
+    }
+
+    private func CreateVArraySet(lhs: Value, rhs: Value, index: Value, elementTy: Type): Unit {
+        let args = ArrayList<Value>()
+        args.add(lhs)
+        args.add(CastValueIfNeeded(rhs, elementTy))
+        args.add(index)
         let callContext = IntrisicCallContext(kind: IntrinsicKind.VARRAY_SET, args: args)
         builder.CreateIntrinsic(builder.context.GetUnitTy(), callContext, CurrentBlock())
     }

@@ -159,6 +159,21 @@ public class CGEnumType <: CGCustomType {
 
     protected override func GenLLVMType(): LLVMTypeRef {
         EnsureClassified()
+        if (cgEnumTypeKind == CGEnumTypeKind.NON_EXHAUSTIVE_ASSOCIATED ||
+            cgEnumTypeKind == CGEnumTypeKind.EXHAUSTIVE_OTHER) {
+            let layoutName = STRUCT_TYPE_PREFIX + chirType.ToString()
+            let enumLayout = GetOrCreateNamedStructType(cgCtx.GetLLVMContext(), layoutName)
+            layoutType = enumLayout
+            let refType = CGType.GetRefType(cgCtx.GetLLVMContext())
+            llvmType = refType
+            if (!cgCtx.IsGeneratedStructType(layoutName)) {
+                let body = ArrayList<LLVMTypeRef>()
+                body.add(CGType.GetRefType(cgCtx.GetLLVMContext()))
+                SetStructTypeBody(enumLayout, body)
+                cgCtx.AddGeneratedStructType(layoutName)
+            }
+            return refType
+        }
         if (cgEnumTypeKind == CGEnumTypeKind.EXHAUSTIVE_ASSOCIATED_OPTION_LIKE_T) {
             let i8Ty = unsafe { LLVMInt8TypeInContext(cgCtx.GetLLVMContext().raw) }
             llvmType = i8Ty
@@ -185,6 +200,11 @@ public class CGEnumType <: CGCustomType {
         if (cgEnumTypeKind == CGEnumTypeKind.UNKNOWN) {
             cgEnumTypeKind = ClassifyEnumType()
         }
+        if (cgEnumTypeKind == CGEnumTypeKind.NON_EXHAUSTIVE_ASSOCIATED ||
+            cgEnumTypeKind == CGEnumTypeKind.EXHAUSTIVE_OTHER) {
+            containedCGTypes.add(CGType.GetOrCreate(cgMod, cgCtx.GetCHIRBuilder().context.GetInt32Ty()))
+            return
+        }
         if (cgEnumTypeKind == CGEnumTypeKind.EXHAUSTIVE_ASSOCIATED_OPTION_LIKE_T) {
             return
         }
@@ -206,6 +226,19 @@ public class CGEnumType <: CGCustomType {
     }
 
     protected override func CalculateSizeAndAlign(): Unit {
+        if (cgEnumTypeKind == CGEnumTypeKind.NON_EXHAUSTIVE_ASSOCIATED ||
+            cgEnumTypeKind == CGEnumTypeKind.EXHAUSTIVE_OTHER ||
+            cgEnumTypeKind == CGEnumTypeKind.EXHAUSTIVE_ASSOCIATED_OPTION_LIKE_REF) {
+            let rawTy = GetLLVMType()
+            size = Int64(cgMod.GetTypeSize(rawTy))
+            align = Int64(cgMod.GetABITypeAlignment(rawTy))
+            return
+        }
+        if (cgEnumTypeKind == CGEnumTypeKind.EXHAUSTIVE_ASSOCIATED_OPTION_LIKE_T) {
+            size = None
+            align = None
+            return
+        }
         if (ContainsGenericType(chirType)) {
             size = None
             align = None
