@@ -35,6 +35,11 @@ public func CastValueToType(irBuilder: IRBuilder2, sourceValue: LLVMValueRef, so
         irBuilder.StoreValueToObjectPayload(objectValue, sourceValue, sourceTy)
         return objectValue
     }
+    if (sourceTy.StripAllRefs().IsValueType() && IsObjectReferenceType(targetTy)) {
+        let objectValue = irBuilder.CallValueIntrinsicAlloc(sourceTy)
+        irBuilder.StoreValueToObjectPayload(objectValue, sourceValue, sourceTy)
+        return objectValue
+    }
     if (IsIntegerLikeType(sourceTy) && IsIntegerLikeType(targetTy)) {
         return EmitIntegerCast(irBuilder, sourceValue, sourceTy, targetTy, targetLLVMType)
     }
@@ -106,6 +111,11 @@ private func IsSignedIntegerLikeType(ty: Type): Bool {
 
 private func IsPointerLikeType(ty: Type): Bool {
     return ty.IsRef() || ty.IsReferenceType() || ty.IsCPointer() || ty.IsCString() || ty.IsFunc()
+}
+
+private func IsObjectReferenceType(ty: Type): Bool {
+    let strippedTy = ty.StripAllRefs()
+    return strippedTy.IsClassOrArray() || strippedTy.IsBox() || strippedTy.IsThis()
 }
 
 private func GetIntegerBitWidth(ty: Type): Int64 {

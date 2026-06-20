@@ -19,6 +19,8 @@ public class CGFunctionType <: CGType {
     private var hasBasePtr: Bool = false
     private var llvmFunctionType: Option<LLVMTypeRef> = None
     private let realParamIndices: ArrayList<Int64> = ArrayList<Int64>()
+    private var methodTypeInfoIndex: Option<Int64> = None
+    private var staticMethodTypeInfoIndex: Option<Int64> = None
     private let chirFunc: Option<Function>
     private let allowBasePtr: Bool
     private let methodType: Bool
@@ -52,6 +54,8 @@ public class CGFunctionType <: CGType {
     public func IsStaticMethodType(): Bool { return staticMethodType }
     public func IsConstructorType(): Bool { return constructorType }
     public func GetRealArgIndices(): ArrayList<Int64> { return realParamIndices }
+    public func GetMethodTypeInfoIndex(): Option<Int64> { Complete(); return methodTypeInfoIndex }
+    public func GetStaticMethodTypeInfoIndex(): Option<Int64> { Complete(); return staticMethodTypeInfoIndex }
 
     public func GetLLVMFunctionType(): LLVMTypeRef {
         Complete()
@@ -101,9 +105,11 @@ public class CGFunctionType <: CGType {
                 }
             }
             if (methodType) {
+                methodTypeInfoIndex = Some(paramLLVMTypes.size)
                 paramLLVMTypes.add(CGType.GetOrCreateTypeInfoPtrType(cgCtx.GetLLVMContext()))
             }
             if (staticMethodType) {
+                staticMethodTypeInfoIndex = Some(paramLLVMTypes.size)
                 paramLLVMTypes.add(CGType.GetOrCreateTypeInfoPtrType(cgCtx.GetLLVMContext()))
             }
             if (paramLLVMTypes.isEmpty()) {
