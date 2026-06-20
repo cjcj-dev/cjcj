@@ -732,6 +732,9 @@ private class CjoSignatureMaterializer {
 
     private func MaterializePropertyAccessorSignature(propName: String, signature: String, propStart: Int64,
         mangle: String): Unit {
+        if (MaterializeDirectPropertyAccessorSignature(propName, signature, propStart, mangle)) {
+            return
+        }
         let ownerStart = propStart + 1
         let memberStart = FindExtendMemberStart(signature, ownerStart)
         if (memberStart <= ownerStart || memberStart >= signature.size) {
@@ -742,6 +745,28 @@ private class CjoSignatureMaterializer {
         let genericMark = PushGenericParams(extendDecl)
         MaterializePropertyAccessor(propName, signature, memberStart, mangle, extendDecl)
         RestoreGenericParams(genericMark)
+    }
+
+    private func MaterializeDirectPropertyAccessorSignature(propName: String, signature: String, propStart: Int64,
+        mangle: String): Bool {
+        let ownerStart = propStart + 1
+        let parsedOwner = ParseLengthText(signature, ownerStart)
+        if (!parsedOwner.ok || parsedOwner.text.isEmpty()) {
+            return false
+        }
+        var pos = parsedOwner.next
+        let genericArity = ParseGenericArity(signature, pos)
+        if (genericArity.ok) {
+            pos = genericArity.next
+        }
+        if (pos >= signature.size || !IsNominalKind(signature[pos])) {
+            return false
+        }
+        let owner = EnsureNominal(parsedOwner.text, signature[pos], genericArity.arity)
+        let genericMark = PushGenericParams(owner)
+        MaterializePropertyAccessor(propName, signature, pos + 1, mangle, owner)
+        RestoreGenericParams(genericMark)
+        return true
     }
 
     private func MaterializePropertyAccessor(propName: String, signature: String, accessorStart: Int64,
