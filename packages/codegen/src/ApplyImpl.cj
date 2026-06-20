@@ -10,13 +10,11 @@ import cangjie_compiler::chir.Value
 
 public func EmitCallLikeExpression(irBuilder: IRBuilder2, chirExpr: Expression): LLVMValueRef {
     if (let Some(applyExpr) <- (chirExpr as Apply)) {
-        return GenerateApplyWithThisType(irBuilder, applyExpr.GetCallee(), applyExpr.GetArgs(),
-            applyExpr.GetThisType(), callType: None, isMethodType: false, isStaticMethodType: false)
+        return GenerateApply(irBuilder, applyExpr.GetCallee(), applyExpr.GetArgs(), thisType: applyExpr.GetThisType())
     }
     if (let Some(applyWithExceptionExpr) <- (chirExpr as ApplyWithException)) {
-        return GenerateApplyWithThisType(irBuilder, applyWithExceptionExpr.GetCallee(),
-            applyWithExceptionExpr.GetArgs(), applyWithExceptionExpr.GetThisType(),
-            callType: None, isMethodType: false, isStaticMethodType: false)
+        return GenerateApply(irBuilder, applyWithExceptionExpr.GetCallee(), applyWithExceptionExpr.GetArgs(),
+            thisType: applyWithExceptionExpr.GetThisType())
     }
     if (chirExpr.GetNumOfOperands() == 0) {
         return LLVMNullValue()
@@ -31,23 +29,29 @@ public func EmitCallLikeExpression(irBuilder: IRBuilder2, chirExpr: Expression):
 }
 
 public func GenerateApply(irBuilder: IRBuilder2, callee: Value, args: ArrayList<Value>): LLVMValueRef {
-    return GenerateApply(irBuilder, callee, args, callType: None, isMethodType: false, isStaticMethodType: false)
+    return GenerateApply(irBuilder, callee, args, thisType: None)
+}
+
+private func GenerateApply(irBuilder: IRBuilder2, callee: Value, args: ArrayList<Value>,
+    thisType!: Option<Type>): LLVMValueRef {
+    return GenerateApply(irBuilder, callee, args, callType: None, isMethodType: false, isStaticMethodType: false,
+        thisType: thisType)
 }
 
 public func GenerateApply(irBuilder: IRBuilder2, callee: Value, args: ArrayList<Value>, callType!: Option<FuncType>,
     isMethodType!: Bool, isStaticMethodType!: Bool): LLVMValueRef {
-    return GenerateApplyWithThisType(irBuilder, callee, args, None, callType: callType,
-        isMethodType: isMethodType, isStaticMethodType: isStaticMethodType)
+    return GenerateApply(irBuilder, callee, args, callType: callType, isMethodType: isMethodType,
+        isStaticMethodType: isStaticMethodType, thisType: None)
 }
 
-private func GenerateApplyWithThisType(irBuilder: IRBuilder2, callee: Value, args: ArrayList<Value>,
-    thisType: Option<Type>, callType!: Option<FuncType>, isMethodType!: Bool,
-    isStaticMethodType!: Bool): LLVMValueRef {
+private func GenerateApply(irBuilder: IRBuilder2, callee: Value, args: ArrayList<Value>, callType!: Option<FuncType>,
+    isMethodType!: Bool, isStaticMethodType!: Bool, thisType!: Option<Type>): LLVMValueRef {
     let calleeValue = irBuilder.GetCGModule().MaterializeValue(irBuilder, callee)
     let argValues = ArrayList<CGValue>()
     for (arg in args) {
         argValues.add(irBuilder.GetCGModule().MaterializeValue(irBuilder, arg))
     }
+    let methodTypeInfoArg = BuildApplyMethodTypeInfoArg(irBuilder, thisType)
     if (let Some(instFuncTy) <- callType) {
         let typeInfo = TypeExtraInfo()
         typeInfo.isMethod = isMethodType
@@ -56,13 +60,14 @@ private func GenerateApplyWithThisType(irBuilder: IRBuilder2, callee: Value, arg
             extraInfo: typeInfo) as CGFunctionType)) {
             let typedCallee = irBuilder.CreateBitCast(calleeValue.GetRawValue(), instCGFuncTy.GetLLVMType(),
                 name: "call.callee")
-            return irBuilder.CreateCallOrInvoke(instCGFuncTy, typedCallee, argValues, name: "call")
+            return irBuilder.CreateCallOrInvokeWithMethodTypeInfo(instCGFuncTy, typedCallee, argValues,
+                methodTypeInfoArg, name: "call")
         }
     }
     if (let Some(cgFunctionValue) <- (calleeValue as CGFunction)) {
-        if (let Some(functionType) <- cgFunctionValue.GetCGFunctionType()) {
-            return irBuilder.CreateCallOrInvokeWithMethodTypeInfo(functionType, cgFunctionValue.GetRawFunction(),
-                argValues, CreateOuterTypeInfoArg(irBuilder, thisType), name: "call")
+        if (let Some(cgFuncTy) <- cgFunctionValue.GetCGFunctionType()) {
+            return irBuilder.CreateCallOrInvokeWithMethodTypeInfo(cgFuncTy, cgFunctionValue.GetRawFunction(),
+                argValues, methodTypeInfoArg, name: "call")
         }
         return irBuilder.CreateCallOrInvoke(cgFunctionValue, args: argValues, name: "call")
     }
@@ -71,18 +76,18 @@ private func GenerateApplyWithThisType(irBuilder: IRBuilder2, callee: Value, arg
             if (let Some(funcTy) <- (functionType.GetOriginal() as FuncType)) {
                 return GenerateClosureApply(irBuilder, calleeValue, funcTy, argValues)
             }
-            return irBuilder.CreateCallOrInvoke(functionType, calleeValue.GetRawValue(), argValues, name: "call")
+            return irBuilder.CreateCallOrInvokeWithMethodTypeInfo(functionType, calleeValue.GetRawValue(), argValues,
+                methodTypeInfoArg, name: "call")
         }
     }
     return LLVMNullValue()
 }
 
-private func CreateOuterTypeInfoArg(irBuilder: IRBuilder2, thisType: Option<Type>): Option<LLVMValueRef> {
+private func BuildApplyMethodTypeInfoArg(irBuilder: IRBuilder2, thisType: Option<Type>): Option<LLVMValueRef> {
     if (let Some(ty) <- thisType) {
-        let stripped = ty.StripAllRefs()
-        if (stripped.IsClass() || stripped.IsStruct() || stripped.IsEnum() || stripped.IsTuple()) {
-            return Some(CGType.GetOrCreate(irBuilder.GetCGModule(), stripped).GetOrCreateTypeInfo())
-        }
+        let typeInfo = CGType.GetOrCreate(irBuilder.GetCGModule(), ty.StripAllRefs()).GetOrCreateTypeInfo()
+        let typeInfoPtrType = CGType.GetOrCreateTypeInfoPtrType(irBuilder.GetLLVMContext())
+        return Some(irBuilder.CreateBitCast(typeInfo, typeInfoPtrType, name: "call.this.ti"))
     }
     return None
 }
