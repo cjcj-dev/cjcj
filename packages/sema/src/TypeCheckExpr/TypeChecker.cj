@@ -384,6 +384,60 @@ private func typeCheckExprConcreteBinaryCandidateKinds(op: TokenKind): ArrayList
     return kinds
 }
 
+private class TypeCheckerTargetSnapshot {
+    let node: Node
+    let target: Option<Decl>
+    let targets: ArrayList<Decl> = ArrayList<Decl>()
+
+    init(node: Node) {
+        this.node = node
+        this.target = node.GetTarget()
+        for (value in node.GetTargets()) {
+            targets.add(value)
+        }
+    }
+
+    func Restore(): Unit {
+        node.SetTarget(target)
+        if (let Some(refExpr) <- (node as RefExpr)) {
+            refExpr.ref.targets.clear()
+            for (value in targets) {
+                refExpr.ref.targets.add(value)
+            }
+        } else if (let Some(memberAccess) <- (node as MemberAccess)) {
+            memberAccess.targets.clear()
+            for (value2 in targets) {
+                memberAccess.targets.add(value2)
+            }
+        } else if (let Some(refType) <- (node as RefType)) {
+            refType.ref.targets.clear()
+            for (value3 in targets) {
+                refType.ref.targets.add(value3)
+            }
+        }
+    }
+}
+
+private func typeCheckExprCollectTargetSnapshots(node: Node): ArrayList<TypeCheckerTargetSnapshot> {
+    let snapshots = ArrayList<TypeCheckerTargetSnapshot>()
+    let walker = Walker(node, visitPre: { current: Node =>
+        if ((let Some(_) <- current.GetTarget()) || !current.GetTargets().isEmpty()) {
+            snapshots.add(TypeCheckerTargetSnapshot(current))
+        }
+        VisitAction.WALK_CHILDREN
+    })
+    let _ = walker.Walk()
+    return snapshots
+}
+
+private func typeCheckExprClearKeepTargets(expr: Expr): Unit {
+    let snapshots = typeCheckExprCollectTargetSnapshots(expr)
+    expr.Clear()
+    for (snapshot in snapshots) {
+        snapshot.Restore()
+    }
+}
+
 public class TypeChecker {
     private var ci: Option<CompilerInstance> = None
     private var impl: TypeCheckerImpl = TypeCheckerImpl()
@@ -1977,6 +2031,19 @@ public class TypeChecker {
         return ty
     }
 
+    private func CurrentFunctionParam(name: String): Option<FuncParam> {
+        if (let Some(fb) <- currentFuncBody) {
+            for (paramList in fb.paramLists) {
+                for (param in paramList.params) {
+                    if (param.identifier.Val() == name) {
+                        return Some(param)
+                    }
+                }
+            }
+        }
+        return None
+    }
+
     private func SynthesizeDesugarIfNeeded(ctx: ASTContext, expr: Expr): Unit {
         if (let Some(desugar) <- expr.desugarExpr) {
             let _ = Synthesize(ctx, desugar)
@@ -2262,8 +2329,8 @@ public class TypeChecker {
             if (!impl.typeManager.IsSubtype(candidateTy, targetTy)) {
                 continue
             }
-            leftExpr.Clear()
-            rightExpr.Clear()
+            typeCheckExprClearKeepTargets(leftExpr)
+            typeCheckExprClearKeepTargets(rightExpr)
             let leftOk = Check(ctx, candidateTy, leftExpr)
             let rightOk = Check(ctx, candidateTy, rightExpr)
             if (leftOk && rightOk) {
@@ -2340,6 +2407,14 @@ public class TypeChecker {
             return
         }
         let targets = impl.Lookup(ctx, refExpr.ref.identifier.Val(), scopeNameOf(refExpr), refExpr)
+        if (let Some(param) <- CurrentFunctionParam(refExpr.ref.identifier.Val())) {
+            if (targets.isEmpty()) {
+                targets.add(param)
+            } else if (targets[0].astKind == ASTKind.FUNC_PARAM && !SameDecl(targets[0], param)) {
+                targets.clear()
+                targets.add(param)
+            }
+        }
         if (targets.isEmpty() && ctx.IsEnumConstructor(refExpr.ref.identifier.Val())) {
             var arity: UInt64 = 0u64
             if (let Some(owner) <- refExpr.callOrPattern) {
