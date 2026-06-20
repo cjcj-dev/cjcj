@@ -37,6 +37,7 @@ import cangjie_compiler::ast.InterfaceTy as AstInterfaceTy
 import cangjie_compiler::ast.InterfaceDecl as AstInterfaceDecl
 import cangjie_compiler::ast.JumpExpr as AstJumpExpr
 import cangjie_compiler::ast.LambdaExpr as AstLambdaExpr
+import cangjie_compiler::ast.LetPatternDestructor as AstLetPatternDestructor
 import cangjie_compiler::ast.LitConstExpr as AstLitConstExpr
 import cangjie_compiler::ast.LitConstKind as AstLitConstKind
 import cangjie_compiler::ast.MainDecl as AstMainDecl
@@ -44,6 +45,7 @@ import cangjie_compiler::ast.MatchExpr as AstMatchExpr
 import cangjie_compiler::ast.MemberAccess as AstMemberAccess
 import cangjie_compiler::ast.NameReferenceExpr as AstNameReferenceExpr
 import cangjie_compiler::ast.Node as AstNode
+import cangjie_compiler::ast.ParenExpr as AstParenExpr
 import cangjie_compiler::ast.Pattern as AstPattern
 import cangjie_compiler::ast.PropDecl as AstPropDecl
 import cangjie_compiler::ast.RefExpr as AstRefExpr
@@ -546,9 +548,92 @@ public class Translator {
         return None
     }
 
-    public func Visit(expr: AstIfExpr): Option<Value> {
-        let cond = Translator.TranslateASTNode(RequireExpr(expr.condExpr, "if condition"), this) ??
+    private func IfConditionHasLetPattern(expr: AstExpr): Bool {
+        if (let Some(_) <- (expr as AstLetPatternDestructor)) {
+            return true
+        }
+        if (let Some(parenExpr) <- (expr as AstParenExpr)) {
+            if (let Some(inner) <- parenExpr.expr) {
+                return IfConditionHasLetPattern(inner)
+            }
+            return false
+        }
+        if (let Some(binaryExpr) <- (expr as AstBinaryExpr)) {
+            if (binaryExpr.op == AstTokenKind.AND || binaryExpr.op == AstTokenKind.OR) {
+                if (let Some(left) <- binaryExpr.leftExpr) {
+                    if (IfConditionHasLetPattern(left)) {
+                        return true
+                    }
+                }
+                if (let Some(right) <- binaryExpr.rightExpr) {
+                    return IfConditionHasLetPattern(right)
+                }
+            }
+        }
+        return false
+    }
+
+    private func TranslateIfCondition(expr: AstExpr, trueBlock: Block, falseBlock: Block): Unit {
+        if (let Some(parenExpr) <- (expr as AstParenExpr)) {
+            TranslateIfCondition(RequireExpr(parenExpr.expr, "parenthesized if condition"), trueBlock, falseBlock)
+            return
+        }
+        if (let Some(letPattern) <- (expr as AstLetPatternDestructor)) {
+            TranslateLetPatternCondition(letPattern, trueBlock, falseBlock)
+            return
+        }
+        if (let Some(binaryExpr) <- (expr as AstBinaryExpr)) {
+            if ((binaryExpr.op == AstTokenKind.AND || binaryExpr.op == AstTokenKind.OR) &&
+                IfConditionHasLetPattern(binaryExpr)) {
+                let group = RequireParentBlockGroup(CurrentBlock(), "if condition")
+                let rightEntry = builder.CreateBlock(group)
+                if (binaryExpr.op == AstTokenKind.AND) {
+                    TranslateIfCondition(RequireExpr(binaryExpr.leftExpr, "if && lhs"), rightEntry, falseBlock)
+                    currentBlock = rightEntry
+                    TranslateIfCondition(RequireExpr(binaryExpr.rightExpr, "if && rhs"), trueBlock, falseBlock)
+                } else {
+                    TranslateIfCondition(RequireExpr(binaryExpr.leftExpr, "if || lhs"), trueBlock, rightEntry)
+                    currentBlock = rightEntry
+                    TranslateIfCondition(RequireExpr(binaryExpr.rightExpr, "if || rhs"), trueBlock, falseBlock)
+                }
+                return
+            }
+        }
+        let cond = Translator.TranslateASTNode(expr, this) ??
             throw IllegalStateException("faithful AST2CHIR if condition produced no value")
+        builder.CreateBranch(cond, trueBlock, falseBlock, CurrentBlock())
+    }
+
+    private func TranslateLetPatternCondition(letPattern: AstLetPatternDestructor, trueBlock: Block,
+        falseBlock: Block): Unit {
+        let selector = Translator.TranslateASTNode(RequireExpr(letPattern.initializer, "if-let initializer"), this) ??
+            throw IllegalStateException("faithful AST2CHIR if-let initializer produced no value")
+        let group = RequireParentBlockGroup(CurrentBlock(), "if-let condition")
+        let matchedBlock = builder.CreateBlock(group)
+        if (letPattern.patterns.size == 1) {
+            TranslateSinglePatternBranch(letPattern.patterns[0], selector, matchedBlock, falseBlock)
+            currentBlock = matchedBlock
+            BindPatternValues(letPattern.patterns[0], selector)
+            builder.CreateGoTo(trueBlock, CurrentBlock())
+            return
+        }
+        var patternIndex: Int64 = 0
+        while (patternIndex < letPattern.patterns.size) {
+            let nextBlock = if (patternIndex == letPattern.patterns.size - 1) {
+                falseBlock
+            } else {
+                builder.CreateBlock(group)
+            }
+            TranslateSinglePatternBranch(letPattern.patterns[patternIndex], selector, matchedBlock, nextBlock)
+            currentBlock = nextBlock
+            patternIndex++
+        }
+        currentBlock = matchedBlock
+        builder.CreateGoTo(trueBlock, CurrentBlock())
+    }
+
+    public func Visit(expr: AstIfExpr): Option<Value> {
+        let condExpr = RequireExpr(expr.condExpr, "if condition")
         let parentBlock = CurrentBlock()
         let group = parentBlock.GetParentBlockGroup() ??
             throw IllegalStateException("faithful AST2CHIR if requires parent block group")
@@ -561,7 +646,7 @@ public class Translator {
         } else {
             RequireResult(builder.CreateAllocate(builder.context.GetRefTy(resultTy), resultTy, parentBlock))
         }
-        builder.CreateBranch(cond, thenBlock, elseBlock, parentBlock)
+        TranslateIfCondition(condExpr, thenBlock, elseBlock)
 
         currentBlock = thenBlock
         let thenValue = Translator.TranslateASTNode(RequireBlock(expr.thenBody, "if then body"), this)
