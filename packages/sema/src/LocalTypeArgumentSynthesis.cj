@@ -33,6 +33,14 @@ private func containsTy(values: ArrayList<Ty>, ty: Ty): Bool {
     return false
 }
 
+private func ToTySet(values: ArrayList<GenericsTy>): TySet {
+    let out = TySet()
+    for (value in values) {
+        out.Add(value)
+    }
+    return out
+}
+
 private func substContainsTyVar(subst: TypeSubst, tyVar: GenericsTy): Bool {
     for (entry in subst.entries) {
         if (entry.ty.Contains(tyVar)) {
@@ -702,13 +710,7 @@ public class LocalTypeArgumentSynthesis {
         if (lbs.values.isEmpty()) {
             return None
         }
-        var result = lbs.values[0]
-        var idx: Int64 = 1
-        while (idx < lbs.values.size) {
-            result = Join(tyMgr, result, lbs.values[idx])
-            idx++
-        }
-        return result
+        return JoinAsVisibleTy(tyMgr, lbs, ignoredTyVars: ToTySet(argPack.tyVarsToSolve))
     }
 
     private func MeetUpperBounds(tyVar: GenericsTy, ubs: TySet): Option<Ty> {
@@ -745,13 +747,7 @@ public class LocalTypeArgumentSynthesis {
         if (values.values.isEmpty()) {
             return None
         }
-        var result = values.values[0]
-        var idx: Int64 = 1
-        while (idx < values.values.size) {
-            result = Meet(tyMgr, result, values.values[idx])
-            idx++
-        }
-        return result
+        return MeetAsVisibleTy(tyMgr, values, ignoredTyVars: ToTySet(argPack.tyVarsToSolve))
     }
 
     private func NormalizeSolution(ty: Ty): Ty {

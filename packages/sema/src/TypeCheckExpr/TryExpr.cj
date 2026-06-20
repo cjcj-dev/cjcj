@@ -19,7 +19,7 @@ private func TryInvalid(te: TryExpr): Ty {
     return TcInvalid(te)
 }
 
-private func JoinTryTy(typeManager: TypeManager, currentTy: Ty, branchTy: Ty): Ty {
+private func JoinTryTy(typeManager: TypeManager, currentTy: Ty, branchTy: Ty, curFile: Option<File>): Ty {
     if (!Ty.IsTyCorrect(currentTy) || !Ty.IsTyCorrect(branchTy)) {
         return TypeManager.GetInvalidTy()
     }
@@ -29,7 +29,10 @@ private func JoinTryTy(typeManager: TypeManager, currentTy: Ty, branchTy: Ty): T
     if (branchTy.IsNothing()) {
         return currentTy
     }
-    return Join(typeManager, currentTy, branchTy)
+    let tys = TySet()
+    tys.Add(currentTy)
+    tys.Add(branchTy)
+    return JoinAsVisibleTy(typeManager, tys, curFile: curFile)
 }
 
 private func IsCommandTy(ty: Ty): Bool {
@@ -189,7 +192,7 @@ private func CheckExceptTypePattern(typeManager: TypeManager, exceptPattern: Exc
         if (let Some(typeTy) <- typeNode.GetTy()) {
             if (IsThrowableCatchTy(typeManager, typeTy)) {
                 if (AddIncludedType(typeManager, included, typeTy)) {
-                    joinedTy = JoinTryTy(typeManager, joinedTy, typeTy)
+                    joinedTy = JoinTryTy(typeManager, joinedTy, typeTy, typeNode.curFile)
                     ok = Ty.IsTyCorrect(joinedTy) && ok
                 } else {
                     ok = false
@@ -435,7 +438,7 @@ private func SynTryExprCatchesAndHandles(typeManager: TypeManager, te: TryExpr, 
         }
         let catchTy = SynBlock(typeManager, catchBlock)
         if (Ty.IsTyCorrect(catchTy)) {
-            joinedTy = JoinTryTy(typeManager, joinedTy, catchTy)
+            joinedTy = JoinTryTy(typeManager, joinedTy, catchTy, te.curFile)
             ok = Ty.IsTyCorrect(joinedTy) && ok
         } else {
             ok = false
@@ -447,7 +450,7 @@ private func SynTryExprCatchesAndHandles(typeManager: TypeManager, te: TryExpr, 
         } else if (let Some(block) <- handler.block) {
             let handlerTy = SynBlock(typeManager, block)
             if (Ty.IsTyCorrect(handlerTy)) {
-                joinedTy = JoinTryTy(typeManager, joinedTy, handlerTy)
+                joinedTy = JoinTryTy(typeManager, joinedTy, handlerTy, te.curFile)
                 ok = Ty.IsTyCorrect(joinedTy) && ok
             } else {
                 ok = false
