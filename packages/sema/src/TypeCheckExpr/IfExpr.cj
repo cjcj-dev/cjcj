@@ -23,7 +23,7 @@ private func IsIfExprWithoutElse(ie: IfExpr): Bool {
     return false
 }
 
-private func JoinIfBranchTys(typeManager: TypeManager, thenTy: Ty, elseTy: Ty): Ty {
+private func JoinIfBranchTys(typeManager: TypeManager, thenTy: Ty, elseTy: Ty, curFile: Option<File>): Ty {
     if (!Ty.IsTyCorrect(thenTy) || !Ty.IsTyCorrect(elseTy)) {
         return TypeManager.GetInvalidTy()
     }
@@ -33,7 +33,10 @@ private func JoinIfBranchTys(typeManager: TypeManager, thenTy: Ty, elseTy: Ty): 
     if (elseTy.IsNothing()) {
         return thenTy
     }
-    return Join(typeManager, thenTy, elseTy)
+    let tys = TySet()
+    tys.Add(thenTy)
+    tys.Add(elseTy)
+    return JoinAsVisibleTy(typeManager, tys, curFile: curFile)
 }
 
 private func SynIfBranches(typeManager: TypeManager, ie: IfExpr): Bool {
@@ -71,7 +74,7 @@ public func SynIfExpr(typeManager: TypeManager, ie: IfExpr): Ty {
             let elseTy = typeManager.GetThisRealTy(TcReplaceIdeal(typeManager, elseExpr))
             thenBody.SetTy(thenTy)
             elseExpr.SetTy(elseTy)
-            let joinedTy = JoinIfBranchTys(typeManager, thenTy, elseTy)
+            let joinedTy = JoinIfBranchTys(typeManager, thenTy, elseTy, ie.curFile)
             if (Ty.IsTyCorrect(joinedTy)) {
                 ie.SetTy(joinedTy)
                 return joinedTy

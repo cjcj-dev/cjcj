@@ -245,7 +245,7 @@ public func SynArrayLit(typeManager: TypeManager, arrayLit: ArrayLit, arrayStruc
             return InvalidExprTy(arrayLit)
         }
     }
-    let elemTy = JoinCaseTysForBuiltin(typeManager, elemTys)
+    let elemTy = JoinCaseTysForBuiltin(typeManager, elemTys, arrayLit.curFile)
     if (let None <- arrayStruct) {
         return InvalidExprTy(arrayLit)
     }
@@ -769,17 +769,15 @@ private func TypeNodeFromCallBase(ce: CallExpr): Option<Type> {
     return typeNode
 }
 
-private func JoinCaseTysForBuiltin(typeManager: TypeManager, tys: ArrayList<Ty>): Ty {
+private func JoinCaseTysForBuiltin(typeManager: TypeManager, tys: ArrayList<Ty>, curFile: Option<File>): Ty {
     if (tys.isEmpty()) {
         return TypeManager.GetInvalidTy()
     }
-    var out = tys[0]
-    var idx: Int64 = 1
-    while (idx < tys.size) {
-        out = Join(typeManager, out, tys[idx])
-        idx++
+    let tySet = TySet()
+    for (ty in tys) {
+        tySet.Add(ty)
     }
-    return out
+    return JoinAsVisibleTy(typeManager, tySet, curFile: curFile)
 }
 
 public func ChkBuiltinCallWithDiag(diag: BasicDiagnosticEngine, typeManager: TypeManager, target: Ty,
