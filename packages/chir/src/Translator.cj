@@ -2150,7 +2150,8 @@ public class Translator {
         }
         if (let Some(typePattern) <- (pattern as AstTypePattern)) {
             if (let Some(inner) <- typePattern.pattern) {
-                BindPatternValues(inner, selector)
+                let castedSelector = CastValueIfNeeded(selector, chirTy.TranslateType(RequireAstTy(typePattern)))
+                BindPatternValues(inner, castedSelector)
             }
             return
         }
