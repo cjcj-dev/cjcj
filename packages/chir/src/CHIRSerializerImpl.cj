@@ -135,7 +135,13 @@ class CHIRSerializerImpl {
         fields.add(globalVar.GetRawMangledName())
         fields.add(globalVar.GetPackageName())
         fields.add(if (let Some(ty) <- globalVar.GetType()) { CHIRSerializeType(ty) } else { "" })
-        fields.add(if (let Some(initValue) <- globalVar.GetInitializerValue()) { CHIRValueId(initValue) } else { "" })
+        fields.add(if (let Some(initValue) <- globalVar.GetInitializerValue()) {
+            CHIRValueId(initValue)
+        } else if (let Some(initFunc) <- globalVar.GetInitFunc()) {
+            CHIRValueId(initFunc)
+        } else {
+            ""
+        })
         fields.add(CHIRWireJoinList(globalVar.GetFeatures()))
         fields.add(if (let Some(parentDef) <- globalVar.GetParentCustomTypeDef()) { CHIRBaseId(parentDef) } else { "" })
         fields.add(CHIRSerializeAnnoInfo(globalVar.GetAnnoInfo()))

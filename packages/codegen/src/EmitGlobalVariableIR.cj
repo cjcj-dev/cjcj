@@ -19,6 +19,14 @@ private class GlobalVariableGeneratorImpl <: IRGeneratorImpl {
             let builder = IRBuilder2(cgMod)
             let initValue = cgMod.MaterializeValue(builder, initializer)
             unsafe { LLVMSetInitializer(globalValue.GetRawValue(), initValue.GetRawValue()) }
+        } else if (chirGV.GetInitFunc().isSome()) {
+            let globalType = globalValue.GetCGType() ??
+                throw IllegalStateException("global variable emission produced no CG type: " +
+                    chirGV.GetIdentifierWithoutPrefix())
+            let elementType = globalType.GetPointerElementType() ??
+                throw IllegalStateException("global variable emission expected ref type: " +
+                    chirGV.GetIdentifierWithoutPrefix())
+            unsafe { LLVMSetInitializer(globalValue.GetRawValue(), LLVMConstNull(elementType.GetLLVMType())) }
         }
     }
 

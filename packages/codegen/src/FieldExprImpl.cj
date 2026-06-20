@@ -106,6 +106,18 @@ private func GenerateEnumTupleCastField(irBuilder: IRBuilder2, base: Value,
         return None
     }
     let baseValue = irBuilder.GetCGModule().MaterializeValue(irBuilder, base).GetRawValue()
+    if (let Some(enumCGType) <- (CGType.GetOrCreate(irBuilder.GetCGModule(), sourceTy.StripAllRefs()) as CGEnumType)) {
+        if (enumCGType.IsAllAssociatedValuesAreNonRef() || enumCGType.IsOptionLikeNonRef()) {
+            var extracted = baseValue
+            for (item in path) {
+                extracted = irBuilder.CreateExtractValue(extracted, UInt32(item), name: name)
+            }
+            if (let Some(fieldType) <- GetFieldCGTypeAtPath(enumCGType, path)) {
+                return Some(CastExtractedFieldIfNeeded(irBuilder, extracted, fieldType.GetOriginal(), expectedTy))
+            }
+            return Some(extracted)
+        }
+    }
     return Some(LoadObjectPayloadField(irBuilder, baseValue, targetTy, path, name, expectedTy))
 }
 

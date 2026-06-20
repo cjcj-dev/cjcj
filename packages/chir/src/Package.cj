@@ -85,7 +85,7 @@ public class Package {
     public func GetGlobalVarsWithoutInit(): ArrayList<GlobalVar> {
         let out = ArrayList<GlobalVar>()
         for (item in globalVars) {
-            if (item.GetInitializerValue().isNone() && !item.IsSrcCodeImported()) {
+            if (item.GetInitializerValue().isNone() && item.GetInitFunc().isNone() && !item.IsSrcCodeImported()) {
                 out.add(item)
             }
         }
@@ -95,7 +95,8 @@ public class Package {
     public func GetGlobalVarsWithInit(includeSrcCodeImported!: Bool = true): ArrayList<GlobalVar> {
         let out = ArrayList<GlobalVar>()
         for (item in globalVars) {
-            if (item.GetInitializerValue().isSome() && (includeSrcCodeImported || !item.IsSrcCodeImported())) {
+            if ((item.GetInitializerValue().isSome() || item.GetInitFunc().isSome()) &&
+                (includeSrcCodeImported || !item.IsSrcCodeImported())) {
                 out.add(item)
             }
         }
