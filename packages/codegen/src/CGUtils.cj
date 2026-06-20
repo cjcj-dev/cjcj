@@ -108,10 +108,6 @@ public func IsAutoEnvInstBaseType(chirTy: Type): Bool {
     return false
 }
 
-public func AutoEnvPayloadPrefixFields(chirTy: Type): UInt64 {
-    return if (IsAutoEnvType(chirTy)) { 2u64 } else { 0u64 }
-}
-
 public func IsGenericRef(chirTy: Type): Bool {
     let typeArgs = chirTy.GetTypeArgs()
     return chirTy.IsRef() && !typeArgs.isEmpty() && typeArgs[0].IsGeneric()

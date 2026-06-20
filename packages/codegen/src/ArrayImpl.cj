@@ -427,30 +427,13 @@ private func CreateElementAddress(irBuilder: IRBuilder2, baseValue: CGValue, ind
                 let payload = irBuilder.GetPayloadFromObject(baseValue.GetRawValue())
                 let typedPayload = irBuilder.CreateBitCast(payload,
                     unsafe { LLVMPointerType(layoutType, 1u32) }, name: name + ".payload")
-                return irBuilder.CreateGEP(layoutType, typedPayload,
-                    AdjustClassElementIndices(baseType.GetOriginal(), indices), name: name)
+                return irBuilder.CreateGEP(layoutType, typedPayload, indices, name: name)
             }
             return irBuilder.CreateGEP(elementType.GetLLVMType(), baseValue.GetRawValue(), indices, name: name)
         }
         return irBuilder.CreateGEP(baseType.GetLLVMType(), baseValue.GetRawValue(), indices, name: name)
     }
     return LLVMNullValue()
-}
-
-private func AdjustClassElementIndices(baseTy: Type, indices: ArrayList<LLVMValueRef>): ArrayList<LLVMValueRef> {
-    let out = ArrayList<LLVMValueRef>()
-    let prefix = AutoEnvPayloadPrefixFields(baseTy)
-    var idx: Int64 = 0
-    while (idx < indices.size) {
-        if (idx == 1 && prefix != 0u64) {
-            let rawIndex = unsafe { LLVMConstIntGetZExtValue(indices[idx]) }
-            out.add(unsafe { LLVMConstInt(LLVMTypeOf(indices[idx]), rawIndex + prefix, 0) })
-        } else {
-            out.add(indices[idx])
-        }
-        idx++
-    }
-    return out
 }
 
 private func ResolveElementPathByNames(baseTy: Type, names: ArrayList<String>): Option<ArrayList<UInt64>> {
