@@ -26,6 +26,9 @@ public func CastValueToType(irBuilder: IRBuilder2, sourceValue: LLVMValueRef, so
     if (sourceTy.IsEqual(targetTy)) {
         return sourceValue
     }
+    if (sourceTy.IsEnum() && targetTy.IsTuple()) {
+        return sourceValue
+    }
     if (targetTy.IsGeneric()) {
         let sourceCGType = CGType.GetOrCreate(irBuilder.GetCGModule(), sourceTy.StripAllRefs())
         if (sourceCGType.IsReference()) {

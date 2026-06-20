@@ -99,6 +99,7 @@ public class Translator {
     private let chirTy: CHIRType
     private let globalSymbolTable: FaithfulAST2CHIRNodeMap
     private let localValSymbolTable: FaithfulAST2CHIRNodeMap = FaithfulAST2CHIRNodeMap()
+    private let exprValueTable: HashMap<String, Value> = HashMap<String, Value>()
     private var currentBlock: Option<Block> = None
     private var currentFunc: Option<Function> = None
     private var currentLambda: Option<Lambda> = None
@@ -416,6 +417,9 @@ public class Translator {
     }
 
     public func Visit(expr: AstRefExpr): Option<Value> {
+        if (let Some(value) <- TryGetExprValue(expr)) {
+            return value
+        }
         if (expr.isThis || expr.isSuper) {
             return GetCurrentThisObject()
         }
@@ -2462,10 +2466,7 @@ public class Translator {
             return
         }
         if (let Some(constPattern) <- (pattern as AstConstPattern)) {
-            let litValue = Translator.TranslateASTNode(RequireExpr(constPattern.literal, "const pattern literal"),
-                this) ?? throw IllegalStateException("faithful AST2CHIR const pattern literal produced no value")
-            let cond = RequireResult(builder.CreateBinaryExpression(ExprKind.EQUAL, builder.context.GetBoolTy(),
-                selector, litValue, CurrentBlock()))
+            let cond = TranslateConstPatternCondition(constPattern, selector)
             builder.CreateBranch(cond, trueBlock, falseBlock, CurrentBlock())
             return
         }
@@ -2485,15 +2486,17 @@ public class Translator {
     }
 
     private func BindPatternValues(pattern: AstPattern, selector: Value): Unit {
+        BindPatternValues(pattern, selector, CurrentBlock())
+    }
+
+    private func BindPatternValues(pattern: AstPattern, selector: Value, block: Block): Unit {
         if (let Some(varPattern) <- (pattern as AstVarPattern)) {
-            if (let Some(varDecl) <- varPattern.varDecl) {
-                localValSymbolTable.Set(varDecl, selector)
-            }
+            BindVarPatternValue(varPattern, selector, block)
             return
         }
         if (let Some(varOrEnum) <- (pattern as AstVarOrEnumPattern)) {
             if (let Some(realPattern) <- varOrEnum.pattern) {
-                BindPatternValues(realPattern, selector)
+                BindPatternValues(realPattern, selector, block)
             }
             return
         }
@@ -2501,12 +2504,13 @@ public class Translator {
             var idx: Int64 = 0
             for (subPattern in tuplePattern.patterns) {
                 let fieldValue = ExtractPatternField(selector, idx, chirTy.TranslateType(RequireAstTy(subPattern)))
-                BindPatternValues(subPattern, fieldValue)
+                BindPatternValues(subPattern, fieldValue, block)
                 idx++
             }
             return
         }
         if (let Some(enumPattern) <- (pattern as AstEnumPattern)) {
+            let enumSelector = EnumPatternPayloadSelector(selector, enumPattern)
             let payloadTypes = EnumPatternPayloadTypes(enumPattern)
             var idx: Int64 = 0
             for (subPattern in enumPattern.patterns) {
@@ -2515,19 +2519,44 @@ public class Translator {
                 } else {
                     chirTy.TranslateType(RequireAstTy(subPattern))
                 }
-                let payloadValue = ExtractPatternField(selector, idx + 1, fieldTy)
-                BindPatternValues(subPattern, payloadValue)
+                let payloadValue = ExtractPatternField(enumSelector, idx + 1, fieldTy)
+                BindPatternValues(subPattern, payloadValue, block)
                 idx++
             }
             return
         }
         if (let Some(typePattern) <- (pattern as AstTypePattern)) {
             if (let Some(inner) <- typePattern.pattern) {
-                let castedSelector = CastValueIfNeeded(selector, chirTy.TranslateType(RequireAstTy(typePattern)))
-                BindPatternValues(inner, castedSelector)
+                BindPatternValues(inner, selector, block)
             }
             return
         }
+    }
+
+    private func BindVarPatternValue(pattern: AstVarPattern, value: Value, block: Block): Unit {
+        let varDecl = pattern.varDecl ??
+            throw IllegalStateException("faithful AST2CHIR match VarPattern has no VarDecl")
+        let backup = currentBlock
+        currentBlock = block
+        let boundValue = CastValueIfNeeded(value, VarPatternBindingType(pattern, value))
+        boundValue.EnableAttr(Attribute.READONLY)
+        currentBlock = backup
+        if (let Some(desugar) <- pattern.desugarExpr) {
+            if (let Some(desugarTarget) <- desugar.GetTarget()) {
+                localValSymbolTable.Set(desugarTarget, boundValue)
+            }
+        } else {
+            localValSymbolTable.Set(varDecl, boundValue)
+        }
+    }
+
+    private func VarPatternBindingType(pattern: AstVarPattern, value: Value): Type {
+        let astTy = RequireAstTy(pattern)
+        if (!astTy.IsAny()) {
+            return chirTy.TranslateType(astTy)
+        }
+        return value.GetType() ??
+            throw IllegalStateException("faithful AST2CHIR VarPattern value has no CHIR type")
     }
 
     private func TranslateEnumPatternCondition(pattern: AstEnumPattern, selector: Value): Value {
@@ -2547,7 +2576,8 @@ public class Translator {
         let payloadBlock = builder.CreateBlock(RequireParentBlockGroup(CurrentBlock(), "enum pattern payload"))
         builder.CreateBranch(cond, payloadBlock, falseBlock, CurrentBlock())
         currentBlock = payloadBlock
-        TranslatePatternSequenceWithTypes(pattern.patterns, EnumPatternPayloadTypes(pattern), selector, 1,
+        let payloadSelector = EnumPatternPayloadSelector(selector, pattern)
+        TranslatePatternSequenceWithTypes(pattern.patterns, EnumPatternPayloadTypes(pattern), payloadSelector, 1,
             trueBlock, falseBlock)
     }
 
@@ -2560,7 +2590,16 @@ public class Translator {
         falseBlock: Block): Unit {
         if (pattern.matchBeforeRuntime) {
             if (let Some(inner) <- pattern.pattern) {
-                TranslateSinglePatternBranch(inner, selector, trueBlock, falseBlock)
+                if (let Some(desugar) <- pattern.desugarExpr) {
+                    if (let Some(varPattern) <- pattern.desugarVarPattern) {
+                        BindVarPatternValue(varPattern, selector, CurrentBlock())
+                    }
+                    let newValue = Translator.TranslateASTNode(desugar, this) ??
+                        throw IllegalStateException("faithful AST2CHIR type pattern desugar produced no value")
+                    TranslateSinglePatternBranch(inner, newValue, trueBlock, falseBlock)
+                } else {
+                    TranslateSinglePatternBranch(inner, selector, trueBlock, falseBlock)
+                }
             } else {
                 builder.CreateGoTo(trueBlock, CurrentBlock())
             }
@@ -2614,6 +2653,37 @@ public class Translator {
         }
     }
 
+    private func TranslateConstPatternCondition(pattern: AstConstPattern, selector: Value): Value {
+        if (let Some(callExpr) <- pattern.operatorCallExpr) {
+            let base = ConstPatternOperatorBase(callExpr)
+            SetExprValue(base, selector)
+            return Translator.TranslateASTNode(callExpr, this) ??
+                throw IllegalStateException("faithful AST2CHIR const pattern operator call produced no value")
+        }
+        let litValue = Translator.TranslateASTNode(RequireExpr(pattern.literal, "const pattern literal"), this) ??
+            throw IllegalStateException("faithful AST2CHIR const pattern literal produced no value")
+        return RequireResult(builder.CreateBinaryExpression(ExprKind.EQUAL, builder.context.GetBoolTy(), selector,
+            litValue, CurrentBlock()))
+    }
+
+    private func ConstPatternOperatorBase(callExpr: AstCallExpr): AstExpr {
+        let member = (RequireExpr(callExpr.baseFunc, "const pattern operator callee") as AstMemberAccess) ??
+            throw IllegalStateException("faithful AST2CHIR const pattern operator callee is not MemberAccess")
+        return RequireExpr(member.baseExpr, "const pattern operator base")
+    }
+
+    private func SetExprValue(expr: AstExpr, value: Value): Unit {
+        exprValueTable[ExprValueKey(expr)] = value
+    }
+
+    private func TryGetExprValue(expr: AstExpr): Option<Value> {
+        return exprValueTable.get(ExprValueKey(expr))
+    }
+
+    private func ExprValueKey(expr: AstExpr): String {
+        return "${ASTKindIndex(expr.astKind)}:${expr.begin.hashCode()}:${expr.end.hashCode()}"
+    }
+
     private func EnumPatternPayloadTypes(pattern: AstEnumPattern): ArrayList<Type> {
         let out = ArrayList<Type>()
         if (let Some(funcDecl) <- (RequireEnumPatternConstructor(pattern) as AstFuncDecl)) {
@@ -2639,7 +2709,7 @@ public class Translator {
     }
 
     private func TranslateEnumPatternPayloadType(pattern: AstEnumPattern, paramTy: AstTy): Type {
-        let translated = chirTy.TranslateType(paramTy)
+        let translated = chirTy.TranslateType(paramTy).StripAllRefs()
         if (let Some(enumTy) <- (chirTy.TranslateType(RequireAstTy(pattern)) as EnumType)) {
             return SubstituteGenericType(translated, enumTy.GetEnumDef().GetGenericTypeParams(),
                 enumTy.GetGenericArgs())
@@ -2653,6 +2723,31 @@ public class Translator {
         return RequireResult(builder.CreateField(fieldTy, GetDerefedValue(value), path, CurrentBlock()))
     }
 
+    private func EnumPatternPayloadSelector(value: Value, pattern: AstEnumPattern): Value {
+        if (IsOptionLikeEnumConstructor(RequireEnumPatternConstructor(pattern))) {
+            return value
+        }
+        return CastEnumValueToConstructorTupleType(value, pattern)
+    }
+
+    private func IsOptionLikeEnumConstructor(constructor: AstDecl): Bool {
+        let outer = constructor.outerDecl ??
+            throw IllegalStateException("faithful AST2CHIR enum constructor has no outer enum")
+        let enumDecl = (outer as AstEnumDecl) ??
+            throw IllegalStateException("faithful AST2CHIR enum constructor outer is not enum")
+        return IsOptionLikeEnumDecl(enumDecl)
+    }
+
+    private func CastEnumValueToConstructorTupleType(value: Value, pattern: AstEnumPattern): Value {
+        let constructor = RequireEnumPatternConstructor(pattern)
+        let fieldTys = ArrayList<Type>()
+        fieldTys.add(GetEnumSelectorType(constructor))
+        for (payloadTy in EnumPatternPayloadTypes(pattern)) {
+            fieldTys.add(payloadTy)
+        }
+        return CastValueIfNeeded(value, builder.context.GetTupleTy(fieldTys))
+    }
+
     private func GetEnumTagValue(pattern: AstEnumPattern, selector: Value): Value {
         let constructor = RequireEnumPatternConstructor(pattern)
         let path = ArrayList<UInt64>()
@@ -2663,6 +2758,9 @@ public class Translator {
 
     private func RequireEnumPatternConstructor(pattern: AstEnumPattern): AstDecl {
         let constructorExpr = RequireExpr(pattern.constructor, "enum pattern constructor")
+        if (let Some(target) <- constructorExpr.GetTarget()) {
+            return target
+        }
         if (let Some(refExpr) <- (constructorExpr as AstRefExpr)) {
             return refExpr.ref.target ??
                 throw IllegalStateException("faithful AST2CHIR enum pattern RefExpr has no target")
