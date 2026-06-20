@@ -1020,11 +1020,21 @@ public class FaithfulAST2CHIR {
         if (let Some(litExpr) <- (initExpr as AstLitConstExpr)) {
             if (IsSimpleLiteralValue(litExpr)) {
                 let declTy = chirType.TranslateType(RequireAstTy(varDecl))
+                if (IsStringGlobalLiteralInit(litExpr, declTy)) {
+                    return true
+                }
                 let initTy = chirType.TranslateType(RequireAstTy(initExpr))
                 return !declTy.IsEqual(initTy)
             }
         }
         return true
+    }
+
+    private func IsStringGlobalLiteralInit(litExpr: AstLitConstExpr, declTy: Type): Bool {
+        if (litExpr.kind != AstLitConstKind.STRING && litExpr.kind != AstLitConstKind.JSTRING) {
+            return false
+        }
+        return declTy.IsString()
     }
 
     private func IsSimpleLiteralValue(expr: AstLitConstExpr): Bool {

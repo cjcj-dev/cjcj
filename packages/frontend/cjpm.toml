@@ -21,6 +21,7 @@
   "cangjie_compiler::lex" = { path = "../lex" }
   "cangjie_compiler::mangle" = { path = "../mangle" }
   "cangjie_compiler::meta_transformation" = { path = "../meta_transformation" }
+  "cangjie_compiler::modules" = { path = "../modules" }
   "cangjie_compiler::option" = { path = "../option" }
   "cangjie_compiler::parse" = { path = "../parse" }
   "cangjie_compiler::sema" = { path = "../sema" }

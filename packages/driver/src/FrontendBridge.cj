@@ -1,6 +1,7 @@
 package cangjie_compiler::driver
 
 import std.collection.*
+import std.fs.Directory as FSDirectory
 import cangjie_compiler::frontend_tool.ExecuteFrontend
 import cangjie_compiler::utils.FailureReason as UtilsFailureReason
 
@@ -19,7 +20,10 @@ public func ExecuteFrontendPhase(driver: Driver): Bool {
     if (exitCode != 0) {
         return false
     }
-    return ReconcileFrontendOutputs(driver.driverOptions)
+    if (!ReconcileFrontendOutputs(driver.driverOptions)) {
+        return false
+    }
+    return PublishFrontendCjoOutputs(driver.driverOptions)
 }
 
 private func SeedBuiltinDependenciesFromSources(driver: Driver): Unit {
@@ -230,6 +234,32 @@ private func ReconcileFrontendOutputs(opts: DriverOptions): Bool {
         return true
     }
     return VerifyFrontendOutputs(opts)
+}
+
+private func PublishFrontendCjoOutputs(opts: DriverOptions): Bool {
+    if (!HasFrontendSourceInput(opts) || opts.IsEmitCHIREnable() || opts.frontendOnlyAction ||
+        opts.frontendOutputFiles.isEmpty()) {
+        return true
+    }
+    let sourceDir = FileUtil.GetDirPath(opts.frontendOutputFiles[0].filePath)
+    let outputDir = if (opts.output.isEmpty()) { "." } else { FileUtil.GetDirPath(opts.output) }
+    var copied = true
+    try {
+        for (info in FSDirectory.readFrom(sourceDir)) {
+            if (!info.isRegular() || FileUtil.GetFileExtension(info.name) != "cjo") {
+                continue
+            }
+            let source = FileUtil.JoinPath(sourceDir, info.name)
+            let target = FileUtil.JoinPath(outputDir, info.name)
+            if (source != target && !CopyFile(source, target)) {
+                eprintln("error: failed to publish CJO output: " + target)
+                copied = false
+            }
+        }
+    } catch (e: Exception) {
+        return true
+    }
+    return copied
 }
 
 private func HasFrontendSourceInput(opts: DriverOptions): Bool {

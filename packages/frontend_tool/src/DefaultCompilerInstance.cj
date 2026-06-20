@@ -102,7 +102,7 @@ public open class DefaultCompilerInstance {
 
     public open func PerformCjoSaving(): Bool {
         return ProfiledBool("Main Stage", "Save cjo", { =>
-            if (invocation.globalOptions.outputMode == OutputMode.CHIR) {
+            if (!ShouldSaveCjoForOutputMode()) {
                 return true
             }
             return SaveCjos(core.GetSourcePackages())
@@ -160,11 +160,46 @@ public open class DefaultCompilerInstance {
             return true
         }
         let cjoPath = invocation.globalOptions.GenerateCachedPathName(pkg.fullPackageName, SERIALIZED_FILE_EXTENSION)
-        if (!FileUtil.WriteToFile(cjoPath, RenderPackageCjo(pkg))) {
-            diag.Warn(DiagCategory.IMPORT_PACKAGE, DEFAULT_POSITION, "failed to write CJO summary: " + cjoPath)
+        let pkgs = ArrayList<Package>()
+        pkgs.add(pkg)
+        let depInfos = core.importManager.GeneratePkgDepInfo(pkgs)
+        let packageDepInfo = if (depInfos.isEmpty()) { "" } else { depInfos[0] }
+        let data = SerializePackageToCjoFlatBuffer(pkg, packageDepInfo, invocation.globalOptions.enableCompileDebug,
+            invocation.globalOptions.optimizationLevel)
+        if (!FileUtil.WriteBufferToASTFile(cjoPath, data)) {
+            diag.Warn(DiagCategory.IMPORT_PACKAGE, DEFAULT_POSITION, "failed to write CJO: " + cjoPath)
             return false
         }
+        if (ShouldPublishCjo()) {
+            let publishedPath = PublishedCjoPath(pkg)
+            if (!FileUtil.WriteBufferToASTFile(publishedPath, data)) {
+                diag.Warn(DiagCategory.IMPORT_PACKAGE, DEFAULT_POSITION, "failed to write CJO: " + publishedPath)
+                return false
+            }
+        }
         return true
+    }
+
+    private func ShouldPublishCjo(): Bool {
+        return ShouldSaveCjoForOutputMode()
+    }
+
+    private func ShouldSaveCjoForOutputMode(): Bool {
+        return invocation.globalOptions.outputMode == OutputMode.STATIC_LIB ||
+            invocation.globalOptions.outputMode == OutputMode.SHARED_LIB
+    }
+
+    private func PublishedCjoPath(pkg: Package): String {
+        let output = invocation.globalOptions.output
+        let dir = if (output.isEmpty() || output == "./") { "." } else { FileUtil.GetDirPath(output) }
+        return FileUtil.JoinPath(dir, PublishedCjoFileName(pkg.fullPackageName) + SERIALIZED_FILE_EXTENSION)
+    }
+
+    private func PublishedCjoFileName(fullPackageName: String): String {
+        if (let Some(pos) <- fullPackageName.indexOf("::")) {
+            return fullPackageName[pos + 2..] + "@" + fullPackageName[0..pos]
+        }
+        return fullPackageName
     }
 
     public func RearrangeImportedPackageDependence(): Unit {
