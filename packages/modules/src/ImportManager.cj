@@ -974,9 +974,11 @@ public class ImportManager {
                 } else {
                     let decls = cjoManager.GetPackageMembersByName(packageValue.fullPackageName, importSpec.content.identifier)
                     if (!HasVisibleDecl(decls, relation)) {
-                        diag.ReportError("package_decl_not_find_in_package",
+                        let im = importSpec.content
+                        let nameRange = MakeRange(im.prefixPoses[0], im.identifierEnd)
+                        diag.ReportErrorWithFormatArguments("package_decl_not_find_in_package",
                             "declaration '${importSpec.content.identifier}' was not found in package '${fullPackageName}'",
-                            range: packageRange)
+                            nameRange, [im.identifier, fullPackageName])
                     }
                 }
             }
@@ -1961,7 +1963,15 @@ public class ImportManager {
         for (path in content.prefixPaths) {
             cloned.prefixPaths.add(path)
         }
+        for (pos in content.prefixPoses) {
+            cloned.prefixPoses.add(pos)
+        }
+        for (pos in content.prefixDotPoses) {
+            cloned.prefixDotPoses.add(pos)
+        }
         cloned.identifier = content.identifier
+        cloned.identifierBegin = content.identifierBegin
+        cloned.identifierEnd = content.identifierEnd
         cloned.aliasName = content.aliasName
         for (item in content.items) {
             cloned.items.add(CloneImportContent(item))

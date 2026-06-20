@@ -191,6 +191,10 @@ public class ASTWriter {
                 importFields.add(BoolToWire(importSpec.withImplicitExport))
                 AppendNodeFields(importFields, importSpec)
                 AppendNodeFields(importFields, importSpec.content)
+                importFields.add(JoinStringList(SerializedPositions(importSpec.content.prefixPoses)))
+                importFields.add(JoinStringList(SerializedPositions(importSpec.content.prefixDotPoses)))
+                AppendPositionFields(importFields, importSpec.content.identifierBegin)
+                AppendPositionFields(importFields, importSpec.content.identifierEnd)
                 lines.add(JoinFields(importFields))
             }
             for (decl in file.decls) {
@@ -474,6 +478,20 @@ public class ASTLoader {
                         if (fields.size > 23) {
                             LoadNodeFields(fields, 17, importSpec.content)
                         }
+                        if (fields.size > 24) {
+                            for (pos in SplitStringList(fields[24])) {
+                                importSpec.content.prefixPoses.add(ParsePositionWire(pos))
+                            }
+                        }
+                        if (fields.size > 25) {
+                            for (pos in SplitStringList(fields[25])) {
+                                importSpec.content.prefixDotPoses.add(ParsePositionWire(pos))
+                            }
+                        }
+                        if (fields.size > 31) {
+                            importSpec.content.identifierBegin = ParsePositionFields(fields, 26)
+                            importSpec.content.identifierEnd = ParsePositionFields(fields, 29)
+                        }
                         if (!HasAccessAttr(importSpec)) {
                             ApplyAccessAttr(importSpec, importSpec.accessLevel)
                         }
@@ -665,6 +683,14 @@ private func SerializedFeatureNames(file: File): ArrayList<String> {
     return CloneStringArray(file.features)
 }
 
+private func SerializedPositions(positions: ArrayList<Position>): ArrayList<String> {
+    let out = ArrayList<String>()
+    for (pos in positions) {
+        out.add(pos.fileID.toString() + ":" + pos.line.toString() + ":" + pos.column.toString())
+    }
+    return out
+}
+
 private func SerializedFileIsProduct(file: File): Bool {
     if (let Some(featureDirective) <- file.feature) {
         return file.isProduct && featureDirective.annotations.isEmpty()
@@ -770,6 +796,14 @@ private func ParsePositionFields(fields: ArrayList<String>, start: Int64): Posit
         ParseInt64Field(fields[start + 1]),
         ParseInt64Field(fields[start + 2])
     )
+}
+
+private func ParsePositionWire(value: String): Position {
+    let fields = value.split(":")
+    if (fields.size < 3) {
+        return INVALID_POSITION
+    }
+    return Position(ParseUInt64Field(fields[0]), ParseInt64Field(fields[1]), ParseInt64Field(fields[2]))
 }
 
 private func PackageSpecAccessLevel(spec: PackageSpec): AccessLevel {
