@@ -112,11 +112,13 @@ private func parseUnsignedWithLimit(value: String, base: Int64, limit: UInt64): 
         return (0u64, true)
     }
     var accum = 0u64
+    var sawDigit = false
     for (byte in value.toArray()) {
         let digit = digitValue(byte)
         if (digit < 0 || digit >= base) {
-            return (0u64, true)
+            return if (sawDigit) { (accum, false) } else { (0u64, true) }
         }
+        sawDigit = true
         let digitValue64 = UInt64(digit)
         if (accum > (limit - digitValue64) / UInt64(base)) {
             return (0u64, true)

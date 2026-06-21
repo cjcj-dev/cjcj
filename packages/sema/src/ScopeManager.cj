@@ -101,3 +101,64 @@ public class ScopeManager {
         return length
     }
 }
+
+private func SameScopeNode(left: Node, right: Node): Bool {
+    return left.astKind == right.astKind && left.begin == right.begin && left.end == right.end
+}
+
+private func ScopeContainsJump(root: Option<Expr>, self: Node): Bool {
+    let found = ArrayList<Bool>()
+    if (let Some(rootNode) <- root) {
+        let walker = Walker(rootNode, visitPre: { node: Node =>
+            if (let Some(_) <- (node as JumpExpr)) {
+                if (SameScopeNode(node, self)) {
+                    found.add(true)
+                }
+                return VisitAction.SKIP_CHILDREN
+            }
+            if (node.astKind == ASTKind.WHILE_EXPR || node.astKind == ASTKind.DO_WHILE_EXPR ||
+                node.astKind == ASTKind.FOR_IN_EXPR || node.astKind == ASTKind.FUNC_DECL ||
+                node.astKind == ASTKind.LAMBDA_EXPR) {
+                return VisitAction.SKIP_CHILDREN
+            }
+            VisitAction.WALK_CHILDREN
+        })
+        let _ = walker.Walk()
+    }
+    return !found.isEmpty()
+}
+
+private func IsRefLoopSymbol(symbol: Symbol, self: Node): Bool {
+    let node = if (let Some(value) <- symbol.node) { value } else { return false }
+    var condExpr: Option<Expr> = None
+    var guardExpr: Option<Expr> = None
+    if (let Some(whileExpr) <- (node as WhileExpr)) {
+        condExpr = whileExpr.condExpr
+    } else if (let Some(doWhileExpr) <- (node as DoWhileExpr)) {
+        condExpr = doWhileExpr.condExpr
+    } else if (let Some(forInExpr) <- (node as ForInExpr)) {
+        condExpr = forInExpr.inExpression
+        guardExpr = forInExpr.patternGuard
+    } else {
+        return node.IsLoopExpr()
+    }
+    return !ScopeContainsJump(condExpr, self) && !ScopeContainsJump(guardExpr, self)
+}
+
+public func GetRefLoopSymbol(ctx: ASTContext, self: Node): Option<Symbol> {
+    var scopeGateName = GetScopeGateName(self.scopeName)
+    while (!scopeGateName.isEmpty()) {
+        if (let Some(symbol) <- GetScopeGate(ctx, scopeGateName)) {
+            if (IsRefLoopSymbol(symbol, self)) {
+                return Some(symbol)
+            }
+            if (let Some(node) <- symbol.node) {
+                if (node.astKind == ASTKind.FUNC_BODY) {
+                    return None
+                }
+            }
+        }
+        scopeGateName = GetScopeGateName(scopeGateName)
+    }
+    return None
+}
