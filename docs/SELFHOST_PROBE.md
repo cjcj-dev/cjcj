@@ -1013,3 +1013,115 @@ Results:
 - `run_diag.sh`: `SEPTEST-DIAG-PASS`.
 - `run_write_types.sh`: `SEPTEST-WRITE-TYPES-PASS`.
 - `run_write_struct.sh`: `SEPTEST-WRITE-STRUCT-PASS`.
+
+## Probe 9 (lex overload ambiguity)
+
+### Symptom
+
+After Probe 8, selfhost `cjc` reached `packages/lex/src/LexerImpl.cj:1722:21` and emitted a false
+overload-resolution diagnostic:
+
+```text
+ambiguous use of 'lexDiagnose'
+```
+
+The exact call is:
+
+```cj
+lexDiagnose(diag, DiagKindRefactor.lex_expected_identifier, GetPos(pCurrent), ConvertCurrentChar())
+```
+
+The relevant overloads in `packages/lex/src/LexerDiag.cj` are:
+
+- `lexDiagnose(DiagnosticEngine, DiagKindRefactor, Position)`
+- `lexDiagnose(DiagnosticEngine, DiagKindRefactor, Position, String)`
+- `lexDiagnose(DiagnosticEngine, DiagKindRefactor, Range)`
+- `lexDiagnose(DiagnosticEngine, DiagKindRefactor, Range, String)`
+
+The C++ compiler picks the four-argument `Position, String` overload.
+
+### Diagnosis
+
+The spurious ambiguity was not caused by the final call candidate ranking. Instrumenting selfhost
+`TypeCheckCall.cj` showed the call matcher accepted only the `Position, String` overload and rejected
+the `Range, String` overload as incompatible.
+
+The false diagnostic was emitted earlier while the name reference was still treated as an isolated
+function reference. Selfhost `Collector` did not mark call bases as non-alone, so
+`TypeCheckReferenceFilterTargetsForFuncReference` saw the base `lexDiagnose` as `isAlone == true`
+with four overload targets and reported an ambiguous standalone function reference before normal
+call overload resolution could own the decision.
+
+The C++ reference does this in the collector:
+
+- `/root/cj_build/cangjie_compiler/src/Sema/Collector.cpp:841-856`: for `CALL_EXPR`, call
+  `TypeCheckUtil::SetIsNotAlone(*ce->baseFunc)` before visiting the base and arguments.
+- `/root/cj_build/cangjie_compiler/src/Sema/Collector.cpp:860-866`: for member access, mark the base
+  expression non-alone.
+- `/root/cj_build/cangjie_compiler/src/Sema/Collector.cpp:872-880`: for subscript, mark the base
+  expression non-alone.
+- `/root/cj_build/cangjie_compiler/src/Sema/TypeCheckUtil.cpp:62-66`: `SetIsNotAlone` clears
+  `NameReferenceExpr::isAlone`.
+- `/root/cj_build/cangjie_compiler/src/Sema/TypeCheckReference.cpp:371-378`: a `RefExpr` enters the
+  standalone function-reference filter only when it has no target type and `re.isAlone` is true.
+- `/root/cj_build/cangjie_compiler/src/Sema/TypeCheckCall.cpp:1216-1249` and
+  `/root/cj_build/cangjie_compiler/src/Sema/TypeCheckCall.cpp:2147-2195`: actual call matching and
+  best-result selection then handle the overload set.
+
+The divergence was therefore a missing faithful collector pre-pass, not a missing `lexDiagnose`-specific
+overload tie-break.
+
+### Faithful fix
+
+Selfhost `packages/sema/src/Collector.cj` now mirrors the C++ collector and marks call bases, member
+access bases, and subscript bases as not-alone before symbol collection continues. This prevents a call
+base overload set from being diagnosed as an ambiguous standalone function reference and lets the normal
+call overload resolver choose the unique best candidate.
+
+The optional finalizer parity branch was also added in the default-parameter pre-pass:
+`packages/sema/src/TypeCheckExpr/TypeChecker.cj` now calls `AddUnitType` for finalizers, matching
+`/root/cj_build/cangjie_compiler/src/Sema/TypeChecker.cpp:2327-2332`.
+
+A regression corpus program was added at
+`scripts/difftest_corpus/102_overload_call_base_not_func_ref.cj`. It reproduces the same overload shape:
+two overloads differing by `Position` versus `Range`, a call through a non-empty overloaded name, and a
+unique `Position, String` best match.
+
+### Current lex result
+
+`packages/lex/src` now compiles past the former `lexDiagnose` ambiguity. The next frontier is later in
+CHIR translation:
+
+```text
+IllegalArgumentException: unsupported AST type kind for CHIRType.TranslateType: Invalid
+  at packages/chir/src/CHIRType.cj:325
+  at packages/chir/src/Translator.cj:791 Visit(IfExpr)
+```
+
+No `lex@cangjie_compiler.cjo` or final lex static library is produced yet.
+
+### Verification
+
+Commands run after the fix, as separate commands:
+
+```sh
+rm -rf target && cjpm build
+bash scripts/difftest.sh
+bash scripts/septest/run.sh
+bash scripts/septest/run_write.sh
+bash scripts/septest/run_diag.sh
+bash scripts/septest/run_write_types.sh
+bash scripts/septest/run_write_struct.sh
+```
+
+Results:
+
+- `cjpm build`: success.
+- `packages/lex/src` selfhost compile: passed the `lexDiagnose` ambiguity and reached the new CHIR
+  invalid-type frontier above.
+- `difftest`: `TOTAL=86  PASS=86  MISMATCH=0  FAIL=0`.
+- `run.sh`: `SEPTEST-PASS`.
+- `run_write.sh`: `SEPTEST-WRITE-PASS`.
+- `run_diag.sh`: `SEPTEST-DIAG-PASS`.
+- `run_write_types.sh`: `SEPTEST-WRITE-TYPES-PASS`.
+- `run_write_struct.sh`: `SEPTEST-WRITE-STRUCT-PASS`.
