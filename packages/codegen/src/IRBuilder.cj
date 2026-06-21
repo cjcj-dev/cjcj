@@ -539,7 +539,14 @@ public class IRBuilder2 <: Resource {
 
     public func CreateCallOrInvokeWithMethodTypeInfo(calleeType: CGFunctionType, callee: LLVMValueRef,
         args: ArrayList<CGValue>, methodTypeInfoArg: Option<LLVMValueRef>, name!: String = ""): LLVMValueRef {
-        let callArgs = TransformCGFunctionArgs(calleeType, args, methodTypeInfoArg, name: name)
+        return CreateCallOrInvokeWithMethodTypeInfo(calleeType, callee, args, methodTypeInfoArg,
+            ArrayList<Type>(), name: name)
+    }
+
+    public func CreateCallOrInvokeWithMethodTypeInfo(calleeType: CGFunctionType, callee: LLVMValueRef,
+        args: ArrayList<CGValue>, methodTypeInfoArg: Option<LLVMValueRef>, instTypeArgs: ArrayList<Type>,
+        name!: String = ""): LLVMValueRef {
+        let callArgs = TransformCGFunctionArgs(calleeType, args, methodTypeInfoArg, instTypeArgs, name: name)
         if (let Some(funcType) <- (calleeType.GetOriginal() as FuncType)) {
             let retTy = funcType.GetReturnType()
             let callName = if (retTy.IsUnit() || retTy.IsNothing() || retTy.IsVoid() || calleeType.HasSRet()) {
@@ -574,7 +581,8 @@ public class IRBuilder2 <: Resource {
     }
 
     private func TransformCGFunctionArgs(calleeType: CGFunctionType, args: ArrayList<CGValue>,
-        methodTypeInfoArg: Option<LLVMValueRef>, name!: String = ""): ArrayList<LLVMValueRef> {
+        methodTypeInfoArg: Option<LLVMValueRef>, instTypeArgs: ArrayList<Type>,
+        name!: String = ""): ArrayList<LLVMValueRef> {
         let callArgs = ArrayList<LLVMValueRef>()
         if (calleeType.HasSRet()) {
             if (let Some(funcType) <- (calleeType.GetOriginal() as FuncType)) {
@@ -587,7 +595,11 @@ public class IRBuilder2 <: Resource {
             var idx: Int64 = 0
             for (arg in args) {
                 let fixedArg = if (idx < paramTys.size) {
-                    FixFuncArg(arg, paramTys[idx], name: name)
+                    if (idx == 0 && calleeType.UsesImportedGenericStructWrapper()) {
+                        FixImportedGenericStructThisArg(arg, name: name)
+                    } else {
+                        FixFuncArg(arg, paramTys[idx], name: name)
+                    }
                 } else {
                     arg.GetRawValue()
                 }
@@ -596,6 +608,12 @@ public class IRBuilder2 <: Resource {
                     callArgs.add(unsafe { LLVMConstNull(CGType.GetRefType(GetLLVMContext())) })
                 }
                 idx++
+            }
+            let typeInfoPtrType = CGType.GetOrCreateTypeInfoPtrType(GetLLVMContext())
+            for (instTy in instTypeArgs) {
+                let typeInfo = CGType.GetOrCreate(cgMod, instTy.StripAllRefs()).GetOrCreateTypeInfo()
+                callArgs.add(CreateBitCast(typeInfo, typeInfoPtrType,
+                    name: if (name.isEmpty()) { "generic.ti" } else { name + ".generic.ti" }))
             }
             if (calleeType.IsMethodType() && !args.isEmpty()) {
                 if (let Some(overrideTypeInfo) <- methodTypeInfoArg) {
@@ -613,6 +631,23 @@ public class IRBuilder2 <: Resource {
             callArgs.add(arg.GetRawValue())
         }
         return callArgs
+    }
+
+    private func FixImportedGenericStructThisArg(arg: CGValue, name!: String = ""): LLVMValueRef {
+        let raw = arg.GetRawValue()
+        let refTy = CGType.GetRefType(GetLLVMContext())
+        let rawTy = unsafe { LLVMTypeOf(raw) }
+        if (!rawTy.isNull() && unsafe { LLVMGetTypeKind(rawTy) } == 12) {
+            let rawAddrspace = unsafe { LLVMGetPointerAddressSpace(rawTy) }
+            let destAddrspace = unsafe { LLVMGetPointerAddressSpace(refTy) }
+            if (rawAddrspace != destAddrspace) {
+                return CreateAddrSpaceCast(raw, refTy,
+                    name: if (name.isEmpty()) { "generic.this" } else { name + ".generic.this" })
+            }
+            return CreatePointerCast(raw, refTy,
+                name: if (name.isEmpty()) { "generic.this" } else { name + ".generic.this" })
+        }
+        return raw
     }
 
     private func FixFuncArg(arg: CGValue, paramTy: Type, name!: String = ""): LLVMValueRef {
