@@ -2108,6 +2108,9 @@ public class TypeChecker {
     }
 
     private func SynthesizeNameReference(ctx: ASTContext, nameRef: NameReferenceExpr): Ty {
+        if (impl.typeManager.GetUnsolvedTyVars().isEmpty() && ctx.IsSynSkippedForCorrectTy(nameRef)) {
+            return nameRef.GetTy() ?? TypeManager.GetInvalidTy()
+        }
         for (typeArg in nameRef.GetTypeArgs()) {
             impl.SetTypeTy(ctx, typeArg)
         }
@@ -2318,6 +2321,13 @@ public class TypeChecker {
     }
 
     private func Synthesize(ctx: ASTContext, expr: Expr): Ty {
+        if (expr.TestAttr(Attribute.IS_BROKEN)) {
+            expr.SetTy(TypeManager.GetInvalidTy())
+            return expr.GetTy() ?? TypeManager.GetInvalidTy()
+        }
+        if (impl.typeManager.GetUnsolvedTyVars().isEmpty() && ctx.IsSynSkippedForCorrectTy(expr)) {
+            return expr.GetTy() ?? TypeManager.GetInvalidTy()
+        }
         if (let Some(desugar) <- expr.desugarExpr) {
             let _ = Synthesize(ctx, desugar)
         }

@@ -295,6 +295,18 @@ public class ASTContext {
         typeCheckCache[nodeHash(node)] = cache
     }
 
+    public func IsSynSkippedForCorrectTy(node: Node): Bool {
+        if (!Ty.IsTyCorrect(node.GetTy()) || node.TyKind() == TypeKind.TYPE_QUEST) {
+            return false
+        }
+        if (let Some(cache) <- typeCheckCache.get(nodeHash(node))) {
+            if (let Some(_) <- cache.lastKey) {
+                return true
+            }
+        }
+        return false
+    }
+
     public func SkipSynForCorrectTyRec(root: Node): Unit {
         let walker = Walker(root, visitPre: { node: Node =>
             if (Ty.IsTyCorrect(node.GetTy())) {
