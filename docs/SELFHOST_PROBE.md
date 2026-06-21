@@ -507,6 +507,92 @@ Results:
 - `run_write_types.sh`: `SEPTEST-WRITE-TYPES-PASS`.
 - `run_write_struct.sh`: `SEPTEST-WRITE-STRUCT-PASS`.
 
+## Probe 7 (scope-name same-name resolution root cause)
+
+### Diagnosis
+
+The three same-name repros were not a lookup-ranking problem. The true divergence was earlier: selfhost symbol
+collection did not drive C++ scope-gate name generation before indexing symbols. The old selfhost
+`packages/sema/src/Collector.cj` walked the AST and indexed whatever `node.scopeName` already contained, defaulting
+empty scope names to `a`. Its `ScopeManager.cj` was only a stack stub, so it never reproduced C++'s monotonic
+per-package gate sequence.
+
+C++ ground truth:
+
+- `/root/cj_build/cangjie_compiler/src/Sema/ScopeManager.cpp:79-104` increments scope depth and appends the next
+  encoded layer name.
+- `/root/cj_build/cangjie_compiler/src/Sema/ScopeManager.cpp:106-118` computes the next child gate name with `_`.
+- `/root/cj_build/cangjie_compiler/src/Sema/ScopeManager.cpp:182-208` finalizes scopes and resets nested indexes only
+  after leaving a top-level declaration.
+- `/root/cj_build/cangjie_compiler/src/Sema/Collector.cpp:297-341`,
+  `/root/cj_build/cangjie_compiler/src/Sema/Collector.cpp:440-467`, and
+  `/root/cj_build/cangjie_compiler/src/Sema/Collector.cpp:947-971` call `CalcScopeGateName`,
+  `InitializeScope`, and `FinalizeScope` around function bodies, `if`, `for`, and block scopes.
+- `/root/cj_build/cangjie_compiler/src/Sema/PreCheck.cpp:285-286` strips gate tails with
+  `GetScopeNameWithoutTail` before keying `declMap`.
+- `/root/cj_build/cangjie_compiler/src/Sema/LookUpImpl.cpp:636-677` then walks parent scope names and picks the
+  nearest visible declaration.
+
+Temporary diagnostics after porting the C++ path showed the necessary scope separation:
+
+```text
+block repro: param x@a0a0a, inner let x@a0a0a0a, inner ref x@a0a0a0a -> var_decl@a0a0a0a
+loop repro:  param n@a0a0a, loop pattern n@a0a0a0a, loop ref n@a0a0a0a -> var_decl@a0a0a0a
+sibling repro: top helper@a_a, f param helper@a0b0a, f ref helper@a0b0a -> func_param@a0b0a,
+                main ref helper@a0c0a -> func_decl@a_a
+```
+
+Before the fix these programs produced `5`, `400`, and a CHIR invalid-type failure. After the scope names are unique,
+ordinary `Lookup` resolves the nearest declaration and the scope-unaware `CurrentFunctionParam` override is not
+needed.
+
+### Faithful Fix
+
+- Ported the C++ `ScopeManager` counter/gate algorithm into selfhost
+  `packages/sema/src/ScopeManager.cj`, including `InitializeScope`, `CalcScopeGateName`, `FinalizeScope`, base-52
+  layer names, and top-level nested-index reset.
+- Added a C++-shaped scope assignment pass in `packages/sema/src/Collector.cj` before indexing symbols. It assigns
+  gates and child scopes for package/file declarations, nominal bodies, function bodies, generic parameters, local
+  blocks, `if`, loops, match cases, try/catch/handler blocks, lambdas, enum body scopes, and extend body scopes.
+- Updated selfhost decl-map insertion to key declarations by `GetScopeNameWithoutTail(scopeName)`, matching C++
+  `PreCheck.cpp:285-286`.
+- Removed the selfhost-only `CurrentFunctionParam` override from `ResolveRefExpr`; resolution now comes from scoped
+  `Lookup`.
+
+### Confirmation
+
+The three repros now match reference cjc:
+
+```text
+96_shadow_param_block  -> 99
+97_shadow_param_loop   -> 103
+98_sibling_param_name  -> 108
+```
+
+The lex-style `match (kind)` cross-function parameter case also resolves correctly in a focused check and prints `7`.
+
+Verification commands run separately:
+
+```sh
+rm -rf target && cjpm build
+bash scripts/difftest.sh
+bash scripts/septest/run.sh
+bash scripts/septest/run_write.sh
+bash scripts/septest/run_diag.sh
+bash scripts/septest/run_write_types.sh
+bash scripts/septest/run_write_struct.sh
+```
+
+Results:
+
+- `cjpm build`: success.
+- `difftest`: `TOTAL=82  PASS=82  MISMATCH=0  FAIL=0`.
+- `run.sh`: `SEPTEST-PASS`.
+- `run_write.sh`: `SEPTEST-WRITE-PASS`.
+- `run_diag.sh`: `SEPTEST-DIAG-PASS`.
+- `run_write_types.sh`: `SEPTEST-WRITE-TYPES-PASS`.
+- `run_write_struct.sh`: `SEPTEST-WRITE-STRUCT-PASS`.
+
 ## Probe 4 (lex OOM diagnosis)
 
 Date: 2026-06-21
