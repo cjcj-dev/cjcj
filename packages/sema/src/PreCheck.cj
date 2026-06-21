@@ -7,7 +7,7 @@ private func scopeForDecl(decl: Decl): String {
     if (decl.scopeName.isEmpty()) {
         return TOPLEVEL_SCOPE_NAME
     }
-    return decl.scopeName
+    return GetScopeNameWithoutTail(decl.scopeName)
 }
 
 private func funcParamArity(decl: Decl): UInt64 {

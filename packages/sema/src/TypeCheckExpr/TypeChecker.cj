@@ -1518,7 +1518,7 @@ public class TypeChecker {
         if (name.isEmpty() || name == INVALID_IDENTIFIER) {
             return
         }
-        ctx.AddDeclName(Names(name, scopeNameOf(decl)), decl)
+        ctx.AddDeclName(Names(name, GetScopeNameWithoutTail(scopeNameOf(decl))), decl)
     }
 
     private func BindLocalDeclIfAbsent(ctx: ASTContext, decl: Decl): Unit {
@@ -1526,7 +1526,7 @@ public class TypeChecker {
         if (name.isEmpty() || name == INVALID_IDENTIFIER) {
             return
         }
-        let names = Names(name, scopeNameOf(decl))
+        let names = Names(name, GetScopeNameWithoutTail(scopeNameOf(decl)))
         for (existing in ctx.GetDeclsByName(names)) {
             if (SameDecl(existing, decl)) {
                 return
@@ -2138,19 +2138,6 @@ public class TypeChecker {
         return ty
     }
 
-    private func CurrentFunctionParam(name: String): Option<FuncParam> {
-        if (let Some(fb) <- currentFuncBody) {
-            for (paramList in fb.paramLists) {
-                for (param in paramList.params) {
-                    if (param.identifier.Val() == name) {
-                        return Some(param)
-                    }
-                }
-            }
-        }
-        return None
-    }
-
     private func SynthesizeDesugarIfNeeded(ctx: ASTContext, expr: Expr): Unit {
         if (let Some(desugar) <- expr.desugarExpr) {
             let _ = Synthesize(ctx, desugar)
@@ -2639,14 +2626,6 @@ public class TypeChecker {
         if (targets.isEmpty()) {
             for (target in impl.Lookup(ctx, refExpr.ref.identifier.Val(), scopeNameOf(refExpr), refExpr)) {
                 targets.add(target)
-            }
-        }
-        if (let Some(param) <- CurrentFunctionParam(refExpr.ref.identifier.Val())) {
-            if (targets.isEmpty()) {
-                targets.add(param)
-            } else if (targets[0].astKind == ASTKind.FUNC_PARAM && !SameDecl(targets[0], param)) {
-                targets.clear()
-                targets.add(param)
             }
         }
         if (targets.isEmpty() && ctx.IsEnumConstructor(refExpr.ref.identifier.Val())) {
