@@ -222,6 +222,20 @@ private class SubtypeCacheEntry {
     }
 }
 
+private class DeclInstantiationStatusEntry {
+    public var decl: Decl
+    public let typeArgs: ArrayList<Ty> = ArrayList<Ty>()
+    public var value: Bool
+
+    public init(decl: Decl, typeArgs: ArrayList<Ty>, value: Bool) {
+        this.decl = decl
+        for (ty in typeArgs) {
+            this.typeArgs.add(ty)
+        }
+        this.value = value
+    }
+}
+
 private class TyVarScopeDepthEntry {
     public var tyVar: GenericsTy
     public var depth: Int64
@@ -247,6 +261,8 @@ public class TypeManager {
     private let tyUsedExtends: ArrayList<TyUsedExtendsEntry> = ArrayList<TyUsedExtendsEntry>()
     private let checkedTyExtendRelation: ArrayList<CheckedTyExtendRelation> = ArrayList<CheckedTyExtendRelation>()
     private let subtypeCache: ArrayList<SubtypeCacheEntry> = ArrayList<SubtypeCacheEntry>()
+    private let declInstantiationStatus: ArrayList<DeclInstantiationStatusEntry> =
+        ArrayList<DeclInstantiationStatusEntry>()
     private let allocatedClassLikeTys: ArrayList<Ty> = ArrayList<Ty>()
     private let unsolvedTyVars: ArrayList<GenericsTy> = ArrayList<GenericsTy>()
     private let tyVarScopes: ArrayList<TyVarScope> = ArrayList<TyVarScope>()
@@ -1056,18 +1072,24 @@ public class TypeManager {
             if (let None <- decl.GetGeneric()) {
                 return decl.astKind == ASTKind.EXTEND_DECL
             }
+            if (let Some(value) <- getDeclInstantiationStatus(decl, typeArgs)) {
+                return value
+            }
             let instantiateMap = GenerateTypeMapping(decl, typeArgs)
             if (decl.astKind == ASTKind.EXTEND_DECL) {
                 idx = 0
                 while (idx < typeArgs.size) {
                     let instantiatedParam = GetInstantiatedTy(genericParamTys[idx], instantiateMap)
                     if (!SameTy(instantiatedParam, typeArgs[idx])) {
+                        addDeclInstantiationStatus(decl, typeArgs, false)
                         return false
                     }
                     idx++
                 }
             }
-            return CheckGenericConstraints(decl, instantiateMap)
+            let result = CheckGenericConstraints(decl, instantiateMap)
+            addDeclInstantiationStatus(decl, typeArgs, result)
+            return result
         }
         return false
     }
@@ -1510,12 +1532,14 @@ public class TypeManager {
         allocatedClassLikeTys.clear()
         unsolvedTyVars.clear()
         subtypeCache.clear()
+        declInstantiationStatus.clear()
     }
 
     public func ClearMapCache(): Unit {
         builtinTyToExtendMap.clear()
         declToExtendMap.clear()
         overrideCache.clear()
+        declInstantiationStatus.clear()
         ClearRecordUsedExtends()
     }
 
@@ -1544,6 +1568,7 @@ public class TypeManager {
     public func ReleaseSemaQueryCaches(): Unit {
         overrideCache.clear()
         subtypeCache.clear()
+        declInstantiationStatus.clear()
     }
 
     public func ReleasePostSemaCaches(): Unit {
@@ -2283,6 +2308,38 @@ public class TypeManager {
         allowOptionBox: Bool): Bool {
         return entry.implicitBoxed == implicitBoxed && entry.allowOptionBox == allowOptionBox &&
             SameTy(entry.leaf, leaf) && SameTy(entry.root, root)
+    }
+
+    private func sameDeclInstantiationTypeArgs(left: ArrayList<Ty>, right: ArrayList<Ty>): Bool {
+        if (left.size != right.size) {
+            return false
+        }
+        for (idx in 0..left.size) {
+            if (!SameTy(left[idx], right[idx])) {
+                return false
+            }
+        }
+        return true
+    }
+
+    private func sameDeclInstantiationStatusKey(entry: DeclInstantiationStatusEntry, decl: Decl,
+        typeArgs: ArrayList<Ty>): Bool {
+        return SameDecl(entry.decl, decl) && sameDeclInstantiationTypeArgs(entry.typeArgs, typeArgs)
+    }
+
+    private func getDeclInstantiationStatus(decl: Decl, typeArgs: ArrayList<Ty>): Option<Bool> {
+        for (entry in declInstantiationStatus) {
+            if (sameDeclInstantiationStatusKey(entry, decl, typeArgs)) {
+                return entry.value
+            }
+        }
+        return None
+    }
+
+    private func addDeclInstantiationStatus(decl: Decl, typeArgs: ArrayList<Ty>, value: Bool): Unit {
+        if (let None <- getDeclInstantiationStatus(decl, typeArgs)) {
+            declInstantiationStatus.add(DeclInstantiationStatusEntry(decl, typeArgs, value))
+        }
     }
 
     private func getSubtypeCache(leaf: Ty, root: Ty, implicitBoxed: Bool, allowOptionBox: Bool): Option<Bool> {
