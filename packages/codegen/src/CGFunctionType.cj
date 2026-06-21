@@ -14,6 +14,29 @@ private func ChirFunctionTypeOf(chirFunc: Function): Type {
     return FuncType(ArrayList<Type>(), VoidType())
 }
 
+private func UsesImportedGenericStructWrapper(chirFunc: Function): Bool {
+    if (!chirFunc.TestAttr(Attribute.IMPORTED)) {
+        return false
+    }
+    let funcTy = chirFunc.GetFuncType() ?? return false
+    let params = funcTy.GetParamTypes()
+    if (params.isEmpty() || !params[0].IsRef()) {
+        return false
+    }
+    let thisTy = params[0].StripAllRefs()
+    if (!thisTy.IsStruct() || !thisTy.IsGenericRelated()) {
+        return false
+    }
+    var idx: Int64 = 1
+    while (idx < params.size) {
+        if (params[idx].IsGeneric()) {
+            return true
+        }
+        idx++
+    }
+    return false
+}
+
 public class CGFunctionType <: CGType {
     private var hasSRet: Bool = false
     private var hasBasePtr: Bool = false
@@ -27,6 +50,7 @@ public class CGFunctionType <: CGType {
     private let staticMethodType: Bool
     private let forWrapper: Bool
     private let constructorType: Bool
+    private let importedGenericStructWrapper: Bool
 
     public init(cgMod: CGModule, cgCtx: CGContext, chirType: FuncType, extraInfo: TypeExtraInfo) {
         super(cgMod, cgCtx, chirType, cgTypeKind: CGTypeKind.CG_FUNCTION)
@@ -36,12 +60,14 @@ public class CGFunctionType <: CGType {
         staticMethodType = extraInfo.isStaticMethod
         forWrapper = extraInfo.forWrapper
         constructorType = false
+        importedGenericStructWrapper = false
     }
 
     public init(cgMod: CGModule, cgCtx: CGContext, chirFunc: Function, extraInfo: TypeExtraInfo) {
         super(cgMod, cgCtx, ChirFunctionTypeOf(chirFunc), cgTypeKind: CGTypeKind.CG_FUNCTION)
         this.chirFunc = chirFunc
-        allowBasePtr = extraInfo.allowBasePtr
+        importedGenericStructWrapper = UsesImportedGenericStructWrapper(chirFunc)
+        allowBasePtr = extraInfo.allowBasePtr && !importedGenericStructWrapper
         methodType = chirFunc.GetParentCustomTypeDef().isSome()
         staticMethodType = chirFunc.TestAttr(Attribute.STATIC)
         forWrapper = extraInfo.forWrapper
@@ -53,6 +79,7 @@ public class CGFunctionType <: CGType {
     public func IsMethodType(): Bool { return methodType }
     public func IsStaticMethodType(): Bool { return staticMethodType }
     public func IsConstructorType(): Bool { return constructorType }
+    public func UsesImportedGenericStructWrapper(): Bool { return importedGenericStructWrapper }
     public func GetRealArgIndices(): ArrayList<Int64> { return realParamIndices }
     public func GetMethodTypeInfoIndex(): Option<Int64> { Complete(); return methodTypeInfoIndex }
     public func GetStaticMethodTypeInfoIndex(): Option<Int64> { Complete(); return staticMethodTypeInfoIndex }
@@ -86,9 +113,13 @@ public class CGFunctionType <: CGType {
             }
             realParamIndices.clear()
             for (paramTy in funcTy.GetParamTypes()) {
+                let isImportedGenericStructThis = importedGenericStructWrapper && realParamIndices.isEmpty() &&
+                    paramTy.IsRef() && paramTy.StripAllRefs().IsStruct()
                 realParamIndices.add(paramLLVMTypes.size)
                 let derefParamTy = paramTy.StripAllRefs()
-                if (paramTy.IsRef() && (derefParamTy.IsStruct() || derefParamTy.IsTuple())) {
+                if (isImportedGenericStructThis) {
+                    paramLLVMTypes.add(CGType.GetRefType(cgCtx.GetLLVMContext()))
+                } else if (paramTy.IsRef() && (derefParamTy.IsStruct() || derefParamTy.IsTuple())) {
                     let derefParamCGType = CGType.GetOrCreate(cgMod, derefParamTy)
                     paramLLVMTypes.add(unsafe { LLVMPointerType(derefParamCGType.GetLLVMType(), 1u32) })
                     if (allowBasePtr) {
@@ -102,6 +133,11 @@ public class CGFunctionType <: CGType {
                     } else {
                         paramLLVMTypes.add(paramCGType.GetLLVMType())
                     }
+                }
+            }
+            if (let Some(fn) <- chirFunc) {
+                for (_ in fn.GetGenericTypeParams()) {
+                    paramLLVMTypes.add(CGType.GetOrCreateTypeInfoPtrType(cgCtx.GetLLVMContext()))
                 }
             }
             if (methodType) {
