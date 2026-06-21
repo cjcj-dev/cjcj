@@ -337,3 +337,172 @@ Results:
 - `cjpm build`: success.
 - `difftest`: `TOTAL=76  PASS=76  MISMATCH=0  FAIL=0`; no non-PASS lines.
 - All five septests printed final PASS lines.
+
+## Probe 3 (lex re-probe)
+
+Date: 2026-06-21
+
+Probe target: `packages/lex/src`, re-run after the recursive generic-bound memoization fix on main
+(`c09f869`). Dependency artifacts were the reference-built `basic` and `utils` `.cjo`/static libraries under
+`target/release`, matching the septest-style setup used in earlier probes.
+
+Reference command:
+
+```sh
+/root/.cjv/bin/cjc -p packages/lex/src --output-type=staticlib -o "$WORK/ref-liblex.a" \
+  --import-path target/release/basic@cangjie_compiler \
+  --import-path target/release/utils@cangjie_compiler \
+  -L target/release/basic@cangjie_compiler \
+  -L target/release/utils@cangjie_compiler \
+  -lbasic@cangjie_compiler -lutils@cangjie_compiler --set-runtime-rpath -V
+```
+
+Reference result: success, producing `lex@cangjie_compiler.cjo` (204104 bytes) and `ref-liblex.a`
+(976806 bytes).
+
+Selfhost command:
+
+```sh
+./target/release/bin/cangjie_compiler::cjc -p packages/lex/src --output-type=staticlib -o "$WORK/self-liblex.a" \
+  --import-path target/release/basic@cangjie_compiler \
+  --import-path target/release/utils@cangjie_compiler \
+  -L target/release/basic@cangjie_compiler \
+  -L target/release/utils@cangjie_compiler \
+  -lbasic@cangjie_compiler -lutils@cangjie_compiler --set-runtime-rpath -V
+```
+
+### Result
+
+The old recursive-bound frontier is confirmed gone as a diagnostic path: the selfhost re-probe no longer reports
+`TreeSet<Token>` / `Token <: Comparable<Token>` constraint failure. The full package still does not compile. With
+the default Cangjie heap (256 MiB), the selfhost compiler runs into runtime OOM during the package compile with no
+frontend diagnostic:
+
+```text
+Out of memory
+```
+
+With `cjHeapSize=1GB`, the full package made no diagnostic progress before a 180s timeout. An earlier long 1GB
+run reached roughly 653 MiB RSS and was killed after more than 8 minutes with no stdout/stderr diagnostics. This
+looks like a separate lex package memory/progress frontier, not the already-fixed recursive generic-bound
+`declInstantiationStatus` path.
+
+Suggested next cut: isolate full-package lex progress by file/stage, starting with `LexerImpl.cj` and package
+symbol-table/sema traversal. Compare against:
+
+- `/root/cj_build/cangjie_compiler/src/Sema/Collector.cpp`
+- `/root/cj_build/cangjie_compiler/src/Sema/TypeChecker.cpp`
+- `/root/cj_build/cangjie_compiler/src/Sema/InheritanceChecker/*`
+- `/root/cj_build/cangjie_compiler/src/Sema/GenericInstantiation/*`
+
+### Faithful fixes landed
+
+#### Sema collector: string literal core refs
+
+Selfhost shallow typing of string literals could still produce `Invalid` when no contextual `String` type had
+already been supplied. The collector now seeds string literal `RefType`s for `String` and `JString` with
+`COMPILER_ADD` and `IN_CORE`, and collects a symbol for the synthetic ref.
+
+C++ reference:
+
+- `/root/cj_build/cangjie_compiler/src/Sema/Collector.cpp`, `Collector::CollectLitConstExpr`
+- `/root/cj_build/cangjie_compiler/src/Sema/TypeCheckExpr/LitConstExpr.cpp`,
+  `TypeCheckerImpl::SynLitConstStringExpr`
+
+Regression case:
+
+- `scripts/difftest_corpus/94_string_literal_equality.cj`
+
+#### Sema check path: array literals and string literal targets
+
+The check path now handles `LitConstExpr` and `ArrayLit` before the generic synthesize-then-check fallback. For
+array literals this mirrors the C++ behavior of checking each child against the target element type, which lets
+context such as `Array<String>` reach the string literal children.
+
+C++ reference:
+
+- `/root/cj_build/cangjie_compiler/src/Sema/TypeChecker.cpp`, check dispatch for `LIT_CONST_EXPR` and `ARRAY_LIT`
+- `/root/cj_build/cangjie_compiler/src/Sema/TypeCheckBuiltinExpr.cpp`,
+  `TypeCheckerImpl::ChkArrayLit`
+
+Existing array/string corpus cases and the new string-literal equality case cover this path under reference/selfhost
+difftest.
+
+#### After-type-check desugar: array literal constructor binding
+
+The after-type-check desugar walker now binds array literal constructor metadata, matching the C++ after-type-check
+pass. The helper is exported so that desugar and type-check synthesis share the same constructor binding logic.
+
+C++ reference:
+
+- `/root/cj_build/cangjie_compiler/src/Sema/Desugar/AfterTypeCheck.cpp`, `ASTKind::ARRAY_LIT`
+- `/root/cj_build/cangjie_compiler/src/Sema/TypeCheckUtil.cpp`, `AddArrayLitConstructor`
+
+### Remaining frontiers
+
+#### Package-level memory/progress frontier
+
+Full `packages/lex/src` still OOMs at the default heap and times out under a 1GB heap without diagnostics. This is
+the highest-impact remaining blocker because it prevents reaching a deterministic package-level CHIR/codegen
+frontier.
+
+Suggested next cut: add low-overhead phase/file progress isolation locally, then port the exact C++ sema/generic
+path responsible for the growth. Do not add broad caches or lex-specific guards.
+
+#### Single-file CHIR frontier: global initializer invalid type
+
+After the sema fixes, `packages/lex/src/Tokens.cj` no longer dies in `Translator::Visit(LitConstExpr)` for the
+`IsExperimental` string equality expression. Its next standalone failure is CHIR global-initializer classification:
+
+```text
+IllegalArgumentException: unsupported AST type kind for CHIRType.TranslateType: Invalid
+via FaithfulAST2CHIR::NeedInitGlobalVarByInitFunc
+```
+
+This is exposed by global `Array<String>` initializers such as `TOKEN_KIND_VALUES` and `TOKENS`.
+
+C++ reference area:
+
+- `/root/cj_build/cangjie_compiler/src/CHIR/AST2CHIR/GlobalVarInitializer.cpp`,
+  `NeedInitGlobalVarByInitFunc`
+- `/root/cj_build/cangjie_compiler/src/CHIR/AST2CHIR/TranslateType.cpp`
+- upstream array/string sema under `/root/cj_build/cangjie_compiler/src/Sema/TypeCheckBuiltinExpr.cpp`
+
+Suggested next cut: minimize a global `Array<String>` initializer that reaches this `Invalid`, then fix the upstream
+type assignment or the exact C++ global-initializer predicate. A direct CHIR workaround is not acceptable.
+
+#### Other single-file frontiers observed
+
+- `packages/lex/src/AnnotationToken.cj`: codegen/LLVM verifier failure,
+  `Explicit load/store type does not match pointee type of pointer operand`.
+- `packages/lex/src/Lexer.cj` and `packages/lex/src/Token.cj`: `.cjo` write/mangle failure,
+  `Unexpected semantic type to be mangled: Invalid`.
+- `packages/lex/src/LexerDiag.cj`: frontend reports `unsupported construct ... not yet implemented in real pipeline`
+  when compiled alone.
+- `packages/lex/src/LexerImpl.cj`: standalone 1GB compile timed out after 90s with no diagnostics.
+
+These were treated as secondary to the package-level memory/progress blocker and the tractable sema fixes above.
+
+### Verification
+
+Commands run after the fixes, as separate commands:
+
+```sh
+cjpm build
+bash scripts/difftest.sh
+bash scripts/septest/run.sh
+bash scripts/septest/run_write.sh
+bash scripts/septest/run_diag.sh
+bash scripts/septest/run_write_types.sh
+bash scripts/septest/run_write_struct.sh
+```
+
+Results:
+
+- `cjpm build`: success.
+- `difftest`: `TOTAL=78  PASS=78  MISMATCH=0  FAIL=0`; no non-PASS lines.
+- `run.sh`: `SEPTEST-PASS`.
+- `run_write.sh`: `SEPTEST-WRITE-PASS`.
+- `run_diag.sh`: `SEPTEST-DIAG-PASS`.
+- `run_write_types.sh`: `SEPTEST-WRITE-TYPES-PASS`.
+- `run_write_struct.sh`: `SEPTEST-WRITE-STRUCT-PASS`.

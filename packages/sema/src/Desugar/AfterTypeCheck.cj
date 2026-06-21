@@ -45,6 +45,10 @@ public func PerformDesugarAfterTypeCheck(typeManager: TypeManager, pkg: Package,
                 if (let Some(asExpr) <- (node as AsExpr)) {
                     DesugarAsExpr(typeManager, asExpr)
                 }
+            case ASTKind.ARRAY_LIT =>
+                if (let Some(arrayLit) <- (node as ArrayLit)) {
+                    AddArrayLitConstructor(arrayLit)
+                }
             case ASTKind.IF_EXPR =>
                 if (let Some(ifExpr) <- (node as IfExpr)) {
                     DesugarIfExpr(typeManager, ifExpr)

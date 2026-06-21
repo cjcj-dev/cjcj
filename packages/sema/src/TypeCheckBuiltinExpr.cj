@@ -200,7 +200,7 @@ public func ChkArrayArgs(typeManager: TypeManager, arrayExpr: ArrayExpr,
     return true
 }
 
-private func AddArrayLitConstructor(arrayLit: ArrayLit): Unit {
+public func AddArrayLitConstructor(arrayLit: ArrayLit): Unit {
     let decl = Ty.GetDeclPtrOfTy(arrayLit.GetTy())
     if (let None <- decl) {
         return
