@@ -1147,6 +1147,12 @@ extend ParserImpl {
         ret.keywordPos = key.Begin()
         ret.begin = if (ret.begin.IsZero()) { key.Begin() } else { ret.begin }
         ret.extendedType = ParseType()
+        if (Skip(TokenKind.UPPERBOUND)) {
+            ParseInheritedTypes(ret)
+        }
+        for (constraint in ParseGenericConstraints()) {
+            EnsureDeclGeneric(ret).genericConstraints.add(constraint)
+        }
         ParseClassLikeBody(ret, ScopeKind.EXTEND_BODY)
         return ret
     }
