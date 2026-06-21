@@ -131,6 +131,7 @@ private func ChkOpOverloadForConstPattern(typeManager: TypeManager, ctx: ASTCont
     baseExpr.begin = pattern.begin
     baseExpr.end = pattern.end
     baseExpr.SetTy(target)
+    ctx.SkipSynForCorrectTy(baseExpr)
     let callBase = CreateMemberAccess(baseExpr, "==")
     callBase.scopeName = pattern.scopeName
     let arg = CreateFuncArg(clonedLiteral.getOrThrow())

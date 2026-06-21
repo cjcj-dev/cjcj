@@ -613,3 +613,97 @@ Results:
 - `run_diag.sh`: `SEPTEST-DIAG-PASS`.
 - `run_write_types.sh`: `SEPTEST-WRITE-TYPES-PASS`.
 - `run_write_struct.sh`: `SEPTEST-WRITE-STRUCT-PASS`.
+
+## Probe 5 (lex string-literal match ambiguity)
+
+Date: 2026-06-21
+
+Probe target: `packages/lex/src`, re-run on branch `lexambig` after Probe 4.
+
+### Diagnosis
+
+The blocking `sema_ambiguous_use` diagnostics were not caused by the string-literal `String`/`JString` ref seeding
+itself. A temporary local diagnostic probe at `ResolveRefExpr` showed that each failing `case "." => ...` path was
+resolving the synthetic receiver used for constant-pattern `==`, not a user identifier:
+
+```text
+PROBE5 empty-ref targets=120 pos=(4, 536, 18) scope=''
+```
+
+The collected candidates for that empty reference were 120 imported `ExtendDecl` nodes whose identifiers are empty:
+
+- `cangjie_compiler::basic`: 13 imported `ExtendDecl` candidates
+- `std.collection`: 18 imported `ExtendDecl` candidates
+- `std.core`: 89 imported `ExtendDecl` candidates
+
+Because the dummy receiver is a fresh `RefExpr` with no identifier, normal reference synthesis looked it up as an
+ordinary empty-name reference. That reached
+`TypeCheckReferenceCheckAmbiguousImportedNonFuncs`, which correctly reported ambiguity for the candidate set it was
+given, rendering the empty name as `ambiguous use of ''`.
+
+The C++ reference avoids this lookup. In constant-pattern overload checking it creates a dummy `RefExpr`, assigns the
+selector type directly, and explicitly marks the node so synthesis is skipped:
+
+- `/root/cj_build/cangjie_compiler/src/Sema/TypeCheckPattern.cpp:284-293`:
+  `ChkOpOverloadForConstPattern` creates the call, sets `callBase->baseExpr->SetTy(&target)`, then calls
+  `ctx.SkipSynForCorrectTy(*callBase->baseExpr)`.
+- `/root/cj_build/cangjie_compiler/src/Sema/TypeChecker.cpp:740-748`:
+  `IsChecked` treats nodes with a `typeCheckCache` `lastKey` and a correct non-quest type as already checked.
+- `/root/cj_build/cangjie_compiler/src/Sema/TypeChecker.cpp:751-768` and `771-777`:
+  `PerformBasicChecksForSynthesize` returns the existing type before normal synthesis, and `Synthesize` records the
+  cache key before continuing for non-skipped nodes.
+
+### Faithful fix
+
+The selfhost constant-pattern overload path now mirrors C++ by calling `ctx.SkipSynForCorrectTy(baseExpr)` immediately
+after assigning the dummy receiver's target type. The selfhost `Synthesize`/`SynthesizeNameReference` path now honors
+that skip marker for correct, non-quest expression types, matching the C++ early return described above. This is not a
+name filter and does not suppress `sema_ambiguous_use`; real ambiguous references still flow through the existing
+diagnostic path.
+
+Regression coverage was added as:
+
+- `scripts/difftest_corpus/95_string_match_case.cj`
+
+The case is a string selector with several string-literal `case "..." =>` arms. It compiles and runs with both the
+reference compiler and selfhost compiler, outputting `1`.
+
+### Current lex result
+
+The string-literal match ambiguity is cleared. Re-running `packages/lex/src` with the selfhost compiler no longer
+prints any `ambiguous use of ''` diagnostics for `LexerImpl.cj:536` or the following string-literal match cases.
+
+`packages/lex/src` still does not fully compile to `lex@cangjie_compiler.cjo`. The next observed package-level
+frontier is memory pressure with no frontend diagnostic:
+
+```text
+Out of memory
+```
+
+At the default heap the package still OOMs. With `cjHeapSize=1GB`, the package also OOMs after the ambiguity is gone.
+With `cjHeapSize=2GB`, an exploratory run timed out after 260s with no diagnostics and no `lex@cangjie_compiler.cjo`.
+This is a distinct package memory/progress blocker after the string-literal match case fix.
+
+### Verification
+
+Commands run after the fixes, as separate commands:
+
+```sh
+rm -rf target && cjpm build
+bash scripts/difftest.sh
+bash scripts/septest/run.sh
+bash scripts/septest/run_write.sh
+bash scripts/septest/run_diag.sh
+bash scripts/septest/run_write_types.sh
+bash scripts/septest/run_write_struct.sh
+```
+
+Results:
+
+- `cjpm build`: success.
+- `difftest`: `TOTAL=79  PASS=79  MISMATCH=0  FAIL=0`; no standalone tail verification was needed.
+- `run.sh`: `SEPTEST-PASS`.
+- `run_write.sh`: `SEPTEST-WRITE-PASS`.
+- `run_diag.sh`: `SEPTEST-DIAG-PASS`.
+- `run_write_types.sh`: `SEPTEST-WRITE-TYPES-PASS`.
+- `run_write_struct.sh`: `SEPTEST-WRITE-STRUCT-PASS`.
