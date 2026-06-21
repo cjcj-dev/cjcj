@@ -48,6 +48,18 @@ private func TypeCheckExtendMaxAccess(left: AccessLevel, right: AccessLevel): Ac
     return right
 }
 
+private func TypeCheckExtendDeclPackageName(decl: Decl): String {
+    if (!decl.fullPackageName.isEmpty()) {
+        return decl.fullPackageName
+    }
+    if (let Some(file) <- decl.curFile) {
+        if (let Some(pkg) <- file.curPackage) {
+            return pkg.fullPackageName
+        }
+    }
+    return ""
+}
+
 private func TypeCheckExtendHasSameTy(values: ArrayList<Ty>, candidate: Ty): Bool {
     for (value in values) {
         if (SameTy(value, candidate)) {
@@ -886,7 +898,7 @@ public func TypeCheckExtendSetExternalAttr(ctx: ASTContext, extendDecl: ExtendDe
     }
     var differentPackage = ctx.fullPackageName != "std.core"
     if (let Some(target) <- extendedTypeTarget) {
-        differentPackage = target.fullPackageName != ctx.fullPackageName
+        differentPackage = TypeCheckExtendDeclPackageName(target) != ctx.fullPackageName
     }
     if (differentPackage) {
         var interfaceAccessLevel = AccessLevel.PRIVATE
