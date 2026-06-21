@@ -506,3 +506,110 @@ Results:
 - `run_diag.sh`: `SEPTEST-DIAG-PASS`.
 - `run_write_types.sh`: `SEPTEST-WRITE-TYPES-PASS`.
 - `run_write_struct.sh`: `SEPTEST-WRITE-STRUCT-PASS`.
+
+## Probe 4 (lex OOM diagnosis)
+
+Date: 2026-06-21
+
+Probe target: `packages/lex/src`, re-run on branch `lexoom` after Probe 3 and after the recursive generic-bound
+memoization fix already present on main. The selfhost compiler was rebuilt with:
+
+```sh
+rm -rf target && cjpm build
+```
+
+The lex package was then compiled with the selfhost compiler and the same reference-built `basic`/`utils` dependency
+artifacts used by Probe 3:
+
+```sh
+env cjHeapSize=1GB ./target/release/bin/cangjie_compiler::cjc -p packages/lex/src \
+  --output-type=staticlib -o "$WORK/self-liblex.a" \
+  --import-path target/release/basic@cangjie_compiler \
+  --import-path target/release/utils@cangjie_compiler \
+  -L target/release/basic@cangjie_compiler \
+  -L target/release/utils@cangjie_compiler \
+  -lbasic@cangjie_compiler -lutils@cangjie_compiler --set-runtime-rpath -V
+```
+
+### Diagnosis
+
+This is a performance/memory-growth frontier from repeated linear uniqueness scans, not the earlier recursive-bound
+nontermination. Initial TypeManager cache counters did not fire before the first timeout; sampled stacks showed the
+compiler was still earlier in package symbol indexing:
+
+- Before fixes: `Collector::BuildSymbolTable -> InvertedIndex::Index -> Trie::Insert -> addUniqueSymbol`, with trie
+  node ID lists growing and every inserted character scanning the existing `ArrayList<Symbol>`.
+- After the trie fix: the hot stack moved to `TypeManager::GenerateGenericMapping -> putTyVarScopeDepth`, matching
+  the selfhost `ArrayList` visited/depth scans where C++ uses `std::unordered_set<Ptr<Ty>>` for the traversal and
+  `std::map<Ptr<const GenericsTy>, size_t>` for depth tracking.
+- After the generic-mapping fix: the next hot stack moved to
+  `TypeCheckExpr::addImportedDeclToCurrentPackage -> addDeclUniqueToPackage`, another repeated imported-declaration
+  uniqueness scan.
+- After hashing `srcImportedNonGenericDecls`, lex reached a real diagnostic path in about 72s instead of a silent
+  timeout, but the note range for imported candidates was zero and raised `IllegalStateException: begin of range is
+  zero` at `TypeCheckReference.cj:236`.
+- After porting the candidate-note range logic, lex now emits deterministic `ambiguous use of ''` diagnostics in
+  `packages/lex/src/LexerImpl.cj:536` and following match cases. A 1GB heap run reached those diagnostics but then
+  still exhausted the heap while resolving/formatting the remaining errors: 178.36s elapsed, 1,221,608 KiB max RSS,
+  `148 errors generated, 8 errors printed`, then runtime OOM. A 2GB exploratory run also reached the same diagnostics
+  and ended before timeout with `148 errors generated, 8 errors printed`, 178.26s elapsed, 2,321,444 KiB max RSS.
+
+The observed behavior is therefore bounded forward progress through successive O(n) scan fronts, not a single
+unbounded recursive loop. The package still does not produce `lex@cangjie_compiler.cjo`; the current material
+milestone is that the no-diagnostic sema stall is replaced by emitted semantic diagnostics and the next front is a
+separate ambiguous string-literal/match-case resolution issue plus remaining diagnostic memory pressure.
+
+### Faithful fixes landed
+
+- `TrieNode.ids` is now a keyed map instead of a linear `ArrayList`, mirroring C++ `TrieNode::ids` as `std::set<Symbol*>`.
+  The key is derived from the same identity/equality fields that `SameSymbol` used, and insert/delete preserve the
+  existing trie lifecycle.
+- `TypeManager.GenerateGenericMapping` now uses a `HashSet` visited set, and `tyVarScopeDepth` is a keyed map instead
+  of an `ArrayList`, matching the C++ hashed/set map structure while preserving the previous selfhost `SameTy` lookup
+  semantics through a stable type key.
+- `Package.srcImportedNonGenericDecls` now has a side key set for O(1) imported-declaration uniqueness in the hot
+  package accumulation path. Mutations from inline-function checking clear the key set so the list and key cache keep
+  the same lifecycle.
+- Resolved imported declaration lookup now uses the same imported-aware key for its local uniqueness pass, avoiding
+  another hot linear scan while preserving the prior equality semantics.
+- Ambiguous imported candidate notes now use a selfhost port of C++ `MakeRangeForDeclIdentifier` behavior and fall
+  back to an unlocated note only when no source range exists, avoiding the zero-range diagnostic exception without
+  suppressing the diagnostic.
+
+### Current lex result
+
+`packages/lex/src` is materially further but not fully compiling. The selfhost compiler reaches real diagnostics in
+`LexerImpl.cj` instead of hanging silently in sema. No `lex@cangjie_compiler.cjo` is produced in this probe. The next
+frontier is to compare C++ and selfhost resolution for string literal match cases such as:
+
+```text
+packages/lex/src/LexerImpl.cj:536:18: ambiguous use of ''
+case "." => TokenKind.DOT
+```
+
+and then reduce the remaining diagnostic/memory pressure once the spurious ambiguity is fixed.
+
+### Verification
+
+Commands run after the fixes, as separate commands:
+
+```sh
+rm -rf target && cjpm build
+bash scripts/difftest.sh
+bash scripts/septest/run.sh
+bash scripts/septest/run_write.sh
+bash scripts/septest/run_diag.sh
+bash scripts/septest/run_write_types.sh
+bash scripts/septest/run_write_struct.sh
+```
+
+Results:
+
+- `cjpm build`: success.
+- `difftest`: `TOTAL=78  PASS=78  MISMATCH=0  FAIL=0`; programs `88`-`92` also passed in the harness, so no
+  standalone tail verification was needed.
+- `run.sh`: `SEPTEST-PASS`.
+- `run_write.sh`: `SEPTEST-WRITE-PASS`.
+- `run_diag.sh`: `SEPTEST-DIAG-PASS`.
+- `run_write_types.sh`: `SEPTEST-WRITE-TYPES-PASS`.
+- `run_write_struct.sh`: `SEPTEST-WRITE-STRUCT-PASS`.

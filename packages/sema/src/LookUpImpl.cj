@@ -60,6 +60,29 @@ private func sameImportedAwareDecl(left: Decl, right: Decl): Bool {
     return SameDecl(left, right)
 }
 
+private func importedAwareDeclKey(decl: Decl): String {
+    if (decl.TestAttr(Attribute.IMPORTED)) {
+        if (!decl.rawMangleName.isEmpty()) {
+            return "raw|" + decl.rawMangleName
+        }
+        if (!decl.mangledName.isEmpty()) {
+            return "mangled|" + decl.mangledName
+        }
+    }
+    return "decl|" + ASTKindName(decl.astKind) + "|" + decl.fullPackageName + "|" + decl.identifier.Val() + "|" +
+        decl.begin.fileID.toString() + ":" + decl.begin.line.toString() + ":" + decl.begin.column.toString() + "|" +
+        decl.end.fileID.toString() + ":" + decl.end.line.toString() + ":" + decl.end.column.toString()
+}
+
+private func addDeclUnique(values: ArrayList<Decl>, keys: HashSet<String>, decl: Decl): Unit {
+    let key = importedAwareDeclKey(decl)
+    if (keys.contains(key)) {
+        return
+    }
+    values.add(decl)
+    keys.add(key)
+}
+
 private func insertDeclByPosition(values: ArrayList<Decl>, decl: Decl): Unit {
     var idx: Int64 = 0
     while (idx < values.size) {
@@ -662,11 +685,12 @@ private func collectImportedDeclsByName(ctx: ASTContext, node: Node, name: Strin
 
 private func collectResolvedImportedDeclsByName(ctx: ASTContext, node: Node, name: String): ArrayList<Decl> {
     let results = ArrayList<Decl>()
+    let keys = HashSet<String>()
     if (let Some(file) <- node.curFile) {
         if (let Some(fileMap) <- ctx.resolvedImportedDeclsMap.get(file.fileHash)) {
             if (let Some(decls) <- fileMap.get(name)) {
                 for (decl in decls) {
-                    addDeclUnique(results, decl)
+                    addDeclUnique(results, keys, decl)
                 }
             }
         }

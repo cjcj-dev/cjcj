@@ -250,6 +250,7 @@ private func RemoveImportedInlineFunctionDecls(pkgs: ArrayList<Package>): ArrayL
             if (let Some(funcDecl) <- (pkg.srcImportedNonGenericDecls[idx] as FuncDecl)) {
                 out.add(funcDecl)
                 pkg.srcImportedNonGenericDecls.remove(at: idx)
+                pkg.srcImportedNonGenericDeclKeys.clear()
                 continue
             }
             idx++
@@ -301,6 +302,7 @@ public func CheckInlineFunctionsForPackages(pkgs: ArrayList<Package>, opts: Opti
             for (funcDecl in pkg.inlineFuncDecls) {
                 if (funcDecl.TestAttr(Attribute.IMPORTED)) {
                     pkg.srcImportedNonGenericDecls.add(funcDecl)
+                    pkg.srcImportedNonGenericDeclKeys.clear()
                 }
             }
         }

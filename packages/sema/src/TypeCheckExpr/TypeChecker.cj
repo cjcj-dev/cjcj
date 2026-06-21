@@ -164,25 +164,27 @@ private func lookupResolvedPackageDecl(ctx: ASTContext, packageName: String, nam
     return None
 }
 
-private func addDeclUniqueToPackage(values: ArrayList<Decl>, decl: Decl): Unit {
-    for (value in values) {
-        if (sameImportedAwareDecl(value, decl)) {
-            return
+private func importedAwareDeclKey(decl: Decl): String {
+    if (decl.TestAttr(Attribute.IMPORTED)) {
+        if (!decl.rawMangleName.isEmpty()) {
+            return "raw|" + decl.rawMangleName
+        }
+        if (!decl.mangledName.isEmpty()) {
+            return "mangled|" + decl.mangledName
         }
     }
-    values.add(decl)
+    return "decl|" + ASTKindName(decl.astKind) + "|" + decl.fullPackageName + "|" + decl.identifier.Val() + "|" +
+        decl.begin.fileID.toString() + ":" + decl.begin.line.toString() + ":" + decl.begin.column.toString() + "|" +
+        decl.end.fileID.toString() + ":" + decl.end.line.toString() + ":" + decl.end.column.toString()
 }
 
-private func sameImportedAwareDecl(left: Decl, right: Decl): Bool {
-    if (left.TestAttr(Attribute.IMPORTED) && right.TestAttr(Attribute.IMPORTED)) {
-        if (!left.rawMangleName.isEmpty() || !right.rawMangleName.isEmpty()) {
-            return left.rawMangleName == right.rawMangleName
-        }
-        if (!left.mangledName.isEmpty() || !right.mangledName.isEmpty()) {
-            return left.mangledName == right.mangledName
-        }
+private func ensureSrcImportedDeclKeys(pkg: Package): Unit {
+    if (!pkg.srcImportedNonGenericDeclKeys.isEmpty() || pkg.srcImportedNonGenericDecls.isEmpty()) {
+        return
     }
-    return SameDecl(left, right)
+    for (decl in pkg.srcImportedNonGenericDecls) {
+        pkg.srcImportedNonGenericDeclKeys.add(importedAwareDeclKey(decl))
+    }
 }
 
 private func addImportedDeclToCurrentPackage(ctx: ASTContext, decl: Decl): Unit {
@@ -190,7 +192,12 @@ private func addImportedDeclToCurrentPackage(ctx: ASTContext, decl: Decl): Unit 
         return
     }
     if (let Some(pkg) <- ctx.curPackage) {
-        addDeclUniqueToPackage(pkg.srcImportedNonGenericDecls, decl)
+        ensureSrcImportedDeclKeys(pkg)
+        let key = importedAwareDeclKey(decl)
+        if (!pkg.srcImportedNonGenericDeclKeys.contains(key)) {
+            pkg.srcImportedNonGenericDecls.add(decl)
+            pkg.srcImportedNonGenericDeclKeys.add(key)
+        }
     }
 }
 

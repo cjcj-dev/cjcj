@@ -10,7 +10,7 @@ public class TrieNode {
     public var parent: Option<TrieNode> = None
     public let next: HashMap<String, TrieNode> = HashMap<String, TrieNode>()
     public let suffixes: HashSet<String> = HashSet<String>()
-    public let ids: ArrayList<Symbol> = ArrayList<Symbol>()
+    public let ids: HashMap<String, Symbol> = HashMap<String, Symbol>()
     public init() {}
 
     public init(c: String) {
@@ -22,6 +22,19 @@ public class Trie {
     public var root: TrieNode = TrieNode("R")
 
     public init() {}
+
+    private func symbolKey(symbol: Symbol): String {
+        if (symbol.hashID.hash64 != 0u64 || symbol.hashID.fieldID != 0u32) {
+            return symbol.hashID.hash64.toString() + ":" + symbol.hashID.fieldID.toString()
+        }
+        if (let Some(node) <- symbol.node) {
+            return symbol.name + "|" + symbol.scopeName + "|" + node.begin.fileID.toString() + ":" +
+                node.begin.line.toString() + ":" + node.begin.column.toString() + "|" +
+                node.end.fileID.toString() + ":" + node.end.line.toString() + ":" + node.end.column.toString() +
+                "|" + ASTKindIndex(node.astKind).toString()
+        }
+        return symbol.name + "|" + symbol.scopeName + "|" + ASTKindIndex(symbol.astKind).toString()
+    }
 
     public func Reset(): Unit {
         root = TrieNode("R")
@@ -52,7 +65,7 @@ public class Trie {
             }
             if (let Some(child) <- node.next.get(key)) {
                 node = child
-                addUniqueSymbol(node.ids, symbol)
+                node.ids[symbolKey(symbol)] = symbol
                 if (idx + 1 < value.size) {
                     node.suffixes.add(value[(idx + 1)..])
                 }
@@ -67,7 +80,10 @@ public class Trie {
         for (byte in value.toArray()) {
             let key = String.fromUtf8([byte])
             if (let Some(child) <- node.next.get(key)) {
-                removeSymbol(child.ids, symbol)
+                let keyForSymbol = symbolKey(symbol)
+                if (child.ids.contains(keyForSymbol)) {
+                    child.ids.remove(keyForSymbol)
+                }
                 node = child
             } else {
                 return
@@ -118,25 +134,6 @@ public class Trie {
         }
     }
 
-    private func addUniqueSymbol(values: ArrayList<Symbol>, symbol: Symbol): Unit {
-        for (value in values) {
-            if (SameSymbol(value, symbol)) {
-                return
-            }
-        }
-        values.add(symbol)
-    }
-
-    private func removeSymbol(values: ArrayList<Symbol>, symbol: Symbol): Unit {
-        var idx: Int64 = 0
-        while (idx < values.size) {
-            if (SameSymbol(values[idx], symbol)) {
-                values.remove(at: idx)
-            } else {
-                idx++
-            }
-        }
-    }
 }
 
 public class PosSearchApi {
@@ -273,8 +270,8 @@ public class PosSearchApi {
         values.add(symbol)
     }
 
-    private static func addAllUnique(values: ArrayList<Symbol>, symbols: ArrayList<Symbol>): Unit {
-        for (symbol in symbols) {
+    private static func addAllUnique(values: ArrayList<Symbol>, symbols: HashMap<String, Symbol>): Unit {
+        for (symbol in symbols.values()) {
             addUniqueSymbol(values, symbol)
         }
     }

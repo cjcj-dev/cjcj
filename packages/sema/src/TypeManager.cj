@@ -266,7 +266,7 @@ public class TypeManager {
     private let allocatedClassLikeTys: ArrayList<Ty> = ArrayList<Ty>()
     private let unsolvedTyVars: ArrayList<GenericsTy> = ArrayList<GenericsTy>()
     private let tyVarScopes: ArrayList<TyVarScope> = ArrayList<TyVarScope>()
-    private let tyVarScopeDepth: ArrayList<TyVarScopeDepthEntry> = ArrayList<TyVarScopeDepthEntry>()
+    private let tyVarScopeDepth: HashMap<String, Int64> = HashMap<String, Int64>()
     private let instCtxScopes: ArrayList<InstCtxScope> = ArrayList<InstCtxScope>()
     private var nextUniqId: UInt64 = 0u64
 
@@ -1122,13 +1122,12 @@ public class TypeManager {
         return out
     }
 
-    private func hasVisitedGenericMappingTy(visited: ArrayList<Ty>, ty: Ty): Bool {
-        for (value in visited) {
-            if (SameTy(value, ty)) {
-                return true
-            }
-        }
-        return false
+    private func typeManagerTyKey(ty: Ty): String {
+        return ty.Hash().toString() + ":" + ty.String()
+    }
+
+    private func hasVisitedGenericMappingTy(visited: HashSet<String>, ty: Ty): Bool {
+        return visited.contains(typeManagerTyKey(ty))
     }
 
     private func isInheritableTypeForGenericMapping(ty: Ty): Bool {
@@ -1141,18 +1140,18 @@ public class TypeManager {
         return false
     }
 
-    private func generateGenericMappingVisit(m: MultiTypeSubst, baseType: Ty, visited: ArrayList<Ty>): Unit {
+    private func generateGenericMappingVisit(m: MultiTypeSubst, baseType: Ty, visited: HashSet<String>): Unit {
         if (!Ty.IsTyCorrect(baseType) || hasVisitedGenericMappingTy(visited, baseType)) {
             return
         }
-        visited.add(baseType)
+        visited.add(typeManagerTyKey(baseType))
         generateExtendGenericMappingVisit(m, baseType, visited)
         if (let Some(decl) <- Ty.GetInheritableDeclPtrOfTy(Some(baseType))) {
             generateStructDeclGenericMappingVisit(m, decl, baseType, visited)
         }
     }
 
-    private func generateExtendGenericMappingVisit(m: MultiTypeSubst, baseType: Ty, visited: ArrayList<Ty>): Unit {
+    private func generateExtendGenericMappingVisit(m: MultiTypeSubst, baseType: Ty, visited: HashSet<String>): Unit {
         if (!Ty.IsTyCorrect(baseType)) {
             return
         }
@@ -1162,7 +1161,7 @@ public class TypeManager {
     }
 
     private func generateStructDeclGenericMappingVisit(m: MultiTypeSubst, decl: InheritableDecl, targetTy: Ty,
-        visited: ArrayList<Ty>): Unit {
+        visited: HashSet<String>): Unit {
         if (!Ty.IsTyCorrect(targetTy)) {
             return
         }
@@ -1176,18 +1175,18 @@ public class TypeManager {
         }
     }
 
-    private func generateGenericMappingVisit(m: SubstPack, baseType: Ty, visited: ArrayList<Ty>, contextual: Bool): Unit {
+    private func generateGenericMappingVisit(m: SubstPack, baseType: Ty, visited: HashSet<String>, contextual: Bool): Unit {
         if (!Ty.IsTyCorrect(baseType) || hasVisitedGenericMappingTy(visited, baseType)) {
             return
         }
-        visited.add(baseType)
+        visited.add(typeManagerTyKey(baseType))
         generateExtendGenericMappingVisit(m, baseType, visited, contextual)
         if (let Some(decl) <- Ty.GetInheritableDeclPtrOfTy(Some(baseType))) {
             generateStructDeclGenericMappingVisit(m, decl, baseType, visited, contextual)
         }
     }
 
-    private func generateExtendGenericMappingVisit(m: SubstPack, baseType: Ty, visited: ArrayList<Ty>,
+    private func generateExtendGenericMappingVisit(m: SubstPack, baseType: Ty, visited: HashSet<String>,
         contextual: Bool): Unit {
         if (!Ty.IsTyCorrect(baseType)) {
             return
@@ -1198,7 +1197,7 @@ public class TypeManager {
     }
 
     private func generateStructDeclGenericMappingVisit(m: SubstPack, decl: InheritableDecl, targetTy: Ty,
-        visited: ArrayList<Ty>, contextual: Bool): Unit {
+        visited: HashSet<String>, contextual: Bool): Unit {
         if (!Ty.IsTyCorrect(targetTy)) {
             return
         }
@@ -1221,17 +1220,17 @@ public class TypeManager {
     }
 
     public func GenerateStructDeclGenericMapping(m: MultiTypeSubst, decl: InheritableDecl, targetTy: Ty): Unit {
-        let visited = ArrayList<Ty>()
+        let visited = HashSet<String>()
         generateStructDeclGenericMappingVisit(m, decl, targetTy, visited)
     }
 
     public func GenerateGenericMapping(m: MultiTypeSubst, baseType: Ty): Unit {
-        let visited = ArrayList<Ty>()
+        let visited = HashSet<String>()
         generateGenericMappingVisit(m, baseType, visited)
     }
 
     public func GenerateGenericMapping(m: SubstPack, baseType: Ty): Unit {
-        let visited = ArrayList<Ty>()
+        let visited = HashSet<String>()
         generateGenericMappingVisit(m, baseType, visited, true)
     }
 
@@ -2011,31 +2010,20 @@ public class TypeManager {
     }
 
     private func putTyVarScopeDepth(tyVar: GenericsTy, depth: Int64): Unit {
-        for (entry in tyVarScopeDepth) {
-            if (SameTy(entry.tyVar, tyVar)) {
-                entry.depth = depth
-                return
-            }
-        }
-        tyVarScopeDepth.add(TyVarScopeDepthEntry(tyVar, depth))
+        tyVarScopeDepth[typeManagerTyKey(tyVar)] = depth
     }
 
     private func removeTyVarScopeDepth(tyVar: GenericsTy): Unit {
-        var idx: Int64 = 0
-        while (idx < tyVarScopeDepth.size) {
-            if (SameTy(tyVarScopeDepth[idx].tyVar, tyVar)) {
-                tyVarScopeDepth.remove(at: idx)
-                return
-            }
-            idx++
+        let key = typeManagerTyKey(tyVar)
+        if (tyVarScopeDepth.contains(key)) {
+            tyVarScopeDepth.remove(key)
         }
     }
 
     private func findTyVarScopeDepth(tyVar: GenericsTy): Option<Int64> {
-        for (entry in tyVarScopeDepth) {
-            if (SameTy(entry.tyVar, tyVar)) {
-                return entry.depth
-            }
+        let key = typeManagerTyKey(tyVar)
+        if (let Some(depth) <- tyVarScopeDepth.get(key)) {
+            return depth
         }
         var idx: Int64 = 0
         while (idx < tyVarScopes.size) {
