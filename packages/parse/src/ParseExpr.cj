@@ -17,6 +17,17 @@ extend ParserImpl {
         if (ExprKindEquals(ek, ExprKind.UNKNOWN_EXPR) && Seeing(TokenKind.LET)) {
             return ParseLetPattern(ek)
         }
+        if (ExprKindEquals(ek, ExprKind.INDEX_EXPR)) {
+            let ret = ParseIndexAccess()
+            if (!SeeingExprOperator()) {
+                CheckWildcardInExpr(ret)
+            }
+            if (SeeingFakeOperator()) {
+                DiagExpectedOperatorOrEnd()
+                ConsumeUntilAny([TokenKind.NL])
+            }
+            return ret
+        }
         let left = ParseUnaryExpr(ek)
         let ret = ParseExprRhs(0, left, ek)
         if (ExprKindEquals(ek, ExprKind.VAR_INIT) && IsAssignmentExpressionRoot(ret)) {
@@ -131,12 +142,15 @@ extend ParserImpl {
                 continue
             }
             if (Skip(TokenKind.LSQUARE)) {
-            let sub = SubscriptExpr()
-            sub.baseExpr = base
-            sub.leftParenPos = lastToken.Begin()
-            sub.begin = base.begin
-            while (!Seeing(TokenKind.END) && !Seeing(TokenKind.RSQUARE)) {
-                sub.indexExprs.add(ParseExpr(ExprKind.INDEX_EXPR))
+                let sub = SubscriptExpr()
+                sub.baseExpr = base
+                sub.leftParenPos = lastToken.Begin()
+                sub.begin = base.begin
+                while (!Seeing(TokenKind.END) && !Seeing(TokenKind.RSQUARE)) {
+                    if (!sub.indexExprs.isEmpty()) {
+                        sub.commaPos.add(lastToken.Begin())
+                    }
+                    sub.indexExprs.add(ParseExpr(ExprKind.INDEX_EXPR))
                     if (!Skip(TokenKind.COMMA)) { break }
                 }
                 sub.rightParenPos = Expect(TokenKind.RSQUARE, "expected ']' after subscript").Begin()
@@ -270,6 +284,141 @@ extend ParserImpl {
             lhs = node
         }
         return lhs
+    }
+
+    private func ParseExprWithPrevious(preKind: TokenKind, ek: ExprKind): Expr {
+        return ParseExprWithPrevious(preKind, ParseUnaryExpr(ek), ek)
+    }
+
+    private func ParseExprWithPrevious(preKind: TokenKind, left: Expr, ek: ExprKind): Expr {
+        var lhs = left
+        let prePrec = Precedence(preKind)
+        while (true) {
+            var op = Peek()
+            var combinedOperator = false
+            if (let Some(combined) <- LookupSeenCombinator()) {
+                op = combined
+                combinedOperator = true
+            }
+            let prec = Precedence(op.kind)
+            if (prec <= prePrec || prec == INVALID_PRECEDENCE) {
+                return lhs
+            }
+            if (ExprKindEquals(ek, ExprKind.LET_PATTERN) && prec < Precedence(TokenKind.RANGEOP)) {
+                return lhs
+            }
+            if (IsConditionExprKind(ek) && lhs.astKind == ASTKind.LET_PATTERN_DESTRUCTOR &&
+                prec < Precedence(TokenKind.RANGEOP) && op.kind != TokenKind.AND && op.kind != TokenKind.OR) {
+                return lhs
+            }
+            if (IsAssignment(op.kind)) {
+                CheckLeftExpression(lhs, op)
+            }
+            if (!CheckMacroExprRules(Token(preKind), op, lhs)) {
+                lhs.isBroken = true
+            }
+            if (combinedOperator) {
+                SkipAmbiguousToken()
+            } else {
+                Next()
+            }
+            if (op.kind == TokenKind.IS || op.kind == TokenKind.AS) {
+                let typeNode = ParseType()
+                if (op.kind == TokenKind.IS) {
+                    let expr = IsExpr()
+                    expr.leftExpr = lhs
+                    expr.isType = typeNode
+                    expr.isPos = op.Begin()
+                    expr.begin = lhs.begin
+                    expr.end = typeNode.end
+                    lhs = expr
+                } else {
+                    let expr = AsExpr()
+                    expr.leftExpr = lhs
+                    expr.asType = typeNode
+                    expr.asPos = op.Begin()
+                    expr.begin = lhs.begin
+                    expr.end = typeNode.end
+                    lhs = expr
+                }
+                continue
+            }
+            var rhs = ParseUnaryExpr(ek)
+            var nextOp = Peek()
+            if (let Some(nextCombined) <- LookupSeenCombinator()) {
+                nextOp = nextCombined
+            }
+            let nextPrec = Precedence(nextOp.kind)
+            if (prec < nextPrec) {
+                rhs = ParseExprRhsWithPre(prec + 1, rhs, ek, op)
+            } else if (prec == nextPrec && IsNoneAssociative(nextOp.kind) && !rhs.isBroken) {
+                DiagNoneAssociativeOp(op, nextOp)
+                rhs.isBroken = true
+            }
+            if (!CheckMacroExprRules(op, Token(TokenKind.DOT), rhs)) {
+                rhs.isBroken = true
+            }
+            lhs = MakeBinaryExpr(lhs, op, rhs)
+        }
+        return lhs
+    }
+
+    private func ParseIndexAccess(): Expr {
+        if (IsAssignment(Peek().kind)) {
+            diag.DiagnoseRefactor(
+                DiagKindRefactor.EXPECTED_TOKEN,
+                Peek().Begin(),
+                "expected expression in index access")
+            ConsumeUntilAny([TokenKind.NL, TokenKind.SEMI, TokenKind.RSQUARE], targetTokenConsumed: false)
+            return InvalidExpr(Peek().Begin())
+        }
+        let ret = RangeExpr()
+        ret.begin = Peek().Begin()
+        var hasFirstExpr = false
+        if (!Seeing(TokenKind.RANGEOP) && !Seeing(TokenKind.CLOSEDRANGEOP)) {
+            ret.startExpr = ParseExprWithPrevious(TokenKind.RANGEOP, ExprKind.INDEX_EXPR)
+            hasFirstExpr = true
+        }
+        if (!Seeing(TokenKind.RANGEOP) && !Seeing(TokenKind.CLOSEDRANGEOP)) {
+            if (let Some(first) <- ret.startExpr) {
+                return ParseExprWithPrevious(TokenKind.DOT, first, ExprKind.INDEX_EXPR)
+            }
+            return InvalidExpr(Peek().Begin())
+        }
+        ret.isClosed = Peek().kind == TokenKind.CLOSEDRANGEOP
+        ret.rangePos = Peek().Begin()
+        Next()
+        ret.end = lastToken.End()
+        if (!Seeing(TokenKind.RSQUARE) && !Seeing(TokenKind.COLON)) {
+            ret.stopExpr = ParseExprWithPrevious(TokenKind.RANGEOP, ExprKind.INDEX_EXPR)
+            if (let Some(stop) <- ret.stopExpr) {
+                ret.end = stop.end
+            }
+        }
+        if (ret.isClosed && ret.stopExpr.isNone()) {
+            diag.DiagnoseRefactor(
+                DiagKindRefactor.EXPECTED_TOKEN,
+                lastToken.End(),
+                "expected expression after closed range operator in index access")
+            ret.isBroken = true
+        }
+        if (Seeing(TokenKind.COLON)) {
+            if (!hasFirstExpr || ret.stopExpr.isNone()) {
+                diag.DiagnoseRefactor(
+                    DiagKindRefactor.PARSE_ERROR,
+                    Peek().Begin(),
+                    "range expression in index access cannot have step if it is without start or end")
+                ConsumeUntilAny([TokenKind.NL, TokenKind.SEMI, TokenKind.RSQUARE], targetTokenConsumed: false)
+                return ret
+            }
+            Next()
+            ret.colonPos = lastToken.Begin()
+            ret.stepExpr = ParseExprWithPrevious(TokenKind.RANGEOP, ExprKind.INDEX_EXPR)
+            if (let Some(step) <- ret.stepExpr) {
+                ret.end = step.end
+            }
+        }
+        return ParseExprWithPrevious(TokenKind.DOT, ret, ExprKind.INDEX_EXPR)
     }
 
     public func MakeBinaryExpr(left: Expr, op: Token, right: Expr): Expr {
