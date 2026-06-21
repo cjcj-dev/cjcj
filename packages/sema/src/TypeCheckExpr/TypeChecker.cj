@@ -2292,6 +2292,24 @@ public class TypeChecker {
         return FinishSynthesize(ctx, tryExpr, SynTryExpr(impl.typeManager, tryExpr))
     }
 
+    private func CheckArrayLit(ctx: ASTContext, target: Ty, arrayLit: ArrayLit): Bool {
+        let targetTy = UnboxOptionType(target)
+        var matched = true
+        if (targetTy.typeArgs.size >= 1) {
+            let elemTy = targetTy.typeArgs[0]
+            for (child in arrayLit.children) {
+                if (!Check(ctx, elemTy, child)) {
+                    matched = false
+                    break
+                }
+            }
+        }
+        if (!ChkArrayLit(impl.typeManager, target, arrayLit)) {
+            matched = false
+        }
+        return matched
+    }
+
     private func Synthesize(ctx: ASTContext, expr: Expr): Ty {
         if (let Some(desugar) <- expr.desugarExpr) {
             let _ = Synthesize(ctx, desugar)
@@ -2393,7 +2411,8 @@ public class TypeChecker {
                     addImportedDeclAndDependencies(ctx, stringDecl)
                     stringTy = stringDecl.GetTy()
                 }
-                return FinishSynthesize(ctx, lit, SynLitConstExpr(lit, stringTy: stringTy))
+                return FinishSynthesize(ctx, lit,
+                    SynLitConstExpr(lit, stringTy: stringTy, typeManager: Some(impl.typeManager), ctx: Some(ctx)))
             }
         }
         SynthesizeNodeChildren(ctx, expr)
@@ -2549,6 +2568,12 @@ public class TypeChecker {
         if (expr.IsLoopExpr()) {
             SynthesizeLoopChildren(ctx, expr)
             return FinishCheck(ctx, expr, ChkExprShallow(impl.typeManager, target, expr))
+        }
+        if (let Some(lit) <- (expr as LitConstExpr)) {
+            return FinishCheck(ctx, lit, ChkLitConstExpr(impl.typeManager, target, lit, ctx: Some(ctx)))
+        }
+        if (let Some(arrayLit) <- (expr as ArrayLit)) {
+            return FinishCheck(ctx, arrayLit, CheckArrayLit(ctx, target, arrayLit))
         }
         if (let Some(binaryExpr) <- (expr as BinaryExpr)) {
             return FinishCheck(ctx, binaryExpr, CheckBinaryExpr(ctx, target, binaryExpr))

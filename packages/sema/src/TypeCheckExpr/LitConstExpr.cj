@@ -157,11 +157,24 @@ public func ChkLitConstExprOfTypeChar(typeManager: TypeManager, target: Ty, lce:
     return false
 }
 
-private func TyFromRef(ref: Option<RefType>): Option<Ty> {
+private func TyFromRef(ref: Option<RefType>, typeManager!: Option<TypeManager> = None,
+    ctx!: Option<ASTContext> = None): Option<Ty> {
     if (let Some(refType) <- ref) {
         if (let Some(refTy) <- refType.GetTy()) {
             if (Ty.IsTyCorrect(refTy)) {
                 return refTy
+            }
+        }
+        if (let Some(tm) <- typeManager) {
+            if (let Some(astCtx) <- ctx) {
+                if (refType.TestAttr(Attribute.COMPILER_ADD) && refType.TestAttr(Attribute.IN_CORE) &&
+                    !Ty.IsTyCorrect(refType.GetTy())) {
+                    refType.SetTy(Ty.GetInitialTy())
+                }
+                let refTy = GetTyFromASTRefType(tm, astCtx, refType)
+                if (Ty.IsTyCorrect(refTy)) {
+                    return refTy
+                }
             }
         }
     }
@@ -177,7 +190,8 @@ private func SetStringLiteralRef(lce: LitConstExpr, ty: Ty): Unit {
     lce.ref = Some(refType)
 }
 
-public func SynLitConstStringExpr(lce: LitConstExpr, stringTy!: Option<Ty> = None): Ty {
+public func SynLitConstStringExpr(lce: LitConstExpr, stringTy!: Option<Ty> = None,
+    typeManager!: Option<TypeManager> = None, ctx!: Option<ASTContext> = None): Ty {
     if (let Some(ty) <- stringTy) {
         if (Ty.IsTyCorrect(ty)) {
             lce.SetTy(ty)
@@ -188,7 +202,7 @@ public func SynLitConstStringExpr(lce: LitConstExpr, stringTy!: Option<Ty> = Non
             return ty
         }
     }
-    if (let Some(refTy) <- TyFromRef(lce.ref)) {
+    if (let Some(refTy) <- TyFromRef(lce.ref, typeManager: typeManager, ctx: ctx)) {
         lce.SetTy(refTy)
         if (let Some(siExpr) <- lce.siExpr) {
             siExpr.SetTy(refTy)
@@ -248,8 +262,8 @@ private func InterpolationPartsAreWellTyped(typeManager: TypeManager, stringTy: 
 }
 
 public func ChkLitConstExprOfTypeString(typeManager: TypeManager, target: Ty, lce: LitConstExpr,
-    stringTy!: Option<Ty> = None): Bool {
-    let actualTy = SynLitConstStringExpr(lce, stringTy: stringTy)
+    stringTy!: Option<Ty> = None, ctx!: Option<ASTContext> = None): Bool {
+    let actualTy = SynLitConstStringExpr(lce, stringTy: stringTy, typeManager: Some(typeManager), ctx: ctx)
     if (!Ty.IsTyCorrect(actualTy)) {
         return false
     }
@@ -265,7 +279,7 @@ public func ChkLitConstExprOfTypeString(typeManager: TypeManager, target: Ty, lc
 }
 
 public func ChkLitConstExpr(typeManager: TypeManager, target: Ty, lce: LitConstExpr,
-    stringTy!: Option<Ty> = None): Bool {
+    stringTy!: Option<Ty> = None, ctx!: Option<ASTContext> = None): Bool {
     let isWellTyped = match (lce.kind) {
         case LitConstKind.BOOL => ChkLitConstExprOfTypeBool(typeManager, target, lce)
         case LitConstKind.UNIT => ChkLitConstExprOfTypeUnit(typeManager, target, lce)
@@ -273,8 +287,8 @@ public func ChkLitConstExpr(typeManager: TypeManager, target: Ty, lce: LitConstE
         case LitConstKind.RUNE_BYTE => ChkLitConstExprOfTypeInteger(typeManager, target, lce)
         case LitConstKind.FLOAT => ChkLitConstExprOfTypeFloat(typeManager, target, lce)
         case LitConstKind.RUNE => ChkLitConstExprOfTypeChar(typeManager, target, lce)
-        case LitConstKind.STRING => ChkLitConstExprOfTypeString(typeManager, target, lce, stringTy: stringTy)
-        case LitConstKind.JSTRING => ChkLitConstExprOfTypeString(typeManager, target, lce, stringTy: stringTy)
+        case LitConstKind.STRING => ChkLitConstExprOfTypeString(typeManager, target, lce, stringTy: stringTy, ctx: ctx)
+        case LitConstKind.JSTRING => ChkLitConstExprOfTypeString(typeManager, target, lce, stringTy: stringTy, ctx: ctx)
         case LitConstKind.NONE => false
     }
     if (!isWellTyped) {
@@ -288,7 +302,8 @@ public func ChkLitConstExpr(typeManager: TypeManager, target: Ty, lce: LitConstE
     }
 }
 
-public func SynLitConstExpr(lce: LitConstExpr, stringTy!: Option<Ty> = None): Ty {
+public func SynLitConstExpr(lce: LitConstExpr, stringTy!: Option<Ty> = None,
+    typeManager!: Option<TypeManager> = None, ctx!: Option<ASTContext> = None): Ty {
     let synTy = match (lce.kind) {
         case LitConstKind.BOOL => TypeManager.GetPrimitiveTy(TypeKind.TYPE_BOOLEAN)
         case LitConstKind.UNIT => TypeManager.GetPrimitiveTy(TypeKind.TYPE_UNIT)
@@ -296,8 +311,8 @@ public func SynLitConstExpr(lce: LitConstExpr, stringTy!: Option<Ty> = None): Ty
         case LitConstKind.RUNE_BYTE => TypeManager.GetPrimitiveTy(lce.GetNumLitTypeKind())
         case LitConstKind.FLOAT => TypeManager.GetPrimitiveTy(lce.GetNumLitTypeKind())
         case LitConstKind.RUNE => TypeManager.GetPrimitiveTy(TypeKind.TYPE_RUNE)
-        case LitConstKind.STRING => SynLitConstStringExpr(lce, stringTy: stringTy)
-        case LitConstKind.JSTRING => SynLitConstStringExpr(lce, stringTy: stringTy)
+        case LitConstKind.STRING => SynLitConstStringExpr(lce, stringTy: stringTy, typeManager: typeManager, ctx: ctx)
+        case LitConstKind.JSTRING => SynLitConstStringExpr(lce, stringTy: stringTy, typeManager: typeManager, ctx: ctx)
         case LitConstKind.NONE => TypeManager.GetInvalidTy()
     }
     if (lce.kind != LitConstKind.STRING && lce.kind != LitConstKind.JSTRING) {

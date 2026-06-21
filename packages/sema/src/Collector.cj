@@ -13,7 +13,11 @@ public class Collector {
         ctx.fullPackageName = pkg.fullPackageName
         let collector = this
         let walker = Walker(pkg, visitPre: { node: Node =>
-            collector.AddSymbol(ctx, node, buildTrie: buildTrie)
+            if (let Some(lce) <- (node as LitConstExpr)) {
+                collector.CollectLitConstExpr(ctx, lce, buildTrie: buildTrie)
+            } else {
+                collector.AddSymbol(ctx, node, buildTrie: buildTrie)
+            }
             VisitAction.WALK_CHILDREN
         })
         let _ = walker.Walk()
@@ -47,6 +51,31 @@ public class Collector {
         node.symbol = Some(symbol)
         ctx.symbolTable.add(symbol)
         ctx.invertedIndex.Index(symbol, withTrie: buildTrie)
+    }
+
+    private func CollectLitConstExpr(ctx: ASTContext, lce: LitConstExpr, buildTrie!: Bool = true): Unit {
+        if (let Some(refName) <- StringLiteralRefName(lce.kind)) {
+            if (let None <- lce.ref) {
+                let refType = RefType()
+                refType.begin = lce.begin
+                refType.ref.identifier = SrcIdentifier(refName)
+                refType.EnableAttr(Attribute.COMPILER_ADD)
+                refType.EnableAttr(Attribute.IN_CORE)
+                lce.ref = Some(refType)
+                AddSymbol(ctx, refType, buildTrie: buildTrie)
+            }
+        }
+        AddSymbol(ctx, lce, buildTrie: buildTrie)
+    }
+
+    private func StringLiteralRefName(kind: LitConstKind): Option<String> {
+        if (kind == LitConstKind.STRING) {
+            return Some("String")
+        }
+        if (kind == LitConstKind.JSTRING) {
+            return Some("JString")
+        }
+        return None
     }
 
     private func SymbolName(node: Node): String {
