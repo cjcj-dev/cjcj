@@ -322,7 +322,18 @@ extend ParserImpl {
             decl.annotations.add(anno)
         }
         if (!modifiers.isEmpty()) {
-            decl.begin = modifiers[0].begin
+            var index: Int64 = 0
+            if (inForeignBlock) {
+                while (index < modifiers.size && modifiers[index].modifier != TokenKind.FOREIGN) {
+                    index++
+                }
+                if (index < modifiers.size) {
+                    index++
+                }
+            }
+            if (index < modifiers.size) {
+                decl.begin = modifiers[index].begin
+            }
         }
         if (!annos.isEmpty() && (decl.begin.IsZero() || annos[0].begin < decl.begin)) {
             decl.begin = annos[0].begin

@@ -1,5 +1,6 @@
 package cangjie_compiler::parse
 
+import cangjie_compiler::ast.ASTCloner
 import std.collection.*
 
 extend ParserImpl {
@@ -73,6 +74,15 @@ extend ParserImpl {
     private func ParseTopLevelDecl(file: File, annos: ArrayList<Annotation>): Unit {
         let modifiers = ArrayList<Modifier>()
         ParseModifiers(modifiers)
+        if (HasModifierToken(modifiers, TokenKind.FOREIGN)) {
+            for (decl in ParseForeignDecls(modifiers, annos)) {
+                decl.EnableAttr(Attribute.GLOBAL)
+                FinalizeDeclTree(decl)
+                CheckMacroPackageTopLevelDecl(file, decl)
+                file.decls.add(decl)
+            }
+            return
+        }
         if (SeeingPackageHeader()) {
             diag.DiagnoseRefactor(
                 DiagKindRefactor.UNEXPECTED_TOKEN,
@@ -107,6 +117,66 @@ extend ParserImpl {
         }
         diag.DiagnoseRefactor(DiagKindRefactor.UNEXPECTED_TOKEN, Peek().Begin(), "unexpected token at top level")
         Next()
+    }
+
+    private func ParseForeignDecls(modifiers: ArrayList<Modifier>, annos: ArrayList<Annotation>): ArrayList<Decl> {
+        let ret = ArrayList<Decl>()
+        if (!Skip(TokenKind.LCURL)) {
+            ret.add(ParseDecl(ScopeKind.TOPLEVEL, modifiers, annos))
+            return ret
+        }
+        CheckNoDeprecatedAnnotation(annos, "foreign block")
+        let leftCurlPos = lastToken.Begin()
+        SkipBlank(TokenKind.SEMI)
+        let savedInForeignBlock = inForeignBlock
+        inForeignBlock = true
+        while (true) {
+            if (Skip(TokenKind.RCURL)) {
+                break
+            }
+            if (Seeing(TokenKind.END)) {
+                diag.DiagnoseRefactor(DiagKindRefactor.UNTERMINATED_DELIMITER, leftCurlPos, "expected '}' after foreign block")
+                break
+            }
+            let clonedModifiers = CloneModifiers(modifiers)
+            let clonedAnnos = CloneAnnotations(annos)
+            ParseAnnotations(clonedAnnos)
+            ret.add(ParseDecl(ScopeKind.TOPLEVEL, clonedModifiers, clonedAnnos))
+            SkipBlank(TokenKind.SEMI)
+        }
+        inForeignBlock = savedInForeignBlock
+        return ret
+    }
+
+    private func CloneModifiers(modifiers: ArrayList<Modifier>): ArrayList<Modifier> {
+        let ret = ArrayList<Modifier>()
+        for (modifier in modifiers) {
+            if (let Some(cloned) <- (ASTCloner.Clone(modifier) as Modifier)) {
+                ret.add(cloned)
+            }
+        }
+        return ret
+    }
+
+    private func CloneAnnotations(annos: ArrayList<Annotation>): ArrayList<Annotation> {
+        let ret = ArrayList<Annotation>()
+        for (anno in annos) {
+            if (let Some(cloned) <- (ASTCloner.Clone(anno) as Annotation)) {
+                ret.add(cloned)
+            }
+        }
+        return ret
+    }
+
+    private func CheckNoDeprecatedAnnotation(annos: ArrayList<Annotation>, invalidTarget: String): Unit {
+        for (anno in annos) {
+            if (anno.kind == AnnotationKind.DEPRECATED) {
+                diag.DiagnoseRefactor(
+                    DiagKindRefactor.INVALID_ANNOTATION,
+                    anno.begin,
+                    "@Deprecated cannot be applied to ${invalidTarget}")
+            }
+        }
     }
 
     private func SeeingPackageHeader(): Bool {

@@ -308,6 +308,7 @@ public class Translator {
             case ASTKind.SUBSCRIPT_EXPR => trans.Visit(RequireNodeAsSubscriptExpr(nodePtr))
             case ASTKind.TYPE_CONV_EXPR => trans.Visit(RequireNodeAsTypeConvExpr(nodePtr))
             case ASTKind.VAR_WITH_PATTERN_DECL => trans.Visit(RequireNodeAsVarWithPatternDecl(nodePtr))
+            case ASTKind.PAREN_EXPR => trans.Visit(RequireNodeAsParenExpr(nodePtr))
             case _ => throw IllegalArgumentException(
                 "not yet ported in faithful AST2CHIR: ${ASTKindName(nodePtr.astKind)}")
         }
@@ -627,6 +628,10 @@ public class Translator {
         let resultTy = chirTy.TranslateType(RequireAstTy(expr))
         let unary = builder.CreateUnaryExpression(ToCHIRUnaryOp(expr.op), resultTy, operand, CurrentBlock())
         return RequireResult(unary)
+    }
+
+    public func Visit(expr: AstParenExpr): Option<Value> {
+        return Translator.TranslateASTNode(RequireExpr(expr.expr, "parenthesized expression"), this)
     }
 
     public func Visit(expr: AstCallExpr): Option<Value> {
@@ -5150,6 +5155,10 @@ public class Translator {
 
     private static func RequireNodeAsUnaryExpr(node: AstNode): AstUnaryExpr {
         return (node as AstUnaryExpr) ?? throw IllegalArgumentException("ASTKind cast failed: UNARY_EXPR")
+    }
+
+    private static func RequireNodeAsParenExpr(node: AstNode): AstParenExpr {
+        return (node as AstParenExpr) ?? throw IllegalArgumentException("ASTKind cast failed: PAREN_EXPR")
     }
 
     private static func RequireNodeAsCallExpr(node: AstNode): AstCallExpr {

@@ -17,6 +17,7 @@ public class ParserImpl {
     public var firstNLPosition: Position = DEFAULT_POSITION
     public var enableCustomAnno: Bool = false
     public var forImport: Bool = false
+    public var inForeignBlock: Bool = false
     public var moduleName: String = ""
     public var currentFile: Option<File> = None
     public var curMacroCall: Option<Node> = None

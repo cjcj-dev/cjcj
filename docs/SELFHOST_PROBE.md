@@ -167,3 +167,173 @@ Results:
 - `cjpm build`: success.
 - `difftest`: `TOTAL=72  PASS=72  MISMATCH=0  FAIL=0`; no non-PASS lines.
 - All five septests printed final PASS lines.
+
+## Probe 2 (`packages/option/src`)
+
+Probe target: `packages/option/src` (`Option.cj`, `OptionAction.cj`, `OptionEnums.cj`, `OptionSupport.cj`,
+`OptionTable.cj`, `Options.cj`, `Triple.cj`).
+
+Dependency packages were built by the reference toolchain through the workspace `cjpm build`:
+
+- `target/release/basic@cangjie_compiler/basic@cangjie_compiler.cjo`
+- `target/release/basic@cangjie_compiler/libbasic@cangjie_compiler.a`
+- `target/release/utils@cangjie_compiler/utils@cangjie_compiler.cjo`
+- `target/release/utils@cangjie_compiler/libutils@cangjie_compiler.a`
+
+Reference compile command:
+
+```sh
+/root/.cjv/bin/cjc -p packages/option/src --output-type=staticlib -o "$WORK/liboption.a" \
+  --import-path target/release/basic@cangjie_compiler \
+  --import-path target/release/utils@cangjie_compiler \
+  -L target/release/basic@cangjie_compiler \
+  -L target/release/utils@cangjie_compiler \
+  -lbasic@cangjie_compiler -lutils@cangjie_compiler --set-runtime-rpath -V
+```
+
+Reference result: success, producing `option@cangjie_compiler.cjo` and `liboption.a`.
+
+Selfhost compile command:
+
+```sh
+./target/release/bin/cangjie_compiler::cjc -p packages/option/src --output-type=staticlib -o "$WORK/liboption.a" \
+  --import-path target/release/basic@cangjie_compiler \
+  --import-path target/release/utils@cangjie_compiler \
+  -L target/release/basic@cangjie_compiler \
+  -L target/release/utils@cangjie_compiler \
+  -lbasic@cangjie_compiler -lutils@cangjie_compiler --set-runtime-rpath -V
+```
+
+### Progress
+
+Before this probe, the selfhost parser rejected `packages/option/src/OptionSupport.cj` at line 1. The actual
+syntax gap was a top-level `foreign { ... }` block following `@When`.
+
+Two faithful ports were landed:
+
+- Top-level foreign block parsing, including cloning the block modifiers/annotations for each inner declaration,
+  mirroring `/root/cj_build/cangjie_compiler/src/Parse/Parser.cpp`, `ParserImpl::ParseTopLevelDecl` and
+  `ParserImpl::ParseForeignDecls`.
+- Foreign-block declaration begin-position handling, mirroring
+  `/root/cj_build/cangjie_compiler/src/Parse/ParseModifiers.cpp`, `ParserImpl::SetDeclBeginPos`.
+
+After that parser port, `packages/option/src` no longer stops at the parser. The full package now runs until the
+selfhost process exhausts its runtime heap:
+
+```text
+An exception has occurred:
+    Out of memory
+```
+
+This cut did not attempt an OOM fix.
+
+A small CHIR blocker was also exposed and fixed while probing individual option files:
+
+- Parenthesized expression lowering, mirroring
+  `/root/cj_build/cangjie_compiler/src/CHIR/AST2CHIR/TranslateASTNode/TranslateParenExpr.cpp`,
+  `Translator::Visit(const AST::ParenExpr&)`.
+
+`packages/option/src/OptionEnums.cj` now compiles by itself with the selfhost cjc against reference-built `basic`
+and `utils`.
+
+### Remaining Frontier
+
+#### Sema/runtime memory frontier: full option package OOM
+
+Files hit:
+
+- package compile of `packages/option/src`
+- single-file probes of larger files such as `Option.cj`, `OptionAction.cj`, `OptionTable.cj`, and `Triple.cj`
+  did not produce a smaller categorized failure before timeout/OOM.
+
+Symptom:
+
+```text
+Out of memory
+```
+
+C++ reference area for the next cut:
+
+- `/root/cj_build/cangjie_compiler/src/Sema/`
+- `/root/cj_build/cangjie_compiler/src/Frontend/CompilerInstance.cpp`, stage ordering around sema and generic
+  instantiation
+
+Suggested next cut: isolate the smallest option declaration or type-checking pattern that drives heap growth before
+changing sema. Do not conflate this with the separately owned recursive generic-bound OOM unless the minimized case
+proves it is the same path.
+
+#### CHIR/.cjo frontier: invalid semantic type in option support/signatures
+
+Files hit:
+
+- `packages/option/src/OptionSupport.cj`
+- `packages/option/src/Options.cj`
+
+Symptoms:
+
+```text
+IllegalArgumentException: unsupported AST type kind for CHIRType.TranslateType: Invalid
+via FaithfulAST2CHIR::CreateImportedFuncSignatureAndSetGlobalCache
+```
+
+and:
+
+```text
+IllegalArgumentException: unsupported AST type kind for CHIRType.TranslateType: Invalid
+via FaithfulAST2CHIR::CreateFuncSignatureAndSetGlobalCache
+```
+
+C++ reference area for the next cut:
+
+- `/root/cj_build/cangjie_compiler/src/CHIR/AST2CHIR/TranslateType.cpp`
+- `/root/cj_build/cangjie_compiler/src/CHIR/AST2CHIR/AST2CHIR.cpp`
+- upstream sema signature typing under `/root/cj_build/cangjie_compiler/src/Sema/`
+
+Suggested next cut: identify the exact function signature still containing `Invalid` after sema, then fix the
+upstream C++-faithful type assignment path rather than tolerating `Invalid` in CHIR.
+
+#### Fallback observations
+
+`packages/conditional_compilation/src` was tried as the first fallback with reference-built `ast`, `basic`, `option`,
+and `utils`; it did not produce a categorized failure before a 180s selfhost timeout.
+
+`packages/meta_transformation/src` was tried as the second fallback with reference-built `basic` and `chir`; it
+stopped in sema diagnostic construction:
+
+```text
+IllegalStateException: diagnostic argument count does not match format placeholders
+via TypeCheckReferenceFilterTargetsForFuncReference
+```
+
+C++ reference area for that fallback:
+
+- `/root/cj_build/cangjie_compiler/src/Sema/TypeCheckReference.cpp`
+- `/root/cj_build/cangjie_compiler/src/Basic/DiagnosticEngine.cpp`
+
+Suggested next cut: minimize the lambda/member-reference in `meta_transformation` that triggers the diagnostic
+argument mismatch, then port the C++ diagnostic call and format contract together.
+
+### Verification
+
+Commands run after the fixes:
+
+```sh
+cjpm build
+bash scripts/difftest.sh
+bash scripts/septest/run.sh
+bash scripts/septest/run_write.sh
+bash scripts/septest/run_diag.sh
+bash scripts/septest/run_write_types.sh
+bash scripts/septest/run_write_struct.sh
+```
+
+Additional corpus cases added:
+
+- `scripts/difftest_corpus/91_paren_expr.cj`
+- `scripts/difftest_corpus/92_foreign_block.cj`
+
+Results:
+
+- `cjpm build`: success.
+- `difftest`: `TOTAL=76  PASS=76  MISMATCH=0  FAIL=0`; no non-PASS lines.
+- All five septests printed final PASS lines.
