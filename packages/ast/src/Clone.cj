@@ -872,6 +872,7 @@ public class ASTCloner {
                 for (file in src.files) { if (let Some(cloned) <- (Clone(file) as File)) { dst.files.add(cloned) } }
                 for (decl in src.genericInstantiatedDecls) { if (let Some(cloned) <- (Clone(decl) as Decl)) { dst.genericInstantiatedDecls.add(cloned) } }
                 for (decl in src.srcImportedNonGenericDecls) { dst.srcImportedNonGenericDecls.add(decl) }
+                for (key in src.srcImportedNonGenericDeclKeys) { dst.srcImportedNonGenericDeclKeys.add(key) }
                 for (decl in src.inlineFuncDecls) { dst.inlineFuncDecls.add(decl) }
                 dst.accessible = src.accessible
                 dst.hasSourceImportedDecl = src.hasSourceImportedDecl

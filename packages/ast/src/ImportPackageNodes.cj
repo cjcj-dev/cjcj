@@ -386,6 +386,7 @@ public class Package <: Node {
     public let files: ArrayList<File> = ArrayList<File>()
     public let genericInstantiatedDecls: ArrayList<Decl> = ArrayList<Decl>()
     public let srcImportedNonGenericDecls: ArrayList<Decl> = ArrayList<Decl>()
+    public let srcImportedNonGenericDeclKeys: HashSet<String> = HashSet<String>()
     public let inlineFuncDecls: ArrayList<FuncDecl> = ArrayList<FuncDecl>()
     public var accessible: AccessLevel = AccessLevel.PUBLIC
     public var hasSourceImportedDecl: Bool = false
