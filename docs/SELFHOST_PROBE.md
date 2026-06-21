@@ -546,6 +546,12 @@ Before the fix these programs produced `5`, `400`, and a CHIR invalid-type failu
 ordinary `Lookup` resolves the nearest declaration and the scope-unaware `CurrentFunctionParam` override is not
 needed.
 
+A follow-up scope-walk check found a remaining collector divergence: the selfhost assignment pass had a plain
+subtree walker for non-special expression nodes, and that walker only copied the current scope without re-entering
+the C++-shaped dispatch. Scope-bearing descendants hidden under calls, binary expressions, function arguments,
+array literals, returns, and similar plain parents could therefore miss their gate and collapse into the enclosing
+scope.
+
 ### Faithful Fix
 
 - Ported the C++ `ScopeManager` counter/gate algorithm into selfhost
@@ -554,6 +560,10 @@ needed.
 - Added a C++-shaped scope assignment pass in `packages/sema/src/Collector.cj` before indexing symbols. It assigns
   gates and child scopes for package/file declarations, nominal bodies, function bodies, generic parameters, local
   blocks, `if`, loops, match cases, try/catch/handler blocks, lambdas, enum body scopes, and extend body scopes.
+- Completed the collector walk so plain expression parents re-dispatch any scope-bearing descendant through the same
+  `AssignNode` path and skip that owned subtree. This mirrors C++ `Collector::BuildSymbolTable`'s single uniform
+  recursion: embedded lambdas, blocks, `if`, loops, match cases, try, synchronized, and nested declarations now get
+  their scopes regardless of the enclosing expression.
 - Updated selfhost decl-map insertion to key declarations by `GetScopeNameWithoutTail(scopeName)`, matching C++
   `PreCheck.cpp:285-286`.
 - Removed the selfhost-only `CurrentFunctionParam` override from `ResolveRefExpr`; resolution now comes from scoped
@@ -567,6 +577,13 @@ The three repros now match reference cjc:
 96_shadow_param_block  -> 99
 97_shadow_param_loop   -> 103
 98_sibling_param_name  -> 108
+```
+
+The embedded-scope repros also match reference after the walk-completeness fix:
+
+```text
+99_shadow_lambda_in_call -> 99
+100_shadow_if_in_binary  -> 8
 ```
 
 The lex-style `match (kind)` cross-function parameter case also resolves correctly in a focused check and prints `7`.
@@ -586,7 +603,7 @@ bash scripts/septest/run_write_struct.sh
 Results:
 
 - `cjpm build`: success.
-- `difftest`: `TOTAL=82  PASS=82  MISMATCH=0  FAIL=0`.
+- `difftest`: `TOTAL=84  PASS=84  MISMATCH=0  FAIL=0`.
 - `run.sh`: `SEPTEST-PASS`.
 - `run_write.sh`: `SEPTEST-WRITE-PASS`.
 - `run_diag.sh`: `SEPTEST-DIAG-PASS`.

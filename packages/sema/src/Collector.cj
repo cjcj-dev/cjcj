@@ -117,6 +117,9 @@ public class Collector {
 
     private func AssignPlainSubtree(ctx: ASTContext, root: Node): Unit {
         let walker = Walker(root, visitPre: { node: Node =>
+            if (AssignDispatchedNode(ctx, node)) {
+                return VisitAction.SKIP_CHILDREN
+            }
             SetCurrentScope(ctx, node)
             VisitAction.WALK_CHILDREN
         })
@@ -559,99 +562,104 @@ public class Collector {
         }
         if (let Some(desugarExpr) <- se.desugarExpr) {
             AssignNode(ctx, desugarExpr)
-        } else if (let Some(body) <- se.body) {
-            AssignBlockContents(ctx, body)
         }
         scopeManager.FinalizeScope(ctx)
     }
 
-    private func AssignNode(ctx: ASTContext, node: Node): Unit {
+    private func AssignDispatchedNode(ctx: ASTContext, node: Node): Bool {
         if (let Some(classDecl) <- (node as ClassDecl)) {
             AssignClassDecl(ctx, classDecl)
-            return
+            return true
         }
         if (let Some(structDecl) <- (node as StructDecl)) {
             AssignStructDecl(ctx, structDecl)
-            return
+            return true
         }
         if (let Some(interfaceDecl) <- (node as InterfaceDecl)) {
             AssignInterfaceDecl(ctx, interfaceDecl)
-            return
+            return true
         }
         if (let Some(enumDecl) <- (node as EnumDecl)) {
             AssignEnumDecl(ctx, enumDecl)
-            return
+            return true
         }
         if (let Some(extendDecl) <- (node as ExtendDecl)) {
             AssignExtendDecl(ctx, extendDecl)
-            return
+            return true
         }
         if (let Some(typeAlias) <- (node as TypeAliasDecl)) {
             AssignTypeAliasDecl(ctx, typeAlias)
-            return
+            return true
         }
         if (let Some(funcDecl) <- (node as FuncDecl)) {
             AssignFuncDecl(ctx, funcDecl)
-            return
+            return true
         }
         if (let Some(mainDecl) <- (node as MainDecl)) {
             AssignMainDecl(ctx, mainDecl)
-            return
+            return true
         }
         if (let Some(funcBody) <- (node as FuncBody)) {
             AssignFuncBody(ctx, funcBody)
-            return
+            return true
         }
         if (let Some(funcParam) <- (node as FuncParam)) {
             AssignFuncParam(ctx, funcParam)
-            return
+            return true
         }
         if (let Some(varDecl) <- (node as VarDeclAbstract)) {
             AssignVarDecl(ctx, varDecl)
-            return
+            return true
         }
         if (let Some(block) <- (node as Block)) {
             AssignBlock(ctx, block)
-            return
+            return true
         }
         if (let Some(ifExpr) <- (node as IfExpr)) {
             AssignIfExpr(ctx, ifExpr)
-            return
+            return true
         }
         if (let Some(forInExpr) <- (node as ForInExpr)) {
             AssignForInExpr(ctx, forInExpr)
-            return
+            return true
         }
         if (let Some(whileExpr) <- (node as WhileExpr)) {
             AssignWhileExpr(ctx, whileExpr)
-            return
+            return true
         }
         if (let Some(doWhileExpr) <- (node as DoWhileExpr)) {
             AssignDoWhileExpr(ctx, doWhileExpr)
-            return
+            return true
         }
         if (let Some(lambdaExpr) <- (node as LambdaExpr)) {
             AssignLambdaExpr(ctx, lambdaExpr)
-            return
+            return true
         }
         if (let Some(matchExpr) <- (node as MatchExpr)) {
             AssignMatchExpr(ctx, matchExpr)
-            return
+            return true
         }
         if (let Some(matchCase) <- (node as MatchCase)) {
             AssignMatchCase(ctx, matchCase)
-            return
+            return true
         }
         if (let Some(matchCaseOther) <- (node as MatchCaseOther)) {
             AssignMatchCaseOther(ctx, matchCaseOther)
-            return
+            return true
         }
         if (let Some(tryExpr) <- (node as TryExpr)) {
             AssignTryExpr(ctx, tryExpr)
-            return
+            return true
         }
         if (let Some(syncExpr) <- (node as SynchronizedExpr)) {
             AssignSynchronizedExpr(ctx, syncExpr)
+            return true
+        }
+        return false
+    }
+
+    private func AssignNode(ctx: ASTContext, node: Node): Unit {
+        if (AssignDispatchedNode(ctx, node)) {
             return
         }
         AssignPlainSubtree(ctx, node)
