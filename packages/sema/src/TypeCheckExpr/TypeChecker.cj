@@ -913,7 +913,9 @@ public class TypeChecker {
     }
 
     private func TypeCheckTopLevelDecl(ctx: ASTContext, decl: Decl): Unit {
+        let tyVarScope = BeginTyVarScope(impl.typeManager)
         SynthesizeTree(ctx, decl)
+        EndTyVarScope(tyVarScope)
     }
 
     private func TypeCheckImportedGenericMember(ctx: ASTContext): Unit {

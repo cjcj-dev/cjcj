@@ -263,6 +263,7 @@ public class TypeManager {
     private let subtypeCache: ArrayList<SubtypeCacheEntry> = ArrayList<SubtypeCacheEntry>()
     private let declInstantiationStatus: ArrayList<DeclInstantiationStatusEntry> =
         ArrayList<DeclInstantiationStatusEntry>()
+    private let allocatedTyCache: HashMap<String, Ty> = HashMap<String, Ty>()
     private let allocatedClassLikeTys: ArrayList<Ty> = ArrayList<Ty>()
     private let unsolvedTyVars: ArrayList<GenericsTy> = ArrayList<GenericsTy>()
     private let tyVarScopes: ArrayList<TyVarScope> = ArrayList<TyVarScope>()
@@ -315,27 +316,33 @@ public class TypeManager {
     public func GetGenericsTy(gpd: GenericParamDecl): GenericsTy {
         let raw = gpd.identifier.Val()
         let name = if (raw.isEmpty()) { "T" } else { raw }
-        return GenericsTy(name, gpd)
+        let ty = GenericsTy(name, gpd)
+        return (internAllocatedTy(ty) as GenericsTy) ?? ty
     }
 
     public func GetEnumTy(ed: EnumDecl, typeArgs!: Array<Ty> = Array<Ty>()): EnumTy {
-        return EnumTy(declName(ed), ed, typeArgs)
+        let ty = EnumTy(declName(ed), ed, typeArgs)
+        return (internAllocatedTy(ty) as EnumTy) ?? ty
     }
 
     public func GetRefEnumTy(ed: EnumDecl, typeArgs: Array<Ty>): RefEnumTy {
-        return RefEnumTy(declName(ed), ed, typeArgs)
+        let ty = RefEnumTy(declName(ed), ed, typeArgs)
+        return (internAllocatedTy(ty) as RefEnumTy) ?? ty
     }
 
     public func GetStructTy(sd: StructDecl, typeArgs: Array<Ty>): StructTy {
-        return StructTy(declName(sd), sd, typeArgs)
+        let ty = StructTy(declName(sd), sd, typeArgs)
+        return (internAllocatedTy(ty, classLike: true) as StructTy) ?? ty
     }
 
     public func GetTupleTy(typeArgs: Array<Ty>, isClosureTy!: Bool = false): TupleTy {
-        return TupleTy(typeArgs, isClosureTy: isClosureTy)
+        let ty = TupleTy(typeArgs, isClosureTy: isClosureTy)
+        return (internAllocatedTy(ty) as TupleTy) ?? ty
     }
 
     public func GetFunctionTy(paramTys: Array<Ty>, retTy: Ty, cfg!: FuncTyConfig = FuncTyConfig()): FuncTy {
-        return FuncTy(paramTys, retTy, cfg: cfg)
+        let ty = FuncTy(paramTys, retTy, cfg: cfg)
+        return (internAllocatedTy(ty) as FuncTy) ?? ty
     }
 
     public func GetArrayTy(elemTy: Ty, dims: UInt64): ArrayTy {
@@ -351,16 +358,19 @@ public class TypeManager {
         } else {
             realElemTy = GetInvalidTy()
         }
-        return ArrayTy(realElemTy, realDims)
+        let ty = ArrayTy(realElemTy, realDims)
+        return (internAllocatedTy(ty) as ArrayTy) ?? ty
     }
 
     public func GetVArrayTy(elemTy: Ty, size: Int64): VArrayTy {
-        return VArrayTy(elemTy, size)
+        let ty = VArrayTy(elemTy, size)
+        return (internAllocatedTy(ty) as VArrayTy) ?? ty
     }
 
     public func GetPointerTy(elemTy: Ty): PointerTy {
         let realElemTy = if (Ty.IsTyCorrect(elemTy)) { elemTy } else { GetInvalidTy() }
-        return PointerTy(realElemTy)
+        let ty = PointerTy(realElemTy)
+        return (internAllocatedTy(ty) as PointerTy) ?? ty
     }
 
     public func GetArrayTy(): ArrayTy {
@@ -369,24 +379,22 @@ public class TypeManager {
 
     public func GetClassTy(cd: ClassDecl, typeArgs: Array<Ty>): ClassTy {
         let ty = ClassTy(declName(cd), cd, typeArgs)
-        recordAllocatedClassLikeTy(ty)
-        return ty
+        return (internAllocatedTy(ty, classLike: true) as ClassTy) ?? ty
     }
 
     public func GetClassThisTy(cd: ClassDecl, typeArgs: Array<Ty>): ClassThisTy {
         let ty = ClassThisTy(declName(cd), cd, typeArgs)
-        recordAllocatedClassLikeTy(ty)
-        return ty
+        return (internAllocatedTy(ty, classLike: true) as ClassThisTy) ?? ty
     }
 
     public func GetInterfaceTy(id: InterfaceDecl, typeArgs: Array<Ty>): InterfaceTy {
         let ty = InterfaceTy(declName(id), id, typeArgs)
-        recordAllocatedClassLikeTy(ty)
-        return ty
+        return (internAllocatedTy(ty, classLike: true) as InterfaceTy) ?? ty
     }
 
     public func GetTypeAliasTy(tad: TypeAliasDecl, typeArgs: Array<Ty>): TypeAliasTy {
-        return TypeAliasTy(declName(tad), tad, typeArgs)
+        let ty = TypeAliasTy(declName(tad), tad, typeArgs)
+        return (internAllocatedTy(ty) as TypeAliasTy) ?? ty
     }
 
     public func GetIntersectionTy(tys: Array<Ty>): Ty {
@@ -396,7 +404,8 @@ public class TypeManager {
         if (tys.size == 1) {
             return tys[0]
         }
-        return IntersectionTy(tys)
+        let ty = IntersectionTy(tys)
+        return internAllocatedTy(ty)
     }
 
     public func GetUnionTy(tys: Array<Ty>): Ty {
@@ -406,7 +415,8 @@ public class TypeManager {
         if (tys.size == 1) {
             return tys[0]
         }
-        return UnionTy(tys)
+        let ty = UnionTy(tys)
+        return internAllocatedTy(ty)
     }
 
     public func GetAnyTy(): Ty {
@@ -428,8 +438,16 @@ public class TypeManager {
         ctypeTy = semCTypeTy
     }
 
-    private func recordAllocatedClassLikeTy(ty: Ty): Unit {
-        allocatedClassLikeTys.add(ty)
+    private func internAllocatedTy(ty: Ty, classLike!: Bool = false): Ty {
+        let key = typeManagerTyKey(ty)
+        if (let Some(cached) <- allocatedTyCache.get(key)) {
+            return cached
+        }
+        allocatedTyCache[key] = ty
+        if (classLike) {
+            allocatedClassLikeTys.add(ty)
+        }
+        return ty
     }
 
     public func GetInstantiatedTys(ty: Ty, mts: MultiTypeSubst): TySet {
@@ -1528,6 +1546,7 @@ public class TypeManager {
     public func Clear(): Unit {
         constraints.Clear()
         ClearMapCache()
+        allocatedTyCache.clear()
         allocatedClassLikeTys.clear()
         unsolvedTyVars.clear()
         subtypeCache.clear()
@@ -1539,6 +1558,7 @@ public class TypeManager {
         declToExtendMap.clear()
         overrideCache.clear()
         declInstantiationStatus.clear()
+        subtypeCache.clear()
         ClearRecordUsedExtends()
     }
 
@@ -1571,7 +1591,9 @@ public class TypeManager {
     }
 
     public func ReleasePostSemaCaches(): Unit {
+        ReleaseSemaQueryCaches()
         ClearRecordUsedExtends()
+        boxedNonGenericDecls.clear()
     }
 
     public func GetOverrideDeclInClassLike(baseDecl: Decl, funcDecl: FuncDecl,
