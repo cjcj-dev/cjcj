@@ -197,7 +197,7 @@ private class FrontendCjoFlatBufferWriter {
         if (decl.doNotExport || decl.TestAttr(Attribute.COMPILER_ADD)) {
             return false
         }
-        return decl.TestAnyAttr(Attribute.PUBLIC, Attribute.PROTECTED)
+        return decl.IsExportedDecl()
     }
 
     private func IsSupportedTopLevelDecl(decl: Decl): Bool {
@@ -216,7 +216,16 @@ private class FrontendCjoFlatBufferWriter {
         if ((decl as InterfaceDecl).isSome()) {
             return true
         }
-        return (decl as EnumDecl).isSome()
+        if ((decl as EnumDecl).isSome()) {
+            return true
+        }
+        if ((decl as StructDecl).isSome()) {
+            return true
+        }
+        if ((decl as TypeAliasDecl).isSome()) {
+            return true
+        }
+        return (decl as ExtendDecl).isSome()
     }
 
     private func SaveDeclIndex(decl: Decl, isTopLevel: Bool): UInt32 {
@@ -297,24 +306,128 @@ private class FrontendCjoFlatBufferWriter {
     }
 
     private func SaveDeclType(decl: Decl): UInt32 {
-        if (let Some(ty) <- decl.GetTy()) {
-            return SaveType(ty)
+        if (let Some(funcDecl) <- (decl as FuncDecl)) {
+            if (let Some(ty) <- FuncDeclTypeForSerialization(funcDecl)) {
+                return SaveType(ty)
+            }
         }
         if (let Some(param) <- (decl as FuncParam)) {
             if (let Some(typeNode) <- param.typeNode) {
-                if (let Some(ty2) <- typeNode.GetTy()) {
-                    return SaveType(ty2)
-                }
+                return SaveType(TypeNodeTyForSerialization(typeNode))
             }
         }
         if (let Some(varDecl) <- (decl as VarDeclAbstract)) {
             if (let Some(typeNode2) <- varDecl.typeNode) {
-                if (let Some(ty3) <- typeNode2.GetTy()) {
-                    return SaveType(ty3)
+                return SaveType(TypeNodeTyForSerialization(typeNode2))
+            }
+        }
+        if (let Some(extendDecl) <- (decl as ExtendDecl)) {
+            if (let Some(extendedType) <- extendDecl.extendedType) {
+                return SaveType(TypeNodeTyForSerialization(extendedType))
+            }
+        }
+        if (let Some(ty) <- decl.GetTy()) {
+            return SaveType(ty)
+        }
+        return 0u32
+    }
+
+    private func FuncDeclTypeForSerialization(funcDecl: FuncDecl): Option<Ty> {
+        if (let Some(body) <- funcDecl.funcBody) {
+            if (!body.paramLists.isEmpty()) {
+                let params = ArrayList<Ty>()
+                for (param in body.paramLists[0].params) {
+                    if (let Some(typeNode) <- param.typeNode) {
+                        params.add(TypeNodeTyForSerialization(typeNode))
+                    } else if (let Some(paramTy) <- param.GetTy()) {
+                        params.add(paramTy)
+                    } else {
+                        return None
+                    }
+                }
+                let retTy = if (let Some(retType) <- body.retType) {
+                    TypeNodeTyForSerialization(retType)
+                } else if (let Some(declTy) <- funcDecl.GetTy()) {
+                    if (let Some(funcTy) <- (declTy as FuncTy)) {
+                        funcTy.retTy
+                    } else {
+                        PrimitiveTy(TypeKind.TYPE_UNIT)
+                    }
+                } else {
+                    PrimitiveTy(TypeKind.TYPE_UNIT)
+                }
+                let cfg = FuncTyConfig()
+                if (let Some(declTy2) <- funcDecl.GetTy()) {
+                    if (let Some(funcTy2) <- (declTy2 as FuncTy)) {
+                        cfg.isC = funcTy2.isC
+                        cfg.isClosureTy = funcTy2.isClosureTy
+                        cfg.hasVariableLenArg = funcTy2.hasVariableLenArg
+                        cfg.noCast = funcTy2.noCast
+                    }
+                }
+                return Some(FuncTy(params.toArray(), retTy, cfg: cfg))
+            }
+        }
+        return funcDecl.GetTy()
+    }
+
+    private func TypeNodeTyForSerialization(typeNode: Type): Ty {
+        if (let Some(aliasTy) <- typeNode.aliasTy) {
+            if (!Ty.IsInitialTy(Some(aliasTy))) {
+                return aliasTy
+            }
+        }
+        if (let Some(parenType) <- (typeNode as ParenType)) {
+            if (let Some(innerType) <- parenType.innerType) {
+                return TypeNodeTyForSerialization(innerType)
+            }
+        }
+        if (let Some(funcType) <- (typeNode as FuncType)) {
+            let params = ArrayList<Ty>()
+            for (paramType in funcType.paramTypes) {
+                params.add(TypeNodeTyForSerialization(paramType))
+            }
+            let retTy = if (let Some(retType) <- funcType.retType) {
+                TypeNodeTyForSerialization(retType)
+            } else {
+                PrimitiveTy(TypeKind.TYPE_UNIT)
+            }
+            let cfg = FuncTyConfig()
+            cfg.isC = funcType.isC
+            if (let Some(typeTy) <- funcType.GetTy()) {
+                if (let Some(funcTy) <- (typeTy as FuncTy)) {
+                    cfg.isClosureTy = funcTy.isClosureTy
+                    cfg.hasVariableLenArg = funcTy.hasVariableLenArg
+                    cfg.noCast = funcTy.noCast
+                }
+            }
+            return FuncTy(params.toArray(), retTy, cfg: cfg)
+        }
+        if (let Some(tupleType) <- (typeNode as TupleType)) {
+            let elems = ArrayList<Ty>()
+            for (fieldType in tupleType.fieldTypes) {
+                elems.add(TypeNodeTyForSerialization(fieldType))
+            }
+            if (let Some(typeTy2) <- tupleType.GetTy()) {
+                if (let Some(tupleTy) <- (typeTy2 as TupleTy)) {
+                    return TupleTy(elems.toArray(), isClosureTy: tupleTy.isClosureTy)
+                }
+            }
+            return TupleTy(elems.toArray())
+        }
+        if (let Some(varrayType) <- (typeNode as VArrayType)) {
+            if (let Some(argType) <- varrayType.typeArgument) {
+                if (let Some(typeTy3) <- varrayType.GetTy()) {
+                    if (let Some(varrayTy) <- (typeTy3 as VArrayTy)) {
+                        return VArrayTy(TypeNodeTyForSerialization(argType), varrayTy.size)
+                    }
                 }
             }
         }
-        return 0u32
+        if (let Some(ty) <- typeNode.GetTy()) {
+            return ty
+        }
+        throw IllegalArgumentException("not yet serialized in faithful .cjo writer: type node without semantic type")
     }
 
     private func SaveDeclInfo(decl: Decl): FlatBufferOffset {
@@ -338,6 +451,15 @@ private class FrontendCjoFlatBufferWriter {
         }
         if (let Some(enumDecl) <- (decl as EnumDecl)) {
             return SaveEnumInfo(enumDecl)
+        }
+        if (let Some(structDecl) <- (decl as StructDecl)) {
+            return SaveStructInfo(structDecl)
+        }
+        if (let Some(typeAliasDecl) <- (decl as TypeAliasDecl)) {
+            return SaveTypeAliasInfo(typeAliasDecl)
+        }
+        if (let Some(extendDecl) <- (decl as ExtendDecl)) {
+            return SaveExtendInfo(extendDecl)
         }
         if ((decl as GenericParamDecl).isSome()) {
             return 0u32
@@ -409,9 +531,7 @@ private class FrontendCjoFlatBufferWriter {
 
     private func SaveFuncReturnType(funcDecl: FuncDecl, body: FuncBody): UInt32 {
         if (let Some(retType) <- body.retType) {
-            if (let Some(retTy) <- retType.GetTy()) {
-                return SaveType(retTy)
-            }
+            return SaveType(TypeNodeTyForSerialization(retType))
         }
         if (let Some(declTy) <- funcDecl.GetTy()) {
             if (let Some(funcTy) <- (declTy as FuncTy)) {
@@ -500,14 +620,42 @@ private class FrontendCjoFlatBufferWriter {
         return builder.EndTable()
     }
 
+    private func SaveStructInfo(structDecl: StructDecl): FlatBufferOffset {
+        let inheritedTypes = SaveInheritedTypes(structDecl)
+        let body = SaveBody(structDecl)
+        // ModuleFormat.fbs StructInfo fields: 0 inheritedTypes, 1 body, 2 adInfo.
+        builder.StartTable(3)
+        builder.AddOffset(1, body)
+        builder.AddOffset(0, inheritedTypes)
+        return builder.EndTable()
+    }
+
+    private func SaveExtendInfo(extendDecl: ExtendDecl): FlatBufferOffset {
+        let inheritedTypes = SaveInheritedTypes(extendDecl)
+        let body = SaveBody(extendDecl)
+        // ModuleFormat.fbs ExtendInfo fields: 0 inheritedTypes, 1 body.
+        builder.StartTable(2)
+        builder.AddOffset(1, body)
+        builder.AddOffset(0, inheritedTypes)
+        return builder.EndTable()
+    }
+
+    private func SaveTypeAliasInfo(typeAliasDecl: TypeAliasDecl): FlatBufferOffset {
+        let aliasedTy = if (let Some(typeNode) <- typeAliasDecl.typeNode) {
+            SaveType(TypeNodeTyForSerialization(typeNode))
+        } else {
+            throw IllegalArgumentException("not yet serialized in faithful .cjo writer: type alias without target type")
+        }
+        // ModuleFormat.fbs AliasInfo fields: 0 aliasedTy.
+        builder.StartTable(1)
+        builder.AddU32(0, aliasedTy)
+        return builder.EndTable()
+    }
+
     private func SaveInheritedTypes(decl: InheritableDecl): FlatBufferOffset {
         let types = ArrayList<UInt32>()
         for (inheritedType in decl.inheritedTypes) {
-            if (let Some(ty) <- inheritedType.GetTy()) {
-                types.add(SaveType(ty))
-            } else {
-                throw IllegalArgumentException("not yet serialized in faithful .cjo writer: inherited type without semantic type")
-            }
+            types.add(SaveType(TypeNodeTyForSerialization(inheritedType)))
         }
         return builder.CreateVectorU32(types)
     }
@@ -515,7 +663,7 @@ private class FrontendCjoFlatBufferWriter {
     private func SaveBody(decl: InheritableDecl): FlatBufferOffset {
         let body = ArrayList<UInt32>()
         let addedPlatformImpls = HashSet<String>()
-        if (decl.TestAttr(Attribute.PRIVATE)) {
+        if (decl.TestAttr(Attribute.PRIVATE) && (decl as ExtendDecl).isNone()) {
             return builder.CreateVectorU32(body)
         }
         for (member in decl.GetMemberDeclPtrs()) {
@@ -541,7 +689,8 @@ private class FrontendCjoFlatBufferWriter {
         if (member.doNotExport || member.astKind == ASTKind.VAR_WITH_PATTERN_DECL || !member.IsExportedDecl()) {
             return false
         }
-        if (!parent.TestAttr(Attribute.COMMON) && !isInstMemberVar && member.linkage == Linkage.INTERNAL) {
+        if (!parent.TestAttr(Attribute.COMMON) && (parent as ExtendDecl).isNone() && !isInstMemberVar &&
+            member.linkage == Linkage.INTERNAL) {
             return false
         }
         return true
@@ -604,19 +753,11 @@ private class FrontendCjoFlatBufferWriter {
     private func SaveGenericConstraint(constraint: GenericConstraint): FlatBufferOffset {
         let uppers = ArrayList<UInt32>()
         for (upper in constraint.upperBounds) {
-            if (let Some(upperTy) <- upper.GetTy()) {
-                uppers.add(SaveType(upperTy))
-            } else {
-                throw IllegalArgumentException("not yet serialized in faithful .cjo writer: generic constraint upper bound without semantic type")
-            }
+            uppers.add(SaveType(TypeNodeTyForSerialization(upper)))
         }
         let upperVec = builder.CreateVectorU32(uppers)
         let typeIndex = if (let Some(refType) <- constraint.refType) {
-            if (let Some(typeTy) <- refType.GetTy()) {
-                SaveType(typeTy)
-            } else {
-                throw IllegalArgumentException("not yet serialized in faithful .cjo writer: generic constraint type without semantic type")
-            }
+            SaveType(TypeNodeTyForSerialization(refType))
         } else {
             throw IllegalArgumentException("not yet serialized in faithful .cjo writer: generic constraint without reference type")
         }
@@ -641,7 +782,7 @@ private class FrontendCjoFlatBufferWriter {
 
     private func ShouldEmitGenericDecl(decl: Decl): Bool {
         return (decl as FuncDecl).isSome() || (decl as ClassDecl).isSome() || (decl as InterfaceDecl).isSome() ||
-            (decl as EnumDecl).isSome()
+            (decl as StructDecl).isSome() || (decl as EnumDecl).isSome() || (decl as ExtendDecl).isSome()
     }
 
     private func SaveGenericDeclIndex(decl: Decl): FlatBufferOffset {
@@ -883,6 +1024,15 @@ private class FrontendCjoFlatBufferWriter {
         if ((decl as EnumDecl).isSome()) {
             return true
         }
+        if ((decl as StructDecl).isSome()) {
+            return true
+        }
+        if ((decl as TypeAliasDecl).isSome()) {
+            return true
+        }
+        if ((decl as ExtendDecl).isSome()) {
+            return true
+        }
         return (decl as GenericParamDecl).isSome()
     }
 
@@ -1041,18 +1191,24 @@ private func DeclKindToFlat(decl: Decl): UInt16 {
     if ((decl as FuncParam).isSome()) { return 7u16 }
     if ((decl as GenericParamDecl).isSome()) { return 12u16 }
     if ((decl as VarDecl).isSome()) { return 5u16 }
+    if ((decl as StructDecl).isSome()) { return 8u16 }
     if ((decl as EnumDecl).isSome()) { return 9u16 }
+    if ((decl as ExtendDecl).isSome()) { return 10u16 }
+    if ((decl as TypeAliasDecl).isSome()) { return 11u16 }
     return 0u16
 }
 
 private func DeclInfoTypeToFlat(decl: Decl): UInt8 {
     if ((decl as ClassDecl).isSome()) { return 1u8 }
     if ((decl as InterfaceDecl).isSome()) { return 2u8 }
+    if ((decl as StructDecl).isSome()) { return 3u8 }
     if ((decl as EnumDecl).isSome()) { return 4u8 }
+    if ((decl as ExtendDecl).isSome()) { return 5u8 }
     if ((decl as PropDecl).isSome()) { return 6u8 }
     if ((decl as FuncDecl).isSome()) { return 10u8 }
     if ((decl as FuncParam).isSome()) { return 9u8 }
     if ((decl as VarDecl).isSome()) { return 7u8 }
+    if ((decl as TypeAliasDecl).isSome()) { return 12u8 }
     return 0u8
 }
 

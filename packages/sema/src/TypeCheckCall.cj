@@ -1247,7 +1247,9 @@ private func CheckCallArgCompatible(typeManager: TypeManager, diag: Option<Basic
         return false
     }
     let argTy = GetExprTy(ce.args[idx])
-    if (typeManager.CheckTypeCompatibility(paramTy, argTy) == TypeCompatibility.INCOMPATIBLE) {
+    let normalizedParamTy = typeManager.SubstituteTypeAliasInTy(paramTy)
+    let normalizedArgTy = typeManager.SubstituteTypeAliasInTy(argTy)
+    if (typeManager.CheckTypeCompatibility(normalizedParamTy, normalizedArgTy) == TypeCompatibility.INCOMPATIBLE) {
         if (let Some(diagValue) <- diag) {
             DiagOld(diagValue, ce.args[idx], BasicDiagKind.sema_parameters_and_arguments_mismatch)
         }
@@ -1468,7 +1470,9 @@ private func CheckCandidate(typeManager: TypeManager, diag: Option<BasicDiagnost
     if (let Some(targetTy) <- target) {
         if (let Some(fdTy) <- fd.GetTy()) {
             if (let Some(funcTy) <- (typeManager.ApplySubstPack(fdTy, typeMapping) as FuncTy)) {
-                if (!typeManager.IsSubtype(funcTy.retTy, targetTy)) {
+                let normalizedRetTy = typeManager.SubstituteTypeAliasInTy(funcTy.retTy)
+                let normalizedTargetTy = typeManager.SubstituteTypeAliasInTy(targetTy)
+                if (!typeManager.IsSubtype(normalizedRetTy, normalizedTargetTy)) {
                     return None
                 }
             }
@@ -1517,7 +1521,7 @@ private func GetCallTy(typeManager: TypeManager, ce: CallExpr, fd: FuncDecl, typ
                     }
                 }
             }
-            return rawRet
+            return typeManager.SubstituteTypeAliasInTy(rawRet)
         }
     }
     return TypeManager.GetInvalidTy()
