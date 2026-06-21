@@ -21,11 +21,13 @@ fail() {
 [[ -x "$SELF" ]] || fail "missing selfhost cjc at $SELF"
 [[ -d "$CANGJIE_HOME" ]] || fail "missing CANGJIE_HOME at $CANGJIE_HOME"
 
-mkdir -p "$WORK/pkgA" "$WORK/pkgB" "$WORK/ref" "$WORK/self"
+mkdir -p "$WORK/pkgA" "$WORK/pkgSig" "$WORK/pkgB" "$WORK/ref" "$WORK/self"
 cp "$FIXTURE/pkgA/pkgA.cj" "$WORK/pkgA/pkgA.cj"
+cp "$FIXTURE/pkgSig/pkgSig.cj" "$WORK/pkgSig/pkgSig.cj"
 cp "$FIXTURE/pkgB/function.cj" "$WORK/pkgB/function.cj"
 cp "$FIXTURE/pkgB/function_single.cj" "$WORK/pkgB/function_single.cj"
 cp "$FIXTURE/pkgB/greeting.cj" "$WORK/pkgB/greeting.cj"
+cp "$FIXTURE/pkgB/imported_signature.cj" "$WORK/pkgB/imported_signature.cj"
 
 "$REF" "$WORK/pkgA/pkgA.cj" --output-type=staticlib -o "$WORK/pkgA/libpkgA.a" --set-runtime-rpath \
     >"$WORK/pkgA.ref.stdout" 2>"$WORK/pkgA.ref.stderr" ||
@@ -33,6 +35,13 @@ cp "$FIXTURE/pkgB/greeting.cj" "$WORK/pkgB/greeting.cj"
 
 [[ -f "$WORK/pkgA/pkgA.cjo" ]] || fail "reference pkgA did not produce pkgA.cjo"
 [[ -f "$WORK/pkgA/libpkgA.a" ]] || fail "reference pkgA did not produce libpkgA.a"
+
+"$REF" "$WORK/pkgSig/pkgSig.cj" --output-type=staticlib -o "$WORK/pkgSig/libpkgSig.a" --set-runtime-rpath \
+    >"$WORK/pkgSig.ref.stdout" 2>"$WORK/pkgSig.ref.stderr" ||
+    fail "reference pkgSig compile failed: $(tr '\n' ' ' <"$WORK/pkgSig.ref.stderr")"
+
+[[ -f "$WORK/pkgSig/pkgSig.cjo" ]] || fail "reference pkgSig did not produce pkgSig.cjo"
+[[ -f "$WORK/pkgSig/libpkgSig.a" ]] || fail "reference pkgSig did not produce libpkgSig.a"
 
 run_case() {
     local name="$1"
@@ -70,5 +79,29 @@ run_case() {
 run_case function 42
 run_case function_single 42
 run_case greeting "hello from pkgA"
+
+"$REF" "$WORK/pkgB/imported_signature.cj" --import-path "$WORK/pkgSig" -L "$WORK/pkgSig" -lpkgSig \
+    -o "$WORK/ref/imported_signature" --set-runtime-rpath \
+    >"$WORK/imported_signature.ref.stdout" 2>"$WORK/imported_signature.ref.stderr" ||
+    fail "reference pkgB imported_signature compile failed: $(tr '\n' ' ' <"$WORK/imported_signature.ref.stderr")"
+
+"$SELF" "$WORK/pkgB/imported_signature.cj" --import-path "$WORK/pkgSig" -L "$WORK/pkgSig" -lpkgSig \
+    -o "$WORK/self/imported_signature" --set-runtime-rpath \
+    >"$WORK/imported_signature.self.stdout" 2>"$WORK/imported_signature.self.stderr" ||
+    fail "selfhost pkgB imported_signature compile failed: $(tr '\n' ' ' <"$WORK/imported_signature.self.stderr")"
+
+set +e
+imported_ref_out=$("$WORK/ref/imported_signature" 2>"$WORK/imported_signature.ref.run.stderr")
+imported_ref_status=$?
+imported_self_out=$("$WORK/self/imported_signature" 2>"$WORK/imported_signature.self.run.stderr")
+imported_self_status=$?
+set -e
+
+[[ "$imported_ref_status" -eq "$imported_self_status" ]] ||
+    fail "imported_signature exit mismatch: reference=$imported_ref_status selfhost=$imported_self_status"
+[[ "$imported_ref_out" = "$imported_self_out" ]] ||
+    fail "imported_signature output mismatch: reference='$imported_ref_out' selfhost='$imported_self_out'"
+
+printf 'SEPTEST-imported_signature-PASS output=%s exit=%s\n' "$imported_self_out" "$imported_self_status"
 
 printf 'SEPTEST-PASS\n'
