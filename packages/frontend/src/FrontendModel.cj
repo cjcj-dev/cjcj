@@ -2115,6 +2115,7 @@ public class ImportManager {
     private let importedPackages: ArrayList<Package> = ArrayList<Package>()
     private let depPkgCjdPaths: HashMap<String, String> = HashMap<String, String>()
     private let directDependencies: HashMap<String, HashSet<String>> = HashMap<String, HashSet<String>>()
+    private let loadingPackages: HashSet<String> = HashSet<String>()
 
     public init(diag: DiagnosticEngine) {
         this.diag = diag
@@ -2172,6 +2173,7 @@ public class ImportManager {
         importedPackages.clear()
         depPkgCjdPaths.clear()
         directDependencies.clear()
+        loadingPackages.clear()
         let sourcePackages = HashSet<String>()
         for (pkg in pkgs) {
             if (pkg.fullPackageName.isEmpty()) {
@@ -2530,10 +2532,19 @@ public class ImportManager {
     }
 
     private func LoadImportedPackageFromCjo(fullPackageName: String, cjoPath: String): Bool {
+        if ((let Some(_) <- GetPackage(fullPackageName)) || loadingPackages.contains(fullPackageName)) {
+            return true
+        }
+        loadingPackages.add(fullPackageName)
         let (ok, data, reason) = FileUtil.ReadBinaryFileToBuffer(cjoPath)
         if (!ok) {
+            loadingPackages.remove(fullPackageName)
             diag.Diagnose(DiagCategory.IMPORT_PACKAGE, DEFAULT_POSITION,
                 "failed to load imported package '${fullPackageName}' from '${cjoPath}': ${reason}")
+            return false
+        }
+        if (!LoadSerializedImportDependencies(data, fullPackageName)) {
+            loadingPackages.remove(fullPackageName)
             return false
         }
         let pkg = CreatePackage(fullPackageName)
@@ -2545,6 +2556,32 @@ public class ImportManager {
         let materializer = CjoSignatureMaterializer(fullPackageName, pkg, file, importedPackages)
         materializer.Materialize(data)
         AddImportedPackageIfMissing(pkg)
+        loadingPackages.remove(fullPackageName)
+        return true
+    }
+
+    private func LoadSerializedImportDependencies(data: Array<UInt8>, ownerPackageName: String): Bool {
+        let reader = CjoFlatBuffer(data)
+        let root = reader.RootTable()
+        if (root < 0) {
+            return true
+        }
+        let flatImports = reader.VectorField(root, 12)
+        if (flatImports < 0) {
+            return true
+        }
+        var idx: Int64 = 0
+        while (idx < reader.VectorLength(flatImports)) {
+            let depName = reader.StringAt(reader.VectorOffsetElement(flatImports, idx))
+            if (!depName.isEmpty() && depName != ownerPackageName && (let None <- GetPackage(depName)) &&
+                !loadingPackages.contains(depName)) {
+                let depPath = FileUtil.FindSerializationFile(depName, ".cjo", searchPath.toArray())
+                if (!depPath.isEmpty() && !LoadImportedPackageFromCjo(depName, depPath)) {
+                    return false
+                }
+            }
+            idx++
+        }
         return true
     }
 
