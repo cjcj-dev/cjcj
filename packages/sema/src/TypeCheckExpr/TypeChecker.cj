@@ -510,6 +510,10 @@ public class TypeChecker {
                         GetSingleParamFunc(funcDecl)
                         return VisitAction.WALK_CHILDREN
                     }
+                    if (let Some(propDecl) <- (node as PropDecl)) {
+                        AddReturnTypeForPropMemDecl(propDecl)
+                        return VisitAction.WALK_CHILDREN
+                    }
                     if (node.astKind == ASTKind.FUNC_PARAM) {
                         return VisitAction.SKIP_CHILDREN
                     }
@@ -517,6 +521,44 @@ public class TypeChecker {
                 })
                 let _ = walker.Walk()
             }
+        }
+    }
+
+    private func AddUnitType(fd: FuncDecl): Unit {
+        let body = if (let Some(value) <- fd.funcBody) { value } else { return }
+        if (let Some(_) <- body.retType) {
+            return
+        }
+        let typeNode = PrimitiveType()
+        typeNode.str = "Unit"
+        typeNode.kind = TypeKind.TYPE_UNIT
+        if (!body.paramLists.isEmpty()) {
+            typeNode.begin = body.paramLists[0].end
+            typeNode.end = body.paramLists[0].end
+        }
+        typeNode.SetTy(TypeManager.GetPrimitiveTy(TypeKind.TYPE_UNIT))
+        typeNode.EnableAttr(Attribute.COMPILER_ADD)
+        body.retType = Some(typeNode)
+    }
+
+    private func AddReturnTypeForPropMemDecl(pd: PropDecl): Unit {
+        for (getter in pd.getters) {
+            let body = if (let Some(value) <- getter.funcBody) { value } else { continue }
+            if (pd.typeNode.isSome() && body.retType.isNone()) {
+                body.retType = ASTCloner.Clone(pd.typeNode.getOrThrow()) as Type
+            }
+        }
+        for (setter in pd.setters) {
+            let typeNode = if (let Some(value) <- pd.typeNode) { value } else { continue }
+            let body = if (let Some(value) <- setter.funcBody) { value } else { continue }
+            if (body.paramLists.isEmpty() || body.paramLists[0].params.isEmpty()) {
+                return
+            }
+            let firstParam = body.paramLists[0].params[0]
+            if (firstParam.typeNode.isNone()) {
+                firstParam.typeNode = ASTCloner.Clone(typeNode) as Type
+            }
+            AddUnitType(setter)
         }
     }
 
@@ -1084,6 +1126,10 @@ public class TypeChecker {
                 param.SetTy(paramTy)
             }
         }
+        if (let Some(desugarDecl) <- param.desugarDecl) {
+            PrepareDeclSignature(ctx, desugarDecl)
+            let _ = SynthesizeDecl(ctx, desugarDecl)
+        }
     }
 
     private func PrepareEnumConstructorSignature(ctx: ASTContext, enumDecl: EnumDecl, constructor: Decl): Ty {
@@ -1579,10 +1625,19 @@ public class TypeChecker {
             }
         }
         if (let Some(lastNode) <- block.GetLastExprOrDecl()) {
-            if (let Some(lastExpr) <- (lastNode as Expr)) {
+            var nodeForCheck = lastNode
+            if (!block.TestAttr(Attribute.COMPILER_ADD) && lastNode.TestAttr(Attribute.COMPILER_ADD) &&
+                lastNode.astKind == ASTKind.RETURN_EXPR) {
+                if (let Some(returnExpr) <- (lastNode as ReturnExpr)) {
+                    if (let Some(innerExpr) <- returnExpr.expr) {
+                        nodeForCheck = innerExpr
+                    }
+                }
+            }
+            if (let Some(lastExpr) <- (nodeForCheck as Expr)) {
                 let _ = Check(ctx, target, lastExpr)
             } else {
-                let _ = SynthesizeNode(ctx, lastNode)
+                let _ = SynthesizeNode(ctx, nodeForCheck)
             }
         }
         return ChkBlock(impl.typeManager, target, block)
@@ -2337,6 +2392,9 @@ public class TypeChecker {
             SynthesizeMatchChildren(ctx, matchExpr)
             return FinishSynthesize(ctx, matchExpr, SynMatchExpr(impl.typeManager, ctx, matchExpr, diag: impl.diag))
         }
+        if (let Some(jumpExpr) <- (expr as JumpExpr)) {
+            return FinishSynthesize(ctx, jumpExpr, SynLoopControlExpr(ctx, jumpExpr))
+        }
         if (expr.IsLoopExpr()) {
             SynthesizeLoopChildren(ctx, expr)
             return FinishSynthesize(ctx, expr, SynExprShallow(impl.typeManager, expr))
@@ -2570,6 +2628,9 @@ public class TypeChecker {
         if (let Some(matchExpr) <- (expr as MatchExpr)) {
             SynthesizeMatchChildren(ctx, matchExpr)
             return FinishCheck(ctx, matchExpr, ChkMatchExpr(impl.typeManager, ctx, target, matchExpr, diag: impl.diag))
+        }
+        if (let Some(jumpExpr) <- (expr as JumpExpr)) {
+            return FinishCheck(ctx, jumpExpr, ChkLoopControlExpr(ctx, jumpExpr))
         }
         if (expr.IsLoopExpr()) {
             SynthesizeLoopChildren(ctx, expr)

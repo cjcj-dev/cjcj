@@ -507,6 +507,116 @@ Results:
 - `run_write_types.sh`: `SEPTEST-WRITE-TYPES-PASS`.
 - `run_write_struct.sh`: `SEPTEST-WRITE-STRUCT-PASS`.
 
+## Probe 8 (lex re-probe after faithful scope resolution)
+
+Probe target: `packages/lex/src`, re-run on branch `lexprobe2` after Probe 7's faithful scope-gate name generation
+and full sequential scope-assignment walk.
+
+The selfhost compiler was rebuilt cleanly, then `packages/lex/src` was compiled with the selfhost compiler against the
+reference-built `basic` and `utils` artifacts in `target/release/*@cangjie_compiler`, using the same package command as
+Probe 4/6:
+
+```sh
+env cjHeapSize=1GB ./target/release/bin/cangjie_compiler::cjc -p packages/lex/src \
+  --output-type=staticlib -o "$WORK/self-liblex.a" \
+  --import-path target/release/basic@cangjie_compiler \
+  --import-path target/release/utils@cangjie_compiler \
+  -L target/release/basic@cangjie_compiler \
+  -L target/release/utils@cangjie_compiler \
+  -lbasic@cangjie_compiler -lutils@cangjie_compiler --set-runtime-rpath -V
+```
+
+### Re-probe result
+
+The old pre-scope-fix note at `packages/lex/src/Lexer.cj:145` (`if (inDollar)`) did reproduce after the default-param
+frontier was cleared, but it was no longer the first blocker. The fresh baseline first reached CHIR after about 5:45,
+max RSS about 1.21 GiB, and failed while caching the synthetic default-parameter helper for
+`packages/lex/src/LexerImpl.cj:89`:
+
+```text
+IllegalArgumentException: unsupported AST type kind for CHIRType.TranslateType: Initial
+  at packages/chir/src/CHIRType.cj:325
+  at packages/chir/src/FaithfulAST2CHIR.cj:1292 CreateFuncSignatureAndSetGlobalCache
+```
+
+The bad function was the constructor default-param helper for `LexerConfig.fileID`:
+
+```text
+func fileID.0()UInt64 { return 0u64 }
+```
+
+After the fixes below, lex advanced past both that default-param helper and the prior `Lexer.cj:145` CHIR invalid-type
+frontier. The current real package frontier is now a sema overload-resolution diagnostic:
+
+```text
+packages/lex/src/LexerImpl.cj:1722:21: ambiguous use of 'lexDiagnose'
+```
+
+The current 1GB run reaches that diagnostic in 0:32.43 elapsed, max RSS 1,215,508 KiB. No
+`lex@cangjie_compiler.cjo` or `self-liblex.a` is produced in Probe 8.
+
+### Faithful fixes
+
+- Default-param/property pre-pass: `AddDefaultParamFunctions` now also fills property getter/setter return/parameter
+  types and prepares/synthesizes each generated default-param helper signature/body. This mirrors C++
+  `/root/cj_build/cangjie_compiler/src/Sema/TypeChecker.cpp:2323-2338`
+  (`CheckDefaultParamFuncsEntry`), `:283-325` (`AddUnitType`, `AddReturnTypeForPropMemDecl`), and `:2512-2550`
+  (`GetSingleParamFunc` walks generated default-param functions). The helper-body synthesis matches
+  `/root/cj_build/cangjie_compiler/src/Sema/TypeCheckDecl.cpp:721-740`.
+- Compiler-added return checking: `CheckBlock` now checks the inner expression of a compiler-added `return` when the
+  parent block is not compiler-added, matching
+  `/root/cj_build/cangjie_compiler/src/Sema/TypeCheckExpr/Block.cpp:71-75`.
+- Suffixed integer literal values: selfhost `IntLiteral` now accepts the validated numeric prefix before a type suffix
+  during value parsing, matching C++ `GetBaseAndPureStringValue` plus `std::stoull/stoll` parsing in
+  `/root/cj_build/cangjie_compiler/src/AST/IntLiteral.cpp:133-205` and
+  `/root/cj_build/cangjie_compiler/src/Utils/StdUtils/StdUtils.cpp:47-59`. This keeps `0u64` typed and range-checked
+  as `UInt64` instead of being invalidated during later shallow synthesis.
+- Loop-control target resolution: selfhost sema now ports `ScopeManager::GetRefLoopSymbol` and uses it from
+  `SynLoopControlExpr(ctx, jump)`, matching
+  `/root/cj_build/cangjie_compiler/src/Sema/ScopeManager.cpp:29-77` and
+  `/root/cj_build/cangjie_compiler/src/Sema/TypeCheckExpr/JumpExpr.cpp:23-34`. This clears the `Lexer.cj:145`
+  `continue`/`if` invalid-type CHIR frontier.
+
+### Remaining blocker
+
+Category: sema overload resolution, not parser, not OOM, and not CHIR fallback.
+
+`packages/lex/src/LexerImpl.cj:1722` calls:
+
+```cj
+lexDiagnose(diag, DiagKindRefactor.lex_expected_identifier, GetPos(pCurrent), ConvertCurrentChar())
+```
+
+The overload set in `packages/lex/src/LexerDiag.cj` has both `(Position, String)` and `(Range, String)` variants. The
+reference compiler resolves this call; selfhost currently reports it ambiguous. The next cut should focus on faithful
+`TypeCheckCall` overload filtering/specificity, especially argument type compatibility and candidate comparison around
+`/root/cj_build/cangjie_compiler/src/Sema/TypeCheckCall.cpp:667-721` and `:774-857`, instead of changing lex source or
+adding a CHIR fallback.
+
+### Verification
+
+Commands run after the fixes, as separate commands:
+
+```sh
+rm -rf target && cjpm build
+bash scripts/difftest.sh
+bash scripts/septest/run.sh
+bash scripts/septest/run_write.sh
+bash scripts/septest/run_diag.sh
+bash scripts/septest/run_write_types.sh
+bash scripts/septest/run_write_struct.sh
+```
+
+Results:
+
+- `cjpm build`: success.
+- `difftest`: `TOTAL=85  PASS=85  MISMATCH=0  FAIL=0`; no standalone tail verification was needed.
+- `run.sh`: `SEPTEST-PASS`.
+- `run_write.sh`: `SEPTEST-WRITE-PASS`.
+- `run_diag.sh`: `SEPTEST-DIAG-PASS`.
+- `run_write_types.sh`: `SEPTEST-WRITE-TYPES-PASS`.
+- `run_write_struct.sh`: `SEPTEST-WRITE-STRUCT-PASS`.
+
 ## Probe 7 (scope-name same-name resolution root cause)
 
 ### Diagnosis
