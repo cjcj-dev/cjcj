@@ -707,3 +707,96 @@ Results:
 - `run_diag.sh`: `SEPTEST-DIAG-PASS`.
 - `run_write_types.sh`: `SEPTEST-WRITE-TYPES-PASS`.
 - `run_write_struct.sh`: `SEPTEST-WRITE-STRUCT-PASS`.
+
+## Probe 6 (lex heap pressure)
+
+Date: 2026-06-21
+
+Probe target: `packages/lex/src`, re-run on branch `lexheap` after Probe 5.
+
+### Diagnosis
+
+The Probe 5 string-literal constant-pattern ambiguity is gone. The next failure was no longer a frontend diagnostic:
+`packages/lex/src` exhausted the runtime heap during the real selfhost sema pass.
+
+Baseline reproduction with the Probe 5 compiler:
+
+- `env cjHeapSize=1GB ... -p packages/lex/src`: runtime OOM after 1:20.40, max RSS 1,221,412 KiB, no frontend
+  diagnostic.
+- A sampled stack near failure was in runtime allocation/GC (`MObject::NewObject`, `RegionSpace::Allocate`,
+  `WCollector::TraceHeap`), not in diagnostic rendering.
+
+Temporary stage probes narrowed the failure to the real sema `TypeCheckForPackages` path, after precheck/extend-map
+setup and while checking the source package. Temporary counters on the already-known TypeManager linear query caches
+(`subtypeCache`, `declInstantiationStatus`, `checkedTyExtendRelation`, `tyUsedExtends`) did not identify a new
+dominant bounded scan before the OOM. The evidence instead pointed at TypeManager type allocation: the selfhost
+constructors returned fresh `Ty` objects for every `Get*Ty` request, while C++ interns all constructed types in a
+hash table. That creates unbounded-equivalent heap pressure on a package that repeatedly instantiates tuple/function/
+nominal types.
+
+The C++ reference structure is:
+
+- `/root/cj_build/cangjie_compiler/include/cangjie/Sema/TypeManager.h:426-427`: `allocatedTys` is an
+  `std::unordered_set<TypePointer, TypeHash>`.
+- `/root/cj_build/cangjie_compiler/src/Sema/TypeManager.cpp:81-91`: `GetTypeTy` probes `allocatedTys`, inserts only
+  on miss, and returns the existing canonical type on hit.
+- `/root/cj_build/cangjie_compiler/src/Sema/TypeManager.cpp:1702-1708`: `Clear` owns the lifecycle of the allocated
+  type table.
+
+The run after interning showed the former heap frontier was cleared: with `cjHeapSize=1GB`, the compile did not OOM in
+sema. At 6:17 elapsed it was past sema and sampled in mangling
+(`MangleAstAdapter::FindDecl -> ConvertDecl -> ConvertTy`) at about 504 MiB RSS. It then reached CHIR translation and
+failed with a distinct blocker:
+
+```text
+IllegalArgumentException: unsupported AST type kind for CHIRType.TranslateType: Invalid
+  at packages/chir/src/CHIRType.cj:325
+  at packages/chir/src/Translator.cj:1417 (Visit(MatchExpr))
+```
+
+The same next blocker reproduced with `cjHeapSize=2GB` after 7:00.27 elapsed, max RSS 1,204,376 KiB. No
+`lex@cangjie_compiler.cjo` or final static library is produced yet.
+
+### Faithful fix
+
+- Selfhost `TypeManager` now interns all constructed types through a keyed `allocatedTyCache`, mirroring C++
+  `allocatedTys` as a hash set. The key uses the established `typeManagerTyKey` (`ty.Hash():ty.String()`), the same
+  stable equality used by selfhost `SameTy`, so hits and misses preserve the previous type-equality semantics while
+  avoiding duplicate heap objects.
+- The allocated type cache is cleared in `TypeManager.Clear`, matching the C++ `allocatedTys.clear()` lifecycle.
+- `ClearMapCache` now clears `subtypeCache`, matching `/root/cj_build/cangjie_compiler/include/cangjie/Sema/TypeManager.h:228-240`.
+- `ReleasePostSemaCaches` now also releases sema query caches and `boxedNonGenericDecls`, matching
+  `/root/cj_build/cangjie_compiler/src/Sema/TypeManager.cpp:52-61`.
+- `TypeCheckTopLevelDecl` now wraps synthesis in a `TyVarScope`, matching
+  `/root/cj_build/cangjie_compiler/src/Sema/TypeChecker.cpp:2120-2124`.
+
+### Current lex result
+
+`packages/lex/src` is materially further. The no-diagnostic sema/runtime OOM frontier is cleared: both 1GB and 2GB
+runs reach CHIR translation. The next distinct blocker is an invalid AST type on a match expression during
+`FaithfulAST2CHIR`, not another silent heap exhaustion. Lex still does not fully compile to
+`lex@cangjie_compiler.cjo`.
+
+### Verification
+
+Commands run after the fixes, as separate commands:
+
+```sh
+rm -rf target && cjpm build
+bash scripts/difftest.sh
+bash scripts/septest/run.sh
+bash scripts/septest/run_write.sh
+bash scripts/septest/run_diag.sh
+bash scripts/septest/run_write_types.sh
+bash scripts/septest/run_write_struct.sh
+```
+
+Results:
+
+- `cjpm build`: success.
+- `difftest`: `TOTAL=79  PASS=79  MISMATCH=0  FAIL=0`; no standalone tail verification was needed.
+- `run.sh`: `SEPTEST-PASS`.
+- `run_write.sh`: `SEPTEST-WRITE-PASS`.
+- `run_diag.sh`: `SEPTEST-DIAG-PASS`.
+- `run_write_types.sh`: `SEPTEST-WRITE-TYPES-PASS`.
+- `run_write_struct.sh`: `SEPTEST-WRITE-STRUCT-PASS`.
