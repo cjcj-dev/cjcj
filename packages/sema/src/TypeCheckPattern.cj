@@ -275,6 +275,97 @@ private func AddEnumOwnedDecl(result: ArrayList<Decl>, decl: Decl): Unit {
     }
 }
 
+private func AddUniqueEnumPatternDecl(result: ArrayList<Decl>, decl: Decl): Unit {
+    for (existing in result) {
+        if (SameDecl(existing, decl)) {
+            return
+        }
+    }
+    result.add(decl)
+}
+
+private func IsEnumPatternBaseDecl(decl: Decl): Bool {
+    return decl.astKind == ASTKind.ENUM_DECL || decl.astKind == ASTKind.PACKAGE_DECL
+}
+
+private func AddEnumPatternCandidate(result: ArrayList<Decl>, decl: Decl): Unit {
+    if (IsEnumOwnedDecl(decl)) {
+        AddUniqueEnumPatternDecl(result, decl)
+    }
+}
+
+private func AddEnumPatternBaseCandidate(result: ArrayList<Decl>, decl: Decl): Unit {
+    if (IsEnumPatternBaseDecl(decl)) {
+        AddUniqueEnumPatternDecl(result, decl)
+    }
+}
+
+private func ResolveEnumPatternRefBase(typeManager: TypeManager, ctx: ASTContext, refExpr: RefExpr): Option<Decl> {
+    if (let Some(target) <- refExpr.ref.target) {
+        return Some(target)
+    }
+    for (target in refExpr.ref.targets) {
+        if (IsEnumPatternBaseDecl(target)) {
+            ReplaceTarget(refExpr, Some(target), insertTarget: false)
+            if (let Some(ty) <- target.GetTy()) {
+                refExpr.SetTy(ty)
+            }
+            return Some(target)
+        }
+    }
+    for (target in LookupTopLevel(typeManager, ctx, refExpr.ref.identifier.Val(),
+        BindingScopeName(refExpr.scopeName), refExpr)) {
+        if (IsEnumPatternBaseDecl(target)) {
+            refExpr.ref.targets.add(target)
+            ReplaceTarget(refExpr, Some(target), insertTarget: false)
+            if (let Some(ty) <- target.GetTy()) {
+                refExpr.SetTy(ty)
+            }
+            return Some(target)
+        }
+    }
+    return None
+}
+
+private func ResolveEnumPatternMemberBase(typeManager: TypeManager, ctx: ASTContext, expr: Expr): Option<Decl> {
+    if (let Some(refExpr) <- (expr as RefExpr)) {
+        return ResolveEnumPatternRefBase(typeManager, ctx, refExpr)
+    }
+    if (let Some(member) <- (expr as MemberAccess)) {
+        ResolveEnumPatternMemberAccess(typeManager, ctx, member, resolveBase: true)
+        return member.target
+    }
+    return expr.GetTarget()
+}
+
+private func ResolveEnumPatternMemberAccess(typeManager: TypeManager, ctx: ASTContext, member: MemberAccess,
+    resolveBase!: Bool = false): Unit {
+    if ((let Some(_) <- member.target) || !member.targets.isEmpty()) {
+        return
+    }
+    if (let None <- member.baseExpr) {
+        return
+    }
+    let base = member.baseExpr.getOrThrow()
+    if (let Some(baseDecl) <- ResolveEnumPatternMemberBase(typeManager, ctx, base)) {
+        let info = LookupInfo(lookupExtend: false, file: member.curFile)
+        for (target in FieldLookup(typeManager, Some(baseDecl), member.field.Val(), info: info)) {
+            if (resolveBase) {
+                AddEnumPatternBaseCandidate(member.targets, target)
+            } else {
+                AddEnumPatternCandidate(member.targets, target)
+            }
+        }
+        if (!member.targets.isEmpty()) {
+            let first = member.targets[0]
+            ReplaceTarget(member, Some(first), insertTarget: false)
+            if (let Some(ty) <- first.GetTy()) {
+                member.SetTy(ty)
+            }
+        }
+    }
+}
+
 private func CandidateMatchesEnumPattern(decl: Decl, pattern: EnumPattern): Bool {
     if (pattern.patterns.isEmpty()) {
         if (let Some(ty) <- decl.GetTy()) {
@@ -288,9 +379,11 @@ private func CandidateMatchesEnumPattern(decl: Decl, pattern: EnumPattern): Bool
     return false
 }
 
-private func FindEnumPatternTargets(ctx: ASTContext, enumDecl: Option<EnumDecl>, pattern: EnumPattern): ArrayList<Decl> {
+private func FindEnumPatternTargets(typeManager: TypeManager, ctx: ASTContext,
+    enumDecl: Option<EnumDecl>, pattern: EnumPattern): ArrayList<Decl> {
     if (let Some(constructor) <- pattern.constructor) {
         if (let Some(member) <- (constructor as MemberAccess)) {
+            ResolveEnumPatternMemberAccess(typeManager, ctx, member)
             let result = ArrayList<Decl>()
             if (let Some(target) <- member.target) {
                 AddEnumOwnedDecl(result, target)
@@ -401,7 +494,7 @@ public func FindEnumPatternTarget(typeManager: TypeManager, ctx: ASTContext,
         return false
     }
     let constructor = pattern.constructor.getOrThrow()
-    let candidates = FindEnumPatternTargets(ctx, enumDecl, pattern)
+    let candidates = FindEnumPatternTargets(typeManager, ctx, enumDecl, pattern)
     ReplaceTarget(constructor, None)
     for (candidate in candidates) {
         if (CandidateMatchesEnumPattern(candidate, pattern) && Ty.IsTyCorrect(candidate.GetTy())) {
