@@ -5,6 +5,8 @@ import cangjie_compiler::ast.*
 import cangjie_compiler::basic.DiagnosticEngine as BasicDiagnosticEngine
 import cangjie_compiler::basic.DiagKindRefactor as BasicDiagKindRefactor
 
+public type ConstPatternExprChecker = (Ty, Expr) -> Bool
+
 private let V_COMPILER: String = "v-compiler"
 
 private func BindingScopeName(scopeName: String): String {
@@ -115,8 +117,7 @@ private func IsBuiltinConstPatternEqualityTy(ty: Ty): Bool {
 }
 
 private func ChkOpOverloadForConstPattern(typeManager: TypeManager, ctx: ASTContext, target: Ty,
-    pattern: ConstPattern): Bool {
-    let _ = ctx
+    pattern: ConstPattern, exprChecker!: Option<ConstPatternExprChecker> = None): Bool {
     if (let None <- pattern.literal) {
         return InvalidPatternTy(pattern)
     }
@@ -133,16 +134,22 @@ private func ChkOpOverloadForConstPattern(typeManager: TypeManager, ctx: ASTCont
     baseExpr.SetTy(target)
     ctx.SkipSynForCorrectTy(baseExpr)
     let callBase = CreateMemberAccess(baseExpr, "==")
+    ctx.RemoveTypeCheckCache(callBase)
     callBase.scopeName = pattern.scopeName
     let arg = CreateFuncArg(clonedLiteral.getOrThrow())
     arg.scopeName = pattern.scopeName
     let args = ArrayList<FuncArg>()
     args.add(arg)
     let callExpr = CreateCallExpr(callBase, args)
+    ctx.RemoveTypeCheckCache(callExpr)
     callExpr.scopeName = pattern.scopeName
     callExpr.scopeLevel = pattern.scopeLevel
-    callExpr.curFile = pattern.curFile
-    if (ChkCallExpr(typeManager, None, Some(TypeManager.GetBoolTy()), callExpr)) {
+    AddCurFile(callExpr, file: pattern.curFile)
+    let ok = match (exprChecker) {
+        case Some(checker) => checker(TypeManager.GetBoolTy(), callExpr)
+        case None => ChkCallExpr(typeManager, None, Some(TypeManager.GetBoolTy()), callExpr)
+    }
+    if (ok) {
         pattern.operatorCallExpr = callExpr
         return true
     }
@@ -538,7 +545,8 @@ public func ChkWildcardPattern(target: Ty, pattern: WildcardPattern): Bool {
     return true
 }
 
-public func ChkConstPattern(typeManager: TypeManager, ctx: ASTContext, target: Ty, pattern: ConstPattern): Bool {
+public func ChkConstPattern(typeManager: TypeManager, ctx: ASTContext, target: Ty, pattern: ConstPattern,
+    exprChecker!: Option<ConstPatternExprChecker> = None): Bool {
     if (let None <- pattern.literal) {
         return InvalidPatternTy(pattern)
     }
@@ -553,7 +561,15 @@ public func ChkConstPattern(typeManager: TypeManager, ctx: ASTContext, target: T
             if (!ChkLitConstExprRange(lit)) {
                 return InvalidPatternTy(pattern)
             }
+        } else if (let Some(checker) <- exprChecker) {
+            if (!checker(target, lit)) {
+                return InvalidPatternTy(pattern)
+            }
         } else if (!CheckConstPatternLiteral(target, lit)) {
+            return InvalidPatternTy(pattern)
+        }
+    } else if (let Some(checker) <- exprChecker) {
+        if (!checker(target, literal)) {
             return InvalidPatternTy(pattern)
         }
     }
@@ -573,7 +589,7 @@ public func ChkConstPattern(typeManager: TypeManager, ctx: ASTContext, target: T
     if (IsBuiltinConstPatternEqualityTy(pattern.GetTy() ?? TypeManager.GetInvalidTy())) {
         return true
     }
-    return ChkOpOverloadForConstPattern(typeManager, ctx, target, pattern)
+    return ChkOpOverloadForConstPattern(typeManager, ctx, target, pattern, exprChecker: exprChecker)
 }
 
 public func ChkTypePattern(typeManager: TypeManager, ctx: ASTContext, target: Ty, pattern: TypePattern): Bool {
@@ -724,9 +740,9 @@ private func VarOrEnumPatternToVarPattern(pattern: VarOrEnumPattern): VarPattern
 }
 
 public func ChkVarOrEnumPattern(typeManager: TypeManager, ctx: ASTContext, target: Ty,
-    pattern: VarOrEnumPattern): Bool {
+    pattern: VarOrEnumPattern, exprChecker!: Option<ConstPatternExprChecker> = None): Bool {
     if (let Some(inner) <- pattern.pattern) {
-        if (!ChkPattern(typeManager, ctx, target, inner)) {
+        if (!ChkPattern(typeManager, ctx, target, inner, exprChecker: exprChecker)) {
             return InvalidPatternTy(pattern)
         }
         pattern.SetTy(target)
@@ -735,7 +751,7 @@ public func ChkVarOrEnumPattern(typeManager: TypeManager, ctx: ASTContext, targe
     if (ctx.IsEnumConstructor(pattern.identifier.Val())) {
         let enumPattern = VarOrEnumPatternToEnumPattern(pattern)
         pattern.pattern = enumPattern
-        if (!ChkPattern(typeManager, ctx, target, enumPattern)) {
+        if (!ChkPattern(typeManager, ctx, target, enumPattern, exprChecker: exprChecker)) {
             return InvalidPatternTy(pattern)
         }
         if (let Some(constructor) <- enumPattern.constructor) {
@@ -747,7 +763,7 @@ public func ChkVarOrEnumPattern(typeManager: TypeManager, ctx: ASTContext, targe
         if (let Some(varDecl) <- varPattern.varDecl) {
             ctx.AddDeclName(Names(pattern.identifier.Val(), varDecl.scopeName), varDecl)
         }
-        if (!ChkPattern(typeManager, ctx, target, varPattern)) {
+        if (!ChkPattern(typeManager, ctx, target, varPattern, exprChecker: exprChecker)) {
             if (let Some(varDecl) <- varPattern.varDecl) {
                 ctx.RemoveDeclByName(Names(pattern.identifier.Val(), varDecl.scopeName), varDecl)
             }
@@ -759,7 +775,8 @@ public func ChkVarOrEnumPattern(typeManager: TypeManager, ctx: ASTContext, targe
 }
 
 public func ChkTuplePattern(typeManager: TypeManager, ctx: ASTContext, target: Ty,
-    pattern: TuplePattern, isPatternInMatch!: Bool = true): Bool {
+    pattern: TuplePattern, isPatternInMatch!: Bool = true,
+    exprChecker!: Option<ConstPatternExprChecker> = None): Bool {
     let _ = isPatternInMatch
     if (let Some(tupleTy) <- (target as TupleTy)) {
         if (tupleTy.typeArgs.size != pattern.patterns.size) {
@@ -767,7 +784,8 @@ public func ChkTuplePattern(typeManager: TypeManager, ctx: ASTContext, target: T
         }
         var idx: Int64 = 0
         while (idx < pattern.patterns.size) {
-            if (!ChkPattern(typeManager, ctx, tupleTy.typeArgs[idx], pattern.patterns[idx])) {
+            if (!ChkPattern(typeManager, ctx, tupleTy.typeArgs[idx], pattern.patterns[idx],
+                exprChecker: exprChecker)) {
                 return InvalidPatternTy(pattern)
             }
             idx++
@@ -779,12 +797,12 @@ public func ChkTuplePattern(typeManager: TypeManager, ctx: ASTContext, target: T
 }
 
 public func ChkPattern(typeManager: TypeManager, ctx: ASTContext, target: Ty,
-    pattern: Pattern, isPatternInMatch!: Bool = true): Bool {
+    pattern: Pattern, isPatternInMatch!: Bool = true, exprChecker!: Option<ConstPatternExprChecker> = None): Bool {
     if (let Some(wildcard) <- (pattern as WildcardPattern)) {
         return ChkWildcardPattern(target, wildcard)
     }
     if (let Some(constPattern) <- (pattern as ConstPattern)) {
-        return ChkConstPattern(typeManager, ctx, target, constPattern)
+        return ChkConstPattern(typeManager, ctx, target, constPattern, exprChecker: exprChecker)
     }
     if (let Some(typePattern) <- (pattern as TypePattern)) {
         return ChkTypePattern(typeManager, ctx, target, typePattern)
@@ -796,10 +814,11 @@ public func ChkPattern(typeManager: TypeManager, ctx: ASTContext, target: Ty,
         return ChkEnumPattern(typeManager, ctx, target, enumPattern)
     }
     if (let Some(varOrEnum) <- (pattern as VarOrEnumPattern)) {
-        return ChkVarOrEnumPattern(typeManager, ctx, target, varOrEnum)
+        return ChkVarOrEnumPattern(typeManager, ctx, target, varOrEnum, exprChecker: exprChecker)
     }
     if (let Some(tuplePattern) <- (pattern as TuplePattern)) {
-        return ChkTuplePattern(typeManager, ctx, target, tuplePattern, isPatternInMatch: isPatternInMatch)
+        return ChkTuplePattern(typeManager, ctx, target, tuplePattern, isPatternInMatch: isPatternInMatch,
+            exprChecker: exprChecker)
     }
     return InvalidPatternTy(pattern)
 }

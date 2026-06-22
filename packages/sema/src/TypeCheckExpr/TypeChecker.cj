@@ -2047,7 +2047,10 @@ public class TypeChecker {
             if (let Some(targetTy) <- selectorTy) {
                 if (Ty.IsTyCorrect(targetTy)) {
                     matchCase.SetCtxExprForPatterns(matchExpr.selector.getOrThrow())
-                    let _ = ChkMatchCasePatterns(impl.typeManager, ctx, targetTy, matchCase, diag: impl.diag)
+                    let _ = ChkMatchCasePatterns(impl.typeManager, ctx, targetTy, matchCase, diag: impl.diag,
+                        exprChecker: Some({ target: Ty, expr: Expr =>
+                            Check(ctx, target, expr)
+                        }))
                     BindCollectedConditionDecls(ctx, matchCase.patterns, boundDecls)
                 }
             }
@@ -2393,7 +2396,10 @@ public class TypeChecker {
         }
         if (let Some(matchExpr) <- (expr as MatchExpr)) {
             SynthesizeMatchChildren(ctx, matchExpr)
-            return FinishSynthesize(ctx, matchExpr, SynMatchExpr(impl.typeManager, ctx, matchExpr, diag: impl.diag))
+            return FinishSynthesize(ctx, matchExpr, SynMatchExpr(impl.typeManager, ctx, matchExpr, diag: impl.diag,
+                exprChecker: Some({ target: Ty, expr: Expr =>
+                    Check(ctx, target, expr)
+                })))
         }
         if (let Some(jumpExpr) <- (expr as JumpExpr)) {
             return FinishSynthesize(ctx, jumpExpr, SynLoopControlExpr(ctx, jumpExpr))
@@ -2630,7 +2636,10 @@ public class TypeChecker {
         }
         if (let Some(matchExpr) <- (expr as MatchExpr)) {
             SynthesizeMatchChildren(ctx, matchExpr)
-            return FinishCheck(ctx, matchExpr, ChkMatchExpr(impl.typeManager, ctx, target, matchExpr, diag: impl.diag))
+            return FinishCheck(ctx, matchExpr, ChkMatchExpr(impl.typeManager, ctx, target, matchExpr, diag: impl.diag,
+                exprChecker: Some({ target2: Ty, expr: Expr =>
+                    Check(ctx, target2, expr)
+                })))
         }
         if (let Some(jumpExpr) <- (expr as JumpExpr)) {
             return FinishCheck(ctx, jumpExpr, ChkLoopControlExpr(ctx, jumpExpr))
