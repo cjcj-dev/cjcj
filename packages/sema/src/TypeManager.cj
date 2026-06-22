@@ -2,6 +2,9 @@ package cangjie_compiler::sema
 
 import std.collection.*
 import cangjie_compiler::ast.*
+import cangjie_compiler::modules.GetPackageRelation as ModulesGetPackageRelation
+import cangjie_compiler::modules.PackageRelation as ModulesPackageRelation
+import cangjie_compiler::modules.SplitQualifiedName as ModulesSplitQualifiedName
 
 public enum TypeCompatibility {
     | INCOMPATIBLE
@@ -270,9 +273,36 @@ public class TypeManager {
     private let tyVarScopeDepth: HashMap<String, Int64> = HashMap<String, Int64>()
     private let instCtxScopes: ArrayList<InstCtxScope> = ArrayList<InstCtxScope>()
     private var nextUniqId: UInt64 = 0u64
+    private let resolvedImportedDeclsMap: HashMap<UInt64, HashMap<String, ArrayList<Decl>>> =
+        HashMap<UInt64, HashMap<String, ArrayList<Decl>>>()
 
     public init() {
         tyVarScopes.add(TyVarScope())
+    }
+
+    public func AddResolvedImportedDecls(fileHash: UInt64, name: String, decls: ArrayList<Decl>): Unit {
+        if (!resolvedImportedDeclsMap.contains(fileHash)) {
+            resolvedImportedDeclsMap[fileHash] = HashMap<String, ArrayList<Decl>>()
+        }
+        if (let Some(fileMap) <- resolvedImportedDeclsMap.get(fileHash)) {
+            if (!fileMap.contains(name)) {
+                fileMap[name] = ArrayList<Decl>()
+            }
+            if (let Some(values) <- fileMap.get(name)) {
+                for (decl in decls) {
+                    var found = false
+                    for (value in values) {
+                        if (SameDecl(value, decl)) {
+                            found = true
+                            break
+                        }
+                    }
+                    if (!found) {
+                        values.add(decl)
+                    }
+                }
+            }
+        }
     }
 
     public static func GetPrimitiveTy(kind: TypeKind): PrimitiveTy {
@@ -820,24 +850,79 @@ public class TypeManager {
     }
 
     public func GetAllCommonSuperTys(tys: TySet): TySet {
-        let out = TySet()
         if (tys.values.isEmpty()) {
-            return out
+            return TySet()
         }
-        let firstSupers = GetAllSuperTys(tys.values[0])
-        for (candidate in firstSupers.values) {
-            var allHave = true
-            for (ty in tys.values) {
-                if (!HasSuperTy(ty, candidate, TypeSubst())) {
-                    allHave = false
-                    break
+        var supers = GetAllSuperTys(tys.values[0])
+        let firstWithSelf = tys.values[0]
+        if (Ty.IsTyCorrect(firstWithSelf)) {
+            supers.Add(firstWithSelf)
+        }
+        for (ty in tys.values) {
+            let supersCur = TySet()
+            if (Ty.IsTyCorrect(ty)) {
+                supersCur.AddAll(GetAllSuperTys(ty))
+                supersCur.Add(ty)
+            }
+            let supersNext = TySet()
+            for (candidate in supersCur.values) {
+                if (supers.Contains(candidate)) {
+                    supersNext.Add(candidate)
                 }
             }
-            if (allHave) {
-                out.Add(candidate)
+            supers = supersNext
+        }
+        return supers
+    }
+
+    private func getResolvedImportedDeclsByName(file: File, name: String): ArrayList<Decl> {
+        let out = ArrayList<Decl>()
+        if (let Some(fileMap) <- resolvedImportedDeclsMap.get(file.fileHash)) {
+            if (let Some(decls) <- fileMap.get(name)) {
+                for (decl in decls) {
+                    out.add(decl)
+                }
             }
         }
         return out
+    }
+
+    private func containsDecl(values: ArrayList<Decl>, decl: Decl): Bool {
+        for (value in values) {
+            if (SameDecl(value, decl)) {
+                return true
+            }
+        }
+        return false
+    }
+
+    private func isVisibleInRelation(node: Decl, relation: ModulesPackageRelation): Bool {
+        return node.TestAttr(Attribute.PUBLIC) || relation == ModulesPackageRelation.SAME_PACKAGE ||
+            (node.TestAttr(Attribute.PROTECTED) && relation != ModulesPackageRelation.NONE) ||
+            (node.TestAttr(Attribute.INTERNAL) &&
+                (relation == ModulesPackageRelation.CHILD || relation == ModulesPackageRelation.SAME_PACKAGE))
+    }
+
+    public func IsDeclAccessible(file: File, decl: Decl): Bool {
+        var ret = false
+        var relation = ModulesPackageRelation.NONE
+        if (let Some(filePackage) <- file.curPackage) {
+            ret = decl.fullPackageName == filePackage.fullPackageName
+            relation = ModulesGetPackageRelation(filePackage.fullPackageName, decl.fullPackageName)
+        }
+        if (containsDecl(getResolvedImportedDeclsByName(file, decl.identifier.Val()), decl)) {
+            return true
+        }
+        let packageNames = ModulesSplitQualifiedName(decl.fullPackageName)
+        var idx = packageNames.size - 1
+        while (idx >= 0) {
+            if (!getResolvedImportedDeclsByName(file, packageNames[idx]).isEmpty() &&
+                isVisibleInRelation(decl, relation)) {
+                ret = true
+            }
+            idx--
+        }
+        return ret
     }
 
     public func GetSubstituteMapping(nominalTy: Ty, typeMapping: TypeSubst): TypeSubst {
@@ -1149,7 +1234,7 @@ public class TypeManager {
     }
 
     private func isInheritableTypeForGenericMapping(ty: Ty): Bool {
-        if (!Ty.IsTyCorrect(ty) || !ty.IsNominal()) {
+        if (!Ty.IsTyCorrect(ty) || !ty.IsClassLike()) {
             return false
         }
         if (let Some(decl) <- Ty.GetInheritableDeclPtrOfTy(Some(ty))) {
@@ -2870,13 +2955,13 @@ public class TypeManager {
     }
 
     private func collectNominalSuperTys(ty: Ty, typeMapping: TypeSubst, withExtended: Bool, out: TySet): Unit {
+        let _ = withExtended
         if (let Some(decl) <- Ty.GetInheritableDeclPtrOfTy(Some(ty))) {
             let substituteMapping = GetSubstituteMapping(ty, typeMapping)
             for (inheritedType in decl.inheritedTypes) {
                 if (let Some(inheritedTy) <- inheritedType.GetTy()) {
                     if (isInheritableTypeForGenericMapping(inheritedTy)) {
-                        out.AddAll(GetAllSuperTys(inheritedTy, typeMapping: substituteMapping,
-                            withExtended: withExtended))
+                        out.AddAll(GetAllSuperTys(inheritedTy, typeMapping: substituteMapping))
                     }
                 }
             }
@@ -2884,12 +2969,13 @@ public class TypeManager {
     }
 
     private func hasNominalSuperTy(ty: Ty, superTy: Ty, typeMapping: TypeSubst, withExtended: Bool): Bool {
+        let _ = withExtended
         if (let Some(decl) <- Ty.GetInheritableDeclPtrOfTy(Some(ty))) {
             let substituteMapping = GetSubstituteMapping(ty, typeMapping)
             for (inheritedType in decl.inheritedTypes) {
                 if (let Some(inheritedTy) <- inheritedType.GetTy()) {
                     if (isInheritableTypeForGenericMapping(inheritedTy) &&
-                        HasSuperTy(inheritedTy, superTy, substituteMapping, withExtended: withExtended)) {
+                        HasSuperTy(inheritedTy, superTy, substituteMapping)) {
                         return true
                     }
                 }

@@ -21,13 +21,15 @@ fail() {
 [[ -x "$SELF" ]] || fail "missing selfhost cjc at $SELF"
 [[ -d "$CANGJIE_HOME" ]] || fail "missing CANGJIE_HOME at $CANGJIE_HOME"
 
-mkdir -p "$WORK/pkgA" "$WORK/pkgSig" "$WORK/pkgB" "$WORK/ref" "$WORK/self"
+mkdir -p "$WORK/pkgA" "$WORK/pkgSig" "$WORK/pkgA4" "$WORK/pkgB" "$WORK/pkgB4" "$WORK/ref" "$WORK/self"
 cp "$FIXTURE/pkgA/pkgA.cj" "$WORK/pkgA/pkgA.cj"
 cp "$FIXTURE/pkgSig/pkgSig.cj" "$WORK/pkgSig/pkgSig.cj"
+cp "$FIXTURE/pkgA4/pkgA4.cj" "$WORK/pkgA4/pkgA4.cj"
 cp "$FIXTURE/pkgB/function.cj" "$WORK/pkgB/function.cj"
 cp "$FIXTURE/pkgB/function_single.cj" "$WORK/pkgB/function_single.cj"
 cp "$FIXTURE/pkgB/greeting.cj" "$WORK/pkgB/greeting.cj"
 cp "$FIXTURE/pkgB/imported_signature.cj" "$WORK/pkgB/imported_signature.cj"
+cp "$FIXTURE/pkgB4/protected_lub.cj" "$WORK/pkgB4/protected_lub.cj"
 
 "$REF" "$WORK/pkgA/pkgA.cj" --output-type=staticlib -o "$WORK/pkgA/libpkgA.a" --set-runtime-rpath \
     >"$WORK/pkgA.ref.stdout" 2>"$WORK/pkgA.ref.stderr" ||
@@ -42,6 +44,13 @@ cp "$FIXTURE/pkgB/imported_signature.cj" "$WORK/pkgB/imported_signature.cj"
 
 [[ -f "$WORK/pkgSig/pkgSig.cjo" ]] || fail "reference pkgSig did not produce pkgSig.cjo"
 [[ -f "$WORK/pkgSig/libpkgSig.a" ]] || fail "reference pkgSig did not produce libpkgSig.a"
+
+"$REF" "$WORK/pkgA4/pkgA4.cj" --output-type=staticlib -o "$WORK/pkgA4/libpkgA4.a" --set-runtime-rpath \
+    >"$WORK/pkgA4.ref.stdout" 2>"$WORK/pkgA4.ref.stderr" ||
+    fail "reference pkgA4 compile failed: $(tr '\n' ' ' <"$WORK/pkgA4.ref.stderr")"
+
+[[ -f "$WORK/pkgA4/pkgA4.cjo" ]] || fail "reference pkgA4 did not produce pkgA4.cjo"
+[[ -f "$WORK/pkgA4/libpkgA4.a" ]] || fail "reference pkgA4 did not produce libpkgA4.a"
 
 run_case() {
     local name="$1"
@@ -103,5 +112,31 @@ set -e
     fail "imported_signature output mismatch: reference='$imported_ref_out' selfhost='$imported_self_out'"
 
 printf 'SEPTEST-imported_signature-PASS output=%s exit=%s\n' "$imported_self_out" "$imported_self_status"
+
+"$REF" "$WORK/pkgB4/protected_lub.cj" --import-path "$WORK/pkgA4" -L "$WORK/pkgA4" -lpkgA4 \
+    -o "$WORK/ref/protected_lub" --set-runtime-rpath \
+    >"$WORK/protected_lub.ref.stdout" 2>"$WORK/protected_lub.ref.stderr" ||
+    fail "reference pkgB4 protected_lub compile failed: $(tr '\n' ' ' <"$WORK/protected_lub.ref.stderr")"
+
+"$SELF" "$WORK/pkgB4/protected_lub.cj" --import-path "$WORK/pkgA4" -L "$WORK/pkgA4" -lpkgA4 \
+    -o "$WORK/self/protected_lub" --set-runtime-rpath \
+    >"$WORK/protected_lub.self.stdout" 2>"$WORK/protected_lub.self.stderr" ||
+    fail "selfhost pkgB4 protected_lub compile failed: $(tr '\n' ' ' <"$WORK/protected_lub.self.stderr")"
+
+set +e
+protected_ref_out=$("$WORK/ref/protected_lub" 2>"$WORK/protected_lub.ref.run.stderr")
+protected_ref_status=$?
+protected_self_out=$("$WORK/self/protected_lub" 2>"$WORK/protected_lub.self.run.stderr")
+protected_self_status=$?
+set -e
+
+[[ "$protected_ref_status" -eq "$protected_self_status" ]] ||
+    fail "protected_lub exit mismatch: reference=$protected_ref_status selfhost=$protected_self_status"
+[[ "$protected_ref_out" = "$protected_self_out" ]] ||
+    fail "protected_lub output mismatch: reference='$protected_ref_out' selfhost='$protected_self_out'"
+[[ "$protected_self_out" = "17" ]] ||
+    fail "protected_lub output '$protected_self_out' did not match expected '17'"
+
+printf 'SEPTEST-protected_lub-PASS output=%s exit=%s\n' "$protected_self_out" "$protected_self_status"
 
 printf 'SEPTEST-PASS\n'
