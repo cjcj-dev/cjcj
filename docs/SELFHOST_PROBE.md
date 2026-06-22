@@ -1390,3 +1390,33 @@ Results:
 - `run_diag.sh`: `SEPTEST-DIAG-PASS`.
 - `run_write_types.sh`: `SEPTEST-WRITE-TYPES-PASS`.
 - `run_write_struct.sh`: `SEPTEST-WRITE-STRUCT-PASS`.
+
+### Review-gate residuals (documented for follow-up cuts)
+
+An independent adversarial faithfulness review confirmed the core fix is 1:1 with C++
+(`ChkConstPattern`/`ChkOpOverloadForConstPattern`, `src/Sema/TypeCheckPattern.cpp:244-311`): routing the
+const-pattern literal and the synthesized `selector == literal` equality through the full `Check` (via the
+`ConstPatternExprChecker` callback) exactly mirrors C++. Independent verification: clean build, difftest
+`TOTAL=89 PASS=89` (one tail FAIL on `45_string_methods` was a spurious contention OOM — verified standalone
+PASS), all 5 septests, and `m1`–`m4` match the reference. No valid-program regression (the `big` for-in over
+an array-literal that now reaches a downstream codegen `load/store type` frontier was already blocked at the
+old match-Invalid sema frontier on base `dca2193` — the fix advanced it, did not regress it).
+
+Residuals NOT addressed by this cut (all confirmed by the review as either diagnostics-only or pre-existing
+adjacent frontiers, none a regression):
+
+1. **DiagSuppressor + `sema_not_overload_in_match` (diagnostics-only).** C++ `ChkOpOverloadForConstPattern`
+   (`TypeCheckPattern.cpp:300-310`) wraps the trial `Check(ctx, boolTy, callExpr)` in a `DiagSuppressor` and
+   emits `sema_not_overload_in_match` on failure. The selfhost (which HAS `DiagSuppressor.cj`) routes the
+   trial through the live diag engine without suppression and emits no such diagnostic. Inert on valid
+   programs (the overload succeeds → no diagnostics emitted); only the failure path (invalid programs / no
+   `==` overload) diverges. Part of foundational sema-validation-diagnostic debt.
+
+2. **Nested / sugar const-pattern paths not yet threaded (pre-existing valid-program frontiers).** The
+   `exprChecker` is threaded only through the top-level match path. A string-literal const pattern nested
+   inside an enum pattern (`case Some("a") => …`), a tuple pattern with an enum-typed arm
+   (`case ("a", 1) => E.X`), an `if-let`/`LetPattern` const pattern, and the quest-sugar (`?.`/`??`) match
+   path all still take the narrow checker and leave an Invalid match type → CHIR abort. These fail identically
+   on base `dca2193` (pre-existing, not regressed) and are a coherent follow-up cut: thread the const-pattern
+   `Check` through `ChkEnumPattern` and the remaining nested/sugar pattern paths, mirroring C++'s uniform
+   `Check`-through-`ChkPattern` recursion.
