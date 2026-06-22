@@ -46,6 +46,203 @@ private class FaithfulInitFileVars {
     }
 }
 
+private class FaithfulInitDepsEntry {
+    public let decl: AstDecl
+    public let deps: ArrayList<AstDecl>
+
+    public init(decl: AstDecl, deps: ArrayList<AstDecl>) {
+        this.decl = decl
+        this.deps = deps
+    }
+}
+
+private class FaithfulInitDeclSet {
+    private let buckets: HashMap<Int64, ArrayList<AstDecl>> = HashMap<Int64, ArrayList<AstDecl>>()
+
+    public init() {}
+
+    public func Add(decl: AstDecl): Bool {
+        let key = FaithfulInitDeclHash(decl)
+        if (let Some(bucket) <- buckets.get(key)) {
+            for (item in bucket) {
+                if (FaithfulInitSameDecl(item, decl)) {
+                    return false
+                }
+            }
+            bucket.add(decl)
+            return true
+        }
+        let bucket = ArrayList<AstDecl>()
+        bucket.add(decl)
+        buckets[key] = bucket
+        return true
+    }
+
+    public func Contains(decl: AstDecl): Bool {
+        let key = FaithfulInitDeclHash(decl)
+        if (let Some(bucket) <- buckets.get(key)) {
+            for (item in bucket) {
+                if (FaithfulInitSameDecl(item, decl)) {
+                    return true
+                }
+            }
+        }
+        return false
+    }
+
+    public func Remove(decl: AstDecl): Bool {
+        let key = FaithfulInitDeclHash(decl)
+        if (let Some(bucket) <- buckets.get(key)) {
+            var idx: Int64 = 0
+            while (idx < bucket.size) {
+                if (FaithfulInitSameDecl(bucket[idx], decl)) {
+                    bucket.remove(at: idx)
+                    return true
+                }
+                idx++
+            }
+        }
+        return false
+    }
+}
+
+private class FaithfulInitDepsMap {
+    private let buckets: HashMap<Int64, ArrayList<FaithfulInitDepsEntry>> =
+        HashMap<Int64, ArrayList<FaithfulInitDepsEntry>>()
+
+    public init() {}
+
+    public func Add(decl: AstDecl, deps: ArrayList<AstDecl>): Unit {
+        let key = FaithfulInitDeclHash(decl)
+        if (let Some(bucket) <- buckets.get(key)) {
+            bucket.add(FaithfulInitDepsEntry(decl, deps))
+            return
+        }
+        let bucket = ArrayList<FaithfulInitDepsEntry>()
+        bucket.add(FaithfulInitDepsEntry(decl, deps))
+        buckets[key] = bucket
+    }
+
+    public func Get(decl: AstDecl): Option<ArrayList<AstDecl>> {
+        let key = FaithfulInitDeclHash(decl)
+        if (let Some(bucket) <- buckets.get(key)) {
+            for (entry in bucket) {
+                if (FaithfulInitSameDecl(entry.decl, decl)) {
+                    return entry.deps
+                }
+            }
+        }
+        return None
+    }
+}
+
+private class FaithfulInitDeclOwnerEntry {
+    public let decl: AstDecl
+    public let owner: AstDecl
+
+    public init(decl: AstDecl, owner: AstDecl) {
+        this.decl = decl
+        this.owner = owner
+    }
+}
+
+private class FaithfulInitDeclOwnerMap {
+    private let buckets: HashMap<Int64, ArrayList<FaithfulInitDeclOwnerEntry>> =
+        HashMap<Int64, ArrayList<FaithfulInitDeclOwnerEntry>>()
+
+    public init() {}
+
+    public func Add(decl: AstDecl, owner: AstDecl): Unit {
+        let key = FaithfulInitDeclHash(decl)
+        if (let Some(bucket) <- buckets.get(key)) {
+            for (entry in bucket) {
+                if (FaithfulInitSameDecl(entry.decl, decl)) {
+                    return
+                }
+            }
+            bucket.add(FaithfulInitDeclOwnerEntry(decl, owner))
+            return
+        }
+        let bucket = ArrayList<FaithfulInitDeclOwnerEntry>()
+        bucket.add(FaithfulInitDeclOwnerEntry(decl, owner))
+        buckets[key] = bucket
+    }
+
+    public func Get(decl: AstDecl): Option<AstDecl> {
+        let key = FaithfulInitDeclHash(decl)
+        if (let Some(bucket) <- buckets.get(key)) {
+            for (entry in bucket) {
+                if (FaithfulInitSameDecl(entry.decl, decl)) {
+                    return entry.owner
+                }
+            }
+        }
+        return None
+    }
+}
+
+@OverflowWrapping
+private func FaithfulInitHashCombine(seed: Int64, value: Int64): Int64 {
+    return seed * 1315423911 + value + 0x9e3779b9
+}
+
+private func FaithfulInitDeclHash(decl: AstDecl): Int64 {
+    if (let Some(defaultKey) <- FaithfulInitDefaultParamDeclIdentity(decl)) {
+        return defaultKey.hashCode()
+    }
+    if (decl.TestAttr(AstAttribute.IMPORTED)) {
+        if (!decl.rawMangleName.isEmpty()) {
+            return FaithfulInitHashCombine(17, decl.rawMangleName.hashCode())
+        }
+        if (!decl.mangledName.isEmpty()) {
+            return FaithfulInitHashCombine(31, decl.mangledName.hashCode())
+        }
+    }
+    var out = ASTKindIndex(decl.astKind)
+    out = FaithfulInitHashCombine(out, decl.identifier.Val().hashCode())
+    out = FaithfulInitHashCombine(out, decl.fullPackageName.hashCode())
+    out = FaithfulInitHashCombine(out, decl.begin.hashCode())
+    out = FaithfulInitHashCombine(out, decl.end.hashCode())
+    return out
+}
+
+private func FaithfulInitSameDecl(left: AstDecl, right: AstDecl): Bool {
+    if (let Some(leftKey) <- FaithfulInitDefaultParamDeclIdentity(left)) {
+        if (let Some(rightKey) <- FaithfulInitDefaultParamDeclIdentity(right)) {
+            return leftKey == rightKey
+        }
+        return false
+    }
+    if (FaithfulInitDefaultParamDeclIdentity(right).isSome()) {
+        return false
+    }
+    if (left.TestAttr(AstAttribute.IMPORTED) && right.TestAttr(AstAttribute.IMPORTED)) {
+        if (!left.rawMangleName.isEmpty() || !right.rawMangleName.isEmpty()) {
+            return left.rawMangleName == right.rawMangleName
+        }
+        if (!left.mangledName.isEmpty() || !right.mangledName.isEmpty()) {
+            return left.mangledName == right.mangledName
+        }
+    }
+    return ASTKindIndex(left.astKind) == ASTKindIndex(right.astKind) &&
+        left.identifier.Val() == right.identifier.Val() && left.fullPackageName == right.fullPackageName &&
+        left.begin.hashCode() == right.begin.hashCode() && left.end.hashCode() == right.end.hashCode()
+}
+
+private func FaithfulInitDefaultParamDeclIdentity(decl: AstDecl): Option<String> {
+    if (!decl.TestAttr(AstAttribute.HAS_INITIAL)) {
+        return None
+    }
+    if (let Some(funcDecl) <- (decl as AstFuncDecl)) {
+        if (let Some(owner) <- funcDecl.ownerFunc) {
+            return Some(ASTKindIndex(owner.astKind).toString() + ":" + owner.fullPackageName + ":" +
+                owner.identifier.Val() + ":" + owner.begin.hashCode().toString() + ":" +
+                owner.end.hashCode().toString() + ":default-param:" + decl.identifier.Val())
+        }
+    }
+    return None
+}
+
 private let FAITHFUL_MANGLE_CANGJIE_PREFIX: String = "_C"
 private let FAITHFUL_MANGLE_SUFFIX: String = "E"
 private let FAITHFUL_MANGLE_NESTED_PREFIX: String = "N"
@@ -111,18 +308,28 @@ public class FaithfulAST2CHIR {
 
     private let globalCache: FaithfulAST2CHIRNodeMap = FaithfulAST2CHIRNodeMap()
     private let allTopLevelNodes: ArrayList<AstDecl> = ArrayList<AstDecl>()
+    private let allTopLevelNodeSet: FaithfulInitDeclSet = FaithfulInitDeclSet()
     private let pkgFiles: ArrayList<AstFile> = ArrayList<AstFile>()
 
     private let importedGlobalAndStaticVars: ArrayList<AstDecl> = ArrayList<AstDecl>()
+    private let importedGlobalAndStaticVarSet: FaithfulInitDeclSet = FaithfulInitDeclSet()
     private let importedGlobalAndMemberFuncs: ArrayList<AstDecl> = ArrayList<AstDecl>()
+    private let importedGlobalAndMemberFuncSet: FaithfulInitDeclSet = FaithfulInitDeclSet()
     private let importedNominalDecls: ArrayList<AstDecl> = ArrayList<AstDecl>()
+    private let importedNominalDeclSet: FaithfulInitDeclSet = FaithfulInitDeclSet()
     private let importedGenericInstantiatedNominalDecls: ArrayList<AstDecl> = ArrayList<AstDecl>()
+    private let importedGenericInstantiatedNominalDeclSet: FaithfulInitDeclSet = FaithfulInitDeclSet()
 
     private let globalAndStaticVars: ArrayList<AstDecl> = ArrayList<AstDecl>()
+    private let globalAndStaticVarSet: FaithfulInitDeclSet = FaithfulInitDeclSet()
     private let globalAndMemberFuncs: ArrayList<AstDecl> = ArrayList<AstDecl>()
+    private let globalAndMemberFuncSet: FaithfulInitDeclSet = FaithfulInitDeclSet()
     private let nominalDecls: ArrayList<AstDecl> = ArrayList<AstDecl>()
+    private let nominalDeclSet: FaithfulInitDeclSet = FaithfulInitDeclSet()
     private let genericNominalDecls: ArrayList<AstDecl> = ArrayList<AstDecl>()
+    private let genericNominalDeclSet: FaithfulInitDeclSet = FaithfulInitDeclSet()
     private let foreignFuncs: ArrayList<AstDecl> = ArrayList<AstDecl>()
+    private let foreignFuncSet: FaithfulInitDeclSet = FaithfulInitDeclSet()
 
     public init(builder: CHIRBuilder, chirType: CHIRType,
         importedPkgs!: ArrayList<AstPackage> = ArrayList<AstPackage>(), chirWFC!: Bool = false) {
@@ -221,11 +428,12 @@ public class FaithfulAST2CHIR {
         }
     }
 
-    private func CollectDeclToList(decl: AstDecl, astNodes: ArrayList<AstDecl>): Unit {
-        if (!ContainsDecl(allTopLevelNodes, decl)) {
+    private func CollectDeclToList(decl: AstDecl, astNodes: ArrayList<AstDecl>,
+        astNodeSet: FaithfulInitDeclSet): Unit {
+        if (allTopLevelNodeSet.Add(decl)) {
             allTopLevelNodes.add(decl)
         }
-        if (!ContainsDecl(astNodes, decl)) {
+        if (astNodeSet.Add(decl)) {
             astNodes.add(decl)
         }
     }
@@ -243,7 +451,7 @@ public class FaithfulAST2CHIR {
             return
         }
         if (decl.IsNominalDecl()) {
-            CollectDeclToList(decl, importedNominalDecls)
+            CollectDeclToList(decl, importedNominalDecls, importedNominalDeclSet)
             for (member in decl.GetMemberDecls()) {
                 CollectImportedDeclUsedInCurPkg(member)
             }
@@ -270,7 +478,7 @@ public class FaithfulAST2CHIR {
             return
         }
         if (decl.IsNominalDecl()) {
-            CollectDeclToList(decl, importedNominalDecls)
+            CollectDeclToList(decl, importedNominalDecls, importedNominalDeclSet)
             for (member in decl.GetMemberDecls()) {
                 CollectImportedGenericDecl(member)
             }
@@ -290,11 +498,11 @@ public class FaithfulAST2CHIR {
     private func CollectImportedFuncDeclAndDesugarParams(funcDecl: AstFuncDecl): Unit {
         if (let Some(outer) <- funcDecl.outerDecl) {
             if (outer.IsNominalDecl()) {
-                CollectDeclToList(outer, importedNominalDecls)
+                CollectDeclToList(outer, importedNominalDecls, importedNominalDeclSet)
             }
         }
-        CollectDeclToList(funcDecl, importedGlobalAndMemberFuncs)
-        CollectDesugaredDefaultParams(funcDecl, importedGlobalAndMemberFuncs)
+        CollectDeclToList(funcDecl, importedGlobalAndMemberFuncs, importedGlobalAndMemberFuncSet)
+        CollectDesugaredDefaultParams(funcDecl, importedGlobalAndMemberFuncs, importedGlobalAndMemberFuncSet)
     }
 
     private func CollectImportedPropDecl(propDecl: AstPropDecl): Unit {
@@ -307,36 +515,26 @@ public class FaithfulAST2CHIR {
     }
 
     private func CollectImportedGlobalOrStaticVarDecl(varDecl: AstVarDecl): Unit {
-        CollectDeclToList(varDecl, importedGlobalAndStaticVars)
+        CollectDeclToList(varDecl, importedGlobalAndStaticVars, importedGlobalAndStaticVarSet)
     }
 
     private func CollectDecls(decl: AstDecl, instantiated!: Bool): Unit {
         match (decl.astKind) {
             case ASTKind.STRUCT_DECL =>
                 CollectDeclsFromStructDecl(RequireStructDecl(decl))
-                CollectDeclToList(decl, if (instantiated) { importedGenericInstantiatedNominalDecls } else {
-                    if (decl.TestAttr(AstAttribute.GENERIC)) { genericNominalDecls } else { nominalDecls }
-                })
+                CollectNominalDecl(decl, instantiated)
             case ASTKind.CLASS_DECL =>
                 CollectDeclsFromClassLikeDecl(RequireClassLikeDecl(decl))
-                CollectDeclToList(decl, if (instantiated) { importedGenericInstantiatedNominalDecls } else {
-                    if (decl.TestAttr(AstAttribute.GENERIC)) { genericNominalDecls } else { nominalDecls }
-                })
+                CollectNominalDecl(decl, instantiated)
             case ASTKind.INTERFACE_DECL =>
                 CollectDeclsFromClassLikeDecl(RequireClassLikeDecl(decl))
-                CollectDeclToList(decl, if (instantiated) { importedGenericInstantiatedNominalDecls } else {
-                    if (decl.TestAttr(AstAttribute.GENERIC)) { genericNominalDecls } else { nominalDecls }
-                })
+                CollectNominalDecl(decl, instantiated)
             case ASTKind.ENUM_DECL =>
                 CollectDeclsFromEnumDecl(RequireEnumDecl(decl))
-                CollectDeclToList(decl, if (instantiated) { importedGenericInstantiatedNominalDecls } else {
-                    if (decl.TestAttr(AstAttribute.GENERIC)) { genericNominalDecls } else { nominalDecls }
-                })
+                CollectNominalDecl(decl, instantiated)
             case ASTKind.EXTEND_DECL =>
                 CollectDeclsFromExtendDecl(RequireExtendDecl(decl))
-                CollectDeclToList(decl, if (instantiated) { importedGenericInstantiatedNominalDecls } else {
-                    if (decl.TestAttr(AstAttribute.GENERIC)) { genericNominalDecls } else { nominalDecls }
-                })
+                CollectNominalDecl(decl, instantiated)
             case ASTKind.FUNC_DECL =>
                 CollectFuncDecl(RequireFuncDecl(decl))
             case ASTKind.MAIN_DECL =>
@@ -347,6 +545,19 @@ public class FaithfulAST2CHIR {
                 CollectVarandVarwithpatternDecl(decl)
             case _ => ()
         }
+    }
+
+    private func CollectNominalDecl(decl: AstDecl, instantiated: Bool): Unit {
+        if (instantiated) {
+            CollectDeclToList(decl, importedGenericInstantiatedNominalDecls,
+                importedGenericInstantiatedNominalDeclSet)
+            return
+        }
+        if (decl.TestAttr(AstAttribute.GENERIC)) {
+            CollectDeclToList(decl, genericNominalDecls, genericNominalDeclSet)
+            return
+        }
+        CollectDeclToList(decl, nominalDecls, nominalDeclSet)
     }
 
     private func CollectDeclsFromEnumDecl(enumDecl: AstEnumDecl): Unit {
@@ -386,7 +597,7 @@ public class FaithfulAST2CHIR {
         }
         if (let Some(varDecl) <- (decl as AstVarDecl)) {
             if (varDecl.TestAttr(AstAttribute.STATIC)) {
-                CollectDeclToList(varDecl, globalAndStaticVars)
+                CollectDeclToList(varDecl, globalAndStaticVars, globalAndStaticVarSet)
             }
         }
     }
@@ -396,11 +607,11 @@ public class FaithfulAST2CHIR {
             return
         }
         if (funcDecl.TestAttr(AstAttribute.FOREIGN)) {
-            CollectDeclToList(funcDecl, foreignFuncs)
+            CollectDeclToList(funcDecl, foreignFuncs, foreignFuncSet)
             return
         }
-        CollectDeclToList(funcDecl, globalAndMemberFuncs)
-        CollectDesugaredDefaultParams(funcDecl, globalAndMemberFuncs)
+        CollectDeclToList(funcDecl, globalAndMemberFuncs, globalAndMemberFuncSet)
+        CollectDesugaredDefaultParams(funcDecl, globalAndMemberFuncs, globalAndMemberFuncSet)
     }
 
     private func CollectDesugarDecl(decl: AstDecl): Unit {
@@ -411,12 +622,13 @@ public class FaithfulAST2CHIR {
         }
     }
 
-    private func CollectDesugaredDefaultParams(funcDecl: AstFuncDecl, list: ArrayList<AstDecl>): Unit {
+    private func CollectDesugaredDefaultParams(funcDecl: AstFuncDecl, list: ArrayList<AstDecl>,
+        listSet: FaithfulInitDeclSet): Unit {
         if (let Some(body) <- funcDecl.funcBody) {
             if (!body.paramLists.isEmpty()) {
                 for (param in body.paramLists[0].params) {
                     if (let Some(desugarDecl) <- param.desugarDecl) {
-                        CollectDeclToList(desugarDecl, list)
+                        CollectDeclToList(desugarDecl, list, listSet)
                     }
                 }
             }
@@ -424,7 +636,7 @@ public class FaithfulAST2CHIR {
     }
 
     private func CollectVarandVarwithpatternDecl(decl: AstDecl): Unit {
-        CollectDeclToList(decl, globalAndStaticVars)
+        CollectDeclToList(decl, globalAndStaticVars, globalAndStaticVarSet)
     }
 
     private func CacheTopLevelDeclToGlobalSymbolTable(): Unit {
@@ -522,14 +734,15 @@ public class FaithfulAST2CHIR {
 
     private func TranslateAllCustomTypeTy(): Unit {
         let translatedGenericDecls = ArrayList<AstDecl>()
+        let translatedGenericDeclSet = FaithfulInitDeclSet()
         for (decl in importedNominalDecls) {
             if (TranslateCustomTypeTyIfReady(decl).isSome() && decl.TestAttr(AstAttribute.GENERIC)) {
-                CollectDeclToList(decl, translatedGenericDecls)
+                CollectDeclToList(decl, translatedGenericDecls, translatedGenericDeclSet)
             }
         }
         for (decl in genericNominalDecls) {
             if (TranslateCustomTypeTyIfReady(decl).isSome()) {
-                CollectDeclToList(decl, translatedGenericDecls)
+                CollectDeclToList(decl, translatedGenericDecls, translatedGenericDeclSet)
             }
         }
         for (decl in nominalDecls) { let _ = TranslateCustomTypeTyIfReady(decl) }
@@ -649,62 +862,89 @@ public class FaithfulAST2CHIR {
     }
 
     private func SortGlobalAndStaticVarsByDependency(): ArrayList<AstDecl> {
-        let sorted = ArrayList<AstDecl>()
-        let visiting = ArrayList<AstDecl>()
-        let visited = ArrayList<AstDecl>()
+        let globalVarSet = BuildDeclSet(globalAndStaticVars)
+        let candidateSet = FaithfulInitDeclSet()
         for (decl in globalAndStaticVars) {
-            VisitVarForInitOrder(decl, visiting, visited, sorted)
+            candidateSet.Add(decl)
+        }
+        for (decl in globalAndMemberFuncs) {
+            candidateSet.Add(decl)
+        }
+        let patternOwnerMap = BuildPatternDependencyOwnerMap()
+        let directDepsMap = PrecomputeDirectDependencies(candidateSet, globalVarSet, patternOwnerMap)
+        let sorted = ArrayList<AstDecl>()
+        let sortedSet = FaithfulInitDeclSet()
+        let visitingStack = ArrayList<AstDecl>()
+        let visitingSet = FaithfulInitDeclSet()
+        let visitedSet = FaithfulInitDeclSet()
+        for (decl in globalAndStaticVars) {
+            VisitVarForInitOrder(decl, visitingStack, visitingSet, visitedSet, sorted, sortedSet, directDepsMap,
+                candidateSet, globalVarSet)
         }
         return sorted
     }
 
-    private func VisitVarForInitOrder(decl: AstDecl, visiting: ArrayList<AstDecl>, visited: ArrayList<AstDecl>,
-        sorted: ArrayList<AstDecl>): Unit {
-        if (ContainsDecl(visited, decl)) {
+    private func VisitVarForInitOrder(decl: AstDecl, visitingStack: ArrayList<AstDecl>,
+        visitingSet: FaithfulInitDeclSet, visitedSet: FaithfulInitDeclSet, sorted: ArrayList<AstDecl>,
+        sortedSet: FaithfulInitDeclSet, directDepsMap: FaithfulInitDepsMap, candidateSet: FaithfulInitDeclSet,
+        globalVarSet: FaithfulInitDeclSet): Unit {
+        if (visitedSet.Contains(decl)) {
             return
         }
-        if (ContainsDecl(visiting, decl)) {
+        if (visitingSet.Contains(decl)) {
             return
         }
-        visiting.add(decl)
-        for (dep in CollectTransitiveVarDeps(decl)) {
-            VisitVarForInitOrder(dep, visiting, visited, sorted)
-        }
-        visiting.remove(at: visiting.size - 1)
-        visited.add(decl)
-        if (!ContainsDecl(sorted, decl)) {
+        visitingStack.add(decl)
+        visitingSet.Add(decl)
+        let seenFuncs = FaithfulInitDeclSet()
+        VisitDepsForInitOrder(decl, visitingStack, visitingSet, visitedSet, sorted, sortedSet, directDepsMap,
+            candidateSet, globalVarSet, seenFuncs)
+        visitingStack.remove(at: visitingStack.size - 1)
+        visitingSet.Remove(decl)
+        visitedSet.Add(decl)
+        if (sortedSet.Add(decl)) {
             sorted.add(decl)
         }
     }
 
-    private func CollectTransitiveVarDeps(root: AstDecl): ArrayList<AstDecl> {
-        let out = ArrayList<AstDecl>()
-        let seen = ArrayList<AstDecl>()
-        CollectTransitiveVarDeps(root, seen, out)
-        return out
-    }
-
-    private func CollectTransitiveVarDeps(root: AstDecl, seen: ArrayList<AstDecl>, out: ArrayList<AstDecl>): Unit {
-        if (ContainsDecl(seen, root)) {
-            return
-        }
-        seen.add(root)
-        for (dep in CollectDirectDependencies(root)) {
-            if (IsGlobalOrStaticVarDecl(dep)) {
-                if (!ContainsDecl(out, dep)) {
-                    out.add(dep)
+    private func VisitDepsForInitOrder(root: AstDecl, visitingStack: ArrayList<AstDecl>,
+        visitingSet: FaithfulInitDeclSet, visitedSet: FaithfulInitDeclSet, sorted: ArrayList<AstDecl>,
+        sortedSet: FaithfulInitDeclSet, directDepsMap: FaithfulInitDepsMap, candidateSet: FaithfulInitDeclSet,
+        globalVarSet: FaithfulInitDeclSet, seenFuncs: FaithfulInitDeclSet): Unit {
+        if (let Some(directDeps) <- directDepsMap.Get(root)) {
+            for (dep in directDeps) {
+                if (globalVarSet.Contains(dep)) {
+                    VisitVarForInitOrder(dep, visitingStack, visitingSet, visitedSet, sorted, sortedSet, directDepsMap,
+                        candidateSet, globalVarSet)
+                } else if (candidateSet.Contains(dep)) {
+                    if (seenFuncs.Add(dep)) {
+                        VisitDepsForInitOrder(dep, visitingStack, visitingSet, visitedSet, sorted, sortedSet,
+                            directDepsMap, candidateSet, globalVarSet, seenFuncs)
+                    }
                 }
-            } else if (IsFuncOrVarCandidate(dep)) {
-                CollectTransitiveVarDeps(dep, seen, out)
             }
         }
     }
 
-    private func CollectDirectDependencies(root: AstDecl): ArrayList<AstDecl> {
+    private func PrecomputeDirectDependencies(candidateSet: FaithfulInitDeclSet, globalVarSet: FaithfulInitDeclSet,
+        patternOwnerMap: FaithfulInitDeclOwnerMap): FaithfulInitDepsMap {
+        let depsMap = FaithfulInitDepsMap()
+        for (decl in globalAndStaticVars) {
+            depsMap.Add(decl, CollectDirectDependencies(decl, candidateSet, globalVarSet, patternOwnerMap))
+        }
+        for (decl in globalAndMemberFuncs) {
+            depsMap.Add(decl, CollectDirectDependencies(decl, candidateSet, globalVarSet, patternOwnerMap))
+        }
+        return depsMap
+    }
+
+    private func CollectDirectDependencies(root: AstDecl, candidateSet: FaithfulInitDeclSet,
+        globalVarSet: FaithfulInitDeclSet, patternOwnerMap: FaithfulInitDeclOwnerMap): ArrayList<AstDecl> {
         let dependencies = ArrayList<AstDecl>()
+        let dependencySet = FaithfulInitDeclSet()
         let visitor = { node: AstNode =>
             if (let Some(expr) <- (node as AstExpr)) {
-                CollectExprDependency(expr, dependencies)
+                CollectExprDependency(expr, dependencies, dependencySet, candidateSet, globalVarSet, patternOwnerMap)
             }
             AstVisitAction.WALK_CHILDREN
         }
@@ -712,17 +952,60 @@ public class FaithfulAST2CHIR {
         return dependencies
     }
 
-    private func CollectExprDependency(expr: AstExpr, dependencies: ArrayList<AstDecl>): Unit {
+    private func BuildPatternDependencyOwnerMap(): FaithfulInitDeclOwnerMap {
+        let out = FaithfulInitDeclOwnerMap()
+        for (candidate in globalAndStaticVars) {
+            if (let Some(varWithPattern) <- (candidate as AstVarWithPatternDecl)) {
+                if (let Some(pattern) <- varWithPattern.irrefutablePattern) {
+                    AddPatternDependencyOwners(pattern, varWithPattern, out)
+                }
+            }
+        }
+        return out
+    }
+
+    private func AddPatternDependencyOwners(pattern: AstPattern, owner: AstDecl,
+        out: FaithfulInitDeclOwnerMap): Unit {
+        if (let Some(varPattern) <- (pattern as AstVarPattern)) {
+            if (let Some(varDecl) <- varPattern.varDecl) {
+                out.Add(varDecl, owner)
+            }
+            return
+        }
+        if (let Some(tuplePattern) <- (pattern as AstTuplePattern)) {
+            for (subPattern in tuplePattern.patterns) {
+                AddPatternDependencyOwners(subPattern, owner, out)
+            }
+            return
+        }
+        if (let Some(enumPattern) <- (pattern as AstEnumPattern)) {
+            for (subPattern in enumPattern.patterns) {
+                AddPatternDependencyOwners(subPattern, owner, out)
+            }
+        }
+    }
+
+    private func BuildDeclSet(decls: ArrayList<AstDecl>): FaithfulInitDeclSet {
+        let out = FaithfulInitDeclSet()
+        for (decl in decls) {
+            out.Add(decl)
+        }
+        return out
+    }
+
+    private func CollectExprDependency(expr: AstExpr, dependencies: ArrayList<AstDecl>,
+        dependencySet: FaithfulInitDeclSet, candidateSet: FaithfulInitDeclSet, globalVarSet: FaithfulInitDeclSet,
+        patternOwnerMap: FaithfulInitDeclOwnerMap): Unit {
         if (let Some(callExpr) <- (expr as AstCallExpr)) {
             if (let Some(callee) <- callExpr.resolvedFunction) {
-                AddDependency(callee, dependencies)
+                AddDependency(callee, dependencies, dependencySet, candidateSet, globalVarSet, patternOwnerMap)
             }
             return
         }
         if (let Some(member) <- (expr as AstMemberAccess)) {
             if (let Some(target) <- member.target) {
                 if (target.astKind == ASTKind.FUNC_DECL || IsGlobalOrStaticVarDecl(target)) {
-                    AddDependency(target, dependencies)
+                    AddDependency(target, dependencies, dependencySet, candidateSet, globalVarSet, patternOwnerMap)
                 }
             }
             return
@@ -730,86 +1013,57 @@ public class FaithfulAST2CHIR {
         if (let Some(refExpr) <- (expr as AstRefExpr)) {
             if (let Some(target) <- refExpr.ref.target) {
                 if (target.astKind == ASTKind.FUNC_DECL || IsGlobalOrStaticVarDecl(target)) {
-                    AddDependency(target, dependencies)
+                    AddDependency(target, dependencies, dependencySet, candidateSet, globalVarSet, patternOwnerMap)
                 }
             }
             return
         }
         if (let Some(arrayExpr) <- (expr as AstArrayExpr)) {
             if (let Some(initFunc) <- arrayExpr.initFunc) {
-                AddDependency(initFunc, dependencies)
+                AddDependency(initFunc, dependencies, dependencySet, candidateSet, globalVarSet, patternOwnerMap)
             }
             return
         }
         if (let Some(arrayLit) <- (expr as AstArrayLit)) {
             if (let Some(initFunc) <- arrayLit.initFunc) {
-                AddDependency(initFunc, dependencies)
+                AddDependency(initFunc, dependencies, dependencySet, candidateSet, globalVarSet, patternOwnerMap)
             }
         }
     }
 
-    private func AddDependency(dep: AstDecl, dependencies: ArrayList<AstDecl>): Unit {
-        let resolvedDep = ResolveVarWithPatternDependency(dep)
-        if (!IsFuncOrVarCandidate(resolvedDep)) {
+    private func AddDependency(dep: AstDecl, dependencies: ArrayList<AstDecl>, dependencySet: FaithfulInitDeclSet,
+        candidateSet: FaithfulInitDeclSet, globalVarSet: FaithfulInitDeclSet,
+        patternOwnerMap: FaithfulInitDeclOwnerMap): Unit {
+        let resolvedDep = ResolveVarWithPatternDependency(dep, globalVarSet, patternOwnerMap)
+        if (!IsFuncOrVarCandidate(resolvedDep, candidateSet)) {
             return
         }
-        if (!ContainsDecl(dependencies, resolvedDep)) {
+        if (dependencySet.Add(resolvedDep)) {
             dependencies.add(resolvedDep)
         }
     }
 
-    private func ResolveVarWithPatternDependency(dep: AstDecl): AstDecl {
-        if (ContainsDecl(globalAndStaticVars, dep)) {
+    private func ResolveVarWithPatternDependency(dep: AstDecl, globalVarSet: FaithfulInitDeclSet,
+        patternOwnerMap: FaithfulInitDeclOwnerMap): AstDecl {
+        if (globalVarSet.Contains(dep)) {
             return dep
         }
-        if (let Some(varDecl) <- (dep as AstVarDecl)) {
-            for (candidate in globalAndStaticVars) {
-                if (let Some(varWithPattern) <- (candidate as AstVarWithPatternDecl)) {
-                    if (let Some(pattern) <- varWithPattern.irrefutablePattern) {
-                        if (PatternContainsVarDecl(pattern, varDecl)) {
-                            return varWithPattern
-                        }
-                    }
-                }
+        if ((dep as AstVarDecl).isSome()) {
+            if (let Some(owner) <- patternOwnerMap.Get(dep)) {
+                return owner
             }
         }
         return dep
     }
 
-    private func PatternContainsVarDecl(pattern: AstPattern, decl: AstVarDecl): Bool {
-        if (let Some(varPattern) <- (pattern as AstVarPattern)) {
-            if (let Some(varDecl) <- varPattern.varDecl) {
-                return SameAstDecl(varDecl, decl)
-            }
-            return false
-        }
-        if (let Some(tuplePattern) <- (pattern as AstTuplePattern)) {
-            for (subPattern in tuplePattern.patterns) {
-                if (PatternContainsVarDecl(subPattern, decl)) {
-                    return true
-                }
-            }
-            return false
-        }
-        if (let Some(enumPattern) <- (pattern as AstEnumPattern)) {
-            for (subPattern in enumPattern.patterns) {
-                if (PatternContainsVarDecl(subPattern, decl)) {
-                    return true
-                }
-            }
-            return false
-        }
-        return false
-    }
-
-    private func IsFuncOrVarCandidate(decl: AstDecl): Bool {
+    private func IsFuncOrVarCandidate(decl: AstDecl, candidateSet: FaithfulInitDeclSet): Bool {
         if (decl.TestAnyAttr(AstAttribute.FOREIGN, AstAttribute.INTRINSIC, AstAttribute.ENUM_CONSTRUCTOR)) {
             return false
         }
         if (decl.TestAttr(AstAttribute.IMPORTED) && !decl.TestAttr(AstAttribute.SRC_IMPORTED)) {
             return false
         }
-        return ContainsDecl(globalAndMemberFuncs, decl) || ContainsDecl(globalAndStaticVars, decl)
+        return candidateSet.Contains(decl)
     }
 
     private func IsGlobalOrStaticVarDecl(decl: AstDecl): Bool {
@@ -1539,15 +1793,11 @@ public class FaithfulAST2CHIR {
     }
 
     private func AddFunctionToPackage(fn: Function): Unit {
-        if (CurrentPackage().TryGetGlobalFunc(fn.GetIdentifier()).isNone()) {
-            CurrentPackage().AddGlobalFunc(fn)
-        }
+        CurrentPackage().AddGlobalFunc(fn)
     }
 
     private func AddGlobalVarToPackage(globalVar: GlobalVar): Unit {
-        if (CurrentPackage().TryGetGlobalVar(globalVar.GetIdentifier()).isNone()) {
-            CurrentPackage().AddGlobalVar(globalVar)
-        }
+        CurrentPackage().AddGlobalVar(globalVar)
     }
 
     private func ApplyDeclAttrs(target: Base, decl: AstDecl): Unit {
@@ -1903,57 +2153,11 @@ public class FaithfulAST2CHIR {
             throw IllegalArgumentException("faithful AST2CHIR expected extend_decl, got ${ASTKindName(decl.astKind)}")
     }
 
-    private static func ContainsDecl(values: ArrayList<AstDecl>, decl: AstDecl): Bool {
-        for (value in values) {
-            if (SameAstDecl(value, decl)) {
-                return true
-            }
-        }
-        return false
-    }
-
     private static func FindInitEntryForFile(values: ArrayList<FaithfulInitFileVars>,
         file: AstFile): Option<FaithfulInitFileVars> {
         for (value in values) {
             if (SameAstFile(value.file, file)) {
                 return value
-            }
-        }
-        return None
-    }
-
-    private static func SameAstDecl(left: AstDecl, right: AstDecl): Bool {
-        if (let Some(leftKey) <- DefaultParamDeclIdentity(left)) {
-            if (let Some(rightKey) <- DefaultParamDeclIdentity(right)) {
-                return leftKey == rightKey
-            }
-            return false
-        }
-        if (DefaultParamDeclIdentity(right).isSome()) {
-            return false
-        }
-        if (left.TestAttr(AstAttribute.IMPORTED) && right.TestAttr(AstAttribute.IMPORTED)) {
-            if (!left.rawMangleName.isEmpty() || !right.rawMangleName.isEmpty()) {
-                return left.rawMangleName == right.rawMangleName
-            }
-            if (!left.mangledName.isEmpty() || !right.mangledName.isEmpty()) {
-                return left.mangledName == right.mangledName
-            }
-        }
-        return ASTKindIndex(left.astKind) == ASTKindIndex(right.astKind) &&
-            left.identifier.Val() == right.identifier.Val() && left.fullPackageName == right.fullPackageName &&
-            left.begin.hashCode() == right.begin.hashCode() && left.end.hashCode() == right.end.hashCode()
-    }
-
-    private static func DefaultParamDeclIdentity(decl: AstDecl): Option<String> {
-        if (!decl.TestAttr(AstAttribute.HAS_INITIAL)) {
-            return None
-        }
-        if (let Some(funcDecl) <- (decl as AstFuncDecl)) {
-            if (let Some(owner) <- funcDecl.ownerFunc) {
-                return Some(ASTKindIndex(owner.astKind).toString() + ":" + owner.fullPackageName + ":" +
-                    owner.identifier.Val() + ":" + owner.begin.hashCode().toString() + ":" +
-                    owner.end.hashCode().toString() + ":default-param:" + decl.identifier.Val())
             }
         }
         return None

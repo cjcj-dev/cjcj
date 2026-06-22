@@ -293,15 +293,11 @@ public class CHIRContext {
     }
 
     public func RegisterValue(value: Value): Unit {
-        if (!ContainsValue(allocatedValues, value)) {
-            allocatedValues.add(value)
-        }
+        allocatedValues.add(value)
     }
 
     public func RegisterExpression(expr: Expression): Unit {
-        if (!ContainsExpression(allocatedExpressions, expr)) {
-            allocatedExpressions.add(expr)
-        }
+        allocatedExpressions.add(expr)
     }
 
     public func RegisterStruct(def: StructDef): Unit {

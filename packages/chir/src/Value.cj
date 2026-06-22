@@ -90,13 +90,18 @@ public open class Value <: Base {
     }
 
     public func AddUserOnly(expr: Expression): Unit {
-        if (!ContainsExpression(users, expr)) {
-            users.add(expr)
-        }
+        users.add(expr)
     }
 
     public func RemoveUserOnly(expr: Expression): Unit {
-        RemoveExpressionById(users, expr.nodeId)
+        var idx: Int64 = 0
+        while (idx < users.size) {
+            if (users[idx].nodeId == expr.nodeId) {
+                users.remove(at: idx)
+                continue
+            }
+            idx++
+        }
     }
 
     public func ClearUsersOnly(): Unit {
