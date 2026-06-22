@@ -103,7 +103,10 @@ extend ParserImpl {
         var base = expr
         var hasQuestSuffix = false
         while (true) {
-            if (SeeingOptionalSuffix()) {
+            if (newlineSkipped && !Seeing(TokenKind.DOT)) {
+                break
+            }
+            if (!newlineSkipped && SeeingOptionalSuffix()) {
                 base = ParseQuestSuffixExpr(base)
                 hasQuestSuffix = true
             } else if (Seeing(TokenKind.QUEST) && !SeeingCombinator([TokenKind.QUEST, TokenKind.QUEST])) {
@@ -111,7 +114,7 @@ extend ParserImpl {
                 Next()
                 break
             }
-            if (Skip(TokenKind.LPAREN)) {
+            if (!newlineSkipped && Skip(TokenKind.LPAREN)) {
                 let call = CallExpr()
                 call.baseFunc = base
                 call.leftParenPos = lastToken.Begin()
@@ -141,7 +144,7 @@ extend ParserImpl {
                 base = member
                 continue
             }
-            if (Skip(TokenKind.LSQUARE)) {
+            if (!newlineSkipped && Skip(TokenKind.LSQUARE)) {
                 let sub = SubscriptExpr()
                 sub.baseExpr = base
                 sub.leftParenPos = lastToken.Begin()
@@ -170,9 +173,10 @@ extend ParserImpl {
                 base = incOrDec
                 continue
             }
-            if (Seeing(TokenKind.LCURL) && (base.astKind == ASTKind.CALL_EXPR || base.astKind == ASTKind.REF_EXPR ||
-                base.astKind == ASTKind.MEMBER_ACCESS || base.astKind == ASTKind.OPTIONAL_EXPR ||
-                base.astKind == ASTKind.ARRAY_EXPR || base.astKind == ASTKind.MACRO_EXPAND_EXPR)) {
+            if (!newlineSkipped && Seeing(TokenKind.LCURL) && (base.astKind == ASTKind.CALL_EXPR ||
+                base.astKind == ASTKind.REF_EXPR || base.astKind == ASTKind.MEMBER_ACCESS ||
+                base.astKind == ASTKind.OPTIONAL_EXPR || base.astKind == ASTKind.ARRAY_EXPR ||
+                base.astKind == ASTKind.MACRO_EXPAND_EXPR)) {
                 let trailing = TrailingClosureExpr()
                 trailing.expr = base
                 trailing.lambda = ParseLambdaExprWithTrailingClosure()
@@ -195,8 +199,9 @@ extend ParserImpl {
     }
 
     public func SeeingOptionalSuffix(): Bool {
-        return Seeing([TokenKind.QUEST, TokenKind.DOT]) || Seeing([TokenKind.QUEST, TokenKind.LPAREN]) ||
-            Seeing([TokenKind.QUEST, TokenKind.LSQUARE]) || Seeing([TokenKind.QUEST, TokenKind.LCURL])
+        return Seeing([TokenKind.QUEST, TokenKind.DOT]) || Seeing([TokenKind.QUEST, TokenKind.LPAREN], skipNewline: false) ||
+            Seeing([TokenKind.QUEST, TokenKind.LSQUARE], skipNewline: false) ||
+            Seeing([TokenKind.QUEST, TokenKind.LCURL], skipNewline: false)
     }
 
     public func ParseQuestSuffixExpr(expr: Expr): OptionalExpr {

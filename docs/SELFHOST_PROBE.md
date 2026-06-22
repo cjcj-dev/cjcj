@@ -2536,3 +2536,62 @@ Verification:
 - Septests `run.sh`, `run_write.sh`, `run_diag.sh`, `run_write_types.sh`, `run_write_struct.sh` pass
   (`run_gendefault.sh` lands with the main merge).
 - Init order preserved: `115_global_init_order` output matches the reference compiler.
+
+## Probe 29 (literal normalization and postfix newline boundaries)
+
+Two lex/parse faithfulness gaps were verified against C++ and fixed in the shared basic helper plus parse scope.
+
+Literal value normalization:
+
+- C++ ground truth: `src/Parse/ParseAtom.cpp:184-185` sends string, JString, and multiline string
+  tokens through `ProcessStringInterpolation`; `src/Parse/ParseAtom.cpp:252-266` builds the string
+  literal with `rawString = value`, `stringValue = StringConvertor::Normalize(value)`, and
+  `codepoint = StringConvertor::UTF8ToCodepoint(stringValue)`. Non-interpolated strings take the same
+  path at `src/Parse/ParseAtom.cpp:327-333`. Multiline raw strings and rune literals are normalized at
+  `src/Parse/ParseAtom.cpp:199-209`. The normalization routine itself maps `\0`, `\\`, `\b`, `\f`,
+  `\n`, `\r`, `\t`, `\v`, quotes, `\?`, and `\u{...}` at `src/Basic/StringConvertor.cpp:175-208`,
+  with ordinary bytes appended verbatim at `src/Basic/StringConvertor.cpp:204-205`, CR/LF handling at
+  `src/Basic/StringConvertor.cpp:195-202`, Unicode UTF-8 emission at
+  `src/Basic/StringConvertor.cpp:153-168`, and codepoint UTF-8 encoding at
+  `src/Basic/StringConvertor.cpp:210-258`.
+- Selfhost gap: `packages/parse/src/ParseAtom.cj:98-102` constructed most `LitConstExpr`s directly
+  from raw token text, and `packages/parse/src/ParseAtom.cj:126-163` did the same for string and
+  interpolation parts. The helper implementation existed in `packages/basic/src/StringConvertor.cj`,
+  but the parser never called it for string/char literal AST values. The helper also had its own
+  fidelity bug: `packages/basic/src/StringConvertor.cj:222-224` appended ordinary bytes one at a time
+  through `String.fromUtf8([current])`, so direct multi-byte UTF-8 literals could throw or corrupt
+  outside parser callers too.
+- Fix: `packages/basic/src/StringConvertor.cj:192-240` now preserves ordinary byte runs by appending
+  original string slices, while keeping the existing escape table, `\u{...}` decoding, and CR/LF
+  normalization behavior. `packages/parse/src/ParseAtom.cj:73-86` now calls the shared helper and
+  fills codepoints; `packages/parse/src/ParseAtom.cj:110-116` applies it for multiline raw and rune
+  cases, and `packages/parse/src/ParseAtom.cj:142-180` applies it to interpolation base literals and
+  string parts. The parser no longer carries a duplicate inline normalizer.
+- Corpus: `scripts/difftest_corpus/117_literal_escape_normalization.cj` checks decoded `\\`, `\n`,
+  `\t`, and `\u{4e2d}` string values byte-for-byte against reference output.
+- Corpus: `scripts/difftest_corpus/119_literal_multibyte_normalization.cj` checks direct multi-byte
+  string and rune literals, including equality against Unicode escape literals.
+
+Postfix `newlineSkipped`:
+
+- C++ ground truth: `src/Parse/ParserUtils.cpp:98-124` sets `newlineSkipped` when `Next()` skips a
+  newline. `src/Parse/ParseExpr.cpp:942-967` refuses optional suffixes once a newline was skipped,
+  except for the dot-specific path handled by postfix parsing. `src/Parse/ParseExpr.cpp:970-1008`
+  returns immediately for a skipped newline unless the next token is `.`, and otherwise gates
+  subscript, call, and trailing-closure postfixes on `!newlineSkipped`.
+- Selfhost gap: `packages/parse/src/ParserImpl.cj:134-150` already tracked `newlineSkipped`, but
+  `packages/parse/src/ParseExpr.cj:102-184` ignored it for postfix calls, subscripts, optional
+  suffixes, and trailing closures, so expressions were parsed greedily across line breaks.
+- Fix: `packages/parse/src/ParseExpr.cj:102-204` now mirrors the C++ gating: only `.` may continue
+  across a skipped newline; `(`, `[`, `{`, postfix `?`, and optional `?(`/`?[`/`?{` require no skipped
+  newline.
+- Corpus: `scripts/difftest_corpus/118_postfix_newline_boundary.cj` verifies that a newline before
+  `(7)` and before a trailing lambda does not extend the previous expression; output matches the
+  reference compiler.
+
+Verification:
+
+- Clean `rm -rf target && cjpm build`: success.
+- `bash scripts/difftest.sh`: `TOTAL=104  PASS=104  MISMATCH=0  FAIL=0`.
+- Septests `run.sh`, `run_write.sh`, `run_diag.sh`, `run_write_types.sh`, `run_write_struct.sh`,
+  and `run_gendefault.sh` all pass.
