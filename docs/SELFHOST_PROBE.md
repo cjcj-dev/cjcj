@@ -1420,3 +1420,126 @@ adjacent frontiers, none a regression):
    on base `dca2193` (pre-existing, not regressed) and are a coherent follow-up cut: thread the const-pattern
    `Check` through `ChkEnumPattern` and the remaining nested/sugar pattern paths, mirroring C++'s uniform
    `Check`-through-`ChkPattern` recursion.
+
+## Probe 12 (lex unsupported-construct / array member access)
+
+### Diagnosis
+
+The package-level diagnostic
+
+```text
+error: unsupported construct in package 'cangjie_compiler::lex' (not yet implemented in real pipeline)
+  ==> packages/lex/src/AnnotationToken.cj:1:1
+```
+
+was not anchored at the culprit declaration. `AnnotationToken.cj:1:1` is the package diagnostic position chosen
+by `GenerateCHIRForPkg` when `BuildRealCHIRForASTPackage` returns `None` without an existing diagnostic.
+
+Instrumentation of `BuildRealCHIRForASTPackage` showed that the actual `None` came from the selfhost
+`FaithfulAST2CHIR` post-translation CHIR checker. The smallest standalone matching frontier is:
+
+```cj
+main() {
+    let a: Array<String> = ["x", "y"]
+    println(a.size)
+}
+```
+
+Before the fix, selfhost failed it with the same CHIR-level unsupported construct; the reference compiler prints
+`2`. The checker failure was an `Apply` argument mismatch for the array `size` getter:
+
+```text
+Apply(std.core._CNat5ArrayIG_E<std.core._CNat6StringE>->@_CNatXRNat5ArrayIG_E4sizepgHv, %array)
+```
+
+where the loaded receiver had concrete type `Array<String>`, while the imported getter function still exposed its
+generic extension receiver type `Array<T>`.
+
+For the full lex package, `--chir-wfc on` reports the first checker failure in
+`Lexer.GetComments`, with the same shape:
+
+```text
+value ... Array<Token> has type Array<Token>, but Array<Generic-T> type is expected
+```
+
+followed by more `Array`/`ArrayList` generic member-call checker errors. `AnnotationToken.cj` remains only the
+package-level anchor; the lex package failure is a checker-level generic receiver/member-call frontier, not a
+single unsupported AST declaration in `AnnotationToken.cj`.
+
+The relevant C++ lowering already computes the instantiated member-call receiver/parent:
+
+- `src/CHIR/AST2CHIR/TranslateASTNode/TranslateMemberAccess.cpp:269-307` builds `InstCalleeInfo` from member
+  access, including `thisType`, instantiated parent type, parameter types, return type, and instantiated type args.
+- `src/CHIR/AST2CHIR/TranslateASTNode/TranslateMemberAccess.cpp:133-190` inserts `thisType` into non-static member
+  parameter types and calls `GetExactParentType`.
+- `src/CHIR/AST2CHIR/TranslateASTNode/TranslateArrayExpr.cpp:158-225` resolves builtin/extension parent types;
+  lines `195-211` build the generic replacement table for extension targets and return the instantiated extended
+  type.
+- The C++ CHIR checker then re-instantiates apply callees using the apply's instantiated parent type:
+  `src/CHIR/Checker/CHIRChecker.cpp:2029-2070`, especially `CalculateInstFuncType(...,
+  expr.GetInstParentCustomTyOfCallee(builder))`, and
+  `src/CHIR/Utils/Utils.cpp:1303-1427`.
+
+The selfhost divergence was earlier than that C++ checker path: it always ran its AST2CHIR WFC pass during normal
+release selfhost compilation. Reference C++ does not do that in the release compiler. `src/CMakeLists.txt:42-46`
+defines `CANGJIE_CHIR_WFC_OFF` for Release builds without assertions; `include/cangjie/Option/Option.h:630-634`
+therefore defaults `chirWFC` to `false`; and `src/CHIR/AST2CHIR/AST2CHIR.cpp:485-489` returns immediately when
+`opts.chirWFC` is false, even though `ToCHIRPackage` still calls `AST2CHIRCheck` at
+`src/CHIR/AST2CHIR/AST2CHIR.cpp:583-589`.
+
+### Faithful Fix
+
+`GlobalOptions.chirWFC` now defaults to `false`, matching the release C++ default. `FaithfulAST2CHIR` takes the
+actual frontend `globalOptions.chirWFC` and only runs `AST2CHIRCheck()` when that option is enabled, preserving the
+explicit `--chir-wfc on` debugging behavior.
+
+This is deliberately not a checker workaround and does not special-case arrays, lex, `size`, or any symbol name.
+The underlying checker gap remains visible with `--chir-wfc on`; normal release compilation now follows the C++
+pipeline and proceeds past the debug-only checker.
+
+### Current lex result
+
+With the faithful WFC default, the lex package gets materially further: it no longer returns `None` from
+`BuildRealCHIRForASTPackage` and no longer emits the package-level unsupported-construct diagnostic.
+
+The next blocker is in real codegen. Compiling `packages/lex/src` as a staticlib now reaches
+`EmitRealCodeGenForCompilerInstance` and crashes while emitting `StoreElementRef` for array/object element storage:
+
+```text
+SIGSEGV in llvm::PointerType::get
+  at packages/codegen/src/IRBuilder.cj:1033
+  via packages/codegen/src/ArrayImpl.cj:495 CreateElementAddress
+  via packages/codegen/src/ArrayImpl.cj:338 GenerateStoreElementRef
+```
+
+No `lex@cangjie_compiler.cjo` or `self-liblex.a` is produced yet. This is a separate codegen frontier, consistent
+with the earlier `Array<String>` sibling failures: `Array<Int64>.size` now compiles and runs, while
+`Array<String>.size` reaches LLVM/codegen and fails later.
+
+### Verification
+
+Added corpus program `scripts/difftest_corpus/106_array_int_size.cj`, covering both global and local
+`Array<Int64>.size`.
+
+Commands run after the fix:
+
+```sh
+rm -rf target && cjpm build
+bash scripts/difftest.sh
+bash scripts/septest/run.sh
+bash scripts/septest/run_write.sh
+bash scripts/septest/run_diag.sh
+bash scripts/septest/run_write_types.sh
+bash scripts/septest/run_write_struct.sh
+```
+
+Results:
+
+- `cjpm build`: success.
+- New corpus program `106_array_int_size`: selfhost output matches reference (`3`, `2`).
+- `difftest`: `TOTAL=90  PASS=90  MISMATCH=0  FAIL=0`.
+- `run.sh`: `SEPTEST-PASS`.
+- `run_write.sh`: `SEPTEST-WRITE-PASS`.
+- `run_diag.sh`: `SEPTEST-DIAG-PASS`.
+- `run_write_types.sh`: `SEPTEST-WRITE-TYPES-PASS`.
+- `run_write_struct.sh`: `SEPTEST-WRITE-STRUCT-PASS`.

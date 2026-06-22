@@ -104,6 +104,7 @@ public class FaithfulAST2CHIR {
     private let builder: CHIRBuilder
     private let chirType: CHIRType
     private let importedPackages: ArrayList<AstPackage>
+    private let chirWFC: Bool
     private var outputPackage: Option<Package> = None
     private var failure: Bool = false
     private var failureReason: String = ""
@@ -124,10 +125,11 @@ public class FaithfulAST2CHIR {
     private let foreignFuncs: ArrayList<AstDecl> = ArrayList<AstDecl>()
 
     public init(builder: CHIRBuilder, chirType: CHIRType,
-        importedPkgs!: ArrayList<AstPackage> = ArrayList<AstPackage>()) {
+        importedPkgs!: ArrayList<AstPackage> = ArrayList<AstPackage>(), chirWFC!: Bool = false) {
         this.builder = builder
         this.chirType = chirType
         this.importedPackages = importedPkgs
+        this.chirWFC = chirWFC
     }
 
     public func ToCHIRPackage(node: AstPackage): Bool {
@@ -139,7 +141,9 @@ public class FaithfulAST2CHIR {
         TranslateOtherTopLevelDecls(node)
         SetInitFuncForStaticVar()
         FlatForInExpr(builder).RunOnPackage(CurrentPackage())
-        AST2CHIRCheck()
+        if (chirWFC) {
+            AST2CHIRCheck()
+        }
         if (!failure) {
             ClosureConversion(builder).RunOnPackage(CurrentPackage())
         }
