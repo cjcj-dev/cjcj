@@ -1,6 +1,7 @@
 package cangjie_compiler::parse
 
 import std.collection.*
+import cangjie_compiler::basic.StringConvertor
 
 extend ParserImpl {
     public func SeeingLiteral(): Bool {
@@ -69,6 +70,16 @@ extend ParserImpl {
         return InvalidExpr(token.Begin())
     }
 
+    private func NormalizeLitConst(lit: LitConstExpr, token: Token, isRawString!: Bool = false): LitConstExpr {
+        lit.rawString = token.Value()
+        lit.stringValue = StringConvertor.Normalize(token.Value(), isRawString: isRawString)
+        for (point in StringConvertor.UTF8ToCodepoint(lit.stringValue)) {
+            lit.codepoint.add(point)
+        }
+        lit.isSingleQuote = token.isSingleQuote
+        return lit
+    }
+
     public func ParseLitConst(): Expr {
         let token = Peek()
         let kind = if (token.kind == TokenKind.INTEGER_LITERAL) {
@@ -98,6 +109,11 @@ extend ParserImpl {
         let lit = LitConstExpr(kind, token)
         if (token.kind == TokenKind.MULTILINE_RAW_STRING) {
             lit.stringKind = StringKind.MULTILINE_RAW
+            lit.delimiterNum = UInt64(token.delimiterNum)
+            return NormalizeLitConst(lit, token, isRawString: true)
+        }
+        if (token.kind == TokenKind.RUNE_LITERAL) {
+            return NormalizeLitConst(lit, token)
         }
         return lit
     }
@@ -125,7 +141,7 @@ extend ParserImpl {
 
     public func ProcessStringInterpolation(token: Token, kind: LitConstKind): Expr {
         let parts = lexer.GetStrParts(token)
-        let lit = LitConstExpr(kind, token)
+        let lit = NormalizeLitConst(LitConstExpr(kind, token), token)
         if (token.kind == TokenKind.MULTILINE_STRING) {
             lit.stringKind = StringKind.MULTILINE
         } else if (token.kind == TokenKind.JSTRING_LITERAL) {
@@ -148,7 +164,8 @@ extend ParserImpl {
         for (part in parts) {
             strExpr.strParts.add(part)
             if (part.strKind == StringPartKind.STR) {
-                let partLit = LitConstExpr(kind, Token(token.kind, part.value, part.begin, part.end))
+                let partToken = Token(token.kind, part.value, part.begin, part.end)
+                let partLit = NormalizeLitConst(LitConstExpr(kind, partToken), partToken)
                 if (token.kind == TokenKind.MULTILINE_STRING) {
                     partLit.stringKind = StringKind.MULTILINE
                 } else if (token.kind == TokenKind.JSTRING_LITERAL) {

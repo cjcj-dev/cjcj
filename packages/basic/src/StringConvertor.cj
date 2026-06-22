@@ -27,6 +27,12 @@ private func singleByteString(value: UInt8): String {
     return String.fromUtf8([value])
 }
 
+private func appendNormalizeSpan(builder: StringBuilder, str: String, begin: Int64, end: Int64): Unit {
+    if (begin < end) {
+        builder.append(str[begin..end])
+    }
+}
+
 private func isHexDigit(value: UInt8): Bool {
     return (value >= b'0' && value <= b'9') || (value >= b'a' && value <= b'f') ||
         (value >= b'A' && value <= b'F')
@@ -187,9 +193,11 @@ public class StringConvertor {
         let bytes = str.toArray()
         let builder = StringBuilder()
         var idx: Int64 = 0
+        var spanBegin: Int64 = 0
         while (idx < bytes.size) {
             let current = bytes[idx]
             if (current == b'\\' && idx + 1 < bytes.size && !isRawString) {
+                appendNormalizeSpan(builder, str, spanBegin, idx)
                 if (idx + 2 < bytes.size && bytes[idx + 1] == b'u' && bytes[idx + 2] == b'{') {
                     idx += 3
                     var point: UInt32 = 0u32
@@ -201,17 +209,21 @@ public class StringConvertor {
                     if (idx < bytes.size) {
                         idx++
                     }
+                    spanBegin = idx
                     continue
                 }
                 if (let Some(escaped) <- escapedByte(bytes[idx + 1])) {
                     builder.append(escaped)
                     idx += 2
+                    spanBegin = idx
                     continue
                 }
                 idx++
+                spanBegin = idx
                 continue
             }
             if (current == b'\r') {
+                appendNormalizeSpan(builder, str, spanBegin, idx)
                 if (idx + 1 < bytes.size && bytes[idx + 1] == b'\n') {
                     builder.append("\n")
                     idx += 2
@@ -219,11 +231,12 @@ public class StringConvertor {
                     builder.append("\n")
                     idx++
                 }
+                spanBegin = idx
             } else {
-                builder.append(singleByteString(current))
                 idx++
             }
         }
+        appendNormalizeSpan(builder, str, spanBegin, bytes.size)
         return builder.toString()
     }
 
