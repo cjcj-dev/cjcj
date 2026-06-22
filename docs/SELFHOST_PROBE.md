@@ -1275,3 +1275,118 @@ scoped `SeeingDeclInScope(UNKNOWN_SCOPE)` rather than C++'s no-arg `SeeingDecl()
 `CONST/PROP/INIT`); and the `ParseExpr()` else-branch omits C++'s `newlineSkipped` `parse_nl_warning` and the
 `IS_BROKEN` `ConsumeUntilAny` error-recovery (diagnostics-only). The deeper contextual-keyword-as-identifier
 gap in the declaration/atom parser is a separate frontier.
+
+## Probe 11 (lex match string-pattern + enum-arm invalid type)
+
+Probe 11 targeted the next lex frontier in `packages/lex/src/LexerImpl.cj`, `LookupKeyword`, where
+`let mapped = match (literal) { case "." => TokenKind.DOT ... }` reached CHIR with `mapped` and the
+initializer match expression typed as `Invalid`.
+
+### Diagnosis
+
+Fresh oracle re-verification with the selfhost compiler contradicted the earlier narrow trigger: `m1`
+and `m4` failed as expected, `m2` passed, but `m3` (string-literal const patterns with `Int64` arms)
+also failed before the fix. Instrumenting sema showed the exact failure point was before result-type
+join and before CHIR:
+
+- selector type: `Struct-String`;
+- each enum arm body type: `Enum-E` for `m1`, and each int arm body type was correct for `m3`;
+- `ChkMatchCasePatterns` returned `false` for each string-literal const pattern;
+- `ChkMatchCaseActions` returned `true`;
+- `SynNormalMatchCaseBody` set the whole match expression to `Invalid` because `patternOk` was false.
+
+So the enum-arm join hypothesis was refuted in this worktree. The bad interaction was not
+`JoinAndMeet`: the selfhost never reached the join for the failing cases. The actual C++ divergence is
+constant-pattern literal checking. C++ checks every non-rune/byte special constant-pattern literal by
+calling the full expression checker against the selector type:
+
+- `/root/cj_build/cangjie_compiler/src/Sema/TypeCheckPattern.cpp:244-258`:
+  `ChkConstPattern` calls `Check(ctx, &target, p.literal.get())`.
+- `/root/cj_build/cangjie_compiler/src/Sema/TypeCheckPattern.cpp:259-279`: after that check, C++ requires
+  exact type equality, rejects interpolation, sets the pattern type to `TryGreedySubst(&target)`, and
+  dispatches string equality through the synthesized `==` call.
+- `/root/cj_build/cangjie_compiler/src/Sema/TypeCheckPattern.cpp:282-305`: the synthesized string
+  equality call removes type-check cache entries for the synthetic `CallExpr` and `MemberAccess`,
+  skips synthesis for the dummy receiver, calls `Check(ctx, boolTy, callExpr.get())`, and stores
+  `p.operatorCallExpr` when that succeeds.
+- `/root/cj_build/cangjie_compiler/src/Sema/TypeCheckMatchExpr.cpp:92-130`: only after all
+  `ChkMatchCasePatterns`, guards, and actions succeed does C++ collect match-case types and join them.
+
+The selfhost had a standalone `CheckConstPatternLiteral` path for string literals. It did not call the
+real `TypeChecker.Check(ctx, target, literal)`, so string literal patterns could remain untyped or
+incorrectly typed during the pattern pass. The match-case action bodies were still correctly typed, but
+the false `patternOk` forced `SynNormalMatchCaseBody` to `Invalid` before `JoinCaseTys`.
+
+### Faithful Fix
+
+`packages/sema/src/TypeCheckPattern.cj` now accepts a `ConstPatternExprChecker` callback and uses it for
+the same sites where C++ calls `Check(ctx, &target, ...)`: checking the const-pattern literal against
+the selector type and checking the synthesized overloaded `==` call against `Bool`. This keeps the
+standalone fallback for non-`TypeChecker` callers, but the main type checker passes its real
+`Check(ctx, target, expr)` function through `SynthesizeMatchChildren`, `SynMatchExpr`, and
+`ChkMatchExpr`.
+
+The synthesized const-pattern equality path was also aligned with C++ by removing type-check cache
+entries for the synthetic call/base nodes and applying `AddCurFile` to the whole synthetic call tree,
+matching `/root/cj_build/cangjie_compiler/src/Sema/TypeCheckPattern.cpp:285-300`.
+
+Regression corpus `scripts/difftest_corpus/105_match_string_enum.cj` covers:
+
+- string-literal patterns with enum arms in a `let`;
+- string-literal patterns with enum arms in a `return`;
+- int patterns with enum arms;
+- string-literal patterns with int arms.
+
+Reference and selfhost outputs match for the new corpus program:
+
+```text
+A
+B
+C
+A
+B
+3
+```
+
+### Current lex result
+
+The `LookupKeyword` invalid match-expression frontier is cleared. Re-running the full lex package with
+the selfhost compiler now gets past that CHIR abort and stops later with the existing frontend
+unsupported-construct diagnostic:
+
+```text
+error: unsupported construct in package 'cangjie_compiler::lex' (not yet implemented in real pipeline)
+ ==> packages/lex/src/AnnotationToken.cj:1:1
+```
+
+No `lex@cangjie_compiler.cjo` or `self-liblex.a` is produced yet in Probe 11.
+
+### Verification
+
+Commands run after the fix, as separate commands:
+
+```sh
+rm -rf target && cjpm build
+./target/release/bin/cangjie_compiler::cjc /tmp/cjtasks/match_oracle/m1.cj -o /tmp/cjtasks/match_oracle/m1.self
+./target/release/bin/cangjie_compiler::cjc /tmp/cjtasks/match_oracle/m2.cj -o /tmp/cjtasks/match_oracle/m2.self
+./target/release/bin/cangjie_compiler::cjc /tmp/cjtasks/match_oracle/m3.cj -o /tmp/cjtasks/match_oracle/m3.self
+./target/release/bin/cangjie_compiler::cjc /tmp/cjtasks/match_oracle/m4.cj -o /tmp/cjtasks/match_oracle/m4.self
+bash scripts/difftest.sh
+bash scripts/septest/run.sh
+bash scripts/septest/run_write.sh
+bash scripts/septest/run_diag.sh
+bash scripts/septest/run_write_types.sh
+bash scripts/septest/run_write_struct.sh
+```
+
+Results:
+
+- `cjpm build`: success.
+- Oracle `m1`, `m2`, `m3`, and `m4`: selfhost compiles and runs; outputs match the reference.
+- New corpus program `105_match_string_enum`: selfhost output matches reference.
+- `difftest`: `TOTAL=89  PASS=89  MISMATCH=0  FAIL=0`.
+- `run.sh`: `SEPTEST-PASS`.
+- `run_write.sh`: `SEPTEST-WRITE-PASS`.
+- `run_diag.sh`: `SEPTEST-DIAG-PASS`.
+- `run_write_types.sh`: `SEPTEST-WRITE-TYPES-PASS`.
+- `run_write_struct.sh`: `SEPTEST-WRITE-STRUCT-PASS`.
