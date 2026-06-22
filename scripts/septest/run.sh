@@ -21,10 +21,14 @@ fail() {
 [[ -x "$SELF" ]] || fail "missing selfhost cjc at $SELF"
 [[ -d "$CANGJIE_HOME" ]] || fail "missing CANGJIE_HOME at $CANGJIE_HOME"
 
-mkdir -p "$WORK/pkgA" "$WORK/pkgSig" "$WORK/pkgA4" "$WORK/pkgB" "$WORK/pkgB4" "$WORK/ref" "$WORK/self"
+mkdir -p "$WORK/pkgA" "$WORK/pkgSig" "$WORK/pkgA4" "$WORK/pkgReExportP" "$WORK/pkgReExportQ" \
+    "$WORK/pkgReExportM" "$WORK/pkgB" "$WORK/pkgB4" "$WORK/ref" "$WORK/self"
 cp "$FIXTURE/pkgA/pkgA.cj" "$WORK/pkgA/pkgA.cj"
 cp "$FIXTURE/pkgSig/pkgSig.cj" "$WORK/pkgSig/pkgSig.cj"
 cp "$FIXTURE/pkgA4/pkgA4.cj" "$WORK/pkgA4/pkgA4.cj"
+cp "$FIXTURE/pkgReExportP/pkgReExportP.cj" "$WORK/pkgReExportP/pkgReExportP.cj"
+cp "$FIXTURE/pkgReExportQ/pkgReExportQ.cj" "$WORK/pkgReExportQ/pkgReExportQ.cj"
+cp "$FIXTURE/pkgReExportM/use_reexport.cj" "$WORK/pkgReExportM/use_reexport.cj"
 cp "$FIXTURE/pkgB/function.cj" "$WORK/pkgB/function.cj"
 cp "$FIXTURE/pkgB/function_single.cj" "$WORK/pkgB/function_single.cj"
 cp "$FIXTURE/pkgB/greeting.cj" "$WORK/pkgB/greeting.cj"
@@ -51,6 +55,27 @@ cp "$FIXTURE/pkgB4/protected_lub.cj" "$WORK/pkgB4/protected_lub.cj"
 
 [[ -f "$WORK/pkgA4/pkgA4.cjo" ]] || fail "reference pkgA4 did not produce pkgA4.cjo"
 [[ -f "$WORK/pkgA4/libpkgA4.a" ]] || fail "reference pkgA4 did not produce libpkgA4.a"
+
+"$REF" "$WORK/pkgReExportP/pkgReExportP.cj" --output-type=staticlib \
+    -o "$WORK/pkgReExportP/libpkgReExportP.a" --set-runtime-rpath \
+    >"$WORK/pkgReExportP.ref.stdout" 2>"$WORK/pkgReExportP.ref.stderr" ||
+    fail "reference pkgReExportP compile failed: $(tr '\n' ' ' <"$WORK/pkgReExportP.ref.stderr")"
+
+[[ -f "$WORK/pkgReExportP/pkgReExportP.cjo" ]] ||
+    fail "reference pkgReExportP did not produce pkgReExportP.cjo"
+[[ -f "$WORK/pkgReExportP/libpkgReExportP.a" ]] ||
+    fail "reference pkgReExportP did not produce libpkgReExportP.a"
+
+"$REF" "$WORK/pkgReExportQ/pkgReExportQ.cj" --import-path "$WORK/pkgReExportP" \
+    -L "$WORK/pkgReExportP" -lpkgReExportP --output-type=staticlib \
+    -o "$WORK/pkgReExportQ/libpkgReExportQ.a" --set-runtime-rpath \
+    >"$WORK/pkgReExportQ.ref.stdout" 2>"$WORK/pkgReExportQ.ref.stderr" ||
+    fail "reference pkgReExportQ compile failed: $(tr '\n' ' ' <"$WORK/pkgReExportQ.ref.stderr")"
+
+[[ -f "$WORK/pkgReExportQ/pkgReExportQ.cjo" ]] ||
+    fail "reference pkgReExportQ did not produce pkgReExportQ.cjo"
+[[ -f "$WORK/pkgReExportQ/libpkgReExportQ.a" ]] ||
+    fail "reference pkgReExportQ did not produce libpkgReExportQ.a"
 
 run_case() {
     local name="$1"
@@ -112,6 +137,36 @@ set -e
     fail "imported_signature output mismatch: reference='$imported_ref_out' selfhost='$imported_self_out'"
 
 printf 'SEPTEST-imported_signature-PASS output=%s exit=%s\n' "$imported_self_out" "$imported_self_status"
+
+"$REF" "$WORK/pkgReExportM/use_reexport.cj" --import-path "$WORK/pkgReExportQ" \
+    --import-path "$WORK/pkgReExportP" -L "$WORK/pkgReExportQ" -lpkgReExportQ \
+    -L "$WORK/pkgReExportP" -lpkgReExportP \
+    -o "$WORK/ref/use_reexport" --set-runtime-rpath \
+    >"$WORK/use_reexport.ref.stdout" 2>"$WORK/use_reexport.ref.stderr" ||
+    fail "reference pkgReExportM compile failed: $(tr '\n' ' ' <"$WORK/use_reexport.ref.stderr")"
+
+"$SELF" "$WORK/pkgReExportM/use_reexport.cj" --import-path "$WORK/pkgReExportQ" \
+    --import-path "$WORK/pkgReExportP" -L "$WORK/pkgReExportQ" -lpkgReExportQ \
+    -L "$WORK/pkgReExportP" -lpkgReExportP \
+    -o "$WORK/self/use_reexport" --set-runtime-rpath \
+    >"$WORK/use_reexport.self.stdout" 2>"$WORK/use_reexport.self.stderr" ||
+    fail "selfhost pkgReExportM compile failed: $(tr '\n' ' ' <"$WORK/use_reexport.self.stderr")"
+
+set +e
+reexport_ref_out=$("$WORK/ref/use_reexport" 2>"$WORK/use_reexport.ref.run.stderr")
+reexport_ref_status=$?
+reexport_self_out=$("$WORK/self/use_reexport" 2>"$WORK/use_reexport.self.run.stderr")
+reexport_self_status=$?
+set -e
+
+[[ "$reexport_ref_status" -eq "$reexport_self_status" ]] ||
+    fail "use_reexport exit mismatch: reference=$reexport_ref_status selfhost=$reexport_self_status"
+[[ "$reexport_ref_out" = "$reexport_self_out" ]] ||
+    fail "use_reexport output mismatch: reference='$reexport_ref_out' selfhost='$reexport_self_out'"
+[[ "$reexport_self_out" = "7" ]] ||
+    fail "use_reexport output '$reexport_self_out' did not match expected '7'"
+
+printf 'SEPTEST-use_reexport-PASS output=%s exit=%s\n' "$reexport_self_out" "$reexport_self_status"
 
 "$REF" "$WORK/pkgB4/protected_lub.cj" --import-path "$WORK/pkgA4" -L "$WORK/pkgA4" -lpkgA4 \
     -o "$WORK/ref/protected_lub" --set-runtime-rpath \

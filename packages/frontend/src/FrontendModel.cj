@@ -693,6 +693,7 @@ private class CjoSignatureMaterializer {
 
     public func Materialize(data: Array<UInt8>): Unit {
         LoadSerializedDeclRecords(data)
+        MaterializeSerializedImports()
         MaterializeSerializedDecls()
         MaterializeSerializedInheritedTypes()
     }
@@ -746,6 +747,108 @@ private class CjoSignatureMaterializer {
             }
             idx++
         }
+    }
+
+    private func MaterializeSerializedImports(): Unit {
+        if (let None <- flat) {
+            return
+        }
+        let reader = flat.getOrThrow()
+        let root = reader.RootTable()
+        if (root < 0) {
+            return
+        }
+        let allFileImports = reader.VectorField(root, 16)
+        if (allFileImports < 0) {
+            return
+        }
+        var fileIdx: Int64 = 0
+        while (fileIdx < reader.VectorLength(allFileImports)) {
+            let importsTable = reader.VectorOffsetElement(allFileImports, fileIdx)
+            if (importsTable >= 0) {
+                MaterializeFlatImports(reader, importsTable)
+            }
+            fileIdx++
+        }
+    }
+
+    private func MaterializeFlatImports(reader: CjoFlatBuffer, importsTable: Int64): Unit {
+        let importSpecs = reader.VectorField(importsTable, 4)
+        if (importSpecs < 0) {
+            return
+        }
+        var idx: Int64 = 0
+        while (idx < reader.VectorLength(importSpecs)) {
+            let importTable = reader.VectorOffsetElement(importSpecs, idx)
+            if (importTable >= 0) {
+                file.imports.add(CreateFlatImportSpec(reader, importTable))
+            }
+            idx++
+        }
+    }
+
+    private func CreateFlatImportSpec(reader: CjoFlatBuffer, importTable: Int64): ImportSpec {
+        let importSpec = ImportSpec()
+        let identifier = reader.StringField(importTable, 10)
+        let aliasName = reader.StringField(importTable, 12)
+        if (!aliasName.isEmpty()) {
+            importSpec.content.kind = ImportKind.IMPORT_ALIAS
+        } else if (identifier == "*") {
+            importSpec.content.kind = ImportKind.IMPORT_ALL
+        } else {
+            importSpec.content.kind = ImportKind.IMPORT_SINGLE
+        }
+        let prefixPaths = reader.VectorField(importTable, 8)
+        if (prefixPaths >= 0) {
+            var idx: Int64 = 0
+            while (idx < reader.VectorLength(prefixPaths)) {
+                importSpec.content.prefixPaths.add(reader.StringAt(reader.VectorOffsetElement(prefixPaths, idx)))
+                idx++
+            }
+        }
+        importSpec.content.identifier = Identifier(identifier, DEFAULT_POSITION, DEFAULT_POSITION)
+        importSpec.content.aliasName = Identifier(aliasName, DEFAULT_POSITION, DEFAULT_POSITION)
+        importSpec.content.isDecl = reader.U8Field(importTable, 16, 0u8) != 0u8
+        importSpec.content.hasDoubleColon = reader.U8Field(importTable, 18, 0u8) != 0u8
+        importSpec.withImplicitExport = reader.U8Field(importTable, 20, 1u8) != 0u8
+        SetFlatImportAccessLevel(importSpec, FlatImportAccessLevel(reader.U8Field(importTable, 14, 0u8)))
+        importSpec.EnableAttr(Attribute.IMPORTED)
+        importSpec.curFile = Some(file)
+        importSpec.content.curFile = Some(file)
+        return importSpec
+    }
+
+    private func SetFlatImportAccessLevel(importSpec: ImportSpec, level: AccessLevel): Unit {
+        let tokenKind = match (level) {
+            case AccessLevel.PUBLIC => TokenKind.PUBLIC
+            case AccessLevel.PROTECTED => TokenKind.PROTECTED
+            case AccessLevel.INTERNAL => TokenKind.INTERNAL
+            case AccessLevel.PRIVATE => TokenKind.PRIVATE
+        }
+        importSpec.modifier = Some(Modifier(tokenKind, DEFAULT_POSITION))
+        importSpec.DisableAttr(Attribute.PUBLIC)
+        importSpec.DisableAttr(Attribute.PRIVATE)
+        importSpec.DisableAttr(Attribute.PROTECTED)
+        importSpec.DisableAttr(Attribute.INTERNAL)
+        match (level) {
+            case AccessLevel.PUBLIC => importSpec.EnableAttr(Attribute.PUBLIC)
+            case AccessLevel.PRIVATE => importSpec.EnableAttr(Attribute.PRIVATE)
+            case AccessLevel.PROTECTED => importSpec.EnableAttr(Attribute.PROTECTED)
+            case AccessLevel.INTERNAL => importSpec.EnableAttr(Attribute.INTERNAL)
+        }
+    }
+
+    private func FlatImportAccessLevel(value: UInt8): AccessLevel {
+        if (value == 3u8) {
+            return AccessLevel.PUBLIC
+        }
+        if (value == 2u8) {
+            return AccessLevel.PROTECTED
+        }
+        if (value == 1u8) {
+            return AccessLevel.INTERNAL
+        }
+        return AccessLevel.PRIVATE
     }
 
     private func CreateFlatDeclRecord(reader: CjoFlatBuffer, declTable: Int64, index: UInt32): CjoFlatDecl {
@@ -2109,6 +2212,32 @@ private class CjoSignatureMaterializer {
     }
 }
 
+private enum FrontendPackageRelation {
+    | NONE
+    | CHILD
+    | SAME_MODULE
+    | SAME_PACKAGE
+}
+
+private func FrontendPackageRelationIndex(relation: FrontendPackageRelation): Int64 {
+    return match (relation) {
+        case FrontendPackageRelation.NONE => 0
+        case FrontendPackageRelation.CHILD => 1
+        case FrontendPackageRelation.SAME_MODULE => 2
+        case FrontendPackageRelation.SAME_PACKAGE => 3
+    }
+}
+
+extend FrontendPackageRelation <: Equatable<FrontendPackageRelation> {
+    public operator func ==(right: FrontendPackageRelation): Bool {
+        return FrontendPackageRelationIndex(this) == FrontendPackageRelationIndex(right)
+    }
+
+    public operator func !=(right: FrontendPackageRelation): Bool {
+        return !(this == right)
+    }
+}
+
 public class ImportManager {
     private let diag: DiagnosticEngine
     private let searchPath: ArrayList<String> = ArrayList<String>()
@@ -2116,6 +2245,10 @@ public class ImportManager {
     private let depPkgCjdPaths: HashMap<String, String> = HashMap<String, String>()
     private let directDependencies: HashMap<String, HashSet<String>> = HashMap<String, HashSet<String>>()
     private let loadingPackages: HashSet<String> = HashSet<String>()
+    private let sourcePackagesForMembers: ArrayList<Package> = ArrayList<Package>()
+    private let packageMembers: HashMap<String, HashMap<String, ArrayList<Decl>>> =
+        HashMap<String, HashMap<String, ArrayList<Decl>>>()
+    private let packageMembersVisited: HashSet<String> = HashSet<String>()
 
     public init(diag: DiagnosticEngine) {
         this.diag = diag
@@ -2174,6 +2307,9 @@ public class ImportManager {
         depPkgCjdPaths.clear()
         directDependencies.clear()
         loadingPackages.clear()
+        sourcePackagesForMembers.clear()
+        packageMembers.clear()
+        packageMembersVisited.clear()
         let sourcePackages = HashSet<String>()
         for (pkg in pkgs) {
             if (pkg.fullPackageName.isEmpty()) {
@@ -2182,6 +2318,7 @@ public class ImportManager {
             }
             AddImplicitImports(pkg, opts)
             sourcePackages.add(pkg.fullPackageName)
+            sourcePackagesForMembers.add(pkg)
         }
         for (pkg in pkgs) {
             let deps = CollectDirectDependencyNames(pkg, sourcePackages)
@@ -2202,6 +2339,9 @@ public class ImportManager {
         }
         if (!LoadResolvedImportedPackages()) {
             return false
+        }
+        for (pkg in pkgs) {
+            RebuildPackageMembers(pkg.fullPackageName)
         }
         CheckImports(pkgs)
         return diag.GetErrorCount() == 0
@@ -2239,11 +2379,19 @@ public class ImportManager {
 
     public func GetPackageMembers(srcFullPackageName: String, targetFullPackageName: String): HashMap<String, ArrayList<Decl>> {
         let out = HashMap<String, ArrayList<Decl>>()
-        if (let Some(pkg) <- GetPackage(targetFullPackageName)) {
-            for (file in pkg.files) {
-                for (decl in file.decls) {
-                    if (IsDeclVisibleFrom(srcFullPackageName, decl)) {
-                        PutImportedDecl(out, decl.identifier.Val(), decl)
+        BuildPackageMembers(targetFullPackageName)
+        let relation = GetFrontendPackageRelation(srcFullPackageName, targetFullPackageName)
+        if (let Some(members) <- packageMembers.get(targetFullPackageName)) {
+            for (name in members.keys()) {
+                if (let Some(decls) <- members.get(name)) {
+                    let visibleDecls = ArrayList<Decl>()
+                    for (decl in decls) {
+                        if (IsFrontendVisible(decl, relation)) {
+                            AddDeclIfMissing(visibleDecls, decl)
+                        }
+                    }
+                    if (!visibleDecls.isEmpty()) {
+                        out[name] = visibleDecls
                     }
                 }
             }
@@ -2341,6 +2489,58 @@ public class ImportManager {
             return RootPackageName(decl.fullPackageName) == RootPackageName(srcFullPackageName)
         }
         return false
+    }
+
+    private func IsFrontendVisible(node: Node, relation: FrontendPackageRelation): Bool {
+        return node.TestAttr(Attribute.PUBLIC) || relation == FrontendPackageRelation.SAME_PACKAGE ||
+            (node.TestAttr(Attribute.PROTECTED) && relation != FrontendPackageRelation.NONE) ||
+            (node.TestAttr(Attribute.INTERNAL) &&
+                (relation == FrontendPackageRelation.CHILD || relation == FrontendPackageRelation.SAME_PACKAGE))
+    }
+
+    private func IsFrontendCompatibleAccessLevel(srcLevel: AccessLevel, refLevel: AccessLevel): Bool {
+        return FrontendAccessLevelIndex(srcLevel) >= FrontendAccessLevelIndex(refLevel)
+    }
+
+    private func FrontendAccessLevelIndex(level: AccessLevel): Int64 {
+        return match (level) {
+            case AccessLevel.PRIVATE => 0
+            case AccessLevel.INTERNAL => 1
+            case AccessLevel.PROTECTED => 2
+            case AccessLevel.PUBLIC => 3
+        }
+    }
+
+    private func GetFrontendPackageRelation(srcFullPkgName: String, targetFullPkgName: String): FrontendPackageRelation {
+        if (srcFullPkgName == targetFullPkgName) {
+            return FrontendPackageRelation.SAME_PACKAGE
+        }
+        if (srcFullPkgName.isEmpty() || targetFullPkgName.isEmpty()) {
+            return FrontendPackageRelation.NONE
+        }
+        let srcPath = SplitQualifiedName(srcFullPkgName)
+        let targetPath = SplitQualifiedName(targetFullPkgName)
+        if (targetPath.size < srcPath.size && StartsWithPath(srcPath, targetPath)) {
+            return FrontendPackageRelation.CHILD
+        }
+        if (!srcPath.isEmpty() && !targetPath.isEmpty() && srcPath[0] == targetPath[0]) {
+            return FrontendPackageRelation.SAME_MODULE
+        }
+        return FrontendPackageRelation.NONE
+    }
+
+    private func StartsWithPath(source: ArrayList<String>, prefix: ArrayList<String>): Bool {
+        if (prefix.size > source.size) {
+            return false
+        }
+        var idx: Int64 = 0
+        while (idx < prefix.size) {
+            if (source[idx] != prefix[idx]) {
+                return false
+            }
+            idx++
+        }
+        return true
     }
 
     private func PutImportedDecl(map: HashMap<String, ArrayList<Decl>>, name: String, decl: Decl): Unit {
@@ -2493,14 +2693,120 @@ public class ImportManager {
     }
 
     private func HasVisibleImportedDecl(srcFullPackageName: String, pkg: Package, name: String): Bool {
-        for (file in pkg.files) {
-            for (decl in file.decls) {
-                if (decl.identifier.Val() == name && IsDeclVisibleFrom(srcFullPackageName, decl)) {
-                    return true
+        BuildPackageMembers(pkg.fullPackageName)
+        let relation = GetFrontendPackageRelation(srcFullPackageName, pkg.fullPackageName)
+        if (let Some(members) <- packageMembers.get(pkg.fullPackageName)) {
+            if (let Some(decls) <- members.get(name)) {
+                for (decl in decls) {
+                    if (IsFrontendVisible(decl, relation)) {
+                        return true
+                    }
                 }
             }
         }
         return false
+    }
+
+    private func RebuildPackageMembers(fullPackageName: String): Unit {
+        packageMembers.remove(fullPackageName)
+        packageMembersVisited.remove(fullPackageName)
+        BuildPackageMembers(fullPackageName)
+    }
+
+    private func BuildPackageMembers(fullPackageName: String, importedPackage!: String = ""): Unit {
+        if (packageMembersVisited.contains(fullPackageName)) {
+            return
+        }
+        packageMembersVisited.add(fullPackageName)
+        let pkgOpt = GetPackageForMemberBuild(fullPackageName)
+        if (let None <- pkgOpt) {
+            return
+        }
+        let pkg = pkgOpt.getOrThrow()
+        if (!packageMembers.contains(fullPackageName)) {
+            packageMembers[fullPackageName] = HashMap<String, ArrayList<Decl>>()
+        }
+        let members = packageMembers.get(fullPackageName).getOrThrow()
+        for (file in pkg.files) {
+            for (decl in file.decls) {
+                if (!decl.TestAttr(Attribute.MACRO_EXPANDED_NODE)) {
+                    PutImportedDecl(members, decl.identifier.Val(), decl)
+                }
+            }
+        }
+        let relation = if (importedPackage.isEmpty()) {
+            GetFrontendPackageRelation(fullPackageName, fullPackageName)
+        } else {
+            GetFrontendPackageRelation(importedPackage, fullPackageName)
+        }
+        for (file in pkg.files) {
+            for (importSpec in file.imports) {
+                if (importSpec.IsImportMulti()) {
+                    continue
+                }
+                let importedName = importSpec.content.GetImportedPackageNameWithIsDecl()
+                if (importedName.isEmpty()) {
+                    continue
+                }
+                BuildPackageMembers(importedName, importedPackage: fullPackageName)
+                if (importSpec.IsReExport() && IsFrontendVisible(importSpec, relation)) {
+                    AddReExportedMembers(importSpec, importedName, members)
+                }
+            }
+        }
+    }
+
+    private func GetPackageForMemberBuild(fullPackageName: String): Option<Package> {
+        if (let Some(pkg) <- GetPackage(fullPackageName)) {
+            return Some(pkg)
+        }
+        for (pkg in sourcePackagesForMembers) {
+            if (pkg.fullPackageName == fullPackageName) {
+                return Some(pkg)
+            }
+        }
+        return None
+    }
+
+    private func AddReExportedMembers(
+        importSpec: ImportSpec,
+        importedPackage: String,
+        targetMembers: HashMap<String, ArrayList<Decl>>
+    ): Unit {
+        if (let None <- packageMembers.get(importedPackage)) {
+            return
+        }
+        let importedMembers = packageMembers.get(importedPackage).getOrThrow()
+        if (importSpec.IsImportAll()) {
+            for (name in importedMembers.keys()) {
+                if (let Some(decls) <- importedMembers.get(name)) {
+                    AddImportedDeclsWithAccess(decls, targetMembers, name, GetAccessLevel(importSpec))
+                }
+            }
+            return
+        }
+        let sourceName = importSpec.content.identifier.Val()
+        if (let Some(decls) <- importedMembers.get(sourceName)) {
+            let targetName = if (importSpec.IsImportAlias()) {
+                importSpec.content.aliasName.Val()
+            } else {
+                sourceName
+            }
+            AddImportedDeclsWithAccess(decls, targetMembers, targetName, GetAccessLevel(importSpec))
+        }
+    }
+
+    private func AddImportedDeclsWithAccess(
+        decls: ArrayList<Decl>,
+        targetMembers: HashMap<String, ArrayList<Decl>>,
+        targetName: String,
+        importLevel: AccessLevel
+    ): Unit {
+        for (decl in decls) {
+            if (IsFrontendCompatibleAccessLevel(importLevel, GetAccessLevel(decl))) {
+                PutImportedDecl(targetMembers, targetName, decl)
+            }
+        }
     }
 
     private func AddImportedPackageIfMissing(pkg: Package): Unit {
