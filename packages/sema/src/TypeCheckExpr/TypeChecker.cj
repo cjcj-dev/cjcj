@@ -450,7 +450,7 @@ public class TypeChecker {
         AddCurFile(pkg)
         AddDefaultFunction(pkg)
         AddDefaultParamFunctions(pkg)
-        Collector().BuildSymbolTable(ctx, pkg)
+        Collector().BuildSymbolTable(ctx, pkg, buildTrie: false)
         impl.WarmupCache(ctx)
     }
 
@@ -1091,6 +1091,15 @@ public class TypeChecker {
         SynthesizeNodeChildren(ctx, assign)
     }
 
+    private func SynthesizeBinaryChildren(ctx: ASTContext, binaryExpr: BinaryExpr): Unit {
+        if (let Some(leftExpr) <- binaryExpr.leftExpr) {
+            let _ = Synthesize(ctx, leftExpr)
+        }
+        if (let Some(rightExpr) <- binaryExpr.rightExpr) {
+            let _ = Synthesize(ctx, rightExpr)
+        }
+    }
+
     private func SetCallOrPattern(expr: Expr, owner: Node): Unit {
         if (let Some(nameRef) <- (expr as NameReferenceExpr)) {
             nameRef.callOrPattern = Some(owner)
@@ -1412,6 +1421,13 @@ public class TypeChecker {
             return SynthesizeVarWithPatternDecl(ctx, vpd)
         }
         if (let Some(vd) <- (decl as VarDeclAbstract)) {
+            if (vd.TestAttr(Attribute.IS_CHECK_VISITED)) {
+                if (IsGlobalOrMember(vd) && Ty.IsInitialTy(vd.GetTy())) {
+                    vd.SetTy(TypeManager.GetInvalidTy())
+                }
+                return vd.GetTy() ?? TypeManager.GetInvalidTy()
+            }
+            vd.EnableAttr(Attribute.IS_CHECK_VISITED)
             SynthesizeTypeNode(ctx, vd.typeNode)
             if (let Some(initializer) <- vd.initializer) {
                 if (let Some(typeNode) <- vd.typeNode) {
@@ -2253,6 +2269,7 @@ public class TypeChecker {
         let walker = Walker(expr, visitPost: { node: Node =>
             if (let Some(nameRef) <- (node as NameReferenceExpr)) {
                 let _ = SynthesizeNameReference(ctx, nameRef)
+                ctx.SkipSynForCorrectTy(nameRef)
             }
             VisitAction.WALK_CHILDREN
         })
@@ -2276,6 +2293,7 @@ public class TypeChecker {
         RefreshNameReferencesInTree(ctx, expr)
         RefreshUnsetExprTypesInTree(expr)
         RefreshNameReferencesInTree(ctx, expr)
+        ctx.SkipSynForCorrectTy(expr)
         return ty
     }
 
@@ -2284,6 +2302,9 @@ public class TypeChecker {
         RefreshNameReferencesInTree(ctx, expr)
         RefreshUnsetExprTypesInTree(expr)
         RefreshNameReferencesInTree(ctx, expr)
+        if (ok) {
+            ctx.SkipSynForCorrectTy(expr)
+        }
         return ok
     }
 
@@ -2450,6 +2471,7 @@ public class TypeChecker {
             return FinishSynthesize(ctx, returnExpr, SynExprShallow(impl.typeManager, returnExpr))
         }
         if (let Some(binaryExpr) <- (expr as BinaryExpr)) {
+            SynthesizeBinaryChildren(ctx, binaryExpr)
             let binaryTy = SynBinaryExpr(impl.typeManager, binaryExpr)
             if (Ty.IsTyCorrect(binaryTy)) {
                 return FinishSynthesize(ctx, binaryExpr, binaryTy)

@@ -14,13 +14,26 @@ private class ResolveTypeWalkerBox {
     }
 }
 
-private func addDeclUniqueForTypeCheck(values: ArrayList<Decl>, decl: Decl): Unit {
-    for (value in values) {
-        if (SameDecl(value, decl)) {
+private func declIdentityKeyForTypeCheck(decl: Decl): String {
+    return ASTKindIndex(decl.astKind).toString() + "|" + decl.begin.line.toString() + ":" +
+        decl.begin.column.toString() + "|" + decl.end.line.toString() + ":" + decl.end.column.toString() + "|" +
+        decl.identifier.Val() + "|" + decl.fullPackageName
+}
+
+private class DeclCollectorForTypeCheck {
+    public let values: ArrayList<Decl> = ArrayList<Decl>()
+    private let keys: HashSet<String> = HashSet<String>()
+
+    public init() {}
+
+    public func Add(decl: Decl): Unit {
+        let key = declIdentityKeyForTypeCheck(decl)
+        if (keys.contains(key)) {
             return
         }
+        keys.add(key)
+        values.add(decl)
     }
-    values.add(decl)
 }
 
 private func insertDeclByTypeLookupRank(values: ArrayList<Decl>, decl: Decl): Unit {
@@ -53,10 +66,15 @@ private func rankTypeLookupTargets(targets: ArrayList<Decl>): ArrayList<Decl> {
 
 private func collectPackageTypeDecls(pkg: Package, name: String): ArrayList<Decl> {
     let out = ArrayList<Decl>()
+    let keys = HashSet<String>()
     for (file in pkg.files) {
         for (decl in file.decls) {
             if (decl.identifier == name && decl.IsTypeDecl()) {
-                addDeclUniqueForTypeCheck(out, decl)
+                let key = declIdentityKeyForTypeCheck(decl)
+                if (!keys.contains(key)) {
+                    keys.add(key)
+                    out.add(decl)
+                }
             }
         }
     }
@@ -286,38 +304,38 @@ private func storeOuterVarWithPatternDecl(ctx: ASTContext, vpd: VarWithPatternDe
 }
 
 private func collectDeclsFromPackage(pkg: Package): ArrayList<Decl> {
-    let out = ArrayList<Decl>()
+    let collector = DeclCollectorForTypeCheck()
     for (file in pkg.files) {
         for (decl in file.decls) {
-            collectDeclsFromDecl(decl, out)
+            collectDeclsFromDecl(decl, collector)
         }
     }
-    return out
+    return collector.values
 }
 
-private func collectDeclsFromDecl(decl: Decl, out: ArrayList<Decl>): Unit {
-    addDeclUniqueForTypeCheck(out, decl)
+private func collectDeclsFromDecl(decl: Decl, collector: DeclCollectorForTypeCheck): Unit {
+    collector.Add(decl)
     if (let Some(generic) <- decl.GetGeneric()) {
         for (param in generic.typeParameters) {
             param.outerDecl = Some(decl)
-            collectDeclsFromDecl(param, out)
+            collectDeclsFromDecl(param, collector)
         }
     }
     if (let Some(enumDecl) <- (decl as EnumDecl)) {
         for (constructor in enumDecl.constructors) {
-            collectDeclsFromDecl(constructor, out)
+            collectDeclsFromDecl(constructor, collector)
         }
     }
     for (member in decl.GetMemberDecls()) {
-        collectDeclsFromDecl(member, out)
+        collectDeclsFromDecl(member, collector)
     }
     if (let Some(classDecl) <- (decl as ClassDecl)) {
         for (subDecl in classDecl.subDecls) {
-            collectDeclsFromDecl(subDecl, out)
+            collectDeclsFromDecl(subDecl, collector)
         }
     } else if (let Some(interfaceDecl) <- (decl as InterfaceDecl)) {
         for (subDecl in interfaceDecl.subDecls) {
-            collectDeclsFromDecl(subDecl, out)
+            collectDeclsFromDecl(subDecl, collector)
         }
     }
 }
