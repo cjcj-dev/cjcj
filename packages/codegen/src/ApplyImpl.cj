@@ -4,8 +4,10 @@ import std.collection.*
 import cangjie_compiler::chir.Attribute
 import cangjie_compiler::chir.Apply
 import cangjie_compiler::chir.ApplyWithException
+import cangjie_compiler::chir.CustomType
 import cangjie_compiler::chir.Expression
 import cangjie_compiler::chir.FuncType
+import cangjie_compiler::chir.Function
 import cangjie_compiler::chir.Type
 import cangjie_compiler::chir.Value
 
@@ -56,10 +58,6 @@ private func GenerateApply(irBuilder: IRBuilder2, callee: Value, args: ArrayList
         argValues.add(irBuilder.GetCGModule().MaterializeValue(irBuilder, arg))
     }
     let methodTypeInfoArg = BuildApplyMethodTypeInfoArg(irBuilder, thisType)
-    if (let Some(result) <- TryGenerateImportedGenericStructCtorApply(irBuilder, callee, calleeValue, args,
-        argValues, methodTypeInfoArg)) {
-        return result
-    }
     if (let Some(instFuncTy) <- callType) {
         let typeInfo = TypeExtraInfo()
         typeInfo.isMethod = isMethodType
@@ -80,7 +78,8 @@ private func GenerateApply(irBuilder: IRBuilder2, callee: Value, args: ArrayList
     }
     if (let Some(cgFunctionValue) <- (calleeValue as CGFunction)) {
         if (let Some(cgFuncTy) <- cgFunctionValue.GetCGFunctionType()) {
-            return irBuilder.CreateCallOrInvokeWithMethodTypeInfo(cgFuncTy, cgFunctionValue.GetRawFunction(),
+            let rawFunction = SelectImportedGenericStructCtorEntry(irBuilder, callee, cgFunctionValue, cgFuncTy)
+            return irBuilder.CreateCallOrInvokeWithMethodTypeInfo(cgFuncTy, rawFunction,
                 argValues, methodTypeInfoArg, instTypeArgs, name: "call")
         }
         return irBuilder.CreateCallOrInvoke(cgFunctionValue, args: argValues, name: "call")
@@ -94,57 +93,34 @@ private func GenerateApply(irBuilder: IRBuilder2, callee: Value, args: ArrayList
     return LLVMNullValue()
 }
 
-private func TryGenerateImportedGenericStructCtorApply(irBuilder: IRBuilder2, callee: Value, calleeValue: CGValue,
-    args: ArrayList<Value>, argValues: ArrayList<CGValue>,
-    methodTypeInfoArg: Option<LLVMValueRef>): Option<LLVMValueRef> {
-    let fn = callee.AsFunction() ?? return None
-    if (!fn.TestAttr(Attribute.IMPORTED) || !fn.IsConstructor() || args.isEmpty() || argValues.isEmpty()) {
-        return None
+private func SelectImportedGenericStructCtorEntry(irBuilder: IRBuilder2, callee: Value, cgFunctionValue: CGFunction,
+    cgFuncTy: CGFunctionType): LLVMValueRef {
+    let fn = callee.AsFunction() ?? return cgFunctionValue.GetRawFunction()
+    if (!fn.TestAttr(Attribute.IMPORTED) || !fn.IsConstructor() || !ImportedGenericStructCtorNeedsWithoutTI(fn)) {
+        return cgFunctionValue.GetRawFunction()
     }
-    let sourceFuncTy = fn.GetFuncType() ?? return None
-    let paramTys = sourceFuncTy.GetParamTypes()
-    if (paramTys.isEmpty() || !paramTys[0].IsRef()) {
-        return None
+    return irBuilder.GetCGModule().GetOrInsertFunction(fn.GetIdentifierWithoutPrefix() + POSTFIX_WITHOUT_TI,
+        cgFuncTy.GetLLVMFunctionType())
+}
+
+private func ImportedGenericStructCtorNeedsWithoutTI(fn: Function): Bool {
+    let funcTy = fn.GetFuncType() ?? return false
+    let params = funcTy.GetParamTypes()
+    if (params.isEmpty() || !params[0].IsRef()) {
+        return false
     }
-    let templateThisTy = paramTys[0].StripAllRefs()
-    if (!templateThisTy.IsStruct() || !templateThisTy.IsGenericRelated()) {
-        return None
+    let thisTy = params[0].StripAllRefs()
+    if (!thisTy.IsStruct() || !thisTy.IsGenericRelated()) {
+        return false
     }
-    var hasDirectGenericParam = false
-    var paramIdx: Int64 = 1
-    while (paramIdx < paramTys.size) {
-        if (paramTys[paramIdx].IsGeneric()) {
-            hasDirectGenericParam = true
-            break
+    if (let Some(customTy) <- (thisTy as CustomType)) {
+        for (field in customTy.GetCustomTypeDef().GetAllInstanceVars()) {
+            if (field.ty.IsGeneric()) {
+                return true
+            }
         }
-        paramIdx++
     }
-    if (!hasDirectGenericParam) {
-        return None
-    }
-    let concreteThisTy = (args[0].GetType() ?? return None).StripAllRefs()
-    if (!concreteThisTy.IsStruct()) {
-        return None
-    }
-    let cgFunctionValue = (calleeValue as CGFunction) ?? return None
-    let cgFuncTy = cgFunctionValue.GetCGFunctionType() ?? return None
-    let cgThisTy = CGType.GetOrCreate(irBuilder.GetCGModule(), concreteThisTy)
-    let boxedThis = irBuilder.CallValueIntrinsicAlloc(concreteThisTy)
-    let boxedArgs = ArrayList<CGValue>()
-    boxedArgs.add(CGValue(boxedThis, cgThisTy))
-    var idx: Int64 = 1
-    while (idx < argValues.size) {
-        boxedArgs.add(argValues[idx])
-        idx++
-    }
-    let call = irBuilder.CreateCallOrInvokeWithMethodTypeInfo(cgFuncTy, cgFunctionValue.GetRawFunction(),
-        boxedArgs, methodTypeInfoArg, ArrayList<Type>(), name: "call")
-    let payload = irBuilder.GetPayloadFromObject(boxedThis)
-    let payloadType = unsafe { LLVMPointerType(cgThisTy.GetLLVMType(), 1u32) }
-    let typedPayload = irBuilder.CreateBitCast(payload, payloadType, name: "generic.this.payload")
-    let loaded = irBuilder.CreateLoad(cgThisTy.GetLLVMType(), typedPayload, name: "generic.this.value")
-    let _ = irBuilder.CreateStore(loaded, argValues[0].GetRawValue())
-    return Some(call)
+    return false
 }
 
 private func BuildApplyMethodTypeInfoArg(irBuilder: IRBuilder2, thisType: Option<Type>): Option<LLVMValueRef> {
