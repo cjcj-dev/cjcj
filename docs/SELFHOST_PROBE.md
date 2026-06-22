@@ -1125,3 +1125,112 @@ Results:
 - `run_diag.sh`: `SEPTEST-DIAG-PASS`.
 - `run_write_types.sh`: `SEPTEST-WRITE-TYPES-PASS`.
 - `run_write_struct.sh`: `SEPTEST-WRITE-STRUCT-PASS`.
+
+## Probe 10 (lex if-expr invalid type)
+
+### Reproduction
+
+Rebuilt the selfhost compiler cleanly and re-ran the Probe 4/6/8/9 lex package command:
+
+```sh
+env cjHeapSize=1GB ./target/release/bin/cangjie_compiler::cjc -p packages/lex/src \
+  --output-type=staticlib -o "$WORK/self-liblex.a" \
+  --import-path target/release/basic@cangjie_compiler \
+  --import-path target/release/utils@cangjie_compiler \
+  -L target/release/basic@cangjie_compiler \
+  -L target/release/utils@cangjie_compiler \
+  -lbasic@cangjie_compiler -lutils@cangjie_compiler --set-runtime-rpath -V
+```
+
+Temporary CHIR tracing identified the invalid `IfExpr` as `packages/lex/src/LexerImpl.cj:525` in
+`CollectToken`:
+
+```cj
+if (!enableCollect) {
+    return
+}
+```
+
+At CHIR entry the if had type `Invalid`, its then block had type `Invalid`, and it had no else branch.
+
+### Diagnosis
+
+The invalid if was not a branch join failure. It was caused by selfhost parsing a bare `return` with
+`ReturnExpr.expr == None`, so sema typed the return as `Invalid`; that made the then block invalid,
+and the no-else if statement reached CHIR with an invalid AST type.
+
+The C++ parser does not leave bare returns without an expression:
+
+- `/root/cj_build/cangjie_compiler/src/Parse/ParseAtom.cpp:916-950`: `ParseReturnExpr` creates a
+  compiler-added `LitConstExpr` of kind `UNIT`, value `"()"`, when `return` is followed by a
+  terminator/declaration/double-arrow.
+- `/root/cj_build/cangjie_compiler/src/Sema/TypeCheckExpr/ReturnExpr.cpp:18-57`: `SynReturnExpr`
+  assumes a return expression exists, checks it against the function return type, then sets the
+  `ReturnExpr` type to `Nothing`.
+- `/root/cj_build/cangjie_compiler/src/Sema/TypeCheckExpr/IfExpr.cpp:40-45`: no-else if expressions
+  are typed as `Unit` when their condition and branches are well typed.
+
+The selfhost parser diverged at `packages/parse/src/ParseExpr.cj:1175-1184`: it only parsed an
+expression when one was present and otherwise left `ret.expr` unset. That made the later sema code
+hit an AST shape the C++ sema never sees for a bare return.
+
+### Faithful fix
+
+`packages/parse/src/ParseExpr.cj` now mirrors the C++ parser behavior for `return` followed by a
+terminator/declaration/double-arrow: it synthesizes a compiler-added `()` `LitConstExpr`, assigns it
+zero-width source positions at the return token end, preserves semicolon metadata, and always sets
+`ReturnExpr.end` from the expression.
+
+Added regression corpus program `scripts/difftest_corpus/103_if_bare_return_unit.cj`, which reproduces
+the lex shape: an unused no-else if whose then branch is a bare `return` in a `Unit` function. The
+selfhost and reference compilers both compile and run it with identical output:
+
+```text
+collected
+```
+
+### Current lex result
+
+The original invalid-if CHIR frontier is cleared. Re-running the full selfhost lex package compile now
+gets further and stops at the next invalid-type frontier:
+
+```text
+IllegalArgumentException: unsupported AST type kind for CHIRType.TranslateType: Invalid
+  at packages/chir/src/CHIRType.cj:325
+  at packages/chir/src/Translator.cj:496 Visit(VarDecl)
+```
+
+Temporary tracing identified that next node as local variable `mapped` in
+`packages/lex/src/LexerImpl.cj:535`, inside `LookupKeyword`:
+
+```cj
+let mapped = match (literal) { ... }
+```
+
+No `lex@cangjie_compiler.cjo` or final lex static library is produced yet.
+
+### Verification
+
+Commands run after the fix, as separate commands:
+
+```sh
+rm -rf target && cjpm build
+bash scripts/difftest.sh
+bash scripts/septest/run.sh
+bash scripts/septest/run_write.sh
+bash scripts/septest/run_diag.sh
+bash scripts/septest/run_write_types.sh
+bash scripts/septest/run_write_struct.sh
+```
+
+Results:
+
+- `cjpm build`: success.
+- `packages/lex/src` selfhost compile: passed the invalid `IfExpr` at `LexerImpl.cj:525` and reached
+  the new `VarDecl` invalid-type frontier at `Translator.cj:496`.
+- `difftest`: `TOTAL=87  PASS=87  MISMATCH=0  FAIL=0`.
+- `run.sh`: `SEPTEST-PASS`.
+- `run_write.sh`: `SEPTEST-WRITE-PASS`.
+- `run_diag.sh`: `SEPTEST-DIAG-PASS`.
+- `run_write_types.sh`: `SEPTEST-WRITE-TYPES-PASS`.
+- `run_write_struct.sh`: `SEPTEST-WRITE-STRUCT-PASS`.

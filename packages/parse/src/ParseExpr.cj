@@ -1177,10 +1177,20 @@ extend ParserImpl {
         let token = Expect(TokenKind.RETURN, "expected 'return'")
         ret.returnPos = token.Begin()
         ret.begin = token.Begin()
-        if (!AtTerminator()) {
+        if (AtTerminator() || SeeingDecl() || SeeingDoubleArrow()) {
+            let unitLit = LitConstExpr(LitConstKind.UNIT, "()")
+            unitLit.begin = lastToken.End()
+            unitLit.end = unitLit.begin
+            unitLit.EnableAttr(Attribute.COMPILER_ADD)
+            ret.expr = unitLit
+            if (Seeing(TokenKind.SEMI)) {
+                ret.hasSemi = true
+                ret.semiPos = Peek().Begin()
+            }
+        } else {
             ret.expr = ParseExpr()
         }
-        ret.end = if (let Some(expr) <- ret.expr) { expr.end } else { token.End() }
+        ret.end = ret.expr.getOrThrow().end
         return ret
     }
 
