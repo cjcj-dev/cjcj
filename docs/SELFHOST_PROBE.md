@@ -1698,3 +1698,91 @@ Results:
 - `run_diag.sh`: `SEPTEST-DIAG-PASS`.
 - `run_write_types.sh`: `SEPTEST-WRITE-TYPES-PASS`.
 - `run_write_struct.sh`: `SEPTEST-WRITE-STRUCT-PASS`.
+
+## Probe 13 (nested/sugar const-pattern paths)
+
+### Diagnosis
+
+Probe 11's `ConstPatternExprChecker` was threaded only through the top-level match path. C++ has no callback
+split: recursive `ChkPattern` dispatches `CONST_PATTERN` to `ChkConstPattern` and `ENUM_PATTERN` /
+`TUPLE_PATTERN` to their recursive checkers uniformly
+(`/root/cj_build/cangjie_compiler/src/Sema/TypeCheckPattern.cpp:194-223`). `ChkConstPattern` checks the
+literal with full `Check` and then checks the synthesized string `==` call with full `Check`
+(`/root/cj_build/cangjie_compiler/src/Sema/TypeCheckPattern.cpp:244-311`).
+
+The selfhost enum pattern path dropped the callback: `ChkEnumPattern` delegated to
+`IsFuncTyEnumPatternMatched`, whose payload loop recursively called `ChkPattern` without the checker. This
+diverged from C++'s payload recursion
+(`/root/cj_build/cangjie_compiler/src/Sema/TypeCheckPattern.cpp:371-428`) and left `case Some("a")` with an
+Invalid nested const-pattern type. The tuple checker was already threaded; C++ tuple recursion checks each
+element with the normal pattern `Check` path
+(`/root/cj_build/cangjie_compiler/src/Sema/TypeCheckPattern.cpp:467-492`), so E2's remaining failure was not
+Sema.
+
+E2's true root was backend ABI/lowering. The tuple-nested string const pattern reached codegen, but the
+selfhost treated LLVM struct-shaped values such as `String`, tuple values, and option-like non-ref enum values
+as by-value call arguments. That produced first-class aggregate string/tuple values live across Cangjie GC
+statepoints or aggregate stores where the reference passes LLVM struct-shaped arguments by pointer. C++ does
+this in `CGFunctionType`: parameters whose CHIR type is struct/tuple, whose size is unknown, or whose CG type
+is an LLVM struct/array are lowered to pointers
+(`/root/cj_build/cangjie_compiler/src/CodeGen/Base/CGTypes/CGFunctionType.cpp:117-129`) and the contained
+function-argument CG types are likewise fixed to refs
+(`/root/cj_build/cangjie_compiler/src/CodeGen/Base/CGTypes/CGFunctionType.cpp:176-195`). C++ defines
+`CGType::IsStructType` / `IsVArrayType` from the LLVM type shape, not only from the source CHIR kind
+(`/root/cj_build/cangjie_compiler/src/CodeGen/Base/CGTypes/CGType.h:97-105`). For struct-pointer stores, C++
+copies through `memcpy`
+(`/root/cj_build/cangjie_compiler/src/CodeGen/CJNative/CJNativeIRBuilder.cpp:731-738`).
+
+The first ABI fix regressed nested struct field access by making `FieldByName`/`Field` on a pointer base return
+the struct-shaped field address directly. That broke `o.i.v`: the intermediate `o.i` CHIR value was mapped as an
+`Inner` value but carried the LLVM address of `Outer.i`, so the following `.v` extraction treated a pointer as a
+first-class struct. C++ separates these paths. Value member access loads from a reference base after building the
+address with `GetElementRef`
+(`/root/cj_build/cangjie_compiler/src/CHIR/AST2CHIR/TranslateASTNode/TranslateMemberAccess.cpp:443-448`), and
+value-base member access emits a `FieldByName` value
+(`/root/cj_build/cangjie_compiler/src/CHIR/AST2CHIR/TranslateASTNode/TranslateMemberAccess.cpp:449-453`). When a
+member access is only the base for a later field, C++ first loads the referenced member value, then continues with
+that value as the base
+(`/root/cj_build/cangjie_compiler/src/CHIR/AST2CHIR/TranslateASTNode/TranslateMemberAccess.cpp:596-607`). The
+selfhost fix therefore restores `FieldByName`/`Field` as value-producing loads and leaves address-producing
+behavior to the `GetElementRef` lowering used by left values.
+
+The remaining quest-sugar probe exposed a separate, larger frontier. The const-pattern checker is now threaded
+into `LetPattern` checking to match C++ `SynLetPatternDestructor`
+(`/root/cj_build/cangjie_compiler/src/Sema/TypeCheckExpr/IfExpr.cpp:133-155`) and into the quest-sugar match
+case checker to match C++ `SynMatchExprHasSelector` / `SynQuestSugarMatchCaseBody`
+(`/root/cj_build/cangjie_compiler/src/Sema/TypeCheckMatchExpr.cpp:76-89`,
+`/root/cj_build/cangjie_compiler/src/Sema/TypeCheckMatchExpr.cpp:153-187`). Quest-sugar still hits the existing
+frontend unsupported-construct path before a const-pattern oracle can run.
+
+### Faithful Fix
+
+- Threaded the same `exprChecker` through `ChkEnumPattern` and its payload recursion, matching C++'s uniform
+  `ChkPattern -> ChkEnumPattern -> ChkPattern` recursion.
+- Threaded `exprChecker` through `SynQuestSugarMatchCaseBody` and both of its `ChkMatchCasePatterns` calls,
+  matching C++'s quest-sugar case checking.
+- Threaded a full `TypeChecker.Check` callback into `CheckLetPatternCondition`, matching C++ let-pattern
+  recursion.
+- Fixed the E2 backend root by matching the C++ ABI rule for LLVM struct-shaped parameters: `CGType` now
+  identifies struct/array by LLVM type shape, `CGFunctionType` and parameter mapping pass those parameters by
+  pointer, and `FixFuncArg` materializes aggregate actuals into argument slots.
+- Fixed the nested-struct regression by restoring pointer-base `FieldByName`/`Field` lowering to load the final
+  field value, matching C++ value member access. Further field access still receives an address through
+  `GetElementRef`, matching C++ left-value/base lowering.
+
+### Confirmation
+
+Focused oracles after the fix:
+
+- E1 `match (o: Option<String>) { case Some("a") => ... }`: selfhost output matches reference: `1`, `2`, `3`.
+- E2 `match (t: (String, Int64)) { case ("a", 1) => E.X; ... }`: selfhost output matches reference: `X`, `Y`.
+- if-let `if (let Some("a") <- o)`: selfhost output matches reference: `1`, `0`, `0`.
+- s1/s3/s4/s6 battery: selfhost output matches reference, including s3 nested struct field output `11`, `5`.
+- s2 tuple-with-String parameter and s5 `VArray<Int64, $3>` parameter remain the same pre-existing selfhost
+  compile failures noted by the battery.
+- New corpus program `109_match_nested_const.cj`: selfhost output matches reference: `1`, `2`, `3`, `X`, `Y`.
+- New corpus program `108_nested_struct_field.cj`: selfhost output matches reference: `11`, `5`.
+
+Full verification for this probe: clean `cjpm build`, `difftest` `TOTAL=91 PASS=91 MISMATCH=0 FAIL=0`, and all
+five septests pass as separate commands: `run.sh`, `run_write.sh`, `run_diag.sh`, `run_write_types.sh`, and
+`run_write_struct.sh`.

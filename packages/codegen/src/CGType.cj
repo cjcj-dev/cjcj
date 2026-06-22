@@ -166,8 +166,14 @@ public open class CGType {
         return false
     }
 
-    public func IsStructType(): Bool { return chirType.IsStruct() || chirType.IsTuple() }
-    public func IsVArrayType(): Bool { return chirType.IsVArray() }
+    public func IsStructType(): Bool {
+        let rawTy = GetLLVMType()
+        return !rawTy.isNull() && unsafe { LLVMGetTypeKind(rawTy) } == 10
+    }
+    public func IsVArrayType(): Bool {
+        let rawTy = GetLLVMType()
+        return !rawTy.isNull() && unsafe { LLVMGetTypeKind(rawTy) } == 11
+    }
     public func IsStructPtrType(): Bool { return IsPointerType() && !GetContainedTypes().isEmpty() && GetContainedTypes()[0].IsStructType() }
     public func IsRefType(): Bool { return cgTypeKind == CGTypeKind.CG_REF }
     public func IsReference(): Bool { return chirType.IsReferenceType() || chirType.IsRef() }

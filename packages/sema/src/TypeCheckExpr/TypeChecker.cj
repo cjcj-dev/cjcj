@@ -1968,8 +1968,10 @@ public class TypeChecker {
             ChkNoVarPatternInOrPattern(ctx, letPattern.patterns, diag: impl.diag)
         var subpatternsGood = true
         for (pattern in letPattern.patterns) {
-            subpatternsGood = ChkPattern(impl.typeManager, ctx, selectorTy, pattern, isPatternInMatch: false) &&
-                subpatternsGood
+            subpatternsGood = ChkPattern(impl.typeManager, ctx, selectorTy, pattern, isPatternInMatch: false,
+                exprChecker: Some({ target: Ty, expr: Expr =>
+                    Check(ctx, target, expr)
+                })) && subpatternsGood
         }
         if (Ty.IsTyCorrect(selectorTy) && subpatternsGood) {
             letPattern.SetTy(TypeManager.GetPrimitiveTy(TypeKind.TYPE_BOOLEAN))
