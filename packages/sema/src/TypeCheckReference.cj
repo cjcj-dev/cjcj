@@ -702,8 +702,10 @@ public func TypeCheckReferenceFilterTargetsForFuncReference(
             }
         }
         if (targets.isEmpty()) {
+            let name = if (let Some(symbol) <- expr.symbol) { " '" + symbol.name + "'" } else { "" }
             let builder = diag.DiagnoseRefactor(BasicDiagKindRefactor.sema_generic_func_without_type_arg,
-                TypeCheckReferenceRange(expr))
+                TypeCheckReferenceRange(expr),
+                arguments: [name])
             builder.Emit()
             return false
         }
