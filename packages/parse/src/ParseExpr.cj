@@ -1177,7 +1177,8 @@ extend ParserImpl {
         let token = Expect(TokenKind.RETURN, "expected 'return'")
         ret.returnPos = token.Begin()
         ret.begin = token.Begin()
-        if (AtTerminator() || SeeingDecl() || SeeingDoubleArrow()) {
+        if ((SeeingDecl() && !SeeingContextualKeyword()) || AtTerminator() || Seeing(TokenKind.CASE) ||
+            SeeingDoubleArrow()) {
             let unitLit = LitConstExpr(LitConstKind.UNIT, "()")
             unitLit.begin = lastToken.End()
             unitLit.end = unitLit.begin

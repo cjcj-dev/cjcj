@@ -1234,3 +1234,44 @@ Results:
 - `run_diag.sh`: `SEPTEST-DIAG-PASS`.
 - `run_write_types.sh`: `SEPTEST-WRITE-TYPES-PASS`.
 - `run_write_struct.sh`: `SEPTEST-WRITE-STRUCT-PASS`.
+
+### Faithfulness follow-up: make the bare-return guard condition 1:1 with C++
+
+A review-gate pass over the first cut found the new bare-return guard condition was not yet a faithful
+match for C++ `ParserImpl::ParseReturnExpr` (`src/Parse/ParseAtom.cpp:921-924`), which is
+`(SeeingDecl() && !SeeingContextualKeyword()) || SeeingAny({SEMI, COMMA, RPAREN, RSQUARE, RCURL, CASE,
+END, DOUBLE_ARROW}) || SeeingCombinator(combinedDoubleArrow)`. Two divergences were corrected:
+
+1. **Missing `!SeeingContextualKeyword()` guard.** C++ excludes contextual keywords from the `SeeingDecl()`
+   arm (`SeeingContextualKeyword()`, `src/Parse/ParserImpl.h:190-193`, over `CONTEXTUAL_KEYWORD_TOKEN`
+   in `src/Lex/Lexer.cpp:46-50`) so that `return open` / `return public` parse the contextual keyword as a
+   real operand (`ParseExpr()`, `ParseAtom.cpp:945`) rather than synthesizing a bare unit. The selfhost
+   `SeeingDecl()` (`ParseDecl.cj`) is true for every contextual keyword that is also a modifier
+   (`ModifierKindFromToken`), so without the guard the cut would have taken the synth-unit branch for those.
+   A `SeeingContextualKeyword()` helper was added to `packages/parse/src/ParserUtils.cj`, mirroring
+   `ParserImpl.h:190-193` over `GetContextualKeyword()` (already in `packages/lex/src/Tokens.cj:433`), and the
+   `SeeingDecl()` arm is now `(SeeingDecl() && !SeeingContextualKeyword())`.
+
+   Note: this guard is currently latent — the selfhost declaration/atom parser does not yet accept a
+   contextual keyword as a binding/reference identifier anywhere (`let open = …` / `func open(…)` /
+   `return open(5)` all fail to parse on both base `2b60b17` and this cut, whereas the reference cjc accepts
+   them). So no observable behavior changes today, but the guard makes the condition 1:1 with C++ and removes
+   the latent defect that would surface once the deeper contextual-keyword-as-identifier gap is closed.
+
+2. **Missing `CASE` token.** C++ lists `CASE` in the terminator set so that a bare `return` as a match-arm
+   body immediately before the next `case` synthesizes a unit. The selfhost `AtTerminator()` does not include
+   `CASE`, and because `skipNL` defaults true the trailing newline is skipped before lookahead (lookahead is
+   the `case` token, not `NL`), so both the same-line and the common multi-line `case X => return` shapes hit
+   `ParseExpr(case)` and failed to parse. Adding `Seeing(TokenKind.CASE)` to the guard fixes this (verified:
+   `match (x) { case 0 => return; case _ => println(...) }` now compiles on the selfhost and matches the
+   reference). Regression corpus `scripts/difftest_corpus/104_match_arm_bare_return.cj`.
+
+The guard condition is now
+`(SeeingDecl() && !SeeingContextualKeyword()) || AtTerminator() || Seeing(TokenKind.CASE) || SeeingDoubleArrow()`.
+
+Remaining (pre-existing, not introduced by this cut, documented for a later cut): `AtTerminator()` also
+includes `NL` (a superset, inert because NL is skipped before lookahead); the selfhost `SeeingDecl()` is the
+scoped `SeeingDeclInScope(UNKNOWN_SCOPE)` rather than C++'s no-arg `SeeingDecl()` (different inert edge tokens
+`CONST/PROP/INIT`); and the `ParseExpr()` else-branch omits C++'s `newlineSkipped` `parse_nl_warning` and the
+`IS_BROKEN` `ConsumeUntilAny` error-recovery (diagnostics-only). The deeper contextual-keyword-as-identifier
+gap in the declaration/atom parser is a separate frontier.
