@@ -2659,3 +2659,66 @@ Verification:
 - `bash scripts/difftest.sh`: `TOTAL=104  PASS=104  MISMATCH=0  FAIL=0`.
 - Septests `run.sh`, `run_write.sh`, `run_diag.sh`, `run_write_types.sh`, `run_write_struct.sh`,
   and `run_gendefault.sh` all pass.
+## Probe 32 (AST Walker child-set parity)
+
+Bug: the selfhost AST walker visited child edges that C++ `Walker.cpp` never visits. Several of those
+edges are non-owning `Ptr<...>` back-pointers into a subtree that is also reached later by the owning
+path. Because both walkers use one shared `visitedByWalkerID` mark (`Walker.cpp:44-49`), a back-pointer
+visit can pre-mark the aliased subtree and cause the later owning visit to return early without
+`VisitPre`/`VisitPost`. The subtree is then silently skipped for that pass.
+
+Faithful fix in `packages/ast/src/Walker.cj`: remove only the selfhost-only edges below and change
+`CallExpr` argument traversal to the C++ `desugarArgs` view.
+
+- Pattern common `ctxExpr`: `Node.h:1589` declares `Ptr<Expr> ctxExpr`, a non-owning match context.
+  C++ has no common Pattern pre-walk; match patterns are visited only from their concrete cases
+  (`Walker.cpp:478-490`, `998-1083`), and `MatchExpr` walks the owning selector first in match mode
+  (`Walker.cpp:505-515`). Removing this prevents a pattern from pre-marking the selector before the
+  owning `MatchExpr.selector` walk.
+- `JumpExpr.refLoop`: `Node.h:2080` declares `Ptr<Expr> refLoop`, a non-owning loop back-pointer. C++
+  has no `ASTKind::JUMP_EXPR` case; unhandled nodes fall through the default child set
+  (`Walker.cpp:1201-1203`). Removing this prevents break/continue nodes from walking their enclosing
+  loop as a child.
+- `ForInExpr.patternInDesugarExpr`: `Node.h:2094` declares `Ptr<Pattern> patternInDesugarExpr`.
+  C++ `FOR_IN_EXPR` walks only `pattern`, `inExpression`, `patternGuard`, and `body`
+  (`Walker.cpp:610-624`).
+- `FuncBody.capturedVars`: `Node.h:1278` declares
+  `std::unordered_set<Ptr<const NameReferenceExpr>> capturedVars`, a non-owning capture set. C++
+  `FUNC_BODY` walks only `generic`, `paramLists`, `retType`, and `body` (`Walker.cpp:181-197`).
+- `Package.inlineFuncDecls`: `Node.h:3058` declares `std::vector<Ptr<FuncDecl>> inlineFuncDecls`,
+  non-owning imported inline declarations. C++ `PACKAGE` walks `genericInstantiatedDecls`, `files`,
+  and `srcImportedNonGenericDecls` only (`Walker.cpp:77-96`).
+- `File.originalMacroCallNodes`: `Node.h:3002` stores this as `std::vector<OwnedPtr<Node>>`, but C++
+  `FILE` still does not traverse it; it walks `package`, `imports`, `exportedInternalDecls`, and
+  `decls` only (`Walker.cpp:99-119`). This is not a back-pointer case; it is removed strictly for
+  child-set parity.
+- `VarPattern.desugarExpr`: `Node.h:1648` stores this as `OwnedPtr<Expr>`, but C++ `VAR_PATTERN`
+  walks only `varDecl` (`Walker.cpp:1009-1014`). This desugar edge is intentionally not part of the
+  Walker child set.
+- `TypePattern.desugarExpr` and `TypePattern.desugarVarPattern`: `Node.h:1689-1690` stores these as
+  `OwnedPtr<Expr>` and `OwnedPtr<VarPattern>`, but C++ `TYPE_PATTERN` walks only `pattern` and `type`
+  (`Walker.cpp:1027-1035`).
+- `CallExpr` arguments: `Node.h:2520-2529` defines `baseFunc`, `args`, optional `desugarArgs`, and
+  `defaultArgs`; `desugarArgs` is a sorted pointer view over `args` and `defaultArgs`. C++ walks
+  `baseFunc`, then `desugarArgs` if present, otherwise `args`, and never separately walks both
+  `args` and `defaultArgs` (`Walker.cpp:735-755`). The selfhost now mirrors that exact branch.
+
+Parity audit: after the edits, every removed edge is either a `Ptr<...>` non-owning back-pointer or an
+owning desugar/macro storage edge that the matching C++ `Walker.cpp` case deliberately excludes. The
+remaining selfhost-walked fields in this cut are either owning AST children or fields reached by the
+corresponding C++ case. Decl-common modifier/generic ordering is left unchanged because the shared
+visited mark makes the order equivalent for this fix.
+
+New regression case: `scripts/difftest_corpus/117_ctxexpr_iflet_embedded.cj` covers an if-let pattern
+where the pattern context aliases the initializer; it would regress if the pattern back-pointer walk
+pre-marked the initializer before the owning path.
+
+Verification:
+
+- Clean `rm -rf target && cjpm build`: success.
+- Full corpus: `TOTAL=102  PASS=102  MISMATCH=0  FAIL=0`.
+- Septests all pass: `run.sh`, `run_write.sh`, `run_diag.sh`, `run_write_types.sh`,
+  `run_write_struct.sh`, and `run_gendefault.sh`.
+- Adversarial temporary battery matched `/root/.cjv/bin/cjc`: match selector containing a lambda-local
+  binding, match arm containing a closure-local binding, for-in with break/continue in an embedded
+  result expression, and if-let inside a match arm.
