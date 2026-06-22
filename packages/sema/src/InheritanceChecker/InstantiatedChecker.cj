@@ -113,7 +113,7 @@ private func IsVisibleGenericExtendForInstantiation(
     extendDecl: ExtendDecl,
     instTys: ArrayList<Ty>
 ): Bool {
-    if (!IsExtendVisibleForPackage(checker.pkg.fullPackageName, extendDecl)) {
+    if (!checker.IsExtendVisibleInCurpkg(extendDecl)) {
         return false
     }
     return extendDecl.TestAttr(Attribute.GENERIC) && checker.typeManager.CheckGenericDeclInstantiation(extendDecl, instTys)

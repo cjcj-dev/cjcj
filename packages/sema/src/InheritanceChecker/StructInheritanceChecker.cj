@@ -5,6 +5,7 @@ import cangjie_compiler::ast.*
 import cangjie_compiler::basic.{DiagnosticEngine, DiagArgument, DiagKind, DiagKindRefactor, MakeRange, SubDiagnostic}
 import cangjie_compiler::basic.Range as BasicRange
 import cangjie_compiler::modules.{GetPackageRelation, PackageRelation}
+import cangjie_compiler::option.GlobalOptions as OptionGlobalOptions
 import cangjie_compiler::sema.*
 
 private func DeclRange(decl: Decl): BasicRange {
@@ -104,11 +105,6 @@ private func StringifyInconsistentTypes(inconsistentTypes: TySet, childTy!: Opti
         AddTyUniqueByNameSkipping(sortedTys, ty, childTy)
     }
     return "'" + Ty.GetTypesToStableStr(sortedTys, "', '") + "'"
-}
-
-func IsExtendVisibleForPackage(currentPkg: String, extendDecl: ExtendDecl): Bool {
-    let relation = GetPackageRelation(currentPkg, extendDecl.fullPackageName)
-    return IsAstVisibleInRelation(extendDecl, relation)
 }
 
 private func IsAstVisibleInRelation(node: Node, relation: PackageRelation): Bool {
@@ -378,6 +374,7 @@ public class StructInheritanceChecker {
     public let diag: DiagnosticEngine
     public let typeManager: TypeManager
     public let pkg: Package
+    public let opts: OptionGlobalOptions
 
     private let structInheritedMembers: ArrayList<InheritedMemberEntry> = ArrayList<InheritedMemberEntry>()
     private let checkingDecls: ArrayList<InheritableDecl> = ArrayList<InheritableDecl>()
@@ -389,10 +386,85 @@ public class StructInheritanceChecker {
     private let instantiationTypeMaps: ArrayList<TypeSubst> = ArrayList<TypeSubst>()
     private var infiniteInstantiationOccurred: Bool = false
 
-    public init(diag: DiagnosticEngine, typeManager: TypeManager, pkg: Package) {
+    public init(diag: DiagnosticEngine, typeManager: TypeManager, pkg: Package, opts!: OptionGlobalOptions) {
         this.diag = diag
         this.typeManager = typeManager
         this.pkg = pkg
+        this.opts = opts
+    }
+
+    public func IsExtendVisibleInCurpkg(extendDecl: ExtendDecl): Bool {
+        if (pkg.files.isEmpty()) {
+            return false
+        }
+        return IsExtendAccessible(pkg.files[0], extendDecl)
+    }
+
+    private func IsTyAccessible(file: File, ty: Ty): Bool {
+        if (let Some(decl) <- Ty.GetDeclPtrOfTy(Some(ty))) {
+            return typeManager.IsDeclAccessible(file, decl)
+        }
+        return true
+    }
+
+    private func IsTypeAccessible(file: File, typeNode: Type): Bool {
+        if (let Some(ty) <- typeNode.GetTy()) {
+            return IsTyAccessible(file, ty)
+        }
+        return true
+    }
+
+    private func IsExtendAllUpperBoundsImported(extendDecl: ExtendDecl, file: File): Bool {
+        if (let None <- extendDecl.generic) {
+            return true
+        }
+        let generic = extendDecl.generic.getOrThrow()
+        for (constraint in generic.genericConstraints) {
+            for (upperBound in constraint.upperBounds) {
+                if (!IsTypeAccessible(file, upperBound)) {
+                    return false
+                }
+            }
+        }
+        return true
+    }
+
+    private func IsExtendAccessible(file: File, extendDecl: ExtendDecl): Bool {
+        if (let Some(filePackage) <- file.curPackage) {
+            if (extendDecl.fullPackageName == filePackage.fullPackageName) {
+                return true
+            }
+            let allUpperBoundsImported = IsExtendAllUpperBoundsImported(extendDecl, file)
+            var hasAnyInterfacesImported = false
+            var extendedTypeAccessible = false
+            let extendedDecl = Ty.GetInheritableDeclPtrOfTy(extendDecl.GetTy())
+            let inSamePackage = if (let Some(realExtendedDecl) <- extendedDecl) {
+                extendDecl.fullPackageName == realExtendedDecl.fullPackageName
+            } else {
+                extendDecl.fullPackageName == "std.core"
+            }
+            if (!inSamePackage) {
+                for (inheritedType in extendDecl.inheritedTypes) {
+                    if (IsTypeAccessible(file, inheritedType)) {
+                        hasAnyInterfacesImported = true
+                    }
+                }
+                if (let Some(extendedType) <- extendDecl.extendedType) {
+                    extendedTypeAccessible = IsTypeAccessible(file, extendedType)
+                }
+            } else {
+                hasAnyInterfacesImported = true
+                if (let Some(realExtendedDecl) <- extendedDecl) {
+                    let relation = GetPackageRelation(filePackage.fullPackageName, realExtendedDecl.fullPackageName)
+                    extendedTypeAccessible = IsAstVisibleInRelation(realExtendedDecl, relation)
+                } else {
+                    extendedTypeAccessible = true
+                }
+            }
+            return extendDecl.IsExportedDecl() && allUpperBoundsImported && hasAnyInterfacesImported &&
+                extendedTypeAccessible
+        }
+        return true
     }
 
     public func Check(): Unit {
@@ -410,7 +482,7 @@ public class StructInheritanceChecker {
             }
             if (let Some(inheritable) <- (node as InheritableDecl)) {
                 if (let Some(extendDecl) <- (node as ExtendDecl)) {
-                    if (IsExtendVisibleForPackage(pkg.fullPackageName, extendDecl)) {
+                    if (IsExtendVisibleInCurpkg(extendDecl)) {
                         extendDecls.add(extendDecl)
                     }
                 } else {
@@ -425,7 +497,7 @@ public class StructInheritanceChecker {
         }
         for (decl in GetAllNeedCheckExtended()) {
             if (!HasExtend(extendDecls, decl) && !decl.TestAttr(Attribute.IS_BROKEN) &&
-                Ty.IsTyCorrect(decl.GetTy()) && IsExtendVisibleForPackage(pkg.fullPackageName, decl)) {
+                Ty.IsTyCorrect(decl.GetTy()) && IsExtendVisibleInCurpkg(decl)) {
                 extendDecls.add(decl)
             }
         }
@@ -660,35 +732,9 @@ public class StructInheritanceChecker {
         for (interfaceTy in interfaceTys) {
             if (let Some(interfaceDecl) <- Ty.GetInheritableDeclPtrOfTy(interfaceTy)) {
                 MergeInheritedMembers(members, GetStoredMembersForDecl(interfaceDecl), interfaceTy, inheritedInterfaces: true)
-                MergeInheritedMembers(members, GetDirectInterfaceMembers(interfaceDecl, interfaceTy), interfaceTy,
-                    inheritedInterfaces: true)
             }
         }
         DiagnoseForConflictInheritance(decl, members)
-        return members
-    }
-
-    private func GetDirectInterfaceMembers(interfaceDecl: InheritableDecl, interfaceTy: Ty): MemberMap {
-        let members = MemberMap()
-        for (member in interfaceDecl.GetMemberDecls()) {
-            if (!Ty.IsTyCorrect(member.GetTy()) || member.TestAttr(Attribute.CONSTRUCTOR)) {
-                continue
-            }
-            if (member.astKind != ASTKind.PROP_DECL && !member.IsFunc()) {
-                continue
-            }
-            let memberSig = MemberSignature(
-                decl: member,
-                ty: member.GetTy(),
-                structTy: Some(interfaceTy),
-                extendDecl: None
-            )
-            memberSig.isInheritedInterface = true
-            for (bounds in GetAllGenericUpperBounds(typeManager, member)) {
-                memberSig.upperBounds.add(bounds)
-            }
-            let _ = UpdateInheritedMemberIfNeeded(members, memberSig, inheritedInterfaces: true)
-        }
         return members
     }
 
@@ -707,7 +753,10 @@ public class StructInheritanceChecker {
             return members
         }
         for (extendDecl in CollectExtendsForDecl(decl, baseTy)) {
-            if (!Ty.IsTyCorrect(extendDecl.GetTy())) {
+            if ((let None <- extendDecl.extendedType) || !Ty.IsTyCorrect(extendDecl.extendedType.getOrThrow().GetTy())) {
+                continue
+            }
+            if (!IsExtendAccessible(curFile, extendDecl)) {
                 continue
             }
             CheckMembersWithInheritedDecls(extendDecl)
@@ -846,17 +895,15 @@ public class StructInheritanceChecker {
             if (SameDecl(otherExtend, curDecl)) {
                 continue
             }
-            if (otherExtend.fullPackageName != curDecl.fullPackageName) {
-                let bothVisibleFromCheckingPackage = otherExtend.fullPackageName != pkg.fullPackageName &&
-                    curDecl.fullPackageName != pkg.fullPackageName &&
-                    IsExtendVisibleForPackage(pkg.fullPackageName, otherExtend)
-                if (!bothVisibleFromCheckingPackage) {
-                    if (IsExtendVisibleForPackage(curDecl.fullPackageName, otherExtend) ||
-                        IsExtendVisibleForPackage(pkg.fullPackageName, otherExtend)) {
+            let areAllFromOtherPkg = otherExtend.fullPackageName != pkg.fullPackageName &&
+                curDecl.fullPackageName != pkg.fullPackageName && IsExtendVisibleInCurpkg(otherExtend)
+            if (otherExtend.fullPackageName != curDecl.fullPackageName && !areAllFromOtherPkg) {
+                if (let Some(curFile) <- curDecl.curFile) {
+                    if (IsExtendAccessible(curFile, otherExtend)) {
                         AddExtendUniqueByPosition(ordered, otherExtend)
                     }
-                    continue
                 }
+                continue
             }
             let skipExtend = DeterminingSkipExtendByInheritanceRelationship(curDecl, otherExtend, extendedDecl)
             if ((let None <- skipExtend) || !skipExtend.getOrThrow()) {
@@ -1578,7 +1625,7 @@ public class StructInheritanceChecker {
             }
             let memberDecl = member.decl.getOrThrow()
             let notInheritable = memberDecl.astKind != ASTKind.PROP_DECL && !memberDecl.IsFunc()
-            if (notInheritable || (let Some(_) <- member.extendDecl)) {
+            if (notInheritable || (let Some(_) <- member.extendDecl) || opts.compileCjd) {
                 continue
             }
             if (IsBuiltInOperatorFuncInExtend(diag, typeManager, member, structDecl)) {
@@ -1611,19 +1658,15 @@ public class StructInheritanceChecker {
                     DiagKind.sema_interface_member_must_be_implemented,
                     args: [DiagArgument(DeclKindText(memberDecl)), DiagArgument(entry.name), DiagArgument(structName)]
                 )
-            } else if (isStaticAbsMember && isAbstractClass) {
-                if (let Some(outer) <- memberDecl.outerDecl) {
-                    if (!SameDecl(outer, structDecl)) {
+            } else if (let Some(outer) <- memberDecl.outerDecl) {
+                if (!SameDecl(outer, structDecl)) {
+                    if (isStaticAbsMember && isAbstractClass) {
                         diag.DiagnoseRefactor(
                             DiagKindRefactor.sema_inherit_abstract_class_static_unimplement_func,
                             DeclRange(structDecl),
                             arguments: [structName, DeclKindText(memberDecl), entry.name]
                         )
-                    }
-                }
-            } else if (!member.inconsistentTypes.IsEmpty()) {
-                if (let Some(outer) <- memberDecl.outerDecl) {
-                    if (!SameDecl(outer, structDecl)) {
+                    } else if (!member.inconsistentTypes.IsEmpty()) {
                         DiagnoseInheritedInsconsistType(member, structDecl)
                     }
                 }

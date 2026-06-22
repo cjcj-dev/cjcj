@@ -2310,5 +2310,69 @@ Confirmation:
   and a non-literal global initializer (`2 + 3`).
 - New corpus case matches reference output standalone: `TOTAL=1  PASS=1  MISMATCH=0  FAIL=0`.
 - Full corpus: `TOTAL=98  PASS=98  MISMATCH=0  FAIL=0`.
+## Probe 25 (InheritanceChecker false-positive unimplemented-interface + zero-range ICE)
+
+Bug: self-compiling `packages/mangle/src` with reference-built `basic/utils/lex/ast/chir` dependencies reached
+`StructInheritanceChecker::DiagnoseForUnimplementedInterfaces`, produced a false "unimplemented interface members"
+diagnostic for a synthetic/imported extend, and then crashed in the diagnostic engine with
+`IllegalStateException: begin of range is zero`. The reference compiler compiles the same package without this
+diagnostic.
+
+Root: the selfhost `StructInheritanceChecker` over-included imported/std extensions when deciding which extend
+decls to inheritance-check. C++ checks extend visibility through `IsExtendVisibleInCurpkg`, which calls
+`importManager.IsExtendAccessible` on the current package's file
+(`/root/cj_build/cangjie_compiler/src/Sema/InheritanceChecker/StructInheritanceChecker.h:139-142`). The
+source-package walker and `GetAllNeedCheckExtended` gate candidates through that predicate
+(`StructInheritanceChecker.cpp:336-340`, `StructInheritanceChecker.cpp:352-356`), base-member collection skips
+extensions that are not accessible from the current file (`StructInheritanceChecker.cpp:475-485`), extension
+ordering uses the same current-package/import accessibility split (`StructInheritanceChecker.cpp:561-569`), and
+generic-instantiation lookup uses `IsExtendVisibleInCurpkg` for visible generic extends
+(`/root/cj_build/cangjie_compiler/src/Sema/InheritanceChecker/InstantiatedChecker.cpp:125-139`).
+`GetAllNeedCheckExtended` also skips a whole set when all extends are imported from one package
+(`StructInheritanceChecker.cpp:1463-1475`). The selfhost port used a package-relation/public check in those
+paths instead, so an imported `std` `extend Array` was checked as if it were part of the mangle package. That
+synthetic imported extend had zero source positions and still carried abstract inherited interface members,
+triggering the false unimplemented diagnostic.
+
+Secondary divergence: the unimplemented-member loop missed C++'s `opts.compileCjd` exclusion
+(`/root/cj_build/cangjie_compiler/src/Sema/InheritanceChecker/StructInheritanceChecker.cpp:967`), and the
+outer-decl gate was split instead of matching C++'s `member.decl->outerDecl != &structDecl`
+(`StructInheritanceChecker.cpp:1003`). The `shouldBeImplemented` computation already matched the C++ merge helper
+(`/root/cj_build/cangjie_compiler/src/Sema/InheritanceChecker/MergeInheritedMemberHelper.cpp:196-202`). The
+diagnostic engine zero-range guard remains faithful to C++'s internal error behavior; the fix is to avoid reaching
+the false diagnostic.
+
+Faithful fix: `StructInheritanceChecker.cj` now threads the real `GlobalOptions` from `TypeChecker`, with no
+default options fallback at the checker constructor, restores the `compileCjd` member exclusion, uses a
+C++-shaped `IsExtendVisibleInCurpkg` backed by an `IsExtendAccessible` predicate equivalent to
+`ImportManager::IsExtendAccessible`
+(`/root/cj_build/cangjie_compiler/src/Modules/ImportManager.cpp:1429-1475`), and applies it to the candidate
+collection, inherited base-extension, extension-ordering, and instantiated generic-extension visibility paths.
+The port also removed a non-C++ direct-interface-member merge; C++ only merges stored
+`structInheritedMembers[interfaceDecl]` after checking the interface (`StructInheritanceChecker.cpp:449-455`).
+That extra merge could reintroduce imported abstract interface signatures after they had been resolved.
+
+Regression coverage: `scripts/septest/run_diag.sh` now builds `pkgExtIface` with the reference compiler and checks
+a selfhost consumer where `extend Token <: Same<Token>` fully implements the interface. The test asserts no
+`sema_need_member_implementation`, no class abstract-member diagnostic, no `IllegalStateException`, and matching
+reference output.
+
+Mangle status:
+
+- Reference deps in `/tmp/mdeps` built with `/root/.cjv/bin/cjc`.
+- Reference mangle compile: exit 0, about 6.6s, about 272MB RSS.
+- Selfhost mangle compile with `cjHeapSize=4GB`: the false unimplemented-interface diagnostic and zero-range ICE
+  are gone. The run proceeds past sema and fails later in the mangle stage after about 6m48s / 3.45GB RSS with
+  `IllegalArgumentException: Using undeclared generic type: T$0` from `packages/mangle/src/BaseMangler.cj:1096`;
+  local tracing isolated that later failure to imported `std.sort` local function mangling (`stable.2` under
+  `sort`). That later mangle-stage failure is outside this sema cut and is routed onward.
+- Selfhost mangle compile with `cjHeapSize=256MB`: still OOMs before producing phase profile output; runtime
+  reports heap capacity near 256MB / object capacity about 0.988 and exits with `Out of memory` in about 6.7s,
+  max RSS about 384MB. This remains a separate performance/memory issue.
+
+Verification:
+
+- Clean `rm -rf target && cjpm build`: success.
+- `bash scripts/difftest.sh`: `TOTAL=97  PASS=97  MISMATCH=0  FAIL=0`.
 - Septests passed separately: `run.sh`, `run_write.sh`, `run_diag.sh`, `run_write_types.sh`,
   `run_write_struct.sh`.

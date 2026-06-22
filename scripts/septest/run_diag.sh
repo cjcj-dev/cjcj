@@ -42,10 +42,12 @@ assert_absent() {
 [[ -x "$SELF" ]] || fail "missing selfhost cjc at $SELF"
 [[ -d "$CANGJIE_HOME" ]] || fail "missing CANGJIE_HOME at $CANGJIE_HOME"
 
-mkdir -p "$WORK/pkgA" "$WORK/pkgB" "$WORK/ref" "$WORK/self"
+mkdir -p "$WORK/pkgA" "$WORK/pkgB" "$WORK/pkgExtIface" "$WORK/pkgExtUse" "$WORK/ref" "$WORK/self"
 cp "$FIXTURE/pkgA/pkgA.cj" "$WORK/pkgA/pkgA.cj"
 cp "$FIXTURE/pkgB/missing_decl.cj" "$WORK/pkgB/missing_decl.cj"
 cp "$FIXTURE/pkgB/generic_func_without_type_arg.cj" "$WORK/pkgB/generic_func_without_type_arg.cj"
+cp "$FIXTURE/pkgExtIface/pkgExtIface.cj" "$WORK/pkgExtIface/pkgExtIface.cj"
+cp "$FIXTURE/pkgExtUse/extend_implements.cj" "$WORK/pkgExtUse/extend_implements.cj"
 
 "$REF" "$WORK/pkgA/pkgA.cj" --output-type=staticlib -o "$WORK/pkgA/libpkgA.a" --set-runtime-rpath \
     >"$WORK/pkgA.ref.stdout" 2>"$WORK/pkgA.ref.stderr" ||
@@ -53,6 +55,16 @@ cp "$FIXTURE/pkgB/generic_func_without_type_arg.cj" "$WORK/pkgB/generic_func_wit
 
 [[ -f "$WORK/pkgA/pkgA.cjo" ]] || fail "reference pkgA did not produce pkgA.cjo"
 [[ -f "$WORK/pkgA/libpkgA.a" ]] || fail "reference pkgA did not produce libpkgA.a"
+
+"$REF" "$WORK/pkgExtIface/pkgExtIface.cj" --output-type=staticlib \
+    -o "$WORK/pkgExtIface/libpkgExtIface.a" --set-runtime-rpath \
+    >"$WORK/pkgExtIface.ref.stdout" 2>"$WORK/pkgExtIface.ref.stderr" ||
+    fail "reference pkgExtIface compile failed: $(tr '\n' ' ' <"$WORK/pkgExtIface.ref.stderr")"
+
+[[ -f "$WORK/pkgExtIface/pkgExtIface.cjo" ]] ||
+    fail "reference pkgExtIface did not produce pkgExtIface.cjo"
+[[ -f "$WORK/pkgExtIface/libpkgExtIface.a" ]] ||
+    fail "reference pkgExtIface did not produce libpkgExtIface.a"
 
 run_missing_decl() {
     local name="$1"
@@ -165,5 +177,37 @@ printf 'SEPTEST-DIAG-PASS selfhost generic range matches reference columns=%s-%s
 
 assert_absent "IllegalStateException" "$WORK/self.generic.stderr"
 printf 'SEPTEST-DIAG-PASS selfhost generic diagnostic did not crash\n'
+
+"$REF" "$WORK/pkgExtUse/extend_implements.cj" --import-path "$WORK/pkgExtIface" \
+    -L "$WORK/pkgExtIface" -lpkgExtIface \
+    -o "$WORK/ref/extend_implements" --set-runtime-rpath \
+    >"$WORK/extend_implements.ref.stdout" 2>"$WORK/extend_implements.ref.stderr" ||
+    fail "reference extend_implements compile failed: $(tr '\n' ' ' <"$WORK/extend_implements.ref.stderr")"
+
+"$SELF" "$WORK/pkgExtUse/extend_implements.cj" --import-path "$WORK/pkgExtIface" \
+    -L "$WORK/pkgExtIface" -lpkgExtIface \
+    -o "$WORK/self/extend_implements" --set-runtime-rpath \
+    >"$WORK/extend_implements.self.stdout" 2>"$WORK/extend_implements.self.stderr" ||
+    fail "selfhost extend_implements compile failed: $(tr '\n' ' ' <"$WORK/extend_implements.self.stderr")"
+
+assert_absent "sema_need_member_implementation" "$WORK/extend_implements.self.stderr"
+assert_absent "sema_class_need_abstract_modifier_or_func_need_impl" "$WORK/extend_implements.self.stderr"
+assert_absent "IllegalStateException" "$WORK/extend_implements.self.stderr"
+printf 'SEPTEST-DIAG-PASS selfhost extend implementation emitted no unimplemented-interface diagnostic\n'
+
+set +e
+extend_ref_out=$("$WORK/ref/extend_implements" 2>"$WORK/extend_implements.ref.run.stderr")
+extend_ref_status=$?
+extend_self_out=$("$WORK/self/extend_implements" 2>"$WORK/extend_implements.self.run.stderr")
+extend_self_status=$?
+set -e
+
+[[ "$extend_ref_status" -eq "$extend_self_status" ]] ||
+    fail "extend_implements exit mismatch: reference=$extend_ref_status selfhost=$extend_self_status"
+[[ "$extend_ref_out" = "$extend_self_out" ]] ||
+    fail "extend_implements output mismatch: reference='$extend_ref_out' selfhost='$extend_self_out'"
+[[ "$extend_self_out" = "1" ]] ||
+    fail "extend_implements output '$extend_self_out' did not match expected '1'"
+printf 'SEPTEST-DIAG-PASS extend_implements output=%s exit=%s\n' "$extend_self_out" "$extend_self_status"
 
 printf 'SEPTEST-DIAG-PASS\n'
