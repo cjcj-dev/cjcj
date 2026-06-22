@@ -2422,3 +2422,41 @@ Confirmation:
 - Full corpus: `TOTAL=99  PASS=99  MISMATCH=0  FAIL=0`.
 - Septests passed separately: `run.sh`, `run_write.sh`, `run_diag.sh`, `run_write_types.sh`,
   `run_write_struct.sh`.
+
+## Probe 27 (imported generic-func default-param desugar ownerFunc on import)
+
+Bug: compiling a package that imports a generic function with a DEFAULT PARAMETER threw
+`IllegalArgumentException: Using undeclared generic type: T$0` at `packages/mangle/src/BaseMangler.cj:1096`.
+This was the next blocker for self-compiling `packages/mangle/src` after Probe 25 (it shows up
+mangling imported `std.sort`'s default-param desugars, e.g. `stable.2 <T$0,P$1>`). Reference
+cjc compiles the same input cleanly.
+
+Root (upstream of the mangler — the mangler is faithful): in `packages/frontend/src/FrontendModel.cj`,
+`LoadFlatFuncDeclAdvancedInfo` never set `ownerFunc` on a param's default-value desugar function for a
+TOP-LEVEL imported generic function. The selfhost only set `desugar.ownerFunc` in
+`SetFlatOuterDeclForMember` (member funcs only). With `ownerFunc = None`, `BaseMangler.MangleFunctionDecl`
+(line 633) skips the `HAS_INITIAL` branch (gated on `if (let Some(owner) <- funcDecl.ownerFunc)`), so
+`MangleDeclName` → `MangleGenericArguments` never declares the desugar's `<T$0>` onto `genericsTypeStack`;
+execution falls to `MangleFuncParams` with an empty stack and a `T$0` param lookup throws at :1096.
+(Generic decls serialize an empty `mangledName` — C++ `ASTWriter.cpp:1657-1665` — so both compilers must
+re-mangle these desugars on import.)
+
+C++ ground truth: `src/Modules/ASTSerialization/ASTLoader.cpp:829-833` (`LoadFuncDeclAdvancedInfo`) sets
+`param->desugarDecl->ownerFunc = &funcDecl` UNCONDITIONALLY (top-level AND member funcs) while updating
+param-function references.
+
+Faithful fix: in `LoadFlatFuncDeclAdvancedInfo`, immediately after `funcDecl.funcBody = Some(body)`,
+iterate `body.paramLists[0].params` and set `desugar.ownerFunc = Some(funcDecl)` for each
+`param.desugarDecl`. One function, one already-existing field, mirrors C++ exactly; idempotent with the
+existing member path.
+
+Confirmation:
+- Clean `rm -rf target && cjpm build`: success.
+- Repro (`public func gfn<T>(x: T, y!: T = x): T` in a dep, imported + `gfn<Int64>(3)` in a consumer):
+  selfhost now prints `3`, matching reference; pre-fix `main` crashed with the `T$0` exception.
+- Full corpus: `TOTAL=99  PASS=99  MISMATCH=0  FAIL=0`.
+- All 5 septests pass + new `scripts/septest/run_gendefault.sh` (ref-built generic-default-param dep,
+  selfhost consumer) passes: `self=3 ref=3`.
+- NOTE: this fixes the IMPORT-loader side. A complementary, broader gap remains (tracked): the frontend
+  mangling driver (`CompilerInstance.cj`) never walks function BODIES, so nested local funcs / lambdas in
+  generic contexts are unmangled (`MangleLambda` has no callers).

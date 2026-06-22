@@ -1410,6 +1410,18 @@ private class CjoSignatureMaterializer {
         body.captureKind = FlatCaptureKind(reader.U8Field(bodyTable, 12, 0u8))
         body.funcDecl = Some(funcDecl)
         funcDecl.funcBody = Some(body)
+        // Update param functions' references: set ownerFunc on each param's desugar (default-param)
+        // function, for top-level AND member funcs. Mirrors C++ ASTLoader.cpp:829-833 — without this
+        // a top-level imported generic func's default-param desugar (e.g. y.1 <T$0,P$1>) has no
+        // ownerFunc, so MangleFunctionDecl skips MangleDeclName and never declares <T$0> on the
+        // generics stack, throwing "Using undeclared generic type" at mangle time.
+        if (!body.paramLists.isEmpty()) {
+            for (param in body.paramLists[0].params) {
+                if (let Some(desugar) <- param.desugarDecl) {
+                    desugar.ownerFunc = Some(funcDecl)
+                }
+            }
+        }
         SetFlatGeneric(reader, record, funcDecl)
         if (let Some(funcTy) <- FlatFuncTypeFromBody(reader, bodyTable, body)) {
             body.SetTy(funcTy)
