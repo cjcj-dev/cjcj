@@ -1836,6 +1836,102 @@ public class TypeChecker {
         return false
     }
 
+    private func LookupCoreDeclForSpawn(ctx: ASTContext, name: String): Option<Decl> {
+        if (let Some(decl) <- lookupResolvedPackageDecl(ctx, "std.core", name)) {
+            addImportedDeclAndDependencies(ctx, decl)
+            return Some(decl)
+        }
+        return None
+    }
+
+    private func LookupCoreFutureForSpawn(ctx: ASTContext): Option<ClassDecl> {
+        if (let Some(decl) <- LookupCoreDeclForSpawn(ctx, "Future")) {
+            return decl as ClassDecl
+        }
+        return None
+    }
+
+    private func LookupCoreThreadContextTyForSpawn(ctx: ASTContext): Option<Ty> {
+        if (let Some(decl) <- LookupCoreDeclForSpawn(ctx, "ThreadContext")) {
+            return decl.GetTy()
+        }
+        return None
+    }
+
+    private func DiagnoseNoCoreObjectForSpawn(expr: SpawnExpr): Unit {
+        if (let Some(diagValue) <- impl.diag) {
+            let builder = diagValue.Diagnose(expr.begin, expr.end, BasicDiagKind.sema_no_core_object)
+            builder.Emit()
+        }
+    }
+
+    private func SynthesizeSpawnExpr(ctx: ASTContext, expr: SpawnExpr): Ty {
+        if (let Some(arg) <- expr.arg) {
+            let _ = Synthesize(ctx, arg)
+        }
+        if (let Some(task) <- expr.task) {
+            let _ = Synthesize(ctx, task)
+        }
+        let futureClass = LookupCoreFutureForSpawn(ctx)
+        if (let None <- futureClass) {
+            DiagnoseNoCoreObjectForSpawn(expr)
+            expr.SetTy(TypeManager.GetInvalidTy())
+            return TypeManager.GetInvalidTy()
+        }
+        let spawnTy = SynSpawnExpr(impl.typeManager, expr, futureClass: futureClass,
+            threadContextTy: LookupCoreThreadContextTyForSpawn(ctx))
+        return FinishSynthesize(ctx, expr, spawnTy)
+    }
+
+    private func SelectSpawnFutureTy(ctx: ASTContext, target: Ty): Option<Ty> {
+        if (TypeManager.IsCoreFutureType(target)) {
+            return Some(target)
+        }
+        if (let Some(futureClass) <- LookupCoreFutureForSpawn(ctx)) {
+            if (let Some(futureTy) <- futureClass.GetTy()) {
+                let fuTys = Promotion(impl.typeManager).Downgrade(futureTy, target)
+                if (!fuTys.values.isEmpty()) {
+                    return Some(fuTys.values[0])
+                }
+            }
+        }
+        return None
+    }
+
+    private func CheckSpawnExprWithTarget(ctx: ASTContext, target: Ty, expr: SpawnExpr): Bool {
+        if (let Some(fuTy) <- SelectSpawnFutureTy(ctx, target)) {
+            if (fuTy.typeArgs.isEmpty()) {
+                expr.SetTy(TypeManager.GetInvalidTy())
+                return false
+            }
+            var isWellTyped = true
+            if (let Some(arg) <- expr.arg) {
+                let _ = Synthesize(ctx, arg)
+                isWellTyped = CheckSpawnArgValid(impl.typeManager, arg,
+                    threadContextTy: LookupCoreThreadContextTyForSpawn(ctx)) && isWellTyped
+            }
+            if (let Some(task) <- expr.task) {
+                let funcTy = impl.typeManager.GetFunctionTy(Array<Ty>(), fuTy.typeArgs[0])
+                isWellTyped = Check(ctx, funcTy, task) && isWellTyped
+            } else {
+                isWellTyped = false
+            }
+            if (!isWellTyped) {
+                expr.SetTy(TypeManager.GetInvalidTy())
+                return false
+            }
+            expr.SetTy(fuTy)
+            return true
+        }
+        let synTy = SynthesizeSpawnExpr(ctx, expr)
+        if (Ty.IsTyCorrect(synTy) &&
+            impl.typeManager.CheckTypeCompatibility(target, synTy) != TypeCompatibility.INCOMPATIBLE) {
+            return true
+        }
+        expr.SetTy(TypeManager.GetInvalidTy())
+        return false
+    }
+
     private func ReturnExprTargetTy(returnExpr: ReturnExpr): Option<Ty> {
         if (let None <- returnExpr.refFuncBody) {
             return None
@@ -2565,6 +2661,9 @@ public class TypeChecker {
             }
             return FinishSynthesize(ctx, arrayLit, arrayTy)
         }
+        if (let Some(spawnExpr) <- (expr as SpawnExpr)) {
+            return SynthesizeSpawnExpr(ctx, spawnExpr)
+        }
         return FinishSynthesize(ctx, expr, SynExprShallow(impl.typeManager, expr))
     }
 
@@ -2739,6 +2838,9 @@ public class TypeChecker {
                 let _ = SynthesizeFuncArg(ctx, arg)
             }
             return FinishCheck(ctx, arrayExpr, ChkArrayExpr(impl.typeManager, target, arrayExpr, diag: impl.diag))
+        }
+        if (let Some(spawnExpr) <- (expr as SpawnExpr)) {
+            return FinishCheck(ctx, spawnExpr, CheckSpawnExprWithTarget(ctx, target, spawnExpr))
         }
         let _ = Synthesize(ctx, expr)
         return FinishCheck(ctx, expr, ChkExprShallow(impl.typeManager, target, expr))

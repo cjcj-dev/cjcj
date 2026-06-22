@@ -94,9 +94,6 @@ public func DesugarSpawnExpr(typeManager: TypeManager, expr: SpawnExpr): Unit {
                 if (let Some(spawnTy) <- expr.GetTy()) {
                     if (let Some(futureTy) <- (spawnTy as ClassTy)) {
                         if (let Some(futureClass) <- futureTy.declPtr) {
-                            if (futureTy.typeArgs.isEmpty()) {
-                                return
-                            }
                             if (let Some(initDecl) <- FindSingleConstructor(futureClass)) {
                                 if (let Some(initTy) <- initDecl.GetTy()) {
                                     if (!initTy.IsFunc()) {
@@ -110,11 +107,18 @@ public func DesugarSpawnExpr(typeManager: TypeManager, expr: SpawnExpr): Unit {
                                 refExpr.ref.target = initDecl
                                 refExpr.ref.targets.add(initDecl)
                                 refExpr.instTys.add(funcTy.retTy)
-                                if (let Some(genericTy) <- (futureTy.typeArgs[0] as GenericsTy)) {
-                                    let mapping = TypeSubst()
-                                    mapping.Put(genericTy, funcTy.retTy)
-                                    if (let Some(initTy) <- initDecl.GetTy()) {
-                                        refExpr.SetTy(typeManager.GetInstantiatedTy(initTy, mapping))
+                                if (let Some(futureClassTy) <- futureClass.GetTy()) {
+                                    if (futureClassTy.typeArgs.size != 1) {
+                                        return
+                                    }
+                                    if (let Some(genericTy) <- (futureClassTy.typeArgs[0] as GenericsTy)) {
+                                        let mapping = TypeSubst()
+                                        mapping.Put(genericTy, funcTy.retTy)
+                                        if (let Some(initTy) <- initDecl.GetTy()) {
+                                            refExpr.SetTy(typeManager.GetInstantiatedTy(initTy, mapping))
+                                        }
+                                    } else if (let Some(initTy) <- initDecl.GetTy()) {
+                                        refExpr.SetTy(initTy)
                                     }
                                 } else if (let Some(initTy) <- initDecl.GetTy()) {
                                     refExpr.SetTy(initTy)
@@ -125,6 +129,7 @@ public func DesugarSpawnExpr(typeManager: TypeManager, expr: SpawnExpr): Unit {
                                 CopyBasicInfo(task, taskArg)
                                 taskArg.SetTy(taskTy)
                                 args.add(taskArg)
+                                expr.task = None
                                 let callExpr = CreateCallExpr(refExpr, args)
                                 CopyBasicInfo(task, callExpr)
                                 callExpr.callKind = CallKind.CALL_OBJECT_CREATION
