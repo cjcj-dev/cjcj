@@ -2,6 +2,9 @@ package cangjie_compiler::sema.TypeCheckExpr
 
 import std.collection.*
 import cangjie_compiler::ast.*
+import cangjie_compiler::basic.DiagArgument as BasicDiagArgument
+import cangjie_compiler::basic.DiagKind as BasicDiagKind
+import cangjie_compiler::basic.DiagnosticEngine as BasicDiagnosticEngine
 import cangjie_compiler::option.GlobalOptions as OptionGlobalOptions
 import cangjie_compiler::sema.*
 import cangjie_compiler::sema.Desugar.*
@@ -1007,6 +1010,11 @@ public class TypeChecker {
     private func SynthesizeTypeNode(ctx: ASTContext, typeNode: Option<Type>): Unit {
         if (let Some(value) <- typeNode) {
             impl.SetTypeTy(ctx, value)
+            if (!Ty.IsTyCorrect(value.GetTy())) {
+                if (let Some(diagValue) <- impl.diag) {
+                    let _ = DiagnoseInvalidTypeName(diagValue, value)
+                }
+            }
             if (let Some(target) <- value.GetTarget()) {
                 addImportedDeclAndDependencies(ctx, target)
                 if (let Some(enumDecl) <- (target as EnumDecl)) {
@@ -1014,6 +1022,30 @@ public class TypeChecker {
                 }
             }
         }
+    }
+
+    private func DiagnoseInvalidTypeName(diagValue: BasicDiagnosticEngine, typeNode: Type): Bool {
+        if (typeNode.TestAttr(Attribute.IS_BROKEN) || Ty.IsTyCorrect(typeNode.GetTy())) {
+            return false
+        }
+        if (let Some(refType) <- (typeNode as RefType)) {
+            if ((let None <- refType.ref.target) && refType.ref.identifier.Val() != INVALID_IDENTIFIER) {
+                let builder = diagValue.Diagnose(refType.begin, refType.end,
+                    BasicDiagKind.sema_undeclared_type_name,
+                    args: [BasicDiagArgument(refType.ref.identifier.Val())])
+                builder.Emit()
+                refType.EnableAttr(Attribute.IS_BROKEN)
+                return true
+            }
+        }
+        for (child in typeNode.Children()) {
+            if (let Some(childType) <- (child as Type)) {
+                if (DiagnoseInvalidTypeName(diagValue, childType)) {
+                    return true
+                }
+            }
+        }
+        return false
     }
 
     private func SynthesizeFuncArg(ctx: ASTContext, arg: FuncArg): Ty {

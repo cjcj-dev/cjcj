@@ -22,13 +22,18 @@ fail() {
 [[ -d "$CANGJIE_HOME" ]] || fail "missing CANGJIE_HOME at $CANGJIE_HOME"
 
 mkdir -p "$WORK/pkgA" "$WORK/pkgSig" "$WORK/pkgA4" "$WORK/pkgReExportP" "$WORK/pkgReExportQ" \
-    "$WORK/pkgReExportM" "$WORK/pkgB" "$WORK/pkgB4" "$WORK/ref" "$WORK/self"
+    "$WORK/pkgReExportM" "$WORK/pkgReParamBase" "$WORK/pkgReParamHubRef" "$WORK/pkgReParamHub" \
+    "$WORK/pkgReParamUse" "$WORK/pkgB" "$WORK/pkgB4" "$WORK/ref" "$WORK/self"
 cp "$FIXTURE/pkgA/pkgA.cj" "$WORK/pkgA/pkgA.cj"
 cp "$FIXTURE/pkgSig/pkgSig.cj" "$WORK/pkgSig/pkgSig.cj"
 cp "$FIXTURE/pkgA4/pkgA4.cj" "$WORK/pkgA4/pkgA4.cj"
 cp "$FIXTURE/pkgReExportP/pkgReExportP.cj" "$WORK/pkgReExportP/pkgReExportP.cj"
 cp "$FIXTURE/pkgReExportQ/pkgReExportQ.cj" "$WORK/pkgReExportQ/pkgReExportQ.cj"
 cp "$FIXTURE/pkgReExportM/use_reexport.cj" "$WORK/pkgReExportM/use_reexport.cj"
+cp "$FIXTURE/pkgReParamBase/kind.cj" "$WORK/pkgReParamBase/kind.cj"
+cp "$FIXTURE/pkgReParamHub/hub.cj" "$WORK/pkgReParamHubRef/hub.cj"
+cp "$FIXTURE/pkgReParamHub/hub.cj" "$WORK/pkgReParamHub/hub.cj"
+cp "$FIXTURE/pkgReParamUse/use.cj" "$WORK/pkgReParamUse/use.cj"
 cp "$FIXTURE/pkgB/function.cj" "$WORK/pkgB/function.cj"
 cp "$FIXTURE/pkgB/function_single.cj" "$WORK/pkgB/function_single.cj"
 cp "$FIXTURE/pkgB/greeting.cj" "$WORK/pkgB/greeting.cj"
@@ -76,6 +81,33 @@ cp "$FIXTURE/pkgB4/protected_lub.cj" "$WORK/pkgB4/protected_lub.cj"
     fail "reference pkgReExportQ did not produce pkgReExportQ.cjo"
 [[ -f "$WORK/pkgReExportQ/libpkgReExportQ.a" ]] ||
     fail "reference pkgReExportQ did not produce libpkgReExportQ.a"
+
+"$REF" "$WORK/pkgReParamBase/kind.cj" --output-type=staticlib \
+    -o "$WORK/pkgReParamBase/libpkgReParamBase.a" --set-runtime-rpath \
+    >"$WORK/pkgReParamBase.ref.stdout" 2>"$WORK/pkgReParamBase.ref.stderr" ||
+    fail "reference pkgReParamBase compile failed: $(tr '\n' ' ' <"$WORK/pkgReParamBase.ref.stderr")"
+
+[[ -f "$WORK/pkgReParamBase/pkgReParamBase.cjo" ]] ||
+    fail "reference pkgReParamBase did not produce pkgReParamBase.cjo"
+[[ -f "$WORK/pkgReParamBase/libpkgReParamBase.a" ]] ||
+    fail "reference pkgReParamBase did not produce libpkgReParamBase.a"
+
+"$REF" "$WORK/pkgReParamHubRef/hub.cj" --import-path "$WORK/pkgReParamBase" \
+    -L "$WORK/pkgReParamBase" -lpkgReParamBase --output-type=staticlib \
+    -o "$WORK/pkgReParamHubRef/libpkgReParamHub.a" --set-runtime-rpath \
+    >"$WORK/pkgReParamHub.ref.stdout" 2>"$WORK/pkgReParamHub.ref.stderr" ||
+    fail "reference pkgReParamHub compile failed: $(tr '\n' ' ' <"$WORK/pkgReParamHub.ref.stderr")"
+
+"$SELF" "$WORK/pkgReParamHub/hub.cj" --import-path "$WORK/pkgReParamBase" \
+    -L "$WORK/pkgReParamBase" -lpkgReParamBase --output-type=staticlib \
+    -o "$WORK/pkgReParamHub/libpkgReParamHub.a" --set-runtime-rpath \
+    >"$WORK/pkgReParamHub.self.stdout" 2>"$WORK/pkgReParamHub.self.stderr" ||
+    fail "selfhost pkgReParamHub compile failed: $(tr '\n' ' ' <"$WORK/pkgReParamHub.self.stderr")"
+
+[[ -f "$WORK/pkgReParamHub/pkgReParamHub.cjo" ]] ||
+    fail "selfhost pkgReParamHub did not produce pkgReParamHub.cjo"
+[[ -f "$WORK/pkgReParamHub/libpkgReParamHub.a" ]] ||
+    fail "selfhost pkgReParamHub did not produce libpkgReParamHub.a"
 
 run_case() {
     local name="$1"
@@ -167,6 +199,36 @@ set -e
     fail "use_reexport output '$reexport_self_out' did not match expected '7'"
 
 printf 'SEPTEST-use_reexport-PASS output=%s exit=%s\n' "$reexport_self_out" "$reexport_self_status"
+
+"$REF" "$WORK/pkgReParamUse/use.cj" --import-path "$WORK/pkgReParamHubRef" \
+    --import-path "$WORK/pkgReParamBase" -L "$WORK/pkgReParamHubRef" -lpkgReParamHub \
+    -L "$WORK/pkgReParamBase" -lpkgReParamBase \
+    -o "$WORK/ref/use_reexport_param" --set-runtime-rpath \
+    >"$WORK/use_reexport_param.ref.stdout" 2>"$WORK/use_reexport_param.ref.stderr" ||
+    fail "reference pkgReParamUse compile failed: $(tr '\n' ' ' <"$WORK/use_reexport_param.ref.stderr")"
+
+"$SELF" "$WORK/pkgReParamUse/use.cj" --import-path "$WORK/pkgReParamHub" \
+    --import-path "$WORK/pkgReParamBase" -L "$WORK/pkgReParamHub" -lpkgReParamHub \
+    -L "$WORK/pkgReParamBase" -lpkgReParamBase \
+    -o "$WORK/self/use_reexport_param" --set-runtime-rpath \
+    >"$WORK/use_reexport_param.self.stdout" 2>"$WORK/use_reexport_param.self.stderr" ||
+    fail "selfhost pkgReParamUse compile failed: $(tr '\n' ' ' <"$WORK/use_reexport_param.self.stderr")"
+
+set +e
+reparam_ref_out=$("$WORK/ref/use_reexport_param" 2>"$WORK/use_reexport_param.ref.run.stderr")
+reparam_ref_status=$?
+reparam_self_out=$("$WORK/self/use_reexport_param" 2>"$WORK/use_reexport_param.self.run.stderr")
+reparam_self_status=$?
+set -e
+
+[[ "$reparam_ref_status" -eq "$reparam_self_status" ]] ||
+    fail "use_reexport_param exit mismatch: reference=$reparam_ref_status selfhost=$reparam_self_status"
+[[ "$reparam_ref_out" = "$reparam_self_out" ]] ||
+    fail "use_reexport_param output mismatch: reference='$reparam_ref_out' selfhost='$reparam_self_out'"
+[[ "$reparam_self_out" = "true" ]] ||
+    fail "use_reexport_param output '$reparam_self_out' did not match expected 'true'"
+
+printf 'SEPTEST-use_reexport_param-PASS output=%s exit=%s\n' "$reparam_self_out" "$reparam_self_status"
 
 "$REF" "$WORK/pkgB4/protected_lub.cj" --import-path "$WORK/pkgA4" -L "$WORK/pkgA4" -lpkgA4 \
     -o "$WORK/ref/protected_lub" --set-runtime-rpath \
