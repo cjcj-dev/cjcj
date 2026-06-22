@@ -113,6 +113,7 @@ public class CGFunctionType <: CGType {
             }
             realParamIndices.clear()
             for (paramTy in funcTy.GetParamTypes()) {
+                let paramCGType = CGType.GetOrCreate(cgMod, paramTy)
                 let isImportedGenericStructThis = importedGenericStructWrapper && realParamIndices.isEmpty() &&
                     paramTy.IsRef() && paramTy.StripAllRefs().IsStruct()
                 realParamIndices.add(paramLLVMTypes.size)
@@ -126,8 +127,10 @@ public class CGFunctionType <: CGType {
                         paramLLVMTypes.add(CGType.GetRefType(cgCtx.GetLLVMContext()))
                         hasBasePtr = true
                     }
+                } else if (ShouldPassByPointer(paramTy, paramCGType)) {
+                    let addrspace = if (paramCGType.GetSize().isSome()) { 0u32 } else { 1u32 }
+                    paramLLVMTypes.add(unsafe { LLVMPointerType(paramCGType.GetLLVMType(), addrspace) })
                 } else {
-                    let paramCGType = CGType.GetOrCreate(cgMod, paramTy)
                     if (ShouldNeedBasePtr(paramTy) && allowBasePtr) {
                         paramLLVMTypes.add(unsafe { LLVMPointerType(paramCGType.GetLLVMType(), 0u32) })
                     } else {
@@ -185,7 +188,14 @@ public class CGFunctionType <: CGType {
         if (let Some(funcTy) <- (chirType as FuncType)) {
             containedCGTypes.add(CGType.GetOrCreate(cgMod, funcTy.GetReturnType()))
             for (paramTy in funcTy.GetParamTypes()) {
-                containedCGTypes.add(CGType.GetOrCreate(cgMod, paramTy))
+                let paramCGType = CGType.GetOrCreate(cgMod, paramTy)
+                if (ShouldPassByPointer(paramTy, paramCGType)) {
+                    let addrspace = if (paramCGType.GetSize().isSome()) { 0u32 } else { 1u32 }
+                    containedCGTypes.add(CGType.GetOrCreate(cgMod,
+                        cgCtx.GetCHIRBuilder().context.GetRefTy(paramTy), extraInfo: TypeExtraInfo(addrspace)))
+                } else {
+                    containedCGTypes.add(paramCGType)
+                }
             }
         }
     }
@@ -218,5 +228,10 @@ public class CGFunctionType <: CGType {
 
     private func ShouldNeedBasePtr(paramTy: Type): Bool {
         return paramTy.IsStruct() || paramTy.IsTuple()
+    }
+
+    private func ShouldPassByPointer(paramTy: Type, cgType: CGType): Bool {
+        return paramTy.IsStruct() || paramTy.IsTuple() || (!cgType.GetSize().isSome() && !paramTy.IsGeneric()) ||
+            cgType.IsStructType() || cgType.IsVArrayType()
     }
 }

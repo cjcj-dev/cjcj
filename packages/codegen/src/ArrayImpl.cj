@@ -282,6 +282,9 @@ private func StoreValueForAddress(irBuilder: IRBuilder2, value: CGValue, addr: C
     if (let Some(addrCGType) <- addr.GetCGType()) {
         if (let Some(destCGType) <- addrCGType.GetPointerElementType()) {
             let destTy = destCGType.GetLLVMType()
+            if (destCGType.IsVArrayType()) {
+                return irBuilder.CreateLoad(destTy, raw, name: "store.value")
+            }
             if (IsPointerLLVMType(destTy)) {
                 return irBuilder.CreateBitCast(raw, destTy, name: "store.ptr.cast")
             }

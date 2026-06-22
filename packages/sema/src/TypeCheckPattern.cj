@@ -650,13 +650,15 @@ public func ChkVarPattern(ctx: ASTContext, target: Ty, pattern: VarPattern): Boo
 }
 
 public func IsFuncTyEnumPatternMatched(typeManager: TypeManager, ctx: ASTContext,
-    target: Ty, funcTy: FuncTy, pattern: EnumPattern): Bool {
+    target: Ty, funcTy: FuncTy, pattern: EnumPattern,
+    exprChecker!: Option<ConstPatternExprChecker> = None): Bool {
     if (funcTy.paramTys.size != pattern.patterns.size) {
         return false
     }
     var idx: Int64 = 0
     while (idx < pattern.patterns.size) {
-        if (!ChkPattern(typeManager, ctx, funcTy.paramTys[idx], pattern.patterns[idx])) {
+        if (!ChkPattern(typeManager, ctx, funcTy.paramTys[idx], pattern.patterns[idx],
+            exprChecker: exprChecker)) {
             return false
         }
         idx++
@@ -664,7 +666,8 @@ public func IsFuncTyEnumPatternMatched(typeManager: TypeManager, ctx: ASTContext
     return typeManager.IsTyEqual(funcTy.retTy, target)
 }
 
-public func ChkEnumPattern(typeManager: TypeManager, ctx: ASTContext, target: Ty, pattern: EnumPattern): Bool {
+public func ChkEnumPattern(typeManager: TypeManager, ctx: ASTContext, target: Ty, pattern: EnumPattern,
+    exprChecker!: Option<ConstPatternExprChecker> = None): Bool {
     var mayMatch = false
     let maybeInferred = typeManager.TryGreedySubst(target)
     if (let Some(enumTy) <- (maybeInferred as EnumTy)) {
@@ -701,7 +704,8 @@ public func ChkEnumPattern(typeManager: TypeManager, ctx: ASTContext, target: Ty
                 }
             }
             if (let Some(funcTy) <- ((constructor.GetTy() ?? TypeManager.GetInvalidTy()) as FuncTy)) {
-                if (IsFuncTyEnumPatternMatched(typeManager, ctx, target, funcTy, pattern)) {
+                if (IsFuncTyEnumPatternMatched(typeManager, ctx, target, funcTy, pattern,
+                    exprChecker: exprChecker)) {
                     pattern.SetTy(funcTy.retTy)
                     return true
                 }
@@ -811,7 +815,7 @@ public func ChkPattern(typeManager: TypeManager, ctx: ASTContext, target: Ty,
         return ChkVarPattern(ctx, target, varPattern)
     }
     if (let Some(enumPattern) <- (pattern as EnumPattern)) {
-        return ChkEnumPattern(typeManager, ctx, target, enumPattern)
+        return ChkEnumPattern(typeManager, ctx, target, enumPattern, exprChecker: exprChecker)
     }
     if (let Some(varOrEnum) <- (pattern as VarOrEnumPattern)) {
         return ChkVarOrEnumPattern(typeManager, ctx, target, varOrEnum, exprChecker: exprChecker)

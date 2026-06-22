@@ -61,6 +61,9 @@ private func GenerateFieldByPath(irBuilder: IRBuilder2, base: Value,
                 let fieldAddr = irBuilder.CreateGEP(gepElementType, basePointer, indices,
                     name: name + ".addr")
                 if (let Some(fieldType) <- GetFieldCGTypeAtPath(elementType, path)) {
+                    if (fieldType.IsStructType()) {
+                        return fieldAddr
+                    }
                     let loaded = irBuilder.CreateLoad(fieldType.GetLLVMType(), fieldAddr, name: name)
                     return CastExtractedFieldIfNeeded(irBuilder, loaded, fieldType.GetOriginal(), expectedTy)
                 }
@@ -108,7 +111,7 @@ private func GenerateEnumTupleCastField(irBuilder: IRBuilder2, base: Value,
     let baseValue = irBuilder.GetCGModule().MaterializeValue(irBuilder, base).GetRawValue()
     if (let Some(enumCGType) <- (CGType.GetOrCreate(irBuilder.GetCGModule(), sourceTy.StripAllRefs()) as CGEnumType)) {
         if (enumCGType.IsAllAssociatedValuesAreNonRef() || enumCGType.IsOptionLikeNonRef()) {
-            var extracted = baseValue
+            var extracted = LoadPointerBackedEnumAggregateIfNeeded(irBuilder, baseValue, enumCGType)
             for (item in path) {
                 extracted = irBuilder.CreateExtractValue(extracted, UInt32(item), name: name)
             }
@@ -119,6 +122,15 @@ private func GenerateEnumTupleCastField(irBuilder: IRBuilder2, base: Value,
         }
     }
     return Some(LoadObjectPayloadField(irBuilder, baseValue, targetTy, path, name, expectedTy))
+}
+
+private func LoadPointerBackedEnumAggregateIfNeeded(irBuilder: IRBuilder2, rawValue: LLVMValueRef,
+    enumCGType: CGEnumType): LLVMValueRef {
+    let rawTy = unsafe { LLVMTypeOf(rawValue) }
+    if (!rawTy.isNull() && unsafe { LLVMGetTypeKind(rawTy) } == 12) {
+        return irBuilder.CreateLoad(enumCGType.GetLLVMType(), rawValue, name: "enum.value")
+    }
+    return rawValue
 }
 
 private func GenerateDirectEnumField(irBuilder: IRBuilder2, base: Value,

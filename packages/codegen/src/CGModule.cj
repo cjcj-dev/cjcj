@@ -389,10 +389,12 @@ public class CGModule {
             let param = chirFunc.GetParam(idx)
             let rawArg = cgFunc.GetArgByIndexFromCHIR(idx)
             let paramCGType = if (let Some(paramTy) <- param.GetType()) {
-                if (!paramTy.IsRef() && (paramTy.IsStruct() || paramTy.IsTuple())) {
+                let valueCGType = GetCGTypeForValue(param)
+                if (!paramTy.IsRef() && (paramTy.IsStruct() || paramTy.IsTuple() ||
+                    valueCGType.IsStructType() || valueCGType.IsVArrayType())) {
                     CGType.GetOrCreate(this, cgCtx.GetCGPkgContext().GetCHIRBuilder().context.GetRefTy(paramTy))
                 } else {
-                    GetCGTypeForValue(param)
+                    valueCGType
                 }
             } else {
                 GetCGTypeForValue(param)

@@ -680,10 +680,11 @@ public class IRBuilder2 <: Resource {
             return raw
         }
         let derefParamTy = paramTy.StripAllRefs()
-        if (!(derefParamTy.IsStruct() || derefParamTy.IsTuple())) {
+        let derefParamCGType = CGType.GetOrCreate(cgMod, derefParamTy)
+        if (!(derefParamTy.IsStruct() || derefParamTy.IsTuple() ||
+            derefParamCGType.IsStructType() || derefParamCGType.IsVArrayType())) {
             return raw
         }
-        let derefParamCGType = CGType.GetOrCreate(cgMod, derefParamTy)
         let rawTy = unsafe { LLVMTypeOf(raw) }
         if (!rawTy.isNull() && unsafe { LLVMGetTypeKind(rawTy) } == 12) {
             let destPtrTy = if (paramTy.IsRef()) {
@@ -705,15 +706,76 @@ public class IRBuilder2 <: Resource {
             let argTy = argCGType.GetOriginal().StripAllRefs()
             if ((argTy.IsStruct() || argTy.IsTuple()) && !argTy.IsEqual(derefParamTy)) {
                 let actualSlot = CreateEntryAlloca(argCGType, name: allocaName)
-                CreateStore(raw, actualSlot)
+                StoreAggregateArgToSlot(raw, actualSlot, argCGType)
                 let destPtrTy = unsafe { LLVMPointerType(derefParamCGType.GetLLVMType(), 0u32) }
                 return CreatePointerCast(actualSlot, destPtrTy,
                     name: if (name.isEmpty()) { "arg.addr.cast" } else { name + ".arg.addr.cast" })
             }
         }
         let slot = CreateEntryAlloca(derefParamCGType, name: allocaName)
-        CreateStore(raw, slot)
+        StoreAggregateArgToSlot(raw, slot, derefParamCGType)
         return slot
+    }
+
+    private func StoreAggregateArgToSlot(raw: LLVMValueRef, slot: LLVMValueRef, slotCGType: CGType): LLVMValueRef {
+        let rawTy = unsafe { LLVMTypeOf(raw) }
+        if (rawTy.isNull() || unsafe { LLVMGetTypeKind(rawTy) } != 10 || !slotCGType.IsStructType()) {
+            return CreateStore(raw, slot)
+        }
+        let fields = slotCGType.GetContainedTypes()
+        if (fields.isEmpty()) {
+            return StoreLLVMAggregateArgToSlot(raw, slot, slotCGType)
+        }
+        var lastStore = LLVMNullValue()
+        var idx: Int64 = 0
+        while (idx < fields.size) {
+            let fieldValue = CreateExtractValue(raw, UInt32(idx), name: "arg.field")
+            let fieldSlot = CreateStructGEP(slotCGType.GetLLVMType(), slot, UInt32(idx), name: "arg.field.addr")
+            let fieldCGType = fields[idx]
+            let fieldRawTy = unsafe { LLVMTypeOf(fieldValue) }
+            if (!fieldRawTy.isNull() && unsafe { LLVMGetTypeKind(fieldRawTy) } == 12 && fieldCGType.IsStructType()) {
+                if (let Some(size) <- fieldCGType.GetSize()) {
+                    if (size > 0) {
+                        let rawSize = unsafe {
+                            LLVMConstInt(LLVMInt64TypeInContext(GetLLVMContext().raw), UInt64(size), 0)
+                        }
+                        let align = cgMod.GetABITypeAlignment(fieldCGType.GetLLVMType())
+                        lastStore = CreateMemCpy(fieldSlot, align, fieldValue, align, rawSize)
+                    }
+                }
+            } else if (!fieldRawTy.isNull() && unsafe { LLVMGetTypeKind(fieldRawTy) } == 10 && fieldCGType.IsStructType()) {
+                lastStore = StoreAggregateArgToSlot(fieldValue, fieldSlot, fieldCGType)
+            } else {
+                lastStore = CreateStore(fieldValue, fieldSlot)
+            }
+            idx++
+        }
+        return lastStore
+    }
+
+    private func StoreLLVMAggregateArgToSlot(raw: LLVMValueRef, slot: LLVMValueRef, slotCGType: CGType): LLVMValueRef {
+        let rawTy = unsafe { LLVMTypeOf(raw) }
+        if (rawTy.isNull() || unsafe { LLVMGetTypeKind(rawTy) } != 10 || !slotCGType.IsStructType()) {
+            return CreateStore(raw, slot)
+        }
+        let fieldCount = unsafe { LLVMCountStructElementTypes(rawTy) }
+        if (fieldCount == 0u32) {
+            return CreateStore(raw, slot)
+        }
+        var lastStore = LLVMNullValue()
+        var idx: UInt32 = 0u32
+        while (idx < fieldCount) {
+            let fieldValue = CreateExtractValue(raw, idx, name: "arg.field")
+            let fieldSlot = CreateStructGEP(slotCGType.GetLLVMType(), slot, idx, name: "arg.field.addr")
+            let fieldRawTy = unsafe { LLVMTypeOf(fieldValue) }
+            if (!fieldRawTy.isNull() && unsafe { LLVMGetTypeKind(fieldRawTy) } == 10) {
+                lastStore = StoreLLVMAggregateArgToSlot(fieldValue, fieldSlot, slotCGType)
+            } else {
+                lastStore = CreateStore(fieldValue, fieldSlot)
+            }
+            idx++
+        }
+        return lastStore
     }
 
     private func IsRefStructParam(paramTy: Type): Bool {

@@ -371,7 +371,8 @@ public func SynNormalMatchCaseBody(typeManager: TypeManager, ctx: ASTContext,
     return me.GetTy() ?? TypeManager.GetInvalidTy()
 }
 
-public func SynQuestSugarMatchCaseBody(typeManager: TypeManager, ctx: ASTContext, me: MatchExpr): Ty {
+public func SynQuestSugarMatchCaseBody(typeManager: TypeManager, ctx: ASTContext, me: MatchExpr,
+    exprChecker!: Option<ConstPatternExprChecker> = None): Ty {
     if (let None <- me.selector) {
         return InvalidMatchTy(me)
     }
@@ -390,10 +391,10 @@ public func SynQuestSugarMatchCaseBody(typeManager: TypeManager, ctx: ASTContext
     let secondCase = me.matchCases[1]
     firstCase.SetCtxExprForPatterns(selector)
     secondCase.SetCtxExprForPatterns(selector)
-    let _ = ChkMatchCasePatterns(typeManager, ctx, selectorTy, firstCase)
+    let _ = ChkMatchCasePatterns(typeManager, ctx, selectorTy, firstCase, exprChecker: exprChecker)
     let _ = ChkMatchCaseActions(typeManager, None, firstCase)
     if (let Some(firstTy) <- firstCase.GetTy()) {
-        let _ = ChkMatchCasePatterns(typeManager, ctx, selectorTy, secondCase)
+        let _ = ChkMatchCasePatterns(typeManager, ctx, selectorTy, secondCase, exprChecker: exprChecker)
         let _ = ChkMatchCaseActions(typeManager, firstTy, secondCase)
         me.SetTy(firstTy)
         return firstTy
@@ -405,7 +406,7 @@ public func SynMatchExprHasSelector(typeManager: TypeManager, ctx: ASTContext,
     diag: Option<BasicDiagnosticEngine>, me: MatchExpr,
     exprChecker!: Option<ConstPatternExprChecker> = None): Ty {
     if (SugarKindEq(me.sugarKind, SugarKind.QUEST)) {
-        return SynQuestSugarMatchCaseBody(typeManager, ctx, me)
+        return SynQuestSugarMatchCaseBody(typeManager, ctx, me, exprChecker: exprChecker)
     }
     return SynNormalMatchCaseBody(typeManager, ctx, diag, me, exprChecker: exprChecker)
 }
