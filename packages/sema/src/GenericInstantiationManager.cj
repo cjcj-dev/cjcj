@@ -23,6 +23,7 @@ public class CompilerInstance {
         if (let Some(fileMap) <- resolvedImportedDeclsMap.get(fileHash)) {
             AddDeclsToNamedMap(fileMap, name, decls)
         }
+        typeManager.AddResolvedImportedDecls(fileHash, name, decls)
     }
 
     public func AddResolvedPackageMemberDecls(packageName: String, name: String, decls: ArrayList<Decl>): Unit {

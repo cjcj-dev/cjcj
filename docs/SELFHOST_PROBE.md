@@ -1420,3 +1420,70 @@ adjacent frontiers, none a regression):
    on base `dca2193` (pre-existing, not regressed) and are a coherent follow-up cut: thread the const-pattern
    `Check` through `ChkEnumPattern` and the remaining nested/sugar pattern paths, mirroring C++'s uniform
    `Check`-through-`ChkPattern` recursion.
+
+## Probe 14 (JoinAndMeet residual faithfulness gaps)
+
+### C++ divergences closed
+
+**Gap A: JoinAndMeet accessibility filtering.** C++ `BatchJoin` filters common supertypes through
+`impMgr->IsTyAccessible(*curFile, *ty)` (`src/Sema/JoinAndMeet.cpp:159-161`). That only extracts decls for
+struct/class/interface/enum tys and keeps all other tys (`src/Modules/ImportManager.cpp:1349-1364`), then
+uses package equality, imported-decl lookup, package-prefix import plus `Modules::IsVisible`, and alias-import
+lookup (`src/Modules/ImportManager.cpp:1367-1388`; `include/cangjie/Modules/ModulesUtils.h:71-77`). The
+selfhost had a hand-rolled same-file/public/private/same-package check in `JoinAndMeet.cj`, so visible
+non-public supertypes could be dropped.
+
+The port now mirrors the C++ shape: `JoinAndMeet.cj:272-298` extracts only struct/class/interface/enum decls,
+so `TypeAliasTy` and builtin/structural tys follow the C++ keep-by-default path; `JoinAndMeet.cj:300-332`
+filters through `TypeManager.IsDeclAccessible`. The selfhost frontend already seeds resolved imports for
+lookup; `GenericInstantiationManager.cj:19-26` now also seeds the same data into `TypeManager`, whose
+`IsDeclAccessible` (`TypeManager.cj:878-925`) follows the C++ package/imported-name/package-prefix-visible
+logic using the selfhost `PackageRelation` helpers. This is a valid-program behavior fix.
+
+Oracle: added `scripts/septest/pkgA4/pkgA4.cj` and `scripts/septest/pkgB4/protected_lub.cj`. `pkgA4` exposes
+public sibling classes with a protected common base; `pkgA4.child` imports `pkgA4.*` and joins the two branch
+types. Reference C++ and selfhost both compile and run with output `17` (`SEPTEST-protected_lub-PASS`).
+
+**Gap B: common-supertype construction.** C++ constructs `GetAllCommonSuperTys` by intersecting each operand's
+`GetAllSuperTys(ty)` plus the operand itself (`src/Sema/TypeManager.cpp:1558-1577`). The selfhost used a
+`HasSuperTy` filter over the first operand's candidates, which could drift from enumeration. The port in
+`TypeManager.cj:852-875` now builds the same set intersection. This is a latent correctness fix for any case
+where `HasSuperTy` and enumerated supertypes diverge; no separate failing valid-program oracle was isolated.
+
+**Gap C: inheritable-type predicate and recursion defaults.** C++ `IsInheritableType` rejects non-class-like
+tys (`src/Sema/TypeManager.cpp:449-457`) and the nominal-super walkers recurse with default `withExtended=true`
+(`src/Sema/TypeManager.cpp:1428-1451`). The selfhost accepted all nominal tys and propagated `withExtended`.
+`TypeManager.cj:1236-1242` now requires `IsClassLike`, and `TypeManager.cj:2957-2978` calls `GetAllSuperTys`
+and `HasSuperTy` with their defaults. This is mostly latent 1:1 parity for valid programs, because inherited
+types should already be class/interface, but it prevents malformed or partially typed struct/enum inherited
+entries from adding spurious common supertypes.
+
+**Gap D: `TypeAliasTy` common supertype filtering.** C++ `ImportManager::IsTyAccessible` does not extract a
+decl from `TypeAliasTy`; non struct/class/interface/enum tys return accessible (`src/Modules/ImportManager.cpp:1349-1364`).
+The selfhost used `Ty.GetDeclPtrOfTy`, which includes aliases. `JoinAndMeet.cj:272-298` now matches the C++
+typed-decl extraction, so alias common supertypes are retained. This is a lower-risk valid-program fix; no
+separate failing oracle was isolated.
+
+### Verification
+
+Commands run after the fix, as separate commands:
+
+```sh
+rm -rf target && cjpm build
+bash scripts/difftest.sh
+bash scripts/septest/run.sh
+bash scripts/septest/run_write.sh
+bash scripts/septest/run_diag.sh
+bash scripts/septest/run_write_types.sh
+bash scripts/septest/run_write_struct.sh
+```
+
+Results:
+
+- `cjpm build`: success.
+- `difftest`: `TOTAL=89  PASS=89  MISMATCH=0  FAIL=0`.
+- `run.sh`: `SEPTEST-PASS`, including new `SEPTEST-protected_lub-PASS output=17 exit=0`.
+- `run_write.sh`: `SEPTEST-WRITE-PASS`.
+- `run_diag.sh`: `SEPTEST-DIAG-PASS`.
+- `run_write_types.sh`: `SEPTEST-WRITE-TYPES-PASS`.
+- `run_write_struct.sh`: `SEPTEST-WRITE-STRUCT-PASS`.

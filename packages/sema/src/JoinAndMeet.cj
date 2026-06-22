@@ -269,45 +269,39 @@ private func InsertRealMeetTy(tm: TypeManager, realTys: TySet, ty: Ty, ignoredTy
     }
 }
 
-private func IsSameFile(left: File, right: Option<File>): Bool {
-    if (let Some(rightFile) <- right) {
-        return left.fileHash == rightFile.fileHash && left.filePath == rightFile.filePath
+private func DeclForAccessibleTy(ty: Ty): Option<Decl> {
+    if (let Some(structTy) <- (ty as StructTy)) {
+        if (let Some(decl) <- structTy.declPtr) {
+            return Some(decl)
+        }
+    } else if (let Some(classTy) <- (ty as ClassTy)) {
+        if (let Some(decl) <- classTy.declPtr) {
+            return Some(decl)
+        }
+    } else if (let Some(interfaceTy) <- (ty as InterfaceTy)) {
+        if (let Some(decl) <- interfaceTy.declPtr) {
+            return Some(decl)
+        }
+    } else if (let Some(enumTy) <- (ty as EnumTy)) {
+        if (let Some(decl) <- enumTy.declPtr) {
+            return Some(decl)
+        }
     }
-    return false
+    return None
 }
 
-private func IsSamePackage(file: File, decl: Decl): Bool {
-    if (let Some(pkg) <- file.curPackage) {
-        return pkg.fullPackageName == decl.fullPackageName
-    }
-    return false
-}
-
-private func IsDeclAccessible(file: File, decl: Decl): Bool {
-    if (IsSameFile(file, decl.curFile)) {
-        return true
-    }
-    if (decl.TestAttr(Attribute.PUBLIC)) {
-        return true
-    }
-    if (decl.TestAttr(Attribute.PRIVATE)) {
-        return IsSameFile(file, decl.curFile)
-    }
-    return IsSamePackage(file, decl)
-}
-
-private func IsTyAccessible(curFile: File, ty: Ty): Bool {
-    if (let Some(decl) <- Ty.GetDeclPtrOfTy(Some(ty))) {
-        return IsDeclAccessible(curFile, decl)
+private func IsTyAccessible(tm: TypeManager, curFile: File, ty: Ty): Bool {
+    if (let Some(decl) <- DeclForAccessibleTy(ty)) {
+        return tm.IsDeclAccessible(curFile, decl)
     }
     return true
 }
 
-private func FilterAccessibleTys(common: TySet, curFile: Option<File>): TySet {
+private func FilterAccessibleTys(tm: TypeManager, common: TySet, curFile: Option<File>): TySet {
     if (let Some(file) <- curFile) {
         let out = TySet()
         for (ty in common.values) {
-            if (IsTyAccessible(file, ty)) {
+            if (IsTyAccessible(tm, file, ty)) {
                 out.Add(ty)
             }
         }
@@ -335,7 +329,7 @@ private func BatchJoin(tm: TypeManager, tys: TySet, ignoredTyVars: TySet,
         return tupleTyJoin
     }
 
-    let common = FilterAccessibleTys(tm.GetAllCommonSuperTys(realTys), curFile)
+    let common = FilterAccessibleTys(tm, tm.GetAllCommonSuperTys(realTys), curFile)
     if (common.values.isEmpty()) {
         return tm.GetAnyTy()
     }
