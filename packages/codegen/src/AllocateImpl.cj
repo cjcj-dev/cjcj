@@ -40,13 +40,13 @@ private func InitializeAutoEnvCallableAbi(irBuilder: IRBuilder2, obj: LLVMValueR
     let i8PtrType = unsafe { LLVMPointerType(i8Type, 0u32) }
     let i8PtrSlotType = unsafe { LLVMPointerType(i8PtrType, 1u32) }
     let typedPayload = irBuilder.CreateBitCast(payload, i8PtrSlotType, name: "autoenv.payload")
-    let methods = classTy.GetClassDef().GetMethods()
     var idx: Int64 = 0
-    while (idx < methods.size && idx < 2) {
+    while (idx < 2) {
+        let implMethod = FindAutoEnvCallableImplementationMethod(classTy, idx) ?? break
         let rawMethod = if (let Some(expectedMethod) <- FindAutoEnvCallableExpectedMethod(classTy, idx)) {
-            GetOrCreateExpectedVirtualSlotWrapper(irBuilder.GetCGModule(), methods[idx], expectedMethod)
+            GetOrCreateExpectedVirtualSlotWrapper(irBuilder.GetCGModule(), implMethod, expectedMethod)
         } else {
-            irBuilder.GetCGModule().GetOrInsertCGFunction(methods[idx]).GetRawFunction()
+            irBuilder.GetCGModule().GetOrInsertCGFunction(implMethod).GetRawFunction()
         }
         let methodPtr = irBuilder.CreateBitCast(rawMethod, i8PtrType, name: "autoenv.method")
         let indices = ArrayList<LLVMValueRef>()
@@ -55,6 +55,14 @@ private func InitializeAutoEnvCallableAbi(irBuilder: IRBuilder2, obj: LLVMValueR
         irBuilder.CreateStore(methodPtr, slot)
         idx++
     }
+}
+
+private func FindAutoEnvCallableImplementationMethod(classTy: ClassType, idx: Int64): Option<Function> {
+    let methods = classTy.GetClassDef().GetMethods()
+    if (idx >= 0 && idx < methods.size) {
+        return Some(methods[idx])
+    }
+    return None
 }
 
 private func FindAutoEnvCallableExpectedMethod(classTy: ClassType, idx: Int64): Option<Function> {

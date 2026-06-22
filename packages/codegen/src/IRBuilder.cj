@@ -3,6 +3,9 @@ package cangjie_compiler::codegen
 import std.collection.*
 import cangjie_compiler::chir.BoolLiteral
 import cangjie_compiler::chir.BoxType
+import cangjie_compiler::chir.ClassType
+import cangjie_compiler::chir.CPointerType
+import cangjie_compiler::chir.CustomType
 import cangjie_compiler::chir.ExprKind
 import cangjie_compiler::chir.FloatLiteral
 import cangjie_compiler::chir.FuncType
@@ -12,7 +15,9 @@ import cangjie_compiler::chir.LiteralValue
 import cangjie_compiler::chir.RawArrayType
 import cangjie_compiler::chir.RuneLiteral
 import cangjie_compiler::chir.StringLiteral
+import cangjie_compiler::chir.TupleType
 import cangjie_compiler::chir.Type
+import cangjie_compiler::chir.VArrayType
 
 private let CREATE_OVERFLOW_EXCEPTION_FUNC_NAME: String = "rt$CreateOverflowException_msg"
 private let CREATE_ARITHMETIC_EXCEPTION_FUNC_NAME: String = "rt$CreateArithmeticException_msg"
@@ -28,6 +33,7 @@ private let ARRAY_COPY_REF_INTRINSIC_NAME: String = "llvm.cj.array.copy.ref"
 private let ARRAY_COPY_STRUCT_INTRINSIC_NAME: String = "llvm.cj.array.copy.struct"
 private let ARRAY_COPY_GENERIC_INTRINSIC_NAME: String = "llvm.cj.array.copy.generic"
 private let ALLOCA_GENERIC_INTRINSIC_NAME: String = "llvm.cj.alloca.generic"
+private let GET_TYPE_INFO_INTRINSIC_NAME: String = "llvm.cj.get.type.info"
 private let IS_REFERENCE_INTRINSIC_NAME: String = "llvm.cj.is.reference"
 private let MALLOC_OBJECT_INTRINSIC_NAME: String = "llvm.cj.malloc.object"
 private let CJ_MEMSET_INTRINSIC_NAME: String = "llvm.cj.memset"
@@ -613,7 +619,7 @@ public class IRBuilder2 <: Resource {
             }
             let typeInfoPtrType = CGType.GetOrCreateTypeInfoPtrType(GetLLVMContext())
             for (instTy in instTypeArgs) {
-                let typeInfo = CGType.GetOrCreate(cgMod, instTy.StripAllRefs()).GetOrCreateTypeInfo()
+                let typeInfo = CreateTypeInfo(instTy)
                 callArgs.add(CreateBitCast(typeInfo, typeInfoPtrType,
                     name: if (name.isEmpty()) { "generic.ti" } else { name + ".generic.ti" }))
             }
@@ -876,15 +882,26 @@ public class IRBuilder2 <: Resource {
     private func CallAllocaGeneric(chirTy: Type): LLVMValueRef {
         let tyForInfo = chirTy.StripAllRefs()
         let cgTy = CGType.GetOrCreate(cgMod, tyForInfo)
-        let typeInfoValue = cgTy.GetOrCreateTypeInfo()
+        let typeInfoValue = CreateTypeInfo(tyForInfo)
         EnsureAllocaGenericLayoutMetadata(tyForInfo, typeInfoValue)
         let i8PtrType = unsafe { LLVMPointerType(LLVMInt8TypeInContext(GetLLVMContext().raw), 0u32) }
         let typeInfoArg = CreateBitCast(typeInfoValue, i8PtrType, name: "sret.ti")
         let args = ArrayList<LLVMValueRef>()
         args.add(typeInfoArg)
-        args.add(GetLayoutSize32(tyForInfo, cgTy))
+        args.add(GetLayoutSize32ForAllocaGeneric(cgTy, typeInfoValue))
         return CreateIntrinsicCall(ALLOCA_GENERIC_INTRINSIC_NAME, ArrayList<LLVMTypeRef>(), args,
             name: "sret.generic")
+    }
+
+    private func GetLayoutSize32ForAllocaGeneric(cgTy: CGType, typeInfoValue: LLVMValueRef): LLVMValueRef {
+        if (let Some(staticSize) <- cgTy.GetSize()) {
+            return unsafe { LLVMConstInt(LLVMInt32TypeInContext(GetLLVMContext().raw), UInt64(staticSize), 0) }
+        }
+        let typeInfoType = CGType.GetOrCreateTypeInfoType(GetLLVMContext())
+        let typeInfoPtrType = CGType.GetOrCreateTypeInfoPtrType(GetLLVMContext())
+        let typedTypeInfo = CreateBitCast(typeInfoValue, typeInfoPtrType, name: "ti.typed")
+        let sizePtr = CreateStructGEP(typeInfoType, typedTypeInfo, 4u32, name: "ti.size")
+        return CreateLoad(unsafe { LLVMInt32TypeInContext(GetLLVMContext().raw) }, sizePtr, name: "ti.size")
     }
 
     private func EnsureAllocaGenericLayoutMetadata(chirTy: Type, typeInfoValue: LLVMValueRef): Unit {
@@ -1838,7 +1855,11 @@ public class IRBuilder2 <: Resource {
 
     public func CallClassIntrinsicAlloc(classTy: Type): LLVMValueRef {
         let classCGType = CGType.GetOrCreate(cgMod, classTy)
-        let typeInfo = classCGType.GetOrCreateTypeInfo()
+        let typeInfo = if (IsAutoEnvType(classTy)) {
+            CreateTypeInfo(classTy)
+        } else {
+            classCGType.GetOrCreateTypeInfo()
+        }
         let typeInfoArg = CreateBitCast(typeInfo, unsafe { LLVMPointerType(LLVMInt8TypeInContext(GetLLVMContext().raw),
             0u32) }, name: "class.ti")
         let sizeArg = GetLayoutSize32(classTy, classCGType)
@@ -1904,6 +1925,176 @@ public class IRBuilder2 <: Resource {
             0u64
         }
         return unsafe { LLVMConstInt(LLVMInt32TypeInContext(GetLLVMContext().raw), sizeValue, 0) }
+    }
+
+    private func CreateTypeInfo(chirTy: Type): LLVMValueRef {
+        let baseTy = chirTy.StripAllRefs()
+        if (let Some(currentFunction) <- cgFunction) {
+            if (let Some(typeInfoProvider) <- currentFunction.genericParamsMap.get(baseTy.ToString())) {
+                return typeInfoProvider(this)
+            }
+        }
+        if (baseTy.IsGeneric()) {
+            if (let Some(runtimeTypeInfo) <- GetCurrentGenericTypeInfoArg(baseTy)) {
+                return runtimeTypeInfo
+            }
+            return CGType.GetOrCreate(cgMod, baseTy).GetOrCreateTypeInfo()
+        }
+        if (ContainsGenericType(baseTy)) {
+            return CreateGenericRuntimeTypeInfo(baseTy)
+        }
+        return CGType.GetOrCreate(cgMod, baseTy).GetOrCreateTypeInfo()
+    }
+
+    private func GetCurrentGenericTypeInfoArg(genericTy: Type): Option<LLVMValueRef> {
+        let currentFunction = cgFunction ?? return None
+        if (let Some(functionType) <- currentFunction.GetCGFunctionType()) {
+            let _ = functionType.GetLLVMFunctionType()
+            if (let Some(paramIdx) <- functionType.GetGenericParamIndex(genericTy)) {
+                return Some(unsafe { LLVMGetParam(currentFunction.GetRawFunction(), UInt32(paramIdx)) })
+            }
+        }
+        return None
+    }
+
+    public func GetTypeArgsFromTypeInfo(typeInfo: LLVMValueRef): LLVMValueRef {
+        let typeInfoType = CGType.GetOrCreateTypeInfoType(GetLLVMContext())
+        let typeInfoPtrType = CGType.GetOrCreateTypeInfoPtrType(GetLLVMContext())
+        let i8PtrType = unsafe { LLVMPointerType(LLVMInt8TypeInContext(GetLLVMContext().raw), 0u32) }
+        let typedTypeInfo = CreateBitCast(typeInfo, typeInfoPtrType, name: "ti.typed")
+        let typeArgsPtr = CreateStructGEP(typeInfoType, typedTypeInfo, 12u32, name: "ti.typeArgs")
+        let typeArgsRaw = CreateLoad(i8PtrType, typeArgsPtr, name: "ti.typeArgs")
+        return CreateBitCast(typeArgsRaw, unsafe { LLVMPointerType(typeInfoPtrType, 0u32) }, name: "ti.typeArgs.typed")
+    }
+
+    public func GetTypeInfoFromTypeInfoArgs(typeInfo: LLVMValueRef, index: Int64): LLVMValueRef {
+        let typeInfoPtrType = CGType.GetOrCreateTypeInfoPtrType(GetLLVMContext())
+        let typeArgs = GetTypeArgsFromTypeInfo(typeInfo)
+        let indices = ArrayList<LLVMValueRef>()
+        indices.add(unsafe { LLVMConstInt(LLVMInt32TypeInContext(GetLLVMContext().raw), UInt64(index), 0) })
+        let typeInfoSlot = CreateGEP(typeInfoPtrType, typeArgs, indices, name: "ti.arg")
+        return CreateLoad(typeInfoPtrType, typeInfoSlot, name: "ti.arg")
+    }
+
+    private func CreateGenericRuntimeTypeInfo(chirTy: Type): LLVMValueRef {
+        let (typeTemplate, typeArgs) = IRBuilderRuntimeTypeTemplateAndArgs(chirTy)
+        if (typeArgs.isEmpty()) {
+            return CGType.GetOrCreate(cgMod, chirTy).GetOrCreateTypeInfo()
+        }
+        let typeInfoArray = CreateTypeInfoArray(typeArgs)
+        let args = ArrayList<LLVMValueRef>()
+        let i8PtrType = unsafe { LLVMPointerType(LLVMInt8TypeInContext(GetLLVMContext().raw), 0u32) }
+        args.add(CreateBitCast(typeTemplate, i8PtrType, name: "ti.template"))
+        args.add(unsafe { LLVMConstInt(LLVMInt32TypeInContext(GetLLVMContext().raw), UInt64(typeArgs.size), 0) })
+        args.add(typeInfoArray)
+        return CallGetTypeInfoIntrinsic(args)
+    }
+
+    private func IRBuilderRuntimeTypeTemplateAndArgs(chirTy: Type): (LLVMValueRef, ArrayList<Type>) {
+        let typeArgs = ArrayList<Type>()
+        if (let Some(funcTy) <- (chirTy as FuncType)) {
+            typeArgs.add(funcTy.GetReturnType())
+            for (paramTy in funcTy.GetParamTypes()) {
+                typeArgs.add(paramTy)
+            }
+            return (CGType.GetOrCreate(cgMod, chirTy).GetOrCreateTypeTemplate(), typeArgs)
+        }
+        if (let Some(tupleTy) <- (chirTy as TupleType)) {
+            for (typeArg in tupleTy.GetTypeArgs()) {
+                typeArgs.add(typeArg)
+            }
+            return (CGType.GetOrCreate(cgMod, chirTy).GetOrCreateTypeTemplate(), typeArgs)
+        }
+        if (let Some(varrayTy) <- (chirTy as VArrayType)) {
+            var idx: UInt64 = 0u64
+            while (idx < varrayTy.size) {
+                typeArgs.add(varrayTy.GetElementType())
+                idx++
+            }
+            return (CGType.GetOrCreate(cgMod, chirTy).GetOrCreateTypeTemplate(), typeArgs)
+        }
+        if (let Some(rawArrayTy) <- (chirTy as RawArrayType)) {
+            typeArgs.add(rawArrayTy.GetElementType())
+            return (CGType.GetOrCreate(cgMod, chirTy).GetOrCreateTypeTemplate(), typeArgs)
+        }
+        if (let Some(cPointerTy) <- (chirTy as CPointerType)) {
+            typeArgs.add(cPointerTy.GetElementType())
+            return (CGType.GetOrCreate(cgMod, chirTy).GetOrCreateTypeTemplate(), typeArgs)
+        }
+        if (let Some(boxTy) <- (chirTy as BoxType)) {
+            typeArgs.add(boxTy.GetBaseType())
+            return (CGType.GetOrCreate(cgMod, chirTy).GetOrCreateTypeTemplate(), typeArgs)
+        }
+        if (let Some(customTy) <- (chirTy as CustomType)) {
+            let typeTemplate = EnsureSourceGenericTypeTemplate(cgMod, IRBuilderSourceCustomType(customTy))
+            if (IsAutoEnvBaseType(customTy)) {
+                let autoEnvTy = if (IsAutoEnvInstBaseType(customTy)) {
+                    if (let Some(classTy) <- (customTy as ClassType)) {
+                        classTy.GetSuperClassTy() ?? classTy
+                    } else {
+                        customTy
+                    }
+                } else {
+                    customTy
+                }
+                let autoEnvArgs = autoEnvTy.GetGenericArgs()
+                if (!autoEnvArgs.isEmpty()) {
+                    let paramTypes = ArrayList<Type>()
+                    var idx: Int64 = 0
+                    while (idx + 1 < autoEnvArgs.size) {
+                        paramTypes.add(autoEnvArgs[idx])
+                        idx++
+                    }
+                    typeArgs.add(FuncType(paramTypes, autoEnvArgs[autoEnvArgs.size - 1]))
+                }
+            } else {
+                for (typeArg in customTy.GetGenericArgs()) {
+                    typeArgs.add(typeArg)
+                }
+            }
+            return (typeTemplate, typeArgs)
+        }
+        return (CGType.GetOrCreate(cgMod, chirTy).GetOrCreateTypeTemplate(), typeArgs)
+    }
+
+    private func IRBuilderSourceCustomType(customTy: CustomType): CustomType {
+        return customTy.GetCustomTypeDef().GetType() ?? customTy
+    }
+
+    private func CallGetTypeInfoIntrinsic(args: ArrayList<LLVMValueRef>): LLVMValueRef {
+        let i8Type = unsafe { LLVMInt8TypeInContext(GetLLVMContext().raw) }
+        let i8PtrType = unsafe { LLVMPointerType(i8Type, 0u32) }
+        let i8PtrPtrType = unsafe { LLVMPointerType(i8PtrType, 0u32) }
+        let i32Type = unsafe { LLVMInt32TypeInContext(GetLLVMContext().raw) }
+        let paramTypes = ArrayList<LLVMTypeRef>()
+        paramTypes.add(i8PtrType)
+        paramTypes.add(i32Type)
+        paramTypes.add(i8PtrPtrType)
+        let functionType = MakeFunctionType(i8PtrType, paramTypes)
+        let fixedArgs = ArrayList<LLVMValueRef>()
+        fixedArgs.add(CreateBitCast(args[0], i8PtrType, name: "ti.template.raw"))
+        fixedArgs.add(args[1])
+        fixedArgs.add(CreateBitCast(args[2], i8PtrPtrType, name: "ti.args.i8"))
+        return CreateCallOrInvoke(GetOrInsertRuntimeFunction(GET_TYPE_INFO_INTRINSIC_NAME, functionType), functionType,
+            fixedArgs, name: "ti")
+    }
+
+    private func CreateTypeInfoArray(typeArgs: ArrayList<Type>): LLVMValueRef {
+        let typeInfoPtrType = CGType.GetOrCreateTypeInfoPtrType(GetLLVMContext())
+        let arrayType = unsafe { LLVMArrayType(typeInfoPtrType, UInt32(typeArgs.size)) }
+        let slot = CreateEntryAlloca(arrayType, name: "ti.args")
+        let i32Type = unsafe { LLVMInt32TypeInContext(GetLLVMContext().raw) }
+        var idx: Int64 = 0
+        while (idx < typeArgs.size) {
+            let indices = ArrayList<LLVMValueRef>()
+            indices.add(unsafe { LLVMConstInt(i32Type, 0u64, 0) })
+            indices.add(unsafe { LLVMConstInt(i32Type, UInt64(idx), 0) })
+            let argSlot = CreateGEP(arrayType, slot, indices, name: "ti.arg")
+            let argTypeInfo = CreatePointerCast(CreateTypeInfo(typeArgs[idx]), typeInfoPtrType, name: "ti.arg.cast")
+            CreateStore(argTypeInfo, argSlot)
+            idx++
+        }
+        return CreateBitCast(slot, unsafe { LLVMPointerType(typeInfoPtrType, 0u32) }, name: "ti.args.raw")
     }
 
     private func CreateTypeInfoIsReferenceCall(chirTy: Type): LLVMValueRef {
@@ -2059,7 +2250,7 @@ public class IRBuilder2 <: Resource {
         return CreateIntrinsicCall(intrinsicName, overloadedTypes, args)
     }
 
-    private func IsLLVMTypeContainsRef(llvmTy: LLVMTypeRef): Bool {
+    public func IsLLVMTypeContainsRef(llvmTy: LLVMTypeRef): Bool {
         if (llvmTy.isNull()) {
             return false
         }

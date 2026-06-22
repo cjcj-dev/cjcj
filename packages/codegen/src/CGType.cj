@@ -7,6 +7,7 @@ import cangjie_compiler::chir.Function
 import cangjie_compiler::chir.Type
 import cangjie_compiler::chir.TypeKind
 import cangjie_compiler::chir.Value
+import cangjie_compiler::mangle.GetCustomTypeIdentifier
 
 public enum CGTypeKind {
     | OTHERS
@@ -423,6 +424,36 @@ public open class CGType {
     }
 
     public static func GetNameOfTypeTemplateGV(chirType: Type): String {
+        if (chirType.IsTuple()) {
+            return "Tuple.tt"
+        }
+        if (chirType.IsRawArray()) {
+            return "RawArray.tt"
+        }
+        if (chirType.IsVArray()) {
+            return "VArray.tt"
+        }
+        if (chirType.IsCPointer()) {
+            return "CPointer.tt"
+        }
+        if (chirType.IsFunc() || chirType.IsCFunc()) {
+            return "CFunc.tt"
+        }
+        if (chirType.IsBox()) {
+            return "Box.tt"
+        }
+        if (let Some(customTy) <- (chirType as CustomType)) {
+            if (IsAutoEnvBaseType(customTy)) {
+                return "Closure.tt"
+            }
+            let def = customTy.GetCustomTypeDef()
+            let packageName = if (let Some(genericDecl) <- def.GetGenericDecl()) {
+                genericDecl.GetPackageName()
+            } else {
+                def.GetPackageName()
+            }
+            return packageName + ":" + GetCustomTypeIdentifier(customTy) + ".tt"
+        }
         return chirType.ToString() + ".tt"
     }
 }

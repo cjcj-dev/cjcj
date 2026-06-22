@@ -2770,6 +2770,60 @@ After (clean build, no temporary probes):
 - Independent globals: N=1000/2000/4000 = 3.32s / 6.72s / 14.87s.
 - Chain globals: N=1000/2000/4000 = 3.88s / 6.17s / 16.97s.
 
+## Probe 33 (faithful generic-body lambda subset)
+
+Bug: moving the mangle driver to the AST `Walker` made lambdas and local functions inside generic
+function bodies reach codegen. The faithful subset needed runtime TypeInfo fixes for generic closure
+lowering, especially when a generic function body contains a closure and the function is instantiated.
+
+C++ ground truth:
+
+- The frontend mangle driver is `DoNewMangling`, which walks each decl with `Walker` and assigns lambda
+  names through `BaseMangler::MangleLambda` (`src/Frontend/CompilerInstance.cpp:747-801`).
+- `CGFunctionType` records each runtime generic TypeInfo parameter index while lowering the LLVM
+  function type, after any by-ref/basePtr slots have been appended
+  (`src/CodeGen/Base/CGTypes/CGFunctionType.cpp:113-114`, `142`). `CGModule` reads that recorded
+  parameter directly (`src/CodeGen/CGModule.cpp:321-326`).
+- Dynamic generic TypeInfo is created from a source `TypeTemplate`, runtime type args, and the
+  `llvm.cj.get.type.info` intrinsic (`src/CodeGen/CJNative/CJNativeIntrinsicsCall.cpp:1354-1455`).
+- TypeTemplate super callbacks use the direct parent class type from `classTy.GetSuperClassTy()`;
+  no AutoEnv instantiated-base skip exists (`src/CodeGen/CJNative/CGTypes/CJNativeClassType.cpp:104-117`).
+- TypeTemplate global names for custom types use `CHIR::GetCustomTypeIdentifier(*ct)`, not the raw
+  source-code identifier (`src/CodeGen/Base/CGTypes/CGType.cpp:605`).
+- AutoEnv allocation writes only the implementation methods that exist; it does not synthesize an
+  instantiated slot-1 pointer from a single generic method (`src/CodeGen/Base/AllocateImpl.cpp:32-39`).
+
+Fix shipped:
+
+- `packages/frontend/src/CompilerInstance.cj` keeps the C++-style Walker mangle driver, so `MangleLambda`
+  is reached for generic-body lambdas/local functions.
+- `packages/codegen/src/CGFunctionType.cj` owns `genericParamIndicesMap` and records each generic
+  TypeInfo parameter index during LLVM function-type construction. `packages/codegen/src/IRBuilder.cj`
+  now reads that recorded index instead of reconstructing it from `GetRealArgIndices()`.
+- `packages/codegen/src/IRBuilder.cj`, `CGType.cj`, `CGTypeInfo.cj`, and `CGModule.cj` build runtime
+  TypeInfo for generic function/tuple/array/pointer/box/custom and AutoEnv types using the source
+  template plus concrete TypeInfo args.
+- `packages/codegen/src/CGTypeInfo.cj` returns the direct superclass in TypeTemplate super callbacks,
+  matching `GenSuperFnOfTypeTemplate`.
+- `packages/codegen/src/CGType.cj` uses `GetCustomTypeIdentifier` for custom TypeTemplate global names,
+  matching `CGType.cpp:605`.
+- `packages/codegen/src/AllocateImpl.cj` is back to the faithful form: no synthesized slot-1 write.
+
+Deferred:
+
+- Generic-body lambdas that return a generic type are not shipped in this cut. The temporary slot-1
+  fallback made `126_generic_body_lambda_return_generic_struct.cj` run, but it was rejected because C++
+  does not write an instantiated slot unless the method exists. The follow-up needs proper AutoEnv
+  instantiated-method generation instead of payload synthesis.
+
+New regression cases:
+
+- `scripts/difftest_corpus/121_generic_body_lambda.cj`
+- `scripts/difftest_corpus/122_generic_body_lambda_capture.cj`
+- `scripts/difftest_corpus/123_generic_body_lambda_tuple_last.cj`
+- `scripts/difftest_corpus/124_generic_body_lambda_struct_last.cj`
+- `scripts/difftest_corpus/125_generic_body_lambda_higher_order.cj`
+
 Verification:
 
 - Clean `rm -rf target && cjpm build`: success.
@@ -2778,3 +2832,10 @@ Verification:
   `run_gendefault.sh`: all pass.
 - Change is confined to `packages/sema/src` plus this probe note; `packages/chir` and `packages/ast`
   were not edited.
+- Corpus cases 121-125 compile and run with selfhost and `/root/.cjv/bin/cjc`, with matching stdout
+  and exit status.
+- `MangleLambda` has a frontend caller and the lambda-in-generic-body mangled AutoEnv name appears in
+  saved IR.
+- Full corpus: `TOTAL=111  PASS=111  MISMATCH=0  FAIL=0`.
+- Septests all pass: `run.sh`, `run_write.sh`, `run_diag.sh`, `run_write_types.sh`,
+  `run_write_struct.sh`, and `run_gendefault.sh`.

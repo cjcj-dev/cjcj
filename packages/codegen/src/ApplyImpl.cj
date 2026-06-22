@@ -49,6 +49,12 @@ public func GenerateApply(irBuilder: IRBuilder2, callee: Value, args: ArrayList<
         isStaticMethodType: isStaticMethodType, thisType: None)
 }
 
+public func GenerateApply(irBuilder: IRBuilder2, callee: Value, args: ArrayList<Value>, callType!: Option<FuncType>,
+    isMethodType!: Bool, isStaticMethodType!: Bool, instTypeArgs!: ArrayList<Type>): LLVMValueRef {
+    return GenerateApply(irBuilder, callee, args, callType: callType, isMethodType: isMethodType,
+        isStaticMethodType: isStaticMethodType, thisType: None, instTypeArgs: instTypeArgs)
+}
+
 private func GenerateApply(irBuilder: IRBuilder2, callee: Value, args: ArrayList<Value>, callType!: Option<FuncType>,
     isMethodType!: Bool, isStaticMethodType!: Bool, thisType!: Option<Type>,
     instTypeArgs!: ArrayList<Type> = ArrayList<Type>()): LLVMValueRef {
