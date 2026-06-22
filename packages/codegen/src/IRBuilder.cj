@@ -18,11 +18,15 @@ private let CREATE_OVERFLOW_EXCEPTION_FUNC_NAME: String = "rt$CreateOverflowExce
 private let CREATE_ARITHMETIC_EXCEPTION_FUNC_NAME: String = "rt$CreateArithmeticException_msg"
 private let THROW_EXCEPTION_FUNC_NAME: String = PREFIX_OF_BACKEND_SYMS + "ThrowException"
 private let THROW_NEGATIVE_ARRAY_SIZE_EXCEPTION_FUNC_NAME: String = "rt$ThrowNegativeArraySizeException"
+private let THROW_INDEX_OUT_OF_BOUNDS_EXCEPTION_FUNC_NAME: String = "rt$ThrowIndexOutOfBoundsException"
 private let THROW_EXCEPTION_INTRINSIC_NAME: String = "llvm.cj.throw.exception"
 private let GET_EXCEPTION_WRAPPER_INTRINSIC_NAME: String = "llvm.cj.get.exception.wrapper"
 private let POST_THROW_EXCEPTION_INTRINSIC_NAME: String = "llvm.cj.post.throw.exception"
 private let MALLOC_ARRAY_INTRINSIC_NAME: String = "llvm.cj.malloc.array"
 private let MALLOC_ARRAY_GENERIC_INTRINSIC_NAME: String = "llvm.cj.malloc.array.generic"
+private let ARRAY_COPY_REF_INTRINSIC_NAME: String = "llvm.cj.array.copy.ref"
+private let ARRAY_COPY_STRUCT_INTRINSIC_NAME: String = "llvm.cj.array.copy.struct"
+private let ARRAY_COPY_GENERIC_INTRINSIC_NAME: String = "llvm.cj.array.copy.generic"
 private let ALLOCA_GENERIC_INTRINSIC_NAME: String = "llvm.cj.alloca.generic"
 private let IS_REFERENCE_INTRINSIC_NAME: String = "llvm.cj.is.reference"
 private let MALLOC_OBJECT_INTRINSIC_NAME: String = "llvm.cj.malloc.object"
@@ -1173,6 +1177,151 @@ public class IRBuilder2 <: Resource {
         return CreateGEP(i8PtrType, objectSlot, indices, name: "obj.payload")
     }
 
+    public func CallArrayIntrinsicGetSize(array: LLVMValueRef): LLVMValueRef {
+        let i64Type = unsafe { LLVMInt64TypeInContext(GetLLVMContext().raw) }
+        let arrayBaseType = CGType.GetArrayBaseType(GetCGContext())
+        let payloadPtr = CreateBitCast(GetPayloadFromObject(array),
+            unsafe { LLVMPointerType(arrayBaseType, 1u32) }, name: "array.base")
+        let ptrToArrayLen = CreateBitCast(payloadPtr, unsafe { LLVMPointerType(i64Type, 1u32) },
+            name: "array.len.ptr")
+        return CreateLoad(i64Type, ptrToArrayLen, name: "array.len")
+    }
+
+    public func CallArrayIntrinsicIndexCheck(array: LLVMValueRef, index: LLVMValueRef): Unit {
+        CallIntrinsicIndexCheck(CallArrayIntrinsicGetSize(array), index)
+    }
+
+    public func CallIntrinsicIndexCheck(len: LLVMValueRef, index: LLVMValueRef): Unit {
+        let indexI64 = CastIntegerToInt64(index)
+        let lenI64 = CastIntegerToInt64(len)
+        let zero = GetInt64(0)
+        let cmpZero = CreateICmp(LLVMIntPredicate.SLT, indexI64, zero, name: "arr.idx.lt.zero")
+        let cmpLen = CreateICmp(LLVMIntPredicate.SGE, indexI64, lenI64, name: "arr.idx.ge.len")
+        let isThrow = CreateBinary(ExprKind.OR, cmpZero, cmpLen, name: "arr.idx.throw")
+        let blocks = CreateAndInsertBasicBlocks(ArrayList<String>(["arr.if.then", "arr.if.else"]))
+        if (blocks.size < 2) {
+            return
+        }
+        CreateCondBr(isThrow, blocks[0], blocks[1])
+        SetInsertPoint(blocks[0])
+        CreateOutOfBoundException()
+        SetInsertPoint(blocks[1])
+    }
+
+    public func GetArrayElementAddr(rawArrayTy: RawArrayType, array: LLVMValueRef, index: LLVMValueRef,
+        isChecked: Bool): LLVMValueRef {
+        if (isChecked) {
+            CallArrayIntrinsicIndexCheck(array, index)
+        }
+        let arrayLayoutType = CGArrayType.GenerateArrayLayoutType(cgMod, rawArrayTy)
+        let payload = GetPayloadFromObject(array)
+        let typedPayload = CreateBitCast(payload, unsafe { LLVMPointerType(arrayLayoutType, 1u32) },
+            name: "arr.payload")
+        let indices = ArrayList<LLVMValueRef>()
+        indices.add(unsafe { LLVMConstInt(LLVMInt32TypeInContext(GetLLVMContext().raw), 0u64, 0) })
+        indices.add(unsafe { LLVMConstInt(LLVMInt32TypeInContext(GetLLVMContext().raw), 1u64, 0) })
+        indices.add(CastIntegerToInt64(index))
+        return CreateGEP(arrayLayoutType, typedPayload, indices, name: "arr.idx.get.gep")
+    }
+
+    public func CallArrayIntrinsicGet(rawArrayTy: RawArrayType, array: LLVMValueRef, index: LLVMValueRef,
+        isChecked: Bool): LLVMValueRef {
+        let elementCHIRType = rawArrayTy.GetElementType()
+        let elementCGType = CGType.GetOrCreate(cgMod, elementCHIRType)
+        let elementPtr = GetArrayElementAddr(rawArrayTy, array, index, isChecked)
+        let loaded = CreateLoad(elementCGType.GetLLVMType(), elementPtr, name: "arr.idx.get")
+        if (elementCHIRType.IsEnum()) {
+            LLVMSetInstructionMetadata(GetLLVMContext(), loaded, "untrusted_ref",
+                LLVMCreateMDTuple(GetLLVMContext(), ArrayList<LLVMMetadataRef>()))
+        }
+        return loaded
+    }
+
+    public func CallArrayIntrinsicSet(rawArrayTy: RawArrayType, array: LLVMValueRef, index: LLVMValueRef,
+        elementValue: CGValue, isChecked: Bool): LLVMValueRef {
+        let elementCGType = CGType.GetOrCreate(cgMod, rawArrayTy.GetElementType())
+        let elementPtr = GetArrayElementAddr(rawArrayTy, array, index, isChecked)
+        let rawValue = elementValue.GetRawValue()
+        let rawValueTy = unsafe { LLVMTypeOf(rawValue) }
+        if (elementCGType.IsStructType() && IsLLVMTypeContainsRef(elementCGType.GetLLVMType()) &&
+            !rawValueTy.isNull() && unsafe { LLVMGetTypeKind(rawValueTy) } == 12) {
+            let size = unsafe {
+                LLVMConstInt(LLVMInt64TypeInContext(GetLLVMContext().raw),
+                    cgMod.GetTypeSize(elementCGType.GetLLVMType()), 0)
+            }
+            return CallGCWriteStruct(array, elementPtr, rawValue, size, elementCGType.GetOriginal().ToString())
+        }
+        let rawElementValue = RawValueForArrayElementStore(elementValue, elementCGType)
+        if (elementCGType.IsReference()) {
+            return CallGCWrite(rawElementValue, array, elementPtr)
+        }
+        return CreateStore(rawElementValue, elementPtr)
+    }
+
+    public func CallArrayIntrinsicCopy(rawArrayTy: RawArrayType, srcArray: LLVMValueRef): LLVMValueRef {
+        let srcLen = CallArrayIntrinsicGetSize(srcArray)
+        let dstArray = AllocateArray(rawArrayTy, srcLen)
+        if (dstArray.isNull()) {
+            return LLVMNullValue()
+        }
+        CallArrayIntrinsicCopyTo(rawArrayTy, srcArray, dstArray, GetInt64(0), GetInt64(0), srcLen)
+        return dstArray
+    }
+
+    public func CallArrayIntrinsicCopyTo(rawArrayTy: RawArrayType, srcArray: LLVMValueRef, dstArray: LLVMValueRef,
+        srcStart: LLVMValueRef, dstStart: LLVMValueRef, copyLen: LLVMValueRef): LLVMValueRef {
+        let elementSizeValue = GetRawArrayElementSizeValue(rawArrayTy)
+        let copyLenI64 = CastIntegerToInt64(copyLen)
+        let dataSize = CreateBinary(ExprKind.MUL, copyLenI64, elementSizeValue, name: "arr.data.len")
+        let srcIndex = CreateBinary(ExprKind.MUL, CastIntegerToInt64(srcStart), elementSizeValue, name: "src.index")
+        let dstIndex = CreateBinary(ExprKind.MUL, CastIntegerToInt64(dstStart), elementSizeValue, name: "dst.index")
+        let arrayLayoutType = CGArrayType.GenerateArrayLayoutType(cgMod, rawArrayTy)
+        let srcArrPtr = CreateStructGEP(arrayLayoutType, CreateBitCast(GetPayloadFromObject(srcArray),
+            unsafe { LLVMPointerType(arrayLayoutType, 1u32) }, name: "src.arr.ptr"), 1u32, name: "src.arr.data")
+        let dstArrPtr = CreateStructGEP(arrayLayoutType, CreateBitCast(GetPayloadFromObject(dstArray),
+            unsafe { LLVMPointerType(arrayLayoutType, 1u32) }, name: "dst.arr.ptr"), 1u32, name: "dst.arr.data")
+        return CreateArrayCopyTo(rawArrayTy, srcArray, dstArray, srcArrPtr, dstArrPtr, dataSize, srcIndex, dstIndex)
+    }
+
+    public func CallArrayInit(rawArrayValue: LLVMValueRef, arrayLen: LLVMValueRef, elementValue: LLVMValueRef,
+        rawArrayTy: RawArrayType): LLVMValueRef {
+        let currentBlock = GetInsertBlock()
+        if (currentBlock.isNull()) {
+            return LLVMNullValue()
+        }
+        let parentFunction = unsafe { LLVMGetBasicBlockParent(currentBlock) }
+        if (parentFunction.isNull()) {
+            return LLVMNullValue()
+        }
+        let loopCondBlock = CreateEntryBasicBlock(parentFunction, "arr.init.start")
+        unsafe { LLVMMoveBasicBlockAfter(loopCondBlock, currentBlock) }
+        let loopBodyBlock = CreateEntryBasicBlock(parentFunction, "arr.init.body")
+        unsafe { LLVMMoveBasicBlockAfter(loopBodyBlock, loopCondBlock) }
+        let loopEndBlock = CreateEntryBasicBlock(parentFunction, "arr.init.end")
+        unsafe { LLVMMoveBasicBlockAfter(loopEndBlock, loopBodyBlock) }
+
+        let int64Type = unsafe { LLVMInt64TypeInContext(GetLLVMContext().raw) }
+        let sizeValue = CastIntegerToInt64(arrayLen)
+        let iterator = CreateEntryAlloca(int64Type, name: "iterator")
+        CreateStore(GetInt64(0), iterator)
+        CreateBr(loopCondBlock)
+
+        SetInsertPoint(loopCondBlock)
+        let currentIndex = CreateLoad(int64Type, iterator, name: "iterator")
+        let hasElement = CreateICmp(LLVMIntPredicate.SLT, currentIndex, sizeValue, name: "iterator.size.cmp")
+        CreateCondBr(hasElement, loopBodyBlock, loopEndBlock)
+
+        SetInsertPoint(loopBodyBlock)
+        let elementCGType = CGType.GetOrCreate(cgMod, rawArrayTy.GetElementType())
+        CallArrayIntrinsicSet(rawArrayTy, rawArrayValue, currentIndex, CGValue(elementValue, elementCGType), false)
+        let nextIndex = CreateBinary(ExprKind.ADD, currentIndex, GetInt64(1), name: "iterator.next")
+        CreateStore(nextIndex, iterator)
+        CreateBr(loopCondBlock)
+
+        SetInsertPoint(loopEndBlock)
+        return LLVMNullValue()
+    }
+
     public func CreateVArrayGEP(arrayType: LLVMTypeRef, pointer: LLVMValueRef, indices: ArrayList<LLVMValueRef>,
         name!: String = ""): LLVMValueRef {
         let gepIndices = ArrayList<LLVMValueRef>()
@@ -1611,6 +1760,17 @@ public class IRBuilder2 <: Resource {
         let _ = CreateUnreachable()
     }
 
+    public func CreateOutOfBoundException(): Unit {
+        let helperType = MakeFunctionType(unsafe { LLVMVoidTypeInContext(GetLLVMContext().raw) }, ArrayList<LLVMTypeRef>())
+        let helper = if (let Some(helperNode) <- GetCGContext().GetImplicitUsedFunc(THROW_INDEX_OUT_OF_BOUNDS_EXCEPTION_FUNC_NAME)) {
+            cgMod.GetOrInsertCGFunction(helperNode).GetRawFunction()
+        } else {
+            GetOrInsertRuntimeFunction(THROW_INDEX_OUT_OF_BOUNDS_EXCEPTION_FUNC_NAME, helperType)
+        }
+        let _ = CreateCallOrInvoke(helper, helperType, ArrayList<LLVMValueRef>())
+        let _ = CreateUnreachable()
+    }
+
     public func AllocateArray(rawArrayTy: RawArrayType, length: LLVMValueRef): LLVMValueRef {
         let rawArrayCGType = CGType.GetOrCreate(cgMod, rawArrayTy)
         let rawTypeInfo = rawArrayCGType.GetOrCreateTypeInfo()
@@ -1835,6 +1995,98 @@ public class IRBuilder2 <: Resource {
             return elementSize
         }
         return 0
+    }
+
+    private func GetRawArrayElementSizeValue(rawArrayTy: RawArrayType): LLVMValueRef {
+        let elementCGType = CGType.GetOrCreate(cgMod, rawArrayTy.GetElementType())
+        let elementSize = if (let Some(size) <- elementCGType.GetSize()) {
+            size
+        } else {
+            Int64(cgMod.GetTypeSize(elementCGType.GetLLVMType()))
+        }
+        return unsafe { LLVMConstInt(LLVMInt64TypeInContext(GetLLVMContext().raw), UInt64(elementSize), 0) }
+    }
+
+    private func RawValueForArrayElementStore(elementValue: CGValue, elementCGType: CGType): LLVMValueRef {
+        let raw = elementValue.GetRawValue()
+        let rawTy = unsafe { LLVMTypeOf(raw) }
+        if (!rawTy.isNull() && unsafe { LLVMGetTypeKind(rawTy) } == 12 && !elementCGType.IsReference() &&
+            (elementCGType.IsStructType() || elementCGType.IsVArrayType())) {
+            return CreateLoad(elementCGType.GetLLVMType(), raw, name: "arr.store.value")
+        }
+        return raw
+    }
+
+    private func CreateArrayCopyTo(rawArrayTy: RawArrayType, srcArray: LLVMValueRef, dstArray: LLVMValueRef,
+        srcArrPtr: LLVMValueRef, dstArrPtr: LLVMValueRef, dataSize: LLVMValueRef, srcIndex: LLVMValueRef,
+        dstIndex: LLVMValueRef): LLVMValueRef {
+        let i8Type = unsafe { LLVMInt8TypeInContext(GetLLVMContext().raw) }
+        let i8PtrType = unsafe { LLVMPointerType(i8Type, 1u32) }
+        let srcI8Ptr = CreatePointerCast(srcArrPtr, i8PtrType, name: "src.arr.i8")
+        let dstI8Ptr = CreatePointerCast(dstArrPtr, i8PtrType, name: "dst.arr.i8")
+        let srcIndices = ArrayList<LLVMValueRef>()
+        srcIndices.add(srcIndex)
+        let dstIndices = ArrayList<LLVMValueRef>()
+        dstIndices.add(dstIndex)
+        let srcDataPtr = CreateGEP(i8Type, srcI8Ptr, srcIndices, name: "src.arr.data.i8")
+        let dstDataPtr = CreateGEP(i8Type, dstI8Ptr, dstIndices, name: "dst.arr.data.i8")
+        let elementCGType = CGType.GetOrCreate(cgMod, rawArrayTy.GetElementType())
+        if (elementCGType.GetSize().isNone()) {
+            return CreateArrayCopyIntrinsic(ARRAY_COPY_GENERIC_INTRINSIC_NAME, dstArray, dstDataPtr, srcArray, srcDataPtr,
+                dataSize)
+        }
+        if (IsLLVMTypeContainsRef(elementCGType.GetLLVMType())) {
+            let intrinsicName = if (elementCGType.IsReference()) {
+                ARRAY_COPY_REF_INTRINSIC_NAME
+            } else {
+                ARRAY_COPY_STRUCT_INTRINSIC_NAME
+            }
+            return CreateArrayCopyIntrinsic(intrinsicName, dstArray, dstDataPtr, srcArray, srcDataPtr, dataSize)
+        }
+        return CreateMemMove(dstDataPtr, 8u32, srcDataPtr, 8u32, dataSize)
+    }
+
+    private func CreateArrayCopyIntrinsic(intrinsicName: String, dstBase: LLVMValueRef, dstData: LLVMValueRef,
+        srcBase: LLVMValueRef, srcData: LLVMValueRef, dataSize: LLVMValueRef): LLVMValueRef {
+        let overloadedTypes = ArrayList<LLVMTypeRef>()
+        overloadedTypes.add(unsafe { LLVMTypeOf(dataSize) })
+        let args = ArrayList<LLVMValueRef>()
+        args.add(CreatePointerCast(dstBase, CGType.GetRefType(GetLLVMContext()), name: "array.copy.dst.base"))
+        args.add(CreatePointerCast(dstData, CGType.GetRefType(GetLLVMContext()), name: "array.copy.dst"))
+        args.add(CreatePointerCast(srcBase, CGType.GetRefType(GetLLVMContext()), name: "array.copy.src.base"))
+        args.add(CreatePointerCast(srcData, CGType.GetRefType(GetLLVMContext()), name: "array.copy.src"))
+        args.add(dataSize)
+        return CreateIntrinsicCall(intrinsicName, overloadedTypes, args)
+    }
+
+    private func IsLLVMTypeContainsRef(llvmTy: LLVMTypeRef): Bool {
+        if (llvmTy.isNull()) {
+            return false
+        }
+        let kind = unsafe { LLVMGetTypeKind(llvmTy) }
+        if (kind == 12) {
+            return unsafe { LLVMGetPointerAddressSpace(llvmTy) } == 1u32
+        }
+        if (kind == 10) {
+            let elementCount = unsafe { LLVMCountStructElementTypes(llvmTy) }
+            if (elementCount == 0u32) {
+                return false
+            }
+            var result = false
+            try (elementPtr = LibC.malloc<LLVMTypeRef>(count: Int64(elementCount)).asResource()) {
+                unsafe { LLVMGetStructElementTypes(llvmTy, elementPtr.value) }
+                var idx: Int64 = 0
+                while (idx < Int64(elementCount)) {
+                    if (IsLLVMTypeContainsRef(unsafe { (elementPtr.value + idx).read() })) {
+                        result = true
+                        break
+                    }
+                    idx++
+                }
+            }
+            return result
+        }
+        return false
     }
 
     private func LookupIntrinsicID(intrinsicName: String): UInt32 {

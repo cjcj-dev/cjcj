@@ -7,6 +7,7 @@ import cangjie_compiler::chir.Intrinsic
 import cangjie_compiler::chir.IntrinsicKind
 import cangjie_compiler::chir.IntrinsicKindToString
 import cangjie_compiler::chir.IntrinsicWithException
+import cangjie_compiler::chir.RawArrayType
 import cangjie_compiler::chir.Type
 import cangjie_compiler::chir.Value
 
@@ -135,8 +136,126 @@ private func GenerateIntrinsic(irBuilder: IRBuilder2, kind: IntrinsicKind, args:
         }
         return LLVMNullValue()
     }
+    if (IsArrayIntrinsic(kind)) {
+        return GenerateArraySyscall(irBuilder, kind, args, resultType)
+    }
     let _ = IntrinsicKindToString(kind)
     return UnitOrTypedNull(irBuilder, resultType)
+}
+
+private func IsArrayIntrinsic(kind: IntrinsicKind): Bool {
+    return kind == IntrinsicKind.ARRAY_BUILT_IN_COPY_TO ||
+        kind == IntrinsicKind.ARRAY_GET ||
+        kind == IntrinsicKind.ARRAY_SET ||
+        kind == IntrinsicKind.ARRAY_GET_UNCHECKED ||
+        kind == IntrinsicKind.ARRAY_GET_REF_UNCHECKED ||
+        kind == IntrinsicKind.ARRAY_SET_UNCHECKED ||
+        kind == IntrinsicKind.ARRAY_SIZE ||
+        kind == IntrinsicKind.ARRAY_CLONE ||
+        kind == IntrinsicKind.ARRAY_INIT
+}
+
+private func GenerateArraySyscall(irBuilder: IRBuilder2, kind: IntrinsicKind, args: ArrayList<Value>,
+    resultType: Option<Type>): LLVMValueRef {
+    if (args.isEmpty()) {
+        return LLVMNullValue()
+    }
+    if (kind == IntrinsicKind.ARRAY_GET || kind == IntrinsicKind.ARRAY_SET) {
+        return GenerateArrayIndex(irBuilder, args, true)
+    }
+    if (kind == IntrinsicKind.ARRAY_GET_UNCHECKED || kind == IntrinsicKind.ARRAY_SET_UNCHECKED) {
+        return GenerateArrayIndex(irBuilder, args, false)
+    }
+    if (kind == IntrinsicKind.ARRAY_GET_REF_UNCHECKED) {
+        return GenerateArrayGetElemRef(irBuilder, args)
+    }
+    if (kind == IntrinsicKind.ARRAY_BUILT_IN_COPY_TO) {
+        return GenerateArrayCopyTo(irBuilder, args, resultType)
+    }
+    if (kind == IntrinsicKind.ARRAY_SIZE) {
+        let arrayValue = irBuilder.GetCGModule().MaterializeValue(irBuilder, args[0]).GetRawValue()
+        return irBuilder.CallArrayIntrinsicGetSize(arrayValue)
+    }
+    if (kind == IntrinsicKind.ARRAY_CLONE) {
+        if (let Some(rawArrayTy) <- GetRawArrayTypeFromArrayArg(args[0])) {
+            let arrayValue = irBuilder.GetCGModule().MaterializeValue(irBuilder, args[0]).GetRawValue()
+            return irBuilder.CallArrayIntrinsicCopy(rawArrayTy, arrayValue)
+        }
+        return LLVMNullValue()
+    }
+    if (kind == IntrinsicKind.ARRAY_INIT) {
+        if (args.size == 3) {
+            if (let Some(rawArrayTy) <- GetRawArrayTypeFromArrayArg(args[0])) {
+                let arrayValue = irBuilder.GetCGModule().MaterializeValue(irBuilder, args[0]).GetRawValue()
+                let elementValue = irBuilder.GetCGModule().MaterializeValue(irBuilder, args[1]).GetRawValue()
+                let sizeValue = irBuilder.GetCGModule().MaterializeValue(irBuilder, args[2]).GetRawValue()
+                let _ = irBuilder.CallArrayInit(arrayValue, sizeValue, elementValue, rawArrayTy)
+                return UnitOrTypedNull(irBuilder, resultType)
+            }
+        }
+        return LLVMNullValue()
+    }
+    return LLVMNullValue()
+}
+
+private func GenerateArrayIndex(irBuilder: IRBuilder2, args: ArrayList<Value>, isChecked: Bool): LLVMValueRef {
+    if (args.size < 2) {
+        return LLVMNullValue()
+    }
+    if (let Some(rawArrayTy) <- GetRawArrayTypeFromArrayArg(args[0])) {
+        let arrayValue = irBuilder.GetCGModule().MaterializeValue(irBuilder, args[0]).GetRawValue()
+        let indexValue = irBuilder.GetCGModule().MaterializeValue(irBuilder, args[1]).GetRawValue()
+        if (args.size >= 3) {
+            let elementValue = irBuilder.GetCGModule().MaterializeValue(irBuilder, args[2])
+            return irBuilder.CallArrayIntrinsicSet(rawArrayTy, arrayValue, indexValue, elementValue, isChecked)
+        }
+        return irBuilder.CallArrayIntrinsicGet(rawArrayTy, arrayValue, indexValue, isChecked)
+    }
+    return LLVMNullValue()
+}
+
+private func GenerateArrayGetElemRef(irBuilder: IRBuilder2, args: ArrayList<Value>): LLVMValueRef {
+    if (args.size != 2) {
+        return LLVMNullValue()
+    }
+    if (let Some(rawArrayTy) <- GetRawArrayTypeFromArrayArg(args[0])) {
+        let arrayValue = irBuilder.GetCGModule().MaterializeValue(irBuilder, args[0]).GetRawValue()
+        let indexValue = irBuilder.GetCGModule().MaterializeValue(irBuilder, args[1]).GetRawValue()
+        return irBuilder.GetArrayElementAddr(rawArrayTy, arrayValue, indexValue, false)
+    }
+    return LLVMNullValue()
+}
+
+private func GenerateArrayCopyTo(irBuilder: IRBuilder2, args: ArrayList<Value>,
+    resultType: Option<Type>): LLVMValueRef {
+    if (args.size != 5) {
+        return LLVMNullValue()
+    }
+    if (let Some(rawArrayTy) <- GetRawArrayTypeFromArrayArg(args[0])) {
+        let srcArray = irBuilder.GetCGModule().MaterializeValue(irBuilder, args[0]).GetRawValue()
+        let dstArray = irBuilder.GetCGModule().MaterializeValue(irBuilder, args[1]).GetRawValue()
+        let srcStart = irBuilder.GetCGModule().MaterializeValue(irBuilder, args[2]).GetRawValue()
+        let dstStart = irBuilder.GetCGModule().MaterializeValue(irBuilder, args[3]).GetRawValue()
+        let copyLen = irBuilder.GetCGModule().MaterializeValue(irBuilder, args[4]).GetRawValue()
+        let _ = irBuilder.CallArrayIntrinsicCopyTo(rawArrayTy, srcArray, dstArray, srcStart, dstStart, copyLen)
+        return UnitOrTypedNull(irBuilder, resultType)
+    }
+    return LLVMNullValue()
+}
+
+private func GetRawArrayTypeFromArrayArg(arg: Value): Option<RawArrayType> {
+    if (let Some(argTy) <- arg.GetType()) {
+        let typeArgs = argTy.GetTypeArgs()
+        if (!typeArgs.isEmpty()) {
+            if (let Some(rawArrayTy) <- (typeArgs[0] as RawArrayType)) {
+                return rawArrayTy
+            }
+        }
+        if (let Some(rawArrayTy) <- (argTy.StripAllRefs() as RawArrayType)) {
+            return rawArrayTy
+        }
+    }
+    return None
 }
 
 private func GenerateCPointerAdd(irBuilder: IRBuilder2, args: ArrayList<Value>,

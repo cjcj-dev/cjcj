@@ -2561,3 +2561,43 @@ Verification for this exact state:
 - Clean `rm -rf target && cjpm build`: success.
 - `bash scripts/difftest.sh`: `TOTAL=101  PASS=101  MISMATCH=0  FAIL=0`.
 - New pointer repro compiles/runs and matches `/root/.cjv/bin/cjc`.
+## Probe 31 (CodeGen Array intrinsic dispatcher)
+
+Bug: selfhost codegen had no Array intrinsic dispatcher arm, so `ARRAY_GET`, `ARRAY_SET`,
+`ARRAY_GET_UNCHECKED`, `ARRAY_SET_UNCHECKED`, `ARRAY_GET_REF_UNCHECKED`, `ARRAY_SIZE`,
+`ARRAY_CLONE`, `ARRAY_INIT`, and `ARRAY_BUILT_IN_COPY_TO` all fell through to the generic
+typed-null fallback in `packages/codegen/src/IntrinsicsDispatcher.cj`. Array indexing could therefore
+lower to null IR values and either print wrong output or crash later.
+
+C++ reference ported:
+- Classification mirrors `src/CodeGen/Base/IntrinsicsDispatcher.h:70-75`: array intrinsics are
+  `ARRAY_BUILT_IN_COPY_TO..ARRAY_CLONE` plus `ARRAY_INIT`.
+- Dispatch mirrors `src/CodeGen/Base/IntrinsicsDispatcher.cpp:629-675`:
+  checked get/set route through `GenerateArrayIndex(..., true)`, unchecked get/set through
+  `GenerateArrayIndex(..., false)`, ref-get through the array element address helper, copy-to/size/clone/init
+  through the corresponding array helpers.
+- Element primitives mirror `src/CodeGen/CJNative/CJNativeIntrinsicsCall.cpp:224-313`: payload bitcast,
+  length load at array-base index 1, `{0, 1, index}` GEP on the array layout, checked index branch, GC-barrier
+  stores for reference elements, ordinary loads for gets, and `untrusted_ref` metadata for enum loads.
+
+The selfhost implementation reuses existing codegen layout/runtime primitives: `CGType.GetArrayBaseType`,
+`CGArrayType.GenerateArrayLayoutType`, `IRBuilder2.GetPayloadFromObject`, `IRBuilder2.AllocateArray`,
+`IRBuilder2.CallGCWrite`, `CreateMemMove`, and the LLVM array-copy intrinsics already available through
+`CreateIntrinsicCall`. The change is confined to the Array dispatch surface in
+`packages/codegen/src/IntrinsicsDispatcher.cj` and thin IRBuilder array helpers in
+`packages/codegen/src/IRBuilder.cj`; no CHIR/sema/parse/lex changes were made.
+
+Before: `main(){ let a = Array<Int64>(3, repeat: 0); a[0] = 7; println(a[0]); println(a.size) }`
+could compile to typed-null lowering for the array intrinsic and produce wrong output or crash.
+After: the selfhost compiler matches `/root/.cjv/bin/cjc`; the focused repro prints `7`, `3`, and a
+loop sum of `7`.
+
+New corpus case: `scripts/difftest_corpus/117_array_intrinsics_get_set_size.cj` covers checked set,
+checked get, size, and looped indexed reads.
+
+Verification:
+- Clean `rm -rf target && cjpm build`: success.
+- Focused repro and new corpus case match reference output.
+- Full corpus: `TOTAL=102  PASS=102  MISMATCH=0  FAIL=0`.
+- Septests passed: `run.sh`, `run_write.sh`, `run_diag.sh`, `run_write_types.sh`, `run_write_struct.sh`,
+  `run_gendefault.sh`.
