@@ -362,6 +362,7 @@ public class Translator {
         BindFuncParams(funcDecl, fn)
         if (let Some(funcBody) <- funcDecl.funcBody) {
             if (let Some(astBody) <- funcBody.body) {
+                TranslateConstructorDefaultFieldInitializers(funcDecl, funcBody)
                 let result = Translator.TranslateASTNode(astBody, this)
                 if (CurrentBlock().GetTerminator().isNone()) {
                     EmitImplicitFunctionExit(fn, result)
@@ -375,6 +376,89 @@ public class Translator {
         currentAstFuncDecl = savedAstFuncDecl
         blockGroupStack.remove(at: blockGroupStack.size - 1)
         return fn
+    }
+
+    private func TranslateConstructorDefaultFieldInitializers(funcDecl: AstFuncDecl, funcBody: AstFuncBody): Unit {
+        if (!funcDecl.TestAttr(AstAttribute.CONSTRUCTOR) || HasDelegatedThisCall(funcBody)) {
+            return
+        }
+        let owner = match (funcDecl.outerDecl) {
+            case Some(value) => value
+            case None => return
+        }
+        if (owner.astKind != ASTKind.CLASS_DECL && owner.astKind != ASTKind.STRUCT_DECL) {
+            return
+        }
+        let thisVar = CurrentFunction().GetParam(0)
+        var fieldOffset = GetSuperInstanceVarSize(owner)
+        for (member in owner.GetMemberDeclPtrs()) {
+            if (let Some(varDecl) <- (member as AstVarDecl)) {
+                if (varDecl.TestAttr(AstAttribute.STATIC)) {
+                    continue
+                }
+                if (let Some(initializer) <- varDecl.initializer) {
+                    let initValue = Translator.TranslateASTNode(initializer, this) ??
+                        throw IllegalStateException("faithful AST2CHIR member initializer produced no value")
+                    let path = ArrayList<UInt64>()
+                    path.add(UInt64(fieldOffset))
+                    let memberTy = GetInstanceMemberTypeByIndex(thisVar, fieldOffset)
+                    builder.CreateStoreElementRef(CoerceInitializerForExpectedType(initializer, initValue, memberTy),
+                        thisVar, path, CurrentBlock())
+                }
+                fieldOffset++
+            }
+        }
+    }
+
+    private func HasDelegatedThisCall(funcBody: AstFuncBody): Bool {
+        let body = funcBody.body ?? return false
+        if (body.body.isEmpty()) {
+            return false
+        }
+        let first = body.body[0]
+        if (let Some(callExpr) <- (first as AstCallExpr)) {
+            if (callExpr.callKind == AstCallKind.CALL_FUNCTION_PTR) {
+                return false
+            }
+            if (let Some(resolved) <- callExpr.resolvedFunction) {
+                if (resolved.TestAttr(AstAttribute.CONSTRUCTOR)) {
+                    if (let Some(base) <- callExpr.baseFunc) {
+                        if (let Some(refExpr) <- (base as AstRefExpr)) {
+                            return refExpr.isThis
+                        }
+                    }
+                }
+            }
+        }
+        return false
+    }
+
+    private func GetSuperInstanceVarSize(owner: AstDecl): Int64 {
+        if (let Some(classDecl) <- (owner as AstClassDecl)) {
+            if (let Some(superDecl) <- classDecl.GetSuperClassDecl()) {
+                return chirTy.GetGlobalNominalCache(superDecl).GetAllInstanceVarNum()
+            }
+        }
+        return 0
+    }
+
+    private func GetInstanceMemberTypeByIndex(thisVar: Value, index: Int64): Type {
+        let thisTy = thisVar.GetType() ??
+            throw IllegalStateException("faithful AST2CHIR constructor this has no type")
+        let baseTy = if (let Some(refTy) <- (thisTy as RefType)) { refTy.GetBaseType() } else { thisTy }
+        let customTy = (baseTy as CustomType) ??
+            throw IllegalStateException("faithful AST2CHIR constructor this is not nominal: ${baseTy.ToString()}")
+        let memberTys = customTy.GetInstantiatedMemberTys()
+        return memberTys[index]
+    }
+
+    private func CoerceInitializerForExpectedType(expr: AstExpr, value: Value, expectedTy: Type): Value {
+        if (let Some(litExpr) <- (expr as AstLitConstExpr)) {
+            if (expectedTy.IsConstant()) {
+                return RequireResult(builder.CreateConstant(expectedTy, TranslateLitConstant(litExpr), CurrentBlock()))
+            }
+        }
+        return CastValueIfNeeded(value, expectedTy)
     }
 
     public func Visit(mainDecl: AstMainDecl): Option<Value> {
