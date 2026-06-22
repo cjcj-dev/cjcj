@@ -51,6 +51,19 @@ public class Collector {
     }
 
     private func AddSymbol(ctx: ASTContext, node: Node, buildTrie!: Bool = true): Unit {
+        if (let Some(callExpr) <- (node as CallExpr)) {
+            if (let Some(baseFunc) <- callExpr.baseFunc) {
+                SetIsNotAlone(baseFunc)
+            }
+        } else if (let Some(memberAccess) <- (node as MemberAccess)) {
+            if (let Some(baseExpr) <- memberAccess.baseExpr) {
+                SetIsNotAlone(baseExpr)
+            }
+        } else if (let Some(subscriptExpr) <- (node as SubscriptExpr)) {
+            if (let Some(baseExpr2) <- subscriptExpr.baseExpr) {
+                SetIsNotAlone(baseExpr2)
+            }
+        }
         let scopeName = if (node.scopeName.isEmpty()) { TOPLEVEL_SCOPE_NAME } else { node.scopeName }
         let fileHash = if (let Some(file) <- node.curFile) { file.fileHash } else { 0u64 }
         let symbol = Symbol(fileHash, SymbolName(node), node, node.scopeLevel, scopeName)

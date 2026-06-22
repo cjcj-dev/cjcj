@@ -508,6 +508,9 @@ public class TypeChecker {
                 let walker = Walker(decl, visitPre: { node: Node =>
                     if (let Some(funcDecl) <- (node as FuncDecl)) {
                         GetSingleParamFunc(funcDecl)
+                        if (funcDecl.IsFinalizer()) {
+                            AddUnitType(funcDecl)
+                        }
                         return VisitAction.WALK_CHILDREN
                     }
                     if (let Some(propDecl) <- (node as PropDecl)) {
