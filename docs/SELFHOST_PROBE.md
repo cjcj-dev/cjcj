@@ -1698,3 +1698,88 @@ Results:
 - `run_diag.sh`: `SEPTEST-DIAG-PASS`.
 - `run_write_types.sh`: `SEPTEST-WRITE-TYPES-PASS`.
 - `run_write_struct.sh`: `SEPTEST-WRITE-STRUCT-PASS`.
+
+## Probe 16 (where-clause multiple constraints)
+
+### Root cause and C++ reference
+
+The selfhost parser treated `where` as if each `where` introduced exactly one generic constraint. In
+`packages/parse/src/ParserUtils.cj`, `ParseGenericConstraints` looped on `while (Skip(TokenKind.WHERE))`, parsed one
+`T <: Bound`, and returned with a comma still pending for sources such as:
+
+```cj
+public func HashPair<T1, T2>(pair: (T1, T2)): Int64 where T1 <: Hashable, T2 <: Hashable {
+    return pair[0].hashCode() ^ pair[1].hashCode()
+}
+```
+
+The C++ parser has the opposite shape: a single `where` introduces a comma-separated list of constraints.
+`/root/cj_build/cangjie_compiler/src/Parse/ParseDecl.cpp:1868-1888` builds one `GenericConstraint`, records either the
+initial `wherePos` or the previous constraint's `commaPos` at `:1874-1878`, parses the upper-bound list, and repeats
+with `while (Skip(TokenKind::COMMA))`. It then performs the duplicate constrained type-name diagnostic pass at
+`/root/cj_build/cangjie_compiler/src/Parse/ParseDecl.cpp:1889-1899`. The upper-bound helper records `<:` and `&`
+positions at `/root/cj_build/cangjie_compiler/src/Parse/ParseDecl.cpp:1833-1864`.
+
+### Faithful fix
+
+`packages/parse/src/ParserUtils.cj` now mirrors that structure:
+
+- no constraints are parsed unless the caller position actually has `where`;
+- the first constraint records `wherePos`;
+- each following comma records `commaPos` on the previous `GenericConstraint` before parsing the next one;
+- `<:` is recorded in `operatorPos`;
+- `&` multi-bounds continue to parse and now record `bitAndPos`;
+- a duplicate constrained type-name pass diagnoses repeated constrained type names after parsing the list.
+
+This is a parser-grammar fix only; it does not special-case `HashPair` or any corpus file.
+
+### Oracle and corpus
+
+The original oracle now matches the reference: selfhost and reference both compile the `HashPair<T1, T2> ... where
+T1 <: Hashable, T2 <: Hashable` snippet successfully.
+
+Added `scripts/difftest_corpus/108_where_multi_constraint.cj`, covering:
+
+- a generic function with multiple comma-separated `where` constraints;
+- a generic class with multiple comma-separated `where` constraints;
+- a generic struct with multiple comma-separated `where` constraints;
+- a single-constraint `where T <: Hashable`;
+- `&` multi-bound constraints such as `T1 <: Hashable & Named`.
+
+Standalone reference/selfhost compile-run for the new corpus case matches: output `48`, exit `0`.
+
+### Current package frontier after this blocker
+
+`packages/utils/src` now gets past the former parser blocker in `Utils.cj` at
+`where T1 <: Hashable, T2 <: Hashable`. The next observed blocker is runtime OOM during selfhost compilation of the
+package with:
+
+```sh
+./target/release/bin/cangjie_compiler::cjc -p packages/utils/src --output-type=staticlib -o "$tmpdir/utils"
+```
+
+The failure occurs after parsing and reports `Out of memory`; no follow-up fix was attempted here.
+
+### Verification
+
+```sh
+rm -rf target && cjpm build
+bash scripts/difftest.sh
+bash scripts/septest/run.sh
+bash scripts/septest/run_write.sh
+bash scripts/septest/run_diag.sh
+bash scripts/septest/run_write_types.sh
+bash scripts/septest/run_write_struct.sh
+```
+
+Results:
+
+- `cjpm build`: success.
+- Original multi-constraint oracle: reference and selfhost both compile successfully.
+- New corpus case: reference and selfhost compile/run match, output `48`, exit `0`.
+- `difftest`: `TOTAL=92  PASS=92  MISMATCH=0  FAIL=0`.
+- `run.sh`: `SEPTEST-PASS`.
+- `run_write.sh`: `SEPTEST-WRITE-PASS`.
+- `run_diag.sh`: `SEPTEST-DIAG-PASS`.
+- `run_write_types.sh`: `SEPTEST-WRITE-TYPES-PASS`.
+- `run_write_struct.sh`: `SEPTEST-WRITE-STRUCT-PASS`.

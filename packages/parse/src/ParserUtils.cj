@@ -319,20 +319,52 @@ extend ParserImpl {
 
     public func ParseGenericConstraints(): ArrayList<GenericConstraint> {
         let out = ArrayList<GenericConstraint>()
-        while (Skip(TokenKind.WHERE)) {
+        if (!Skip(TokenKind.WHERE)) {
+            return out
+        }
+        while (true) {
             let constraint = GenericConstraint()
-            constraint.wherePos = lastToken.Begin()
+            if (lastToken.kind == TokenKind.COMMA && !out.isEmpty()) {
+                out[out.size - 1].commaPos = lastToken.Begin()
+            } else if (lastToken.kind == TokenKind.WHERE) {
+                constraint.wherePos = lastToken.Begin()
+            }
             let refTy = ParseRefType(true)
             constraint.refType = refTy
-            if (Skip(TokenKind.UPPERBOUND) || Skip(TokenKind.COLON)) {
+            if (!Skip(TokenKind.UPPERBOUND)) {
+                diag.DiagnoseRefactor(DiagKindRefactor.EXPECTED_TOKEN, Peek().Begin(), "expected '<:' in generic constraint")
+            } else {
+                constraint.operatorPos = lastToken.Begin()
+            }
+            constraint.upperBounds.add(ParseType())
+            while (Skip(TokenKind.BITAND)) {
+                constraint.bitAndPos.add(lastToken.Begin())
                 constraint.upperBounds.add(ParseType())
-                while (Skip(TokenKind.BITAND)) {
-                    constraint.upperBounds.add(ParseType())
+            }
+            constraint.begin = if (constraint.wherePos.IsZero()) { refTy.begin } else { constraint.wherePos }
+            constraint.end = if (!constraint.upperBounds.isEmpty()) {
+                constraint.upperBounds[constraint.upperBounds.size - 1].end
+            } else {
+                refTy.end
+            }
+            out.add(constraint)
+            if (!Skip(TokenKind.COMMA)) {
+                break
+            }
+        }
+        let posRecord = HashMap<String, Position>()
+        for (constraint in out) {
+            if (let Some(refTy) <- constraint.refType) {
+                let typeName = refTy.ref.identifier.Val()
+                if (posRecord.contains(typeName)) {
+                    diag.DiagnoseRefactor(
+                        DiagKindRefactor.PARSE_ERROR,
+                        refTy.begin,
+                        "duplicated type name '${typeName}' in generic constrain")
+                } else {
+                    posRecord.add(typeName, refTy.begin)
                 }
             }
-            constraint.begin = constraint.wherePos
-            constraint.end = if (!constraint.upperBounds.isEmpty()) { constraint.upperBounds[constraint.upperBounds.size - 1].end } else { refTy.end }
-            out.add(constraint)
         }
         return out
     }
