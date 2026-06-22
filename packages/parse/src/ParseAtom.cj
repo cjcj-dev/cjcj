@@ -32,7 +32,8 @@ extend ParserImpl {
             ret.end = token.End()
             return ret
         }
-        if (Seeing(TokenKind.IDENTIFIER) || Seeing(TokenKind.PACKAGE_IDENTIFIER) || Seeing(TokenKind.THIS) || Seeing(TokenKind.SUPER)) {
+        if (Seeing(TokenKind.IDENTIFIER) || SeeingContextualKeyword() ||
+            Seeing(TokenKind.PACKAGE_IDENTIFIER) || Seeing(TokenKind.THIS) || Seeing(TokenKind.SUPER)) {
             return ParseRefExpr(ek)
         }
         if (Seeing(TokenKind.WILDCARD)) {
@@ -287,9 +288,10 @@ extend ParserImpl {
     // Tokens that may legally appear inside a generic type-argument list (excluding the angle brackets
     // themselves, which are handled by the depth counter in LooksLikeTypeArguments).
     func IsTypeArgInnerToken(kind: TokenKind): Bool {
+        if (IsPackageIdentifierOrContextualKeyword(kind)) {
+            return true
+        }
         return match (kind) {
-            case TokenKind.IDENTIFIER => true
-            case TokenKind.PACKAGE_IDENTIFIER => true
             case TokenKind.DOT => true
             case TokenKind.DOUBLE_COLON => true
             case TokenKind.COMMA => true

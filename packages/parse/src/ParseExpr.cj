@@ -742,7 +742,8 @@ extend ParserImpl {
     public func ParseFuncArg(): FuncArg {
         let arg = FuncArg()
         let first = Peek()
-        if (Seeing(TokenKind.IDENTIFIER) && lexer.LookAheadSkipNL(1).size > 0 && lexer.LookAheadSkipNL(1)[0].kind == TokenKind.COLON) {
+        if (IsIdentifierOrContextualKeyword(first.kind) &&
+            lexer.LookAheadSkipNL(1).size > 0 && lexer.LookAheadSkipNL(1)[0].kind == TokenKind.COLON) {
             arg.name = ParseIdentifierFromToken(first)
             Next()
             arg.colonPos = Expect(TokenKind.COLON, "expected ':' after argument name").Begin()
@@ -789,6 +790,9 @@ extend ParserImpl {
     }
 
     public func ParseExprOrDecl(scopeKind: ScopeKind): Node {
+        if (SeeingKeywordAndOperater()) {
+            return ParseExpr()
+        }
         if (CheckIfSeeingDecl(scopeKind)) {
             return ParseDecl(scopeKind)
         }
