@@ -61,9 +61,6 @@ private func GenerateFieldByPath(irBuilder: IRBuilder2, base: Value,
                 let fieldAddr = irBuilder.CreateGEP(gepElementType, basePointer, indices,
                     name: name + ".addr")
                 if (let Some(fieldType) <- GetFieldCGTypeAtPath(elementType, path)) {
-                    if (fieldType.IsStructType()) {
-                        return fieldAddr
-                    }
                     let loaded = irBuilder.CreateLoad(fieldType.GetLLVMType(), fieldAddr, name: name)
                     return CastExtractedFieldIfNeeded(irBuilder, loaded, fieldType.GetOriginal(), expectedTy)
                 }
