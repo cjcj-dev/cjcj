@@ -967,7 +967,9 @@ public class FaithfulAST2CHIR {
             initFn.EnableAttr(Attribute.CONST)
         }
         let globalVar = RequireGlobalVar(globalCache.Get(varDecl))
-        globalVar.SetInitFunc(initFn)
+        if (suffix != "$literal") {
+            globalVar.SetInitFunc(initFn)
+        }
         CreateTranslator().TranslateGlobalVarInitializer(initFn, varDecl, globalVar)
         return initFn
     }

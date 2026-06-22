@@ -2265,3 +2265,50 @@ Confirmation:
 - Full corpus: `TOTAL=95  PASS=95  MISMATCH=0  FAIL=0`.
 - Septests passed separately: `run.sh`, `run_write.sh`, `run_diag.sh`, `run_write_types.sh`,
   `run_write_struct.sh`.
+
+## Probe 24 (global variable literal initializer)
+
+Bug: a package-level global with a simple literal initializer could read its zero/default value at runtime in the
+selfhost compiler. The minimal case:
+
+```cj
+var B: Int64 = 2
+main() { println(B) }
+```
+
+printed `0` before the fix, while the reference compiler emits a static LLVM initializer and prints `2`.
+
+Root: the selfhost literal path first recorded the literal through `SetLiteralInitializer`, but then the mutable-var
+literal reset path built a `$literal` store function and attached that function to the same `GlobalVar`.
+`packages/chir/src/Value.cj:784` made `GlobalVar.SetInitFunc` set `initFunc` and clear `initializerValue`, and
+`packages/chir/src/FaithfulAST2CHIR.cj:962` always called `globalVar.SetInitFunc(initFn)` inside
+`CreateGlobalVarStoreInitFunc`, including for the `$literal` reset function created from
+`TranslateFileLiteralInitializer`. Codegen then saw no literal initializer and emitted a zero initializer for the
+global.
+
+C++ reference behavior keeps these paths separate. `src/CHIR/IR/Value/Value.cpp:422` records a literal initializer,
+`Value.cpp:432` records a function initializer, and the accessors distinguish them with `DynamicCast`
+(`Value.cpp:417`, `Value.cpp:427`). The literal global path sets the initializer directly at
+`src/CHIR/AST2CHIR/GlobalVarInitializer.cpp:553`. The separate file-literal reset function is created by
+`GlobalVarInitializer.cpp:563` and only appends reset stores (`GlobalVarInitializer.cpp:584-590`); the non-literal
+initializer-to-function path is the separate `TranslateInitializerToFunction` path, which calls `SetInitFunc` at
+`GlobalVarInitializer.cpp:300-305`.
+
+Faithful fix: `CreateGlobalVarStoreInitFunc` now skips `globalVar.SetInitFunc(initFn)` when `suffix == "$literal"`.
+The `$literal` function remains available as the side reset function, but it no longer replaces the literal stored
+on the `GlobalVar`. Non-literal initializers still attach their real init function through the unchanged empty-suffix
+path.
+
+Confirmation:
+
+- Clean `rm -rf target && cjpm build`: success.
+- Minimal repro now prints `2` on selfhost and reference.
+- Saved LLVM IR for the repro contains `@_CN7default1BE = global i64 2`; `cj_entry$` calls the normal package init,
+  not the literal reset init.
+- Added `scripts/difftest_corpus/114_global_var_init.cj`, covering global `let`/`var` literal reads in `main` and a
+  helper function, `Int64`/`String`/`Rune`/`Bool`/`Float64` literal globals, mutable global updates across functions,
+  and a non-literal global initializer (`2 + 3`).
+- New corpus case matches reference output standalone: `TOTAL=1  PASS=1  MISMATCH=0  FAIL=0`.
+- Full corpus: `TOTAL=98  PASS=98  MISMATCH=0  FAIL=0`.
+- Septests passed separately: `run.sh`, `run_write.sh`, `run_diag.sh`, `run_write_types.sh`,
+  `run_write_struct.sh`.
