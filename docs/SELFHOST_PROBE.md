@@ -1931,3 +1931,87 @@ Results:
 - `run_diag.sh`: `SEPTEST-DIAG-PASS`.
 - `run_write_types.sh`: `SEPTEST-WRITE-TYPES-PASS`.
 - `run_write_struct.sh`: `SEPTEST-WRITE-STRUCT-PASS`.
+
+## Probe 18 (top-level const declaration)
+
+### C++ divergence closed
+
+The rejection point was the selfhost top-level declaration gate after modifier parsing. `ParseTopLevelDecl` called
+`ParseModifiers`, which consumed `const` as a modifier, leaving the identifier as lookahead. The old gate then only
+called `ParseDecl` when `SeeingDecl()` was true, so bare `const A...` and modifier-prefixed `private const C...`
+fell through to "unexpected token at top level" before reaching variable parsing.
+
+C++ does not have that post-modifier gate: after `ParseModifiers`, top-level parsing calls
+`ParseDecl(ScopeKind::TOPLEVEL, modifiers, ...)` directly (`src/Parse/Parser.cpp:241-254`). In `ParseDecl`, C++
+then handles a consumed `const` modifier as a const variable when `HasModifier(modifiers, TokenKind::CONST)` and
+`lastToken == "const"` (`src/Parse/ParseDecl.cpp:118-123`), routes it through `ParseConstVariable`
+(`src/Parse/ParseDecl.cpp:248-252`), and records the declaration as const from the keyword token
+(`src/Parse/ParseDecl.cpp:286-288`). C++ `SeeingDecl()` also does not list `CONST` as a declaration-start keyword;
+it treats `const` through the modifier path (`src/Parse/ParserImpl.h:397-401`).
+
+The selfhost port now mirrors that path: `SeeingDeclInScope` no longer lists `CONST` as an ordinary declaration
+start, top-level parsing allows the already-consumed const modifier to enter `ParseDecl`, and `ParseDecl` has the
+same consumed-const branch. `ParseConstVariable` reuses the existing variable/pattern declaration parsing with
+`isConst = true`, so the AST remains a real const declaration rather than a `let`.
+
+### Oracle
+
+The narrowed oracle now matches the reference compiler:
+
+- `/tmp/cjtasks/const_oracle/c1.cj`: `const A: Int64 = 5`, reference and selfhost compile successfully.
+- `/tmp/cjtasks/const_oracle/c3.cj`: `private const C: Int64 = 5`, reference and selfhost compile successfully.
+- `/tmp/cjtasks/const_oracle/c4.cj`: `const D = 5`, reference and selfhost compile successfully.
+
+Added `scripts/difftest_corpus/111_toplevel_const.cj`, covering a private top-level const with a type annotation,
+a public top-level const with inferred type, and function use of both. Standalone reference/selfhost compile-run
+matches: output `42`, exit `0`.
+
+Function-local `const`, static class-member `const`, and top-level `let`/`var` were also rechecked with the
+selfhost compiler and still compile.
+
+### Current package frontier after this blocker
+
+`packages/parse/src` no longer reports the former real-parser failure at `packages/parse/src/ParseImports.cj` on
+`private const PACKAGE_NAME_LEN_LIMIT: Int64 = 200`. A focused package compile with `cjHeapSize=2GB` and the
+reference-built dependency artifacts produced no parser diagnostic and hit the 300s timeout instead:
+
+```sh
+timeout 300 env cjHeapSize=2GB ./target/release/bin/cangjie_compiler::cjc -p packages/parse/src \
+  --output-type=staticlib -o "$WORK/self-libparse.a" \
+  --import-path target/release/basic@cangjie_compiler \
+  --import-path target/release/utils@cangjie_compiler \
+  --import-path target/release/option@cangjie_compiler \
+  --import-path target/release/ast@cangjie_compiler \
+  --import-path target/release/lex@cangjie_compiler \
+  -L target/release/basic@cangjie_compiler \
+  -L target/release/utils@cangjie_compiler \
+  -L target/release/option@cangjie_compiler \
+  -L target/release/ast@cangjie_compiler \
+  -L target/release/lex@cangjie_compiler \
+  -lbasic@cangjie_compiler -lutils@cangjie_compiler -loption@cangjie_compiler \
+  -last@cangjie_compiler -llex@cangjie_compiler --set-runtime-rpath -V
+```
+
+No follow-up fix was attempted here.
+
+### Verification
+
+```sh
+rm -rf target && cjpm build
+bash scripts/difftest.sh
+bash scripts/septest/run.sh
+bash scripts/septest/run_write.sh
+bash scripts/septest/run_diag.sh
+bash scripts/septest/run_write_types.sh
+bash scripts/septest/run_write_struct.sh
+```
+
+Results:
+
+- Clean `cjpm build`: success.
+- `difftest`: `TOTAL=95  PASS=95  MISMATCH=0  FAIL=0`.
+- `run.sh`: `SEPTEST-PASS`.
+- `run_write.sh`: `SEPTEST-WRITE-PASS`.
+- `run_diag.sh`: `SEPTEST-DIAG-PASS`.
+- `run_write_types.sh`: `SEPTEST-WRITE-TYPES-PASS`.
+- `run_write_struct.sh`: `SEPTEST-WRITE-STRUCT-PASS`.

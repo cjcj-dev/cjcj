@@ -107,7 +107,7 @@ extend ParserImpl {
             file.feature = ParseTopLvlFeatures(annos)
             return
         }
-        if (SeeingDecl() || Seeing(TokenKind.AT) || Seeing(TokenKind.AT_EXCL)) {
+        if (SeeingDecl() || SeeingConsumedConstModifier(modifiers) || Seeing(TokenKind.AT) || Seeing(TokenKind.AT_EXCL)) {
             let decl = ParseDecl(ScopeKind.TOPLEVEL, modifiers, annos)
             decl.EnableAttr(Attribute.GLOBAL)
             FinalizeDeclTree(decl)
@@ -263,7 +263,7 @@ extend ParserImpl {
             SeeingPrimaryConstructor(scopeKind)
         return seeingScopedSpecial || (SeeingModifier() && !Seeing([TokenKind.UNSAFE, TokenKind.LCURL])) ||
             SeeingAny([TokenKind.FUNC, TokenKind.MACRO, TokenKind.LET, TokenKind.VAR,
-            TokenKind.CONST, TokenKind.ENUM, TokenKind.TYPE, TokenKind.STRUCT, TokenKind.CLASS,
+            TokenKind.ENUM, TokenKind.TYPE, TokenKind.STRUCT, TokenKind.CLASS,
             TokenKind.INTERFACE, TokenKind.MAIN, TokenKind.EXTEND, TokenKind.PROP, TokenKind.INIT])
     }
 
@@ -303,6 +303,7 @@ extend ParserImpl {
         if (Seeing(TokenKind.TYPE)) { return ParseTypeAlias(scopeKind, modifiers, annos) }
         if (Seeing(TokenKind.PROP)) { return ParsePropDecl(scopeKind, modifiers, annos) }
         if (Seeing(TokenKind.INIT)) { return ParseConstructor(scopeKind, modifiers, annos) }
+        if (SeeingConsumedConstModifier(modifiers)) { return ParseConstVariable(scopeKind, modifiers, annos) }
         let token = Peek()
         diag.DiagnoseRefactor(DiagKindRefactor.EXPECTED_TOKEN, token.Begin(), "expected declaration")
         ConsumeUntilAny([TokenKind.NL, TokenKind.SEMI, TokenKind.RCURL], targetTokenConsumed: false)
@@ -836,6 +837,26 @@ extend ParserImpl {
         return InvalidDecl(key.Begin())
     }
 
+    private func ParseConstVariable(
+        scopeKind: ScopeKind,
+        modifiers: ArrayList<Modifier>,
+        annos: ArrayList<Annotation>
+    ): Decl {
+        let key = lastToken
+        if (SeeingVarWithPatternStart()) {
+            return ParseVarWithPatternDecl(scopeKind, modifiers, annos, key, false, true)
+        }
+        if (SeeingIdentifierLike()) {
+            return ParseVarDecl(scopeKind, modifiers, annos, key, false, true)
+        }
+        diag.DiagnoseRefactor(
+            DiagKindRefactor.EXPECTED_IDENTIFIER,
+            Peek().Begin(),
+            "expected identifier or irrefutable pattern after '${key.Value()}'")
+        ConsumeUntilAny([TokenKind.NL, TokenKind.SEMI, TokenKind.RCURL], targetTokenConsumed: false)
+        return InvalidDecl(key.Begin())
+    }
+
     private func SeeingVarWithPatternStart(): Bool {
         return Seeing(TokenKind.WILDCARD) || Seeing(TokenKind.LPAREN) ||
             SeeingIdentifierAndTargetOp([TokenKind.LPAREN, TokenKind.DOT, TokenKind.LT])
@@ -959,6 +980,10 @@ extend ParserImpl {
             }
         }
         return false
+    }
+
+    private func SeeingConsumedConstModifier(modifiers: ArrayList<Modifier>): Bool {
+        return HasModifierToken(modifiers, TokenKind.CONST) && lastToken.kind == TokenKind.CONST
     }
 
     public func ParseClassDecl(scopeKind: ScopeKind, modifiers: ArrayList<Modifier>, annos: ArrayList<Annotation>): ClassDecl {
