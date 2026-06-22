@@ -2536,3 +2536,28 @@ Verification:
 - Septests `run.sh`, `run_write.sh`, `run_diag.sh`, `run_write_types.sh`, `run_write_struct.sh` pass
   (`run_gendefault.sh` lands with the main merge).
 - Init order preserved: `115_global_init_order` output matches the reference compiler.
+
+## Probe 30
+
+Expression dispatch gap fixed in `packages/chir/src/Translator.cj`, with the change confined to
+`packages/chir/src/Translator.cj`.
+
+- `POINTER_EXPR` is now translated, matching C++
+  `src/CHIR/AST2CHIR/TranslateASTNode/TranslatePointerExpr.cpp:14`: it lowers to
+  `CPOINTER_INIT0` / `CPOINTER_INIT1` intrinsics and preserves the C++ `inout` path through
+  `INOUT_PARAM`, member-path left-value handling, and the same load-if-needed behavior.
+- `SPAWN_EXPR` has the faithful CHIR shape ported from C++
+  `src/CHIR/AST2CHIR/TranslateASTNode/TranslateSpawnExpr.cpp:12`: translate the desugared
+  `futureObj` initializer, optional desugared spawn argument, then emit `CreateSpawn` /
+  `CreateSpawnWithException` and return the future object.
+- Spawn activation is gated on selfhost sema populating `SpawnExpr.futureObj`. The selfhost gap is
+  `packages/sema/src/Desugar/AfterTypeCheck/SpawnExpr.cj:84`; C++ ground truth documents and creates
+  this desugared future object in `src/Sema/Desugar/AfterTypeCheck/SpawnExpr.cpp:44` and assigns it
+  at `src/Sema/Desugar/AfterTypeCheck/SpawnExpr.cpp:88`. Activation is deferred to a follow-up sema
+  cut.
+
+Verification for this exact state:
+
+- Clean `rm -rf target && cjpm build`: success.
+- `bash scripts/difftest.sh`: `TOTAL=101  PASS=101  MISMATCH=0  FAIL=0`.
+- New pointer repro compiles/runs and matches `/root/.cjv/bin/cjc`.
