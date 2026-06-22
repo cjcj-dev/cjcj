@@ -507,6 +507,57 @@ Results:
 - `run_write_types.sh`: `SEPTEST-WRITE-TYPES-PASS`.
 - `run_write_struct.sh`: `SEPTEST-WRITE-STRUCT-PASS`.
 
+## Probe 20 (virtual method dispatch vtable slot)
+
+### Bug
+
+Every source-level virtual method call through an `open func` on an `open class` could load the wrong function
+pointer from the runtime vtable and crash. The minimal reproducer
+`public open class Base { public open func greet(): Int64 { 10 } } main() { println(Base().greet()) }`
+printed `10` with the reference compiler but the selfhost compiler emitted a call through slot `0` and SIGSEGVed.
+
+### Root
+
+The selfhost codegen path in `packages/codegen/src/InvokeImpl.cj` computed the method slot by scanning
+`CustomTypeDef.GetMethods()` in declaration order. That ordinal is not the physical vtable slot, because class
+vtables are grouped by introducing parent type and include inherited entries before user-introduced methods.
+
+The C++ path does not rescan declarations. `src/CodeGen/Base/InvokeImpl.cpp:63-71` reads
+`invokeExpr.GetVirtualMethodOffset()` and passes that offset to `CallIntrinsicGetVTableFunc`. That offset is
+created before codegen: `src/CHIR/CHIR.cpp:1252-1264` runs `GenerateVTable`, and
+`src/CHIR/Transformation/GenerateVTable/GenerateVTable.cpp:161-168` stores `VirMethodOffset` on dynamic dispatch
+expressions. When the annotation is absent, `src/CHIR/IR/Expression/Expression.cpp:929-937` computes it from
+virtual method info; that search walks `vtable.GetTypeVTables()` and records the matched slot index at
+`src/CHIR/IR/Type/CustomTypeDef.cpp:344-364`. The intro type is likewise taken from the invoke, not from a
+declaration scan: `src/CodeGen/Base/CHIRExprWrapper.h:376-383` calls
+`GetInstSrcParentCustomTypeOfMethod`, which returns the matched instantiated source parent type at
+`src/CHIR/IR/Expression/Expression.cpp:940-949`.
+
+### Faithful Fix
+
+`GenerateInvokeExpression` now threads `GetVirtualMethodOffset()` through resolved invoke generation and virtual
+callee construction, replacing the declaration-order slot scan with the Invoke expression's precomputed offset
+when present. For source CHIR that has not run the C++ vtable pass, the fallback computes the same per-parent
+vtable search shape used by `CustomTypeDef::GetFuncIndexInVTable`, including inherited parent tables and the
+implicit `std.core.Object` prefix. Class extension function tables now use that same physical class-vtable shape
+so `llvm.cj.get.vtable.func` resolves the runtime slot the invoke selected. The port also maps AST `OPEN` to CHIR `VIRTUAL`, matching
+`src/CHIR/AST2CHIR/Utils.cpp:15-22`, so open methods are eligible for the generated vtable.
+
+### Confirmation
+
+Added `scripts/difftest_corpus/111_virtual_dispatch.cj`, covering a base virtual call, an override on a subclass,
+and an inherited method called on the subclass. Focused selfhost runs now match reference output:
+
+```text
+10
+20
+30
+```
+
+Full regression confirmation was run after the fix: clean `cjpm build`, `scripts/difftest.sh`, and all five
+septests. Final results: `difftest` reported `TOTAL=95  PASS=95  MISMATCH=0  FAIL=0`; `run.sh`,
+`run_write.sh`, `run_diag.sh`, `run_write_types.sh`, and `run_write_struct.sh` all reported PASS.
+
 ## Probe 8 (lex re-probe after faithful scope resolution)
 
 Probe target: `packages/lex/src`, re-run on branch `lexprobe2` after Probe 7's faithful scope-gate name generation

@@ -1555,6 +1555,7 @@ public class FaithfulAST2CHIR {
         if (decl.TestAttr(AstAttribute.STATIC)) { target.EnableAttr(Attribute.STATIC) }
         if (decl.TestAttr(AstAttribute.MUT)) { target.EnableAttr(Attribute.MUT) }
         if (decl.TestAttr(AstAttribute.ABSTRACT)) { target.EnableAttr(Attribute.ABSTRACT) }
+        if (decl.TestAttr(AstAttribute.OPEN)) { target.EnableAttr(Attribute.VIRTUAL) }
         if (decl.TestAttr(AstAttribute.FOREIGN)) { target.EnableAttr(Attribute.FOREIGN) }
         if (decl.TestAttr(AstAttribute.IMPORTED)) { target.EnableAttr(Attribute.IMPORTED) }
         if (decl.TestAttr(AstAttribute.SRC_IMPORTED)) { target.EnableAttr(Attribute.SRC_CODE_IMPORTED) }
