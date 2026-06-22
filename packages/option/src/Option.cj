@@ -367,7 +367,7 @@ public open class GlobalOptions <: Option {
     public var chirDebugOptimizer: Bool = false
     public var chirEA: Bool = false
     public var chirLICM: Bool = false
-    public var chirWFC: Bool = true
+    public var chirWFC: Bool = false
     public var chirCC: Bool = false
     public var codegenDebugMode: Bool = false
     public var chirLLVM: Bool = false

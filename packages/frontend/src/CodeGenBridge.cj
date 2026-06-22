@@ -23,7 +23,9 @@ import cangjie_compiler::option.MaybeUInt64
 public func BuildRealCHIRForASTPackage(instance: CompilerInstance, pkg: RealASTPackage): Option<RealCHIRPackage> {
     let builder = ChirBuilder(instance.chirData.GetRealCHIRContext())
     let chirType = CHIRType(builder, CHIRTypeCache())
-    let ast2chir = FaithfulAST2CHIR(builder, chirType, importedPkgs: instance.importManager.GetAllImportedPackages())
+    let ast2chir = FaithfulAST2CHIR(builder, chirType,
+        importedPkgs: instance.importManager.GetAllImportedPackages(),
+        chirWFC: instance.invocation.globalOptions.chirWFC)
     if (!ast2chir.ToCHIRPackage(pkg)) {
         return None
     }
