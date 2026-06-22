@@ -89,6 +89,15 @@ extend ParserImpl {
         return Seeing(TokenKind.DOUBLE_ARROW) || SeeingCombinator([TokenKind.ASSIGN, TokenKind.GT])
     }
 
+    public func SeeingContextualKeyword(): Bool {
+        for (kind in GetContextualKeyword()) {
+            if (Seeing(kind)) {
+                return true
+            }
+        }
+        return false
+    }
+
     public func SeeingBackarrow(): Bool {
         return Seeing(TokenKind.BACKARROW) || SeeingCombinator([TokenKind.LT, TokenKind.SUB])
     }

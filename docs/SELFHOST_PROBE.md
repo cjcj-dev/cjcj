@@ -1125,3 +1125,153 @@ Results:
 - `run_diag.sh`: `SEPTEST-DIAG-PASS`.
 - `run_write_types.sh`: `SEPTEST-WRITE-TYPES-PASS`.
 - `run_write_struct.sh`: `SEPTEST-WRITE-STRUCT-PASS`.
+
+## Probe 10 (lex if-expr invalid type)
+
+### Reproduction
+
+Rebuilt the selfhost compiler cleanly and re-ran the Probe 4/6/8/9 lex package command:
+
+```sh
+env cjHeapSize=1GB ./target/release/bin/cangjie_compiler::cjc -p packages/lex/src \
+  --output-type=staticlib -o "$WORK/self-liblex.a" \
+  --import-path target/release/basic@cangjie_compiler \
+  --import-path target/release/utils@cangjie_compiler \
+  -L target/release/basic@cangjie_compiler \
+  -L target/release/utils@cangjie_compiler \
+  -lbasic@cangjie_compiler -lutils@cangjie_compiler --set-runtime-rpath -V
+```
+
+Temporary CHIR tracing identified the invalid `IfExpr` as `packages/lex/src/LexerImpl.cj:525` in
+`CollectToken`:
+
+```cj
+if (!enableCollect) {
+    return
+}
+```
+
+At CHIR entry the if had type `Invalid`, its then block had type `Invalid`, and it had no else branch.
+
+### Diagnosis
+
+The invalid if was not a branch join failure. It was caused by selfhost parsing a bare `return` with
+`ReturnExpr.expr == None`, so sema typed the return as `Invalid`; that made the then block invalid,
+and the no-else if statement reached CHIR with an invalid AST type.
+
+The C++ parser does not leave bare returns without an expression:
+
+- `/root/cj_build/cangjie_compiler/src/Parse/ParseAtom.cpp:916-950`: `ParseReturnExpr` creates a
+  compiler-added `LitConstExpr` of kind `UNIT`, value `"()"`, when `return` is followed by a
+  terminator/declaration/double-arrow.
+- `/root/cj_build/cangjie_compiler/src/Sema/TypeCheckExpr/ReturnExpr.cpp:18-57`: `SynReturnExpr`
+  assumes a return expression exists, checks it against the function return type, then sets the
+  `ReturnExpr` type to `Nothing`.
+- `/root/cj_build/cangjie_compiler/src/Sema/TypeCheckExpr/IfExpr.cpp:40-45`: no-else if expressions
+  are typed as `Unit` when their condition and branches are well typed.
+
+The selfhost parser diverged at `packages/parse/src/ParseExpr.cj:1175-1184`: it only parsed an
+expression when one was present and otherwise left `ret.expr` unset. That made the later sema code
+hit an AST shape the C++ sema never sees for a bare return.
+
+### Faithful fix
+
+`packages/parse/src/ParseExpr.cj` now mirrors the C++ parser behavior for `return` followed by a
+terminator/declaration/double-arrow: it synthesizes a compiler-added `()` `LitConstExpr`, assigns it
+zero-width source positions at the return token end, preserves semicolon metadata, and always sets
+`ReturnExpr.end` from the expression.
+
+Added regression corpus program `scripts/difftest_corpus/103_if_bare_return_unit.cj`, which reproduces
+the lex shape: an unused no-else if whose then branch is a bare `return` in a `Unit` function. The
+selfhost and reference compilers both compile and run it with identical output:
+
+```text
+collected
+```
+
+### Current lex result
+
+The original invalid-if CHIR frontier is cleared. Re-running the full selfhost lex package compile now
+gets further and stops at the next invalid-type frontier:
+
+```text
+IllegalArgumentException: unsupported AST type kind for CHIRType.TranslateType: Invalid
+  at packages/chir/src/CHIRType.cj:325
+  at packages/chir/src/Translator.cj:496 Visit(VarDecl)
+```
+
+Temporary tracing identified that next node as local variable `mapped` in
+`packages/lex/src/LexerImpl.cj:535`, inside `LookupKeyword`:
+
+```cj
+let mapped = match (literal) { ... }
+```
+
+No `lex@cangjie_compiler.cjo` or final lex static library is produced yet.
+
+### Verification
+
+Commands run after the fix, as separate commands:
+
+```sh
+rm -rf target && cjpm build
+bash scripts/difftest.sh
+bash scripts/septest/run.sh
+bash scripts/septest/run_write.sh
+bash scripts/septest/run_diag.sh
+bash scripts/septest/run_write_types.sh
+bash scripts/septest/run_write_struct.sh
+```
+
+Results:
+
+- `cjpm build`: success.
+- `packages/lex/src` selfhost compile: passed the invalid `IfExpr` at `LexerImpl.cj:525` and reached
+  the new `VarDecl` invalid-type frontier at `Translator.cj:496`.
+- `difftest`: `TOTAL=87  PASS=87  MISMATCH=0  FAIL=0`.
+- `run.sh`: `SEPTEST-PASS`.
+- `run_write.sh`: `SEPTEST-WRITE-PASS`.
+- `run_diag.sh`: `SEPTEST-DIAG-PASS`.
+- `run_write_types.sh`: `SEPTEST-WRITE-TYPES-PASS`.
+- `run_write_struct.sh`: `SEPTEST-WRITE-STRUCT-PASS`.
+
+### Faithfulness follow-up: make the bare-return guard condition 1:1 with C++
+
+A review-gate pass over the first cut found the new bare-return guard condition was not yet a faithful
+match for C++ `ParserImpl::ParseReturnExpr` (`src/Parse/ParseAtom.cpp:921-924`), which is
+`(SeeingDecl() && !SeeingContextualKeyword()) || SeeingAny({SEMI, COMMA, RPAREN, RSQUARE, RCURL, CASE,
+END, DOUBLE_ARROW}) || SeeingCombinator(combinedDoubleArrow)`. Two divergences were corrected:
+
+1. **Missing `!SeeingContextualKeyword()` guard.** C++ excludes contextual keywords from the `SeeingDecl()`
+   arm (`SeeingContextualKeyword()`, `src/Parse/ParserImpl.h:190-193`, over `CONTEXTUAL_KEYWORD_TOKEN`
+   in `src/Lex/Lexer.cpp:46-50`) so that `return open` / `return public` parse the contextual keyword as a
+   real operand (`ParseExpr()`, `ParseAtom.cpp:945`) rather than synthesizing a bare unit. The selfhost
+   `SeeingDecl()` (`ParseDecl.cj`) is true for every contextual keyword that is also a modifier
+   (`ModifierKindFromToken`), so without the guard the cut would have taken the synth-unit branch for those.
+   A `SeeingContextualKeyword()` helper was added to `packages/parse/src/ParserUtils.cj`, mirroring
+   `ParserImpl.h:190-193` over `GetContextualKeyword()` (already in `packages/lex/src/Tokens.cj:433`), and the
+   `SeeingDecl()` arm is now `(SeeingDecl() && !SeeingContextualKeyword())`.
+
+   Note: this guard is currently latent — the selfhost declaration/atom parser does not yet accept a
+   contextual keyword as a binding/reference identifier anywhere (`let open = …` / `func open(…)` /
+   `return open(5)` all fail to parse on both base `2b60b17` and this cut, whereas the reference cjc accepts
+   them). So no observable behavior changes today, but the guard makes the condition 1:1 with C++ and removes
+   the latent defect that would surface once the deeper contextual-keyword-as-identifier gap is closed.
+
+2. **Missing `CASE` token.** C++ lists `CASE` in the terminator set so that a bare `return` as a match-arm
+   body immediately before the next `case` synthesizes a unit. The selfhost `AtTerminator()` does not include
+   `CASE`, and because `skipNL` defaults true the trailing newline is skipped before lookahead (lookahead is
+   the `case` token, not `NL`), so both the same-line and the common multi-line `case X => return` shapes hit
+   `ParseExpr(case)` and failed to parse. Adding `Seeing(TokenKind.CASE)` to the guard fixes this (verified:
+   `match (x) { case 0 => return; case _ => println(...) }` now compiles on the selfhost and matches the
+   reference). Regression corpus `scripts/difftest_corpus/104_match_arm_bare_return.cj`.
+
+The guard condition is now
+`(SeeingDecl() && !SeeingContextualKeyword()) || AtTerminator() || Seeing(TokenKind.CASE) || SeeingDoubleArrow()`.
+
+Remaining (pre-existing, not introduced by this cut, documented for a later cut): `AtTerminator()` also
+includes `NL` (a superset, inert because NL is skipped before lookahead); the selfhost `SeeingDecl()` is the
+scoped `SeeingDeclInScope(UNKNOWN_SCOPE)` rather than C++'s no-arg `SeeingDecl()` (different inert edge tokens
+`CONST/PROP/INIT`); and the `ParseExpr()` else-branch omits C++'s `newlineSkipped` `parse_nl_warning` and the
+`IS_BROKEN` `ConsumeUntilAny` error-recovery (diagnostics-only). The deeper contextual-keyword-as-identifier
+gap in the declaration/atom parser is a separate frontier.
