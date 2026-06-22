@@ -152,10 +152,6 @@ public class Walker {
             }
         }
 
-        if (let Some(pattern) <- (curNode as Pattern)) {
-            if (stopIf(walkExprOption(pattern.ctxExpr))) { return VisitAction.STOP_NOW }
-        }
-
         if (let Some(inheritable) <- (curNode as InheritableDecl)) {
             for (ty in inheritable.inheritedTypes) {
                 if (stopIf(WalkNode(ty))) { return VisitAction.STOP_NOW }
@@ -215,9 +211,6 @@ public class Walker {
             for (decl in pkg.srcImportedNonGenericDecls) {
                 if (stopIf(WalkNode(decl))) { return VisitAction.STOP_NOW }
             }
-            for (decl in pkg.inlineFuncDecls) {
-                if (stopIf(WalkNode(decl))) { return VisitAction.STOP_NOW }
-            }
         }
         if (let Some(file) <- (curNode as File)) {
             if (let Some(feature) <- file.feature) {
@@ -234,9 +227,6 @@ public class Walker {
             }
             for (decl in file.decls) {
                 if (stopIf(WalkNode(decl))) { return VisitAction.STOP_NOW }
-            }
-            for (node in file.originalMacroCallNodes) {
-                if (stopIf(WalkNode(node))) { return VisitAction.STOP_NOW }
             }
         }
 
@@ -269,9 +259,6 @@ public class Walker {
             if (stopIf(walkTypeOption(funcBody.retType))) { return VisitAction.STOP_NOW }
             if (let Some(body) <- funcBody.body) {
                 if (stopIf(WalkNode(body))) { return VisitAction.STOP_NOW }
-            }
-            for (captured in funcBody.capturedVars) {
-                if (stopIf(WalkNode(captured))) { return VisitAction.STOP_NOW }
             }
         }
         if (let Some(funcParam) <- (curNode as FuncParam)) {
@@ -445,12 +432,8 @@ public class Walker {
                 if (stopIf(walkExprOption(returnExpr.expr))) { return VisitAction.STOP_NOW }
             }
         }
-        if (let Some(jumpExpr) <- (curNode as JumpExpr)) {
-            if (stopIf(walkExprOption(jumpExpr.refLoop))) { return VisitAction.STOP_NOW }
-        }
         if (let Some(forIn) <- (curNode as ForInExpr)) {
             if (stopIf(walkPatternOption(forIn.pattern))) { return VisitAction.STOP_NOW }
-            if (stopIf(walkPatternOption(forIn.patternInDesugarExpr))) { return VisitAction.STOP_NOW }
             if (stopIf(walkExprOption(forIn.inExpression))) { return VisitAction.STOP_NOW }
             if (stopIf(walkExprOption(forIn.patternGuard))) { return VisitAction.STOP_NOW }
             if (let Some(body) <- forIn.body) {
@@ -527,11 +510,14 @@ public class Walker {
         }
         if (let Some(call) <- (curNode as CallExpr)) {
             if (stopIf(walkExprOption(call.baseFunc))) { return VisitAction.STOP_NOW }
-            for (arg in call.args) {
-                if (stopIf(WalkNode(arg))) { return VisitAction.STOP_NOW }
-            }
-            for (arg in call.defaultArgs) {
-                if (stopIf(WalkNode(arg))) { return VisitAction.STOP_NOW }
+            if (let Some(desugarArgs) <- call.desugarArgs) {
+                for (arg in desugarArgs) {
+                    if (stopIf(WalkNode(arg))) { return VisitAction.STOP_NOW }
+                }
+            } else {
+                for (arg in call.args) {
+                    if (stopIf(WalkNode(arg))) { return VisitAction.STOP_NOW }
+                }
             }
         }
         if (let Some(member) <- (curNode as MemberAccess)) {
@@ -677,7 +663,6 @@ public class Walker {
             if (let Some(decl) <- varPattern.varDecl) {
                 if (stopIf(WalkNode(decl))) { return VisitAction.STOP_NOW }
             }
-            if (stopIf(walkExprOption(varPattern.desugarExpr))) { return VisitAction.STOP_NOW }
         }
         if (let Some(tuplePattern) <- (curNode as TuplePattern)) {
             for (patternValue in tuplePattern.patterns) {
@@ -687,10 +672,6 @@ public class Walker {
         if (let Some(typePattern) <- (curNode as TypePattern)) {
             if (stopIf(walkPatternOption(typePattern.pattern))) { return VisitAction.STOP_NOW }
             if (stopIf(walkTypeOption(typePattern.typeNode))) { return VisitAction.STOP_NOW }
-            if (stopIf(walkExprOption(typePattern.desugarExpr))) { return VisitAction.STOP_NOW }
-            if (let Some(patternValue) <- typePattern.desugarVarPattern) {
-                if (stopIf(WalkNode(patternValue))) { return VisitAction.STOP_NOW }
-            }
         }
         if (let Some(enumPattern) <- (curNode as EnumPattern)) {
             if (stopIf(walkExprOption(enumPattern.constructor))) { return VisitAction.STOP_NOW }
