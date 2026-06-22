@@ -1,6 +1,7 @@
 package cangjie_compiler::sema
 
 import std.collection.*
+import std.sort.*
 import cangjie_compiler::ast.*
 
 public enum SearchOrder {
@@ -25,30 +26,29 @@ extend SearchOrder <: Equatable<SearchOrder> {
     }
 }
 
-private func insertSymbol(out: ArrayList<Symbol>, symbol: Symbol, order: SearchOrder): Unit {
-    var idx: Int64 = 0
-    while (idx < out.size) {
-        let before = if (order == SearchOrder.POS_ASC) {
-            Sort.PosAsc(symbol, out[idx])
-        } else {
-            Sort.PosDesc(symbol, out[idx])
-        }
-        if (before) {
-            out.add(symbol, at: idx)
-            return
-        }
-        idx++
-    }
-    out.add(symbol)
-}
-
 private func sortSymbols(symbols: ArrayList<Symbol>, order!: SearchOrder = SearchOrder.POS_ASC): ArrayList<Symbol> {
     let out = ArrayList<Symbol>()
     for (symbol in symbols) {
         if (!symbol.invertedIndexBeenDeleted) {
-            insertSymbol(out, symbol, order)
+            out.add(symbol)
         }
     }
+    sort(out, by: { left: Symbol, right: Symbol =>
+        let leftBeforeRight = if (order == SearchOrder.POS_ASC) {
+            Sort.PosAsc(left, right)
+        } else {
+            Sort.PosDesc(left, right)
+        }
+        if (leftBeforeRight) {
+            Ordering.LT
+        } else if (order == SearchOrder.POS_ASC && Sort.PosAsc(right, left)) {
+            Ordering.GT
+        } else if (order == SearchOrder.POS_DESC && Sort.PosDesc(right, left)) {
+            Ordering.GT
+        } else {
+            Ordering.EQ
+        }
+    }, stable: true)
     return out
 }
 
@@ -95,7 +95,18 @@ public func SearchSymbols(ctx: ASTContext, query: String,
 }
 
 public func GetToplevelDeclSymbols(ctx: ASTContext): ArrayList<Symbol> {
-    return SearchSymbols(ctx, "scope_level : 0 && ast_kind : *decl")
+    let out = ArrayList<Symbol>()
+    for (symbol in ctx.symbolTable) {
+        if (symbol.invertedIndexBeenDeleted || symbol.scopeLevel != 0u32) {
+            continue
+        }
+        if (let Some(node) <- symbol.node) {
+            if (let Some(_) <- (node as Decl)) {
+                out.add(symbol)
+            }
+        }
+    }
+    return sortSymbols(out)
 }
 
 public func GetAllDeclSymbols(ctx: ASTContext): ArrayList<Symbol> {

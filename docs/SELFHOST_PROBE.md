@@ -2536,3 +2536,60 @@ Verification:
 - Septests `run.sh`, `run_write.sh`, `run_diag.sh`, `run_write_types.sh`, `run_write_struct.sh` pass
   (`run_gendefault.sh` lands with the main merge).
 - Init order preserved: `115_global_init_order` output matches the reference compiler.
+
+## Probe 28 (SEMA typecheck O(n^2) cluster)
+
+The selfhost SEMA `--typecheck` blowup came from three live SEMA-side ports that rebuilt or re-sorted
+whole-package state per declaration.
+
+Diagnosis with temporary stderr timers on `TypeCheckForPackages -> PreTypeCheck -> DoTypeCheck`:
+
+- Independent globals, before: N=1000/2000/4000 was 3.76s / 8.16s / 32.42s. The sub-phase proof was
+  `PreTypeCheck` 0.31s / 0.93s / 6.49s and `DoTypeCheck` 0.39s / 1.98s / 14.39s. Drilling into
+  `DoTypeCheck` showed `PreparePackageSignatures` `GetToplevelDecls` alone at 0.40s / 1.84s / 14.47s.
+- Chain globals, before: N=1000/2000 was 10.05s / 30.94s, and N=4000 hit the 256MB OOM. After the
+  top-level/precheck fixes, remaining chain time was initializer synthesis; adding C++-style
+  already-checked decl/expr fast paths and synthesizing binary children once made it linear enough to
+  finish under the heap.
+
+Fixed sites, all confined to `packages/sema/src`:
+
+1. `Search.cj`: removed the redundant insertion sort in `sortSymbols` and replaced it with one stable
+   `std.sort.sort`; `GetToplevelDeclSymbols` now scans `ctx.symbolTable` for live top-level `Decl`
+   symbols and applies that single position sort. This avoids the AST `Searcher` compound-query
+   result-set path from SEMA without editing `packages/ast`. C++ ground truth: `src/Sema/Search.cpp:76-84`
+   asks the searcher for `Sort::posAsc`; `src/AST/Searcher.cpp:329-340` builds a vector and performs one
+   `std::sort`; `include/cangjie/AST/Searcher.h:34-40` and `src/AST/Searcher.cpp:343-356` use a
+   `std::set<Symbol*>` result set, not insertion sorting per returned symbol.
+2. `TypeCheck.cj`: replaced `collectDeclsFromPackage` / `collectDeclsFromDecl` linear `SameDecl`
+   dedup with an order-preserving `ArrayList<Decl>` plus `HashSet<String>` membership key matching
+   `SameDecl` equality (`astKind`, begin/end position, identifier, package). This removes an O(n)
+   membership scan repeated by `ResolveDecls`, `ResolveTypeAlias`, and `MarkAliasGenericParameters`.
+   C++ ground truth: `src/Sema/PreCheck.cpp:1771-1828` gets typed declaration vectors directly from
+   `GetSymsByASTKind`, which uses the set/sort searcher above; package decl lookup is hash-backed by
+   `include/cangjie/AST/ASTContext.h:197-201`.
+3. `TypeChecker.cj`: `BuildSymbolTable` passes `buildTrie: false`, matching release selfhost usage
+   where trie indexes are not needed by the sema-only path; C++ passes `ci->buildTrie` at
+   `src/Sema/TypeChecker.cpp:2108`, and frontend-tool compiler instances set it false in
+   `include/cangjie/FrontendTool/CjdCompilerInstance.h:27` and
+   `src/FrontendTool/DefaultCompilerInstance.cpp:65`. Var declarations now honor
+   `IS_CHECK_VISITED`, matching `src/Sema/TypeCheckDecl.cpp:247-266` and `268-280`. Expression
+   completion marks successfully synthesized/checked expressions in the existing typecheck cache,
+   mirroring the C++ `IsChecked` / cache-key fast path at `src/Sema/TypeChecker.cpp:740-776` and
+   cache helpers at `src/Sema/TypeChecker.cpp:1382-1510`. Binary expressions synthesize their
+   children through the full checker before the shallow binary fold, matching C++ binary synthesis's
+   `SynthesizeWithNegCache` child calls in `src/Sema/TypeCheckExpr/BinaryExpr.cpp:920-1015`.
+
+After (clean build, no temporary probes):
+
+- Independent globals: N=1000/2000/4000 = 3.32s / 6.72s / 14.87s.
+- Chain globals: N=1000/2000/4000 = 3.88s / 6.17s / 16.97s.
+
+Verification:
+
+- Clean `rm -rf target && cjpm build`: success.
+- `bash scripts/difftest.sh`: `TOTAL=101  PASS=101  MISMATCH=0  FAIL=0`.
+- Septests `run.sh`, `run_write.sh`, `run_diag.sh`, `run_write_types.sh`, `run_write_struct.sh`,
+  `run_gendefault.sh`: all pass.
+- Change is confined to `packages/sema/src` plus this probe note; `packages/chir` and `packages/ast`
+  were not edited.
