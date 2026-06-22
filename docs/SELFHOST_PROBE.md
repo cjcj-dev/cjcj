@@ -2312,3 +2312,49 @@ Confirmation:
 - Full corpus: `TOTAL=98  PASS=98  MISMATCH=0  FAIL=0`.
 - Septests passed separately: `run.sh`, `run_write.sh`, `run_diag.sh`, `run_write_types.sh`,
   `run_write_struct.sh`.
+
+## Probe 23 (generic struct constructor basePtr ABI + SRet null layout)
+
+Bug: `main() { let arr = Array<String>(1, repeat: "x"); println(arr[0]); 0 }` crashed in selfhost codegen with
+`llvm.cj.alloca.generic layout type is null`. The proximate crash was in the generic SRet path, but the root was the
+imported generic struct constructor ABI: selfhost declared/called `_CNat5ArrayIG_E6<init>HlG_` with four logical
+arguments after suppressing the struct `this` base pointer, while reference IR uses five arguments:
+`this`, `basePtr`, length, repeat value, and outer typeinfo.
+
+Root: `packages/codegen/src/CGFunctionType.cj` had a selfhost-only `UsesImportedGenericStructWrapper` path that
+recognized imported generic struct receivers and disabled basePtr emission for that receiver; `ApplyImpl.cj` then
+boxed that `this` argument through a matching call-site special path. C++ has no imported-generic-struct-wrapper
+exception. The reference function type builder inserts the basePtr uniformly for every ref struct/tuple parameter
+when `allowBasePtr` is set (`/root/cj_build/cangjie_compiler/src/CodeGen/Base/CGTypes/CGFunctionType.cpp:107-116`),
+and call argument routing inserts the matching basePtr from `structParamNeedsBasePtr`
+(`/root/cj_build/cangjie_compiler/src/CodeGen/CJNative/CJNativeIRBuilder.cpp:125-142`). `TransformFuncArgs` then
+prepends SRet storage, appends the fixed args, and finally appends instantiated type args
+(`/root/cj_build/cangjie_compiler/src/CodeGen/CJNative/CJNativeIRBuilder.cpp:149-172`). The unknown-size SRet split is
+the same uniform path: `CreateSRetGeneric` emits `prepNRSRet`/`end`, checks `CreateTypeInfoIsReferenceCall`, and calls
+`llvm.cj.alloca.generic` only on the non-reference branch
+(`/root/cj_build/cangjie_compiler/src/CodeGen/CJNative/CJNativeIRBuilder.cpp:203-215`), with
+`CreateSRetForUnknownSize` choosing that path at
+`/root/cj_build/cangjie_compiler/src/CodeGen/CJNative/CJNativeIRBuilder.cpp:219-252`.
+
+Faithful fix: removed the imported generic struct wrapper suppression and call-site boxing path, so struct `this`
+uses the same ref-struct parameter rule as every other struct parameter. `TransformCGFunctionArgs` now routes those
+parameters through the ordinary fixed-arg path and adds the synthetic basePtr slot. The SRet unknown-size path now
+matches the C++ split for generic/boxed returns and only calls `llvm.cj.alloca.generic` on the non-reference branch;
+non-generic unknown-size struct/tuple/enum returns use typed generic allocation after layout metadata is present.
+For imported generic struct constructors with generic fields, the call target uses the existing `$withoutTI` stdlib
+entry while keeping the same uniform `this` + basePtr ABI, which is what keeps `Range<T>` construction compatible
+with the exported std symbols and avoids regressing `90_range_subscript`.
+
+Confirmation:
+
+- Clean `rm -rf target && cjpm build`: success.
+- Repro prints `x`.
+- Saved LLVM IR declares/calls `_CNat5ArrayIG_E6<init>HlG_` as
+  `void (ptr addrspace(1), ptr addrspace(1), i64, ptr addrspace(1), ptr)`, matching the reference five-argument ABI.
+- Added `scripts/difftest_corpus/115_generic_sret_array.cj`, covering `Array<String>(repeat:)`, primitive
+  `Array<Int64>(repeat:)`, and a generic function returning a concrete struct.
+- New corpus case matches reference output: `x`, `0`, `7`.
+- `90_range_subscript.cj` remains green with `bc`, `bcdef`, `abc`.
+- Full corpus: `TOTAL=99  PASS=99  MISMATCH=0  FAIL=0`.
+- Septests passed separately: `run.sh`, `run_write.sh`, `run_diag.sh`, `run_write_types.sh`,
+  `run_write_struct.sh`.
