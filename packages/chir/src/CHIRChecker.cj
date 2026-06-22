@@ -53,8 +53,9 @@ public class CHIRCheckResult {
 
 public class CHIRChecker {
     private let rules: ArrayList<CHIRCheckerRule> = ArrayList<CHIRCheckerRule>()
-    private let identifiers: ArrayList<String> = ArrayList<String>()
+    private let identifiers: HashSet<String> = HashSet<String>()
     private let duplicatedGlobalIds: ArrayList<String> = ArrayList<String>()
+    private let duplicatedGlobalIdSet: HashSet<String> = HashSet<String>()
 
     public init() {}
 
@@ -129,6 +130,7 @@ public class CHIRChecker {
         rules.clear()
         identifiers.clear()
         duplicatedGlobalIds.clear()
+        duplicatedGlobalIdSet.clear()
         for (rule in enabledRules) {
             rules.add(rule)
         }
@@ -154,7 +156,7 @@ public class CHIRChecker {
             }
         }
         if (!CHIRCheckerAddIdentifier(identifiers, identifier)) {
-            CHIRCheckerAddUniqueString(duplicatedGlobalIds, identifier)
+            CHIRCheckerAddUniqueString(duplicatedGlobalIds, duplicatedGlobalIdSet, identifier)
             return false
         }
         return true
@@ -167,7 +169,7 @@ public class CHIRChecker {
             return false
         }
         if (!CHIRCheckerAddIdentifier(identifiers, identifier)) {
-            CHIRCheckerAddUniqueString(duplicatedGlobalIds, identifier)
+            CHIRCheckerAddUniqueString(duplicatedGlobalIds, duplicatedGlobalIdSet, identifier)
             return false
         }
         return true
@@ -510,7 +512,7 @@ public class CHIRChecker {
     }
 
     private func CheckInstanceMemberVar(def: CustomTypeDef, result: CHIRCheckResult): Unit {
-        let memberVarNames = ArrayList<String>()
+        let memberVarNames = HashSet<String>()
         for (memberVar in def.GetDirectInstanceVars()) {
             if (memberVar.name.isEmpty()) {
                 result.AddError("member var in ${def.GetIdentifier()} doesn't have name.")
@@ -541,7 +543,7 @@ public class CHIRChecker {
                     continue
                 }
                 if ((memberVar.TestAttr(Attribute.PUBLIC) || memberVar.TestAttr(Attribute.PROTECTED)) &&
-                    CHIRCheckerContainsString(memberVarNames, memberVar.name)) {
+                    memberVarNames.contains(memberVar.name)) {
                     result.AddError("duplicated member var name `${memberVar.name}` in ${def.GetIdentifier()}, " +
                         "it has same name with parent class ${outerDef.GetIdentifier()} member var.")
                 }
@@ -628,7 +630,7 @@ public class CHIRChecker {
             result.AddError("in function ${topLevelFunc.GetIdentifier()}, there is no block in block group " +
                 "${blockGroup.GetIdentifier()}.")
         }
-        let blockIds = ArrayList<String>()
+        let blockIds = HashSet<String>()
         var idx: Int64 = 0
         while (idx < blocks.size) {
             let id = blocks[idx].GetIdentifier()
@@ -2029,16 +2031,17 @@ public class CHIRChecker {
     }
 
     private func CheckLocalId(blockGroup: BlockGroup, topLevelFunc: Function, result: CHIRCheckResult): Unit {
-        let allIds = ArrayList<String>()
+        let allIds = HashSet<String>()
         let duplicatedLocalIds = ArrayList<String>()
+        let duplicatedLocalIdSet = HashSet<String>()
         let exprResWithoutId = ArrayList<Expression>()
         for (param in topLevelFunc.GetParams()) {
             let id = param.GetIdentifier()
             if (!CHIRCheckerAddIdentifier(allIds, id)) {
-                CHIRCheckerAddUniqueString(duplicatedLocalIds, id)
+                CHIRCheckerAddUniqueString(duplicatedLocalIds, duplicatedLocalIdSet, id)
             }
         }
-        CheckLocalIdInBlockGroup(blockGroup, allIds, duplicatedLocalIds, exprResWithoutId)
+        CheckLocalIdInBlockGroup(blockGroup, allIds, duplicatedLocalIds, duplicatedLocalIdSet, exprResWithoutId)
         if (!duplicatedLocalIds.isEmpty()) {
             result.AddError("in function ${topLevelFunc.GetIdentifier()}, there are duplicated local id: " +
                 JoinStrings(duplicatedLocalIds, ", "))
@@ -2049,8 +2052,9 @@ public class CHIRChecker {
         }
     }
 
-    private func CheckLocalIdInBlockGroup(blockGroup: BlockGroup, allIds: ArrayList<String>,
-        duplicatedLocalIds: ArrayList<String>, exprResWithoutId: ArrayList<Expression>): Unit {
+    private func CheckLocalIdInBlockGroup(blockGroup: BlockGroup, allIds: HashSet<String>,
+        duplicatedLocalIds: ArrayList<String>, duplicatedLocalIdSet: HashSet<String>,
+        exprResWithoutId: ArrayList<Expression>): Unit {
         for (block in blockGroup.GetBlocksRef()) {
             for (expr in block.GetExpressionsRef()) {
                 if (let Some(resultValue) <- expr.GetResult()) {
@@ -2058,19 +2062,20 @@ public class CHIRChecker {
                     if (id.isEmpty()) {
                         exprResWithoutId.add(expr)
                     } else if (!CHIRCheckerAddIdentifier(allIds, id)) {
-                        CHIRCheckerAddUniqueString(duplicatedLocalIds, id)
+                        CHIRCheckerAddUniqueString(duplicatedLocalIds, duplicatedLocalIdSet, id)
                     }
                 }
                 if (let Some(lambdaExpr) <- (expr as Lambda)) {
                     for (param in lambdaExpr.GetParams()) {
                         let id = param.GetIdentifier()
                         if (!CHIRCheckerAddIdentifier(allIds, id)) {
-                            CHIRCheckerAddUniqueString(duplicatedLocalIds, id)
+                            CHIRCheckerAddUniqueString(duplicatedLocalIds, duplicatedLocalIdSet, id)
                         }
                     }
                 }
                 for (nestedGroup in expr.GetBlockGroups()) {
-                    CheckLocalIdInBlockGroup(nestedGroup, allIds, duplicatedLocalIds, exprResWithoutId)
+                    CheckLocalIdInBlockGroup(nestedGroup, allIds, duplicatedLocalIds, duplicatedLocalIdSet,
+                        exprResWithoutId)
                 }
             }
         }
@@ -2079,13 +2084,15 @@ public class CHIRChecker {
     private func CheckUnreachableOpAndGenericTyInFuncBody(blockGroup: BlockGroup, topLevelFunc: Function,
         result: CHIRCheckResult): Unit {
         let reachableValues = ArrayList<Value>()
+        let reachableValueCounts = HashMap<Int64, Int64>()
         let reachableGenericTypes = ArrayList<GenericType>()
-        CheckUnreachableOpAndGenericTyInBG(blockGroup, topLevelFunc, reachableValues, reachableGenericTypes, result)
+        CheckUnreachableOpAndGenericTyInBG(blockGroup, topLevelFunc, reachableValues, reachableValueCounts,
+            reachableGenericTypes, result)
     }
 
     private func CheckUnreachableOpAndGenericTyInBG(blockGroup: BlockGroup, topLevelFunc: Function,
-        reachableValues: ArrayList<Value>, reachableGenericTypes: ArrayList<GenericType>,
-        result: CHIRCheckResult): Unit {
+        reachableValues: ArrayList<Value>, reachableValueCounts: HashMap<Int64, Int64>,
+        reachableGenericTypes: ArrayList<GenericType>, result: CHIRCheckResult): Unit {
         let valueSize = reachableValues.size
         let typeSize = reachableGenericTypes.size
         if (let Some(ownerExpr) <- blockGroup.GetOwnerExpression()) {
@@ -2094,7 +2101,7 @@ public class CHIRChecker {
                     reachableGenericTypes.add(genericTy)
                 }
                 for (param in lambdaExpr.GetParams()) {
-                    reachableValues.add(param)
+                    CHIRCheckerAddReachableValue(reachableValues, reachableValueCounts, param)
                     if (let Some(paramTy) <- param.GetType()) {
                         if (!CHIRCheckerGenericTypeIsInContainer(paramTy, reachableGenericTypes)) {
                             result.AddError("in function ${topLevelFunc.GetIdentifier()}, generic type " +
@@ -2109,14 +2116,14 @@ public class CHIRChecker {
                     reachableGenericTypes.add(genericTy)
                 }
             }
-            for (genericTy in fn.GetGenericTypeParams()) {
-                reachableGenericTypes.add(genericTy)
-            }
-            for (param in fn.GetParams()) {
-                reachableValues.add(param)
-                if (let Some(paramTy) <- param.GetType()) {
-                    if (!CHIRCheckerGenericTypeIsInContainer(paramTy, reachableGenericTypes)) {
-                        result.AddError("in function ${topLevelFunc.GetIdentifier()}, generic type " +
+                for (genericTy in fn.GetGenericTypeParams()) {
+                    reachableGenericTypes.add(genericTy)
+                }
+                for (param in fn.GetParams()) {
+                    CHIRCheckerAddReachableValue(reachableValues, reachableValueCounts, param)
+                    if (let Some(paramTy) <- param.GetType()) {
+                        if (!CHIRCheckerGenericTypeIsInContainer(paramTy, reachableGenericTypes)) {
+                            result.AddError("in function ${topLevelFunc.GetIdentifier()}, generic type " +
                             "${param.ToString(0)}is unreachable, the type is parameter in function " +
                             "${fn.GetIdentifier()}.")
                     }
@@ -2124,18 +2131,18 @@ public class CHIRChecker {
             }
         }
         if (let Some(entryBlock) <- blockGroup.GetEntryBlock()) {
-            let visitedBlocks = ArrayList<Int64>()
+            let visitedBlocks = HashSet<Int64>()
             CheckUnreachableOpAndGenericTyInBlock(entryBlock, topLevelFunc, reachableValues, reachableGenericTypes,
-                visitedBlocks, result)
+                reachableValueCounts, visitedBlocks, result)
         }
-        CHIRCheckerTrimValues(reachableValues, valueSize)
+        CHIRCheckerTrimValues(reachableValues, reachableValueCounts, valueSize)
         CHIRCheckerTrimGenericTypes(reachableGenericTypes, typeSize)
     }
 
     private func CheckUnreachableOpAndGenericTyInBlock(block: Block, topLevelFunc: Function,
         reachableValues: ArrayList<Value>, reachableGenericTypes: ArrayList<GenericType>,
-        visitedBlocks: ArrayList<Int64>, result: CHIRCheckResult): Unit {
-        if (CHIRCheckerContainsId(visitedBlocks, block.nodeId)) {
+        reachableValueCounts: HashMap<Int64, Int64>, visitedBlocks: HashSet<Int64>, result: CHIRCheckResult): Unit {
+        if (visitedBlocks.contains(block.nodeId)) {
             return
         }
         visitedBlocks.add(block.nodeId)
@@ -2147,33 +2154,33 @@ public class CHIRChecker {
                     reachableGenericTypes.add(genericTy)
                 }
             }
-            CheckUnreachableOpAndGenericTyInExpr(expr, topLevelFunc, reachableValues, reachableGenericTypes, result)
+            CheckUnreachableOpAndGenericTyInExpr(expr, topLevelFunc, reachableValueCounts, reachableGenericTypes, result)
             if (let Some(resultValue) <- expr.GetResult()) {
-                reachableValues.add(resultValue)
+                CHIRCheckerAddReachableValue(reachableValues, reachableValueCounts, resultValue)
             }
             for (nestedGroup in expr.GetBlockGroups()) {
-                CheckUnreachableOpAndGenericTyInBG(nestedGroup, topLevelFunc, reachableValues, reachableGenericTypes,
-                    result)
+                CheckUnreachableOpAndGenericTyInBG(nestedGroup, topLevelFunc, reachableValues, reachableValueCounts,
+                    reachableGenericTypes, result)
             }
             CHIRCheckerTrimGenericTypes(reachableGenericTypes, typeSize)
             if (let Some(term) <- expr.AsTerminator()) {
                 for (successor in term.GetSuccessors()) {
                     CheckUnreachableOpAndGenericTyInBlock(successor, topLevelFunc, reachableValues,
-                        reachableGenericTypes, visitedBlocks, result)
+                        reachableGenericTypes, reachableValueCounts, visitedBlocks, result)
                 }
             }
         }
-        CHIRCheckerTrimValues(reachableValues, valueSize)
+        CHIRCheckerTrimValues(reachableValues, reachableValueCounts, valueSize)
     }
 
     private func CheckUnreachableOpAndGenericTyInExpr(expr: Expression, topLevelFunc: Function,
-        reachableValues: ArrayList<Value>, reachableGenericTypes: ArrayList<GenericType>,
-        result: CHIRCheckResult): Unit {
+        reachableValueCounts: HashMap<Int64, Int64>,
+        reachableGenericTypes: ArrayList<GenericType>, result: CHIRCheckResult): Unit {
         for (operand in expr.GetOperands()) {
             if (operand.IsLiteral() || operand.IsGlobal()) {
                 continue
             }
-            if (!CHIRCheckerContainsValue(reachableValues, operand)) {
+            if (!CHIRCheckerContainsValue(reachableValueCounts, operand)) {
                 result.AddError("in function ${topLevelFunc.GetIdentifier()}, ${operand.GetIdentifier()} in " +
                     "${expr.ToString(0)} is unreachable.")
             }
@@ -2254,45 +2261,29 @@ private func CHIRCheckerIdentifierWithoutPrefix(identifier: String): String {
     return identifier
 }
 
-private func CHIRCheckerAddIdentifier(values: ArrayList<String>, identifier: String): Bool {
-    if (CHIRCheckerContainsString(values, identifier)) {
+private func CHIRCheckerAddIdentifier(values: HashSet<String>, identifier: String): Bool {
+    if (values.contains(identifier)) {
         return false
     }
     values.add(identifier)
     return true
 }
 
-private func CHIRCheckerAddUniqueString(values: ArrayList<String>, value: String): Unit {
-    if (!CHIRCheckerContainsString(values, value)) {
-        values.add(value)
+private func CHIRCheckerAddUniqueString(values: ArrayList<String>, valueSet: HashSet<String>, value: String): Unit {
+    if (valueSet.contains(value)) {
+        return
     }
+    valueSet.add(value)
+    values.add(value)
 }
 
-private func CHIRCheckerContainsString(values: ArrayList<String>, value: String): Bool {
-    for (item in values) {
-        if (item == value) {
-            return true
-        }
-    }
-    return false
+private func CHIRCheckerAddReachableValue(values: ArrayList<Value>, counts: HashMap<Int64, Int64>, value: Value): Unit {
+    values.add(value)
+    counts[value.nodeId] = (counts.get(value.nodeId) ?? 0) + 1
 }
 
-private func CHIRCheckerContainsId(values: ArrayList<Int64>, value: Int64): Bool {
-    for (item in values) {
-        if (item == value) {
-            return true
-        }
-    }
-    return false
-}
-
-private func CHIRCheckerContainsValue(values: ArrayList<Value>, value: Value): Bool {
-    for (item in values) {
-        if (item.nodeId == value.nodeId) {
-            return true
-        }
-    }
-    return false
+private func CHIRCheckerContainsValue(counts: HashMap<Int64, Int64>, value: Value): Bool {
+    return (counts.get(value.nodeId) ?? 0) > 0
 }
 
 private func CHIRCheckerContainsBlock(values: ArrayList<Block>, value: Block): Bool {
@@ -2304,8 +2295,15 @@ private func CHIRCheckerContainsBlock(values: ArrayList<Block>, value: Block): B
     return false
 }
 
-private func CHIRCheckerTrimValues(values: ArrayList<Value>, size: Int64): Unit {
+private func CHIRCheckerTrimValues(values: ArrayList<Value>, counts: HashMap<Int64, Int64>, size: Int64): Unit {
     while (values.size > size) {
+        let nodeId = values[values.size - 1].nodeId
+        let count = counts.get(nodeId) ?? 0
+        if (count <= 1) {
+            counts.remove(nodeId)
+        } else {
+            counts[nodeId] = count - 1
+        }
         values.remove(at: values.size - 1)
     }
 }

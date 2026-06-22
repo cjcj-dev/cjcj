@@ -2460,3 +2460,79 @@ Confirmation:
 - NOTE: this fixes the IMPORT-loader side. A complementary, broader gap remains (tracked): the frontend
   mangling driver (`CompilerInstance.cj`) never walks function BODIES, so nested local funcs / lambdas in
   generic contexts are unmangled (`MangleLambda` has no callers).
+
+## Probe 26 (CHIR-construction O(n^2) cluster)
+
+CHIR construction was superlinear: a global-var chain of N declarations
+(`let g_i = g_{i-1} + 1`) compiled with `--emit-chir=raw` took roughly 20.7s / 60.5s / 169s at
+N=1000/2000/4000 (about 2.9x per doubling) and AST/codegen self-compiles ran out of memory under a
+256MB heap. The root was a *pervasive* port infidelity: the selfhost used `ArrayList` plus a linear
+membership/dedup scan in hot paths where the C++ compiler uses `unordered_set` / pointer-keyed maps.
+Five such whole-program sites were corrected to match the C++ data-structure choice (faithful 1:1):
+
+1. `CHIRContext.RegisterValue` / `RegisterExpression` (CHIRContext.cj:293) — dropped the
+   `ContainsValue` / `ContainsExpression` linear scan; the registry now appends unconditionally, as
+   C++ `CHIRBuilder` allocates each value/expression exactly once (the dedup guard was an invented
+   shim and an O(n^2) scan over all allocated values).
+2. `Value.AddUserOnly` / `RemoveUserOnly` (Value.cj:92) — unconditional `users.add`, and erase-all on
+   removal, matching C++ `Value::AddUserOnly` (`users.push_back`) and `Value::RemoveUserOnly`
+   (`users.erase(std::remove(...))`) at `src/CHIR/IR/Value/Value.cpp:155-173`. C++ allows duplicate
+   users; the prior `ContainsExpression` guard was an O(users) scan per add over wide-fan-out globals.
+3. `FaithfulAST2CHIR` global-var init dependency sort (FaithfulAST2CHIR.cj) — the recursive
+   `CollectTransitiveVarDeps` re-walked the AST and used `ContainsDecl` linear scans. Replaced with a
+   memoized direct-dependency map (`PrecomputeDirectDependencies`) plus hash-bucketed decl
+   membership (`FaithfulInitDeclSet` / `FaithfulInitDepsMap` / `FaithfulInitDeclOwnerMap`, keyed by a
+   decl identity hash consistent with the existing `SameAstDecl` equality). The init *order* is
+   preserved: the dedup sets are pure membership accelerators alongside the order-preserving
+   `ArrayList`s, and the inlined eager DFS produces the identical first-encounter visit order as the
+   old "collect-then-visit" form (reviewed for order-equivalence across diamonds, var->func->var
+   chains, multi-path reachability, and guard-broken cycles; confirmed empirically by
+   `115_global_init_order`).
+4. `FaithfulAST2CHIRNodeMap` global symbol table (FaithfulAST2CHIRNodeMap.cj) — `Set` / `TryGet` /
+   `Has` used an `ArrayList` + linear `SameFaithfulAstDecl` scan per global-symbol insert/lookup.
+   Re-keyed into hash buckets on a stable decl-identity hash, preserving the same equality so no
+   wrong-merge.
+5. `CHIRChecker` identifier tables (CHIRChecker.cj) — `identifiers` and `memberVarNames`
+   `ArrayList<String>` + linear `CHIRCheckerContainsString` became `HashSet<String>` (with a parallel
+   `duplicatedGlobalIdSet`), preserving exact string-membership semantics.
+
+CHIR well-formedness checker gating: the C++ checker (`AST2CHIR.cpp:487`, `CHIR.cpp:669`) is gated by
+`opts.chirWFC`, which defaults to `true` *unless* `CANGJIE_CHIR_WFC_OFF` is defined — and
+`src/CMakeLists.txt:42-46` defines it for RELEASE-without-assert builds. So the shipped release
+compiler runs with the checker OFF. The selfhost release `cjc` matches this: `Option.cj` defaults
+`chirWFC = false`, `--chir-wfc=on` mirrors the C++ flag, and `FaithfulAST2CHIR` only runs
+`AST2CHIRCheck` when `chirWFC` is set. When enabled, the checker uses the hashed membership above
+(C++ uses `unordered_set` there too).
+
+Block expression-list methods left unchanged: `Block.AppendExpression` and `InsertExprIntoHead` are
+bounded by expressions-per-block (not whole-program size), so they are *not* part of the quadratic.
+An attempt to also strip their dedup guards produced malformed IR ("Invalid instruction with no BB")
+on 18 closure/lambda/nested-func/method-ref corpus cases (the C++ equivalents
+`AppendNonTerminatorExpression` / `InsertExprIntoHead` perform a block *move* — remove from the
+current parent block, then re-parent — which the selfhost does not mirror), so these methods retain
+their established working form. A faithful port of the C++ move semantics is deferred to its own cut.
+
+Remaining superlinearity is OUTSIDE CHIR. After these fixes the global-chain at N=1000/2000/4000 is
+5.82s / 16.0s / 60.1s; stage profiling shows `--dump-tokens` (lex) linear (0.42s / 0.63s at
+N=2000/4000) but `--dump-ast` and `--typecheck` already quadratic (about 16s / 60s, ~3.8x per
+doubling), and `--emit-chir=raw` (60.1s) is essentially equal to `--typecheck` (58.7s) — i.e. CHIR
+construction now adds only ~2s marginal. The dominant O(n^2) is in the frontend/sema
+parse+typecheck/symbol-resolution path; that is the next cut (routed onward, out of `packages/chir`
+scope).
+
+C++ ground truth: `src/CHIR/IR/CHIRBuilder.cpp` (value/func/expr allocation), `src/CHIR/IR/Value/Value.cpp`
+(`AddUserOnly`/`RemoveUserOnly`, `Block::AppendNonTerminatorExpression`/`InsertExprIntoHead`),
+`src/CHIR/IR/Package.cpp:40-58` (`AddGlobalVar`/`AddGlobalFunc` are plain `emplace_back`, no dedup),
+`src/CHIR/AST2CHIR/GlobalDeclAnalysis.cpp` (init-order dependency analysis),
+`src/CHIR/AST2CHIR/AST2CHIR.cpp:487` + `src/CHIR/CHIR.cpp:669` + `include/cangjie/Option/Option.h:630-634`
++ `src/CMakeLists.txt:42-46` (chirWFC gating).
+
+Verification:
+
+- Clean `rm -rf target && cjpm build`: success.
+- `bash scripts/difftest.sh`: `TOTAL=100  PASS=100  MISMATCH=0  FAIL=0` (includes the 18
+  closure/lambda cases that the block-expr over-reach had regressed, plus the two new corpus cases
+  `115_global_init_order` and `116_nonprimitive_array_literal`).
+- Septests `run.sh`, `run_write.sh`, `run_diag.sh`, `run_write_types.sh`, `run_write_struct.sh` pass
+  (`run_gendefault.sh` lands with the main merge).
+- Init order preserved: `115_global_init_order` output matches the reference compiler.

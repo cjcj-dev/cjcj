@@ -145,6 +145,31 @@ private func FaithfulLocalAstDeclStructuralKey(decl: AstDecl): String {
         decl.begin.hashCode().toString() + ":" + decl.end.hashCode().toString()
 }
 
+@OverflowWrapping
+private func FaithfulLocalAstDeclHashCombine(seed: Int64, value: Int64): Int64 {
+    return seed * 1315423911 + value + 0x9e3779b9
+}
+
+private func FaithfulLocalAstDeclHash(decl: AstDecl): Int64 {
+    if (let Some(defaultKey) <- FaithfulLocalDefaultParamFunctionIdentity(decl)) {
+        return defaultKey.hashCode()
+    }
+    if (decl.TestAttr(AstAttribute.IMPORTED)) {
+        if (!decl.rawMangleName.isEmpty()) {
+            return FaithfulLocalAstDeclHashCombine(17, decl.rawMangleName.hashCode())
+        }
+        if (!decl.mangledName.isEmpty()) {
+            return FaithfulLocalAstDeclHashCombine(31, decl.mangledName.hashCode())
+        }
+    }
+    var out = ASTKindIndex(decl.astKind)
+    out = FaithfulLocalAstDeclHashCombine(out, decl.identifier.Val().hashCode())
+    out = FaithfulLocalAstDeclHashCombine(out, decl.fullPackageName.hashCode())
+    out = FaithfulLocalAstDeclHashCombine(out, decl.begin.hashCode())
+    out = FaithfulLocalAstDeclHashCombine(out, decl.end.hashCode())
+    return out
+}
+
 private func FaithfulLocalDefaultParamFunctionIdentity(decl: AstDecl): Option<String> {
     if (!decl.TestAttr(AstAttribute.HAS_INITIAL)) {
         return None
@@ -192,21 +217,35 @@ private class FaithfulLocalValueEntry {
 
 private class FaithfulLocalValueMap {
     private let values: ArrayList<FaithfulLocalValueEntry> = ArrayList<FaithfulLocalValueEntry>()
+    private let buckets: HashMap<Int64, ArrayList<FaithfulLocalValueEntry>> =
+        HashMap<Int64, ArrayList<FaithfulLocalValueEntry>>()
 
     public init() {}
 
     public func Set(decl: AstDecl, value: Value): Unit {
-        values.add(FaithfulLocalValueEntry(decl, value))
+        let entry = FaithfulLocalValueEntry(decl, value)
+        values.add(entry)
+        let key = FaithfulLocalAstDeclHash(decl)
+        if (let Some(bucket) <- buckets.get(key)) {
+            bucket.add(entry)
+            return
+        }
+        let bucket = ArrayList<FaithfulLocalValueEntry>()
+        bucket.add(entry)
+        buckets[key] = bucket
     }
 
     public func TryGet(decl: AstDecl): Option<Value> {
-        var idx = values.size - 1
-        while (idx >= 0) {
-            let entry = values[idx]
-            if (SameFaithfulLocalAstDecl(entry.decl, decl)) {
-                return entry.value
+        let key = FaithfulLocalAstDeclHash(decl)
+        if (let Some(bucket) <- buckets.get(key)) {
+            var idx = bucket.size - 1
+            while (idx >= 0) {
+                let entry = bucket[idx]
+                if (SameFaithfulLocalAstDecl(entry.decl, decl)) {
+                    return entry.value
+                }
+                idx--
             }
-            idx--
         }
         return None
     }
@@ -222,7 +261,25 @@ private class FaithfulLocalValueMap {
 
     public func Restore(mark: Int64): Unit {
         while (values.size > mark) {
+            let entry = values[values.size - 1]
+            RemoveBucketEntry(entry)
             values.remove(at: values.size - 1)
+        }
+    }
+
+    private func RemoveBucketEntry(entry: FaithfulLocalValueEntry): Unit {
+        let key = FaithfulLocalAstDeclHash(entry.decl)
+        if (let Some(bucket) <- buckets.get(key)) {
+            var idx = bucket.size - 1
+            while (idx >= 0) {
+                let candidate = bucket[idx]
+                if (SameFaithfulLocalAstDecl(candidate.decl, entry.decl) &&
+                    candidate.value.nodeId == entry.value.nodeId) {
+                    bucket.remove(at: idx)
+                    return
+                }
+                idx--
+            }
         }
     }
 }
