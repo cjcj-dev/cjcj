@@ -4,8 +4,19 @@ import std.collection.*
 import cangjie_compiler::chir.Attribute
 import cangjie_compiler::chir.FuncType
 import cangjie_compiler::chir.Function
+import cangjie_compiler::chir.GenericType
 import cangjie_compiler::chir.Type
 import cangjie_compiler::chir.VoidType
+
+private class GenericParamIndex {
+    public let chirGenericTy: GenericType
+    public let llvmParamIndex: Int64
+
+    public init(chirGenericTy: GenericType, llvmParamIndex: Int64) {
+        this.chirGenericTy = chirGenericTy
+        this.llvmParamIndex = llvmParamIndex
+    }
+}
 
 private func ChirFunctionTypeOf(chirFunc: Function): Type {
     if (let Some(fnTy) <- chirFunc.GetType()) {
@@ -19,6 +30,7 @@ public class CGFunctionType <: CGType {
     private var hasBasePtr: Bool = false
     private var llvmFunctionType: Option<LLVMTypeRef> = None
     private let realParamIndices: ArrayList<Int64> = ArrayList<Int64>()
+    private let genericParamIndicesMap: ArrayList<GenericParamIndex> = ArrayList<GenericParamIndex>()
     private var methodTypeInfoIndex: Option<Int64> = None
     private var staticMethodTypeInfoIndex: Option<Int64> = None
     private let chirFunc: Option<Function>
@@ -27,6 +39,7 @@ public class CGFunctionType <: CGType {
     private let staticMethodType: Bool
     private let forWrapper: Bool
     private let constructorType: Bool
+    private let instantiatedParamTypes: ArrayList<Type> = ArrayList<Type>()
 
     public init(cgMod: CGModule, cgCtx: CGContext, chirType: FuncType, extraInfo: TypeExtraInfo) {
         super(cgMod, cgCtx, chirType, cgTypeKind: CGTypeKind.CG_FUNCTION)
@@ -36,6 +49,9 @@ public class CGFunctionType <: CGType {
         staticMethodType = extraInfo.isStaticMethod
         forWrapper = extraInfo.forWrapper
         constructorType = false
+        for (ty in extraInfo.instantiatedParamTypes) {
+            instantiatedParamTypes.add(ty)
+        }
     }
 
     public init(cgMod: CGModule, cgCtx: CGContext, chirFunc: Function, extraInfo: TypeExtraInfo) {
@@ -46,6 +62,9 @@ public class CGFunctionType <: CGType {
         staticMethodType = chirFunc.TestAttr(Attribute.STATIC)
         forWrapper = extraInfo.forWrapper
         constructorType = chirFunc.IsConstructor()
+        for (genericTy in chirFunc.GetGenericTypeParams()) {
+            instantiatedParamTypes.add(genericTy)
+        }
     }
 
     public func HasSRet(): Bool { Complete(); return hasSRet }
@@ -54,6 +73,15 @@ public class CGFunctionType <: CGType {
     public func IsStaticMethodType(): Bool { return staticMethodType }
     public func IsConstructorType(): Bool { return constructorType }
     public func GetRealArgIndices(): ArrayList<Int64> { return realParamIndices }
+    public func GetGenericParamIndex(genericTy: Type): Option<Int64> {
+        Complete()
+        for (item in genericParamIndicesMap) {
+            if (genericTy.IsEqual(item.chirGenericTy)) {
+                return Some(item.llvmParamIndex)
+            }
+        }
+        return None
+    }
     public func GetMethodTypeInfoIndex(): Option<Int64> { Complete(); return methodTypeInfoIndex }
     public func GetStaticMethodTypeInfoIndex(): Option<Int64> { Complete(); return staticMethodTypeInfoIndex }
 
@@ -85,6 +113,7 @@ public class CGFunctionType <: CGType {
                 }
             }
             realParamIndices.clear()
+            genericParamIndicesMap.clear()
             for (paramTy in funcTy.GetParamTypes()) {
                 let paramCGType = CGType.GetOrCreate(cgMod, paramTy)
                 realParamIndices.add(paramLLVMTypes.size)
@@ -108,7 +137,12 @@ public class CGFunctionType <: CGType {
                 }
             }
             if (let Some(fn) <- chirFunc) {
-                for (_ in fn.GetGenericTypeParams()) {
+                for (chirGenericTy in fn.GetGenericTypeParams()) {
+                    genericParamIndicesMap.add(GenericParamIndex(chirGenericTy, paramLLVMTypes.size))
+                    paramLLVMTypes.add(CGType.GetOrCreateTypeInfoPtrType(cgCtx.GetLLVMContext()))
+                }
+            } else {
+                for (_ in instantiatedParamTypes) {
                     paramLLVMTypes.add(CGType.GetOrCreateTypeInfoPtrType(cgCtx.GetLLVMContext()))
                 }
             }

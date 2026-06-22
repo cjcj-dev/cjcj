@@ -15,6 +15,30 @@ import cangjie_compiler::option.OutputMode
 import cangjie_compiler::utils.FileUtil
 import std.collection.*
 
+private class PendingMangledDecl {
+    public let astDecl: Decl
+    public let mangleDecl: RealMangleDecl
+    public let mangledName: String
+
+    public init(astDecl: Decl, mangleDecl: RealMangleDecl, mangledName: String) {
+        this.astDecl = astDecl
+        this.mangleDecl = mangleDecl
+        this.mangledName = mangledName
+    }
+}
+
+private class PendingMangledLambda {
+    public let astLambda: LambdaExpr
+    public let mangleLambda: RealMangleDecl
+    public let mangledName: String
+
+    public init(astLambda: LambdaExpr, mangleLambda: RealMangleDecl, mangledName: String) {
+        this.astLambda = astLambda
+        this.mangleLambda = mangleLambda
+        this.mangledName = mangledName
+    }
+}
+
 public enum CompileStage {
     | LOAD_PLUGINS
     | PARSE
@@ -895,33 +919,32 @@ public class CompilerInstance {
     }
 
     private func ManglingHelpFunction(baseMangler: RealBaseMangler, adapter: RealMangleAstAdapter): Unit {
-        let seen = HashSet<String>()
         for (pkg in GetPackages()) {
             for (file in pkg.files) {
                 for (decl in file.decls) {
-                    mangleDeclTree(baseMangler, adapter, pkg.fullPackageName, decl, seen)
+                    mangleDeclTree(baseMangler, adapter, pkg.fullPackageName, decl)
                 }
             }
             for (decl in pkg.genericInstantiatedDecls) {
-                mangleDeclTree(baseMangler, adapter, pkg.fullPackageName, decl, seen)
+                mangleDeclTree(baseMangler, adapter, pkg.fullPackageName, decl)
             }
         }
         for (pkg in importManager.GetAllImportedPackages()) {
             for (file in pkg.files) {
                 for (decl in file.decls) {
                     if (decl.isUsedImports || !decl.TestAttr(Attribute.IMPORTED)) {
-                        mangleDeclTree(baseMangler, adapter, pkg.fullPackageName, decl, seen)
+                        mangleDeclTree(baseMangler, adapter, pkg.fullPackageName, decl)
                     }
                 }
                 for (decl in file.exportedInternalDecls) {
                     if (decl.isUsedImports || !decl.TestAttr(Attribute.IMPORTED)) {
-                        mangleDeclTree(baseMangler, adapter, pkg.fullPackageName, decl, seen)
+                        mangleDeclTree(baseMangler, adapter, pkg.fullPackageName, decl)
                     }
                 }
             }
             for (decl in pkg.genericInstantiatedDecls) {
                 if (decl.IsNominalDecl()) {
-                    mangleDeclTree(baseMangler, adapter, pkg.fullPackageName, decl, seen)
+                    mangleDeclTree(baseMangler, adapter, pkg.fullPackageName, decl)
                 }
             }
         }
@@ -931,86 +954,94 @@ public class CompilerInstance {
         baseMangler: RealBaseMangler,
         adapter: RealMangleAstAdapter,
         pkgName: String,
-        decl: Decl,
-        seen: HashSet<String>
+        decl: Decl
     ): Unit {
-        let prefix = ArrayList<RealMangleDecl>()
-        mangleDeclTreeWithPrefix(baseMangler, adapter, pkgName, decl, seen, prefix)
+        let prefix = ArrayList<Node>()
+        let pendingDecls = ArrayList<PendingMangledDecl>()
+        let pendingLambdas = ArrayList<PendingMangledLambda>()
+        let pre = { node: Node =>
+            let filteredPrefix = getMangleFilteredPrefix(prefix)
+            let convertedPrefix = convertManglePrefix(adapter, filteredPrefix)
+            let action = if (let Some(curDecl) <- (node as Decl)) {
+                curDecl.fullPackageName = pkgName
+                if (curDecl.astKind == ASTKind.MAIN_DECL) {
+                    VisitAction.WALK_CHILDREN
+                } else if (curDecl.astKind == ASTKind.MACRO_DECL) {
+                    if (let Some(desugarDecl) <- curDecl.GetDesugarDecl()) {
+                        desugarDecl.mangledName = baseMangler.Mangle(desugarDecl)
+                    }
+                    VisitAction.WALK_CHILDREN
+                } else if (!Ty.IsTyCorrect(curDecl.GetTy())) {
+                    VisitAction.SKIP_CHILDREN
+                } else {
+                    let convertedDecl = adapter.ConvertDecl(curDecl)
+                    pendingDecls.add(PendingMangledDecl(curDecl, convertedDecl,
+                        baseMangler.Mangle(convertedDecl, convertedPrefix)))
+                    VisitAction.WALK_CHILDREN
+                }
+            } else if (let Some(lambda) <- (node as LambdaExpr)) {
+                if (lambda.TestAttr(Attribute.GENERIC) || !Ty.IsTyCorrect(lambda.GetTy())) {
+                    VisitAction.SKIP_CHILDREN
+                } else {
+                    let convertedLambda = adapter.ConvertLambdaExpr(lambda)
+                    pendingLambdas.add(PendingMangledLambda(lambda, convertedLambda,
+                        baseMangler.MangleLambda(convertedLambda, convertedPrefix)))
+                    VisitAction.WALK_CHILDREN
+                }
+            } else if (let Some(_) <- (node as Annotation)) {
+                VisitAction.SKIP_CHILDREN
+            } else {
+                VisitAction.WALK_CHILDREN
+            }
+            prefix.add(node)
+            action
+        }
+        let post = { _: Node =>
+            prefix.remove(at: prefix.size - 1)
+            VisitAction.KEEP_DECISION
+        }
+        Walker(decl, visitPre: pre, visitPost: post).Walk()
+        for (pending in pendingDecls) {
+            pending.astDecl.mangledName = pending.mangledName
+            pending.mangleDecl.mangledName = pending.mangledName
+            if (mangledName2DeclMap.contains(pending.mangledName)) {
+                mangledName2DeclMap.remove(pending.mangledName)
+            }
+            mangledName2DeclMap.add(pending.mangledName, pending.astDecl)
+        }
+        for (pending in pendingLambdas) {
+            pending.astLambda.mangledName = pending.mangledName
+            pending.mangleLambda.mangledName = pending.mangledName
+        }
     }
 
-    private func mangleDeclTreeWithPrefix(
-        baseMangler: RealBaseMangler,
-        adapter: RealMangleAstAdapter,
-        pkgName: String,
-        decl: Decl,
-        seen: HashSet<String>,
-        prefix: ArrayList<RealMangleDecl>
-    ): Unit {
-        let key = pkgName + "::" + ASTKindName(decl.astKind) + "::" + decl.identifier.Val() + "::" +
-            decl.rawMangleName + "::" + decl.mangledName + "::" + decl.exportId + "::" +
-            decl.begin.hashCode().toString() + ":" + decl.end.hashCode().toString()
-        if (seen.contains(key)) {
-            return
-        }
-        seen.add(key)
-        decl.fullPackageName = pkgName
-        if (decl.astKind == ASTKind.MAIN_DECL) {
-            if (let Some(desugared) <- decl.GetDesugarDecl()) {
-                let localPrefix = ArrayList<RealMangleDecl>()
-                for (item in prefix) {
-                    localPrefix.add(item)
-                }
-                localPrefix.add(adapter.ConvertDecl(decl))
-                mangleDeclTreeWithPrefix(baseMangler, adapter, pkgName, desugared, seen, localPrefix)
-            }
-            return
-        }
-        if (!Ty.IsTyCorrect(decl.GetTy())) {
-            return
-        }
-        let convertedDecl = adapter.ConvertDecl(decl)
-        decl.mangledName = baseMangler.Mangle(convertedDecl, prefix)
-        convertedDecl.mangledName = decl.mangledName
-        if (mangledName2DeclMap.contains(decl.mangledName)) {
-            mangledName2DeclMap.remove(decl.mangledName)
-        }
-        mangledName2DeclMap.add(decl.mangledName, decl)
-        if (let Some(propDecl) <- (decl as PropDecl)) {
-            for (getter in propDecl.getters) {
-                mangleDeclTreeWithPrefix(baseMangler, adapter, pkgName, getter, seen, prefix)
-            }
-            for (setter in propDecl.setters) {
-                mangleDeclTreeWithPrefix(baseMangler, adapter, pkgName, setter, seen, prefix)
-            }
-        }
-        prefix.add(convertedDecl)
-        if (let Some(generic) <- decl.generic) {
-            for (typeParam in generic.typeParameters) {
-                typeParam.outerDecl = Some(decl)
-                mangleDeclTreeWithPrefix(baseMangler, adapter, pkgName, typeParam, seen, prefix)
-            }
-        }
-        if (let Some(funcDecl) <- (decl as FuncDecl)) {
-            if (let Some(body) <- funcDecl.funcBody) {
-                if (let Some(bodyGeneric) <- body.generic) {
-                    for (typeParam2 in bodyGeneric.typeParameters) {
-                        typeParam2.outerDecl = Some(decl)
-                        mangleDeclTreeWithPrefix(baseMangler, adapter, pkgName, typeParam2, seen, prefix)
-                    }
-                }
-                for (paramList in body.paramLists) {
-                    for (param in paramList.params) {
-                        if (let Some(desugarDecl) <- param.desugarDecl) {
-                            mangleDeclTreeWithPrefix(baseMangler, adapter, pkgName, desugarDecl, seen, prefix)
+    private func getMangleFilteredPrefix(prefix: ArrayList<Node>): ArrayList<Node> {
+        let filteredPrefix = ArrayList<Node>()
+        for (node in prefix) {
+            if (filteredPrefix.size != 0) {
+                if (let Some(expr) <- (filteredPrefix[filteredPrefix.size - 1] as Expr)) {
+                    if (let Some(nodeExpr) <- (node as Expr)) {
+                        if (let Some(desugarExpr) <- expr.desugarExpr) {
+                            if (refEq(desugarExpr, nodeExpr)) {
+                                filteredPrefix.remove(at: filteredPrefix.size - 1)
+                            }
                         }
                     }
                 }
             }
+            filteredPrefix.add(node)
         }
-        for (member in decl.GetMemberDecls()) {
-            mangleDeclTreeWithPrefix(baseMangler, adapter, pkgName, member, seen, prefix)
+        filteredPrefix
+    }
+
+    private func convertManglePrefix(adapter: RealMangleAstAdapter, prefix: ArrayList<Node>): ArrayList<RealMangleDecl> {
+        let convertedPrefix = ArrayList<RealMangleDecl>()
+        for (node in prefix) {
+            if (let Some(convertedNode) <- adapter.ConvertNode(node)) {
+                convertedPrefix.add(convertedNode)
+            }
         }
-        prefix.remove(at: prefix.size - 1)
+        convertedPrefix
     }
 
     private func collectDeclCacheSummary(pkg: Package, file: File, decl: Decl): Unit {

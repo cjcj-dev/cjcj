@@ -158,12 +158,48 @@ public class CGModule {
             LLVMNullValue()
         }
         let cgFunc = CGFunction(rawFunction, cgFuncType, chirValue, this)
+        AddGenericParamMappings(rawFunction, cgFunc, chirValue, cgFuncType)
         ApplyFunctionABIAttributes(rawFunction, chirValue, cgFuncType)
         MaybeAttachExceptionPersonality(rawFunction, chirValue)
         MaybeSetCangjieGC(rawFunction, chirValue)
         functions[name] = cgFunc
         valueMapping[name] = cgFunc
         return cgFunc
+    }
+
+    private func AddGenericParamMappings(rawFunction: LLVMValueRef, cgFunc: CGFunction, chirValue: Value,
+        cgType: CGType): Unit {
+        let fn = (chirValue as Function) ?? return
+        let functionType = (cgType as CGFunctionType) ?? return
+        let _ = functionType.GetLLVMFunctionType()
+        for (genericTy in fn.GetGenericTypeParams()) {
+            if (let Some(paramIdx) <- functionType.GetGenericParamIndex(genericTy)) {
+                let typeInfoParam = unsafe { LLVMGetParam(rawFunction, UInt32(paramIdx)) }
+                cgFunc.genericParamsMap[genericTy.ToString()] = { _: IRBuilder2 => typeInfoParam }
+            }
+        }
+        if (let Some(outerInfoIndex) <- functionType.GetMethodTypeInfoIndex()) {
+            AddOuterGenericParamMappings(rawFunction, cgFunc, fn, outerInfoIndex)
+        }
+    }
+
+    private func AddOuterGenericParamMappings(rawFunction: LLVMValueRef, cgFunc: CGFunction, fn: Function,
+        outerInfoIndex: Int64): Unit {
+        let parentDef = fn.GetParentCustomTypeDef() ?? return
+        let outerTypeInfo = unsafe { LLVMGetParam(rawFunction, UInt32(outerInfoIndex)) }
+        if (!parentDef.GetGenericTypeParams().isEmpty()) {
+            if (let Some(parentTy) <- parentDef.GetType()) {
+                cgFunc.genericParamsMap[parentTy.ToString()] = { _: IRBuilder2 => outerTypeInfo }
+            }
+        }
+        var idx: Int64 = 0
+        for (genericTy in parentDef.GetGenericTypeParams()) {
+            let capturedIdx = idx
+            cgFunc.genericParamsMap[genericTy.ToString()] = {
+                irBuilder: IRBuilder2 => irBuilder.GetTypeInfoFromTypeInfoArgs(outerTypeInfo, capturedIdx)
+            }
+            idx++
+        }
     }
 
     public func GetOrInsertFunction(funcName: String, functionType: LLVMTypeRef): LLVMValueRef {
