@@ -3916,10 +3916,12 @@ public class Translator {
         let argValues = ArrayList<Value>()
         let callee = globalSymbolTable.Get(calleeDecl)
         var thisType: Option<Type> = None
+        var dispatchReceiverType: Option<Type> = None
         var thisObj: Option<Value> = None
         if (!calleeDecl.TestAttr(AstAttribute.STATIC)) {
-            let obj = CoerceThisObjectForCallee(calleeDecl, callee,
-                TranslateThisObjectForMemberFuncCall(expr, calleeDecl))
+            let rawObj = TranslateThisObjectForMemberFuncCall(expr, calleeDecl)
+            dispatchReceiverType = rawObj.GetType()
+            let obj = CoerceThisObjectForCallee(calleeDecl, callee, rawObj)
             thisObj = obj
             thisType = obj.GetType()
         }
@@ -3929,7 +3931,7 @@ public class Translator {
             previousDefaultArgs.add(obj)
         }
         AppendTranslatedCallArgs(expr, calleeDecl, argValues, expectedParamTys, previousDefaultArgs)
-        if (ShouldUseVirtualMemberDispatch(calleeDecl)) {
+        if (ShouldUseVirtualMemberDispatchForCall(calleeDecl, dispatchReceiverType)) {
             if (calleeDecl.TestAttr(AstAttribute.STATIC)) {
                 let parentTy = TranslateMemberOwnerType(calleeDecl)
                 let rtti = RequireResult(builder.CreateGetRTTIStatic(builder.context.GetUnitTy(),
@@ -4124,6 +4126,24 @@ public class Translator {
             }
         }
         return funcHasOpenFlag && funcDecl.TestAnyAttr(AstAttribute.PUBLIC, AstAttribute.PROTECTED)
+    }
+
+    private func ShouldUseVirtualMemberDispatchForCall(funcDecl: AstFuncDecl, receiverTy: Option<Type>): Bool {
+        if (!ShouldUseVirtualMemberDispatch(funcDecl)) {
+            return false
+        }
+        if (funcDecl.TestAttr(AstAttribute.STATIC)) {
+            return true
+        }
+        if (let Some(ty) <- receiverTy) {
+            if (let Some(classTy) <- (ty.StripAllRefs() as ClassType)) {
+                let classDef = classTy.GetClassDef()
+                if (!classDef.IsInterface() && !classDef.CanBeInherited()) {
+                    return false
+                }
+            }
+        }
+        return true
     }
 
     private func TranslateMemberOwnerType(funcDecl: AstFuncDecl): Type {

@@ -23,6 +23,16 @@ private class InterfaceFunctionEntry {
     }
 }
 
+private class ExtensionClassVTable {
+    public let parentDef: ClassDef
+    public let slots: ArrayList<Option<Function>>
+
+    public init(parentDef: ClassDef, slots: ArrayList<Option<Function>>) {
+        this.parentDef = parentDef
+        this.slots = slots
+    }
+}
+
 public func GenerateInterfaceExtensionDefs(cgMod: CGModule): Unit {
     for (def in cgMod.GetCGContext().GetSubCHIRPackage().chirCustomDefs) {
         if (def.TestAttr(Attribute.IMPORTED)) {
@@ -66,21 +76,20 @@ private func GenerateExtensionDefsForCustomDef(cgMod: CGModule, def: CustomTypeD
             if (GenerateObjectExtensionDefForType(cgMod, classDef)) {
                 emitted = true
             }
+            let superTypes = CollectSuperClassTypes(classDef)
+            var superIdx = superTypes.size - 1
+            while (superIdx >= 0) {
+                let superTy = superTypes[superIdx]
+                if (!IsCoreObjectType(superTy)) {
+                    let directSuper = superIdx == 0
+                    if (GenerateExtensionDefForType(cgMod, def, superTy, directSuper)) {
+                        emitted = true
+                    }
+                }
+                superIdx--
+            }
             if (GenerateExtensionDefForType(cgMod, def, RequireClassType(classDef), false)) {
                 emitted = true
-            }
-            if (ShouldEmitInheritedClassExtensionDefs(classDef)) {
-                var directSuper = true
-                var currentSuper = classDef.GetSuperClassTy()
-                while (let Some(superTy) <- currentSuper) {
-                    if (!IsCoreObjectType(superTy) &&
-                        GenerateExtensionDefForType(cgMod, def, superTy, directSuper)) {
-                        emitted = true
-                        emittedInterfaces.add(MTableInterfaceInfo(superTy, None))
-                    }
-                    directSuper = false
-                    currentSuper = superTy.GetSuperClassTy()
-                }
             }
         } else if (!def.GetMethods().isEmpty() && !RequireClassType(classDef).IsGenericRelated()) {
             let selfInterfaceTy = RequireClassType(classDef)
@@ -103,6 +112,16 @@ private func GenerateExtensionDefsForCustomDef(cgMod: CGModule, def: CustomTypeD
             cgMod.RegisterExtensionDefInterfaces(ty, emittedInterfaces)
         }
     }
+}
+
+private func CollectSuperClassTypes(classDef: ClassDef): ArrayList<ClassType> {
+    let out = ArrayList<ClassType>()
+    var current = classDef.GetSuperClassTy()
+    while (let Some(superTy) <- current) {
+        out.add(superTy)
+        current = superTy.GetSuperClassTy()
+    }
+    return out
 }
 
 private func GenerateObjectExtensionDefForType(cgMod: CGModule, targetDef: ClassDef): Bool {
@@ -217,6 +236,24 @@ private func GenerateFuncTableForType(cgMod: CGModule, targetType: Type, inherit
 private func FunctionsForInheritedType(targetDef: CustomTypeDef, inheritedType: ClassType): ArrayList<InterfaceFunctionEntry> {
     let out = ArrayList<InterfaceFunctionEntry>()
     let inheritedDef = inheritedType.GetClassDef()
+    if (!inheritedDef.IsInterface()) {
+        if (let Some(targetClassDef) <- (targetDef as ClassDef)) {
+            for (table in BuildClassVTablesForTarget(targetClassDef)) {
+                if (table.parentDef.nodeId != inheritedDef.nodeId) {
+                    continue
+                }
+                for (slot in table.slots) {
+                    if (let Some(expected) <- slot) {
+                        out.add(InterfaceFunctionEntry(Some(expected), Some(expected)))
+                    } else {
+                        out.add(InterfaceFunctionEntry(None, None))
+                    }
+                }
+                return out
+            }
+        }
+        return out
+    }
     if (inheritedDef.nodeId == targetDef.nodeId) {
         if (!targetDef.IsInterface()) {
             return out
@@ -253,6 +290,114 @@ private func FindImplementation(targetDef: CustomTypeDef, interfaceMethod: Funct
         }
     }
     return DefaultMethodOrNone(interfaceMethod)
+}
+
+private func BuildClassVTablesForTarget(def: ClassDef): ArrayList<ExtensionClassVTable> {
+    let tables = ArrayList<ExtensionClassVTable>()
+    if (!IsCoreObjectDef(def)) {
+        if (let Some(superDef) <- def.GetSuperClassDef()) {
+            for (table in BuildClassVTablesForTarget(superDef)) {
+                tables.add(table)
+            }
+        } else {
+            tables.add(ExtensionClassVTable(CoreObjectClassDef(def), ArrayList<Option<Function>>()))
+        }
+    }
+    for (method in def.GetMethods()) {
+        if (!FuncMayBeInVTable(method)) {
+            continue
+        }
+        if (let Some((table, slotIdx)) <- FindMatchingVirtualSlot(tables, method)) {
+            table.slots[slotIdx] = Some(method)
+        } else if (IsVirtualFunctionForVTable(method)) {
+            let table = GetOrCreateClassVTable(tables, def)
+            table.slots.add(Some(method))
+        }
+    }
+    return tables
+}
+
+private func GetOrCreateClassVTable(tables: ArrayList<ExtensionClassVTable>, def: ClassDef): ExtensionClassVTable {
+    for (table in tables) {
+        if (table.parentDef.nodeId == def.nodeId) {
+            return table
+        }
+    }
+    let table = ExtensionClassVTable(def, ArrayList<Option<Function>>())
+    tables.add(table)
+    return table
+}
+
+private func FindMatchingVirtualSlot(tables: ArrayList<ExtensionClassVTable>,
+    method: Function): Option<(ExtensionClassVTable, Int64)> {
+    for (table in tables) {
+        var idx: Int64 = 0
+        while (idx < table.slots.size) {
+            if (let Some(slotMethod) <- table.slots[idx]) {
+                if (VirtualMethodsHaveSameSlot(slotMethod, method)) {
+                    return Some((table, idx))
+                }
+            }
+            idx++
+        }
+    }
+    return None
+}
+
+private func CoreObjectClassDef(def: ClassDef): ClassDef {
+    var current = def
+    while (let Some(superDef) <- current.GetSuperClassDef()) {
+        current = superDef
+    }
+    return current
+}
+
+private func VirtualMethodsHaveSameSlot(left: Function, right: Function): Bool {
+    if (left.TestAttr(Attribute.STATIC) != right.TestAttr(Attribute.STATIC)) {
+        return false
+    }
+    if (!MethodNameMatches(left, right.GetSrcCodeIdentifier()) &&
+        !MethodNameMatches(left, right.GetIdentifierWithoutPrefix()) &&
+        !MethodNameMatches(right, left.GetSrcCodeIdentifier()) &&
+        !MethodNameMatches(right, left.GetIdentifierWithoutPrefix())) {
+        return false
+    }
+    let leftTy = left.GetFuncType() ?? return true
+    let rightTy = right.GetFuncType() ?? return true
+    return VirtualFuncTypeMatches(leftTy, rightTy)
+}
+
+private func FuncMayBeInVTable(fn: Function): Bool {
+    if (fn.IsConstructor() || fn.IsFinalizer() || fn.TestAttr(Attribute.GENERIC_INSTANTIATED)) {
+        return false
+    }
+    return fn.TestAttr(Attribute.PUBLIC) || fn.TestAttr(Attribute.PROTECTED) ||
+        (fn.TestAttr(Attribute.STATIC) && !fn.TestAttr(Attribute.PRIVATE))
+}
+
+private func IsVirtualFunctionForVTable(fn: Function): Bool {
+    let parentDef = fn.GetParentCustomTypeDef() ?? return false
+    let parentClass = (parentDef as ClassDef) ?? return false
+    if (parentClass.IsInterface()) {
+        return true
+    }
+    if (!parentClass.CanBeInherited()) {
+        return false
+    }
+    if (fn.TestAttr(Attribute.STATIC)) {
+        return true
+    }
+    if (fn.IsConstructor() || fn.IsFinalizer() || fn.TestAttr(Attribute.GENERIC_INSTANTIATED)) {
+        return false
+    }
+    if (!fn.TestAttr(Attribute.PUBLIC) && !fn.TestAttr(Attribute.PROTECTED)) {
+        return false
+    }
+    return fn.TestAttr(Attribute.VIRTUAL) || fn.TestAttr(Attribute.ABSTRACT)
+}
+
+private func IsCoreObjectDef(def: CustomTypeDef): Bool {
+    return def.GetPackageName() == "std.core" && def.GetSrcCodeIdentifier() == "Object"
 }
 
 private func DefaultMethodOrNone(method: Function): Option<Function> {
@@ -641,10 +786,6 @@ private func RequireClassType(def: ClassDef): ClassType {
 private func IsCoreObjectType(ty: ClassType): Bool {
     let def = ty.GetClassDef()
     return def.GetPackageName() == "std.core" && def.GetSrcCodeIdentifier() == "Object"
-}
-
-private func ShouldEmitInheritedClassExtensionDefs(def: ClassDef): Bool {
-    return def.GetAnnotation("IsAutoEnvImpl").isSome()
 }
 
 private func RequireCustomType(def: CustomTypeDef): Type {
