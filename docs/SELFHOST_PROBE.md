@@ -507,31 +507,38 @@ Results:
 - `run_write_types.sh`: `SEPTEST-WRITE-TYPES-PASS`.
 - `run_write_struct.sh`: `SEPTEST-WRITE-STRUCT-PASS`.
 
-## Probe 20 (virtual method dispatch vtable slot)
+## Probe 20 (polymorphic virtual dispatch vtable data)
 
 ### Bug
 
-Every source-level virtual method call through an `open func` on an `open class` could load the wrong function
-pointer from the runtime vtable and crash. The minimal reproducer
-`public open class Base { public open func greet(): Int64 { 10 } } main() { println(Base().greet()) }`
-printed `10` with the reference compiler but the selfhost compiler emitted a call through slot `0` and SIGSEGVed.
+Concrete/devirtualizable calls through `open func` had been repaired, but true polymorphic virtual dispatch still
+crashed when the receiver's static type differed from its dynamic type:
+
+```cj
+public open class Base { public open func greet(): Int64 { 10 } }
+public class Sub <: Base { public override func greet(): Int64 { 20 } }
+main() { let b: Base = Sub(); println(b.greet()) }
+```
+
+The same null function pointer path also hit self virtual calls such as `A.g()` dispatching `this.f()` on `B2`, and
+multi-level upcasts such as `let a: Animal = Puppy(); a.sound(); a.legs()`.
 
 ### Root
 
-The selfhost codegen path in `packages/codegen/src/InvokeImpl.cj` computed the method slot by scanning
-`CustomTypeDef.GetMethods()` in declaration order. That ordinal is not the physical vtable slot, because class
-vtables are grouped by introducing parent type and include inherited entries before user-introduced methods.
+The previous cut fixed the slot offset and had `BuildVirtualCallee` passing the object's runtime typeinfo as the
+first intrinsic argument. That matches C++: `src/CodeGen/Base/InvokeImpl.cpp:61-71` takes the introducing type,
+reads `invokeExpr.GetVirtualMethodOffset()`, computes `idxOfIntroType`, and calls
+`CallIntrinsicGetVTableFunc(thisTI, idxOfIntroType, idxOfVFunc, introTi)`. The intrinsic wrapper just bitcasts and
+forwards those four arguments at `src/CodeGen/CJNative/CJNativeIntrinsicsCall.cpp:1297-1302`.
 
-The C++ path does not rescan declarations. `src/CodeGen/Base/InvokeImpl.cpp:63-71` reads
-`invokeExpr.GetVirtualMethodOffset()` and passes that offset to `CallIntrinsicGetVTableFunc`. That offset is
-created before codegen: `src/CHIR/CHIR.cpp:1252-1264` runs `GenerateVTable`, and
-`src/CHIR/Transformation/GenerateVTable/GenerateVTable.cpp:161-168` stores `VirMethodOffset` on dynamic dispatch
-expressions. When the annotation is absent, `src/CHIR/IR/Expression/Expression.cpp:929-937` computes it from
-virtual method info; that search walks `vtable.GetTypeVTables()` and records the matched slot index at
-`src/CHIR/IR/Type/CustomTypeDef.cpp:344-364`. The intro type is likewise taken from the invoke, not from a
-declaration scan: `src/CodeGen/Base/CHIRExprWrapper.h:376-383` calls
-`GetInstSrcParentCustomTypeOfMethod`, which returns the matched instantiated source parent type at
-`src/CHIR/IR/Expression/Expression.cpp:940-949`.
+The remaining divergence was the runtime vtable/extension data for subclass typeinfo. C++ emits extension defs for
+the class itself plus inherited class intro types in parent-before-child order:
+`src/CodeGen/CJNative/CGTypes/CJNativeCGExtensionDef.cpp:572-608` orders grandparent, parent, subclass, then
+interfaces; `src/CodeGen/CJNative/CGTypes/CJNativeCGExtensionDef.cpp:510-547` emits one extension def per inherited
+type using `chirDef.GetDefVTable().GetExpectedTypeVTable(inheritedType)`. The selfhost port emitted inherited class
+extension defs only for `IsAutoEnvImpl`, so `Sub` had no `Base` vtable record, `B2` had no `A` record, and `Puppy`
+had no `Animal`/`Dog` records. Runtime lookup from the dynamic typeinfo therefore returned a null callee for those
+polymorphic intro-type lookups.
 
 ### Faithful Fix
 
@@ -539,20 +546,36 @@ declaration scan: `src/CodeGen/Base/CHIRExprWrapper.h:376-383` calls
 callee construction, replacing the declaration-order slot scan with the Invoke expression's precomputed offset
 when present. For source CHIR that has not run the C++ vtable pass, the fallback computes the same per-parent
 vtable search shape used by `CustomTypeDef::GetFuncIndexInVTable`, including inherited parent tables and the
-implicit `std.core.Object` prefix. Class extension function tables now use that same physical class-vtable shape
-so `llvm.cj.get.vtable.func` resolves the runtime slot the invoke selected. The port also maps AST `OPEN` to CHIR `VIRTUAL`, matching
-`src/CHIR/AST2CHIR/Utils.cpp:15-22`, so open methods are eligible for the generated vtable.
+implicit `std.core.Object` prefix. Class extension function tables use that same physical class-vtable shape so
+`llvm.cj.get.vtable.func` resolves the runtime slot the invoke selected. The port also maps AST `OPEN` to CHIR
+`VIRTUAL`, matching `src/CHIR/AST2CHIR/Utils.cpp:15-22`, so open methods are eligible for the generated vtable.
+
+This rework completes the polymorphic path by emitting inherited class extension defs for every non-Object superclass
+of a class, in the same grandparent-to-parent order as the C++ `GetOrderedParentTypesRecusively` helper. That gives
+runtime vtable lookup the `Sub -> Base`, `B2 -> A`, and `Puppy -> Animal/Dog` records needed by the
+`thisTI -> vtable -> slot` intrinsic path.
 
 ### Confirmation
 
-Added `scripts/difftest_corpus/111_virtual_dispatch.cj`, covering a base virtual call, an override on a subclass,
-and an inherited method called on the subclass. Focused selfhost runs now match reference output:
+`scripts/difftest_corpus/113_virtual_dispatch.cj` now covers concrete calls, subclass concrete calls, a true
+`Base`-typed upcast holding `Sub`, a self virtual call from `A.g`, and a multi-level `Animal`-typed upcast holding
+`Puppy`. Focused selfhost runs now match reference:
 
 ```text
 10
 20
 30
+20
+101
+102
+woof
+4
 ```
+
+The independently reported reproducers also match reference exactly: case 1 prints `20`, case 2 prints `101` and
+`102`, and case 3 prints `woof` and `4`. Existing concrete and interface cases remain green. Verification:
+`rm -rf target && cjpm build`, `bash scripts/difftest.sh` (`TOTAL=95 PASS=95 MISMATCH=0 FAIL=0`), and each septest
+separately: `run.sh`, `run_write.sh`, `run_diag.sh`, `run_write_types.sh`, `run_write_struct.sh`.
 
 Full regression confirmation was run after the fix: clean `cjpm build`, `scripts/difftest.sh`, and all five
 septests. Final results: `difftest` reported `TOTAL=95  PASS=95  MISMATCH=0  FAIL=0`; `run.sh`,

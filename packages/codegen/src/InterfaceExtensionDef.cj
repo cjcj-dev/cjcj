@@ -76,21 +76,20 @@ private func GenerateExtensionDefsForCustomDef(cgMod: CGModule, def: CustomTypeD
             if (GenerateObjectExtensionDefForType(cgMod, classDef)) {
                 emitted = true
             }
+            let superTypes = CollectSuperClassTypes(classDef)
+            var superIdx = superTypes.size - 1
+            while (superIdx >= 0) {
+                let superTy = superTypes[superIdx]
+                if (!IsCoreObjectType(superTy)) {
+                    let directSuper = superIdx == 0
+                    if (GenerateExtensionDefForType(cgMod, def, superTy, directSuper)) {
+                        emitted = true
+                    }
+                }
+                superIdx--
+            }
             if (GenerateExtensionDefForType(cgMod, def, RequireClassType(classDef), false)) {
                 emitted = true
-            }
-            if (ShouldEmitInheritedClassExtensionDefs(classDef)) {
-                var directSuper = true
-                var currentSuper = classDef.GetSuperClassTy()
-                while (let Some(superTy) <- currentSuper) {
-                    if (!IsCoreObjectType(superTy) &&
-                        GenerateExtensionDefForType(cgMod, def, superTy, directSuper)) {
-                        emitted = true
-                        emittedInterfaces.add(MTableInterfaceInfo(superTy, None))
-                    }
-                    directSuper = false
-                    currentSuper = superTy.GetSuperClassTy()
-                }
             }
         } else if (!def.GetMethods().isEmpty() && !RequireClassType(classDef).IsGenericRelated()) {
             let selfInterfaceTy = RequireClassType(classDef)
@@ -113,6 +112,16 @@ private func GenerateExtensionDefsForCustomDef(cgMod: CGModule, def: CustomTypeD
             cgMod.RegisterExtensionDefInterfaces(ty, emittedInterfaces)
         }
     }
+}
+
+private func CollectSuperClassTypes(classDef: ClassDef): ArrayList<ClassType> {
+    let out = ArrayList<ClassType>()
+    var current = classDef.GetSuperClassTy()
+    while (let Some(superTy) <- current) {
+        out.add(superTy)
+        current = superTy.GetSuperClassTy()
+    }
+    return out
 }
 
 private func GenerateObjectExtensionDefForType(cgMod: CGModule, targetDef: ClassDef): Bool {
@@ -777,10 +786,6 @@ private func RequireClassType(def: ClassDef): ClassType {
 private func IsCoreObjectType(ty: ClassType): Bool {
     let def = ty.GetClassDef()
     return def.GetPackageName() == "std.core" && def.GetSrcCodeIdentifier() == "Object"
-}
-
-private func ShouldEmitInheritedClassExtensionDefs(def: ClassDef): Bool {
-    return def.GetAnnotation("IsAutoEnvImpl").isSome()
 }
 
 private func RequireCustomType(def: CustomTypeDef): Type {
