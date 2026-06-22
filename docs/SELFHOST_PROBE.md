@@ -1420,3 +1420,98 @@ adjacent frontiers, none a regression):
    on base `dca2193` (pre-existing, not regressed) and are a coherent follow-up cut: thread the const-pattern
    `Check` through `ChkEnumPattern` and the remaining nested/sugar pattern paths, mirroring C++'s uniform
    `Check`-through-`ChkPattern` recursion.
+
+## Probe 15 (contextual keyword as identifier)
+
+### Root cause and C++ reference
+
+The selfhost parser rejected contextual-keyword tokens such as `features`, `open`, and `common` in ordinary
+identifier/reference positions. The reference parser accepts those tokens by position:
+
+- `src/Parse/ParseAtom.cpp:111-112`: `ParseAtom` dispatches `IDENTIFIER || SeeingContextualKeyword()` to
+  `ParseRefExpr`.
+- `src/Parse/ParserUtils.cpp:607-615`: `ExpectIdentifierWithPos` reads both normal identifiers and keyword
+  identifiers through `SkipKeyWordIdentifier`, preserving the token text as the identifier.
+- `src/Parse/ParserUtils.cpp:654-667`: `SeeingKeywordAndOperater` recognizes contextual keywords followed by
+  expression operators as expression starts, not declaration modifiers.
+- `src/Parse/ParseDecl.cpp:1904-1907`: modifier parsing stops on `SeeingKeywordAndOperater()`.
+- `src/Parse/Parser.cpp:552-556`: block `ParseExprOrDecl` routes `SeeingKeywordAndOperater()` to `ParseExpr`.
+- `src/Parse/ParserUtils.cpp:683-688` plus `src/Parse/ParseAtom.cpp:1149-1152`: named call arguments accept
+  contextual-keyword argument names through the same identifier path.
+- `src/Parse/ParseType.cpp:24-25`: type parsing treats contextual keywords as identifier-like type names;
+  this is the C++ shape that expression type-argument parsing relies on after `<`.
+
+### Faithful fix
+
+The selfhost port now mirrors those C++ gates:
+
+- `packages/parse/src/ParseAtom.cj`: `ParseAtom` includes `SeeingContextualKeyword()` in the reference-expression
+  dispatch, and the type-argument lookahead scanner treats contextual keywords as identifier-like tokens before
+  handing control to `ParseTypeArguments`.
+- `packages/parse/src/ParserUtils.cj`: added the C++-shaped `SeeingKeywordAndOperater()` helper.
+- `packages/parse/src/ParseModifiers.cj`: modifier parsing now stops when a contextual keyword is actually an
+  expression start, matching the C++ guard.
+- `packages/parse/src/ParseExpr.cj`: `ParseExprOrDecl` routes `SeeingKeywordAndOperater()` to expression parsing,
+  and named call arguments accept contextual-keyword names.
+
+The identifier text round-trips through the existing `ParseIdentifierFromToken` / `ExpectIdentifierWithPos`
+path, so the token value becomes the binding/reference name rather than demoting token kind globally.
+
+### Oracle and corpus
+
+The original oracle now matches the reference:
+
+```cj
+main(): Int64 {
+    let features = 3
+    return features
+}
+```
+
+Reference compile/run and selfhost compile/run both succeed, returning exit code `3`.
+
+Added `scripts/difftest_corpus/106_contextual_kw_identifier.cj`, covering:
+
+- contextual keyword as let-binding name plus expression reference: `features`
+- contextual keyword as parameter name and named call argument: `common`
+- contextual keyword as member name and member access: `features`
+- genuine keyword/modifier use remains covered by existing class/member syntax in the same corpus run.
+
+### Current package frontier after this blocker
+
+Follow-up package probes no longer stop on the `return features` / contextual-reference parser gap:
+
+- `packages/ast/src`: gets past the former `PrintNode.cj` parser failure and now reaches runtime OOM in the
+  selfhost compile, even with `cjHeapSize=4GB`.
+- `packages/parse/src`: gets past contextual-keyword reference expressions; the next observed parser blocker is
+  `packages/parse/src/ParseImports.cj:5` on the top-level `private const PACKAGE_NAME_LEN_LIMIT` declaration.
+- `packages/modules/src` and `packages/sema/src`: with `cjHeapSize=2GB`, the next observed blocker is runtime OOM.
+- `packages/chir/src`: next observed blocker is import accessibility:
+  `packages/chir/src/Translator.cj:58-59` imports `TokenKind` / `TokenKindValue` from `cangjie_compiler::ast`,
+  where they are not accessible.
+- `packages/codegen/src`: with `cjHeapSize=2GB`, the next observed blocker is runtime OOM.
+
+### Verification
+
+Commands run after the fix:
+
+```sh
+rm -rf target && cjpm build
+bash scripts/difftest.sh
+bash scripts/septest/run.sh
+bash scripts/septest/run_write.sh
+bash scripts/septest/run_diag.sh
+bash scripts/septest/run_write_types.sh
+bash scripts/septest/run_write_struct.sh
+```
+
+Results:
+
+- `cjpm build`: success.
+- Contextual keyword oracle: reference and selfhost compile/run match, exit code `3`.
+- `difftest`: `TOTAL=90  PASS=90  MISMATCH=0  FAIL=0`.
+- `run.sh`: `SEPTEST-PASS`.
+- `run_write.sh`: `SEPTEST-WRITE-PASS`.
+- `run_diag.sh`: `SEPTEST-DIAG-PASS`.
+- `run_write_types.sh`: `SEPTEST-WRITE-TYPES-PASS`.
+- `run_write_struct.sh`: `SEPTEST-WRITE-STRUCT-PASS`.

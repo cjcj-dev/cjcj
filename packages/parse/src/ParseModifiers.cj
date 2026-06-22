@@ -11,6 +11,9 @@ extend ParserImpl {
         while (true) {
             let token = Peek()
             if (let Some(kind) <- ModifierKindFromToken(token.kind)) {
+                if (SeeingKeywordAndOperater()) {
+                    break
+                }
                 Next()
                 let modifier = Modifier(token.kind, token.Begin())
                 for (existing in modifiers) {

@@ -98,6 +98,23 @@ extend ParserImpl {
         return false
     }
 
+    public func SeeingKeywordAndOperater(): Bool {
+        if (SeeingContextualKeyword()) {
+            let ahead = lexer.LookAheadSkipNL(1)
+            if (ahead.isEmpty()) {
+                return false
+            }
+            let kind = ahead[0].kind
+            if (kind == TokenKind.BITNOT || kind == TokenKind.AT) {
+                return false
+            }
+            if (TokenKindIndex(kind) < TokenKindIndex(TokenKind.WILDCARD)) {
+                return true
+            }
+        }
+        return false
+    }
+
     public func SeeingBackarrow(): Bool {
         return Seeing(TokenKind.BACKARROW) || SeeingCombinator([TokenKind.LT, TokenKind.SUB])
     }
