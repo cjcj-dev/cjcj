@@ -2016,6 +2016,95 @@ Results:
 - `run_write_types.sh`: `SEPTEST-WRITE-TYPES-PASS`.
 - `run_write_struct.sh`: `SEPTEST-WRITE-STRUCT-PASS`.
 
+## Probe 21 (re-exported type as function parameter)
+
+### C++ divergence closed
+
+The reference compiler has no weaker function-parameter type path. Function parameters call
+`Synthesize({ctx, SynPos::NONE}, fp.type.get())` and then copy `fp.type->GetTy()` into the parameter
+(`src/Sema/TypeCheckDecl.cpp:721-733`). Function return annotations use the same type synthesis path
+(`src/Sema/TypeChecker.cpp:190-194`). For a `RefType`, that path resolves through `LookupTopLevel`
+(`src/Sema/PreCheck.cpp:400-408`) and reports `sema_undeclared_type_name` when no target exists
+(`src/Sema/PreCheck.cpp:423-434`).
+
+That lookup includes imported declarations by calling `importManager.GetImportedDeclsByName`
+(`src/Sema/LookUpImpl.cpp:699-707`). The import manager populates those maps from
+`cjoManager->GetPackageMembers` / `GetPackageMembersByName`, not from only direct file declarations
+(`src/Modules/ImportManager.cpp:1097-1155`), and `CjoManager::AddPackageDeclMap` folds visible re-export imports into
+the package member map (`src/Modules/CjoManager.cpp:558-594`).
+
+The selfhost collector assigned parameter annotations through `AssignFuncParam`
+(`packages/sema/src/Collector.cj:386-390`) and return annotations from the same function body immediately afterward
+(`packages/sema/src/Collector.cj:155-163`). Type synthesis itself was already common at
+`packages/sema/src/TypeCheckExpr/TypeChecker.cj:1010`, and `GetTyFromASTRefType` used `LookupTopLevel`
+(`packages/sema/src/TypeCheck.cj:517-533`). The divergence was the import lookup input seeded before sema:
+`packages/frontend/src/CompilerInstance.cj:440-445` gets compact import groups from
+`ImportManager.GetImportedDecls`, but `packages/frontend/src/FrontendModel.cj:2423` collected import-all and explicit
+member imports by scanning only `pkg.files[*].decls`. A dependency package's public-imported declarations were present
+in the re-export-folded `packageMembers` map, but absent from the imported declaration groups feeding lookup. A
+parameter annotation `Kind` from `import reast.*` therefore kept `TYPE_INVALID`, even though C++ feeds both parameter
+and return annotations from the same re-export-inclusive package-member lookup.
+
+The fix makes `CollectDeclsFromImport` build and query the same re-export-folded `packageMembers` map for import-all
+and explicit member imports (`packages/frontend/src/FrontendModel.cj:2432-2467`). Unresolved invalid `RefType`
+annotations now also emit `sema_undeclared_type_name` during type-node synthesis instead of letting invalid types
+escape to later phases (`packages/sema/src/TypeCheckExpr/TypeChecker.cj:1010-1048`). This mirrors the C++ behavior:
+bind through one import-inclusive type lookup path, and diagnose truly inaccessible names before cjo save.
+
+### Oracle
+
+The three-package oracle now matches the reference:
+
+- `relex` defines `public enum Kind { AND | OR | OTHER }`.
+- `reast` re-exports it with `public import relex.Kind`.
+- `reuse` imports `reast.*` and declares `public func F(op: Kind): Bool`.
+
+Before the fix, the selfhost compiler aborted during cjo save with
+`IllegalArgumentException: Unexpected semantic type to be mangled: Invalid` from the function-parameter mangler. After
+the fix, the selfhost no-main staticlib variant compiles, and the executable variant prints `true`, matching the
+reference. The same re-exported type continues to resolve as a return type.
+
+A negative oracle still rejects a non-re-exported inaccessible package-private type used as a parameter:
+`error: undeclared type name 'Hidden'`. The failure is now a sema diagnostic, not a mangler abort.
+
+Added `scripts/septest/pkgReParamBase`, `scripts/septest/pkgReParamHub`, and `scripts/septest/pkgReParamUse`, wired
+through `scripts/septest/run.sh`. The test builds the base package with the reference compiler, builds a selfhost
+staticlib whose public API has `public func Accept(op: Kind): Bool` where `Kind` is public-imported, then compiles and
+runs a downstream caller. It passes with `SEPTEST-use_reexport_param-PASS output=true exit=0`.
+
+### Current package frontier after this blocker
+
+`packages/conditional_compilation/src` gets past the former invalid-parameter-type mangler/cjo-save blocker. With
+reference-built dependencies plus `target/release/lex@cangjie_compiler` on the import path and `cjHeapSize=2GB`, the
+next observed blocker is later in CHIR translation:
+
+```text
+IllegalStateException: faithful AST2CHIR return expression produced no value
+    at packages/chir/src/Translator.cj:590
+```
+
+### Verification
+
+```sh
+rm -rf target && cjpm build
+bash scripts/difftest.sh
+bash scripts/septest/run.sh
+bash scripts/septest/run_write.sh
+bash scripts/septest/run_diag.sh
+bash scripts/septest/run_write_types.sh
+bash scripts/septest/run_write_struct.sh
+```
+
+Results:
+
+- Clean `cjpm build`: success.
+- `difftest`: `TOTAL=94  PASS=94  MISMATCH=0  FAIL=0`.
+- `run.sh`: `SEPTEST-PASS`, including `SEPTEST-use_reexport_param-PASS output=true exit=0`.
+- `run_write.sh`: `SEPTEST-WRITE-PASS`.
+- `run_diag.sh`: `SEPTEST-DIAG-PASS`.
+- `run_write_types.sh`: `SEPTEST-WRITE-TYPES-PASS`.
+- `run_write_struct.sh`: `SEPTEST-WRITE-STRUCT-PASS`.
+
 ## Probe 22 (generic-func-without-type-arg diagnostic argument)
 
 Selfhost `TypeCheckReferenceFilterTargetsForFuncReference` removed generic function targets when a reference used no

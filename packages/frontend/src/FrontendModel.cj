@@ -2430,11 +2430,16 @@ public class ImportManager {
             return
         }
         if (let Some(pkg) <- GetPackage(targetPackageName)) {
+            BuildPackageMembers(targetPackageName)
             if (importSpec.IsImportAll()) {
-                for (file in pkg.files) {
-                    for (decl in file.decls) {
-                        if (IsDeclVisibleFrom(srcFullPackageName, decl)) {
-                            AddImportedDeclGroupValue(out, decl.identifier.Val(), decl)
+                if (let Some(members) <- packageMembers.get(targetPackageName)) {
+                    for (name in members.keys()) {
+                        if (let Some(decls) <- members.get(name)) {
+                            for (decl in decls) {
+                                if (IsDeclVisibleFrom(srcFullPackageName, decl)) {
+                                    AddImportedDeclGroupValue(out, name, decl)
+                                }
+                            }
                         }
                     }
                 }
@@ -2451,11 +2456,12 @@ public class ImportManager {
                 } else {
                     importSpec.content.identifier.Val()
                 }
-                for (file in pkg.files) {
-                    for (decl in file.decls) {
-                        if (decl.identifier.Val() == importSpec.content.identifier.Val() &&
-                            IsDeclVisibleFrom(srcFullPackageName, decl)) {
-                            AddImportedDeclGroupValue(out, importedName, decl)
+                if (let Some(members) <- packageMembers.get(targetPackageName)) {
+                    if (let Some(decls) <- members.get(importSpec.content.identifier.Val())) {
+                        for (decl in decls) {
+                            if (IsDeclVisibleFrom(srcFullPackageName, decl)) {
+                                AddImportedDeclGroupValue(out, importedName, decl)
+                            }
                         }
                     }
                 }
