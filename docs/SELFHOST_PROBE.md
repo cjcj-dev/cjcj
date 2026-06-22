@@ -1931,3 +1931,51 @@ Results:
 - `run_diag.sh`: `SEPTEST-DIAG-PASS`.
 - `run_write_types.sh`: `SEPTEST-WRITE-TYPES-PASS`.
 - `run_write_struct.sh`: `SEPTEST-WRITE-STRUCT-PASS`.
+
+## Probe 22 (generic-func-without-type-arg diagnostic argument)
+
+Selfhost `TypeCheckReferenceFilterTargetsForFuncReference` removed generic function targets when a reference used no
+type arguments, then emitted `sema_generic_func_without_type_arg` with no diagnostic arguments
+(`packages/sema/src/TypeCheckReference.cj:705`). That diagnostic format is
+`"type arguments needed for the generic function%s"`, so `Diagnostic.InsertArguments` raised
+`IllegalStateException` before a clean sema error could be printed.
+
+The C++ reference helper computes the expression range, narrows member access to the field range, builds
+`expr.symbol == nullptr ? "" : " '" + expr.symbol->name + "'"`, and passes that string as the format argument
+(`src/Sema/Diags.cpp:369-379`; format in
+`include/cangjie/Basic/DiagRefactor/DiagnosticSema.def:87-88`). The selfhost now mirrors that by reading
+`expr.symbol`, constructing the same optional quoted name, and passing it through
+`arguments: [name]` to `DiagnoseRefactor`.
+
+Added a `run_diag.sh` regression for:
+
+```cj
+func id<T>(x: T): T { x }
+main() { let f = id; println("hi") }
+```
+
+The test compares reference and selfhost JSON diagnostic kind, message, and main-hint range. The selfhost now emits
+the clean matching error `type arguments needed for the generic function 'id'`, columns `18-20`, instead of throwing
+`IllegalStateException`.
+
+Verification:
+
+```sh
+rm -rf target && cjpm build
+bash scripts/difftest.sh
+bash scripts/septest/run.sh
+bash scripts/septest/run_write.sh
+bash scripts/septest/run_diag.sh
+bash scripts/septest/run_write_types.sh
+bash scripts/septest/run_write_struct.sh
+```
+
+Results:
+
+- Clean `cjpm build`: success.
+- `difftest`: `TOTAL=94  PASS=94  MISMATCH=0  FAIL=0`.
+- `run.sh`: `SEPTEST-PASS`.
+- `run_write.sh`: `SEPTEST-WRITE-PASS`.
+- `run_diag.sh`: `SEPTEST-DIAG-PASS`, including the generic function diagnostic match.
+- `run_write_types.sh`: `SEPTEST-WRITE-TYPES-PASS`.
+- `run_write_struct.sh`: `SEPTEST-WRITE-STRUCT-PASS`.

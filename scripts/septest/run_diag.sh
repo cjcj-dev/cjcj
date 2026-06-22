@@ -45,6 +45,7 @@ assert_absent() {
 mkdir -p "$WORK/pkgA" "$WORK/pkgB" "$WORK/ref" "$WORK/self"
 cp "$FIXTURE/pkgA/pkgA.cj" "$WORK/pkgA/pkgA.cj"
 cp "$FIXTURE/pkgB/missing_decl.cj" "$WORK/pkgB/missing_decl.cj"
+cp "$FIXTURE/pkgB/generic_func_without_type_arg.cj" "$WORK/pkgB/generic_func_without_type_arg.cj"
 
 "$REF" "$WORK/pkgA/pkgA.cj" --output-type=staticlib -o "$WORK/pkgA/libpkgA.a" --set-runtime-rpath \
     >"$WORK/pkgA.ref.stdout" 2>"$WORK/pkgA.ref.stderr" ||
@@ -109,5 +110,60 @@ printf 'SEPTEST-DIAG-PASS selfhost range matches reference columns=%s-%s\n' \
 
 assert_absent "undeclared identifier" "$WORK/self.stderr"
 printf 'SEPTEST-DIAG-PASS old diagnostic absent\n'
+
+run_generic_func_without_type_arg() {
+    local name="$1"
+    local compiler="$2"
+    local exe="$WORK/$name/generic_func_without_type_arg"
+
+    set +e
+    "$compiler" "$WORK/pkgB/generic_func_without_type_arg.cj" --diagnostic-format json \
+        -o "$exe" --set-runtime-rpath >"$WORK/$name.generic.stdout" 2>"$WORK/$name.generic.stderr"
+    local rc=$?
+    set -e
+
+    [[ "$rc" -ne 0 ]] || fail "$name generic func without type arg unexpectedly succeeded"
+    printf 'SEPTEST-DIAG-PASS %s generic-func-without-type-arg failed exit=%s\n' "$name" "$rc"
+}
+
+run_generic_func_without_type_arg ref "$REF"
+run_generic_func_without_type_arg self "$SELF"
+
+ref_generic_kind=$(extract_field DiagKind "$WORK/ref.generic.stderr")
+self_generic_kind=$(extract_field DiagKind "$WORK/self.generic.stderr")
+ref_generic_message=$(extract_field Message "$WORK/ref.generic.stderr")
+self_generic_message=$(extract_field Message "$WORK/self.generic.stderr")
+ref_generic_range_begin_col=$(extract_number_field Column 2 "$WORK/ref.generic.stderr")
+ref_generic_range_end_col=$(extract_number_field Column 3 "$WORK/ref.generic.stderr")
+self_generic_range_begin_col=$(extract_number_field Column 2 "$WORK/self.generic.stderr")
+self_generic_range_end_col=$(extract_number_field Column 3 "$WORK/self.generic.stderr")
+
+[[ "$ref_generic_kind" = "sema_generic_func_without_type_arg" ]] ||
+    fail "reference generic kind '$ref_generic_kind' did not match sema_generic_func_without_type_arg"
+printf 'SEPTEST-DIAG-PASS reference generic kind=%s\n' "$ref_generic_kind"
+
+[[ "$self_generic_kind" = "$ref_generic_kind" ]] ||
+    fail "selfhost generic kind '$self_generic_kind' did not match reference '$ref_generic_kind'"
+printf 'SEPTEST-DIAG-PASS selfhost generic kind matches reference\n'
+
+[[ "$self_generic_message" = "$ref_generic_message" ]] ||
+    fail "selfhost generic message '$self_generic_message' did not match reference '$ref_generic_message'"
+printf 'SEPTEST-DIAG-PASS selfhost generic message matches reference: %s\n' "$self_generic_message"
+
+[[ "$self_generic_message" = "type arguments needed for the generic function 'id'" ]] ||
+    fail "selfhost generic message '$self_generic_message' did not name id"
+
+[[ -n "$ref_generic_range_begin_col" && -n "$ref_generic_range_end_col" ]] ||
+    fail "reference generic range columns were empty"
+[[ -n "$self_generic_range_begin_col" && -n "$self_generic_range_end_col" ]] ||
+    fail "selfhost generic range columns were empty"
+[[ "$self_generic_range_begin_col" = "$ref_generic_range_begin_col" &&
+    "$self_generic_range_end_col" = "$ref_generic_range_end_col" ]] ||
+    fail "selfhost generic range columns ${self_generic_range_begin_col}-${self_generic_range_end_col} did not match reference ${ref_generic_range_begin_col}-${ref_generic_range_end_col}"
+printf 'SEPTEST-DIAG-PASS selfhost generic range matches reference columns=%s-%s\n' \
+    "$self_generic_range_begin_col" "$self_generic_range_end_col"
+
+assert_absent "IllegalStateException" "$WORK/self.generic.stderr"
+printf 'SEPTEST-DIAG-PASS selfhost generic diagnostic did not crash\n'
 
 printf 'SEPTEST-DIAG-PASS\n'
