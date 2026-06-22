@@ -927,7 +927,7 @@ public class TypeChecker {
 
     private func RunInheritanceCheck(pkg: Package): Unit {
         if (let Some(diagValue) <- impl.diag) {
-            StructInheritanceChecker(diagValue, impl.typeManager, pkg).Check()
+            StructInheritanceChecker(diagValue, impl.typeManager, pkg, opts: GlobalOptions()).Check()
         }
     }
 
