@@ -48,10 +48,12 @@ import cangjie_compiler::ast.NameReferenceExpr as AstNameReferenceExpr
 import cangjie_compiler::ast.Node as AstNode
 import cangjie_compiler::ast.ParenExpr as AstParenExpr
 import cangjie_compiler::ast.Pattern as AstPattern
+import cangjie_compiler::ast.PointerExpr as AstPointerExpr
 import cangjie_compiler::ast.PropDecl as AstPropDecl
 import cangjie_compiler::ast.RangeExpr as AstRangeExpr
 import cangjie_compiler::ast.RefExpr as AstRefExpr
 import cangjie_compiler::ast.ReturnExpr as AstReturnExpr
+import cangjie_compiler::ast.SpawnExpr as AstSpawnExpr
 import cangjie_compiler::ast.StructDecl as AstStructDecl
 import cangjie_compiler::ast.StructTy as AstStructTy
 import cangjie_compiler::ast.SubscriptExpr as AstSubscriptExpr
@@ -366,6 +368,8 @@ public class Translator {
             case ASTKind.TYPE_CONV_EXPR => trans.Visit(RequireNodeAsTypeConvExpr(nodePtr))
             case ASTKind.VAR_WITH_PATTERN_DECL => trans.Visit(RequireNodeAsVarWithPatternDecl(nodePtr))
             case ASTKind.PAREN_EXPR => trans.Visit(RequireNodeAsParenExpr(nodePtr))
+            case ASTKind.POINTER_EXPR => trans.Visit(RequireNodeAsPointerExpr(nodePtr))
+            case ASTKind.SPAWN_EXPR => trans.Visit(RequireNodeAsSpawnExpr(nodePtr))
             case _ => throw IllegalArgumentException(
                 "not yet ported in faithful AST2CHIR: ${ASTKindName(nodePtr.astKind)}")
         }
@@ -773,6 +777,47 @@ public class Translator {
 
     public func Visit(expr: AstParenExpr): Option<Value> {
         return Translator.TranslateASTNode(RequireExpr(expr.expr, "parenthesized expression"), this)
+    }
+
+    public func Visit(expr: AstPointerExpr): Option<Value> {
+        let resultTy = chirTy.TranslateType(RequireAstTy(expr))
+        var intrinsicKind = IntrinsicKind.CPOINTER_INIT0
+        let args = ArrayList<Value>()
+        if (let Some(arg) <- expr.arg) {
+            intrinsicKind = IntrinsicKind.CPOINTER_INIT1
+            var argValue: Value
+            if (arg.withInout) {
+                let argExpr = RequireFuncArgExpr(arg, "pointer argument")
+                argValue = GeneratePointerInoutArg(TranslateExprAsLeftValue(argExpr),
+                    chirTy.TranslateType(RequireAstTy(argExpr)))
+                let inoutArgs = ArrayList<Value>()
+                inoutArgs.add(argValue)
+                argValue = RequireResult(builder.CreateIntrinsic(chirTy.TranslateType(RequireAstTy(arg)),
+                    IntrisicCallContext(kind: IntrinsicKind.INOUT_PARAM, args: inoutArgs), CurrentBlock()))
+            } else {
+                argValue = Translator.TranslateASTNode(RequireFuncArgExpr(arg, "pointer argument"), this) ??
+                    throw IllegalStateException("faithful AST2CHIR pointer argument produced no value")
+            }
+            args.add(GenerateLoadIfNecessaryForArg(argValue, arg.withInout))
+        }
+        return RequireResult(builder.CreateIntrinsic(resultTy, IntrisicCallContext(kind: intrinsicKind, args: args),
+            CurrentBlock()))
+    }
+
+    public func Visit(expr: AstSpawnExpr): Option<Value> {
+        let futureDecl = expr.futureObj ??
+            throw IllegalStateException("faithful AST2CHIR SpawnExpr has no desugared future object")
+        let futureInit = RequireExpr(futureDecl.initializer, "spawn future initializer")
+        let futureObj = Translator.TranslateASTNode(futureInit, this) ??
+            throw IllegalStateException("faithful AST2CHIR spawn future initializer produced no value")
+        var spawnArg: Option<Value> = None
+        if (let Some(arg) <- expr.arg) {
+            if (let Some(desugar) <- arg.desugarExpr) {
+                spawnArg = Translator.TranslateASTNode(desugar, this)
+            }
+        }
+        CreateSpawnMaybeWithException(chirTy.TranslateType(RequireAstTy(expr)), futureObj, spawnArg)
+        return futureObj
     }
 
     public func Visit(expr: AstCallExpr): Option<Value> {
@@ -3770,6 +3815,24 @@ public class Translator {
         return RequireResult(builder.CreateApply(resultTy, callee, callContext, CurrentBlock()))
     }
 
+    private func CreateSpawnMaybeWithException(resultTy: Type, futureObj: Value, spawnArg: Option<Value>): Unit {
+        if (let Some(errorBlock) <- CurrentTryCatchBlock()) {
+            let successBlock = builder.CreateBlock(RequireParentBlockGroup(CurrentBlock(), "spawn-with-exception"))
+            if (let Some(arg) <- spawnArg) {
+                builder.CreateSpawnWithException(resultTy, futureObj, arg, successBlock, errorBlock, CurrentBlock())
+            } else {
+                builder.CreateSpawnWithException(resultTy, futureObj, successBlock, errorBlock, CurrentBlock())
+            }
+            currentBlock = successBlock
+            return
+        }
+        if (let Some(arg) <- spawnArg) {
+            builder.CreateSpawn(resultTy, futureObj, arg, CurrentBlock())
+        } else {
+            builder.CreateSpawn(resultTy, futureObj, CurrentBlock())
+        }
+    }
+
     private func ActiveCallArgs(expr: AstCallExpr): ArrayList<AstFuncArg> {
         if (let Some(desugarArgs) <- expr.desugarArgs) {
             return desugarArgs
@@ -4934,6 +4997,51 @@ public class Translator {
         return value
     }
 
+    private func GenerateLoadIfNecessaryForArg(value: Value, isInOut: Bool): Value {
+        let argTy = value.GetType() ??
+            throw IllegalStateException("faithful AST2CHIR argument has no type: ${value.GetIdentifier()}")
+        let pureArgTy = argTy.StripAllRefs()
+        if (isInOut && (pureArgTy.IsValueType() || pureArgTy.IsGeneric())) {
+            if (argTy.IsCPointer()) {
+                return value
+            }
+            if (pureArgTy.IsGeneric()) {
+                if (let Some(refTy) <- (argTy as RefType)) {
+                    return RequireResult(builder.CreateLoad(refTy.GetBaseType(), value, CurrentBlock()))
+                }
+            }
+            return value
+        }
+        if (pureArgTy.IsValueType() || pureArgTy.IsGeneric() || pureArgTy.IsFunc()) {
+            if (let Some(refTy) <- (argTy as RefType)) {
+                return RequireResult(builder.CreateLoad(refTy.GetBaseType(), value, CurrentBlock()))
+            }
+            return value
+        }
+        if (pureArgTy.IsReferenceType()) {
+            if (let Some(refTy) <- (argTy as RefType)) {
+                let baseTy = refTy.GetBaseType()
+                if (baseTy.IsRef()) {
+                    return RequireResult(builder.CreateLoad(baseTy, value, CurrentBlock()))
+                }
+            }
+        }
+        return value
+    }
+
+    private func GeneratePointerInoutArg(info: FaithfulLeftValueInfo, expectedTy: Type): Value {
+        if (info.path.isEmpty()) {
+            return info.base
+        }
+        let baseTy = info.base.GetType() ??
+            throw IllegalStateException("faithful AST2CHIR pointer inout base has no type: ${info.base.GetIdentifier()}")
+        if (baseTy.IsRef()) {
+            return RequireResult(builder.CreateGetElementByName(builder.context.GetRefTy(expectedTy), info.base,
+                info.path, CurrentBlock()))
+        }
+        return RequireResult(builder.CreateFieldByName(expectedTy, info.base, info.path, CurrentBlock()))
+    }
+
     private func CurrentBlock(): Block {
         return currentBlock ?? throw IllegalStateException("faithful AST2CHIR has no current block")
     }
@@ -5394,5 +5502,13 @@ public class Translator {
     private static func RequireNodeAsVarWithPatternDecl(node: AstNode): AstVarWithPatternDecl {
         return (node as AstVarWithPatternDecl) ??
             throw IllegalArgumentException("ASTKind cast failed: VAR_WITH_PATTERN_DECL")
+    }
+
+    private static func RequireNodeAsPointerExpr(node: AstNode): AstPointerExpr {
+        return (node as AstPointerExpr) ?? throw IllegalArgumentException("ASTKind cast failed: POINTER_EXPR")
+    }
+
+    private static func RequireNodeAsSpawnExpr(node: AstNode): AstSpawnExpr {
+        return (node as AstSpawnExpr) ?? throw IllegalArgumentException("ASTKind cast failed: SPAWN_EXPR")
     }
 }
