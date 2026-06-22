@@ -1675,7 +1675,6 @@ Follow-up package probes no longer stop on the `return features` / contextual-re
   where they are not accessible.
 - `packages/codegen/src`: with `cjHeapSize=2GB`, the next observed blocker is runtime OOM.
 
-
 ### Verification
 
 ```sh
@@ -1694,6 +1693,67 @@ Results:
 - Contextual keyword oracle: reference and selfhost compile/run match, exit code `3`.
 - `difftest`: `TOTAL=90  PASS=90  MISMATCH=0  FAIL=0`.
 - `run.sh`: `SEPTEST-PASS`.
+- `run_write.sh`: `SEPTEST-WRITE-PASS`.
+- `run_diag.sh`: `SEPTEST-DIAG-PASS`.
+- `run_write_types.sh`: `SEPTEST-WRITE-TYPES-PASS`.
+- `run_write_struct.sh`: `SEPTEST-WRITE-STRUCT-PASS`.
+
+## Probe 17 (public-import re-export visibility)
+
+### C++ divergence closed
+
+C++ import checking looks up the imported declaration in the package member map, not just in declarations directly
+owned by the imported package source file. The reference code calls
+`cjoManager->GetPackageMembersByName(package->fullPackageName, import->content.identifier)` and filters that
+member set with `Modules::IsVisible` before emitting `package_decl_not_find_in_package`
+(`src/Modules/ImportManager.cpp:648-655`). That member map is populated through `CjoManager::AddPackageDeclMap`,
+which recursively folds visible `public`/protected/internal re-export imports into `pkgInfo->declMap`
+(`src/Modules/CjoManager.cpp:568-593`).
+
+The selfhost `FrontendModel.cj` re-check only scanned `pkg.files[*].decls`, so a visible declaration re-exported
+by `public import` was rejected as not accessible. The port now builds the same package-member view in
+`FrontendModel.cj`, including serialized import specs from imported `.cjo` files, applies the re-export access
+level when folding imported members, and makes `HasVisibleImportedDecl` query that member map plus the same
+package-relation visibility predicate before reporting `package_decl_not_find_in_package`.
+
+### Oracle
+
+Added a septest cross-package case:
+
+- `pkgReExportP` defines `public func reExportedValue(): Int64`.
+- `pkgReExportQ` uses `public import pkgReExportP.reExportedValue`.
+- `pkgReExportM` imports `pkgReExportQ.reExportedValue`.
+
+`scripts/septest/run.sh` builds `pkgReExportP` and `pkgReExportQ` with the reference compiler, then compiles
+`pkgReExportM` with both reference and selfhost. The selfhost now matches reference and prints
+`SEPTEST-use_reexport-PASS output=7 exit=0`.
+
+### Current package frontier after this blocker
+
+- `packages/mangle/src`: gets past the former
+  `OverflowStrategy` / `Linkage` not-accessible import blocker. With `cjHeapSize=2GB`, the next observed blocker is
+  `IllegalStateException: diagnostic argument count does not match format placeholders` in
+  `packages/basic/src/DiagnosticEngine.cj:399`, reached from `packages/sema/src/TypeCheckReference.cj:705`.
+- `packages/chir/src`: gets past the former `TokenKind` / `TokenKindValue` not-accessible import blocker. With
+  `cjHeapSize=2GB` and again with `cjHeapSize=4GB`, the next observed blocker is runtime OOM.
+
+### Verification
+
+```sh
+rm -rf target && cjpm build
+bash scripts/difftest.sh
+bash scripts/septest/run.sh
+bash scripts/septest/run_write.sh
+bash scripts/septest/run_diag.sh
+bash scripts/septest/run_write_types.sh
+bash scripts/septest/run_write_struct.sh
+```
+
+Results:
+
+- Clean `cjpm build`: success.
+- `difftest`: `TOTAL=91  PASS=91  MISMATCH=0  FAIL=0`.
+- `run.sh`: `SEPTEST-PASS`, including `SEPTEST-use_reexport-PASS output=7 exit=0`.
 - `run_write.sh`: `SEPTEST-WRITE-PASS`.
 - `run_diag.sh`: `SEPTEST-DIAG-PASS`.
 - `run_write_types.sh`: `SEPTEST-WRITE-TYPES-PASS`.
