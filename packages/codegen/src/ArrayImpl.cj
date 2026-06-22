@@ -352,22 +352,36 @@ public func GenerateStoreElementRef(irBuilder: IRBuilder2, chirExpr: Expression)
 
 private func StoreElementValue(irBuilder: IRBuilder2, baseValue: CGValue, elementValue: CGValue,
     elementPtr: LLVMValueRef, fieldTy: Option<Type>): LLVMValueRef {
+    let rawElementValue = StoreElementRawValue(irBuilder, elementValue)
     if (let Some(baseType) <- baseValue.GetCGType()) {
         if (let Some(rawArrayTy) <- FindRawArrayType(baseType.GetOriginal())) {
             let elementCGType = CGType.GetOrCreate(irBuilder.GetCGModule(), rawArrayTy.GetElementType())
-            return StoreRawArrayElement(irBuilder, baseValue.GetRawValue(), elementCGType, elementValue.GetRawValue(),
+            return StoreRawArrayElement(irBuilder, baseValue.GetRawValue(), elementCGType, rawElementValue,
                 elementPtr)
         }
         if (IsManagedObjectElementBase(baseType.GetOriginal())) {
             if (IsManagedReferenceField(irBuilder, fieldTy)) {
-                return irBuilder.CallGCWrite(elementValue.GetRawValue(), baseValue.GetRawValue(), elementPtr)
+                return irBuilder.CallGCWrite(rawElementValue, baseValue.GetRawValue(), elementPtr)
             }
         }
     }
     if (ShouldUseObjectFieldWriteBarrier(baseValue, elementValue, elementPtr)) {
-        return irBuilder.CallGCWrite(elementValue.GetRawValue(), baseValue.GetRawValue(), elementPtr)
+        return irBuilder.CallGCWrite(rawElementValue, baseValue.GetRawValue(), elementPtr)
     }
-    return irBuilder.CreateStore(elementValue.GetRawValue(), elementPtr)
+    return irBuilder.CreateStore(rawElementValue, elementPtr)
+}
+
+private func StoreElementRawValue(irBuilder: IRBuilder2, value: CGValue): LLVMValueRef {
+    let raw = value.GetRawValue()
+    if (!IsPointerLLVMValue(raw)) {
+        return raw
+    }
+    if (let Some(valueCGType) <- value.GetCGType()) {
+        if (!valueCGType.IsReference() && valueCGType.GetOriginal().StripAllRefs().IsStruct()) {
+            return irBuilder.CreateLoad(valueCGType.GetLLVMType(), raw, name: "store.elem.value")
+        }
+    }
+    return raw
 }
 
 private func ShouldUseObjectFieldWriteBarrier(baseValue: CGValue, elementValue: CGValue,

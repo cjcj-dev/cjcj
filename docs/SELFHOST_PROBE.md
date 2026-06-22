@@ -1931,3 +1931,42 @@ Results:
 - `run_diag.sh`: `SEPTEST-DIAG-PASS`.
 - `run_write_types.sh`: `SEPTEST-WRITE-TYPES-PASS`.
 - `run_write_struct.sh`: `SEPTEST-WRITE-STRUCT-PASS`.
+
+## Probe 19 (constructor default field initializers)
+
+Bug: source constructors translated by the selfhost skipped in-class instance field default initializers. Valid programs
+such as `class C { public var x = 5; public func get(): Int64 { x } }` printed `0` from `C().get()` instead of
+the reference `5`. The gap affected `var` and `let`, classes and structs, and non-integer defaults such as
+`String` and `Bool`.
+
+Root: `packages/chir/src/Translator.cj:336` translated every `AstFuncDecl` body directly through
+`TranslateASTNode(astBody)` after parameter binding, with no constructor-specialized path to emit member default
+initializers before the explicit constructor body.
+
+C++ divergence: `/root/cj_build/cangjie_compiler/src/CHIR/AST2CHIR/TranslateASTNode/TranslateFuncDecl.cpp`
+builds member initialization separately in `Translator::TranslateVariablesInit` by walking
+`AST::GetVarsInitializationOrderWithPositions(parent)` and storing each initializer into `this`
+(`TranslateFuncDecl.cpp:331-378`). Constructors then run that initialization before the body when there is no
+delegated `this(...)` call (`TranslateConstructorFunc`, `TranslateFuncDecl.cpp:381-408`). The inline constructor
+path shows the direct field-order lowering: start from the super-field offset, iterate non-static `VAR_DECL`
+members in declaration order, translate each initializer, and `StoreElementRef` into `this`
+(`TranslateConstructorFuncInline`, `TranslateFuncDecl.cpp:411-453`).
+
+Faithful fix: `Translator.cj` now detects constructor functions, skips the initializer pass for delegated
+`this(...)` constructors, computes the local field offset after super fields, translates each non-static member
+initializer in declaration order, and stores it into the current constructor `this` through the existing
+`StoreElementRef` path. String-valued field defaults also exercised struct-valued `StoreElementRef` codegen, so
+the store-element lowering now materializes non-reference struct values before storing, matching the existing
+plain `Store` handling instead of special-casing `String`.
+
+Confirmation:
+
+- Repro now prints `5` on selfhost and reference.
+- Added `scripts/difftest_corpus/111_field_default_init.cj` covering `var` and `let`, `Int64`/`String`/`Bool`,
+  struct field defaults, explicit constructors with defaulted fields, and delegated `this(...)` without double init.
+- New corpus case matches reference output:
+  `12`, `15`, `4`, `11`.
+- Clean build succeeded.
+- Full corpus: `TOTAL=95  PASS=95  MISMATCH=0  FAIL=0`.
+- Septests passed separately: `run.sh`, `run_write.sh`, `run_diag.sh`, `run_write_types.sh`,
+  `run_write_struct.sh`.
