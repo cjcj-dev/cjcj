@@ -5,6 +5,7 @@ public import cangjie_compiler::basic.{
     IntegratedString, MakeRange, Position, PositionStatus, Range, Source, SourceManager
 }
 public import cangjie_compiler::ast.*
+import cangjie_compiler::basic.StringConvertor
 import cangjie_compiler::basic.Diagnostic as BasicDiagnostic
 import cangjie_compiler::basic.DiagFormat as BasicDiagFormat
 import cangjie_compiler::basic.DiagnosticEngine as BasicDiagnosticEngine
@@ -392,6 +393,34 @@ extend SrcCodeChangeState <: Equatable<SrcCodeChangeState> {
     }
 }
 
+// ModuleFormat.fbs enum ExprKind (fbs:333-373): LitConstExpr is index 10.
+private const FLAT_EXPR_KIND_LIT_CONST: UInt16 = 10u16
+
+// ModuleFormat.fbs enum LitConstKind (fbs:388-397). Mirrors ASTLoader.cpp LIT_CONST_KIND_RMAP.
+private func FlatToLitConstKind(value: UInt8): LitConstKind {
+    return match (value) {
+        case 0u8 => LitConstKind.INTEGER
+        case 1u8 => LitConstKind.RUNE_BYTE
+        case 2u8 => LitConstKind.FLOAT
+        case 3u8 => LitConstKind.RUNE
+        case 4u8 => LitConstKind.STRING
+        case 5u8 => LitConstKind.JSTRING
+        case 6u8 => LitConstKind.BOOL
+        case 7u8 => LitConstKind.UNIT
+        case _ => LitConstKind.NONE
+    }
+}
+
+// ModuleFormat.fbs enum StringKind (fbs:398-403).
+private func FlatToStringKind(value: UInt8): StringKind {
+    return match (value) {
+        case 1u8 => StringKind.JSTRING
+        case 2u8 => StringKind.MULTILINE
+        case 3u8 => StringKind.MULTILINE_RAW
+        case _ => StringKind.NORMAL
+    }
+}
+
 public class SrcCodeCacheInfo {
     public var state: SrcCodeChangeState = SrcCodeChangeState.ADDED
     public var code: String = ""
@@ -678,6 +707,7 @@ private class CjoSignatureMaterializer {
     private var flat: Option<CjoFlatBuffer> = None
     private var flatAllDecls: Int64 = -1
     private var flatAllTypes: Int64 = -1
+    private var flatAllExprs: Int64 = -1
     private var flatImports: Int64 = -1
     private let flatDecls: HashMap<UInt32, CjoFlatDecl> = HashMap<UInt32, CjoFlatDecl>()
     private let flatNominalKinds: HashMap<String, UInt8> = HashMap<String, UInt8>()
@@ -702,6 +732,7 @@ private class CjoSignatureMaterializer {
         flat = Some(CjoFlatBuffer(data))
         flatAllDecls = -1
         flatAllTypes = -1
+        flatAllExprs = -1
         flatImports = -1
         flatDecls.clear()
         flatNominalKinds.clear()
@@ -714,6 +745,7 @@ private class CjoSignatureMaterializer {
         }
         flatAllTypes = reader.VectorField(root, 18)
         flatAllDecls = reader.VectorField(root, 20)
+        flatAllExprs = reader.VectorField(root, 22)
         flatImports = reader.VectorField(root, 12)
         if (flatAllTypes < 0 || flatAllDecls < 0) {
             return
@@ -1497,6 +1529,63 @@ private class CjoSignatureMaterializer {
         varDecl.isVar = reader.U8Field(infoTable, 4, 0u8) != 0u8
         varDecl.isConst = reader.U8Field(infoTable, 6, 0u8) != 0u8
         varDecl.isMemberParam = reader.U8Field(infoTable, 8, 0u8) != 0u8
+        // VarInfo field 3 (vtable slot 10) = initializer expr index. Mirrors ASTLoader.cpp:719-720.
+        let initIndex = reader.U32Field(infoTable, 10, 0u32)
+        if (let Some(initializer) <- LoadFlatExpr(reader, initIndex)) {
+            varDecl.initializer = Some(initializer)
+        }
+    }
+
+    // Loads an Expr by its 1-based index from the package allExprs vector (root field 9, slot 22).
+    // Bounded faithful slice: only LitConstExpr is materialized (mirrors ExprLoader.cpp LoadExpr +
+    // LoadLitConstExpr, ASTLoader.cpp:719-726). Returns None for INVALID_FORMAT_INDEX (0) or
+    // any not-yet-supported expr kind.
+    private func LoadFlatExpr(reader: CjoFlatBuffer, exprIndex: UInt32): Option<Expr> {
+        if (exprIndex == 0u32 || flatAllExprs < 0) {
+            return None
+        }
+        let count = reader.VectorLength(flatAllExprs)
+        let idx = Int64(exprIndex) - 1
+        if (idx < 0 || idx >= count) {
+            return None
+        }
+        let exprTable = reader.VectorOffsetElement(flatAllExprs, idx)
+        if (exprTable < 0) {
+            return None
+        }
+        // Expr field 0 (slot 4) = kind. EXPR_KIND_LIT_CONST = 10.
+        let kind = reader.U16Field(exprTable, 4, 0u16)
+        if (kind != FLAT_EXPR_KIND_LIT_CONST) {
+            return None
+        }
+        return Some(LoadFlatLitConstExpr(reader, exprTable))
+    }
+
+    // Mirrors ExprLoader.cpp:141-152 LoadLitConstExpr + LitConstInfo (fbs:446-450).
+    private func LoadFlatLitConstExpr(reader: CjoFlatBuffer, exprTable: Int64): LitConstExpr {
+        // Expr field 7 (slot 18) = info_type, field 8 (slot 20) = info (LitConstInfo table).
+        let infoTable = reader.OffsetField(exprTable, 20)
+        let lce = LitConstExpr()
+        if (infoTable >= 0) {
+            // LitConstInfo field 0 (slot 4) strValue, 1 (slot 6) constKind, 2 (slot 8) strKind.
+            lce.stringValue = reader.StringField(infoTable, 4)
+            lce.kind = FlatToLitConstKind(reader.U8Field(infoTable, 6, 0u8))
+            lce.stringKind = FlatToStringKind(reader.U8Field(infoTable, 8, 0u8))
+        }
+        lce.rawString = lce.stringValue
+        // Expr field 5 (slot 14) = type index.
+        let typeIndex = reader.U32Field(exprTable, 14, 0u32)
+        if (let Some(ty) <- LoadFlatType(typeIndex)) {
+            lce.SetTy(ty)
+        }
+        // ExprLoader.cpp:148-150: compute codepoints for RUNE/STRING literals.
+        if (lce.kind == LitConstKind.RUNE || lce.kind == LitConstKind.STRING) {
+            for (point in StringConvertor.UTF8ToCodepoint(lce.stringValue)) {
+                lce.codepoint.add(point)
+            }
+        }
+        lce.EnableAttr(Attribute.IMPORTED)
+        return lce
     }
 
     private func LoadFlatVarWithPatternInfo(reader: CjoFlatBuffer, record: CjoFlatDecl,
