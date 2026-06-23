@@ -795,8 +795,7 @@ public class Translator {
                 argValue = RequireResult(builder.CreateIntrinsic(chirTy.TranslateType(RequireAstTy(arg)),
                     IntrisicCallContext(kind: IntrinsicKind.INOUT_PARAM, args: inoutArgs), CurrentBlock()))
             } else {
-                argValue = Translator.TranslateASTNode(RequireFuncArgExpr(arg, "pointer argument"), this) ??
-                    throw IllegalStateException("faithful AST2CHIR pointer argument produced no value")
+                argValue = TranslateExprArg(RequireFuncArgExpr(arg, "pointer argument"))
             }
             args.add(GenerateLoadIfNecessaryForArg(argValue, arg.withInout))
         }
@@ -3880,23 +3879,28 @@ public class Translator {
         // `this` object first for a non-static member intrinsic, then the explicit args with no
         // expected-type coercion.
         let args = ArrayList<Value>()
+        let previousDefaultArgs = ArrayList<Value>()
         if (let Some(callee) <- expr.resolvedFunction) {
             if (callee.IsMemberDecl() && !callee.TestAttr(AstAttribute.CONSTRUCTOR) &&
                 !callee.TestAttr(AstAttribute.STATIC)) {
-                args.add(TranslateThisObjectForMemberFuncCall(expr, callee))
+                let thisObj = TranslateThisObjectForMemberFuncCall(expr, callee)
+                args.add(thisObj)
+                previousDefaultArgs.add(thisObj)
             }
         }
-        for (arg in ActiveCallArgs(expr)) {
-            let argExpr = RequireFuncArgExpr(arg, "intrinsic call argument")
-            let value = Translator.TranslateASTNode(argExpr, this) ??
-                throw IllegalStateException("faithful AST2CHIR intrinsic call arg produced no value")
-            args.add(value)
+        if (let Some(callee) <- expr.resolvedFunction) {
+            AppendTranslatedCallArgs(expr, callee, args, ArrayList<Type>(), previousDefaultArgs)
+        } else {
+            for (arg in ActiveCallArgs(expr)) {
+                args.add(TranslateTrivialArgWithNoSugar(arg, None))
+            }
         }
 
         var retTy = resultTy
         if (intrinsicKind == IntrinsicKind.BLACK_BOX && !args.isEmpty()) {
             // intrinsic blackBox's signature is blackBox<T>(v: T): T;
-            // codegen uses the arg type as the intrinsic's result type.
+            // args need to be converted into reference types to control variable lifetimes.
+            BlackBoxModifyArgTypeToRef(args)
             retTy = args[0].GetType() ?? retTy
         }
 
@@ -3929,6 +3933,92 @@ public class Translator {
             return result
         }
         return RequireResult(builder.CreateIntrinsic(resultTy, callContext, CurrentBlock()))
+    }
+
+    private func TranslateExprArg(expr: AstExpr): Value {
+        if (let Some(value) <- Translator.TranslateASTNode(expr, this)) {
+            return value
+        }
+        if (RequireAstTy(expr).IsUnit()) {
+            return RequireResult(builder.CreateConstant(builder.context.GetUnitTy(), UnitLiteral(), CurrentBlock()))
+        }
+        return RequireResult(builder.CreateConstant(builder.context.GetNothingType(), NullLiteral(), CurrentBlock()))
+    }
+
+    private func TranslateTrivialArgWithNoSugar(arg: AstFuncArg, expectedTy: Option<Type>): Value {
+        let argExpr = RequireFuncArgExpr(arg, "call argument")
+        var value = if (arg.withInout) {
+            let argVal = GenerateLeftValue(TranslateExprAsLeftValue(argExpr), chirTy.TranslateType(RequireAstTy(arg)))
+            let inoutArgs = ArrayList<Value>()
+            inoutArgs.add(argVal)
+            RequireResult(builder.CreateIntrinsic(chirTy.TranslateType(RequireAstTy(arg)),
+                IntrisicCallContext(kind: IntrinsicKind.INOUT_PARAM, args: inoutArgs), CurrentBlock()))
+        } else {
+            TranslateExprArg(argExpr)
+        }
+        if (let Some(targetTy) <- expectedTy) {
+            value = CoerceValueForExpectedType(value, targetTy)
+        }
+        return value
+    }
+
+    private func GenerateLeftValue(info: FaithfulLeftValueInfo, expectedTy: Type): Value {
+        if (info.path.isEmpty()) {
+            return info.base
+        }
+        let baseTy = info.base.GetType() ??
+            throw IllegalStateException("faithful AST2CHIR left value base has no type: ${info.base.GetIdentifier()}")
+        if (baseTy.IsRef()) {
+            return RequireResult(builder.CreateGetElementByName(builder.context.GetRefTy(expectedTy), info.base,
+                info.path, CurrentBlock()))
+        }
+        return RequireResult(builder.CreateFieldByName(expectedTy, info.base, info.path, CurrentBlock()))
+    }
+
+    private func BlackBoxModifyArgTypeToRef(args: ArrayList<Value>): Unit {
+        var idx: Int64 = 0
+        while (idx < args.size) {
+            let arg = args[idx]
+            let argTy = arg.GetType() ??
+                throw IllegalStateException("faithful AST2CHIR blackBox argument has no type: ${arg.GetIdentifier()}")
+            if (argTy.IsRef()) {
+                idx++
+                continue
+            }
+            var newArg = arg
+            if (let Some(localVar) <- arg.AsLocalVar()) {
+                if (let Some(expr) <- localVar.GetExpr()) {
+                    if (let Some(load) <- (expr as Load)) {
+                        newArg = load.GetLocation()
+                        RemoveDeadLoadForBlackBox(load)
+                    } else {
+                        let argRefType = builder.context.GetRefTy(argTy)
+                        newArg = RequireResult(builder.CreateAllocate(argRefType, argTy, CurrentBlock()))
+                        builder.CreateStore(arg, newArg, CurrentBlock())
+                    }
+                }
+            }
+            args[idx] = newArg
+            idx++
+        }
+    }
+
+    private func RemoveDeadLoadForBlackBox(load: Load): Unit {
+        let result = match (load.GetResult()) {
+            case Some(value) => value
+            case None => return
+        }
+        for (user in result.GetUsers()) {
+            if (!user.IsDebug()) {
+                return
+            }
+        }
+        for (user in result.GetUsers()) {
+            if (user.IsDebug()) {
+                user.RemoveSelfFromBlock()
+            }
+        }
+        load.RemoveSelfFromBlock()
     }
 
     private func CopyValueList(values: ArrayList<Value>): ArrayList<Value> {
@@ -3967,13 +4057,7 @@ public class Translator {
             }
             return value
         }
-        let argExpr = RequireFuncArgExpr(arg, "call argument")
-        var value = Translator.TranslateASTNode(argExpr, this) ??
-            throw IllegalStateException("faithful AST2CHIR call arg produced no value")
-        if (let Some(targetTy) <- expectedTy) {
-            value = CoerceValueForExpectedType(value, targetTy)
-        }
-        return value
+        return TranslateTrivialArgWithNoSugar(arg, expectedTy)
     }
 
     private func AppendTranslatedCallArgs(expr: AstCallExpr, calleeDecl: AstFuncDecl, out: ArrayList<Value>,
@@ -4027,9 +4111,8 @@ public class Translator {
         let argValues = ArrayList<Value>()
         var idx: Int64 = 0
         for (arg in expr.args) {
-            if (let Some(argExpr) <- arg.expr) {
-                var value = Translator.TranslateASTNode(argExpr, this) ??
-                    throw IllegalStateException("faithful AST2CHIR function-value call arg produced no value")
+            if (arg.expr.isSome()) {
+                var value = TranslateTrivialArgWithNoSugar(arg, None)
                 if (idx < baseFuncTy.paramTys.size) {
                     value = CoerceValueForExpectedType(value, chirTy.TranslateType(baseFuncTy.paramTys[idx]))
                 }
