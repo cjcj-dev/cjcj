@@ -499,7 +499,30 @@ private func fieldLookupPackage(pd: PackageDecl, fieldName: String): ArrayList<D
     return results
 }
 
-private func lookupPackageMembers(pkg: Package, name: String): ArrayList<Decl> {
+// Faithful to ImportManager::GetPackageMembersByName -> CjoManager::GetPackageMembers
+// (src/Modules/CjoManager.cpp:231,242). The package member view is the re-export-aware
+// declMap built in CjoManager::AddPackageDeclMap (which merges the package's transitive
+// re-exports). In the selfhost that re-export-aware view for imported packages lives in
+// ctx.resolvedPackageMemberDeclsMap; consult it first so that a member re-exported by `pkg`
+// (e.g. lex.TokenKind re-exported through ast) is resolvable through an `import pkg.*`.
+// Fall back to physically-owned decls for packages that have no resolved member map
+// (e.g. the source package currently being compiled).
+private func lookupPackageMembers(ctx: ASTContext, pkg: Package, name: String): ArrayList<Decl> {
+    if (let Some(packageMap) <- ctx.resolvedPackageMemberDeclsMap.get(pkg.fullPackageName)) {
+        if (let Some(decls) <- packageMap.get(name)) {
+            let results = ArrayList<Decl>()
+            for (decl in decls) {
+                addDeclUnique(results, decl)
+            }
+            if (!results.isEmpty()) {
+                return results
+            }
+        }
+    }
+    return lookupOwnedPackageMembers(pkg, name)
+}
+
+private func lookupOwnedPackageMembers(pkg: Package, name: String): ArrayList<Decl> {
     let results = ArrayList<Decl>()
     for (file in pkg.files) {
         for (decl in file.decls) {
@@ -526,8 +549,8 @@ private func lookupPackageMembers(pkg: Package, name: String): ArrayList<Decl> {
     return results
 }
 
-private func lookupPackageMember(pkg: Package, name: String): Option<Decl> {
-    let members = lookupPackageMembers(pkg, name)
+private func lookupPackageMember(ctx: ASTContext, pkg: Package, name: String): Option<Decl> {
+    let members = lookupPackageMembers(ctx, pkg, name)
     if (!members.isEmpty()) {
         return Some(members[0])
     }
@@ -569,7 +592,7 @@ private func stdLibFieldLookup(ctx: ASTContext, node: Node, fieldName: String): 
     }
     if (let Some(fullPackageName) <- packageName) {
         if (let Some(pkg) <- lookupKnownPackage(ctx, fullPackageName)) {
-            if (let Some(target) <- lookupPackageMember(pkg, fieldName)) {
+            if (let Some(target) <- lookupPackageMember(ctx, pkg, fieldName)) {
                 results.add(target)
             }
         }
@@ -608,7 +631,7 @@ private func collectImportedDeclsFromSpec(ctx: ASTContext, sourcePkgName: String
     if (importSpec.IsImportAll()) {
         let fullPackageName = importSpec.content.GetImportedPackageName()
         if (let Some(pkg) <- lookupKnownPackage(ctx, fullPackageName)) {
-            for (decl in lookupPackageMembers(pkg, name)) {
+            for (decl in lookupPackageMembers(ctx, pkg, name)) {
                 if (importedPackageMemberVisible(sourcePkgName, fullPackageName, importSpec, decl)) {
                     addDeclUnique(results, decl)
                 }
@@ -641,7 +664,7 @@ private func collectImportedDeclsFromSpec(ctx: ASTContext, sourcePkgName: String
         return
     }
     if (let Some(pkg) <- lookupKnownPackage(ctx, memberPackageName)) {
-        for (decl in lookupPackageMembers(pkg, importSpec.content.identifier.Val())) {
+        for (decl in lookupPackageMembers(ctx, pkg, importSpec.content.identifier.Val())) {
             if (importedPackageMemberVisible(sourcePkgName, memberPackageName, importSpec, decl)) {
                 addDeclUnique(results, decl)
             }
