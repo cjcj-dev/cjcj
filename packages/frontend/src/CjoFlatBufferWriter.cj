@@ -701,8 +701,8 @@ private class FrontendCjoFlatBufferWriter {
     }
 
     // Per-kind dispatch. Bounded faithful slice: RefExpr, MemberAccess, CallExpr, UnaryExpr,
-    // BinaryExpr, SubscriptExpr, AssignExpr, ThrowExpr, TryExpr, WhileExpr, DoWhileExpr, MatchExpr,
-    // IfExpr, Block, ReturnExpr, LitConstExpr, ArrayLit, TupleLit. Other kinds throw
+    // BinaryExpr, SubscriptExpr, AssignExpr, ThrowExpr, SpawnExpr, TryExpr, WhileExpr, DoWhileExpr,
+    // MatchExpr, ForInExpr, IfExpr, Block, ReturnExpr, LitConstExpr, ArrayLit, TupleLit. Other kinds throw
     // (no SaveUnsupportExpr diagnostic stub yet);
     // they are added in later cuts.
     private func SaveExprByKind(realExpr: Expr): FlatBufferOffset {
@@ -730,6 +730,9 @@ private class FrontendCjoFlatBufferWriter {
         if (let Some(te) <- (realExpr as ThrowExpr)) {
             return SaveThrowExpr(te)
         }
+        if (let Some(se) <- (realExpr as SpawnExpr)) {
+            return SaveSpawnExpr(se)
+        }
         if (let Some(te) <- (realExpr as TryExpr)) {
             return SaveTryExpr(te)
         }
@@ -747,6 +750,9 @@ private class FrontendCjoFlatBufferWriter {
         }
         if (let Some(lpd) <- (realExpr as LetPatternDestructor)) {
             return SaveLetPatternDestructor(lpd)
+        }
+        if (let Some(fie) <- (realExpr as ForInExpr)) {
+            return SaveForInExpr(fie)
         }
         if (let Some(al) <- (realExpr as ArrayLit)) {
             return SaveArrayLit(al)
@@ -1126,6 +1132,49 @@ private class FrontendCjoFlatBufferWriter {
         return builder.EndTable()
     }
 
+    // Mirrors ExprWriter.cpp:598-617 SaveExpression(ForInExpr): operands are inExpression,
+    // patternGuard-or-0, then body. ForInInfo owns the loop pattern and ForInKind
+    // (ModuleFormat.fbs:493-496, union tag 17). C++ SaveExpr has already unwrapped desugarExpr
+    // (ExprWriter.cpp:45-56), so this is the original ForInExpr only when it has no desugarExpr.
+    private func SaveForInExpr(fie: ForInExpr): FlatBufferOffset {
+        if (let None <- fie.pattern) {
+            throw IllegalArgumentException("ForInExpr without pattern is not supported in faithful .cjo writer")
+        }
+        if (let None <- fie.inExpression) {
+            throw IllegalArgumentException("ForInExpr without inExpression is not supported in faithful .cjo writer")
+        }
+        if (let None <- fie.body) {
+            throw IllegalArgumentException("ForInExpr without body is not supported in faithful .cjo writer")
+        }
+        let pattern = SavePattern(fie.pattern.getOrThrow())
+        let operands = ArrayList<UInt32>()
+        operands.add(SaveExpr(fie.inExpression.getOrThrow()))
+        let guardIndex = if (let Some(guard) <- fie.patternGuard) { SaveExpr(guard) } else { 0u32 }
+        operands.add(guardIndex)
+        operands.add(SaveExpr(fie.body.getOrThrow()))
+        let operandsVec = builder.CreateVectorU32(operands)
+
+        builder.StartTable(2)
+        builder.AddU8(1, ForInKindToFlat(fie.forInKind))
+        builder.AddOffset(0, pattern)
+        let info = builder.EndTable()
+
+        let begin = PositionBytes(fie.begin)
+        let end = PositionBytes(fie.end)
+        let typeIndex = SaveExprType(fie)
+        builder.StartTable(9)
+        builder.AddOffset(8, info)
+        // ExprInfo_ForInInfo is union tag 17 (ModuleFormat.fbs:412-432).
+        builder.AddU8(7, 17u8)
+        builder.AddU32(5, typeIndex)
+        builder.AddOffset(4, operandsVec)
+        builder.AddStruct(2, end, 4)
+        builder.AddStruct(1, begin, 4)
+        // ExprKind_ForInExpr is index 35 of enum ExprKind (ModuleFormat.fbs:333-373).
+        builder.AddU16(0, 35u16)
+        return builder.EndTable()
+    }
+
     // Mirrors ExprWriter.cpp:284-299 SaveExpression(AssignExpr): operands are leftValue and
     // rightExpr; AssignInfo carries isCompound plus OP_KIND_MAP.at(ae.op).
     private func SaveAssignExpr(ae: AssignExpr): FlatBufferOffset {
@@ -1157,6 +1206,39 @@ private class FrontendCjoFlatBufferWriter {
         builder.AddStruct(1, begin, 4)
         // ExprKind_AssignExpr is index 13 of enum ExprKind (ModuleFormat.fbs:333-373).
         builder.AddU16(0, 13u16)
+        return builder.EndTable()
+    }
+
+    // Mirrors ExprWriter.cpp:373-392 SaveExpression(SpawnExpr): optional operand 0 is the
+    // thread-context arg. SpawnInfo owns futureObj as a local FullId after the VarDecl is serialized.
+    private func SaveSpawnExpr(se: SpawnExpr): FlatBufferOffset {
+        if (let None <- se.futureObj) {
+            throw IllegalArgumentException("SpawnExpr without futureObj is not supported in faithful .cjo writer")
+        }
+        let operands = ArrayList<UInt32>()
+        if (let Some(arg) <- se.arg) {
+            operands.add(SaveExpr(arg))
+        }
+        let operandsVec = builder.CreateVectorU32(operands)
+        let futureIndex = SaveDeclIndex(se.futureObj.getOrThrow(), false)
+        let future = CreateFullId(LOCAL_PACKAGE_INDEX, "", futureIndex)
+        builder.StartTable(1)
+        builder.AddOffset(0, future)
+        let info = builder.EndTable()
+
+        let begin = PositionBytes(se.begin)
+        let end = PositionBytes(se.end)
+        let typeIndex = SaveExprType(se)
+        builder.StartTable(9)
+        builder.AddOffset(8, info)
+        // ExprInfo_SpawnInfo is union tag 19 (ModuleFormat.fbs:412-432).
+        builder.AddU8(7, 19u8)
+        builder.AddU32(5, typeIndex)
+        builder.AddOffset(4, operandsVec)
+        builder.AddStruct(2, end, 4)
+        builder.AddStruct(1, begin, 4)
+        // ExprKind_SpawnExpr is index 18 of enum ExprKind (ModuleFormat.fbs:333-373).
+        builder.AddU16(0, 18u16)
         return builder.EndTable()
     }
 
@@ -1718,6 +1800,15 @@ private class FrontendCjoFlatBufferWriter {
             return SaveType(ty)
         }
         return 0u32
+    }
+
+    private func ForInKindToFlat(kind: ForInKind): UInt8 {
+        match (kind) {
+            case ForInKind.FORIN_INVALID => 0u8
+            case ForInKind.FORIN_RANGE => 1u8
+            case ForInKind.FORIN_STRING => 2u8
+            case ForInKind.FORIN_ITER => 3u8
+        }
     }
 
     // Serialize a decl's annotations into the Decl.annotations vector (Decl field 10).

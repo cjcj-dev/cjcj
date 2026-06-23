@@ -395,9 +395,9 @@ extend SrcCodeChangeState <: Equatable<SrcCodeChangeState> {
 }
 
 // ModuleFormat.fbs enum ExprKind (fbs:333-373): MemberAccess=5, RefExpr=6, CallExpr=7,
-// UnaryExpr=8, BinaryExpr=11, SubscriptExpr=12, AssignExpr=13, ThrowExpr=17, ArrayLit=19,
+// UnaryExpr=8, BinaryExpr=11, SubscriptExpr=12, AssignExpr=13, ThrowExpr=17, SpawnExpr=18, ArrayLit=19,
 // TupleLit=20, MatchExpr=21, ReturnExpr=3, LitConstExpr=10, IfExpr=23, TryExpr=24,
-// WhileExpr=25, DoWhileExpr=26, LambdaExpr=27, Block=28, MatchCase=29, MatchCaseOther=30.
+// WhileExpr=25, DoWhileExpr=26, LambdaExpr=27, Block=28, MatchCase=29, MatchCaseOther=30, ForInExpr=35.
 private const FLAT_EXPR_KIND_WILDCARD: UInt16 = 1u16
 private const FLAT_EXPR_KIND_RETURN: UInt16 = 3u16
 private const FLAT_EXPR_KIND_MEMBER_ACCESS: UInt16 = 5u16
@@ -409,6 +409,7 @@ private const FLAT_EXPR_KIND_BINARY: UInt16 = 11u16
 private const FLAT_EXPR_KIND_SUBSCRIPT: UInt16 = 12u16
 private const FLAT_EXPR_KIND_ASSIGN: UInt16 = 13u16
 private const FLAT_EXPR_KIND_THROW: UInt16 = 17u16
+private const FLAT_EXPR_KIND_SPAWN: UInt16 = 18u16
 private const FLAT_EXPR_KIND_ARRAY_LIT: UInt16 = 19u16
 private const FLAT_EXPR_KIND_TUPLE_LIT: UInt16 = 20u16
 private const FLAT_EXPR_KIND_MATCH: UInt16 = 21u16
@@ -421,6 +422,7 @@ private const FLAT_EXPR_KIND_LAMBDA: UInt16 = 27u16
 private const FLAT_EXPR_KIND_BLOCK: UInt16 = 28u16
 private const FLAT_EXPR_KIND_MATCH_CASE: UInt16 = 29u16
 private const FLAT_EXPR_KIND_MATCH_CASE_OTHER: UInt16 = 30u16
+private const FLAT_EXPR_KIND_FOR_IN: UInt16 = 35u16
 
 // ModuleFormat.fbs enum PatternKind (fbs:515-524).
 private const FLAT_PATTERN_KIND_CONST: UInt8 = 1u8
@@ -1768,6 +1770,9 @@ private class CjoSignatureMaterializer {
         if (kind == FLAT_EXPR_KIND_THROW) {
             return Some(LoadFlatThrowExpr(reader, exprTable))
         }
+        if (kind == FLAT_EXPR_KIND_SPAWN) {
+            return Some(LoadFlatSpawnExpr(reader, exprTable))
+        }
         if (kind == FLAT_EXPR_KIND_TRY) {
             return Some(LoadFlatTryExpr(reader, exprTable))
         }
@@ -1792,6 +1797,9 @@ private class CjoSignatureMaterializer {
         if (kind == FLAT_EXPR_KIND_LET_PATTERN_DESTRUCTOR) {
             return Some(LoadFlatLetPatternDestructor(reader, exprTable))
         }
+        if (kind == FLAT_EXPR_KIND_FOR_IN) {
+            return Some(LoadFlatForInExpr(reader, exprTable))
+        }
         if (kind == FLAT_EXPR_KIND_LAMBDA) {
             return Some(LoadFlatLambdaExpr(reader, exprTable))
         }
@@ -1811,13 +1819,14 @@ private class CjoSignatureMaterializer {
                     scanKind == FLAT_EXPR_KIND_REF_EXPR || scanKind == FLAT_EXPR_KIND_CALL ||
                     scanKind == FLAT_EXPR_KIND_UNARY || scanKind == FLAT_EXPR_KIND_LIT_CONST ||
                     scanKind == FLAT_EXPR_KIND_BINARY || scanKind == FLAT_EXPR_KIND_SUBSCRIPT ||
-                    scanKind == FLAT_EXPR_KIND_ASSIGN ||
+                    scanKind == FLAT_EXPR_KIND_ASSIGN || scanKind == FLAT_EXPR_KIND_SPAWN ||
                     scanKind == FLAT_EXPR_KIND_THROW || scanKind == FLAT_EXPR_KIND_MATCH ||
                     scanKind == FLAT_EXPR_KIND_ARRAY_LIT || scanKind == FLAT_EXPR_KIND_TUPLE_LIT ||
                     scanKind == FLAT_EXPR_KIND_MATCH_CASE || scanKind == FLAT_EXPR_KIND_MATCH_CASE_OTHER ||
                     scanKind == FLAT_EXPR_KIND_IF || scanKind == FLAT_EXPR_KIND_TRY || scanKind == FLAT_EXPR_KIND_WHILE ||
                     scanKind == FLAT_EXPR_KIND_DO_WHILE ||
-                    scanKind == FLAT_EXPR_KIND_LET_PATTERN_DESTRUCTOR || scanKind == FLAT_EXPR_KIND_LAMBDA ||
+                    scanKind == FLAT_EXPR_KIND_LET_PATTERN_DESTRUCTOR || scanKind == FLAT_EXPR_KIND_FOR_IN ||
+                    scanKind == FLAT_EXPR_KIND_LAMBDA ||
                     scanKind == FLAT_EXPR_KIND_BLOCK || (scanKind == 0u16 && scanInfoKind == 11u8)
                 if (!supported) {
                     return None
@@ -1958,6 +1967,25 @@ private class CjoSignatureMaterializer {
         }
         te.EnableAttr(Attribute.IMPORTED)
         return te
+    }
+
+    // Mirrors ExprLoader.cpp:250-262 LoadSpawnExpr. Operand 0 is the optional thread-context arg;
+    // SpawnInfo.future is a local VarDecl FullId.
+    private func LoadFlatSpawnExpr(reader: CjoFlatBuffer, exprTable: Int64): SpawnExpr {
+        let se = SpawnExpr()
+        LoadFlatExprBasicInfo(reader, exprTable, se)
+        let operands = reader.VectorField(exprTable, 12)
+        if (operands >= 0 && reader.VectorLength(operands) > 0) {
+            se.arg = LoadFlatExpr(reader, reader.VectorU32(operands, 0))
+        }
+        let infoTable = reader.OffsetField(exprTable, 20)
+        if (infoTable >= 0) {
+            if (let Some(decl) <- ResolveFlatFullId(reader, reader.OffsetField(infoTable, 4))) {
+                se.futureObj = decl as VarDecl
+            }
+        }
+        se.EnableAttr(Attribute.IMPORTED)
+        return se
     }
 
     // Mirrors ExprLoader.cpp:303-327 LoadTryExpr and ReferenceLoader.cpp:676-682. Operands are
@@ -2195,6 +2223,54 @@ private class CjoSignatureMaterializer {
         }
         lpd.EnableAttr(Attribute.IMPORTED)
         return lpd
+    }
+
+    // Mirrors ExprLoader.cpp:460-475 LoadForInExpr. Desugared for-in variants have non-invalid
+    // ForInKind and load operand 0 as a raw Block, matching C++ LoadExpr<Block>.
+    private func LoadFlatForInExpr(reader: CjoFlatBuffer, exprTable: Int64): ForInExpr {
+        let fie = ForInExpr()
+        LoadFlatExprBasicInfo(reader, exprTable, fie)
+        let infoTable = reader.OffsetField(exprTable, 20)
+        if (infoTable >= 0) {
+            fie.forInKind = FlatToForInKind(reader.U8Field(infoTable, 6, 0u8))
+            fie.pattern = LoadFlatPattern(reader, reader.OffsetField(infoTable, 4))
+        }
+        let operands = reader.VectorField(exprTable, 12)
+        if (operands >= 0 && reader.VectorLength(operands) == 3) {
+            if (IsInvalidForInKind(fie.forInKind)) {
+                fie.inExpression = LoadFlatExpr(reader, reader.VectorU32(operands, 0))
+            } else if (let Some(inExpr) <- LoadFlatExprRaw(reader, reader.VectorU32(operands, 0))) {
+                if (let Some(block) <- (inExpr as Block)) {
+                    fie.inExpression = Some(block)
+                }
+            }
+            fie.patternGuard = LoadFlatExpr(reader, reader.VectorU32(operands, 1))
+            if (let Some(bodyExpr) <- LoadFlatExprRaw(reader, reader.VectorU32(operands, 2))) {
+                fie.body = bodyExpr as Block
+            }
+        }
+        fie.EnableAttr(Attribute.IMPORTED)
+        return fie
+    }
+
+    private func FlatToForInKind(kind: UInt8): ForInKind {
+        if (kind == 1u8) {
+            return ForInKind.FORIN_RANGE
+        }
+        if (kind == 2u8) {
+            return ForInKind.FORIN_STRING
+        }
+        if (kind == 3u8) {
+            return ForInKind.FORIN_ITER
+        }
+        return ForInKind.FORIN_INVALID
+    }
+
+    private func IsInvalidForInKind(kind: ForInKind): Bool {
+        match (kind) {
+            case ForInKind.FORIN_INVALID => true
+            case _ => false
+        }
     }
 
     // Mirrors ExprLoader.cpp:118-127 LoadUnaryExpr. Operand 0 is expr; UnaryInfo field 0 (slot 4)
