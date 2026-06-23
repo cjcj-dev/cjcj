@@ -49,6 +49,16 @@ private class AnnotationLambdaKey {
     }
 }
 
+private class FuncBodyScopeKey {
+    public var owner: MangleDecl
+    public var key: MangleDecl
+
+    public init(owner: MangleDecl, key: MangleDecl) {
+        this.owner = owner
+        this.key = key
+    }
+}
+
 private class FileWildcardBucket {
     public var file: MangleFile
     public let vars: ArrayList<MangleDecl> = ArrayList<MangleDecl>()
@@ -161,6 +171,7 @@ public class ManglerContext {
     private let node2LocalVar: ArrayList<VarBucket> = ArrayList<VarBucket>()
     private let node2LocalFunc: ArrayList<FuncBucket> = ArrayList<FuncBucket>()
     private let file2ExtendDecl: ArrayList<ExtendBucket> = ArrayList<ExtendBucket>()
+    private let funcBodyScopeKeys: ArrayList<FuncBodyScopeKey> = ArrayList<FuncBodyScopeKey>()
     public let fileIndexes: ArrayList<UInt64> = ArrayList<UInt64>()
 
     public init() {}
@@ -264,17 +275,82 @@ public class ManglerContext {
         return false
     }
 
-    private func NeedCollectScope(node: MangleDecl): Bool {
-        return node.astKind == ASTKind.FUNC_DECL || node.astKind == ASTKind.LAMBDA_EXPR ||
-            (IsVarDeclAbstract(node) && node.TestAttr(Attribute.GLOBAL)) || IsCompositeMemberVar(node)
+    private func IsFuncBodyScopeOwner(node: MangleDecl): Bool {
+        return node.astKind == ASTKind.FUNC_DECL || node.astKind == ASTKind.PRIMARY_CTOR_DECL ||
+            node.astKind == ASTKind.LAMBDA_EXPR
     }
 
-    private func GetDeclKey(node: MangleDecl): Option<MangleDecl> {
-        if (node.astKind == ASTKind.FUNC_DECL || node.astKind == ASTKind.PRIMARY_CTOR_DECL ||
-            node.astKind == ASTKind.LAMBDA_EXPR || IsVarDeclAbstract(node)) {
+    private func GetFuncBodyScopeKey(node: MangleDecl): Option<MangleDecl> {
+        if (!IsFuncBodyScopeOwner(node)) {
+            return None
+        }
+        if (let None <- node.funcBody) {
+            return None
+        }
+        for (item in funcBodyScopeKeys) {
+            if (sameDecl(item.owner, node)) {
+                return item.key
+            }
+        }
+        let key = MangleDecl(ASTKind.FUNC_BODY, "<funcBody>", fullPackageName: node.fullPackageName)
+        key.curFile = node.curFile
+        key.outerDecl = node.outerDecl
+        funcBodyScopeKeys.add(FuncBodyScopeKey(node, key))
+        return key
+    }
+
+    private func GetLocalVarScopeKey(node: MangleDecl): Option<MangleDecl> {
+        // C++ BaseMangler.cpp:1357-1368 keys local vars by funcBody for function-like scopes.
+        if (node.astKind == ASTKind.FUNC_BODY) {
+            return node
+        }
+        if (let Some(key) <- GetFuncBodyScopeKey(node)) {
+            return key
+        }
+        if (IsVarDeclAbstract(node) && node.TestAttr(Attribute.GLOBAL)) {
             return node
         }
         return None
+    }
+
+    private func GetLocalWildcardScopeKey(node: MangleDecl): Option<MangleDecl> {
+        // C++ BaseMangler.cpp:1331-1342 uses the same funcBody/global-var keying for local wildcards.
+        return GetLocalVarScopeKey(node)
+    }
+
+    private func GetLocalFuncScopeKey(node: MangleDecl): Option<MangleDecl> {
+        // C++ BaseMangler.cpp:1281-1294 uses funcBody for function-like scopes and any VarDeclAbstract otherwise.
+        if (node.astKind == ASTKind.FUNC_BODY) {
+            return node
+        }
+        if (let Some(key) <- GetFuncBodyScopeKey(node)) {
+            return key
+        }
+        if (IsVarDeclAbstract(node)) {
+            return node
+        }
+        return None
+    }
+
+    private func GetLambdaScopeKey(node: MangleDecl): Option<MangleDecl> {
+        // C++ BaseMangler.cpp:1383-1402 keys lambdas by funcBody or by eligible VarDeclAbstract owners.
+        if (node.astKind == ASTKind.FUNC_BODY || node.astKind == ASTKind.NODE) {
+            return node
+        }
+        if (let Some(key) <- GetFuncBodyScopeKey(node)) {
+            return key
+        }
+        if (IsVarDeclAbstract(node)) {
+            if (node.TestAttr(Attribute.GLOBAL) || IsCompositeMemberVar(node)) {
+                return node
+            }
+        }
+        return None
+    }
+
+    private func NeedCollectScope(node: MangleDecl): Bool {
+        return node.astKind == ASTKind.FUNC_DECL || node.astKind == ASTKind.LAMBDA_EXPR ||
+            (IsVarDeclAbstract(node) && node.TestAttr(Attribute.GLOBAL)) || IsCompositeMemberVar(node)
     }
 
     private func ShouldSkipNestedLocalScope(child: MangleDecl): Bool {
@@ -337,8 +413,9 @@ public class ManglerContext {
     }
 
     public func GetIndexOfLocalWildcardVar(node: MangleDecl, target: MangleDecl): Option<Int64> {
+        let lookupKey = if (let Some(value) <- GetLocalWildcardScopeKey(node)) { value } else { return None }
         for (bucket in node2LocalWildcardVar) {
-            if (sameDecl(bucket.key, node)) {
+            if (sameDecl(bucket.key, lookupKey)) {
                 return findDeclIndex(bucket.vars, target)
             }
         }
@@ -346,8 +423,10 @@ public class ManglerContext {
     }
 
     public func GetIndexOfVar(node: MangleDecl, target: MangleDecl): Option<Int64> {
+        let lookupKey = if (let Some(value) <- GetLocalVarScopeKey(node)) { value } else { return None }
+        // C++ BaseMangler.cpp:1482-1507 unwraps LambdaExpr/FuncDecl/PrimaryCtorDecl to funcBody before lookup.
         for (bucket in node2LocalVar) {
-            if (sameDecl(bucket.key, node)) {
+            if (sameDecl(bucket.key, lookupKey)) {
                 var idx: Int64 = 0
                 for (item in bucket.vars) {
                     if (item.identifier == target.identifier) {
@@ -363,8 +442,9 @@ public class ManglerContext {
     }
 
     public func GetIndexOfFunc(node: MangleDecl, target: MangleDecl): Option<Int64> {
+        let lookupKey = if (let Some(value) <- GetLocalFuncScopeKey(node)) { value } else { return None }
         for (bucket in node2LocalFunc) {
-            if (sameDecl(bucket.key, node)) {
+            if (sameDecl(bucket.key, lookupKey)) {
                 var idx: Int64 = 0
                 for (item in bucket.funcs) {
                     if (item.identifier == target.identifier) {
@@ -380,14 +460,15 @@ public class ManglerContext {
     }
 
     public func GetIndexOfLambda(node: MangleDecl, target: MangleDecl): Option<Int64> {
+        let lookupKey = if (let Some(value) <- GetLambdaScopeKey(node)) { value } else { return None }
         var bodyLambdaCount: Int64 = 0
-        if (let Some(bodyBucket) <- findLambdaBucket(node)) {
+        if (let Some(bodyBucket) <- findLambdaBucket(lookupKey)) {
             bodyLambdaCount = bodyBucket.lambdas.size
             if (let Some(index) <- findDeclIndex(bodyBucket.lambdas, target)) {
                 return index
             }
         }
-        if (let Some(annotationKey) <- findAnnotationLambdaKey(node)) {
+        if (let Some(annotationKey) <- findAnnotationLambdaKey(lookupKey)) {
             if (let Some(annotationBucket) <- findLambdaBucket(annotationKey)) {
                 if (let Some(index) <- findDeclIndex(annotationBucket.lambdas, target)) {
                     return bodyLambdaCount + index
@@ -416,13 +497,13 @@ public class ManglerContext {
     }
 
     public func SaveLocalWildcardVar2Decl(node: MangleDecl): Unit {
-        if (let Some(key) <- GetDeclKey(node)) {
+        if (let Some(key) <- GetLocalWildcardScopeKey(node)) {
             CollectLocalWildcardVarsInScope(key, node)
         }
     }
 
     public func SaveVar2CurDecl(node: MangleDecl): Unit {
-        if (let Some(key) <- GetDeclKey(node)) {
+        if (let Some(key) <- GetLocalVarScopeKey(node)) {
             CollectLocalVarsInScope(key, node)
         }
     }
@@ -432,17 +513,19 @@ public class ManglerContext {
             !node.TestAttr(Attribute.GLOBAL)) {
             if (let Some(outer) <- node.outerDecl) {
                 if (!outer.IsNominalDecl()) {
-                    RegisterLocalFunc(outer, node)
+                    if (let Some(key) <- GetLocalFuncScopeKey(outer)) {
+                        RegisterLocalFunc(key, node)
+                    }
                 }
             }
         }
-        if (let Some(key) <- GetDeclKey(node)) {
+        if (let Some(key) <- GetLocalFuncScopeKey(node)) {
             CollectLocalFunctionsInScope(key, node)
         }
     }
 
     public func SaveLambda2CurDecl(node: MangleDecl): Unit {
-        if (let Some(key) <- GetDeclKey(node)) {
+        if (let Some(key) <- GetLambdaScopeKey(node)) {
             CollectLambdasInScope(key, node)
         }
     }
@@ -475,28 +558,37 @@ public class ManglerContext {
     }
 
     public func RegisterLocalVar(node: MangleDecl, target: MangleDecl): Unit {
-        addUniqueDecl(varBucket(node).vars, target)
+        if (let Some(key) <- GetLocalVarScopeKey(node)) {
+            addUniqueDecl(varBucket(key).vars, target)
+        }
     }
 
     public func RegisterLocalFunc(node: MangleDecl, target: MangleDecl): Unit {
-        addUniqueDecl(funcBucket(node).funcs, target)
+        if (let Some(key) <- GetLocalFuncScopeKey(node)) {
+            addUniqueDecl(funcBucket(key).funcs, target)
+        }
     }
 
     public func RegisterLocalWildcardVar(node: MangleDecl, target: MangleDecl): Unit {
-        addUniqueDecl(wildcardBucket(node).vars, target)
+        if (let Some(key) <- GetLocalWildcardScopeKey(node)) {
+            addUniqueDecl(wildcardBucket(key).vars, target)
+        }
     }
 
     public func RegisterLambda(node: MangleDecl, target: MangleDecl): Unit {
-        addUniqueDecl(lambdaBucket(node).lambdas, target)
+        if (let Some(key) <- GetLambdaScopeKey(node)) {
+            addUniqueDecl(lambdaBucket(key).lambdas, target)
+        }
     }
 
     public func RegisterLambdaAnnotationKey(owner: MangleDecl, annotationKey: MangleDecl): Unit {
+        let ownerKey = if (let Some(value) <- GetLambdaScopeKey(owner)) { value } else { owner }
         for (item in owner2AnnotationLambdaKey) {
-            if (sameDecl(item.owner, owner)) {
+            if (sameDecl(item.owner, ownerKey)) {
                 return
             }
         }
-        owner2AnnotationLambdaKey.add(AnnotationLambdaKey(owner, annotationKey))
+        owner2AnnotationLambdaKey.add(AnnotationLambdaKey(ownerKey, annotationKey))
     }
 
     public static func CheckAllElementsWildcard(root: ManglePattern): Bool {
@@ -1118,7 +1210,8 @@ public open class BaseMangler {
                     } else if (let Some(index) <- ctx.GetIndexOfVar(outerNode, decl)) {
                         mangleStr += DecimalToManglingNumber("${index}")
                     } else {
-                        throw IllegalArgumentException("Index of local variable is not found: " + decl.identifier)
+                        // C++ BaseMangler.cpp:368-371 only CJC_ASSERTs here; release builds do not emit
+                        // a selfhost-only diagnostic from this path.
                     }
                 }
             }
