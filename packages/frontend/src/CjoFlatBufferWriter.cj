@@ -703,8 +703,9 @@ private class FrontendCjoFlatBufferWriter {
     }
 
     // Per-kind dispatch. Bounded faithful slice: RefExpr, MemberAccess, CallExpr, UnaryExpr,
-    // BinaryExpr, AssignExpr, WhileExpr, DoWhileExpr, MatchExpr, IfExpr, Block, ReturnExpr, LitConstExpr. Other kinds throw
-    // (no SaveUnsupportExpr diagnostic stub yet); they are added in later cuts.
+    // BinaryExpr, AssignExpr, ThrowExpr, TryExpr, WhileExpr, DoWhileExpr, MatchExpr, IfExpr,
+    // Block, ReturnExpr, LitConstExpr. Other kinds throw (no SaveUnsupportExpr diagnostic stub yet);
+    // they are added in later cuts.
     private func SaveExprByKind(realExpr: Expr): FlatBufferOffset {
         if (let Some(we) <- (realExpr as WildcardExpr)) {
             return SaveWildcardExpr(we)
@@ -723,6 +724,12 @@ private class FrontendCjoFlatBufferWriter {
         }
         if (let Some(ae) <- (realExpr as AssignExpr)) {
             return SaveAssignExpr(ae)
+        }
+        if (let Some(te) <- (realExpr as ThrowExpr)) {
+            return SaveThrowExpr(te)
+        }
+        if (let Some(te) <- (realExpr as TryExpr)) {
+            return SaveTryExpr(te)
         }
         if (let Some(ie) <- (realExpr as IfExpr)) {
             return SaveIfExpr(ie)
@@ -882,6 +889,75 @@ private class FrontendCjoFlatBufferWriter {
         builder.AddStruct(1, begin, 4)
         // ExprKind_IfExpr is index 23 of enum ExprKind (ModuleFormat.fbs:333-373).
         builder.AddU16(0, 23u16)
+        return builder.EndTable()
+    }
+
+    // Mirrors ExprWriter.cpp:347-357 SaveExpression(ThrowExpr): operand 0 is the thrown expr.
+    // ExprKind_ThrowExpr is index 17 of enum ExprKind (ModuleFormat.fbs:333-373).
+    private func SaveThrowExpr(te: ThrowExpr): FlatBufferOffset {
+        if (let None <- te.expr) {
+            throw IllegalArgumentException("ThrowExpr without expr is not supported in faithful .cjo writer")
+        }
+        let operands = ArrayList<UInt32>()
+        operands.add(SaveExpr(te.expr.getOrThrow()))
+        let operandsVec = builder.CreateVectorU32(operands)
+
+        let begin = PositionBytes(te.begin)
+        let end = PositionBytes(te.end)
+        let typeIndex = SaveExprType(te)
+        builder.StartTable(9)
+        builder.AddU32(5, typeIndex)
+        builder.AddOffset(4, operandsVec)
+        builder.AddStruct(2, end, 4)
+        builder.AddStruct(1, begin, 4)
+        builder.AddU16(0, 17u16)
+        return builder.EndTable()
+    }
+
+    // Mirrors ExprWriter.cpp:444-474 SaveExpression(TryExpr): operands are tryBlock, each catch block,
+    // then a mandatory finallyBlock-or-0 slot. TryInfo owns resource FullIds and catch patterns
+    // (ModuleFormat.fbs:486-489); ExprInfo_TryInfo's union tag value is 15.
+    private func SaveTryExpr(te: TryExpr): FlatBufferOffset {
+        if (let None <- te.tryBlock) {
+            throw IllegalArgumentException("TryExpr without tryBlock is not supported in faithful .cjo writer")
+        }
+        let resources = ArrayList<FlatBufferOffset>()
+        for (resource in te.resourceSpec) {
+            let declIndex = SaveDeclIndex(resource, false)
+            resources.add(CreateFullId(LOCAL_PACKAGE_INDEX, "", declIndex))
+        }
+        let operands = ArrayList<UInt32>()
+        operands.add(SaveExpr(te.tryBlock.getOrThrow()))
+        for (catchBlock in te.catchBlocks) {
+            operands.add(SaveExpr(catchBlock))
+        }
+        let finallyIndex = if (let Some(finallyBlock) <- te.finallyBlock) { SaveExpr(finallyBlock) } else { 0u32 }
+        operands.add(finallyIndex)
+        let patterns = ArrayList<FlatBufferOffset>()
+        for (pattern in te.catchPatterns) {
+            patterns.add(SavePattern(pattern))
+        }
+        let resourcesVec = builder.CreateVectorOffsets(resources)
+        let operandsVec = builder.CreateVectorU32(operands)
+        let patternsVec = builder.CreateVectorOffsets(patterns)
+
+        builder.StartTable(2)
+        builder.AddOffset(1, patternsVec)
+        builder.AddOffset(0, resourcesVec)
+        let info = builder.EndTable()
+
+        let begin = PositionBytes(te.begin)
+        let end = PositionBytes(te.end)
+        let typeIndex = SaveExprType(te)
+        builder.StartTable(9)
+        builder.AddOffset(8, info)
+        builder.AddU8(7, 15u8)
+        builder.AddU32(5, typeIndex)
+        builder.AddOffset(4, operandsVec)
+        builder.AddStruct(2, end, 4)
+        builder.AddStruct(1, begin, 4)
+        // ExprKind_TryExpr is index 24 of enum ExprKind (ModuleFormat.fbs:333-373).
+        builder.AddU16(0, 24u16)
         return builder.EndTable()
     }
 
