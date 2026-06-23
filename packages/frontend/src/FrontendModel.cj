@@ -395,7 +395,7 @@ extend SrcCodeChangeState <: Equatable<SrcCodeChangeState> {
 }
 
 // ModuleFormat.fbs enum ExprKind (fbs:333-373): MemberAccess=5, RefExpr=6, CallExpr=7,
-// UnaryExpr=8, BinaryExpr=11, ReturnExpr=3, LitConstExpr=10, LambdaExpr=27, Block=28.
+// UnaryExpr=8, BinaryExpr=11, ReturnExpr=3, LitConstExpr=10, IfExpr=23, LambdaExpr=27, Block=28.
 private const FLAT_EXPR_KIND_RETURN: UInt16 = 3u16
 private const FLAT_EXPR_KIND_MEMBER_ACCESS: UInt16 = 5u16
 private const FLAT_EXPR_KIND_REF_EXPR: UInt16 = 6u16
@@ -403,6 +403,7 @@ private const FLAT_EXPR_KIND_CALL: UInt16 = 7u16
 private const FLAT_EXPR_KIND_UNARY: UInt16 = 8u16
 private const FLAT_EXPR_KIND_LIT_CONST: UInt16 = 10u16
 private const FLAT_EXPR_KIND_BINARY: UInt16 = 11u16
+private const FLAT_EXPR_KIND_IF: UInt16 = 23u16
 private const FLAT_EXPR_KIND_BLOCK: UInt16 = 28u16
 
 // ModuleFormat.fbs enum PatternKind (fbs:515-524).
@@ -1696,8 +1697,9 @@ private class CjoSignatureMaterializer {
 
     // Recursive EXPR-load dispatcher. Loads an Expr by its 1-based index from the package allExprs
     // vector (root field 9, slot 22). Mirrors ExprLoader.cpp LoadExpr (:417-443) + per-kind loaders.
-    // Bounded faithful slice: RefExpr, MemberAccess, CallExpr, UnaryExpr, BinaryExpr, LitConstExpr,
-    // ReturnExpr, Block. Returns None for INVALID_FORMAT_INDEX (0) or any not-yet-supported expr kind.
+    // Bounded faithful slice: RefExpr, MemberAccess, CallExpr, UnaryExpr, BinaryExpr, IfExpr,
+    // LitConstExpr, ReturnExpr, Block. Returns None for INVALID_FORMAT_INDEX (0) or any
+    // not-yet-supported expr kind.
     private func LoadFlatExprRaw(reader: CjoFlatBuffer, exprIndex: UInt32): Option<Expr> {
         if (exprIndex == 0u32 || flatAllExprs < 0) {
             return None
@@ -1728,6 +1730,9 @@ private class CjoSignatureMaterializer {
         if (kind == FLAT_EXPR_KIND_BINARY) {
             return Some(LoadFlatBinaryExpr(reader, exprTable))
         }
+        if (kind == FLAT_EXPR_KIND_IF) {
+            return Some(LoadFlatIfExpr(reader, exprTable))
+        }
         if (kind == FLAT_EXPR_KIND_CALL) {
             // Mirrors ExprLoader.cpp:92-115 LoadCallExpr and ExprLoader.cpp:516-531 LoadFuncArg
             // for packages whose exported allExprs are wholly inside this cut's bounded expr slice.
@@ -1742,7 +1747,8 @@ private class CjoSignatureMaterializer {
                 let supported = scanKind == FLAT_EXPR_KIND_RETURN || scanKind == FLAT_EXPR_KIND_MEMBER_ACCESS ||
                     scanKind == FLAT_EXPR_KIND_REF_EXPR || scanKind == FLAT_EXPR_KIND_CALL ||
                     scanKind == FLAT_EXPR_KIND_UNARY || scanKind == FLAT_EXPR_KIND_LIT_CONST ||
-                    scanKind == FLAT_EXPR_KIND_BINARY || scanKind == FLAT_EXPR_KIND_BLOCK ||
+                    scanKind == FLAT_EXPR_KIND_BINARY || scanKind == FLAT_EXPR_KIND_IF ||
+                    scanKind == FLAT_EXPR_KIND_BLOCK ||
                     (scanKind == 0u16 && scanInfoKind == 11u8)
                 if (!supported) {
                     return None
@@ -1843,6 +1849,32 @@ private class CjoSignatureMaterializer {
             return Some(LoadFlatBlock(reader, exprTable))
         }
         return None
+    }
+
+    // Mirrors ExprLoader.cpp:285-300 LoadIfExpr. Operands are condExpr, thenBody, elseBody; hasElse
+    // and isElseIf are recovered from the loaded else node rather than serialized as fields.
+    private func LoadFlatIfExpr(reader: CjoFlatBuffer, exprTable: Int64): IfExpr {
+        let ie = IfExpr()
+        LoadFlatExprBasicInfo(reader, exprTable, ie)
+        let operands = reader.VectorField(exprTable, 12)
+        if (operands >= 0 && reader.VectorLength(operands) >= 2) {
+            ie.condExpr = LoadFlatExpr(reader, reader.VectorU32(operands, 0))
+            if (let Some(thenExpr) <- LoadFlatExprRaw(reader, reader.VectorU32(operands, 1))) {
+                ie.thenBody = thenExpr as Block
+            }
+            if (reader.VectorLength(operands) > 2) {
+                ie.elseBody = LoadFlatExpr(reader, reader.VectorU32(operands, 2))
+            }
+        }
+        ie.hasElse = ie.elseBody.isSome()
+        if (let Some(elseExpr) <- ie.elseBody) {
+            ie.isElseIf = elseExpr.astKind == ASTKind.IF_EXPR
+            if (let Some(desugar) <- elseExpr.desugarExpr) {
+                ie.elseBody = Some(desugar)
+            }
+        }
+        ie.EnableAttr(Attribute.IMPORTED)
+        return ie
     }
 
     // Mirrors ExprLoader.cpp:118-127 LoadUnaryExpr. Operand 0 is expr; UnaryInfo field 0 (slot 4)

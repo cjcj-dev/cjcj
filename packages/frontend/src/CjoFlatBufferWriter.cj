@@ -685,7 +685,7 @@ private class FrontendCjoFlatBufferWriter {
     }
 
     // Per-kind dispatch. Bounded faithful slice: RefExpr, MemberAccess, CallExpr, UnaryExpr,
-    // BinaryExpr, Block, ReturnExpr, LitConstExpr. Other kinds throw (no SaveUnsupportExpr
+    // BinaryExpr, IfExpr, Block, ReturnExpr, LitConstExpr. Other kinds throw (no SaveUnsupportExpr
     // diagnostic stub yet); they are added in later cuts.
     private func SaveExprByKind(realExpr: Expr): FlatBufferOffset {
         if (let Some(block) <- (realExpr as Block)) {
@@ -699,6 +699,9 @@ private class FrontendCjoFlatBufferWriter {
         }
         if (let Some(be) <- (realExpr as BinaryExpr)) {
             return SaveBinaryExpr(be)
+        }
+        if (let Some(ie) <- (realExpr as IfExpr)) {
+            return SaveIfExpr(ie)
         }
         if (let Some(ma) <- (realExpr as MemberAccess)) {
             return SaveMemberAccess(ma)
@@ -785,6 +788,35 @@ private class FrontendCjoFlatBufferWriter {
         builder.AddStruct(1, begin, 4)
         // ExprKind_UnaryExpr is index 8 of enum ExprKind (ModuleFormat.fbs:333-373).
         builder.AddU16(0, 8u16)
+        return builder.EndTable()
+    }
+
+    // Mirrors ExprWriter.cpp:427-441 SaveExpression(IfExpr): operands are condExpr, thenBody, and
+    // elseBody-or-INVALID_FORMAT_INDEX. There is no IfExprInfo table in ModuleFormat.fbs.
+    private func SaveIfExpr(ie: IfExpr): FlatBufferOffset {
+        if (let None <- ie.condExpr) {
+            throw IllegalArgumentException("IfExpr without condition is not supported in faithful .cjo writer")
+        }
+        if (let None <- ie.thenBody) {
+            throw IllegalArgumentException("IfExpr without then body is not supported in faithful .cjo writer")
+        }
+        let operands = ArrayList<UInt32>()
+        operands.add(SaveExpr(ie.condExpr.getOrThrow()))
+        operands.add(SaveExpr(ie.thenBody.getOrThrow()))
+        let elseIdx = if (let Some(elseBody) <- ie.elseBody) { SaveExpr(elseBody) } else { 0u32 }
+        operands.add(elseIdx)
+        let operandsVec = builder.CreateVectorU32(operands)
+
+        let begin = PositionBytes(ie.begin)
+        let end = PositionBytes(ie.end)
+        let typeIndex = SaveExprType(ie)
+        builder.StartTable(9)
+        builder.AddU32(5, typeIndex)
+        builder.AddOffset(4, operandsVec)
+        builder.AddStruct(2, end, 4)
+        builder.AddStruct(1, begin, 4)
+        // ExprKind_IfExpr is index 23 of enum ExprKind (ModuleFormat.fbs:333-373).
+        builder.AddU16(0, 23u16)
         return builder.EndTable()
     }
 
