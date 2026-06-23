@@ -226,19 +226,31 @@ public func ChkMatchCasePatGuard(typeManager: TypeManager, ctx: ASTContext, mc: 
     return true
 }
 
-public func ChkMatchCaseActions(typeManager: TypeManager, target: Option<Ty>, mc: MatchCase): Bool {
+public func ChkMatchCaseActions(typeManager: TypeManager, target: Option<Ty>, mc: MatchCase,
+    exprChecker!: Option<ConstPatternExprChecker> = None): Bool {
     if (let None <- mc.exprOrDecls) {
         mc.SetTy(TypeManager.GetInvalidTy())
         return false
     }
     let block = mc.exprOrDecls.getOrThrow()
-    let blockTy = BlockTy(block)
     if (let Some(targetTy) <- target) {
+        if (let Some(checker) <- exprChecker) {
+            if (checker(targetTy, block)) {
+                mc.SetTy(block.GetTy() ?? targetTy)
+                return true
+            }
+            mc.SetTy(TypeManager.GetInvalidTy())
+            return false
+        }
+        let blockTy = BlockTy(block)
         if (typeManager.CheckTypeCompatibility(targetTy, blockTy) == TypeCompatibility.INCOMPATIBLE) {
             mc.SetTy(TypeManager.GetInvalidTy())
             return false
         }
+        mc.SetTy(blockTy)
+        return Ty.IsTyCorrect(blockTy)
     }
+    let blockTy = BlockTy(block)
     mc.SetTy(blockTy)
     return Ty.IsTyCorrect(blockTy)
 }
@@ -347,7 +359,7 @@ public func SynNormalMatchCaseBody(typeManager: TypeManager, ctx: ASTContext,
         let patternOk = ChkMatchCasePatterns(typeManager, ctx, selectorTy, mc, diag: diag,
             exprChecker: exprChecker)
         let guardOk = ChkMatchCasePatGuard(typeManager, ctx, mc)
-        let actionOk = ChkMatchCaseActions(typeManager, None, mc)
+        let actionOk = ChkMatchCaseActions(typeManager, None, mc, exprChecker: exprChecker)
         if (patternOk && guardOk && actionOk) {
             if (let Some(caseTy) <- mc.GetTy()) {
                 caseTys.add(caseTy)
@@ -392,10 +404,10 @@ public func SynQuestSugarMatchCaseBody(typeManager: TypeManager, ctx: ASTContext
     firstCase.SetCtxExprForPatterns(selector)
     secondCase.SetCtxExprForPatterns(selector)
     let _ = ChkMatchCasePatterns(typeManager, ctx, selectorTy, firstCase, exprChecker: exprChecker)
-    let _ = ChkMatchCaseActions(typeManager, None, firstCase)
+    let _ = ChkMatchCaseActions(typeManager, None, firstCase, exprChecker: exprChecker)
     if (let Some(firstTy) <- firstCase.GetTy()) {
         let _ = ChkMatchCasePatterns(typeManager, ctx, selectorTy, secondCase, exprChecker: exprChecker)
-        let _ = ChkMatchCaseActions(typeManager, firstTy, secondCase)
+        let _ = ChkMatchCaseActions(typeManager, firstTy, secondCase, exprChecker: exprChecker)
         me.SetTy(firstTy)
         return firstTy
     }
@@ -459,7 +471,7 @@ public func ChkMatchExprHasSelector(typeManager: TypeManager, ctx: ASTContext,
         let patternOk = ChkMatchCasePatterns(typeManager, ctx, selectorTy, mc, diag: diag,
             exprChecker: exprChecker)
         let guardOk = ChkMatchCasePatGuard(typeManager, ctx, mc)
-        let actionOk = ChkMatchCaseActions(typeManager, target, mc)
+        let actionOk = ChkMatchCaseActions(typeManager, target, mc, exprChecker: exprChecker)
         if (patternOk && guardOk && actionOk) {
             if (let Some(caseTy) <- mc.GetTy()) {
                 caseTys.add(caseTy)
