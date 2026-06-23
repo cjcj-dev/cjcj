@@ -79,8 +79,11 @@ private class ExtendBucket {
     }
 }
 
-private func sameFile(left: MangleFile, right: MangleFile): Bool {
-    return left.fileName == right.fileName && left.fileHash == right.fileHash
+// Composite key for file-keyed HashMaps, equivalent to the former sameFile
+// equality (fileName == fileName && fileHash == fileHash). The NUL separator
+// avoids collisions across the fileName/fileHash boundary.
+private func fileKey(file: MangleFile): String {
+    return file.fileName + "\u{0}" + file.fileHash.toString()
 }
 
 private func sameDecl(left: MangleDecl, right: MangleDecl): Bool {
@@ -164,99 +167,90 @@ private func toBase62(value: UInt64): String {
 }
 
 public class ManglerContext {
-    private let file2GlobalWildcardVar: ArrayList<FileWildcardBucket> = ArrayList<FileWildcardBucket>()
-    private let node2LocalWildcardVar: ArrayList<WildcardBucket> = ArrayList<WildcardBucket>()
-    private let node2Lambda: ArrayList<LambdaBucket> = ArrayList<LambdaBucket>()
-    private let owner2AnnotationLambdaKey: ArrayList<AnnotationLambdaKey> = ArrayList<AnnotationLambdaKey>()
-    private let node2LocalVar: ArrayList<VarBucket> = ArrayList<VarBucket>()
-    private let node2LocalFunc: ArrayList<FuncBucket> = ArrayList<FuncBucket>()
-    private let file2ExtendDecl: ArrayList<ExtendBucket> = ArrayList<ExtendBucket>()
-    private let funcBodyScopeKeys: ArrayList<FuncBodyScopeKey> = ArrayList<FuncBodyScopeKey>()
+    // Identity-keyed HashMaps mirror the C++ pointer-keyed std::map containers
+    // (include/cangjie/Mangle/BaseMangler.h:160-169). Lookups in C++ are .find()
+    // probes that never rely on map iteration order; they index into the value
+    // vector instead. The inner bucket lists stay ArrayList so insertion order
+    // (the load-bearing order) is preserved. This restores O(1) lookup vs the
+    // previous O(n) linear scans -> overall O(n^2) -> O(n) on large packages.
+    // File-keyed containers use a composite "fileName\u{0}fileHash" string key
+    // mirroring sameFile (fileName == fileName && fileHash == fileHash).
+    private let file2GlobalWildcardVar: HashMap<String, FileWildcardBucket> = HashMap<String, FileWildcardBucket>()
+    private let node2LocalWildcardVar: HashMap<Int64, WildcardBucket> = HashMap<Int64, WildcardBucket>()
+    private let node2Lambda: HashMap<Int64, LambdaBucket> = HashMap<Int64, LambdaBucket>()
+    private let owner2AnnotationLambdaKey: HashMap<Int64, AnnotationLambdaKey> = HashMap<Int64, AnnotationLambdaKey>()
+    private let node2LocalVar: HashMap<Int64, VarBucket> = HashMap<Int64, VarBucket>()
+    private let node2LocalFunc: HashMap<Int64, FuncBucket> = HashMap<Int64, FuncBucket>()
+    private let file2ExtendDecl: HashMap<String, ExtendBucket> = HashMap<String, ExtendBucket>()
+    private let funcBodyScopeKeys: HashMap<Int64, FuncBodyScopeKey> = HashMap<Int64, FuncBodyScopeKey>()
     public let fileIndexes: ArrayList<UInt64> = ArrayList<UInt64>()
 
     public init() {}
 
     private func fileWildcardBucket(file: MangleFile): FileWildcardBucket {
-        for (bucket in file2GlobalWildcardVar) {
-            if (sameFile(bucket.file, file)) {
-                return bucket
-            }
+        let mapKey = fileKey(file)
+        if (let Some(bucket) <- file2GlobalWildcardVar.get(mapKey)) {
+            return bucket
         }
         let bucket = FileWildcardBucket(file)
-        file2GlobalWildcardVar.add(bucket)
+        file2GlobalWildcardVar[mapKey] = bucket
         return bucket
     }
 
     private func wildcardBucket(node: MangleDecl): WildcardBucket {
-        for (bucket in node2LocalWildcardVar) {
-            if (sameDecl(bucket.key, node)) {
-                return bucket
-            }
+        if (let Some(bucket) <- node2LocalWildcardVar.get(node.identity)) {
+            return bucket
         }
         let bucket = WildcardBucket(node)
-        node2LocalWildcardVar.add(bucket)
+        node2LocalWildcardVar[node.identity] = bucket
         return bucket
     }
 
     private func varBucket(node: MangleDecl): VarBucket {
-        for (bucket in node2LocalVar) {
-            if (sameDecl(bucket.key, node)) {
-                return bucket
-            }
+        if (let Some(bucket) <- node2LocalVar.get(node.identity)) {
+            return bucket
         }
         let bucket = VarBucket(node)
-        node2LocalVar.add(bucket)
+        node2LocalVar[node.identity] = bucket
         return bucket
     }
 
     private func funcBucket(node: MangleDecl): FuncBucket {
-        for (bucket in node2LocalFunc) {
-            if (sameDecl(bucket.key, node)) {
-                return bucket
-            }
+        if (let Some(bucket) <- node2LocalFunc.get(node.identity)) {
+            return bucket
         }
         let bucket = FuncBucket(node)
-        node2LocalFunc.add(bucket)
+        node2LocalFunc[node.identity] = bucket
         return bucket
     }
 
     private func lambdaBucket(node: MangleDecl): LambdaBucket {
-        for (bucket in node2Lambda) {
-            if (sameDecl(bucket.key, node)) {
-                return bucket
-            }
+        if (let Some(bucket) <- node2Lambda.get(node.identity)) {
+            return bucket
         }
         let bucket = LambdaBucket(node)
-        node2Lambda.add(bucket)
+        node2Lambda[node.identity] = bucket
         return bucket
     }
 
     private func findLambdaBucket(node: MangleDecl): Option<LambdaBucket> {
-        for (bucket in node2Lambda) {
-            if (sameDecl(bucket.key, node)) {
-                return bucket
-            }
-        }
-        return None
+        return node2Lambda.get(node.identity)
     }
 
     private func findAnnotationLambdaKey(node: MangleDecl): Option<MangleDecl> {
-        for (item in owner2AnnotationLambdaKey) {
-            if (sameDecl(item.owner, node)) {
-                return item.annotationKey
-            }
+        if (let Some(item) <- owner2AnnotationLambdaKey.get(node.identity)) {
+            return item.annotationKey
         }
         return None
     }
 
     private func extendBucket(file: MangleFile, extendedTypeName: String): ExtendBucket {
-        for (bucket in file2ExtendDecl) {
-            if (sameFile(bucket.file, file) && bucket.extendedTypeName == extendedTypeName) {
-                return bucket
-            }
+        let mapKey = fileKey(file) + "\u{0}" + extendedTypeName
+        if (let Some(bucket) <- file2ExtendDecl.get(mapKey)) {
+            return bucket
         }
         let bucket = ExtendBucket(file, extendedTypeName)
-        file2ExtendDecl.add(bucket)
+        file2ExtendDecl[mapKey] = bucket
         return bucket
     }
 
@@ -287,15 +281,13 @@ public class ManglerContext {
         if (let None <- node.funcBody) {
             return None
         }
-        for (item in funcBodyScopeKeys) {
-            if (sameDecl(item.owner, node)) {
-                return item.key
-            }
+        if (let Some(item) <- funcBodyScopeKeys.get(node.identity)) {
+            return item.key
         }
         let key = MangleDecl(ASTKind.FUNC_BODY, "<funcBody>", fullPackageName: node.fullPackageName)
         key.curFile = node.curFile
         key.outerDecl = node.outerDecl
-        funcBodyScopeKeys.add(FuncBodyScopeKey(node, key))
+        funcBodyScopeKeys[node.identity] = FuncBodyScopeKey(node, key)
         return key
     }
 
@@ -404,20 +396,16 @@ public class ManglerContext {
         if (file.fileHash == 0u64) {
             return None
         }
-        for (bucket in file2GlobalWildcardVar) {
-            if (sameFile(bucket.file, file)) {
-                return findDeclIndex(bucket.vars, target)
-            }
+        if (let Some(bucket) <- file2GlobalWildcardVar.get(fileKey(file))) {
+            return findDeclIndex(bucket.vars, target)
         }
         return None
     }
 
     public func GetIndexOfLocalWildcardVar(node: MangleDecl, target: MangleDecl): Option<Int64> {
         let lookupKey = if (let Some(value) <- GetLocalWildcardScopeKey(node)) { value } else { return None }
-        for (bucket in node2LocalWildcardVar) {
-            if (sameDecl(bucket.key, lookupKey)) {
-                return findDeclIndex(bucket.vars, target)
-            }
+        if (let Some(bucket) <- node2LocalWildcardVar.get(lookupKey.identity)) {
+            return findDeclIndex(bucket.vars, target)
         }
         return None
     }
@@ -425,16 +413,14 @@ public class ManglerContext {
     public func GetIndexOfVar(node: MangleDecl, target: MangleDecl): Option<Int64> {
         let lookupKey = if (let Some(value) <- GetLocalVarScopeKey(node)) { value } else { return None }
         // C++ BaseMangler.cpp:1482-1507 unwraps LambdaExpr/FuncDecl/PrimaryCtorDecl to funcBody before lookup.
-        for (bucket in node2LocalVar) {
-            if (sameDecl(bucket.key, lookupKey)) {
-                var idx: Int64 = 0
-                for (item in bucket.vars) {
-                    if (item.identifier == target.identifier) {
-                        if (sameDecl(item, target)) {
-                            return idx
-                        }
-                        idx++
+        if (let Some(bucket) <- node2LocalVar.get(lookupKey.identity)) {
+            var idx: Int64 = 0
+            for (item in bucket.vars) {
+                if (item.identifier == target.identifier) {
+                    if (sameDecl(item, target)) {
+                        return idx
                     }
+                    idx++
                 }
             }
         }
@@ -443,16 +429,14 @@ public class ManglerContext {
 
     public func GetIndexOfFunc(node: MangleDecl, target: MangleDecl): Option<Int64> {
         let lookupKey = if (let Some(value) <- GetLocalFuncScopeKey(node)) { value } else { return None }
-        for (bucket in node2LocalFunc) {
-            if (sameDecl(bucket.key, lookupKey)) {
-                var idx: Int64 = 0
-                for (item in bucket.funcs) {
-                    if (item.identifier == target.identifier) {
-                        if (sameDecl(item, target)) {
-                            return idx
-                        }
-                        idx++
+        if (let Some(bucket) <- node2LocalFunc.get(lookupKey.identity)) {
+            var idx: Int64 = 0
+            for (item in bucket.funcs) {
+                if (item.identifier == target.identifier) {
+                    if (sameDecl(item, target)) {
+                        return idx
                     }
+                    idx++
                 }
             }
         }
@@ -480,10 +464,9 @@ public class ManglerContext {
 
     public func GetIndexOfExtend(file: MangleFile, target: MangleDecl): Option<Int64> {
         let typeName = extendedTypeKey(target)
-        for (bucket in file2ExtendDecl) {
-            if (sameFile(bucket.file, file) && bucket.extendedTypeName == typeName) {
-                return findDeclIndex(bucket.extends, target)
-            }
+        let mapKey = fileKey(file) + "\u{0}" + typeName
+        if (let Some(bucket) <- file2ExtendDecl.get(mapKey)) {
+            return findDeclIndex(bucket.extends, target)
         }
         return None
     }
@@ -583,12 +566,10 @@ public class ManglerContext {
 
     public func RegisterLambdaAnnotationKey(owner: MangleDecl, annotationKey: MangleDecl): Unit {
         let ownerKey = if (let Some(value) <- GetLambdaScopeKey(owner)) { value } else { owner }
-        for (item in owner2AnnotationLambdaKey) {
-            if (sameDecl(item.owner, ownerKey)) {
-                return
-            }
+        if (owner2AnnotationLambdaKey.contains(ownerKey.identity)) {
+            return
         }
-        owner2AnnotationLambdaKey.add(AnnotationLambdaKey(ownerKey, annotationKey))
+        owner2AnnotationLambdaKey[ownerKey.identity] = AnnotationLambdaKey(ownerKey, annotationKey)
     }
 
     public static func CheckAllElementsWildcard(root: ManglePattern): Bool {
