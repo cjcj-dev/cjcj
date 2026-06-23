@@ -2878,3 +2878,49 @@ Verification:
 - Standalone spawn programs match `/root/.cjv/bin/cjc`: simple Future get prints `42`; captured-var
   Future get prints `42`.
 - Full corpus includes both spawn cases and remains all-pass.
+
+## Probe 34 (mangle local var funcBody scope keys)
+
+Bug: selfhost mangling keyed local variables by the direct `FUNC_DECL` / `LAMBDA_EXPR` mangle node,
+while C++ keys those buckets by the enclosing `funcBody` pointer. The mismatch made local-var lookup
+miss for compiler-introduced and nested locals, then selfhost threw at `MangleVarDecl`.
+
+C++ ground truth:
+
+- `MangleVarDecl` finds the outer local scope and appends a local-variable count; the only failure
+  check is a release-no-op `CJC_ASSERT`, then C++ uses the returned optional value
+  (`src/Mangle/BaseMangler.cpp:360-371`).
+- `SaveVar2CurDecl` stores local vars under `lambda->funcBody`, `function->funcBody`,
+  `pcd->funcBody`, or a global `VarDeclAbstract` key, and skips nested func bodies
+  (`src/Mangle/BaseMangler.cpp:1357-1380`).
+- `GetIndexOfVar` unwraps `LambdaExpr`, `FuncDecl`, and `PrimaryCtorDecl` to the same `funcBody`
+  key before looking up the target identifier bucket (`src/Mangle/BaseMangler.cpp:1482-1507`).
+- The neighboring local wildcard, local function, and lambda collectors use the same scope-key
+  convention (`src/Mangle/BaseMangler.cpp:1281-1328`, `1331-1355`, `1383-1416`,
+  `1458-1479`, `1510-1579`).
+
+Fix shipped:
+
+- `packages/mangle/src/BaseMangler.cj` now canonicalizes function-like local scope owners to a
+  synthetic `FUNC_BODY` mangle key on both collection and lookup paths for local vars, local
+  wildcard vars, local funcs, and lambdas.
+- Generic-instantiated local function registration now resolves the outer scope through the same
+  local-function key path.
+- The selfhost-only hard throw at the `MangleVarDecl` local-variable index site was removed to
+  match the C++ release behavior at `src/Mangle/BaseMangler.cpp:368-371`.
+
+Verification:
+
+- Clean `rm -rf target && cjpm build`: success.
+- Self-compile probe: reference-built `packages/basic/src` as `.cjo`, then selfhost-compiled
+  `packages/utils/src` with `--output-type=staticlib`. It gets past the original
+  `BaseMangler.cj:1121` local-var crash and now stops later at
+  `BaseMangler.cj:1188` (`Using undeclared generic type: T`).
+- Standalone lambda-local probe matches reference output (`6`). Standalone `a?.b` and `as` probes
+  now pass mangling and reach CHIR, then hit the existing CHIR next blocker
+  `packages/chir/src/CHIRType.cj:325` (`unsupported AST type kind ... Invalid`), so they do not run
+  yet with selfhost.
+- `bash scripts/difftest.sh`: `TOTAL=113  PASS=113  MISMATCH=0  FAIL=0`.
+- Septests all pass: `run.sh`, `run_write.sh`, `run_diag.sh`, `run_write_types.sh`,
+  `run_write_struct.sh`, and `run_gendefault.sh`.
+- Code change is confined to `packages/mangle/src/BaseMangler.cj`.
