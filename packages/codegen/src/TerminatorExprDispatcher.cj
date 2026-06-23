@@ -115,6 +115,12 @@ private func CreateDirectRet(irBuilder: IRBuilder2, chirExpr: Expression): LLVMV
     if (let Some(cgFunc) <- irBuilder.GetInsertCGFunction()) {
         if (cgFunc.IsSRet()) {
             let sretArg = unsafe { LLVMGetParam(cgFunc.GetRawFunction(), 0u32) }
+            if (let Some(retTy) <- CurrentFunctionReturnType(irBuilder, chirExpr)) {
+                if (retTy.IsGeneric()) {
+                    irBuilder.StoreGenericSRetReturnValue(directRetValue.GetRawValue(), sretArg, retTy)
+                    return irBuilder.CreateRetVoid()
+                }
+            }
             irBuilder.CreateStore(directRetValue.GetRawValue(), sretArg)
             return irBuilder.CreateRetVoid()
         }
@@ -152,6 +158,10 @@ private func CreateRetFromFunctionReturnSlot(irBuilder: IRBuilder2, parentFunc: 
                     if (let Some(cgFunc) <- irBuilder.GetInsertCGFunction()) {
                         if (cgFunc.IsSRet()) {
                             let sretArg = unsafe { LLVMGetParam(cgFunc.GetRawFunction(), 0u32) }
+                            if (retTy.IsGeneric()) {
+                                irBuilder.StoreGenericSRetReturnValue(loadedRet, sretArg, retTy)
+                                return irBuilder.CreateRetVoid()
+                            }
                             irBuilder.CreateStore(loadedRet, sretArg)
                             return irBuilder.CreateRetVoid()
                         }

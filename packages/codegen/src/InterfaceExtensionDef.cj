@@ -593,10 +593,12 @@ private func EmitExpectedSlotWrapperBody(irBuilder: IRBuilder2, wrapper: LLVMVal
         idx++
     }
     let methodTypeInfoArg = GetWrapperMethodTypeInfoArg(expectedCGType, wrapper)
-    let result = irBuilder.CreateCallOrInvokeWithMethodTypeInfo(methodCGType, methodCGFunc.GetRawFunction(),
-        callArgs, methodTypeInfoArg, name: "ifwrap.call")
+    let methodReturnTypeInfo = GetGenericMethodReturnTypeInfo(irBuilder, method, methodTy.GetReturnType(),
+        methodTypeInfoArg)
+    let result = irBuilder.CreateCallOrInvokeWithMethodTypeInfoAndSRetTypeInfo(methodCGType,
+        methodCGFunc.GetRawFunction(), callArgs, methodTypeInfoArg, methodReturnTypeInfo, name: "ifwrap.call")
     EmitExpectedSlotWrapperReturn(irBuilder, wrapper, expectedCGType, expectedTy.GetReturnType(),
-        methodTy.GetReturnType(), result)
+        methodTy.GetReturnType(), result, methodReturnTypeInfo)
 }
 
 private func GetWrapperMethodTypeInfoArg(expectedCGType: CGFunctionType, wrapper: LLVMValueRef): Option<LLVMValueRef> {
@@ -605,6 +607,24 @@ private func GetWrapperMethodTypeInfoArg(expectedCGType: CGFunctionType, wrapper
     }
     if (let Some(index2) <- expectedCGType.GetStaticMethodTypeInfoIndex()) {
         return Some(unsafe { LLVMGetParam(wrapper, UInt32(index2)) })
+    }
+    return None
+}
+
+private func GetGenericMethodReturnTypeInfo(irBuilder: IRBuilder2, method: Function, methodRetTy: Type,
+    methodTypeInfoArg: Option<LLVMValueRef>): Option<LLVMValueRef> {
+    if (!methodRetTy.IsGeneric()) {
+        return None
+    }
+    let outerTypeInfo = methodTypeInfoArg ?? return None
+    let parentDef = method.GetParentCustomTypeDef() ?? return None
+    let genericRetTy = methodRetTy.StripAllRefs()
+    var idx: Int64 = 0
+    for (genericTy in parentDef.GetGenericTypeParams()) {
+        if (genericTy.IsEqual(genericRetTy)) {
+            return Some(irBuilder.GetTypeInfoFromTypeInfoArgs(outerTypeInfo, idx))
+        }
+        idx++
     }
     return None
 }
@@ -625,13 +645,23 @@ private func ConvertExpectedArgForMethod(irBuilder: IRBuilder2, rawArg: LLVMValu
 }
 
 private func EmitExpectedSlotWrapperReturn(irBuilder: IRBuilder2, wrapper: LLVMValueRef,
-    expectedCGType: CGFunctionType, expectedRetTy: Type, methodRetTy: Type, result: LLVMValueRef): Unit {
+    expectedCGType: CGFunctionType, expectedRetTy: Type, methodRetTy: Type, result: LLVMValueRef,
+    methodReturnTypeInfo: Option<LLVMValueRef>): Unit {
     if (expectedCGType.HasSRet()) {
         if (expectedRetTy.IsUnit() || expectedRetTy.IsVoid() || expectedRetTy.IsNothing()) {
             irBuilder.CreateRetVoid()
             return
         }
         let returnSlot = unsafe { LLVMGetParam(wrapper, 0u32) }
+        if (expectedRetTy.IsGeneric() && methodRetTy.IsGeneric()) {
+            if (let Some(typeInfo) <- methodReturnTypeInfo) {
+                irBuilder.StoreGenericSRetReturnValueWithTypeInfo(result, returnSlot, expectedRetTy, typeInfo)
+            } else {
+                irBuilder.StoreGenericSRetReturnValue(result, returnSlot, expectedRetTy)
+            }
+            irBuilder.CreateRetVoid()
+            return
+        }
         irBuilder.CreateStore(ConvertReturnForExpectedSlot(irBuilder, result, methodRetTy, expectedRetTy), returnSlot)
         irBuilder.CreateRetVoid()
         return
