@@ -731,8 +731,7 @@ public class Translator {
 
     public func Visit(expr: AstReturnExpr): Option<Value> {
         if (let Some(retExpr) <- expr.expr) {
-            let value = Translator.TranslateASTNode(retExpr, this) ??
-                throw IllegalStateException("faithful AST2CHIR return expression produced no value")
+            let value = TranslateExprArg(retExpr)
             if (currentLambda.isSome()) {
                 EmitLambdaReturn(Some(value))
                 return None
