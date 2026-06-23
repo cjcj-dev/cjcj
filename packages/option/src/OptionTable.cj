@@ -6,6 +6,11 @@ import std.collection.*
 
 private let OPTION_WIDTH: Int64 = 28
 
+// Mirrors the C++ build flag CANGJIE_VISIBLE_OPTIONS_ONLY, which defaults to ON
+// (CMakeLists.txt:52). When enabled, the option table only recognizes VISIBLE-group options
+// (src/Option/OptionTable.cpp:74-78). The reference cjc is built with this ON.
+private let VISIBLE_OPTIONS_ONLY: Bool = true
+
 private func printIndentOnly(indent: Int64, numSpaces!: Int64 = 2): Unit {
     BasicPrintIndentOnly(UInt64(indent), numSpaces: UInt64(numSpaces))
 }
@@ -193,6 +198,17 @@ public class OptionArgParseResult {
     }
 }
 
+public class OptionForwardInfo {
+    public let info: OptionInfo
+    public let name: String
+    public let needsSeparatedValue: Bool
+    public init(info: OptionInfo, name: String, needsSeparatedValue: Bool) {
+        this.info = info
+        this.name = name
+        this.needsSeparatedValue = needsSeparatedValue
+    }
+}
+
 private class ParsedArgumentName {
     let name: String
     let hasValue: Bool
@@ -310,6 +326,62 @@ public class OptionTable {
         let partial = !arg.hasJoinedValue && arg.info.GetKind() == Kind.SEPARATED && !joinedWithoutSpace
         arg.argType = if (partial) { ArgType.PartiallyParsed } else { ArgType.FullyParsed }
         return OptionArgParseResult(true, arg)
+    }
+
+    // Under CANGJIE_VISIBLE_OPTIONS_ONLY (default in the reference build), only VISIBLE-group
+    // options are recognized (src/Option/OptionTable.cpp:74-78).
+    private func isVisibleForForward(info: OptionInfo): Bool {
+        return !VISIBLE_OPTIONS_ONLY || info.BelongsGroup(Group.VISIBLE)
+    }
+
+    // Classify a single option string for the driver's group-based forwarding (see
+    // GlobalOptions::GenerateFrontendOptions, src/Option/Option.cpp:993-1021). Returns the
+    // matched OptionInfo together with the recognized spelling and whether it still needs a
+    // separated value token. No diagnostics are emitted and no input is consumed; the driver
+    // decides how to forward based on the result.
+    public func ClassifyOption(argStr: String): ?OptionForwardInfo {
+        let parsed = parseArgumentName(argStr)
+        var argName = parsed.name
+        var foundIndex: Int64 = -1
+        var idx: Int64 = 0
+        while (idx < optionInfos.size) {
+            if (isVisibleForForward(optionInfos[idx]) &&
+                shouldRecognize(argName, parsed.hasValue, optionInfos[idx])) {
+                foundIndex = idx
+                break
+            }
+            idx++
+        }
+        var joinedWithoutSpace = false
+        if (foundIndex < 0) {
+            idx = 0
+            while (idx < optionInfos.size) {
+                let info = optionInfos[idx]
+                let aliasMatch = info.kind == Kind.SEPARATED && !info.alias.isEmpty() && StartsWith(argStr, info.alias)
+                let continuousMatch = info.kind == Kind.CONTINOUS && StartsWith(argStr, info.name)
+                if (isVisibleForForward(info) && belongsToBackend(info.backends) && belongsToGroup(info.groups) &&
+                    (aliasMatch || continuousMatch)) {
+                    foundIndex = idx
+                    joinedWithoutSpace = true
+                    argName = if (info.kind == Kind.SEPARATED) { info.alias } else { info.name }
+                    break
+                }
+                idx++
+            }
+        }
+        if (foundIndex < 0) {
+            return None
+        }
+        let info = optionInfos[foundIndex]
+        // Mirror OptionTable::ParseOptionArg (src/Option/OptionTable.cpp:145): in driver mode a
+        // FRONTEND-group-only option is not recognized here.
+        if (!frontendMode && info.BelongsGroup(Group.FRONTEND)) {
+            return None
+        }
+        // A SEPARATED option needs a value token only when it was not given inline ("--opt=value")
+        // and not joined to an alias ("-Lfoo"); this matches ArgType::PartiallyParsed.
+        let needsSeparatedValue = info.kind == Kind.SEPARATED && !parsed.hasValue && !joinedWithoutSpace
+        return OptionForwardInfo(info, argName, needsSeparatedValue)
     }
 
     public func ParseArgs(argsStrs: Array<String>, argList: ArgList): Bool {

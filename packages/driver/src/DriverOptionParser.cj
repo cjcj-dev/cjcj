@@ -2,6 +2,7 @@ package cangjie_compiler::driver
 
 import std.collection.*
 import std.convert.*
+import cangjie_compiler::option.{CreateOptionTable, Group, ID, Kind, OptionTable}
 
 private class ParseCursor {
     let args: Array<String>
@@ -747,6 +748,44 @@ private func ParseOptionWithValue(opts: DriverOptions, cursor: ParseCursor, arg:
             }
         }
         return false
+    }
+    return ForwardNonDriverOption(opts, cursor, arg)
+}
+
+// Group-based auto-forward, mirroring C++ GlobalOptions::GenerateFrontendOptions
+// (src/Option/Option.cpp:993-1021): any option recognized by the driver-mode option table that
+// does NOT belong to the DRIVER group (and is not OUTPUT_FILE) is forwarded verbatim to
+// cjc-frontend, instead of being rejected by the hand-written allowlist. The driver-mode table
+// (src/Option/OptionTable.cpp:145) rejects FRONTEND-group-only options, so passing one still
+// produces C++'s "invalid option" diagnostic.
+private let g_driverOptionTable: OptionTable = CreateOptionTable(frontendMode: false)
+
+private func ForwardNonDriverOption(opts: DriverOptions, cursor: ParseCursor, arg: String): Bool {
+    match (g_driverOptionTable.ClassifyOption(arg)) {
+        case Some(forward) =>
+            let info = forward.info
+            // OUTPUT_FILE and DRIVER-group options are consumed by the driver, never forwarded
+            // (src/Option/Option.cpp:1004-1009). The hand-written parser above already handles all
+            // such options; reaching here for one would indicate a recognized-but-unhandled driver
+            // option, so fall through to the error below.
+            if (info.GetID() != ID.OUTPUT_FILE && !info.BelongsGroup(Group.DRIVER)) {
+                opts.frontendForwardArgs.add(forward.name)
+                if (info.GetKind() == Kind.SEPARATED) {
+                    if (forward.needsSeparatedValue) {
+                        match (cursor.takeValue(forward.name)) {
+                            case Some(value) => opts.frontendForwardArgs.add(value)
+                            case None => return false
+                        }
+                    } else if (let Some(inlineValue) <- optionValueInline(arg, forward.name)) {
+                        opts.frontendForwardArgs.add(inlineValue)
+                    } else if (arg.startsWith(forward.name) && arg.size > forward.name.size) {
+                        // joined-without-space SEPARATED alias, e.g. "-Lvalue"
+                        opts.frontendForwardArgs.add(arg[forward.name.size..])
+                    }
+                }
+                return true
+            }
+        case None => ()
     }
     eprintln("error: unrecognized driver option '${arg}'")
     return false
