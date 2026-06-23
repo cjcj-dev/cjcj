@@ -395,8 +395,9 @@ extend SrcCodeChangeState <: Equatable<SrcCodeChangeState> {
 }
 
 // ModuleFormat.fbs enum ExprKind (fbs:333-373): MemberAccess=5, RefExpr=6, CallExpr=7,
-// UnaryExpr=8, BinaryExpr=11, AssignExpr=13, MatchExpr=21, ReturnExpr=3, LitConstExpr=10,
-// IfExpr=23, WhileExpr=25, DoWhileExpr=26, LambdaExpr=27, Block=28, MatchCase=29, MatchCaseOther=30.
+// UnaryExpr=8, BinaryExpr=11, AssignExpr=13, ThrowExpr=17, MatchExpr=21, ReturnExpr=3,
+// LitConstExpr=10, IfExpr=23, TryExpr=24, WhileExpr=25, DoWhileExpr=26, LambdaExpr=27,
+// Block=28, MatchCase=29, MatchCaseOther=30.
 private const FLAT_EXPR_KIND_WILDCARD: UInt16 = 1u16
 private const FLAT_EXPR_KIND_RETURN: UInt16 = 3u16
 private const FLAT_EXPR_KIND_MEMBER_ACCESS: UInt16 = 5u16
@@ -406,9 +407,11 @@ private const FLAT_EXPR_KIND_UNARY: UInt16 = 8u16
 private const FLAT_EXPR_KIND_LIT_CONST: UInt16 = 10u16
 private const FLAT_EXPR_KIND_BINARY: UInt16 = 11u16
 private const FLAT_EXPR_KIND_ASSIGN: UInt16 = 13u16
+private const FLAT_EXPR_KIND_THROW: UInt16 = 17u16
 private const FLAT_EXPR_KIND_MATCH: UInt16 = 21u16
 private const FLAT_EXPR_KIND_LET_PATTERN_DESTRUCTOR: UInt16 = 22u16
 private const FLAT_EXPR_KIND_IF: UInt16 = 23u16
+private const FLAT_EXPR_KIND_TRY: UInt16 = 24u16
 private const FLAT_EXPR_KIND_WHILE: UInt16 = 25u16
 private const FLAT_EXPR_KIND_DO_WHILE: UInt16 = 26u16
 private const FLAT_EXPR_KIND_LAMBDA: UInt16 = 27u16
@@ -1756,6 +1759,12 @@ private class CjoSignatureMaterializer {
         if (kind == FLAT_EXPR_KIND_ASSIGN) {
             return Some(LoadFlatAssignExpr(reader, exprTable))
         }
+        if (kind == FLAT_EXPR_KIND_THROW) {
+            return Some(LoadFlatThrowExpr(reader, exprTable))
+        }
+        if (kind == FLAT_EXPR_KIND_TRY) {
+            return Some(LoadFlatTryExpr(reader, exprTable))
+        }
         if (kind == FLAT_EXPR_KIND_IF) {
             return Some(LoadFlatIfExpr(reader, exprTable))
         }
@@ -1790,9 +1799,9 @@ private class CjoSignatureMaterializer {
                     scanKind == FLAT_EXPR_KIND_REF_EXPR || scanKind == FLAT_EXPR_KIND_CALL ||
                     scanKind == FLAT_EXPR_KIND_UNARY || scanKind == FLAT_EXPR_KIND_LIT_CONST ||
                     scanKind == FLAT_EXPR_KIND_BINARY || scanKind == FLAT_EXPR_KIND_ASSIGN ||
-                    scanKind == FLAT_EXPR_KIND_MATCH ||
+                    scanKind == FLAT_EXPR_KIND_THROW || scanKind == FLAT_EXPR_KIND_MATCH ||
                     scanKind == FLAT_EXPR_KIND_MATCH_CASE || scanKind == FLAT_EXPR_KIND_MATCH_CASE_OTHER ||
-                    scanKind == FLAT_EXPR_KIND_IF || scanKind == FLAT_EXPR_KIND_WHILE ||
+                    scanKind == FLAT_EXPR_KIND_IF || scanKind == FLAT_EXPR_KIND_TRY || scanKind == FLAT_EXPR_KIND_WHILE ||
                     scanKind == FLAT_EXPR_KIND_DO_WHILE ||
                     scanKind == FLAT_EXPR_KIND_LET_PATTERN_DESTRUCTOR || scanKind == FLAT_EXPR_KIND_LAMBDA ||
                     scanKind == FLAT_EXPR_KIND_BLOCK || (scanKind == 0u16 && scanInfoKind == 11u8)
@@ -1923,6 +1932,76 @@ private class CjoSignatureMaterializer {
         LoadFlatExprBasicInfo(reader, exprTable, we)
         we.EnableAttr(Attribute.IMPORTED)
         return we
+    }
+
+    // Mirrors ExprLoader.cpp:228-233 LoadThrowExpr. Operand 0 is the thrown expr.
+    private func LoadFlatThrowExpr(reader: CjoFlatBuffer, exprTable: Int64): ThrowExpr {
+        let te = ThrowExpr()
+        LoadFlatExprBasicInfo(reader, exprTable, te)
+        let operands = reader.VectorField(exprTable, 12)
+        if (operands >= 0 && reader.VectorLength(operands) >= 1) {
+            te.expr = LoadFlatExpr(reader, reader.VectorU32(operands, 0))
+        }
+        te.EnableAttr(Attribute.IMPORTED)
+        return te
+    }
+
+    // Mirrors ExprLoader.cpp:303-327 LoadTryExpr and ReferenceLoader.cpp:676-682. Operands are
+    // tryBlock, zero or more catch blocks, then finallyBlock-or-0; TryInfo owns catch patterns and
+    // resource VarDecl FullIds (ModuleFormat.fbs:486-489).
+    private func LoadFlatTryExpr(reader: CjoFlatBuffer, exprTable: Int64): TryExpr {
+        let te = TryExpr()
+        LoadFlatExprBasicInfo(reader, exprTable, te)
+        let operands = reader.VectorField(exprTable, 12)
+        if (operands >= 0 && reader.VectorLength(operands) >= 1) {
+            if (let Some(tryExpr) <- LoadFlatExprRaw(reader, reader.VectorU32(operands, 0))) {
+                te.tryBlock = tryExpr as Block
+            }
+            var operandIdx: Int64 = 1
+            let operandCount = reader.VectorLength(operands)
+            while (operandIdx < operandCount - 1) {
+                if (let Some(catchExpr) <- LoadFlatExprRaw(reader, reader.VectorU32(operands, operandIdx))) {
+                    if (let Some(catchBlock) <- (catchExpr as Block)) {
+                        te.catchBlocks.add(catchBlock)
+                    }
+                }
+                operandIdx++
+            }
+            let finallyIndex = reader.VectorU32(operands, operandCount - 1)
+            if (let Some(finallyExpr) <- LoadFlatExprRaw(reader, finallyIndex)) {
+                te.finallyBlock = finallyExpr as Block
+            }
+        }
+        let infoTable = reader.OffsetField(exprTable, 20)
+        if (infoTable >= 0) {
+            let resources = reader.VectorField(infoTable, 4)
+            if (resources >= 0) {
+                var resourceIdx: Int64 = 0
+                let resourceCount = reader.VectorLength(resources)
+                while (resourceIdx < resourceCount) {
+                    if (let Some(resourceDecl) <- ResolveFlatFullId(reader,
+                        reader.VectorOffsetElement(resources, resourceIdx))) {
+                        if (let Some(varDecl) <- (resourceDecl as VarDecl)) {
+                            te.resourceSpec.add(varDecl)
+                        }
+                    }
+                    resourceIdx++
+                }
+            }
+            let patterns = reader.VectorField(infoTable, 6)
+            if (patterns >= 0) {
+                var patternIdx: Int64 = 0
+                let patternCount = reader.VectorLength(patterns)
+                while (patternIdx < patternCount) {
+                    if (let Some(pattern) <- LoadFlatPattern(reader, reader.VectorOffsetElement(patterns, patternIdx))) {
+                        te.catchPatterns.add(pattern)
+                    }
+                    patternIdx++
+                }
+            }
+        }
+        te.EnableAttr(Attribute.IMPORTED)
+        return te
     }
 
     // Mirrors ExprLoader.cpp:285-300 LoadIfExpr. Operands are condExpr, thenBody, elseBody; hasElse
