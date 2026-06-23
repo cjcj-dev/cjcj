@@ -46,6 +46,13 @@ private class FrontendCjoFlatBufferWriter {
     private let completedDeclKeys: HashSet<String> = HashSet<String>()
     private let allDecls: ArrayList<FlatBufferOffset> = ArrayList<FlatBufferOffset>()
     private let allExprs: ArrayList<FlatBufferOffset> = ArrayList<FlatBufferOffset>()
+    // Mirrors ASTWriterImpl's savedExprMap (std::map<const Expr*, FormattedIndex>, ASTWriterImpl.h):
+    // expr-identity -> preassigned 1-based index, for dedup + cycle-safety in SaveExpr
+    // (ExprWriter.cpp:59-85). Cangjie has no object-identity hash for arbitrary Expr nodes, so the
+    // pointer-keyed map is modelled as parallel key/value lists probed with refEq (faithful in
+    // behaviour: pointer-identity dedup). Expr counts per func body are small in this slice.
+    private let savedExprKeys: ArrayList<Expr> = ArrayList<Expr>()
+    private let savedExprIndexes: ArrayList<UInt32> = ArrayList<UInt32>()
     private let paramOwnerMangles: HashMap<String, String> = HashMap<String, String>()
 
     public init(
@@ -497,8 +504,32 @@ private class FrontendCjoFlatBufferWriter {
         }
         let paramListsVec = builder.CreateVectorOffsets(paramLists)
         let retType = SaveFuncReturnType(funcDecl, body)
+        // Mirror ASTWriter.cpp:1383-1389 SaveFuncBody body gating:
+        //   shouldExportBody = config.exportContent && exportFuncBody && (!fd || CanBeSrcExported(fd) || isGenericCJMP)
+        //   validBody = shouldExportBody && Ty::IsTyCorrect(funcBody.GetTy()) && funcBody.body
+        // The selfhost .cjo writer always serialises content (config.exportContent), so the gate
+        // reduces to CanBeSrcExported(funcDecl) && IsTyCorrect(body ty) && body present. isGenericCJMP
+        // (IsGenericInCommonSerialization, cjmp common side) is not modelled in this slice.
+        // The whole body-expr subtree is serialised here (FlatBuffer table discipline: child expr
+        // offsets are built/closed BEFORE the FuncBody table is opened below).
+        var bodyIdx = 0u32
+        var captureKind = 0u8
+        // The C++ parser sets fd->isFrozen=true when it parses '@Frozen' (ParseDecl.cpp:880-883);
+        // the selfhost parser does not yet wire this (parse package is out of this slice's scope).
+        // Derive it from the annotation here, faithful to how every other C++ site that needs the
+        // flag recomputes it (ASTLoader.cpp:811, TypeChecker.cpp:2457 MakeDefaultParamFunction).
+        // Without this, CanBeSrcExported (Utils.h:181-192) would never export a frozen-only body.
+        if (!funcDecl.isFrozen && funcDecl.HasAnno(AstAnnotationKind.FROZEN)) {
+            funcDecl.isFrozen = true
+        }
+        let validBody = CanBeSrcExported(funcDecl) && Ty.IsTyCorrect(body.GetTy()) && body.body.isSome()
+        if (validBody) {
+            bodyIdx = SaveExpr(body.body.getOrThrow())
+            captureKind = CaptureKindToFlat(body.captureKind)
+        }
         builder.StartTable(5)
-        builder.AddU8(4, CaptureKindToFlat(body.captureKind))
+        builder.AddU8(4, captureKind)
+        builder.AddU32(2, bodyIdx)
         builder.AddU32(1, retType)
         builder.AddOffset(0, paramListsVec)
         return builder.EndTable()
@@ -583,8 +614,8 @@ private class FrontendCjoFlatBufferWriter {
         }
         if (let Some(initializer) <- varDecl.initializer) {
             // Bounded slice: only LitConstExpr is supported so far.
-            if (let Some(lce) <- (initializer as LitConstExpr)) {
-                return SaveLitConstExprIndex(lce)
+            if (let Some(_) <- (GetRealExpr(initializer) as LitConstExpr)) {
+                return SaveExpr(initializer)
             }
         }
         return 0u32
@@ -606,14 +637,135 @@ private class FrontendCjoFlatBufferWriter {
         return isExternal && isConstGlobalOrMemberVar
     }
 
-    // Appends an Expr record for the LitConstExpr to allExprs and returns its 1-based index.
-    // Mirrors ASTWriter::ASTWriterImpl::SaveExpr (ExprWriter.cpp:59-85) for the bounded slice.
-    private func SaveLitConstExprIndex(lce: LitConstExpr): UInt32 {
+    // Only get desugared expression. 'ParenExpr' is just a wrapper which can be ignored.
+    // Mirrors ASTWriter::ASTWriterImpl::GetRealExpr (ExprWriter.cpp:45-57).
+    private func GetRealExpr(expr: Expr): Expr {
+        var realExpr = expr
+        while (let Some(desugar) <- realExpr.desugarExpr) {
+            realExpr = desugar
+        }
+        if (let Some(pe) <- (realExpr as ParenExpr)) {
+            if (let Some(inner) <- pe.expr) {
+                return GetRealExpr(inner)
+            }
+        }
+        return realExpr
+    }
+
+    // savedExprMap probe (refEq pointer-identity); returns the preassigned index if already saved.
+    private func FindSavedExpr(realExpr: Expr): Option<UInt32> {
+        var idx = 0
+        while (idx < savedExprKeys.size) {
+            if (refEq(savedExprKeys[idx], realExpr)) {
+                return savedExprIndexes[idx]
+            }
+            idx++
+        }
+        return None
+    }
+
+    // Recursive EXPR-serialization dispatcher. Mirrors ASTWriter::ASTWriterImpl::SaveExpr
+    // (ExprWriter.cpp:59-85): (i) GetRealExpr unwrap, (ii) savedExprMap dedup/cycle-safety,
+    // (iii) INDEX-PREALLOCATE-THEN-FILL. Child expr offsets are computed first (recursively, with
+    // no parent table open); only after children are fully built/closed is the parent expr's table
+    // opened — honouring FlatBufferBuilder.StartTable's one-open-table constraint.
+    private func SaveExpr(expr: Expr): UInt32 {
+        let realExpr = GetRealExpr(expr)
+        if (let Some(found) <- FindSavedExpr(realExpr)) {
+            return found
+        }
         let exprIndex = UInt32(allExprs.size + 1)
         allExprs.add(0u32)
-        let offset = SaveLitConstExpr(lce)
+        savedExprKeys.add(realExpr)
+        savedExprIndexes.add(exprIndex)
+        let offset = SaveExprByKind(realExpr)
+        // Overwrite the slot with the actual expr.
         allExprs[Int64(exprIndex) - 1] = offset
         return exprIndex
+    }
+
+    // Per-kind dispatch. Bounded faithful slice: Block, ReturnExpr, LitConstExpr. Other kinds throw
+    // (no SaveUnsupportExpr diagnostic stub yet); they are added in later cuts.
+    private func SaveExprByKind(realExpr: Expr): FlatBufferOffset {
+        if (let Some(block) <- (realExpr as Block)) {
+            return SaveBlock(block)
+        }
+        if (let Some(re) <- (realExpr as ReturnExpr)) {
+            return SaveReturnExpr(re)
+        }
+        if (let Some(lce) <- (realExpr as LitConstExpr)) {
+            return SaveLitConstExpr(lce)
+        }
+        throw IllegalArgumentException(
+            "not yet ported in faithful .cjo writer: SaveExpr for unsupported AST expr kind")
+    }
+
+    // Mirrors ExprWriter.cpp:520-549 SaveExpression(Block) + BlockInfo (fbs:483-485).
+    // Child offsets (operands, isExpr bool vector, BlockInfo table) are all built and CLOSED
+    // before the Block's Expr table is opened.
+    private func SaveBlock(block: Block): FlatBufferOffset {
+        let operands = ArrayList<UInt32>()
+        let childrenCond = ArrayList<Bool>()
+        for (node in block.body) {
+            if (let Some(childExpr) <- (node as Expr)) {
+                operands.add(SaveExpr(childExpr))
+                childrenCond.add(true)
+            } else if (let Some(childDecl) <- (node as Decl)) {
+                operands.add(SaveDeclIndex(childDecl, false))
+                childrenCond.add(false)
+            } else {
+                throw IllegalArgumentException("Block child is neither Expr nor Decl")
+            }
+        }
+        // Save the 'unsafe' condition as the last value (childrenCond has size+1 entries).
+        childrenCond.add(block.TestAttr(Attribute.UNSAFE))
+        let operandsVec = builder.CreateVectorU32(operands)
+        let condVec = builder.CreateVectorBool(childrenCond)
+        // BlockInfo: field 0 (slot 4) isExpr (bool vector).
+        builder.StartTable(1)
+        builder.AddOffset(0, condVec)
+        let info = builder.EndTable()
+
+        let begin = PositionBytes(block.begin)
+        let end = PositionBytes(block.end)
+        let typeIndex = SaveExprType(block)
+        // Expr: 0 kind, 1 begin, 2 end, 3 mapExpr, 4 operands, 5 type, 6 overflowPolicy,
+        //       7 info_type, 8 info. (fbs:504-513)
+        builder.StartTable(9)
+        builder.AddOffset(8, info)
+        // ExprInfo union (fbs:412-432): BlockInfo is the 14th member, union tag value 14.
+        builder.AddU8(7, 14u8)
+        builder.AddU32(5, typeIndex)
+        builder.AddOffset(4, operandsVec)
+        builder.AddStruct(2, end, 4)
+        builder.AddStruct(1, begin, 4)
+        // ExprKind_Block is index 28 of enum ExprKind (fbs:333-373; LambdaExpr=27, Block=28).
+        builder.AddU16(0, 28u16)
+        return builder.EndTable()
+    }
+
+    // Mirrors ExprWriter.cpp:113-123 SaveExpression(ReturnExpr).
+    // The operand (return value) sub-expr is saved (and closed) before the Expr table is opened.
+    private func SaveReturnExpr(re: ReturnExpr): FlatBufferOffset {
+        if (let None <- re.expr) {
+            throw IllegalArgumentException("ReturnExpr without operand is not supported in this slice")
+        }
+        let subExprIdx = SaveExpr(re.expr.getOrThrow())
+        let operands = ArrayList<UInt32>()
+        operands.add(subExprIdx)
+        let operandsVec = builder.CreateVectorU32(operands)
+
+        let begin = PositionBytes(re.begin)
+        let end = PositionBytes(re.end)
+        let typeIndex = SaveExprType(re)
+        builder.StartTable(9)
+        builder.AddU32(5, typeIndex)
+        builder.AddOffset(4, operandsVec)
+        builder.AddStruct(2, end, 4)
+        builder.AddStruct(1, begin, 4)
+        // ExprKind_ReturnExpr is index 3 of enum ExprKind (fbs:333-373).
+        builder.AddU16(0, 3u16)
+        return builder.EndTable()
     }
 
     // Mirrors ExprWriter.cpp:233-244 SaveExpression(LitConstExpr) + LitConstInfo (fbs:446-450).
@@ -743,7 +895,7 @@ private class FrontendCjoFlatBufferWriter {
                 }
                 // Bounded slice: only LitConstExpr is materialized as an Expr record.
                 let exprIndex = if (let Some(lce) <- (expr as LitConstExpr)) {
-                    SaveLitConstExprIndex(lce)
+                    SaveExpr(lce)
                 } else {
                     0u32
                 }
