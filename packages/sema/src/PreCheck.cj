@@ -89,6 +89,99 @@ private func collectDecl(ctx: ASTContext, decl: Decl): Bool {
     return valid
 }
 
+private func collectDeclIfAbsent(ctx: ASTContext, decl: Decl): Unit {
+    let name = decl.identifier.Val()
+    if (name.isEmpty() || name == INVALID_IDENTIFIER) {
+        return
+    }
+    let names = Names(name, scopeForDecl(decl))
+    for (existing in ctx.GetDeclsByName(names)) {
+        if (SameDecl(existing, decl)) {
+            return
+        }
+    }
+    ctx.AddDeclName(names, decl)
+}
+
+private func materializeVarOrEnumPatternBinding(ctx: ASTContext, pattern: VarOrEnumPattern): Option<VarDecl> {
+    if (let Some(inner) <- pattern.pattern) {
+        if (let Some(varPattern) <- (inner as VarPattern)) {
+            return varPattern.varDecl
+        }
+        return None
+    }
+    if (ctx.IsEnumConstructor(pattern.identifier.Val())) {
+        return None
+    }
+    let varPattern = VarPattern(pattern.identifier, nodePos: pattern.begin)
+    CopyNodeWithFileID(varPattern, pattern)
+    varPattern.begin = pattern.begin
+    varPattern.end = pattern.end
+    if (let Some(varDecl) <- varPattern.varDecl) {
+        CopyNodeWithFileID(varDecl, pattern)
+        varDecl.scopeName = if (pattern.scopeName.isEmpty()) {
+            TOPLEVEL_SCOPE_NAME
+        } else {
+            pattern.scopeName
+        }
+        varDecl.scopeLevel = pattern.scopeLevel
+        varDecl.fullPackageName = pattern.GetFullPackageName()
+    }
+    pattern.pattern = varPattern
+    return varPattern.varDecl
+}
+
+private func collectLetPatternBinding(ctx: ASTContext, pattern: Pattern): Unit {
+    if (let Some(varPattern) <- (pattern as VarPattern)) {
+        if (let Some(varDecl) <- varPattern.varDecl) {
+            collectDeclIfAbsent(ctx, varDecl)
+        }
+        return
+    }
+    if (let Some(varOrEnum) <- (pattern as VarOrEnumPattern)) {
+        if (let Some(varDecl2) <- materializeVarOrEnumPatternBinding(ctx, varOrEnum)) {
+            collectDeclIfAbsent(ctx, varDecl2)
+        }
+        return
+    }
+    if (let Some(enumPattern) <- (pattern as EnumPattern)) {
+        for (subPattern in enumPattern.patterns) {
+            collectLetPatternBinding(ctx, subPattern)
+        }
+        return
+    }
+    if (let Some(tuplePattern) <- (pattern as TuplePattern)) {
+        for (subPattern2 in tuplePattern.patterns) {
+            collectLetPatternBinding(ctx, subPattern2)
+        }
+        return
+    }
+    if (let Some(typePattern) <- (pattern as TypePattern)) {
+        if (let Some(inner) <- typePattern.pattern) {
+            collectLetPatternBinding(ctx, inner)
+        }
+        return
+    }
+    if (let Some(exceptPattern) <- (pattern as ExceptTypePattern)) {
+        if (let Some(inner2) <- exceptPattern.pattern) {
+            collectLetPatternBinding(ctx, inner2)
+        }
+    }
+}
+
+private func collectLetPatternDecls(ctx: ASTContext, pkg: Package): Unit {
+    let walker = Walker(pkg, visitPre: { node: Node =>
+        if (let Some(letPattern) <- (node as LetPatternDestructor)) {
+            for (pattern in letPattern.patterns) {
+                collectLetPatternBinding(ctx, pattern)
+            }
+            return VisitAction.SKIP_CHILDREN
+        }
+        VisitAction.WALK_CHILDREN
+    })
+    let _ = walker.Walk()
+}
+
 private func collectDeclForAssumption(decl: Decl, out: ArrayList<Decl>): Unit {
     out.add(decl)
     if (let Some(generic) <- decl.GetGeneric()) {
@@ -169,6 +262,7 @@ public func PreCheckPackage(ctx: ASTContext, pkg: Package, typeManager!: TypeMan
             valid = collectDecl(ctx, decl) && valid
         }
     }
+    collectLetPatternDecls(ctx, pkg)
     PreSetDeclType(typeManager, ctx)
     collectAndCheckAssumption(typeManager, pkg)
     return valid
