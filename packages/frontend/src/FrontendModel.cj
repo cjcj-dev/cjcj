@@ -395,12 +395,14 @@ extend SrcCodeChangeState <: Equatable<SrcCodeChangeState> {
 }
 
 // ModuleFormat.fbs enum ExprKind (fbs:333-373): MemberAccess=5, RefExpr=6, CallExpr=7,
-// ReturnExpr=3, LitConstExpr=10, LambdaExpr=27, Block=28.
+// UnaryExpr=8, BinaryExpr=11, ReturnExpr=3, LitConstExpr=10, LambdaExpr=27, Block=28.
 private const FLAT_EXPR_KIND_RETURN: UInt16 = 3u16
 private const FLAT_EXPR_KIND_MEMBER_ACCESS: UInt16 = 5u16
 private const FLAT_EXPR_KIND_REF_EXPR: UInt16 = 6u16
 private const FLAT_EXPR_KIND_CALL: UInt16 = 7u16
+private const FLAT_EXPR_KIND_UNARY: UInt16 = 8u16
 private const FLAT_EXPR_KIND_LIT_CONST: UInt16 = 10u16
+private const FLAT_EXPR_KIND_BINARY: UInt16 = 11u16
 private const FLAT_EXPR_KIND_BLOCK: UInt16 = 28u16
 
 // ModuleFormat.fbs enum PatternKind (fbs:515-524).
@@ -1694,8 +1696,8 @@ private class CjoSignatureMaterializer {
 
     // Recursive EXPR-load dispatcher. Loads an Expr by its 1-based index from the package allExprs
     // vector (root field 9, slot 22). Mirrors ExprLoader.cpp LoadExpr (:417-443) + per-kind loaders.
-    // Bounded faithful slice: RefExpr, MemberAccess, CallExpr, LitConstExpr, ReturnExpr, Block.
-    // Returns None for INVALID_FORMAT_INDEX (0) or any not-yet-supported expr kind.
+    // Bounded faithful slice: RefExpr, MemberAccess, CallExpr, UnaryExpr, BinaryExpr, LitConstExpr,
+    // ReturnExpr, Block. Returns None for INVALID_FORMAT_INDEX (0) or any not-yet-supported expr kind.
     private func LoadFlatExprRaw(reader: CjoFlatBuffer, exprIndex: UInt32): Option<Expr> {
         if (exprIndex == 0u32 || flatAllExprs < 0) {
             return None
@@ -1720,6 +1722,12 @@ private class CjoSignatureMaterializer {
         if (kind == FLAT_EXPR_KIND_REF_EXPR) {
             return Some(LoadFlatRefExpr(reader, exprTable))
         }
+        if (kind == FLAT_EXPR_KIND_UNARY) {
+            return Some(LoadFlatUnaryExpr(reader, exprTable))
+        }
+        if (kind == FLAT_EXPR_KIND_BINARY) {
+            return Some(LoadFlatBinaryExpr(reader, exprTable))
+        }
         if (kind == FLAT_EXPR_KIND_CALL) {
             // Mirrors ExprLoader.cpp:92-115 LoadCallExpr and ExprLoader.cpp:516-531 LoadFuncArg
             // for packages whose exported allExprs are wholly inside this cut's bounded expr slice.
@@ -1733,7 +1741,8 @@ private class CjoSignatureMaterializer {
                 let scanInfoKind = reader.U8Field(scanTable, 18, 0u8)
                 let supported = scanKind == FLAT_EXPR_KIND_RETURN || scanKind == FLAT_EXPR_KIND_MEMBER_ACCESS ||
                     scanKind == FLAT_EXPR_KIND_REF_EXPR || scanKind == FLAT_EXPR_KIND_CALL ||
-                    scanKind == FLAT_EXPR_KIND_LIT_CONST || scanKind == FLAT_EXPR_KIND_BLOCK ||
+                    scanKind == FLAT_EXPR_KIND_UNARY || scanKind == FLAT_EXPR_KIND_LIT_CONST ||
+                    scanKind == FLAT_EXPR_KIND_BINARY || scanKind == FLAT_EXPR_KIND_BLOCK ||
                     (scanKind == 0u16 && scanInfoKind == 11u8)
                 if (!supported) {
                     return None
@@ -1834,6 +1843,41 @@ private class CjoSignatureMaterializer {
             return Some(LoadFlatBlock(reader, exprTable))
         }
         return None
+    }
+
+    // Mirrors ExprLoader.cpp:118-127 LoadUnaryExpr. Operand 0 is expr; UnaryInfo field 0 (slot 4)
+    // is the OperatorKind encoded through OP_KIND_RMAP.
+    private func LoadFlatUnaryExpr(reader: CjoFlatBuffer, exprTable: Int64): UnaryExpr {
+        let ue = UnaryExpr()
+        LoadFlatExprBasicInfo(reader, exprTable, ue)
+        let operands = reader.VectorField(exprTable, 12)
+        if (operands >= 0 && reader.VectorLength(operands) >= 1) {
+            ue.expr = LoadFlatExpr(reader, reader.VectorU32(operands, 0))
+        }
+        let infoTable = reader.OffsetField(exprTable, 20)
+        if (infoTable >= 0) {
+            ue.op = FlatOperatorKind(reader.U8Field(infoTable, 4, 0u8))
+        }
+        ue.EnableAttr(Attribute.IMPORTED)
+        return ue
+    }
+
+    // Mirrors ExprLoader.cpp:154-163 LoadBinaryExpr. Operands are left then right; BinaryInfo field
+    // 0 (slot 4) is the OperatorKind encoded through OP_KIND_RMAP.
+    private func LoadFlatBinaryExpr(reader: CjoFlatBuffer, exprTable: Int64): BinaryExpr {
+        let be = BinaryExpr()
+        LoadFlatExprBasicInfo(reader, exprTable, be)
+        let operands = reader.VectorField(exprTable, 12)
+        if (operands >= 0 && reader.VectorLength(operands) >= 2) {
+            be.leftExpr = LoadFlatExpr(reader, reader.VectorU32(operands, 0))
+            be.rightExpr = LoadFlatExpr(reader, reader.VectorU32(operands, 1))
+        }
+        let infoTable = reader.OffsetField(exprTable, 20)
+        if (infoTable >= 0) {
+            be.op = FlatOperatorKind(reader.U8Field(infoTable, 4, 0u8))
+        }
+        be.EnableAttr(Attribute.IMPORTED)
+        return be
     }
 
     // Mirrors ExprLoader.cpp:67-79 LoadMemberAccess, plus ReferenceLoader.cpp:586-600 deferred

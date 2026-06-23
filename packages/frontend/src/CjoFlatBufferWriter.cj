@@ -684,15 +684,21 @@ private class FrontendCjoFlatBufferWriter {
         return exprIndex
     }
 
-    // Per-kind dispatch. Bounded faithful slice: RefExpr, MemberAccess, CallExpr, Block,
-    // ReturnExpr, LitConstExpr. Other kinds throw (no SaveUnsupportExpr diagnostic stub yet); they
-    // are added in later cuts.
+    // Per-kind dispatch. Bounded faithful slice: RefExpr, MemberAccess, CallExpr, UnaryExpr,
+    // BinaryExpr, Block, ReturnExpr, LitConstExpr. Other kinds throw (no SaveUnsupportExpr
+    // diagnostic stub yet); they are added in later cuts.
     private func SaveExprByKind(realExpr: Expr): FlatBufferOffset {
         if (let Some(block) <- (realExpr as Block)) {
             return SaveBlock(block)
         }
         if (let Some(ce) <- (realExpr as CallExpr)) {
             return SaveCallExpr(ce)
+        }
+        if (let Some(ue) <- (realExpr as UnaryExpr)) {
+            return SaveUnaryExpr(ue)
+        }
+        if (let Some(be) <- (realExpr as BinaryExpr)) {
+            return SaveBinaryExpr(be)
         }
         if (let Some(ma) <- (realExpr as MemberAccess)) {
             return SaveMemberAccess(ma)
@@ -751,6 +757,66 @@ private class FrontendCjoFlatBufferWriter {
         builder.AddStruct(1, begin, 4)
         // ExprKind_Block is index 28 of enum ExprKind (fbs:333-373; LambdaExpr=27, Block=28).
         builder.AddU16(0, 28u16)
+        return builder.EndTable()
+    }
+
+    // Mirrors ExprWriter.cpp:203-215 SaveExpression(UnaryExpr): operand 0 is expr and UnaryInfo
+    // carries only OP_KIND_MAP.at(ue.op). ExprInfo_UnaryInfo's union tag value is 2 (fbs:412-438).
+    private func SaveUnaryExpr(ue: UnaryExpr): FlatBufferOffset {
+        if (let None <- ue.expr) {
+            throw IllegalArgumentException("UnaryExpr without operand is not supported in faithful .cjo writer")
+        }
+        let operands = ArrayList<UInt32>()
+        operands.add(SaveExpr(ue.expr.getOrThrow()))
+        let operandsVec = builder.CreateVectorU32(operands)
+        builder.StartTable(1)
+        builder.AddU8(0, OperatorKindToFlat(ue.op))
+        let info = builder.EndTable()
+
+        let begin = PositionBytes(ue.begin)
+        let end = PositionBytes(ue.end)
+        let typeIndex = SaveExprType(ue)
+        builder.StartTable(9)
+        builder.AddOffset(8, info)
+        builder.AddU8(7, 2u8)
+        builder.AddU32(5, typeIndex)
+        builder.AddOffset(4, operandsVec)
+        builder.AddStruct(2, end, 4)
+        builder.AddStruct(1, begin, 4)
+        // ExprKind_UnaryExpr is index 8 of enum ExprKind (ModuleFormat.fbs:333-373).
+        builder.AddU16(0, 8u16)
+        return builder.EndTable()
+    }
+
+    // Mirrors ExprWriter.cpp:246-261 SaveExpression(BinaryExpr): operands are left then right, and
+    // BinaryInfo carries only OP_KIND_MAP.at(be.op). ExprInfo_BinaryInfo's union tag value is 3.
+    private func SaveBinaryExpr(be: BinaryExpr): FlatBufferOffset {
+        if (let None <- be.leftExpr) {
+            throw IllegalArgumentException("BinaryExpr without left operand is not supported in faithful .cjo writer")
+        }
+        if (let None <- be.rightExpr) {
+            throw IllegalArgumentException("BinaryExpr without right operand is not supported in faithful .cjo writer")
+        }
+        let operands = ArrayList<UInt32>()
+        operands.add(SaveExpr(be.leftExpr.getOrThrow()))
+        operands.add(SaveExpr(be.rightExpr.getOrThrow()))
+        let operandsVec = builder.CreateVectorU32(operands)
+        builder.StartTable(1)
+        builder.AddU8(0, OperatorKindToFlat(be.op))
+        let info = builder.EndTable()
+
+        let begin = PositionBytes(be.begin)
+        let end = PositionBytes(be.end)
+        let typeIndex = SaveExprType(be)
+        builder.StartTable(9)
+        builder.AddOffset(8, info)
+        builder.AddU8(7, 3u8)
+        builder.AddU32(5, typeIndex)
+        builder.AddOffset(4, operandsVec)
+        builder.AddStruct(2, end, 4)
+        builder.AddStruct(1, begin, 4)
+        // ExprKind_BinaryExpr is index 11 of enum ExprKind (ModuleFormat.fbs:333-373).
+        builder.AddU16(0, 11u16)
         return builder.EndTable()
     }
 
