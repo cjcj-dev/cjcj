@@ -1454,12 +1454,17 @@ public class TypeChecker {
             if (let Some(initializer) <- vd.initializer) {
                 if (let Some(typeNode) <- vd.typeNode) {
                     if (let Some(targetTy) <- typeNode.GetTy()) {
-                        let _ = Check(ctx, targetTy, initializer)
+                        if (!Check(ctx, targetTy, initializer) && !IsGlobalOrMember(vd)) {
+                            vd.DisableAttr(Attribute.IS_CHECK_VISITED)
+                        }
                     } else {
                         let _ = Synthesize(ctx, initializer)
                     }
                 } else {
                     let _ = Synthesize(ctx, initializer)
+                    if (!Ty.IsTyCorrect(initializer.GetTy()) && !IsGlobalOrMember(vd)) {
+                        vd.DisableAttr(Attribute.IS_CHECK_VISITED)
+                    }
                 }
             }
             let declTy = TypeCheckDeclSynchronizeTypeAndInitializer(impl.typeManager, vd)
@@ -1597,8 +1602,14 @@ public class TypeChecker {
             currentFuncBody = Some(fb)
             if (retTy.IsQuest()) {
                 let bodyTy = SynthesizeBlock(ctx, body)
-                retType.SetTy(bodyTy)
-                retTy = bodyTy
+                if ((let None <- fb.funcDecl) && !Ty.IsTyCorrect(bodyTy)) {
+                    retType.SetTy(TypeManager.GetInvalidTy())
+                    retTy = TypeManager.GetInvalidTy()
+                } else {
+                    let inferredRetTy = CalcFuncRetTyFromBody(fb)
+                    retType.SetTy(inferredRetTy)
+                    retTy = inferredRetTy
+                }
             } else if (retTy.IsUnit()) {
                 let _ = SynthesizeBlock(ctx, body)
             } else if (IsConstructorBody(fb)) {
@@ -1616,6 +1627,51 @@ public class TypeChecker {
             funcDecl.SetTy(funcTy)
         }
         return funcTy
+    }
+
+    private func CalcFuncRetTyFromBody(fb: FuncBody): Ty {
+        let body = fb.body ?? return TypeManager.GetInvalidTy()
+        if (body.body.isEmpty()) {
+            return TypeManager.GetPrimitiveTy(TypeKind.TYPE_UNIT)
+        }
+
+        let lastNode = body.body[body.body.size - 1]
+        let bodyTy = if (lastNode.IsDecl()) {
+            TypeManager.GetPrimitiveTy(TypeKind.TYPE_UNIT)
+        } else {
+            lastNode.GetTy() ?? TypeManager.GetInvalidTy()
+        }
+        var retTy = bodyTy
+        let retTys = TySet()
+        let walker = Walker(body, visitPre: { node: Node =>
+            if (node.astKind == ASTKind.FUNC_DECL || node.astKind == ASTKind.LAMBDA_EXPR) {
+                return VisitAction.SKIP_CHILDREN
+            }
+            if (let Some(returnExpr) <- (node as ReturnExpr)) {
+                if (let Some(expr) <- returnExpr.expr) {
+                    if (Ty.IsTyCorrect(expr.GetTy())) {
+                        retTys.Add(expr.GetTy().getOrThrow())
+                    }
+                }
+            }
+            VisitAction.WALK_CHILDREN
+        })
+        let _ = walker.Walk()
+
+        let returnUnit = Ty.IsTyCorrect(fb.retType.getOrThrow().GetTy()) &&
+            fb.retType.getOrThrow().GetTy().getOrThrow().IsUnit()
+        if (returnUnit) {
+            if (retTys.values.isEmpty()) {
+                return fb.retType.getOrThrow().GetTy().getOrThrow()
+            }
+        } else {
+            retTys.Add(bodyTy)
+        }
+        if (!Ty.IsTyCorrect(bodyTy)) {
+            return TypeManager.GetInvalidTy()
+        }
+        retTy = JoinAsVisibleTy(impl.typeManager, retTys, curFile: fb.curFile)
+        return retTy
     }
 
     private func FunctionTyConfigForFuncBody(fb: FuncBody): FuncTyConfig {
@@ -1699,10 +1755,45 @@ public class TypeChecker {
     }
 
     private func SynthesizeBlock(ctx: ASTContext, block: Block): Ty {
-        for (item in block.body) {
-            let _ = SynthesizeNode(ctx, item)
+        if (block.body.isEmpty()) {
+            let unitTy = TypeManager.GetPrimitiveTy(TypeKind.TYPE_UNIT)
+            block.SetTy(unitTy)
+            return unitTy
         }
-        return SynBlock(impl.typeManager, block)
+        MarkUnsafeBlockChildren(block)
+        var existInvalid = false
+        for (item in block.body) {
+            let itemTy = SynthesizeNode(ctx, item)
+            if (!Ty.IsTyCorrect(itemTy) || !ReplaceIdealTy(impl.typeManager, item)) {
+                existInvalid = true
+            }
+        }
+        let lastNode = block.body[block.body.size - 1]
+        if (existInvalid) {
+            block.SetTy(TypeManager.GetInvalidTy())
+        } else if (lastNode.IsDecl()) {
+            block.SetTy(TypeManager.GetPrimitiveTy(TypeKind.TYPE_UNIT))
+        } else {
+            block.SetTy(lastNode.GetTy() ?? TypeManager.GetInvalidTy())
+        }
+        return block.GetTy() ?? TypeManager.GetInvalidTy()
+    }
+
+    private func MarkUnsafeBlockChildren(block: Block): Unit {
+        if (!block.TestAttr(Attribute.UNSAFE) && block.unsafePos.IsZero()) {
+            return
+        }
+        block.EnableAttr(Attribute.UNSAFE)
+        let walker = Walker(block, visitPre: { node: Node =>
+            if (let Some(_) <- (node as CallExpr)) {
+                node.EnableAttr(Attribute.UNSAFE)
+            }
+            if (let Some(expr) <- (node as OverloadableExpr)) {
+                expr.EnableAttr(Attribute.UNSAFE)
+            }
+            VisitAction.WALK_CHILDREN
+        })
+        let _ = walker.Walk()
     }
 
     private func CheckBlock(ctx: ASTContext, target: Ty, block: Block): Bool {

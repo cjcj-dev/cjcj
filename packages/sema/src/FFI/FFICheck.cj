@@ -30,6 +30,12 @@ public func PreCheckAnnoForCFFI(decl: Decl): Unit {
     if (HasAnnotationNamed(decl, "C") || HasAnnotationNamed(decl, "CallingConv")) {
         decl.EnableAttr(Attribute.C)
     }
+    if (let Some(funcDecl) <- (decl as FuncDecl)) {
+        if (decl.TestAttr(Attribute.FOREIGN)) {
+            decl.EnableAttr(Attribute.NO_MANGLE)
+            funcDecl.linkage = Linkage.INTERNAL
+        }
+    }
 }
 
 public func PreCheckAnnoForFFI(root: Node): Unit {
