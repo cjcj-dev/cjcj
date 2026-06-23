@@ -2430,6 +2430,14 @@ public class TypeChecker {
         return None
     }
 
+    private func LookupCoreEnumDecl(ctx: ASTContext, name: String): Option<EnumDecl> {
+        if (let Some(decl) <- lookupResolvedPackageDecl(ctx, "std.core", name)) {
+            addImportedDeclAndDependencies(ctx, decl)
+            return decl as EnumDecl
+        }
+        return None
+    }
+
     private func SynthesizeThrowExpr(ctx: ASTContext, throwExpr: ThrowExpr): Ty {
         if (let Some(innerExpr) <- throwExpr.expr) {
             let _ = Synthesize(ctx, innerExpr)
@@ -2631,7 +2639,7 @@ public class TypeChecker {
             if (let Some(leftExpr2) <- asExpr.leftExpr) {
                 let _ = Synthesize(ctx, leftExpr2)
             }
-            return FinishSynthesize(ctx, asExpr, SynExprShallow(impl.typeManager, asExpr))
+            return FinishSynthesize(ctx, asExpr, SynAsExpr(impl.typeManager, asExpr, LookupCoreEnumDecl(ctx, "Option")))
         }
         if (let Some(arrayExpr) <- (expr as ArrayExpr)) {
             SynthesizeTypeNode(ctx, arrayExpr.typeNode)
@@ -2859,6 +2867,13 @@ public class TypeChecker {
         }
         if (let Some(spawnExpr) <- (expr as SpawnExpr)) {
             return FinishCheck(ctx, spawnExpr, CheckSpawnExprWithTarget(ctx, target, spawnExpr))
+        }
+        if (let Some(asExpr) <- (expr as AsExpr)) {
+            SynthesizeTypeNode(ctx, asExpr.asType)
+            if (let Some(leftExpr) <- asExpr.leftExpr) {
+                let _ = Synthesize(ctx, leftExpr)
+            }
+            return FinishCheck(ctx, asExpr, ChkAsExpr(impl.typeManager, target, asExpr, LookupCoreEnumDecl(ctx, "Option")))
         }
         let _ = Synthesize(ctx, expr)
         return FinishCheck(ctx, expr, ChkExprShallow(impl.typeManager, target, expr))
