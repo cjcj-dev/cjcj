@@ -378,6 +378,31 @@ extend ParserImpl {
         }
         for (anno in annos) {
             decl.annotations.add(anno)
+            if (let Some(funcDecl) <- (decl as FuncDecl)) {
+                if (anno.kind == AnnotationKind.INTRINSIC) {
+                    funcDecl.EnableAttr(Attribute.INTRINSIC)
+                }
+                if (anno.kind == AnnotationKind.FASTNATIVE) {
+                    funcDecl.isFastNative = true
+                }
+                if (anno.kind == AnnotationKind.FROZEN) {
+                    funcDecl.isFrozen = true
+                }
+            } else if (let Some(mainDecl) <- (decl as MainDecl)) {
+                if (anno.kind == AnnotationKind.INTRINSIC) {
+                    mainDecl.EnableAttr(Attribute.INTRINSIC)
+                }
+                if (anno.kind == AnnotationKind.FASTNATIVE) {
+                    mainDecl.isFastNative = true
+                }
+            } else if (let Some(primaryCtor) <- (decl as PrimaryCtorDecl)) {
+                if (anno.kind == AnnotationKind.INTRINSIC) {
+                    primaryCtor.EnableAttr(Attribute.INTRINSIC)
+                }
+                if (anno.kind == AnnotationKind.FASTNATIVE) {
+                    primaryCtor.isFastNative = true
+                }
+            }
         }
         if (!modifiers.isEmpty()) {
             var index: Int64 = 0
