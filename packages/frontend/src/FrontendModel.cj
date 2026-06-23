@@ -394,8 +394,10 @@ extend SrcCodeChangeState <: Equatable<SrcCodeChangeState> {
     }
 }
 
-// ModuleFormat.fbs enum ExprKind (fbs:333-373): LitConstExpr is index 10.
+// ModuleFormat.fbs enum ExprKind (fbs:333-373): ReturnExpr=3, LitConstExpr=10, LambdaExpr=27, Block=28.
+private const FLAT_EXPR_KIND_RETURN: UInt16 = 3u16
 private const FLAT_EXPR_KIND_LIT_CONST: UInt16 = 10u16
+private const FLAT_EXPR_KIND_BLOCK: UInt16 = 28u16
 
 // ModuleFormat.fbs enum LitConstKind (fbs:388-397). Mirrors ASTLoader.cpp LIT_CONST_KIND_RMAP.
 private func FlatToLitConstKind(value: UInt8): LitConstKind {
@@ -571,6 +573,11 @@ private class CjoFlatBuffer {
     public func VectorU64(vector: Int64, index: Int64): UInt64 {
         let pos = vector + 4 + index * 8
         return ReadU64(pos)
+    }
+
+    public func VectorBool(vector: Int64, index: Int64): Bool {
+        let pos = vector + 4 + index
+        return pos >= 0 && pos < data.size && data[pos] != 0u8
     }
 
     public func VectorOffsetElement(vector: Int64, index: Int64): Int64 {
@@ -1522,6 +1529,7 @@ private class CjoSignatureMaterializer {
         body.captureKind = FlatCaptureKind(reader.U8Field(bodyTable, 12, 0u8))
         body.funcDecl = Some(funcDecl)
         funcDecl.funcBody = Some(body)
+        LoadFlatFuncBodyContent(reader, bodyTable, funcDecl, body)
         // Update param functions' references: set ownerFunc on each param's desugar (default-param)
         // function, for top-level AND member funcs. Mirrors C++ ASTLoader.cpp:829-833 — without this
         // a top-level imported generic func's default-param desugar (e.g. y.1 <T$0,P$1>) has no
@@ -1540,6 +1548,39 @@ private class CjoSignatureMaterializer {
             funcDecl.SetTy(funcTy)
         }
         SetOuterFunctionDecl(funcDecl)
+    }
+
+    // Loads FuncBody.body (fbs FuncBody field 2 / slot 8 = body expr index), gated by the C++
+    // shouldImportBody (ExprLoader.cpp:489-510). shouldImportBody = always() || isInline || isConst;
+    // the writer always emits FuncBody.always=false (ASTWriter.cpp:1389), so it reduces to
+    // isInline || isConst. The selfhost loader always imports source for .cjo, so importSrcCode is
+    // implicitly true. On import, the loaded Block is the un-wrapped funcBody.body (LoadExpr<Block>,
+    // no dummy-RefExpr wrap), and every nested ReturnExpr's refFuncBody is set to this funcBody
+    // (ExprLoader.cpp:500-509).
+    private func LoadFlatFuncBodyContent(reader: CjoFlatBuffer, bodyTable: Int64, funcDecl: FuncDecl,
+        body: FuncBody): Unit {
+        let always = reader.U8Field(bodyTable, 10, 0u8) != 0u8
+        let shouldImportBody = always || funcDecl.isInline || funcDecl.isConst
+        if (!shouldImportBody) {
+            return
+        }
+        // FuncBody field 2 (slot 8) = body expr index.
+        let bodyIndex = reader.U32Field(bodyTable, 8, 0u32)
+        if (let Some(loaded) <- LoadFlatExprRaw(reader, bodyIndex)) {
+            if (let Some(block) <- (loaded as Block)) {
+                body.body = Some(block)
+                let setRefFuncBody = { node: Node =>
+                    if (node.astKind == ASTKind.FUNC_BODY) {
+                        return VisitAction.SKIP_CHILDREN
+                    }
+                    if (let Some(re) <- (node as ReturnExpr)) {
+                        re.refFuncBody = Some(body)
+                    }
+                    return VisitAction.WALK_CHILDREN
+                }
+                Walker(block, visitPre: setRefFuncBody).Walk()
+            }
+        }
     }
 
     private func LoadFlatFuncParamLists(reader: CjoFlatBuffer, bodyTable: Int64, body: FuncBody): Unit {
@@ -1616,11 +1657,32 @@ private class CjoSignatureMaterializer {
         }
     }
 
-    // Loads an Expr by its 1-based index from the package allExprs vector (root field 9, slot 22).
-    // Bounded faithful slice: only LitConstExpr is materialized (mirrors ExprLoader.cpp LoadExpr +
-    // LoadLitConstExpr, ASTLoader.cpp:719-726). Returns None for INVALID_FORMAT_INDEX (0) or
-    // any not-yet-supported expr kind.
+    // Generic LoadExpr<Expr> entry: loads the raw expr then applies the C++ dummy-RefExpr wrap when
+    // the loaded node is a Block (ExprLoader.cpp:417-443 — the `if constexpr (!is_same<ExprT,Block>)`
+    // branch creates a COMPILER_ADD RefExpr whose desugarExpr is the Block, so CHIR can generate the
+    // 'goto'). Used for sub-expr operands (default ExprT). For funcBody.body, the un-wrapped Block is
+    // needed, so that call site uses LoadFlatExprRaw + a direct Block cast instead.
     private func LoadFlatExpr(reader: CjoFlatBuffer, exprIndex: UInt32): Option<Expr> {
+        let loaded = LoadFlatExprRaw(reader, exprIndex)
+        if (let Some(expr) <- loaded) {
+            if (let Some(block) <- (expr as Block)) {
+                let dummy = RefExpr()
+                dummy.EnableAttr(Attribute.COMPILER_ADD)
+                if (let Some(ty) <- block.GetTy()) {
+                    dummy.SetTy(ty)
+                }
+                dummy.desugarExpr = block
+                return dummy
+            }
+        }
+        return loaded
+    }
+
+    // Recursive EXPR-load dispatcher. Loads an Expr by its 1-based index from the package allExprs
+    // vector (root field 9, slot 22). Mirrors ExprLoader.cpp LoadExpr (:417-443) + per-kind loaders.
+    // Bounded faithful slice: LitConstExpr, ReturnExpr, Block. Returns None for INVALID_FORMAT_INDEX
+    // (0) or any not-yet-supported expr kind.
+    private func LoadFlatExprRaw(reader: CjoFlatBuffer, exprIndex: UInt32): Option<Expr> {
         if (exprIndex == 0u32 || flatAllExprs < 0) {
             return None
         }
@@ -1633,12 +1695,73 @@ private class CjoSignatureMaterializer {
         if (exprTable < 0) {
             return None
         }
-        // Expr field 0 (slot 4) = kind. EXPR_KIND_LIT_CONST = 10.
+        // Expr field 0 (slot 4) = kind.
         let kind = reader.U16Field(exprTable, 4, 0u16)
-        if (kind != FLAT_EXPR_KIND_LIT_CONST) {
-            return None
+        if (kind == FLAT_EXPR_KIND_LIT_CONST) {
+            return Some(LoadFlatLitConstExpr(reader, exprTable))
         }
-        return Some(LoadFlatLitConstExpr(reader, exprTable))
+        if (kind == FLAT_EXPR_KIND_RETURN) {
+            return Some(LoadFlatReturnExpr(reader, exprTable))
+        }
+        if (kind == FLAT_EXPR_KIND_BLOCK) {
+            return Some(LoadFlatBlock(reader, exprTable))
+        }
+        return None
+    }
+
+    // Mirrors ExprLoader.cpp:50-56 LoadReturnExpr. Operand 0 = return value sub-expr.
+    private func LoadFlatReturnExpr(reader: CjoFlatBuffer, exprTable: Int64): ReturnExpr {
+        let re = ReturnExpr()
+        // Expr field 5 (slot 14) = type index.
+        if (let Some(ty) <- LoadFlatType(reader.U32Field(exprTable, 14, 0u32))) {
+            re.SetTy(ty)
+        }
+        // Expr field 4 (slot 12) = operands (uint32 vector of sub-expr indices).
+        let operands = reader.VectorField(exprTable, 12)
+        if (operands >= 0 && reader.VectorLength(operands) >= 1) {
+            re.expr = LoadFlatExpr(reader, reader.VectorU32(operands, 0))
+        }
+        re.EnableAttr(Attribute.IMPORTED)
+        return re
+    }
+
+    // Mirrors ExprLoader.cpp:361-381 LoadBlock + BlockInfo (fbs:483-485). operands[i] is an Expr when
+    // BlockInfo.isExpr[i] is true, else a Decl; the trailing isExpr entry is the 'unsafe' flag.
+    private func LoadFlatBlock(reader: CjoFlatBuffer, exprTable: Int64): Block {
+        let block = Block()
+        if (let Some(ty) <- LoadFlatType(reader.U32Field(exprTable, 14, 0u32))) {
+            block.SetTy(ty)
+        }
+        // Expr field 8 (slot 20) = info (BlockInfo); BlockInfo field 0 (slot 4) = isExpr bool vector.
+        let infoTable = reader.OffsetField(exprTable, 20)
+        let isExprVec = if (infoTable >= 0) { reader.VectorField(infoTable, 4) } else { -1 }
+        let operands = reader.VectorField(exprTable, 12)
+        if (operands >= 0) {
+            let size = reader.VectorLength(operands)
+            var i = 0
+            while (i < size) {
+                let childIndex = reader.VectorU32(operands, i)
+                let isExpr = isExprVec >= 0 && i < reader.VectorLength(isExprVec) && reader.VectorBool(isExprVec, i)
+                if (isExpr) {
+                    if (let Some(childExpr) <- LoadFlatExpr(reader, childIndex)) {
+                        block.body.add(childExpr)
+                    }
+                } else {
+                    if (let Some(childRecord) <- flatDecls.get(childIndex)) {
+                        if (let Some(childDecl) <- EnsureFlatDecl(childRecord)) {
+                            block.body.add(childDecl)
+                        }
+                    }
+                }
+                i++
+            }
+            // Trailing isExpr entry encodes the block's 'unsafe' attribute (ExprWriter.cpp:538).
+            if (isExprVec >= 0 && reader.VectorLength(isExprVec) > size && reader.VectorBool(isExprVec, size)) {
+                block.EnableAttr(Attribute.UNSAFE)
+            }
+        }
+        block.EnableAttr(Attribute.IMPORTED)
+        return block
     }
 
     // Mirrors ExprLoader.cpp:141-152 LoadLitConstExpr + LitConstInfo (fbs:446-450).

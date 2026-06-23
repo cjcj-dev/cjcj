@@ -68,6 +68,17 @@ public class FlatBufferBuilder {
         return UInt32(buffer.size)
     }
 
+    public func CreateVectorBool(values: ArrayList<Bool>): FlatBufferOffset {
+        StartVector(1, values.size, 1)
+        var idx = values.size - 1
+        while (idx >= 0) {
+            PrependRawByte(if (values[idx]) { 1u8 } else { 0u8 })
+            idx--
+        }
+        PrependU32(UInt32(values.size))
+        return UInt32(buffer.size)
+    }
+
     public func CreateVectorU64(values: ArrayList<UInt64>): FlatBufferOffset {
         StartVector(8, values.size, 8)
         var idx = values.size - 1
