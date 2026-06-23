@@ -904,7 +904,10 @@ public class TypeChecker {
                 // Check legality of usage after sema type completed.
                 // Mirrors C++ TypeChecker.cpp:2053 (CheckLegalityOfUsage).
                 RunLegalityOfUsageCheck(pkg)
-                PerformDesugarAfterTypeCheck(impl.typeManager, pkg, context: Some(ctx), options: GlobalOptions())
+                PerformDesugarAfterTypeCheck(impl.typeManager, pkg, context: Some(ctx), options: GlobalOptions(),
+                    synthesizer: Some({ synCtx: ASTContext, pos: SynPos, node: Node =>
+                        SynthesizeWithoutRecover(synCtx, pos, node)
+                    }))
                 DesugarAfterInstantiation(impl.typeManager, recursivePkgs, pkg,
                     implicitUsedDecls: Some(implicitUsedDecls))
             }
@@ -997,6 +1000,13 @@ public class TypeChecker {
 
     private func SynthesizeTree(ctx: ASTContext, root: Node): Ty {
         return SynthesizeNode(ctx, root)
+    }
+
+    private func SynthesizeWithoutRecover(ctx: ASTContext, pos: SynPos, node: Node): Ty {
+        let _ = pos
+        ctx.ClearTypeCheckCache(node)
+        ctx.SkipSynForCorrectTyRec(node)
+        return SynthesizeNode(ctx, node)
     }
 
     private func SynthesizeNode(ctx: ASTContext, node: Node): Ty {

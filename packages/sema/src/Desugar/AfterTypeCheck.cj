@@ -6,7 +6,8 @@ import cangjie_compiler::sema.*
 import cangjie_compiler::sema.Desugar.AfterTypeCheck.*
 
 public func PerformDesugarAfterTypeCheck(typeManager: TypeManager, pkg: Package,
-    context!: Option<ASTContext> = None, options!: GlobalOptions = GlobalOptions()): Unit {
+    context!: Option<ASTContext> = None, options!: GlobalOptions = GlobalOptions(),
+    synthesizer!: Option<(ASTContext, SynPos, Node) -> Ty> = None): Unit {
     DesugarDeclsForPackage(pkg, options.enableCoverage)
     let walker = Walker(pkg, visitPre: { node: Node =>
         if (node.TestAnyAttr(Attribute.HAS_BROKEN, Attribute.IS_BROKEN)) {
@@ -15,7 +16,7 @@ public func PerformDesugarAfterTypeCheck(typeManager: TypeManager, pkg: Package,
         match (node.astKind) {
             case ASTKind.FOR_IN_EXPR =>
                 if (let Some(forInExpr) <- (node as ForInExpr)) {
-                    DesugarForInExpr(typeManager, forInExpr)
+                    DesugarForInExpr(typeManager, forInExpr, context: context, synthesizer: synthesizer)
                 }
             case ASTKind.FUNC_PARAM =>
                 if (let Some(param) <- (node as FuncParam)) {

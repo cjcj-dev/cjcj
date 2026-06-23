@@ -19,48 +19,10 @@ private func CloneExpr(expr: Expr): Option<Expr> {
     return ASTCloner.Clone(expr) as Expr
 }
 
-// After type-checking, desugar-created calls have a fully resolved callee, so the
-// result type is simply the callee's function return type. Reading it directly
-// avoids re-running expression synthesis (which would couple this after-typecheck
-// package to TypeCheckExpr and form a sema subpackage dependency cycle).
 private func FuncRetTyOf(decl: Decl): Option<Ty> {
     if (let Some(t) <- decl.GetTy()) {
         if (let Some(funcTy) <- (t as FuncTy)) {
             return funcTy.retTy
-        }
-    }
-    return None
-}
-
-private func GenericReceiverTyOf(decl: Decl): Option<Ty> {
-    if (let Some(outer) <- decl.outerDecl) {
-        if (let Some(extendDecl) <- (outer as ExtendDecl)) {
-            return extendDecl.GetTy()
-        }
-        return outer.GetTy()
-    }
-    return None
-}
-
-private func InstantiatedFuncRetTy(typeManager: TypeManager, decl: Decl, baseTy: Ty): Option<Ty> {
-    if (let Some(retTy) <- FuncRetTyOf(decl)) {
-        let typeMapping = GenerateTypeMappingByTy(GenericReceiverTyOf(decl), Some(baseTy))
-        if (!typeMapping.IsEmpty()) {
-            return Some(typeManager.GetInstantiatedTy(retTy, typeMapping))
-        }
-        return Some(retTy)
-    }
-    return None
-}
-
-private func InstantiatedFuncTy(typeManager: TypeManager, decl: Decl, baseTy: Ty): Option<Ty> {
-    if (let Some(declTy) <- decl.GetTy()) {
-        if (let Some(_) <- (declTy as FuncTy)) {
-            let typeMapping = GenerateTypeMappingByTy(GenericReceiverTyOf(decl), Some(baseTy))
-            if (!typeMapping.IsEmpty()) {
-                return Some(typeManager.GetInstantiatedTy(declTy, typeMapping))
-            }
-            return Some(declTy)
         }
     }
     return None
@@ -124,55 +86,30 @@ private func CreateVarRef(decl: VarDecl, pos: Node): RefExpr {
     return refExpr
 }
 
-private func FirstZeroArgFunc(decls: ArrayList<Decl>): Option<FuncDecl> {
-    for (decl in decls) {
-        let used = GetUsedMemberDecl(decl, true)
-        if (let Some(funcDecl) <- (used as FuncDecl)) {
-            if (let Some(declTy) <- funcDecl.GetTy()) {
-                if (let Some(funcTy) <- (declTy as FuncTy)) {
-                    if (funcTy.paramTys.isEmpty()) {
-                        return funcDecl
-                    }
-                }
-            }
-        }
-    }
-    return None
-}
+private func CreateSynthesizedNoArgMemberCall(source: Node, baseExpr: Expr, name: String,
+    context: Option<ASTContext>, synthesizer: Option<(ASTContext, SynPos, Node) -> Ty>): Option<CallExpr> {
+    let memberAccess = CreateMemberAccess(baseExpr, name)
+    memberAccess.target = None
+    memberAccess.targets.clear()
+    CopyBasicInfo(source, memberAccess)
+    memberAccess.SetTy(Ty.GetInitialTy())
+    AddCurFile(memberAccess, file: source.curFile)
 
-private func LookupZeroArgMember(typeManager: TypeManager, source: Node, baseTy: Ty, name: String): Option<FuncDecl> {
-    var found = FieldLookup(typeManager, Ty.GetDeclPtrOfTy(Some(baseTy)), name,
-        info: LookupInfo(baseTy: baseTy, file: source.curFile))
-    if (found.isEmpty()) {
-        if (let Some(file) <- source.curFile) {
-            found = ExtendFieldLookup(typeManager, file, Some(baseTy), name)
-        }
-    }
-    return FirstZeroArgFunc(found)
-}
-
-private func CreateResolvedNoArgMemberCall(typeManager: TypeManager, source: Node, baseExpr: Expr,
-    name: String): Option<CallExpr> {
-        if (let Some(baseTy) <- baseExpr.GetTy()) {
-        if (let Some(funcDecl) <- LookupZeroArgMember(typeManager, source, baseTy, name)) {
-            AddSyntheticImportedTarget(source, funcDecl)
-            let memberAccess = CreateMemberAccess(baseExpr, funcDecl)
-            memberAccess.target = funcDecl
-            memberAccess.targets.add(funcDecl)
-            CopyBasicInfo(source, memberAccess)
-            AddCurFile(memberAccess, file: source.curFile)
-            if (let Some(funcTy) <- InstantiatedFuncTy(typeManager, funcDecl, baseTy)) {
-                memberAccess.SetTy(funcTy)
+    let callExpr = CreateCallExpr(memberAccess, ArrayList<FuncArg>())
+    CopyBasicInfo(source, callExpr)
+    callExpr.SetTy(Ty.GetInitialTy())
+    AddCurFile(callExpr, file: source.curFile)
+    if (let Some(ctx) <- context) {
+        if (let Some(synthesize) <- synthesizer) {
+            let synTy = synthesize(ctx, SynPos.EXPR_ARG, callExpr)
+            if (Ty.IsTyCorrect(Some(synTy))) {
+                callExpr.SetTy(synTy)
             }
-            let retTy = InstantiatedFuncRetTy(typeManager, funcDecl, baseTy)
-            let callExpr = CreateCallExpr(memberAccess, ArrayList<FuncArg>(), Some(funcDecl), retTy,
-                CallKind.CALL_DECLARED_FUNCTION)
-            CopyBasicInfo(source, callExpr)
-            AddCurFile(callExpr, file: source.curFile)
-            if (let Some(valueTy) <- retTy) {
-                callExpr.SetTy(valueTy)
+            if (let Some(funcDecl) <- callExpr.resolvedFunction) {
+                memberAccess.target = funcDecl
+                AddSyntheticImportedTarget(source, funcDecl)
             }
-            return callExpr
+            return Some(callExpr)
         }
     }
     return None
@@ -620,12 +557,13 @@ private func FinishStringDesugar(forInExpr: ForInExpr, index: VarDecl, tmp: VarD
     forInExpr.forInKind = ForInKind.FORIN_STRING
 }
 
-private func CreateIteratorVar(typeManager: TypeManager, forInExpr: ForInExpr): Option<VarDecl> {
+private func CreateIteratorVar(forInExpr: ForInExpr, context: Option<ASTContext>,
+    synthesizer: Option<(ASTContext, SynPos, Node) -> Ty>): Option<VarDecl> {
     if (let Some(inExpr) <- forInExpr.inExpression) {
         let inExprBegin = inExpr.begin
         let inExprEnd = inExpr.end
-        if (let Some(iteratorCall) <- CreateResolvedNoArgMemberCall(typeManager, inExpr, inExpr,
-            ITERATOR_METHOD_NAME)) {
+        if (let Some(iteratorCall) <- CreateSynthesizedNoArgMemberCall(inExpr, inExpr, ITERATOR_METHOD_NAME,
+            context, synthesizer)) {
             let iterator = CreateVarDecl(ITER_COMPILER, iteratorCall, None)
             iterator.begin = if (let Some(pattern) <- forInExpr.pattern) { pattern.begin } else { inExprBegin }
             iterator.end = if (let Some(patternEnd) <- forInExpr.pattern) { patternEnd.end } else { inExprEnd }
@@ -639,14 +577,14 @@ private func CreateIteratorVar(typeManager: TypeManager, forInExpr: ForInExpr): 
     return None
 }
 
-private func CreateIteratorNextCall(typeManager: TypeManager, forInExpr: ForInExpr,
-    iterator: VarDecl): Option<CallExpr> {
+private func CreateIteratorNextCall(forInExpr: ForInExpr, iterator: VarDecl, context: Option<ASTContext>,
+    synthesizer: Option<(ASTContext, SynPos, Node) -> Ty>): Option<CallExpr> {
     let iteratorRef = CreateVarRef(iterator, forInExpr)
     CopyBasicInfo(forInExpr, iteratorRef)
     if (let Some(iteratorTy) <- iterator.GetTy()) {
         iteratorRef.SetTy(iteratorTy)
     }
-    return CreateResolvedNoArgMemberCall(typeManager, forInExpr, iteratorRef, NEXT_METHOD_NAME)
+    return CreateSynthesizedNoArgMemberCall(forInExpr, iteratorRef, NEXT_METHOD_NAME, context, synthesizer)
 }
 
 private func CreateOptionCtorRef(enumTy: EnumTy, ctorName: String, ctorTy: Ty): Option<RefExpr> {
@@ -792,9 +730,10 @@ private func FinishIterDesugar(forInExpr: ForInExpr, iterator: VarDecl, whileExp
     forInExpr.forInKind = ForInKind.FORIN_ITER
 }
 
-private func DesugarForInIterExpr(typeManager: TypeManager, forInExpr: ForInExpr): Unit {
-    if (let Some(iterator) <- CreateIteratorVar(typeManager, forInExpr)) {
-        if (let Some(nextCall) <- CreateIteratorNextCall(typeManager, forInExpr, iterator)) {
+private func DesugarForInIterExpr(typeManager: TypeManager, forInExpr: ForInExpr, context: Option<ASTContext>,
+    synthesizer: Option<(ASTContext, SynPos, Node) -> Ty>): Unit {
+    if (let Some(iterator) <- CreateIteratorVar(forInExpr, context, synthesizer)) {
+        if (let Some(nextCall) <- CreateIteratorNextCall(forInExpr, iterator, context, synthesizer)) {
             if (let Some(selectorTy) <- nextCall.GetTy()) {
                 if (let Some(enumTy) <- (selectorTy as EnumTy)) {
                     let whileExpr = WhileExpr()
@@ -884,7 +823,9 @@ public func DesugarForInRangeExpr(forInExpr: ForInExpr): Unit {
     }
 }
 
-public func DesugarForInExpr(typeManager: TypeManager, forInExpr: ForInExpr): Unit {
+public func DesugarForInExpr(typeManager: TypeManager, forInExpr: ForInExpr,
+    context!: Option<ASTContext> = None,
+    synthesizer!: Option<(ASTContext, SynPos, Node) -> Ty> = None): Unit {
     if (!Ty.IsTyCorrect(forInExpr.GetTy())) {
         return
     }
@@ -908,7 +849,7 @@ public func DesugarForInExpr(typeManager: TypeManager, forInExpr: ForInExpr): Un
             if (inTy.IsString()) {
                 DesugarForInStringExpr(typeManager, forInExpr)
             } else {
-                DesugarForInIterExpr(typeManager, forInExpr)
+                DesugarForInIterExpr(typeManager, forInExpr, context, synthesizer)
             }
         }
     }
