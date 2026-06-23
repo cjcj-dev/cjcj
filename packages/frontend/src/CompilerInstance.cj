@@ -919,34 +919,49 @@ public class CompilerInstance {
     }
 
     private func ManglingHelpFunction(baseMangler: RealBaseMangler, adapter: RealMangleAstAdapter): Unit {
+        let topDecls = ArrayList<(String, Decl)>()
+        let deduplicatedEmplace = { decl: Decl, pkgName: String =>
+            if (decl.TestAttr(Attribute.IMPORTED) && !decl.isUsedImports) {
+                return
+            }
+            for (topDecl in topDecls) {
+                if (topDecl[0] == pkgName && refEq(topDecl[1], decl)) {
+                    return
+                }
+            }
+            topDecls.add((pkgName, decl))
+        }
+
         for (pkg in GetPackages()) {
             for (file in pkg.files) {
                 for (decl in file.decls) {
-                    mangleDeclTree(baseMangler, adapter, pkg.fullPackageName, decl)
+                    deduplicatedEmplace(decl, pkg.fullPackageName)
                 }
             }
             for (decl in pkg.genericInstantiatedDecls) {
-                mangleDeclTree(baseMangler, adapter, pkg.fullPackageName, decl)
+                deduplicatedEmplace(decl, pkg.fullPackageName)
             }
         }
         for (pkg in importManager.GetAllImportedPackages()) {
+            if (!pkg.TestAttr(Attribute.IMPORTED)) {
+                continue
+            }
             for (file in pkg.files) {
                 for (decl in file.decls) {
-                    if (decl.isUsedImports || !decl.TestAttr(Attribute.IMPORTED)) {
-                        mangleDeclTree(baseMangler, adapter, pkg.fullPackageName, decl)
-                    }
+                    deduplicatedEmplace(decl, pkg.fullPackageName)
                 }
                 for (decl in file.exportedInternalDecls) {
-                    if (decl.isUsedImports || !decl.TestAttr(Attribute.IMPORTED)) {
-                        mangleDeclTree(baseMangler, adapter, pkg.fullPackageName, decl)
-                    }
+                    deduplicatedEmplace(decl, pkg.fullPackageName)
                 }
             }
             for (decl in pkg.genericInstantiatedDecls) {
                 if (decl.IsNominalDecl()) {
-                    mangleDeclTree(baseMangler, adapter, pkg.fullPackageName, decl)
+                    deduplicatedEmplace(decl, pkg.fullPackageName)
                 }
             }
+        }
+        for (topDecl in topDecls) {
+            mangleDeclTree(baseMangler, adapter, topDecl[0], topDecl[1])
         }
     }
 

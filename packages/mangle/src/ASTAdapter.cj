@@ -13,26 +13,6 @@ private class AstDeclPair {
     }
 }
 
-private class AstLambdaPair {
-    public var source: LambdaExpr
-    public var target: MangleDecl
-
-    public init(source: LambdaExpr, target: MangleDecl) {
-        this.source = source
-        this.target = target
-    }
-}
-
-private class AstAnnotationArrayPair {
-    public var source: ArrayLit
-    public var target: MangleDecl
-
-    public init(source: ArrayLit, target: MangleDecl) {
-        this.source = source
-        this.target = target
-    }
-}
-
 private func AddAttrIf(target: MangleDecl, condition: Bool, attr: Attribute): Unit {
     if (condition) {
         target.attrs.add(attr)
@@ -100,74 +80,71 @@ private func CopyParamAttributes(source: FuncParam, target: MangleFuncParam): Un
     }
 }
 
-private func SameAdapterDecl(left: Decl, right: Decl): Bool {
-    if (left.astKind != right.astKind || left.begin != right.begin || left.end != right.end ||
-        left.identifier != right.identifier || left.fullPackageName != right.fullPackageName) {
-        return false
+private class MangleAdapterIdAllocator {
+    private static var nextId: Int64 = 0
+
+    public static func Next(): Int64 {
+        let out = nextId
+        nextId++
+        return out
     }
-    if (!left.rawMangleName.isEmpty() || !right.rawMangleName.isEmpty() ||
-        !left.mangledName.isEmpty() || !right.mangledName.isEmpty() ||
-        !left.exportId.isEmpty() || !right.exportId.isEmpty()) {
-        return left.rawMangleName == right.rawMangleName && left.mangledName == right.mangledName &&
-            left.exportId == right.exportId
-    }
-    return true
 }
 
 public class MangleAstAdapter {
+    private let declCache: HashMap<Int64, MangleDecl> = HashMap<Int64, MangleDecl>()
+    private let lambdaCache: HashMap<Int64, MangleDecl> = HashMap<Int64, MangleDecl>()
+    private let annotationArrayCache: HashMap<Int64, MangleDecl> = HashMap<Int64, MangleDecl>()
     private let declPairs: ArrayList<AstDeclPair> = ArrayList<AstDeclPair>()
-    private let lambdaPairs: ArrayList<AstLambdaPair> = ArrayList<AstLambdaPair>()
-    private let annotationArrayPairs: ArrayList<AstAnnotationArrayPair> = ArrayList<AstAnnotationArrayPair>()
 
     public init() {}
 
-    private func FindDecl(source: Decl): Option<MangleDecl> {
-        for (pair in declPairs) {
-            if (SameAdapterDecl(pair.source, source)) {
-                return pair.target
-            }
+    private func EnsureAdapterId(source: Node): Int64 {
+        if (source.mangleAdapterId < 0) {
+            source.mangleAdapterId = MangleAdapterIdAllocator.Next()
         }
-        return None
+        return source.mangleAdapterId
+    }
+
+    private func SameAdapterNode(left: Node, right: Node): Bool {
+        return EnsureAdapterId(left) == EnsureAdapterId(right)
+    }
+
+    private func FindDecl(source: Decl): Option<MangleDecl> {
+        if (source.mangleAdapterId < 0) {
+            return None
+        }
+        return declCache.get(source.mangleAdapterId)
     }
 
     private func StoreDecl(source: Decl, target: MangleDecl): Unit {
+        declCache[EnsureAdapterId(source)] = target
         declPairs.add(AstDeclPair(source, target))
     }
 
     private func FindLambda(source: LambdaExpr): Option<MangleDecl> {
-        for (pair in lambdaPairs) {
-            if (pair.source.begin == source.begin && pair.source.end == source.end &&
-                pair.source.mangledName == source.mangledName) {
-                return pair.target
-            }
+        if (source.mangleAdapterId < 0) {
+            return None
         }
-        return None
+        return lambdaCache.get(source.mangleAdapterId)
     }
 
     private func StoreLambda(source: LambdaExpr, target: MangleDecl): Unit {
-        lambdaPairs.add(AstLambdaPair(source, target))
+        lambdaCache[EnsureAdapterId(source)] = target
     }
 
     private func FindAnnotationArray(source: ArrayLit): Option<MangleDecl> {
-        for (pair in annotationArrayPairs) {
-            if (SameNode(pair.source, source)) {
-                return pair.target
-            }
+        if (source.mangleAdapterId < 0) {
+            return None
         }
-        return None
+        return annotationArrayCache.get(source.mangleAdapterId)
     }
 
     private func StoreAnnotationArray(source: ArrayLit, target: MangleDecl): Unit {
-        annotationArrayPairs.add(AstAnnotationArrayPair(source, target))
+        annotationArrayCache[EnsureAdapterId(source)] = target
     }
 
     private func SameNode(left: Node, right: Node): Bool {
-        if (let Some(leftDecl) <- (left as Decl)) {
-            if (let Some(rightDecl) <- (right as Decl)) {
-                return SameAdapterDecl(leftDecl, rightDecl)
-            }
-        }
-        return left.astKind == right.astKind && left.begin == right.begin && left.end == right.end
+        return SameAdapterNode(left, right)
     }
 
     private func PackageNameOf(node: Node): String {
