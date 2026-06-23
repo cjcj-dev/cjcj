@@ -180,9 +180,18 @@ public class CGEnumType <: CGCustomType {
             return i8Ty
         }
         if (cgEnumTypeKind == CGEnumTypeKind.EXHAUSTIVE_ASSOCIATED_OPTION_LIKE_REF) {
+            let layoutName = STRUCT_TYPE_PREFIX + chirType.ToString()
+            let enumLayout = GetOrCreateNamedStructType(cgCtx.GetLLVMContext(), layoutName)
+            layoutType = enumLayout
             let refTy = CGType.GetRefType(cgCtx.GetLLVMContext())
             llvmType = refTy
-            layoutType = refTy
+            if (!cgCtx.IsGeneratedStructType(layoutName)) {
+                let body = ArrayList<LLVMTypeRef>()
+                body.add(refTy)
+                body.add(unsafe { LLVMArrayType(LLVMInt8TypeInContext(cgCtx.GetLLVMContext().raw), 0u32) })
+                SetStructTypeBody(enumLayout, body)
+                cgCtx.AddGeneratedStructType(layoutName)
+            }
             return refTy
         }
         let layoutName = STRUCT_TYPE_PREFIX + chirType.ToString()

@@ -1139,10 +1139,7 @@ public class IRBuilder2 <: Resource {
             let resultCGType = CGType.GetOrCreate(cgMod, resultTy)
             retValue = CreateLoad(returnCGType.GetLLVMType(), retValue, name: "sret.load")
             if (resultCGType.GetSize().isSome() && !resultCGType.IsReference()) {
-                let payload = GetPayloadFromObject(retValue)
-                let payloadType = unsafe { LLVMPointerType(resultCGType.GetLLVMType(), 1u32) }
-                let typedPayload = CreateBitCast(payload, payloadType, name: "sret.payload")
-                return CreateLoad(resultCGType.GetLLVMType(), typedPayload, name: "sret.value")
+                return LoadSRetPayloadValue(retValue, resultCGType)
             }
             return retValue
         }
@@ -1150,10 +1147,7 @@ public class IRBuilder2 <: Resource {
             let resultTy = CurrentExpressionResultType() ?? returnTy
             let resultCGType = CGType.GetOrCreate(cgMod, resultTy)
             if (resultCGType.GetSize().isSome() && !resultCGType.IsReference()) {
-                let payload = GetPayloadFromObject(retValue)
-                let payloadType = unsafe { LLVMPointerType(resultCGType.GetLLVMType(), 1u32) }
-                let typedPayload = CreateBitCast(payload, payloadType, name: "sret.payload")
-                return CreateLoad(resultCGType.GetLLVMType(), typedPayload, name: "sret.value")
+                return LoadSRetPayloadValue(retValue, resultCGType)
             }
             return retValue
         }
@@ -1164,10 +1158,7 @@ public class IRBuilder2 <: Resource {
                 retValue = CreateLoad(returnCGType.GetLLVMType(), retValue, name: "sret.load")
             }
             if (resultCGType.GetSize().isSome() && !resultCGType.IsReference()) {
-                let payload = GetPayloadFromObject(retValue)
-                let payloadType = unsafe { LLVMPointerType(resultCGType.GetLLVMType(), 1u32) }
-                let typedPayload = CreateBitCast(payload, payloadType, name: "sret.payload")
-                return CreateLoad(resultCGType.GetLLVMType(), typedPayload, name: "sret.value")
+                return LoadSRetPayloadValue(retValue, resultCGType)
             }
         }
         if (!returnTy.IsUnit() && !returnTy.IsNothing() && !returnTy.IsVoid() && returnCGType.GetSize().isSome() &&
@@ -1175,6 +1166,27 @@ public class IRBuilder2 <: Resource {
             return CreateLoad(returnCGType.GetLLVMType(), retValue, name: "sret.value")
         }
         return retValue
+    }
+
+    private func LoadSRetPayloadValue(retValue: LLVMValueRef, resultCGType: CGType): LLVMValueRef {
+        let elementType = resultCGType.GetLLVMType()
+        let payload = GetPayloadFromObject(retValue)
+        let payloadType = unsafe { LLVMPointerType(elementType, 1u32) }
+        let typedPayload = CreateBitCast(payload, payloadType, name: "sret.payload")
+        if (IsGCReferenceLLVMType(elementType)) {
+            return CallGCReadRef(retValue, typedPayload)
+        }
+        return CreateLoad(elementType, typedPayload, name: "sret.value")
+    }
+
+    private func IsGCReferenceLLVMType(llvmTy: LLVMTypeRef): Bool {
+        if (llvmTy.isNull()) {
+            return false
+        }
+        if (unsafe { LLVMGetTypeKind(llvmTy) } != 12) {
+            return false
+        }
+        return unsafe { LLVMGetPointerAddressSpace(llvmTy) } == 1u32
     }
 
     private func GetSRetAttributeType(retType: Type, retCGType: CGType): LLVMTypeRef {
