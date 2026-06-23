@@ -997,7 +997,7 @@ public open class BaseMangler {
         if (ty.kind == TypeKind.TYPE_CSTRING) {
             return MangleCStringType()
         }
-        return unsupportedMangleType(ty.kind, "Unexpected semantic type to be mangled")
+        return ""
     }
 
     public func MangleUserDefinedType(ty: MangleType, genericsTypeStack: ArrayList<String>, declare: Bool,
