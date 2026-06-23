@@ -256,6 +256,7 @@ public func PreCheckPackage(ctx: ASTContext, pkg: Package, typeManager!: TypeMan
     ctx.declMap.clear()
     ctx.mem2Decls.clear()
     ctx.enumConstructors.clear()
+    TypeCheckDeclBuildImportedEnumConstructorMap(ctx)
     var valid = true
     for (file in pkg.files) {
         for (decl in file.decls) {

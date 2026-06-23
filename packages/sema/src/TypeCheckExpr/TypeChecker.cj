@@ -29,6 +29,31 @@ private func questTy(): Ty {
     return TypeManager.GetQuestTy()
 }
 
+private func typeCheckExprNodeHash(node: Node): Int64 {
+    return node.begin.hashCode() ^ (node.end.hashCode() << 1) ^ ASTKindIndex(node.astKind)
+}
+
+private func typeCheckExprTargetTypeOf(ctx: ASTContext, node: Node): Option<Ty> {
+    return ctx.targetTypeMap.get(typeCheckExprNodeHash(node))
+}
+
+private func typeCheckExprPutTargetType(ctx: ASTContext, node: Node, ty: Ty): Unit {
+    ctx.targetTypeMap[typeCheckExprNodeHash(node)] = ty
+}
+
+private func typeCheckExprClearTargetType(ctx: ASTContext, node: Node): Unit {
+    ctx.targetTypeMap.remove(typeCheckExprNodeHash(node))
+}
+
+private func typeCheckExprAllMacroFuncDecls(targets: ArrayList<Decl>): Bool {
+    for (target in targets) {
+        if (!target.TestAttr(Attribute.MACRO_FUNC)) {
+            return false
+        }
+    }
+    return true
+}
+
 private func typeCheckExprGetCurInheritableDecl(ctx: ASTContext, scopeName: String,
     currentFuncBody: Option<FuncBody>): Option<InheritableDecl> {
     var scopeGateName = GetScopeGateName(scopeName)
@@ -1828,7 +1853,17 @@ public class TypeChecker {
         if (let Some(baseFunc) <- callExpr.baseFunc) {
             SetIsNotAlone(baseFunc)
             SetCallOrPattern(baseFunc, callExpr)
+            var copiedTargetToBase = false
+            if (let Some(baseRef) <- (baseFunc as RefExpr)) {
+                if (let Some(targetTy) <- typeCheckExprTargetTypeOf(ctx, callExpr)) {
+                    typeCheckExprPutTargetType(ctx, baseRef, targetTy)
+                    copiedTargetToBase = true
+                }
+            }
             let _ = Synthesize(ctx, baseFunc)
+            if (copiedTargetToBase) {
+                typeCheckExprClearTargetType(ctx, baseFunc)
+            }
         }
         for (arg in callExpr.args) {
             let _ = SynthesizeFuncArg(ctx, arg)
@@ -2918,10 +2953,20 @@ public class TypeChecker {
         if (let Some(block) <- (expr as Block)) {
             return CheckBlock(ctx, target, block)
         }
+        if (let Some(nameRef) <- (expr as NameReferenceExpr)) {
+            typeCheckExprPutTargetType(ctx, nameRef, target)
+            let _ = Synthesize(ctx, nameRef)
+            let ok = ChkNameReferenceExpr(impl.typeManager, target, nameRef)
+            typeCheckExprClearTargetType(ctx, nameRef)
+            return FinishCheck(ctx, expr, ok)
+        }
         if (let Some(callExpr) <- (expr as CallExpr)) {
+            typeCheckExprPutTargetType(ctx, callExpr, target)
             SynthesizeCallChildren(ctx, callExpr)
-            return FinishCheck(ctx, callExpr, ChkCallExprWithArgChecker(impl.typeManager, impl.diag, Some(target),
-                callExpr, Some({ paramTy: Ty, arg: FuncArg => CheckCallArgFromContext(ctx, paramTy, arg) })))
+            let ok = ChkCallExprWithArgChecker(impl.typeManager, impl.diag, Some(target), callExpr,
+                Some({ paramTy: Ty, arg: FuncArg => CheckCallArgFromContext(ctx, paramTy, arg) }))
+            typeCheckExprClearTargetType(ctx, callExpr)
+            return FinishCheck(ctx, callExpr, ok)
         }
         if (let Some(ifExpr) <- (expr as IfExpr)) {
             SynthesizeIfChildren(ctx, ifExpr)
@@ -3004,15 +3049,19 @@ public class TypeChecker {
                 targets.add(target)
             }
         }
-        if (targets.isEmpty() && ctx.IsEnumConstructor(refExpr.ref.identifier.Val())) {
-            var arity: UInt64 = 0u64
-            if (let Some(owner) <- refExpr.callOrPattern) {
-                if (let Some(callExpr) <- (owner as CallExpr)) {
-                    arity = UInt64(callExpr.args.size)
+        if (!refExpr.TestAttr(Attribute.MACRO_INVOKE_BODY) && typeCheckExprAllMacroFuncDecls(targets)) {
+            let checker = EnumSugarChecker(impl.typeManager, ctx, refExpr)
+            let (resolved, resolvedTargets) = checker.Resolve()
+            if (resolved) {
+                targets.clear()
+                for (target in resolvedTargets) {
+                    targets.add(target)
                 }
-            }
-            for (constructor in ctx.FindEnumConstructor(refExpr.ref.identifier.Val(), arity)) {
-                targets.add(constructor)
+                if (targets.isEmpty()) {
+                    refExpr.SetTy(TypeManager.GetInvalidTy())
+                    refExpr.ref.targets.clear()
+                    return
+                }
             }
         }
         if (targets.isEmpty()) {
