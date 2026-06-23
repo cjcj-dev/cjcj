@@ -47,6 +47,22 @@ public func GetOrInsertCodeGenGlobal(cgMod: CGModule, globalName: String, global
     return LLVMNullValue()
 }
 
+// Mirror C++ llvm::Module::getNamedGlobal: return the existing global with this name, or None if it
+// has not been inserted yet. Used by the generic-typeinfo creators to short-circuit recursion when
+// the in-progress global has already been declared (but not yet initialized).
+public func GetNamedCodeGenGlobal(cgMod: CGModule, globalName: String): Option<LLVMValueRef> {
+    if (let Some(moduleHandle) <- cgMod.GetLLVMModule()) {
+        var result = LLVMNullValue()
+        try (nameCString = unsafe { LibC.mallocCString(globalName) }.asResource()) {
+            result = unsafe { LLVMGetNamedGlobal(moduleHandle.raw, nameCString.value) }
+        }
+        if (!result.isNull()) {
+            return result
+        }
+    }
+    return None
+}
+
 public func GetOrCreateTypeInfoGlobal(cgMod: CGModule, chirTy: Type, genericKind: CGGenericKind): LLVMValueRef {
     let typeInfo = DeclareTypeInfoGlobal(cgMod, chirTy, genericKind)
     DefineTypeInfoGlobalIfNeeded(cgMod, chirTy, typeInfo)
@@ -83,8 +99,15 @@ public func GetOrCreateGenericTypeInfoGlobal(cgMod: CGModule, chirTy: Type): LLV
     let genericTy = (chirTy as GenericType) ?? throw IllegalArgumentException("expected generic type info")
     let typeInfoTy = GetOrCreateGenericTypeInfoType(cgMod.GetLLVMContext())
     let typeInfoName = GenericTypeInfoName(cgMod, genericTy) + ".ti"
+    // Mirror C++ CGGenericType::GetOrCreateTypeInfo (CGGenericType.cpp:58-60): if the global already
+    // exists (even just declared, before its initializer is set) return it. This caches the global
+    // BEFORE generating its upper bounds, so a re-entrant lookup during F-bounded upper-bound
+    // generation reuses the in-progress global instead of recursing forever.
+    if (let Some(found) <- GetNamedCodeGenGlobal(cgMod, typeInfoName)) {
+        return found
+    }
     let typeInfo = GetOrInsertCodeGenGlobal(cgMod, typeInfoName, typeInfoTy)
-    if (typeInfo.isNull() || unsafe { LLVMIsDeclaration(typeInfo) } == 0) {
+    if (typeInfo.isNull()) {
         return typeInfo
     }
     if (let Some(moduleHandle) <- cgMod.GetLLVMModule()) {
@@ -109,8 +132,15 @@ public func GetOrCreateGenericCustomTypeInfoGlobal(cgMod: CGModule, chirTy: Type
     let customTy = (chirTy as CustomType) ?? throw IllegalArgumentException("expected generic custom type info")
     let typeInfoTy = GetOrCreateGenericCustomTypeInfoType(cgMod.GetLLVMContext())
     let qualifiedName = GenericCustomTypeInfoName(cgMod, customTy)
+    // Mirror C++ CGType::GetOrCreateGenericCustomTypeInfo (CGType.cpp:1046-1048): if the global already
+    // exists (even just declared, before its initializer is set) return it. This caches the global
+    // BEFORE generating its type args, so a re-entrant lookup during F-bounded type-arg generation
+    // reuses the in-progress global instead of recursing forever.
+    if (let Some(found) <- GetNamedCodeGenGlobal(cgMod, qualifiedName + ".ti")) {
+        return found
+    }
     let typeInfo = GetOrInsertCodeGenGlobal(cgMod, qualifiedName + ".ti", typeInfoTy)
-    if (typeInfo.isNull() || unsafe { LLVMIsDeclaration(typeInfo) } == 0) {
+    if (typeInfo.isNull()) {
         return typeInfo
     }
     if (let Some(moduleHandle) <- cgMod.GetLLVMModule()) {
