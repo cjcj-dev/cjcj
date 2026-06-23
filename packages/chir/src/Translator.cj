@@ -821,6 +821,9 @@ public class Translator {
     }
 
     public func Visit(expr: AstCallExpr): Option<Value> {
+        if (let Some(intrinsicResult) <- TranslateIntrinsicCall(expr)) {
+            return Some(intrinsicResult)
+        }
         if (IsFunctionValueCall(expr)) {
             return Some(TranslateFunctionValueCall(expr))
         }
@@ -3838,6 +3841,94 @@ public class Translator {
             return desugarArgs
         }
         return expr.args
+    }
+
+    // Faithful port of Translator::TranslateIntrinsicCall
+    // (cangjie_compiler/src/CHIR/AST2CHIR/TranslateASTNode/TranslateCallExpr.cpp:515).
+    // A CallExpr whose callKind is CALL_INTRINSIC_FUNCTION is lowered to a CHIR Intrinsic
+    // expression (carrying the IntrinsicKind + args), instead of an Apply to a symbol. The
+    // intrinsic func decl itself is intentionally not collected (FaithfulAST2CHIR.cj:442/606,
+    // mirroring ASTPackage2CHIR.cpp:230/538), so codegen dispatches via the intrinsic kind.
+    private func TranslateIntrinsicCall(expr: AstCallExpr): Option<Value> {
+        // Conditions to check if this is a call to intrinsic
+        if (expr.callKind != AstCallKind.CALL_INTRINSIC_FUNCTION) {
+            return None
+        }
+        let base = RequireExpr(expr.baseFunc, "intrinsic call base")
+        let target = base.GetTarget() ??
+            throw IllegalStateException("faithful AST2CHIR intrinsic call base has no target")
+        let identifier = target.identifier.Val()
+        let resultTy = chirTy.TranslateType(RequireAstTy(expr))
+
+        // Get the intrinsic kind. Determine the package the intrinsic was declared in, mirroring
+        // the C++ ordering: generic decl's package, else outer decl's generic package, else the
+        // target's own package. Headless intrinsics are resolved first inside LookupPackageIntrinsicKind.
+        let packageName = if (let Some(genericDecl) <- target.genericDecl) {
+            genericDecl.fullPackageName
+        } else if (let Some(outerDecl) <- target.outerDecl) {
+            if (let Some(outerGenericDecl) <- outerDecl.genericDecl) {
+                outerGenericDecl.fullPackageName
+            } else {
+                target.fullPackageName
+            }
+        } else {
+            target.fullPackageName
+        }
+        let intrinsicKind = LookupPackageIntrinsicKind(packageName, identifier) ?? IntrinsicKind.NOT_INTRINSIC
+
+        // Translate arguments (mirrors TranslateFuncArgs(expr, nullptr, nullptr)): generate the
+        // `this` object first for a non-static member intrinsic, then the explicit args with no
+        // expected-type coercion.
+        let args = ArrayList<Value>()
+        if (let Some(callee) <- expr.resolvedFunction) {
+            if (callee.IsMemberDecl() && !callee.TestAttr(AstAttribute.CONSTRUCTOR) &&
+                !callee.TestAttr(AstAttribute.STATIC)) {
+                args.add(TranslateThisObjectForMemberFuncCall(expr, callee))
+            }
+        }
+        for (arg in ActiveCallArgs(expr)) {
+            let argExpr = RequireFuncArgExpr(arg, "intrinsic call argument")
+            let value = Translator.TranslateASTNode(argExpr, this) ??
+                throw IllegalStateException("faithful AST2CHIR intrinsic call arg produced no value")
+            args.add(value)
+        }
+
+        var retTy = resultTy
+        if (intrinsicKind == IntrinsicKind.BLACK_BOX && !args.isEmpty()) {
+            // intrinsic blackBox's signature is blackBox<T>(v: T): T;
+            // codegen uses the arg type as the intrinsic's result type.
+            retTy = args[0].GetType() ?? retTy
+        }
+
+        let instTypeArgs = ArrayList<Type>()
+        if (let Some(nameRef) <- (base as AstNameReferenceExpr)) {
+            for (instTy in nameRef.instTys) {
+                instTypeArgs.add(chirTy.TranslateType(instTy))
+            }
+        }
+        let callContext = IntrisicCallContext(kind: intrinsicKind, args: args, instTypeArgs: instTypeArgs)
+        let intriVar = CreateIntrinsicMaybeWithException(retTy, callContext)
+
+        if (RequireAstTy(expr).IsUnit()) {
+            // Codegen will not generate a valid 'unit' value for intrinsic call.
+            return RequireResult(builder.CreateConstant(builder.context.GetUnitTy(), UnitLiteral(), CurrentBlock()))
+        }
+        if (intrinsicKind == IntrinsicKind.BLACK_BOX && !refEq(retTy, resultTy)) {
+            return RequireResult(builder.CreateLoad(resultTy, intriVar, CurrentBlock()))
+        }
+        return intriVar
+    }
+
+    private func CreateIntrinsicMaybeWithException(resultTy: Type, callContext: IntrisicCallContext): Value {
+        if (let Some(errorBlock) <- CurrentTryCatchBlock()) {
+            let successBlock = builder.CreateBlock(RequireParentBlockGroup(CurrentBlock(), "intrinsic-with-exception"))
+            let term = builder.CreateIntrinsicWithException(resultTy, callContext, successBlock, errorBlock,
+                CurrentBlock())
+            let result = RequireResult(term)
+            currentBlock = successBlock
+            return result
+        }
+        return RequireResult(builder.CreateIntrinsic(resultTy, callContext, CurrentBlock()))
     }
 
     private func CopyValueList(values: ArrayList<Value>): ArrayList<Value> {
