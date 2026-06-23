@@ -1,6 +1,7 @@
 package cangjie_compiler::chir
 
 import std.collection.*
+import cangjie_compiler::utils.{OverflowStrategy, OverflowStrategyName}
 
 private var gLambdaClonedIdx: UInt64 = 0u64
 
@@ -357,24 +358,55 @@ public open class Expression <: Base {
 }
 
 public class UnaryExpression <: Expression {
-    public init(kind: ExprKind, operand: Value, parent: Option<Block>) {
+    private let overflowStrategy: OverflowStrategy
+
+    public init(kind: ExprKind, operand: Value, parent: Option<Block>,
+        overflowStrategy!: OverflowStrategy = OverflowStrategy.NA) {
         super(kind, MakeUnaryOperands(operand), parent)
+        this.overflowStrategy = overflowStrategy
+    }
+
+    public func GetOverflowStrategy(): OverflowStrategy {
+        return overflowStrategy
+    }
+
+    public override func AddExtraComment(): String {
+        if (overflowStrategy != OverflowStrategy.NA) {
+            return "Overflow: " + OverflowStrategyName(overflowStrategy)
+        }
+        return ""
     }
 
     public override func Clone(builder: CHIRBuilder, parent: Block): Expression {
-        let cloned = builder.CreateUnaryExpression(GetExprKind(), RequiredResultType(this), GetOperand(0), parent)
+        let cloned = builder.CreateUnaryExpression(GetExprKind(), RequiredResultType(this), GetOperand(0), parent,
+            overflowStrategy: GetOverflowStrategy())
         return FinishExpressionClone(this, cloned)
     }
 }
 
 public class BinaryExpression <: Expression {
-    public init(kind: ExprKind, left: Value, right: Value, parent: Option<Block>) {
+    private let overflowStrategy: OverflowStrategy
+
+    public init(kind: ExprKind, left: Value, right: Value, parent: Option<Block>,
+        overflowStrategy!: OverflowStrategy = OverflowStrategy.NA) {
         super(kind, MakeBinaryOperands(left, right), parent)
+        this.overflowStrategy = overflowStrategy
+    }
+
+    public func GetOverflowStrategy(): OverflowStrategy {
+        return overflowStrategy
+    }
+
+    public override func AddExtraComment(): String {
+        if (overflowStrategy != OverflowStrategy.NA) {
+            return "Overflow: " + OverflowStrategyName(overflowStrategy)
+        }
+        return ""
     }
 
     public override func Clone(builder: CHIRBuilder, parent: Block): Expression {
         let cloned = builder.CreateBinaryExpression(GetExprKind(), RequiredResultType(this), GetOperand(0), GetOperand(1),
-            parent)
+            parent, overflowStrategy: GetOverflowStrategy())
         return FinishExpressionClone(this, cloned)
     }
 }
@@ -980,8 +1012,11 @@ public class GetRTTIStatic <: Expression {
 }
 
 public class TypeCast <: Expression {
-    public init(source: Value, parent: Option<Block>) {
+    private let overflowStrategy: OverflowStrategy
+
+    public init(source: Value, parent: Option<Block>, overflowStrategy!: OverflowStrategy = OverflowStrategy.NA) {
         super(ExprKind.TYPECAST, MakeUnaryOperands(source), parent)
+        this.overflowStrategy = overflowStrategy
     }
 
     public func GetSourceValue(): Value {
@@ -999,8 +1034,20 @@ public class TypeCast <: Expression {
         return None
     }
 
+    public func GetOverflowStrategy(): OverflowStrategy {
+        return overflowStrategy
+    }
+
+    public override func AddExtraComment(): String {
+        if (overflowStrategy != OverflowStrategy.NA) {
+            return "Overflow: " + OverflowStrategyName(overflowStrategy)
+        }
+        return ""
+    }
+
     public override func Clone(builder: CHIRBuilder, parent: Block): Expression {
-        let cloned = builder.CreateTypeCast(RequiredResultType(this), GetSourceValue(), parent)
+        let cloned = builder.CreateTypeCast(RequiredResultType(this), GetSourceValue(), parent,
+            overflowStrategy: GetOverflowStrategy())
         return FinishExpressionClone(this, cloned)
     }
 }

@@ -2,6 +2,7 @@ package cangjie_compiler::sema
 
 import std.collection.*
 import cangjie_compiler::ast.*
+import cangjie_compiler::ast.AnnotationKind as AstAnnotationKind
 
 private func IsOverflowOp(op: TokenKind): Bool {
     return match (op) {
@@ -109,6 +110,7 @@ public func SetOverflowFlag(node: Node): Unit {
 }
 
 public func SetOverflowStrategyForPkg(pkg: Package): Unit {
+    SetOverflowStrategyForNode(pkg, OverflowStrategy.NA, OverflowStrategy.NA)
     let walker = Walker(pkg, visitPre: { curNode: Node =>
         SetOverflowFlag(curNode)
         VisitAction.WALK_CHILDREN
@@ -160,7 +162,16 @@ public func SetOverflowStrategyForNode(
 ): Unit {
     let walker = Walker(root, visitPre: { curNode: Node =>
         if (let Some(funcDecl) <- (curNode as FuncDecl)) {
-            if (funcDecl.TestAttr(Attribute.NUMERIC_OVERFLOW)) {
+            var funcHasOverflowStrategy = funcDecl.TestAttr(Attribute.NUMERIC_OVERFLOW)
+            for (annotation in funcDecl.annotations) {
+                if (annotation.kind == AstAnnotationKind.NUMERIC_OVERFLOW) {
+                    funcHasOverflowStrategy = true
+                    funcDecl.EnableAttr(Attribute.NUMERIC_OVERFLOW)
+                    funcDecl.overflowStrategy = annotation.overflowStrategy
+                    break
+                }
+            }
+            if (funcHasOverflowStrategy) {
                 if (let Some(funcBody) <- funcDecl.funcBody) {
                     SetOverflowStrategyForNode(funcBody, funcDecl.overflowStrategy, optionStrategy)
                 }

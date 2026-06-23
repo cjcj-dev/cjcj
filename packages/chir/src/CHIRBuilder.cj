@@ -1,6 +1,7 @@
 package cangjie_compiler::chir
 
 import std.collection.*
+import cangjie_compiler::utils.OverflowStrategy
 
 public class CHIRBuilder {
     public let context: CHIRContext
@@ -107,8 +108,9 @@ public class CHIRBuilder {
         return expr
     }
 
-    public func CreateUnaryExpression(kind: ExprKind, resultTy: Type, operand: Value, parent: Block): UnaryExpression {
-        let expr = UnaryExpression(kind, operand, parent)
+    public func CreateUnaryExpression(kind: ExprKind, resultTy: Type, operand: Value, parent: Block,
+        overflowStrategy!: OverflowStrategy = OverflowStrategy.NA): UnaryExpression {
+        let expr = UnaryExpression(kind, operand, parent, overflowStrategy: overflowStrategy)
         parent.AppendExpression(expr)
         context.RegisterExpression(expr)
         CreateLocalVar(resultTy, "%${context.GetAllNodesNum()}", expr)
@@ -116,8 +118,8 @@ public class CHIRBuilder {
     }
 
     public func CreateBinaryExpression(kind: ExprKind, resultTy: Type, left: Value, right: Value,
-        parent: Block): BinaryExpression {
-        let expr = BinaryExpression(kind, left, right, parent)
+        parent: Block, overflowStrategy!: OverflowStrategy = OverflowStrategy.NA): BinaryExpression {
+        let expr = BinaryExpression(kind, left, right, parent, overflowStrategy: overflowStrategy)
         parent.AppendExpression(expr)
         context.RegisterExpression(expr)
         CreateLocalVar(resultTy, "%${context.GetAllNodesNum()}", expr)
@@ -244,8 +246,9 @@ public class CHIRBuilder {
         return expr
     }
 
-    public func CreateTypeCast(resultTy: Type, source: Value, parent: Block): TypeCast {
-        let expr = TypeCast(source, parent)
+    public func CreateTypeCast(resultTy: Type, source: Value, parent: Block,
+        overflowStrategy!: OverflowStrategy = OverflowStrategy.NA): TypeCast {
+        let expr = TypeCast(source, parent, overflowStrategy: overflowStrategy)
         parent.AppendExpression(expr)
         context.RegisterExpression(expr)
         CreateLocalVar(resultTy, "%${context.GetAllNodesNum()}", expr)

@@ -763,7 +763,8 @@ public class Translator {
         let rhs = Translator.TranslateASTNode(RequireExpr(expr.rightExpr, "binary rhs"), this) ??
             throw IllegalStateException("faithful AST2CHIR binary rhs produced no value")
         let resultTy = chirTy.TranslateType(RequireAstTy(expr))
-        let binary = builder.CreateBinaryExpression(ToCHIRBinaryOp(expr.op), resultTy, lhs, rhs, CurrentBlock())
+        let binary = builder.CreateBinaryExpression(ToCHIRBinaryOp(expr.op), resultTy, lhs, rhs, CurrentBlock(),
+            overflowStrategy: expr.overflowStrategy)
         return RequireResult(binary)
     }
 
@@ -771,7 +772,8 @@ public class Translator {
         let operand = Translator.TranslateASTNode(RequireExpr(expr.expr, "unary operand"), this) ??
             throw IllegalStateException("faithful AST2CHIR unary operand produced no value")
         let resultTy = chirTy.TranslateType(RequireAstTy(expr))
-        let unary = builder.CreateUnaryExpression(ToCHIRUnaryOp(expr.op), resultTy, operand, CurrentBlock())
+        let unary = builder.CreateUnaryExpression(ToCHIRUnaryOp(expr.op), resultTy, operand, CurrentBlock(),
+            overflowStrategy: expr.overflowStrategy)
         return RequireResult(unary)
     }
 
@@ -1772,7 +1774,8 @@ public class Translator {
     public func Visit(expr: AstTypeConvExpr): Option<Value> {
         let operand = Translator.TranslateASTNode(RequireExpr(expr.expr, "type conversion operand"), this) ??
             throw IllegalStateException("faithful AST2CHIR type conversion operand produced no value")
-        return RequireResult(builder.CreateTypeCast(chirTy.TranslateType(RequireAstTy(expr)), operand, CurrentBlock()))
+        return RequireResult(builder.CreateTypeCast(chirTy.TranslateType(RequireAstTy(expr)), operand, CurrentBlock(),
+            overflowStrategy: expr.overflowStrategy))
     }
 
     public func Visit(decl: AstVarWithPatternDecl): Option<Value> {
@@ -4715,7 +4718,8 @@ public class Translator {
             let rhsValue = Translator.TranslateASTNode(rightExpr, this) ??
                 throw IllegalStateException("faithful AST2CHIR compound rhs produced no value")
             let opResult = builder.CreateBinaryExpression(ToCHIRCompoundAssignOp(expr.op),
-                lhsValue.GetType() ?? chirTy.TranslateType(RequireAstTy(leftExpr)), lhsValue, rhsValue, CurrentBlock())
+                lhsValue.GetType() ?? chirTy.TranslateType(RequireAstTy(leftExpr)), lhsValue, rhsValue, CurrentBlock(),
+                overflowStrategy: expr.overflowStrategy)
             compoundValue = RequireResult(opResult)
         }
         StoreToLeftValue(leftValueInfo, compoundValue)
@@ -4954,7 +4958,8 @@ public class Translator {
             let rhsValue = Translator.TranslateASTNode(rightExpr, this) ??
                 throw IllegalStateException("faithful AST2CHIR VArray compound rhs produced no value")
             let opResult = builder.CreateBinaryExpression(ToCHIRCompoundAssignOp(assign.op),
-                lhsValue.GetType() ?? elementTy, lhsValue, rhsValue, CurrentBlock())
+                lhsValue.GetType() ?? elementTy, lhsValue, rhsValue, CurrentBlock(),
+                overflowStrategy: assign.overflowStrategy)
             compoundValue = RequireResult(opResult)
         }
         CreateVArraySet(lhsBase, compoundValue, index, elementTy)
