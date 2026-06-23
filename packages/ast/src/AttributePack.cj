@@ -305,6 +305,116 @@ private let ATTRIBUTE_NAMES: Array<String> = [
     "AST_ATTR_END"
 ]
 
+private let ATTR_SIZE: UInt64 = 64u64
+private let ATTR_SET_SIZE: Int64 = Int64(UInt64(AttributeIndex(Attribute.AST_ATTR_END)) / ATTR_SIZE + 1u64)
+
+private func AttributeWordIndex(index: Int64): Int64 {
+    return Int64(UInt64(index) / ATTR_SIZE)
+}
+
+private func AttributeBitMask(index: Int64): UInt64 {
+    return 1u64 << (UInt64(index) % ATTR_SIZE)
+}
+
+private func AttributeFromIndex(index: Int64): Attribute {
+    return match (index) {
+        case 0 => Attribute.IN_REFERENCE_CYCLE
+        case 1 => Attribute.UNREACHABLE
+        case 2 => Attribute.IMPLICIT_USED
+        case 3 => Attribute.IMPORTED
+        case 4 => Attribute.GLOBAL
+        case 5 => Attribute.INITIALIZED
+        case 6 => Attribute.COMPILER_ADD
+        case 7 => Attribute.GENERIC
+        case 8 => Attribute.DEFAULT
+        case 9 => Attribute.STATIC
+        case 10 => Attribute.PUBLIC
+        case 11 => Attribute.PRIVATE
+        case 12 => Attribute.PROTECTED
+        case 13 => Attribute.EXTERNAL
+        case 14 => Attribute.INTERNAL
+        case 15 => Attribute.OVERRIDE
+        case 16 => Attribute.REDEF
+        case 17 => Attribute.ABSTRACT
+        case 18 => Attribute.SEALED
+        case 19 => Attribute.OPEN
+        case 20 => Attribute.OPERATOR
+        case 21 => Attribute.FOREIGN
+        case 22 => Attribute.UNSAFE
+        case 23 => Attribute.MUT
+        case 24 => Attribute.HAS_BROKEN
+        case 25 => Attribute.IN_STRUCT
+        case 26 => Attribute.IN_EXTEND
+        case 27 => Attribute.IN_ENUM
+        case 28 => Attribute.IN_CLASSLIKE
+        case 29 => Attribute.IN_MACRO
+        case 30 => Attribute.PRIMARY_CONSTRUCTOR
+        case 31 => Attribute.CONSTRUCTOR
+        case 32 => Attribute.ENUM_CONSTRUCTOR
+        case 33 => Attribute.FINALIZER
+        case 34 => Attribute.IS_CLONED_SOURCE_CODE
+        case 35 => Attribute.IS_CAPTURE
+        case 36 => Attribute.IN_CORE
+        case 37 => Attribute.NEED_AUTO_BOX
+        case 38 => Attribute.MACRO_EXPANDED_NODE
+        case 39 => Attribute.MACRO_FUNC
+        case 40 => Attribute.MACRO_INVOKE_FUNC
+        case 41 => Attribute.MACRO_INVOKE_BODY
+        case 42 => Attribute.LEFT_VALUE
+        case 43 => Attribute.C
+        case 44 => Attribute.SRC_IMPORTED
+        case 45 => Attribute.JAVA_APP
+        case 46 => Attribute.JAVA_EXT
+        case 47 => Attribute.STD_CALL
+        case 48 => Attribute.NO_MANGLE
+        case 49 => Attribute.INITIALIZATION_CHECKED
+        case 50 => Attribute.IS_BROKEN
+        case 51 => Attribute.GENERIC_INSTANTIATED
+        case 52 => Attribute.HAS_INITIAL
+        case 53 => Attribute.IS_VOLATILE
+        case 54 => Attribute.NUMERIC_OVERFLOW
+        case 55 => Attribute.INTRINSIC
+        case 56 => Attribute.TOOL_ADD
+        case 57 => Attribute.IS_CHECK_VISITED
+        case 58 => Attribute.INCRE_COMPILE
+        case 59 => Attribute.SIDE_EFFECT
+        case 60 => Attribute.IMPLICIT_ADD
+        case 61 => Attribute.MAIN_ENTRY
+        case 62 => Attribute.GENERATED_TO_MOCK
+        case 63 => Attribute.IS_OUTERMOST
+        case 64 => Attribute.IS_ANNOTATION
+        case 65 => Attribute.NO_REFLECT_INFO
+        case 66 => Attribute.MOCK_SUPPORTED
+        case 67 => Attribute.OPEN_TO_MOCK
+        case 68 => Attribute.INTERFACE_IMPL
+        case 69 => Attribute.FOR_TEST
+        case 70 => Attribute.CONTAINS_MOCK_CREATION_CALL
+        case 71 => Attribute.COMMON
+        case 72 => Attribute.FROM_COMMON_PART
+        case 73 => Attribute.COMMON_NON_EXHAUSTIVE
+        case 74 => Attribute.SPECIFIC
+        case 75 => Attribute.COMMON_WITH_DEFAULT
+        case 76 => Attribute.JAVA_MIRROR
+        case 77 => Attribute.JAVA_MIRROR_SUBTYPE
+        case 78 => Attribute.JAVA_HAS_DEFAULT
+        case 79 => Attribute.JAVA_MIRROR_SYNTHETIC_WRAPPER
+        case 80 => Attribute.OBJ_C_MIRROR
+        case 81 => Attribute.OBJ_C_MIRROR_SUBTYPE
+        case 82 => Attribute.OBJ_C_INIT
+        case 83 => Attribute.OBJ_C_OPTIONAL
+        case 84 => Attribute.JAVA_CJ_MAPPING
+        case 85 => Attribute.OBJ_C_CJ_MAPPING
+        case 86 => Attribute.CJ_MIRROR_JAVA_INTERFACE_FWD
+        case 87 => Attribute.DESUGARED_MIRROR_FIELD
+        case 88 => Attribute.HAS_INITED_FIELD
+        case 89 => Attribute.OBJ_C_MIRROR_SYNTHETIC_WRAPPER
+        case 90 => Attribute.CJ_MIRROR_JAVA_INTERFACE_DEFAULT
+        case 91 => Attribute.CJ_MIRROR_OBJC_INTERFACE_FWD
+        case 92 => Attribute.ALREADY_LOADED
+        case _ => Attribute.AST_ATTR_END
+    }
+}
+
 public func AttributeName(attr: Attribute): String {
     let idx = AttributeIndex(attr)
     if (idx >= ATTRIBUTE_NAMES.size) {
@@ -314,49 +424,43 @@ public func AttributeName(attr: Attribute): String {
 }
 
 public class AttributePack {
-    private let enabled: ArrayList<Attribute> = ArrayList<Attribute>()
+    private let attributes: Array<UInt64> = Array<UInt64>(ATTR_SET_SIZE, repeat: 0u64)
 
     public init() {}
 
     public init(other: AttributePack) {
-        for (attr in other.enabled) {
-            enabled.add(attr)
+        for (idx in 0..ATTR_SET_SIZE) {
+            attributes[idx] = other.attributes[idx]
         }
     }
 
     public func SetAttr(attr: Attribute, enable: Bool): Unit {
+        let attrIndex = AttributeIndex(attr)
+        let idx = AttributeWordIndex(attrIndex)
+        let mask = AttributeBitMask(attrIndex)
         if (enable) {
-            if (!TestAttr(attr)) {
-                enabled.add(attr)
-            }
-            return
-        }
-        var idx: Int64 = 0
-        while (idx < enabled.size) {
-            if (enabled[idx] == attr) {
-                enabled.remove(at: idx)
-                return
-            }
-            idx++
+            attributes[idx] = attributes[idx] | mask
+        } else {
+            attributes[idx] = attributes[idx] & (UInt64.Max ^ mask)
         }
     }
 
     public func TestAttr(attr: Attribute): Bool {
-        for (item in enabled) {
-            if (item == attr) {
-                return true
-            }
+        let attrIndex = AttributeIndex(attr)
+        let idx = AttributeWordIndex(attrIndex)
+        if (idx >= attributes.size) {
+            return false
         }
-        return false
+        return (attributes[idx] & AttributeBitMask(attrIndex)) != 0u64
     }
 
     public func GetAllIdxOfAttr(): ArrayList<UInt64> {
         let out = ArrayList<UInt64>()
-        for (idx in 0..(AttributeIndex(Attribute.AST_ATTR_END) + 1)) {
-            for (attr in enabled) {
-                if (AttributeIndex(attr) == idx) {
-                    out.add(UInt64(idx))
-                    break
+        for (wordIndex in 0..attributes.size) {
+            for (bitIndex in 0..Int64(ATTR_SIZE)) {
+                let attrIndex = UInt64(wordIndex) * ATTR_SIZE + UInt64(bitIndex)
+                if ((attributes[wordIndex] & (1u64 << UInt64(bitIndex))) != 0u64) {
+                    out.add(attrIndex)
                 }
             }
         }
@@ -366,11 +470,9 @@ public class AttributePack {
     public func GetAllAttrs(): ArrayList<Attribute> {
         let out = ArrayList<Attribute>()
         for (idx in 0..(AttributeIndex(Attribute.AST_ATTR_END) + 1)) {
-            for (attr in enabled) {
-                if (AttributeIndex(attr) == idx) {
-                    out.add(attr)
-                    break
-                }
+            let attr = AttributeFromIndex(idx)
+            if (TestAttr(attr)) {
+                out.add(attr)
             }
         }
         return out
@@ -385,7 +487,7 @@ public class AttributePack {
         if (ATTRIBUTE_NAMES.size != expected) {
             return "ATTR2STR has invalid mapping(${ATTRIBUTE_NAMES.size}!=${expected})"
         }
-        if (enabled.isEmpty()) {
+        if (GetAllIdxOfAttr().isEmpty()) {
             return "[]"
         }
         let names = ArrayList<String>()
