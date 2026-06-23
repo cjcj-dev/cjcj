@@ -395,7 +395,9 @@ extend SrcCodeChangeState <: Equatable<SrcCodeChangeState> {
 }
 
 // ModuleFormat.fbs enum ExprKind (fbs:333-373): MemberAccess=5, RefExpr=6, CallExpr=7,
-// UnaryExpr=8, BinaryExpr=11, ReturnExpr=3, LitConstExpr=10, IfExpr=23, LambdaExpr=27, Block=28.
+// UnaryExpr=8, BinaryExpr=11, MatchExpr=21, ReturnExpr=3, LitConstExpr=10, IfExpr=23,
+// LambdaExpr=27, Block=28, MatchCase=29, MatchCaseOther=30.
+private const FLAT_EXPR_KIND_WILDCARD: UInt16 = 1u16
 private const FLAT_EXPR_KIND_RETURN: UInt16 = 3u16
 private const FLAT_EXPR_KIND_MEMBER_ACCESS: UInt16 = 5u16
 private const FLAT_EXPR_KIND_REF_EXPR: UInt16 = 6u16
@@ -403,10 +405,13 @@ private const FLAT_EXPR_KIND_CALL: UInt16 = 7u16
 private const FLAT_EXPR_KIND_UNARY: UInt16 = 8u16
 private const FLAT_EXPR_KIND_LIT_CONST: UInt16 = 10u16
 private const FLAT_EXPR_KIND_BINARY: UInt16 = 11u16
+private const FLAT_EXPR_KIND_MATCH: UInt16 = 21u16
 private const FLAT_EXPR_KIND_LET_PATTERN_DESTRUCTOR: UInt16 = 22u16
 private const FLAT_EXPR_KIND_IF: UInt16 = 23u16
 private const FLAT_EXPR_KIND_LAMBDA: UInt16 = 27u16
 private const FLAT_EXPR_KIND_BLOCK: UInt16 = 28u16
+private const FLAT_EXPR_KIND_MATCH_CASE: UInt16 = 29u16
+private const FLAT_EXPR_KIND_MATCH_CASE_OTHER: UInt16 = 30u16
 
 // ModuleFormat.fbs enum PatternKind (fbs:515-524).
 private const FLAT_PATTERN_KIND_CONST: UInt8 = 1u8
@@ -1727,6 +1732,9 @@ private class CjoSignatureMaterializer {
         }
         // Expr field 0 (slot 4) = kind.
         let kind = reader.U16Field(exprTable, 4, 0u16)
+        if (kind == FLAT_EXPR_KIND_WILDCARD) {
+            return Some(LoadFlatWildcardExpr(reader, exprTable))
+        }
         if (kind == FLAT_EXPR_KIND_LIT_CONST) {
             return Some(LoadFlatLitConstExpr(reader, exprTable))
         }
@@ -1745,6 +1753,9 @@ private class CjoSignatureMaterializer {
         if (kind == FLAT_EXPR_KIND_IF) {
             return Some(LoadFlatIfExpr(reader, exprTable))
         }
+        if (kind == FLAT_EXPR_KIND_MATCH) {
+            return Some(LoadFlatMatchExpr(reader, exprTable))
+        }
         if (kind == FLAT_EXPR_KIND_LET_PATTERN_DESTRUCTOR) {
             return Some(LoadFlatLetPatternDestructor(reader, exprTable))
         }
@@ -1762,10 +1773,13 @@ private class CjoSignatureMaterializer {
                 }
                 let scanKind = reader.U16Field(scanTable, 4, 0u16)
                 let scanInfoKind = reader.U8Field(scanTable, 18, 0u8)
-                let supported = scanKind == FLAT_EXPR_KIND_RETURN || scanKind == FLAT_EXPR_KIND_MEMBER_ACCESS ||
+                let supported = scanKind == FLAT_EXPR_KIND_WILDCARD || scanKind == FLAT_EXPR_KIND_RETURN ||
+                    scanKind == FLAT_EXPR_KIND_MEMBER_ACCESS ||
                     scanKind == FLAT_EXPR_KIND_REF_EXPR || scanKind == FLAT_EXPR_KIND_CALL ||
                     scanKind == FLAT_EXPR_KIND_UNARY || scanKind == FLAT_EXPR_KIND_LIT_CONST ||
-                    scanKind == FLAT_EXPR_KIND_BINARY || scanKind == FLAT_EXPR_KIND_IF ||
+                    scanKind == FLAT_EXPR_KIND_BINARY || scanKind == FLAT_EXPR_KIND_MATCH ||
+                    scanKind == FLAT_EXPR_KIND_MATCH_CASE || scanKind == FLAT_EXPR_KIND_MATCH_CASE_OTHER ||
+                    scanKind == FLAT_EXPR_KIND_IF ||
                     scanKind == FLAT_EXPR_KIND_LET_PATTERN_DESTRUCTOR || scanKind == FLAT_EXPR_KIND_LAMBDA ||
                     scanKind == FLAT_EXPR_KIND_BLOCK || (scanKind == 0u16 && scanInfoKind == 11u8)
                 if (!supported) {
@@ -1889,6 +1903,14 @@ private class CjoSignatureMaterializer {
         return le
     }
 
+    // Mirrors ExprLoader.cpp:33-37 LoadWildcardExpr. WildcardExpr has no extra ExprInfo table.
+    private func LoadFlatWildcardExpr(reader: CjoFlatBuffer, exprTable: Int64): WildcardExpr {
+        let we = WildcardExpr()
+        LoadFlatExprBasicInfo(reader, exprTable, we)
+        we.EnableAttr(Attribute.IMPORTED)
+        return we
+    }
+
     // Mirrors ExprLoader.cpp:285-300 LoadIfExpr. Operands are condExpr, thenBody, elseBody; hasElse
     // and isElseIf are recovered from the loaded else node rather than serialized as fields.
     private func LoadFlatIfExpr(reader: CjoFlatBuffer, exprTable: Int64): IfExpr {
@@ -1913,6 +1935,100 @@ private class CjoSignatureMaterializer {
         }
         ie.EnableAttr(Attribute.IMPORTED)
         return ie
+    }
+
+    // Mirrors ExprLoader.cpp:383-402 LoadMatchExpr. MatchInfo.matchMode decides whether operands are
+    // selector + MatchCase indexes or MatchCaseOther indexes.
+    private func LoadFlatMatchExpr(reader: CjoFlatBuffer, exprTable: Int64): MatchExpr {
+        let me = MatchExpr()
+        LoadFlatExprBasicInfo(reader, exprTable, me)
+        let infoTable = reader.OffsetField(exprTable, 20)
+        if (infoTable >= 0) {
+            me.matchMode = reader.U8Field(infoTable, 4, 0u8) != 0u8
+        }
+        let operands = reader.VectorField(exprTable, 12)
+        if (operands >= 0) {
+            if (me.matchMode) {
+                if (reader.VectorLength(operands) >= 1) {
+                    me.selector = LoadFlatExpr(reader, reader.VectorU32(operands, 0))
+                    var idx: Int64 = 1
+                    let count = reader.VectorLength(operands)
+                    while (idx < count) {
+                        if (let Some(matchCase) <- LoadFlatMatchCase(reader, reader.VectorU32(operands, idx))) {
+                            if (let Some(selector) <- me.selector) {
+                                matchCase.SetCtxExprForPatterns(selector)
+                            }
+                            me.matchCases.add(matchCase)
+                        }
+                        idx++
+                    }
+                }
+            } else {
+                var idx: Int64 = 0
+                let count = reader.VectorLength(operands)
+                while (idx < count) {
+                    if (let Some(matchCase) <- LoadFlatMatchCaseOther(reader, reader.VectorU32(operands, idx))) {
+                        me.matchCaseOthers.add(matchCase)
+                    }
+                    idx++
+                }
+            }
+        }
+        me.EnableAttr(Attribute.IMPORTED)
+        return me
+    }
+
+    // Mirrors ExprLoader.cpp:445-458 LoadMatchCase plus ReferenceLoader.cpp:732-743: this loader
+    // restores the wrapper ty and pattern tys immediately so imported Frozen bodies can CHIR-lower.
+    private func LoadFlatMatchCase(reader: CjoFlatBuffer, exprIndex: UInt32): Option<MatchCase> {
+        let exprTable = FlatExprTable(reader, exprIndex)
+        if (exprTable < 0 || reader.U16Field(exprTable, 4, 0u16) != FLAT_EXPR_KIND_MATCH_CASE) {
+            return None
+        }
+        let mc = MatchCase()
+        LoadFlatNodeBasicInfo(reader, exprTable, mc)
+        let operands = reader.VectorField(exprTable, 12)
+        if (operands >= 0 && reader.VectorLength(operands) >= 2) {
+            mc.patternGuard = LoadFlatExpr(reader, reader.VectorU32(operands, 0))
+            if (let Some(bodyExpr) <- LoadFlatExprRaw(reader, reader.VectorU32(operands, 1))) {
+                mc.exprOrDecls = bodyExpr as Block
+            }
+        }
+        let infoTable = reader.OffsetField(exprTable, 20)
+        if (infoTable >= 0) {
+            let patterns = reader.VectorField(infoTable, 4)
+            if (patterns >= 0) {
+                var idx: Int64 = 0
+                let count = reader.VectorLength(patterns)
+                while (idx < count) {
+                    if (let Some(pattern) <- LoadFlatPattern(reader, reader.VectorOffsetElement(patterns, idx))) {
+                        mc.patterns.add(pattern)
+                    }
+                    idx++
+                }
+            }
+        }
+        mc.EnableAttr(Attribute.IMPORTED)
+        return Some(mc)
+    }
+
+    // Mirrors ExprLoader.cpp:478-486 LoadMatchCaseOther; this wrapper has no ExprInfo table.
+    private func LoadFlatMatchCaseOther(reader: CjoFlatBuffer, exprIndex: UInt32): Option<MatchCaseOther> {
+        let exprTable = FlatExprTable(reader, exprIndex)
+        if (exprTable < 0 || reader.U16Field(exprTable, 4, 0u16) != FLAT_EXPR_KIND_MATCH_CASE_OTHER) {
+            return None
+        }
+        let mco = MatchCaseOther()
+        LoadFlatNodeBasicInfo(reader, exprTable, mco)
+        let operands = reader.VectorField(exprTable, 12)
+        if (operands >= 0 && reader.VectorLength(operands) >= 2) {
+            mco.matchExpr = LoadFlatExpr(reader, reader.VectorU32(operands, 0))
+            if (let Some(bodyExpr) <- LoadFlatExprRaw(reader, reader.VectorU32(operands, 1))) {
+                mco.exprOrDecls = bodyExpr as Block
+            }
+        }
+        mco.EnableAttr(Attribute.IMPORTED)
+        return Some(mco)
     }
 
     // Mirrors ExprLoader.cpp:404-414 LoadLetPatternDestructor plus ReferenceLoader.cpp:717-724:
@@ -2020,9 +2136,24 @@ private class CjoSignatureMaterializer {
     }
 
     private func LoadFlatExprBasicInfo(reader: CjoFlatBuffer, exprTable: Int64, expr: Expr): Unit {
+        LoadFlatNodeBasicInfo(reader, exprTable, expr)
+    }
+
+    private func LoadFlatNodeBasicInfo(reader: CjoFlatBuffer, exprTable: Int64, node: Node): Unit {
         if (let Some(ty) <- LoadFlatType(reader.U32Field(exprTable, 14, 0u32))) {
-            expr.SetTy(ty)
+            node.SetTy(ty)
         }
+    }
+
+    private func FlatExprTable(reader: CjoFlatBuffer, exprIndex: UInt32): Int64 {
+        if (exprIndex == 0u32 || flatAllExprs < 0) {
+            return -1
+        }
+        let idx = Int64(exprIndex) - 1
+        if (idx < 0 || idx >= reader.VectorLength(flatAllExprs)) {
+            return -1
+        }
+        return reader.VectorOffsetElement(flatAllExprs, idx)
     }
 
     private func LoadFlatReferenceInfo(reader: CjoFlatBuffer, infoTable: Int64, expr: NameReferenceExpr): Unit {
