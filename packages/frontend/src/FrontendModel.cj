@@ -404,6 +404,7 @@ private const FLAT_EXPR_KIND_UNARY: UInt16 = 8u16
 private const FLAT_EXPR_KIND_LIT_CONST: UInt16 = 10u16
 private const FLAT_EXPR_KIND_BINARY: UInt16 = 11u16
 private const FLAT_EXPR_KIND_IF: UInt16 = 23u16
+private const FLAT_EXPR_KIND_LAMBDA: UInt16 = 27u16
 private const FLAT_EXPR_KIND_BLOCK: UInt16 = 28u16
 
 // ModuleFormat.fbs enum PatternKind (fbs:515-524).
@@ -1538,15 +1539,9 @@ private class CjoSignatureMaterializer {
         if (bodyTable < 0) {
             throw IllegalStateException("FlatBuffer FuncDecl '${record.identifier}' has no FuncBody")
         }
-        let body = FuncBody()
-        LoadFlatFuncParamLists(reader, bodyTable, body)
-        if (let Some(retTy) <- LoadFlatType(reader.U32Field(bodyTable, 6, 0u32))) {
-            body.retType = Some(TypeNodeForTy(retTy))
-        }
-        body.captureKind = FlatCaptureKind(reader.U8Field(bodyTable, 12, 0u8))
+        let body = LoadFlatFuncBody(reader, bodyTable, Some(funcDecl), funcDecl.isInline, funcDecl.isConst)
         body.funcDecl = Some(funcDecl)
         funcDecl.funcBody = Some(body)
-        LoadFlatFuncBodyContent(reader, bodyTable, funcDecl, body)
         // Update param functions' references: set ownerFunc on each param's desugar (default-param)
         // function, for top-level AND member funcs. Mirrors C++ ASTLoader.cpp:829-833 — without this
         // a top-level imported generic func's default-param desugar (e.g. y.1 <T$0,P$1>) has no
@@ -1574,10 +1569,26 @@ private class CjoSignatureMaterializer {
     // implicitly true. On import, the loaded Block is the un-wrapped funcBody.body (LoadExpr<Block>,
     // no dummy-RefExpr wrap), and every nested ReturnExpr's refFuncBody is set to this funcBody
     // (ExprLoader.cpp:500-509).
-    private func LoadFlatFuncBodyContent(reader: CjoFlatBuffer, bodyTable: Int64, funcDecl: FuncDecl,
+    private func LoadFlatFuncBody(reader: CjoFlatBuffer, bodyTable: Int64, funcDecl: Option<FuncDecl>,
+        isInline: Bool, isConst: Bool): FuncBody {
+        let body = FuncBody()
+        LoadFlatFuncParamLists(reader, bodyTable, body)
+        if (let Some(retTy) <- LoadFlatType(reader.U32Field(bodyTable, 6, 0u32))) {
+            body.retType = Some(TypeNodeForTy(retTy))
+        }
+        body.captureKind = FlatCaptureKind(reader.U8Field(bodyTable, 12, 0u8))
+        if (let Some(fd) <- funcDecl) {
+            body.funcDecl = Some(fd)
+        }
+        LoadFlatFuncBodyContent(reader, bodyTable, isInline, isConst, body)
+        body.EnableAttr(Attribute.IMPORTED)
+        return body
+    }
+
+    private func LoadFlatFuncBodyContent(reader: CjoFlatBuffer, bodyTable: Int64, isInline: Bool, isConst: Bool,
         body: FuncBody): Unit {
         let always = reader.U8Field(bodyTable, 10, 0u8) != 0u8
-        let shouldImportBody = always || funcDecl.isInline || funcDecl.isConst
+        let shouldImportBody = always || isInline || isConst
         if (!shouldImportBody) {
             return
         }
@@ -1733,6 +1744,9 @@ private class CjoSignatureMaterializer {
         if (kind == FLAT_EXPR_KIND_IF) {
             return Some(LoadFlatIfExpr(reader, exprTable))
         }
+        if (kind == FLAT_EXPR_KIND_LAMBDA) {
+            return Some(LoadFlatLambdaExpr(reader, exprTable))
+        }
         if (kind == FLAT_EXPR_KIND_CALL) {
             // Mirrors ExprLoader.cpp:92-115 LoadCallExpr and ExprLoader.cpp:516-531 LoadFuncArg
             // for packages whose exported allExprs are wholly inside this cut's bounded expr slice.
@@ -1748,7 +1762,7 @@ private class CjoSignatureMaterializer {
                     scanKind == FLAT_EXPR_KIND_REF_EXPR || scanKind == FLAT_EXPR_KIND_CALL ||
                     scanKind == FLAT_EXPR_KIND_UNARY || scanKind == FLAT_EXPR_KIND_LIT_CONST ||
                     scanKind == FLAT_EXPR_KIND_BINARY || scanKind == FLAT_EXPR_KIND_IF ||
-                    scanKind == FLAT_EXPR_KIND_BLOCK ||
+                    scanKind == FLAT_EXPR_KIND_LAMBDA || scanKind == FLAT_EXPR_KIND_BLOCK ||
                     (scanKind == 0u16 && scanInfoKind == 11u8)
                 if (!supported) {
                     return None
@@ -1849,6 +1863,26 @@ private class CjoSignatureMaterializer {
             return Some(LoadFlatBlock(reader, exprTable))
         }
         return None
+    }
+
+    // Mirrors ExprLoader.cpp:348-358 LoadLambdaExpr: LambdaInfo owns a nested FuncBody and
+    // supportMock restores Attribute.MOCK_SUPPORTED. LoadFuncBody is called with C++ defaults
+    // (isInline=false, isConst=true), so the lambda body is imported when source is present.
+    private func LoadFlatLambdaExpr(reader: CjoFlatBuffer, exprTable: Int64): LambdaExpr {
+        let le = LambdaExpr()
+        LoadFlatExprBasicInfo(reader, exprTable, le)
+        let infoTable = reader.OffsetField(exprTable, 20)
+        if (infoTable >= 0) {
+            let bodyTable = reader.OffsetField(infoTable, 4)
+            if (bodyTable >= 0) {
+                le.funcBody = Some(LoadFlatFuncBody(reader, bodyTable, None, false, true))
+            }
+            if (reader.U8Field(infoTable, 6, 0u8) != 0u8) {
+                le.EnableAttr(Attribute.MOCK_SUPPORTED)
+            }
+        }
+        le.EnableAttr(Attribute.IMPORTED)
+        return le
     }
 
     // Mirrors ExprLoader.cpp:285-300 LoadIfExpr. Operands are condExpr, thenBody, elseBody; hasElse
