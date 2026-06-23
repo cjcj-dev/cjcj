@@ -703,9 +703,12 @@ private class FrontendCjoFlatBufferWriter {
     }
 
     // Per-kind dispatch. Bounded faithful slice: RefExpr, MemberAccess, CallExpr, UnaryExpr,
-    // BinaryExpr, IfExpr, Block, ReturnExpr, LitConstExpr. Other kinds throw (no SaveUnsupportExpr
-    // diagnostic stub yet); they are added in later cuts.
+    // BinaryExpr, MatchExpr, IfExpr, Block, ReturnExpr, LitConstExpr. Other kinds throw
+    // (no SaveUnsupportExpr diagnostic stub yet); they are added in later cuts.
     private func SaveExprByKind(realExpr: Expr): FlatBufferOffset {
+        if (let Some(we) <- (realExpr as WildcardExpr)) {
+            return SaveWildcardExpr(we)
+        }
         if (let Some(block) <- (realExpr as Block)) {
             return SaveBlock(block)
         }
@@ -720,6 +723,9 @@ private class FrontendCjoFlatBufferWriter {
         }
         if (let Some(ie) <- (realExpr as IfExpr)) {
             return SaveIfExpr(ie)
+        }
+        if (let Some(me) <- (realExpr as MatchExpr)) {
+            return SaveMatchExpr(me)
         }
         if (let Some(lpd) <- (realExpr as LetPatternDestructor)) {
             return SaveLetPatternDestructor(lpd)
@@ -868,6 +874,126 @@ private class FrontendCjoFlatBufferWriter {
         // ExprKind_IfExpr is index 23 of enum ExprKind (ModuleFormat.fbs:333-373).
         builder.AddU16(0, 23u16)
         return builder.EndTable()
+    }
+
+    // Mirrors ExprWriter.cpp:105-111 SaveExpression(WildcardExpr). It carries only basic Expr fields.
+    private func SaveWildcardExpr(we: WildcardExpr): FlatBufferOffset {
+        let begin = PositionBytes(we.begin)
+        let end = PositionBytes(we.end)
+        let typeIndex = SaveExprType(we)
+        builder.StartTable(9)
+        builder.AddU32(5, typeIndex)
+        builder.AddStruct(2, end, 4)
+        builder.AddStruct(1, begin, 4)
+        // ExprKind_WildcardExpr is index 1 of enum ExprKind (ModuleFormat.fbs:333-373).
+        builder.AddU16(0, 1u16)
+        return builder.EndTable()
+    }
+
+    // Mirrors ExprWriter.cpp:551-577 SaveExpression(MatchExpr). MatchInfo carries matchMode
+    // (ModuleFormat.fbs:480-482, union tag 13). With a selector, operands are selector followed by
+    // MatchCase wrapper indexes; without a selector, operands are MatchCaseOther wrapper indexes.
+    private func SaveMatchExpr(me: MatchExpr): FlatBufferOffset {
+        let operands = ArrayList<UInt32>()
+        if (me.matchMode) {
+            if (let None <- me.selector) {
+                throw IllegalArgumentException("MatchExpr selector mode without selector is not supported")
+            }
+            operands.add(SaveExpr(me.selector.getOrThrow()))
+            for (matchCase in me.matchCases) {
+                operands.add(SaveMatchCase(matchCase))
+            }
+        } else {
+            for (matchCase in me.matchCaseOthers) {
+                operands.add(SaveMatchCaseOther(matchCase))
+            }
+        }
+        let operandsVec = builder.CreateVectorU32(operands)
+        builder.StartTable(1)
+        builder.AddBool(0, me.matchMode)
+        let info = builder.EndTable()
+
+        let begin = PositionBytes(me.begin)
+        let end = PositionBytes(me.end)
+        let typeIndex = SaveExprType(me)
+        builder.StartTable(9)
+        builder.AddOffset(8, info)
+        builder.AddU8(7, 13u8)
+        builder.AddU32(5, typeIndex)
+        builder.AddOffset(4, operandsVec)
+        builder.AddStruct(2, end, 4)
+        builder.AddStruct(1, begin, 4)
+        // ExprKind_MatchExpr is index 21 of enum ExprKind (ModuleFormat.fbs:333-373).
+        builder.AddU16(0, 21u16)
+        return builder.EndTable()
+    }
+
+    // Mirrors ExprWriter.cpp:620-645 SaveMatchCase. MatchCase is stored in allExprs as an Expr table
+    // with kind MatchCase=29; operands are patternGuard-or-0 then body, and MatchCaseInfo owns patterns.
+    private func SaveMatchCase(mc: MatchCase): UInt32 {
+        let exprIndex = UInt32(allExprs.size + 1)
+        allExprs.add(0u32)
+        let operands = ArrayList<UInt32>()
+        let guardIndex = if (let Some(guard) <- mc.patternGuard) { SaveExpr(guard) } else { 0u32 }
+        operands.add(guardIndex)
+        let patterns = ArrayList<FlatBufferOffset>()
+        for (pattern in mc.patterns) {
+            patterns.add(SavePattern(pattern))
+        }
+        if (let None <- mc.exprOrDecls) {
+            throw IllegalArgumentException("MatchCase without body is not supported")
+        }
+        operands.add(SaveExpr(mc.exprOrDecls.getOrThrow()))
+        let operandsVec = builder.CreateVectorU32(operands)
+        let patternsVec = builder.CreateVectorOffsets(patterns)
+        builder.StartTable(1)
+        builder.AddOffset(0, patternsVec)
+        let info = builder.EndTable()
+
+        let begin = PositionBytes(mc.begin)
+        let end = PositionBytes(mc.end)
+        let typeIndex = if (let Some(ty) <- mc.GetTy()) { SaveType(ty) } else { 0u32 }
+        builder.StartTable(9)
+        builder.AddOffset(8, info)
+        builder.AddU8(7, 18u8)
+        builder.AddU32(5, typeIndex)
+        builder.AddOffset(4, operandsVec)
+        builder.AddStruct(2, end, 4)
+        builder.AddStruct(1, begin, 4)
+        // ExprKind_MatchCase is index 29 of enum ExprKind (ModuleFormat.fbs:333-373).
+        builder.AddU16(0, 29u16)
+        allExprs[Int64(exprIndex) - 1] = builder.EndTable()
+        return exprIndex
+    }
+
+    // Mirrors ExprWriter.cpp:647-664 SaveMatchCaseOther. MatchCaseOther is stored in allExprs as an
+    // Expr table with kind MatchCaseOther=30 and operands matchExpr then body; no info table is used.
+    private func SaveMatchCaseOther(mco: MatchCaseOther): UInt32 {
+        let exprIndex = UInt32(allExprs.size + 1)
+        allExprs.add(0u32)
+        if (let None <- mco.matchExpr) {
+            throw IllegalArgumentException("MatchCaseOther without condition is not supported")
+        }
+        if (let None <- mco.exprOrDecls) {
+            throw IllegalArgumentException("MatchCaseOther without body is not supported")
+        }
+        let operands = ArrayList<UInt32>()
+        operands.add(SaveExpr(mco.matchExpr.getOrThrow()))
+        operands.add(SaveExpr(mco.exprOrDecls.getOrThrow()))
+        let operandsVec = builder.CreateVectorU32(operands)
+
+        let begin = PositionBytes(mco.begin)
+        let end = PositionBytes(mco.end)
+        let typeIndex = if (let Some(ty) <- mco.GetTy()) { SaveType(ty) } else { 0u32 }
+        builder.StartTable(9)
+        builder.AddU32(5, typeIndex)
+        builder.AddOffset(4, operandsVec)
+        builder.AddStruct(2, end, 4)
+        builder.AddStruct(1, begin, 4)
+        // ExprKind_MatchCaseOther is index 30 of enum ExprKind (ModuleFormat.fbs:333-373).
+        builder.AddU16(0, 30u16)
+        allExprs[Int64(exprIndex) - 1] = builder.EndTable()
+        return exprIndex
     }
 
     // Mirrors ExprWriter.cpp:579-595 SaveExpression(LetPatternDestructor): operand 0 is the
