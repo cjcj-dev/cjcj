@@ -1503,9 +1503,9 @@ private func UpdateCallTargets(ce: CallExpr, fd: FuncDecl): Unit {
     }
 }
 
-private func GetCallTy(typeManager: TypeManager, ce: CallExpr, fd: FuncDecl, typeMapping: SubstPack): Ty {
+private func GetCallTy(typeManager: TypeManager, ce: CallExpr, fd: FuncDecl): Ty {
     if (let Some(fdTy) <- fd.GetTy()) {
-        if (let Some(funcTy) <- (typeManager.ApplySubstPack(fdTy, typeMapping) as FuncTy)) {
+        if (let Some(funcTy) <- (fdTy as FuncTy)) {
             let rawRet = funcTy.retTy
             if (let Some(_) <- (rawRet as ClassThisTy)) {
                 if (let Some(base) <- ce.baseFunc) {
@@ -1525,6 +1525,16 @@ private func GetCallTy(typeManager: TypeManager, ce: CallExpr, fd: FuncDecl, typ
         }
     }
     return TypeManager.GetInvalidTy()
+}
+
+private func IsGenericCallForUpdate(fd: FuncDecl, ce: CallExpr): Bool {
+    if (let Some(generic) <- GenericDeclForCall(fd)) {
+        return fd.TestAttr(Attribute.GENERIC) || !generic.GetGeneric().isNone()
+    }
+    if (let Some(base) <- ce.baseFunc) {
+        return NeedFurtherInstantiation(base.GetTypeArgs())
+    }
+    return false
 }
 
 private func CheckCallKind(diag: Option<BasicDiagnosticEngine>, ce: CallExpr, decl: Decl): Bool {
@@ -1723,9 +1733,16 @@ private func MatchFunctionForCall(typeManager: TypeManager, diag: Option<BasicDi
         BuildDesugaredCallArgs(typeManager, unit.fd, ce, unit.typeMapping)
         ApplyInstantiatedArgumentTypes(typeManager, ce, unit)
         if (let Some(fdTy) <- unit.fd.GetTy()) {
-            ce.baseFunc.getOrThrow().SetTy(typeManager.ApplySubstPack(fdTy, unit.typeMapping))
+            if (IsGenericCallForUpdate(unit.fd, ce)) {
+                ce.baseFunc.getOrThrow().SetTy(typeManager.ApplySubstPack(fdTy, unit.typeMapping))
+                ce.SetTy(typeManager.ApplySubstPack(GetCallTy(typeManager, ce, unit.fd), unit.typeMapping))
+            } else {
+                ce.baseFunc.getOrThrow().SetTy(fdTy)
+                ce.SetTy(GetCallTy(typeManager, ce, unit.fd))
+            }
+        } else {
+            ce.SetTy(TypeManager.GetInvalidTy())
         }
-        ce.SetTy(GetCallTy(typeManager, ce, unit.fd, unit.typeMapping))
         ce.resolvedFunction = Some(unit.fd)
         UpdateCallTargets(ce, unit.fd)
         FillTypeArgumentsTy(typeManager, unit.fd, ce, unit.typeMapping)
