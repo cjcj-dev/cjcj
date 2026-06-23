@@ -313,8 +313,13 @@ public class MangleAstAdapter {
     private func IsCompositeMemberVar(node: Node): Bool {
         if (let Some(varDecl) <- (node as VarDeclAbstract)) {
             if (let Some(outer) <- varDecl.outerDecl) {
-                return outer.astKind == ASTKind.CLASS_DECL || outer.astKind == ASTKind.INTERFACE_DECL ||
-                    outer.astKind == ASTKind.STRUCT_DECL || outer.astKind == ASTKind.ENUM_DECL
+                // Faithful to BaseMangler.cpp:1397-1400 (vda->outerDecl->astKind == ASTKind::CLASS_DECL
+                // || ... ). Matching on the constructor tag is an O(1) compare; the `ASTKind ==`
+                // operator otherwise routes each comparison through the linear ASTKindIndex.
+                return match (outer.astKind) {
+                    case ASTKind.CLASS_DECL | ASTKind.INTERFACE_DECL | ASTKind.STRUCT_DECL | ASTKind.ENUM_DECL => true
+                    case _ => false
+                }
             }
         }
         return false
@@ -333,8 +338,13 @@ public class MangleAstAdapter {
     }
 
     private func NeedCollectScope(node: Node): Bool {
-        if (node.astKind == ASTKind.FUNC_DECL || node.astKind == ASTKind.LAMBDA_EXPR) {
-            return true
+        // Faithful to BaseMangler.cpp:948-955 (isFunc = astKind == FUNC_DECL; isLambda = astKind ==
+        // LAMBDA_EXPR; ...). The constructor match is an O(1) tag compare; this runs once per node
+        // in the CollectLocalDecls package walk, so routing it through the linear ASTKind ==
+        // operator is the hot cost being removed.
+        match (node.astKind) {
+            case ASTKind.FUNC_DECL | ASTKind.LAMBDA_EXPR => return true
+            case _ => ()
         }
         if (let Some(varDecl) <- (node as VarDeclAbstract)) {
             return varDecl.TestAttr(Attribute.GLOBAL) || IsCompositeMemberVar(node)
