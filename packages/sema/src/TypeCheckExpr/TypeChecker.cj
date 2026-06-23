@@ -2333,6 +2333,21 @@ public class TypeChecker {
         return Check(ctx, TypeManager.GetPrimitiveTy(TypeKind.TYPE_BOOLEAN), expr)
     }
 
+    private func CheckUnaryExprWithTarget(ctx: ASTContext, target: Ty, unaryExpr: UnaryExpr): Bool {
+        if (let Some(innerExpr) <- unaryExpr.expr) {
+            let unboxedTarget = UnboxOptionType(target)
+            if (Ty.IsTyCorrect(unboxedTarget) && unboxedTarget.IsBuiltin()) {
+                let _ = Check(ctx, unboxedTarget, innerExpr)
+                if (let Some(innerTy) <- innerExpr.GetTy()) {
+                    innerExpr.SetTy(impl.typeManager.TryGreedySubst(innerTy))
+                }
+            } else {
+                let _ = Synthesize(ctx, innerExpr)
+            }
+        }
+        return ChkUnaryExpr(impl.typeManager, target, unaryExpr)
+    }
+
     private func SynthesizeIfChildren(ctx: ASTContext, ifExpr: IfExpr): Unit {
         let conditionBindings = ArrayList<Decl>()
         if (let Some(condExpr) <- ifExpr.condExpr) {
@@ -2994,6 +3009,9 @@ public class TypeChecker {
         }
         if (let Some(binaryExpr) <- (expr as BinaryExpr)) {
             return FinishCheck(ctx, binaryExpr, CheckBinaryExpr(ctx, target, binaryExpr))
+        }
+        if (let Some(unaryExpr) <- (expr as UnaryExpr)) {
+            return FinishCheck(ctx, unaryExpr, CheckUnaryExprWithTarget(ctx, target, unaryExpr))
         }
         if (let Some(returnExpr) <- (expr as ReturnExpr)) {
             if (let Some(fb) <- currentFuncBody) {
