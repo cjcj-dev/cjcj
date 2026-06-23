@@ -1083,6 +1083,9 @@ private class FrontendCjoFlatBufferWriter {
         if (!decl.rawMangleName.isEmpty()) {
             return decl.rawMangleName
         }
+        if (!Ty.IsTyCorrect(decl.GetTy())) {
+            return ""
+        }
         if (IsSupportedSerializedDecl(decl)) {
             decl.mangledName = mangler.Mangle(decl)
             return decl.mangledName
@@ -1109,6 +1112,9 @@ private class FrontendCjoFlatBufferWriter {
         }
         if (!decl.exportId.isEmpty()) {
             return decl.exportId
+        }
+        if (!Ty.IsTyCorrect(decl.GetTy())) {
+            return ""
         }
         if (decl.TestAttr(Attribute.GLOBAL) || decl.IsNominalDecl()) {
             decl.exportId = if ((decl as FuncDecl).isSome()) { mangler.MangleExportId(decl) } else { mangler.Mangle(decl) }
