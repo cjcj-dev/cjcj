@@ -631,35 +631,28 @@ public class LocalTypeArgumentSynthesis {
     }
 
     private func FindSolution(tyVar: GenericsTy, bounds: TyVarBounds): Option<Ty> {
-        for (eqTy in bounds.eq.values) {
-            let normalizedEq = NormalizeSolution(eqTy)
-            if (IsValidSolution(normalizedEq, bounds)) {
-                return normalizedEq
-            }
-        }
-        if (let Some(joinedLb) <- JoinLowerBounds(bounds.lbs)) {
-            let normalizedJoined = NormalizeSolution(joinedLb)
-            if (IsValidSolution(normalizedJoined, bounds)) {
-                return normalizedJoined
-            }
-        }
-        if (let Some(metUb) <- MeetUpperBounds(tyVar, bounds.ubs)) {
-            let normalizedMet = NormalizeSolution(metUb)
-            if (IsValidSolution(normalizedMet, bounds)) {
-                return normalizedMet
-            }
-        }
-        for (lb in bounds.lbs.values) {
-            let normalizedLb = NormalizeSolution(lb)
-            if (IsValidSolution(normalizedLb, bounds)) {
-                return normalizedLb
-            }
-        }
-        for (ub in bounds.ubs.values) {
-            let normalizedUb = NormalizeSolution(ub)
-            if (IsValidSolution(normalizedUb, bounds)) {
-                return normalizedUb
-            }
+        // Mirror C++ LocalTypeArgumentSynthesis::FindSolution
+        // (src/Sema/LocalTypeArgumentSynthesis.cpp:767-831): the solution for a
+        // type variable is the join of its lower bounds (tyJ) or, failing that, the
+        // meet of its upper bounds (tyM). The bounds have already been mutually
+        // consistency-checked while collecting constraints (UnifyTyVarCollectConstraints),
+        // so the only validity test here is IsValidSolution, which rejects
+        // invalid/ideal/CType (and Nothing/Any unless permitted). No further per-bound
+        // subtype re-checking is performed.
+        var tyJ = JoinAsVisibleTy(tyMgr, bounds.lbs, ignoredTyVars: ToTySet(argPack.tyVarsToSolve))
+        var tyM = MeetUpperBounds(tyVar, bounds.ubs) ?? TypeManager.GetInvalidTy()
+        let validAnyTy = hasAnyTy || (deterministic && bounds.ubs.Contains(tyMgr.GetAnyTy()))
+        let validNothingTy = hasNothingTy || (deterministic && bounds.lbs.Contains(TypeManager.GetNothingTy()))
+        if (IsValidSolution(tyJ, validNothingTy, validAnyTy)) {
+            return tyJ
+        } else if (tyJ.HasIdealTy() && !tyM.IsNumeric()) {
+            tyJ = ReplaceIdealTyInSolution(tyJ)
+            return tyJ
+        } else if (IsValidSolution(tyM, validNothingTy, validAnyTy)) {
+            return tyM
+        } else if (tyM.HasIdealTy()) {
+            tyM = ReplaceIdealTyInSolution(tyM)
+            return tyM
         }
         return None
     }
@@ -706,13 +699,6 @@ public class LocalTypeArgumentSynthesis {
         return out
     }
 
-    private func JoinLowerBounds(lbs: TySet): Option<Ty> {
-        if (lbs.values.isEmpty()) {
-            return None
-        }
-        return JoinAsVisibleTy(tyMgr, lbs, ignoredTyVars: ToTySet(argPack.tyVarsToSolve))
-    }
-
     private func MeetUpperBounds(tyVar: GenericsTy, ubs: TySet): Option<Ty> {
         if (ubs.values.isEmpty()) {
             return None
@@ -748,14 +734,6 @@ public class LocalTypeArgumentSynthesis {
             return None
         }
         return MeetAsVisibleTy(tyMgr, values, ignoredTyVars: ToTySet(argPack.tyVarsToSolve))
-    }
-
-    private func NormalizeSolution(ty: Ty): Ty {
-        let inferred = normalizeInferredTy(ty)
-        if (inferred.HasIdealTy()) {
-            return ReplaceIdealTyInSolution(inferred)
-        }
-        return inferred
     }
 
     private func ReplaceIdealTyInSolution(ty: Ty): Ty {
@@ -844,27 +822,13 @@ public class LocalTypeArgumentSynthesis {
         return out.toArray()
     }
 
-    private func IsValidSolution(candidate: Ty, bounds: TyVarBounds): Bool {
-        if (candidate.HasInvalidTy() || candidate.HasIdealTy() || candidate.IsCType()) {
-            return false
-        }
-        if (candidate.IsNothing() && !hasNothingTy) {
-            return false
-        }
-        if (candidate.IsAny() && !hasAnyTy) {
-            return false
-        }
-        for (lb in bounds.lbs.values) {
-            if (!tyMgr.IsSubtype(lb, candidate)) {
-                return false
-            }
-        }
-        for (ub in bounds.ubs.values) {
-            if (!tyMgr.IsSubtype(candidate, ub)) {
-                return false
-            }
-        }
-        return true
+    private func IsValidSolution(ty: Ty, hasNothingTy: Bool, hasAnyTy: Bool): Bool {
+        // Mirror C++ LocalTypeArgumentSynthesis::IsValidSolution
+        // (src/Sema/LocalTypeArgumentSynthesis.cpp:833-839).
+        var solution = !ty.HasInvalidTy() && !ty.IsNothing() && !ty.IsAny() && !ty.HasIdealTy() && !ty.IsCType()
+        solution = solution || (hasNothingTy && ty.IsNothing())
+        solution = solution || (hasAnyTy && ty.IsAny())
+        return solution
     }
 
     private func normalizeInferredTy(ty: Ty): Ty {
