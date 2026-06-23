@@ -18,6 +18,7 @@ import cangjie_compiler::chir.StringLiteral
 import cangjie_compiler::chir.TupleType
 import cangjie_compiler::chir.Type
 import cangjie_compiler::chir.VArrayType
+import cangjie_compiler::utils.{CORE_PACKAGE_NAME, STD_LIB_FUTURE}
 
 private let CREATE_OVERFLOW_EXCEPTION_FUNC_NAME: String = "rt$CreateOverflowException_msg"
 private let CREATE_ARITHMETIC_EXCEPTION_FUNC_NAME: String = "rt$CreateArithmeticException_msg"
@@ -1734,7 +1735,7 @@ public class IRBuilder2 <: Resource {
         if (let Some(ctxValue) <- threadCtx) {
             args.add(ctxValue.GetRawValue())
         } else {
-            args.add(unsafe { LLVMConstNull(CGType.GetRefType(GetLLVMContext())) })
+            args.add(unsafe { LLVMConstNull(i8PtrTy) })
         }
         if (!spawnWithFuture) {
             let futureTIValue = if (let Some(value) <- futureTI) {
@@ -1870,11 +1871,23 @@ public class IRBuilder2 <: Resource {
             name: "class.alloc")
         if (!objectValue.isNull()) {
             AddRetAttr(objectValue, "noalias")
+            AddSpecialClassMallocMetadata(objectValue, classTy)
             return CreatePointerCast(objectValue,
                 unsafe { LLVMPointerType(classCGType.GetLLVMType(), 1u32) },
                 name: "class.alloc.cast")
         }
         return objectValue
+    }
+
+    private func AddSpecialClassMallocMetadata(objectValue: LLVMValueRef, classTy: Type): Unit {
+        let classType = (classTy.StripAllRefs() as ClassType) ?? return
+        let classDef = classType.GetClassDef()
+        let srcName = classDef.GetSrcCodeIdentifier()
+        let pkgName = classDef.GetPackageName()
+        if (pkgName == CORE_PACKAGE_NAME && srcName == STD_LIB_FUTURE) {
+            LLVMSetInstructionMetadata(GetLLVMContext(), objectValue, "MallocType",
+                LLVMCreateMDTupleFromString(GetLLVMContext(), srcName))
+        }
     }
 
     public func CallValueIntrinsicAlloc(sourceTy: Type): LLVMValueRef {

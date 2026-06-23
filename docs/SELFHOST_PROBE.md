@@ -2839,3 +2839,42 @@ Verification:
 - Full corpus: `TOTAL=111  PASS=111  MISMATCH=0  FAIL=0`.
 - Septests all pass: `run.sh`, `run_write.sh`, `run_diag.sh`, `run_write_types.sh`,
   `run_write_struct.sh`, and `run_gendefault.sh`.
+## Probe 29 (spawn Future end-to-end)
+
+Spawn now reaches the same Future-based runtime path as the reference compiler.
+
+SEMA:
+
+- Ported the after-typecheck desugar that creates `let futureObj = Future(task)` and stores it on
+  `SpawnExpr.futureObj`, matching `src/Sema/Desugar/AfterTypeCheck/SpawnExpr.cpp:44-91`.
+- Hooked the desugar at the after-typecheck dispatch point, matching
+  `src/Sema/Desugar/AfterTypeCheck.cpp:631-632`.
+- Ported the selfhost spawn typecheck side needed for the future-object path, matching
+  `src/Sema/TypeCheckExpr/SpawnExpr.cpp:25-45`.
+
+Codegen:
+
+- Fixed the Future `_thread` field access to mirror the C++ object payload path: C++
+  `src/CodeGen/Base/SpawnExprImpl.cpp:70-77` loads field 0 through `CreateGEP(*futureObj, {0})`;
+  `src/CodeGen/CJNative/CJNativeIRBuilder.cpp:1004-1062` implements that class GEP by skipping to
+  object payload, bitcasting to the class layout pointer, and struct-GEPing the field. The selfhost
+  now does the same payload/layout GEP and uses the managed read barrier before calling
+  `Thread.setRuntimeCJThreadHandle`.
+- Fixed the null thread-context argument for `CJ_MCC_NewCJThread` to use the runtime `i8*` parameter
+  type, matching the C++ null `Ref<Int8>` path in
+  `src/CodeGen/CJNative/CJNativeIntrinsicsCall.cpp:624-631`.
+- Marked core `Future` object allocations with the same special `MallocType` metadata C++ attaches in
+  `src/CodeGen/CJNative/CJNativeIntrinsicsCall.cpp:702-719`; without this, the spawned thread enters
+  `Future.execute` with a runtime object layout that crashes before calling the task.
+
+New corpus cases:
+
+- `scripts/difftest_corpus/121_spawn_future_get.cj`
+- `scripts/difftest_corpus/122_spawn_capture_future_get.cj`
+
+Verification:
+
+- Clean `rm -rf target && cjpm build`: success.
+- Standalone spawn programs match `/root/.cjv/bin/cjc`: simple Future get prints `42`; captured-var
+  Future get prints `42`.
+- Full corpus includes both spawn cases and remains all-pass.
