@@ -2471,13 +2471,13 @@ public class TypeManager {
         }
     }
 
-    private func cloneTypeManagerConstraint(): Constraint {
+    public func cloneTypeManagerConstraint(): Constraint {
         let out = Constraint()
         copyConstraintEntries(out, constraints)
         return out
     }
 
-    private func restoreTypeManagerConstraint(saved: Constraint): Unit {
+    public func restoreTypeManagerConstraint(saved: Constraint): Unit {
         constraints.Clear()
         copyConstraintEntries(constraints, saved)
     }
