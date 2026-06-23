@@ -402,6 +402,16 @@ private const FLAT_EXPR_KIND_REF_EXPR: UInt16 = 6u16
 private const FLAT_EXPR_KIND_LIT_CONST: UInt16 = 10u16
 private const FLAT_EXPR_KIND_BLOCK: UInt16 = 28u16
 
+// ModuleFormat.fbs enum PatternKind (fbs:515-524).
+private const FLAT_PATTERN_KIND_CONST: UInt8 = 1u8
+private const FLAT_PATTERN_KIND_WILDCARD: UInt8 = 2u8
+private const FLAT_PATTERN_KIND_VAR: UInt8 = 3u8
+private const FLAT_PATTERN_KIND_TUPLE: UInt8 = 4u8
+private const FLAT_PATTERN_KIND_TYPE: UInt8 = 5u8
+private const FLAT_PATTERN_KIND_ENUM: UInt8 = 6u8
+private const FLAT_PATTERN_KIND_EXCEPT_TYPE: UInt8 = 7u8
+private const FLAT_PATTERN_KIND_COMMAND_TYPE: UInt8 = 8u8
+
 // ModuleFormat.fbs enum LitConstKind (fbs:388-397). Mirrors ASTLoader.cpp LIT_CONST_KIND_RMAP.
 private func FlatToLitConstKind(value: UInt8): LitConstKind {
     return match (value) {
@@ -1875,6 +1885,152 @@ private class CjoSignatureMaterializer {
         }
         varDecl.isVar = reader.U8Field(infoTable, 4, 0u8) != 0u8
         varDecl.isConst = reader.U8Field(infoTable, 6, 0u8) != 0u8
+        // Mirrors ASTLoader.cpp:742-743: initializer is field 3, irrefutablePattern is field 2.
+        if (let Some(initializer) <- LoadFlatExpr(reader, reader.U32Field(infoTable, 10, 0u32))) {
+            varDecl.initializer = Some(initializer)
+        }
+        varDecl.irrefutablePattern = LoadFlatPattern(reader, reader.OffsetField(infoTable, 8))
+    }
+
+    // Mirrors ExprLoader.cpp:534-634 and ReferenceLoader.cpp:745-785 for cjo Pattern records.
+    private func LoadFlatPattern(reader: CjoFlatBuffer, patternTable: Int64): Option<Pattern> {
+        if (patternTable < 0) {
+            return None
+        }
+        let kind = reader.U8Field(patternTable, 4, 0u8)
+        let pattern = if (kind == FLAT_PATTERN_KIND_CONST) {
+            LoadFlatConstPattern(reader, patternTable)
+        } else if (kind == FLAT_PATTERN_KIND_WILDCARD) {
+            WildcardPattern()
+        } else if (kind == FLAT_PATTERN_KIND_VAR) {
+            LoadFlatVarPattern(reader, patternTable)
+        } else if (kind == FLAT_PATTERN_KIND_TUPLE) {
+            LoadFlatTuplePattern(reader, patternTable)
+        } else if (kind == FLAT_PATTERN_KIND_TYPE) {
+            LoadFlatTypePattern(reader, patternTable)
+        } else if (kind == FLAT_PATTERN_KIND_ENUM) {
+            LoadFlatEnumPattern(reader, patternTable)
+        } else if (kind == FLAT_PATTERN_KIND_EXCEPT_TYPE) {
+            LoadFlatExceptTypePattern(reader, patternTable)
+        } else if (kind == FLAT_PATTERN_KIND_COMMAND_TYPE) {
+            LoadFlatCommandTypePattern(reader, patternTable)
+        } else {
+            return None
+        }
+        LoadFlatPatternTy(reader, patternTable, pattern)
+        if (let Some(typePattern) <- (pattern as TypePattern)) {
+            if (let Some(ty) <- typePattern.GetTy()) {
+                typePattern.typeNode = Some(TypeNodeForTy(ty))
+            }
+        }
+        return Some(pattern)
+    }
+
+    private func LoadFlatPatternTy(reader: CjoFlatBuffer, patternTable: Int64, pattern: Pattern): Unit {
+        let types = reader.VectorField(patternTable, 12)
+        if (types >= 0 && reader.VectorLength(types) >= 1) {
+            if (let Some(ty) <- LoadFlatType(reader.VectorU32(types, 0))) {
+                pattern.SetTy(ty)
+            }
+        }
+    }
+
+    private func LoadFlatConstPattern(reader: CjoFlatBuffer, patternTable: Int64): ConstPattern {
+        let pattern = ConstPattern()
+        let exprs = reader.VectorField(patternTable, 14)
+        if (exprs >= 0 && reader.VectorLength(exprs) >= 1) {
+            pattern.literal = LoadFlatExpr(reader, reader.VectorU32(exprs, 0))
+        }
+        return pattern
+    }
+
+    private func LoadFlatVarPattern(reader: CjoFlatBuffer, patternTable: Int64): VarPattern {
+        let pattern = VarPattern()
+        let exprs = reader.VectorField(patternTable, 14)
+        if (exprs >= 0 && reader.VectorLength(exprs) >= 1) {
+            let declIndex = reader.VectorU32(exprs, 0)
+            if (let Some(record) <- flatDecls.get(declIndex)) {
+                if (let Some(decl) <- EnsureFlatDecl(record)) {
+                    if (let Some(varDecl) <- (decl as VarDecl)) {
+                        pattern.varDecl = Some(varDecl)
+                        varDecl.parentPattern = pattern
+                    }
+                }
+            }
+        }
+        return pattern
+    }
+
+    private func LoadFlatTuplePattern(reader: CjoFlatBuffer, patternTable: Int64): TuplePattern {
+        let pattern = TuplePattern()
+        LoadFlatChildPatterns(reader, patternTable, pattern.patterns)
+        return pattern
+    }
+
+    private func LoadFlatTypePattern(reader: CjoFlatBuffer, patternTable: Int64): TypePattern {
+        let pattern = TypePattern()
+        let children = reader.VectorField(patternTable, 10)
+        if (children >= 0 && reader.VectorLength(children) >= 1) {
+            pattern.pattern = LoadFlatPattern(reader, reader.VectorOffsetElement(children, 0))
+        }
+        pattern.matchBeforeRuntime = reader.U8Field(patternTable, 18, 0u8) != 0u8
+        pattern.needRuntimeTypeCheck = reader.U8Field(patternTable, 20, 0u8) != 0u8
+        return pattern
+    }
+
+    private func LoadFlatEnumPattern(reader: CjoFlatBuffer, patternTable: Int64): EnumPattern {
+        let pattern = EnumPattern()
+        LoadFlatChildPatterns(reader, patternTable, pattern.patterns)
+        let exprs = reader.VectorField(patternTable, 14)
+        if (exprs >= 0 && reader.VectorLength(exprs) >= 1) {
+            pattern.constructor = LoadFlatExpr(reader, reader.VectorU32(exprs, 0))
+        }
+        return pattern
+    }
+
+    private func LoadFlatExceptTypePattern(reader: CjoFlatBuffer, patternTable: Int64): ExceptTypePattern {
+        let pattern = ExceptTypePattern()
+        LoadFlatTypeListPattern(reader, patternTable, pattern)
+        return pattern
+    }
+
+    private func LoadFlatCommandTypePattern(reader: CjoFlatBuffer, patternTable: Int64): CommandTypePattern {
+        let pattern = CommandTypePattern()
+        LoadFlatTypeListPattern(reader, patternTable, pattern)
+        return pattern
+    }
+
+    private func LoadFlatTypeListPattern(reader: CjoFlatBuffer, patternTable: Int64, pattern: TypeListPattern): Unit {
+        let children = reader.VectorField(patternTable, 10)
+        if (children >= 0 && reader.VectorLength(children) >= 1) {
+            pattern.pattern = LoadFlatPattern(reader, reader.VectorOffsetElement(children, 0))
+        }
+        let types = reader.VectorField(patternTable, 12)
+        if (types >= 0) {
+            var idx: Int64 = 1
+            let count = reader.VectorLength(types)
+            while (idx < count) {
+                if (let Some(ty) <- LoadFlatType(reader.VectorU32(types, idx))) {
+                    pattern.types.add(TypeNodeForTy(ty))
+                }
+                idx++
+            }
+        }
+    }
+
+    private func LoadFlatChildPatterns(reader: CjoFlatBuffer, patternTable: Int64, out: ArrayList<Pattern>): Unit {
+        let children = reader.VectorField(patternTable, 10)
+        if (children < 0) {
+            return
+        }
+        var idx: Int64 = 0
+        let count = reader.VectorLength(children)
+        while (idx < count) {
+            if (let Some(child) <- LoadFlatPattern(reader, reader.VectorOffsetElement(children, idx))) {
+                out.add(child)
+            }
+            idx++
+        }
     }
 
     private func LoadFlatParamInfo(reader: CjoFlatBuffer, record: CjoFlatDecl, param: FuncParam): Unit {
