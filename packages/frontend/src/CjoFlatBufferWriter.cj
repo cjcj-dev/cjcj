@@ -524,16 +524,6 @@ private class FrontendCjoFlatBufferWriter {
         // offsets are built/closed BEFORE the FuncBody table is opened below).
         var bodyIdx = 0u32
         var captureKind = 0u8
-        // The C++ parser sets fd->isFrozen=true when it parses '@Frozen' (ParseDecl.cpp:880-883);
-        // the selfhost parser does not yet wire this (parse package is out of this slice's scope).
-        // Derive it from the annotation here, faithful to how every other C++ site that needs the
-        // flag recomputes it (ASTLoader.cpp:811, TypeChecker.cpp:2457 MakeDefaultParamFunction).
-        // Without this, CanBeSrcExported (Utils.h:181-192) would never export a frozen-only body.
-        if (let Some(fd2) <- funcDecl) {
-            if (!fd2.isFrozen && fd2.HasAnno(AstAnnotationKind.FROZEN)) {
-                fd2.isFrozen = true
-            }
-        }
         let shouldExportBody = if (let Some(fd3) <- funcDecl) { CanBeSrcExported(fd3) } else { true }
         let validBody = shouldExportBody && Ty.IsTyCorrect(body.GetTy()) && body.body.isSome()
         if (validBody) {
