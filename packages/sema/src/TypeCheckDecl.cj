@@ -170,6 +170,38 @@ public func TypeCheckDeclBuildEnumConstructorMap(
     }
 }
 
+private func TypeCheckDeclContainsEnumDecl(values: ArrayList<EnumDecl>, decl: EnumDecl): Bool {
+    for (value in values) {
+        if (SameDecl(value, decl)) {
+            return true
+        }
+    }
+    return false
+}
+
+public func TypeCheckDeclBuildImportedEnumConstructorMap(
+    ctx: ASTContext,
+    enableMacroInLsp!: Bool = false
+): Unit {
+    let visited = ArrayList<EnumDecl>()
+    for (fileHash in ctx.resolvedImportedDeclsMap.keys()) {
+        if (let Some(fileMap) <- ctx.resolvedImportedDeclsMap.get(fileHash)) {
+            for (name in fileMap.keys()) {
+                if (let Some(decls) <- fileMap.get(name)) {
+                    for (decl in decls) {
+                        if (let Some(enumDecl) <- (decl as EnumDecl)) {
+                            if (!TypeCheckDeclContainsEnumDecl(visited, enumDecl)) {
+                                visited.add(enumDecl)
+                                TypeCheckDeclInsertEnumConstructors(ctx, enumDecl, enableMacroInLsp: enableMacroInLsp)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
 public func TypeCheckDeclCheckEntryFunc(diag: BasicDiagnosticEngine, fd: FuncDecl): Bool {
     if (!fd.TestAttr(Attribute.GLOBAL)) {
         return true
