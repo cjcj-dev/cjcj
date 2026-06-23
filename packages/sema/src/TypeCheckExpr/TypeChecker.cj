@@ -11,6 +11,7 @@ import cangjie_compiler::sema.*
 import cangjie_compiler::sema.Desugar.*
 import cangjie_compiler::sema.FFI.*
 import cangjie_compiler::sema.InheritanceChecker.*
+import cangjie_compiler::sema.LegalityOfUsage.*
 
 private func contextPackage(ctx: ASTContext): Option<Package> {
     return ctx.curPackage
@@ -900,6 +901,9 @@ public class TypeChecker {
                 let _ = CollectUnusedImports(pkg)
                 let _ = CheckConstEvaluation(pkg)
                 RunInheritanceCheck(pkg)
+                // Check legality of usage after sema type completed.
+                // Mirrors C++ TypeChecker.cpp:2053 (CheckLegalityOfUsage).
+                RunLegalityOfUsageCheck(pkg)
                 PerformDesugarAfterTypeCheck(impl.typeManager, pkg, context: Some(ctx), options: GlobalOptions())
                 DesugarAfterInstantiation(impl.typeManager, recursivePkgs, pkg,
                     implicitUsedDecls: Some(implicitUsedDecls))
@@ -929,6 +933,13 @@ public class TypeChecker {
     private func RunInheritanceCheck(pkg: Package): Unit {
         if (let Some(diagValue) <- impl.diag) {
             StructInheritanceChecker(diagValue, impl.typeManager, pkg, opts: GlobalOptions()).Check()
+        }
+    }
+
+    private func RunLegalityOfUsageCheck(pkg: Package): Unit {
+        if (let Some(diagValue) <- impl.diag) {
+            let result = CheckLegalityOfUsage(pkg)
+            EmitLegalityOfUsage(diagValue, result)
         }
     }
 

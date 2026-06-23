@@ -133,6 +133,20 @@ private func FuncBodyScopeName(body: FuncBody): String {
     return ""
 }
 
+// Return the scope path of a scope-gate name, i.e. the portion before the gate marker
+// (CHILD_SCOPE_SEPARATOR). For a func body scope-gate name like "a0a_a" this yields "a0a",
+// the scope under which the body's locals (and any nested function declarations) live.
+private func ScopePathBeforeGate(scopeName: String): String {
+    var idx = scopeName.size - 1
+    while (idx >= 0) {
+        if (scopeName[idx..(idx + 1)] == CHILD_SCOPE_SEPARATOR) {
+            return scopeName[0..idx]
+        }
+        idx--
+    }
+    return scopeName
+}
+
 private func ScopeContains(parent: String, child: String): Bool {
     if (parent.isEmpty() || child.isEmpty()) {
         return false
@@ -697,6 +711,18 @@ public class InitializationChecker {
                         CheckInitialization(param)
                     }
                 }
+            case ASTKind.MAIN_DECL =>
+                // Faithful to the AST Walker's MAIN_DECL traversal (Walker.cpp:154-166):
+                // descend into the desugared 'main' function when present, otherwise its
+                // raw funcBody. The C++ InitializationChecker relies on the same
+                // WALK_CHILDREN behaviour to analyse the body of 'main'.
+                if (let Some(mainDecl) <- (node as MainDecl)) {
+                    if (let Some(desugarDecl) <- mainDecl.desugarDecl) {
+                        CheckInitialization(desugarDecl)
+                    } else if (let Some(body) <- mainDecl.funcBody) {
+                        CheckInitInFuncBody(body)
+                    }
+                }
             case ASTKind.FUNC_DECL =>
                 if (let Some(funcDecl) <- (node as FuncDecl)) {
                     if (funcDecl.TestAttr(Attribute.HAS_INITIAL)) {
@@ -855,11 +881,23 @@ public class InitializationChecker {
         for (paramList in body.paramLists) {
             CheckInitialization(paramList)
         }
+        // Faithful to C++ InitializationChecker::CheckInitInFuncBody (InitializationChecker.cpp:677-678):
+        //   needCheckInLoop = !fb.funcDecl ||
+        //       (fb.funcDecl->symbol && GetCurSymbolByKindCached(FUNC_LIKE, fb.funcDecl->scopeName))
+        // i.e. loop-style unsetting of conditionally-initialized references is performed only when the
+        // function body belongs to a named function that is *declared inside another function* (a local
+        // or nested function/lambda). Top-level functions, class/struct members and constructors are
+        // analysed with a plain CheckInitialization, so members assigned in a constructor body keep their
+        // INITIALIZED state instead of being wrongly unset (which previously produced spurious
+        // sema_class_uninitialized_field errors). The enclosing FUNC_LIKE symbol is recovered structurally
+        // from the active func-body stack, which only contains an ancestor body when the function is nested.
         var needCheckInLoop = true
         if (let Some(funcDecl) <- body.funcDecl) {
-            if (let None <- funcDecl.symbol) {
-                needCheckInLoop = false
+            let hasSymbol = match (funcDecl.symbol) {
+                case Some(_) => true
+                case None => false
             }
+            needCheckInLoop = hasSymbol && IsDeclaredInsideEnclosingFuncBody(funcDecl)
         }
         if (needCheckInLoop) {
             CheckInitInLoop(body.body)
@@ -1120,13 +1158,38 @@ public class InitializationChecker {
         var idx = currentFuncBodies.size - 1
         while (idx >= 0) {
             let body = currentFuncBodies[idx]
-            let bodyScopeName = FuncBodyScopeName(body)
-            if (ScopeContains(bodyScopeName, scopeName)) {
+            // A func body's scope name is a scope-gate name ("<path>_<gate>"); locals declared
+            // directly inside the body carry the gate's *path* as their scope-name prefix. Compare
+            // against that path (mirroring the upward FUNC_LIKE scope walk of
+            // GetCurSymbolByKindCached in InitializationChecker.cpp:340) so a body containing the
+            // target's declaration scope is recognised. The gate-suffixed name itself never prefixes
+            // a child scope, so the previous comparison missed every local variable.
+            let bodyScopePath = ScopePathBeforeGate(FuncBodyScopeName(body))
+            if (!bodyScopePath.isEmpty() && ScopeContains(bodyScopePath, scopeName)) {
                 return body
             }
             idx--
         }
         return None
+    }
+
+    // Structural reimplementation of `GetCurSymbolByKindCached(FUNC_LIKE, funcDecl.scopeName) != null`
+    // (InitializationChecker.cpp:678): true iff `funcDecl` is declared inside the body scope of an
+    // enclosing function. The InitializationChecker only reaches a nested/local function while walking
+    // its enclosing function's body, so an ancestor body is present on `currentFuncBodies` exactly when
+    // such an enclosing FUNC_LIKE symbol exists. The current body is the last stack element, so only the
+    // ancestors are examined; each ancestor body's scope path (the portion before its scope-gate marker)
+    // is matched against `funcDecl.scopeName`.
+    private func IsDeclaredInsideEnclosingFuncBody(funcDecl: FuncDecl): Bool {
+        var idx = currentFuncBodies.size - 2
+        while (idx >= 0) {
+            let ancestorScopePath = ScopePathBeforeGate(FuncBodyScopeName(currentFuncBodies[idx]))
+            if (!ancestorScopePath.isEmpty() && ScopeContains(ancestorScopePath, funcDecl.scopeName)) {
+                return true
+            }
+            idx--
+        }
+        return false
     }
 
     private func IsUsedInInitFunction(expr: Expr): Bool {
