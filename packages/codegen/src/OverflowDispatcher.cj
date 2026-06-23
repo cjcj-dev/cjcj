@@ -6,32 +6,7 @@ import cangjie_compiler::chir.IntOpWithException
 import cangjie_compiler::chir.IntrinsicKind
 import cangjie_compiler::chir.Type
 import cangjie_compiler::chir.Value
-
-public enum OverflowStrategy {
-    | THROWING
-    | WRAPPING
-    | SATURATING
-    | CHECKED
-}
-
-private func OverflowStrategyIndex(strategy: OverflowStrategy): Int64 {
-    return match (strategy) {
-        case OverflowStrategy.THROWING => 0
-        case OverflowStrategy.WRAPPING => 1
-        case OverflowStrategy.SATURATING => 2
-        case OverflowStrategy.CHECKED => 3
-    }
-}
-
-extend OverflowStrategy <: Equatable<OverflowStrategy> {
-    public operator func ==(right: OverflowStrategy): Bool {
-        return OverflowStrategyIndex(this) == OverflowStrategyIndex(right)
-    }
-
-    public operator func !=(right: OverflowStrategy): Bool {
-        return !(this == right)
-    }
-}
+import cangjie_compiler::utils.OverflowStrategy
 
 private class OverflowIntrinsicInfo {
     public let exprKind: ExprKind
@@ -92,7 +67,7 @@ public func IsOverflowIntrinsic(kind: IntrinsicKind): Bool {
     return GetOverflowIntrinsicInfo(kind).isSome()
 }
 
-private func GenerateOverflowBinary(irBuilder: IRBuilder2, strategy: OverflowStrategy, kind: ExprKind,
+public func GenerateOverflowBinary(irBuilder: IRBuilder2, strategy: OverflowStrategy, kind: ExprKind,
     lhs: Value, rhs: Value, resultType: Option<Type>): LLVMValueRef {
     let lhsValue = irBuilder.GetCGModule().MaterializeValue(irBuilder, lhs).GetRawValue()
     let rhsValue = irBuilder.GetCGModule().MaterializeValue(irBuilder, rhs).GetRawValue()
@@ -128,7 +103,7 @@ private func GenerateOverflowIncOrDec(irBuilder: IRBuilder2, strategy: OverflowS
     return GenerateThrowingBinaryIntOp(irBuilder, kind, value, value, valueRef, oneValue, resultType)
 }
 
-private func GenerateOverflowUnary(irBuilder: IRBuilder2, strategy: OverflowStrategy, kind: ExprKind,
+public func GenerateOverflowUnary(irBuilder: IRBuilder2, strategy: OverflowStrategy, kind: ExprKind,
     operand: Value, operandValue: LLVMValueRef, resultType: Option<Type>): LLVMValueRef {
     if (strategy == OverflowStrategy.WRAPPING) {
         return irBuilder.CreateUnaryTypedWithResult(kind, operandValue, operand.GetType(), resultType,

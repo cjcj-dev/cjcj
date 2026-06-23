@@ -1,5 +1,7 @@
 package cangjie_compiler::chir
 
+import cangjie_compiler::utils.{OverflowStrategy, OverflowStrategyIndex}
+
 public func CHIR2BCHIRTranslateOtherExpression(compiler: CHIR2BCHIR, context: CHIR2BCHIRContext,
     expr: Expression): Unit {
     match (expr.GetExprKind()) {
@@ -93,7 +95,12 @@ public func TranslateTypecastExpression(context: CHIR2BCHIRContext, expr: Expres
                 context.definition.PushOp(if (withException) { OpCode.TYPECAST_EXC } else { OpCode.TYPECAST })
                 context.definition.PushCell(BCHIRTypeKindCell(src))
                 context.definition.PushCell(BCHIRTypeKindCell(dst))
-                context.definition.PushCell(0)
+                let overflowStrategy = if (let Some(typeCast) <- (expr as TypeCast)) {
+                    typeCast.GetOverflowStrategy()
+                } else {
+                    OverflowStrategy.THROWING
+                }
+                context.definition.PushCell(OverflowStrategyIndex(overflowStrategy))
             }
         }
     }

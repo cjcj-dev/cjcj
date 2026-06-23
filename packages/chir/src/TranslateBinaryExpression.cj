@@ -14,7 +14,12 @@ public func CHIR2BCHIRTranslateBinaryExpression(context: CHIR2BCHIRContext, expr
     } else {
         context.definition.PushCell(BCHIRTypeKindCell(expr.GetResultType()))
     }
-    context.definition.PushCell(OverflowStrategyIndex(OverflowStrategy.NA))
+    let overflowStrategy = if (let Some(binaryExpr) <- (expr as BinaryExpression)) {
+        binaryExpr.GetOverflowStrategy()
+    } else {
+        OverflowStrategy.NA
+    }
+    context.definition.PushCell(OverflowStrategyIndex(overflowStrategy))
     if (opCode == OpCode.BIN_LSHIFT || opCode == OpCode.BIN_RSHIFT) {
         if (expr.GetNumOfOperands() > 1) {
             context.definition.PushCell(BCHIRTypeKindCell(expr.GetOperand(1).GetType()))

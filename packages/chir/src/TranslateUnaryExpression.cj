@@ -10,5 +10,10 @@ public func CHIR2BCHIRTranslateUnaryExpression(context: CHIR2BCHIRContext, expr:
     }
     context.definition.PushOp(opCode)
     context.definition.PushCell(BCHIRTypeKindCell(expr.GetResultType()))
-    context.definition.PushCell(OverflowStrategyIndex(OverflowStrategy.NA))
+    let overflowStrategy = if (let Some(unaryExpr) <- (expr as UnaryExpression)) {
+        unaryExpr.GetOverflowStrategy()
+    } else {
+        OverflowStrategy.NA
+    }
+    context.definition.PushCell(OverflowStrategyIndex(overflowStrategy))
 }
