@@ -395,9 +395,9 @@ extend SrcCodeChangeState <: Equatable<SrcCodeChangeState> {
 }
 
 // ModuleFormat.fbs enum ExprKind (fbs:333-373): MemberAccess=5, RefExpr=6, CallExpr=7,
-// UnaryExpr=8, BinaryExpr=11, AssignExpr=13, ThrowExpr=17, MatchExpr=21, ReturnExpr=3,
-// LitConstExpr=10, IfExpr=23, TryExpr=24, WhileExpr=25, DoWhileExpr=26, LambdaExpr=27,
-// Block=28, MatchCase=29, MatchCaseOther=30.
+// UnaryExpr=8, BinaryExpr=11, SubscriptExpr=12, AssignExpr=13, ThrowExpr=17, ArrayLit=19,
+// TupleLit=20, MatchExpr=21, ReturnExpr=3, LitConstExpr=10, IfExpr=23, TryExpr=24,
+// WhileExpr=25, DoWhileExpr=26, LambdaExpr=27, Block=28, MatchCase=29, MatchCaseOther=30.
 private const FLAT_EXPR_KIND_WILDCARD: UInt16 = 1u16
 private const FLAT_EXPR_KIND_RETURN: UInt16 = 3u16
 private const FLAT_EXPR_KIND_MEMBER_ACCESS: UInt16 = 5u16
@@ -406,8 +406,11 @@ private const FLAT_EXPR_KIND_CALL: UInt16 = 7u16
 private const FLAT_EXPR_KIND_UNARY: UInt16 = 8u16
 private const FLAT_EXPR_KIND_LIT_CONST: UInt16 = 10u16
 private const FLAT_EXPR_KIND_BINARY: UInt16 = 11u16
+private const FLAT_EXPR_KIND_SUBSCRIPT: UInt16 = 12u16
 private const FLAT_EXPR_KIND_ASSIGN: UInt16 = 13u16
 private const FLAT_EXPR_KIND_THROW: UInt16 = 17u16
+private const FLAT_EXPR_KIND_ARRAY_LIT: UInt16 = 19u16
+private const FLAT_EXPR_KIND_TUPLE_LIT: UInt16 = 20u16
 private const FLAT_EXPR_KIND_MATCH: UInt16 = 21u16
 private const FLAT_EXPR_KIND_LET_PATTERN_DESTRUCTOR: UInt16 = 22u16
 private const FLAT_EXPR_KIND_IF: UInt16 = 23u16
@@ -1756,6 +1759,9 @@ private class CjoSignatureMaterializer {
         if (kind == FLAT_EXPR_KIND_BINARY) {
             return Some(LoadFlatBinaryExpr(reader, exprTable))
         }
+        if (kind == FLAT_EXPR_KIND_SUBSCRIPT) {
+            return Some(LoadFlatSubscriptExpr(reader, exprTable))
+        }
         if (kind == FLAT_EXPR_KIND_ASSIGN) {
             return Some(LoadFlatAssignExpr(reader, exprTable))
         }
@@ -1773,6 +1779,12 @@ private class CjoSignatureMaterializer {
         }
         if (kind == FLAT_EXPR_KIND_DO_WHILE) {
             return Some(LoadFlatDoWhileExpr(reader, exprTable))
+        }
+        if (kind == FLAT_EXPR_KIND_ARRAY_LIT) {
+            return Some(LoadFlatArrayLit(reader, exprTable))
+        }
+        if (kind == FLAT_EXPR_KIND_TUPLE_LIT) {
+            return Some(LoadFlatTupleLit(reader, exprTable))
         }
         if (kind == FLAT_EXPR_KIND_MATCH) {
             return Some(LoadFlatMatchExpr(reader, exprTable))
@@ -1798,8 +1810,10 @@ private class CjoSignatureMaterializer {
                     scanKind == FLAT_EXPR_KIND_MEMBER_ACCESS ||
                     scanKind == FLAT_EXPR_KIND_REF_EXPR || scanKind == FLAT_EXPR_KIND_CALL ||
                     scanKind == FLAT_EXPR_KIND_UNARY || scanKind == FLAT_EXPR_KIND_LIT_CONST ||
-                    scanKind == FLAT_EXPR_KIND_BINARY || scanKind == FLAT_EXPR_KIND_ASSIGN ||
+                    scanKind == FLAT_EXPR_KIND_BINARY || scanKind == FLAT_EXPR_KIND_SUBSCRIPT ||
+                    scanKind == FLAT_EXPR_KIND_ASSIGN ||
                     scanKind == FLAT_EXPR_KIND_THROW || scanKind == FLAT_EXPR_KIND_MATCH ||
+                    scanKind == FLAT_EXPR_KIND_ARRAY_LIT || scanKind == FLAT_EXPR_KIND_TUPLE_LIT ||
                     scanKind == FLAT_EXPR_KIND_MATCH_CASE || scanKind == FLAT_EXPR_KIND_MATCH_CASE_OTHER ||
                     scanKind == FLAT_EXPR_KIND_IF || scanKind == FLAT_EXPR_KIND_TRY || scanKind == FLAT_EXPR_KIND_WHILE ||
                     scanKind == FLAT_EXPR_KIND_DO_WHILE ||
@@ -2218,6 +2232,36 @@ private class CjoSignatureMaterializer {
         return be
     }
 
+    // Mirrors ExprLoader.cpp:166-183 LoadSubscriptExpr. Operand 0 is baseExpr; remaining operands are
+    // indexExprs. SubscriptInfo.isTupleAccess is restored from ModuleFormat.fbs:477-479.
+    private func LoadFlatSubscriptExpr(reader: CjoFlatBuffer, exprTable: Int64): SubscriptExpr {
+        let se = SubscriptExpr()
+        LoadFlatExprBasicInfo(reader, exprTable, se)
+        let operands = reader.VectorField(exprTable, 12)
+        if (operands >= 0 && reader.VectorLength(operands) > 1) {
+            se.baseExpr = LoadFlatExpr(reader, reader.VectorU32(operands, 0))
+            var idx: Int64 = 1
+            let count = reader.VectorLength(operands)
+            while (idx < count) {
+                if (let Some(indexExpr) <- LoadFlatExpr(reader, reader.VectorU32(operands, idx))) {
+                    se.indexExprs.add(indexExpr)
+                }
+                idx++
+            }
+            if (let Some(base) <- se.baseExpr) {
+                if (let Some(nameRef) <- (base as NameReferenceExpr)) {
+                    nameRef.isAlone = false
+                }
+            }
+        }
+        let infoTable = reader.OffsetField(exprTable, 20)
+        if (infoTable >= 0) {
+            se.isTupleAccess = reader.U8Field(infoTable, 4, 0u8) != 0u8
+        }
+        se.EnableAttr(Attribute.IMPORTED)
+        return se
+    }
+
     // Mirrors ExprLoader.cpp:186-195 LoadAssignExpr. Operands are leftValue then rightExpr; AssignInfo
     // restores op and isCompound through OP_KIND_RMAP.
     private func LoadFlatAssignExpr(reader: CjoFlatBuffer, exprTable: Int64): AssignExpr {
@@ -2235,6 +2279,48 @@ private class CjoSignatureMaterializer {
         }
         ae.EnableAttr(Attribute.IMPORTED)
         return ae
+    }
+
+    // Mirrors ExprLoader.cpp:265-272 LoadArrayLit for children and ReferenceLoader.cpp:612-620 for
+    // ArrayInfo.initFunc on non-VArray literals.
+    private func LoadFlatArrayLit(reader: CjoFlatBuffer, exprTable: Int64): ArrayLit {
+        let al = ArrayLit()
+        LoadFlatExprBasicInfo(reader, exprTable, al)
+        LoadFlatExprOperands(reader, exprTable, al.children)
+        if (al.TyKind() != TypeKind.TYPE_VARRAY) {
+            let infoTable = reader.OffsetField(exprTable, 20)
+            if (infoTable >= 0) {
+                if (let Some(initDecl) <- ResolveFlatFullId(reader, reader.OffsetField(infoTable, 4))) {
+                    al.initFunc = initDecl as FuncDecl
+                }
+            }
+        }
+        al.EnableAttr(Attribute.IMPORTED)
+        return al
+    }
+
+    // Mirrors ExprLoader.cpp:275-282 LoadTupleLit. Operands are tuple element expressions.
+    private func LoadFlatTupleLit(reader: CjoFlatBuffer, exprTable: Int64): TupleLit {
+        let tl = TupleLit()
+        LoadFlatExprBasicInfo(reader, exprTable, tl)
+        LoadFlatExprOperands(reader, exprTable, tl.children)
+        tl.EnableAttr(Attribute.IMPORTED)
+        return tl
+    }
+
+    private func LoadFlatExprOperands(reader: CjoFlatBuffer, exprTable: Int64, out: ArrayList<Expr>): Unit {
+        let operands = reader.VectorField(exprTable, 12)
+        if (operands < 0) {
+            return
+        }
+        var idx: Int64 = 0
+        let count = reader.VectorLength(operands)
+        while (idx < count) {
+            if (let Some(child) <- LoadFlatExpr(reader, reader.VectorU32(operands, idx))) {
+                out.add(child)
+            }
+            idx++
+        }
     }
 
     // Mirrors ExprLoader.cpp:67-79 LoadMemberAccess, plus ReferenceLoader.cpp:586-600 deferred
