@@ -394,8 +394,11 @@ extend SrcCodeChangeState <: Equatable<SrcCodeChangeState> {
     }
 }
 
-// ModuleFormat.fbs enum ExprKind (fbs:333-373): ReturnExpr=3, LitConstExpr=10, LambdaExpr=27, Block=28.
+// ModuleFormat.fbs enum ExprKind (fbs:333-373): MemberAccess=5, RefExpr=6, ReturnExpr=3,
+// LitConstExpr=10, LambdaExpr=27, Block=28.
 private const FLAT_EXPR_KIND_RETURN: UInt16 = 3u16
+private const FLAT_EXPR_KIND_MEMBER_ACCESS: UInt16 = 5u16
+private const FLAT_EXPR_KIND_REF_EXPR: UInt16 = 6u16
 private const FLAT_EXPR_KIND_LIT_CONST: UInt16 = 10u16
 private const FLAT_EXPR_KIND_BLOCK: UInt16 = 28u16
 
@@ -1680,8 +1683,8 @@ private class CjoSignatureMaterializer {
 
     // Recursive EXPR-load dispatcher. Loads an Expr by its 1-based index from the package allExprs
     // vector (root field 9, slot 22). Mirrors ExprLoader.cpp LoadExpr (:417-443) + per-kind loaders.
-    // Bounded faithful slice: LitConstExpr, ReturnExpr, Block. Returns None for INVALID_FORMAT_INDEX
-    // (0) or any not-yet-supported expr kind.
+    // Bounded faithful slice: RefExpr, MemberAccess, LitConstExpr, ReturnExpr, Block. Returns None
+    // for INVALID_FORMAT_INDEX (0) or any not-yet-supported expr kind.
     private func LoadFlatExprRaw(reader: CjoFlatBuffer, exprIndex: UInt32): Option<Expr> {
         if (exprIndex == 0u32 || flatAllExprs < 0) {
             return None
@@ -1700,6 +1703,12 @@ private class CjoSignatureMaterializer {
         if (kind == FLAT_EXPR_KIND_LIT_CONST) {
             return Some(LoadFlatLitConstExpr(reader, exprTable))
         }
+        if (kind == FLAT_EXPR_KIND_MEMBER_ACCESS) {
+            return Some(LoadFlatMemberAccess(reader, exprTable))
+        }
+        if (kind == FLAT_EXPR_KIND_REF_EXPR) {
+            return Some(LoadFlatRefExpr(reader, exprTable))
+        }
         if (kind == FLAT_EXPR_KIND_RETURN) {
             return Some(LoadFlatReturnExpr(reader, exprTable))
         }
@@ -1707,6 +1716,73 @@ private class CjoSignatureMaterializer {
             return Some(LoadFlatBlock(reader, exprTable))
         }
         return None
+    }
+
+    // Mirrors ExprLoader.cpp:67-79 LoadMemberAccess, plus ReferenceLoader.cpp:586-600 deferred
+    // reference restoration for target, instTys, and matchedParentTy.
+    private func LoadFlatMemberAccess(reader: CjoFlatBuffer, exprTable: Int64): MemberAccess {
+        let ma = MemberAccess()
+        LoadFlatExprBasicInfo(reader, exprTable, ma)
+        let operands = reader.VectorField(exprTable, 12)
+        if (operands >= 0 && reader.VectorLength(operands) >= 1) {
+            ma.baseExpr = LoadFlatExpr(reader, reader.VectorU32(operands, 0))
+            if (let Some(base) <- ma.baseExpr) {
+                if (let Some(nameRef) <- (base as NameReferenceExpr)) {
+                    nameRef.isAlone = false
+                }
+            }
+        }
+        let infoTable = reader.OffsetField(exprTable, 20)
+        if (infoTable >= 0) {
+            ma.field = SrcIdentifier(reader.StringField(infoTable, 4))
+            LoadFlatReferenceInfo(reader, infoTable, ma)
+            ma.target = LoadFlatReferenceTarget(reader, infoTable)
+        }
+        ma.EnableAttr(Attribute.IMPORTED)
+        return ma
+    }
+
+    // Mirrors ExprLoader.cpp:81-90 LoadRefExpr, plus ReferenceLoader.cpp:586-610 deferred
+    // reference restoration for target, instTys, and matchedParentTy.
+    private func LoadFlatRefExpr(reader: CjoFlatBuffer, exprTable: Int64): RefExpr {
+        let re = RefExpr()
+        LoadFlatExprBasicInfo(reader, exprTable, re)
+        let infoTable = reader.OffsetField(exprTable, 20)
+        if (infoTable >= 0) {
+            let name = reader.StringField(infoTable, 4)
+            re.ref.identifier = SrcIdentifier(name)
+            re.isThis = name == "this"
+            re.isSuper = name == "super"
+            LoadFlatReferenceInfo(reader, infoTable, re)
+            re.ref.target = LoadFlatReferenceTarget(reader, infoTable)
+        }
+        re.EnableAttr(Attribute.IMPORTED)
+        return re
+    }
+
+    private func LoadFlatExprBasicInfo(reader: CjoFlatBuffer, exprTable: Int64, expr: Expr): Unit {
+        if (let Some(ty) <- LoadFlatType(reader.U32Field(exprTable, 14, 0u32))) {
+            expr.SetTy(ty)
+        }
+    }
+
+    private func LoadFlatReferenceInfo(reader: CjoFlatBuffer, infoTable: Int64, expr: NameReferenceExpr): Unit {
+        let instTys = reader.VectorField(infoTable, 8)
+        if (instTys >= 0) {
+            var idx: Int64 = 0
+            let count = reader.VectorLength(instTys)
+            while (idx < count) {
+                if (let Some(ty) <- LoadFlatType(reader.VectorU32(instTys, idx))) {
+                    expr.instTys.add(ty)
+                }
+                idx++
+            }
+        }
+        expr.matchedParentTy = LoadFlatType(reader.U32Field(infoTable, 10, 0u32))
+    }
+
+    private func LoadFlatReferenceTarget(reader: CjoFlatBuffer, infoTable: Int64): Option<Decl> {
+        return ResolveFlatFullId(reader, reader.OffsetField(infoTable, 6))
     }
 
     // Mirrors ExprLoader.cpp:50-56 LoadReturnExpr. Operand 0 = return value sub-expr.
