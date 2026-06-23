@@ -57,8 +57,7 @@ private func StringDiagArgs(values: Array<String>): Array<BasicDiagArgument> {
     return args.toArray()
 }
 
-private func DiagOldStrings(diag: BasicDiagnosticEngine, node: Node, kind: BasicDiagKind,
-    values: Array<String>): Unit {
+private func DiagOldStrings(diag: BasicDiagnosticEngine, node: Node, kind: BasicDiagKind, values: Array<String>): Unit {
     DiagOld(diag, node, kind, args: StringDiagArgs(values))
 }
 
@@ -538,7 +537,11 @@ private func FilterIncompatibleCandidatesForCall(diag: Option<BasicDiagnosticEng
     if (out.isEmpty()) {
         if (let Some(bad) <- badCandidate) {
             let initializedParamSize = GetInitializedNameParamSize(bad)
-            let paramSize = if (let Some(params) <- BodyParamList(bad)) { params.params.size } else { 0 }
+            let paramSize = if (let Some(params) <- BodyParamList(bad)) {
+                params.params.size
+            } else {
+                0
+            }
             if (ce.args.size >= paramSize - initializedParamSize && ce.args.size <= paramSize) {
                 let _ = CheckArgsWithParamName(diag, ce, bad)
             } else if (let Some(diagValue) <- diag) {
@@ -568,8 +571,8 @@ private func FilterShadowedFunc(candidates: ArrayList<FuncDecl>): ArrayList<Func
     for (fd in candidates) {
         var shadowed = false
         for (existing in out) {
-            if (fd.identifier.Val() == existing.identifier.Val() && fd.TestAttr(Attribute.GENERIC) ==
-                existing.TestAttr(Attribute.GENERIC)) {
+            if (fd.identifier.Val() == existing.identifier.Val() && fd.TestAttr(Attribute.GENERIC) == existing
+                .TestAttr(Attribute.GENERIC)) {
                 let left = GetParamTys(fd)
                 let right = GetParamTys(existing)
                 if (left.size == right.size && SameTypeArgs(left, right)) {
@@ -586,8 +589,8 @@ private func FilterShadowedFunc(candidates: ArrayList<FuncDecl>): ArrayList<Func
     return out
 }
 
-private func CheckAndObtainTypeMappingBetweenInterfaceAndExtend(typeManager: TypeManager,
-    extendDecl: ExtendDecl, interfaceDecl: InterfaceDecl): Option<TypeSubst> {
+private func CheckAndObtainTypeMappingBetweenInterfaceAndExtend(typeManager: TypeManager, extendDecl: ExtendDecl,
+    interfaceDecl: InterfaceDecl): Option<TypeSubst> {
     for (inheritedType in extendDecl.inheritedTypes) {
         if (let Some(inheritedTy) <- inheritedType.GetTy()) {
             if (let Some(interfaceTy) <- (inheritedTy as InterfaceTy)) {
@@ -617,8 +620,8 @@ private func ContainsDeclIdentity(values: ArrayList<FuncDecl>, candidate: FuncDe
     return false
 }
 
-private func IsInterfaceAbstractImplementedByExtend(typeManager: TypeManager,
-    interfaceFunc: FuncDecl, extendFunc: FuncDecl): Bool {
+private func IsInterfaceAbstractImplementedByExtend(typeManager: TypeManager, interfaceFunc: FuncDecl,
+    extendFunc: FuncDecl): Bool {
     if (!interfaceFunc.TestAttr(Attribute.ABSTRACT) || !Ty.IsTyCorrect(interfaceFunc.GetTy())) {
         return false
     }
@@ -653,12 +656,11 @@ private func IsInterfaceAbstractImplementedByExtend(typeManager: TypeManager,
     }
     let interfaceTy = (instantiatedInterfaceTy as FuncTy).getOrThrow()
     let extendTy = (extendFunc.GetTy().getOrThrow() as FuncTy).getOrThrow()
-    return typeManager.IsFuncParameterTypesIdentical(interfaceTy.paramTys, extendTy.paramTys) &&
-        typeManager.IsSubtype(extendTy.retTy, interfaceTy.retTy)
+    return typeManager.IsFuncParameterTypesIdentical(interfaceTy.paramTys, extendTy.paramTys) && typeManager.IsSubtype(
+        extendTy.retTy, interfaceTy.retTy)
 }
 
-private func FilterExtendImplAbstractFunc(typeManager: TypeManager, candidates: ArrayList<FuncDecl>):
-    ArrayList<FuncDecl> {
+private func FilterExtendImplAbstractFunc(typeManager: TypeManager, candidates: ArrayList<FuncDecl>): ArrayList<FuncDecl> {
     let implemented = ArrayList<FuncDecl>()
     for (fd1 in candidates) {
         if (let None <- fd1.outerDecl) {
@@ -674,8 +676,7 @@ private func FilterExtendImplAbstractFunc(typeManager: TypeManager, candidates: 
             if (fd2.outerDecl.getOrThrow().astKind != ASTKind.EXTEND_DECL) {
                 continue
             }
-            if (IsInterfaceAbstractImplementedByExtend(typeManager, fd1, fd2) &&
-                !ContainsDeclIdentity(implemented, fd1)) {
+            if (IsInterfaceAbstractImplementedByExtend(typeManager, fd1, fd2) && !ContainsDeclIdentity(implemented, fd1)) {
                 implemented.add(fd1)
             }
         }
@@ -764,8 +765,8 @@ private func TypeListHasGeneric(tys: ArrayList<Ty>): Bool {
     return false
 }
 
-private func CompareGenericCandidate(typeManager: TypeManager, left: FunctionMatchingUnit,
-    right: FunctionMatchingUnit, ce: CallExpr): Option<Bool> {
+private func CompareGenericCandidate(typeManager: TypeManager, left: FunctionMatchingUnit, right: FunctionMatchingUnit,
+    ce: CallExpr): Option<Bool> {
     if (let None <- GetCurrentGeneric(right.fd, ce)) {
         return None
     }
@@ -806,18 +807,19 @@ private func CompareGenericCandidate(typeManager: TypeManager, left: FunctionMat
     return Some(true)
 }
 
-private func CompareFuncCandidates(typeManager: TypeManager, left: FunctionMatchingUnit,
-    right: FunctionMatchingUnit, ce: CallExpr): Bool {
+private func CompareFuncCandidates(typeManager: TypeManager, left: FunctionMatchingUnit, right: FunctionMatchingUnit,
+    ce: CallExpr): Bool {
     if (let Some(result) <- CompareGenericCandidate(typeManager, left, right, ce)) {
         return result
     }
     if (let Some(leftOuter) <- left.fd.outerDecl) {
         if (let Some(rightOuter) <- right.fd.outerDecl) {
-            let sameParamTys = left.tysInArgOrder.size == right.tysInArgOrder.size &&
-                SameTypeArgs(left.tysInArgOrder, right.tysInArgOrder)
+            let sameParamTys = left.tysInArgOrder.size == right.tysInArgOrder.size && SameTypeArgs(left.tysInArgOrder,
+                right.tysInArgOrder)
             if (sameParamTys) {
-                let rightImplementable = rightOuter.astKind == ASTKind.INTERFACE_DECL ||
-                    right.fd.TestAttr(Attribute.ABSTRACT)
+                let rightImplementable = rightOuter.astKind == ASTKind.INTERFACE_DECL || right
+                    .fd
+                    .TestAttr(Attribute.ABSTRACT)
                 let leftImpl = leftOuter.astKind != ASTKind.INTERFACE_DECL && !left.fd.TestAttr(Attribute.ABSTRACT)
                 if (rightImplementable && leftImpl) {
                     return true
@@ -860,8 +862,7 @@ private func SameGenericShape(left: FuncDecl, right: FuncDecl): Bool {
     return FuncGenericParamSize(left) == FuncGenericParamSize(right)
 }
 
-private func GenerateTypeMappingBetweenFuncs(typeManager: TypeManager, src: FuncDecl, target: FuncDecl):
-    MultiTypeSubst {
+private func GenerateTypeMappingBetweenFuncs(typeManager: TypeManager, src: FuncDecl, target: FuncDecl): MultiTypeSubst {
     let out = MultiTypeSubst()
     if (let Some(outer) <- src.outerDecl) {
         if (Ty.IsTyCorrect(outer.GetTy())) {
@@ -924,9 +925,8 @@ private func FilterOverriden(typeManager: TypeManager, candidates: ArrayList<Fun
             let otherOuterDecl = candidates[otherIdx].fd.outerDecl.getOrThrow()
             let otherOuterOpt = AppliedDeclTy(typeManager, otherOuterDecl, candidates[otherIdx].typeMapping)
             if (let Some(otherOuter) <- otherOuterOpt) {
-                if (Ty.IsTyCorrect(otherOuter) && !SameTy(instOuter, otherOuter) &&
-                    typeManager.IsSubtype(instOuter, otherOuter) &&
-                    SameInstantiatedOverrideSignature(typeManager, candidates[idx], candidates[otherIdx])) {
+                if (Ty.IsTyCorrect(otherOuter) && !SameTy(instOuter, otherOuter) && typeManager.IsSubtype(instOuter,
+                    otherOuter) && SameInstantiatedOverrideSignature(typeManager, candidates[idx], candidates[otherIdx])) {
                     targetMark[otherIdx] = false
                     break
                 }
@@ -937,8 +937,7 @@ private func FilterOverriden(typeManager: TypeManager, candidates: ArrayList<Fun
     }
 }
 
-private func ResolveOverload(typeManager: TypeManager, candidates: ArrayList<FunctionMatchingUnit>,
-    ce: CallExpr): ArrayList<Int64> {
+private func ResolveOverload(typeManager: TypeManager, candidates: ArrayList<FunctionMatchingUnit>, ce: CallExpr): ArrayList<Int64> {
     let targetMark = ArrayList<Bool>()
     for (_ in candidates) {
         targetMark.add(true)
@@ -1023,17 +1022,20 @@ private func SpreadInstantiationTy(typeManager: TypeManager, node: Node, typeMap
     if (typeMapping.u2i.IsEmpty() || !Ty.IsTyCorrect(node.GetTy())) {
         return
     }
-    let walker = Walker(node, visitPre: { current: Node =>
-        if (Ty.IsTyCorrect(current.GetTy())) {
-            current.SetTy(typeManager.ApplySubstPack(current.GetTy().getOrThrow(), typeMapping))
+    let walker = Walker(
+        node,
+        visitPre: {
+            current: Node =>
+                if (Ty.IsTyCorrect(current.GetTy())) {
+                    current.SetTy(typeManager.ApplySubstPack(current.GetTy().getOrThrow(), typeMapping))
+                }
+                VisitAction.WALK_CHILDREN
         }
-        VisitAction.WALK_CHILDREN
-    })
+    )
     let _ = walker.Walk()
 }
 
-private func BuildDesugaredCallArgs(typeManager: TypeManager, fd: FuncDecl, ce: CallExpr,
-    typeMapping: SubstPack): Unit {
+private func BuildDesugaredCallArgs(typeManager: TypeManager, fd: FuncDecl, ce: CallExpr, typeMapping: SubstPack): Unit {
     ce.defaultArgs.clear()
     ce.desugarArgs = None
     if (let None <- BodyParamList(fd)) {
@@ -1058,8 +1060,7 @@ private func BuildDesugaredCallArgs(typeManager: TypeManager, fd: FuncDecl, ce: 
     ce.desugarArgs = Some(desugarArgs)
 }
 
-private func ApplyInstantiatedArgumentTypes(typeManager: TypeManager, ce: CallExpr,
-    unit: FunctionMatchingUnit): Unit {
+private func ApplyInstantiatedArgumentTypes(typeManager: TypeManager, ce: CallExpr, unit: FunctionMatchingUnit): Unit {
     var idx: Int64 = 0
     while (idx < ce.args.size && idx < unit.tysInArgOrder.size) {
         let rawParamTy = unit.tysInArgOrder[idx]
@@ -1135,8 +1136,8 @@ private func TyListContains(values: ArrayList<Ty>, ty: Ty): Bool {
     return false
 }
 
-private func AddCurrentGenericInstTyVars(typeManager: TypeManager, generic: Generic,
-    typeMapping: SubstPack, out: ArrayList<GenericsTy>): Unit {
+private func AddCurrentGenericInstTyVars(typeManager: TypeManager, generic: Generic, typeMapping: SubstPack,
+    out: ArrayList<GenericsTy>): Unit {
     for (param in generic.typeParameters) {
         if (let Some(paramTy) <- param.GetTy()) {
             if (let Some(genericTy) <- (paramTy as GenericsTy)) {
@@ -1157,43 +1158,296 @@ private func AddCurrentGenericInstTyVars(typeManager: TypeManager, generic: Gene
     }
 }
 
-private func InferGenericCallTypeMapping(typeManager: TypeManager, ce: CallExpr, fd: FuncDecl,
-    paramTys: ArrayList<Ty>, typeMapping: SubstPack, inferenceFailure: Option<CallInferenceFailure>): Bool {
+private class TyArgSynState {
+    public let tyVarsToSolve: ArrayList<GenericsTy> = ArrayList<GenericsTy>()
+    public let argTys: ArrayList<Ty> = ArrayList<Ty>()
+    public let failSet: ArrayList<Bool> = ArrayList<Bool>()
+    public let questParamTys: ArrayList<Option<Ty>> = ArrayList<Option<Ty>>()
+    public var unsolvedCount: Int64 = 0
+    public var newInfo: Bool = true
+    public var lastResortUnused: Bool = true
+    public var solution: Option<TypeSubst> = None
+
+    public init() {}
+}
+
+private func SubstContainsTyVar(subst: TypeSubst, tyVar: GenericsTy): Bool {
+    for (entry in subst.entries) {
+        if (entry.ty.Contains(tyVar)) {
+            return true
+        }
+    }
+    return false
+}
+
+private func CountUnsolvedTyVars(tyVarsToSolve: ArrayList<GenericsTy>, subst: TypeSubst): Int64 {
+    var count: Int64 = 0
+    for (tyVar in tyVarsToSolve) {
+        if (let None <- subst.Get(tyVar)) {
+            count++
+        } else if (SubstContainsTyVar(subst, tyVar)) {
+            count++
+        }
+    }
+    return count
+}
+
+private func HasUnsolvedTyVars(tyVarsToSolve: ArrayList<GenericsTy>, subst: TypeSubst): Bool {
+    return CountUnsolvedTyVars(tyVarsToSolve, subst) > 0
+}
+
+private func MayNeedNextIteration(stat: TyArgSynState, newUnsolvedCount: Int64): Bool {
+    if ((let None <- stat.solution) || newUnsolvedCount == 0) {
+        stat.unsolvedCount = newUnsolvedCount
+        return false
+    }
+    if (newUnsolvedCount >= stat.unsolvedCount) {
+        return false
+    }
+    stat.unsolvedCount = newUnsolvedCount
+    return true
+}
+
+private func ContainsTyVar(values: ArrayList<GenericsTy>, target: Ty): Bool {
+    if (let Some(targetVar) <- (target as GenericsTy)) {
+        for (value in values) {
+            if (SameTy(value, targetVar)) {
+                return true
+            }
+        }
+    }
+    return false
+}
+
+private func IsConcreteForTyArgSynthesis(tyVarsToSolve: ArrayList<GenericsTy>, ty: Ty): Bool {
+    if (!Ty.IsTyCorrect(ty)) {
+        return false
+    }
+    for (genericTy in ty.GetGenericTyArgs()) {
+        if (ContainsTyVar(tyVarsToSolve, genericTy)) {
+            return false
+        }
+    }
+    return true
+}
+
+private func CloneFuncTyCfgForQuest(funcTy: FuncTy): FuncTyConfig {
+    let cfg = FuncTyConfig()
+    cfg.isC = funcTy.isC
+    cfg.isClosureTy = funcTy.isClosureTy
+    cfg.hasVariableLenArg = funcTy.hasVariableLenArg
+    cfg.noCast = funcTy.noCast
+    return cfg
+}
+
+private func UnsolvedAsQuest(typeManager: TypeManager, tyVarsToSolve: ArrayList<GenericsTy>, ty: Ty): Option<Ty> {
+    if (!Ty.IsTyCorrect(ty)) {
+        return Some(ty)
+    }
+    if (let Some(funcTy) <- (ty as FuncTy)) {
+        let paramTys = ArrayList<Ty>()
+        for (paramTy in funcTy.paramTys) {
+            if (!IsConcreteForTyArgSynthesis(tyVarsToSolve, paramTy)) {
+                return None
+            }
+            paramTys.add(paramTy)
+        }
+        if (let Some(retTy) <- UnsolvedAsQuest(typeManager, tyVarsToSolve, funcTy.retTy)) {
+            return Some(typeManager.GetFunctionTy(paramTys.toArray(), retTy, cfg: CloneFuncTyCfgForQuest(funcTy)))
+        }
+        return None
+    }
+    if (IsConcreteForTyArgSynthesis(tyVarsToSolve, ty)) {
+        return Some(ty)
+    }
+    return Some(TypeManager.GetQuestTy())
+}
+
+private func PrepareQuestParamTy(typeManager: TypeManager, paramsTy: ArrayList<Ty>, stat: TyArgSynState): Bool {
+    var anyNewTarget = false
+    for (idx in 0..paramsTy.size) {
+        stat.questParamTys[idx] = None
+        if (stat.failSet[idx]) {
+            if (let Some(solution) <- stat.solution) {
+                let partial = typeManager.GetInstantiatedTy(paramsTy[idx], solution)
+                if (let Some(questParamTy) <- UnsolvedAsQuest(typeManager, stat.tyVarsToSolve, partial)) {
+                    stat.questParamTys[idx] = Some(questParamTy)
+                    anyNewTarget = true
+                }
+            }
+        }
+    }
+    return anyNewTarget
+}
+
+private func FillValidArgTys(stat: TyArgSynState, pack: LocTyArgSynArgPack, paramsTyInOrder: ArrayList<Ty>): Unit {
+    for (idx in 0..stat.argTys.size) {
+        if (Ty.IsTyCorrect(stat.argTys[idx])) {
+            stat.failSet[idx] = false
+            pack.argTys.add(stat.argTys[idx])
+            pack.paramTys.add(paramsTyInOrder[idx])
+        } else {
+            stat.failSet[idx] = true
+        }
+    }
+}
+
+private class BoolRef {
+    public var value: Bool = false
+
+    public init() {}
+}
+
+private func NeedLastTry(ce: CallExpr): Bool {
+    for (arg in ce.args) {
+        if (let Some(expr) <- arg.expr) {
+            let found = BoolRef()
+            let walker = Walker(
+                expr,
+                visitPre: {
+                    node: Node =>
+                        if (let Some(_) <- (node as LambdaExpr)) {
+                            found.value = true
+                            return VisitAction.STOP_NOW
+                        }
+                        if (IsQuestableNode(node)) {
+                            return VisitAction.WALK_CHILDREN
+                        }
+                        VisitAction.SKIP_CHILDREN
+                }
+            )
+            let _ = walker.Walk()
+            if (found.value) {
+                return true
+            }
+        }
+    }
+    return false
+}
+
+private func PropagatePlaceholderAndSolve(typeManager: TypeManager, ce: CallExpr, paramTys: ArrayList<Ty>,
+    funcRetTy: Ty, retTyUB: Option<Ty>, argChecker: Option<CallArgChecker>, tyVarsToSolve: ArrayList<GenericsTy>): Option<TypeSubst> {
+    if (!NeedLastTry(ce)) {
+        return None
+    }
+    let checker = argChecker ?? return None
+    let saved = typeManager.cloneTypeManagerConstraint()
+    for (tyVar in tyVarsToSolve) {
+        typeManager.MarkAsUnsolvedTyVar(tyVar)
+    }
+    if (let Some(target) <- retTyUB) {
+        if (!typeManager.IsSubtype(funcRetTy, target)) {
+            typeManager.restoreTypeManagerConstraint(saved)
+            return None
+        }
+    }
+    for (idx in 0..ce.args.size) {
+        ce.args[idx].Clear()
+        if (!checker(paramTys[idx], ce.args[idx])) {
+            typeManager.restoreTypeManagerConstraint(saved)
+            return None
+        }
+    }
+    let solved = LocalTypeArgumentSynthesis.SolveConstraints(typeManager, typeManager.constraints)
+    typeManager.restoreTypeManagerConstraint(saved)
+    return solved
+}
+
+private func InferGenericCallTypeMapping(typeManager: TypeManager, ce: CallExpr, fd: FuncDecl, paramTys: ArrayList<Ty>,
+    typeMapping: SubstPack, inferenceFailure: Option<CallInferenceFailure>, target: Option<Ty>,
+    argChecker: Option<CallArgChecker>): Bool {
     if (HasRecordedCallTypeArgs(ce)) {
         return true
     }
     let generic = GetCurrentGeneric(fd, ce) ?? return true
-    let tyVarsToSolve = ArrayList<GenericsTy>()
-    AddCurrentGenericInstTyVars(typeManager, generic, typeMapping, tyVarsToSolve)
-    if (tyVarsToSolve.isEmpty()) {
+    let stat = TyArgSynState()
+    AddCurrentGenericInstTyVars(typeManager, generic, typeMapping, stat.tyVarsToSolve)
+    if (stat.tyVarsToSolve.isEmpty()) {
         return true
     }
-    let pack = LocTyArgSynArgPack()
-    for (tyVar in tyVarsToSolve) {
-        pack.tyVarsToSolve.add(tyVar)
+    stat.unsolvedCount = stat.tyVarsToSolve.size + 1
+    let paramsTyInOrder = ArrayList<Ty>()
+    for (paramTy in paramTys) {
+        paramsTyInOrder.add(typeManager.ApplySubstPack(paramTy, typeMapping))
     }
     var idx: Int64 = 0
-    while (idx < ce.args.size && idx < paramTys.size) {
+    while (idx < ce.args.size && idx < paramsTyInOrder.size) {
         let argTy = typeManager.ReplaceIdealTy(GetExprTy(ce.args[idx]))
-        if (!Ty.IsTyCorrect(argTy) && IsLambdaCallArg(ce.args[idx])) {
-            idx++
-            continue
-        }
-        let paramTy = typeManager.ApplySubstPack(paramTys[idx], typeMapping)
-        pack.argTys.add(argTy)
-        pack.paramTys.add(paramTy)
+        stat.argTys.add(argTy)
+        stat.failSet.add(!Ty.IsTyCorrect(argTy))
+        stat.questParamTys.add(None)
         idx++
     }
-    if (pack.argTys.size != pack.paramTys.size || pack.argTys.isEmpty()) {
+    if (stat.argTys.size != ce.args.size) {
         MarkCallInferenceFailure(inferenceFailure, ce, fd)
         return false
     }
-    if (let Some(subst) <- LocalTypeArgumentSynthesis(typeManager, pack).SynthesizeTypeArguments()) {
-        typeManager.PackMapping(typeMapping, subst)
-        return true
+    let funcRetTy = if (let Some(fdTy) <- fd.GetTy()) {
+        if (let Some(funcTy) <- (typeManager.ApplySubstPack(fdTy, typeMapping) as FuncTy)) {
+            funcTy.retTy
+        } else {
+            TypeManager.GetInvalidTy()
+        }
+    } else {
+        TypeManager.GetInvalidTy()
     }
-    MarkCallInferenceFailure(inferenceFailure, ce, fd)
-    return false
+    var pack = LocTyArgSynArgPack()
+    // Mirrors the C++ fixpoint loop in src/Sema/TypeArgumentInference.cpp:431-540:
+    // every partial solution is fed back as contextual targets for still-failed arguments.
+    while (stat.newInfo) {
+        for (argIdx in 0..stat.argTys.size) {
+            if (stat.failSet[argIdx]) {
+                if (let Some(questParamTy) <- stat.questParamTys[argIdx]) {
+                    if (let Some(checker) <- argChecker) {
+                        ce.args[argIdx].Clear()
+                        if (checker(questParamTy, ce.args[argIdx])) {
+                            stat.argTys[argIdx] = typeManager.ReplaceIdealTy(GetExprTy(ce.args[argIdx]))
+                        }
+                    }
+                }
+            }
+        }
+        pack = LocTyArgSynArgPack()
+        for (tyVar in stat.tyVarsToSolve) {
+            pack.tyVarsToSolve.add(tyVar)
+        }
+        FillValidArgTys(stat, pack, paramsTyInOrder)
+        pack.funcRetTy = Some(funcRetTy)
+        pack.retTyUB = target
+        if (pack.argTys.size != pack.paramTys.size || (pack.argTys.isEmpty() && (let None <- target))) {
+            stat.solution = None
+            stat.newInfo = false
+        } else {
+            let syn = LocalTypeArgumentSynthesis(typeManager, pack)
+            stat.solution = syn.SynthesizeTypeArguments(allowPartial: true)
+            let newUnsolvedCount = if (let Some(solution) <- stat.solution) {
+                syn.CountUnsolvedTyVars(solution)
+            } else {
+                0
+            }
+            stat.newInfo = MayNeedNextIteration(stat, newUnsolvedCount)
+            if (stat.newInfo) {
+                stat.newInfo = PrepareQuestParamTy(typeManager, paramsTyInOrder, stat)
+            }
+            if (!stat.newInfo && stat.unsolvedCount > 0 && stat.lastResortUnused) {
+                stat.lastResortUnused = false
+                // Matches the lambda-body last resort in TypeArgumentInference.cpp:485-519.
+                if (let Some(sol) <- PropagatePlaceholderAndSolve(typeManager, ce, paramsTyInOrder, funcRetTy, target,
+                    argChecker, stat.tyVarsToSolve)) {
+                    if (!HasUnsolvedTyVars(stat.tyVarsToSolve, sol)) {
+                        stat.solution = Some(sol)
+                        stat.unsolvedCount = 0
+                    }
+                }
+            }
+        }
+    }
+    if ((let None <- stat.solution) || stat.unsolvedCount > 0) {
+        MarkCallInferenceFailure(inferenceFailure, ce, fd)
+        return false
+    }
+    typeManager.PackMapping(typeMapping, stat.solution.getOrThrow())
+    return true
 }
 
 private func DiagnoseForCallInference(diag: Option<BasicDiagnosticEngine>, ce: CallExpr): Unit {
@@ -1204,15 +1458,7 @@ private func DiagnoseForCallInference(diag: Option<BasicDiagnosticEngine>, ce: C
     }
 }
 
-private func IsLambdaCallArg(arg: FuncArg): Bool {
-    if (let Some(expr) <- arg.expr) {
-        return (expr as LambdaExpr).isSome()
-    }
-    return false
-}
-
-private func FillTypeArgumentsTy(typeManager: TypeManager, fd: FuncDecl, ce: CallExpr,
-    typeMapping: SubstPack): Unit {
+private func FillTypeArgumentsTy(typeManager: TypeManager, fd: FuncDecl, ce: CallExpr, typeMapping: SubstPack): Unit {
     let generic = match (GetCurrentGeneric(fd, ce)) {
         case Some(value) => value
         case None => return
@@ -1284,8 +1530,7 @@ private func CheckCallCompatible(typeManager: TypeManager, diag: Option<BasicDia
         }
         if (Ty.IsCStructType(argTy) && !SameTy(argTy, paramTy)) {
             if (let Some(diagValue) <- diag) {
-                DiagOldStrings(diagValue, ce.args[idx], BasicDiagKind.sema_cstruct_cannot_autobox,
-                    [paramTy.String()])
+                DiagOldStrings(diagValue, ce.args[idx], BasicDiagKind.sema_cstruct_cannot_autobox, [paramTy.String()])
             }
             return false
         }
@@ -1428,8 +1673,8 @@ private func CheckInstantiatedCandidateGenericDecl(typeManager: TypeManager, dia
     return CheckGenericDeclInstantiationForCall(typeManager, diag, genericDecl, instTys, checkNode)
 }
 
-private func CheckCandidateConstrains(typeManager: TypeManager, diag: Option<BasicDiagnosticEngine>,
-    ce: CallExpr, fd: FuncDecl, typeMapping: SubstPack): Bool {
+private func CheckCandidateConstrains(typeManager: TypeManager, diag: Option<BasicDiagnosticEngine>, ce: CallExpr,
+    fd: FuncDecl, typeMapping: SubstPack): Bool {
     if (let Some(base) <- ce.baseFunc) {
         let userDefinedTypeArgs = base.GetTypeArgs()
         if (!NeedFurtherInstantiation(userDefinedTypeArgs) && fd.TestAttr(Attribute.GENERIC) &&
@@ -1440,13 +1685,15 @@ private func CheckCandidateConstrains(typeManager: TypeManager, diag: Option<Bas
     return CheckInstantiatedCandidateGenericDecl(typeManager, diag, ce, fd, typeMapping)
 }
 
-private func CheckCandidate(typeManager: TypeManager, diag: Option<BasicDiagnosticEngine>, ce: CallExpr,
-    fd: FuncDecl, target: Option<Ty>, argChecker!: Option<CallArgChecker> = None,
+private func CheckCandidate(typeManager: TypeManager, diag: Option<BasicDiagnosticEngine>, ce: CallExpr, fd: FuncDecl,
+    target: Option<Ty>, argChecker!: Option<CallArgChecker> = None,
     inferenceFailure!: Option<CallInferenceFailure> = None): Option<FunctionMatchingUnit> {
-    let wrongNormalArgSize = !fd.hasVariableLenArg &&
-        !IsPossibleVariadicFunction(fd, ce) &&
-        (if (let Some(params) <- BodyParamList(fd)) { params.params.size != ce.args.size } else { true }) &&
-        !HasSamePositionalArgsSize(fd, ce)
+    let wrongNormalArgSize = !fd.hasVariableLenArg && !IsPossibleVariadicFunction(fd, ce) && (if (let Some(params) <- BodyParamList(
+        fd)) {
+        params.params.size != ce.args.size
+    } else {
+        true
+    }) && !HasSamePositionalArgsSize(fd, ce)
     if (wrongNormalArgSize) {
         if (let Some(diagValue) <- diag) {
             DiagOld(diagValue, ce, BasicDiagKind.sema_parameters_and_arguments_mismatch)
@@ -1459,7 +1706,8 @@ private func CheckCandidate(typeManager: TypeManager, diag: Option<BasicDiagnost
         return None
     }
     let typeMapping = GenerateCallBaseTypeMapping(typeManager, ce)
-    if (!InferGenericCallTypeMapping(typeManager, ce, fd, paramTyInArgOrder, typeMapping, inferenceFailure)) {
+    if (!InferGenericCallTypeMapping(typeManager, ce, fd, paramTyInArgOrder, typeMapping, inferenceFailure, target,
+        argChecker)) {
         return None
     }
     let unit = FunctionMatchingUnit(fd, paramTyInArgOrder, typeMapping)
@@ -1481,7 +1729,11 @@ private func CheckCandidate(typeManager: TypeManager, diag: Option<BasicDiagnost
     if (!CheckCandidateConstrains(typeManager, diag, ce, fd, typeMapping)) {
         return None
     }
-    return if (argNamesValid) { Some(unit) } else { None }
+    return if (argNamesValid) {
+        Some(unit)
+    } else {
+        None
+    }
 }
 
 private func UpdateCallTargets(ce: CallExpr, fd: FuncDecl): Unit {
@@ -1566,7 +1818,11 @@ private func CheckCallKind(diag: Option<BasicDiagnosticEngine>, ce: CallExpr, de
             if (isThis) {
                 ce.callKind = CallKind.CALL_DECLARED_FUNCTION
             } else {
-                ce.callKind = if (isSuper) { CallKind.CALL_SUPER_FUNCTION } else { CallKind.CALL_OBJECT_CREATION }
+                ce.callKind = if (isSuper) {
+                    CallKind.CALL_SUPER_FUNCTION
+                } else {
+                    CallKind.CALL_OBJECT_CREATION
+                }
             }
             true
         case ASTKind.STRUCT_DECL =>
@@ -1576,7 +1832,11 @@ private func CheckCallKind(diag: Option<BasicDiagnosticEngine>, ce: CallExpr, de
                     isThis = refExpr.isThis
                 }
             }
-            ce.callKind = if (isThis) { CallKind.CALL_DECLARED_FUNCTION } else { CallKind.CALL_STRUCT_CREATION }
+            ce.callKind = if (isThis) {
+                CallKind.CALL_DECLARED_FUNCTION
+            } else {
+                CallKind.CALL_STRUCT_CREATION
+            }
             true
         case ASTKind.FUNC_DECL =>
             if (IsSuperCall(ce)) {
@@ -1591,8 +1851,7 @@ private func CheckCallKind(diag: Option<BasicDiagnosticEngine>, ce: CallExpr, de
     }
 }
 
-private func DynamicBindingThisType(typeManager: TypeManager, ce: CallExpr, fd: FuncDecl,
-    typeMapping: SubstPack): Option<Ty> {
+private func DynamicBindingThisType(typeManager: TypeManager, ce: CallExpr, fd: FuncDecl, typeMapping: SubstPack): Option<Ty> {
     if (!IsFuncReturnThisType(fd)) {
         return None
     }
@@ -1681,8 +1940,7 @@ private func PostCheckCallExpr(typeManager: TypeManager, diag: Option<BasicDiagn
 }
 
 private func MatchFunctionForCall(typeManager: TypeManager, diag: Option<BasicDiagnosticEngine>,
-    candidates: ArrayList<FuncDecl>, ce: CallExpr, target: Option<Ty>,
-    argChecker!: Option<CallArgChecker> = None,
+    candidates: ArrayList<FuncDecl>, ce: CallExpr, target: Option<Ty>, argChecker!: Option<CallArgChecker> = None,
     inferenceFailure!: Option<CallInferenceFailure> = None): ArrayList<FuncDecl> {
     let legals = ArrayList<FunctionMatchingUnit>()
     for (fd in candidates) {
@@ -1753,8 +2011,7 @@ private func MatchFunctionForCall(typeManager: TypeManager, diag: Option<BasicDi
     return out
 }
 
-private func CheckCallArgs(diag: Option<BasicDiagnosticEngine>, typeManager: TypeManager, ce: CallExpr,
-    funcTy: FuncTy): Option<ArrayList<Ty>> {
+private func CheckCallArgs(diag: Option<BasicDiagnosticEngine>, typeManager: TypeManager, ce: CallExpr, funcTy: FuncTy): Option<ArrayList<Ty>> {
     let paramTys = ArrayList<Ty>()
     for (paramTy in funcTy.paramTys) {
         paramTys.add(paramTy)
@@ -1762,7 +2019,11 @@ private func CheckCallArgs(diag: Option<BasicDiagnosticEngine>, typeManager: Typ
     if (funcTy.hasVariableLenArg && ce.args.size > funcTy.paramTys.size) {
         let varargsSize = ce.args.size - funcTy.paramTys.size
         for (_ in 0..varargsSize) {
-            paramTys.add(if (funcTy.isC) { typeManager.GetCTypeTy() } else { typeManager.GetAnyTy() })
+            paramTys.add(if (funcTy.isC) {
+                typeManager.GetCTypeTy()
+            } else {
+                typeManager.GetAnyTy()
+            })
         }
     }
     if (paramTys.size != ce.args.size) {
@@ -1817,8 +2078,7 @@ private func CheckFuncPtrCall(typeManager: TypeManager, diag: Option<BasicDiagno
         }
         if (Ty.IsCStructType(argTy) && !SameTy(argTy, param)) {
             if (let Some(diagValue) <- diag) {
-                DiagOldStrings(diagValue, ce.args[idx], BasicDiagKind.sema_cstruct_cannot_autobox,
-                    [param.String()])
+                DiagOldStrings(diagValue, ce.args[idx], BasicDiagKind.sema_cstruct_cannot_autobox, [param.String()])
             }
             return false
         }
@@ -1862,8 +2122,8 @@ private func CheckFuncPtrCall(typeManager: TypeManager, diag: Option<BasicDiagno
     return true
 }
 
-private func CheckNonNormalCall(typeManager: TypeManager, diag: Option<BasicDiagnosticEngine>,
-    target: Option<Ty>, ce: CallExpr, argChecker!: Option<CallArgChecker> = None): Bool {
+private func CheckNonNormalCall(typeManager: TypeManager, diag: Option<BasicDiagnosticEngine>, target: Option<Ty>,
+    ce: CallExpr, argChecker!: Option<CallArgChecker> = None): Bool {
     if (let Some(base) <- ce.baseFunc) {
         if (let Some(baseTy) <- base.GetTy()) {
             if (let Some(funcTy) <- (baseTy as FuncTy)) {
@@ -1889,8 +2149,7 @@ private func DiagnoseForCall(diag: Option<BasicDiagnosticEngine>, candidatesBefo
         return
     }
     let diagValue = diag.getOrThrow()
-    let isConstructorCall = ce.callKind == CallKind.CALL_OBJECT_CREATION ||
-        ce.callKind == CallKind.CALL_STRUCT_CREATION
+    let isConstructorCall = ce.callKind == CallKind.CALL_OBJECT_CREATION || ce.callKind == CallKind.CALL_STRUCT_CREATION
     if (candidatesBeforeCheck.isEmpty()) {
         ce.callKind = CallKind.CALL_INVALID
         if (isConstructorCall) {
@@ -1940,18 +2199,16 @@ private func ResolveDeclForCallBase(ce: CallExpr, candidates: ArrayList<FuncDecl
     return None
 }
 
-public func ChkCallExprWithDiag(typeManager: TypeManager, diag: BasicDiagnosticEngine, target: Option<Ty>,
-    ce: CallExpr): Bool {
+public func ChkCallExprWithDiag(typeManager: TypeManager, diag: BasicDiagnosticEngine, target: Option<Ty>, ce: CallExpr): Bool {
     return ChkCallExpr(typeManager, Some(diag), target, ce)
 }
 
-public func ChkCallExpr(typeManager: TypeManager, diag: Option<BasicDiagnosticEngine>, target: Option<Ty>,
-    ce: CallExpr): Bool {
+public func ChkCallExpr(typeManager: TypeManager, diag: Option<BasicDiagnosticEngine>, target: Option<Ty>, ce: CallExpr): Bool {
     return ChkCallExprWithArgChecker(typeManager, diag, target, ce, None)
 }
 
-public func ChkCallExprWithArgChecker(typeManager: TypeManager, diag: Option<BasicDiagnosticEngine>,
-    target: Option<Ty>, ce: CallExpr, argChecker: Option<CallArgChecker>): Bool {
+public func ChkCallExprWithArgChecker(typeManager: TypeManager, diag: Option<BasicDiagnosticEngine>, target: Option<Ty>,
+    ce: CallExpr, argChecker: Option<CallArgChecker>): Bool {
     if (let Some(desugar) <- ce.desugarExpr) {
         if (Ty.IsTyCorrect(desugar.GetTy())) {
             ce.SetTy(desugar.GetTy().getOrThrow())
@@ -2016,8 +2273,8 @@ public func SynCallExpr(typeManager: TypeManager, ce: CallExpr): Ty {
     return TypeManager.GetInvalidTy()
 }
 
-public func SynCallExprWithArgChecker(typeManager: TypeManager, ce: CallExpr,
-    argChecker: Option<CallArgChecker>, diag!: Option<BasicDiagnosticEngine> = None): Ty {
+public func SynCallExprWithArgChecker(typeManager: TypeManager, ce: CallExpr, argChecker: Option<CallArgChecker>,
+    diag!: Option<BasicDiagnosticEngine> = None): Ty {
     if (ChkCallExprWithArgChecker(typeManager, diag, None, ce, argChecker)) {
         return ce.GetTy() ?? TypeManager.GetInvalidTy()
     }
