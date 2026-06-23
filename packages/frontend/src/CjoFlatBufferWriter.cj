@@ -684,12 +684,15 @@ private class FrontendCjoFlatBufferWriter {
         return exprIndex
     }
 
-    // Per-kind dispatch. Bounded faithful slice: RefExpr, MemberAccess, Block, ReturnExpr,
-    // LitConstExpr. Other kinds throw (no SaveUnsupportExpr diagnostic stub yet); they are added in
-    // later cuts.
+    // Per-kind dispatch. Bounded faithful slice: RefExpr, MemberAccess, CallExpr, Block,
+    // ReturnExpr, LitConstExpr. Other kinds throw (no SaveUnsupportExpr diagnostic stub yet); they
+    // are added in later cuts.
     private func SaveExprByKind(realExpr: Expr): FlatBufferOffset {
         if (let Some(block) <- (realExpr as Block)) {
             return SaveBlock(block)
+        }
+        if (let Some(ce) <- (realExpr as CallExpr)) {
+            return SaveCallExpr(ce)
         }
         if (let Some(ma) <- (realExpr as MemberAccess)) {
             return SaveMemberAccess(ma)
@@ -749,6 +752,79 @@ private class FrontendCjoFlatBufferWriter {
         // ExprKind_Block is index 28 of enum ExprKind (fbs:333-373; LambdaExpr=27, Block=28).
         builder.AddU16(0, 28u16)
         return builder.EndTable()
+    }
+
+    // Mirrors ExprWriter.cpp:179-200 SaveExpression(CallExpr): operand 0 is baseFunc, following
+    // operands are FuncArg wrapper indices from desugarArgs if present, else args. CallInfo follows
+    // ModuleFormat.fbs:433-436 and ExprInfo_CallInfo's union tag value is 1 (fbs:412-432).
+    private func SaveCallExpr(ce: CallExpr): FlatBufferOffset {
+        if (let None <- ce.baseFunc) {
+            throw IllegalArgumentException("CallExpr without baseFunc is not supported in faithful .cjo writer")
+        }
+        let operands = ArrayList<UInt32>()
+        operands.add(SaveExpr(ce.baseFunc.getOrThrow()))
+        if (let Some(desugarArgs) <- ce.desugarArgs) {
+            for (arg in desugarArgs) {
+                operands.add(SaveFuncArg(arg))
+            }
+        } else {
+            for (arg in ce.args) {
+                operands.add(SaveFuncArg(arg))
+            }
+        }
+        let operandsVec = builder.CreateVectorU32(operands)
+        // CallInfo field 0 hasSideEffect, field 1 callKind (ModuleFormat.fbs:433-436).
+        builder.StartTable(2)
+        builder.AddU8(1, CallKindToFlat(ce.callKind))
+        builder.AddBool(0, ce.TestAttr(Attribute.SIDE_EFFECT))
+        let info = builder.EndTable()
+
+        let begin = PositionBytes(ce.begin)
+        let end = PositionBytes(ce.end)
+        let typeIndex = SaveExprType(ce)
+        builder.StartTable(9)
+        builder.AddOffset(8, info)
+        builder.AddU8(7, 1u8)
+        builder.AddU32(5, typeIndex)
+        builder.AddOffset(4, operandsVec)
+        builder.AddStruct(2, end, 4)
+        builder.AddStruct(1, begin, 4)
+        // ExprKind_CallExpr is index 7 of enum ExprKind (ModuleFormat.fbs:333-373).
+        builder.AddU16(0, 7u16)
+        return builder.EndTable()
+    }
+
+    // Mirrors ExprWriter.cpp:667-687 SaveFuncArg. FuncArg is stored in allExprs as an Expr table
+    // without Expr.kind; its info is FuncArgInfo (ModuleFormat.fbs:473-476), union tag 11.
+    private func SaveFuncArg(arg: FuncArg): UInt32 {
+        let exprIndex = UInt32(allExprs.size + 1)
+        allExprs.add(0u32)
+        let isDefaultVal = arg.TestAttr(Attribute.HAS_INITIAL)
+        let operands = ArrayList<UInt32>()
+        if (!isDefaultVal) {
+            if (let None <- arg.expr) {
+                throw IllegalArgumentException("FuncArg without expr is not supported in faithful .cjo writer")
+            }
+            operands.add(SaveExpr(arg.expr.getOrThrow()))
+        }
+        let operandsVec = builder.CreateVectorU32(operands)
+        builder.StartTable(2)
+        builder.AddBool(1, isDefaultVal)
+        builder.AddBool(0, arg.withInout)
+        let info = builder.EndTable()
+
+        let begin = PositionBytes(arg.begin)
+        let end = PositionBytes(arg.end)
+        let typeIndex = if (let Some(ty) <- arg.GetTy()) { SaveType(ty) } else { 0u32 }
+        builder.StartTable(9)
+        builder.AddOffset(8, info)
+        builder.AddU8(7, 11u8)
+        builder.AddU32(5, typeIndex)
+        builder.AddOffset(4, operandsVec)
+        builder.AddStruct(2, end, 4)
+        builder.AddStruct(1, begin, 4)
+        allExprs[Int64(exprIndex) - 1] = builder.EndTable()
+        return exprIndex
     }
 
     // Mirrors ExprWriter.cpp:136-157 SaveExpression(MemberAccess), using ReferenceInfo from
@@ -1722,6 +1798,22 @@ private func StringKindToFlat(kind: StringKind): UInt8 {
         case StringKind.JSTRING => 1u8
         case StringKind.MULTILINE => 2u8
         case StringKind.MULTILINE_RAW => 3u8
+    }
+}
+
+// Mirrors CALL_KIND_MAP from ASTWriter.cpp:72-76 via Mapping.h:115-124.
+private func CallKindToFlat(kind: CallKind): UInt8 {
+    return match (kind) {
+        case CallKind.CALL_INVALID => 0u8
+        case CallKind.CALL_DECLARED_FUNCTION => 1u8
+        case CallKind.CALL_OBJECT_CREATION => 2u8
+        case CallKind.CALL_FUNCTION_PTR => 3u8
+        case CallKind.CALL_STRUCT_CREATION => 4u8
+        case CallKind.CALL_SUPER_FUNCTION => 5u8
+        case CallKind.CALL_VARIADIC_FUNCTION => 6u8
+        case CallKind.CALL_ANNOTATION => 7u8
+        case CallKind.CALL_BUILTIN_FUNCTION => 8u8
+        case CallKind.CALL_INTRINSIC_FUNCTION => 9u8
     }
 }
 

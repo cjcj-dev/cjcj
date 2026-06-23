@@ -394,11 +394,12 @@ extend SrcCodeChangeState <: Equatable<SrcCodeChangeState> {
     }
 }
 
-// ModuleFormat.fbs enum ExprKind (fbs:333-373): MemberAccess=5, RefExpr=6, ReturnExpr=3,
-// LitConstExpr=10, LambdaExpr=27, Block=28.
+// ModuleFormat.fbs enum ExprKind (fbs:333-373): MemberAccess=5, RefExpr=6, CallExpr=7,
+// ReturnExpr=3, LitConstExpr=10, LambdaExpr=27, Block=28.
 private const FLAT_EXPR_KIND_RETURN: UInt16 = 3u16
 private const FLAT_EXPR_KIND_MEMBER_ACCESS: UInt16 = 5u16
 private const FLAT_EXPR_KIND_REF_EXPR: UInt16 = 6u16
+private const FLAT_EXPR_KIND_CALL: UInt16 = 7u16
 private const FLAT_EXPR_KIND_LIT_CONST: UInt16 = 10u16
 private const FLAT_EXPR_KIND_BLOCK: UInt16 = 28u16
 
@@ -1693,8 +1694,8 @@ private class CjoSignatureMaterializer {
 
     // Recursive EXPR-load dispatcher. Loads an Expr by its 1-based index from the package allExprs
     // vector (root field 9, slot 22). Mirrors ExprLoader.cpp LoadExpr (:417-443) + per-kind loaders.
-    // Bounded faithful slice: RefExpr, MemberAccess, LitConstExpr, ReturnExpr, Block. Returns None
-    // for INVALID_FORMAT_INDEX (0) or any not-yet-supported expr kind.
+    // Bounded faithful slice: RefExpr, MemberAccess, CallExpr, LitConstExpr, ReturnExpr, Block.
+    // Returns None for INVALID_FORMAT_INDEX (0) or any not-yet-supported expr kind.
     private func LoadFlatExprRaw(reader: CjoFlatBuffer, exprIndex: UInt32): Option<Expr> {
         if (exprIndex == 0u32 || flatAllExprs < 0) {
             return None
@@ -1718,6 +1719,113 @@ private class CjoSignatureMaterializer {
         }
         if (kind == FLAT_EXPR_KIND_REF_EXPR) {
             return Some(LoadFlatRefExpr(reader, exprTable))
+        }
+        if (kind == FLAT_EXPR_KIND_CALL) {
+            // Mirrors ExprLoader.cpp:92-115 LoadCallExpr and ExprLoader.cpp:516-531 LoadFuncArg
+            // for packages whose exported allExprs are wholly inside this cut's bounded expr slice.
+            var scanIdx: Int64 = 0
+            while (scanIdx < reader.VectorLength(flatAllExprs)) {
+                let scanTable = reader.VectorOffsetElement(flatAllExprs, scanIdx)
+                if (scanTable < 0) {
+                    return None
+                }
+                let scanKind = reader.U16Field(scanTable, 4, 0u16)
+                let scanInfoKind = reader.U8Field(scanTable, 18, 0u8)
+                let supported = scanKind == FLAT_EXPR_KIND_RETURN || scanKind == FLAT_EXPR_KIND_MEMBER_ACCESS ||
+                    scanKind == FLAT_EXPR_KIND_REF_EXPR || scanKind == FLAT_EXPR_KIND_CALL ||
+                    scanKind == FLAT_EXPR_KIND_LIT_CONST || scanKind == FLAT_EXPR_KIND_BLOCK ||
+                    (scanKind == 0u16 && scanInfoKind == 11u8)
+                if (!supported) {
+                    return None
+                }
+                scanIdx++
+            }
+            let ce = CallExpr()
+            LoadFlatExprBasicInfo(reader, exprTable, ce)
+            let operands = reader.VectorField(exprTable, 12)
+            if (operands < 0 || reader.VectorLength(operands) < 1) {
+                return None
+            }
+            if (let Some(base) <- LoadFlatExpr(reader, reader.VectorU32(operands, 0))) {
+                ce.baseFunc = Some(base)
+            } else {
+                return None
+            }
+            var argIdx: Int64 = 1
+            let argCount = reader.VectorLength(operands)
+            while (argIdx < argCount) {
+                let argExprIndex = reader.VectorU32(operands, argIdx)
+                if (argExprIndex == 0u32 || flatAllExprs < 0) {
+                    return None
+                }
+                let argTable = reader.VectorOffsetElement(flatAllExprs, Int64(argExprIndex) - 1)
+                if (argTable < 0) {
+                    return None
+                }
+                let arg = FuncArg()
+                if (let Some(ty) <- LoadFlatType(reader.U32Field(argTable, 14, 0u32))) {
+                    arg.SetTy(ty)
+                }
+                let argInfo = reader.OffsetField(argTable, 20)
+                let isDefaultVal = if (argInfo >= 0) {
+                    reader.U8Field(argInfo, 6, 0u8) != 0u8
+                } else {
+                    false
+                }
+                if (argInfo >= 0) {
+                    arg.withInout = reader.U8Field(argInfo, 4, 0u8) != 0u8
+                }
+                if (isDefaultVal) {
+                    arg.expr = Some(InvalidExpr())
+                    arg.EnableAttr(Attribute.HAS_INITIAL)
+                } else {
+                    let argOperands = reader.VectorField(argTable, 12)
+                    if (argOperands < 0 || reader.VectorLength(argOperands) != 1) {
+                        return None
+                    }
+                    if (let Some(argExpr) <- LoadFlatExpr(reader, reader.VectorU32(argOperands, 0))) {
+                        arg.expr = Some(argExpr)
+                    } else {
+                        return None
+                    }
+                }
+                ce.args.add(arg)
+                argIdx++
+            }
+            ce.desugarArgs = Some(ce.args)
+            let infoTable = reader.OffsetField(exprTable, 20)
+            if (infoTable >= 0) {
+                let flatCallKind = reader.U8Field(infoTable, 6, 0u8)
+                if (flatCallKind == 1u8) {
+                    ce.callKind = CallKind.CALL_DECLARED_FUNCTION
+                } else if (flatCallKind == 2u8) {
+                    ce.callKind = CallKind.CALL_OBJECT_CREATION
+                } else if (flatCallKind == 3u8) {
+                    ce.callKind = CallKind.CALL_FUNCTION_PTR
+                } else if (flatCallKind == 4u8) {
+                    ce.callKind = CallKind.CALL_STRUCT_CREATION
+                } else if (flatCallKind == 5u8) {
+                    ce.callKind = CallKind.CALL_SUPER_FUNCTION
+                } else if (flatCallKind == 6u8) {
+                    ce.callKind = CallKind.CALL_VARIADIC_FUNCTION
+                } else if (flatCallKind == 7u8) {
+                    ce.callKind = CallKind.CALL_ANNOTATION
+                } else if (flatCallKind == 8u8) {
+                    ce.callKind = CallKind.CALL_BUILTIN_FUNCTION
+                } else if (flatCallKind == 9u8) {
+                    ce.callKind = CallKind.CALL_INTRINSIC_FUNCTION
+                }
+                if (reader.U8Field(infoTable, 4, 0u8) != 0u8) {
+                    ce.EnableAttr(Attribute.SIDE_EFFECT)
+                }
+            }
+            if (let Some(base) <- ce.baseFunc) {
+                if (let Some(nameRef) <- (base as NameReferenceExpr)) {
+                    nameRef.isAlone = false
+                }
+            }
+            ce.EnableAttr(Attribute.IMPORTED)
+            return Some(ce)
         }
         if (kind == FLAT_EXPR_KIND_RETURN) {
             return Some(LoadFlatReturnExpr(reader, exprTable))
