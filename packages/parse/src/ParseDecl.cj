@@ -552,7 +552,60 @@ extend ParserImpl {
         if (let Some(_) <- body.generic) {
             ret.EnableAttr(Attribute.GENERIC)
         }
+        CheckVariableParams(ret)
         ret.end = body.end
+    }
+
+    private func CheckVariableParams(decl: FuncDecl): Unit {
+        if (let None <- decl.funcBody) {
+            return
+        }
+        let body = decl.funcBody.getOrThrow()
+        if (body.paramLists.size != 1) {
+            return
+        }
+        let paramList = body.paramLists[0]
+        let params = paramList.params
+        let ellipsis = TokenKindLiteral(TokenKind.ELLIPSIS)
+        var varargIdx: Option<Int64> = None
+        var index = 0
+        while (index < params.size) {
+            if (params[index].identifier.Val() == ellipsis) {
+                decl.hasVariableLenArg = true
+                decl.variadicArgIndex = UInt64(index)
+                paramList.hasVariableLenArg = true
+                paramList.variadicArgIndex = UInt64(index)
+
+                if (!decl.TestAttr(Attribute.FOREIGN)) {
+                    diag.DiagnoseRefactor(
+                        DiagKindRefactor.PARSE_ERROR,
+                        decl.keywordPos,
+                        "variable length parameter is only allowed in foreign function")
+                    decl.EnableAttr(Attribute.IS_BROKEN)
+                    break
+                }
+
+                if (index == 0) {
+                    diag.DiagnoseRefactor(
+                        DiagKindRefactor.PARSE_ERROR,
+                        params[index].begin,
+                        "variable length parameter cannot be first")
+                    decl.EnableAttr(Attribute.IS_BROKEN)
+                } else if (index != params.size - 1) {
+                    diag.DiagnoseRefactor(
+                        DiagKindRefactor.PARSE_ERROR,
+                        params[index].begin,
+                        "variable length parameter must be at the end")
+                    decl.EnableAttr(Attribute.IS_BROKEN)
+                } else {
+                    varargIdx = Some(index)
+                }
+            }
+            index++
+        }
+        if (let Some(idx) <- varargIdx) {
+            params.remove(at: idx)
+        }
     }
 
     public func ExpectOperatorIdentifier(ret: FuncDecl): SrcIdentifier {

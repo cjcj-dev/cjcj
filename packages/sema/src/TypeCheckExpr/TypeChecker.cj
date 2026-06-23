@@ -6,6 +6,7 @@ import cangjie_compiler::basic.DiagArgument as BasicDiagArgument
 import cangjie_compiler::basic.DiagKind as BasicDiagKind
 import cangjie_compiler::basic.DiagnosticEngine as BasicDiagnosticEngine
 import cangjie_compiler::option.GlobalOptions as OptionGlobalOptions
+import cangjie_compiler::option.IsUnsafeBackend as OptionIsUnsafeBackend
 import cangjie_compiler::sema.*
 import cangjie_compiler::sema.Desugar.*
 import cangjie_compiler::sema.FFI.*
@@ -1277,7 +1278,7 @@ public class TypeChecker {
         let retType = EnsureRetType(ctx, fb)
         let paramTys = GetFuncBodyParamTys(fb)
         let retTy = SignatureReturnTy(fb, retType)
-        let funcTy = impl.typeManager.GetFunctionTy(paramTys.toArray(), retTy)
+        let funcTy = impl.typeManager.GetFunctionTy(paramTys.toArray(), retTy, cfg: FunctionTyConfigForFuncBody(fb))
         fb.SetTy(funcTy)
         if (let Some(funcDecl) <- fb.funcDecl) {
             funcDecl.SetTy(funcTy)
@@ -1588,12 +1589,29 @@ public class TypeChecker {
             }
             currentFuncBody = previousFuncBody
         }
-        let funcTy = impl.typeManager.GetFunctionTy(paramTys.toArray(), retTy)
+        let funcTy = impl.typeManager.GetFunctionTy(paramTys.toArray(), retTy, cfg: FunctionTyConfigForFuncBody(fb))
         fb.SetTy(funcTy)
         if (let Some(funcDecl) <- fb.funcDecl) {
             funcDecl.SetTy(funcTy)
         }
         return funcTy
+    }
+
+    private func FunctionTyConfigForFuncBody(fb: FuncBody): FuncTyConfig {
+        let cfg = FuncTyConfig()
+        let isCFFIBackend = OptionIsUnsafeBackend(GlobalOptions().backend)
+        if (fb.TestAttr(Attribute.C)) {
+            cfg.isC = true
+        } else if (let Some(funcDecl) <- fb.funcDecl) {
+            cfg.isC = funcDecl.TestAttr(Attribute.FOREIGN) && isCFFIBackend
+        }
+        if (let Some(funcDecl) <- fb.funcDecl) {
+            cfg.hasVariableLenArg = funcDecl.hasVariableLenArg
+        }
+        if (!cfg.hasVariableLenArg && !fb.paramLists.isEmpty()) {
+            cfg.hasVariableLenArg = fb.paramLists[0].hasVariableLenArg
+        }
+        return cfg
     }
 
     private func SynthesizeFuncParams(ctx: ASTContext, fb: FuncBody): Unit {
