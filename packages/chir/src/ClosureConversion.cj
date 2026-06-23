@@ -906,8 +906,69 @@ public class ClosureConversion {
             globalFunc.SetReturnValue(retValue)
         }
         ReplaceEnvVarWithMemberVar(capturedValues, globalFunc, thisParam)
+        // Mirror C++ LiftLambdaToGlobalFunc step 3 (ClosureConversion.cpp:2008-2028):
+        // traverse the lifted body and re-map the original generics (e.g. the
+        // enclosing func's `T`) to the lifted func's own generic params, so the
+        // body's stored types match the new signature and instantiate correctly.
+        ConvertBlockGroupTypesWithGenericMap(globalFunc.GetBody().getOrThrow(), genericMap)
+        for (param in globalFunc.GetParams()) {
+            ConvertValueTypeWithGenericMap(param, genericMap)
+        }
+        if (let Some(retValue) <- globalFunc.GetReturnValue()) {
+            ConvertValueTypeWithGenericMap(retValue, genericMap)
+        }
         convertedCache[lambda.nodeId] = globalFunc
         return globalFunc
+    }
+
+    private func ConvertBlockGroupTypesWithGenericMap(group: BlockGroup,
+        genericMap: HashMap<String, Type>): Unit {
+        for (block in group.GetBlocks()) {
+            for (expr in block.GetExpressions()) {
+                ConvertExpressionTypesWithGenericMap(expr, genericMap)
+                for (subGroup in expr.GetBlockGroups()) {
+                    ConvertBlockGroupTypesWithGenericMap(subGroup, genericMap)
+                }
+            }
+        }
+    }
+
+    private func ConvertExpressionTypesWithGenericMap(expr: Expression,
+        genericMap: HashMap<String, Type>): Unit {
+        if (let Some(result) <- expr.GetResult()) {
+            ConvertValueTypeWithGenericMap(result, genericMap)
+        }
+        if (let Some(allocate) <- (expr as Allocate)) {
+            allocate.SetType(SubstituteGenericTypes(allocate.GetType(), genericMap))
+        } else if (let Some(rawArrayAllocate) <- (expr as RawArrayAllocate)) {
+            rawArrayAllocate.SetElementType(SubstituteGenericTypes(rawArrayAllocate.GetElementType(), genericMap))
+        } else if (let Some(getRTTIStatic) <- (expr as GetRTTIStatic)) {
+            getRTTIStatic.SetRTTIType(SubstituteGenericTypes(getRTTIStatic.GetRTTIType(), genericMap))
+        } else if (let Some(instanceOfExpr) <- (expr as InstanceOf)) {
+            instanceOfExpr.SetTestedType(SubstituteGenericTypes(instanceOfExpr.GetType(), genericMap))
+        }
+        if (let Some(call) <- (expr as FuncCall)) {
+            if (let Some(thisTy) <- call.GetThisType()) {
+                call.SetThisType(SubstituteGenericTypes(thisTy, genericMap))
+            }
+            call.SetInstantiatedTypeArgs(SubstituteGenericTypeArgs(call.GetInstantiatedTypeArgs(), genericMap))
+        }
+        if (let Some(callWithException) <- (expr as FuncCallWithException)) {
+            if (let Some(thisTy2) <- callWithException.GetThisType()) {
+                callWithException.SetThisType(SubstituteGenericTypes(thisTy2, genericMap))
+            }
+            callWithException.SetInstantiatedTypeArgs(
+                SubstituteGenericTypeArgs(callWithException.GetInstantiatedTypeArgs(), genericMap))
+        }
+    }
+
+    private func ConvertValueTypeWithGenericMap(value: Value, genericMap: HashMap<String, Type>): Unit {
+        if (value.AsFunction().isSome()) {
+            return
+        }
+        if (let Some(valueTy) <- value.GetType()) {
+            value.SetType(SubstituteGenericTypes(valueTy, genericMap))
+        }
     }
 
     private func LiftNestedFunctionWithCFuncType(lambda: Lambda): Unit {
@@ -979,7 +1040,7 @@ public class ClosureConversion {
         let parent = user.GetParentBlock() ??
             throw IllegalStateException("ClosureConversion function user has no parent block")
         let envs = ArrayList<Value>()
-        let obj = CreateAutoEnvImplObject(parent, RequireClassType(autoEnvImplDef), envs, user)
+        let obj = CreateAutoEnvImplObject(parent, RequireClassType(autoEnvImplDef), envs, user, fn)
         let baseObj = CastAutoEnvObjToSuper(obj, autoEnvImplDef, user)
         user.ReplaceOperand(fn, baseObj)
     }
@@ -997,10 +1058,10 @@ public class ClosureConversion {
             if (owner.nodeId == globalFunc.nodeId) {
                 autoEnvObj = globalFunc.GetParam(0)
             } else {
-                autoEnvObj = CreateAutoEnvImplObject(parent, RequireClassType(autoEnvImplDef), envs, user)
+                autoEnvObj = CreateAutoEnvImplObject(parent, RequireClassType(autoEnvImplDef), envs, user, result)
             }
         } else {
-            autoEnvObj = CreateAutoEnvImplObject(parent, RequireClassType(autoEnvImplDef), envs, user)
+            autoEnvObj = CreateAutoEnvImplObject(parent, RequireClassType(autoEnvImplDef), envs, user, result)
         }
         if (let Some(apply) <- (user as Apply)) {
             if (apply.GetCallee().nodeId == result.nodeId) {
@@ -1036,9 +1097,10 @@ public class ClosureConversion {
     }
 
     private func CreateAutoEnvImplObject(parent: Block, autoEnvImplType: ClassType, envs: ArrayList<Value>,
-        user: Expression): LocalVar {
-        let refType = builder.context.GetRefTy(autoEnvImplType)
-        let allocate = builder.CreateAllocate(refType, autoEnvImplType, parent)
+        user: Expression, srcFunc: Value): LocalVar {
+        let instantiateClassTy = GenerateInstantiatedClassType(autoEnvImplType, user, srcFunc)
+        let refType = builder.context.GetRefTy(instantiateClassTy)
+        let allocate = builder.CreateAllocate(refType, instantiateClassTy, parent)
         parent.InsertExprIntoHead(allocate)
         let obj = RequireResult(allocate)
         var idx: UInt64 = 0u64
@@ -1050,6 +1112,140 @@ public class ClosureConversion {
             idx++
         }
         return obj
+    }
+
+    // Mirror C++ ClosureConversion::GenerateInstantiatedClassType
+    // (src/CHIR/Transformation/ClosureConversion.cpp:1011-1054). The AutoEnv impl
+    // class is declared over the generic params visible at the closure-creation
+    // site (outer-scope decl + func itself). The allocation must bind those
+    // params to the concrete type args in scope so that, after generic
+    // instantiation, the env allocation specializes to the captured concrete type.
+    private func GenerateInstantiatedClassType(autoEnvImplType: ClassType, user: Expression,
+        srcFunc: Value): ClassType {
+        let autoEnvInstTypeArgs = ArrayList<Type>()
+        for (genericTy in GetVisiableGenericTypes(srcFunc)) {
+            autoEnvInstTypeArgs.add(genericTy)
+        }
+        // Overlay any explicit instantiated type args carried by the call site that
+        // applies srcFunc onto the trailing func-generic slots.
+        if (let Some(apply) <- (user as Apply)) {
+            if (apply.GetCallee().nodeId == srcFunc.nodeId) {
+                OverlayInstantiatedTypeArgs(autoEnvInstTypeArgs, apply.GetInstantiatedTypeArgs())
+            }
+        } else if (let Some(awe) <- (user as ApplyWithException)) {
+            if (awe.GetCallee().nodeId == srcFunc.nodeId) {
+                OverlayInstantiatedTypeArgs(autoEnvInstTypeArgs, awe.GetInstantiatedTypeArgs())
+            }
+        }
+        if (NeedAddThisType(srcFunc)) {
+            autoEnvInstTypeArgs.add(ThisType(), at: 0)
+        }
+        if (autoEnvImplType.GetGenericArgs().size != autoEnvInstTypeArgs.size) {
+            return autoEnvImplType
+        }
+        return builder.context.GetClassTy(autoEnvImplType.GetClassDef(), autoEnvInstTypeArgs)
+    }
+
+    private func OverlayInstantiatedTypeArgs(autoEnvInstTypeArgs: ArrayList<Type>,
+        partInstTys: ArrayList<Type>): Unit {
+        if (autoEnvInstTypeArgs.size < partInstTys.size) {
+            return
+        }
+        let offset = autoEnvInstTypeArgs.size - partInstTys.size
+        var i = offset
+        var j = 0
+        while (i < autoEnvInstTypeArgs.size) {
+            autoEnvInstTypeArgs[i] = partInstTys[j]
+            i++
+            j++
+        }
+    }
+
+    // Mirror C++ GetVisiableGenericTypes (src/CHIR/Utils/Utils.cpp:1050-1108):
+    // collect the generic params of srcFunc and of the lexically enclosing
+    // lambdas/funcs (and any owning custom type def), outermost first.
+    private func GetVisiableGenericTypes(srcFunc: Value): ArrayList<GenericType> {
+        let result = ArrayList<GenericType>()
+        CollectVisiableGenericTypes(srcFunc, result)
+        return result
+    }
+
+    private func CollectVisiableGenericTypes(value: Value, result: ArrayList<GenericType>): Unit {
+        if (let Some(fn) <- value.AsFunction()) {
+            CollectVisiableGenericTypesFromFunction(fn, result)
+            return
+        }
+        if (let Some(local) <- value.AsLocalVar()) {
+            CollectVisiableGenericTypesFromLocalVar(local, result)
+            return
+        }
+        if (let Some(param) <- value.AsParameter()) {
+            if (let Some(topLevelFunc) <- param.GetTopLevelFunc()) {
+                CollectVisiableGenericTypesFromFunction(topLevelFunc, result)
+            }
+        }
+    }
+
+    private func CollectVisiableGenericTypesFromFunction(fn: Function, result: ArrayList<GenericType>): Unit {
+        InsertGenericTypesAtFront(result, fn.GetGenericTypeParams())
+        if (let Some(parentDef) <- fn.GetParentCustomTypeDef()) {
+            InsertGenericTypesAtFront(result, parentDef.GetGenericTypeParams())
+        }
+    }
+
+    private func CollectVisiableGenericTypesFromLocalVar(value: LocalVar, result: ArrayList<GenericType>): Unit {
+        let expr = value.GetExpr() ??
+            throw IllegalStateException("ClosureConversion visible-generic local var has no expression")
+        // A lambda's return value can see generic types declared in the lambda itself.
+        if (let Some(lambda) <- (expr as Lambda)) {
+            InsertGenericTypesAtFront(result, lambda.GetGenericTypeParams())
+        }
+        var curPos = expr.GetParentBlockGroup() ??
+            throw IllegalStateException("ClosureConversion visible-generic local var has no parent block group")
+        while (curPos.GetOwnerFunc().isNone()) {
+            let ownedExpr = curPos.GetOwnerExpression() ??
+                throw IllegalStateException("ClosureConversion visible-generic block group has no owner")
+            if (let Some(lam) <- (ownedExpr as Lambda)) {
+                InsertGenericTypesAtFront(result, lam.GetGenericTypeParams())
+                curPos = lam.GetParentBlockGroup() ??
+                    throw IllegalStateException("ClosureConversion visible-generic lambda has no parent block group")
+            } else {
+                curPos = ownedExpr.GetParentBlockGroup() ??
+                    throw IllegalStateException("ClosureConversion visible-generic expr has no parent block group")
+            }
+        }
+        let ownFunc = curPos.GetOwnerFunc() ??
+            throw IllegalStateException("ClosureConversion visible-generic block group has no owner func")
+        CollectVisiableGenericTypesFromFunction(ownFunc, result)
+    }
+
+    private func InsertGenericTypesAtFront(target: ArrayList<GenericType>,
+        values: ArrayList<GenericType>): Unit {
+        var idx: Int64 = 0
+        for (value in values) {
+            target.add(value, at: idx)
+            idx++
+        }
+    }
+
+    // Mirror C++ NeedAddThisType (src/CHIR/Transformation/ClosureConversion.cpp:192-211):
+    // only a lambda whose enclosing member method lives in an inheritable class
+    // needs a leading `This` type arg.
+    private func NeedAddThisType(srcFunc: Value): Bool {
+        let local = srcFunc.AsLocalVar() ?? return false
+        let expr = local.GetExpr() ?? return false
+        let lambda = (expr as Lambda) ?? return false
+        if (let Some(lambdaTy) <- lambda.GetFuncType()) {
+            if (lambdaTy.IsCFunc()) {
+                return false
+            }
+        }
+        let topLevelFunc = local.GetTopLevelFunc() ?? return false
+        let outerDecl = topLevelFunc.GetParentCustomTypeDef() ?? return false
+        if (outerDecl.IsEnum() || outerDecl.IsStruct()) {
+            return false
+        }
+        return outerDecl.CanBeInherited()
     }
 
     private func CastAutoEnvObjToSuper(autoEnvObj: Value, autoEnvImplDef: ClassDef, user: Expression): Value {

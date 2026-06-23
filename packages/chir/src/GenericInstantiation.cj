@@ -44,6 +44,15 @@ private class GenericInstantiationPass {
             changed = false
             let funcs = pkg.GetGlobalFunctions()
             for (fn in funcs) {
+                // Skip the bodies of generic templates that will be dropped: their
+                // applies would be specialized against the still-free template
+                // generics (e.g. an enclosing `T`), producing dead partial
+                // instantiations that linger with free generics and break codegen.
+                // Templates that are kept (e.g. public closure env methods) are
+                // still processed so their callees get concrete-named targets.
+                if (ShouldDropGenericTemplate(fn)) {
+                    continue
+                }
                 if (let Some(body) <- fn.GetBody()) {
                     changed = RewriteAppliesInBlockGroup(pkg, body) || changed
                 }
@@ -70,19 +79,22 @@ private class GenericInstantiationPass {
     }
 
     private func RewriteApply(pkg: Package, apply: Apply): Bool {
-        let callee = apply.GetCallee().AsFunction() ?? return false
-        if (callee.GetGenericDecl().isSome()) {
+        let directCallee = apply.GetCallee().AsFunction() ?? return false
+        // If the callee is itself an instantiation, it may have been keyed on a
+        // still-generic binding (e.g. a closure env method instantiated over the
+        // enclosing `T`). Re-resolve against the original generic decl so that a
+        // now-concrete call site (after this function was itself instantiated) can
+        // produce the fully concrete specialization.
+        let source = directCallee.GetGenericDecl() ?? directCallee
+        if (source.GetBody().isNone()) {
             return false
         }
-        if (callee.GetBody().isNone()) {
-            return false
-        }
-        let binding = BuildBinding(callee, apply)
+        let binding = BuildBinding(source, apply)
         if (binding.IsEmpty()) {
             return false
         }
-        let instantiated = InstantiateFunction(pkg, callee, binding)
-        if (instantiated.nodeId == callee.nodeId) {
+        let instantiated = InstantiateFunction(pkg, source, binding)
+        if (instantiated.nodeId == directCallee.nodeId) {
             return false
         }
         apply.ReplaceOperand(0, instantiated)
@@ -332,6 +344,26 @@ private class GenericInstantiationPass {
             instanceOf.SetTestedType(SubstituteType(instanceOf.GetType(), binding.params, binding.args))
         } else if (let Some(rawArray) <- (expr as RawArrayAllocate)) {
             rawArray.SetElementType(SubstituteType(rawArray.GetElementType(), binding.params, binding.args))
+        }
+        if (let Some(apply) <- (expr as Apply)) {
+            SubstituteFuncCallTypes(apply.GetThisType(), apply.GetInstantiatedTypeArgs(), binding,
+                {thisTy => apply.SetThisType(thisTy)}, {args => apply.SetInstantiatedTypeArgs(args)})
+        } else if (let Some(awe) <- (expr as ApplyWithException)) {
+            SubstituteFuncCallTypes(awe.GetThisType(), awe.GetInstantiatedTypeArgs(), binding,
+                {thisTy => awe.SetThisType(thisTy)}, {args => awe.SetInstantiatedTypeArgs(args)})
+        }
+    }
+
+    // The callee's binding for a generic parent (e.g. the closure env class) is
+    // derived from the call site's thisType / instantiated type args, so these
+    // must be specialized alongside the rest of the cloned body.
+    private func SubstituteFuncCallTypes(thisTy: Option<Type>, instTypeArgs: ArrayList<Type>,
+        binding: GenericInstantiationBinding, setThisTy: (Type) -> Unit, setInstArgs: (ArrayList<Type>) -> Unit): Unit {
+        if (let Some(ty) <- thisTy) {
+            setThisTy(SubstituteType(ty, binding.params, binding.args))
+        }
+        if (!instTypeArgs.isEmpty()) {
+            setInstArgs(SubstituteTypeList(instTypeArgs, binding.params, binding.args))
         }
     }
 
