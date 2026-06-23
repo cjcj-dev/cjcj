@@ -721,6 +721,9 @@ private class FrontendCjoFlatBufferWriter {
         if (let Some(ie) <- (realExpr as IfExpr)) {
             return SaveIfExpr(ie)
         }
+        if (let Some(lpd) <- (realExpr as LetPatternDestructor)) {
+            return SaveLetPatternDestructor(lpd)
+        }
         if (let Some(le) <- (realExpr as LambdaExpr)) {
             return SaveLambdaExpr(le)
         }
@@ -867,6 +870,43 @@ private class FrontendCjoFlatBufferWriter {
         return builder.EndTable()
     }
 
+    // Mirrors ExprWriter.cpp:579-595 SaveExpression(LetPatternDestructor): operand 0 is the
+    // initializer, and LetPatternDestructorInfo owns the serialized pattern list (fbs:490-492).
+    private func SaveLetPatternDestructor(lpd: LetPatternDestructor): FlatBufferOffset {
+        if (let None <- lpd.initializer) {
+            throw IllegalArgumentException(
+                "LetPatternDestructor without initializer is not supported in faithful .cjo writer")
+        }
+        let patterns = ArrayList<FlatBufferOffset>()
+        for (pattern in lpd.patterns) {
+            patterns.add(SavePattern(pattern))
+        }
+        let initializer = SaveExpr(lpd.initializer.getOrThrow())
+        let patternsVec = builder.CreateVectorOffsets(patterns)
+        let operands = ArrayList<UInt32>()
+        operands.add(initializer)
+        let operandsVec = builder.CreateVectorU32(operands)
+
+        builder.StartTable(1)
+        builder.AddOffset(0, patternsVec)
+        let info = builder.EndTable()
+
+        let begin = PositionBytes(lpd.begin)
+        let end = PositionBytes(lpd.end)
+        let typeIndex = SaveExprType(lpd)
+        builder.StartTable(9)
+        builder.AddOffset(8, info)
+        // ExprInfo_LetPatternDestructorInfo is union tag 16 (ModuleFormat.fbs:412-432).
+        builder.AddU8(7, 16u8)
+        builder.AddU32(5, typeIndex)
+        builder.AddOffset(4, operandsVec)
+        builder.AddStruct(2, end, 4)
+        builder.AddStruct(1, begin, 4)
+        // ExprKind_LetPatternDestructor is index 22 of enum ExprKind (ModuleFormat.fbs:333-373).
+        builder.AddU16(0, 22u16)
+        return builder.EndTable()
+    }
+
     // Mirrors ExprWriter.cpp:246-261 SaveExpression(BinaryExpr): operands are left then right, and
     // BinaryInfo carries only OP_KIND_MAP.at(be.op). ExprInfo_BinaryInfo's union tag value is 3.
     private func SaveBinaryExpr(be: BinaryExpr): FlatBufferOffset {
@@ -970,6 +1010,186 @@ private class FrontendCjoFlatBufferWriter {
         builder.AddStruct(1, begin, 4)
         allExprs[Int64(exprIndex) - 1] = builder.EndTable()
         return exprIndex
+    }
+
+    // Mirrors ExprWriter.cpp:689-718 SavePattern dispatch. VarOrEnumPattern is not represented in
+    // ModuleFormat.fbs, so the desugared pattern is serialized directly as in C++ lines 708-711.
+    private func SavePattern(pattern: Pattern): FlatBufferOffset {
+        if (let Some(cp) <- (pattern as ConstPattern)) {
+            return SaveConstPattern(cp)
+        }
+        if (let Some(wp) <- (pattern as WildcardPattern)) {
+            return SaveWildcardPattern(wp)
+        }
+        if (let Some(vp) <- (pattern as VarPattern)) {
+            return SaveVarPattern(vp)
+        }
+        if (let Some(tp) <- (pattern as TuplePattern)) {
+            return SaveTuplePattern(tp)
+        }
+        if (let Some(tp2) <- (pattern as TypePattern)) {
+            return SaveTypePattern(tp2)
+        }
+        if (let Some(ep) <- (pattern as EnumPattern)) {
+            return SaveEnumPattern(ep)
+        }
+        if (let Some(etp) <- (pattern as ExceptTypePattern)) {
+            return SaveExceptTypePattern(etp)
+        }
+        if (let Some(ctp) <- (pattern as CommandTypePattern)) {
+            return SaveCommandTypePattern(ctp)
+        }
+        if (let Some(vep) <- (pattern as VarOrEnumPattern)) {
+            if (let Some(realPattern) <- vep.pattern) {
+                return SavePattern(realPattern)
+            }
+        }
+        throw IllegalArgumentException("not yet serialized in faithful .cjo writer: " + ASTKindName(pattern.astKind))
+    }
+
+    // Mirrors ExprWriter.cpp:720-737 SaveConstPattern: exprs contains literal and optional
+    // operatorCallExpr; types contains the pattern ty at index 0 (fbs:527-536).
+    private func SaveConstPattern(cp: ConstPattern): FlatBufferOffset {
+        if (let None <- cp.literal) {
+            throw IllegalArgumentException("ConstPattern without literal is not supported in faithful .cjo writer")
+        }
+        let exprs = ArrayList<UInt32>()
+        exprs.add(SaveExpr(cp.literal.getOrThrow()))
+        if (let Some(operatorCallExpr) <- cp.operatorCallExpr) {
+            exprs.add(SaveExpr(operatorCallExpr))
+        }
+        let exprsVec = builder.CreateVectorU32(exprs)
+        let typesVec = SavePatternTypeVector(cp)
+        return SavePatternTable(1u8, cp, patterns: 0u32, types: typesVec, exprs: exprsVec)
+    }
+
+    // Mirrors ExprWriter.cpp:740-749 SaveWildcardPattern.
+    private func SaveWildcardPattern(wp: WildcardPattern): FlatBufferOffset {
+        return SavePatternTable(2u8, wp, types: SavePatternTypeVector(wp))
+    }
+
+    // Mirrors ExprWriter.cpp:752-765 SaveVarPattern: exprs[0] is the VarDecl index, whose Decl.type
+    // serializes the bound variable ty through the regular declaration/type path.
+    private func SaveVarPattern(vp: VarPattern): FlatBufferOffset {
+        if (let None <- vp.varDecl) {
+            throw IllegalArgumentException("VarPattern without VarDecl is not supported in faithful .cjo writer")
+        }
+        let varDecl = vp.varDecl.getOrThrow()
+        SyncVarPatternDeclTy(vp, varDecl)
+        let declIndex = SaveDeclIndex(varDecl, false)
+        let exprs = ArrayList<UInt32>()
+        exprs.add(declIndex)
+        let exprsVec = builder.CreateVectorU32(exprs)
+        return SavePatternTable(3u8, vp, types: SavePatternTypeVector(vp), exprs: exprsVec)
+    }
+
+    // C++ TypeCheckPattern.cpp:340-366 keeps VarPattern.ty and varDecl.ty synchronized before
+    // ExprWriter.cpp:752-765 serializes the VarDecl through Pattern.exprs[0].
+    private func SyncVarPatternDeclTy(vp: VarPattern, varDecl: VarDecl): Unit {
+        if (let Some(patternTy) <- vp.GetTy()) {
+            if (let Some(declTy) <- varDecl.GetTy()) {
+                if (Ty.IsTyCorrect(declTy) && !declTy.IsAny()) {
+                    return
+                }
+            }
+            if (Ty.IsTyCorrect(patternTy) && !patternTy.IsAny()) {
+                varDecl.SetTy(patternTy)
+            }
+        }
+    }
+
+    // Mirrors ExprWriter.cpp:768-783 SaveTuplePattern.
+    private func SaveTuplePattern(tp: TuplePattern): FlatBufferOffset {
+        let patterns = ArrayList<FlatBufferOffset>()
+        for (pattern in tp.patterns) {
+            patterns.add(SavePattern(pattern))
+        }
+        let patternsVec = builder.CreateVectorOffsets(patterns)
+        return SavePatternTable(4u8, tp, patterns: patternsVec, types: SavePatternTypeVector(tp))
+    }
+
+    // Mirrors ExprWriter.cpp:786-801 SaveTypePattern.
+    private func SaveTypePattern(tp: TypePattern): FlatBufferOffset {
+        if (let None <- tp.pattern) {
+            throw IllegalArgumentException("TypePattern without child pattern is not supported in faithful .cjo writer")
+        }
+        let patterns = ArrayList<FlatBufferOffset>()
+        patterns.add(SavePattern(tp.pattern.getOrThrow()))
+        let patternsVec = builder.CreateVectorOffsets(patterns)
+        return SavePatternTable(5u8, tp, patterns: patternsVec, types: SavePatternTypeVector(tp),
+            matchBeforeRuntime: tp.matchBeforeRuntime, needRuntimeTypeCheck: tp.needRuntimeTypeCheck)
+    }
+
+    // Mirrors ExprWriter.cpp:804-823 SaveEnumPattern.
+    private func SaveEnumPattern(ep: EnumPattern): FlatBufferOffset {
+        if (let None <- ep.constructor) {
+            throw IllegalArgumentException("EnumPattern without constructor is not supported in faithful .cjo writer")
+        }
+        let exprs = ArrayList<UInt32>()
+        exprs.add(SaveExpr(ep.constructor.getOrThrow()))
+        let exprsVec = builder.CreateVectorU32(exprs)
+        let patterns = ArrayList<FlatBufferOffset>()
+        for (pattern in ep.patterns) {
+            patterns.add(SavePattern(pattern))
+        }
+        let patternsVec = builder.CreateVectorOffsets(patterns)
+        return SavePatternTable(6u8, ep, patterns: patternsVec, types: SavePatternTypeVector(ep), exprs: exprsVec)
+    }
+
+    // Mirrors ExprWriter.cpp:826-843 SaveExceptTypePattern.
+    private func SaveExceptTypePattern(etp: ExceptTypePattern): FlatBufferOffset {
+        return SaveTypeListPattern(7u8, etp)
+    }
+
+    // Mirrors ExprWriter.cpp:846-863 SaveCommandTypePattern.
+    private func SaveCommandTypePattern(ctp: CommandTypePattern): FlatBufferOffset {
+        return SaveTypeListPattern(8u8, ctp)
+    }
+
+    private func SaveTypeListPattern(kind: UInt8, pattern: TypeListPattern): FlatBufferOffset {
+        if (let None <- pattern.pattern) {
+            throw IllegalArgumentException("TypeListPattern without child pattern is not supported in faithful .cjo writer")
+        }
+        let patterns = ArrayList<FlatBufferOffset>()
+        patterns.add(SavePattern(pattern.pattern.getOrThrow()))
+        let patternsVec = builder.CreateVectorOffsets(patterns)
+        let types = ArrayList<UInt32>()
+        types.add(SavePatternTy(pattern))
+        for (typeNode in pattern.types) {
+            types.add(SaveType(TypeNodeTyForSerialization(typeNode)))
+        }
+        let typesVec = builder.CreateVectorU32(types)
+        return SavePatternTable(kind, pattern, patterns: patternsVec, types: typesVec)
+    }
+
+    private func SavePatternTypeVector(pattern: Pattern): FlatBufferOffset {
+        let types = ArrayList<UInt32>()
+        types.add(SavePatternTy(pattern))
+        return builder.CreateVectorU32(types)
+    }
+
+    private func SavePatternTy(pattern: Pattern): UInt32 {
+        if (let Some(ty) <- pattern.GetTy()) {
+            return SaveType(ty)
+        }
+        return 0u32
+    }
+
+    private func SavePatternTable(kind: UInt8, pattern: Pattern, patterns!: FlatBufferOffset = 0u32,
+        types!: FlatBufferOffset = 0u32, exprs!: FlatBufferOffset = 0u32, matchBeforeRuntime!: Bool = false,
+        needRuntimeTypeCheck!: Bool = false): FlatBufferOffset {
+        let begin = PositionBytes(pattern.begin)
+        let end = PositionBytes(pattern.end)
+        builder.StartTable(9)
+        builder.AddBool(8, needRuntimeTypeCheck)
+        builder.AddBool(7, matchBeforeRuntime)
+        builder.AddOffset(5, exprs)
+        builder.AddOffset(4, types)
+        builder.AddOffset(3, patterns)
+        builder.AddStruct(2, end, 4)
+        builder.AddStruct(1, begin, 4)
+        builder.AddU8(0, kind)
+        return builder.EndTable()
     }
 
     // Mirrors ExprWriter.cpp:136-157 SaveExpression(MemberAccess), using ReferenceInfo from
@@ -1899,8 +2119,9 @@ private func TypeKindToFlat(kind: TypeKind): UInt16 {
         case TypeKind.TYPE_INTERFACE => 27u16
         case TypeKind.TYPE => 28u16
         case TypeKind.TYPE_GENERICS => 29u16
-        case _ => throw IllegalArgumentException("not yet serialized in faithful .cjo writer: type " +
-            TypeKindName(kind))
+        // ASTWriterImpl.h:346-350 maps non-schema/internal type kinds, such as TYPE_ANY, to
+        // PackageFormat::TypeKind_Invalid rather than inventing extra ModuleFormat.fbs kinds.
+        case _ => 0u16
     }
 }
 

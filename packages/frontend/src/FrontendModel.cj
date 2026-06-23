@@ -403,6 +403,7 @@ private const FLAT_EXPR_KIND_CALL: UInt16 = 7u16
 private const FLAT_EXPR_KIND_UNARY: UInt16 = 8u16
 private const FLAT_EXPR_KIND_LIT_CONST: UInt16 = 10u16
 private const FLAT_EXPR_KIND_BINARY: UInt16 = 11u16
+private const FLAT_EXPR_KIND_LET_PATTERN_DESTRUCTOR: UInt16 = 22u16
 private const FLAT_EXPR_KIND_IF: UInt16 = 23u16
 private const FLAT_EXPR_KIND_LAMBDA: UInt16 = 27u16
 private const FLAT_EXPR_KIND_BLOCK: UInt16 = 28u16
@@ -1744,6 +1745,9 @@ private class CjoSignatureMaterializer {
         if (kind == FLAT_EXPR_KIND_IF) {
             return Some(LoadFlatIfExpr(reader, exprTable))
         }
+        if (kind == FLAT_EXPR_KIND_LET_PATTERN_DESTRUCTOR) {
+            return Some(LoadFlatLetPatternDestructor(reader, exprTable))
+        }
         if (kind == FLAT_EXPR_KIND_LAMBDA) {
             return Some(LoadFlatLambdaExpr(reader, exprTable))
         }
@@ -1762,8 +1766,8 @@ private class CjoSignatureMaterializer {
                     scanKind == FLAT_EXPR_KIND_REF_EXPR || scanKind == FLAT_EXPR_KIND_CALL ||
                     scanKind == FLAT_EXPR_KIND_UNARY || scanKind == FLAT_EXPR_KIND_LIT_CONST ||
                     scanKind == FLAT_EXPR_KIND_BINARY || scanKind == FLAT_EXPR_KIND_IF ||
-                    scanKind == FLAT_EXPR_KIND_LAMBDA || scanKind == FLAT_EXPR_KIND_BLOCK ||
-                    (scanKind == 0u16 && scanInfoKind == 11u8)
+                    scanKind == FLAT_EXPR_KIND_LET_PATTERN_DESTRUCTOR || scanKind == FLAT_EXPR_KIND_LAMBDA ||
+                    scanKind == FLAT_EXPR_KIND_BLOCK || (scanKind == 0u16 && scanInfoKind == 11u8)
                 if (!supported) {
                     return None
                 }
@@ -1909,6 +1913,33 @@ private class CjoSignatureMaterializer {
         }
         ie.EnableAttr(Attribute.IMPORTED)
         return ie
+    }
+
+    // Mirrors ExprLoader.cpp:404-414 LoadLetPatternDestructor plus ReferenceLoader.cpp:717-724:
+    // the selfhost loader restores expr and pattern tys eagerly instead of in a later refs pass.
+    private func LoadFlatLetPatternDestructor(reader: CjoFlatBuffer, exprTable: Int64): LetPatternDestructor {
+        let lpd = LetPatternDestructor()
+        LoadFlatExprBasicInfo(reader, exprTable, lpd)
+        let operands = reader.VectorField(exprTable, 12)
+        if (operands >= 0 && reader.VectorLength(operands) >= 1) {
+            lpd.initializer = LoadFlatExpr(reader, reader.VectorU32(operands, 0))
+        }
+        let infoTable = reader.OffsetField(exprTable, 20)
+        if (infoTable >= 0) {
+            let patterns = reader.VectorField(infoTable, 4)
+            if (patterns >= 0) {
+                var idx: Int64 = 0
+                let count = reader.VectorLength(patterns)
+                while (idx < count) {
+                    if (let Some(pattern) <- LoadFlatPattern(reader, reader.VectorOffsetElement(patterns, idx))) {
+                        lpd.patterns.add(pattern)
+                    }
+                    idx++
+                }
+            }
+        }
+        lpd.EnableAttr(Attribute.IMPORTED)
+        return lpd
     }
 
     // Mirrors ExprLoader.cpp:118-127 LoadUnaryExpr. Operand 0 is expr; UnaryInfo field 0 (slot 4)
@@ -2136,6 +2167,7 @@ private class CjoSignatureMaterializer {
             return None
         }
         LoadFlatPatternTy(reader, patternTable, pattern)
+        SyncFlatVarPatternDeclTy(pattern)
         if (let Some(typePattern) <- (pattern as TypePattern)) {
             if (let Some(ty) <- typePattern.GetTy()) {
                 typePattern.typeNode = Some(TypeNodeForTy(ty))
@@ -2149,6 +2181,19 @@ private class CjoSignatureMaterializer {
         if (types >= 0 && reader.VectorLength(types) >= 1) {
             if (let Some(ty) <- LoadFlatType(reader.VectorU32(types, 0))) {
                 pattern.SetTy(ty)
+            }
+        }
+    }
+
+    private func SyncFlatVarPatternDeclTy(pattern: Pattern): Unit {
+        if (let Some(varPattern) <- (pattern as VarPattern)) {
+            if (let Some(varDecl) <- varPattern.varDecl) {
+                if (!Ty.IsTyCorrect(varDecl.GetTy())) {
+                    if (let Some(ty) <- varPattern.GetTy()) {
+                        varDecl.SetTy(ty)
+                        varDecl.typeNode = Some(TypeNodeForTy(ty))
+                    }
+                }
             }
         }
     }
@@ -2738,6 +2783,11 @@ private class CjoSignatureMaterializer {
         }
         if (id.pkgId == -2) {
             if (let Some(record) <- flatDecls.get(id.index)) {
+                if (!record.fullPackageName.isEmpty() && record.fullPackageName != packageName) {
+                    if (let Some(found) <- FindImportedDeclByExportId(record.fullPackageName, record.exportId)) {
+                        return Some(found)
+                    }
+                }
                 return EnsureFlatDecl(record)
             }
             return None
