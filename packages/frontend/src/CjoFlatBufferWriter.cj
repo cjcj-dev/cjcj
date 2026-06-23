@@ -45,6 +45,7 @@ private class FrontendCjoFlatBufferWriter {
     private let declKeyToIndex: HashMap<String, UInt32> = HashMap<String, UInt32>()
     private let completedDeclKeys: HashSet<String> = HashSet<String>()
     private let allDecls: ArrayList<FlatBufferOffset> = ArrayList<FlatBufferOffset>()
+    private let allExprs: ArrayList<FlatBufferOffset> = ArrayList<FlatBufferOffset>()
     private let paramOwnerMangles: HashMap<String, String> = HashMap<String, String>()
 
     public init(
@@ -70,7 +71,7 @@ private class FrontendCjoFlatBufferWriter {
         let fileImportsVec = builder.CreateVectorOffsets(allFileImports)
         let typesVec = builder.CreateVectorOffsets(allTypes)
         let declsVec = builder.CreateVectorOffsets(allDecls)
-        let emptyExprs = builder.CreateVectorOffsets(ArrayList<FlatBufferOffset>())
+        let exprsVec = builder.CreateVectorOffsets(allExprs)
         let fileInfoVec = builder.CreateVectorOffsets(allFileInfo)
         let dependentStdPkgs = CreateStringVector(pkg.GetAllDependentStdPkgs())
         let options = CreateCompilationOptions()
@@ -87,7 +88,7 @@ private class FrontendCjoFlatBufferWriter {
         builder.AddOffset(13, moduleName)
         builder.AddU8(12, PackageAccess(pkg.accessible))
         builder.AddU8(11, if (pkg.isMacroPackage) { 1u8 } else { 0u8 })
-        builder.AddOffset(9, emptyExprs)
+        builder.AddOffset(9, exprsVec)
         builder.AddOffset(8, declsVec)
         builder.AddOffset(7, typesVec)
         builder.AddOffset(6, fileImportsVec)
@@ -561,11 +562,92 @@ private class FrontendCjoFlatBufferWriter {
     }
 
     private func SaveVarInfo(varDecl: VarDecl): FlatBufferOffset {
+        // Mirror ASTWriter.cpp:1319-1322 / ModuleFormat.fbs VarInfo:
+        //   field 0 isVar, 1 isConst, 2 isMemberParam, 3 initializer (expr index).
+        // Bounded faithful slice: only literal const initializers are emitted (gap 1.1/1.3),
+        // gated by ShouldExportVarSource (a subset of C++ ShouldExportSource).
+        let initializer = SaveVarInitializer(varDecl)
         builder.StartTable(4)
+        builder.AddU32(3, initializer)
         builder.AddBool(2, varDecl.isMemberParam)
         builder.AddBool(1, varDecl.isConst)
         builder.AddBool(0, varDecl.isVar)
         return builder.EndTable()
+    }
+
+    // Returns the 1-based expr index of the serialized initializer, or 0 (INVALID_FORMAT_INDEX)
+    // when no faithful expr record is emitted. Mirrors ASTWriter.cpp:1319-1320.
+    private func SaveVarInitializer(varDecl: VarDecl): UInt32 {
+        if (!ShouldExportVarSource(varDecl)) {
+            return 0u32
+        }
+        if (let Some(initializer) <- varDecl.initializer) {
+            // Bounded slice: only LitConstExpr is supported so far.
+            if (let Some(lce) <- (initializer as LitConstExpr)) {
+                return SaveLitConstExprIndex(lce)
+            }
+        }
+        return 0u32
+    }
+
+    // Subset of ASTWriter.cpp:312-348 ShouldExportSource(VarDecl) covering the cross-package
+    // const-folding cases handled by this bounded slice: public global/member const variables.
+    private func ShouldExportVarSource(varDecl: VarDecl): Bool {
+        if (varDecl.initializer.isNone() || varDecl.TestAttr(Attribute.IMPORTED)) {
+            return false
+        }
+        if (varDecl.IsCommonMatchedWithSpecific()) {
+            return false
+        }
+        let isExternal = varDecl.linkage != Linkage.INTERNAL || varDecl.IsExportedDecl()
+        let isGlobalVar = varDecl.TestAttr(Attribute.GLOBAL)
+        let isMemberVar = varDecl.TestAttr(Attribute.IN_CLASSLIKE) || varDecl.TestAttr(Attribute.IN_STRUCT)
+        let isConstGlobalOrMemberVar = varDecl.isConst && (isGlobalVar || isMemberVar)
+        return isExternal && isConstGlobalOrMemberVar
+    }
+
+    // Appends an Expr record for the LitConstExpr to allExprs and returns its 1-based index.
+    // Mirrors ASTWriter::ASTWriterImpl::SaveExpr (ExprWriter.cpp:59-85) for the bounded slice.
+    private func SaveLitConstExprIndex(lce: LitConstExpr): UInt32 {
+        let exprIndex = UInt32(allExprs.size + 1)
+        allExprs.add(0u32)
+        let offset = SaveLitConstExpr(lce)
+        allExprs[Int64(exprIndex) - 1] = offset
+        return exprIndex
+    }
+
+    // Mirrors ExprWriter.cpp:233-244 SaveExpression(LitConstExpr) + LitConstInfo (fbs:446-450).
+    private func SaveLitConstExpr(lce: LitConstExpr): FlatBufferOffset {
+        let strValue = builder.CreateString(lce.stringValue)
+        // LitConstInfo: field 0 strValue, 1 constKind (uint8), 2 strKind (uint8).
+        builder.StartTable(3)
+        builder.AddU8(2, StringKindToFlat(lce.stringKind))
+        builder.AddU8(1, LitConstKindToFlat(lce.kind))
+        builder.AddOffset(0, strValue)
+        let info = builder.EndTable()
+
+        let begin = PositionBytes(lce.begin)
+        let end = PositionBytes(lce.end)
+        let typeIndex = SaveExprType(lce)
+        // Expr: 0 kind(uint16), 1 begin, 2 end, 3 mapExpr, 4 operands, 5 type,
+        //       6 overflowPolicy, 7 info_type(union byte), 8 info(union value). (fbs:504-513)
+        builder.StartTable(9)
+        builder.AddOffset(8, info)
+        // ExprInfo union (fbs:412-432): LitConstInfo is the 5th member, union tag value 5.
+        builder.AddU8(7, 5u8)
+        builder.AddU32(5, typeIndex)
+        builder.AddStruct(2, end, 4)
+        builder.AddStruct(1, begin, 4)
+        // ExprKind_LitConstExpr is index 10 of enum ExprKind (fbs:333-373).
+        builder.AddU16(0, 10u16)
+        return builder.EndTable()
+    }
+
+    private func SaveExprType(expr: Expr): UInt32 {
+        if (let Some(ty) <- expr.GetTy()) {
+            return SaveType(ty)
+        }
+        return 0u32
     }
 
     private func SaveParamInfo(param: FuncParam): FlatBufferOffset {
@@ -1268,6 +1350,32 @@ private func ShouldEmitTypeArgsVector(kind: UInt16, infoType: UInt8, typeArgs: A
 
 private func OverflowPolicyToFlat(strategy: OverflowStrategy): UInt8 {
     return UInt8(OverflowStrategyIndex(strategy))
+}
+
+// ModuleFormat.fbs enum LitConstKind (fbs:388-397): Integer=0,RuneByte=1,Float=2,Rune=3,
+// String=4,JString=5,Bool=6,Unit=7. Mirrors ASTWriter.cpp LIT_CONST_KIND_MAP.
+private func LitConstKindToFlat(kind: LitConstKind): UInt8 {
+    return match (kind) {
+        case LitConstKind.INTEGER => 0u8
+        case LitConstKind.RUNE_BYTE => 1u8
+        case LitConstKind.FLOAT => 2u8
+        case LitConstKind.RUNE => 3u8
+        case LitConstKind.STRING => 4u8
+        case LitConstKind.JSTRING => 5u8
+        case LitConstKind.BOOL => 6u8
+        case LitConstKind.UNIT => 7u8
+        case LitConstKind.NONE => 0u8
+    }
+}
+
+// ModuleFormat.fbs enum StringKind (fbs:398-403): Normal=0,JString=1,MultiLine=2,MultiLineRaw=3.
+private func StringKindToFlat(kind: StringKind): UInt8 {
+    return match (kind) {
+        case StringKind.NORMAL => 0u8
+        case StringKind.JSTRING => 1u8
+        case StringKind.MULTILINE => 2u8
+        case StringKind.MULTILINE_RAW => 3u8
+    }
 }
 
 private func OperatorKindToFlat(kind: TokenKind): UInt8 {
