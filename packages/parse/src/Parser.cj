@@ -1,5 +1,6 @@
 package cangjie_compiler::parse
 
+import cangjie_compiler::basic.DiagnosticEngine as BasicDiagnosticEngine
 import std.collection.*
 
 public class Parser {
@@ -73,6 +74,7 @@ public class Parser {
 
     public func SetCompileOptions(opts: GlobalOptions): Unit { impl.SetCompileOptions(opts) }
     public func GetDiagnosticEngine(): DiagnosticEngine { return impl.GetDiagnosticEngine() }
+    public func GetLexerDiagnosticEngine(): BasicDiagnosticEngine { return impl.GetLexerDiagnosticEngine() }
     public func GetCommentsMap(): TokenVecMap { return impl.commentsMap }
 
     public func Skip(kind: TokenKind): Bool { return impl.Skip(kind) }

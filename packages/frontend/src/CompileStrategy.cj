@@ -3,7 +3,10 @@ package cangjie_compiler::frontend
 import cangjie_compiler::ast.AddCurFile
 import cangjie_compiler::ast.TokenKind
 import cangjie_compiler::parse.DiagnosticEngine as ParseDiagnosticEngine
+import cangjie_compiler::parse.DiagSeverity as ParseDiagSeverity
 import cangjie_compiler::parse.Parser as RealParser
+import cangjie_compiler::basic.DiagnosticEngine as BasicDiagnosticEngine
+import cangjie_compiler::basic.DiagSeverity as BasicDiagSeverity
 import cangjie_compiler::utils.FileUtil
 import std.collection.*
 import std.sort.*
@@ -262,12 +265,45 @@ private class FullCompileStrategyImpl {
         if (pkg.files.size == 1) {
             initializePackageInfoFromFirstFile(pkg)
         }
-        if (parseDiag.HasError()) {
-            s.ci.diag.Diagnose(DiagCategory.PARSE, realFile.begin,
-                "real parser failed for source file '" + filePath + "'")
+        // Forward the parser's actual diagnostics into the real engine instead of
+        // collapsing every parse failure into one generic message. Faithful to C++,
+        // where ParserImpl writes directly into the shared DiagnosticEngine (lexer
+        // and parser share it; src/Parse/ParserImpl.cpp:206), so each error keeps its
+        // own message, position and severity.
+        let lexerError = forwardLexerDiagnostics(parser.GetLexerDiagnosticEngine(), s.ci.diag)
+        let parseError = forwardParseDiagnostics(parseDiag, s.ci.diag)
+        if (lexerError || parseError) {
             return false
         }
         return true
+    }
+
+    private func forwardLexerDiagnostics(lexerDiag: BasicDiagnosticEngine, dst: DiagnosticEngine): Bool {
+        // The lexer emits refactor diagnostics carrying full table kind/range/hints.
+        // Re-handle them on the real engine so they are categorized and emitted.
+        var hadError = false
+        for (diagnostic in lexerDiag.GetCategoryDiagnostic(DiagCategory.LEX)) {
+            if (diagnostic.diagSeverity == BasicDiagSeverity.DS_ERROR) {
+                hadError = true
+            }
+            dst.HandleDiagnostic(diagnostic)
+        }
+        return hadError
+    }
+
+    private func forwardParseDiagnostics(parseDiag: ParseDiagnosticEngine, dst: DiagnosticEngine): Bool {
+        var hadError = false
+        for (diagnostic in parseDiag.Diagnostics()) {
+            if (diagnostic.severity == ParseDiagSeverity.WARNING) {
+                dst.Warn(DiagCategory.PARSE, diagnostic.pos, diagnostic.message)
+            } else if (diagnostic.severity == ParseDiagSeverity.NOTE) {
+                dst.Note(DiagCategory.PARSE, diagnostic.pos, diagnostic.message)
+            } else {
+                dst.Diagnose(DiagCategory.PARSE, diagnostic.pos, diagnostic.message)
+                hadError = true
+            }
+        }
+        return hadError
     }
 
     private func initializePackageInfoFromFirstFile(pkg: Package): Unit {

@@ -115,6 +115,14 @@ public class ParserImpl {
         return diag
     }
 
+    // Lexer shares a basic DiagnosticEngine (faithful to C++ ParserImpl, where the
+    // lexer is constructed with the parser's `diag`; see src/Parse/ParserImpl.cpp:206).
+    // Expose it so callers can forward the lexer's refactor diagnostics (full table
+    // kind/range/hints) rather than dropping them on the floor.
+    public func GetLexerDiagnosticEngine(): BasicDiagnosticEngine {
+        return lexerDiag
+    }
+
     public func Peek(): Token {
         return lookahead
     }
