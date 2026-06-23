@@ -49,6 +49,7 @@ public open class Node {
     public var curMacroCall: Option<Node> = None
     public var scopeLevel: UInt32 = 0u32
     public var visitedByWalkerID: UInt32 = 0u32
+    public var mangleAdapterId: Int64 = -1
     public var isInMacroCall: Bool = false
     public let astKind: ASTKind
     private var attributes: AttributePack = AttributePack()
