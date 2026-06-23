@@ -613,8 +613,6 @@ private class FrontendCjoFlatBufferWriter {
     private func SaveVarInfo(varDecl: VarDecl): FlatBufferOffset {
         // Mirror ASTWriter.cpp:1319-1322 / ModuleFormat.fbs VarInfo:
         //   field 0 isVar, 1 isConst, 2 isMemberParam, 3 initializer (expr index).
-        // Bounded faithful slice: only literal const initializers are emitted (gap 1.1/1.3),
-        // gated by ShouldExportVarSource (a subset of C++ ShouldExportSource).
         let initializer = SaveVarInitializer(varDecl)
         builder.StartTable(4)
         builder.AddU32(3, initializer)
@@ -631,22 +629,22 @@ private class FrontendCjoFlatBufferWriter {
             return 0u32
         }
         if (let Some(initializer) <- varDecl.initializer) {
-            // Bounded slice: only LitConstExpr is supported so far.
-            if (let Some(_) <- (GetRealExpr(initializer) as LitConstExpr)) {
-                return SaveExpr(initializer)
-            }
+            return SaveExpr(initializer)
         }
         return 0u32
     }
 
-    // Subset of ASTWriter.cpp:312-348 ShouldExportSource(VarDecl) covering the cross-package
-    // const-folding cases handled by this bounded slice: public global/member const variables.
+    // Mirrors ASTWriter.cpp:312-348 ShouldExportSource(VarDecl) for the cases handled by this writer:
+    // local non-global variables without outerDecl, plus public global/member const variables.
     private func ShouldExportVarSource(varDecl: VarDecl): Bool {
         if (varDecl.initializer.isNone() || varDecl.TestAttr(Attribute.IMPORTED)) {
             return false
         }
         if (varDecl.IsCommonMatchedWithSpecific()) {
             return false
+        }
+        if (!varDecl.TestAttr(Attribute.GLOBAL) && varDecl.outerDecl.isNone()) {
+            return true
         }
         let isExternal = varDecl.linkage != Linkage.INTERNAL || varDecl.IsExportedDecl()
         let isGlobalVar = varDecl.TestAttr(Attribute.GLOBAL)
@@ -703,8 +701,9 @@ private class FrontendCjoFlatBufferWriter {
     }
 
     // Per-kind dispatch. Bounded faithful slice: RefExpr, MemberAccess, CallExpr, UnaryExpr,
-    // BinaryExpr, AssignExpr, ThrowExpr, TryExpr, WhileExpr, DoWhileExpr, MatchExpr, IfExpr,
-    // Block, ReturnExpr, LitConstExpr. Other kinds throw (no SaveUnsupportExpr diagnostic stub yet);
+    // BinaryExpr, SubscriptExpr, AssignExpr, ThrowExpr, TryExpr, WhileExpr, DoWhileExpr, MatchExpr,
+    // IfExpr, Block, ReturnExpr, LitConstExpr, ArrayLit, TupleLit. Other kinds throw
+    // (no SaveUnsupportExpr diagnostic stub yet);
     // they are added in later cuts.
     private func SaveExprByKind(realExpr: Expr): FlatBufferOffset {
         if (let Some(we) <- (realExpr as WildcardExpr)) {
@@ -721,6 +720,9 @@ private class FrontendCjoFlatBufferWriter {
         }
         if (let Some(be) <- (realExpr as BinaryExpr)) {
             return SaveBinaryExpr(be)
+        }
+        if (let Some(se) <- (realExpr as SubscriptExpr)) {
+            return SaveSubscriptExpr(se)
         }
         if (let Some(ae) <- (realExpr as AssignExpr)) {
             return SaveAssignExpr(ae)
@@ -745,6 +747,12 @@ private class FrontendCjoFlatBufferWriter {
         }
         if (let Some(lpd) <- (realExpr as LetPatternDestructor)) {
             return SaveLetPatternDestructor(lpd)
+        }
+        if (let Some(al) <- (realExpr as ArrayLit)) {
+            return SaveArrayLit(al)
+        }
+        if (let Some(tl) <- (realExpr as TupleLit)) {
+            return SaveTupleLit(tl)
         }
         if (let Some(le) <- (realExpr as LambdaExpr)) {
             return SaveLambdaExpr(le)
@@ -1233,6 +1241,90 @@ private class FrontendCjoFlatBufferWriter {
         builder.AddStruct(1, begin, 4)
         // ExprKind_BinaryExpr is index 11 of enum ExprKind (ModuleFormat.fbs:333-373).
         builder.AddU16(0, 11u16)
+        return builder.EndTable()
+    }
+
+    // Mirrors ExprWriter.cpp:264-281 SaveExpression(SubscriptExpr): operands are baseExpr followed by
+    // indexExprs; SubscriptInfo carries isTupleAccess (ExprInfo union tag 12).
+    private func SaveSubscriptExpr(se: SubscriptExpr): FlatBufferOffset {
+        if (let None <- se.baseExpr) {
+            throw IllegalArgumentException("SubscriptExpr without baseExpr is not supported in faithful .cjo writer")
+        }
+        if (se.indexExprs.isEmpty()) {
+            throw IllegalArgumentException("SubscriptExpr without indexExprs is not supported in faithful .cjo writer")
+        }
+        let operands = ArrayList<UInt32>()
+        operands.add(SaveExpr(se.baseExpr.getOrThrow()))
+        for (indexExpr in se.indexExprs) {
+            operands.add(SaveExpr(indexExpr))
+        }
+        let operandsVec = builder.CreateVectorU32(operands)
+        builder.StartTable(1)
+        builder.AddBool(0, se.isTupleAccess)
+        let info = builder.EndTable()
+
+        let begin = PositionBytes(se.begin)
+        let end = PositionBytes(se.end)
+        let typeIndex = SaveExprType(se)
+        builder.StartTable(9)
+        builder.AddOffset(8, info)
+        builder.AddU8(7, 12u8)
+        builder.AddU32(5, typeIndex)
+        builder.AddOffset(4, operandsVec)
+        builder.AddStruct(2, end, 4)
+        builder.AddStruct(1, begin, 4)
+        // ExprKind_SubscriptExpr is index 12 of enum ExprKind (ModuleFormat.fbs:333-373).
+        builder.AddU16(0, 12u16)
+        return builder.EndTable()
+    }
+
+    // Mirrors ExprWriter.cpp:395-410 SaveExpression(ArrayLit): operands are element expressions and
+    // ArrayInfo carries initFunc. isValueArray remains the schema default false for ArrayLit.
+    private func SaveArrayLit(al: ArrayLit): FlatBufferOffset {
+        let operands = ArrayList<UInt32>()
+        for (child in al.children) {
+            operands.add(SaveExpr(child))
+        }
+        let operandsVec = builder.CreateVectorU32(operands)
+        let initFunc = if (let Some(decl) <- al.initFunc) { CreateFullIdForDecl(decl) } else { CreateInvalidFullId() }
+        builder.StartTable(2)
+        builder.AddOffset(0, initFunc)
+        let info = builder.EndTable()
+
+        let begin = PositionBytes(al.begin)
+        let end = PositionBytes(al.end)
+        let typeIndex = SaveExprType(al)
+        builder.StartTable(9)
+        builder.AddOffset(8, info)
+        builder.AddU8(7, 9u8)
+        builder.AddU32(5, typeIndex)
+        builder.AddOffset(4, operandsVec)
+        builder.AddStruct(2, end, 4)
+        builder.AddStruct(1, begin, 4)
+        // ExprKind_ArrayLit is index 19 of enum ExprKind (ModuleFormat.fbs:333-373).
+        builder.AddU16(0, 19u16)
+        return builder.EndTable()
+    }
+
+    // Mirrors ExprWriter.cpp:413-424 SaveExpression(TupleLit): operands are element expressions; no
+    // ExprInfo table is used.
+    private func SaveTupleLit(tl: TupleLit): FlatBufferOffset {
+        let operands = ArrayList<UInt32>()
+        for (child in tl.children) {
+            operands.add(SaveExpr(child))
+        }
+        let operandsVec = builder.CreateVectorU32(operands)
+
+        let begin = PositionBytes(tl.begin)
+        let end = PositionBytes(tl.end)
+        let typeIndex = SaveExprType(tl)
+        builder.StartTable(9)
+        builder.AddU32(5, typeIndex)
+        builder.AddOffset(4, operandsVec)
+        builder.AddStruct(2, end, 4)
+        builder.AddStruct(1, begin, 4)
+        // ExprKind_TupleLit is index 20 of enum ExprKind (ModuleFormat.fbs:333-373).
+        builder.AddU16(0, 20u16)
         return builder.EndTable()
     }
 
