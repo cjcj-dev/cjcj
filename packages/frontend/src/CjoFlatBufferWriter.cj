@@ -684,11 +684,18 @@ private class FrontendCjoFlatBufferWriter {
         return exprIndex
     }
 
-    // Per-kind dispatch. Bounded faithful slice: Block, ReturnExpr, LitConstExpr. Other kinds throw
-    // (no SaveUnsupportExpr diagnostic stub yet); they are added in later cuts.
+    // Per-kind dispatch. Bounded faithful slice: RefExpr, MemberAccess, Block, ReturnExpr,
+    // LitConstExpr. Other kinds throw (no SaveUnsupportExpr diagnostic stub yet); they are added in
+    // later cuts.
     private func SaveExprByKind(realExpr: Expr): FlatBufferOffset {
         if (let Some(block) <- (realExpr as Block)) {
             return SaveBlock(block)
+        }
+        if (let Some(ma) <- (realExpr as MemberAccess)) {
+            return SaveMemberAccess(ma)
+        }
+        if (let Some(refExpr) <- (realExpr as RefExpr)) {
+            return SaveRefExpr(refExpr)
         }
         if (let Some(re) <- (realExpr as ReturnExpr)) {
             return SaveReturnExpr(re)
@@ -741,6 +748,87 @@ private class FrontendCjoFlatBufferWriter {
         builder.AddStruct(1, begin, 4)
         // ExprKind_Block is index 28 of enum ExprKind (fbs:333-373; LambdaExpr=27, Block=28).
         builder.AddU16(0, 28u16)
+        return builder.EndTable()
+    }
+
+    // Mirrors ExprWriter.cpp:136-157 SaveExpression(MemberAccess), using ReferenceInfo from
+    // ModuleFormat.fbs:451-457. Base expr, target FullId, instTys vector, and info table are all
+    // built and closed before the parent Expr table opens.
+    private func SaveMemberAccess(ma: MemberAccess): FlatBufferOffset {
+        if (let None <- ma.baseExpr) {
+            throw IllegalArgumentException("MemberAccess without base expr is not supported in faithful .cjo writer")
+        }
+        let baseIdx = SaveExpr(ma.baseExpr.getOrThrow())
+        let operands = ArrayList<UInt32>()
+        operands.add(baseIdx)
+        let operandsVec = builder.CreateVectorU32(operands)
+        let info = SaveReferenceInfo(ma.field.Val(), ma.target, ma.instTys, ma.matchedParentTy)
+
+        let begin = PositionBytes(ma.begin)
+        let end = PositionBytes(ma.end)
+        let typeIndex = SaveExprType(ma)
+        builder.StartTable(9)
+        builder.AddOffset(8, info)
+        // ExprInfo union (fbs:412-432): ReferenceInfo is the 6th member, union tag value 6.
+        builder.AddU8(7, 6u8)
+        builder.AddU32(5, typeIndex)
+        builder.AddOffset(4, operandsVec)
+        builder.AddStruct(2, end, 4)
+        builder.AddStruct(1, begin, 4)
+        // ExprKind_MemberAccess is index 5 of enum ExprKind (fbs:333-373).
+        builder.AddU16(0, 5u16)
+        return builder.EndTable()
+    }
+
+    // Mirrors ExprWriter.cpp:159-177 SaveExpression(RefExpr), including the genericDecl target
+    // normalization at ExprWriter.cpp:162 before writing ReferenceInfo (fbs:451-457).
+    private func SaveRefExpr(re: RefExpr): FlatBufferOffset {
+        let refTarget: Option<Decl> = if (let Some(target) <- re.ref.target) {
+            if (let Some(genericDecl) <- target.genericDecl) {
+                Some(genericDecl)
+            } else {
+                Some(target)
+            }
+        } else {
+            None
+        }
+        let info = SaveReferenceInfo(re.ref.identifier.Val(), refTarget, re.instTys, re.matchedParentTy)
+
+        let begin = PositionBytes(re.begin)
+        let end = PositionBytes(re.end)
+        let typeIndex = SaveExprType(re)
+        builder.StartTable(9)
+        builder.AddOffset(8, info)
+        // ExprInfo union (fbs:412-432): ReferenceInfo is the 6th member, union tag value 6.
+        builder.AddU8(7, 6u8)
+        builder.AddU32(5, typeIndex)
+        builder.AddStruct(2, end, 4)
+        builder.AddStruct(1, begin, 4)
+        // ExprKind_RefExpr is index 6 of enum ExprKind (fbs:333-373).
+        builder.AddU16(0, 6u16)
+        return builder.EndTable()
+    }
+
+    private func SaveReferenceInfo(reference: String, target: Option<Decl>, instTys: ArrayList<Ty>,
+        matchedParentTy: Option<Ty>): FlatBufferOffset {
+        let referenceOffset = builder.CreateString(reference)
+        let targetOffset = if (let Some(targetDecl) <- target) {
+            CreateFullIdForDecl(targetDecl)
+        } else {
+            CreateInvalidFullId()
+        }
+        let types = ArrayList<UInt32>()
+        for (ty in instTys) {
+            types.add(SaveType(ty))
+        }
+        let tyVec = builder.CreateVectorU32(types)
+        let parentTy = if (let Some(ty) <- matchedParentTy) { SaveType(ty) } else { 0u32 }
+        // ReferenceInfo fields (fbs:451-457): 0 reference, 1 target, 2 instTys, 3 matchedParentTy.
+        builder.StartTable(4)
+        builder.AddU32(3, parentTy)
+        builder.AddOffset(2, tyVec)
+        builder.AddOffset(1, targetOffset)
+        builder.AddOffset(0, referenceOffset)
         return builder.EndTable()
     }
 
