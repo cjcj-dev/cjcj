@@ -395,8 +395,8 @@ extend SrcCodeChangeState <: Equatable<SrcCodeChangeState> {
 }
 
 // ModuleFormat.fbs enum ExprKind (fbs:333-373): MemberAccess=5, RefExpr=6, CallExpr=7,
-// UnaryExpr=8, BinaryExpr=11, MatchExpr=21, ReturnExpr=3, LitConstExpr=10, IfExpr=23,
-// LambdaExpr=27, Block=28, MatchCase=29, MatchCaseOther=30.
+// UnaryExpr=8, BinaryExpr=11, AssignExpr=13, MatchExpr=21, ReturnExpr=3, LitConstExpr=10,
+// IfExpr=23, WhileExpr=25, DoWhileExpr=26, LambdaExpr=27, Block=28, MatchCase=29, MatchCaseOther=30.
 private const FLAT_EXPR_KIND_WILDCARD: UInt16 = 1u16
 private const FLAT_EXPR_KIND_RETURN: UInt16 = 3u16
 private const FLAT_EXPR_KIND_MEMBER_ACCESS: UInt16 = 5u16
@@ -405,9 +405,12 @@ private const FLAT_EXPR_KIND_CALL: UInt16 = 7u16
 private const FLAT_EXPR_KIND_UNARY: UInt16 = 8u16
 private const FLAT_EXPR_KIND_LIT_CONST: UInt16 = 10u16
 private const FLAT_EXPR_KIND_BINARY: UInt16 = 11u16
+private const FLAT_EXPR_KIND_ASSIGN: UInt16 = 13u16
 private const FLAT_EXPR_KIND_MATCH: UInt16 = 21u16
 private const FLAT_EXPR_KIND_LET_PATTERN_DESTRUCTOR: UInt16 = 22u16
 private const FLAT_EXPR_KIND_IF: UInt16 = 23u16
+private const FLAT_EXPR_KIND_WHILE: UInt16 = 25u16
+private const FLAT_EXPR_KIND_DO_WHILE: UInt16 = 26u16
 private const FLAT_EXPR_KIND_LAMBDA: UInt16 = 27u16
 private const FLAT_EXPR_KIND_BLOCK: UInt16 = 28u16
 private const FLAT_EXPR_KIND_MATCH_CASE: UInt16 = 29u16
@@ -1714,8 +1717,8 @@ private class CjoSignatureMaterializer {
 
     // Recursive EXPR-load dispatcher. Loads an Expr by its 1-based index from the package allExprs
     // vector (root field 9, slot 22). Mirrors ExprLoader.cpp LoadExpr (:417-443) + per-kind loaders.
-    // Bounded faithful slice: RefExpr, MemberAccess, CallExpr, UnaryExpr, BinaryExpr, IfExpr,
-    // LitConstExpr, ReturnExpr, Block. Returns None for INVALID_FORMAT_INDEX (0) or any
+    // Bounded faithful slice: RefExpr, MemberAccess, CallExpr, UnaryExpr, BinaryExpr, AssignExpr,
+    // WhileExpr, DoWhileExpr, IfExpr, LitConstExpr, ReturnExpr, Block. Returns None for INVALID_FORMAT_INDEX (0) or any
     // not-yet-supported expr kind.
     private func LoadFlatExprRaw(reader: CjoFlatBuffer, exprIndex: UInt32): Option<Expr> {
         if (exprIndex == 0u32 || flatAllExprs < 0) {
@@ -1750,8 +1753,17 @@ private class CjoSignatureMaterializer {
         if (kind == FLAT_EXPR_KIND_BINARY) {
             return Some(LoadFlatBinaryExpr(reader, exprTable))
         }
+        if (kind == FLAT_EXPR_KIND_ASSIGN) {
+            return Some(LoadFlatAssignExpr(reader, exprTable))
+        }
         if (kind == FLAT_EXPR_KIND_IF) {
             return Some(LoadFlatIfExpr(reader, exprTable))
+        }
+        if (kind == FLAT_EXPR_KIND_WHILE) {
+            return Some(LoadFlatWhileExpr(reader, exprTable))
+        }
+        if (kind == FLAT_EXPR_KIND_DO_WHILE) {
+            return Some(LoadFlatDoWhileExpr(reader, exprTable))
         }
         if (kind == FLAT_EXPR_KIND_MATCH) {
             return Some(LoadFlatMatchExpr(reader, exprTable))
@@ -1777,9 +1789,11 @@ private class CjoSignatureMaterializer {
                     scanKind == FLAT_EXPR_KIND_MEMBER_ACCESS ||
                     scanKind == FLAT_EXPR_KIND_REF_EXPR || scanKind == FLAT_EXPR_KIND_CALL ||
                     scanKind == FLAT_EXPR_KIND_UNARY || scanKind == FLAT_EXPR_KIND_LIT_CONST ||
-                    scanKind == FLAT_EXPR_KIND_BINARY || scanKind == FLAT_EXPR_KIND_MATCH ||
+                    scanKind == FLAT_EXPR_KIND_BINARY || scanKind == FLAT_EXPR_KIND_ASSIGN ||
+                    scanKind == FLAT_EXPR_KIND_MATCH ||
                     scanKind == FLAT_EXPR_KIND_MATCH_CASE || scanKind == FLAT_EXPR_KIND_MATCH_CASE_OTHER ||
-                    scanKind == FLAT_EXPR_KIND_IF ||
+                    scanKind == FLAT_EXPR_KIND_IF || scanKind == FLAT_EXPR_KIND_WHILE ||
+                    scanKind == FLAT_EXPR_KIND_DO_WHILE ||
                     scanKind == FLAT_EXPR_KIND_LET_PATTERN_DESTRUCTOR || scanKind == FLAT_EXPR_KIND_LAMBDA ||
                     scanKind == FLAT_EXPR_KIND_BLOCK || (scanKind == 0u16 && scanInfoKind == 11u8)
                 if (!supported) {
@@ -1937,6 +1951,38 @@ private class CjoSignatureMaterializer {
         return ie
     }
 
+    // Mirrors ExprLoader.cpp:330-337 LoadWhileExpr. Operands are condExpr then body; the body is
+    // loaded raw as Block, matching C++ LoadExpr<Block>.
+    private func LoadFlatWhileExpr(reader: CjoFlatBuffer, exprTable: Int64): WhileExpr {
+        let we = WhileExpr()
+        LoadFlatExprBasicInfo(reader, exprTable, we)
+        let operands = reader.VectorField(exprTable, 12)
+        if (operands >= 0 && reader.VectorLength(operands) == 2) {
+            we.condExpr = LoadFlatExpr(reader, reader.VectorU32(operands, 0))
+            if (let Some(bodyExpr) <- LoadFlatExprRaw(reader, reader.VectorU32(operands, 1))) {
+                we.body = bodyExpr as Block
+            }
+        }
+        we.EnableAttr(Attribute.IMPORTED)
+        return we
+    }
+
+    // Mirrors ExprLoader.cpp:339-346 LoadDoWhileExpr. Operands are body then condExpr; the body is
+    // loaded raw as Block, matching C++ LoadExpr<Block>.
+    private func LoadFlatDoWhileExpr(reader: CjoFlatBuffer, exprTable: Int64): DoWhileExpr {
+        let dwe = DoWhileExpr()
+        LoadFlatExprBasicInfo(reader, exprTable, dwe)
+        let operands = reader.VectorField(exprTable, 12)
+        if (operands >= 0 && reader.VectorLength(operands) == 2) {
+            if (let Some(bodyExpr) <- LoadFlatExprRaw(reader, reader.VectorU32(operands, 0))) {
+                dwe.body = bodyExpr as Block
+            }
+            dwe.condExpr = LoadFlatExpr(reader, reader.VectorU32(operands, 1))
+        }
+        dwe.EnableAttr(Attribute.IMPORTED)
+        return dwe
+    }
+
     // Mirrors ExprLoader.cpp:383-402 LoadMatchExpr. MatchInfo.matchMode decides whether operands are
     // selector + MatchCase indexes or MatchCaseOther indexes.
     private func LoadFlatMatchExpr(reader: CjoFlatBuffer, exprTable: Int64): MatchExpr {
@@ -2091,6 +2137,25 @@ private class CjoSignatureMaterializer {
         }
         be.EnableAttr(Attribute.IMPORTED)
         return be
+    }
+
+    // Mirrors ExprLoader.cpp:186-195 LoadAssignExpr. Operands are leftValue then rightExpr; AssignInfo
+    // restores op and isCompound through OP_KIND_RMAP.
+    private func LoadFlatAssignExpr(reader: CjoFlatBuffer, exprTable: Int64): AssignExpr {
+        let ae = AssignExpr()
+        LoadFlatExprBasicInfo(reader, exprTable, ae)
+        let operands = reader.VectorField(exprTable, 12)
+        if (operands >= 0 && reader.VectorLength(operands) >= 2) {
+            ae.leftValue = LoadFlatExpr(reader, reader.VectorU32(operands, 0))
+            ae.rightExpr = LoadFlatExpr(reader, reader.VectorU32(operands, 1))
+        }
+        let infoTable = reader.OffsetField(exprTable, 20)
+        if (infoTable >= 0) {
+            ae.op = FlatOperatorKind(reader.U8Field(infoTable, 6, 0u8))
+            ae.isCompound = reader.U8Field(infoTable, 4, 0u8) != 0u8
+        }
+        ae.EnableAttr(Attribute.IMPORTED)
+        return ae
     }
 
     // Mirrors ExprLoader.cpp:67-79 LoadMemberAccess, plus ReferenceLoader.cpp:586-600 deferred

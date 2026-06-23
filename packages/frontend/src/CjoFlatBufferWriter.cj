@@ -703,7 +703,7 @@ private class FrontendCjoFlatBufferWriter {
     }
 
     // Per-kind dispatch. Bounded faithful slice: RefExpr, MemberAccess, CallExpr, UnaryExpr,
-    // BinaryExpr, MatchExpr, IfExpr, Block, ReturnExpr, LitConstExpr. Other kinds throw
+    // BinaryExpr, AssignExpr, WhileExpr, DoWhileExpr, MatchExpr, IfExpr, Block, ReturnExpr, LitConstExpr. Other kinds throw
     // (no SaveUnsupportExpr diagnostic stub yet); they are added in later cuts.
     private func SaveExprByKind(realExpr: Expr): FlatBufferOffset {
         if (let Some(we) <- (realExpr as WildcardExpr)) {
@@ -721,8 +721,17 @@ private class FrontendCjoFlatBufferWriter {
         if (let Some(be) <- (realExpr as BinaryExpr)) {
             return SaveBinaryExpr(be)
         }
+        if (let Some(ae) <- (realExpr as AssignExpr)) {
+            return SaveAssignExpr(ae)
+        }
         if (let Some(ie) <- (realExpr as IfExpr)) {
             return SaveIfExpr(ie)
+        }
+        if (let Some(we) <- (realExpr as WhileExpr)) {
+            return SaveWhileExpr(we)
+        }
+        if (let Some(dwe) <- (realExpr as DoWhileExpr)) {
+            return SaveDoWhileExpr(dwe)
         }
         if (let Some(me) <- (realExpr as MatchExpr)) {
             return SaveMatchExpr(me)
@@ -1030,6 +1039,92 @@ private class FrontendCjoFlatBufferWriter {
         builder.AddStruct(1, begin, 4)
         // ExprKind_LetPatternDestructor is index 22 of enum ExprKind (ModuleFormat.fbs:333-373).
         builder.AddU16(0, 22u16)
+        return builder.EndTable()
+    }
+
+    // Mirrors ExprWriter.cpp:284-299 SaveExpression(AssignExpr): operands are leftValue and
+    // rightExpr; AssignInfo carries isCompound plus OP_KIND_MAP.at(ae.op).
+    private func SaveAssignExpr(ae: AssignExpr): FlatBufferOffset {
+        if (let None <- ae.leftValue) {
+            throw IllegalArgumentException("AssignExpr without leftValue is not supported in faithful .cjo writer")
+        }
+        if (let None <- ae.rightExpr) {
+            throw IllegalArgumentException("AssignExpr without rightExpr is not supported in faithful .cjo writer")
+        }
+        let operands = ArrayList<UInt32>()
+        operands.add(SaveExpr(ae.leftValue.getOrThrow()))
+        operands.add(SaveExpr(ae.rightExpr.getOrThrow()))
+        let operandsVec = builder.CreateVectorU32(operands)
+        builder.StartTable(2)
+        builder.AddU8(1, OperatorKindToFlat(ae.op))
+        builder.AddBool(0, ae.isCompound)
+        let info = builder.EndTable()
+
+        let begin = PositionBytes(ae.begin)
+        let end = PositionBytes(ae.end)
+        let typeIndex = SaveExprType(ae)
+        builder.StartTable(9)
+        builder.AddOffset(8, info)
+        // ExprInfo_AssignInfo is union tag 8 (ModuleFormat.fbs:412-432).
+        builder.AddU8(7, 8u8)
+        builder.AddU32(5, typeIndex)
+        builder.AddOffset(4, operandsVec)
+        builder.AddStruct(2, end, 4)
+        builder.AddStruct(1, begin, 4)
+        // ExprKind_AssignExpr is index 13 of enum ExprKind (ModuleFormat.fbs:333-373).
+        builder.AddU16(0, 13u16)
+        return builder.EndTable()
+    }
+
+    // Mirrors ExprWriter.cpp:477-490 SaveExpression(WhileExpr): operands are condExpr and body.
+    private func SaveWhileExpr(we: WhileExpr): FlatBufferOffset {
+        if (let None <- we.condExpr) {
+            throw IllegalArgumentException("WhileExpr without condition is not supported in faithful .cjo writer")
+        }
+        if (let None <- we.body) {
+            throw IllegalArgumentException("WhileExpr without body is not supported in faithful .cjo writer")
+        }
+        let operands = ArrayList<UInt32>()
+        operands.add(SaveExpr(we.condExpr.getOrThrow()))
+        operands.add(SaveExpr(we.body.getOrThrow()))
+        let operandsVec = builder.CreateVectorU32(operands)
+
+        let begin = PositionBytes(we.begin)
+        let end = PositionBytes(we.end)
+        let typeIndex = SaveExprType(we)
+        builder.StartTable(9)
+        builder.AddU32(5, typeIndex)
+        builder.AddOffset(4, operandsVec)
+        builder.AddStruct(2, end, 4)
+        builder.AddStruct(1, begin, 4)
+        // ExprKind_WhileExpr is index 25 of enum ExprKind (ModuleFormat.fbs:333-373).
+        builder.AddU16(0, 25u16)
+        return builder.EndTable()
+    }
+
+    // Mirrors ExprWriter.cpp:492-505 SaveExpression(DoWhileExpr): operands are body and condExpr.
+    private func SaveDoWhileExpr(dwe: DoWhileExpr): FlatBufferOffset {
+        if (let None <- dwe.body) {
+            throw IllegalArgumentException("DoWhileExpr without body is not supported in faithful .cjo writer")
+        }
+        if (let None <- dwe.condExpr) {
+            throw IllegalArgumentException("DoWhileExpr without condition is not supported in faithful .cjo writer")
+        }
+        let operands = ArrayList<UInt32>()
+        operands.add(SaveExpr(dwe.body.getOrThrow()))
+        operands.add(SaveExpr(dwe.condExpr.getOrThrow()))
+        let operandsVec = builder.CreateVectorU32(operands)
+
+        let begin = PositionBytes(dwe.begin)
+        let end = PositionBytes(dwe.end)
+        let typeIndex = SaveExprType(dwe)
+        builder.StartTable(9)
+        builder.AddU32(5, typeIndex)
+        builder.AddOffset(4, operandsVec)
+        builder.AddStruct(2, end, 4)
+        builder.AddStruct(1, begin, 4)
+        // ExprKind_DoWhileExpr is index 26 of enum ExprKind (ModuleFormat.fbs:333-373).
+        builder.AddU16(0, 26u16)
         return builder.EndTable()
     }
 
