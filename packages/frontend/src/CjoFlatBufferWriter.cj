@@ -492,11 +492,21 @@ private class FrontendCjoFlatBufferWriter {
             throw IllegalArgumentException("not yet serialized in faithful .cjo writer: function without body signature")
         }
         let body = funcDecl.funcBody.getOrThrow()
-        if (funcDecl.TestAttr(Attribute.GENERIC_INSTANTIATED) && funcDecl.TestAttr(Attribute.GENERIC)) {
-            let emptyParamLists = builder.CreateVectorOffsets(ArrayList<FlatBufferOffset>())
-            builder.StartTable(5)
-            builder.AddOffset(0, emptyParamLists)
-            return builder.EndTable()
+        return SaveFuncBody(body, Some(funcDecl))
+    }
+
+    private func SaveFuncBody(body: FuncBody): FlatBufferOffset {
+        return SaveFuncBody(body, body.funcDecl)
+    }
+
+    private func SaveFuncBody(body: FuncBody, funcDecl: Option<FuncDecl>): FlatBufferOffset {
+        if (let Some(fd) <- funcDecl) {
+            if (fd.TestAttr(Attribute.GENERIC_INSTANTIATED) && fd.TestAttr(Attribute.GENERIC)) {
+                let emptyParamLists = builder.CreateVectorOffsets(ArrayList<FlatBufferOffset>())
+                builder.StartTable(5)
+                builder.AddOffset(0, emptyParamLists)
+                return builder.EndTable()
+            }
         }
         let paramLists = ArrayList<FlatBufferOffset>()
         for (paramList in body.paramLists) {
@@ -508,8 +518,8 @@ private class FrontendCjoFlatBufferWriter {
         //   shouldExportBody = config.exportContent && exportFuncBody && (!fd || CanBeSrcExported(fd) || isGenericCJMP)
         //   validBody = shouldExportBody && Ty::IsTyCorrect(funcBody.GetTy()) && funcBody.body
         // The selfhost .cjo writer always serialises content (config.exportContent), so the gate
-        // reduces to CanBeSrcExported(funcDecl) && IsTyCorrect(body ty) && body present. isGenericCJMP
-        // (IsGenericInCommonSerialization, cjmp common side) is not modelled in this slice.
+        // reduces to (!funcDecl || CanBeSrcExported(funcDecl)) && IsTyCorrect(body ty) && body present.
+        // isGenericCJMP (IsGenericInCommonSerialization, cjmp common side) is not modelled in this slice.
         // The whole body-expr subtree is serialised here (FlatBuffer table discipline: child expr
         // offsets are built/closed BEFORE the FuncBody table is opened below).
         var bodyIdx = 0u32
@@ -519,10 +529,13 @@ private class FrontendCjoFlatBufferWriter {
         // Derive it from the annotation here, faithful to how every other C++ site that needs the
         // flag recomputes it (ASTLoader.cpp:811, TypeChecker.cpp:2457 MakeDefaultParamFunction).
         // Without this, CanBeSrcExported (Utils.h:181-192) would never export a frozen-only body.
-        if (!funcDecl.isFrozen && funcDecl.HasAnno(AstAnnotationKind.FROZEN)) {
-            funcDecl.isFrozen = true
+        if (let Some(fd2) <- funcDecl) {
+            if (!fd2.isFrozen && fd2.HasAnno(AstAnnotationKind.FROZEN)) {
+                fd2.isFrozen = true
+            }
         }
-        let validBody = CanBeSrcExported(funcDecl) && Ty.IsTyCorrect(body.GetTy()) && body.body.isSome()
+        let shouldExportBody = if (let Some(fd3) <- funcDecl) { CanBeSrcExported(fd3) } else { true }
+        let validBody = shouldExportBody && Ty.IsTyCorrect(body.GetTy()) && body.body.isSome()
         if (validBody) {
             bodyIdx = SaveExpr(body.body.getOrThrow())
             captureKind = CaptureKindToFlat(body.captureKind)
@@ -535,14 +548,16 @@ private class FrontendCjoFlatBufferWriter {
         return builder.EndTable()
     }
 
-    private func SaveFuncParamList(funcDecl: FuncDecl, paramList: FuncParamList): FlatBufferOffset {
+    private func SaveFuncParamList(funcDecl: Option<FuncDecl>, paramList: FuncParamList): FlatBufferOffset {
         let params = ArrayList<UInt32>()
         let desugars = ArrayList<UInt32>()
         for (param in paramList.params) {
             if (param.fullPackageName.isEmpty()) {
                 param.fullPackageName = currentPackageName
             }
-            paramOwnerMangles[DeclKey(param)] = ExistingMangledName(funcDecl)
+            if (let Some(fd) <- funcDecl) {
+                paramOwnerMangles[DeclKey(param)] = ExistingMangledName(fd)
+            }
             params.add(SaveDeclIndex(param, false))
             if (let Some(desugar) <- param.desugarDecl) {
                 if (desugar.fullPackageName.isEmpty()) {
@@ -561,16 +576,19 @@ private class FrontendCjoFlatBufferWriter {
         return builder.EndTable()
     }
 
-    private func SaveFuncReturnType(funcDecl: FuncDecl, body: FuncBody): UInt32 {
+    private func SaveFuncReturnType(funcDecl: Option<FuncDecl>, body: FuncBody): UInt32 {
         if (let Some(retType) <- body.retType) {
             return SaveType(TypeNodeTyForSerialization(retType))
         }
-        if (let Some(declTy) <- funcDecl.GetTy()) {
-            if (let Some(funcTy) <- (declTy as FuncTy)) {
-                return SaveType(funcTy.retTy)
+        if (let Some(fd) <- funcDecl) {
+            if (let Some(declTy) <- fd.GetTy()) {
+                if (let Some(funcTy) <- (declTy as FuncTy)) {
+                    return SaveType(funcTy.retTy)
+                }
             }
+            return SaveType(PrimitiveTy(TypeKind.TYPE_UNIT))
         }
-        return SaveType(PrimitiveTy(TypeKind.TYPE_UNIT))
+        return 0u32
     }
 
     private func SavePropInfo(propDecl: PropDecl): FlatBufferOffset {
@@ -703,6 +721,9 @@ private class FrontendCjoFlatBufferWriter {
         if (let Some(ie) <- (realExpr as IfExpr)) {
             return SaveIfExpr(ie)
         }
+        if (let Some(le) <- (realExpr as LambdaExpr)) {
+            return SaveLambdaExpr(le)
+        }
         if (let Some(ma) <- (realExpr as MemberAccess)) {
             return SaveMemberAccess(ma)
         }
@@ -760,6 +781,32 @@ private class FrontendCjoFlatBufferWriter {
         builder.AddStruct(1, begin, 4)
         // ExprKind_Block is index 28 of enum ExprKind (fbs:333-373; LambdaExpr=27, Block=28).
         builder.AddU16(0, 28u16)
+        return builder.EndTable()
+    }
+
+    // Mirrors ExprWriter.cpp:507-517 SaveExpression(LambdaExpr): LambdaInfo carries the
+    // nested FuncBody and supportMock flag; ExprInfo_LambdaInfo's union tag value is 7.
+    private func SaveLambdaExpr(le: LambdaExpr): FlatBufferOffset {
+        if (let None <- le.funcBody) {
+            throw IllegalArgumentException("LambdaExpr without FuncBody is not supported in faithful .cjo writer")
+        }
+        let funcBody = SaveFuncBody(le.funcBody.getOrThrow())
+        builder.StartTable(2)
+        builder.AddBool(1, le.TestAttr(Attribute.MOCK_SUPPORTED))
+        builder.AddOffset(0, funcBody)
+        let info = builder.EndTable()
+
+        let begin = PositionBytes(le.begin)
+        let end = PositionBytes(le.end)
+        let typeIndex = SaveExprType(le)
+        builder.StartTable(9)
+        builder.AddOffset(8, info)
+        builder.AddU8(7, 7u8)
+        builder.AddU32(5, typeIndex)
+        builder.AddStruct(2, end, 4)
+        builder.AddStruct(1, begin, 4)
+        // ExprKind_LambdaExpr is index 27 of enum ExprKind (ModuleFormat.fbs:333-373).
+        builder.AddU16(0, 27u16)
         return builder.EndTable()
     }
 
