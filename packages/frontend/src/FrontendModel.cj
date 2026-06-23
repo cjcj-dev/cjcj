@@ -5,6 +5,7 @@ public import cangjie_compiler::basic.{
     IntegratedString, MakeRange, Position, PositionStatus, Range, Source, SourceManager
 }
 public import cangjie_compiler::ast.*
+import cangjie_compiler::ast.AnnotationKind as AstAnnotationKind
 import cangjie_compiler::basic.StringConvertor
 import cangjie_compiler::basic.Diagnostic as BasicDiagnostic
 import cangjie_compiler::basic.DiagFormat as BasicDiagFormat
@@ -999,8 +1000,84 @@ private class CjoSignatureMaterializer {
         decl.moduleName = RootPackageName(decl.fullPackageName)
         decl.toBeCompiled = false
         ApplyFlatAttributes(reader, record, decl)
+        ApplyFlatAnnotations(reader, record, decl)
         MarkFlatImportedDecl(decl)
         ApplyFlatDeclHash(reader, record, decl)
+    }
+
+    // Loads the Decl.annotations vector (Decl field 10 -> vtable slot 24) onto the decl.
+    // Mirrors ASTLoader::ASTLoaderImpl::LoadDeclBasicInfo annotation loop (ASTLoader.cpp:628-638)
+    // and LoadAnnotation/LoadAnnotationArgs (ASTLoader.cpp:641-708). Bounded faithful slice:
+    // built-in annotation kinds plus literal (LitConstExpr) args, matching the writer slice.
+    private func ApplyFlatAnnotations(reader: CjoFlatBuffer, record: CjoFlatDecl, decl: Decl): Unit {
+        let annos = reader.VectorField(record.table, 24)
+        if (annos < 0) {
+            return
+        }
+        var idx: Int64 = 0
+        let count = reader.VectorLength(annos)
+        while (idx < count) {
+            let annoTable = reader.VectorOffsetElement(annos, idx)
+            if (annoTable >= 0) {
+                if (let Some(annotation) <- LoadFlatAnnotation(reader, annoTable)) {
+                    decl.annotations.add(annotation)
+                }
+            }
+            idx++
+        }
+    }
+
+    // Mirrors ASTLoader::ASTLoaderImpl::LoadAnnotation (ASTLoader.cpp:641-692). Anno record
+    // (schema/ModuleFormat.fbs:321-326): field 0 kind (slot 4), 1 identifier (slot 6),
+    // 2 args (slot 8). The target FullId (slot 10) is not consumed in this bounded slice.
+    private func LoadFlatAnnotation(reader: CjoFlatBuffer, annoTable: Int64): Option<Annotation> {
+        let kindValue = reader.U16Field(annoTable, 4, 0u16)
+        let annotation = Annotation()
+        match (kindValue) {
+            case 0u16 => annotation.kind = AstAnnotationKind.DEPRECATED
+            case 1u16 =>
+                // AnnoKind_TestRegistration -> @Attribute[TEST_REGISTER] (ASTLoader.cpp:649-652).
+                annotation.kind = AstAnnotationKind.ATTRIBUTE
+                annotation.attrs.add(Token(TokenKind.IDENTIFIER, "TEST_REGISTER"))
+            case 2u16 => annotation.kind = AstAnnotationKind.FROZEN
+            case 3u16 =>
+                annotation.kind = AstAnnotationKind.CUSTOM
+                annotation.isCompileTimeVisible = true
+            case 4u16 => annotation.kind = AstAnnotationKind.JAVA_MIRROR
+            case 5u16 => annotation.kind = AstAnnotationKind.JAVA_IMPL
+            case 6u16 => annotation.kind = AstAnnotationKind.OBJ_C_MIRROR
+            case 7u16 => annotation.kind = AstAnnotationKind.OBJ_C_IMPL
+            case 8u16 => annotation.kind = AstAnnotationKind.FOREIGN_NAME
+            case 9u16 => annotation.kind = AstAnnotationKind.JAVA_HAS_DEFAULT
+            case 10u16 => annotation.kind = AstAnnotationKind.ANNOTATION
+            case _ => return None
+        }
+        annotation.identifier = Identifier(reader.StringField(annoTable, 6))
+        LoadFlatAnnotationArgs(reader, annoTable, annotation)
+        return annotation
+    }
+
+    // Mirrors ASTLoader::ASTLoaderImpl::LoadAnnotationArgs (ASTLoader.cpp:694-708). AnnoArg
+    // (schema/ModuleFormat.fbs:328-331): field 0 name (slot 4), 1 expr index (slot 6).
+    // Reuses LoadFlatExpr (LitConstExpr-only) for the arg expr.
+    private func LoadFlatAnnotationArgs(reader: CjoFlatBuffer, annoTable: Int64, annotation: Annotation): Unit {
+        let args = reader.VectorField(annoTable, 8)
+        if (args < 0) {
+            return
+        }
+        var idx: Int64 = 0
+        let count = reader.VectorLength(args)
+        while (idx < count) {
+            let argTable = reader.VectorOffsetElement(args, idx)
+            if (argTable >= 0) {
+                let arg = FuncArg()
+                arg.name = SrcIdentifier(reader.StringField(argTable, 4))
+                let exprIndex = reader.U32Field(argTable, 6, 0u32)
+                arg.expr = LoadFlatExpr(reader, exprIndex)
+                annotation.args.add(arg)
+            }
+            idx++
+        }
     }
 
     private func ApplyFlatDeclHash(reader: CjoFlatBuffer, record: CjoFlatDecl, decl: Decl): Unit {
@@ -1430,6 +1507,9 @@ private class CjoSignatureMaterializer {
         funcDecl.isConst = reader.U8Field(infoTable, 12, 0u8) != 0u8
         funcDecl.isInline = reader.U8Field(infoTable, 14, 0u8) != 0u8
         funcDecl.isFastNative = reader.U8Field(infoTable, 16, 0u8) != 0u8
+        // Mirror ASTLoader.cpp:810-811: derive isFrozen from the loaded @Frozen annotation
+        // (annotations are loaded in ApplyFlatDeclBasicInfo, which runs before this).
+        funcDecl.isFrozen = funcDecl.HasAnno(AstAnnotationKind.FROZEN)
         let bodyTable = reader.OffsetField(infoTable, 4)
         if (bodyTable < 0) {
             throw IllegalStateException("FlatBuffer FuncDecl '${record.identifier}' has no FuncBody")

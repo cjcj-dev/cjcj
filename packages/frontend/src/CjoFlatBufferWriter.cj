@@ -272,7 +272,7 @@ private class FrontendCjoFlatBufferWriter {
         let generic = SaveGeneric(decl)
         let genericDecl = if (ShouldEmitGenericDecl(decl)) { SaveGenericDeclIndex(decl) } else { 0u32 }
         let attributes = builder.CreateVectorU64(PackedAttributes(decl))
-        let annotations = builder.CreateVectorOffsets(ArrayList<FlatBufferOffset>())
+        let annotations = SaveAnnotations(decl)
         let typeIndex = SaveDeclType(decl)
         let info = SaveDeclInfo(decl)
         let begin = PositionBytes(decl.begin)
@@ -648,6 +648,113 @@ private class FrontendCjoFlatBufferWriter {
             return SaveType(ty)
         }
         return 0u32
+    }
+
+    // Serialize a decl's annotations into the Decl.annotations vector (Decl field 10).
+    // Mirrors ASTWriter::ASTWriterImpl::SaveAnnotations (ASTWriter.cpp:1751-1861) and the
+    // Anno/AnnoArg records (schema/ModuleFormat.fbs:305-331). Bounded faithful slice:
+    // built-in annotation kinds plus literal (LitConstExpr) args. The custom-annotation
+    // target FullId (ASTWriter.cpp:1835-1842) is NOT emitted (left null), matching what C++
+    // does for every built-in kind; only AnnoKind_Custom carries a target there.
+    private func SaveAnnotations(decl: Decl): FlatBufferOffset {
+        let annotations = ArrayList<FlatBufferOffset>()
+        for (annotation in decl.annotations) {
+            match (annotation.kind) {
+                case AstAnnotationKind.DEPRECATED =>
+                    annotations.add(SaveAnno(annotation, 0u16, true))
+                case AstAnnotationKind.ATTRIBUTE =>
+                    // ASTWriter.cpp:1765-1781: only @Attribute[TEST_REGISTER] is serialized,
+                    // as AnnoKind_TestRegistration with no args.
+                    if (HasTestRegisterAttr(annotation)) {
+                        annotations.add(SaveAnno(annotation, 1u16, false))
+                    }
+                case AstAnnotationKind.FROZEN =>
+                    annotations.add(SaveAnno(annotation, 2u16, false))
+                case AstAnnotationKind.JAVA_MIRROR =>
+                    annotations.add(SaveAnno(annotation, 4u16, true))
+                case AstAnnotationKind.JAVA_IMPL =>
+                    annotations.add(SaveAnno(annotation, 5u16, true))
+                case AstAnnotationKind.JAVA_HAS_DEFAULT =>
+                    annotations.add(SaveAnno(annotation, 9u16, true))
+                case AstAnnotationKind.OBJ_C_MIRROR =>
+                    annotations.add(SaveAnno(annotation, 6u16, true))
+                case AstAnnotationKind.OBJ_C_IMPL =>
+                    annotations.add(SaveAnno(annotation, 7u16, true))
+                case AstAnnotationKind.FOREIGN_NAME =>
+                    annotations.add(SaveAnno(annotation, 8u16, true))
+                case AstAnnotationKind.CUSTOM =>
+                    // ASTWriter.cpp:1830-1844: save compile-time-visible (@!) or common/specific
+                    // custom annotations. Target FullId is omitted in this bounded slice.
+                    if (annotation.isCompileTimeVisible ||
+                        decl.TestAnyAttr(Attribute.COMMON, Attribute.SPECIFIC)) {
+                        annotations.add(SaveAnno(annotation, 3u16, true))
+                    }
+                case AstAnnotationKind.ANNOTATION =>
+                    // ASTWriter.cpp:1846-1855: @Annotation with no args enables all targets locally
+                    // and is not serialized; only @Annotation carrying args is emitted.
+                    if (annotation.args.isEmpty()) {
+                        annotation.EnableAllTargets()
+                    } else {
+                        annotations.add(SaveAnno(annotation, 10u16, true))
+                    }
+                case _ => ()
+            }
+        }
+        return builder.CreateVectorOffsets(annotations)
+    }
+
+    private func HasTestRegisterAttr(annotation: Annotation): Bool {
+        for (attr in annotation.attrs) {
+            if (attr.Value() == "TEST_REGISTER") {
+                return true
+            }
+        }
+        return false
+    }
+
+    // Builds one Anno record (schema/ModuleFormat.fbs:321-326): field 0 kind, 1 identifier,
+    // 2 args, 3 target. All child offsets are computed before StartTable (only one table may be
+    // open at a time). Mirrors PackageFormat::CreateAnno calls in ASTWriter.cpp:1751-1855.
+    private func SaveAnno(annotation: Annotation, annoKind: UInt16, withArgs: Bool): FlatBufferOffset {
+        let argsVec = if (withArgs) {
+            SaveAnnotationArgs(annotation)
+        } else {
+            builder.CreateVectorOffsets(ArrayList<FlatBufferOffset>())
+        }
+        let identifier = builder.CreateString(annotation.identifier.Val())
+        builder.StartTable(4)
+        builder.AddOffset(2, argsVec)
+        builder.AddOffset(1, identifier)
+        builder.AddU16(0, annoKind)
+        return builder.EndTable()
+    }
+
+    // Builds the AnnoArg vector (schema/ModuleFormat.fbs:328-331): AnnoArg field 0 name,
+    // 1 expr (Expr index). Mirrors ASTWriter::ASTWriterImpl::SaveAnnotationArgs
+    // (ASTWriter.cpp:1863-1878). Bounded slice: non-@Annotation args that are not LitConstExpr
+    // are skipped (matching the C++ guard at :1869).
+    private func SaveAnnotationArgs(annotation: Annotation): FlatBufferOffset {
+        let args = ArrayList<FlatBufferOffset>()
+        for (arg in annotation.args) {
+            if (let Some(expr) <- arg.expr) {
+                let isLit = (expr as LitConstExpr).isSome()
+                if (annotation.kind != AstAnnotationKind.ANNOTATION && !isLit) {
+                    continue
+                }
+                // Bounded slice: only LitConstExpr is materialized as an Expr record.
+                let exprIndex = if (let Some(lce) <- (expr as LitConstExpr)) {
+                    SaveLitConstExprIndex(lce)
+                } else {
+                    0u32
+                }
+                let name = builder.CreateString(arg.name.GetRawText())
+                builder.StartTable(2)
+                builder.AddU32(1, exprIndex)
+                builder.AddOffset(0, name)
+                args.add(builder.EndTable())
+            }
+        }
+        return builder.CreateVectorOffsets(args)
     }
 
     private func SaveParamInfo(param: FuncParam): FlatBufferOffset {
