@@ -43,26 +43,48 @@ private func TryLoadClassFieldWithReadBarrier(irBuilder: IRBuilder2, loadExpr: E
     }
     let local = (loadExpr.GetOperand(0) as LocalVar) ?? return None
     let ownerExpr = local.GetExpr() ?? return None
-    let base = if (let Some(elementRef) <- (ownerExpr as GetElementRef)) {
-        elementRef.GetLocation()
+    let (base, fieldTy) = if (let Some(elementRef) <- (ownerExpr as GetElementRef)) {
+        ResolveLoadBaseAndFieldType(elementRef.GetLocation(), Some(elementRef.GetPath()))
     } else if (let Some(elementByName) <- (ownerExpr as GetElementByName)) {
-        elementByName.GetLocation()
+        ResolveLoadBaseAndFieldType(elementByName.GetLocation(),
+            ResolveLoadElementPathByNames(elementByName.GetLocation(), elementByName.GetNames()))
     } else {
         return None
     }
     let baseValue = irBuilder.GetCGModule().MaterializeValue(irBuilder, base)
-    if (let Some(baseCGType) <- baseValue.GetCGType()) {
-        if (!baseCGType.GetOriginal().StripAllRefs().IsClass()) {
-            return None
-        }
-    } else {
+    let baseCGType = baseValue.GetCGType() ?? return None
+    if (!baseCGType.GetOriginal().StripAllRefs().IsClass()) {
         return None
     }
     if (!IsAddressSpacePointer(baseValue.GetRawValue(), 1u32)) {
         return None
     }
+    if (IsGenericField(fieldTy)) {
+        return Some(irBuilder.LoadGenericFieldValue(baseValue.GetRawValue(), addr.GetRawValue(), elementType,
+            baseCGType.GetOriginal(), fieldTy))
+    }
     let raw = irBuilder.CallGCReadRef(baseValue.GetRawValue(), addr.GetRawValue())
     return Some(irBuilder.CreateBitCast(raw, elementType.GetLLVMType(), name: "load.gcread.cast"))
+}
+
+private func ResolveLoadBaseAndFieldType(base: Value, path: Option<ArrayList<UInt64>>): (Value, Option<Type>) {
+    let fieldTy = if (let Some(elementPath) <- path) {
+        if (let Some(locationTy) <- base.GetType()) {
+            ResolveElementTypeByPath(locationTy, elementPath)
+        } else {
+            Option<Type>.None
+        }
+    } else {
+        Option<Type>.None
+    }
+    return (base, fieldTy)
+}
+
+private func ResolveLoadElementPathByNames(base: Value, names: ArrayList<String>): Option<ArrayList<UInt64>> {
+    if (let Some(locationTy) <- base.GetType()) {
+        return ResolveElementPathByNames(locationTy, names)
+    }
+    return None
 }
 
 private func ShouldUseClassFieldReadBarrier(elementType: CGType): Bool {
@@ -257,6 +279,9 @@ public func GenerateStore(irBuilder: IRBuilder2, chirExpr: Expression): LLVMValu
     }
     let value = irBuilder.GetCGModule().MaterializeValue(irBuilder, valueOperand)
     let addr = irBuilder.GetCGModule().MaterializeValue(irBuilder, addrOperand)
+    if (let Some(genericStore) <- irBuilder.TryCreateGenericStore(value, addr)) {
+        return genericStore
+    }
     return irBuilder.CreateStore(StoreValueForAddress(irBuilder, value, addr), addr.GetRawValue())
 }
 
@@ -359,6 +384,10 @@ private func StoreElementValue(irBuilder: IRBuilder2, baseValue: CGValue, elemen
     }
     let rawElementValue = StoreElementRawValue(irBuilder, elementValue)
     if (let Some(baseType) <- baseValue.GetCGType()) {
+        if (IsManagedObjectElementBase(baseType.GetOriginal()) && IsGenericField(fieldTy)) {
+            return irBuilder.StoreGenericMemberValue(baseValue.GetRawValue(), elementPtr, elementValue,
+                baseType.GetOriginal(), fieldTy)
+        }
         if (let Some(rawArrayTy) <- FindRawArrayType(baseType.GetOriginal())) {
             let elementCGType = CGType.GetOrCreate(irBuilder.GetCGModule(), rawArrayTy.GetElementType())
             return StoreRawArrayElement(irBuilder, baseValue.GetRawValue(), elementCGType, rawElementValue,
@@ -374,6 +403,13 @@ private func StoreElementValue(irBuilder: IRBuilder2, baseValue: CGValue, elemen
         return irBuilder.CallGCWrite(rawElementValue, baseValue.GetRawValue(), elementPtr)
     }
     return irBuilder.CreateStore(rawElementValue, elementPtr)
+}
+
+private func IsGenericField(fieldTy: Option<Type>): Bool {
+    if (let Some(ty) <- fieldTy) {
+        return ty.StripAllRefs().IsGeneric()
+    }
+    return false
 }
 
 private func IsAggregateFieldType(fieldTy: Type): Bool {

@@ -304,6 +304,13 @@ public open class FuncCallWithException <: ExpressionWithException {
         return CopyTypeList(instantiatedTypeArgs)
     }
 
+    public func SetInstantiatedTypeArgs(args: ArrayList<Type>): Unit {
+        instantiatedTypeArgs.clear()
+        for (ty in args) {
+            instantiatedTypeArgs.add(ty)
+        }
+    }
+
     protected func CallTargetPrefix(): String {
         if (let Some(ty) <- thisType) {
             return ty.ToString() + "->"

@@ -63,7 +63,7 @@ private func GenerateApply(irBuilder: IRBuilder2, callee: Value, args: ArrayList
     for (arg in args) {
         argValues.add(irBuilder.GetCGModule().MaterializeValue(irBuilder, arg))
     }
-    let methodTypeInfoArg = BuildApplyMethodTypeInfoArg(irBuilder, thisType)
+    let methodTypeInfoArg = BuildApplyMethodTypeInfoArg(irBuilder, thisType, argValues)
     if (let Some(instFuncTy) <- callType) {
         let typeInfo = TypeExtraInfo()
         typeInfo.isMethod = isMethodType
@@ -129,8 +129,12 @@ private func ImportedGenericStructCtorNeedsWithoutTI(fn: Function): Bool {
     return false
 }
 
-private func BuildApplyMethodTypeInfoArg(irBuilder: IRBuilder2, thisType: Option<Type>): Option<LLVMValueRef> {
+private func BuildApplyMethodTypeInfoArg(irBuilder: IRBuilder2, thisType: Option<Type>,
+    argValues: ArrayList<CGValue>): Option<LLVMValueRef> {
     if (let Some(ty) <- thisType) {
+        if (IsAutoEnvType(ty) && !argValues.isEmpty()) {
+            return Some(irBuilder.GetTypeInfoFromObject(argValues[0].GetRawValue()))
+        }
         let typeInfo = CGType.GetOrCreate(irBuilder.GetCGModule(), ty.StripAllRefs()).GetOrCreateTypeInfo()
         let typeInfoPtrType = CGType.GetOrCreateTypeInfoPtrType(irBuilder.GetLLVMContext())
         return Some(irBuilder.CreateBitCast(typeInfo, typeInfoPtrType, name: "call.this.ti"))

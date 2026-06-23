@@ -263,6 +263,7 @@ foreign {
     func LLVMGetTypeContext(ty: LLVMTypeRef): LLVMContextRef
     func LLVMGetValueContext(value: LLVMValueRef): LLVMContextRef
     func LLVMIsAFunction(value: LLVMValueRef): LLVMValueRef
+    func LLVMIsAArgument(value: LLVMValueRef): LLVMValueRef
     func LLVMIsAInstruction(value: LLVMValueRef): LLVMValueRef
     func LLVMGetIntTypeWidth(integerTy: LLVMTypeRef): UInt32
 
