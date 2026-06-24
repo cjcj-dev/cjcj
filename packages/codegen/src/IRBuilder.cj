@@ -2223,7 +2223,7 @@ public class IRBuilder2 <: Resource {
         return GetLayoutSize32(baseTy, cgType)
     }
 
-    private func CreateTypeInfo(chirTy: Type): LLVMValueRef {
+    public func CreateTypeInfo(chirTy: Type): LLVMValueRef {
         let baseTy = chirTy.StripAllRefs()
         if (let Some(currentFunction) <- cgFunction) {
             if (let Some(typeInfoProvider) <- currentFunction.genericParamsMap.get(baseTy.ToString())) {
