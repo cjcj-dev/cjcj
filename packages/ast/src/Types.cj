@@ -262,6 +262,7 @@ public open class Ty {
     public let kind: TypeKind
     public var name: String = ""
     public let typeArgs: ArrayList<Ty> = ArrayList<Ty>()
+    public var mangleAdapterId: Int64 = -1
     protected var invalid: Bool = false
     protected var generic: Bool = false
 
