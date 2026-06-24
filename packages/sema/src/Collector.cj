@@ -373,6 +373,42 @@ public class Collector {
         }
     }
 
+    private func SetPropAccessorContext(propDecl: PropDecl, accessor: FuncDecl): Unit {
+        accessor.identifierForLsp = accessor.identifier.Val()
+        if (accessor.isGetter && accessor.identifier.Val() == "get") {
+            accessor.identifier = SrcIdentifier("$${propDecl.identifier.Val()}get", accessor.identifier.Begin(),
+                accessor.identifier.End(), accessor.identifier.IsRaw())
+        } else if (accessor.isSetter && accessor.identifier.Val() == "set") {
+            accessor.identifier = SrcIdentifier("$${propDecl.identifier.Val()}set", accessor.identifier.Begin(),
+                accessor.identifier.End(), accessor.identifier.IsRaw())
+        }
+        accessor.propDecl = propDecl
+        if (let Some(outer) <- propDecl.outerDecl) {
+            accessor.outerDecl = outer
+            if (let Some(body) <- accessor.funcBody) {
+                if (let Some(classLike) <- (outer as ClassLikeDecl)) {
+                    body.parentClassLike = classLike
+                } else if (let Some(structDecl) <- (outer as StructDecl)) {
+                    body.parentStruct = structDecl
+                } else if (let Some(enumDecl) <- (outer as EnumDecl)) {
+                    body.parentEnum = enumDecl
+                }
+            }
+        }
+    }
+
+    private func AssignPropDecl(ctx: ASTContext, pd: PropDecl): Unit {
+        AssignVarDecl(ctx, pd)
+        for (setter in pd.setters) {
+            SetPropAccessorContext(pd, setter)
+            AssignNode(ctx, setter)
+        }
+        for (getter in pd.getters) {
+            SetPropAccessorContext(pd, getter)
+            AssignNode(ctx, getter)
+        }
+    }
+
     private func AssignVarDecl(ctx: ASTContext, vd: VarDeclAbstract): Unit {
         SetCurrentScope(ctx, vd)
         if (let Some(typeNode) <- vd.typeNode) {
@@ -635,6 +671,10 @@ public class Collector {
         }
         if (let Some(varWithPattern) <- (node as VarWithPatternDecl)) {
             AssignVarWithPatternDecl(ctx, varWithPattern)
+            return true
+        }
+        if (let Some(propDecl) <- (node as PropDecl)) {
+            AssignPropDecl(ctx, propDecl)
             return true
         }
         if (let Some(varDecl) <- (node as VarDeclAbstract)) {
