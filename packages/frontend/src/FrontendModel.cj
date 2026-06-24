@@ -394,12 +394,13 @@ extend SrcCodeChangeState <: Equatable<SrcCodeChangeState> {
     }
 }
 
-// ModuleFormat.fbs enum ExprKind (fbs:333-373): MemberAccess=5, RefExpr=6, CallExpr=7,
-// UnaryExpr=8, BinaryExpr=11, SubscriptExpr=12, AssignExpr=13, ThrowExpr=17, SpawnExpr=18, ArrayLit=19,
+// ModuleFormat.fbs enum ExprKind (fbs:333-373): JumpExpr=4, MemberAccess=5, RefExpr=6, CallExpr=7,
+// UnaryExpr=8, BinaryExpr=11, SubscriptExpr=12, AssignExpr=13, TypeConvExpr=16, ThrowExpr=17, SpawnExpr=18, ArrayLit=19,
 // TupleLit=20, MatchExpr=21, ReturnExpr=3, LitConstExpr=10, IfExpr=23, TryExpr=24,
 // WhileExpr=25, DoWhileExpr=26, LambdaExpr=27, Block=28, MatchCase=29, MatchCaseOther=30, ForInExpr=35.
 private const FLAT_EXPR_KIND_WILDCARD: UInt16 = 1u16
 private const FLAT_EXPR_KIND_RETURN: UInt16 = 3u16
+private const FLAT_EXPR_KIND_JUMP: UInt16 = 4u16
 private const FLAT_EXPR_KIND_MEMBER_ACCESS: UInt16 = 5u16
 private const FLAT_EXPR_KIND_REF_EXPR: UInt16 = 6u16
 private const FLAT_EXPR_KIND_CALL: UInt16 = 7u16
@@ -408,6 +409,7 @@ private const FLAT_EXPR_KIND_LIT_CONST: UInt16 = 10u16
 private const FLAT_EXPR_KIND_BINARY: UInt16 = 11u16
 private const FLAT_EXPR_KIND_SUBSCRIPT: UInt16 = 12u16
 private const FLAT_EXPR_KIND_ASSIGN: UInt16 = 13u16
+private const FLAT_EXPR_KIND_TYPE_CONV: UInt16 = 16u16
 private const FLAT_EXPR_KIND_THROW: UInt16 = 17u16
 private const FLAT_EXPR_KIND_SPAWN: UInt16 = 18u16
 private const FLAT_EXPR_KIND_ARRAY_LIT: UInt16 = 19u16
@@ -1767,6 +1769,12 @@ private class CjoSignatureMaterializer {
         if (kind == FLAT_EXPR_KIND_ASSIGN) {
             return Some(LoadFlatAssignExpr(reader, exprTable))
         }
+        if (kind == FLAT_EXPR_KIND_JUMP) {
+            return Some(LoadFlatJumpExpr(reader, exprTable))
+        }
+        if (kind == FLAT_EXPR_KIND_TYPE_CONV) {
+            return Some(LoadFlatTypeConvExpr(reader, exprTable))
+        }
         if (kind == FLAT_EXPR_KIND_THROW) {
             return Some(LoadFlatThrowExpr(reader, exprTable))
         }
@@ -1819,7 +1827,8 @@ private class CjoSignatureMaterializer {
                     scanKind == FLAT_EXPR_KIND_REF_EXPR || scanKind == FLAT_EXPR_KIND_CALL ||
                     scanKind == FLAT_EXPR_KIND_UNARY || scanKind == FLAT_EXPR_KIND_LIT_CONST ||
                     scanKind == FLAT_EXPR_KIND_BINARY || scanKind == FLAT_EXPR_KIND_SUBSCRIPT ||
-                    scanKind == FLAT_EXPR_KIND_ASSIGN || scanKind == FLAT_EXPR_KIND_SPAWN ||
+                    scanKind == FLAT_EXPR_KIND_ASSIGN || scanKind == FLAT_EXPR_KIND_JUMP ||
+                    scanKind == FLAT_EXPR_KIND_TYPE_CONV || scanKind == FLAT_EXPR_KIND_SPAWN ||
                     scanKind == FLAT_EXPR_KIND_THROW || scanKind == FLAT_EXPR_KIND_MATCH ||
                     scanKind == FLAT_EXPR_KIND_ARRAY_LIT || scanKind == FLAT_EXPR_KIND_TUPLE_LIT ||
                     scanKind == FLAT_EXPR_KIND_MATCH_CASE || scanKind == FLAT_EXPR_KIND_MATCH_CASE_OTHER ||
@@ -1955,6 +1964,30 @@ private class CjoSignatureMaterializer {
         LoadFlatExprBasicInfo(reader, exprTable, we)
         we.EnableAttr(Attribute.IMPORTED)
         return we
+    }
+
+    // Mirrors ExprLoader.cpp:58-66 LoadJumpExpr. JumpInfo carries only isBreak.
+    private func LoadFlatJumpExpr(reader: CjoFlatBuffer, exprTable: Int64): JumpExpr {
+        let je = JumpExpr()
+        LoadFlatExprBasicInfo(reader, exprTable, je)
+        let infoTable = reader.OffsetField(exprTable, 20)
+        if (infoTable >= 0) {
+            je.isBreak = reader.U8Field(infoTable, 4, 0u8) != 0u8
+        }
+        je.EnableAttr(Attribute.IMPORTED)
+        return je
+    }
+
+    // Mirrors ExprLoader.cpp:220-227 LoadTypeConvExpr. Operand 0 is the converted expr.
+    private func LoadFlatTypeConvExpr(reader: CjoFlatBuffer, exprTable: Int64): TypeConvExpr {
+        let tce = TypeConvExpr()
+        LoadFlatExprBasicInfo(reader, exprTable, tce)
+        let operands = reader.VectorField(exprTable, 12)
+        if (operands >= 0 && reader.VectorLength(operands) >= 1) {
+            tce.expr = LoadFlatExpr(reader, reader.VectorU32(operands, 0))
+        }
+        tce.EnableAttr(Attribute.IMPORTED)
+        return tce
     }
 
     // Mirrors ExprLoader.cpp:228-233 LoadThrowExpr. Operand 0 is the thrown expr.

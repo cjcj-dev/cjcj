@@ -691,7 +691,7 @@ private class FrontendCjoFlatBufferWriter {
     }
 
     // Per-kind dispatch. Bounded faithful slice: RefExpr, MemberAccess, CallExpr, UnaryExpr,
-    // BinaryExpr, SubscriptExpr, AssignExpr, ThrowExpr, SpawnExpr, TryExpr, WhileExpr, DoWhileExpr,
+    // BinaryExpr, SubscriptExpr, AssignExpr, JumpExpr, TypeConvExpr, ThrowExpr, SpawnExpr, TryExpr, WhileExpr, DoWhileExpr,
     // MatchExpr, ForInExpr, IfExpr, Block, ReturnExpr, LitConstExpr, ArrayLit, TupleLit. Other kinds throw
     // (no SaveUnsupportExpr diagnostic stub yet);
     // they are added in later cuts.
@@ -716,6 +716,12 @@ private class FrontendCjoFlatBufferWriter {
         }
         if (let Some(ae) <- (realExpr as AssignExpr)) {
             return SaveAssignExpr(ae)
+        }
+        if (let Some(je) <- (realExpr as JumpExpr)) {
+            return SaveJumpExpr(je)
+        }
+        if (let Some(tce) <- (realExpr as TypeConvExpr)) {
+            return SaveTypeConvExpr(tce)
         }
         if (let Some(te) <- (realExpr as ThrowExpr)) {
             return SaveThrowExpr(te)
@@ -979,6 +985,26 @@ private class FrontendCjoFlatBufferWriter {
         return builder.EndTable()
     }
 
+    // Mirrors ExprWriter.cpp:125-134 SaveExpression(JumpExpr): no operands; JumpInfo carries isBreak.
+    // ExprKind_JumpExpr is index 4 and ExprInfo_JumpInfo is union tag 10 (ModuleFormat.fbs:333-373, 412-432).
+    private func SaveJumpExpr(je: JumpExpr): FlatBufferOffset {
+        builder.StartTable(1)
+        builder.AddBool(0, je.isBreak)
+        let info = builder.EndTable()
+
+        let begin = PositionBytes(je.begin)
+        let end = PositionBytes(je.end)
+        let typeIndex = SaveExprType(je)
+        builder.StartTable(9)
+        builder.AddOffset(8, info)
+        builder.AddU8(7, 10u8)
+        builder.AddU32(5, typeIndex)
+        builder.AddStruct(2, end, 4)
+        builder.AddStruct(1, begin, 4)
+        builder.AddU16(0, 4u16)
+        return builder.EndTable()
+    }
+
     // Mirrors ExprWriter.cpp:551-577 SaveExpression(MatchExpr). MatchInfo carries matchMode
     // (ModuleFormat.fbs:480-482, union tag 13). With a selector, operands are selector followed by
     // MatchCase wrapper indexes; without a selector, operands are MatchCaseOther wrapper indexes.
@@ -1196,6 +1222,28 @@ private class FrontendCjoFlatBufferWriter {
         builder.AddStruct(1, begin, 4)
         // ExprKind_AssignExpr is index 13 of enum ExprKind (ModuleFormat.fbs:333-373).
         builder.AddU16(0, 13u16)
+        return builder.EndTable()
+    }
+
+    // Mirrors ExprWriter.cpp:334-345 SaveExpression(TypeConvExpr): operand 0 is the converted expr.
+    // ExprKind_TypeConvExpr is index 16 of enum ExprKind (ModuleFormat.fbs:333-373).
+    private func SaveTypeConvExpr(tce: TypeConvExpr): FlatBufferOffset {
+        if (let None <- tce.expr) {
+            throw IllegalArgumentException("TypeConvExpr without expr is not supported in faithful .cjo writer")
+        }
+        let operands = ArrayList<UInt32>()
+        operands.add(SaveExpr(tce.expr.getOrThrow()))
+        let operandsVec = builder.CreateVectorU32(operands)
+
+        let begin = PositionBytes(tce.begin)
+        let end = PositionBytes(tce.end)
+        let typeIndex = SaveExprType(tce)
+        builder.StartTable(9)
+        builder.AddU32(5, typeIndex)
+        builder.AddOffset(4, operandsVec)
+        builder.AddStruct(2, end, 4)
+        builder.AddStruct(1, begin, 4)
+        builder.AddU16(0, 16u16)
         return builder.EndTable()
     }
 
