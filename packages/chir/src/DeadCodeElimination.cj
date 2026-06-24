@@ -1,5 +1,7 @@
 package cangjie_compiler::chir
 
+import std.collection.*
+
 public class DeadCodeElimination {
     public init() {}
 
@@ -21,6 +23,51 @@ public class DeadCodeElimination {
             }
         }
         return removed
+    }
+
+    public func UnreachableBlockEliminationForPackage(pkg: Package): Unit {
+        for (fn in pkg.GetGlobalFuncsWithBody()) {
+            if (let Some(body) <- fn.GetBody()) {
+                UnreachableBlockEliminationForFunc(body)
+            }
+        }
+    }
+
+    public func UnreachableBlockEliminationForFunc(body: BlockGroup): Unit {
+        let entryBlock = body.GetEntryBlock() ?? return
+        let unreachable = body.GetBlocks()
+        let workList = ArrayList<Block>()
+        workList.add(entryBlock)
+        RemoveBlockById(unreachable, entryBlock.nodeId)
+
+        var workIdx: Int64 = 0
+        while (workIdx < workList.size) {
+            let block = workList[workIdx]
+            workIdx++
+
+            for (expr in block.GetExpressionsRef()) {
+                if (let Some(lambdaExpr) <- (expr as Lambda)) {
+                    if (let Some(lambdaBody) <- lambdaExpr.GetBody()) {
+                        UnreachableBlockEliminationForFunc(lambdaBody)
+                    }
+                }
+            }
+
+            let terminator = block.GetTerminator() ??
+                throw IllegalStateException("reachable CHIR block has no terminator in unreachable block elimination")
+            var succIdx: Int64 = 0
+            while (succIdx < terminator.GetNumOfSuccessor()) {
+                let successor = terminator.GetSuccessor(succIdx)
+                if (RemoveBlockById(unreachable, successor.nodeId)) {
+                    workList.add(successor)
+                }
+                succIdx++
+            }
+        }
+
+        for (block in unreachable) {
+            block.RemoveSelfFromBlockGroup()
+        }
     }
 
     private func RunOnBody(body: BlockGroup): Int64 {

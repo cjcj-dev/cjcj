@@ -6,6 +6,7 @@ import cangjie_compiler::chir.CHIRBuilder as ChirBuilder
 import cangjie_compiler::chir.CHIRPrinter as ChirCHIRPrinter
 import cangjie_compiler::chir.CHIRType
 import cangjie_compiler::chir.CHIRTypeCache
+import cangjie_compiler::chir.DeadCodeElimination
 import cangjie_compiler::chir.FaithfulAST2CHIR
 import cangjie_compiler::chir.FuncKind as ChirFuncKind
 import cangjie_compiler::chir.Function as ChirFunction
@@ -33,6 +34,8 @@ public func BuildRealCHIRForASTPackage(instance: CompilerInstance, pkg: RealASTP
         case Some(value) => value
         case None => return None
     }
+    DeadCodeElimination().UnreachableBlockEliminationForPackage(lowered)
+    // Generic instantiation clones already-lowered source bodies, so instantiated bodies inherit this cleanup.
     InstantiateGenericFunctionsForPackage(builder, lowered)
     let pluginResult = TryRunCHIRMetaTransforms(instance.metaTransformPluginBuilder, builder, lowered)
     if (!pluginResult.succeed) {
