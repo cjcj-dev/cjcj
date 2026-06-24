@@ -1376,14 +1376,39 @@ public open class BaseMangler {
     }
 
     public func MangleExportIds(pkg: Package): Unit {
-        let adapter = MangleAstAdapter()
-        let convertedPkg = adapter.ConvertPackage(pkg)
-        let ctx = PrepareContextForPackage(convertedPkg)
-        adapter.CollectLocalDecls(ctx, pkg)
+        let adapters = HashMap<String, MangleAstAdapter>()
+        let preparedPackages = HashSet<String>()
+        let preparePackage = { astPkg: Package =>
+            let pkgName = ManglerContext.ReduceUnitTestPackageName(astPkg.fullPackageName)
+            if (!preparedPackages.contains(pkgName)) {
+                let adapter = MangleAstAdapter()
+                adapters[pkgName] = adapter
+                let convertedPkg = adapter.ConvertPackage(astPkg)
+                let ctx = PrepareContextForPackage(convertedPkg)
+                adapter.CollectLocalDecls(ctx, astPkg)
+                preparedPackages.add(pkgName)
+            }
+        }
+        preparePackage(pkg)
         exportIdMode = true
         let walker = Walker(pkg, visitPre: { node: Node =>
             if (let Some(decl) <- (node as Decl)) {
                 if (Ty.IsTyCorrect(decl.GetTy()) && decl.TestAttr(Attribute.GLOBAL)) {
+                    if (let Some(file) <- decl.curFile) {
+                        if (let Some(astPkg) <- file.curPackage) {
+                            preparePackage(astPkg)
+                        }
+                    }
+                    let pkgName = ManglerContext.ReduceUnitTestPackageName(if (!decl.fullPackageName.isEmpty()) {
+                        decl.fullPackageName
+                    } else {
+                        pkg.fullPackageName
+                    })
+                    let adapter = if (let Some(value) <- adapters.get(pkgName)) {
+                        value
+                    } else {
+                        throw IllegalArgumentException("Mangler context not prepared for package: " + pkgName)
+                    }
                     let convertedDecl = adapter.ConvertDecl(decl)
                     convertedDecl.exportId = MangleExportId(convertedDecl)
                 }
@@ -1391,7 +1416,11 @@ public open class BaseMangler {
             VisitAction.WALK_CHILDREN
         })
         walker.Walk()
-        adapter.CopyExportIdsToAst()
+        for (pkgName in adapters.keys()) {
+            if (let Some(adapter) <- adapters.get(pkgName)) {
+                adapter.CopyExportIdsToAst()
+            }
+        }
     }
 
     public func MangleExportId(decl: MangleDecl): String {
