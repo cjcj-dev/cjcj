@@ -1332,6 +1332,23 @@ public class TypeChecker {
         return funcTy
     }
 
+    private func PreparePropDeclSignature(ctx: ASTContext, pd: PropDecl): Ty {
+        SynthesizeTypeNode(ctx, pd.typeNode)
+        if (let Some(typeNode) <- pd.typeNode) {
+            if (let Some(propTy) <- typeNode.GetTy()) {
+                pd.SetTy(propTy)
+            }
+        }
+        AddReturnTypeForPropMemDecl(pd)
+        for (getter in pd.getters) {
+            PrepareDeclSignature(ctx, getter)
+        }
+        for (setter in pd.setters) {
+            PrepareDeclSignature(ctx, setter)
+        }
+        return pd.GetTy() ?? TypeManager.GetInvalidTy()
+    }
+
     private func PrepareDeclSignature(ctx: ASTContext, decl: Decl): Unit {
         if (decl.TestAttr(Attribute.ENUM_CONSTRUCTOR)) {
             if (let Some(outer) <- decl.outerDecl) {
@@ -1340,6 +1357,10 @@ public class TypeChecker {
                     return
                 }
             }
+        }
+        if (let Some(propDecl) <- (decl as PropDecl)) {
+            let _ = PreparePropDeclSignature(ctx, propDecl)
+            return
         }
         if (let Some(vd) <- (decl as VarDeclAbstract)) {
             SynthesizeTypeNode(ctx, vd.typeNode)
@@ -1457,6 +1478,25 @@ public class TypeChecker {
         return fp.GetTy() ?? TypeManager.GetInvalidTy()
     }
 
+    private func SynthesizePropDecl(ctx: ASTContext, pd: PropDecl): Ty {
+        if (pd.TestAttr(Attribute.IS_CHECK_VISITED)) {
+            if (Ty.IsInitialTy(pd.GetTy())) {
+                pd.SetTy(TypeManager.GetInvalidTy())
+            }
+            return pd.GetTy() ?? TypeManager.GetInvalidTy()
+        }
+        pd.EnableAttr(Attribute.IS_CHECK_VISITED)
+        let propTy = PreparePropDeclSignature(ctx, pd)
+        for (getter in pd.getters) {
+            let _ = SynthesizeDecl(ctx, getter)
+        }
+        for (setter in pd.setters) {
+            let _ = SynthesizeDecl(ctx, setter)
+        }
+        BindLocalDeclIfNeeded(ctx, pd)
+        return propTy
+    }
+
     private func SynthesizeDecl(ctx: ASTContext, decl: Decl): Ty {
         if (decl.TestAttr(Attribute.ENUM_CONSTRUCTOR)) {
             return TypeCheckDeclSetEnumElementTy(impl.typeManager, decl, diag: impl.diag)
@@ -1466,6 +1506,9 @@ public class TypeChecker {
         }
         if (let Some(vpd) <- (decl as VarWithPatternDecl)) {
             return SynthesizeVarWithPatternDecl(ctx, vpd)
+        }
+        if (let Some(propDecl) <- (decl as PropDecl)) {
+            return SynthesizePropDecl(ctx, propDecl)
         }
         if (let Some(vd) <- (decl as VarDeclAbstract)) {
             if (vd.TestAttr(Attribute.IS_CHECK_VISITED)) {

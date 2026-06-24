@@ -595,6 +595,15 @@ public class FaithfulAST2CHIR {
             CollectFuncDecl(funcDecl)
             return
         }
+        if (let Some(propDecl) <- (decl as AstPropDecl)) {
+            for (getter in propDecl.getters) {
+                CollectFuncDecl(getter)
+            }
+            for (setter in propDecl.setters) {
+                CollectFuncDecl(setter)
+            }
+            return
+        }
         if (let Some(varDecl) <- (decl as AstVarDecl)) {
             if (varDecl.TestAttr(AstAttribute.STATIC)) {
                 CollectDeclToList(varDecl, globalAndStaticVars, globalAndStaticVarSet)

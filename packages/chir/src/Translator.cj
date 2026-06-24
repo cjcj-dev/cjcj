@@ -1017,6 +1017,9 @@ public class Translator {
             let _ = Translator.TranslateASTNode(rightExpr, this)
             return None
         }
+        if (TranslatePropertySetterAssign(expr, leftExpr, rightExpr)) {
+            return None
+        }
         if (let Some(subscriptExpr) <- (leftExpr as AstSubscriptExpr)) {
             if (!subscriptExpr.isTupleAccess) {
                 if (subscriptExpr.IsVArrayAccess()) {
@@ -4719,6 +4722,44 @@ public class Translator {
         }
         StoreToLeftValue(leftValueInfo, compoundValue)
         return None
+    }
+
+    private func TranslatePropertySetterAssign(assign: AstAssignExpr, leftExpr: AstExpr, rightExpr: AstExpr): Bool {
+        if (IsCompoundAssignOp(assign.op)) {
+            return false
+        }
+        let target = leftExpr.GetTarget() ?? return false
+        let propDecl = (target as AstPropDecl) ?? return false
+        if (!propDecl.isVar || propDecl.setters.isEmpty()) {
+            return false
+        }
+        let setter = propDecl.setters[0]
+        let callee = GetSymbolTable(setter)
+        let args = ArrayList<Value>()
+        var thisTy: Option<Type> = None
+        if (let Some(memberAccess) <- (leftExpr as AstMemberAccess)) {
+            let baseExpr = RequireExpr(memberAccess.baseExpr, "property setter base")
+            let baseInfo = TranslateExprAsLeftValue(baseExpr)
+            let baseTy = chirTy.TranslateType(RequireAstTy(baseExpr))
+            let thisObj = TranslatePropertySetterThisObject(setter, callee, baseInfo, baseTy)
+            thisTy = thisObj.GetType()
+            args.add(thisObj)
+        }
+        var rhsValue = Translator.TranslateASTNode(rightExpr, this) ??
+            throw IllegalStateException("faithful AST2CHIR property setter rhs produced no value")
+        let expectedParamTys = FuncDeclParamTypes(setter)
+        if (!expectedParamTys.isEmpty() && !expectedParamTys[0].IsGeneric()) {
+            rhsValue = CoerceValueForExpectedType(rhsValue, expectedParamTys[0])
+        }
+        args.add(rhsValue)
+        let _ = CreateApplyMaybeWithException(builder.context.GetUnitTy(), callee,
+            FuncCallContext(args: args, thisType: thisTy))
+        return true
+    }
+
+    private func TranslatePropertySetterThisObject(funcDecl: AstFuncDecl, callee: Value,
+        baseInfo: FaithfulLeftValueInfo, baseTy: Type): Value {
+        return TranslateSubscriptSetterThisObject(funcDecl, callee, baseInfo, baseTy)
     }
 
     private func TranslateSubscriptSetterAssign(assign: AstAssignExpr, subscriptExpr: AstSubscriptExpr,

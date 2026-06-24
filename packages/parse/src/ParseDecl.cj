@@ -1324,6 +1324,9 @@ extend ParserImpl {
         let ret = PropDecl()
         ApplyModifiersAndAnnotations(ret, modifiers, annos)
         EnableModifierAttrs(ret, CheckDeclModifiers(modifiers, scopeKind, DefKind.PROPERTY))
+        if (ret.TestAttr(Attribute.MUT)) {
+            ret.isVar = true
+        }
         let key = Expect(TokenKind.PROP, "expected 'prop'")
         ret.keywordPos = key.Begin()
         ret.begin = if (ret.begin.IsZero()) { key.Begin() } else { ret.begin }
@@ -1345,6 +1348,7 @@ extend ParserImpl {
                     accessor.identifier = ParseIdentifierFromToken(Peek())
                     Next()
                     accessor.funcBody = ParseFuncBody(if (accessorName == "get") { ScopeKind.PROP_MEMBER_GETTER_BODY } else { ScopeKind.PROP_MEMBER_SETTER_BODY })
+                    accessor.outerDecl = ret
                     accessor.propDecl = ret
                     if (accessorName == "get") {
                         accessor.isGetter = true
