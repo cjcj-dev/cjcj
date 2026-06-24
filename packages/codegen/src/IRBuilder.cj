@@ -42,6 +42,8 @@ private let GCWRITE_GENERIC_INTRINSIC_NAME: String = "llvm.cj.gcwrite.generic"
 private let MALLOC_OBJECT_INTRINSIC_NAME: String = "llvm.cj.malloc.object"
 private let CJ_MEMSET_INTRINSIC_NAME: String = "llvm.cj.memset"
 private let GCWRITE_REF_INTRINSIC_NAME: String = "llvm.cj.gcwrite.ref"
+private let GCREAD_STATIC_REF_INTRINSIC_NAME: String = "llvm.cj.gcread.static.ref"
+private let GCWRITE_STATIC_REF_INTRINSIC_NAME: String = "llvm.cj.gcwrite.static.ref"
 private let NEW_CJ_THREAD_FUNC_NAME: String = PREFIX_OF_BACKEND_SYMS + "NewCJThread"
 private let NEW_CJ_THREAD_NO_RETURN_FUNC_NAME: String = PREFIX_OF_BACKEND_SYMS + "NewCJThreadNoReturn"
 
@@ -172,6 +174,10 @@ public class IRBuilder2 <: Resource {
 
     public func CreateStore(value: LLVMValueRef, dest: CGValue): LLVMValueRef {
         return CreateStore(value, dest.GetRawValue())
+    }
+
+    public func IsGlobalVariableBasePtr(value: LLVMValueRef): Bool {
+        return !value.isNull() && !unsafe { LLVMIsAGlobalVariable(value) }.isNull()
     }
 
     public func StoreGenericSRetReturnValue(value: LLVMValueRef, sretArg: LLVMValueRef, retTy: Type): LLVMValueRef {
@@ -1300,6 +1306,13 @@ public class IRBuilder2 <: Resource {
         return CreateIntrinsicCall("llvm.cj.gcwrite.ref", ArrayList<LLVMTypeRef>(), args)
     }
 
+    public func CallGCWriteStaticRef(value: LLVMValueRef, place: LLVMValueRef): LLVMValueRef {
+        let args = ArrayList<LLVMValueRef>()
+        args.add(value)
+        args.add(place)
+        return CreateIntrinsicCall(GCWRITE_STATIC_REF_INTRINSIC_NAME, ArrayList<LLVMTypeRef>(), args)
+    }
+
     public func CallGCWriteGeneric(baseObject: LLVMValueRef, dest: LLVMValueRef, source: LLVMValueRef,
         size: LLVMValueRef): LLVMValueRef {
         let i8Type = unsafe { LLVMInt8TypeInContext(GetLLVMContext().raw) }
@@ -1319,6 +1332,12 @@ public class IRBuilder2 <: Resource {
         args.add(CreatePointerCast(baseObject, refTy, name: "gcread.ref.base"))
         args.add(CreatePointerCast(place, refPlaceTy, name: "gcread.ref.place"))
         return CreateIntrinsicCall("llvm.cj.gcread.ref", ArrayList<LLVMTypeRef>(), args, name: "gcread.ref")
+    }
+
+    public func CallGCReadStaticRef(place: LLVMValueRef): LLVMValueRef {
+        let args = ArrayList<LLVMValueRef>()
+        args.add(place)
+        return CreateIntrinsicCall(GCREAD_STATIC_REF_INTRINSIC_NAME, ArrayList<LLVMTypeRef>(), args)
     }
 
     public func CallGCReadGeneric(dest: LLVMValueRef, baseObject: LLVMValueRef, source: LLVMValueRef,
