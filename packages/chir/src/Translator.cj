@@ -739,6 +739,8 @@ public class Translator {
             StoreReturnValueIfNeeded(CurrentFunction(), value)
             UpdateDelayExitSignalForReturnIfNeeded()
             builder.CreateExit(None, CurrentBlock())
+            let group = RequireParentBlockGroup(CurrentBlock(), "return continuation")
+            currentBlock = builder.CreateBlock(group)
             return None
         }
         if (currentLambda.isSome()) {
@@ -747,6 +749,8 @@ public class Translator {
         }
         UpdateDelayExitSignalForReturnIfNeeded()
         builder.CreateExit(None, CurrentBlock())
+        let group = RequireParentBlockGroup(CurrentBlock(), "return continuation")
+        currentBlock = builder.CreateBlock(group)
         return None
     }
 
