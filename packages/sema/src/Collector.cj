@@ -383,6 +383,19 @@ public class Collector {
         }
     }
 
+    private func AssignVarWithPatternDecl(ctx: ASTContext, vpd: VarWithPatternDecl): Unit {
+        SetCurrentScope(ctx, vpd)
+        if (let Some(pattern) <- vpd.irrefutablePattern) {
+            AssignNode(ctx, pattern)
+        }
+        if (let Some(typeNode) <- vpd.typeNode) {
+            AssignNode(ctx, typeNode)
+        }
+        if (let Some(initializer) <- vpd.initializer) {
+            AssignNode(ctx, initializer)
+        }
+    }
+
     private func AssignFuncParam(ctx: ASTContext, fp: FuncParam): Unit {
         SetCurrentScope(ctx, fp)
         if (let Some(typeNode) <- fp.typeNode) {
@@ -618,6 +631,10 @@ public class Collector {
         }
         if (let Some(funcParam) <- (node as FuncParam)) {
             AssignFuncParam(ctx, funcParam)
+            return true
+        }
+        if (let Some(varWithPattern) <- (node as VarWithPatternDecl)) {
+            AssignVarWithPatternDecl(ctx, varWithPattern)
             return true
         }
         if (let Some(varDecl) <- (node as VarDeclAbstract)) {

@@ -2511,6 +2511,7 @@ public class TypeChecker {
             if (let Some(baseExpr) <- memberAccess.baseExpr) {
                 SetIsNotAlone(baseExpr)
                 let _ = Synthesize(ctx, baseExpr)
+                ResolvePrimitiveStaticMemberAccess(ctx, memberAccess)
             }
         } else if (let Some(refExpr) <- (nameRef as RefExpr)) {
             if (refExpr.isThis || refExpr.isSuper) {
@@ -2527,6 +2528,37 @@ public class TypeChecker {
             addImportedDeclAndDependencies(ctx, target2)
         }
         return ty
+    }
+
+    private func ResolvePrimitiveStaticMemberAccess(ctx: ASTContext, memberAccess: MemberAccess): Unit {
+        if ((let Some(_) <- memberAccess.target) || !memberAccess.targets.isEmpty()) {
+            return
+        }
+        if (let None <- memberAccess.baseExpr) {
+            return
+        }
+        let baseExpr = memberAccess.baseExpr.getOrThrow()
+        if (!(baseExpr is PrimitiveTypeExpr)) {
+            return
+        }
+        if (let None <- memberAccess.curFile) {
+            return
+        }
+        let file = memberAccess.curFile.getOrThrow()
+        memberAccess.SetTy(TypeManager.GetInvalidTy())
+        let targets = ExtendFieldLookup(impl.typeManager, file, baseExpr.GetTy(), memberAccess.field.Val())
+        if (let Some(diagValue) <- impl.diag) {
+            if (!TypeCheckReferenceFilterAndCheckTargetsOfNameAccess(
+                diagValue, impl.typeManager, ctx, memberAccess, targets)) {
+                return
+            }
+        }
+        if (targets.isEmpty()) {
+            return
+        }
+        let target = GetAccessibleDecl(memberAccess, targets) ?? targets[0]
+        ReplaceTarget(memberAccess, Some(target))
+        AddFuncTargetsForMemberAccess(memberAccess, targets)
     }
 
     private func SynthesizeDesugarIfNeeded(ctx: ASTContext, expr: Expr): Unit {
