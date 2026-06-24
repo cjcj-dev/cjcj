@@ -177,6 +177,7 @@ private class FrontendCjoFlatBufferWriter {
     }
 
     private func SaveTopLevelDecls(pkg: Package): Unit {
+        mangler.MangleExportIds(pkg)
         for (file in pkg.files) {
             for (decl in file.decls) {
                 SaveTopLevelDeclIfNeeded(decl)
