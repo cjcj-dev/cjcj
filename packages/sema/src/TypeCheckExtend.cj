@@ -320,9 +320,7 @@ public func TypeCheckExtendUpdateExtendMap(tm: TypeManager, extends: ArrayList<E
         if (extendTy.IsBuiltin()) {
             extendTy = tm.GetTyForExtendMap(extendTy)
             if (let Some(entry) <- TypeCheckExtendFindBuiltinEntry(tm, extendTy)) {
-                if (!TypeCheckExtendContainsExtend(entry.extends, extendDecl)) {
-                    entry.extends.add(extendDecl)
-                }
+                entry.extends.add(extendDecl)
             } else {
                 let entry = TyExtendsEntry(extendTy)
                 entry.extends.add(extendDecl)
@@ -333,9 +331,7 @@ public func TypeCheckExtendUpdateExtendMap(tm: TypeManager, extends: ArrayList<E
         if (let Some(extendDeclPtr) <- Ty.GetDeclPtrOfTy(Some(extendTy))) {
             if (let Some(inheritableDecl) <- (extendDeclPtr as InheritableDecl)) {
                 if (let Some(entry) <- TypeCheckExtendFindDeclEntry(tm, inheritableDecl)) {
-                    if (!TypeCheckExtendContainsExtend(entry.extends, extendDecl)) {
-                        entry.extends.add(extendDecl)
-                    }
+                    entry.extends.add(extendDecl)
                 } else {
                     let entry = DeclExtendsEntry(inheritableDecl)
                     entry.extends.add(extendDecl)
