@@ -1992,6 +1992,7 @@ public class TypeChecker {
 
     private func CheckCallArgFromContext(ctx: ASTContext, target: Ty, arg: FuncArg): Bool {
         if (let Some(expr) <- arg.expr) {
+            typeCheckExprClearKeepTargets(expr)
             let ok = Check(ctx, target, expr)
             if (ok) {
                 arg.SetTy(expr.GetTy() ?? target)
@@ -2661,6 +2662,9 @@ public class TypeChecker {
             let pattern = tryExpr.catchPatterns[idx]
             SynthesizeTryCatchPatternTypes(ctx, pattern)
             CollectPatternBinding(pattern, boundDecls)
+            for (decl in boundDecls) {
+                BindLocalDeclIfAbsent(ctx, decl)
+            }
             if (idx < tryExpr.catchBlocks.size) {
                 let _ = SynthesizeBlock(ctx, tryExpr.catchBlocks[idx])
             }
