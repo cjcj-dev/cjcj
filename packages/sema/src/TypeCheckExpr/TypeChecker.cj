@@ -1825,6 +1825,7 @@ public class TypeChecker {
         if (block.body.isEmpty()) {
             return ChkBlock(impl.typeManager, target, block)
         }
+        MarkUnsafeBlockChildren(block)
         if (block.body.size > 1) {
             for (idx in 0..block.body.size - 1) {
                 let _ = SynthesizeNode(ctx, block.body[idx])
