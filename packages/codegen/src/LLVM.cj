@@ -262,6 +262,7 @@ foreign {
     func LLVMTypeOf(value: LLVMValueRef): LLVMTypeRef
     func LLVMGetTypeContext(ty: LLVMTypeRef): LLVMContextRef
     func LLVMGetValueContext(value: LLVMValueRef): LLVMContextRef
+    func LLVMIsAGlobalVariable(value: LLVMValueRef): LLVMValueRef
     func LLVMIsAFunction(value: LLVMValueRef): LLVMValueRef
     func LLVMIsAArgument(value: LLVMValueRef): LLVMValueRef
     func LLVMIsAInstruction(value: LLVMValueRef): LLVMValueRef

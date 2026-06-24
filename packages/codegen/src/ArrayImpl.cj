@@ -26,6 +26,9 @@ public func GenerateLoad(irBuilder: IRBuilder2, chirExpr: Expression): LLVMValue
             if (let Some(loaded) <- TryLoadClassFieldWithReadBarrier(irBuilder, chirExpr, addr, pointerElementType)) {
                 return loaded
             }
+            if (let Some(staticRead) <- TryGenerateGCStaticReadForLoad(irBuilder, pointerElementType, addr)) {
+                return staticRead
+            }
             return irBuilder.CreateLoad(pointerElementType.GetLLVMType(), addr.GetRawValue(), name: "load")
         }
     }
@@ -113,6 +116,14 @@ private func TryGenerateGCReadForLoad(irBuilder: IRBuilder2, chirExpr: Expressio
         }
     }
     return None
+}
+
+private func TryGenerateGCStaticReadForLoad(irBuilder: IRBuilder2, elementType: CGType,
+    addr: CGValue): Option<LLVMValueRef> {
+    if (!irBuilder.IsGlobalVariableBasePtr(addr.GetRawValue()) || !IsBareGCRefLLVMType(elementType.GetLLVMType())) {
+        return None
+    }
+    return Some(irBuilder.CallGCReadStaticRef(addr.GetRawValue()))
 }
 
 private func IsManagedObjectElementBase(ty: Type): Bool {
@@ -282,7 +293,11 @@ public func GenerateStore(irBuilder: IRBuilder2, chirExpr: Expression): LLVMValu
     if (let Some(genericStore) <- irBuilder.TryCreateGenericStore(value, addr)) {
         return genericStore
     }
-    return irBuilder.CreateStore(StoreValueForAddress(irBuilder, value, addr), addr.GetRawValue())
+    let storedValue = StoreValueForAddress(irBuilder, value, addr)
+    if (ShouldUseGCStaticWriteBarrier(irBuilder, addr)) {
+        return irBuilder.CallGCWriteStaticRef(storedValue, addr.GetRawValue())
+    }
+    return irBuilder.CreateStore(storedValue, addr.GetRawValue())
 }
 
 private func IsPointerLLVMValue(value: LLVMValueRef): Bool {
@@ -292,6 +307,19 @@ private func IsPointerLLVMValue(value: LLVMValueRef): Bool {
 
 private func IsPointerLLVMType(ty: LLVMTypeRef): Bool {
     return !ty.isNull() && unsafe { LLVMGetTypeKind(ty) } == 12
+}
+
+private func IsBareGCRefLLVMType(ty: LLVMTypeRef): Bool {
+    return IsPointerLLVMType(ty) && unsafe { LLVMGetPointerAddressSpace(ty) } == 1u32
+}
+
+private func ShouldUseGCStaticWriteBarrier(irBuilder: IRBuilder2, addr: CGValue): Bool {
+    if (!irBuilder.IsGlobalVariableBasePtr(addr.GetRawValue())) {
+        return false
+    }
+    let addrCGType = addr.GetCGType() ?? return false
+    let destCGType = addrCGType.GetPointerElementType() ?? return false
+    return IsBareGCRefLLVMType(destCGType.GetLLVMType())
 }
 
 private func StoreValueForAddress(irBuilder: IRBuilder2, value: CGValue, addr: CGValue): LLVMValueRef {
