@@ -63,7 +63,7 @@ private func GenerateApply(irBuilder: IRBuilder2, callee: Value, args: ArrayList
     for (arg in args) {
         argValues.add(irBuilder.GetCGModule().MaterializeValue(irBuilder, arg))
     }
-    let methodTypeInfoArg = BuildApplyMethodTypeInfoArg(irBuilder, thisType, argValues)
+    let methodTypeInfoArg = BuildApplyMethodTypeInfoArg(irBuilder, callee, thisType, argValues)
     if (let Some(instFuncTy) <- callType) {
         let typeInfo = TypeExtraInfo()
         typeInfo.isMethod = isMethodType
@@ -129,7 +129,7 @@ private func ImportedGenericStructCtorNeedsWithoutTI(fn: Function): Bool {
     return false
 }
 
-private func BuildApplyMethodTypeInfoArg(irBuilder: IRBuilder2, thisType: Option<Type>,
+private func BuildApplyMethodTypeInfoArg(irBuilder: IRBuilder2, callee: Value, thisType: Option<Type>,
     argValues: ArrayList<CGValue>): Option<LLVMValueRef> {
     if (let Some(ty) <- thisType) {
         if (IsAutoEnvType(ty) && !argValues.isEmpty()) {
@@ -138,6 +138,13 @@ private func BuildApplyMethodTypeInfoArg(irBuilder: IRBuilder2, thisType: Option
         let typeInfo = CGType.GetOrCreate(irBuilder.GetCGModule(), ty.StripAllRefs()).GetOrCreateTypeInfo()
         let typeInfoPtrType = CGType.GetOrCreateTypeInfoPtrType(irBuilder.GetLLVMContext())
         return Some(irBuilder.CreateBitCast(typeInfo, typeInfoPtrType, name: "call.this.ti"))
+    }
+    if (let Some(fn) <- (callee as Function)) {
+        if (let Some(parentTy) <- fn.GetParentCustomTypeOrExtendedType()) {
+            let typeInfo = irBuilder.CreateTypeInfo(parentTy)
+            let typeInfoPtrType = CGType.GetOrCreateTypeInfoPtrType(irBuilder.GetLLVMContext())
+            return Some(irBuilder.CreateBitCast(typeInfo, typeInfoPtrType, name: "call.outer.ti"))
+        }
     }
     return None
 }
