@@ -186,14 +186,66 @@ private func propAccessibleForAccess(propDecl: PropDecl, isSetter: Bool): Bool {
     return !propDecl.getters.isEmpty()
 }
 
-private func extendAccessibleForLookup(info: LookupInfo, extendDecl: ExtendDecl): Bool {
+private func extendAccessibleForLookup(typeManager: TypeManager, info: LookupInfo, extendDecl: ExtendDecl): Bool {
     if (let Some(file) <- info.file) {
         if (let Some(pkg) <- file.curPackage) {
             if (extendDecl.fullPackageName == pkg.fullPackageName) {
                 return true
             }
-            let relation = ModulesGetPackageRelation(pkg.fullPackageName, extendDecl.fullPackageName)
-            return nodeVisibleInRelation(extendDecl, relation)
+            let allUpperBoundsImported = extendAllUpperBoundsImported(typeManager, info, extendDecl)
+            var hasAnyInterfacesImported = false
+            var extendedTypeAccessible = false
+            let extendedDecl = Ty.GetInheritableDeclPtrOfTy(extendDecl.GetTy())
+            let inSamePackage = if (let Some(realExtendedDecl) <- extendedDecl) {
+                extendDecl.fullPackageName == realExtendedDecl.fullPackageName
+            } else {
+                extendDecl.fullPackageName == "std.core"
+            }
+            if (!inSamePackage) {
+                for (inheritedType in extendDecl.inheritedTypes) {
+                    if (typeAccessibleForLookup(typeManager, info, inheritedType)) {
+                        hasAnyInterfacesImported = true
+                    }
+                }
+                if (let Some(extendedType) <- extendDecl.extendedType) {
+                    extendedTypeAccessible = typeAccessibleForLookup(typeManager, info, extendedType)
+                }
+            } else {
+                hasAnyInterfacesImported = true
+                if (let Some(realExtendedDecl) <- extendedDecl) {
+                    let relation = ModulesGetPackageRelation(pkg.fullPackageName, realExtendedDecl.fullPackageName)
+                    extendedTypeAccessible = nodeVisibleInRelation(realExtendedDecl, relation)
+                } else {
+                    extendedTypeAccessible = true
+                }
+            }
+            return extendDecl.IsExportedDecl() && allUpperBoundsImported && hasAnyInterfacesImported &&
+                extendedTypeAccessible
+        }
+    }
+    return true
+}
+
+private func typeAccessibleForLookup(typeManager: TypeManager, info: LookupInfo, typeNode: Type): Bool {
+    if (let Some(ty) <- typeNode.GetTy()) {
+        if (let Some(decl) <- Ty.GetDeclPtrOfTy(Some(ty))) {
+            if (let Some(file) <- info.file) {
+                return typeManager.IsDeclAccessible(file, decl)
+            }
+        }
+    }
+    return true
+}
+
+private func extendAllUpperBoundsImported(typeManager: TypeManager, info: LookupInfo, extendDecl: ExtendDecl): Bool {
+    if (let None <- extendDecl.generic) {
+        return true
+    }
+    for (constraint in extendDecl.generic.getOrThrow().genericConstraints) {
+        for (upperBound in constraint.upperBounds) {
+            if (!typeAccessibleForLookup(typeManager, info, upperBound)) {
+                return false
+            }
         }
     }
     return true
@@ -305,7 +357,7 @@ private func fieldLookupExtend(typeManager: TypeManager, ty: Ty, fieldName: Stri
     let orderedExtends = sortedDecls(extendDecls)
     for (decl in orderedExtends) {
         if (let Some(extendDecl) <- (decl as ExtendDecl)) {
-            if (!extendAccessibleForLookup(info, extendDecl)) {
+            if (!extendAccessibleForLookup(typeManager, info, extendDecl)) {
                 continue
             }
             for (member in extendDecl.members) {
@@ -317,7 +369,7 @@ private func fieldLookupExtend(typeManager: TypeManager, ty: Ty, fieldName: Stri
     }
     for (decl in orderedExtends) {
         if (let Some(extendDecl) <- (decl as ExtendDecl)) {
-            if (!extendAccessibleForLookup(info, extendDecl)) {
+            if (!extendAccessibleForLookup(typeManager, info, extendDecl)) {
                 continue
             }
             for (inheritedType in extendDecl.inheritedTypes) {
