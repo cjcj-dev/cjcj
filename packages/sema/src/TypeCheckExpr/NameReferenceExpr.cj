@@ -554,6 +554,11 @@ public func SynExprShallow(typeManager: TypeManager, expr: Expr): Ty {
             return desugarTy
         }
     }
+    if (let Some(value) <- (expr as PrimitiveTypeExpr)) {
+        let ty = TypeManager.GetPrimitiveTy(value.typeKind)
+        expr.SetTy(ty)
+        return ty
+    }
     if (let Some(value) <- (expr as LitConstExpr)) { return SynLitConstExpr(value) }
     if (let Some(value) <- (expr as ParenExpr)) { return SynParenExpr(typeManager, value) }
     if (let Some(value) <- (expr as TupleLit)) { return SynTupleLit(typeManager, value) }
