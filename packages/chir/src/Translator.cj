@@ -1526,11 +1526,7 @@ public class Translator {
 
         loopTargetStack.add(FaithfulLoopTarget(conditionBlock, endBlock))
         currentBlock = conditionBlock
-        let condValue = Translator.TranslateASTNode(RequireExpr(expr.condExpr, "while condition"), this) ??
-            throw IllegalStateException("faithful AST2CHIR while condition produced no value")
-        if (CurrentBlock().GetTerminator().isNone()) {
-            builder.CreateBranch(condValue, bodyBlock, endBlock, CurrentBlock())
-        }
+        TranslateIfCondition(RequireExpr(expr.condExpr, "while condition"), bodyBlock, endBlock)
 
         currentBlock = bodyBlock
         let _ = Translator.TranslateASTNode(RequireBlock(expr.body, "while body"), this)

@@ -2480,12 +2480,14 @@ public class TypeChecker {
             return
         }
         if (let Some(whileExpr) <- (loopExpr as WhileExpr)) {
+            let conditionBindings = ArrayList<Decl>()
             if (let Some(condExpr) <- whileExpr.condExpr) {
-                let _ = Synthesize(ctx, condExpr)
+                let _ = CheckConditionWithBindings(ctx, condExpr, conditionBindings, false)
             }
             if (let Some(body2) <- whileExpr.body) {
                 let _ = SynthesizeBlock(ctx, body2)
             }
+            RemovePatternBindings(ctx, conditionBindings)
             return
         }
         if (let Some(doWhileExpr) <- (loopExpr as DoWhileExpr)) {
