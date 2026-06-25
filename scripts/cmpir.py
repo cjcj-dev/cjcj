@@ -217,7 +217,21 @@ def main():
             diff = list(
                 difflib.unified_diff(ref, slf, fromfile="reference", tofile="selfhost", lineterm="")
             )
-            if diff:
+            if not ref and not slf:
+                # Both sides captured ZERO IR lines. This is NOT a real identity — it means no
+                # bitcode was produced (a compile error swallowed by --save-temps) or the -g filter
+                # matched no function on either side. Report it loudly so it is never mistaken for a
+                # byte-identical result.
+                print(f"!! NO IR CAPTURED on either side (ref={len(ref)} self={len(slf)} lines). "
+                      f"This is NOT 'identical' — the compile likely failed or the -g filter "
+                      f"'{args.filter}' matched nothing. Re-run without -g or check the build.")
+            elif not ref or not slf:
+                side = "reference" if not ref else "selfhost"
+                print(f"!! IR captured on only ONE side ({side} is EMPTY: ref={len(ref)} "
+                      f"self={len(slf)} lines) — filter '{args.filter}' matched nothing there, "
+                      f"or that compiler failed. NOT identical.")
+                print("\n".join(diff))
+            elif diff:
                 print("\n".join(diff))
             else:
                 print("(identical after normalization)")
