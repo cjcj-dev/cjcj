@@ -177,12 +177,19 @@ public class CGModule {
         for (genericTy in fn.GetGenericTypeParams()) {
             if (let Some(paramIdx) <- functionType.GetGenericParamIndex(genericTy)) {
                 let typeInfoParam = unsafe { LLVMGetParam(rawFunction, UInt32(paramIdx)) }
-                cgFunc.genericParamsMap[genericTy.ToString()] = { _: IRBuilder2 => typeInfoParam }
+                AddGenericParamMapping(cgFunc, genericTy, { _: IRBuilder2 => typeInfoParam })
             }
         }
         if (let Some(outerInfoIndex) <- functionType.GetMethodTypeInfoIndex()) {
             AddOuterGenericParamMappings(rawFunction, cgFunc, fn, outerInfoIndex)
         }
+    }
+
+    private func AddGenericParamMapping(cgFunc: CGFunction, genericTy: GenericType,
+        provider: (IRBuilder2) -> LLVMValueRef): Unit {
+        cgFunc.genericParamsMap[genericTy.ToString()] = provider
+        cgFunc.genericParamsMap[genericTy.GetIdentifier()] = provider
+        cgFunc.genericParamsMap[genericTy.GetSrcCodeIdentifier()] = provider
     }
 
     private func AddOuterGenericParamMappings(rawFunction: LLVMValueRef, cgFunc: CGFunction, fn: Function,
@@ -201,9 +208,9 @@ public class CGModule {
         var idx: Int64 = 0
         for (genericTy in parentDef.GetGenericTypeParams()) {
             let capturedIdx = idx
-            cgFunc.genericParamsMap[genericTy.ToString()] = {
+            AddGenericParamMapping(cgFunc, genericTy, {
                 irBuilder: IRBuilder2 => irBuilder.GetTypeInfoFromTypeInfoArgs(outerTypeInfo, capturedIdx)
-            }
+            })
             idx++
         }
     }
@@ -219,14 +226,14 @@ public class CGModule {
                     genericTy.ToString())
             }
             let capturedPath = CopyTypeInfoPath(path)
-            cgFunc.genericParamsMap[genericTy.ToString()] = {
+            AddGenericParamMapping(cgFunc, genericTy, {
                 irBuilder: IRBuilder2 =>
                 if (capturedPath.isEmpty()) {
                     outerTypeInfo
                 } else {
                     LoadTypeInfoWithPath(irBuilder, outerTypeInfo, capturedPath)
                 }
-            }
+            })
         }
     }
 
