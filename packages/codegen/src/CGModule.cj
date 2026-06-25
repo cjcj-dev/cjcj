@@ -3,8 +3,10 @@ package cangjie_compiler::codegen
 import std.collection.*
 import cangjie_compiler::chir.Attribute
 import cangjie_compiler::chir.Block
+import cangjie_compiler::chir.ExtendDef
 import cangjie_compiler::chir.FuncType
 import cangjie_compiler::chir.Function
+import cangjie_compiler::chir.GenericType
 import cangjie_compiler::chir.GlobalVar
 import cangjie_compiler::chir.LocalVar
 import cangjie_compiler::chir.Type
@@ -192,6 +194,10 @@ public class CGModule {
                 cgFunc.genericParamsMap[parentTy.ToString()] = { _: IRBuilder2 => outerTypeInfo }
             }
         }
+        if (let Some(extendDef) <- (parentDef as ExtendDef)) {
+            AddExtendGenericParamMappings(cgFunc, extendDef, outerTypeInfo)
+            return
+        }
         var idx: Int64 = 0
         for (genericTy in parentDef.GetGenericTypeParams()) {
             let capturedIdx = idx
@@ -200,6 +206,63 @@ public class CGModule {
             }
             idx++
         }
+    }
+
+    private func AddExtendGenericParamMappings(cgFunc: CGFunction, extendDef: ExtendDef,
+        outerTypeInfo: LLVMValueRef): Unit {
+        let extendedTy = extendDef.GetExtendedType() ??
+            throw IllegalStateException("extend function has no extended type: " + extendDef.GetIdentifier())
+        for (genericTy in extendDef.GetGenericTypeParams()) {
+            let path = ArrayList<Int64>()
+            if (!CollectGenericTypeInfoPath(extendedTy, genericTy, path)) {
+                throw IllegalStateException("extend generic type is not reachable from extended type: " +
+                    genericTy.ToString())
+            }
+            let capturedPath = CopyTypeInfoPath(path)
+            cgFunc.genericParamsMap[genericTy.ToString()] = {
+                irBuilder: IRBuilder2 =>
+                if (capturedPath.isEmpty()) {
+                    outerTypeInfo
+                } else {
+                    LoadTypeInfoWithPath(irBuilder, outerTypeInfo, capturedPath)
+                }
+            }
+        }
+    }
+
+    private func CollectGenericTypeInfoPath(srcTy: Type, genericTy: GenericType, path: ArrayList<Int64>): Bool {
+        let baseTy = srcTy.StripAllRefs()
+        if (baseTy.IsEqual(genericTy)) {
+            return true
+        }
+        let typeArgs = baseTy.GetTypeArgs()
+        var idx: Int64 = 0
+        while (idx < typeArgs.size) {
+            path.add(idx)
+            if (CollectGenericTypeInfoPath(typeArgs[idx], genericTy, path)) {
+                return true
+            }
+            path.remove(at: path.size - 1)
+            idx++
+        }
+        return false
+    }
+
+    private func CopyTypeInfoPath(path: ArrayList<Int64>): ArrayList<Int64> {
+        let out = ArrayList<Int64>()
+        for (idx in path) {
+            out.add(idx)
+        }
+        return out
+    }
+
+    private func LoadTypeInfoWithPath(irBuilder: IRBuilder2, rootTypeInfo: LLVMValueRef,
+        path: ArrayList<Int64>): LLVMValueRef {
+        var currentTypeInfo = rootTypeInfo
+        for (idx in path) {
+            currentTypeInfo = irBuilder.GetTypeInfoFromTypeInfoArgs(currentTypeInfo, idx)
+        }
+        return currentTypeInfo
     }
 
     public func GetOrInsertFunction(funcName: String, functionType: LLVMTypeRef): LLVMValueRef {

@@ -664,7 +664,7 @@ private func CreateTypeInfoForTemplateCallback(cgMod: CGModule, irBuilder: IRBui
         if (let Some(genericIdx) <- FindGenericParamIndex(genericTy, genericParams)) {
             return GetRuntimeTypeInfoFromArray(cgMod, irBuilder, runtimeTypeInfoArray, genericIdx, genericTy)
         }
-        return CGType.GetOrCreate(cgMod, baseTy).GetOrCreateTypeInfo()
+        throw IllegalStateException("missing runtime TypeInfo mapping for template generic type: " + baseTy.ToString())
     }
     if (ContainsGenericType(baseTy)) {
         return CreateRuntimeTypeInfoForTemplateCallback(cgMod, irBuilder, baseTy, genericParams, runtimeTypeInfoArray)

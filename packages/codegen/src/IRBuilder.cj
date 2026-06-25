@@ -2266,6 +2266,8 @@ public class IRBuilder2 <: Resource {
             cgMod.GetTypeSize(cgType.GetLayoutType())
         } else if (let Some(staticSize) <- cgType.GetSize()) {
             UInt64(staticSize)
+        } else if (chirTy.IsGeneric()) {
+            return GetLayoutSize32ForAllocaGeneric(cgType, CreateTypeInfo(chirTy))
         } else {
             0u64
         }
@@ -2314,26 +2316,12 @@ public class IRBuilder2 <: Resource {
             }
         }
         if (baseTy.IsGeneric()) {
-            if (let Some(runtimeTypeInfo) <- GetCurrentGenericTypeInfoArg(baseTy)) {
-                return runtimeTypeInfo
-            }
-            return CGType.GetOrCreate(cgMod, baseTy).GetOrCreateTypeInfo()
+            throw IllegalStateException("missing runtime TypeInfo mapping for generic type: " + baseTy.ToString())
         }
         if (ContainsGenericType(baseTy)) {
             return CreateGenericRuntimeTypeInfo(baseTy)
         }
         return CGType.GetOrCreate(cgMod, baseTy).GetOrCreateTypeInfo()
-    }
-
-    private func GetCurrentGenericTypeInfoArg(genericTy: Type): Option<LLVMValueRef> {
-        let currentFunction = cgFunction ?? return None
-        if (let Some(functionType) <- currentFunction.GetCGFunctionType()) {
-            let _ = functionType.GetLLVMFunctionType()
-            if (let Some(paramIdx) <- functionType.GetGenericParamIndex(genericTy)) {
-                return Some(unsafe { LLVMGetParam(currentFunction.GetRawFunction(), UInt32(paramIdx)) })
-            }
-        }
-        return None
     }
 
     public func GetTypeArgsFromTypeInfo(typeInfo: LLVMValueRef): LLVMValueRef {
@@ -2488,7 +2476,7 @@ public class IRBuilder2 <: Resource {
         if (!baseTy.IsGeneric()) {
             return if (CGType.GetOrCreate(cgMod, baseTy).IsReference()) { GetTrue() } else { GetFalse() }
         }
-        let typeInfoValue = CGType.GetOrCreate(cgMod, baseTy).GetOrCreateTypeInfo()
+        let typeInfoValue = CreateTypeInfo(baseTy)
         return CreateTypeInfoIsReferenceCall(typeInfoValue)
     }
 
