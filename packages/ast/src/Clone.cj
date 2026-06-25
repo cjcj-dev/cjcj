@@ -149,116 +149,50 @@ public func CloneGeneric(source: Generic, visitFunc: (Node, Node) -> Unit): Gene
 
 public class ASTCloner {
     private static var cloneDepth: Int64 = 0
+    // Source->clone correspondence captured BY OBJECT IDENTITY during the clone recursion, mirroring
+    // C++ ASTCloner::CloneWithRearrange's source2cloned map (AST/Clone.cpp:1551-1694). The previous
+    // post-hoc dual-Walker pairing matched by a structural key and broke when (a) distinct desugar
+    // temporaries shared an identifier and a (0,0,0) position (the `v-compiler` temps from `as`-cast
+    // desugar) and (b) the cloner descends side-channel nodes the Walker does not, so the two pre-order
+    // lists diverged and every reference past the divergence point was remapped to the wrong clone.
+    private static var cloneAccum: ArrayList<ClonePair> = ArrayList<ClonePair>()
+    private static var lastClonePairs: ArrayList<ClonePair> = ArrayList<ClonePair>()
 
     public init() {}
 
     public static func Clone(node: Node): Node {
         let shouldRepairPointers = cloneDepth == 0
+        if (shouldRepairPointers) {
+            cloneAccum = ArrayList<ClonePair>()
+        }
         cloneDepth++
         let target = makeNode(node)
         CopyNodeField(node, target)
         copyCommon(node, target)
         copySpecific(node, target)
+        cloneAccum.add(ClonePair(node, target))
         cloneDepth--
         if (shouldRepairPointers) {
-            repairClonedPointers(node, target)
+            lastClonePairs = cloneAccum
+            repairClonedPointers(lastClonePairs)
         }
         return target
     }
 
     public static func Clone(node: Node, visitFunc: (Node, Node) -> Unit): Node {
         let target = Clone(node)
-        applyVisitFuncToClonedTree(node, target, visitFunc)
+        let pairs = lastClonePairs
+        for (pair in pairs) {
+            visitFunc(pair.sourceNode, pair.targetNode)
+        }
         return target
     }
 
-    private static func applyVisitFuncToClonedTree(source: Node, target: Node,
-        visitFunc: (Node, Node) -> Unit): Unit {
-        let sourceNodes = collectPreorder(source)
-        let targetNodes = collectPreorder(target)
-        let count = if (sourceNodes.size < targetNodes.size) { sourceNodes.size } else { targetNodes.size }
-        var idx: Int64 = 0
-        while (idx < count) {
-            visitFunc(sourceNodes[idx], targetNodes[idx])
-            idx++
-        }
-    }
-
-    private static func collectPreorder(root: Node): ArrayList<Node> {
-        let nodes = ArrayList<Node>()
-        let walker = Walker(root, visitPre: { node: Node =>
-            nodes.add(node)
-            VisitAction.WALK_CHILDREN
-        })
-        walker.Walk()
-        return nodes
-    }
-
-    private static func collectClonePairs(sourceRoot: Node, targetRoot: Node): ArrayList<ClonePair> {
-        let pairs = ArrayList<ClonePair>()
-        let sourceNodes = collectPreorder(sourceRoot)
-        let targetNodes = collectPreorder(targetRoot)
-        let count = if (sourceNodes.size < targetNodes.size) { sourceNodes.size } else { targetNodes.size }
-        var idx: Int64 = 0
-        while (idx < count) {
-            pairs.add(ClonePair(sourceNodes[idx], targetNodes[idx]))
-            idx++
-        }
-        return pairs
-    }
-
-    private static func sameCloneSourceNode(sourceValue: Node, candidateValue: Node): Bool {
-        if (sourceValue.astKind != candidateValue.astKind) {
-            return false
-        }
-        if (sourceValue.begin != candidateValue.begin || sourceValue.end != candidateValue.end) {
-            return false
-        }
-        if (let Some(sourceDecl) <- (sourceValue as Decl)) {
-            if (let Some(candidateDecl) <- (candidateValue as Decl)) {
-                return SameDecl(sourceDecl, candidateDecl)
-            }
-            return false
-        }
-        if (let Some(sourceRefExpr) <- (sourceValue as RefExpr)) {
-            if (let Some(candidateRefExpr) <- (candidateValue as RefExpr)) {
-                return sourceRefExpr.ref.identifier == candidateRefExpr.ref.identifier &&
-                    sourceRefExpr.isThis == candidateRefExpr.isThis && sourceRefExpr.isSuper == candidateRefExpr.isSuper
-            }
-            return false
-        }
-        if (let Some(sourceMember) <- (sourceValue as MemberAccess)) {
-            if (let Some(candidateMember) <- (candidateValue as MemberAccess)) {
-                return sourceMember.field == candidateMember.field
-            }
-            return false
-        }
-        if (let Some(sourceRefType) <- (sourceValue as RefType)) {
-            if (let Some(candidateRefType) <- (candidateValue as RefType)) {
-                return sourceRefType.ref.identifier == candidateRefType.ref.identifier
-            }
-            return false
-        }
-        if (let Some(sourceQualified) <- (sourceValue as QualifiedType)) {
-            if (let Some(candidateQualified) <- (candidateValue as QualifiedType)) {
-                return sourceQualified.field == candidateQualified.field
-            }
-            return false
-        }
-        return sourceValue.ToString() == candidateValue.ToString()
-    }
-
     private static func findNodeClone(pairs: ArrayList<ClonePair>, node: Node): Option<Node> {
-        var found: Option<Node> = None
-        var foundCount: Int64 = 0
         for (pair in pairs) {
-            if (sameCloneSourceNode(pair.sourceNode, node)) {
-                found = pair.targetNode
-                foundCount++
+            if (refEq(pair.sourceNode, node)) {
+                return pair.targetNode
             }
-        }
-        if (foundCount == 1) {
-            return found
         }
         return None
     }
@@ -446,8 +380,7 @@ public class ASTCloner {
         return true
     }
 
-    private static func repairClonedPointers(sourceRoot: Node, targetRoot: Node): Unit {
-        let pairs = collectClonePairs(sourceRoot, targetRoot)
+    private static func repairClonedPointers(pairs: ArrayList<ClonePair>): Unit {
         for (pair in pairs) {
             repairClonedPointerFields(pairs, pair.sourceNode, pair.targetNode)
         }

@@ -295,9 +295,11 @@ private func SameFaithfulLocalAstDecl(left: AstDecl, right: AstDecl): Bool {
             return left.mangledName == right.mangledName
         }
     }
-    return ASTKindIndex(left.astKind) == ASTKindIndex(right.astKind) && left.identifier.Val() == right.identifier.Val() &&
-        left.fullPackageName == right.fullPackageName && left.begin.hashCode() == right.begin.hashCode() &&
-        left.end.hashCode() == right.end.hashCode()
+    // Non-imported local decls are matched by OBJECT IDENTITY, faithfully mirroring C++'s
+    // pointer-keyed AST2CHIRNodeMap (AST2CHIRNodeMap.h:66). A structural key wrongly merges distinct
+    // COMPILER_ADD desugar temporaries sharing an identifier and a (0,0,0) position; the structural
+    // hash above is retained only for bucketing.
+    return refEq(left, right)
 }
 
 private class FaithfulLocalValueEntry {
