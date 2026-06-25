@@ -62,6 +62,9 @@ _SUBS = [
     (re.compile(r",? ?!dbg ![0-9]+"), ""),
     (re.compile(r", ![a-zA-Z.]+ ![0-9]+"), ""),
     (re.compile(r" #[0-9]+ "), " "),
+    # collapse the alignment padding before an inline `; preds = ...` comment (its width depends on the
+    # original block-label length, which differs between the two backends) to a single space
+    (re.compile(r"\s{2,};"), " ;"),
     (re.compile(r"[ \t]*,?[ \t]*$"), ""),
 ]
 
