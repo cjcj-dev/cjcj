@@ -885,6 +885,14 @@ public class TypeChecker {
     }
 
     private func PreCheck(activeContexts: ArrayList<ASTContext>): Unit {
+        let enableMacroInLSP = if (let Some(instance) <- ci) { instance.globalOptions.enableMacroInLSP } else { false }
+        for (ctx in activeContexts) {
+            if (let Some(pkg) <- contextPackage(ctx)) {
+                if (let Some(diagValue) <- impl.diag) {
+                    CheckRedefinition(ctx, pkg, diagValue, enableMacroInLSP: enableMacroInLSP)
+                }
+            }
+        }
         for (ctx in activeContexts) {
             if (let Some(pkg) <- contextPackage(ctx)) {
                 PreCheckAnnoForFFI(pkg)
