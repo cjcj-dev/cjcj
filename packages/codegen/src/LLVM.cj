@@ -33,6 +33,12 @@ public enum LLVMLinkage {
     | ExternalWeak
 }
 
+public enum LLVMUnnamedAddr {
+    | NoUnnamedAddr
+    | LocalUnnamedAddr
+    | GlobalUnnamedAddr
+}
+
 public enum LLVMVerifierFailureAction {
     | AbortProcess
     | PrintMessage
@@ -59,6 +65,14 @@ public func LLVMLinkageValue(linkage: LLVMLinkage): Int32 {
         case LLVMLinkage.Internal => 8
         case LLVMLinkage.Private => 9
         case LLVMLinkage.ExternalWeak => 12
+    }
+}
+
+public func LLVMUnnamedAddrValue(value: LLVMUnnamedAddr): Int32 {
+    return match (value) {
+        case LLVMUnnamedAddr.NoUnnamedAddr => 0
+        case LLVMUnnamedAddr.LocalUnnamedAddr => 1
+        case LLVMUnnamedAddr.GlobalUnnamedAddr => 2
     }
 }
 
@@ -200,6 +214,7 @@ foreign {
     func LLVMGetValueName(value: LLVMValueRef): CString
     func LLVMGetLinkage(global: LLVMValueRef): Int32
     func LLVMSetLinkage(global: LLVMValueRef, linkage: Int32): Unit
+    func LLVMSetUnnamedAddress(global: LLVMValueRef, unnamedAddr: Int32): Unit
     func LLVMIsDeclaration(global: LLVMValueRef): Int32
     func LLVMSetGlobalConstant(global: LLVMValueRef, isConstant: Int32): Unit
     func LLVMSetInitializer(global: LLVMValueRef, constantVal: LLVMValueRef): Unit
