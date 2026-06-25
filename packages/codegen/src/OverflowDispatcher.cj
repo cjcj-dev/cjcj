@@ -171,9 +171,16 @@ private func GenerateCheckedOverflowBinary(irBuilder: IRBuilder2, kind: ExprKind
         return irBuilder.CreateBinaryTyped(kind, lhsValue, rhsValue, lhs.GetType(), resultType,
             name: ExprKindNameForIR(kind))
     }
-    let resultValue = irBuilder.CreateExtractValue(overflowPair, 0u32, name: "overflow.value")
-    let overflowFlag = irBuilder.CreateExtractValue(overflowPair, 1u32, name: "overflow.flag")
-    return EmitOverflowCheck(irBuilder, overflowFlag, resultValue, ExprKindNameForIR(kind))
+    let boolType = unsafe { LLVMInt1TypeInContext(irBuilder.GetLLVMContext().raw) }
+    let pairTypes = ArrayList<LLVMTypeRef>()
+    pairTypes.add(operandType)
+    pairTypes.add(boolType)
+    let pairType = irBuilder.CreateAnonymousStructType(pairTypes)
+    let pairSlot = irBuilder.CreateEntryAlloca(pairType, name: "val.ov")
+    irBuilder.CreateStore(overflowPair, pairSlot)
+    let overflowFlagPtr = irBuilder.CreateStructGEP(pairType, pairSlot, 1u32)
+    let overflowFlag = irBuilder.CreateLoad(boolType, overflowFlagPtr)
+    return EmitOverflowCheck(irBuilder, overflowFlag, pairSlot, pairType, operandType, ExprKindNameForIR(kind))
 }
 
 private func GenerateCheckedOverflowUnary(irBuilder: IRBuilder2, kind: ExprKind, operand: Value,
@@ -282,21 +289,33 @@ private func GenerateSaturatingUnaryIntOp(irBuilder: IRBuilder2, kind: ExprKind,
     return LLVMNullValue()
 }
 
-private func EmitOverflowCheck(irBuilder: IRBuilder2, overflowFlag: LLVMValueRef, resultValue: LLVMValueRef,
-    opName: String): LLVMValueRef {
+private func EmitOverflowCheck(irBuilder: IRBuilder2, overflowFlag: LLVMValueRef, pairSlot: LLVMValueRef,
+    pairType: LLVMTypeRef, resultType: LLVMTypeRef, opName: String): LLVMValueRef {
     let currentBlock = irBuilder.GetInsertBlock()
     if (currentBlock.isNull()) {
-        return resultValue
+        let valuePtr = irBuilder.CreateStructGEP(pairType, pairSlot, 0u32)
+        return irBuilder.CreateLoad(resultType, valuePtr)
     }
-    let blocks = irBuilder.CreateAndInsertBasicBlocks(MakeBlockNameList("overflow", "no.overflow"))
-    if (blocks.size < 2) {
-        return resultValue
+    let expectedFlag = irBuilder.GenerateCallExpectFunction(overflowFlag, irBuilder.GetFalse())
+    let blocks = irBuilder.CreateAndInsertBasicBlocks(MakeBlockNameList("normal", "overflow", "end"))
+    if (blocks.size < 3) {
+        let valuePtr = irBuilder.CreateStructGEP(pairType, pairSlot, 0u32)
+        return irBuilder.CreateLoad(resultType, valuePtr)
     }
-    irBuilder.CreateCondBr(overflowFlag, blocks[0], blocks[1])
+    irBuilder.CreateCondBr(expectedFlag, blocks[1], blocks[0])
+
+    let ifValue = irBuilder.CreateEntryAlloca(resultType)
     irBuilder.SetInsertPoint(blocks[0])
-    irBuilder.CreateOverflowOrArithmeticException(opName)
+    let valuePtr = irBuilder.CreateStructGEP(pairType, pairSlot, 0u32)
+    let resultValue = irBuilder.CreateLoad(resultType, valuePtr)
+    irBuilder.CreateStore(resultValue, ifValue)
+    irBuilder.CreateBr(blocks[2])
+
     irBuilder.SetInsertPoint(blocks[1])
-    return resultValue
+    irBuilder.CreateOverflowOrArithmeticException(opName)
+
+    irBuilder.SetInsertPoint(blocks[2])
+    return irBuilder.CreateLoad(resultType, ifValue)
 }
 
 private func MaybeCastShiftRHS(irBuilder: IRBuilder2, kind: ExprKind, lhs: Value, rhs: Value,
@@ -392,6 +411,14 @@ private func MakeBlockNameList(first: String, second: String): ArrayList<String>
     let out = ArrayList<String>()
     out.add(first)
     out.add(second)
+    return out
+}
+
+private func MakeBlockNameList(first: String, second: String, third: String): ArrayList<String> {
+    let out = ArrayList<String>()
+    out.add(first)
+    out.add(second)
+    out.add(third)
     return out
 }
 
