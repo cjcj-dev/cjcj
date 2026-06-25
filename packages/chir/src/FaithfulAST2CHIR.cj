@@ -250,7 +250,10 @@ private let FAITHFUL_MANGLE_SUFFIX: String = "E"
 private let FAITHFUL_MANGLE_NESTED_PREFIX: String = "N"
 private let FAITHFUL_MANGLE_GLOBAL_PACKAGE_INIT_PREFIX: String = "GP"
 private let FAITHFUL_MANGLE_GLOBAL_VARIABLE_INIT_PREFIX: String = "GV"
+// Mirrors include/cangjie/Mangle/MangleUtils.h:22-36 for CHIR-local faithful init names.
+private let FAITHFUL_MANGLE_GLOBAL_FILE_INIT_PREFIX: String = "GF"
 private let FAITHFUL_MANGLE_FUNC_PARA_INIT_PREFIX: String = "PI"
+private let FAITHFUL_MANGLE_FILE_ID_PREFIX: String = "U"
 private let FAITHFUL_MANGLE_FUNC_PARAM_TYPE_PREFIX: String = "H"
 private let FAITHFUL_MANGLE_VOID_TY_SUFFIX: String = "v"
 private let FAITHFUL_MANGLE_TYPE_STRUCT_PREFIX: String = "R"
@@ -274,6 +277,74 @@ private let FAITHFUL_GV_INIT_WILDCARD_PATTERN: String = "wildcard_pattern_"
 
 private func FaithfulStartsWith(value: String, prefix: String): Bool {
     return value.size >= prefix.size && value[0..prefix.size] == prefix
+}
+
+private func FaithfulEndsWith(value: String, suffix: String): Bool {
+    return value.size >= suffix.size && value[value.size - suffix.size..] == suffix
+}
+
+private func FaithfulIsDigit(ch: Byte): Bool {
+    return ch >= b'0' && ch <= b'9'
+}
+
+private func FaithfulIsAlpha(ch: Byte): Bool {
+    return (ch >= b'a' && ch <= b'z') || (ch >= b'A' && ch <= b'Z')
+}
+
+// Mirrors BaseMangler::HashToBase62/IsHashable/FileNameWithoutExtension
+// in src/Mangle/BaseMangler.cpp:1210-1241.
+private func FaithfulFnv1aHash(str: String): UInt64 {
+    var hash: UInt64 = 2166136261u64
+    for (ch in str.toArray()) {
+        hash = ((hash ^ UInt64(ch)) * 16777619u64) & 0xffffffffu64
+    }
+    return hash
+}
+
+private func FaithfulToBase62(value: UInt64): String {
+    let base62Chars = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
+    var current = value
+    var result = ""
+    while (current > 0u64) {
+        let idx = Int64(current % UInt64(base62Chars.size))
+        result += base62Chars[idx..idx + 1]
+        current /= UInt64(base62Chars.size)
+    }
+    let length: Int64 = 13
+    while (result.size < length) {
+        result += "0"
+    }
+    var reversed = ""
+    var idx = result.size - 1
+    while (idx >= 0) {
+        reversed += result[idx..idx + 1]
+        idx--
+    }
+    return if (reversed.size > length) { reversed[0..length] } else { reversed }
+}
+
+private func FaithfulHashToBase62(input: String): String {
+    return FaithfulToBase62(FaithfulFnv1aHash(input))
+}
+
+private func FaithfulFileNameWithoutExtension(fileName: String): String {
+    if (fileName.size > 3 && FaithfulEndsWith(fileName, ".cj")) {
+        return fileName[0..fileName.size - 3]
+    }
+    return fileName
+}
+
+private func FaithfulIsHashableFileName(fileName: String): Bool {
+    let nameWithoutExt = FaithfulFileNameWithoutExtension(fileName)
+    if (nameWithoutExt.size > 12) {
+        return true
+    }
+    for (ch in nameWithoutExt.toArray()) {
+        if (!(FaithfulIsAlpha(ch) || FaithfulIsDigit(ch) || ch == b'.' || ch == b'_' || ch == b'-')) {
+            return true
+        }
+    }
+    return false
 }
 
 public class FaithfulAST2CHIRBuilder {
@@ -1225,8 +1296,8 @@ public class FaithfulAST2CHIR {
     }
 
     private func CreateGlobalVarStoreInitFunc(varDecl: AstVarDecl, suffix!: String): Function {
-        let initFn = CreateEmptyGVInitFunc(GlobalVarInitFuncName(varDecl, suffix),
-            "gv$_" + varDecl.identifier.Val() + suffix, EffectiveRawMangledName(varDecl) + "$init" + suffix,
+        let initFn = CreateEmptyGVInitFunc(GlobalVarInitFuncName(varDecl),
+            "gv$_" + varDecl.identifier.Val() + suffix, EffectiveRawMangledName(varDecl),
             EffectivePackageName(varDecl))
         if (varDecl.IsConst()) {
             initFn.EnableAttr(Attribute.CONST)
@@ -1259,8 +1330,8 @@ public class FaithfulAST2CHIR {
         let litExpr = (RequireExpr(varDecl.initializer, "literal global initializer") as AstLitConstExpr) ??
             throw IllegalStateException("faithful AST2CHIR literal global initializer expected LitConstExpr")
         let globalVar = RequireGlobalVar(globalCache.Get(varDecl))
-        let initFn = CreateEmptyGVInitFunc(GlobalVarInitFuncName(varDecl, "$const"),
-            "gv$_" + varDecl.identifier.Val() + "$const", EffectiveRawMangledName(varDecl) + "$const",
+        let initFn = CreateEmptyGVInitFunc(GlobalVarInitFuncName(varDecl),
+            "gv$_" + varDecl.identifier.Val() + "$const", EffectiveRawMangledName(varDecl),
             EffectivePackageName(varDecl))
         if (varDecl.IsConst()) {
             initFn.EnableAttr(Attribute.CONST)
@@ -1493,23 +1564,39 @@ public class FaithfulAST2CHIR {
     }
 
     private func FileInitFuncName(file: AstFile, suffix: String): String {
-        return CurrentPackage().GetName() + "$file$" + file.fileName + "$" +
-            if (suffix == "_literal") { "init$literal" } else { "init" }
+        let specialName = if (suffix.isEmpty()) {
+            FAITHFUL_SPECIAL_NAME_FOR_INIT_FUNCTION
+        } else {
+            FAITHFUL_SPECIAL_NAME_FOR_INIT_LITERAL_FUNCTION
+        }
+        let fileId = if (FaithfulIsHashableFileName(file.fileName)) {
+            FaithfulHashToBase62(file.fileName)
+        } else {
+            FaithfulFileNameWithoutExtension(file.fileName) + "$"
+        }
+        return FAITHFUL_MANGLE_CANGJIE_PREFIX + FAITHFUL_MANGLE_GLOBAL_FILE_INIT_PREFIX +
+            FaithfulOptPackageName(CurrentPackage().GetName()) + FAITHFUL_MANGLE_FILE_ID_PREFIX + fileId +
+            specialName + FAITHFUL_MANGLE_FUNC_PARAM_TYPE_PREFIX + FAITHFUL_MANGLE_VOID_TY_SUFFIX
     }
 
-    private func GlobalVarInitFuncName(varDecl: AstVarDecl, suffix: String): String {
-        return EffectiveMangledName(varDecl) + "$init" + suffix
+    private func GlobalVarInitFuncName(varDecl: AstVarDecl): String {
+        return GlobalVarInitFuncNameFromMangledName(varDecl.mangledName)
     }
 
     private func GlobalVarWithPatternInitFuncName(decl: AstVarWithPatternDecl): String {
+        return GlobalVarInitFuncNameFromMangledName(decl.mangledName)
+    }
+
+    private func GlobalVarInitFuncNameFromMangledName(mangledName: String): String {
         let prefix = FAITHFUL_MANGLE_CANGJIE_PREFIX + FAITHFUL_MANGLE_NESTED_PREFIX
-        if (FaithfulStartsWith(decl.mangledName, prefix) && decl.mangledName.size > prefix.size +
-            FAITHFUL_MANGLE_SUFFIX.size) {
-            return FAITHFUL_MANGLE_CANGJIE_PREFIX + FAITHFUL_MANGLE_GLOBAL_VARIABLE_INIT_PREFIX +
-                decl.mangledName[prefix.size..decl.mangledName.size - FAITHFUL_MANGLE_SUFFIX.size] +
-                FAITHFUL_MANGLE_FUNC_PARAM_TYPE_PREFIX + FAITHFUL_MANGLE_VOID_TY_SUFFIX
+        if (!FaithfulStartsWith(mangledName, prefix) || !FaithfulEndsWith(mangledName, FAITHFUL_MANGLE_SUFFIX) ||
+            mangledName.size <= prefix.size + FAITHFUL_MANGLE_SUFFIX.size) {
+            throw IllegalArgumentException("faithful AST2CHIR global var init requires nested mangled name: " +
+                mangledName)
         }
-        return EffectiveMangledName(decl) + "$init"
+        return FAITHFUL_MANGLE_CANGJIE_PREFIX + FAITHFUL_MANGLE_GLOBAL_VARIABLE_INIT_PREFIX +
+            mangledName[prefix.size..mangledName.size - FAITHFUL_MANGLE_SUFFIX.size] +
+            FAITHFUL_MANGLE_FUNC_PARAM_TYPE_PREFIX + FAITHFUL_MANGLE_VOID_TY_SUFFIX
     }
 
     private func GlobalVarWithPatternInitSrcName(decl: AstVarWithPatternDecl): String {
