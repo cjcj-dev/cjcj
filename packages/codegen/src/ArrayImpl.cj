@@ -435,6 +435,15 @@ public func GenerateStoreElementRef(irBuilder: IRBuilder2, chirExpr: Expression)
 
 private func StoreElementValue(irBuilder: IRBuilder2, baseValue: CGValue, elementValue: CGValue,
     elementPtr: LLVMValueRef, fieldTy: Option<Type>): LLVMValueRef {
+    if (let Some(baseType) <- baseValue.GetCGType()) {
+        if (IsManagedObjectElementBase(baseType.GetOriginal()) && IsGenericField(fieldTy)) {
+            return irBuilder.StoreGenericMemberValue(baseValue.GetRawValue(), elementPtr, elementValue,
+                baseType.GetOriginal(), fieldTy)
+        }
+    }
+    if (let Some(genericStore) <- TryStoreGenericElementValue(irBuilder, elementValue, elementPtr, fieldTy)) {
+        return genericStore
+    }
     if (let Some(fieldType) <- fieldTy) {
         if (IsAggregateFieldType(fieldType)) {
             return StoreAggregateElementValue(irBuilder, baseValue, elementValue, elementPtr, fieldType)
@@ -442,10 +451,6 @@ private func StoreElementValue(irBuilder: IRBuilder2, baseValue: CGValue, elemen
     }
     let rawElementValue = StoreElementRawValue(irBuilder, elementValue)
     if (let Some(baseType) <- baseValue.GetCGType()) {
-        if (IsManagedObjectElementBase(baseType.GetOriginal()) && IsGenericField(fieldTy)) {
-            return irBuilder.StoreGenericMemberValue(baseValue.GetRawValue(), elementPtr, elementValue,
-                baseType.GetOriginal(), fieldTy)
-        }
         if (let Some(rawArrayTy) <- FindRawArrayType(baseType.GetOriginal())) {
             let elementCGType = CGType.GetOrCreate(irBuilder.GetCGModule(), rawArrayTy.GetElementType())
             return StoreRawArrayElement(irBuilder, baseValue.GetRawValue(), elementCGType, rawElementValue,
@@ -461,6 +466,17 @@ private func StoreElementValue(irBuilder: IRBuilder2, baseValue: CGValue, elemen
         return irBuilder.CallGCWrite(rawElementValue, baseValue.GetRawValue(), elementPtr)
     }
     return irBuilder.CreateStore(rawElementValue, elementPtr)
+}
+
+private func TryStoreGenericElementValue(irBuilder: IRBuilder2, elementValue: CGValue, elementPtr: LLVMValueRef,
+    fieldTy: Option<Type>): Option<LLVMValueRef> {
+    let genericFieldTy = (fieldTy ?? return None).StripAllRefs()
+    if (!genericFieldTy.IsGeneric()) {
+        return None
+    }
+    let refTy = irBuilder.GetCGContext().GetCHIRBuilder().context.GetRefTy(genericFieldTy)
+    let dest = CGValue(elementPtr, CGType.GetOrCreate(irBuilder.GetCGModule(), refTy))
+    return irBuilder.TryCreateGenericStore(elementValue, dest)
 }
 
 private func IsGenericField(fieldTy: Option<Type>): Bool {

@@ -61,6 +61,10 @@ private func GenerateFieldByPath(irBuilder: IRBuilder2, base: Value,
                 let fieldAddr = irBuilder.CreateGEP(gepElementType, basePointer, indices,
                     name: name + ".addr")
                 if (let Some(fieldType) <- GetFieldCGTypeAtPath(elementType, path)) {
+                    if (ShouldLoadGenericClassField(baseCGType, fieldType)) {
+                        return irBuilder.LoadGenericFieldValue(baseValue.GetRawValue(), fieldAddr, fieldType,
+                            baseCGType.GetOriginal(), Some(fieldType.GetOriginal()))
+                    }
                     let loaded = irBuilder.CreateLoad(fieldType.GetLLVMType(), fieldAddr, name: name)
                     return CastExtractedFieldIfNeeded(irBuilder, loaded, fieldType.GetOriginal(), expectedTy)
                 }
@@ -250,4 +254,8 @@ private func GetFieldCGTypeAtPath(rootType: CGType, path: ArrayList<UInt64>): Op
         currentType = contained[fieldIdx]
     }
     return Some(currentType)
+}
+
+private func ShouldLoadGenericClassField(baseCGType: CGType, fieldCGType: CGType): Bool {
+    return baseCGType.GetOriginal().StripAllRefs().IsClass() && fieldCGType.GetOriginal().StripAllRefs().IsGeneric()
 }
