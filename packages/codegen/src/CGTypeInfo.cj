@@ -558,7 +558,7 @@ private func BuildSourceGenericTypeTemplateInitializer(cgMod: CGModule, moduleHa
     })
     values.add(unsafe { LLVMConstNull(i8PtrType) })
     values.add(unsafe { LLVMConstNull(i8PtrType) })
-    values.add(unsafe { LLVMConstNull(extensionDefPtrPtrType) })
+    values.add(GenerateExtensionDefPtrOfTypeInfo(cgMod, customTy, extensionDefPtrPtrType))
     values.add(unsafe { LLVMConstInt(i16Type, if (isAutoEnv) {
         TypeTemplateInheritedClassNumValue(customTy)
     } else {
@@ -657,7 +657,7 @@ private func BuildTypeInfoFunctionType(returnType: LLVMTypeRef, paramTypes: Arra
     return result
 }
 
-private func CreateTypeInfoForTemplateCallback(cgMod: CGModule, irBuilder: IRBuilder2, chirTy: Type,
+public func CreateTypeInfoForTemplateCallback(cgMod: CGModule, irBuilder: IRBuilder2, chirTy: Type,
     genericParams: ArrayList<GenericType>, runtimeTypeInfoArray: LLVMValueRef): LLVMValueRef {
     let baseTy = chirTy.StripAllRefs()
     if (let Some(genericTy) <- (baseTy as GenericType)) {
