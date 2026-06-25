@@ -692,7 +692,7 @@ private class FrontendCjoFlatBufferWriter {
     }
 
     // Per-kind dispatch. Bounded faithful slice: RefExpr, MemberAccess, CallExpr, UnaryExpr,
-    // BinaryExpr, SubscriptExpr, AssignExpr, JumpExpr, TypeConvExpr, ThrowExpr, SpawnExpr, TryExpr, WhileExpr, DoWhileExpr,
+    // BinaryExpr, SubscriptExpr, AssignExpr, JumpExpr, PointerExpr, TypeConvExpr, ThrowExpr, SpawnExpr, TryExpr, WhileExpr, DoWhileExpr,
     // MatchExpr, ForInExpr, IfExpr, Block, ReturnExpr, LitConstExpr, ArrayLit, TupleLit. Other kinds throw
     // (no SaveUnsupportExpr diagnostic stub yet);
     // they are added in later cuts.
@@ -720,6 +720,9 @@ private class FrontendCjoFlatBufferWriter {
         }
         if (let Some(je) <- (realExpr as JumpExpr)) {
             return SaveJumpExpr(je)
+        }
+        if (let Some(pe) <- (realExpr as PointerExpr)) {
+            return SavePointerExpr(pe)
         }
         if (let Some(tce) <- (realExpr as TypeConvExpr)) {
             return SaveTypeConvExpr(tce)
@@ -774,6 +777,28 @@ private class FrontendCjoFlatBufferWriter {
         }
         throw IllegalArgumentException(
             "not yet ported in faithful .cjo writer: SaveExpr for unsupported AST expr kind")
+    }
+
+    // Mirrors ExprWriter.cpp:320-332 SaveExpression(PointerExpr): optional operand 0 is
+    // a FuncArg, serialized via SaveFuncArg. PointerExpr has no ExprInfo union.
+    // ExprKind_PointerExpr is index 15 of enum ExprKind (ModuleFormat.fbs:333-373).
+    private func SavePointerExpr(pe: PointerExpr): FlatBufferOffset {
+        let operands = ArrayList<UInt32>()
+        if (let Some(arg) <- pe.arg) {
+            operands.add(SaveFuncArg(arg))
+        }
+        let operandsVec = builder.CreateVectorU32(operands)
+
+        let begin = PositionBytes(pe.begin)
+        let end = PositionBytes(pe.end)
+        let typeIndex = SaveExprType(pe)
+        builder.StartTable(9)
+        builder.AddU32(5, typeIndex)
+        builder.AddOffset(4, operandsVec)
+        builder.AddStruct(2, end, 4)
+        builder.AddStruct(1, begin, 4)
+        builder.AddU16(0, 15u16)
+        return builder.EndTable()
     }
 
     // Mirrors ExprWriter.cpp:520-549 SaveExpression(Block) + BlockInfo (fbs:483-485).
