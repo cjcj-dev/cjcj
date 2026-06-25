@@ -83,11 +83,23 @@ public func CopyBasicInfo(source: Node, target: Node): Unit {
     target.curMacroCall = source.curMacroCall
     target.isInMacroCall = source.isInMacroCall
     target.comments = cloneCommentGroups(source.comments)
-    target.CopyAttrs(source.GetAttrs())
     CopyNodeScopeInfo(target, source)
+}
+
+// This function should be called in each node which inherit Node directly (the AST clone path).
+// Unlike CopyBasicInfo it also carries the sema type and attributes, mirroring C++ AST/Clone.cpp:86-95
+// CopyNodeField (private to the cloner).
+func CopyNodeField(source: Node, target: Node): Unit {
+    target.begin = source.begin
+    target.end = source.end
     if (let Some(ty) <- source.GetTy()) {
         target.SetTy(ty)
     }
+    target.curMacroCall = source.curMacroCall
+    target.isInMacroCall = source.isInMacroCall
+    target.comments = cloneCommentGroups(source.comments)
+    CopyNodeScopeInfo(target, source)
+    target.CopyAttrs(source.GetAttrs())
 }
 
 public func CloneMacroInvocation(source: MacroInvocation): MacroInvocation {
@@ -144,7 +156,7 @@ public class ASTCloner {
         let shouldRepairPointers = cloneDepth == 0
         cloneDepth++
         let target = makeNode(node)
-        CopyBasicInfo(node, target)
+        CopyNodeField(node, target)
         copyCommon(node, target)
         copySpecific(node, target)
         cloneDepth--
