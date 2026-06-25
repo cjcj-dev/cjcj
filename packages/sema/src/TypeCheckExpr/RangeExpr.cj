@@ -31,12 +31,7 @@ private func CheckRangeBound(typeManager: TypeManager, elemTy: Ty, expr: Option<
             if (!Ty.IsTyCorrect(exprTy)) {
                 return false
             }
-            var actualTy = exprTy
-            if (actualTy.IsIdeal()) {
-                actualTy = typeManager.ReplaceIdealTy(actualTy)
-                realExpr.SetTy(actualTy)
-            }
-            return typeManager.CheckTypeCompatibility(elemTy, actualTy) != TypeCompatibility.INCOMPATIBLE
+            return ChkExprShallow(typeManager, elemTy, realExpr)
         }
         return false
     }
