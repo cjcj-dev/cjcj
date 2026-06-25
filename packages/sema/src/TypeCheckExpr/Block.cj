@@ -92,12 +92,10 @@ public func ChkBlock(typeManager: TypeManager, target: Ty, b: Block): Bool {
             return false
         }
         if (let Some(lastExpr) <- (lastNode as Expr)) {
-            if (let Some(lastTy) <- lastExpr.GetTy()) {
-                let actualTy = if (lastTy.IsIdeal()) { typeManager.ReplaceIdealTy(lastTy) } else { lastTy }
-                lastExpr.SetTy(actualTy)
-                let compatible = typeManager.CheckTypeCompatibility(target, actualTy) != TypeCompatibility.INCOMPATIBLE
-                if (isWellTyped && compatible) {
-                    b.SetTy(actualTy)
+            let checked = ChkExprShallow(typeManager, target, lastExpr)
+            if (isWellTyped && checked) {
+                if (let Some(lastTy) <- lastExpr.GetTy()) {
+                    b.SetTy(lastTy)
                     return true
                 }
             }
