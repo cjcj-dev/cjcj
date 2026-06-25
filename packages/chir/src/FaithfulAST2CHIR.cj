@@ -30,6 +30,8 @@ import cangjie_compiler::ast.RefExpr as AstRefExpr
 import cangjie_compiler::ast.StructDecl as AstStructDecl
 import cangjie_compiler::ast.TuplePattern as AstTuplePattern
 import cangjie_compiler::ast.Ty as AstTy
+import cangjie_compiler::ast.TypeKind as AstTypeKind
+import cangjie_compiler::ast.TypeKindInRange as AstTypeKindInRange
 import cangjie_compiler::ast.VarDecl as AstVarDecl
 import cangjie_compiler::ast.VarPattern as AstVarPattern
 import cangjie_compiler::ast.VarWithPatternDecl as AstVarWithPatternDecl
@@ -1327,7 +1329,7 @@ public class FaithfulAST2CHIR {
         return match (expr.kind) {
             case AstLitConstKind.BOOL => BoolLiteral(expr.stringValue == "true")
             case AstLitConstKind.UNIT => UnitLiteral()
-            case AstLitConstKind.INTEGER => IntLiteral(expr.constNumValue.asInt.`Int64`())
+            case AstLitConstKind.INTEGER => TranslateIntegerLiteralValue(expr)
             case AstLitConstKind.RUNE_BYTE => IntLiteral(expr.constNumValue.asInt.`Int64`())
             case AstLitConstKind.FLOAT => FloatLiteral(expr.constNumValue.asFloat.value)
             case AstLitConstKind.RUNE =>
@@ -1338,6 +1340,23 @@ public class FaithfulAST2CHIR {
             case AstLitConstKind.NONE =>
                 throw IllegalArgumentException("not yet ported in faithful AST2CHIR: literal NONE")
         }
+    }
+
+    private func TranslateIntegerLiteralValue(expr: AstLitConstExpr): IntLiteral {
+        let astTy = RequireAstTy(expr)
+        let kind = astTy.kind
+        if (AstTypeKindInRange(kind, AstTypeKind.TYPE_UINT8, AstTypeKind.TYPE_UINT64) ||
+            kind == AstTypeKind.TYPE_UINT_NATIVE) {
+            return IntLiteral(UInt64LiteralBitsToInt64(expr.constNumValue.asInt.Uint64()))
+        }
+        return IntLiteral(expr.constNumValue.asInt.`Int64`())
+    }
+
+    private func UInt64LiteralBitsToInt64(value: UInt64): Int64 {
+        if (value <= UInt64(Int64.Max)) {
+            return Int64(value)
+        }
+        return -Int64(UInt64.Max - value) - 1
     }
 
     private func CreateEmptyGVInitFunc(identifier: String, srcCodeIdentifier: String, rawMangledName: String,
