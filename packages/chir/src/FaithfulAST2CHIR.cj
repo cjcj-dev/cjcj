@@ -854,11 +854,13 @@ public class FaithfulAST2CHIR {
 
     private func AttachCustomTypeGenericParams(decl: AstDecl): Unit {
         let def = chirType.GetGlobalNominalCache(decl)
-        if (let Some(ty) <- decl.GetTy()) {
-            for (arg in ty.typeArgs) {
-                if (let Some(genericTy) <- (arg as AstGenericsTy)) {
-                    if (let Some(paramTy) <- (chirType.TranslateType(genericTy) as GenericType)) {
-                        AddGenericTypeParamIfMissing(def, paramTy)
+        if (let Some(generic) <- decl.GetGeneric()) {
+            for (param in generic.typeParameters) {
+                if (let Some(paramAstTy) <- param.GetTy()) {
+                    if (let Some(genericTy) <- (paramAstTy as AstGenericsTy)) {
+                        if (let Some(paramTy) <- (chirType.TranslateType(genericTy) as GenericType)) {
+                            AddGenericTypeParamIfMissing(def, paramTy)
+                        }
                     }
                 }
             }
@@ -885,15 +887,19 @@ public class FaithfulAST2CHIR {
 
     private func AttachFunctionGenericParams(funcDecl: AstFuncDecl, fn: Function): Unit {
         if (let Some(generic) <- funcDecl.GetGeneric()) {
+            let genericTys = ArrayList<AstGenericsTy>()
             for (param in generic.typeParameters) {
                 if (let Some(paramAstTy) <- param.GetTy()) {
                     if (let Some(genericTy) <- (paramAstTy as AstGenericsTy)) {
                         if (let Some(paramTy) <- (chirType.TranslateType(genericTy) as GenericType)) {
                             AddGenericTypeParamIfMissing(fn, paramTy)
-                            chirType.FillGenericArgType(genericTy)
+                            genericTys.add(genericTy)
                         }
                     }
                 }
+            }
+            for (genericTy in genericTys) {
+                chirType.FillGenericArgType(genericTy)
             }
         }
     }
@@ -2253,21 +2259,36 @@ public class FaithfulAST2CHIR {
     }
 
     private func MangleFuncDeclParamTypes(funcDecl: AstFuncDecl): String {
+        let genericsTypeStack = MangleFuncDeclGenericsTypeStack(funcDecl)
         if (let Some(body) <- funcDecl.funcBody) {
             if (!body.paramLists.isEmpty()) {
-                return MangleFuncParamList(body.paramLists[0].params)
+                return MangleFuncParamList(body.paramLists[0].params, genericsTypeStack)
             }
         }
         return FAITHFUL_MANGLE_VOID_TY_SUFFIX
     }
 
-    private func MangleFuncParamList(params: ArrayList<AstFuncParam>): String {
+    private func MangleFuncDeclGenericsTypeStack(funcDecl: AstFuncDecl): ArrayList<String> {
+        let out = ArrayList<String>()
+        if (let Some(generic) <- funcDecl.GetGeneric()) {
+            for (param in generic.typeParameters) {
+                if (let Some(paramAstTy) <- param.GetTy()) {
+                    if (let Some(genericTy) <- (paramAstTy as AstGenericsTy)) {
+                        out.add(genericTy.name)
+                    }
+                }
+            }
+        }
+        return out
+    }
+
+    private func MangleFuncParamList(params: ArrayList<AstFuncParam>, genericsTypeStack: ArrayList<String>): String {
         if (params.isEmpty()) {
             return FAITHFUL_MANGLE_VOID_TY_SUFFIX
         }
         var out = ""
         for (param in params) {
-            out += FaithfulMangleType(chirType.TranslateType(RequireAstTy(param)))
+            out += FaithfulMangleType(chirType.TranslateType(RequireAstTy(param)), genericsTypeStack)
         }
         return out
     }
@@ -2341,7 +2362,18 @@ public class FaithfulAST2CHIR {
         }
     }
 
-    private func FaithfulMangleType(ty: Type): String {
+    private func FaithfulMangleGenericType(genericTy: GenericType, genericsTypeStack: ArrayList<String>): String {
+        var idx = genericsTypeStack.size - 1
+        while (idx >= 0) {
+            if (genericsTypeStack[idx] == genericTy.GetSrcCodeIdentifier()) {
+                return FAITHFUL_MANGLE_GENERIC_TYPE_PREFIX + FaithfulDecimalToManglingNumber(idx.toString())
+            }
+            idx--
+        }
+        throw IllegalArgumentException("Using undeclared generic type: " + genericTy.GetSrcCodeIdentifier())
+    }
+
+    private func FaithfulMangleType(ty: Type, genericsTypeStack: ArrayList<String>): String {
         let primitive = FaithfulPrimitiveTypeMangle(ty.GetTypeKind())
         if (!primitive.isEmpty()) {
             return primitive
@@ -2350,28 +2382,28 @@ public class FaithfulAST2CHIR {
             let items = tupleTy.GetTypeArgs()
             var out = FAITHFUL_MANGLE_TUPLE_PREFIX + FaithfulDecimalToManglingNumber(items.size.toString())
             for (item in items) {
-                out += FaithfulMangleType(item)
+                out += FaithfulMangleType(item, genericsTypeStack)
             }
             return out + FAITHFUL_MANGLE_SUFFIX
         }
         if (let Some(structTy) <- (ty as StructType)) {
             var out = FAITHFUL_MANGLE_TYPE_STRUCT_PREFIX + FaithfulCustomTypeIdentifier(structTy.GetCustomTypeDef())
             for (arg in structTy.GetGenericArgs()) {
-                out += FaithfulMangleType(arg)
+                out += FaithfulMangleType(arg, genericsTypeStack)
             }
             return out
         }
         if (let Some(enumTy) <- (ty as EnumType)) {
             var out = FAITHFUL_MANGLE_TYPE_ENUM_PREFIX + FaithfulCustomTypeIdentifier(enumTy.GetCustomTypeDef())
             for (arg in enumTy.GetGenericArgs()) {
-                out += FaithfulMangleType(arg)
+                out += FaithfulMangleType(arg, genericsTypeStack)
             }
             return out
         }
         if (let Some(classTy) <- (ty as ClassType)) {
             var out = FAITHFUL_MANGLE_TYPE_CLASS_PREFIX + FaithfulCustomTypeIdentifier(classTy.GetCustomTypeDef())
             for (arg in classTy.GetGenericArgs()) {
-                out += FaithfulMangleType(arg)
+                out += FaithfulMangleType(arg, genericsTypeStack)
             }
             return out
         }
@@ -2379,35 +2411,36 @@ public class FaithfulAST2CHIR {
             var out = if (funcTy.IsCFunc()) { FAITHFUL_MANGLE_CFUNC_PREFIX } else {
                 FAITHFUL_MANGLE_GENERAL_FUNC_PREFIX
             }
-            out += FaithfulMangleType(funcTy.GetReturnType())
+            out += FaithfulMangleType(funcTy.GetReturnType(), genericsTypeStack)
             let params = funcTy.GetParamTypes()
             if (params.isEmpty()) {
                 return out + FAITHFUL_MANGLE_VOID_TY_SUFFIX + FAITHFUL_MANGLE_SUFFIX
             }
             for (param in params) {
-                out += FaithfulMangleType(param)
+                out += FaithfulMangleType(param, genericsTypeStack)
             }
             return out + FAITHFUL_MANGLE_SUFFIX
         }
         if (let Some(rawArrayTy) <- (ty as RawArrayType)) {
             return FAITHFUL_MANGLE_TYPE_ARRAY_PREFIX + FaithfulDecimalToManglingNumber(rawArrayTy.GetDims().toString()) +
-                FaithfulMangleType(rawArrayTy.GetElementType())
+                FaithfulMangleType(rawArrayTy.GetElementType(), genericsTypeStack)
         }
         if (let Some(refTy) <- (ty as RefType)) {
-            return FaithfulMangleType(refTy.GetBaseType())
+            return FaithfulMangleType(refTy.GetBaseType(), genericsTypeStack)
         }
         if (let Some(varrayTy) <- (ty as VArrayType)) {
             return FAITHFUL_MANGLE_VARRAY_PREFIX + FaithfulDecimalToManglingNumber(varrayTy.size.toString()) +
-                FaithfulMangleType(varrayTy.GetElementType())
+                FaithfulMangleType(varrayTy.GetElementType(), genericsTypeStack)
         }
         if (let Some(pointerTy) <- (ty as CPointerType)) {
-            return FAITHFUL_MANGLE_POINTER_PREFIX + FaithfulMangleType(pointerTy.GetElementType())
+            return FAITHFUL_MANGLE_POINTER_PREFIX + FaithfulMangleType(pointerTy.GetElementType(), genericsTypeStack)
         }
         if (let Some(genericTy) <- (ty as GenericType)) {
-            return FAITHFUL_MANGLE_GENERIC_TYPE_PREFIX + FaithfulMangleName(genericTy.GetSrcCodeIdentifier())
+            return FaithfulMangleGenericType(genericTy, genericsTypeStack)
         }
         if (let Some(boxTy) <- (ty as BoxType)) {
-            return FAITHFUL_MANGLE_TYPE_CLASS_PREFIX + FaithfulMangleName("Box") + FaithfulMangleType(boxTy.GetBaseType())
+            return FAITHFUL_MANGLE_TYPE_CLASS_PREFIX + FaithfulMangleName("Box") +
+                FaithfulMangleType(boxTy.GetBaseType(), genericsTypeStack)
         }
         if (let Some(thisTy) <- (ty as ThisType)) {
             return FAITHFUL_MANGLE_TYPE_CLASS_PREFIX + FaithfulMangleName(thisTy.ToString())
