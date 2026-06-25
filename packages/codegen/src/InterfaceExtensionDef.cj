@@ -248,14 +248,15 @@ private func GenerateFuncTableForType(cgMod: CGModule, targetType: Type, inherit
         return unsafe { LLVMConstNull(i8PtrType) }
     }
     let tableType = unsafe { LLVMArrayType(i8PtrType, UInt32(funcs.size * 2)) }
-    let table = GetOrInsertCodeGenGlobal(cgMod, ExtensionDefName(targetType, inheritedType) + ".ft", tableType)
+    let extendDefName = ExtensionDefName(targetType, inheritedType)
+    let table = GetOrInsertCodeGenGlobal(cgMod, extendDefName + ".ft", tableType)
     if (unsafe { LLVMIsDeclaration(table) } != 0) {
         let values = ArrayList<LLVMValueRef>()
         for (fn in funcs) {
             values.add(FunctionAsI8Ptr(cgMod, targetType, inheritedType, fn, i8PtrType))
         }
         for (fn2 in funcs) {
-            values.add(OuterTypeInfoForFunction(cgMod, targetType, fn2, i8PtrType))
+            values.add(OuterTypeInfoForFunction(cgMod, extendDefName, targetType, inheritedType, fn2, i8PtrType))
         }
         unsafe {
             LLVMSetInitializer(table, ConstArray(i8PtrType, values))
@@ -402,7 +403,7 @@ private func VirtualMethodsHaveSameSlot(left: Function, right: Function): Bool {
 
 private func FuncMayBeInVTable(fn: Function): Bool {
     if (fn.IsConstructor() || fn.IsFinalizer() || fn.GetFuncKind() == FuncKind.ANNOFACTORY_FUNC ||
-        fn.TestAttr(Attribute.GENERIC_INSTANTIATED)) {
+        IsWrappedRawMethod(fn) || fn.TestAttr(Attribute.GENERIC_INSTANTIATED)) {
         return false
     }
     return fn.TestAttr(Attribute.PUBLIC) || fn.TestAttr(Attribute.PROTECTED) ||
@@ -428,6 +429,10 @@ private func IsVirtualFunctionForVTable(fn: Function): Bool {
         return false
     }
     return fn.TestAttr(Attribute.VIRTUAL) || fn.TestAttr(Attribute.ABSTRACT)
+}
+
+private func IsWrappedRawMethod(fn: Function): Bool {
+    return fn.GetAnnotation("WrappedRawMethod").isSome() || fn.GetAnnotation("wrappedRawMethod").isSome()
 }
 
 private func IsCoreObjectDef(def: CustomTypeDef): Bool {
@@ -780,51 +785,92 @@ private func UnboxObjectValue(irBuilder: IRBuilder2, objectValue: LLVMValueRef, 
     return irBuilder.CreateLoad(valueCGType.GetLLVMType(), typedPayload, name: name + ".value")
 }
 
-private func OuterTypeInfoForFunction(cgMod: CGModule, targetType: Type, entry: InterfaceFunctionEntry,
-    i8PtrType: LLVMTypeRef): LLVMValueRef {
+private func OuterTypeInfoForFunction(cgMod: CGModule, extendDefName: String, targetType: Type, inheritedType: ClassType,
+    entry: InterfaceFunctionEntry, i8PtrType: LLVMTypeRef): LLVMValueRef {
+    let method = OuterTypeInfoMethod(entry) ?? return GenerateOuterTypeInfo(cgMod, inheritedType, None, i8PtrType)
     if (!targetType.GetTypeArgs().isEmpty()) {
-        if (let Some(method) <- entry.implementation) {
-            if (!method.TestAttr(Attribute.ABSTRACT)) {
-                return unsafe { LLVMConstBitCast(GetOrCreateOuterTypeInfoFn(cgMod, targetType, method), i8PtrType) }
-            }
-        }
+        return GenerateOuterTypeInfoFn(cgMod, extendDefName, targetType, method, inheritedType, i8PtrType)
     }
-    if (let Some(method) <- entry.implementation) {
-        if (let Some(parent) <- method.GetParentCustomTypeDef()) {
-            if (let Some(parentType) <- parent.GetType()) {
-                return TypeInfoAsI8Ptr(cgMod, parentType, i8PtrType)
-            }
-        }
-    }
-    return TypeInfoAsI8Ptr(cgMod, targetType, i8PtrType)
+    let instParentType = InstParentTypeForDirectOuterTypeInfo(targetType, inheritedType, method)
+    return GenerateOuterTypeInfo(cgMod, instParentType, Some(method), i8PtrType)
 }
 
-private func GetOrCreateOuterTypeInfoFn(cgMod: CGModule, targetType: Type, method: Function): LLVMValueRef {
+private func OuterTypeInfoMethod(entry: InterfaceFunctionEntry): Option<Function> {
+    if (let Some(method) <- entry.implementation) {
+        return Some(method)
+    }
+    return entry.expected
+}
+
+private func InstParentTypeForDirectOuterTypeInfo(targetType: Type, inheritedType: ClassType, method: Function): Type {
+    let methodParent = method.GetParentCustomTypeDef() ?? return inheritedType
+    if (let Some(targetCustomTy) <- (targetType.StripAllRefs() as CustomType)) {
+        if (targetCustomTy.GetCustomTypeDef().nodeId == methodParent.nodeId) {
+            return targetType
+        }
+    }
+    if (inheritedType.GetClassDef().nodeId == methodParent.nodeId) {
+        return inheritedType
+    }
+    return inheritedType
+}
+
+private func GenerateOuterTypeInfo(cgMod: CGModule, parentType: Type, method: Option<Function>,
+    i8PtrType: LLVMTypeRef): LLVMValueRef {
+    if (let Some(fn) <- method) {
+        if (fn.TestAttr(Attribute.ABSTRACT) && fn.GetBody().isNone()) {
+            return SentinelI8Ptr(cgMod, i8PtrType)
+        }
+    }
+    if (parentType.GetTypeArgs().isEmpty()) {
+        return SentinelI8Ptr(cgMod, i8PtrType)
+    }
+    return TypeInfoAsI8Ptr(cgMod, parentType, i8PtrType)
+}
+
+private func GenerateOuterTypeInfoFn(cgMod: CGModule, extendDefName: String, targetType: Type, method: Function,
+    parentType: Type, i8PtrType: LLVMTypeRef): LLVMValueRef {
+    if (method.TestAttr(Attribute.ABSTRACT) && method.GetBody().isNone()) {
+        return SentinelI8Ptr(cgMod, i8PtrType)
+    }
+    return unsafe {
+        LLVMConstBitCast(GetOrCreateOuterTypeInfoFn(cgMod, extendDefName, targetType, method, parentType), i8PtrType)
+    }
+}
+
+private func GetOrCreateOuterTypeInfoFn(cgMod: CGModule, extendDefName: String, targetType: Type,
+    method: Function, parentType: Type): LLVMValueRef {
     let typeInfoPtrType = CGType.GetOrCreateTypeInfoPtrType(cgMod.GetLLVMContext())
     let params = ArrayList<LLVMTypeRef>()
     params.add(typeInfoPtrType)
     let fnType = BuildLLVMFunctionType(typeInfoPtrType, params)
-    let fnName = CGType.GetRuntimeTypeName(targetType) + "_" + GetCodeGenGlobalName(method) + "_GetOuterTiFn"
+    let fnName = extendDefName + "_" + method.GetIdentifierWithoutPrefix() + "_GetOuterTiFn"
     let fn = cgMod.GetOrInsertFunction(fnName, fnType)
     if (unsafe { LLVMIsDeclaration(fn) } == 0) {
         return fn
     }
     unsafe { LLVMSetLinkage(fn, LLVMLinkageValue(LLVMLinkage.Private)) }
-    SetCangjieGC(fn)
+    AddFnAttr(fn, "native-interface-fn")
+    unsafe { LLVMSetUnnamedAddress(fn, LLVMUnnamedAddrValue(LLVMUnnamedAddr.GlobalUnnamedAddr)) }
     let entry = IRBuilder2(cgMod)
     let block = entry.CreateEntryBasicBlock(fn, "entry")
     entry.SetInsertPoint(block)
     let targetTypeInfo = unsafe { LLVMGetParam(fn, 0u32) }
-    let parentType = method.GetParentCustomTypeOrExtendedType() ?? targetType
-    let typeInfo = if (parentType.IsGenericRelated()) {
-        CreateTypeInfoForTemplateCallback(cgMod, entry, parentType.StripAllRefs(), RuntimeGenericParams(targetType),
+    let strippedParentType = parentType.StripAllRefs()
+    let typeInfo = if (strippedParentType.IsGenericRelated()) {
+        CreateTypeInfoForTemplateCallback(cgMod, entry, strippedParentType, RuntimeGenericParams(targetType),
             entry.GetTypeArgsFromTypeInfo(targetTypeInfo))
     } else {
-        CGType.GetOrCreate(cgMod, parentType.StripAllRefs()).GetOrCreateTypeInfo()
+        CGType.GetOrCreate(cgMod, strippedParentType).GetOrCreateTypeInfo()
     }
     entry.CreateRet(entry.CreateBitCast(typeInfo, typeInfoPtrType, name: "outer.ti"))
     entry.close()
     return fn
+}
+
+private func SentinelI8Ptr(cgMod: CGModule, i8PtrType: LLVMTypeRef): LLVMValueRef {
+    let i64Type = unsafe { LLVMInt64TypeInContext(cgMod.GetLLVMContext().raw) }
+    return unsafe { LLVMConstIntToPtr(LLVMConstInt(i64Type, 1u64, 0), i8PtrType) }
 }
 
 private func RuntimeGenericParams(targetType: Type): ArrayList<GenericType> {
