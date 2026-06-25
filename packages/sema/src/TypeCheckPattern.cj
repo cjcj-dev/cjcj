@@ -671,10 +671,9 @@ public func ChkEnumPattern(typeManager: TypeManager, ctx: ASTContext, target: Ty
     var mayMatch = false
     let maybeInferred = typeManager.TryGreedySubst(target)
     if (let Some(enumTy) <- (maybeInferred as EnumTy)) {
-        mayMatch = FindEnumPatternTarget(typeManager, ctx, enumTy.declPtr, pattern)
-        if (mayMatch) {
-            SetTyForEnumPatternConstructor(typeManager, enumTy, pattern)
-        }
+        let _ = FindEnumPatternTarget(typeManager, ctx, enumTy.declPtr, pattern)
+        SetTyForEnumPatternConstructor(typeManager, enumTy, pattern)
+        mayMatch = true
     } else if (target.IsPlaceholder()) {
         mayMatch = FindEnumPatternTarget(typeManager, ctx, None, pattern)
         if (mayMatch) {

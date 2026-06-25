@@ -130,11 +130,30 @@ func TcPatternCheck(typeManager: TypeManager, target: Ty, pattern: Pattern): Boo
     }
     if (let Some(enumPattern) <- (pattern as EnumPattern)) {
         var enumOk = true
+        var ctorTy: Ty = TypeManager.GetInvalidTy()
         if (let Some(ctor) <- enumPattern.constructor) {
-            enumOk = Ty.IsTyCorrect(SynExprShallow(typeManager, ctor)) && enumOk
+            ctorTy = SynExprShallow(typeManager, ctor)
+            if (let Some(ctorRef) <- (ctor as NameReferenceExpr)) {
+                ctorTy = InstantiateEnumConstructorRefFromTarget(typeManager, target, ctorRef, ctorTy)
+            }
+            enumOk = Ty.IsTyCorrect(ctorTy) && enumOk
         }
-        for (subPattern in enumPattern.patterns) {
-            enumOk = TcPatternCheck(typeManager, typeManager.GetAnyTy(), subPattern) && enumOk
+        if (let Some(funcTy) <- (ctorTy as FuncTy)) {
+            if (funcTy.paramTys.size == enumPattern.patterns.size) {
+                var idx: Int64 = 0
+                while (idx < enumPattern.patterns.size) {
+                    enumOk = TcPatternCheck(typeManager, funcTy.paramTys[idx], enumPattern.patterns[idx]) && enumOk
+                    idx++
+                }
+            } else {
+                for (subPattern in enumPattern.patterns) {
+                    enumOk = TcPatternCheck(typeManager, typeManager.GetAnyTy(), subPattern) && enumOk
+                }
+            }
+        } else {
+            for (subPattern2 in enumPattern.patterns) {
+                enumOk = TcPatternCheck(typeManager, typeManager.GetAnyTy(), subPattern2) && enumOk
+            }
         }
         if (!enumOk) {
             pattern.SetTy(TypeManager.GetInvalidTy())
