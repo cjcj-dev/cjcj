@@ -135,7 +135,13 @@ private func BuildApplyMethodTypeInfoArg(irBuilder: IRBuilder2, callee: Value, t
         if (IsAutoEnvType(ty) && !argValues.isEmpty()) {
             return Some(irBuilder.GetTypeInfoFromObject(argValues[0].GetRawValue()))
         }
-        let typeInfo = CGType.GetOrCreate(irBuilder.GetCGModule(), ty.StripAllRefs()).GetOrCreateTypeInfo()
+        let strippedTy = ty.StripAllRefs()
+        let cgType = CGType.GetOrCreate(irBuilder.GetCGModule(), strippedTy)
+        let typeInfo = if (cgType.IsDynamicGI()) {
+            irBuilder.CreateTypeInfo(strippedTy)
+        } else {
+            cgType.GetOrCreateTypeInfo()
+        }
         let typeInfoPtrType = CGType.GetOrCreateTypeInfoPtrType(irBuilder.GetLLVMContext())
         return Some(irBuilder.CreateBitCast(typeInfo, typeInfoPtrType, name: "call.this.ti"))
     }

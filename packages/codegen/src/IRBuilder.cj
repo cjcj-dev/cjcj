@@ -1186,6 +1186,9 @@ public class IRBuilder2 <: Resource {
             let resultTy = CurrentExpressionResultType() ?? returnTy
             let resultCGType = CGType.GetOrCreate(cgMod, resultTy)
             retValue = CreateLoad(returnCGType.GetLLVMType(), retValue, name: "sret.load")
+            if (resultCGType.GetSize().isNone() && !resultTy.IsGeneric()) {
+                return CopyUnknownSizeSRetReturn(retValue, resultTy)
+            }
             if (resultCGType.GetSize().isSome() && !resultCGType.IsReference()) {
                 return LoadSRetPayloadValue(retValue, resultCGType)
             }
@@ -1194,6 +1197,9 @@ public class IRBuilder2 <: Resource {
         if (ContainsGenericType(returnTy)) {
             let resultTy = CurrentExpressionResultType() ?? returnTy
             let resultCGType = CGType.GetOrCreate(cgMod, resultTy)
+            if (resultCGType.GetSize().isNone() && !resultTy.IsGeneric()) {
+                return CopyUnknownSizeSRetReturn(retValue, resultTy)
+            }
             if (resultCGType.GetSize().isSome() && !resultCGType.IsReference()) {
                 return LoadSRetPayloadValue(retValue, resultCGType)
             }
@@ -1205,6 +1211,9 @@ public class IRBuilder2 <: Resource {
             if (returnTy.IsGeneric()) {
                 retValue = CreateLoad(returnCGType.GetLLVMType(), retValue, name: "sret.load")
             }
+            if (resultCGType.GetSize().isNone() && !resultTy.IsGeneric()) {
+                return CopyUnknownSizeSRetReturn(retValue, resultTy)
+            }
             if (resultCGType.GetSize().isSome() && !resultCGType.IsReference()) {
                 return LoadSRetPayloadValue(retValue, resultCGType)
             }
@@ -1214,6 +1223,13 @@ public class IRBuilder2 <: Resource {
             return CreateLoad(returnCGType.GetLLVMType(), retValue, name: "sret.value")
         }
         return retValue
+    }
+
+    private func CopyUnknownSizeSRetReturn(retValue: LLVMValueRef, resultTy: Type): LLVMValueRef {
+        let typeInfo = CreateTypeInfo(resultTy)
+        let tmp = CallAllocaGenericWithTypeInfo(resultTy, typeInfo)
+        CallAssignGeneric(tmp, retValue, typeInfo)
+        return tmp
     }
 
     private func LoadSRetPayloadValue(retValue: LLVMValueRef, resultCGType: CGType): LLVMValueRef {

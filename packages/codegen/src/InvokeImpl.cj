@@ -232,7 +232,13 @@ private func BuildVirtualCallee(irBuilder: IRBuilder2, objectValue: CGValue, own
             unsafe { LLVMPointerType(cgFuncType.GetLLVMFunctionType(), 0u32) }, name: "invoke.fn.cast"),
             objectTypeInfo)
     }
-    let ownerTypeInfo = CGType.GetOrCreate(irBuilder.GetCGModule(), ownerTy.StripAllRefs()).GetOrCreateTypeInfo()
+    let strippedOwnerTy = ownerTy.StripAllRefs()
+    let ownerCGType = CGType.GetOrCreate(irBuilder.GetCGModule(), strippedOwnerTy)
+    let ownerTypeInfo = if (ownerCGType.IsDynamicGI()) {
+        irBuilder.CreateTypeInfo(strippedOwnerTy)
+    } else {
+        ownerCGType.GetOrCreateTypeInfo()
+    }
     let ownerTypeInfoRaw = irBuilder.CreateBitCast(ownerTypeInfo, i8PtrType, name: "invoke.owner.ti")
     let isInterfaceCall = IsInterfaceOwnerType(ownerTy)
     let rawCallee = if (isInterfaceCall) {
