@@ -10,6 +10,7 @@ private let CC_FUNC_IMPL_PREFIX: String = "$Cf"
 private let CC_LAMBDA_IMPL_PREFIX: String = "$Cl"
 private let CC_CAPTURED_PREFIX: String = "$Captured_"
 private let CC_FUNC_PREFIX: String = "_CC"
+private let MANGLE_CANGJIE_PREFIX: String = "_C"
 private let CC_AUTO_ENV_CLASS_ANNOTATION: String = "IsAutoEnvClass"
 private let CC_AUTO_ENV_BASE_ANNOTATION: String = "IsAutoEnvBase"
 private let CC_AUTO_ENV_GENERIC_BASE_ANNOTATION: String = "IsAutoEnvGenericBase"
@@ -441,7 +442,7 @@ public class ClosureConversion {
     }
 
     private func GetOrCreateAutoEnvImplDef(fn: Function, superClassDef: ClassDef): ClassDef {
-        let className = CC_FUNC_IMPL_PREFIX + StripGlobalPrefix(fn.GetIdentifierWithoutPrefix())
+        let className = ReplaceManglePrefixWith(fn.GetIdentifierWithoutPrefix(), CC_FUNC_IMPL_PREFIX)
         if (let Some(found) <- autoEnvImplDefs.get(className)) {
             return found
         }
@@ -457,7 +458,7 @@ public class ClosureConversion {
     private func GetOrCreateAutoEnvImplDef(lambda: Lambda, superClassDef: ClassDef,
         boxedEnvs: ArrayList<Value>): ClassDef {
         let count = duplicateLambdaName.get(lambda.GetIdentifier()) ?? 0
-        let className = CC_LAMBDA_IMPL_PREFIX + StripGlobalPrefix(lambda.GetIdentifier()) + "$" + count.toString()
+        let className = ReplaceManglePrefixWith(lambda.GetIdentifier(), CC_LAMBDA_IMPL_PREFIX) + "$" + count.toString()
         if (let Some(found) <- autoEnvImplDefs.get(className)) {
             return found
         }
@@ -1731,11 +1732,11 @@ public class ClosureConversion {
     }
 
     private func GenericOverrideFuncName(srcFunc: Function): String {
-        return CC_FUNC_PREFIX + StripGlobalPrefix(srcFunc.GetIdentifierWithoutPrefix()) + "$g"
+        return ReplaceManglePrefixWith(srcFunc.GetIdentifierWithoutPrefix(), CC_FUNC_PREFIX) + "$g"
     }
 
     private func InstOverrideFuncName(srcFunc: Function): String {
-        return CC_FUNC_PREFIX + StripGlobalPrefix(srcFunc.GetIdentifierWithoutPrefix()) + "$i"
+        return ReplaceManglePrefixWith(srcFunc.GetIdentifierWithoutPrefix(), CC_FUNC_PREFIX) + "$i"
     }
 
     private func GenerateCapturedMemberName(value: Value): String {
@@ -1755,6 +1756,13 @@ public class ClosureConversion {
             return identifier[1..]
         }
         return identifier
+    }
+
+    private func ReplaceManglePrefixWith(identifier: String, newPrefix: String): String {
+        if (identifier.startsWith(MANGLE_CANGJIE_PREFIX)) {
+            return newPrefix + identifier[MANGLE_CANGJIE_PREFIX.size..]
+        }
+        throw IllegalArgumentException("Mangle name has no _C prefix to be replaced: " + identifier)
     }
 
     private func TypeKey(ty: Type): String {
