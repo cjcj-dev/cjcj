@@ -183,6 +183,7 @@ public class LocalTypeArgumentSynthesis {
         }
         let synthesis = LocalTypeArgumentSynthesis(typeManager, pack)
         synthesis.constraints = cloneConstraint(cst)
+        synthesis.deterministic = true
         let ok = synthesis.UnifyOne(argTy, paramTy)
         if (ok) {
             cst.Clear()
