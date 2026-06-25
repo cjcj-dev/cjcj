@@ -251,13 +251,11 @@ private func EmitThrowingIntegerCast(irBuilder: IRBuilder2, sourceValue: LLVMVal
         lowerOK, lowerOverflow)
     irBuilder.SetInsertPoint(lowerOverflow)
     irBuilder.CreateOverflowOrArithmeticException("The result would be less than " + targetTy.ToString() + ".Min.")
-    irBuilder.CreateUnreachable()
     irBuilder.SetInsertPoint(lowerOK)
     irBuilder.CreateCondBr(CheckIntegerCastUpperBound(irBuilder, sourceValue, sourceTy, targetTy),
         upperOK, upperOverflow)
     irBuilder.SetInsertPoint(upperOverflow)
     irBuilder.CreateOverflowOrArithmeticException("The result would be greater than " + targetTy.ToString() + ".Max.")
-    irBuilder.CreateUnreachable()
     irBuilder.SetInsertPoint(upperOK)
     return EmitWrappingIntegerCast(irBuilder, sourceValue, sourceTy, targetLLVMType)
 }
