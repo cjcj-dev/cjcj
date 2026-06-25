@@ -10,6 +10,7 @@ import cangjie_compiler::chir.ExprKind
 import cangjie_compiler::chir.FloatLiteral
 import cangjie_compiler::chir.FuncType
 import cangjie_compiler::chir.Function
+import cangjie_compiler::chir.GenericType
 import cangjie_compiler::chir.IntLiteral
 import cangjie_compiler::chir.LiteralValue
 import cangjie_compiler::chir.RawArrayType
@@ -836,7 +837,11 @@ public class IRBuilder2 <: Resource {
             }
             if (calleeType.IsMethodType()) {
                 if (let Some(overrideTypeInfo) <- methodTypeInfoArg) {
-                    callArgs.add(overrideTypeInfo)
+                    if (calleeType.IsConstructorType() && !args.isEmpty()) {
+                        callArgs.add(CreateOuterTypeInfoArg(args[0]) ?? overrideTypeInfo)
+                    } else {
+                        callArgs.add(overrideTypeInfo)
+                    }
                 } else if (!args.isEmpty()) {
                     if (let Some(thisTypeInfo) <- CreateOuterTypeInfoArg(args[0])) {
                         callArgs.add(thisTypeInfo)
@@ -1001,6 +1006,10 @@ public class IRBuilder2 <: Resource {
         if (let Some(thisCGType) <- thisArg.GetCGType()) {
             let thisTy = thisCGType.GetOriginal().StripAllRefs()
             if (thisTy.IsStruct() || thisTy.IsTuple() || thisTy.IsClass() || thisTy.IsEnum()) {
+                if (CGType.GetOrCreate(cgMod, thisTy).IsDynamicGI()) {
+                    return Some(CreatePointerCast(CreateTypeInfo(thisTy),
+                        CGType.GetOrCreateTypeInfoPtrType(GetLLVMContext()), name: "this.ti"))
+                }
                 return Some(CGType.GetOrCreate(cgMod, thisTy).GetOrCreateTypeInfo())
             }
         }
@@ -2172,7 +2181,7 @@ public class IRBuilder2 <: Resource {
 
     public func CallClassIntrinsicAlloc(classTy: Type): LLVMValueRef {
         let classCGType = CGType.GetOrCreate(cgMod, classTy)
-        let typeInfo = if (IsAutoEnvType(classTy)) {
+        let typeInfo = if (IsAutoEnvType(classTy) || classCGType.IsDynamicGI()) {
             CreateTypeInfo(classTy)
         } else {
             classCGType.GetOrCreateTypeInfo()
@@ -2209,7 +2218,11 @@ public class IRBuilder2 <: Resource {
     public func CallValueIntrinsicAlloc(sourceTy: Type): LLVMValueRef {
         let valueTy = sourceTy.StripAllRefs()
         let valueCGType = CGType.GetOrCreate(cgMod, valueTy)
-        let typeInfo = valueCGType.GetOrCreateTypeInfo()
+        let typeInfo = if (valueCGType.IsDynamicGI()) {
+            CreateTypeInfo(valueTy)
+        } else {
+            valueCGType.GetOrCreateTypeInfo()
+        }
         let typeInfoArg = CreateBitCast(typeInfo, unsafe { LLVMPointerType(LLVMInt8TypeInContext(GetLLVMContext().raw),
             0u32) }, name: "generic.ti")
         let args = ArrayList<LLVMValueRef>()
@@ -2311,17 +2324,34 @@ public class IRBuilder2 <: Resource {
     public func CreateTypeInfo(chirTy: Type): LLVMValueRef {
         let baseTy = chirTy.StripAllRefs()
         if (let Some(currentFunction) <- cgFunction) {
-            if (let Some(typeInfoProvider) <- currentFunction.genericParamsMap.get(baseTy.ToString())) {
+            if (let Some(typeInfoProvider) <- FindGenericTypeInfoProvider(currentFunction, baseTy)) {
                 return typeInfoProvider(this)
             }
         }
         if (baseTy.IsGeneric()) {
             throw IllegalStateException("missing runtime TypeInfo mapping for generic type: " + baseTy.ToString())
         }
-        if (ContainsGenericType(baseTy)) {
-            return CreateGenericRuntimeTypeInfo(baseTy)
+        let cgTy = CGType.GetOrCreate(cgMod, baseTy)
+        if (cgTy.IsConcrete() || cgTy.IsStaticGI()) {
+            return cgTy.GetOrCreateTypeInfo()
         }
-        return CGType.GetOrCreate(cgMod, baseTy).GetOrCreateTypeInfo()
+        return CreateGenericRuntimeTypeInfo(baseTy)
+    }
+
+    private func FindGenericTypeInfoProvider(currentFunction: CGFunction,
+        baseTy: Type): Option<(IRBuilder2) -> LLVMValueRef> {
+        if (let Some(typeInfoProvider) <- currentFunction.genericParamsMap.get(baseTy.ToString())) {
+            return Some(typeInfoProvider)
+        }
+        if (let Some(genericTy) <- (baseTy as GenericType)) {
+            if (let Some(typeInfoProvider) <- currentFunction.genericParamsMap.get(genericTy.GetIdentifier())) {
+                return Some(typeInfoProvider)
+            }
+            if (let Some(typeInfoProvider) <- currentFunction.genericParamsMap.get(genericTy.GetSrcCodeIdentifier())) {
+                return Some(typeInfoProvider)
+            }
+        }
+        return None
     }
 
     public func GetTypeArgsFromTypeInfo(typeInfo: LLVMValueRef): LLVMValueRef {
@@ -2353,7 +2383,8 @@ public class IRBuilder2 <: Resource {
     private func CreateGenericRuntimeTypeInfo(chirTy: Type): LLVMValueRef {
         let (typeTemplate, typeArgs) = IRBuilderRuntimeTypeTemplateAndArgs(chirTy)
         if (typeArgs.isEmpty()) {
-            return CGType.GetOrCreate(cgMod, chirTy).GetOrCreateTypeInfo()
+            throw IllegalStateException("missing runtime TypeInfo arguments for generic-related type: " +
+                chirTy.ToString())
         }
         let typeInfoArray = CreateTypeInfoArray(typeArgs)
         let args = ArrayList<LLVMValueRef>()
@@ -2464,7 +2495,14 @@ public class IRBuilder2 <: Resource {
             indices.add(unsafe { LLVMConstInt(i32Type, 0u64, 0) })
             indices.add(unsafe { LLVMConstInt(i32Type, UInt64(idx), 0) })
             let argSlot = CreateGEP(arrayType, slot, indices, name: "ti.arg")
-            let argTypeInfo = CreatePointerCast(CreateTypeInfo(typeArgs[idx]), typeInfoPtrType, name: "ti.arg.cast")
+            let argTy = typeArgs[idx].StripAllRefs()
+            let argCGType = CGType.GetOrCreate(cgMod, argTy)
+            let rawTypeInfo = if (argCGType.IsDynamicGI()) {
+                CreateTypeInfo(argTy)
+            } else {
+                argCGType.GetOrCreateTypeInfo()
+            }
+            let argTypeInfo = CreatePointerCast(rawTypeInfo, typeInfoPtrType, name: "ti.arg.cast")
             CreateStore(argTypeInfo, argSlot)
             idx++
         }

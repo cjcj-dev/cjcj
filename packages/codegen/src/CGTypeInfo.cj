@@ -699,7 +699,8 @@ private func CreateRuntimeTypeInfoForTemplateCallback(cgMod: CGModule, irBuilder
     genericParams: ArrayList<GenericType>, runtimeTypeInfoArray: LLVMValueRef): LLVMValueRef {
     let (typeTemplate, typeArgs) = RuntimeTypeTemplateAndArgs(cgMod, chirTy)
     if (typeArgs.isEmpty()) {
-        return CGType.GetOrCreate(cgMod, chirTy).GetOrCreateTypeInfo()
+        throw IllegalStateException("missing runtime TypeInfo arguments for template generic-related type: " +
+            chirTy.ToString())
     }
     let localTypeInfoArray = CreateTypeInfoArrayForTemplateCallback(cgMod, irBuilder, typeArgs, genericParams,
         runtimeTypeInfoArray)
@@ -795,8 +796,14 @@ private func CreateTypeInfoArrayForTemplateCallback(cgMod: CGModule, irBuilder: 
         indices.add(unsafe { LLVMConstInt(i32Type, 0u64, 0) })
         indices.add(unsafe { LLVMConstInt(i32Type, UInt64(idx), 0) })
         let argSlot = irBuilder.CreateGEP(arrayType, slot, indices, name: "ti.arg")
-        let argTypeInfo = irBuilder.CreatePointerCast(CreateTypeInfoForTemplateCallback(cgMod, irBuilder,
-            typeArgs[idx], genericParams, runtimeTypeInfoArray), typeInfoPtrType, name: "ti.arg.cast")
+        let argTy = typeArgs[idx].StripAllRefs()
+        let argCGType = CGType.GetOrCreate(cgMod, argTy)
+        let rawTypeInfo = if (argCGType.IsDynamicGI()) {
+            CreateTypeInfoForTemplateCallback(cgMod, irBuilder, argTy, genericParams, runtimeTypeInfoArray)
+        } else {
+            argCGType.GetOrCreateTypeInfo()
+        }
+        let argTypeInfo = irBuilder.CreatePointerCast(rawTypeInfo, typeInfoPtrType, name: "ti.arg.cast")
         irBuilder.CreateStore(argTypeInfo, argSlot)
         idx++
     }
