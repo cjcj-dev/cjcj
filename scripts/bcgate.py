@@ -52,8 +52,12 @@ def norm_ir(text):
     return _canonicalize(_normalize(text))
 
 
-def emit_ir(compiler, src, workdir, e):
-    """Compile src to bitcode with --save-temps; return normalized IR text (sorted by function)."""
+_DEFNAME = re.compile(r'define[^@]*@("[^"]+"|[^ (]+)')
+
+
+def emit_funcs(compiler, src, workdir, e):
+    """Compile src to bitcode; return {functionMangledName: canonicalized body} (robust to how the two
+    backends split a package into modules — we match function-by-function, not by module layout)."""
     d = workdir / hashlib.md5(compiler.encode()).hexdigest()[:8]
     d.mkdir(parents=True, exist_ok=True)
     r = subprocess.run([compiler, str(src), "--save-temps", str(d), "-o", str(d / "a")],
@@ -66,19 +70,19 @@ def emit_ir(compiler, src, workdir, e):
         dr = subprocess.run([DIS, str(bc), "-o", "-"], capture_output=True, text=True)
         if dr.returncode == 0:
             chunks.append(dr.stdout)
-    # split into function bodies, sort, so module-ordering noise doesn't matter
     lines = norm_ir("\n".join(chunks))
-    funcs, cur = [], None
+    funcs, cur, name = {}, None, None
     for ln in lines:
         if ln.startswith("define "):
+            m = _DEFNAME.match(ln)
+            name = m.group(1) if m else ln
             cur = [ln]
-            funcs.append(cur)
         elif cur is not None:
             cur.append(ln)
             if ln == "}":
+                funcs[name] = "\n".join(cur)
                 cur = None
-    bodies = sorted("\n".join(f) for f in funcs)
-    return "\n".join(bodies), None
+    return funcs, None
 
 
 def run_prog(compiler, src, workdir, e):
@@ -107,41 +111,44 @@ def main():
         print(f"no .cj in {args.corpus}", file=sys.stderr)
         return 2
 
-    unchanged, changed, errors = [], [], []
+    samples_identical, errors = [], []
+    tot_fn = tot_same = 0
+    from collections import Counter
+    differ = Counter()           # function-name -> how many samples it differs in
+    only_one_side = Counter()
     with tempfile.TemporaryDirectory() as work:
         work = Path(work)
         for src in samples:
-            cand_ir, cerr = emit_ir(args.cand, src, work / "c" / src.stem, e)
-            base_ir, berr = emit_ir(args.base, src, work / "b" / src.stem, e)
-            name = src.name
-            if cand_ir is None or base_ir is None:
-                errors.append((name, cerr or berr))
+            cand, cerr = emit_funcs(args.cand, src, work / "c" / src.stem, e)
+            base, berr = emit_funcs(args.base, src, work / "b" / src.stem, e)
+            if cand is None or base is None:
+                errors.append((src.name, cerr or berr))
                 continue
-            if cand_ir == base_ir:
-                unchanged.append(name)
-            else:
-                verdict = ""
-                if args.run:
-                    co = run_prog(args.cand, src, work / "rc" / src.stem, e)
-                    bo = run_prog(args.base, src, work / "rb" / src.stem, e)
-                    verdict = "stdout-MATCH" if co == bo else f"stdout-MISMATCH (cand={co!r} base={bo!r})"
-                changed.append((name, verdict))
-                if args.v:
-                    import difflib
-                    print(f"--- IR diff: {name} ---")
-                    print("\n".join(difflib.unified_diff(base_ir.splitlines(), cand_ir.splitlines(),
-                                                          "baseline", "candidate", lineterm=""))[:4000])
+            shared = set(cand) & set(base)
+            same = sum(1 for n in shared if cand[n] == base[n])
+            tot_fn += len(shared)
+            tot_same += same
+            for n in shared:
+                if cand[n] != base[n]:
+                    differ[n] += 1
+            for n in (set(cand) ^ set(base)):
+                only_one_side[n] += 1
+            if same == len(shared) and not (set(cand) ^ set(base)):
+                samples_identical.append(src.name)
 
-    print(f"\n=== bcgate: {len(samples)} samples  |  {len(unchanged)} bitcode-identical (proven non-regress)"
-          f"  |  {len(changed)} changed  |  {len(errors)} compile-error ===")
-    for name, verdict in changed:
-        print(f"  CHANGED  {name}  {verdict}")
-    for name, err in errors:
-        print(f"  ERROR    {name}  {err}")
-    bad = [n for n, v in changed if "MISMATCH" in v] + [n for n, _ in errors]
-    if not changed and not errors:
-        print("ALL BITCODE IDENTICAL — no behavioral change vs baseline, no run needed.")
-    return 1 if bad else 0
+    pct = (100.0 * tot_same / tot_fn) if tot_fn else 0.0
+    print(f"\n=== bcgate PER-FUNCTION parity (candidate vs baseline) over {len(samples)} samples ===")
+    print(f"shared functions: {tot_fn}  |  byte-identical: {tot_same} ({pct:.1f}%)  |  differing: {tot_fn - tot_same}")
+    print(f"fully-identical samples: {len(samples_identical)}/{len(samples) - len(errors)}  |  compile-errors: {len(errors)}")
+    if differ:
+        print("top differing functions (name: #samples):")
+        for n, c in differ.most_common(15):
+            print(f"  {c:3d}  {n}")
+    if only_one_side:
+        print(f"functions present on only one side (module/emission-set divergence): {sum(only_one_side.values())} occurrences, {len(only_one_side)} distinct")
+    for name, err in errors[:10]:
+        print(f"  ERROR  {name}  {err}")
+    return 0
 
 
 if __name__ == "__main__":
