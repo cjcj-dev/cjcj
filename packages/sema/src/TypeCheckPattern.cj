@@ -293,7 +293,8 @@ private func AddUniqueEnumPatternDecl(result: ArrayList<Decl>, decl: Decl): Unit
 }
 
 private func IsEnumPatternBaseDecl(decl: Decl): Bool {
-    return decl.astKind == ASTKind.ENUM_DECL || decl.astKind == ASTKind.PACKAGE_DECL
+    let realDecl = GetRealTarget(decl)
+    return realDecl.astKind == ASTKind.ENUM_DECL || realDecl.astKind == ASTKind.PACKAGE_DECL
 }
 
 private func AddEnumPatternCandidate(result: ArrayList<Decl>, decl: Decl): Unit {
@@ -337,13 +338,13 @@ private func ResolveEnumPatternRefBase(typeManager: TypeManager, ctx: ASTContext
 
 private func ResolveEnumPatternMemberBase(typeManager: TypeManager, ctx: ASTContext, expr: Expr): Option<Decl> {
     if (let Some(refExpr) <- (expr as RefExpr)) {
-        return ResolveEnumPatternRefBase(typeManager, ctx, refExpr)
+        return GetRealTarget(ResolveEnumPatternRefBase(typeManager, ctx, refExpr))
     }
     if (let Some(member) <- (expr as MemberAccess)) {
         ResolveEnumPatternMemberAccess(typeManager, ctx, member, resolveBase: true)
-        return member.target
+        return GetRealTarget(member.target)
     }
-    return expr.GetTarget()
+    return GetRealTarget(expr.GetTarget())
 }
 
 private func ResolveEnumPatternMemberAccess(typeManager: TypeManager, ctx: ASTContext, member: MemberAccess,
