@@ -1,12 +1,25 @@
 package cangjie_compiler::codegen
 
 import std.collection.*
+import std.sort.*
+import cangjie_compiler::chir.Attribute
 import cangjie_compiler::chir.FuncKind
 import cangjie_compiler::chir.Function
+import cangjie_compiler::mangle.MANGLE_FUNC_PARAM_TYPE_PREFIX
+import cangjie_compiler::mangle.MANGLE_VOID_TY_SUFFIX
+import cangjie_compiler::mangle.SPECIAL_NAME_FOR_IMPORTS_INIT_FUNCTION
+import cangjie_compiler::mangle.SPECIAL_NAME_FOR_INIT_FLAG_RESET_FUNCTION
+import cangjie_compiler::mangle.SPECIAL_NAME_FOR_INIT_LITERAL_FUNCTION
+import cangjie_compiler::mangle.SPECIAL_NAME_FOR_INIT_RESET_FUNCTION
 import cangjie_compiler::option.GlobalOptions
-import cangjie_compiler::option.OutputMode
 
 private let CANGJIE_SDK_VERSION: String = "1.1.0-alpha.20260331010029"
+private let PKG_INIT_FUNC_METADATA: String = "pkg_init_func"
+private let HAS_INVOKED_PKG_INIT_LITERAL: String = "has_invoked_pkg_init_literal"
+
+private type LLVMIsACallInstFunc = CFunc<(LLVMValueRef) -> LLVMValueRef>
+private type LLVMGetCalledValueFunc = CFunc<(LLVMValueRef) -> LLVMValueRef>
+private type LLVMSetValueName2Func = CFunc<(LLVMValueRef, CString, UIntNative) -> Unit>
 
 public func GenPackageModules(chirData: CHIRData, options: GlobalOptions, enableIncrement: Bool,
     cachedMangleMap!: CachedMangleMap = CachedMangleMap()): ArrayList<LLVMModuleHandle> {
@@ -21,9 +34,16 @@ public func GenPackageModules(chirData: CHIRData, options: GlobalOptions, enable
         for (chirFunc in subPackage.chirFuncs) {
             EmitFunctionIR(cgMod, chirFunc)
         }
-        if (subPackage.mainModule && options.outputMode == OutputMode.EXECUTABLE) {
+        for (chirFunc in subPackage.chirForeigns) {
+            EmitImportedCFuncIR(cgMod, chirFunc)
+        }
+        for (chirFunc in subPackage.chirImportedCFuncs) {
+            EmitImportedCFuncIR(cgMod, chirFunc)
+        }
+        if (subPackage.mainModule && options.CompileExecutable()) {
             EmitCJSDKVersion(cgMod)
             EmitMainFunctionIR(cgMod)
+            CreatePackageInitResetFunction(cgMod)
             SpecifyPackageInitFunc(cgMod)
         }
         InitializeCjStringLiteral(cgMod)
@@ -204,9 +224,266 @@ private func EmitPackageInitCall(cgMod: CGModule, builder: LLVMBuilderRef): Unit
     }
 }
 
+private func EmitImportedCFuncIR(cgMod: CGModule, chirFunc: Function): Unit {
+    let chirFuncTy = if (let Some(funcTy) <- chirFunc.GetFuncType()) { funcTy } else { return }
+    if (!chirFuncTy.IsCFunc() || (!chirFunc.TestAttr(Attribute.PRIVATE) && !chirFunc.TestAttr(Attribute.FOREIGN))) {
+        return
+    }
+    let srcPkgName = chirFunc.GetPackageName()
+    let funcPkgName = if (srcPkgName.isEmpty()) { cgMod.GetCGContext().GetCurrentPkgName() } else { srcPkgName }
+    if (funcPkgName != cgMod.GetCGContext().GetCurrentPkgName()) {
+        return
+    }
+    EmitFunctionIR(cgMod, chirFunc)
+}
+
 private func SpecifyPackageInitFunc(cgMod: CGModule): Unit {
     if (let Some(initFn) <- cgMod.GetCGContext().GetCHIRPackage().GetPackageInitFunc()) {
-        cgMod.GetCGContext().AddLLVMUsedVars(GetCodeGenGlobalName(initFn))
+        let initFuncName = GetCodeGenGlobalName(initFn)
+        if (let Some(moduleHandle) <- cgMod.GetLLVMModule()) {
+            LLVMAddNamedMetadataStringOperand(moduleHandle, PKG_INIT_FUNC_METADATA, initFuncName)
+        }
+        cgMod.GetCGContext().AddLLVMUsedVars(initFuncName)
+    }
+}
+
+private func CreatePackageInitResetFunction(cgMod: CGModule): Unit {
+    let pkgInitFuncName = GetPackageInitFuncName(cgMod) ?? return
+    let funcName = ReplaceLastMangleSpecialName(pkgInitFuncName, SPECIAL_NAME_FOR_INIT_RESET_FUNCTION)
+    if (let Some(moduleHandle) <- cgMod.GetLLVMModule()) {
+        if (!GetNamedFunction(moduleHandle, funcName).isNull()) {
+            return
+        }
+    }
+    let llvmContext = cgMod.GetLLVMContext().raw
+    let voidType = unsafe { LLVMVoidTypeInContext(llvmContext) }
+    let i8Type = unsafe { LLVMInt8TypeInContext(llvmContext) }
+    let i8PtrType = unsafe { LLVMPointerType(i8Type, 0u32) }
+    let functionType = BuildLLVMFunctionType(voidType, SingleTypeList(i8PtrType))
+    let resetFunc = cgMod.GetOrInsertFunction(funcName, functionType)
+    SetLLVMValueName(resetFunc, 0u32, "param")
+    AddFnAttr(resetFunc, "noinline")
+    cgMod.SetExceptionIntrinsicPersonality(resetFunc)
+    AddLinkageTypeMetadata(resetFunc, LLVMLinkage.External, cgMod.GetCGContext().IsCGParallelEnabled())
+    SetCangjieGC(resetFunc)
+
+    try (irBuilder = IRBuilder2(cgMod)) {
+        let entry = irBuilder.CreateEntryBasicBlock(resetFunc, "entry")
+        unsafe { LLVMPositionBuilderAtEnd(irBuilder.GetBuilder().raw, entry) }
+        let flagResetFunc = CreatePackageInitFlagResetFunction(cgMod)
+        let voidFnType = unsafe { LLVMFunctionType(voidType, CPointer<LLVMTypeRef>(), 0u32, 0) }
+        let _ = irBuilder.CreateCallOrInvoke(flagResetFunc, voidFnType, ArrayList<LLVMValueRef>())
+
+        if (let Some(literalInitFunc) <- GetPackageInitSiblingFunction(cgMod, pkgInitFuncName,
+            SPECIAL_NAME_FOR_INIT_LITERAL_FUNCTION)) {
+            let _ = irBuilder.CreateCallOrInvoke(literalInitFunc, voidFnType, ArrayList<LLVMValueRef>())
+        }
+        if (let Some(gvInitFunc) <- GetNamedFunctionOpt(cgMod, pkgInitFuncName)) {
+            let _ = irBuilder.CreateCallOrInvoke(gvInitFunc, voidFnType, ArrayList<LLVMValueRef>())
+        }
+
+        let cFuncType = BuildLLVMFunctionType(voidType, SingleTypeList(i8PtrType))
+        let paramType = GetOrCreateNamedStructType(cgMod.GetLLVMContext(), "struct._param")
+        let paramFields = ArrayList<LLVMTypeRef>()
+        paramFields.add(unsafe { LLVMPointerType(cFuncType, 0u32) })
+        paramFields.add(i8PtrType)
+        SetStructTypeBody(paramType, paramFields)
+        let wrapperFunc = GetGVResetCallBack(cgMod, cFuncType)
+        let castParam = irBuilder.CreateBitCast(unsafe { LLVMGetParam(resetFunc, 0u32) },
+            unsafe { LLVMPointerType(paramType, 0u32) })
+        let wrapperArgs = ArrayList<LLVMValueRef>()
+        wrapperArgs.add(irBuilder.CreateLoad(paramFields[0], irBuilder.CreateStructGEP(paramType, castParam, 0u32)))
+        wrapperArgs.add(irBuilder.CreateLoad(paramFields[1], irBuilder.CreateStructGEP(paramType, castParam, 1u32)))
+        let wrapperType = BuildLLVMFunctionType(voidType, paramFields)
+        let _ = irBuilder.CreateCallOrInvoke(wrapperFunc, wrapperType, wrapperArgs)
+        let _ = unsafe { LLVMBuildRetVoid(irBuilder.GetBuilder().raw) }
+    }
+}
+
+private func CreatePackageInitFlagResetFunction(cgMod: CGModule): LLVMValueRef {
+    let pkgInitFuncName = GetPackageInitFuncName(cgMod) ?? return LLVMNullValue()
+    let funcName = ReplaceLastMangleSpecialName(pkgInitFuncName, SPECIAL_NAME_FOR_INIT_FLAG_RESET_FUNCTION)
+    if (let Some(existing) <- GetNamedFunctionOpt(cgMod, funcName)) {
+        return existing
+    }
+
+    let llvmContext = cgMod.GetLLVMContext().raw
+    let voidType = unsafe { LLVMVoidTypeInContext(llvmContext) }
+    let functionType = unsafe { LLVMFunctionType(voidType, CPointer<LLVMTypeRef>(), 0u32, 0) }
+    let flagResetFunc = cgMod.GetOrInsertFunction(funcName, functionType)
+    AddFnAttr(flagResetFunc, "noinline")
+    cgMod.SetExceptionIntrinsicPersonality(flagResetFunc)
+    AddLinkageTypeMetadata(flagResetFunc, LLVMLinkage.External, cgMod.GetCGContext().IsCGParallelEnabled())
+    SetCangjieGC(flagResetFunc)
+
+    try (irBuilder = IRBuilder2(cgMod)) {
+        let entry = irBuilder.CreateEntryBasicBlock(flagResetFunc, "entry")
+        unsafe { LLVMPositionBuilderAtEnd(irBuilder.GetBuilder().raw, entry) }
+        CallDependentPackageGlobalResetCall(irBuilder)
+        StoreFalseIfGlobalExists(cgMod, irBuilder, HAS_INVOKED_PKG_INIT_LITERAL)
+        StoreFalseIfGlobalExists(cgMod, irBuilder, GV_PKG_INIT_ONCE_FLAG)
+        let _ = unsafe { LLVMBuildRetVoid(irBuilder.GetBuilder().raw) }
+    }
+    return flagResetFunc
+}
+
+private func GetGVResetCallBack(cgMod: CGModule, callBackFuncType: LLVMTypeRef): LLVMValueRef {
+    let llvmContext = cgMod.GetLLVMContext().raw
+    let voidType = unsafe { LLVMVoidTypeInContext(llvmContext) }
+    let i8PtrType = unsafe { LLVMPointerType(LLVMInt8TypeInContext(llvmContext), 0u32) }
+    let wrapperParamTypes = ArrayList<LLVMTypeRef>()
+    wrapperParamTypes.add(unsafe { LLVMPointerType(callBackFuncType, 0u32) })
+    wrapperParamTypes.add(i8PtrType)
+    let wrapperFuncType = BuildLLVMFunctionType(voidType, wrapperParamTypes)
+    let wrapperFunc = cgMod.GetOrInsertFunction("wrapper.F0uPuE", wrapperFuncType)
+    if (unsafe { LLVMGetFirstBasicBlock(wrapperFunc) }.isNull()) {
+        try (irBuilder = IRBuilder2(cgMod)) {
+            let entry = irBuilder.CreateEntryBasicBlock(wrapperFunc, "entry")
+            unsafe { LLVMPositionBuilderAtEnd(irBuilder.GetBuilder().raw, entry) }
+            let args = ArrayList<LLVMValueRef>()
+            args.add(unsafe { LLVMGetParam(wrapperFunc, 1u32) })
+            let _ = irBuilder.CreateCall(unsafe { LLVMGetParam(wrapperFunc, 0u32) }, callBackFuncType, args)
+            let _ = unsafe { LLVMBuildRetVoid(irBuilder.GetBuilder().raw) }
+        }
+    }
+    unsafe { LLVMSetLinkage(wrapperFunc, LLVMLinkageValue(LLVMLinkage.Private)) }
+    AddFnAttr(wrapperFunc, "noinline")
+    AddFnAttr(wrapperFunc, CJ2C_ATTR)
+    return wrapperFunc
+}
+
+private func CallDependentPackageGlobalResetCall(irBuilder: IRBuilder2): Unit {
+    let pkgInitFuncName = GetPackageInitFuncName(irBuilder.GetCGModule()) ?? return
+    let initFunc = GetNamedFunctionOpt(irBuilder.GetCGModule(), pkgInitFuncName) ?? return
+    let giList = ArrayList<String>()
+    CollectDependentPackages(initFunc, giList)
+    let giFuncType = unsafe {
+        LLVMFunctionType(LLVMVoidTypeInContext(irBuilder.GetLLVMContext().raw), CPointer<LLVMTypeRef>(), 0u32, 0)
+    }
+    for (gi in giList) {
+        let flagResetFunc = irBuilder.GetCGModule().GetOrInsertFunction(gi, giFuncType)
+        AddFnAttr(flagResetFunc, "noinline")
+        let _ = irBuilder.CreateCall(flagResetFunc, giFuncType, ArrayList<LLVMValueRef>())
+    }
+}
+
+private func CollectDependentPackages(llvmFunc: LLVMValueRef, giList: ArrayList<String>): Unit {
+    let isCallInstSymbol = LookupLLVMOptionalSymbol("LLVMIsACallInst")
+    let getCalledValueSymbol = LookupLLVMOptionalSymbol("LLVMGetCalledValue")
+    if (isCallInstSymbol.isNull() || getCalledValueSymbol.isNull()) {
+        return
+    }
+    let isCallInst = LLVMIsACallInstFunc(isCallInstSymbol)
+    let getCalledValue = LLVMGetCalledValueFunc(getCalledValueSymbol)
+    let callDependentPackageInitSuffix = SPECIAL_NAME_FOR_INIT_FLAG_RESET_FUNCTION +
+        MANGLE_FUNC_PARAM_TYPE_PREFIX + MANGLE_VOID_TY_SUFFIX
+    let callDependentPackagesInitsSuffix = SPECIAL_NAME_FOR_IMPORTS_INIT_FUNCTION +
+        MANGLE_FUNC_PARAM_TYPE_PREFIX + MANGLE_VOID_TY_SUFFIX
+
+    var block = unsafe { LLVMGetFirstBasicBlock(llvmFunc) }
+    while (!block.isNull()) {
+        var inst = unsafe { LLVMGetFirstInstruction(block) }
+        while (!inst.isNull()) {
+            if (!unsafe { isCallInst(inst) }.isNull()) {
+                let callee = unsafe { getCalledValue(inst) }
+                if (!callee.isNull() && !unsafe { LLVMIsAFunction(callee) }.isNull()) {
+                    let calleeName = LLVMCStringToString(unsafe { LLVMGetValueName(callee) }) ?? ""
+                    CollectDependentPackageByCalleeName(callee, calleeName, callDependentPackageInitSuffix,
+                        callDependentPackagesInitsSuffix, giList)
+                }
+            }
+            inst = unsafe { LLVMGetNextInstruction(inst) }
+        }
+        block = unsafe { LLVMGetNextBasicBlock(block) }
+    }
+}
+
+private func CollectDependentPackageByCalleeName(callee: LLVMValueRef, calleeName: String,
+    callDependentPackageInitSuffix: String, callDependentPackagesInitsSuffix: String,
+    giList: ArrayList<String>): Unit {
+    if (calleeName.size < callDependentPackageInitSuffix.size) {
+        return
+    }
+    let calleePrefixSize = calleeName.size - callDependentPackageInitSuffix.size
+    let calleePrefix = calleeName[0..calleePrefixSize]
+    let calleeSuffix = calleeName[calleePrefixSize..]
+    if (calleeSuffix == callDependentPackagesInitsSuffix) {
+        CollectDependentPackages(callee, giList)
+    } else if (calleeName.startsWith(PKG_GV_INIT_PREFIX)) {
+        giList.add(calleePrefix + callDependentPackageInitSuffix)
+    }
+}
+
+private func StoreFalseIfGlobalExists(cgMod: CGModule, irBuilder: IRBuilder2, globalName: String): Unit {
+    if (let Some(moduleHandle) <- cgMod.GetLLVMModule()) {
+        let global = GetNamedGlobal(moduleHandle, globalName)
+        if (!global.isNull()) {
+            let _ = irBuilder.CreateStore(irBuilder.GetFalse(), global)
+        }
+    }
+}
+
+private func GetPackageInitSiblingFunction(cgMod: CGModule, pkgInitFuncName: String,
+    specialName: String): Option<LLVMValueRef> {
+    return GetNamedFunctionOpt(cgMod, ReplaceLastMangleSpecialName(pkgInitFuncName, specialName))
+}
+
+private func ReplaceLastMangleSpecialName(pkgInitFuncName: String, specialName: String): String {
+    let targetSuffix = specialName + MANGLE_FUNC_PARAM_TYPE_PREFIX + MANGLE_VOID_TY_SUFFIX
+    return pkgInitFuncName[0..(pkgInitFuncName.size - targetSuffix.size)] + targetSuffix
+}
+
+private func GetPackageInitFuncName(cgMod: CGModule): Option<String> {
+    if (let Some(initFn) <- cgMod.GetCGContext().GetCHIRPackage().GetPackageInitFunc()) {
+        return Some(GetCodeGenGlobalName(initFn))
+    }
+    return None
+}
+
+private func GetNamedFunctionOpt(cgMod: CGModule, name: String): Option<LLVMValueRef> {
+    if (let Some(moduleHandle) <- cgMod.GetLLVMModule()) {
+        let function = GetNamedFunction(moduleHandle, name)
+        if (!function.isNull()) {
+            return Some(function)
+        }
+    }
+    return None
+}
+
+private func GetNamedFunction(moduleHandle: LLVMModuleHandle, name: String): LLVMValueRef {
+    var result = LLVMNullValue()
+    try (nameCString = unsafe { LibC.mallocCString(name) }.asResource()) {
+        result = unsafe { LLVMGetNamedFunction(moduleHandle.raw, nameCString.value) }
+    }
+    return result
+}
+
+private func GetNamedGlobal(moduleHandle: LLVMModuleHandle, name: String): LLVMValueRef {
+    var result = LLVMNullValue()
+    try (nameCString = unsafe { LibC.mallocCString(name) }.asResource()) {
+        result = unsafe { LLVMGetNamedGlobal(moduleHandle.raw, nameCString.value) }
+    }
+    return result
+}
+
+private func SingleTypeList(ty: LLVMTypeRef): ArrayList<LLVMTypeRef> {
+    let out = ArrayList<LLVMTypeRef>()
+    out.add(ty)
+    return out
+}
+
+private func SetLLVMValueName(parent: LLVMValueRef, paramIndex: UInt32, name: String): Unit {
+    let setNameSymbol = LookupLLVMOptionalSymbol("LLVMSetValueName2")
+    if (setNameSymbol.isNull()) {
+        return
+    }
+    let setName = LLVMSetValueName2Func(setNameSymbol)
+    let value = unsafe { LLVMGetParam(parent, paramIndex) }
+    if (value.isNull()) {
+        return
+    }
+    try (nameCString = unsafe { LibC.mallocCString(name) }.asResource()) {
+        unsafe { setName(value, nameCString.value, UIntNative(name.size)) }
     }
 }
 
@@ -310,7 +587,12 @@ private func EmitStaticGenericTIsAndLLVMUsed(cgMod: CGModule, keepTypesFunc: LLV
             usedValues.add(staticGITable)
         }
         let llvmContext = cgMod.GetLLVMContext().raw
+        let llvmUsedNames = ArrayList<String>()
         for (usedName in cgMod.GetCGContext().GetLLVMUsedVars()) {
+            llvmUsedNames.add(usedName)
+        }
+        sort(llvmUsedNames, by: { left: String, right: String => CompareString(left, right) })
+        for (usedName in llvmUsedNames) {
             var usedValue = LLVMNullValue()
             try (nameCString = unsafe { LibC.mallocCString(usedName) }.asResource()) {
                 usedValue = unsafe { LLVMGetNamedGlobal(moduleHandle.raw, nameCString.value) }
@@ -383,6 +665,16 @@ private func ConstLLVMArray(elementType: LLVMTypeRef, values: ArrayList<LLVMValu
         result = unsafe { LLVMConstArray(elementType, valuePtr.value, UInt32(values.size)) }
     }
     return result
+}
+
+private func CompareString(left: String, right: String): Ordering {
+    if (left < right) {
+        return Ordering.LT
+    }
+    if (left > right) {
+        return Ordering.GT
+    }
+    return Ordering.EQ
 }
 
 public func SavePackageModule(module: LLVMModuleHandle, bcFilePath: String): Bool {
