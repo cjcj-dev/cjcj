@@ -89,11 +89,31 @@ public func ChkIsExpr(typeManager: TypeManager, target: Ty, ie: IsExpr): Bool {
     return true
 }
 
+// Resolve the core Option enum decl the way C++ SynAsExpr does (importManager.GetCoreDecl("Option"),
+// Sema/TypeCheckExpr/IsAsExprs.cpp:48). The deep Synthesize pass — which has the ASTContext and thus the
+// import manager — runs before any shallow re-check and already stamped this AsExpr with the
+// importManager-derived Option<asTy>. The shallow dispatchers (Syn/ChkExprShallow) have no ctx and pass
+// None, so recover that genuine Option decl from the node's own type; this keeps SynAsExpr idempotent
+// like C++ instead of clobbering the type to Invalid on re-check.
+private func ResolveOptionDecl(ae: AsExpr, optionDecl: Option<EnumDecl>): Option<EnumDecl> {
+    if (let Some(decl) <- optionDecl) {
+        return decl
+    }
+    if (let Some(existingTy) <- ae.GetTy()) {
+        if (existingTy.IsCoreOptionType()) {
+            if (let Some(enumTy) <- (existingTy as EnumTy)) {
+                return enumTy.declPtr
+            }
+        }
+    }
+    return None
+}
+
 public func SynAsExpr(typeManager: TypeManager, ae: AsExpr, optionDecl: Option<EnumDecl>): Ty {
     if (let Some(left) <- ae.leftExpr) {
         if (let Some(_) <- validExprTy(typeManager, left)) {
             if (let Some(asTy) <- validTypeNodeTy(ae.asType)) {
-                if (let Some(coreOptionDecl) <- optionDecl) {
+                if (let Some(coreOptionDecl) <- ResolveOptionDecl(ae, optionDecl)) {
                     let optionTy = typeManager.GetEnumTy(coreOptionDecl, typeArgs: [asTy])
                     ae.SetTy(optionTy)
                     return optionTy
