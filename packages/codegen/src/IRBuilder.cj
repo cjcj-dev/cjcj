@@ -1964,11 +1964,13 @@ public class IRBuilder2 <: Resource {
         let helperName = if (isOverflow) { CREATE_OVERFLOW_EXCEPTION_FUNC_NAME } else {
             CREATE_ARITHMETIC_EXCEPTION_FUNC_NAME
         }
+        // The const-string global is already a sized `%String*` in address space 0 and the helper
+        // param is now address space 0 too, so pass it directly — mirror C++ DoSimpleCast
+        // (CJNativeIRBuilder.cpp:27) which emits no cast when the address spaces already match.
         let literal = CreateStringLiteral(ident)
-        let stringArg = CreateAddrSpaceCast(literal, GetCjStringRefType(), name: "cjstr")
         let (helperFunction, helperType) = GetOrInsertRuntimeExceptionHelper(helperName)
         let helperArgs = ArrayList<LLVMValueRef>()
-        helperArgs.add(stringArg)
+        helperArgs.add(literal)
         let exceptionValue = CreateCallOrInvoke(helperFunction, helperType, helperArgs, name: "exception")
         CallExceptionIntrinsicThrow(exceptionValue)
     }
@@ -2510,7 +2512,9 @@ public class IRBuilder2 <: Resource {
     }
 
     private func GetCjStringRefType(): LLVMTypeRef {
-        return unsafe { LLVMPointerType(GetCGContext().GetCjStringType(), 1u32) }
+        // `String` is a fully-sized struct, so a String* parameter lives in address space 0, not 1
+        // (mirror C++ CGFunctionType.cpp:117-125: getPointerTo(cgType->GetSize() ? 0U : 1U)).
+        return unsafe { LLVMPointerType(GetCGContext().GetCjStringType(), 0u32) }
     }
 
     private func GetOrInsertRuntimeFunction(name: String, functionType: LLVMTypeRef): LLVMValueRef {
