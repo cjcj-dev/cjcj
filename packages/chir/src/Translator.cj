@@ -5251,10 +5251,48 @@ public class Translator {
         if (let Some(member) <- (nodePtr as AstMemberAccess)) {
             return TranslateMemberAccessAsLeftValue(member)
         }
+        if (let Some(parenExpr) <- (nodePtr as AstParenExpr)) {
+            return TranslateExprAsLeftValue(RequireExpr(parenExpr.expr, "parenthesized left value"))
+        }
+        if (let Some(callExpr) <- (nodePtr as AstCallExpr)) {
+            return TranslateCallExprAsLeftValue(callExpr)
+        }
         if (let Some(_) <- (nodePtr as AstSubscriptExpr)) {
             throw IllegalArgumentException("not yet ported in faithful AST2CHIR: tuple/subscript left value")
         }
-        throw IllegalArgumentException("not yet ported in faithful AST2CHIR left value: ${ASTKindName(nodePtr.astKind)}")
+        let value = Translator.TranslateASTNode(expr, this) ??
+            throw IllegalArgumentException("not yet ported in faithful AST2CHIR left value: ${ASTKindName(nodePtr.astKind)}")
+        return FaithfulLeftValueInfo(value, ArrayList<String>())
+    }
+
+    private func TranslateCallExprAsLeftValue(expr: AstCallExpr): FaithfulLeftValueInfo {
+        if (let Some(calleeDecl) <- expr.resolvedFunction) {
+            if (IsStructOrClassCtorCall(expr, calleeDecl)) {
+                return TranslateStructOrClassCtorCallAsLeftValue(expr, calleeDecl)
+            }
+        }
+        let value = Translator.TranslateASTNode(expr, this) ??
+            throw IllegalStateException("faithful AST2CHIR call left value produced no value")
+        return FaithfulLeftValueInfo(value, ArrayList<String>())
+    }
+
+    private func TranslateStructOrClassCtorCallAsLeftValue(expr: AstCallExpr,
+        calleeDecl: AstFuncDecl): FaithfulLeftValueInfo {
+        let thisTy = chirTy.TranslateType(RequireAstTy(expr)).StripAllRefs()
+        let thisRefTy = builder.context.GetRefTy(thisTy)
+        let thisObj = if (IsSuperOrThisCtorCall(expr)) {
+            CastValueIfNeeded(GetCurrentConstructorThisObject(), thisRefTy)
+        } else {
+            RequireResult(builder.CreateAllocate(thisRefTy, thisTy, CurrentBlock()))
+        }
+        let args = ArrayList<Value>()
+        args.add(thisObj)
+        let expectedParamTys = FuncParamTypes(expr, calleeDecl, thisType: Some(thisRefTy))
+        AppendTranslatedCallArgs(expr, calleeDecl, args, expectedParamTys, ArrayList<Value>())
+        let callee = globalSymbolTable.Get(calleeDecl)
+        let _ = CreateApplyMaybeWithException(builder.context.GetUnitTy(), callee,
+            FuncCallContext(args: args, thisType: thisRefTy))
+        return FaithfulLeftValueInfo(args[0], ArrayList<String>())
     }
 
     private func TranslateMemberAccessAsLeftValue(member: AstMemberAccess): FaithfulLeftValueInfo {
