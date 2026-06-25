@@ -478,9 +478,6 @@ private func BuildConcreteTypeInfoInitializer(cgMod: CGModule, moduleHandle: LLV
 }
 
 private func GenerateSourceGenericOfTypeInfo(cgMod: CGModule, chirTy: Type, i8PtrType: LLVMTypeRef): LLVMValueRef {
-    if (chirTy.IsTuple()) {
-        return unsafe { LLVMConstNull(i8PtrType) }
-    }
     if (chirTy.GetTypeArgs().isEmpty()) {
         return unsafe { LLVMConstNull(i8PtrType) }
     }
