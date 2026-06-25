@@ -3,18 +3,6 @@ package cangjie_compiler::sema.TypeCheckExpr
 import cangjie_compiler::ast.*
 import cangjie_compiler::sema.*
 
-public func SynthesizeAndReplaceIdealTy(typeManager: TypeManager, node: Node): Bool {
-    if (!Ty.IsTyCorrect(node.GetTy())) {
-        if (let Some(expr) <- (node as Expr)) {
-            let _ = SynExprShallow(typeManager, expr)
-        }
-    }
-    if (!Ty.IsTyCorrect(node.GetTy())) {
-        return false
-    }
-    return ReplaceIdealTy(typeManager, node)
-}
-
 private func UnitTy(): Ty {
     return TypeManager.GetPrimitiveTy(TypeKind.TYPE_UNIT)
 }
@@ -40,6 +28,10 @@ private func LastNodeForCheck(b: Block): Option<Node> {
     return None
 }
 
+private func ReplaceCorrectIdealTy(typeManager: TypeManager, node: Node): Bool {
+    return Ty.IsTyCorrect(node.GetTy()) && ReplaceIdealTy(typeManager, node)
+}
+
 public func SynBlock(typeManager: TypeManager, b: Block): Ty {
     if (b.body.isEmpty()) {
         let unitTy = UnitTy()
@@ -48,7 +40,7 @@ public func SynBlock(typeManager: TypeManager, b: Block): Ty {
     }
     var existInvalid = false
     for (node in b.body) {
-        if (!SynthesizeAndReplaceIdealTy(typeManager, node)) {
+        if (!ReplaceCorrectIdealTy(typeManager, node)) {
             existInvalid = true
         }
     }
@@ -79,7 +71,7 @@ public func ChkBlock(typeManager: TypeManager, target: Ty, b: Block): Bool {
     var isWellTyped = true
     if (b.body.size > 1) {
         for (idx in 0..b.body.size - 1) {
-            if (!SynthesizeAndReplaceIdealTy(typeManager, b.body[idx])) {
+            if (!ReplaceCorrectIdealTy(typeManager, b.body[idx])) {
                 isWellTyped = false
             }
         }
@@ -88,7 +80,7 @@ public func ChkBlock(typeManager: TypeManager, target: Ty, b: Block): Bool {
     if (let Some(lastNode) <- LastNodeForCheck(b)) {
         if (lastNode.IsDecl()) {
             let typeMatched = typeManager.IsSubtype(unitTy, target)
-            isWellTyped = SynthesizeAndReplaceIdealTy(typeManager, lastNode) && typeMatched && isWellTyped
+            isWellTyped = ReplaceCorrectIdealTy(typeManager, lastNode) && typeMatched && isWellTyped
             if (isWellTyped) {
                 b.SetTy(unitTy)
                 return true
