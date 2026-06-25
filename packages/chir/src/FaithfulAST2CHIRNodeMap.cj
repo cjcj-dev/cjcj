@@ -67,9 +67,12 @@ private func SameFaithfulAstDecl(left: AstDecl, right: AstDecl): Bool {
             return left.mangledName == right.mangledName
         }
     }
-    return ASTKindIndex(left.astKind) == ASTKindIndex(right.astKind) && left.identifier.Val() == right.identifier.Val() &&
-        left.fullPackageName == right.fullPackageName && left.begin.hashCode() == right.begin.hashCode() &&
-        left.end.hashCode() == right.end.hashCode()
+    // Non-imported decls are matched by OBJECT IDENTITY, faithfully mirroring C++ AST2CHIRNodeMap's
+    // std::unordered_map<const AST::Node*, T*> (include/cangjie/CHIR/AST2CHIR/AST2CHIRNodeMap.h:66).
+    // A structural (kind+name+position) key wrongly merges distinct COMPILER_ADD desugar temporaries
+    // that share an identifier and a (0,0,0) position (e.g. the `v-compiler` temps from `as`-cast
+    // desugar), corrupting the value table. The structural hash above is retained only for bucketing.
+    return refEq(left, right)
 }
 
 public class FaithfulAST2CHIRNodeMapEntry {
