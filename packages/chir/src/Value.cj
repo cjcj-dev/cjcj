@@ -1059,6 +1059,19 @@ public class Function <: GlobalValue {
         return None
     }
 
+    public func GetOuterDeclaredOrExtendedDef(): Option<CustomTypeDef> {
+        let declaredParent = GetParentCustomTypeDef() ?? return None
+        if (let Some(extendDef) <- (declaredParent as ExtendDef)) {
+            if (let Some(extendedType) <- extendDef.GetExtendedType()) {
+                if (let Some(customTy) <- (extendedType as CustomType)) {
+                    return customTy.GetCustomTypeDef()
+                }
+            }
+            return None
+        }
+        return declaredParent
+    }
+
     public func IsMemberFunc(): Bool {
         return GetParentCustomTypeDef().isSome()
     }
