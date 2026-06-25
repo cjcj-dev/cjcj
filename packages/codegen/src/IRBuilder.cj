@@ -156,6 +156,24 @@ public class IRBuilder2 <: Resource {
         return allocaInst
     }
 
+    public func CreateAnonymousStructType(elementTypes: ArrayList<LLVMTypeRef>): LLVMTypeRef {
+        if (elementTypes.isEmpty()) {
+            return unsafe { LLVMStructTypeInContext(GetLLVMContext().raw, CPointer<LLVMTypeRef>(), 0u32, 0) }
+        }
+        var result = LLVMNullType()
+        try (typePtr = LibC.malloc<LLVMTypeRef>(count: elementTypes.size).asResource()) {
+            var idx: Int64 = 0
+            while (idx < elementTypes.size) {
+                unsafe { (typePtr.value + idx).write(elementTypes[idx]) }
+                idx++
+            }
+            result = unsafe {
+                LLVMStructTypeInContext(GetLLVMContext().raw, typePtr.value, UInt32(elementTypes.size), 0)
+            }
+        }
+        return result
+    }
+
     public func CreateLoad(elementType: LLVMTypeRef, addr: LLVMValueRef, name!: String = ""): LLVMValueRef {
         var result = LLVMNullValue()
         try (nameCString = unsafe { LibC.mallocCString(name) }.asResource()) {
@@ -1289,6 +1307,20 @@ public class IRBuilder2 <: Resource {
             return LLVMNullValue()
         }
         return CreateCallOrInvoke(callee, calleeType, args, name: name)
+    }
+
+    public func GenerateCallExpectFunction(val: LLVMValueRef, expectVal: LLVMValueRef): LLVMValueRef {
+        let valueType = unsafe { LLVMTypeOf(val) }
+        let paramTypes = ArrayList<LLVMTypeRef>()
+        paramTypes.add(valueType)
+        paramTypes.add(valueType)
+        let functionType = MakeFunctionType(valueType, paramTypes)
+        let bitWidth = unsafe { LLVMGetIntTypeWidth(valueType) }
+        let expectFunction = cgMod.GetOrInsertFunction("llvm.expect.i" + bitWidth.toString(), functionType)
+        let args = ArrayList<LLVMValueRef>()
+        args.add(val)
+        args.add(expectVal)
+        return CreateCall(expectFunction, functionType, args)
     }
 
     public func CallAssignGeneric(dest: LLVMValueRef, source: LLVMValueRef, typeInfo: LLVMValueRef): LLVMValueRef {
